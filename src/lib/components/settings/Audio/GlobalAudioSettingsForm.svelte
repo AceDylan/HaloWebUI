@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { toast } from 'svelte-sonner';
-	import { createEventDispatcher, onMount, onDestroy, getContext, tick } from 'svelte';
+	import { createEventDispatcher, onMount, getContext, tick } from 'svelte';
 	import { slide } from 'svelte/transition';
 	import { quintOut } from 'svelte/easing';
 	const dispatch = createEventDispatcher();
@@ -16,6 +16,7 @@
 	import { revealExpandedSection } from '$lib/utils/expanded-section-scroll';
 
 	import SensitiveInput from '$lib/components/common/SensitiveInput.svelte';
+	import Spinner from '$lib/components/common/Spinner.svelte';
 	import ChevronDown from '$lib/components/icons/ChevronDown.svelte';
 	import HaloSelect from '$lib/components/common/HaloSelect.svelte';
 	import InlineDirtyActions from '$lib/components/admin/Settings/InlineDirtyActions.svelte';
@@ -68,39 +69,99 @@
 	let sectionEl_tts: HTMLElement;
 	let sectionEl_advanced: HTMLElement;
 	let initialSnapshot = null;
-	let autoSyncBaseline = false;
-	let baselineSyncTimeout: ReturnType<typeof setTimeout> | null = null;
-	const BASELINE_SYNC_WINDOW_MS = 400;
+	let isInitialized = false;
 
 	export let isDirty = false;
 	let lastDirtyState: boolean | null = null;
 
-	const buildSnapshot = () => ({
+	const buildSnapshot = (
+		currentSTTOpenAIBaseUrl: string,
+		currentSTTOpenAIKey: string,
+		currentSTTEngine: string,
+		currentSTTModel: string,
+		currentSTTWhisperModel: string,
+		currentSTTAzureApiKey: string,
+		currentSTTAzureRegion: string,
+		currentSTTAzureLocales: string,
+		currentSTTDeepgramApiKey: string,
+		currentTTSOpenAIBaseUrl: string,
+		currentTTSOpenAIKey: string,
+		currentTTSApiKey: string,
+		currentTTSEngine: string,
+		currentTTSModel: string,
+		currentTTSVoice: string,
+		currentTTSSplitOn: TTS_RESPONSE_SPLIT,
+		currentTTSAzureSpeechRegion: string,
+		currentTTSAzureSpeechOutputFormat: string
+	) => ({
 		stt: {
-			STT_OPENAI_API_BASE_URL,
-			STT_OPENAI_API_KEY,
-			STT_ENGINE,
-			STT_MODEL,
-			STT_WHISPER_MODEL,
-			STT_AZURE_API_KEY,
-			STT_AZURE_REGION,
-			STT_AZURE_LOCALES,
-			STT_DEEPGRAM_API_KEY
+			STT_OPENAI_API_BASE_URL: currentSTTOpenAIBaseUrl,
+			STT_OPENAI_API_KEY: currentSTTOpenAIKey,
+			STT_ENGINE: currentSTTEngine,
+			STT_MODEL: currentSTTModel,
+			STT_WHISPER_MODEL: currentSTTWhisperModel,
+			STT_AZURE_API_KEY: currentSTTAzureApiKey,
+			STT_AZURE_REGION: currentSTTAzureRegion,
+			STT_AZURE_LOCALES: currentSTTAzureLocales,
+			STT_DEEPGRAM_API_KEY: currentSTTDeepgramApiKey
 		},
 		tts: {
-			TTS_OPENAI_API_BASE_URL,
-			TTS_OPENAI_API_KEY,
-			TTS_API_KEY,
-			TTS_ENGINE,
-			TTS_MODEL,
-			TTS_VOICE,
-			TTS_SPLIT_ON,
-			TTS_AZURE_SPEECH_REGION,
-			TTS_AZURE_SPEECH_OUTPUT_FORMAT
+			TTS_OPENAI_API_BASE_URL: currentTTSOpenAIBaseUrl,
+			TTS_OPENAI_API_KEY: currentTTSOpenAIKey,
+			TTS_API_KEY: currentTTSApiKey,
+			TTS_ENGINE: currentTTSEngine,
+			TTS_MODEL: currentTTSModel,
+			TTS_VOICE: currentTTSVoice,
+			TTS_SPLIT_ON: currentTTSSplitOn,
+			TTS_AZURE_SPEECH_REGION: currentTTSAzureSpeechRegion,
+			TTS_AZURE_SPEECH_OUTPUT_FORMAT: currentTTSAzureSpeechOutputFormat
 		}
 	});
 
-	$: snapshot = buildSnapshot();
+	let snapshot = {
+		stt: {
+			STT_OPENAI_API_BASE_URL: '',
+			STT_OPENAI_API_KEY: '',
+			STT_ENGINE: '',
+			STT_MODEL: '',
+			STT_WHISPER_MODEL: '',
+			STT_AZURE_API_KEY: '',
+			STT_AZURE_REGION: '',
+			STT_AZURE_LOCALES: '',
+			STT_DEEPGRAM_API_KEY: ''
+		},
+		tts: {
+			TTS_OPENAI_API_BASE_URL: '',
+			TTS_OPENAI_API_KEY: '',
+			TTS_API_KEY: '',
+			TTS_ENGINE: '',
+			TTS_MODEL: '',
+			TTS_VOICE: '',
+			TTS_SPLIT_ON: TTS_RESPONSE_SPLIT.PUNCTUATION,
+			TTS_AZURE_SPEECH_REGION: '',
+			TTS_AZURE_SPEECH_OUTPUT_FORMAT: ''
+		}
+	};
+	$: snapshot = buildSnapshot(
+		STT_OPENAI_API_BASE_URL,
+		STT_OPENAI_API_KEY,
+		STT_ENGINE,
+		STT_MODEL,
+		STT_WHISPER_MODEL,
+		STT_AZURE_API_KEY,
+		STT_AZURE_REGION,
+		STT_AZURE_LOCALES,
+		STT_DEEPGRAM_API_KEY,
+		TTS_OPENAI_API_BASE_URL,
+		TTS_OPENAI_API_KEY,
+		TTS_API_KEY,
+		TTS_ENGINE,
+		TTS_MODEL,
+		TTS_VOICE,
+		TTS_SPLIT_ON,
+		TTS_AZURE_SPEECH_REGION,
+		TTS_AZURE_SPEECH_OUTPUT_FORMAT
+	);
 	$: dirtySections = initialSnapshot
 		? {
 				stt: !isSettingsSnapshotEqual(snapshot.stt, initialSnapshot.stt),
@@ -112,27 +173,36 @@
 		lastDirtyState = isDirty;
 		dispatch('dirtyChange', { value: isDirty });
 	}
-	$: if (
-		autoSyncBaseline &&
-		(initialSnapshot === null || !isSettingsSnapshotEqual(snapshot, initialSnapshot))
-	) {
-		initialSnapshot = cloneSettingsSnapshot(snapshot);
-	}
 
 	$: isDocumentCard = visualVariant === 'document-card';
 	$: isFlat = visualVariant === 'flat';
 
 	const normalizeText = (value: string | null | undefined) => value ?? '';
 
-	const startBaselineSync = () => {
-		autoSyncBaseline = true;
-		if (baselineSyncTimeout) {
-			clearTimeout(baselineSyncTimeout);
-		}
-		baselineSyncTimeout = setTimeout(() => {
-			autoSyncBaseline = false;
-			baselineSyncTimeout = null;
-		}, BASELINE_SYNC_WINDOW_MS);
+	// Audio config arrives asynchronously; lock the baseline to hydrated values, not a timeout window.
+	const syncBaseline = () => {
+		initialSnapshot = cloneSettingsSnapshot(
+			buildSnapshot(
+				STT_OPENAI_API_BASE_URL,
+				STT_OPENAI_API_KEY,
+				STT_ENGINE,
+				STT_MODEL,
+				STT_WHISPER_MODEL,
+				STT_AZURE_API_KEY,
+				STT_AZURE_REGION,
+				STT_AZURE_LOCALES,
+				STT_DEEPGRAM_API_KEY,
+				TTS_OPENAI_API_BASE_URL,
+				TTS_OPENAI_API_KEY,
+				TTS_API_KEY,
+				TTS_ENGINE,
+				TTS_MODEL,
+				TTS_VOICE,
+				TTS_SPLIT_ON,
+				TTS_AZURE_SPEECH_REGION,
+				TTS_AZURE_SPEECH_OUTPUT_FORMAT
+			)
+		);
 	};
 
 	const toggleSection = async (section: 'stt' | 'tts' | 'advanced') => {
@@ -228,8 +298,7 @@
 
 			if (res) {
 				await tick();
-				startBaselineSync();
-				initialSnapshot = cloneSettingsSnapshot(buildSnapshot());
+				syncBaseline();
 				if (notify) {
 					saveHandler?.();
 					dispatch('save');
@@ -297,17 +366,10 @@
 			STT_DEEPGRAM_API_KEY = normalizeText(res.stt.DEEPGRAM_API_KEY);
 		}
 
-		await getVoices();
-		await getModels();
+		syncBaseline();
+		isInitialized = true;
+		await Promise.all([getVoices(), getModels()]);
 		await tick();
-		startBaselineSync();
-		initialSnapshot = cloneSettingsSnapshot(buildSnapshot());
-	});
-
-	onDestroy(() => {
-		if (baselineSyncTimeout) {
-			clearTimeout(baselineSyncTimeout);
-		}
 	});
 
 	const resetSectionChanges = (section: 'stt' | 'tts') => {
@@ -346,7 +408,12 @@
 	};
 </script>
 
-{#if isFlat}
+{#if !isInitialized}
+	<div class="glass-item flex items-center gap-3 px-4 py-3 text-sm text-gray-500 dark:text-gray-400">
+		<Spinner className="size-4" />
+		<span>{$i18n.t('Loading audio settings...')}</span>
+	</div>
+{:else if isFlat}
 	<!-- ====== Flat variant: glass-items directly, no wrapper cards/folding ====== -->
 	<div class="space-y-3">
 		<!-- STT -->

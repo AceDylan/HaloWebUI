@@ -19,6 +19,11 @@
 
 	import { WEBUI_VERSION } from '$lib/constants';
 	import { compareVersion } from '$lib/utils';
+	import {
+		getTemporaryChatNavigationPath,
+		persistTemporaryChatOverride,
+		resolveTemporaryChatEnabled
+	} from '$lib/utils/temporary-chat';
 
 	import {
 		config,
@@ -49,6 +54,32 @@
 	let localDBChats = [];
 
 	let version;
+
+	const applyTemporaryChatMode = async (enabled: boolean) => {
+		const defaultEnabled = $settings?.temporaryChatByDefault ?? false;
+		const allowed = $user?.role === 'user' ? ($user?.permissions?.chat?.temporary ?? true) : true;
+		const enforced = allowed && ($user?.permissions?.chat?.temporary_enforced ?? false);
+		const nextEnabled = allowed ? (enforced ? true : enabled) : false;
+
+		persistTemporaryChatOverride(nextEnabled, { defaultEnabled, enforced, allowed });
+		temporaryChatEnabled.set(nextEnabled);
+
+		const targetPath = getTemporaryChatNavigationPath({
+			currentUrl: new URL(window.location.href),
+			enabled: nextEnabled,
+			defaultEnabled,
+			enforced,
+			allowed,
+			pathname: '/'
+		});
+
+		await goto(targetPath);
+		await tick();
+		(
+			document.getElementById('new-chat-button') ??
+			document.getElementById('sidebar-new-chat-button')
+		)?.click();
+	};
 
 	onMount(async () => {
 		if ($user === undefined || $user === null) {
@@ -207,12 +238,7 @@
 				) {
 					event.preventDefault();
 					console.log('temporaryChat');
-					temporaryChatEnabled.set(!$temporaryChatEnabled);
-					await goto('/');
-					const newChatButton = document.getElementById('new-chat-button');
-					setTimeout(() => {
-						newChatButton?.click();
-					}, 0);
+					await applyTemporaryChatMode(!$temporaryChatEnabled);
 				}
 			});
 
@@ -220,15 +246,23 @@
 				showChangelog.set($settings?.version !== $config.version);
 			}
 
-			if ($user?.permissions?.chat?.temporary ?? true) {
-				if ($page.url.searchParams.get('temporary-chat') === 'true') {
-					temporaryChatEnabled.set(true);
-				}
+			const temporaryChatAllowed =
+				$user?.role === 'user' ? ($user?.permissions?.chat?.temporary ?? true) : true;
+			const temporaryChatEnforced =
+				temporaryChatAllowed && ($user?.permissions?.chat?.temporary_enforced ?? false);
+			const resolvedTemporaryChatEnabled = resolveTemporaryChatEnabled({
+				searchParams: $page.url.searchParams,
+				defaultEnabled: $settings?.temporaryChatByDefault ?? false,
+				enforced: temporaryChatEnforced,
+				allowed: temporaryChatAllowed
+			});
 
-				if ($user?.permissions?.chat?.temporary_enforced) {
-					temporaryChatEnabled.set(true);
-				}
-			}
+			persistTemporaryChatOverride(resolvedTemporaryChatEnabled, {
+				defaultEnabled: $settings?.temporaryChatByDefault ?? false,
+				enforced: temporaryChatEnforced,
+				allowed: temporaryChatAllowed
+			});
+			temporaryChatEnabled.set(resolvedTemporaryChatEnabled);
 
 			// Check for version updates
 			if ($user?.role === 'admin') {

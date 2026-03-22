@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { toast } from 'svelte-sonner';
-	import { onMount, onDestroy, getContext, tick } from 'svelte';
+	import { onMount, getContext, tick } from 'svelte';
 	import { slide } from 'svelte/transition';
 	import { quintOut } from 'svelte/easing';
 
@@ -37,34 +37,24 @@
 	let newPasswordConfirm = '';
 	let saving = false;
 	let initialSnapshot = null;
-	let autoSyncBaseline = false;
-	let baselineSyncTimeout: ReturnType<typeof setTimeout> | null = null;
-	const BASELINE_SYNC_WINDOW_MS = 400;
-
-	const buildSnapshot = () => ({
+	let snapshot = {
+		name: '',
+		profileImageUrl: '',
+		webhookUrl: ''
+	};
+	$: snapshot = {
 		name,
 		profileImageUrl,
 		webhookUrl
-	});
-
-	$: snapshot = buildSnapshot();
+	};
 	$: isDirty = !!(initialSnapshot && !isSettingsSnapshotEqual(snapshot, initialSnapshot));
-	$: if (
-		autoSyncBaseline &&
-		(initialSnapshot === null || !isSettingsSnapshotEqual(snapshot, initialSnapshot))
-	) {
-		initialSnapshot = cloneSettingsSnapshot(snapshot);
-	}
 
-	const startBaselineSync = () => {
-		autoSyncBaseline = true;
-		if (baselineSyncTimeout) {
-			clearTimeout(baselineSyncTimeout);
-		}
-		baselineSyncTimeout = setTimeout(() => {
-			autoSyncBaseline = false;
-			baselineSyncTimeout = null;
-		}, BASELINE_SYNC_WINDOW_MS);
+	const syncBaseline = () => {
+		initialSnapshot = cloneSettingsSnapshot({
+			name,
+			profileImageUrl,
+			webhookUrl
+		});
 	};
 
 	const submitHandler = async () => {
@@ -112,8 +102,7 @@
 			const res = await submitHandler();
 			if (res) {
 				await tick();
-				startBaselineSync();
-				initialSnapshot = cloneSettingsSnapshot(buildSnapshot());
+				syncBaseline();
 				saveHandler();
 			}
 		} finally {
@@ -173,14 +162,7 @@
 		});
 
 		await tick();
-		startBaselineSync();
-		initialSnapshot = cloneSettingsSnapshot(buildSnapshot());
-	});
-
-	onDestroy(() => {
-		if (baselineSyncTimeout) {
-			clearTimeout(baselineSyncTimeout);
-		}
+		syncBaseline();
 	});
 </script>
 

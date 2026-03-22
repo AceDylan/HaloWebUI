@@ -42,6 +42,8 @@ langchain-community==0.3.18
 
 fake-useragent==2.1.0
 chromadb==0.6.3
+# ChromaDB 0.6.x still calls the pre-6.x PostHog capture API.
+posthog<6
 
 beautifulsoup4
 ftfy==6.2.3

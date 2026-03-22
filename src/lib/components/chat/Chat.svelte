@@ -54,6 +54,11 @@
 	} from '$lib/utils';
 	import { getModelChatDisplayName } from '$lib/utils/model-display';
 	import {
+		getTemporaryChatNavigationPath,
+		persistTemporaryChatOverride,
+		resolveTemporaryChatEnabled
+	} from '$lib/utils/temporary-chat';
+	import {
 		getPreferredWebSearchMode,
 		normalizeWebSearchMode,
 		type WebSearchMode
@@ -849,6 +854,23 @@
 		}
 	};
 
+	const syncTemporaryChatState = (settingsSource = $settings) => {
+		const defaultEnabled = settingsSource?.temporaryChatByDefault ?? false;
+		const allowed = $user?.role === 'user' ? ($user?.permissions?.chat?.temporary ?? true) : true;
+		const enforced = allowed && ($user?.permissions?.chat?.temporary_enforced ?? false);
+		const enabled = resolveTemporaryChatEnabled({
+			searchParams: $page.url.searchParams,
+			defaultEnabled,
+			enforced,
+			allowed
+		});
+
+		persistTemporaryChatOverride(enabled, { defaultEnabled, enforced, allowed });
+		temporaryChatEnabled.set(enabled);
+
+		return { enabled, defaultEnabled, enforced, allowed };
+	};
+
 	//////////////////////////
 	// Web functions
 	//////////////////////////
@@ -909,7 +931,7 @@
 			}
 		}
 
-		temporaryChatEnabled.set($settings?.temporaryChatByDefault ?? false);
+		let temporaryChatState = syncTemporaryChatState();
 		messageQueue = [];
 
 		await showControls.set(false);
@@ -918,7 +940,18 @@
 		await showArtifacts.set(false);
 
 		if ($page.url.pathname.includes('/c/')) {
-			window.history.replaceState(history.state, '', `/`);
+			window.history.replaceState(
+				window.history.state,
+				'',
+				getTemporaryChatNavigationPath({
+					currentUrl: new URL(window.location.href),
+					enabled: temporaryChatState.enabled,
+					defaultEnabled: temporaryChatState.defaultEnabled,
+					enforced: temporaryChatState.enforced,
+					allowed: temporaryChatState.allowed,
+					pathname: '/'
+				})
+			);
 		}
 
 		autoScroll = true;
@@ -1012,11 +1045,26 @@
 
 		if (userSettings) {
 			settings.set(userSettings.ui);
-			temporaryChatEnabled.set(userSettings?.ui?.temporaryChatByDefault ?? false);
+			temporaryChatState = syncTemporaryChatState(userSettings.ui);
 		} else {
 			const localSettings = JSON.parse(localStorage.getItem('settings') ?? '{}');
 			settings.set(localSettings);
-			temporaryChatEnabled.set(localSettings?.temporaryChatByDefault ?? false);
+			temporaryChatState = syncTemporaryChatState(localSettings);
+		}
+
+		if (window.location.pathname === '/') {
+			window.history.replaceState(
+				window.history.state,
+				'',
+				getTemporaryChatNavigationPath({
+					currentUrl: new URL(window.location.href),
+					enabled: temporaryChatState.enabled,
+					defaultEnabled: temporaryChatState.defaultEnabled,
+					enforced: temporaryChatState.enforced,
+					allowed: temporaryChatState.allowed,
+					pathname: '/'
+				})
+			);
 		}
 
 		const chatInput = document.getElementById('chat-input');

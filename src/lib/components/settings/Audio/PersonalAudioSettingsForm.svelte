@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { toast } from 'svelte-sonner';
-	import { createEventDispatcher, onMount, onDestroy, getContext, tick } from 'svelte';
+	import { createEventDispatcher, onMount, getContext, tick } from 'svelte';
 	import { slide } from 'svelte/transition';
 	import { quintOut } from 'svelte/easing';
 
@@ -77,7 +77,7 @@
 	let modelVoices: Record<string, string> = {};
 
 	// Audio speed control
-	let playbackRate = 1;
+	let playbackRate: string | number = '1';
 	const speedOptions = [2, 1.75, 1.5, 1.25, 1, 0.75, 0.5];
 	let canUseSTT = false;
 	let canUseTTS = false;
@@ -86,9 +86,6 @@
 	let sectionEl_tts: HTMLElement;
 	let sectionEl_voice: HTMLElement;
 	let initialSnapshot = null;
-	let autoSyncBaseline = false;
-	let baselineSyncTimeout: ReturnType<typeof setTimeout> | null = null;
-	const BASELINE_SYNC_WINDOW_MS = 400;
 	let KokoroTTSClass = null;
 
 	export let isDirty = false;
@@ -178,7 +175,7 @@
 				tts: {
 					engine: TTSEngine !== '' ? TTSEngine : undefined,
 					engineConfig: TTSEngineConfig,
-					playbackRate: playbackRate,
+					playbackRate: normalizePlaybackRate(playbackRate),
 					voice: voice !== '' ? voice : undefined,
 					defaultVoice: $config?.audio?.tts?.voice ?? '',
 					nonLocalVoices: $config.audio.tts.engine === '' ? nonLocalVoices : undefined,
@@ -191,6 +188,69 @@
 		return patch;
 	};
 
+	const normalizePlaybackRate = (value: string | number | null | undefined) => {
+		const parsed = Number(value);
+		return Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
+	};
+
+	const buildSnapshot = (
+		currentCanUseSTT: boolean,
+		currentCanUseTTS: boolean,
+		currentSTTEngine: string,
+		currentSTTLanguage: string,
+		currentSpeechAutoSend: boolean,
+		currentTTSEngine: string,
+		currentTTSEngineConfig: Record<string, any>,
+		currentResponseAutoPlayback: boolean,
+		currentPlaybackRate: string | number,
+		currentVoice: string,
+		currentNonLocalVoices: boolean,
+		currentModelVoices: Record<string, string>
+	) => ({
+		stt: currentCanUseSTT
+			? {
+					STTEngine: currentSTTEngine,
+					STTLanguage: currentSTTLanguage,
+					speechAutoSend: currentSpeechAutoSend
+				}
+			: null,
+		tts: currentCanUseTTS
+			? {
+					TTSEngine: currentTTSEngine,
+					TTSEngineConfig: currentTTSEngineConfig,
+					responseAutoPlayback: currentResponseAutoPlayback,
+					playbackRate: normalizePlaybackRate(currentPlaybackRate)
+				}
+			: null,
+		voice: currentCanUseTTS
+			? {
+					voice: currentVoice,
+					nonLocalVoices: currentNonLocalVoices,
+					modelVoices: currentModelVoices
+				}
+			: null
+	});
+
+	// Audio lists load asynchronously; keep dirty tracking tied to real form values, not timing windows.
+	const syncBaseline = () => {
+		initialSnapshot = cloneSettingsSnapshot(
+			buildSnapshot(
+				canUseSTT,
+				canUseTTS,
+				STTEngine,
+				STTLanguage,
+				speechAutoSend,
+				TTSEngine,
+				TTSEngineConfig,
+				responseAutoPlayback,
+				playbackRate,
+				voice,
+				nonLocalVoices,
+				modelVoices
+			)
+		);
+	};
+
 	const saveUserAudioSettings = async () => {
 		const patch = buildUserPatch();
 
@@ -199,8 +259,7 @@
 		}
 
 		await tick();
-		startBaselineSync();
-		initialSnapshot = cloneSettingsSnapshot(buildSnapshot());
+		syncBaseline();
 		dispatch('save');
 	};
 
@@ -208,54 +267,30 @@
 		await saveUserAudioSettings();
 	};
 
-	const buildSnapshot = () => ({
-		stt: canUseSTT
-			? {
-					STTEngine,
-					STTLanguage,
-					speechAutoSend
-				}
-			: null,
-		tts: canUseTTS
-			? {
-					TTSEngine,
-					TTSEngineConfig,
-					responseAutoPlayback,
-					playbackRate
-				}
-			: null,
-		voice: canUseTTS
-			? {
-					voice,
-					nonLocalVoices,
-					modelVoices
-				}
-			: null
-	});
-
-	$: snapshot = buildSnapshot();
+	let snapshot = {
+		stt: null,
+		tts: null,
+		voice: null
+	};
+	$: snapshot = buildSnapshot(
+		canUseSTT,
+		canUseTTS,
+		STTEngine,
+		STTLanguage,
+		speechAutoSend,
+		TTSEngine,
+		TTSEngineConfig,
+		responseAutoPlayback,
+		playbackRate,
+		voice,
+		nonLocalVoices,
+		modelVoices
+	);
 	$: isDirty = !!(initialSnapshot && !isSettingsSnapshotEqual(snapshot, initialSnapshot));
 	$: if (lastDirtyState !== isDirty) {
 		lastDirtyState = isDirty;
 		dispatch('dirtyChange', { value: isDirty });
 	}
-	$: if (
-		autoSyncBaseline &&
-		(initialSnapshot === null || !isSettingsSnapshotEqual(snapshot, initialSnapshot))
-	) {
-		initialSnapshot = cloneSettingsSnapshot(snapshot);
-	}
-
-	const startBaselineSync = () => {
-		autoSyncBaseline = true;
-		if (baselineSyncTimeout) {
-			clearTimeout(baselineSyncTimeout);
-		}
-		baselineSyncTimeout = setTimeout(() => {
-			autoSyncBaseline = false;
-			baselineSyncTimeout = null;
-		}, BASELINE_SYNC_WINDOW_MS);
-	};
 
 	const onSubmitHandler = async () => {
 		if (!showSubmit) {
@@ -272,8 +307,8 @@
 			voice: defaultExpandedSections?.voice ?? true
 		};
 
-		playbackRate = $settings.audio?.tts?.playbackRate ?? 1;
-			speechAutoSend = $settings.speechAutoSend ?? false;
+		playbackRate = String($settings.audio?.tts?.playbackRate ?? 1);
+		speechAutoSend = $settings.speechAutoSend ?? false;
 		responseAutoPlayback = $settings.responseAutoPlayback ?? false;
 
 		STTEngine = $settings?.audio?.stt?.engine ?? '';
@@ -291,16 +326,9 @@
 		nonLocalVoices = $settings.audio?.tts?.nonLocalVoices ?? false;
 		modelVoices = $settings?.audio?.tts?.modelVoices ?? {};
 
+		syncBaseline();
 		await getVoices();
 		await tick();
-		startBaselineSync();
-		initialSnapshot = cloneSettingsSnapshot(buildSnapshot());
-	});
-
-	onDestroy(() => {
-		if (baselineSyncTimeout) {
-			clearTimeout(baselineSyncTimeout);
-		}
 	});
 
 	$: if (TTSEngine && TTSEngineConfig) {
@@ -378,7 +406,7 @@
 			TTSEngine = next.tts.TTSEngine;
 			TTSEngineConfig = cloneSettingsSnapshot(next.tts.TTSEngineConfig);
 			responseAutoPlayback = next.tts.responseAutoPlayback;
-			playbackRate = next.tts.playbackRate;
+			playbackRate = String(next.tts.playbackRate);
 		}
 
 		if (next.voice) {

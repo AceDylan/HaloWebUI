@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { toast } from 'svelte-sonner';
 
-	import { createEventDispatcher, onMount, onDestroy, getContext, tick } from 'svelte';
+	import { createEventDispatcher, onMount, getContext, tick } from 'svelte';
 	import { config as backendConfig, user } from '$lib/stores';
 
 	import { getBackendConfig } from '$lib/apis';
@@ -27,9 +27,6 @@
 
 	let loading = false;
 	let initialSnapshot = null;
-	let autoSyncBaseline = false;
-	let baselineSyncTimeout: ReturnType<typeof setTimeout> | null = null;
-	const BASELINE_SYNC_WINDOW_MS = 400;
 
 	let config = null;
 	let imageGenerationConfig = null;
@@ -114,15 +111,27 @@
 		return value;
 	};
 
-	const startBaselineSync = () => {
-		autoSyncBaseline = true;
-		if (baselineSyncTimeout) {
-			clearTimeout(baselineSyncTimeout);
+	const buildSnapshot = (currentConfig, currentImageGenerationConfig, currentRequiredWorkflowNodes) => ({
+		config: currentConfig,
+		imageGenerationConfig: currentImageGenerationConfig,
+		requiredWorkflowNodes: currentRequiredWorkflowNodes
+	});
+
+	const syncBaseline = () => {
+		initialSnapshot = cloneSettingsSnapshot(
+			buildSnapshot(config, imageGenerationConfig, requiredWorkflowNodes)
+		);
+	};
+
+	const syncDraftModels = () => {
+		if (!config?.enabled) {
+			models = null;
+			return;
 		}
-		baselineSyncTimeout = setTimeout(() => {
-			autoSyncBaseline = false;
-			baselineSyncTimeout = null;
-		}, BASELINE_SYNC_WINDOW_MS);
+
+		if (config.engine !== 'openai') {
+			models = null;
+		}
 	};
 
 	const getModels = async () => {
@@ -227,33 +236,23 @@
 			models = null;
 		}
 		await tick();
-		startBaselineSync();
-		initialSnapshot = cloneSettingsSnapshot(buildSnapshot());
+		syncBaseline();
 		dispatch('save');
 		loading = false;
 	};
 
-	const buildSnapshot = () => ({
-		config,
-		imageGenerationConfig,
+	let snapshot = {
+		config: null,
+		imageGenerationConfig: null,
 		requiredWorkflowNodes
-	});
-
-	$: snapshot = buildSnapshot();
+	};
+	$: snapshot = buildSnapshot(config, imageGenerationConfig, requiredWorkflowNodes);
 	$: isDirty = !!(
 		initialSnapshot &&
 		config &&
 		imageGenerationConfig &&
 		!isSettingsSnapshotEqual(snapshot, initialSnapshot)
 	);
-	$: if (
-		autoSyncBaseline &&
-		config &&
-		imageGenerationConfig &&
-		(initialSnapshot === null || !isSettingsSnapshotEqual(snapshot, initialSnapshot))
-	) {
-		initialSnapshot = cloneSettingsSnapshot(snapshot);
-	}
 
 	onMount(async () => {
 		if ($user?.role === 'admin') {
@@ -306,14 +305,7 @@
 			}
 
 			await tick();
-			startBaselineSync();
-			initialSnapshot = cloneSettingsSnapshot(buildSnapshot());
-		}
-	});
-
-	onDestroy(() => {
-		if (baselineSyncTimeout) {
-			clearTimeout(baselineSyncTimeout);
+			syncBaseline();
 		}
 	});
 
@@ -421,7 +413,7 @@
 												config.enabled = false;
 											}
 										}
-										updateConfigHandler();
+										syncDraftModels();
 									}}
 								/>
 							</div>
@@ -454,7 +446,7 @@
 											if (!['openai', 'gemini'].includes(config.engine)) {
 												config.shared_key_enabled = false;
 											}
-											updateConfigHandler();
+											syncDraftModels();
 										}}
 									/>
 								</div>
@@ -503,7 +495,6 @@
 													return;
 												}
 											}
-											updateConfigHandler();
 										}}
 									/>
 								</div>

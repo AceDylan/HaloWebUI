@@ -24,11 +24,35 @@
 	let initialSnapshot = null;
 
 	let engines = ['pyodide', 'jupyter'];
+	let snapshot = null;
+	$: snapshot = config
+		? {
+				general: {
+					ENABLE_CODE_EXECUTION: config.ENABLE_CODE_EXECUTION,
+					CODE_EXECUTION_ENGINE: config.CODE_EXECUTION_ENGINE,
+					CODE_EXECUTION_JUPYTER_URL: config.CODE_EXECUTION_JUPYTER_URL,
+					CODE_EXECUTION_JUPYTER_AUTH: config.CODE_EXECUTION_JUPYTER_AUTH,
+					CODE_EXECUTION_JUPYTER_AUTH_PASSWORD: config.CODE_EXECUTION_JUPYTER_AUTH_PASSWORD,
+					CODE_EXECUTION_JUPYTER_AUTH_TOKEN: config.CODE_EXECUTION_JUPYTER_AUTH_TOKEN,
+					CODE_EXECUTION_JUPYTER_TIMEOUT: config.CODE_EXECUTION_JUPYTER_TIMEOUT,
+					ENABLE_CODE_INTERPRETER: config.ENABLE_CODE_INTERPRETER,
+					CODE_INTERPRETER_ENGINE: config.CODE_INTERPRETER_ENGINE,
+					CODE_INTERPRETER_JUPYTER_URL: config.CODE_INTERPRETER_JUPYTER_URL,
+					CODE_INTERPRETER_JUPYTER_AUTH: config.CODE_INTERPRETER_JUPYTER_AUTH,
+					CODE_INTERPRETER_JUPYTER_AUTH_PASSWORD: config.CODE_INTERPRETER_JUPYTER_AUTH_PASSWORD,
+					CODE_INTERPRETER_JUPYTER_AUTH_TOKEN: config.CODE_INTERPRETER_JUPYTER_AUTH_TOKEN,
+					CODE_INTERPRETER_JUPYTER_TIMEOUT: config.CODE_INTERPRETER_JUPYTER_TIMEOUT
+				},
+				terminal: {
+					terminalEnabled
+				}
+			}
+		: null;
 
-	const buildSnapshot = () => {
-		if (!config) return null;
+	const syncBaseline = () => {
+		if (!config) return;
 
-		return {
+		initialSnapshot = cloneSettingsSnapshot({
 			general: {
 				ENABLE_CODE_EXECUTION: config.ENABLE_CODE_EXECUTION,
 				CODE_EXECUTION_ENGINE: config.CODE_EXECUTION_ENGINE,
@@ -48,10 +72,9 @@
 			terminal: {
 				terminalEnabled
 			}
-		};
+		});
 	};
 
-	$: snapshot = buildSnapshot();
 	$: dirtySections = initialSnapshot && snapshot
 		? {
 				general: !isSettingsSnapshotEqual(snapshot.general, initialSnapshot.general),
@@ -74,7 +97,7 @@
 			} catch (e) {
 				console.error('Failed to save terminal config', e);
 			}
-			initialSnapshot = cloneSettingsSnapshot(buildSnapshot());
+			syncBaseline();
 		} finally {
 			isSaving = false;
 		}
@@ -109,7 +132,7 @@
 			terminalEnabled = terminalRes.enabled;
 		}
 
-		initialSnapshot = cloneSettingsSnapshot(buildSnapshot());
+		syncBaseline();
 		loading = false;
 	});
 </script>

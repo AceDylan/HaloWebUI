@@ -27,6 +27,7 @@
 	import HaloSelect from '$lib/components/common/HaloSelect.svelte';
 	import ThemeSelector from '$lib/components/common/ThemeSelector.svelte';
 	import ManageModal from '$lib/components/chat/Settings/Personalization/ManageModal.svelte';
+	import Textarea from '$lib/components/common/Textarea.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import InlineDirtyActions from '$lib/components/admin/Settings/InlineDirtyActions.svelte';
 	import CodeHighlightThemePreview from '$lib/components/settings/CodeHighlightThemePreview.svelte';
@@ -150,6 +151,7 @@
 	let ctrlEnterToSend = false;
 	let copyFormatted = false;
 	let largeTextAsFile = false;
+	let globalSystemPrompt = '';
 
 	// Privacy / advanced
 	let userLocation = false;
@@ -206,6 +208,7 @@
 			largeTextAsFile: boolean;
 			copyFormatted: boolean;
 			ctrlEnterToSend: boolean;
+			globalSystemPrompt: string;
 			promptSuggestions: any[];
 		};
 		chat: {
@@ -519,6 +522,7 @@
 			largeTextAsFile,
 			copyFormatted,
 			ctrlEnterToSend,
+			globalSystemPrompt,
 			promptSuggestions
 		},
 		chat: {
@@ -591,6 +595,7 @@
 		largeTextAsFile = snapshot.largeTextAsFile;
 		copyFormatted = snapshot.copyFormatted;
 		ctrlEnterToSend = snapshot.ctrlEnterToSend;
+		globalSystemPrompt = snapshot.globalSystemPrompt;
 		promptSuggestions = snapshot.promptSuggestions;
 	};
 
@@ -655,6 +660,7 @@
 		largeTextAsFile;
 		copyFormatted;
 		ctrlEnterToSend;
+		globalSystemPrompt;
 		titleAutoGenerate;
 		autoTags;
 		autoFollowUps;
@@ -914,7 +920,8 @@
 				insertPromptAsRichText,
 				largeTextAsFile,
 				copyFormatted,
-				ctrlEnterToSend
+				ctrlEnterToSend,
+				system: globalSystemPrompt.trim() ? globalSystemPrompt : ''
 			});
 			// Admin: save autocomplete generation task config
 			if ($user?.role === 'admin') {
@@ -1135,6 +1142,7 @@
 		insertPromptAsRichText = $settings?.insertPromptAsRichText ?? false;
 		largeTextAsFile = $settings?.largeTextAsFile ?? false;
 		copyFormatted = $settings?.copyFormatted ?? false;
+		globalSystemPrompt = $settings?.system ?? '';
 
 		collapseCodeBlocks = $settings?.collapseCodeBlocks ?? false;
 		expandDetails = $settings?.expandDetails ?? false;
@@ -1886,6 +1894,58 @@
 											{/if}
 										</div>
 									{/if}
+
+									<div class="glass-item p-4">
+										<div class="flex items-start gap-3">
+											<div class="shrink-0 size-9 rounded-2xl border border-sky-200/80 bg-linear-to-br from-sky-50 to-blue-100 text-sky-600 shadow-xs dark:border-sky-800/60 dark:from-sky-950/40 dark:to-blue-950/30 dark:text-sky-300 flex items-center justify-center">
+												<svg
+													xmlns="http://www.w3.org/2000/svg"
+													viewBox="0 0 24 24"
+													fill="currentColor"
+													class="size-4.5"
+												>
+													<path
+														fill-rule="evenodd"
+														d="M7.5 3.75A2.25 2.25 0 0 0 5.25 6v12A2.25 2.25 0 0 0 7.5 20.25h9A2.25 2.25 0 0 0 18.75 18V8.56a2.25 2.25 0 0 0-.659-1.591l-2.56-2.56A2.25 2.25 0 0 0 13.94 3.75H7.5Zm3 4.5a.75.75 0 0 1 .75-.75h2.25a.75.75 0 0 1 0 1.5h-2.25a.75.75 0 0 1-.75-.75Zm-1.5 3a.75.75 0 0 1 .75-.75h4.5a.75.75 0 0 1 0 1.5h-4.5a.75.75 0 0 1-.75-.75Zm0 3a.75.75 0 0 1 .75-.75h4.5a.75.75 0 0 1 0 1.5h-4.5a.75.75 0 0 1-.75-.75Z"
+														clip-rule="evenodd"
+													/>
+												</svg>
+											</div>
+											<div class="min-w-0 flex-1">
+												<div class="flex flex-wrap items-center gap-2">
+													<div class="text-sm font-medium text-gray-900 dark:text-gray-100">
+														{$i18n.t('Global Default System Prompt')}
+													</div>
+													<span class="inline-flex items-center rounded-full border border-sky-200/80 bg-sky-50 px-2 py-0.5 text-[11px] font-medium text-sky-700 dark:border-sky-800/70 dark:bg-sky-950/40 dark:text-sky-300">
+														{$i18n.t('Applies to New Chats')}
+													</span>
+												</div>
+												<p class="mt-1 text-xs leading-5 text-gray-500 dark:text-gray-400">
+													{$i18n.t(
+														'New chats without a custom current-chat system prompt will inherit this setting. A current chat system prompt can override it.'
+													)}
+												</p>
+											</div>
+										</div>
+
+										<div class="mt-3">
+											<Textarea
+												bind:value={globalSystemPrompt}
+												rows={5}
+												minSize={140}
+												placeholder={$i18n.t(
+													'Leave empty if you do not want a global default system prompt.'
+												)}
+												className="w-full rounded-xl border border-gray-200/80 bg-white/80 px-3.5 py-3 text-sm leading-6 text-gray-800 outline-hidden transition-colors focus:border-sky-300/80 dark:border-gray-700/70 dark:bg-gray-900/60 dark:text-gray-200 dark:focus:border-sky-500/60"
+											/>
+										</div>
+
+										<div class="mt-3 rounded-xl border border-dashed border-gray-200/90 bg-gray-50/80 px-3 py-2 text-xs leading-5 text-gray-500 dark:border-gray-700/70 dark:bg-gray-900/40 dark:text-gray-400">
+											{$i18n.t(
+												'This default is not copied into each chat. Chats without an override inherit it dynamically.'
+											)}
+										</div>
+									</div>
 
 								</div>
 							{:else if s.key === 'chat'}

@@ -12,7 +12,7 @@
 	import Collapsible from '$lib/components/common/Collapsible.svelte';
 	import SteppedSlider from '$lib/components/common/SteppedSlider.svelte';
 
-	import { config, user } from '$lib/stores';
+	import { config, settings, user } from '$lib/stores';
 	import { getBackendConfig } from '$lib/apis';
 	import { getNativeToolsConfig, setNativeToolsConfig } from '$lib/apis/configs';
 	import { cloneSettingsSnapshot, isSettingsSnapshotEqual } from '$lib/utils/settings-dirty';
@@ -212,6 +212,11 @@
 		params = { ...params, system: initialSectionSnapshot.system };
 	};
 
+	const restoreSystemInheritance = () => {
+		markInteraction('system');
+		params = { ...params, system: null };
+	};
+
 	const resetThinking = () => {
 		if (!initialSectionSnapshot) return;
 		markInteraction('thinking');
@@ -348,8 +353,12 @@
 		}
 	}
 
+	$: currentChatSystemPrompt = typeof params?.system === 'string' ? params.system : '';
+	$: globalSystemPrompt = typeof $settings?.system === 'string' ? $settings.system : '';
+	$: hasCurrentChatSystemPromptOverride = normalizeSystemValue(params?.system) !== null;
+	$: hasGlobalSystemPrompt = normalizeSystemValue($settings?.system) !== null;
 	// 系统提示词有内容时自动展开
-	$: systemPromptHasContent = !!(params?.system && params.system.trim());
+	$: systemPromptHasContent = !!currentChatSystemPrompt.trim();
 
 	const handleUpdateGlobalToolCallingMode = async (e: CustomEvent<ToolCallingMode>) => {
 		await updateGlobalToolCallingMode(e.detail);
@@ -463,37 +472,106 @@
 					systemAck = false;
 				}}
 			>
-				{#if systemModified || systemAck}
-					<div
-						class="absolute top-2 right-10 z-10 flex items-center gap-1 px-2 py-1 rounded-full bg-teal-50/95 dark:bg-teal-900/70 border border-teal-200/80 dark:border-teal-700/60 shadow-sm pointer-events-none"
-					>
-						<span class="text-[10px] font-medium text-teal-700 dark:text-teal-300">
-							{systemModified ? '已调整' : '已应用'}
-						</span>
-						{#if systemModified}
-							<button
-								class="pointer-events-auto p-0.5 rounded-full text-teal-500 hover:text-teal-700 dark:text-teal-400 dark:hover:text-teal-200 transition-colors duration-150 cursor-pointer"
-								title={$i18n.t('Reset')}
-								on:click|stopPropagation={resetSystem}
-							>
-								<ArrowPath className="size-2.5" />
-							</button>
-						{/if}
-					</div>
-				{/if}
 				<Collapsible
-					title={$i18n.t('System Prompt')}
+					chevron={true}
 					open={systemPromptHasContent}
 					buttonClassName="w-full px-3 py-2.5 rounded-xl hover:bg-gray-100/60 dark:hover:bg-white/[0.04] transition-colors duration-200"
 				>
+					<div class="flex w-full items-start justify-between gap-3">
+						<div class="min-w-0 flex flex-wrap items-center gap-2">
+							<div class="text-sm font-medium text-gray-900 dark:text-gray-100">
+								{$i18n.t('Current Chat System Prompt')}
+							</div>
+							<span
+								class="inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium {hasCurrentChatSystemPromptOverride
+									? 'border-teal-200/80 bg-teal-50 text-teal-700 dark:border-teal-800/70 dark:bg-teal-950/40 dark:text-teal-300'
+									: 'border-sky-200/80 bg-sky-50 text-sky-700 dark:border-sky-800/70 dark:bg-sky-950/40 dark:text-sky-300'}"
+							>
+								{hasCurrentChatSystemPromptOverride
+									? $i18n.t('Override Global System Prompt')
+									: $i18n.t('Inheriting Global System Prompt')}
+							</span>
+							{#if systemModified || systemAck}
+								<span class="inline-flex items-center rounded-full border border-teal-200/80 bg-teal-50 px-2 py-0.5 text-[11px] font-medium text-teal-700 dark:border-teal-800/70 dark:bg-teal-950/40 dark:text-teal-300">
+									{systemModified ? '已调整' : '已应用'}
+								</span>
+							{/if}
+						</div>
+
+						<div class="flex items-center gap-1">
+							{#if systemModified}
+								<button
+									class="p-1.5 rounded-lg text-teal-500 hover:text-teal-700 dark:text-teal-400 dark:hover:text-teal-200 hover:bg-teal-50/80 dark:hover:bg-teal-950/40 transition-colors duration-150"
+									title={$i18n.t('Reset')}
+									on:pointerup|stopPropagation
+									on:click|stopPropagation={resetSystem}
+								>
+									<ArrowPath className="size-3" />
+								</button>
+							{/if}
+							{#if hasCurrentChatSystemPromptOverride}
+								<button
+									class="inline-flex items-center rounded-lg border border-sky-200/80 bg-white/90 px-2.5 py-1 text-[11px] font-medium text-sky-700 hover:bg-sky-50 dark:border-sky-800/70 dark:bg-gray-900/70 dark:text-sky-300 dark:hover:bg-sky-950/30 transition-colors duration-150"
+									on:pointerup|stopPropagation
+									on:click|stopPropagation={restoreSystemInheritance}
+								>
+									{$i18n.t('Restore Inheritance')}
+								</button>
+							{/if}
+						</div>
+					</div>
+
 					<div class="px-3 pb-3" slot="content">
-						<textarea
-							bind:value={params.system}
-							on:input={lockBaseline}
-							class="w-full text-xs py-2 px-3 bg-gray-50 dark:bg-gray-800/50 border border-gray-200/60 dark:border-gray-700/40 rounded-lg outline-hidden resize-none focus:border-blue-300/50 dark:focus:border-blue-500/30 transition-colors duration-200 placeholder:text-gray-400 dark:placeholder:text-gray-500"
-							rows="4"
-							placeholder={$i18n.t('Enter system prompt')}
-						/>
+						<div class="space-y-3">
+							{#if !hasCurrentChatSystemPromptOverride}
+								<div class="rounded-xl border border-sky-200/80 bg-sky-50/70 p-3 dark:border-sky-800/60 dark:bg-sky-950/20">
+									<div class="flex items-center gap-2 text-[11px] font-medium text-sky-700 dark:text-sky-300">
+										<svg
+											xmlns="http://www.w3.org/2000/svg"
+											viewBox="0 0 20 20"
+											fill="currentColor"
+											class="size-3.5 shrink-0"
+										>
+											<path
+												fill-rule="evenodd"
+												d="M18 10A8 8 0 1 1 2 10a8 8 0 0 1 16 0Zm-7.25-3a.75.75 0 0 0-1.5 0v3.25c0 .414.336.75.75.75h2a.75.75 0 0 0 0-1.5h-1.25V7Z"
+												clip-rule="evenodd"
+											/>
+										</svg>
+										{$i18n.t('Current effective content comes from the global default system prompt.')}
+									</div>
+									{#if hasGlobalSystemPrompt}
+										<div class="mt-2 max-h-44 overflow-y-auto rounded-lg border border-sky-200/80 bg-white/90 px-3 py-2 text-xs leading-5 whitespace-pre-wrap text-gray-700 dark:border-sky-800/60 dark:bg-gray-900/70 dark:text-gray-200">
+											{globalSystemPrompt}
+										</div>
+									{:else}
+										<div class="mt-2 rounded-lg border border-dashed border-sky-200/80 bg-white/70 px-3 py-2 text-xs leading-5 text-sky-700/90 dark:border-sky-800/60 dark:bg-gray-900/50 dark:text-sky-300/90">
+											{$i18n.t('No global default system prompt is set yet.')}
+										</div>
+									{/if}
+								</div>
+							{/if}
+
+							<div class="space-y-2">
+								<div class="flex items-center justify-between gap-2">
+									<div class="text-[11px] font-medium uppercase tracking-[0.08em] text-gray-500 dark:text-gray-400">
+										{$i18n.t('Override for This Chat')}
+									</div>
+									<div class="text-[11px] text-gray-400 dark:text-gray-500">
+										{$i18n.t('Only affects the current chat')}
+									</div>
+								</div>
+								<textarea
+									bind:value={params.system}
+									on:input={lockBaseline}
+									class="w-full text-xs py-2.5 px-3 bg-gray-50 dark:bg-gray-800/50 border border-gray-200/60 dark:border-gray-700/40 rounded-xl outline-hidden resize-none focus:border-blue-300/50 dark:focus:border-blue-500/30 transition-colors duration-200 placeholder:text-gray-400 dark:placeholder:text-gray-500"
+									rows="4"
+									placeholder={$i18n.t(
+										'Leave empty to inherit the global default system prompt. Enter text here to override it only for the current chat.'
+									)}
+								/>
+							</div>
+						</div>
 					</div>
 				</Collapsible>
 			</div>

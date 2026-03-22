@@ -201,10 +201,9 @@ def get_config_value(config_path: str):
     path_parts = config_path.split(".")
     cur_config = CONFIG_DATA
     for key in path_parts:
-        if key in cur_config:
-            cur_config = cur_config[key]
-        else:
+        if not isinstance(cur_config, dict) or key not in cur_config:
             return None
+        cur_config = cur_config[key]
     return cur_config
 
 

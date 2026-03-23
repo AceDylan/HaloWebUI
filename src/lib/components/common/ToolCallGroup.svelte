@@ -85,6 +85,10 @@
 		return ['fetch_url', 'fetch_url_rendered'].includes(name?.toLowerCase() ?? '');
 	}
 
+	function isImageGenerationTool(name: string): boolean {
+		return ['generate_image', 'edit_image'].includes(name?.toLowerCase() ?? '');
+	}
+
 	function parseSearchQuery(argsStr: string): string {
 		try {
 			const parsed = parseJSONString(argsStr);
@@ -329,7 +333,7 @@
 						/>
 					{/if}
 
-						{#if selectedDone && typeof files === 'object'}
+						{#if selectedDone && !isImageGenerationTool(toolName) && typeof files === 'object'}
 							{#each files ?? [] as file}
 								{#if typeof file === 'string' && file.startsWith('data:image/')}
 									<Image src={file} alt="Image" />

@@ -89,6 +89,10 @@
 			return str;
 		}
 	}
+
+	function isImageGenerationTool(name: string): boolean {
+		return ['generate_image', 'edit_image'].includes(name?.toLowerCase() ?? '');
+	}
 </script>
 
 <div {id} {dir} class={className}>
@@ -250,7 +254,7 @@
 				</div>
 			{/if}
 
-			{#if attributes?.done === 'true'}
+			{#if attributes?.done === 'true' && !isImageGenerationTool(attributes?.name)}
 				{#if typeof files === 'object'}
 					{#each files ?? [] as file, idx}
 						{#if typeof file === 'string' && file.startsWith('data:image/')}

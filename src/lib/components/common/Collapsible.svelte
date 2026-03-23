@@ -253,8 +253,10 @@
 			{#if attributes?.done === 'true'}
 				{#if typeof files === 'object'}
 					{#each files ?? [] as file, idx}
-						{#if file.startsWith('data:image/')}
+						{#if typeof file === 'string' && file.startsWith('data:image/')}
 							<Image src={file} alt="Image" />
+						{:else if file?.type === 'image' && file?.url}
+							<Image src={file.url} alt="Image" />
 						{/if}
 					{/each}
 				{/if}

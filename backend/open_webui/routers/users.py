@@ -1,7 +1,7 @@
 import logging
 import csv
 import io
-from typing import Optional
+from typing import Any, Optional
 
 from open_webui.models.auths import Auths
 from open_webui.models.groups import Groups
@@ -32,6 +32,23 @@ log = logging.getLogger(__name__)
 log.setLevel(SRC_LOG_LEVELS["MODELS"])
 
 router = APIRouter()
+
+
+def _as_dict(value: Any) -> dict:
+    return value if isinstance(value, dict) else {}
+
+
+def _get_ui_connections(settings_like: Any) -> dict:
+    if settings_like is None:
+        return {}
+
+    if hasattr(settings_like, "model_dump"):
+        settings_dict = _as_dict(settings_like.model_dump())
+    else:
+        settings_dict = _as_dict(settings_like)
+
+    ui = _as_dict(settings_dict.get("ui"))
+    return _as_dict(ui.get("connections"))
 
 ############################
 # GetUsers
@@ -213,10 +230,24 @@ async def get_user_settings_by_session_user(request: Request, user=Depends(get_v
 
 @router.post("/user/settings/update", response_model=UserSettings)
 async def update_user_settings_by_session_user(
-    form_data: UserSettings, user=Depends(get_verified_user)
+    request: Request,
+    form_data: UserSettings,
+    user=Depends(get_verified_user),
 ):
+    existing_user = Users.get_user_by_id(user.id)
+    connections_changed = _get_ui_connections(
+        getattr(existing_user, "settings", None)
+    ) != _get_ui_connections(form_data)
+
     user = Users.update_user_settings_by_id(user.id, form_data.model_dump())
     if user:
+        if connections_changed:
+            from open_webui.utils.models import invalidate_base_model_cache
+
+            request.app.state.BASE_MODELS = None
+            request.app.state.MODELS = {}
+            invalidate_base_model_cache(user.id)
+
         return user.settings
     else:
         raise HTTPException(

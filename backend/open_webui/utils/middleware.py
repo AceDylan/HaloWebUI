@@ -170,6 +170,18 @@ _API_ERROR_REASON_MAP: dict[int, tuple[list[str], str]] = {
     504: (["api_upstream_error", "proxy_error"], "wait_retry"),
 }
 
+_API_ERROR_TITLE_MAP: dict[int, str] = {
+    401: "上游服务鉴权失败",
+    403: "上游服务拒绝访问",
+    404: "上游模型或接口不存在",
+    408: "上游服务请求超时",
+    429: "上游服务限流",
+    500: "上游服务暂时不可用",
+    502: "上游网关或代理错误",
+    503: "上游服务暂时不可用",
+    504: "上游服务响应超时",
+}
+
 
 def _parse_error_message(raw: str) -> str:
     """Extract a human-readable message from a raw error string.
@@ -190,6 +202,39 @@ def _parse_error_message(raw: str) -> str:
     except (json.JSONDecodeError, TypeError):
         pass
     return raw
+
+
+def _normalize_api_error(error: Any, status_override: int | None = None) -> dict:
+    candidate = error
+    if isinstance(candidate, str):
+        candidate = _safe_json_loads(candidate)
+
+    if isinstance(candidate, dict):
+        nested = candidate.get("error")
+        normalized = dict(nested) if isinstance(nested, dict) else dict(candidate)
+    else:
+        normalized = {}
+
+    if not normalized:
+        message = _truncate_text(error, 4000).strip()
+        normalized = {"message": message} if message else {}
+
+    if not normalized.get("message"):
+        for key in ("detail", "msg", "error_description"):
+            value = normalized.get(key)
+            if isinstance(value, str) and value.strip():
+                normalized["message"] = value.strip()
+                break
+
+    if status_override is not None:
+        normalized.setdefault("status", status_override)
+        code_str = str(normalized.get("code", "") or "")
+        if not code_str.startswith("http_"):
+            if code_str:
+                normalized.setdefault("upstream_code", code_str)
+            normalized["code"] = f"http_{status_override}"
+
+    return normalized
 
 
 WEB_SEARCH_MODE_OFF = "off"
@@ -465,28 +510,44 @@ def should_retry_native_file_inputs_with_rag(metadata: dict, error: Any) -> bool
     return any(pattern in text for pattern in _NATIVE_FILE_INPUT_RETRY_PATTERNS)
 
 
-def _build_api_error_payload(error: dict, model_id: str) -> dict:
+def _build_api_error_payload(
+    error: dict | str,
+    model_id: str,
+    *,
+    status_override: int | None = None,
+) -> dict:
     """Build a structured error payload from a stream API error chunk.
 
     *error* is the dict captured from the SSE error event, e.g.:
       {"message": "...", "type": "api_error", "code": "http_500"}
     """
-    code_str = str(error.get("code", ""))
+    error_payload = _normalize_api_error(error, status_override=status_override)
+
+    code_str = str(error_payload.get("code", ""))
     status: int | None = None
     if code_str.startswith("http_"):
         try:
             status = int(code_str[5:])
         except ValueError:
             pass
+    if status is None:
+        raw_status = error_payload.get("status")
+        if isinstance(raw_status, int):
+            status = raw_status
 
-    raw_message = str(error.get("message", ""))
+    raw_message = str(error_payload.get("message", ""))
     parsed_message = _parse_error_message(raw_message)
 
     # Build title line
+    title_prefix = _API_ERROR_TITLE_MAP.get(status or 0, "上游服务返回错误")
     if status:
-        title = f"上游服务返回错误（HTTP {status}）\n{parsed_message}" if parsed_message else f"上游服务返回错误（HTTP {status}）"
+        title = (
+            f"{title_prefix}（HTTP {status}）\n{parsed_message}"
+            if parsed_message
+            else f"{title_prefix}（HTTP {status}）"
+        )
     else:
-        title = f"上游服务返回错误\n{parsed_message}" if parsed_message else "上游服务返回错误"
+        title = f"{title_prefix}\n{parsed_message}" if parsed_message else title_prefix
 
     reasons, suggestion = _API_ERROR_REASON_MAP.get(
         status or 0, (["api_upstream_error"], "retry_or_switch")
@@ -3026,11 +3087,15 @@ async def process_chat_response(
                     )
 
                 _stream_api_error = None
+                _stream_response_status = None
+                _stream_non_sse_error_lines: list[str] = []
 
                 async def stream_body_handler(response):
                     nonlocal content
                     nonlocal content_blocks
                     nonlocal _stream_api_error
+                    nonlocal _stream_response_status
+                    nonlocal _stream_non_sse_error_lines
 
                     response_tool_calls = []
                     tool_call_lookup: dict[tuple[str, str], int] = {}
@@ -3043,6 +3108,12 @@ async def process_chat_response(
                     _stream_skip_count = 0
                     _stream_finish_reason = None
                     _stream_exit_reason = "normal"  # normal | break_code_interpreter | exception
+                    try:
+                        _stream_response_status = int(
+                            getattr(response, "status_code", None) or 0
+                        )
+                    except Exception:
+                        _stream_response_status = None
 
                     async for line in response.body_iterator:
                         line = line.decode("utf-8") if isinstance(line, bytes) else line
@@ -3056,6 +3127,22 @@ async def process_chat_response(
                         # "data:" is the prefix for each event
                         if not data.startswith("data:"):
                             _stream_skip_count += 1
+                            stripped = data.strip()
+                            if (
+                                stripped
+                                and _stream_response_status
+                                and _stream_response_status >= 400
+                            ):
+                                _stream_non_sse_error_lines.append(
+                                    _truncate_text(stripped, 4000)
+                                )
+                                if _stream_api_error is None:
+                                    candidate_error = _normalize_api_error(
+                                        stripped,
+                                        status_override=_stream_response_status,
+                                    )
+                                    if candidate_error.get("message"):
+                                        _stream_api_error = candidate_error
                             if _stream_skip_count <= 3:
                                 log.info("[STREAM] skipped non-data line: %s", data.strip()[:200])
                             continue
@@ -3492,12 +3579,37 @@ async def process_chat_response(
                                     _stream_line_count, _stream_data_count, len(content),
                                 )
                             else:
+                                if (
+                                    _stream_response_status
+                                    and _stream_response_status >= 400
+                                ):
+                                    _stream_non_sse_error_lines.append(
+                                        _truncate_text(data, 4000)
+                                    )
+                                    if _stream_api_error is None:
+                                        candidate_error = _normalize_api_error(
+                                            data,
+                                            status_override=_stream_response_status,
+                                        )
+                                        if candidate_error.get("message"):
+                                            _stream_api_error = candidate_error
                                 log.warning(
                                     "[STREAM PARSE ERROR] line #%d data_event #%d | error=%s | line=%s",
                                     _stream_line_count, _stream_data_count,
                                     str(e)[:200], line[:300] if isinstance(line, str) else str(line)[:300],
                                 )
                                 continue
+
+                    if (
+                        _stream_api_error is None
+                        and _stream_response_status
+                        and _stream_response_status >= 400
+                        and _stream_non_sse_error_lines
+                    ):
+                        _stream_api_error = _normalize_api_error(
+                            "\n".join(_stream_non_sse_error_lines[-10:]),
+                            status_override=_stream_response_status,
+                        )
 
                     # ── Stream summary log ──
                     log.info(
@@ -5758,13 +5870,28 @@ async def process_chat_response(
                             str(_stream_api_error.get("message", ""))[:200],
                         )
                         finalize_error_payload = _build_api_error_payload(
-                            _stream_api_error, model_id_display
+                            _stream_api_error,
+                            model_id_display,
+                            status_override=_stream_response_status,
+                        )
+                    elif _stream_response_status and _stream_response_status >= 400:
+                        log.warning(
+                            "[API ERROR] Model %s returned HTTP %s without a structured SSE error payload",
+                            model_id_display,
+                            _stream_response_status,
+                        )
+                        finalize_error_payload = _build_api_error_payload(
+                            {
+                                "message": "\n".join(_stream_non_sse_error_lines[-10:]),
+                            },
+                            model_id_display,
+                            status_override=_stream_response_status,
                         )
                     else:
                         # Genuine empty response (HTTP 200 but no content)
                         log.warning(
                             "[EMPTY RESPONSE] Model %s returned empty content (0 text tokens). "
-                            "This may be caused by content filtering, rate limiting, or a proxy issue.",
+                            "This may be caused by content filtering, an unavailable model, or a proxy issue.",
                             model_id_display,
                         )
                         finalize_error_payload = {
@@ -5773,7 +5900,6 @@ async def process_chat_response(
                             "content": f"模型 {model_id_display} 返回了空响应（0 token）。",
                             "reasons": [
                                 "content_filter",
-                                "rate_limit",
                                 "proxy_error",
                                 "model_unavailable",
                             ],
@@ -5807,6 +5933,18 @@ async def process_chat_response(
                 if finalize_error_payload:
                     data["error"] = finalize_error_payload
 
+                if finalize_error_payload and ENABLE_REALTIME_CHAT_SAVE:
+                    try:
+                        Chats.upsert_message_to_chat_by_id_and_message_id(
+                            metadata["chat_id"],
+                            metadata["message_id"],
+                            {
+                                "error": finalize_error_payload,
+                            },
+                        )
+                    except Exception as e:
+                        log.warning(f"Failed to persist stream error payload: {e}")
+
                 if not ENABLE_REALTIME_CHAT_SAVE:
                     # Save message in the database
                     _save_payload = {
@@ -5814,6 +5952,8 @@ async def process_chat_response(
                     }
                     if accumulated_usage:
                         _save_payload["usage"] = accumulated_usage
+                    if finalize_error_payload:
+                        _save_payload["error"] = finalize_error_payload
                     Chats.upsert_message_to_chat_by_id_and_message_id(
                         metadata["chat_id"],
                         metadata["message_id"],

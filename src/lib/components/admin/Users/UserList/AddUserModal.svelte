@@ -262,6 +262,7 @@
 						<a
 							class="mt-2 inline-block font-medium text-blue-600 underline hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
 							href="{WEBUI_BASE_URL}/static/user-import.csv"
+							download="user-import.csv"
 						>
 							{$i18n.t('Click here to download user import template file.')}
 						</a>

@@ -165,3 +165,71 @@ class TestUsers(AbstractPostgresTest):
         assert len(response.json()) == 1
         data = response.json()
         _assert_user(data, "1")
+
+    def test_update_user_settings_invalidates_model_cache_when_connections_change(
+        self, monkeypatch
+    ):
+        from main import app
+
+        invalidated = []
+
+        monkeypatch.setattr(
+            "open_webui.utils.models.invalidate_base_model_cache",
+            lambda user_id=None: invalidated.append(user_id),
+        )
+
+        app.state.BASE_MODELS = ["stale"]
+        app.state.MODELS = {"stale": {"id": "stale"}}
+
+        with mock_webui_user(id="2"):
+            response = self.fast_api_client.post(
+                self.create_url("/user/settings/update"),
+                json={
+                    "ui": {
+                        "connections": {
+                            "openai": {
+                                "OPENAI_API_BASE_URLS": ["https://wzw.pp.ua/v1"],
+                                "OPENAI_API_KEYS": ["sk-test"],
+                                "OPENAI_API_CONFIGS": {
+                                    "0": {
+                                        "remark": "Wong",
+                                    }
+                                },
+                            }
+                        }
+                    }
+                },
+            )
+
+        assert response.status_code == 200
+        assert invalidated == ["2"]
+        assert app.state.BASE_MODELS is None
+        assert app.state.MODELS == {}
+
+    def test_update_user_settings_does_not_invalidate_model_cache_for_unrelated_ui_changes(
+        self, monkeypatch
+    ):
+        from main import app
+
+        invalidated = []
+
+        monkeypatch.setattr(
+            "open_webui.utils.models.invalidate_base_model_cache",
+            lambda user_id=None: invalidated.append(user_id),
+        )
+
+        app.state.BASE_MODELS = ["keep"]
+        app.state.MODELS = {"keep": {"id": "keep"}}
+
+        with mock_webui_user(id="2"):
+            response = self.fast_api_client.post(
+                self.create_url("/user/settings/update"),
+                json={
+                    "ui": {"theme": "dark"},
+                },
+            )
+
+        assert response.status_code == 200
+        assert invalidated == []
+        assert app.state.BASE_MODELS == ["keep"]
+        assert app.state.MODELS == {"keep": {"id": "keep"}}

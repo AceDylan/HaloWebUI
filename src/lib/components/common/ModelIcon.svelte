@@ -7,6 +7,7 @@
 	export let title: string | undefined;
 	export let loading: 'eager' | 'lazy' | undefined = undefined;
 	export let decoding: 'async' | 'sync' | 'auto' = 'async';
+	export let bare = false;
 
 	// Applied to the outer wrapper. This should include size classes (e.g. `size-5`) and rounding.
 	export let className = '';
@@ -92,7 +93,7 @@
 		class="model-icon {shouldInvertInDark ? 'model-icon--invert' : ''} {isMonochromeModelIcon ||
 		isMonochromeConnAvatar
 			? 'model-icon--mono'
-			: ''} {className}"
+			: ''} {bare ? 'model-icon--bare' : ''} {className}"
 	>
 		<img
 			class="model-icon__img model-icon__img--{loaded ? 'loaded' : 'loading'} {fitClass}"
@@ -142,6 +143,14 @@
 		opacity: 1;
 	}
 
+	.model-icon--bare {
+		background-color: transparent;
+		box-shadow:
+			var(--tw-ring-offset-shadow, 0 0 #0000),
+			var(--tw-ring-shadow, 0 0 #0000),
+			var(--tw-shadow, 0 0 #0000);
+	}
+
 	:global(html.dark) .model-icon--invert .model-icon__img {
 		filter: invert(1) brightness(1.12) contrast(1.06);
 	}
@@ -155,11 +164,23 @@
 		box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.06);
 	}
 
+	.model-icon--bare::after {
+		content: none;
+	}
+
 	:global(html.dark) .model-icon {
 		background-color: #1f2937;
 		box-shadow:
 			0 2px 8px rgba(0, 0, 0, 0.3),
 			0 0 0 1px rgba(255, 255, 255, 0.06);
+	}
+
+	:global(html.dark) .model-icon--bare {
+		background-color: transparent;
+		box-shadow:
+			var(--tw-ring-offset-shadow, 0 0 #0000),
+			var(--tw-ring-shadow, 0 0 #0000),
+			var(--tw-shadow, 0 0 #0000);
 	}
 
 	:global(html.dark) .model-icon::after {

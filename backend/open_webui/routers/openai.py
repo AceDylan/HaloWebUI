@@ -592,6 +592,13 @@ def _format_responses_upstream_error(
     return "\n".join([p for p in parts if p])
 
 
+def _get_chat_upstream_error_message(*, status: int, body) -> str:
+    body_text = _truncate_text(_stringify_upstream_body(body), 2400).strip()
+    if body_text:
+        return body_text
+    return f"HTTP Error: {status}"
+
+
 async def error_sse_generator(message: str, *, code: str = "upstream_error"):
     yield (
         "data: "
@@ -1604,15 +1611,43 @@ async def generate_chat_completion(
                 {k: v for k, v in r.headers.items() if k.lower() not in ("set-cookie",)},
             )
 
-        # ── Non-2xx response on Chat Completions path: log body for diagnosis ──
+        # Chat Completions: normalize non-2xx upstreams into truthful errors
+        # instead of letting downstream guess from an empty stream.
         if not use_responses_api and r.status >= 400:
-            error_body = await r.text()
+            response = await _safe_read_upstream_body(r)
+            error_message = _get_chat_upstream_error_message(
+                status=r.status, body=response
+            )
+            client_requested_stream = (
+                bool(payload_dict.get("stream"))
+                if isinstance(payload_dict, dict)
+                else False
+            )
             log.warning(
                 "[UPSTREAM ERROR] status=%d | url=%s | body=%s",
-                r.status, request_url, error_body[:2000],
+                r.status,
+                request_url,
+                error_message[:2000],
             )
-            # Re-create the response for downstream processing (body already consumed)
-            # We'll let the existing error handling below deal with it.
+
+            if client_requested_stream:
+                streaming = True
+                return StreamingResponse(
+                    error_sse_generator(
+                        error_message,
+                        code=f"http_{r.status}",
+                    ),
+                    media_type="text/event-stream",
+                    status_code=200,
+                    background=BackgroundTask(
+                        cleanup_response, response=r, session=session
+                    ),
+                )
+
+            raise HTTPException(
+                status_code=r.status,
+                detail=_extract_upstream_error_detail(r.status, response),
+            )
 
         # Responses API handling (strict mode).
         if use_responses_api:

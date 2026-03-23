@@ -393,10 +393,10 @@
 		}
 	};
 
-	const restoreChatSessionState = (id: string | null | undefined = $chatId || chatIdProp) => {
-		try {
-			const stored = JSON.parse(localStorage.getItem(getChatSessionStateKey(id)) || 'null');
-			const state = stored ?? readLegacyInputSettings(id);
+		const restoreChatSessionState = (id: string | null | undefined = $chatId || chatIdProp) => {
+			try {
+				const stored = JSON.parse(localStorage.getItem(getChatSessionStateKey(id)) || 'null');
+				const state = stored ?? readLegacyInputSettings(id);
 
 			if (!state) {
 				return false;
@@ -406,29 +406,37 @@
 			if (state.reasoningEffort !== undefined) {
 				reasoningEffort = state.reasoningEffort ?? null;
 			}
-			if (state.maxThinkingTokens !== undefined) {
-				maxThinkingTokens = state.maxThinkingTokens ?? null;
-			}
+				if (state.maxThinkingTokens !== undefined) {
+					maxThinkingTokens = state.maxThinkingTokens ?? null;
+				}
+				if (state.imageGenerationEnabled !== undefined) {
+					imageGenerationEnabled = Boolean(state.imageGenerationEnabled);
+				}
+				if (state.codeInterpreterEnabled !== undefined) {
+					codeInterpreterEnabled = Boolean(state.codeInterpreterEnabled);
+				}
 
-			return true;
-		} catch {
-			return false;
-		}
+				return true;
+			} catch {
+				return false;
+			}
 	};
 
 	const persistChatSessionState = (id: string | null | undefined = $chatId || chatIdProp) => {
 		localStorage.setItem(
 			getChatSessionStateKey(id),
 			JSON.stringify({
-				webSearchMode: resolveStoredWebSearchMode(
-					{ webSearchMode },
-					getPreferredDefaultWebSearchMode()
-				),
-				reasoningEffort,
-				maxThinkingTokens
-			})
-		);
-	};
+					webSearchMode: resolveStoredWebSearchMode(
+						{ webSearchMode },
+						getPreferredDefaultWebSearchMode()
+					),
+					imageGenerationEnabled,
+					codeInterpreterEnabled,
+					reasoningEffort,
+					maxThinkingTokens
+				})
+			);
+		};
 
 	const removeChatSessionState = (id: string | null | undefined = $chatId || chatIdProp) => {
 		localStorage.removeItem(getChatSessionStateKey(id));

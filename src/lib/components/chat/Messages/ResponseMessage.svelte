@@ -746,16 +746,17 @@
 			class={`shrink-0 ml-0.5 sm:ml-0 ltr:mr-1.5 rtl:ml-1.5 ltr:sm:mr-3 rtl:sm:ml-3 relative z-10`}
 		>
 			<div class="relative">
-				<ModelIcon
-					src={model?.info?.meta?.profile_image_url ??
-						model?.meta?.profile_image_url ??
-						($i18n.language === 'dg-DG' ? `/doge.png` : `${WEBUI_BASE_URL}/static/favicon.png`)}
-					alt="model profile"
-					className="size-[26px] sm:size-[34px] rounded-xl -translate-y-[1px] ring-2 ring-white/60 dark:ring-white/20 shadow-lg"
-				/>
+					<ModelIcon
+						src={model?.info?.meta?.profile_image_url ??
+							model?.meta?.profile_image_url ??
+							($i18n.language === 'dg-DG' ? `/doge.png` : `${WEBUI_BASE_URL}/static/favicon.png`)}
+						alt="model profile"
+						bare={true}
+						className="size-[26px] sm:size-[34px] rounded-xl -translate-y-[1px] ring-2 ring-white/60 dark:ring-white/20"
+					/>
 				<!-- Status indicator dot -->
 				<div
-					class="absolute -bottom-0.5 -right-0.5 w-2 h-2 sm:w-2.5 sm:h-2.5 bg-green-400 rounded-full ring-[1.5px] sm:ring-2 ring-white dark:ring-gray-900 animate-pulse"
+					class="absolute -bottom-0.5 -right-0.5 size-1.5 sm:size-2 translate-x-px -translate-y-px bg-green-400 rounded-full ring-1 sm:ring-[1.5px] ring-white dark:ring-gray-900 animate-pulse"
 				/>
 			</div>
 		</div>

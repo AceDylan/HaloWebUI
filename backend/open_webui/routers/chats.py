@@ -22,11 +22,12 @@ from open_webui.config import ENABLE_ADMIN_CHAT_ACCESS, ENABLE_ADMIN_EXPORT
 from open_webui.constants import ERROR_MESSAGES
 from open_webui.env import SRC_LOG_LEVELS, FOLDER_MAX_ITEM_COUNT
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 from open_webui.utils.auth import get_admin_user, get_verified_user
 from open_webui.utils.access_control import has_permission
+from open_webui.tasks import list_task_ids_by_chat_id
 
 log = logging.getLogger(__name__)
 log.setLevel(SRC_LOG_LEVELS["MODELS"])
@@ -45,6 +46,11 @@ def _chat_response(chat) -> Optional[ChatResponse]:
 
 def _chat_response_list(chats) -> list[ChatResponse]:
     return [_chat_response(chat) for chat in chats]
+
+
+class ChatContextResponse(BaseModel):
+    tags: list[TagModel] = Field(default_factory=list)
+    task_ids: list[str] = Field(default_factory=list)
 
 ############################
 # GetChatList
@@ -368,6 +374,31 @@ async def get_chat_by_id(id: str, user=Depends(get_verified_user)):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail=ERROR_MESSAGES.NOT_FOUND
         )
+
+
+@router.get("/{id}/context", response_model=ChatContextResponse)
+async def get_chat_context_by_id(id: str, user=Depends(get_verified_user)):
+    chat = Chats.get_chat_by_id_and_user_id(id, user.id)
+    if not chat:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail=ERROR_MESSAGES.NOT_FOUND
+        )
+
+    tag_models: list[TagModel] = []
+    task_ids: list[str] = []
+
+    try:
+        tag_ids = chat.meta.get("tags", [])
+        tag_models = Tags.get_tags_by_ids_and_user_id(tag_ids, user.id)
+    except Exception:
+        log.exception("Failed to load chat tags for chat_id=%s", id)
+
+    try:
+        task_ids = list_task_ids_by_chat_id(id, blocks_completion_only=True)
+    except Exception:
+        log.exception("Failed to load chat task ids for chat_id=%s", id)
+
+    return ChatContextResponse(tags=tag_models, task_ids=task_ids)
 
 
 ############################

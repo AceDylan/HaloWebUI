@@ -73,8 +73,8 @@
 		deleteTagsById,
 		getAllTags,
 		getChatById,
+		getChatContextById,
 		getChatList,
-		getTagsById,
 		updateChatById
 	} from '$lib/apis/chats';
 	import { generateOpenAIChatCompletion } from '$lib/apis/openai';
@@ -82,14 +82,13 @@
 	import { createOpenAITextStream } from '$lib/apis/streaming';
 	import { queryMemory } from '$lib/apis/memories';
 	import { uploadFile } from '$lib/apis/files';
-	import { getAndUpdateUserLocation } from '$lib/apis/users';
+	import { getAndUpdateUserLocation, getUserSettings } from '$lib/apis/users';
 	import {
 		chatCompleted,
 		generateQueries,
 		chatAction,
 		generateMoACompletion,
-		stopTask,
-		getTaskIdsByChatId
+		stopTask
 	} from '$lib/apis';
 	import { getTools } from '$lib/apis/tools';
 	import { ensureModels } from '$lib/services/models';
@@ -595,8 +594,8 @@
 			maxThinkingTokens = null;
 
 			if (chatIdProp && (await loadChat())) {
-				await tick();
 				loading = false;
+				await tick();
 				restoreChatSessionState(chatIdProp);
 
 				if (localStorage.getItem(`chat-input-${chatIdProp}`)) {
@@ -898,24 +897,26 @@
 			}
 		}
 
-		if (localStorage.getItem(`chat-input-${chatIdProp}`)) {
-			try {
-				const input = JSON.parse(localStorage.getItem(`chat-input-${chatIdProp}`));
-				prompt = input.prompt;
-				files = input.files;
-				selectedToolIds = input.selectedToolIds;
-				imageGenerationEnabled = input.imageGenerationEnabled;
-				imageGenerationOptions = input.imageGenerationOptions ?? {};
-			} catch (e) {
-				prompt = '';
-				files = [];
-				selectedToolIds = [];
-				webSearchMode = getPreferredDefaultWebSearchMode();
-				imageGenerationEnabled = false;
-				imageGenerationOptions = {};
+		if (!chatIdProp) {
+			if (localStorage.getItem(`chat-input-${chatIdProp}`)) {
+				try {
+					const input = JSON.parse(localStorage.getItem(`chat-input-${chatIdProp}`));
+					prompt = input.prompt;
+					files = input.files;
+					selectedToolIds = input.selectedToolIds;
+					imageGenerationEnabled = input.imageGenerationEnabled;
+					imageGenerationOptions = input.imageGenerationOptions ?? {};
+				} catch (e) {
+					prompt = '';
+					files = [];
+					selectedToolIds = [];
+					webSearchMode = getPreferredDefaultWebSearchMode();
+					imageGenerationEnabled = false;
+					imageGenerationOptions = {};
+				}
 			}
+			restoreChatSessionState(chatIdProp);
 		}
-		restoreChatSessionState(chatIdProp);
 
 		showControls.subscribe(async (value) => {
 			if (controlPane && !$mobile) {
@@ -1463,6 +1464,10 @@
 		chatId.set(chatIdProp);
 		tags = [];
 		taskIds = null;
+		const chatContextPromise = getChatContextById(localStorage.token, chatIdProp).catch(() => ({
+			tags: [],
+			task_ids: []
+		}));
 
 		chat = await getChatById(localStorage.token, $chatId).catch(async (error) => {
 			await goto('/');
@@ -1494,21 +1499,16 @@
 				chatFiles = chatContent?.files ?? [];
 
 				void (async () => {
-					const [nextTags, taskRes] = await Promise.all([
-						getTagsById(localStorage.token, $chatId).catch(() => []),
-						getTaskIdsByChatId(localStorage.token, $chatId).catch(() => null)
-					]);
+					const nextContext = await chatContextPromise;
 
 					if (navigationId !== chatIdProp) return;
 
-					tags = nextTags;
-					taskIds = taskRes?.task_ids ?? [];
+					tags = nextContext?.tags ?? [];
+					taskIds = nextContext?.task_ids ?? [];
 					reconcileLoadedAssistantMessages(taskIds);
 				})();
 
 				resetAutoScrollLock();
-				await tick();
-
 				return true;
 			} else {
 				return null;

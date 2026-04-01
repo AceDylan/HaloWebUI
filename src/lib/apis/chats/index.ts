@@ -431,6 +431,36 @@ export const getChatById = async (token: string, id: string) => {
 	return res;
 };
 
+export const getChatContextById = async (token: string, id: string) => {
+	let error = null;
+
+	const res = await fetch(`${WEBUI_API_BASE_URL}/chats/${id}/context`, {
+		method: 'GET',
+		headers: {
+			Accept: 'application/json',
+			'Content-Type': 'application/json',
+			...(token && { authorization: `Bearer ${token}` })
+		}
+	})
+		.then(parseJsonResponse)
+		.catch((err) => {
+			error = err.detail;
+			console.log(err);
+			return null;
+		});
+
+	if (error) {
+		throw error;
+	}
+
+	return (
+		res ?? {
+			tags: [],
+			task_ids: []
+		}
+	);
+};
+
 export const getSharedChatList = async (token: string = '') => {
 	let error = null;
 

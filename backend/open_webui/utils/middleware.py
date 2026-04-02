@@ -153,6 +153,22 @@ def strip_reasoning_details(content: str) -> str:
     return _REASONING_DETAILS_RE.sub("", content).strip()
 
 
+def _summarize_form_data_for_debug(form_data: Any) -> dict[str, Any]:
+    if not isinstance(form_data, dict):
+        return {"type": type(form_data).__name__}
+
+    messages = form_data.get("messages")
+    files = form_data.get("files")
+    features = form_data.get("features")
+
+    return {
+        "model": form_data.get("model"),
+        "message_count": len(messages) if isinstance(messages, list) else 0,
+        "file_count": len(files) if isinstance(files, list) else 0,
+        "feature_keys": sorted(features.keys()) if isinstance(features, dict) else [],
+    }
+
+
 def _truncate_text(value: Any, max_chars: int) -> str:
     try:
         text = value if isinstance(value, str) else ("" if value is None else str(value))
@@ -1789,9 +1805,17 @@ async def chat_completion_tools_handler(
 
     try:
         response = await generate_chat_completion(request, form_data=payload, user=user)
-        log.debug(f"{response=}")
+        if log.isEnabledFor(logging.DEBUG):
+            log.debug(
+                "structured_output_generation response_type=%s",
+                type(response).__name__,
+            )
         content = await get_content_from_response(response)
-        log.debug(f"{content=}")
+        if log.isEnabledFor(logging.DEBUG):
+            log.debug(
+                "structured_output_generation content_len=%s",
+                len(content) if isinstance(content, str) else None,
+            )
 
         if not content:
             return body, {}
@@ -1931,7 +1955,8 @@ async def chat_completion_tools_handler(
         log.debug(f"Error: {e}")
         content = None
 
-    log.debug(f"tool_contexts: {sources}")
+    if log.isEnabledFor(logging.DEBUG):
+        log.debug("tool_contexts sources_count=%d", len(sources))
 
     if skip_files and "files" in body.get("metadata", {}):
         del body["metadata"]["files"]
@@ -2346,7 +2371,8 @@ async def chat_completion_files_handler(
         except Exception as e:
             log.exception(e)
 
-        log.debug(f"rag_contexts:sources: {sources}")
+        if log.isEnabledFor(logging.DEBUG):
+            log.debug("rag_contexts sources_count=%d", len(sources))
 
     return body, {"sources": sources}
 
@@ -2400,7 +2426,11 @@ def apply_params_to_form_data(form_data, model):
 async def process_chat_payload(request, form_data, user, metadata, model):
 
     form_data = apply_params_to_form_data(form_data, model)
-    log.debug(f"form_data: {form_data}")
+    if log.isEnabledFor(logging.DEBUG):
+        log.debug(
+            "process_chat_payload summary=%s",
+            _summarize_form_data_for_debug(form_data),
+        )
 
     event_emitter = get_event_emitter(metadata)
     event_call = get_event_call(metadata)

@@ -63,6 +63,21 @@ log = logging.getLogger(__name__)
 log.setLevel(SRC_LOG_LEVELS["MAIN"])
 
 
+def _summarize_chat_form_data(form_data: Any) -> dict[str, Any]:
+    if not isinstance(form_data, dict):
+        return {"type": type(form_data).__name__}
+
+    messages = form_data.get("messages")
+    files = form_data.get("files")
+
+    return {
+        "model": form_data.get("model"),
+        "stream": bool(form_data.get("stream")),
+        "message_count": len(messages) if isinstance(messages, list) else 0,
+        "file_count": len(files) if isinstance(files, list) else 0,
+    }
+
+
 async def generate_direct_chat_completion(
     request: Request,
     form_data: dict,
@@ -164,7 +179,11 @@ async def generate_chat_completion(
     user: Any,
     bypass_filter: bool = False,
 ):
-    log.debug(f"generate_chat_completion: {form_data}")
+    if log.isEnabledFor(logging.DEBUG):
+        log.debug(
+            "generate_chat_completion summary=%s",
+            _summarize_chat_form_data(form_data),
+        )
     if BYPASS_MODEL_ACCESS_CONTROL:
         bypass_filter = True
 

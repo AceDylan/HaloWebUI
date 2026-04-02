@@ -1327,12 +1327,12 @@ async def chat_completion(
     form_data: dict,
     user=Depends(get_verified_user),
 ):
+    original_request_body = await request.body()
     model_item = form_data.pop("model_item", {})
     tasks = form_data.pop("background_tasks", None)
 
     metadata = {}
-    native_file_inputs_retry_form_data = None
-    native_web_search_retry_form_data = None
+    strip_non_native_function_calling = False
     try:
         if not model_item.get("direct", False):
             # Build a user-scoped model map for this request.
@@ -1382,6 +1382,7 @@ async def chat_completion(
         # non-standard function_calling value to upstream providers.
         if isinstance(form_data.get("params", None), dict) and requested_function_calling is not None:
             if str(requested_function_calling).lower() != "native":
+                strip_non_native_function_calling = True
                 form_data["params"].pop("function_calling", None)
         model_function_calling = (
             model_info.params.model_dump().get("function_calling")
@@ -1425,8 +1426,6 @@ async def chat_completion(
 
         request.state.metadata = metadata
         form_data["metadata"] = metadata
-        native_file_inputs_retry_form_data = copy.deepcopy(form_data)
-        native_web_search_retry_form_data = copy.deepcopy(form_data)
 
         form_data, metadata, events = await process_chat_payload(
             request, form_data, user, metadata, model
@@ -1470,17 +1469,20 @@ async def chat_completion(
             request, response, form_data, user, metadata, model, events, tasks
         )
     except Exception as e:
-        if native_file_inputs_retry_form_data and should_retry_native_file_inputs_with_rag(
+        if original_request_body and should_retry_native_file_inputs_with_rag(
             metadata, e
         ):
-            retry_form_data = copy.deepcopy(native_file_inputs_retry_form_data)
             retry_metadata = {
                 **metadata,
                 "disable_native_file_inputs": True,
                 "native_file_input_file_ids": [],
                 "native_file_input_parts_by_message": {},
             }
-            retry_form_data["metadata"] = retry_metadata
+            retry_form_data = _rebuild_retry_form_data(
+                original_request_body,
+                retry_metadata,
+                strip_non_native_function_calling=strip_non_native_function_calling,
+            )
 
             retry_emitter = get_event_emitter(retry_metadata)
             if retry_emitter:
@@ -1515,17 +1517,16 @@ async def chat_completion(
             except Exception as retry_error:
                 e = retry_error
 
-        if native_web_search_retry_form_data and should_retry_native_web_search_with_halo(
+        if original_request_body and should_retry_native_web_search_with_halo(
             metadata, e
         ):
-            retry_form_data = copy.deepcopy(native_web_search_retry_form_data)
-            retry_features = dict(retry_form_data.get("features") or {})
-            retry_features["web_search"] = True
-            retry_features["web_search_mode"] = "halo"
-            retry_form_data["features"] = retry_features
-
             retry_metadata = {**metadata, "allow_native_web_search_halo_fallback": False}
-            retry_form_data["metadata"] = retry_metadata
+            retry_form_data = _rebuild_retry_form_data(
+                original_request_body,
+                retry_metadata,
+                strip_non_native_function_calling=strip_non_native_function_calling,
+                halo_web_search_fallback=True,
+            )
 
             retry_emitter = get_event_emitter(retry_metadata)
             if retry_emitter:
@@ -1569,6 +1570,45 @@ async def chat_completion(
 # Alias for chat_completion (Legacy)
 generate_chat_completions = chat_completion
 generate_chat_completion = chat_completion
+
+
+def _rebuild_retry_form_data(
+    original_request_body: bytes,
+    retry_metadata: dict,
+    *,
+    strip_non_native_function_calling: bool = False,
+    halo_web_search_fallback: bool = False,
+) -> dict:
+    retry_form_data = json.loads(original_request_body)
+    if not isinstance(retry_form_data, dict):
+        raise ValueError("Chat request body must be a JSON object.")
+
+    retry_form_data.pop("model_item", None)
+    retry_form_data.pop("background_tasks", None)
+    retry_form_data.pop("chat_id", None)
+    retry_form_data.pop("id", None)
+    retry_form_data.pop("session_id", None)
+    retry_form_data.pop("preview_tool_compat", None)
+    retry_form_data.pop("tool_servers", None)
+
+    if strip_non_native_function_calling:
+        params = retry_form_data.get("params")
+        if isinstance(params, dict):
+            requested_mode = params.get("function_calling")
+            if requested_mode is not None and str(requested_mode).lower() != "native":
+                params = dict(params)
+                params.pop("function_calling", None)
+                retry_form_data["params"] = params
+
+    if halo_web_search_fallback:
+        retry_features = retry_form_data.get("features")
+        retry_features = dict(retry_features) if isinstance(retry_features, dict) else {}
+        retry_features["web_search"] = True
+        retry_features["web_search_mode"] = "halo"
+        retry_form_data["features"] = retry_features
+
+    retry_form_data["metadata"] = retry_metadata
+    return retry_form_data
 
 
 @app.post("/api/chat/completed")

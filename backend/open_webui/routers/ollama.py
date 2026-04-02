@@ -943,7 +943,13 @@ async def create_model(
     url_idx: int = 0,
     user=Depends(get_admin_user),
 ):
-    log.debug(f"form_data: {form_data}")
+    if log.isEnabledFor(logging.DEBUG):
+        log.debug(
+            "create_model summary model=%s stream=%s path=%s",
+            form_data.model,
+            form_data.stream,
+            form_data.path,
+        )
     url = request.app.state.config.OLLAMA_BASE_URLS[url_idx]
 
     return await send_post_request(

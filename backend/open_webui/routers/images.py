@@ -47,6 +47,7 @@ COMFYUI_WORKFLOW_NODE_MAPPING_INVALID = (
 )
 
 IMAGE_MODEL_DISCOVERY_CACHE_TTL_SECONDS = 60.0
+IMAGE_MODEL_DISCOVERY_CACHE_MAX_ENTRIES = 64
 IMAGE_MODEL_DISCOVERY_CACHE: dict[str, tuple[float, list[dict[str, Any]]]] = {}
 
 OPENAI_IMAGE_FAMILY_PREFIXES = ("dall-e", "dalle", "gpt-image")
@@ -120,6 +121,29 @@ GEMINI_IMAGE_ASPECT_RATIOS = (
     "16:9",
     "21:9",
 )
+
+def _evict_stale_image_models_cache(now: float) -> None:
+    stale_keys = [
+        cache_key
+        for cache_key, (cached_at, _models) in IMAGE_MODEL_DISCOVERY_CACHE.items()
+        if now - cached_at > IMAGE_MODEL_DISCOVERY_CACHE_TTL_SECONDS
+    ]
+    for cache_key in stale_keys:
+        IMAGE_MODEL_DISCOVERY_CACHE.pop(cache_key, None)
+
+    overflow = len(IMAGE_MODEL_DISCOVERY_CACHE) - IMAGE_MODEL_DISCOVERY_CACHE_MAX_ENTRIES
+    if overflow <= 0:
+        return
+
+    oldest_keys = [
+        cache_key
+        for cache_key, _ in sorted(
+            IMAGE_MODEL_DISCOVERY_CACHE.items(), key=lambda item: item[1][0]
+        )[:overflow]
+    ]
+    for cache_key in oldest_keys:
+        IMAGE_MODEL_DISCOVERY_CACHE.pop(cache_key, None)
+
 
 def _can_use_image_generation(request: Request, user) -> bool:
     """Server-side permission gate for image generation (matches builtin_tools behavior)."""
@@ -864,15 +888,14 @@ def _build_image_model_cache_key(engine: str, source: Optional[dict[str, Any]]) 
 
 
 def _get_cached_image_models(cache_key: str) -> Optional[list[dict[str, Any]]]:
+    now = time.monotonic()
+    _evict_stale_image_models_cache(now)
+
     cached = IMAGE_MODEL_DISCOVERY_CACHE.get(cache_key)
     if not cached:
         return None
 
-    cached_at, models = cached
-    now = time.monotonic()
-    if now - cached_at > IMAGE_MODEL_DISCOVERY_CACHE_TTL_SECONDS:
-        IMAGE_MODEL_DISCOVERY_CACHE.pop(cache_key, None)
-        return None
+    _cached_at, models = cached
 
     return list(models)
 
@@ -880,6 +903,7 @@ def _get_cached_image_models(cache_key: str) -> Optional[list[dict[str, Any]]]:
 def _set_cached_image_models(cache_key: str, models: list[dict[str, Any]]) -> list[dict[str, Any]]:
     now = time.monotonic()
     IMAGE_MODEL_DISCOVERY_CACHE[cache_key] = (now, list(models))
+    _evict_stale_image_models_cache(now)
     return models
 
 

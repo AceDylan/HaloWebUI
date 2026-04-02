@@ -120,6 +120,34 @@ log.setLevel(SRC_LOG_LEVELS["RAG"])
 router = APIRouter()
 
 
+def _log_text_content_summary(
+    context: str,
+    *,
+    text_content: Optional[str],
+    collection_name: Optional[str] = None,
+    processing_mode: Optional[str] = None,
+    provider: Optional[str] = None,
+) -> None:
+    if not log.isEnabledFor(logging.DEBUG):
+        return
+
+    log.debug(
+        "%s text_content_len=%d collection_name=%s processing_mode=%s provider=%s",
+        context,
+        len(text_content or ""),
+        collection_name,
+        processing_mode,
+        provider,
+    )
+
+
+def _log_web_results_summary(engine: str, web_results: list[SearchResult]) -> None:
+    if not log.isEnabledFor(logging.DEBUG):
+        return
+
+    log.debug("web_results_count=%d engine=%s", len(web_results), engine)
+
+
 class CollectionNameForm(BaseModel):
     collection_name: Optional[str] = None
 
@@ -1337,7 +1365,13 @@ def process_file(
             )
 
         text_content = text_content or ""
-        log.debug(f"text_content: {text_content}")
+        _log_text_content_summary(
+            "process_file",
+            text_content=text_content,
+            collection_name=collection_name,
+            processing_mode=processing_mode,
+            provider=resolved_provider,
+        )
         Files.update_file_data_by_id(file.id, {"content": text_content})
 
         hash = calculate_sha256_string(text_content)
@@ -1452,7 +1486,11 @@ def process_text(
         )
     ]
     text_content = form_data.content
-    log.debug(f"text_content: {text_content}")
+    _log_text_content_summary(
+        "process_text",
+        text_content=text_content,
+        collection_name=collection_name,
+    )
 
     result = save_docs_to_vector_db(request, docs, collection_name, user=user)
     if result:
@@ -1484,8 +1522,13 @@ def process_youtube_video(
         )
 
         docs = loader.load()
-        content = " ".join([doc.page_content for doc in docs])
-        log.debug(f"text_content: {content}")
+        content = " ".join(doc.page_content for doc in docs)
+        _log_text_content_summary(
+            "process_youtube_video",
+            text_content=content,
+            collection_name=collection_name,
+            provider="youtube",
+        )
 
         save_docs_to_vector_db(
             request, docs, collection_name, overwrite=True, user=user
@@ -1529,9 +1572,13 @@ def process_web(
             requests_per_second=request.app.state.config.WEB_SEARCH_CONCURRENT_REQUESTS,
         )
         docs = loader.load()
-        content = " ".join([doc.page_content for doc in docs])
-
-        log.debug(f"text_content: {content}")
+        content = " ".join(doc.page_content for doc in docs)
+        _log_text_content_summary(
+            "process_web",
+            text_content=content,
+            collection_name=collection_name,
+            provider="web",
+        )
 
         if not request.app.state.config.BYPASS_WEB_SEARCH_EMBEDDING_AND_RETRIEVAL:
             save_docs_to_vector_db(
@@ -1866,7 +1913,7 @@ async def process_web_search(
             detail=ERROR_MESSAGES.WEB_SEARCH_ERROR(e),
         )
 
-    log.debug(f"web_results: {web_results}")
+    _log_web_results_summary(engine, web_results)
 
     try:
         urls = [str(result.link or "").strip() for result in web_results if str(result.link or "").strip()]

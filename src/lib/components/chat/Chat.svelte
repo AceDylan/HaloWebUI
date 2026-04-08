@@ -122,8 +122,7 @@
 		parts: string[];
 	};
 	const pendingGeminiImages = new Map<string, Map<string, PendingGeminiImage>>();
-	const buildImageDataUrl = (mimeType: string, data: string) =>
-		`data:${mimeType};base64,${data}`;
+	const buildImageDataUrl = (mimeType: string, data: string) => `data:${mimeType};base64,${data}`;
 	const mergeMessageFiles = (existing: any[] = [], incoming: any[] = []) => {
 		const merged = [];
 		const seen = new Set<string>();
@@ -407,10 +406,88 @@
 	const getPreferredDefaultWebSearchMode = (): WebSearchMode =>
 		getPreferredWebSearchMode($settings, 'off');
 
+	const decodeTokenUserId = (token: string | null | undefined): string | null => {
+		if (!token || typeof atob !== 'function') {
+			return null;
+		}
+
+		try {
+			const [, payload = ''] = token.split('.');
+			if (!payload) {
+				return null;
+			}
+
+			const normalized = payload.replace(/-/g, '+').replace(/_/g, '/');
+			const padded = normalized.padEnd(
+				normalized.length + ((4 - (normalized.length % 4)) % 4),
+				'='
+			);
+			const decoded = JSON.parse(atob(padded));
+			const value = typeof decoded?.id === 'string' ? decoded.id.trim() : '';
+			return value || null;
+		} catch {
+			return null;
+		}
+	};
+
+	const getChatStorageUserScope = (): string => {
+		const directUserId = typeof $user?.id === 'string' ? $user.id.trim() : '';
+		if (directUserId) {
+			return directUserId;
+		}
+
+		if (typeof localStorage !== 'undefined') {
+			const tokenUserId = decodeTokenUserId(localStorage.token);
+			if (tokenUserId) {
+				return tokenUserId;
+			}
+		}
+
+		return 'anonymous';
+	};
+
+	const buildScopedStorageKey = (baseKey: string) => `${baseKey}::${getChatStorageUserScope()}`;
+
+	const readStorageItem = (
+		storage: Storage,
+		scopedKey: string,
+		legacyKey?: string | null
+	): { value: string | null; usedLegacy: boolean } => {
+		const scopedValue = storage.getItem(scopedKey);
+		if (scopedValue !== null) {
+			return { value: scopedValue, usedLegacy: false };
+		}
+
+		if (!legacyKey || legacyKey === scopedKey) {
+			return { value: null, usedLegacy: false };
+		}
+
+		const legacyValue = storage.getItem(legacyKey);
+		return { value: legacyValue, usedLegacy: legacyValue !== null };
+	};
+
+	const migrateStorageItem = (
+		storage: Storage,
+		scopedKey: string,
+		legacyKey: string | null | undefined,
+		value: string | null
+	) => {
+		if (value === null) {
+			return;
+		}
+
+		storage.setItem(scopedKey, value);
+		if (legacyKey && legacyKey !== scopedKey) {
+			storage.removeItem(legacyKey);
+		}
+	};
+
 	const getImageGenerationOptionsPayload = () => {
 		const raw = imageGenerationOptions ?? {};
 		const payload = Object.fromEntries(
-			Object.entries(raw).filter(([, value]) => value !== undefined && value !== null && value !== '')
+			Object.entries(raw).filter(
+				([, value]) => value !== undefined && value !== null && value !== ''
+			)
 		);
 		return Object.keys(payload).length > 0 ? payload : undefined;
 	};
@@ -458,10 +535,24 @@
 		return fallback;
 	};
 
-	const getChatSessionStateKey = (id: string | null | undefined = $chatId || chatIdProp) =>
+	const getLegacyChatSessionStateKey = (id: string | null | undefined = $chatId || chatIdProp) =>
 		`chat-session-state-${id && id !== '' ? id : 'new'}`;
 
-	const safeParseStoredJson = <T>(rawValue: string | null | undefined, fallback: T): T => {
+	const getChatSessionStateKey = (id: string | null | undefined = $chatId || chatIdProp) =>
+		buildScopedStorageKey(getLegacyChatSessionStateKey(id));
+
+	const getLegacyChatInputStateKey = (id: string | null | undefined = $chatId || chatIdProp) =>
+		`chat-input-${id ?? ''}`;
+
+	const getChatInputStateKey = (id: string | null | undefined = $chatId || chatIdProp) =>
+		buildScopedStorageKey(getLegacyChatInputStateKey(id));
+
+	const getLegacySelectedModelsStorageKey = () => 'selectedModels';
+
+	const getSelectedModelsStorageKey = () =>
+		buildScopedStorageKey(getLegacySelectedModelsStorageKey());
+
+	const safeParseStoredJson = <T,>(rawValue: string | null | undefined, fallback: T): T => {
 		if (!rawValue) {
 			return fallback;
 		}
@@ -473,29 +564,52 @@
 		}
 	};
 
-	const readLegacyInputSettings = (id: string | null | undefined = $chatId || chatIdProp) => {
-		try {
-			const input = JSON.parse(localStorage.getItem(`chat-input-${id ?? ''}`) || 'null');
-			if (!input) {
-				return null;
-			}
+	const readChatInputState = (id: string | null | undefined = $chatId || chatIdProp) => {
+		const scopedKey = getChatInputStateKey(id);
+		const legacyKey = getLegacyChatInputStateKey(id);
+		const { value, usedLegacy } = readStorageItem(localStorage, scopedKey, legacyKey);
+		const parsed = safeParseStoredJson<Record<string, any> | null>(value, null);
 
-			return {
-				webSearchMode: input.webSearchMode,
-				reasoningEffort: input.reasoningEffort,
-				maxThinkingTokens: input.maxThinkingTokens,
-				imageGenerationOptions: input.imageGenerationOptions
-			};
-		} catch {
-			return null;
+		if (parsed && usedLegacy) {
+			migrateStorageItem(localStorage, scopedKey, legacyKey, value);
+		}
+
+		return parsed;
+	};
+
+	const writeChatInputState = (
+		input: Record<string, any>,
+		id: string | null | undefined = $chatId || chatIdProp
+	) => {
+		const scopedKey = getChatInputStateKey(id);
+		const legacyKey = getLegacyChatInputStateKey(id);
+		const serialized = JSON.stringify(input);
+		localStorage.setItem(scopedKey, serialized);
+		if (legacyKey !== scopedKey) {
+			localStorage.removeItem(legacyKey);
 		}
 	};
 
-		const restoreChatSessionState = (id: string | null | undefined = $chatId || chatIdProp) => {
-			try {
-				const stored = JSON.parse(localStorage.getItem(getChatSessionStateKey(id)) || 'null');
-				const state = stored ?? readLegacyInputSettings(id);
+	const removeChatInputState = (id: string | null | undefined = $chatId || chatIdProp) => {
+		const scopedKey = getChatInputStateKey(id);
+		const legacyKey = getLegacyChatInputStateKey(id);
+		localStorage.removeItem(scopedKey);
+		if (legacyKey !== scopedKey) {
+			localStorage.removeItem(legacyKey);
+		}
+	};
 
+	const restoreChatSessionState = (id: string | null | undefined = $chatId || chatIdProp) => {
+		try {
+			const scopedKey = getChatSessionStateKey(id);
+			const legacyKey = getLegacyChatSessionStateKey(id);
+			const { value, usedLegacy } = readStorageItem(localStorage, scopedKey, legacyKey);
+			const stored = safeParseStoredJson<Record<string, any> | null>(value, null);
+			if (stored && usedLegacy) {
+				migrateStorageItem(localStorage, scopedKey, legacyKey, value);
+			}
+
+			const state = stored ?? readChatInputState(id);
 			if (!state) {
 				return false;
 			}
@@ -504,44 +618,54 @@
 			if (state.reasoningEffort !== undefined) {
 				reasoningEffort = state.reasoningEffort ?? null;
 			}
-				if (state.maxThinkingTokens !== undefined) {
-					maxThinkingTokens = state.maxThinkingTokens ?? null;
-				}
-				if (state.imageGenerationEnabled !== undefined) {
-					imageGenerationEnabled = Boolean(state.imageGenerationEnabled);
-				}
-				if (state.imageGenerationOptions !== undefined) {
-					imageGenerationOptions = state.imageGenerationOptions ?? {};
-				}
-				if (state.codeInterpreterEnabled !== undefined) {
-					codeInterpreterEnabled = Boolean(state.codeInterpreterEnabled);
-				}
-
-				return true;
-			} catch {
-				return false;
+			if (state.maxThinkingTokens !== undefined) {
+				maxThinkingTokens = state.maxThinkingTokens ?? null;
 			}
+			if (state.imageGenerationEnabled !== undefined) {
+				imageGenerationEnabled = Boolean(state.imageGenerationEnabled);
+			}
+			if (state.imageGenerationOptions !== undefined) {
+				imageGenerationOptions = state.imageGenerationOptions ?? {};
+			}
+			if (state.codeInterpreterEnabled !== undefined) {
+				codeInterpreterEnabled = Boolean(state.codeInterpreterEnabled);
+			}
+
+			return true;
+		} catch {
+			return false;
+		}
 	};
 
 	const persistChatSessionState = (id: string | null | undefined = $chatId || chatIdProp) => {
+		const scopedKey = getChatSessionStateKey(id);
+		const legacyKey = getLegacyChatSessionStateKey(id);
 		localStorage.setItem(
-			getChatSessionStateKey(id),
+			scopedKey,
 			JSON.stringify({
-					webSearchMode: resolveStoredWebSearchMode(
-						{ webSearchMode },
-						getPreferredDefaultWebSearchMode()
-					),
-					imageGenerationEnabled,
-					imageGenerationOptions,
-					codeInterpreterEnabled,
-					reasoningEffort,
-					maxThinkingTokens
-				})
-			);
-		};
+				webSearchMode: resolveStoredWebSearchMode(
+					{ webSearchMode },
+					getPreferredDefaultWebSearchMode()
+				),
+				imageGenerationEnabled,
+				imageGenerationOptions,
+				codeInterpreterEnabled,
+				reasoningEffort,
+				maxThinkingTokens
+			})
+		);
+		if (legacyKey !== scopedKey) {
+			localStorage.removeItem(legacyKey);
+		}
+	};
 
 	const removeChatSessionState = (id: string | null | undefined = $chatId || chatIdProp) => {
-		localStorage.removeItem(getChatSessionStateKey(id));
+		const scopedKey = getChatSessionStateKey(id);
+		const legacyKey = getLegacyChatSessionStateKey(id);
+		localStorage.removeItem(scopedKey);
+		if (legacyKey !== scopedKey) {
+			localStorage.removeItem(legacyKey);
+		}
 	};
 
 	const migrateChatSessionState = (
@@ -601,10 +725,9 @@
 				await tick();
 				restoreChatSessionState(chatIdProp);
 
-				if (localStorage.getItem(`chat-input-${chatIdProp}`)) {
+				const input = readChatInputState(chatIdProp);
+				if (input) {
 					try {
-						const input = JSON.parse(localStorage.getItem(`chat-input-${chatIdProp}`));
-
 						prompt = input.prompt;
 						files = input.files;
 						selectedToolIds = input.selectedToolIds;
@@ -630,7 +753,12 @@
 		if (selectedModels.length === 0 || (selectedModels.length === 1 && selectedModels[0] === '')) {
 			return;
 		}
-		sessionStorage.selectedModels = JSON.stringify(selectedModels);
+		const scopedKey = getSelectedModelsStorageKey();
+		const legacyKey = getLegacySelectedModelsStorageKey();
+		sessionStorage.setItem(scopedKey, JSON.stringify(selectedModels));
+		if (legacyKey !== scopedKey) {
+			sessionStorage.removeItem(legacyKey);
+		}
 	};
 
 	// When models finish loading after page refresh, restore selection from sessionStorage
@@ -642,12 +770,18 @@
 		!freshChatActive &&
 		(selectedModels.length === 0 || (selectedModels.length === 1 && selectedModels[0] === ''))
 	) {
-		if (sessionStorage.selectedModels) {
+		const scopedKey = getSelectedModelsStorageKey();
+		const legacyKey = getLegacySelectedModelsStorageKey();
+		const { value, usedLegacy } = readStorageItem(sessionStorage, scopedKey, legacyKey);
+		if (value) {
 			try {
-				const stored = JSON.parse(sessionStorage.selectedModels);
+				const stored = JSON.parse(value);
 				const valid = stored.filter((id: string) => modelsMap.has(id));
 				if (valid.length > 0) {
 					selectedModels = valid;
+					if (usedLegacy) {
+						migrateStorageItem(sessionStorage, scopedKey, legacyKey, value);
+					}
 				}
 			} catch {}
 		}
@@ -897,9 +1031,9 @@
 		}
 
 		if (!chatIdProp) {
-			if (localStorage.getItem(`chat-input-${chatIdProp}`)) {
+			const input = readChatInputState(chatIdProp);
+			if (input) {
 				try {
-					const input = JSON.parse(localStorage.getItem(`chat-input-${chatIdProp}`));
 					prompt = input.prompt;
 					files = input.files;
 					selectedToolIds = input.selectedToolIds;
@@ -1251,13 +1385,16 @@
 				selectedModels = urlModels;
 			}
 		} else if (!fresh) {
-			if (sessionStorage.selectedModels) {
-				const storedSelectedModels = safeParseStoredJson<string[] | null>(
-					sessionStorage.selectedModels,
-					null
-				);
+			const scopedKey = getSelectedModelsStorageKey();
+			const legacyKey = getLegacySelectedModelsStorageKey();
+			const { value, usedLegacy } = readStorageItem(sessionStorage, scopedKey, legacyKey);
+			if (value) {
+				const storedSelectedModels = safeParseStoredJson<string[] | null>(value, null);
 				if (Array.isArray(storedSelectedModels)) {
 					selectedModels = storedSelectedModels;
+					if (usedLegacy) {
+						migrateStorageItem(sessionStorage, scopedKey, legacyKey, value);
+					}
 				}
 			} else {
 				if ($settings?.models) {
@@ -1277,7 +1414,10 @@
 		// The recovery block (line 573) and ModelSelector validation handle deferred validation.
 		if (modelsMap.size > 0) {
 			selectedModels = selectedModels.filter((modelId) => modelsMap.has(modelId));
-			if (selectedModels.length === 0 || (selectedModels.length === 1 && selectedModels[0] === '')) {
+			if (
+				selectedModels.length === 0 ||
+				(selectedModels.length === 1 && selectedModels[0] === '')
+			) {
 				if (!fresh && $models.length > 0) {
 					// Non-fresh: auto-select first available model as fallback
 					selectedModels = [$models[0].id];
@@ -1341,6 +1481,7 @@
 
 		if (fresh) {
 			removeChatSessionState('');
+			removeChatInputState('');
 			reasoningEffort = null;
 			maxThinkingTokens = null;
 			webSearchMode = getPreferredDefaultWebSearchMode();
@@ -1412,6 +1553,10 @@
 			const localSettings = safeParseStoredJson(localStorage.getItem('settings'), {});
 			settings.set(localSettings);
 			temporaryChatState = syncTemporaryChatState(localSettings);
+		}
+
+		if (fresh && $page.url.searchParams.get('web-search') !== 'true') {
+			webSearchMode = getPreferredWebSearchMode(userSettings?.ui ?? $settings, 'off');
 		}
 
 		if (window.location.pathname === '/') {
@@ -1670,9 +1815,7 @@
 		}
 	};
 
-	const createResponseAnimationController = (
-		message
-	): ResponseAnimationController => ({
+	const createResponseAnimationController = (message): ResponseAnimationController => ({
 		destroy() {},
 		enqueue(text: string) {
 			appendAnimatedMessageContent(message, text);
@@ -2587,12 +2730,11 @@
 			})
 			.filter((message) => message?.role === 'user' || message?.content?.trim());
 
-		const requestedWebSearchMode = (
+		const requestedWebSearchMode =
 			$config?.features?.enable_web_search &&
 			($user?.role === 'admin' || $user?.permissions?.features?.web_search)
-		)
-			? normalizeWebSearchMode(webSearchMode, 'off')
-			: 'off';
+				? normalizeWebSearchMode(webSearchMode, 'off')
+				: 'off';
 
 		const res = await generateOpenAIChatCompletion(
 			localStorage.token,
@@ -2641,8 +2783,7 @@
 							? codeInterpreterEnabled
 							: false,
 					web_search: requestedWebSearchMode !== 'off',
-					web_search_mode:
-						requestedWebSearchMode !== 'off' ? requestedWebSearchMode : undefined
+					web_search_mode: requestedWebSearchMode !== 'off' ? requestedWebSearchMode : undefined
 				},
 				variables: {
 					...getPromptVariables(
@@ -2997,7 +3138,9 @@
 			innerError.type === 'api_error' &&
 			('title' in innerError || 'content' in innerError)
 		) {
-			toast.error(`${innerError.title ?? innerError.content ?? $i18n.t('error.title.upstream_service_error_no_status')}`);
+			toast.error(
+				`${innerError.title ?? innerError.content ?? $i18n.t('error.title.upstream_service_error_no_status')}`
+			);
 			responseMessage.error = innerError;
 			responseMessage.done = true;
 
@@ -3171,10 +3314,7 @@
 			);
 
 			if (res && res.ok && res.body) {
-				const textStream = await createOpenAITextStream(
-					res.body,
-					$settings.splitLargeChunks
-				);
+				const textStream = await createOpenAITextStream(res.body, $settings.splitLargeChunks);
 				for await (const update of textStream) {
 					const { value, image, done, sources, error, usage } = update;
 					if (error || done) {
@@ -3303,7 +3443,10 @@
 		{/if}
 
 		<PaneGroup direction="horizontal" class="w-full h-full">
-			<Pane defaultSize={50} class="h-full flex relative max-w-full min-w-0 flex-col overflow-hidden">
+			<Pane
+				defaultSize={50}
+				class="h-full flex relative max-w-full min-w-0 flex-col overflow-hidden"
+			>
 				<Navbar
 					bind:this={navbarElement}
 					chat={{
@@ -3326,12 +3469,12 @@
 
 				<div class="flex flex-col flex-auto z-10 w-full min-w-0 @container">
 					{#if $settings?.landingPageMode === 'chat' || hasMessages}
-							<div
-								class=" pb-2.5 flex flex-col justify-between w-full flex-auto overflow-auto h-0 max-w-full z-10 scrollbar-hidden"
-								id="messages-container"
-								bind:this={messagesContainerElement}
-								on:scroll={handleMessagesScroll}
-							>
+						<div
+							class=" pb-2.5 flex flex-col justify-between w-full flex-auto overflow-auto h-0 max-w-full z-10 scrollbar-hidden"
+							id="messages-container"
+							bind:this={messagesContainerElement}
+							on:scroll={handleMessagesScroll}
+						>
 							<div class=" h-full w-full flex flex-col">
 								<Messages
 									chatId={$chatId}
@@ -3417,9 +3560,9 @@
 									persistChatSessionState();
 
 									if (input.prompt) {
-										localStorage.setItem(`chat-input-${$chatId}`, JSON.stringify(input));
+										writeChatInputState(input, $chatId);
 									} else {
-										localStorage.removeItem(`chat-input-${$chatId}`);
+										removeChatInputState($chatId);
 									}
 								}}
 								on:upload={async (e) => {
@@ -3453,7 +3596,7 @@
 						</div>
 					{:else}
 						<div class="overflow-auto w-full h-full flex items-center">
-								<Placeholder
+							<Placeholder
 								{history}
 								{selectedModels}
 								bind:files

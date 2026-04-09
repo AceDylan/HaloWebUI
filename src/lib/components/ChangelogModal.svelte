@@ -21,6 +21,24 @@
 
 	$: currentVersion = $config?.version ?? WEBUI_VERSION;
 
+	const isConflictError = (error: unknown) => (error as { status?: number })?.status === 409;
+
+	const dismissChangelog = async () => {
+		localStorage.version = $config.version;
+		try {
+			await saveUserSettingsPatch(localStorage.token, { version: $config.version });
+			show = false;
+		} catch (error) {
+			toast.error(
+				isConflictError(error)
+					? $i18n.t(
+							'Settings changed in another tab. The latest settings have been reloaded; please review and save again.'
+						)
+					: getErrorDetail(error, $i18n.t('Failed to update settings'))
+			);
+		}
+	};
+
 	onMount(async () => {
 		const res = await getChangelog();
 		changelog = res;
@@ -110,22 +128,7 @@
 		</div>
 		<div class="flex justify-end pt-3 text-sm font-medium">
 			<button
-				on:click={async () => {
-					localStorage.version = $config.version;
-					try {
-						await saveUserSettingsPatch(localStorage.token, { version: $config.version });
-						show = false;
-					} catch (error) {
-						const isConflict = (error as { status?: number })?.status === 409;
-						toast.error(
-							isConflict
-								? $i18n.t(
-										'Settings changed in another tab. The latest settings have been reloaded; please review and save again.'
-									)
-								: getErrorDetail(error, $i18n.t('Failed to update settings'))
-						);
-					}
-				}}
+				on:click={dismissChangelog}
 				class="px-3.5 py-1.5 text-sm font-medium bg-black hover:bg-gray-900 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 transition rounded-full"
 			>
 				<span class="relative">{$i18n.t("Okay, Let's Go!")}</span>

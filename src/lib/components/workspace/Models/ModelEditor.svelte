@@ -924,21 +924,31 @@
 							</div>
 
 							<div class="glass-item p-4">
-								<div class="text-sm font-medium mb-2">{$i18n.t('Thinking intensity')}</div>
-								<div class="text-xs text-gray-500 dark:text-gray-400 mb-3">
-									{$i18n.t(
-										'Constrains effort on reasoning for reasoning models. Only applicable to reasoning models from specific providers that support reasoning effort.'
-									)}
+								<div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+									<div class="min-w-0 flex-1">
+										<div class="text-sm font-medium mb-1.5">{$i18n.t('Thinking intensity')}</div>
+										<div class="max-w-2xl text-xs leading-5 text-gray-500 dark:text-gray-400">
+											{$i18n.t(
+												'Constrains effort on reasoning for reasoning models. Only applicable to reasoning models from specific providers that support reasoning effort.'
+											)}
+										</div>
+									</div>
+
+									<div class="shrink-0 sm:pt-0.5">
+										<HaloSelect
+											value={reasoningEffortSelectValue}
+											options={reasoningEffortSelectOptions}
+											placeholder={$i18n.t('Enter reasoning effort')}
+											className="w-full sm:w-[10.5rem]"
+											contentClassName="min-w-[8.5rem]"
+											contentAlign="end"
+											matchTriggerMinWidth={false}
+											on:change={(e) => {
+												updateReasoningEffort(e.detail.value);
+											}}
+										/>
+									</div>
 								</div>
-								<HaloSelect
-									value={reasoningEffortSelectValue}
-									options={reasoningEffortSelectOptions}
-									placeholder={$i18n.t('Enter reasoning effort')}
-									className="w-full"
-									on:change={(e) => {
-										updateReasoningEffort(e.detail.value);
-									}}
-								/>
 							</div>
 
 							<!-- Advanced Params -->

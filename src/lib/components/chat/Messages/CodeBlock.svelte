@@ -544,7 +544,7 @@
 							on:click={openIframePreview}
 							title={$i18n.t('Open preview')}
 						>
-							<PanelRightOpen class="size-4" size={16} strokeWidth={2.1} />
+							<PanelRightOpen class="size-[17.5px]" size={17.5} strokeWidth={1.8} />
 						</button>
 					{/if}
 
@@ -554,7 +554,7 @@
 							on:click={previewSvg}
 							title={`${$i18n.t('Preview')} SVG`}
 						>
-							<PanelRightOpen class="size-4" size={16} strokeWidth={2.1} />
+							<PanelRightOpen class="size-[17.5px]" size={17.5} strokeWidth={1.8} />
 						</button>
 					{/if}
 
@@ -565,10 +565,10 @@
 							title={$i18n.t('Save')}
 						>
 							{#if saved}
-								<Check class="size-4 text-green-500" size={16} strokeWidth={2.3} />
-							{:else}
-								<Save class="size-4" size={16} strokeWidth={2.1} />
-							{/if}
+									<Check class="size-[17.5px] text-green-500" size={17.5} strokeWidth={2.15} />
+								{:else}
+									<Save class="size-[17.5px]" size={17.5} strokeWidth={1.95} />
+								{/if}
 						</button>
 					{/if}
 

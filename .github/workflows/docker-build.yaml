@@ -20,45 +20,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  prepare-base-inputs:
-    runs-on: ubuntu-latest
-    outputs:
-      base_inputs_changed: ${{ steps.detect.outputs.base_inputs_changed }}
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Detect whether Docker base inputs changed
-        id: detect
-        run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "base_inputs_changed=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          before="${{ github.event.before }}"
-          if [ -z "$before" ] || [ "$before" = "0000000000000000000000000000000000000000" ]; then
-            echo "base_inputs_changed=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          if git diff --quiet "$before" "${{ github.sha }}" -- Dockerfile backend/requirements; then
-            echo "base_inputs_changed=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "base_inputs_changed=true" >> "$GITHUB_OUTPUT"
-          fi
-
-  prepare-base-images:
-    needs: [prepare-base-inputs]
-    uses: ./.github/workflows/docker-base-build.yaml
-    with:
-      build_bases: ${{ needs.prepare-base-inputs.outputs.base_inputs_changed == 'true' }}
-    secrets: inherit
-
   build-main-image:
-    needs: [prepare-base-images]
     runs-on: ${{ matrix.platform == 'linux/arm64' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
     permissions:
       contents: read
@@ -122,15 +84,11 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           provenance: false
           outputs: type=image,name=${{ env.FULL_IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true
-          cache-from: type=gha,scope=docker-main-${{ needs.prepare-base-images.outputs.builder_base_hash }}-${{ needs.prepare-base-images.outputs.runtime_base_hash }}-${{ env.PLATFORM_PAIR }}
-          cache-to: type=gha,scope=docker-main-${{ needs.prepare-base-images.outputs.builder_base_hash }}-${{ needs.prepare-base-images.outputs.runtime_base_hash }}-${{ env.PLATFORM_PAIR }},mode=max
+          cache-from: type=registry,ref=${{ env.FULL_IMAGE_NAME }}:cache-main-${{ env.PLATFORM_PAIR }}
+          cache-to: type=registry,ref=${{ env.FULL_IMAGE_NAME }}:cache-main-${{ env.PLATFORM_PAIR }},mode=max
           build-args: |
             BUILD_HASH=${{ github.sha }}
             HALO_RUNTIME_PROFILE=main
-            BACKEND_BUILDER_MAIN_BASE_SOURCE=${{ needs.prepare-base-images.outputs.builder_main_tag }}
-            BACKEND_BUILDER_SLIM_BASE_SOURCE=${{ needs.prepare-base-images.outputs.builder_slim_tag }}
-            RUNTIME_MAIN_BASE_SOURCE=${{ needs.prepare-base-images.outputs.runtime_main_tag }}
-            RUNTIME_SLIM_BASE_SOURCE=${{ needs.prepare-base-images.outputs.runtime_slim_tag }}
 
       - name: Export digest
         run: |
@@ -201,7 +159,6 @@ jobs:
           docker buildx imagetools inspect ${{ env.FULL_IMAGE_NAME }}:${{ steps.meta.outputs.version }}
 
   build-slim-image:
-    needs: [prepare-base-images]
     runs-on: ${{ matrix.platform == 'linux/arm64' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
     permissions:
       contents: read
@@ -260,15 +217,11 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           provenance: false
           outputs: type=image,name=${{ env.FULL_IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true
-          cache-from: type=gha,scope=docker-slim-${{ needs.prepare-base-images.outputs.builder_base_hash }}-${{ needs.prepare-base-images.outputs.runtime_base_hash }}-${{ env.PLATFORM_PAIR }}
-          cache-to: type=gha,scope=docker-slim-${{ needs.prepare-base-images.outputs.builder_base_hash }}-${{ needs.prepare-base-images.outputs.runtime_base_hash }}-${{ env.PLATFORM_PAIR }},mode=max
+          cache-from: type=registry,ref=${{ env.FULL_IMAGE_NAME }}:cache-slim-${{ env.PLATFORM_PAIR }}
+          cache-to: type=registry,ref=${{ env.FULL_IMAGE_NAME }}:cache-slim-${{ env.PLATFORM_PAIR }},mode=max
           build-args: |
             BUILD_HASH=${{ github.sha }}
             HALO_RUNTIME_PROFILE=slim
-            BACKEND_BUILDER_MAIN_BASE_SOURCE=${{ needs.prepare-base-images.outputs.builder_main_tag }}
-            BACKEND_BUILDER_SLIM_BASE_SOURCE=${{ needs.prepare-base-images.outputs.builder_slim_tag }}
-            RUNTIME_MAIN_BASE_SOURCE=${{ needs.prepare-base-images.outputs.runtime_main_tag }}
-            RUNTIME_SLIM_BASE_SOURCE=${{ needs.prepare-base-images.outputs.runtime_slim_tag }}
 
       - name: Export digest
         run: |

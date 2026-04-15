@@ -21,10 +21,6 @@ ARG USE_TIKTOKEN_ENCODING_NAME="cl100k_base"
 
 ARG BUILD_HASH=dev-build
 ARG HALO_RUNTIME_PROFILE=main
-ARG BACKEND_BUILDER_MAIN_BASE_SOURCE=backend-builder-main-base-local
-ARG BACKEND_BUILDER_SLIM_BASE_SOURCE=backend-builder-slim-base-local
-ARG RUNTIME_MAIN_BASE_SOURCE=runtime-main-base-local
-ARG RUNTIME_SLIM_BASE_SOURCE=runtime-slim-base-local
 # Override at your own risk - non-root configurations are untested
 ARG UID=0
 ARG GID=0
@@ -56,129 +52,8 @@ ENV APP_BUILD_HASH=${BUILD_HASH} \
 
 RUN npm run build
 
-######## WebUI backend builder base (local fallback) ########
-FROM python:3.11-slim-bookworm AS backend-builder-system-base-local
-
-ARG USE_CUDA
-ARG INSTALL_PROFILE
-ARG PRELOAD_LOCAL_MODELS
-ARG USE_CUDA_VER
-ARG USE_EMBEDDING_MODEL
-ARG USE_RERANKING_MODEL
-ARG USE_TIKTOKEN_ENCODING_NAME
-
-ENV USE_CUDA_DOCKER=${USE_CUDA} \
-    USE_CUDA_DOCKER_VER=${USE_CUDA_VER} \
-    INSTALL_PROFILE=${INSTALL_PROFILE} \
-    PRELOAD_LOCAL_MODELS=${PRELOAD_LOCAL_MODELS} \
-    RAG_EMBEDDING_MODEL=${USE_EMBEDDING_MODEL} \
-    RAG_RERANKING_MODEL=${USE_RERANKING_MODEL} \
-    TIKTOKEN_ENCODING_NAME=${USE_TIKTOKEN_ENCODING_NAME} \
-    WHISPER_MODEL="base" \
-    WHISPER_MODEL_DIR="/app/backend/data/cache/whisper/models" \
-    SENTENCE_TRANSFORMERS_HOME="/app/backend/data/cache/embedding/models" \
-    TIKTOKEN_CACHE_DIR="/app/backend/data/cache/tiktoken" \
-    HF_HOME="/app/backend/data/cache/embedding/models" \
-    PATH="/opt/venv/bin:${PATH}"
-
-WORKDIR /app/backend
-
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends gcc python3-dev \
-    && rm -rf /var/lib/apt/lists/*
-
-RUN python -m venv /opt/venv
-
-COPY ./backend/requirements ./requirements
-
-RUN pip install --no-cache-dir --upgrade pip
-
-FROM backend-builder-system-base-local AS backend-builder-main-base-local
-RUN pip install --no-cache-dir -r requirements/core.txt \
-    && pip install --no-cache-dir -r requirements/storage-s3.txt \
-    && pip install --no-cache-dir uv
-
-FROM backend-builder-system-base-local AS backend-builder-slim-base-local
-RUN pip install --no-cache-dir -r requirements/core.txt
-
-FROM ${BACKEND_BUILDER_MAIN_BASE_SOURCE} AS backend-builder-main-base
-FROM ${BACKEND_BUILDER_SLIM_BASE_SOURCE} AS backend-builder-slim-base
-
-######## WebUI backend builder ########
-FROM backend-builder-${HALO_RUNTIME_PROFILE}-base AS backend-builder
-
-ARG USE_CUDA
-ARG INSTALL_PROFILE
-ARG PRELOAD_LOCAL_MODELS
-ARG USE_CUDA_VER
-ARG USE_EMBEDDING_MODEL
-ARG USE_RERANKING_MODEL
-ARG USE_TIKTOKEN_ENCODING_NAME
-ARG HALO_RUNTIME_PROFILE
-
-COPY ./backend/requirements ./requirements
-
-RUN set -eux; \
-    requirements_file="requirements/${INSTALL_PROFILE}.txt"; \
-    test -f "${requirements_file}"; \
-    if [ "$INSTALL_PROFILE" != "core" ]; then \
-        if [ "$INSTALL_PROFILE" = "local-rag" ] || [ "$INSTALL_PROFILE" = "local-audio" ] || [ "$INSTALL_PROFILE" = "full" ]; then \
-            if [ "$USE_CUDA" = "true" ]; then \
-                pip install torch torchvision torchaudio --index-url "https://download.pytorch.org/whl/${USE_CUDA_DOCKER_VER}" --no-cache-dir; \
-            else \
-                pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu --no-cache-dir; \
-            fi; \
-        fi; \
-        pip install --no-cache-dir -r "${requirements_file}"; \
-        if [ "$HALO_RUNTIME_PROFILE" = "main" ]; then \
-            pip install --no-cache-dir -r requirements/storage-s3.txt; \
-            pip install --no-cache-dir uv; \
-        fi; \
-    fi; \
-    if [ "$PRELOAD_LOCAL_MODELS" = "true" ]; then \
-        if [ "$INSTALL_PROFILE" = "local-rag" ] || [ "$INSTALL_PROFILE" = "full" ]; then \
-            python -c "import os; from sentence_transformers import SentenceTransformer; SentenceTransformer(os.environ['RAG_EMBEDDING_MODEL'], device='cpu')"; \
-        fi; \
-        if [ "$INSTALL_PROFILE" = "local-audio" ] || [ "$INSTALL_PROFILE" = "full" ]; then \
-            python -c "import os; from faster_whisper import WhisperModel; WhisperModel(os.environ['WHISPER_MODEL'], device='cpu', compute_type='int8', download_root=os.environ['WHISPER_MODEL_DIR'])"; \
-        fi; \
-        python -c "import os; import tiktoken; tiktoken.get_encoding(os.environ['TIKTOKEN_ENCODING_NAME'])"; \
-    fi
-
-######## WebUI runtime base (local fallback) ########
-FROM python:3.11-slim-bookworm AS runtime-common-base-local
-
-ARG HALO_PG_CLIENT_MAJORS
-
-RUN set -eux; \
-    pg_client_packages=""; \
-    for major in ${HALO_PG_CLIENT_MAJORS}; do \
-        pg_client_packages="${pg_client_packages} postgresql-client-${major}"; \
-    done; \
-    apt-get update; \
-    apt-get install -y --no-install-recommends curl ca-certificates; \
-    install -d /usr/share/postgresql-common/pgdg; \
-    curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
-        https://www.postgresql.org/media/keys/ACCC4CF8.asc; \
-    . /etc/os-release; \
-    echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" \
-        > /etc/apt/sources.list.d/pgdg.list; \
-    apt-get update; \
-    apt-get install -y --no-install-recommends ${pg_client_packages}; \
-    rm -rf /var/lib/apt/lists/*
-
-FROM runtime-common-base-local AS runtime-main-base-local
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends nodejs npm git \
-    && rm -rf /var/lib/apt/lists/*
-
-FROM runtime-common-base-local AS runtime-slim-base-local
-
-FROM ${RUNTIME_MAIN_BASE_SOURCE} AS runtime-main-base
-FROM ${RUNTIME_SLIM_BASE_SOURCE} AS runtime-slim-base
-
 ######## WebUI backend runtime ########
-FROM runtime-${HALO_RUNTIME_PROFILE}-base AS base
+FROM python:3.11-slim-bookworm AS base
 
 ARG USE_CUDA
 ARG USE_OLLAMA
@@ -188,6 +63,7 @@ ARG USE_CUDA_VER
 ARG USE_EMBEDDING_MODEL
 ARG USE_RERANKING_MODEL
 ARG USE_TIKTOKEN_ENCODING_NAME
+ARG HALO_PG_CLIENT_MAJORS
 ARG UID
 ARG GID
 ARG HALO_RUNTIME_PROFILE
@@ -216,10 +92,72 @@ ENV ENV=prod \
     TIKTOKEN_CACHE_DIR="/app/backend/data/cache/tiktoken" \
     HF_HOME="/app/backend/data/cache/embedding/models" \
     HALO_RUNTIME_PROFILE=${HALO_RUNTIME_PROFILE} \
-    PATH="/opt/venv/bin:${PATH}" \
     HOME=/root
 
 WORKDIR /app/backend
+
+COPY ./backend/requirements ./requirements
+
+RUN set -eux; \
+    extra_apt_packages=""; \
+    build_apt_packages="gcc python3-dev"; \
+    pg_client_packages=""; \
+    requirements_file="requirements/${INSTALL_PROFILE}.txt"; \
+    test -f "${requirements_file}"; \
+    case "$INSTALL_PROFILE" in \
+        local-audio) extra_apt_packages="ffmpeg libsm6 libxext6" ;; \
+        docs-full|full) extra_apt_packages="pandoc ffmpeg libsm6 libxext6" ;; \
+    esac; \
+    for major in ${HALO_PG_CLIENT_MAJORS}; do \
+        pg_client_packages="${pg_client_packages} postgresql-client-${major}"; \
+    done; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends \
+        curl \
+        ca-certificates \
+        ${build_apt_packages} \
+        ${extra_apt_packages}; \
+    install -d /usr/share/postgresql-common/pgdg; \
+    curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+        https://www.postgresql.org/media/keys/ACCC4CF8.asc; \
+    . /etc/os-release; \
+    echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" \
+        > /etc/apt/sources.list.d/pgdg.list; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends ${pg_client_packages}; \
+    if [ "$HALO_RUNTIME_PROFILE" = "main" ]; then \
+        apt-get install -y --no-install-recommends nodejs npm git; \
+    fi; \
+    if [ "$USE_OLLAMA" = "true" ]; then \
+        curl -fsSL https://ollama.com/install.sh | sh; \
+    fi; \
+    pip install --no-cache-dir uv; \
+    if [ "$INSTALL_PROFILE" = "local-rag" ] || [ "$INSTALL_PROFILE" = "local-audio" ] || [ "$INSTALL_PROFILE" = "full" ]; then \
+        if [ "$USE_CUDA" = "true" ]; then \
+            pip install torch torchvision torchaudio --index-url "https://download.pytorch.org/whl/${USE_CUDA_DOCKER_VER}" --no-cache-dir; \
+        else \
+            pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu --no-cache-dir; \
+        fi; \
+    fi; \
+    if [ "$INSTALL_PROFILE" = "core" ]; then \
+        uv pip install --system -r requirements/core.txt --no-cache-dir; \
+    else \
+        uv pip install --system -r "${requirements_file}" --no-cache-dir; \
+    fi; \
+    if [ "$HALO_RUNTIME_PROFILE" = "main" ]; then \
+        uv pip install --system -r requirements/storage-s3.txt --no-cache-dir; \
+    fi; \
+    if [ "$PRELOAD_LOCAL_MODELS" = "true" ]; then \
+        if [ "$INSTALL_PROFILE" = "local-rag" ] || [ "$INSTALL_PROFILE" = "full" ]; then \
+            python -c "import os; from sentence_transformers import SentenceTransformer; SentenceTransformer(os.environ['RAG_EMBEDDING_MODEL'], device='cpu')"; \
+        fi; \
+        if [ "$INSTALL_PROFILE" = "local-audio" ] || [ "$INSTALL_PROFILE" = "full" ]; then \
+            python -c "import os; from faster_whisper import WhisperModel; WhisperModel(os.environ['WHISPER_MODEL'], device='cpu', compute_type='int8', download_root=os.environ['WHISPER_MODEL_DIR'])"; \
+        fi; \
+        python -c "import os; import tiktoken; tiktoken.get_encoding(os.environ['TIKTOKEN_ENCODING_NAME'])"; \
+    fi; \
+    apt-get purge -y --auto-remove gcc python3-dev; \
+    rm -rf /var/lib/apt/lists/*
 
 RUN if [ $UID -ne 0 ]; then \
     if [ $GID -ne 0 ]; then \
@@ -228,25 +166,8 @@ RUN if [ $UID -ne 0 ]; then \
     adduser --uid $UID --gid $GID --home $HOME --disabled-password --no-create-home app; \
     fi
 
-RUN set -eux; \
-    extra_apt_packages=""; \
-    case "$INSTALL_PROFILE" in \
-        local-audio) extra_apt_packages="ffmpeg libsm6 libxext6" ;; \
-        docs-full|full) extra_apt_packages="pandoc ffmpeg libsm6 libxext6" ;; \
-    esac; \
-    if [ -n "$extra_apt_packages" ]; then \
-        apt-get update; \
-        apt-get install -y --no-install-recommends ${extra_apt_packages}; \
-        rm -rf /var/lib/apt/lists/*; \
-    fi; \
-    if [ "$USE_OLLAMA" = "true" ]; then \
-        curl -fsSL https://ollama.com/install.sh | sh; \
-    fi
-
 RUN mkdir -p "$HOME/.cache/chroma" /app/backend/data
 RUN echo -n 00000000-0000-0000-0000-000000000000 > "$HOME/.cache/chroma/telemetry_user_id"
-
-COPY --from=backend-builder /opt/venv /opt/venv
 
 # copy built frontend files
 COPY --chown=$UID:$GID --from=frontend-build /app/build /app/build

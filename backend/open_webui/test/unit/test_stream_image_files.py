@@ -43,6 +43,32 @@ def test_extract_stream_content_and_files_strips_markdown_data_images_from_text(
     assert files == [{"type": "image", "url": "data:image/png;base64,abcd"}]
 
 
+def test_extract_stream_content_and_files_handles_top_level_image_url_with_text():
+    text, files = _extract_stream_content_and_files(
+        {
+            "role": "assistant",
+            "content": "caption",
+            "image_url": {"url": "data:image/png;base64,abcd"},
+        }
+    )
+
+    assert text == "caption"
+    assert files == [{"type": "image", "url": "data:image/png;base64,abcd"}]
+
+
+def test_extract_stream_content_and_files_handles_top_level_image_url_without_text():
+    text, files = _extract_stream_content_and_files(
+        {
+            "role": "assistant",
+            "content": None,
+            "image_url": "data:image/png;base64,abcd",
+        }
+    )
+
+    assert text == ""
+    assert files == [{"type": "image", "url": "data:image/png;base64,abcd"}]
+
+
 def test_consume_stream_image_delta_reassembles_final_image_file():
     pending_images = {}
 

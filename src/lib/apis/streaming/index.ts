@@ -36,6 +36,8 @@ type PendingImage = {
 const buildMarkdownImage = (mimeType: string, data: string) =>
 	`\n![Generated Image](data:${mimeType};base64,${data})\n`;
 
+const buildMarkdownImageFromUrl = (url: string) => `\n![Generated Image](${url})\n`;
+
 const flushPendingImages = (pendingImages: Map<string, PendingImage>) => {
 	if (pendingImages.size > 0) {
 		console.warn('Discarding incomplete streamed Gemini image(s)', pendingImages.size);
@@ -79,6 +81,32 @@ const consumeImageDelta = (
 	return { id, markdown, mimeType: pending.mimeType };
 };
 
+const consumeImageUrlDelta = (
+	imageUrlDelta: any,
+	sequence: number
+): StreamedImageUpdate | null => {
+	const imageUrl =
+		typeof imageUrlDelta === 'string'
+			? imageUrlDelta
+			: imageUrlDelta && typeof imageUrlDelta === 'object'
+				? imageUrlDelta.url || imageUrlDelta.image_url
+				: '';
+
+	if (typeof imageUrl !== 'string' || imageUrl.trim() === '') {
+		return null;
+	}
+
+	const normalizedUrl = imageUrl.trim();
+	const mimeTypeMatch = normalizedUrl.match(/^data:(image\/[^;,]+)[;,]/i);
+	const mimeType = mimeTypeMatch?.[1] ?? 'image/png';
+
+	return {
+		id: `image_url_${sequence}`,
+		markdown: buildMarkdownImageFromUrl(normalizedUrl),
+		mimeType
+	};
+};
+
 // createOpenAITextStream takes a responseBody with a SSE response,
 // and returns an async generator that emits delta updates with large deltas chunked into random sized chunks
 export async function createOpenAITextStream(
@@ -102,6 +130,7 @@ async function* openAIStreamToIterator(
 	reader: ReadableStreamDefaultReader<ParsedEvent>
 ): AsyncGenerator<TextStreamUpdate> {
 	const pendingImages = new Map<string, PendingImage>();
+	let imageUrlSequence = 0;
 
 	while (true) {
 		const { value, done } = await reader.read();
@@ -140,7 +169,13 @@ async function* openAIStreamToIterator(
 			}
 
 			const delta = parsedData.choices?.[0]?.delta ?? {};
-			const image = consumeImageDelta(pendingImages, delta?.image);
+			let image = consumeImageDelta(pendingImages, delta?.image);
+			if (!image) {
+				image = consumeImageUrlDelta(delta?.image_url, imageUrlSequence);
+				if (image) {
+					imageUrlSequence += 1;
+				}
+			}
 			const textValue = delta?.content ?? '';
 
 			if (textValue) {

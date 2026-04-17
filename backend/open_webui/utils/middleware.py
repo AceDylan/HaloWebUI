@@ -356,9 +356,17 @@ def _extract_stream_content_and_files(value: Any) -> tuple[str, list[dict]]:
             files = _normalize_message_files(value)
             return "", files
 
+        top_level_files: list[dict] = []
+        if "image_url" in value:
+            top_level_files = _merge_message_files(
+                top_level_files,
+                [{"type": "image_url", "image_url": value.get("image_url")}],
+            )
+
         nested_content = value.get("content")
         if isinstance(nested_content, (list, dict)):
-            return _extract_stream_content_and_files(nested_content)
+            text_part, nested_files = _extract_stream_content_and_files(nested_content)
+            return text_part, _merge_message_files(top_level_files, nested_files)
 
         text_value = (
             value.get("text")
@@ -366,7 +374,8 @@ def _extract_stream_content_and_files(value: Any) -> tuple[str, list[dict]]:
             or value.get("value")
             or ""
         )
-        return _extract_stream_content_and_files(text_value)
+        text_part, nested_files = _extract_stream_content_and_files(text_value)
+        return text_part, _merge_message_files(top_level_files, nested_files)
 
     if isinstance(value, str):
         return _extract_image_files_from_text(value)
@@ -3649,9 +3658,10 @@ async def process_chat_response(
                 )
 
             choices = response.get("choices", [])
-            if choices and choices[0].get("message", {}).get("content"):
-                raw_content = response["choices"][0]["message"]["content"]
-                content, message_files = _extract_stream_content_and_files(raw_content)
+            if choices and isinstance(choices[0], dict):
+                message_payload = choices[0].get("message", {}) or {}
+                content, message_files = _extract_stream_content_and_files(message_payload)
+                response_message = response["choices"][0].setdefault("message", {})
 
                 if message_files:
                     await event_emitter(
@@ -3661,9 +3671,10 @@ async def process_chat_response(
                         }
                     )
 
-                    response["choices"][0]["message"]["files"] = message_files
+                    response_message["files"] = message_files
 
-                response["choices"][0]["message"]["content"] = content
+                if isinstance(response_message, dict):
+                    response_message["content"] = content
 
                 if content or message_files:
                     completed_at = int(time.time())
@@ -4721,7 +4732,7 @@ async def process_chat_response(
                                             tool_call_lookup[key] = resolved_idx
 
                                 value, streamed_files = _extract_stream_content_and_files(
-                                    delta.get("content")
+                                    delta
                                 )
                                 streamed_image = _consume_stream_image_delta(
                                     pending_stream_images,

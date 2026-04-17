@@ -2807,6 +2807,7 @@ async def generate_chat_completion(
                 _last_finish_reason = None
                 _last_usage = None
                 _total_content_len = 0
+                _image_payload_count = 0
 
                 # Use iter_any() to avoid aiohttp's readline() buffer
                 # limit which crashes on large SSE lines (e.g. base64
@@ -2848,6 +2849,20 @@ async def generate_chat_completion(
                                     _ct = _delta.get("content")
                                     if _ct:
                                         _total_content_len += len(_ct)
+                                    _image_url = _delta.get("image_url")
+                                    if isinstance(_image_url, dict):
+                                        _image_url = (
+                                            _image_url.get("url")
+                                            or _image_url.get("image_url")
+                                        )
+                                    if (
+                                        _delta.get("image")
+                                        or (
+                                            isinstance(_image_url, str)
+                                            and _image_url.strip()
+                                        )
+                                    ):
+                                        _image_payload_count += 1
                                 _u = _payload.get("usage")
                                 if isinstance(_u, dict) and _u:
                                     _last_usage = _u
@@ -2856,8 +2871,11 @@ async def generate_chat_completion(
 
                             if _data_count <= 3 or _data_count % 20 == 0:
                                 log.info(
-                                    "[SSE DATA #%d] finish_reason=%s content_so_far=%d chunk=%s",
-                                    _data_count, _last_finish_reason, _total_content_len,
+                                    "[SSE DATA #%d] finish_reason=%s content_so_far=%d image_events=%d chunk=%s",
+                                    _data_count,
+                                    _last_finish_reason,
+                                    _total_content_len,
+                                    _image_payload_count,
                                     _stripped[:200],
                                 )
                             else:
@@ -2876,9 +2894,9 @@ async def generate_chat_completion(
                 # Final summary — always INFO
                 log.info(
                     "[SSE DONE] total_lines=%d data_events=%d "
-                    "finish_reason=%s content_len=%d usage=%s",
+                    "finish_reason=%s content_len=%d image_events=%d usage=%s",
                     _line_count, _data_count,
-                    _last_finish_reason, _total_content_len,
+                    _last_finish_reason, _total_content_len, _image_payload_count,
                     json.dumps(_last_usage, ensure_ascii=False)[:300] if _last_usage else "(none)",
                 )
                 if _last_data_line:

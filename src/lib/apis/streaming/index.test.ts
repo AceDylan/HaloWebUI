@@ -60,6 +60,23 @@ describe('createOpenAITextStream', () => {
 		expect(updates.filter((update) => update.image)).toHaveLength(1);
 	});
 
+	it('emits a complete image update from top-level delta.image_url', async () => {
+		const stream = buildReadableStream([
+			'data: {"choices":[{"delta":{"role":"assistant","content":null,"image_url":{"url":"data:image/png;base64,abcd"}}}]}\n\n',
+			'data: [DONE]\n\n'
+		]);
+
+		const iterator = await createOpenAITextStream(stream, false);
+		const updates = await collectUpdates(iterator);
+		const imageUpdate = updates.find((update) => update.image);
+
+		expect(imageUpdate?.image?.id).toBe('image_url_0');
+		expect(imageUpdate?.image?.markdown).toBe(
+			'\n![Generated Image](data:image/png;base64,abcd)\n'
+		);
+		expect(updates.filter((update) => update.image)).toHaveLength(1);
+	});
+
 	it('does not split final image markdown when splitLargeDeltas is enabled', async () => {
 		const stream = buildReadableStream([
 			'data: {"choices":[{"delta":{"image":{"id":"img_2","mime_type":"image/png","data":"abcdefghijklmnop","final":true}}}]}\n\n',

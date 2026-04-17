@@ -86,6 +86,7 @@
 	import { KokoroWorker } from '$lib/workers/KokoroWorker';
 	import ToolServersModal from './ToolServersModal.svelte';
 	import Wrench from '../icons/Wrench.svelte';
+	import Sparkles from '../icons/Sparkles.svelte';
 
 	const i18n = getContext('i18n');
 
@@ -114,6 +115,9 @@
 	export let toolServers = [];
 
 	export let selectedToolIds = [];
+	export let toolSelectionTouched = false;
+	export let selectedSkillIds = [];
+	export let skillSelectionTouched = false;
 
 	export let imageGenerationEnabled = false;
 	export let imageGenerationOptions: {
@@ -132,6 +136,9 @@
 		prompt,
 		files,
 		selectedToolIds,
+		toolSelectionTouched,
+		selectedSkillIds,
+		skillSelectionTouched,
 		imageGenerationEnabled,
 		imageGenerationOptions,
 		webSearchMode,
@@ -911,7 +918,7 @@
 
 <FilesOverlay show={dragged} />
 
-<ToolServersModal bind:show={showTools} {selectedToolIds} />
+<ToolServersModal bind:show={showTools} {selectedToolIds} {selectedSkillIds} />
 <InputVariablesModal
 	bind:show={showInputVariablesModal}
 	variables={inputVariables}
@@ -956,7 +963,7 @@
 				</div>
 
 				<div class="w-full relative">
-					{#if atSelectedModel !== undefined || selectedToolIds.length > 0 || webSearchActive || imageGenerationEnabled || codeInterpreterEnabled}
+					{#if atSelectedModel !== undefined || selectedToolIds.length > 0 || selectedSkillIds.length > 0 || webSearchActive || imageGenerationEnabled || codeInterpreterEnabled}
 						<div
 							class="px-3 pb-0.5 pt-1.5 text-left w-full flex flex-col absolute bottom-0 left-0 right-0 bg-linear-to-t from-white dark:from-gray-900 z-10"
 						>
@@ -1287,12 +1294,15 @@
 														}
 													}
 
-														if (e.key === 'Escape') {
-															atSelectedModel = undefined;
-															selectedToolIds = [];
-															setWebSearchModeFromUser('off');
-															imageGenerationEnabled = false;
-														}
+															if (e.key === 'Escape') {
+																atSelectedModel = undefined;
+																selectedToolIds = [];
+																toolSelectionTouched = true;
+																selectedSkillIds = [];
+																skillSelectionTouched = true;
+																setWebSearchModeFromUser('off');
+																imageGenerationEnabled = false;
+															}
 													}}
 												on:paste={async (e) => {
 													e = e.detail.event;
@@ -1482,6 +1492,9 @@
 														console.log('Escape');
 														atSelectedModel = undefined;
 														selectedToolIds = [];
+														toolSelectionTouched = true;
+														selectedSkillIds = [];
+														skillSelectionTouched = true;
 														setWebSearchModeFromUser('off');
 														imageGenerationEnabled = false;
 													}
@@ -1539,6 +1552,9 @@
 									<div class="ml-1 self-end flex items-center flex-1 max-w-[80%] gap-0.5">
 										<InputMenu
 											bind:selectedToolIds
+											bind:toolSelectionTouched
+											bind:selectedSkillIds
+											bind:skillSelectionTouched
 											bind:webSearchMode
 											{webSearchModeOptions}
 											onWebSearchModeChange={setWebSearchModeFromUser}
@@ -1628,6 +1644,26 @@
 
 														<span class="text-sm font-medium text-gray-600 dark:text-gray-300">
 															{toolServers.length + selectedToolIds.length}
+														</span>
+													</button>
+												</Tooltip>
+											{/if}
+
+											{#if selectedSkillIds.length > 0}
+												<Tooltip
+													content={`已选择 ${selectedSkillIds.length} 个技能`}
+												>
+													<button
+														class="translate-y-[0.5px] flex gap-1 items-center text-amber-700 dark:text-amber-300 hover:text-amber-800 dark:hover:text-amber-200 rounded-lg p-1 self-center transition"
+														aria-label="Selected Skills"
+														type="button"
+														on:click={() => {
+															showTools = !showTools;
+														}}
+													>
+														<Sparkles className="size-4" />
+														<span class="text-sm font-medium">
+															{selectedSkillIds.length}
 														</span>
 													</button>
 												</Tooltip>

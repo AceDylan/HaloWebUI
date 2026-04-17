@@ -6,6 +6,7 @@ from typing import Literal, Optional
 from open_webui.socket.main import get_event_emitter
 from open_webui.models.chats import (
     ChatForm,
+    ChatComposerStateForm,
     ChatImportForm,
     ChatResponse,
     Chats,
@@ -685,6 +686,31 @@ async def update_chat_by_id(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
         )
+
+
+############################
+# UpdateChatComposerStateById
+############################
+
+
+@router.post("/{id}/composer-state", response_model=Optional[ChatResponse])
+async def update_chat_composer_state_by_id(
+    id: str,
+    form_data: ChatComposerStateForm,
+    user=Depends(get_verified_user),
+):
+    chat = Chats.get_chat_by_id_and_user_id(id, user.id)
+    if chat:
+        updated = Chats.update_chat_composer_state_by_id(
+            id,
+            form_data.composer_state if isinstance(form_data.composer_state, dict) else {},
+        )
+        return _chat_response(updated)
+
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
+    )
 
 
 ############################

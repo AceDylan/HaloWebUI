@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { getContext, onMount } from 'svelte';
-	import { models, config, toolServers, tools } from '$lib/stores';
+	import { models, config, toolServers, tools, skills } from '$lib/stores';
 
 	import { toast } from 'svelte-sonner';
 	import { deleteSharedChatById, getChatById, shareChatById } from '$lib/apis/chats';
@@ -12,10 +12,13 @@
 
 	export let show = false;
 	export let selectedToolIds = [];
+	export let selectedSkillIds = [];
 
 	let selectedTools = [];
+	let selectedSkills = [];
 
 	$: selectedTools = ($tools ?? []).filter((tool) => selectedToolIds.includes(tool.id));
+	$: selectedSkills = ($skills ?? []).filter((skill) => selectedSkillIds.includes(skill.id));
 
 	const i18n = getContext('i18n');
 </script>
@@ -23,7 +26,7 @@
 <Modal bind:show size="md">
 	<div>
 		<div class=" flex justify-between dark:text-gray-300 px-5 pt-4 pb-0.5">
-			<div class=" text-lg font-medium self-center">{$i18n.t('Available Tools')}</div>
+			<div class=" text-lg font-medium self-center">{$i18n.t('Selected Tools & Skills')}</div>
 			<button
 				class="self-center"
 				on:click={() => {
@@ -79,6 +82,37 @@
 							<!-- <div slot="content">
 							{JSON.stringify(tool, null, 2)}
 						</div> -->
+						</Collapsible>
+					{/each}
+				</div>
+			</div>
+		{/if}
+
+		{#if selectedSkills.length > 0}
+			<div class="flex justify-between dark:text-gray-300 px-5 pb-1">
+				<div class="text-base font-medium self-center">{$i18n.t('Skills')}</div>
+			</div>
+
+			<div class="px-5 pb-3 w-full flex flex-col justify-center">
+				<div class="text-sm dark:text-gray-300 mb-1">
+					{#each selectedSkills as skill}
+						<Collapsible buttonClassName="w-full mb-0.5">
+							<div>
+								<div class="flex items-center gap-1.5 text-sm font-medium dark:text-gray-100 text-gray-800">
+									<span>{skill?.name}</span>
+									{#if skill?.meta?.runtime?.mode === 'runnable'}
+										<span class="rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-950/30 dark:text-amber-300">
+											可执行
+										</span>
+									{/if}
+								</div>
+
+								{#if skill?.description}
+									<div class="text-xs text-gray-500">
+										{skill?.description}
+									</div>
+								{/if}
+							</div>
 						</Collapsible>
 					{/each}
 				</div>

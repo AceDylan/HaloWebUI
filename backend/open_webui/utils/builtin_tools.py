@@ -39,6 +39,10 @@ from open_webui.routers.images import (
 )
 from open_webui.routers.retrieval import search_web as _search_web
 from open_webui.utils.access_control import has_access, has_permission
+from open_webui.utils.skill_runtime import (
+    SkillRuntimeError,
+    execute_skill_entrypoint,
+)
 from open_webui.utils.user_tools import get_user_native_tools_config
 from open_webui.config import ENABLE_TERMINAL, TERMINAL_COMMAND_TIMEOUT, TERMINAL_MAX_OUTPUT_CHARS
 from open_webui.routers.terminal import _get_workspace_root
@@ -1511,6 +1515,88 @@ def get_builtin_tools(
                         },
                     },
                     "required": [],
+                },
+            ),
+        }
+
+    runnable_skill_context = metadata.get("selected_runnable_skills") or {}
+    runnable_skill_ids = (
+        runnable_skill_context.get("skill_ids")
+        if isinstance(runnable_skill_context, dict)
+        else []
+    )
+    runnable_entries = (
+        runnable_skill_context.get("entries")
+        if isinstance(runnable_skill_context, dict)
+        else []
+    )
+    if runnable_skill_ids and runnable_entries:
+        skill_entry_descriptions = "\n".join(
+            [
+                f"- {entry.get('skill_id')} / {entry.get('entrypoint_id')} ({entry.get('runtime')}): {entry.get('description') or 'No description'}"
+                for entry in runnable_entries
+            ]
+        )
+
+        async def execute_selected_skill_entrypoint(
+            skill_id: str,
+            entrypoint_id: str,
+            args: Optional[dict] = None,
+            timeout: Optional[int] = None,
+        ) -> str:
+            if skill_id not in runnable_skill_ids:
+                raise ValueError("The requested skill is not enabled for this conversation.")
+
+            # Refresh from the database when available so install status changes are picked up.
+            from open_webui.models.skills import Skills
+
+            skill_model = Skills.get_skill_by_id(skill_id)
+            if skill_model is None:
+                raise ValueError("The requested skill no longer exists.")
+
+            try:
+                result = await asyncio.to_thread(
+                    execute_skill_entrypoint,
+                    skill_model,
+                    entrypoint_id,
+                    args if isinstance(args, dict) else {},
+                    timeout,
+                )
+            except SkillRuntimeError as exc:
+                raise ValueError(str(exc)) from exc
+
+            return json.dumps(result, ensure_ascii=False)
+
+        tools["execute_skill_entrypoint"] = {
+            "tool_id": "builtin:skill",
+            "callable": execute_selected_skill_entrypoint,
+            "spec": _tool_spec(
+                "execute_skill_entrypoint",
+                "Execute one of the runnable skills selected for this conversation. "
+                "Only use skill_id and entrypoint_id from this list:\n"
+                + skill_entry_descriptions,
+                {
+                    "type": "object",
+                    "properties": {
+                        "skill_id": {
+                            "type": "string",
+                            "enum": runnable_skill_ids,
+                            "description": "Selected runnable skill id.",
+                        },
+                        "entrypoint_id": {
+                            "type": "string",
+                            "description": "Entrypoint id declared by the selected skill.",
+                        },
+                        "args": {
+                            "type": "object",
+                            "description": "JSON arguments exposed to the skill via HALO_SKILL_ARGS_JSON and HALO_SKILL_ARGS_PATH.",
+                        },
+                        "timeout": {
+                            "type": "integer",
+                            "description": "Execution timeout in seconds (max 120).",
+                        },
+                    },
+                    "required": ["skill_id", "entrypoint_id"],
                 },
             ),
         }

@@ -7,13 +7,17 @@
 		deleteSkillById,
 		getSkillById,
 		getSkills,
+		getSkillRuntimeCapabilities,
 		importSkillFromGithub,
 		importSkillFromRemoteZipUrl,
 		importSkillFromUrl,
 		importSkillFromZip,
+		installSkillRuntime,
 		updateSkillById,
+		uninstallSkillRuntime,
 		type SkillImportStatus,
-		type SkillModel
+		type SkillModel,
+		type SkillRuntimeCapabilities
 	} from '$lib/apis/skills';
 	import {
 		VERIFIED_LOBEHUB_SKILLS,
@@ -85,6 +89,8 @@
 	let zipInputElement: HTMLInputElement | null = null;
 
 	let promptSkills: SkillModel[] = [];
+	let runtimeCapabilities: SkillRuntimeCapabilities | null = null;
+	let runtimeActionSkillId: string | null = null;
 
 	let editingSkill: SkillModel | null = null;
 	let deletingSkill: SkillModel | null = null;
@@ -237,6 +243,67 @@
 	const getSkillPackageFileCount = (skill: SkillModel) =>
 		Array.isArray(skill.meta?.package_files) ? skill.meta.package_files.length : 0;
 
+	const getSkillRuntimeMeta = (skill: SkillModel) =>
+		typeof skill.meta?.runtime === 'object' && skill.meta?.runtime !== null ? skill.meta.runtime : {};
+
+	const isRunnableSkill = (skill: SkillModel) => getSkillRuntimeMeta(skill)?.mode === 'runnable';
+
+	const getSkillInstallStatus = (skill: SkillModel) =>
+		String(getSkillRuntimeMeta(skill)?.install_status || (isRunnableSkill(skill) ? 'not_installed' : 'prompt_only'));
+
+	const getSkillInstallStatusLabel = (skill: SkillModel) => {
+		const status = getSkillInstallStatus(skill);
+		if (
+			runtimeCapabilities &&
+			status === 'not_installed' &&
+			isRunnableSkill(skill) &&
+			!canInstallRunnableSkill(skill)
+		) {
+			return '当前环境不支持';
+		}
+		if (status === 'ready') return '已安装';
+		if (status === 'installing') return '安装中';
+		if (status === 'error') return '安装失败';
+		if (status === 'unsupported') return '当前环境不支持';
+		if (status === 'prompt_only') return '提示词';
+		return '未安装';
+	};
+
+	const getSkillInstallStatusClass = (skill: SkillModel) => {
+		const status = getSkillInstallStatus(skill);
+		if (
+			runtimeCapabilities &&
+			status === 'not_installed' &&
+			isRunnableSkill(skill) &&
+			!canInstallRunnableSkill(skill)
+		) {
+			return 'bg-red-50 text-red-700 dark:bg-red-950/40 dark:text-red-300';
+		}
+		if (status === 'ready') {
+			return 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300';
+		}
+		if (status === 'error' || status === 'unsupported') {
+			return 'bg-red-50 text-red-700 dark:bg-red-950/40 dark:text-red-300';
+		}
+		if (status === 'installing') {
+			return 'bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300';
+		}
+		return 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300';
+	};
+
+	const canInstallRunnableSkill = (skill: SkillModel) => {
+		if (!isRunnableSkill(skill) || !runtimeCapabilities?.install_allowed) {
+			return false;
+		}
+
+		const entrypoints = Array.isArray(getSkillRuntimeMeta(skill)?.entrypoints)
+			? getSkillRuntimeMeta(skill).entrypoints
+			: [];
+		const needsPython = entrypoints.some((item) => item?.runtime === 'python');
+		const needsNode = entrypoints.some((item) => item?.runtime === 'node');
+		return (!needsPython || runtimeCapabilities?.python?.available) && (!needsNode || runtimeCapabilities?.node?.available);
+	};
+
 	const getSkillSourceUrl = (skill: SkillModel) => {
 		const catalogEntry = getCatalogEntryByIdentifier(skill.identifier);
 		if (catalogEntry) return catalogEntry.skillUrl;
@@ -361,7 +428,13 @@
 		refreshing = true;
 
 		try {
-			await loadPromptSkills();
+			const [skillsResult, capabilitiesResult] = await Promise.all([
+				getSkills(localStorage.token),
+				getSkillRuntimeCapabilities(localStorage.token).catch(() => null)
+			]);
+			promptSkills = skillsResult ?? [];
+			skillsStore.set(promptSkills);
+			runtimeCapabilities = capabilitiesResult;
 		} catch (error) {
 			if (!silent) {
 				toast.error(formatError(error));
@@ -462,6 +535,34 @@
 			await refreshData({ silent: true });
 		} catch (error) {
 			toast.error(formatError(error));
+		}
+	};
+
+	const handleInstallRuntime = async (skill: SkillModel) => {
+		runtimeActionSkillId = skill.id;
+		try {
+			await installSkillRuntime(localStorage.token, skill.id);
+			toast.success('Skill 运行环境已安装');
+			await refreshData({ silent: true });
+		} catch (error) {
+			toast.error(formatError(error));
+			await refreshData({ silent: true });
+		} finally {
+			runtimeActionSkillId = null;
+		}
+	};
+
+	const handleUninstallRuntime = async (skill: SkillModel) => {
+		runtimeActionSkillId = skill.id;
+		try {
+			await uninstallSkillRuntime(localStorage.token, skill.id);
+			toast.success('Skill 运行环境已移除');
+			await refreshData({ silent: true });
+		} catch (error) {
+			toast.error(formatError(error));
+			await refreshData({ silent: true });
+		} finally {
+			runtimeActionSkillId = null;
 		}
 	};
 
@@ -633,6 +734,23 @@
 						)}
 					</p>
 
+					{#if runtimeCapabilities}
+						<div class="flex flex-wrap gap-2">
+							<div class="workspace-count-pill">
+								运行档位：{runtimeCapabilities.profile}
+							</div>
+							<div class="workspace-count-pill">
+								{runtimeCapabilities.install_allowed ? '可执行 Skill 已启用' : '当前仅支持提示词 Skill'}
+							</div>
+							<div class="workspace-count-pill">
+								Python：{runtimeCapabilities.python?.available ? '可用' : '不可用'}
+							</div>
+							<div class="workspace-count-pill">
+								Node：{runtimeCapabilities.node?.available ? '可用' : '不可用'}
+							</div>
+						</div>
+					{/if}
+
 					<div class="flex flex-wrap gap-2">
 						<div
 							class="glass-item px-3 py-2 text-sm"
@@ -742,6 +860,13 @@
 												{getSkillPackageFileCount(skill)} {$i18n.t('files')}
 											</span>
 										{/if}
+										{#if isRunnableSkill(skill)}
+											<span
+												class={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${getSkillInstallStatusClass(skill)}`}
+											>
+												可执行 · {getSkillInstallStatusLabel(skill)}
+											</span>
+										{/if}
 									</div>
 
 									<div class="text-base font-semibold text-gray-900 dark:text-gray-100">
@@ -766,6 +891,12 @@
 										</div>
 									{/if}
 
+									{#if isRunnableSkill(skill) && getSkillRuntimeMeta(skill)?.last_error}
+										<div class="mt-3 rounded-xl bg-red-50 px-3 py-2 text-xs text-red-700 dark:bg-red-950/30 dark:text-red-300">
+											{getSkillRuntimeMeta(skill).last_error}
+										</div>
+									{/if}
+
 									<div
 										class="mt-4 flex min-w-0 flex-col gap-2 border-t border-gray-100 pt-4 text-xs text-gray-500 dark:border-gray-800 dark:text-gray-400"
 									>
@@ -787,6 +918,32 @@
 							</div>
 
 							<div class="flex shrink-0 flex-wrap items-center gap-2">
+								{#if isRunnableSkill(skill)}
+									{#if getSkillInstallStatus(skill) === 'ready'}
+										<button
+											class="inline-flex items-center gap-2 rounded-xl border border-amber-200 px-3 py-2 text-sm font-medium text-amber-700 transition hover:bg-amber-50 dark:border-amber-900/60 dark:text-amber-300 dark:hover:bg-amber-950/30 disabled:cursor-not-allowed disabled:opacity-60"
+											on:click={() => handleUninstallRuntime(skill)}
+											disabled={runtimeActionSkillId === skill.id}
+										>
+											{#if runtimeActionSkillId === skill.id}
+												<Spinner className="size-4" />
+											{/if}
+											移除运行环境
+										</button>
+									{:else}
+										<button
+											class="inline-flex items-center gap-2 rounded-xl bg-gray-900 px-3 py-2 text-sm font-medium text-white transition hover:bg-gray-800 dark:bg-white dark:text-gray-900 dark:hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-60"
+											on:click={() => handleInstallRuntime(skill)}
+											disabled={runtimeActionSkillId === skill.id || !canInstallRunnableSkill(skill)}
+										>
+											{#if runtimeActionSkillId === skill.id}
+												<Spinner className="size-4" />
+											{/if}
+											安装运行环境
+										</button>
+									{/if}
+								{/if}
+
 								<button
 									class="inline-flex items-center gap-1 rounded-xl border border-gray-200 px-3 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50 dark:border-gray-800 dark:text-gray-200 dark:hover:bg-gray-850"
 									on:click={() => openEditSkillModal(skill.id)}

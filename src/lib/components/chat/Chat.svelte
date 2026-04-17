@@ -36,6 +36,7 @@
 		chatTitle,
 		showArtifacts,
 		tools,
+		skills as skillsStore,
 		toolServers,
 		activeChatIds,
 		overviewFocusedMessageId,
@@ -92,7 +93,8 @@
 		getChatById,
 		getChatContextById,
 		getChatList,
-		updateChatById
+		updateChatById,
+		updateChatComposerStateById
 	} from '$lib/apis/chats';
 	import { getModelById as getWorkspaceModelById } from '$lib/apis/models';
 	import { generateOpenAIChatCompletion } from '$lib/apis/openai';
@@ -109,6 +111,7 @@
 		stopTask
 	} from '$lib/apis';
 	import { getTools } from '$lib/apis/tools';
+	import { getSkills } from '$lib/apis/skills';
 	import { ensureModels } from '$lib/services/models';
 
 	import Banner from '../common/Banner.svelte';
@@ -371,6 +374,9 @@
 	let activeAssistant: ChatAssistantSnapshot | null = null;
 
 	let selectedToolIds = [];
+	let toolSelectionTouched = false;
+	let selectedSkillIds = [];
+	let skillSelectionTouched = false;
 	let imageGenerationEnabled = false;
 	let imageGenerationOptions: {
 		image_size?: string | null;
@@ -392,7 +398,11 @@
 	const selectionThreadsStore = writable<PersistedSelectionThreads>(selectionThreads);
 	const expandedSelectionThreadId = writable<string | null>(null);
 	let selectionThreadsPersistTimeout: ReturnType<typeof setTimeout> | null = null;
+	let composerStatePersistTimeout: ReturnType<typeof setTimeout> | null = null;
 	let pendingChatSave: Promise<void> = Promise.resolve();
+	let pendingComposerStateSave: Promise<void> = Promise.resolve();
+	let hasPersistedComposerState = false;
+	let composerStateSyncReady = false;
 
 	// J-3-01: O(1) model lookup map — rebuilt reactively when $models changes
 	let modelsMap: Map<string, Model> = new Map();
@@ -404,6 +414,51 @@
 		modelsMap = m;
 	}
 	const getModelById = (id: string): Model | undefined => modelsMap.get(id);
+	const getVisibleSkillIds = () =>
+		($skillsStore ?? []).map((skill) => String(skill?.id ?? '')).filter((id) => id);
+	const filterVisibleSkillIds = (ids: string[] = []) => {
+		const visible = new Set(getVisibleSkillIds());
+		return ids.filter((id) => visible.has(id));
+	};
+	const arraysEqual = (left: string[] = [], right: string[] = []) =>
+		left.length === right.length && left.every((value, index) => value === right[index]);
+	const extractSkillIdsFromText = (text: string) => {
+		const matches = [...String(text ?? '').matchAll(/<\$([\w.\-:/]+)(?:\|[^>]+)?>/g)];
+		return Array.from(
+			new Set(matches.map((match) => String(match?.[1] ?? '').trim()).filter(Boolean))
+		);
+	};
+	const stripSkillTagsFromText = (text: string) =>
+		String(text ?? '')
+			.replace(/<\$([\w.\-:/]+)(?:\|[^>]+)?>\s*/g, '')
+			.trim();
+	const collectRequestSkillIds = (messages: any[] = []) => {
+		const ids = new Set<string>(skillSelectionTouched ? selectedSkillIds : []);
+		for (const message of messages ?? []) {
+			if (message?.role !== 'user') {
+				continue;
+			}
+
+			const content = message?.content;
+			if (typeof content === 'string') {
+				for (const skillId of extractSkillIdsFromText(content)) {
+					ids.add(skillId);
+				}
+				continue;
+			}
+
+			if (Array.isArray(content)) {
+				for (const item of content) {
+					if (item?.type === 'text') {
+						for (const skillId of extractSkillIdsFromText(item?.text ?? '')) {
+							ids.add(skillId);
+						}
+					}
+				}
+			}
+		}
+		return Array.from(ids);
+	};
 
 	const normalizeReasoningEffortValue = (value: unknown): string | null => {
 		if (value === null || value === undefined) {
@@ -639,7 +694,7 @@
 			...params,
 			system: assistant.prompt
 		};
-		persistChatSessionState();
+		persistChatComposerState();
 	};
 
 	const deactivateAssistant = () => {
@@ -651,7 +706,7 @@
 			params = rest;
 		}
 
-		persistChatSessionState();
+		persistChatComposerState();
 	};
 
 	const getRequestStopTokens = () => {
@@ -702,7 +757,9 @@
 					}
 				: undefined,
 			...messages.map((message) => {
-				const textContent = message?.merged?.content ?? processDetails(message?.content ?? '');
+				const textContent = stripSkillTagsFromText(
+					message?.merged?.content ?? processDetails(message?.content ?? '')
+				);
 				const imageFiles = (message?.files ?? []).filter((file) => file.type === 'image');
 
 				return {
@@ -762,6 +819,7 @@
 		}
 
 		const requestMessages = await buildFloatingRequestMessages(messages);
+		const requestSkillIds = collectRequestSkillIds(messages);
 		const requestedWebSearchMode = canUseChatWebSearch()
 			? normalizeWebSearchMode(webSearchMode, 'off')
 			: 'off';
@@ -784,6 +842,8 @@
 			},
 			files: requestFiles.length > 0 ? requestFiles : undefined,
 			tool_ids: selectedToolIds.length > 0 ? selectedToolIds : undefined,
+			skill_ids: requestSkillIds.length > 0 ? requestSkillIds : undefined,
+			skill_selection_touched: skillSelectionTouched ? true : undefined,
 			tool_servers: $toolServers,
 			features: {
 				memory: $settings?.memory ?? false,
@@ -1036,6 +1096,149 @@
 		}
 	};
 
+	const buildComposerStatePayload = () => ({
+		selected_tool_ids: selectedToolIds,
+		tool_selection_touched: toolSelectionTouched,
+		selected_skill_ids: selectedSkillIds,
+		skill_selection_touched: skillSelectionTouched,
+		web_search_mode: webSearchMode,
+		web_search_mode_source: webSearchModeSource,
+		image_generation_enabled: imageGenerationEnabled,
+		image_generation_options: imageGenerationOptions,
+		code_interpreter_enabled: codeInterpreterEnabled,
+		reasoning_effort: reasoningEffort,
+		max_thinking_tokens: maxThinkingTokens
+	});
+
+	const buildLocalChatSessionState = () => ({
+		...buildComposerStatePayload(),
+		webSearchMode: webSearchMode,
+		webSearchModeSource: webSearchModeSource,
+		webSearchModeTouched: webSearchModeSource === 'user',
+		selectedToolIds,
+		toolSelectionTouched,
+		selectedSkillIds,
+		skillSelectionTouched,
+		activeAssistant,
+		systemPrompt: typeof params?.system === 'string' ? params.system : null,
+		imageGenerationEnabled,
+		imageGenerationOptions,
+		codeInterpreterEnabled,
+		reasoningEffort,
+		maxThinkingTokens
+	});
+
+	const applyComposerState = (
+		state: Record<string, any> | null | undefined,
+		options: { markPersisted?: boolean } = {}
+	) => {
+		if (!state || typeof state !== 'object') {
+			return false;
+		}
+
+		const hasComposerKeys = [
+			'selected_tool_ids',
+			'selectedToolIds',
+			'selected_skill_ids',
+			'selectedSkillIds',
+			'web_search_mode',
+			'webSearchMode',
+			'image_generation_enabled',
+			'imageGenerationEnabled',
+			'code_interpreter_enabled',
+			'codeInterpreterEnabled',
+			'reasoning_effort',
+			'reasoningEffort',
+			'max_thinking_tokens',
+			'maxThinkingTokens'
+		].some((key) => key in state);
+		if (!hasComposerKeys) {
+			return false;
+		}
+
+		const restoredToolIds = state.selected_tool_ids ?? state.selectedToolIds;
+		if (Array.isArray(restoredToolIds)) {
+			selectedToolIds = restoredToolIds.map((id) => String(id ?? '').trim()).filter(Boolean);
+		}
+		if (
+			state.tool_selection_touched !== undefined ||
+			state.toolSelectionTouched !== undefined
+		) {
+			toolSelectionTouched = Boolean(
+				state.tool_selection_touched ?? state.toolSelectionTouched
+			);
+		}
+
+		const restoredSkillIds = state.selected_skill_ids ?? state.selectedSkillIds;
+		if (Array.isArray(restoredSkillIds)) {
+			selectedSkillIds = restoredSkillIds.map((id) => String(id ?? '').trim()).filter(Boolean);
+		}
+		if (
+			state.skill_selection_touched !== undefined ||
+			state.skillSelectionTouched !== undefined
+		) {
+			skillSelectionTouched = Boolean(
+				state.skill_selection_touched ?? state.skillSelectionTouched
+			);
+		}
+
+		const restoredWebSearchState = resolveStoredWebSearchState({
+			webSearchMode: state.web_search_mode ?? state.webSearchMode,
+			webSearchModeSource: state.web_search_mode_source ?? state.webSearchModeSource,
+			webSearchModeTouched:
+				state.web_search_mode_source !== undefined ||
+				state.webSearchModeSource !== undefined
+					? normalizeWebSearchModeSource(
+							state.web_search_mode_source ?? state.webSearchModeSource,
+							'default'
+						) === 'user'
+					: state.webSearchModeTouched
+		});
+		webSearchMode = restoredWebSearchState.mode;
+		webSearchModeSource = restoredWebSearchState.source;
+
+		if (
+			state.image_generation_enabled !== undefined ||
+			state.imageGenerationEnabled !== undefined
+		) {
+			imageGenerationEnabled = Boolean(
+				state.image_generation_enabled ?? state.imageGenerationEnabled
+			);
+		}
+		if (
+			state.image_generation_options !== undefined ||
+			state.imageGenerationOptions !== undefined
+		) {
+			imageGenerationOptions =
+				state.image_generation_options ?? state.imageGenerationOptions ?? {};
+		}
+		if (
+			state.code_interpreter_enabled !== undefined ||
+			state.codeInterpreterEnabled !== undefined
+		) {
+			codeInterpreterEnabled = Boolean(
+				state.code_interpreter_enabled ?? state.codeInterpreterEnabled
+			);
+		}
+		if (state.reasoning_effort !== undefined || state.reasoningEffort !== undefined) {
+			reasoningEffort =
+				normalizeReasoningEffortValue(
+					state.reasoning_effort ?? state.reasoningEffort ?? null
+				) ?? null;
+		}
+		if (
+			state.max_thinking_tokens !== undefined ||
+			state.maxThinkingTokens !== undefined
+		) {
+			maxThinkingTokens = normalizeThinkingTokenValue(
+				state.max_thinking_tokens ?? state.maxThinkingTokens ?? null
+			);
+		}
+
+		hasPersistedComposerState = options.markPersisted === true;
+		return true;
+	};
+
 	const readChatInputState = (id: string | null | undefined = $chatId || chatIdProp) => {
 		const scopedKey = getChatInputStateKey(id);
 		const legacyKey = getLegacyChatInputStateKey(id);
@@ -1086,24 +1289,7 @@
 				return false;
 			}
 
-			const restoredWebSearchState = resolveStoredWebSearchState(state);
-			webSearchMode = restoredWebSearchState.mode;
-			webSearchModeSource = restoredWebSearchState.source;
-			if (state.reasoningEffort !== undefined) {
-				reasoningEffort = state.reasoningEffort ?? null;
-			}
-			if (state.maxThinkingTokens !== undefined) {
-				maxThinkingTokens = state.maxThinkingTokens ?? null;
-			}
-			if (state.imageGenerationEnabled !== undefined) {
-				imageGenerationEnabled = Boolean(state.imageGenerationEnabled);
-			}
-			if (state.imageGenerationOptions !== undefined) {
-				imageGenerationOptions = state.imageGenerationOptions ?? {};
-			}
-			if (state.codeInterpreterEnabled !== undefined) {
-				codeInterpreterEnabled = Boolean(state.codeInterpreterEnabled);
-			}
+			applyComposerState(state, { markPersisted: false });
 			activeAssistant = toChatAssistantSnapshot(state.activeAssistant ?? null);
 
 			if (typeof state.systemPrompt === 'string') {
@@ -1127,24 +1313,33 @@
 	const persistChatSessionState = (id: string | null | undefined = $chatId || chatIdProp) => {
 		const scopedKey = getChatSessionStateKey(id);
 		const legacyKey = getLegacyChatSessionStateKey(id);
-		localStorage.setItem(
-			scopedKey,
-			JSON.stringify({
-				webSearchMode,
-				webSearchModeSource,
-				webSearchModeTouched: webSearchModeSource === 'user',
-				activeAssistant,
-				systemPrompt: typeof params?.system === 'string' ? params.system : null,
-				imageGenerationEnabled,
-				imageGenerationOptions,
-				codeInterpreterEnabled,
-				reasoningEffort,
-				maxThinkingTokens
-			})
-		);
+		localStorage.setItem(scopedKey, JSON.stringify(buildLocalChatSessionState()));
 		if (legacyKey !== scopedKey) {
 			localStorage.removeItem(legacyKey);
 		}
+	};
+
+	const persistChatComposerState = (id: string | null | undefined = $chatId || chatIdProp) => {
+		persistChatSessionState(id);
+		if (!composerStateSyncReady || !id || $temporaryChatEnabled) {
+			return;
+		}
+
+		if (composerStatePersistTimeout) {
+			clearTimeout(composerStatePersistTimeout);
+			composerStatePersistTimeout = null;
+		}
+
+		composerStatePersistTimeout = setTimeout(() => {
+			pendingComposerStateSave = pendingComposerStateSave
+				.catch(() => undefined)
+				.then(async () => {
+					await updateChatComposerStateById(localStorage.token, id, buildComposerStatePayload());
+				})
+				.catch((error) => {
+					console.error(error);
+				});
+		}, 250);
 	};
 
 	const handleMessageInputChange = (input) => {
@@ -1173,9 +1368,16 @@
 		);
 		webSearchMode = nextWebSearchState.mode;
 		webSearchModeSource = nextWebSearchState.source;
+		selectedToolIds = Array.isArray(input.selectedToolIds)
+			? input.selectedToolIds.map((id) => String(id ?? '').trim()).filter(Boolean)
+			: selectedToolIds;
+		toolSelectionTouched = Boolean(input.toolSelectionTouched ?? toolSelectionTouched);
+		selectedSkillIds = Array.isArray(input.selectedSkillIds)
+			? input.selectedSkillIds.map((id) => String(id ?? '').trim()).filter(Boolean)
+			: selectedSkillIds;
+		skillSelectionTouched = Boolean(input.skillSelectionTouched ?? skillSelectionTouched);
 		reasoningEffort = newRE;
 		maxThinkingTokens = newMT;
-		persistChatSessionState();
 
 		const persistedInput = {
 			...input,
@@ -1407,6 +1609,7 @@
 		params,
 		files: chatFiles,
 		assistant: activeAssistant ?? undefined,
+		composer_state: buildComposerStatePayload(),
 		selectionThreads: persistedSelectionThreads
 	});
 
@@ -1415,9 +1618,13 @@
 		currentSystemPrompt;
 		activeAssistant;
 
-		if (!chatIdProp) {
-			persistChatSessionState();
-		}
+		persistChatSessionState($chatId || chatIdProp);
+	}
+
+	$: {
+		const composerStateSignature = JSON.stringify(buildComposerStatePayload());
+		composerStateSignature;
+		persistChatComposerState($chatId || chatIdProp);
 	}
 
 	// 正向同步: Controls(params) → ThinkingControl(reasoningEffort/maxThinkingTokens)
@@ -1465,19 +1672,24 @@
 		) {
 			webSearchMode = selectionDrivenState.mode;
 			webSearchModeSource = selectionDrivenState.source;
-			persistChatSessionState();
+			persistChatComposerState();
 		}
 	}
 
 	$: if (chatIdProp) {
 		(async () => {
 			loading = true;
+			composerStateSyncReady = false;
 			resetReasoningSelectionTracking();
 			webSearchSelectionSyncReady = false;
 
 			prompt = '';
 			files = [];
 			selectedToolIds = [];
+			toolSelectionTouched = false;
+			selectedSkillIds = [];
+			skillSelectionTouched = false;
+			hasPersistedComposerState = false;
 			webSearchMode = getPreferredDefaultWebSearchMode();
 			webSearchModeSource = 'default';
 			imageGenerationEnabled = false;
@@ -1488,22 +1700,22 @@
 			if (chatIdProp && (await loadChat())) {
 				loading = false;
 				await tick();
-				restoreChatSessionState(chatIdProp);
+				if (!hasPersistedComposerState) {
+					restoreChatSessionState(chatIdProp);
+				}
 
 				const input = readChatInputState(chatIdProp);
 				if (input) {
 					try {
 						prompt = input.prompt;
 						files = input.files;
-						selectedToolIds = input.selectedToolIds;
-						imageGenerationEnabled = input.imageGenerationEnabled;
-						imageGenerationOptions = input.imageGenerationOptions ?? {};
 					} catch (e) {}
 				}
 
 				window.setTimeout(() => scrollToBottom(), 0);
 				const chatInput = document.getElementById('chat-input');
 				chatInput?.focus();
+				composerStateSyncReady = true;
 				webSearchSelectionSyncReady = true;
 				initializeReasoningSelectionTracking();
 			} else {
@@ -1558,9 +1770,24 @@
 		setToolIds();
 	}
 
+	$: if ($skillsStore && (atSelectedModel || selectedModels)) {
+		setSkillIds();
+	}
+
+	$: if ($skillsStore?.length) {
+		const filteredSkillIds = filterVisibleSkillIds(selectedSkillIds);
+		if (!arraysEqual(filteredSkillIds, selectedSkillIds)) {
+			selectedSkillIds = filteredSkillIds;
+		}
+	}
+
 	const setToolIds = async () => {
 		if (!$tools) {
 			tools.set(await getTools(localStorage.token));
+		}
+
+		if (hasPersistedComposerState || toolSelectionTouched) {
+			return;
 		}
 
 		if (selectedModels.length !== 1 && !atSelectedModel) {
@@ -1572,6 +1799,29 @@
 			selectedToolIds = (model?.info?.meta?.toolIds ?? []).filter((id) =>
 				$tools.find((t) => t.id === id)
 			);
+		}
+	};
+
+	const setSkillIds = async () => {
+		if (!$skillsStore || $skillsStore.length === 0) {
+			const latestSkills = (await getSkills(localStorage.token).catch(() => [])) ?? [];
+			skillsStore.set(latestSkills);
+			if (latestSkills.length === 0 && selectedSkillIds.length > 0) {
+				selectedSkillIds = [];
+			}
+		}
+
+		if (hasPersistedComposerState || skillSelectionTouched) {
+			return;
+		}
+
+		if (selectedModels.length !== 1 && !atSelectedModel) {
+			return;
+		}
+
+		const model = atSelectedModel ?? getModelById(selectedModels[0]);
+		if (model) {
+			selectedSkillIds = filterVisibleSkillIds(model?.info?.meta?.skillIds ?? []);
 		}
 	};
 
@@ -1831,13 +2081,13 @@
 				try {
 					prompt = input.prompt;
 					files = input.files;
-					selectedToolIds = input.selectedToolIds;
-					imageGenerationEnabled = input.imageGenerationEnabled;
-					imageGenerationOptions = input.imageGenerationOptions ?? {};
 				} catch (e) {
 					prompt = '';
 					files = [];
 					selectedToolIds = [];
+					toolSelectionTouched = false;
+					selectedSkillIds = [];
+					skillSelectionTouched = false;
 					webSearchMode = getPreferredDefaultWebSearchMode();
 					webSearchModeSource = 'default';
 					imageGenerationEnabled = false;
@@ -1845,6 +2095,7 @@
 				}
 			}
 			restoreChatSessionState(chatIdProp);
+			composerStateSyncReady = true;
 			webSearchSelectionSyncReady = true;
 		}
 
@@ -1926,6 +2177,10 @@
 		if (selectionThreadsPersistTimeout) {
 			clearTimeout(selectionThreadsPersistTimeout);
 			selectionThreadsPersistTimeout = null;
+		}
+		if (composerStatePersistTimeout) {
+			clearTimeout(composerStatePersistTimeout);
+			composerStatePersistTimeout = null;
 		}
 		scrollObserver?.disconnect();
 		cancelScheduledScrollToBottom();
@@ -2198,6 +2453,7 @@
 	const initNewChat = async (options: { fresh?: boolean } = {}) => {
 		const fresh = options.fresh ?? false;
 		freshChatActive = fresh;
+		composerStateSyncReady = false;
 		resetReasoningSelectionTracking();
 		webSearchSelectionSyncReady = false;
 
@@ -2319,6 +2575,10 @@
 			prompt = '';
 			files = [];
 			selectedToolIds = [];
+			toolSelectionTouched = false;
+			selectedSkillIds = [];
+			skillSelectionTouched = false;
+			hasPersistedComposerState = false;
 			imageGenerationEnabled = false;
 			imageGenerationOptions = {};
 			codeInterpreterEnabled = false;
@@ -2326,6 +2586,11 @@
 
 		chatFiles = [];
 		params = {};
+		hasPersistedComposerState = false;
+		selectedToolIds = [];
+		toolSelectionTouched = false;
+		selectedSkillIds = [];
+		skillSelectionTouched = false;
 
 		if (fresh) {
 			removeChatSessionState('');
@@ -2368,12 +2633,30 @@
 				?.split(',')
 				.map((id) => id.trim())
 				.filter((id) => id);
+			toolSelectionTouched = true;
 		} else if ($page.url.searchParams.get('tool-ids')) {
 			selectedToolIds = $page.url.searchParams
 				.get('tool-ids')
 				?.split(',')
 				.map((id) => id.trim())
 				.filter((id) => id);
+			toolSelectionTouched = true;
+		}
+
+		if ($page.url.searchParams.get('skills')) {
+			selectedSkillIds = $page.url.searchParams
+				.get('skills')
+				?.split(',')
+				.map((id) => id.trim())
+				.filter((id) => id);
+			skillSelectionTouched = true;
+		} else if ($page.url.searchParams.get('skill-ids')) {
+			selectedSkillIds = $page.url.searchParams
+				.get('skill-ids')
+				?.split(',')
+				.map((id) => id.trim())
+				.filter((id) => id);
+			skillSelectionTouched = true;
 		}
 
 		if ($page.url.searchParams.get('call') === 'true') {
@@ -2443,6 +2726,7 @@
 
 		const chatInput = document.getElementById('chat-input');
 		setTimeout(() => chatInput?.focus(), 0);
+		composerStateSyncReady = true;
 		webSearchSelectionSyncReady = true;
 		initializeReasoningSelectionTracking();
 
@@ -2506,6 +2790,8 @@
 				params = chatContent?.params ?? {};
 				activeAssistant = toChatAssistantSnapshot(chatContent?.assistant ?? null);
 				chatFiles = chatContent?.files ?? [];
+				hasPersistedComposerState = false;
+				applyComposerState(chatContent?.composer_state, { markPersisted: true });
 				setRuntimeSelectionThreadsState(normalizeSelectionThreads(chatContent?.selectionThreads));
 				expandedSelectionThreadId.set(null);
 
@@ -3674,9 +3960,11 @@
 			}))
 		].filter((message) => message);
 
+		const requestSkillIds = collectRequestSkillIds(messages);
+
 		messages = messages
 			.map((message, idx, arr) => {
-				let textContent = message?.merged?.content ?? message.content;
+				let textContent = stripSkillTagsFromText(message?.merged?.content ?? message.content);
 
 				// Inject regeneration instruction into the last user message for API payload only
 				if (
@@ -3744,6 +4032,8 @@
 
 				files: (files?.length ?? 0) > 0 ? files : undefined,
 				tool_ids: selectedToolIds.length > 0 ? selectedToolIds : undefined,
+				skill_ids: requestSkillIds.length > 0 ? requestSkillIds : undefined,
+				skill_selection_touched: skillSelectionTouched ? true : undefined,
 				tool_servers: $toolServers,
 
 				features: {
@@ -4529,6 +4819,9 @@
 								bind:prompt
 								bind:autoScroll
 								bind:selectedToolIds
+								bind:toolSelectionTouched
+								bind:selectedSkillIds
+								bind:skillSelectionTouched
 								bind:imageGenerationEnabled
 								bind:imageGenerationOptions
 								bind:codeInterpreterEnabled
@@ -4582,6 +4875,9 @@
 								bind:prompt
 								bind:autoScroll
 								bind:selectedToolIds
+								bind:toolSelectionTouched
+								bind:selectedSkillIds
+								bind:skillSelectionTouched
 								bind:imageGenerationEnabled
 								bind:imageGenerationOptions
 								bind:codeInterpreterEnabled

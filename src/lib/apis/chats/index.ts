@@ -939,6 +939,39 @@ export const updateChatById = async (token: string, id: string, chat: object) =>
 	return res;
 };
 
+export const updateChatComposerStateById = async (
+	token: string,
+	id: string,
+	composerState: object
+) => {
+	let error = null;
+
+	const res = await fetch(`${WEBUI_API_BASE_URL}/chats/${id}/composer-state`, {
+		method: 'POST',
+		headers: {
+			Accept: 'application/json',
+			'Content-Type': 'application/json',
+			...(token && { authorization: `Bearer ${token}` })
+		},
+		body: JSON.stringify({
+			composer_state: composerState
+		})
+	})
+		.then(parseJsonResponse)
+		.then((json) => json)
+		.catch((err) => {
+			error = err;
+			console.log(err);
+			return null;
+		});
+
+	if (error) {
+		throw error;
+	}
+
+	return res;
+};
+
 export const deleteChatById = async (token: string, id: string) => {
 	let error = null;
 

@@ -52,6 +52,21 @@ export interface SkillImportResult {
 	status: SkillImportStatus;
 }
 
+export interface SkillRuntimeCapabilities {
+	profile: string;
+	install_allowed: boolean;
+	python: {
+		available: boolean;
+		uv?: string | null;
+		python?: string | null;
+	};
+	node: {
+		available: boolean;
+		node?: string | null;
+		npm?: string | null;
+	};
+}
+
 const requestJson = async <T>(
 	path: string,
 	token: string,
@@ -107,6 +122,10 @@ export const getSkillCatalog = async (token: string = '') => {
 	return requestJson<SkillCatalogItem[]>('/catalog', token);
 };
 
+export const getSkillRuntimeCapabilities = async (token: string = '') => {
+	return requestJson<SkillRuntimeCapabilities>('/runtime/capabilities', token);
+};
+
 export const getSkillById = async (token: string, skillId: string) => {
 	return requestJson<SkillModel>(`/${skillId}`, token);
 };
@@ -127,6 +146,18 @@ export const updateSkillById = async (token: string, skillId: string, skill: obj
 
 export const deleteSkillById = async (token: string, skillId: string) => {
 	return requestJson<boolean>(`/${skillId}/delete`, token, {
+		method: 'DELETE'
+	});
+};
+
+export const installSkillRuntime = async (token: string, skillId: string) => {
+	return requestJson<SkillModel>(`/${skillId}/runtime/install`, token, {
+		method: 'POST'
+	});
+};
+
+export const uninstallSkillRuntime = async (token: string, skillId: string) => {
+	return requestJson<SkillModel>(`/${skillId}/runtime/install`, token, {
 		method: 'DELETE'
 	});
 };

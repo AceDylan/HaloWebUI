@@ -69,6 +69,9 @@
 	export let files = [];
 
 	export let selectedToolIds = [];
+	export let toolSelectionTouched = false;
+	export let selectedSkillIds = [];
+	export let skillSelectionTouched = false;
 	export let imageGenerationEnabled = false;
 	export let imageGenerationOptions = {};
 	export let codeInterpreterEnabled = false;
@@ -316,6 +319,9 @@
 					bind:prompt
 					bind:autoScroll
 					bind:selectedToolIds
+					bind:toolSelectionTouched
+					bind:selectedSkillIds
+					bind:skillSelectionTouched
 					bind:imageGenerationEnabled
 					bind:imageGenerationOptions
 					bind:codeInterpreterEnabled

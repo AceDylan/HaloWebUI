@@ -1505,6 +1505,7 @@ async def chat_completion(
             "preview_tool_compat": preview_tool_compat,
             "tool_calling_mode": effective_tool_calling_mode,
             "tool_ids": form_data.get("tool_ids", None),
+            "skill_ids": form_data.get("skill_ids", None),
             "tool_servers": form_data.pop("tool_servers", None),
             "files": form_data.get("files", None),
             "features": form_data.get("features", None),
@@ -1520,6 +1521,7 @@ async def chat_completion(
         form_data, metadata, events = await process_chat_payload(
             request, form_data, user, metadata, model
         )
+        request.state.metadata = metadata
 
     except Exception as e:
         log.debug(f"Error processing chat payload: {e}")

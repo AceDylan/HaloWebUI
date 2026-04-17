@@ -148,6 +148,10 @@ class ChatTitleForm(BaseModel):
     title: str
 
 
+class ChatComposerStateForm(BaseModel):
+    composer_state: dict
+
+
 class ChatResponse(BaseModel):
     id: str
     user_id: str
@@ -345,6 +349,21 @@ class ChatTable:
                 return ChatModel.model_validate(chat_item)
         except Exception:
             return None
+
+    def update_chat_composer_state_by_id(
+        self, id: str, composer_state: dict
+    ) -> Optional[ChatModel]:
+        chat = self.get_chat_by_id(id)
+        if chat is None:
+            return None
+
+        chat_dict = chat.chat or {}
+        next_chat = {
+            **chat_dict,
+            "composer_state": composer_state if isinstance(composer_state, dict) else {},
+        }
+
+        return self.update_chat_by_id(id, next_chat)
 
     def update_chat_title_by_id(self, id: str, title: str) -> Optional[ChatModel]:
         chat = self.get_chat_by_id(id)

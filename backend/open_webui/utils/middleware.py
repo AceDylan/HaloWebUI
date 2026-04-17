@@ -98,6 +98,11 @@ from open_webui.utils.native_web_search import (
     strip_model_prefix,
 )
 from open_webui.utils.payload import merge_additive_payload_fields
+from open_webui.utils.skill_runtime import (
+    build_skill_system_prompt,
+    build_skill_tool_context,
+    get_selected_skill_context,
+)
 from open_webui.utils.task import (
     get_task_model_id,
     prompt_template,
@@ -3081,6 +3086,26 @@ async def process_chat_payload(request, form_data, user, metadata, model):
                 form_data["messages"],
             )
 
+    skill_ids = form_data.pop("skill_ids", None)
+    skill_selection_touched = bool(form_data.pop("skill_selection_touched", False))
+    model_skill_ids = (
+        (model.get("info", {}) or {}).get("meta", {}) or {}
+    ).get("skillIds", [])
+    skill_context = get_selected_skill_context(
+        user,
+        skill_ids,
+        [] if skill_selection_touched else model_skill_ids,
+    )
+    skill_system_prompt = build_skill_system_prompt(
+        skill_context["prompt_skills"],
+        requested_skill_ids=skill_context["requested_ids"],
+    )
+    if skill_system_prompt:
+        form_data["messages"] = add_or_update_system_message(
+            skill_system_prompt,
+            form_data.get("messages", []),
+        )
+
     tool_ids = form_data.pop("tool_ids", None)
     files = form_data.pop("files", None)
 
@@ -3090,6 +3115,19 @@ async def process_chat_payload(request, form_data, user, metadata, model):
 
     metadata = {
         **metadata,
+        "selected_skill_ids": skill_context["resolved_ids"],
+        "selected_prompt_skills": [
+            {
+                "id": skill.id,
+                "name": skill.name,
+            }
+            for skill in skill_context["prompt_skills"]
+        ],
+        "selected_runnable_skills": build_skill_tool_context(
+            skill_context["runnable_skills"]
+        ),
+        "skill_selection_touched": skill_selection_touched,
+        "skill_ids": skill_context["resolved_ids"],
         "tool_ids": tool_ids,
         "files": files,
     }
@@ -3222,6 +3260,7 @@ async def process_chat_payload(request, form_data, user, metadata, model):
             or tool_ids
             or tool_servers
             or metadata.get("preview_tool_compat")
+            or (metadata.get("selected_runnable_skills") or {}).get("skill_ids")
         )
     ):
         builtin_tools = get_builtin_tools(request, user, metadata)

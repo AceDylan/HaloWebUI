@@ -11,6 +11,11 @@ from urllib.parse import urlparse
 import aiohttp
 import yaml
 
+from open_webui.utils.skill_runtime import (
+    SKILL_ARCHIVE_MAX_BYTES,
+    build_skill_runtime_metadata,
+)
+
 
 class SkillImportError(Exception):
     pass
@@ -18,11 +23,14 @@ class SkillImportError(Exception):
 
 @dataclass
 class ImportedSkillPayload:
+    archive_bytes: Optional[bytes]
+    archive_name: Optional[str]
     content: str
     description: str
     identifier: str
     meta: dict
     name: str
+    package_files_map: Optional[dict[str, bytes]]
     source: str
     source_url: Optional[str]
 
@@ -132,21 +140,31 @@ def parse_skill_markdown(
         ).__repr__().encode("utf-8")
     )
 
+    runtime_meta = build_skill_runtime_metadata(
+        manifest,
+        source=source,
+        has_package_assets=bool(normalized_files),
+    )
+
     meta = {
         "import_hash": import_hash,
         "manifest": manifest,
         "package_files": normalized_files,
+        "runtime": runtime_meta,
     }
     tags = manifest.get("tags")
     if isinstance(tags, list):
         meta["tags"] = [str(tag).strip() for tag in tags if str(tag).strip()]
 
     return ImportedSkillPayload(
+        archive_bytes=None,
+        archive_name=None,
         content=content,
         description=str(manifest.get("description") or ""),
         identifier=str(manifest.get("identifier") or synthetic_identifier),
         meta=meta,
         name=str(manifest.get("name") or fallback_name or ""),
+        package_files_map=None,
         source=source,
         source_url=source_url,
     )
@@ -161,6 +179,9 @@ def parse_skill_zip(
     source_url: Optional[str],
     synthetic_identifier: str,
 ) -> ImportedSkillPayload:
+    if len(buffer) > SKILL_ARCHIVE_MAX_BYTES:
+        raise SkillImportError("Skill archive exceeds the 50MB upload limit.")
+
     try:
         zip_file = zipfile.ZipFile(io.BytesIO(buffer))
     except zipfile.BadZipFile as exc:
@@ -197,6 +218,7 @@ def parse_skill_zip(
         except UnicodeDecodeError as exc:
             raise SkillImportError("SKILL.md must be UTF-8 encoded.") from exc
 
+        package_entries: dict[str, bytes] = {"SKILL.md": raw_text.encode("utf-8")}
         package_files = []
         content_hash = hashlib.sha256()
         content_hash.update(b"SKILL.md\0")
@@ -215,9 +237,11 @@ def parse_skill_zip(
                 continue
 
             package_files.append(relative_path)
+            file_bytes = zip_file.read(original_path)
+            package_entries[relative_path] = file_bytes
             content_hash.update(relative_path.encode("utf-8"))
             content_hash.update(b"\0")
-            content_hash.update(zip_file.read(original_path))
+            content_hash.update(file_bytes)
 
         payload = parse_skill_markdown(
             raw_text,
@@ -228,6 +252,9 @@ def parse_skill_zip(
             synthetic_identifier=synthetic_identifier,
         )
         payload.meta["import_hash"] = content_hash.hexdigest()
+        payload.archive_bytes = buffer
+        payload.archive_name = fallback_name
+        payload.package_files_map = package_entries
         return payload
 
 
@@ -347,7 +374,7 @@ async def import_skill_from_github(url: str) -> ImportedSkillPayload:
         else f"https://github.com/{owner}/{repo}/tree/{branch}"
     )
 
-    return parse_skill_zip(
+    payload = parse_skill_zip(
         archive_bytes,
         base_path=base_path,
         fallback_name=fallback_name,
@@ -355,15 +382,19 @@ async def import_skill_from_github(url: str) -> ImportedSkillPayload:
         source_url=canonical_source,
         synthetic_identifier=_stable_identifier("github", canonical_source),
     )
+    payload.archive_name = f"{repo}-{branch or 'default'}.zip"
+    return payload
 
 
 async def import_skill_from_zip(filename: str, buffer: bytes) -> ImportedSkillPayload:
     synthetic_identifier = _stable_identifier("zip", _sha256_bytes(buffer))
     fallback_name = (filename or "uploaded-skill").rsplit(".", 1)[0]
-    return parse_skill_zip(
+    payload = parse_skill_zip(
         buffer,
         fallback_name=fallback_name,
         source="zip",
         source_url=None,
         synthetic_identifier=synthetic_identifier,
     )
+    payload.archive_name = filename or "skill.zip"
+    return payload

@@ -77,6 +77,7 @@
 	import {
 		buildWebSearchModeOptions
 	} from '$lib/utils/native-web-search';
+	import { translateWithDefault } from '$lib/i18n';
 
 	import XMark from '../icons/XMark.svelte';
 	import Headphone from '../icons/Headphone.svelte';
@@ -118,6 +119,8 @@
 	export let toolSelectionTouched = false;
 	export let selectedSkillIds = [];
 	export let skillSelectionTouched = false;
+	const tr = (key: string, defaultValue: string, options: Record<string, any> = {}) =>
+		translateWithDefault($i18n, key, defaultValue, options);
 
 	export let imageGenerationEnabled = false;
 	export let imageGenerationOptions: {
@@ -1675,14 +1678,13 @@
 
 											{#if activeAssistant}
 												<Tooltip
-													content={`${$i18n.t('当前助手', { defaultValue: 'Current Assistant' })}: ${activeAssistant.name}${activeAssistant.description ? `\n${activeAssistant.description}` : ''}`}
+													content={`${tr('当前助手', 'Current Assistant')}: ${activeAssistant.name}${activeAssistant.description ? `\n${activeAssistant.description}` : ''}`}
 													placement="top"
 												>
 													<button
 														type="button"
 														class={`${featureBadgeBaseClass} px-2.5 py-1.5 gap-1.5 max-w-[13rem]`}
-														aria-label={$i18n.t('关闭助手 {{name}}', {
-															defaultValue: 'Close assistant {{name}}',
+														aria-label={tr('关闭助手 {{name}}', 'Close assistant {{name}}', {
 															name: activeAssistant.name
 														})}
 														on:click={() => {
@@ -1706,9 +1708,7 @@
 											{#if $_user}
 													{#if webSearchFeatureEnabled && ($_user.role === 'admin' || $_user?.permissions?.features?.web_search) && webSearchActive}
 													<Tooltip
-														content={`${currentWebSearchTooltip} ${$i18n.t('点击关闭', {
-															defaultValue: 'Click to disable'
-														})}`}
+														content={`${currentWebSearchTooltip} ${tr('点击关闭', 'Click to disable')}`}
 														placement="top"
 													>
 														<button

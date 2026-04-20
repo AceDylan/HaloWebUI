@@ -29,6 +29,7 @@
 		MAX_FEATURED_ASSISTANTS,
 		toChatAssistantSnapshot
 	} from '$lib/utils/chat-assistants';
+	import { translateWithDefault } from '$lib/i18n';
 
 	import Suggestions from './Suggestions.svelte';
 	import ModelIcon from '$lib/components/common/ModelIcon.svelte';
@@ -91,6 +92,8 @@
 	let dropTargetIdx: number | null = null;
 	let isMobileSortingMode = false;
 	let featuredAssistants: ChatAssistantSnapshot[] = [];
+	const tr = (key: string, defaultValue: string, options: Record<string, any> = {}) =>
+		translateWithDefault($i18n, key, defaultValue, options);
 
 	$: isMobileSortingMode = $mobile;
 	$: featuredAssistants = featuredIds
@@ -352,7 +355,7 @@
 			<div class="rounded-3xl border border-gray-200/60 bg-white/65 p-3 text-left shadow-sm backdrop-blur-xl dark:border-gray-700/30 dark:bg-white/[0.03]">
 				<div class="flex items-center justify-between gap-3 px-1">
 					<div class="text-xs font-medium text-gray-500 dark:text-gray-400">
-						{$i18n.t('精选助手', { defaultValue: 'Featured Assistants' })}
+						{tr('精选助手', 'Featured Assistants')}
 					</div>
 					<button
 						class="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium text-gray-500 transition hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-200"
@@ -364,10 +367,10 @@
 					>
 						{#if editMode}
 							<Check className="size-3.5" strokeWidth="2.25" />
-							<span>{$i18n.t('完成', { defaultValue: 'Done' })}</span>
+							<span>{tr('完成', 'Done')}</span>
 						{:else}
 							<Pencil className="size-3.5" strokeWidth="2.1" />
-							<span>{$i18n.t('管理', { defaultValue: 'Manage' })}</span>
+							<span>{tr('管理', 'Manage')}</span>
 						{/if}
 					</button>
 				</div>
@@ -472,7 +475,7 @@
 									<Plus className="size-4" />
 								</div>
 								<div class="text-xs font-medium">
-									{$i18n.t('添加助手', { defaultValue: 'Add Assistant' })}
+									{tr('添加助手', 'Add Assistant')}
 								</div>
 							</div>
 						</button>
@@ -481,17 +484,17 @@
 
 				{#if !editMode && featuredAssistants.length === 0}
 					<div class="mt-2 rounded-2xl border border-dashed border-gray-200/80 px-4 py-8 text-center text-sm text-gray-400 dark:border-gray-700/70 dark:text-gray-500">
-						{$i18n.t('暂无精选助手，点击右上角“管理”即可添加', {
-							defaultValue: 'No featured assistants yet. Click "Manage" in the top-right corner to add one.'
-						})}
+						{tr(
+							'暂无精选助手，点击右上角“管理”即可添加',
+							'No featured assistants yet. Click "Manage" in the top-right corner to add one.'
+						)}
 					</div>
 				{/if}
 
 				{#if editMode}
 					<div class="mt-3 flex items-center justify-between px-1">
 						<div class="text-xs text-gray-400 dark:text-gray-500">
-							{$i18n.t('最多 {{count}} 个精选助手', {
-								defaultValue: 'Up to {{count}} featured assistants',
+							{tr('最多 {{count}} 个精选助手', 'Up to {{count}} featured assistants', {
 								count: MAX_FEATURED_ASSISTANTS
 							})}
 						</div>
@@ -499,7 +502,7 @@
 							class="text-xs font-medium text-gray-500 transition hover:text-primary-600 dark:text-gray-400 dark:hover:text-primary-400"
 							on:click={handleResetFeaturedAssistants}
 						>
-							{$i18n.t('恢复默认', { defaultValue: 'Restore Defaults' })}
+							{tr('恢复默认', 'Restore Defaults')}
 						</button>
 					</div>
 				{/if}

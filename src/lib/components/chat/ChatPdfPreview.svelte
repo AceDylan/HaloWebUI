@@ -47,6 +47,7 @@
 				addMessages={noop}
 				readOnly={true}
 				showAllMessages={true}
+				forceExpandContent={true}
 				bottomPadding={false}
 				{autoScroll}
 			/>

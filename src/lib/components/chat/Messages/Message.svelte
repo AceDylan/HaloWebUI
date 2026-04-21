@@ -41,6 +41,7 @@
 	export let branchSupported = false;
 	export let triggerScroll;
 	export let readOnly = false;
+	export let forceExpandContent = false;
 </script>
 
 <div
@@ -93,6 +94,7 @@
 				{branchingMessageId}
 				{branchSupported}
 				{readOnly}
+				{forceExpandContent}
 			/>
 		{:else}
 			<MultiResponseMessages
@@ -115,6 +117,7 @@
 				{branchingMessageId}
 				{branchSupported}
 				{readOnly}
+				{forceExpandContent}
 			/>
 		{/if}
 	{/if}

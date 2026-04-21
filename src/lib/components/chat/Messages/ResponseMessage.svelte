@@ -212,6 +212,7 @@
 
 	export let isLastMessage = true;
 	export let readOnly = false;
+	export let forceExpandContent = false;
 
 	let buttonsContainerElement: HTMLDivElement;
 	let citationsRef: any = null;
@@ -1197,6 +1198,7 @@
 												content={message.content}
 												streaming={!message.done}
 												{isLastMessage}
+												forceExpand={forceExpandContent}
 												sources={message.sources}
 												floatingButtons={message?.done &&
 													!readOnly &&

@@ -51,6 +51,7 @@
 
 	export let readOnly = false;
 	export let showAllMessages = false;
+	export let forceExpandContent = false;
 
 	export let bottomPadding = false;
 	export let autoScroll;
@@ -453,6 +454,7 @@
 							{branchSupported}
 							{triggerScroll}
 							{readOnly}
+							{forceExpandContent}
 						/>
 					{/each}
 				</div>

@@ -77,6 +77,7 @@
 	export let actions = [];
 	export let streaming = false;
 	export let isLastMessage = false;
+	export let forceExpand = false;
 
 	export let onSourceClick = () => {};
 	export let onTaskClick = () => {};
@@ -250,7 +251,7 @@
 	let shouldCollapseHistoricalLongResponses = false;
 
 	$: shouldCollapseHistoricalLongResponses =
-		!isLastMessage && ($settings?.collapseHistoricalLongResponses ?? true);
+		!forceExpand && !isLastMessage && ($settings?.collapseHistoricalLongResponses ?? true);
 
 	$: currentMessageThreads = (($selectionThreadsStore.items ?? []) as SelectionThread[])
 		.filter((thread) => thread.sourceMessageId === id)

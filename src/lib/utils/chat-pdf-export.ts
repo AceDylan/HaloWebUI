@@ -14,8 +14,40 @@ type RgbaColor = {
 	a: number;
 };
 
+type PageSlice = {
+	offsetY: number;
+	sliceHeight: number;
+};
+
+type BlockRange = {
+	top: number;
+	bottom: number;
+};
+
 const PDF_PAGE_WIDTH_MM = 210;
 const PDF_PAGE_HEIGHT_MM = 297;
+const PRIMARY_BREAK_SELECTOR = [
+	'.pdf-export-header',
+	'[id^="message-"]'
+].join(', ');
+const SECONDARY_BREAK_SELECTOR = [
+	'[id^="message-"] p',
+	'[id^="message-"] ul',
+	'[id^="message-"] ol',
+	'[id^="message-"] li',
+	'[id^="message-"] h1',
+	'[id^="message-"] h2',
+	'[id^="message-"] h3',
+	'[id^="message-"] h4',
+	'[id^="message-"] h5',
+	'[id^="message-"] h6'
+].join(', ');
+const ATOMIC_BLOCK_SELECTOR = [
+	'[id^="message-"] pre',
+	'[id^="message-"] blockquote',
+	'[id^="message-"] table',
+	'[id^="message-"] img:not([alt="model profile"]):not([alt="profile"])'
+].join(', ');
 
 const MODE_CONFIG: Record<
 	ChatPdfExportMode,
@@ -232,22 +264,203 @@ const buildClone = (sourceElement: HTMLElement, mode: ChatPdfExportMode, width: 
 	return clone;
 };
 
+const collectBreakOffsets = (root: HTMLElement, selector: string, canvasWidth: number) => {
+	const rootRect = root.getBoundingClientRect();
+	const pxPerCssPixel = canvasWidth / Math.max(rootRect.width, 1);
+	const offsets = new Set<number>();
+
+	for (const element of root.querySelectorAll<HTMLElement>(selector)) {
+		const rect = element.getBoundingClientRect();
+		const top = Math.round((rect.top - rootRect.top) * pxPerCssPixel);
+		if (top > 0) {
+			offsets.add(top);
+		}
+	}
+
+	return Array.from(offsets).sort((left, right) => left - right);
+};
+
+const collectBlockRanges = (root: HTMLElement, selector: string, canvasWidth: number) => {
+	const rootRect = root.getBoundingClientRect();
+	const pxPerCssPixel = canvasWidth / Math.max(rootRect.width, 1);
+	const blocks: BlockRange[] = [];
+
+	for (const element of root.querySelectorAll<HTMLElement>(selector)) {
+		const rect = element.getBoundingClientRect();
+		const top = Math.round((rect.top - rootRect.top) * pxPerCssPixel);
+		const bottom = Math.round((rect.bottom - rootRect.top) * pxPerCssPixel);
+
+		if (bottom > top) {
+			blocks.push({ top, bottom });
+		}
+	}
+
+	return blocks.sort((left, right) => left.top - right.top);
+};
+
+const getBandInkScore = (
+	imageData: Uint8ClampedArray,
+	canvasWidth: number,
+	canvasHeight: number,
+	startRow: number,
+	bandHeight: number,
+	background: RgbaColor
+) => {
+	let inkPixels = 0;
+	let sampledPixels = 0;
+
+	for (let row = startRow; row < Math.min(startRow + bandHeight, canvasHeight); row += 1) {
+		for (let col = 0; col < canvasWidth; col += 2) {
+			const index = (row * canvasWidth + col) * 4;
+			const r = imageData[index];
+			const g = imageData[index + 1];
+			const b = imageData[index + 2];
+			const a = imageData[index + 3];
+
+			if (a < 12) {
+				sampledPixels += 1;
+				continue;
+			}
+
+			const distance =
+				Math.abs(r - background.r) +
+				Math.abs(g - background.g) +
+				Math.abs(b - background.b);
+
+			if (distance > 48) {
+				inkPixels += 1;
+			}
+
+			sampledPixels += 1;
+		}
+	}
+
+	return sampledPixels === 0 ? 1 : inkPixels / sampledPixels;
+};
+
+const findWhitespaceBreak = (
+	canvas: HTMLCanvasElement,
+	currentTop: number,
+	targetBottom: number,
+	minPageFill: number,
+	background: RgbaColor
+) => {
+	const ctx = canvas.getContext('2d');
+	if (!ctx) {
+		return null;
+	}
+
+	const searchHeight = Math.min(220, Math.max(Math.floor((targetBottom - currentTop) * 0.22), 80));
+	const searchStart = Math.max(currentTop + minPageFill, targetBottom - searchHeight);
+	const searchEnd = Math.max(searchStart, targetBottom - 12);
+	const imageData = ctx.getImageData(0, searchStart, canvas.width, searchEnd - searchStart + 1).data;
+
+	let bestRow = -1;
+	let bestScore = Number.POSITIVE_INFINITY;
+
+	for (let row = 0; row <= searchEnd - searchStart; row += 2) {
+		const absoluteRow = searchStart + row;
+		const score = getBandInkScore(imageData, canvas.width, searchEnd - searchStart + 1, row, 4, background);
+		if (score < bestScore) {
+			bestScore = score;
+			bestRow = absoluteRow;
+		}
+	}
+
+	return bestScore < 0.035 ? bestRow : null;
+};
+
+const buildPageSlices = (
+	canvas: HTMLCanvasElement,
+	root: HTMLElement,
+	pagePixelHeight: number,
+	background: RgbaColor
+) => {
+	const primaryBreakOffsets = collectBreakOffsets(root, PRIMARY_BREAK_SELECTOR, canvas.width);
+	const secondaryBreakOffsets = collectBreakOffsets(root, SECONDARY_BREAK_SELECTOR, canvas.width);
+	const messageRanges = collectBlockRanges(root, '[id^="message-"]', canvas.width);
+	const atomicRanges = collectBlockRanges(root, ATOMIC_BLOCK_SELECTOR, canvas.width);
+	const slices: PageSlice[] = [];
+	const minPageFill = Math.floor(pagePixelHeight * 0.62);
+	const minSliceHeight = Math.floor(pagePixelHeight * 0.35);
+	const preferredMessageFill = Math.floor(pagePixelHeight * 0.52);
+	let offsetY = 0;
+
+	while (offsetY < canvas.height) {
+		if (offsetY + pagePixelHeight >= canvas.height) {
+			slices.push({
+				offsetY,
+				sliceHeight: canvas.height - offsetY
+			});
+			break;
+		}
+
+		const targetBottom = offsetY + pagePixelHeight;
+		const crossingMessage = messageRanges.find(
+			(range) =>
+				range.top > offsetY + minSliceHeight &&
+				range.top < targetBottom &&
+				range.bottom > targetBottom &&
+				targetBottom - range.top < Math.min(180, pagePixelHeight * 0.22)
+		);
+		const crossingAtomic = atomicRanges.find(
+			(range) =>
+				range.top > offsetY + minSliceHeight &&
+				range.top < targetBottom &&
+				range.bottom > targetBottom &&
+				range.bottom - range.top < pagePixelHeight * 0.92
+		);
+
+		const primaryBreak = [...primaryBreakOffsets]
+			.reverse()
+			.find(
+				(offset) => offset >= offsetY + preferredMessageFill && offset <= targetBottom - 12
+			);
+		const secondaryBreak = [...secondaryBreakOffsets]
+			.reverse()
+			.find((offset) => offset >= offsetY + minPageFill && offset <= targetBottom - 12);
+
+		const whitespaceBreak =
+			crossingMessage === undefined &&
+			crossingAtomic === undefined &&
+			primaryBreak === undefined &&
+			secondaryBreak === undefined
+				? findWhitespaceBreak(canvas, offsetY, targetBottom, minPageFill, background)
+				: null;
+
+		const nextBreak =
+			crossingMessage?.top ??
+			crossingAtomic?.top ??
+			primaryBreak ??
+			secondaryBreak ??
+			whitespaceBreak ??
+			targetBottom;
+		const sliceHeight = Math.max(nextBreak - offsetY, minSliceHeight);
+
+		slices.push({
+			offsetY,
+			sliceHeight
+		});
+
+		offsetY += sliceHeight;
+	}
+
+	return slices;
+};
+
 const saveCanvasAsPdf = async (
 	canvas: HTMLCanvasElement,
 	title: string | null | undefined,
 	quality: number,
-	darkMode: boolean
+	darkMode: boolean,
+	pageSlices: PageSlice[]
 ) => {
 	const jspdfModule = await import('jspdf');
 	const JsPdf = (jspdfModule as any).jsPDF ?? (jspdfModule as any).default;
 	const pdf = new JsPdf('p', 'mm', 'a4');
-	const pagePixelHeight = Math.floor((canvas.width / PDF_PAGE_WIDTH_MM) * PDF_PAGE_HEIGHT_MM);
-
-	let offsetY = 0;
 	let page = 0;
 
-	while (offsetY < canvas.height) {
-		const sliceHeight = Math.min(pagePixelHeight, canvas.height - offsetY);
+	for (const { offsetY, sliceHeight } of pageSlices) {
 		const pageCanvas = document.createElement('canvas');
 		pageCanvas.width = canvas.width;
 		pageCanvas.height = sliceHeight;
@@ -272,8 +485,6 @@ const saveCanvasAsPdf = async (
 		}
 
 		pdf.addImage(imageData, 'JPEG', 0, 0, PDF_PAGE_WIDTH_MM, imageHeightMM);
-
-		offsetY += sliceHeight;
 		page += 1;
 	}
 
@@ -309,8 +520,24 @@ export const exportChatPdfFromElement = async ({
 			windowWidth: config.width,
 			logging: false
 		});
+		const pagePixelHeight = Math.floor((canvas.width / PDF_PAGE_WIDTH_MM) * PDF_PAGE_HEIGHT_MM);
+		const background =
+			parseCssColor(config.backgroundColor(darkMode)) ??
+			({
+				r: 255,
+				g: 255,
+				b: 255,
+				a: 1
+			} satisfies RgbaColor);
+		const pageSlices = buildPageSlices(canvas, clone, pagePixelHeight, background);
 
-		await saveCanvasAsPdf(canvas, title, config.quality, darkMode && mode === 'stylized');
+		await saveCanvasAsPdf(
+			canvas,
+			title,
+			config.quality,
+			darkMode && mode === 'stylized',
+			pageSlices
+		);
 	} finally {
 		clone.remove();
 	}

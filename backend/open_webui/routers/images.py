@@ -846,7 +846,6 @@ def _list_image_provider_sources(
     context = _normalize_context(context)
     credential_source = _normalize_credential_source(credential_source)
     cfg = request.app.state.config
-    connection_user = getattr(getattr(request, "state", None), "connection_user", None) or user
     image_api_config: dict[str, Any] = {}
 
     if provider == "openai":
@@ -911,7 +910,7 @@ def _list_image_provider_sources(
         return [settings_source] if settings_source is not None else []
 
     personal_urls, personal_keys, personal_cfgs = _get_provider_user_connection_bundle(
-        connection_user, provider
+        user, provider
     )
     shared_enabled = bool(getattr(cfg, "ENABLE_IMAGE_GENERATION_SHARED_KEY", False))
     shared_available = _shared_key_available(request, provider)
@@ -936,7 +935,7 @@ def _list_image_provider_sources(
             "key": str(api_key or "").strip(),
             "api_config": api_config,
             "connection_index": idx,
-            "cache_scope": f"{provider}:{context}:personal:{getattr(connection_user, 'id', 'anon')}:{idx}",
+            "cache_scope": f"{provider}:{context}:personal:{getattr(user, 'id', 'anon')}:{idx}",
         }
 
     def _list_personal_sources() -> list[dict[str, Any]]:
@@ -2021,33 +2020,35 @@ def set_image_model(request: Request, model: str):
     return request.app.state.config.IMAGE_GENERATION_MODEL
 
 
-def _get_default_image_model_for_engine(request: Request, engine: str) -> str:
-    normalized_engine = _normalize_engine(engine)
-    if normalized_engine == "openai":
+def get_image_model(request):
+    if request.app.state.config.IMAGE_GENERATION_ENGINE == "openai":
         return (
             request.app.state.config.IMAGE_GENERATION_MODEL
             if request.app.state.config.IMAGE_GENERATION_MODEL
             else "dall-e-2"
         )
-    elif normalized_engine == "gemini":
+    elif request.app.state.config.IMAGE_GENERATION_ENGINE == "gemini":
         return (
             request.app.state.config.IMAGE_GENERATION_MODEL
             if request.app.state.config.IMAGE_GENERATION_MODEL
             else "imagen-3.0-generate-002"
         )
-    elif normalized_engine == "grok":
+    elif request.app.state.config.IMAGE_GENERATION_ENGINE == "grok":
         return (
             request.app.state.config.IMAGE_GENERATION_MODEL
             if request.app.state.config.IMAGE_GENERATION_MODEL
             else "grok-imagine-image"
         )
-    elif normalized_engine == "comfyui":
+    elif request.app.state.config.IMAGE_GENERATION_ENGINE == "comfyui":
         return (
             request.app.state.config.IMAGE_GENERATION_MODEL
             if request.app.state.config.IMAGE_GENERATION_MODEL
             else ""
         )
-    elif normalized_engine == "automatic1111":
+    elif (
+        request.app.state.config.IMAGE_GENERATION_ENGINE == "automatic1111"
+        or request.app.state.config.IMAGE_GENERATION_ENGINE == ""
+    ):
         try:
             r = requests.get(
                 url=f"{request.app.state.config.AUTOMATIC1111_BASE_URL}/sdapi/v1/options",
@@ -2058,14 +2059,6 @@ def _get_default_image_model_for_engine(request: Request, engine: str) -> str:
             return options["sd_model_checkpoint"]
         except Exception as e:
             raise HTTPException(status_code=400, detail=ERROR_MESSAGES.DEFAULT(e))
-
-    return ""
-
-
-def get_image_model(request):
-    return _get_default_image_model_for_engine(
-        request, request.app.state.config.IMAGE_GENERATION_ENGINE
-    )
 
 
 class ImageConfigForm(BaseModel):
@@ -2184,7 +2177,6 @@ async def get_models(
 
 
 class GenerateImageForm(BaseModel):
-    provider: Optional[str] = None
     model: Optional[str] = None
     prompt: str
     size: Optional[str] = None
@@ -2197,28 +2189,6 @@ class GenerateImageForm(BaseModel):
     connection_index: Optional[int] = None
     steps: Optional[int] = None
     background: Optional[str] = None
-
-
-def _should_default_openai_image_size_to_auto(
-    *,
-    explicit_size_provided: bool,
-    configured_size: str,
-    selected_model: str,
-    selected_model_meta: Optional[dict[str, Any]],
-) -> bool:
-    if explicit_size_provided:
-        return False
-
-    generation_mode = str((selected_model_meta or {}).get("generation_mode") or "")
-    if generation_mode != "openai_images":
-        return False
-
-    normalized_model = _model_id_basename(selected_model).lower()
-    if not normalized_model.startswith("gpt-image"):
-        return False
-
-    normalized_size = str(configured_size or "").strip().lower()
-    return normalized_size in {"", "512x512"}
 
 
 def load_b64_image_data(b64_str):
@@ -2701,28 +2671,6 @@ def _post_json_with_attempts(
     raise RuntimeError("Failed to contact upstream image generation service")
 
 
-def _stringify_upstream_error_payload(payload: Any) -> str:
-    if payload is None:
-        return ""
-    if isinstance(payload, str):
-        return payload
-    try:
-        return json.dumps(payload, ensure_ascii=False, default=str)
-    except Exception:
-        return str(payload)
-
-
-def _upstream_error_mentions_unknown_parameter(payload: Any, parameter: str) -> bool:
-    text = _stringify_upstream_error_payload(payload).lower()
-    normalized_parameter = str(parameter or "").strip().lower()
-    if not text or not normalized_parameter:
-        return False
-
-    return (
-        "unknown parameter" in text or "unsupported parameter" in text
-    ) and normalized_parameter in text
-
-
 def _parse_upstream_json_response(
     response: requests.Response, *, default_message: str
 ) -> Any:
@@ -2746,7 +2694,7 @@ async def _generate_via_openai_images_endpoint(
     model_id: str,
     prompt: str,
     n: int,
-    size: Optional[str],
+    size: str,
     background: Optional[str],
     source: dict[str, Any],
 ) -> list[dict[str, str]]:
@@ -2758,11 +2706,9 @@ async def _generate_via_openai_images_endpoint(
         "model": model_id,
         "prompt": prompt,
         "n": n,
+        "size": size,
         "response_format": "b64_json",
     }
-
-    if size:
-        payload["size"] = size
 
     if background:
         payload["background"] = background
@@ -2777,34 +2723,13 @@ async def _generate_via_openai_images_endpoint(
         verify=REQUESTS_VERIFY,
     )
     if response.status_code >= 400:
-        error_payload = read_requests_error_payload(response)
-
-        if "response_format" in payload and _upstream_error_mentions_unknown_parameter(
-            error_payload, "response_format"
-        ):
-            retry_payload = dict(payload)
-            retry_payload.pop("response_format", None)
-            response = await asyncio.to_thread(
-                requests.post,
-                generation_url,
-                json=retry_payload,
-                headers=headers,
-                timeout=60,
-                verify=REQUESTS_VERIFY,
-            )
-            if response.status_code < 400:
-                payload = retry_payload
-            else:
-                error_payload = read_requests_error_payload(response)
-
-        if response.status_code >= 400:
-            raise HTTPException(
-                status_code=response.status_code,
-                detail=build_error_detail(
-                    error_payload,
-                    default="Failed to generate image via upstream /images/generations",
-                ),
-            )
+        raise HTTPException(
+            status_code=response.status_code,
+            detail=build_error_detail(
+                read_requests_error_payload(response),
+                default="Failed to generate image via upstream /images/generations",
+            ),
+        )
 
     response_body = _parse_upstream_json_response(
         response,
@@ -2913,7 +2838,7 @@ async def _generate_via_openai_chat_image(
     model_id: str,
     prompt: str,
     n: int,
-    size: Optional[str],
+    size: str,
     background: Optional[str],
     source: dict[str, Any],
     model_meta: Optional[dict[str, Any]] = None,
@@ -3171,19 +3096,10 @@ async def image_generations(
             detail="Image generation is disabled by the administrator.",
         )
 
-    effective_engine = _normalize_engine(
-        getattr(form_data, "provider", None)
-        or request.app.state.config.IMAGE_GENERATION_ENGINE
-    )
-    configured_size = str(getattr(request.app.state.config, "IMAGE_SIZE", "") or "").strip()
-    effective_size = configured_size
-    explicit_size_provided = form_data.size is not None
+    effective_size = request.app.state.config.IMAGE_SIZE
     if form_data.size is not None:
-        normalized_size = str(form_data.size).strip().lower()
-        if normalized_size == "auto" and effective_engine == "openai":
-            effective_size = "auto"
-        elif re.match(r"^\d+x\d+$", normalized_size):
-            effective_size = normalized_size
+        if re.match(r"^\d+x\d+$", form_data.size):
+            effective_size = form_data.size
         else:
             raise HTTPException(
                 status_code=400,
@@ -3207,20 +3123,14 @@ async def image_generations(
     if not requested_image_size:
         requested_image_size = _size_to_gemini_image_size(effective_size)
 
+    width, height = tuple(map(int, effective_size.split("x")))
     selected_model = str(
-        form_data.model
-        or (
-            request.app.state.config.IMAGE_GENERATION_MODEL
-            if effective_engine
-            == _normalize_engine(request.app.state.config.IMAGE_GENERATION_ENGINE)
-            else ""
-        )
-        or ""
+        form_data.model or request.app.state.config.IMAGE_GENERATION_MODEL or ""
     ).strip()
 
     r = None
     try:
-        if effective_engine == "openai":
+        if request.app.state.config.IMAGE_GENERATION_ENGINE == "openai":
             credential_source = _normalize_credential_source(form_data.credential_source)
             source: Optional[dict[str, Any]] = None
             discovered_models: Optional[list[dict[str, Any]]] = None
@@ -3272,7 +3182,7 @@ async def image_generations(
                     selected_model_meta = discovered_models[0]
                 selected_model = (
                     str((selected_model_meta or {}).get("id") or "").strip()
-                    or _get_default_image_model_for_engine(request, effective_engine)
+                    or get_image_model(request)
                 )
 
             if not selected_model_meta and selected_model:
@@ -3296,20 +3206,10 @@ async def image_generations(
                 if (selected_model_meta or {}).get("supports_background")
                 else None
             )
-            requested_openai_size = (
-                "auto"
-                if _should_default_openai_image_size_to_auto(
-                    explicit_size_provided=explicit_size_provided,
-                    configured_size=configured_size,
-                    selected_model=selected_model,
-                    selected_model_meta=selected_model_meta,
-                )
-                else effective_size
-            )
 
             try:
                 log.info(
-                    f"image_generation user_id={user.id} engine=openai credential_source={source.get('effective_source') or credential_source} connection_index={source.get('connection_index') if source.get('connection_index') is not None else ''} model={selected_model or ''} generation_mode={generation_mode} size={requested_openai_size or ''} n={requested_n} steps={(form_data.steps if form_data.steps is not None else '')}"
+                    f"image_generation user_id={user.id} engine=openai credential_source={source.get('effective_source') or credential_source} connection_index={source.get('connection_index') if source.get('connection_index') is not None else ''} model={selected_model or ''} generation_mode={generation_mode} size={effective_size} n={requested_n} steps={(form_data.steps if form_data.steps is not None else '')}"
                 )
             except Exception:
                 pass
@@ -3321,7 +3221,7 @@ async def image_generations(
                     model_id=selected_model,
                     prompt=form_data.prompt,
                     n=requested_n,
-                    size=requested_openai_size,
+                    size=effective_size,
                     background=background,
                     source=source,
                     model_meta=selected_model_meta,
@@ -3346,12 +3246,12 @@ async def image_generations(
                 model_id=selected_model,
                 prompt=form_data.prompt,
                 n=requested_n,
-                size=requested_openai_size,
+                size=effective_size,
                 background=background,
                 source=source,
             )
 
-        elif effective_engine == "gemini":
+        elif request.app.state.config.IMAGE_GENERATION_ENGINE == "gemini":
             credential_source = _normalize_credential_source(form_data.credential_source)
             source: Optional[dict[str, Any]] = None
             discovered_models: Optional[list[dict[str, Any]]] = None
@@ -3402,7 +3302,7 @@ async def image_generations(
                     selected_model_meta = discovered_models[0]
                 selected_model = (
                     str((selected_model_meta or {}).get("id") or "").strip()
-                    or _get_default_image_model_for_engine(request, effective_engine)
+                    or get_image_model(request)
                 )
 
             if not selected_model_meta and selected_model:
@@ -3460,7 +3360,7 @@ async def image_generations(
                 source=source,
             )
 
-        elif effective_engine == "grok":
+        elif request.app.state.config.IMAGE_GENERATION_ENGINE == "grok":
             credential_source = _normalize_credential_source(form_data.credential_source)
             source: Optional[dict[str, Any]] = None
             discovered_models: Optional[list[dict[str, Any]]] = None
@@ -3511,7 +3411,7 @@ async def image_generations(
                     selected_model_meta = discovered_models[0]
                 selected_model = (
                     str((selected_model_meta or {}).get("id") or "").strip()
-                    or _get_default_image_model_for_engine(request, effective_engine)
+                    or get_image_model(request)
                 )
 
             if not selected_model_meta and selected_model:
@@ -3545,12 +3445,11 @@ async def image_generations(
                 fallback_size=effective_size,
             )
 
-        elif effective_engine == "comfyui":
+        elif request.app.state.config.IMAGE_GENERATION_ENGINE == "comfyui":
             workflow = _parse_comfyui_workflow_config(request)
             _validate_comfyui_workflow_node_mapping(
                 workflow, request.app.state.config.COMFYUI_WORKFLOW_NODES
             )
-            width, height = tuple(map(int, effective_size.split("x")))
             data = {
                 "prompt": form_data.prompt,
                 "width": width,
@@ -3617,11 +3516,13 @@ async def image_generations(
                 )
                 images.append({"url": url})
             return images
-        elif effective_engine == "automatic1111":
+        elif (
+            request.app.state.config.IMAGE_GENERATION_ENGINE == "automatic1111"
+            or request.app.state.config.IMAGE_GENERATION_ENGINE == ""
+        ):
             if form_data.model:
                 set_image_model(request, form_data.model)
 
-            width, height = tuple(map(int, effective_size.split("x")))
             data = {
                 "prompt": form_data.prompt,
                 "batch_size": form_data.n,

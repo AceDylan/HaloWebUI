@@ -47,12 +47,7 @@ from open_webui.routers.retrieval import (
     process_file,
     process_web_search,
 )
-from open_webui.routers.images import (
-    GenerateImageForm,
-    _classify_gemini_image_model,
-    _classify_openai_image_model,
-    image_generations,
-)
+from open_webui.routers.images import image_generations, GenerateImageForm
 from open_webui.routers.openai import (
     NATIVE_FILE_INPUT_STATUS_DISABLED_BY_CONFIG,
     NATIVE_FILE_INPUT_STATUS_PROTOCOL_NOT_ATTEMPTED,
@@ -2796,275 +2791,6 @@ async def chat_web_search_handler(
     return form_data
 
 
-def _get_chat_image_generation_options(extra_params: dict) -> dict[str, Any]:
-    options = extra_params.get("__metadata__", {}).get("image_generation_options", {})
-    return options if isinstance(options, dict) else {}
-
-
-async def _resolve_chat_connection_user(request: Request, user: UserModel, model: dict):
-    connection_user = getattr(getattr(request, "state", None), "connection_user", None)
-    if connection_user is not None:
-        return connection_user
-
-    try:
-        model_info = Models.get_model_by_id((model or {}).get("id"))
-        if model_info and model_info.user_id and model_info.user_id != user.id:
-            owner = Users.get_user_by_id(model_info.user_id)
-            if owner:
-                request.state.connection_user = owner
-                return owner
-    except Exception:
-        pass
-
-    return user
-
-
-async def _resolve_selected_chat_image_target(
-    request: Request, user: UserModel, model: dict, model_id: str
-) -> Optional[dict[str, Any]]:
-    if not isinstance(model, dict):
-        return None
-
-    connection_user = await _resolve_chat_connection_user(request, user, model)
-    selected_model_id = str(model.get("id") or model_id or "").strip()
-    original_model_id = str(model.get("original_id") or selected_model_id).strip()
-    source_hint = {
-        "effective_source": "personal",
-        "connection_index": model.get("urlIdx"),
-    }
-
-    if model.get("gemini") is not None or model.get("owned_by") in {"google", "gemini"}:
-        base_urls, keys, cfgs = _get_gemini_user_config(connection_user)
-        if not base_urls:
-            return None
-
-        connection_index, _url, _key, _api_config = _resolve_gemini_connection_by_model_id(
-            selected_model_id, base_urls, keys, cfgs
-        )
-        raw_model = model.get("gemini") or {
-            "id": original_model_id,
-            "name": f"models/{original_model_id}",
-            "displayName": model.get("name") or original_model_id,
-            "supportedGenerationMethods": ["generateContent"],
-        }
-        classified = _classify_gemini_image_model(raw_model, source=source_hint)
-        if not classified:
-            return None
-
-        return {
-            "provider": "gemini",
-            "model_id": original_model_id,
-            "credential_source": "personal",
-            "connection_index": connection_index,
-            "connection_user": connection_user,
-            "model_meta": classified,
-        }
-
-    if (model or {}).get("owned_by") == "openai" or isinstance((model or {}).get("openai"), dict):
-        base_urls, keys, cfgs = _get_openai_user_config(connection_user)
-        if not base_urls:
-            return None
-
-        connection_index, url, _key, api_config = _resolve_openai_connection_by_model_id(
-            selected_model_id, base_urls, keys, cfgs
-        )
-        raw_model = model.get("openai") or {
-            "id": original_model_id,
-            "name": model.get("name") or original_model_id,
-        }
-        classified = _classify_openai_image_model(
-            raw_model,
-            base_url=url,
-            api_config=api_config,
-            source=source_hint,
-        )
-        if not classified:
-            return None
-
-        return {
-            "provider": "openai",
-            "model_id": original_model_id,
-            "credential_source": "personal",
-            "connection_index": connection_index,
-            "connection_user": connection_user,
-            "model_meta": classified,
-        }
-
-    return None
-
-
-async def _resolve_chat_image_prompt(request: Request, form_data: dict, user) -> str:
-    messages = form_data.get("messages", []) or []
-    user_message = get_last_user_message(messages)
-    prompt = user_message
-
-    if not request.app.state.config.ENABLE_IMAGE_PROMPT_GENERATION:
-        return prompt
-
-    try:
-        res = await generate_image_prompt(
-            request,
-            {
-                "model": form_data["model"],
-                "messages": messages,
-            },
-            user,
-        )
-        response = _get_generation_response_content(res)
-        if not response:
-            raise ValueError("Image prompt generation returned no content")
-
-        bracket_start = response.find("{")
-        bracket_end = response.rfind("}") + 1
-        if bracket_start == -1 or bracket_end == -1:
-            raise ValueError("No JSON object found in the response")
-
-        parsed = json.loads(response[bracket_start:bracket_end])
-        generated_prompt = parsed.get("prompt")
-        return generated_prompt if isinstance(generated_prompt, str) and generated_prompt else prompt
-    except Exception:
-        return prompt
-
-
-async def _generate_images_for_chat_request(
-    request: Request,
-    form_data: dict,
-    extra_params: dict,
-    user,
-    *,
-    image_target: Optional[dict[str, Any]] = None,
-) -> list[dict[str, str]]:
-    prompt = (
-        get_last_user_message(form_data.get("messages", []) or [])
-        if image_target is not None
-        else await _resolve_chat_image_prompt(request, form_data, user)
-    )
-    image_generation_options = _get_chat_image_generation_options(extra_params)
-
-    payload = {
-        "prompt": prompt,
-        **{
-            key: image_generation_options.get(key)
-            for key in (
-                "model",
-                "size",
-                "image_size",
-                "aspect_ratio",
-                "n",
-                "negative_prompt",
-                "credential_source",
-                "connection_index",
-                "steps",
-                "background",
-                "resolution",
-            )
-            if image_generation_options.get(key) is not None
-        },
-    }
-
-    if image_target:
-        payload.update(
-            {
-                "provider": image_target.get("provider"),
-                "model": image_target.get("model_id"),
-                "credential_source": image_target.get("credential_source"),
-                "connection_index": image_target.get("connection_index"),
-            }
-        )
-
-    previous_connection_user = getattr(getattr(request, "state", None), "connection_user", None)
-    if image_target and image_target.get("connection_user") is not None:
-        request.state.connection_user = image_target["connection_user"]
-
-    try:
-        return await image_generations(
-            request=request,
-            form_data=GenerateImageForm(**payload),
-            user=user,
-        )
-    finally:
-        if image_target and image_target.get("connection_user") is not None:
-            request.state.connection_user = previous_connection_user
-
-
-def _build_generated_image_chat_response(
-    *,
-    model_id: str,
-    images: list[dict[str, str]],
-) -> dict[str, Any]:
-    content: list[dict[str, Any]] = [
-        {
-            "type": "text",
-            "text": "已根据你的描述生成图片。",
-        }
-    ]
-
-    for image in images:
-        image_url = str((image or {}).get("url") or "").strip()
-        if not image_url:
-            continue
-        content.append(
-            {
-                "type": "image_url",
-                "image_url": {"url": image_url},
-            }
-        )
-
-    return {
-        "id": f"chatcmpl-{uuid4().hex}",
-        "object": "chat.completion",
-        "created": int(time.time()),
-        "model": model_id,
-        "choices": [
-            {
-                "index": 0,
-                "message": {
-                    "role": "assistant",
-                    "content": content,
-                },
-                "finish_reason": "stop",
-            }
-        ],
-    }
-
-
-async def _generate_direct_image_chat_response(
-    request: Request,
-    form_data: dict,
-    extra_params: dict,
-    user,
-    *,
-    image_target: dict[str, Any],
-) -> dict[str, Any]:
-    __event_emitter__ = extra_params["__event_emitter__"]
-    await __event_emitter__(
-        {
-            "type": "status",
-            "data": {"description": "Generating an image", "done": False},
-        }
-    )
-
-    images = await _generate_images_for_chat_request(
-        request,
-        form_data,
-        extra_params,
-        user,
-        image_target=image_target,
-    )
-
-    await __event_emitter__(
-        {
-            "type": "status",
-            "data": {"description": "Generated an image", "done": True},
-        }
-    )
-
-    return _build_generated_image_chat_response(
-        model_id=str(form_data.get("model") or image_target.get("model_id") or ""),
-        images=images,
-    )
-
-
 async def chat_image_generation_handler(
     request: Request, form_data: dict, extra_params: dict, user
 ):
@@ -3076,14 +2802,77 @@ async def chat_image_generation_handler(
         }
     )
 
+    messages = form_data["messages"]
+    user_message = get_last_user_message(messages)
+
+    prompt = user_message
+    negative_prompt = ""
+    image_generation_options = (
+        extra_params.get("__metadata__", {})
+        .get("image_generation_options", {})
+    )
+    image_generation_options = (
+        image_generation_options if isinstance(image_generation_options, dict) else {}
+    )
+
+    if request.app.state.config.ENABLE_IMAGE_PROMPT_GENERATION:
+        try:
+            res = await generate_image_prompt(
+                request,
+                {
+                    "model": form_data["model"],
+                    "messages": messages,
+                },
+                user,
+            )
+            response = _get_generation_response_content(res)
+            if not response:
+                raise ValueError("Image prompt generation returned no content")
+
+            try:
+                bracket_start = response.find("{")
+                bracket_end = response.rfind("}") + 1
+
+                if bracket_start == -1 or bracket_end == -1:
+                    raise Exception("No JSON object found in the response")
+
+                json_str = response[bracket_start:bracket_end]
+                parsed = json.loads(json_str)
+                prompt = parsed.get("prompt", [])
+            except Exception as e:
+                prompt = user_message
+
+        except Exception as e:
+            log.exception(e)
+            prompt = user_message
+
     system_message_content = ""
 
     try:
-        images = await _generate_images_for_chat_request(
-            request,
-            form_data,
-            extra_params,
-            user,
+        images = await image_generations(
+            request=request,
+            form_data=GenerateImageForm(
+                **{
+                    "prompt": prompt,
+                    **{
+                        key: image_generation_options.get(key)
+                        for key in (
+                            "model",
+                            "size",
+                            "image_size",
+                            "aspect_ratio",
+                            "n",
+                            "negative_prompt",
+                            "credential_source",
+                            "connection_index",
+                            "steps",
+                            "background",
+                        )
+                        if image_generation_options.get(key) is not None
+                    },
+                }
+            ),
+            user=user,
         )
 
         await __event_emitter__(
@@ -3380,24 +3169,9 @@ async def process_chat_payload(request, form_data, user, metadata, model):
         raise Exception(f"Error: {e}")
 
     features = form_data.pop("features", None)
-    if isinstance(features, dict) and isinstance(features.get("image_generation_options"), dict):
-        metadata["image_generation_options"] = features["image_generation_options"]
-
-    direct_image_target = await _resolve_selected_chat_image_target(
-        request, user, model, form_data.get("model", "")
-    )
-    if direct_image_target is not None:
-        metadata["precomputed_chat_response"] = await _generate_direct_image_chat_response(
-            request,
-            form_data,
-            extra_params,
-            user,
-            image_target=direct_image_target,
-        )
-        form_data["metadata"] = metadata
-        return form_data, metadata, events
-
     if features:
+        if isinstance(features.get("image_generation_options"), dict):
+            metadata["image_generation_options"] = features["image_generation_options"]
         web_search_strategy = _resolve_web_search_strategy(
             request, user, model, form_data.get("model", ""), features
         )

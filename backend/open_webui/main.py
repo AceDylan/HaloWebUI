@@ -1558,7 +1558,6 @@ async def chat_completion(
         form_data, metadata, events = await process_chat_payload(
             request, form_data, user, metadata, model
         )
-        precomputed_chat_response = metadata.pop("precomputed_chat_response", None)
         request.state.metadata = metadata
 
     except Exception as e:
@@ -1579,18 +1578,6 @@ async def chat_completion(
         )
 
     try:
-        if precomputed_chat_response is not None:
-            return await process_chat_response(
-                request,
-                precomputed_chat_response,
-                form_data,
-                user,
-                metadata,
-                model,
-                events,
-                {},
-            )
-
         _emitter = get_event_emitter(metadata)
         if _emitter:
             await _emitter(

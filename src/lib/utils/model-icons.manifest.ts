@@ -60,6 +60,7 @@ export const MODEL_ICON_FILES = [
 	"gpt-image-1-mini.png",
 	"gpt-image-1.5.png",
 	"gpt-image-1.png",
+	"gpt-image-2.png",
 	"gpt-oss-120b.png",
 	"gpt-oss-20b.png",
 	"gpt-realtime-mini.png",

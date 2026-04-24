@@ -22,6 +22,99 @@ def _make_user():
     )
 
 
+def test_send_openai_image_request_uses_httpx_json(monkeypatch):
+    captured = {}
+
+    class FakeResponse:
+        status_code = 200
+        headers = {"content-type": "application/json"}
+        text = json.dumps({"data": []})
+
+    class FakeAsyncClient:
+        def __init__(self, **kwargs):
+            captured["client_kwargs"] = kwargs
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        async def post(self, url, **kwargs):
+            captured["url"] = url
+            captured["post_kwargs"] = kwargs
+            return FakeResponse()
+
+    monkeypatch.setattr(images_router.httpx, "AsyncClient", FakeAsyncClient)
+
+    result = asyncio.run(
+        images_router._send_openai_image_request(
+            url="https://api.openai.com/v1/images/generations",
+            headers={"Authorization": "Bearer test"},
+            request_kind="json",
+            json_body={"model": "gpt-image-2", "prompt": "cat"},
+        )
+    )
+
+    assert result["status"] == 200
+    assert captured["client_kwargs"]["trust_env"] is True
+    assert captured["post_kwargs"]["json"]["model"] == "gpt-image-2"
+    assert captured["post_kwargs"]["files"] is None
+
+
+def test_send_openai_image_request_uses_httpx_multipart(monkeypatch):
+    captured = {}
+
+    class FakeResponse:
+        status_code = 200
+        headers = {"content-type": "application/json"}
+        text = json.dumps({"data": []})
+
+    class FakeAsyncClient:
+        def __init__(self, **kwargs):
+            captured["client_kwargs"] = kwargs
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        async def post(self, url, **kwargs):
+            captured["url"] = url
+            captured["post_kwargs"] = kwargs
+            return FakeResponse()
+
+    monkeypatch.setattr(images_router.httpx, "AsyncClient", FakeAsyncClient)
+
+    asyncio.run(
+        images_router._send_openai_image_request(
+            url="https://api.openai.com/v1/images/edits",
+            headers={"Authorization": "Bearer test", "Content-Type": "bad"},
+            request_kind="multipart",
+            form_fields={"model": "gpt-image-2", "prompt": "cat", "n": 1},
+            files=[
+                {
+                    "field_name": "image",
+                    "filename": "image.png",
+                    "mime": "image/png",
+                    "data": b"png-bytes",
+                }
+            ],
+        )
+    )
+
+    assert "Content-Type" not in captured["post_kwargs"]["headers"]
+    assert captured["post_kwargs"]["data"] == {
+        "model": "gpt-image-2",
+        "prompt": "cat",
+        "n": "1",
+    }
+    assert captured["post_kwargs"]["files"] == [
+        ("image", ("image.png", b"png-bytes", "image/png"))
+    ]
+
+
 def test_node_openai_image_helper_does_not_require_open_as_blob():
     helper_path = _BACKEND_DIR / "open_webui" / "utils" / "openai-image-fetch.mjs"
     helper_source = helper_path.read_text(encoding="utf-8")

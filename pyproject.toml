@@ -16,6 +16,7 @@ dependencies = [
     "passlib[bcrypt]==1.7.4",
 
     "requests==2.32.3",
+    "httpx==0.28.1",
     "aiohttp==3.11.11",
     "async-timeout",
     "aiocache",

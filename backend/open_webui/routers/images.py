@@ -12,6 +12,7 @@ from typing import Any, Optional
 from urllib.parse import urlparse
 
 import aiohttp
+import httpx
 import requests
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, status
 from open_webui.config import CACHE_DIR
@@ -2994,7 +2995,8 @@ async def _send_openai_image_request(
     files: Optional[list[dict[str, Any]]] = None,
 ) -> dict[str, Any]:
     request_headers = dict(headers)
-    request_data: Any = None
+    request_data: Optional[dict[str, str]] = None
+    request_files: Optional[list[tuple[str, tuple[str, bytes, str]]]] = None
     request_json: Optional[dict[str, Any]] = None
 
     if request_kind == "json":
@@ -3005,38 +3007,46 @@ async def _send_openai_image_request(
             for key, value in request_headers.items()
             if key.lower() not in {"content-type", "content-length"}
         }
-        form = aiohttp.FormData()
+        request_data = {}
         for key, value in (form_fields or {}).items():
             if value is None:
                 continue
-            form.add_field(key, str(value))
+            request_data[key] = str(value)
+        request_files = []
         for file_item in files or []:
-            form.add_field(
-                str(file_item.get("field_name") or "file"),
-                file_item.get("data") or b"",
-                filename=str(file_item.get("filename") or "file.bin"),
-                content_type=str(file_item.get("mime") or "application/octet-stream"),
+            request_files.append(
+                (
+                    str(file_item.get("field_name") or "file"),
+                    (
+                        str(file_item.get("filename") or "file.bin"),
+                        file_item.get("data") or b"",
+                        str(file_item.get("mime") or "application/octet-stream"),
+                    ),
+                )
             )
-        request_data = form
     else:
         raise RuntimeError(f"Unsupported OpenAI image request kind: {request_kind}")
 
     started_at = time.monotonic()
     try:
-        timeout = aiohttp.ClientTimeout(total=AIOHTTP_CLIENT_TIMEOUT)
-        async with aiohttp.ClientSession(trust_env=True, timeout=timeout) as session:
-            response = await session.post(
+        timeout = None if AIOHTTP_CLIENT_TIMEOUT is None else float(AIOHTTP_CLIENT_TIMEOUT)
+        async with httpx.AsyncClient(
+            timeout=timeout,
+            trust_env=True,
+            verify=REQUESTS_VERIFY,
+            follow_redirects=True,
+        ) as client:
+            response = await client.post(
                 url,
                 headers=request_headers,
                 json=request_json,
                 data=request_data,
-                ssl=AIOHTTP_CLIENT_SESSION_SSL,
+                files=request_files,
             )
-            response_body = await response.text()
             return {
-                "status": response.status,
+                "status": response.status_code,
                 "headers": dict(response.headers),
-                "response_body": response_body,
+                "response_body": response.text,
                 "elapsed_ms": int((time.monotonic() - started_at) * 1000),
             }
     except Exception as error:

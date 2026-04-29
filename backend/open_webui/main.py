@@ -49,7 +49,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.gzip import GZipMiddleware
-from starlette.responses import Response, StreamingResponse
+from starlette.responses import FileResponse, Response, StreamingResponse
 
 
 from open_webui.utils import logger
@@ -2217,6 +2217,27 @@ async def get_manifest_json():
             },
         ],
     }
+
+
+@app.get("/sw.js")
+async def get_service_worker():
+    sw_candidates = [
+        FRONTEND_BUILD_DIR / "sw.js",
+        BASE_DIR / "static" / "sw.js",
+        STATIC_DIR / "sw.js",
+    ]
+
+    for sw_path in sw_candidates:
+        try:
+            if sw_path.exists():
+                response = FileResponse(sw_path, media_type="application/javascript")
+                response.headers["Cache-Control"] = "no-cache"
+                response.headers["Service-Worker-Allowed"] = "/"
+                return response
+        except Exception as exc:
+            log.warning(f"Failed to load service worker from {sw_path}: {exc}")
+
+    raise HTTPException(status_code=404, detail="Service worker not found")
 
 
 @app.get("/opensearch.xml")

@@ -51,6 +51,7 @@
 	let builtinModelMeta: ImageGenerationModel | null = null;
 	let builtinRequestKey = '';
 	let currentModelIdentity = '';
+	let openaiRouteSelectValue = 'auto';
 
 	let customLoading = false;
 	let customFunctionId = '';
@@ -88,7 +89,7 @@
 		if (generationMode.startsWith('gemini_')) {
 			return 'gemini';
 		}
-		if (generationMode === 'xai_images' || model?.supports_resolution) {
+		if (generationMode === 'xai_images') {
 			return 'grok';
 		}
 		return '';
@@ -97,7 +98,19 @@
 	const getOpenAIImageRouteOptions = (model: ImageGenerationModel | null) => {
 		const routes = Array.isArray(model?.supported_image_routes) ? model.supported_image_routes : [];
 		const hasRoute = (route: string) => routes.includes(route);
-		const options = [{ value: 'auto', label: tr('普通生图', 'Default') }];
+		const hasDefaultRoute = ['generations', 'chat', 'responses'].some(hasRoute);
+		const options = hasDefaultRoute
+			? [{ value: 'auto', label: tr('普通生图', 'Default') }]
+			: hasRoute('edits')
+				? [
+						{
+							value: '',
+							label: tr('请选择接口', 'Select route'),
+							disabled: true,
+							description: tr('该模型只有编辑接口，需要手动选择。', 'This model only supports edit mode.')
+						}
+					]
+				: [];
 
 		if (hasRoute('chat') || model?.generation_mode === 'openai_chat_image') {
 			options.push({ value: 'chat', label: tr('对话图片', 'Chat Image') });
@@ -280,6 +293,11 @@
 		label: option.label
 	}));
 	$: openaiRouteOptions = getOpenAIImageRouteOptions(builtinModelMeta);
+	$: openaiRouteSelectValue = openaiRouteOptions.some(
+		(option) => option.value === `${imageGenerationOptions?.image_route_mode ?? 'auto'}`
+	)
+		? `${imageGenerationOptions?.image_route_mode ?? 'auto'}`
+		: (openaiRouteOptions[0]?.value ?? '');
 	$: if (builtinEngine === 'openai' && imageGenerationOptions?.image_route_mode) {
 		const selectedRouteMode = `${imageGenerationOptions.image_route_mode}`.trim();
 		if (!openaiRouteOptions.some((option) => option.value === selectedRouteMode)) {
@@ -417,13 +435,13 @@
 							</div>
 						{/if}
 					{:else if showBuiltinPanel}
-						{#if builtinEngine === 'openai'}
+						{#if builtinEngine === 'openai' && openaiRouteOptions.length > 0}
 							<div class="space-y-1.5">
 								<div class="text-xs font-medium text-gray-500 dark:text-gray-400">
 									{tr('接口模式', 'Route Mode')}
 								</div>
 								<HaloSelect
-									value={`${imageGenerationOptions?.image_route_mode ?? 'auto'}`}
+									value={openaiRouteSelectValue}
 									options={openaiRouteOptions}
 									className="w-full text-xs"
 									on:change={(e) => {

@@ -53,6 +53,16 @@ def test_image_model_detection_covers_gemini_3_image_preview_like_cherry_studio(
     )
 
 
+def test_image_model_detection_excludes_grok_imagine_video():
+    assert not is_dedicated_image_generation_model(
+        {
+            "id": "grok-imagine-video",
+            "name": "grok-imagine-video",
+            "info": {"base_model_id": "grok-imagine-video"},
+        }
+    )
+
+
 def test_dedicated_image_model_uses_current_chat_model_before_admin_default():
     captured = {}
 

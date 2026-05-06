@@ -71,6 +71,21 @@ def test_openai_chat_completions_endpoint_prefers_chat_image_route():
     assert classified["default_image_route"] == "chat"
 
 
+def test_openai_chat_completions_endpoint_alone_does_not_make_image_model():
+    classified = _classify_openai_image_model(
+        {
+            "id": "gpt-4o-mini",
+            "name": "gpt-4o-mini",
+            "endpoints": ["/v1/chat/completions"],
+        },
+        base_url="https://relay.example/v1",
+        api_config={},
+        source={"effective_source": "personal", "provider": "openai"},
+    )
+
+    assert classified is None
+
+
 def test_openai_grok_imagine_video_is_not_detected_as_image_model():
     classified = _classify_openai_image_model(
         {
@@ -102,7 +117,7 @@ def test_openai_official_gpt_image_family_prefers_images_endpoint_mode():
     assert classified["supports_background"] is True
 
 
-def test_official_xai_openai_compat_models_use_xai_images_mode():
+def test_openai_compat_xai_named_model_stays_on_openai_image_route():
     classified = _classify_openai_image_model(
         {
             "id": "grok-imagine-image",
@@ -114,9 +129,99 @@ def test_official_xai_openai_compat_models_use_xai_images_mode():
     )
 
     assert classified is not None
-    assert classified["generation_mode"] == "xai_images"
-    assert classified["size_mode"] == "aspect_ratio"
-    assert classified["supports_resolution"] is True
+    assert classified["generation_mode"] == "openai_images"
+    assert classified["supported_image_routes"] == ["generations"]
+    assert classified["default_image_route"] == "generations"
+    assert classified["supports_resolution"] is False
+
+
+def test_openai_video_endpoint_only_model_is_not_detected_as_image_model():
+    classified = _classify_openai_image_model(
+        {
+            "id": "grok-imagine-image",
+            "name": "Grok Imagine Image",
+            "endpoints": ["/v1/videos/generations"],
+            "description": "Text to video generation model.",
+        },
+        base_url="https://relay.example/v1",
+        api_config={},
+        source={"effective_source": "personal", "provider": "openai"},
+    )
+
+    assert classified is None
+
+
+def test_openai_model_with_image_and_video_endpoints_keeps_image_route():
+    classified = _classify_openai_image_model(
+        {
+            "id": "media-image-video",
+            "name": "Media Image Video",
+            "endpoints": ["/v1/images/generations", "/v1/videos/generations"],
+            "description": "Supports image generation and video generation.",
+        },
+        base_url="https://relay.example/v1",
+        api_config={},
+        source={"effective_source": "personal", "provider": "openai"},
+    )
+
+    assert classified is not None
+    assert classified["generation_mode"] == "openai_images"
+    assert classified["supported_image_routes"] == ["generations"]
+    assert classified["default_image_route"] == "generations"
+
+
+def test_openai_edit_only_endpoint_does_not_gain_generation_route():
+    classified = _classify_openai_image_model(
+        {
+            "id": "gpt-image-edit-only",
+            "name": "GPT Image Edit Only",
+            "endpoints": ["/v1/images/edits"],
+        },
+        base_url="https://relay.example/v1",
+        api_config={},
+        source={"effective_source": "personal", "provider": "openai"},
+    )
+
+    assert classified is not None
+    assert classified["generation_mode"] == "openai_images"
+    assert classified["supported_image_routes"] == ["edits"]
+    assert classified["default_image_route"] == ""
+
+
+def test_openai_supported_endpoint_types_detect_image_and_responses_routes():
+    classified = _classify_openai_image_model(
+        {
+            "id": "relay-image-preview",
+            "name": "Relay Image Preview",
+            "supported_endpoint_types": ["openai-response", "image-generation"],
+        },
+        base_url="https://relay.example/v1",
+        api_config={},
+        source={"effective_source": "personal", "provider": "openai"},
+    )
+
+    assert classified is not None
+    assert classified["generation_mode"] == "openai_images"
+    assert classified["supported_image_routes"] == ["generations", "responses"]
+    assert classified["default_image_route"] == "generations"
+
+
+def test_openai_bare_responses_endpoint_prefers_responses_route():
+    classified = _classify_openai_image_model(
+        {
+            "id": "relay-image-preview",
+            "name": "Relay Image Preview",
+            "endpoints": ["responses"],
+        },
+        base_url="https://relay.example/v1",
+        api_config={},
+        source={"effective_source": "personal", "provider": "openai"},
+    )
+
+    assert classified is not None
+    assert classified["generation_mode"] == "openai_chat_image"
+    assert classified["supported_image_routes"] == ["responses"]
+    assert classified["default_image_route"] == "responses"
 
 
 def test_openai_seedream_description_is_detected_as_image_model():

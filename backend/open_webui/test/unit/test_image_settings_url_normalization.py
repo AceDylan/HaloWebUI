@@ -16,6 +16,7 @@ from open_webui.routers.images import _discover_image_models  # noqa: E402
 from open_webui.routers.images import _normalize_image_provider_base_url  # noqa: E402
 from open_webui.routers.images import _generate_via_xai_images  # noqa: E402
 from open_webui.routers.images import _resolve_image_provider_source  # noqa: E402
+from open_webui.routers.images import _resolve_openai_image_request_route  # noqa: E402
 from open_webui.routers.images import _select_runtime_image_provider_source  # noqa: E402
 from open_webui.routers.images import _sync_image_provider_config_state  # noqa: E402
 from open_webui.utils import middleware  # noqa: E402
@@ -937,6 +938,54 @@ def test_grok_settings_source_uses_grok_shared_config():
     assert source is not None
     assert source["base_url"] == "https://api.x.ai/v1"
     assert source["key"] == "grok-key"
+
+
+def test_openai_auto_route_rejects_edit_only_model():
+    try:
+        _resolve_openai_image_request_route(
+            {
+                "generation_mode": "openai_images",
+                "supported_image_routes": ["edits"],
+                "default_image_route": "",
+            },
+            "auto",
+        )
+    except HTTPException as exc:
+        assert exc.status_code == 400
+        assert "普通生图" in str(exc.detail)
+    else:
+        raise AssertionError("edit-only model must not be used as default generation route")
+
+
+def test_openai_explicit_edit_route_uses_edit_when_supported():
+    assert (
+        _resolve_openai_image_request_route(
+            {
+                "generation_mode": "openai_images",
+                "supported_image_routes": ["generations", "edits"],
+                "default_image_route": "generations",
+            },
+            "edits",
+        )
+        == "edits"
+    )
+
+
+def test_openai_chat_image_rejects_unsupported_responses_mode():
+    try:
+        _resolve_openai_image_request_route(
+            {
+                "generation_mode": "openai_chat_image",
+                "supported_image_routes": ["chat"],
+                "default_image_route": "chat",
+            },
+            "responses",
+        )
+    except HTTPException as exc:
+        assert exc.status_code == 400
+        assert "不支持所选图片接口模式" in str(exc.detail)
+    else:
+        raise AssertionError("chat-only route must not accept responses mode")
 
 
 def test_openai_chat_image_returns_upstream_error_without_images_endpoint_fallback(monkeypatch):

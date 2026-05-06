@@ -31,6 +31,12 @@ from open_webui.retrieval.vector.connector import VECTOR_DB_CLIENT
 from open_webui.retrieval.web.utils import get_web_loader
 from open_webui.routers.images import (
     GenerateImageForm,
+    _build_openai_image_headers,
+    _get_openai_images_edit_url,
+    _list_image_provider_sources,
+    _openai_image_model_has_default_response_format,
+    _resolve_openai_image_request_route,
+    _send_openai_image_request,
     get_automatic1111_api_auth,
     image_generations,
     load_b64_image_data,
@@ -39,6 +45,7 @@ from open_webui.routers.images import (
 )
 from open_webui.routers.retrieval import search_web as _search_web
 from open_webui.utils.access_control import has_access, has_permission
+from open_webui.utils.error_handling import build_error_detail
 from open_webui.utils.skill_runtime import (
     SkillRuntimeError,
     execute_skill_entrypoint,
@@ -813,47 +820,89 @@ def get_builtin_tools(
                 return images
 
             if engine == "openai":
-                import requests
+                import mimetypes
 
-                headers: Dict[str, str] = {
-                    "Authorization": f"Bearer {request.app.state.config.IMAGES_OPENAI_API_KEY}"
+                source = _list_image_provider_sources(
+                    request,
+                    user,
+                    "openai",
+                    context="runtime",
+                    credential_source="auto",
+                )[0]
+                model = str(
+                    request.app.state.config.IMAGE_GENERATION_MODEL or "dall-e-2"
+                ).strip()
+                selected_model_meta = {
+                    "generation_mode": "openai_images",
+                    "supported_image_routes": ["edits"],
+                    "default_image_route": "",
                 }
+                _resolve_openai_image_request_route(selected_model_meta, "edits")
 
-                model = "dall-e-2"
-                base_model = str(model or "").split("/")[-1].lower()
-                data = {
+                base_url = source.get("base_url") or ""
+                api_key = source.get("key") or ""
+                api_config = source.get("api_config") or {}
+                headers = _build_openai_image_headers(
+                    base_url,
+                    api_key,
+                    api_config,
+                    user,
+                    content_type=None,
+                )
+                content_type_header = next(
+                    (
+                        header
+                        for header in list(headers.keys())
+                        if header.lower() == "content-type"
+                    ),
+                    None,
+                )
+                if content_type_header:
+                    headers.pop(content_type_header, None)
+
+                data: Dict[str, Any] = {
                     "model": model,
                     "prompt": str(prompt),
                     "n": requested_n,
                     "size": f"{width}x{height}",
                 }
-                default_response_format_prefixes = (
-                    "chatgpt-image-",
-                    "gpt-image-1-mini",
-                    "gpt-image-1.5",
-                    "gpt-image-1",
-                    "gpt-image-2",
-                )
-                if not any(
-                    base_model.startswith(prefix)
-                    for prefix in default_response_format_prefixes
-                ):
+                if not _openai_image_model_has_default_response_format(model):
                     data["response_format"] = "b64_json"
 
-                files = [("image", ("image", image_bytes, image_mime or "image/png"))]
+                files = [
+                    {
+                        "field_name": "image",
+                        "filename": f"image{mimetypes.guess_extension(image_mime or 'image/png') or '.png'}",
+                        "mime": image_mime or "image/png",
+                        "data": image_bytes,
+                    }
+                ]
                 if mask_bytes is not None:
-                    files.append(("mask", ("mask", mask_bytes, "image/png")))
+                    files.append(
+                        {
+                            "field_name": "mask",
+                            "filename": "mask.png",
+                            "mime": "image/png",
+                            "data": mask_bytes,
+                        }
+                    )
 
-                r = await asyncio.to_thread(
-                    requests.post,
-                    url=f"{request.app.state.config.IMAGES_OPENAI_API_BASE_URL}/images/edits",
-                    data=data,
-                    files=files,
+                result = await _send_openai_image_request(
+                    url=_get_openai_images_edit_url(base_url, api_config),
                     headers=headers,
+                    request_kind="multipart",
+                    form_fields=data,
+                    files=files,
                 )
-                r.raise_for_status()
-                res = r.json() or {}
+                if int(result.get("status") or 500) >= 400:
+                    raise RuntimeError(
+                        build_error_detail(
+                            result.get("response_body"),
+                            default="OpenAI image edit failed",
+                        )
+                    )
 
+                res = json.loads(result.get("response_body") or "{}")
                 images: List[dict] = []
                 for image in res.get("data", []) or []:
                     if image_url := image.get("url", None):

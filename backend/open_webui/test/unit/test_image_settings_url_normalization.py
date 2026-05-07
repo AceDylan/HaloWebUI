@@ -971,6 +971,64 @@ def test_openai_explicit_edit_route_uses_edit_when_supported():
     )
 
 
+def test_openai_auto_route_with_reference_prefers_chat_then_edit_without_model_default():
+    assert (
+        _resolve_openai_image_request_route(
+            {
+                "generation_mode": "openai_images",
+                "supported_image_routes": ["generations", "chat", "edits"],
+                "default_image_route": "generations",
+            },
+            "auto",
+            has_reference_image=True,
+        )
+        == "chat"
+    )
+    assert (
+        _resolve_openai_image_request_route(
+            {
+                "generation_mode": "openai_images",
+                "supported_image_routes": ["generations", "edits"],
+                "default_image_route": "generations",
+            },
+            "auto",
+            has_reference_image=True,
+        )
+        == "edits"
+    )
+
+
+def test_openai_auto_route_with_reference_respects_reference_default_route():
+    assert (
+        _resolve_openai_image_request_route(
+            {
+                "generation_mode": "openai_images",
+                "supported_image_routes": ["generations", "chat", "edits"],
+                "default_image_route": "generations",
+                "reference_image_default_route": "edits",
+            },
+            "auto",
+            has_reference_image=True,
+        )
+        == "edits"
+    )
+
+
+def test_openai_auto_route_with_reference_prefers_responses_before_edit():
+    assert (
+        _resolve_openai_image_request_route(
+            {
+                "generation_mode": "openai_images",
+                "supported_image_routes": ["generations", "responses", "edits"],
+                "default_image_route": "generations",
+            },
+            "auto",
+            has_reference_image=True,
+        )
+        == "responses"
+    )
+
+
 def test_openai_chat_image_rejects_unsupported_responses_mode():
     try:
         _resolve_openai_image_request_route(
@@ -1200,7 +1258,7 @@ def test_chat_openai_model_with_chat_only_endpoint_uses_chat_image_path(monkeypa
     assert captured["image_url"] == "/api/v1/files/source/content"
 
 
-def test_chat_openai_dedicated_image_with_reference_defaults_to_generation_path(monkeypatch):
+def test_chat_openai_dedicated_image_with_reference_defaults_to_edit_route(monkeypatch):
     same_base_url = "https://relay.example.com/v1"
     cfg = SimpleNamespace(
         ENABLE_IMAGE_GENERATION=True,
@@ -1246,20 +1304,20 @@ def test_chat_openai_dedicated_image_with_reference_defaults_to_generation_path(
 
     captured = {}
 
-    async def fake_images_endpoint(_request, _user, **kwargs):
+    async def fake_edits_endpoint(_request, _user, **kwargs):
         captured.update(kwargs)
         return [{"url": "/api/v1/files/generated"}]
 
-    async def fail_chat_image(*_args, **_kwargs):
-        raise AssertionError("dedicated image generation must not use chat/completions")
+    async def fail_images_endpoint(*_args, **_kwargs):
+        raise AssertionError("reference image should use a route that sends image input")
 
-    async def fail_edits_endpoint(*_args, **_kwargs):
-        raise AssertionError("reference image must not force /images/edits by default")
+    async def fail_chat_image(*_args, **_kwargs):
+        raise AssertionError("gpt-image reference image should default to edits")
 
     monkeypatch.setattr(images_router, "_discover_image_models_for_source", fake_discover)
     monkeypatch.setattr(images_router, "_generate_via_openai_chat_image", fail_chat_image)
-    monkeypatch.setattr(images_router, "_generate_via_openai_images_endpoint", fake_images_endpoint)
-    monkeypatch.setattr(images_router, "_generate_via_openai_image_edits_endpoint", fail_edits_endpoint)
+    monkeypatch.setattr(images_router, "_generate_via_openai_images_endpoint", fail_images_endpoint)
+    monkeypatch.setattr(images_router, "_generate_via_openai_image_edits_endpoint", fake_edits_endpoint)
 
     source = images_router._list_image_provider_sources(
         request,
@@ -1287,6 +1345,7 @@ def test_chat_openai_dedicated_image_with_reference_defaults_to_generation_path(
 
     assert result == [{"url": "/api/v1/files/generated"}]
     assert captured["model_id"] == "gpt-image-2"
+    assert captured["image_url"] == "/api/v1/files/source/content"
     assert captured["source"]["key"] == "key-a"
     assert captured["source"]["api_config"]["use_responses_api"] is True
 

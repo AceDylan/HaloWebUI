@@ -107,7 +107,11 @@ async def get_tools(request: Request, user=Depends(get_verified_user)):
             for server in get_mcp_servers_cached_meta(mcp_server_connections)
             if (server.get("config") or {}).get("enable", True)
         ]
-        shared_tool_servers = get_accessible_shared_tool_servers(request, user)
+        shared_tool_servers = [
+            shared_tool_server
+            for shared_tool_server in get_accessible_shared_tool_servers(request, user)
+            if shared_tool_server.owner_user_id != user.id
+        ]
 
     for server in tool_servers_data:
         tools.append(

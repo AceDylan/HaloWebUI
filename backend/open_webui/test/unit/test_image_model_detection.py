@@ -114,7 +114,27 @@ def test_openai_official_gpt_image_family_prefers_images_endpoint_mode():
 
     assert classified is not None
     assert classified["generation_mode"] == "openai_images"
+    assert classified["supported_image_routes"] == ["generations", "edits"]
+    assert classified["default_image_route"] == "generations"
     assert classified["supports_background"] is True
+
+
+def test_openai_compat_gpt_image_with_model_prefix_exposes_manual_edit_route():
+    classified = _classify_openai_image_model(
+        {
+            "id": "plus/gpt-image-2",
+            "name": "plus/gpt-image-2",
+        },
+        base_url="https://relay.example/v1",
+        api_config={},
+        source={"effective_source": "personal", "provider": "openai"},
+    )
+
+    assert classified is not None
+    assert classified["generation_mode"] == "openai_images"
+    assert classified["supported_image_routes"] == ["generations", "chat", "edits"]
+    assert classified["default_image_route"] == "generations"
+    assert classified["reference_image_default_route"] == "edits"
 
 
 def test_openai_compat_xai_named_model_stays_on_openai_image_route():

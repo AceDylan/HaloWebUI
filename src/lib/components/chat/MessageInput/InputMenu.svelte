@@ -13,9 +13,11 @@
 	import Dropdown from '$lib/components/common/Dropdown.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import Switch from '$lib/components/common/Switch.svelte';
-	import { Wrench, Globe, Image, Terminal, Camera, FileUp, Sparkles } from 'lucide-svelte';
+	import { Wrench, Globe, Terminal, Camera, FileUp, Sparkles, CircleHelp, Users } from 'lucide-svelte';
 	import GoogleDrive from '$lib/components/icons/GoogleDrive.svelte';
 	import OneDrive from '$lib/components/icons/OneDrive.svelte';
+	import ImageOptionsMenu from './InputMenu/ImageOptionsMenu.svelte';
+	import type { Model } from '$lib/stores';
 
 	const i18n = getContext('i18n');
 
@@ -38,6 +40,16 @@
 	];
 	export let onWebSearchModeChange: ((mode: WebSearchMode) => void) | null = null;
 	export let imageGenerationEnabled: boolean = false;
+	export let imageGenerationOptions: {
+		image_size?: string | null;
+		aspect_ratio?: string | null;
+		resolution?: string | null;
+		n?: number | null;
+		image_route_mode?: string | null;
+	} = {};
+	export let currentModel: Model | null = null;
+	export let hasReferenceImage = false;
+	export let onAdvancedImageOptions: (() => void) | null = null;
 	export let codeInterpreterEnabled: boolean = false;
 
 	export let onClose: Function;
@@ -124,23 +136,86 @@
 		}
 
 		tools = ($_tools ?? []).reduce((a, tool) => {
-			a[tool.id] = {
+			// 调试：打印工具信息
+			console.log('Processing tool:', {
+				id: tool.id,
 				name: tool.name,
-				description: tool.meta.description,
 				source: tool.meta?.source,
-				ownerName: tool.meta?.owner_name,
-				enabled: selectedToolIds.includes(tool.id)
-			};
+				ownerName: tool.meta?.owner_name
+			});
+
+			// 检查是否已存在同名工具
+			const existingEntry = Object.entries(a).find(([_, t]: [string, any]) => t.name === tool.name);
+
+			if (existingEntry) {
+				const [existingKey, existingTool] = existingEntry;
+				const currentIsShared = tool.meta?.source === 'shared';
+				const existingIsShared = existingTool.source === 'shared';
+
+				console.log('Found duplicate:', {
+					existing: { key: existingKey, name: existingTool.name, source: existingTool.source },
+					current: { id: tool.id, name: tool.name, source: tool.meta?.source }
+				});
+
+				// 优先保留非共享版本
+				if (existingIsShared && !currentIsShared) {
+					// 删除共享版本，添加非共享版本
+					console.log('Replacing shared with non-shared');
+					delete a[existingKey];
+					a[tool.id] = {
+						name: tool.name,
+						description: tool.meta.description,
+						source: tool.meta?.source,
+						ownerName: tool.meta?.owner_name,
+						enabled: selectedToolIds.includes(tool.id)
+					};
+				} else {
+					console.log('Skipping current tool (keeping existing)');
+				}
+				// 如果当前是共享版本，已存在非共享版本，则跳过
+			} else {
+				// 不存在同名工具，直接添加
+				a[tool.id] = {
+					name: tool.name,
+					description: tool.meta.description,
+					source: tool.meta?.source,
+					ownerName: tool.meta?.owner_name,
+					enabled: selectedToolIds.includes(tool.id)
+				};
+			}
 			return a;
 		}, {});
 
 		skills = ($_skills ?? []).reduce((a, skill) => {
-			a[skill.id] = {
-				name: skill.name,
-				description: skill.description,
-				source: skill.source,
-				enabled: selectedSkillIds.includes(skill.id)
-			};
+			// 检查是否已存在同名技能
+			const existingEntry = Object.entries(a).find(([_, s]: [string, any]) => s.name === skill.name);
+
+			if (existingEntry) {
+				const [existingKey, existingSkill] = existingEntry;
+				const currentIsShared = skill.source === 'shared';
+				const existingIsShared = existingSkill.source === 'shared';
+
+				// 优先保留非共享版本
+				if (existingIsShared && !currentIsShared) {
+					// 删除共享版本，添加非共享版本
+					delete a[existingKey];
+					a[skill.id] = {
+						name: skill.name,
+						description: skill.description,
+						source: skill.source,
+						enabled: selectedSkillIds.includes(skill.id)
+					};
+				}
+				// 如果当前是共享版本，已存在非共享版本，则跳过
+			} else {
+				// 不存在同名技能，直接添加
+				a[skill.id] = {
+					name: skill.name,
+					description: skill.description,
+					source: skill.source,
+					enabled: selectedSkillIds.includes(skill.id)
+				};
+			}
 			return a;
 		}, {});
 	};
@@ -171,16 +246,7 @@
 		currentWebSearchModeOption?.label ??
 		getWebSearchModeLabel(webSearchMode, $i18n.t.bind($i18n));
 
-	const getOptionDescriptionClasses = (tone?: WebSearchModeOption['descriptionTone']) => {
-		switch (tone) {
-			case 'warning':
-				return 'mt-0.5 text-xs leading-4 text-amber-600/90 dark:text-amber-400/80';
-			case 'info':
-				return 'mt-0.5 text-xs leading-4 text-sky-600/80 dark:text-sky-400/80';
-			default:
-				return 'mt-0.5 text-xs leading-4 text-gray-500 dark:text-gray-400';
-		}
-	};
+	const helpIconClass = 'size-3 shrink-0 cursor-help text-gray-400 dark:text-gray-500';
 </script>
 
 <!-- Hidden file input used to open the camera on mobile -->
@@ -224,29 +290,25 @@
 								toggleToolEnabled(toolId);
 							}}
 						>
-							<div class="flex-1 truncate">
-								<Tooltip
-									content={tools[toolId]?.description ?? ''}
-									placement="top-start"
-									className="flex flex-1 gap-2 items-center"
-								>
-									<span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-gray-100 text-gray-600 dark:bg-gray-700/60 dark:text-gray-300">
+							<div class="flex gap-2 items-center min-w-0 flex-1">
+								<div class="relative shrink-0">
+									<span class="flex h-6 w-6 items-center justify-center rounded-md bg-gray-100 text-gray-600 dark:bg-gray-700/60 dark:text-gray-300">
 										<Wrench class="size-4" strokeWidth={2} />
 									</span>
-
-									<div class=" truncate">{tools[toolId].name}</div>
-								</Tooltip>
-								{#if tools[toolId]?.source === 'shared'}
-									<span class="shrink-0 rounded-full bg-emerald-100 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300">
-										共享
-									</span>
-								{/if}
-							</div>
-							{#if tools[toolId]?.source === 'shared' && tools[toolId]?.ownerName}
-								<div class="mt-0.5 text-[11px] text-gray-500 dark:text-gray-400">
-									管理员：{tools[toolId].ownerName}
+									{#if tools[toolId]?.source === 'shared'}
+										<span class="absolute -top-0.5 -right-0.5 flex h-3 w-3 items-center justify-center rounded-full bg-emerald-500 dark:bg-emerald-400">
+											<Users class="size-2 text-white" strokeWidth={2.5} />
+										</span>
+									{/if}
 								</div>
-							{/if}
+								<Tooltip
+									content={tools[toolId]?.description + (tools[toolId]?.source === 'shared' && tools[toolId]?.ownerName ? '\n\n管理员：' + tools[toolId].ownerName : '')}
+									placement="top-start"
+									className="truncate"
+								>
+									<div class="truncate">{tools[toolId].name}</div>
+								</Tooltip>
+							</div>
 
 							<div class=" shrink-0" on:click|stopPropagation>
 								<Switch
@@ -273,15 +335,22 @@
 								toggleSkillEnabled(skillId);
 							}}
 						>
-							<div class="flex-1 truncate">
+							<div class="flex gap-2 items-center min-w-0 flex-1">
+								<div class="relative shrink-0">
+									<span class="flex h-6 w-6 items-center justify-center rounded-md bg-amber-50 text-amber-600 dark:bg-amber-950/40 dark:text-amber-300">
+										<Sparkles class="size-4" strokeWidth={2} />
+									</span>
+									{#if skills[skillId]?.source === 'shared'}
+										<span class="absolute -top-0.5 -right-0.5 flex h-3 w-3 items-center justify-center rounded-full bg-emerald-500 dark:bg-emerald-400">
+											<Users class="size-2 text-white" strokeWidth={2.5} />
+										</span>
+									{/if}
+								</div>
 								<Tooltip
 									content={skills[skillId]?.description ?? ''}
 									placement="top-start"
-									className="flex flex-1 gap-2 items-center"
+									className="truncate"
 								>
-									<span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-amber-50 text-amber-600 dark:bg-amber-950/40 dark:text-amber-300">
-										<Sparkles class="size-4" strokeWidth={2} />
-									</span>
 									<div class="truncate">{skills[skillId].name}</div>
 								</Tooltip>
 							</div>
@@ -325,7 +394,7 @@
 								{#each webSearchModeOptions as option}
 									<DropdownMenu.Item
 										disabled={option.disabled}
-										class="flex w-full justify-between gap-3 items-start px-3 py-2 text-sm font-medium cursor-pointer rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800 data-[disabled]:opacity-45 data-[disabled]:cursor-not-allowed"
+										class="flex w-full justify-between gap-3 items-center px-3 py-2 text-sm font-medium cursor-pointer rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800 data-[disabled]:opacity-45 data-[disabled]:cursor-not-allowed"
 											on:click={() => {
 												if (option.disabled) {
 													return;
@@ -335,25 +404,25 @@
 												show = false;
 											}}
 										>
-										<div class="min-w-0 flex-1">
-											<div class="flex items-center gap-2">
-												<div class="truncate">{option.label}</div>
-												{#if option.badge}
-													<span
-														class="shrink-0 rounded-full bg-gray-100 px-1.5 py-0.5 text-[10px] font-medium text-gray-500 dark:bg-gray-800 dark:text-gray-400"
-													>
-														{option.badge}
-													</span>
-												{/if}
-											</div>
+										<div class="min-w-0 flex-1 flex items-center gap-2">
+											<div class="truncate">{option.label}</div>
+											{#if option.badge}
+												<span
+													class="shrink-0 rounded-full bg-gray-100 px-1.5 py-0.5 text-[10px] font-medium text-gray-500 dark:bg-gray-800 dark:text-gray-400"
+												>
+													{option.badge}
+												</span>
+											{/if}
 											{#if option.description}
-												<div class={getOptionDescriptionClasses(option.descriptionTone)}>
-													{option.description}
-												</div>
+												<span on:click|stopPropagation>
+													<Tooltip content={option.description} placement="top">
+														<CircleHelp class={helpIconClass} strokeWidth={1.9} />
+													</Tooltip>
+												</span>
 											{/if}
 										</div>
 										{#if webSearchMode === option.value}
-											<div class="shrink-0 pt-0.5 text-xs text-blue-500 dark:text-blue-400">✓</div>
+											<div class="shrink-0 text-xs text-blue-500 dark:text-blue-400">✓</div>
 										{/if}
 									</DropdownMenu.Item>
 								{/each}
@@ -362,23 +431,18 @@
 						{/if}
 
 				{#if $config?.features?.enable_image_generation && ($user?.role === 'admin' || $user?.permissions?.features?.image_generation)}
-					<button
-						type="button"
-						class="flex w-full justify-between gap-2 items-center px-3 py-2 text-sm font-medium cursor-pointer rounded-xl"
-						on:click={() => {
-							imageGenerationEnabled = !imageGenerationEnabled;
+					<ImageOptionsMenu
+						bind:imageGenerationEnabled
+						bind:imageGenerationOptions
+						{currentModel}
+						{hasReferenceImage}
+						onSelect={() => {
+							show = false;
 						}}
-					>
-						<div class="flex gap-2 items-center">
-							<span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-gray-100 text-gray-600 dark:bg-gray-700/60 dark:text-gray-300">
-								<Image class="size-4" strokeWidth={2} />
-							</span>
-							<div class="truncate">{$i18n.t('Image')}</div>
-						</div>
-						<div class="shrink-0" on:click|stopPropagation>
-							<Switch bind:state={imageGenerationEnabled} />
-						</div>
-					</button>
+						on:advanced={() => {
+							onAdvancedImageOptions?.();
+						}}
+					/>
 				{/if}
 
 				{#if $config?.features?.enable_code_interpreter && ($user?.role === 'admin' || $user?.permissions?.features?.code_interpreter)}

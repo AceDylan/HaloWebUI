@@ -68,6 +68,7 @@
 		getModelCleanId,
 		getModelRef,
 		getModelSelectionId,
+		parseModelSelectionId,
 		resolveModelSelectionId
 	} from '$lib/utils/model-identity';
 	import {
@@ -740,7 +741,20 @@
 			return null;
 		}
 
-		return isDedicatedImageGenerationModel(getModelCleanId(model) || model.id) ? model : null;
+		return isDedicatedImageGenerationChatModel(model) ? model : null;
+	};
+
+	const isDedicatedImageGenerationChatModel = (model: Model | null | undefined): boolean => {
+		const candidates = [
+			getModelCleanId(model),
+			(model as any)?.info?.base_model_id,
+			(model as any)?.info?.meta?.base_selection_id,
+			model?.id
+		].map((candidate) => {
+			const raw = `${candidate ?? ''}`.trim();
+			return parseModelSelectionId(raw)?.modelId ?? raw;
+		});
+		return candidates.some((candidate) => isDedicatedImageGenerationModel(`${candidate ?? ''}`));
 	};
 
 	const canUseChatImageGeneration = () =>
@@ -1160,11 +1174,40 @@
 		isChatWebSearchFeatureEnabled() &&
 		($user?.role === 'admin' || $user?.permissions?.features?.web_search);
 
-	$: {
+	let lastAutoImageGenerationSelectionKey = '';
+	const syncImageGenerationForDedicatedModel = ({ force = false } = {}) => {
 		const dedicatedImageModel = getSingleSelectedDedicatedImageModel();
-		if (dedicatedImageModel && canUseChatImageGeneration() && !imageGenerationEnabled) {
-			imageGenerationEnabled = true;
+		const dedicatedImageSelectionKey = dedicatedImageModel ? getModelRequestId(dedicatedImageModel) : '';
+
+		if (!dedicatedImageSelectionKey) {
+			lastAutoImageGenerationSelectionKey = '';
+			return false;
 		}
+
+		if (
+			!canUseChatImageGeneration() ||
+			(!force && lastAutoImageGenerationSelectionKey === dedicatedImageSelectionKey)
+		) {
+			return false;
+		}
+
+		lastAutoImageGenerationSelectionKey = dedicatedImageSelectionKey;
+		if (!imageGenerationEnabled) {
+			imageGenerationEnabled = true;
+			return true;
+		}
+
+		return false;
+	};
+
+	$: {
+		selectedModelIds;
+		modelsMap;
+		$config?.features?.enable_image_generation;
+		$user?.role;
+		$user?.permissions?.features?.image_generation;
+
+		syncImageGenerationForDedicatedModel();
 	}
 
 	const decodeTokenUserId = (token: string | null | undefined): string | null => {
@@ -3089,6 +3132,7 @@
 		composerStateSyncReady = true;
 		webSearchSelectionSyncReady = true;
 		initializeReasoningSelectionTracking();
+		syncImageGenerationForDedicatedModel({ force: true });
 
 		if (fresh && $page.url.searchParams.get('fresh-chat') === 'true') {
 			const url = new URL($page.url);

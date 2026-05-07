@@ -55,7 +55,6 @@
 	import { WEBUI_BASE_URL, WEBUI_API_BASE_URL, PASTED_TEXT_CHARACTER_LIMIT } from '$lib/constants';
 
 	import InputMenu from './MessageInput/InputMenu.svelte';
-	import ImageContextPanel from './MessageInput/ImageContextPanel.svelte';
 	import VoiceRecording from './MessageInput/VoiceRecording.svelte';
 	import FilesOverlay from './MessageInput/FilesOverlay.svelte';
 	import Commands from './MessageInput/Commands.svelte';
@@ -125,6 +124,77 @@
 	export let prompt = '';
 	export let files = [];
 
+	const isImageReferenceFile = (file: any) => {
+		const type = `${file?.type ?? ''}`.trim().toLowerCase();
+		return ['image', 'image_url', 'input_image', 'output_image'].includes(type);
+	};
+
+	const contentHasImageReference = (content: any): boolean => {
+		if (Array.isArray(content)) {
+			return content.some(contentHasImageReference);
+		}
+
+		if (!content || typeof content !== 'object') {
+			return false;
+		}
+
+		const type = `${content.type ?? ''}`.trim().toLowerCase();
+		if (['image', 'image_url', 'input_image', 'output_image'].includes(type)) {
+			return true;
+		}
+
+		if (content.image_url) {
+			return true;
+		}
+
+		if (imagePayloadHasReference(content.images)) {
+			return true;
+		}
+
+		return contentHasImageReference(content.content);
+	};
+
+	const imagePayloadHasReference = (value: any): boolean => {
+		if (Array.isArray(value)) {
+			return value.some(imagePayloadHasReference);
+		}
+
+		if (typeof value === 'string') {
+			return value.trim().length > 0;
+		}
+
+		if (!value || typeof value !== 'object') {
+			return false;
+		}
+
+		if (value.image_url || value.url) {
+			return true;
+		}
+
+		return contentHasImageReference(value);
+	};
+
+	const messageHasImageReference = (message: any) => {
+		if (!message || typeof message !== 'object') {
+			return false;
+		}
+
+		return (
+			(Array.isArray(message.files) && message.files.some(isImageReferenceFile)) ||
+			imagePayloadHasReference(message.images) ||
+			contentHasImageReference(message.content)
+		);
+	};
+
+	const historyHasImageReference = (historyState: any) => {
+		const currentId = historyState?.currentId ?? null;
+		if (!currentId || !historyState?.messages?.[currentId]) {
+			return false;
+		}
+
+		return createMessagesList(historyState, currentId).some(messageHasImageReference);
+	};
+
 	export let toolServers = [];
 
 	export let selectedToolIds = [];
@@ -140,6 +210,7 @@
 		aspect_ratio?: string | null;
 		resolution?: string | null;
 		n?: number | null;
+		image_route_mode?: string | null;
 	} = {};
 	export let webSearchMode: WebSearchMode = 'off';
 	export let webSearchModeSource: WebSearchModeSource = 'default';
@@ -169,6 +240,8 @@
 	let showInputVariablesModal = false;
 	let inputVariables = {};
 	let inputVariableValues = {};
+	$: hasReferenceImageForImageGeneration =
+		files.some(isImageReferenceFile) || historyHasImageReference(history);
 	let inputVariablesModalCallback = (_variableValues) => {};
 
 	const replaceVariablesInPlainText = (variables: Record<string, any>) => {
@@ -1108,15 +1181,6 @@
 								class="flex-1 flex flex-col relative w-full rounded-3xl border border-gray-200/50 dark:border-gray-700/20 hover:border-gray-300/60 dark:hover:border-gray-600/40 focus-within:border-primary-300/40 dark:focus-within:border-primary-500/25 shadow-sm dark:shadow-none focus-within:shadow-lg focus-within:shadow-primary-500/5 dark:focus-within:shadow-primary-400/[0.07] transition-all duration-300 px-1 pt-1 bg-white/80 dark:bg-white/[0.04] backdrop-blur-xl dark:text-gray-100"
 								dir={$settings?.chatDirection ?? 'auto'}
 							>
-								<ImageContextPanel
-									currentModel={primarySelectedModel}
-									{imageGenerationEnabled}
-									bind:imageGenerationOptions
-									on:advanced={() => {
-										showControls.set(true);
-									}}
-								/>
-
 								{#if files.length > 0}
 									<div class="px-2.5 mt-0.5 mb-1.5 pt-1.5 flex items-end gap-2 overflow-x-auto scrollbar-none">
 										{#each files as file, fileIdx}
@@ -1587,6 +1651,12 @@
 											{webSearchModeOptions}
 											onWebSearchModeChange={setWebSearchModeFromUser}
 											bind:imageGenerationEnabled
+											bind:imageGenerationOptions
+											currentModel={primarySelectedModel}
+											hasReferenceImage={hasReferenceImageForImageGeneration}
+											onAdvancedImageOptions={() => {
+												showControls.set(true);
+											}}
 											bind:codeInterpreterEnabled
 											{screenCaptureHandler}
 											{inputFilesHandler}

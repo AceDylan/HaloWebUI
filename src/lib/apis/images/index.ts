@@ -53,6 +53,7 @@ export type ImageGenerationModel = {
 	supports_resolution?: boolean;
 	supported_image_routes?: string[];
 	default_image_route?: string | null;
+	reference_image_default_route?: string | null;
 	text_output_supported?: boolean;
 	source?: 'settings' | 'personal' | 'shared' | string | null;
 	connection_index?: number | null;

@@ -176,3 +176,93 @@ export const modelSupportsGeminiImageOptions = (model: any): boolean =>
 			((model?.supports_image_size ?? false) ||
 				model?.generation_mode === 'gemini_generate_content_image')
 	);
+
+export type OpenAIImageRouteOption = {
+	value: string;
+	label: string;
+	disabled?: boolean;
+	description?: string;
+};
+
+export const getOpenAIImageRouteOptions = (
+	model: any | null,
+	tr: (zh: string, en: string) => string
+): OpenAIImageRouteOption[] => {
+	const routes = Array.isArray(model?.supported_image_routes) ? model.supported_image_routes : [];
+	const hasRoute = (route: string) => routes.includes(route);
+	const isChatImageModel = model?.generation_mode === 'openai_chat_image';
+	const hasConversationalRoute = hasRoute('chat') || hasRoute('responses') || isChatImageModel;
+	const hasPlainRoute = hasRoute('generations') || hasConversationalRoute;
+	const options: OpenAIImageRouteOption[] = hasRoute('generations')
+		? [
+				{
+					value: 'generations',
+					label: tr('普通生图', 'Default'),
+					description: tr(
+						'走 generations，按文字生成新图；不会把参考图当成要修改的原图。',
+						'Uses generations to create a new image from text; reference images are not treated as the source image to edit.'
+					)
+				}
+			]
+		: !hasPlainRoute && hasRoute('edits')
+			? [
+					{
+						value: '',
+						label: tr('请选择接口', 'Select route'),
+						disabled: true,
+						description: tr(
+							'该模型只有 edits，需要提供当前消息或历史上下文里的参考图。',
+							'This model only supports edits and needs a reference image from the current message or chat history.'
+						)
+					}
+				]
+			: [];
+
+	if (hasConversationalRoute) {
+		const conversationalRoute =
+			model?.default_image_route === 'responses' && hasRoute('responses')
+				? 'responses'
+				: hasRoute('chat') || isChatImageModel
+					? 'chat'
+					: 'responses';
+		options.push({
+			value: conversationalRoute,
+			label: tr('对话图片', 'Chat Image'),
+			description: tr(
+				'走 chat 或 responses，把文字和图片一起发给支持对话生图的模型。',
+				'Uses chat or responses to send text and images together to models that support conversational image generation.'
+			)
+		});
+	}
+	if (hasRoute('edits')) {
+		options.push({
+			value: 'edits',
+			label: tr('编辑接口', 'Edit'),
+			description: tr(
+				'走 edits，用当前消息或历史上下文里的参考图改图；适合换风格、局部修改、重绘。',
+				'Uses edits to modify a reference image from the current message or chat history; useful for style changes, local edits, and redraws.'
+			)
+		});
+	}
+
+	return options;
+};
+
+export const getBuiltinImageEngine = (model: any | null): '' | 'openai' | 'gemini' | 'grok' => {
+	const provider = `${model?.provider ?? ''}`.trim().toLowerCase();
+	if (provider === 'gemini' || provider === 'grok') {
+		return provider;
+	}
+
+	const generationMode = `${model?.generation_mode ?? ''}`.trim().toLowerCase();
+	if (generationMode.startsWith('openai_') || provider === 'openai') {
+		return 'openai';
+	}
+	if (generationMode.startsWith('gemini_')) {
+		return 'gemini';
+	}
+	if (generationMode === 'xai_images') {
+		return 'grok';
+	}
+	return '';
+};

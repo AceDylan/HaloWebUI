@@ -113,6 +113,27 @@ OPENAI_DEDICATED_IMAGE_MODEL_RE = re.compile(
     ),
     re.IGNORECASE,
 )
+OPENAI_IMAGE_EDIT_COMPAT_MODEL_RE = re.compile(
+    "|".join(
+        (
+            r"dall-e-2(?:-[\w-]+)?",
+            r"dalle-2(?:-[\w-]+)?",
+            r"gpt-image(?:-[\w-]+)?",
+            r"chatgpt-image(?:-[\w-]+)?",
+            r"seededit(?:-[\w-]+)?",
+        )
+    ),
+    re.IGNORECASE,
+)
+OPENAI_IMAGE_REFERENCE_EDIT_DEFAULT_MODEL_RE = re.compile(
+    "|".join(
+        (
+            r"gpt-image(?:-[\w-]+)?",
+            r"chatgpt-image(?:-[\w-]+)?",
+        )
+    ),
+    re.IGNORECASE,
+)
 OPENAI_IMAGE_ALLOWED_SIZES = {"1024x1024", "1536x1024", "1024x1536"}
 OPENAI_IMAGE_ROUTE_GENERATIONS = "generations"
 OPENAI_IMAGE_ROUTE_EDITS = "edits"
@@ -848,6 +869,37 @@ def _resolve_default_openai_image_route(
     return ""
 
 
+def _should_offer_openai_image_edit_route(
+    *,
+    base_name: str,
+    generation_mode: str,
+    endpoint_routes: Optional[set[str]] = None,
+) -> bool:
+    routes = endpoint_routes or set()
+    if OPENAI_IMAGE_ROUTE_EDITS in routes:
+        return True
+    if generation_mode != "openai_images":
+        return False
+    return _is_openai_image_edit_compatible_model(base_name)
+
+
+def _should_offer_openai_chat_image_route(
+    *,
+    base_name: str,
+    base_url: str,
+    generation_mode: str,
+    endpoint_routes: Optional[set[str]] = None,
+) -> bool:
+    routes = endpoint_routes or set()
+    if routes & {OPENAI_IMAGE_ROUTE_CHAT, OPENAI_IMAGE_ROUTE_RESPONSES}:
+        return False
+    if generation_mode != "openai_images":
+        return False
+    if openai_router._is_official_openai_connection(base_url):
+        return False
+    return _is_openai_image_edit_compatible_model(base_name)
+
+
 def _model_text_blob(model: dict) -> str:
     parts = [
         model.get("id"),
@@ -890,6 +942,22 @@ def _has_text_modality(tokens: set[str]) -> bool:
 def _is_openai_dedicated_image_model(*values: str) -> bool:
     return any(
         OPENAI_DEDICATED_IMAGE_MODEL_RE.search(str(value or "").lower())
+        for value in values
+        if str(value or "").strip()
+    )
+
+
+def _is_openai_image_edit_compatible_model(*values: str) -> bool:
+    return any(
+        OPENAI_IMAGE_EDIT_COMPAT_MODEL_RE.search(str(value or "").lower())
+        for value in values
+        if str(value or "").strip()
+    )
+
+
+def _is_openai_image_reference_edit_default_model(*values: str) -> bool:
+    return any(
+        OPENAI_IMAGE_REFERENCE_EDIT_DEFAULT_MODEL_RE.search(str(value or "").lower())
         for value in values
         if str(value or "").strip()
     )
@@ -1544,6 +1612,7 @@ def _build_image_model_entry(
     source: Optional[dict[str, Any]] = None,
     supported_image_routes: Optional[list[str]] = None,
     default_image_route: Optional[str] = None,
+    reference_image_default_route: Optional[str] = None,
 ) -> dict[str, Any]:
     provider = source.get("provider") if isinstance(source, dict) else None
     effective_source = source.get("effective_source") if isinstance(source, dict) else None
@@ -1594,6 +1663,27 @@ def _build_image_model_entry(
             normalized_routes = [OPENAI_IMAGE_ROUTE_GENERATIONS]
         elif generation_mode == "xai_images":
             normalized_routes = [OPENAI_IMAGE_ROUTE_GENERATIONS]
+    if (
+        generation_mode == "openai_images"
+        and OPENAI_IMAGE_ROUTE_CHAT not in normalized_routes
+        and _should_offer_openai_chat_image_route(
+            base_name=_model_id_basename(model_id).lower(),
+            base_url=str(source.get("base_url") or "") if isinstance(source, dict) else "",
+            generation_mode=generation_mode,
+            endpoint_routes=set(normalized_routes),
+        )
+    ):
+        normalized_routes.append(OPENAI_IMAGE_ROUTE_CHAT)
+    if (
+        generation_mode == "openai_images"
+        and OPENAI_IMAGE_ROUTE_EDITS not in normalized_routes
+        and _should_offer_openai_image_edit_route(
+            base_name=_model_id_basename(model_id).lower(),
+            generation_mode=generation_mode,
+            endpoint_routes=set(normalized_routes),
+        )
+    ):
+        normalized_routes.append(OPENAI_IMAGE_ROUTE_EDITS)
     normalized_default_route = str(default_image_route or "").strip()
     if normalized_default_route not in normalized_routes:
         normalized_default_route = next(
@@ -1608,12 +1698,25 @@ def _build_image_model_entry(
             ),
             "",
         )
+    normalized_reference_default_route = str(reference_image_default_route or "").strip()
+    if normalized_reference_default_route not in normalized_routes:
+        normalized_reference_default_route = ""
+    if (
+        not normalized_reference_default_route
+        and generation_mode == "openai_images"
+        and OPENAI_IMAGE_ROUTE_EDITS in normalized_routes
+        and _is_openai_image_reference_edit_default_model(
+            _model_id_basename(model_id).lower(), model_id
+        )
+    ):
+        normalized_reference_default_route = OPENAI_IMAGE_ROUTE_EDITS
     if model_ref and generation_mode in {"openai_images", "openai_chat_image", "xai_images"}:
         model_ref = {
             **model_ref,
             "image_generation_mode": generation_mode,
             "supported_image_routes": normalized_routes,
             "default_image_route": normalized_default_route,
+            "reference_image_default_route": normalized_reference_default_route,
         }
     return {
         "id": model_id,
@@ -1643,6 +1746,7 @@ def _build_image_model_entry(
         "supports_resolution": bool(supports_resolution),
         "supported_image_routes": normalized_routes,
         "default_image_route": normalized_default_route,
+        "reference_image_default_route": normalized_reference_default_route,
         "text_output_supported": bool(text_output_supported),
         "source": source.get("effective_source") if isinstance(source, dict) else None,
         "connection_index": source.get("connection_index") if isinstance(source, dict) else None,
@@ -1739,6 +1843,24 @@ def _classify_openai_image_model(
             if generation_mode == "openai_chat_image"
             else [OPENAI_IMAGE_ROUTE_GENERATIONS]
         )
+
+    if (
+        _should_offer_openai_image_edit_route(
+            base_name=base_name,
+            generation_mode=generation_mode,
+            endpoint_routes=endpoint_routes,
+        )
+        and OPENAI_IMAGE_ROUTE_EDITS not in supported_image_routes
+    ):
+        supported_image_routes.append(OPENAI_IMAGE_ROUTE_EDITS)
+
+    if _should_offer_openai_chat_image_route(
+        base_name=base_name,
+        base_url=base_url,
+        generation_mode=generation_mode,
+        endpoint_routes=endpoint_routes,
+    ):
+        supported_image_routes.append(OPENAI_IMAGE_ROUTE_CHAT)
 
     default_image_route = _resolve_default_openai_image_route(
         set(supported_image_routes),
@@ -2092,6 +2214,9 @@ def _build_search_candidate_model_meta_from_ref(
             model_ref.get("supported_image_routes")
         ),
         "default_image_route": str(model_ref.get("default_image_route") or "").strip(),
+        "reference_image_default_route": str(
+            model_ref.get("reference_image_default_route") or ""
+        ).strip(),
         "text_output_supported": _model_ref_bool(model_ref.get("text_output_supported")),
     }
 
@@ -2121,6 +2246,8 @@ def _normalize_openai_image_route_mode(value: Any) -> str:
 def _resolve_openai_image_request_route(
     selected_model_meta: Optional[dict[str, Any]],
     route_mode: Any,
+    *,
+    has_reference_image: bool = False,
 ) -> str:
     requested_route = _normalize_openai_image_route_mode(route_mode)
     if str((selected_model_meta or {}).get("generation_mode") or "").strip() == "openai_chat_image":
@@ -2177,6 +2304,19 @@ def _resolve_openai_image_request_route(
 
     if requested_route == OPENAI_IMAGE_ROUTE_AUTO:
         default_route = str((selected_model_meta or {}).get("default_image_route") or "").strip()
+        if has_reference_image:
+            reference_default_route = str(
+                (selected_model_meta or {}).get("reference_image_default_route") or ""
+            ).strip()
+            if reference_default_route in supported_routes:
+                return reference_default_route
+            for route in (
+                OPENAI_IMAGE_ROUTE_CHAT,
+                OPENAI_IMAGE_ROUTE_RESPONSES,
+                OPENAI_IMAGE_ROUTE_EDITS,
+            ):
+                if route in supported_routes:
+                    return route
         if default_route in supported_routes:
             return default_route
         if OPENAI_IMAGE_ROUTE_GENERATIONS in supported_routes:
@@ -5305,6 +5445,7 @@ async def image_generations(
             openai_image_route = _resolve_openai_image_request_route(
                 selected_model_meta,
                 form_data.image_route_mode,
+                has_reference_image=bool(form_data.image_url),
             )
             requested_n = (
                 max(1, min(int(form_data.n or 1), 4))

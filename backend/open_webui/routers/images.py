@@ -4516,17 +4516,46 @@ def _build_openai_image_upstream_error_detail(
     body_dict = parsed_body if isinstance(parsed_body, dict) else {}
     error_code = body_dict.get("error_code") or body_dict.get("code")
     title = str(body_dict.get("title") or "")
+    detail = str(body_dict.get("detail") or body_dict.get("message") or "")
+    try:
+        body_text = json.dumps(parsed_body, ensure_ascii=False, default=str)
+    except Exception:
+        body_text = str(parsed_body or "")
+    body_text_lower = body_text.lower()
+    cloudflare_marker = bool(
+        body_dict.get("cloudflare_error") is True
+        or "cloudflare" in body_text_lower
+        or "cf-ray" in body_text_lower
+    )
+    route = str(route_label or "").strip()
+    route_prefix = f"{route} 请求" if route else "图片请求"
+    status_text = f"HTTP {status_code}" if status_code else "HTTP 错误"
+
     is_cloudflare_timeout = bool(
         status_code == 524
         or str(error_code or "").strip() == "524"
         or "error 524" in title.lower()
     )
     if is_cloudflare_timeout:
-        route = str(route_label or "").strip()
-        route_prefix = f"{route} 请求" if route else "图片请求"
         return (
-            f"上游图片服务超时：{route_prefix}已发出，但上游 120 秒内没有返回完整结果，"
+            f"{status_text}：上游图片服务超时，{route_prefix}已发出，但上游 120 秒内没有返回完整结果，"
             "被 Cloudflare 截断。请稍后重试，或切换到其他接口模式/连接。"
+        )
+
+    is_cloudflare_gateway_error = bool(
+        cloudflare_marker
+        and status_code in {502, 520, 521, 522, 523, 525, 526}
+    )
+    if is_cloudflare_gateway_error:
+        return (
+            f"{status_text}：上游图片服务返回异常，{route_prefix}已发出，但 Cloudflare 收到的上游响应无效或不完整。"
+            "这通常是中转站或源站临时异常，不是页面参数写错。请稍后重试，或切换接口模式/连接。"
+        )
+
+    if status_code == 502 and "origin web server" in detail.lower():
+        return (
+            f"{status_text}：上游图片服务返回异常，{route_prefix}已发出，但上游返回了无效或不完整响应。"
+            "请稍后重试，或切换接口模式/连接。"
         )
 
     return build_error_detail(parsed_body, default=default)

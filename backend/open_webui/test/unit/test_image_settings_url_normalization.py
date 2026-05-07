@@ -131,10 +131,30 @@ def test_openai_image_524_error_is_user_readable():
         route_label="edits",
     )
 
+    assert "HTTP 524" in detail
     assert "edits 请求已发出" in detail
     assert "120 秒" in detail
     assert "Cloudflare" in detail
     assert "title" not in detail
+
+
+def test_openai_image_502_cloudflare_error_keeps_status_code():
+    detail = _build_openai_image_upstream_error_detail(
+        502,
+        {
+            "detail": "The origin web server returned an invalid or incomplete response to Cloudflare.",
+            "cloudflare_error": True,
+            "retry_after": 60,
+        },
+        default="Failed to edit image via upstream /images/edits",
+        route_label="edits",
+    )
+
+    assert "HTTP 502" in detail
+    assert "edits 请求已发出" in detail
+    assert "Cloudflare" in detail
+    assert "中转站或源站" in detail
+    assert "origin web server" not in detail
 
 
 def test_openai_image_settings_auto_append_v1():

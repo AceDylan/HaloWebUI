@@ -5,6 +5,7 @@
 	import { toast } from 'svelte-sonner';
 
 	import ArchivedChatsModal from '$lib/components/layout/Sidebar/ArchivedChatsModal.svelte';
+	import Spinner from '$lib/components/common/Spinner.svelte';
 	import DataManagementStatus from '$lib/components/settings/DataManagementStatus.svelte';
 	import { getBackendConfig } from '$lib/apis';
 	import { getErrorDetail } from '$lib/apis/response';
@@ -74,6 +75,11 @@
 		topLevelKeys: string[];
 		mode: ImportMode;
 		confirmReplace: boolean;
+	};
+
+	type DatabaseRestoreInspectingFile = {
+		fileName: string;
+		fileSize: number;
 	};
 
 	type DatabaseRestoreDraft = {
@@ -161,6 +167,7 @@
 
 	let chatImportDraft: ChatImportDraft | null = null;
 	let configImportDraft: ConfigImportDraft | null = null;
+	let databaseRestoreInspectingFile: DatabaseRestoreInspectingFile | null = null;
 	let databaseRestoreDraft: DatabaseRestoreDraft | null = null;
 
 	let chatImportInputElement: HTMLInputElement;
@@ -317,12 +324,14 @@
 	};
 
 	const resetDatabaseRestoreDraft = () => {
+		databaseRestoreInspectingFile = null;
 		databaseRestoreDraft = null;
 	};
 
 	const cancelDatabaseRestoreInspection = () => {
 		databaseRestoreInspectionController?.abort();
 		databaseRestoreInspectionController = null;
+		databaseRestoreInspectingFile = null;
 		setOperationState(
 			'databaseRestore',
 			'warning',
@@ -676,6 +685,10 @@
 
 		databaseRestoreInspectionController?.abort();
 		resetDatabaseRestoreDraft();
+		databaseRestoreInspectingFile = {
+			fileName: file.name,
+			fileSize: file.size
+		};
 		const controller = new AbortController();
 		databaseRestoreInspectionController = controller;
 		const timeoutId = window.setTimeout(() => {
@@ -691,6 +704,7 @@
 
 		try {
 			const response = await inspectDatabaseRestore(localStorage.token, file, controller.signal);
+			databaseRestoreInspectingFile = null;
 			databaseRestoreDraft = {
 				fileName: response.filename,
 				fileSize: response.size,
@@ -714,6 +728,7 @@
 			if (controller.signal.aborted) {
 				if (databaseRestoreInspectionController !== controller) return;
 
+				databaseRestoreInspectingFile = null;
 				setOperationState(
 					'databaseRestore',
 					'warning',
@@ -1333,24 +1348,55 @@
 											{$i18n.t('Upload and inspect a SQLite backup before restoring it.')}
 										</div>
 									</div>
-									<button
-										class={btnNeutral}
-										type="button"
-										on:click={() => databaseRestoreInputElement?.click()}
-										disabled={!databaseRestoreSupport.supported || operationStates.databaseRestore.phase === 'running'}
-									>
-										{$i18n.t('Import')}
-									</button>
-								</div>
+										<button
+											class={btnNeutral}
+											type="button"
+											on:click={() => databaseRestoreInputElement?.click()}
+											disabled={!databaseRestoreSupport.supported || operationStates.databaseRestore.phase === 'validating' || operationStates.databaseRestore.phase === 'running'}
+										>
+											{$i18n.t(operationStates.databaseRestore.phase === 'validating' ? 'Checking...' : 'Import')}
+										</button>
+									</div>
 
 								{#if !databaseRestoreSupport.supported}
 									<div class="rounded-xl border border-amber-200/70 bg-amber-50/80 px-3 py-2 text-xs text-amber-700 dark:border-amber-800/40 dark:bg-amber-950/20 dark:text-amber-300">
 										{getRestoreUnavailableMessage()}
-									</div>
-								{/if}
+										</div>
+									{/if}
 
-								{#if databaseRestoreDraft}
-									<div class="rounded-2xl border border-red-200/70 bg-red-50/40 p-3 space-y-3 dark:border-red-800/40 dark:bg-red-950/10">
+									{#if databaseRestoreInspectingFile && operationStates.databaseRestore.phase === 'validating'}
+										<div class="rounded-2xl border border-red-200/70 bg-red-50/40 p-3 space-y-3 dark:border-red-800/40 dark:bg-red-950/10">
+											<div class="flex items-start gap-3">
+												<div class="mt-0.5 shrink-0 text-red-600 dark:text-red-300">
+													<Spinner className="size-5" />
+												</div>
+												<div class="min-w-0 flex-1 space-y-1">
+													<div class="text-xs font-medium text-red-700 dark:text-red-300">
+														{$i18n.t('Backup file')}
+													</div>
+													<div class="truncate text-sm font-medium text-gray-800 dark:text-gray-100">
+														{databaseRestoreInspectingFile.fileName}
+													</div>
+													<div class="text-xs text-gray-500 dark:text-gray-400">
+														{formatBytes(databaseRestoreInspectingFile.fileSize)}
+													</div>
+												</div>
+											</div>
+
+											<div class="rounded-xl border border-red-200/70 bg-white/80 px-3 py-2 text-xs text-red-700 dark:border-red-800/40 dark:bg-gray-900/60 dark:text-red-300">
+												{$i18n.t('Checking backup contents. Large database files may take a while.')}
+											</div>
+
+											<div class="flex items-center justify-end gap-2">
+												<button class={btnSmall} type="button" on:click={cancelDatabaseRestoreInspection}>
+													{$i18n.t('Cancel')}
+												</button>
+											</div>
+										</div>
+									{/if}
+
+									{#if databaseRestoreDraft}
+										<div class="rounded-2xl border border-red-200/70 bg-red-50/40 p-3 space-y-3 dark:border-red-800/40 dark:bg-red-950/10">
 										<div class="space-y-1">
 											<div class="text-xs font-medium text-red-700 dark:text-red-300">
 												{$i18n.t('Backup file')}
@@ -1402,19 +1448,12 @@
 								{/if}
 
 								<DataManagementStatus
-									visible={hasOperationState('databaseRestore')}
-									phase={operationStates.databaseRestore.phase}
-									title={operationStates.databaseRestore.title}
-									detail={operationStates.databaseRestore.detail}
-								/>
-								{#if operationStates.databaseRestore.phase === 'validating'}
-									<div class="flex justify-end">
-										<button class={btnSmall} type="button" on:click={cancelDatabaseRestoreInspection}>
-											{$i18n.t('Cancel')}
-										</button>
-									</div>
-								{/if}
-							</div>
+										visible={hasOperationState('databaseRestore')}
+										phase={operationStates.databaseRestore.phase}
+										title={operationStates.databaseRestore.title}
+										detail={operationStates.databaseRestore.detail}
+									/>
+								</div>
 
 							<div class="glass-item px-4 py-3 space-y-3 md:col-span-2">
 								<div class="flex items-center justify-between gap-3">

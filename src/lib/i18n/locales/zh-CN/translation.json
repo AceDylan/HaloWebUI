@@ -2526,6 +2526,7 @@
 	"Chat file is ready to import.": "对话文件已完成预检，可开始导入。",
 	"Chat import finished.": "对话导入已完成。",
 	"Checking chat file...": "正在检查对话文件...",
+	"Checking backup contents. Large database files may take a while.": "正在检查备份内容，大数据库文件可能需要等待一会儿。",
 	"Checking configuration file...": "正在检查配置文件...",
 	"Configuration export download started.": "已开始下载配置导出文件。",
 	"Configuration file is ready to import.": "配置文件已完成预检，可开始导入。",

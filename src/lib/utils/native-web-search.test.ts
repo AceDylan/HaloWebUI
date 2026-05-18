@@ -2,10 +2,20 @@ import { describe, expect, it } from 'vitest';
 
 import {
 	buildWebSearchModeOptions,
+	getSmartWebSearchRouteLabel,
 	resolveConfiguredDefaultWebSearchMode
 } from './native-web-search';
 
 const t = (key: string) => key;
+const zhT = (key: string) =>
+	(
+		{
+			'Smart Web Search': '智能联网搜索',
+			'Smart · Model Native': '智能 · 原生优先',
+			'Smart · HaloWebUI': '智能 · HaloWebUI',
+			Recommended: '推荐'
+		} as Record<string, string>
+	)[key] ?? key;
 
 describe('native web search mode options', () => {
 	it('offers smart web search when only HaloWebUI search is enabled', () => {
@@ -38,6 +48,87 @@ describe('native web search mode options', () => {
 		);
 
 		expect(options.find((option) => option.value === 'auto')?.disabled).toBe(true);
+	});
+
+	it('labels smart web search as model-native first for supported models', () => {
+		const config = {
+			features: {
+				enable_halo_web_search: true,
+				enable_native_web_search: true
+			}
+		};
+		const models = [{ id: 'gpt-5.5', owned_by: 'openai' }];
+		const options = buildWebSearchModeOptions(t, config, models);
+		const auto = options.find((option) => option.value === 'auto');
+
+		expect(auto?.shortLabel).toBe('Smart · Model Native');
+		expect(auto?.description).toBe(
+			'先判断是否需要联网；白名单模型优先原生联网，失败自动切回 HaloWebUI，其余模型使用 HaloWebUI。'
+		);
+		expect(getSmartWebSearchRouteLabel(t, config, models)).toBe('Smart · Model Native');
+	});
+
+	it('keeps smart web search on HaloWebUI for unverified compatible models', () => {
+		const config = {
+			features: {
+				enable_halo_web_search: true,
+				enable_native_web_search: true
+			}
+		};
+		const models = [{ id: 'future-model', owned_by: 'openai' }];
+		const options = buildWebSearchModeOptions(t, config, models);
+		const auto = options.find((option) => option.value === 'auto');
+
+		expect(auto?.shortLabel).toBe('Smart · HaloWebUI');
+		expect(auto?.description).toBe('先判断是否需要联网；需要时使用 HaloWebUI 搜索。');
+		expect(auto?.disabled).toBeFalsy();
+	});
+
+	it('uses concise Chinese labels and descriptions for all web search modes', () => {
+		const options = buildWebSearchModeOptions(
+			zhT,
+			{
+				features: {
+					enable_halo_web_search: true,
+					enable_native_web_search: true
+				}
+			},
+			[{ id: 'gpt-5.5', owned_by: 'openai' }]
+		);
+
+		expect(options.find((option) => option.value === 'off')).toMatchObject({
+			label: '关闭联网',
+			description: '本聊天不使用联网搜索。'
+		});
+		expect(options.find((option) => option.value === 'halo')).toMatchObject({
+			label: 'HaloWebUI 搜索',
+			description: '使用 HaloWebUI 搜索，再把结果交给模型。'
+		});
+		expect(options.find((option) => option.value === 'native')).toMatchObject({
+			label: '模型原生联网',
+			description: '直接调用模型内置联网；失败时自动切回 HaloWebUI（如可用）。'
+		});
+		expect(options.find((option) => option.value === 'auto')).toMatchObject({
+			label: '智能联网搜索',
+			shortLabel: '智能 · 原生优先',
+			description: '先判断是否需要联网；白名单模型优先原生联网，失败自动切回 HaloWebUI，其余模型使用 HaloWebUI。'
+		});
+	});
+
+	it('does not automatically try unverified native-only models', () => {
+		const options = buildWebSearchModeOptions(
+			t,
+			{
+				features: {
+					enable_halo_web_search: false,
+					enable_native_web_search: true
+				}
+			},
+			[{ id: 'future-model', owned_by: 'openai' }]
+		);
+
+		expect(options.find((option) => option.value === 'auto')?.disabled).toBe(true);
+		expect(options.find((option) => option.value === 'native')?.disabled).toBeFalsy();
 	});
 
 	it('keeps new chats off when the admin default is missing or off', () => {

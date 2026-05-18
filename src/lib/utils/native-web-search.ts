@@ -321,40 +321,70 @@ export function getNativeWebSearchAvailabilityNote(
 	});
 }
 
-function buildNativeModeDescription(t: Translator, summary: NativeWebSearchSummary): string {
+function buildNativeModeDescription(
+	t: Translator,
+	haloEnabled: boolean,
+	summary: NativeWebSearchSummary
+): string {
 	if (summary.allUnsupported) {
 		return t('Model-native web search is unavailable for this model.');
 	}
-	if (summary.supportedCount === 0 && summary.unknownCount > 0) {
-		return t('Current model has not been verified for built-in web search yet. You can still try it manually.');
-	}
 
-	return t('Use model-native web search directly for all selected models.');
+	return haloEnabled
+		? t('直接调用模型内置联网；失败时自动切回 HaloWebUI（如可用）。')
+		: t('直接调用模型内置联网。');
 }
 
 function buildAutoModeDescription(
 	t: Translator,
 	haloEnabled: boolean,
+	nativeEnabled: boolean,
 	summary: NativeWebSearchSummary
 ): string {
-	if (summary.hasSelection && !haloEnabled && !summary.anySupported && !summary.anyUnknown) {
+	if (summary.hasSelection && !haloEnabled && !summary.anySupported) {
 		return t('No web search route is available for the current selection.');
 	}
 
 	if (summary.allUnsupported) {
 		return haloEnabled
-			? t('Automatically decide whether web search is needed. When needed, use HaloWebUI search.')
+			? t('先判断是否需要联网；需要时使用 HaloWebUI 搜索。')
 			: t('Model-native web search is unavailable for this model.');
 	}
 	if (summary.supportedCount === 0 && summary.unknownCount > 0) {
 		return haloEnabled
-			? t('Automatically decide whether web search is needed. When needed, use HaloWebUI search.')
-			: t('Native web search availability for this model is currently unknown.');
+			? t('先判断是否需要联网；需要时使用 HaloWebUI 搜索。')
+			: t('No automatic web search route is available for the current selection. You can still try model-native web search manually.');
 	}
 
-	return haloEnabled
-		? t('Automatically decide whether web search is needed, then prefer model-native search with HaloWebUI fallback.')
-		: t('Automatically decide whether web search is needed, then use model-native search when supported.');
+	if (nativeEnabled && summary.anySupported) {
+		return haloEnabled
+			? t('先判断是否需要联网；白名单模型优先原生联网，失败自动切回 HaloWebUI，其余模型使用 HaloWebUI。')
+			: t('先判断是否需要联网；白名单模型使用模型原生联网。');
+	}
+
+	return t('先判断是否需要联网；需要时使用 HaloWebUI 搜索。');
+}
+
+export function getSmartWebSearchRouteLabel(
+	t: Translator,
+	config: WebSearchConfigLike | null | undefined,
+	models: Array<ModelLike | null | undefined>
+): string {
+	const haloEnabled = Boolean(
+		config?.features?.enable_halo_web_search ?? config?.features?.enable_web_search
+	);
+	const nativeEnabled = Boolean(config?.features?.enable_native_web_search);
+	const summary = summarizeNativeWebSearchSupport(models);
+
+	if (nativeEnabled && summary.anySupported) {
+		return t('Smart · Model Native');
+	}
+
+	if (haloEnabled) {
+		return t('Smart · HaloWebUI');
+	}
+
+	return t('Smart');
 }
 
 export function buildWebSearchModeOptions(
@@ -368,7 +398,7 @@ export function buildWebSearchModeOptions(
 	const nativeEnabled = Boolean(config?.features?.enable_native_web_search);
 	const summary = summarizeNativeWebSearchSupport(models);
 	const nativeImpossible = summary.hasSelection && summary.allUnsupported;
-	const autoImpossible = !haloEnabled && nativeImpossible;
+	const autoImpossible = summary.hasSelection && !haloEnabled && !summary.anySupported;
 	const nativeDescriptionTone: WebSearchModeOption['descriptionTone'] = summary.allUnsupported
 		? 'warning'
 		: summary.supportedCount === 0 && summary.unknownCount > 0
@@ -382,17 +412,15 @@ export function buildWebSearchModeOptions(
 	return [
 		{
 			value: 'off',
-			label: t('Off'),
-			description: t('Do not use any web search mode for this chat.')
+			label: t('关闭联网'),
+			description: t('本聊天不使用联网搜索。')
 		},
 		...(haloEnabled
 			? [
 					{
 						value: 'halo' as WebSearchMode,
-						label: 'HaloWebUI',
-						description: t(
-							'Always use HaloWebUI web search for consistent behavior across selected models.'
-						)
+						label: 'HaloWebUI 搜索',
+						description: t('使用 HaloWebUI 搜索，再把结果交给模型。')
 					}
 				]
 			: []),
@@ -401,7 +429,7 @@ export function buildWebSearchModeOptions(
 					{
 						value: 'native' as WebSearchMode,
 						label: t('模型原生联网'),
-						description: buildNativeModeDescription(t, summary),
+						description: buildNativeModeDescription(t, haloEnabled, summary),
 						descriptionTone: nativeDescriptionTone,
 						disabled: nativeImpossible
 					}
@@ -412,8 +440,8 @@ export function buildWebSearchModeOptions(
 					{
 						value: 'auto' as WebSearchMode,
 						label: t('Smart Web Search'),
-						shortLabel: t('Smart'),
-						description: buildAutoModeDescription(t, haloEnabled, summary),
+						shortLabel: getSmartWebSearchRouteLabel(t, config, models),
+						description: buildAutoModeDescription(t, haloEnabled, nativeEnabled, summary),
 						descriptionTone: autoDescriptionTone,
 						disabled: autoImpossible,
 						badge: haloEnabled && !autoImpossible ? t('Recommended') : undefined

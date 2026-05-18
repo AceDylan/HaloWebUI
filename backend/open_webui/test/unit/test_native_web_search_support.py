@@ -100,6 +100,62 @@ def test_connection_level_disable_overrides_supported_model():
     assert support["can_attempt"] is False
 
 
+def test_openai_compatible_connection_allows_whitelisted_models():
+    connection_support = build_native_web_search_support(
+        "openai",
+        url="https://new-api.example.test/v1",
+        api_config={},
+    )
+
+    supported = resolve_effective_native_web_search_support(
+        connection_support,
+        provider="openai",
+        model_id="gpt-5.5",
+        model_name="GPT 5.5",
+    )
+    unknown = resolve_effective_native_web_search_support(
+        connection_support,
+        provider="openai",
+        model_id="future-model",
+        model_name="Future Model",
+    )
+    denied = resolve_effective_native_web_search_support(
+        connection_support,
+        provider="openai",
+        model_id="text-embedding-3-large",
+        model_name="Embedding",
+    )
+
+    assert supported["status"] == NATIVE_WEB_SEARCH_STATUS_SUPPORTED
+    assert supported["supported"] is True
+    assert supported["connection_support"]["reason"] == "compat_connection_unverified"
+
+    assert unknown["status"] == NATIVE_WEB_SEARCH_STATUS_UNKNOWN
+    assert unknown["supported"] is False
+
+    assert denied["status"] == NATIVE_WEB_SEARCH_STATUS_UNSUPPORTED
+    assert denied["can_attempt"] is False
+
+
+def test_openai_compatible_connection_explicit_disable_overrides_whitelist():
+    connection_support = build_native_web_search_support(
+        "openai",
+        url="https://new-api.example.test/v1",
+        api_config={"native_web_search_enabled": False},
+    )
+
+    support = resolve_effective_native_web_search_support(
+        connection_support,
+        provider="openai",
+        model_id="gpt-5.5",
+        model_name="GPT 5.5",
+    )
+
+    assert support["status"] == NATIVE_WEB_SEARCH_STATUS_UNSUPPORTED
+    assert support["reason"] == "connection_disabled"
+    assert support["supported"] is False
+
+
 def test_gemini_rules_allow_supported_family_and_deny_non_chat_models():
     connection_support = build_native_web_search_support(
         "gemini",

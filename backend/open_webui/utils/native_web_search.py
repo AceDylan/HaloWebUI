@@ -198,6 +198,14 @@ def resolve_effective_native_web_search_support(
         effective_status = NATIVE_WEB_SEARCH_STATUS_SUPPORTED
         reason = model_rule.get("reason") or connection.get("reason") or "official_connection"
         source = NATIVE_WEB_SEARCH_EFFECTIVE_SCOPE
+    elif (
+        normalized_provider == "openai"
+        and connection_status == NATIVE_WEB_SEARCH_STATUS_UNKNOWN
+        and model_status == NATIVE_WEB_SEARCH_STATUS_SUPPORTED
+    ):
+        effective_status = NATIVE_WEB_SEARCH_STATUS_SUPPORTED
+        reason = model_rule.get("reason") or "model_rule_allow_openai_compatible"
+        source = NATIVE_WEB_SEARCH_EFFECTIVE_SCOPE
     else:
         effective_status = NATIVE_WEB_SEARCH_STATUS_UNKNOWN
         reason = model_rule.get("reason") or connection.get("reason") or "model_rule_unknown"

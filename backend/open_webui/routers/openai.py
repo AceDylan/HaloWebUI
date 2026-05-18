@@ -455,10 +455,10 @@ def _stringify_upstream_body(body) -> str:
 def _get_native_web_search_tool_type(api_config: dict) -> str:
     """
     Responses API web search tool types vary across providers/proxies.
-    Prefer explicit config, otherwise default to the canonical 'web_search'.
+    Prefer explicit config, otherwise default to OpenAI's hosted web search tool.
     """
     if not isinstance(api_config, dict):
-        return "web_search"
+        return "web_search_preview"
 
     tool_types = api_config.get("native_web_search_tool_types")
     if isinstance(tool_types, list):
@@ -470,7 +470,7 @@ def _get_native_web_search_tool_type(api_config: dict) -> str:
     if tool_type and str(tool_type).strip():
         return str(tool_type).strip()
 
-    return "web_search"
+    return "web_search_preview"
 
 
 def _should_use_responses_api(
@@ -2513,6 +2513,7 @@ async def generate_chat_completion(
 
     # Local-only flags (do not forward as-is).
     native_web_search = payload.pop("native_web_search", False) is True
+    native_web_search_required = payload.pop("native_web_search_required", False) is True
     native_file_inputs = payload.pop("native_file_inputs", False) is True
 
     # Responses API routing is strict: if enabled, we only call /responses and surface real errors.
@@ -2543,6 +2544,7 @@ async def generate_chat_completion(
         payload_dict = convert_chat_completions_to_responses_payload(
             payload,
             native_web_search_tool_type=web_search_tool_type,
+            native_web_search_required=native_web_search_required,
             default_reasoning_summary=default_reasoning_summary,
         )
         auto_reasoning_summary_applied = bool(

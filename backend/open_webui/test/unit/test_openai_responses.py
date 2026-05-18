@@ -131,6 +131,22 @@ def test_convert_chat_completions_to_responses_payload_injects_native_web_search
     assert r["tool_choice"] == "auto"
 
 
+def test_convert_chat_completions_to_responses_payload_forces_native_web_search_tool():
+    chat = {
+        "model": "gpt-test",
+        "messages": [{"role": "user", "content": "Find the latest updates"}],
+    }
+
+    r = convert_chat_completions_to_responses_payload(
+        chat,
+        native_web_search_tool_type="web_search",
+        native_web_search_required=True,
+    )
+
+    assert r["tools"] == [{"type": "web_search"}]
+    assert r["tool_choice"] == {"type": "web_search"}
+
+
 def test_convert_chat_completions_to_responses_payload_strips_include_usage_stream_option():
     chat = {
         "model": "gpt-test",

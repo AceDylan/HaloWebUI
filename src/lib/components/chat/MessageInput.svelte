@@ -79,7 +79,8 @@
 		type WebSearchModeSource
 	} from '$lib/utils/web-search-mode';
 	import {
-		buildWebSearchModeOptions
+		buildWebSearchModeOptions,
+		getSmartWebSearchRouteLabel
 	} from '$lib/utils/native-web-search';
 	import { translateWithDefault } from '$lib/i18n';
 
@@ -399,7 +400,11 @@
 		normalizedWebSearchMode === 'native'
 			? $i18n.t('Model Built-in')
 			: normalizedWebSearchMode === 'auto'
-				? $i18n.t('Smart')
+				? getSmartWebSearchRouteLabel(
+						(key, options) => $i18n.t(key, options),
+						$config,
+						hasResolvedSelectedModels ? selectedModelObjects : []
+					)
 				: currentWebSearchModeLabel;
 	$: fallbackWebSearchMode =
 		(['auto', 'halo', 'native', 'off'] as WebSearchMode[]).find((mode) =>
@@ -431,7 +436,10 @@
 	$: currentWebSearchTooltip = (() => {
 		switch (normalizedWebSearchMode) {
 			case 'auto':
-				return $i18n.t('智能联网已开启：会先判断是否需要搜索');
+				return tr(
+					'智能联网已开启：先判断是否需要联网；白名单模型优先原生联网，失败自动切回 HaloWebUI，其余模型使用 HaloWebUI。',
+					'Smart web search is enabled: decide first, prefer model-native search for allowlisted models, and fall back to HaloWebUI.'
+				);
 			case 'native':
 				return $i18n.t('模型原生联网搜索已开启');
 			case 'halo':

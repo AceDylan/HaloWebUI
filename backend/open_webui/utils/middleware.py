@@ -1724,8 +1724,7 @@ def _resolve_web_search_strategy(
         elif halo_enabled:
             effective_mode = WEB_SEARCH_MODE_HALO
             notification = (
-                "Current model or connection does not support native web search. "
-                "Falling back to HaloWebUI web search."
+                "当前模型或连接不支持模型原生联网，本次将使用 HaloWebUI 搜索。"
             )
     elif requested_mode == WEB_SEARCH_MODE_AUTO:
         if native_enabled and native_support.get("supported"):
@@ -4013,6 +4012,7 @@ async def process_chat_payload(request, form_data, user, metadata, model):
             )
         elif web_search_strategy["effective_mode"] == WEB_SEARCH_MODE_NATIVE:
             form_data["native_web_search"] = True
+            form_data["native_web_search_required"] = True
 
         # In native tool-calling mode, image generation should happen through the
         # `generate_image` tool only. Otherwise the request gets duplicated:

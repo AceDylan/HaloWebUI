@@ -291,6 +291,7 @@ def convert_chat_completions_to_responses_payload(
     chat_payload: Dict[str, Any],
     *,
     native_web_search_tool_type: Optional[str] = None,
+    native_web_search_required: bool = False,
     default_reasoning_summary: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
@@ -488,8 +489,11 @@ def convert_chat_completions_to_responses_payload(
             tools.append({"type": native_web_search_tool_type})
         responses_payload["tools"] = tools
 
-        # Make tool_choice default to auto when enabling web search.
-        if "tool_choice" not in responses_payload:
+        # Smart web search has already decided this turn needs live results.
+        # Force the hosted search tool instead of merely offering it.
+        if native_web_search_required:
+            responses_payload["tool_choice"] = {"type": native_web_search_tool_type}
+        elif "tool_choice" not in responses_payload:
             responses_payload["tool_choice"] = "auto"
 
     return responses_payload

@@ -1795,8 +1795,7 @@ async def chat_completion(
                         "data": {
                             "type": "info",
                             "content": (
-                                "Native web search is unavailable for this request. "
-                                "Retrying with HaloWebUI web search."
+                                "模型原生联网暂不可用，本次已切换到 HaloWebUI 搜索。"
                             ),
                         },
                     }

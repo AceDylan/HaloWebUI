@@ -80,12 +80,12 @@ export function getWebSearchModeLabel(
 
 	switch (normalizeWebSearchMode(mode, 'off')) {
 		case 'halo':
-			return 'HaloWebUI';
+			return translate('HaloWebUI 搜索', 'HaloWebUI Search');
 		case 'native':
 			return translate('模型原生联网', 'Model Native Web Search');
 		case 'auto':
-			return translate('自动', 'Auto');
+			return translate('智能联网搜索', 'Smart Web Search');
 		default:
-			return translate('关闭', 'Off');
+			return translate('关闭联网', 'Web Search Off');
 	}
 }

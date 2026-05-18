@@ -610,23 +610,23 @@
 	$: defaultWebSearchModeOptions = [
 		{
 			value: 'off',
-			label: $i18n.t('Off'),
-			description: tr('新聊天默认不启用联网搜索。', 'New chats start with web search off.')
+			label: $i18n.t('关闭联网'),
+			description: tr('新聊天默认不使用联网搜索。', 'New chats start with web search off.')
 		},
 		{
 			value: 'auto',
 			label: $i18n.t('Smart Web Search'),
 			description: tr(
-				'新聊天默认自动判断是否需要联网。',
-				'New chats automatically decide whether web search is needed.'
+				'新聊天默认先判断是否需要联网；白名单模型优先原生联网，失败自动切回 HaloWebUI，其余模型使用 HaloWebUI。',
+				'New chats decide whether web search is needed. Allowlisted models prefer model-native search and fall back to HaloWebUI; the rest use HaloWebUI.'
 			),
 			disabled: !webConfig?.ENABLE_WEB_SEARCH && !webConfig?.ENABLE_NATIVE_WEB_SEARCH
 		},
 		{
 			value: 'halo',
-			label: 'HaloWebUI',
+			label: 'HaloWebUI 搜索',
 			description: tr(
-				'新聊天默认使用 HaloWebUI 搜索。',
+				'新聊天默认使用 HaloWebUI 搜索，再把结果交给模型。',
 				'New chats default to HaloWebUI search.'
 			),
 			disabled: !webConfig?.ENABLE_WEB_SEARCH
@@ -635,8 +635,8 @@
 			value: 'native',
 			label: $i18n.t('Model Native'),
 			description: tr(
-				'新聊天默认使用模型内置联网搜索。',
-				'New chats default to model-native web search.'
+				'新聊天默认直接调用模型内置联网；失败时自动切回 HaloWebUI（如可用）。',
+				'New chats default to model-native web search and fall back to HaloWebUI when available.'
 			),
 			disabled: !webConfig?.ENABLE_NATIVE_WEB_SEARCH
 		}

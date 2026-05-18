@@ -1131,8 +1131,6 @@
 
 	setContext('floatingChatRequestFactory', buildFloatingChatRequest);
 
-	const getPreferredDefaultWebSearchMode = (): WebSearchMode => 'off';
-
 	const isChatWebSearchFeatureEnabled = () =>
 		Boolean($config?.features?.enable_halo_web_search ?? $config?.features?.enable_web_search) ||
 		Boolean($config?.features?.enable_native_web_search);
@@ -1140,6 +1138,9 @@
 	const canUseChatWebSearch = () =>
 		isChatWebSearchFeatureEnabled() &&
 		($user?.role === 'admin' || $user?.permissions?.features?.web_search);
+
+	const getPreferredDefaultWebSearchMode = (): WebSearchMode =>
+		canUseChatWebSearch() ? 'auto' : 'off';
 
 	let lastAutoImageGenerationSelectionKey = '';
 	const syncImageGenerationForDedicatedModel = ({ force = false } = {}) => {

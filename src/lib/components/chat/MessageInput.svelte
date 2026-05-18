@@ -431,7 +431,7 @@
 	$: currentWebSearchTooltip = (() => {
 		switch (normalizedWebSearchMode) {
 			case 'auto':
-				return $i18n.t('智能联网搜索已开启');
+				return $i18n.t('智能联网已开启：会先判断是否需要搜索');
 			case 'native':
 				return $i18n.t('模型原生联网搜索已开启');
 			case 'halo':

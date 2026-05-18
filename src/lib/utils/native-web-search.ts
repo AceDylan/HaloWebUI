@@ -336,20 +336,24 @@ function buildAutoModeDescription(
 	haloEnabled: boolean,
 	summary: NativeWebSearchSummary
 ): string {
+	if (summary.hasSelection && !haloEnabled && !summary.anySupported && !summary.anyUnknown) {
+		return t('No web search route is available for the current selection.');
+	}
+
 	if (summary.allUnsupported) {
 		return haloEnabled
-			? t('Current model does not support built-in web search. Auto will use HaloWebUI instead.')
+			? t('Automatically decide whether web search is needed. When needed, use HaloWebUI search.')
 			: t('Model-native web search is unavailable for this model.');
 	}
 	if (summary.supportedCount === 0 && summary.unknownCount > 0) {
 		return haloEnabled
-			? t('Current model has not been verified for built-in web search yet. Auto will keep using HaloWebUI.')
+			? t('Automatically decide whether web search is needed. When needed, use HaloWebUI search.')
 			: t('Native web search availability for this model is currently unknown.');
 	}
 
 	return haloEnabled
-		? t('Prefer model-native web search and keep HaloWebUI as fallback.')
-		: t('Prefer native web search whenever it is supported.');
+		? t('Automatically decide whether web search is needed, then prefer model-native search with HaloWebUI fallback.')
+		: t('Automatically decide whether web search is needed, then use model-native search when supported.');
 }
 
 export function buildWebSearchModeOptions(
@@ -364,6 +368,15 @@ export function buildWebSearchModeOptions(
 	const summary = summarizeNativeWebSearchSupport(models);
 	const nativeImpossible = summary.hasSelection && summary.allUnsupported;
 	const autoImpossible = !haloEnabled && nativeImpossible;
+	const nativeDescriptionTone: WebSearchModeOption['descriptionTone'] = summary.allUnsupported
+		? 'warning'
+		: summary.supportedCount === 0 && summary.unknownCount > 0
+			? 'info'
+			: 'default';
+	const autoDescriptionTone: WebSearchModeOption['descriptionTone'] =
+		summary.allUnsupported || (summary.supportedCount === 0 && summary.unknownCount > 0)
+			? 'info'
+			: 'default';
 
 	return [
 		{
@@ -388,23 +401,19 @@ export function buildWebSearchModeOptions(
 						value: 'native' as WebSearchMode,
 						label: t('模型原生联网'),
 						description: buildNativeModeDescription(t, summary),
-						descriptionTone:
-							summary.allUnsupported
-								? 'warning'
-								: summary.supportedCount === 0 && summary.unknownCount > 0
-									? 'info'
-									: 'default',
+						descriptionTone: nativeDescriptionTone,
 						disabled: nativeImpossible
-					},
+					}
+				]
+			: []),
+		...(haloEnabled || nativeEnabled
+			? [
 					{
 						value: 'auto' as WebSearchMode,
 						label: t('Smart Web Search'),
 						shortLabel: t('Smart'),
 						description: buildAutoModeDescription(t, haloEnabled, summary),
-						descriptionTone:
-							summary.allUnsupported || (summary.supportedCount === 0 && summary.unknownCount > 0)
-								? 'info'
-								: 'default',
+						descriptionTone: autoDescriptionTone,
 						disabled: autoImpossible,
 						badge: haloEnabled && !autoImpossible ? t('Recommended') : undefined
 					}

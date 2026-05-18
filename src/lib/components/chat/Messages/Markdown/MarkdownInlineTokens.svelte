@@ -9,6 +9,7 @@
 
 	import { WEBUI_BASE_URL } from '$lib/constants';
 	import { copyToClipboard, unescapeHtml } from '$lib/utils';
+	import { getDataUrlDownloadName, rewriteDataUrlDownloadLinks } from '$lib/utils/download-links';
 
 	import Image from '$lib/components/common/Image.svelte';
 	import {
@@ -36,6 +37,9 @@
 
 	const resolveContentSrc = (href: string) =>
 		resolveGeneratedFileContentUrl(href, generatedFiles) ?? href;
+
+	const resolveDownloadName = (href: string, label: string = '') =>
+		getDataUrlDownloadName(href, label);
 </script>
 
 {#each renderTokens as token}
@@ -47,9 +51,11 @@
 		{/if}
 	{:else if token.type === 'html'}
 		{@const isSvgMarkupToken = isSvgMarkup(token.text)}
-		{@const html = rewriteGeneratedFileHtmlLinks(
-			DOMPurify.sanitize(token.text, { ADD_ATTR: ['style'] }),
-			generatedFiles
+		{@const html = rewriteDataUrlDownloadLinks(
+			rewriteGeneratedFileHtmlLinks(
+				DOMPurify.sanitize(token.text, { ADD_ATTR: ['style'] }),
+				generatedFiles
+			)
 		)}
 		{#if isSvgMarkupToken}
 			<span class="font-mono whitespace-pre-wrap break-all">{token.text}</span>
@@ -64,8 +70,15 @@
 		{/if}
 	{:else if token.type === 'link'}
 		{@const href = resolveLinkHref(token.href ?? '')}
+		{@const download = resolveDownloadName(href, token.text ?? '')}
 		{#if token.tokens}
-			<a {href} target="_blank" rel="nofollow" title={token.title}>
+			<a
+				{href}
+				target={download ? undefined : '_blank'}
+				download={download ?? undefined}
+				rel="nofollow"
+				title={token.title}
+			>
 				<svelte:self
 					id={`${id}-a`}
 					tokens={token.tokens}
@@ -75,7 +88,13 @@
 				/>
 			</a>
 		{:else}
-			<a {href} target="_blank" rel="nofollow" title={token.title}>{token.text}</a>
+			<a
+				{href}
+				target={download ? undefined : '_blank'}
+				download={download ?? undefined}
+				rel="nofollow"
+				title={token.title}>{token.text}</a
+			>
 		{/if}
 	{:else if token.type === 'image'}
 		<Image src={resolveContentSrc(token.href ?? '')} alt={token.text} />

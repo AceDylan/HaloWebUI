@@ -24,6 +24,7 @@
 	import { settings } from '$lib/stores';
 	import { isSvgMarkup, promoteSvgMarkupTokens } from './svgMarkupTokens';
 	import { getHeadingAnchorId } from '$lib/utils/headings';
+	import { rewriteDataUrlDownloadLinks } from '$lib/utils/download-links';
 	import {
 		rewriteGeneratedFileHtmlLinks,
 		type GeneratedMessageFile
@@ -383,9 +384,11 @@
 			</Collapsible>
 		{:else if token.type === 'html'}
 			{@const isSvgMarkupToken = isSvgMarkup(token.text)}
-			{@const html = rewriteGeneratedFileHtmlLinks(
-				DOMPurify.sanitize(token.text, { ADD_ATTR: ['style'] }),
-				generatedFiles
+			{@const html = rewriteDataUrlDownloadLinks(
+				rewriteGeneratedFileHtmlLinks(
+					DOMPurify.sanitize(token.text, { ADD_ATTR: ['style'] }),
+					generatedFiles
+				)
 			)}
 			{#if isSvgMarkupToken}
 				<CodeBlock

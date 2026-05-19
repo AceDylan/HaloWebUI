@@ -39,6 +39,7 @@
 
 	export let className = '';
 	export let uiStyle: 'flat' | 'card' = 'flat';
+	export let variant: 'default' | 'folder' = 'default';
 
 	export let id;
 	export let title;
@@ -54,13 +55,23 @@
 	export let selected = false;
 	export let shiftKey = false;
 
+	$: isFolderVariant = variant === 'folder';
+
 	$: itemShellClass =
-		uiStyle === 'card'
+		isFolderVariant
+			? 'w-full flex justify-between rounded-md border border-transparent px-2.5 py-1.5 text-[13px] transition-colors duration-150'
+			: uiStyle === 'card'
 			? 'w-full flex justify-between rounded-xl border border-transparent px-3 py-2 transition-colors duration-150'
 			: 'w-full flex justify-between rounded-lg px-3 py-2 transition-colors duration-150';
 
 	$: itemStateClass =
-		uiStyle === 'card'
+		isFolderVariant
+			? id === $chatId || confirmEdit
+				? 'bg-white text-gray-900 border-gray-200/80 shadow-sm font-medium dark:bg-gray-900/80 dark:text-gray-100 dark:border-gray-700/70'
+				: selected
+					? 'bg-white/70 text-gray-800 border-gray-200/60 dark:bg-gray-900/55 dark:text-gray-200 dark:border-gray-800/70'
+					: 'text-gray-600 group-hover:bg-white/70 group-hover:border-gray-200/70 dark:text-gray-300 dark:group-hover:bg-gray-900/55 dark:group-hover:border-gray-800/70'
+			: uiStyle === 'card'
 			? id === $chatId || confirmEdit
 				? 'bg-white/85 dark:bg-gray-900/60 border-gray-200/70 dark:border-gray-800/70 shadow-sm font-medium'
 				: selected
@@ -73,7 +84,13 @@
 					: 'group-hover:bg-gray-100 dark:group-hover:bg-gray-850';
 
 	$: menuFromClass =
-		uiStyle === 'card'
+		isFolderVariant
+			? id === $chatId || confirmEdit
+				? 'from-white dark:from-gray-900'
+				: selected
+					? 'from-white/70 dark:from-gray-900/55'
+					: 'invisible group-hover:visible from-white/70 dark:from-gray-900/55'
+			: uiStyle === 'card'
 			? id === $chatId || confirmEdit
 				? 'from-white/85 dark:from-gray-900/60'
 				: selected
@@ -84,6 +101,12 @@
 				: selected
 					? 'from-gray-100 dark:from-gray-850'
 					: 'invisible group-hover:visible from-gray-100 dark:from-gray-850';
+
+	$: titleClass = isFolderVariant
+		? 'text-left self-center overflow-hidden w-full h-[19px] leading-5'
+		: 'text-left self-center overflow-hidden w-full h-[20px]';
+
+	$: menuOffsetClass = isFolderVariant ? 'top-[4px]' : 'top-[6px]';
 
 	let mouseOver = false;
 
@@ -244,7 +267,7 @@
 			draggable="false"
 		>
 			<div class=" flex self-center flex-1 w-full">
-				<div dir="auto" class="text-left self-center overflow-hidden w-full h-[20px]">
+				<div dir="auto" class={titleClass}>
 					{title}
 				</div>
 				{#if $activeChatIds.has(id)}
@@ -265,7 +288,7 @@
 	<div
 		class="{menuFromClass} absolute {className === 'pr-2'
 			? 'right-[8px]'
-			: 'right-0'}  top-[6px] py-0.5 pr-0.5 mr-1.5 pl-5 bg-linear-to-l from-80%
+			: 'right-0'} {menuOffsetClass} py-0.5 pr-0.5 mr-1.5 pl-5 bg-linear-to-l from-80%
 
               to-transparent"
 		on:mouseenter={(e) => {

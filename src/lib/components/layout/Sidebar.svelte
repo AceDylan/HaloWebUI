@@ -976,6 +976,7 @@
 						className="px-2 mt-0.5"
 						name={$i18n.t('Chat Folders')}
 						dragAndDrop={false}
+						addButtonVisibility="always"
 						bind:open={showFolderSection}
 						onAdd={() => {
 							createFolder($i18n.t('New chat folder'));
@@ -997,6 +998,14 @@
 								await initChatList();
 							}}
 						/>
+
+						{#if folderOptions.length === 0}
+							<div
+								class="mx-2 mt-1 rounded-lg border border-dashed border-gray-200/80 bg-white/45 px-3 py-2 text-xs text-gray-400 dark:border-gray-800/80 dark:bg-gray-950/20 dark:text-gray-500"
+							>
+								{$i18n.t('No chat folders')}
+							</div>
+						{/if}
 					</Folder>
 				{/if}
 

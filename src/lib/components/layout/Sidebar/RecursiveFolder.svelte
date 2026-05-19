@@ -39,8 +39,35 @@
 	let showDeleteConfirm = false;
 	let isExpandedUpdateTimeout;
 
+	const getFolderChatCount = (sourceFolders, id) => {
+		const target = sourceFolders[id] ?? {};
+		const directCount = target.items?.chats?.length ?? 0;
+		const childCount = (target.childrenIds ?? []).reduce((count, childId) => {
+			return count + getFolderChatCount(sourceFolders, childId);
+		}, 0);
+
+		return directCount + childCount;
+	};
+
+	const folderContainsChat = (sourceFolders, id, activeChatId) => {
+		if (!activeChatId) {
+			return false;
+		}
+
+		const target = sourceFolders[id] ?? {};
+		if ((target.items?.chats ?? []).some((chat) => chat.id === activeChatId)) {
+			return true;
+		}
+
+		return (target.childrenIds ?? []).some((childId) =>
+			folderContainsChat(sourceFolders, childId, activeChatId)
+		);
+	};
+
 	$: folder = folders[folderId] ?? {};
 	$: folderIcon = folder?.meta?.icon || '';
+	$: chatCount = getFolderChatCount(folders, folderId);
+	$: hasActiveChat = folderContainsChat(folders, folderId, $chatId);
 
 	onMount(async () => {
 		open = folder.is_expanded;
@@ -172,14 +199,17 @@
 		}}
 	>
 		<div class="w-full group">
-			<button
+			<!-- svelte-ignore a11y-no-static-element-interactions -->
+			<div
 				id="folder-{folderId}-button"
-				class="relative w-full py-1.5 px-2 rounded-md flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-500 font-medium hover:bg-gray-100 dark:hover:bg-gray-900 transition"
+				class="relative flex min-h-[34px] w-full items-center gap-2 rounded-lg border px-2 py-1.5 text-left transition {hasActiveChat
+					? 'border-sky-200/70 bg-sky-50/70 text-gray-900 shadow-sm shadow-sky-900/[0.04] dark:border-sky-900/60 dark:bg-sky-950/20 dark:text-gray-100'
+					: 'border-gray-200/70 bg-gray-50/75 text-gray-700 hover:border-gray-300/80 hover:bg-white dark:border-gray-800/80 dark:bg-gray-900/35 dark:text-gray-200 dark:hover:border-gray-700/80 dark:hover:bg-gray-900/60'}"
 				on:dblclick={() => {
 					editHandler();
 				}}
 			>
-				<div class="text-gray-300 dark:text-gray-600">
+				<div class="flex size-4 shrink-0 items-center justify-center text-gray-400 dark:text-gray-500">
 					{#if open}
 						<ChevronDown className=" size-3" strokeWidth="2.5" />
 					{:else}
@@ -187,13 +217,17 @@
 					{/if}
 				</div>
 
-				{#if folderIcon}
-					<span class="text-sm leading-none shrink-0">{folderIcon}</span>
-				{:else}
-					<FolderOpen className="size-3.5 shrink-0" strokeWidth="2" />
-				{/if}
+				<div
+					class="flex size-6 shrink-0 items-center justify-center rounded-md border border-gray-200/80 bg-white text-gray-500 shadow-xs dark:border-gray-700/70 dark:bg-gray-950/45 dark:text-gray-300"
+				>
+					{#if folderIcon}
+						<span class="text-sm leading-none">{folderIcon}</span>
+					{:else}
+						<FolderOpen className="size-3.5" strokeWidth="2" />
+					{/if}
+				</div>
 
-				<div class="translate-y-[0.5px] flex-1 justify-start text-start line-clamp-1">
+				<div class="min-w-0 flex-1 translate-y-[0.5px] justify-start text-start">
 					{#if edit}
 						<input
 							id="folder-{folderId}-input"
@@ -218,15 +252,24 @@
 									edit = false;
 								}
 							}}
-							class="w-full h-full bg-transparent text-gray-500 dark:text-gray-500 outline-hidden"
+							class="h-full w-full bg-transparent text-[13px] font-semibold text-gray-800 outline-hidden dark:text-gray-100"
 						/>
 					{:else}
-						{folder.name}
+						<div class="line-clamp-1 text-[13px] font-semibold leading-5">
+							{folder.name}
+						</div>
 					{/if}
 				</div>
 
-				<button
-					class="absolute z-10 right-2 invisible group-hover:visible self-center flex items-center dark:text-gray-300"
+				<span
+					class="flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full border border-gray-200/70 bg-white/90 px-1.5 text-[11px] font-medium text-gray-500 dark:border-gray-700/70 dark:bg-gray-950/50 dark:text-gray-400"
+				>
+					{chatCount}
+				</span>
+
+				<!-- svelte-ignore a11y-no-static-element-interactions -->
+				<div
+					class="z-10 flex shrink-0 items-center self-center rounded-md p-0.5 text-gray-400 opacity-70 transition hover:bg-gray-100 hover:text-gray-700 hover:opacity-100 dark:text-gray-500 dark:hover:bg-gray-800 dark:hover:text-gray-200"
 					on:pointerup={(e) => {
 						e.stopPropagation();
 					}}
@@ -244,18 +287,18 @@
 							exportHandler();
 						}}
 					>
-						<button class="p-0.5 dark:hover:bg-gray-850 rounded-lg touch-auto" on:click={() => {}}>
+						<button class="touch-auto" on:click={() => {}}>
 							<EllipsisHorizontal className="size-4" strokeWidth="2.5" />
 						</button>
 					</FolderMenu>
-				</button>
-			</button>
+				</div>
+			</div>
 		</div>
 
 		<div slot="content" class="w-full">
 			{#if (folder?.childrenIds ?? []).length > 0 || (folder.items?.chats ?? []).length > 0}
 				<div
-					class="ml-3 pl-1 mt-[1px] flex flex-col overflow-y-auto scrollbar-hidden border-s border-gray-100 dark:border-gray-900"
+					class="ml-5 mt-1 mb-1 flex flex-col gap-0.5 overflow-y-auto rounded-r-lg border-s border-gray-200/80 bg-white/35 py-1 pl-2 scrollbar-hidden dark:border-gray-800/90 dark:bg-gray-950/20"
 				>
 					{#if folder?.childrenIds}
 						{@const children = folder.childrenIds
@@ -289,6 +332,7 @@
 						{#each folder.items.chats as chat (chat.id)}
 							<ChatItem
 								{uiStyle}
+								variant="folder"
 								id={chat.id}
 								title={chat.title}
 								assistantId={chat.assistant_id ?? null}

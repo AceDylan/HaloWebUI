@@ -18,6 +18,7 @@
 
 	export let onAddLabel: string = '';
 	export let onAdd: null | Function = null;
+	export let addButtonVisibility: 'hover' | 'always' = 'hover';
 
 	export let dragAndDrop = true;
 
@@ -26,6 +27,11 @@
 	let folderElement;
 
 	let draggedOver = false;
+
+	$: addButtonClass =
+		addButtonVisibility === 'always'
+			? 'visible opacity-100'
+			: 'invisible opacity-0 group-hover:visible group-hover:opacity-100 group-focus-within:visible group-focus-within:opacity-100';
 
 	const onDragOver = (e) => {
 		e.preventDefault();
@@ -145,7 +151,7 @@
 
 				{#if onAdd}
 					<button
-						class="absolute z-10 right-2 invisible group-hover:visible self-center flex items-center dark:text-gray-300"
+						class="absolute z-10 right-2 {addButtonClass} self-center flex items-center text-gray-400 transition-opacity dark:text-gray-300"
 						on:pointerup={(e) => {
 							e.stopPropagation();
 						}}

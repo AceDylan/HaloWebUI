@@ -43,7 +43,11 @@ const DEDICATED_IMAGE_MODEL_PATTERNS = [
 	'kandinsky'
 ];
 
-const DEDICATED_IMAGE_MODEL_REGEXES = [/^grok(?:[-.\w]+)?-image(?:[-.\w]+)?$/i, /^sd[-.\w]+$/i];
+const DEDICATED_IMAGE_MODEL_REGEXES = [
+	/^gemini-3(?:\.\d+)?-(?:flash|pro)-image(?:[-.\w]+)?$/i,
+	/^grok(?:[-.\w]+)?-image(?:[-.\w]+)?$/i,
+	/^sd[-.\w]+$/i
+];
 const NEGATIVE_IMAGE_MODEL_REGEXES = [/(^|[\/._:-])video([\/._:-]|$)/i];
 
 const isNegativeImageModel = (id: string): boolean =>

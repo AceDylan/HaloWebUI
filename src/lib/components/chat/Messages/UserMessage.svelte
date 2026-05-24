@@ -32,7 +32,7 @@
 		X
 	} from 'lucide-svelte';
 	import { uploadFile } from '$lib/apis/files';
-	import { WEBUI_API_BASE_URL } from '$lib/constants';
+	import { WEBUI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
 
 	import localizedFormat from 'dayjs/plugin/localizedFormat';
 
@@ -89,6 +89,7 @@
 	];
 
 	const buildUploadedImageContentUrl = (id: string) => `${WEBUI_API_BASE_URL}/files/${id}/content`;
+	const resolveImageSrc = (src = '') => (src.startsWith('/') ? `${WEBUI_BASE_URL}${src}` : src);
 
 	const cloneMessageFiles = (files: any[] | undefined | null) =>
 		Array.isArray(files) ? structuredClone(files) : [];
@@ -408,10 +409,11 @@
 												}}
 												disabled={imageUploadBusy}
 											>
-												<Image
-													src={file.preview_url || file.url}
+												<img
+													src={resolveImageSrc(file.preview_url || file.url)}
 													alt={file.name ?? 'image'}
-													imageClassName="size-16 rounded-xl object-cover"
+													class="rounded-lg chat-user-attachment-image"
+													draggable="false"
 												/>
 												<div
 													class="absolute inset-0 hidden group-hover:flex items-center justify-center bg-black/35 text-white"

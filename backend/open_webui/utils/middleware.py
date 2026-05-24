@@ -5180,6 +5180,14 @@ async def process_chat_response(
         event_emitter = get_event_emitter(metadata)
         event_caller = get_event_call(metadata)
 
+    def upsert_response_message(message: dict):
+        return Chats.upsert_message_to_chat_by_id_and_message_id(
+            metadata["chat_id"],
+            metadata["message_id"],
+            message,
+            guard_stopped=True,
+        )
+
     # Non-streaming response
     if not isinstance(response, StreamingResponse):
         if event_emitter:
@@ -5192,9 +5200,7 @@ async def process_chat_response(
             )
             if "error" in response:
                 error = response["error"].get("detail", response["error"])
-                Chats.upsert_message_to_chat_by_id_and_message_id(
-                    metadata["chat_id"],
-                    metadata["message_id"],
+                upsert_response_message(
                     {
                         "error": {"content": error},
                     },
@@ -5254,9 +5260,7 @@ async def process_chat_response(
                     )
 
                     # Save message in the database
-                    Chats.upsert_message_to_chat_by_id_and_message_id(
-                        metadata["chat_id"],
-                        metadata["message_id"],
+                    upsert_response_message(
                         {
                             "content": content,
                             "done": True,
@@ -5316,9 +5320,7 @@ async def process_chat_response(
         task_id = str(uuid4())  # Create a unique task ID.
         model_id = form_data.get("model", "")
 
-        Chats.upsert_message_to_chat_by_id_and_message_id(
-            metadata["chat_id"],
-            metadata["message_id"],
+        upsert_response_message(
             {
                 "model": model_id,
             },
@@ -5824,41 +5826,6 @@ async def process_chat_response(
             # Accumulate usage (token counts) across all LLM rounds so the
             # frontend info button can display them even after tool orchestration.
             accumulated_usage: dict = {}
-            response_stopped_by_user = False
-            last_stop_check_at = 0.0
-
-            class ResponseStoppedByUser(Exception):
-                pass
-
-            def is_response_message_stopped(message: Optional[dict]) -> bool:
-                return bool(
-                    isinstance(message, dict)
-                    and (
-                        message.get("stopped") is True
-                        or message.get("stoppedByUser") is True
-                    )
-                )
-
-            def response_was_stopped_by_user(force: bool = False) -> bool:
-                nonlocal response_stopped_by_user, last_stop_check_at
-                if response_stopped_by_user:
-                    return True
-
-                now = time.monotonic()
-                if not force and now - last_stop_check_at < 0.5:
-                    return False
-
-                last_stop_check_at = now
-                try:
-                    current_message = Chats.get_message_by_id_and_message_id(
-                        metadata["chat_id"], metadata["message_id"]
-                    )
-                except Exception as e:
-                    log.debug(f"Failed to check stream cancellation state: {e}")
-                    return False
-
-                response_stopped_by_user = is_response_message_stopped(current_message)
-                return response_stopped_by_user
 
             def _merge_usage(incoming: dict) -> None:
                 """Merge *incoming* usage dict into accumulated_usage (in-place)."""
@@ -5953,9 +5920,7 @@ async def process_chat_response(
                     )
 
                     # Save message in the database
-                    Chats.upsert_message_to_chat_by_id_and_message_id(
-                        metadata["chat_id"],
-                        metadata["message_id"],
+                    upsert_response_message(
                         {
                             **event,
                         },
@@ -6031,14 +5996,6 @@ async def process_chat_response(
                         _stream_response_status = None
 
                     async for line in response.body_iterator:
-                        if response_was_stopped_by_user():
-                            log.info(
-                                "Stream response stopped by user; skipping remaining chunks for chat_id=%s message_id=%s",
-                                metadata["chat_id"],
-                                metadata["message_id"],
-                            )
-                            break
-
                         line = line.decode("utf-8") if isinstance(line, bytes) else line
                         data = line
                         _stream_line_count += 1
@@ -6561,19 +6518,9 @@ async def process_chat_response(
                                             )
                                         )
 
-                                    if response_was_stopped_by_user(force=True):
-                                        log.info(
-                                            "Stream response stopped by user before persistence; chat_id=%s message_id=%s",
-                                            metadata["chat_id"],
-                                            metadata["message_id"],
-                                        )
-                                        break
-
                                     if ENABLE_REALTIME_CHAT_SAVE:
                                         # Save message in the database
-                                        Chats.upsert_message_to_chat_by_id_and_message_id(
-                                            metadata["chat_id"],
-                                            metadata["message_id"],
+                                        upsert_response_message(
                                             {
                                                 "content": serialize_content_blocks(
                                                     content_blocks
@@ -8350,9 +8297,7 @@ async def process_chat_response(
                                         "data": {"files": merged_message_files},
                                     }
                                 )
-                                Chats.upsert_message_to_chat_by_id_and_message_id(
-                                    metadata["chat_id"],
-                                    metadata["message_id"],
+                                upsert_response_message(
                                     {"files": merged_message_files},
                                 )
                         except Exception:
@@ -8525,9 +8470,7 @@ async def process_chat_response(
 
                                 # Persist best-effort so refresh doesn't lose the final text.
                                 try:
-                                    Chats.upsert_message_to_chat_by_id_and_message_id(
-                                        metadata["chat_id"],
-                                        metadata["message_id"],
+                                    upsert_response_message(
                                         {
                                             "content": serialize_content_blocks(
                                                 content_blocks
@@ -8840,9 +8783,7 @@ async def process_chat_response(
                                 )
 
                                 try:
-                                    Chats.upsert_message_to_chat_by_id_and_message_id(
-                                        metadata["chat_id"],
-                                        metadata["message_id"],
+                                    upsert_response_message(
                                         {
                                             "content": serialize_content_blocks(
                                                 content_blocks
@@ -8892,9 +8833,7 @@ async def process_chat_response(
                         )
 
                         try:
-                            Chats.upsert_message_to_chat_by_id_and_message_id(
-                                metadata["chat_id"],
-                                metadata["message_id"],
+                            upsert_response_message(
                                 {
                                     "content": serialize_content_blocks(content_blocks),
                                     "error": finalize_error_payload,
@@ -9178,15 +9117,6 @@ async def process_chat_response(
 
                 title = Chats.get_chat_title_by_id(metadata["chat_id"])
 
-                if response_was_stopped_by_user(force=True):
-                    set_current_task_blocks_completion(False)
-                    log.info(
-                        "Stream response already stopped by user; skipping final persistence for chat_id=%s message_id=%s",
-                        metadata["chat_id"],
-                        metadata["message_id"],
-                    )
-                    raise ResponseStoppedByUser()
-
                 # Detect empty response (model returned 200 but no content).
                 # Common with reverse proxies / relay services that swallow errors.
                 if not finalize_error_payload and not _has_visible_assistant_output(
@@ -9255,9 +9185,7 @@ async def process_chat_response(
                     # reflect accurate token usage.
                     if ENABLE_REALTIME_CHAT_SAVE:
                         try:
-                            Chats.upsert_message_to_chat_by_id_and_message_id(
-                                metadata["chat_id"],
-                                metadata["message_id"],
+                            upsert_response_message(
                                 {
                                     "done": True,
                                     "completedAt": completed_at,
@@ -9268,9 +9196,7 @@ async def process_chat_response(
                             log.warning(f"Failed to persist usage for analytics: {e}")
                 elif ENABLE_REALTIME_CHAT_SAVE:
                     try:
-                        Chats.upsert_message_to_chat_by_id_and_message_id(
-                            metadata["chat_id"],
-                            metadata["message_id"],
+                        upsert_response_message(
                             {
                                 "done": True,
                                 "completedAt": completed_at,
@@ -9286,9 +9212,7 @@ async def process_chat_response(
 
                 if finalize_error_payload and ENABLE_REALTIME_CHAT_SAVE:
                     try:
-                        Chats.upsert_message_to_chat_by_id_and_message_id(
-                            metadata["chat_id"],
-                            metadata["message_id"],
+                        upsert_response_message(
                             {
                                 "error": finalize_error_payload,
                             },
@@ -9308,9 +9232,7 @@ async def process_chat_response(
                         _save_payload["usage"] = accumulated_usage
                     if finalize_error_payload:
                         _save_payload["error"] = finalize_error_payload
-                    Chats.upsert_message_to_chat_by_id_and_message_id(
-                        metadata["chat_id"],
-                        metadata["message_id"],
+                    upsert_response_message(
                         _save_payload,
                     )
 
@@ -9344,8 +9266,6 @@ async def process_chat_response(
                 )
 
                 await background_tasks_handler()
-            except ResponseStoppedByUser:
-                pass
             except asyncio.CancelledError:
                 log.warning("Task was cancelled!")
                 await event_emitter({"type": "task-cancelled"})
@@ -9355,16 +9275,13 @@ async def process_chat_response(
                     "stopped": True,
                     "stoppedByUser": True,
                     "completedAt": int(time.time()),
+                    "content": serialize_content_blocks(content_blocks),
                 }
-                if not response_was_stopped_by_user(force=True):
-                    _cancel_payload["content"] = serialize_content_blocks(content_blocks)
                 if accumulated_usage:
                     _cancel_payload["usage"] = accumulated_usage
 
                 try:
-                    Chats.upsert_message_to_chat_by_id_and_message_id(
-                        metadata["chat_id"],
-                        metadata["message_id"],
+                    upsert_response_message(
                         _cancel_payload,
                     )
                 except Exception as e:

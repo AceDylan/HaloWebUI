@@ -446,7 +446,7 @@ class ChatTable:
         return chat.chat.get("history", {}).get("messages", {}).get(message_id, {})
 
     def upsert_message_to_chat_by_id_and_message_id(
-        self, id: str, message_id: str, message: dict
+        self, id: str, message_id: str, message: dict, guard_stopped: bool = False
     ) -> Optional[ChatModel]:
         chat = self.get_chat_by_id(id)
         if chat is None:
@@ -455,14 +455,47 @@ class ChatTable:
         user_id = chat.user_id
         chat_dict = chat.chat
         history = chat_dict.get("history", {})
+        messages = history.setdefault("messages", {})
+        existing_message = messages.get(message_id)
+        incoming_stopped = (
+            message.get("stopped") is True or message.get("stoppedByUser") is True
+        )
+        existing_stopped = (
+            isinstance(existing_message, dict)
+            and (
+                existing_message.get("stopped") is True
+                or existing_message.get("stoppedByUser") is True
+            )
+        )
 
-        if message_id in history.get("messages", {}):
-            history["messages"][message_id] = {
-                **history["messages"][message_id],
+        if guard_stopped and existing_stopped and not incoming_stopped:
+            return chat
+
+        if guard_stopped and existing_stopped and incoming_stopped:
+            stopped_update = {
+                key: value
+                for key, value in message.items()
+                if key in {"done", "stopped", "stoppedByUser", "usage"}
+            }
+            if (
+                existing_message.get("completedAt") is None
+                and message.get("completedAt") is not None
+            ):
+                stopped_update["completedAt"] = message["completedAt"]
+            messages[message_id] = {
+                **existing_message,
+                **stopped_update,
+                "done": True,
+                "stopped": True,
+                "stoppedByUser": True,
+            }
+        elif existing_message is not None:
+            messages[message_id] = {
+                **existing_message,
                 **message,
             }
         else:
-            history["messages"][message_id] = message
+            messages[message_id] = message
 
         history["currentId"] = message_id
 

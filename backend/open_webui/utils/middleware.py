@@ -36,7 +36,6 @@ from open_webui.socket.main import (
     get_event_call,
     get_event_emitter,
     get_active_status_by_user_id,
-    write_chat_diag,
 )
 from open_webui.routers.tasks import (
     generate_queries,
@@ -9243,76 +9242,14 @@ async def process_chat_response(
                 # work is post-response bookkeeping (webhooks/title/tags/follow-ups),
                 # which should not make the refreshed UI think the last assistant
                 # message is still streaming.
-                task_blocks_updated = set_current_task_blocks_completion(False)
-                log.warning(
-                    "[CHAT_DIAG stream_final_ready] chat_id=%s message_id=%s session_id=%s content_len=%d files=%d has_error=%s task_blocks_updated=%s",
-                    metadata.get("chat_id"),
-                    metadata.get("message_id"),
-                    metadata.get("session_id"),
-                    len(str(data.get("content", ""))),
-                    len(data.get("files", []) or []),
-                    bool(data.get("error")),
-                    task_blocks_updated,
-                )
-                write_chat_diag(
-                    "stream_final_ready",
-                    chat_id=metadata.get("chat_id"),
-                    message_id=metadata.get("message_id"),
-                    session_id=metadata.get("session_id"),
-                    content_len=len(str(data.get("content", ""))),
-                    files=len(data.get("files", []) or []),
-                    has_error=bool(data.get("error")),
-                    task_blocks_updated=task_blocks_updated,
-                )
+                set_current_task_blocks_completion(False)
                 response_finalized = True
-
-                try:
-                    log.warning(
-                        "[CHAT_DIAG stream_final_emit_start] chat_id=%s message_id=%s session_id=%s data_keys=%s",
-                        metadata.get("chat_id"),
-                        metadata.get("message_id"),
-                        metadata.get("session_id"),
-                        sorted(data.keys()),
-                    )
-                    write_chat_diag(
-                        "stream_final_emit_start",
-                        chat_id=metadata.get("chat_id"),
-                        message_id=metadata.get("message_id"),
-                        session_id=metadata.get("session_id"),
-                        data_keys=sorted(data.keys()),
-                    )
-                    await event_emitter(
-                        {
-                            "type": "chat:completion",
-                            "data": data,
-                        }
-                    )
-                    log.warning(
-                        "[CHAT_DIAG stream_final_emit_ok] chat_id=%s message_id=%s session_id=%s",
-                        metadata.get("chat_id"),
-                        metadata.get("message_id"),
-                        metadata.get("session_id"),
-                    )
-                    write_chat_diag(
-                        "stream_final_emit_ok",
-                        chat_id=metadata.get("chat_id"),
-                        message_id=metadata.get("message_id"),
-                        session_id=metadata.get("session_id"),
-                    )
-                except Exception:
-                    log.exception(
-                        "[CHAT_DIAG stream_final_emit_failed] chat_id=%s message_id=%s session_id=%s",
-                        metadata.get("chat_id"),
-                        metadata.get("message_id"),
-                        metadata.get("session_id"),
-                    )
-                    write_chat_diag(
-                        "stream_final_emit_failed",
-                        chat_id=metadata.get("chat_id"),
-                        message_id=metadata.get("message_id"),
-                        session_id=metadata.get("session_id"),
-                    )
-                    raise
+                await event_emitter(
+                    {
+                        "type": "chat:completion",
+                        "data": data,
+                    }
+                )
 
                 # Send a webhook notification if the user is not active. This is
                 # post-response work and must never delay the live chat completion event.

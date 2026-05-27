@@ -2,7 +2,6 @@ import asyncio
 import json
 import socketio
 import logging
-import os
 import sys
 import time
 from redis import asyncio as aioredis
@@ -38,20 +37,6 @@ from open_webui.env import (
 logging.basicConfig(stream=sys.stdout, level=GLOBAL_LOG_LEVEL)
 log = logging.getLogger(__name__)
 log.setLevel(SRC_LOG_LEVELS["SOCKET"])
-
-
-CHAT_DIAG_LOG_PATH = os.environ.get(
-    "HALOWEBUI_CHAT_DIAG_LOG", "/tmp/halowebui_chat_diag.log"
-)
-
-
-def write_chat_diag(event: str, **fields):
-    try:
-        record = {"ts": time.time(), "event": event, **fields}
-        with open(CHAT_DIAG_LOG_PATH, "a", encoding="utf-8") as log_file:
-            log_file.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
-    except Exception:
-        log.debug("Failed to write chat diagnostic log", exc_info=True)
 
 
 if WEBSOCKET_MANAGER == "redis":
@@ -194,27 +179,6 @@ async def usage(sid, data):
 
     # Broadcast the usage data to all clients
     await sio.emit("usage", {"models": get_models_in_use()})
-
-
-@sio.on("chat-diag")
-async def chat_diag(sid, data):
-    if sid not in SESSION_POOL:
-        return
-
-    if not isinstance(data, dict):
-        data = {"value": data}
-
-    event = data.get("event")
-    if not isinstance(event, str) or not event.startswith("frontend_"):
-        event = "frontend_unknown"
-
-    fields = {key: value for key, value in data.items() if key != "event"}
-    write_chat_diag(
-        event,
-        sid=sid,
-        user_id=SESSION_POOL[sid].get("id"),
-        **fields,
-    )
 
 
 @sio.event
@@ -485,79 +449,16 @@ def get_event_emitter(request_info, update_db=True):
             )
         )
 
-        event_type = event_data.get("type") if isinstance(event_data, dict) else None
-        event_payload = event_data.get("data", {}) if isinstance(event_data, dict) else {}
-        if (
-            event_type == "chat:completion"
-            and isinstance(event_payload, dict)
-            and event_payload.get("done") is True
-        ):
-            log.warning(
-                "[CHAT_DIAG socket_emit_prepare] user_id=%s chat_id=%s message_id=%s requested_session_id=%s target_session_ids=%s user_pool_session_ids=%s data_keys=%s",
-                user_id,
-                request_info.get("chat_id", None),
-                request_info.get("message_id", None),
-                request_info.get("session_id", None),
-                session_ids,
-                USER_POOL.get(user_id, []),
-                sorted(event_payload.keys()),
-            )
-            write_chat_diag(
-                "socket_emit_prepare",
-                user_id=user_id,
-                chat_id=request_info.get("chat_id", None),
-                message_id=request_info.get("message_id", None),
-                requested_session_id=request_info.get("session_id", None),
-                target_session_ids=session_ids,
-                user_pool_session_ids=USER_POOL.get(user_id, []),
-                data_keys=sorted(event_payload.keys()),
-            )
-
         for session_id in session_ids:
-            try:
-                await sio.emit(
-                    "chat-events",
-                    {
-                        "chat_id": request_info.get("chat_id", None),
-                        "message_id": request_info.get("message_id", None),
-                        "data": event_data,
-                    },
-                    to=session_id,
-                )
-            except Exception as exc:
-                if (
-                    event_type == "chat:completion"
-                    and isinstance(event_payload, dict)
-                    and event_payload.get("done") is True
-                ):
-                    write_chat_diag(
-                        "socket_emit_failed",
-                        user_id=user_id,
-                        chat_id=request_info.get("chat_id", None),
-                        message_id=request_info.get("message_id", None),
-                        target_session_id=session_id,
-                        error=repr(exc),
-                    )
-                raise
-            if (
-                event_type == "chat:completion"
-                and isinstance(event_payload, dict)
-                and event_payload.get("done") is True
-            ):
-                log.warning(
-                    "[CHAT_DIAG socket_emit_ok] user_id=%s chat_id=%s message_id=%s target_session_id=%s",
-                    user_id,
-                    request_info.get("chat_id", None),
-                    request_info.get("message_id", None),
-                    session_id,
-                )
-                write_chat_diag(
-                    "socket_emit_ok",
-                    user_id=user_id,
-                    chat_id=request_info.get("chat_id", None),
-                    message_id=request_info.get("message_id", None),
-                    target_session_id=session_id,
-                )
+            await sio.emit(
+                "chat-events",
+                {
+                    "chat_id": request_info.get("chat_id", None),
+                    "message_id": request_info.get("message_id", None),
+                    "data": event_data,
+                },
+                to=session_id,
+            )
 
         if update_db:
             if "type" in event_data and event_data["type"] == "status":

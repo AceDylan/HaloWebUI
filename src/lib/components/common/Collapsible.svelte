@@ -99,30 +99,26 @@
 
 	const ACTIVITY_DETAIL_TYPES = new Set(['reasoning', 'tool_calls', 'code_interpreter']);
 
-	$: isActivityBlock =
-		title !== null && ACTIVITY_DETAIL_TYPES.has(String(attributes?.type ?? ''));
+	$: activityType = String(attributes?.type ?? '');
+	$: activityDone = attributes?.done === 'true';
+	$: activityDuration = attributes?.duration;
+	$: activityName = typeof attributes?.name === 'string' ? attributes.name : '';
+	$: isActivityBlock = title !== null && ACTIVITY_DETAIL_TYPES.has(activityType);
+	$: activityBusy = isActivityBlock && !activityDone;
 
-	function isActivityDone(): boolean {
-		return attributes?.done === 'true';
-	}
-
-	function isActivityBusy(): boolean {
-		return isActivityBlock && attributes?.done !== 'true';
-	}
-
-	function formatReasoningTitle(): string {
-		if (isActivityDone() && attributes?.duration) {
-			const durationSeconds = Number(attributes.duration);
+	function formatReasoningTitle(done: boolean, duration: unknown): string {
+		if (done && duration) {
+			const durationSeconds = Number(duration);
 
 			if (!Number.isFinite(durationSeconds)) {
 				return $i18n.t('Deep thought for {{DURATION}}', {
-					DURATION: attributes.duration
+					DURATION: duration
 				});
 			}
 
 			if (durationSeconds < 60) {
 				return $i18n.t('Deep thought for {{DURATION}} seconds', {
-					DURATION: attributes.duration
+					DURATION: duration
 				});
 			}
 
@@ -134,37 +130,51 @@
 		return $i18n.t('Thinking deeply...');
 	}
 
-	function getActivityTitle(): string {
-		if (attributes?.type === 'reasoning') {
-			return formatReasoningTitle();
+	function getActivityTitle(
+		type: string,
+		done: boolean,
+		duration: unknown,
+		name: string
+	): string {
+		if (type === 'reasoning') {
+			return formatReasoningTitle(done, duration);
 		}
 
-		if (attributes?.type === 'code_interpreter') {
-			return isActivityDone() ? $i18n.t('Analysis completed') : $i18n.t('Analyzing...');
+		if (type === 'code_interpreter') {
+			return done ? $i18n.t('Analysis completed') : $i18n.t('Analyzing...');
 		}
 
-		if (attributes?.type === 'tool_calls') {
-			return attributes?.name || $i18n.t('Tool call');
+		if (type === 'tool_calls') {
+			return name || $i18n.t('Tool call');
 		}
 
 		return title ?? '';
 	}
 
-	function getActivityStatus(): string {
-		if (isActivityDone()) {
+	function getActivityStatus(type: string, done: boolean): string {
+		if (done) {
 			return $i18n.t('Completed');
 		}
 
-		if (attributes?.type === 'tool_calls') {
+		if (type === 'tool_calls') {
 			return $i18n.t('Executing');
 		}
 
 		return '';
 	}
 
-	function getActivityStatusTone(): 'neutral' | 'success' | 'running' | 'warning' {
-		return isActivityDone() ? 'success' : 'running';
+	function getActivityStatusTone(done: boolean): 'neutral' | 'success' | 'running' | 'warning' {
+		return done ? 'success' : 'running';
 	}
+
+	$: activityTitle = getActivityTitle(
+		activityType,
+		activityDone,
+		activityDuration,
+		activityName
+	);
+	$: activityStatus = getActivityStatus(activityType, activityDone);
+	$: activityStatusTone = getActivityStatusTone(activityDone);
 </script>
 
 <div
@@ -178,21 +188,21 @@
 	{#if isActivityBlock}
 		<ActivityCard
 			bind:open
-			title={getActivityTitle()}
-			status={getActivityStatus()}
-			statusTone={getActivityStatusTone()}
-			busy={isActivityBusy()}
+			title={activityTitle}
+			status={activityStatus}
+			statusTone={activityStatusTone}
+			busy={activityBusy}
 			{disabled}
 			expandable={!hide}
 			className="activity-collapsible"
-			bodyClassName={attributes?.type === 'reasoning'
+			bodyClassName={activityType === 'reasoning'
 				? 'activity-collapsible-body activity-reasoning-body'
 				: 'activity-collapsible-body'}
 		>
 			<svelte:fragment slot="icon">
-				{#if attributes?.type === 'reasoning'}
+				{#if activityType === 'reasoning'}
 					<LightBulb className="size-4" strokeWidth="1.8" />
-				{:else if attributes?.type === 'code_interpreter'}
+				{:else if activityType === 'code_interpreter'}
 					<CommandLine className="size-4" strokeWidth="1.8" />
 				{:else}
 					<WrenchSolid className="size-4" />
@@ -205,12 +215,12 @@
 					e.stopPropagation();
 				}}
 			>
-				{#if attributes?.type === 'tool_calls'}
+				{#if activityType === 'tool_calls'}
 					{@const args = decode(attributes?.arguments)}
 					{@const result = decode(attributes?.result ?? '')}
 					{@const files = parseJSONString(decode(attributes?.files ?? ''))}
 
-					{#if attributes?.done === 'true'}
+					{#if activityDone}
 						<Markdown
 							id={`${collapsibleId}-tool-calls-${attributes?.id}-result`}
 							content={`> \`\`\`json
@@ -227,7 +237,7 @@
 						/>
 					{/if}
 
-					{#if attributes?.done === 'true' && !isImageGenerationTool(attributes?.name)}
+					{#if activityDone && !isImageGenerationTool(activityName)}
 						{#if typeof files === 'object'}
 							{#each files ?? [] as file}
 								{#if typeof file === 'string' && file.startsWith('data:image/')}

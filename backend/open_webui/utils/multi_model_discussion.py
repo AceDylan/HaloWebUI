@@ -37,6 +37,20 @@ USAGE_NUMBER_KEYS = (
 )
 
 
+def _extract_sources_from_events(events: list[dict] | None) -> list | None:
+    if not isinstance(events, list):
+        return None
+
+    for event in reversed(events):
+        if not isinstance(event, dict):
+            continue
+        sources = event.get("sources")
+        if isinstance(sources, list) and sources:
+            return deepcopy(sources)
+
+    return None
+
+
 def is_multi_model_discussion_enabled(discussion: Any) -> bool:
     return isinstance(discussion, dict) and discussion.get("enabled") is True
 
@@ -489,6 +503,7 @@ async def generate_multi_model_discussion_completion(
     metadata: dict,
     model: dict,
     discussion: dict,
+    events: list[dict] | None = None,
 ):
     models_map = getattr(request.state, "MODELS", None) or request.app.state.MODELS
     ambiguous_model_aliases = getattr(request.state, "MODELS_AMBIGUOUS", set()) or set()
@@ -521,6 +536,8 @@ async def generate_multi_model_discussion_completion(
         {"id": item["id"], "name": item["name"]} for item in settings["participants"]
     ]
     final_model = settings["final_model"]
+
+    sources = _extract_sources_from_events(events)
 
     discussion_state = {
         "enabled": True,
@@ -662,28 +679,34 @@ async def generate_multi_model_discussion_completion(
             completed_at = int(time.time())
             discussion_state["status"] = "completed"
             await emit_discussion("done", status="completed", usage=discussion_usage)
+            completion_data = {
+                "done": True,
+                "content": final_content,
+                "completedAt": completed_at,
+                "usage": discussion_usage,
+                "discussion": discussion_state,
+            }
+            if sources:
+                completion_data["sources"] = sources
             await event_emitter(
                 {
                     "type": "chat:completion",
-                    "data": {
-                        "done": True,
-                        "content": final_content,
-                        "completedAt": completed_at,
-                        "usage": discussion_usage,
-                        "discussion": discussion_state,
-                    },
+                    "data": completion_data,
                 }
             )
+            upsert_payload = {
+                "content": final_content,
+                "done": True,
+                "completedAt": completed_at,
+                "usage": discussion_usage,
+                "discussion": discussion_state,
+            }
+            if sources:
+                upsert_payload["sources"] = sources
             Chats.upsert_message_to_chat_by_id_and_message_id(
                 chat_id,
                 message_id,
-                {
-                    "content": final_content,
-                    "done": True,
-                    "completedAt": completed_at,
-                    "usage": discussion_usage,
-                    "discussion": discussion_state,
-                },
+                upsert_payload,
                 guard_stopped=True,
             )
         except asyncio.CancelledError:

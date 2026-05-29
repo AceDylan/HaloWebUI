@@ -81,6 +81,7 @@
 		getSmartWebSearchRouteLabel
 	} from '$lib/utils/native-web-search';
 	import { translateWithDefault } from '$lib/i18n';
+	import { saveUserSettingsPatch } from '$lib/utils/user-settings';
 
 	import XMark from '../icons/XMark.svelte';
 	import Headphone from '../icons/Headphone.svelte';
@@ -433,6 +434,34 @@
 		webSearchModeSource = 'user';
 	};
 
+	const setResponseHtmlFormatFromMenu = async (enabled: boolean) => {
+		const previousValue = $settings?.responseHtmlFormat ?? false;
+
+		settings.set({
+			...($settings ?? {}),
+			responseHtmlFormat: enabled
+		});
+
+		if (!localStorage.token) {
+			return;
+		}
+
+		try {
+			await saveUserSettingsPatch(localStorage.token, { responseHtmlFormat: enabled });
+		} catch (error) {
+			console.error('Failed to save HTML rendering setting:', error);
+
+			if ((error as { status?: number })?.status !== 409) {
+				settings.set({
+					...($settings ?? {}),
+					responseHtmlFormat: previousValue
+				});
+			}
+
+			toast.error(tr('保存 HTML 渲染设置失败', 'Failed to save HTML rendering setting'));
+		}
+	};
+
 	const disableImageGeneration = () => {
 		imageGenerationEnabled = false;
 		imageGenerationPanelOpen = false;
@@ -592,47 +621,6 @@
 
 		textarea.focus();
 		textarea.dispatchEvent(new Event('input'));
-	};
-
-	const screenCaptureHandler = async () => {
-		try {
-			// Request screen media
-			const mediaStream = await navigator.mediaDevices.getDisplayMedia({
-				video: { cursor: 'never' },
-				audio: false
-			});
-			// Once the user selects a screen, temporarily create a video element
-			const video = document.createElement('video');
-			video.srcObject = mediaStream;
-			// Ensure the video loads without affecting user experience or tab switching
-			await video.play();
-			// Set up the canvas to match the video dimensions
-			const canvas = document.createElement('canvas');
-			canvas.width = video.videoWidth;
-			canvas.height = video.videoHeight;
-			// Grab a single frame from the video stream using the canvas
-			const context = canvas.getContext('2d');
-			context.drawImage(video, 0, 0, canvas.width, canvas.height);
-			// Stop all video tracks (stop screen sharing) after capturing the image
-			mediaStream.getTracks().forEach((track) => track.stop());
-
-			// bring back focus to this current tab, so that the user can see the screen capture
-			window.focus();
-
-			const imageBlob = await new Promise<Blob | null>((resolve) =>
-				canvas.toBlob(resolve, 'image/png')
-			);
-			if (!imageBlob) {
-				throw new Error('Failed to capture screen image');
-			}
-
-			await uploadImageFileHandler(createNamedImageFile(imageBlob, 'Screen_Capture'));
-			// Clean memory: Clear video srcObject
-			video.srcObject = null;
-		} catch (error) {
-			// Handle any errors (e.g., user cancels screen sharing)
-			console.error('Error capturing screen:', error);
-		}
 	};
 
 	const getUploadLocalizeOptions = () => ({
@@ -1677,8 +1665,8 @@
 											onWebSearchModeChange={setWebSearchModeFromUser}
 											bind:imageGenerationEnabled
 											bind:codeInterpreterEnabled
-											{screenCaptureHandler}
-											{inputFilesHandler}
+											responseHtmlFormat={$settings?.responseHtmlFormat ?? false}
+											onResponseHtmlFormatChange={setResponseHtmlFormatFromMenu}
 											uploadFilesHandler={() => {
 												filesInputElement.click();
 											}}

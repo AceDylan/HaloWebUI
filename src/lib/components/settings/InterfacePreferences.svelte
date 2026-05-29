@@ -2256,16 +2256,18 @@
 											/>
 										</div>
 										<div class="flex items-center justify-between glass-item px-4 py-3">
-											<div class="space-y-1 pr-4">
-												<div class="text-sm font-medium">
-													{tr('HTML 格式输出', 'HTML format output')}
-												</div>
-												<div class="text-xs text-gray-500 dark:text-gray-400">
-													{tr(
-														'开启后，回答完成后会被转换为安全的内联 HTML 卡片展示；关闭后继续使用 Markdown。',
-														'When enabled, completed replies are converted into safe inline HTML cards; when disabled, Markdown rendering is unchanged.'
+											<div class="flex items-center gap-1.5 pr-4 text-sm font-medium">
+												<span>{tr('HTML 格式输出', 'HTML format output')}</span>
+												<Tooltip
+													content={tr(
+														'开启后，模型回复会以 HTML 格式展示；关闭后使用 Markdown。',
+														'Render model replies as HTML when enabled; use Markdown when disabled.'
 													)}
-												</div>
+												>
+													<QuestionMarkCircle
+														className="w-4 h-4 cursor-help text-gray-400 dark:text-gray-500"
+													/>
+												</Tooltip>
 											</div>
 											<Switch
 												bind:state={responseHtmlFormat}

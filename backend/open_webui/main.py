@@ -1719,6 +1719,7 @@ async def chat_completion(
                 metadata,
                 model,
                 discussion,
+                events,
             )
 
         _emitter = get_event_emitter(metadata)

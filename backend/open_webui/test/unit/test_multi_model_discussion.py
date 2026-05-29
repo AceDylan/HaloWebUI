@@ -81,6 +81,13 @@ def test_multi_model_discussion_orchestrates_models_and_events(monkeypatch):
     upserts = []
     calls = []
     scheduled = {}
+    search_sources = [
+        {
+            "source": {"name": "Grok 搜索摘要"},
+            "document": ["联网搜索阶段已经得到的摘要内容。"],
+            "metadata": [{"source": "grok://search/abc", "content": "摘要内容"}],
+        }
+    ]
 
     async def event_emitter(event):
         events.append(event)
@@ -138,6 +145,7 @@ def test_multi_model_discussion_orchestrates_models_and_events(monkeypatch):
                 "rounds": 1,
                 "finalModel": "model-final",
             },
+            [{"sources": search_sources}],
         )
         await scheduled["task"]
         return result
@@ -178,11 +186,13 @@ def test_multi_model_discussion_orchestrates_models_and_events(monkeypatch):
     assert completion["data"]["usage"]["completion_tokens"] == 15
     assert completion["data"]["usage"]["total_tokens"] == 45
     assert len(completion["data"]["usage"]["per_model"]) == 3
+    assert completion["data"]["sources"] == search_sources
 
     final_upsert = upserts[-1][0][2]
     assert final_upsert["content"] == "answer from model-final"
     assert final_upsert["usage"]["total_tokens"] == 45
     assert final_upsert["discussion"]["status"] == "completed"
+    assert final_upsert["sources"] == search_sources
 
 
 def test_multi_model_discussion_passes_transcript_to_later_rounds_and_final(monkeypatch):

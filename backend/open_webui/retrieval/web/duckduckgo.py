@@ -10,6 +10,10 @@ log = logging.getLogger(__name__)
 log.setLevel(SRC_LOG_LEVELS["RAG"])
 
 
+class DuckDuckGoRateLimitError(Exception):
+    """Raised when DuckDuckGo rejects a query because of rate limiting."""
+
+
 def search_duckduckgo(
     query: str,
     count: int,
@@ -35,7 +39,15 @@ def search_duckduckgo(
                 query, safesearch="moderate", max_results=count, backend=backend
             )
         except RatelimitException as e:
-            log.error(f"RatelimitException: {e}")
+            log.warning(
+                "DuckDuckGo rate limited the search request (query=%s, backend=%s): %s",
+                query,
+                backend,
+                e,
+            )
+            raise DuckDuckGoRateLimitError(
+                "DuckDuckGo 当前限流，请稍后再试。"
+            ) from e
     if filter_list:
         search_results = get_filtered_results(search_results, filter_list)
 

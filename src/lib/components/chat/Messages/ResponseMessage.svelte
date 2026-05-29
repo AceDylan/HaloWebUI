@@ -1130,7 +1130,7 @@
 			<div class="mt-1.5 -ml-4 w-[calc(100%+1rem)] sm:ml-0 sm:w-auto">
 				<div class="chat-{message.role} w-full min-w-full markdown-prose">
 					<div>
-						{#if message.content !== '' || renderableMessageError || hasVisibleMessageFiles}
+						{#if message.content !== '' || renderableMessageError || hasVisibleMessageFiles || displayStatusHistory.length > 0}
 							<!-- Only show status section when content is streaming (not during initial loading) -->
 							{#if displayStatusHistory.length > 0}
 								{@const status = displayStatusHistory.at(-1)}
@@ -1142,7 +1142,7 @@
 											</div>
 										{/if}
 
-										{#if status?.action === 'web_search' && status?.urls}
+										{#if status?.action === 'web_search'}
 											<WebSearchResults {status}>
 												<div class="flex flex-col justify-center -space-y-0.5">
 													<div
@@ -1154,7 +1154,7 @@
 														<!-- $i18n.t("No search query generated") -->
 
 														<!-- $i18n.t('Searched {{count}} sites') -->
-														{#if status?.description.includes('{{count}}')}
+																{#if status?.description?.includes('{{count}}')}
 															{$i18n.t(status?.description, {
 																count: status?.count ?? status?.urls?.length ?? 0,
 																failed: status?.failed ?? 0,
@@ -1216,7 +1216,7 @@
 														: ''} text-gray-500 dark:text-gray-500 text-base line-clamp-1 text-wrap"
 												>
 													<!-- $i18n.t(`Searching "{{searchQuery}}"`) -->
-													{#if status?.description.includes('{{searchQuery}}')}
+											{#if status?.description?.includes('{{searchQuery}}')}
 														{$i18n.t(status?.description, {
 															searchQuery: status?.query
 														})}

@@ -5793,9 +5793,18 @@
 			if (res && res.ok && res.body) {
 				const textStream = await createOpenAITextStream(res.body, $settings.splitLargeChunks);
 				for await (const update of textStream) {
-					const { value, image, done, sources, error, usage } = update;
+					const { value, image, done, sources, error, usage, status } = update;
 					if (error || done) {
 						break;
+					}
+
+					if (status) {
+						message.statusHistory = [...(message.statusHistory ?? []), status];
+						history.messages[messageId] = message;
+						if (shouldAutoScrollOnStreaming()) {
+							scrollToBottom();
+						}
+						continue;
 					}
 
 					const appendValue = image?.markdown ?? value;

@@ -143,14 +143,13 @@
 			</div>
 		{/each}
 	{:else}
-		<!-- 多模型：紧凑水平选择块布局 -->
+		<!-- 多模型：每个模型都是完整胶囊，删除按钮始终占位可见，避免 hover 时出现隐形框。 -->
 		<div class="flex flex-wrap items-center gap-1.5 max-w-full">
 			{#each selectedModels as selectedModel, selectedModelIdx}
 				<div
-					class="group/chip flex items-center gap-0.5 rounded-lg border border-gray-200/70 bg-white/70 pr-0.5 shadow-xs transition-colors dark:border-gray-700/50 dark:bg-gray-900/35"
+					class="group/chip flex max-w-full items-center gap-1 rounded-xl border border-gray-200 bg-white px-1 py-0.5 shadow-xs transition-colors hover:border-gray-300 dark:border-gray-700 dark:bg-gray-900/70 dark:hover:border-gray-600"
 				>
-					<!-- 模型 Selector 下拉（点击弹出更换模型） -->
-					<div class="overflow-hidden max-w-[200px] rounded-lg">
+					<div class="overflow-hidden max-w-[210px] rounded-lg">
 						<Selector
 							id={`${selectedModelIdx}`}
 							placeholder={$i18n.t('Select a model')}
@@ -163,15 +162,15 @@
 							bind:value={selectedModel}
 						/>
 					</div>
-					<!-- 删除按钮（第一个模型不显示删除，只在 hover 时显示） -->
 					{#if selectedModelIdx > 0}
 						<Tooltip content={$i18n.t('Remove Model')}>
 							<button
 								class="inline-flex items-center justify-center
-									size-5 rounded-md
+									size-6 shrink-0 rounded-lg
 									text-gray-400 dark:text-gray-500
 									bg-transparent
-									opacity-0 group-hover/chip:opacity-100
+									border border-transparent
+									hover:border-red-100 dark:hover:border-red-900/40
 									hover:bg-red-50/80 dark:hover:bg-red-900/20
 									hover:text-red-500 dark:hover:text-red-400
 									active:scale-[0.88]
@@ -200,17 +199,16 @@
 				</div>
 			{/each}
 
-			<!-- 添加模型按钮 - 与 chips 同行 -->
 			{#if canUseMultipleModels}
 				<Tooltip content={$i18n.t('Add Model')}>
 					<button
 						class="inline-flex items-center justify-center
-							size-6 rounded-lg
+							size-7 rounded-xl
 							text-gray-400 dark:text-gray-500
-							bg-transparent
-							border border-dashed border-gray-300/60 dark:border-gray-600/40
+							bg-white dark:bg-gray-900/70
+							border border-dashed border-gray-300 dark:border-gray-600
 							hover:bg-gray-100/80 dark:hover:bg-gray-800/60
-							hover:border-gray-400/60 dark:hover:border-gray-500/50
+							hover:border-gray-400 dark:hover:border-gray-500
 							hover:text-gray-600 dark:hover:text-gray-300
 							active:scale-[0.92]
 							transition-all duration-150

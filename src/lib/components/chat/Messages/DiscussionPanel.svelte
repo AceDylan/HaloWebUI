@@ -11,71 +11,128 @@
 	let expanded = false;
 	let selectedModelId = '';
 	let detailView: 'model' | 'all' = 'model';
+	let userPinnedSelection = false;
 
 	const toArray = (value: any) => (Array.isArray(value) ? value : []);
 	const cleanText = (value: any) => `${value ?? ''}`.trim();
-	const modelName = (value: any) => cleanText(value?.name ?? value?.modelName ?? value?.id ?? value?.model);
-	const modelKey = (value: any) => cleanText(value?.id ?? value?.model ?? value?.name ?? value?.modelName);
-	const sameModel = (left: any, right: any) => cleanText(left) !== '' && cleanText(left) === cleanText(right);
+	const normalizeIdentity = (value: any) => cleanText(value).toLowerCase();
+	const uniqueTexts = (values: any[]) => {
+		const seen = new Set<string>();
+		const result: string[] = [];
 
-	$: participants = toArray(discussion?.participants)
-		.map((participant, index) => ({
-			...participant,
-			key: modelKey(participant) || `participant-${index}`,
-			label: modelName(participant) || $i18n.t('模型')
-		}))
-		.filter((participant) => participant.key || participant.label);
+		for (const value of values) {
+			const text = cleanText(value);
+			const normalized = normalizeIdentity(text);
+			if (!text || seen.has(normalized)) continue;
+
+			seen.add(normalized);
+			result.push(text);
+		}
+
+		return result;
+	};
+	const modelName = (value: any) =>
+		cleanText(value?.name ?? value?.modelName ?? value?.label ?? value?.id ?? value?.model);
+	const modelIdentity = (value: any) =>
+		cleanText(
+			value?.rawKey ??
+				value?.id ??
+				value?.model ??
+				value?.model_id ??
+				value?.selection_id ??
+				value?.name ??
+				value?.modelName
+		);
+	const modelCandidates = (value: any) =>
+		uniqueTexts([
+			value?.rawKey,
+			value?.id,
+			value?.model,
+			value?.model_id,
+			value?.selection_id,
+			value?.name,
+			value?.modelName,
+			value?.label
+		]).map(normalizeIdentity);
+	const sameModelEntity = (left: any, right: any) => {
+		const leftCandidates = new Set(modelCandidates(left));
+		return modelCandidates(right).some((candidate) => leftCandidates.has(candidate));
+	};
+
+	const enrichTurn = (turn: any, round: any) => ({
+		...turn,
+		roundIndex: round?.index ?? turn?.round,
+		modelKey: modelIdentity(turn),
+		modelLabel: modelName(turn) || $i18n.t('模型')
+	});
+
+	$: participants = (() => {
+		const seen = new Map<string, number>();
+
+		return toArray(discussion?.participants)
+			.map((participant, index) => {
+				const rawKey = modelIdentity(participant) || `participant-${index}`;
+				const normalizedKey = normalizeIdentity(rawKey) || `participant-${index}`;
+				const duplicateIndex = seen.get(normalizedKey) ?? 0;
+				seen.set(normalizedKey, duplicateIndex + 1);
+
+				return {
+					...participant,
+					rawKey,
+					key: duplicateIndex === 0 ? normalizedKey : `${normalizedKey}::${duplicateIndex}`,
+					label: modelName(participant) || $i18n.t('模型')
+				};
+			})
+			.filter((participant) => participant.key || participant.label);
+	})();
 	$: rounds = toArray(discussion?.rounds);
+	$: roundEntries = rounds.map((round) => ({
+		...round,
+		roundIndex: round?.index ?? '-',
+		turns: toArray(round?.turns).map((turn) => enrichTurn(turn, round))
+	}));
 	$: status = discussion?.status ?? 'running';
-	$: allTurns = rounds.flatMap((round) =>
-		toArray(round?.turns).map((turn) => ({
-			...turn,
-			roundIndex: round?.index ?? turn?.round,
-			modelKey: modelKey(turn),
-			modelLabel: modelName(turn) || $i18n.t('模型')
-		}))
-	);
-	$: latestTurns = allTurns
-		.filter((turn) => turn?.content || turn?.error || turn?.status === 'running')
-		.slice(-2);
+	$: allTurns = roundEntries.flatMap((round) => round.turns);
 	$: running =
 		status === 'running' ||
 		status === 'summarizing' ||
 		allTurns.some((turn) => turn?.status === 'running');
 	$: runningTurn = allTurns.find((turn) => turn?.status === 'running');
 	$: latestTurn = [...allTurns].reverse().find((turn) => turn?.content || turn?.error || turn?.status);
-	$: defaultModelId =
-		participants.find((participant) => sameModel(participant.key, runningTurn?.modelKey))?.key ??
-		participants.find((participant) => sameModel(participant.key, latestTurn?.modelKey))?.key ??
-		participants[0]?.key ??
-		'';
-	$: if (!selectedModelId && defaultModelId) {
-		selectedModelId = defaultModelId;
+	$: summaryTurn = runningTurn ?? latestTurn;
+	$: activeParticipant = participants.find((participant) =>
+		summaryTurn ? sameModelEntity(participant, summaryTurn) : false
+	);
+	$: autoModelId = activeParticipant?.key ?? participants[0]?.key ?? '';
+	$: if (!selectedModelId && autoModelId) {
+		selectedModelId = autoModelId;
 	}
 	$: if (
 		selectedModelId &&
 		participants.length > 0 &&
-		!participants.some((participant) => sameModel(participant.key, selectedModelId))
+		!participants.some((participant) => participant.key === selectedModelId)
 	) {
-		selectedModelId = defaultModelId;
+		selectedModelId = autoModelId;
+		userPinnedSelection = false;
 	}
-	$: selectedParticipant = participants.find((participant) => sameModel(participant.key, selectedModelId));
-	$: selectedModelTurns = allTurns.filter((turn) => sameModel(turn.modelKey, selectedModelId));
-	$: selectedModelTimeline = rounds.map((round) => {
-		const turn = toArray(round?.turns)
-			.map((item) => ({
-				...item,
-				roundIndex: round?.index ?? item?.round,
-				modelKey: modelKey(item),
-				modelLabel: modelName(item) || $i18n.t('模型')
-			}))
-			.find((item) => sameModel(item.modelKey, selectedModelId));
+	$: if (!userPinnedSelection && detailView === 'model' && autoModelId) {
+		selectedModelId = autoModelId;
+	}
+	$: selectedParticipant = participants.find((participant) => participant.key === selectedModelId);
+	$: selectedModelTurns = selectedParticipant
+		? allTurns.filter((turn) => sameModelEntity(selectedParticipant, turn))
+		: [];
+	$: selectedModelTimeline = roundEntries.map((round) => {
+		const turn = selectedParticipant
+			? round.turns.find((item) => sameModelEntity(selectedParticipant, item))
+			: null;
 
 		return {
-			roundIndex: round?.index ?? turn?.roundIndex ?? '-',
+			roundIndex: round?.roundIndex ?? turn?.roundIndex ?? '-',
 			turn
 		};
 	});
+	$: finalModelLabel = modelName(discussion?.finalModel);
 
 	const statusLabel = (value: string) => {
 		switch (value) {
@@ -173,13 +230,19 @@
 
 	const turnAccentClass = (turn: any) => {
 		if (turn?.status === 'error') {
-			return 'border-l-red-400 dark:border-l-red-500';
+			return 'border-red-200 bg-red-50/60 dark:border-red-900/60 dark:bg-red-950/20';
 		}
 		if (turn?.status === 'running') {
-			return 'border-l-primary-400 dark:border-l-primary-500';
+			return 'border-primary-200 bg-primary-50/70 dark:border-primary-800/60 dark:bg-primary-950/20';
 		}
-		return 'border-l-gray-200 dark:border-l-gray-700';
+		return 'border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-950/20';
 	};
+
+	const turnStats = (turn: any) => [
+		$i18n.t('第 {{round}} 轮', { round: turn?.roundIndex ?? turn?.round ?? '-' }),
+		...turnUsageStats(turn),
+		turnStatusLabel(turn)
+	];
 
 	const turnStatusClass = (turn: any) => {
 		if (turn?.status === 'error') {
@@ -192,7 +255,7 @@
 	};
 
 	const participantTurns = (participant: any) =>
-		allTurns.filter((turn) => sameModel(turn.modelKey, participant?.key));
+		allTurns.filter((turn) => sameModelEntity(participant, turn));
 
 	const participantStatus = (participant: any) => {
 		const turns = participantTurns(participant);
@@ -204,10 +267,28 @@
 	};
 
 	const modelTabClass = (participant: any) => {
-		const active = sameModel(participant?.key, selectedModelId) && detailView === 'model';
+		const active = participant?.key === selectedModelId && detailView === 'model';
 		return active
-			? 'border-gray-900 bg-gray-900 text-white shadow-sm dark:border-gray-100 dark:bg-gray-100 dark:text-gray-900'
-			: 'border-gray-200/80 bg-white/60 text-gray-600 hover:border-gray-300 hover:text-gray-900 dark:border-gray-700/70 dark:bg-gray-900/50 dark:text-gray-300 dark:hover:border-gray-600 dark:hover:text-gray-100';
+			? 'border-primary-300 bg-primary-50 text-primary-700 shadow-xs dark:border-primary-700/70 dark:bg-primary-900/20 dark:text-primary-200'
+			: 'border-gray-200 bg-white text-gray-600 hover:border-gray-300 hover:bg-gray-50 hover:text-gray-900 dark:border-gray-700/70 dark:bg-gray-900/40 dark:text-gray-300 dark:hover:border-gray-600 dark:hover:bg-gray-800/60 dark:hover:text-gray-100';
+	};
+
+	const allRoundsTabClass = () =>
+		detailView === 'all'
+			? 'border-primary-300 bg-primary-50 text-primary-700 shadow-xs dark:border-primary-700/70 dark:bg-primary-900/20 dark:text-primary-200'
+			: 'border-gray-200 bg-white text-gray-600 hover:border-gray-300 hover:bg-gray-50 hover:text-gray-900 dark:border-gray-700/70 dark:bg-gray-900/40 dark:text-gray-300 dark:hover:border-gray-600 dark:hover:bg-gray-800/60 dark:hover:text-gray-100';
+
+	const selectParticipant = (participant: any) => {
+		selectedModelId = participant.key;
+		detailView = 'model';
+		userPinnedSelection = true;
+		expanded = true;
+	};
+
+	const showAllRounds = () => {
+		detailView = 'all';
+		userPinnedSelection = false;
+		expanded = true;
 	};
 </script>
 
@@ -234,24 +315,23 @@
 					</div>
 				</div>
 
-				{#if participants.length > 0}
-					<div class="mt-2 flex flex-wrap items-center gap-1.5">
-						{#each participants as participant}
-							<button
-								type="button"
-								class="inline-flex max-w-[190px] items-center gap-1.5 rounded-lg border px-2 py-1 text-xs font-medium transition-colors {modelTabClass(participant)}"
-								on:click={() => {
-									selectedModelId = participant.key;
-									detailView = 'model';
-									expanded = true;
-								}}
-							>
-								<span class="size-1.5 shrink-0 rounded-full {statusDotClass(participantStatus(participant))}" />
-								<span class="truncate">{participant.label}</span>
-							</button>
-						{/each}
-					</div>
-				{/if}
+				<div class="mt-2 flex flex-wrap items-center gap-1.5 text-[11px] text-gray-500 dark:text-gray-400">
+					{#if participants.length > 0}
+						<span class="rounded-full bg-gray-100 px-2 py-0.5 dark:bg-gray-800/80">
+							{$i18n.t('共 {{count}} 个模型', { count: participants.length })}
+						</span>
+					{/if}
+					{#if activeParticipant}
+						<span class="rounded-full bg-primary-50 px-2 py-0.5 text-primary-700 dark:bg-primary-900/20 dark:text-primary-200">
+							{$i18n.t('当前：{{model}}', { model: activeParticipant.label })}
+						</span>
+					{/if}
+					{#if finalModelLabel}
+						<span class="rounded-full bg-gray-100 px-2 py-0.5 dark:bg-gray-800/80">
+							{$i18n.t('总结：{{model}}', { model: finalModelLabel })}
+						</span>
+					{/if}
+				</div>
 			</div>
 
 			<button
@@ -271,42 +351,56 @@
 			</button>
 		</div>
 
-		<div class="border-t border-gray-100/80 px-3 py-2 dark:border-gray-800/70" aria-live="polite">
-			{#if latestTurns.length > 0}
-				<div class="space-y-0 divide-y divide-gray-100/80 dark:divide-gray-800/70">
-					{#each latestTurns as turn}
-						{@const usageStats = turnUsageStats(turn)}
-						<div class="border-l-2 py-2 pl-3 {turnAccentClass(turn)}">
-							<div class="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 text-xs">
-								<div class="min-w-0 truncate font-medium text-gray-700 dark:text-gray-200">
-									{$i18n.t('第 {{round}} 轮', { round: turn?.roundIndex ?? turn?.round ?? '-' })} · {turn?.modelLabel ??
-										turn?.modelName ??
-										turn?.model ??
-										$i18n.t('模型')}
-								</div>
-								<div class="shrink-0 text-right text-[11px] text-gray-400 dark:text-gray-500">
-									{#if usageStats.length > 0}
-										<span>{usageStats.join(' · ')}</span>
-										<span class="px-1 text-gray-300 dark:text-gray-600">/</span>
-									{/if}
-									<span class={turnStatusClass(turn)}>{turnStatusLabel(turn)}</span>
-								</div>
-							</div>
-							{#if turnText(turn)}
-								<div class="mt-1 line-clamp-2 whitespace-pre-wrap text-xs leading-5 text-gray-600 dark:text-gray-300">
-									{turnText(turn)}
-								</div>
-							{:else if turn?.status === 'running'}
-								<div class="mt-1 flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400">
-									<Loader2 class="size-3 animate-spin" />
-									{$i18n.t('该模型正在准备观点...')}
-								</div>
-							{/if}
+		<div class="border-t border-gray-100/80 px-3 py-3 dark:border-gray-800/70" aria-live="polite">
+			{#if summaryTurn}
+				{@const stats = turnStats(summaryTurn)}
+				<button
+					type="button"
+					class="w-full rounded-xl border px-3 py-2.5 text-left transition-colors {turnAccentClass(summaryTurn)} hover:border-primary-200 hover:bg-primary-50/40 dark:hover:border-primary-800 dark:hover:bg-primary-950/20"
+					on:click={() => {
+						if (activeParticipant) {
+							selectParticipant(activeParticipant);
+						} else {
+							expanded = true;
+						}
+					}}
+				>
+					<div class="flex min-w-0 items-center gap-2">
+						<span class="size-2 shrink-0 rounded-full {statusDotClass(summaryTurn?.status ?? status)}" />
+						<span class="truncate text-xs font-semibold text-gray-800 dark:text-gray-100">
+							{summaryTurn?.modelLabel ?? summaryTurn?.modelName ?? summaryTurn?.model ?? $i18n.t('模型')}
+						</span>
+						{#if summaryTurn?.status === 'running'}
+							<Loader2 class="size-3.5 shrink-0 animate-spin text-primary-500 dark:text-primary-300" />
+						{/if}
+					</div>
+
+					<div class="mt-2 flex flex-wrap gap-1.5">
+						{#each stats as stat, statIdx}
+							<span
+								class="rounded-full border border-gray-200 bg-white/80 px-2 py-0.5 text-[11px] leading-4 dark:border-gray-700 dark:bg-gray-900/70 {statIdx ===
+								stats.length - 1
+									? turnStatusClass(summaryTurn)
+									: 'text-gray-500 dark:text-gray-400'}"
+							>
+								{stat}
+							</span>
+						{/each}
+					</div>
+
+					{#if turnText(summaryTurn)}
+						<div class="mt-2 line-clamp-2 whitespace-pre-wrap text-xs leading-5 text-gray-600 dark:text-gray-300">
+							{turnText(summaryTurn)}
 						</div>
-					{/each}
-				</div>
+					{:else if summaryTurn?.status === 'running'}
+						<div class="mt-2 flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400">
+							<Loader2 class="size-3 animate-spin" />
+							{$i18n.t('该模型正在准备观点...')}
+						</div>
+					{/if}
+				</button>
 			{:else}
-				<div class="flex items-center gap-2 py-2 text-xs text-gray-500 dark:text-gray-400">
+				<div class="flex items-center gap-2 rounded-xl border border-dashed border-gray-200 px-3 py-3 text-xs text-gray-500 dark:border-gray-700 dark:text-gray-400">
 					<Loader2 class="size-3 animate-spin" />
 					{$i18n.t('正在等待第一条讨论发言...')}
 				</div>
@@ -321,10 +415,7 @@
 							<button
 								type="button"
 								class="inline-flex max-w-[190px] items-center gap-1.5 rounded-lg border px-2 py-1 text-xs font-medium transition-colors {modelTabClass(participant)}"
-								on:click={() => {
-									selectedModelId = participant.key;
-									detailView = 'model';
-								}}
+								on:click={() => selectParticipant(participant)}
 							>
 								<span class="truncate">{participant.label}</span>
 								<span class="text-[10px] opacity-70">{participantTurns(participant).length}</span>
@@ -334,12 +425,8 @@
 
 					<button
 						type="button"
-						class="inline-flex items-center rounded-lg border px-2 py-1 text-xs font-medium transition-colors {detailView === 'all'
-							? 'border-gray-900 bg-gray-900 text-white shadow-sm dark:border-gray-100 dark:bg-gray-100 dark:text-gray-900'
-							: 'border-gray-200/80 bg-white/60 text-gray-600 hover:border-gray-300 hover:text-gray-900 dark:border-gray-700/70 dark:bg-gray-900/50 dark:text-gray-300 dark:hover:border-gray-600 dark:hover:text-gray-100'}"
-						on:click={() => {
-							detailView = 'all';
-						}}
+						class="inline-flex items-center rounded-lg border px-2 py-1 text-xs font-medium transition-colors {allRoundsTabClass()}"
+						on:click={showAllRounds}
 					>
 						{$i18n.t('全部轮次')}
 					</button>
@@ -356,22 +443,38 @@
 							</div>
 						</div>
 
-						{#if rounds.length > 0}
+						{#if roundEntries.length > 0}
 							{#each selectedModelTimeline as item}
 								{@const turn = item.turn}
-								{@const usageStats = turn ? turnUsageStats(turn) : []}
-								<div class="rounded-xl border border-gray-100/90 bg-white/55 px-3 py-2 dark:border-gray-800/80 dark:bg-gray-950/20">
-									<div class="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 text-xs">
-										<div class="font-medium text-gray-700 dark:text-gray-200">
+								{@const stats = turn
+									? turnStats(turn)
+									: [$i18n.t('第 {{round}} 轮', { round: item.roundIndex }), $i18n.t('等待中')]}
+								<div
+									class="rounded-xl border px-3 py-2.5 {turn
+										? turnAccentClass(turn)
+										: 'border-gray-200 bg-white/70 dark:border-gray-800 dark:bg-gray-950/20'}"
+								>
+									<div class="flex min-w-0 items-center gap-2">
+										<span class="size-2 shrink-0 rounded-full {statusDotClass(turn?.status ?? 'waiting')}" />
+										<div class="min-w-0 truncate text-xs font-semibold text-gray-700 dark:text-gray-200">
 											{$i18n.t('第 {{round}} 轮', { round: item.roundIndex })}
 										</div>
-										<div class="shrink-0 text-right text-[11px] text-gray-400 dark:text-gray-500">
-											{#if usageStats.length > 0}
-												<span>{usageStats.join(' · ')}</span>
-												<span class="px-1 text-gray-300 dark:text-gray-600">/</span>
-											{/if}
-											<span class={turnStatusClass(turn)}>{turn ? turnStatusLabel(turn) : $i18n.t('等待中')}</span>
-										</div>
+										{#if turn?.status === 'running'}
+											<Loader2 class="size-3.5 shrink-0 animate-spin text-primary-500 dark:text-primary-300" />
+										{/if}
+									</div>
+
+									<div class="mt-2 flex flex-wrap gap-1.5">
+										{#each stats as stat, statIdx}
+											<span
+												class="rounded-full border border-gray-200 bg-white/80 px-2 py-0.5 text-[11px] leading-4 dark:border-gray-700 dark:bg-gray-900/70 {statIdx ===
+												stats.length - 1
+													? turnStatusClass(turn)
+													: 'text-gray-500 dark:text-gray-400'}"
+											>
+												{stat}
+											</span>
+										{/each}
 									</div>
 
 									{#if turn && turnText(turn)}
@@ -396,30 +499,41 @@
 							</div>
 						{/if}
 					</div>
-				{:else if rounds.length > 0}
+				{:else if roundEntries.length > 0}
 					<div class="space-y-3">
-						{#each rounds as round}
+						{#each roundEntries as round}
 							<div>
 								<div class="mb-2 text-xs font-semibold text-gray-500 dark:text-gray-400">
-									{$i18n.t('第 {{round}} 轮', { round: round?.index ?? '-' })}
+									{$i18n.t('第 {{round}} 轮', { round: round?.roundIndex ?? '-' })}
 								</div>
-								<div class="divide-y divide-gray-100/80 dark:divide-gray-800/70">
-									{#each toArray(round?.turns) as turn}
-										{@const usageStats = turnUsageStats(turn)}
-										<div class="border-l-2 py-2 pl-3 {turnAccentClass(turn)}">
-											<div class="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 text-xs">
-												<span class="font-medium text-gray-700 dark:text-gray-200"
-													>{turn?.modelName ?? turn?.model ?? $i18n.t('模型')}</span
-												>
-												<div class="shrink-0 text-right text-[11px] text-gray-400 dark:text-gray-500">
-													{#if usageStats.length > 0}
-														<span>{usageStats.join(' · ')}</span>
-														<span class="px-1 text-gray-300 dark:text-gray-600">/</span>
-													{/if}
-													<span class={turnStatusClass(turn)}>{turnStatusLabel(turn)}</span>
-												</div>
+								<div class="space-y-2">
+									{#each round.turns as turn}
+										{@const stats = turnStats(turn)}
+										<div class="rounded-xl border px-3 py-2.5 {turnAccentClass(turn)}">
+											<div class="flex min-w-0 items-center gap-2">
+												<span class="size-2 shrink-0 rounded-full {statusDotClass(turn?.status)}" />
+												<span class="min-w-0 truncate text-xs font-semibold text-gray-700 dark:text-gray-200">
+													{turn?.modelLabel ?? turn?.modelName ?? turn?.model ?? $i18n.t('模型')}
+												</span>
+												{#if turn?.status === 'running'}
+													<Loader2 class="size-3.5 shrink-0 animate-spin text-primary-500 dark:text-primary-300" />
+												{/if}
 											</div>
-											<div class="mt-1 whitespace-pre-wrap text-xs leading-5 text-gray-600 dark:text-gray-300">
+
+											<div class="mt-2 flex flex-wrap gap-1.5">
+												{#each stats as stat, statIdx}
+													<span
+														class="rounded-full border border-gray-200 bg-white/80 px-2 py-0.5 text-[11px] leading-4 dark:border-gray-700 dark:bg-gray-900/70 {statIdx ===
+														stats.length - 1
+															? turnStatusClass(turn)
+															: 'text-gray-500 dark:text-gray-400'}"
+													>
+														{stat}
+													</span>
+												{/each}
+											</div>
+
+											<div class="mt-2 whitespace-pre-wrap text-xs leading-5 text-gray-600 dark:text-gray-300">
 												{turnText(turn) || $i18n.t('暂无内容。')}
 											</div>
 										</div>

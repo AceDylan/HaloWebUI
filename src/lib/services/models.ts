@@ -1,12 +1,19 @@
 import { get } from 'svelte/store';
 
 import { getModels as apiGetModels } from '$lib/apis';
-import { config, models, modelsError, modelsStatus, settings } from '$lib/stores';
+import {
+	config,
+	models,
+	modelsError,
+	modelsStatus,
+	settings
+} from '$lib/stores';
 import type { Model } from '$lib/stores';
 
 const MODELS_TTL_MS = 5 * 60 * 1000;
 
 let inFlight: Promise<Model[]> | null = null;
+let inFlightForce = false;
 let lastFetchedAt = 0;
 
 const getDirectConnections = () => {
@@ -46,13 +53,21 @@ export const refreshModels = async (
 	const isFresh = current.length > 0 && Date.now() - lastFetchedAt < MODELS_TTL_MS;
 	if (!opts.force && isFresh && !inFlight) return current;
 
-	// De-dup concurrent refreshes.
-	if (inFlight) return inFlight;
+	// Reuse regular refreshes, but never let a pre-save request satisfy a forced reload.
+	if (inFlight) {
+		if (!opts.force || inFlightForce) return inFlight;
+
+		const previous = inFlight;
+		await previous.catch(() => {});
+		if (inFlight && inFlight !== previous) return inFlight;
+	}
 
 	modelsStatus.set('loading');
 	modelsError.set(null);
 
-	inFlight = (async () => {
+	inFlightForce = !!opts.force;
+	let request: Promise<Model[]>;
+	request = (async () => {
 		try {
 			const next = await apiGetModels(token, getDirectConnections());
 			models.set(next);
@@ -65,9 +80,13 @@ export const refreshModels = async (
 			modelsError.set(stringifyError(error));
 			throw error;
 		} finally {
-			inFlight = null;
+			if (inFlight === request) {
+				inFlight = null;
+				inFlightForce = false;
+			}
 		}
 	})();
+	inFlight = request;
 
 	return inFlight;
 };

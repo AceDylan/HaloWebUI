@@ -38,7 +38,12 @@ def _make_user(connections):
     )
 
 
-def _connections(*, openai_prefix: str | None = None, gemini_prefix: str | None = None):
+def _connections(
+    *,
+    openai_prefix: str | None = None,
+    gemini_prefix: str | None = None,
+    grok_prefix: str | None = None,
+):
     data = {}
     if openai_prefix is not None:
         data["openai"] = {
@@ -62,6 +67,18 @@ def _connections(*, openai_prefix: str | None = None, gemini_prefix: str | None 
                     "name": "Gemini Example",
                     "prefix_id": gemini_prefix,
                     "model_ids": ["gemini-new"],
+                }
+            },
+        }
+    if grok_prefix is not None:
+        data["grok"] = {
+            "GROK_API_BASE_URLS": ["https://grok.example/v1"],
+            "GROK_API_KEYS": ["key"],
+            "GROK_API_CONFIGS": {
+                "0": {
+                    "enable": True,
+                    "name": "Grok Example",
+                    "prefix_id": grok_prefix,
                 }
             },
         }
@@ -91,6 +108,10 @@ async def _empty_gemini(_request, user=None):
     return {"data": []}
 
 
+async def _empty_grok(_request, user=None):
+    return {"data": []}
+
+
 async def _empty_anthropic(_request, user=None):
     return {"data": []}
 
@@ -115,6 +136,7 @@ def test_failed_source_keeps_stale_models_for_still_configured_connection(monkey
 
     monkeypatch.setattr(models_utils.openai, "get_all_models", failed_openai)
     monkeypatch.setattr(models_utils.gemini, "get_all_models", fresh_gemini)
+    monkeypatch.setattr(models_utils.grok, "get_all_models", _empty_grok)
     monkeypatch.setattr(models_utils.ollama, "get_all_models", _empty_ollama)
     monkeypatch.setattr(models_utils.anthropic, "get_all_models", _empty_anthropic)
     monkeypatch.setattr(models_utils, "get_function_models", _empty_functions)
@@ -142,6 +164,7 @@ def test_failed_source_does_not_keep_stale_models_for_removed_connection(monkeyp
 
     monkeypatch.setattr(models_utils.openai, "get_all_models", failed_openai)
     monkeypatch.setattr(models_utils.gemini, "get_all_models", _empty_gemini)
+    monkeypatch.setattr(models_utils.grok, "get_all_models", _empty_grok)
     monkeypatch.setattr(models_utils.ollama, "get_all_models", _empty_ollama)
     monkeypatch.setattr(models_utils.anthropic, "get_all_models", _empty_anthropic)
     monkeypatch.setattr(models_utils, "get_function_models", _empty_functions)
@@ -152,6 +175,29 @@ def test_failed_source_does_not_keep_stale_models_for_removed_connection(monkeyp
         _reset_base_model_caches()
 
     assert all(model["id"] != "oa1.gpt-old" for model in models)
+
+
+def test_grok_source_is_included_in_base_models(monkeypatch):
+    _reset_base_model_caches()
+    request = _make_request()
+    user = _make_user(_connections(grok_prefix="gk1"))
+
+    async def fresh_grok(_request, user=None):
+        return {"data": [_provider_model("grok", "gk1", "grok-image-new")]}
+
+    monkeypatch.setattr(models_utils.openai, "get_all_models", _empty_gemini)
+    monkeypatch.setattr(models_utils.gemini, "get_all_models", _empty_gemini)
+    monkeypatch.setattr(models_utils.grok, "get_all_models", fresh_grok)
+    monkeypatch.setattr(models_utils.ollama, "get_all_models", _empty_ollama)
+    monkeypatch.setattr(models_utils.anthropic, "get_all_models", _empty_anthropic)
+    monkeypatch.setattr(models_utils, "get_function_models", _empty_functions)
+
+    try:
+        models = asyncio.run(models_utils.get_all_base_models(request, user=user))
+    finally:
+        _reset_base_model_caches()
+
+    assert "gk1.grok-image-new" in {model["id"] for model in models}
 
 
 def test_base_model_deduplication_removes_duplicate_identity():

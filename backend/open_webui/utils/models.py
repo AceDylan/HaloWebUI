@@ -7,7 +7,7 @@ from typing import Optional
 
 from fastapi import Request
 
-from open_webui.routers import openai, ollama, gemini, anthropic
+from open_webui.routers import openai, ollama, gemini, grok, anthropic
 from open_webui.functions import get_function_models
 
 
@@ -386,11 +386,12 @@ async def _fetch_all_base_models(
     # the user has no configured connections for that provider.
     # Fetch all providers in parallel and cap individual sources so one slow upstream
     # does not block the entire settings / model-management UI.
-    openai_resp, ollama_resp, gemini_resp, anthropic_resp, function_models_resp = (
+    openai_resp, ollama_resp, gemini_resp, grok_resp, anthropic_resp, function_models_resp = (
         await asyncio.gather(
             _fetch_source_models("openai", openai.get_all_models(request, user=user)),
             _fetch_source_models("ollama", ollama.get_all_models(request, user=user)),
             _fetch_source_models("gemini", gemini.get_all_models(request, user=user)),
+            _fetch_source_models("grok", grok.get_all_models(request, user=user)),
             _fetch_source_models(
                 "anthropic", anthropic.get_all_models(request, user=user)
             ),
@@ -463,6 +464,15 @@ async def _fetch_all_base_models(
         user=user,
     )
 
+    # Process grok
+    grok_models = _provider_models_or_fallback(
+        response=grok_resp,
+        provider="grok",
+        data_key="data",
+        fallback_models=fallback_models,
+        user=user,
+    )
+
     # Process anthropic
     anthropic_models = _provider_models_or_fallback(
         response=anthropic_resp,
@@ -482,7 +492,12 @@ async def _fetch_all_base_models(
             active_refs=None,
         )
     models = (
-        function_models + openai_models + ollama_models + gemini_models + anthropic_models
+        function_models
+        + openai_models
+        + ollama_models
+        + gemini_models
+        + grok_models
+        + anthropic_models
     )
 
     return _deduplicate_models_by_identity(models)

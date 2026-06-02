@@ -11,7 +11,13 @@
 
 	const i18n: Writable<any> = getContext('i18n');
 
-	import { WEBUI_NAME, config, models as _models, settings, user } from '$lib/stores';
+	import {
+		WEBUI_NAME,
+		config,
+		models as _models,
+		settings,
+		user
+	} from '$lib/stores';
 	import { getModels } from '$lib/apis';
 	import {
 		bulkUpsertBaseModels,
@@ -55,7 +61,7 @@
 	type EnabledFilter = 'all' | 'enabled' | 'disabled';
 	type HiddenFilter = 'all' | 'hidden' | 'visible';
 	type VisibilityFilter = 'all' | 'public' | 'private' | 'unset';
-	type ProviderTab = 'all' | 'openai' | 'gemini' | 'anthropic' | 'ollama' | 'other';
+	type ProviderTab = 'all' | 'openai' | 'gemini' | 'grok' | 'anthropic' | 'ollama' | 'other';
 
 	type ModelLike = any;
 	type Row =
@@ -98,6 +104,7 @@
 	let listLoading = false;
 	let hasLoadedList = false;
 	let listLoadError = '';
+	let modelListLoadVersion = 0;
 
 	let searchValue = '';
 	let enabledFilter: EnabledFilter = 'all';
@@ -138,6 +145,12 @@
 			badgeColor: 'bg-blue-50 dark:bg-blue-950/30',
 			iconColor: 'text-blue-500 dark:text-blue-400'
 		},
+		grok: {
+			label: 'Grok 接口',
+			description: '管理通过 xAI Grok 接口连接的模型。',
+			badgeColor: 'bg-slate-50 dark:bg-slate-900/30',
+			iconColor: 'text-slate-500 dark:text-slate-400'
+		},
 		anthropic: {
 			label: 'Anthropic 接口',
 			description: '管理通过 Anthropic 接口连接的模型。',
@@ -161,7 +174,11 @@
 	$: activeTabMeta = tabMeta[selectedTab];
 
 	const getProviderTab = (m: any): Exclude<ProviderTab, 'all'> => {
+		const provider = (m?.model_ref?.provider ?? m?.provider ?? '').toString().toLowerCase();
+		if (provider === 'grok' || provider === 'xai' || provider.startsWith('grok')) return 'grok';
+
 		const owned = (m?.owned_by ?? '').toString().toLowerCase();
+		if (owned === 'grok' || owned === 'xai' || owned.startsWith('grok')) return 'grok';
 		if (owned === 'openai' || owned.startsWith('openai') || owned === 'system') return 'openai';
 		if (owned === 'google' || owned.startsWith('google')) return 'gemini';
 		if (owned === 'anthropic' || owned.startsWith('anthropic')) return 'anthropic';
@@ -198,6 +215,7 @@
 			all: 0,
 			openai: 0,
 			gemini: 0,
+			grok: 0,
 			anthropic: 0,
 			ollama: 0,
 			other: 0
@@ -210,7 +228,7 @@
 	})();
 
 	$: visibleTabs = (
-		['all', 'openai', 'gemini', 'anthropic', 'ollama', 'other'] as ProviderTab[]
+		['all', 'openai', 'gemini', 'grok', 'anthropic', 'ollama', 'other'] as ProviderTab[]
 	).filter((t) => t !== 'other' || tabCounts.other > 0);
 
 	$: if (selectedTab !== prevTab) {
@@ -365,6 +383,7 @@
 		(visibilityFilter !== 'all' ? 1 : 0);
 
 	const init = async () => {
+		const loadVersion = ++modelListLoadVersion;
 		listLoading = true;
 		listLoadError = '';
 
@@ -373,6 +392,8 @@
 				getBaseModels(localStorage.token),
 				getModels(localStorage.token, null, true)
 			]);
+
+			if (loadVersion !== modelListLoadVersion) return;
 
 			if (workspaceModelsResult.status === 'fulfilled') {
 				workspaceModels = (workspaceModelsResult.value ?? []) as any[];
@@ -454,7 +475,9 @@
 			console.error('Failed to initialize model management page', error);
 			listLoadError = error instanceof Error ? error.message : listLoadError || String(error);
 		} finally {
-			listLoading = false;
+			if (loadVersion === modelListLoadVersion) {
+				listLoading = false;
+			}
 		}
 	};
 

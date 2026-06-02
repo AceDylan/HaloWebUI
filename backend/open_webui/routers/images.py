@@ -2557,19 +2557,20 @@ def _resolve_openai_image_request_route(
             reference_default_route = str(
                 (selected_model_meta or {}).get("reference_image_default_route") or ""
             ).strip()
-            if (
-                reference_image_count <= 1
-                and reference_default_route in supported_routes
-            ):
+            if reference_default_route in supported_routes:
                 return reference_default_route
             if reference_image_count > 1:
-                for route in (OPENAI_IMAGE_ROUTE_CHAT, OPENAI_IMAGE_ROUTE_RESPONSES):
+                for route in (
+                    OPENAI_IMAGE_ROUTE_CHAT,
+                    OPENAI_IMAGE_ROUTE_RESPONSES,
+                    OPENAI_IMAGE_ROUTE_EDITS,
+                ):
                     if route in supported_routes:
                         return route
                 raise HTTPException(
                     status_code=400,
                     detail=(
-                        "当前图片编辑接口一次只支持一张参考图。请改用支持多图参考的图片接口，或只上传一张参考图。"
+                        "当前模型没有可用的多图参考接口。请切换到支持多图参考的图片模型，或减少参考图数量后重新生成。"
                     ),
                 )
             for route in (
@@ -4320,7 +4321,10 @@ def _extract_generated_image_values_from_text(text: str) -> list[str]:
 
 
 def _append_openai_stream_text_fragment(
-    fragments: list[str], value: Any, *, max_chars: int = OPENAI_STREAM_TEXT_FRAGMENT_LIMIT
+    fragments: list[str],
+    value: Any,
+    *,
+    max_chars: int = OPENAI_STREAM_TEXT_FRAGMENT_LIMIT,
 ) -> None:
     if not isinstance(value, str) or not value:
         return
@@ -4412,7 +4416,9 @@ def _summarize_openai_stream_event(event: Any) -> dict[str, Any]:
                     summary["delta_reasoning_preview"] = reasoning[:240]
             message = choice.get("message")
             if isinstance(message, dict):
-                summary["message_keys"] = sorted(str(key) for key in message.keys())[:20]
+                summary["message_keys"] = sorted(str(key) for key in message.keys())[
+                    :20
+                ]
                 content = message.get("content")
                 if isinstance(content, str) and content:
                     summary["message_content_len"] = len(content)
@@ -4506,9 +4512,7 @@ def _build_openai_empty_image_context(
     completion_tokens = _first_openai_usage_value(
         usage, event_summaries, "completion_tokens", "output_tokens"
     )
-    total_tokens = _first_openai_usage_value(
-        usage, event_summaries, "total_tokens"
-    )
+    total_tokens = _first_openai_usage_value(usage, event_summaries, "total_tokens")
     finish_reasons = _unique_non_empty_strings(
         [summary.get("finish_reason") for summary in event_summaries]
     )
@@ -4527,9 +4531,16 @@ def _build_openai_empty_image_context(
     if event_count == 0:
         category = "empty_stream_no_events"
         reason = "上游返回了流式响应，但没有返回任何有效事件。"
-    elif completion_tokens == 0 and text_chars == 0 and not url_previews and data_image_count == 0:
+    elif (
+        completion_tokens == 0
+        and text_chars == 0
+        and not url_previews
+        and data_image_count == 0
+    ):
         category = "empty_stream_zero_output"
-        reason = "上游请求已结束，但输出 token 为 0，且没有返回文本、图片链接或图片数据。"
+        reason = (
+            "上游请求已结束，但输出 token 为 0，且没有返回文本、图片链接或图片数据。"
+        )
     elif text_chars > 0 and not url_previews and data_image_count == 0:
         category = "text_without_image"
         reason = "上游返回了文本内容，但没有返回图片链接或图片数据。"
@@ -4565,9 +4576,9 @@ def _build_openai_empty_image_context(
 def _build_openai_empty_image_error_detail(context: dict[str, Any]) -> str:
     reason = str(context.get("reason") or "上游响应中没有可识别的图片字段。").strip()
     if reason.startswith("上游请求已结束，但"):
-        first_sentence = "上游图片生成请求已完成，但" + reason[
-            len("上游请求已结束，但") :
-        ]
+        first_sentence = (
+            "上游图片生成请求已完成，但" + reason[len("上游请求已结束，但") :]
+        )
     elif reason.startswith("上游图片生成请求已完成"):
         first_sentence = reason
     else:
@@ -4648,9 +4659,7 @@ def _summarize_openai_chat_image_payload(payload: dict[str, Any]) -> dict[str, A
     tools = payload.get("tools")
     if isinstance(tools, list):
         summary["tool_types"] = [
-            str(tool.get("type") or "")
-            for tool in tools
-            if isinstance(tool, dict)
+            str(tool.get("type") or "") for tool in tools if isinstance(tool, dict)
         ]
 
     messages = payload.get("messages")
@@ -5754,6 +5763,7 @@ async def _generate_via_openai_image_edits_endpoint(
     prompt: str,
     stream: Optional[bool] = None,
     image_url: str,
+    image_urls: Optional[list[str]] = None,
     n: int,
     size: Optional[str],
     background: Optional[str],
@@ -5762,6 +5772,13 @@ async def _generate_via_openai_image_edits_endpoint(
         Callable[[int, dict[str, Any]], Awaitable[None]]
     ] = None,
 ) -> list[dict[str, str]]:
+    reference_image_urls = _normalize_reference_image_urls(image_url, image_urls)
+    if not reference_image_urls:
+        raise HTTPException(
+            status_code=400,
+            detail="编辑接口需要先提供一张参考图。",
+        )
+
     requested_n = max(1, int(n or 1))
     if requested_n > 1:
 
@@ -5772,7 +5789,8 @@ async def _generate_via_openai_image_edits_endpoint(
                 model_id=model_id,
                 prompt=prompt,
                 stream=stream,
-                image_url=image_url,
+                image_url=reference_image_urls[0],
+                image_urls=reference_image_urls,
                 n=1,
                 size=size,
                 background=background,
@@ -5817,14 +5835,39 @@ async def _generate_via_openai_image_edits_endpoint(
     base_name = _model_id_basename(upstream_model_id).lower()
     stream_enabled = _openai_image_stream_enabled(stream)
 
-    resolved_image = _resolve_image_edit_input(request, user, image_url)
-    if not resolved_image:
-        raise HTTPException(
-            status_code=400,
-            detail="Failed to resolve image input for edit request.",
+    resolved_images: list[tuple[str, bytes]] = []
+    input_summaries: list[dict[str, Any]] = []
+    for index, reference_image_url in enumerate(reference_image_urls):
+        resolved_image = _resolve_image_edit_input(request, user, reference_image_url)
+        if not resolved_image:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Failed to resolve image input #{index + 1} for edit request.",
+            )
+
+        image_mime, image_bytes = resolved_image
+        mime_type = image_mime or "image/png"
+        resolved_images.append((mime_type, image_bytes))
+        input_summaries.append(
+            {
+                "index": index + 1,
+                "file_id": extract_chat_image_file_id(reference_image_url) or "",
+                "mime": mime_type,
+                "bytes": len(image_bytes),
+            }
         )
 
-    image_mime, image_bytes = resolved_image
+    try:
+        log.info(
+            "openai_image_edits_reference_inputs user_id=%s model=%s reference_input_count=%s files=%s",
+            getattr(user, "id", None),
+            upstream_model_id,
+            len(resolved_images),
+            json.dumps(input_summaries, ensure_ascii=False, default=str),
+        )
+    except Exception:
+        pass
+
     payload: dict[str, Any] = {
         "model": upstream_model_id,
         "prompt": prompt,
@@ -5841,9 +5884,23 @@ async def _generate_via_openai_image_edits_endpoint(
     else:
         payload["response_format"] = "b64_json"
 
-    image_extension = mimetypes.guess_extension(image_mime or "image/png") or ".png"
-    image_filename = f"image{image_extension}"
-    image_field_name = "image"
+    image_files: list[dict[str, Any]] = []
+    for index, (image_mime, image_bytes) in enumerate(resolved_images):
+        image_extension = mimetypes.guess_extension(image_mime or "image/png") or ".png"
+        image_filename = (
+            f"image{image_extension}"
+            if len(resolved_images) == 1
+            else f"image-{index + 1}{image_extension}"
+        )
+        image_files.append(
+            {
+                "field_name": "image",
+                "filename": image_filename,
+                "mime": image_mime or "image/png",
+                "data": image_bytes,
+            }
+        )
+
     generation_url = _get_openai_images_edit_url(base_url, api_config)
     result, headers = await _send_openai_image_request_with_key_pool(
         provider="openai",
@@ -5854,14 +5911,7 @@ async def _generate_via_openai_image_edits_endpoint(
         url=generation_url,
         request_kind="multipart",
         form_fields=payload,
-        files=[
-            {
-                "field_name": image_field_name,
-                "filename": image_filename,
-                "mime": image_mime or "image/png",
-                "data": image_bytes,
-            }
-        ],
+        files=image_files,
     )
 
     response_status = result.get("status")
@@ -6270,8 +6320,16 @@ async def _generate_via_openai_chat_image(
         "input_image": bool(image_inputs),
         "input_image_count": len(image_inputs),
         **({"input_image_mime": image_inputs[0][0]} if image_inputs else {}),
-        **({"input_image_mimes": [item[0] for item in image_inputs]} if image_inputs else {}),
-        **({"input_image_bytes": [len(item[1]) for item in image_inputs]} if image_inputs else {}),
+        **(
+            {"input_image_mimes": [item[0] for item in image_inputs]}
+            if image_inputs
+            else {}
+        ),
+        **(
+            {"input_image_bytes": [len(item[1]) for item in image_inputs]}
+            if image_inputs
+            else {}
+        ),
     }
 
     started_at = time.monotonic()
@@ -7301,11 +7359,6 @@ async def image_generations(
                         status_code=400,
                         detail="编辑接口需要先提供一张参考图。",
                     )
-                if len(reference_image_urls) > 1:
-                    raise HTTPException(
-                        status_code=400,
-                        detail="当前编辑接口一次只支持一张参考图。请改用支持多图参考的 chat/responses 图片接口，或只上传一张参考图。",
-                    )
                 return await _generate_via_openai_image_edits_endpoint(
                     request,
                     user,
@@ -7313,6 +7366,7 @@ async def image_generations(
                     prompt=form_data.prompt,
                     stream=form_data.stream,
                     image_url=reference_image_url,
+                    image_urls=reference_image_urls,
                     n=requested_n,
                     size=openai_request_size,
                     background=background,

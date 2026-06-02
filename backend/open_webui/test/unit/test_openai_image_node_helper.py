@@ -368,11 +368,83 @@ def test_node_openai_image_helper_does_not_require_open_as_blob():
     assert "new Blob" in helper_source
 
 
-def test_generate_via_openai_chat_image_sends_all_reference_images(monkeypatch):
+def test_generate_via_openai_image_edits_endpoint_sends_all_reference_images(
+    monkeypatch,
+):
     captured = {}
-    first_image = "data:image/png;base64," + base64.b64encode(b"ref-1").decode(
+    first_image = "data:image/png;base64," + base64.b64encode(b"ref-1").decode("utf-8")
+    second_image = "data:image/jpeg;base64," + base64.b64encode(b"ref-2").decode(
         "utf-8"
     )
+    generated_b64 = base64.b64encode(b"generated" * 32).decode("utf-8")
+
+    async def fake_send_with_key_pool(**kwargs):
+        captured.update(kwargs)
+        return (
+            {
+                "status": 200,
+                "headers": {"content-type": "application/json"},
+                "response_body": json.dumps({"data": [{"b64_json": generated_b64}]}),
+                "elapsed_ms": 25,
+            },
+            {"content-type": "application/json"},
+        )
+
+    monkeypatch.setattr(
+        images_router,
+        "_send_openai_image_request_with_key_pool",
+        fake_send_with_key_pool,
+    )
+    monkeypatch.setattr(
+        images_router,
+        "upload_image",
+        lambda request, payload, image_data, content_type, user: "/images/generated.png",
+    )
+
+    result = asyncio.run(
+        images_router._generate_via_openai_image_edits_endpoint(
+            request=SimpleNamespace(),
+            user=_make_user(),
+            model_id="gpt-image-2",
+            prompt="use both references",
+            stream=False,
+            image_url=first_image,
+            image_urls=[first_image, second_image],
+            n=1,
+            size=None,
+            background=None,
+            source={
+                "base_url": "https://api.openai.com/v1",
+                "key": "sk-test",
+                "api_config": {},
+            },
+        )
+    )
+
+    assert captured["url"] == "https://api.openai.com/v1/images/edits"
+    assert captured["request_kind"] == "multipart"
+    assert captured["form_fields"]["model"] == "gpt-image-2"
+    assert captured["form_fields"]["prompt"] == "use both references"
+    assert captured["files"] == [
+        {
+            "field_name": "image",
+            "filename": "image-1.png",
+            "mime": "image/png",
+            "data": b"ref-1",
+        },
+        {
+            "field_name": "image",
+            "filename": "image-2.jpg",
+            "mime": "image/jpeg",
+            "data": b"ref-2",
+        },
+    ]
+    assert result[0]["url"] == "/images/generated.png"
+
+
+def test_generate_via_openai_chat_image_sends_all_reference_images(monkeypatch):
+    captured = {}
+    first_image = "data:image/png;base64," + base64.b64encode(b"ref-1").decode("utf-8")
     second_image = "data:image/jpeg;base64," + base64.b64encode(b"ref-2").decode(
         "utf-8"
     )
@@ -466,9 +538,7 @@ def test_generate_via_openai_chat_image_stream_parses_split_image_url(monkeypatc
             yield 'data: {"choices":[{"delta":{"content":"![result]("}}]}'
             yield (
                 "data: "
-                + json.dumps(
-                    {"choices": [{"delta": {"content": generated_url[:24]}}]}
-                )
+                + json.dumps({"choices": [{"delta": {"content": generated_url[:24]}}]})
             )
             yield (
                 "data: "
@@ -506,7 +576,10 @@ def test_generate_via_openai_chat_image_stream_parses_split_image_url(monkeypatc
     monkeypatch.setattr(
         images_router,
         "load_url_image_data",
-        lambda url, headers=None, allowed_base_urls=None: (b"stream-image", "image/png"),
+        lambda url, headers=None, allowed_base_urls=None: (
+            b"stream-image",
+            "image/png",
+        ),
     )
     monkeypatch.setattr(images_router, "upload_image", fake_upload_image)
     monkeypatch.setattr(
@@ -538,12 +611,8 @@ def test_generate_via_openai_chat_image_stream_parses_split_image_url(monkeypatc
 
 def test_generate_via_openai_responses_image_sends_all_reference_images(monkeypatch):
     captured = {}
-    first_image = "data:image/png;base64," + base64.b64encode(b"ref-1").decode(
-        "utf-8"
-    )
-    second_image = "data:image/png;base64," + base64.b64encode(b"ref-2").decode(
-        "utf-8"
-    )
+    first_image = "data:image/png;base64," + base64.b64encode(b"ref-1").decode("utf-8")
+    second_image = "data:image/png;base64," + base64.b64encode(b"ref-2").decode("utf-8")
     generated_b64 = base64.b64encode(b"generated" * 32).decode("utf-8")
 
     class FakeResponse:
@@ -620,9 +689,7 @@ def test_generate_via_openai_responses_image_sends_all_reference_images(monkeypa
 
 def test_generate_via_gemini_generate_content_sends_all_reference_images(monkeypatch):
     captured = {}
-    first_image = "data:image/png;base64," + base64.b64encode(b"ref-1").decode(
-        "utf-8"
-    )
+    first_image = "data:image/png;base64," + base64.b64encode(b"ref-1").decode("utf-8")
     second_image = "data:image/jpeg;base64," + base64.b64encode(b"ref-2").decode(
         "utf-8"
     )
@@ -693,7 +760,9 @@ def test_generate_via_openai_images_endpoint_uses_native_request(monkeypatch):
                 {
                     "data": [
                         {
-                            "b64_json": base64.b64encode(b"generated" * 32).decode("utf-8")
+                            "b64_json": base64.b64encode(b"generated" * 32).decode(
+                                "utf-8"
+                            )
                         }
                     ]
                 }
@@ -745,7 +814,9 @@ def test_generate_via_openai_images_endpoint_honors_non_stream_request(monkeypat
                 {
                     "data": [
                         {
-                            "b64_json": base64.b64encode(b"generated" * 32).decode("utf-8")
+                            "b64_json": base64.b64encode(b"generated" * 32).decode(
+                                "utf-8"
+                            )
                         }
                     ]
                 }
@@ -795,7 +866,9 @@ def test_generate_via_openai_images_endpoint_uses_configured_size(monkeypatch):
                 {
                     "data": [
                         {
-                            "b64_json": base64.b64encode(b"generated" * 32).decode("utf-8")
+                            "b64_json": base64.b64encode(b"generated" * 32).decode(
+                                "utf-8"
+                            )
                         }
                     ]
                 }
@@ -848,7 +921,9 @@ def test_generate_via_openai_images_endpoint_retries_api_key_pool(monkeypatch):
                 {
                     "data": [
                         {
-                            "b64_json": base64.b64encode(b"generated" * 32).decode("utf-8")
+                            "b64_json": base64.b64encode(b"generated" * 32).decode(
+                                "utf-8"
+                            )
                         }
                     ]
                 }
@@ -896,7 +971,9 @@ def test_generate_via_openai_images_endpoint_retries_api_key_pool(monkeypatch):
     assert calls[1]["headers"]["Authorization"] == "Bearer sk-b"
 
 
-def test_generate_via_openai_images_endpoint_splits_batch_into_single_requests(monkeypatch):
+def test_generate_via_openai_images_endpoint_splits_batch_into_single_requests(
+    monkeypatch,
+):
     calls = []
 
     async def fake_send(**kwargs):
@@ -906,13 +983,7 @@ def test_generate_via_openai_images_endpoint_splits_batch_into_single_requests(m
             "status": 200,
             "headers": {"content-type": "application/json"},
             "response_body": json.dumps(
-                {
-                    "data": [
-                        {
-                            "b64_json": base64.b64encode(image_bytes).decode("utf-8")
-                        }
-                    ]
-                }
+                {"data": [{"b64_json": base64.b64encode(image_bytes).decode("utf-8")}]}
             ),
         }
 
@@ -953,7 +1024,9 @@ def test_generate_via_openai_images_endpoint_splits_batch_into_single_requests(m
     ]
 
 
-def test_generate_via_openai_images_endpoint_uses_b64_response_format_for_dalle(monkeypatch):
+def test_generate_via_openai_images_endpoint_uses_b64_response_format_for_dalle(
+    monkeypatch,
+):
     captured = {}
 
     async def fake_send(**kwargs):
@@ -965,7 +1038,9 @@ def test_generate_via_openai_images_endpoint_uses_b64_response_format_for_dalle(
                 {
                     "data": [
                         {
-                            "b64_json": base64.b64encode(b"generated" * 32).decode("utf-8")
+                            "b64_json": base64.b64encode(b"generated" * 32).decode(
+                                "utf-8"
+                            )
                         }
                     ]
                 }
@@ -1012,7 +1087,9 @@ def test_generate_via_openai_images_endpoint_strips_connection_prefix(monkeypatc
                 {
                     "data": [
                         {
-                            "b64_json": base64.b64encode(b"generated" * 32).decode("utf-8")
+                            "b64_json": base64.b64encode(b"generated" * 32).decode(
+                                "utf-8"
+                            )
                         }
                     ]
                 }
@@ -1049,7 +1126,9 @@ def test_generate_via_openai_images_endpoint_strips_connection_prefix(monkeypatc
     assert "response_format" not in captured["json_body"]
 
 
-def test_generate_via_openai_images_endpoint_strips_internal_prefix_without_config_prefix(monkeypatch):
+def test_generate_via_openai_images_endpoint_strips_internal_prefix_without_config_prefix(
+    monkeypatch,
+):
     captured = {}
 
     async def fake_send(**kwargs):
@@ -1061,7 +1140,9 @@ def test_generate_via_openai_images_endpoint_strips_internal_prefix_without_conf
                 {
                     "data": [
                         {
-                            "b64_json": base64.b64encode(b"generated" * 32).decode("utf-8")
+                            "b64_json": base64.b64encode(b"generated" * 32).decode(
+                                "utf-8"
+                            )
                         }
                     ]
                 }
@@ -1106,9 +1187,7 @@ def test_generate_via_openai_image_edits_endpoint_uses_native_request(monkeypatc
             "response_body": json.dumps(
                 {
                     "data": [
-                        {
-                            "b64_json": base64.b64encode(b"edited" * 32).decode("utf-8")
-                        }
+                        {"b64_json": base64.b64encode(b"edited" * 32).decode("utf-8")}
                     ]
                 }
             ),
@@ -1154,7 +1233,9 @@ def test_generate_via_openai_image_edits_endpoint_uses_native_request(monkeypatc
     assert result == [{"url": "/images/edited.png"}]
 
 
-def test_generate_via_openai_image_edits_endpoint_splits_batch_into_single_requests(monkeypatch):
+def test_generate_via_openai_image_edits_endpoint_splits_batch_into_single_requests(
+    monkeypatch,
+):
     calls = []
 
     async def fake_send(**kwargs):
@@ -1164,13 +1245,7 @@ def test_generate_via_openai_image_edits_endpoint_splits_batch_into_single_reque
             "status": 200,
             "headers": {"content-type": "application/json"},
             "response_body": json.dumps(
-                {
-                    "data": [
-                        {
-                            "b64_json": base64.b64encode(image_bytes).decode("utf-8")
-                        }
-                    ]
-                }
+                {"data": [{"b64_json": base64.b64encode(image_bytes).decode("utf-8")}]}
             ),
         }
 
@@ -1229,9 +1304,7 @@ def test_generate_via_openai_image_edits_endpoint_strips_connection_prefix(monke
             "response_body": json.dumps(
                 {
                     "data": [
-                        {
-                            "b64_json": base64.b64encode(b"edited" * 32).decode("utf-8")
-                        }
+                        {"b64_json": base64.b64encode(b"edited" * 32).decode("utf-8")}
                     ]
                 }
             ),

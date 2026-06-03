@@ -25,7 +25,8 @@
 		config,
 		isApp,
 		models,
-		modelsStatus
+		modelsStatus,
+		requestNewChat
 	} from '$lib/stores';
 	import { onMount, getContext, tick, onDestroy } from 'svelte';
 
@@ -200,12 +201,10 @@
 	const startSidebarNewChat = async () => {
 		selectedChatId = null;
 		selectedAssistantScene.set(null);
+		requestNewChat({ source: 'sidebar' });
 
-		const newChatButton = document.getElementById('new-chat-button');
-		if (newChatButton) {
-			newChatButton.click();
-		} else {
-			await goto('/?fresh-chat=true');
+		if ($page.url.pathname !== '/' && !$page.url.pathname.startsWith('/c/')) {
+			await goto('/');
 		}
 
 		if ($mobile) {

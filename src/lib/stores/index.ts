@@ -50,6 +50,25 @@ export const activeAudioId = writable<string | null>(null);
 export const chatId = writable('');
 export const chatTitle = writable('');
 
+export type NewChatRequestSource = 'sidebar' | 'navbar' | 'brand' | 'fallback';
+export type NewChatRequest = {
+	id: string;
+	fresh?: boolean;
+	source?: NewChatRequestSource;
+};
+
+export const newChatRequest: Writable<NewChatRequest | null> = writable(null);
+
+export const requestNewChat = (options: Omit<NewChatRequest, 'id'> = {}) => {
+	const request = {
+		id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`,
+		...options
+	};
+
+	newChatRequest.set(request);
+	return request;
+};
+
 // Chat IDs currently generating responses (for sidebar activity indicators)
 export const activeChatIds: Writable<Set<string>> = writable(new Set());
 

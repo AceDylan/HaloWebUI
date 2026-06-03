@@ -226,6 +226,7 @@
 				disabled={discussionDisabled}
 				variant="success"
 				size="md"
+				className="halo-switch-secondary"
 				tooltip={discussionIssue || ''}
 				ariaLabel={$i18n.t('Multi-model discussion')}
 			>

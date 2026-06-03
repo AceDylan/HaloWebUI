@@ -35,27 +35,6 @@
 	$: labeledRootClass = `halo-switch-field ${className}`;
 	$: compactThumbClass =
 		'pointer-events-none block size-3 shrink-0 rounded-full bg-white shadow-md transition-transform duration-200 data-[state=checked]:translate-x-3 data-[state=unchecked]:translate-x-0';
-	$: checkedTone =
-		variant === 'primary'
-			? {
-					surface: 'rgba(255, 255, 255, 0.97)',
-					border: '#e5e5e5',
-					text: '#525252',
-					track: '#3b82f6',
-					shadow: '0 1px 3px rgba(0, 0, 0, 0.06), 0 4px 12px -8px rgba(59, 130, 246, 0.3)'
-				}
-			: {
-					surface: 'rgba(255, 255, 255, 0.97)',
-					border: '#e5e5e5',
-					text: '#525252',
-					track: '#10b981',
-					shadow: '0 1px 3px rgba(0, 0, 0, 0.06), 0 4px 12px -8px rgba(16, 185, 129, 0.3)'
-				};
-	$: checkedRootStyle = state
-		? `background: ${checkedTone.surface}; border-color: ${checkedTone.border}; color: ${checkedTone.text}; box-shadow: ${checkedTone.shadow};`
-		: undefined;
-	$: checkedTrackStyle = state ? `background: ${checkedTone.track};` : undefined;
-	$: checkedLabelStyle = state ? 'font-weight: 550;' : undefined;
 </script>
 
 <Tooltip
@@ -78,16 +57,15 @@
 			data-size={size}
 			{disabled}
 			class={labeledRootClass}
-			style={checkedRootStyle}
 			onCheckedChange={async () => {
 				await tick();
 				dispatch('change', state);
 			}}
 		>
-			<span class="halo-switch-track" aria-hidden="true" style={checkedTrackStyle}>
+			<span class="halo-switch-track" aria-hidden="true">
 				<Switch.Thumb class="halo-switch-thumb" />
 			</span>
-			<span class="halo-switch-label {labelClassName}" style={checkedLabelStyle}>
+			<span class="halo-switch-label {labelClassName}">
 				<slot />
 			</span>
 		</Switch.Root>
@@ -174,6 +152,30 @@
 			0 4px 12px -8px rgba(16, 185, 129, 0.3);
 	}
 
+	:global(.halo-switch-field.halo-switch-secondary) {
+		gap: 0.42rem;
+		border-color: #e7e7e7;
+		border-radius: 0.625rem;
+		background: rgba(255, 255, 255, 0.94);
+		color: #737373;
+		box-shadow: 0 1px 2px rgba(0, 0, 0, 0.045);
+		padding: 0.36rem 0.58rem;
+		font-size: 0.75rem;
+		font-weight: 500;
+	}
+
+	:global(.halo-switch-field.halo-switch-secondary:hover:not(:disabled)) {
+		border-color: #dadada;
+		box-shadow: 0 1px 3px rgba(0, 0, 0, 0.055);
+	}
+
+	:global(.halo-switch-field.halo-switch-secondary[data-state='checked']) {
+		border-color: #e5e5e5;
+		background: rgba(255, 255, 255, 0.96);
+		color: #525252;
+		box-shadow: 0 1px 2px rgba(0, 0, 0, 0.045);
+	}
+
 	:global(.halo-switch-track) {
 		--halo-switch-track-width: 2.25rem;
 		--halo-switch-track-height: 1.375rem;
@@ -200,6 +202,15 @@
 		--halo-switch-track-height: 1.375rem;
 	}
 
+	:global(.halo-switch-field.halo-switch-secondary .halo-switch-track) {
+		--halo-switch-track-width: 1.875rem;
+		--halo-switch-track-height: 1.125rem;
+		--halo-switch-thumb-size: 0.875rem;
+
+		background: #d1d1d1;
+		box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.09);
+	}
+
 	:global(.halo-switch-field[data-state='checked'][data-variant='primary'] .halo-switch-track) {
 		background: #3b82f6;
 		box-shadow:
@@ -212,6 +223,26 @@
 		box-shadow:
 			inset 0 0 0 1px rgba(255, 255, 255, 0.2),
 			0 2px 8px -4px rgba(16, 185, 129, 0.6);
+	}
+
+	:global(
+			.halo-switch-field.halo-switch-secondary[data-state='checked'][data-variant='success']
+				.halo-switch-track
+		) {
+		background: #10a37f;
+		box-shadow:
+			inset 0 0 0 1px rgba(255, 255, 255, 0.18),
+			0 1px 5px -3px rgba(16, 163, 127, 0.55);
+	}
+
+	:global(
+			.halo-switch-field.halo-switch-secondary[data-state='checked'][data-variant='primary']
+				.halo-switch-track
+		) {
+		background: #3b82f6;
+		box-shadow:
+			inset 0 0 0 1px rgba(255, 255, 255, 0.18),
+			0 1px 5px -3px rgba(59, 130, 246, 0.55);
 	}
 
 	:global(.halo-switch-thumb) {
@@ -228,6 +259,12 @@
 		transition:
 			transform 180ms cubic-bezier(0.2, 0.8, 0.2, 1),
 			box-shadow 160ms ease;
+	}
+
+	:global(.halo-switch-field.halo-switch-secondary .halo-switch-thumb) {
+		box-shadow:
+			0 1px 2px rgba(0, 0, 0, 0.24),
+			0 2px 5px rgba(0, 0, 0, 0.12);
 	}
 
 	:global(.halo-switch-field[data-size='sm'] .halo-switch-thumb) {
@@ -253,6 +290,10 @@
 
 	:global(.halo-switch-field[data-state='checked'] .halo-switch-label) {
 		font-weight: 550;
+	}
+
+	:global(.halo-switch-field.halo-switch-secondary[data-state='checked'] .halo-switch-label) {
+		font-weight: 500;
 	}
 
 	:global(.dark) .halo-switch-field {

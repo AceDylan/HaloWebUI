@@ -29,7 +29,8 @@
 		mobile,
 		temporaryChatEnabled,
 		settings,
-		config
+		config,
+		requestNewChat
 	} from '$lib/stores';
 	import { toast } from 'svelte-sonner';
 	import { capitalizeFirstLetter, sanitizeResponseContent, splitStream } from '$lib/utils';
@@ -412,11 +413,7 @@
 		});
 
 		await goto(targetPath);
-		await tick();
-		(
-			document.getElementById('new-chat-button') ??
-			document.getElementById('sidebar-new-chat-button')
-		)?.click();
+		requestNewChat({ source: 'navbar' });
 		show = false;
 	};
 

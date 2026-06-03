@@ -8,6 +8,7 @@
 		chatId,
 		config,
 		mobile,
+		requestNewChat,
 		selectedAssistantScene,
 		settings,
 		showArchivedChats,
@@ -33,7 +34,6 @@
 
 	const i18n = getContext('i18n');
 
-	export let initNewChat: Function;
 	export let title: string = $WEBUI_NAME;
 	export let shareEnabled: boolean = false;
 
@@ -149,7 +149,7 @@
 								: ''} cursor-pointer px-2 py-2 rounded-xl text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-850 transition"
 							on:click={() => {
 								selectedAssistantScene.set(null);
-								initNewChat();
+								requestNewChat({ source: 'navbar' });
 							}}
 							aria-label="New Chat"
 						>

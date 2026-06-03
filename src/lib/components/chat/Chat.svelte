@@ -42,6 +42,7 @@
 		toolServers,
 		activeChatIds,
 		overviewFocusedMessageId,
+		newChatRequest,
 		selectedAssistantScene
 	} from '$lib/stores';
 	import {
@@ -1056,6 +1057,7 @@
 	let reasoningEffort: string | null = null;
 		let maxThinkingTokens: number | null = null;
 		let lastFreshChatRequest = '';
+		let lastHandledNewChatRequestId = '';
 		// Flag to prevent sessionStorage recovery from overriding a deliberate fresh chat reset
 		let freshChatActive = false;
 		let webSearchSelectionSyncReady = false;
@@ -3460,6 +3462,13 @@
 			window.history.replaceState(history.state, '', `${url.pathname}${url.search}${url.hash}`);
 		}
 	};
+
+	$: if ($newChatRequest && $newChatRequest.id !== lastHandledNewChatRequestId) {
+		const request = $newChatRequest;
+		lastHandledNewChatRequestId = request.id;
+		newChatRequest.set(null);
+		void initNewChat({ fresh: request.fresh ?? false });
+	}
 
 	$: {
 		const freshChatRequested =
@@ -6163,7 +6172,6 @@
 					bind:multiModelDiscussionEnabled
 					maxDiscussionModels={MULTI_MODEL_DISCUSSION_MAX_MODELS}
 					shareEnabled={!!history.currentId}
-					{initNewChat}
 				/>
 
 				<div class="flex flex-col flex-auto z-10 w-full min-w-0 @container">

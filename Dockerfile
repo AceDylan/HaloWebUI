@@ -48,7 +48,8 @@ COPY vite.config.ts ./
 
 ENV APP_BUILD_HASH=${BUILD_HASH} \
     ENABLE_PYODIDE=${ENABLE_PYODIDE} \
-    VITE_SOURCEMAP=${VITE_SOURCEMAP}
+    VITE_SOURCEMAP=${VITE_SOURCEMAP} \
+    NODE_OPTIONS="--max-old-space-size=4096"
 
 RUN npm run build
 

@@ -176,10 +176,24 @@ sudo find /var/lib/docker -name "*.log"
 	it('renders the copy button as a real <button> element instead of mangled text', () => {
 		const html = renderResponseHtmlFormat('```bash\necho hi\n```');
 
-		expect(html).toMatch(/<button\s+[^>]*title="复制代码"[^>]*>📋<\/button>/);
+		expect(html).toMatch(/<button\b[^>]*title="复制代码"[^>]*>📋<\/button>/);
 		expect(html).not.toMatch(/<buttononclick/);
-		expect(html).not.toMatch(/"onmouseover=/);
-		expect(html).not.toMatch(/"onmouseout=/);
-		expect(html).not.toMatch(/"style="[^"]*"onmouseover/);
+		expect(html).not.toMatch(/<buttontype=/);
+	});
+
+	it('uses data-halo-copy-id instead of inline event handlers so DOMPurify keeps the button working', () => {
+		const html = renderResponseHtmlFormat('```bash\necho hi\n```');
+
+		expect(html).not.toContain('onclick=');
+		expect(html).not.toContain('onmouseover=');
+		expect(html).not.toContain('onmouseout=');
+
+		const buttonMatch = html.match(/<button\b[^>]*>📋<\/button>/);
+		expect(buttonMatch).not.toBeNull();
+		expect(buttonMatch![0]).toMatch(/data-halo-copy-id="code-[a-z0-9]+"/);
+
+		const idMatch = buttonMatch![0].match(/data-halo-copy-id="(code-[a-z0-9]+)"/)!;
+		expect(html).toContain(`<pre id="${idMatch[1]}"`);
+		expect(html).toContain('data-halo-code="true"');
 	});
 });

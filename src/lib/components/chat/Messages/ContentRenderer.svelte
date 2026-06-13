@@ -145,6 +145,11 @@
 	const normalizeCopyFragment = (container: HTMLElement) => {
 		container.querySelectorAll(INLINE_CITATION_SELECTOR).forEach((node) => node.remove());
 
+		container.querySelectorAll('pre[data-halo-code="true"]').forEach((pre) => {
+			(pre as HTMLElement).style.whiteSpace = 'pre-wrap';
+			(pre as HTMLElement).style.wordWrap = 'break-word';
+		});
+
 		container.querySelectorAll('table').forEach((table) => {
 			table.style.borderCollapse = 'collapse';
 			table.style.width = 'auto';
@@ -243,6 +248,62 @@
 		event.preventDefault();
 		event.clipboardData.setData('text/plain', payload.text);
 		event.clipboardData.setData('text/html', payload.html);
+	};
+
+	const handleHaloCopyClick = (event: MouseEvent) => {
+		const target = event.target as HTMLElement | null;
+		const trigger = target?.closest?.('[data-halo-copy-id]') as HTMLElement | null;
+		if (!trigger || !contentContainerElement?.contains(trigger)) {
+			return;
+		}
+
+		const targetId = trigger.getAttribute('data-halo-copy-id');
+		if (!targetId) {
+			return;
+		}
+
+		const pre = contentContainerElement.querySelector<HTMLElement>(`#${CSS.escape(targetId)}`);
+		const code = pre?.textContent ?? '';
+		if (!code) {
+			return;
+		}
+
+		event.preventDefault();
+		event.stopPropagation();
+
+		const flashSuccess = () => {
+			const original = trigger.innerHTML;
+			const originalColor = trigger.style.color;
+			trigger.innerHTML = '✓';
+			trigger.style.color = '#10b981';
+			setTimeout(() => {
+				trigger.innerHTML = original;
+				trigger.style.color = originalColor;
+			}, 1000);
+		};
+
+		const fallbackCopy = () => {
+			const textarea = document.createElement('textarea');
+			textarea.value = code;
+			textarea.style.position = 'fixed';
+			textarea.style.left = '-99999px';
+			textarea.style.opacity = '0';
+			document.body.appendChild(textarea);
+			textarea.select();
+			try {
+				document.execCommand('copy');
+				flashSuccess();
+			} catch (_) {
+				/* swallow */
+			}
+			textarea.remove();
+		};
+
+		if (navigator.clipboard?.writeText) {
+			navigator.clipboard.writeText(code).then(flashSuccess).catch(fallbackCopy);
+		} else {
+			fallbackCopy();
+		}
 	};
 
 	const resetThreadLayoutsIfIdle = () => {
@@ -746,6 +807,7 @@
 		data-inline-citations-hidden={($settings?.showInlineCitations ?? true) ? undefined : 'true'}
 		class="relative message-selection-surface"
 		on:copy={handleContentCopy}
+		on:click={handleHaloCopyClick}
 		style={needsTruncation && !isExpanded
 			? `max-height: ${MAX_CONTENT_HEIGHT}px; overflow: hidden;`
 			: ''}

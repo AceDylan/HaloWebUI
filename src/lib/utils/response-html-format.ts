@@ -698,24 +698,73 @@ const renderBlock = (block: ParsedBlock) => {
 			});
 		}
 
-		case 'code':
+		case 'code': {
+			// 生成唯一ID用于复制功能
+			const codeBlockId = `code-${Math.random().toString(36).substring(2, 9)}`;
+			const escapedCode = escapeHtml(block.text);
+
 			return renderFeatureBlock(
 				'code',
 				`${
 					block.lang
-						? `<div style="${escapeAttribute(toStyle({ color: THEME.codeText, opacity: 0.76, 'font-size': '12px', padding: '10px 14px 0' }))}">${escapeHtml(block.lang)}</div>`
-						: ''
-				}<pre style="${escapeAttribute(
+						? `<div style="${escapeAttribute(toStyle({
+							color: THEME.codeText,
+							opacity: 0.76,
+							'font-size': '12px',
+							padding: '10px 14px 0',
+							display: 'flex',
+							'justify-content': 'space-between',
+							'align-items': 'center'
+						}))}">${escapeHtml(block.lang)}<button
+							onclick="(function(id){const code=document.getElementById(id).textContent;navigator.clipboard.writeText(code).then(()=>{const btn=event.target;const orig=btn.innerHTML;btn.innerHTML='✓';btn.style.color='#10b981';setTimeout(()=>{btn.innerHTML=orig;btn.style.color='';},1000);})})('${codeBlockId}')"
+							style="${escapeAttribute(toStyle({
+								background: 'transparent',
+								border: 'none',
+								color: THEME.codeText,
+								cursor: 'pointer',
+								padding: '4px 8px',
+								'font-size': '14px',
+								opacity: 0.7,
+								transition: 'opacity 0.2s'
+							}))}"
+							onmouseover="this.style.opacity='1'"
+							onmouseout="this.style.opacity='0.7'"
+							title="复制代码"
+						>📋</button></div>`
+						: `<div style="${escapeAttribute(toStyle({
+							padding: '10px 14px 0',
+							display: 'flex',
+							'justify-content': 'flex-end'
+						}))}"><button
+							onclick="(function(id){const code=document.getElementById(id).textContent;navigator.clipboard.writeText(code).then(()=>{const btn=event.target;const orig=btn.innerHTML;btn.innerHTML='✓';btn.style.color='#10b981';setTimeout(()=>{btn.innerHTML=orig;btn.style.color='';},1000);})})('${codeBlockId}')"
+							style="${escapeAttribute(toStyle({
+								background: 'transparent',
+								border: 'none',
+								color: THEME.codeText,
+								cursor: 'pointer',
+								padding: '4px 8px',
+								'font-size': '14px',
+								opacity: 0.7,
+								transition: 'opacity 0.2s'
+							}))}"
+							onmouseover="this.style.opacity='1'"
+							onmouseout="this.style.opacity='0.7'"
+							title="复制代码"
+						>📋</button></div>`
+				}<pre id="${codeBlockId}" style="${escapeAttribute(
 					toStyle({
 						margin: 0,
-						padding: block.lang ? '8px 14px 14px' : '14px',
+						padding: block.lang ? '8px 14px 14px' : '8px 14px 14px',
 						overflow: 'auto',
 						background: 'transparent',
 						color: THEME.codeText,
 						'font-size': '13px',
-						'line-height': 1.65
+						'line-height': 1.65,
+						'white-space': 'pre-wrap',
+						'word-wrap': 'break-word',
+						'overflow-wrap': 'break-word'
 					})
-				)}"><code>${escapeHtml(block.text)}</code></pre>`,
+				)}"><code>${escapedCode}</code></pre>`,
 				{
 					margin: '4px 0',
 					background: THEME.codeBg,
@@ -724,6 +773,7 @@ const renderBlock = (block: ParsedBlock) => {
 					'box-shadow': '0 12px 28px rgba(15, 23, 42, 0.12)'
 				}
 			);
+		}
 
 		case 'table': {
 			const headers = block.headers

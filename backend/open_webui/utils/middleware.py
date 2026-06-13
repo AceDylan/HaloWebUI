@@ -5638,17 +5638,27 @@ async def process_chat_response(
                 return title_string.strip(" \"'")
 
             async def generate_or_fallback_chat_title() -> str:
-                if metadata.get("skip_text_enhancements"):
-                    return build_fallback_chat_title(messages)
+                # Image-only / multi-model-discussion sessions can't dispatch text
+                # completion to their primary model. We still try the configured
+                # external task model (a text model) when available; the
+                # generate_title() guard rejects the call when no safe text model
+                # is configured, and we fall back to a deterministic snippet.
+                require_external_task_model = bool(
+                    metadata.get("skip_text_enhancements")
+                )
 
                 try:
+                    title_form_data = {
+                        "model": message["model"],
+                        "messages": messages,
+                        "chat_id": metadata["chat_id"],
+                    }
+                    if require_external_task_model:
+                        title_form_data["require_external_task_model"] = True
+
                     res = await generate_title(
                         request,
-                        {
-                            "model": message["model"],
-                            "messages": messages,
-                            "chat_id": metadata["chat_id"],
-                        },
+                        title_form_data,
                         user,
                     )
                     title = parse_generated_chat_title(res)

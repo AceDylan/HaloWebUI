@@ -24,7 +24,7 @@ from open_webui.utils.filter import (
     get_sorted_filter_ids,
     process_filter_functions,
 )
-from open_webui.utils.task import get_task_model_id
+from open_webui.utils.task import get_task_model_id, is_dedicated_image_generation_model
 from open_webui.utils.model_identity import get_model_selection_id, resolve_model_from_lookup
 
 from open_webui.config import (
@@ -167,6 +167,32 @@ async def generate_title(
         models,
         _get_ambiguous_model_aliases(request),
     )
+
+    # Safety guard for callers (image-only / multi-model discussion) that must NOT
+    # dispatch a text completion to a dedicated image model. The caller passes
+    # `require_external_task_model=True` to indicate the originating chat model
+    # can't serve text — in that case we only proceed if an external task model
+    # is configured and is itself a text model.
+    if form_data.get("require_external_task_model"):
+        configured_external = (
+            request.app.state.config.TASK_MODEL_EXTERNAL or ""
+        ).strip()
+        if not configured_external or task_model_id == model_id:
+            return JSONResponse(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                content={
+                    "detail": "External task model required for this session",
+                    "skipped": True,
+                },
+            )
+        if is_dedicated_image_generation_model(models.get(task_model_id)):
+            return JSONResponse(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                content={
+                    "detail": "External task model resolves to an image model",
+                    "skipped": True,
+                },
+            )
 
     log.debug(
         f"generating chat title using model {task_model_id} for user {user.email} "

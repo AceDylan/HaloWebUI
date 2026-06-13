@@ -655,3 +655,308 @@ def test_multi_model_discussion_persists_error_when_final_model_fails(monkeypatc
     assert error_upsert["done"] is True
     assert error_upsert["error"]["content"] == "final model failed"
     assert error_upsert["discussion"]["status"] == "error"
+
+
+def test_multi_model_discussion_generates_chat_title_via_external_task_model(
+    monkeypatch,
+):
+    from open_webui.constants import TASKS
+
+    events = []
+    upserts = []
+    title_updates = []
+    generate_title_calls = []
+    scheduled = {}
+
+    async def event_emitter(event):
+        events.append(event)
+
+    async def fake_generate_chat_completion(_request, payload, _user):
+        return {
+            "choices": [
+                {"message": {"content": f"reply from {payload['model']}"}}
+            ],
+            "usage": {
+                "prompt_tokens": 1,
+                "completion_tokens": 1,
+                "total_tokens": 2,
+            },
+        }
+
+    async def fake_generate_title(_request, form_data, _user):
+        generate_title_calls.append(form_data)
+        return {
+            "choices": [
+                {
+                    "message": {
+                        "content": '{"title": "讨论：橘猫吃粮的拍照建议"}',
+                    }
+                }
+            ],
+        }
+
+    def fake_create_task(coroutine, id=None):
+        task = asyncio.create_task(coroutine)
+        scheduled["task"] = task
+        scheduled["chat_id"] = id
+        return "task-1", task
+
+    monkeypatch.setattr(
+        discussion_mod, "get_event_emitter", lambda _metadata: event_emitter
+    )
+    monkeypatch.setattr(
+        discussion_mod,
+        "generate_chat_completion",
+        fake_generate_chat_completion,
+    )
+    monkeypatch.setattr(discussion_mod, "create_task", fake_create_task)
+    monkeypatch.setattr(
+        discussion_mod.Chats,
+        "upsert_message_to_chat_by_id_and_message_id",
+        lambda *args, **kwargs: upserts.append((args, kwargs)),
+    )
+    monkeypatch.setattr(
+        discussion_mod.Chats,
+        "get_chat_title_by_id",
+        lambda _chat_id: "New Chat",
+    )
+    monkeypatch.setattr(
+        discussion_mod.Chats,
+        "update_chat_title_by_id",
+        lambda _chat_id, title: title_updates.append(title),
+    )
+
+    # Patch the lazily-imported router function used by _apply_discussion_chat_title.
+    import open_webui.routers.tasks as tasks_mod
+
+    monkeypatch.setattr(tasks_mod, "generate_title", fake_generate_title)
+
+    async def run():
+        await discussion_mod.generate_multi_model_discussion_completion(
+            _request(_models("model-a", "model-b", "model-final")),
+            {
+                "model": "model-final",
+                "messages": [
+                    {"role": "user", "content": "讨论一下橘猫吃粮的拍照视角"}
+                ],
+                "stream": True,
+            },
+            _user(),
+            {"chat_id": "chat-1", "message_id": "assistant-1"},
+            {"id": "model-final"},
+            {
+                "enabled": True,
+                "participants": ["model-a", "model-b"],
+                "rounds": 1,
+                "finalModel": "model-final",
+            },
+            None,
+            tasks={TASKS.TITLE_GENERATION: True},
+        )
+        await scheduled["task"]
+
+    asyncio.run(run())
+
+    assert generate_title_calls, (
+        "multi-model discussion should invoke generate_title when "
+        "background_tasks request title_generation"
+    )
+    assert generate_title_calls[0].get("require_external_task_model") is True
+    assert title_updates == ["讨论：橘猫吃粮的拍照建议"]
+    title_event = next(
+        (event for event in events if event["type"] == "chat:title"),
+        None,
+    )
+    assert title_event is not None
+    assert title_event["data"] == "讨论：橘猫吃粮的拍照建议"
+
+
+def test_multi_model_discussion_title_falls_back_when_external_task_model_unavailable(
+    monkeypatch,
+):
+    from fastapi.responses import JSONResponse
+
+    from open_webui.constants import TASKS
+
+    events = []
+    title_updates = []
+    scheduled = {}
+
+    async def event_emitter(event):
+        events.append(event)
+
+    async def fake_generate_chat_completion(_request, payload, _user):
+        return {
+            "choices": [
+                {"message": {"content": f"reply from {payload['model']}"}}
+            ],
+            "usage": {
+                "prompt_tokens": 1,
+                "completion_tokens": 1,
+                "total_tokens": 2,
+            },
+        }
+
+    async def fake_generate_title(_request, _form_data, _user):
+        # Simulate the require_external_task_model guard rejecting the call.
+        return JSONResponse(
+            status_code=400,
+            content={"detail": "no external task model", "skipped": True},
+        )
+
+    def fake_create_task(coroutine, id=None):
+        task = asyncio.create_task(coroutine)
+        scheduled["task"] = task
+        scheduled["chat_id"] = id
+        return "task-1", task
+
+    monkeypatch.setattr(
+        discussion_mod, "get_event_emitter", lambda _metadata: event_emitter
+    )
+    monkeypatch.setattr(
+        discussion_mod,
+        "generate_chat_completion",
+        fake_generate_chat_completion,
+    )
+    monkeypatch.setattr(discussion_mod, "create_task", fake_create_task)
+    monkeypatch.setattr(
+        discussion_mod.Chats,
+        "upsert_message_to_chat_by_id_and_message_id",
+        lambda *args, **kwargs: None,
+    )
+    monkeypatch.setattr(
+        discussion_mod.Chats,
+        "get_chat_title_by_id",
+        lambda _chat_id: "New Chat",
+    )
+    monkeypatch.setattr(
+        discussion_mod.Chats,
+        "update_chat_title_by_id",
+        lambda _chat_id, title: title_updates.append(title),
+    )
+
+    import open_webui.routers.tasks as tasks_mod
+
+    monkeypatch.setattr(tasks_mod, "generate_title", fake_generate_title)
+
+    async def run():
+        await discussion_mod.generate_multi_model_discussion_completion(
+            _request(_models("model-a", "model-b", "model-final")),
+            {
+                "model": "model-final",
+                "messages": [
+                    {"role": "user", "content": "请帮我分析下英伟达股价走势"}
+                ],
+                "stream": True,
+            },
+            _user(),
+            {"chat_id": "chat-1", "message_id": "assistant-1"},
+            {"id": "model-final"},
+            {
+                "enabled": True,
+                "participants": ["model-a", "model-b"],
+                "rounds": 1,
+                "finalModel": "model-final",
+            },
+            None,
+            tasks={TASKS.TITLE_GENERATION: True},
+        )
+        await scheduled["task"]
+
+    asyncio.run(run())
+
+    assert title_updates and title_updates[0]
+    # Fallback should derive from the user prompt rather than the assistant content.
+    assert "英伟达" in title_updates[0]
+
+
+def test_multi_model_discussion_preserves_user_provided_title(monkeypatch):
+    from open_webui.constants import TASKS
+
+    title_updates = []
+    generate_title_calls = []
+    scheduled = {}
+
+    async def event_emitter(_event):
+        return None
+
+    async def fake_generate_chat_completion(_request, payload, _user):
+        return {
+            "choices": [
+                {"message": {"content": f"reply from {payload['model']}"}}
+            ],
+            "usage": {
+                "prompt_tokens": 1,
+                "completion_tokens": 1,
+                "total_tokens": 2,
+            },
+        }
+
+    async def fake_generate_title(_request, form_data, _user):
+        generate_title_calls.append(form_data)
+        return {"choices": [{"message": {"content": "新建对话"}}]}
+
+    def fake_create_task(coroutine, id=None):
+        task = asyncio.create_task(coroutine)
+        scheduled["task"] = task
+        return "task-1", task
+
+    monkeypatch.setattr(
+        discussion_mod, "get_event_emitter", lambda _metadata: event_emitter
+    )
+    monkeypatch.setattr(
+        discussion_mod,
+        "generate_chat_completion",
+        fake_generate_chat_completion,
+    )
+    monkeypatch.setattr(discussion_mod, "create_task", fake_create_task)
+    monkeypatch.setattr(
+        discussion_mod.Chats,
+        "upsert_message_to_chat_by_id_and_message_id",
+        lambda *args, **kwargs: None,
+    )
+    monkeypatch.setattr(
+        discussion_mod.Chats,
+        "get_chat_title_by_id",
+        lambda _chat_id: "用户手动起的标题",
+    )
+    monkeypatch.setattr(
+        discussion_mod.Chats,
+        "update_chat_title_by_id",
+        lambda _chat_id, title: title_updates.append(title),
+    )
+
+    import open_webui.routers.tasks as tasks_mod
+
+    monkeypatch.setattr(tasks_mod, "generate_title", fake_generate_title)
+
+    async def run():
+        await discussion_mod.generate_multi_model_discussion_completion(
+            _request(_models("model-a", "model-b", "model-final")),
+            {
+                "model": "model-final",
+                "messages": [{"role": "user", "content": "继续讨论"}],
+                "stream": True,
+            },
+            _user(),
+            {"chat_id": "chat-1", "message_id": "assistant-1"},
+            {"id": "model-final"},
+            {
+                "enabled": True,
+                "participants": ["model-a", "model-b"],
+                "rounds": 1,
+                "finalModel": "model-final",
+            },
+            None,
+            tasks={TASKS.TITLE_GENERATION: True},
+        )
+        await scheduled["task"]
+
+    asyncio.run(run())
+
+    assert title_updates == [], (
+        "must not overwrite an existing non-default chat title"
+    )
+    assert generate_title_calls == [], (
+        "should not waste tokens generating titles when one already exists"
+    )

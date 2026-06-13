@@ -112,15 +112,17 @@ def test_image_generation_title_falls_back_to_user_prompt_when_title_task_fails(
         },
     }
     updated_titles = []
+    generate_title_calls = []
     events = []
 
     async def fake_event_emitter(event):
         events.append(event)
 
-    async def fake_generate_title(*_args, **_kwargs):
+    async def fake_generate_title(_request, form_data, _user):
+        generate_title_calls.append(form_data)
         return JSONResponse(status_code=400, content={"detail": "image model"})
 
-    def fake_upsert_message(_chat_id, message_id, message):
+    def fake_upsert_message(_chat_id, message_id, message, **_kwargs):
         message_map[message_id] = {
             **message_map.get(message_id, {}),
             **message,
@@ -189,6 +191,8 @@ def test_image_generation_title_falls_back_to_user_prompt_when_title_task_fails(
         "type": "chat:title",
         "data": "橘猫在吃粮的照片",
     }
+    assert generate_title_calls, "image sessions should still attempt generate_title"
+    assert generate_title_calls[0].get("require_external_task_model") is True
 
 
 def test_image_generation_title_skips_model_call_and_uses_fallback(monkeypatch):
@@ -208,12 +212,20 @@ def test_image_generation_title_skips_model_call_and_uses_fallback(monkeypatch):
         },
     }
     updated_titles = []
+    generate_title_calls = []
 
     async def fake_event_emitter(_event):
         pass
 
-    async def fake_generate_title(*_args, **_kwargs):
-        raise AssertionError("image sessions should not call the image model for title text")
+    async def fake_generate_title(_request, form_data, _user):
+        # Image sessions opt-in to the external-task-model guard, so the call
+        # may be attempted but must never reach the underlying text completion
+        # of the image model. Simulate the guard rejecting the call.
+        generate_title_calls.append(form_data)
+        return JSONResponse(
+            status_code=400,
+            content={"detail": "no external task model", "skipped": True},
+        )
 
     monkeypatch.setattr(middleware, "generate_title", fake_generate_title)
     monkeypatch.setattr(
@@ -232,7 +244,7 @@ def test_image_generation_title_skips_model_call_and_uses_fallback(monkeypatch):
     monkeypatch.setattr(
         middleware.Chats,
         "upsert_message_to_chat_by_id_and_message_id",
-        lambda _chat_id, message_id, message: message_map[message_id].update(message),
+        lambda _chat_id, message_id, message, **_kwargs: message_map[message_id].update(message),
     )
     monkeypatch.setattr(
         middleware.Chats,
@@ -273,6 +285,11 @@ def test_image_generation_title_skips_model_call_and_uses_fallback(monkeypatch):
     )
 
     assert updated_titles == ["橘猫在吃粮的照片"]
+    assert generate_title_calls, "image sessions must still attempt generate_title so the guard runs"
+    assert all(
+        call.get("require_external_task_model") is True
+        for call in generate_title_calls
+    )
 
 
 def test_dedicated_image_model_uses_current_chat_model_before_admin_default():

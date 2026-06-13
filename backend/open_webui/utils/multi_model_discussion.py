@@ -8,6 +8,7 @@ from typing import Any
 from fastapi import HTTPException, Request, status
 from starlette.responses import Response
 
+from open_webui.constants import TASKS
 from open_webui.env import BYPASS_MODEL_ACCESS_CONTROL, GLOBAL_LOG_LEVEL, SRC_LOG_LEVELS
 from open_webui.models.chats import Chats
 from open_webui.socket.main import get_event_emitter
@@ -15,6 +16,7 @@ from open_webui.tasks import create_task
 from open_webui.utils.chat import generate_chat_completion
 from open_webui.utils.model_identity import resolve_model_from_lookup
 from open_webui.utils.models import check_model_access
+from open_webui.utils.task import build_fallback_chat_title
 
 
 log = logging.getLogger(__name__)
@@ -510,6 +512,88 @@ async def _run_model_once(
     }
 
 
+async def _apply_discussion_chat_title(
+    request: Request,
+    user: Any,
+    metadata: dict,
+    chat_id: str,
+    message_id: str,
+    user_prompt: str,
+    final_content: str,
+    event_emitter,
+    tasks: dict | None,
+) -> None:
+    if not tasks or not tasks.get(TASKS.TITLE_GENERATION):
+        return
+
+    try:
+        message = Chats.get_chat_title_by_id(chat_id)
+    except Exception:
+        message = None
+    if message and str(message).strip() and str(message).strip() != "New Chat":
+        # Respect user-set titles and prior auto-titles; never overwrite.
+        return
+
+    title_messages = [
+        {"role": "user", "content": user_prompt or ""},
+    ]
+    if final_content:
+        title_messages.append({"role": "assistant", "content": final_content})
+
+    title = ""
+    try:
+        # Lazy import avoids a circular import (routers.tasks -> utils.chat -> ...)
+        from open_webui.routers.tasks import generate_title
+
+        res = await generate_title(
+            request,
+            {
+                "model": metadata.get("model_id") or "",
+                "messages": title_messages,
+                "chat_id": chat_id,
+                "require_external_task_model": True,
+            },
+            user,
+        )
+        if isinstance(res, dict):
+            choices = res.get("choices") or []
+            if choices and isinstance(choices[0], dict):
+                content = (choices[0].get("message") or {}).get("content") or ""
+                content = content.strip()
+                if content:
+                    start = content.find("{")
+                    end = content.rfind("}")
+                    if start != -1 and end >= start:
+                        try:
+                            title = str(
+                                json.loads(content[start : end + 1]).get("title")
+                                or ""
+                            ).strip()
+                        except Exception:
+                            title = ""
+                    if not title:
+                        title = content.strip(" \"'")
+    except Exception as exc:
+        log.debug("Multi-model discussion title generation failed: %s", exc)
+
+    if not title:
+        title = build_fallback_chat_title(title_messages)
+
+    if not title:
+        return
+
+    try:
+        Chats.update_chat_title_by_id(chat_id, title)
+        await event_emitter(
+            {
+                "type": "chat:title",
+                "data": title,
+            }
+        )
+    except Exception as exc:
+        log.debug("Failed to persist multi-model discussion title: %s", exc)
+
+
 async def generate_multi_model_discussion_completion(
     request: Request,
     form_data: dict,
@@ -518,6 +602,7 @@ async def generate_multi_model_discussion_completion(
     model: dict,
     discussion: dict,
     events: list[dict] | None = None,
+    tasks: dict | None = None,
 ):
     models_map = getattr(request.state, "MODELS", None) or request.app.state.MODELS
     ambiguous_model_aliases = getattr(request.state, "MODELS_AMBIGUOUS", set()) or set()
@@ -736,6 +821,23 @@ async def generate_multi_model_discussion_completion(
                 upsert_payload,
                 guard_stopped=True,
             )
+
+            try:
+                await _apply_discussion_chat_title(
+                    request=request,
+                    user=user,
+                    metadata=metadata,
+                    chat_id=chat_id,
+                    message_id=message_id,
+                    user_prompt=user_prompt,
+                    final_content=final_content,
+                    event_emitter=event_emitter,
+                    tasks=tasks,
+                )
+            except Exception:
+                log.exception(
+                    "Multi-model discussion title hook crashed; ignoring"
+                )
         except asyncio.CancelledError:
             completed_at = int(time.time())
             discussion_state["status"] = "stopped"

@@ -159,4 +159,27 @@ This reasoning should be visible when expanded.
 		expect(isKnownInlineHtmlFormatFragment(fragment)).toBe(true);
 		expect(renderResponseHtmlFormat(fragment)).toBe(fragment);
 	});
+
+	it('preserves real newlines inside code blocks so multi-line code stays wrapped', () => {
+		const html = renderResponseHtmlFormat(`\`\`\`bash
+sudo systemctl restart docker
+sudo find /var/lib/docker -name "*.log"
+\`\`\``);
+
+		const codeMatch = html.match(/<code>([\s\S]*?)<\/code>/);
+		expect(codeMatch).not.toBeNull();
+		expect(codeMatch![1]).toContain('\n');
+		expect(codeMatch![1]).toContain('sudo systemctl restart docker');
+		expect(codeMatch![1]).toContain('sudo find /var/lib/docker');
+	});
+
+	it('renders the copy button as a real <button> element instead of mangled text', () => {
+		const html = renderResponseHtmlFormat('```bash\necho hi\n```');
+
+		expect(html).toMatch(/<button\s+[^>]*title="复制代码"[^>]*>📋<\/button>/);
+		expect(html).not.toMatch(/<buttononclick/);
+		expect(html).not.toMatch(/"onmouseover=/);
+		expect(html).not.toMatch(/"onmouseout=/);
+		expect(html).not.toMatch(/"style="[^"]*"onmouseover/);
+	});
 });

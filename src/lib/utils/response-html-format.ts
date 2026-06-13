@@ -60,11 +60,25 @@ const toStyle = (rules: Record<string, CssValue>) =>
 		.map(([key, value]) => `${key}: ${value}`)
 		.join('; ');
 
-const compactHtml = (html: string) =>
-	html
+const compactHtml = (html: string) => {
+	const preserved: string[] = [];
+	const placeholder = (index: number) => `__HALO_PRE_${index}__`;
+
+	const withPlaceholders = html.replace(/<pre\b[\s\S]*?<\/pre>/gi, (match) => {
+		preserved.push(match);
+		return placeholder(preserved.length - 1);
+	});
+
+	const compacted = withPlaceholders
 		.split('\n')
 		.map((line) => line.trim())
-		.join('');
+		.join(' ')
+		.replace(/>\s+</g, '><')
+		.replace(/\s{2,}/g, ' ')
+		.trim();
+
+	return compacted.replace(/__HALO_PRE_(\d+)__/g, (_, index) => preserved[Number(index)]);
+};
 
 const isFence = (line: string) => /^\s*```/.test(line);
 const isHeading = (line: string) => /^#{1,4}\s+\S/.test(line);

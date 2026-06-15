@@ -128,10 +128,10 @@ async def get_gateways(user=Depends(get_admin_user)):
 
 @router.post("/gateways", response_model=GatewayResponse)
 async def create_gateway(form_data: GatewayForm, user=Depends(get_admin_user)):
-    if form_data.platform not in ("telegram", "wechat_work", "feishu", "qq_bot"):
+    if form_data.platform not in ("telegram", "wechat_work", "feishu"):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Unsupported platform. Must be: telegram, wechat_work, feishu, qq_bot",
+            detail="Unsupported platform. Must be: telegram, wechat_work, feishu",
         )
     gateway = Gateways.insert(form_data, user.id)
     if not gateway:

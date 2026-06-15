@@ -37,6 +37,10 @@
 	let verificationToken = gateway?.config?.verification_token ?? '';
 	let encryptKey = gateway?.config?.encrypt_key ?? '';
 
+	// --- QQ Bot config ---
+	let qqAppId = gateway?.config?.app_id ?? '';
+	let qqAppSecret = gateway?.config?.app_secret ?? '';
+
 	// --- Tool config (stored in meta) ---
 	const BUILTIN_TOOLS = [
 		{ id: 'builtin:web', label: '联网搜索' },
@@ -48,10 +52,11 @@
 	let toolIds: string[] = gateway?.meta?.tool_ids ?? [];
 	let maxToolRounds: number = gateway?.meta?.max_tool_rounds ?? 5;
 
-	// Webhook URL for display
+	// Webhook URL for display (only webhook-based platforms; telegram polls and
+	// qq_bot connects outbound via WebSocket, so neither needs a callback URL).
 	let webhookCopied = false;
 	$: webhookUrl =
-		gateway?.id && platform !== 'telegram'
+		gateway?.id && (platform === 'wechat_work' || platform === 'feishu')
 			? `${window.location.origin}/api/v1/haloclaw/webhook/${platform}/${gateway.id}`
 			: '';
 
@@ -80,6 +85,9 @@
 		verificationToken = gw?.config?.verification_token ?? '';
 		encryptKey = gw?.config?.encrypt_key ?? '';
 
+		qqAppId = gw?.config?.app_id ?? '';
+		qqAppSecret = gw?.config?.app_secret ?? '';
+
 		toolIds = gw?.meta?.tool_ids ?? [];
 		maxToolRounds = gw?.meta?.max_tool_rounds ?? 5;
 
@@ -95,7 +103,8 @@
 	const platformLabels: Record<string, string> = {
 		telegram: 'Telegram',
 		wechat_work: 'WeChat Work',
-		feishu: 'Feishu / Lark'
+		feishu: 'Feishu / Lark',
+		qq_bot: 'QQ Bot'
 	};
 
 	function buildConfig(): Record<string, any> {
@@ -115,6 +124,11 @@
 				app_secret: appSecret,
 				verification_token: verificationToken,
 				encrypt_key: encryptKey
+			};
+		} else if (platform === 'qq_bot') {
+			return {
+				app_id: qqAppId,
+				app_secret: qqAppSecret
 			};
 		}
 		return {};
@@ -204,7 +218,9 @@
 								? $i18n.t('My Telegram Bot')
 								: platform === 'wechat_work'
 									? $i18n.t('WeChat Work Bot')
-									: $i18n.t('Feishu Bot')}
+									: platform === 'qq_bot'
+										? $i18n.t('QQ Bot')
+										: $i18n.t('Feishu Bot')}
 							bind:value={name}
 							required
 						/>
@@ -367,6 +383,39 @@
 								/>
 							</div>
 						</div>
+					{:else if platform === 'qq_bot'}
+						<!-- QQ Bot: AppID, AppSecret (connects via WebSocket, no callback URL) -->
+						<div class="grid grid-cols-2 gap-3">
+							<div>
+								<label class="text-xs text-gray-500 mb-1 block">AppID</label>
+								<input
+									class="w-full"
+									type="text"
+									placeholder="102000000"
+									bind:value={qqAppId}
+									required
+								/>
+							</div>
+							<div>
+								<label class="text-xs text-gray-500 mb-1 block">AppSecret</label>
+								<input
+									class="w-full"
+									type="text"
+									placeholder={$i18n.t('App Secret')}
+									bind:value={qqAppSecret}
+									required
+								/>
+							</div>
+						</div>
+						<p class="text-xs text-gray-500 mt-1">
+							{$i18n.t('Get from')}
+							<a
+								href="https://q.qq.com/"
+								target="_blank"
+								rel="noopener"
+								class="text-blue-500 hover:underline">q.qq.com</a
+							>
+						</p>
 					{/if}
 
 					<!-- Default Model -->

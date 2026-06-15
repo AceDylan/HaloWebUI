@@ -160,7 +160,7 @@ This reasoning should be visible when expanded.
 		expect(renderResponseHtmlFormat(fragment)).toBe(fragment);
 	});
 
-	it('preserves real newlines inside code blocks so multi-line code stays wrapped', () => {
+	it('encodes code block newlines as character references so multi-line code stays wrapped', () => {
 		const html = renderResponseHtmlFormat(`\`\`\`bash
 sudo systemctl restart docker
 sudo find /var/lib/docker -name "*.log"
@@ -168,9 +168,39 @@ sudo find /var/lib/docker -name "*.log"
 
 		const codeMatch = html.match(/<code>([\s\S]*?)<\/code>/);
 		expect(codeMatch).not.toBeNull();
-		expect(codeMatch![1]).toContain('\n');
+		// 换行被编码为 &#10;（在 white-space: pre-wrap 下仍渲染为换行），
+		// 而非真实 \n —— 真实空行会被下游 marked 当作 HTML block 终止符。
+		expect(codeMatch![1]).toContain('&#10;');
+		expect(codeMatch![1]).not.toContain('\n');
 		expect(codeMatch![1]).toContain('sudo systemctl restart docker');
 		expect(codeMatch![1]).toContain('sudo find /var/lib/docker');
+	});
+
+	it('keeps blank-line-containing code blocks intact instead of leaking later content into markdown', () => {
+		// 复现：代码块内含空行时，旧实现会让 <pre> 残留真实空行，
+		// 经 marked 二次解析时最外层 <div> HTML block 在空行处提前终止，
+		// 导致空行之后的内容（## 关联 Issue 等）泄漏成 markdown 渲染。
+		const html = renderResponseHtmlFormat(`**模板**
+\`\`\`markdown
+## 变更说明
+<!-- 改了什么 -->
+
+## 关联 Issue
+Closes #
+
+## 自检清单
+- [ ] 本地测试通过
+\`\`\`
+正文继续。`);
+
+		// 整段输出不得含真实换行，否则下游 marked 会在空行处截断 HTML block。
+		expect(html).not.toContain('\n');
+		// 模板里的标题/清单必须仍留在代码块内（被转义），而不是变成真实 <h2>/<li>。
+		const codeMatch = html.match(/<code>([\s\S]*?)<\/code>/);
+		expect(codeMatch).not.toBeNull();
+		expect(codeMatch![1]).toContain('## 关联 Issue');
+		expect(codeMatch![1]).toContain('## 自检清单');
+		expect(codeMatch![1]).toContain('- [ ] 本地测试通过');
 	});
 
 	it('renders the copy button as a real <button> element instead of mangled text', () => {

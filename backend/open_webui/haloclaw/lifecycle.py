@@ -31,6 +31,10 @@ def _create_adapter(gateway_id: str, platform: str, config: dict) -> Optional[Ba
         from open_webui.haloclaw.adapters.feishu import FeishuAdapter
 
         return FeishuAdapter(gateway_id, config)
+    elif platform == "qq_bot":
+        from open_webui.haloclaw.adapters.qq_bot import QQBotAdapter
+
+        return QQBotAdapter(gateway_id, config)
     else:
         log.warning(f"HaloClaw: unsupported platform '{platform}'")
         return None

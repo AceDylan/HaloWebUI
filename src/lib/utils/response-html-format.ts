@@ -65,7 +65,12 @@ const compactHtml = (html: string) => {
 	const placeholder = (index: number) => `__HALO_PRE_${index}__`;
 
 	const withPlaceholders = html.replace(/<pre\b[\s\S]*?<\/pre>/gi, (match) => {
-		preserved.push(match);
+		// 把 <pre> 内部的换行编码成字符引用，避免整段 HTML 里残留真实空行。
+		// 该 HTML 片段会再经 Markdown(marked) 渲染：最外层 <div> 被当成 CommonMark
+		// HTML block(type 6)，遇到第一个空行即终止，导致空行之后的内容“泄漏”回 markdown
+		// 重新解析（多行代码块里的空行最易触发）。&#10; 在 `white-space: pre-wrap` 下仍渲染为换行，
+		// 且经 textContent 读取时会还原为 \n，复制行为不受影响。
+		preserved.push(match.replace(/\n/g, '&#10;'));
 		return placeholder(preserved.length - 1);
 	});
 

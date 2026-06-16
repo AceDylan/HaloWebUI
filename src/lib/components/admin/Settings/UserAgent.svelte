@@ -60,7 +60,6 @@
 			const res = await setUserAgentConfig(localStorage.token, config);
 			if (res) {
 				config = res;
-				toast.success($i18n.t('Settings saved successfully!'));
 				await saveHandler();
 			}
 		} catch (error) {

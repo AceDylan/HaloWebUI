@@ -75,7 +75,8 @@
 		images: false,
 		analytics: false,
 		haloclaw: false,
-		externalApi: false
+		externalApi: false,
+		userAgent: false
 	};
 	$: currentPath = $page.url.pathname;
 	$: {
@@ -98,7 +99,8 @@
 			images: path.startsWith('/settings/images'),
 			analytics: path.startsWith('/settings/analytics'),
 			haloclaw: path.startsWith('/settings/haloclaw'),
-			externalApi: path.startsWith('/settings/external-api')
+			externalApi: path.startsWith('/settings/external-api'),
+			userAgent: path.startsWith('/settings/user-agent')
 		};
 	}
 
@@ -181,6 +183,9 @@
 						<a class={navLinkClass(activeLinks.codeExecution)} href="/settings/code-execution"
 							>{$i18n.t('Code Execution')}</a
 						>
+						<a class={navLinkClass(activeLinks.userAgent)} href="/settings/user-agent">
+							User-Agent
+						</a>
 						<a class={navLinkClass(activeLinks.images)} href="/settings/images"
 							>{$i18n.t('Images')}</a
 						>

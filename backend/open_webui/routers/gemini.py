@@ -40,7 +40,7 @@ from open_webui.env import (
 
 from open_webui.utils.auth import get_admin_user, get_verified_user
 from open_webui.utils.access_control import has_access
-from open_webui.utils.headers import set_model_user_agent
+from open_webui.utils.headers import get_user_agent_config, set_model_user_agent
 from open_webui.utils.payload import (
     apply_model_params_to_body_openai,
     apply_model_system_prompt_to_body,
@@ -262,7 +262,11 @@ def _has_auth_headers(headers: dict) -> bool:
 
 
 def _auth_attempts(
-    url: str, key: str, config: Optional[dict], model_id: Optional[str] = None
+    url: str,
+    key: str,
+    config: Optional[dict],
+    model_id: Optional[str] = None,
+    ua_config: Optional[dict] = None,
 ) -> list[tuple[str, dict]]:
     cfg = config or {}
     headers = _normalize_headers(cfg.get("headers"))
@@ -270,7 +274,7 @@ def _auth_attempts(
     # Set User-Agent based on model prefix (gemini -> GeminiCLI). Inject on the base
     # headers so every auth attempt below inherits it via dict spread.
     if model_id:
-        set_model_user_agent(headers, model_id)
+        set_model_user_agent(headers, model_id, ua_config)
 
     # If caller already provided auth headers, don't auto-attach the key.
     if _has_auth_headers(headers) or not key:
@@ -1655,7 +1659,8 @@ async def health_check_connection(
             for key_attempt_idx, key_attempt in enumerate(key_attempts):
                 try:
                     for full_url, headers in _auth_attempts(
-                        request_url, key_attempt.key, config, model_id=chosen_model
+                        request_url, key_attempt.key, config, model_id=chosen_model,
+                        ua_config=get_user_agent_config(),
                     ):
                         async with session.post(full_url, headers=headers, json=payload) as response:
                             body = await _read_gemini_upstream_body(response)
@@ -2359,7 +2364,7 @@ async def generate_chat_completion(
                     for key_attempt_idx, key_attempt in enumerate(key_attempts):
                         response, _used_payload, last_status, last_err_text = await _open_gemini_response(
                             session,
-                            _auth_attempts(request_url, key_attempt.key, api_config, model_id=gemini_model),
+                            _auth_attempts(request_url, key_attempt.key, api_config, model_id=gemini_model, ua_config=get_user_agent_config(request)),
                             gemini_payload,
                             log_prefix="Gemini Stream Response",
                             allow_drop_response_modalities=not is_image_model,
@@ -2396,7 +2401,7 @@ async def generate_chat_completion(
                                 fallback_err_text,
                             ) = await _open_gemini_response(
                                 session,
-                                _auth_attempts(non_stream_url, key_attempt.key, api_config, model_id=gemini_model),
+                                _auth_attempts(non_stream_url, key_attempt.key, api_config, model_id=gemini_model, ua_config=get_user_agent_config(request)),
                                 gemini_payload,
                                 log_prefix="Gemini Chat Fallback Response",
                                 allow_drop_response_modalities=False,
@@ -2567,7 +2572,7 @@ async def generate_chat_completion(
             for key_attempt_idx, key_attempt in enumerate(key_attempts):
                 response, _used_payload, last_status, last_err_text = await _open_gemini_response(
                     session,
-                    _auth_attempts(request_url, key_attempt.key, api_config, model_id=gemini_model),
+                    _auth_attempts(request_url, key_attempt.key, api_config, model_id=gemini_model, ua_config=get_user_agent_config(request)),
                     gemini_payload,
                     log_prefix="Gemini Chat Response",
                     allow_drop_response_modalities=not is_image_model,

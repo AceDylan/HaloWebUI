@@ -1390,6 +1390,36 @@ ANTHROPIC_API_CONFIGS = PersistentConfig(
 )
 
 ####################################
+# USER_AGENT (outbound LLM request spoofing, configurable per model prefix)
+####################################
+
+# Defaults mirror the previously hardcoded values in utils/headers.py so that an
+# empty/unset config keeps the exact same outbound behavior as before.
+DEFAULT_USER_AGENT_CLAUDE = "claude-cli/2.1.170 (external, cli)"
+DEFAULT_USER_AGENT_GPT = (
+    "codex_vscode/0.140.0-alpha.2 (Windows 10.0.26100; x86_64) unknown (VS Code; 26.609.30741)"
+)
+DEFAULT_USER_AGENT_GEMINI = "GeminiCLI-tui/0.46.0/gemini-3.1-pro-preview (win32; x64; terminal)"
+
+USER_AGENT_CLAUDE = PersistentConfig(
+    "USER_AGENT_CLAUDE",
+    "user_agent.claude",
+    os.environ.get("USER_AGENT_CLAUDE", DEFAULT_USER_AGENT_CLAUDE),
+)
+
+USER_AGENT_GPT = PersistentConfig(
+    "USER_AGENT_GPT",
+    "user_agent.gpt",
+    os.environ.get("USER_AGENT_GPT", DEFAULT_USER_AGENT_GPT),
+)
+
+USER_AGENT_GEMINI = PersistentConfig(
+    "USER_AGENT_GEMINI",
+    "user_agent.gemini",
+    os.environ.get("USER_AGENT_GEMINI", DEFAULT_USER_AGENT_GEMINI),
+)
+
+####################################
 # TOOL_SERVERS
 ####################################
 

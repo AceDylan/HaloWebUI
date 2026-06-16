@@ -975,6 +975,41 @@ async def set_code_execution_config(
     }
 
 
+############################
+# User-Agent Config
+############################
+
+
+class UserAgentConfigForm(BaseModel):
+    USER_AGENT_CLAUDE: str
+    USER_AGENT_GPT: str
+    USER_AGENT_GEMINI: str
+
+
+@router.get("/user_agent", response_model=UserAgentConfigForm)
+async def get_user_agent_config(request: Request, user=Depends(get_admin_user)):
+    return {
+        "USER_AGENT_CLAUDE": request.app.state.config.USER_AGENT_CLAUDE,
+        "USER_AGENT_GPT": request.app.state.config.USER_AGENT_GPT,
+        "USER_AGENT_GEMINI": request.app.state.config.USER_AGENT_GEMINI,
+    }
+
+
+@router.post("/user_agent", response_model=UserAgentConfigForm)
+async def set_user_agent_config(
+    request: Request, form_data: UserAgentConfigForm, user=Depends(get_admin_user)
+):
+    request.app.state.config.USER_AGENT_CLAUDE = form_data.USER_AGENT_CLAUDE
+    request.app.state.config.USER_AGENT_GPT = form_data.USER_AGENT_GPT
+    request.app.state.config.USER_AGENT_GEMINI = form_data.USER_AGENT_GEMINI
+
+    return {
+        "USER_AGENT_CLAUDE": request.app.state.config.USER_AGENT_CLAUDE,
+        "USER_AGENT_GPT": request.app.state.config.USER_AGENT_GPT,
+        "USER_AGENT_GEMINI": request.app.state.config.USER_AGENT_GEMINI,
+    }
+
+
 # Compatibility-only model UI config.
 # DEFAULT_MODELS is deprecated and intentionally ignored; only MODEL_ORDER_LIST is mutable.
 class ModelsConfigForm(BaseModel):

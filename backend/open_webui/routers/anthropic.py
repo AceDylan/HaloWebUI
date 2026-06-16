@@ -56,6 +56,7 @@ from open_webui.storage.provider import Storage
 from open_webui.retrieval.document_processing import FILE_PROCESSING_MODE_NATIVE_FILE
 from open_webui.utils.access_control import has_access
 from open_webui.utils.auth import get_admin_user, get_verified_user
+from open_webui.utils.headers import set_model_user_agent
 from open_webui.utils.payload import (
     apply_model_params_to_body_openai,
     apply_model_system_prompt_to_body,
@@ -225,6 +226,7 @@ def _build_anthropic_headers(
     accept: str = "application/json",
     content_type: Optional[str] = "application/json",
     extra_beta: Optional[list[str]] = None,
+    model_id: Optional[str] = None,
 ) -> dict:
     cfg = api_config or {}
     headers = _normalize_headers(cfg.get("headers"))
@@ -284,6 +286,11 @@ def _build_anthropic_headers(
             headers[existing_key] = ",".join(merged)
         else:
             headers["anthropic-beta"] = ",".join(betas_unique)
+
+    # Set User-Agent based on model prefix (claude -> claude-cli, gpt -> codex_vscode,
+    # gemini -> GeminiCLI). Inject after all header construction to provide a sensible default.
+    if model_id:
+        set_model_user_agent(headers, model_id)
 
     return headers
 
@@ -1312,6 +1319,7 @@ async def health_check_connection(
                         cfg,
                         accept="application/json",
                         content_type="application/json",
+                        model_id=payload.get("model"),
                     )
                     async with _post_preserve_method(
                         session, request_url, json_data=payload, headers=headers
@@ -2507,6 +2515,7 @@ async def generate_chat_completion(
                             accept="application/json",
                             content_type="application/json",
                             extra_beta=required_betas,
+                            model_id=upstream_model_id,
                         )
                         # Keep x-api-key but strip Authorization for messages endpoint.
                         if "x-api-key" in headers:
@@ -2755,6 +2764,7 @@ async def generate_chat_completion(
                 accept="application/json",
                 content_type="application/json",
                 extra_beta=required_betas,
+                model_id=upstream_model_id,
             )
             if "x-api-key" in headers:
                 headers.pop("Authorization", None)

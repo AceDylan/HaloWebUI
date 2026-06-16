@@ -85,6 +85,7 @@ from open_webui.utils.api_key_pool import (
 
 from open_webui.utils.auth import get_admin_user, get_verified_user
 from open_webui.utils.access_control import has_access
+from open_webui.utils.headers import set_model_user_agent
 
 
 log = logging.getLogger(__name__)
@@ -703,6 +704,7 @@ def _build_upstream_headers(
     *,
     accept: Optional[str] = "application/json",
     content_type: Optional[str] = "application/json",
+    model_id: Optional[str] = None,
 ) -> dict:
     headers: dict = {}
 
@@ -754,6 +756,12 @@ def _build_upstream_headers(
         }.items():
             if k.lower() not in lower:
                 headers[k] = v
+
+    # Set User-Agent based on model prefix (claude -> claude-cli, gpt -> codex_vscode,
+    # gemini -> GeminiCLI). This MUST come after custom headers to allow intentional user
+    # override if needed, but will inject a default UA when model_id is provided.
+    if model_id:
+        set_model_user_agent(headers, model_id)
 
     return headers
 
@@ -1398,7 +1406,7 @@ async def _probe_responses_support_for_native_file_inputs(
         return dict(cached_result[1])
 
     cfg = api_config or {}
-    headers = _build_upstream_headers(url, key or "", cfg, user=user)
+    headers = _build_upstream_headers(url, key or "", cfg, user=user, model_id=model_id)
     chosen_model = str(model_id or "gpt-4o-mini")
     prefix_id = str(cfg.get("_resolved_prefix_id") or cfg.get("prefix_id") or "").strip()
     if prefix_id:
@@ -2639,7 +2647,8 @@ async def health_check_connection(
                 async with session.post(
                     target_url,
                     headers=_build_upstream_headers(
-                        url, attempt_key, api_config, user=user
+                        url, attempt_key, api_config, user=user,
+                        model_id=payload.get("model")
                     ),
                     data=json.dumps(payload, ensure_ascii=False, default=str),
                     ssl=AIOHTTP_CLIENT_SESSION_SSL,
@@ -2774,7 +2783,7 @@ async def verify_responses_connection(
 
     # Merge provided headers with defaults.
     api_config = {"headers": form_data.headers or {}}
-    headers = _build_upstream_headers(url, key, api_config, user=user)
+    headers = _build_upstream_headers(url, key, api_config, user=user, model_id=form_data.model)
 
     chosen_model = form_data.model
     models_error = None
@@ -3123,7 +3132,8 @@ async def generate_chat_completion(
                 url=request_url,
                 data=payload_json,
                 headers=_build_upstream_headers(
-                    url, current_key_attempt.key, api_config, user=user
+                    url, current_key_attempt.key, api_config, user=user,
+                    model_id=payload_dict.get("model") if isinstance(payload_dict, dict) else None
                 ),
                 ssl=AIOHTTP_CLIENT_SESSION_SSL,
             )

@@ -22,6 +22,7 @@
 		type ChatTransitionMode
 	} from '$lib/utils/lobehub-chat-appearance';
 	import { renderResponseHtmlFormat } from '$lib/utils/response-html-format';
+	import { mergeAdjacentReasoningDetails } from '$lib/utils/reasoning-merge';
 	import {
 		createEmptySelectionThreads,
 		hashSelectionThreadSource,
@@ -372,10 +373,13 @@
 	}
 
 	$: currentTransitionMode = resolveChatTransitionMode($settings);
+	// Collapse reasoning blocks fragmented by providers that echo thinking into
+	// the answer stream, so both the HTML and Markdown renderers see one block.
+	$: normalizedContent = mergeAdjacentReasoningDetails(content || '');
 	$: renderedMessageContent =
 		!streaming && ($settings?.responseHtmlFormat ?? false)
-			? renderResponseHtmlFormat(content || '') || (content || '')
-			: content || '';
+			? renderResponseHtmlFormat(normalizedContent) || normalizedContent
+			: normalizedContent;
 
 	const highlightHeading = (headingElement: HTMLElement) => {
 		headingElement.classList.remove('message-outline-anchor-target');

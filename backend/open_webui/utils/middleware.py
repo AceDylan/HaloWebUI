@@ -1141,6 +1141,26 @@ def _finalize_reasoning_block_duration(
     return duration
 
 
+def _is_duplicated_reasoning_echo(value: Any, reasoning_content: Any) -> bool:
+    """Detect when a delta mirrors its reasoning text into the regular content.
+
+    Some upstream providers/proxies (observed with certain DeepSeek-compatible
+    endpoints) emit the very same thinking token in BOTH ``delta.content`` and
+    ``delta.reasoning_content`` for every streamed chunk. If we honor that
+    duplicated ``content`` it (1) leaks the hidden reasoning as visible answer
+    text and (2) fragments the reasoning panel into one ``<details>`` block per
+    token, because each visible-content chunk finalizes the current reasoning
+    block and forces the next reasoning chunk to open a new one. Dropping the
+    echoed content keeps the reasoning in a single accumulating block.
+    """
+
+    if not isinstance(value, str) or not isinstance(reasoning_content, str):
+        return False
+
+    stripped_value = value.strip()
+    return bool(stripped_value) and stripped_value == reasoning_content.strip()
+
+
 def _get_tool_call_result(
     results: Any, tool_call_id: Any, *, fallback_index: Optional[int] = None
 ) -> tuple[bool, Any, Any]:
@@ -6990,6 +7010,16 @@ async def process_chat_response(
                                     reasoning_content = extract_reasoning_content(
                                         choice
                                     )
+
+                                # Drop content that merely echoes the reasoning of the
+                                # same delta. Otherwise providers that mirror thinking
+                                # into both fields leak reasoning as visible text and
+                                # split the reasoning panel into one block per token.
+                                if reasoning_content and _is_duplicated_reasoning_echo(
+                                    value, reasoning_content
+                                ):
+                                    value = ""
+
                                 if reasoning_content:
                                     if (
                                         not content_blocks

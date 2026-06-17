@@ -53,6 +53,10 @@ from open_webui.utils.error_handling import (
     read_aiohttp_error_payload,
     read_requests_error_payload,
 )
+from open_webui.utils.optional_dependencies import (
+    OptionalDependencyError,
+    require_module,
+)
 
 
 router = APIRouter()
@@ -147,7 +151,13 @@ def convert_audio_to_wav(file_path, output_path, conversion_type):
 def set_faster_whisper_model(model: str, auto_update: bool = False):
     whisper_model = None
     if model:
-        from faster_whisper import WhisperModel
+        faster_whisper = require_module(
+            "faster_whisper",
+            feature="local Whisper speech-to-text",
+            packages=["faster-whisper"],
+            install_profiles=["local-audio", "full"],
+        )
+        WhisperModel = faster_whisper.WhisperModel
 
         faster_whisper_kwargs = {
             "model_size_or_path": model,
@@ -316,9 +326,15 @@ async def update_audio_config(
     request.app.state.config.AUDIO_STT_AZURE_LOCALES = form_data.stt.AZURE_LOCALES
 
     if request.app.state.config.STT_ENGINE == "":
-        request.app.state.faster_whisper_model = set_faster_whisper_model(
-            form_data.stt.WHISPER_MODEL, WHISPER_MODEL_AUTO_UPDATE
-        )
+        try:
+            request.app.state.faster_whisper_model = set_faster_whisper_model(
+                form_data.stt.WHISPER_MODEL, WHISPER_MODEL_AUTO_UPDATE
+            )
+        except OptionalDependencyError as e:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=str(e),
+            )
 
     return {
         "tts": {

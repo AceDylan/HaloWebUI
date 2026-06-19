@@ -9,16 +9,16 @@
 
   <br/>
 
-  <a href="https://github.com/ztx888/HaloWebUI/stargazers">
+  <a href="https://github.com/AceDylan/HaloWebUI/stargazers">
     <img src="https://img.shields.io/github/stars/ztx888/HaloWebUI?style=for-the-badge&logo=github&color=f4c542" alt="Stars" />
   </a>
-  <a href="https://github.com/ztx888/HaloWebUI/network/members">
+  <a href="https://github.com/AceDylan/HaloWebUI/network/members">
     <img src="https://img.shields.io/github/forks/ztx888/HaloWebUI?style=for-the-badge&logo=github&color=8ac926" alt="Forks" />
   </a>
-  <a href="https://github.com/ztx888/HaloWebUI/commits/main">
+  <a href="https://github.com/AceDylan/HaloWebUI/commits/main">
     <img src="https://img.shields.io/github/last-commit/ztx888/HaloWebUI/main?style=for-the-badge&logo=git&color=ff595e" alt="Last Commit" />
   </a>
-  <a href="https://github.com/ztx888/HaloWebUI/blob/main/LICENSE">
+  <a href="https://github.com/AceDylan/HaloWebUI/blob/main/LICENSE">
     <img src="https://img.shields.io/github/license/ztx888/HaloWebUI?style=for-the-badge&color=6a4c93" alt="License" />
   </a>
 

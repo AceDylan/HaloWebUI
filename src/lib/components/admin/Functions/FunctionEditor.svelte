@@ -79,8 +79,8 @@
 	let boilerplate = `"""
 title: Example Filter
 author: halo-webui
-author_url: https://github.com/ztx888/HaloWebUI
-funding_url: https://github.com/ztx888/HaloWebUI
+author_url: https://github.com/AceDylan/HaloWebUI
+funding_url: https://github.com/AceDylan/HaloWebUI
 version: 0.1
 """
 

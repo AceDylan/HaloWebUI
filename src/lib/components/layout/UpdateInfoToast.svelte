@@ -37,7 +37,7 @@
 			LATEST_VERSION: version.latest
 		})}
 
-		<a href="https://github.com/ztx888/HaloWebUI/releases" target="_blank"
+		<a href="https://github.com/AceDylan/HaloWebUI/releases" target="_blank"
 			class="underline hover:text-blue-900 dark:hover:text-blue-200 transition-colors">
 			{$i18n.t('Update for the latest features and improvements.')}
 		</a>

@@ -194,7 +194,7 @@ def _find_group_by_external_id(external_id: str):
 async def get_service_provider_config(_=Depends(verify_scim_token)):
     return {
         "schemas": [SCIM_SCHEMA_SP_CONFIG],
-        "documentationUri": "https://github.com/ztx888/HaloWebUI",
+        "documentationUri": "https://github.com/AceDylan/HaloWebUI",
         "patch": {"supported": True},
         "bulk": {"supported": False, "maxOperations": 0, "maxPayloadSize": 0},
         "filter": {"supported": True, "maxResults": 200},

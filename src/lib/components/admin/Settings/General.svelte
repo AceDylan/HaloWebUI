@@ -323,7 +323,7 @@
 						</a>
 						<span class="text-gray-300 dark:text-gray-600 select-none">·</span>
 						<a
-							href="https://github.com/ztx888/HaloWebUI"
+							href="https://github.com/AceDylan/HaloWebUI"
 							target="_blank"
 							class="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-700/40 transition-colors"
 						>
@@ -343,7 +343,7 @@
 						</a>
 						<span class="text-gray-300 dark:text-gray-600 select-none">·</span>
 						<a
-							href="https://github.com/ztx888/HaloWebUI/issues"
+							href="https://github.com/AceDylan/HaloWebUI/issues"
 							target="_blank"
 							class="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-gray-500 dark:text-gray-400 hover:text-orange-600 dark:hover:text-orange-400 hover:bg-orange-50 dark:hover:bg-orange-900/15 transition-colors"
 						>

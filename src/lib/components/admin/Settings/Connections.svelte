@@ -1439,7 +1439,7 @@
 									{$i18n.t('Trouble accessing Ollama?')}
 									<a
 										class=" text-gray-300 font-medium underline"
-										href="https://github.com/ztx888/HaloWebUI#troubleshooting"
+										href="https://github.com/AceDylan/HaloWebUI#troubleshooting"
 										target="_blank"
 									>
 										{$i18n.t('Click here for help.')}

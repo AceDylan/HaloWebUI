@@ -4058,21 +4058,53 @@ async def chat_web_search_handler(
     emitted_loader_runtime_notices = set()
 
     total_queries = len(queries)
-    for query_index, searchQuery in enumerate(queries, start=1):
-        await emit_web_search_status(
-            f"正在搜索第 {query_index}/{total_queries} 个关键词：{searchQuery}",
-            query=searchQuery,
-            query_index=query_index,
-            total_queries=total_queries,
-            done=False,
-        )
+    query_concurrency = max(1, min(total_queries, 3))
+    query_semaphore = asyncio.Semaphore(query_concurrency)
 
-        try:
-            results = await process_web_search_with_progress(
-                searchQuery,
-                query_index,
-                total_queries,
+    async def _run_single_query(query_index: int, searchQuery: str):
+        async with query_semaphore:
+            await emit_web_search_status(
+                f"正在搜索第 {query_index}/{total_queries} 个关键词：{searchQuery}",
+                query=searchQuery,
+                query_index=query_index,
+                total_queries=total_queries,
+                done=False,
             )
+
+            try:
+                results = await process_web_search_with_progress(
+                    searchQuery,
+                    query_index,
+                    total_queries,
+                )
+            except Exception as e:
+                error_status = build_search_error_status(e)
+                if error_status.get("known"):
+                    log.warning(
+                        "Web search skipped known failure (query=%s, code=%s): %s",
+                        searchQuery,
+                        error_status.get("code"),
+                        error_status.get("message"),
+                    )
+                else:
+                    log.exception(e)
+
+                await emit_web_search_status(
+                    error_status["message"],
+                    query=searchQuery,
+                    query_index=query_index,
+                    total_queries=total_queries,
+                    error=not error_status.get("warning"),
+                    warning=bool(error_status.get("warning")),
+                    error_code=error_status.get("code"),
+                    done=False,
+                )
+                return {
+                    "query_index": query_index,
+                    "query": searchQuery,
+                    "results": None,
+                    "error_status": error_status,
+                }
 
             if results:
                 result_count = len(results.get("filenames") or []) + len(
@@ -4092,91 +4124,96 @@ async def chat_web_search_handler(
                     warning=result_count == 0,
                 )
 
-                runtime_notice = results.get("loader_runtime_notice")
-                notification = build_tavily_loader_fallback_notification(runtime_notice)
-                if notification is not None:
-                    notice_key = json.dumps(
-                        runtime_notice, sort_keys=True, ensure_ascii=False
-                    )
-                    if notice_key not in emitted_loader_runtime_notices:
-                        emitted_loader_runtime_notices.add(notice_key)
-                        level, content = notification
-                        await event_emitter(
-                            {
-                                "type": "notification",
-                                "data": {
-                                    "type": level,
-                                    "content": content,
-                                },
-                            }
-                        )
+            return {
+                "query_index": query_index,
+                "query": searchQuery,
+                "results": results,
+                "error_status": None,
+            }
 
-                all_results.append(results)
-                files = form_data.get("files", [])
+    query_outcomes = await asyncio.gather(
+        *[
+            _run_single_query(query_index, searchQuery)
+            for query_index, searchQuery in enumerate(queries, start=1)
+        ]
+    )
 
-                if results.get("collection_names"):
-                    for col_idx, collection_name in enumerate(
-                        results.get("collection_names")
-                    ):
-                        files.append(
-                            {
-                                "collection_name": collection_name,
-                                "name": searchQuery,
-                                "type": "web_search",
-                                "urls": [results["filenames"][col_idx]],
-                            }
-                        )
-                elif results.get("docs"):
-                    # Invoked when bypass embedding and retrieval is set to True
-                    docs = results["docs"]
+    query_outcomes.sort(key=lambda o: o["query_index"])
 
-                    if len(docs) == len(results["filenames"]):
-                        # the number of docs and filenames (urls) should be the same
-                        for doc_idx, doc in enumerate(docs):
-                            files.append(
-                                {
-                                    "docs": [doc],
-                                    "name": searchQuery,
-                                    "type": "web_search",
-                                    "urls": [results["filenames"][doc_idx]],
-                                }
-                            )
-                    else:
-                        # edge case when the number of docs and filenames (urls) are not the same
-                        # this should not happen, but if it does, we will just append the docs
-                        files.append(
-                            {
-                                "docs": results.get("docs", []),
-                                "name": searchQuery,
-                                "type": "web_search",
-                                "urls": results["filenames"],
-                            }
-                        )
-
-                form_data["files"] = files
-        except Exception as e:
-            error_status = build_search_error_status(e)
-            failed_queries.append({"query": searchQuery, **error_status})
-            if error_status.get("known"):
-                log.warning(
-                    "Web search skipped known failure (query=%s, code=%s): %s",
-                    searchQuery,
-                    error_status.get("code"),
-                    error_status.get("message"),
-                )
-            else:
-                log.exception(e)
-
-            await emit_web_search_status(
-                error_status["message"],
-                query=searchQuery,
-                query_index=query_index,
-                total_queries=total_queries,
-                error=not error_status.get("warning"),
-                warning=bool(error_status.get("warning")),
-                error_code=error_status.get("code"),
-                done=False,
+    for outcome in query_outcomes:
+        if outcome["error_status"] is not None:
+            failed_queries.append(
+                {"query": outcome["query"], **outcome["error_status"]}
             )
+            continue
+
+        results = outcome["results"]
+        if not results:
+            continue
+
+        runtime_notice = results.get("loader_runtime_notice")
+        notification = build_tavily_loader_fallback_notification(runtime_notice)
+        if notification is not None:
+            notice_key = json.dumps(
+                runtime_notice, sort_keys=True, ensure_ascii=False
+            )
+            if notice_key not in emitted_loader_runtime_notices:
+                emitted_loader_runtime_notices.add(notice_key)
+                level, content = notification
+                await event_emitter(
+                    {
+                        "type": "notification",
+                        "data": {
+                            "type": level,
+                            "content": content,
+                        },
+                    }
+                )
+
+        all_results.append(results)
+        searchQuery = outcome["query"]
+        files = form_data.get("files", [])
+
+        if results.get("collection_names"):
+            for col_idx, collection_name in enumerate(
+                results.get("collection_names")
+            ):
+                files.append(
+                    {
+                        "collection_name": collection_name,
+                        "name": searchQuery,
+                        "type": "web_search",
+                        "urls": [results["filenames"][col_idx]],
+                    }
+                )
+        elif results.get("docs"):
+            # Invoked when bypass embedding and retrieval is set to True
+            docs = results["docs"]
+
+            if len(docs) == len(results["filenames"]):
+                # the number of docs and filenames (urls) should be the same
+                for doc_idx, doc in enumerate(docs):
+                    files.append(
+                        {
+                            "docs": [doc],
+                            "name": searchQuery,
+                            "type": "web_search",
+                            "urls": [results["filenames"][doc_idx]],
+                        }
+                    )
+            else:
+                # edge case when the number of docs and filenames (urls) are not the same
+                # this should not happen, but if it does, we will just append the docs
+                files.append(
+                    {
+                        "docs": results.get("docs", []),
+                        "name": searchQuery,
+                        "type": "web_search",
+                        "urls": results["filenames"],
+                    }
+                )
+
+        form_data["files"] = files
 
     if all_results:
         urls = []

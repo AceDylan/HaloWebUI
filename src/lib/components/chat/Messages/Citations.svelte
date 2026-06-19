@@ -191,6 +191,11 @@
 				transition:slide={{ duration: 200, easing: quintOut }}
 			>
 				{#each citations as citation, idx}
+					{@const _rawCitationLabel =
+						citation.source?.name ||
+						citation.source?.url ||
+						(typeof citation.id === 'string' && citation.id !== 'N/A' ? citation.id : '') ||
+						''}
 					<button
 						id={`source-${id}-${idx + 1}`}
 						class="no-toggle outline-hidden flex items-center gap-2 px-2 py-1.5
@@ -216,7 +221,11 @@
 								group-hover:text-gray-900 dark:group-hover:text-white
 								transition truncate flex-1"
 						>
-							{getDisplayTitle(decodeString(citation.source?.name ?? ''), 60, 30, 20)}
+							{#if _rawCitationLabel.trim()}
+								{getDisplayTitle(decodeString(_rawCitationLabel), 60, 30, 20)}
+							{:else}
+								{$i18n.t('Source')} {idx + 1}
+							{/if}
 						</span>
 					</button>
 				{/each}

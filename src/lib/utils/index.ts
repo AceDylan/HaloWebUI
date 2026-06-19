@@ -83,8 +83,22 @@ export const sanitizeResponseContent = (content: string) => {
 		.trim();
 };
 
+const CHATGPT_CITE_SENTINEL = '[\\u2060-\\u2063\\ue200-\\ue203]';
+const CHATGPT_CITE_PLACEHOLDER_RE = new RegExp(
+	`${CHATGPT_CITE_SENTINEL}?cite${CHATGPT_CITE_SENTINEL}?turn\\d+[a-z]+\\d+(?:,turn\\d+[a-z]+\\d+)*${CHATGPT_CITE_SENTINEL}?`,
+	'gi'
+);
+const CHATGPT_SENTINEL_CHAR_RE = new RegExp(CHATGPT_CITE_SENTINEL, 'g');
+
 export const processResponseContent = (content: string) => {
-	return content.trim();
+	if (typeof content !== 'string') {
+		return '';
+	}
+
+	return content
+		.replace(CHATGPT_CITE_PLACEHOLDER_RE, '')
+		.replace(CHATGPT_SENTINEL_CHAR_RE, '')
+		.trim();
 };
 
 export function unescapeHtml(html: string) {

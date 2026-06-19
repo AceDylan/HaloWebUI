@@ -1,7 +1,5 @@
 <script lang="ts">
-	import { getContext } from 'svelte';
-	import { slide } from 'svelte/transition';
-	import { quintOut } from 'svelte/easing';
+	import { getContext, onDestroy } from 'svelte';
 	import CitationsModal from './CitationsModal.svelte';
 	import ChevronDown from '$lib/components/icons/ChevronDown.svelte';
 	import GlobeAlt from '$lib/components/icons/GlobeAlt.svelte';
@@ -23,7 +21,65 @@
 	let showCitations = false;
 
 	let buttonEl: HTMLElement;
+	let dropdownEl: HTMLElement | null = null;
 	let openAbove = false;
+	// The dropdown is rendered with position:fixed anchored to the pill button so it
+	// escapes any ancestor with overflow:hidden / its own stacking context (the chat
+	// message bubble clips an absolutely-positioned dropdown, hiding the source list).
+	let dropdownStyle = '';
+
+	function computeDropdownStyle() {
+		if (!buttonEl || typeof window === 'undefined') return;
+		const rect = buttonEl.getBoundingClientRect();
+		const spaceBelow = window.innerHeight - rect.bottom;
+		openAbove = spaceBelow < 260;
+		const base =
+			`position: fixed; left: ${Math.round(rect.left)}px; z-index: 9999; ` +
+			`min-width: ${Math.max(200, Math.round(rect.width))}px; max-width: 320px; ` +
+			`max-height: 240px; overflow-y: auto;`;
+		dropdownStyle = openAbove
+			? `${base} bottom: ${Math.round(window.innerHeight - rect.top + 6)}px;`
+			: `${base} top: ${Math.round(rect.bottom + 6)}px;`;
+	}
+
+	function handleOutsidePointer(event: PointerEvent) {
+		const target = event.target as Node;
+		if (buttonEl?.contains(target) || dropdownEl?.contains(target)) {
+			return;
+		}
+		closeDropdown();
+	}
+
+	function bindGlobalListeners(bind: boolean) {
+		if (typeof window === 'undefined') return;
+		const fn = bind ? window.addEventListener : window.removeEventListener;
+		fn('scroll', computeDropdownStyle, true);
+		fn('resize', computeDropdownStyle);
+		fn('pointerdown', handleOutsidePointer, true);
+	}
+
+	function openDropdown() {
+		computeDropdownStyle();
+		showCitations = true;
+		bindGlobalListeners(true);
+	}
+
+	function closeDropdown() {
+		showCitations = false;
+		bindGlobalListeners(false);
+	}
+
+	function toggleDropdown() {
+		if (showCitations) {
+			closeDropdown();
+		} else {
+			openDropdown();
+		}
+	}
+
+	onDestroy(() => {
+		bindGlobalListeners(false);
+	});
 
 	function calculateShowRelevance(sources: any[]) {
 		const distances = sources.flatMap((citation) => citation.distances ?? []);
@@ -154,14 +210,7 @@
 				flex items-center gap-1.5
 				border border-gray-200/50 dark:border-gray-700/50"
 			style="height: 36px;"
-			on:click={() => {
-				if (!showCitations && buttonEl) {
-					const rect = buttonEl.getBoundingClientRect();
-					const spaceBelow = window.innerHeight - rect.bottom;
-					openAbove = spaceBelow < 260;
-				}
-				showCitations = !showCitations;
-			}}
+			on:click={toggleDropdown}
 		>
 			{#if hasWebCitations}
 				<GlobeAlt className="size-4 shrink-0" strokeWidth="2" />
@@ -180,15 +229,14 @@
 			</div>
 		</button>
 
-		<!-- Expanded source list -->
+		<!-- Expanded source list (fixed-positioned, anchored to the pill button) -->
 		{#if showCitations}
 			<div
+				bind:this={dropdownEl}
 				class="flex flex-col gap-0.5
 					bg-white/90 dark:bg-gray-900/90 backdrop-blur-xl
 					rounded-xl shadow-lg border border-gray-200/50 dark:border-gray-700/50 p-1"
-				style="position: absolute; left: 0; z-index: 20; min-width: 200px; max-width: 320px; max-height: 240px; overflow-y: auto;
-					{openAbove ? 'bottom: 100%; margin-bottom: 6px;' : 'top: 100%; margin-top: 6px;'}"
-				transition:slide={{ duration: 200, easing: quintOut }}
+				style={dropdownStyle}
 			>
 				{#each citations as citation, idx}
 					{@const _rawCitationLabel =
@@ -202,8 +250,9 @@
 							rounded-lg hover:bg-gray-50 dark:hover:bg-gray-850 transition
 							w-full text-left group"
 						on:click={() => {
-							showCitationModal = true;
 							selectedCitation = citation;
+							showCitationModal = true;
+							closeDropdown();
 						}}
 					>
 						<span

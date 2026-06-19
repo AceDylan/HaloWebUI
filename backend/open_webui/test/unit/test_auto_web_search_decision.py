@@ -12,7 +12,9 @@ if str(_BACKEND_DIR) not in sys.path:
 from open_webui.utils import middleware as middleware_module  # noqa: E402
 from open_webui.utils.middleware import (  # noqa: E402
     _build_auto_web_search_chat_history,
+    _describe_auto_web_search_skip,
     _extract_json_object_from_text,
+    _native_web_search_provider_label,
     _normalize_auto_web_search_queries,
     _quick_auto_web_search_decision,
     _resolve_web_search_strategy,
@@ -32,14 +34,23 @@ def test_quick_auto_web_search_respects_user_opt_out():
     assert decision["reason"] == "user_disabled_web_search"
 
 
-def test_quick_auto_web_search_uses_search_for_urls():
+def test_quick_auto_web_search_defers_bare_urls_to_task_model():
     decision = _quick_auto_web_search_decision(
         [{"role": "user", "content": "帮我看看 https://example.com/docs 这个页面"}]
     )
 
+    # 仅包含链接、没有明确联网意图的消息不再被启发式直接判为搜索，
+    # 而是交给任务模型根据意图决定。
+    assert decision is None
+
+
+def test_quick_auto_web_search_still_honors_explicit_request_with_url():
+    decision = _quick_auto_web_search_decision(
+        [{"role": "user", "content": "帮我查一下 https://example.com 最新状态"}]
+    )
+
     assert decision["should_search"] is True
-    assert decision["queries"] == ["帮我看看 https://example.com/docs 这个页面"]
-    assert decision["reason"] == "user_referenced_url"
+    assert decision["reason"] == "user_requested_current_or_external_info"
 
 
 def test_quick_auto_web_search_leaves_ambiguous_prompts_to_task_model():
@@ -87,6 +98,28 @@ def test_build_auto_web_search_history_uses_recent_text_messages():
 
     assert 'USER: """最新问题"""' in history
     assert 'ASSISTANT: """旧回答"""' in history
+
+
+def test_describe_auto_web_search_skip_explains_user_opt_out():
+    text = _describe_auto_web_search_skip("user_disabled_web_search")
+
+    assert "本次判断无需联网" in text
+    assert "你在消息中要求不要联网" in text
+
+
+def test_describe_auto_web_search_skip_handles_unknown_reason():
+    text = _describe_auto_web_search_skip("task_model_decision")
+
+    # 未知原因不应附加误导性后缀，但仍要清楚说明本次没有联网。
+    assert text == "智能联网：本次判断无需联网，已直接用模型已有知识回答。"
+
+
+def test_native_web_search_provider_label_maps_known_providers():
+    assert _native_web_search_provider_label("openai") == "OpenAI"
+    assert _native_web_search_provider_label("google") == "Gemini"
+    assert _native_web_search_provider_label("gemini") == "Gemini"
+    assert _native_web_search_provider_label("") == "模型"
+    assert _native_web_search_provider_label(None) == "模型"
 
 
 def _fake_request(*, halo_enabled=True, native_enabled=True):

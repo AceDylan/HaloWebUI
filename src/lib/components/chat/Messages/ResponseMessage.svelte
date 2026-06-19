@@ -47,6 +47,7 @@
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import WebSearchResults from './ResponseMessage/WebSearchResults.svelte';
+	import WebSearchBadge from './ResponseMessage/WebSearchBadge.svelte';
 	import Sparkles from '$lib/components/icons/Sparkles.svelte';
 
 	import {
@@ -131,6 +132,7 @@
 			total?: number;
 			urls?: string[];
 			query?: string;
+			web_search_state?: string;
 		}[];
 		status?: {
 			done: boolean;
@@ -144,6 +146,7 @@
 			total?: number;
 			urls?: string[];
 			query?: string;
+			web_search_state?: string;
 		};
 		done: boolean;
 		stopped?: boolean;
@@ -200,6 +203,52 @@
 	$: message = history.messages?.[messageId] as MessageType;
 	const tr = (key: string, defaultValue: string, options: Record<string, any> = {}) =>
 		translateWithDefault($i18n, key, defaultValue, options);
+
+	// 独立联网状态标记：从 statusHistory 里的 web_search 状态推导出本条回答的最终联网状态。
+	// 优先用后端给的显式 web_search_state（skipped/native_pending/searched），
+	// 其余（Halo 模式等）按 count/done/error/warning 数值推断，避免依赖中文文案匹配。
+	const computeWebSearchBadge = (
+		statuses: NonNullable<MessageType['statusHistory']>
+	): { state: string; count: number } | null => {
+		const web = (statuses ?? []).filter((s) => s?.action === 'web_search' && !s?.hidden);
+		if (web.length === 0) return null;
+
+		const last = web[web.length - 1];
+		const count = Number(last?.count ?? last?.urls?.length ?? 0) || 0;
+
+		if (last?.done === false) return { state: 'searching', count };
+
+		const explicit = last?.web_search_state;
+		if (explicit === 'skipped') return { state: 'skipped', count: 0 };
+		if (explicit === 'native_pending') return { state: 'native_pending', count: 0 };
+		if (explicit === 'searched' || count > 0) return { state: 'searched', count };
+
+		if (last?.error) return { state: 'failed', count: 0 };
+		if (last?.warning) return { state: 'no_results', count: 0 };
+		return count > 0 ? { state: 'searched', count } : { state: 'no_results', count: 0 };
+	};
+
+	const webSearchBadgeLabel = (badge: { state: string; count: number } | null): string => {
+		if (!badge) return '';
+		switch (badge.state) {
+			case 'searching':
+				return tr('联网中…', 'Searching…');
+			case 'searched':
+				return badge.count > 0
+					? tr('已联网 · {{count}} 源', 'Web · {{count}} sources', { count: badge.count })
+					: tr('已联网', 'Web searched');
+			case 'skipped':
+				return tr('未联网', 'No web search');
+			case 'native_pending':
+				return tr('原生联网 · 模型决定', 'Native web · model decides');
+			case 'no_results':
+				return tr('联网无结果', 'Web · no results');
+			case 'failed':
+				return tr('联网失败', 'Web search failed');
+			default:
+				return tr('联网', 'Web');
+		}
+	};
 
 	function getVisibleAssistantOutput(content: string): string {
 		return sanitizeResponseContent(
@@ -471,6 +520,9 @@
 	});
 	$: latestDisplayStatus = displayStatusHistory.at(-1);
 	$: hasActiveVisibleStatus = latestDisplayStatus?.done === false;
+	$: webSearchBadge = computeWebSearchBadge(
+		message?.statusHistory ?? [...(message?.status ? [message?.status] : [])]
+	);
 	$: hasActiveImageGenerationStatus =
 		latestDisplayStatus?.action === 'image_generation' && latestDisplayStatus?.done === false;
 	$: activeImageGenerationStatus = hasActiveImageGenerationStatus ? latestDisplayStatus : null;
@@ -1228,6 +1280,12 @@
 					</div>
 				{/if}
 			</Name>
+
+			{#if webSearchBadge}
+				<div class="mt-1 ml-0.5">
+					<WebSearchBadge state={webSearchBadge.state} label={webSearchBadgeLabel(webSearchBadge)} />
+				</div>
+			{/if}
 
 			{#if stats && (stats.speed || stats.tokens || stats.elapsed)}
 				<div class="text-gray-500 dark:text-gray-400 mt-1 ml-0.5 text-xs sm:text-sm">

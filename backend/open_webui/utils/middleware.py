@@ -1684,10 +1684,13 @@ AUTO_WEB_SEARCH_DECISION_PROMPT = """### Task:
 Decide whether the assistant should use web search before answering the latest user message.
 
 ### Rules:
-- Use web search when the user asks to search, browse, open, verify, check a URL, or when the answer depends on current, recent, fast-changing, or external facts.
+- Decide from the user's actual intent, not from surface patterns. A message is not a search request just because it contains a link, a keyword, or a question mark.
+- Use web search when the user asks to search, browse, open, verify, or fact-check something, or when a correct answer depends on current, recent, fast-changing, or external facts the assistant cannot reliably know on its own.
 - Use web search for news, weather, prices, schedules, sports, laws, regulations, software/library versions, product availability, company/public figures, and anything explicitly described as latest/current/today/recent.
+- A URL in the message does NOT by itself require web search. Only search when the user clearly wants you to retrieve, open, summarize, or verify the live content of that link. If the link is merely context, an example, part of code, or something the user is just discussing or pasting, do not search.
 - Do not use web search for translation, rewriting, summarizing supplied content, coding from provided context, math, brainstorming, or general knowledge that does not depend on current facts.
 - Do not use web search if the user explicitly asks not to search or not to use the internet.
+- When in doubt and the answer does not actually depend on live external information, prefer NOT searching.
 - When web search is needed, provide 1-3 concise search queries in the user's language.
 
 ### Output:
@@ -1713,7 +1716,6 @@ Today's date: {{CURRENT_DATE}}
 </chat_history>
 """
 
-_AUTO_WEB_SEARCH_URL_RE = re.compile(r"https?://|www\.", re.IGNORECASE)
 _AUTO_WEB_SEARCH_NEGATIVE_RE = re.compile(
     r"不要(?:联网|搜索|查|检索)|别(?:联网|搜索|查|检索)|不用(?:联网|搜索|查|检索)|"
     r"无需(?:联网|搜索|查|检索)|不要用网|不要上网|不需要联网|"
@@ -1960,14 +1962,6 @@ def _quick_auto_web_search_decision(messages: list[dict]) -> Optional[dict]:
             "source": "heuristic",
         }
 
-    if _AUTO_WEB_SEARCH_URL_RE.search(text):
-        return {
-            "should_search": True,
-            "queries": [text[:300]],
-            "reason": "user_referenced_url",
-            "source": "heuristic",
-        }
-
     if _AUTO_WEB_SEARCH_EXPLICIT_RE.search(text):
         return {
             "should_search": True,
@@ -2046,6 +2040,32 @@ async def _resolve_auto_web_search_decision(
             "reason": "decision_failed",
             "source": "error",
         }
+
+
+def _describe_auto_web_search_skip(reason: Any) -> str:
+    """智能联网判断「无需联网」时给用户的可读提示。
+
+    让用户清楚看到：这次确实没有联网，以及大致原因，避免「以为联网了其实没联网」。
+    """
+    suffix_map = {
+        "user_disabled_web_search": "（你在消息中要求不要联网）",
+        "search_query_generation_disabled": "（搜索词生成功能已关闭）",
+        "decision_failed": "（联网判断出错，已保守跳过）",
+        "empty_user_message": "",
+    }
+    suffix = suffix_map.get(str(reason or ""), "")
+    return f"智能联网：本次判断无需联网，已直接用模型已有知识回答。{suffix}".strip()
+
+
+def _native_web_search_provider_label(provider: Any) -> str:
+    normalized = str(provider or "").strip().lower()
+    if normalized == "openai":
+        return "OpenAI"
+    if normalized in {"gemini", "google"}:
+        return "Gemini"
+    if normalized:
+        return str(provider)
+    return "模型"
 
 
 def _normalize_web_search_mode(value: Any, fallback: str = WEB_SEARCH_MODE_OFF) -> str:
@@ -5165,6 +5185,23 @@ async def process_chat_payload(request, form_data, user, metadata, model, tasks=
                 }
                 metadata["effective_web_search_mode"] = WEB_SEARCH_MODE_OFF
                 metadata["allow_native_web_search_halo_fallback"] = False
+                # 显式告知用户：智能联网这次没有联网（否则用户无法判断是否真的搜索了）。
+                if event_emitter:
+                    await event_emitter(
+                        {
+                            "type": "status",
+                            "data": {
+                                "action": "web_search",
+                                "web_search_state": "skipped",
+                                "description": _describe_auto_web_search_skip(
+                                    auto_decision.get("reason")
+                                ),
+                                "done": True,
+                                "count": 0,
+                                "urls": [],
+                            },
+                        }
+                    )
             else:
                 auto_web_search_queries = auto_decision.get("queries") or None
 
@@ -5190,6 +5227,28 @@ async def process_chat_payload(request, form_data, user, metadata, model, tasks=
         elif web_search_strategy["effective_mode"] == WEB_SEARCH_MODE_NATIVE:
             form_data["native_web_search"] = True
             form_data["native_web_search_required"] = True
+            # 告知用户已切到「模型原生联网」：是否真正检索由模型自行决定，
+            # 命中时会在流式回答里给出来源引用（见下方 stream 结束时的确认状态）。
+            if event_emitter:
+                provider_label = _native_web_search_provider_label(
+                    (web_search_strategy.get("native_support") or {}).get("provider")
+                )
+                await event_emitter(
+                    {
+                        "type": "status",
+                        "data": {
+                            "action": "web_search",
+                            "web_search_state": "native_pending",
+                            "description": (
+                                f"已启用模型原生联网（{provider_label}）："
+                                "是否检索由模型自行决定，若检索会在回答中标注来源。"
+                            ),
+                            "done": True,
+                            "count": 0,
+                            "urls": [],
+                        },
+                    }
+                )
 
         # In native tool-calling mode, image generation should happen through the
         # `generate_image` tool only. Otherwise the request gets duplicated:
@@ -7251,6 +7310,35 @@ async def process_chat_response(
                         _stream_api_error = _normalize_api_error(
                             "\n".join(_stream_non_sse_error_lines[-10:]),
                             status_override=_stream_response_status,
+                        )
+
+                    # 原生联网确认：只有当本次真的拿到了网页引用（url_citation）时，
+                    # 才给出「已检索并引用 N 个来源」的确认。没有引用时保持 dispatch 阶段
+                    # 的提示不动 —— 因为部分上游（如 Gemini grounding）会把来源直接写进
+                    # 正文而非 url_citation，这里不能据此断言「未联网」以免误导用户。
+                    if (
+                        _stream_api_error is None
+                        and event_emitter
+                        and metadata.get("effective_web_search_mode")
+                        == WEB_SEARCH_MODE_NATIVE
+                        and emitted_url_citations
+                    ):
+                        _native_citation_urls = sorted(emitted_url_citations)
+                        await event_emitter(
+                            {
+                                "type": "status",
+                                "data": {
+                                    "action": "web_search",
+                                    "web_search_state": "searched",
+                                    "description": (
+                                        "模型原生联网：本次已检索并引用 "
+                                        f"{len(_native_citation_urls)} 个网页来源。"
+                                    ),
+                                    "done": True,
+                                    "count": len(_native_citation_urls),
+                                    "urls": _native_citation_urls,
+                                },
+                            }
                         )
 
                     # ── Stream summary log ──

@@ -86,6 +86,12 @@ from open_webui.utils.api_key_pool import (
 from open_webui.utils.auth import get_admin_user, get_verified_user
 from open_webui.utils.access_control import has_access
 from open_webui.utils.headers import get_user_agent_config, set_model_user_agent
+from open_webui.utils.codex_emulation import (
+    augment_codex_responses_payload,
+    build_codex_headers,
+    build_codex_request_context,
+    is_codex_emulation_target,
+)
 
 
 log = logging.getLogger(__name__)
@@ -2994,6 +3000,7 @@ async def generate_chat_completion(
     )
 
     payload_dict = None
+    codex_ctx = None
     auto_reasoning_summary_applied = False
     if use_responses_api:
         web_search_tool_type = _get_native_web_search_tool_type(api_config) if native_web_search else None
@@ -3044,6 +3051,15 @@ async def generate_chat_completion(
         payload_dict,
         model_id=model_id,
     )
+
+    # Codex CLI request emulation: make GPT requests on the Responses API path
+    # look like the official codex-tui client. Envelope-only (no codex prompt or
+    # tools injected); see open_webui.utils.codex_emulation.
+    if use_responses_api and is_codex_emulation_target(
+        payload_dict.get("model") if isinstance(payload_dict, dict) else None
+    ):
+        codex_ctx = build_codex_request_context(metadata)
+        payload_dict = augment_codex_responses_payload(payload_dict, codex_ctx)
 
     request_attempts = (
         [(request_url, payload_dict)]
@@ -3135,15 +3151,25 @@ async def generate_chat_completion(
                     current_key_attempt.total,
                 )
 
+            request_headers = _build_upstream_headers(
+                url, current_key_attempt.key, api_config, user=user,
+                model_id=payload_dict.get("model") if isinstance(payload_dict, dict) else None,
+                ua_config=get_user_agent_config(request),
+            )
+            if codex_ctx is not None:
+                build_codex_headers(
+                    request_headers,
+                    codex_ctx,
+                    streaming=bool(payload_dict.get("stream"))
+                    if isinstance(payload_dict, dict)
+                    else False,
+                )
+
             r = await session.request(
                 method="POST",
                 url=request_url,
                 data=payload_json,
-                headers=_build_upstream_headers(
-                    url, current_key_attempt.key, api_config, user=user,
-                    model_id=payload_dict.get("model") if isinstance(payload_dict, dict) else None,
-                    ua_config=get_user_agent_config(request),
-                ),
+                headers=request_headers,
                 ssl=AIOHTTP_CLIENT_SESSION_SSL,
             )
 

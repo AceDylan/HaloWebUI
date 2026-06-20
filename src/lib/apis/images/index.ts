@@ -31,8 +31,22 @@ export type ImageUsageConfig = {
 	};
 };
 
+export type ImageModelCapabilityOverride = {
+	supports_background?: boolean;
+	supports_batch?: boolean;
+	supports_image_size?: boolean;
+	supports_resolution?: boolean;
+	text_output_supported?: boolean;
+	size_mode?: 'exact' | 'aspect_ratio' | 'unsupported' | string;
+	/** 执行期"学习式降级"写回的不支持档位标记，如 "size:4096x4096"。 */
+	_learned_unsupported?: string[];
+	[key: string]: unknown;
+};
+
 export type ImageGenerationConfig = {
 	IMAGE_MODEL_FILTER_REGEX?: string | null;
+	/** 每模型能力覆盖表：key 形如 "openai:gpt-image-3" / "gemini-3*"。 */
+	IMAGES_MODEL_CAPABILITY_OVERRIDES?: Record<string, ImageModelCapabilityOverride>;
 };
 
 export type ImageGenerationModel = {
@@ -55,6 +69,10 @@ export type ImageGenerationModel = {
 	default_image_route?: string | null;
 	reference_image_default_route?: string | null;
 	text_output_supported?: boolean;
+	/** 后端已对该条目应用了管理员/学习覆盖（覆盖优先级高于元数据与启发式）。 */
+	capability_override_applied?: boolean;
+	/** 学习到的不支持档位标记，如 "size:4096x4096"，前端据此过滤档位。 */
+	learned_unsupported?: string[];
 	source?: 'settings' | 'personal' | 'shared' | string | null;
 	connection_index?: number | null;
 	connection_name?: string | null;

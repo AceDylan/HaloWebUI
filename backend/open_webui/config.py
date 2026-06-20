@@ -3591,6 +3591,32 @@ IMAGES_GROK_API_KEY = PersistentConfig(
     os.getenv("IMAGES_GROK_API_KEY", GROK_CONNECTION_API_KEY),
 )
 
+
+def _load_images_model_capability_overrides() -> dict:
+    """Per-model image capability overrides.
+
+    结构：{"<engine>:<model_basename>": {能力字段...}}。供管理员手动覆盖，
+    以及执行期"学习式降级"写回（_learned_unsupported）。env 给的是 JSON 串，
+    解析失败时安全回退为空表，避免坏配置导致启动崩溃。"""
+    raw = os.getenv("IMAGES_MODEL_CAPABILITY_OVERRIDES", "")
+    if not raw.strip():
+        return {}
+    try:
+        value = json.loads(raw)
+    except Exception:
+        log.warning(
+            "Invalid IMAGES_MODEL_CAPABILITY_OVERRIDES env value; falling back to {}"
+        )
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+IMAGES_MODEL_CAPABILITY_OVERRIDES = PersistentConfig(
+    "IMAGES_MODEL_CAPABILITY_OVERRIDES",
+    "image_generation.model_capability_overrides",
+    _load_images_model_capability_overrides(),
+)
+
 IMAGE_SIZE = PersistentConfig(
     "IMAGE_SIZE", "image_generation.size", os.getenv("IMAGE_SIZE", "auto")
 )

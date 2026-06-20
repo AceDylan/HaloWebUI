@@ -14,8 +14,61 @@
 
 	let loading = false;
 	let config = null;
-	let imageGenerationConfig = { IMAGE_MODEL_FILTER_REGEX: '' };
+	let imageGenerationConfig = {
+		IMAGE_MODEL_FILTER_REGEX: '',
+		IMAGES_MODEL_CAPABILITY_OVERRIDES_TEXT: ''
+	};
 	let initialSnapshot = null;
+
+	// 能力覆盖表以 JSON 文本形式编辑，便于复用现有"字符串快照"脏检测。
+	const stringifyOverrides = (value) => {
+		if (
+			!value ||
+			typeof value !== 'object' ||
+			Array.isArray(value) ||
+			Object.keys(value).length === 0
+		)
+			return '';
+		try {
+			return JSON.stringify(value, null, 2);
+		} catch {
+			return '';
+		}
+	};
+
+	// 解析编辑框文本：空 → {}；合法对象 → 该对象；非法 → null（用于报错/拦截保存）。
+	const parseCapabilityOverrides = (text) => {
+		const trimmed = `${text ?? ''}`.trim();
+		if (!trimmed) return {};
+		try {
+			const parsed = JSON.parse(trimmed);
+			if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+			return parsed;
+		} catch {
+			return null;
+		}
+	};
+
+	$: capabilityOverridesInvalid =
+		!!`${imageGenerationConfig.IMAGES_MODEL_CAPABILITY_OVERRIDES_TEXT ?? ''}`.trim() &&
+		parseCapabilityOverrides(imageGenerationConfig.IMAGES_MODEL_CAPABILITY_OVERRIDES_TEXT) === null;
+
+	$: capabilityOverridesEmpty =
+		!`${imageGenerationConfig.IMAGES_MODEL_CAPABILITY_OVERRIDES_TEXT ?? ''}`.trim();
+
+	// 一键插入的可编辑模板：用户即使完全忘记写法，点一下照着改即可。
+	const capabilityOverrideExample = `{
+  "gemini:gemini-4-flash-image": {
+    "supports_image_size": true
+  }
+}`;
+
+	const insertCapabilityOverrideExample = () => {
+		imageGenerationConfig = {
+			...imageGenerationConfig,
+			IMAGES_MODEL_CAPABILITY_OVERRIDES_TEXT: capabilityOverrideExample
+		};
+	};
 
 	const getErrorText = (error) => {
 		if (typeof error === 'string') return error;
@@ -58,7 +111,10 @@
 	) => ({
 		enabled: sourceConfig?.enabled === true,
 		shared_key_enabled: sourceConfig?.shared_key_enabled === true,
-		IMAGE_MODEL_FILTER_REGEX: `${sourceImageConfig?.IMAGE_MODEL_FILTER_REGEX ?? ''}`
+		IMAGE_MODEL_FILTER_REGEX: `${sourceImageConfig?.IMAGE_MODEL_FILTER_REGEX ?? ''}`,
+		IMAGES_MODEL_CAPABILITY_OVERRIDES_TEXT: `${
+			sourceImageConfig?.IMAGES_MODEL_CAPABILITY_OVERRIDES_TEXT ?? ''
+		}`
 	});
 
 	$: snapshot = normalizeImageSettingsSnapshot(config, imageGenerationConfig);
@@ -79,7 +135,9 @@
 		};
 		imageGenerationConfig = {
 			...imageGenerationConfig,
-			IMAGE_MODEL_FILTER_REGEX: initialSnapshot.IMAGE_MODEL_FILTER_REGEX
+			IMAGE_MODEL_FILTER_REGEX: initialSnapshot.IMAGE_MODEL_FILTER_REGEX,
+			IMAGES_MODEL_CAPABILITY_OVERRIDES_TEXT:
+				initialSnapshot.IMAGES_MODEL_CAPABILITY_OVERRIDES_TEXT
 		};
 	};
 
@@ -108,12 +166,25 @@
 		if (loadedImageConfig) {
 			imageGenerationConfig = {
 				...imageGenerationConfig,
-				IMAGE_MODEL_FILTER_REGEX: `${loadedImageConfig?.IMAGE_MODEL_FILTER_REGEX ?? ''}`
+				IMAGE_MODEL_FILTER_REGEX: `${loadedImageConfig?.IMAGE_MODEL_FILTER_REGEX ?? ''}`,
+				IMAGES_MODEL_CAPABILITY_OVERRIDES_TEXT: stringifyOverrides(
+					loadedImageConfig?.IMAGES_MODEL_CAPABILITY_OVERRIDES
+				)
 			};
 		}
 	};
 
 	const saveHandler = async () => {
+		const parsedOverrides = parseCapabilityOverrides(
+			imageGenerationConfig.IMAGES_MODEL_CAPABILITY_OVERRIDES_TEXT
+		);
+		if (parsedOverrides === null) {
+			toast.error(
+				$i18n.t('Model capability overrides must be valid JSON (an object of objects).')
+			);
+			return;
+		}
+
 		loading = true;
 
 		const updatedConfig = await updateConfig(localStorage.token, serializeConfigForSave(config)).catch((error) => {
@@ -121,10 +192,10 @@
 			return null;
 		});
 
-		const updatedImageGenerationConfig = await updateImageGenerationConfig(
-			localStorage.token,
-			serializeImageGenerationConfigForSave(imageGenerationConfig)
-		).catch((error) => {
+		const updatedImageGenerationConfig = await updateImageGenerationConfig(localStorage.token, {
+			...serializeImageGenerationConfigForSave(imageGenerationConfig),
+			IMAGES_MODEL_CAPABILITY_OVERRIDES: parsedOverrides
+		}).catch((error) => {
 			toast.error(formatImageSettingsError(error));
 			return null;
 		});
@@ -137,7 +208,10 @@
 		config = normalizeImageSettingsSnapshot(updatedConfig, imageGenerationConfig);
 		imageGenerationConfig = {
 			...imageGenerationConfig,
-			IMAGE_MODEL_FILTER_REGEX: `${updatedImageGenerationConfig?.IMAGE_MODEL_FILTER_REGEX ?? ''}`
+			IMAGE_MODEL_FILTER_REGEX: `${updatedImageGenerationConfig?.IMAGE_MODEL_FILTER_REGEX ?? ''}`,
+			IMAGES_MODEL_CAPABILITY_OVERRIDES_TEXT: stringifyOverrides(
+				updatedImageGenerationConfig?.IMAGES_MODEL_CAPABILITY_OVERRIDES
+			)
 		};
 		backendConfig.set(await getBackendConfig());
 		await tick();
@@ -202,6 +276,80 @@
 								bind:value={imageGenerationConfig.IMAGE_MODEL_FILTER_REGEX}
 							/>
 						</Tooltip>
+					</div>
+				</section>
+
+				<section class="glass-section p-5 space-y-5 {isDirty ? 'glass-section-dirty' : ''}">
+					<div class="flex items-center justify-between gap-3">
+						<div class="text-base font-semibold text-gray-800 dark:text-gray-100">
+							{$i18n.t('Model Capability Overrides')}
+						</div>
+						{#if capabilityOverridesEmpty}
+							<button
+								type="button"
+								class="shrink-0 rounded-md border border-gray-200 px-2.5 py-1 text-xs text-gray-600 transition hover:bg-gray-100 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+								on:click={insertCapabilityOverrideExample}
+							>
+								{$i18n.t('Insert example')}
+							</button>
+						{/if}
+					</div>
+					<div class="glass-item p-4 space-y-2">
+						<div class="text-xs text-gray-400 dark:text-gray-500">
+							{$i18n.t(
+								'Optional. Leave empty unless a new model is not detected correctly (e.g. its 2K/4K size tiers are greyed out). You usually do not need this — unsupported tiers are learned and hidden automatically.'
+							)}
+						</div>
+						<textarea
+							class="w-full min-h-[7rem] py-2 px-3 text-xs font-mono dark:text-gray-300 glass-input resize-y {capabilityOverridesInvalid
+								? 'border border-red-400'
+								: ''}"
+							spellcheck="false"
+							placeholder={'{\n  "gemini:gemini-4-flash-image": { "supports_image_size": true }\n}'}
+							bind:value={imageGenerationConfig.IMAGES_MODEL_CAPABILITY_OVERRIDES_TEXT}
+						/>
+						{#if capabilityOverridesInvalid}
+							<div class="text-xs text-red-500">
+								{$i18n.t('Invalid JSON — changes cannot be saved until this is fixed.')}
+							</div>
+						{/if}
+
+						<details class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+							<summary class="cursor-pointer select-none text-gray-600 dark:text-gray-300">
+								{$i18n.t('Format & example')}
+							</summary>
+							<div class="mt-2 space-y-2">
+								<div>
+									{$i18n.t('Key format')}: <code class="font-mono">engine:model</code>
+									({$i18n.t('engine is openai / gemini / grok')})
+								</div>
+								<pre
+									class="overflow-x-auto rounded-md bg-gray-100 p-2 font-mono text-[11px] leading-5 text-gray-700 dark:bg-gray-800 dark:text-gray-200">{capabilityOverrideExample}</pre>
+								<div>{$i18n.t('Common capability flags:')}</div>
+								<ul class="ml-4 list-disc space-y-0.5">
+									<li>
+										<code class="font-mono">supports_image_size</code> — {$i18n.t(
+											'size tiers such as 2K / 4K (Gemini)'
+										)}
+									</li>
+									<li>
+										<code class="font-mono">supports_resolution</code> — {$i18n.t(
+											'resolution tiers (Grok)'
+										)}
+									</li>
+									<li>
+										<code class="font-mono">supports_background</code> — {$i18n.t(
+											'transparent / white / black background'
+										)}
+									</li>
+									<li>
+										<code class="font-mono">supports_batch</code> — {$i18n.t(
+											'generate multiple images at once'
+										)}
+									</li>
+								</ul>
+							</div>
+						</details>
 					</div>
 				</section>
 			</div>

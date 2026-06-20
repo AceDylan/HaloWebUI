@@ -644,10 +644,24 @@
 
 	$: hasOpenAIRouteChoice =
 		hasBuiltinImage && builtinEngine === 'openai' && openaiRouteOptions.length > 0;
+	// 「未验证」模型：用户主动搜索出来、未被自动发现，且无管理员/学习覆盖。
+	// 注意：后端 supports_image_size 始终来自 gemini-3 名字启发式（非元数据），
+	// 故 detection_method 不能作为档位能力的判据；这里仅对 search 候选乐观放开，
+	// 已发现模型保持原行为（不回归）。更广的自动乐观放开留待阶段 C（带降级兜底）。
+	$: builtinModelUnverified =
+		hasBuiltinImage &&
+		!builtinModelMeta?.capability_override_applied &&
+		`${builtinModelMeta?.detection_method ?? ''}` === 'search';
 	$: hasBuiltinSizeOption =
 		hasBuiltinImage &&
 		(builtinEngine === 'gemini' || builtinEngine === 'grok') &&
-		Boolean(builtinModelMeta?.supports_image_size);
+		(Boolean(builtinModelMeta?.supports_image_size) ||
+			(builtinEngine === 'gemini' && builtinModelUnverified));
+	// 档位是「乐观放开」而非已确认支持（用于展示试验性提示）。
+	$: sizeTierOptimistic =
+		hasBuiltinSizeOption &&
+		!Boolean(builtinModelMeta?.supports_image_size) &&
+		builtinModelUnverified;
 	$: hasBuiltinResolutionOption = hasBuiltinImage && Boolean(builtinModelMeta?.supports_resolution);
 	$: hasBuiltinAspectOption =
 		hasBuiltinImage &&
@@ -696,16 +710,33 @@
 					'这里选择当前模型支持的清晰度档位。',
 					'Select the resolution tier supported by the current model.'
 				)
-			: tr(
-					'这里选择当前模型支持的尺寸档位。',
-					'Select the size tier supported by the current model.'
-				)
+			: sizeTierOptimistic
+				? tr(
+						'该模型能力未确认，已乐观开放尺寸档位；若不支持会自动降级或报错。可在管理后台为该模型设置能力覆盖。',
+						'This model is unverified, so size tiers are optimistically enabled; unsupported tiers will fall back or error. Admins can set a capability override for it.'
+					)
+				: tr(
+						'这里选择当前模型支持的尺寸档位。',
+						'Select the size tier supported by the current model.'
+					)
 		: qualityUnavailableDescription;
 	$: stepsUnavailableLabel = hasBuiltinImage
 		? tr('当前接口不使用', 'Not used by this route')
 		: tr('当前配置不支持', 'Not supported');
 
-	$: builtinImageSizeOptions = GEMINI_IMAGE_SIZE_OPTIONS.map((option) => ({
+	// 阶段 C 学习式降级会写回 learned_unsupported（格式 "image_size:<档位>"，如 "image_size:4K"），
+	// 据此把已确认不支持的档位从可选项里隐藏，避免重复试错计费。
+	$: learnedUnsupportedSizes = new Set(
+		((builtinModelMeta?.learned_unsupported as string[] | undefined) ?? [])
+			.map((item) => {
+				const value = `${item}`;
+				return value.startsWith('image_size:') ? value.slice('image_size:'.length) : '';
+			})
+			.filter(Boolean)
+	);
+	$: builtinImageSizeOptions = GEMINI_IMAGE_SIZE_OPTIONS.filter(
+		(option) => !learnedUnsupportedSizes.has(option.value)
+	).map((option) => ({
 		value: option.value,
 		label: `${option.label} · ${option.pixels}`
 	}));
@@ -1086,7 +1117,13 @@
 									</Tooltip>
 								</div>
 								<div class="text-[11px] text-gray-400">
-									{canUseQuality ? currentQualityLabel : qualityUnavailableLabel}
+									{#if canUseQuality}
+										{currentQualityLabel}{#if sizeTierOptimistic}&nbsp;·&nbsp;<span
+												class="text-amber-500">{tr('试验性', 'Experimental')}</span
+											>{/if}
+									{:else}
+										{qualityUnavailableLabel}
+									{/if}
 								</div>
 							</div>
 							<div class="grid grid-cols-2 gap-1.5">

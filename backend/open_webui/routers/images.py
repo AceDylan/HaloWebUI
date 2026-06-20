@@ -2452,6 +2452,273 @@ def _build_search_candidate_model_meta_from_ref(
     }
 
 
+# ---------------------------------------------------------------------------
+# 模型能力覆盖层（阶段 A）
+# 解析优先级：覆盖配置（含执行期学习）> provider 元数据 > 名字启发式。
+# 覆盖表结构：{"<engine>:<model_basename>": {能力字段..., "_learned_unsupported": [...]}}
+#   - key 形如 "openai:gpt-image-3"（引擎限定）或 "gpt-image-3"（引擎无关）
+#   - key 末尾可加 "*" 做前缀匹配，如 "gemini-3*"
+#   - 更具体的 key 优先：引擎限定 > 引擎无关；精确 > 前缀；前缀越长越具体
+# ---------------------------------------------------------------------------
+
+_CAPABILITY_OVERRIDE_BOOL_FIELDS = (
+    "supports_background",
+    "supports_batch",
+    "supports_image_size",
+    "supports_resolution",
+    "text_output_supported",
+)
+_CAPABILITY_OVERRIDE_SIZE_MODES = {"exact", "aspect_ratio", "unsupported"}
+
+
+def _engine_from_generation_mode(generation_mode: Any) -> str:
+    gm = str(generation_mode or "").strip().lower()
+    if gm.startswith("gemini"):
+        return "gemini"
+    if gm == "xai_images":
+        return "grok"
+    if gm.startswith("openai"):
+        return "openai"
+    return ""
+
+
+def _normalize_capability_overrides(raw: Any) -> dict[str, dict[str, Any]]:
+    """把持久化的覆盖配置规整为 {match_key(lower): {field: value}}。"""
+    if not isinstance(raw, dict):
+        return {}
+    normalized: dict[str, dict[str, Any]] = {}
+    for key, value in raw.items():
+        if not isinstance(value, dict):
+            continue
+        match_key = str(key or "").strip().lower()
+        if match_key:
+            normalized[match_key] = value
+    return normalized
+
+
+def _get_capability_overrides(request: Request) -> dict[str, dict[str, Any]]:
+    try:
+        raw = getattr(
+            request.app.state.config, "IMAGES_MODEL_CAPABILITY_OVERRIDES", None
+        )
+    except Exception:
+        raw = None
+    return _normalize_capability_overrides(raw)
+
+
+def _capability_override_match_score(
+    match_key: str, engine: str, base_name: str
+) -> int:
+    """返回匹配特异度分数（0=不匹配，越大越具体）。"""
+    key = str(match_key or "").strip().lower()
+    if not key:
+        return 0
+    if ":" in key:
+        key_engine, _, key_pattern = key.partition(":")
+    else:
+        key_engine, key_pattern = "", key
+    if key_engine and key_engine != engine:
+        return 0
+    if not key_pattern:
+        return 0
+    if key_pattern.endswith("*"):
+        prefix = key_pattern[:-1]
+        if not base_name.startswith(prefix):
+            return 0
+        score = 1 + len(prefix)  # 前缀越长越具体
+    else:
+        if key_pattern != base_name:
+            return 0
+        score = 10000  # 精确匹配
+    if key_engine:
+        score += 100000  # 引擎限定优先于引擎无关
+    return score
+
+
+def _apply_capability_overrides(
+    entry: Optional[dict[str, Any]],
+    overrides: dict[str, dict[str, Any]],
+) -> Optional[dict[str, Any]]:
+    """对单个模型条目应用能力覆盖（纯函数）。无匹配则原样返回。"""
+    if not isinstance(entry, dict) or not overrides:
+        return entry
+    model_id = str(entry.get("id") or entry.get("model_id") or "").strip()
+    if not model_id:
+        return entry
+    engine = _engine_from_generation_mode(entry.get("generation_mode"))
+    base_name = _model_id_basename(model_id).lower()
+
+    matched: list[tuple[int, dict[str, Any]]] = []
+    for match_key, cfg in overrides.items():
+        if not isinstance(cfg, dict):
+            continue
+        score = _capability_override_match_score(match_key, engine, base_name)
+        if score > 0:
+            matched.append((score, cfg))
+    if not matched:
+        return entry
+    matched.sort(key=lambda item: item[0])  # 低特异度先应用，高特异度后覆盖
+
+    result = dict(entry)
+    learned: set[str] = set()
+    for _score, cfg in matched:
+        for field in _CAPABILITY_OVERRIDE_BOOL_FIELDS:
+            if field in cfg:
+                result[field] = _model_ref_bool(
+                    cfg.get(field), bool(result.get(field))
+                )
+        size_mode = str(cfg.get("size_mode") or "").strip().lower()
+        if size_mode in _CAPABILITY_OVERRIDE_SIZE_MODES:
+            result["size_mode"] = size_mode
+        raw_learned = cfg.get("_learned_unsupported")
+        if isinstance(raw_learned, list):
+            learned.update(
+                str(item).strip() for item in raw_learned if str(item).strip()
+            )
+    if learned:
+        result["learned_unsupported"] = sorted(learned)
+    result["capability_override_applied"] = True
+    return result
+
+
+def _apply_capability_overrides_to_list(
+    request: Request,
+    entries: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """对模型列表批量应用能力覆盖。无覆盖配置时零开销返回原列表。"""
+    overrides = _get_capability_overrides(request)
+    if not overrides:
+        return entries
+    return [_apply_capability_overrides(entry, overrides) for entry in entries]
+
+
+# ---------------------------------------------------------------------------
+# 执行期"学习式降级"（阶段 C，仅作用于 Gemini image_size 档位 512/1K/2K/4K）
+# 策略：乐观发送用户所选档位；若 provider 以"参数类错误"拒绝，则降一档重试，
+# 最终省略 imageSize 让模型用默认；成功后把失败档位写回覆盖表（学一次记住），
+# 下次面板直接隐藏该档位，不再重复试错计费。
+# ---------------------------------------------------------------------------
+
+# 档位从低到高，用于推导"降一档"。
+_GEMINI_IMAGE_SIZE_ORDER = ["512", "1K", "2K", "4K"]
+
+# 命中以下关键词且为 4xx 参数类错误，才允许降级（针对尺寸/imageConfig）。
+_IMAGE_SIZE_ERROR_KEYWORDS = (
+    "imagesize",
+    "image size",
+    "image_size",
+    "imageconfig",
+    "image_config",
+    "aspect",
+    "unsupported",
+    "not supported",
+    "does not support",
+    "not allowed",
+    "invalid",
+    "size",
+)
+
+# 负面拦截：以下属鉴权/额度/限流等，绝不降级重试（避免重复计费/无意义重试）。
+_IMAGE_SIZE_ERROR_NEGATIVE_KEYWORDS = (
+    "api key",
+    "apikey",
+    "unauthorized",
+    "authenticat",
+    "permission",
+    "forbidden",
+    "quota",
+    "billing",
+    "credit",
+    "balance",
+    "rate limit",
+    "too many requests",
+    "insufficient",
+)
+
+# 仅这些状态码视为"参数类错误"。
+_IMAGE_PARAM_ERROR_STATUS = {400, 422}
+
+
+def _is_image_size_param_error(status_code: Any, detail_text: Any) -> bool:
+    """判断是否为"尺寸/参数不支持"类错误（可安全降级）。"""
+    try:
+        code = int(status_code)
+    except Exception:
+        return False
+    if code not in _IMAGE_PARAM_ERROR_STATUS:
+        return False
+    text = str(detail_text or "").lower()
+    if not text:
+        return False
+    if any(neg in text for neg in _IMAGE_SIZE_ERROR_NEGATIVE_KEYWORDS):
+        return False
+    return any(kw in text for kw in _IMAGE_SIZE_ERROR_KEYWORDS)
+
+
+def _gemini_image_size_fallback_steps(size: Optional[str]) -> list[Optional[str]]:
+    """返回首次之后的降级尝试序列（最多 2 步：下一更低档 + 省略）。"""
+    normalized = _normalize_gemini_image_size(size)
+    steps: list[Optional[str]] = []
+    if normalized and normalized in _GEMINI_IMAGE_SIZE_ORDER:
+        idx = _GEMINI_IMAGE_SIZE_ORDER.index(normalized)
+        if idx - 1 >= 0:
+            steps.append(_GEMINI_IMAGE_SIZE_ORDER[idx - 1])
+    steps.append(None)  # 最终省略 imageSize，用模型默认
+    return steps
+
+
+def _resolve_gemini_image_size_to_send(
+    meta: Optional[dict[str, Any]], requested_image_size: Any
+) -> Optional[str]:
+    """决定首次实际发送的 image_size：
+    - 已确认支持 → 直接发用户所选；
+    - 未验证（用户主动搜索、无覆盖）且未学习到不支持 → 乐观发送试探；
+    - 其余 → 不发（None）。"""
+    requested = _normalize_gemini_image_size(requested_image_size)
+    if not requested:
+        return None
+    meta = meta or {}
+    if meta.get("supports_image_size"):
+        return requested
+    detection = str(meta.get("detection_method") or "")
+    if detection == "search" and not meta.get("capability_override_applied"):
+        learned = set(meta.get("learned_unsupported") or [])
+        if f"image_size:{requested}" not in learned:
+            return requested
+    return None
+
+
+def _learn_unsupported_image_sizes(
+    request: Request, engine: str, model_id: str, sizes: list[Optional[str]]
+) -> None:
+    """把降级中失败的档位写回 IMAGES_MODEL_CAPABILITY_OVERRIDES（自动持久化+Redis 同步）。"""
+    failed = [str(s) for s in sizes if s]
+    if not failed:
+        return
+    try:
+        current = (
+            getattr(request.app.state.config, "IMAGES_MODEL_CAPABILITY_OVERRIDES", {})
+            or {}
+        )
+        if not isinstance(current, dict):
+            current = {}
+        new_overrides = dict(current)
+        key = (
+            f"{str(engine or '').strip().lower()}:"
+            f"{_model_id_basename(model_id).lower()}"
+        )
+        entry = dict(new_overrides.get(key) or {})
+        learned = set(entry.get("_learned_unsupported") or [])
+        for size in failed:
+            learned.add(f"image_size:{size}")
+        entry["_learned_unsupported"] = sorted(learned)
+        new_overrides[key] = entry
+        request.app.state.config.IMAGES_MODEL_CAPABILITY_OVERRIDES = new_overrides
+        log.info(f"learned unsupported image sizes for {key}: {sorted(learned)}")
+    except Exception as error:
+        log.warning(f"failed to persist learned image-size overrides: {error}")
+
+
 def _normalize_openai_image_route_mode(value: Any) -> str:
     normalized = str(value or "").strip().lower().replace("_", "-")
     aliases = {
@@ -3924,14 +4191,41 @@ def set_image_model(request: Request, model: str):
     return request.app.state.config.IMAGE_GENERATION_MODEL
 
 
+def _validate_capability_overrides_payload(raw: Any) -> dict[str, dict[str, Any]]:
+    """校验管理员提交的能力覆盖表结构：必须是 {str: {字段...}} 的两层字典。
+    结构非法时抛 400；合法时原样返回（保留 _learned_unsupported 等扩展字段）。"""
+    if not isinstance(raw, dict):
+        raise HTTPException(
+            status_code=400,
+            detail="IMAGES_MODEL_CAPABILITY_OVERRIDES 必须是 JSON 对象（{ \"engine:model\": { ... } }）。",
+        )
+    cleaned: dict[str, dict[str, Any]] = {}
+    for key, value in raw.items():
+        match_key = str(key or "").strip()
+        if not match_key:
+            continue
+        if not isinstance(value, dict):
+            raise HTTPException(
+                status_code=400,
+                detail=f"能力覆盖项 \"{match_key}\" 的值必须是对象。",
+            )
+        cleaned[match_key] = value
+    return cleaned
+
+
 class ImageConfigForm(BaseModel):
     IMAGE_MODEL_FILTER_REGEX: Optional[str] = None
+    IMAGES_MODEL_CAPABILITY_OVERRIDES: Optional[dict[str, Any]] = None
 
 
 @router.get("/image/config")
 async def get_image_config(request: Request, user=Depends(get_admin_user)):
     return {
         "IMAGE_MODEL_FILTER_REGEX": request.app.state.config.IMAGE_MODEL_FILTER_REGEX,
+        "IMAGES_MODEL_CAPABILITY_OVERRIDES": getattr(
+            request.app.state.config, "IMAGES_MODEL_CAPABILITY_OVERRIDES", {}
+        )
+        or {},
     }
 
 
@@ -3954,8 +4248,19 @@ async def update_image_config(
             form_data.IMAGE_MODEL_FILTER_REGEX
         )
 
+    if form_data.IMAGES_MODEL_CAPABILITY_OVERRIDES is not None:
+        request.app.state.config.IMAGES_MODEL_CAPABILITY_OVERRIDES = (
+            _validate_capability_overrides_payload(
+                form_data.IMAGES_MODEL_CAPABILITY_OVERRIDES
+            )
+        )
+
     return {
         "IMAGE_MODEL_FILTER_REGEX": request.app.state.config.IMAGE_MODEL_FILTER_REGEX,
+        "IMAGES_MODEL_CAPABILITY_OVERRIDES": getattr(
+            request.app.state.config, "IMAGES_MODEL_CAPABILITY_OVERRIDES", {}
+        )
+        or {},
     }
 
 
@@ -3995,6 +4300,7 @@ async def get_models(
                 strict=False,
             )
             models = _merge_image_model_lists(models, search_candidates)
+        models = _apply_capability_overrides_to_list(request, models)
     except HTTPException:
         raise
     except Exception as e:
@@ -7034,6 +7340,77 @@ async def _generate_via_gemini_generate_content(
     ]
 
 
+async def _generate_gemini_image_with_size_fallback(
+    request: Request,
+    user,
+    *,
+    model_id: str,
+    prompt: str,
+    image_size: Optional[str],
+    aspect_ratio: Optional[str],
+    source: dict[str, Any],
+    image_url: Optional[str] = None,
+    image_urls: Optional[list[str]] = None,
+    engine: str = "gemini",
+) -> list[dict[str, str]]:
+    """阶段 C：在 Gemini generateContent 外层做"参数错误→降档重试→学习"。
+    最多 2 次额外重试（降一档 + 省略 imageSize），失败档位成功后写回覆盖表。"""
+    normalized = _normalize_gemini_image_size(image_size)
+    if normalized:
+        attempt_sizes: list[Optional[str]] = [
+            normalized,
+            *_gemini_image_size_fallback_steps(normalized),
+        ]
+    else:
+        # 未选档位/无法识别：单次普通调用，无降级。
+        attempt_sizes = [None]
+
+    failed_sizes: list[Optional[str]] = []
+    last_exc: Optional[HTTPException] = None
+    for idx, size in enumerate(attempt_sizes):
+        try:
+            result = await _generate_via_gemini_generate_content(
+                request,
+                user,
+                model_id=model_id,
+                prompt=prompt,
+                image_size=size,
+                aspect_ratio=aspect_ratio,
+                source=source,
+                image_url=image_url,
+                image_urls=image_urls,
+            )
+            if failed_sizes:
+                _learn_unsupported_image_sizes(request, engine, model_id, failed_sizes)
+            return result
+        except HTTPException as exc:
+            is_last = idx >= len(attempt_sizes) - 1
+            detail_text = (
+                exc.detail
+                if isinstance(exc.detail, str)
+                else json.dumps(exc.detail, ensure_ascii=False, default=str)
+            )
+            if (
+                not is_last
+                and size is not None
+                and _is_image_size_param_error(exc.status_code, detail_text)
+            ):
+                failed_sizes.append(size)
+                last_exc = exc
+                try:
+                    log.info(
+                        f"gemini image_size '{size}' rejected as param error; "
+                        f"degrading (model={model_id})"
+                    )
+                except Exception:
+                    pass
+                continue
+            raise
+    if last_exc is not None:
+        raise last_exc
+    raise RuntimeError("Gemini image generation failed without a captured error")
+
+
 @router.post("/generations")
 async def image_generations(
     request: Request,
@@ -7288,6 +7665,9 @@ async def image_generations(
                 selected_model_meta = _build_search_candidate_model_meta_from_ref(
                     "openai", model_ref, selected_model
                 )
+            selected_model_meta = _apply_capability_overrides(
+                selected_model_meta, _get_capability_overrides(request)
+            )
 
             generation_mode = (selected_model_meta or {}).get(
                 "generation_mode"
@@ -7494,6 +7874,9 @@ async def image_generations(
                 selected_model_meta = _build_search_candidate_model_meta_from_ref(
                     "gemini", model_ref, selected_model
                 )
+            selected_model_meta = _apply_capability_overrides(
+                selected_model_meta, _get_capability_overrides(request)
+            )
 
             generation_mode = (selected_model_meta or {}).get(
                 "generation_mode"
@@ -7512,15 +7895,13 @@ async def image_generations(
                 pass
 
             if generation_mode == "gemini_generate_content_image":
-                return await _generate_via_gemini_generate_content(
+                return await _generate_gemini_image_with_size_fallback(
                     request,
                     user,
                     model_id=selected_model,
                     prompt=form_data.prompt,
-                    image_size=(
-                        requested_image_size
-                        if (selected_model_meta or {}).get("supports_image_size")
-                        else None
+                    image_size=_resolve_gemini_image_size_to_send(
+                        selected_model_meta, requested_image_size
                     ),
                     aspect_ratio=(
                         requested_aspect_ratio
@@ -7531,6 +7912,7 @@ async def image_generations(
                     image_url=reference_image_url,
                     image_urls=reference_image_urls,
                     source=source,
+                    engine="gemini",
                 )
 
             if reference_image_urls:
@@ -7640,6 +8022,9 @@ async def image_generations(
                     {"id": selected_model, "name": selected_model},
                     source=source,
                 )
+            selected_model_meta = _apply_capability_overrides(
+                selected_model_meta, _get_capability_overrides(request)
+            )
 
             requested_n = (
                 max(1, min(int(form_data.n or 1), 4))

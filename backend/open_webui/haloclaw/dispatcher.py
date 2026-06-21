@@ -185,8 +185,18 @@ async def handle_message(
     fake_request.state.connection_user = gateway_owner or halo_user
     await get_all_models(fake_request, user=gateway_owner or halo_user)
 
+    # --- 智能联网（与页面一致：自动判断本条消息是否需要联网，需要则检索并注入上下文）---
+    # 复用现有开关：网关勾选「联网搜索」(builtin:web) + 用户 /tools 开关 + 全局 ENABLE_WEB_SEARCH。
+    web_search_status = await _maybe_run_web_search(
+        fake_request, form_data, gateway, ext_user, halo_user, model_id
+    )
+
     # --- Load built-in tools (if gateway has tool_ids configured and user enabled) ---
     tools_dict = _load_gateway_tools(fake_request, gateway, ext_user, halo_user)
+
+    # 已注入联网资料时，抑制 search_web 工具，避免模型重复联网（与页面 halo 模式一致）。
+    if web_search_status and web_search_status.get("searched"):
+        tools_dict.pop("search_web", None)
 
     # --- Call chat completion (with or without tool loop) ---
     try:
@@ -242,6 +252,39 @@ async def handle_message(
         log.exception(f"HaloClaw dispatcher error: {e}")
         from open_webui.haloclaw.tool_executor import _extract_error_detail
         return DispatcherResult(error=_extract_error_detail(e))
+
+
+async def _maybe_run_web_search(
+    fake_request: _FakeRequest,
+    form_data: dict,
+    gateway: GatewayModel,
+    ext_user: ExternalUserModel,
+    halo_user: UserModel,
+    model_id: str,
+) -> Optional[dict]:
+    """按现有开关决定是否运行智能联网，并把结果注入 form_data。
+
+    门控（与 builtin:web 工具完全一致的语义）：
+    - 网关 meta.tool_ids 含 "builtin:web"（管理后台勾选「联网搜索」）
+    - 用户未在 /tools 中关闭工具（ext_user.meta.tools_enabled）
+    - 全局 ENABLE_WEB_SEARCH 打开（由 web_search 模块内部判断）
+    """
+    gateway_meta = gateway.meta or {}
+    if "builtin:web" not in (gateway_meta.get("tool_ids") or []):
+        return None
+
+    if not (ext_user.meta or {}).get("tools_enabled", True):
+        return None
+
+    try:
+        from open_webui.haloclaw.web_search import maybe_run_auto_web_search
+
+        return await maybe_run_auto_web_search(
+            fake_request, form_data, halo_user, model_id
+        )
+    except Exception as e:
+        log.warning(f"HaloClaw 智能联网执行出错: {e}")
+        return None
 
 
 def _load_gateway_tools(

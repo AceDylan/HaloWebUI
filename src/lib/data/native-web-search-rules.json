@@ -109,6 +109,33 @@
 					"reason": "model_rule_deny_non_chat_model"
 				}
 			]
+		},
+		"anthropic": {
+			"default_status": "unknown",
+			"allow": [
+				{
+					"type": "regex",
+					"value": "^claude-(?:opus|sonnet|haiku)-[0-9].*$",
+					"reason": "model_rule_allow_anthropic_search_family"
+				},
+				{
+					"type": "regex",
+					"value": "^claude-[0-9].*-(?:opus|sonnet|haiku).*$",
+					"reason": "model_rule_allow_anthropic_search_family"
+				}
+			],
+			"deny": [
+				{
+					"type": "contains",
+					"value": "claude-instant",
+					"reason": "model_rule_deny_legacy_model"
+				},
+				{
+					"type": "prefix",
+					"value": "claude-2",
+					"reason": "model_rule_deny_legacy_model"
+				}
+			]
 		}
 	}
 }

@@ -1880,6 +1880,23 @@ def _openai_tools_to_anthropic(tools: list[dict]) -> list[dict]:
     return anthropic_tools
 
 
+def _build_anthropic_web_search_tool(api_config: Optional[dict]) -> dict:
+    """Build Anthropic's server-side web search tool block.
+
+    Anthropic exposes web search as a server tool on the Messages API
+    (`web_search_20250305`); the model itself decides whether to invoke it.
+    The tool type and max_uses can be overridden per connection via api_config.
+    """
+    cfg = api_config if isinstance(api_config, dict) else {}
+    tool_type = str(cfg.get("anthropic_web_search_tool_type") or "").strip() or (
+        "web_search_20250305"
+    )
+    tool: dict = {"type": tool_type, "name": "web_search"}
+    max_uses = _coerce_positive_int(cfg.get("native_web_search_max_uses"))
+    tool["max_uses"] = max_uses if max_uses else 5
+    return tool
+
+
 def _openai_tool_choice_to_anthropic(tool_choice: Any) -> Optional[dict]:
     if tool_choice is None:
         return None
@@ -2210,6 +2227,11 @@ async def generate_chat_completion(
     payload = {**form_data}
     custom_params = payload.pop("custom_params", None)
     metadata = payload.pop("metadata", None) or {}
+    # Local-only flags injected by the chat middleware for model-native web search.
+    # Anthropic web search is a server tool, so the model decides when to search;
+    # there is no client-side "required" forcing to honor here.
+    native_web_search = payload.pop("native_web_search", False) is True
+    payload.pop("native_web_search_required", None)
 
     request_models = getattr(request.state, "MODELS", None) or getattr(
         request.app.state, "MODELS", {}
@@ -2447,11 +2469,18 @@ async def generate_chat_completion(
         anthropic_payload["stop_sequences"] = [stop.strip()]
 
     openai_tools = payload.get("tools")
+    anthropic_tools: list[dict] = []
     if isinstance(openai_tools, list) and openai_tools:
-        anthropic_payload["tools"] = _openai_tools_to_anthropic(openai_tools)
+        anthropic_tools = _openai_tools_to_anthropic(openai_tools)
         tool_choice = _openai_tool_choice_to_anthropic(payload.get("tool_choice"))
         if tool_choice:
             anthropic_payload["tool_choice"] = tool_choice
+    if native_web_search:
+        # Server-side web search; appended after function tools so existing
+        # tool_choice (auto/any) still applies to the function tools only.
+        anthropic_tools.append(_build_anthropic_web_search_tool(api_config))
+    if anthropic_tools:
+        anthropic_payload["tools"] = anthropic_tools
 
     metadata_user_id = str(user.id if user else "anonymous")
     anthropic_payload["metadata"] = {"user_id": metadata_user_id}

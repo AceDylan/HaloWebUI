@@ -75,6 +75,9 @@ from open_webui.routers.gemini import (
     _get_gemini_user_config,
     _resolve_gemini_connection_by_model_id,
 )
+from open_webui.routers.anthropic import (
+    _get_anthropic_user_config,
+)
 
 from open_webui.utils.webhook import post_webhook
 from open_webui.utils.chat_image_refs import extract_chat_image_file_id
@@ -2063,6 +2066,8 @@ def _native_web_search_provider_label(provider: Any) -> str:
         return "OpenAI"
     if normalized in {"gemini", "google"}:
         return "Gemini"
+    if normalized == "anthropic":
+        return "Claude"
     if normalized:
         return str(provider)
     return "模型"
@@ -2187,6 +2192,44 @@ def _resolve_native_web_search_support(
         support["api_config"] = api_config
         return support
 
+    if provider == "anthropic" or model.get("anthropic") is not None:
+        base_urls, keys, cfgs = _get_anthropic_user_config(connection_user)
+        if not base_urls:
+            return {
+                "provider": "anthropic",
+                "status": "unsupported",
+                "reason": "connection_not_found",
+                "source": "provider_resolution",
+                "supported": False,
+                "can_attempt": False,
+            }
+
+        # Anthropic web search is a server-side tool on the Messages API; the exact
+        # per-connection resolver is not available here, so infer support from the
+        # first configured connection. The upstream still decides whether to search.
+        url = base_urls[0]
+        api_config = {}
+        if isinstance(cfgs, dict):
+            api_config = cfgs.get("0") or cfgs.get(0) or {}
+            if not isinstance(api_config, dict):
+                api_config = {}
+
+        connection_support = build_native_web_search_support(
+            "anthropic",
+            url=url,
+            api_config=api_config,
+            connection_name=model.get("connection_name"),
+        )
+        support = resolve_effective_native_web_search_support(
+            connection_support,
+            provider="anthropic",
+            model_id=model.get("original_id") or model_id,
+            model_name=model.get("name") or "",
+        )
+        support["url"] = url
+        support["api_config"] = api_config
+        return support
+
     return resolve_effective_native_web_search_support(
         build_native_web_search_support(provider or "unknown"),
         provider=provider or "unknown",
@@ -2216,26 +2259,34 @@ def _resolve_web_search_strategy(
     if requested_mode == WEB_SEARCH_MODE_HALO:
         effective_mode = WEB_SEARCH_MODE_HALO if halo_enabled else WEB_SEARCH_MODE_OFF
     elif requested_mode == WEB_SEARCH_MODE_NATIVE:
+        # 用户显式选择「模型原生联网」：只要当前连接/模型有原生联网的可能（supported
+        # 或 can_attempt）就直接尝试，由上游模型自行决定是否检索；若确实无法原生联网，
+        # 本次不联网（不偷偷回退到 HaloWebUI 搜索）。
         if native_enabled and (
             native_support.get("supported") or native_support.get("can_attempt")
         ):
             effective_mode = WEB_SEARCH_MODE_NATIVE
-        elif halo_enabled:
-            effective_mode = WEB_SEARCH_MODE_HALO
-            notification = (
-                "当前模型或连接不支持模型原生联网，本次将使用 HaloWebUI 搜索。"
-            )
+        else:
+            effective_mode = WEB_SEARCH_MODE_OFF
+            notification = "当前模型或连接无法使用模型原生联网，本次不联网。"
     elif requested_mode == WEB_SEARCH_MODE_AUTO:
         if native_enabled and native_support.get("supported"):
             effective_mode = WEB_SEARCH_MODE_NATIVE
         elif halo_enabled:
             effective_mode = WEB_SEARCH_MODE_HALO
 
+    # 显式原生模式失败时也不回退 Halo；仅在「智能联网」(auto) 收敛到 native 时保留单次回退。
+    allow_halo_retry = (
+        effective_mode == WEB_SEARCH_MODE_NATIVE
+        and halo_enabled
+        and requested_mode != WEB_SEARCH_MODE_NATIVE
+    )
+
     return {
         "requested_mode": requested_mode,
         "effective_mode": effective_mode,
         "native_support": native_support,
-        "allow_halo_retry": effective_mode == WEB_SEARCH_MODE_NATIVE and halo_enabled,
+        "allow_halo_retry": allow_halo_retry,
         "notification": notification,
     }
 

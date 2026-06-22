@@ -121,7 +121,12 @@ function resolveFallbackModelRule(
 ): NativeWebSearchSupport {
 	const normalizedProvider = normalizeRuleProvider(provider);
 	const providerRules = getProviderRules(normalizedProvider);
-	if (!providerRules.default_status && normalizedProvider !== 'openai' && normalizedProvider !== 'gemini') {
+	if (
+		!providerRules.default_status &&
+		normalizedProvider !== 'openai' &&
+		normalizedProvider !== 'gemini' &&
+		normalizedProvider !== 'anthropic'
+	) {
 		return {
 			status: 'unsupported',
 			reason: normalizedProvider ? 'provider_not_supported' : 'unknown_model',
@@ -171,7 +176,10 @@ function resolveFallbackModelRule(
 		source: 'model_rules_fallback',
 		provider: normalizedProvider,
 		supported: false,
-		can_attempt: normalizedProvider === 'openai' || normalizedProvider === 'gemini',
+		can_attempt:
+			normalizedProvider === 'openai' ||
+			normalizedProvider === 'gemini' ||
+			normalizedProvider === 'anthropic',
 		model_rule: {
 			status: providerRules.default_status ?? 'unknown',
 			reason: 'model_rule_unknown',

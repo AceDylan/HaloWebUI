@@ -39,6 +39,11 @@ def is_official_gemini_connection(url: str) -> bool:
     return host == "generativelanguage.googleapis.com"
 
 
+def is_official_anthropic_connection(url: str) -> bool:
+    host = _get_hostname(url)
+    return host == "api.anthropic.com" or host.endswith(".anthropic.com")
+
+
 def _normalize_rule_provider(provider: str) -> str:
     normalized = str(provider or "").strip().lower()
     if normalized in {"google", "gemini"}:
@@ -199,12 +204,12 @@ def resolve_effective_native_web_search_support(
         reason = model_rule.get("reason") or connection.get("reason") or "official_connection"
         source = NATIVE_WEB_SEARCH_EFFECTIVE_SCOPE
     elif (
-        normalized_provider == "openai"
+        normalized_provider in {"openai", "anthropic"}
         and connection_status == NATIVE_WEB_SEARCH_STATUS_UNKNOWN
         and model_status == NATIVE_WEB_SEARCH_STATUS_SUPPORTED
     ):
         effective_status = NATIVE_WEB_SEARCH_STATUS_SUPPORTED
-        reason = model_rule.get("reason") or "model_rule_allow_openai_compatible"
+        reason = model_rule.get("reason") or "model_rule_allow_provider_compatible"
         source = NATIVE_WEB_SEARCH_EFFECTIVE_SCOPE
     else:
         effective_status = NATIVE_WEB_SEARCH_STATUS_UNKNOWN
@@ -310,6 +315,41 @@ def build_native_web_search_support(
 
         return {
             "provider": "gemini",
+            "status": status,
+            "reason": reason,
+            "source": source,
+            "official": official,
+            "configured": configured,
+            "supported": status == NATIVE_WEB_SEARCH_STATUS_SUPPORTED,
+            "can_attempt": status
+            in {
+                NATIVE_WEB_SEARCH_STATUS_SUPPORTED,
+                NATIVE_WEB_SEARCH_STATUS_UNKNOWN,
+            },
+            **({"connection_name": connection_name} if connection_name else {}),
+        }
+
+    if normalized_provider == "anthropic":
+        official = is_official_anthropic_connection(url)
+        if configured is True:
+            status = NATIVE_WEB_SEARCH_STATUS_SUPPORTED
+            reason = "connection_enabled"
+            source = "connection_config"
+        elif configured is False:
+            status = NATIVE_WEB_SEARCH_STATUS_UNSUPPORTED
+            reason = "connection_disabled"
+            source = "connection_config"
+        elif official:
+            status = NATIVE_WEB_SEARCH_STATUS_SUPPORTED
+            reason = "official_connection"
+            source = "official_connection"
+        else:
+            status = NATIVE_WEB_SEARCH_STATUS_UNKNOWN
+            reason = "compat_connection_unverified"
+            source = "connection_inference"
+
+        return {
+            "provider": "anthropic",
             "status": status,
             "reason": reason,
             "source": source,

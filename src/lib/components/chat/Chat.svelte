@@ -2283,7 +2283,18 @@
 
 	$: if (!chatIdProp) {
 		lastRequestedChatIdProp = '';
-	} else if (lastRequestedChatIdProp !== chatIdProp) {
+	} else if (
+		lastRequestedChatIdProp !== chatIdProp ||
+		(!loading && $chatId !== chatIdProp && $page.url.pathname.endsWith(`/c/${chatIdProp}`))
+	) {
+		// 触发加载的两种情况:
+		// 1) chatIdProp(来自 $page.params.id)值发生变化 —— 常规切换对话。
+		// 2) chatIdProp 值未变,但地址栏已回到 /c/<chatIdProp> 且当前已加载的会话 $chatId 不是它 ——
+		//    例如在 /c/X 上点"新对话"(浅路由不改 route params,chatIdProp 仍为 X,$chatId 被清空、
+		//    地址栏变为 /),随后再点同一对话 X:此时 chatIdProp 值不变、Svelte 不会因 prop 触发,
+		//    需靠 pathname 已回到 /c/X 且 $chatId 偏离来补触发。
+		//    用 pathname 判断(而非裸比较 $chatId)可避免误伤新对话本身(新对话时 pathname 为 /);
+		//    用 !loading 保证不打断正在进行的加载,避免重复加载循环。
 		lastRequestedChatIdProp = chatIdProp;
 		const targetChatId = chatIdProp;
 		const loadToken = ++activeChatLoadToken;

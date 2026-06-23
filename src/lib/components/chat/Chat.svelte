@@ -7,7 +7,7 @@
 	import { getContext, onDestroy, onMount, setContext, tick } from 'svelte';
 	const i18n: Writable<i18nType> = getContext('i18n');
 
-	import { goto, replaceState } from '$app/navigation';
+	import { goto, replaceState, afterNavigate } from '$app/navigation';
 	import { page } from '$app/stores';
 
 	import { get, writable, type Unsubscriber, type Writable } from 'svelte/store';
@@ -2281,22 +2281,11 @@
 		}
 	}
 
-	$: if (!chatIdProp) {
-		lastRequestedChatIdProp = '';
-	} else if (
-		lastRequestedChatIdProp !== chatIdProp ||
-		(!loading && $chatId !== chatIdProp && $page.url.pathname.endsWith(`/c/${chatIdProp}`))
-	) {
-		// 触发加载的两种情况:
-		// 1) chatIdProp(来自 $page.params.id)值发生变化 —— 常规切换对话。
-		// 2) chatIdProp 值未变,但地址栏已回到 /c/<chatIdProp> 且当前已加载的会话 $chatId 不是它 ——
-		//    例如在 /c/X 上点"新对话"(浅路由不改 route params,chatIdProp 仍为 X,$chatId 被清空、
-		//    地址栏变为 /),随后再点同一对话 X:此时 chatIdProp 值不变、Svelte 不会因 prop 触发,
-		//    需靠 pathname 已回到 /c/X 且 $chatId 偏离来补触发。
-		//    用 pathname 判断(而非裸比较 $chatId)可避免误伤新对话本身(新对话时 pathname 为 /);
-		//    用 !loading 保证不打断正在进行的加载,避免重复加载循环。
-		lastRequestedChatIdProp = chatIdProp;
-		const targetChatId = chatIdProp;
+	// 加载某个已存在对话的统一入口。响应式块(chatIdProp 值变化)与 afterNavigate
+	// (chatIdProp 值未变但发生了真实导航,如新对话后点回同一对话)共用此函数,
+	// 保证 token 去重、失败回退、loading 复位等保障逻辑只有一份。
+	const requestChatLoad = (targetChatId: string) => {
+		lastRequestedChatIdProp = targetChatId;
 		const loadToken = ++activeChatLoadToken;
 
 		(async () => {
@@ -2321,7 +2310,7 @@
 			maxThinkingTokens = null;
 
 			try {
-				const loaded = await loadChat(targetChatId);
+				const loaded = await loadChat(targetChatId, loadToken);
 
 				// 已被更新的加载请求取代：loading 与状态交给最新加载管理，这里直接退出
 				if (loadToken !== activeChatLoadToken) {
@@ -2371,7 +2360,34 @@
 				console.error('[Chat] Failed to load chat', targetChatId, error);
 			}
 		})();
+	};
+
+	$: if (!chatIdProp) {
+		lastRequestedChatIdProp = '';
+	} else if (lastRequestedChatIdProp !== chatIdProp) {
+		// 仅在 chatIdProp(来自 $page.params.id)值发生变化时加载。
+		// "chatIdProp 值未变但需重载"的场景(如新对话后点回同一对话)交给下方 afterNavigate 处理,
+		// 不在此处用 $chatId/pathname 等异步状态做判断 —— 响应式块会在中间态被触发,导致竞态。
+		requestChatLoad(chatIdProp);
 	}
+
+	// 处理"chatIdProp 值未变但发生了真实导航"的场景:
+	// 在 /c/X 上点"新对话"时,initNewChat 用浅路由 replaceState 把地址栏改为 /,
+	// 但 route params 不变(chatIdProp 仍为 X),$chatId 被清空、显示新对话页。
+	// 随后再点同一对话 X(href="/c/X"),SvelteKit 发生真实导航,但 params.id 值仍是 X,
+	// chatIdProp 不变 → 上方响应式块不会触发。
+	// afterNavigate 在真实导航(enter/goto/link/popstate/form)完成后执行,组件挂载时也会立即执行一次;
+	// 浅路由 replaceState/pushState 是 "without navigating",不会触发它 ——
+	// 因此"点新对话"(浅路由)不会进入这里,不会误把刚清空的对话又加载回来(规避了之前的竞态)。
+	// 组件挂载时的那次:首次加载已由响应式块发起(loading=true 或 $chatId 已等于 chatIdProp),会被下方条件拦截。
+	// 触发时机点 $chatId / 路由状态均已稳定(无响应式中间态),可安全按需补发加载。
+	afterNavigate(() => {
+		// 当前停在某个对话路由、且该对话尚未被加载(被新对话清空,$chatId 与之不一致)时,补发一次加载。
+		// !loading 避免与响应式块/进行中的加载重复触发。
+		if (chatIdProp && lastRequestedChatIdProp === chatIdProp && $chatId !== chatIdProp && !loading) {
+			requestChatLoad(chatIdProp);
+		}
+	});
 
 	$: if (selectedModels) {
 		saveSessionSelectedModels();
@@ -3198,6 +3214,11 @@
 	const initNewChat = async (options: { fresh?: boolean } = {}) => {
 		const fresh = options.fresh ?? false;
 		const inheritNewChatState = !fresh && getNewChatStateInheritanceEnabled();
+		// 作废所有在途的对话加载:在 /c/X 上开新对话时,浅路由不改 chatIdProp(仍为 X),
+		// 旧的 loadChat(X) 若仍在 await 中,其内部 isStale() 会因 token 变化而中止写状态,
+		// 避免慢加载完成后把 X 的内容覆盖到刚打开的新对话上。
+		activeChatLoadToken++;
+		loading = false;
 		freshChatActive = fresh;
 		composerStateSyncReady = false;
 		resetReasoningSelectionTracking();
@@ -3525,8 +3546,14 @@
 		}
 	}
 
-	const loadChat = async (targetChatId: string = chatIdProp) => {
+	const loadChat = async (targetChatId: string = chatIdProp, loadToken: number = activeChatLoadToken) => {
 		const navigationId = targetChatId;
+		// stale 判定:loadToken 失效说明本次加载已被更新的请求或"新对话"(initNewChat 会作废 token)取代。
+		// 不能仅靠 navigationId !== chatIdProp —— 在 /c/X 浅路由开新对话时 chatIdProp 仍为 X,该判定会漏判,
+		// 导致旧的慢加载把 X 的状态写回新对话界面(竞态)。token 是统一、可靠的失效信号。
+		const isStale = () => loadToken !== activeChatLoadToken || navigationId !== chatIdProp;
+		// 任何状态写入前先判一次:本次加载若已被新请求/新对话取代,直接退出,不污染组件状态。
+		if (isStale()) return null;
 		chatId.set(targetChatId);
 		tags = [];
 		taskIds = null;
@@ -3535,9 +3562,13 @@
 			task_ids: []
 		}));
 
-		chat = await getChatById(localStorage.token, targetChatId).catch(() => null);
+		// 用局部变量接收,确认 token 仍有效后再写入组件级 chat 变量,
+		// 避免慢加载返回时把旧对话的 chat 对象写回(影响分享/菜单/initChatHandler 等)。
+		const loadedChat = await getChatById(localStorage.token, targetChatId).catch(() => null);
 
-		if (navigationId !== chatIdProp) return null;
+		if (isStale()) return null;
+
+		chat = loadedChat;
 
 		if (chat) {
 			const chatContent = chat.chat;
@@ -3546,6 +3577,8 @@
 				if ($models.length === 0) {
 					await ensureModels(localStorage.token, { reason: 'chat-history-model-recovery' }).catch(() => {});
 					await tick();
+					// ensureModels 是异步 await,期间可能已开新对话/切换,需在写状态前再次校验。
+					if (isStale()) return null;
 				}
 
 				const loadedModels =
@@ -3575,11 +3608,14 @@
 					if ($models.length === 0) {
 						await ensureModels(localStorage.token, { reason: 'chat-assistant-scene' }).catch(() => {});
 						await tick();
+						if (isStale()) return null;
 					}
 
 					const assistantScene =
 						getModelById(chat.assistant_id) ??
 						(await getWorkspaceModelById(localStorage.token, chat.assistant_id).catch(() => null));
+
+					if (isStale()) return null;
 
 					selectedAssistantScene.set(assistantScene ?? null);
 				} else {
@@ -3589,7 +3625,7 @@
 				void (async () => {
 					const nextContext = await chatContextPromise;
 
-					if (navigationId !== chatIdProp) return;
+					if (isStale()) return;
 
 					tags = nextContext?.tags ?? [];
 					taskIds = nextContext?.task_ids ?? [];

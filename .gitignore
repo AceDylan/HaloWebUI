@@ -323,3 +323,4 @@ cypress/videos
 cypress/screenshots
 .vscode/settings.json
 nul
+.ace-tool/

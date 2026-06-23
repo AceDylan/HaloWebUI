@@ -7,7 +7,7 @@
 	import { getContext, onDestroy, onMount, setContext, tick } from 'svelte';
 	const i18n: Writable<i18nType> = getContext('i18n');
 
-	import { goto } from '$app/navigation';
+	import { goto, replaceState } from '$app/navigation';
 	import { page } from '$app/stores';
 
 	import { get, writable, type Unsubscriber, type Writable } from 'svelte/store';
@@ -3283,9 +3283,9 @@
 		await showArtifacts.set(false);
 
 		if ($page.url.pathname.includes('/c/')) {
-			window.history.replaceState(
-				window.history.state,
-				'',
+			// 用 SvelteKit 的 replaceState 走浅路由,同步 $page.url,
+			// 避免地址栏与路由状态不同步导致点击侧边栏首个对话不跳转。
+			replaceState(
 				getTemporaryChatNavigationPath({
 					currentUrl: new URL(window.location.href),
 					enabled: temporaryChatState.enabled,
@@ -3293,7 +3293,8 @@
 					enforced: temporaryChatState.enforced,
 					allowed: temporaryChatState.allowed,
 					pathname: '/'
-				})
+				}),
+				$page.state
 			);
 		}
 
@@ -3459,9 +3460,8 @@
 		}
 
 		if (window.location.pathname === '/') {
-			window.history.replaceState(
-				window.history.state,
-				'',
+			// 浅路由同步,理由同上,避免与 SvelteKit 路由状态脱节
+			replaceState(
 				getTemporaryChatNavigationPath({
 					currentUrl: new URL(window.location.href),
 					enabled: temporaryChatState.enabled,
@@ -3469,7 +3469,8 @@
 					enforced: temporaryChatState.enforced,
 					allowed: temporaryChatState.allowed,
 					pathname: '/'
-				})
+				}),
+				$page.state
 			);
 		}
 
@@ -3483,7 +3484,8 @@
 		if (fresh && $page.url.searchParams.get('fresh-chat') === 'true') {
 			const url = new URL($page.url);
 			url.searchParams.delete('fresh-chat');
-			window.history.replaceState(history.state, '', `${url.pathname}${url.search}${url.hash}`);
+			// 浅路由同步,理由同上
+			replaceState(`${url.pathname}${url.search}${url.hash}`, $page.state);
 		}
 	};
 
@@ -6063,7 +6065,10 @@
 			await chats.set(await getChatList(localStorage.token, $currentChatPage));
 			currentChatPage.set(1);
 
-			window.history.replaceState(history.state, '', `/c/${_chatId}`);
+			// 浅路由同步,理由同 initNewChat 中的两处:
+			// 之前用 window.history.replaceState 会导致地址栏与 SvelteKit 内部 $page.url 脱节,
+			// 后续点侧边栏第一个对话时 URL 变了但 SvelteKit 认为已在该路由而不重渲染(无 Console 报错)。
+			replaceState(`/c/${_chatId}`, $page.state);
 		} else {
 			_chatId = 'local';
 			await chatId.set('local');

@@ -575,7 +575,12 @@
 				WEB_SEARCH_DOMAIN_FILTER_LIST: webConfig.WEB_SEARCH_DOMAIN_FILTER_LIST,
 				BYPASS_WEB_SEARCH_EMBEDDING_AND_RETRIEVAL:
 					webConfig.BYPASS_WEB_SEARCH_EMBEDDING_AND_RETRIEVAL,
-				WEB_SEARCH_TRUST_ENV: webConfig.WEB_SEARCH_TRUST_ENV
+				WEB_SEARCH_TRUST_ENV: webConfig.WEB_SEARCH_TRUST_ENV,
+				// 任务开关（高级选项）渲染在联网搜索页签内，需纳入脏状态快照，
+				// 否则切换这些开关不会触发保存按钮。
+				ENABLE_RETRIEVAL_QUERY_GENERATION: enableRetrievalQueryGeneration,
+				ENABLE_SEARCH_QUERY_GENERATION: enableSearchQueryGeneration,
+				AUTO_WEB_SEARCH_DECISION_USE_MAIN_MODEL: autoWebSearchDecisionUseMainModel
 			},
 			loader: {
 				WEB_LOADER_ENGINE: webConfig.WEB_LOADER_ENGINE,
@@ -704,6 +709,10 @@
 		youtubeTranslation;
 		tavilySearchBaseUrlInput;
 		tavilyExtractBaseUrlInput;
+		// 列为响应式依赖，确保任务开关变化时重算快照（buildSnapshot 内部引用不会被自动追踪）。
+		enableSearchQueryGeneration;
+		enableRetrievalQueryGeneration;
+		autoWebSearchDecisionUseMainModel;
 		snapshot = buildSnapshot();
 	}
 	$: dirtySections = initialSnapshot && snapshot
@@ -779,7 +788,6 @@
 					webConfig.TAVILY_EXTRACT_API_FORCE_MODE
 				);
 				syncPlaywrightModeFromConfig();
-				initialSnapshot = cloneSettingsSnapshot(buildSnapshot());
 			} else {
 				webConfig = null;
 			}
@@ -789,6 +797,13 @@
 				enableRetrievalQueryGeneration = taskRes.ENABLE_RETRIEVAL_QUERY_GENERATION ?? true;
 				autoWebSearchDecisionUseMainModel =
 					taskRes.AUTO_WEB_SEARCH_DECISION_USE_MAIN_MODEL ?? false;
+			}
+
+			// 初始快照必须在 web 配置与任务开关都加载完成后再生成，
+			// 否则任务开关（含「由对话模型判断是否联网」）的初始值会落在快照之外，
+			// 导致加载后被误判为脏（或永远无法触发保存按钮）。
+			if (webConfig) {
+				initialSnapshot = cloneSettingsSnapshot(buildSnapshot());
 			}
 		} catch (error) {
 			console.error('Failed to load web config', error);
@@ -1008,9 +1023,18 @@
 		const sectionSnapshot: Record<string, any> = cloneSettingsSnapshot(initialSnapshot[section]);
 		delete sectionSnapshot.TAVILY_SEARCH_API_BASE_URL_INPUT;
 		delete sectionSnapshot.TAVILY_EXTRACT_API_BASE_URL_INPUT;
+		// 任务开关存放在独立变量中，不属于 webConfig，需从快照里剔除后单独还原。
+		delete sectionSnapshot.ENABLE_RETRIEVAL_QUERY_GENERATION;
+		delete sectionSnapshot.ENABLE_SEARCH_QUERY_GENERATION;
+		delete sectionSnapshot.AUTO_WEB_SEARCH_DECISION_USE_MAIN_MODEL;
 		Object.assign(webConfig, sectionSnapshot);
 		if (section === 'webSearch') {
 			tavilySearchBaseUrlInput = initialSnapshot.webSearch.TAVILY_SEARCH_API_BASE_URL_INPUT;
+			enableRetrievalQueryGeneration =
+				initialSnapshot.webSearch.ENABLE_RETRIEVAL_QUERY_GENERATION;
+			enableSearchQueryGeneration = initialSnapshot.webSearch.ENABLE_SEARCH_QUERY_GENERATION;
+			autoWebSearchDecisionUseMainModel =
+				initialSnapshot.webSearch.AUTO_WEB_SEARCH_DECISION_USE_MAIN_MODEL;
 		}
 		if (section === 'loader') {
 			playwrightMode = normalizePlaywrightMode(

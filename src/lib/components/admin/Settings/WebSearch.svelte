@@ -187,6 +187,8 @@
 	// Task config for query generation toggles
 	let enableSearchQueryGeneration = true;
 	let enableRetrievalQueryGeneration = true;
+	// 智能联网「是否需要联网」的判断模型：false=任务模型（默认），true=当前对话主模型
+	let autoWebSearchDecisionUseMainModel = false;
 
 	const NUMERIC_FIELD_DEFAULTS = {
 		WEB_SEARCH_RESULT_COUNT: 3,
@@ -785,6 +787,8 @@
 			if (taskRes) {
 				enableSearchQueryGeneration = taskRes.ENABLE_SEARCH_QUERY_GENERATION ?? true;
 				enableRetrievalQueryGeneration = taskRes.ENABLE_RETRIEVAL_QUERY_GENERATION ?? true;
+				autoWebSearchDecisionUseMainModel =
+					taskRes.AUTO_WEB_SEARCH_DECISION_USE_MAIN_MODEL ?? false;
 			}
 		} catch (error) {
 			console.error('Failed to load web config', error);
@@ -870,7 +874,8 @@
 		try {
 			await updateTaskConfig(localStorage.token, {
 				ENABLE_SEARCH_QUERY_GENERATION: enableSearchQueryGeneration,
-				ENABLE_RETRIEVAL_QUERY_GENERATION: enableRetrievalQueryGeneration
+				ENABLE_RETRIEVAL_QUERY_GENERATION: enableRetrievalQueryGeneration,
+				AUTO_WEB_SEARCH_DECISION_USE_MAIN_MODEL: autoWebSearchDecisionUseMainModel
 			});
 			return true;
 		} catch (error) {
@@ -1677,6 +1682,22 @@
 									>
 										<div class="text-sm font-medium">{$i18n.t('Web Search Query Generation')}</div>
 										<Switch bind:state={enableSearchQueryGeneration} />
+									</div>
+
+									<div
+										class="flex items-center justify-between glass-item px-4 py-3"
+									>
+										<div class="text-sm font-medium">
+											<Tooltip
+												content={$i18n.t(
+													'When enabled, the current chat model decides whether to auto web search, instead of the task model.'
+												)}
+												placement="top-start"
+											>
+												{$i18n.t('Auto Web Search Decided by Chat Model')}
+											</Tooltip>
+										</div>
+										<Switch bind:state={autoWebSearchDecisionUseMainModel} />
 									</div>
 
 									<div

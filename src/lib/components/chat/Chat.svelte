@@ -2309,32 +2309,56 @@
 			reasoningEffort = null;
 			maxThinkingTokens = null;
 
-			const loaded = await loadChat(targetChatId);
+			try {
+				const loaded = await loadChat(targetChatId);
 
-			if (loadToken !== activeChatLoadToken || targetChatId !== chatIdProp) {
-				return;
+				// 已被更新的加载请求取代：loading 与状态交给最新加载管理，这里直接退出
+				if (loadToken !== activeChatLoadToken) {
+					return;
+				}
+
+				// 加载失败：回滚守卫以允许重试，跳转首页（保持 loading 直至卸载，避免空视图闪烁）
+				if (!loaded) {
+					lastRequestedChatIdProp = '';
+					await goto('/');
+					return;
+				}
+
+				// 目标已切换（如已导航到首页/新对话）：复位 loading 与守卫，避免视图卡在 loading
+				if (targetChatId !== chatIdProp) {
+					lastRequestedChatIdProp = '';
+					loading = false;
+					composerStateSyncReady = true;
+					webSearchSelectionSyncReady = true;
+					return;
+				}
+
+				if (!hasPersistedComposerState) {
+					restoreChatSessionState(targetChatId);
+				}
+
+				const input = readChatInputState(targetChatId);
+				restoreChatInputDraft(input);
+
+				loading = false;
+				await tick();
+				scrollToBottomImmediately();
+				const chatInput = document.getElementById('chat-input');
+				chatInput?.focus();
+				composerStateSyncReady = true;
+				webSearchSelectionSyncReady = true;
+				initializeReasoningSelectionTracking();
+			} catch (error) {
+				// 加载过程抛异常：若本次仍是最新请求，复位 loading，避免视图永久卡在 loading。
+				// 此处不回滚 lastRequestedChatIdProp —— 否则响应式块会立即用相同 id 重跑，
+				// 持续异常时会陷入无限重载循环；需切换到其它对话方可重新尝试。
+				if (loadToken === activeChatLoadToken) {
+					loading = false;
+					composerStateSyncReady = true;
+					webSearchSelectionSyncReady = true;
+				}
+				console.error('[Chat] Failed to load chat', targetChatId, error);
 			}
-
-			if (!loaded) {
-				await goto('/');
-				return;
-			}
-
-			if (!hasPersistedComposerState) {
-				restoreChatSessionState(targetChatId);
-			}
-
-			const input = readChatInputState(targetChatId);
-			restoreChatInputDraft(input);
-
-			loading = false;
-			await tick();
-			scrollToBottomImmediately();
-			const chatInput = document.getElementById('chat-input');
-			chatInput?.focus();
-			composerStateSyncReady = true;
-			webSearchSelectionSyncReady = true;
-			initializeReasoningSelectionTracking();
 		})();
 	}
 

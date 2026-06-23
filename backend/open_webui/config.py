@@ -2071,6 +2071,17 @@ ENABLE_RETRIEVAL_QUERY_GENERATION = PersistentConfig(
 )
 
 
+# 智能联网（auto web search）「是否需要联网」的判断模型：
+# - False（默认）：沿用任务模型（TASK_MODEL_EXTERNAL，未配置时即主模型），保留把这道
+#   廉价分类下放到便宜模型的省钱行为。
+# - True：恒用当前对话主模型（form_data["model"]）做判断，让判断与真正回答的模型一致。
+AUTO_WEB_SEARCH_DECISION_USE_MAIN_MODEL = PersistentConfig(
+    "AUTO_WEB_SEARCH_DECISION_USE_MAIN_MODEL",
+    "task.auto_web_search_decision.use_main_model",
+    os.environ.get("AUTO_WEB_SEARCH_DECISION_USE_MAIN_MODEL", "False").lower() == "true",
+)
+
+
 QUERY_GENERATION_PROMPT_TEMPLATE = PersistentConfig(
     "QUERY_GENERATION_PROMPT_TEMPLATE",
     "task.query.prompt_template",

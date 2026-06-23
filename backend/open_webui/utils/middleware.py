@@ -2006,8 +2006,23 @@ async def _resolve_auto_web_search_decision(
         or get_last_user_message(messages),
     )
 
+    # 选择「是否需要联网」的判断模型：
+    # 默认沿用任务模型；当 AUTO_WEB_SEARCH_DECISION_USE_MAIN_MODEL 打开时，改用当前
+    # 对话主模型（form_data["model"]），让判断与真正回答的模型保持一致。
+    decision_model_id = task_model_id
+    if bool(
+        getattr(
+            request.app.state.config,
+            "AUTO_WEB_SEARCH_DECISION_USE_MAIN_MODEL",
+            False,
+        )
+    ):
+        main_model_id = form_data.get("model") if isinstance(form_data, dict) else None
+        if main_model_id:
+            decision_model_id = main_model_id
+
     payload = {
-        "model": task_model_id,
+        "model": decision_model_id,
         "messages": [{"role": "user", "content": prompt}],
         "stream": False,
         "metadata": {

@@ -41,6 +41,29 @@
 	let defaultModel = '';
 	let maxHistory = 20;
 	let rateLimit = 10;
+	let defaultReasoningEffort = 'xhigh';
+	// 空字符串表示「默认（不启用预算）」=> null
+	let defaultThinkingBudget: string = '';
+	let anthropicEffortPassthrough = true;
+
+	const REASONING_EFFORT_OPTIONS = ['none', 'low', 'medium', 'high', 'xhigh', 'max'];
+
+	// 预算输入框（字符串）<-> 后端值（number|null）互转
+	const thinkingBudgetToString = (value: unknown): string => {
+		if (value === null || value === undefined || value === '') {
+			return '';
+		}
+		const parsed = Number(value);
+		return Number.isFinite(parsed) ? String(parsed) : '';
+	};
+	const thinkingBudgetToPayload = (value: string): number | null => {
+		const trimmed = String(value ?? '').trim();
+		if (trimmed === '') {
+			return null;
+		}
+		const parsed = Number(trimmed);
+		return Number.isFinite(parsed) ? Math.trunc(parsed) : null;
+	};
 	let ready = false;
 
 	let showGatewayModal = false;
@@ -106,7 +129,10 @@
 		enabled: Boolean(haloclawEnabled),
 		default_model: resolveModelId(defaultModel ?? ''),
 		max_history: normalizeMainNumber(maxHistory, 20),
-		rate_limit: normalizeMainNumber(rateLimit, 10)
+		rate_limit: normalizeMainNumber(rateLimit, 10),
+		default_reasoning_effort: defaultReasoningEffort,
+		default_max_thinking_tokens: thinkingBudgetToPayload(defaultThinkingBudget),
+		anthropic_effort_passthrough: Boolean(anthropicEffortPassthrough)
 	});
 
 	const syncMainBaseline = () => {
@@ -173,6 +199,9 @@
 		defaultModel = resolveModelId(loadedConfig?.default_model ?? '');
 		maxHistory = Number(loadedConfig?.max_history ?? 20);
 		rateLimit = Number(loadedConfig?.rate_limit ?? 10);
+		defaultReasoningEffort = loadedConfig?.default_reasoning_effort ?? 'xhigh';
+		defaultThinkingBudget = thinkingBudgetToString(loadedConfig?.default_max_thinking_tokens);
+		anthropicEffortPassthrough = loadedConfig?.anthropic_effort_passthrough ?? true;
 		gateways = cloneSettingsSnapshot(loadedGateways ?? []);
 		ready = true;
 		syncMainBaseline();
@@ -186,13 +215,19 @@
 				enabled: haloclawEnabled,
 				default_model: resolveModelId(defaultModel),
 				max_history: Number(maxHistory),
-				rate_limit: Number(rateLimit)
+				rate_limit: Number(rateLimit),
+				default_reasoning_effort: defaultReasoningEffort,
+				default_max_thinking_tokens: thinkingBudgetToPayload(defaultThinkingBudget),
+				anthropic_effort_passthrough: Boolean(anthropicEffortPassthrough)
 			});
 
 			haloclawEnabled = Boolean(res?.enabled);
 			defaultModel = resolveModelId(res?.default_model ?? '');
 			maxHistory = Number(res?.max_history ?? maxHistory);
 			rateLimit = Number(res?.rate_limit ?? rateLimit);
+			defaultReasoningEffort = res?.default_reasoning_effort ?? defaultReasoningEffort;
+			defaultThinkingBudget = thinkingBudgetToString(res?.default_max_thinking_tokens);
+			anthropicEffortPassthrough = res?.anthropic_effort_passthrough ?? anthropicEffortPassthrough;
 			syncMainBaseline();
 			await saveHandler?.();
 		} catch (err: any) {
@@ -210,6 +245,9 @@
 		defaultModel = resolveModelId(next.default_model ?? '');
 		maxHistory = Number(next.max_history ?? 20);
 		rateLimit = Number(next.rate_limit ?? 10);
+		defaultReasoningEffort = next.default_reasoning_effort ?? 'xhigh';
+		defaultThinkingBudget = thinkingBudgetToString(next.default_max_thinking_tokens);
+		anthropicEffortPassthrough = next.anthropic_effort_passthrough ?? true;
 		syncMainDirty();
 	};
 
@@ -453,6 +491,58 @@
 										bind:value={rateLimit}
 										on:input={syncMainDirty}
 									/>
+								</div>
+
+								<!-- Default Reasoning Effort -->
+								<div class="flex items-center justify-between glass-item px-4 py-3">
+									<Tooltip content={$i18n.t('Default thinking intensity for new chats and bots')}>
+										<div class="text-sm font-medium">{$i18n.t('Default Reasoning Effort')}</div>
+									</Tooltip>
+									<select
+										class="w-[8rem] text-sm bg-transparent outline-hidden text-right cursor-pointer"
+										bind:value={defaultReasoningEffort}
+										on:change={syncMainDirty}
+									>
+										{#each REASONING_EFFORT_OPTIONS as effort}
+											<option value={effort}>{effort}</option>
+										{/each}
+									</select>
+								</div>
+
+								<!-- Default Thinking Budget -->
+								<div class="flex items-center justify-between glass-item px-4 py-3">
+									<Tooltip
+										content={$i18n.t(
+											'Default thinking token budget (overrides effort when set). Leave empty to use effort.'
+										)}
+									>
+										<div class="text-sm font-medium">
+											{$i18n.t('Default Thinking Budget (Tokens)')}
+										</div>
+									</Tooltip>
+									<input
+										class="w-24 text-sm bg-transparent outline-hidden text-right"
+										type="number"
+										min="0"
+										step="1024"
+										placeholder={$i18n.t('Default')}
+										bind:value={defaultThinkingBudget}
+										on:input={syncMainDirty}
+									/>
+								</div>
+
+								<!-- Anthropic Effort Passthrough (R4) -->
+								<div class="flex items-center justify-between glass-item px-4 py-3">
+									<Tooltip
+										content={$i18n.t(
+											'Attach reasoning_effort/effort fields to upstream Anthropic requests (for proxy trace). Disable if upstream returns 400.'
+										)}
+									>
+										<div class="text-sm font-medium">
+											{$i18n.t('Anthropic Effort Passthrough')}
+										</div>
+									</Tooltip>
+									<Switch bind:state={anthropicEffortPassthrough} on:change={syncMainDirty} />
 								</div>
 							</div>
 						</div>

@@ -22,6 +22,7 @@ from open_webui.haloclaw.media import (
     summarize_content_for_log,
 )
 from open_webui.haloclaw.tool_executor import DispatcherResult
+from open_webui.haloclaw.thinking import resolve_default_thinking
 from open_webui.env import SRC_LOG_LEVELS
 from open_webui.models.users import UserModel, Users
 
@@ -158,14 +159,6 @@ async def handle_message(
         "stream": False,
     }
 
-    # --- User preferences (thinking intensity) ---
-    user_meta = ext_user.meta or {}
-    thinking = user_meta.get("thinking", {})
-    if isinstance(thinking, dict) and thinking.get("enabled"):
-        effort = thinking.get("effort", "medium")
-        if effort in ("low", "medium", "high"):
-            form_data["reasoning_effort"] = effort
-
     # --- Create request mock ---
     fake_request = _FakeRequest(app)
 
@@ -183,7 +176,23 @@ async def handle_message(
         gateway_owner = maybe_migrate_user_connections(fake_request, gateway_owner)
 
     fake_request.state.connection_user = gateway_owner or halo_user
-    await get_all_models(fake_request, user=gateway_owner or halo_user)
+    available_models = await get_all_models(fake_request, user=gateway_owner or halo_user)
+    model_meta = _find_model_metadata(available_models, model_id)
+
+    # --- User preferences (thinking intensity) ---
+    user_meta = ext_user.meta or {}
+    thinking = user_meta.get("thinking", {})
+    if isinstance(thinking, dict) and thinking.get("enabled"):
+        effort = thinking.get("effort", "medium")
+        if effort == "default":
+            form_data.update(
+                resolve_default_thinking(
+                    model_id,
+                    (model_meta or {}).get("owned_by"),
+                )
+            )
+        elif effort in ("low", "medium", "high", "xhigh", "max"):
+            form_data["reasoning_effort"] = effort
 
     # --- 智能联网（与页面一致：自动判断本条消息是否需要联网，需要则检索并注入上下文）---
     # 复用现有开关：网关勾选「联网搜索」(builtin:web) + 用户 /tools 开关 + 全局 ENABLE_WEB_SEARCH。
@@ -320,6 +329,18 @@ def _load_gateway_tools(
     except Exception as e:
         log.warning(f"HaloClaw: failed to load tools: {e}")
         return {}
+
+
+def _find_model_metadata(models: Any, model_id: str) -> dict:
+    if not isinstance(models, list):
+        return {}
+
+    for model in models:
+        if not isinstance(model, dict):
+            continue
+        if model.get("id") == model_id or model_id in (model.get("aliases") or []):
+            return model
+    return {}
 
 
 def _resolve_halo_user(ext_user: ExternalUserModel) -> UserModel:

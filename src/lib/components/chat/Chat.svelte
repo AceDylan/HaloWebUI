@@ -64,6 +64,7 @@
 		type PersistedSelectionThreads
 	} from '$lib/utils/selection-threads';
 	import { getModelChatDisplayName } from '$lib/utils/model-display';
+	import { getAnthropicEffortSteps } from '$lib/utils/anthropic-thinking';
 	import {
 		buildModelIdentityLookup,
 		getModelCleanId,
@@ -1057,6 +1058,48 @@
 	let reasoningEffort: string | null = null;
 		let maxThinkingTokens: number | null = null;
 		let lastFreshChatRequest = '';
+
+		// 网页默认思考强度的本地兜底档位（与 ThinkingControl.defaultEffortSteps 对齐）
+		const DEFAULT_EFFORT_STEP_VALUES = ['none', null, 'low', 'medium', 'high', 'xhigh', 'max'];
+
+		// 判断某 effort 档位是否被当前模型支持：
+		// Anthropic 模型用 getAnthropicEffortSteps（不含 xhigh），其余用通用档位。
+		const isEffortSupportedByModel = (model: any, effort: string): boolean => {
+			const steps = getAnthropicEffortSteps(model) ?? null;
+			const allowed = steps
+				? steps.map((s) => s.value)
+				: DEFAULT_EFFORT_STEP_VALUES;
+			return allowed.includes(effort);
+		};
+
+		// 全新对话读取全局默认思考强度/预算（来自 /api/config），并按当前模型能力兜底。
+		const applyGlobalDefaultThinking = () => {
+			const haloclawDefaults = $config?.features?.haloclaw ?? {};
+			const defaultEffort: string | null = haloclawDefaults.default_reasoning_effort ?? 'xhigh';
+			const defaultBudgetRaw = haloclawDefaults.default_max_thinking_tokens;
+			const defaultBudget =
+				defaultBudgetRaw === null || defaultBudgetRaw === undefined
+					? null
+					: Number(defaultBudgetRaw);
+
+			// 预算模式优先（与后端 resolve_default_thinking 一致：budget 非空则忽略 effort）
+			if (defaultBudget != null && Number.isFinite(defaultBudget) && defaultBudget > 0) {
+				maxThinkingTokens = defaultBudget;
+				reasoningEffort = null;
+				return;
+			}
+
+			maxThinkingTokens = null;
+			if (!defaultEffort || defaultEffort === 'none') {
+				reasoningEffort = null;
+				return;
+			}
+
+			const currentModel = getModelById(selectedModels?.[0] ?? '');
+			reasoningEffort = isEffortSupportedByModel(currentModel, defaultEffort)
+				? defaultEffort
+				: null;
+		};
 		let lastHandledNewChatRequestId = '';
 		// Flag to prevent sessionStorage recovery from overriding a deliberate fresh chat reset
 		let freshChatActive = false;
@@ -3372,8 +3415,8 @@
 
 		if (fresh || !inheritNewChatState) {
 			clearNewChatStateCache();
-			reasoningEffort = null;
-			maxThinkingTokens = null;
+			// 全新对话：读取全局默认思考强度/预算（管理员可配，默认 xhigh），按模型能力兜底
+			applyGlobalDefaultThinking();
 			webSearchMode = getPreferredDefaultWebSearchMode();
 			webSearchModeSource = 'default';
 		} else {

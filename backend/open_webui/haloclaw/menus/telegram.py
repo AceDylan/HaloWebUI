@@ -9,7 +9,11 @@ import logging
 import math
 from typing import Optional
 
-from open_webui.haloclaw.config import HALOCLAW_DEFAULT_MODEL
+from open_webui.haloclaw.config import (
+    HALOCLAW_DEFAULT_MAX_THINKING_TOKENS,
+    HALOCLAW_DEFAULT_MODEL,
+    HALOCLAW_DEFAULT_REASONING_EFFORT,
+)
 from open_webui.haloclaw.models import (
     ExternalUsers,
     MessageLogs,
@@ -30,12 +34,19 @@ GROUPS_PER_PAGE = 8
 # Thinking effort labels (Chinese)
 EFFORT_LABELS = {
     "off": "关闭",
+    "default": "默认",
     "low": "低",
     "medium": "中",
     "high": "高",
 }
 
-EFFORT_MAP = {"off": None, "low": "low", "med": "medium", "high": "high"}
+EFFORT_MAP = {
+    "off": None,
+    "default": "default",
+    "low": "low",
+    "med": "medium",
+    "high": "high",
+}
 
 
 def _group_models(models: list[dict]) -> list[dict]:
@@ -189,7 +200,7 @@ async def handle_think(update, context, gateway: GatewayModel) -> None:
     if isinstance(thinking, dict) and thinking.get("enabled"):
         current = thinking.get("effort", "medium")
 
-    text = f"🧠 思考强度\n当前: {EFFORT_LABELS.get(current, current)}\n\n选择思考强度："
+    text = f"🧠 思考强度\n当前: {_format_thinking_label(current)}\n\n选择思考强度："
 
     buttons = []
     for key, label in EFFORT_LABELS.items():
@@ -400,7 +411,7 @@ async def _handle_model_group_callback(query, gateway, ext_user, app, data: str)
 
 async def _handle_think_callback(query, ext_user, data: str) -> None:
     """Handle thinking intensity callback."""
-    effort_key = data[3:]  # off, low, med, high
+    effort_key = data[3:]  # off, default, low, med, high
 
     if effort_key not in EFFORT_MAP:
         return
@@ -415,7 +426,7 @@ async def _handle_think_callback(query, ext_user, data: str) -> None:
 
     ExternalUsers.update_meta(ext_user.id, meta)
 
-    label = EFFORT_LABELS.get(effort_key, effort_key)
+    label = _format_thinking_label(effort_value or effort_key)
     await _safe_edit(query.message, f"✅ 思考强度已设为: {label}")
 
 
@@ -600,7 +611,7 @@ def _build_settings_text(gateway, ext_user, chat_id: str) -> str:
 
     thinking = meta.get("thinking", {})
     if isinstance(thinking, dict) and thinking.get("enabled"):
-        think_label = EFFORT_LABELS.get(thinking.get("effort", "medium"), "中")
+        think_label = _format_thinking_label(thinking.get("effort", "medium"))
     else:
         think_label = "关闭"
 
@@ -639,3 +650,18 @@ def _truncate_model_name(name: str, max_len: int = 40) -> str:
     if len(name) <= max_len:
         return name
     return name[:max_len - 1] + "…"
+
+
+def _format_global_default_thinking() -> str:
+    budget = HALOCLAW_DEFAULT_MAX_THINKING_TOKENS.value
+    if budget is not None:
+        if budget == 0:
+            return "0（关闭）"
+        return str(budget)
+    return str(HALOCLAW_DEFAULT_REASONING_EFFORT.value)
+
+
+def _format_thinking_label(effort: str) -> str:
+    if effort == "default":
+        return f"默认（全局：{_format_global_default_thinking()}）"
+    return EFFORT_LABELS.get(effort, effort)

@@ -2098,6 +2098,17 @@ async def get_app_config(request: Request):
             )
         ),
     }
+    haloclaw_features = {}
+    if user is not None:
+        from open_webui.haloclaw.config import (
+            HALOCLAW_DEFAULT_MAX_THINKING_TOKENS,
+            HALOCLAW_DEFAULT_REASONING_EFFORT,
+        )
+
+        haloclaw_features = {
+            "default_reasoning_effort": HALOCLAW_DEFAULT_REASONING_EFFORT.value,
+            "default_max_thinking_tokens": HALOCLAW_DEFAULT_MAX_THINKING_TOKENS.value,
+        }
 
     return {
         **({"onboarding": True} if onboarding else {}),
@@ -2144,6 +2155,7 @@ async def get_app_config(request: Request):
                     "database_restore_supported": database_restore_support["supported"],
                     "database_restore_reason": database_restore_support["reason"],
                     "uvicorn_workers": database_restore_support["worker_count"],
+                    "haloclaw": haloclaw_features,
                 }
                 if user is not None
                 else {}

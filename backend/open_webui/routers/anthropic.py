@@ -500,6 +500,32 @@ def _normalize_effort_for_supported_model(effort: Optional[str]) -> Optional[str
     return None
 
 
+def _anthropic_effort_passthrough_enabled() -> bool:
+    # R4 开关：运行时读取 HaloClaw 配置（管理后台可改），默认开启。
+    # 延迟导入避免与 haloclaw 模块的循环依赖。
+    try:
+        from open_webui.haloclaw.config import ANTHROPIC_EFFORT_PASSTHROUGH
+
+        return bool(ANTHROPIC_EFFORT_PASSTHROUGH.value)
+    except Exception:
+        return True
+
+
+def _reasoning_effort_passthrough_value(payload: dict) -> Optional[Any]:
+    if "reasoning_effort" not in payload:
+        return None
+
+    value = payload.get("reasoning_effort")
+    reasoning_effort, numeric_budget = _normalize_reasoning_effort_value(value)
+    if numeric_budget is not None:
+        return value
+    if reasoning_effort in (None, "", "none"):
+        return None
+    if isinstance(value, str):
+        value = value.strip()
+    return value if value not in (None, "") else None
+
+
 def _payload_requests_thinking(payload: dict) -> bool:
     explicit_thinking = payload.get("thinking")
     if isinstance(explicit_thinking, dict):
@@ -2434,6 +2460,7 @@ async def generate_chat_completion(
             anthropic_messages.insert(0, {"role": "user", "content": attachment_blocks})
 
     max_tokens = _resolve_anthropic_max_tokens(payload, model_profile)
+    reasoning_effort_passthrough = _reasoning_effort_passthrough_value(payload)
 
     anthropic_payload: dict = {
         "model": upstream_model_id,
@@ -2498,6 +2525,9 @@ async def generate_chat_completion(
     anthropic_payload, thinking_budget, thinking_enabled = _normalize_final_anthropic_payload(
         anthropic_payload, model_profile
     )
+    if reasoning_effort_passthrough is not None and _anthropic_effort_passthrough_enabled():
+        anthropic_payload["reasoning_effort"] = reasoning_effort_passthrough
+        anthropic_payload["effort"] = reasoning_effort_passthrough
     max_tokens = anthropic_payload.get("max_tokens")
 
     # Determine required betas (e.g., Files API) and merge with user configured betas.

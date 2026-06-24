@@ -9,10 +9,15 @@ from pydantic import BaseModel
 from starlette.responses import JSONResponse
 
 from open_webui.haloclaw.config import (
+    ANTHROPIC_EFFORT_PASSTHROUGH,
     ENABLE_HALOCLAW,
     HALOCLAW_DEFAULT_MODEL,
+    HALOCLAW_DEFAULT_REASONING_EFFORT,
+    HALOCLAW_DEFAULT_MAX_THINKING_TOKENS,
     HALOCLAW_MAX_HISTORY,
     HALOCLAW_RATE_LIMIT,
+    normalize_default_reasoning_effort,
+    normalize_default_max_thinking_tokens,
 )
 from open_webui.haloclaw.models import (
     Gateways,
@@ -44,6 +49,9 @@ class HaloClawConfigResponse(BaseModel):
     default_model: str
     max_history: int
     rate_limit: int
+    default_reasoning_effort: str
+    default_max_thinking_tokens: Optional[int] = None
+    anthropic_effort_passthrough: bool
 
 
 class HaloClawConfigForm(BaseModel):
@@ -51,6 +59,9 @@ class HaloClawConfigForm(BaseModel):
     default_model: Optional[str] = None
     max_history: Optional[int] = None
     rate_limit: Optional[int] = None
+    default_reasoning_effort: Optional[str] = None
+    default_max_thinking_tokens: Optional[int] = None
+    anthropic_effort_passthrough: Optional[bool] = None
 
 
 @router.get("/config", response_model=HaloClawConfigResponse)
@@ -60,6 +71,9 @@ async def get_haloclaw_config(user=Depends(get_admin_user)):
         default_model=HALOCLAW_DEFAULT_MODEL.value,
         max_history=HALOCLAW_MAX_HISTORY.value,
         rate_limit=HALOCLAW_RATE_LIMIT.value,
+        default_reasoning_effort=HALOCLAW_DEFAULT_REASONING_EFFORT.value,
+        default_max_thinking_tokens=HALOCLAW_DEFAULT_MAX_THINKING_TOKENS.value,
+        anthropic_effort_passthrough=bool(ANTHROPIC_EFFORT_PASSTHROUGH.value),
     )
 
 
@@ -81,6 +95,23 @@ async def update_haloclaw_config(
     if form_data.rate_limit is not None:
         HALOCLAW_RATE_LIMIT.value = form_data.rate_limit
         HALOCLAW_RATE_LIMIT.save()
+    if form_data.default_reasoning_effort is not None:
+        HALOCLAW_DEFAULT_REASONING_EFFORT.value = normalize_default_reasoning_effort(
+            form_data.default_reasoning_effort
+        )
+        HALOCLAW_DEFAULT_REASONING_EFFORT.save()
+    if form_data.default_max_thinking_tokens is not None:
+        HALOCLAW_DEFAULT_MAX_THINKING_TOKENS.value = (
+            normalize_default_max_thinking_tokens(
+                form_data.default_max_thinking_tokens
+            )
+        )
+        HALOCLAW_DEFAULT_MAX_THINKING_TOKENS.save()
+    if form_data.anthropic_effort_passthrough is not None:
+        ANTHROPIC_EFFORT_PASSTHROUGH.value = bool(
+            form_data.anthropic_effort_passthrough
+        )
+        ANTHROPIC_EFFORT_PASSTHROUGH.save()
 
     if (
         form_data.default_model is not None
@@ -103,6 +134,9 @@ async def update_haloclaw_config(
         default_model=HALOCLAW_DEFAULT_MODEL.value,
         max_history=HALOCLAW_MAX_HISTORY.value,
         rate_limit=HALOCLAW_RATE_LIMIT.value,
+        default_reasoning_effort=HALOCLAW_DEFAULT_REASONING_EFFORT.value,
+        default_max_thinking_tokens=HALOCLAW_DEFAULT_MAX_THINKING_TOKENS.value,
+        anthropic_effort_passthrough=bool(ANTHROPIC_EFFORT_PASSTHROUGH.value),
     )
 
 

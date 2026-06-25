@@ -805,6 +805,12 @@
 		const visible = new Set(getVisibleSkillIds());
 		return ids.filter((id) => visible.has(id));
 	};
+	// 默认技能集：模型显式配置了 skillIds 则沿用其配置，否则默认启用全部已安装技能。
+	// 用户在当前对话手动增删后会置 skillSelectionTouched=true，从而覆盖此默认值。
+	const getDefaultSkillIds = (model: any = null) => {
+		const configured = filterVisibleSkillIds(model?.info?.meta?.skillIds ?? []);
+		return configured.length > 0 ? configured : getVisibleSkillIds();
+	};
 	const arraysEqual = (left: string[] = [], right: string[] = []) =>
 		left.length === right.length && left.every((value, index) => value === right[index]);
 	const extractSkillIdsFromText = (text: string) => {
@@ -818,7 +824,12 @@
 			.replace(/<\$([\w.\-:/]+)(?:\|[^>]+)?>\s*/g, '')
 			.trim();
 	const collectRequestSkillIds = (messages: any[] = []) => {
-		const ids = new Set<string>(skillSelectionTouched ? selectedSkillIds : []);
+		// 未手动调整：默认启用全部已安装技能（或模型配置的技能集）；
+		// 已手动调整：尊重用户对当前对话的实际勾选（含「全部取消」=空集）。
+		const baseSkillIds = skillSelectionTouched
+			? selectedSkillIds
+			: getDefaultSkillIds(atSelectedModel ?? getModelById(selectedModels[0]));
+		const ids = new Set<string>(baseSkillIds ?? []);
 		for (const message of messages ?? []) {
 			if (message?.role !== 'user') {
 				continue;
@@ -2551,7 +2562,10 @@
 			}
 		}
 
-		if (hasPersistedComposerState || skillSelectionTouched) {
+		// 仅当用户在当前对话手动调整过技能选择时才跳过默认值；
+		// 「未手动调整」语义上等于「使用默认全部技能」，即使有持久化状态也需重算，
+		// 以保证 UI 勾选与实际请求一致（含从旧对话恢复的场景）。
+		if (skillSelectionTouched) {
 			return;
 		}
 
@@ -2561,7 +2575,8 @@
 
 		const model = atSelectedModel ?? getModelById(selectedModels[0]);
 		if (model) {
-			selectedSkillIds = filterVisibleSkillIds(model?.info?.meta?.skillIds ?? []);
+			// 默认勾选全部已安装技能（或模型配置的技能集），用户可在当前对话手动取消。
+			selectedSkillIds = getDefaultSkillIds(model);
 		}
 	};
 

@@ -97,6 +97,45 @@ def test_resolve_thinking_payload_uses_budget_for_legacy_models():
     assert enabled is True
 
 
+def test_apply_haloclaw_default_reasoning_effort_when_missing(monkeypatch):
+    from open_webui.haloclaw.config import (
+        HALOCLAW_DEFAULT_MAX_THINKING_TOKENS,
+        HALOCLAW_DEFAULT_REASONING_EFFORT,
+    )
+
+    monkeypatch.setattr(HALOCLAW_DEFAULT_MAX_THINKING_TOKENS, "value", None)
+    monkeypatch.setattr(HALOCLAW_DEFAULT_REASONING_EFFORT, "value", "xhigh")
+    payload = anthropic._apply_haloclaw_default_thinking(
+        {"model": "claude-opus-4-8", "messages": []},
+        model_id="claude-opus-4-8",
+        owned_by="anthropic",
+    )
+
+    assert payload["reasoning_effort"] == "xhigh"
+
+
+def test_apply_haloclaw_default_thinking_preserves_explicit_controls(monkeypatch):
+    from open_webui.haloclaw.config import HALOCLAW_DEFAULT_REASONING_EFFORT
+
+    monkeypatch.setattr(HALOCLAW_DEFAULT_REASONING_EFFORT, "value", "xhigh")
+    payload = {"model": "claude-opus-4-8", "reasoning_effort": "low"}
+    assert (
+        anthropic._apply_haloclaw_default_thinking(
+            payload,
+            model_id="claude-opus-4-8",
+            owned_by="anthropic",
+        )["reasoning_effort"]
+        == "low"
+    )
+
+    payload = {"model": "claude-opus-4-8", "thinking": {"type": "enabled"}}
+    assert anthropic._apply_haloclaw_default_thinking(
+        payload,
+        model_id="claude-opus-4-8",
+        owned_by="anthropic",
+    ) == payload
+
+
 def test_is_anyrouter_url():
     assert anthropic._is_anyrouter_url("https://anyrouter.top/v1") is True
     assert anthropic._is_anyrouter_url("https://api.anthropic.com/v1") is False

@@ -526,6 +526,33 @@ def _reasoning_effort_passthrough_value(payload: dict) -> Optional[Any]:
     return value if value not in (None, "") else None
 
 
+def _apply_haloclaw_default_thinking(
+    payload: dict,
+    *,
+    model_id: Optional[str] = None,
+    owned_by: Optional[str] = None,
+) -> dict:
+    if not isinstance(payload, dict):
+        return payload
+
+    if "reasoning_effort" in payload or "reasoning" in payload or "thinking" in payload:
+        return payload
+
+    try:
+        from open_webui.haloclaw.thinking import resolve_default_thinking
+    except Exception:
+        return payload
+
+    default_thinking = resolve_default_thinking(model_id or payload.get("model"), owned_by)
+    if not default_thinking:
+        return payload
+
+    return normalize_openai_compatible_reasoning_controls(
+        {**payload, **default_thinking},
+        model_id=model_id or payload.get("model"),
+    )
+
+
 def _payload_requests_thinking(payload: dict) -> bool:
     explicit_thinking = payload.get("thinking")
     if isinstance(explicit_thinking, dict):
@@ -2325,6 +2352,16 @@ async def generate_chat_completion(
     payload = normalize_openai_compatible_reasoning_controls(
         payload,
         model_id=upstream_model_id,
+    )
+    model_owned_by = (
+        request_model_entry.get("owned_by")
+        if isinstance(request_model_entry, dict)
+        else None
+    )
+    payload = _apply_haloclaw_default_thinking(
+        payload,
+        model_id=upstream_model_id,
+        owned_by=model_owned_by,
     )
     model_profile = _build_anthropic_model_profile(
         upstream_model_id,

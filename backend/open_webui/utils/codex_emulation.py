@@ -43,8 +43,8 @@ CODEX_SANDBOX = "windows_elevated"
 CODEX_REQUEST_KIND = "turn"
 
 # Default GPT-5-family body params, injected ONLY when the payload does not
-# already carry them. Set to None to disable injecting that field by default.
-CODEX_DEFAULT_REASONING_EFFORT: Optional[str] = "medium"
+# already carry them. Set reasoning effort to None to follow HaloClaw's default.
+CODEX_DEFAULT_REASONING_EFFORT: Optional[str] = None
 CODEX_DEFAULT_TEXT_VERBOSITY: Optional[str] = "low"
 
 # Where the stable installation id is persisted (mirrors a per-machine Codex id).
@@ -126,6 +126,28 @@ def _session_id_for_chat(chat_id: Optional[str]) -> str:
 def is_codex_emulation_target(model_id: Optional[str]) -> bool:
     """True when the (prefix-stripped) upstream model should emulate Codex."""
     return isinstance(model_id, str) and model_id.lower().startswith("gpt")
+
+
+def get_default_reasoning_effort() -> Optional[str]:
+    """Resolve the default reasoning effort for Codex-emulated requests."""
+    if CODEX_DEFAULT_REASONING_EFFORT is not None:
+        return CODEX_DEFAULT_REASONING_EFFORT
+
+    try:
+        from open_webui.haloclaw.config import (
+            HALOCLAW_DEFAULT_REASONING_EFFORT,
+            normalize_default_reasoning_effort,
+        )
+
+        effort = normalize_default_reasoning_effort(
+            HALOCLAW_DEFAULT_REASONING_EFFORT.value
+        )
+    except Exception:
+        return None
+
+    if effort == "none":
+        return None
+    return effort
 
 
 @dataclass
@@ -229,12 +251,13 @@ def augment_codex_responses_payload(
         include = [*include, "reasoning.encrypted_content"]
     payload["include"] = include
 
-    if CODEX_DEFAULT_REASONING_EFFORT:
+    default_reasoning_effort = get_default_reasoning_effort()
+    if default_reasoning_effort:
         reasoning = payload.get("reasoning")
         if not isinstance(reasoning, dict):
             reasoning = {}
         if not reasoning.get("effort"):
-            reasoning["effort"] = CODEX_DEFAULT_REASONING_EFFORT
+            reasoning["effort"] = default_reasoning_effort
         payload["reasoning"] = reasoning
 
     if CODEX_DEFAULT_TEXT_VERBOSITY:

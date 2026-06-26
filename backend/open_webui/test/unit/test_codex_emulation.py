@@ -66,7 +66,10 @@ def test_build_codex_headers_non_streaming_keeps_json_accept():
     assert headers["originator"] == "codex-tui"
 
 
-def test_augment_payload_injects_defaults_when_absent():
+def test_augment_payload_injects_defaults_when_absent(monkeypatch):
+    from open_webui.haloclaw.config import HALOCLAW_DEFAULT_REASONING_EFFORT
+
+    monkeypatch.setattr(HALOCLAW_DEFAULT_REASONING_EFFORT, "value", "xhigh")
     ctx = ce.build_codex_request_context({"chat_id": "chat-p1"})
     payload = {
         "model": "gpt-chat",
@@ -78,7 +81,7 @@ def test_augment_payload_injects_defaults_when_absent():
 
     assert payload["store"] is False
     assert payload["include"] == ["reasoning.encrypted_content"]
-    assert payload["reasoning"]["effort"] == ce.CODEX_DEFAULT_REASONING_EFFORT
+    assert payload["reasoning"]["effort"] == "xhigh"
     assert payload["text"]["verbosity"] == ce.CODEX_DEFAULT_TEXT_VERBOSITY
     assert payload["prompt_cache_key"] == ctx.session_id
     assert payload["client_metadata"]["turn_id"] == ctx.turn_id
@@ -87,6 +90,36 @@ def test_augment_payload_injects_defaults_when_absent():
     # No tools -> no tool_choice / parallel_tool_calls injected.
     assert "tool_choice" not in payload
     assert "parallel_tool_calls" not in payload
+
+
+def test_augment_payload_uses_haloclaw_default_reasoning_effort(monkeypatch):
+    from open_webui.haloclaw.config import HALOCLAW_DEFAULT_REASONING_EFFORT
+
+    monkeypatch.setattr(HALOCLAW_DEFAULT_REASONING_EFFORT, "value", "xhigh")
+    ctx = ce.build_codex_request_context({"chat_id": "chat-haloclaw-effort"})
+    payload = {
+        "model": "gpt-5.5",
+        "input": [{"type": "message", "role": "user", "content": []}],
+    }
+
+    ce.augment_codex_responses_payload(payload, ctx)
+
+    assert payload["reasoning"]["effort"] == "xhigh"
+
+
+def test_augment_payload_skips_reasoning_when_haloclaw_default_is_none(monkeypatch):
+    from open_webui.haloclaw.config import HALOCLAW_DEFAULT_REASONING_EFFORT
+
+    monkeypatch.setattr(HALOCLAW_DEFAULT_REASONING_EFFORT, "value", "none")
+    ctx = ce.build_codex_request_context({"chat_id": "chat-haloclaw-none"})
+    payload = {
+        "model": "gpt-5.5",
+        "input": [{"type": "message", "role": "user", "content": []}],
+    }
+
+    ce.augment_codex_responses_payload(payload, ctx)
+
+    assert "reasoning" not in payload
 
 
 def test_augment_payload_is_additive_and_enables_tool_fields():

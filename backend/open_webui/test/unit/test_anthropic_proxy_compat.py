@@ -148,6 +148,13 @@ def test_needs_cc_format_for_anyrouter_premium_models():
     assert anthropic._needs_cc_format("claude-opus-4-6", "https://api.anthropic.com/v1") is False
 
 
+def test_needs_cc_format_for_generic_proxy_premium_models():
+    assert anthropic._needs_cc_format("claude-opus-4-8", "https://relay.example.com/v1") is True
+    assert anthropic._needs_cc_format("claude-sonnet-4-6", "https://relay.example.com/v1") is True
+    assert anthropic._needs_cc_format("claude-haiku-4-5", "https://relay.example.com/v1") is False
+    assert anthropic._needs_cc_format("claude-opus-4-8", "https://api.anthropic.com/v1") is False
+
+
 def test_resolve_proxy_model_alias_keeps_anyrouter_opus_short_alias():
     assert (
         anthropic._resolve_proxy_model_alias(

@@ -764,7 +764,7 @@ _CC_USER_AGENT = "claude-cli/2.1.74 (external, sdk-cli)"
 
 def _needs_cc_format(model_id: str, base_url: str) -> bool:
     """Check if request to a proxy needs Claude Code request format for validation."""
-    if not _is_anyrouter_url(base_url):
+    if not _is_proxy_base_url(base_url):
         return False
     lower = model_id.lower()
     return "opus" in lower or "sonnet" in lower

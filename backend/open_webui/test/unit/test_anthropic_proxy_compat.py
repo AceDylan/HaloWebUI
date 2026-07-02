@@ -27,9 +27,9 @@ def test_resolve_thinking_payload_requires_explicit_opt_in():
     thinking, output_config, budget, enabled = anthropic._resolve_thinking_payload(
         {"thinking": {"type": "enabled"}}, model_profile=_profile("claude-sonnet-4-6")
     )
-    assert thinking == {"type": "enabled", "budget_tokens": 8192}
-    assert output_config is None
-    assert budget == 8192
+    assert thinking == {"type": "adaptive"}
+    assert output_config == {"effort": "medium"}
+    assert budget is None
     assert enabled is True
 
 
@@ -81,6 +81,21 @@ def test_resolve_thinking_payload_uses_effort_for_46_models():
     thinking, output_config, budget, enabled = anthropic._resolve_thinking_payload(
         {"reasoning_effort": "high"}, model_profile=_profile("claude-sonnet-4-6")
     )
+    assert thinking == {"type": "adaptive"}
+    assert output_config == {"effort": "high"}
+    assert budget is None
+    assert enabled is True
+
+
+def test_resolve_thinking_payload_converts_explicit_enabled_for_effort_models():
+    thinking, output_config, budget, enabled = anthropic._resolve_thinking_payload(
+        {
+            "thinking": {"type": "enabled", "budget_tokens": 16384},
+            "reasoning_effort": "high",
+        },
+        model_profile=_profile("claude-sonnet-4-6"),
+    )
+
     assert thinking == {"type": "adaptive"}
     assert output_config == {"effort": "high"}
     assert budget is None
@@ -155,6 +170,11 @@ def test_needs_cc_format_for_generic_proxy_premium_models():
     assert anthropic._needs_cc_format("claude-opus-4-8", "https://api.anthropic.com/v1") is False
 
 
+def test_needs_cc_format_for_claude_chat_proxy_alias():
+    assert anthropic._needs_cc_format("claude-chat", "https://relay.example.com/v1") is True
+    assert anthropic._needs_cc_format("claude-chat", "https://api.anthropic.com/v1") is False
+
+
 def test_resolve_proxy_model_alias_keeps_anyrouter_opus_short_alias():
     assert (
         anthropic._resolve_proxy_model_alias(
@@ -189,3 +209,22 @@ def test_apply_cc_format_preserves_display_mode():
     assert url.endswith("?beta=true")
     assert headers["x-app"] == "cli"
     assert headers["User-Agent"].startswith("claude-cli/")
+
+
+def test_apply_cc_format_moves_reasoning_effort_to_output_config():
+    headers = {}
+    payload = {
+        "model": "claude-chat",
+        "messages": [{"role": "user", "content": [{"type": "text", "text": "hello"}]}],
+        "thinking": {"type": "enabled", "budget_tokens": 16384},
+        "reasoning_effort": "high",
+        "effort": "high",
+        "metadata": {"user_id": "tester"},
+    }
+
+    anthropic._apply_cc_format(headers, payload, "https://relay.example.com/v1/messages")
+
+    assert payload["thinking"] == {"type": "adaptive"}
+    assert payload["output_config"] == {"effort": "high"}
+    assert "reasoning_effort" not in payload
+    assert "effort" not in payload

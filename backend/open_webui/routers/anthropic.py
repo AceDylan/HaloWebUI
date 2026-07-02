@@ -484,6 +484,18 @@ def _thinking_effort_to_budget_tokens(effort: Optional[str]) -> int:
     }.get(str(effort or "").lower(), 8192)
 
 
+def _budget_tokens_to_effort(budget_tokens: Optional[int]) -> Optional[str]:
+    if budget_tokens is None or budget_tokens <= 0:
+        return None
+    if budget_tokens <= 2048:
+        return "low"
+    if budget_tokens <= 8192:
+        return "medium"
+    if budget_tokens <= 16384:
+        return "high"
+    return "max"
+
+
 def _normalize_effort_for_supported_model(effort: Optional[str]) -> Optional[str]:
     if effort is None:
         return None
@@ -498,6 +510,30 @@ def _normalize_effort_for_supported_model(effort: Optional[str]) -> Optional[str
     if text in {"low", "medium", "high", "max"}:
         return text
     return None
+
+
+def _resolve_output_effort_value(
+    payload: dict, fallback_budget_tokens: Optional[int] = None
+) -> Optional[str]:
+    if not isinstance(payload, dict):
+        return _budget_tokens_to_effort(fallback_budget_tokens)
+
+    output_config = payload.get("output_config")
+    if isinstance(output_config, dict):
+        normalized = _normalize_effort_for_supported_model(output_config.get("effort"))
+        if normalized:
+            return normalized
+
+    for key in ("reasoning_effort", "effort"):
+        effort, numeric_budget = _normalize_reasoning_effort_value(payload.get(key))
+        normalized = _normalize_effort_for_supported_model(effort)
+        if normalized:
+            return normalized
+        budget_effort = _budget_tokens_to_effort(numeric_budget)
+        if budget_effort:
+            return budget_effort
+
+    return _budget_tokens_to_effort(fallback_budget_tokens)
 
 
 def _anthropic_effort_passthrough_enabled() -> bool:
@@ -645,6 +681,24 @@ def _normalize_final_anthropic_payload(
         if etype in {"enabled", "adaptive"}:
             thinking_enabled = True
 
+        if thinking_enabled and model_profile.get("supports_effort"):
+            thinking_budget = None
+            fallback_budget = _coerce_positive_int(thinking.get("budget_tokens"))
+            current_display = thinking.get("display")
+            thinking = {"type": "adaptive"}
+            if isinstance(current_display, str) and current_display.strip():
+                thinking["display"] = current_display.strip()
+            etype = "adaptive"
+
+            normalized_effort = _resolve_output_effort_value(payload, fallback_budget)
+            if normalized_effort:
+                output_config = payload.get("output_config")
+                output_config = output_config if isinstance(output_config, dict) else {}
+                payload["output_config"] = {
+                    **output_config,
+                    "effort": normalized_effort,
+                }
+
         if etype == "adaptive" and not model_profile.get("prefers_adaptive"):
             etype = "enabled"
             thinking["type"] = "enabled"
@@ -696,6 +750,19 @@ def _resolve_thinking_payload(
     if isinstance(explicit_thinking, dict):
         thinking = dict(explicit_thinking)
         etype = str(thinking.get("type") or "").lower()
+        if etype in {"enabled", "adaptive"} and model_profile.get("supports_effort"):
+            output_effort = (
+                _resolve_output_effort_value(
+                    payload,
+                    _coerce_positive_int(thinking.get("budget_tokens")),
+                )
+                or "medium"
+            )
+            adaptive_thinking = {"type": "adaptive"}
+            current_display = thinking.get("display")
+            if isinstance(current_display, str) and current_display.strip():
+                adaptive_thinking["display"] = current_display.strip()
+            return adaptive_thinking, {"effort": output_effort}, None, True
         if etype == "enabled":
             explicit_budget = _coerce_positive_int(thinking.get("budget_tokens")) or 8192
             thinking["budget_tokens"] = explicit_budget
@@ -767,7 +834,7 @@ def _needs_cc_format(model_id: str, base_url: str) -> bool:
     if not _is_proxy_base_url(base_url):
         return False
     lower = model_id.lower()
-    return "opus" in lower or "sonnet" in lower
+    return lower in {"claude-chat"} or "opus" in lower or "sonnet" in lower
 
 
 _CC_SYSTEM_PROMPT = "You are a Claude agent, built on Anthropic's Claude Agent SDK."
@@ -806,15 +873,27 @@ def _apply_cc_format(headers: dict, payload: dict, url: str) -> str:
     # Ensure thinking is adaptive (CC uses adaptive, not enabled with budget).
     # Preserve display mode when we already resolved one upstream.
     thinking_display = None
+    thinking_budget = None
     if isinstance(payload.get("thinking"), dict):
         current_display = payload["thinking"].get("display")
         if isinstance(current_display, str) and current_display.strip():
             thinking_display = current_display.strip()
+        thinking_budget = _coerce_positive_int(payload["thinking"].get("budget_tokens"))
 
     if "thinking" not in payload:
         payload["thinking"] = {"type": "adaptive", **({"display": thinking_display} if thinking_display else {})}
     elif isinstance(payload.get("thinking"), dict):
         payload["thinking"] = {"type": "adaptive", **({"display": thinking_display} if thinking_display else {})}
+
+    output_effort = _resolve_output_effort_value(payload, thinking_budget)
+    output_config = payload.get("output_config")
+    output_config = output_config if isinstance(output_config, dict) else {}
+    if output_effort:
+        payload["output_config"] = {**output_config, "effort": output_effort}
+    elif output_config:
+        payload["output_config"] = output_config
+    payload.pop("reasoning_effort", None)
+    payload.pop("effort", None)
 
     # Ensure max_tokens is set (CC default)
     if "max_tokens" not in payload:

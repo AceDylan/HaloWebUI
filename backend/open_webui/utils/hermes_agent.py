@@ -225,16 +225,6 @@ def _serialize_blocks(blocks) -> str:
             text = str(block.get("content", "")).strip()
             if text:
                 content = f"{content}{text}\n"
-        elif block["type"] == "reasoning":
-            duration = block.get("duration", 0)
-            text = str(block.get("content", "")).strip()
-            if text:
-                content = (
-                    f"{content}\n"
-                    f'<details type="reasoning" done="true" duration="{duration}">\n'
-                    f"<summary>Thought for {duration} seconds</summary>\n"
-                    f"{text}\n</details>\n"
-                )
         elif block["type"] == "tool":
             arguments = html.escape(
                 json.dumps({"input": block.get("preview") or ""}, ensure_ascii=False)
@@ -541,18 +531,12 @@ async def run_hermes_agent(request, form_data, user, metadata, model, events):
                                 {"content": _serialize_blocks(blocks)}
                             )
                         elif event_type == "reasoning.available":
-                            text = event.get("text") or ""
-                            if text:
-                                blocks.append(
-                                    {
-                                        "type": "reasoning",
-                                        "content": text,
-                                        "duration": 0,
-                                    }
-                                )
-                                await _emit_completion(
-                                    {"content": _serialize_blocks(blocks)}
-                                )
+                            # Not real reasoning: hermes re-emits the assistant
+                            # message content (first 500 chars) after every turn
+                            # for delegation progress displays. The same text
+                            # already arrives via message.delta, so rendering it
+                            # would duplicate the answer as a "thinking" block.
+                            pass
                         elif event_type == "approval.request":
                             await _request_approval(session, run_id, event)
                         elif event_type == "approval.responded":

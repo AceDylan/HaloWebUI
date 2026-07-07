@@ -58,8 +58,37 @@ except ValueError:
     HERMES_AGENT_APPROVAL_TIMEOUT = 240
 
 
-def is_hermes_agent_model(model_id) -> bool:
-    return isinstance(model_id, str) and model_id in HERMES_AGENT_MODEL_IDS
+def _model_upstream_id(model) -> str:
+    """Return the upstream model id (without any connection prefix).
+
+    Accepts either the raw model id string or a resolved model dict (which
+    carries `original_id`/`model_ref.model_id` = the unprefixed upstream id,
+    while its `id` may be prefixed like "ee5e02db.hermes-agent").
+    """
+    if isinstance(model, dict):
+        original = model.get("original_id")
+        if original:
+            return str(original)
+        model_ref = model.get("model_ref")
+        if isinstance(model_ref, dict) and model_ref.get("model_id"):
+            return str(model_ref["model_id"])
+        candidate = str(model.get("id") or "")
+    else:
+        candidate = str(model or "")
+    # Fall back to stripping a "<prefix>." connection prefix.
+    if candidate in HERMES_AGENT_MODEL_IDS:
+        return candidate
+    if "." in candidate:
+        stripped = candidate.split(".", 1)[1]
+        if stripped in HERMES_AGENT_MODEL_IDS:
+            return stripped
+    return candidate
+
+
+def is_hermes_agent_model(model) -> bool:
+    """True when `model` (a raw id string or a resolved model dict) targets a
+    hermes agent model, even if the UI selected a connection-prefixed id."""
+    return _model_upstream_id(model) in HERMES_AGENT_MODEL_IDS
 
 
 def _normalize_base_url(url: str) -> str:
@@ -77,10 +106,17 @@ def _normalize_base_url(url: str) -> str:
     return urlunparse(parsed._replace(path=path, params="", query="", fragment=""))
 
 
-def _resolve_hermes_connection(request, user, model_id):
-    """Return (base_url, api_key) for the hermes connection, or (None, None)."""
+def _resolve_hermes_connection(request, user, model, model_id):
+    """Return (base_url, api_key, upstream_model_id) for the hermes connection,
+    or (None, None, None) when it cannot be resolved."""
+    upstream_model_id = _model_upstream_id(model) or model_id
+
     if HERMES_AGENT_BASE_URL:
-        return _normalize_base_url(HERMES_AGENT_BASE_URL), HERMES_AGENT_API_KEY
+        return (
+            _normalize_base_url(HERMES_AGENT_BASE_URL),
+            HERMES_AGENT_API_KEY,
+            upstream_model_id,
+        )
 
     try:
         from open_webui.routers.openai import (
@@ -88,13 +124,26 @@ def _resolve_hermes_connection(request, user, model_id):
             _normalize_openai_connection_key,
             _resolve_openai_connection_by_model_id,
         )
+        from open_webui.utils.model_identity import get_model_ref_from_model
+
+        # Mirror openai.generate_chat_completion's resolution exactly so we pick
+        # the same connection it would. The resolved model dict carries the
+        # connection routing info (connection_index + connection_id) that
+        # disambiguates when several OpenAI connections are configured.
+        request_models = getattr(
+            getattr(request, "state", None), "MODELS", None
+        ) or getattr(getattr(getattr(request, "app", None), "state", None), "MODELS", {})
+
+        model_ref = get_model_ref_from_model(model) if isinstance(model, dict) else {}
+        if not model_ref and isinstance(request_models, dict):
+            model_ref = get_model_ref_from_model(request_models.get(model_id))
 
         connection_user = (
             getattr(getattr(request, "state", None), "connection_user", None) or user
         )
         base_urls, keys, cfgs = _get_openai_user_config(connection_user)
         if not base_urls:
-            return None, None
+            return None, None, None
 
         try:
             idx, url, key, api_config = _resolve_openai_connection_by_model_id(
@@ -102,11 +151,14 @@ def _resolve_hermes_connection(request, user, model_id):
                 base_urls,
                 keys,
                 cfgs,
-                request_models=getattr(getattr(request, "state", None), "MODELS", None),
+                model_ref=model_ref,
+                request_models=request_models,
             )
             key, api_config = _normalize_openai_connection_key(
                 key, api_config, url_idx=idx
             )
+            if api_config.get("_resolved_model_id"):
+                upstream_model_id = api_config["_resolved_model_id"]
         except Exception:
             # Single-connection fallback: with exactly one configured OpenAI
             # connection there is nothing ambiguous to resolve.
@@ -117,11 +169,11 @@ def _resolve_hermes_connection(request, user, model_id):
             key = keys[idx] if idx < len(keys) else ""
 
         if not url:
-            return None, None
-        return _normalize_base_url(url), key or ""
+            return None, None, None
+        return _normalize_base_url(url), key or "", upstream_model_id
     except Exception as e:
         log.warning(f"Failed to resolve hermes agent connection for {model_id}: {e}")
-        return None, None
+        return None, None, None
 
 
 def _extract_text_content(content) -> str:
@@ -136,7 +188,7 @@ def _extract_text_content(content) -> str:
     return str(content) if content is not None else ""
 
 
-def _build_run_payload(form_data, metadata):
+def _build_run_payload(form_data, metadata, upstream_model_id):
     messages = form_data.get("messages") or []
 
     instructions = None
@@ -155,7 +207,7 @@ def _build_run_payload(form_data, metadata):
 
     payload = {
         "input": user_message,
-        "model": form_data.get("model"),
+        "model": upstream_model_id,
     }
     if history:
         payload["conversation_history"] = history
@@ -238,7 +290,9 @@ async def run_hermes_agent(request, form_data, user, metadata, model, events):
         return None
 
     model_id = form_data.get("model")
-    base_url, api_key = _resolve_hermes_connection(request, user, model_id)
+    base_url, api_key, upstream_model_id = _resolve_hermes_connection(
+        request, user, model, model_id
+    )
     if not base_url:
         return None
 
@@ -249,7 +303,7 @@ async def run_hermes_agent(request, form_data, user, metadata, model, events):
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
 
-    run_payload = _build_run_payload(form_data, metadata)
+    run_payload = _build_run_payload(form_data, metadata, upstream_model_id)
 
     def upsert_response_message(message: dict):
         return Chats.upsert_message_to_chat_by_id_and_message_id(

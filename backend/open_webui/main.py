@@ -1775,7 +1775,9 @@ async def chat_completion(
                 }
             )
 
-        if is_hermes_agent_model(form_data.get("model")):
+        if is_hermes_agent_model(model) or is_hermes_agent_model(
+            form_data.get("model")
+        ):
             hermes_response = await run_hermes_agent(
                 request, form_data, user, metadata, model, events
             )

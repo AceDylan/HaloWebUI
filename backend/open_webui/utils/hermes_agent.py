@@ -266,7 +266,7 @@ def _map_usage(usage):
     }
 
 
-async def run_hermes_agent(request, form_data, user, metadata, model, events):
+async def run_hermes_agent(request, form_data, user, metadata, model, events, tasks=None):
     """
     Execute the chat via hermes's runs API, streaming results over the chat
     socket. Returns a background-task response dict, or None when this path
@@ -439,6 +439,16 @@ async def run_hermes_agent(request, form_data, user, metadata, model, events):
                 )
             except Exception as e:
                 log.warning(f"hermes completion persist failed: {e}")
+            # Post-response bookkeeping (title/tags/follow-ups), same as the
+            # normal chat flow in process_chat_response.
+            try:
+                from open_webui.utils.middleware import background_tasks_handler
+
+                await background_tasks_handler(
+                    request, user, metadata, tasks, event_emitter
+                )
+            except Exception as e:
+                log.warning(f"hermes background tasks failed: {e}")
 
         try:
             for event in events or []:

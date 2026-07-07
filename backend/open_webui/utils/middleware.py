@@ -5764,107 +5764,148 @@ async def process_chat_payload(request, form_data, user, metadata, model, tasks=
     return form_data, metadata, events
 
 
-async def process_chat_response(
-    request, response, form_data, user, metadata, model, events, tasks
-):
-    async def background_tasks_handler():
-        message_map = Chats.get_messages_by_chat_id(metadata["chat_id"])
-        message = message_map.get(metadata["message_id"]) if message_map else None
+async def background_tasks_handler(request, user, metadata, tasks, event_emitter):
+    message_map = Chats.get_messages_by_chat_id(metadata["chat_id"])
+    message = message_map.get(metadata["message_id"]) if message_map else None
 
-        if message:
-            messages = get_message_list(message_map, message.get("id"))
-            if not messages:
+    if message:
+        messages = get_message_list(message_map, message.get("id"))
+        if not messages:
+            return
+
+        # Strip reasoning/thinking HTML blocks from message content to avoid
+        # wasting tokens on title/tags/follow-up generation (H-12 KV cache protection).
+        for msg in messages:
+            if msg.get("role") == "assistant" and msg.get("content"):
+                msg["content"] = strip_reasoning_details(msg["content"])
+
+        async def apply_chat_title(title: str):
+            Chats.update_chat_title_by_id(metadata["chat_id"], title)
+
+            await event_emitter(
+                {
+                    "type": "chat:title",
+                    "data": title,
+                }
+            )
+
+        def parse_generated_chat_title(res) -> str:
+            if not res or not isinstance(res, dict):
+                return ""
+
+            choices = res.get("choices", [])
+            if len(choices) != 1:
+                return ""
+
+            title_string = (
+                choices[0].get("message", {}).get("content")
+                or message.get("content")
+                or ""
+            ).strip()
+            if not title_string:
+                return ""
+
+            json_start = title_string.find("{")
+            json_end = title_string.rfind("}")
+            if json_start != -1 and json_end >= json_start:
+                title_json = title_string[json_start : json_end + 1]
+                try:
+                    return str(json.loads(title_json).get("title") or "").strip()
+                except Exception:
+                    return ""
+
+            return title_string.strip(" \"'")
+
+        async def generate_or_fallback_chat_title() -> str:
+            # Image-only / multi-model-discussion sessions can't dispatch text
+            # completion to their primary model. We still try the configured
+            # external task model (a text model) when available; the
+            # generate_title() guard rejects the call when no safe text model
+            # is configured, and we fall back to a deterministic snippet.
+            require_external_task_model = bool(
+                metadata.get("skip_text_enhancements")
+            )
+
+            try:
+                title_form_data = {
+                    "model": message["model"],
+                    "messages": messages,
+                    "chat_id": metadata["chat_id"],
+                }
+                if require_external_task_model:
+                    title_form_data["require_external_task_model"] = True
+
+                res = await generate_title(
+                    request,
+                    title_form_data,
+                    user,
+                )
+                title = parse_generated_chat_title(res)
+            except Exception as e:
+                log.debug(f"Error generating chat title: {e}")
+                title = ""
+
+            return title or build_fallback_chat_title(messages)
+
+        if tasks:
+            if TASKS.TITLE_GENERATION in tasks:
+                if tasks[TASKS.TITLE_GENERATION]:
+                    title = await generate_or_fallback_chat_title()
+                    await apply_chat_title(title)
+                elif (
+                    len([msg for msg in messages if msg.get("role") == "user"]) == 1
+                ):
+                    await apply_chat_title(build_fallback_chat_title(messages))
+
+            if metadata.get("skip_text_enhancements"):
                 return
 
-            # Strip reasoning/thinking HTML blocks from message content to avoid
-            # wasting tokens on title/tags/follow-up generation (H-12 KV cache protection).
-            for msg in messages:
-                if msg.get("role") == "assistant" and msg.get("content"):
-                    msg["content"] = strip_reasoning_details(msg["content"])
-
-            async def apply_chat_title(title: str):
-                Chats.update_chat_title_by_id(metadata["chat_id"], title)
-
-                await event_emitter(
+            if TASKS.TAGS_GENERATION in tasks and tasks[TASKS.TAGS_GENERATION]:
+                res = await generate_chat_tags(
+                    request,
                     {
-                        "type": "chat:title",
-                        "data": title,
-                    }
-                )
-
-            def parse_generated_chat_title(res) -> str:
-                if not res or not isinstance(res, dict):
-                    return ""
-
-                choices = res.get("choices", [])
-                if len(choices) != 1:
-                    return ""
-
-                title_string = (
-                    choices[0].get("message", {}).get("content")
-                    or message.get("content")
-                    or ""
-                ).strip()
-                if not title_string:
-                    return ""
-
-                json_start = title_string.find("{")
-                json_end = title_string.rfind("}")
-                if json_start != -1 and json_end >= json_start:
-                    title_json = title_string[json_start : json_end + 1]
-                    try:
-                        return str(json.loads(title_json).get("title") or "").strip()
-                    except Exception:
-                        return ""
-
-                return title_string.strip(" \"'")
-
-            async def generate_or_fallback_chat_title() -> str:
-                # Image-only / multi-model-discussion sessions can't dispatch text
-                # completion to their primary model. We still try the configured
-                # external task model (a text model) when available; the
-                # generate_title() guard rejects the call when no safe text model
-                # is configured, and we fall back to a deterministic snippet.
-                require_external_task_model = bool(
-                    metadata.get("skip_text_enhancements")
-                )
-
-                try:
-                    title_form_data = {
                         "model": message["model"],
                         "messages": messages,
                         "chat_id": metadata["chat_id"],
-                    }
-                    if require_external_task_model:
-                        title_form_data["require_external_task_model"] = True
+                    },
+                    user,
+                )
 
-                    res = await generate_title(
-                        request,
-                        title_form_data,
-                        user,
-                    )
-                    title = parse_generated_chat_title(res)
-                except Exception as e:
-                    log.debug(f"Error generating chat title: {e}")
-                    title = ""
+                if res and isinstance(res, dict):
+                    if len(res.get("choices", [])) == 1:
+                        tags_string = (
+                            res.get("choices", [])[0]
+                            .get("message", {})
+                            .get("content", "")
+                        )
+                    else:
+                        tags_string = ""
 
-                return title or build_fallback_chat_title(messages)
+                    tags_string = tags_string[
+                        tags_string.find("{") : tags_string.rfind("}") + 1
+                    ]
 
-            if tasks:
-                if TASKS.TITLE_GENERATION in tasks:
-                    if tasks[TASKS.TITLE_GENERATION]:
-                        title = await generate_or_fallback_chat_title()
-                        await apply_chat_title(title)
-                    elif (
-                        len([msg for msg in messages if msg.get("role") == "user"]) == 1
-                    ):
-                        await apply_chat_title(build_fallback_chat_title(messages))
+                    try:
+                        tags = json.loads(tags_string).get("tags", [])
+                        Chats.update_chat_tags_by_id(
+                            metadata["chat_id"], tags, user
+                        )
 
-                if metadata.get("skip_text_enhancements"):
-                    return
+                        await event_emitter(
+                            {
+                                "type": "chat:tags",
+                                "data": tags,
+                            }
+                        )
+                    except Exception as e:
+                        pass
 
-                if TASKS.TAGS_GENERATION in tasks and tasks[TASKS.TAGS_GENERATION]:
-                    res = await generate_chat_tags(
+            if (
+                TASKS.FOLLOW_UP_GENERATION in tasks
+                and tasks[TASKS.FOLLOW_UP_GENERATION]
+            ):
+                try:
+                    res = await generate_follow_ups(
                         request,
                         {
                             "model": message["model"],
@@ -5876,76 +5917,36 @@ async def process_chat_response(
 
                     if res and isinstance(res, dict):
                         if len(res.get("choices", [])) == 1:
-                            tags_string = (
+                            fu_string = (
                                 res.get("choices", [])[0]
                                 .get("message", {})
                                 .get("content", "")
                             )
                         else:
-                            tags_string = ""
+                            fu_string = ""
 
-                        tags_string = tags_string[
-                            tags_string.find("{") : tags_string.rfind("}") + 1
+                        fu_string = fu_string[
+                            fu_string.find("{") : fu_string.rfind("}") + 1
                         ]
 
-                        try:
-                            tags = json.loads(tags_string).get("tags", [])
-                            Chats.update_chat_tags_by_id(
-                                metadata["chat_id"], tags, user
-                            )
+                        follow_ups = json.loads(fu_string).get("follow_ups", [])
 
+                        if follow_ups and isinstance(follow_ups, list):
                             await event_emitter(
                                 {
-                                    "type": "chat:tags",
-                                    "data": tags,
+                                    "type": "chat:message:follow_ups",
+                                    "data": {
+                                        "follow_ups": follow_ups[:3],
+                                    },
                                 }
                             )
-                        except Exception as e:
-                            pass
+                except Exception as e:
+                    log.debug(f"Error generating follow-ups: {e}")
 
-                if (
-                    TASKS.FOLLOW_UP_GENERATION in tasks
-                    and tasks[TASKS.FOLLOW_UP_GENERATION]
-                ):
-                    try:
-                        res = await generate_follow_ups(
-                            request,
-                            {
-                                "model": message["model"],
-                                "messages": messages,
-                                "chat_id": metadata["chat_id"],
-                            },
-                            user,
-                        )
 
-                        if res and isinstance(res, dict):
-                            if len(res.get("choices", [])) == 1:
-                                fu_string = (
-                                    res.get("choices", [])[0]
-                                    .get("message", {})
-                                    .get("content", "")
-                                )
-                            else:
-                                fu_string = ""
-
-                            fu_string = fu_string[
-                                fu_string.find("{") : fu_string.rfind("}") + 1
-                            ]
-
-                            follow_ups = json.loads(fu_string).get("follow_ups", [])
-
-                            if follow_ups and isinstance(follow_ups, list):
-                                await event_emitter(
-                                    {
-                                        "type": "chat:message:follow_ups",
-                                        "data": {
-                                            "follow_ups": follow_ups[:3],
-                                        },
-                                    }
-                                )
-                    except Exception as e:
-                        log.debug(f"Error generating follow-ups: {e}")
-
+async def process_chat_response(
+    request, response, form_data, user, metadata, model, events, tasks
+):
     event_emitter = None
     event_caller = None
     if (
@@ -6065,7 +6066,7 @@ async def process_chat_response(
                                 },
                             )
 
-                    await background_tasks_handler()
+                    await background_tasks_handler(request, user, metadata, tasks, event_emitter)
 
             return response
         else:
@@ -10057,7 +10058,7 @@ async def process_chat_response(
                             },
                         )
 
-                await background_tasks_handler()
+                await background_tasks_handler(request, user, metadata, tasks, event_emitter)
             except asyncio.CancelledError:
                 log.warning("Task was cancelled!")
                 await event_emitter({"type": "task-cancelled"})

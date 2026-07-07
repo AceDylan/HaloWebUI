@@ -1779,7 +1779,7 @@ async def chat_completion(
             form_data.get("model")
         ):
             hermes_response = await run_hermes_agent(
-                request, form_data, user, metadata, model, events
+                request, form_data, user, metadata, model, events, tasks
             )
             if hermes_response is not None:
                 return hermes_response

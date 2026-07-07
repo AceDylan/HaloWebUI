@@ -513,6 +513,10 @@ from open_webui.utils.multi_model_discussion import (
     generate_multi_model_discussion_completion,
     is_multi_model_discussion_enabled,
 )
+from open_webui.utils.hermes_agent import (
+    is_hermes_agent_model,
+    run_hermes_agent,
+)
 from open_webui.utils.middleware import (
     build_native_file_input_retry_notification,
     clear_native_file_input_remote_cache,
@@ -1770,6 +1774,13 @@ async def chat_completion(
                     },
                 }
             )
+
+        if is_hermes_agent_model(form_data.get("model")):
+            hermes_response = await run_hermes_agent(
+                request, form_data, user, metadata, model, events
+            )
+            if hermes_response is not None:
+                return hermes_response
 
         response = await chat_completion_handler(request, form_data, user)
 

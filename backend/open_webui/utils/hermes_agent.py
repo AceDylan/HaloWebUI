@@ -58,6 +58,11 @@ try:
 except ValueError:
     HERMES_AGENT_APPROVAL_TIMEOUT = 240
 
+# aiohttp's default per-line read buffer is 64KB, but a run.completed SSE
+# event carrying inlined base64 images (hermes resolves MEDIA:<path> tags,
+# up to 5MB per image) arrives as a single multi-MB line.
+HERMES_EVENTS_READ_BUFSIZE = 64 * 1024 * 1024
+
 
 def _model_upstream_id(model) -> str:
     """Return the upstream model id (without any connection prefix).
@@ -539,6 +544,7 @@ async def run_hermes_agent(request, form_data, user, metadata, model, events, ta
                     f"{base_url}/runs/{run_id}/events",
                     headers=headers,
                     ssl=AIOHTTP_CLIENT_SESSION_SSL,
+                    read_bufsize=HERMES_EVENTS_READ_BUFSIZE,
                 ) as resp:
                     if resp.status >= 400:
                         body = await resp.text()
@@ -547,7 +553,18 @@ async def run_hermes_agent(request, form_data, user, metadata, model, events, ta
                         )
                         return
 
-                    async for raw_line in resp.content:
+                    while True:
+                        try:
+                            raw_line = await resp.content.readline()
+                        except ValueError as e:
+                            # "Chunk too big": a single SSE line exceeded
+                            # read_bufsize. Don't fail the chat — fall through
+                            # to the status poll below, which reads the same
+                            # final output as plain JSON with no line limit.
+                            log.warning(f"hermes event stream read aborted: {e}")
+                            break
+                        if not raw_line:
+                            break
                         line = raw_line.decode("utf-8", errors="ignore").strip()
                         if not line or line.startswith(":"):
                             continue

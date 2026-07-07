@@ -27,6 +27,7 @@ import html
 import json
 import logging
 import os
+import re
 import time
 from urllib.parse import urlparse, urlunparse
 
@@ -256,6 +257,48 @@ def _serialize_blocks(blocks) -> str:
     return content.strip()
 
 
+_DATA_URL_IMAGE_RE = re.compile(
+    r"!\[([^\]]*)\]\((data:image/[a-zA-Z0-9.+-]+;base64,[A-Za-z0-9+/=\s]+)\)"
+)
+
+
+def _store_data_url_images(request, user, metadata, text: str) -> str:
+    """Persist inline base64 images as uploaded files and rewrite them to
+    file-content URLs.
+
+    Hermes resolves MEDIA:<path> image tags in the final run output into
+    markdown data URLs (the web UI container cannot read hermes's local file
+    paths). Storing the multi-MB base64 blob in the chat would bloat the DB
+    and get echoed back to hermes as conversation history on every following
+    message, so save it via the same upload path the built-in image
+    generation uses and reference it by URL instead.
+    """
+    if not text or "data:image/" not in text:
+        return text
+
+    from open_webui.routers.images import load_b64_image_data, upload_image
+
+    def _repl(match):
+        try:
+            loaded = load_b64_image_data(match.group(2))
+            if not loaded:
+                return match.group(0)
+            image_data, content_type = loaded
+            url = upload_image(
+                request,
+                {"source": "hermes-agent", "chat_id": metadata.get("chat_id")},
+                image_data,
+                content_type,
+                user,
+            )
+            return f"![{match.group(1) or 'image'}]({url})"
+        except Exception as e:
+            log.warning(f"hermes media image upload failed: {e}")
+            return match.group(0)
+
+    return _DATA_URL_IMAGE_RE.sub(_repl, text)
+
+
 def _map_usage(usage):
     if not isinstance(usage, dict):
         return None
@@ -402,6 +445,21 @@ async def run_hermes_agent(request, form_data, user, metadata, model, events, ta
             if not blocks or blocks[-1]["type"] != "text":
                 blocks.append({"type": "text", "content": ""})
             return blocks[-1]
+
+        def _apply_final_output(output):
+            # Hermes resolves MEDIA:<path> image tags into markdown images
+            # only in the final output; the delta stream carried the raw tag
+            # text. Swap the streamed text for the resolved output so the
+            # image renders instead of a server-side file path.
+            if not output:
+                return
+            output = _store_data_url_images(request, user, metadata, output)
+            for block in reversed(blocks):
+                if block["type"] == "text" and str(block.get("content", "")).strip():
+                    if "MEDIA:" in block["content"] and "![" in output:
+                        block["content"] = output
+                    return
+            blocks.append({"type": "text", "content": output})
 
         async def _finalize(error=None, usage=None):
             nonlocal finalized
@@ -552,14 +610,7 @@ async def run_hermes_agent(request, form_data, user, metadata, model, events, ta
                         elif event_type == "approval.responded":
                             pass
                         elif event_type == "run.completed":
-                            output = event.get("output") or ""
-                            has_text = any(
-                                block["type"] == "text"
-                                and str(block.get("content", "")).strip()
-                                for block in blocks
-                            )
-                            if output and not has_text:
-                                blocks.append({"type": "text", "content": output})
+                            _apply_final_output(event.get("output") or "")
                             await _finalize(usage=event.get("usage"))
                         elif event_type == "run.failed":
                             await _finalize(
@@ -587,16 +638,7 @@ async def run_hermes_agent(request, form_data, user, metadata, model, events, ta
                                 usage = status_data.get("usage")
                                 if status_data.get("status") == "failed":
                                     error = status_data.get("error") or "run failed"
-                                output = status_data.get("output") or ""
-                                has_text = any(
-                                    block["type"] == "text"
-                                    and str(block.get("content", "")).strip()
-                                    for block in blocks
-                                )
-                                if output and not has_text:
-                                    blocks.append(
-                                        {"type": "text", "content": output}
-                                    )
+                                _apply_final_output(status_data.get("output") or "")
                 except Exception:
                     pass
                 await _finalize(error=error, usage=usage)

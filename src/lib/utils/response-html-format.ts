@@ -259,13 +259,41 @@ const renderInline = (value: string): string => {
 	const input = normalizeText(value);
 	let html = '';
 	let cursor = 0;
-	const linkPattern = /\[([^\]\n]{1,200})\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g;
+	const linkPattern = /(!?)\[([^\]\n]{1,200})\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g;
 	let match: RegExpExecArray | null;
 
 	while ((match = linkPattern.exec(input))) {
 		html += renderInlineWithoutLinks(input.slice(cursor, match.index));
-		const label = match[1];
-		const href = resolveSafeMarkdownUrl(match[2], {
+		const label = match[2];
+
+		if (match[1] === '!') {
+			// Markdown image, e.g. generated images referenced as
+			// ![image](/api/v1/files/<id>/content). Relative file-content
+			// URLs are the norm here, unlike links below.
+			const src = resolveSafeMarkdownUrl(match[3], {
+				allowHash: false,
+				allowRelative: true,
+				allowDataImage: true
+			});
+
+			if (src) {
+				html += `<img src="${escapeAttribute(src)}" alt="${escapeAttribute(label)}" loading="lazy" style="${escapeAttribute(
+					toStyle({
+						'max-width': '100%',
+						'border-radius': '12px',
+						display: 'block',
+						margin: '8px 0'
+					})
+				)}">`;
+			} else {
+				html += renderInlineWithoutLinks(match[0]);
+			}
+
+			cursor = match.index + match[0].length;
+			continue;
+		}
+
+		const href = resolveSafeMarkdownUrl(match[3], {
 			allowHash: true,
 			allowRelative: false,
 			allowDataDownload: true

@@ -12,6 +12,7 @@
 	import { getGeminiConfig, updateGeminiConfig } from '$lib/apis/gemini';
 	import { getGrokConfig, updateGrokConfig } from '$lib/apis/grok';
 	import { getAnthropicConfig, updateAnthropicConfig } from '$lib/apis/anthropic';
+	import { getHermesAgentConfig, updateHermesAgentConfig } from '$lib/apis/hermes-agent';
 	import { getBackendConfig } from '$lib/apis';
 	import { getConnectionsConfig, setConnectionsConfig } from '$lib/apis/configs';
 	import { refreshModels as refreshModelsStore } from '$lib/services/models';
@@ -48,6 +49,7 @@
 
 	// Connections can grow very large; allow folding like the Documents settings page.
 	let expandedSections = {
+		hermes: true,
 		openai: true,
 		gemini: true,
 		grok: true,
@@ -58,6 +60,7 @@
 	let expandedSectionsInitialized = false;
 
 	let sectionEl_openai: HTMLElement;
+	let sectionEl_hermes: HTMLElement;
 	let sectionEl_gemini: HTMLElement;
 	let sectionEl_grok: HTMLElement;
 	let sectionEl_anthropic: HTMLElement;
@@ -76,6 +79,13 @@
 	const AUTO_EXPAND_MAX_CONNECTIONS = 2;
 	const getConnectionRenderKey = (url: string, key: string | undefined, config: any) =>
 		config ?? `${url}::${key ?? ''}`;
+	const remapConfigAfterDelete = (configs: any, removedIdx: number, remainingUrls: string[]) => {
+		const newConfig: any = {};
+		remainingUrls.forEach((_, newIdx) => {
+			newConfig[newIdx] = configs[newIdx < removedIdx ? newIdx : newIdx + 1];
+		});
+		return newConfig;
+	};
 	const getOllamaRenderKey = (url: string, config: any) => config ?? url;
 	const SETTINGS_CONFLICT_DETAIL =
 		'User settings were updated elsewhere. Please retry with the latest settings.';
@@ -97,6 +107,9 @@
 		if (expandedSectionsInitialized) return;
 
 		// Auto-collapse sections with many connections to avoid an excessively tall page.
+		expandedSections.hermes =
+			HERMES_AGENT_BASE_URLS.length > 0 &&
+			HERMES_AGENT_BASE_URLS.length <= AUTO_EXPAND_MAX_CONNECTIONS;
 		expandedSections.openai =
 			OPENAI_API_BASE_URLS.length > 0 && OPENAI_API_BASE_URLS.length <= AUTO_EXPAND_MAX_CONNECTIONS;
 		expandedSections.gemini =
@@ -133,11 +146,16 @@
 	let ANTHROPIC_API_BASE_URLS = [''];
 	let ANTHROPIC_API_CONFIGS: any = {};
 
+	let HERMES_AGENT_API_KEYS = [''];
+	let HERMES_AGENT_BASE_URLS = [''];
+	let HERMES_AGENT_CONFIGS: any = {};
+
 	let ENABLE_OPENAI_API: null | boolean = null;
 	let ENABLE_OLLAMA_API: null | boolean = null;
 	let ENABLE_GEMINI_API: null | boolean = null;
 	let ENABLE_GROK_API: null | boolean = null;
 	let ENABLE_ANTHROPIC_API: null | boolean = null;
+	let ENABLE_HERMES_AGENT: null | boolean = null;
 
 	let connectionsConfig: any = null;
 
@@ -162,6 +180,47 @@
 	let geminiUpdateVersion = 0;
 	let grokUpdateVersion = 0;
 	let anthropicUpdateVersion = 0;
+	let hermesUpdateVersion = 0;
+
+	const updateHermesHandler = async (refreshModels = true) => {
+		if (ENABLE_HERMES_AGENT === null) return false;
+
+		const thisVersion = ++hermesUpdateVersion;
+		HERMES_AGENT_BASE_URLS = HERMES_AGENT_BASE_URLS.map((url) => url.replace(/\/$/, ''));
+		if (HERMES_AGENT_API_KEYS.length > HERMES_AGENT_BASE_URLS.length) {
+			HERMES_AGENT_API_KEYS = HERMES_AGENT_API_KEYS.slice(0, HERMES_AGENT_BASE_URLS.length);
+		}
+		while (HERMES_AGENT_API_KEYS.length < HERMES_AGENT_BASE_URLS.length) {
+			HERMES_AGENT_API_KEYS.push('');
+		}
+
+		const res = await updateHermesAgentConfig(localStorage.token, {
+			ENABLE_HERMES_AGENT,
+			HERMES_AGENT_BASE_URLS,
+			HERMES_AGENT_API_KEYS,
+			HERMES_AGENT_CONFIGS
+		}).catch((error) => {
+			toast.error(formatSettingsSaveError(error));
+			return null;
+		});
+
+		if (thisVersion !== hermesUpdateVersion) return false;
+		if (!res) return false;
+
+		ENABLE_HERMES_AGENT = res?.ENABLE_HERMES_AGENT ?? ENABLE_HERMES_AGENT;
+		HERMES_AGENT_BASE_URLS = res?.HERMES_AGENT_BASE_URLS ?? HERMES_AGENT_BASE_URLS;
+		HERMES_AGENT_API_KEYS = res?.HERMES_AGENT_API_KEYS ?? HERMES_AGENT_API_KEYS;
+		HERMES_AGENT_CONFIGS = res?.HERMES_AGENT_CONFIGS ?? HERMES_AGENT_CONFIGS;
+
+		toast.success($i18n.t('Hermes Agent settings updated'));
+		if (refreshModels) {
+			await refreshModelsStore(localStorage.token, {
+				force: true,
+				reason: 'admin-connections-hermes'
+			});
+		}
+		return true;
+	};
 
 	const updateOpenAIHandler = async (refreshModels = true) => {
 		if (ENABLE_OPENAI_API === null) return false;
@@ -556,6 +615,7 @@
 			let geminiConfig: any = {};
 			let grokConfig: any = {};
 			let anthropicConfig: any = {};
+			let hermesConfig: any = {};
 
 			await Promise.all([
 				(async () => {
@@ -653,6 +713,19 @@
 				})(),
 				(async () => {
 					try {
+						hermesConfig = await getHermesAgentConfig(localStorage.token);
+					} catch (error) {
+						console.error(error);
+						hermesConfig = {
+							ENABLE_HERMES_AGENT: true,
+							HERMES_AGENT_BASE_URLS: [],
+							HERMES_AGENT_API_KEYS: [],
+							HERMES_AGENT_CONFIGS: {}
+						};
+					}
+				})(),
+				(async () => {
+					try {
 						// Use cached config if available
 						if ($connectionsConfigCache) {
 							connectionsConfig = JSON.parse(JSON.stringify($connectionsConfigCache));
@@ -669,6 +742,10 @@
 
 			ENABLE_OPENAI_API = openaiConfig?.ENABLE_OPENAI_API ?? false;
 			ENABLE_OLLAMA_API = ollamaConfig?.ENABLE_OLLAMA_API ?? false;
+			ENABLE_HERMES_AGENT = hermesConfig?.ENABLE_HERMES_AGENT ?? true;
+			HERMES_AGENT_BASE_URLS = hermesConfig?.HERMES_AGENT_BASE_URLS ?? [];
+			HERMES_AGENT_API_KEYS = hermesConfig?.HERMES_AGENT_API_KEYS ?? [];
+			HERMES_AGENT_CONFIGS = hermesConfig?.HERMES_AGENT_CONFIGS ?? {};
 
 			OPENAI_API_BASE_URLS = openaiConfig?.OPENAI_API_BASE_URLS ?? [];
 			OPENAI_API_KEYS = openaiConfig?.OPENAI_API_KEYS ?? [];
@@ -732,12 +809,19 @@
 				}
 			}
 
+			for (const [idx] of HERMES_AGENT_BASE_URLS.entries()) {
+				if (!HERMES_AGENT_CONFIGS[idx]) {
+					HERMES_AGENT_CONFIGS[idx] = { name: 'Hermes Agent', default_model: 'hermes-agent' };
+				}
+			}
+
 			initExpandedSections();
 		}
 	});
 
 	const submitHandler = async () => {
 		const results = await Promise.all([
+			updateHermesHandler(false),
 			updateOpenAIHandler(false),
 			updateGeminiHandler(false),
 			updateGrokHandler(false),
@@ -791,10 +875,153 @@
 	on:submit|preventDefault={submitHandler}
 >
 	<div class="overflow-y-auto scrollbar-hidden h-full pr-2">
-		{#if ENABLE_OPENAI_API !== null && ENABLE_OLLAMA_API !== null && ENABLE_GEMINI_API !== null && ENABLE_GROK_API !== null && ENABLE_ANTHROPIC_API !== null && connectionsConfig !== null}
+		{#if ENABLE_HERMES_AGENT !== null && ENABLE_OPENAI_API !== null && ENABLE_OLLAMA_API !== null && ENABLE_GEMINI_API !== null && ENABLE_GROK_API !== null && ENABLE_ANTHROPIC_API !== null && connectionsConfig !== null}
 			<div class="max-w-6xl mx-auto space-y-3">
+				<div bind:this={sectionEl_hermes} class="scroll-mt-2">
+					<div
+						class="rounded-2xl border bg-gray-50 border-gray-100 dark:bg-gray-850 dark:border-gray-800"
+					>
+						<div
+							class="w-full flex items-center justify-between px-5 py-4 text-left cursor-pointer select-none"
+							role="button"
+							tabindex="0"
+							aria-expanded={expandedSections.hermes}
+							on:click={async (e) => {
+								const target = e.target;
+								if (
+									target instanceof Element &&
+									target.closest('button, a, input, select, textarea, [data-no-toggle]')
+								) {
+									return;
+								}
+								expandedSections.hermes = !expandedSections.hermes;
+								await revealIfExpanded('hermes', sectionEl_hermes);
+							}}
+							on:keydown={async (e) => {
+								if (e.key === 'Enter' || e.key === ' ') {
+									e.preventDefault();
+									expandedSections.hermes = !expandedSections.hermes;
+									await revealIfExpanded('hermes', sectionEl_hermes);
+								}
+							}}
+						>
+							<div class="flex items-center gap-3">
+								<div class="glass-icon-badge bg-violet-100/80 dark:bg-violet-900/30">
+									<ModelIcon src="/favicon.png" alt="Hermes Agent" bare className="size-[18px]" />
+								</div>
+								<div>
+									<div
+										class="text-base font-semibold text-gray-800 dark:text-gray-100 tracking-tight"
+									>
+										{$i18n.t('Hermes Agent')}
+									</div>
+									<div class="text-xs text-gray-500 dark:text-gray-400">
+										{$i18n.t('Native Hermes Agent API Server provider')}
+									</div>
+								</div>
+							</div>
+
+							<div class="flex items-center gap-3">
+								<div data-no-toggle>
+									<Switch
+										bind:state={ENABLE_HERMES_AGENT}
+										on:change={async () => {
+											if (ENABLE_HERMES_AGENT) {
+												expandedSections.hermes = true;
+											}
+											updateHermesHandler();
+										}}
+									/>
+								</div>
+								<div
+									class="transform transition-transform duration-200 {expandedSections.hermes
+										? 'rotate-180'
+										: ''}"
+								>
+									<ChevronDown className="size-5 text-gray-400" />
+								</div>
+							</div>
+						</div>
+
+						{#if expandedSections.hermes}
+							<div
+								transition:slide={{ duration: 200, easing: quintOut }}
+								class="px-5 pb-5 space-y-3"
+							>
+								<div
+									class="rounded-lg border border-violet-100 dark:border-violet-900/40 bg-violet-50/60 dark:bg-violet-950/20 px-4 py-3 text-xs text-violet-800 dark:text-violet-200"
+								>
+									{$i18n.t(
+										'Configure Hermes Agent API Server here, for example http://127.0.0.1:8642/v1. The browser only talks to HaloWebUI; HaloWebUI proxies the API key server-side.'
+									)}
+								</div>
+								<div class="grid grid-cols-1 md:grid-cols-2 gap-2">
+									{#each HERMES_AGENT_BASE_URLS as url, idx (getConnectionRenderKey(url, HERMES_AGENT_API_KEYS[idx], HERMES_AGENT_CONFIGS[idx]))}
+										<OpenAIConnection
+											bind:url={HERMES_AGENT_BASE_URLS[idx]}
+											bind:key={HERMES_AGENT_API_KEYS[idx]}
+											bind:config={HERMES_AGENT_CONFIGS[idx]}
+											onSubmit={async () => {
+												const ok = await updateHermesHandler(!!ENABLE_HERMES_AGENT);
+												if (!ok) {
+													throw new Error($i18n.t('Failed to save connections'));
+												}
+											}}
+											onDelete={() => {
+												HERMES_AGENT_BASE_URLS = HERMES_AGENT_BASE_URLS.filter(
+													(u, urlIdx) => !(urlIdx === idx && u === url)
+												);
+												HERMES_AGENT_API_KEYS = HERMES_AGENT_API_KEYS.filter(
+													(key, keyIdx) => idx !== keyIdx
+												);
+
+												HERMES_AGENT_CONFIGS = remapConfigAfterDelete(
+													HERMES_AGENT_CONFIGS,
+													idx,
+													HERMES_AGENT_BASE_URLS
+												);
+												updateHermesHandler(!!ENABLE_HERMES_AGENT);
+											}}
+										/>
+									{/each}
+									<button
+										type="button"
+										class="w-full min-h-[62px] bg-white dark:bg-gray-900 rounded-lg px-4 py-3 border border-dashed border-gray-200 dark:border-gray-800 hover:border-gray-300 dark:hover:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition flex items-center justify-center gap-2 text-gray-500 dark:text-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-200 dark:focus:ring-gray-700"
+										aria-label={$i18n.t('Add Hermes Agent connection')}
+										on:click={() => {
+											expandedSections.hermes = true;
+											HERMES_AGENT_BASE_URLS = [
+												...HERMES_AGENT_BASE_URLS,
+												'http://127.0.0.1:8642/v1'
+											];
+											HERMES_AGENT_API_KEYS = [...HERMES_AGENT_API_KEYS, ''];
+											HERMES_AGENT_CONFIGS[HERMES_AGENT_BASE_URLS.length - 1] = {
+												name: 'Hermes Agent',
+												default_model: 'hermes-agent'
+											};
+										}}
+									>
+										<div
+											class="w-7 h-7 rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center text-gray-700 dark:text-gray-200"
+										>
+											<Plus className="size-3" />
+										</div>
+										<div
+											class="text-xs font-medium text-gray-600 dark:text-gray-300 whitespace-nowrap"
+										>
+											{$i18n.t('Add Hermes Agent API Server')}
+										</div>
+									</button>
+								</div>
+							</div>
+						{/if}
+					</div>
+				</div>
+
 				<div bind:this={sectionEl_openai} class="scroll-mt-2">
-					<div class="rounded-2xl border bg-gray-50 border-gray-100 dark:bg-gray-850 dark:border-gray-800">
+					<div
+						class="rounded-2xl border bg-gray-50 border-gray-100 dark:bg-gray-850 dark:border-gray-800"
+					>
 						<div
 							class="w-full flex items-center justify-between px-5 py-4 text-left cursor-pointer select-none"
 							role="button"
@@ -820,9 +1047,7 @@
 							}}
 						>
 							<div class="flex items-center gap-3">
-								<div
-									class="glass-icon-badge bg-emerald-100/80 dark:bg-emerald-900/30"
-								>
+								<div class="glass-icon-badge bg-emerald-100/80 dark:bg-emerald-900/30">
 									<svg
 										xmlns="http://www.w3.org/2000/svg"
 										viewBox="0 0 24 24"
@@ -834,7 +1059,9 @@
 										/>
 									</svg>
 								</div>
-								<div class="text-base font-semibold text-gray-800 dark:text-gray-100 tracking-tight">
+								<div
+									class="text-base font-semibold text-gray-800 dark:text-gray-100 tracking-tight"
+								>
 									{$i18n.t('OpenAI API')}
 								</div>
 							</div>
@@ -868,7 +1095,7 @@
 						{#if expandedSections.openai}
 							<div transition:slide={{ duration: 200, easing: quintOut }} class="px-5 pb-5">
 								<div class="grid grid-cols-1 md:grid-cols-2 gap-2">
-										{#each OPENAI_API_BASE_URLS as url, idx (getConnectionRenderKey(url, OPENAI_API_KEYS[idx], OPENAI_API_CONFIGS[idx]))}
+									{#each OPENAI_API_BASE_URLS as url, idx (getConnectionRenderKey(url, OPENAI_API_KEYS[idx], OPENAI_API_CONFIGS[idx]))}
 										<OpenAIConnection
 											bind:url={OPENAI_API_BASE_URLS[idx]}
 											bind:key={OPENAI_API_KEYS[idx]}
@@ -922,7 +1149,9 @@
 
 				<!-- Gemini API Section -->
 				<div bind:this={sectionEl_gemini} class="scroll-mt-2">
-					<div class="rounded-2xl border bg-gray-50 border-gray-100 dark:bg-gray-850 dark:border-gray-800">
+					<div
+						class="rounded-2xl border bg-gray-50 border-gray-100 dark:bg-gray-850 dark:border-gray-800"
+					>
 						<div
 							class="w-full flex items-center justify-between px-5 py-4 text-left cursor-pointer select-none"
 							role="button"
@@ -948,9 +1177,7 @@
 							}}
 						>
 							<div class="flex items-center gap-3">
-								<div
-									class="glass-icon-badge bg-blue-100/80 dark:bg-blue-900/30"
-								>
+								<div class="glass-icon-badge bg-blue-100/80 dark:bg-blue-900/30">
 									<svg
 										xmlns="http://www.w3.org/2000/svg"
 										viewBox="0 0 24 24"
@@ -971,7 +1198,9 @@
 										/>
 									</svg>
 								</div>
-								<div class="text-base font-semibold text-gray-800 dark:text-gray-100 tracking-tight">
+								<div
+									class="text-base font-semibold text-gray-800 dark:text-gray-100 tracking-tight"
+								>
 									{$i18n.t('Gemini API')}
 								</div>
 							</div>
@@ -1005,7 +1234,7 @@
 						{#if expandedSections.gemini}
 							<div transition:slide={{ duration: 200, easing: quintOut }} class="px-5 pb-5">
 								<div class="grid grid-cols-1 md:grid-cols-2 gap-2">
-										{#each GEMINI_API_BASE_URLS as url, idx (getConnectionRenderKey(url, GEMINI_API_KEYS[idx], GEMINI_API_CONFIGS[idx]))}
+									{#each GEMINI_API_BASE_URLS as url, idx (getConnectionRenderKey(url, GEMINI_API_KEYS[idx], GEMINI_API_CONFIGS[idx]))}
 										<GeminiConnection
 											bind:url={GEMINI_API_BASE_URLS[idx]}
 											bind:key={GEMINI_API_KEYS[idx]}
@@ -1059,7 +1288,9 @@
 
 				<!-- Grok API Section -->
 				<div bind:this={sectionEl_grok} class="scroll-mt-2">
-					<div class="rounded-2xl border bg-gray-50 border-gray-100 dark:bg-gray-850 dark:border-gray-800">
+					<div
+						class="rounded-2xl border bg-gray-50 border-gray-100 dark:bg-gray-850 dark:border-gray-800"
+					>
 						<div
 							class="w-full flex items-center justify-between px-5 py-4 text-left cursor-pointer select-none"
 							role="button"
@@ -1086,14 +1317,11 @@
 						>
 							<div class="flex items-center gap-3">
 								<div class="glass-icon-badge bg-slate-100/80 dark:bg-slate-900/30">
-									<ModelIcon
-										src={GROK_PROVIDER_ICON}
-										alt="Grok"
-										bare
-										className="size-[18px]"
-									/>
+									<ModelIcon src={GROK_PROVIDER_ICON} alt="Grok" bare className="size-[18px]" />
 								</div>
-								<div class="text-base font-semibold text-gray-800 dark:text-gray-100 tracking-tight">
+								<div
+									class="text-base font-semibold text-gray-800 dark:text-gray-100 tracking-tight"
+								>
 									{$i18n.t('Grok API')}
 								</div>
 							</div>
@@ -1146,8 +1374,7 @@
 
 												let newConfig = {};
 												GROK_API_BASE_URLS.forEach((u, newIdx) => {
-													newConfig[newIdx] =
-														GROK_API_CONFIGS[newIdx < idx ? newIdx : newIdx + 1];
+													newConfig[newIdx] = GROK_API_CONFIGS[newIdx < idx ? newIdx : newIdx + 1];
 												});
 												GROK_API_CONFIGS = newConfig;
 												updateGrokHandler(!!ENABLE_GROK_API);
@@ -1181,7 +1408,9 @@
 
 				<!-- Anthropic API Section -->
 				<div bind:this={sectionEl_anthropic} class="scroll-mt-2">
-					<div class="rounded-2xl border bg-gray-50 border-gray-100 dark:bg-gray-850 dark:border-gray-800">
+					<div
+						class="rounded-2xl border bg-gray-50 border-gray-100 dark:bg-gray-850 dark:border-gray-800"
+					>
 						<div
 							class="w-full flex items-center justify-between px-5 py-4 text-left cursor-pointer select-none"
 							role="button"
@@ -1207,9 +1436,7 @@
 							}}
 						>
 							<div class="flex items-center gap-3">
-								<div
-									class="glass-icon-badge bg-amber-100/80 dark:bg-amber-900/30"
-								>
+								<div class="glass-icon-badge bg-amber-100/80 dark:bg-amber-900/30">
 									<svg
 										xmlns="http://www.w3.org/2000/svg"
 										viewBox="0 0 16 16"
@@ -1221,7 +1448,9 @@
 										/>
 									</svg>
 								</div>
-								<div class="text-base font-semibold text-gray-800 dark:text-gray-100 tracking-tight">
+								<div
+									class="text-base font-semibold text-gray-800 dark:text-gray-100 tracking-tight"
+								>
 									{$i18n.t('Anthropic API')}
 								</div>
 							</div>
@@ -1255,7 +1484,7 @@
 						{#if expandedSections.anthropic}
 							<div transition:slide={{ duration: 200, easing: quintOut }} class="px-5 pb-5">
 								<div class="grid grid-cols-1 md:grid-cols-2 gap-2">
-										{#each ANTHROPIC_API_BASE_URLS as url, idx (getConnectionRenderKey(url, ANTHROPIC_API_KEYS[idx], ANTHROPIC_API_CONFIGS[idx]))}
+									{#each ANTHROPIC_API_BASE_URLS as url, idx (getConnectionRenderKey(url, ANTHROPIC_API_KEYS[idx], ANTHROPIC_API_CONFIGS[idx]))}
 										<AnthropicConnection
 											bind:url={ANTHROPIC_API_BASE_URLS[idx]}
 											bind:key={ANTHROPIC_API_KEYS[idx]}
@@ -1311,7 +1540,9 @@
 
 				<!-- Ollama API Section -->
 				<div bind:this={sectionEl_ollama} class="scroll-mt-2">
-					<div class="rounded-2xl border bg-gray-50 border-gray-100 dark:bg-gray-850 dark:border-gray-800">
+					<div
+						class="rounded-2xl border bg-gray-50 border-gray-100 dark:bg-gray-850 dark:border-gray-800"
+					>
 						<div
 							class="w-full flex items-center justify-between px-5 py-4 text-left cursor-pointer select-none"
 							role="button"
@@ -1337,9 +1568,7 @@
 							}}
 						>
 							<div class="flex items-center gap-3">
-								<div
-									class="glass-icon-badge bg-gray-100/80 dark:bg-gray-900/30"
-								>
+								<div class="glass-icon-badge bg-gray-100/80 dark:bg-gray-900/30">
 									<svg
 										xmlns="http://www.w3.org/2000/svg"
 										viewBox="0 0 24 24"
@@ -1351,7 +1580,9 @@
 										/>
 									</svg>
 								</div>
-								<div class="text-base font-semibold text-gray-800 dark:text-gray-100 tracking-tight">
+								<div
+									class="text-base font-semibold text-gray-800 dark:text-gray-100 tracking-tight"
+								>
 									{$i18n.t('Ollama API')}
 								</div>
 							</div>
@@ -1388,7 +1619,7 @@
 								class="px-5 pb-5 space-y-2"
 							>
 								<div class="grid grid-cols-1 md:grid-cols-2 gap-2">
-										{#each OLLAMA_BASE_URLS as url, idx (getOllamaRenderKey(url, OLLAMA_API_CONFIGS[idx]))}
+									{#each OLLAMA_BASE_URLS as url, idx (getOllamaRenderKey(url, OLLAMA_API_CONFIGS[idx]))}
 										<OllamaConnection
 											bind:url={OLLAMA_BASE_URLS[idx]}
 											bind:config={OLLAMA_API_CONFIGS[idx]}
@@ -1452,7 +1683,9 @@
 
 				<!-- Advanced Settings -->
 				<div bind:this={sectionEl_advanced} class="scroll-mt-2">
-					<div class="rounded-2xl border bg-gray-50 border-gray-100 dark:bg-gray-850 dark:border-gray-800">
+					<div
+						class="rounded-2xl border bg-gray-50 border-gray-100 dark:bg-gray-850 dark:border-gray-800"
+					>
 						<button
 							type="button"
 							class="w-full flex items-center justify-between px-5 py-4 text-left"
@@ -1464,9 +1697,7 @@
 							}}
 						>
 							<div class="flex items-center gap-3">
-								<div
-									class="glass-icon-badge bg-slate-100/80 dark:bg-slate-900/30"
-								>
+								<div class="glass-icon-badge bg-slate-100/80 dark:bg-slate-900/30">
 									<svg
 										xmlns="http://www.w3.org/2000/svg"
 										viewBox="0 0 24 24"
@@ -1480,7 +1711,9 @@
 										/>
 									</svg>
 								</div>
-								<div class="text-base font-semibold text-gray-800 dark:text-gray-100 tracking-tight">
+								<div
+									class="text-base font-semibold text-gray-800 dark:text-gray-100 tracking-tight"
+								>
 									{$i18n.t('Advanced Settings')}
 								</div>
 							</div>
@@ -1528,7 +1761,6 @@
 			</div>
 		{/if}
 	</div>
-
 </form>
 
 <ConfirmDialog

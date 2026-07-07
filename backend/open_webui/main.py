@@ -69,6 +69,7 @@ from open_webui.routers import (
     gemini,
     grok,
     anthropic,
+    hermes_agent,
     retrieval,
     tasks,
     auths,
@@ -1399,6 +1400,7 @@ app.include_router(openai.router, prefix="/openai", tags=["openai"])
 app.include_router(gemini.router, prefix="/gemini", tags=["gemini"])
 app.include_router(grok.router, prefix="/grok", tags=["grok"])
 app.include_router(anthropic.router, prefix="/anthropic", tags=["anthropic"])
+app.include_router(hermes_agent.router, prefix="/hermes-agent", tags=["hermes-agent"])
 
 
 app.include_router(tasks.router, prefix="/api/v1/tasks", tags=["tasks"])

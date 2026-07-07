@@ -58,11 +58,6 @@ CONNECTION_PROVIDER_SPECS = {
         "keys_key": None,
         "configs_key": "OLLAMA_API_CONFIGS",
     },
-    "hermes": {
-        "urls_key": "HERMES_AGENT_BASE_URLS",
-        "keys_key": "HERMES_AGENT_API_KEYS",
-        "configs_key": "HERMES_AGENT_CONFIGS",
-    },
 }
 
 

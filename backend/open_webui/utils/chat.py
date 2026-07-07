@@ -34,10 +34,6 @@ from open_webui.routers.anthropic import (
     generate_chat_completion as generate_anthropic_chat_completion,
 )
 
-from open_webui.routers.hermes_agent import (
-    generate_chat_completion as generate_hermes_agent_chat_completion,
-)
-
 from open_webui.routers.ollama import (
     generate_chat_completion as generate_ollama_chat_completion,
 )
@@ -280,13 +276,6 @@ async def generate_chat_completion(
             )
         if model.get("anthropic") is not None or model.get("owned_by") in ("anthropic", "claude"):
             return await generate_anthropic_chat_completion(
-                request=request,
-                form_data=form_data,
-                user=user,
-                bypass_filter=bypass_filter,
-            )
-        if model.get("hermes") is not None or model.get("owned_by") == "hermes":
-            return await generate_hermes_agent_chat_completion(
                 request=request,
                 form_data=form_data,
                 user=user,

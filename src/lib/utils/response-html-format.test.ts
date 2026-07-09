@@ -118,6 +118,35 @@ This reasoning should be visible when expanded.
 		expect(html).toContain('最终答案。');
 	});
 
+	it('groups consecutive tool call details into one collapsible card', () => {
+		const html = renderResponseHtmlFormat(`
+<details type="tool_calls" done="true" name="search_web" arguments="{&quot;query&quot;:&quot;a&quot;}" result="&quot;ok&quot;"><summary>Tool Executed</summary></details>
+<details type="tool_calls" done="true" name="fetch_url" arguments="{&quot;url&quot;:&quot;https://example.com&quot;}" result="&quot;ok&quot;"><summary>Tool Executed</summary></details>
+<details type="tool_calls" done="true" name="read_file" arguments="{}" result="&quot;ok&quot;"><summary>Tool Executed</summary></details>
+
+最终答案。
+`);
+
+		expect(html).toContain('data-halo-block="activity-group"');
+		expect(html).toContain('工具调用 ×3');
+		expect(html).toContain('search_web');
+		expect(html).toContain('fetch_url');
+		expect(html).toContain('read_file');
+		// 不再是每个调用一张独立卡片
+		expect(html.match(/data-halo-block="activity"/g)).toBeNull();
+		expect(html).toContain('最终答案。');
+	});
+
+	it('keeps a single tool call as a standalone activity card', () => {
+		const html = renderResponseHtmlFormat(`
+<details type="tool_calls" done="true" name="search_web" arguments="{}" result="&quot;ok&quot;"><summary>Tool Executed</summary></details>
+`);
+
+		expect(html).toContain('data-halo-block="activity"');
+		expect(html).not.toContain('data-halo-block="activity-group"');
+		expect(html).toContain('工具调用：search_web');
+	});
+
 	it('renders code interpreter details as activity blocks', () => {
 		const html = renderResponseHtmlFormat(`
 <details type="code_interpreter" done="true" result="{&quot;stdout&quot;:&quot;ok&quot;}"><summary>Code executed</summary></details>

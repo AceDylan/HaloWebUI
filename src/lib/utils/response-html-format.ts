@@ -4,6 +4,13 @@ import { getDataUrlDownloadName } from './download-links';
 import { resolveSafeMarkdownUrl } from './html-safety';
 
 type CssValue = string | number | null | undefined;
+type ActivityBlock = {
+	type: 'activity';
+	detailType: StructuredDetailType;
+	attributes: Record<string, string>;
+	summary: string;
+	text: string;
+};
 type ParsedBlock =
 	| { type: 'heading'; level: number; text: string }
 	| { type: 'paragraph'; text: string }
@@ -12,13 +19,8 @@ type ParsedBlock =
 	| { type: 'code'; lang: string; text: string }
 	| { type: 'table'; headers: string[]; rows: string[][] }
 	| { type: 'divider' }
-	| {
-			type: 'activity';
-			detailType: StructuredDetailType;
-			attributes: Record<string, string>;
-			summary: string;
-			text: string;
-	  };
+	| ActivityBlock
+	| { type: 'activity-group'; items: ActivityBlock[] };
 
 type StructuredDetailType = 'reasoning' | 'tool_calls' | 'code_interpreter';
 
@@ -127,7 +129,7 @@ const parseHtmlAttributes = (tag: string): Record<string, string> => {
 	return attributes;
 };
 
-const parseStructuredDetails = (raw: string): Extract<ParsedBlock, { type: 'activity' }> | null => {
+const parseStructuredDetails = (raw: string): ActivityBlock | null => {
 	const openTag = structuredDetailsOpenPattern.exec(raw)?.[0] ?? '';
 	if (!openTag) {
 		return null;
@@ -467,7 +469,7 @@ const renderFeatureBlock = (kind: string, inner: string, style: Record<string, C
 const isEmphasisParagraph = (text: string) =>
 	/^(?:核心答案|核心结论|结论|总结|注意|重点|提示|答案)\s*[：:]/.test(text.trim());
 
-const getActivityMeta = (block: Extract<ParsedBlock, { type: 'activity' }>) => {
+const getActivityMeta = (block: ActivityBlock) => {
 	const done = block.attributes.done === 'true';
 	const toolName = block.attributes.name || '';
 
@@ -560,7 +562,7 @@ const renderSearchResults = (value: unknown) => {
 		: '';
 };
 
-const renderActivityContent = (block: Extract<ParsedBlock, { type: 'activity' }>) => {
+const renderActivityContent = (block: ActivityBlock) => {
 	if (block.detailType === 'reasoning') {
 		const reasoning = normalizeReasoningText(block.text || block.summary || '暂无可展示的思考内容');
 
@@ -584,7 +586,7 @@ const renderActivityContent = (block: Extract<ParsedBlock, { type: 'activity' }>
 		: `<div style="${escapeAttribute(toStyle({ color: THEME.muted, 'font-size': '13px' }))}">暂无可展示的执行详情</div>`;
 };
 
-const renderActivityBlock = (block: Extract<ParsedBlock, { type: 'activity' }>) => {
+const renderActivityBlock = (block: ActivityBlock) => {
 	const meta = getActivityMeta(block);
 	return `<details data-halo-block="activity" data-halo-activity-type="${escapeAttribute(block.detailType)}" style="${escapeAttribute(
 		toStyle({
@@ -627,6 +629,159 @@ const renderActivityBlock = (block: Extract<ParsedBlock, { type: 'activity' }>) 
 			padding: '0 14px 14px 48px'
 		})
 	)}">${renderActivityContent(block)}</div></details>`;
+};
+
+const isToolCallsActivity = (block: ParsedBlock): block is ActivityBlock =>
+	block.type === 'activity' && block.detailType === 'tool_calls';
+
+// 连续的多个工具调用合并成一张分组卡片，避免一行一张卡片堆满屏幕。
+const groupToolCallBlocks = (blocks: ParsedBlock[]): ParsedBlock[] => {
+	const grouped: ParsedBlock[] = [];
+
+	for (const block of blocks) {
+		if (isToolCallsActivity(block)) {
+			const previous = grouped[grouped.length - 1];
+
+			if (previous && previous.type === 'activity-group') {
+				previous.items.push(block);
+				continue;
+			}
+
+			if (previous && isToolCallsActivity(previous)) {
+				grouped[grouped.length - 1] = { type: 'activity-group', items: [previous, block] };
+				continue;
+			}
+		}
+
+		grouped.push(block);
+	}
+
+	return grouped;
+};
+
+const getToolCallLabel = (block: ActivityBlock, index: number) =>
+	block.attributes.name || block.summary || `工具调用 ${index + 1}`;
+
+const renderActivityGroupBlock = (block: Extract<ParsedBlock, { type: 'activity-group' }>) => {
+	const total = block.items.length;
+	const allDone = block.items.every((item) => item.attributes.done === 'true');
+	const tone = allDone ? '#16a34a' : THEME.primary;
+	const names = truncatePlainText(
+		block.items.map((item, index) => getToolCallLabel(item, index)).join('、'),
+		56
+	);
+
+	const rows = block.items
+		.map((item, index) => {
+			const itemDone = item.attributes.done === 'true';
+			return `<details style="${escapeAttribute(
+				toStyle({
+					background: THEME.surface,
+					border: `1px solid ${THEME.borderSubtle}`,
+					'border-radius': '10px',
+					overflow: 'hidden'
+				})
+			)}"><summary style="${escapeAttribute(
+				toStyle({
+					cursor: 'pointer',
+					padding: '9px 12px',
+					display: 'flex',
+					'align-items': 'center',
+					gap: '9px',
+					color: THEME.text,
+					'font-size': '12.5px',
+					'font-weight': 700
+				})
+			)}"><span style="${escapeAttribute(
+				toStyle({
+					width: '20px',
+					height: '20px',
+					display: 'inline-flex',
+					'align-items': 'center',
+					'justify-content': 'center',
+					'border-radius': '7px',
+					background: THEME.panel,
+					color: THEME.muted,
+					'font-size': '11px',
+					'flex-shrink': 0
+				})
+			)}">${index + 1}</span><span style="${escapeAttribute(
+				toStyle({
+					flex: 1,
+					'min-width': 0,
+					overflow: 'hidden',
+					'text-overflow': 'ellipsis',
+					'white-space': 'nowrap'
+				})
+			)}">${escapeHtml(getToolCallLabel(item, index))}</span><span style="${escapeAttribute(
+				toStyle({
+					color: itemDone ? '#16a34a' : THEME.primary,
+					'font-size': '11px',
+					'font-weight': 700,
+					'flex-shrink': 0
+				})
+			)}">${itemDone ? '已完成' : '执行中'}</span></summary><div style="${escapeAttribute(
+				toStyle({ display: 'grid', gap: '10px', padding: '0 12px 12px' })
+			)}">${renderActivityContent(item)}</div></details>`;
+		})
+		.join('');
+
+	return `<details data-halo-block="activity-group" data-halo-activity-type="tool_calls" style="${escapeAttribute(
+		toStyle({
+			margin: '4px 0',
+			background: `linear-gradient(135deg, ${THEME.primarySoft}, ${THEME.surface})`,
+			border: `1px solid ${THEME.borderSubtle}`,
+			'border-radius': '14px',
+			overflow: 'hidden'
+		})
+	)}"><summary style="${escapeAttribute(
+		toStyle({
+			cursor: 'pointer',
+			padding: '12px 14px',
+			display: 'flex',
+			'align-items': 'center',
+			gap: '10px',
+			color: THEME.text,
+			'font-size': '13px',
+			'font-weight': 700
+		})
+	)}"><span style="${escapeAttribute(
+		toStyle({
+			width: '24px',
+			height: '24px',
+			display: 'inline-flex',
+			'align-items': 'center',
+			'justify-content': 'center',
+			'border-radius': '9px',
+			background: THEME.surface,
+			color: tone,
+			border: `1px solid ${THEME.borderSubtle}`,
+			'font-size': '12px',
+			'flex-shrink': 0
+		})
+	)}">工</span><span style="${escapeAttribute(
+		toStyle({
+			flex: 1,
+			'min-width': 0,
+			overflow: 'hidden',
+			'text-overflow': 'ellipsis',
+			'white-space': 'nowrap'
+		})
+	)}">工具调用 ×${total}${
+		names
+			? `<span style="${escapeAttribute(
+					toStyle({ color: THEME.muted, 'font-weight': 500, 'margin-left': '8px', 'font-size': '12px' })
+				)}">${escapeHtml(names)}</span>`
+			: ''
+	}</span><span style="${escapeAttribute(
+		toStyle({ color: tone, 'font-size': '12px', 'font-weight': 700, 'flex-shrink': 0 })
+	)}">${allDone ? '已完成' : '执行中'}</span></summary><div style="${escapeAttribute(
+		toStyle({
+			display: 'grid',
+			gap: '8px',
+			padding: '0 14px 14px'
+		})
+	)}">${rows}</div></details>`;
 };
 
 const renderBlock = (block: ParsedBlock) => {
@@ -856,6 +1011,9 @@ const renderBlock = (block: ParsedBlock) => {
 
 		case 'activity':
 			return renderActivityBlock(block);
+
+		case 'activity-group':
+			return renderActivityGroupBlock(block);
 	}
 };
 
@@ -875,7 +1033,7 @@ export const renderResponseHtmlFormat = (content: string): string => {
 		return normalized;
 	}
 
-	const blocks = parseBlocks(normalized);
+	const blocks = groupToolCallBlocks(parseBlocks(normalized));
 	if (blocks.length === 0) {
 		return '';
 	}

@@ -46,6 +46,7 @@
 	import { getModelChatDisplayName } from '$lib/utils/model-display';
 
 	import ArchivedChatsModal from './Sidebar/ArchivedChatsModal.svelte';
+	import ChatHistoryModal from './Sidebar/ChatHistoryModal.svelte';
 	import UserMenu from './Sidebar/UserMenu.svelte';
 	import ChatItem from './Sidebar/ChatItem.svelte';
 	import Spinner from '../common/Spinner.svelte';
@@ -59,6 +60,7 @@
 	import ChannelModal from './Sidebar/ChannelModal.svelte';
 	import ChannelItem from './Sidebar/ChannelItem.svelte';
 	import ChatBubblePlus from '../icons/ChatBubblePlus.svelte';
+	import ChatBubbles from '../icons/ChatBubbles.svelte';
 	import Search from '../icons/Search.svelte';
 	import ArchiveBox from '../icons/ArchiveBox.svelte';
 
@@ -135,6 +137,7 @@
 	let showFolderSection = browser ? localStorage?.showFolderSection !== 'false' : true;
 
 	let showCreateChannel = false;
+	let showChatHistoryModal = false;
 
 	// Pagination variables
 	let chatListLoading = false;
@@ -610,6 +613,8 @@
 	}}
 />
 
+<ChatHistoryModal bind:show={showChatHistoryModal} />
+
 <ChannelModal
 	bind:show={showCreateChannel}
 	onSubmit={async ({ name, access_control }) => {
@@ -856,6 +861,18 @@
 				{/if}
 
 				<div class="w-full h-px bg-gray-200/70 dark:bg-gray-800/70 my-1" />
+
+				<Tooltip content={$i18n.t('Chat History')}>
+					<button
+						class={iconButtonClass}
+						on:click={() => {
+							showChatHistoryModal = true;
+						}}
+						aria-label={$i18n.t('Chat History')}
+					>
+						<ChatBubbles className="size-5" strokeWidth="2" />
+					</button>
+				</Tooltip>
 
 				<Tooltip content={$i18n.t('Search')}>
 					<button

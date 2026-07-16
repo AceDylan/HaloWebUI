@@ -37,6 +37,7 @@ from open_webui.env import AIOHTTP_CLIENT_SESSION_SSL, SRC_LOG_LEVELS
 from open_webui.models.chats import Chats
 from open_webui.socket.main import get_event_call, get_event_emitter
 from open_webui.tasks import create_task
+from open_webui.utils.chat_image_refs import materialize_openai_image_message_refs
 
 log = logging.getLogger(__name__)
 log.setLevel(SRC_LOG_LEVELS.get("MAIN", logging.INFO))
@@ -182,16 +183,18 @@ def _resolve_hermes_connection(request, user, model, model_id):
         return None, None, None
 
 
-def _extract_text_content(content) -> str:
+def _normalize_multimodal_content(content):
+    """Preserve OpenAI-compatible text and image parts for Hermes runs.
+
+    The old adapter extracted only text, silently dropping uploaded images.
+    Hermes accepts the same structured content shape used by the Responses
+    API, so keep image parts intact (including image-only messages).
+    """
     if isinstance(content, str):
         return content
     if isinstance(content, list):
-        return " ".join(
-            part.get("text", "")
-            for part in content
-            if isinstance(part, dict) and part.get("type") == "text"
-        )
-    return str(content) if content is not None else ""
+        return [part for part in content if isinstance(part, (dict, str))]
+    return content if content is not None else ""
 
 
 def _build_run_payload(form_data, metadata, upstream_model_id):
@@ -201,7 +204,7 @@ def _build_run_payload(form_data, metadata, upstream_model_id):
     history = []
     for message in messages:
         role = message.get("role")
-        content = _extract_text_content(message.get("content"))
+        content = _normalize_multimodal_content(message.get("content"))
         if role == "system":
             instructions = f"{instructions}\n{content}" if instructions else content
         else:
@@ -341,6 +344,14 @@ async def run_hermes_agent(request, form_data, user, metadata, model, events, ta
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
 
+    # The normal OpenAI path materializes /api/v1/files/... image references,
+    # but Hermes is dispatched before that path. Do it here so Hermes receives
+    # actual image bytes rather than an inaccessible UI file reference.
+    form_data = materialize_openai_image_message_refs(
+        form_data,
+        user_id=user.id,
+        is_admin=user.role == "admin",
+    )
     run_payload = _build_run_payload(form_data, metadata, upstream_model_id)
 
     def upsert_response_message(message: dict):

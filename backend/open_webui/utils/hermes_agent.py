@@ -214,8 +214,16 @@ def _build_run_payload(form_data, metadata, upstream_model_id):
     if history and history[-1].get("role") == "user":
         user_message = history.pop()["content"]
 
+    # The runs API accepts a string input or an OpenAI-style message array.  A
+    # multimodal content list is a list of parts, not a list of messages; pass
+    # it as the content of a user message so the API can find the user turn.
+    if isinstance(user_message, list):
+        run_input = [{"role": "user", "content": user_message}]
+    else:
+        run_input = user_message
+
     payload = {
-        "input": user_message,
+        "input": run_input,
         "model": upstream_model_id,
     }
     if history:

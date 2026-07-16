@@ -32,3 +32,5 @@ jobs:
           tags: |
             dylanha009/halowebui:custom
             dylanha009/halowebui:latest
+          build-args: |
+            INSTALL_PROFILE=local-rag

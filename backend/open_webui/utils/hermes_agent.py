@@ -197,6 +197,41 @@ def _normalize_multimodal_content(content):
     return content if content is not None else ""
 
 
+def _history_text_content(content) -> str:
+    """Keep historical turns textual so inline image bytes are not replayed.
+
+    Hermes treats inbound media as turn-scoped. Re-sending a prior data URL as
+    conversation history can turn a small image into hundreds of thousands of
+    text tokens when the runs endpoint serializes that history.
+    """
+    if isinstance(content, str):
+        return content
+    if not isinstance(content, list):
+        return str(content) if content is not None else ""
+
+    text_parts = []
+    has_image = False
+    for part in content:
+        if isinstance(part, str):
+            if part.strip():
+                text_parts.append(part.strip())
+            continue
+        if not isinstance(part, dict):
+            continue
+
+        part_type = part.get("type")
+        if part_type in {"text", "input_text"}:
+            text = part.get("text") or part.get("content") or ""
+            if str(text).strip():
+                text_parts.append(str(text).strip())
+        elif part_type in {"image", "image_url", "input_image"}:
+            has_image = True
+
+    if has_image:
+        text_parts.append("[Image attachment omitted from prior turn]")
+    return "\n".join(text_parts)
+
+
 def _build_run_payload(form_data, metadata, upstream_model_id):
     messages = form_data.get("messages") or []
 
@@ -206,13 +241,25 @@ def _build_run_payload(form_data, metadata, upstream_model_id):
         role = message.get("role")
         content = _normalize_multimodal_content(message.get("content"))
         if role == "system":
-            instructions = f"{instructions}\n{content}" if instructions else content
+            system_content = _history_text_content(content)
+            instructions = (
+                f"{instructions}\n{system_content}"
+                if instructions
+                else system_content
+            )
         else:
             history.append({"role": role, "content": content})
 
     user_message = ""
     if history and history[-1].get("role") == "user":
         user_message = history.pop()["content"]
+
+    # Inbound media is turn-scoped. Historical image data URLs must not be
+    # replayed: /v1/runs would stringify them and count the base64 as text.
+    history = [
+        {"role": message["role"], "content": _history_text_content(message["content"])}
+        for message in history
+    ]
 
     # The runs API accepts a string input or an OpenAI-style message array.  A
     # multimodal content list is a list of parts, not a list of messages; pass
@@ -233,6 +280,23 @@ def _build_run_payload(form_data, metadata, upstream_model_id):
     if metadata.get("chat_id"):
         payload["session_id"] = metadata["chat_id"]
     return payload
+
+
+def _materialize_run_input_image_refs(payload, *, user_id: str, is_admin: bool):
+    """Materialize only images attached to the current Hermes run input."""
+    run_input = payload.get("input")
+    if not isinstance(run_input, list):
+        return payload
+
+    materialized = materialize_openai_image_message_refs(
+        {"messages": run_input},
+        user_id=user_id,
+        is_admin=is_admin,
+    )
+    return {
+        **payload,
+        "input": materialized.get("messages") or run_input,
+    }
 
 
 def _serialize_blocks(blocks) -> str:
@@ -353,14 +417,14 @@ async def run_hermes_agent(request, form_data, user, metadata, model, events, ta
         headers["Authorization"] = f"Bearer {api_key}"
 
     # The normal OpenAI path materializes /api/v1/files/... image references,
-    # but Hermes is dispatched before that path. Do it here so Hermes receives
-    # actual image bytes rather than an inaccessible UI file reference.
-    form_data = materialize_openai_image_message_refs(
-        form_data,
+    # but Hermes is dispatched before that path. Materialize the current input
+    # only; replaying prior images would inflate later turns with base64 data.
+    run_payload = _build_run_payload(form_data, metadata, upstream_model_id)
+    run_payload = _materialize_run_input_image_refs(
+        run_payload,
         user_id=user.id,
         is_admin=user.role == "admin",
     )
-    run_payload = _build_run_payload(form_data, metadata, upstream_model_id)
 
     def upsert_response_message(message: dict):
         return Chats.upsert_message_to_chat_by_id_and_message_id(

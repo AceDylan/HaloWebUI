@@ -164,8 +164,22 @@ def _normalize_anthropic_connection_key(
     )
     return primary_key, cfg
 
-# Official beta header required for Files API.
+# Official beta headers used by Anthropic-compatible upstreams.
 ANTHROPIC_BETA_FILES_API = "files-api-2025-04-14"
+ANTHROPIC_BETA_CONTEXT_1M = "context-1m-2025-08-07"
+
+
+def _context_window_betas_for_model(model_id: str) -> list[str]:
+    """Enable the configured 1M context window for the claude-chat alias.
+
+    Current first-party Claude models expose 1M context without a beta header,
+    but the custom claude-chat proxy alias still uses the compatibility flag.
+    """
+    return (
+        [ANTHROPIC_BETA_CONTEXT_1M]
+        if str(model_id or "").strip().lower() == "claude-chat"
+        else []
+    )
 
 
 SUPPORTED_DOCUMENT_MIME_TYPES = {"application/pdf", "text/plain"}
@@ -2646,8 +2660,8 @@ async def generate_chat_completion(
         anthropic_payload["effort"] = reasoning_effort_passthrough
     max_tokens = anthropic_payload.get("max_tokens")
 
-    # Determine required betas (e.g., Files API) and merge with user configured betas.
-    required_betas: list[str] = []
+    # Determine required betas and merge with user configured betas.
+    required_betas = _context_window_betas_for_model(upstream_model_id)
     needs_files_api_beta = any(
         (
             isinstance(b, dict)

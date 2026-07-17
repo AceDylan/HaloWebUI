@@ -175,6 +175,21 @@ def test_needs_cc_format_for_claude_chat_proxy_alias():
     assert anthropic._needs_cc_format("claude-chat", "https://api.anthropic.com/v1") is False
 
 
+def test_claude_chat_alias_enables_1m_context_beta():
+    betas = anthropic._context_window_betas_for_model("claude-chat")
+    headers = anthropic._build_anthropic_headers(
+        "test-key",
+        {"anthropic_beta": "files-api-2025-04-14"},
+        extra_beta=betas,
+    )
+
+    assert headers["anthropic-beta"].split(",") == [
+        "files-api-2025-04-14",
+        "context-1m-2025-08-07",
+    ]
+    assert anthropic._context_window_betas_for_model("claude-opus-4-6") == []
+
+
 def test_resolve_proxy_model_alias_keeps_anyrouter_opus_short_alias():
     assert (
         anthropic._resolve_proxy_model_alias(

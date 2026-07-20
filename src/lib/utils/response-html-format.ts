@@ -14,7 +14,7 @@ type ActivityBlock = {
 type ParsedBlock =
 	| { type: 'heading'; level: number; text: string }
 	| { type: 'paragraph'; text: string }
-	| { type: 'list'; ordered: boolean; items: string[] }
+	| { type: 'list'; ordered: boolean; start?: number; items: string[] }
 	| { type: 'quote'; text: string }
 	| { type: 'code'; lang: string; text: string }
 	| { type: 'table'; headers: string[]; rows: string[][] }
@@ -93,6 +93,12 @@ const isQuote = (line: string) => /^\s*>\s?/.test(line);
 const isUnorderedList = (line: string) => /^\s*[-*+]\s+\S/.test(line);
 const isOrderedList = (line: string) => /^\s*\d+[.)]\s+\S/.test(line);
 const isList = (line: string) => isUnorderedList(line) || isOrderedList(line);
+const getOrderedListStart = (line: string) => {
+	const match = /^\s*(\d+)[.)]\s+\S/.exec(line);
+	const start = Number.parseInt(match?.[1] ?? '', 10);
+
+	return Number.isFinite(start) ? start : 1;
+};
 const isTableSeparator = (line: string) =>
 	/^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(line);
 const looksLikeTableRow = (line: string) => line.includes('|') && !isFence(line);
@@ -279,12 +285,13 @@ const renderInline = (value: string): string => {
 			});
 
 			if (src) {
-				html += `<img src="${escapeAttribute(src)}" alt="${escapeAttribute(label)}" loading="lazy" style="${escapeAttribute(
+				html += `<img src="${escapeAttribute(src)}" alt="${escapeAttribute(label)}" loading="lazy" data-halo-image-preview="true" style="${escapeAttribute(
 					toStyle({
 						'max-width': '100%',
 						'border-radius': '12px',
 						display: 'block',
-						margin: '8px 0'
+						margin: '8px 0',
+						cursor: 'zoom-in'
 					})
 				)}">`;
 			} else {
@@ -430,12 +437,13 @@ const parseBlocks = (content: string): ParsedBlock[] => {
 
 		if (isList(line)) {
 			const ordered = isOrderedList(line);
+			const start = ordered ? getOrderedListStart(line) : undefined;
 			const items: string[] = [];
 			while (i < lines.length && (ordered ? isOrderedList(lines[i]) : isUnorderedList(lines[i]))) {
 				items.push(lines[i].replace(/^\s*(?:[-*+]|\d+[.)])\s+/, '').trim());
 				i += 1;
 			}
-			blocks.push({ type: 'list', ordered, items });
+			blocks.push({ type: 'list', ordered, start, items });
 			continue;
 		}
 
@@ -770,7 +778,12 @@ const renderActivityGroupBlock = (block: Extract<ParsedBlock, { type: 'activity-
 	)}">工具调用 ×${total}${
 		names
 			? `<span style="${escapeAttribute(
-					toStyle({ color: THEME.muted, 'font-weight': 500, 'margin-left': '8px', 'font-size': '12px' })
+					toStyle({
+						color: THEME.muted,
+						'font-weight': 500,
+						'margin-left': '8px',
+						'font-size': '12px'
+					})
 				)}">${escapeHtml(names)}</span>`
 			: ''
 	}</span><span style="${escapeAttribute(
@@ -869,7 +882,7 @@ const renderBlock = (block: ParsedBlock) => {
 			const tag = block.ordered ? 'ol' : 'ul';
 			const items = block.items
 				.map((item, index) => {
-					const marker = block.ordered ? `${index + 1}` : '';
+					const marker = block.ordered ? `${(block.start ?? 1) + index}` : '';
 					return `<li style="${escapeAttribute(toStyle({ margin: '7px 0', padding: 0, display: 'flex', gap: '10px', 'align-items': 'flex-start' }))}"><span style="${escapeAttribute(
 						toStyle({
 							width: block.ordered ? '22px' : '8px',
@@ -929,14 +942,14 @@ const renderBlock = (block: ParsedBlock) => {
 							'justify-content': 'space-between',
 							'align-items': 'center'
 						})
-				  )}">${escapeHtml(block.lang)}${copyButton}</div>`
+					)}">${escapeHtml(block.lang)}${copyButton}</div>`
 				: `<div style="${escapeAttribute(
 						toStyle({
 							padding: '10px 14px 0',
 							display: 'flex',
 							'justify-content': 'flex-end'
 						})
-				  )}">${copyButton}</div>`;
+					)}">${copyButton}</div>`;
 
 			const preStyle = escapeAttribute(
 				toStyle({

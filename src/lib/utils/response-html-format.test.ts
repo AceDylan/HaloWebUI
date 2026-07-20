@@ -66,6 +66,24 @@ const ready = true;
 		expect(html).not.toContain('>---<');
 	});
 
+	it('preserves explicit ordered-list numbers when items are separated by paragraphs', () => {
+		const html = renderResponseHtmlFormat(
+			'1. Alpha\n\nhttps://alpha.example\n\n2. Beta\n\nhttps://beta.example\n\n3. Gamma'
+		);
+
+		expect(html).toContain('>1</span><span');
+		expect(html).toContain('>2</span><span');
+		expect(html).toContain('>3</span><span');
+	});
+
+	it('marks markdown images for delegated image preview clicks', () => {
+		const html = renderResponseHtmlFormat('![generated image](/api/v1/files/image-id/content)');
+
+		expect(html).toContain('<img');
+		expect(html).toContain('data-halo-image-preview="true"');
+		expect(html).toContain('cursor: zoom-in');
+	});
+
 	it('renders reasoning details as a collapsible activity block', () => {
 		const html = renderResponseHtmlFormat(`
 <details type="reasoning" done="true" duration="0.8">

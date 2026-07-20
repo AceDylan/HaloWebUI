@@ -532,7 +532,7 @@
 			{@const html = rewriteDataUrlDownloadLinks(
 				rewriteGeneratedFileHtmlLinks(
 					DOMPurify.sanitize(token.text, {
-						ADD_ATTR: ['style', 'download', 'target', 'rel'],
+						ADD_ATTR: ['style', 'download', 'target', 'rel', 'data-halo-image-preview'],
 						ALLOWED_URI_REGEXP: SAFE_HTML_URI_REGEXP
 					}),
 					generatedFiles

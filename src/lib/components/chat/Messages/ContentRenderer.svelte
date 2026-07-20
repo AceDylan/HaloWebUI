@@ -23,6 +23,7 @@
 	} from '$lib/utils/lobehub-chat-appearance';
 	import { renderResponseHtmlFormat } from '$lib/utils/response-html-format';
 	import { mergeAdjacentReasoningDetails } from '$lib/utils/reasoning-merge';
+	import ImagePreview from '$lib/components/common/ImagePreview.svelte';
 	import {
 		createEmptySelectionThreads,
 		hashSelectionThreadSource,
@@ -119,6 +120,9 @@
 	let syncThreadLayoutsRaf = 0;
 	let hadThreadLayouts = false;
 	let resolvedSourceIds: any[] = [];
+	let showImagePreview = false;
+	let imagePreviewSrc = '';
+	let imagePreviewAlt = '';
 
 	const INLINE_CITATION_SELECTOR = '[data-inline-citation="true"]';
 
@@ -305,6 +309,36 @@
 		} else {
 			fallbackCopy();
 		}
+	};
+
+	const handleHaloImagePreviewClick = (event: MouseEvent) => {
+		const target = event.target as HTMLElement | null;
+		const image = target?.closest?.('img[data-halo-image-preview="true"]') as HTMLImageElement | null;
+		if (!image || !contentContainerElement?.contains(image)) {
+			return;
+		}
+
+		const src = image.currentSrc || image.src || image.getAttribute('src') || '';
+		if (!src) {
+			return;
+		}
+
+		event.preventDefault();
+		event.stopPropagation();
+
+		imagePreviewSrc = src;
+		imagePreviewAlt = image.getAttribute('alt') ?? '';
+		showImagePreview = true;
+	};
+
+	const handleMessageContentClick = (event: MouseEvent) => {
+		handleHaloCopyClick(event);
+
+		if (event.defaultPrevented) {
+			return;
+		}
+
+		handleHaloImagePreviewClick(event);
 	};
 
 	const resetThreadLayoutsIfIdle = () => {
@@ -806,12 +840,14 @@
 </script>
 
 <div class="relative overflow-visible">
+	<!-- svelte-ignore a11y-click-events-have-key-events -->
+	<!-- svelte-ignore a11y-no-static-element-interactions -->
 	<div
 		bind:this={contentContainerElement}
 		data-inline-citations-hidden={($settings?.showInlineCitations ?? true) ? undefined : 'true'}
 		class="relative message-selection-surface"
 		on:copy={handleContentCopy}
-		on:click={handleHaloCopyClick}
+		on:click={handleMessageContentClick}
 		style={needsTruncation && !isExpanded
 			? `max-height: ${MAX_CONTENT_HEIGHT}px; overflow: hidden;`
 			: ''}
@@ -901,6 +937,8 @@
 		</div>
 	</div>
 {/if}
+
+<ImagePreview bind:show={showImagePreview} src={imagePreviewSrc} alt={imagePreviewAlt} />
 
 <style>
 	:global(.message-outline-anchor) {

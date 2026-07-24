@@ -29,7 +29,7 @@ from fastapi.concurrency import run_in_threadpool
 from starlette.responses import Response, StreamingResponse
 
 
-from open_webui.models.chats import Chats
+from open_webui.models.chats import Chats, can_auto_generate_chat_title
 from open_webui.models.files import FileForm, Files
 from open_webui.models.users import Users
 from open_webui.socket.main import (
@@ -5779,8 +5779,32 @@ async def background_tasks_handler(request, user, metadata, tasks, event_emitter
             if msg.get("role") == "assistant" and msg.get("content"):
                 msg["content"] = strip_reasoning_details(msg["content"])
 
+        user_message_count = len(
+            [msg for msg in messages if msg.get("role") == "user"]
+        )
+
+        def may_refresh_chat_title() -> bool:
+            return can_auto_generate_chat_title(
+                Chats.get_chat_title_by_id(metadata["chat_id"]),
+                {
+                    "title_generation": Chats.get_chat_title_generation_metadata_by_id(
+                        metadata["chat_id"]
+                    )
+                },
+                user_message_count,
+                metadata["message_id"],
+            )
+
         async def apply_chat_title(title: str):
-            Chats.update_chat_title_by_id(metadata["chat_id"], title)
+            updated = Chats.update_chat_title_by_id(
+                metadata["chat_id"],
+                title,
+                auto_generated=True,
+                last_user_message_count=user_message_count,
+                source_message_id=metadata["message_id"],
+            )
+            if updated is None:
+                return
 
             await event_emitter(
                 {
@@ -5848,13 +5872,11 @@ async def background_tasks_handler(request, user, metadata, tasks, event_emitter
             return title or build_fallback_chat_title(messages)
 
         if tasks:
-            if TASKS.TITLE_GENERATION in tasks:
+            if TASKS.TITLE_GENERATION in tasks and may_refresh_chat_title():
                 if tasks[TASKS.TITLE_GENERATION]:
                     title = await generate_or_fallback_chat_title()
                     await apply_chat_title(title)
-                elif (
-                    len([msg for msg in messages if msg.get("role") == "user"]) == 1
-                ):
+                elif user_message_count == 1:
                     await apply_chat_title(build_fallback_chat_title(messages))
 
             if metadata.get("skip_text_enhancements"):

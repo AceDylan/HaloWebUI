@@ -25,6 +25,56 @@ from sqlalchemy.sql import exists
 log = logging.getLogger(__name__)
 log.setLevel(SRC_LOG_LEVELS["MODELS"])
 
+TITLE_GENERATION_META_KEY = "title_generation"
+DEFAULT_CHAT_TITLE = "New Chat"
+
+
+def get_title_generation_metadata(meta: Optional[dict]) -> dict:
+    if not isinstance(meta, dict):
+        return {}
+
+    title_generation = meta.get(TITLE_GENERATION_META_KEY)
+    return title_generation if isinstance(title_generation, dict) else {}
+
+
+def can_auto_generate_chat_title(
+    title: Optional[str],
+    meta: Optional[dict],
+    user_message_count: Optional[int],
+    message_id: Optional[str] = None,
+) -> bool:
+    """Return whether an automatic title may replace the persisted title."""
+    if (
+        isinstance(user_message_count, bool)
+        or not isinstance(user_message_count, int)
+        or user_message_count < 1
+    ):
+        return False
+
+    title_generation = get_title_generation_metadata(meta)
+    auto_generated = title_generation.get("auto_generated")
+
+    # An explicit manual-title marker wins even if the user chose "New Chat".
+    if auto_generated is False:
+        return False
+    if auto_generated is not True and str(title or "").strip() != DEFAULT_CHAT_TITLE:
+        return False
+
+    last_message_id = title_generation.get("last_message_id")
+    if message_id and isinstance(last_message_id, str):
+        if message_id == last_message_id:
+            return False
+    else:
+        last_user_message_count = title_generation.get("last_user_message_count")
+        if (
+            isinstance(last_user_message_count, int)
+            and not isinstance(last_user_message_count, bool)
+            and user_message_count <= last_user_message_count
+        ):
+            return False
+
+    return True
+
 
 class Chat(Base):
     __tablename__ = "chat"
@@ -134,6 +184,7 @@ class ChatForm(BaseModel):
     chat: dict
     folder_id: Optional[str] = None
     assistant_id: Optional[str] = None
+    title_auto_generated: Optional[bool] = None
 
 
 class ChatImportForm(ChatForm):
@@ -378,9 +429,16 @@ class ChatTable:
     def insert_new_chat(self, user_id: str, form_data: ChatForm) -> Optional[ChatModel]:
         with get_db() as db:
             now = self._next_user_chat_timestamp(db, user_id)
+            meta = {}
+            if form_data.title_auto_generated is not None:
+                meta[TITLE_GENERATION_META_KEY] = {
+                    "auto_generated": form_data.title_auto_generated,
+                    "last_user_message_count": 0,
+                }
             result = self._build_chat_row(
                 user_id=user_id,
                 chat_payload=form_data.chat,
+                meta=meta,
                 folder_id=form_data.folder_id,
                 assistant_id=form_data.assistant_id,
                 now=now,
@@ -454,26 +512,49 @@ class ChatTable:
 
             return [ChatModel.model_validate(row) for row in rows]
 
-    def update_chat_by_id(self, id: str, chat: dict) -> Optional[ChatModel]:
+    def update_chat_by_id(
+        self, id: str, chat: dict, *, update_title: bool = True
+    ) -> Optional[ChatModel]:
         try:
             with get_db() as db:
                 normalized_chat = normalize_chat_payload(chat)
                 normalized_chat, _changed = (
                     sanitize_chat_payload_image_generation_options(normalized_chat)
                 )
-                chat_item = db.get(Chat, id)
+                query = getattr(db, "query", None)
+                if callable(query):
+                    chat_item = (
+                        query(Chat).filter(Chat.id == id).with_for_update().first()
+                    )
+                else:
+                    chat_item = db.get(Chat, id)
                 if chat_item is None:
                     return None
+
+                current_chat = chat_item.chat or {}
+                current_title = getattr(chat_item, "title", None) or current_chat.get(
+                    "title", DEFAULT_CHAT_TITLE
+                )
+                if update_title:
+                    next_title = normalized_chat.get("title", DEFAULT_CHAT_TITLE)
+                    if next_title != current_title:
+                        current_meta = getattr(chat_item, "meta", None)
+                        meta = dict(current_meta) if isinstance(current_meta, dict) else {}
+                        title_generation = dict(get_title_generation_metadata(meta))
+                        title_generation["auto_generated"] = False
+                        meta[TITLE_GENERATION_META_KEY] = title_generation
+                        chat_item.meta = meta
+                        flag_modified(chat_item, "meta")
+                else:
+                    next_title = current_title
+
+                normalized_chat["title"] = next_title
                 normalized_chat = _preserve_completed_assistant_messages(
                     chat_item.chat or {}, normalized_chat
                 )
                 chat_item.chat = normalized_chat
                 flag_modified(chat_item, "chat")
-                chat_item.title = (
-                    normalized_chat["title"]
-                    if "title" in normalized_chat
-                    else "New Chat"
-                )
+                chat_item.title = next_title
                 chat_item.updated_at = self._next_user_chat_timestamp(
                     db, chat_item.user_id
                 )
@@ -506,21 +587,71 @@ class ChatTable:
             "composer_state": sanitized_composer_state.get("composer_state", {}),
         }
 
-        return self.update_chat_by_id(id, next_chat)
+        return self.update_chat_by_id(id, next_chat, update_title=False)
 
-    def update_chat_title_by_id(self, id: str, title: str) -> Optional[ChatModel]:
+    def update_chat_title_by_id(
+        self,
+        id: str,
+        title: str,
+        *,
+        auto_generated: Optional[bool] = None,
+        last_user_message_count: Optional[int] = None,
+        source_message_id: Optional[str] = None,
+    ) -> Optional[ChatModel]:
         try:
             with get_db() as db:
-                chat_item = db.get(Chat, id)
-                if chat_item is None:
+                query = getattr(db, "query", None)
+                if callable(query):
+                    chat_item = (
+                        query(Chat).filter(Chat.id == id).with_for_update().first()
+                    )
+                else:
+                    chat_item = db.get(Chat, id)
+                if not chat_item:
                     return None
 
                 chat = normalize_chat_payload(chat_item.chat or {})
+                if auto_generated is True and not can_auto_generate_chat_title(
+                    chat_item.title or chat.get("title", DEFAULT_CHAT_TITLE),
+                    chat_item.meta,
+                    last_user_message_count,
+                    source_message_id,
+                ):
+                    return None
+
+                if auto_generated is True and source_message_id:
+                    history = chat.get("history") or {}
+                    if (
+                        history.get("currentId")
+                        and history.get("currentId") != source_message_id
+                    ):
+                        return None
+                    source_message = (history.get("messages") or {}).get(
+                        source_message_id
+                    )
+                    if source_message and source_message.get("childrenIds"):
+                        return None
+
                 chat["title"] = title
 
                 chat_item.chat = chat
                 flag_modified(chat_item, "chat")
                 chat_item.title = title
+
+                if auto_generated is not None:
+                    meta = dict(chat_item.meta) if isinstance(chat_item.meta, dict) else {}
+                    title_generation = dict(get_title_generation_metadata(meta))
+                    title_generation["auto_generated"] = auto_generated
+                    if auto_generated is True:
+                        title_generation["last_user_message_count"] = (
+                            last_user_message_count
+                        )
+                        if source_message_id:
+                            title_generation["last_message_id"] = source_message_id
+                    meta[TITLE_GENERATION_META_KEY] = title_generation
+                    chat_item.meta = meta
+                    flag_modified(chat_item, "meta")
+
                 db.commit()
                 db.refresh(chat_item)
 
@@ -553,7 +684,14 @@ class ChatTable:
         if chat is None:
             return None
 
-        return chat.chat.get("title", "New Chat")
+        return chat.title or chat.chat.get("title", DEFAULT_CHAT_TITLE)
+
+    def get_chat_title_generation_metadata_by_id(self, id: str) -> dict:
+        chat = self.get_chat_by_id(id)
+        if chat is None:
+            return {}
+
+        return get_title_generation_metadata(chat.meta)
 
     def get_messages_by_chat_id(self, id: str) -> Optional[dict]:
         chat = self.get_chat_by_id(id)
@@ -623,7 +761,7 @@ class ChatTable:
         history["currentId"] = message_id
 
         chat_dict["history"] = history
-        result = self.update_chat_by_id(id, chat_dict)
+        result = self.update_chat_by_id(id, chat_dict, update_title=False)
 
         # Dual-write: sync to chat_message table (non-blocking, errors logged)
         try:
@@ -655,7 +793,7 @@ class ChatTable:
             history["messages"][message_id]["statusHistory"] = status_history
 
         chat["history"] = history
-        return self.update_chat_by_id(id, chat)
+        return self.update_chat_by_id(id, chat, update_title=False)
 
     def insert_shared_chat_by_chat_id(self, chat_id: str) -> Optional[ChatModel]:
         with get_db() as db:

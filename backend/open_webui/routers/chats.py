@@ -374,6 +374,7 @@ async def create_new_chat(form_data: ChatForm, user=Depends(get_verified_user)):
                 chat=normalized_chat,
                 folder_id=form_data.folder_id,
                 assistant_id=form_data.assistant_id,
+                title_auto_generated=form_data.title_auto_generated,
             ),
         )
         if chat and changed_message_ids:
@@ -844,7 +845,9 @@ async def update_chat_title_by_id(
 ):
     chat = Chats.get_chat_by_id_and_user_id(id, user.id)
     if chat:
-        updated = Chats.update_chat_title_by_id(id, form_data.title)
+        updated = Chats.update_chat_title_by_id(
+            id, form_data.title, auto_generated=False
+        )
         return _chat_response(updated)
 
     raise HTTPException(
@@ -862,14 +865,20 @@ async def update_chat_by_id(
     chat = Chats.get_chat_by_id_and_user_id(id, user.id)
     if chat:
         if set(form_data.chat.keys()) == {"title"}:
-            updated = Chats.update_chat_title_by_id(id, form_data.chat["title"])
+            updated = Chats.update_chat_title_by_id(
+                id, form_data.chat["title"], auto_generated=False
+            )
             return _chat_response(updated)
 
         updated_chat = {**chat.chat, **form_data.chat}
         normalized_chat, changed_message_ids = await _normalize_chat_payload_images(
             updated_chat, user
         )
-        chat = Chats.update_chat_by_id(id, normalized_chat)
+        chat = Chats.update_chat_by_id(
+            id,
+            normalized_chat,
+            update_title="title" in form_data.chat,
+        )
         if chat and changed_message_ids:
             await run_in_threadpool(
                 lambda: _sync_changed_chat_messages(

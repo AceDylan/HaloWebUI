@@ -723,7 +723,7 @@ def test_multi_model_discussion_generates_chat_title_via_external_task_model(
     monkeypatch.setattr(
         discussion_mod.Chats,
         "update_chat_title_by_id",
-        lambda _chat_id, title: title_updates.append(title),
+        lambda _chat_id, title, **_kwargs: title_updates.append(title) or True,
     )
 
     # Patch the lazily-imported router function used by _apply_discussion_chat_title.
@@ -832,7 +832,7 @@ def test_multi_model_discussion_title_falls_back_when_external_task_model_unavai
     monkeypatch.setattr(
         discussion_mod.Chats,
         "update_chat_title_by_id",
-        lambda _chat_id, title: title_updates.append(title),
+        lambda _chat_id, title, **_kwargs: title_updates.append(title) or True,
     )
 
     import open_webui.routers.tasks as tasks_mod
@@ -923,7 +923,7 @@ def test_multi_model_discussion_preserves_user_provided_title(monkeypatch):
     monkeypatch.setattr(
         discussion_mod.Chats,
         "update_chat_title_by_id",
-        lambda _chat_id, title: title_updates.append(title),
+        lambda _chat_id, title, **_kwargs: title_updates.append(title) or True,
     )
 
     import open_webui.routers.tasks as tasks_mod
@@ -960,3 +960,114 @@ def test_multi_model_discussion_preserves_user_provided_title(monkeypatch):
     assert generate_title_calls == [], (
         "should not waste tokens generating titles when one already exists"
     )
+
+
+def test_multi_model_discussion_title_refresh_uses_persisted_chain_and_metadata(
+    monkeypatch,
+):
+    from open_webui.constants import TASKS
+
+    message_map = {
+        "user-1": {
+            "id": "user-1",
+            "role": "user",
+            "content": "early topic",
+            "parentId": None,
+        },
+        "assistant-1": {
+            "id": "assistant-1",
+            "role": "assistant",
+            "content": "early answer",
+            "parentId": "user-1",
+        },
+        "user-2": {
+            "id": "user-2",
+            "role": "user",
+            "content": "new topic begins",
+            "parentId": "assistant-1",
+        },
+        "assistant-2": {
+            "id": "assistant-2",
+            "role": "assistant",
+            "content": "new topic answer",
+            "parentId": "user-2",
+        },
+        "user-3": {
+            "id": "user-3",
+            "role": "user",
+            "content": "continue new topic",
+            "parentId": "assistant-2",
+        },
+        "assistant-3": {
+            "id": "assistant-3",
+            "role": "assistant",
+            "content": "final discussion answer",
+            "parentId": "user-3",
+        },
+    }
+    generated = []
+    updates = []
+    events = []
+
+    monkeypatch.setattr(
+        discussion_mod.Chats,
+        "get_messages_by_chat_id",
+        lambda _chat_id: message_map,
+    )
+    monkeypatch.setattr(
+        discussion_mod.Chats,
+        "get_chat_title_by_id",
+        lambda _chat_id: "Early automatic title",
+    )
+    monkeypatch.setattr(
+        discussion_mod.Chats,
+        "get_chat_title_generation_metadata_by_id",
+        lambda _chat_id: {
+            "auto_generated": True,
+            "last_user_message_count": 1,
+        },
+    )
+    monkeypatch.setattr(
+        discussion_mod.Chats,
+        "update_chat_title_by_id",
+        lambda chat_id, title, **kwargs: updates.append((chat_id, title, kwargs)) or True,
+    )
+
+    import open_webui.routers.tasks as tasks_mod
+
+    async def fake_generate_title(_request, form_data, _user):
+        generated.append(form_data)
+        return {"choices": [{"message": {"content": '{"title": "New topic"}'}}]}
+
+    async def event_emitter(event):
+        events.append(event)
+
+    monkeypatch.setattr(tasks_mod, "generate_title", fake_generate_title)
+
+    asyncio.run(
+        discussion_mod._apply_discussion_chat_title(
+            request=SimpleNamespace(),
+            user=_user(),
+            metadata={"model_id": "model-final"},
+            chat_id="chat-1",
+            message_id="assistant-3",
+            user_prompt="continue new topic",
+            final_content="final discussion answer",
+            event_emitter=event_emitter,
+            tasks={TASKS.TITLE_GENERATION: True},
+        )
+    )
+
+    assert generated[0]["messages"] == list(message_map.values())
+    assert updates == [
+        (
+            "chat-1",
+            "New topic",
+            {
+                "auto_generated": True,
+                "last_user_message_count": 3,
+                "source_message_id": "assistant-3",
+            },
+        )
+    ]
+    assert events == [{"type": "chat:title", "data": "New topic"}]

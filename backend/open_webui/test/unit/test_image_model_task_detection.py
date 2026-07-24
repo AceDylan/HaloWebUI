@@ -150,7 +150,7 @@ def test_image_generation_title_falls_back_to_user_prompt_when_title_task_fails(
     monkeypatch.setattr(
         middleware.Chats,
         "update_chat_title_by_id",
-        lambda _chat_id, title: updated_titles.append(title),
+        lambda _chat_id, title, **_kwargs: updated_titles.append(title) or True,
     )
 
     request = SimpleNamespace(
@@ -249,7 +249,7 @@ def test_image_generation_title_skips_model_call_and_uses_fallback(monkeypatch):
     monkeypatch.setattr(
         middleware.Chats,
         "update_chat_title_by_id",
-        lambda _chat_id, title: updated_titles.append(title),
+        lambda _chat_id, title, **_kwargs: updated_titles.append(title) or True,
     )
 
     request = SimpleNamespace(

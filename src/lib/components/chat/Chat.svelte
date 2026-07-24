@@ -106,6 +106,7 @@
 		resolveConfiguredDefaultWebSearchMode
 	} from '$lib/utils/native-web-search';
 	import { hasVisibleMessageFiles as messageHasVisibleFiles } from '$lib/utils/chat-message-errors';
+	import { countUserTurns, shouldRequestTitleGeneration } from '$lib/utils/chat-title-generation';
 
 	import { generateChatCompletion } from '$lib/apis/ollama';
 	import {
@@ -5334,6 +5335,17 @@
 			.filter((content) => content.trim())
 			.join('\n\n');
 
+		const conversationMessages = createMessagesList(_history, responseMessageId);
+		const userTurnCount = countUserTurns(conversationMessages);
+		const isPrimaryTitleModel =
+			selectedModels[0] === getModelRequestId(model) || atSelectedModel !== undefined;
+		const requestTitleGeneration = shouldRequestTitleGeneration({
+			messages: conversationMessages,
+			isPrimaryModel: isPrimaryTitleModel,
+			isTemporaryChat: $temporaryChatEnabled
+		});
+		const isFirstUserTurn = userTurnCount === 1;
+
 		let messages = [
 			systemMessageContent
 				? {
@@ -5341,7 +5353,7 @@
 						content: systemMessageContent
 					}
 				: undefined,
-			...createMessagesList(_history, responseMessageId).map((message) => ({
+			...conversationMessages.map((message) => ({
 				...message,
 				content: processDetails(message.content)
 			}))
@@ -5504,12 +5516,7 @@
 				chat_id: $chatId,
 				id: responseMessageId,
 
-				...(!$temporaryChatEnabled &&
-				(messages.length == 1 ||
-					(messages.length == 2 &&
-						messages.at(0)?.role === 'system' &&
-						messages.at(1)?.role === 'user')) &&
-				(selectedModels[0] === getModelRequestId(model) || atSelectedModel !== undefined)
+				...(requestTitleGeneration
 					? {
 							background_tasks: imageGenerationActive
 								? {
@@ -5517,8 +5524,12 @@
 									}
 								: {
 										title_generation: $settings?.title?.auto ?? true,
-										tags_generation: $settings?.autoTags ?? true,
-										follow_up_generation: $settings?.autoFollowUps ?? true
+										...(isFirstUserTurn
+											? {
+													tags_generation: $settings?.autoTags ?? true,
+													follow_up_generation: $settings?.autoFollowUps ?? true
+												}
+											: {})
 									}
 						}
 					: !$temporaryChatEnabled &&
@@ -6161,7 +6172,7 @@
 				tags: [],
 				timestamp: Date.now(),
 				...buildPersistedChatData(history)
-			}, null, $selectedAssistantScene?.id ?? null);
+			}, null, $selectedAssistantScene?.id ?? null, true);
 
 			_chatId = chat.id;
 			await chatId.set(_chatId);

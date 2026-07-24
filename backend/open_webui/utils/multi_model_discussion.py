@@ -10,11 +10,12 @@ from starlette.responses import Response
 
 from open_webui.constants import TASKS
 from open_webui.env import BYPASS_MODEL_ACCESS_CONTROL, GLOBAL_LOG_LEVEL, SRC_LOG_LEVELS
-from open_webui.models.chats import Chats
+from open_webui.models.chats import Chats, can_auto_generate_chat_title
 from open_webui.socket.main import get_event_emitter
 from open_webui.tasks import create_task
 from open_webui.utils.chat import generate_chat_completion
 from open_webui.utils.model_identity import resolve_model_from_lookup
+from open_webui.utils.misc import get_message_list
 from open_webui.utils.models import check_model_access
 from open_webui.utils.task import build_fallback_chat_title
 
@@ -526,19 +527,39 @@ async def _apply_discussion_chat_title(
     if not tasks or not tasks.get(TASKS.TITLE_GENERATION):
         return
 
+    title_messages = []
     try:
-        message = Chats.get_chat_title_by_id(chat_id)
+        message_map = Chats.get_messages_by_chat_id(chat_id)
+        if message_map:
+            title_messages = get_message_list(message_map, message_id) or []
     except Exception:
-        message = None
-    if message and str(message).strip() and str(message).strip() != "New Chat":
-        # Respect user-set titles and prior auto-titles; never overwrite.
-        return
+        title_messages = []
 
-    title_messages = [
-        {"role": "user", "content": user_prompt or ""},
-    ]
-    if final_content:
-        title_messages.append({"role": "assistant", "content": final_content})
+    if not title_messages:
+        title_messages = [
+            {"role": "user", "content": user_prompt or ""},
+        ]
+        if final_content:
+            title_messages.append({"role": "assistant", "content": final_content})
+
+    user_message_count = len(
+        [message for message in title_messages if message.get("role") == "user"]
+    )
+    try:
+        may_refresh_title = can_auto_generate_chat_title(
+            Chats.get_chat_title_by_id(chat_id),
+            {
+                "title_generation": Chats.get_chat_title_generation_metadata_by_id(
+                    chat_id
+                )
+            },
+            user_message_count,
+            message_id,
+        )
+    except Exception:
+        may_refresh_title = False
+    if not may_refresh_title:
+        return
 
     title = ""
     try:
@@ -583,7 +604,15 @@ async def _apply_discussion_chat_title(
         return
 
     try:
-        Chats.update_chat_title_by_id(chat_id, title)
+        updated = Chats.update_chat_title_by_id(
+            chat_id,
+            title,
+            auto_generated=True,
+            last_user_message_count=user_message_count,
+            source_message_id=message_id,
+        )
+        if updated is None:
+            return
         await event_emitter(
             {
                 "type": "chat:title",

@@ -35,6 +35,7 @@
 		buildLocalFileIframeSrc,
 		resolveLocalFileIframeSrcFromHtml
 	} from '$lib/utils/html-safety';
+	import { HTML_PREVIEW_REFERRER_POLICY, HTML_PREVIEW_SANDBOX } from '$lib/utils/html-preview';
 
 	const dispatch = createEventDispatcher();
 
@@ -45,6 +46,7 @@
 	export let attributes = {};
 
 	export let save = false;
+	export let streaming = false;
 
 	export let onTaskClick: Function = () => {};
 	export let onSourceClick: Function = () => {};
@@ -296,6 +298,7 @@
 						code={token?.text ?? ''}
 						{attributes}
 						{save}
+						{streaming}
 						onCode={(value) => {
 							dispatch('code', value);
 						}}
@@ -391,6 +394,7 @@
 						tokens={token.tokens}
 						pathPrefix={[...pathPrefix, tokenIdx]}
 						{charAnimation}
+						{streaming}
 						{onTaskClick}
 						{onSourceClick}
 						{generatedFiles}
@@ -427,6 +431,7 @@
 								pathPrefix={[...pathPrefix, tokenIdx, itemIdx]}
 								top={token.loose}
 								{charAnimation}
+								{streaming}
 								{onTaskClick}
 								{onSourceClick}
 								{generatedFiles}
@@ -463,6 +468,7 @@
 								pathPrefix={[...pathPrefix, tokenIdx, itemIdx]}
 								top={token.loose}
 								{charAnimation}
+								{streaming}
 								{onTaskClick}
 								{onSourceClick}
 								{generatedFiles}
@@ -493,6 +499,7 @@
 								pathPrefix={[...pathPrefix, tokenIdx]}
 								attributes={token?.attributes}
 								{charAnimation}
+								{streaming}
 								{onTaskClick}
 								{onSourceClick}
 								{generatedFiles}
@@ -519,6 +526,7 @@
 							pathPrefix={[...pathPrefix, tokenIdx]}
 							attributes={token?.attributes}
 							{charAnimation}
+							{streaming}
 							{onTaskClick}
 							{onSourceClick}
 							{generatedFiles}
@@ -553,6 +561,7 @@
 					code={token.text}
 					{attributes}
 					{save}
+					{streaming}
 					onCode={(value) => {
 						dispatch('code', value);
 					}}
@@ -565,7 +574,8 @@
 					title="Generated file preview"
 					width="100%"
 					frameborder="0"
-					sandbox="allow-scripts"
+					sandbox={HTML_PREVIEW_SANDBOX}
+					referrerpolicy={HTML_PREVIEW_REFERRER_POLICY}
 					class="min-h-80 rounded-lg border border-gray-100 dark:border-gray-800"
 				></iframe>
 			{:else if token.text.includes(`<source_id`)}
@@ -581,7 +591,8 @@
 					title={token.fileId}
 					width="100%"
 					frameborder="0"
-					sandbox="allow-scripts"
+					sandbox={HTML_PREVIEW_SANDBOX}
+					referrerpolicy={HTML_PREVIEW_REFERRER_POLICY}
 					class="min-h-80 rounded-lg border border-gray-100 dark:border-gray-800"
 				></iframe>
 			{/if}

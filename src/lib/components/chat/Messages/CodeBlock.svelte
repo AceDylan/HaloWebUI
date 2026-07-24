@@ -39,6 +39,7 @@
 		usesRemotePyodideRuntime
 	} from '$lib/utils/browser-ai-assets';
 	import { getLanguageIcon } from '$lib/utils/language-icons';
+	import { getCodePreviewEventKey } from '$lib/utils/html-preview';
 	import {
 		DEFAULT_MERMAID_THEME,
 		normalizeMermaidTheme,
@@ -71,6 +72,7 @@
 	export let lang = '';
 	export let code = '';
 	export let messageId = '';
+	export let streaming = false;
 
 	$: langIcon = getLanguageIcon(lang);
 	export let attributes: { output?: string } = {};
@@ -82,6 +84,7 @@
 	let pyodideWorker: Worker | null = null;
 
 	let _code = '';
+	let lastCodeEventKey: string | null = null;
 	$: if (code) {
 		updateCode();
 	}
@@ -416,7 +419,15 @@
 		render();
 	}
 
-	$: onCode({ lang, code });
+	$: {
+		const nextCodeEventKey = getCodePreviewEventKey(lang, code, streaming);
+		if (nextCodeEventKey && nextCodeEventKey !== lastCodeEventKey) {
+			lastCodeEventKey = nextCodeEventKey;
+			onCode({ lang, code });
+		} else if (!nextCodeEventKey && !streaming) {
+			lastCodeEventKey = null;
+		}
+	}
 
 	$: if (attributes) {
 		onAttributesUpdate();
@@ -447,10 +458,6 @@
 	};
 
 	onMount(async () => {
-		if (lang) {
-			onCode({ lang, code });
-		}
-
 		mermaidThemeObserver = new MutationObserver(() => {
 			if (lang === 'mermaid') {
 				render();

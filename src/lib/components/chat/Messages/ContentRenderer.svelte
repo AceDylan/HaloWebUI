@@ -105,8 +105,7 @@
 		selectionThreadManager?.selectionThreadsStore ?? fallbackSelectionThreadsStore;
 	const expandedSelectionThreadId =
 		selectionThreadManager?.expandedSelectionThreadId ?? fallbackExpandedSelectionThreadId;
-	const updateSelectionThreadsState =
-		selectionThreadManager?.updateSelectionThreads ?? (() => {});
+	const updateSelectionThreadsState = selectionThreadManager?.updateSelectionThreads ?? (() => {});
 
 	let contentContainerElement: HTMLElement | null = null;
 	let currentTransitionMode: ChatTransitionMode = 'none';
@@ -123,6 +122,7 @@
 	let showImagePreview = false;
 	let imagePreviewSrc = '';
 	let imagePreviewAlt = '';
+	let lastAutoOpenedArtifactKey: string | null = null;
 
 	const INLINE_CITATION_SELECTOR = '[data-inline-citation="true"]';
 
@@ -313,7 +313,9 @@
 
 	const handleHaloImagePreviewClick = (event: MouseEvent) => {
 		const target = event.target as HTMLElement | null;
-		const image = target?.closest?.('img[data-halo-image-preview="true"]') as HTMLImageElement | null;
+		const image = target?.closest?.(
+			'img[data-halo-image-preview="true"]'
+		) as HTMLImageElement | null;
 		if (!image || !contentContainerElement?.contains(image)) {
 			return;
 		}
@@ -445,12 +447,8 @@
 		options?: { persist?: boolean; immediate?: boolean }
 	) => {
 		updateSelectionThreadsState((currentState) => {
-			const otherThreads = currentState.items.filter(
-				(thread) => thread.sourceMessageId !== id
-			);
-			const messageThreads = currentState.items.filter(
-				(thread) => thread.sourceMessageId === id
-			);
+			const otherThreads = currentState.items.filter((thread) => thread.sourceMessageId !== id);
+			const messageThreads = currentState.items.filter((thread) => thread.sourceMessageId === id);
 
 			return {
 				version: 1,
@@ -756,14 +754,16 @@
 			}
 
 			const selection = window.getSelection();
-			const hasSelection = Boolean(selection && selection.rangeCount > 0 && selection.toString().trim() !== '');
+			const hasSelection = Boolean(
+				selection && selection.rangeCount > 0 && selection.toString().trim() !== ''
+			);
 			const selectionRange = hasSelection && selection ? selection.getRangeAt(0) : null;
 			const selectionTouchesThisMessage = Boolean(
 				selectionRange &&
-				contentContainerElement &&
-				(contentContainerElement.contains(selectionRange.commonAncestorContainer) ||
-					contentContainerElement.contains(selectionRange.startContainer) ||
-					contentContainerElement.contains(selectionRange.endContainer))
+					contentContainerElement &&
+					(contentContainerElement.contains(selectionRange.commonAncestorContainer) ||
+						contentContainerElement.contains(selectionRange.startContainer) ||
+						contentContainerElement.contains(selectionRange.endContainer))
 			);
 			const expandedThread = currentMessageThreads.find(
 				(thread) => thread.id === $expandedSelectionThreadId
@@ -789,7 +789,6 @@
 			}
 		}, 0);
 	};
-
 
 	const keydownHandler = (event: KeyboardEvent) => {
 		if (event.key !== 'Escape') {
@@ -869,21 +868,29 @@
 			}}
 			on:code={(e) => {
 				const { lang, code } = e.detail;
-				const normalizedLang = String(lang ?? '').toLowerCase();
+				const normalizedLang = String(lang ?? '')
+					.trim()
+					.toLowerCase()
+					.split(/\s+/, 1)[0];
 				const isSvgCode =
 					normalizedLang === 'svg' || (normalizedLang === 'xml' && code.includes('<svg'));
 				const isHtmlArtifact = normalizedLang === 'html';
 				const shouldAutoOpenSvgPreview =
-					$settings?.svgPreviewAutoOpen ?? ($settings?.detectArtifacts ?? true);
+					$settings?.svgPreviewAutoOpen ?? $settings?.detectArtifacts ?? true;
 				const autoOpenDismissed = $artifactAutoOpenDismissedMessageId === id;
+				const artifactType = isSvgCode ? 'svg' : isHtmlArtifact ? 'iframe' : null;
+				const autoOpenKey = artifactType ? `${id}:${artifactType}:${content}` : null;
 
 				if (
+					!streaming &&
 					!$mobile &&
 					$chatId &&
 					!autoOpenDismissed &&
+					autoOpenKey !== lastAutoOpenedArtifactKey &&
 					((($settings?.detectArtifacts ?? true) && isHtmlArtifact) ||
 						(shouldAutoOpenSvgPreview && isSvgCode))
 				) {
+					lastAutoOpenedArtifactKey = autoOpenKey;
 					if (isSvgCode) {
 						artifactPreviewTarget.set({ messageId: id, type: 'svg', content: code });
 					} else {

@@ -59,7 +59,7 @@ def _resolve_safe_path(relative_path: str) -> Path:
     cleaned = relative_path.lstrip("/").lstrip("\\")
     resolved = (root / cleaned).resolve()
 
-    if not str(resolved).startswith(str(root)):
+    if resolved != root and root not in resolved.parents:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Path traversal not allowed",

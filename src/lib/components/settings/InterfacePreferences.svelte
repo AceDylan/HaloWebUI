@@ -213,8 +213,6 @@
 
 	// Privacy / advanced
 	let userLocation = false;
-	let iframeSandboxAllowSameOrigin = false;
-	let iframeSandboxAllowForms = false;
 
 	// Voice / haptics
 	let showEmojiInCall = false;
@@ -316,8 +314,6 @@
 		};
 		advanced: {
 			userLocation: boolean;
-			iframeSandboxAllowSameOrigin: boolean;
-			iframeSandboxAllowForms: boolean;
 			hapticFeedback: boolean;
 		};
 	};
@@ -637,8 +633,6 @@
 		},
 		advanced: {
 			userLocation,
-			iframeSandboxAllowSameOrigin,
-			iframeSandboxAllowForms,
 			hapticFeedback
 		}
 	});
@@ -722,8 +716,6 @@
 
 	const applyAdvancedSnapshot = (snapshot: SectionSnapshot['advanced']) => {
 		userLocation = snapshot.userLocation;
-		iframeSandboxAllowSameOrigin = snapshot.iframeSandboxAllowSameOrigin;
-		iframeSandboxAllowForms = snapshot.iframeSandboxAllowForms;
 		hapticFeedback = snapshot.hapticFeedback;
 	};
 
@@ -793,8 +785,6 @@
 		imageCompressionSize;
 		imageCompressionInChannels;
 		userLocation;
-		iframeSandboxAllowSameOrigin;
-		iframeSandboxAllowForms;
 		sectionSnapshot = buildSectionSnapshot();
 	}
 	$: if (
@@ -1112,8 +1102,6 @@
 			await syncUserLocationPreference();
 			await saveSettings({
 				userLocation,
-				iframeSandboxAllowSameOrigin,
-				iframeSandboxAllowForms,
 				hapticFeedback
 			});
 			await tick();
@@ -1299,8 +1287,6 @@
 		defaultModelId = getEffectiveDefaultModelId();
 
 		backgroundImageUrl = $settings?.backgroundImageUrl ?? null;
-		iframeSandboxAllowSameOrigin = $settings?.iframeSandboxAllowSameOrigin ?? false;
-		iframeSandboxAllowForms = $settings?.iframeSandboxAllowForms ?? false;
 
 		// Admin: load banners and prompt suggestions
 		if ($user?.role === 'admin') {
@@ -2702,22 +2688,6 @@
 												{$i18n.t('Allow User Location')}
 											</div>
 											<Switch bind:state={userLocation} />
-										</div>
-										<div class="flex items-center justify-between glass-item px-4 py-3">
-											<div class="text-sm font-medium">
-												{$i18n.t('iframe Sandbox Allow Same Origin')}
-											</div>
-											<Switch
-												bind:state={iframeSandboxAllowSameOrigin}
-											/>
-										</div>
-										<div class="flex items-center justify-between glass-item px-4 py-3">
-											<div class="text-sm font-medium">
-												{$i18n.t('iframe Sandbox Allow Forms')}
-											</div>
-											<Switch
-												bind:state={iframeSandboxAllowForms}
-											/>
 										</div>
 										<div class="flex items-center justify-between glass-item px-4 py-3">
 											<div class="text-sm font-medium">

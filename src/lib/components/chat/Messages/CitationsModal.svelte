@@ -5,6 +5,11 @@
 	import { WEBUI_API_BASE_URL } from '$lib/constants';
 	import { settings } from '$lib/stores';
 	import { getCitationEntries } from '$lib/utils/citations';
+	import {
+		hardenHtmlPreviewDocument,
+		HTML_PREVIEW_REFERRER_POLICY,
+		HTML_PREVIEW_SANDBOX
+	} from '$lib/utils/html-preview';
 	import { decodeString, getTextFragmentUrl } from '$lib/utils/marked/citation-extension';
 	import Markdown from './Markdown.svelte';
 
@@ -183,11 +188,9 @@
 							{#if document.metadata?.html}
 								<iframe
 									class="w-full border-0 h-auto rounded-none"
-									sandbox="allow-scripts allow-forms{($settings?.iframeSandboxAllowSameOrigin ??
-									false)
-										? ' allow-same-origin'
-										: ''}"
-									srcdoc={document.document}
+									sandbox={HTML_PREVIEW_SANDBOX}
+									referrerpolicy={HTML_PREVIEW_REFERRER_POLICY}
+									srcdoc={hardenHtmlPreviewDocument(document.document)}
 									title={$i18n.t('Content')}
 								></iframe>
 							{:else if $settings?.renderMarkdownInPreviews ?? true}

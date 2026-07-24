@@ -1,14 +1,15 @@
 <script lang="ts">
-	import { toast } from 'svelte-sonner';
-	import { onMount, onDestroy, getContext, createEventDispatcher, tick } from 'svelte';
-	const i18n = getContext('i18n');
+	import { onDestroy, getContext, createEventDispatcher, tick } from 'svelte';
+	import type { Writable } from 'svelte/store';
+	import type { i18n as I18n } from 'i18next';
+	import { marked } from 'marked';
+	const i18n = getContext<Writable<I18n>>('i18n');
 	const dispatch = createEventDispatcher();
 
 	import {
 		artifactAutoOpenDismissedMessageId,
 		artifactPreviewTarget,
 		chatId,
-		settings,
 		showArtifacts,
 		showControls
 	} from '$lib/stores';
@@ -19,132 +20,126 @@
 	import SvgPanZoom from '../common/SVGPanZoom.svelte';
 	import ArrowLeft from '../icons/ArrowLeft.svelte';
 	import { extractSvgMarkupBlocks, normalizeSvgMarkup } from './Messages/Markdown/svgMarkupTokens';
+	import {
+		buildHtmlArtifactPreview,
+		HTML_PREVIEW_REFERRER_POLICY,
+		HTML_PREVIEW_SANDBOX
+	} from '$lib/utils/html-preview';
 
 	export let overlay = false;
 	export let history;
-	let messages = [];
+	let messages: any[] = [];
 
-	let contents: Array<{ type: string; content: string; messageId: string }> = [];
+	type PreviewContent = { type: 'iframe' | 'svg'; content: string; messageId: string };
+	type CachedMessageContents = { source: string; previews: PreviewContent[] };
+
+	const MAX_ARTIFACT_VERSIONS = 50;
+
+	let contents: PreviewContent[] = [];
 	let selectedContentIdx = 0;
 
 	let copied = false;
 	let iframeElement: HTMLIFrameElement;
 	let alive = true;
+	let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+	const messageContentsCache = new Map<string, CachedMessageContents>();
 
 	/** Strip thinking/reasoning blocks from content before code extraction */
 	const stripThinkingBlocks = (text: string): string => {
-		return text.replace(/<(think|thinking|reasoning)>[\s\S]*?<\/(think|thinking|reasoning)>/g, '');
+		return text.replace(/<(think|thinking|reasoning)\b[^>]*>[\s\S]*?<\/\1>/gi, '');
+	};
+
+	const extractSvgContents = (content: string, messageId: string): PreviewContent[] => {
+		const previews: PreviewContent[] = [];
+		const seen = new Set<string>();
+		const appendSvg = (markup: string) => {
+			const normalizedContent = normalizeSvgMarkup(markup);
+			if (!normalizedContent || seen.has(normalizedContent)) return;
+			seen.add(normalizedContent);
+			previews.push({ type: 'svg', content: normalizedContent, messageId });
+		};
+
+		const tokens = marked.lexer(content);
+		marked.walkTokens(tokens, (token: any) => {
+			if (token?.type !== 'code') return;
+			const language = String(token.lang ?? '')
+				.trim()
+				.toLowerCase()
+				.split(/\s+/, 1)[0];
+			const code = String(token.text ?? '');
+			if (language === 'svg' || (language === 'xml' && code.includes('<svg'))) {
+				appendSvg(code);
+			}
+		});
+
+		for (const markup of extractSvgMarkupBlocks(content)) {
+			appendSvg(markup);
+		}
+
+		return previews;
+	};
+
+	const buildMessageContents = (message: any): PreviewContent[] => {
+		const messageId = String(message.id ?? '');
+		const source = String(message.content ?? '');
+		const cached = messageContentsCache.get(messageId);
+		if (cached?.source === source) {
+			return cached.previews;
+		}
+
+		const previews: PreviewContent[] = [];
+		const htmlPreview = buildHtmlArtifactPreview(source);
+		if (htmlPreview) {
+			previews.push({ type: 'iframe', content: htmlPreview, messageId });
+		}
+		previews.push(...extractSvgContents(stripThinkingBlocks(source), messageId));
+
+		messageContentsCache.set(messageId, { source, previews });
+		return previews;
+	};
+
+	const scheduleGetContents = () => {
+		if (refreshTimer) {
+			clearTimeout(refreshTimer);
+			refreshTimer = null;
+		}
+		if (!messages.some((message) => message?.done === false)) {
+			getContents();
+			return;
+		}
+
+		refreshTimer = setTimeout(() => {
+			refreshTimer = null;
+			if (alive) getContents();
+		}, 300);
 	};
 
 	$: if (history) {
 		messages = createMessagesList(history, history.currentId);
-		getContents();
+		scheduleGetContents();
 	} else {
 		messages = [];
-		getContents();
+		scheduleGetContents();
 	}
 
 	const getContents = () => {
-		contents = [];
-		messages.forEach((message) => {
-			if (message?.role !== 'user' && message?.content) {
-				// Strip thinking/reasoning blocks before extracting code
-				const cleanedContent = stripThinkingBlocks(message.content);
+		const nextContents: PreviewContent[] = [];
+		const activeMessageIds = new Set<string>();
 
-				const codeBlockContents = cleanedContent.match(/```[\s\S]*?```/g);
-				let codeBlocks = [];
+		for (const message of messages) {
+			if (message?.role === 'user' || !message?.content || !message?.id) continue;
+			const messageId = String(message.id);
+			activeMessageIds.add(messageId);
+			nextContents.push(...buildMessageContents(message));
+		}
 
-				if (codeBlockContents) {
-					codeBlockContents.forEach((block) => {
-						const lang = block.split('\n')[0].replace('```', '').trim().toLowerCase();
-						const code = block.replace(/```[\s\S]*?\n/, '').replace(/```$/, '');
-						codeBlocks.push({ lang, code });
-					});
-				}
-
-				let htmlContent = '';
-				let cssContent = '';
-				let jsContent = '';
-
-				codeBlocks.forEach((block) => {
-					const { lang, code } = block;
-
-					if (lang === 'html') {
-						htmlContent += code + '\n';
-					} else if (lang === 'css') {
-						cssContent += code + '\n';
-					} else if (lang === 'javascript' || lang === 'js') {
-						jsContent += code + '\n';
-					}
-				});
-
-				const inlineHtml = cleanedContent.match(/<html>[\s\S]*?<\/html>/gi);
-				const inlineCss = cleanedContent.match(/<style>[\s\S]*?<\/style>/gi);
-				const inlineJs = cleanedContent.match(/<script>[\s\S]*?<\/script>/gi);
-
-				if (inlineHtml) {
-					inlineHtml.forEach((block) => {
-						const content = block.replace(/<\/?html>/gi, ''); // Remove <html> tags
-						htmlContent += content + '\n';
-					});
-				}
-				if (inlineCss) {
-					inlineCss.forEach((block) => {
-						const content = block.replace(/<\/?style>/gi, ''); // Remove <style> tags
-						cssContent += content + '\n';
-					});
-				}
-				if (inlineJs) {
-					inlineJs.forEach((block) => {
-						const content = block.replace(/<\/?script>/gi, ''); // Remove <script> tags
-						jsContent += content + '\n';
-					});
-				}
-
-				if (htmlContent || cssContent || jsContent) {
-					const renderedContent = `
-                        <!DOCTYPE html>
-                        <html lang="en">
-                        <head>
-                            <meta charset="UTF-8">
-                            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-							<${''}style>
-								body {
-									background-color: white; /* Ensure the iframe has a white background */
-								}
-
-								${cssContent}
-							</${''}style>
-                        </head>
-                        <body>
-                            ${htmlContent}
-
-							<${''}script>
-                            	${jsContent}
-							</${''}script>
-                        </body>
-                        </html>
-                    `;
-					contents = [...contents, { type: 'iframe', content: renderedContent, messageId: message.id }];
-				}
-
-				for (const block of codeBlocks) {
-					if (block.lang === 'svg' || (block.lang === 'xml' && block.code.includes('<svg'))) {
-						contents = [
-							...contents,
-							{ type: 'svg', content: normalizeSvgMarkup(block.code), messageId: message.id }
-						];
-					}
-				}
-
-				for (const markup of extractSvgMarkupBlocks(cleanedContent)) {
-					contents = [
-						...contents,
-						{ type: 'svg', content: normalizeSvgMarkup(markup), messageId: message.id }
-					];
-				}
+		for (const messageId of messageContentsCache.keys()) {
+			if (!activeMessageIds.has(messageId)) {
+				messageContentsCache.delete(messageId);
 			}
-		});
+		}
+
+		contents = nextContents.slice(-MAX_ARTIFACT_VERSIONS);
 
 		if (contents.length === 0) {
 			// Defer store mutations out of the reactive block to avoid re-trigger loops
@@ -197,61 +192,19 @@
 	};
 
 	function navigateContent(direction: 'prev' | 'next') {
-		console.log(selectedContentIdx);
-
 		selectedContentIdx =
 			direction === 'prev'
 				? Math.max(selectedContentIdx - 1, 0)
 				: Math.min(selectedContentIdx + 1, contents.length - 1);
-
-		console.log(selectedContentIdx);
 	}
 
-	const iframeLoadHandler = () => {
-		iframeElement.contentWindow.addEventListener(
-			'click',
-			function (e) {
-				const target = e.target.closest('a');
-				if (target && target.href) {
-					e.preventDefault();
-					const url = new URL(target.href, iframeElement.baseURI);
-					if (url.origin === window.location.origin) {
-						iframeElement.contentWindow.history.pushState(
-							null,
-							'',
-							url.pathname + url.search + url.hash
-						);
-					} else {
-						console.log('External navigation blocked:', url.href);
-					}
-				}
-			},
-			true
-		);
-
-		// Cancel drag when hovering over iframe
-		iframeElement.contentWindow.addEventListener('mouseenter', function (e) {
-			e.preventDefault();
-			iframeElement.contentWindow.addEventListener('dragstart', (event) => {
-				event.preventDefault();
-			});
-		});
-	};
-
 	const showFullScreen = () => {
-		if (iframeElement.requestFullscreen) {
-			iframeElement.requestFullscreen();
-		} else if (iframeElement.webkitRequestFullscreen) {
-			iframeElement.webkitRequestFullscreen();
-		} else if (iframeElement.msRequestFullscreen) {
-			iframeElement.msRequestFullscreen();
-		}
+		iframeElement?.requestFullscreen();
 	};
-
-	onMount(() => {});
 
 	onDestroy(() => {
 		alive = false;
+		if (refreshTimer) clearTimeout(refreshTimer);
 	});
 
 	const getActivePreviewMessageId = () =>
@@ -391,15 +344,11 @@
 						{#if contents[selectedContentIdx].type === 'iframe'}
 							<iframe
 								bind:this={iframeElement}
-								title="Content"
+								title="HTML artifact preview"
 								srcdoc={contents[selectedContentIdx].content}
 								class="w-full border-0 h-full rounded-none"
-								sandbox="allow-scripts{($settings?.iframeSandboxAllowForms ?? false)
-									? ' allow-forms'
-									: ''}{($settings?.iframeSandboxAllowSameOrigin ?? false)
-									? ' allow-same-origin'
-									: ''}"
-								on:load={iframeLoadHandler}
+								sandbox={HTML_PREVIEW_SANDBOX}
+								referrerpolicy={HTML_PREVIEW_REFERRER_POLICY}
 							></iframe>
 						{:else if contents[selectedContentIdx].type === 'svg'}
 							<SvgPanZoom

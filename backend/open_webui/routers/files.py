@@ -52,6 +52,42 @@ log.setLevel(SRC_LOG_LEVELS["MODELS"])
 router = APIRouter()
 
 
+HTML_PREVIEW_CONTENT_SECURITY_POLICY = "; ".join(
+    [
+        "default-src 'none'",
+        "base-uri 'none'",
+        "object-src 'none'",
+        "frame-src 'none'",
+        "frame-ancestors 'self'",
+        "connect-src 'none'",
+        "form-action 'none'",
+        "script-src 'unsafe-inline' blob:",
+        "style-src 'unsafe-inline'",
+        "img-src data: blob:",
+        "font-src data:",
+        "media-src data: blob:",
+        "worker-src blob:",
+    ]
+)
+
+
+def _build_html_preview_response(file_path: Path, filename: str) -> FileResponse:
+    encoded_filename = quote(filename)
+    return FileResponse(
+        file_path,
+        media_type="text/html",
+        headers={
+            "Content-Disposition": f"inline; filename*=UTF-8''{encoded_filename}",
+            "Content-Security-Policy": HTML_PREVIEW_CONTENT_SECURITY_POLICY,
+            "X-Content-Type-Options": "nosniff",
+            "Referrer-Policy": "no-referrer",
+            "Cache-Control": "no-store",
+            "X-Frame-Options": "SAMEORIGIN",
+            "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
+        },
+    )
+
+
 def _cleanup_failed_uploaded_file(file_id: str, file_path: str | None) -> None:
     if file_id:
         try:
@@ -571,8 +607,8 @@ async def get_html_file_content_by_id(id: str, user=Depends(get_verified_user)):
 
             # Check if the file already exists in the cache
             if file_path.is_file():
-                log.info(f"file_path: {file_path}")
-                return FileResponse(file_path)
+                filename = (file.meta or {}).get("name", file.filename)
+                return _build_html_preview_response(file_path, filename)
             else:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,

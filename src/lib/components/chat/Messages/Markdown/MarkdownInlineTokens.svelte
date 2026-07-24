@@ -25,6 +25,7 @@
 		resolveLocalFileIframeSrcFromHtml,
 		resolveSafeMarkdownUrl
 	} from '$lib/utils/html-safety';
+	import { HTML_PREVIEW_REFERRER_POLICY, HTML_PREVIEW_SANDBOX } from '$lib/utils/html-preview';
 	import KatexRenderer from './KatexRenderer.svelte';
 	import Source from './Source.svelte';
 	import SourceToken from './SourceToken.svelte';
@@ -98,7 +99,8 @@
 				title="Generated file preview"
 				width="100%"
 				frameborder="0"
-				sandbox="allow-scripts"
+				sandbox={HTML_PREVIEW_SANDBOX}
+				referrerpolicy={HTML_PREVIEW_REFERRER_POLICY}
 				class="min-h-80 rounded-lg border border-gray-100 dark:border-gray-800"
 			></iframe>
 		{:else if tokenText.includes(`<source_id`)}
@@ -205,7 +207,8 @@
 				title={toText(token.fileId)}
 				width="100%"
 				frameborder="0"
-				sandbox="allow-scripts"
+				sandbox={HTML_PREVIEW_SANDBOX}
+				referrerpolicy={HTML_PREVIEW_REFERRER_POLICY}
 				class="min-h-80 rounded-lg border border-gray-100 dark:border-gray-800"
 			></iframe>
 		{/if}

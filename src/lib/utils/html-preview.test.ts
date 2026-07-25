@@ -1,15 +1,51 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+	HTML_EXPORT_CSP,
+	HTML_EXPORT_SANDBOX,
 	HTML_PREVIEW_SANDBOX,
 	buildHtmlArtifactPreview,
 	getCodePreviewEventKey,
-	hardenHtmlPreviewDocument
+	hardenHtmlArtifactExportDocument,
+	hardenHtmlPreviewDocument,
+	isActiveHtmlArtifactSnapshotMessage
 } from './html-preview';
 
 const countMatches = (value: string, pattern: RegExp) => value.match(pattern)?.length ?? 0;
 
 describe('html-preview', () => {
+	it('accepts snapshot responses only for a non-empty active export request', () => {
+		const response = {
+			type: 'halo-html-preview-export-snapshot-result',
+			requestId: 'request-1',
+			ok: true
+		};
+
+		expect(isActiveHtmlArtifactSnapshotMessage(response, 'request-1', true)).toBe(true);
+		expect(isActiveHtmlArtifactSnapshotMessage({ ...response, requestId: '' }, '', false)).toBe(
+			false
+		);
+		expect(isActiveHtmlArtifactSnapshotMessage(response, null, false)).toBe(false);
+		expect(isActiveHtmlArtifactSnapshotMessage(response, 'request-2', true)).toBe(false);
+	});
+
+	it('builds a script-free same-origin export document with an offline CSP', () => {
+		const exported = hardenHtmlArtifactExportDocument(`
+<!doctype html><html><head>
+<base href="https://example.com/"><meta http-equiv="refresh" content="0;url=https://example.com">
+</head><body><script>alert(1)</script><main>Export me</main></body></html>`);
+
+		expect(HTML_EXPORT_SANDBOX).toBe('allow-same-origin');
+		expect(HTML_EXPORT_SANDBOX).not.toContain('allow-scripts');
+		expect(HTML_EXPORT_CSP).toContain("script-src 'none'");
+		expect(exported).toContain('data-halo-html-export-policy="true"');
+		expect(exported).toContain('<main>Export me</main>');
+		expect(exported).not.toContain('<script');
+		expect(exported).not.toContain('<base');
+		expect(exported).not.toContain('http-equiv="refresh"');
+		expect(exported).not.toContain('data-halo-html-preview-snapshot');
+	});
+
 	it('wraps fragments in an isolated document with a strict CSP', () => {
 		const preview = hardenHtmlPreviewDocument(
 			'<h1>Hello</h1><script>window.ready = true;</script>'
@@ -21,6 +57,10 @@ describe('html-preview', () => {
 		expect(preview).toContain("connect-src 'none'");
 		expect(preview).toContain("form-action 'none'");
 		expect(preview).toContain('data-halo-html-preview-guard="true"');
+		expect(preview).toContain('data-halo-html-preview-snapshot="true"');
+		expect(preview).toContain('halo-html-preview-export-snapshot');
+		expect(preview).toContain('event.source !== parent');
+		expect(preview).toContain('event.stopImmediatePropagation()');
 		expect(preview).toContain('name="referrer" content="no-referrer"');
 		expect(preview).toContain('<body><h1>Hello</h1><script>window.ready = true;</script></body>');
 	});
@@ -71,6 +111,7 @@ window.artifactReady = true;
 		expect(preview).toContain("default-src 'none'");
 		expect(preview).toContain('data-halo-html-preview-guard="true"');
 		expect(countMatches(preview, /data-halo-html-preview-policy="true"/g)).toBe(1);
+		expect(countMatches(preview, /data-halo-html-preview-snapshot="true"/g)).toBe(1);
 	});
 
 	it('extracts inline HTML documents without relying on fenced-code regexes', () => {

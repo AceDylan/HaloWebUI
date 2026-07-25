@@ -22,6 +22,10 @@ describe('user default settings helpers', () => {
 			textScale: 1.2,
 			scrollOnBranchChange: true,
 			enableMessageQueue: true,
+			svgPreviewAutoOpen: false,
+			htmlVisualArtifacts: true,
+			hideHtmlArtifactCodeBlocks: true,
+			responseAutoCopy: true,
 			showFormulaQuickCopyButton: true,
 			regenerateMenu: true,
 			renderMarkdownInPreviews: true,
@@ -46,6 +50,10 @@ describe('user default settings helpers', () => {
 			models: ['gpt-4o'],
 			temporaryChatByDefault: true,
 			showInlineCitations: false,
+			svgPreviewAutoOpen: false,
+			htmlVisualArtifacts: true,
+			hideHtmlArtifactCodeBlocks: true,
+			responseAutoCopy: true,
 			system: 'You are helpful.',
 			title: { auto: false }
 		});

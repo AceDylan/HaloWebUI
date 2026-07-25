@@ -127,13 +127,19 @@
 		collapsed = !collapsed;
 	};
 
+	const normalizeLanguage = (value: string) =>
+		String(value ?? '')
+			.trim()
+			.toLowerCase()
+			.split(/\s+/, 1)[0];
+
 	const isSvgPreviewable = (lang: string, code: string) => {
-		const normalizedLang = String(lang ?? '').toLowerCase();
+		const normalizedLang = normalizeLanguage(lang);
 		return normalizedLang === 'svg' || (normalizedLang === 'xml' && code.includes('<svg'));
 	};
 
 	const isIframePreviewable = (lang: string) => {
-		const normalizedLang = String(lang ?? '').toLowerCase();
+		const normalizedLang = normalizeLanguage(lang);
 		return ['html', 'css', 'javascript', 'js'].includes(normalizedLang);
 	};
 
@@ -302,6 +308,13 @@
 	$: hasFiles = files.length > 0;
 	$: hasExecutionFeedback = executing || hasOutputText || hasResult || hasFiles;
 	$: sourceIsCollapsed = collapsed && needsCollapse;
+	$: iframeArtifactCodeBlock = isIframePreviewable(lang);
+	$: sourceHiddenForArtifact =
+		!streaming &&
+		Boolean(messageId) &&
+		iframeArtifactCodeBlock &&
+		($settings?.detectArtifacts ?? true) &&
+		($settings?.hideHtmlArtifactCodeBlocks ?? true);
 	$: codeExecutionEnabled =
 		((($config as any)?.features?.enable_code_execution as boolean | undefined) ?? true) === true;
 
@@ -494,7 +507,49 @@
 		class="relative {className} group/codeblock flex flex-col rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-950 my-2 overflow-hidden"
 		dir="ltr"
 	>
-		{#if lang === 'mermaid'}
+		{#if sourceHiddenForArtifact}
+			<div
+				class="flex flex-col gap-3 p-3 sm:flex-row sm:items-center sm:justify-between"
+				dir="auto"
+			>
+				<div class="min-w-0">
+					<div class="text-sm font-semibold text-gray-800 dark:text-gray-100">
+						{normalizeLanguage(lang) === 'css'
+							? 'CSS Artifact'
+							: normalizeLanguage(lang) === 'js' || normalizeLanguage(lang) === 'javascript'
+								? 'JavaScript Artifact'
+								: 'HTML Artifact'}
+					</div>
+					<div class="mt-1 text-xs leading-relaxed text-gray-500 dark:text-gray-400">
+						{code.split('\n').length}
+						{$i18n.t('lines')} · {$i18n.t('Source hidden; open the preview for the visual result.')}
+					</div>
+				</div>
+				<div class="flex shrink-0 items-center gap-2">
+					<button
+						type="button"
+						class="inline-flex items-center gap-1.5 rounded-lg border border-sky-200 bg-sky-50 px-3 py-1.5 text-xs font-medium text-sky-700 transition hover:bg-sky-100 dark:border-sky-500/25 dark:bg-sky-500/10 dark:text-sky-200 dark:hover:bg-sky-500/20"
+						on:click={openIframePreview}
+					>
+						<PanelRightOpen class="size-3.5" size={14} strokeWidth={2} />
+						{$i18n.t('Open preview')}
+					</button>
+					<button
+						type="button"
+						class="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-600 transition hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-800"
+						on:click={copyCode}
+					>
+						{#if copied}
+							<Check class="size-3.5 text-green-500" size={14} strokeWidth={2.2} />
+							{$i18n.t('Copied')}
+						{:else}
+							<Copy class="size-3.5" size={14} strokeWidth={2} />
+							{$i18n.t('Copy source')}
+						{/if}
+					</button>
+				</div>
+			</div>
+		{:else if lang === 'mermaid'}
 			{#if mermaidHtml}
 				<SvgPanZoom
 					className=" border border-gray-100 dark:border-gray-850 rounded-lg max-h-fit overflow-hidden"

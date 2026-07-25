@@ -23,6 +23,8 @@ type UserDefaultUiTemplate = {
 	autoFollowUps: boolean;
 	detectArtifacts: boolean;
 	svgPreviewAutoOpen: boolean;
+	htmlVisualArtifacts: boolean;
+	hideHtmlArtifactCodeBlocks: boolean;
 	responseAutoCopy: boolean;
 	temporaryChatByDefault: boolean;
 	newChatInheritsPreviousState: boolean;
@@ -73,6 +75,8 @@ export const DEFAULT_USER_DEFAULT_UI_TEMPLATE: UserDefaultUiTemplate = {
 	autoFollowUps: true,
 	detectArtifacts: true,
 	svgPreviewAutoOpen: true,
+	htmlVisualArtifacts: true,
+	hideHtmlArtifactCodeBlocks: true,
 	responseAutoCopy: false,
 	temporaryChatByDefault: false,
 	newChatInheritsPreviousState: false,
@@ -109,6 +113,8 @@ const UI_BOOL_KEYS: UserDefaultUiBoolKey[] = [
 	'autoFollowUps',
 	'detectArtifacts',
 	'svgPreviewAutoOpen',
+	'htmlVisualArtifacts',
+	'hideHtmlArtifactCodeBlocks',
 	'responseAutoCopy',
 	'temporaryChatByDefault',
 	'newChatInheritsPreviousState',

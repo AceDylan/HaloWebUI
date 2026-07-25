@@ -1363,6 +1363,8 @@
 			tool_servers: $toolServers,
 			features: {
 				memory: $settings?.memory ?? false,
+				html_visual_artifacts: $settings?.htmlVisualArtifacts ?? true,
+				html_visual_surface: 'halowebui-web',
 				image_generation: imageGenerationActive,
 				image_generation_options: imageGenerationActive
 					? getImageGenerationOptionsPayload()
@@ -5487,6 +5489,8 @@
 
 				features: {
 					memory: $settings?.memory ?? false,
+					html_visual_artifacts: $settings?.htmlVisualArtifacts ?? true,
+					html_visual_surface: 'halowebui-web',
 					image_generation: imageGenerationActive,
 					image_generation_options: imageGenerationActive
 						? getImageGenerationOptionsPayload()

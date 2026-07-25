@@ -144,6 +144,8 @@
 	let autoFollowUps = true;
 	let detectArtifacts = true;
 	let svgPreviewAutoOpen = true;
+	let htmlVisualArtifacts = true;
+	let hideHtmlArtifactCodeBlocks = true;
 	let responseAutoCopy = false;
 	let responseHtmlFormat = false;
 	let scrollOnBranchChange = true;
@@ -274,6 +276,8 @@
 			autoFollowUps: boolean;
 			detectArtifacts: boolean;
 			svgPreviewAutoOpen: boolean;
+			htmlVisualArtifacts: boolean;
+			hideHtmlArtifactCodeBlocks: boolean;
 			responseAutoCopy: boolean;
 			scrollOnBranchChange: boolean;
 			enableMessageQueue: boolean;
@@ -601,6 +605,8 @@
 			autoFollowUps,
 			detectArtifacts,
 			svgPreviewAutoOpen,
+			htmlVisualArtifacts,
+			hideHtmlArtifactCodeBlocks,
 			responseAutoCopy,
 			scrollOnBranchChange,
 			enableMessageQueue,
@@ -681,6 +687,8 @@
 		autoFollowUps = snapshot.autoFollowUps;
 		detectArtifacts = snapshot.detectArtifacts;
 		svgPreviewAutoOpen = snapshot.svgPreviewAutoOpen;
+		htmlVisualArtifacts = snapshot.htmlVisualArtifacts;
+		hideHtmlArtifactCodeBlocks = snapshot.hideHtmlArtifactCodeBlocks;
 		responseAutoCopy = snapshot.responseAutoCopy;
 		scrollOnBranchChange = snapshot.scrollOnBranchChange;
 		enableMessageQueue = snapshot.enableMessageQueue;
@@ -752,6 +760,8 @@
 		autoFollowUps;
 		detectArtifacts;
 		svgPreviewAutoOpen;
+		htmlVisualArtifacts;
+		hideHtmlArtifactCodeBlocks;
 		responseAutoCopy;
 		scrollOnBranchChange;
 		enableMessageQueue;
@@ -1054,6 +1064,8 @@
 				autoFollowUps,
 				detectArtifacts,
 				svgPreviewAutoOpen,
+				htmlVisualArtifacts,
+				hideHtmlArtifactCodeBlocks,
 				responseAutoCopy,
 				scrollOnBranchChange,
 				enableMessageQueue,
@@ -1215,6 +1227,8 @@
 
 		detectArtifacts = $settings?.detectArtifacts ?? true;
 		svgPreviewAutoOpen = $settings?.svgPreviewAutoOpen ?? ($settings?.detectArtifacts ?? true);
+		htmlVisualArtifacts = $settings?.htmlVisualArtifacts ?? true;
+		hideHtmlArtifactCodeBlocks = $settings?.hideHtmlArtifactCodeBlocks ?? true;
 		responseAutoCopy = $settings?.responseAutoCopy ?? false;
 		showChatTitleInTab = $settings?.showChatTitleInTab ?? true;
 		enableMessageQueue = $settings?.enableMessageQueue ?? true;
@@ -2218,7 +2232,35 @@
 												bind:state={svgPreviewAutoOpen}
 											/>
 										</div>
-									</div>
+										<div class="flex items-center justify-between glass-item px-4 py-3">
+											<div class="flex min-w-0 items-center gap-1.5 pr-4 text-sm font-medium">
+												<span>{tr('HTML-Visual Artifact 模式', 'HTML-Visual Artifact Mode')}</span>
+												<Tooltip
+													content={tr(
+														'开启后，HaloWebUI 网页对话会向直连模型和 Hermes Agent 临时注入 HTML 可视化提示词；Telegram 等纯文本入口不受影响。',
+														'When enabled, HaloWebUI web chats temporarily inject an HTML visual prompt for direct models and Hermes Agent; Telegram/plain-text surfaces are not affected.'
+													)}
+												>
+													<QuestionMarkCircle className="size-3.5 cursor-help text-gray-400 dark:text-gray-500" />
+												</Tooltip>
+											</div>
+											<Switch bind:state={htmlVisualArtifacts} />
+										</div>
+										<div class="flex items-center justify-between glass-item px-4 py-3">
+											<div class="flex min-w-0 items-center gap-1.5 pr-4 text-sm font-medium">
+												<span>{tr('隐藏 HTML Artifact 源码', 'Hide HTML Artifact Source')}</span>
+												<Tooltip
+													content={tr(
+														'开启后，聊天正文中的 html/css/js Artifact 代码块显示为紧凑预览卡，源码仍可复制并可在右侧预览打开。',
+														'When enabled, html/css/js Artifact code blocks become compact preview cards in chat while keeping source copy and side preview actions.'
+													)}
+												>
+													<QuestionMarkCircle className="size-3.5 cursor-help text-gray-400 dark:text-gray-500" />
+												</Tooltip>
+											</div>
+											<Switch bind:state={hideHtmlArtifactCodeBlocks} />
+										</div>
+										</div>
 
 									<!-- Sub-group B: Display & Rendering -->
 									<div class="text-sm font-medium text-gray-500 dark:text-gray-400 pl-1 mt-3">

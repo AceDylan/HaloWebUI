@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onDestroy, getContext, createEventDispatcher, tick } from 'svelte';
+	import { onDestroy, onMount, getContext, createEventDispatcher, tick } from 'svelte';
 	import type { Writable } from 'svelte/store';
 	import type { i18n as I18n } from 'i18next';
 	import { marked } from 'marked';
@@ -19,11 +19,16 @@
 	import Tooltip from '../common/Tooltip.svelte';
 	import SvgPanZoom from '../common/SVGPanZoom.svelte';
 	import ArrowLeft from '../icons/ArrowLeft.svelte';
+	import { toast } from 'svelte-sonner';
 	import { extractSvgMarkupBlocks, normalizeSvgMarkup } from './Messages/Markdown/svgMarkupTokens';
 	import {
 		buildHtmlArtifactPreview,
+		hardenHtmlArtifactExportDocument,
+		HTML_ARTIFACT_EXPORT_MAX_SNAPSHOT_CHARS,
+		HTML_EXPORT_SANDBOX,
 		HTML_PREVIEW_REFERRER_POLICY,
-		HTML_PREVIEW_SANDBOX
+		HTML_PREVIEW_SANDBOX,
+		isActiveHtmlArtifactSnapshotMessage
 	} from '$lib/utils/html-preview';
 
 	export let overlay = false;
@@ -39,6 +44,10 @@
 	let selectedContentIdx = 0;
 
 	let copied = false;
+	let exportingImage = false;
+	let exportRendering = false;
+	let exportRequestId: string | null = null;
+	let exportTimeout: ReturnType<typeof setTimeout> | null = null;
 	let iframeElement: HTMLIFrameElement;
 	let alive = true;
 	let refreshTimer: ReturnType<typeof setTimeout> | null = null;
@@ -202,9 +211,226 @@
 		iframeElement?.requestFullscreen();
 	};
 
+	const downloadBlob = (blob: Blob, filename: string) => {
+		const url = URL.createObjectURL(blob);
+		const link = document.createElement('a');
+		link.href = url;
+		link.download = filename;
+		document.body.appendChild(link);
+		link.click();
+		link.remove();
+		setTimeout(() => URL.revokeObjectURL(url), 0);
+	};
+
+	const clampNumber = (value: number, min: number, max: number) =>
+		Math.max(min, Math.min(max, value));
+
+	const sanitizeCssUrls = (value: string) =>
+		value
+			.replace(/@import\s+[^;]+;?/gi, '')
+			.replace(/(?:-webkit-)?image-set\(([^)]*)\)/gi, (match, body) =>
+				/data:/i.test(body) ? match : 'none'
+			)
+			.replace(/url\(\s*(['"]?)(.*?)\1\s*\)/gi, (match, _quote, url) => {
+				const normalized = String(url ?? '').trim();
+				return normalized.startsWith('data:') || normalized.startsWith('#') ? match : 'url("")';
+			});
+
+	const sanitizeHtmlArtifactSnapshot = (snapshot: string) => {
+		const parsed = new DOMParser().parseFromString(snapshot, 'text/html');
+		parsed
+			.querySelectorAll('script,noscript,base,link,iframe,object,embed,meta[http-equiv]')
+			.forEach((node) => node.remove());
+
+		const urlAttributes = new Set(['action', 'formaction', 'poster', 'srcdoc', 'srcset', 'data']);
+		parsed.querySelectorAll('*').forEach((element) => {
+			for (const attribute of Array.from(element.attributes)) {
+				const name = attribute.name.toLowerCase();
+				const value = attribute.value.trim();
+				if (name.startsWith('on') || urlAttributes.has(name)) {
+					element.removeAttribute(attribute.name);
+					continue;
+				}
+				if (name === 'src') {
+					if (!value.toLowerCase().startsWith('data:image/')) {
+						element.removeAttribute(attribute.name);
+					}
+					continue;
+				}
+				if (name === 'href' || name === 'xlink:href') {
+					if (!value.startsWith('#') && !value.toLowerCase().startsWith('data:image/')) {
+						element.removeAttribute(attribute.name);
+					}
+					continue;
+				}
+				if (name === 'style') {
+					const sanitized = sanitizeCssUrls(attribute.value);
+					if (sanitized.trim()) element.setAttribute(attribute.name, sanitized);
+					else element.removeAttribute(attribute.name);
+				}
+			}
+		});
+		parsed.querySelectorAll('style').forEach((style) => {
+			style.textContent = sanitizeCssUrls(style.textContent ?? '');
+		});
+
+		return hardenHtmlArtifactExportDocument(`<!DOCTYPE html>${parsed.documentElement.outerHTML}`);
+	};
+
+	const renderSnapshotPng = async (snapshot: string, rawWidth: unknown, rawHeight: unknown) => {
+		const width = clampNumber(Math.ceil(Number(rawWidth) || 320), 320, 2048);
+		const maxBasePixels = 16_000_000;
+		const maxHeight = Math.min(16_384, Math.floor(maxBasePixels / width));
+		const height = clampNumber(Math.ceil(Number(rawHeight) || 1), 1, maxHeight);
+		const maxRenderedPixels = 16_000_000;
+		const scale = clampNumber(Math.sqrt(maxRenderedPixels / Math.max(width * height, 1)), 1, 2);
+		const exportDocument = sanitizeHtmlArtifactSnapshot(snapshot);
+		const exportFrame = document.createElement('iframe');
+		exportFrame.setAttribute('sandbox', HTML_EXPORT_SANDBOX);
+		exportFrame.referrerPolicy = HTML_PREVIEW_REFERRER_POLICY;
+		exportFrame.setAttribute('aria-hidden', 'true');
+		exportFrame.style.cssText = `position:fixed;left:-100000px;top:0;width:${width}px;height:${height}px;opacity:0;pointer-events:none;border:0;z-index:-1;`;
+
+		try {
+			const loaded = new Promise<void>((resolve, reject) => {
+				exportFrame.addEventListener('load', () => resolve(), { once: true });
+				exportFrame.addEventListener(
+					'error',
+					() => reject(new Error('Export document failed to load')),
+					{ once: true }
+				);
+			});
+			exportFrame.srcdoc = exportDocument;
+			document.body.appendChild(exportFrame);
+			await loaded;
+
+			const frameDocument = exportFrame.contentDocument;
+			if (!frameDocument?.documentElement) {
+				throw new Error('Export document is unavailable');
+			}
+			await frameDocument.fonts?.ready.catch(() => undefined);
+			const { default: html2canvas } = await import('html2canvas-pro');
+			const canvas = await html2canvas(frameDocument.documentElement, {
+				allowTaint: false,
+				backgroundColor: '#ffffff',
+				height,
+				logging: false,
+				removeContainer: true,
+				scale,
+				scrollX: 0,
+				scrollY: 0,
+				useCORS: false,
+				width,
+				windowHeight: height,
+				windowWidth: width,
+				x: 0,
+				y: 0
+			});
+			const blob = await new Promise<Blob>((resolve, reject) => {
+				canvas.toBlob((value) => {
+					if (value) resolve(value);
+					else reject(new Error('PNG encoding failed'));
+				}, 'image/png');
+			});
+			if (blob.size > 80_000_000) {
+				throw new Error('Exported PNG exceeds the 80 MB safety limit');
+			}
+			return blob;
+		} finally {
+			exportFrame.remove();
+		}
+	};
+
+	const resetExportState = () => {
+		exportingImage = false;
+		exportRendering = false;
+		exportRequestId = null;
+		if (exportTimeout) {
+			clearTimeout(exportTimeout);
+			exportTimeout = null;
+		}
+	};
+
+	const showExportError = (error: unknown) => {
+		const message = String(error instanceof Error ? error.message : (error ?? ''))
+			.trim()
+			.slice(0, 300);
+		resetExportState();
+		toast.error(message || $i18n.t('Failed to export PNG'));
+	};
+
+	const createExportRequestId = () =>
+		`halo-html-export-${Array.from(crypto.getRandomValues(new Uint32Array(4)), (value) =>
+			value.toString(16).padStart(8, '0')
+		).join('')}`;
+
+	const exportPreviewPng = () => {
+		if (exportingImage) return;
+		if (!iframeElement?.contentWindow || contents[selectedContentIdx]?.type !== 'iframe') {
+			toast.error($i18n.t('No HTML preview is available to export.'));
+			return;
+		}
+
+		exportRequestId = createExportRequestId();
+		exportingImage = true;
+		exportRendering = false;
+		if (exportTimeout) clearTimeout(exportTimeout);
+		exportTimeout = setTimeout(() => {
+			if (!exportingImage) return;
+			resetExportState();
+			toast.error($i18n.t('PNG export timed out'));
+		}, 30000);
+		iframeElement.contentWindow.postMessage(
+			{ type: 'halo-html-preview-export-snapshot', requestId: exportRequestId },
+			'*'
+		);
+	};
+
+	const handleExportMessage = async (event: MessageEvent) => {
+		if (!iframeElement?.contentWindow || event.source !== iframeElement.contentWindow) return;
+		const data = event.data;
+		if (
+			exportRendering ||
+			!isActiveHtmlArtifactSnapshotMessage(data, exportRequestId, exportingImage)
+		) {
+			return;
+		}
+
+		if (data.ok !== true) {
+			showExportError(typeof data.error === 'string' ? data.error : 'Failed to capture preview');
+			return;
+		}
+		if (
+			typeof data.html !== 'string' ||
+			!data.html.trim() ||
+			data.html.length > HTML_ARTIFACT_EXPORT_MAX_SNAPSHOT_CHARS
+		) {
+			showExportError('HTML preview snapshot is invalid or too large');
+			return;
+		}
+
+		const requestId = exportRequestId;
+		exportRendering = true;
+		try {
+			const pngBlob = await renderSnapshotPng(data.html, data.width, data.height);
+			if (!alive || requestId !== exportRequestId) return;
+			resetExportState();
+			downloadBlob(pngBlob, `halo-html-artifact-${Date.now()}.png`);
+			toast.success($i18n.t('Exported PNG'));
+		} catch (error) {
+			if (requestId === exportRequestId) showExportError(error);
+		}
+	};
+
+	onMount(() => {
+		window.addEventListener('message', handleExportMessage);
+	});
+
 	onDestroy(() => {
 		alive = false;
+		window.removeEventListener('message', handleExportMessage);
 		if (refreshTimer) clearTimeout(refreshTimer);
+		if (exportTimeout) clearTimeout(exportTimeout);
 	});
 
 	const getActivePreviewMessageId = () =>
@@ -312,6 +538,14 @@
 						>
 
 						{#if contents[selectedContentIdx].type === 'iframe'}
+							<button
+								class="bg-none border-none text-xs bg-gray-50 hover:bg-gray-100 dark:bg-gray-850 dark:hover:bg-gray-800 transition rounded-md px-1.5 py-0.5 disabled:cursor-wait disabled:opacity-60"
+								on:click={exportPreviewPng}
+								disabled={exportingImage}
+							>
+								{exportingImage ? $i18n.t('Exporting...') : $i18n.t('Export PNG')}
+							</button>
+
 							<Tooltip content={$i18n.t('Open in full screen')}>
 								<button
 									class=" bg-none border-none text-xs bg-gray-50 hover:bg-gray-100 dark:bg-gray-850 dark:hover:bg-gray-800 transition rounded-md p-0.5"

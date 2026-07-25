@@ -252,6 +252,8 @@ type Settings = {
 	autoFollowUps?: boolean;
 	detectArtifacts?: boolean;
 	svgPreviewAutoOpen?: boolean;
+	htmlVisualArtifacts?: boolean;
+	hideHtmlArtifactCodeBlocks?: boolean;
 	splitLargeChunks?: boolean;
 	splitLargeDeltas?: boolean;
 	chatDirection?: 'LTR' | 'RTL' | 'auto';

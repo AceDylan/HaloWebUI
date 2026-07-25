@@ -7,7 +7,6 @@
 		artifactAutoOpenDismissedMessageId,
 		artifactPreviewTarget,
 		chatId,
-		mobile,
 		settings,
 		showArtifacts,
 		showControls,
@@ -883,7 +882,6 @@
 
 				if (
 					!streaming &&
-					!$mobile &&
 					$chatId &&
 					!autoOpenDismissed &&
 					autoOpenKey !== lastAutoOpenedArtifactKey &&

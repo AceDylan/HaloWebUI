@@ -1,7 +1,23 @@
 import { marked } from 'marked';
 
 export const HTML_PREVIEW_SANDBOX = 'allow-scripts';
+export const HTML_EXPORT_SANDBOX = 'allow-same-origin';
 export const HTML_PREVIEW_REFERRER_POLICY = 'no-referrer';
+export const HTML_ARTIFACT_EXPORT_MAX_SNAPSHOT_CHARS = 2_000_000;
+
+export const isActiveHtmlArtifactSnapshotMessage = (
+	data: unknown,
+	requestId: string | null,
+	exporting: boolean
+): data is { type: string; requestId: string; ok?: unknown; [key: string]: unknown } =>
+	exporting === true &&
+	typeof requestId === 'string' &&
+	requestId.length > 0 &&
+	typeof data === 'object' &&
+	data !== null &&
+	(data as { type?: unknown }).type === 'halo-html-preview-export-snapshot-result' &&
+	typeof (data as { requestId?: unknown }).requestId === 'string' &&
+	(data as { requestId: string }).requestId === requestId;
 
 export const HTML_PREVIEW_CSP = [
 	"default-src 'none'",
@@ -18,7 +34,23 @@ export const HTML_PREVIEW_CSP = [
 	'worker-src blob:'
 ].join('; ');
 
+export const HTML_EXPORT_CSP = [
+	"default-src 'none'",
+	"base-uri 'none'",
+	"object-src 'none'",
+	"frame-src 'none'",
+	"connect-src 'none'",
+	"form-action 'none'",
+	"script-src 'none'",
+	"style-src 'unsafe-inline'",
+	'img-src data:',
+	'font-src data:',
+	"media-src 'none'",
+	"worker-src 'none'"
+].join('; ');
+
 const PREVIEW_POLICY_MARKER = 'data-halo-html-preview-policy="true"';
+const EXPORT_POLICY_MARKER = 'data-halo-html-export-policy="true"';
 const PREVIEW_NAVIGATION_GUARD = `<script data-halo-html-preview-guard="true">(() => {
 	document.addEventListener('click', (event) => {
 		const target = event.target instanceof Element ? event.target.closest('a[href]') : null;
@@ -27,12 +59,58 @@ const PREVIEW_NAVIGATION_GUARD = `<script data-halo-html-preview-guard="true">((
 	}, true);
 	document.addEventListener('submit', (event) => event.preventDefault(), true);
 })();</script>`;
-const PREVIEW_POLICY_META = [
-	`<meta ${PREVIEW_POLICY_MARKER} http-equiv="Content-Security-Policy" content="${HTML_PREVIEW_CSP}">`,
+const PREVIEW_SNAPSHOT_BRIDGE = `<script data-halo-html-preview-snapshot="true">(() => {
+	const getSize = () => {
+		const root = document.documentElement;
+		const body = document.body || root;
+		return {
+			width: Math.ceil(Math.max(root.scrollWidth, body.scrollWidth, root.offsetWidth, body.offsetWidth, root.clientWidth, 320)),
+			height: Math.ceil(Math.max(root.scrollHeight, body.scrollHeight, root.offsetHeight, body.offsetHeight, root.clientHeight, 1))
+		};
+	};
+	window.addEventListener('message', (event) => {
+		if (event.source !== parent) return;
+		const message = event.data || {};
+		if (message.type !== 'halo-html-preview-export-snapshot') return;
+		event.stopImmediatePropagation();
+		try {
+			const clone = document.documentElement.cloneNode(true);
+			clone.querySelectorAll('script,noscript').forEach((node) => node.remove());
+			const html = '<!DOCTYPE html>' + clone.outerHTML;
+			if (html.length > ${HTML_ARTIFACT_EXPORT_MAX_SNAPSHOT_CHARS}) {
+				throw new Error('HTML preview is too large to export safely');
+			}
+			parent.postMessage({
+				type: 'halo-html-preview-export-snapshot-result',
+				requestId: message.requestId,
+				ok: true,
+				html,
+				...getSize()
+			}, '*');
+		} catch (error) {
+			parent.postMessage({
+				type: 'halo-html-preview-export-snapshot-result',
+				requestId: message.requestId,
+				ok: false,
+				error: String(error?.message || error)
+			}, '*');
+		}
+	});
+})();</script>`;
+const COMMON_POLICY_META = [
 	'<meta name="referrer" content="no-referrer">',
 	'<meta name="viewport" content="width=device-width, initial-scale=1.0">',
-	'<meta charset="UTF-8">',
-	PREVIEW_NAVIGATION_GUARD
+	'<meta charset="UTF-8">'
+];
+const PREVIEW_POLICY_META = [
+	`<meta ${PREVIEW_POLICY_MARKER} http-equiv="Content-Security-Policy" content="${HTML_PREVIEW_CSP}">`,
+	...COMMON_POLICY_META,
+	PREVIEW_NAVIGATION_GUARD,
+	PREVIEW_SNAPSHOT_BRIDGE
+].join('');
+const EXPORT_POLICY_META = [
+	`<meta ${EXPORT_POLICY_MARKER} http-equiv="Content-Security-Policy" content="${HTML_EXPORT_CSP}">`,
+	...COMMON_POLICY_META
 ].join('');
 
 const stripLeadingDoctype = (value: string) => value.replace(/^\s*<!doctype\s+html[^>]*>/i, '');
@@ -57,29 +135,50 @@ const insertBeforeClosingTag = (document: string, tagName: string, content: stri
 	return `${document}${content}`;
 };
 
-export const hardenHtmlPreviewDocument = (html: unknown): string => {
-	const source = String(html ?? '')
+const stripInjectedPreviewPolicies = (html: unknown) =>
+	String(html ?? '')
 		.replace(/<meta\b(?=[^>]*\bdata-halo-html-preview-policy=["']true["'])[^>]*>/gi, '')
+		.replace(/<meta\b(?=[^>]*\bdata-halo-html-export-policy=["']true["'])[^>]*>/gi, '')
 		.replace(
 			/<script\b(?=[^>]*\bdata-halo-html-preview-guard=["']true["'])[^>]*>[\s\S]*?<\/script>/gi,
 			''
+		)
+		.replace(
+			/<script\b(?=[^>]*\bdata-halo-html-preview-(?:snapshot|export)=["']true["'])[^>]*>[\s\S]*?<\/script>/gi,
+			''
 		);
+
+const hardenHtmlDocument = (html: unknown, policyMeta: string): string => {
+	const source = stripInjectedPreviewPolicies(html);
 
 	if (/<html\b[^>]*>/i.test(source)) {
 		let document = ensureDoctype(source);
 		if (/<head\b[^>]*>/i.test(document)) {
-			return insertAfterOpeningTag(document, 'head', PREVIEW_POLICY_META);
+			return insertAfterOpeningTag(document, 'head', policyMeta);
 		}
-		return insertAfterOpeningTag(document, 'html', `<head>${PREVIEW_POLICY_META}</head>`);
+		return insertAfterOpeningTag(document, 'html', `<head>${policyMeta}</head>`);
 	}
 
 	if (/<(?:head|body)\b[^>]*>/i.test(source)) {
-		return hardenHtmlPreviewDocument(
-			`<!DOCTYPE html><html lang="en">${stripLeadingDoctype(source)}</html>`
+		return hardenHtmlDocument(
+			`<!DOCTYPE html><html lang="en">${stripLeadingDoctype(source)}</html>`,
+			policyMeta
 		);
 	}
 
-	return `<!DOCTYPE html><html lang="en"><head>${PREVIEW_POLICY_META}</head><body>${stripLeadingDoctype(source)}</body></html>`;
+	return `<!DOCTYPE html><html lang="en"><head>${policyMeta}</head><body>${stripLeadingDoctype(source)}</body></html>`;
+};
+
+export const hardenHtmlPreviewDocument = (html: unknown): string =>
+	hardenHtmlDocument(html, PREVIEW_POLICY_META);
+
+export const hardenHtmlArtifactExportDocument = (html: unknown): string => {
+	const source = stripInjectedPreviewPolicies(html)
+		.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '')
+		.replace(/<noscript\b[^>]*>[\s\S]*?<\/noscript>/gi, '')
+		.replace(/<base\b[^>]*>/gi, '')
+		.replace(/<meta\b(?=[^>]*\bhttp-equiv=["']?refresh\b)[^>]*>/gi, '');
+	return hardenHtmlDocument(source, EXPORT_POLICY_META);
 };
 
 const normalizeCodeLanguage = (value: unknown) =>

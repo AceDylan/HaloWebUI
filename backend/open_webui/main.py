@@ -517,6 +517,7 @@ from open_webui.utils.hermes_agent import (
     is_hermes_agent_model,
     run_hermes_agent,
 )
+from open_webui.utils.html_visual_prompt import apply_html_visual_prompt_overlay
 from open_webui.utils.middleware import (
     build_native_file_input_retry_notification,
     clear_native_file_input_remote_cache,
@@ -1715,6 +1716,7 @@ async def chat_completion(
 
         request.state.metadata = metadata
         form_data["metadata"] = metadata
+        form_data = apply_html_visual_prompt_overlay(form_data, metadata)
 
         form_data, metadata, events = await process_chat_payload(
             request, form_data, user, metadata, model, tasks=tasks
@@ -1809,6 +1811,9 @@ async def chat_completion(
                 retry_metadata,
                 strip_non_native_function_calling=strip_non_native_function_calling,
             )
+            retry_form_data = apply_html_visual_prompt_overlay(
+                retry_form_data, retry_metadata
+            )
 
             try:
                 retry_form_data, retry_metadata, retry_events = await process_chat_payload(
@@ -1841,6 +1846,9 @@ async def chat_completion(
                 original_request_body,
                 retry_metadata,
                 strip_non_native_function_calling=strip_non_native_function_calling,
+            )
+            retry_form_data = apply_html_visual_prompt_overlay(
+                retry_form_data, retry_metadata
             )
 
             retry_emitter = get_event_emitter(retry_metadata)
@@ -1884,6 +1892,9 @@ async def chat_completion(
                 retry_metadata,
                 strip_non_native_function_calling=strip_non_native_function_calling,
                 halo_web_search_fallback=True,
+            )
+            retry_form_data = apply_html_visual_prompt_overlay(
+                retry_form_data, retry_metadata
             )
 
             retry_emitter = get_event_emitter(retry_metadata)

@@ -4,6 +4,7 @@ from open_webui.utils.hermes_agent import _build_run_payload
 from open_webui.utils.html_visual_prompt import (
     HTML_VISUAL_FALLBACK_MARKER,
     HTML_VISUAL_FORCE_PROMPT_MARKER,
+    HTML_VISUAL_PROMPT,
     HTML_VISUAL_PROMPT_MARKER,
     apply_html_visual_prompt_overlay,
     append_html_visual_fallback,
@@ -37,6 +38,17 @@ def test_html_visual_prompt_injects_for_halowebui_web_surface():
     assert HTML_VISUAL_PROMPT_MARKER in messages[1]["content"]
     assert "Telegram" in messages[1]["content"]
     assert metadata["html_visual_artifacts"]["enabled"] is True
+
+
+def test_html_visual_prompt_requires_flat_responsive_information_hierarchy():
+    assert "根容器保持扁平" in HTML_VISUAL_PROMPT
+    assert "禁止卡片套卡片" in HTML_VISUAL_PROMPT
+    assert "默认最多两列" in HTML_VISUAL_PROMPT
+    assert "窄屏自动单列" in HTML_VISUAL_PROMPT
+    assert "不要把所有条目做成等权卡片" in HTML_VISUAL_PROMPT
+    assert "一个主重点" in HTML_VISUAL_PROMPT
+    assert "只保留一个强调色" in HTML_VISUAL_PROMPT
+    assert "flex:1 1 360px" in HTML_VISUAL_PROMPT
 
 
 @pytest.mark.parametrize(
@@ -256,6 +268,16 @@ def test_force_fallback_closes_unterminated_source_fence_before_artifact():
 
     assert "\n```\n\n```html\n" in content
     assert HTML_VISUAL_FALLBACK_MARKER in content
+
+
+def test_force_fallback_uses_flat_shell_without_nested_card_chrome():
+    content = append_html_visual_fallback("Plain response", _metadata())
+    fallback = content.split("```html\n", 1)[1]
+
+    assert "max-width:920px" in fallback
+    assert "box-shadow" not in fallback
+    assert "border-radius" not in fallback
+    assert "border:1px solid" not in fallback
 
 
 @pytest.mark.parametrize("mode", ["off", "auto"])

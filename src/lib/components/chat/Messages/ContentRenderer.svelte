@@ -946,19 +946,16 @@
 		/>
 
 		{#if inlineHtmlArtifactPreview}
-			<div
-				class="mt-3 overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm dark:border-gray-700 dark:bg-gray-950"
-				data-halo-inline-html-preview="true"
-			>
+			<div class="mt-3" data-halo-inline-html-preview="true">
 				<div
-					class="flex items-center justify-between gap-3 border-b border-gray-200 bg-gray-50 px-3 py-2 dark:border-gray-700 dark:bg-gray-900"
+					class="flex items-center justify-between gap-3 border-t border-gray-100 px-1 py-2 dark:border-gray-800"
 				>
-					<div class="text-xs font-semibold text-gray-700 dark:text-gray-200">
+					<div class="text-[11px] font-medium tracking-wide text-gray-400 dark:text-gray-500">
 						{$i18n.t('HTML Preview')}
 					</div>
 					<button
 						type="button"
-						class="rounded-md border border-gray-200 bg-white px-2.5 py-1 text-xs font-medium text-gray-600 transition hover:bg-gray-100 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-300 dark:hover:bg-gray-800"
+						class="inline-flex items-center rounded-md px-2 py-1 text-xs font-medium text-gray-500 transition hover:bg-gray-100 hover:text-gray-800 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-100"
 						on:click={openInlineHtmlArtifactPreview}
 					>
 						{$i18n.t('Open preview')}
@@ -970,7 +967,7 @@
 					srcdoc={inlineHtmlArtifactPreview}
 					sandbox={HTML_PREVIEW_SANDBOX}
 					referrerpolicy={HTML_PREVIEW_REFERRER_POLICY}
-					class="block w-full border-0 bg-white"
+					class="block w-full overflow-hidden rounded-lg border-0 bg-white"
 					style={`height: ${inlineHtmlPreviewHeight}px;`}
 				></iframe>
 			</div>

@@ -19,19 +19,30 @@ HTML_VISUAL_FALLBACK_MARKER = "HALOWEBUI_HTML_VISUAL_SAFE_FALLBACK"
 HTML_VISUAL_WEB_SURFACE = "halowebui-web"
 
 HTML_VISUAL_PROMPT = f"""[{HTML_VISUAL_PROMPT_MARKER}]
-当前输出 surface 是 HaloWebUI Web Chat，支持右侧 Artifact iframe 预览；本规则只适用于当前 Web 会话，不代表 Telegram/纯文本平台也支持 HTML。
+当前输出 surface 是 HaloWebUI Web Chat，支持消息卡片内嵌 Artifact iframe，并可打开完整预览；本规则只适用于当前 Web 会话，不代表 Telegram/纯文本平台也支持 HTML。
 
 当回答包含复杂结构、横向对比、流程/架构/状态关系、信息卡片、参数矩阵、表格、数据图表、密集多字段归纳，或纯 Markdown 会显得冗长割裂时，优先提供一个 fenced `html` Artifact：
 ````html
-<div style="max-width:980px;margin:0 auto;padding:28px;background:#fff;color:#111;font-family:Inter,Arial,'Noto Sans SC',sans-serif;">
-  <!-- 自包含 HTML 片段 -->
+<div style="max-width:920px;margin:0 auto;padding:22px 20px;background:#fff;color:#171717;font-family:Inter,Arial,'Noto Sans SC',sans-serif;">
+  <div style="font-size:24px;font-weight:750;line-height:1.3;">清晰标题</div>
+  <div style="margin-top:16px;padding:16px;background:#f7f7f5;border-left:3px solid #1f2937;">一个主重点或核心结论</div>
+  <div style="display:flex;flex-wrap:wrap;gap:12px;margin-top:16px;">
+    <div style="flex:1 1 360px;min-width:0;padding:14px 0;border-top:1px solid #e5e7eb;">次重点</div>
+    <div style="flex:1 1 360px;min-width:0;padding:14px 0;border-top:1px solid #e5e7eb;">次重点</div>
+  </div>
 </div>
 ````
 
 生成规则：
 - 使用简体中文；Markdown 标题从 ## 起，子层级使用 ###，禁用单个 #。
 - HTML 只输出局部片段，禁止 !DOCTYPE/html/head/body 全量页面框架。
-- 默认使用黑白灰克制视觉：线条、留白、边框、阴影建立层级；重点信息可少量使用高级强调色。
+- 根容器保持扁平：不要添加外层边框、圆角或阴影，HaloWebUI 已提供消息卡片边界；禁止卡片套卡片，视觉嵌套最多一层。
+- 先建立“标题/结论 → 一个主重点 → 2–4 个次重点 → 紧凑详情”的层级；不要把所有条目做成等权卡片。新闻等长列表采用“1 条头条 + 3 条重点 + 其余紧凑列表/折叠详情”。
+- 默认最多两列，使用 `display:flex;flex-wrap:wrap` 与 `flex:1 1 360px;min-width:0`，让窄屏自动单列；禁止三列窄卡和固定宽度桌面长图缩放。
+- 长文本不要塞进多列表格。四列以上或单元格文字较长时，改为纵向对比卡/列表；确需表格时外包 `overflow-x:auto`，并降低网格线对比度。
+- 默认使用黑白灰克制视觉，只保留一个强调色；红/橙只用于风险，绿色只用于完成状态。不要同时堆叠黑色横幅、多色分类、重阴影和粗边框。
+- 优先用字号、字重、留白和细分隔线建立层级；同一画面最多一种圆角尺度、一种边框强度，阴影仅用于真正需要悬浮的元素。
+- 正文建议 14–16px、行高 1.6–1.75；长哈希、URL、命令用 `overflow-wrap:anywhere` 或紧凑代码区，避免孤字断行。
 - HTML 片段优先使用纯内联 style；避免 class、伪类/伪元素、外链资源、可解析 URL、远程图片、远程字体。
 - 可使用 Flexbox、基础盒模型、table、details/summary、内联 SVG/纯 CSS 条形图；不要为装饰而过度设计。
 - 不要把整段回复都塞进一个巨大 HTML 块；先给必要结论，再用 Artifact 承载复杂可视化。
@@ -329,9 +340,9 @@ def append_html_visual_fallback(content: Any, metadata: dict[str, Any] | None) -
     escaped_content = _escape_fallback_content(display_content)
     artifact = f"""```html
 <!-- {HTML_VISUAL_FALLBACK_MARKER} -->
-<section style="max-width:980px;margin:0 auto;padding:28px;background:#ffffff;color:#111111;border:1px solid #e5e7eb;border-radius:16px;box-shadow:0 12px 32px rgba(0,0,0,0.08);font-family:Inter,Arial,'Noto Sans SC',sans-serif;">
-  <div style="margin:0 0 16px;font-size:12px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:#6b7280;">Response summary</div>
-  <div style="margin:0;white-space:pre-wrap;overflow-wrap:anywhere;font-size:15px;line-height:1.7;color:#1f2937;">{escaped_content}</div>
+<section style="max-width:920px;margin:0 auto;padding:22px 20px;background:#ffffff;color:#171717;font-family:Inter,Arial,'Noto Sans SC',sans-serif;">
+  <div style="margin:0;font-size:12px;font-weight:700;letter-spacing:0.08em;color:#6b7280;">回复摘要</div>
+  <div style="margin-top:12px;padding-top:14px;border-top:1px solid #e5e7eb;white-space:pre-wrap;overflow-wrap:anywhere;font-size:15px;line-height:1.7;color:#1f2937;">{escaped_content}</div>
 </section>
 ```"""
     _, _, unclosed_fence = _scan_top_level_markdown_fences(content)

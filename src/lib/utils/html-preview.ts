@@ -4,6 +4,8 @@ export const HTML_PREVIEW_SANDBOX = 'allow-scripts';
 export const HTML_EXPORT_SANDBOX = 'allow-same-origin';
 export const HTML_PREVIEW_REFERRER_POLICY = 'no-referrer';
 export const HTML_ARTIFACT_EXPORT_MAX_SNAPSHOT_CHARS = 2_000_000;
+export const INLINE_HTML_PREVIEW_MIN_HEIGHT = 200;
+export const INLINE_HTML_PREVIEW_MAX_HEIGHT = 1200;
 
 export const isActiveHtmlArtifactSnapshotMessage = (
 	data: unknown,
@@ -18,6 +20,26 @@ export const isActiveHtmlArtifactSnapshotMessage = (
 	(data as { type?: unknown }).type === 'halo-html-preview-export-snapshot-result' &&
 	typeof (data as { requestId?: unknown }).requestId === 'string' &&
 	(data as { requestId: string }).requestId === requestId;
+
+export const isInlineHtmlPreviewResizeMessage = (
+	data: unknown
+): data is { type: 'halo-html-preview-resize'; height: number } =>
+	typeof data === 'object' &&
+	data !== null &&
+	(data as { type?: unknown }).type === 'halo-html-preview-resize' &&
+	typeof (data as { height?: unknown }).height === 'number' &&
+	Number.isFinite((data as { height: number }).height) &&
+	(data as { height: number }).height > 0;
+
+export const getInlineHtmlPreviewHeight = (data: unknown): number | null => {
+	if (!isInlineHtmlPreviewResizeMessage(data)) {
+		return null;
+	}
+
+	return Math.round(
+		Math.max(INLINE_HTML_PREVIEW_MIN_HEIGHT, Math.min(INLINE_HTML_PREVIEW_MAX_HEIGHT, data.height))
+	);
+};
 
 export const HTML_PREVIEW_CSP = [
 	"default-src 'none'",
@@ -58,6 +80,35 @@ const PREVIEW_NAVIGATION_GUARD = `<script data-halo-html-preview-guard="true">((
 		if (target && href && !href.startsWith('#')) event.preventDefault();
 	}, true);
 	document.addEventListener('submit', (event) => event.preventDefault(), true);
+})();</script>`;
+const PREVIEW_RESIZE_BRIDGE = `<script data-halo-html-preview-resize="true">(() => {
+	let frame = 0;
+	const reportSize = () => {
+		frame = 0;
+		const root = document.documentElement;
+		const body = document.body || root;
+		const height = Math.ceil(Math.max(
+			root.scrollHeight,
+			body.scrollHeight,
+			1
+		));
+		parent.postMessage({ type: 'halo-html-preview-resize', height }, '*');
+	};
+	const scheduleSize = () => {
+		if (frame) cancelAnimationFrame(frame);
+		frame = requestAnimationFrame(reportSize);
+	};
+	const resizeObserver = new ResizeObserver(scheduleSize);
+	resizeObserver.observe(document.documentElement);
+	if (document.body) resizeObserver.observe(document.body);
+	new MutationObserver(scheduleSize).observe(document.documentElement, {
+		childList: true,
+		subtree: true,
+		attributes: true,
+		characterData: true
+	});
+	window.addEventListener('load', scheduleSize, { once: true });
+	scheduleSize();
 })();</script>`;
 const PREVIEW_SNAPSHOT_BRIDGE = `<script data-halo-html-preview-snapshot="true">(() => {
 	const getSize = () => {
@@ -106,6 +157,7 @@ const PREVIEW_POLICY_META = [
 	`<meta ${PREVIEW_POLICY_MARKER} http-equiv="Content-Security-Policy" content="${HTML_PREVIEW_CSP}">`,
 	...COMMON_POLICY_META,
 	PREVIEW_NAVIGATION_GUARD,
+	PREVIEW_RESIZE_BRIDGE,
 	PREVIEW_SNAPSHOT_BRIDGE
 ].join('');
 const EXPORT_POLICY_META = [
@@ -144,7 +196,7 @@ const stripInjectedPreviewPolicies = (html: unknown) =>
 			''
 		)
 		.replace(
-			/<script\b(?=[^>]*\bdata-halo-html-preview-(?:snapshot|export)=["']true["'])[^>]*>[\s\S]*?<\/script>/gi,
+			/<script\b(?=[^>]*\bdata-halo-html-preview-(?:snapshot|export|resize)=["']true["'])[^>]*>[\s\S]*?<\/script>/gi,
 			''
 		);
 
@@ -186,6 +238,26 @@ const normalizeCodeLanguage = (value: unknown) =>
 		.trim()
 		.toLowerCase()
 		.split(/\s+/, 1)[0];
+
+const HTML_ARTIFACT_CODE_LANGUAGES = new Set(['html', 'css', 'javascript', 'js']);
+
+export const isHtmlArtifactSourceToken = (token: unknown): boolean => {
+	if (!token || typeof token !== 'object') {
+		return false;
+	}
+
+	const candidate = token as { type?: unknown; lang?: unknown; raw?: unknown; text?: unknown };
+	if (candidate.type === 'code') {
+		return HTML_ARTIFACT_CODE_LANGUAGES.has(normalizeCodeLanguage(candidate.lang));
+	}
+
+	if (candidate.type !== 'html') {
+		return false;
+	}
+
+	const raw = String(candidate.raw ?? candidate.text ?? '').trim();
+	return /^(?:<!doctype\s+html\b|<html\b|<style\b|<script\b)/i.test(raw);
+};
 
 const stripThinkingBlocks = (value: string) =>
 	value.replace(/<(think|thinking|reasoning)\b[^>]*>[\s\S]*?<\/\1>/gi, '');
@@ -294,6 +366,17 @@ export const buildHtmlArtifactPreview = (content: unknown): string | null => {
 	return hardenHtmlPreviewDocument(
 		`<!DOCTYPE html><html lang="en"><head>${style}</head><body>${mergedHtml}${script}</body></html>`
 	);
+};
+
+export const buildInlineHtmlArtifactPreview = (
+	content: unknown,
+	options: { enabled: boolean; streaming: boolean }
+): string | null => {
+	if (!options.enabled || options.streaming) {
+		return null;
+	}
+
+	return buildHtmlArtifactPreview(content);
 };
 
 export const getCodePreviewEventKey = (

@@ -2269,8 +2269,8 @@
 												<span>{tr('隐藏 HTML Artifact 源码', 'Hide HTML Artifact Source')}</span>
 												<Tooltip
 													content={tr(
-														'开启后，聊天正文中的 html/css/js Artifact 代码块显示为紧凑预览卡，源码仍可复制并可在右侧预览打开。',
-														'When enabled, html/css/js Artifact code blocks become compact preview cards in chat while keeping source copy and side preview actions.'
+														'开启后，HTML Artifact 会直接在聊天消息卡片内渲染，并隐藏 html/css/js 源码；仍可打开完整预览并导出 PNG。',
+														'When enabled, HTML Artifacts render directly inside the chat message card while html/css/js source is hidden; the full preview and PNG export remain available.'
 													)}
 												>
 													<QuestionMarkCircle className="size-3.5 cursor-help text-gray-400 dark:text-gray-500" />

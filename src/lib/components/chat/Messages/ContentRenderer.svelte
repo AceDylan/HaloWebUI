@@ -22,6 +22,13 @@
 	} from '$lib/utils/lobehub-chat-appearance';
 	import { renderResponseHtmlFormat } from '$lib/utils/response-html-format';
 	import { mergeAdjacentReasoningDetails } from '$lib/utils/reasoning-merge';
+	import {
+		buildInlineHtmlArtifactPreview,
+		getInlineHtmlPreviewHeight,
+		HTML_PREVIEW_REFERRER_POLICY,
+		HTML_PREVIEW_SANDBOX,
+		INLINE_HTML_PREVIEW_MIN_HEIGHT
+	} from '$lib/utils/html-preview';
 	import ImagePreview from '$lib/components/common/ImagePreview.svelte';
 	import {
 		createEmptySelectionThreads,
@@ -109,6 +116,11 @@
 	let contentContainerElement: HTMLElement | null = null;
 	let currentTransitionMode: ChatTransitionMode = 'none';
 	let renderedMessageContent = '';
+	let inlineHtmlArtifactPreview: string | null = null;
+	let hideInlineHtmlArtifactSource = false;
+	let inlineHtmlPreviewFrame: HTMLIFrameElement | null = null;
+	let inlineHtmlPreviewHeight = INLINE_HTML_PREVIEW_MIN_HEIGHT;
+	let lastInlineHtmlPreviewDocument: string | null = null;
 	let pendingSelection: PendingSelection | null = null;
 	let pendingSelectionPosition: { top: number; left: number } | null = null;
 	let currentMessageThreads: SelectionThread[] = [];
@@ -411,10 +423,39 @@
 	// Collapse reasoning blocks fragmented by providers that echo thinking into
 	// the answer stream, so both the HTML and Markdown renderers see one block.
 	$: normalizedContent = mergeAdjacentReasoningDetails(content || '');
+	$: inlineHtmlArtifactPreview = buildInlineHtmlArtifactPreview(normalizedContent, {
+		enabled: $settings?.detectArtifacts ?? true,
+		streaming
+	});
+	$: hideInlineHtmlArtifactSource =
+		Boolean(inlineHtmlArtifactPreview) && ($settings?.hideHtmlArtifactCodeBlocks ?? true);
+	$: if (inlineHtmlArtifactPreview !== lastInlineHtmlPreviewDocument) {
+		lastInlineHtmlPreviewDocument = inlineHtmlArtifactPreview;
+		inlineHtmlPreviewHeight = INLINE_HTML_PREVIEW_MIN_HEIGHT;
+	}
 	$: renderedMessageContent =
-		!streaming && ($settings?.responseHtmlFormat ?? false)
+		!inlineHtmlArtifactPreview && !streaming && ($settings?.responseHtmlFormat ?? false)
 			? renderResponseHtmlFormat(normalizedContent) || normalizedContent
 			: normalizedContent;
+
+	const openInlineHtmlArtifactPreview = () => {
+		artifactAutoOpenDismissedMessageId.set(null);
+		artifactPreviewTarget.set({ messageId: id, type: 'iframe' });
+		showOverview.set(false);
+		showArtifacts.set(true);
+		showControls.set(true);
+	};
+
+	const handleInlineHtmlPreviewMessage = (event: MessageEvent) => {
+		if (!inlineHtmlPreviewFrame || event.source !== inlineHtmlPreviewFrame.contentWindow) {
+			return;
+		}
+
+		const nextHeight = getInlineHtmlPreviewHeight(event.data);
+		if (nextHeight !== null && nextHeight !== inlineHtmlPreviewHeight) {
+			inlineHtmlPreviewHeight = nextHeight;
+		}
+	};
 
 	const highlightHeading = (headingElement: HTMLElement) => {
 		headingElement.classList.remove('message-outline-anchor-target');
@@ -800,6 +841,7 @@
 
 	onMount(() => {
 		messagesContainerElement = document.getElementById('messages-container');
+		window.addEventListener('message', handleInlineHtmlPreviewMessage);
 
 		if (floatingButtons) {
 			document.addEventListener('mouseup', handleDocumentMouseUp);
@@ -822,6 +864,7 @@
 	});
 
 	onDestroy(() => {
+		window.removeEventListener('message', handleInlineHtmlPreviewMessage);
 		if (floatingButtons) {
 			document.removeEventListener('mouseup', handleDocumentMouseUp);
 			document.removeEventListener('keydown', keydownHandler);
@@ -857,6 +900,7 @@
 			{model}
 			{save}
 			{streaming}
+			hideHtmlArtifactSource={hideInlineHtmlArtifactSource}
 			{generatedFiles}
 			transitionMode={currentTransitionMode}
 			sourceIds={resolvedSourceIds}
@@ -885,7 +929,7 @@
 					$chatId &&
 					!autoOpenDismissed &&
 					autoOpenKey !== lastAutoOpenedArtifactKey &&
-					((($settings?.detectArtifacts ?? true) && isHtmlArtifact) ||
+					((($settings?.detectArtifacts ?? true) && isHtmlArtifact && !inlineHtmlArtifactPreview) ||
 						(shouldAutoOpenSvgPreview && isSvgCode))
 				) {
 					lastAutoOpenedArtifactKey = autoOpenKey;
@@ -900,6 +944,37 @@
 				}
 			}}
 		/>
+
+		{#if inlineHtmlArtifactPreview}
+			<div
+				class="mt-3 overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm dark:border-gray-700 dark:bg-gray-950"
+				data-halo-inline-html-preview="true"
+			>
+				<div
+					class="flex items-center justify-between gap-3 border-b border-gray-200 bg-gray-50 px-3 py-2 dark:border-gray-700 dark:bg-gray-900"
+				>
+					<div class="text-xs font-semibold text-gray-700 dark:text-gray-200">
+						{$i18n.t('HTML Preview')}
+					</div>
+					<button
+						type="button"
+						class="rounded-md border border-gray-200 bg-white px-2.5 py-1 text-xs font-medium text-gray-600 transition hover:bg-gray-100 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-300 dark:hover:bg-gray-800"
+						on:click={openInlineHtmlArtifactPreview}
+					>
+						{$i18n.t('Open preview')}
+					</button>
+				</div>
+				<iframe
+					bind:this={inlineHtmlPreviewFrame}
+					title={$i18n.t('HTML Preview')}
+					srcdoc={inlineHtmlArtifactPreview}
+					sandbox={HTML_PREVIEW_SANDBOX}
+					referrerpolicy={HTML_PREVIEW_REFERRER_POLICY}
+					class="block w-full border-0 bg-white"
+					style={`height: ${inlineHtmlPreviewHeight}px;`}
+				></iframe>
+			</div>
+		{/if}
 	</div>
 
 	{#if floatingButtons && model}

@@ -5,10 +5,14 @@ import {
 	HTML_EXPORT_SANDBOX,
 	HTML_PREVIEW_SANDBOX,
 	buildHtmlArtifactPreview,
+	buildInlineHtmlArtifactPreview,
 	getCodePreviewEventKey,
+	getInlineHtmlPreviewHeight,
 	hardenHtmlArtifactExportDocument,
 	hardenHtmlPreviewDocument,
-	isActiveHtmlArtifactSnapshotMessage
+	isActiveHtmlArtifactSnapshotMessage,
+	isHtmlArtifactSourceToken,
+	isInlineHtmlPreviewResizeMessage
 } from './html-preview';
 
 const countMatches = (value: string, pattern: RegExp) => value.match(pattern)?.length ?? 0;
@@ -58,7 +62,10 @@ describe('html-preview', () => {
 		expect(preview).toContain("form-action 'none'");
 		expect(preview).toContain('data-halo-html-preview-guard="true"');
 		expect(preview).toContain('data-halo-html-preview-snapshot="true"');
+		expect(preview).toContain('data-halo-html-preview-resize="true"');
 		expect(preview).toContain('halo-html-preview-export-snapshot');
+		expect(preview).toContain('halo-html-preview-resize');
+		expect(preview).toContain('ResizeObserver');
 		expect(preview).toContain('event.source !== parent');
 		expect(preview).toContain('event.stopImmediatePropagation()');
 		expect(preview).toContain('name="referrer" content="no-referrer"');
@@ -175,6 +182,59 @@ window.done = true;
 			'html\u0000<main>done</main>'
 		);
 		expect(getCodePreviewEventKey('', 'content', false)).toBeNull();
+	});
+
+	it('renders completed HTML artifacts inline only when artifact detection is enabled', () => {
+		const content = '```html\n<main>Inline preview</main>\n```';
+
+		expect(buildInlineHtmlArtifactPreview(content, { enabled: true, streaming: false })).toContain(
+			'<main>Inline preview</main>'
+		);
+		expect(
+			buildInlineHtmlArtifactPreview(content, { enabled: false, streaming: false })
+		).toBeNull();
+		expect(buildInlineHtmlArtifactPreview(content, { enabled: true, streaming: true })).toBeNull();
+		expect(
+			buildInlineHtmlArtifactPreview('plain text', { enabled: true, streaming: false })
+		).toBeNull();
+	});
+
+	it('accepts bounded resize messages for inline preview height', () => {
+		expect(
+			isInlineHtmlPreviewResizeMessage({ type: 'halo-html-preview-resize', height: 420 })
+		).toBe(true);
+		expect(getInlineHtmlPreviewHeight({ type: 'halo-html-preview-resize', height: 420 })).toBe(420);
+		expect(getInlineHtmlPreviewHeight({ type: 'halo-html-preview-resize', height: 40 })).toBe(200);
+		expect(getInlineHtmlPreviewHeight({ type: 'halo-html-preview-resize', height: 5000 })).toBe(
+			1200
+		);
+		expect(
+			getInlineHtmlPreviewHeight({ type: 'halo-html-preview-resize', height: Number.NaN })
+		).toBeNull();
+		expect(getInlineHtmlPreviewHeight({ type: 'other', height: 420 })).toBeNull();
+	});
+
+	it('identifies only preview-consumed HTML artifact source tokens', () => {
+		expect(isHtmlArtifactSourceToken({ type: 'code', lang: 'html', text: '<main />' })).toBe(true);
+		expect(isHtmlArtifactSourceToken({ type: 'code', lang: 'CSS', text: 'body {}' })).toBe(true);
+		expect(
+			isHtmlArtifactSourceToken({ type: 'code', lang: 'javascript title="demo"', text: '1' })
+		).toBe(true);
+		expect(
+			isHtmlArtifactSourceToken({
+				type: 'html',
+				raw: '<!doctype html><html><body>demo</body></html>'
+			})
+		).toBe(true);
+		expect(
+			isHtmlArtifactSourceToken({ type: 'html', raw: '<style>body { color: red; }</style>' })
+		).toBe(true);
+		expect(isHtmlArtifactSourceToken({ type: 'code', lang: 'python', text: 'print(1)' })).toBe(
+			false
+		);
+		expect(
+			isHtmlArtifactSourceToken({ type: 'html', raw: '<div>ordinary inline html</div>' })
+		).toBe(false);
 	});
 
 	it('never grants forms or same-origin access to untrusted preview documents', () => {

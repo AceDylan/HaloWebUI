@@ -9,6 +9,7 @@
 		type ChatTransitionMode
 	} from '$lib/utils/lobehub-chat-appearance';
 	import { getModelChatDisplayName } from '$lib/utils/model-display';
+	import { isHtmlArtifactSourceToken } from '$lib/utils/html-preview';
 
 	import markedExtension from '$lib/utils/marked/extension';
 	import markedKatexExtension from '$lib/utils/marked/katex-extension';
@@ -26,6 +27,7 @@
 	export let model = null;
 	export let save = false;
 	export let streaming = false;
+	export let hideHtmlArtifactSource = false;
 	export let transitionMode: ChatTransitionMode = DEFAULT_CHAT_TRANSITION_MODE;
 
 	export let sourceIds = [];
@@ -36,6 +38,7 @@
 	export let onTaskClick: Function = () => {};
 
 	let tokens: Token[] = [];
+	let visibleTokens: Token[] = [];
 	let processedContent = '';
 	let renderedContent = '';
 	let delayedAnimated = false;
@@ -171,7 +174,10 @@
 		}
 	}
 
-	$: headings = tokens.length > 0 ? extractHeadings(tokens, id) : [];
+	$: visibleTokens = hideHtmlArtifactSource
+		? tokens.filter((token) => !isHtmlArtifactSourceToken(token))
+		: tokens;
+	$: headings = visibleTokens.length > 0 ? extractHeadings(visibleTokens, id) : [];
 
 	onDestroy(() => {
 		if (delayedAnimatedTimer) {
@@ -182,7 +188,7 @@
 </script>
 
 <MarkdownTokens
-	{tokens}
+	tokens={visibleTokens}
 	{id}
 	messageId={id}
 	{save}

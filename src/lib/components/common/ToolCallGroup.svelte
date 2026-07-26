@@ -128,7 +128,8 @@
 </script>
 
 <div
-	class="-mx-0.5 rounded-xl border border-gray-200/70 bg-white/65 p-1.5 shadow-[0_1px_2px_rgba(15,23,42,0.04)] backdrop-blur-xl dark:border-gray-700/60 dark:bg-gray-850/45"
+	data-halo-tool-call-section="true"
+	class="rounded-xl bg-gray-50/70 p-1.5 dark:bg-gray-800/40"
 >
 	<!-- Group header keeps the existing multi-tool summary while matching activity cards. -->
 	<button

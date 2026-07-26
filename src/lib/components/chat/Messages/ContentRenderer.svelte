@@ -438,14 +438,6 @@
 			? renderResponseHtmlFormat(normalizedContent) || normalizedContent
 			: normalizedContent;
 
-	const openInlineHtmlArtifactPreview = () => {
-		artifactAutoOpenDismissedMessageId.set(null);
-		artifactPreviewTarget.set({ messageId: id, type: 'iframe' });
-		showOverview.set(false);
-		showArtifacts.set(true);
-		showControls.set(true);
-	};
-
 	const handleInlineHtmlPreviewMessage = (event: MessageEvent) => {
 		if (!inlineHtmlPreviewFrame || event.source !== inlineHtmlPreviewFrame.contentWindow) {
 			return;
@@ -946,21 +938,10 @@
 		/>
 
 		{#if inlineHtmlArtifactPreview}
-			<div class="mt-3" data-halo-inline-html-preview="true">
-				<div
-					class="flex items-center justify-between gap-3 border-t border-gray-100 px-1 py-2 dark:border-gray-800"
-				>
-					<div class="text-[11px] font-medium tracking-wide text-gray-400 dark:text-gray-500">
-						{$i18n.t('HTML Preview')}
-					</div>
-					<button
-						type="button"
-						class="inline-flex items-center rounded-md px-2 py-1 text-xs font-medium text-gray-500 transition hover:bg-gray-100 hover:text-gray-800 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-100"
-						on:click={openInlineHtmlArtifactPreview}
-					>
-						{$i18n.t('Open preview')}
-					</button>
-				</div>
+			<div
+				class="mt-4 border-t border-gray-100 pt-4 dark:border-gray-800"
+				data-halo-inline-html-preview="true"
+			>
 				<iframe
 					bind:this={inlineHtmlPreviewFrame}
 					title={$i18n.t('HTML Preview')}

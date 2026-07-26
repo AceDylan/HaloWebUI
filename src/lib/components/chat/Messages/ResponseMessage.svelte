@@ -1304,7 +1304,10 @@
 				</div>
 			{/if}
 
-			<div class="mt-1.5 -ml-4 w-[calc(100%+1rem)] sm:ml-0 sm:w-auto">
+			<div
+				data-halo-response-card="true"
+				class="mt-2 -ml-4 w-[calc(100%+1rem)] rounded-2xl border border-gray-200/80 bg-white px-3.5 py-3 shadow-sm dark:border-gray-800 dark:bg-gray-850 sm:ml-0 sm:w-auto sm:px-5 sm:py-4"
+			>
 				<div class="chat-{message.role} w-full min-w-full markdown-prose">
 					<div>
 						{#if message.content !== '' || renderableMessageError || hasVisibleMessageFiles || displayStatusHistory.length > 0}
@@ -1748,7 +1751,9 @@
 										{/if}
 									</div>
 
-									<div class="message-outline-toolbar-row flex items-end mt-2 gap-3 flex-wrap">
+									<div
+										class="message-outline-toolbar-row mt-3 flex flex-wrap items-end gap-3 border-t border-gray-100 pt-2.5 dark:border-gray-800"
+									>
 						{#if (message?.sources || message?.citations) && (model?.info?.meta?.capabilities?.citations ?? true)}
 							<div class="flex shrink-0 items-center gap-2">
 								<Tooltip
@@ -1762,7 +1767,7 @@
 										aria-label={($settings?.showInlineCitations ?? true)
 											? tr('隐藏正文引用标签', 'Hide inline citations')
 											: tr('显示正文引用标签', 'Show inline citations')}
-										class="text-gray-600 dark:text-gray-300 rounded-xl bg-white/60 dark:bg-gray-800/60 backdrop-blur-xl hover:bg-white/80 dark:hover:bg-gray-700/60 transition-all duration-200 flex items-center justify-center border border-gray-200/50 dark:border-gray-700/50 h-[36px] w-[36px] shrink-0"
+										class="flex h-[36px] w-[36px] shrink-0 items-center justify-center rounded-lg text-gray-600 transition-all duration-200 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800"
 										on:click={toggleInlineCitations}
 									>
 										{#if $settings?.showInlineCitations ?? true}
@@ -1782,9 +1787,9 @@
 						{#if message.done || siblings.length > 1}
 							<div
 								bind:this={buttonsContainerElement}
-								class="flex items-center gap-0.5 overflow-x-auto buttons text-gray-600 dark:text-gray-300 px-1.5 h-[37px] rounded-xl {isLastMessage
+								class="flex items-center gap-0.5 overflow-x-auto buttons text-gray-600 dark:text-gray-300 px-0.5 h-[37px] {isLastMessage
 									? 'visible opacity-100'
-									: 'invisible group-hover/message:visible opacity-0 group-hover/message:opacity-100'} transition-all duration-300 bg-white/60 dark:bg-gray-800/60 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 w-fit min-w-0 max-w-full toolbar-appear"
+									: 'invisible group-hover/message:visible opacity-0 group-hover/message:opacity-100'} transition-all duration-300 w-fit min-w-0 max-w-full toolbar-appear"
 							>
 								{#if siblings.length > 1}
 									<div class="flex self-center min-w-fit" dir="ltr">

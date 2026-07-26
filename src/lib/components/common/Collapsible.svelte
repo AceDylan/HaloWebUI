@@ -67,6 +67,22 @@
 	export let disabled = false;
 	export let hide = false;
 
+	// Auto-close activity blocks (reasoning / tool_calls) once they finish.
+	// We track the previous done state so we only react to the false→true transition,
+	// never re-collapsing on subsequent prop updates or reactivity runs.
+	let prevActivityDone: boolean | undefined = undefined;
+	let hasAutoCollapsed = false;
+	$: if (typeof attributes?.type === 'string' &&
+		(attributes?.type === 'reasoning' || attributes?.type === 'tool_calls' ||
+		 attributes?.type === 'code_interpreter')) {
+		const done = attributes?.done === 'true';
+		if (done && prevActivityDone !== true && !hasAutoCollapsed) {
+			hasAutoCollapsed = true;
+			open = false;
+		}
+		prevActivityDone = done;
+	}
+
 	const collapsibleId = uuidv4();
 
 	function parseJSONString(str: string): any {

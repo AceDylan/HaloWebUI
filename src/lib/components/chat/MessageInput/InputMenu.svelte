@@ -485,56 +485,6 @@
 				<hr class="border-black/5 dark:border-white/5 my-1" />
 			{/if}
 
-			<div
-				class="flex w-full justify-between gap-2 items-center px-3 py-2 text-sm font-medium rounded-xl border transition {responseHtmlFormat
-					? 'border-blue-500/20 bg-blue-50/80 text-blue-700 shadow-sm shadow-blue-500/5 dark:border-blue-400/20 dark:bg-blue-950/30 dark:text-blue-200'
-					: 'border-transparent hover:bg-gray-50 dark:hover:bg-gray-800'}"
-			>
-				<button
-					type="button"
-					class="flex min-w-0 flex-1 gap-2 items-center text-left"
-					on:click={() => {
-						updateResponseHtmlFormat(!responseHtmlFormat);
-					}}
-				>
-					<span
-						class="flex h-6 w-6 shrink-0 items-center justify-center rounded-md {responseHtmlFormat
-							? 'bg-blue-500 text-white dark:bg-blue-400 dark:text-gray-950'
-							: 'bg-blue-50 text-blue-600 dark:bg-blue-950/40 dark:text-blue-300'}"
-					>
-						<Sparkles class="size-4" strokeWidth={2} />
-					</span>
-					<span class="min-w-0 truncate">{tr('HTML 渲染', 'HTML Rendering')}</span>
-				</button>
-
-				<Tooltip
-					content={tr(
-						'开启后，模型回复会以 HTML 格式展示；关闭后使用 Markdown。',
-						'Render model replies as HTML when enabled; use Markdown when disabled.'
-					)}
-					placement="top"
-				>
-					<button
-						type="button"
-						class="shrink-0 rounded-full p-0.5 text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300"
-						aria-label={tr('HTML 渲染说明', 'HTML rendering help')}
-					>
-						<CircleHelp class={helpIconClass} strokeWidth={1.9} />
-					</button>
-				</Tooltip>
-
-				<div class="shrink-0">
-					<Switch
-						state={responseHtmlFormat}
-						on:change={(e) => {
-							updateResponseHtmlFormat(Boolean(e.detail));
-						}}
-					/>
-				</div>
-			</div>
-
-			<hr class="border-black/5 dark:border-white/5 my-1" />
-
 			<Tooltip
 				content={!fileUploadEnabled ? $i18n.t('You do not have permission to upload files') : ''}
 				className="w-full"

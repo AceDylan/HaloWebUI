@@ -52,11 +52,9 @@
 	import { WEBUI_BASE_URL, WEBUI_API_BASE_URL, PASTED_TEXT_CHARACTER_LIMIT } from '$lib/constants';
 
 	import InputMenu from './MessageInput/InputMenu.svelte';
-	import VoiceRecording from './MessageInput/VoiceRecording.svelte';
 	import FilesOverlay from './MessageInput/FilesOverlay.svelte';
 	import Commands from './MessageInput/Commands.svelte';
 	import InputVariablesModal from './MessageInput/InputVariablesModal.svelte';
-	import ThinkingControl from './MessageInput/ThinkingControl.svelte';
 	import SendMenu from './MessageInput/SendMenu.svelte';
 	import CommandSuggestionList from './MessageInput/CommandSuggestionList.svelte';
 	import ImageGenerationPanel from './MessageInput/ImageGenerationPanel.svelte';
@@ -522,7 +520,6 @@
 	let imageGenerationPanelOpen = false;
 
 	let loaded = false;
-	let recording = false;
 
 	let isComposing = false;
 
@@ -1168,31 +1165,7 @@
 						}}
 					/>
 
-					{#if recording}
-						<VoiceRecording
-							bind:recording
-							on:cancel={async () => {
-								recording = false;
-
-								await tick();
-								document.getElementById('chat-input')?.focus();
-							}}
-							on:confirm={async (e) => {
-								const { text, filename } = e.detail;
-								prompt = `${prompt}${text} `;
-
-								recording = false;
-
-								await tick();
-								document.getElementById('chat-input')?.focus();
-
-								if ($settings?.speechAutoSend ?? false) {
-									dispatch('submit', prompt);
-								}
-							}}
-						/>
-					{:else}
-						<form
+					<form
 							class="w-full flex gap-1.5"
 							on:submit|preventDefault={() => {
 								// check if selectedModels support image input
@@ -1946,68 +1919,10 @@
 												{/if}
 											{/if}
 
-											<ThinkingControl
-												bind:reasoningEffort
-												bind:maxThinkingTokens
-												model={primarySelectedModel}
-											/>
-										</div>
-									</div>
+											</div>
+											</div>
 
 									<div class="self-end flex space-x-1 mr-1 shrink-0">
-										{#if (!history?.currentId || history.messages[history.currentId]?.done == true) && ($_user?.role === 'admin' || ($_user?.permissions?.chat?.stt ?? true))}
-											<Tooltip content={$i18n.t('Record voice')}>
-												<button
-													id="voice-input-button"
-													class=" text-gray-600 dark:text-gray-300 hover:text-gray-700 dark:hover:text-gray-200 transition rounded-full p-[7px] mr-0.5 self-center"
-													type="button"
-													on:click={async () => {
-														try {
-															let stream = await navigator.mediaDevices
-																.getUserMedia({ audio: true })
-																.catch(function (err) {
-																	toast.error(
-																		$i18n.t(
-																			`Permission denied when accessing microphone: {{error}}`,
-																			{
-																				error: err
-																			}
-																		)
-																	);
-																	return null;
-																});
-
-															if (stream) {
-																recording = true;
-																const tracks = stream.getTracks();
-																tracks.forEach((track) => track.stop());
-															}
-															stream = null;
-														} catch {
-															toast.error($i18n.t('Permission denied when accessing microphone'));
-														}
-													}}
-													aria-label="Voice Input"
-												>
-													<svg
-														xmlns="http://www.w3.org/2000/svg"
-														viewBox="0 0 24 24"
-														fill="none"
-														stroke="currentColor"
-														stroke-width="2"
-														stroke-linecap="round"
-														stroke-linejoin="round"
-														class="w-5 h-5"
-													>
-														<path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
-														<path d="M19 10v2a7 7 0 0 1-14 0v-2" />
-														<line x1="12" x2="12" y1="19" y2="22" />
-														<line x1="8" x2="16" y1="22" y2="22" />
-													</svg>
-												</button>
-											</Tooltip>
-										{/if}
-
 										{#if (taskIds && taskIds.length > 0) || (history.currentId && history.messages[history.currentId]?.done != true)}
 											<div class=" flex items-center">
 												<Tooltip content={$i18n.t('Stop')}>
@@ -2029,83 +1944,6 @@
 																d="M2.25 12c0-5.385 4.365-9.75 9.75-9.75s9.75 4.365 9.75 9.75-4.365 9.75-9.75 9.75S2.25 17.385 2.25 12zm6-2.438c0-.724.588-1.312 1.313-1.312h4.874c.725 0 1.313.588 1.313 1.313v4.874c0 .725-.588 1.313-1.313 1.313H9.564a1.312 1.312 0 01-1.313-1.313V9.564z"
 																clip-rule="evenodd"
 															/>
-														</svg>
-													</button>
-												</Tooltip>
-											</div>
-										{:else if !hasSubmittableContent && ($_user?.role === 'admin' || ($_user?.permissions?.chat?.call ?? true))}
-											<div class=" flex items-center">
-												<Tooltip content={$i18n.t('Call')}>
-													<button
-														class=" bg-black text-white hover:bg-gray-900 dark:bg-white dark:text-black dark:hover:bg-gray-100 transition rounded-full p-[7px] self-center"
-														type="button"
-														on:click={async () => {
-															if (selectedModels.length > 1) {
-																toast.error($i18n.t('Select only one model to call'));
-
-																return;
-															}
-
-															if ($config.audio.stt.engine === 'web') {
-																toast.error(
-																	$i18n.t('Call feature is not supported when using Web STT engine')
-																);
-
-																return;
-															}
-															// check if user has access to getUserMedia
-															try {
-																let stream = await navigator.mediaDevices.getUserMedia({
-																	audio: true
-																});
-																// If the user grants the permission, proceed to show the call overlay
-
-																if (stream) {
-																	const tracks = stream.getTracks();
-																	tracks.forEach((track) => track.stop());
-																}
-
-																stream = null;
-
-																if ($settings.audio?.tts?.engine === 'browser-kokoro') {
-																	// If the user has not initialized the TTS worker, initialize it
-																	if (!$TTSWorker) {
-																		await TTSWorker.set(
-																			new KokoroWorker({
-																				dtype: $settings.audio?.tts?.engineConfig?.dtype ?? 'fp32'
-																			})
-																		);
-
-																		await $TTSWorker.init();
-																	}
-																}
-
-																showCallOverlay.set(true);
-																showControls.set(true);
-															} catch (err) {
-																// If the user denies the permission or an error occurs, show an error message
-																toast.error(
-																	$i18n.t('Permission denied when accessing media devices')
-																);
-															}
-														}}
-														aria-label="Call"
-													>
-														<!-- 波形图标 - 灵动非对称版 -->
-														<svg
-															xmlns="http://www.w3.org/2000/svg"
-															viewBox="0 0 24 24"
-															fill="none"
-															stroke="currentColor"
-															stroke-width="2.6"
-															stroke-linecap="round"
-															stroke-linejoin="round"
-															class="size-5"
-														>
-															<path d="M5 8.5v7" />
-															<path d="M10 5v14" />
-															<path d="M15 7.5v9" />
-															<path d="M20 10v4" />
 														</svg>
 													</button>
 												</Tooltip>
@@ -2158,7 +1996,6 @@
 								</div>
 							</div>
 						</form>
-					{/if}
 				</div>
 			</div>
 		</div>

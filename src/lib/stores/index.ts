@@ -3,6 +3,7 @@ import { type Writable, writable } from 'svelte/store';
 import type { ModelConfig } from '$lib/apis';
 import type { Banner } from '$lib/types';
 import type { Socket } from 'socket.io-client';
+import type { HtmlVisualMode } from '$lib/utils/html-visual-mode';
 
 import emojiShortCodes from '$lib/emoji-shortcodes.json';
 
@@ -252,7 +253,7 @@ type Settings = {
 	autoFollowUps?: boolean;
 	detectArtifacts?: boolean;
 	svgPreviewAutoOpen?: boolean;
-	htmlVisualArtifacts?: boolean;
+	htmlVisualArtifacts?: HtmlVisualMode;
 	hideHtmlArtifactCodeBlocks?: boolean;
 	splitLargeChunks?: boolean;
 	splitLargeDeltas?: boolean;

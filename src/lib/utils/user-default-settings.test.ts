@@ -23,7 +23,7 @@ describe('user default settings helpers', () => {
 			scrollOnBranchChange: true,
 			enableMessageQueue: true,
 			svgPreviewAutoOpen: false,
-			htmlVisualArtifacts: true,
+			htmlVisualArtifacts: 'auto',
 			hideHtmlArtifactCodeBlocks: true,
 			responseAutoCopy: true,
 			showFormulaQuickCopyButton: true,
@@ -51,7 +51,7 @@ describe('user default settings helpers', () => {
 			temporaryChatByDefault: true,
 			showInlineCitations: false,
 			svgPreviewAutoOpen: false,
-			htmlVisualArtifacts: true,
+			htmlVisualArtifacts: 'auto',
 			hideHtmlArtifactCodeBlocks: true,
 			responseAutoCopy: true,
 			system: 'You are helpful.',
@@ -145,5 +145,44 @@ describe('user default settings helpers', () => {
 			copyFormatted: false,
 			copyFormattedUserSet: true
 		});
+	});
+
+	it.each([
+		[true, 'force'],
+		[false, 'off'],
+		['auto', 'auto'],
+		['force', 'force'],
+		['off', 'off'],
+		['unexpected', 'off']
+	] as const)('migrates and preserves HTML-Visual user defaults from %s', (value, expected) => {
+		const draft = normalizeNewUserDefaultSettings({
+			enabled: true,
+			roles: ['user'],
+			ui: { htmlVisualArtifacts: value },
+			tools: { native_tools: {} }
+		});
+
+		expect(draft.ui.htmlVisualArtifacts).toBe(expected);
+	});
+
+	it('uses force as the default without serializing a redundant override', () => {
+		const defaultDraft = normalizeNewUserDefaultSettings({
+			enabled: true,
+			roles: ['user'],
+			ui: {},
+			tools: { native_tools: {} }
+		});
+		const autoDraft = normalizeNewUserDefaultSettings({
+			enabled: true,
+			roles: ['user'],
+			ui: { htmlVisualArtifacts: 'auto' },
+			tools: { native_tools: {} }
+		});
+
+		expect(defaultDraft.ui.htmlVisualArtifacts).toBe('force');
+		expect(buildNewUserDefaultSettingsPayload(defaultDraft).ui).not.toHaveProperty(
+			'htmlVisualArtifacts'
+		);
+		expect(buildNewUserDefaultSettingsPayload(autoDraft).ui.htmlVisualArtifacts).toBe('auto');
 	});
 });

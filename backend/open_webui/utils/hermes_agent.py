@@ -38,6 +38,7 @@ from open_webui.models.chats import Chats
 from open_webui.socket.main import get_event_call, get_event_emitter
 from open_webui.tasks import create_task
 from open_webui.utils.chat_image_refs import materialize_openai_image_message_refs
+from open_webui.utils.html_visual_prompt import append_html_visual_fallback
 
 log = logging.getLogger(__name__)
 log.setLevel(SRC_LOG_LEVELS.get("MAIN", logging.INFO))
@@ -549,12 +550,14 @@ async def run_hermes_agent(request, form_data, user, metadata, model, events, ta
                     return
             blocks.append({"type": "text", "content": output})
 
-        async def _finalize(error=None, usage=None):
+        async def _finalize(error=None, usage=None, successful=False):
             nonlocal finalized
             if finalized:
                 return
             finalized = True
             content = _serialize_blocks(blocks)
+            if successful and not error:
+                content = append_html_visual_fallback(content, metadata)
             completed_at = int(time.time())
             data = {
                 "done": True,
@@ -711,7 +714,9 @@ async def run_hermes_agent(request, form_data, user, metadata, model, events, ta
                             pass
                         elif event_type == "run.completed":
                             _apply_final_output(event.get("output") or "")
-                            await _finalize(usage=event.get("usage"))
+                            await _finalize(
+                                usage=event.get("usage"), successful=True
+                            )
                         elif event_type == "run.failed":
                             await _finalize(
                                 error=event.get("error") or "Hermes run failed"
@@ -723,6 +728,7 @@ async def run_hermes_agent(request, form_data, user, metadata, model, events, ta
                 # Stream closed without a terminal event; poll final status.
                 error = None
                 usage = None
+                successful = False
                 try:
                     timeout = aiohttp.ClientTimeout(total=15)
                     async with aiohttp.ClientSession(
@@ -736,12 +742,14 @@ async def run_hermes_agent(request, form_data, user, metadata, model, events, ta
                             if resp.status < 400:
                                 status_data = await resp.json()
                                 usage = status_data.get("usage")
-                                if status_data.get("status") == "failed":
+                                status = status_data.get("status")
+                                successful = status == "completed"
+                                if status == "failed":
                                     error = status_data.get("error") or "run failed"
                                 _apply_final_output(status_data.get("output") or "")
                 except Exception:
                     pass
-                await _finalize(error=error, usage=usage)
+                await _finalize(error=error, usage=usage, successful=successful)
         except asyncio.CancelledError:
             if run_id:
                 try:

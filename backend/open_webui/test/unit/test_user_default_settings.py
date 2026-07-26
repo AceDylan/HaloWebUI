@@ -120,7 +120,9 @@ def test_new_user_default_settings_disables_when_template_is_empty():
             "enabled": True,
             "roles": ["user"],
             "ui": {"connections": {"openai": {"OPENAI_API_KEYS": ["secret"]}}},
-            "tools": {"native_tools": {"mcp_server_connections": [{"url": "https://secret"}]}},
+            "tools": {
+                "native_tools": {"mcp_server_connections": [{"url": "https://secret"}]}
+            },
         }
     )
 
@@ -208,3 +210,35 @@ def test_new_user_default_settings_preserves_explicit_formatted_copy_preference(
         },
         "revision": 0,
     }
+
+
+def test_new_user_default_settings_preserves_html_visual_mode():
+    template = sanitize_new_user_default_settings(
+        {
+            "enabled": True,
+            "roles": ["user"],
+            "ui": {"htmlVisualArtifacts": "auto"},
+            "tools": {"native_tools": {}},
+        }
+    )
+
+    assert template["ui"]["htmlVisualArtifacts"] == "auto"
+    assert build_new_user_settings_from_template(template, "user") == {
+        "ui": {"htmlVisualArtifacts": "auto"},
+        "revision": 0,
+    }
+
+
+def test_new_user_default_settings_migrates_legacy_html_visual_booleans():
+    assert (
+        sanitize_new_user_default_settings({"ui": {"htmlVisualArtifacts": True}})["ui"][
+            "htmlVisualArtifacts"
+        ]
+        == "force"
+    )
+    assert (
+        sanitize_new_user_default_settings({"ui": {"htmlVisualArtifacts": False}})[
+            "ui"
+        ]["htmlVisualArtifacts"]
+        == "off"
+    )

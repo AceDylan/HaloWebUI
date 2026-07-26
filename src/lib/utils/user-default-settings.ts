@@ -1,4 +1,5 @@
 import type { NewUserDefaultSettingsPayload } from '$lib/apis/users';
+import { normalizeHtmlVisualMode, type HtmlVisualMode } from '$lib/utils/html-visual-mode';
 
 type UserDefaultUiTemplate = {
 	models: string[];
@@ -23,7 +24,7 @@ type UserDefaultUiTemplate = {
 	autoFollowUps: boolean;
 	detectArtifacts: boolean;
 	svgPreviewAutoOpen: boolean;
-	htmlVisualArtifacts: boolean;
+	htmlVisualArtifacts: HtmlVisualMode;
 	hideHtmlArtifactCodeBlocks: boolean;
 	responseAutoCopy: boolean;
 	temporaryChatByDefault: boolean;
@@ -75,7 +76,7 @@ export const DEFAULT_USER_DEFAULT_UI_TEMPLATE: UserDefaultUiTemplate = {
 	autoFollowUps: true,
 	detectArtifacts: true,
 	svgPreviewAutoOpen: true,
-	htmlVisualArtifacts: true,
+	htmlVisualArtifacts: 'force',
 	hideHtmlArtifactCodeBlocks: true,
 	responseAutoCopy: false,
 	temporaryChatByDefault: false,
@@ -113,7 +114,6 @@ const UI_BOOL_KEYS: UserDefaultUiBoolKey[] = [
 	'autoFollowUps',
 	'detectArtifacts',
 	'svgPreviewAutoOpen',
-	'htmlVisualArtifacts',
 	'hideHtmlArtifactCodeBlocks',
 	'responseAutoCopy',
 	'temporaryChatByDefault',
@@ -164,6 +164,7 @@ export const normalizeNewUserDefaultSettings = (
 		ui: {
 			...defaults,
 			...rawUi,
+			htmlVisualArtifacts: normalizeHtmlVisualMode(rawUi.htmlVisualArtifacts),
 			models: Array.isArray(rawUi.models) ? rawUi.models : [],
 			title: {
 				...defaults.title,
@@ -184,6 +185,10 @@ export const pickUserDefaultUiFields = (ui: Record<string, any>) => {
 
 	for (const key of UI_STRING_KEYS) {
 		if (typeof source[key] === 'string') picked[key] = source[key];
+	}
+
+	if ('htmlVisualArtifacts' in source) {
+		picked.htmlVisualArtifacts = normalizeHtmlVisualMode(source.htmlVisualArtifacts);
 	}
 
 	for (const key of UI_ARRAY_KEYS) {

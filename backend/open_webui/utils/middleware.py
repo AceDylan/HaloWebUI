@@ -85,6 +85,7 @@ from open_webui.utils.image_generation_options import (
     CHAT_IMAGE_GENERATION_OPTION_KEYS,
     sanitize_chat_image_generation_options,
 )
+from open_webui.utils.html_visual_prompt import append_html_visual_fallback
 from open_webui.utils.error_handling import build_error_detail
 
 
@@ -6020,6 +6021,8 @@ async def process_chat_response(
                     message_payload,
                     allow_base64_image_url_conversion=allow_base64_image_url_conversion,
                 )
+                if "error" not in response:
+                    content = append_html_visual_fallback(content, metadata)
                 response_message = response["choices"][0].setdefault("message", {})
 
                 if message_files:
@@ -9982,10 +9985,14 @@ async def process_chat_response(
                             "suggestion": "retry_or_switch",
                         }
 
+                final_content = serialize_content_blocks(content_blocks)
+                if not finalize_error_payload:
+                    final_content = append_html_visual_fallback(final_content, metadata)
+
                 completed_at = int(time.time())
                 data = {
                     "done": True,
-                    "content": serialize_content_blocks(content_blocks),
+                    "content": final_content,
                     "title": title,
                     "completedAt": completed_at,
                     **({"files": message_files} if message_files else {}),
@@ -10003,6 +10010,7 @@ async def process_chat_response(
                                 {
                                     "done": True,
                                     "completedAt": completed_at,
+                                    "content": final_content,
                                     "usage": accumulated_usage,
                                 },
                             )
@@ -10014,6 +10022,7 @@ async def process_chat_response(
                             {
                                 "done": True,
                                 "completedAt": completed_at,
+                                "content": final_content,
                             },
                         )
                     except Exception as e:
@@ -10037,7 +10046,7 @@ async def process_chat_response(
                 if not ENABLE_REALTIME_CHAT_SAVE:
                     # Save message in the database
                     _save_payload = {
-                        "content": serialize_content_blocks(content_blocks),
+                        "content": final_content,
                         "done": True,
                         "completedAt": completed_at,
                         **({"files": message_files} if message_files else {}),

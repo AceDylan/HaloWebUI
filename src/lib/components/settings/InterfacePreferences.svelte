@@ -32,6 +32,10 @@
 		TEXT_SCALE_MIN
 	} from '$lib/utils/text-scale';
 	import { revealExpandedSection } from '$lib/utils/expanded-section-scroll';
+	import {
+		normalizeHtmlVisualMode,
+		type HtmlVisualMode
+	} from '$lib/utils/html-visual-mode';
 
 	import Switch from '$lib/components/common/Switch.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
@@ -144,7 +148,7 @@
 	let autoFollowUps = true;
 	let detectArtifacts = true;
 	let svgPreviewAutoOpen = true;
-	let htmlVisualArtifacts = true;
+	let htmlVisualArtifacts: HtmlVisualMode = 'force';
 	let hideHtmlArtifactCodeBlocks = true;
 	let responseAutoCopy = false;
 	let responseHtmlFormat = false;
@@ -276,7 +280,7 @@
 			autoFollowUps: boolean;
 			detectArtifacts: boolean;
 			svgPreviewAutoOpen: boolean;
-			htmlVisualArtifacts: boolean;
+			htmlVisualArtifacts: HtmlVisualMode;
 			hideHtmlArtifactCodeBlocks: boolean;
 			responseAutoCopy: boolean;
 			scrollOnBranchChange: boolean;
@@ -1227,7 +1231,7 @@
 
 		detectArtifacts = $settings?.detectArtifacts ?? true;
 		svgPreviewAutoOpen = $settings?.svgPreviewAutoOpen ?? ($settings?.detectArtifacts ?? true);
-		htmlVisualArtifacts = $settings?.htmlVisualArtifacts ?? true;
+		htmlVisualArtifacts = normalizeHtmlVisualMode($settings?.htmlVisualArtifacts);
 		hideHtmlArtifactCodeBlocks = $settings?.hideHtmlArtifactCodeBlocks ?? true;
 		responseAutoCopy = $settings?.responseAutoCopy ?? false;
 		showChatTitleInTab = $settings?.showChatTitleInTab ?? true;
@@ -2232,19 +2236,33 @@
 												bind:state={svgPreviewAutoOpen}
 											/>
 										</div>
-										<div class="flex items-center justify-between glass-item px-4 py-3">
-											<div class="flex min-w-0 items-center gap-1.5 pr-4 text-sm font-medium">
-												<span>{tr('HTML-Visual Artifact 模式', 'HTML-Visual Artifact Mode')}</span>
+										<div class="flex items-center justify-between gap-4 glass-item px-4 py-3">
+											<div class="flex min-w-0 items-center gap-1.5 text-sm font-medium">
+												<label for="html-visual-artifact-mode">
+													{tr('HTML-Visual Artifact 模式', 'HTML-Visual Artifact Mode')}
+												</label>
 												<Tooltip
 													content={tr(
-														'开启后，HaloWebUI 网页对话会向直连模型和 Hermes Agent 临时注入 HTML 可视化提示词；Telegram 等纯文本入口不受影响。',
-														'When enabled, HaloWebUI web chats temporarily inject an HTML visual prompt for direct models and Hermes Agent; Telegram/plain-text surfaces are not affected.'
+														'关闭不注入；自动仅建议模型按需生成；强制会确保成功回复包含可预览的 HTML Artifact。Telegram 等纯文本入口始终禁用。',
+														'Off disables injection; Auto advises the model when useful; Force ensures successful replies contain a previewable HTML Artifact. Plain-text surfaces always stay disabled.'
 													)}
 												>
 													<QuestionMarkCircle className="size-3.5 cursor-help text-gray-400 dark:text-gray-500" />
 												</Tooltip>
 											</div>
-											<Switch bind:state={htmlVisualArtifacts} />
+											<HaloSelect
+												triggerId="html-visual-artifact-mode"
+												value={htmlVisualArtifacts}
+												className="w-32"
+												options={[
+													{ value: 'off', label: tr('关闭', 'Off') },
+													{ value: 'auto', label: tr('自动', 'Auto') },
+													{ value: 'force', label: tr('强制', 'Force') }
+												]}
+												on:change={(event) => {
+													htmlVisualArtifacts = normalizeHtmlVisualMode(event.detail.value);
+												}}
+											/>
 										</div>
 										<div class="flex items-center justify-between glass-item px-4 py-3">
 											<div class="flex min-w-0 items-center gap-1.5 pr-4 text-sm font-medium">

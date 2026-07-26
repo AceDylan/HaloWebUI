@@ -7,12 +7,16 @@ Telegram/default reply policy.
 
 from __future__ import annotations
 
+import html
 import re
 from typing import Any
 
 HTML_VISUAL_FEATURE_KEY = "html_visual_artifacts"
 HTML_VISUAL_SURFACE_KEY = "html_visual_surface"
 HTML_VISUAL_PROMPT_MARKER = "HALOWEBUI_HTML_VISUAL_ARTIFACT_MODE"
+HTML_VISUAL_FORCE_PROMPT_MARKER = "HALOWEBUI_HTML_VISUAL_FORCE_REQUIRED"
+HTML_VISUAL_FALLBACK_MARKER = "HALOWEBUI_HTML_VISUAL_SAFE_FALLBACK"
+HTML_VISUAL_WEB_SURFACE = "halowebui-web"
 
 HTML_VISUAL_PROMPT = f"""[{HTML_VISUAL_PROMPT_MARKER}]
 当前输出 surface 是 HaloWebUI Web Chat，支持右侧 Artifact iframe 预览；本规则只适用于当前 Web 会话，不代表 Telegram/纯文本平台也支持 HTML。
@@ -34,6 +38,12 @@ HTML_VISUAL_PROMPT = f"""[{HTML_VISUAL_PROMPT_MARKER}]
 - 如果用户明确要求 Telegram、短信、纯文本、Markdown-only 或不支持 Artifact 的输出，禁止输出 HTML Artifact，改用紧凑 Markdown。
 """.strip()
 
+HTML_VISUAL_FORCE_PROMPT = f"""{HTML_VISUAL_PROMPT}
+
+[{HTML_VISUAL_FORCE_PROMPT_MARKER}]
+当前模式是 force。最终回复必须包含一个非空的 fenced `html` Artifact；即使答案主要是纯文本，也要在保留原始结论后提供安全、自包含的 HTML 可视化。
+""".strip()
+
 _PLAIN_TEXT_SURFACES = {
     "telegram",
     "tg",
@@ -47,6 +57,25 @@ _PLAIN_TEXT_SURFACES = {
     "markdown-only",
 }
 
+_TOOL_CALL_DETAILS_RE = re.compile(
+    r"<details\b(?=[^>]*\btype\s*=\s*(?P<quote>[\"'])tool_calls(?P=quote))"
+    r"[^>]*>.*?</details\s*>",
+    re.IGNORECASE | re.DOTALL,
+)
+_NON_ARTIFACT_DETAILS_RE = re.compile(
+    r"<details\b(?=[^>]*\btype\s*=\s*(?P<quote>[\"'])(?:tool_calls|reasoning)(?P=quote))"
+    r"[^>]*>.*?</details\s*>",
+    re.IGNORECASE | re.DOTALL,
+)
+_THINKING_BLOCK_RE = re.compile(
+    r"<(think|thinking|reasoning)\b[^>]*>.*?</\1\s*>",
+    re.IGNORECASE | re.DOTALL,
+)
+_FULL_HTML_DOCUMENT_RE = re.compile(
+    r"^[\t ]*(?:<!doctype\s+html\b|<html\b)",
+    re.IGNORECASE | re.MULTILINE,
+)
+
 
 def _as_mapping(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
@@ -55,16 +84,22 @@ def _as_mapping(value: Any) -> dict[str, Any]:
 def normalize_html_visual_mode(value: Any) -> str:
     """Normalize client feature values to off/auto/force."""
     if isinstance(value, bool):
-        return "auto" if value else "off"
+        return "force" if value else "off"
     if value is None:
         return "off"
 
     normalized = str(value).strip().lower()
-    if normalized in {"1", "true", "yes", "on", "auto"}:
+    if normalized == "auto":
         return "auto"
-    if normalized in {"force", "always"}:
+    if normalized in {"1", "true", "yes", "on", "force", "always"}:
         return "force"
     return "off"
+
+
+def get_html_visual_mode(metadata: dict[str, Any] | None) -> str:
+    metadata = _as_mapping(metadata)
+    features = _as_mapping(metadata.get("features"))
+    return normalize_html_visual_mode(features.get(HTML_VISUAL_FEATURE_KEY))
 
 
 def get_html_visual_surface(metadata: dict[str, Any] | None) -> str:
@@ -75,7 +110,7 @@ def get_html_visual_surface(metadata: dict[str, Any] | None) -> str:
             metadata.get("surface")
             or metadata.get("source")
             or features.get(HTML_VISUAL_SURFACE_KEY)
-            or "halowebui-web"
+            or ""
         )
         .strip()
         .lower()
@@ -93,8 +128,12 @@ def _is_plain_text_surface(surface: str) -> bool:
 def should_apply_html_visual_prompt(metadata: dict[str, Any] | None) -> bool:
     metadata = _as_mapping(metadata)
     features = _as_mapping(metadata.get("features"))
-    mode = normalize_html_visual_mode(features.get(HTML_VISUAL_FEATURE_KEY))
+    mode = get_html_visual_mode(metadata)
     if mode == "off":
+        return False
+
+    client_surface = str(features.get(HTML_VISUAL_SURFACE_KEY) or "").strip().lower()
+    if client_surface != HTML_VISUAL_WEB_SURFACE:
         return False
 
     explicit_surfaces = (
@@ -162,7 +201,13 @@ def apply_html_visual_prompt_overlay(
             break
         insertion_index += 1
 
-    prompt_message = {"role": "system", "content": HTML_VISUAL_PROMPT}
+    mode = get_html_visual_mode(metadata)
+    prompt_message = {
+        "role": "system",
+        "content": (
+            HTML_VISUAL_FORCE_PROMPT if mode == "force" else HTML_VISUAL_PROMPT
+        ),
+    }
     form_data["messages"] = [
         *messages[:insertion_index],
         prompt_message,
@@ -173,8 +218,126 @@ def apply_html_visual_prompt_overlay(
         metadata["html_visual_artifacts"] = {
             "enabled": True,
             "surface": get_html_visual_surface(metadata),
-            "mode": normalize_html_visual_mode(
-                _as_mapping(metadata.get("features")).get(HTML_VISUAL_FEATURE_KEY)
-            ),
+            "mode": mode,
         }
     return form_data
+
+
+def _parse_markdown_fence_line(line: str) -> tuple[str, int, str] | None:
+    indent = len(line) - len(line.lstrip(" "))
+    if indent > 3:
+        return None
+    candidate = line[indent:]
+    if not candidate or candidate[0] not in {"`", "~"}:
+        return None
+    marker = candidate[0]
+    length = len(candidate) - len(candidate.lstrip(marker))
+    if length < 3:
+        return None
+    return marker, length, candidate[length:]
+
+
+def _scan_top_level_markdown_fences(
+    content: str,
+) -> tuple[list[tuple[str, str]], str, str | None]:
+    blocks: list[tuple[str, str]] = []
+    outside: list[str] = []
+    active: tuple[str, int, str, list[str]] | None = None
+
+    for line in content.splitlines():
+        fence = _parse_markdown_fence_line(line)
+        if active is None:
+            if fence is None:
+                outside.append(line)
+                continue
+            marker, length, info = fence
+            if marker == "`" and "`" in info:
+                outside.append(line)
+                continue
+            active = (marker, length, info.strip(), [])
+            continue
+
+        marker, length, info, body = active
+        if (
+            fence is not None
+            and fence[0] == marker
+            and fence[1] >= length
+            and not fence[2].strip()
+        ):
+            blocks.append((info, "\n".join(body)))
+            active = None
+        else:
+            body.append(line)
+
+    unclosed_fence = active[0] * active[1] if active is not None else None
+    return blocks, "\n".join(outside), unclosed_fence
+
+
+def has_fenced_html_artifact(content: Any) -> bool:
+    """Return whether content contains a top-level non-empty fenced HTML block."""
+    if not isinstance(content, str):
+        return False
+    blocks, _, _ = _scan_top_level_markdown_fences(content)
+    return any(
+        info.strip().lower().split(None, 1)[0] == "html" and body.strip()
+        for info, body in blocks
+        if info.strip()
+    )
+
+
+def has_html_visual_artifact(content: Any) -> bool:
+    """Mirror the frontend's previewable HTML shapes while ignoring hidden details."""
+    if not isinstance(content, str) or not content.strip():
+        return False
+    candidate = _THINKING_BLOCK_RE.sub("", content)
+    candidate = _NON_ARTIFACT_DETAILS_RE.sub("", candidate)
+    blocks, outside, _ = _scan_top_level_markdown_fences(candidate)
+    has_html_fence = any(
+        info.strip().lower().split(None, 1)[0] == "html" and body.strip()
+        for info, body in blocks
+        if info.strip()
+    )
+    return has_html_fence or bool(_FULL_HTML_DOCUMENT_RE.search(outside))
+
+
+def _escape_fallback_content(content: str) -> str:
+    # Escaping markup preserves the response as inert text. Encoding fence and
+    # URL punctuation also prevents copied Markdown from closing the generated
+    # fence or becoming a URL-like token in the Artifact source.
+    return html.escape(content, quote=True).replace("`", "&#96;").replace(":", "&#58;")
+
+
+def append_html_visual_fallback(content: Any, metadata: dict[str, Any] | None) -> Any:
+    """Append one safe local Artifact for a successful force-mode response.
+
+    Callers are responsible for invoking this only for successful terminal
+    responses. The helper additionally fails closed for disabled/advisory modes,
+    pure-text surfaces, empty content, and replies that already have an Artifact.
+    """
+    if (
+        not isinstance(content, str)
+        or not content.strip()
+        or get_html_visual_mode(metadata) != "force"
+        or not should_apply_html_visual_prompt(metadata)
+        or has_html_visual_artifact(content)
+    ):
+        return content
+
+    display_content = _TOOL_CALL_DETAILS_RE.sub("", content).strip()
+    if not display_content:
+        display_content = "任务已完成，详细过程请查看原回复中的工具调用记录。"
+    escaped_content = _escape_fallback_content(display_content)
+    artifact = f"""```html
+<!-- {HTML_VISUAL_FALLBACK_MARKER} -->
+<section style="max-width:980px;margin:0 auto;padding:28px;background:#ffffff;color:#111111;border:1px solid #e5e7eb;border-radius:16px;box-shadow:0 12px 32px rgba(0,0,0,0.08);font-family:Inter,Arial,'Noto Sans SC',sans-serif;">
+  <div style="margin:0 0 16px;font-size:12px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:#6b7280;">Response summary</div>
+  <div style="margin:0;white-space:pre-wrap;overflow-wrap:anywhere;font-size:15px;line-height:1.7;color:#1f2937;">{escaped_content}</div>
+</section>
+```"""
+    _, _, unclosed_fence = _scan_top_level_markdown_fences(content)
+    if unclosed_fence:
+        leading_newline = "" if content.endswith("\n") else "\n"
+        separator = f"{leading_newline}{unclosed_fence}\n\n"
+    else:
+        separator = "\n\n" if not content.endswith("\n") else "\n"
+    return f"{content}{separator}{artifact}"

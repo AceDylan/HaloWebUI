@@ -10,6 +10,9 @@ if str(_BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(_BACKEND_DIR))
 
 from open_webui.utils import middleware  # noqa: E402
+from open_webui.utils.html_visual_prompt import (  # noqa: E402
+    HTML_VISUAL_FALLBACK_MARKER,
+)
 from open_webui.utils.middleware import _build_api_error_payload  # noqa: E402
 
 
@@ -82,12 +85,16 @@ def test_stream_background_task_exception_finalizes_message(monkeypatch):
         created["blocks_completion"] = blocks_completion
         return "task-1", SimpleNamespace()
 
-    monkeypatch.setattr(middleware, "get_event_emitter", lambda _metadata: fake_event_emitter)
+    monkeypatch.setattr(
+        middleware, "get_event_emitter", lambda _metadata: fake_event_emitter
+    )
     monkeypatch.setattr(middleware, "get_event_call", lambda _metadata: object())
     monkeypatch.setattr(middleware, "get_sorted_filters", lambda _model: [])
     monkeypatch.setattr(middleware, "process_filter_functions", lambda **kwargs: None)
     monkeypatch.setattr(middleware, "create_task", fake_create_task)
-    monkeypatch.setattr(middleware, "set_current_task_blocks_completion", lambda _value: True)
+    monkeypatch.setattr(
+        middleware, "set_current_task_blocks_completion", lambda _value: True
+    )
     monkeypatch.setattr(
         middleware.Chats,
         "upsert_message_to_chat_by_id_and_message_id",
@@ -112,6 +119,10 @@ def test_stream_background_task_exception_finalizes_message(monkeypatch):
         "session_id": "session-1",
         "chat_id": "chat-1",
         "message_id": "assistant-1",
+        "features": {
+            "html_visual_artifacts": "force",
+            "html_visual_surface": "halowebui-web",
+        },
     }
     response = StreamingResponse(_failing_stream(), media_type="text/event-stream")
 
@@ -142,6 +153,7 @@ def test_stream_background_task_exception_finalizes_message(monkeypatch):
     assert final_event["done"] is True
     assert final_event["error"]["type"] == "generation_interrupted"
     assert "upstream stream crashed" in final_event["error"]["raw_message"]
+    assert HTML_VISUAL_FALLBACK_MARKER not in final_event["content"]
 
     final_upsert = upserts[-1][2]
     assert final_upsert["done"] is True

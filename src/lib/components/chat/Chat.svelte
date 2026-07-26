@@ -107,6 +107,7 @@
 	} from '$lib/utils/native-web-search';
 	import { hasVisibleMessageFiles as messageHasVisibleFiles } from '$lib/utils/chat-message-errors';
 	import { countUserTurns, shouldRequestTitleGeneration } from '$lib/utils/chat-title-generation';
+	import { serializeHtmlVisualMode } from '$lib/utils/html-visual-mode';
 
 	import { generateChatCompletion } from '$lib/apis/ollama';
 	import {
@@ -1363,7 +1364,7 @@
 			tool_servers: $toolServers,
 			features: {
 				memory: $settings?.memory ?? false,
-				html_visual_artifacts: $settings?.htmlVisualArtifacts ?? true,
+				html_visual_artifacts: serializeHtmlVisualMode($settings?.htmlVisualArtifacts),
 				html_visual_surface: 'halowebui-web',
 				image_generation: imageGenerationActive,
 				image_generation_options: imageGenerationActive
@@ -5489,7 +5490,7 @@
 
 				features: {
 					memory: $settings?.memory ?? false,
-					html_visual_artifacts: $settings?.htmlVisualArtifacts ?? true,
+					html_visual_artifacts: serializeHtmlVisualMode($settings?.htmlVisualArtifacts),
 					html_visual_surface: 'halowebui-web',
 					image_generation: imageGenerationActive,
 					image_generation_options: imageGenerationActive

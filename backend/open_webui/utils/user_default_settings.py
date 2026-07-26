@@ -30,6 +30,7 @@ ALLOWED_UI_BOOL_KEYS = {
     "autoFollowUps",
     "detectArtifacts",
     "svgPreviewAutoOpen",
+    "hideHtmlArtifactCodeBlocks",
     "responseAutoCopy",
     "temporaryChatByDefault",
     "newChatInheritsPreviousState",
@@ -126,6 +127,14 @@ def sanitize_user_default_ui(value: Any) -> dict:
         if next_value is None:
             continue
         cleaned[key] = next_value
+
+    html_visual_mode = raw.get("htmlVisualArtifacts")
+    if isinstance(html_visual_mode, bool):
+        cleaned["htmlVisualArtifacts"] = "force" if html_visual_mode else "off"
+    elif isinstance(html_visual_mode, str):
+        normalized_mode = html_visual_mode.strip().lower()
+        if normalized_mode in {"off", "auto", "force"}:
+            cleaned["htmlVisualArtifacts"] = normalized_mode
 
     for key in ALLOWED_STRING_ARRAY_KEYS:
         if key in raw:

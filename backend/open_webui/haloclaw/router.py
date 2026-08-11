@@ -1,7 +1,7 @@
 import asyncio
 import json
 import logging
-from typing import Optional
+from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import PlainTextResponse
@@ -42,6 +42,23 @@ router = APIRouter()
 # ---------------------------------------------------------------------------
 # Global Config
 # ---------------------------------------------------------------------------
+
+
+class RuntimeReasoningEffortResponse(BaseModel):
+    reasoning_effort: Literal["none", "low", "medium", "high", "xhigh", "max"]
+
+
+# This intentionally has no admin dependency: it exposes only a non-secret,
+# validated enum to the host-side Hermes process. The deployment publishes the
+# Docker UI port on loopback (127.0.0.1:3000), so it is not a public config API.
+# The existing admin config routes below remain authenticated and unchanged.
+@router.get("/runtime/reasoning-effort", response_model=RuntimeReasoningEffortResponse)
+async def get_runtime_reasoning_effort():
+    return RuntimeReasoningEffortResponse(
+        reasoning_effort=normalize_default_reasoning_effort(
+            HALOCLAW_DEFAULT_REASONING_EFFORT.value
+        )
+    )
 
 
 class HaloClawConfigResponse(BaseModel):

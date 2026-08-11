@@ -1,0 +1,4 @@
+name: halowebui-reasoning-sync
+version: "0.1.0"
+description: "Apply HaloWebUI's current Message Gateway reasoning effort to every Hermes model request."
+author: HaloWebUI

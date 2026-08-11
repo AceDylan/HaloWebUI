@@ -1,7 +1,10 @@
 import importlib.util
 import json
+from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace
+
+import pytest
 
 
 _PLUGIN_PATH = (
@@ -72,6 +75,28 @@ def test_chat_completions_replaces_top_level_reasoning_effort(monkeypatch):
     assert result["request"]["reasoning_effort"] == "medium"
     assert result["request"]["messages"] is messages
     assert request["reasoning_effort"] == "high"
+
+
+@pytest.mark.parametrize("api_mode", ["anthropic_messages", "bedrock_converse"])
+def test_unsupported_api_modes_do_not_mutate_or_fetch(monkeypatch, api_mode):
+    endpoint_calls = []
+
+    def unexpected_urlopen(url, timeout):
+        endpoint_calls.append((url, timeout))
+        return _Response({"reasoning_effort": "max"})
+
+    monkeypatch.setattr(plugin, "urlopen", unexpected_urlopen)
+    request = {
+        "messages": [{"role": "user", "content": "Keep provider payload exact"}],
+        "reasoning_effort": "provider-owned",
+    }
+    original_request = deepcopy(request)
+
+    result = plugin.sync_reasoning_effort(request=request, api_mode=api_mode)
+
+    assert result is None
+    assert request == original_request
+    assert endpoint_calls == []
 
 
 def test_every_llm_request_fetches_current_value(monkeypatch):

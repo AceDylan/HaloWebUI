@@ -11,6 +11,7 @@ from urllib.request import urlopen
 
 DEFAULT_SYNC_URL = "http://127.0.0.1:3000/api/v1/haloclaw/runtime/reasoning-effort"
 VALID_REASONING_EFFORTS = frozenset({"none", "low", "medium", "high", "xhigh", "max"})
+SUPPORTED_API_MODES = frozenset({"codex_responses", "chat_completions"})
 REQUEST_TIMEOUT_SECONDS = 0.75
 MAX_RESPONSE_BYTES = 1024
 
@@ -52,6 +53,10 @@ def _fetch_reasoning_effort() -> str | None:
 
 def sync_reasoning_effort(**kwargs: Any) -> dict[str, Any] | None:
     """Replace only the outbound request's reasoning-effort field."""
+    api_mode = kwargs.get("api_mode")
+    if api_mode not in SUPPORTED_API_MODES:
+        return None
+
     request = kwargs.get("request")
     if not isinstance(request, dict):
         return None
@@ -61,7 +66,7 @@ def sync_reasoning_effort(**kwargs: Any) -> dict[str, Any] | None:
         return None
 
     updated_request = dict(request)
-    if kwargs.get("api_mode") == "codex_responses":
+    if api_mode == "codex_responses":
         existing_reasoning = request.get("reasoning")
         reasoning = (
             dict(existing_reasoning) if isinstance(existing_reasoning, dict) else {}

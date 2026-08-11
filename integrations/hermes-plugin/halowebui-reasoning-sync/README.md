@@ -1,9 +1,9 @@
 # HaloWebUI reasoning-effort sync for Hermes
 
 This user-installable Hermes plugin reads HaloWebUI's current Message Gateway
-default reasoning effort before every model API call. It uses `llm_request`
-middleware to update only the effective outbound provider request; it does not
-alter user or system messages.
+default reasoning effort before Codex Responses and OpenAI-compatible Chat
+Completions model API calls. It uses `llm_request` middleware to update only the
+effective outbound provider request; it does not alter user or system messages.
 
 The endpoint defaults to:
 
@@ -20,7 +20,9 @@ export HALOWEBUI_REASONING_SYNC_URL=http://127.0.0.1:3000/api/v1/haloclaw/runtim
 Requests use a short timeout and fail open. Values outside
 `none|low|medium|high|xhigh|max`, malformed responses, and connection failures
 leave the original Hermes request unchanged. There is no cache: each LLM
-request reads the endpoint again.
+request in a supported API mode reads the endpoint again. Other API modes,
+including Anthropic Messages and Bedrock Converse, are left unchanged without
+calling the endpoint.
 
 ## Install
 

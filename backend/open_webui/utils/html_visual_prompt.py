@@ -975,8 +975,7 @@ def _preview_artifact_fences(
     return [
         (language, body)
         for info, body in blocks
-        if (language := _fence_language(info))
-        in _PREVIEW_ARTIFACT_FENCE_LANGUAGES
+        if (language := _fence_language(info)) in _PREVIEW_ARTIFACT_FENCE_LANGUAGES
     ]
 
 

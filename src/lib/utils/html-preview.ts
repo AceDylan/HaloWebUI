@@ -241,6 +241,17 @@ const normalizeCodeLanguage = (value: unknown) =>
 
 const HTML_ARTIFACT_CODE_LANGUAGES = new Set(['html']);
 
+export const shouldMaskStreamingPreviewSource = (
+	language: unknown,
+	streaming: boolean,
+	detectArtifacts: boolean,
+	hideHtmlArtifactCodeBlocks: boolean
+): boolean =>
+	streaming &&
+	detectArtifacts &&
+	hideHtmlArtifactCodeBlocks &&
+	HTML_ARTIFACT_CODE_LANGUAGES.has(normalizeCodeLanguage(language));
+
 export const isHtmlArtifactSourceToken = (token: unknown): boolean => {
 	if (!token || typeof token !== 'object') {
 		return false;

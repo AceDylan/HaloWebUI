@@ -471,6 +471,10 @@ def test_agy_failures_instruct_main_model_to_design_validate_and_force_fallback(
     assert HTML_VISUAL_FORCE_PROMPT_MARKER in prompt
     assert HTML_VISUAL_AGY_PROMPT_MARKER not in prompt
     assert HTML_VISUAL_AGY_FALLBACK_PROMPT_MARKER in prompt
+    if expected_reason is None:
+        assert "分类原因：" not in prompt
+    else:
+        assert f"分类原因：{expected_reason}" in prompt
     assert "不要声称 AGY 只是可选" in prompt
     assert "自行确定上述五项规范" in prompt
     assert "返回前逐项检查" in prompt
@@ -658,10 +662,30 @@ def test_agy_authentication_prompt_fails_fast_and_is_redacted(monkeypatch, caplo
     assert agy_metadata["status"] == "failed"
     assert agy_metadata["reason"] == "authentication_required"
     assert HTML_VISUAL_AGY_PROMPT_MARKER not in form_data["messages"][1]["content"]
-    recorded_output = f"{metadata!r}\n{caplog.text}"
+    prompt = form_data["messages"][1]["content"]
+    assert "分类原因：authentication_required" in prompt
+    recorded_output = f"{metadata!r}\n{caplog.text}\n{prompt}"
     assert oauth_url not in recorded_output
     assert "secret-device-code" not in recorded_output
     assert token_marker not in recorded_output
+
+
+def test_agy_fallback_guidance_omits_unclassified_reason_content():
+    secret_marker = "raw-stderr-secret-device-code"
+    metadata = _metadata()
+    metadata[HTML_VISUAL_AGY_METADATA_KEY] = {
+        "attempted": True,
+        "status": "failed",
+        "reason": secret_marker,
+    }
+
+    form_data = apply_html_visual_prompt_overlay(_form_data(), metadata)
+
+    prompt = form_data["messages"][1]["content"]
+    assert HTML_VISUAL_AGY_FALLBACK_PROMPT_MARKER in prompt
+    assert "（状态：failed）" in prompt
+    assert "分类原因：" not in prompt
+    assert secret_marker not in prompt
 
 
 def test_agy_capacity_exhaustion_falls_back_without_spawning(monkeypatch):

@@ -139,6 +139,23 @@ _AGY_REQUIRED_SECTIONS = (
     "spacing",
     "components",
 )
+_AGY_FALLBACK_REASON_ALLOWLIST = frozenset(
+    {
+        "invalid_command",
+        "empty_command",
+        "not_found",
+        "busy",
+        "authentication_required",
+        "oauth_token_file_unavailable",
+        "stdout_too_large",
+        "stderr_too_large",
+        "nonzero_exit",
+        "empty_output",
+        "invalid_utf8",
+        "control_characters",
+        "invalid_format",
+    }
+)
 _AGY_SECTION_LINE_RE = re.compile(
     r"^(layout|colors|typography|spacing|components):[ \t]*(\S.*)$",
     re.IGNORECASE,
@@ -592,6 +609,28 @@ def _build_agy_design_guidance(design_spec: str) -> str:
 若本次回复生成 fenced `html` Artifact，在完成前根据上方规格检查最终 HTML 的布局、颜色、字体、间距和组件；同时确认它是响应式、自包含、可安全预览的非空 HTML 片段。"""
 
 
+def _safe_agy_fallback_reason(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+
+    reason = value.strip().lower()
+    if reason in _AGY_FALLBACK_REASON_ALLOWLIST:
+        return reason
+
+    if reason.startswith("duplicate_section:"):
+        section = reason.removeprefix("duplicate_section:")
+        return reason if section in _AGY_REQUIRED_SECTIONS else None
+
+    if reason.startswith("missing_sections:"):
+        sections = reason.removeprefix("missing_sections:").split(",")
+        expected = [
+            section for section in _AGY_REQUIRED_SECTIONS if section in sections
+        ]
+        return reason if sections and sections == expected else None
+
+    return None
+
+
 def _build_agy_main_model_fallback_guidance(
     metadata: dict[str, Any] | None,
 ) -> str | None:
@@ -599,9 +638,11 @@ def _build_agy_main_model_fallback_guidance(
     status = str(agy_metadata.get("status") or "").strip().lower()
     if not status or status == "success":
         return None
+    reason = _safe_agy_fallback_reason(agy_metadata.get("reason"))
+    reason_detail = f"；分类原因：{html.escape(reason, quote=False)}" if reason else ""
 
     return f"""[{HTML_VISUAL_AGY_FALLBACK_PROMPT_MARKER}]
-本轮服务端 AGY 前置设计步骤未返回可用的 Layout、Colors、Typography、Spacing、Components 五项规范（状态：{html.escape(status, quote=False)}）。这不是可选设计增强，也不允许跳过 HTML 设计：不要等待或再次调用 AGY，不要声称 AGY 只是可选。
+本轮服务端 AGY 前置设计步骤未返回可用的 Layout、Colors、Typography、Spacing、Components 五项规范（状态：{html.escape(status, quote=False)}{reason_detail}）。这不是可选设计增强，也不允许跳过 HTML 设计：不要等待或再次调用 AGY，不要声称 AGY 只是可选。
 
 你必须立即接管设计与验证工作：先自行确定上述五项规范，再据此完成最终 fenced `html` Artifact。返回前逐项检查布局层级与响应式、颜色对比、字体可读性、间距节奏和组件状态，并确认最终回复只有一个可预览的 HTML source；所有必要 CSS/JavaScript 必须内联在同一个 HTML fence 中，不得另外输出 `css`、`javascript` 或 `js` preview fence。"""
 

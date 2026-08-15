@@ -39,7 +39,10 @@
 		usesRemotePyodideRuntime
 	} from '$lib/utils/browser-ai-assets';
 	import { getLanguageIcon } from '$lib/utils/language-icons';
-	import { getCodePreviewEventKey } from '$lib/utils/html-preview';
+	import {
+		getCodePreviewEventKey,
+		shouldMaskStreamingPreviewSource
+	} from '$lib/utils/html-preview';
 	import {
 		DEFAULT_MERMAID_THEME,
 		normalizeMermaidTheme,
@@ -309,6 +312,12 @@
 	$: hasExecutionFeedback = executing || hasOutputText || hasResult || hasFiles;
 	$: sourceIsCollapsed = collapsed && needsCollapse;
 	$: iframeArtifactCodeBlock = isIframePreviewable(lang);
+	$: sourceMaskedForStreamingPreview = shouldMaskStreamingPreviewSource(
+		lang,
+		streaming,
+		$settings?.detectArtifacts ?? true,
+		$settings?.hideHtmlArtifactCodeBlocks ?? true
+	);
 	$: sourceHiddenForArtifact =
 		!streaming &&
 		Boolean(messageId) &&
@@ -507,7 +516,16 @@
 		class="relative {className} group/codeblock flex flex-col rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-950 my-2 overflow-hidden"
 		dir="ltr"
 	>
-		{#if sourceHiddenForArtifact}
+		{#if sourceMaskedForStreamingPreview}
+			<div
+				class="flex items-center gap-2 px-3 py-2.5 text-sm text-gray-500 dark:text-gray-400"
+				role="status"
+				aria-live="polite"
+			>
+				<LoaderCircle class="size-4 shrink-0 animate-spin" size={16} strokeWidth={2.1} />
+				<span>{$i18n.t('HTML Preview')} · {$i18n.t('Generating...')}</span>
+			</div>
+		{:else if sourceHiddenForArtifact}
 			<div
 				class="flex flex-col gap-3 p-3 sm:flex-row sm:items-center sm:justify-between"
 				dir="auto"

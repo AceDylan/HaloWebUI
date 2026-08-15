@@ -12,7 +12,8 @@ import {
 	hardenHtmlPreviewDocument,
 	isActiveHtmlArtifactSnapshotMessage,
 	isHtmlArtifactSourceToken,
-	isInlineHtmlPreviewResizeMessage
+	isInlineHtmlPreviewResizeMessage,
+	shouldMaskStreamingPreviewSource
 } from './html-preview';
 
 const countMatches = (value: string, pattern: RegExp) => value.match(pattern)?.length ?? 0;
@@ -209,6 +210,23 @@ window.done = true;
 			'html\u0000<main>done</main>'
 		);
 		expect(getCodePreviewEventKey('', 'content', false)).toBeNull();
+	});
+
+	it('masks only HTML artifact source while streaming', () => {
+		for (const language of ['html', 'HTML', 'html title="demo"']) {
+			expect(shouldMaskStreamingPreviewSource(language, true, true, true)).toBe(true);
+			expect(shouldMaskStreamingPreviewSource(language, false, true, true)).toBe(false);
+		}
+
+		for (const language of ['css', 'javascript', 'js title="demo"', 'python', '']) {
+			expect(shouldMaskStreamingPreviewSource(language, true, true, true)).toBe(false);
+		}
+	});
+
+	it('does not mask streaming HTML when artifact source hiding is disabled', () => {
+		expect(shouldMaskStreamingPreviewSource('html', true, false, true)).toBe(false);
+		expect(shouldMaskStreamingPreviewSource('html', true, true, false)).toBe(false);
+		expect(shouldMaskStreamingPreviewSource('html', true, false, false)).toBe(false);
 	});
 
 	it('renders completed HTML artifacts inline only when artifact detection is enabled', () => {

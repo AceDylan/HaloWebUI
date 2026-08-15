@@ -239,7 +239,7 @@ const normalizeCodeLanguage = (value: unknown) =>
 		.toLowerCase()
 		.split(/\s+/, 1)[0];
 
-const HTML_ARTIFACT_CODE_LANGUAGES = new Set(['html', 'css', 'javascript', 'js']);
+const HTML_ARTIFACT_CODE_LANGUAGES = new Set(['html']);
 
 export const isHtmlArtifactSourceToken = (token: unknown): boolean => {
 	if (!token || typeof token !== 'object') {
@@ -256,21 +256,11 @@ export const isHtmlArtifactSourceToken = (token: unknown): boolean => {
 	}
 
 	const raw = String(candidate.raw ?? candidate.text ?? '').trim();
-	return /^(?:<!doctype\s+html\b|<html\b|<style\b|<script\b)/i.test(raw);
+	return /^(?:<!doctype\s+html\b|<html\b)/i.test(raw);
 };
 
 const stripThinkingBlocks = (value: string) =>
 	value.replace(/<(think|thinking|reasoning)\b[^>]*>[\s\S]*?<\/\1>/gi, '');
-
-const extractTagBody = (value: string, tagName: 'style' | 'script') => {
-	const match = new RegExp(`<${tagName}\\b[^>]*>([\\s\\S]*?)</${tagName}>`, 'i').exec(value);
-	return match?.[1] ?? '';
-};
-
-const extractDocumentBody = (value: string) => {
-	const match = /<body\b[^>]*>([\s\S]*?)<\/body>/i.exec(value);
-	return match?.[1] ?? stripLeadingDoctype(value);
-};
 
 type ArtifactParts = {
 	html: string[];
@@ -281,9 +271,11 @@ type ArtifactParts = {
 const collectArtifactParts = (content: string): ArtifactParts => {
 	const parts: ArtifactParts = { html: [], css: [], javascript: [] };
 	const tokens = marked.lexer(stripThinkingBlocks(content));
+	let pendingRawDoctypeIndex = -1;
 
 	marked.walkTokens(tokens, (token: any) => {
 		if (token?.type === 'code') {
+			pendingRawDoctypeIndex = -1;
 			const language = normalizeCodeLanguage(token.lang);
 			const code = String(token.text ?? '');
 			if (language === 'html') {
@@ -297,41 +289,33 @@ const collectArtifactParts = (content: string): ArtifactParts => {
 		}
 
 		if (token?.type !== 'html') {
+			if (token?.type !== 'space') pendingRawDoctypeIndex = -1;
 			return;
 		}
 
 		const raw = String(token.raw ?? token.text ?? '').trim();
-		if (/^(?:<!doctype\s+html\b|<html\b)/i.test(raw)) {
+		if (/^<!doctype\s+html\b[^>]*>$/i.test(raw)) {
 			parts.html.push(raw);
+			pendingRawDoctypeIndex = parts.html.length - 1;
+		} else if (/^<html\b/i.test(raw)) {
+			if (pendingRawDoctypeIndex === parts.html.length - 1) {
+				parts.html[pendingRawDoctypeIndex] = `${parts.html[pendingRawDoctypeIndex]}${raw}`;
+			} else {
+				parts.html.push(raw);
+			}
+			pendingRawDoctypeIndex = -1;
 		} else if (/^<style\b/i.test(raw)) {
-			parts.css.push(extractTagBody(raw, 'style'));
+			pendingRawDoctypeIndex = -1;
+			parts.css.push(raw);
 		} else if (/^<script\b/i.test(raw)) {
-			parts.javascript.push(extractTagBody(raw, 'script'));
+			pendingRawDoctypeIndex = -1;
+			parts.javascript.push(raw);
+		} else {
+			pendingRawDoctypeIndex = -1;
 		}
 	});
 
 	return parts;
-};
-
-const mergeHtmlParts = (htmlParts: string[]) => {
-	let documentIndex = htmlParts.findIndex((part) => /<html\b/i.test(part));
-	if (documentIndex < 0) {
-		documentIndex = htmlParts.findIndex((part) => /<!doctype\s+html\b/i.test(part));
-	}
-	if (documentIndex < 0) {
-		return htmlParts.join('\n');
-	}
-
-	let document = htmlParts[documentIndex];
-	for (let index = 0; index < htmlParts.length; index += 1) {
-		if (index === documentIndex) continue;
-		document = insertBeforeClosingTag(
-			document,
-			'body',
-			`\n${extractDocumentBody(htmlParts[index])}`
-		);
-	}
-	return document;
 };
 
 export const buildHtmlArtifactPreview = (content: unknown): string | null => {
@@ -340,15 +324,15 @@ export const buildHtmlArtifactPreview = (content: unknown): string | null => {
 	}
 
 	const parts = collectArtifactParts(content);
-	if (parts.html.length === 0 && parts.css.length === 0 && parts.javascript.length === 0) {
+	// A response is previewable only when it contains exactly one HTML source.
+	// Separate CSS/JS fences and multiple HTML sources are ambiguous executable
+	// artifacts and must remain inert Markdown instead of being merged here.
+	if (parts.html.length !== 1 || parts.css.length !== 0 || parts.javascript.length !== 0) {
 		return null;
 	}
 
-	const style = `<style data-halo-artifact-styles="true">body { background-color: white; }\n${parts.css.join('\n')}</style>`;
-	const script = parts.javascript.length
-		? `<script data-halo-artifact-scripts="true">\n${parts.javascript.join('\n')}\n</script>`
-		: '';
-	const mergedHtml = mergeHtmlParts(parts.html);
+	const style = '<style data-halo-artifact-styles="true">body { background-color: white; }</style>';
+	const mergedHtml = parts.html[0];
 
 	if (/(?:<!doctype\s+html\b|<html\b)/i.test(mergedHtml)) {
 		let document = mergedHtml;
@@ -357,14 +341,11 @@ export const buildHtmlArtifactPreview = (content: unknown): string | null => {
 		} else if (/<html\b[^>]*>/i.test(document)) {
 			document = insertAfterOpeningTag(document, 'html', `<head>${style}</head>`);
 		}
-		if (script) {
-			document = insertBeforeClosingTag(document, 'body', script);
-		}
 		return hardenHtmlPreviewDocument(document);
 	}
 
 	return hardenHtmlPreviewDocument(
-		`<!DOCTYPE html><html lang="en"><head>${style}</head><body>${mergedHtml}${script}</body></html>`
+		`<!DOCTYPE html><html lang="en"><head>${style}</head><body>${mergedHtml}</body></html>`
 	);
 };
 

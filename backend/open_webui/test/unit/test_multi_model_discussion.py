@@ -12,6 +12,9 @@ if str(_BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(_BACKEND_DIR))
 
 from open_webui.utils import multi_model_discussion as discussion_mod  # noqa: E402
+from open_webui.utils.html_visual_prompt import (  # noqa: E402
+    HTML_VISUAL_FALLBACK_MARKER,
+)
 
 
 def _request(models):
@@ -198,6 +201,91 @@ def test_multi_model_discussion_orchestrates_models_and_events(monkeypatch):
     assert final_upsert["usage"]["total_tokens"] == 45
     assert final_upsert["discussion"]["status"] == "completed"
     assert final_upsert["sources"] == search_sources
+
+
+def test_multi_model_discussion_force_mode_replaces_rejected_final_artifact(
+    monkeypatch,
+):
+    events = []
+    upserts = []
+    scheduled = {}
+    call_count = 0
+
+    async def event_emitter(event):
+        events.append(event)
+
+    async def fake_generate_chat_completion(_request, _payload, _user):
+        nonlocal call_count
+        call_count += 1
+        if call_count < 3:
+            content = f"participant answer {call_count}"
+        else:
+            content = """Final explanation remains.
+```html
+<div style="color:#111">Rejected companion artifact</div>
+```
+```js
+window.discussionUnsafe = true;
+```"""
+        return {"choices": [{"message": {"content": content}}]}
+
+    def fake_create_task(coroutine, id=None):
+        task = asyncio.create_task(coroutine)
+        scheduled["task"] = task
+        return "task-force", task
+
+    monkeypatch.setattr(
+        discussion_mod, "get_event_emitter", lambda _metadata: event_emitter
+    )
+    monkeypatch.setattr(
+        discussion_mod, "generate_chat_completion", fake_generate_chat_completion
+    )
+    monkeypatch.setattr(discussion_mod, "create_task", fake_create_task)
+    monkeypatch.setattr(
+        discussion_mod.Chats,
+        "upsert_message_to_chat_by_id_and_message_id",
+        lambda *args, **kwargs: upserts.append((args, kwargs)),
+    )
+
+    async def run():
+        result = await discussion_mod.generate_multi_model_discussion_completion(
+            _request(_models("model-a", "model-b", "model-final")),
+            {
+                "model": "model-final",
+                "messages": [{"role": "user", "content": "question"}],
+                "stream": True,
+            },
+            _user(),
+            {
+                "chat_id": "chat-1",
+                "message_id": "assistant-1",
+                "features": {
+                    "html_visual_artifacts": "force",
+                    "html_visual_surface": "halowebui-web",
+                },
+            },
+            {"id": "model-final"},
+            {
+                "enabled": True,
+                "participants": ["model-a", "model-b"],
+                "rounds": 1,
+                "finalModel": "model-final",
+            },
+        )
+        await scheduled["task"]
+        return result
+
+    result = asyncio.run(run())
+
+    assert result == {"status": True, "task_id": "task-force"}
+    completion = next(event for event in events if event["type"] == "chat:completion")
+    final_content = completion["data"]["content"]
+    assert final_content.startswith("Final explanation remains.")
+    assert "Rejected companion artifact" not in final_content
+    assert "window.discussionUnsafe" not in final_content
+    assert final_content.count(HTML_VISUAL_FALLBACK_MARKER) == 1
+    assert final_content.count("```html\n") == 1
+    assert upserts[-1][0][2]["content"] == final_content
 
 
 def test_multi_model_discussion_passes_transcript_to_later_rounds_and_final(

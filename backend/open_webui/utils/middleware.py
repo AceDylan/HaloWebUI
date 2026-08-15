@@ -85,7 +85,11 @@ from open_webui.utils.image_generation_options import (
     CHAT_IMAGE_GENERATION_OPTION_KEYS,
     sanitize_chat_image_generation_options,
 )
-from open_webui.utils.html_visual_prompt import append_html_visual_fallback
+from open_webui.utils.html_visual_prompt import (
+    append_html_visual_fallback,
+    get_html_visual_mode,
+    should_apply_html_visual_prompt,
+)
 from open_webui.utils.error_handling import build_error_detail
 
 
@@ -5993,14 +5997,37 @@ async def process_chat_response(
 
     # Non-streaming response
     if not isinstance(response, StreamingResponse):
-        if event_emitter:
-            allow_base64_image_url_conversion = bool(
-                getattr(
-                    request.app.state.config,
-                    "ENABLE_CHAT_RESPONSE_BASE64_IMAGE_URL_CONVERSION",
-                    False,
-                )
+        if not isinstance(response, dict):
+            return response
+
+        allow_base64_image_url_conversion = bool(
+            getattr(
+                getattr(request.app.state, "config", None),
+                "ENABLE_CHAT_RESPONSE_BASE64_IMAGE_URL_CONVERSION",
+                False,
             )
+        )
+        choices = response.get("choices", [])
+        response_usage = (
+            response.get("usage") if isinstance(response.get("usage"), dict) else None
+        )
+        content = ""
+        message_files: list[dict] = []
+        if choices and isinstance(choices[0], dict):
+            message_payload = choices[0].get("message", {}) or {}
+            content, message_files = _extract_stream_content_and_files(
+                message_payload,
+                allow_base64_image_url_conversion=allow_base64_image_url_conversion,
+            )
+            if "error" not in response:
+                content = append_html_visual_fallback(content, metadata)
+            response_message = choices[0].setdefault("message", {})
+            if isinstance(response_message, dict):
+                response_message["content"] = content
+                if message_files:
+                    response_message["files"] = message_files
+
+        if event_emitter:
             if "error" in response:
                 error = response["error"].get("detail", response["error"])
                 upsert_response_message(
@@ -6009,22 +6036,7 @@ async def process_chat_response(
                     },
                 )
 
-            choices = response.get("choices", [])
-            response_usage = (
-                response.get("usage")
-                if isinstance(response.get("usage"), dict)
-                else None
-            )
             if choices and isinstance(choices[0], dict):
-                message_payload = choices[0].get("message", {}) or {}
-                content, message_files = _extract_stream_content_and_files(
-                    message_payload,
-                    allow_base64_image_url_conversion=allow_base64_image_url_conversion,
-                )
-                if "error" not in response:
-                    content = append_html_visual_fallback(content, metadata)
-                response_message = response["choices"][0].setdefault("message", {})
-
                 if message_files:
                     await event_emitter(
                         {
@@ -6032,12 +6044,6 @@ async def process_chat_response(
                             "data": {"files": message_files},
                         }
                     )
-
-                    response_message["files"] = message_files
-
-                if isinstance(response_message, dict):
-                    response_message["content"] = content
-
                 if content or message_files:
                     completed_at = int(time.time())
 
@@ -10167,6 +10173,172 @@ async def process_chat_response(
 
     else:
         # Fallback to the original response
+        force_html_visual_validation = (
+            get_html_visual_mode(metadata) == "force"
+            and should_apply_html_visual_prompt(metadata)
+        )
+
+        if force_html_visual_validation:
+            # Without a chat event channel there is nowhere to replace content
+            # after unsafe deltas have reached the browser. Buffer only this
+            # explicit force path, validate its terminal content, then emit one
+            # consolidated completion through the original streaming protocol.
+            async def validated_force_stream_wrapper(original_generator, events):
+                buffered_chunks: list[str] = []
+
+                def buffer_item(item: Any) -> None:
+                    if isinstance(item, bytes):
+                        buffered_chunks.append(item.decode("utf-8", errors="replace"))
+                    elif isinstance(item, dict):
+                        buffered_chunks.append(json.dumps(item, ensure_ascii=False) + "\n")
+                    elif item is not None:
+                        buffered_chunks.append(str(item))
+
+                for event in events:
+                    event, _ = await process_filter_functions(
+                        request=request,
+                        filter_functions=filter_functions,
+                        filter_type="stream",
+                        form_data=event,
+                        extra_params=extra_params,
+                    )
+                    buffer_item(event)
+
+                async for data in original_generator:
+                    data, _ = await process_filter_functions(
+                        request=request,
+                        filter_functions=filter_functions,
+                        filter_type="stream",
+                        form_data=data,
+                        extra_params=extra_params,
+                    )
+                    buffer_item(data)
+
+                payloads: list[dict] = []
+                for line in "".join(buffered_chunks).splitlines():
+                    candidate = line.strip()
+                    if candidate.startswith("data:"):
+                        candidate = candidate[len("data:") :].strip()
+                    if not candidate or candidate == "[DONE]":
+                        continue
+                    try:
+                        payload = json.loads(candidate)
+                    except (TypeError, ValueError):
+                        continue
+                    if isinstance(payload, dict):
+                        payloads.append(payload)
+
+                content_parts: list[str] = []
+                response_envelope: dict[str, Any] = {}
+                response_usage: dict | None = None
+                response_error: Any = None
+                for payload in payloads:
+                    if response_error is None and payload.get("error") is not None:
+                        response_error = payload.get("error")
+                    if isinstance(payload.get("usage"), dict):
+                        response_usage = payload["usage"]
+                    if not response_envelope:
+                        response_envelope = {
+                            key: payload[key]
+                            for key in (
+                                "id",
+                                "object",
+                                "created",
+                                "model",
+                                "system_fingerprint",
+                            )
+                            if key in payload
+                        }
+
+                    choices = payload.get("choices")
+                    if isinstance(choices, list) and choices and isinstance(
+                        choices[0], dict
+                    ):
+                        choice = choices[0]
+                        delta = choice.get("delta")
+                        if isinstance(delta, dict):
+                            piece, _ = _extract_stream_content_and_files(
+                                delta,
+                                allow_base64_image_url_conversion=False,
+                            )
+                            if piece:
+                                content_parts.append(piece)
+                        message = choice.get("message")
+                        if isinstance(message, dict):
+                            piece, _ = _extract_stream_content_and_files(
+                                message,
+                                allow_base64_image_url_conversion=False,
+                            )
+                            if piece:
+                                content_parts = [piece]
+                        elif isinstance(choice.get("text"), str):
+                            content_parts.append(choice["text"])
+                    elif (
+                        payload.get("type") == "response.output_text.delta"
+                        and isinstance(payload.get("delta"), str)
+                    ):
+                        content_parts.append(payload["delta"])
+
+                final_content = append_html_visual_fallback(
+                    "".join(content_parts), metadata
+                )
+                is_ndjson = "application/x-ndjson" in response.headers.get(
+                    "Content-Type", ""
+                )
+
+                def encode_payload(payload: Any) -> str:
+                    serialized = (
+                        payload
+                        if isinstance(payload, str)
+                        else json.dumps(payload, ensure_ascii=False)
+                    )
+                    return (
+                        f"{serialized}\n"
+                        if is_ndjson
+                        else f"data: {serialized}\n\n"
+                    )
+
+                if final_content:
+                    yield encode_payload(
+                        {
+                            **response_envelope,
+                            "choices": [
+                                {
+                                    "index": 0,
+                                    "delta": {
+                                        "role": "assistant",
+                                        "content": final_content,
+                                    },
+                                    "finish_reason": None,
+                                }
+                            ],
+                        }
+                    )
+                    final_payload = {
+                        **response_envelope,
+                        "choices": [
+                            {
+                                "index": 0,
+                                "delta": {},
+                                "finish_reason": "stop",
+                            }
+                        ],
+                    }
+                    if response_usage:
+                        final_payload["usage"] = response_usage
+                    yield encode_payload(final_payload)
+                elif response_error is not None:
+                    yield encode_payload({"error": response_error})
+
+                if not is_ndjson:
+                    yield encode_payload("[DONE]")
+
+            return StreamingResponse(
+                validated_force_stream_wrapper(response.body_iterator, events),
+                headers=dict(response.headers),
+                background=response.background,
+            )
+
         async def stream_wrapper(original_generator, events):
             def wrap_item(item):
                 return f"data: {item}\n\n"

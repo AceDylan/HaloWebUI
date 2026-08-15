@@ -98,6 +98,54 @@ def test_direct_non_streaming_force_mode_finalizes_with_fallback(monkeypatch):
     assert events[-1]["data"]["content"] == final_content
 
 
+def test_non_streaming_force_mode_without_session_finalizes_with_fallback(monkeypatch):
+    monkeypatch.setattr(
+        middleware,
+        "get_event_emitter",
+        lambda _metadata: (_ for _ in ()).throw(
+            AssertionError("event emitter should not be requested")
+        ),
+    )
+    metadata = _metadata()
+    metadata.pop("session_id")
+    response = {
+        "choices": [
+            {
+                "message": {
+                    "role": "assistant",
+                    "content": """Explanation remains.
+```html
+<div style="color:#111">Rejected source</div>
+```
+```javascript
+window.nonEmitterUnsafe = true;
+```""",
+                }
+            }
+        ]
+    }
+
+    result = asyncio.run(
+        middleware.process_chat_response(
+            _request(),
+            response,
+            {"model": "gpt-test", "messages": [{"role": "user", "content": "hi"}]},
+            _user(),
+            metadata,
+            {},
+            [],
+            {},
+        )
+    )
+
+    final_content = result["choices"][0]["message"]["content"]
+    assert final_content.startswith("Explanation remains.")
+    assert "Rejected source" not in final_content
+    assert "window.nonEmitterUnsafe" not in final_content
+    assert final_content.count(HTML_VISUAL_FALLBACK_MARKER) == 1
+    assert final_content.count("```html\n") == 1
+
+
 async def _sse_stream():
     chunk = {"choices": [{"delta": {"content": "Streamed <unsafe>"}}]}
     yield f"data: {json.dumps(chunk)}\n\n".encode()
@@ -152,3 +200,52 @@ def test_direct_streaming_force_mode_appends_fallback_only_at_finalization(monke
         for event in events
         if not event.get("data", {}).get("done")
     )
+
+
+def test_streaming_force_mode_without_session_buffers_and_validates(monkeypatch):
+    async def unsafe_stream():
+        content = """Streaming explanation.
+```html
+<div>Rejected streamed source</div>
+```
+```js
+window.streamUnsafe = true;
+```"""
+        chunk = {"choices": [{"delta": {"content": content}}]}
+        yield f"data: {json.dumps(chunk)}\n\n".encode()
+        yield b"data: [DONE]\n\n"
+
+    async def passthrough_filter(**kwargs):
+        return kwargs["form_data"], {}
+
+    monkeypatch.setattr(middleware, "get_sorted_filters", lambda _model: [])
+    monkeypatch.setattr(middleware, "process_filter_functions", passthrough_filter)
+    metadata = _metadata()
+    metadata.pop("session_id")
+    response = StreamingResponse(unsafe_stream(), media_type="text/event-stream")
+
+    result = asyncio.run(
+        middleware.process_chat_response(
+            _request(),
+            response,
+            {"model": "gpt-test", "messages": [{"role": "user", "content": "hi"}]},
+            _user(),
+            metadata,
+            {},
+            [],
+            {},
+        )
+    )
+
+    async def consume():
+        chunks = []
+        async for chunk in result.body_iterator:
+            chunks.append(chunk.decode() if isinstance(chunk, bytes) else chunk)
+        return "".join(chunks)
+
+    streamed = asyncio.run(consume())
+    assert "Streaming explanation." in streamed
+    assert "Rejected streamed source" not in streamed
+    assert "window.streamUnsafe" not in streamed
+    assert streamed.count(HTML_VISUAL_FALLBACK_MARKER) == 1
+    assert streamed.rstrip().endswith("data: [DONE]")

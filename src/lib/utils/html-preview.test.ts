@@ -84,7 +84,7 @@ describe('html-preview', () => {
 		expect(preview).toContain('http-equiv="Content-Security-Policy"');
 	});
 
-	it('builds one artifact document from fenced html, css, and javascript blocks', () => {
+	it('rejects an html artifact when separate css or javascript preview sources exist', () => {
 		const preview = buildHtmlArtifactPreview(`
 <reasoning>\n\`\`\`html\n<p>hidden</p>\n\`\`\`\n</reasoning>
 
@@ -101,13 +101,7 @@ window.artifactReady = true;
 \`\`\`
 `);
 
-		expect(preview).not.toBeNull();
-		expect(countMatches(preview ?? '', /<html\b/gi)).toBe(1);
-		expect(preview).toContain('<main>Visible</main>');
-		expect(preview).not.toContain('<p>hidden</p>');
-		expect(preview).toContain('main { color: rebeccapurple; }');
-		expect(preview).toContain('window.artifactReady = true;');
-		expect(preview).toContain('http-equiv="Content-Security-Policy"');
+		expect(preview).toBeNull();
 	});
 
 	it('does not trust a user-supplied preview policy marker', () => {
@@ -132,7 +126,7 @@ window.artifactReady = true;
 		expect(countMatches(preview ?? '', /<html\b/gi)).toBe(1);
 	});
 
-	it('keeps injected styles in head and scripts in body for incomplete documents', () => {
+	it('does not merge companion css and js fences into incomplete html documents', () => {
 		const preview = buildHtmlArtifactPreview(`\`\`\`html
 <html><head><title>Incomplete</title><body><main>Body</main>
 \`\`\`
@@ -145,32 +139,21 @@ main { color: teal; }
 window.done = true;
 \`\`\``);
 
-		expect(preview).not.toBeNull();
-		expect((preview ?? '').indexOf('data-halo-artifact-styles')).toBeLessThan(
-			(preview ?? '').indexOf('<body>')
-		);
-		expect((preview ?? '').indexOf('data-halo-artifact-scripts')).toBeGreaterThan(
-			(preview ?? '').indexOf('<body>')
-		);
+		expect(preview).toBeNull();
 	});
 
-	it('places CSS-only artifacts in the document head', () => {
+	it('does not treat CSS-only fences as HTML artifacts', () => {
 		const preview = buildHtmlArtifactPreview('```css\nbody { color: navy; }\n```');
 
-		expect(preview).not.toBeNull();
-		expect((preview ?? '').indexOf('data-halo-artifact-styles')).toBeLessThan(
-			(preview ?? '').indexOf('<body>')
-		);
+		expect(preview).toBeNull();
 	});
 
-	it('preserves standalone raw style and script blocks with attributes', () => {
+	it('does not treat standalone raw style and script blocks as HTML artifacts', () => {
 		const preview = buildHtmlArtifactPreview(
 			'<style media="screen">main { color: olive; }</style>\n<script type="module">window.rawReady = true;</script>'
 		);
 
-		expect(preview).not.toBeNull();
-		expect(preview).toContain('main { color: olive; }');
-		expect(preview).toContain('window.rawReady = true;');
+		expect(preview).toBeNull();
 	});
 
 	it('does not emit code preview events while streaming', () => {
@@ -216,10 +199,10 @@ window.done = true;
 
 	it('identifies only preview-consumed HTML artifact source tokens', () => {
 		expect(isHtmlArtifactSourceToken({ type: 'code', lang: 'html', text: '<main />' })).toBe(true);
-		expect(isHtmlArtifactSourceToken({ type: 'code', lang: 'CSS', text: 'body {}' })).toBe(true);
+		expect(isHtmlArtifactSourceToken({ type: 'code', lang: 'CSS', text: 'body {}' })).toBe(false);
 		expect(
 			isHtmlArtifactSourceToken({ type: 'code', lang: 'javascript title="demo"', text: '1' })
-		).toBe(true);
+		).toBe(false);
 		expect(
 			isHtmlArtifactSourceToken({
 				type: 'html',
@@ -228,7 +211,7 @@ window.done = true;
 		).toBe(true);
 		expect(
 			isHtmlArtifactSourceToken({ type: 'html', raw: '<style>body { color: red; }</style>' })
-		).toBe(true);
+		).toBe(false);
 		expect(isHtmlArtifactSourceToken({ type: 'code', lang: 'python', text: 'print(1)' })).toBe(
 			false
 		);

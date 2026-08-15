@@ -34,3 +34,4 @@ jobs:
             dylanha009/halowebui:latest
           build-args: |
             INSTALL_PROFILE=local-rag
+            INSTALL_AGY=true

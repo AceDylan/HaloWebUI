@@ -6,6 +6,7 @@ ARG USE_CUDA=false
 ARG USE_OLLAMA=false
 ARG INSTALL_PROFILE=core
 ARG PRELOAD_LOCAL_MODELS=false
+ARG INSTALL_AGY=true
 # Tested with cu117 for CUDA 11 and cu121 for CUDA 12 (default)
 ARG USE_CUDA_VER=cu121
 # any sentence transformer model; models to use can be found at https://huggingface.co/models?library=sentence-transformers
@@ -67,6 +68,8 @@ ARG HALO_PG_CLIENT_MAJORS
 ARG UID
 ARG GID
 ARG HALO_RUNTIME_PROFILE
+ARG INSTALL_AGY
+ARG TARGETARCH
 
 ENV ENV=prod \
     PORT=8080 \
@@ -161,6 +164,36 @@ RUN set -eux; \
     fi; \
     apt-get purge -y --auto-remove gcc python3-dev; \
     rm -rf /var/lib/apt/lists/*
+
+RUN set -eux; \
+    case "${INSTALL_AGY}" in \
+        true) \
+            if [ "${TARGETARCH}" != "amd64" ]; then \
+                echo "INSTALL_AGY=true requires TARGETARCH=amd64; set INSTALL_AGY=false to opt out" >&2; \
+                exit 1; \
+            fi; \
+            agy_archive="/tmp/agy-cli-linux-x64.tar.gz"; \
+            agy_extract_dir="/tmp/agy-cli-linux-x64"; \
+            install -d "${agy_extract_dir}"; \
+            curl -fsSL \
+                "https://storage.googleapis.com/antigravity-public/antigravity-cli/1.1.13-6057583128215552/linux-x64/cli_linux_x64.tar.gz" \
+                -o "${agy_archive}"; \
+            echo "89c6881b6c1999cb8236e7181c2192ae8f372b0413396c0f7bcff83d27ac9c0cc1202795cc0d629ec1ecbf4937d1c294cf4f5e4f9f8e05b1e972e27198313442  ${agy_archive}" \
+                | sha512sum -c -; \
+            tar -xzf "${agy_archive}" -C "${agy_extract_dir}"; \
+            agy_binary="$(find "${agy_extract_dir}" -type f -name agy -print -quit)"; \
+            test -n "${agy_binary}"; \
+            install -m 0755 "${agy_binary}" /usr/local/bin/agy; \
+            rm -rf "${agy_archive}" "${agy_extract_dir}"; \
+            agy --version; \
+            ;; \
+        false) \
+            ;; \
+        *) \
+            echo "INSTALL_AGY must be true or false" >&2; \
+            exit 1; \
+            ;; \
+    esac
 
 RUN if [ $UID -ne 0 ]; then \
     if [ $GID -ne 0 ]; then \

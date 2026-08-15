@@ -517,7 +517,10 @@ from open_webui.utils.hermes_agent import (
     is_hermes_agent_model,
     run_hermes_agent,
 )
-from open_webui.utils.html_visual_prompt import apply_html_visual_prompt_overlay
+from open_webui.utils.html_visual_prompt import (
+    apply_html_visual_prompt_overlay,
+    prepare_html_visual_prompt_overlay,
+)
 from open_webui.utils.middleware import (
     build_native_file_input_retry_notification,
     clear_native_file_input_remote_cache,
@@ -1708,6 +1711,7 @@ async def chat_completion(
             "files": form_data.get("files", None),
             "files_provided": "files" in form_data,
             "features": form_data.get("features", None),
+            "server_surface": "halowebui-web",
             "variables": form_data.get("variables", None),
             "model": model,
             "direct": model_item.get("direct", False),
@@ -1716,7 +1720,7 @@ async def chat_completion(
 
         request.state.metadata = metadata
         form_data["metadata"] = metadata
-        form_data = apply_html_visual_prompt_overlay(form_data, metadata)
+        form_data = await prepare_html_visual_prompt_overlay(form_data, metadata)
 
         form_data, metadata, events = await process_chat_payload(
             request, form_data, user, metadata, model, tasks=tasks

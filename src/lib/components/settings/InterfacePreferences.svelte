@@ -2243,8 +2243,8 @@
 												</label>
 												<Tooltip
 													content={tr(
-														'关闭不注入；自动仅建议模型按需生成；强制会确保成功回复包含可预览的 HTML Artifact。Telegram 等纯文本入口始终禁用。',
-														'Off disables injection; Auto advises the model when useful; Force ensures successful replies contain a previewable HTML Artifact. Plain-text surfaces always stay disabled.'
+														'Web Chat 由服务端强制注入并尝试 AGY；此选择仅作客户端兼容提示。Telegram 等纯文本入口始终禁用。',
+														'Web Chat always uses the server-enforced AGY/HTML flow; this selector is retained for client compatibility. Plain-text surfaces such as Telegram remain disabled.'
 													)}
 												>
 													<QuestionMarkCircle className="size-3.5 cursor-help text-gray-400 dark:text-gray-500" />

@@ -104,6 +104,50 @@ window.artifactReady = true;
 		expect(preview).toBeNull();
 	});
 
+	it('previews the single html fence produced by server force fallback for rejected css/js sources', () => {
+		const rejected = `Explanation stays.
+
+\`\`\`css
+main { color: rebeccapurple; }
+\`\`\`
+
+\`\`\`javascript
+window.artifactReady = true;
+\`\`\``;
+		const serverFallback = `Explanation stays.
+
+\`\`\`html
+<section data-halowebui-fallback="HALOWEBUI_HTML_VISUAL_SAFE_FALLBACK" style="padding:20px;color:#171717;background:#fff;">
+  <div style="font-size:15px;line-height:1.7;">Explanation stays.</div>
+</section>
+\`\`\``;
+
+		expect(buildHtmlArtifactPreview(rejected)).toBeNull();
+		const preview = buildHtmlArtifactPreview(serverFallback);
+		expect(preview).not.toBeNull();
+		expect(preview).toContain('HALOWEBUI_HTML_VISUAL_SAFE_FALLBACK');
+		expect(preview).not.toContain('rebeccapurple');
+		expect(preview).not.toContain('artifactReady');
+	});
+
+	it('rejects css and javascript fences nested in blockquotes or lists', () => {
+		const preview = buildHtmlArtifactPreview(`
+\`\`\`html
+<main>Visible</main>
+\`\`\`
+
+> \`\`\`css
+> body { color: red; }
+> \`\`\`
+
+- \`\`\`javascript
+  alert(1)
+  \`\`\`
+`);
+
+		expect(preview).toBeNull();
+	});
+
 	it('does not trust a user-supplied preview policy marker', () => {
 		const preview = hardenHtmlPreviewDocument(
 			'<meta data-halo-html-preview-policy="true"><main>spoofed marker</main>'

@@ -10,6 +10,7 @@ from open_webui.utils import html_visual_prompt
 from open_webui.utils.hermes_agent import _build_run_payload
 from open_webui.utils.html_visual_prompt import (
     HTML_VISUAL_AGY_DEFAULT_COMMAND,
+    HTML_VISUAL_AGY_FALLBACK_PROMPT_MARKER,
     HTML_VISUAL_AGY_MAX_INPUT_CHARS,
     HTML_VISUAL_AGY_METADATA_KEY,
     HTML_VISUAL_AGY_PROMPT_MARKER,
@@ -21,6 +22,7 @@ from open_webui.utils.html_visual_prompt import (
     apply_html_visual_prompt_overlay,
     append_html_visual_fallback,
     has_fenced_html_artifact,
+    has_html_visual_artifact,
     normalize_html_visual_mode,
     prepare_html_visual_prompt_overlay,
     should_apply_html_visual_prompt,
@@ -50,10 +52,11 @@ Components: Include a title, summary, comparison rows, status labels, and detail
 
 def test_html_visual_prompt_injects_for_halowebui_web_surface():
     metadata = {
+        "server_surface": "halowebui-web",
         "features": {
             "html_visual_artifacts": True,
             "html_visual_surface": "halowebui-web",
-        }
+        },
     }
 
     form_data = apply_html_visual_prompt_overlay(_form_data(), metadata)
@@ -94,33 +97,21 @@ def test_html_visual_mode_normalizes_legacy_and_explicit_values(value, expected)
     assert normalize_html_visual_mode(value) == expected
 
 
-def test_force_and_auto_modes_receive_different_prompt_instructions():
-    auto_form = apply_html_visual_prompt_overlay(
-        _form_data(),
-        {
-            "features": {
-                "html_visual_artifacts": "auto",
-                "html_visual_surface": "halowebui-web",
-            }
-        },
-    )
-    force_form = apply_html_visual_prompt_overlay(
-        _form_data(),
-        {
-            "features": {
-                "html_visual_artifacts": "force",
-                "html_visual_surface": "halowebui-web",
-            }
-        },
-    )
+@pytest.mark.parametrize("client_mode", [None, "auto", "off", "force"])
+def test_server_web_surface_forces_prompt_for_every_client_mode(client_mode):
+    metadata = {"server_surface": "halowebui-web"}
+    if client_mode is not None:
+        metadata["features"] = {
+            "html_visual_artifacts": client_mode,
+            "html_visual_surface": "telegram",
+        }
 
-    auto_prompt = auto_form["messages"][1]["content"]
-    force_prompt = force_form["messages"][1]["content"]
-    assert HTML_VISUAL_PROMPT_MARKER in auto_prompt
-    assert HTML_VISUAL_PROMPT_MARKER in force_prompt
-    assert HTML_VISUAL_FORCE_PROMPT_MARKER not in auto_prompt
-    assert HTML_VISUAL_FORCE_PROMPT_MARKER in force_prompt
-    assert auto_prompt != force_prompt
+    form_data = apply_html_visual_prompt_overlay(_form_data(), metadata)
+
+    prompt = form_data["messages"][1]["content"]
+    assert HTML_VISUAL_PROMPT_MARKER in prompt
+    assert HTML_VISUAL_FORCE_PROMPT_MARKER in prompt
+    assert metadata["html_visual_artifacts"]["mode"] == "force"
 
 
 def test_html_visual_prompt_is_not_injected_for_telegram_surface():
@@ -134,10 +125,11 @@ def test_html_visual_prompt_is_not_injected_for_telegram_surface():
             "sms",
         ):
             metadata = {
+                "server_surface": surface,
                 "features": {
                     "html_visual_artifacts": mode,
-                    "html_visual_surface": surface,
-                }
+                    "html_visual_surface": "halowebui-web",
+                },
             }
 
             form_data = apply_html_visual_prompt_overlay(_form_data(), metadata)
@@ -146,7 +138,7 @@ def test_html_visual_prompt_is_not_injected_for_telegram_surface():
             assert not should_apply_html_visual_prompt(metadata)
 
 
-def test_trusted_plain_text_metadata_overrides_client_web_surface():
+def test_missing_server_surface_cannot_be_spoofed_by_client_web_surface():
     for key in ("surface", "source"):
         metadata = {
             key: "telegram:webhook",
@@ -162,7 +154,7 @@ def test_trusted_plain_text_metadata_overrides_client_web_surface():
         assert not should_apply_html_visual_prompt(metadata)
 
 
-def test_server_surface_gates_without_overriding_client_surface():
+def test_server_surface_is_authoritative_over_client_surface_and_mode():
     metadata = {
         "server_surface": "telegram:webhook",
         "features": {
@@ -179,14 +171,13 @@ def test_server_surface_gates_without_overriding_client_surface():
     trusted_web_metadata = {
         "server_surface": "halowebui-web",
         "features": {
-            "html_visual_artifacts": "force",
+            "html_visual_artifacts": "off",
             "html_visual_surface": "telegram",
         },
     }
-    assert not should_apply_html_visual_prompt(trusted_web_metadata)
-
-    trusted_web_metadata["features"]["html_visual_surface"] = "halowebui-web"
     assert should_apply_html_visual_prompt(trusted_web_metadata)
+    trusted_form = apply_html_visual_prompt_overlay(_form_data(), trusted_web_metadata)
+    assert HTML_VISUAL_FORCE_PROMPT_MARKER in trusted_form["messages"][1]["content"]
 
 
 def test_default_agy_command_uses_noninteractive_sandbox():
@@ -198,26 +189,85 @@ def test_default_agy_command_uses_noninteractive_sandbox():
     ]
 
 
-def test_agy_can_be_disabled_without_disabling_main_model_html_path(monkeypatch):
+@pytest.mark.parametrize("client_mode", [None, "auto", "off"])
+def test_server_web_surface_attempts_agy_without_client_opt_in(
+    monkeypatch, client_mode
+):
+    monkeypatch.setenv(
+        "HALOWEBUI_AGY_COMMAND",
+        _agy_command(f"print({AGY_DESIGN_SPEC!r})"),
+    )
+    metadata = {"server_surface": "halowebui-web"}
+    if client_mode is not None:
+        metadata["features"] = {
+            "html_visual_artifacts": client_mode,
+            "html_visual_surface": "telegram",
+        }
+
+    form_data = asyncio.run(prepare_html_visual_prompt_overlay(_form_data(), metadata))
+
+    assert metadata[HTML_VISUAL_AGY_METADATA_KEY]["status"] == "success"
+    assert metadata[HTML_VISUAL_AGY_METADATA_KEY]["attempted"] is True
+    prompt = form_data["messages"][1]["content"]
+    assert HTML_VISUAL_AGY_PROMPT_MARKER in prompt
+    assert HTML_VISUAL_FORCE_PROMPT_MARKER in prompt
+
+
+def test_legacy_agy_enabled_false_still_attempts_and_records_success(monkeypatch):
     monkeypatch.setenv("HALOWEBUI_AGY_ENABLED", "false")
+    monkeypatch.setenv(
+        "HALOWEBUI_AGY_COMMAND",
+        _agy_command(f"print({AGY_DESIGN_SPEC!r})"),
+    )
     metadata = _metadata(mode="auto")
 
     form_data = asyncio.run(prepare_html_visual_prompt_overlay(_form_data(), metadata))
 
-    assert metadata[HTML_VISUAL_AGY_METADATA_KEY]["status"] == "disabled"
-    assert metadata[HTML_VISUAL_AGY_METADATA_KEY]["attempted"] is False
+    assert metadata[HTML_VISUAL_AGY_METADATA_KEY]["status"] == "success"
+    assert metadata[HTML_VISUAL_AGY_METADATA_KEY]["attempted"] is True
     assert HTML_VISUAL_PROMPT_MARKER in form_data["messages"][1]["content"]
-    assert HTML_VISUAL_AGY_PROMPT_MARKER not in form_data["messages"][1]["content"]
+    assert HTML_VISUAL_AGY_PROMPT_MARKER in form_data["messages"][1]["content"]
+    assert (
+        HTML_VISUAL_AGY_FALLBACK_PROMPT_MARKER
+        not in form_data["messages"][1]["content"]
+    )
 
 
-def test_invalid_agy_enabled_value_fails_closed(monkeypatch):
-    monkeypatch.setenv("HALOWEBUI_AGY_ENABLED", "flase")
+def test_legacy_agy_enabled_false_still_attempts_and_records_failure(monkeypatch):
+    monkeypatch.setenv("HALOWEBUI_AGY_ENABLED", "false")
+    monkeypatch.setenv(
+        "HALOWEBUI_AGY_COMMAND",
+        _agy_command("import sys; sys.exit(7)"),
+    )
     metadata = _metadata(mode="auto")
+
+    form_data = asyncio.run(prepare_html_visual_prompt_overlay(_form_data(), metadata))
+
+    agy_metadata = metadata[HTML_VISUAL_AGY_METADATA_KEY]
+    assert agy_metadata["status"] == "failed"
+    assert agy_metadata["attempted"] is True
+    assert agy_metadata["reason"] == "nonzero_exit"
+    assert agy_metadata["exit_code"] == 7
+    assert HTML_VISUAL_AGY_PROMPT_MARKER not in form_data["messages"][1]["content"]
+    assert HTML_VISUAL_AGY_FALLBACK_PROMPT_MARKER in form_data["messages"][1]["content"]
+
+
+def test_legacy_unattempted_disabled_status_does_not_block_agy(monkeypatch):
+    monkeypatch.setenv("HALOWEBUI_AGY_ENABLED", "false")
+    monkeypatch.setenv(
+        "HALOWEBUI_AGY_COMMAND",
+        _agy_command(f"print({AGY_DESIGN_SPEC!r})"),
+    )
+    metadata = _metadata(mode="auto")
+    metadata[HTML_VISUAL_AGY_METADATA_KEY] = {
+        "attempted": False,
+        "status": "disabled",
+    }
 
     asyncio.run(prepare_html_visual_prompt_overlay(_form_data(), metadata))
 
-    assert metadata[HTML_VISUAL_AGY_METADATA_KEY]["status"] == "disabled"
-    assert metadata[HTML_VISUAL_AGY_METADATA_KEY]["attempted"] is False
+    assert metadata[HTML_VISUAL_AGY_METADATA_KEY]["status"] == "success"
+    assert metadata[HTML_VISUAL_AGY_METADATA_KEY]["attempted"] is True
 
 
 def test_agy_request_escapes_delimiters_and_preserves_long_request_ends():
@@ -236,32 +286,31 @@ def test_agy_request_escapes_delimiters_and_preserves_long_request_ends():
     assert prompt.count("</user_request>") == 1
 
 
-def test_html_visual_prompt_is_not_injected_without_explicit_feature():
-    metadata = {"features": {"html_visual_surface": "halowebui-web"}}
+def test_server_web_surface_forces_prompt_without_client_feature():
+    metadata = {"server_surface": "halowebui-web"}
+    form_data = apply_html_visual_prompt_overlay(_form_data(), metadata)
+
+    assert should_apply_html_visual_prompt(metadata)
+    assert HTML_VISUAL_FORCE_PROMPT_MARKER in form_data["messages"][1]["content"]
+
+
+def test_html_visual_prompt_and_fallback_reject_client_only_web_claim():
+    metadata = {
+        "features": {
+            "html_visual_artifacts": "force",
+            "html_visual_surface": "halowebui-web",
+        }
+    }
     form_data = apply_html_visual_prompt_overlay(_form_data(), metadata)
 
     assert len(form_data["messages"]) == 2
-
-
-def test_html_visual_prompt_and_force_fallback_require_explicit_web_surface():
-    for metadata in (
-        {"features": {"html_visual_artifacts": "force"}},
-        {
-            "server_surface": "halowebui-web",
-            "features": {"html_visual_artifacts": "force"},
-        },
-    ):
-        form_data = apply_html_visual_prompt_overlay(_form_data(), metadata)
-
-        assert len(form_data["messages"]) == 2
-        assert not should_apply_html_visual_prompt(metadata)
-        assert (
-            append_html_visual_fallback("Plain response", metadata) == "Plain response"
-        )
+    assert not should_apply_html_visual_prompt(metadata)
+    assert append_html_visual_fallback("Plain response", metadata) == "Plain response"
 
 
 def test_html_visual_prompt_flows_into_hermes_run_instructions():
     metadata = {
+        "server_surface": "halowebui-web",
         "chat_id": "chat-1",
         "features": {
             "html_visual_artifacts": "auto",
@@ -280,10 +329,11 @@ def test_html_visual_prompt_flows_into_hermes_run_instructions():
 
 def test_html_visual_prompt_is_idempotent():
     metadata = {
+        "server_surface": "halowebui-web",
         "features": {
             "html_visual_artifacts": True,
             "html_visual_surface": "halowebui-web",
-        }
+        },
     }
     form_data = apply_html_visual_prompt_overlay(_form_data(), metadata)
     form_data = apply_html_visual_prompt_overlay(form_data, metadata)
@@ -336,6 +386,7 @@ def test_agy_success_injects_design_spec_into_model_instructions(monkeypatch):
     prompt = form_data["messages"][1]["content"]
     assert HTML_VISUAL_PROMPT_MARKER in prompt
     assert HTML_VISUAL_AGY_PROMPT_MARKER in prompt
+    assert HTML_VISUAL_AGY_FALLBACK_PROMPT_MARKER not in prompt
     assert "Colors: Use #ffffff" in prompt
     assert "未受信任" in prompt
 
@@ -357,6 +408,7 @@ def test_agy_output_with_extra_instructions_is_rejected(monkeypatch):
     assert metadata[HTML_VISUAL_AGY_METADATA_KEY]["status"] == "invalid"
     assert metadata[HTML_VISUAL_AGY_METADATA_KEY]["reason"] == "invalid_format"
     assert HTML_VISUAL_AGY_PROMPT_MARKER not in form_data["messages"][1]["content"]
+    assert HTML_VISUAL_AGY_FALLBACK_PROMPT_MARKER in form_data["messages"][1]["content"]
 
 
 @pytest.mark.parametrize(
@@ -396,7 +448,7 @@ def test_agy_output_with_extra_instructions_is_rejected(monkeypatch):
         ("   ", "1", "invalid", "empty_command"),
     ],
 )
-def test_agy_failures_keep_existing_prompt_and_force_fallback(
+def test_agy_failures_instruct_main_model_to_design_validate_and_force_fallback(
     monkeypatch, command, timeout, expected_status, expected_reason
 ):
     monkeypatch.setenv("HALOWEBUI_AGY_COMMAND", command)
@@ -415,6 +467,11 @@ def test_agy_failures_keep_existing_prompt_and_force_fallback(
     assert HTML_VISUAL_PROMPT_MARKER in prompt
     assert HTML_VISUAL_FORCE_PROMPT_MARKER in prompt
     assert HTML_VISUAL_AGY_PROMPT_MARKER not in prompt
+    assert HTML_VISUAL_AGY_FALLBACK_PROMPT_MARKER in prompt
+    assert "不要声称 AGY 只是可选" in prompt
+    assert "自行确定上述五项规范" in prompt
+    assert "返回前逐项检查" in prompt
+    assert "不得另外输出 `css`、`javascript` 或 `js`" in prompt
     assert HTML_VISUAL_FALLBACK_MARKER in append_html_visual_fallback(
         "Plain response", metadata
     )
@@ -425,32 +482,27 @@ def test_agy_failures_keep_existing_prompt_and_force_fallback(
     [
         {
             "features": {
-                "html_visual_artifacts": "off",
+                "html_visual_artifacts": "force",
                 "html_visual_surface": "halowebui-web",
             }
         },
         {
-            "features": {
-                "html_visual_artifacts": "force",
-                "html_visual_surface": "telegram",
-            }
-        },
-        {
-            "source": "telegram:webhook",
+            "server_surface": "telegram:webhook",
             "features": {
                 "html_visual_artifacts": "force",
                 "html_visual_surface": "halowebui-web",
             },
         },
         {
+            "server_surface": "plain",
             "features": {
                 "html_visual_artifacts": "force",
-                "html_visual_surface": "plain",
-            }
+                "html_visual_surface": "halowebui-web",
+            },
         },
     ],
 )
-def test_agy_is_never_invoked_outside_enabled_halowebui_web_surface(
+def test_agy_is_never_invoked_without_server_confirmed_halowebui_web_surface(
     monkeypatch, tmp_path, metadata
 ):
     called_path = tmp_path / "agy-called"
@@ -491,6 +543,35 @@ def test_agy_result_is_reused_once_across_retry_rebuild(monkeypatch, tmp_path):
     assert HTML_VISUAL_AGY_PROMPT_MARKER in first_form["messages"][1]["content"]
     assert HTML_VISUAL_AGY_PROMPT_MARKER in retry_form["messages"][1]["content"]
     assert retry_form["messages"][1]["content"].count(AGY_DESIGN_SPEC.strip()) == 1
+
+
+def test_agy_failure_is_reused_across_retry_with_main_model_fallback(
+    monkeypatch, tmp_path
+):
+    count_path = tmp_path / "agy-failure-count"
+    script = (
+        "from pathlib import Path; import sys; "
+        f"p=Path({str(count_path)!r}); "
+        "p.write_text(str(int(p.read_text()) + 1) if p.exists() else '1'); "
+        "sys.exit(7)"
+    )
+    monkeypatch.setenv("HALOWEBUI_AGY_COMMAND", _agy_command(script))
+    metadata = _metadata()
+
+    first_form = asyncio.run(prepare_html_visual_prompt_overlay(_form_data(), metadata))
+    retry_metadata = {**metadata, "native_file_input_cache_retried": True}
+    retry_form = asyncio.run(
+        prepare_html_visual_prompt_overlay(_form_data(), retry_metadata)
+    )
+
+    assert count_path.read_text() == "1"
+    assert retry_metadata[HTML_VISUAL_AGY_METADATA_KEY]["status"] == "failed"
+    assert (
+        HTML_VISUAL_AGY_FALLBACK_PROMPT_MARKER in first_form["messages"][1]["content"]
+    )
+    assert (
+        HTML_VISUAL_AGY_FALLBACK_PROMPT_MARKER in retry_form["messages"][1]["content"]
+    )
 
 
 def test_agy_output_is_bounded_and_rejected(monkeypatch):
@@ -604,10 +685,11 @@ def test_agy_timeout_kills_descendant_process_group(monkeypatch, tmp_path):
 
 def _metadata(mode="force", surface="halowebui-web"):
     return {
+        "server_surface": surface,
         "features": {
             "html_visual_artifacts": mode,
             "html_visual_surface": surface,
-        }
+        },
     }
 
 
@@ -662,6 +744,81 @@ print("ordinary example")
     assert content.count(HTML_VISUAL_FALLBACK_MARKER) == 1
 
 
+@pytest.mark.parametrize("language", ["css", "javascript", "js"])
+def test_force_fallback_removes_standalone_rejected_preview_source(language):
+    rejected = f"""Explanation stays.
+
+```{language}
+window-or-style-source {{ color: red; }}
+```
+"""
+
+    content = append_html_visual_fallback(rejected, _metadata(mode="off"))
+
+    assert content.startswith("Explanation stays.")
+    assert "window-or-style-source" not in content
+    assert content.count("```html\n") == 1
+    assert content.count(HTML_VISUAL_FALLBACK_MARKER) == 1
+    assert has_fenced_html_artifact(content)
+
+
+@pytest.mark.parametrize(
+    "nested_source",
+    [
+        "> ```css\n> body { color: red; }\n> ```",
+        "- ```javascript\n  alert(1)\n  ```",
+        "- item\n    ```css\n    body { color: red; }\n    ```",
+        "> - item\n>     ```css\n>     body { color: red; }\n>     ```",
+        "- item\n\t```javascript\n\talert(1)\n\t```",
+    ],
+)
+def test_force_fallback_removes_nested_rejected_preview_source(nested_source):
+    content = append_html_visual_fallback(
+        f"Explanation stays.\n\n{nested_source}\n",
+        _metadata(),
+    )
+
+    assert nested_source not in content
+    assert "color: red" not in content
+    assert "alert(1)" not in content
+    assert content.count("```html\n") == 1
+    assert has_fenced_html_artifact(content)
+
+
+def test_force_fallback_replaces_nested_source_before_valid_html_fence():
+    content = append_html_visual_fallback(
+        "> ```css\n> body { color: red; }\n> ```\n\n" "```html\n<div>safe</div>\n```",
+        _metadata(),
+    )
+
+    assert "color: red" not in content
+    assert content.count("```html\n") == 1
+    assert has_fenced_html_artifact(content)
+
+
+def test_force_fallback_preserves_hidden_details_across_ordinary_fences():
+    hidden = (
+        '<details type="reasoning" done="true">\n'
+        "<summary>Thinking</summary>\n"
+        '```python\nprint("hidden")\n```\n'
+        "</details>\n\n"
+        "<div>raw</div>\nVisible"
+    )
+
+    content = append_html_visual_fallback(hidden, _metadata())
+
+    assert '<details type="reasoning" done="true">' in content
+    assert "<summary>Thinking</summary>" in content
+    assert '```python\nprint("hidden")\n```' in content
+    assert "<div>raw</div>" not in content
+    artifact = content.split("```html\n", 1)[1]
+    assert "Thinking" not in artifact
+    assert "print(1)" not in artifact
+    assert "Visible" in artifact
+    assert content.count("```html\n") == 1
+    assert has_fenced_html_artifact(content)
+
+
 def test_force_fallback_is_idempotent_and_respects_existing_html_artifact():
     original = "Plain response"
     once = append_html_visual_fallback(original, _metadata())
@@ -680,10 +837,14 @@ def test_force_fallback_is_idempotent_and_respects_existing_html_artifact():
 
 
 def test_force_fallback_remains_idempotent_with_urls_and_backslashes():
-    original = r"See https://example.test and C:\\Users\\example"
+    original = (
+        r"See https://example.test, <https://example.test/docs>, "
+        r"and C:\\Users\\example"
+    )
 
     once = append_html_visual_fallback(original, _metadata())
 
+    assert once.startswith(original)
     assert has_fenced_html_artifact(once)
     assert append_html_visual_fallback(once, _metadata()) == once
 
@@ -715,20 +876,69 @@ def test_html_validation_rejects_malformed_and_external_artifacts():
     )
 
 
-def test_force_fallback_accepts_full_html_document_but_not_bare_fragment():
+def test_force_fallback_replaces_raw_full_html_document_and_bare_fragment():
     document = "<!doctype html><html><body><main>ready</main></body></html>"
     fragment = '<div style="color:#111">ready</div>'
     document_as_text = (
         "```text\n<!doctype html><html><body>example only</body></html>\n```"
     )
 
-    assert append_html_visual_fallback(document, _metadata()) == document
-    assert HTML_VISUAL_FALLBACK_MARKER in append_html_visual_fallback(
-        fragment, _metadata()
-    )
+    document_fallback = append_html_visual_fallback(document, _metadata())
+    fragment_fallback = append_html_visual_fallback(fragment, _metadata())
+
+    assert document_fallback != document
+    assert document not in document_fallback
+    assert document_fallback.count("```html\n") == 1
+    assert HTML_VISUAL_FALLBACK_MARKER in document_fallback
+    assert has_fenced_html_artifact(document_fallback)
+    assert HTML_VISUAL_FALLBACK_MARKER in fragment_fallback
+    assert has_fenced_html_artifact(fragment_fallback)
     assert HTML_VISUAL_FALLBACK_MARKER in append_html_visual_fallback(
         document_as_text, _metadata()
     )
+
+
+@pytest.mark.parametrize(
+    ("source", "raw_tag"),
+    [
+        ("<div>raw</div>", "<div>"),
+        ('<img src="https://example.test/raw.png">', "<img"),
+        ('<script src="https://example.test/raw.js"></script>', "<script"),
+    ],
+)
+def test_force_fallback_removes_bare_html_tags_outside_fences(source, raw_tag):
+    assert not has_html_visual_artifact(source)
+
+    content = append_html_visual_fallback(source, _metadata())
+    outside = content.split("```html\n", 1)[0]
+
+    assert content != source
+    assert raw_tag.lower() not in outside.lower()
+    assert content.count("```html\n") == 1
+    assert HTML_VISUAL_FALLBACK_MARKER in content
+    assert has_html_visual_artifact(content)
+
+
+def test_force_fallback_replaces_safe_html_fence_competing_with_bare_fragment():
+    source = """<div>raw</div>
+
+```html
+<section>safe fenced content</section>
+```
+"""
+
+    assert has_fenced_html_artifact(source)
+    assert not has_html_visual_artifact(source)
+
+    content = append_html_visual_fallback(source, _metadata())
+    outside = content.split("```html\n", 1)[0]
+
+    assert content != source
+    assert "<div" not in outside.lower()
+    assert "<section" not in outside.lower()
+    assert content.count("```html\n") == 1
+    assert content.count(HTML_VISUAL_FALLBACK_MARKER) == 1
+    assert has_html_visual_artifact(content)
 
 
 def test_force_fallback_ignores_html_hidden_in_tool_and_reasoning_details():
@@ -762,12 +972,16 @@ def test_force_fallback_uses_flat_shell_without_nested_card_chrome():
     assert "border:1px solid" not in fallback
 
 
-@pytest.mark.parametrize("mode", ["off", "auto"])
-def test_non_force_modes_never_append_fallback(mode):
-    assert (
-        append_html_visual_fallback("Plain response", _metadata(mode))
-        == "Plain response"
-    )
+@pytest.mark.parametrize("mode", ["off", "auto", None])
+def test_server_web_surface_forces_fallback_for_every_client_mode(mode):
+    metadata = {"server_surface": "halowebui-web"}
+    if mode is not None:
+        metadata["features"] = {"html_visual_artifacts": mode}
+
+    content = append_html_visual_fallback("Plain response", metadata)
+
+    assert HTML_VISUAL_FALLBACK_MARKER in content
+    assert has_fenced_html_artifact(content)
 
 
 @pytest.mark.parametrize(

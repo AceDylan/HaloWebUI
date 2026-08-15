@@ -29,6 +29,7 @@ def _user():
 
 def _metadata(mode="force"):
     return {
+        "server_surface": "halowebui-web",
         "session_id": "session-1",
         "chat_id": "chat-1",
         "message_id": "assistant-1",
@@ -92,7 +93,8 @@ def test_direct_non_streaming_force_mode_finalizes_with_fallback(monkeypatch):
     )
 
     final_content = result["choices"][0]["message"]["content"]
-    assert final_content.startswith("Plain <unsafe>\n\n")
+    assert final_content.startswith("Plain\n\n")
+    assert "<unsafe>" not in final_content
     assert final_content.count(HTML_VISUAL_FALLBACK_MARKER) == 1
     assert upserts[-1][2]["content"] == final_content
     assert events[-1]["data"]["content"] == final_content
@@ -192,7 +194,8 @@ def test_direct_streaming_force_mode_appends_fallback_only_at_finalization(monke
         and event.get("data", {}).get("done") is True
     ]
     final_content = completions[-1]["data"]["content"]
-    assert final_content.startswith("Streamed <unsafe>\n\n")
+    assert final_content.startswith("Streamed\n\n")
+    assert "<unsafe>" not in final_content
     assert final_content.count(HTML_VISUAL_FALLBACK_MARKER) == 1
     assert upserts[-1][2]["content"] == final_content
     assert all(

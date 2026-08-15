@@ -257,6 +257,7 @@ window.discussionUnsafe = true;
             },
             _user(),
             {
+                "server_surface": "halowebui-web",
                 "chat_id": "chat-1",
                 "message_id": "assistant-1",
                 "features": {

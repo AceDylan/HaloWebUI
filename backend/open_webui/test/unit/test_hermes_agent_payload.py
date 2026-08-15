@@ -189,6 +189,7 @@ def _run_hermes_terminal_events(monkeypatch, terminal_events):
     )
 
     metadata = {
+        "server_surface": "halowebui-web",
         "session_id": "session-1",
         "chat_id": "chat-1",
         "message_id": "assistant-1",
@@ -233,7 +234,8 @@ def test_hermes_completed_force_mode_finalizes_with_one_fallback(monkeypatch):
         if event.get("type") == "chat:completion"
         and event.get("data", {}).get("done") is True
     ][-1]
-    assert final_data["content"].startswith("Plain <unsafe>")
+    assert final_data["content"].startswith("Plain")
+    assert "<unsafe>" not in final_data["content"]
     assert '<details type="tool_calls" done="true"' in final_data["content"]
     assert final_data["content"].count(HTML_VISUAL_FALLBACK_MARKER) == 1
     assert upserts[-1][2]["content"] == final_data["content"]

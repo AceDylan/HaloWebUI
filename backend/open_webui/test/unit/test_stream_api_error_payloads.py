@@ -116,6 +116,7 @@ def test_stream_background_task_exception_finalizes_message(monkeypatch):
     )
     user = SimpleNamespace(id="user-1", email="u@example.com", name="User", role="user")
     metadata = {
+        "server_surface": "halowebui-web",
         "session_id": "session-1",
         "chat_id": "chat-1",
         "message_id": "assistant-1",

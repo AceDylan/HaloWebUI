@@ -181,7 +181,7 @@ RUN set -eux; \
             echo "89c6881b6c1999cb8236e7181c2192ae8f372b0413396c0f7bcff83d27ac9c0cc1202795cc0d629ec1ecbf4937d1c294cf4f5e4f9f8e05b1e972e27198313442  ${agy_archive}" \
                 | sha512sum -c -; \
             tar -xzf "${agy_archive}" -C "${agy_extract_dir}"; \
-            agy_binary="$(find "${agy_extract_dir}" -type f -name agy -print -quit)"; \
+            agy_binary="$(find "${agy_extract_dir}" -type f -name antigravity -print -quit)"; \
             test -n "${agy_binary}"; \
             install -m 0755 "${agy_binary}" /usr/local/bin/agy; \
             rm -rf "${agy_archive}" "${agy_extract_dir}"; \

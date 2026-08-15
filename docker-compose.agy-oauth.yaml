@@ -1,0 +1,12 @@
+services:
+  halowebui:
+    environment:
+      HALOWEBUI_AGY_OAUTH_TOKEN_FILE: /run/secrets/halowebui_agy_oauth_token
+    secrets:
+      - source: halowebui_agy_oauth_token
+        target: halowebui_agy_oauth_token
+        mode: 0400
+
+secrets:
+  halowebui_agy_oauth_token:
+    file: ${HALOWEBUI_AGY_OAUTH_TOKEN_HOST_FILE:?set HALOWEBUI_AGY_OAUTH_TOKEN_HOST_FILE to the explicit host token file}

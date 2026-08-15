@@ -72,6 +72,17 @@ docker compose up -d
 
 启动完成后访问 **http://localhost:3000** ，首次注册的用户自动成为管理员。
 
+### AGY OAuth（可选）
+
+AGY 前置设计链需要 OAuth 时，只挂载 token 文件，不要挂载整个主机 `.gemini` 目录。通过可选 Compose override 启用：
+
+```bash
+HALOWEBUI_AGY_OAUTH_TOKEN_HOST_FILE=/root/.gemini/antigravity-cli/antigravity-oauth-token \
+  docker compose -f docker-compose.yaml -f docker-compose.agy-oauth.yaml up -d
+```
+
+该 override 将主机文件作为只读 Docker secret 提供到后端的 `/run/secrets/halowebui_agy_oauth_token`。源必须是非空的普通文件（不接受符号链接、目录、FIFO 或设备），且不得超过 16 KiB。后端仅在每次 AGY 运行的隔离临时 `HOME` 中以 `0600` 暂存 token，并在运行结束后清理；无效源会安全回退且不会记录 token 内容。未使用 override 的默认 `docker compose up -d` 保持不变。
+
 ### 首屏加载优化
 
 如果后端服务器带宽较低，首屏加载可能会变慢。推荐把浏览器访问入口放在 Nginx 或 CDN 后面，让前端静态资源就近缓存，接口和实时聊天仍然转发到后端服务。

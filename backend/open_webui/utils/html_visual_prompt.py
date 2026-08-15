@@ -17,6 +17,7 @@ import secrets
 import shlex
 import shutil
 import signal
+import stat
 import tempfile
 import time
 from html.parser import HTMLParser
@@ -35,12 +36,14 @@ HTML_VISUAL_WEB_SURFACE = "halowebui-web"
 HTML_VISUAL_AGY_COMMAND_ENV = "HALOWEBUI_AGY_COMMAND"
 HTML_VISUAL_AGY_TIMEOUT_ENV = "HALOWEBUI_AGY_TIMEOUT_SECONDS"
 HTML_VISUAL_AGY_WORKDIR_ENV = "HALOWEBUI_AGY_WORKDIR"
+HTML_VISUAL_AGY_OAUTH_TOKEN_FILE_ENV = "HALOWEBUI_AGY_OAUTH_TOKEN_FILE"
 HTML_VISUAL_AGY_DEFAULT_COMMAND = "agy --sandbox --disable-slash-commands -p"
 HTML_VISUAL_AGY_DEFAULT_TIMEOUT_SECONDS = 30.0
 HTML_VISUAL_AGY_MAX_TIMEOUT_SECONDS = 120.0
 HTML_VISUAL_AGY_DEFAULT_WORKDIR = "/tmp"
 HTML_VISUAL_AGY_MAX_INPUT_CHARS = 16 * 1024
 HTML_VISUAL_AGY_MAX_OUTPUT_BYTES = 16 * 1024
+HTML_VISUAL_AGY_MAX_OAUTH_TOKEN_BYTES = 16 * 1024
 HTML_VISUAL_AGY_MAX_CONCURRENCY = 4
 HTML_VISUAL_AGY_QUEUE_TIMEOUT_SECONDS = 1.0
 
@@ -140,6 +143,16 @@ _AGY_SECTION_LINE_RE = re.compile(
     r"^(layout|colors|typography|spacing|components):[ \t]*(\S.*)$",
     re.IGNORECASE,
 )
+_AGY_ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
+_AGY_AUTH_REQUIRED_RE = re.compile(
+    r"(?:"
+    r"\bauthentication(?:\s+is)?\s+required\b"
+    r"|\b(?:login|log\s+in|sign\s+in)(?:\s+is)?\s+required\b"
+    r"|\b(?:not|is\s+not|isn't)\s+authenticated\b"
+    r"|\bplease\s+(?:login|log\s+in|sign\s+in|authenticate)\b"
+    r")",
+    re.IGNORECASE,
+)
 
 
 class _AgyOutputLimitError(Exception):
@@ -149,6 +162,14 @@ class _AgyOutputLimitError(Exception):
 
 
 class _AgyBusyError(Exception):
+    pass
+
+
+class _AgyAuthenticationRequiredError(Exception):
+    pass
+
+
+class _AgyOAuthTokenStagingError(Exception):
     pass
 
 
@@ -228,15 +249,88 @@ def _agy_timeout_seconds() -> float:
     return min(timeout, HTML_VISUAL_AGY_MAX_TIMEOUT_SECONDS)
 
 
-def _agy_subprocess_env() -> dict[str, str]:
+def _agy_subprocess_env(isolated_home: str) -> dict[str, str]:
     """Build the minimal non-secret environment exposed to AGY."""
     subprocess_env = {
         key: value
         for key in _AGY_ENV_ALLOWLIST
         if (value := os.environ.get(key)) is not None
     }
+    subprocess_env["HOME"] = isolated_home
     subprocess_env["NO_COLOR"] = "1"
     return subprocess_env
+
+
+def _stage_agy_oauth_token(isolated_home: str) -> None:
+    """Copy the configured OAuth token alone into AGY's ephemeral HOME."""
+    token_source = os.environ.get(HTML_VISUAL_AGY_OAUTH_TOKEN_FILE_ENV)
+    if not token_source:
+        return
+
+    source_fd: int | None = None
+    try:
+        source_stat = os.stat(token_source, follow_symlinks=False)
+        if not stat.S_ISREG(source_stat.st_mode):
+            raise ValueError
+
+        source_flags = (
+            os.O_RDONLY
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_NOFOLLOW", 0)
+            | getattr(os, "O_NONBLOCK", 0)
+        )
+        source_fd = os.open(token_source, source_flags)
+        opened_stat = os.fstat(source_fd)
+        if (
+            not stat.S_ISREG(opened_stat.st_mode)
+            or (opened_stat.st_dev, opened_stat.st_ino)
+            != (source_stat.st_dev, source_stat.st_ino)
+            or opened_stat.st_size <= 0
+            or opened_stat.st_size > HTML_VISUAL_AGY_MAX_OAUTH_TOKEN_BYTES
+        ):
+            raise ValueError
+
+        token = bytearray()
+        while len(token) <= HTML_VISUAL_AGY_MAX_OAUTH_TOKEN_BYTES:
+            chunk = os.read(
+                source_fd,
+                min(
+                    4096,
+                    HTML_VISUAL_AGY_MAX_OAUTH_TOKEN_BYTES + 1 - len(token),
+                ),
+            )
+            if not chunk:
+                break
+            token.extend(chunk)
+        if not token or len(token) > HTML_VISUAL_AGY_MAX_OAUTH_TOKEN_BYTES:
+            raise ValueError
+    except (OSError, ValueError):
+        raise _AgyOAuthTokenStagingError from None
+    finally:
+        if source_fd is not None:
+            os.close(source_fd)
+
+    gemini_dir = os.path.join(isolated_home, ".gemini")
+    token_dir = os.path.join(gemini_dir, "antigravity-cli")
+    token_destination = os.path.join(token_dir, "antigravity-oauth-token")
+    try:
+        os.makedirs(token_dir, mode=0o700)
+        os.chmod(gemini_dir, 0o700)
+        os.chmod(token_dir, 0o700)
+
+        destination_fd = os.open(
+            token_destination,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+            0o600,
+        )
+        try:
+            os.fchmod(destination_fd, 0o600)
+            with os.fdopen(destination_fd, "wb", closefd=False) as destination_file:
+                destination_file.write(token)
+        finally:
+            os.close(destination_fd)
+    except OSError:
+        raise _AgyOAuthTokenStagingError from None
 
 
 def _get_latest_user_request(form_data: dict[str, Any]) -> str:
@@ -272,6 +366,8 @@ async def _read_bounded_subprocess_stream(
     stream: asyncio.StreamReader | None,
     limit: int,
     stream_name: str,
+    *,
+    detect_auth_required: bool = False,
 ) -> bytes:
     if stream is None:
         return b""
@@ -284,6 +380,13 @@ async def _read_bounded_subprocess_stream(
         output.extend(chunk)
         if len(output) > limit:
             raise _AgyOutputLimitError(stream_name)
+        if detect_auth_required and _agy_authentication_required(output):
+            raise _AgyAuthenticationRequiredError
+
+
+def _agy_authentication_required(output: bytearray) -> bool:
+    text = output.decode("utf-8", errors="replace")
+    return _AGY_AUTH_REQUIRED_RE.search(_AGY_ANSI_ESCAPE_RE.sub("", text)) is not None
 
 
 async def _communicate_with_agy(
@@ -294,13 +397,21 @@ async def _communicate_with_agy(
             process.stdout, HTML_VISUAL_AGY_MAX_OUTPUT_BYTES, "stdout"
         )
     )
+    stderr_task = asyncio.create_task(
+        _read_bounded_subprocess_stream(
+            process.stderr,
+            HTML_VISUAL_AGY_MAX_OUTPUT_BYTES,
+            "stderr",
+            detect_auth_required=True,
+        )
+    )
     wait_task = asyncio.create_task(process.wait())
-    tasks = (stdout_task, wait_task)
+    tasks = (stdout_task, stderr_task, wait_task)
 
     try:
         if process.stdin is not None:
             process.stdin.close()
-        stdout, return_code = await asyncio.gather(*tasks)
+        stdout, _stderr, return_code = await asyncio.gather(*tasks)
         return stdout, return_code
     finally:
         for task in tasks:
@@ -347,16 +458,17 @@ async def _run_agy_process(
     try:
         workdir = tempfile.mkdtemp(prefix="halowebui-agy-", dir=workdir_parent)
         try:
+            _stage_agy_oauth_token(workdir)
             process: asyncio.subprocess.Process | None = None
             try:
                 process = await asyncio.create_subprocess_exec(
                     *command,
                     prompt,
                     cwd=workdir,
-                    env=_agy_subprocess_env(),
+                    env=_agy_subprocess_env(workdir),
                     stdin=asyncio.subprocess.DEVNULL,
                     stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.DEVNULL,
+                    stderr=asyncio.subprocess.PIPE,
                     start_new_session=True,
                 )
                 return await asyncio.wait_for(
@@ -539,6 +651,16 @@ async def prepare_html_visual_prompt_overlay(
         raise
     except _AgyBusyError:
         _record_agy_status(metadata, "unavailable", started_at, reason="busy")
+        return apply_html_visual_prompt_overlay(form_data, metadata)
+    except _AgyAuthenticationRequiredError:
+        _record_agy_status(
+            metadata, "failed", started_at, reason="authentication_required"
+        )
+        return apply_html_visual_prompt_overlay(form_data, metadata)
+    except _AgyOAuthTokenStagingError:
+        _record_agy_status(
+            metadata, "failed", started_at, reason="oauth_token_file_unavailable"
+        )
         return apply_html_visual_prompt_overlay(form_data, metadata)
     except asyncio.TimeoutError:
         _record_agy_status(metadata, "timeout", started_at)

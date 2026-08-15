@@ -1,4 +1,5 @@
 import asyncio
+import os
 import shlex
 import sys
 import time
@@ -12,6 +13,8 @@ from open_webui.utils.html_visual_prompt import (
     HTML_VISUAL_AGY_DEFAULT_COMMAND,
     HTML_VISUAL_AGY_FALLBACK_PROMPT_MARKER,
     HTML_VISUAL_AGY_MAX_INPUT_CHARS,
+    HTML_VISUAL_AGY_MAX_OAUTH_TOKEN_BYTES,
+    HTML_VISUAL_AGY_MAX_OUTPUT_BYTES,
     HTML_VISUAL_AGY_METADATA_KEY,
     HTML_VISUAL_AGY_PROMPT_MARKER,
     HTML_VISUAL_FALLBACK_MARKER,
@@ -589,10 +592,21 @@ def test_agy_output_is_bounded_and_rejected(monkeypatch):
     assert HTML_VISUAL_AGY_PROMPT_MARKER not in form_data["messages"][1]["content"]
 
 
-def test_agy_stderr_is_discarded_without_masking_valid_stdout(monkeypatch):
+def test_agy_bounded_stderr_does_not_mask_valid_stdout(monkeypatch):
+    script = f"import sys; sys.stderr.write('warning\\n'); print({AGY_DESIGN_SPEC!r})"
+    monkeypatch.setenv("HALOWEBUI_AGY_COMMAND", _agy_command(script))
+    metadata = _metadata(mode="auto")
+
+    form_data = asyncio.run(prepare_html_visual_prompt_overlay(_form_data(), metadata))
+
+    assert metadata[HTML_VISUAL_AGY_METADATA_KEY]["status"] == "success"
+    assert HTML_VISUAL_AGY_PROMPT_MARKER in form_data["messages"][1]["content"]
+
+
+def test_agy_auth_detection_ignores_non_prompt_login_terms(monkeypatch):
     script = (
         "import sys; "
-        "sys.stderr.write('warning\\n' * 10000); "
+        "sys.stderr.write('Rendered a login code panel; open authorization settings.\\n'); "
         f"print({AGY_DESIGN_SPEC!r})"
     )
     monkeypatch.setenv("HALOWEBUI_AGY_COMMAND", _agy_command(script))
@@ -602,6 +616,52 @@ def test_agy_stderr_is_discarded_without_masking_valid_stdout(monkeypatch):
 
     assert metadata[HTML_VISUAL_AGY_METADATA_KEY]["status"] == "success"
     assert HTML_VISUAL_AGY_PROMPT_MARKER in form_data["messages"][1]["content"]
+
+
+def test_agy_stderr_is_bounded_and_rejected(monkeypatch):
+    script = (
+        "import os; "
+        f"os.write(2, b'x' * {HTML_VISUAL_AGY_MAX_OUTPUT_BYTES + 1}); "
+        f"print({AGY_DESIGN_SPEC!r})"
+    )
+    monkeypatch.setenv("HALOWEBUI_AGY_COMMAND", _agy_command(script))
+    metadata = _metadata(mode="auto")
+
+    form_data = asyncio.run(prepare_html_visual_prompt_overlay(_form_data(), metadata))
+
+    assert metadata[HTML_VISUAL_AGY_METADATA_KEY]["status"] == "invalid"
+    assert metadata[HTML_VISUAL_AGY_METADATA_KEY]["reason"] == "stderr_too_large"
+    assert HTML_VISUAL_AGY_PROMPT_MARKER not in form_data["messages"][1]["content"]
+
+
+def test_agy_authentication_prompt_fails_fast_and_is_redacted(monkeypatch, caplog):
+    oauth_url = "https://accounts.example.test/oauth?code=secret-device-code"
+    token_marker = "secret-oauth-token"
+    script = (
+        "import sys,time; "
+        f"sys.stderr.write('Authentication required. Open {oauth_url} and enter "
+        f"{token_marker}\\n'); "
+        "sys.stderr.flush(); "
+        "time.sleep(5)"
+    )
+    monkeypatch.setenv("HALOWEBUI_AGY_COMMAND", _agy_command(script))
+    monkeypatch.setenv("HALOWEBUI_AGY_TIMEOUT_SECONDS", "4")
+    metadata = _metadata(mode="auto")
+    caplog.set_level("WARNING", logger=html_visual_prompt.__name__)
+
+    started_at = time.monotonic()
+    form_data = asyncio.run(prepare_html_visual_prompt_overlay(_form_data(), metadata))
+    elapsed = time.monotonic() - started_at
+
+    agy_metadata = metadata[HTML_VISUAL_AGY_METADATA_KEY]
+    assert elapsed < 2
+    assert agy_metadata["status"] == "failed"
+    assert agy_metadata["reason"] == "authentication_required"
+    assert HTML_VISUAL_AGY_PROMPT_MARKER not in form_data["messages"][1]["content"]
+    recorded_output = f"{metadata!r}\n{caplog.text}"
+    assert oauth_url not in recorded_output
+    assert "secret-device-code" not in recorded_output
+    assert token_marker not in recorded_output
 
 
 def test_agy_capacity_exhaustion_falls_back_without_spawning(monkeypatch):
@@ -640,6 +700,163 @@ def test_agy_runs_in_an_isolated_temporary_workdir(monkeypatch, tmp_path):
     assert metadata[HTML_VISUAL_AGY_METADATA_KEY]["status"] == "success"
     assert agy_workdir.startswith(f"{tmp_path}/halowebui-agy-")
     assert not Path(agy_workdir).exists()
+
+
+def test_agy_configured_oauth_token_is_staged_with_secure_mode_and_cleaned_up(
+    monkeypatch, tmp_path
+):
+    token_value = "fake-agy-oauth-token"
+    token_source = tmp_path / "docker-secret"
+    token_source.write_text(token_value)
+    token_source.chmod(0o400)
+    result_path = tmp_path / "agy-token-result"
+    script = (
+        "import os,pathlib,stat; "
+        "home=pathlib.Path(os.environ['HOME']); "
+        "token=home/'.gemini/antigravity-cli/antigravity-oauth-token'; "
+        f"pathlib.Path({str(result_path)!r}).write_text("
+        "str(home)+'\\n'+oct(stat.S_IMODE(token.stat().st_mode))+'\\n'+"
+        f"str(token.read_text() == {token_value!r})+'\\n'+str(pathlib.Path.cwd() == home)); "
+        f"print({AGY_DESIGN_SPEC!r})"
+    )
+    monkeypatch.setenv("HALOWEBUI_AGY_COMMAND", _agy_command(script))
+    monkeypatch.setenv("HALOWEBUI_AGY_WORKDIR", str(tmp_path))
+    monkeypatch.setenv("HALOWEBUI_AGY_OAUTH_TOKEN_FILE", str(token_source))
+    metadata = _metadata(mode="auto")
+
+    asyncio.run(prepare_html_visual_prompt_overlay(_form_data(), metadata))
+
+    staged_home, staged_mode, token_matched, home_matched_cwd = (
+        result_path.read_text().splitlines()
+    )
+    assert metadata[HTML_VISUAL_AGY_METADATA_KEY]["status"] == "success"
+    assert staged_mode == "0o600"
+    assert token_matched == "True"
+    assert home_matched_cwd == "True"
+    assert staged_home.startswith(f"{tmp_path}/halowebui-agy-")
+    assert not Path(staged_home).exists()
+    assert token_source.read_text() == token_value
+
+
+def test_agy_missing_oauth_token_source_fails_without_leaking_or_spawning(
+    monkeypatch, tmp_path, caplog
+):
+    source_marker = "missing-secret-source-marker"
+    token_source = tmp_path / source_marker
+    spawned_path = tmp_path / "agy-spawned"
+    script = (
+        f"import pathlib; pathlib.Path({str(spawned_path)!r}).touch(); "
+        f"print({AGY_DESIGN_SPEC!r})"
+    )
+    monkeypatch.setenv("HALOWEBUI_AGY_COMMAND", _agy_command(script))
+    monkeypatch.setenv("HALOWEBUI_AGY_WORKDIR", str(tmp_path))
+    monkeypatch.setenv("HALOWEBUI_AGY_OAUTH_TOKEN_FILE", str(token_source))
+    metadata = _metadata(mode="auto")
+    caplog.set_level("WARNING", logger=html_visual_prompt.__name__)
+
+    asyncio.run(prepare_html_visual_prompt_overlay(_form_data(), metadata))
+
+    agy_metadata = metadata[HTML_VISUAL_AGY_METADATA_KEY]
+    assert agy_metadata["status"] == "failed"
+    assert agy_metadata["reason"] == "oauth_token_file_unavailable"
+    assert not spawned_path.exists()
+    assert source_marker not in f"{metadata!r}\n{caplog.text}"
+
+
+@pytest.mark.parametrize("source_kind", ["directory", "fifo", "symlink"])
+def test_agy_non_regular_oauth_token_source_is_rejected_without_leaking(
+    monkeypatch, tmp_path, caplog, source_kind
+):
+    token_marker = "non-regular-secret-token-marker"
+    token_source = tmp_path / "invalid-token-source"
+    if source_kind == "directory":
+        token_source.mkdir()
+    elif source_kind == "fifo":
+        os.mkfifo(token_source)
+    else:
+        token_target = tmp_path / "token-target"
+        token_target.write_text(token_marker)
+        token_source.symlink_to(token_target)
+    monkeypatch.setenv(
+        "HALOWEBUI_AGY_COMMAND", _agy_command(f"print({AGY_DESIGN_SPEC!r})")
+    )
+    monkeypatch.setenv("HALOWEBUI_AGY_WORKDIR", str(tmp_path))
+    monkeypatch.setenv("HALOWEBUI_AGY_OAUTH_TOKEN_FILE", str(token_source))
+    metadata = _metadata(mode="auto")
+    caplog.set_level("WARNING", logger=html_visual_prompt.__name__)
+
+    started_at = time.monotonic()
+    asyncio.run(prepare_html_visual_prompt_overlay(_form_data(), metadata))
+    elapsed = time.monotonic() - started_at
+
+    agy_metadata = metadata[HTML_VISUAL_AGY_METADATA_KEY]
+    assert elapsed < 1
+    assert agy_metadata["status"] == "failed"
+    assert agy_metadata["reason"] == "oauth_token_file_unavailable"
+    assert token_marker not in f"{metadata!r}\n{caplog.text}"
+
+
+@pytest.mark.parametrize(
+    ("token_contents", "token_marker"),
+    [
+        (b"", None),
+        (
+            b"oversized-secret-token-marker"
+            + b"x" * HTML_VISUAL_AGY_MAX_OAUTH_TOKEN_BYTES,
+            "oversized-secret-token-marker",
+        ),
+    ],
+    ids=["empty", "oversized"],
+)
+def test_agy_empty_or_oversized_oauth_token_source_is_rejected_without_leaking(
+    monkeypatch, tmp_path, caplog, token_contents, token_marker
+):
+    token_source = tmp_path / "invalid-token"
+    token_source.write_bytes(token_contents)
+    monkeypatch.setenv(
+        "HALOWEBUI_AGY_COMMAND", _agy_command(f"print({AGY_DESIGN_SPEC!r})")
+    )
+    monkeypatch.setenv("HALOWEBUI_AGY_WORKDIR", str(tmp_path))
+    monkeypatch.setenv("HALOWEBUI_AGY_OAUTH_TOKEN_FILE", str(token_source))
+    metadata = _metadata(mode="auto")
+    caplog.set_level("WARNING", logger=html_visual_prompt.__name__)
+
+    asyncio.run(prepare_html_visual_prompt_overlay(_form_data(), metadata))
+
+    agy_metadata = metadata[HTML_VISUAL_AGY_METADATA_KEY]
+    assert agy_metadata["status"] == "failed"
+    assert agy_metadata["reason"] == "oauth_token_file_unavailable"
+    if token_marker is not None:
+        assert token_marker not in f"{metadata!r}\n{caplog.text}"
+
+
+def test_agy_unset_oauth_token_file_does_not_reuse_parent_home(monkeypatch, tmp_path):
+    parent_home = tmp_path / "parent-home"
+    parent_token = parent_home / ".gemini/antigravity-cli/antigravity-oauth-token"
+    parent_token.parent.mkdir(parents=True)
+    parent_token.write_text("parent-token-must-not-be-used")
+    result_path = tmp_path / "agy-unset-token-result"
+    script = (
+        "import os,pathlib; "
+        "home=pathlib.Path(os.environ['HOME']); "
+        "token=home/'.gemini/antigravity-cli/antigravity-oauth-token'; "
+        f"pathlib.Path({str(result_path)!r}).write_text(str(home)+'\\n'+str(token.exists())); "
+        f"print({AGY_DESIGN_SPEC!r})"
+    )
+    monkeypatch.setenv("HOME", str(parent_home))
+    monkeypatch.delenv("HALOWEBUI_AGY_OAUTH_TOKEN_FILE", raising=False)
+    monkeypatch.setenv("HALOWEBUI_AGY_COMMAND", _agy_command(script))
+    monkeypatch.setenv("HALOWEBUI_AGY_WORKDIR", str(tmp_path))
+    metadata = _metadata(mode="auto")
+
+    asyncio.run(prepare_html_visual_prompt_overlay(_form_data(), metadata))
+
+    staged_home, token_exists = result_path.read_text().splitlines()
+    assert metadata[HTML_VISUAL_AGY_METADATA_KEY]["status"] == "success"
+    assert staged_home != str(parent_home)
+    assert token_exists == "False"
+    assert not Path(staged_home).exists()
+    assert parent_token.read_text() == "parent-token-must-not-be-used"
 
 
 def test_agy_subprocess_environment_excludes_parent_secrets(monkeypatch, tmp_path):

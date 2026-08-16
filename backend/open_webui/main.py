@@ -519,7 +519,6 @@ from open_webui.utils.hermes_agent import (
 )
 from open_webui.utils.html_visual_prompt import (
     apply_html_visual_prompt_overlay,
-    prepare_html_visual_prompt_overlay,
 )
 from open_webui.utils.middleware import (
     build_native_file_input_retry_notification,
@@ -1720,7 +1719,10 @@ async def chat_completion(
 
         request.state.metadata = metadata
         form_data["metadata"] = metadata
-        form_data = await prepare_html_visual_prompt_overlay(form_data, metadata)
+        # AGY now runs AFTER the answer completes (design_html_visual_artifact_with_agy
+        # in the response finalizers), so it designs around the actual answer instead
+        # of the question. Only the prompt overlay is applied up front.
+        form_data = apply_html_visual_prompt_overlay(form_data, metadata)
 
         form_data, metadata, events = await process_chat_payload(
             request, form_data, user, metadata, model, tasks=tasks

@@ -14,7 +14,10 @@ from open_webui.models.chats import Chats, can_auto_generate_chat_title
 from open_webui.socket.main import get_event_emitter
 from open_webui.tasks import create_task
 from open_webui.utils.chat import generate_chat_completion
-from open_webui.utils.html_visual_prompt import append_html_visual_fallback
+from open_webui.utils.html_visual_prompt import (
+    append_html_visual_fallback,
+    design_html_visual_artifact_with_agy,
+)
 from open_webui.utils.model_identity import resolve_model_from_lookup
 from open_webui.utils.misc import get_message_list
 from open_webui.utils.models import check_model_access
@@ -795,9 +798,10 @@ async def generate_multi_model_discussion_completion(
                     },
                 ],
             )
-            final_content = append_html_visual_fallback(
+            final_content = await design_html_visual_artifact_with_agy(
                 final_result.get("content", ""), metadata
             )
+            final_content = append_html_visual_fallback(final_content, metadata)
             final_usage_item = {
                 "round": "final",
                 "model": final_model["id"],

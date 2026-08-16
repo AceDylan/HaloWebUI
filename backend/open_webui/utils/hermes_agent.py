@@ -38,7 +38,10 @@ from open_webui.models.chats import Chats
 from open_webui.socket.main import get_event_call, get_event_emitter
 from open_webui.tasks import create_task
 from open_webui.utils.chat_image_refs import materialize_openai_image_message_refs
-from open_webui.utils.html_visual_prompt import append_html_visual_fallback
+from open_webui.utils.html_visual_prompt import (
+    append_html_visual_fallback,
+    design_html_visual_artifact_with_agy,
+)
 
 log = logging.getLogger(__name__)
 log.setLevel(SRC_LOG_LEVELS.get("MAIN", logging.INFO))
@@ -557,6 +560,7 @@ async def run_hermes_agent(request, form_data, user, metadata, model, events, ta
             finalized = True
             content = _serialize_blocks(blocks)
             if successful and not error:
+                content = await design_html_visual_artifact_with_agy(content, metadata)
                 content = append_html_visual_fallback(content, metadata)
             completed_at = int(time.time())
             data = {

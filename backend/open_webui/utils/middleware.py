@@ -87,6 +87,7 @@ from open_webui.utils.image_generation_options import (
 )
 from open_webui.utils.html_visual_prompt import (
     append_html_visual_fallback,
+    design_html_visual_artifact_with_agy,
     get_html_visual_mode,
     should_apply_html_visual_prompt,
 )
@@ -6020,6 +6021,7 @@ async def process_chat_response(
                 allow_base64_image_url_conversion=allow_base64_image_url_conversion,
             )
             if "error" not in response:
+                content = await design_html_visual_artifact_with_agy(content, metadata)
                 content = append_html_visual_fallback(content, metadata)
             response_message = choices[0].setdefault("message", {})
             if isinstance(response_message, dict):
@@ -9993,6 +9995,9 @@ async def process_chat_response(
 
                 final_content = serialize_content_blocks(content_blocks)
                 if not finalize_error_payload:
+                    final_content = await design_html_visual_artifact_with_agy(
+                        final_content, metadata
+                    )
                     final_content = append_html_visual_fallback(final_content, metadata)
 
                 completed_at = int(time.time())
@@ -10279,9 +10284,10 @@ async def process_chat_response(
                     ):
                         content_parts.append(payload["delta"])
 
-                final_content = append_html_visual_fallback(
+                final_content = await design_html_visual_artifact_with_agy(
                     "".join(content_parts), metadata
                 )
+                final_content = append_html_visual_fallback(final_content, metadata)
                 is_ndjson = "application/x-ndjson" in response.headers.get(
                     "Content-Type", ""
                 )

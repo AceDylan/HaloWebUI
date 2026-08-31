@@ -642,6 +642,14 @@
 	};
 
 	const syncThreadLayouts = async () => {
+		// When the original text is hidden (artifact-only mode) the anchor text
+		// is not in the DOM, so resolving selection-thread anchors would fail and
+		// syncThreadLayouts would treat existing threads as invalid and delete
+		// them. Defer layout/validation until the original text is shown again.
+		if (!renderInlineHtmlArtifactOriginalText) {
+			return;
+		}
+
 		if (!contentContainerElement) {
 			threadLayouts = {};
 			if (hadThreadLayouts) {
@@ -703,6 +711,7 @@
 	$: if (contentContainerElement) {
 		currentMessageThreads;
 		$expandedSelectionThreadId;
+		renderInlineHtmlArtifactOriginalText;
 		scheduleThreadLayoutSync();
 	}
 

@@ -1099,6 +1099,8 @@
 	"Your images will appear here after generation.": "生成完成后，图片会显示在这里。",
 	"Copy prompt": "复制提示词",
 	"Open preview": "打开预览",
+	"Show original text": "显示原文",
+	"Hide original text": "隐藏原文",
 	"Save image": "保存图片",
 	"Generated image": "生成图片",
 	"Start with a strong subject, then add lighting, composition, materials, and mood for better results.": "先写清主体，再补充光线、构图、材质和氛围，画面通常会更稳定。",

@@ -13,7 +13,8 @@ import {
 	isActiveHtmlArtifactSnapshotMessage,
 	isHtmlArtifactSourceToken,
 	isInlineHtmlPreviewResizeMessage,
-	shouldMaskStreamingPreviewSource
+	shouldMaskStreamingPreviewSource,
+	shouldRenderInlineHtmlArtifactOriginalText
 } from './html-preview';
 
 const countMatches = (value: string, pattern: RegExp) => value.match(pattern)?.length ?? 0;
@@ -242,6 +243,39 @@ window.done = true;
 		expect(
 			buildInlineHtmlArtifactPreview('plain text', { enabled: true, streaming: false })
 		).toBeNull();
+	});
+
+	it('defaults valid inline artifacts to artifact-only while retaining Markdown fallbacks', () => {
+		const content = 'Explanation\n\n```html\n<main>Inline preview</main>\n```';
+		const preview = buildInlineHtmlArtifactPreview(content, {
+			enabled: true,
+			streaming: false
+		});
+
+		expect(preview).not.toBeNull();
+		expect(shouldRenderInlineHtmlArtifactOriginalText(preview, false)).toBe(false);
+		expect(shouldRenderInlineHtmlArtifactOriginalText(preview, true)).toBe(true);
+		expect(
+			shouldRenderInlineHtmlArtifactOriginalText(
+				buildInlineHtmlArtifactPreview(content, { enabled: true, streaming: true }),
+				false
+			)
+		).toBe(true);
+		expect(
+			shouldRenderInlineHtmlArtifactOriginalText(
+				buildInlineHtmlArtifactPreview(content, { enabled: false, streaming: false }),
+				false
+			)
+		).toBe(true);
+		expect(
+			shouldRenderInlineHtmlArtifactOriginalText(
+				buildInlineHtmlArtifactPreview('plain Markdown', {
+					enabled: true,
+					streaming: false
+				}),
+				false
+			)
+		).toBe(true);
 	});
 
 	it('accepts bounded resize messages for inline preview height', () => {

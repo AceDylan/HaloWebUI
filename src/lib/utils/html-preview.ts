@@ -371,6 +371,11 @@ export const buildInlineHtmlArtifactPreview = (
 	return buildHtmlArtifactPreview(content);
 };
 
+export const shouldRenderInlineHtmlArtifactOriginalText = (
+	preview: string | null,
+	showOriginalText: boolean
+): boolean => !preview || showOriginalText;
+
 export const getCodePreviewEventKey = (
 	language: unknown,
 	code: unknown,

@@ -27,7 +27,8 @@
 		getInlineHtmlPreviewHeight,
 		HTML_PREVIEW_REFERRER_POLICY,
 		HTML_PREVIEW_SANDBOX,
-		INLINE_HTML_PREVIEW_MIN_HEIGHT
+		INLINE_HTML_PREVIEW_MIN_HEIGHT,
+		shouldRenderInlineHtmlArtifactOriginalText
 	} from '$lib/utils/html-preview';
 	import ImagePreview from '$lib/components/common/ImagePreview.svelte';
 	import {
@@ -118,9 +119,13 @@
 	let renderedMessageContent = '';
 	let inlineHtmlArtifactPreview: string | null = null;
 	let hideInlineHtmlArtifactSource = false;
+	let showInlineHtmlArtifactOriginalText = false;
+	let renderInlineHtmlArtifactOriginalText = true;
 	let inlineHtmlPreviewFrame: HTMLIFrameElement | null = null;
 	let inlineHtmlPreviewHeight = INLINE_HTML_PREVIEW_MIN_HEIGHT;
 	let lastInlineHtmlPreviewDocument: string | null = null;
+	let lastInlineHtmlPreviewMessageId: string | null = null;
+	let lastInlineHtmlPreviewMessageContent: string | null = null;
 	let pendingSelection: PendingSelection | null = null;
 	let pendingSelectionPosition: { top: number; left: number } | null = null;
 	let currentMessageThreads: SelectionThread[] = [];
@@ -429,9 +434,24 @@
 	});
 	$: hideInlineHtmlArtifactSource =
 		Boolean(inlineHtmlArtifactPreview) && ($settings?.hideHtmlArtifactCodeBlocks ?? true);
-	$: if (inlineHtmlArtifactPreview !== lastInlineHtmlPreviewDocument) {
+	$: if (
+		inlineHtmlArtifactPreview !== lastInlineHtmlPreviewDocument ||
+		(Boolean(inlineHtmlArtifactPreview) &&
+			(id !== lastInlineHtmlPreviewMessageId ||
+				normalizedContent !== lastInlineHtmlPreviewMessageContent))
+	) {
 		lastInlineHtmlPreviewDocument = inlineHtmlArtifactPreview;
+		lastInlineHtmlPreviewMessageId = inlineHtmlArtifactPreview ? id : null;
+		lastInlineHtmlPreviewMessageContent = inlineHtmlArtifactPreview ? normalizedContent : null;
 		inlineHtmlPreviewHeight = INLINE_HTML_PREVIEW_MIN_HEIGHT;
+		showInlineHtmlArtifactOriginalText = false;
+	}
+	$: renderInlineHtmlArtifactOriginalText = shouldRenderInlineHtmlArtifactOriginalText(
+		inlineHtmlArtifactPreview,
+		showInlineHtmlArtifactOriginalText
+	);
+	$: if (!renderInlineHtmlArtifactOriginalText) {
+		headings = [];
 	}
 	$: renderedMessageContent =
 		!inlineHtmlArtifactPreview && !streaming && ($settings?.responseHtmlFormat ?? false)
@@ -873,6 +893,23 @@
 </script>
 
 <div class="relative overflow-visible">
+	{#if inlineHtmlArtifactPreview}
+		<div class="mb-2 flex justify-end" data-halo-inline-html-original-text-toggle="true">
+			<button
+				type="button"
+				class="inline-flex min-h-8 max-w-full items-center rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-600 transition-colors hover:bg-gray-50 hover:text-gray-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500/60 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-800 dark:hover:text-gray-100"
+				aria-expanded={showInlineHtmlArtifactOriginalText}
+				on:click={() => {
+					showInlineHtmlArtifactOriginalText = !showInlineHtmlArtifactOriginalText;
+				}}
+			>
+				{showInlineHtmlArtifactOriginalText
+					? $i18n.t('Hide original text')
+					: $i18n.t('Show original text')}
+			</button>
+		</div>
+	{/if}
+
 	<!-- svelte-ignore a11y-click-events-have-key-events -->
 	<!-- svelte-ignore a11y-no-static-element-interactions -->
 	<div
@@ -885,61 +922,67 @@
 			? `max-height: ${MAX_CONTENT_HEIGHT}px; overflow: hidden;`
 			: ''}
 	>
-		<Markdown
-			bind:headings
-			{id}
-			content={renderedMessageContent}
-			{model}
-			{save}
-			{streaming}
-			hideHtmlArtifactSource={hideInlineHtmlArtifactSource}
-			{generatedFiles}
-			transitionMode={currentTransitionMode}
-			sourceIds={resolvedSourceIds}
-			{onSourceClick}
-			{onTaskClick}
-			on:update={(e) => {
-				dispatch('update', e.detail);
-			}}
-			on:code={(e) => {
-				const { lang, code } = e.detail;
-				const normalizedLang = String(lang ?? '')
-					.trim()
-					.toLowerCase()
-					.split(/\s+/, 1)[0];
-				const isSvgCode =
-					normalizedLang === 'svg' || (normalizedLang === 'xml' && code.includes('<svg'));
-				const isHtmlArtifact = normalizedLang === 'html';
-				const shouldAutoOpenSvgPreview =
-					$settings?.svgPreviewAutoOpen ?? $settings?.detectArtifacts ?? true;
-				const autoOpenDismissed = $artifactAutoOpenDismissedMessageId === id;
-				const artifactType = isSvgCode ? 'svg' : isHtmlArtifact ? 'iframe' : null;
-				const autoOpenKey = artifactType ? `${id}:${artifactType}:${content}` : null;
+		{#if renderInlineHtmlArtifactOriginalText}
+			<Markdown
+				bind:headings
+				{id}
+				content={renderedMessageContent}
+				{model}
+				{save}
+				{streaming}
+				hideHtmlArtifactSource={hideInlineHtmlArtifactSource}
+				{generatedFiles}
+				transitionMode={currentTransitionMode}
+				sourceIds={resolvedSourceIds}
+				{onSourceClick}
+				{onTaskClick}
+				on:update={(e) => {
+					dispatch('update', e.detail);
+				}}
+				on:code={(e) => {
+					const { lang, code } = e.detail;
+					const normalizedLang = String(lang ?? '')
+						.trim()
+						.toLowerCase()
+						.split(/\s+/, 1)[0];
+					const isSvgCode =
+						normalizedLang === 'svg' || (normalizedLang === 'xml' && code.includes('<svg'));
+					const isHtmlArtifact = normalizedLang === 'html';
+					const shouldAutoOpenSvgPreview =
+						$settings?.svgPreviewAutoOpen ?? $settings?.detectArtifacts ?? true;
+					const autoOpenDismissed = $artifactAutoOpenDismissedMessageId === id;
+					const artifactType = isSvgCode ? 'svg' : isHtmlArtifact ? 'iframe' : null;
+					const autoOpenKey = artifactType ? `${id}:${artifactType}:${content}` : null;
 
-				if (
-					!streaming &&
-					$chatId &&
-					!autoOpenDismissed &&
-					autoOpenKey !== lastAutoOpenedArtifactKey &&
-					((($settings?.detectArtifacts ?? true) && isHtmlArtifact && !inlineHtmlArtifactPreview) ||
-						(shouldAutoOpenSvgPreview && isSvgCode))
-				) {
-					lastAutoOpenedArtifactKey = autoOpenKey;
-					if (isSvgCode) {
-						artifactPreviewTarget.set({ messageId: id, type: 'svg', content: code });
-					} else {
-						artifactPreviewTarget.set({ messageId: id, type: 'iframe' });
+					if (
+						!streaming &&
+						$chatId &&
+						!autoOpenDismissed &&
+						autoOpenKey !== lastAutoOpenedArtifactKey &&
+						((($settings?.detectArtifacts ?? true) &&
+							isHtmlArtifact &&
+							!inlineHtmlArtifactPreview) ||
+							(shouldAutoOpenSvgPreview && isSvgCode))
+					) {
+						lastAutoOpenedArtifactKey = autoOpenKey;
+						if (isSvgCode) {
+							artifactPreviewTarget.set({ messageId: id, type: 'svg', content: code });
+						} else {
+							artifactPreviewTarget.set({ messageId: id, type: 'iframe' });
+						}
+						showOverview.set(false);
+						showArtifacts.set(true);
+						showControls.set(true);
 					}
-					showOverview.set(false);
-					showArtifacts.set(true);
-					showControls.set(true);
-				}
-			}}
-		/>
+				}}
+			/>
+		{/if}
 
 		{#if inlineHtmlArtifactPreview}
 			<div
-				class="mt-4 border-t border-gray-100 pt-4 dark:border-gray-800"
+				class={showInlineHtmlArtifactOriginalText
+					? 'mt-4 border-t border-gray-100 pt-4 dark:border-gray-800'
+					: ''}
 				data-halo-inline-html-preview="true"
 			>
 				<iframe

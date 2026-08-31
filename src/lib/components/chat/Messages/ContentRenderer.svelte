@@ -452,6 +452,8 @@
 	);
 	$: if (!renderInlineHtmlArtifactOriginalText) {
 		headings = [];
+		threadLayouts = {};
+		clearSelectionHighlights();
 	}
 	$: renderedMessageContent =
 		!inlineHtmlArtifactPreview && !streaming && ($settings?.responseHtmlFormat ?? false)

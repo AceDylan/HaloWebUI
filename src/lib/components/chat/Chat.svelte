@@ -2695,6 +2695,13 @@
 	const chatEventHandler = async (event, cb) => {
 		if (event.chat_id === $chatId) {
 			await tick();
+			if (event?.data?.type === 'chat:reload') {
+				// The server appended messages this client has never seen (a hermes
+				// background-task follow-up turn); reload so they render and their
+				// stream attaches to the placeholder message.
+				await loadChat();
+				return;
+			}
 			let message = history.messages[event.message_id];
 
 			if (message) {

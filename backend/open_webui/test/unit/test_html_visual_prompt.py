@@ -1251,3 +1251,30 @@ def test_force_fallback_is_fail_closed_for_plain_text_surfaces(surface):
 
 def test_force_fallback_does_not_create_an_empty_artifact():
     assert append_html_visual_fallback("", _metadata()) == ""
+
+
+def test_agy_html_request_replaces_draft_html_card_with_its_text():
+    from open_webui.utils.html_visual_prompt import _build_agy_html_request_prompt
+
+    content = (
+        "已按要求启动 reclaude 检索，未降级。\n\n"
+        "运行 ID：20260904-225602-9ec6da7a\n\n"
+        "````html\n"
+        '<div style="max-width:920px;margin:0 auto;padding:22px 20px;">\n'
+        '  <div style="font-size:24px;font-weight:750;">GPT-6 上线时间查询</div>\n'
+        "  <div>会话 ID：c67a323f-1f57-4960-8eca-d7114fe51dc4</div>\n"
+        "</div>\n"
+        "````\n"
+    )
+
+    prompt = _build_agy_html_request_prompt(content)
+
+    assert "已按要求启动 reclaude 检索，未降级。" in prompt
+    assert "运行 ID：20260904-225602-9ec6da7a" in prompt
+    # facts that only lived inside the card survive as text ...
+    assert "GPT-6 上线时间查询" in prompt
+    assert "会话 ID：c67a323f-1f57-4960-8eca-d7114fe51dc4" in prompt
+    # ... but the card's markup is not offered to AGY as code to preserve
+    assert "style=" not in prompt
+    assert "&lt;div" not in prompt
+    assert "````" not in prompt

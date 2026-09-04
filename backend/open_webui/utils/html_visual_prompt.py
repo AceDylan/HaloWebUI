@@ -1373,9 +1373,41 @@ Hard output rules:
 """.strip()
 
 
+_FENCED_HTML_BLOCK_RE = re.compile(
+    r"^(?P<fence>`{3,}|~{3,})[ \t]*html\b[^\n]*\n(?P<body>.*?)^(?P=fence)[ \t]*$",
+    re.IGNORECASE | re.MULTILINE | re.DOTALL,
+)
+_HTML_TAG_RE = re.compile(r"<[^>]+>")
+_WHITESPACE_RUN_RE = re.compile(r"[ \t\r\f\v]+")
+
+
+def _fenced_html_artifacts_as_text(answer: str) -> str:
+    """Replace the answer's own fenced HTML card(s) with their visible text.
+
+    The card is the model's draft presentation, not content: AGY re-designs it
+    anyway, and when it sees the source it "preserves" it as a code snippet
+    (an "初始响应代码片段" <pre> block). Keeping only the visible text keeps any
+    facts that exist solely in the card without handing AGY markup to copy.
+    """
+
+    def _to_text(match: "re.Match[str]") -> str:
+        text = _HTML_TAG_RE.sub(" ", match.group("body"))
+        text = html.unescape(text)
+        lines = [
+            _WHITESPACE_RUN_RE.sub(" ", line).strip()
+            for line in text.splitlines()
+        ]
+        text = "\n".join(line for line in lines if line)
+        return f"\n{text}\n" if text else "\n"
+
+    return _FENCED_HTML_BLOCK_RE.sub(_to_text, answer)
+
+
 def _build_agy_html_request_prompt(content: str) -> str:
     answer = _NON_ARTIFACT_DETAILS_RE.sub("", content)
-    answer = _THINKING_BLOCK_RE.sub("", answer).strip()
+    answer = _THINKING_BLOCK_RE.sub("", answer)
+    answer = _fenced_html_artifacts_as_text(answer)
+    answer = _remove_rejected_preview_artifact_source(answer).strip()
     if not answer:
         answer = "(empty answer)"
     escaped_answer = html.escape(answer, quote=False)

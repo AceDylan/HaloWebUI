@@ -105,3 +105,22 @@ export const importHermesSession = async (
 	}
 	return await res.json();
 };
+
+/**
+ * Push one test message through the notification webhook: the URL given here
+ * (the unsaved form value) first, the saved one otherwise.
+ */
+export const testNotificationWebhook = async (
+	token: string,
+	url: string
+): Promise<{ status: boolean }> => {
+	const res = await fetch(`${WEBUI_API_BASE_URL}/hermes/webhook-test`, {
+		method: 'POST',
+		headers: jsonHeaders(token),
+		body: JSON.stringify({ url })
+	});
+	if (!res.ok) {
+		throw await detailOf(res);
+	}
+	return await res.json();
+};

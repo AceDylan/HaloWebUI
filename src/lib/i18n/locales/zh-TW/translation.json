@@ -1729,5 +1729,13 @@
 	"Open Prompts": "開啟提示詞",
 	"Hermes Sessions": "Hermes 工作階段",
 	"Import and open": "匯入並開啟",
-	"No hermes sessions": "沒有可匯入的 hermes 工作階段"
+	"No hermes sessions": "沒有可匯入的 hermes 工作階段",
+	"Task notifications": "任務通知",
+	"Get told when a hermes run or a long reply finishes while you are not looking at it.": "hermes 任務或長回覆在你沒看著頁面時完成，會通知你。",
+	"Browser notifications": "瀏覽器通知",
+	"System notification when a reply completes in a background tab. Needs browser permission once.": "回覆在背景分頁完成時彈出系統通知；首次開啟需授權瀏覽器通知權限。",
+	"Send test message": "傳送測試訊息",
+	"Test message sent": "測試訊息已傳送",
+	"Test message failed": "測試訊息傳送失敗",
+	"Fires when a task finishes and no HaloWebUI tab is open. A Telegram Bot API URL works directly:": "任務完成且沒有任何 HaloWebUI 頁面開啟時觸發。可直接填 Telegram Bot API 網址："
 }

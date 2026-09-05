@@ -63,6 +63,7 @@
 	import ChannelItem from './Sidebar/ChannelItem.svelte';
 	import ChatBubblePlus from '../icons/ChatBubblePlus.svelte';
 	import ChatBubbles from '../icons/ChatBubbles.svelte';
+	import CommandLine from '../icons/CommandLine.svelte';
 	import Search from '../icons/Search.svelte';
 	import ArchiveBox from '../icons/ArchiveBox.svelte';
 
@@ -825,6 +826,23 @@
 			</div>
 		{/if}
 
+		{#if $showSidebar || $mobile}
+			<!-- Hermes 会话：Telegram / QQ / CLI 的会话在网页继续 -->
+			<div class="flex text-gray-700 dark:text-gray-200 px-2">
+				<button
+					class={actionItemClass}
+					type="button"
+					on:click={() => {
+						showHermesSessions = true;
+					}}
+					aria-label={$i18n.t('Hermes Sessions')}
+				>
+					<CommandLine className="size-5" strokeWidth="2" />
+					<span class="text-sm font-medium whitespace-nowrap">{$i18n.t('Hermes Sessions')}</span>
+				</button>
+			</div>
+		{/if}
+
 		{#if !$showSidebar && !$mobile}
 			<div class="mt-3 px-2 flex flex-col items-center gap-2 text-gray-700 dark:text-gray-200">
 				<Tooltip content={$i18n.t('New Chat')}>
@@ -918,9 +936,11 @@
 						}}
 						aria-label={$i18n.t('Hermes Sessions')}
 					>
-						<ChatBubbles className="size-5" strokeWidth="2" />
+						<CommandLine className="size-5" strokeWidth="2" />
 					</button>
 				</Tooltip>
+
+				<ActiveHermesRuns compact buttonClass={iconButtonClass} />
 			</div>
 		{/if}
 

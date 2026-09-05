@@ -17,3 +17,4 @@ def test_hermes_router_exposes_every_endpoint():
     assert ("GET", "/runs") in routes
     assert ("GET", "/sessions") in routes
     assert ("POST", "/sessions/{session_id}/import") in routes
+    assert ("POST", "/webhook-test") in routes

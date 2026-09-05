@@ -12,6 +12,8 @@
 	import { localizeCommonError } from '$lib/utils/common-errors';
 	import Plus from '$lib/components/icons/Plus.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
+	import Switch from '$lib/components/common/Switch.svelte';
+	import { testNotificationWebhook } from '$lib/apis/hermes';
 	import SensitiveInput from '$lib/components/common/SensitiveInput.svelte';
 	import InlineDirtyActions from '$lib/components/admin/Settings/InlineDirtyActions.svelte';
 	import { cloneSettingsSnapshot, isSettingsSnapshotEqual } from '$lib/utils/settings-dirty';
@@ -25,6 +27,8 @@
 	let name = '';
 
 	let webhookUrl = '';
+	let notificationEnabled = false;
+	let testingWebhook = false;
 
 	let JWTTokenCopied = false;
 
@@ -146,6 +150,54 @@
 		}
 	};
 
+	const notificationsDenied = () =>
+		toast.error(
+			$i18n.t(
+				'Response notifications cannot be activated as the website permissions have been denied. Please visit your browser settings to grant the necessary access.'
+			)
+		);
+
+	// The browser grants notification permission only from a user gesture, so the
+	// switch itself asks; the setting is saved at once, not with the profile form.
+	const onNotificationToggle = async (event: CustomEvent<boolean>) => {
+		const wanted = event?.detail ?? notificationEnabled;
+		if (wanted) {
+			const permission =
+				typeof Notification === 'undefined' ? 'denied' : await Notification.requestPermission();
+			if (permission !== 'granted') {
+				await tick();
+				notificationEnabled = false;
+				notificationsDenied();
+				return;
+			}
+		}
+		try {
+			await saveSettings({ notificationEnabled: wanted });
+		} catch (error) {
+			// saveSettings already toasted; put the switch back.
+			await tick();
+			notificationEnabled = !wanted;
+		}
+	};
+
+	const sendWebhookTest = async () => {
+		const url = webhookUrl.trim();
+		if (!url || testingWebhook) return;
+		testingWebhook = true;
+		try {
+			const res = await testNotificationWebhook(localStorage.token, url);
+			if (res?.status) {
+				toast.success($i18n.t('Test message sent'));
+			} else {
+				toast.error($i18n.t('Test message failed'));
+			}
+		} catch (error) {
+			toast.error(formatError(error));
+		} finally {
+			testingWebhook = false;
+		}
+	};
+
 	const createAPIKeyHandler = async () => {
 		APIKey = await createAPIKey(localStorage.token);
 		if (APIKey) {
@@ -159,6 +211,7 @@
 		name = $user?.name;
 		profileImageUrl = $user?.profile_image_url;
 		webhookUrl = $settings?.notifications?.webhook_url ?? '';
+		notificationEnabled = $settings?.notificationEnabled ?? false;
 
 		APIKey = await getAPIKey(localStorage.token).catch((error) => {
 			console.log(error);
@@ -292,19 +345,70 @@
 				/>
 			</div>
 
+		</div>
+	</section>
+
+	<!-- Notifications Section -->
+	<section class="glass-section p-5 space-y-5">
+		<div class="flex items-center gap-3">
+			<div class="glass-icon-badge bg-emerald-50 dark:bg-emerald-950/30">
+				<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-[18px] text-emerald-500 dark:text-emerald-400">
+					<path stroke-linecap="round" stroke-linejoin="round" d="M14.857 17.082a23.848 23.848 0 0 0 5.454-1.31A8.967 8.967 0 0 1 18 9.75V9A6 6 0 0 0 6 9v.75a8.967 8.967 0 0 1-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 0 1-5.714 0m5.714 0a3 3 0 1 1-5.714 0" />
+				</svg>
+			</div>
+			<div class="min-w-0">
+				<div class="text-base font-semibold text-gray-800 dark:text-gray-100">
+					{$i18n.t('Task notifications')}
+				</div>
+				<div class="text-xs text-gray-500 dark:text-gray-400">
+					{$i18n.t('Get told when a hermes run or a long reply finishes while you are not looking at it.')}
+				</div>
+			</div>
+		</div>
+
+		<div class="space-y-3">
+			<!-- Browser notifications -->
+			<div class="glass-item p-4">
+				<div class="flex items-center justify-between gap-3">
+					<div class="min-w-0">
+						<div class="text-sm font-medium text-gray-700 dark:text-gray-200">
+							{$i18n.t('Browser notifications')}
+						</div>
+						<div class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+							{$i18n.t('System notification when a reply completes in a background tab. Needs browser permission once.')}
+						</div>
+					</div>
+					<Switch bind:state={notificationEnabled} on:change={onNotificationToggle} />
+				</div>
+			</div>
+
 			<!-- Webhook URL (conditional) -->
 			{#if $config?.features?.enable_user_webhooks}
-			<div class="glass-item p-4">
-				<div class="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5">
-					{$i18n.t('Webhook URL')}
+				<div class="glass-item p-4">
+					<div class="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5">
+						{$i18n.t('Webhook URL')}
+					</div>
+					<div class="flex items-center gap-2">
+						<input
+							class="flex-1 min-w-0 py-2 px-3 text-sm dark:text-gray-300 glass-input"
+							type="url"
+							bind:value={webhookUrl}
+							placeholder={$i18n.t('Enter your webhook URL')}
+						/>
+						<button
+							class="shrink-0 px-3 py-2 text-xs font-medium border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition disabled:opacity-50 disabled:cursor-not-allowed"
+							type="button"
+							disabled={testingWebhook || !webhookUrl.trim()}
+							on:click={sendWebhookTest}
+						>
+							{$i18n.t('Send test message')}
+						</button>
+					</div>
+					<div class="text-xs text-gray-500 dark:text-gray-400 mt-1.5 break-all">
+						{$i18n.t('Fires when a task finishes and no HaloWebUI tab is open. A Telegram Bot API URL works directly:')}
+						https://api.telegram.org/bot&lt;token&gt;/sendMessage?chat_id=&lt;id&gt;
+					</div>
 				</div>
-				<input
-					class="w-full py-2 px-3 text-sm dark:text-gray-300 glass-input"
-					type="url"
-					bind:value={webhookUrl}
-					placeholder={$i18n.t('Enter your webhook URL')}
-				/>
-			</div>
 			{/if}
 		</div>
 	</section>

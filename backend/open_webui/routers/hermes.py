@@ -20,6 +20,7 @@ user session: the caller is a server-side process, and the chat owner is derived
 from the chat itself.
 """
 
+import asyncio
 import logging
 from typing import Optional
 
@@ -27,6 +28,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from open_webui.env import SRC_LOG_LEVELS
+from open_webui.models.users import Users
 from open_webui.utils.auth import get_verified_user
 from open_webui.utils.hermes_agent import (
     STEER_TEXT_MAX_CHARS,
@@ -41,6 +43,7 @@ from open_webui.utils.hermes_sessions import (
     list_sessions,
     validate_session_id,
 )
+from open_webui.utils.webhook import post_webhook
 from open_webui.utils.hermes_notify import (
     NOTIFICATION_PROMPT_MAX_CHARS,
     HermesNotifyError,
@@ -155,3 +158,37 @@ async def import_hermes_session(
     except Exception as e:
         log.exception(f"hermes session import failed for {session_id}: {e}")
         raise HTTPException(status_code=500, detail="failed to import the hermes session")
+
+
+WEBHOOK_TEST_URL_MAX_CHARS = 2048
+
+
+class HermesWebhookTestForm(BaseModel):
+    url: Optional[str] = Field(default=None, max_length=WEBHOOK_TEST_URL_MAX_CHARS)
+
+
+@router.post("/webhook-test")
+async def test_notification_webhook(
+    request: Request, form_data: HermesWebhookTestForm, user=Depends(get_verified_user)
+):
+    """Push one test message through the caller's notification webhook (the URL
+    in the form, else the saved one), so a Telegram/Slack/generic target can be
+    checked from the settings page before the first long run finishes."""
+    if not getattr(request.app.state.config, "ENABLE_USER_WEBHOOKS", True):
+        raise HTTPException(status_code=403, detail="user webhooks are disabled")
+    url = (form_data.url or "").strip() or (Users.get_user_webhook_url_by_id(user.id) or "")
+    if not url:
+        raise HTTPException(status_code=400, detail="no webhook url")
+    if not url.lower().startswith(("http://", "https://")):
+        raise HTTPException(status_code=400, detail="webhook url must start with http(s)://")
+    name = getattr(request.app.state, "WEBUI_NAME", "HaloWebUI")
+    delivered = await asyncio.to_thread(
+        post_webhook,
+        name,
+        url,
+        f"✅ {name} webhook test\n\n"
+        "任务在没有打开页面时完成，会推送到这里。\n"
+        "Task completions will be pushed here while no tab is open.",
+        {"action": "test", "message": "webhook test", "title": name, "url": "", "user": user.name},
+    )
+    return {"status": bool(delivered)}

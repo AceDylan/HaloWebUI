@@ -2245,5 +2245,13 @@
 	"Search result. Use it only if this model supports image generation.": "Search result. Use it only if this model supports image generation.",
 	"Hermes Sessions": "",
 	"Import and open": "",
-	"No hermes sessions": ""
+	"No hermes sessions": "",
+	"Task notifications": "",
+	"Get told when a hermes run or a long reply finishes while you are not looking at it.": "",
+	"Browser notifications": "",
+	"System notification when a reply completes in a background tab. Needs browser permission once.": "",
+	"Send test message": "",
+	"Test message sent": "",
+	"Test message failed": "",
+	"Fires when a task finishes and no HaloWebUI tab is open. A Telegram Bot API URL works directly:": ""
 }

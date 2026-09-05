@@ -6083,8 +6083,10 @@ async def process_chat_response(
                         },
                     )
 
-                    # Send a webhook notification if the user is not active
-                    if get_active_status_by_user_id(user.id) is None:
+                    # Send a webhook notification if the user is not active.
+                    # (get_active_status_by_user_id returns True/False, never
+                    # None - `is None` made this branch unreachable.)
+                    if not get_active_status_by_user_id(user.id):
                         webhook_url = Users.get_user_webhook_url_by_id(user.id)
                         if webhook_url:
                             post_webhook(
@@ -10085,7 +10087,9 @@ async def process_chat_response(
 
                 # Send a webhook notification if the user is not active. This is
                 # post-response work and must never delay the live chat completion event.
-                if get_active_status_by_user_id(user.id) is None:
+                # (get_active_status_by_user_id returns True/False, never None -
+                # `is None` made this branch unreachable.)
+                if not get_active_status_by_user_id(user.id):
                     webhook_url = Users.get_user_webhook_url_by_id(user.id)
                     if webhook_url:
                         post_webhook(

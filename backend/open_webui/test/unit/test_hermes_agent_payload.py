@@ -278,3 +278,76 @@ def test_hermes_failed_force_mode_does_not_append_fallback(monkeypatch):
     assert final_data["error"] == {"content": "provider unavailable"}
     assert HTML_VISUAL_FALLBACK_MARKER not in final_data["content"]
     assert HTML_VISUAL_FALLBACK_MARKER not in upserts[-1][2]["content"]
+
+
+def test_run_payload_continues_when_last_message_is_the_assistant():
+    """"Continue response" replays an assistant-terminated chat; hermes rejects
+    a run with no user turn, so the payload must ask for a continuation."""
+    form_data = {
+        "messages": [
+            {"role": "user", "content": "Write a long report"},
+            {"role": "assistant", "content": "Section 1 ..."},
+        ]
+    }
+
+    payload = _build_run_payload(form_data, {"chat_id": "c1"}, "hermes-agent")
+
+    assert payload["input"] == hermes_agent.CONTINUE_RUN_INPUT
+    # the cut-off answer stays in history so hermes knows what to continue
+    assert payload["conversation_history"][-1] == {
+        "role": "assistant",
+        "content": "Section 1 ...",
+    }
+
+
+def test_run_payload_fills_in_an_attachment_only_turn():
+    """A file submitted with no text leaves an empty user message, which
+    /v1/runs rejects with "Missing 'input' field"."""
+    form_data = {"messages": [{"role": "user", "content": ""}]}
+
+    payload = _build_run_payload(form_data, {"chat_id": "c1"}, "hermes-agent")
+
+    assert payload["input"] == hermes_agent.ATTACHMENT_ONLY_RUN_INPUT
+    assert "conversation_history" not in payload
+
+
+def test_run_payload_keeps_a_real_user_message_untouched():
+    form_data = {
+        "messages": [
+            {"role": "assistant", "content": "Section 1 ..."},
+            {"role": "user", "content": "  keep me  "},
+        ]
+    }
+
+    payload = _build_run_payload(form_data, {"chat_id": "c1"}, "hermes-agent")
+
+    assert payload["input"] == "  keep me  "
+
+
+def test_run_payload_keeps_an_image_only_turn_as_a_message_array():
+    image = {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAA"}}
+    form_data = {"messages": [{"role": "user", "content": [image]}]}
+
+    payload = _build_run_payload(form_data, {"chat_id": "c1"}, "hermes-agent")
+
+    assert payload["input"] == [{"role": "user", "content": [image]}]
+
+
+def test_webhook_summary_drops_the_tool_transcript_and_caps_length():
+    content = (
+        "Here is the answer.\n"
+        '<details type="tool_calls" done="true" id="hermes-1" name="terminal" '
+        'arguments="{}" result="{}">\n<summary>Tool Executed</summary>\n</details>\n'
+        "\n\n\nAnd the risk note."
+    )
+
+    summary = hermes_agent._webhook_summary(content)
+
+    assert "<details" not in summary
+    assert "Here is the answer." in summary
+    assert "And the risk note." in summary
+    assert "\n\n\n" not in summary
+
+    long_summary = hermes_agent._webhook_summary("x" * 5000)
+    assert len(long_summary) == hermes_agent.WEBHOOK_CONTENT_MAX_CHARS + 1
+    assert long_summary.endswith("\u2026")

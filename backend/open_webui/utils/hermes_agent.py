@@ -35,13 +35,20 @@ import aiohttp
 
 from open_webui.env import AIOHTTP_CLIENT_SESSION_SSL, SRC_LOG_LEVELS
 from open_webui.models.chats import Chats
-from open_webui.socket.main import get_event_call, get_event_emitter
+from open_webui.models.users import Users
+from open_webui.socket.main import (
+    get_active_status_by_user_id,
+    get_event_call,
+    get_event_emitter,
+)
 from open_webui.tasks import create_task
 from open_webui.utils.chat_image_refs import materialize_openai_image_message_refs
 from open_webui.utils.html_visual_prompt import (
+    _fenced_html_artifacts_as_text,
     append_html_visual_fallback,
     design_html_visual_artifact_with_agy,
 )
+from open_webui.utils.webhook import post_webhook
 
 log = logging.getLogger(__name__)
 log.setLevel(SRC_LOG_LEVELS.get("MAIN", logging.INFO))
@@ -67,6 +74,24 @@ except ValueError:
 # event carrying inlined base64 images (hermes resolves MEDIA:<path> tags,
 # up to 5MB per image) arrives as a single multi-MB line.
 HERMES_EVENTS_READ_BUFSIZE = 64 * 1024 * 1024
+
+# /v1/runs needs a user turn to start from. Two UI actions do not provide one:
+# "continue response" replays a chat whose last message is the assistant's, and
+# an attachment-only submit carries no text. Both used to die on a 400 before
+# the run started ("Missing 'input' field" / "No user message found in input"),
+# so say out loud what the user meant instead.
+CONTINUE_RUN_INPUT = (
+    "Continue your previous reply from exactly where it stopped. "
+    "Do not repeat what you already wrote, and do not restart the task."
+)
+ATTACHMENT_ONLY_RUN_INPUT = (
+    "The attached file(s) are the request; no other text was provided. "
+    "Work with them and report what you find."
+)
+
+# A completion webhook is read on a phone: no tool transcript, no artifact
+# source, and short enough that Telegram/Bark render it in one screen.
+WEBHOOK_CONTENT_MAX_CHARS = 1200
 
 
 def _model_upstream_id(model) -> str:
@@ -236,6 +261,70 @@ def _history_text_content(content) -> str:
     return "\n".join(text_parts)
 
 
+def _content_has_text(content) -> bool:
+    """True when `content` carries at least one non-blank text part."""
+    if isinstance(content, str):
+        return bool(content.strip())
+    if isinstance(content, list):
+        for part in content:
+            if isinstance(part, str) and part.strip():
+                return True
+            if isinstance(part, dict) and part.get("type") in {"text", "input_text"}:
+                if str(part.get("text") or part.get("content") or "").strip():
+                    return True
+        return False
+    return bool(str(content or "").strip())
+
+
+_DETAILS_BLOCK_RE = re.compile(
+    r"<details\b[^>]*>.*?</details>", re.IGNORECASE | re.DOTALL
+)
+_BLANK_RUN_RE = re.compile(r"\n{3,}")
+
+
+def _webhook_summary(content: str) -> str:
+    """The answer as it should read on a phone, not as it renders in the chat."""
+    text = _DETAILS_BLOCK_RE.sub("", str(content or ""))
+    text = _fenced_html_artifacts_as_text(text)
+    text = _BLANK_RUN_RE.sub("\n\n", text).strip()
+    if len(text) > WEBHOOK_CONTENT_MAX_CHARS:
+        text = text[:WEBHOOK_CONTENT_MAX_CHARS].rstrip() + "\u2026"
+    return text
+
+
+async def _post_completion_webhook(request, user, metadata, title, content):
+    """Push a finished hermes run to the user's notification webhook.
+
+    hermes runs return from main.chat_completion before process_chat_response,
+    so the completion webhook that lives there never fires for them - and hermes
+    turns are exactly the long ones the user walks away from. An open tab is
+    covered by the browser notification, so only push when none is connected.
+    """
+    try:
+        if get_active_status_by_user_id(user.id):
+            return
+        webhook_url = Users.get_user_webhook_url_by_id(user.id)
+        if not webhook_url:
+            return
+        summary = _webhook_summary(content)
+        chat_url = f"{request.app.state.config.WEBUI_URL}/c/{metadata['chat_id']}"
+        heading = f"{title} - {chat_url}" if title else chat_url
+        await asyncio.to_thread(
+            post_webhook,
+            request.app.state.WEBUI_NAME,
+            webhook_url,
+            f"{heading}\n\n{summary}",
+            {
+                "action": "chat",
+                "message": summary,
+                "title": title or "",
+                "url": chat_url,
+            },
+        )
+    except Exception as e:
+        log.warning(f"hermes completion webhook failed: {e}")
+
+
 def _build_run_payload(form_data, metadata, upstream_model_id):
     messages = form_data.get("messages") or []
 
@@ -254,6 +343,9 @@ def _build_run_payload(form_data, metadata, upstream_model_id):
         else:
             history.append({"role": role, "content": content})
 
+    # No trailing user turn means the UI asked to continue the assistant's own
+    # last message ("continue response"), which stays in the history below.
+    continuing = bool(history) and history[-1].get("role") != "user"
     user_message = ""
     if history and history[-1].get("role") == "user":
         user_message = history.pop()["content"]
@@ -268,9 +360,16 @@ def _build_run_payload(form_data, metadata, upstream_model_id):
     # The runs API accepts a string input or an OpenAI-style message array.  A
     # multimodal content list is a list of parts, not a list of messages; pass
     # it as the content of a user message so the API can find the user turn.
+    fallback_input = CONTINUE_RUN_INPUT if continuing else ATTACHMENT_ONLY_RUN_INPUT
     if isinstance(user_message, list):
-        run_input = [{"role": "user", "content": user_message}]
+        run_input = (
+            [{"role": "user", "content": user_message}]
+            if user_message
+            else fallback_input
+        )
     else:
+        if not _content_has_text(user_message):
+            user_message = fallback_input
         run_input = user_message
 
     payload = {
@@ -592,6 +691,7 @@ async def run_hermes_agent(request, form_data, user, metadata, model, events, ta
                 )
             except Exception as e:
                 log.warning(f"hermes completion persist failed: {e}")
+            await _post_completion_webhook(request, user, metadata, title, content)
             # Post-response bookkeeping (title/tags/follow-ups), same as the
             # normal chat flow in process_chat_response.
             try:

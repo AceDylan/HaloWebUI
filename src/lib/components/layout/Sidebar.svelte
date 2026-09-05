@@ -56,6 +56,7 @@
 	import Plus from '../icons/Plus.svelte';
 	import Tooltip from '../common/Tooltip.svelte';
 	import Folders from './Sidebar/Folders.svelte';
+	import ActiveHermesRuns from './Sidebar/ActiveHermesRuns.svelte';
 	import { getChannels, createNewChannel } from '$lib/apis/channels';
 	import ChannelModal from './Sidebar/ChannelModal.svelte';
 	import ChannelItem from './Sidebar/ChannelItem.svelte';
@@ -1044,6 +1045,10 @@
 							</div>
 						{/if}
 					</Folder>
+				{/if}
+
+				{#if !search && !$selectedAssistantScene}
+					<ActiveHermesRuns />
 				{/if}
 
 				<Folder

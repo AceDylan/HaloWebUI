@@ -44,13 +44,45 @@ const shouldBypass = (request, url) => {
 		return true;
 	}
 
+	// Range requests (download managers, media seeking) get partial 206
+	// responses the Cache API cannot store; leave them to the browser.
+	if (request.headers.has('range')) {
+		return true;
+	}
+
 	return EXCLUDED_PREFIXES.some((prefix) => url.pathname.startsWith(prefix));
+};
+
+// Only complete same-origin 200s are worth keeping. A 206, a redirect or an
+// error must never be cached, and caching is always best-effort: a body that
+// breaks halfway (flaky tunnel) is the browser's problem to retry, not a reason
+// to fail the page.
+const isCacheableResponse = (response) =>
+	Boolean(response) && response.status === 200 && response.type === 'basic';
+
+const putInCache = async (cacheName, request, response) => {
+	try {
+		const cache = await caches.open(cacheName);
+		await cache.put(request, response);
+	} catch (error) {
+		// Ignored on purpose; see isCacheableResponse.
+	}
+};
+
+const cacheInBackground = (event, cacheName, request, response) => {
+	if (!isCacheableResponse(response)) {
+		return;
+	}
+	const pending = putInCache(cacheName, request, response.clone());
+	if (event && typeof event.waitUntil === 'function') {
+		event.waitUntil(pending);
+	}
 };
 
 const precacheUrl = async (cache, url) => {
 	try {
 		const response = await fetch(url, { cache: 'no-store' });
-		if (response.ok) {
+		if (isCacheableResponse(response)) {
 			await cache.put(url, response.clone());
 		}
 	} catch (error) {
@@ -71,6 +103,8 @@ self.addEventListener('install', (event) => {
 self.addEventListener('activate', (event) => {
 	event.waitUntil(
 		(async () => {
+			// A new build hash means a new pair of caches; everything older is
+			// dropped so hashed chunks from previous deploys stop piling up.
 			const cacheNames = await caches.keys();
 			await Promise.all(
 				cacheNames.map((name) => {
@@ -85,25 +119,25 @@ self.addEventListener('activate', (event) => {
 	);
 });
 
-const handleNavigationRequest = async (request) => {
+const handleNavigationRequest = async (event, request) => {
 	try {
 		const response = await fetch(request);
-		const cache = await caches.open(SHELL_CACHE);
-		if (response.ok) {
-			await cache.put(request, response.clone());
-		}
+		cacheInBackground(event, SHELL_CACHE, request, response);
 		return response;
 	} catch (error) {
 		const cache = await caches.open(SHELL_CACHE);
-		return (
+		const fallback =
 			(await cache.match(request, { ignoreSearch: true })) ||
 			(await cache.match('/')) ||
-			(await cache.match('/settings'))
-		);
+			(await cache.match('/settings'));
+		if (fallback) {
+			return fallback;
+		}
+		throw error;
 	}
 };
 
-const handleAssetRequest = async (request) => {
+const handleAssetRequest = async (event, request) => {
 	const cache = await caches.open(ASSET_CACHE);
 	const cached = await cache.match(request);
 	if (cached) {
@@ -111,23 +145,22 @@ const handleAssetRequest = async (request) => {
 	}
 
 	const response = await fetch(request);
-	if (response.ok) {
-		await cache.put(request, response.clone());
-	}
+	cacheInBackground(event, ASSET_CACHE, request, response);
 	return response;
 };
 
-const handleManifestRequest = async (request) => {
+const handleManifestRequest = async (event, request) => {
 	try {
 		const response = await fetch(request, { cache: 'no-store' });
-		const cache = await caches.open(SHELL_CACHE);
-		if (response.ok) {
-			await cache.put(request, response.clone());
-		}
+		cacheInBackground(event, SHELL_CACHE, request, response);
 		return response;
 	} catch (error) {
 		const cache = await caches.open(SHELL_CACHE);
-		return (await cache.match(request)) || (await cache.match('/manifest.json'));
+		const fallback = (await cache.match(request)) || (await cache.match('/manifest.json'));
+		if (fallback) {
+			return fallback;
+		}
+		throw error;
 	}
 };
 
@@ -140,16 +173,16 @@ self.addEventListener('fetch', (event) => {
 	}
 
 	if (request.mode === 'navigate') {
-		event.respondWith(handleNavigationRequest(request));
+		event.respondWith(handleNavigationRequest(event, request));
 		return;
 	}
 
 	if (url.pathname === '/manifest.json') {
-		event.respondWith(handleManifestRequest(request));
+		event.respondWith(handleManifestRequest(event, request));
 		return;
 	}
 
 	if (isCacheableAsset(url.pathname)) {
-		event.respondWith(handleAssetRequest(request));
+		event.respondWith(handleAssetRequest(event, request));
 	}
 });

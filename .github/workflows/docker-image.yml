@@ -33,5 +33,6 @@ jobs:
             dylanha009/halowebui:custom
             dylanha009/halowebui:latest
           build-args: |
+            BUILD_HASH=${{ github.sha }}
             INSTALL_PROFILE=local-rag
             INSTALL_AGY=true

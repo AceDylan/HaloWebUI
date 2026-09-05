@@ -57,6 +57,7 @@
 		negative_prompt?: string | null;
 		steps?: number | null;
 		background?: string | null;
+		quality?: string | null;
 		image_route_mode?: string | null;
 	};
 
@@ -251,6 +252,14 @@
 		{ value: 'transparent', labelZh: '透明', labelEn: 'Transparent' },
 		{ value: 'white', labelZh: '白色', labelEn: 'White' },
 		{ value: 'black', labelZh: '黑色', labelEn: 'Black' }
+	];
+
+	// gpt-image quality tiers; '' keeps the upstream default (auto)
+	const openaiQualityOptions = [
+		{ value: '', labelZh: '自动', labelEn: 'Auto' },
+		{ value: 'low', labelZh: '低', labelEn: 'Low' },
+		{ value: 'medium', labelZh: '中', labelEn: 'Medium' },
+		{ value: 'high', labelZh: '高', labelEn: 'High' }
 	];
 
 	const countOptions = [1, 2, 3, 4];
@@ -686,6 +695,12 @@
 		hasBuiltinImage &&
 		Boolean(builtinModelMeta?.supports_background) &&
 		openAIRouteUsesExactSize;
+	$: canUseOpenAIQuality =
+		imageGenerationEnabled &&
+		!loading &&
+		hasBuiltinImage &&
+		Boolean(builtinModelMeta?.supports_quality) &&
+		openAIRouteUsesExactSize;
 	$: canUseSteps = imageGenerationEnabled && !loading && !hasBuiltinImage;
 	$: canUseNegativePrompt = imageGenerationEnabled && !loading && !hasBuiltinImage;
 	$: canUseQuality =
@@ -779,6 +794,7 @@
 	})();
 	$: currentCount = Math.max(1, Math.min(Number(imageGenerationOptions?.n ?? 1) || 1, 4));
 	$: currentBackground = `${imageGenerationOptions?.background ?? ''}`;
+	$: currentOpenAIQuality = `${imageGenerationOptions?.quality ?? ''}`;
 	$: currentSteps = Math.max(0, Math.min(Number(imageGenerationOptions?.steps ?? 0) || 0, 80));
 	$: currentQuality = hasBuiltinResolutionOption
 		? `${imageGenerationOptions?.resolution ?? resolutionOptions[0]?.value ?? '1k'}`
@@ -1161,6 +1177,39 @@
 							</div>
 						</div>
 
+						{#if builtinModelMeta?.supports_quality}
+							<div>
+								<div class="mb-1.5 flex items-center justify-between">
+									<div class="text-xs font-medium text-gray-600 dark:text-gray-300">
+										{tr('质量', 'Quality')}
+									</div>
+									<div class="text-[11px] text-gray-400">
+										{canUseOpenAIQuality
+											? tr('低档最快最省，高档细节最完整', 'Low is fastest, high keeps the most detail')
+											: tr('当前接口不支持', 'Not supported on this route')}
+									</div>
+								</div>
+								<div class="grid grid-cols-4 gap-1.5">
+									{#each openaiQualityOptions as option}
+										<button
+											type="button"
+											disabled={!canUseOpenAIQuality && option.value !== ''}
+											class="rounded-lg border px-2 py-1.5 text-xs font-medium transition
+													{currentOpenAIQuality === option.value
+												? 'border-teal-400 bg-white text-teal-700 dark:border-teal-400/60 dark:bg-teal-500/15 dark:text-teal-100'
+												: 'border-gray-200 bg-white text-gray-700 hover:border-gray-300 dark:border-gray-700 dark:bg-gray-900/60 dark:text-gray-200'}
+													{!canUseOpenAIQuality && option.value !== '' ? optionDisabledClass : ''}"
+											on:click={() => {
+												if (canUseOpenAIQuality || option.value === '')
+													setOption({ quality: option.value || null });
+											}}
+										>
+											{tr(option.labelZh, option.labelEn)}
+										</button>
+									{/each}
+								</div>
+							</div>
+						{/if}
 						<div>
 							<div class="mb-1.5 flex items-center justify-between">
 								<div class="text-xs font-medium text-gray-600 dark:text-gray-300">

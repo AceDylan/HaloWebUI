@@ -13,6 +13,11 @@
 	import ArrowDownTray from '$lib/components/icons/ArrowDownTray.svelte';
 	import ArrowsPointingOut from '$lib/components/icons/ArrowsPointingOut.svelte';
 	import Clipboard from '$lib/components/icons/Clipboard.svelte';
+	import DocumentArrowDown from '$lib/components/icons/DocumentArrowDown.svelte';
+	import DocumentArrowUpSolid from '$lib/components/icons/DocumentArrowUpSolid.svelte';
+	import MagnifyingGlass from '$lib/components/icons/MagnifyingGlass.svelte';
+	import XMark from '$lib/components/icons/XMark.svelte';
+	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import PhotoSolid from '$lib/components/icons/PhotoSolid.svelte';
 	import Sparkles from '$lib/components/icons/Sparkles.svelte';
 	import { WEBUI_NAME, user } from '$lib/stores';
@@ -32,6 +37,17 @@
 		parseImageSize,
 		type LearnedImageConstraint
 	} from '$lib/utils/workspace-image-generation';
+	import {
+		collectImageTemplateTags,
+		filterImageTemplates,
+		isJsonPromptTemplate,
+		mergeImageTemplates,
+		normalizeImportedImageTemplates,
+		serializeImageTemplates,
+		sortImageTemplates,
+		type ImageTemplate,
+		type ImageTemplateSort
+	} from '$lib/utils/image-templates';
 
 	type GeneratedImage = {
 		url: string;
@@ -55,24 +71,7 @@
 		category?: string;
 	};
 
-	type ImageGenerationTemplate = {
-		id: string;
-		name: string;
-		tags: string[];
-		createdAt: number;
-		updatedAt: number;
-		config: {
-			prompt?: string;
-			negativePrompt?: string;
-			model?: string;
-			size?: string;
-			aspectRatio?: string;
-			resolution?: string;
-			steps?: number;
-			numberOfImages?: string;
-			background?: string;
-		};
-	};
+	type ImageGenerationTemplate = ImageTemplate;
 
 	type GalleryImage = {
 		id: string;
@@ -115,6 +114,7 @@
 		showNegativePrompt?: boolean;
 		background?: string;
 		customBackground?: string;
+		quality?: string;
 		learnedConstraints?: Record<string, LearnedImageConstraint>;
 	};
 
@@ -244,6 +244,8 @@
 	let showNegativePrompt = false;
 	let background = 'auto';
 	let customBackground = '';
+	// gpt-image quality tier; auto omits the field so the upstream default applies
+	let quality = 'auto';
 
 	// 标签页状态
 	let activeTab: TabKey = 'workbench';
@@ -252,6 +254,14 @@
 	let templateName = '';
 	let templateTags = '';
 	let savedTemplates: ImageGenerationTemplate[] = [];
+	let templateSearchQuery = '';
+	let templateTagFilter = '';
+	let templateSortBy: ImageTemplateSort = 'recent';
+	let templateFileInput: HTMLInputElement | null = null;
+	const activeTagChipClass =
+		'border-gray-900 bg-gray-900 text-white dark:border-gray-100 dark:bg-gray-100 dark:text-gray-900';
+	const idleTagChipClass =
+		'border-gray-200 bg-white text-gray-600 hover:bg-gray-100 dark:border-gray-700 dark:bg-gray-900/60 dark:text-gray-300 dark:hover:bg-gray-800';
 
 	// 图库相关
 	let galleryImages: GalleryImage[] = [];
@@ -402,6 +412,7 @@
 			showNegativePrompt = Boolean(prefs?.showNegativePrompt);
 			background = `${prefs?.background ?? 'auto'}`.trim() || 'auto';
 			customBackground = `${prefs?.customBackground ?? ''}`.trim();
+			quality = `${prefs?.quality ?? 'auto'}`.trim() || 'auto';
 
 			learnedConstraints =
 				prefs?.learnedConstraints && typeof prefs.learnedConstraints === 'object'
@@ -458,6 +469,7 @@
 	);
 	$: showsResolutionControl = Boolean(selectedModelMeta?.supports_resolution);
 	$: showsStepsControl = !showsResolutionControl;
+	$: showsQualityControl = Boolean(selectedModelMeta?.supports_quality);
 	$: activeSize = usingCustomSize ? `${customSizeInput ?? ''}`.trim() : selectedPresetSize;
 	$: activeSizeLabel =
 		usingCustomSize && activeSize ? activeSize : usingCustomSize ? $i18n.t('Custom size') : selectedPresetSize;
@@ -557,6 +569,7 @@
 				showNegativePrompt,
 				background,
 				customBackground,
+				quality,
 				learnedConstraints
 			})
 		: '';
@@ -628,7 +641,7 @@
 		try {
 			const raw = localStorage.getItem(WORKSPACE_IMAGE_TEMPLATES_KEY);
 			if (raw) {
-				savedTemplates = JSON.parse(raw);
+				savedTemplates = normalizeImportedImageTemplates(JSON.parse(raw));
 			}
 		} catch (error) {
 			console.warn('Failed to load templates', error);
@@ -657,7 +670,8 @@
 				resolution: selectedResolution || undefined,
 				steps: steps > 0 ? steps : undefined,
 				numberOfImages: numberOfImages !== '1' ? numberOfImages : undefined,
-				background: background !== 'auto' ? background : undefined
+				background: background !== 'auto' ? background : undefined,
+				quality: showsQualityControl && quality !== 'auto' ? quality : undefined
 			}
 		};
 
@@ -696,9 +710,67 @@
 		if (config.steps !== undefined) steps = config.steps;
 		if (config.numberOfImages) numberOfImages = config.numberOfImages;
 		if (config.background) background = config.background;
+		if (config.quality) quality = config.quality;
 
 		toast.success($i18n.t('Template loaded'));
 	};
+
+	const persistTemplates = () => {
+		localStorage.setItem(WORKSPACE_IMAGE_TEMPLATES_KEY, JSON.stringify(savedTemplates));
+	};
+
+	const importTemplatesFromFile = async (event: Event) => {
+		const input = event.currentTarget as HTMLInputElement | null;
+		const file = input?.files?.[0];
+		if (input) input.value = '';
+		if (!file) return;
+		try {
+			const incoming = normalizeImportedImageTemplates(JSON.parse(await file.text()));
+			if (incoming.length === 0) {
+				toast.error($i18n.t('Invalid template file'));
+				return;
+			}
+			const merged = mergeImageTemplates(savedTemplates, incoming);
+			savedTemplates = merged.templates;
+			persistTemplates();
+			toast.success(
+				$i18n.t('Imported {{added}} templates, skipped {{skipped}} duplicates', {
+					added: merged.added,
+					skipped: merged.skipped
+				})
+			);
+		} catch (error) {
+			console.warn('Failed to import templates', error);
+			toast.error($i18n.t('Invalid template file'));
+		}
+	};
+
+	const exportTemplates = () => {
+		const blob = new Blob([serializeImageTemplates(savedTemplates)], { type: 'application/json' });
+		const url = URL.createObjectURL(blob);
+		const anchor = document.createElement('a');
+		anchor.href = url;
+		anchor.download = `image-templates-${new Date().toISOString().slice(0, 10)}.json`;
+		document.body.appendChild(anchor);
+		anchor.click();
+		anchor.remove();
+		setTimeout(() => URL.revokeObjectURL(url), 1000);
+	};
+
+	const copyTemplatePrompt = async (template: ImageGenerationTemplate) => {
+		if (!template.config.prompt) return;
+		await copyToClipboard(template.config.prompt);
+		toast.success($i18n.t('Copied'));
+	};
+
+	$: templateTagOptions = collectImageTemplateTags(savedTemplates);
+	$: visibleTemplates = sortImageTemplates(
+		filterImageTemplates(savedTemplates, { query: templateSearchQuery, tag: templateTagFilter }),
+		templateSortBy
+	);
+	$: if (templateTagFilter && !templateTagOptions.some((option) => option.tag === templateTagFilter)) {
+		templateTagFilter = '';
+	}
 
 	const deleteTemplate = (id: string) => {
 		savedTemplates = savedTemplates.filter((t) => t.id !== id);
@@ -1108,6 +1180,7 @@
 						: background !== 'auto'
 							? background
 							: undefined,
+				quality: showsQualityControl && quality !== 'auto' ? quality : undefined,
 				credential_source:
 					selectedModelMeta?.source === 'personal' || selectedModelMeta?.source === 'shared'
 						? selectedModelMeta.source
@@ -1615,6 +1688,28 @@
 							</div>
 						</div>
 
+						{#if showsQualityControl}
+							<!-- gpt-image 质量档位 -->
+							<div class="space-y-1.5">
+								<div class="text-xs font-medium text-gray-500 dark:text-gray-400">
+									{$i18n.t('Quality')}
+								</div>
+								<HaloSelect
+									bind:value={quality}
+									options={[
+										{ value: 'auto', label: $i18n.t('Auto') },
+										{ value: 'low', label: $i18n.t('Low') },
+										{ value: 'medium', label: $i18n.t('Medium') },
+										{ value: 'high', label: $i18n.t('High') }
+									]}
+									className="w-full text-xs"
+								/>
+								<div class="text-xs text-gray-500 dark:text-gray-400">
+									{$i18n.t('Low is fastest and cheapest; high keeps the most detail.')}
+								</div>
+							</div>
+						{/if}
+
 						<!-- 背景参数 -->
 						<div class="space-y-1.5">
 							<div class="text-xs font-medium text-gray-500 dark:text-gray-400">
@@ -1820,63 +1915,197 @@
 		<!-- 提示词管理标签页 -->
 		<div class="space-y-4">
 			<div class="workspace-section">
-				<div class="flex items-center justify-between mb-4">
-					<div class="text-lg font-semibold text-gray-900 dark:text-gray-100">
-						{$i18n.t('Saved Templates')}
+				<div class="mb-4 flex flex-wrap items-center justify-between gap-3">
+					<div>
+						<div class="text-lg font-semibold text-gray-900 dark:text-gray-100">
+							{$i18n.t('Saved Templates')}
+						</div>
+						<div class="text-xs text-gray-500 dark:text-gray-400">
+							{$i18n.t('{{count}} templates', { count: savedTemplates.length })}
+						</div>
+					</div>
+					<div class="flex flex-wrap items-center gap-2">
+						<input
+							bind:this={templateFileInput}
+							type="file"
+							accept="application/json,.json"
+							class="hidden"
+							on:change={importTemplatesFromFile}
+						/>
+						<button
+							type="button"
+							class="workspace-secondary-button text-xs"
+							on:click={() => templateFileInput?.click()}
+						>
+							<DocumentArrowUpSolid className="size-3.5" />
+							<span>{$i18n.t('Import templates')}</span>
+						</button>
+						<button
+							type="button"
+							class="workspace-secondary-button text-xs"
+							disabled={savedTemplates.length === 0}
+							on:click={exportTemplates}
+						>
+							<DocumentArrowDown className="size-3.5" />
+							<span>{$i18n.t('Export templates')}</span>
+						</button>
 					</div>
 				</div>
 
 				{#if savedTemplates.length > 0}
-					<div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-						{#each savedTemplates as template}
-							<div class="glass-item p-4 space-y-3">
-								<div class="flex items-start justify-between">
-									<div class="min-w-0 flex-1">
-										<div class="text-sm font-semibold text-gray-900 dark:text-gray-100 truncate">
+					<div class="mb-3 flex flex-wrap items-center gap-2">
+						<div class="relative min-w-[12rem] flex-1">
+							<MagnifyingGlass
+								className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-gray-400"
+							/>
+							<input
+								bind:value={templateSearchQuery}
+								placeholder={$i18n.t('Search templates')}
+								class="glass-input w-full py-2 pl-9 pr-8 text-sm text-gray-800 dark:text-gray-100"
+							/>
+							{#if templateSearchQuery}
+								<button
+									type="button"
+									class="absolute right-2 top-1/2 -translate-y-1/2 rounded-full p-1 text-gray-400 transition hover:text-gray-600 dark:hover:text-gray-200"
+									aria-label={$i18n.t('Clear')}
+									on:click={() => (templateSearchQuery = '')}
+								>
+									<XMark className="size-3.5" />
+								</button>
+							{/if}
+						</div>
+						<HaloSelect
+							bind:value={templateSortBy}
+							options={[
+								{ value: 'recent', label: $i18n.t('Newest first') },
+								{ value: 'name', label: $i18n.t('Name') }
+							]}
+							className="w-36 text-xs"
+						/>
+					</div>
+
+					{#if templateTagOptions.length > 0}
+						<div class="mb-4 flex flex-wrap gap-1.5">
+							<button
+								type="button"
+								class="rounded-full border px-2.5 py-1 text-xs transition {templateTagFilter === ''
+									? activeTagChipClass
+									: idleTagChipClass}"
+								on:click={() => (templateTagFilter = '')}
+							>
+								{$i18n.t('All')} · {savedTemplates.length}
+							</button>
+							{#each templateTagOptions as option (option.tag)}
+								<button
+									type="button"
+									class="max-w-full truncate rounded-full border px-2.5 py-1 text-xs transition {templateTagFilter ===
+									option.tag
+										? activeTagChipClass
+										: idleTagChipClass}"
+									on:click={() =>
+										(templateTagFilter = templateTagFilter === option.tag ? '' : option.tag)}
+								>
+									{option.tag} · {option.count}
+								</button>
+							{/each}
+						</div>
+					{/if}
+
+					{#if visibleTemplates.length > 0}
+						<div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+							{#each visibleTemplates as template (template.id)}
+								<div class="glass-item flex h-full min-w-0 flex-col p-4">
+									<div class="min-w-0">
+										<div
+											class="line-clamp-2 break-words text-sm font-semibold leading-snug text-gray-900 dark:text-gray-100"
+											title={template.name}
+										>
 											{template.name}
 										</div>
 										{#if template.tags.length > 0}
-											<div class="flex flex-wrap gap-1 mt-1">
+											<div class="mt-1.5 flex flex-wrap gap-1">
 												{#each template.tags as tag}
-													<span
-														class="text-xs px-2 py-0.5 rounded-full bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400"
+													<button
+														type="button"
+														class="max-w-full truncate rounded-full bg-gray-100 px-2 py-0.5 text-[11px] text-gray-600 transition hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-400 dark:hover:bg-gray-700"
+														on:click={() => (templateTagFilter = tag)}
 													>
 														{tag}
-													</span>
+													</button>
 												{/each}
 											</div>
 										{/if}
 									</div>
-								</div>
 
-								{#if template.config.prompt}
-									<div class="text-xs text-gray-600 dark:text-gray-400 line-clamp-2">
-										{template.config.prompt}
+									{#if template.config.prompt}
+										<div
+											class="mt-3 line-clamp-4 flex-1 whitespace-pre-wrap break-words text-xs leading-relaxed text-gray-600 dark:text-gray-400 {isJsonPromptTemplate(
+												template.config.prompt
+											)
+												? 'font-mono'
+												: ''}"
+											title={template.config.prompt}
+										>
+											{template.config.prompt}
+										</div>
+									{:else}
+										<div class="mt-3 flex-1 text-xs italic text-gray-400">
+											{$i18n.t('No prompt')}
+										</div>
+									{/if}
+
+									<div
+										class="mt-3 flex items-center gap-2 border-t border-gray-200/60 pt-3 dark:border-gray-700/50"
+									>
+										<button
+											type="button"
+											class="workspace-secondary-button min-w-0 flex-1 px-3 py-1.5 text-xs"
+											on:click={() => {
+												loadTemplate(template);
+												activeTab = 'workbench';
+											}}
+										>
+											{$i18n.t('Load')}
+										</button>
+										<Tooltip content={$i18n.t('Copy prompt')}>
+											<button
+												type="button"
+												class="workspace-secondary-button px-2.5 py-1.5 text-xs"
+												disabled={!template.config.prompt}
+												aria-label={$i18n.t('Copy prompt')}
+												on:click={() => copyTemplatePrompt(template)}
+											>
+												<Clipboard className="size-3.5" />
+											</button>
+										</Tooltip>
+										<Tooltip content={$i18n.t('Delete')}>
+											<button
+												type="button"
+												class="workspace-secondary-button px-2.5 py-1.5 text-xs text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/40"
+												aria-label={$i18n.t('Delete')}
+												on:click={() => deleteTemplate(template.id)}
+											>
+												<svg class="size-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+													<path
+														stroke-linecap="round"
+														stroke-linejoin="round"
+														stroke-width="2"
+														d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+													/>
+												</svg>
+											</button>
+										</Tooltip>
 									</div>
-								{/if}
-
-								<div class="flex gap-2">
-									<button
-										type="button"
-										class="workspace-secondary-button w-full text-xs"
-										on:click={() => {
-											loadTemplate(template);
-											activeTab = 'workbench';
-										}}
-									>
-										{$i18n.t('Load')}
-									</button>
-									<button
-										type="button"
-										class="workspace-secondary-button text-xs px-3"
-										on:click={() => deleteTemplate(template.id)}
-									>
-										{$i18n.t('Delete')}
-									</button>
 								</div>
+							{/each}
+						</div>
+					{:else}
+						<div class="workspace-empty-state">
+							<div class="text-sm text-gray-500 dark:text-gray-400">
+								{$i18n.t('No templates match')}
 							</div>
-						{/each}
-					</div>
+						</div>
+					{/if}
 				{:else}
 					<div class="workspace-empty-state">
 						<div

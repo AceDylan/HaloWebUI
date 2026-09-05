@@ -153,13 +153,15 @@ const COMMON_POLICY_META = [
 	'<meta name="viewport" content="width=device-width, initial-scale=1.0">',
 	'<meta charset="UTF-8">'
 ];
-const PREVIEW_POLICY_META = [
-	`<meta ${PREVIEW_POLICY_MARKER} http-equiv="Content-Security-Policy" content="${HTML_PREVIEW_CSP}">`,
-	...COMMON_POLICY_META,
-	PREVIEW_NAVIGATION_GUARD,
-	PREVIEW_RESIZE_BRIDGE,
-	PREVIEW_SNAPSHOT_BRIDGE
-].join('');
+const buildPreviewPolicyMeta = (labels: HtmlPreviewLabels = DEFAULT_HTML_PREVIEW_LABELS) =>
+	[
+		`<meta ${PREVIEW_POLICY_MARKER} http-equiv="Content-Security-Policy" content="${HTML_PREVIEW_CSP}">`,
+		...COMMON_POLICY_META,
+		PREVIEW_NAVIGATION_GUARD,
+		PREVIEW_RESIZE_BRIDGE,
+		PREVIEW_SNAPSHOT_BRIDGE,
+		buildPreviewInteractionsBridge(labels)
+	].join('');
 const EXPORT_POLICY_META = [
 	`<meta ${EXPORT_POLICY_MARKER} http-equiv="Content-Security-Policy" content="${HTML_EXPORT_CSP}">`,
 	...COMMON_POLICY_META
@@ -196,7 +198,7 @@ const stripInjectedPreviewPolicies = (html: unknown) =>
 			''
 		)
 		.replace(
-			/<script\b(?=[^>]*\bdata-halo-html-preview-(?:snapshot|export|resize)=["']true["'])[^>]*>[\s\S]*?<\/script>/gi,
+			/<script\b(?=[^>]*\bdata-halo-html-preview-(?:snapshot|export|resize|interactions)=["']true["'])[^>]*>[\s\S]*?<\/script>/gi,
 			''
 		);
 
@@ -221,8 +223,10 @@ const hardenHtmlDocument = (html: unknown, policyMeta: string): string => {
 	return `<!DOCTYPE html><html lang="en"><head>${policyMeta}</head><body>${stripLeadingDoctype(source)}</body></html>`;
 };
 
-export const hardenHtmlPreviewDocument = (html: unknown): string =>
-	hardenHtmlDocument(html, PREVIEW_POLICY_META);
+export const hardenHtmlPreviewDocument = (
+	html: unknown,
+	labels: HtmlPreviewLabels = DEFAULT_HTML_PREVIEW_LABELS
+): string => hardenHtmlDocument(html, buildPreviewPolicyMeta(labels));
 
 export const hardenHtmlArtifactExportDocument = (html: unknown): string => {
 	const source = stripInjectedPreviewPolicies(html)
@@ -277,10 +281,12 @@ type ArtifactParts = {
 	html: string[];
 	css: string[];
 	javascript: string[];
+	/** Source token raw(s) behind each html entry, so callers can locate it in the Markdown. */
+	htmlRaws: string[][];
 };
 
 const collectArtifactParts = (content: string): ArtifactParts => {
-	const parts: ArtifactParts = { html: [], css: [], javascript: [] };
+	const parts: ArtifactParts = { html: [], css: [], javascript: [], htmlRaws: [] };
 	const tokens = marked.lexer(stripThinkingBlocks(content));
 	let pendingRawDoctypeIndex = -1;
 
@@ -291,6 +297,7 @@ const collectArtifactParts = (content: string): ArtifactParts => {
 			const code = String(token.text ?? '');
 			if (language === 'html') {
 				parts.html.push(code);
+				parts.htmlRaws.push([String(token.raw ?? '')]);
 			} else if (language === 'css') {
 				parts.css.push(code);
 			} else if (language === 'javascript' || language === 'js') {
@@ -307,12 +314,15 @@ const collectArtifactParts = (content: string): ArtifactParts => {
 		const raw = String(token.raw ?? token.text ?? '').trim();
 		if (/^<!doctype\s+html\b[^>]*>$/i.test(raw)) {
 			parts.html.push(raw);
+			parts.htmlRaws.push([raw]);
 			pendingRawDoctypeIndex = parts.html.length - 1;
 		} else if (/^<html\b/i.test(raw)) {
 			if (pendingRawDoctypeIndex === parts.html.length - 1) {
 				parts.html[pendingRawDoctypeIndex] = `${parts.html[pendingRawDoctypeIndex]}${raw}`;
+				parts.htmlRaws[pendingRawDoctypeIndex] = [...parts.htmlRaws[pendingRawDoctypeIndex], raw];
 			} else {
 				parts.html.push(raw);
+				parts.htmlRaws.push([raw]);
 			}
 			pendingRawDoctypeIndex = -1;
 		} else if (/^<style\b/i.test(raw)) {
@@ -329,7 +339,10 @@ const collectArtifactParts = (content: string): ArtifactParts => {
 	return parts;
 };
 
-export const buildHtmlArtifactPreview = (content: unknown): string | null => {
+export const buildHtmlArtifactPreview = (
+	content: unknown,
+	options: { labels?: HtmlPreviewLabels } = {}
+): string | null => {
 	if (typeof content !== 'string' || !content.trim()) {
 		return null;
 	}
@@ -352,23 +365,24 @@ export const buildHtmlArtifactPreview = (content: unknown): string | null => {
 		} else if (/<html\b[^>]*>/i.test(document)) {
 			document = insertAfterOpeningTag(document, 'html', `<head>${style}</head>`);
 		}
-		return hardenHtmlPreviewDocument(document);
+		return hardenHtmlPreviewDocument(document, options.labels);
 	}
 
 	return hardenHtmlPreviewDocument(
-		`<!DOCTYPE html><html lang="en"><head>${style}</head><body>${mergedHtml}</body></html>`
+		`<!DOCTYPE html><html lang="en"><head>${style}</head><body>${mergedHtml}</body></html>`,
+		options.labels
 	);
 };
 
 export const buildInlineHtmlArtifactPreview = (
 	content: unknown,
-	options: { enabled: boolean; streaming: boolean }
+	options: { enabled: boolean; streaming: boolean; labels?: HtmlPreviewLabels }
 ): string | null => {
 	if (!options.enabled || options.streaming) {
 		return null;
 	}
 
-	return buildHtmlArtifactPreview(content);
+	return buildHtmlArtifactPreview(content, { labels: options.labels });
 };
 
 export const shouldRenderInlineHtmlArtifactOriginalText = (
@@ -392,4 +406,263 @@ export const getCodePreviewEventKey = (
 	}
 
 	return `${normalizedLanguage}\u0000${normalizedCode}`;
+};
+
+// ---------------------------------------------------------------------------
+// Preview interactions: copy buttons on <pre>, click-to-zoom on <img>, and
+// same-origin image inlining. The iframe stays an opaque-origin sandbox; every
+// action that needs the page's privileges (clipboard, lightbox, authenticated
+// fetch) is delegated to the parent through postMessage.
+// ---------------------------------------------------------------------------
+
+export type HtmlPreviewLabels = { copy: string; copied: string; zoom: string };
+
+export const DEFAULT_HTML_PREVIEW_LABELS: HtmlPreviewLabels = {
+	copy: 'Copy',
+	copied: 'Copied',
+	zoom: 'Click to enlarge'
+};
+
+export const HTML_PREVIEW_COPY_MESSAGE_TYPE = 'halo-html-preview-copy';
+export const HTML_PREVIEW_IMAGE_MESSAGE_TYPE = 'halo-html-preview-image';
+export const HTML_PREVIEW_COPY_MAX_CHARS = 200_000;
+export const HTML_PREVIEW_IMAGE_ALT_MAX_CHARS = 500;
+
+export const isInlineHtmlPreviewCopyMessage = (
+	data: unknown
+): data is { type: typeof HTML_PREVIEW_COPY_MESSAGE_TYPE; text: string } =>
+	typeof data === 'object' &&
+	data !== null &&
+	(data as { type?: unknown }).type === HTML_PREVIEW_COPY_MESSAGE_TYPE &&
+	typeof (data as { text?: unknown }).text === 'string' &&
+	(data as { text: string }).text.length > 0 &&
+	(data as { text: string }).text.length <= HTML_PREVIEW_COPY_MAX_CHARS;
+
+export const isInlineHtmlPreviewImageMessage = (
+	data: unknown
+): data is { type: typeof HTML_PREVIEW_IMAGE_MESSAGE_TYPE; src: string; alt?: string } =>
+	typeof data === 'object' &&
+	data !== null &&
+	(data as { type?: unknown }).type === HTML_PREVIEW_IMAGE_MESSAGE_TYPE &&
+	typeof (data as { src?: unknown }).src === 'string' &&
+	/^data:image\//i.test((data as { src: string }).src) &&
+	(typeof (data as { alt?: unknown }).alt === 'undefined' ||
+		typeof (data as { alt?: unknown }).alt === 'string');
+
+const SAME_ORIGIN_PREVIEW_IMAGE_PATH_RE =
+	/^\/(?:api\/v1\/files\/[A-Za-z0-9_-]+\/content(?:\/[^?#"'\s]*)?|cache\/[^?#"'\s]+)(?:\?[^#"'\s]*)?$/;
+const IMG_SRC_ATTRIBUTE_RE = /(<img\b[^>]*?\ssrc\s*=\s*)(?:"([^"]*)"|'([^']*)')/gi;
+
+/** The same-origin path for an <img src> the parent may fetch on the preview's behalf, else null. */
+export const normalizeSameOriginPreviewImageSource = (
+	src: unknown,
+	origin: string = ''
+): string | null => {
+	const value = String(src ?? '')
+		.trim()
+		.replace(/&amp;/g, '&');
+	if (!value) {
+		return null;
+	}
+	let path = value;
+	if (/^[a-z][a-z0-9+.-]*:/i.test(value) && !/^https?:\/\//i.test(value)) {
+		return null;
+	}
+	if (/^https?:\/\//i.test(value)) {
+		const base = String(origin ?? '')
+			.trim()
+			.replace(/\/+$/, '');
+		if (!base || !value.toLowerCase().startsWith(`${base.toLowerCase()}/`)) {
+			return null;
+		}
+		path = value.slice(base.length);
+	}
+	if (value.startsWith('//')) {
+		return null;
+	}
+	return SAME_ORIGIN_PREVIEW_IMAGE_PATH_RE.test(path) ? path : null;
+};
+
+export const collectSameOriginPreviewImageSources = (html: unknown, origin: string = ''): string[] => {
+	const sources: string[] = [];
+	for (const match of String(html ?? '').matchAll(IMG_SRC_ATTRIBUTE_RE)) {
+		const path = normalizeSameOriginPreviewImageSource(match[2] ?? match[3] ?? '', origin);
+		if (path && !sources.includes(path)) {
+			sources.push(path);
+		}
+	}
+	return sources;
+};
+
+/** Rewrites same-origin <img src> values to the data: URLs `resolve` returns; others are left alone. */
+export const inlineHtmlPreviewImages = async (
+	html: string,
+	resolve: (path: string) => Promise<string | null>,
+	origin: string = ''
+): Promise<string> => {
+	const sources = collectSameOriginPreviewImageSources(html, origin);
+	if (sources.length === 0) {
+		return html;
+	}
+	const resolved = new Map<string, string>();
+	await Promise.all(
+		sources.map(async (path) => {
+			const dataUrl = await resolve(path).catch(() => null);
+			if (typeof dataUrl === 'string' && /^data:image\//i.test(dataUrl)) {
+				resolved.set(path, dataUrl);
+			}
+		})
+	);
+	if (resolved.size === 0) {
+		return html;
+	}
+	return html.replace(
+		IMG_SRC_ATTRIBUTE_RE,
+		(whole: string, prefix: string, doubleQuoted?: string, singleQuoted?: string) => {
+			const path = normalizeSameOriginPreviewImageSource(doubleQuoted ?? singleQuoted ?? '', origin);
+			const dataUrl = path ? resolved.get(path) : undefined;
+			return dataUrl ? `${prefix}"${dataUrl}"` : whole;
+		}
+	);
+};
+
+const escapeForInlineScript = (value: string) => value.replace(/</g, '\\u003c');
+
+export const buildPreviewInteractionsBridge = (labels: HtmlPreviewLabels): string => {
+	const serializedLabels = escapeForInlineScript(
+		JSON.stringify({
+			copy: String(labels?.copy || DEFAULT_HTML_PREVIEW_LABELS.copy),
+			copied: String(labels?.copied || DEFAULT_HTML_PREVIEW_LABELS.copied),
+			zoom: String(labels?.zoom || DEFAULT_HTML_PREVIEW_LABELS.zoom)
+		})
+	);
+	return `<script data-halo-html-preview-interactions="true">(() => {
+	const labels = ${serializedLabels};
+	const STYLE_ID = 'halo-html-preview-interactions-style';
+	const css = '.halo-pre-wrap{position:relative}'
+		+ '.halo-copy-btn{position:absolute;top:6px;right:6px;z-index:5;font:12px/1 system-ui,-apple-system,sans-serif;padding:5px 9px;border-radius:6px;border:1px solid rgba(0,0,0,.14);background:rgba(255,255,255,.94);color:#333;cursor:pointer;opacity:0;transition:opacity .15s}'
+		+ '.halo-pre-wrap:hover .halo-copy-btn,.halo-copy-btn:focus,.halo-copy-btn[data-copied="true"]{opacity:1}'
+		+ 'img[data-halo-zoomable="true"]{cursor:zoom-in}';
+	const ensureStyle = () => {
+		if (document.getElementById(STYLE_ID)) return;
+		const style = document.createElement('style');
+		style.id = STYLE_ID;
+		style.textContent = css;
+		(document.head || document.documentElement).appendChild(style);
+	};
+	const post = (message) => parent.postMessage(message, '*');
+	const codeText = (pre) => {
+		const code = pre.querySelector('code');
+		if (code) return code.textContent || '';
+		const clone = pre.cloneNode(true);
+		clone.querySelectorAll('.halo-copy-btn').forEach((node) => node.remove());
+		return clone.textContent || '';
+	};
+	const decorate = () => {
+		ensureStyle();
+		document.querySelectorAll('pre').forEach((pre) => {
+			if (pre.dataset.haloCopyReady === 'true') return;
+			if (!codeText(pre).trim()) return;
+			pre.dataset.haloCopyReady = 'true';
+			pre.classList.add('halo-pre-wrap');
+			const button = document.createElement('button');
+			button.type = 'button';
+			button.className = 'halo-copy-btn';
+			button.textContent = labels.copy;
+			button.setAttribute('aria-label', labels.copy);
+			button.addEventListener('click', (event) => {
+				event.preventDefault();
+				event.stopPropagation();
+				const text = codeText(pre);
+				if (!text) return;
+				post({ type: '${HTML_PREVIEW_COPY_MESSAGE_TYPE}', text });
+				button.textContent = labels.copied;
+				button.dataset.copied = 'true';
+				setTimeout(() => {
+					button.textContent = labels.copy;
+					delete button.dataset.copied;
+				}, 1600);
+			});
+			pre.appendChild(button);
+		});
+		document.querySelectorAll('img').forEach((img) => {
+			if (img.dataset.haloZoomable === 'true') return;
+			img.dataset.haloZoomable = 'true';
+			if (!img.getAttribute('title')) img.setAttribute('title', labels.zoom);
+		});
+	};
+	document.addEventListener('click', (event) => {
+		const image = event.target instanceof Element ? event.target.closest('img') : null;
+		if (!image) return;
+		const src = image.currentSrc || image.src || '';
+		if (!/^data:image\\//i.test(src)) return;
+		event.preventDefault();
+		post({ type: '${HTML_PREVIEW_IMAGE_MESSAGE_TYPE}', src, alt: image.getAttribute('alt') || '' });
+	}, true);
+	let frame = 0;
+	const schedule = () => {
+		if (frame) return;
+		frame = requestAnimationFrame(() => { frame = 0; decorate(); });
+	};
+	const start = () => {
+		decorate();
+		new MutationObserver(schedule).observe(document.documentElement, { childList: true, subtree: true });
+	};
+	if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start, { once: true });
+	else start();
+})();</script>`;
+};
+
+type HtmlArtifactSourceLocation = {
+	source: string;
+	firstRaw: string;
+	lastRaw: string;
+};
+
+const resolveHtmlArtifactSource = (content: unknown): HtmlArtifactSourceLocation | null => {
+	if (typeof content !== 'string' || !content.trim()) {
+		return null;
+	}
+	const parts = collectArtifactParts(content);
+	if (parts.html.length !== 1 || parts.css.length !== 0 || parts.javascript.length !== 0) {
+		return null;
+	}
+	const raws = parts.htmlRaws[0] ?? [];
+	if (raws.length === 0) {
+		return null;
+	}
+	return { source: parts.html[0], firstRaw: raws[0], lastRaw: raws[raws.length - 1] };
+};
+
+/** The HTML source that the inline preview renders, for a "copy source" action. */
+export const getHtmlArtifactSource = (content: unknown): string | null =>
+	resolveHtmlArtifactSource(content)?.source ?? null;
+
+/**
+ * The Markdown around the previewed HTML source, so text, images and other
+ * code blocks in the same answer keep rendering while the fence itself is
+ * replaced by the preview frame.
+ */
+export const splitHtmlArtifactContent = (
+	content: unknown
+): { before: string; after: string; source: string } | null => {
+	const located = resolveHtmlArtifactSource(content);
+	if (!located) {
+		return null;
+	}
+	const text = content as string;
+	const start = text.indexOf(located.firstRaw);
+	if (start < 0) {
+		return null;
+	}
+	const lastIndex = text.indexOf(located.lastRaw, start);
+	if (lastIndex < 0) {
+		return null;
+	}
+	const end = lastIndex + located.lastRaw.length;
+	return {
+		before: text.slice(0, start).replace(/\s+$/, ''),
+		after: text.slice(end).replace(/^\s+/, ''),
+		source: located.source
+	};
 };

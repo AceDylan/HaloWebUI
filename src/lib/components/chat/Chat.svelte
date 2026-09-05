@@ -552,6 +552,7 @@
 		connection_index?: number | null;
 		steps?: number | null;
 		background?: string | null;
+		quality?: string | null;
 		image_route_mode?: string | null;
 	};
 	let imageGenerationOptions: ImageGenerationOptions = {};
@@ -1561,6 +1562,7 @@
 		'connection_index',
 		'steps',
 		'background',
+		'quality',
 		'image_route_mode'
 	] as const;
 

@@ -343,6 +343,11 @@
 										)}
 									</li>
 									<li>
+										<code class="font-mono">supports_quality</code> — {$i18n.t(
+											'quality tiers (gpt-image low / medium / high)'
+										)}
+									</li>
+									<li>
 										<code class="font-mono">supports_batch</code> — {$i18n.t(
 											'generate multiple images at once'
 										)}

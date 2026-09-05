@@ -180,6 +180,17 @@ OPENAI_IMAGE_REFERENCE_EDIT_DEFAULT_MODEL_RE = re.compile(
     re.IGNORECASE,
 )
 OPENAI_IMAGE_ALLOWED_SIZES = {"1024x1024", "1536x1024", "1024x1536"}
+OPENAI_IMAGE_QUALITY_VALUES = ("auto", "low", "medium", "high")
+
+
+def _normalize_openai_image_quality(value: Any) -> Optional[str]:
+    """gpt-image quality tier. ``auto``/unknown -> None so the field is omitted
+    and the upstream default applies (the relay decides which gpt-image
+    generation answers, so only the family-wide tiers are offered)."""
+    text = str(value or "").strip().lower()
+    if text in OPENAI_IMAGE_QUALITY_VALUES and text != "auto":
+        return text
+    return None
 OPENAI_IMAGE_ROUTE_GENERATIONS = "generations"
 OPENAI_IMAGE_ROUTE_EDITS = "edits"
 OPENAI_IMAGE_ROUTE_CHAT = "chat"
@@ -1778,6 +1789,7 @@ def _build_image_model_entry(
     supports_background: bool,
     supports_batch: bool,
     size_mode: str,
+    supports_quality: bool = False,
     supports_image_size: bool = False,
     supports_resolution: bool = False,
     text_output_supported: bool,
@@ -1933,6 +1945,7 @@ def _build_image_model_entry(
         "detection_method": detection_method,
         "supports_background": bool(supports_background),
         "supports_batch": bool(supports_batch),
+        "supports_quality": bool(supports_quality),
         "size_mode": size_mode,
         "supports_image_size": bool(supports_image_size),
         "supports_resolution": bool(supports_resolution),
@@ -2088,6 +2101,9 @@ def _classify_openai_image_model(
             generation_mode == "openai_images" and base_name.startswith("gpt-image")
         ),
         supports_batch=generation_mode == "openai_images",
+        supports_quality=(
+            generation_mode == "openai_images" and base_name.startswith("gpt-image")
+        ),
         size_mode="exact" if generation_mode == "openai_images" else "aspect_ratio",
         supports_resolution=False,
         text_output_supported=(output_has_text and not is_dedicated_image_model)
@@ -2359,6 +2375,7 @@ def _build_image_model_search_candidate(
             "image_size_mode": entry.get("size_mode"),
             "supports_background": entry.get("supports_background"),
             "supports_batch": entry.get("supports_batch"),
+            "supports_quality": entry.get("supports_quality"),
             "supports_image_size": entry.get("supports_image_size"),
             "supports_resolution": entry.get("supports_resolution"),
             "supported_image_routes": entry.get("supported_image_routes"),
@@ -2436,6 +2453,7 @@ def _build_search_candidate_model_meta_from_ref(
         "detection_method": "search",
         "supports_background": _model_ref_bool(model_ref.get("supports_background")),
         "supports_batch": _model_ref_bool(model_ref.get("supports_batch"), True),
+        "supports_quality": _model_ref_bool(model_ref.get("supports_quality")),
         "size_mode": size_mode,
         "supports_image_size": _model_ref_bool(model_ref.get("supports_image_size")),
         "supports_resolution": _model_ref_bool(model_ref.get("supports_resolution")),
@@ -2464,6 +2482,7 @@ def _build_search_candidate_model_meta_from_ref(
 _CAPABILITY_OVERRIDE_BOOL_FIELDS = (
     "supports_background",
     "supports_batch",
+    "supports_quality",
     "supports_image_size",
     "supports_resolution",
     "text_output_supported",
@@ -4326,6 +4345,7 @@ class GenerateImageForm(BaseModel):
     connection_index: Optional[int] = None
     steps: Optional[int] = None
     background: Optional[str] = None
+    quality: Optional[str] = None
     image_route_mode: Optional[str] = None
     chat_generation: bool = False
 
@@ -6077,6 +6097,7 @@ async def _generate_via_openai_image_edits_endpoint(
     partial_image_callback: Optional[
         Callable[[int, dict[str, Any]], Awaitable[None]]
     ] = None,
+    quality: Optional[str] = None,
 ) -> list[dict[str, str]]:
     reference_image_urls = _normalize_reference_image_urls(image_url, image_urls)
     if not reference_image_urls:
@@ -6101,6 +6122,7 @@ async def _generate_via_openai_image_edits_endpoint(
                 size=size,
                 background=background,
                 source=source,
+                quality=quality,
             )
 
         return await _run_openai_image_split_batch(
@@ -6183,6 +6205,8 @@ async def _generate_via_openai_image_edits_endpoint(
         payload["size"] = size
     if background:
         payload["background"] = background
+    if quality:
+        payload["quality"] = quality
     if _openai_image_model_has_default_response_format(base_name):
         if stream_enabled:
             payload["stream"] = True
@@ -6277,6 +6301,7 @@ async def _generate_via_openai_images_endpoint(
     partial_image_callback: Optional[
         Callable[[int, dict[str, Any]], Awaitable[None]]
     ] = None,
+    quality: Optional[str] = None,
 ) -> list[dict[str, str]]:
     requested_n = max(1, int(n or 1))
     if requested_n > 1:
@@ -6292,6 +6317,7 @@ async def _generate_via_openai_images_endpoint(
                 size=size,
                 background=background,
                 source=source,
+                quality=quality,
             )
 
         return await _run_openai_image_split_batch(
@@ -6330,6 +6356,8 @@ async def _generate_via_openai_images_endpoint(
 
     if background:
         payload["background"] = background
+    if quality:
+        payload["quality"] = quality
 
     generation_url = _get_openai_images_generation_url(base_url, api_config)
     result, headers = await _send_openai_image_request_with_key_pool(
@@ -7688,11 +7716,16 @@ async def image_generations(
                 if (selected_model_meta or {}).get("supports_background")
                 else None
             )
+            quality = (
+                _normalize_openai_image_quality(form_data.quality)
+                if (selected_model_meta or {}).get("supports_quality")
+                else None
+            )
             openai_request_size: Optional[str] = effective_size
 
             try:
                 log.info(
-                    f"image_generation user_id={user.id} engine=openai credential_source={source.get('effective_source') or credential_source} connection_index={source.get('connection_index') if source.get('connection_index') is not None else ''} model={selected_model or ''} generation_mode={generation_mode} image_route={openai_image_route} chat_generation={'yes' if form_data.chat_generation else 'no'} reference_input={'yes' if reference_image_urls else 'no'} reference_input_count={len(reference_image_urls)} size={(openai_request_size or 'auto')} n={requested_n} steps={(form_data.steps if form_data.steps is not None else '')}"
+                    f"image_generation user_id={user.id} engine=openai credential_source={source.get('effective_source') or credential_source} connection_index={source.get('connection_index') if source.get('connection_index') is not None else ''} model={selected_model or ''} generation_mode={generation_mode} image_route={openai_image_route} chat_generation={'yes' if form_data.chat_generation else 'no'} reference_input={'yes' if reference_image_urls else 'no'} reference_input_count={len(reference_image_urls)} size={(openai_request_size or 'auto')} quality={(quality or 'auto')} n={requested_n} steps={(form_data.steps if form_data.steps is not None else '')}"
                 )
             except Exception:
                 pass
@@ -7752,6 +7785,7 @@ async def image_generations(
                     background=background,
                     source=source,
                     partial_image_callback=partial_image_callback,
+                    quality=quality,
                 )
 
             if reference_image_urls:
@@ -7771,6 +7805,7 @@ async def image_generations(
                 background=background,
                 source=source,
                 partial_image_callback=partial_image_callback,
+                quality=quality,
             )
 
         elif selected_engine == "gemini":

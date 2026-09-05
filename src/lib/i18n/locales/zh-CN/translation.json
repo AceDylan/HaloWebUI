@@ -2945,5 +2945,22 @@
 	"Quick commands": "快捷指令",
 	"Fallback model": "兜底模型",
 	"Answers instead when this model fails upstream (5xx, rate limit, timeout) after one retry.": "该模型上游失败（5xx、限流、超时）且重试一次仍失败时，自动改用此模型回答。",
-	"Finished, not yet opened": "任务已完成，尚未查看"
+	"Finished, not yet opened": "任务已完成，尚未查看",
+	"Copy HTML": "复制 HTML 源码",
+	"Click to enlarge": "点击放大",
+	"Quality": "质量",
+	"Low": "低",
+	"Medium": "中",
+	"High": "高",
+	"Low is fastest and cheapest; high keeps the most detail.": "低档最快最省，高档细节最完整。",
+	"quality tiers (gpt-image low / medium / high)": "质量档位（gpt-image 的 low / medium / high）",
+	"{{count}} templates": "共 {{count}} 个模板",
+	"Import templates": "导入模板",
+	"Export templates": "导出模板",
+	"Search templates": "搜索模板名称、标签或内容",
+	"Newest first": "最新优先",
+	"No prompt": "没有提示词",
+	"No templates match": "没有匹配的模板，换个关键词或标签试试",
+	"Invalid template file": "模板文件格式无效：需要 JSON 数组或导出文件",
+	"Imported {{added}} templates, skipped {{skipped}} duplicates": "已导入 {{added}} 个模板，跳过 {{skipped}} 个重复项"
 }

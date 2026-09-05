@@ -15,6 +15,7 @@ export type ImageGenerationRequest = {
 	connection_index?: number;
 	steps?: number;
 	background?: string;
+	quality?: 'auto' | 'low' | 'medium' | 'high' | string;
 	image_route_mode?: 'auto' | 'generations' | 'chat' | 'responses' | 'edits' | string;
 };
 
@@ -33,6 +34,7 @@ export type ImageUsageConfig = {
 
 export type ImageModelCapabilityOverride = {
 	supports_background?: boolean;
+	supports_quality?: boolean;
 	supports_batch?: boolean;
 	supports_image_size?: boolean;
 	supports_resolution?: boolean;
@@ -61,6 +63,7 @@ export type ImageGenerationModel = {
 	generation_mode?: string;
 	detection_method?: string;
 	supports_background?: boolean;
+	supports_quality?: boolean;
 	supports_batch?: boolean;
 	size_mode?: 'exact' | 'aspect_ratio' | 'unsupported' | string;
 	supports_image_size?: boolean;

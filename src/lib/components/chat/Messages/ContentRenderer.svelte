@@ -13,7 +13,8 @@
 		showOverview
 	} from '$lib/stores';
 	import FloatingButtons from '../ContentRenderer/FloatingButtons.svelte';
-	import { createMessagesList } from '$lib/utils';
+	import { copyToClipboard, createMessagesList } from '$lib/utils';
+	import { toast } from 'svelte-sonner';
 	import { getCitationEntries } from '$lib/utils/citations';
 	import type { GeneratedMessageFile } from '$lib/utils/generated-file-links';
 	import {
@@ -24,12 +25,21 @@
 	import { mergeAdjacentReasoningDetails } from '$lib/utils/reasoning-merge';
 	import {
 		buildInlineHtmlArtifactPreview,
+		getHtmlArtifactSource,
 		getInlineHtmlPreviewHeight,
+		HTML_PREVIEW_IMAGE_ALT_MAX_CHARS,
 		HTML_PREVIEW_REFERRER_POLICY,
 		HTML_PREVIEW_SANDBOX,
 		INLINE_HTML_PREVIEW_MIN_HEIGHT,
-		shouldRenderInlineHtmlArtifactOriginalText
+		isInlineHtmlPreviewCopyMessage,
+		isInlineHtmlPreviewImageMessage,
+		shouldRenderInlineHtmlArtifactOriginalText,
+		splitHtmlArtifactContent
 	} from '$lib/utils/html-preview';
+	import {
+		hasSameOriginPreviewImages,
+		inlineSameOriginPreviewImages
+	} from '$lib/utils/html-preview-images';
 	import ImagePreview from '$lib/components/common/ImagePreview.svelte';
 	import {
 		createEmptySelectionThreads,
@@ -126,6 +136,12 @@
 	let lastInlineHtmlPreviewDocument: string | null = null;
 	let lastInlineHtmlPreviewMessageId: string | null = null;
 	let lastInlineHtmlPreviewMessageContent: string | null = null;
+	let inlineHtmlPreviewDocument: string | null = null;
+	let inlineHtmlPreviewInlineToken = 0;
+	let inlineHtmlArtifactSplit: { before: string; after: string; source: string } | null = null;
+	let inlineHtmlArtifactSource: string | null = null;
+	let copiedInlineHtmlArtifactSource = false;
+	let copiedInlineHtmlArtifactSourceTimer: ReturnType<typeof setTimeout> | null = null;
 	let pendingSelection: PendingSelection | null = null;
 	let pendingSelectionPosition: { top: number; left: number } | null = null;
 	let currentMessageThreads: SelectionThread[] = [];
@@ -428,10 +444,26 @@
 	// Collapse reasoning blocks fragmented by providers that echo thinking into
 	// the answer stream, so both the HTML and Markdown renderers see one block.
 	$: normalizedContent = mergeAdjacentReasoningDetails(content || '');
+	$: inlineHtmlPreviewLabels = {
+		copy: $i18n.t('Copy'),
+		copied: $i18n.t('Copied'),
+		zoom: $i18n.t('Click to enlarge')
+	};
 	$: inlineHtmlArtifactPreview = buildInlineHtmlArtifactPreview(normalizedContent, {
 		enabled: $settings?.detectArtifacts ?? true,
-		streaming
+		streaming,
+		labels: inlineHtmlPreviewLabels
 	});
+	$: inlineHtmlArtifactSource = inlineHtmlArtifactPreview
+		? getHtmlArtifactSource(normalizedContent)
+		: null;
+	// Preview mode swaps only the HTML fence for the frame; the Markdown around
+	// it (text, generated images, other code blocks) keeps rendering normally.
+	$: inlineHtmlArtifactSplit =
+		inlineHtmlArtifactPreview && !showInlineHtmlArtifactOriginalText
+			? splitHtmlArtifactContent(normalizedContent)
+			: null;
+	$: void syncInlineHtmlPreviewDocument(inlineHtmlArtifactPreview);
 	$: hideInlineHtmlArtifactSource =
 		Boolean(inlineHtmlArtifactPreview) && ($settings?.hideHtmlArtifactCodeBlocks ?? true);
 	$: if (
@@ -460,8 +492,52 @@
 			? renderResponseHtmlFormat(normalizedContent) || normalizedContent
 			: normalizedContent;
 
+	const syncInlineHtmlPreviewDocument = async (document: string | null) => {
+		const token = ++inlineHtmlPreviewInlineToken;
+		if (!document || !hasSameOriginPreviewImages(document)) {
+			inlineHtmlPreviewDocument = document;
+			return;
+		}
+		// Same-origin uploads cannot load inside the opaque sandbox; the parent
+		// fetches them and hands the frame data: URLs. The frame keeps its last
+		// document until the rewritten one is ready instead of flashing broken
+		// images.
+		const inlined = await inlineSameOriginPreviewImages(document);
+		if (token !== inlineHtmlPreviewInlineToken) {
+			return;
+		}
+		inlineHtmlPreviewDocument = inlined;
+	};
+
+	const copyInlineHtmlArtifactSource = async () => {
+		if (!inlineHtmlArtifactSource) {
+			return;
+		}
+		await copyToClipboard(inlineHtmlArtifactSource);
+		copiedInlineHtmlArtifactSource = true;
+		if (copiedInlineHtmlArtifactSourceTimer) {
+			clearTimeout(copiedInlineHtmlArtifactSourceTimer);
+		}
+		copiedInlineHtmlArtifactSourceTimer = setTimeout(() => {
+			copiedInlineHtmlArtifactSource = false;
+			copiedInlineHtmlArtifactSourceTimer = null;
+		}, 1600);
+	};
+
 	const handleInlineHtmlPreviewMessage = (event: MessageEvent) => {
 		if (!inlineHtmlPreviewFrame || event.source !== inlineHtmlPreviewFrame.contentWindow) {
+			return;
+		}
+
+		if (isInlineHtmlPreviewCopyMessage(event.data)) {
+			void copyToClipboard(event.data.text).then(() => toast.success($i18n.t('Copied')));
+			return;
+		}
+
+		if (isInlineHtmlPreviewImageMessage(event.data)) {
+			imagePreviewSrc = event.data.src;
+			imagePreviewAlt = String(event.data.alt ?? '').slice(0, HTML_PREVIEW_IMAGE_ALT_MAX_CHARS);
+			showImagePreview = true;
 			return;
 		}
 
@@ -888,6 +964,9 @@
 
 	onDestroy(() => {
 		window.removeEventListener('message', handleInlineHtmlPreviewMessage);
+		if (copiedInlineHtmlArtifactSourceTimer) {
+			clearTimeout(copiedInlineHtmlArtifactSourceTimer);
+		}
 		if (floatingButtons) {
 			document.removeEventListener('mouseup', handleDocumentMouseUp);
 			document.removeEventListener('keydown', keydownHandler);
@@ -905,7 +984,16 @@
 
 <div class="relative overflow-visible">
 	{#if inlineHtmlArtifactPreview}
-		<div class="mb-2 flex justify-end" data-halo-inline-html-original-text-toggle="true">
+		<div class="mb-2 flex justify-end gap-2" data-halo-inline-html-original-text-toggle="true">
+			{#if inlineHtmlArtifactSource}
+				<button
+					type="button"
+					class="inline-flex min-h-8 max-w-full items-center rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-600 transition-colors hover:bg-gray-50 hover:text-gray-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500/60 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-800 dark:hover:text-gray-100"
+					on:click={copyInlineHtmlArtifactSource}
+				>
+					{copiedInlineHtmlArtifactSource ? $i18n.t('Copied') : $i18n.t('Copy HTML')}
+				</button>
+			{/if}
 			<button
 				type="button"
 				class="inline-flex min-h-8 max-w-full items-center rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-600 transition-colors hover:bg-gray-50 hover:text-gray-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500/60 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-800 dark:hover:text-gray-100"
@@ -987,6 +1075,19 @@
 					}
 				}}
 			/>
+		{:else if inlineHtmlArtifactSplit && inlineHtmlArtifactSplit.before.trim()}
+			<Markdown
+				id={`${id}-html-before`}
+				content={inlineHtmlArtifactSplit.before}
+				{model}
+				save={false}
+				streaming={false}
+				{generatedFiles}
+				transitionMode={currentTransitionMode}
+				sourceIds={resolvedSourceIds}
+				{onSourceClick}
+				{onTaskClick}
+			/>
 		{/if}
 
 		{#if inlineHtmlArtifactPreview}
@@ -999,13 +1100,29 @@
 				<iframe
 					bind:this={inlineHtmlPreviewFrame}
 					title={$i18n.t('HTML Preview')}
-					srcdoc={inlineHtmlArtifactPreview}
+					srcdoc={inlineHtmlPreviewDocument ?? ''}
 					sandbox={HTML_PREVIEW_SANDBOX}
 					referrerpolicy={HTML_PREVIEW_REFERRER_POLICY}
 					class="block w-full overflow-hidden rounded-lg border-0 bg-white"
 					style={`height: ${inlineHtmlPreviewHeight}px;`}
 				></iframe>
 			</div>
+			{#if inlineHtmlArtifactSplit && inlineHtmlArtifactSplit.after.trim()}
+				<div class="mt-3">
+					<Markdown
+						id={`${id}-html-after`}
+						content={inlineHtmlArtifactSplit.after}
+						{model}
+						save={false}
+						streaming={false}
+						{generatedFiles}
+						transitionMode={currentTransitionMode}
+						sourceIds={resolvedSourceIds}
+						{onSourceClick}
+						{onTaskClick}
+					/>
+				</div>
+			{/if}
 		{/if}
 	</div>
 

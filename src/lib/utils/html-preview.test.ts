@@ -6,6 +6,13 @@ import {
 	HTML_PREVIEW_SANDBOX,
 	buildHtmlArtifactPreview,
 	buildInlineHtmlArtifactPreview,
+	collectSameOriginPreviewImageSources,
+	getHtmlArtifactSource,
+	inlineHtmlPreviewImages,
+	isInlineHtmlPreviewCopyMessage,
+	isInlineHtmlPreviewImageMessage,
+	normalizeSameOriginPreviewImageSource,
+	splitHtmlArtifactContent,
 	getCodePreviewEventKey,
 	getInlineHtmlPreviewHeight,
 	hardenHtmlArtifactExportDocument,
@@ -320,5 +327,112 @@ window.done = true;
 		expect(HTML_PREVIEW_SANDBOX).toBe('allow-scripts');
 		expect(HTML_PREVIEW_SANDBOX).not.toContain('allow-forms');
 		expect(HTML_PREVIEW_SANDBOX).not.toContain('allow-same-origin');
+	});
+
+	it('exposes the html source and the markdown around it for split rendering', () => {
+		const content =
+			'已生成：\n\n![image](/api/v1/files/abc/content)\n\n```html\n<div>hi</div>\n```\n\n后记';
+
+		expect(getHtmlArtifactSource(content)).toBe('<div>hi</div>');
+		const split = splitHtmlArtifactContent(content);
+		expect(split?.before).toBe('已生成：\n\n![image](/api/v1/files/abc/content)');
+		expect(split?.after).toBe('后记');
+		expect(split?.source).toBe('<div>hi</div>');
+	});
+
+	it('splits around raw html documents and returns null without a previewable artifact', () => {
+		const document = '<!DOCTYPE html>\n<html><body>x</body></html>';
+		const split = splitHtmlArtifactContent(`intro\n\n${document}\n\nend`);
+		expect(split?.before).toBe('intro');
+		expect(split?.after).toBe('end');
+
+		expect(splitHtmlArtifactContent('plain text')).toBeNull();
+		expect(getHtmlArtifactSource('```css\na{}\n```\n\n```html\n<b>x</b>\n```')).toBeNull();
+	});
+
+	it('inlines same-origin upload images through the parent and leaves other sources alone', async () => {
+		const html =
+			'<img src="/api/v1/files/abc-123/content">' +
+			"<img src='https://app.example/api/v1/files/def/content?x=1&amp;y=2'>" +
+			'<img src="https://evil.example/a.png">' +
+			'<img src="data:image/png;base64,AAAA">';
+
+		expect(collectSameOriginPreviewImageSources(html, 'https://app.example')).toEqual([
+			'/api/v1/files/abc-123/content',
+			'/api/v1/files/def/content?x=1&y=2'
+		]);
+
+		const requested: string[] = [];
+		const result = await inlineHtmlPreviewImages(
+			html,
+			async (path) => {
+				requested.push(path);
+				return path.includes('abc') ? 'data:image/png;base64,QUJD' : null;
+			},
+			'https://app.example'
+		);
+
+		expect(requested).toHaveLength(2);
+		expect(result).toContain('<img src="data:image/png;base64,QUJD">');
+		expect(result).toContain("src='https://app.example/api/v1/files/def/content?x=1&amp;y=2'");
+		expect(result).toContain('https://evil.example/a.png');
+		expect(await inlineHtmlPreviewImages('<p>no images</p>', async () => 'data:image/png;base64,x')).toBe(
+			'<p>no images</p>'
+		);
+	});
+
+	it('never treats protocol-relative, foreign or traversal paths as same-origin images', () => {
+		expect(
+			normalizeSameOriginPreviewImageSource('//app.example/api/v1/files/a/content', 'https://app.example')
+		).toBeNull();
+		expect(
+			normalizeSameOriginPreviewImageSource(
+				'https://app.example.evil/api/v1/files/a/content',
+				'https://app.example'
+			)
+		).toBeNull();
+		expect(normalizeSameOriginPreviewImageSource('/api/v1/files/../secret', 'https://app.example')).toBeNull();
+		expect(normalizeSameOriginPreviewImageSource('javascript:alert(1)')).toBeNull();
+		expect(normalizeSameOriginPreviewImageSource('/cache/image/generations/x.png')).toBe(
+			'/cache/image/generations/x.png'
+		);
+	});
+
+	it('injects the interactions bridge with escaped labels and strips a user-supplied copy', () => {
+		const document = buildHtmlArtifactPreview('```html\n<pre><code>a\n b</code></pre>\n```', {
+			labels: { copy: '复制</script>', copied: '已复制', zoom: '放大' }
+		});
+
+		expect(document).toContain('data-halo-html-preview-interactions="true"');
+		expect(document).not.toContain('复制</script>');
+		expect(document).toContain('复制\\u003c/script>');
+		expect(countMatches(document as string, /data-halo-html-preview-interactions="true"/g)).toBe(1);
+
+		const spoofed = hardenHtmlPreviewDocument(
+			'<html><head><script data-halo-html-preview-interactions="true">alert(1)</script></head><body></body></html>'
+		);
+		expect(spoofed).not.toContain('alert(1)');
+		expect(countMatches(spoofed, /data-halo-html-preview-interactions="true"/g)).toBe(1);
+	});
+
+	it('accepts only bounded copy and data-url image messages from the preview', () => {
+		expect(isInlineHtmlPreviewCopyMessage({ type: 'halo-html-preview-copy', text: 'x' })).toBe(true);
+		expect(isInlineHtmlPreviewCopyMessage({ type: 'halo-html-preview-copy', text: '' })).toBe(false);
+		expect(
+			isInlineHtmlPreviewCopyMessage({ type: 'halo-html-preview-copy', text: 'x'.repeat(200_001) })
+		).toBe(false);
+		expect(
+			isInlineHtmlPreviewImageMessage({ type: 'halo-html-preview-image', src: 'data:image/png;base64,AA' })
+		).toBe(true);
+		expect(
+			isInlineHtmlPreviewImageMessage({ type: 'halo-html-preview-image', src: 'https://x/y.png' })
+		).toBe(false);
+		expect(
+			isInlineHtmlPreviewImageMessage({
+				type: 'halo-html-preview-image',
+				src: 'data:image/png;base64,AA',
+				alt: 3
+			})
+		).toBe(false);
 	});
 });

@@ -14,6 +14,11 @@
 		showControls
 	} from '$lib/stores';
 	import XMark from '../icons/XMark.svelte';
+	import ImagePreview from '../common/ImagePreview.svelte';
+	import {
+		hasSameOriginPreviewImages,
+		inlineSameOriginPreviewImages
+	} from '$lib/utils/html-preview-images';
 	import { copyToClipboard, createMessagesList } from '$lib/utils';
 	import ArrowsPointingOut from '../icons/ArrowsPointingOut.svelte';
 	import Tooltip from '../common/Tooltip.svelte';
@@ -24,6 +29,9 @@
 	import {
 		buildHtmlArtifactPreview,
 		hardenHtmlArtifactExportDocument,
+		HTML_PREVIEW_IMAGE_ALT_MAX_CHARS,
+		isInlineHtmlPreviewCopyMessage,
+		isInlineHtmlPreviewImageMessage,
 		HTML_ARTIFACT_EXPORT_MAX_SNAPSHOT_CHARS,
 		HTML_EXPORT_SANDBOX,
 		HTML_PREVIEW_REFERRER_POLICY,
@@ -49,6 +57,9 @@
 	let exportRequestId: string | null = null;
 	let exportTimeout: ReturnType<typeof setTimeout> | null = null;
 	let iframeElement: HTMLIFrameElement;
+	let showPreviewImage = false;
+	let previewImageSrc = '';
+	let previewImageAlt = '';
 	let alive = true;
 	let refreshTimer: ReturnType<typeof setTimeout> | null = null;
 	const messageContentsCache = new Map<string, CachedMessageContents>();
@@ -88,6 +99,22 @@
 		return previews;
 	};
 
+	// Same-origin uploads cannot load inside the sandboxed frame; swap them for
+	// data: URLs once fetched, both in the cache and in the visible list.
+	const inlinePreviewImages = (messageId: string, source: string, htmlPreview: string) => {
+		void inlineSameOriginPreviewImages(htmlPreview).then((inlined) => {
+			if (!alive || inlined === htmlPreview) return;
+			const cached = messageContentsCache.get(messageId);
+			if (cached?.source !== source) return;
+			const swap = (entry: PreviewContent) =>
+				entry.type === 'iframe' && entry.messageId === messageId && entry.content === htmlPreview
+					? { ...entry, content: inlined }
+					: entry;
+			cached.previews = cached.previews.map(swap);
+			contents = contents.map(swap);
+		});
+	};
+
 	const buildMessageContents = (message: any): PreviewContent[] => {
 		const messageId = String(message.id ?? '');
 		const source = String(message.content ?? '');
@@ -100,6 +127,9 @@
 		const htmlPreview = buildHtmlArtifactPreview(source);
 		if (htmlPreview) {
 			previews.push({ type: 'iframe', content: htmlPreview, messageId });
+			if (hasSameOriginPreviewImages(htmlPreview)) {
+				inlinePreviewImages(messageId, source, htmlPreview);
+			}
 		}
 		previews.push(...extractSvgContents(stripThinkingBlocks(source), messageId));
 
@@ -389,6 +419,17 @@
 	const handleExportMessage = async (event: MessageEvent) => {
 		if (!iframeElement?.contentWindow || event.source !== iframeElement.contentWindow) return;
 		const data = event.data;
+		if (isInlineHtmlPreviewCopyMessage(data)) {
+			await copyToClipboard(data.text);
+			toast.success($i18n.t('Copied'));
+			return;
+		}
+		if (isInlineHtmlPreviewImageMessage(data)) {
+			previewImageSrc = data.src;
+			previewImageAlt = String(data.alt ?? '').slice(0, HTML_PREVIEW_IMAGE_ALT_MAX_CHARS);
+			showPreviewImage = true;
+			return;
+		}
 		if (
 			exportRendering ||
 			!isActiveHtmlArtifactSnapshotMessage(data, exportRequestId, exportingImage)
@@ -600,3 +641,5 @@
 		</div>
 	</div>
 </div>
+
+<ImagePreview bind:show={showPreviewImage} src={previewImageSrc} alt={previewImageAlt} />

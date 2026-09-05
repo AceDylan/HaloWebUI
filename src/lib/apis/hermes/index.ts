@@ -48,3 +48,60 @@ export const getActiveHermesRuns = async (token: string): Promise<HermesActiveRu
 	const data = await res.json();
 	return Array.isArray(data?.runs) ? data.runs : [];
 };
+
+export type HermesSession = {
+	id: string;
+	source: string;
+	title: string;
+	preview: string;
+	message_count: number;
+	started_at: number | string | null;
+	last_active: number | string | null;
+	model: string | null;
+	imported: boolean;
+};
+
+const detailOf = async (res: Response) => {
+	const body = await res.json().catch(() => ({}));
+	return body?.detail ?? `${res.status} ${res.statusText}`;
+};
+
+/** hermes sessions from another surface (telegram | qqbot | cli), newest first. */
+export const getHermesSessions = async (
+	token: string,
+	source = 'telegram',
+	limit = 50
+): Promise<HermesSession[]> => {
+	const params = new URLSearchParams({ source, limit: `${limit}` });
+	const res = await fetch(`${WEBUI_API_BASE_URL}/hermes/sessions?${params}`, {
+		method: 'GET',
+		headers: jsonHeaders(token)
+	});
+	if (!res.ok) {
+		throw await detailOf(res);
+	}
+	const data = await res.json();
+	return Array.isArray(data?.sessions) ? data.sessions : [];
+};
+
+/**
+ * Import a hermes session as a chat (id = session id, so the chat continues
+ * that session). Idempotent: an already-imported session returns its chat.
+ */
+export const importHermesSession = async (
+	token: string,
+	sessionId: string
+): Promise<{ chat_id: string; title: string; created: boolean; imported_turns: number }> => {
+	const res = await fetch(
+		`${WEBUI_API_BASE_URL}/hermes/sessions/${encodeURIComponent(sessionId)}/import`,
+		{
+			method: 'POST',
+			headers: jsonHeaders(token),
+			body: JSON.stringify({})
+		}
+	);
+	if (!res.ok) {
+		throw await detailOf(res);
+	}
+	return await res.json();
+};

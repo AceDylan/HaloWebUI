@@ -46,6 +46,7 @@
 	import { getModelChatDisplayName } from '$lib/utils/model-display';
 
 	import ArchivedChatsModal from './Sidebar/ArchivedChatsModal.svelte';
+	import HermesSessionsModal from './Sidebar/HermesSessionsModal.svelte';
 	import ChatHistoryModal from './Sidebar/ChatHistoryModal.svelte';
 	import UserMenu from './Sidebar/UserMenu.svelte';
 	import ChatItem from './Sidebar/ChatItem.svelte';
@@ -64,6 +65,7 @@
 	import ChatBubbles from '../icons/ChatBubbles.svelte';
 	import Search from '../icons/Search.svelte';
 	import ArchiveBox from '../icons/ArchiveBox.svelte';
+	import ChatBubbles from '../icons/ChatBubbles.svelte';
 
 	type SidebarStyle = 'flat' | 'card';
 	type SidebarFolder = {
@@ -145,6 +147,7 @@
 	let allChatsLoaded = false;
 	let assistantScenes = [];
 	let folders: Record<string, SidebarFolder> = {};
+	let showHermesSessions = false;
 	let folderOptions: SidebarFolderOption[] = [];
 	let newFolderId: string | null = null;
 
@@ -607,6 +610,13 @@
 	});
 </script>
 
+<HermesSessionsModal
+	bind:show={showHermesSessions}
+	on:change={async () => {
+		await initChatList();
+	}}
+/>
+
 <ArchivedChatsModal
 	bind:show={$showArchivedChats}
 	on:change={async () => {
@@ -898,6 +908,18 @@
 						aria-label={$i18n.t('Archived Chats')}
 					>
 						<ArchiveBox className="size-5" strokeWidth="2" />
+					</button>
+				</Tooltip>
+
+				<Tooltip content={$i18n.t('Hermes Sessions')}>
+					<button
+						class={iconButtonClass}
+						on:click={() => {
+							showHermesSessions = true;
+						}}
+						aria-label={$i18n.t('Hermes Sessions')}
+					>
+						<ChatBubbles className="size-5" strokeWidth="2" />
 					</button>
 				</Tooltip>
 			</div>

@@ -2930,5 +2930,8 @@
 	"Only SKILL.md packages are shown here.": "查看已安装 Skill、可用状态和访问设置。",
 	"No installed skill packages": "还没有安装 Skill 包",
 	"Install a SKILL.md package from the Skill Store, URL, GitHub, or ZIP upload.": "可以从 Skill Store 安装，也可以通过链接导入或上传 ZIP 包。",
-	"Open Prompts": "打开提示词"
+	"Open Prompts": "打开提示词",
+	"Hermes Sessions": "Hermes 会话",
+	"Import and open": "导入并打开",
+	"No hermes sessions": "没有可导入的 hermes 会话"
 }

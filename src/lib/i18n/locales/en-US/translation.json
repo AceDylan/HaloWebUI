@@ -2242,5 +2242,8 @@
 	"Failed to clear history": "Failed to clear history",
 	"No generation history": "No generation history",
 	"Your generation history will appear here.": "Your generation history will appear here.",
-	"Search result. Use it only if this model supports image generation.": "Search result. Use it only if this model supports image generation."
+	"Search result. Use it only if this model supports image generation.": "Search result. Use it only if this model supports image generation.",
+	"Hermes Sessions": "",
+	"Import and open": "",
+	"No hermes sessions": ""
 }

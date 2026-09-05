@@ -6,6 +6,10 @@ one of their own chats.
 
 GET /api/v1/hermes/runs — the signed-in user's hermes runs executing right now.
 
+GET /api/v1/hermes/sessions — hermes sessions from another surface (Telegram,
+QQ, CLI); POST /api/v1/hermes/sessions/{id}/import turns one into a chat whose
+id is the hermes session id, so the chat continues that session.
+
 POST /api/v1/hermes/notifications — a background process started by hermes
 (for example a ``reclaude-run.sh`` run) reports its completion. HaloWebUI turns
 the notification into a follow-up user turn in the originating chat and starts a
@@ -29,6 +33,13 @@ from open_webui.utils.hermes_agent import (
     HermesSteerError,
     list_active_runs,
     steer_active_run,
+)
+from open_webui.utils.hermes_sessions import (
+    LIST_LIMIT_DEFAULT,
+    HermesSessionsError,
+    import_session,
+    list_sessions,
+    validate_session_id,
 )
 from open_webui.utils.hermes_notify import (
     NOTIFICATION_PROMPT_MAX_CHARS,
@@ -101,3 +112,46 @@ async def steer_hermes_run(form_data: HermesSteerForm, user=Depends(get_verified
 @router.get("/runs")
 async def get_active_hermes_runs(user=Depends(get_verified_user)):
     return {"runs": list_active_runs(user.id)}
+
+
+@router.get("/sessions")
+async def list_hermes_sessions(
+    request: Request,
+    source: str = "telegram",
+    limit: int = LIST_LIMIT_DEFAULT,
+    model_id: Optional[str] = None,
+    user=Depends(get_verified_user),
+):
+    try:
+        sessions = await list_sessions(
+            request, user, source=source, limit=limit, model_id=model_id
+        )
+    except HermesSessionsError as e:
+        raise HTTPException(status_code=e.status_code, detail=e.detail)
+    return {"sessions": sessions}
+
+
+class HermesSessionImportForm(BaseModel):
+    model_id: Optional[str] = Field(default=None, max_length=256)
+
+
+@router.post("/sessions/{session_id}/import")
+async def import_hermes_session(
+    request: Request,
+    session_id: str,
+    form_data: Optional[HermesSessionImportForm] = None,
+    user=Depends(get_verified_user),
+):
+    try:
+        validate_session_id(session_id)
+        return await import_session(
+            request,
+            user,
+            session_id=session_id,
+            model_id=form_data.model_id if form_data else None,
+        )
+    except HermesSessionsError as e:
+        raise HTTPException(status_code=e.status_code, detail=e.detail)
+    except Exception as e:
+        log.exception(f"hermes session import failed for {session_id}: {e}")
+        raise HTTPException(status_code=500, detail="failed to import the hermes session")

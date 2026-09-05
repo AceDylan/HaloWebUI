@@ -9,6 +9,7 @@ from open_webui.utils.hermes_sessions import (
     build_chat_payload,
     fold_transcript,
     resolve_hermes_model,
+    unwrap_session,
     validate_session_id,
 )
 
@@ -181,3 +182,73 @@ def test_resolve_hermes_model_is_422_when_the_user_has_no_hermes_model(monkeypat
         asyncio.run(resolve_hermes_model(request, user=None))
     assert exc.value.status_code == 422
     assert "no hermes agent model" in exc.value.detail
+
+
+def test_unwrap_session_reads_every_envelope_hermes_uses():
+    row = {"id": "s1", "source": "telegram"}
+    assert unwrap_session({"object": "hermes.session", "session": row}) == row
+    assert unwrap_session({"data": row}) == row
+    assert unwrap_session(row) == row
+    assert unwrap_session(None) == {}
+
+
+def _stub_import_dependencies(monkeypatch, session_row):
+    import open_webui.utils.hermes_sessions as hs
+
+    urls = []
+
+    async def fake_get_json(url, headers, params=None):
+        urls.append(url)
+        if url.endswith("/messages"):
+            return {"object": "list", "data": _telegram_transcript()}
+        # exactly what hermes answers GET /api/sessions/{id} with today
+        return {"object": "hermes.session", "session": session_row}
+
+    async def fake_resolve(request, user, model_id=None):
+        return {"id": "hermes", "original_id": "hermes-agent"}
+
+    inserted = {}
+
+    def fake_insert(user_id, chat_id, payload, meta):
+        inserted.update(user_id=user_id, chat_id=chat_id, payload=payload, meta=meta)
+        return SimpleNamespace(id=chat_id, title=payload["title"])
+
+    monkeypatch.setattr(hs, "_get_json", fake_get_json)
+    monkeypatch.setattr(hs, "resolve_hermes_model", fake_resolve)
+    monkeypatch.setattr(hs, "_connection", lambda request, user, model: ("http://hermes", {}))
+    monkeypatch.setattr(hs.Chats, "get_chat_by_id_and_user_id", lambda chat_id, user_id: None)
+    monkeypatch.setattr(hs.Chats, "get_chat_by_id", lambda chat_id: None)
+    monkeypatch.setattr(hs, "_insert_chat_with_id", fake_insert)
+    return hs, urls, inserted
+
+
+def test_import_session_accepts_the_hermes_session_envelope(monkeypatch):
+    sid = "20260905_085449_dd2e13cd"
+    hs, urls, inserted = _stub_import_dependencies(
+        monkeypatch, {"id": sid, "source": "telegram", "title": "Halowebui与Hermes新对话映射"}
+    )
+
+    result = asyncio.run(
+        hs.import_session(SimpleNamespace(), SimpleNamespace(id="u1"), session_id=sid)
+    )
+
+    assert result["created"] is True
+    assert result["imported_turns"] == 2
+    assert inserted["chat_id"] == sid
+    assert inserted["meta"][hs.HERMES_SESSION_META_KEY]["source"] == "telegram"
+    assert urls[0].endswith(f"/api/sessions/{sid}")
+
+
+def test_import_session_names_the_source_it_refuses(monkeypatch):
+    hs, _urls, inserted = _stub_import_dependencies(
+        monkeypatch, {"id": "cron_1", "source": "cron"}
+    )
+
+    with pytest.raises(HermesSessionsError) as e:
+        asyncio.run(
+            hs.import_session(SimpleNamespace(), SimpleNamespace(id="u1"), session_id="cron_1")
+        )
+
+    assert e.value.status_code == 400
+    assert "cron" in e.value.detail
+    assert inserted == {}

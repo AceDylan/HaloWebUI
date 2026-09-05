@@ -120,6 +120,22 @@ async def _get_json(url: str, headers: dict, params: Optional[dict] = None):
             return await resp.json()
 
 
+def unwrap_session(body: Any) -> dict:
+    """The session dict out of whatever envelope hermes answers with.
+
+    ``GET /api/sessions/{id}`` wraps it as ``{"object": "hermes.session",
+    "session": {...}}`` (gateway/platforms/api_server.py, _handle_get_session);
+    earlier builds answered ``{"data": {...}}``; a bare dict passes through.
+    """
+    if not isinstance(body, dict):
+        return {}
+    for key in ("session", "data"):
+        inner = body.get(key)
+        if isinstance(inner, dict):
+            return inner
+    return body
+
+
 async def list_sessions(
     request,
     user,
@@ -355,11 +371,16 @@ async def import_session(
 
     model = await resolve_hermes_model(request, user, model_id)
     root, headers = _connection(request, user, model)
-    session = await _get_json(f"{root}/api/sessions/{session_id}", headers)
-    if isinstance(session.get("data"), dict):
-        session = session["data"]
-    if session.get("source") not in SOURCES:
-        raise HermesSessionsError(400, "only Telegram, QQ and CLI sessions can be imported")
+    session = unwrap_session(
+        await _get_json(f"{root}/api/sessions/{session_id}", headers)
+    )
+    source = session.get("source")
+    if source not in SOURCES:
+        raise HermesSessionsError(
+            400,
+            "only Telegram, QQ and CLI sessions can be imported "
+            f"(this one is {source or 'unknown'})",
+        )
     page = await _get_json(
         f"{root}/api/sessions/{session_id}/messages",
         headers,

@@ -666,3 +666,61 @@ export const splitHtmlArtifactContent = (
 		source: located.source
 	};
 };
+
+export type HtmlArtifactCompanionImage = { src: string; alt: string };
+
+const MARKDOWN_IMAGE_RE = /!\[([^\]]*)\]\(\s*(<[^>]+>|[^)\s]+)(?:\s+["'][^"']*["'])?\s*\)/g;
+const HTML_IMAGE_TAG_RE = /<img\b[^>]*?\ssrc\s*=\s*(?:"([^"]*)"|'([^']*)')[^>]*>/gi;
+const HTML_IMAGE_ALT_RE = /\salt\s*=\s*(?:"([^"]*)"|'([^']*)')/i;
+
+const collectImagesFromMarkdown = (text: string): HtmlArtifactCompanionImage[] => {
+	const images: HtmlArtifactCompanionImage[] = [];
+	for (const match of text.matchAll(MARKDOWN_IMAGE_RE)) {
+		const src = match[2].replace(/^<|>$/g, '').trim();
+		if (src) {
+			images.push({ src, alt: match[1].trim() });
+		}
+	}
+	for (const match of text.matchAll(HTML_IMAGE_TAG_RE)) {
+		const src = (match[1] ?? match[2] ?? '').trim();
+		if (!src) {
+			continue;
+		}
+		const alt = HTML_IMAGE_ALT_RE.exec(match[0]);
+		images.push({ src, alt: (alt?.[1] ?? alt?.[2] ?? '').trim() });
+	}
+	return images;
+};
+
+/**
+ * Images that sit in the Markdown around the previewed HTML but not inside it,
+ * e.g. a generated picture the model shows before its HTML write-up. Preview
+ * mode hides that Markdown, so only these are rendered next to the frame; the
+ * text and code blocks stay behind "Show original text".
+ */
+export const collectHtmlArtifactCompanionImages = (
+	content: unknown
+): { before: HtmlArtifactCompanionImage[]; after: HtmlArtifactCompanionImage[] } | null => {
+	const split = splitHtmlArtifactContent(content);
+	if (!split) {
+		return null;
+	}
+	const seen = new Set<string>();
+	const keep = (image: HtmlArtifactCompanionImage) => {
+		if (!/^(?:https?:\/\/|\/|data:image\/)/i.test(image.src)) {
+			return false;
+		}
+		if (split.source.includes(image.src) || seen.has(image.src)) {
+			return false;
+		}
+		seen.add(image.src);
+		return true;
+	};
+	return {
+		before: collectImagesFromMarkdown(split.before).filter(keep),
+		after: collectImagesFromMarkdown(split.after).filter(keep)
+	};
+};
+
+export const companionImagesToMarkdown = (images: HtmlArtifactCompanionImage[]): string =>
+	images.map((image) => `![${image.alt.replace(/[\[\]]/g, ' ')}](${image.src})`).join('\n\n');

@@ -6,7 +6,9 @@ import {
 	HTML_PREVIEW_SANDBOX,
 	buildHtmlArtifactPreview,
 	buildInlineHtmlArtifactPreview,
+	collectHtmlArtifactCompanionImages,
 	collectSameOriginPreviewImageSources,
+	companionImagesToMarkdown,
 	getHtmlArtifactSource,
 	inlineHtmlPreviewImages,
 	isInlineHtmlPreviewCopyMessage,
@@ -434,5 +436,26 @@ window.done = true;
 				alt: 3
 			})
 		).toBe(false);
+	});
+
+	it('keeps only the images the html preview would hide, in order, without duplicates', () => {
+		const content =
+			'已生成：\n\n![cat](/api/v1/files/abc/content)\n\n<img src="https://cdn.example/x.png" alt="x">\n\n' +
+			'```html\n<div><img src="/api/v1/files/abc/content"></div>\n```\n\n' +
+			'尾注\n\n![again](/api/v1/files/def/content)';
+
+		const media = collectHtmlArtifactCompanionImages(content);
+		expect(media?.before).toEqual([{ src: 'https://cdn.example/x.png', alt: 'x' }]);
+		expect(media?.after).toEqual([{ src: '/api/v1/files/def/content', alt: 'again' }]);
+		expect(companionImagesToMarkdown(media?.after ?? [])).toBe('![again](/api/v1/files/def/content)');
+
+		expect(collectHtmlArtifactCompanionImages('```html\n<b>x</b>\n```')).toEqual({
+			before: [],
+			after: []
+		});
+		expect(collectHtmlArtifactCompanionImages('no artifact here')).toBeNull();
+		expect(
+			collectHtmlArtifactCompanionImages('![j](javascript:alert(1))\n\n```html\n<b>x</b>\n```')
+		).toEqual({ before: [], after: [] });
 	});
 });

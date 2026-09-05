@@ -25,6 +25,8 @@
 	import { mergeAdjacentReasoningDetails } from '$lib/utils/reasoning-merge';
 	import {
 		buildInlineHtmlArtifactPreview,
+		collectHtmlArtifactCompanionImages,
+		companionImagesToMarkdown,
 		getHtmlArtifactSource,
 		getInlineHtmlPreviewHeight,
 		HTML_PREVIEW_IMAGE_ALT_MAX_CHARS,
@@ -34,7 +36,7 @@
 		isInlineHtmlPreviewCopyMessage,
 		isInlineHtmlPreviewImageMessage,
 		shouldRenderInlineHtmlArtifactOriginalText,
-		splitHtmlArtifactContent
+		type HtmlArtifactCompanionImage
 	} from '$lib/utils/html-preview';
 	import {
 		hasSameOriginPreviewImages,
@@ -138,7 +140,10 @@
 	let lastInlineHtmlPreviewMessageContent: string | null = null;
 	let inlineHtmlPreviewDocument: string | null = null;
 	let inlineHtmlPreviewInlineToken = 0;
-	let inlineHtmlArtifactSplit: { before: string; after: string; source: string } | null = null;
+	let inlineHtmlArtifactMedia: {
+		before: HtmlArtifactCompanionImage[];
+		after: HtmlArtifactCompanionImage[];
+	} | null = null;
 	let inlineHtmlArtifactSource: string | null = null;
 	let copiedInlineHtmlArtifactSource = false;
 	let copiedInlineHtmlArtifactSourceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -457,11 +462,12 @@
 	$: inlineHtmlArtifactSource = inlineHtmlArtifactPreview
 		? getHtmlArtifactSource(normalizedContent)
 		: null;
-	// Preview mode swaps only the HTML fence for the frame; the Markdown around
-	// it (text, generated images, other code blocks) keeps rendering normally.
-	$: inlineHtmlArtifactSplit =
+	// Preview mode shows the HTML only. Images that sit in the hidden Markdown
+	// but not in the HTML (a generated picture before the write-up) are the one
+	// thing carried over; text and code stay behind "Show original text".
+	$: inlineHtmlArtifactMedia =
 		inlineHtmlArtifactPreview && !showInlineHtmlArtifactOriginalText
-			? splitHtmlArtifactContent(normalizedContent)
+			? collectHtmlArtifactCompanionImages(normalizedContent)
 			: null;
 	$: void syncInlineHtmlPreviewDocument(inlineHtmlArtifactPreview);
 	$: hideInlineHtmlArtifactSource =
@@ -1075,10 +1081,10 @@
 					}
 				}}
 			/>
-		{:else if inlineHtmlArtifactSplit && inlineHtmlArtifactSplit.before.trim()}
+		{:else if inlineHtmlArtifactMedia && inlineHtmlArtifactMedia.before.length > 0}
 			<Markdown
-				id={`${id}-html-before`}
-				content={inlineHtmlArtifactSplit.before}
+				id={`${id}-html-media-before`}
+				content={companionImagesToMarkdown(inlineHtmlArtifactMedia.before)}
 				{model}
 				save={false}
 				streaming={false}
@@ -1107,11 +1113,11 @@
 					style={`height: ${inlineHtmlPreviewHeight}px;`}
 				></iframe>
 			</div>
-			{#if inlineHtmlArtifactSplit && inlineHtmlArtifactSplit.after.trim()}
+			{#if inlineHtmlArtifactMedia && inlineHtmlArtifactMedia.after.length > 0}
 				<div class="mt-3">
 					<Markdown
-						id={`${id}-html-after`}
-						content={inlineHtmlArtifactSplit.after}
+						id={`${id}-html-media-after`}
+						content={companionImagesToMarkdown(inlineHtmlArtifactMedia.after)}
 						{model}
 						save={false}
 						streaming={false}

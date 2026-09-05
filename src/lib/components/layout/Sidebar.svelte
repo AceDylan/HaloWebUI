@@ -65,7 +65,6 @@
 	import ChatBubbles from '../icons/ChatBubbles.svelte';
 	import Search from '../icons/Search.svelte';
 	import ArchiveBox from '../icons/ArchiveBox.svelte';
-	import ChatBubbles from '../icons/ChatBubbles.svelte';
 
 	type SidebarStyle = 'flat' | 'card';
 	type SidebarFolder = {

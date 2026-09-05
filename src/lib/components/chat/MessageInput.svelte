@@ -1118,12 +1118,23 @@
 					{/if}
 
 					<QuickCommands
-						on:select={(e) => {
+						on:select={async (e) => {
 							const chip = e.detail;
 							const body = (chip?.content ?? '').replace(/\s+$/, '');
 							const current = (prompt ?? '').trim();
 							prompt = current ? `${body}\n${current}` : `${body}\n`;
-							document.getElementById('chat-input')?.focus();
+							await tick();
+							const chatInput = document.getElementById('chat-input');
+							if (chatInput instanceof HTMLTextAreaElement) {
+								// bind:value fires no input event, so size the box and park the
+								// caret after the inserted command here.
+								chatInput.style.height = '';
+								chatInput.style.height = Math.min(chatInput.scrollHeight, 320) + 'px';
+								const end = chatInput.value.length;
+								chatInput.setSelectionRange(end, end);
+								chatInput.scrollTop = chatInput.scrollHeight;
+							}
+							chatInput?.focus();
 						}}
 					/>
 

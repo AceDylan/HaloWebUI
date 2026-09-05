@@ -356,7 +356,7 @@ export const buildHtmlArtifactPreview = (
 	}
 
 	const style = '<style data-halo-artifact-styles="true">body { background-color: white; }</style>';
-	const mergedHtml = parts.html[0];
+	const mergedHtml = renderMarkdownImagesInsideHtml(parts.html[0]);
 
 	if (/(?:<!doctype\s+html\b|<html\b)/i.test(mergedHtml)) {
 		let document = mergedHtml;
@@ -705,12 +705,14 @@ export const collectHtmlArtifactCompanionImages = (
 	if (!split) {
 		return null;
 	}
-	const seen = new Set<string>();
+	// Only an actual <img> in the (rendered) HTML counts as "already shown";
+	// the URL appearing as plain text in the HTML does not display anything.
+	const seen = new Set<string>(collectHtmlImageSources(renderMarkdownImagesInsideHtml(split.source)));
 	const keep = (image: HtmlArtifactCompanionImage) => {
 		if (!/^(?:https?:\/\/|\/|data:image\/)/i.test(image.src)) {
 			return false;
 		}
-		if (split.source.includes(image.src) || seen.has(image.src)) {
+		if (seen.has(image.src)) {
 			return false;
 		}
 		seen.add(image.src);
@@ -724,3 +726,52 @@ export const collectHtmlArtifactCompanionImages = (
 
 export const companionImagesToMarkdown = (images: HtmlArtifactCompanionImage[]): string =>
 	images.map((image) => `![${image.alt.replace(/[\[\]]/g, ' ')}](${image.src})`).join('\n\n');
+
+const MARKDOWN_IMAGE_IN_HTML_TEXT_RE =
+	/!\[([^\]\n]*)\]\(\s*(\/api\/v1\/files\/[^)\s]+|\/cache\/[^)\s]+|https?:\/\/[^)\s]+|data:image\/[^)\s]+)\s*\)/g;
+// One capture group so String.split keeps tags, comments and whole
+// script/style elements at odd indexes; only the text between them is touched.
+const HTML_MARKUP_SEGMENT_RE =
+	/(<!--[\s\S]*?-->|<script\b[\s\S]*?<\/script\s*>|<style\b[\s\S]*?<\/style\s*>|<[^>]+>)/i;
+
+const escapeHtmlAttribute = (value: string) =>
+	value
+		.replace(/&(?!(?:amp|lt|gt|quot|#39|#x27|#\d+|#x[0-9a-f]+);)/gi, '&amp;')
+		.replace(/"/g, '&quot;')
+		.replace(/</g, '&lt;')
+		.replace(/>/g, '&gt;');
+
+const collectHtmlImageSources = (html: string): string[] => {
+	const sources: string[] = [];
+	for (const match of String(html ?? '').matchAll(IMG_SRC_ATTRIBUTE_RE)) {
+		const src = (match[2] ?? match[3] ?? '').trim().replace(/&amp;/g, '&');
+		if (src && !sources.includes(src)) {
+			sources.push(src);
+		}
+	}
+	return sources;
+};
+
+/**
+ * A model (or the safe fallback) sometimes leaves Markdown image syntax as
+ * plain text inside the HTML; rendered literally it shows the URL instead of
+ * the picture. Text nodes get a real <img>; attributes, comments, script and
+ * style bodies are left untouched.
+ */
+export const renderMarkdownImagesInsideHtml = (html: string): string => {
+	if (typeof html !== 'string' || !html.includes('![')) {
+		return html;
+	}
+	return html
+		.split(HTML_MARKUP_SEGMENT_RE)
+		.map((segment, index) =>
+			index % 2 === 1
+				? segment
+				: segment.replace(
+						MARKDOWN_IMAGE_IN_HTML_TEXT_RE,
+						(_whole: string, alt: string, src: string) =>
+							`<img src="${escapeHtmlAttribute(src)}" alt="${escapeHtmlAttribute(alt.trim())}" style="max-width:100%;height:auto;display:block;border-radius:10px;margin:10px 0;">`
+					)
+		)
+		.join('');
+};

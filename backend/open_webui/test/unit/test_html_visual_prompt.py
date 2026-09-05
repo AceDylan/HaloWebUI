@@ -1278,3 +1278,25 @@ def test_agy_html_request_replaces_draft_html_card_with_its_text():
     assert "style=" not in prompt
     assert "&lt;div" not in prompt
     assert "````" not in prompt
+
+
+def test_safe_fallback_renders_generated_images_instead_of_their_markdown():
+    metadata = {"server_surface": html_visual_prompt.HTML_VISUAL_WEB_SURFACE}
+    content = (
+        "已生成：\n\n![image](/api/v1/files/0fcab4f1-4322/content?x=1&y=2)\n\n"
+        "参考 ![ext](https://cdn.example/a.png) 与 `code`"
+    )
+
+    result = append_html_visual_fallback(content, metadata)
+
+    assert HTML_VISUAL_FALLBACK_MARKER in result
+    artifact = result.split("```html", 1)[1]
+    assert (
+        '<img src="/api/v1/files/0fcab4f1-4322/content?x=1&amp;y=2" alt="image"'
+        in artifact
+    )
+    # the original Markdown of a same-origin image is gone from the artifact text
+    assert "![image](/api/v1/files/0fcab4f1-4322/content" not in artifact
+    # external links stay inert text, still with the escaped colon
+    assert "![ext](https&#58;//cdn.example/a.png)" in artifact
+    assert "&#96;code&#96;" in artifact

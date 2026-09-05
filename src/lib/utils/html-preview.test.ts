@@ -14,6 +14,7 @@ import {
 	isInlineHtmlPreviewCopyMessage,
 	isInlineHtmlPreviewImageMessage,
 	normalizeSameOriginPreviewImageSource,
+	renderMarkdownImagesInsideHtml,
 	splitHtmlArtifactContent,
 	getCodePreviewEventKey,
 	getInlineHtmlPreviewHeight,
@@ -457,5 +458,45 @@ window.done = true;
 		expect(
 			collectHtmlArtifactCompanionImages('![j](javascript:alert(1))\n\n```html\n<b>x</b>\n```')
 		).toEqual({ before: [], after: [] });
+	});
+
+	it('turns literal markdown image syntax inside html text into img tags, nowhere else', () => {
+		const html =
+			'<section><div style="white-space:pre-wrap">已生成 ![粉猫](/api/v1/files/abc/content) 完成</div>' +
+			'<a href="x" title="![no](/api/v1/files/attr/content)">t</a>' +
+			'<script>const s = "![no](/api/v1/files/script/content)";</script>' +
+			'<!-- ![no](/api/v1/files/comment/content) -->' +
+			'<p>![ext](https://cdn.example/a.png) ![bad](javascript:alert(1)) ![q](/api/v1/files/q/content?a=1&b="2")</p></section>';
+
+		const rendered = renderMarkdownImagesInsideHtml(html);
+
+		expect(rendered).toContain('<img src="/api/v1/files/abc/content" alt="粉猫"');
+		expect(rendered).toContain('<img src="https://cdn.example/a.png" alt="ext"');
+		expect(rendered).toContain('<img src="/api/v1/files/q/content?a=1&amp;b=&quot;2&quot;" alt="q"');
+		expect(rendered).toContain('![bad](javascript:alert(1))');
+		expect(rendered).toContain('title="![no](/api/v1/files/attr/content)"');
+		expect(rendered).toContain('const s = "![no](/api/v1/files/script/content)";');
+		expect(rendered).toContain('<!-- ![no](/api/v1/files/comment/content) -->');
+		expect(renderMarkdownImagesInsideHtml('<p>plain</p>')).toBe('<p>plain</p>');
+	});
+
+	it('shows a fallback-style artifact image inside the preview and does not repeat it outside', () => {
+		const content =
+			'![image](/api/v1/files/0fcab4f1/content)\n\n```html\n' +
+			'<section data-halowebui-fallback="X"><div style="white-space:pre-wrap;">![image](/api/v1/files/0fcab4f1/content)</div></section>\n```';
+
+		const preview = buildHtmlArtifactPreview(content);
+		expect(preview).toContain('<img src="/api/v1/files/0fcab4f1/content" alt="image"');
+		expect(collectHtmlArtifactCompanionImages(content)).toEqual({ before: [], after: [] });
+		// the copyable source stays exactly what the model wrote
+		expect(getHtmlArtifactSource(content)).toContain('>![image](/api/v1/files/0fcab4f1/content)<');
+	});
+
+	it('does not treat a url mentioned as plain text in the html as an already shown image', () => {
+		const content =
+			'![cat](/api/v1/files/cat/content)\n\n```html\n<p>see /api/v1/files/cat/content for the file</p>\n```';
+		expect(collectHtmlArtifactCompanionImages(content)?.before).toEqual([
+			{ src: '/api/v1/files/cat/content', alt: 'cat' }
+		]);
 	});
 });

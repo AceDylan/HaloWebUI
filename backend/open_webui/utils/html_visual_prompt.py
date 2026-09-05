@@ -1316,6 +1316,33 @@ def _escape_fallback_content(content: str) -> str:
     return html.escape(content, quote=True).replace("`", "&#96;").replace(":", "&#58;")
 
 
+# Markdown image syntax as it looks after _escape_fallback_content (":" is
+# already "&#58;", so only same-origin uploads and cache files can match).
+_ESCAPED_FALLBACK_IMAGE_RE = re.compile(
+    r"!\[([^\]\n]*)\]\((/api/v1/files/[^)\s]+|/cache/[^)\s]+)\)"
+)
+
+
+def _render_fallback_markdown_images(escaped_content: str) -> str:
+    """Show generated pictures in the safe fallback instead of their Markdown.
+
+    The fallback wraps the answer as escaped text, so an image the run produced
+    (``![image](/api/v1/files/<id>/content)``) would otherwise read as a URL.
+    The text is already escaped, so the captured pieces are safe to place in
+    attributes as they are.
+    """
+
+    def _img(match: "re.Match[str]") -> str:
+        alt = match.group(1).strip()
+        src = match.group(2)
+        return (
+            f'<img src="{src}" alt="{alt}" '
+            'style="max-width:100%;height:auto;display:block;border-radius:10px;margin:10px 0;">'
+        )
+
+    return _ESCAPED_FALLBACK_IMAGE_RE.sub(_img, escaped_content)
+
+
 def append_html_visual_fallback(content: Any, metadata: dict[str, Any] | None) -> Any:
     """Append one safe local Artifact for a successful force-mode response.
 
@@ -1338,7 +1365,9 @@ def append_html_visual_fallback(content: Any, metadata: dict[str, Any] | None) -
     display_content = _THINKING_BLOCK_RE.sub("", display_content).strip()
     if not display_content:
         display_content = "任务已完成，详细过程请查看原回复中的工具调用记录。"
-    escaped_content = _escape_fallback_content(display_content)
+    escaped_content = _render_fallback_markdown_images(
+        _escape_fallback_content(display_content)
+    )
     artifact = f"""```html
 <section data-halowebui-fallback="{HTML_VISUAL_FALLBACK_MARKER}" style="max-width:920px;margin:0 auto;padding:22px 20px;background:#ffffff;color:#171717;font-family:Inter,Arial,'Noto Sans SC',sans-serif;">
   <div style="margin:0;font-size:12px;font-weight:700;letter-spacing:0.08em;color:#6b7280;">回复摘要</div>

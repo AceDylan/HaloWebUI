@@ -1,5 +1,6 @@
 import json
 import logging
+from urllib.parse import parse_qsl, urlparse, urlunparse
 
 import requests
 from open_webui.config import WEBUI_FAVICON_URL
@@ -8,14 +9,50 @@ from open_webui.env import SRC_LOG_LEVELS, VERSION
 log = logging.getLogger(__name__)
 log.setLevel(SRC_LOG_LEVELS["WEBHOOK"])
 
+# Telegram rejects sendMessage bodies longer than this.
+TELEGRAM_MESSAGE_MAX_CHARS = 4096
+
+
+def _telegram_target(url: str):
+    """(post_url, chat_id, thread_id) for a Telegram Bot API webhook URL.
+
+    Configured as https://api.telegram.org/bot<token>/sendMessage?chat_id=<id>
+    (optionally &message_thread_id=<topic>). The parameters move into the JSON
+    body so Telegram sees them exactly once.
+    """
+    parsed = urlparse(url)
+    if not (parsed.netloc == "api.telegram.org" and parsed.path.startswith("/bot")):
+        return None
+    query = dict(parse_qsl(parsed.query))
+    post_url = urlunparse(parsed._replace(query="", fragment=""))
+    return post_url, query.get("chat_id"), query.get("message_thread_id")
+
 
 def post_webhook(name: str, url: str, message: str, event_data: dict) -> bool:
     try:
         log.debug(f"post_webhook: {url}, {message}, {event_data}")
         payload = {}
+        telegram = _telegram_target(url)
 
+        # Telegram Bot API (sendMessage)
+        if telegram is not None:
+            url, chat_id, thread_id = telegram
+            if not chat_id:
+                log.error("post_webhook: Telegram webhook URL needs ?chat_id=<id>")
+                return False
+            payload = {
+                "chat_id": chat_id,
+                "text": (
+                    message
+                    if len(message) <= TELEGRAM_MESSAGE_MAX_CHARS
+                    else f"{message[: TELEGRAM_MESSAGE_MAX_CHARS - 20]}... (truncated)"
+                ),
+                "disable_web_page_preview": True,
+            }
+            if thread_id:
+                payload["message_thread_id"] = thread_id
         # Slack and Google Chat Webhooks
-        if "https://hooks.slack.com" in url or "https://chat.googleapis.com" in url:
+        elif "https://hooks.slack.com" in url or "https://chat.googleapis.com" in url:
             payload["text"] = message
         # Discord Webhooks
         elif "https://discord.com/api/webhooks" in url:

@@ -505,6 +505,13 @@ from open_webui.utils.models import (
     invalidate_base_model_cache,
 )
 from open_webui.utils.model_identity import resolve_model_from_lookup
+from open_webui.utils.model_fallback import (
+    RETRY_DELAY_SECONDS,
+    fallback_eligible,
+    model_display_name,
+    resolve_fallback_model,
+    transient_reason,
+)
 from open_webui.utils.chat import (
     generate_chat_completion as chat_completion_handler,
     chat_completed as chat_completed_handler,
@@ -1936,6 +1943,111 @@ async def chat_completion(
                 )
             except Exception:
                 pass
+
+        # Transient upstream failure before anything streamed (5xx / 429 /
+        # timeout / connection): retry the same model once, then answer with the
+        # model's configured fallback. Both rebuild the request from the original
+        # body like the retries above, so the payload is processed exactly once.
+        if (
+            original_request_body
+            and fallback_eligible(model, metadata)
+            and not is_multi_model_discussion_enabled(form_data.get("discussion"))
+        ):
+            reason = transient_reason(e)
+            if reason:
+                await asyncio.sleep(RETRY_DELAY_SECONDS)
+                retry_metadata = {**metadata, "upstream_retry": reason}
+                retry_form_data = _rebuild_retry_form_data(
+                    original_request_body,
+                    retry_metadata,
+                    strip_non_native_function_calling=strip_non_native_function_calling,
+                )
+                retry_form_data = apply_html_visual_prompt_overlay(
+                    retry_form_data, retry_metadata
+                )
+                try:
+                    retry_form_data, retry_metadata, retry_events = await process_chat_payload(
+                        request, retry_form_data, user, retry_metadata, model, tasks=tasks
+                    )
+                    response = await chat_completion_handler(request, retry_form_data, user)
+                    return await process_chat_response(
+                        request,
+                        response,
+                        retry_form_data,
+                        user,
+                        retry_metadata,
+                        model,
+                        retry_events,
+                        tasks,
+                    )
+                except Exception as retry_error:
+                    e = retry_error
+                    reason = transient_reason(e) or reason
+
+            fallback_model = resolve_fallback_model(request, model) if reason else None
+            if fallback_model is not None:
+                from_name = model_display_name(model)
+                to_name = model_display_name(fallback_model)
+                fallback_metadata = {
+                    **metadata,
+                    "model": fallback_model,
+                    "model_fallback": {
+                        "from": model.get("id"),
+                        "to": fallback_model.get("id"),
+                        "reason": reason,
+                    },
+                }
+                fallback_form_data = _rebuild_retry_form_data(
+                    original_request_body,
+                    fallback_metadata,
+                    strip_non_native_function_calling=strip_non_native_function_calling,
+                )
+                fallback_form_data["model"] = fallback_model.get("id")
+                fallback_form_data = apply_html_visual_prompt_overlay(
+                    fallback_form_data, fallback_metadata
+                )
+                fallback_emitter = get_event_emitter(fallback_metadata)
+                if fallback_emitter:
+                    await fallback_emitter(
+                        {
+                            "type": "status",
+                            "data": {
+                                "description": f"{from_name} 上游失败（{reason}），已切换到 {to_name} 回答",
+                                "done": True,
+                            },
+                        }
+                    )
+                try:
+                    request.state.model = fallback_model
+                    fallback_form_data, fallback_metadata, fallback_events = await process_chat_payload(
+                        request, fallback_form_data, user, fallback_metadata, fallback_model, tasks=tasks
+                    )
+                    response = await chat_completion_handler(request, fallback_form_data, user)
+                    return await process_chat_response(
+                        request,
+                        response,
+                        fallback_form_data,
+                        user,
+                        fallback_metadata,
+                        fallback_model,
+                        fallback_events,
+                        tasks,
+                    )
+                except Exception as fallback_error:
+                    log.warning(
+                        f"fallback model {to_name} failed after {from_name} ({reason}): {fallback_error}"
+                    )
+                    if fallback_emitter:
+                        await fallback_emitter(
+                            {
+                                "type": "status",
+                                "data": {
+                                    "description": f"兜底模型 {to_name} 也失败（{transient_reason(fallback_error) or '错误'}）",
+                                    "done": True,
+                                },
+                            }
+                        )
+                    e = fallback_error
 
         _raise_preserving_http_exception(e, status.HTTP_400_BAD_REQUEST)
 

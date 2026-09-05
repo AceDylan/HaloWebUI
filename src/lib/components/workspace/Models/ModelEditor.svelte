@@ -934,6 +934,33 @@
 								/>
 							</div>
 
+							<!-- Fallback model -->
+							<div class="glass-item p-4">
+								<div class="text-sm font-medium mb-1">{$i18n.t('Fallback model')}</div>
+								<div class="text-xs text-gray-500 dark:text-gray-400 mb-2">
+									{$i18n.t('Answers instead when this model fails upstream (5xx, rate limit, timeout) after one retry.')}
+								</div>
+								<select
+									class="glass-input w-full px-3 py-2 text-sm"
+									value={info?.meta?.fallback_model_id ?? ''}
+									on:change={(e) => {
+										const value = e.currentTarget.value;
+										const meta = { ...(info?.meta ?? {}) };
+										if (value) {
+											meta.fallback_model_id = value;
+										} else {
+											delete meta.fallback_model_id;
+										}
+										info.meta = meta;
+									}}
+								>
+									<option value="">{$i18n.t('None')}</option>
+									{#each ($models ?? []).filter((option) => getModelSelectionId(option) !== id && option?.original_id !== 'hermes-agent' && !(option?.info?.meta?.hidden ?? false)) as option (getModelSelectionId(option))}
+										<option value={getModelSelectionId(option)}>{option.name}</option>
+									{/each}
+								</select>
+							</div>
+
 							<!-- Access Control -->
 							<div class="glass-item p-4">
 									<AccessControl

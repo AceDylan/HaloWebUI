@@ -139,6 +139,7 @@
 	} from '$lib/apis';
 	import { getTools } from '$lib/apis/tools';
 	import { getSkills } from '$lib/apis/skills';
+	import { steerHermesRun } from '$lib/apis/hermes';
 	import { ensureModels } from '$lib/services/models';
 
 	import Banner from '../common/Banner.svelte';
@@ -4903,6 +4904,20 @@
 		const hasPendingTask = Array.isArray(taskIds) && taskIds.length > 0;
 		const hasRunningResponse = messages.length !== 0 && messages.at(-1).done != true;
 		if (hasPendingTask || hasRunningResponse) {
+			// A hermes run accepts text while it executes: steer it instead of
+			// queueing the message for after it finishes. Anything with files, or
+			// a response that is not a hermes run, is not steerable (null) and
+			// falls through to the queue exactly as before.
+			if (hasRunningResponse && validFiles.length === 0 && referenceFiles.length === 0) {
+				const steered = await steerHermesRun(localStorage.token, $chatId, userPrompt).catch(
+					() => null
+				);
+				if (steered?.accepted) {
+					prompt = '';
+					files = structuredClone(failedFiles);
+					return;
+				}
+			}
 			if ($settings?.enableMessageQueue ?? true) {
 				const queuedFiles = validFiles.map((file) => normalizeInputFileForMessage(file));
 				if (failedFiles.length > 0) {

@@ -93,6 +93,73 @@ ATTACHMENT_ONLY_RUN_INPUT = (
 # source, and short enough that Telegram/Bark render it in one screen.
 WEBHOOK_CONTENT_MAX_CHARS = 1200
 
+# Longest guidance accepted mid-run.
+STEER_TEXT_MAX_CHARS = 4000
+
+
+class HermesSteerError(Exception):
+    """A steer that cannot be honoured; carries the HTTP status to answer with."""
+
+    def __init__(self, status_code: int, detail: str):
+        super().__init__(detail)
+        self.status_code = status_code
+        self.detail = detail
+
+
+# chat_id -> the hermes run streaming into that chat right now. A chat has at
+# most one live run (the UI queues further messages until it finishes), so the
+# chat id is the handle for steering it and for listing what is executing.
+_ACTIVE_RUNS: dict[str, dict] = {}
+
+
+def _register_run(chat_id: str, entry: dict) -> None:
+    _ACTIVE_RUNS[chat_id] = entry
+
+
+def _unregister_run(chat_id: str, run_id) -> None:
+    """Drop the registry entry, but only for the run that registered it."""
+    entry = _ACTIVE_RUNS.get(chat_id)
+    if run_id and entry is not None and entry.get("run_id") == run_id:
+        _ACTIVE_RUNS.pop(chat_id, None)
+
+
+def list_active_runs(user_id: str) -> list:
+    runs = []
+    for chat_id, entry in list(_ACTIVE_RUNS.items()):
+        if entry.get("user_id") != user_id:
+            continue
+        runs.append(
+            {
+                "chat_id": chat_id,
+                "message_id": entry.get("message_id"),
+                "run_id": entry.get("run_id"),
+                "started_at": entry.get("started_at"),
+                "steers": entry.get("steers", 0),
+                "title": Chats.get_chat_title_by_id(chat_id),
+            }
+        )
+    runs.sort(key=lambda run: run["started_at"] or 0)
+    return runs
+
+
+async def steer_active_run(*, chat_id: str, user_id: str, text: str) -> dict:
+    """Inject `text` into the run streaming in `chat_id`."""
+    entry = _ACTIVE_RUNS.get(chat_id)
+    # Another user's chat must look exactly like "no run": do not confirm it.
+    if entry is None or entry.get("user_id") != user_id:
+        raise HermesSteerError(404, "no hermes run is active for this chat")
+    text = str(text or "").strip()
+    if not text:
+        raise HermesSteerError(400, "steer text is empty")
+    await entry["steer"](text)
+    entry["steers"] = entry.get("steers", 0) + 1
+    return {
+        "status": True,
+        "chat_id": chat_id,
+        "run_id": entry.get("run_id"),
+        "accepted": True,
+    }
+
 
 def _model_upstream_id(model) -> str:
     """Return the upstream model id (without any connection prefix).
@@ -409,6 +476,15 @@ def _serialize_blocks(blocks) -> str:
             text = str(block.get("content", "")).strip()
             if text:
                 content = f"{content}{text}\n"
+        elif block["type"] == "steer":
+            # Guidance the user injected while the run executed, quoted at the
+            # point in the transcript where it landed.
+            lines = str(block.get("content", "")).strip().splitlines() or [""]
+            quoted = []
+            for index, line in enumerate(lines):
+                prefix = "\U0001f9ed " if index == 0 else ""
+                quoted.append(f"> {prefix}{line}")
+            content = f"{content}\n" + "\n".join(quoted) + "\n\n"
         elif block["type"] == "tool":
             arguments = html.escape(
                 json.dumps({"input": block.get("preview") or ""}, ensure_ascii=False)
@@ -657,6 +733,7 @@ async def run_hermes_agent(request, form_data, user, metadata, model, events, ta
             if finalized:
                 return
             finalized = True
+            _unregister_run(metadata["chat_id"], run_id)
             content = _serialize_blocks(blocks)
             if successful and not error:
                 content = await design_html_visual_artifact_with_agy(content, metadata)
@@ -703,6 +780,29 @@ async def run_hermes_agent(request, form_data, user, metadata, model, events, ta
             except Exception as e:
                 log.warning(f"hermes background tasks failed: {e}")
 
+        async def _steer(text: str):
+            # Forward to hermes first; only a run that accepted the text gets
+            # the transcript marker. 404/409 from hermes both mean "no longer
+            # accepting input", which is a 409 for our caller.
+            timeout = aiohttp.ClientTimeout(total=15)
+            async with aiohttp.ClientSession(
+                trust_env=True, timeout=timeout
+            ) as session:
+                async with session.post(
+                    f"{base_url}/runs/{run_id}/steer",
+                    json={"input": text},
+                    headers=headers,
+                    ssl=AIOHTTP_CLIENT_SESSION_SSL,
+                ) as resp:
+                    if resp.status >= 400:
+                        body = await resp.text()
+                        raise HermesSteerError(
+                            409 if resp.status in (404, 409) else 502,
+                            f"hermes did not accept the steer ({resp.status}): {body[:300]}",
+                        )
+            blocks.append({"type": "steer", "content": text})
+            await _emit_completion({"content": _serialize_blocks(blocks)})
+
         try:
             for event in events or []:
                 await _emit_completion(event)
@@ -729,6 +829,17 @@ async def run_hermes_agent(request, form_data, user, metadata, model, events, ta
                     if not run_id:
                         await _finalize(error="Hermes did not return a run_id")
                         return
+                    _register_run(
+                        metadata["chat_id"],
+                        {
+                            "user_id": user.id,
+                            "message_id": metadata["message_id"],
+                            "run_id": run_id,
+                            "started_at": time.time(),
+                            "steers": 0,
+                            "steer": _steer,
+                        },
+                    )
 
                 async with session.get(
                     f"{base_url}/runs/{run_id}/events",
@@ -875,6 +986,8 @@ async def run_hermes_agent(request, form_data, user, metadata, model, events, ta
         except Exception as e:
             log.exception("hermes agent run failed")
             await _finalize(error=f"Hermes agent error: {e}")
+        finally:
+            _unregister_run(metadata["chat_id"], run_id)
 
     task_id, _ = create_task(_run_handler(), id=metadata["chat_id"])
     return {"status": True, "task_id": task_id}

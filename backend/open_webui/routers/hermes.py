@@ -1,5 +1,11 @@
 """Hermes integration endpoints.
 
+POST /api/v1/hermes/steer — inject guidance into the hermes run streaming in a
+chat (hermes ``POST /v1/runs/{run_id}/steer``). Signed-in user; the run must be
+one of their own chats.
+
+GET /api/v1/hermes/runs — the signed-in user's hermes runs executing right now.
+
 POST /api/v1/hermes/notifications — a background process started by hermes
 (for example a ``reclaude-run.sh`` run) reports its completion. HaloWebUI turns
 the notification into a follow-up user turn in the originating chat and starts a
@@ -13,10 +19,17 @@ from the chat itself.
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from open_webui.env import SRC_LOG_LEVELS
+from open_webui.utils.auth import get_verified_user
+from open_webui.utils.hermes_agent import (
+    STEER_TEXT_MAX_CHARS,
+    HermesSteerError,
+    list_active_runs,
+    steer_active_run,
+)
 from open_webui.utils.hermes_notify import (
     NOTIFICATION_PROMPT_MAX_CHARS,
     HermesNotifyError,
@@ -68,3 +81,23 @@ async def receive_hermes_notification(request: Request, form_data: HermesNotific
         "assistant_message_id": result["assistant_message_id"],
         "run_id": form_data.run_id,
     }
+
+
+class HermesSteerForm(BaseModel):
+    chat_id: str = Field(min_length=1, max_length=128)
+    text: str = Field(min_length=1, max_length=STEER_TEXT_MAX_CHARS)
+
+
+@router.post("/steer")
+async def steer_hermes_run(form_data: HermesSteerForm, user=Depends(get_verified_user)):
+    try:
+        return await steer_active_run(
+            chat_id=form_data.chat_id, user_id=user.id, text=form_data.text
+        )
+    except HermesSteerError as e:
+        raise HTTPException(status_code=e.status_code, detail=e.detail)
+
+
+@router.get("/runs")
+async def get_active_hermes_runs(user=Depends(get_verified_user)):
+    return {"runs": list_active_runs(user.id)}

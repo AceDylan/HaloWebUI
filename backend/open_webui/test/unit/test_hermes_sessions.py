@@ -1,4 +1,6 @@
+import asyncio
 import json
+from types import SimpleNamespace
 
 import pytest
 
@@ -6,6 +8,7 @@ from open_webui.utils.hermes_sessions import (
     HermesSessionsError,
     build_chat_payload,
     fold_transcript,
+    resolve_hermes_model,
     validate_session_id,
 )
 
@@ -121,3 +124,60 @@ def test_validate_session_id_rejects_path_tricks():
         with pytest.raises(HermesSessionsError) as exc:
             validate_session_id(bad)
         assert exc.value.status_code == 400
+
+
+HERMES_SELECTION = "modelref::openai::personal::id:ee5e02db::hermes-agent"
+CHAT_SELECTION = "modelref::openai::personal::id:c153e2d2::gpt-chat"
+
+
+def _user_scoped_registry(monkeypatch):
+    """Mirror get_all_models in this fork: fill request.state.MODELS (alias →
+    model) and return the list; app.state.MODELS stays empty."""
+    hermes = {"id": HERMES_SELECTION, "original_id": "hermes-agent", "name": "hermes-agent"}
+    chat = {"id": CHAT_SELECTION, "original_id": "gpt-chat", "name": "gpt-chat"}
+
+    async def fake_get_all_models(request, user=None):
+        request.state.MODELS = {chat["id"]: chat, hermes["id"]: hermes, "hermes-agent": hermes}
+        request.state.MODELS_AMBIGUOUS = set()
+        return [chat, hermes]
+
+    monkeypatch.setattr("open_webui.utils.models.get_all_models", fake_get_all_models)
+    request = SimpleNamespace(
+        app=SimpleNamespace(state=SimpleNamespace(MODELS={})), state=SimpleNamespace()
+    )
+    return request, hermes, chat
+
+
+def test_resolve_hermes_model_reads_the_user_scoped_registry(monkeypatch):
+    request, hermes, _chat = _user_scoped_registry(monkeypatch)
+
+    assert asyncio.run(resolve_hermes_model(request, user=None)) is hermes
+    assert asyncio.run(resolve_hermes_model(request, None, model_id=HERMES_SELECTION)) is hermes
+    assert asyncio.run(resolve_hermes_model(request, None, model_id="hermes-agent")) is hermes
+    assert request.app.state.MODELS == {}  # never written to (cross-user leakage)
+
+
+def test_resolve_hermes_model_rejects_non_hermes_and_unknown_ids(monkeypatch):
+    request, _hermes, _chat = _user_scoped_registry(monkeypatch)
+
+    with pytest.raises(HermesSessionsError) as exc:
+        asyncio.run(resolve_hermes_model(request, None, model_id=CHAT_SELECTION))
+    assert exc.value.status_code == 422
+
+    with pytest.raises(HermesSessionsError) as exc:
+        asyncio.run(resolve_hermes_model(request, None, model_id="nope"))
+    assert exc.value.status_code == 422
+
+
+def test_resolve_hermes_model_is_422_when_the_user_has_no_hermes_model(monkeypatch):
+    async def fake_get_all_models(request, user=None):
+        request.state.MODELS = {}
+        request.state.MODELS_AMBIGUOUS = set()
+        return [{"id": CHAT_SELECTION, "original_id": "gpt-chat"}]
+
+    monkeypatch.setattr("open_webui.utils.models.get_all_models", fake_get_all_models)
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace()), state=SimpleNamespace())
+    with pytest.raises(HermesSessionsError) as exc:
+        asyncio.run(resolve_hermes_model(request, user=None))
+    assert exc.value.status_code == 422
+    assert "no hermes agent model" in exc.value.detail

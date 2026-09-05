@@ -16,6 +16,7 @@ import uuid
 from typing import Any, Optional
 
 import aiohttp
+from fastapi import HTTPException
 
 from open_webui.env import AIOHTTP_CLIENT_SESSION_SSL, SRC_LOG_LEVELS
 from open_webui.internal.db import get_db
@@ -58,21 +59,29 @@ def validate_session_id(session_id: str) -> str:
 async def resolve_hermes_model(request, user, model_id: Optional[str] = None) -> dict:
     """The hermes model dict the imported chat answers with.
 
-    An explicit ``model_id`` must be a hermes model; otherwise the first hermes
-    model in the model registry is used (this deployment has exactly one).
+    Models are user-scoped in this fork: ``get_all_models`` builds the caller's
+    list from their own connections, fills ``request.state.MODELS`` (the alias →
+    model lookup chat_completion routes with) and returns the list;
+    ``app.state.MODELS`` is deliberately never populated. An explicit
+    ``model_id`` must resolve to a hermes model; otherwise the first hermes
+    model in the caller's list is used (this deployment has exactly one).
     """
-    models = getattr(request.app.state, "MODELS", None) or {}
-    if not models:
-        from open_webui.utils.models import get_all_models
+    from open_webui.utils.model_identity import resolve_model_from_lookup
+    from open_webui.utils.models import get_all_models
 
-        await get_all_models(request, user=user)
-        models = getattr(request.app.state, "MODELS", None) or {}
+    models = await get_all_models(request, user=user) or []
+    state = getattr(request, "state", None)
+    lookup = getattr(state, "MODELS", None) or {}
+    ambiguous = getattr(state, "MODELS_AMBIGUOUS", None) or set()
     if model_id:
-        model = models.get(model_id)
+        try:
+            model = resolve_model_from_lookup(lookup, ambiguous, model_id)
+        except HTTPException as e:
+            raise HermesSessionsError(e.status_code, str(e.detail))
         if not isinstance(model, dict) or not is_hermes_agent_model(model):
             raise HermesSessionsError(422, f"{model_id} is not a hermes agent model")
         return model
-    for model in models.values():
+    for model in models:
         if isinstance(model, dict) and is_hermes_agent_model(model):
             return model
     raise HermesSessionsError(422, "no hermes agent model is available")

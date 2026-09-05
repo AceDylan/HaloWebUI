@@ -48,6 +48,7 @@ from open_webui.utils.html_visual_prompt import (
     append_html_visual_fallback,
     design_html_visual_artifact_with_agy,
 )
+from open_webui.utils.model_identity import parse_selection_id
 from open_webui.utils.webhook import post_webhook
 
 log = logging.getLogger(__name__)
@@ -169,18 +170,23 @@ def _model_upstream_id(model) -> str:
     while its `id` may be prefixed like "ee5e02db.hermes-agent").
     """
     if isinstance(model, dict):
-        original = model.get("original_id")
+        original = model.get("original_id") or model.get("model_id")
         if original:
             return str(original)
         model_ref = model.get("model_ref")
         if isinstance(model_ref, dict) and model_ref.get("model_id"):
             return str(model_ref["model_id"])
-        candidate = str(model.get("id") or "")
+        candidate = str(model.get("id") or model.get("selection_id") or "")
     else:
         candidate = str(model or "")
-    # Fall back to stripping a "<prefix>." connection prefix.
     if candidate in HERMES_AGENT_MODEL_IDS:
         return candidate
+    # Selection ids ("modelref::openai::personal::id:<conn>::hermes-agent", what
+    # the UI sends as `model`) carry the upstream id as their last segment.
+    selection = parse_selection_id(candidate)
+    if selection and selection.get("model_id"):
+        return str(selection["model_id"])
+    # Fall back to stripping a "<prefix>." connection prefix.
     if "." in candidate:
         stripped = candidate.split(".", 1)[1]
         if stripped in HERMES_AGENT_MODEL_IDS:

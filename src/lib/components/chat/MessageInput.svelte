@@ -54,6 +54,7 @@
 	import InputMenu from './MessageInput/InputMenu.svelte';
 	import FilesOverlay from './MessageInput/FilesOverlay.svelte';
 	import Commands from './MessageInput/Commands.svelte';
+	import QuickCommands from './MessageInput/QuickCommands.svelte';
 	import InputVariablesModal from './MessageInput/InputVariablesModal.svelte';
 	import SendMenu from './MessageInput/SendMenu.svelte';
 	import CommandSuggestionList from './MessageInput/CommandSuggestionList.svelte';
@@ -1115,6 +1116,16 @@
 							{/if}
 						</div>
 					{/if}
+
+					<QuickCommands
+						on:select={(e) => {
+							const chip = e.detail;
+							const body = (chip?.content ?? '').replace(/\s+$/, '');
+							const current = (prompt ?? '').trim();
+							prompt = current ? `${body}\n${current}` : `${body}\n`;
+							document.getElementById('chat-input')?.focus();
+						}}
+					/>
 
 					{#if !($settings?.richTextInput ?? true)}
 						<Commands

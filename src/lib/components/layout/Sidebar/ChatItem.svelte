@@ -25,6 +25,7 @@
 		showSidebar,
 		currentChatPage,
 		tags,
+		hermesUnreadChatIds,
 		activeChatIds
 	} from '$lib/stores';
 
@@ -292,6 +293,13 @@
 							></span>
 							<span class="relative inline-flex rounded-full h-2 w-2 bg-blue-500"></span>
 						</span>
+					</div>
+				{:else if $hermesUnreadChatIds.has(id)}
+					<div
+						class="flex-shrink-0 self-center ml-1"
+						title={$i18n.t('Finished, not yet opened')}
+					>
+						<span class="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
 					</div>
 				{/if}
 			</div>

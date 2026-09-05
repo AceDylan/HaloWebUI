@@ -43,6 +43,7 @@ from open_webui.socket.main import (
 )
 from open_webui.tasks import create_task
 from open_webui.utils.chat_image_refs import materialize_openai_image_message_refs
+from open_webui.utils.hermes_unread import mark_unread
 from open_webui.utils.html_visual_prompt import (
     _fenced_html_artifacts_as_text,
     append_html_visual_fallback,
@@ -758,6 +759,9 @@ async def run_hermes_agent(request, form_data, user, metadata, model, events, ta
             title = Chats.get_chat_title_by_id(metadata["chat_id"])
             if title:
                 data["title"] = title
+            # Unread until the chat is opened: the sidebar dot for runs that
+            # finished while nobody was looking (the client clears it on open).
+            mark_unread(metadata["chat_id"], user.id)
             try:
                 await _emit_completion(data)
             except Exception as e:

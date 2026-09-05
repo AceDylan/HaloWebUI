@@ -2253,5 +2253,9 @@
 	"Send test message": "",
 	"Test message sent": "",
 	"Test message failed": "",
-	"Fires when a task finishes and no HaloWebUI tab is open. A Telegram Bot API URL works directly:": ""
+	"Fires when a task finishes and no HaloWebUI tab is open. A Telegram Bot API URL works directly:": "",
+	"Quick commands": "",
+	"Fallback model": "",
+	"Answers instead when this model fails upstream (5xx, rate limit, timeout) after one retry.": "",
+	"Finished, not yet opened": ""
 }

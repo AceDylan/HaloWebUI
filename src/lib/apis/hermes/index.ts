@@ -124,3 +124,32 @@ export const testNotificationWebhook = async (
 	}
 	return await res.json();
 };
+
+export type HermesActivity = { runs: HermesActiveRun[]; unread: string[] };
+
+/**
+ * Runs executing now plus the chats whose run finished and has not been opened
+ * since — one poll feeds both sidebar indicators.
+ */
+export const getHermesActivity = async (token: string): Promise<HermesActivity> => {
+	const res = await fetch(`${WEBUI_API_BASE_URL}/hermes/runs`, { headers: jsonHeaders(token) });
+	if (!res.ok) {
+		throw await detailOf(res);
+	}
+	const data = await res.json();
+	return {
+		runs: Array.isArray(data?.runs) ? data.runs : [],
+		unread: Array.isArray(data?.unread) ? data.unread : []
+	};
+};
+
+/** Opening a chat clears the unread mark its finished hermes run left. */
+export const markHermesChatRead = async (token: string, chatId: string): Promise<void> => {
+	const res = await fetch(
+		`${WEBUI_API_BASE_URL}/hermes/chats/${encodeURIComponent(chatId)}/read`,
+		{ method: 'POST', headers: jsonHeaders(token) }
+	);
+	if (!res.ok) {
+		throw await detailOf(res);
+	}
+};

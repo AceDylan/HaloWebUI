@@ -43,6 +43,7 @@ from open_webui.utils.hermes_sessions import (
     list_sessions,
     validate_session_id,
 )
+from open_webui.utils.hermes_unread import list_unread_chat_ids, mark_read
 from open_webui.utils.webhook import post_webhook
 from open_webui.utils.hermes_notify import (
     NOTIFICATION_PROMPT_MAX_CHARS,
@@ -114,7 +115,20 @@ async def steer_hermes_run(form_data: HermesSteerForm, user=Depends(get_verified
 
 @router.get("/runs")
 async def get_active_hermes_runs(user=Depends(get_verified_user)):
-    return {"runs": list_active_runs(user.id)}
+    """Runs executing now, plus the chats whose run finished and has not been
+    opened since — one poll feeds both sidebar indicators."""
+    return {
+        "runs": list_active_runs(user.id),
+        "unread": list_unread_chat_ids(user.id),
+    }
+
+
+@router.post("/chats/{chat_id}/read")
+async def mark_hermes_chat_read(chat_id: str, user=Depends(get_verified_user)):
+    """Opening a chat clears the unread mark its finished hermes run left."""
+    if len(chat_id) > 128 or not mark_read(chat_id, user.id):
+        raise HTTPException(status_code=404, detail="chat not found")
+    return {"status": True}
 
 
 @router.get("/sessions")

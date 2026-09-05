@@ -72,6 +72,8 @@ export const requestNewChat = (options: Omit<NewChatRequest, 'id'> = {}) => {
 
 // Chat IDs currently generating responses (for sidebar activity indicators)
 export const activeChatIds: Writable<Set<string>> = writable(new Set());
+// Chats whose hermes run finished and has not been opened since (sidebar dot)
+export const hermesUnreadChatIds: Writable<Set<string>> = writable(new Set());
 
 export const channels = writable([]);
 export const chats = writable(null);

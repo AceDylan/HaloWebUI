@@ -1737,5 +1737,9 @@
 	"Send test message": "傳送測試訊息",
 	"Test message sent": "測試訊息已傳送",
 	"Test message failed": "測試訊息傳送失敗",
-	"Fires when a task finishes and no HaloWebUI tab is open. A Telegram Bot API URL works directly:": "任務完成且沒有任何 HaloWebUI 頁面開啟時觸發。可直接填 Telegram Bot API 網址："
+	"Fires when a task finishes and no HaloWebUI tab is open. A Telegram Bot API URL works directly:": "任務完成且沒有任何 HaloWebUI 頁面開啟時觸發。可直接填 Telegram Bot API 網址：",
+	"Quick commands": "快捷指令",
+	"Fallback model": "備援模型",
+	"Answers instead when this model fails upstream (5xx, rate limit, timeout) after one retry.": "該模型上游失敗（5xx、限流、逾時）且重試一次仍失敗時，自動改用此模型回答。",
+	"Finished, not yet opened": "任務已完成，尚未查看"
 }

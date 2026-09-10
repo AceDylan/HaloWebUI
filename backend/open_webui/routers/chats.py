@@ -878,13 +878,25 @@ async def update_chat_by_id(
             id,
             normalized_chat,
             update_title="title" in form_data.chat,
+            **(
+                {"base_chat": form_data.base_chat}
+                if form_data.base_chat is not None
+                else {}
+            ),
         )
         if chat and changed_message_ids:
             await run_in_threadpool(
                 lambda: _sync_changed_chat_messages(
-                    id, user.id, normalized_chat, changed_message_ids
+                    id, user.id, chat.chat, changed_message_ids
                 )
             )
+        if chat:
+            try:
+                await get_event_emitter(
+                    {"user_id": user.id, "chat_id": id}, update_db=False
+                )({"type": "chat:reload", "data": {"reason": "chat_saved"}})
+            except Exception:
+                log.warning("Could not broadcast saved chat %s", id)
         return _chat_response(chat)
     else:
         raise HTTPException(

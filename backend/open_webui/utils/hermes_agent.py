@@ -763,10 +763,6 @@ async def run_hermes_agent(request, form_data, user, metadata, model, events, ta
             # finished while nobody was looking (the client clears it on open).
             mark_unread(metadata["chat_id"], user.id)
             try:
-                await _emit_completion(data)
-            except Exception as e:
-                log.warning(f"hermes completion emit failed: {e}")
-            try:
                 upsert_response_message(
                     {
                         "content": content,
@@ -778,6 +774,10 @@ async def run_hermes_agent(request, form_data, user, metadata, model, events, ta
                 )
             except Exception as e:
                 log.warning(f"hermes completion persist failed: {e}")
+            try:
+                await _emit_completion(data)
+            except Exception as e:
+                log.warning(f"hermes completion emit failed: {e}")
             await _post_completion_webhook(request, user, metadata, title, content)
             # Post-response bookkeeping (title/tags/follow-ups), same as the
             # normal chat flow in process_chat_response.
@@ -893,7 +893,7 @@ async def run_hermes_agent(request, form_data, user, metadata, model, events, ta
                             if delta:
                                 current_text_block()["content"] += delta
                                 await _emit_completion(
-                                    {"choices": [{"delta": {"content": delta}}]}
+                                    {"content": _serialize_blocks(blocks)}
                                 )
                         elif event_type == "tool.started":
                             blocks.append(

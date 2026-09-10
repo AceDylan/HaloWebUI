@@ -8,6 +8,7 @@ from typing import Optional
 from open_webui.internal.db import Base, get_db
 from open_webui.models.tags import TagModel, Tag, Tags
 from open_webui.env import SRC_LOG_LEVELS
+from open_webui.utils.chat_snapshot import merge_chat_snapshot
 from open_webui.utils.image_generation_options import (
     sanitize_chat_payload_image_generation_options,
 )
@@ -182,6 +183,7 @@ class ChatModel(BaseModel):
 
 class ChatForm(BaseModel):
     chat: dict
+    base_chat: Optional[dict] = None
     folder_id: Optional[str] = None
     assistant_id: Optional[str] = None
     title_auto_generated: Optional[bool] = None
@@ -513,7 +515,12 @@ class ChatTable:
             return [ChatModel.model_validate(row) for row in rows]
 
     def update_chat_by_id(
-        self, id: str, chat: dict, *, update_title: bool = True
+        self,
+        id: str,
+        chat: dict,
+        *,
+        update_title: bool = True,
+        base_chat: Optional[dict] = None,
     ) -> Optional[ChatModel]:
         try:
             with get_db() as db:
@@ -532,6 +539,10 @@ class ChatTable:
                     return None
 
                 current_chat = chat_item.chat or {}
+                if base_chat is not None:
+                    normalized_chat = merge_chat_snapshot(
+                        current_chat, normalized_chat, base_chat
+                    )
                 current_title = getattr(chat_item, "title", None) or current_chat.get(
                     "title", DEFAULT_CHAT_TITLE
                 )
@@ -587,7 +598,7 @@ class ChatTable:
             "composer_state": sanitized_composer_state.get("composer_state", {}),
         }
 
-        return self.update_chat_by_id(id, next_chat, update_title=False)
+        return self.update_chat_by_id(id, next_chat, update_title=False, base_chat=chat_dict)
 
     def update_chat_title_by_id(
         self,
@@ -718,6 +729,7 @@ class ChatTable:
 
         user_id = chat.user_id
         chat_dict = chat.chat
+        base_chat = deepcopy(chat_dict)
         history = chat_dict.get("history", {})
         messages = history.setdefault("messages", {})
         existing_message = messages.get(message_id)
@@ -761,11 +773,17 @@ class ChatTable:
         history["currentId"] = message_id
 
         chat_dict["history"] = history
-        result = self.update_chat_by_id(id, chat_dict, update_title=False)
+        result = self.update_chat_by_id(id, chat_dict, update_title=False, base_chat=base_chat)
 
         # Dual-write: sync to chat_message table (non-blocking, errors logged)
         try:
-            final_message = history["messages"][message_id]
+            final_message = (
+                result.chat.get("history", {}).get("messages", {}).get(message_id)
+                if result
+                else None
+            )
+            if final_message is None:
+                return result
             ChatMessages.upsert_message(
                 chat_id=id,
                 user_id=user_id,
@@ -785,6 +803,7 @@ class ChatTable:
             return None
 
         chat = chat.chat
+        base_chat = deepcopy(chat)
         history = chat.get("history", {})
 
         if message_id in history.get("messages", {}):
@@ -793,7 +812,7 @@ class ChatTable:
             history["messages"][message_id]["statusHistory"] = status_history
 
         chat["history"] = history
-        return self.update_chat_by_id(id, chat, update_title=False)
+        return self.update_chat_by_id(id, chat, update_title=False, base_chat=base_chat)
 
     def insert_shared_chat_by_chat_id(self, chat_id: str) -> Optional[ChatModel]:
         with get_db() as db:

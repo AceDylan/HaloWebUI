@@ -534,11 +534,17 @@ export const getChatListByTagName = async (token: string = '', tagName: string) 
 	}));
 };
 
-export const getChatById = async (token: string, id: string) => {
+export const getChatById = async (
+	token: string,
+	id: string,
+	options: { signal?: AbortSignal } = {}
+) => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/chats/${id}`, {
 		method: 'GET',
+		cache: 'no-store',
+		signal: options.signal,
 		headers: {
 			Accept: 'application/json',
 			'Content-Type': 'application/json',
@@ -563,11 +569,17 @@ export const getChatById = async (token: string, id: string) => {
 	return res;
 };
 
-export const getChatContextById = async (token: string, id: string) => {
+export const getChatContextById = async (
+	token: string,
+	id: string,
+	options: { signal?: AbortSignal } = {}
+) => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/chats/${id}/context`, {
 		method: 'GET',
+		cache: 'no-store',
+		signal: options.signal,
 		headers: {
 			Accept: 'application/json',
 			'Content-Type': 'application/json',
@@ -957,7 +969,7 @@ export const deleteSharedChatById = async (token: string, id: string) => {
 	return res;
 };
 
-export const updateChatById = async (token: string, id: string, chat: object) => {
+export const updateChatById = async (token: string, id: string, chat: object, baseChat?: object) => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/chats/${id}`, {
@@ -968,7 +980,8 @@ export const updateChatById = async (token: string, id: string, chat: object) =>
 			...(token && { authorization: `Bearer ${token}` })
 		},
 		body: JSON.stringify({
-			chat: chat
+			chat: chat,
+			...(baseChat ? { base_chat: baseChat } : {})
 		})
 	})
 		.then(parseJsonResponse)

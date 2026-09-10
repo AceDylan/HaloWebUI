@@ -7341,17 +7341,13 @@ async def process_chat_response(
                                                 ),
                                             },
                                         )
-                                    else:
-                                        data = {
-                                            "content": serialize_content_blocks(
-                                                content_blocks
-                                            ),
-                                            **(
-                                                {"files": message_files}
-                                                if message_files
-                                                else {}
-                                            ),
-                                        }
+                                    # A cumulative snapshot also heals missed deltas on
+                                    # reconnect and while another device loads this turn.
+                                    data = {
+                                        **data,
+                                        "content": serialize_content_blocks(content_blocks),
+                                        **({"files": message_files} if message_files else {}),
+                                    }
 
                                 await event_emitter(
                                     {

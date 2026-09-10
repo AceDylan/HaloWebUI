@@ -4,6 +4,7 @@ import socketio
 import logging
 import sys
 import time
+import uuid
 from redis import asyncio as aioredis
 
 from open_webui.models.users import Users, UserNameResponse
@@ -449,17 +450,6 @@ def get_event_emitter(request_info, update_db=True):
             )
         )
 
-        for session_id in session_ids:
-            await sio.emit(
-                "chat-events",
-                {
-                    "chat_id": request_info.get("chat_id", None),
-                    "message_id": request_info.get("message_id", None),
-                    "data": event_data,
-                },
-                to=session_id,
-            )
-
         if update_db:
             if "type" in event_data and event_data["type"] == "status":
                 Chats.add_message_status_to_chat_by_id_and_message_id(
@@ -519,6 +509,19 @@ def get_event_emitter(request_info, update_db=True):
                             "files": merged_files,
                         },
                     )
+
+        event_id = str(uuid.uuid4())
+        for session_id in session_ids:
+            await sio.emit(
+                "chat-events",
+                {
+                    "event_id": event_id,
+                    "chat_id": request_info.get("chat_id", None),
+                    "message_id": request_info.get("message_id", None),
+                    "data": event_data,
+                },
+                to=session_id,
+            )
 
     return __event_emitter__
 

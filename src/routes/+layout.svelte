@@ -99,6 +99,7 @@
 
 	const handleSocketConnect = () => {
 		console.log('connected', currentSocket?.id);
+		chatListRefreshRevision.update((value) => value + 1);
 	};
 
 	const handleSocketReconnectAttempt = (attempt) => {
@@ -393,7 +394,7 @@
 		const type = event?.data?.type ?? null;
 		const data = event?.data?.data ?? null;
 
-		if (type === 'chat:title') {
+		if (type === 'chat:title' || type === 'chat:reload') {
 			refreshSidebarChatList(event.chat_id);
 		} else if (type === 'chat:tags') {
 			tags.set(await getAllTags(localStorage.token));

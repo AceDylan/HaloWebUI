@@ -9,6 +9,12 @@
 
 	import { goto, replaceState, afterNavigate } from '$app/navigation';
 	import { page } from '$app/stores';
+	import {
+		createChatSync,
+		createEventDeduplicator,
+		reconcileChatHistory,
+		subscribeChatSync
+	} from '$lib/utils/live-chat-sync';
 
 	import { get, writable, type Unsubscriber, type Writable } from 'svelte/store';
 	import type { i18n as i18nType } from 'i18next';
@@ -578,6 +584,12 @@
 	let composerStateSyncReady = false;
 	let lastRequestedChatIdProp = '';
 	let activeChatLoadToken = 0;
+	let persistedChatSnapshot: any = null;
+	let pendingHistorySaves = 0;
+	let chatSyncRevision = 0;
+	const ownedResponseMessageIds = new Set<string>();
+	const acceptChatEvent = createEventDeduplicator();
+	let cleanupLiveChatSync: (() => void) | undefined;
 
 	// J-3-01: O(1) model lookup map — rebuilt reactively when $models changes
 	let modelsMap: Map<string, Model> = new Map();
@@ -2402,6 +2414,7 @@
 				restoreChatInputDraft(input);
 
 				loading = false;
+				liveChatSync.request();
 				await tick();
 				scrollToBottomImmediately();
 				const chatInput = document.getElementById('chat-input');
@@ -2686,7 +2699,7 @@
 	};
 
 	const commitHistoryMessage = (message: any) => {
-		if (!message?.id) {
+		if (!message?.id || !history.messages[message.id]) {
 			return message;
 		}
 
@@ -2695,17 +2708,68 @@
 		return message;
 	};
 
+	const liveChatSync = createChatSync({
+		getKey: () =>
+			$user?.id && !loading && !pendingHistorySaves && !$temporaryChatEnabled &&
+			$chatId && $chatId !== 'local'
+				? `${$user?.id}:${$chatId}:${activeChatLoadToken}:${chatSyncRevision}:${$page.url.pathname}`
+				: null,
+		read: async (signal) => {
+			const id = $chatId;
+			const before = structuredClone(history);
+			const [snapshot, context] = await Promise.all([
+				getChatById(localStorage.token, id, { signal }),
+				getChatContextById(localStorage.token, id, { signal }).catch(() => null)
+			]);
+			return { snapshot, context, before };
+		},
+		apply: ({ snapshot, context, before }) => {
+			if (!snapshot?.chat?.history?.messages) return;
+			clearResponseAnimationControllers();
+			history = reconcileChatHistory(
+				history, snapshot.chat.history, before, persistedChatSnapshot?.history, mergeMessageFiles
+			);
+			chat = snapshot;
+			// Only the history was refreshed. Keep the baseline of local composer
+			// settings/files so an unchanged control cannot undo another device's edit.
+			persistedChatSnapshot = {
+				...(persistedChatSnapshot ?? structuredClone(snapshot.chat)),
+				history: structuredClone(snapshot.chat.history)
+			};
+			chatTitle.set(snapshot.chat.title);
+			if (context) {
+				tags = context.tags ?? [];
+				taskIds = context.task_ids ?? [];
+				// A save can precede task registration; leave unfinished placeholders
+				// alone here. Only initial navigation classifies abandoned requests.
+				activeChatIds.update((ids) => {
+					const next = new Set(ids);
+					if (taskIds.length) next.add($chatId);
+					else next.delete($chatId);
+					return next;
+				});
+			}
+			if (shouldAutoScrollOnStreaming()) scrollToBottom();
+		},
+		onError: () => {} // A transient network failure must leave the current page intact.
+	});
+
 	const chatEventHandler = async (event, cb) => {
 		if (event.chat_id === $chatId) {
+			const eventChatId = $chatId;
+			const eventLoadToken = activeChatLoadToken;
+			if (!acceptChatEvent(event.event_id)) return;
 			await tick();
+			if (eventChatId !== $chatId || eventLoadToken !== activeChatLoadToken) return;
 			if (event?.data?.type === 'chat:reload') {
-				// The server appended messages this client has never seen (a hermes
-				// background-task follow-up turn); reload so they render and their
-				// stream attaches to the placeholder message.
-				await loadChat();
+				liveChatSync.request();
 				return;
 			}
 			let message = history.messages[event.message_id];
+			if (!message) {
+				liveChatSync.request();
+				return;
+			}
 
 			if (message) {
 				const type = event?.data?.type ?? null;
@@ -2713,8 +2777,11 @@
 				let shouldCommitMessage = true;
 
 				if (type === 'task-cancelled') {
-					await markResponseMessagesStopped(message.id);
-					shouldCommitMessage = false;
+					message.done = true;
+					message.stopped = true;
+					message.stoppedByUser = true;
+					ownedResponseMessageIds.delete(message.id);
+					liveChatSync.request();
 				} else if (
 					(isResponseStopped(message) || stoppedResponseMessageIds.has(message.id)) &&
 					[
@@ -2905,7 +2972,13 @@
 		window.addEventListener('keydown', handleMessageOutlineKeydown, true);
 		window.addEventListener('pointerup', clearMessageOutlineScrollbarDragPrime, true);
 		window.addEventListener('pointercancel', clearMessageOutlineScrollbarDragPrime, true);
-		$socket?.on('chat-events', chatEventHandler);
+		cleanupLiveChatSync = subscribeChatSync({
+			socketStore: socket,
+			onEvent: chatEventHandler,
+			refresh: liveChatSync.request,
+			window,
+			document
+		});
 
 		if (!chatIdProp && !$chatId) {
 			chatIdUnsubscriber = chatId.subscribe(async (value) => {
@@ -3003,6 +3076,9 @@
 	});
 
 	onDestroy(() => {
+		activeChatLoadToken++;
+		liveChatSync.dispose();
+		cleanupLiveChatSync?.();
 		chatIdUnsubscriber?.();
 		selectedAssistantSceneUnsubscriber?.();
 		clearMessageOutlineHideTimer();
@@ -3026,7 +3102,6 @@
 		window.removeEventListener('keydown', handleMessageOutlineKeydown, true);
 		window.removeEventListener('pointerup', clearMessageOutlineScrollbarDragPrime, true);
 		window.removeEventListener('pointercancel', clearMessageOutlineScrollbarDragPrime, true);
-		$socket?.off('chat-events', chatEventHandler);
 	});
 
 	$: if ($showOverview) {
@@ -3641,6 +3716,7 @@
 		if (isStale()) return null;
 
 		chat = loadedChat;
+		persistedChatSnapshot = loadedChat?.chat ? structuredClone(loadedChat.chat) : null;
 
 		if (chat) {
 			const chatContent = chat.chat;
@@ -3779,6 +3855,7 @@
 			}
 			return next;
 		});
+		notifyHistoryUpdated();
 	};
 
 	const isNearBottom = () => {
@@ -4113,6 +4190,8 @@
 		});
 	};
 	const chatCompletedHandler = async (chatId, modelId, responseMessageId, messages) => {
+		const loadToken = activeChatLoadToken;
+		const isCurrent = () => $chatId === chatId && activeChatLoadToken === loadToken;
 		const responseMessage = history.messages[responseMessageId];
 		const responseModelIndex = getMessageModelIndex(responseMessage);
 		const responseModelResolution = resolveMessageModelForAction(responseMessage, responseModelIndex);
@@ -4169,6 +4248,7 @@
 			return null;
 		});
 
+		if (!isCurrent()) return;
 		if (res !== null && res.messages) {
 			// Update chat history with the new messages
 			let hasHistoryMessageUpdates = false;
@@ -4749,8 +4829,8 @@
 			}
 		}
 
-		if (content) {
-			// REALTIME_CHAT_SAVE is disabled
+		if (typeof content === 'string') {
+			// Cumulative server snapshots repair gaps left by missed stream events.
 			await releaseResponseAnimationController(message.id, { flush: false });
 			message.content = content;
 
@@ -4768,12 +4848,19 @@
 		commitHistoryMessage(message);
 
 		if (done) {
+			const shouldFinalize = ownedResponseMessageIds.delete(message.id);
 			await releaseResponseAnimationController(message.id);
 			clearPendingGeminiImages(message.id, true);
 			message.done = true;
-			message.completedAt = Date.now() / 1000;
+			message.completedAt = data.completedAt ?? message.completedAt ?? Date.now() / 1000;
 			commitHistoryMessage(message);
 			await tick();
+			if ($chatId !== chatId || !history.messages[message.id]) return;
+			liveChatSync.request();
+			if (!shouldFinalize) {
+				if (shouldAutoScrollOnStreaming()) scrollToBottom();
+				return;
+			}
 
 			if ($settings.responseAutoCopy) {
 				copyToClipboard(message.content);
@@ -5317,6 +5404,7 @@
 		_chatId,
 		options: { discussion?: any } = {}
 	) => {
+		ownedResponseMessageIds.add(responseMessageId);
 		const responseMessage = _history.messages[responseMessageId];
 		const files = structuredClone(chatFiles);
 
@@ -6204,6 +6292,7 @@
 			}, null, $selectedAssistantScene?.id ?? null, true);
 
 			_chatId = chat.id;
+			persistedChatSnapshot = structuredClone(chat.chat);
 			await chatId.set(_chatId);
 			migrateChatSessionState('', _chatId);
 
@@ -6231,33 +6320,56 @@
 	) => {
 		if ($chatId == _chatId) {
 			if (!$temporaryChatEnabled) {
-				const persistedSelectionThreads = options.selectionThreads ?? selectionThreads;
-				const { history: normalizedHistory, changed } =
-					await normalizeHistoryForPersistence(historyState);
-				const persistedMessages =
-					options.messages && !changed
-						? options.messages
-						: createMessagesList(normalizedHistory, normalizedHistory.currentId);
+				const saveLoadToken = activeChatLoadToken;
+				const baseChat = persistedChatSnapshot ? structuredClone(persistedChatSnapshot) : undefined;
+				pendingHistorySaves++;
+				chatSyncRevision++;
+				try {
+					const persistedSelectionThreads = options.selectionThreads ?? selectionThreads;
+					const { history: normalizedHistory, changed } =
+						await normalizeHistoryForPersistence(historyState);
+					if ($chatId !== _chatId || activeChatLoadToken !== saveLoadToken) return;
+					const persistedMessages =
+						options.messages && !changed
+							? options.messages
+							: createMessagesList(normalizedHistory, normalizedHistory.currentId);
 
-				if (changed && history === historyState) {
-					history = normalizedHistory;
+					if (changed && history === historyState) {
+						history = normalizedHistory;
+					}
+
+					const payload = structuredClone(
+						buildPersistedChatData(normalizedHistory, persistedMessages, persistedSelectionThreads)
+					);
+
+					pendingChatSave = pendingChatSave
+						.catch(() => undefined)
+						.then(async () => {
+							const savedChat = await updateChatById(localStorage.token, _chatId, payload, baseChat);
+							if ($chatId !== _chatId || activeChatLoadToken !== saveLoadToken) return;
+							chat = savedChat;
+							if (savedChat?.chat?.history) {
+								clearResponseAnimationControllers();
+								history = reconcileChatHistory(
+									history, savedChat.chat.history, payload.history,
+									baseChat?.history, mergeMessageFiles
+								);
+								persistedChatSnapshot = {
+									...structuredClone(savedChat.chat),
+									...payload,
+									history: structuredClone(savedChat.chat.history)
+								};
+							}
+							currentChatPage.set(1);
+							await chats.set(await getChatList(localStorage.token, $currentChatPage));
+						});
+
+					await pendingChatSave;
+				} finally {
+					pendingHistorySaves--;
+					chatSyncRevision++;
+					liveChatSync.request();
 				}
-
-				const payload = buildPersistedChatData(
-					normalizedHistory,
-					persistedMessages,
-					persistedSelectionThreads
-				);
-
-				pendingChatSave = pendingChatSave
-					.catch(() => undefined)
-					.then(async () => {
-						chat = await updateChatById(localStorage.token, _chatId, payload);
-						currentChatPage.set(1);
-						await chats.set(await getChatList(localStorage.token, $currentChatPage));
-					});
-
-				await pendingChatSave;
 			}
 		}
 	};

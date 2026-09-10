@@ -67,6 +67,7 @@
 	import { formatPythonCode } from '$lib/apis/utils';
 	import { toast } from 'svelte-sonner';
 	import { localizeCommonError } from '$lib/utils/common-errors';
+	import { createEditorHighlighter } from '$lib/utils/editor-highlighter';
 
 	const i18n = getContext('i18n');
 	const formatError = (error: unknown) =>
@@ -347,7 +348,7 @@
 				effects: [
 					editorChromeTheme.reconfigure(buildEditorChromeExtension(chromeTheme, darkMode)),
 					editorSyntaxTheme.reconfigure(
-						shikiModule.default({
+						createEditorHighlighter(shikiModule.default, {
 							highlighter,
 							language: resolvedLanguage,
 							theme: runtimeThemeId

@@ -34,7 +34,7 @@
 	import Switch from '../common/Switch.svelte';
 	import Spinner from '../common/Spinner.svelte';
 	import { capitalizeFirstLetter } from '$lib/utils';
-	import { getModelChatDisplayName } from '$lib/utils/model-display';
+	import { getModelChatDisplayName, getModelDisplayParts } from '$lib/utils/model-display';
 	import HaloSelect from '$lib/components/common/HaloSelect.svelte';
 	import Dropdown from '$lib/components/common/Dropdown.svelte';
 	import { DropdownMenu } from 'bits-ui';
@@ -437,7 +437,14 @@
 								className=" w-fit"
 								placement="top-start"
 							>
-								<div class=" font-semibold line-clamp-1">{getModelChatDisplayName(model)}</div>
+								<div class="flex min-w-0 items-baseline gap-1.5">
+									<div class="min-w-0 font-semibold line-clamp-1">{getModelDisplayParts(model).base}</div>
+									{#if getModelDisplayParts(model).connection}
+										<span class="shrink-0 text-2xs font-medium text-gray-500 dark:text-gray-400">
+											{getModelDisplayParts(model).connection}
+										</span>
+									{/if}
+								</div>
 							</Tooltip>
 
 								<div class="flex gap-1 text-xs overflow-hidden">

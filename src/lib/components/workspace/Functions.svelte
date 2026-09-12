@@ -33,11 +33,17 @@
 	import Spinner from '../common/Spinner.svelte';
 	import { capitalizeFirstLetter } from '$lib/utils';
 	import HaloSelect from '$lib/components/common/HaloSelect.svelte';
+	import Dropdown from '$lib/components/common/Dropdown.svelte';
+	import { DropdownMenu } from 'bits-ui';
+	import { flyAndScale } from '$lib/utils/transitions';
+	import ArrowUpTray from '$lib/components/icons/ArrowUpTray.svelte';
+	import ArrowDownTray from '$lib/components/icons/ArrowDownTray.svelte';
 
 	const i18n = getContext('i18n');
 
 	let shiftKey = false;
 	let loaded = false;
+	let showMoreMenu = false;
 
 	let functionsImportInputElement: HTMLInputElement;
 	let importFiles;
@@ -198,13 +204,10 @@
 
 {#if loaded}
 	<div class="space-y-4">
-		<section class="workspace-section space-y-4">
-			<div class="flex flex-col gap-3 lg:flex-row lg:items-center">
-				<div class="workspace-toolbar-summary">
-					<div class="workspace-count-pill">
+		<div class="workspace-toolbar-row">
+			<div class="workspace-count-pill">
 						{countLabel} {$i18n.t('Functions')}
-					</div>
-				</div>
+			</div>
 
 				<div class="workspace-toolbar">
 					<div class="workspace-search workspace-toolbar-search">
@@ -226,16 +229,76 @@
 							className="w-fit max-w-full text-xs"
 						/>
 
+						{#if $user?.role === 'admin'}
+							<Dropdown bind:show={showMoreMenu} side="bottom" align="end">
+								<Tooltip content={$i18n.t('More')}>
+									<button
+										type="button"
+										class="workspace-icon-button px-3 py-2"
+										aria-label={$i18n.t('More')}
+										aria-haspopup="menu"
+										aria-expanded={showMoreMenu}
+									>
+										<EllipsisHorizontal className="size-4" strokeWidth="2" />
+									</button>
+								</Tooltip>
+
+								<div slot="content">
+									<DropdownMenu.Content
+										class="workspace-menu-content"
+										sideOffset={8}
+										side="bottom"
+										align="end"
+										transition={flyAndScale}
+									>
+										<DropdownMenu.Item
+											class="workspace-menu-item"
+											on:click={() => {
+												showMoreMenu = false;
+												functionsImportInputElement.click();
+											}}
+										>
+											<ArrowUpTray className="size-4 shrink-0" strokeWidth="2" />
+											<span>{$i18n.t('Import Functions')}</span>
+										</DropdownMenu.Item>
+										{#if ($functions ?? []).length}
+											<DropdownMenu.Item
+												class="workspace-menu-item"
+												on:click={async () => {
+													showMoreMenu = false;
+													const _functions = await exportFunctions(localStorage.token).catch(
+														(error) => {
+															toast.error(`${error}`);
+															return null;
+														}
+													);
+
+													if (_functions) {
+														let blob = new Blob([JSON.stringify(_functions)], {
+															type: 'application/json'
+														});
+														saveAs(blob, `functions-export-${Date.now()}.json`);
+													}
+												}}
+											>
+												<ArrowDownTray className="size-4 shrink-0" strokeWidth="2" />
+												<span>{$i18n.t('Export Functions')}</span>
+											</DropdownMenu.Item>
+										{/if}
+									</DropdownMenu.Content>
+								</div>
+							</Dropdown>
+						{/if}
+
 						<a class="workspace-primary-button" href="/workspace/functions/create">
 							<Plus className="size-4" />
 							<span>{$i18n.t('Create')}</span>
 						</a>
 					</div>
 				</div>
-			</div>
-		</section>
+		</div>
 
-		<section class="workspace-section">
+		<section class="min-w-0">
 			{#if isInitialLoading}
 			<div class="workspace-empty-state">
 				<Spinner />
@@ -429,89 +492,21 @@
 		</section>
 
 		{#if $user?.role === 'admin'}
-			<section class="workspace-section">
-				<div class="flex flex-wrap justify-end gap-2">
-				<input
-					id="functions-import-input"
-					bind:this={functionsImportInputElement}
-					bind:files={importFiles}
-					type="file"
-					accept=".json"
-					hidden
-					on:change={() => {
-						showConfirm = true;
-					}}
-				/>
-
-				<button
-					class="workspace-secondary-button text-xs"
-					on:click={() => {
-						functionsImportInputElement.click();
-					}}
-				>
-					<div class=" self-center mr-2 font-medium line-clamp-1">
-						{$i18n.t('Import Functions')}
-					</div>
-
-					<div class=" self-center">
-						<svg
-							xmlns="http://www.w3.org/2000/svg"
-							viewBox="0 0 16 16"
-							fill="currentColor"
-							class="w-4 h-4"
-						>
-							<path
-								fill-rule="evenodd"
-								d="M4 2a1.5 1.5 0 0 0-1.5 1.5v9A1.5 1.5 0 0 0 4 14h8a1.5 1.5 0 0 0 1.5-1.5V6.621a1.5 1.5 0 0 0-.44-1.06L9.94 2.439A1.5 1.5 0 0 0 8.878 2H4Zm4 9.5a.75.75 0 0 1-.75-.75V8.06l-.72.72a.75.75 0 0 1-1.06-1.06l2-2a.75.75 0 0 1 1.06 0l2 2a.75.75 0 1 1-1.06 1.06l-.72-.72v2.69a.75.75 0 0 1-.75.75Z"
-								clip-rule="evenodd"
-							/>
-						</svg>
-					</div>
-				</button>
-
-				{#if ($functions ?? []).length}
-					<button
-						class="workspace-secondary-button text-xs"
-						on:click={async () => {
-							const _functions = await exportFunctions(localStorage.token).catch((error) => {
-								toast.error(`${error}`);
-								return null;
-							});
-
-							if (_functions) {
-								let blob = new Blob([JSON.stringify(_functions)], {
-									type: 'application/json'
-								});
-								saveAs(blob, `functions-export-${Date.now()}.json`);
-							}
-						}}
-					>
-						<div class=" self-center mr-2 font-medium line-clamp-1">
-							{$i18n.t('Export Functions')}
-						</div>
-
-						<div class=" self-center">
-							<svg
-								xmlns="http://www.w3.org/2000/svg"
-								viewBox="0 0 16 16"
-								fill="currentColor"
-								class="w-4 h-4"
-							>
-								<path
-									fill-rule="evenodd"
-									d="M4 2a1.5 1.5 0 0 0-1.5 1.5v9A1.5 1.5 0 0 0 4 14h8a1.5 1.5 0 0 0 1.5-1.5V6.621a1.5 1.5 0 0 0-.44-1.06L9.94 2.439A1.5 1.5 0 0 0 8.878 2H4Zm4 3.5a.75.75 0 0 1 .75.75v2.69l.72-.72a.75.75 0 1 1 1.06 1.06l-2 2a.75.75 0 0 1-1.06 0l-2-2a.75.75 0 0 1 1.06-1.06l.72.72V6.25A.75.75 0 0 1 8 5.5Z"
-									clip-rule="evenodd"
-								/>
-							</svg>
-						</div>
-					</button>
-				{/if}
-				</div>
-			</section>
+			<input
+				id="functions-import-input"
+				bind:this={functionsImportInputElement}
+				bind:files={importFiles}
+				type="file"
+				accept=".json"
+				hidden
+				on:change={() => {
+					showConfirm = true;
+				}}
+			/>
 		{/if}
 
 		{#if $config?.features.enable_community_sharing}
-			<section class="workspace-section space-y-3">
+			<section class="space-y-3 pt-2">
 				<div class="text-base font-semibold text-gray-900 dark:text-gray-100">
 					{$i18n.t('Made by Open WebUI Community')}
 				</div>

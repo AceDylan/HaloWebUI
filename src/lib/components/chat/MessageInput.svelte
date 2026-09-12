@@ -494,28 +494,28 @@
 		}
 	})();
 
+	// Active feature chips (web search, image generation) share one 28px pill with a
+	// primary tint, matching the quick-command and settings chips beside them.
 	const featureBadgeBaseClass =
-		'group shrink-0 rounded-full flex items-center border transition-colors duration-200 cursor-pointer bg-sky-50/90 hover:bg-sky-100/85 dark:bg-slate-800/70 dark:hover:bg-slate-800/90 border-sky-200/60 dark:border-sky-500/20';
-	const webSearchBadgeClass = `${featureBadgeBaseClass} px-2.5 py-1.5 gap-1.5`;
-	const compactFeatureBadgeClass = `${featureBadgeBaseClass} px-1.5 py-1.5 gap-1`;
-	const imageGenerationBadgeBaseClass =
-		'group shrink-0 rounded-full flex items-center border transition-colors duration-200 cursor-pointer bg-teal-50/90 hover:bg-teal-100/85 dark:bg-teal-500/15 dark:hover:bg-teal-500/20 border-teal-200/80 dark:border-teal-400/25';
-	const imageGenerationBadgeClass = `${imageGenerationBadgeBaseClass} px-2.5 py-1.5 gap-1.5`;
+		'group shrink-0 h-7 rounded-full flex items-center border transition-colors duration-200 cursor-pointer bg-primary-50 hover:bg-primary-100 dark:bg-primary-500/15 dark:hover:bg-primary-500/25 border-primary-200/80 dark:border-primary-500/30';
+	const webSearchBadgeClass = `${featureBadgeBaseClass} px-2.5 gap-1.5`;
+	const compactFeatureBadgeClass = `${featureBadgeBaseClass} px-1.5 gap-1`;
+	const imageGenerationBadgeBaseClass = featureBadgeBaseClass;
+	const imageGenerationBadgeClass = `${imageGenerationBadgeBaseClass} px-2.5 gap-1.5`;
 	const featureBadgeLabelClass =
-		'whitespace-nowrap text-slate-600 dark:text-slate-200 text-xs font-medium leading-none';
-	const imageGenerationBadgeLabelClass =
-		'whitespace-nowrap text-teal-700 dark:text-teal-100 text-xs font-medium leading-none';
+		'whitespace-nowrap text-primary-700 dark:text-primary-100 text-xs font-medium leading-none';
+	const imageGenerationBadgeLabelClass = featureBadgeLabelClass;
 	const featureBadgeIconSlotClass = 'relative flex size-4 items-center justify-center';
 	const featureBadgePrimaryIconMotionClass =
 		'transition-all duration-200 ease-out group-hover:scale-75 group-hover:opacity-0 group-focus:scale-75 group-focus:opacity-0';
 	const featureBadgeCloseIconMotionClass =
 		'absolute inset-0 m-auto size-3 scale-75 opacity-0 transition-all duration-200 ease-out group-hover:scale-100 group-hover:opacity-100 group-focus:scale-100 group-focus:opacity-100';
-	const webSearchIconClass = 'size-4 text-sky-500 dark:text-sky-300';
-	const imageGenerationIconClass = 'size-4 text-teal-600 dark:text-teal-200';
-	const codeInterpreterIconClass = 'size-4 text-violet-500 dark:text-violet-300';
-	const webSearchCloseIconClass = `${featureBadgeCloseIconMotionClass} text-sky-600 dark:text-sky-300`;
-	const imageGenerationCloseIconClass = `${featureBadgeCloseIconMotionClass} text-teal-700 dark:text-teal-200`;
-	const codeInterpreterCloseIconClass = `${featureBadgeCloseIconMotionClass} text-violet-600 dark:text-violet-300`;
+	const webSearchIconClass = 'size-4 text-primary-600 dark:text-primary-200';
+	const imageGenerationIconClass = 'size-4 text-primary-600 dark:text-primary-200';
+	const codeInterpreterIconClass = 'size-4 text-primary-600 dark:text-primary-200';
+	const webSearchCloseIconClass = `${featureBadgeCloseIconMotionClass} text-primary-700 dark:text-primary-200`;
+	const imageGenerationCloseIconClass = `${featureBadgeCloseIconMotionClass} text-primary-700 dark:text-primary-200`;
+	const codeInterpreterCloseIconClass = `${featureBadgeCloseIconMotionClass} text-primary-700 dark:text-primary-200`;
 
 	let showTools = false;
 	let imageGenerationPanelOpen = false;
@@ -1146,7 +1146,7 @@
 			<div
 				class="{($settings?.widescreenMode ?? null)
 					? 'max-w-full'
-					: 'max-w-4xl'} px-2.5 mx-auto inset-x-0"
+					: 'max-w-5xl'} px-2.5 sm:pl-[calc(2rem+54px)] sm:pr-9 mx-auto inset-x-0"
 			>
 				<div class="">
 					<input

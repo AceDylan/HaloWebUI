@@ -94,6 +94,7 @@ HTML_VISUAL_PROMPT = f"""[{HTML_VISUAL_PROMPT_MARKER}]
 - 默认最多两列，使用 `display:flex;flex-wrap:wrap` 与 `flex:1 1 360px;min-width:0`，让窄屏自动单列；禁止三列窄卡和固定宽度桌面长图缩放。
 - 长文本不要塞进多列表格。四列以上或单元格文字较长时，改为纵向对比卡/列表；确需表格时外包 `overflow-x:auto`，并降低网格线对比度。
 - 默认使用黑白灰克制视觉，只保留一个强调色；红/橙只用于风险，绿色只用于完成状态。不要同时堆叠黑色横幅、多色分类、重阴影和粗边框。
+- 大面积底色与正文只用中性灰阶（白/浅灰底、深灰字），强调色只用于细边线、图标或小面积标签；HaloWebUI 深色模式会自动把中性色映射为深色，大面积彩色底不会被适配，也不要在片段里用 `<style>` 或媒体查询自行做主题。
 - 优先用字号、字重、留白和细分隔线建立层级；同一画面最多一种圆角尺度、一种边框强度，阴影仅用于真正需要悬浮的元素。
 - 正文建议 14–16px、行高 1.6–1.75；长哈希、URL、命令用 `overflow-wrap:anywhere` 或紧凑代码区，避免孤字断行。
 - HTML 片段优先使用纯内联 style；避免 class、伪类/伪元素、外链资源、可解析 URL、远程图片、远程字体。
@@ -1391,6 +1392,7 @@ Hard output rules:
 - Fragment only: never emit !DOCTYPE, html, head, or body tags.
 - Forbidden entirely: script, style, iframe, form, link, meta, object, embed tags; on* event attributes; external URLs; remote images or fonts; url(...) values; backtick characters.
 - Styling via inline style attributes only. Root container flat (no outer border/shadow/rounded card), max-width about 920px, white background, black/white/grey palette with at most one accent color; red/orange only for risks, green only for completed states.
+- Keep large surfaces neutral (white or light-grey backgrounds with dark-grey text) and use the accent only for thin borders, icons or small labels: HaloWebUI's dark theme remaps neutral colours automatically and leaves saturated fills untouched.
 - Responsive: at most two columns using display:flex;flex-wrap:wrap with flex:1 1 360px;min-width:0 so narrow screens collapse to one column. Body text 14-16px, line-height 1.6-1.75. Long hashes/URLs/commands get overflow-wrap:anywhere in compact monospace blocks.
 - Build hierarchy: title/conclusion first, then one primary highlight, then 2-4 secondary points, then compact details. Do not render every item as an equal-weight card.
 - Preserve ALL facts, numbers, commands, code, and conclusions from the answer faithfully. Do not invent, reorder into falsehood, or drop content. HTML entities in the answer were escaped for safe delimiting; render them as human-readable text.

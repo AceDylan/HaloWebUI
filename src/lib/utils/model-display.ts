@@ -35,6 +35,31 @@ export function getModelBaseName(model?: AnyModel | null): string {
 	return name;
 }
 
+export type ModelDisplayParts = {
+	/** The model's own name, shown as the primary label. */
+	base: string;
+	/** The connection it comes from, shown as a secondary tag; null when there is none. */
+	connection: string | null;
+	/** The combined "name | connection" form used for shares, exports and search. */
+	full: string;
+};
+
+/**
+ * Split a model's display name into the parts the UI shows separately: the
+ * base name stays prominent while the connection becomes a small tag, so
+ * same-named models on different connections remain distinguishable without
+ * the suffix crowding every label.
+ */
+export function getModelDisplayParts(model?: AnyModel | null): ModelDisplayParts {
+	const base = getModelBaseName(model);
+	const connection = getModelConnectionName(model);
+	return {
+		base: base || connection || '',
+		connection: base ? connection : null,
+		full: getModelChatDisplayName(model)
+	};
+}
+
 export function getModelChatDisplayName(model?: AnyModel | null): string {
 	const base = getModelBaseName(model);
 	const connectionName = getModelConnectionName(model);

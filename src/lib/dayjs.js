@@ -99,6 +99,33 @@ import 'dayjs/locale/uz';
 import 'dayjs/locale/vi';
 import 'dayjs/locale/yo';
 import 'dayjs/locale/zh';
+import 'dayjs/locale/zh-cn';
+import 'dayjs/locale/zh-tw';
+import 'dayjs/locale/zh-hk';
+import 'dayjs/locale/en-gb';
+import 'dayjs/locale/pt-br';
 import 'dayjs/locale/et';
+
+/**
+ * Pick the dayjs locale that matches a UI language tag: the full tag when dayjs
+ * ships it (zh-cn, pt-br), otherwise the language part, otherwise English.
+ * @param {string | null | undefined} language
+ */
+export const resolveDayjsLocale = (language) => {
+	const normalized = String(language ?? '')
+		.trim()
+		.toLowerCase()
+		.replace(/_/g, '-');
+	if (!normalized) return 'en';
+	for (const candidate of [normalized, normalized.split('-')[0]]) {
+		if (candidate && dayjs.Ls?.[candidate]) return candidate;
+	}
+	return 'en';
+};
+
+/** @param {string | null | undefined} language */
+export const applyDayjsLocale = (language) => {
+	dayjs.locale(resolveDayjsLocale(language));
+};
 
 export default dayjs;

@@ -133,7 +133,7 @@
 		>
 			<!-- svelte-ignore a11y-no-static-element-interactions -->
 			<div
-				class="w-full group rounded-md relative flex items-center justify-between hover:bg-gray-100 dark:hover:bg-gray-900 text-gray-500 dark:text-gray-500 transition"
+				class="w-full group rounded-md relative flex items-center justify-between hover:bg-gray-100 dark:hover:bg-gray-900 text-gray-600 dark:text-gray-400 transition"
 			>
 				<button class="w-full py-1.5 pl-2 flex items-center gap-1.5 text-xs font-medium">
 					<div class="text-gray-300 dark:text-gray-600">
@@ -151,7 +151,8 @@
 
 				{#if onAdd}
 					<button
-						class="absolute z-10 right-2 {addButtonClass} self-center flex items-center text-gray-400 transition-opacity dark:text-gray-300"
+						class="absolute z-10 right-2 {addButtonClass} self-center flex items-center text-gray-500 transition-opacity dark:text-gray-300"
+						aria-label={onAddLabel}
 						on:pointerup={(e) => {
 							e.stopPropagation();
 						}}
@@ -162,7 +163,9 @@
 					>
 						<Tooltip content={onAddLabel}>
 							<button
-								class="p-0.5 dark:hover:bg-gray-850 rounded-lg touch-auto"
+								class="flex size-6 items-center justify-center rounded-lg hover:bg-gray-200/70 dark:hover:bg-gray-850 touch-auto"
+								aria-label={onAddLabel}
+								tabindex="-1"
 								on:click={(e) => {}}
 							>
 								<Plus className=" size-3" strokeWidth="2.5" />

@@ -210,6 +210,10 @@
 				flex items-center gap-1.5
 				border border-gray-200/50 dark:border-gray-700/50"
 			style="height: 36px;"
+			aria-expanded={showCitations}
+			aria-label={citations.length === 1
+				? $i18n.t('1 Source')
+				: $i18n.t('{{COUNT}} Sources', { COUNT: citations.length })}
 			on:click={toggleDropdown}
 		>
 			{#if hasWebCitations}

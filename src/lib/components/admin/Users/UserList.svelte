@@ -208,7 +208,7 @@
 
 <UserChatsModal bind:show={showUserChatsModal} user={selectedUser} />
 
-<div class="min-w-0 space-y-6">
+<div class="@container min-w-0 space-y-6">
 	{#if seatExceeded}
 		<div class="text-xs text-red-500">
 			<Banner
@@ -322,7 +322,9 @@
 	</section>
 
 	<!-- Users Table Section -->
-	<section class="glass-section hidden max-w-full overflow-hidden p-0 xl:block">
+	<!-- The three layouts switch on the section's own width (container queries) so a
+	     1440px window with the sidebar open gets the compact table, not seven squeezed columns. -->
+	<section class="glass-section hidden max-w-full overflow-hidden p-0 @[72rem]:block">
 		<div class="max-w-full overflow-x-auto">
 			<table class="min-w-full table-auto text-left text-sm">
 				<thead class="bg-gray-50/70 dark:bg-gray-800/40 text-xs tracking-wide border-b border-gray-200/40 dark:border-gray-700/30">
@@ -554,7 +556,7 @@
 	</section>
 
 	<!-- Compact Table -->
-	<section class="glass-section hidden overflow-hidden p-0 md:block xl:hidden">
+	<section class="glass-section hidden overflow-hidden p-0 @[40rem]:block @[72rem]:hidden">
 		<div class="max-w-full overflow-x-auto">
 			<table class="min-w-full table-fixed text-left text-sm">
 				<thead class="border-b border-gray-200/40 bg-gray-50/70 text-xs tracking-wide dark:border-gray-700/30 dark:bg-gray-800/40">
@@ -756,7 +758,7 @@
 	</section>
 
 	<!-- Mobile Cards -->
-	<div class="space-y-3 md:hidden">
+	<div class="space-y-3 @[40rem]:hidden">
 		{#if pagedUsers.length === 0}
 			<div class="glass-section p-6 text-center">
 				<div class="text-sm font-medium text-gray-500 dark:text-gray-400">

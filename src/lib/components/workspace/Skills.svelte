@@ -701,70 +701,65 @@
 />
 
 {#if !loaded}
-	<section class="workspace-section flex min-h-[18rem] items-center justify-center">
+	<div class="flex min-h-[18rem] items-center justify-center">
 		<Spinner className="size-8 text-gray-500" />
-	</section>
+	</div>
 {:else}
 	<div class="space-y-4">
-		<section class="workspace-section space-y-4">
-			<div class="flex flex-col gap-3 lg:flex-row lg:items-center">
-				<div class="workspace-toolbar-summary">
-					<div class="workspace-count-pill">
-						{installedSkills.length}
-						{$i18n.t('Installed')}
-					</div>
-					<div class="text-xs text-gray-500 dark:text-gray-400">
-						{$i18n.t(
-							'Add skills to give chats task-specific instructions, resources, and automation.'
-						)}
-					</div>
-
-					{#if runtimeCapabilities}
-						<div class="flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-500 dark:text-gray-400">
-							<span>运行环境：{getRuntimeProfileLabel(runtimeCapabilities.profile)}</span>
-							<span>
-								{runtimeCapabilities.install_allowed
-									? '支持可执行 Skill'
-									: '当前仅支持说明型 Skill'}
-							</span>
-							<span>Python：{runtimeCapabilities.python?.available ? '可用' : '不可用'}</span>
-							<span>Node：{runtimeCapabilities.node?.available ? '可用' : '不可用'}</span>
-							<span
-								>自动启用：{installedSkills.filter((skill) => isAutoEnabledSkill(skill))
-									.length}</span
-							>
-						</div>
-					{/if}
+		<div class="workspace-toolbar-row">
+			<div class="workspace-toolbar-summary">
+				<div class="workspace-count-pill">
+					{installedSkills.length}
+					{$i18n.t('Installed')}
+				</div>
+				<div class="text-xs text-gray-500 dark:text-gray-400">
+					{$i18n.t(
+						'Add skills to give chats task-specific instructions, resources, and automation.'
+					)}
 				</div>
 
-				<div class="workspace-toolbar">
-					<div class="workspace-search workspace-toolbar-search">
-						<Search className="size-4 text-gray-400" />
-						<input
-							class="w-full bg-transparent text-sm outline-hidden"
-							bind:value={mainQuery}
-							placeholder={$i18n.t('Search installed skills')}
-						/>
+				{#if runtimeCapabilities}
+					<div class="flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-500 dark:text-gray-400">
+						<span>运行环境：{getRuntimeProfileLabel(runtimeCapabilities.profile)}</span>
+						<span>
+							{runtimeCapabilities.install_allowed ? '支持可执行 Skill' : '当前仅支持说明型 Skill'}
+						</span>
+						<span>Python：{runtimeCapabilities.python?.available ? '可用' : '不可用'}</span>
+						<span>Node：{runtimeCapabilities.node?.available ? '可用' : '不可用'}</span>
+						<span
+							>自动启用：{installedSkills.filter((skill) => isAutoEnabledSkill(skill)).length}</span
+						>
 					</div>
+				{/if}
+			</div>
 
-					<div class="workspace-toolbar-actions">
-						<button class="workspace-icon-button" on:click={() => refreshData()}>
-							<ArrowPath className={`size-4 ${refreshing ? 'animate-spin' : ''}`} />
-							<span>{$i18n.t('Refresh')}</span>
-						</button>
+			<div class="workspace-toolbar">
+				<div class="workspace-search workspace-toolbar-search">
+					<Search className="size-4 text-gray-400" />
+					<input
+						class="w-full bg-transparent text-sm outline-hidden"
+						bind:value={mainQuery}
+						placeholder={$i18n.t('Search installed skills')}
+					/>
+				</div>
 
-						<button class="workspace-primary-button" on:click={() => (showStore = true)}>
-							<Plus className="size-4" />
-							<span>{$i18n.t('Install Skill')}</span>
-						</button>
-					</div>
+				<div class="workspace-toolbar-actions">
+					<button class="workspace-icon-button" on:click={() => refreshData()}>
+						<ArrowPath className={`size-4 ${refreshing ? 'animate-spin' : ''}`} />
+						<span>{$i18n.t('Refresh')}</span>
+					</button>
+
+					<button class="workspace-primary-button" on:click={() => (showStore = true)}>
+						<Plus className="size-4" />
+						<span>{$i18n.t('Install Skill')}</span>
+					</button>
 				</div>
 			</div>
-		</section>
+		</div>
 
 		{#if legacyPromptSkills.length > 0}
 			<section
-				class="workspace-section flex flex-col gap-3 md:flex-row md:items-center md:justify-between"
+				class="flex flex-col gap-3 rounded-2xl border border-amber-200/70 bg-amber-50/60 px-4 py-3 md:flex-row md:items-center md:justify-between dark:border-amber-900/50 dark:bg-amber-950/20"
 			>
 				<div>
 					<div class="text-sm font-medium text-amber-900 dark:text-amber-200">
@@ -787,8 +782,8 @@
 			</section>
 		{/if}
 
-		<section class="workspace-section space-y-3">
-			<div class="flex flex-col gap-1">
+		<section class="min-w-0 space-y-3">
+			<div class="flex flex-col gap-1 px-1">
 				<div>
 					<div class="text-sm font-medium text-gray-900 dark:text-gray-100">
 						{$i18n.t('Installed Skill Packages')}

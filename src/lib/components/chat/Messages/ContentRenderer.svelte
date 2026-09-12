@@ -7,6 +7,7 @@
 		artifactAutoOpenDismissedMessageId,
 		artifactPreviewTarget,
 		chatId,
+		mobile,
 		settings,
 		showArtifacts,
 		showControls,
@@ -14,7 +15,14 @@
 	} from '$lib/stores';
 	import FloatingButtons from '../ContentRenderer/FloatingButtons.svelte';
 	import { copyToClipboard, createMessagesList } from '$lib/utils';
+	import { isDarkMode } from '$lib/utils/dark-mode';
 	import { toast } from 'svelte-sonner';
+	import { DropdownMenu } from 'bits-ui';
+	import { Copy, FileText, Palette } from 'lucide-svelte';
+	import Dropdown from '$lib/components/common/Dropdown.svelte';
+	import Tooltip from '$lib/components/common/Tooltip.svelte';
+	import EllipsisHorizontal from '$lib/components/icons/EllipsisHorizontal.svelte';
+	import { flyAndScale } from '$lib/utils/transitions';
 	import { getCitationEntries } from '$lib/utils/citations';
 	import type { GeneratedMessageFile } from '$lib/utils/generated-file-links';
 	import {
@@ -40,7 +48,8 @@
 		isInlineHtmlPreviewCopyMessage,
 		isInlineHtmlPreviewImageMessage,
 		shouldRenderInlineHtmlArtifactOriginalText,
-		type HtmlArtifactCompanionImage
+		type HtmlArtifactCompanionImage,
+		type HtmlPreviewColorScheme
 	} from '$lib/utils/html-preview';
 	import {
 		hasSameOriginPreviewImages,
@@ -151,6 +160,14 @@
 	let inlineHtmlArtifactSource: string | null = null;
 	let copiedInlineHtmlArtifactSource = false;
 	let copiedInlineHtmlArtifactSourceTimer: ReturnType<typeof setTimeout> | null = null;
+	// Dark theme: the preview document gets the bounded dark adaptation unless the
+	// reader asks for the author's original colours for this message.
+	let inlineHtmlPreviewUseOriginalColors = false;
+	let inlineHtmlPreviewColorsMessageId: string | null = null;
+	let inlineHtmlPreviewColorScheme: HtmlPreviewColorScheme = 'light';
+	let showInlineHtmlPreviewMenu = false;
+	const INLINE_HTML_PREVIEW_MENU_ITEM_CLASS =
+		'flex items-center gap-3 px-3 py-2.5 text-sm rounded-xl cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800';
 	let pendingSelection: PendingSelection | null = null;
 	let pendingSelectionPosition: { top: number; left: number } | null = null;
 	let currentMessageThreads: SelectionThread[] = [];
@@ -475,10 +492,17 @@
 		copied: $i18n.t('Copied'),
 		zoom: $i18n.t('Click to enlarge')
 	};
+	$: if (id !== inlineHtmlPreviewColorsMessageId) {
+		inlineHtmlPreviewColorsMessageId = id;
+		inlineHtmlPreviewUseOriginalColors = false;
+	}
+	$: inlineHtmlPreviewColorScheme =
+		$isDarkMode && !inlineHtmlPreviewUseOriginalColors ? 'dark' : 'light';
 	$: inlineHtmlArtifactPreview = buildInlineHtmlArtifactPreview(normalizedContent, {
 		enabled: $settings?.detectArtifacts ?? true,
 		streaming,
-		labels: inlineHtmlPreviewLabels
+		labels: inlineHtmlPreviewLabels,
+		colorScheme: inlineHtmlPreviewColorScheme
 	});
 	$: inlineHtmlArtifactSource = inlineHtmlArtifactPreview
 		? getHtmlArtifactSource(normalizedContent)
@@ -499,11 +523,17 @@
 			(id !== lastInlineHtmlPreviewMessageId ||
 				normalizedContent !== lastInlineHtmlPreviewMessageContent))
 	) {
+		const messageChanged =
+			!inlineHtmlArtifactPreview ||
+			id !== lastInlineHtmlPreviewMessageId ||
+			normalizedContent !== lastInlineHtmlPreviewMessageContent;
 		lastInlineHtmlPreviewDocument = inlineHtmlArtifactPreview;
 		lastInlineHtmlPreviewMessageId = inlineHtmlArtifactPreview ? id : null;
 		lastInlineHtmlPreviewMessageContent = inlineHtmlArtifactPreview ? normalizedContent : null;
 		inlineHtmlPreviewHeight = INLINE_HTML_PREVIEW_MIN_HEIGHT;
-		showInlineHtmlArtifactOriginalText = false;
+		if (messageChanged) {
+			showInlineHtmlArtifactOriginalText = false;
+		}
 	}
 	$: renderInlineHtmlArtifactOriginalText = shouldRenderInlineHtmlArtifactOriginalText(
 		inlineHtmlArtifactPreview,
@@ -541,6 +571,7 @@
 			return;
 		}
 		await copyToClipboard(inlineHtmlArtifactSource);
+		toast.success($i18n.t('Copied'));
 		copiedInlineHtmlArtifactSource = true;
 		if (copiedInlineHtmlArtifactSourceTimer) {
 			clearTimeout(copiedInlineHtmlArtifactSourceTimer);
@@ -1010,32 +1041,6 @@
 </script>
 
 <div class="relative overflow-visible">
-	{#if inlineHtmlArtifactPreview}
-		<div class="mb-2 flex justify-end gap-2" data-halo-inline-html-original-text-toggle="true">
-			{#if inlineHtmlArtifactSource}
-				<button
-					type="button"
-					class="inline-flex min-h-8 max-w-full items-center rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-600 transition-colors hover:bg-gray-50 hover:text-gray-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/60 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-800 dark:hover:text-gray-100"
-					on:click={copyInlineHtmlArtifactSource}
-				>
-					{copiedInlineHtmlArtifactSource ? $i18n.t('Copied') : $i18n.t('Copy HTML')}
-				</button>
-			{/if}
-			<button
-				type="button"
-				class="inline-flex min-h-8 max-w-full items-center rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-600 transition-colors hover:bg-gray-50 hover:text-gray-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/60 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-800 dark:hover:text-gray-100"
-				aria-expanded={showInlineHtmlArtifactOriginalText}
-				on:click={() => {
-					showInlineHtmlArtifactOriginalText = !showInlineHtmlArtifactOriginalText;
-				}}
-			>
-				{showInlineHtmlArtifactOriginalText
-					? $i18n.t('Hide original text')
-					: $i18n.t('Show original text')}
-			</button>
-		</div>
-	{/if}
-
 	<!-- svelte-ignore a11y-click-events-have-key-events -->
 	<!-- svelte-ignore a11y-no-static-element-interactions -->
 	<div
@@ -1119,11 +1124,93 @@
 
 		{#if inlineHtmlArtifactPreview}
 			<div
-				class={showInlineHtmlArtifactOriginalText
+				class="relative group/html-preview {showInlineHtmlArtifactOriginalText
 					? 'mt-4 border-t border-gray-100 pt-4 dark:border-gray-800'
-					: ''}
+					: ''}"
 				data-halo-inline-html-preview="true"
 			>
+				<!--
+					Preview options (copy source, original text, original colours) live in
+					one small corner control instead of a permanent button row. It is a real
+					button in the tab order with a label, so keyboard, screen reader and touch
+					users reach it; on pointer devices it only fades in fully on hover.
+				-->
+				<div
+					class="absolute right-2 z-10 {showInlineHtmlArtifactOriginalText ? 'top-6' : 'top-2'}"
+					data-halo-inline-html-original-text-toggle="true"
+				>
+					<Dropdown bind:show={showInlineHtmlPreviewMenu} side="bottom" align="end">
+						<Tooltip content={$i18n.t('Preview options')} placement="bottom">
+							<button
+								type="button"
+								class="flex size-7 items-center justify-center rounded-lg border border-gray-200/80 bg-white/90 text-gray-600 shadow-sm backdrop-blur transition-opacity hover:text-gray-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/60 dark:border-gray-700/70 dark:bg-gray-900/85 dark:text-gray-300 dark:hover:text-gray-100 {$mobile ||
+								showInlineHtmlPreviewMenu
+									? 'opacity-100'
+									: 'opacity-60 group-hover/html-preview:opacity-100 focus-visible:opacity-100'}"
+								aria-label={$i18n.t('Preview options')}
+								aria-haspopup="menu"
+								aria-expanded={showInlineHtmlPreviewMenu}
+							>
+								<EllipsisHorizontal className="size-4" strokeWidth="2" />
+							</button>
+						</Tooltip>
+
+						<div slot="content">
+							<DropdownMenu.Content
+								class="w-56 rounded-2xl px-1.5 py-1.5 border border-gray-300/30 dark:border-gray-700/50 z-50 bg-white dark:bg-gray-850 dark:text-white shadow-lg"
+								sideOffset={6}
+								side="bottom"
+								align="end"
+								transition={flyAndScale}
+							>
+								{#if inlineHtmlArtifactSource}
+									<DropdownMenu.Item
+										class={INLINE_HTML_PREVIEW_MENU_ITEM_CLASS}
+										on:click={() => {
+											showInlineHtmlPreviewMenu = false;
+											void copyInlineHtmlArtifactSource();
+										}}
+									>
+										<Copy class="size-4 shrink-0" strokeWidth={1.75} />
+										<span>{$i18n.t('Copy HTML')}</span>
+									</DropdownMenu.Item>
+								{/if}
+								<DropdownMenu.Item
+									class={INLINE_HTML_PREVIEW_MENU_ITEM_CLASS}
+									data-halo-inline-html-original-text-item="true"
+									on:click={() => {
+										showInlineHtmlPreviewMenu = false;
+										showInlineHtmlArtifactOriginalText = !showInlineHtmlArtifactOriginalText;
+									}}
+								>
+									<FileText class="size-4 shrink-0" strokeWidth={1.75} />
+									<span>
+										{showInlineHtmlArtifactOriginalText
+											? $i18n.t('Hide original text')
+											: $i18n.t('Show original text')}
+									</span>
+								</DropdownMenu.Item>
+								{#if $isDarkMode}
+									<DropdownMenu.Item
+										class={INLINE_HTML_PREVIEW_MENU_ITEM_CLASS}
+										data-halo-inline-html-original-colors-item="true"
+										on:click={() => {
+											showInlineHtmlPreviewMenu = false;
+											inlineHtmlPreviewUseOriginalColors = !inlineHtmlPreviewUseOriginalColors;
+										}}
+									>
+										<Palette class="size-4 shrink-0" strokeWidth={1.75} />
+										<span>
+											{inlineHtmlPreviewUseOriginalColors
+												? $i18n.t('Use dark theme adaptation')
+												: $i18n.t('Show original colors')}
+										</span>
+									</DropdownMenu.Item>
+								{/if}
+							</DropdownMenu.Content>
+						</div>
+					</Dropdown>
+				</div>
 				<!--
 					Each document gets its own iframe element. Swapping `srcdoc` on an
 					already-inserted frame while its initial (empty) navigation is still
@@ -1141,7 +1228,11 @@
 						srcdoc={inlineHtmlPreviewDocument ?? ''}
 						sandbox={HTML_PREVIEW_SANDBOX}
 						referrerpolicy={HTML_PREVIEW_REFERRER_POLICY}
-						class="block w-full overflow-hidden rounded-lg border-0 bg-white"
+						class="block w-full overflow-hidden rounded-lg border-0 {inlineHtmlPreviewColorScheme ===
+						'dark'
+							? 'bg-[var(--surface-overlay)]'
+							: 'bg-white'}"
+						data-halo-color-scheme={inlineHtmlPreviewColorScheme}
 						style={`height: ${inlineHtmlPreviewHeight}px;`}
 					></iframe>
 				{/key}

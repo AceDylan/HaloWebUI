@@ -832,15 +832,15 @@
 	<Tooltip content={tr('打开参数设置', 'Open generation settings')} placement="top">
 		<button
 			type="button"
-			class="flex h-8 shrink-0 items-center gap-1.5 rounded-full border border-gray-200 bg-gray-100/90 px-2.5 text-sm font-medium leading-none text-gray-700 transition hover:bg-gray-200/80 dark:border-gray-700 dark:bg-gray-800/80 dark:text-gray-100 dark:hover:bg-gray-700"
+			class="flex h-7 shrink-0 items-center gap-1.5 rounded-full border border-gray-200/80 bg-white/80 px-2.5 text-xs font-medium leading-none text-gray-600 transition hover:border-primary-200 hover:bg-primary-50 hover:text-primary-800 dark:border-gray-700/80 dark:bg-gray-900/60 dark:text-gray-300 dark:hover:border-primary-500/40 dark:hover:bg-primary-500/10 dark:hover:text-primary-100"
 			aria-label={tr('参数设置', 'Generation settings')}
 			aria-pressed={open}
 			on:click={openPanel}
 		>
 			<span
-				class="flex size-4 shrink-0 items-center justify-center text-gray-700 dark:text-gray-100"
+				class="flex size-4 shrink-0 items-center justify-center text-gray-500 dark:text-gray-400"
 			>
-				<SlidersHorizontal class="size-4" strokeWidth={2} />
+				<SlidersHorizontal class="size-3.5" strokeWidth={2} />
 			</span>
 			<span class="max-w-[5rem] truncate">{tr('参数设置', 'Settings')}</span>
 		</button>

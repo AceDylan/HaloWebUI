@@ -1395,21 +1395,19 @@
 
 	{#if viewState !== 'ready' || workspaceNoModels}
 		<div class="space-y-4">
-			<section class="workspace-section space-y-4">
-				<div class="flex flex-col gap-3 lg:flex-row lg:items-center">
-					<div class="workspace-toolbar-summary">
-						<div class="workspace-count-pill">
-							<PhotoSolid className="size-3.5" />
-							{$i18n.t('Image Studio')}
-						</div>
-						<div class="text-xs text-gray-500 dark:text-gray-400">
-							{blockedReason ?? $i18n.t('Loading image generation settings...')}
-						</div>
+			<div class="workspace-toolbar-row">
+				<div class="workspace-toolbar-summary">
+					<div class="workspace-count-pill">
+						<PhotoSolid className="size-3.5" />
+						{$i18n.t('Image Studio')}
+					</div>
+					<div class="text-xs text-gray-500 dark:text-gray-400">
+						{blockedReason ?? $i18n.t('Loading image generation settings...')}
 					</div>
 				</div>
-			</section>
+			</div>
 
-			<section class="workspace-section">
+			<section class="min-w-0">
 				<div class="workspace-empty-state">
 					<div class="flex size-14 mx-auto items-center justify-center rounded-2xl bg-gray-100 text-gray-400 dark:bg-gray-800 dark:text-gray-500">
 						<PhotoSolid className="size-7" />
@@ -1442,8 +1440,7 @@
 	{:else}
 		{#if activeTab === 'workbench'}
 			<form class="space-y-4" on:submit|preventDefault={submitHandler}>
-			<section class="workspace-section space-y-4">
-				<div class="flex flex-col gap-3 lg:flex-row lg:items-center">
+			<div class="workspace-toolbar-row">
 					<div class="workspace-toolbar-summary">
 						<div class="workspace-count-pill">
 							<PhotoSolid className="size-3.5" />
@@ -1502,8 +1499,7 @@
 							</button>
 						</div>
 					</div>
-				</div>
-			</section>
+			</div>
 
 			<section class="workspace-section space-y-4">
 				<div class="glass-item p-4 space-y-3">

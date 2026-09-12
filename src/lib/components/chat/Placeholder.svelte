@@ -284,7 +284,7 @@
 							{getModelBaseName(models[selectedModelIdx])}
 						</span>
 						{#if getModelConnectionName(models[selectedModelIdx])}
-							<span class="shrink-0 text-2xs text-gray-400 dark:text-gray-500">
+							<span class="shrink-0 text-2xs text-gray-600 dark:text-gray-400">
 								{getModelConnectionName(models[selectedModelIdx])}
 							</span>
 						{/if}

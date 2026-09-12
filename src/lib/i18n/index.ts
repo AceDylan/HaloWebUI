@@ -3,6 +3,7 @@ import resourcesToBackend from 'i18next-resources-to-backend';
 import LanguageDetector from 'i18next-browser-languagedetector';
 import type { i18n as i18nType } from 'i18next';
 import { writable } from 'svelte/store';
+import { applyDayjsLocale } from '$lib/dayjs';
 
 const DEFAULT_LOCALE = 'en-US';
 const PRIMARY_CHINESE_LOCALE = 'zh-CN';
@@ -391,7 +392,9 @@ const createI18nStore = (i18n: i18nType) => {
 		i18nWritable.set(i18n);
 	});
 	i18n.on('added', () => i18nWritable.set(i18n));
-	i18n.on('languageChanged', () => {
+	i18n.on('languageChanged', (language: string) => {
+		// Dates rendered with dayjs (chat history, relative times) follow the UI language.
+		applyDayjsLocale(language);
 		i18nWritable.set(i18n);
 	});
 	return i18nWritable;

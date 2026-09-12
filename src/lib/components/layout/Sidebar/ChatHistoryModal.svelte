@@ -153,7 +153,7 @@
 								<div class="line-clamp-1 flex-1 text-left text-gray-800 dark:text-gray-100">
 									{chat.title}
 								</div>
-								<div class="shrink-0 text-xs text-gray-400 dark:text-gray-500 whitespace-nowrap">
+								<div class="shrink-0 text-xs text-gray-600 dark:text-gray-400 whitespace-nowrap">
 									{dayjs(chat.updated_at * 1000).format('LL')}
 								</div>
 							</a>

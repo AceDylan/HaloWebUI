@@ -553,43 +553,39 @@
 
 {#if loaded}
 	<div class="space-y-4">
-		<section class="workspace-section space-y-4">
-			<div class="flex flex-col gap-3 lg:flex-row lg:items-center">
-				<div class="workspace-toolbar-summary">
-					<div class="workspace-count-pill">
-						{filteredItems.length}
-						{$i18n.t('Notes')}
-					</div>
+		<div class="workspace-toolbar-row">
+			<div class="workspace-count-pill">
+				{filteredItems.length}
+				{$i18n.t('Notes')}
+			</div>
+			<div class="workspace-toolbar">
+				<div class="workspace-search workspace-toolbar-search">
+					<Search className="size-4 text-gray-400" />
+					<input
+						class="w-full bg-transparent text-sm outline-none"
+						bind:value={query}
+						placeholder={$i18n.t('Search Notes')}
+					/>
 				</div>
-				<div class="workspace-toolbar">
-					<div class="workspace-search workspace-toolbar-search">
-						<Search className="size-4 text-gray-400" />
-						<input
-							class="w-full bg-transparent text-sm outline-none"
-							bind:value={query}
-							placeholder={$i18n.t('Search Notes')}
-						/>
-					</div>
-					<div class="workspace-toolbar-actions">
-						<HaloSelect
-							bind:value={sortBy}
-							options={[
-								{ value: 'updated', label: $i18n.t('Recently Updated') },
-								{ value: 'created', label: $i18n.t('Recently Created') },
-								{ value: 'name', label: $i18n.t('Name') }
-							]}
-							className="w-fit max-w-full text-xs"
-						/>
-						<button class="workspace-primary-button" on:click={openCreateModal}>
-							<Plus className="size-4" />
-							<span>{$i18n.t('Create')}</span>
-						</button>
-					</div>
+				<div class="workspace-toolbar-actions">
+					<HaloSelect
+						bind:value={sortBy}
+						options={[
+							{ value: 'updated', label: $i18n.t('Recently Updated') },
+							{ value: 'created', label: $i18n.t('Recently Created') },
+							{ value: 'name', label: $i18n.t('Name') }
+						]}
+						className="w-fit max-w-full text-xs"
+					/>
+					<button class="workspace-primary-button" on:click={openCreateModal}>
+						<Plus className="size-4" />
+						<span>{$i18n.t('Create')}</span>
+					</button>
 				</div>
 			</div>
-		</section>
+		</div>
 
-		<section class="workspace-section space-y-2">
+		<section class="min-w-0 space-y-2">
 			{#each filteredItems as note, i}
 				<div
 					class="flex justify-between items-start w-full px-3 py-3 my-1 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-850 transition group cursor-pointer

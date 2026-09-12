@@ -43,7 +43,7 @@
 	import { WEBUI_BASE_URL } from '$lib/constants';
 	import { ensureModels } from '$lib/services/models';
 	import { getTimeRange } from '$lib/utils';
-	import { getModelChatDisplayName } from '$lib/utils/model-display';
+	import { getModelChatDisplayName, getModelDisplayParts } from '$lib/utils/model-display';
 
 	import ArchivedChatsModal from './Sidebar/ArchivedChatsModal.svelte';
 	import HermesSessionsModal from './Sidebar/HermesSessionsModal.svelte';
@@ -1030,7 +1030,7 @@
 										/>
 										<div class="min-w-0 flex-1">
 											<div class="line-clamp-1 text-[13px] font-medium leading-5">
-												{getModelChatDisplayName(assistant)}
+												{getModelDisplayParts(assistant).base}
 											</div>
 										</div>
 									</button>
@@ -1154,7 +1154,7 @@
 								{#each $chats as chat, idx}
 									{#if idx === 0 || (idx > 0 && chat.time_range !== $chats[idx - 1].time_range)}
 										<div
-											class="w-full px-3 pb-1 text-2xs text-gray-400 dark:text-gray-500 font-medium {idx !== 0
+											class="w-full px-3 pb-1 text-2xs text-gray-600 dark:text-gray-400 font-medium {idx !== 0
 												? 'pt-3'
 												: 'pt-1'}"
 										>
@@ -1269,8 +1269,8 @@
 									<div class="text-sm font-medium text-gray-800 dark:text-gray-100 truncate">
 										{$user?.name}
 									</div>
-									<div class="text-xs text-gray-400 dark:text-gray-500 whitespace-nowrap">
-										{$user?.role === 'admin' ? 'Admin' : 'User'}
+									<div class="text-xs text-gray-600 dark:text-gray-400 whitespace-nowrap">
+										{$user?.role === 'admin' ? $i18n.t('admin') : $i18n.t('user')}
 									</div>
 								</div>
 								<svg

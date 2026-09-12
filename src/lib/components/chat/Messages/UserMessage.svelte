@@ -402,6 +402,7 @@
 									<div class="relative group shrink-0">
 										<Tooltip content={$i18n.t('Edit')} placement="bottom">
 											<button
+									aria-label={$i18n.t('Edit')}
 												type="button"
 												class="relative block rounded-xl ring-1 ring-gray-200/70 dark:ring-white/10 overflow-hidden"
 												on:click={() => {
@@ -424,6 +425,7 @@
 										</Tooltip>
 										<Tooltip content={$i18n.t('Remove')} placement="bottom">
 											<button
+									aria-label={$i18n.t('Remove')}
 												type="button"
 												class="absolute -top-1.5 -right-1.5 bg-gray-900/75 dark:bg-gray-700/90 text-white border border-white/20 dark:border-gray-500/30 rounded-full p-px opacity-0 group-hover:opacity-100 transition"
 												on:click={() => {
@@ -485,6 +487,7 @@
 						<div class="flex items-center gap-1.5">
 							<Tooltip content={$i18n.t('Upload Image')} placement="bottom">
 								<button
+									aria-label={$i18n.t('Upload Image')}
 									type="button"
 									class="p-2 bg-gray-50 hover:bg-gray-100 dark:bg-gray-800 dark:hover:bg-gray-700 border border-gray-100 dark:border-gray-700 text-gray-700 dark:text-gray-200 transition rounded-3xl disabled:opacity-60 disabled:cursor-not-allowed"
 									on:click={openAddEditedImage}
@@ -590,6 +593,7 @@
 							{#if siblings.length > 1}
 								<div class="flex self-center" dir="ltr">
 									<button
+										aria-label={$i18n.t('Previous response')}
 										class="self-center p-1 hover:bg-black/5 dark:hover:bg-white/5 dark:hover:text-white hover:text-black rounded-lg transition-all duration-200 hover:scale-110 active:scale-95"
 										on:click={() => {
 											showPreviousMessage(message);
@@ -644,6 +648,7 @@
 									{/if}
 
 									<button
+										aria-label={$i18n.t('Next response')}
 										class="self-center p-1 hover:bg-black/5 dark:hover:bg-white/5 dark:hover:text-white hover:text-black rounded-lg transition-all duration-200 hover:scale-110 active:scale-95"
 										on:click={() => {
 											showNextMessage(message);
@@ -661,6 +666,7 @@
 							{/if}
 							<Tooltip content={$i18n.t('Edit')} placement="bottom">
 								<button
+									aria-label={$i18n.t('Edit')}
 									class="p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-xl dark:hover:text-white hover:text-black transition-all duration-200 hover:scale-110 active:scale-95 edit-user-message-button"
 									on:click={() => {
 										editMessageHandler();
@@ -673,6 +679,7 @@
 
 						<Tooltip content={$i18n.t('Copy')} placement="bottom">
 							<button
+									aria-label={$i18n.t('Copy')}
 								class="p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-xl dark:hover:text-white hover:text-black transition-all duration-200 hover:scale-110 active:scale-95"
 								on:click={() => {
 									copyToClipboard(message.content);
@@ -685,6 +692,7 @@
 						{#if !readOnly && branchSupported}
 							<Tooltip content={branchTooltip} placement="bottom">
 								<button
+									aria-label={branchTooltip}
 									class="p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-xl dark:hover:text-white hover:text-black transition-all duration-200 hover:scale-110 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:scale-100"
 									on:click={() => {
 										onBranchMessage(message.id);
@@ -703,6 +711,7 @@
 						{#if !readOnly && (!isFirstMessage || siblings.length > 1)}
 							<Tooltip content={$i18n.t('Delete')} placement="bottom">
 								<button
+									aria-label={$i18n.t('Delete')}
 									class="p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-xl dark:hover:text-white hover:text-black transition-all duration-200 hover:scale-110 active:scale-95"
 									on:click={() => {
 										showDeleteConfirm = true;
@@ -717,6 +726,7 @@
 							{#if siblings.length > 1}
 								<div class="flex self-center" dir="ltr">
 									<button
+										aria-label={$i18n.t('Previous response')}
 										class="self-center p-1 hover:bg-black/5 dark:hover:bg-white/5 dark:hover:text-white hover:text-black rounded-lg transition-all duration-200 hover:scale-110 active:scale-95"
 										on:click={() => {
 											showPreviousMessage(message);
@@ -771,6 +781,7 @@
 									{/if}
 
 									<button
+										aria-label={$i18n.t('Next response')}
 										class="self-center p-1 hover:bg-black/5 dark:hover:bg-white/5 dark:hover:text-white hover:text-black rounded-lg transition-all duration-200 hover:scale-110 active:scale-95"
 										on:click={() => {
 											showNextMessage(message);

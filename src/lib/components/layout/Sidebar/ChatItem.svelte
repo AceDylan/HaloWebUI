@@ -326,7 +326,8 @@
 			>
 				<Tooltip content={$i18n.t('Confirm')}>
 					<button
-						class=" self-center dark:hover:text-white transition"
+						class="self-center rounded-md p-1 -m-1 dark:hover:text-white transition"
+						aria-label={$i18n.t('Confirm')}
 						on:click={() => {
 							editChatTitle(id, chatTitle);
 							confirmEdit = false;
@@ -339,7 +340,8 @@
 
 				<Tooltip content={$i18n.t('Cancel')}>
 					<button
-						class=" self-center dark:hover:text-white transition"
+						class="self-center rounded-md p-1 -m-1 dark:hover:text-white transition"
+						aria-label={$i18n.t('Cancel')}
 						on:click={() => {
 							confirmEdit = false;
 							chatTitle = '';
@@ -353,7 +355,8 @@
 			<div class=" flex items-center self-center space-x-1.5">
 				<Tooltip content={$i18n.t('Archive')} className="flex items-center">
 					<button
-						class=" self-center dark:hover:text-white transition"
+						class="self-center rounded-md p-1 -m-1 dark:hover:text-white transition"
+						aria-label={$i18n.t('Archive')}
 						on:click={() => {
 							archiveChatHandler(id);
 						}}
@@ -365,7 +368,8 @@
 
 				<Tooltip content={$i18n.t('Delete')}>
 					<button
-						class=" self-center dark:hover:text-white transition"
+						class="self-center rounded-md p-1 -m-1 dark:hover:text-white transition"
+						aria-label={$i18n.t('Delete')}
 						on:click={() => {
 							deleteChatHandler(id);
 						}}
@@ -414,8 +418,8 @@
 					}}
 				>
 					<button
-						aria-label="Chat Menu"
-						class=" self-center dark:hover:text-white transition"
+						aria-label={$i18n.t('Chat Menu')}
+						class="self-center rounded-md p-1 -m-1 dark:hover:text-white transition"
 						on:click={() => {
 							dispatch('select');
 						}}

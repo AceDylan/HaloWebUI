@@ -988,8 +988,24 @@
 					</svg>
 					{$i18n.t('Loading...')}
 				</div>
+			{:else if error}
+				<div
+					class="flex flex-col items-center justify-center gap-3 py-12 text-sm text-gray-600 dark:text-gray-400"
+					role="alert"
+				>
+					<span>{$i18n.t(error)}</span>
+					<button
+						type="button"
+						class="rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-700 transition hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
+						on:click={() => loadDirectory(currentPath)}
+					>
+						{$i18n.t('Retry')}
+					</button>
+				</div>
 			{:else if entries.length === 0}
-				<div class="flex items-center justify-center py-12 text-gray-400 text-sm">
+				<div
+					class="flex items-center justify-center py-12 text-gray-600 dark:text-gray-400 text-sm"
+				>
 					{$i18n.t('Empty directory')}
 				</div>
 			{:else}

@@ -4,7 +4,7 @@
 	import { models } from '$lib/stores';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import ModelIcon from '$lib/components/common/ModelIcon.svelte';
-	import { getModelChatDisplayName } from '$lib/utils/model-display';
+	import { getModelChatDisplayName, getModelDisplayParts } from '$lib/utils/model-display';
 
 	const i18n = getContext('i18n');
 
@@ -78,7 +78,14 @@
 							alt={model?.name ?? model.id}
 							className="rounded-lg size-6 mr-2 shrink-0"
 						/>
-						<div class="truncate">{getModelChatDisplayName(model)}</div>
+						<div class="truncate">
+							{getModelDisplayParts(model).base}
+							{#if getModelDisplayParts(model).connection}
+								<span class="ml-1.5 text-2xs text-gray-500 dark:text-gray-400">
+									{getModelDisplayParts(model).connection}
+								</span>
+							{/if}
+						</div>
 					</div>
 				</button>
 			</Tooltip>

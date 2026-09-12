@@ -106,6 +106,7 @@
 							<button
 								class="flex cursor-pointer px-2 py-2 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-850 transition"
 								id="chat-context-menu-button"
+								aria-label={$i18n.t('Chat Menu')}
 							>
 								<div class=" m-auto self-center">
 									<svg

@@ -86,7 +86,7 @@
 	import DiscussionPanel from './DiscussionPanel.svelte';
 	import { KokoroWorker } from '$lib/workers/KokoroWorker';
 	import FileItem from '$lib/components/common/FileItem.svelte';
-	import { getModelChatDisplayName } from '$lib/utils/model-display';
+	import { getModelChatDisplayName, getModelDisplayParts } from '$lib/utils/model-display';
 	import { findModelByIdentity } from '$lib/utils/model-identity';
 	import {
 		getRenderableMessageError,
@@ -409,7 +409,7 @@
 	};
 	const imageGenerationGridStyle = (slotCount: number) => {
 		const columns = imageGenerationGridColumns(slotCount);
-		const maxWidth = slotCount === 1 ? 280 : slotCount === 3 ? 660 : 560;
+		const maxWidth = slotCount === 3 ? 660 : 560;
 		return `grid-template-columns: repeat(${columns}, minmax(0, 1fr)); max-width: ${maxWidth}px;`;
 	};
 	const getImageGenerationStatusSlotCount = (
@@ -1305,9 +1305,23 @@
 						{/if}
 					</div>
 				{:else}
-					<Tooltip content={getModelChatDisplayName(model) || message.modelName || message.model} placement="top-start">
-						<span class="line-clamp-1 text-black dark:text-white font-semibold">
-							{getModelChatDisplayName(model) || message.modelName || message.model}
+					{@const modelParts = model ? getModelDisplayParts(model) : null}
+					<Tooltip
+						content={modelParts?.full || message.modelName || message.model}
+						placement="top-start"
+					>
+						<span class="flex min-w-0 items-baseline gap-1.5">
+							<span class="line-clamp-1 text-black dark:text-white font-semibold">
+								{modelParts?.base || message.modelName || message.model}
+							</span>
+							{#if modelParts?.connection}
+								<span
+									class="shrink-0 text-2xs font-medium text-gray-500 dark:text-gray-400"
+									data-halo-model-connection="true"
+								>
+									{modelParts.connection}
+								</span>
+							{/if}
 						</span>
 					</Tooltip>
 				{/if}
@@ -1411,7 +1425,7 @@
 												<div
 													class="{status?.done === false
 														? 'shimmer'
-														: ''} text-gray-500 dark:text-gray-500 text-base line-clamp-1 text-wrap"
+														: ''} text-gray-600 dark:text-gray-400 text-base line-clamp-1 text-wrap"
 												>
 													{$i18n.t(`Searching Knowledge for "{{searchQuery}}"`, {
 														searchQuery: status.query
@@ -1443,7 +1457,7 @@
 												<div
 													class="{status?.done === false
 														? 'shimmer'
-														: ''} text-gray-500 dark:text-gray-500 text-base line-clamp-1 text-wrap"
+														: ''} text-gray-600 dark:text-gray-400 text-base line-clamp-1 text-wrap"
 												>
 													<!-- $i18n.t(`Searching "{{searchQuery}}"`) -->
 											{#if status?.description?.includes('{{searchQuery}}')}
@@ -1477,18 +1491,33 @@
 								aria-label={tr('图片生成结果', 'Image generation results')}
 							>
 									{#each imageGenerationResultSlots as file, index}
+										{@const naturalImage =
+											imageGenerationResultSlotCount === 1 &&
+											file?.type === 'image' &&
+											Boolean(file.url)}
+										<!-- A single picture keeps its own proportions (no crop, no letterbox);
+										     several pictures share fixed 4:5 cells so the grid stays even. -->
 										<div
-											class="min-w-0 overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm dark:border-gray-700 dark:bg-gray-900"
+											class="min-w-0 overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm dark:border-gray-700 dark:bg-gray-900 {naturalImage
+												? 'w-fit max-w-full'
+												: ''}"
+											data-halo-image-natural={naturalImage ? 'true' : undefined}
 										>
-											<div class="relative aspect-[4/5] bg-gray-100 dark:bg-gray-950">
+											<div
+												class="relative {naturalImage ? '' : 'aspect-[4/5]'} bg-gray-100 dark:bg-gray-950"
+											>
 												{#if file?.type === 'image' && file.url}
 													<Image
 														src={file.url}
 														alt={`${tr('第 {{index}} 张', 'Image {{index}}', {
 															index: imageGenerationSlotNumber(file, index)
 														})}`}
-														className="h-full w-full outline-hidden focus:outline-hidden"
-														imageClassName="h-full w-full object-contain"
+														className="{naturalImage
+															? 'block max-w-full'
+															: 'h-full w-full'} outline-hidden focus:outline-hidden"
+														imageClassName={naturalImage
+															? 'block h-auto max-h-[32rem] w-auto max-w-full !my-0'
+															: 'h-full w-full object-contain'}
 													/>
 												{:else if file}
 													<div
@@ -1706,7 +1735,7 @@
 										{#if message.content === '' && message.done && !renderableMessageError && !hasVisibleMessageFiles}
 											{#if message.stopped || message.stoppedByUser}
 												<div
-													class="status-description flex items-center gap-1.5 py-1 text-[13px] leading-5 text-gray-500 dark:text-gray-400"
+													class="status-description flex items-center gap-1.5 py-1 text-[13px] leading-5 text-gray-600 dark:text-gray-400"
 												>
 													{$i18n.t('Response stopped.')}
 												</div>
@@ -1777,7 +1806,7 @@
 
 										{#if showContinuationIndicator}
 											<div
-												class="status-description flex items-center gap-1.5 py-1 text-[13px] leading-5 text-gray-500 dark:text-gray-400"
+												class="status-description flex items-center gap-1.5 py-1 text-[13px] leading-5 text-gray-600 dark:text-gray-400"
 											>
 												<Spinner className="size-3.5" />
 												<span class="shimmer">
@@ -1802,7 +1831,7 @@
 									</div>
 
 									<div
-										class="message-outline-toolbar-row mt-3 flex flex-wrap items-end gap-3 border-t border-gray-100 pt-2.5 dark:border-gray-800"
+										class="message-outline-toolbar-row mt-2 flex flex-wrap items-end gap-3 pt-1"
 									>
 						{#if (message?.sources || message?.citations) && (model?.info?.meta?.capabilities?.citations ?? true)}
 							<div class="flex shrink-0 items-center gap-2">
@@ -2029,6 +2058,7 @@
 								{#if siblings.length > 1}
 									<div class="flex self-center min-w-fit" dir="ltr">
 										<button
+											aria-label={tr('上一条回复', 'Previous response')}
 											class="self-center p-1 hover:bg-black/5 dark:hover:bg-white/5 dark:hover:text-white hover:text-black rounded-lg transition-all duration-200 hover:scale-110 active:scale-95"
 											on:click={() => {
 												showPreviousMessage(message);
@@ -2085,6 +2115,7 @@
 										{/if}
 
 										<button
+											aria-label={tr('下一条回复', 'Next response')}
 											class="self-center p-1 hover:bg-black/5 dark:hover:bg-white/5 dark:hover:text-white hover:text-black rounded-lg transition-all duration-200 hover:scale-110 active:scale-95"
 											on:click={() => {
 												showNextMessage(message);
@@ -2105,6 +2136,7 @@
 										{#if $user?.role === 'user' ? ($user?.permissions?.chat?.edit ?? true) : true}
 											<Tooltip content={$i18n.t('Edit')} placement="bottom">
 												<button
+													aria-label={$i18n.t('Edit')}
 													class="{isLastMessage
 														? 'visible'
 														: 'invisible group-hover:visible'} p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-xl dark:hover:text-white hover:text-black transition-all duration-200 hover:scale-110 active:scale-95"
@@ -2120,6 +2152,7 @@
 
 									<Tooltip content={$i18n.t('Copy')} placement="bottom">
 										<button
+													aria-label={$i18n.t('Copy')}
 											class="{isLastMessage
 												? 'visible'
 												: 'invisible group-hover:visible'} p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-xl dark:hover:text-white hover:text-black transition-all duration-200 hover:scale-110 active:scale-95 copy-response-button"
@@ -2134,6 +2167,7 @@
 									{#if !readOnly && branchSupported}
 										<Tooltip content={branchTooltip} placement="bottom">
 											<button
+													aria-label={branchTooltip}
 												class="{isLastMessage
 													? 'visible'
 													: 'invisible group-hover:visible'} p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-xl dark:hover:text-white hover:text-black transition-all duration-200 hover:scale-110 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:scale-100"
@@ -2156,6 +2190,7 @@
 									<div>
 										<Tooltip content={$i18n.t('React')} placement="bottom">
 											<button
+													aria-label={$i18n.t('React')}
 												bind:this={reactionBtnEl}
 												class="{isLastMessage
 													? 'visible'
@@ -2178,6 +2213,7 @@
 									{#if $user?.role === 'admin' || ($user?.permissions?.chat?.tts ?? true)}
 										<Tooltip content={$i18n.t('Read Aloud')} placement="bottom">
 											<button
+													aria-label={$i18n.t('Read Aloud')}
 												id="speak-button-{message.id}"
 												class="{isLastMessage
 													? 'visible'
@@ -2275,6 +2311,7 @@
 										{#if isLastMessage}
 											<Tooltip content={$i18n.t('Continue Response')} placement="bottom">
 												<button
+													aria-label={$i18n.t('Continue Response')}
 													type="button"
 													id="continue-response-button"
 													class="{isLastMessage
@@ -2425,6 +2462,7 @@
 										{:else}
 											<Tooltip content={$i18n.t('Regenerate')} placement="bottom">
 												<button
+													aria-label={$i18n.t('Regenerate')}
 													type="button"
 													class="{isLastMessage
 														? 'visible'
@@ -2440,6 +2478,7 @@
 
 										<Tooltip content={$i18n.t('Delete')} placement="bottom">
 											<button
+													aria-label={$i18n.t('Delete')}
 												type="button"
 												id="delete-response-button"
 												class="{isLastMessage
@@ -2457,6 +2496,7 @@
 											{#each model?.actions ?? [] as action}
 												<Tooltip content={action.name} placement="bottom">
 													<button
+													aria-label={action.name}
 														type="button"
 														class="{isLastMessage
 															? 'visible'

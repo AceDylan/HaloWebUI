@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
 	HTML_EXPORT_CSP,
 	HTML_EXPORT_SANDBOX,
+	HTML_PREVIEW_CSP,
 	HTML_PREVIEW_SANDBOX,
 	buildHtmlArtifactPreview,
 	buildInlineHtmlArtifactPreview,
@@ -498,5 +499,56 @@ window.done = true;
 		expect(collectHtmlArtifactCompanionImages(content)?.before).toEqual([
 			{ src: '/api/v1/files/cat/content', alt: 'cat' }
 		]);
+	});
+});
+
+describe('html-preview dark colour scheme', () => {
+	const source = '```html\n<html><head><style>body{background:#fff}</style></head><body><h1>Hi</h1></body></html>\n```';
+
+	it('adds the adaptation layer only for the dark scheme and keeps the sandbox policy', () => {
+		const light = buildHtmlArtifactPreview(source) ?? '';
+		const dark = buildHtmlArtifactPreview(source, { colorScheme: 'dark' }) ?? '';
+
+		expect(light).toContain('data-halo-artifact-styles="true"');
+		expect(light).not.toContain('data-halo-artifact-dark-styles="true"');
+		expect(light).not.toContain('data-halo-html-preview-theme="true"');
+
+		expect(dark).toContain('data-halo-artifact-dark-styles="true"');
+		expect(dark).toContain('color-scheme: dark');
+		expect(dark).toContain('data-halo-html-preview-theme="true"');
+		// The dark base is appended after the author's own styles so plain body rules lose.
+		expect(dark.indexOf('body{background:#fff}')).toBeLessThan(
+			dark.indexOf('<style data-halo-artifact-dark-styles="true">')
+		);
+		// Same policy as the light document: one CSP meta, opaque-origin sandbox unchanged.
+		expect(countMatches(dark, /data-halo-html-preview-policy="true"/g)).toBe(1);
+		expect(dark).toContain(`content="${HTML_PREVIEW_CSP}"`);
+		expect(HTML_PREVIEW_SANDBOX).toBe('allow-scripts');
+	});
+
+	it('does not trust user-supplied theme markers and strips them before export', () => {
+		const forged = `<html><head><style data-halo-artifact-dark-styles="true">body{color:red}</style><script data-halo-html-preview-theme="true">alert(1)</script></head><body>x</body></html>`;
+		const light = hardenHtmlPreviewDocument(forged);
+		expect(light).not.toContain('alert(1)');
+
+		const dark = hardenHtmlPreviewDocument(forged, undefined, 'dark');
+		expect(dark).not.toContain('alert(1)');
+		expect(countMatches(dark, /data-halo-html-preview-theme="true"/g)).toBe(1);
+
+		const exported = hardenHtmlArtifactExportDocument(
+			buildHtmlArtifactPreview(source, { colorScheme: 'dark' })
+		);
+		expect(exported).not.toContain('<script');
+		expect(exported).not.toContain('data-halo-artifact-dark-styles="true"');
+	});
+
+	it('threads the scheme through the inline preview builder', () => {
+		const options = { enabled: true, streaming: false } as const;
+		expect(buildInlineHtmlArtifactPreview(source, { ...options })).not.toContain(
+			'data-halo-html-preview-theme="true"'
+		);
+		expect(
+			buildInlineHtmlArtifactPreview(source, { ...options, colorScheme: 'dark' })
+		).toContain('data-halo-html-preview-theme="true"');
 	});
 });

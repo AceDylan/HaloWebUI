@@ -287,7 +287,11 @@
 							exportHandler();
 						}}
 					>
-						<button class="touch-auto" on:click={() => {}}>
+						<button
+							class="flex size-7 items-center justify-center rounded-md touch-auto"
+							aria-label={$i18n.t('Folder options')}
+							on:click={() => {}}
+						>
 							<EllipsisHorizontal className="size-4" strokeWidth="2.5" />
 						</button>
 					</FolderMenu>

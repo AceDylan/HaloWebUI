@@ -109,8 +109,9 @@
 				{#each SOURCES as item}
 					<button
 						class="rounded-full px-3 py-1 text-xs font-medium transition {source === item.id
-							? 'bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900'
+							? 'bg-[var(--sidebar-active-bg)] text-[var(--sidebar-active-fg)]'
 							: 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-850 dark:text-gray-300 dark:hover:bg-gray-800'}"
+						aria-pressed={source === item.id}
 						on:click={() => {
 							source = item.id;
 						}}
@@ -140,14 +141,22 @@
 					</div>
 				{:else}
 					{#each sessions as session (session.id)}
-						<div
-							class="flex items-center gap-3 rounded-xl px-3 py-2 hover:bg-gray-50 dark:hover:bg-gray-850"
+						<!-- The whole row opens the session; the pill on the right only states what
+						     will happen, so the touch target is the full width. -->
+						<button
+							type="button"
+							class="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left transition hover:bg-gray-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/50 disabled:cursor-wait dark:hover:bg-gray-850"
+							disabled={importing !== null}
+							aria-busy={importing === session.id}
+							on:click={() => openSession(session)}
 						>
 							<div class="min-w-0 flex-1">
 								<div class="truncate text-sm font-medium">
 									{session.title || session.preview || session.id}
 								</div>
-								<div class="mt-0.5 flex items-center gap-2 text-xs text-gray-500">
+								<div
+									class="mt-0.5 flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400"
+								>
 									<span>💬 {session.message_count}</span>
 									{#if when(session.last_active)}
 										<span>· {when(session.last_active)}</span>
@@ -157,12 +166,10 @@
 									{/if}
 								</div>
 							</div>
-							<button
+							<span
 								class="shrink-0 rounded-full px-3 py-1 text-xs font-medium transition {session.imported
-									? 'bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-850 dark:text-gray-200 dark:hover:bg-gray-800'
-									: 'bg-emerald-600 text-white hover:bg-emerald-700'}"
-								disabled={importing !== null}
-								on:click={() => openSession(session)}
+									? 'bg-gray-100 text-gray-700 dark:bg-gray-850 dark:text-gray-200'
+									: 'bg-primary-600 text-white dark:bg-primary-500'}"
 							>
 								{#if importing === session.id}
 									<Spinner className="size-3" />
@@ -171,8 +178,8 @@
 								{:else}
 									{$i18n.t('Import and open')}
 								{/if}
-							</button>
-						</div>
+							</span>
+						</button>
 					{/each}
 				{/if}
 			</div>

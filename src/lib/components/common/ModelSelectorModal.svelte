@@ -18,7 +18,7 @@
 		getModelGroup,
 		type ModelCapabilities
 	} from '$lib/utils/model-capabilities';
-	import { getModelChatDisplayName } from '$lib/utils/model-display';
+	import { getModelChatDisplayName, getModelDisplayParts } from '$lib/utils/model-display';
 	import {
 		describeNativeWebSearchSupport,
 		getNativeWebSearchSupport
@@ -545,7 +545,14 @@
 										checked={selectedIds.has(model.id)}
 										tabindex="-1"
 									/>
-									<span class="text-sm flex-1 truncate">{getModelChatDisplayName(model)}</span>
+									<span class="text-sm flex-1 min-w-0 truncate">
+										{getModelDisplayParts(model).base}
+										{#if getModelDisplayParts(model).connection}
+											<span class="ml-1.5 text-2xs text-gray-500 dark:text-gray-400">
+												{getModelDisplayParts(model).connection}
+											</span>
+										{/if}
+									</span>
 									<div class="flex items-center gap-1 shrink-0">
 										{#if caps.free}
 											<Tooltip content={$i18n.t('Free')}>

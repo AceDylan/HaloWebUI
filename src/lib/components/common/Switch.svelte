@@ -24,7 +24,7 @@
 		variant === 'primary'
 			? 'bg-primary-500 dark:bg-primary-500'
 			: 'bg-emerald-500 dark:bg-emerald-500';
-	$: compactOffTrackClass = 'bg-gray-200 dark:bg-transparent';
+	$: compactOffTrackClass = 'bg-gray-200 dark:bg-white/15';
 	$: focusClass =
 		($settings?.highContrastMode ?? false)
 			? 'focus-visible:outline focus-visible:outline-2 focus-visible:outline-gray-800 focus-visible:dark:outline-gray-200 focus-visible:outline-offset-2'

@@ -2281,5 +2281,19 @@
 	"No prompt": "",
 	"No templates match": "",
 	"Invalid template file": "",
-	"Imported {{added}} templates, skipped {{skipped}} duplicates": ""
+	"Imported {{added}} templates, skipped {{skipped}} duplicates": "",
+	"Preview options": "",
+	"Show original colors": "",
+	"Use dark theme adaptation": "",
+	"Chat Menu": "",
+	"Page not found": "",
+	"The page you are looking for does not exist or has been moved.": "",
+	"Something went wrong while loading this page.": "",
+	"Back to home": "",
+	"Go back": "",
+	"File workspace is disabled": "",
+	"Enable the file browser and terminal under Admin Settings → Code Execution.": "",
+	"Open admin settings": "",
+	"Previous response": "",
+	"Next response": ""
 }

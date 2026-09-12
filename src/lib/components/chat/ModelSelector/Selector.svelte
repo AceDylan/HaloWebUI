@@ -35,7 +35,7 @@
 	import { toast } from 'svelte-sonner';
 	import { capitalizeFirstLetter, sanitizeResponseContent, splitStream } from '$lib/utils';
 	import { localizeCommonError } from '$lib/utils/common-errors';
-	import { getModelChatDisplayName } from '$lib/utils/model-display';
+	import { getModelChatDisplayName, getModelDisplayParts } from '$lib/utils/model-display';
 	import { resolveModelSelectionId } from '$lib/utils/model-identity';
 	import {
 		getTemporaryChatAccess,
@@ -745,9 +745,20 @@
 		title={selectedModel ? selectedModel.label : placeholder}
 		id="model-selector-{id}-button"
 	>
-		<span class="min-w-0 truncate font-medium text-gray-700 dark:text-gray-200">
+		<span
+			class="flex min-w-0 items-baseline gap-1.5 truncate font-medium text-gray-700 dark:text-gray-200"
+		>
 			{#if selectedModel}
-				{selectedModel.label}
+				{@const parts = getModelDisplayParts(selectedModel.model)}
+				<span class="min-w-0 truncate">{parts.base || selectedModel.label}</span>
+				{#if parts.connection}
+					<span
+						class="hidden shrink-0 text-2xs font-medium text-gray-500 dark:text-gray-400 sm:inline"
+						data-halo-model-connection="true"
+					>
+						{parts.connection}
+					</span>
+				{/if}
 			{:else}
 				<span class="text-gray-400 dark:text-gray-500">{placeholder}</span>
 			{/if}
@@ -993,8 +1004,16 @@
 									<div class="flex min-w-0 items-center gap-1.5">
 										<div class="min-w-0 flex flex-1 items-center gap-1">
 											<div class="min-w-0 truncate">
-												{item.label}
+												{getModelDisplayParts(item.model).base || item.label}
 											</div>
+											{#if getModelDisplayParts(item.model).connection}
+												<span
+													class="shrink-0 rounded-md bg-gray-100 px-1.5 py-0.5 text-2xs font-medium text-gray-600 dark:bg-gray-800 dark:text-gray-300"
+													data-halo-model-connection="true"
+												>
+													{getModelDisplayParts(item.model).connection}
+												</span>
+											{/if}
 
 											{#if item.model.owned_by === 'ollama' && (item.model.ollama?.details?.parameter_size ?? '') !== ''}
 												<div class="ml-1 shrink-0 items-center translate-y-[0.5px]">

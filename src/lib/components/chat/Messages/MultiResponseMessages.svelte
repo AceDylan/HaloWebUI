@@ -12,7 +12,7 @@
 	import ResponseMessage from './ResponseMessage.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import Merge from '$lib/components/icons/Merge.svelte';
-	import { getModelChatDisplayName } from '$lib/utils/model-display';
+	import { getModelChatDisplayName, getModelDisplayParts } from '$lib/utils/model-display';
 	import { findModelByIdentity } from '$lib/utils/model-identity';
 
 	import Markdown from './Markdown.svelte';
@@ -327,8 +327,13 @@
 										}}
 									>
 										{tabModel
-											? getModelChatDisplayName(tabModel) || tabModel.name
+											? getModelDisplayParts(tabModel).base || tabModel.name
 											: history.messages[_messageId]?.modelName || history.messages[_messageId]?.model}
+										{#if tabModel && getModelDisplayParts(tabModel).connection}
+											<span class="ml-1 text-2xs font-medium text-gray-500 dark:text-gray-400">
+												{getModelDisplayParts(tabModel).connection}
+											</span>
+										{/if}
 									</button>
 								{/if}
 							{/each}

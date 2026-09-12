@@ -46,7 +46,7 @@
 			<Tooltip content={preview(chip.content)} placement="top" className="flex shrink-0">
 				<button
 					type="button"
-					class="group inline-flex max-w-[9rem] items-center gap-1 rounded-full border border-gray-200/80 bg-white/80 py-1 pr-2.5 pl-2 text-gray-600 transition hover:border-primary-200 hover:bg-primary-50 hover:text-primary-800 active:scale-[0.97] sm:max-w-[13rem] dark:border-gray-700/80 dark:bg-gray-900/60 dark:text-gray-300 dark:hover:border-primary-500/40 dark:hover:bg-primary-500/10 dark:hover:text-primary-100"
+					class="group inline-flex h-7 max-w-[9rem] items-center gap-1 rounded-full border border-gray-200/80 bg-white/80 pr-2.5 pl-2 text-gray-600 transition hover:border-primary-200 hover:bg-primary-50 hover:text-primary-800 active:scale-[0.97] sm:max-w-[13rem] dark:border-gray-700/80 dark:bg-gray-900/60 dark:text-gray-300 dark:hover:border-primary-500/40 dark:hover:bg-primary-500/10 dark:hover:text-primary-100"
 					on:click={() => dispatch('select', chip)}
 				>
 					<Sparkles
@@ -61,7 +61,7 @@
 			<Tooltip content={$i18n.t('Manage prompts')} placement="top" className="flex shrink-0">
 				<a
 					href="/workspace/prompts"
-					class="inline-flex size-[26px] items-center justify-center rounded-full border border-dashed border-gray-300 text-gray-400 transition hover:border-primary-400 hover:text-primary-600 dark:border-gray-700 dark:hover:border-primary-500/60 dark:hover:text-primary-300"
+					class="inline-flex size-7 items-center justify-center rounded-full border border-dashed border-gray-300 text-gray-500 transition hover:border-primary-400 hover:text-primary-600 dark:border-gray-700 dark:text-gray-400 dark:hover:border-primary-500/60 dark:hover:text-primary-300"
 					aria-label={$i18n.t('Manage prompts')}
 				>
 					<Plus className="size-3" strokeWidth="2.5" />

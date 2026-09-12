@@ -95,6 +95,7 @@
 					>
 						<button
 							class="flex cursor-pointer px-2 py-2 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-850 transition"
+							aria-label={$i18n.t('Chat Menu')}
 							id="chat-context-menu-button"
 						>
 							<div class=" m-auto self-center">

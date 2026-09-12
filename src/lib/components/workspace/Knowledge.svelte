@@ -103,13 +103,10 @@
 	/>
 
 	<div class="space-y-4">
-		<section class="workspace-section space-y-4">
-			<div class="flex flex-col gap-3 lg:flex-row lg:items-center">
-				<div class="workspace-toolbar-summary">
-					<div class="workspace-count-pill">
-						{filteredItems.length} {$i18n.t('Knowledge')}
-					</div>
-				</div>
+		<div class="workspace-toolbar-row">
+			<div class="workspace-count-pill">
+				{filteredItems.length} {$i18n.t('Knowledge')}
+			</div>
 
 				<div class="workspace-toolbar">
 					<div class="workspace-search workspace-toolbar-search">
@@ -179,11 +176,11 @@
 						</button>
 					</div>
 				</div>
-			</div>
-		</section>
+		</div>
 
 		<section
-			class="workspace-section"
+			class="min-w-0"
+			class:space-y-2={viewMode === 'list' && filteredItems.length > 0}
 		class:grid={viewMode === 'grid' && filteredItems.length > 0}
 		class:grid-cols-1={viewMode === 'grid' && filteredItems.length > 0}
 		class:lg:grid-cols-2={viewMode === 'grid' && filteredItems.length > 0}
@@ -307,11 +304,9 @@
 		{/each}
 		</section>
 
-		<section class="workspace-section">
-			<div class=" text-gray-500 text-xs">
-				ⓘ {$i18n.t("Use '#' in the prompt input to load and include your knowledge.")}
-			</div>
-		</section>
+		<p class="px-1 text-xs text-gray-600 dark:text-gray-400">
+			ⓘ {$i18n.t("Use '#' in the prompt input to load and include your knowledge.")}
+		</p>
 	</div>
 {:else}
 	<div class="w-full h-full flex justify-center items-center">

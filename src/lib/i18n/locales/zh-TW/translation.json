@@ -1717,6 +1717,7 @@
 	"Runnable": "可執行",
 	"Manage real SKILL.md packages. Legacy prompt-style skills live in Prompts; tools and MCP connections live in Tool Settings.": "新增 Skill，為聊天提供面向任務的說明、資源和自動化能力。",
 	"Manage SKILL.md packages only. Legacy prompt-style skills live in Prompts; tools and MCP connections live in Tool Settings.": "新增 Skill，為聊天提供面向任務的說明、資源和自動化能力。",
+	"Manage prompts": "管理提示詞",
 	"Add skills to give chats task-specific instructions, resources, and automation.": "新增 Skill，為聊天提供面向任務的說明、資源和自動化能力。",
 	"Reusable prompt templates are available in Prompts and can still be used in chat.": "可重複使用的提示詞範本可在提示詞中管理，聊天中仍可繼續使用。",
 	"Review installed skills, availability, and access settings.": "查看已安裝 Skill、可用狀態和存取設定。",

@@ -81,6 +81,11 @@ from open_webui.routers.anthropic import (
 
 from open_webui.utils.webhook import post_webhook
 from open_webui.utils.chat_image_refs import extract_chat_image_file_id
+from open_webui.utils.chat_image_prompt import (
+    compose_chat_image_prompt,
+    get_preset_system_prompt,
+    resolve_chat_image_model_selection,
+)
 from open_webui.utils.image_generation_options import (
     CHAT_IMAGE_GENERATION_OPTION_KEYS,
     sanitize_chat_image_generation_options,
@@ -4379,6 +4384,14 @@ async def chat_image_generation_handler(
         image_generation_options
     )
     requested_n = _get_chat_image_generation_requested_n(image_generation_options)
+    # A workspace preset on a dedicated image model is "prompt + gpt-image":
+    # its system prompt is the image brief, so it goes into the request. Text
+    # models with the image toggle keep sending the user message only.
+    preset_system_prompt = (
+        get_preset_system_prompt(model)
+        if is_dedicated_image_generation_model(model)
+        else ""
+    )
 
     await __event_emitter__(
         {
@@ -4426,6 +4439,7 @@ async def chat_image_generation_handler(
                     user=user,
                     image_generation_options=image_generation_options,
                     requested_n=requested_n,
+                    preset_system_prompt=preset_system_prompt,
                 )
                 await process_chat_response(
                     request,
@@ -4507,6 +4521,7 @@ async def chat_image_generation_handler(
         user=user,
         image_generation_options=image_generation_options,
         requested_n=requested_n,
+        preset_system_prompt=preset_system_prompt,
     )
 
     return form_data
@@ -4557,6 +4572,7 @@ async def _build_chat_image_generation_local_response(
     user,
     image_generation_options: dict[str, Any],
     requested_n: int,
+    preset_system_prompt: str = "",
 ) -> dict[str, Any]:
     __event_emitter__ = extra_params["__event_emitter__"]
 
@@ -4597,7 +4613,19 @@ async def _build_chat_image_generation_local_response(
     except Exception:
         pass
 
-    prompt = user_message
+    prompt = compose_chat_image_prompt(
+        preset_system_prompt,
+        user_message,
+        (extra_params.get("__metadata__") or {}).get("variables"),
+    )
+    if preset_system_prompt:
+        log.info(
+            "chat_image_generation_prompt user_id=%s preset_prompt_len=%s user_len=%s prompt_len=%s",
+            getattr(user, "id", None),
+            len(preset_system_prompt),
+            len(str(user_message or "")),
+            len(prompt),
+        )
     negative_prompt = ""
 
     system_message_content = ""
@@ -5153,13 +5181,13 @@ async def process_chat_payload(request, form_data, user, metadata, model, tasks=
                 features.get("image_generation_options")
             )
 
-            selected_image_model = str(
-                model.get("model_id")
-                or model.get("original_id")
-                or model.get("id")
-                or form_data.get("model")
-                or ""
-            ).strip()
+            # Presets ("助手") are HaloWebUI-only aliases: send the base image
+            # model upstream, never the preset id (the provider has no such model).
+            selected_image_model, preset_model_ref = (
+                resolve_chat_image_model_selection(
+                    model, fallback_model_id=form_data.get("model")
+                )
+            )
             model_ref = {}
             if isinstance(model, dict):
                 existing_model_ref = (
@@ -5204,12 +5232,8 @@ async def process_chat_payload(request, form_data, user, metadata, model, tasks=
                 if connection_id:
                     model_ref["connection_id"] = connection_id
 
-            legacy_prefix_match = re.match(
-                r"^([0-9a-f]{8})\.(.+)$", selected_image_model, re.IGNORECASE
-            )
-            if legacy_prefix_match:
-                model_ref.setdefault("connection_id", legacy_prefix_match.group(1))
-                selected_image_model = legacy_prefix_match.group(2).strip()
+            for key, value in preset_model_ref.items():
+                model_ref.setdefault(key, value)
 
             if selected_image_model:
                 image_generation_options["model"] = selected_image_model

@@ -427,7 +427,10 @@ class UsersTable:
             from open_webui.models.channels import Channels
             from open_webui.models.folders import Folders
             from open_webui.models.tags import Tags
-            from open_webui.models.image_studio import ImageStudioItems
+            from open_webui.models.image_studio import (
+                ImageStudioItems,
+                ImageStudioMigrations,
+            )
 
             # Remove User from Groups
             Groups.remove_user_from_all_groups(id)
@@ -446,6 +449,7 @@ class UsersTable:
             Folders.delete_folders_by_user_id(id)
             Tags.delete_tags_by_user_id(id)
             ImageStudioItems.delete_items_by_user_id(id)
+            ImageStudioMigrations.delete_by_user_id(id)
 
             with get_db() as db:
                 # Delete User

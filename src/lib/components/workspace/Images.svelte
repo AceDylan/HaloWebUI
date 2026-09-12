@@ -52,7 +52,9 @@
 		clearImageStudioItems,
 		deleteImageStudioItem,
 		getImageStudioItems,
-		upsertImageStudioItems
+		importLegacyImageStudioItems,
+		upsertImageStudioItems,
+		type ImageStudioLegacyImportResult
 	} from '$lib/apis/image-studio';
 	import {
 		IMAGE_STUDIO_HISTORY_LIMIT,
@@ -669,8 +671,11 @@
 	};
 
 	// Uploads whatever an older build left in this browser's localStorage, once.
-	// The marker is per browser on purpose: a second account signing in on the
-	// same device must not inherit the first account's prompts and images.
+	// Two gates: the browser marker below (per browser on purpose: a second
+	// account signing in on the same device must not inherit the first
+	// account's prompts and images) and the server, which accepts one legacy
+	// upload per account and refuses it once the account holds or has deleted
+	// server data. So a browser without a marker cannot bring deleted items back.
 	const migrateLegacyStudioData = async (server: ImageStudioData) => {
 		let marker: ImageStudioMigrationMarker | null = null;
 		try {
@@ -683,21 +688,33 @@
 		if (marker) return;
 
 		const plan = planImageStudioLocalMigration(readLegacyStudioData(), server);
+		let uploaded = 0;
 		if (plan.forms.length > 0) {
+			let result: ImageStudioLegacyImportResult;
 			try {
-				await upsertImageStudioItems(localStorage.token, plan.forms);
+				result = await importLegacyImageStudioItems(localStorage.token, plan.forms);
 			} catch (error) {
 				// No marker is written, so the upload is retried on the next visit.
 				console.warn('Failed to upload legacy image studio data', error);
 				toast.error($i18n.t('Failed to sync to the server'));
 				return;
 			}
-			applyStudioData(plan.merged);
-			toast.success(
-				$i18n.t('Moved {{count}} saved items from this browser to your account', {
-					count: plan.forms.length
-				})
-			);
+			if (result.accepted) {
+				uploaded = result.uploaded;
+				applyStudioData(plan.merged);
+				toast.success(
+					$i18n.t('Moved {{count}} saved items from this browser to your account', {
+						count: uploaded
+					})
+				);
+			} else {
+				// The account is past its one legacy upload; this browser's copy
+				// stays local and is never deleted.
+				console.info(
+					'Skipped uploading legacy image studio data: the account already migrated',
+					result.migration
+				);
+			}
 		}
 
 		try {
@@ -706,7 +723,7 @@
 				serializeImageStudioMigrationMarker({
 					userId: $user?.id ?? '',
 					migratedAt: Date.now(),
-					uploaded: plan.forms.length
+					uploaded
 				})
 			);
 		} catch (error) {

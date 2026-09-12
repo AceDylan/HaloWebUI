@@ -60,3 +60,39 @@ export const clearImageStudioItems = async (
 	}).then(parseJsonResponse<boolean>);
 	return res === true;
 };
+
+export type ImageStudioMigrationRecord = {
+	user_id: string;
+	source: string;
+	uploaded: number;
+	migrated_at: number;
+};
+
+export type ImageStudioLegacyImportResult = {
+	accepted: boolean;
+	uploaded: number;
+	migration: ImageStudioMigrationRecord | null;
+};
+
+/**
+ * Uploads what this browser still holds only in localStorage. The server
+ * accepts this once per account and refuses it (nothing stored) once the
+ * account has server data or deleted items, so a browser without a local
+ * migration marker can never bring deleted templates back.
+ */
+export const importLegacyImageStudioItems = async (
+	token: string,
+	items: ImageStudioItemForm[]
+): Promise<ImageStudioLegacyImportResult> => {
+	const res = await fetch(`${IMAGE_STUDIO_API_BASE_URL}/legacy-migration`, {
+		method: 'POST',
+		headers: headers(token, true),
+		body: JSON.stringify({ items })
+	}).then(parseJsonResponse<Partial<ImageStudioLegacyImportResult> | null>);
+	const uploaded = Number(res?.uploaded);
+	return {
+		accepted: res?.accepted === true,
+		uploaded: Number.isFinite(uploaded) && uploaded > 0 ? Math.floor(uploaded) : 0,
+		migration: res?.migration ?? null
+	};
+};

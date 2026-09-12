@@ -2058,6 +2058,43 @@ ENABLE_TITLE_GENERATION = PersistentConfig(
     os.environ.get("ENABLE_TITLE_GENERATION", "True").lower() == "true",
 )
 
+# Automatic chat folder assignment. Runs as a separate lightweight task-model
+# call on the title-generation cadence; see utils/folder_assignment.py.
+ENABLE_FOLDER_AUTO_ASSIGNMENT = PersistentConfig(
+    "ENABLE_FOLDER_AUTO_ASSIGNMENT",
+    "task.folder_assignment.enable",
+    os.environ.get("ENABLE_FOLDER_AUTO_ASSIGNMENT", "True").lower() == "true",
+)
+
+FOLDER_AUTO_ASSIGNMENT_PROMPT_TEMPLATE = PersistentConfig(
+    "FOLDER_AUTO_ASSIGNMENT_PROMPT_TEMPLATE",
+    "task.folder_assignment.prompt_template",
+    os.environ.get("FOLDER_AUTO_ASSIGNMENT_PROMPT_TEMPLATE", ""),
+)
+
+DEFAULT_FOLDER_AUTO_ASSIGNMENT_PROMPT_TEMPLATE = """### Task:
+Pick the ONE existing folder that best matches the main topic of this chat, or answer null.
+
+### Folders (name: purpose):
+{{FOLDER_OPTIONS}}
+
+### Guidelines:
+- Choose only from the folders listed above; copy the folder name exactly.
+- Judge by the actual subject of the conversation, not by which model or tool answered it.
+- If the chat clearly fits none of the folders, or you are unsure, answer null. Do not invent folders.
+- Prefer the most specific folder whose purpose covers the sustained topic of the chat.
+
+### Output:
+JSON format: { "folder": "exact folder name" } or { "folder": null }
+
+### Chat Title:
+{{CHAT_TITLE}}
+
+### Chat History:
+<chat_history>
+{{CHAT_HISTORY}}
+</chat_history>"""
+
 
 ENABLE_SEARCH_QUERY_GENERATION = PersistentConfig(
     "ENABLE_SEARCH_QUERY_GENERATION",

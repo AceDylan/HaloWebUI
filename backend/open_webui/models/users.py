@@ -352,6 +352,26 @@ class UsersTable:
     def update_user_settings_by_id(self, id: str, updated: dict) -> Optional[UserModel]:
         return self.patch_user_settings_by_id(id, updated)
 
+    def patch_user_info_by_id(self, id: str, patch: dict) -> Optional[UserModel]:
+        """Merge ``patch`` into ``user.info`` under a row lock so concurrent
+        writers (e.g. the /user/info/update endpoint) cannot drop each other's
+        keys."""
+        try:
+            with get_db() as db:
+                user = db.query(User).filter_by(id=id).with_for_update().first()
+                if user is None:
+                    return None
+
+                info = _as_dict(user.info)
+                user.info = {**info, **(patch or {})}
+                user.updated_at = int(time.time())
+                db.commit()
+                db.refresh(user)
+                return UserModel.model_validate(user)
+        except Exception:
+            log.exception("Failed to patch user info by id: %s", id)
+            return None
+
     def patch_user_settings_by_id(
         self,
         id: str,

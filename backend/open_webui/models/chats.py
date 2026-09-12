@@ -27,6 +27,7 @@ log = logging.getLogger(__name__)
 log.setLevel(SRC_LOG_LEVELS["MODELS"])
 
 TITLE_GENERATION_META_KEY = "title_generation"
+FOLDER_ASSIGNMENT_META_KEY = "folder_assignment"
 DEFAULT_CHAT_TITLE = "New Chat"
 
 
@@ -36,6 +37,20 @@ def get_title_generation_metadata(meta: Optional[dict]) -> dict:
 
     title_generation = meta.get(TITLE_GENERATION_META_KEY)
     return title_generation if isinstance(title_generation, dict) else {}
+
+
+def get_folder_assignment_metadata(meta: Optional[dict]) -> dict:
+    """``chat.meta.folder_assignment``: ``{"source": "auto"|"manual", "evaluations": n,
+    "last_user_message_count": n, "last_message_id": str, "folder_id": str|None}``.
+
+    ``manual`` is written by the sidebar move/remove endpoint and freezes the chat
+    for the automatic folder assignment; ``auto`` records what the background
+    task did so later milestones can correct it a bounded number of times."""
+    if not isinstance(meta, dict):
+        return {}
+
+    folder_assignment = meta.get(FOLDER_ASSIGNMENT_META_KEY)
+    return folder_assignment if isinstance(folder_assignment, dict) else {}
 
 
 def can_auto_generate_chat_title(
@@ -1352,16 +1367,88 @@ class ChatTable:
     def update_chat_folder_id_by_id_and_user_id(
         self, id: str, user_id: str, folder_id: Optional[str]
     ) -> Optional[ChatModel]:
+        """Manual move / remove from the sidebar menu.
+
+        Marks the chat as manually placed (``meta.folder_assignment.source ==
+        "manual"``) so the automatic folder assignment never overrides it."""
         try:
             with get_db() as db:
                 chat = db.get(Chat, id)
+                if chat is None or chat.user_id != user_id:
+                    return None
                 chat.folder_id = folder_id
                 chat.updated_at = self._next_user_chat_timestamp(db, chat.user_id)
                 chat.pinned = False
+
+                meta = dict(chat.meta) if isinstance(chat.meta, dict) else {}
+                assignment = dict(get_folder_assignment_metadata(meta))
+                assignment["source"] = "manual"
+                assignment["folder_id"] = folder_id
+                assignment["updated_at"] = int(time.time())
+                meta[FOLDER_ASSIGNMENT_META_KEY] = assignment
+                chat.meta = meta
+                flag_modified(chat, "meta")
+
                 db.commit()
                 db.refresh(chat)
                 return ChatModel.model_validate(chat)
         except Exception:
+            return None
+
+    def update_chat_folder_assignment_by_id_and_user_id(
+        self,
+        id: str,
+        user_id: str,
+        folder_id: Optional[str],
+        *,
+        apply_folder: bool,
+        evaluations: int,
+        last_user_message_count: Optional[int] = None,
+        last_message_id: Optional[str] = None,
+    ) -> Optional[ChatModel]:
+        """Persist one automatic folder evaluation.
+
+        Runs under a row lock and re-reads the marker, so a manual move that
+        landed while the task model was thinking always wins. ``apply_folder``
+        False records the attempt (counts it) without touching ``folder_id``.
+        Returns None when nothing was written."""
+        try:
+            with get_db() as db:
+                query = getattr(db, "query", None)
+                if callable(query):
+                    chat = query(Chat).filter(Chat.id == id).with_for_update().first()
+                else:
+                    chat = db.get(Chat, id)
+                if chat is None or chat.user_id != user_id:
+                    return None
+
+                meta = dict(chat.meta) if isinstance(chat.meta, dict) else {}
+                assignment = dict(get_folder_assignment_metadata(meta))
+                if assignment.get("source") == "manual":
+                    return None
+                if not assignment and chat.folder_id:
+                    # Placed before markers existed: treat as manual, never touch.
+                    return None
+
+                assignment["source"] = "auto"
+                assignment["evaluations"] = evaluations
+                if last_user_message_count is not None:
+                    assignment["last_user_message_count"] = last_user_message_count
+                if last_message_id:
+                    assignment["last_message_id"] = last_message_id
+                assignment["updated_at"] = int(time.time())
+                if apply_folder:
+                    chat.folder_id = folder_id
+                    assignment["folder_id"] = folder_id
+                meta[FOLDER_ASSIGNMENT_META_KEY] = assignment
+                chat.meta = meta
+                flag_modified(chat, "meta")
+
+                db.commit()
+                db.refresh(chat)
+                return ChatModel.model_validate(chat)
+        except Exception:
+            log.exception("update_chat_folder_assignment_by_id_and_user_id: %s", id)
             return None
 
     def count_chats_by_folder_id_and_user_id(self, folder_id: str, user_id: str) -> int:

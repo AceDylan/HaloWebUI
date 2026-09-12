@@ -25,6 +25,7 @@ from open_webui.utils.filter import (
     process_filter_functions,
 )
 from open_webui.utils.task import get_task_model_id, is_dedicated_image_generation_model
+from open_webui.utils.folder_assignment import folder_assignment_template
 from open_webui.utils.model_identity import get_model_selection_id, resolve_model_from_lookup
 
 from open_webui.config import (
@@ -36,6 +37,7 @@ from open_webui.config import (
     DEFAULT_EMOJI_GENERATION_PROMPT_TEMPLATE,
     DEFAULT_MOA_GENERATION_PROMPT_TEMPLATE,
     DEFAULT_FOLLOW_UP_GENERATION_PROMPT_TEMPLATE,
+    DEFAULT_FOLDER_AUTO_ASSIGNMENT_PROMPT_TEMPLATE,
 )
 from open_webui.env import SRC_LOG_LEVELS
 from open_webui.utils.models import get_all_models
@@ -56,6 +58,8 @@ TASK_CONFIG_FIELDS = (
     "TAGS_GENERATION_PROMPT_TEMPLATE",
     "ENABLE_TAGS_GENERATION",
     "ENABLE_TITLE_GENERATION",
+    "ENABLE_FOLDER_AUTO_ASSIGNMENT",
+    "FOLDER_AUTO_ASSIGNMENT_PROMPT_TEMPLATE",
     "ENABLE_SEARCH_QUERY_GENERATION",
     "ENABLE_RETRIEVAL_QUERY_GENERATION",
     "AUTO_WEB_SEARCH_DECISION_USE_MAIN_MODEL",
@@ -110,6 +114,38 @@ def _get_ambiguous_model_aliases(request: Request) -> set:
     return getattr(request.state, "MODELS_AMBIGUOUS", set()) or set()
 
 
+def _external_task_model_guard(
+    request: Request, models: dict, model_id: str, task_model_id: str, form_data: dict
+):
+    """Safety guard for callers (image-only / multi-model discussion) that must
+    NOT dispatch a text completion to a dedicated image model. The caller passes
+    `require_external_task_model=True` to indicate the originating chat model
+    can't serve text — in that case we only proceed if an external task model
+    is configured and is itself a text model. Returns a JSONResponse to send
+    back instead of running the task, or None when the task may proceed."""
+    if not form_data.get("require_external_task_model"):
+        return None
+
+    configured_external = (request.app.state.config.TASK_MODEL_EXTERNAL or "").strip()
+    if not configured_external or task_model_id == model_id:
+        return JSONResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            content={
+                "detail": "External task model required for this session",
+                "skipped": True,
+            },
+        )
+    if is_dedicated_image_generation_model(models.get(task_model_id)):
+        return JSONResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            content={
+                "detail": "External task model resolves to an image model",
+                "skipped": True,
+            },
+        )
+    return None
+
+
 ##################################
 #
 # Task Endpoints
@@ -132,6 +168,8 @@ class TaskConfigForm(BaseModel):
     AUTOCOMPLETE_GENERATION_INPUT_MAX_LENGTH: Optional[int] = None
     TAGS_GENERATION_PROMPT_TEMPLATE: Optional[str] = None
     ENABLE_TAGS_GENERATION: Optional[bool] = None
+    ENABLE_FOLDER_AUTO_ASSIGNMENT: Optional[bool] = None
+    FOLDER_AUTO_ASSIGNMENT_PROMPT_TEMPLATE: Optional[str] = None
     ENABLE_SEARCH_QUERY_GENERATION: Optional[bool] = None
     ENABLE_RETRIEVAL_QUERY_GENERATION: Optional[bool] = None
     AUTO_WEB_SEARCH_DECISION_USE_MAIN_MODEL: Optional[bool] = None
@@ -170,31 +208,9 @@ async def generate_title(
         _get_ambiguous_model_aliases(request),
     )
 
-    # Safety guard for callers (image-only / multi-model discussion) that must NOT
-    # dispatch a text completion to a dedicated image model. The caller passes
-    # `require_external_task_model=True` to indicate the originating chat model
-    # can't serve text — in that case we only proceed if an external task model
-    # is configured and is itself a text model.
-    if form_data.get("require_external_task_model"):
-        configured_external = (
-            request.app.state.config.TASK_MODEL_EXTERNAL or ""
-        ).strip()
-        if not configured_external or task_model_id == model_id:
-            return JSONResponse(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                content={
-                    "detail": "External task model required for this session",
-                    "skipped": True,
-                },
-            )
-        if is_dedicated_image_generation_model(models.get(task_model_id)):
-            return JSONResponse(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                content={
-                    "detail": "External task model resolves to an image model",
-                    "skipped": True,
-                },
-            )
+    guard = _external_task_model_guard(request, models, model_id, task_model_id, form_data)
+    if guard is not None:
+        return guard
 
     log.debug(
         f"generating chat title using model {task_model_id} for user {user.email} "
@@ -239,6 +255,82 @@ async def generate_title(
         "metadata": {
             **(request.state.metadata if hasattr(request.state, "metadata") else {}),
             "task": str(TASKS.TITLE_GENERATION),
+            "task_body": form_data,
+            "chat_id": form_data.get("chat_id", None),
+        },
+    }
+
+    try:
+        return await generate_chat_completion(request, form_data=payload, user=user)
+    except Exception as e:
+        log.error("Exception occurred", exc_info=True)
+        return JSONResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            content={"detail": "An internal error has occurred."},
+        )
+
+
+@router.post("/folder/completions")
+async def generate_folder_assignment(
+    request: Request, form_data: dict, user=Depends(get_verified_user)
+):
+    """Ask the task model which of the caller-supplied folders fits the chat.
+
+    Same model resolution and image-model guard as title generation. The body
+    carries ``folders`` (name + description), the current ``title`` and the
+    ``messages``; the answer is ``{"folder": "<exact name>"}`` or
+    ``{"folder": null}``. This endpoint only produces a suggestion — the
+    background task validates it against the user's real folders before
+    moving anything."""
+    models = await _get_request_models(request, user)
+    model_id = _resolve_task_model_id(request, models, form_data["model"])
+
+    task_model_id = get_task_model_id(
+        model_id,
+        request.app.state.config.TASK_MODEL,
+        request.app.state.config.TASK_MODEL_EXTERNAL,
+        models,
+        _get_ambiguous_model_aliases(request),
+    )
+
+    guard = _external_task_model_guard(request, models, model_id, task_model_id, form_data)
+    if guard is not None:
+        return guard
+
+    log.debug(
+        f"generating folder assignment using model {task_model_id} for user {user.email} "
+    )
+
+    if request.app.state.config.FOLDER_AUTO_ASSIGNMENT_PROMPT_TEMPLATE != "":
+        template = request.app.state.config.FOLDER_AUTO_ASSIGNMENT_PROMPT_TEMPLATE
+    else:
+        template = DEFAULT_FOLDER_AUTO_ASSIGNMENT_PROMPT_TEMPLATE
+
+    folders = form_data.get("folders")
+    candidates = [
+        folder for folder in (folders if isinstance(folders, list) else []) if isinstance(folder, dict)
+    ]
+    content = folder_assignment_template(
+        template,
+        candidates,
+        form_data.get("title"),
+        form_data.get("messages") or [],
+    )
+
+    payload = {
+        "model": task_model_id,
+        "messages": [{"role": "user", "content": content}],
+        "stream": False,
+        **(
+            {"max_tokens": 1000}
+            if models[task_model_id].get("owned_by") == "ollama"
+            else {
+                "max_completion_tokens": 1000,
+            }
+        ),
+        "metadata": {
+            **(request.state.metadata if hasattr(request.state, "metadata") else {}),
+            "task": str(TASKS.FOLDER_ASSIGNMENT),
             "task_body": form_data,
             "chat_id": form_data.get("chat_id", None),
         },

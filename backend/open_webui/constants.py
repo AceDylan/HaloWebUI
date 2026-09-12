@@ -119,3 +119,4 @@ class TASKS(str, Enum):
     FUNCTION_CALLING = "function_calling"
     MOA_RESPONSE_GENERATION = "moa_response_generation"
     FOLLOW_UP_GENERATION = "follow_up_generation"
+    FOLDER_ASSIGNMENT = "folder_assignment"

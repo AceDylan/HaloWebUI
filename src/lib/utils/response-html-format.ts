@@ -42,6 +42,7 @@ export const HALO_RF_LIGHT_THEME: Record<string, string> = {
 	accent: '#f59e0b',
 	'accent-soft': '#fffbeb',
 	success: '#16a34a',
+	danger: '#dc2626',
 	border: '#cbd5e1',
 	'border-subtle': '#e2e8f0',
 	'code-bg': '#0f172a',
@@ -88,6 +89,7 @@ const THEME = {
 	accent: rf('accent'),
 	accentSoft: rf('accent-soft'),
 	success: rf('success'),
+	danger: rf('danger'),
 	border: rf('border'),
 	borderSubtle: rf('border-subtle'),
 	codeBg: rf('code-bg'),
@@ -727,6 +729,53 @@ const groupToolCallBlocks = (blocks: ParsedBlock[]): ParsedBlock[] => {
 const getToolCallLabel = (block: ActivityBlock, index: number) =>
 	block.attributes.name || block.summary || `工具调用 ${index + 1}`;
 
+// "terminal · npm test" instead of "terminal": the call's input as one line.
+const getToolCallPreviewText = (block: ActivityBlock, max = 72) => {
+	const args = parseJsonLike(block.attributes.arguments ?? '');
+	if (args === '' || args === null || args === undefined) return '';
+	let text = '';
+	if (typeof args === 'string') {
+		text = args;
+	} else if (args && typeof args === 'object' && !Array.isArray(args)) {
+		const entries = Object.entries(args as Record<string, unknown>);
+		if (entries.length === 1 && typeof entries[0][1] === 'string') {
+			text = entries[0][1] as string;
+		} else if (entries.length > 0) {
+			text = JSON.stringify(maskSensitiveValue(args));
+		}
+	} else {
+		text = JSON.stringify(args);
+	}
+	return truncatePlainText(text.replace(/\s+/g, ' ').trim(), max);
+};
+
+const getToolCallOutcomeStatus = (block: ActivityBlock): 'success' | 'error' | null => {
+	if (block.attributes.done !== 'true') return null;
+	const result = parseJsonLike(block.attributes.result ?? '');
+	if (!result || typeof result !== 'object' || Array.isArray(result)) return null;
+	const status = String((result as Record<string, unknown>).status ?? '').toLowerCase();
+	if (
+		status === 'error' ||
+		status === 'failed' ||
+		(result as Record<string, unknown>).error === true
+	) {
+		return 'error';
+	}
+	return status === 'success' || status === 'ok' ? 'success' : null;
+};
+
+const getToolCallDurationText = (block: ActivityBlock) => {
+	const result = parseJsonLike(block.attributes.result ?? '');
+	if (!result || typeof result !== 'object' || Array.isArray(result)) return '';
+	const seconds = Number((result as Record<string, unknown>).duration);
+	if (!Number.isFinite(seconds) || seconds < 0) return '';
+	if (seconds < 1) return `${Math.round(seconds * 1000)}ms`;
+	if (seconds < 60) return `${seconds < 10 ? seconds.toFixed(1) : Math.round(seconds)}s`;
+	const minutes = Math.floor(seconds / 60);
+	const rest = Math.round(seconds % 60);
+	return rest > 0 ? `${minutes}m ${rest}s` : `${minutes}m`;
+};
+
 const renderActivityGroupBlock = (block: Extract<ParsedBlock, { type: 'activity-group' }>) => {
 	const total = block.items.length;
 	const allDone = block.items.every((item) => item.attributes.done === 'true');
@@ -736,9 +785,16 @@ const renderActivityGroupBlock = (block: Extract<ParsedBlock, { type: 'activity-
 		56
 	);
 
+	const failedCount = block.items.filter(
+		(item) => getToolCallOutcomeStatus(item) === 'error'
+	).length;
+
 	const rows = block.items
 		.map((item, index) => {
 			const itemDone = item.attributes.done === 'true';
+			const itemFailed = getToolCallOutcomeStatus(item) === 'error';
+			const itemPreview = getToolCallPreviewText(item);
+			const itemDuration = itemDone ? getToolCallDurationText(item) : '';
 			return `<details style="${escapeAttribute(
 				toStyle({
 					background: THEME.surface,
@@ -778,14 +834,38 @@ const renderActivityGroupBlock = (block: Extract<ParsedBlock, { type: 'activity-
 					'text-overflow': 'ellipsis',
 					'white-space': 'nowrap'
 				})
-			)}">${escapeHtml(getToolCallLabel(item, index))}</span><span style="${escapeAttribute(
+			)}">${escapeHtml(getToolCallLabel(item, index))}${
+				itemPreview
+					? `<span style="${escapeAttribute(
+							toStyle({
+								'margin-left': '8px',
+								color: THEME.muted,
+								'font-weight': 500,
+								'font-family': 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
+								'font-size': '11.5px'
+							})
+						)}">${escapeHtml(itemPreview)}</span>`
+					: ''
+			}</span>${
+				itemDuration
+					? `<span style="${escapeAttribute(
+							toStyle({
+								color: THEME.muted,
+								'font-size': '11px',
+								'font-weight': 500,
+								'flex-shrink': 0,
+								'font-variant-numeric': 'tabular-nums'
+							})
+						)}">${escapeHtml(itemDuration)}</span>`
+					: ''
+			}<span style="${escapeAttribute(
 				toStyle({
-					color: itemDone ? THEME.success : THEME.primary,
+					color: itemFailed ? THEME.danger : itemDone ? THEME.success : THEME.primary,
 					'font-size': '11px',
 					'font-weight': 700,
 					'flex-shrink': 0
 				})
-			)}">${itemDone ? '已完成' : '执行中'}</span></summary><div style="${escapeAttribute(
+			)}">${itemFailed ? '失败' : itemDone ? '已完成' : '执行中'}</span></summary><div style="${escapeAttribute(
 				toStyle({ display: 'grid', gap: '10px', padding: '0 12px 12px' })
 			)}">${renderActivityContent(item)}</div></details>`;
 		})

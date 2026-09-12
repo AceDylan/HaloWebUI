@@ -42,6 +42,11 @@
 	import ChevronDown from '../icons/ChevronDown.svelte';
 	import Spinner from './Spinner.svelte';
 	import Markdown from '../chat/Messages/Markdown.svelte';
+	import {
+		formatToolDuration,
+		getToolCallOutcome,
+		getToolCallPreview
+	} from '$lib/utils/tool-call-preview';
 	import Image from './Image.svelte';
 	import ActivityCard from './ActivityCard.svelte';
 	import LightBulb from '../icons/LightBulb.svelte';
@@ -121,6 +126,15 @@
 	$: activityName = typeof attributes?.name === 'string' ? attributes.name : '';
 	$: isActivityBlock = title !== null && ACTIVITY_DETAIL_TYPES.has(activityType);
 	$: activityBusy = isActivityBlock && !activityDone;
+	// A single tool call reads "terminal · npm test · 3.2s", and says when it failed.
+	$: toolPreview =
+		activityType === 'tool_calls' ? getToolCallPreview(decode(attributes?.arguments ?? '')) : '';
+	$: toolOutcome =
+		activityType === 'tool_calls' && activityDone
+			? getToolCallOutcome(decode(attributes?.result ?? ''))
+			: null;
+	$: toolFailed = toolOutcome?.status === 'error';
+	$: toolDurationText = toolOutcome ? formatToolDuration(toolOutcome.duration) : '';
 
 	function formatReasoningTitle(done: boolean, duration: unknown): string {
 		if (done && duration) {
@@ -167,9 +181,9 @@
 		return title ?? '';
 	}
 
-	function getActivityStatus(type: string, done: boolean): string {
+	function getActivityStatus(type: string, done: boolean, failed = false): string {
 		if (done) {
-			return $i18n.t('Completed');
+			return failed ? $i18n.t('Failed') : $i18n.t('Completed');
 		}
 
 		if (type === 'tool_calls') {
@@ -179,8 +193,12 @@
 		return '';
 	}
 
-	function getActivityStatusTone(done: boolean): 'neutral' | 'success' | 'running' | 'warning' {
-		return done ? 'success' : 'running';
+	function getActivityStatusTone(
+		done: boolean,
+		failed = false
+	): 'neutral' | 'success' | 'running' | 'warning' {
+		if (!done) return 'running';
+		return failed ? 'warning' : 'success';
 	}
 
 	$: activityTitle = getActivityTitle(
@@ -189,8 +207,12 @@
 		activityDuration,
 		activityName
 	);
-	$: activityStatus = getActivityStatus(activityType, activityDone);
-	$: activityStatusTone = getActivityStatusTone(activityDone);
+	$: activityStatus = getActivityStatus(activityType, activityDone, toolFailed);
+	$: activityStatusTone = getActivityStatusTone(activityDone, toolFailed);
+	$: activitySubtitle =
+		activityType === 'tool_calls'
+			? [toolPreview, toolDurationText].filter(Boolean).join(' · ')
+			: '';
 </script>
 
 <div
@@ -205,6 +227,7 @@
 		<ActivityCard
 			bind:open
 			title={activityTitle}
+			subtitle={activitySubtitle}
 			status={activityStatus}
 			statusTone={activityStatusTone}
 			busy={activityBusy}
@@ -328,6 +351,11 @@
 							/>
 						{:else}
 							<span>{$i18n.t('Executing')} <strong>{attributes.name}</strong>...</span>
+						{/if}
+						{#if toolPreview}
+							<span class="ml-1.5 font-mono text-xs font-normal text-gray-500 dark:text-gray-400"
+								>{toolPreview}</span
+							>
 						{/if}
 					{:else if attributes?.type === 'error'}
 						{#if attributes?.status || attributes?.message}

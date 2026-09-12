@@ -377,6 +377,10 @@
 		}
 	};
 
+	// Approval requests the backend re-sends until a tab answers: one toast per
+	// request, not one per retry.
+	const notifiedHermesApprovals = new Set();
+
 	const chatEventHandler = async (event, cb) => {
 		const chat = $page.url.pathname.includes(`/c/${event.chat_id}`);
 
@@ -431,6 +435,43 @@
 						unstyled: true
 					});
 				}
+			} else if (type === 'hermes:approval') {
+				// A hermes run in another chat (or in this one while the tab is
+				// hidden) is paused on a command approval. The dialog only shows in
+				// the chat itself, so point at it before the request auto-denies.
+				const requestId = `${data?.request_id ?? ''}`;
+				if (requestId && notifiedHermesApprovals.has(requestId)) {
+					return;
+				}
+				if (requestId) {
+					notifiedHermesApprovals.add(requestId);
+				}
+				const title = $i18n.t('Hermes is waiting for your approval');
+				const detail = `${data?.command || data?.description || ''}`.trim();
+				const body = detail
+					? detail.length > 200
+						? `${detail.slice(0, 199)}…`
+						: detail
+					: $i18n.t('Open the chat to allow or deny the command.');
+
+				if ($isLastActiveTab && ($settings?.notificationEnabled ?? false)) {
+					new Notification(`${title} | ${APP_NAME}`, {
+						body,
+						icon: `${WEBUI_BASE_URL}/static/favicon.png`
+					});
+				}
+
+				toast.custom(NotificationToast, {
+					componentProps: {
+						onClick: () => {
+							goto(`/c/${event.chat_id}`);
+						},
+						content: body,
+						title
+					},
+					duration: 20000,
+					unstyled: true
+				});
 			}
 		} else if (data?.session_id === $socket.id) {
 			if (type === 'execute:python') {

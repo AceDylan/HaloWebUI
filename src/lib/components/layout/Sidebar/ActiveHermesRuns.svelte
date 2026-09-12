@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount, onDestroy, getContext } from 'svelte';
-	import { chatId, hermesUnreadChatIds, mobile, showSidebar } from '$lib/stores';
+	import { chatId, hermesActiveRuns, hermesUnreadChatIds, mobile, showSidebar } from '$lib/stores';
 	import {
 		getHermesActivity,
 		markHermesChatRead,
@@ -37,6 +37,7 @@
 			return;
 		}
 		runs = activity.runs;
+		hermesActiveRuns.set(activity.runs);
 		const unread = new Set(activity.unread);
 		// The chat on screen is read by definition; clear it server-side too.
 		if ($chatId && unread.has($chatId)) {
@@ -47,6 +48,7 @@
 	};
 
 	$: unreadCount = $hermesUnreadChatIds.size;
+	$: approvalCount = runs.filter((run) => run.awaiting_approval).length;
 
 	const elapsed = (startedAt: number) => {
 		const seconds = Math.max(0, Math.floor(now - startedAt));
@@ -78,9 +80,11 @@
 {#if compact}
 	{#if runs.length > 0 || unreadCount > 0}
 		<Tooltip
-			content={runs.length > 0
-				? `${$i18n.t('Running')} · ${runs.length}`
-				: `${$i18n.t('Finished, not yet opened')} · ${unreadCount}`}
+			content={approvalCount > 0
+				? `${$i18n.t('Waiting for your approval')} · ${approvalCount}`
+				: runs.length > 0
+					? `${$i18n.t('Running')} · ${runs.length}`
+					: `${$i18n.t('Finished, not yet opened')} · ${unreadCount}`}
 		>
 			<button
 				class="{buttonClass} relative"
@@ -88,21 +92,29 @@
 				on:click={() => {
 					showSidebar.set(true);
 				}}
-				aria-label={runs.length > 0 ? $i18n.t('Running') : $i18n.t('Finished, not yet opened')}
+				aria-label={approvalCount > 0
+					? $i18n.t('Waiting for your approval')
+					: runs.length > 0
+						? $i18n.t('Running')
+						: $i18n.t('Finished, not yet opened')}
 			>
 				<Bolt
-					className="size-5 {runs.length > 0
-						? 'text-emerald-600 dark:text-emerald-400'
-						: 'text-blue-600 dark:text-blue-400'}"
+					className="size-5 {approvalCount > 0
+						? 'text-amber-600 dark:text-amber-400'
+						: runs.length > 0
+							? 'text-emerald-600 dark:text-emerald-400'
+							: 'text-blue-600 dark:text-blue-400'}"
 					strokeWidth="2"
 				/>
 				<span
-					class="absolute -top-0.5 -right-0.5 flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-2xs font-semibold leading-none text-white {runs.length >
+					class="absolute -top-0.5 -right-0.5 flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-2xs font-semibold leading-none text-white {approvalCount >
 					0
-						? 'bg-emerald-500'
-						: 'bg-blue-500'}"
+						? 'bg-amber-500'
+						: runs.length > 0
+							? 'bg-emerald-500'
+							: 'bg-blue-500'}"
 				>
-					{runs.length > 0 ? runs.length : unreadCount}
+					{approvalCount > 0 ? approvalCount : runs.length > 0 ? runs.length : unreadCount}
 				</span>
 			</button>
 		</Tooltip>
@@ -119,26 +131,46 @@
 						? 'bg-gray-100 dark:bg-gray-900'
 						: ''}"
 					href="/c/{run.chat_id}"
-					title={run.title ?? ''}
+					title={run.awaiting_approval
+						? `${$i18n.t('Waiting for your approval')}${run.approval?.command ? ` · ${run.approval.command}` : ''}`
+						: (run.title ?? '')}
+					data-halo-hermes-run-state={run.awaiting_approval ? 'approval' : 'running'}
 					on:click={() => {
 						if ($mobile) {
 							showSidebar.set(false);
 						}
 					}}
 				>
-					<span class="relative flex h-2 w-2 shrink-0">
-						<span
-							class="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75"
-						></span>
-						<span class="relative inline-flex h-2 w-2 rounded-full bg-emerald-500"></span>
-					</span>
-					<span class="flex-1 truncate">{run.title ?? $i18n.t('New Chat')}</span>
-					{#if run.steers > 0}
-						<span class="shrink-0 text-xs text-gray-400">🧭{run.steers}</span>
+					{#if run.awaiting_approval}
+						<span class="relative flex h-2 w-2 shrink-0">
+							<span
+								class="absolute inline-flex h-full w-full animate-ping rounded-full bg-amber-400 opacity-75"
+							></span>
+							<span class="relative inline-flex h-2 w-2 rounded-full bg-amber-500"></span>
+						</span>
+					{:else}
+						<span class="relative flex h-2 w-2 shrink-0">
+							<span
+								class="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75"
+							></span>
+							<span class="relative inline-flex h-2 w-2 rounded-full bg-emerald-500"></span>
+						</span>
 					{/if}
-					<span class="shrink-0 font-mono text-xs tabular-nums text-gray-500">
-						{elapsed(run.started_at)}
-					</span>
+					<span class="flex-1 truncate">{run.title ?? $i18n.t('New Chat')}</span>
+					{#if run.awaiting_approval}
+						<span
+							class="shrink-0 rounded-full bg-amber-100 px-1.5 py-0.5 text-2xs font-medium text-amber-700 dark:bg-amber-900/40 dark:text-amber-300"
+						>
+							{$i18n.t('Waiting for your approval')}
+						</span>
+					{:else}
+						{#if run.steers > 0}
+							<span class="shrink-0 text-xs text-gray-400">🧭{run.steers}</span>
+						{/if}
+						<span class="shrink-0 font-mono text-xs tabular-nums text-gray-500">
+							{elapsed(run.started_at)}
+						</span>
+					{/if}
 				</a>
 			{/each}
 		</div>

@@ -525,6 +525,7 @@ from open_webui.utils.multi_model_discussion import (
     is_multi_model_discussion_enabled,
 )
 from open_webui.utils.hermes_agent import (
+    HERMES_AGENT_MODEL_IDS,
     is_hermes_agent_model,
     run_hermes_agent,
 )
@@ -2270,6 +2271,9 @@ async def get_app_config(request: Request):
         "name": app.state.WEBUI_NAME,
         "version": VERSION,
         "default_locale": str(DEFAULT_LOCALE),
+        # Upstream ids of the models that run through hermes's /v1/runs, so the
+        # composer knows when the reply on screen is a steerable hermes run.
+        "hermes_agent_model_ids": list(HERMES_AGENT_MODEL_IDS),
         "oauth": {
             "providers": {
                 name: config.get("name", name)

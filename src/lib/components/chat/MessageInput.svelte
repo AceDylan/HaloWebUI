@@ -99,6 +99,11 @@
 	export let onChange: Function = () => {};
 	export let createMessagePair: Function;
 	export let stopResponse: Function;
+	// The reply on screen is a hermes run: Enter/send injects guidance into it
+	// instead of queueing a new turn, and the placeholder says so.
+	export let steerable = false;
+	// That run is paused on a command approval dialog.
+	export let awaitingApproval = false;
 
 	export let autoScroll = false;
 
@@ -249,6 +254,16 @@
 		imageGenerationReferenceFiles.length > 0 && files.length === 0;
 	$: hasSubmittableContent =
 		prompt !== '' || files.length > 0 || hasActiveImageGenerationReference;
+	$: isResponding =
+		(taskIds && taskIds.length > 0) ||
+		(history?.currentId && history.messages?.[history.currentId]?.done != true);
+	$: effectivePlaceholder = awaitingApproval
+		? $i18n.t('Task paused for approval · answer the dialog to continue')
+		: steerable && isResponding
+			? $i18n.t('Task running · what you type is injected as guidance')
+			: placeholder
+				? placeholder
+				: $i18n.t('How can I help you today?');
 	$: hasReferenceImageForImageGeneration =
 		files.some(isImageReferenceFile) ||
 		imageGenerationReferenceFiles.some(isImageReferenceFile) ||
@@ -1329,9 +1344,7 @@
 															navigator.maxTouchPoints > 0 ||
 															navigator.msMaxTouchPoints > 0
 														))}
-												placeholder={placeholder
-													? placeholder
-													: $i18n.t('How can I help you today?')}
+												placeholder={effectivePlaceholder}
 												largeTextAsFile={$settings?.largeTextAsFile ?? false}
 												autocomplete={$config?.features?.enable_autocomplete_generation &&
 													($settings?.promptAutocomplete ?? false)}
@@ -1483,7 +1496,7 @@
 											dir="auto"
 											bind:this={chatInputElement}
 											class="scrollbar-hidden bg-transparent dark:text-gray-100 outline-hidden w-full pt-3 px-1 resize-none"
-											placeholder={placeholder ? placeholder : $i18n.t('How can I help you today?')}
+											placeholder={effectivePlaceholder}
 											bind:value={prompt}
 											on:compositionstart={() => (isComposing = true)}
 											on:compositionend={() => (isComposing = false)}
@@ -1948,8 +1961,63 @@
 											</div>
 
 									<div class="self-end flex space-x-1 mr-1 shrink-0">
-										{#if (taskIds && taskIds.length > 0) || (history.currentId && history.messages[history.currentId]?.done != true)}
-											<div class=" flex items-center">
+										{#if isResponding}
+											<div class=" flex items-center gap-1">
+												{#if hasSubmittableContent}
+													<!-- Send while a reply runs: guidance into a hermes run, else queued
+													     for after the reply. Only Enter could do this before; on a phone
+													     there is no Enter. -->
+													<Tooltip
+														content={steerable
+															? $i18n.t('Steer the running task')
+															: $i18n.t('Queue message')}
+													>
+														<button
+															id="steer-message-button"
+															data-halo-composer-action={steerable ? 'steer' : 'queue'}
+															class="{steerable
+																? 'bg-primary-600 text-white hover:bg-primary-700 dark:bg-primary-500 dark:hover:bg-primary-400'
+																: 'bg-gray-200 text-gray-700 hover:bg-gray-300 dark:bg-gray-700 dark:text-gray-100 dark:hover:bg-gray-600'} transition rounded-full p-[7px] focus-visible:ring-2 focus-visible:ring-primary-500/50"
+															type="button"
+															aria-label={steerable
+																? $i18n.t('Steer the running task')
+																: $i18n.t('Queue message')}
+															on:click={() => {
+																dispatch('submit', prompt);
+															}}
+														>
+															{#if steerable}
+																<svg
+																	xmlns="http://www.w3.org/2000/svg"
+																	viewBox="0 0 24 24"
+																	fill="none"
+																	stroke="currentColor"
+																	stroke-width="2"
+																	class="size-5"
+																>
+																	<path
+																		stroke-linecap="round"
+																		stroke-linejoin="round"
+																		d="M6 12 3.269 3.125A59.769 59.769 0 0 1 21.485 12 59.768 59.768 0 0 1 3.27 20.875L5.999 12Zm0 0h7.5"
+																	/>
+																</svg>
+															{:else}
+																<svg
+																	xmlns="http://www.w3.org/2000/svg"
+																	viewBox="0 0 16 16"
+																	fill="currentColor"
+																	class="size-5"
+																>
+																	<path
+																		fill-rule="evenodd"
+																		d="M8 14a.75.75 0 0 1-.75-.75V4.56L4.03 7.78a.75.75 0 0 1-1.06-1.06l4.5-4.5a.75.75 0 0 1 1.06 0l4.5 4.5a.75.75 0 0 1-1.06 1.06L8.75 4.56v8.69A.75.75 0 0 1 8 14Z"
+																		clip-rule="evenodd"
+																	/>
+																</svg>
+															{/if}
+														</button>
+													</Tooltip>
+												{/if}
 												<Tooltip content={$i18n.t('Stop')}>
 													<button
 														class="bg-white hover:bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-white dark:hover:bg-gray-800 transition rounded-full p-[7px]"

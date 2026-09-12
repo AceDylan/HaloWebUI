@@ -1,5 +1,12 @@
 import { WEBUI_API_BASE_URL } from '$lib/constants';
 
+export type HermesActiveRunApproval = {
+	request_id?: string;
+	command?: string;
+	description?: string;
+	since?: number;
+};
+
 export type HermesActiveRun = {
 	chat_id: string;
 	message_id: string;
@@ -7,6 +14,9 @@ export type HermesActiveRun = {
 	started_at: number;
 	steers: number;
 	title: string | null;
+	/** The run is paused on a command approval nobody has answered yet. */
+	awaiting_approval?: boolean;
+	approval?: HermesActiveRunApproval | null;
 };
 
 const jsonHeaders = (token: string) => ({

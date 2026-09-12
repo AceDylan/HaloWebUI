@@ -26,6 +26,7 @@
 		chatListRefreshTarget,
 		chats,
 		config,
+		hermesActiveRuns,
 		type Model,
 		models,
 		tags as allTags,
@@ -146,6 +147,8 @@
 	import { getTools } from '$lib/apis/tools';
 	import { getSkills } from '$lib/apis/skills';
 	import { steerHermesRun } from '$lib/apis/hermes';
+	import { isHermesAgentModelId, type HermesApprovalRequest } from '$lib/utils/hermes';
+	import HermesApprovalDialog from './HermesApprovalDialog.svelte';
 	import { ensureModels } from '$lib/services/models';
 
 	import Banner from '../common/Banner.svelte';
@@ -510,6 +513,12 @@
 
 	let navbarElement;
 
+	// hermes command approval: the run is paused until `hermesApprovalCallback`
+	// answers the socket call with a choice (once / session / always / deny).
+	let showHermesApproval = false;
+	let hermesApprovalRequest: HermesApprovalRequest | null = null;
+	let hermesApprovalCallback: ((choice: string) => void) | null = null;
+
 	let showEventConfirmation = false;
 	let eventConfirmationTitle = '';
 	let eventConfirmationMessage = '';
@@ -597,6 +606,25 @@
 		const lookup = buildModelIdentityLookup($models);
 		modelsMap = lookup.byId;
 	}
+
+	// The reply on screen is a hermes run still executing: the composer sends
+	// text as guidance into it (steer) instead of queueing a new turn.
+	$: hermesRunActive = (() => {
+		const current = history?.currentId ? history.messages?.[history.currentId] : null;
+		if (!current || current.role !== 'assistant' || current.done) {
+			return false;
+		}
+		return isHermesAgentModelId(
+			current.model ?? selectedModels?.[0],
+			$config?.hermes_agent_model_ids
+		);
+	})();
+	// The dialog on screen is the freshest signal; the sidebar poll (10s) covers
+	// a request that arrived while this chat was not open.
+	$: hermesRunAwaitingApproval =
+		hermesRunActive &&
+		(showHermesApproval ||
+			$hermesActiveRuns.some((run) => run.chat_id === $chatId && run.awaiting_approval));
 	const getModelById = (id: string): Model | undefined => modelsMap.get(id);
 	const getCanonicalModelId = (id: string): string =>
 		resolveModelSelectionId($models, id, { preserveAmbiguous: true });
@@ -2879,6 +2907,21 @@
 
 					eventConfirmationTitle = data.title;
 					eventConfirmationMessage = data.message;
+				} else if (type === 'hermes:approval') {
+					// The backend re-asks every tab until one answers, so the same
+					// request can arrive again: keep the dialog, refresh the callback.
+					hermesApprovalCallback = cb;
+					hermesApprovalRequest = data;
+					showHermesApproval = true;
+					shouldCommitMessage = false;
+				} else if (type === 'hermes:approval:resolved') {
+					// Answered from another tab (or timed out server-side).
+					if (hermesApprovalRequest?.request_id === data?.request_id) {
+						showHermesApproval = false;
+						hermesApprovalRequest = null;
+						hermesApprovalCallback = null;
+					}
+					shouldCommitMessage = false;
 				} else if (type === 'execute') {
 					eventCallback = cb;
 
@@ -5004,6 +5047,7 @@
 				if (steered?.accepted) {
 					prompt = '';
 					files = structuredClone(failedFiles);
+					toast.success($i18n.t('Guidance sent to the running task'));
 					return;
 				}
 			}
@@ -6398,6 +6442,19 @@
 
 <audio id="audioElement" src="" style="display: none;" />
 
+<HermesApprovalDialog
+	bind:show={showHermesApproval}
+	request={hermesApprovalRequest}
+	on:choose={(e) => {
+		const answer = hermesApprovalCallback;
+		hermesApprovalCallback = null;
+		hermesApprovalRequest = null;
+		if (answer) {
+			answer(e.detail);
+		}
+	}}
+/>
+
 <EventConfirmDialog
 	bind:show={showEventConfirmation}
 	title={eventConfirmationTitle}
@@ -6545,6 +6602,8 @@
 								transparentBackground={$settings?.backgroundImageUrl ?? false}
 								{stopResponse}
 								{createMessagePair}
+								steerable={hermesRunActive}
+								awaitingApproval={hermesRunAwaitingApproval}
 								onChange={handleMessageInputChange}
 								on:upload={async (e) => {
 									const { type, data } = e.detail;

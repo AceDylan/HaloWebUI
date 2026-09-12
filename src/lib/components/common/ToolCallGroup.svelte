@@ -13,6 +13,11 @@
 	import Markdown from '../chat/Messages/Markdown.svelte';
 	import Image from './Image.svelte';
 	import GlobeAlt from '../icons/GlobeAlt.svelte';
+	import {
+		formatToolDuration,
+		getToolCallOutcome,
+		getToolCallPreview
+	} from '$lib/utils/tool-call-preview';
 
 	export let id: string = '';
 	export let tokens: any[] = [];
@@ -20,6 +25,16 @@
 	$: totalCount = tokens.length;
 	$: doneCount = tokens.filter((t) => t.attributes?.done === 'true').length;
 	$: someExecuting = doneCount < totalCount;
+	// What the agent is doing right now, readable without expanding the card.
+	$: runningToken = tokens.find((t) => t.attributes?.done !== 'true');
+	$: runningPreview = runningToken
+		? getToolCallPreview(runningToken.attributes?.arguments ?? '', 72)
+		: '';
+	$: failedCount = tokens.filter(
+		(t) =>
+			t.attributes?.done === 'true' &&
+			getToolCallOutcome(t.attributes?.result ?? '').status === 'error'
+	).length;
 
 	let expanded = false;
 	let selectedIdx: number | null = null;
@@ -157,9 +172,14 @@
 					{$i18n.t('Called {{COUNT}} tools', { COUNT: totalCount })}
 				{/if}
 			</div>
-			{#if someExecuting && doneCount > 0}
-				<div class="text-2xs leading-4 text-gray-400 dark:text-gray-500 tabular-nums">
-					{doneCount}/{totalCount}
+			{#if someExecuting && runningToken}
+				<div
+					class="line-clamp-1 text-2xs leading-4 text-gray-400 dark:text-gray-500"
+					data-halo-tool-running
+				>
+					{#if doneCount > 0}<span class="tabular-nums">{doneCount}/{totalCount} · </span>{/if}<span
+						class="font-medium text-gray-500 dark:text-gray-400">{runningToken.attributes?.name ?? ''}</span
+					>{#if runningPreview}<span class="font-mono"> · {runningPreview}</span>{/if}
 				</div>
 			{/if}
 		</div>
@@ -168,15 +188,23 @@
 			<span
 				class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-2xs font-medium ring-1 {someExecuting
 					? 'bg-primary-50 text-primary-600 ring-primary-200/70 dark:bg-primary-900/20 dark:text-primary-300 dark:ring-primary-800/50'
-					: 'bg-green-50 text-green-600 ring-green-200/70 dark:bg-green-900/20 dark:text-green-400 dark:ring-green-800/60'}"
+					: failedCount > 0
+						? 'bg-amber-50 text-amber-700 ring-amber-200/70 dark:bg-amber-900/20 dark:text-amber-300 dark:ring-amber-800/60'
+						: 'bg-green-50 text-green-600 ring-green-200/70 dark:bg-green-900/20 dark:text-green-400 dark:ring-green-800/60'}"
 			>
 				{#if someExecuting}
 					<Spinner className="size-3" />
+				{:else if failedCount > 0}
+					<span class="size-1.5 rounded-full bg-amber-500" />
 				{:else}
 					<span class="size-1.5 rounded-full bg-green-500" />
 				{/if}
 				<span class="whitespace-nowrap">
-					{someExecuting ? $i18n.t('Executing') : $i18n.t('Completed')}
+					{someExecuting
+						? $i18n.t('Executing')
+						: failedCount > 0
+							? $i18n.t('{{COUNT}} failed', { COUNT: failedCount })
+							: $i18n.t('Completed')}
 				</span>
 			</span>
 
@@ -199,29 +227,56 @@
 	<!-- Expanded: chip grid + detail panel -->
 	{#if expanded}
 		<div class="mt-2 px-1 pb-1" transition:slide={{ duration: 200, easing: quintOut }}>
-			<!-- Chip flow layout -->
-			<div class="flex flex-wrap gap-1.5">
+			<!-- One row per call: what ran, on what, how long, and whether it failed.
+			     Chips with the tool name alone said nothing about twenty "terminal" calls. -->
+			<div class="flex flex-col gap-px" data-halo-tool-rows>
 				{#each tokens as toolToken, toolIdx (toolToken.attributes?.id ?? toolIdx)}
 					{@const attrs = toolToken.attributes}
 					{@const isDone = attrs?.done === 'true'}
 					{@const isSelected = selectedIdx === toolIdx}
+					{@const preview = getToolCallPreview(attrs?.arguments ?? '')}
+					{@const outcome = isDone ? getToolCallOutcome(attrs?.result ?? '') : null}
+					{@const failed = outcome?.status === 'error'}
 
 					<button
-						class="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs
-							transition-all duration-150 outline-none
+						type="button"
+						class="flex w-full min-w-0 items-center gap-2 rounded-lg px-2 py-1 text-left text-xs
+							transition-colors duration-150 outline-none
 							{isSelected
-							? 'ring-1.5 ring-primary-400/60 dark:ring-primary-500/40 bg-primary-50/60 dark:bg-primary-900/20 text-primary-700 dark:text-primary-300'
+							? 'bg-primary-50/70 text-primary-700 ring-1 ring-primary-300/60 dark:bg-primary-900/20 dark:text-primary-300 dark:ring-primary-600/40'
 							: isDone
-								? 'bg-gray-50 dark:bg-gray-800/60 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700/60'
-								: 'bg-gray-50 dark:bg-gray-800/60 text-gray-400 dark:text-gray-500'}"
+								? 'text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800/60'
+								: 'text-gray-400 dark:text-gray-500'}"
+						aria-pressed={isSelected}
+						data-halo-tool-row={failed ? 'failed' : isDone ? 'done' : 'running'}
 						on:click={() => selectTool(toolIdx)}
 					>
-						{#if isDone}
-							<span class="size-1.5 rounded-full bg-green-500 shrink-0" />
+						{#if !isDone}
+							<Spinner className="size-3 shrink-0" />
+						{:else if failed}
+							<span class="size-1.5 shrink-0 rounded-full bg-red-500" />
 						{:else}
-							<Spinner className="size-3" />
+							<span class="size-1.5 shrink-0 rounded-full bg-green-500" />
 						{/if}
-						<span class={!isDone ? 'shimmer' : ''}>{attrs?.name ?? 'Unknown'}</span>
+						<span class="shrink-0 font-medium {!isDone ? 'shimmer' : ''}">{attrs?.name ?? 'Unknown'}</span>
+						{#if preview}
+							<span
+								class="min-w-0 flex-1 truncate font-mono text-2xs text-gray-500 dark:text-gray-400"
+								title={preview}>{preview}</span
+							>
+						{:else}
+							<span class="flex-1"></span>
+						{/if}
+						{#if failed}
+							<span class="shrink-0 text-2xs font-medium text-red-600 dark:text-red-400">
+								{$i18n.t('Failed')}
+							</span>
+						{/if}
+						{#if outcome && outcome.duration !== null}
+							<span class="shrink-0 tabular-nums text-2xs text-gray-400 dark:text-gray-500">
+								{formatToolDuration(outcome.duration)}
+							</span>
+						{/if}
 					</button>
 				{/each}
 			</div>

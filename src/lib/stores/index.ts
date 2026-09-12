@@ -74,6 +74,25 @@ export const requestNewChat = (options: Omit<NewChatRequest, 'id'> = {}) => {
 export const activeChatIds: Writable<Set<string>> = writable(new Set());
 // Chats whose hermes run finished and has not been opened since (sidebar dot)
 export const hermesUnreadChatIds: Writable<Set<string>> = writable(new Set());
+// The signed-in user's hermes runs executing right now (sidebar poll); the
+// composer reads it to know a reply is steerable or blocked on an approval.
+export const hermesActiveRuns: Writable<
+	{
+		chat_id: string;
+		message_id: string;
+		run_id: string;
+		started_at: number;
+		steers: number;
+		title: string | null;
+		awaiting_approval?: boolean;
+		approval?: {
+			request_id?: string;
+			command?: string;
+			description?: string;
+			since?: number;
+		} | null;
+	}[]
+> = writable([]);
 
 export const channels = writable([]);
 export const chats = writable(null);
@@ -378,6 +397,7 @@ type Config = {
 	default_locale: string;
 	default_models: string;
 	default_prompt_suggestions: PromptSuggestion[];
+	hermes_agent_model_ids?: string[];
 	features: {
 		auth: boolean;
 		auth_trusted_header: boolean;

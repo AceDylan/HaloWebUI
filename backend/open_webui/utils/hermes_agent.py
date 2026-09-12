@@ -6,9 +6,11 @@ Routes chats for configured model IDs through hermes's /v1/runs API (instead of
 
 - tool activity streams into the chat as native <details type="tool_calls">
   blocks (rendered by the existing frontend, no frontend changes needed);
-- command approval requests pop a native confirmation dialog in the web UI
-  (socket "confirmation" event) and the user's choice is posted back to
-  hermes via POST /v1/runs/{run_id}/approval.
+- command approval requests pop the hermes approval dialog in every live tab
+  of the user (socket "hermes:approval" call, answered with once / session /
+  always / deny) and the choice is posted back to hermes via
+  POST /v1/runs/{run_id}/approval; with no tab connected the request is pushed
+  to the user's notification webhook.
 
 Configuration (environment variables):
 
@@ -33,13 +35,20 @@ from urllib.parse import urlparse, urlunparse
 
 import aiohttp
 
-from open_webui.env import AIOHTTP_CLIENT_SESSION_SSL, SRC_LOG_LEVELS
+from open_webui.env import (
+    AIOHTTP_CLIENT_SESSION_SSL,
+    SRC_LOG_LEVELS,
+    WEBSOCKET_EVENT_CALLER_TIMEOUT,
+)
 from open_webui.models.chats import Chats
 from open_webui.models.users import Users
 from open_webui.socket.main import (
+    SESSION_POOL,
+    USER_POOL,
     get_active_status_by_user_id,
     get_event_call,
     get_event_emitter,
+    sio,
 )
 from open_webui.tasks import create_task
 from open_webui.utils.chat_image_refs import materialize_openai_image_message_refs
@@ -98,6 +107,80 @@ WEBHOOK_CONTENT_MAX_CHARS = 1200
 # Longest guidance accepted mid-run.
 STEER_TEXT_MAX_CHARS = 4000
 
+# Choices hermes accepts on POST /v1/runs/{run_id}/approval, in the order the
+# dialog lists them. "session" scopes the grant to the hermes session, which is
+# this chat (session_id = chat_id), so it reads as "allow for this chat".
+APPROVAL_CHOICES = ("once", "session", "always", "deny")
+APPROVAL_EVENT_TYPE = "hermes:approval"
+APPROVAL_RESOLVED_EVENT_TYPE = "hermes:approval:resolved"
+APPROVAL_TITLE = "Hermes 请求执行命令"
+# Pause between rounds of asking the browser: no tab connected, or every
+# connected tab let the socket call time out (none of them shows this chat).
+APPROVAL_RETRY_DELAY_SECONDS = 2
+
+
+def _approval_choices(event) -> list[str]:
+    """The choices to offer for one approval request: what hermes listed,
+    in dialog order, always including "once" and "deny"."""
+    offered = event.get("choices") if isinstance(event, dict) else None
+    if not isinstance(offered, (list, tuple, set)):
+        offered = []
+    offered = {str(choice).strip().lower() for choice in offered}
+    choices = [choice for choice in APPROVAL_CHOICES if choice in offered]
+    if "once" not in choices:
+        choices.insert(0, "once")
+    if "deny" not in choices:
+        choices.append("deny")
+    return choices
+
+
+def _normalize_approval_choice(result, choices) -> str:
+    """Map what the browser answered to a choice hermes accepts.
+
+    The dialog answers with the choice string; a bare boolean (the generic
+    confirmation dialog of an older frontend) means once/deny. Anything else
+    denies: never widen a grant on malformed input."""
+    if isinstance(result, dict):
+        result = result.get("choice")
+    if isinstance(result, bool):
+        return "once" if result else "deny"
+    if isinstance(result, str):
+        value = result.strip().lower()
+        if value in choices:
+            return value
+    return "deny"
+
+
+def _approval_target_sids(
+    user_id: str, preferred_sid=None, *, session_pool=None, user_pool=None
+) -> list[str]:
+    """Socket sessions to show an approval dialog in: the tab that sent the
+    message first, then the user's other live tabs, newest first.
+
+    The original tab is gone after a reload or a navigation away and back;
+    asking only it would let every approval time out into a deny."""
+    session_pool = SESSION_POOL if session_pool is None else session_pool
+    user_pool = USER_POOL if user_pool is None else user_pool
+    sids: list[str] = []
+    if preferred_sid and preferred_sid in session_pool:
+        sids.append(preferred_sid)
+    for sid in reversed(list(user_pool.get(user_id, []) or [])):
+        if sid and sid not in sids and sid in session_pool:
+            sids.append(sid)
+    return sids
+
+
+def _describe_run_error(error: Exception, base_url: str) -> str:
+    """The error text shown in the chat for a failed run, in the user's terms."""
+    if isinstance(error, (asyncio.TimeoutError, TimeoutError)):
+        return f"等待 Hermes 网关响应超时 ({base_url})，请稍后重试"
+    if isinstance(error, (aiohttp.ClientConnectionError, ConnectionRefusedError)):
+        return (
+            f"无法连接 Hermes 网关 ({base_url})，请确认 hermes gateway 正在运行: "
+            f"{error}"
+        )
+    return f"Hermes agent error: {error}"
+
 
 class HermesSteerError(Exception):
     """A steer that cannot be honoured; carries the HTTP status to answer with."""
@@ -130,6 +213,7 @@ def list_active_runs(user_id: str) -> list:
     for chat_id, entry in list(_ACTIVE_RUNS.items()):
         if entry.get("user_id") != user_id:
             continue
+        approval = entry.get("approval")
         runs.append(
             {
                 "chat_id": chat_id,
@@ -138,6 +222,19 @@ def list_active_runs(user_id: str) -> list:
                 "started_at": entry.get("started_at"),
                 "steers": entry.get("steers", 0),
                 "title": Chats.get_chat_title_by_id(chat_id),
+                # A run blocked on a command approval: the sidebar shows it so
+                # the person finds the dialog from any other chat.
+                "awaiting_approval": bool(approval),
+                "approval": (
+                    {
+                        "request_id": approval.get("request_id"),
+                        "command": approval.get("command", ""),
+                        "description": approval.get("description", ""),
+                        "since": approval.get("since"),
+                    }
+                    if approval
+                    else None
+                ),
             }
         )
     runs.sort(key=lambda run: run["started_at"] or 0)
@@ -399,6 +496,45 @@ async def _post_completion_webhook(request, user, metadata, title, content):
         log.warning(f"hermes completion webhook failed: {e}")
 
 
+async def _post_approval_webhook(request, user, metadata, approval: dict):
+    """Push a pending command approval to the user's notification webhook.
+
+    Approvals auto-deny after HERMES_AGENT_APPROVAL_TIMEOUT. With no tab
+    connected nothing else tells the person a run is waiting on them, and
+    hermes runs are exactly the ones they walk away from."""
+    try:
+        if get_active_status_by_user_id(user.id):
+            return
+        webhook_url = Users.get_user_webhook_url_by_id(user.id)
+        if not webhook_url:
+            return
+        title = Chats.get_chat_title_by_id(metadata["chat_id"]) or ""
+        chat_url = f"{request.app.state.config.WEBUI_URL}/c/{metadata['chat_id']}"
+        lines = [f"⏳ {APPROVAL_TITLE}", f"{title} - {chat_url}" if title else chat_url, ""]
+        if approval.get("description"):
+            lines.append(str(approval["description"]))
+        if approval.get("command"):
+            lines.append(f"命令: {approval['command']}")
+        lines.append(f"{int(approval.get('timeout') or 0)} 秒内未处理将自动拒绝")
+        message = "\n".join(lines)
+        if len(message) > WEBHOOK_CONTENT_MAX_CHARS:
+            message = message[:WEBHOOK_CONTENT_MAX_CHARS].rstrip() + "\u2026"
+        await asyncio.to_thread(
+            post_webhook,
+            request.app.state.WEBUI_NAME,
+            webhook_url,
+            message,
+            {
+                "action": "approval",
+                "message": message,
+                "title": title,
+                "url": chat_url,
+            },
+        )
+    except Exception as e:
+        log.warning(f"hermes approval webhook failed: {e}")
+
+
 def _build_run_payload(form_data, metadata, upstream_model_id):
     messages = form_data.get("messages") or []
 
@@ -640,39 +776,98 @@ async def run_hermes_agent(request, form_data, user, metadata, model, events, ta
         except Exception:
             pass
 
+    async def _ask_user_sessions(approval_data: dict, deadline: float):
+        """Show the approval dialog in every live tab of the user; the first
+        answer wins. Returns None when no tab answered this round (no tab at
+        all, or none of them has this chat open so the call timed out)."""
+        sids = _approval_target_sids(user.id, metadata.get("session_id"))
+        if not sids:
+            await asyncio.sleep(APPROVAL_RETRY_DELAY_SECONDS)
+            return None
+        payload = {
+            "chat_id": metadata["chat_id"],
+            "message_id": metadata["message_id"],
+            "data": {"type": APPROVAL_EVENT_TYPE, "data": approval_data},
+        }
+        timeout = max(1, min(WEBSOCKET_EVENT_CALLER_TIMEOUT, int(deadline - time.time())))
+        calls = [
+            asyncio.create_task(sio.call("chat-events", payload, to=sid, timeout=timeout))
+            for sid in sids
+        ]
+        answer = None
+        try:
+            for finished in asyncio.as_completed(calls):
+                try:
+                    result = await finished
+                except Exception:
+                    continue
+                if result is not None:
+                    answer = result
+                    break
+        finally:
+            for call in calls:
+                if not call.done():
+                    call.cancel()
+        if answer is None:
+            await asyncio.sleep(APPROVAL_RETRY_DELAY_SECONDS)
+        return answer
+
     async def _request_approval(session, run_id, event):
-        command = event.get("command") or ""
-        description = event.get("description") or ""
-        title = "Hermes 请求执行命令"
-        message = "\n".join(
-            part
-            for part in [
-                description,
-                f"命令: {command}" if command else "",
-                "确认允许执行吗?(取消 = 拒绝)",
-            ]
-            if part
+        command = str(event.get("command") or "")
+        description = str(event.get("description") or "")
+        choices = _approval_choices(event)
+        timeout_seconds = max(HERMES_AGENT_APPROVAL_TIMEOUT, 30)
+        requested_at = time.time()
+        deadline = requested_at + timeout_seconds
+        request_id = str(
+            event.get("request_id") or f"{run_id}:{int(requested_at * 1000)}"
         )
+        approval_data = {
+            "request_id": request_id,
+            "run_id": run_id,
+            "chat_id": metadata["chat_id"],
+            "title": APPROVAL_TITLE,
+            "description": description,
+            "command": command,
+            "choices": choices,
+            "timeout": timeout_seconds,
+            "requested_at": requested_at,
+        }
+
+        entry = _ACTIVE_RUNS.get(metadata["chat_id"])
+        if entry is not None and entry.get("run_id") == run_id:
+            entry["approval"] = {
+                "request_id": request_id,
+                "command": command,
+                "description": description,
+                "since": requested_at,
+            }
 
         await _emit_status("等待你批准命令审批...", False, action="hermes_approval")
+        await _post_approval_webhook(request, user, metadata, approval_data)
 
         choice = "deny"
-        deadline = time.time() + max(HERMES_AGENT_APPROVAL_TIMEOUT, 30)
-        while time.time() < deadline:
-            try:
-                result = await event_caller(
-                    {
-                        "type": "confirmation",
-                        "data": {"title": title, "message": message},
-                    }
-                )
-            except Exception:
-                # Socket call timed out (WEBSOCKET_EVENT_CALLER_TIMEOUT);
-                # re-show the dialog until the overall deadline passes.
-                await asyncio.sleep(2)
-                continue
-            choice = "once" if result else "deny"
-            break
+        try:
+            while time.time() < deadline:
+                result = await _ask_user_sessions(approval_data, deadline)
+                if result is None:
+                    continue
+                choice = _normalize_approval_choice(result, choices)
+                break
+        finally:
+            if entry is not None and entry.get("run_id") == run_id:
+                entry.pop("approval", None)
+
+        # Close the dialog in every other tab that still shows it.
+        try:
+            await event_emitter(
+                {
+                    "type": APPROVAL_RESOLVED_EVENT_TYPE,
+                    "data": {"request_id": request_id, "choice": choice},
+                }
+            )
+        except Exception:
+            pass
 
         try:
             async with session.post(
@@ -690,7 +885,11 @@ async def run_hermes_agent(request, form_data, user, metadata, model, events, ta
             log.warning(f"hermes approval post error: {e}")
 
         await _emit_status(
-            "命令已批准，继续执行..." if choice == "once" else "命令已拒绝",
+            {
+                "once": "命令已批准，继续执行...",
+                "session": "命令已批准（本对话内不再询问），继续执行...",
+                "always": "命令已批准（始终允许），继续执行...",
+            }.get(choice, "命令已拒绝"),
             True,
             action="hermes_approval",
         )
@@ -995,7 +1194,7 @@ async def run_hermes_agent(request, form_data, user, metadata, model, events, ta
             raise
         except Exception as e:
             log.exception("hermes agent run failed")
-            await _finalize(error=f"Hermes agent error: {e}")
+            await _finalize(error=_describe_run_error(e, base_url))
         finally:
             _unregister_run(metadata["chat_id"], run_id)
 

@@ -1103,15 +1103,27 @@
 					: ''}
 				data-halo-inline-html-preview="true"
 			>
-				<iframe
-					bind:this={inlineHtmlPreviewFrame}
-					title={$i18n.t('HTML Preview')}
-					srcdoc={inlineHtmlPreviewDocument ?? ''}
-					sandbox={HTML_PREVIEW_SANDBOX}
-					referrerpolicy={HTML_PREVIEW_REFERRER_POLICY}
-					class="block w-full overflow-hidden rounded-lg border-0 bg-white"
-					style={`height: ${inlineHtmlPreviewHeight}px;`}
-				></iframe>
+				<!--
+					Each document gets its own iframe element. Swapping `srcdoc` on an
+					already-inserted frame while its initial (empty) navigation is still
+					in flight makes Chromium drop the new document - the frame stays
+					blank and never reports a height. That is exactly what happens when
+					a chat is re-opened: the same-origin images are already cached, so
+					the inlined document arrives within the same task the frame was
+					inserted. A fresh element whose first navigation is the final
+					document always loads.
+				-->
+				{#key inlineHtmlPreviewDocument}
+					<iframe
+						bind:this={inlineHtmlPreviewFrame}
+						title={$i18n.t('HTML Preview')}
+						srcdoc={inlineHtmlPreviewDocument ?? ''}
+						sandbox={HTML_PREVIEW_SANDBOX}
+						referrerpolicy={HTML_PREVIEW_REFERRER_POLICY}
+						class="block w-full overflow-hidden rounded-lg border-0 bg-white"
+						style={`height: ${inlineHtmlPreviewHeight}px;`}
+					></iframe>
+				{/key}
 			</div>
 			{#if inlineHtmlArtifactMedia && inlineHtmlArtifactMedia.after.length > 0}
 				<div class="mt-3">

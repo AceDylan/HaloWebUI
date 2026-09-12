@@ -295,7 +295,7 @@
 								>
 							</Tooltip>
 							<span
-								class="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-amber-50 text-amber-600 dark:bg-amber-900/25 dark:text-amber-400 leading-none"
+								class="inline-flex items-center px-1.5 py-0.5 rounded-full text-2xs font-semibold bg-amber-50 text-amber-600 dark:bg-amber-900/25 dark:text-amber-400 leading-none"
 							>
 								测试版
 							</span>

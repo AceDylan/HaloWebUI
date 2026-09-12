@@ -803,7 +803,7 @@
 			{#if showSetDefaultAction}
 				<div class="px-5 pb-1.5">
 					<div
-						class="inline-flex max-w-full items-center gap-1.5 rounded-md border border-gray-100/80 bg-gray-50/70 px-2 py-1 text-[11px] text-gray-500 dark:border-gray-800/80 dark:bg-gray-900/40 dark:text-gray-400"
+						class="inline-flex max-w-full items-center gap-1.5 rounded-md border border-gray-100/80 bg-gray-50/70 px-2 py-1 text-2xs text-gray-500 dark:border-gray-800/80 dark:bg-gray-900/40 dark:text-gray-400"
 					>
 						<Star
 							class="size-3.5 shrink-0"
@@ -1041,7 +1041,7 @@
 									{#if isSharedModel}
 										<div class="mt-1 flex flex-wrap items-center gap-1.5">
 											<span
-												class="inline-flex items-center gap-1 rounded-full bg-sky-50 px-2 py-0.5 text-[11px] font-medium text-sky-700 dark:bg-sky-900/25 dark:text-sky-300 whitespace-nowrap"
+												class="inline-flex items-center gap-1 rounded-full bg-sky-50 px-2 py-0.5 text-2xs font-medium text-sky-700 dark:bg-sky-900/25 dark:text-sky-300 whitespace-nowrap"
 												title={$i18n.t('Shared model')}
 											>
 												<Share2 class="size-3 shrink-0" strokeWidth={2.1} />
@@ -1050,7 +1050,7 @@
 
 											{#if $user?.role !== 'admin'}
 												<span
-													class="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-600 dark:bg-gray-700/50 dark:text-gray-300 whitespace-nowrap"
+													class="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-2xs font-medium text-gray-600 dark:bg-gray-700/50 dark:text-gray-300 whitespace-nowrap"
 												>
 													{$i18n.t('Read Only')}
 												</span>

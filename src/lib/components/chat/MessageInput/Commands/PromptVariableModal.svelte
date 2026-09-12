@@ -98,7 +98,7 @@
 						<textarea
 							id="var-{variable.word}"
 							bind:this={inputRefs[variable.word]}
-							class="w-full px-3 py-2 rounded-lg border dark:border-gray-700 bg-transparent text-sm outline-none focus:ring-1 focus:ring-blue-500 resize-y min-h-[38px] max-h-[120px]"
+							class="w-full px-3 py-2 rounded-lg border dark:border-gray-700 bg-transparent text-sm outline-none focus:ring-1 focus:ring-primary-500 resize-y min-h-[38px] max-h-[120px]"
 							bind:value={values[variable.word]}
 							on:keydown={(e) => handleKeydown(e, idx)}
 							placeholder={variable.word}

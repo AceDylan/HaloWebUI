@@ -1083,6 +1083,8 @@
 	"Press Ctrl/Command + Enter to generate.": "按 Ctrl/Command + Enter 可快速生成。",
 	"This image workbench remembers your last model, size, and steps only in this browser.": "这个图像工作台只会在当前浏览器里记住你最近一次选择的模型、尺寸和步数。",
 	"Shows all currently available image models for this engine. The suffix in the name indicates the source channel.": "这里会显示当前图片引擎下全部可用的图片模型，名称后缀表示来源渠道。",
+	"This image workbench remembers your last model and generation settings only in this browser.": "这个图像工作台只会在当前浏览器里记住你最近一次选择的模型和生成设置。",
+	"Shows all currently available image models. The suffix in the name indicates the source channel.": "这里会显示当前全部可用的图片模型，名称后缀表示来源渠道。",
 	"Your previous image model source is unavailable. Switched to another available source for the same model.": "你上次选择的图片来源暂时不可用，已自动切换到这个模型的另一个可用来源。",
 	"Supports per-request options when the backend engine allows them.": "当前页面会在后端引擎支持时按次应用模型、尺寸和参数。",
 	"Output Count": "生成数量",

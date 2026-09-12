@@ -1382,7 +1382,7 @@
 							</div>
 							<div class="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
 								<div class="rounded-2xl border border-gray-200/70 bg-white/60 px-4 py-3 dark:border-gray-700/70 dark:bg-gray-900/40">
-									<div class="text-[11px] font-medium uppercase tracking-wide text-gray-400 dark:text-gray-500">
+									<div class="text-2xs font-medium uppercase tracking-wide text-gray-400 dark:text-gray-500">
 										{tr('接入要求', 'Requirements')}
 									</div>
 									<div class="mt-1 text-sm text-gray-700 dark:text-gray-200">
@@ -1390,7 +1390,7 @@
 									</div>
 								</div>
 								<div class="rounded-2xl border border-gray-200/70 bg-white/60 px-4 py-3 dark:border-gray-700/70 dark:bg-gray-900/40">
-									<div class="text-[11px] font-medium uppercase tracking-wide text-gray-400 dark:text-gray-500">
+									<div class="text-2xs font-medium uppercase tracking-wide text-gray-400 dark:text-gray-500">
 										{tr('能力与限制', 'Capabilities and Limits')}
 									</div>
 									<div class="mt-1 text-sm text-gray-700 dark:text-gray-200">

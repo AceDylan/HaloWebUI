@@ -1291,7 +1291,7 @@
 							<span>{$i18n.t('Filter')}</span>
 							{#if activeFilterCount > 0}
 								<span
-									class="min-w-[18px] h-[18px] flex items-center justify-center rounded-full bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 text-[10px] font-semibold leading-none"
+									class="min-w-[18px] h-[18px] flex items-center justify-center rounded-full bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 text-2xs font-semibold leading-none"
 								>
 									{activeFilterCount}
 								</span>
@@ -1327,7 +1327,7 @@
 						>
 							<!-- Status -->
 							<div class="flex items-center gap-2.5">
-								<span class="text-[11px] font-medium text-gray-400 dark:text-gray-500 w-14 shrink-0"
+								<span class="text-2xs font-medium text-gray-400 dark:text-gray-500 w-14 shrink-0"
 									>{$i18n.t('Status')}</span
 								>
 								<div class="flex flex-wrap gap-1">
@@ -1346,7 +1346,7 @@
 							</div>
 							<!-- Hidden -->
 							<div class="flex items-center gap-2.5">
-								<span class="text-[11px] font-medium text-gray-400 dark:text-gray-500 w-14 shrink-0"
+								<span class="text-2xs font-medium text-gray-400 dark:text-gray-500 w-14 shrink-0"
 									>{$i18n.t('Hidden')}</span
 								>
 								<div class="flex flex-wrap gap-1">
@@ -1365,7 +1365,7 @@
 							</div>
 							<!-- Visibility -->
 							<div class="flex items-center gap-2.5">
-								<span class="text-[11px] font-medium text-gray-400 dark:text-gray-500 w-14 shrink-0"
+								<span class="text-2xs font-medium text-gray-400 dark:text-gray-500 w-14 shrink-0"
 									>{$i18n.t('Visibility')}</span
 								>
 								<div class="flex flex-wrap gap-1">
@@ -1389,14 +1389,14 @@
 								<div
 									class="flex items-center justify-between pt-1.5 border-t border-gray-200/60 dark:border-gray-700/50"
 								>
-									<span class="text-[11px] text-gray-400 dark:text-gray-500">
+									<span class="text-2xs text-gray-400 dark:text-gray-500">
 										{$i18n.t('Showing {{count}} of {{total}} models', {
 											count: filteredModels.length,
 											total: tabFilteredModels.length
 										})}
 									</span>
 									<button
-										class="text-[11px] text-emerald-600 dark:text-emerald-400 hover:underline"
+										class="text-2xs text-emerald-600 dark:text-emerald-400 hover:underline"
 										type="button"
 										on:click={() => {
 											enabledFilter = 'all';
@@ -1479,7 +1479,7 @@
 										>
 											<!-- Visibility section -->
 											<div
-												class="px-3 py-1 text-[10px] font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500"
+												class="px-3 py-1 text-2xs font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500"
 											>
 												{$i18n.t('Visibility')}
 											</div>
@@ -1508,7 +1508,7 @@
 
 											<!-- Access section -->
 											<div
-												class="px-3 py-1 text-[10px] font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500"
+												class="px-3 py-1 text-2xs font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500"
 											>
 												{$i18n.t('Access')}
 											</div>

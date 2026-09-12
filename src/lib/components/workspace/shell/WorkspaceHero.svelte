@@ -48,16 +48,16 @@
 	};
 
 	$: heroTabs = swapWorkspaceHeroTabs(tabs);
-	$: splitIndex = Math.ceil(heroTabs.length / 2);
-	$: tabRows = [heroTabs.slice(0, splitIndex), heroTabs.slice(splitIndex)].filter(
-		(row) => row.length > 0
-	);
 </script>
 
 {#if activeTab}
-	<section class="glass-section p-5 space-y-5">
-		<div class="@container flex flex-col gap-5">
-			<div class="flex flex-col gap-4">
+	<!-- Page header + tab switcher in one card. The per-page toolbar (count, search, create)
+	     sits directly on the page below; the list is not wrapped in another card. -->
+	<section class="glass-section p-4 sm:p-5">
+		<div class="@container">
+			<div
+				class="flex flex-col gap-4 @[64rem]:flex-row @[64rem]:items-center @[64rem]:justify-between"
+			>
 				<div class="min-w-0 @[64rem]:flex-1">
 					<div class="flex items-start gap-3">
 						<div class="glass-icon-badge shrink-0 {activeTab.badgeColor}">
@@ -83,36 +83,33 @@
 					</div>
 				</div>
 
-				<div
-					class="inline-flex max-w-full flex-col gap-1.5 self-start rounded-xl bg-gray-100/70 p-1 shadow-[inset_0_1px_0_rgba(255,255,255,0.65)] dark:bg-gray-850/80 dark:shadow-none @[64rem]:shrink-0"
+				<nav
+					class="-mx-4 flex max-w-full gap-1 overflow-x-auto px-4 scrollbar-none scroll-fade-x-cq sm:-mx-5 sm:px-5 @[64rem]:mx-0 @[64rem]:flex-wrap @[64rem]:justify-end @[64rem]:overflow-visible @[64rem]:px-0"
+					aria-label={$i18n.t('Workspace')}
 				>
-					{#each tabRows as row (row[0]?.key ?? 'row')}
-						<div class="flex max-w-full flex-wrap items-center gap-1.5">
-							{#each row as tab (tab.key)}
-								<a
-									class={`flex items-center justify-start gap-2 whitespace-nowrap rounded-lg px-4 py-2 text-sm font-medium transition-all ${
-										tab.activeMatch.some((prefix) => pathname.startsWith(prefix))
-											? 'bg-white text-gray-900 shadow-[0_1px_3px_rgba(15,23,42,0.08)] dark:bg-gray-800 dark:text-white'
-											: 'text-gray-500 hover:bg-white/50 hover:text-gray-800 dark:text-gray-400 dark:hover:bg-gray-800/50 dark:hover:text-gray-200'
-									}`}
-									href={tab.href}
-								>
-									<svg
-										xmlns="http://www.w3.org/2000/svg"
-										viewBox="0 0 24 24"
-										fill="currentColor"
-										class="size-4"
-									>
-										{#each tab.iconPaths as pathD}
-											<path fill-rule="evenodd" d={pathD} clip-rule="evenodd" />
-										{/each}
-									</svg>
-									<span>{getWorkspaceHeroTabLabel(tab)}</span>
-								</a>
-							{/each}
-						</div>
+					{#each heroTabs as tab (tab.key)}
+						{@const active = tab.activeMatch.some((prefix) => pathname.startsWith(prefix))}
+						<a
+							class="flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg px-3 py-1.5 text-[13px] font-medium transition-all {active
+								? 'bg-[var(--sidebar-active-bg)] text-[var(--sidebar-active-fg)]'
+								: 'text-gray-500 hover:bg-gray-100 hover:text-gray-800 dark:text-gray-400 dark:hover:bg-gray-800/60 dark:hover:text-gray-200'}"
+							href={tab.href}
+							aria-current={active ? 'page' : undefined}
+						>
+							<svg
+								xmlns="http://www.w3.org/2000/svg"
+								viewBox="0 0 24 24"
+								fill="currentColor"
+								class="size-4"
+							>
+								{#each tab.iconPaths as pathD}
+									<path fill-rule="evenodd" d={pathD} clip-rule="evenodd" />
+								{/each}
+							</svg>
+							<span>{getWorkspaceHeroTabLabel(tab)}</span>
+						</a>
 					{/each}
-				</div>
+				</nav>
 			</div>
 		</div>
 	</section>

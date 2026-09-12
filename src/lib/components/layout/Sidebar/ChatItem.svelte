@@ -68,7 +68,7 @@
 	$: itemStateClass =
 		isFolderVariant
 			? id === $chatId || confirmEdit
-				? 'bg-white text-gray-900 border-gray-200/80 shadow-sm font-medium dark:bg-gray-900/80 dark:text-gray-100 dark:border-gray-700/70'
+				? 'bg-[var(--sidebar-active-bg)] text-[var(--sidebar-active-fg)] border-transparent font-medium'
 				: selected
 					? 'bg-white/70 text-gray-800 border-gray-200/60 dark:bg-gray-900/55 dark:text-gray-200 dark:border-gray-800/70'
 					: 'text-gray-600 group-hover:bg-white/70 group-hover:border-gray-200/70 dark:text-gray-300 dark:group-hover:bg-gray-900/55 dark:group-hover:border-gray-800/70'
@@ -79,7 +79,7 @@
 					? 'bg-white/65 dark:bg-gray-900/45 border-gray-200/60 dark:border-gray-800/60'
 					: 'group-hover:bg-white/60 dark:group-hover:bg-gray-900/40 group-hover:border-gray-200/60 dark:group-hover:border-gray-800/60'
 			: id === $chatId || confirmEdit
-				? 'bg-gray-200 dark:bg-gray-800 font-medium'
+				? 'bg-[var(--sidebar-active-bg)] text-[var(--sidebar-active-fg)] font-medium'
 				: selected
 					? 'bg-gray-100 dark:bg-gray-850'
 					: 'group-hover:bg-gray-100 dark:group-hover:bg-gray-850';
@@ -87,7 +87,7 @@
 	$: menuFromClass =
 		isFolderVariant
 			? id === $chatId || confirmEdit
-				? 'from-white dark:from-gray-900'
+				? 'from-[var(--sidebar-active-bg)]'
 				: selected
 					? 'from-white/70 dark:from-gray-900/55'
 					: 'invisible group-hover:visible from-white/70 dark:from-gray-900/55'
@@ -98,7 +98,7 @@
 					? 'from-white/65 dark:from-gray-900/45'
 					: 'invisible group-hover:visible from-white/60 dark:from-gray-900/40'
 			: id === $chatId || confirmEdit
-				? 'from-gray-200 dark:from-gray-800'
+				? 'from-[var(--sidebar-active-bg)]'
 				: selected
 					? 'from-gray-100 dark:from-gray-850'
 					: 'invisible group-hover:visible from-gray-100 dark:from-gray-850';

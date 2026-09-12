@@ -109,9 +109,6 @@
 					<div class="workspace-count-pill">
 						{filteredItems.length} {$i18n.t('Knowledge')}
 					</div>
-					<div class="text-xs text-gray-500 dark:text-gray-400">
-						{$i18n.t('Organize collections, documents, and retrieval-ready knowledge sources in one place.')}
-					</div>
 				</div>
 
 				<div class="workspace-toolbar">

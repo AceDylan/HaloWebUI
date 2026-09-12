@@ -56,7 +56,7 @@
 			>
 				<span>{$i18n.t('Send')}</span>
 				<kbd
-					class="text-[10px] text-gray-400 bg-gray-100 dark:bg-gray-700 px-1.5 py-0.5 rounded font-mono"
+					class="text-2xs text-gray-400 bg-gray-100 dark:bg-gray-700 px-1.5 py-0.5 rounded font-mono"
 					>Enter</kbd
 				>
 			</DropdownMenu.Item>
@@ -89,7 +89,7 @@
 			>
 				<span>{$i18n.t('New Chat')}</span>
 				<kbd
-					class="text-[10px] text-gray-400 bg-gray-100 dark:bg-gray-700 px-1.5 py-0.5 rounded font-mono"
+					class="text-2xs text-gray-400 bg-gray-100 dark:bg-gray-700 px-1.5 py-0.5 rounded font-mono"
 					>⌘⇧↵</kbd
 				>
 			</DropdownMenu.Item>
@@ -97,7 +97,7 @@
 			<hr class="border-black/5 dark:border-white/5 my-1" />
 
 			<!-- 快捷键提示 -->
-			<div class="px-3 py-2 text-[11px] text-gray-400 dark:text-gray-500 space-y-1">
+			<div class="px-3 py-2 text-2xs text-gray-400 dark:text-gray-500 space-y-1">
 				<div class="flex justify-between">
 					<span>{$i18n.t('New line')}</span>
 					<kbd class="font-mono">Shift + Enter</kbd>

@@ -36,11 +36,17 @@
 	import { capitalizeFirstLetter } from '$lib/utils';
 	import { getModelChatDisplayName } from '$lib/utils/model-display';
 	import HaloSelect from '$lib/components/common/HaloSelect.svelte';
+	import Dropdown from '$lib/components/common/Dropdown.svelte';
+	import { DropdownMenu } from 'bits-ui';
+	import { flyAndScale } from '$lib/utils/transitions';
+	import ArrowUpTray from '$lib/components/icons/ArrowUpTray.svelte';
+	import ArrowDownTray from '$lib/components/icons/ArrowDownTray.svelte';
 	import { cloneSettingsSnapshot } from '$lib/utils/settings-dirty';
 
 	let shiftKey = false;
 
 	let importFiles;
+	let showMoreMenu = false;
 	let modelsImportInputElement: HTMLInputElement;
 	let loaded = false;
 
@@ -233,18 +239,12 @@
 	/>
 
 	<div class="space-y-4">
-		<section class="workspace-section space-y-4">
-			<div class="flex flex-col gap-3 lg:flex-row lg:items-center">
-				<div class="workspace-toolbar-summary">
-					<div class="workspace-count-pill">
-						{filteredModels.length} {$i18n.t('Assistants')}
-					</div>
-					<div class="text-xs text-gray-500 dark:text-gray-400">
-						{$i18n.t('Manage assistant presets, visibility, and tool-ready model profiles for your workspace.')}
-					</div>
-				</div>
+		<div class="workspace-toolbar-row">
+			<div class="workspace-count-pill">
+				{filteredModels.length} {$i18n.t('Assistants')}
+			</div>
 
-				<div class="workspace-toolbar">
+			<div class="workspace-toolbar">
 					<div class="workspace-search workspace-toolbar-search">
 						<Search className="size-4 text-gray-400" />
 						<input
@@ -344,6 +344,55 @@
 							</Tooltip>
 						{/if}
 
+						{#if $user?.role === 'admin'}
+							<Dropdown bind:show={showMoreMenu} side="bottom" align="end">
+								<Tooltip content={$i18n.t('More')}>
+									<button
+										type="button"
+										class="workspace-icon-button px-3 py-2"
+										aria-label={$i18n.t('More')}
+										aria-haspopup="menu"
+										aria-expanded={showMoreMenu}
+									>
+										<EllipsisHorizontal className="size-4" strokeWidth="2" />
+									</button>
+								</Tooltip>
+
+								<div slot="content">
+									<DropdownMenu.Content
+										class="workspace-menu-content"
+										sideOffset={8}
+										side="bottom"
+										align="end"
+										transition={flyAndScale}
+									>
+										<DropdownMenu.Item
+											class="workspace-menu-item"
+											on:click={() => {
+												showMoreMenu = false;
+												modelsImportInputElement.click();
+											}}
+										>
+											<ArrowUpTray className="size-4 shrink-0" strokeWidth="2" />
+											<span>{$i18n.t('Import Assistants')}</span>
+										</DropdownMenu.Item>
+										{#if models.length}
+											<DropdownMenu.Item
+												class="workspace-menu-item"
+												on:click={async () => {
+													showMoreMenu = false;
+													downloadModels(models);
+												}}
+											>
+												<ArrowDownTray className="size-4 shrink-0" strokeWidth="2" />
+												<span>{$i18n.t('Export Assistants')}</span>
+											</DropdownMenu.Item>
+										{/if}
+									</DropdownMenu.Content>
+								</div>
+							</Dropdown>
+						{/if}
+
 						<a class="workspace-primary-button" href="/workspace/models/create">
 							<Plus className="size-4" />
 							<span>{$i18n.t('Create')}</span>
@@ -351,9 +400,7 @@
 					</div>
 				</div>
 			</div>
-		</section>
 
-		<section class="workspace-section">
 			{#if filteredModels.length > 0}
 			<div class="grid gap-3 lg:grid-cols-2 xl:grid-cols-3" id="model-list">
 		{#each filteredModels as model}
@@ -520,113 +567,54 @@
 				</p>
 			</div>
 			{/if}
-		</section>
 	</div>
 
 	{#if $user?.role === 'admin'}
-		<section class="workspace-section">
-			<div class="flex flex-wrap justify-end gap-2">
-				<input
-					id="models-import-input"
-					bind:this={modelsImportInputElement}
-					bind:files={importFiles}
-					type="file"
-					accept=".json"
-					hidden
-					on:change={() => {
-						console.log(importFiles);
+		<input
+			id="models-import-input"
+			bind:this={modelsImportInputElement}
+			bind:files={importFiles}
+			type="file"
+			accept=".json"
+			hidden
+			on:change={() => {
+				console.log(importFiles);
 
-						let reader = new FileReader();
-						reader.onload = async (event) => {
-							let savedModels = JSON.parse(event.target.result);
-							const existingModelIds = new Set((models ?? []).map((model) => model.id));
-							console.log(savedModels);
+				let reader = new FileReader();
+				reader.onload = async (event) => {
+					let savedModels = JSON.parse(event.target.result);
+					const existingModelIds = new Set((models ?? []).map((model) => model.id));
+					console.log(savedModels);
 
-							for (const model of savedModels) {
-								if (model?.info ?? false) {
-									if (existingModelIds.has(model.id)) {
-										await updateModelById(localStorage.token, model.id, model.info).catch(
-											(error) => {
-												return null;
-											}
-										);
-									} else {
-										await createNewModel(localStorage.token, model.info).catch((error) => {
-											return null;
-										});
-										existingModelIds.add(model.id);
+					for (const model of savedModels) {
+						if (model?.info ?? false) {
+							if (existingModelIds.has(model.id)) {
+								await updateModelById(localStorage.token, model.id, model.info).catch(
+									(error) => {
+										return null;
 									}
-								} else {
-									if (model?.id && model?.name) {
-										await createNewModel(localStorage.token, model).catch((error) => {
-											return null;
-										});
-									}
-								}
+								);
+							} else {
+								await createNewModel(localStorage.token, model.info).catch((error) => {
+									return null;
+								});
+								existingModelIds.add(model.id);
 							}
+						} else {
+							if (model?.id && model?.name) {
+								await createNewModel(localStorage.token, model).catch((error) => {
+									return null;
+								});
+							}
+						}
+					}
 
-							await refreshWorkspaceModelList();
-						};
+					await refreshWorkspaceModelList();
+				};
 
-						reader.readAsText(importFiles[0]);
-					}}
-				/>
-
-				<button
-					class="workspace-secondary-button text-xs"
-					on:click={() => {
-						modelsImportInputElement.click();
-					}}
-				>
-					<div class=" self-center mr-2 font-medium line-clamp-1">
-						{$i18n.t('Import Assistants')}
-					</div>
-
-					<div class=" self-center">
-						<svg
-							xmlns="http://www.w3.org/2000/svg"
-							viewBox="0 0 16 16"
-							fill="currentColor"
-							class="w-4 h-4"
-						>
-							<path
-								fill-rule="evenodd"
-								d="M4 2a1.5 1.5 0 0 0-1.5 1.5v9A1.5 1.5 0 0 0 4 14h8a1.5 1.5 0 0 0 1.5-1.5V6.621a1.5 1.5 0 0 0-.44-1.06L9.94 2.439A1.5 1.5 0 0 0 8.878 2H4Zm4 9.5a.75.75 0 0 1-.75-.75V8.06l-.72.72a.75.75 0 0 1-1.06-1.06l2-2a.75.75 0 0 1 1.06 0l2 2a.75.75 0 1 1-1.06 1.06l-.72-.72v2.69a.75.75 0 0 1-.75.75Z"
-								clip-rule="evenodd"
-							/>
-						</svg>
-					</div>
-				</button>
-
-				{#if models.length}
-					<button
-						class="workspace-secondary-button text-xs"
-						on:click={async () => {
-							downloadModels(models);
-						}}
-					>
-						<div class=" self-center mr-2 font-medium line-clamp-1">
-							{$i18n.t('Export Assistants')}
-						</div>
-
-						<div class=" self-center">
-							<svg
-								xmlns="http://www.w3.org/2000/svg"
-								viewBox="0 0 16 16"
-								fill="currentColor"
-								class="w-4 h-4"
-							>
-								<path
-									fill-rule="evenodd"
-									d="M4 2a1.5 1.5 0 0 0-1.5 1.5v9A1.5 1.5 0 0 0 4 14h8a1.5 1.5 0 0 0 1.5-1.5V6.621a1.5 1.5 0 0 0-.44-1.06L9.94 2.439A1.5 1.5 0 0 0 8.878 2H4Zm4 3.5a.75.75 0 0 1 .75.75v2.69l.72-.72a.75.75 0 1 1 1.06 1.06l-2 2a.75.75 0 0 1-1.06 0l-2-2a.75.75 0 0 1 1.06-1.06l.72.72V6.25A.75.75 0 0 1 8 5.5Z"
-									clip-rule="evenodd"
-								/>
-							</svg>
-						</div>
-					</button>
-				{/if}
-			</div>
-		</section>
+				reader.readAsText(importFiles[0]);
+			}}
+		/>
 	{/if}
 {:else}
 	<div class="w-full h-full flex justify-center items-center">

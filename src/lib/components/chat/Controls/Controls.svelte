@@ -579,7 +579,7 @@
 								{$i18n.t('Current Chat System Prompt')}
 							</div>
 							<span
-								class="inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium {hasCurrentChatSystemPromptOverride
+								class="inline-flex items-center rounded-full border px-2 py-0.5 text-2xs font-medium {hasCurrentChatSystemPromptOverride
 									? 'border-teal-200/80 bg-teal-50 text-teal-700 dark:border-teal-800/70 dark:bg-teal-950/40 dark:text-teal-300'
 									: 'border-sky-200/80 bg-sky-50 text-sky-700 dark:border-sky-800/70 dark:bg-sky-950/40 dark:text-sky-300'}"
 							>
@@ -588,7 +588,7 @@
 									: $i18n.t('Inheriting Global System Prompt')}
 							</span>
 							{#if systemModified || systemAck}
-								<span class="inline-flex items-center rounded-full border border-teal-200/80 bg-teal-50 px-2 py-0.5 text-[11px] font-medium text-teal-700 dark:border-teal-800/70 dark:bg-teal-950/40 dark:text-teal-300">
+								<span class="inline-flex items-center rounded-full border border-teal-200/80 bg-teal-50 px-2 py-0.5 text-2xs font-medium text-teal-700 dark:border-teal-800/70 dark:bg-teal-950/40 dark:text-teal-300">
 									{systemModified
 										? $i18n.t('已调整', { defaultValue: 'Adjusted' })
 										: $i18n.t('已应用', { defaultValue: 'Applied' })}
@@ -609,7 +609,7 @@
 							{/if}
 							{#if hasCurrentChatSystemPromptOverride}
 								<button
-									class="inline-flex items-center rounded-lg border border-sky-200/80 bg-white/90 px-2.5 py-1 text-[11px] font-medium text-sky-700 hover:bg-sky-50 dark:border-sky-800/70 dark:bg-gray-900/70 dark:text-sky-300 dark:hover:bg-sky-950/30 transition-colors duration-150"
+									class="inline-flex items-center rounded-lg border border-sky-200/80 bg-white/90 px-2.5 py-1 text-2xs font-medium text-sky-700 hover:bg-sky-50 dark:border-sky-800/70 dark:bg-gray-900/70 dark:text-sky-300 dark:hover:bg-sky-950/30 transition-colors duration-150"
 									on:pointerup|stopPropagation
 									on:click|stopPropagation={restoreSystemInheritance}
 								>
@@ -627,7 +627,7 @@
 										{$i18n.t('System Prompt')}
 									</div>
 									<span
-										class="shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium {hasCurrentChatSystemPromptOverride
+										class="shrink-0 rounded-full px-2 py-0.5 text-2xs font-medium {hasCurrentChatSystemPromptOverride
 											? 'bg-blue-50 text-blue-600 dark:bg-blue-950/40 dark:text-blue-300'
 											: hasGlobalSystemPrompt
 												? 'bg-sky-50 text-sky-600 dark:bg-sky-950/40 dark:text-sky-300'
@@ -662,7 +662,7 @@
 									/>
 								{/if}
 
-								<div class="flex items-center justify-between gap-2 text-[11px] text-gray-400 dark:text-gray-500">
+								<div class="flex items-center justify-between gap-2 text-2xs text-gray-400 dark:text-gray-500">
 									<div>
 										{hasCurrentChatSystemPromptOverride
 											? $i18n.t('Only applies to this chat')
@@ -712,7 +712,7 @@
 					<div
 						class="absolute top-2 right-10 z-10 flex items-center gap-1 px-2 py-1 rounded-full bg-teal-50/95 dark:bg-teal-900/70 border border-teal-200/80 dark:border-teal-700/60 shadow-sm pointer-events-none"
 					>
-						<span class="text-[10px] font-medium text-teal-700 dark:text-teal-300">
+						<span class="text-2xs font-medium text-teal-700 dark:text-teal-300">
 							{thinkingModified
 								? $i18n.t('已调整', { defaultValue: 'Adjusted' })
 								: $i18n.t('已应用', { defaultValue: 'Applied' })}
@@ -767,7 +767,7 @@
 								</div>
 									<button
 										type="button"
-										class="text-[10px] transition-colors duration-150 cursor-pointer {customEffortMode
+										class="text-2xs transition-colors duration-150 cursor-pointer {customEffortMode
 											? 'text-blue-500 dark:text-blue-400'
 											: 'text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300'}"
 										on:click={() => {
@@ -822,7 +822,7 @@
 									</div>
 									<button
 										type="button"
-										class="text-[10px] transition-colors duration-150 cursor-pointer {customTokenMode
+										class="text-2xs transition-colors duration-150 cursor-pointer {customTokenMode
 											? 'text-blue-500 dark:text-blue-400'
 											: 'text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300'}"
 										on:click={() => {
@@ -894,7 +894,7 @@
 					<div
 						class="absolute top-2 right-10 z-10 flex items-center gap-1 px-2 py-1 rounded-full bg-teal-50/95 dark:bg-teal-900/70 border border-teal-200/80 dark:border-teal-700/60 shadow-sm pointer-events-none"
 					>
-						<span class="text-[10px] font-medium text-teal-700 dark:text-teal-300">
+						<span class="text-2xs font-medium text-teal-700 dark:text-teal-300">
 							{advancedModified
 								? $i18n.t('已调整', { defaultValue: 'Adjusted' })
 								: $i18n.t('已应用', { defaultValue: 'Applied' })}

@@ -204,9 +204,6 @@
 					<div class="workspace-count-pill">
 						{countLabel} {$i18n.t('Functions')}
 					</div>
-					<div class="text-xs text-gray-500 dark:text-gray-400">
-						{$i18n.t('Build and maintain filters, pipelines, and automation functions for admin-controlled workflows.')}
-					</div>
 				</div>
 
 				<div class="workspace-toolbar">

@@ -2062,7 +2062,7 @@
 													<div class="text-sm font-medium text-gray-900 dark:text-gray-100">
 														{$i18n.t('Global Default System Prompt')}
 													</div>
-													<span class="inline-flex items-center rounded-full border border-sky-200/80 bg-sky-50 px-2 py-0.5 text-[11px] font-medium text-sky-700 dark:border-sky-800/70 dark:bg-sky-950/40 dark:text-sky-300">
+													<span class="inline-flex items-center rounded-full border border-sky-200/80 bg-sky-50 px-2 py-0.5 text-2xs font-medium text-sky-700 dark:border-sky-800/70 dark:bg-sky-950/40 dark:text-sky-300">
 														{$i18n.t('Applies to New Chats')}
 													</span>
 												</div>

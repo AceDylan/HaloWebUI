@@ -133,7 +133,7 @@
 					: 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'}
 			<button
 				type="button"
-				class="absolute text-[10px] leading-tight text-center transition-all duration-150 cursor-pointer
+				class="absolute text-2xs leading-tight text-center transition-all duration-150 cursor-pointer
 					-translate-x-1/2 whitespace-nowrap
 					{labelColor}
 					{i === currentIndex ? 'font-medium' : ''}"

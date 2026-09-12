@@ -259,7 +259,7 @@
 			<span class="text-sm font-mono truncate text-gray-600 dark:text-gray-300">
 				{filePath || 'Notebook'}
 			</span>
-			<span class="text-[10px] text-gray-400 px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-700">
+			<span class="text-2xs text-gray-400 px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-700">
 				{getLanguage()} &middot; {notebook.cells.length}
 				{$i18n.t('cells')}
 			</span>
@@ -367,7 +367,7 @@
 							class="flex items-center gap-1 px-2 py-1 bg-gray-50 dark:bg-gray-800/70 border-b border-gray-200 dark:border-gray-700"
 						>
 							<!-- Execution count marker -->
-							<span class="text-[10px] font-mono text-gray-400 w-10 text-right flex-shrink-0">
+							<span class="text-2xs font-mono text-gray-400 w-10 text-right flex-shrink-0">
 								{#if cellExecCounts[idx]}
 									[{cellExecCounts[idx]}]
 								{:else if cell.execution_count != null}
@@ -421,13 +421,13 @@
 
 							<!-- Status indicator -->
 							{#if cellStates[idx] === 'done'}
-								<span class="text-[10px] text-green-500">&#10003;</span>
+								<span class="text-2xs text-green-500">&#10003;</span>
 							{:else if cellStates[idx] === 'error'}
-								<span class="text-[10px] text-red-500">&#10007;</span>
+								<span class="text-2xs text-red-500">&#10007;</span>
 							{/if}
 
 							<span class="flex-1"></span>
-							<span class="text-[10px] text-gray-400">{getLanguage()}</span>
+							<span class="text-2xs text-gray-400">{getLanguage()}</span>
 						</div>
 
 						<!-- Source code -->

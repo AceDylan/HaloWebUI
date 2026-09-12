@@ -104,7 +104,7 @@
 
 					{#if edit}
 						<div class="w-full md:w-52">
-							<div class="mb-1 text-[11px] font-medium text-gray-500 dark:text-gray-400">
+							<div class="mb-1 text-2xs font-medium text-gray-500 dark:text-gray-400">
 								{tr('文件处理模式', 'File Processing Mode')}
 							</div>
 							<Tooltip

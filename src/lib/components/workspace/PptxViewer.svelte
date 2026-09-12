@@ -253,7 +253,7 @@
 						</div>
 						{#if slide.imageCount > 0}
 							<span
-								class="inline-block mt-1 text-[10px] text-gray-400 bg-gray-100 dark:bg-gray-700 px-1.5 py-0.5 rounded"
+								class="inline-block mt-1 text-2xs text-gray-400 bg-gray-100 dark:bg-gray-700 px-1.5 py-0.5 rounded"
 							>
 								{slide.imageCount}
 								{$i18n.t('image(s)')}

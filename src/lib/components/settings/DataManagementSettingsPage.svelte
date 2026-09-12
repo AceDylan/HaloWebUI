@@ -218,7 +218,7 @@
 	const modalPrimaryButton =
 		'inline-flex h-9 w-24 shrink-0 items-center justify-center rounded-lg border border-gray-200 bg-gray-50 text-sm font-medium text-gray-700 transition-all hover:bg-gray-100 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60 dark:border-gray-800 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700';
 	const badgeClass =
-		'inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium';
+		'inline-flex items-center rounded-full border px-2 py-0.5 text-2xs font-medium';
 	const modeButtonBase =
 		'inline-flex items-center justify-center h-8 rounded-lg px-3 text-xs font-medium transition-all border';
 	const DATABASE_RESTORE_INSPECT_TIMEOUT_MS = 120000;

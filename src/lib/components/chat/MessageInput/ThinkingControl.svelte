@@ -302,7 +302,7 @@
 			<div class="mx-2 mb-1 flex justify-end">
 				<button
 					type="button"
-					class="text-[10px] transition-colors duration-150 cursor-pointer
+					class="text-2xs transition-colors duration-150 cursor-pointer
 						{customMode
 						? 'text-blue-500 dark:text-blue-400'
 							: 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'}"

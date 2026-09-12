@@ -666,7 +666,7 @@
 	aria-label="Chat sidebar"
 	class="h-screen max-h-[100dvh] min-h-screen select-none
 		{$isApp ? `ml-[4.5rem] md:ml-0 ` : ''}
-		shrink-0 bg-gray-50/80 dark:bg-[#0a0a0f]/80 backdrop-blur-xl border-r border-gray-200/50 dark:border-gray-800/50 text-gray-900 dark:text-gray-200
+		shrink-0 bg-gray-50/80 backdrop-blur-xl border-r border-gray-200/50 dark:border-white/[0.08] text-gray-900 dark:text-gray-200
 		text-sm fixed md:relative z-50 top-0 left-0 overflow-hidden transform-gpu transition-[width,max-width,transform] duration-300 ease-in-out
 		will-change-transform {!$mobile
 		? $showSidebar
@@ -1011,7 +1011,7 @@
 										type="button"
 										class="mx-2 flex w-auto items-center gap-2.5 rounded-xl px-3 py-2 text-left text-sm transition {($selectedAssistantScene?.id ?? null) ===
 										assistant.id
-											? 'bg-gray-200 text-gray-900 dark:bg-gray-800 dark:text-gray-100'
+											? 'bg-[var(--sidebar-active-bg)] text-[var(--sidebar-active-fg)]'
 											: 'text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-850'}"
 										on:click={() => {
 											void enterAssistantScene(assistant);
@@ -1029,7 +1029,7 @@
 											draggable="false"
 										/>
 										<div class="min-w-0 flex-1">
-											<div class="line-clamp-1 text-[13px] font-semibold leading-5">
+											<div class="line-clamp-1 text-[13px] font-medium leading-5">
 												{getModelChatDisplayName(assistant)}
 											</div>
 										</div>
@@ -1153,11 +1153,10 @@
 							{#if $chats}
 								{#each $chats as chat, idx}
 									{#if idx === 0 || (idx > 0 && chat.time_range !== $chats[idx - 1].time_range)}
-										{#if idx !== 0}
-											<div class="mx-2 my-2 border-t border-gray-200/60 dark:border-gray-800"></div>
-										{/if}
 										<div
-											class="w-full px-3 py-1.5 text-[11px] text-gray-400 dark:text-gray-500 font-semibold uppercase tracking-wider"
+											class="w-full px-3 pb-1 text-2xs text-gray-400 dark:text-gray-500 font-medium {idx !== 0
+												? 'pt-3'
+												: 'pt-1'}"
 										>
 											{$i18n.t(chat.time_range)}
 											<!-- localisation keys for time_range to be recognized from the i18next parser (so they don't get automatically removed):
@@ -1238,7 +1237,7 @@
 		{/if}
 
 		<!-- 底部用户区 -->
-		<div class="shrink-0 mt-auto px-2 pt-2 pb-1 border-t border-gray-200/60 dark:border-gray-800">
+		<div class="shrink-0 mt-auto px-2 pt-2 pb-1 border-t border-gray-200/60 dark:border-white/[0.08]">
 			<div class="flex flex-col font-primary">
 				{#if $user !== undefined && $user !== null}
 					<UserMenu

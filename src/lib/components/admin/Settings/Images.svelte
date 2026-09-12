@@ -324,7 +324,7 @@
 									({$i18n.t('engine is openai / gemini / grok')})
 								</div>
 								<pre
-									class="overflow-x-auto rounded-md bg-gray-100 p-2 font-mono text-[11px] leading-5 text-gray-700 dark:bg-gray-800 dark:text-gray-200">{capabilityOverrideExample}</pre>
+									class="overflow-x-auto rounded-md bg-gray-100 p-2 font-mono text-2xs leading-5 text-gray-700 dark:bg-gray-800 dark:text-gray-200">{capabilityOverrideExample}</pre>
 								<div>{$i18n.t('Common capability flags:')}</div>
 								<ul class="ml-4 list-disc space-y-0.5">
 									<li>

@@ -1083,7 +1083,7 @@
 										<div class="min-w-0 flex-1">
 											<div class="flex items-center gap-2">
 												<div class="text-sm font-medium">{preset.name}</div>
-												<span class="px-1.5 py-0.5 text-[10px] rounded bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300">HTTP</span>
+												<span class="px-1.5 py-0.5 text-2xs rounded bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300">HTTP</span>
 											</div>
 											<div class="text-xs text-gray-500 mt-0.5">{preset.description}</div>
 											<div class="text-xs text-gray-400 mt-1">{preset.setup_hint}</div>
@@ -1113,9 +1113,9 @@
 												<div class="min-w-0 flex-1">
 													<div class="flex items-center gap-2">
 														<div class="text-sm font-medium">{preset.name}</div>
-														<span class="px-1.5 py-0.5 text-[10px] rounded bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">stdio</span>
+														<span class="px-1.5 py-0.5 text-2xs rounded bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">stdio</span>
 														{#if isPresetRuntimeUnavailable(preset) && runtimeProfile === 'slim'}
-															<span class="px-1.5 py-0.5 text-[10px] rounded bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-300">
+															<span class="px-1.5 py-0.5 text-2xs rounded bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-300">
 																{tr('推荐 main', 'Main recommended')}
 															</span>
 														{/if}

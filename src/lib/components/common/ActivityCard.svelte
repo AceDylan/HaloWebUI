@@ -67,7 +67,7 @@
 			</div>
 
 			{#if subtitle}
-				<div class="line-clamp-1 text-[11px] leading-4 text-gray-400 dark:text-gray-500">
+				<div class="line-clamp-1 text-2xs leading-4 text-gray-400 dark:text-gray-500">
 					{subtitle}
 				</div>
 			{/if}
@@ -77,7 +77,7 @@
 			<slot name="status">
 				{#if status}
 					<span
-						class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ring-1 {getStatusClass(
+						class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-2xs font-medium ring-1 {getStatusClass(
 							statusTone
 						)}"
 					>

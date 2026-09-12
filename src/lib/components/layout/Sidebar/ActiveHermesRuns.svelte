@@ -97,7 +97,7 @@
 					strokeWidth="2"
 				/>
 				<span
-					class="absolute -top-0.5 -right-0.5 flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] font-semibold leading-none text-white {runs.length >
+					class="absolute -top-0.5 -right-0.5 flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-2xs font-semibold leading-none text-white {runs.length >
 					0
 						? 'bg-emerald-500'
 						: 'bg-blue-500'}"

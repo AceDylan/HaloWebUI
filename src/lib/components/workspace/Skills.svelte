@@ -1020,7 +1020,7 @@
 							}}
 						>
 							<span>{getTabLabel(tab)}</span>
-							<span class="text-[11px] opacity-70">
+							<span class="text-2xs opacity-70">
 								{tab === 'lobehub'
 									? VERIFIED_LOBEHUB_SKILLS.length
 									: tab === 'community'

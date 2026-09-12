@@ -658,7 +658,7 @@
 							<tr class="border-b border-gray-100 dark:border-white/[0.06] bg-gray-50/80 dark:bg-gray-850/50">
 								{#if selectionMode}
 									<th
-										class="text-left px-4 py-2.5 text-[11px] font-medium uppercase tracking-wider text-gray-400 dark:text-gray-500 w-10"
+										class="text-left px-4 py-2.5 text-2xs font-medium uppercase tracking-wider text-gray-400 dark:text-gray-500 w-10"
 									>
 										<div on:click|stopPropagation>
 											<Checkbox
@@ -680,23 +680,23 @@
 									</th>
 								{/if}
 								<th
-									class="text-left px-4 py-2.5 text-[11px] font-medium uppercase tracking-wider text-gray-400 dark:text-gray-500"
+									class="text-left px-4 py-2.5 text-2xs font-medium uppercase tracking-wider text-gray-400 dark:text-gray-500"
 									>{$i18n.t('Model')}</th
 								>
 								<th
-									class="text-right px-4 py-2.5 text-[11px] font-medium uppercase tracking-wider text-gray-400 dark:text-gray-500"
+									class="text-right px-4 py-2.5 text-2xs font-medium uppercase tracking-wider text-gray-400 dark:text-gray-500"
 									>{$i18n.t('Messages')}</th
 								>
 								<th
-									class="text-right px-4 py-2.5 text-[11px] font-medium uppercase tracking-wider text-gray-400 dark:text-gray-500"
+									class="text-right px-4 py-2.5 text-2xs font-medium uppercase tracking-wider text-gray-400 dark:text-gray-500"
 									>{$i18n.t('Prompt Tokens')}</th
 								>
 								<th
-									class="text-right px-4 py-2.5 text-[11px] font-medium uppercase tracking-wider text-gray-400 dark:text-gray-500"
+									class="text-right px-4 py-2.5 text-2xs font-medium uppercase tracking-wider text-gray-400 dark:text-gray-500"
 									>{$i18n.t('Completion Tokens')}</th
 								>
 								<th
-									class="text-right px-4 py-2.5 text-[11px] font-medium uppercase tracking-wider text-gray-400 dark:text-gray-500"
+									class="text-right px-4 py-2.5 text-2xs font-medium uppercase tracking-wider text-gray-400 dark:text-gray-500"
 									>{$i18n.t('Total')}</th
 								>
 							</tr>
@@ -758,7 +758,7 @@
 											>
 											{#if !isModelActive(stat.model)}
 												<span
-													class="ml-1 px-1.5 py-0.5 text-[10px] rounded-full bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 font-medium"
+													class="ml-1 px-1.5 py-0.5 text-2xs rounded-full bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 font-medium"
 													>{$i18n.t('Deleted')}</span
 												>
 											{/if}
@@ -786,7 +786,7 @@
 														: 'text-gray-400 dark:text-gray-500'}"
 													>{getModelDisplayName(stat.model)}</span
 												>{#if !isModelActive(stat.model)}<span
-														class="ml-1 px-1.5 py-0.5 text-[10px] rounded-full bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 font-medium"
+														class="ml-1 px-1.5 py-0.5 text-2xs rounded-full bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 font-medium"
 														>{$i18n.t('Deleted')}</span
 													>{/if}
 											</div>
@@ -814,7 +814,7 @@
 													</div>
 													{#if hoveredModelDay}
 														<div
-															class="absolute -top-10 px-2.5 py-1 bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 text-[11px] rounded-lg shadow-lg pointer-events-none whitespace-nowrap z-10"
+															class="absolute -top-10 px-2.5 py-1 bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 text-2xs rounded-lg shadow-lg pointer-events-none whitespace-nowrap z-10"
 															style="left: {(hoveredModelDay.idx / modelDailyStats.length) *
 																100}%; transform: translateX(-50%)"
 														>
@@ -822,7 +822,7 @@
 														</div>
 													{/if}
 												</div>
-												<div class="flex justify-between text-[10px] text-gray-400 mt-0.5 px-2">
+												<div class="flex justify-between text-2xs text-gray-400 mt-0.5 px-2">
 													<span>{modelDailyStats[0]?.date ?? ''}</span>
 													<span>{modelDailyStats[modelDailyStats.length - 1]?.date ?? ''}</span>
 												</div>
@@ -832,7 +832,7 @@
 												</div>
 											{/if}
 											{#if stat.total_tokens > 0}
-												<div class="mt-3 flex items-center gap-2 text-[11px]">
+												<div class="mt-3 flex items-center gap-2 text-2xs">
 													<span class="text-gray-400 dark:text-gray-500">{$i18n.t('Token share')}:</span>
 													<div
 														class="flex-1 h-1.5 bg-gray-100 dark:bg-zinc-800 rounded-full overflow-hidden flex"
@@ -876,23 +876,23 @@
 						<thead>
 							<tr class="border-b border-gray-100 dark:border-white/[0.06] bg-gray-50/80 dark:bg-gray-850/50">
 								<th
-									class="text-left px-4 py-2.5 text-[11px] font-medium uppercase tracking-wider text-gray-400 dark:text-gray-500"
+									class="text-left px-4 py-2.5 text-2xs font-medium uppercase tracking-wider text-gray-400 dark:text-gray-500"
 									>{$i18n.t('User')}</th
 								>
 								<th
-									class="text-right px-4 py-2.5 text-[11px] font-medium uppercase tracking-wider text-gray-400 dark:text-gray-500"
+									class="text-right px-4 py-2.5 text-2xs font-medium uppercase tracking-wider text-gray-400 dark:text-gray-500"
 									>{$i18n.t('Messages')}</th
 								>
 								<th
-									class="text-right px-4 py-2.5 text-[11px] font-medium uppercase tracking-wider text-gray-400 dark:text-gray-500"
+									class="text-right px-4 py-2.5 text-2xs font-medium uppercase tracking-wider text-gray-400 dark:text-gray-500"
 									>{$i18n.t('Prompt Tokens')}</th
 								>
 								<th
-									class="text-right px-4 py-2.5 text-[11px] font-medium uppercase tracking-wider text-gray-400 dark:text-gray-500"
+									class="text-right px-4 py-2.5 text-2xs font-medium uppercase tracking-wider text-gray-400 dark:text-gray-500"
 									>{$i18n.t('Completion Tokens')}</th
 								>
 								<th
-									class="text-right px-4 py-2.5 text-[11px] font-medium uppercase tracking-wider text-gray-400 dark:text-gray-500"
+									class="text-right px-4 py-2.5 text-2xs font-medium uppercase tracking-wider text-gray-400 dark:text-gray-500"
 									>{$i18n.t('Total Tokens')}</th
 								>
 							</tr>
@@ -905,7 +905,7 @@
 									<td class="px-4 py-2.5">
 										<div class="flex items-center gap-2">
 											<div
-												class="w-7 h-7 rounded-full {getAvatarColor(stat.user_id)} flex items-center justify-center text-[11px] font-bold shrink-0"
+												class="w-7 h-7 rounded-full {getAvatarColor(stat.user_id)} flex items-center justify-center text-2xs font-bold shrink-0"
 											>
 												{getUserDisplayName(stat.user_id)?.charAt(0)?.toUpperCase() ?? '?'}
 											</div>
@@ -986,7 +986,7 @@
 					<div class="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto scrollbar-hidden">
 						{#each cleanupModels as modelId}
 							<span
-								class="px-2 py-1 text-[11px] rounded-full border font-mono truncate max-w-full {isModelActive(
+								class="px-2 py-1 text-2xs rounded-full border font-mono truncate max-w-full {isModelActive(
 									modelId
 								)
 									? 'border-amber-200/70 dark:border-amber-900/40 bg-amber-50 dark:bg-amber-950/20 text-amber-800 dark:text-amber-200'

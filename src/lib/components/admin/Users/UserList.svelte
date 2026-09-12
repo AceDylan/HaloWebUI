@@ -439,7 +439,7 @@
 											<div class="flex min-w-0 items-center gap-1.5">
 												<span class="truncate font-semibold text-gray-900 dark:text-white">{user.name}</span>
 												{#if userNote}
-													<span class="inline-flex min-w-0 max-w-[16rem] shrink items-center rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-500 dark:bg-gray-700/40 dark:text-gray-400" title={userNote}>
+													<span class="inline-flex min-w-0 max-w-[16rem] shrink items-center rounded-full bg-gray-100 px-2 py-0.5 text-2xs font-medium text-gray-500 dark:bg-gray-700/40 dark:text-gray-400" title={userNote}>
 														<span class="truncate">{userNote}</span>
 													</span>
 												{/if}
@@ -636,7 +636,7 @@
 											<div class="flex min-w-0 items-center gap-1.5">
 												<span class="truncate font-semibold text-gray-900 dark:text-white">{user.name}</span>
 												{#if userNote}
-													<span class="inline-flex min-w-0 max-w-[14rem] shrink items-center rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-500 dark:bg-gray-700/40 dark:text-gray-400" title={userNote}>
+													<span class="inline-flex min-w-0 max-w-[14rem] shrink items-center rounded-full bg-gray-100 px-2 py-0.5 text-2xs font-medium text-gray-500 dark:bg-gray-700/40 dark:text-gray-400" title={userNote}>
 														<span class="truncate">{userNote}</span>
 													</span>
 												{/if}
@@ -777,7 +777,7 @@
 								<div class="flex min-w-0 items-center gap-1.5">
 									<span class="truncate font-semibold text-gray-900 dark:text-white">{user.name}</span>
 									{#if userNote}
-										<span class="inline-flex min-w-0 max-w-[12rem] shrink items-center rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-500 dark:bg-gray-700/40 dark:text-gray-400" title={userNote}>
+										<span class="inline-flex min-w-0 max-w-[12rem] shrink items-center rounded-full bg-gray-100 px-2 py-0.5 text-2xs font-medium text-gray-500 dark:bg-gray-700/40 dark:text-gray-400" title={userNote}>
 											<span class="truncate">{userNote}</span>
 										</span>
 									{/if}

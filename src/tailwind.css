@@ -21,31 +21,23 @@
 }
 
 @layer base {
+	/* The full stack lives in app.css (--font-sans); this fallback only covers the moment
+	   before app.css is applied. */
 	html,
 	pre {
-		font-family:
+		font-family: var(
+			--font-sans,
+			'Inter',
 			'HarmonyOS Sans',
-			'HarmonyOS Sans SC',
-			'Segoe UI',
 			-apple-system,
 			BlinkMacSystemFont,
 			'PingFang SC',
-			ui-sans-serif,
-			system-ui,
-			Roboto,
-			'Helvetica Neue',
-			Arial,
-			'Noto Sans',
-			'Hiragino Sans GB',
-			'Microsoft YaHei UI',
 			'Microsoft YaHei',
-			'Source Han Sans CN',
-			'WenQuanYi Micro Hei',
-			sans-serif,
-			'Apple Color Emoji',
-			'Segoe UI Emoji',
-			'Segoe UI Symbol',
-			'Noto Color Emoji';
+			'Segoe UI',
+			Roboto,
+			system-ui,
+			sans-serif
+		);
 	}
 
 	pre {

@@ -100,11 +100,11 @@ export let shareScopeLabel: string = '';
 				</button>
 			</Tooltip>
 			{#if shareActive}
-				<span class="self-center rounded-full bg-emerald-100 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300">
+				<span class="self-center rounded-full bg-emerald-100 px-1.5 py-0.5 text-2xs font-medium text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300">
 					共享中
 				</span>
 				{#if shareScopeLabel}
-					<span class="self-center rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-600 dark:bg-slate-800/70 dark:text-slate-300">
+					<span class="self-center rounded-full bg-slate-100 px-1.5 py-0.5 text-2xs font-medium text-slate-600 dark:bg-slate-800/70 dark:text-slate-300">
 						{shareScopeLabel}
 					</span>
 				{/if}

@@ -1653,7 +1653,7 @@
 											placeholder="1344x768"
 											class="w-full rounded-xl border border-gray-200/80 bg-white px-3 py-2 text-sm text-gray-800 outline-none transition focus:border-gray-300 dark:border-gray-700/60 dark:bg-gray-950/70 dark:text-gray-100 dark:focus:border-gray-600"
 										/>
-										<div class="flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-gray-500 dark:text-gray-400">
+										<div class="flex flex-wrap gap-x-3 gap-y-1 text-2xs text-gray-500 dark:text-gray-400">
 											<div>{$i18n.t('Enter a custom size like {{example}}.', { example: '1344x768' })}</div>
 											{#if activeSizeParsed}
 												<div>
@@ -2092,7 +2092,7 @@
 												{#each template.tags as tag}
 													<button
 														type="button"
-														class="max-w-full truncate rounded-full bg-gray-100 px-2 py-0.5 text-[11px] text-gray-600 transition hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-400 dark:hover:bg-gray-700"
+														class="max-w-full truncate rounded-full bg-gray-100 px-2 py-0.5 text-2xs text-gray-600 transition hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-400 dark:hover:bg-gray-700"
 														on:click={() => (templateTagFilter = tag)}
 													>
 														{tag}

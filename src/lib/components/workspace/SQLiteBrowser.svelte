@@ -110,7 +110,7 @@
 			<span class="text-sm font-mono truncate text-gray-600 dark:text-gray-300">
 				{getFileName(path)}
 			</span>
-			<span class="text-[10px] text-gray-400 bg-gray-100 dark:bg-gray-700 px-1.5 py-0.5 rounded"
+			<span class="text-2xs text-gray-400 bg-gray-100 dark:bg-gray-700 px-1.5 py-0.5 rounded"
 				>SQLite</span
 			>
 		</div>
@@ -128,7 +128,7 @@
 		<div
 			class="w-48 flex-shrink-0 border-r border-gray-200 dark:border-gray-700 overflow-y-auto bg-gray-50/50 dark:bg-gray-800/30"
 		>
-			<div class="px-2 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-gray-400">
+			<div class="px-2 py-1.5 text-2xs font-semibold uppercase tracking-wider text-gray-400">
 				{$i18n.t('Tables')}
 				{#if !loadingTables}
 					<span class="font-normal">({tables.length})</span>
@@ -181,18 +181,18 @@
 								</svg>
 							</span>
 							{table.name}
-							<span class="text-[10px] text-gray-400 ml-0.5">({table.columns.length})</span>
+							<span class="text-2xs text-gray-400 ml-0.5">({table.columns.length})</span>
 						</button>
 						<!-- Column tooltip on hover -->
 						{#if hoveredTable === table.name}
 							<div
 								class="absolute left-full top-0 ml-1 z-50 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg p-2 min-w-[180px] max-w-[280px]"
 							>
-								<div class="text-[10px] font-semibold text-gray-500 mb-1 uppercase">
+								<div class="text-2xs font-semibold text-gray-500 mb-1 uppercase">
 									{table.name}
 								</div>
 								{#each table.columns as col}
-									<div class="flex items-center gap-1 text-[11px] py-0.5">
+									<div class="flex items-center gap-1 text-2xs py-0.5">
 										{#if col.pk}
 											<span class="text-amber-500 flex-shrink-0" title="Primary Key">
 												<svg class="w-2.5 h-2.5" viewBox="0 0 24 24" fill="currentColor">
@@ -203,7 +203,7 @@
 											<span class="w-2.5 flex-shrink-0"></span>
 										{/if}
 										<span class="text-gray-700 dark:text-gray-200 truncate">{col.name}</span>
-										<span class="text-gray-400 ml-auto text-[10px] flex-shrink-0"
+										<span class="text-gray-400 ml-auto text-2xs flex-shrink-0"
 											>{col.type || 'any'}</span
 										>
 										{#if col.notnull}
@@ -258,7 +258,7 @@
 							{$i18n.t('Execute')}
 						</button>
 						<div class="flex items-center gap-1">
-							<label for="qlimit" class="text-[10px] text-gray-400 whitespace-nowrap"
+							<label for="qlimit" class="text-2xs text-gray-400 whitespace-nowrap"
 								>{$i18n.t('Limit')}</label
 							>
 							<HaloSelect
@@ -269,7 +269,7 @@
 									{ value: 500, label: '500' },
 									{ value: 1000, label: '1000' }
 								]}
-								className="text-[10px]"
+								className="text-2xs"
 							/>
 						</div>
 					</div>
@@ -314,7 +314,7 @@
 					{:else}
 						<!-- Row count bar -->
 						<div
-							class="px-3 py-1 text-[10px] text-gray-400 bg-gray-50 dark:bg-gray-800/30 border-b border-gray-100 dark:border-gray-800 sticky top-0"
+							class="px-3 py-1 text-2xs text-gray-400 bg-gray-50 dark:bg-gray-800/30 border-b border-gray-100 dark:border-gray-800 sticky top-0"
 						>
 							{result.rowCount}
 							{$i18n.t('rows')}

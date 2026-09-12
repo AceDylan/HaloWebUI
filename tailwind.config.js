@@ -37,30 +37,39 @@ export default {
 				}
 			},
 			fontFamily: {
+				// Keep in sync with --font-sans in src/app.css. Inter is bundled under
+				// static/assets/fonts; the CJK faces come from the OS.
 				sans: [
+					'Inter',
 					'HarmonyOS Sans',
 					'HarmonyOS Sans SC',
-					'Segoe UI',
 					'-apple-system',
 					'BlinkMacSystemFont',
 					'PingFang SC',
-					'ui-sans-serif',
-					'system-ui',
-					'Roboto',
-					'Helvetica Neue',
-					'Arial',
-					'Noto Sans',
 					'Hiragino Sans GB',
 					'Microsoft YaHei UI',
 					'Microsoft YaHei',
 					'Source Han Sans CN',
+					'Noto Sans CJK SC',
 					'WenQuanYi Micro Hei',
+					'Segoe UI',
+					'Roboto',
+					'Helvetica Neue',
+					'Arial',
+					'Noto Sans',
+					'ui-sans-serif',
+					'system-ui',
 					'sans-serif',
 					'Apple Color Emoji',
 					'Segoe UI Emoji',
 					'Segoe UI Symbol',
 					'Noto Color Emoji'
 				]
+			},
+			fontSize: {
+				// Smallest step of the type scale (11px). Replaces the ad-hoc text-[10px]/[11px]
+				// values so captions, badges and meta rows share one size.
+				'2xs': '0.6875rem'
 			},
 			typography: {
 				DEFAULT: {

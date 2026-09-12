@@ -1185,7 +1185,7 @@
 											{tavilyVerifyResult.search.message}
 										</div>
 										{#if tavilyVerifyResult.search.http_status}
-											<div class="mt-2 text-[11px] opacity-80">
+											<div class="mt-2 text-2xs opacity-80">
 												HTTP {tavilyVerifyResult.search.http_status}
 											</div>
 										{/if}
@@ -1206,7 +1206,7 @@
 											{tavilyVerifyResult.loader.message}
 										</div>
 										{#if tavilyVerifyResult.loader.http_status}
-											<div class="mt-2 text-[11px] opacity-80">
+											<div class="mt-2 text-2xs opacity-80">
 												HTTP {tavilyVerifyResult.loader.http_status}
 											</div>
 										{/if}
@@ -1308,7 +1308,7 @@
 												{$i18n.t('Current Engine Configuration')}
 											</div>
 											{#if currentWebSearchEngineOption}
-												<span class="inline-flex items-center rounded-full bg-gray-100/90 dark:bg-gray-800/80 px-2 py-0.5 text-[11px] font-medium text-gray-500 dark:text-gray-300">
+												<span class="inline-flex items-center rounded-full bg-gray-100/90 dark:bg-gray-800/80 px-2 py-0.5 text-2xs font-medium text-gray-500 dark:text-gray-300">
 													{currentWebSearchEngineOption.label}
 												</span>
 											{/if}

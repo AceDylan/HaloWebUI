@@ -1224,7 +1224,7 @@
 							</button>
 						{/if}
 						{#if ext === 'csv'}
-							<span class="text-[10px] text-gray-400 px-1">CSV</span>
+							<span class="text-2xs text-gray-400 px-1">CSV</span>
 						{/if}
 
 						<!-- J-1-12: Copy button for text files -->
@@ -1556,14 +1556,14 @@
 				</h3>
 				<div class="flex items-center gap-1">
 					<button
-						class="px-2 py-0.5 text-[11px] rounded text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800 transition"
+						class="px-2 py-0.5 text-2xs rounded text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800 transition"
 						on:click={loadPorts}
 						disabled={portsLoading}
 					>
 						{portsLoading ? $i18n.t('Loading...') : $i18n.t('Refresh')}
 					</button>
 					<button
-						class="px-2 py-0.5 text-[11px] rounded text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800 transition"
+						class="px-2 py-0.5 text-2xs rounded text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800 transition"
 						on:click={() => (showPortViewer = false)}
 					>
 						{$i18n.t('Close')}
@@ -1632,7 +1632,7 @@
 			</h3>
 			<input
 				type="text"
-				class="w-full px-3 py-2 text-sm border rounded-lg dark:bg-gray-900 dark:border-gray-700 outline-none focus:ring-1 focus:ring-blue-500"
+				class="w-full px-3 py-2 text-sm border rounded-lg dark:bg-gray-900 dark:border-gray-700 outline-none focus:ring-1 focus:ring-primary-500"
 				placeholder={$i18n.t('Name')}
 				bind:value={newItemName}
 				on:keydown={(e) => e.key === 'Enter' && handleCreate()}
@@ -1665,7 +1665,7 @@
 			<h3 class="text-sm font-medium mb-3">{$i18n.t('Rename')}</h3>
 			<input
 				type="text"
-				class="w-full px-3 py-2 text-sm border rounded-lg dark:bg-gray-900 dark:border-gray-700 outline-none focus:ring-1 focus:ring-blue-500"
+				class="w-full px-3 py-2 text-sm border rounded-lg dark:bg-gray-900 dark:border-gray-700 outline-none focus:ring-1 focus:ring-primary-500"
 				bind:value={renameName}
 				on:keydown={(e) => e.key === 'Enter' && handleRename()}
 			/>

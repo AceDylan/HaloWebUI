@@ -12,9 +12,8 @@
 	import { getChatsByFolderId } from '$lib/apis/chats';
 	import { chatId, selectedAssistantScene } from '$lib/stores';
 
-	import ChevronDown from '../../icons/ChevronDown.svelte';
-	import ChevronRight from '../../icons/ChevronRight.svelte';
 	import FolderOpen from '$lib/components/icons/FolderOpen.svelte';
+	import Folder from '$lib/components/icons/Folder.svelte';
 	import EllipsisHorizontal from '$lib/components/icons/EllipsisHorizontal.svelte';
 	import Collapsible from '../../common/Collapsible.svelte';
 	import ChatItem from './ChatItem.svelte';
@@ -202,28 +201,25 @@
 			<!-- svelte-ignore a11y-no-static-element-interactions -->
 			<div
 				id="folder-{folderId}-button"
-				class="relative flex min-h-[34px] w-full items-center gap-2 rounded-lg border px-2 py-1.5 text-left transition {hasActiveChat
-					? 'border-sky-200/70 bg-sky-50/70 text-gray-900 shadow-sm shadow-sky-900/[0.04] dark:border-sky-900/60 dark:bg-sky-950/20 dark:text-gray-100'
-					: 'border-gray-200/70 bg-gray-50/75 text-gray-700 hover:border-gray-300/80 hover:bg-white dark:border-gray-800/80 dark:bg-gray-900/35 dark:text-gray-200 dark:hover:border-gray-700/80 dark:hover:bg-gray-900/60'}"
+				class="relative flex min-h-[34px] w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left transition {hasActiveChat
+					? 'bg-[var(--sidebar-active-bg)] text-[var(--sidebar-active-fg)]'
+					: 'text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-850'}"
 				on:dblclick={() => {
 					editHandler();
 				}}
 			>
-				<div class="flex size-4 shrink-0 items-center justify-center text-gray-400 dark:text-gray-500">
-					{#if open}
-						<ChevronDown className=" size-3" strokeWidth="2.5" />
-					{:else}
-						<ChevronRight className=" size-3" strokeWidth="2.5" />
-					{/if}
-				</div>
-
 				<div
-					class="flex size-6 shrink-0 items-center justify-center rounded-md border border-gray-200/80 bg-white text-gray-500 shadow-xs dark:border-gray-700/70 dark:bg-gray-950/45 dark:text-gray-300"
+					class="flex size-6 shrink-0 items-center justify-center rounded-md {hasActiveChat
+						? 'text-[var(--sidebar-active-fg)]'
+						: 'text-gray-500 dark:text-gray-400'}"
+					aria-hidden="true"
 				>
 					{#if folderIcon}
 						<span class="text-sm leading-none">{folderIcon}</span>
+					{:else if open}
+						<FolderOpen className="size-4" strokeWidth="2" />
 					{:else}
-						<FolderOpen className="size-3.5" strokeWidth="2" />
+						<Folder className="size-4" strokeWidth="2" />
 					{/if}
 				</div>
 
@@ -255,17 +251,21 @@
 							class="h-full w-full bg-transparent text-[13px] font-semibold text-gray-800 outline-hidden dark:text-gray-100"
 						/>
 					{:else}
-						<div class="line-clamp-1 text-[13px] font-semibold leading-5">
+						<div class="line-clamp-1 text-[13px] font-medium leading-5">
 							{folder.name}
 						</div>
 					{/if}
 				</div>
 
-				<span
-					class="flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full border border-gray-200/70 bg-white/90 px-1.5 text-[11px] font-medium text-gray-500 dark:border-gray-700/70 dark:bg-gray-950/50 dark:text-gray-400"
-				>
-					{chatCount}
-				</span>
+				{#if chatCount > 0}
+					<span
+						class="flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full px-1.5 text-2xs font-medium tabular-nums {hasActiveChat
+							? 'bg-white/60 text-[var(--sidebar-active-fg)] dark:bg-black/25'
+							: 'bg-gray-200/70 text-gray-500 dark:bg-gray-800 dark:text-gray-400'}"
+					>
+						{chatCount}
+					</span>
+				{/if}
 
 				<!-- svelte-ignore a11y-no-static-element-interactions -->
 				<div
@@ -298,7 +298,7 @@
 		<div slot="content" class="w-full">
 			{#if (folder?.childrenIds ?? []).length > 0 || (folder.items?.chats ?? []).length > 0}
 				<div
-					class="ml-5 mt-1 mb-1 flex flex-col gap-0.5 overflow-y-auto rounded-r-lg border-s border-gray-200/80 bg-white/35 py-1 pl-2 scrollbar-hidden dark:border-gray-800/90 dark:bg-gray-950/20"
+					class="ml-4 mt-0.5 mb-1 flex flex-col gap-0.5 overflow-y-auto border-s border-gray-200/80 py-0.5 pl-2 scrollbar-hidden dark:border-gray-800/90"
 				>
 					{#if folder?.childrenIds}
 						{@const children = folder.childrenIds

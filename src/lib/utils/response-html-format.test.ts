@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
-import { isKnownInlineHtmlFormatFragment, renderResponseHtmlFormat } from './response-html-format';
+import {
+	HALO_RF_LIGHT_THEME,
+	hasHaloThemeVars,
+	isKnownInlineHtmlFormatFragment,
+	renderResponseHtmlFormat,
+	resolveHaloThemeVars
+} from './response-html-format';
 
 describe('response-html-format', () => {
 	it('renders markdown-like content as a Halo inline HTML fragment', () => {
@@ -272,5 +278,28 @@ Closes #
 		const idMatch = buttonMatch![0].match(/data-halo-copy-id="(code-[a-z0-9]+)"/)!;
 		expect(html).toContain(`<pre id="${idMatch[1]}"`);
 		expect(html).toContain('data-halo-code="true"');
+	});
+});
+
+describe('response-html-format theme variables', () => {
+	it('styles the fragment through theme variables instead of literal colors', () => {
+		const html = renderResponseHtmlFormat('# Report\n\nSummary text\n\n```ts\nconst a = 1;\n```');
+
+		expect(html).toContain('var(--halo-rf-text)');
+		expect(html).toContain('var(--halo-rf-surface)');
+		expect(html).toContain('var(--halo-rf-code-bg)');
+		expect(html).not.toMatch(/#(?:0f172a|ffffff|2563eb|e2e8f0)\b/i);
+		expect(hasHaloThemeVars(html)).toBe(true);
+	});
+
+	it('resolves theme variables to the live values and falls back to the light palette', () => {
+		const style =
+			'color: var(--halo-rf-text); background: var(--halo-rf-surface); border: 1px solid var(--halo-rf-border-subtle)';
+
+		expect(resolveHaloThemeVars(style, (name) => (name === 'text' ? ' #e6e8ee ' : ''))).toBe(
+			`color: #e6e8ee; background: ${HALO_RF_LIGHT_THEME.surface}; border: 1px solid ${HALO_RF_LIGHT_THEME['border-subtle']}`
+		);
+		expect(resolveHaloThemeVars(style)).not.toContain('var(--halo-rf-');
+		expect(hasHaloThemeVars(resolveHaloThemeVars(style))).toBe(false);
 	});
 });

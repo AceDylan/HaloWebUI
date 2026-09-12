@@ -49,6 +49,7 @@
 	import WebSearchResults from './ResponseMessage/WebSearchResults.svelte';
 	import WebSearchBadge from './ResponseMessage/WebSearchBadge.svelte';
 	import Sparkles from '$lib/components/icons/Sparkles.svelte';
+	import EllipsisHorizontal from '$lib/components/icons/EllipsisHorizontal.svelte';
 
 	import {
 		ChevronLeft,
@@ -686,6 +687,47 @@
 	let model: MessageModel | null = null;
 	$: model = findModelByIdentity($models, message.model) as unknown as MessageModel | null;
 	$: stats = getStatsDisplay(message);
+
+	// Speed / tokens / elapsed used to sit as a permanent line under the name. They now live
+	// behind the info button: hover shows the usage card, click (works on touch) toggles this
+	// inline row so the numbers stay reachable without hover.
+	let showStats = false;
+	let showMobileMoreMenu = false;
+
+	const toggleStats = async () => {
+		showStats = !showStats;
+		if (!showStats) return;
+		await tick();
+		// The row appears under the toolbar; at the end of the thread that is behind the input box.
+		document
+			.getElementById(`message-stats-${message.id}`)
+			?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+	};
+
+	const mobileActionButtonClass =
+		'p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-xl dark:hover:text-white hover:text-black transition-all duration-200 active:scale-95';
+	const mobileMenuItemClass =
+		'flex items-center gap-3 px-3 py-2.5 text-sm rounded-xl cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800';
+
+	const usageNumber = (value: unknown) => (typeof value === 'number' ? value.toLocaleString() : null);
+
+	function usageDetailRows(usage: unknown): [string, string][] {
+		if (!usage || typeof usage !== 'object') return [];
+		const data = usage as Record<string, unknown>;
+		const compDetails = (data.completion_tokens_details ?? data.output_tokens_details) as
+			| Record<string, unknown>
+			| null;
+		const promptDetails = (data.prompt_tokens_details ?? data.input_tokens_details) as
+			| Record<string, unknown>
+			| null;
+		const candidates: [string, string | null][] = [
+			[tr('输入', 'Input'), usageNumber(data.prompt_tokens ?? data.input_tokens)],
+			[tr('输出', 'Output'), usageNumber(data.completion_tokens ?? data.output_tokens)],
+			[tr('推理', 'Reasoning'), usageNumber(compDetails?.reasoning_tokens)],
+			[tr('缓存', 'Cached'), usageNumber(promptDetails?.cached_tokens)]
+		];
+		return candidates.filter((row): row is [string, string] => row[1] !== null);
+	}
 	const toDiscussionArray = (value: unknown) => (Array.isArray(value) ? value : []);
 	const getDiscussionParticipantName = (participant: any): string =>
 		`${participant?.name ?? participant?.id ?? ''}`.trim();
@@ -1060,7 +1102,10 @@
 	}
 
 	// Token 用量 — 生成毛玻璃卡片 HTML（供 Tooltip 渲染）
-	function formatUsageHtml(usage: unknown): string {
+	function formatUsageHtml(
+		usage: unknown,
+		statsInfo: { speed: string; tokens: string; elapsed: string } | null = null
+	): string {
 		if (!usage || typeof usage !== 'object') return '';
 
 		const data = usage as Record<string, unknown>;
@@ -1107,7 +1152,20 @@
 				: `<span style="color:${vl};font-style:italic">${tr('未返回', 'Not returned')}</span>`;
 			h += `</div>`;
 		}
-		h += `</div></div>`;
+		h += `</div>`;
+
+		if (statsInfo && (statsInfo.speed || statsInfo.elapsed)) {
+			h += `<div style="display:flex;justify-content:space-between;gap:12px;margin-top:8px;padding-top:6px;border-top:1px solid ${dv};font-size:12px">`;
+			if (statsInfo.speed) {
+				h += `<span style="color:${lb}">${tr('速度', 'Speed')} <span style="font-weight:500;font-variant-numeric:tabular-nums;color:${vl}">${statsInfo.speed} T/s</span></span>`;
+			}
+			if (statsInfo.elapsed) {
+				h += `<span style="color:${lb}">${tr('耗时', 'Elapsed')} <span style="font-weight:500;font-variant-numeric:tabular-nums;color:${vl}">${statsInfo.elapsed} s</span></span>`;
+			}
+			h += `</div>`;
+		}
+
+		h += `</div>`;
 
 		return h;
 	}
@@ -1287,14 +1345,6 @@
 				</div>
 			{/if}
 
-			{#if stats && (stats.speed || stats.tokens || stats.elapsed)}
-				<div class="text-gray-500 dark:text-gray-400 mt-1 ml-0.5 text-xs sm:text-sm">
-					{#if stats.speed}{tr('速度', 'Speed')}: {stats.speed} T/s{/if}{#if stats.speed && (stats.tokens || stats.elapsed)}{' | '}{/if}{#if stats.tokens}{tr('消耗', 'Tokens')}:
-						{stats.tokens} {$i18n.t('Token')}{/if}{#if stats.tokens && stats.elapsed}{' | '}{/if}{#if stats.elapsed}{tr('耗时', 'Elapsed')}:
-						{stats.elapsed} s{/if}
-				</div>
-			{/if}
-
 			{#if message.instruction}
 				<div
 					class="flex items-baseline gap-1.5 mt-1 ml-0.5 text-xs text-gray-400 dark:text-gray-500 italic"
@@ -1306,7 +1356,7 @@
 
 			<div
 				data-halo-response-card="true"
-				class="mt-2 -ml-4 w-[calc(100%+1rem)] rounded-2xl border border-gray-200/80 bg-white px-3.5 py-3 shadow-sm dark:border-gray-800 dark:bg-gray-850 sm:ml-0 sm:w-auto sm:px-5 sm:py-4"
+				class="mt-1.5 -ml-4 w-[calc(100%+1rem)] px-1 py-0.5 sm:ml-0 sm:w-auto sm:px-1"
 			>
 				<div class="chat-{message.role} w-full min-w-full markdown-prose">
 					<div>
@@ -1451,7 +1501,7 @@
 													<div class="min-h-0 overflow-y-auto text-xs leading-5 break-words">
 														{imageGenerationErrorText(file)}
 													</div>
-													<div class="text-[11px] text-red-600/80 dark:text-red-300/80">
+													<div class="text-2xs text-red-600/80 dark:text-red-300/80">
 														{tr('第 {{index}} 张', 'Image {{index}}', {
 															index: imageGenerationSlotNumber(file, index)
 															})}
@@ -1784,7 +1834,192 @@
 								/>
 							</div>
 						{/if}
-						{#if message.done || siblings.length > 1}
+						{#if $mobile && message.done}
+							<!-- Phone: copy + regenerate stay inline, everything else folds into "More". Always
+							     visible because touch has no hover. -->
+							<div
+								class="flex items-center gap-0.5 buttons text-gray-600 dark:text-gray-300 px-0.5 h-[37px] w-fit min-w-0 max-w-full toolbar-appear"
+								data-halo-mobile-actions="true"
+							>
+								{#if siblings.length > 1}
+									<div class="flex self-center min-w-fit" dir="ltr">
+										<button
+											type="button"
+											class="self-center p-1 hover:bg-black/5 dark:hover:bg-white/5 rounded-lg transition-all duration-200 active:scale-95"
+											aria-label={tr('上一条回复', 'Previous response')}
+											on:click={() => {
+												showPreviousMessage(message);
+											}}
+										>
+											<ChevronLeft class="size-3.5" strokeWidth={2.5} />
+										</button>
+										<div
+											class="text-xs tracking-wider font-medium self-center text-gray-500 dark:text-gray-300 min-w-fit tabular-nums"
+										>
+											{siblings.indexOf(message.id) + 1}/{siblings.length}
+										</div>
+										<button
+											type="button"
+											class="self-center p-1 hover:bg-black/5 dark:hover:bg-white/5 rounded-lg transition-all duration-200 active:scale-95"
+											aria-label={tr('下一条回复', 'Next response')}
+											on:click={() => {
+												showNextMessage(message);
+											}}
+										>
+											<ChevronRight class="size-3.5" strokeWidth={2.5} />
+										</button>
+									</div>
+									<div class="w-px h-4 bg-gray-300/40 dark:bg-gray-600/40 mx-0.5 self-center"></div>
+								{/if}
+
+								<button
+									type="button"
+									class="{mobileActionButtonClass} copy-response-button"
+									aria-label={$i18n.t('Copy')}
+									on:click={() => {
+										copyToClipboard(message.content);
+									}}
+								>
+									<Copy class="w-4 h-4" strokeWidth={2} />
+								</button>
+
+								{#if !readOnly}
+									<button
+										type="button"
+										class="{mobileActionButtonClass} regenerate-response-button"
+										aria-label={$i18n.t('Regenerate')}
+										on:click={() => {
+											doRegenerate();
+										}}
+									>
+										<RefreshCw class="w-4 h-4" strokeWidth={2} />
+									</button>
+								{/if}
+
+								<Dropdown bind:show={showMobileMoreMenu} side="top" align="end">
+									<button
+										type="button"
+										class={mobileActionButtonClass}
+										aria-label={$i18n.t('More')}
+										aria-haspopup="menu"
+										aria-expanded={showMobileMoreMenu}
+									>
+										<EllipsisHorizontal className="size-4" strokeWidth="2" />
+									</button>
+
+									<div slot="content">
+										<DropdownMenu.Content
+											class="w-52 rounded-2xl px-1.5 py-1.5 border border-gray-300/30 dark:border-gray-700/50 z-50 bg-white dark:bg-gray-850 dark:text-white shadow-lg"
+											sideOffset={8}
+											side="top"
+											align="end"
+											transition={flyAndScale}
+										>
+											{#if !readOnly && ($user?.role === 'user' ? ($user?.permissions?.chat?.edit ?? true) : true)}
+												<DropdownMenu.Item
+													class={mobileMenuItemClass}
+													on:click={() => {
+														showMobileMoreMenu = false;
+														editMessageHandler();
+													}}
+												>
+													<PencilLine class="w-4 h-4 shrink-0" strokeWidth={1.75} />
+													<span>{$i18n.t('Edit')}</span>
+												</DropdownMenu.Item>
+											{/if}
+
+											{#if !readOnly && branchSupported}
+												<DropdownMenu.Item
+													class="{mobileMenuItemClass} {isBranching ? 'opacity-50' : ''}"
+													disabled={isBranching}
+													on:click={() => {
+														showMobileMoreMenu = false;
+														onBranchMessage(message.id);
+													}}
+												>
+													<GitBranchPlus class="w-4 h-4 shrink-0" strokeWidth={1.75} />
+													<span>{branchTooltip}</span>
+												</DropdownMenu.Item>
+											{/if}
+
+											{#if $user?.role === 'admin' || ($user?.permissions?.chat?.tts ?? true)}
+												<DropdownMenu.Item
+													class={mobileMenuItemClass}
+													on:click={() => {
+														showMobileMoreMenu = false;
+														if (!loadingSpeech) {
+															toggleSpeakMessage();
+														}
+													}}
+												>
+													{#if speaking}
+														<VolumeX class="w-4 h-4 shrink-0" strokeWidth={1.75} />
+														<span>{$i18n.t('Stop')}</span>
+													{:else}
+														<Volume2 class="w-4 h-4 shrink-0" strokeWidth={1.75} />
+														<span>{$i18n.t('Read Aloud')}</span>
+													{/if}
+												</DropdownMenu.Item>
+											{/if}
+
+											{#if message.usage}
+												<DropdownMenu.Item
+													class={mobileMenuItemClass}
+													on:click={() => {
+														showMobileMoreMenu = false;
+														void toggleStats();
+													}}
+												>
+													<Info class="w-4 h-4 shrink-0" strokeWidth={1.75} />
+													<span>{showStats ? tr('隐藏统计信息', 'Hide stats') : tr('统计信息', 'Stats')}</span>
+												</DropdownMenu.Item>
+											{/if}
+
+											{#if !readOnly}
+												{#if isLastMessage}
+													<DropdownMenu.Item
+														class={mobileMenuItemClass}
+														on:click={() => {
+															showMobileMoreMenu = false;
+															continueResponse();
+														}}
+													>
+														<PlayCircle class="w-4 h-4 shrink-0" strokeWidth={1.75} />
+														<span>{$i18n.t('Continue Response')}</span>
+													</DropdownMenu.Item>
+
+													{#each model?.actions ?? [] as action}
+														<DropdownMenu.Item
+															class={mobileMenuItemClass}
+															on:click={() => {
+																showMobileMoreMenu = false;
+																actionMessage(action.id, message);
+															}}
+														>
+															<Sparkles strokeWidth="2.1" className="size-4 shrink-0" />
+															<span>{action.name}</span>
+														</DropdownMenu.Item>
+													{/each}
+												{/if}
+
+												<hr class="border-black/5 dark:border-white/5 my-0.5" />
+
+												<DropdownMenu.Item
+													class="{mobileMenuItemClass} text-red-600 dark:text-red-400"
+													on:click={() => {
+														showMobileMoreMenu = false;
+														showDeleteConfirm = true;
+													}}
+												>
+													<Trash2 class="w-4 h-4 shrink-0" strokeWidth={1.75} />
+													<span>{$i18n.t('Delete')}</span>
+												</DropdownMenu.Item>
+											{/if}
+										</DropdownMenu.Content>
+									</div>
+								</Dropdown>
+							</div>
+						{:else if message.done || siblings.length > 1}
 							<div
 								bind:this={buttonsContainerElement}
 								class="flex items-center gap-0.5 overflow-x-auto buttons text-gray-600 dark:text-gray-300 px-0.5 h-[37px] {isLastMessage
@@ -1996,7 +2231,7 @@
 
 									{#if message.usage}
 										<Tooltip
-											content={formatUsageHtml(message.usage)}
+											content={formatUsageHtml(message.usage, stats)}
 											placement="bottom"
 											offset={[0, 8]}
 											tippyOptions={{
@@ -2019,8 +2254,15 @@
 											<button
 												class="{isLastMessage
 													? 'visible'
-													: 'invisible group-hover:visible'} p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-xl dark:hover:text-white hover:text-black transition-all duration-200 hover:scale-110 active:scale-95"
+													: 'invisible group-hover:visible'} p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-xl dark:hover:text-white hover:text-black transition-all duration-200 hover:scale-110 active:scale-95 {showStats
+													? 'text-primary-600 dark:text-primary-300'
+													: ''}"
 												id="info-{message.id}"
+												type="button"
+												aria-label={tr('统计信息', 'Stats')}
+												aria-expanded={showStats}
+												aria-controls="message-stats-{message.id}"
+												on:click={toggleStats}
 											>
 												<Info class="w-4 h-4" strokeWidth={2} />
 											</button>
@@ -2246,6 +2488,26 @@
 							</div>
 						{/if}
 					</div>
+
+					{#if showStats && message.usage}
+						<div
+							id="message-stats-{message.id}"
+							class="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 px-0.5 text-2xs text-gray-500 dark:text-gray-400 tabular-nums"
+						>
+							{#if stats?.speed}
+								<span>{tr('速度', 'Speed')} {stats.speed} T/s</span>
+							{/if}
+							{#if stats?.tokens}
+								<span>{tr('消耗', 'Tokens')} {stats.tokens} {$i18n.t('Token')}</span>
+							{/if}
+							{#if stats?.elapsed}
+								<span>{tr('耗时', 'Elapsed')} {stats.elapsed} s</span>
+							{/if}
+							{#each usageDetailRows(message.usage) as [label, value]}
+								<span>{label} {value}</span>
+							{/each}
+						</div>
+					{/if}
 
 					<!-- [REACTION_FEATURE] Commented out - reaction display disabled for now
 					{#if reactions.length > 0}

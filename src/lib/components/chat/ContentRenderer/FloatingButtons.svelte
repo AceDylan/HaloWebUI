@@ -660,7 +660,7 @@
 				on:click={() => onSetActiveThread(thread.id)}
 				aria-label={$i18n.t('Open selection thread')}
 			>
-				<span class="text-[10px] font-semibold">{getThreadMarkerLabel(thread)}</span>
+				<span class="text-2xs font-semibold">{getThreadMarkerLabel(thread)}</span>
 				{#if thread.pinned}
 					<span class="selection-thread-dot bg-amber-400"></span>
 				{:else if lastAssistantTurn?.role === 'assistant' && lastAssistantTurn.state === 'streaming'}

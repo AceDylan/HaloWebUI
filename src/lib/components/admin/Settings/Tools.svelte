@@ -1007,7 +1007,7 @@
 								<div class="flex items-center justify-between">
 									<div class="text-xs text-gray-500">
 										{$i18n.t('网络搜索')}
-										<code class="text-[11px] bg-gray-100/80 dark:bg-gray-800/60 px-1 py-0.5 rounded font-mono">search_web</code
+										<code class="text-2xs bg-gray-100/80 dark:bg-gray-800/60 px-1 py-0.5 rounded font-mono">search_web</code
 										>
 									</div>
 									<Switch bind:state={nativeToolsConfig.ENABLE_WEB_SEARCH_TOOL} />
@@ -1015,14 +1015,14 @@
 								<div class="flex items-center justify-between">
 									<div class="text-xs text-gray-500">
 										{$i18n.t('网址抓取')}
-										<code class="text-[11px] bg-gray-100/80 dark:bg-gray-800/60 px-1 py-0.5 rounded font-mono">fetch_url</code>
+										<code class="text-2xs bg-gray-100/80 dark:bg-gray-800/60 px-1 py-0.5 rounded font-mono">fetch_url</code>
 									</div>
 									<Switch bind:state={nativeToolsConfig.ENABLE_URL_FETCH} />
 								</div>
 								<div class="flex items-center justify-between">
 									<div class="text-xs text-gray-500">
 										{$i18n.t('网址抓取（渲染）')}
-										<code class="text-[11px] bg-gray-100/80 dark:bg-gray-800/60 px-1 py-0.5 rounded font-mono"
+										<code class="text-2xs bg-gray-100/80 dark:bg-gray-800/60 px-1 py-0.5 rounded font-mono"
 											>fetch_url_rendered</code
 										>
 									</div>
@@ -1040,7 +1040,7 @@
 								<div class="flex items-center justify-between">
 									<div class="text-xs text-gray-500">
 										{$i18n.t('列出知识库')}
-										<code class="text-[11px] bg-gray-100/80 dark:bg-gray-800/60 px-1 py-0.5 rounded font-mono"
+										<code class="text-2xs bg-gray-100/80 dark:bg-gray-800/60 px-1 py-0.5 rounded font-mono"
 											>list_knowledge_bases</code
 										>
 									</div>
@@ -1049,7 +1049,7 @@
 								<div class="flex items-center justify-between">
 									<div class="text-xs text-gray-500">
 										{$i18n.t('搜索知识库')}
-										<code class="text-[11px] bg-gray-100/80 dark:bg-gray-800/60 px-1 py-0.5 rounded font-mono"
+										<code class="text-2xs bg-gray-100/80 dark:bg-gray-800/60 px-1 py-0.5 rounded font-mono"
 											>search_knowledge_bases</code
 										>
 									</div>
@@ -1058,10 +1058,10 @@
 								<div class="flex items-center justify-between">
 									<div class="text-xs text-gray-500">
 										{$i18n.t('检索知识内容')}
-										<code class="text-[11px] bg-gray-100/80 dark:bg-gray-800/60 px-1 py-0.5 rounded font-mono"
+										<code class="text-2xs bg-gray-100/80 dark:bg-gray-800/60 px-1 py-0.5 rounded font-mono"
 											>query_knowledge_bases</code
 										>
-										<code class="text-[11px] bg-gray-100/80 dark:bg-gray-800/60 px-1 py-0.5 rounded font-mono"
+										<code class="text-2xs bg-gray-100/80 dark:bg-gray-800/60 px-1 py-0.5 rounded font-mono"
 											>search_knowledge_files</code
 										>
 									</div>
@@ -1070,7 +1070,7 @@
 								<div class="flex items-center justify-between">
 									<div class="text-xs text-gray-500">
 										{$i18n.t('查看知识文件')}
-										<code class="text-[11px] bg-gray-100/80 dark:bg-gray-800/60 px-1 py-0.5 rounded font-mono"
+										<code class="text-2xs bg-gray-100/80 dark:bg-gray-800/60 px-1 py-0.5 rounded font-mono"
 											>view_knowledge_file</code
 										>
 									</div>
@@ -1088,7 +1088,7 @@
 								<div class="flex items-center justify-between">
 									<div class="text-xs text-gray-500">
 										{$i18n.t('生成图像')}
-										<code class="text-[11px] bg-gray-100/80 dark:bg-gray-800/60 px-1 py-0.5 rounded font-mono"
+										<code class="text-2xs bg-gray-100/80 dark:bg-gray-800/60 px-1 py-0.5 rounded font-mono"
 											>generate_image</code
 										>
 									</div>
@@ -1097,7 +1097,7 @@
 								<div class="flex items-center justify-between">
 									<div class="text-xs text-gray-500">
 										{$i18n.t('编辑图像')}
-										<code class="text-[11px] bg-gray-100/80 dark:bg-gray-800/60 px-1 py-0.5 rounded font-mono">edit_image</code
+										<code class="text-2xs bg-gray-100/80 dark:bg-gray-800/60 px-1 py-0.5 rounded font-mono">edit_image</code
 										>
 									</div>
 									<Switch bind:state={nativeToolsConfig.ENABLE_IMAGE_EDIT} />
@@ -1117,12 +1117,12 @@
 								<div class="flex items-center justify-between">
 									<div class="text-xs text-gray-500">
 										{$i18n.t('启用记忆工具')}
-										<code class="text-[11px] bg-gray-100/80 dark:bg-gray-800/60 px-1 py-0.5 rounded font-mono">add_memory</code
+										<code class="text-2xs bg-gray-100/80 dark:bg-gray-800/60 px-1 py-0.5 rounded font-mono">add_memory</code
 										>
-										<code class="text-[11px] bg-gray-100/80 dark:bg-gray-800/60 px-1 py-0.5 rounded font-mono"
+										<code class="text-2xs bg-gray-100/80 dark:bg-gray-800/60 px-1 py-0.5 rounded font-mono"
 											>search_memories</code
 										>
-										<code class="text-[11px] bg-gray-100/80 dark:bg-gray-800/60 px-1 py-0.5 rounded font-mono"
+										<code class="text-2xs bg-gray-100/80 dark:bg-gray-800/60 px-1 py-0.5 rounded font-mono"
 											>forget_memory</code
 										>
 									</div>
@@ -1140,8 +1140,8 @@
 								<div class="flex items-center justify-between">
 									<div class="text-xs text-gray-500">
 										{$i18n.t('启用笔记工具（实验）')}
-										<code class="text-[11px] bg-gray-100/80 dark:bg-gray-800/60 px-1 py-0.5 rounded font-mono">add_note</code>
-										<code class="text-[11px] bg-gray-100/80 dark:bg-gray-800/60 px-1 py-0.5 rounded font-mono"
+										<code class="text-2xs bg-gray-100/80 dark:bg-gray-800/60 px-1 py-0.5 rounded font-mono">add_note</code>
+										<code class="text-2xs bg-gray-100/80 dark:bg-gray-800/60 px-1 py-0.5 rounded font-mono"
 											>search_notes</code
 										>
 									</div>
@@ -1159,7 +1159,7 @@
 								<div class="flex items-center justify-between">
 									<div class="text-xs text-gray-500">
 										{$i18n.t('对话历史')}
-										<code class="text-[11px] bg-gray-100/80 dark:bg-gray-800/60 px-1 py-0.5 rounded font-mono"
+										<code class="text-2xs bg-gray-100/80 dark:bg-gray-800/60 px-1 py-0.5 rounded font-mono"
 											>search_chats</code
 										>
 									</div>
@@ -1168,13 +1168,13 @@
 								<div class="flex items-center justify-between">
 									<div class="text-xs text-gray-500">
 										{$i18n.t('时间与日期')}
-										<code class="text-[11px] bg-gray-100/80 dark:bg-gray-800/60 px-1 py-0.5 rounded font-mono"
+										<code class="text-2xs bg-gray-100/80 dark:bg-gray-800/60 px-1 py-0.5 rounded font-mono"
 											>get_current_time</code
 										>
-										<code class="text-[11px] bg-gray-100/80 dark:bg-gray-800/60 px-1 py-0.5 rounded font-mono"
+										<code class="text-2xs bg-gray-100/80 dark:bg-gray-800/60 px-1 py-0.5 rounded font-mono"
 											>get_current_date</code
 										>
-										<code class="text-[11px] bg-gray-100/80 dark:bg-gray-800/60 px-1 py-0.5 rounded font-mono"
+										<code class="text-2xs bg-gray-100/80 dark:bg-gray-800/60 px-1 py-0.5 rounded font-mono"
 											>get_current_timestamp</code
 										>
 									</div>
@@ -1183,13 +1183,13 @@
 								<div class="flex items-center justify-between">
 									<div class="text-xs text-gray-500">
 										{$i18n.t('频道工具')}
-										<code class="text-[11px] bg-gray-100/80 dark:bg-gray-800/60 px-1 py-0.5 rounded font-mono"
+										<code class="text-2xs bg-gray-100/80 dark:bg-gray-800/60 px-1 py-0.5 rounded font-mono"
 											>search_channels</code
 										>
-										<code class="text-[11px] bg-gray-100/80 dark:bg-gray-800/60 px-1 py-0.5 rounded font-mono"
+										<code class="text-2xs bg-gray-100/80 dark:bg-gray-800/60 px-1 py-0.5 rounded font-mono"
 											>search_channel_messages</code
 										>
-										<code class="text-[11px] bg-gray-100/80 dark:bg-gray-800/60 px-1 py-0.5 rounded font-mono"
+										<code class="text-2xs bg-gray-100/80 dark:bg-gray-800/60 px-1 py-0.5 rounded font-mono"
 											>view_channel_message</code
 										>
 									</div>
@@ -1198,7 +1198,7 @@
 								<div class="flex items-center justify-between">
 									<div class="text-xs text-gray-500">
 										{$i18n.t('终端命令')}
-										<code class="text-[11px] bg-gray-100/80 dark:bg-gray-800/60 px-1 py-0.5 rounded font-mono"
+										<code class="text-2xs bg-gray-100/80 dark:bg-gray-800/60 px-1 py-0.5 rounded font-mono"
 											>execute_command</code
 										>
 									</div>
@@ -1289,7 +1289,7 @@
 													</div>
 													{#if server.tool_count != null}
 														<span
-															class="px-1.5 py-0.5 text-[10px] rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 shrink-0"
+															class="px-1.5 py-0.5 text-2xs rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 shrink-0"
 														>
 															{server.tool_count}
 															{$i18n.t('个工具')}

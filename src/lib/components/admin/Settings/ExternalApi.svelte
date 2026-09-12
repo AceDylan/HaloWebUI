@@ -307,14 +307,14 @@
 									<div class="min-w-0">
 										<div class="flex items-center gap-2 flex-wrap">
 											<div class="text-sm font-semibold text-gray-800 dark:text-gray-100">{client.name}</div>
-											<span class="text-[10px] rounded-full px-2 py-0.5 bg-gray-100 dark:bg-gray-800 text-gray-500">{client.key_prefix}</span>
+											<span class="text-2xs rounded-full px-2 py-0.5 bg-gray-100 dark:bg-gray-800 text-gray-500">{client.key_prefix}</span>
 											{#if client.enabled}
-												<span class="text-[10px] rounded-full px-2 py-0.5 bg-green-100 dark:bg-green-900/30 text-green-600">启用</span>
+												<span class="text-2xs rounded-full px-2 py-0.5 bg-green-100 dark:bg-green-900/30 text-green-600">启用</span>
 											{:else}
-												<span class="text-[10px] rounded-full px-2 py-0.5 bg-gray-100 dark:bg-gray-800 text-gray-500">停用</span>
+												<span class="text-2xs rounded-full px-2 py-0.5 bg-gray-100 dark:bg-gray-800 text-gray-500">停用</span>
 											{/if}
 											{#if client.allow_tools}
-												<span class="text-[10px] rounded-full px-2 py-0.5 bg-blue-100 dark:bg-blue-900/30 text-blue-600">工具</span>
+												<span class="text-2xs rounded-full px-2 py-0.5 bg-blue-100 dark:bg-blue-900/30 text-blue-600">工具</span>
 											{/if}
 										</div>
 										<div class="mt-1 text-xs text-gray-500 break-all">

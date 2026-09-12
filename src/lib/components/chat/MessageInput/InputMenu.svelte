@@ -346,7 +346,7 @@
 										<div class="truncate">{skills[skillId].name}</div>
 										{#if skills[skillId]?.meta?.runtime?.mode === 'runnable' || skills[skillId]?.meta?.auto_enabled}
 											<div
-												class="mt-0.5 flex gap-1 text-[10px] font-medium text-gray-500 dark:text-gray-400"
+												class="mt-0.5 flex gap-1 text-2xs font-medium text-gray-500 dark:text-gray-400"
 											>
 												{#if skills[skillId]?.meta?.runtime?.mode === 'runnable'}
 													<span>{$i18n.t('Runnable')}</span>
@@ -415,7 +415,7 @@
 										<div class="truncate">{option.label}</div>
 										{#if option.badge}
 											<span
-												class="shrink-0 rounded-full bg-gray-100 px-1.5 py-0.5 text-[10px] font-medium text-gray-500 dark:bg-gray-800 dark:text-gray-400"
+												class="shrink-0 rounded-full bg-gray-100 px-1.5 py-0.5 text-2xs font-medium text-gray-500 dark:bg-gray-800 dark:text-gray-400"
 											>
 												{option.badge}
 											</span>

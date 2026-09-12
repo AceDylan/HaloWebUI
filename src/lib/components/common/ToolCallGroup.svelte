@@ -158,7 +158,7 @@
 				{/if}
 			</div>
 			{#if someExecuting && doneCount > 0}
-				<div class="text-[11px] leading-4 text-gray-400 dark:text-gray-500 tabular-nums">
+				<div class="text-2xs leading-4 text-gray-400 dark:text-gray-500 tabular-nums">
 					{doneCount}/{totalCount}
 				</div>
 			{/if}
@@ -166,7 +166,7 @@
 
 		<div class="flex shrink-0 items-center gap-2">
 			<span
-				class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ring-1 {someExecuting
+				class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-2xs font-medium ring-1 {someExecuting
 					? 'bg-primary-50 text-primary-600 ring-primary-200/70 dark:bg-primary-900/20 dark:text-primary-300 dark:ring-primary-800/50'
 					: 'bg-green-50 text-green-600 ring-green-200/70 dark:bg-green-900/20 dark:text-green-400 dark:ring-green-800/60'}"
 			>
@@ -237,7 +237,7 @@
 					class="mt-2 pl-3 border-l-2 border-primary-300/60 dark:border-primary-600/40"
 					transition:slide={{ duration: 200, easing: quintOut }}
 				>
-					<div class="text-[11px] text-gray-400 dark:text-gray-500 mb-1.5 font-medium">
+					<div class="text-2xs text-gray-400 dark:text-gray-500 mb-1.5 font-medium">
 						{toolName}
 					</div>
 
@@ -291,7 +291,7 @@
 										</div>
 										{#if item.snippet}
 											<span
-												class="text-[11px] text-gray-400 dark:text-gray-500 line-clamp-2 ml-[22px]"
+												class="text-2xs text-gray-400 dark:text-gray-500 line-clamp-2 ml-[22px]"
 											>
 												{item.snippet}
 											</span>
@@ -325,12 +325,12 @@
 									<span class="text-xs font-medium text-gray-700 dark:text-gray-200 line-clamp-1">
 										{fetchResult.title || fetchResult.domain}
 									</span>
-									<span class="text-[11px] text-gray-400 dark:text-gray-500 line-clamp-1">
+									<span class="text-2xs text-gray-400 dark:text-gray-500 line-clamp-1">
 										{fetchResult.url}
 									</span>
 								</div>
 								<span
-									class="ml-auto text-[10px] px-1.5 py-0.5 rounded-full shrink-0 font-medium
+									class="ml-auto text-2xs px-1.5 py-0.5 rounded-full shrink-0 font-medium
 									{fetchResult.status === 'ok'
 										? 'bg-green-100 text-green-600 dark:bg-green-900/30 dark:text-green-400'
 										: 'bg-yellow-100 text-yellow-600 dark:bg-yellow-900/30 dark:text-yellow-400'}"

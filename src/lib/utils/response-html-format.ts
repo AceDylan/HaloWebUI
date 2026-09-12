@@ -24,21 +24,78 @@ type ParsedBlock =
 
 type StructuredDetailType = 'reasoning' | 'tool_calls' | 'code_interpreter';
 
-const THEME = {
+/**
+ * Light palette of the formatted response. The rendered HTML never embeds these literals;
+ * it references `var(--halo-rf-<name>)` so the same fragment follows the app theme (the dark
+ * values live in app.css). `resolveHaloThemeVars` swaps the references back to literal colors
+ * when the HTML leaves the page (clipboard), so the copy still renders on its own.
+ */
+export const HALO_RF_LIGHT_THEME: Record<string, string> = {
 	bg: '#f8fafc',
 	surface: '#ffffff',
 	panel: '#f1f5f9',
 	text: '#0f172a',
 	muted: '#64748b',
 	primary: '#2563eb',
-	primarySoft: '#eff6ff',
+	'primary-light': '#60a5fa',
+	'primary-soft': '#eff6ff',
 	accent: '#f59e0b',
-	accentSoft: '#fffbeb',
+	'accent-soft': '#fffbeb',
+	success: '#16a34a',
 	border: '#cbd5e1',
-	borderSubtle: '#e2e8f0',
-	codeBg: '#0f172a',
-	codeText: '#e2e8f0',
-	shadow: '0 4px 6px -1px rgba(15, 23, 42, 0.06), 0 2px 4px -2px rgba(15, 23, 42, 0.06)'
+	'border-subtle': '#e2e8f0',
+	'code-bg': '#0f172a',
+	'code-text': '#e2e8f0',
+	shadow: '0 4px 6px -1px rgba(15, 23, 42, 0.06), 0 2px 4px -2px rgba(15, 23, 42, 0.06)',
+	'shadow-lg': '0 12px 28px rgba(15, 23, 42, 0.12)',
+	'shadow-md': '0 8px 24px rgba(15, 23, 42, 0.05)',
+	'heading-glow': '0 6px 16px rgba(37, 99, 235, 0.2)'
+};
+
+const HALO_RF_VAR_PREFIX = '--halo-rf-';
+const HALO_RF_VAR_PATTERN = /var\(--halo-rf-([a-z][a-z0-9-]*)\)/g;
+
+const rf = (name: string) => `var(${HALO_RF_VAR_PREFIX}${name})`;
+
+/**
+ * Replace every `var(--halo-rf-*)` reference in a style string with a literal value.
+ * `lookup` should return the value currently in effect (e.g. from getComputedStyle); when it
+ * yields nothing the light palette is used so the output never contains a dangling var().
+ */
+export const resolveHaloThemeVars = (
+	style: string,
+	lookup?: (name: string) => string | null | undefined
+): string =>
+	style.replace(HALO_RF_VAR_PATTERN, (match, name: string) => {
+		const live = lookup?.(name)?.trim();
+		if (live) {
+			return live;
+		}
+		return HALO_RF_LIGHT_THEME[name] ?? match;
+	});
+
+export const hasHaloThemeVars = (style: string) => style.includes(HALO_RF_VAR_PREFIX);
+
+const THEME = {
+	bg: rf('bg'),
+	surface: rf('surface'),
+	panel: rf('panel'),
+	text: rf('text'),
+	muted: rf('muted'),
+	primary: rf('primary'),
+	primaryLight: rf('primary-light'),
+	primarySoft: rf('primary-soft'),
+	accent: rf('accent'),
+	accentSoft: rf('accent-soft'),
+	success: rf('success'),
+	border: rf('border'),
+	borderSubtle: rf('border-subtle'),
+	codeBg: rf('code-bg'),
+	codeText: rf('code-text'),
+	shadow: rf('shadow'),
+	shadowLg: rf('shadow-lg'),
+	shadowMd: rf('shadow-md'),
+	headingGlow: rf('heading-glow')
 };
 
 const normalizeText = (value: unknown) =>
@@ -504,7 +561,7 @@ const getActivityMeta = (block: ActivityBlock) => {
 		icon: '工',
 		title: toolName ? `工具调用：${toolName}` : block.summary || '工具调用',
 		status: done ? '已完成' : '执行中',
-		tone: done ? '#16a34a' : THEME.primary
+		tone: done ? THEME.success : THEME.primary
 	};
 };
 
@@ -673,7 +730,7 @@ const getToolCallLabel = (block: ActivityBlock, index: number) =>
 const renderActivityGroupBlock = (block: Extract<ParsedBlock, { type: 'activity-group' }>) => {
 	const total = block.items.length;
 	const allDone = block.items.every((item) => item.attributes.done === 'true');
-	const tone = allDone ? '#16a34a' : THEME.primary;
+	const tone = allDone ? THEME.success : THEME.primary;
 	const names = truncatePlainText(
 		block.items.map((item, index) => getToolCallLabel(item, index)).join('、'),
 		56
@@ -723,7 +780,7 @@ const renderActivityGroupBlock = (block: Extract<ParsedBlock, { type: 'activity-
 				})
 			)}">${escapeHtml(getToolCallLabel(item, index))}</span><span style="${escapeAttribute(
 				toStyle({
-					color: itemDone ? '#16a34a' : THEME.primary,
+					color: itemDone ? THEME.success : THEME.primary,
 					'font-size': '11px',
 					'font-weight': 700,
 					'flex-shrink': 0
@@ -824,8 +881,8 @@ const renderBlock = (block: ParsedBlock) => {
 					width: block.level <= 2 ? '5px' : '4px',
 					height: block.level <= 2 ? '24px' : '18px',
 					'border-radius': '999px',
-					background: `linear-gradient(180deg, ${THEME.primary}, #60a5fa)`,
-					'box-shadow': '0 6px 16px rgba(37, 99, 235, 0.2)',
+					background: `linear-gradient(180deg, ${THEME.primary}, ${THEME.primaryLight})`,
+					'box-shadow': THEME.headingGlow,
 					'flex-shrink': 0
 				})
 			)}"></span>${heading}</div>`;
@@ -974,7 +1031,7 @@ const renderBlock = (block: ParsedBlock) => {
 					background: THEME.codeBg,
 					'border-radius': '14px',
 					overflow: 'hidden',
-					'box-shadow': '0 12px 28px rgba(15, 23, 42, 0.12)'
+					'box-shadow': THEME.shadowLg
 				}
 			);
 		}
@@ -1007,7 +1064,7 @@ const renderBlock = (block: ParsedBlock) => {
 					border: `1px solid ${THEME.borderSubtle}`,
 					'border-radius': '14px',
 					overflow: 'hidden',
-					'box-shadow': '0 8px 24px rgba(15, 23, 42, 0.05)'
+					'box-shadow': THEME.shadowMd
 				}
 			);
 		}
@@ -1062,7 +1119,7 @@ export const renderResponseHtmlFormat = (content: string): string => {
 			'border-radius': '20px',
 			'box-shadow': THEME.shadow,
 			'font-family':
-				"-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
+				"var(--font-sans, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif)",
 			'line-height': 1.6,
 			'max-width': '100%',
 			overflow: 'hidden'

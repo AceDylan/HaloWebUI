@@ -10,6 +10,12 @@
 	import { ensureModels, refreshModels } from '$lib/services/models';
 	import { getErrorDetail } from '$lib/apis/response';
 	import { saveUserSettingsPatch } from '$lib/utils/user-settings';
+	import {
+		INTERFACE_TAB_QUERY_KEY,
+		getVisibleInterfaceTabs,
+		interfaceTabHref,
+		resolveInterfaceTab
+	} from '$lib/components/settings/interface-tabs';
 
 	const i18n: Writable<any> = getContext('i18n');
 
@@ -106,8 +112,17 @@
 
 	const navLinkClass = (active: boolean) =>
 		`px-2 py-1.5 min-w-fit rounded-lg flex-1 lg:flex-none flex items-center transition ${
-			active ? '' : 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'
+			active
+				? 'text-gray-900 dark:text-white'
+				: 'text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-white'
 		}`;
+
+	// Interface sub-sections show as a second level under "Interface" on desktop; the page
+	// itself renders the same list as a chip strip on phones.
+	$: interfaceTabs = getVisibleInterfaceTabs(isAdmin);
+	$: activeInterfaceTab = activeLinks.interface
+		? resolveInterfaceTab($page.url.searchParams.get(INTERFACE_TAB_QUERY_KEY), isAdmin)
+		: null;
 </script>
 
 <svelte:head>
@@ -143,7 +158,7 @@
 			<div class="flex flex-col lg:flex-row w-full h-full min-h-0 pb-2 lg:space-x-4">
 				<div
 					id="settings-tabs-container"
-					class="flex flex-row overflow-x-auto gap-2.5 max-w-full lg:gap-1 lg:flex-col lg:flex-none lg:w-44 dark:text-gray-200 text-sm font-medium text-left scrollbar-none"
+					class="flex flex-row overflow-x-auto gap-2.5 max-w-full lg:gap-1 lg:flex-col lg:flex-none lg:w-44 dark:text-gray-200 text-sm font-medium text-left scrollbar-none scroll-fade-x-mobile"
 				>
 					{#if isAdmin}
 						<a class={navLinkClass(activeLinks.general)} href="/settings">{$i18n.t('General')}</a>
@@ -151,6 +166,25 @@
 					<a class={navLinkClass(activeLinks.interface)} href="/settings/interface"
 						>{$i18n.t('Interface')}</a
 					>
+					{#if activeLinks.interface}
+						<div
+							class="hidden lg:flex flex-col gap-0.5 ml-2 mb-1 border-l border-gray-200/80 dark:border-gray-800 pl-2"
+							aria-label={$i18n.t('Interface')}
+						>
+							{#each interfaceTabs as tab (tab.key)}
+								<a
+									class="rounded-md px-2 py-1 text-[13px] transition {activeInterfaceTab === tab.key
+										? 'bg-[var(--sidebar-active-bg)] text-[var(--sidebar-active-fg)] font-medium'
+										: 'text-gray-500 hover:bg-gray-100 hover:text-gray-800 dark:text-gray-400 dark:hover:bg-gray-850 dark:hover:text-gray-100'}"
+									href={interfaceTabHref(tab.key)}
+									aria-current={activeInterfaceTab === tab.key ? 'page' : undefined}
+									data-sveltekit-noscroll
+								>
+									{$i18n.t(tab.titleKey)}
+								</a>
+							{/each}
+						</div>
+					{/if}
 
 					<a class={navLinkClass(activeLinks.connections)} href="/settings/connections"
 						>{$i18n.t('Connections')}</a

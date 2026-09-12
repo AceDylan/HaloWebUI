@@ -690,7 +690,7 @@
 							<div class="mb-0 text-sm font-medium flex items-center gap-2">
 								<span>{$i18n.t('STT Settings')}</span>
 								{#if showScopeBadges && scopeLabel}
-									<span class={`px-1.5 py-0.5 rounded-md text-[10px] font-medium ${scopeBadgeClass}`}
+									<span class={`px-1.5 py-0.5 rounded-md text-2xs font-medium ${scopeBadgeClass}`}
 										>{scopeLabel}</span
 									>
 								{/if}
@@ -716,7 +716,7 @@
 									<span>{$i18n.t('STT Settings')}</span>
 									{#if showScopeBadges && scopeLabel}
 										<span
-											class={`px-1.5 py-0.5 rounded-md text-[10px] font-medium ${scopeBadgeClass}`}
+											class={`px-1.5 py-0.5 rounded-md text-2xs font-medium ${scopeBadgeClass}`}
 											>{scopeLabel}</span
 										>
 									{/if}
@@ -795,7 +795,7 @@
 							<div class="mb-0 text-sm font-medium flex items-center gap-2">
 								<span>{$i18n.t('TTS Settings')}</span>
 								{#if showScopeBadges && scopeLabel}
-									<span class={`px-1.5 py-0.5 rounded-md text-[10px] font-medium ${scopeBadgeClass}`}
+									<span class={`px-1.5 py-0.5 rounded-md text-2xs font-medium ${scopeBadgeClass}`}
 										>{scopeLabel}</span
 									>
 								{/if}
@@ -821,7 +821,7 @@
 									<span>{$i18n.t('TTS Settings')}</span>
 									{#if showScopeBadges && scopeLabel}
 										<span
-											class={`px-1.5 py-0.5 rounded-md text-[10px] font-medium ${scopeBadgeClass}`}
+											class={`px-1.5 py-0.5 rounded-md text-2xs font-medium ${scopeBadgeClass}`}
 											>{scopeLabel}</span
 										>
 									{/if}
@@ -951,7 +951,7 @@
 							<div class="mb-0 text-sm font-medium flex items-center gap-2">
 								<span>{$i18n.t('Set Voice')}</span>
 								{#if showScopeBadges && scopeLabel}
-									<span class={`px-1.5 py-0.5 rounded-md text-[10px] font-medium ${scopeBadgeClass}`}
+									<span class={`px-1.5 py-0.5 rounded-md text-2xs font-medium ${scopeBadgeClass}`}
 										>{scopeLabel}</span
 									>
 								{/if}
@@ -980,7 +980,7 @@
 												<span>{$i18n.t('Set Voice')}</span>
 												{#if showScopeBadges && scopeLabel}
 													<span
-														class={`px-1.5 py-0.5 rounded-md text-[10px] font-medium ${scopeBadgeClass}`}
+														class={`px-1.5 py-0.5 rounded-md text-2xs font-medium ${scopeBadgeClass}`}
 														>{scopeLabel}</span
 													>
 												{/if}
@@ -1028,7 +1028,7 @@
 											<span>{$i18n.t('Set Voice')}</span>
 											{#if showScopeBadges && scopeLabel}
 												<span
-													class={`px-1.5 py-0.5 rounded-md text-[10px] font-medium ${scopeBadgeClass}`}
+													class={`px-1.5 py-0.5 rounded-md text-2xs font-medium ${scopeBadgeClass}`}
 													>{scopeLabel}</span
 												>
 											{/if}
@@ -1065,7 +1065,7 @@
 											<span>{$i18n.t('Set Voice')}</span>
 											{#if showScopeBadges && scopeLabel}
 												<span
-													class={`px-1.5 py-0.5 rounded-md text-[10px] font-medium ${scopeBadgeClass}`}
+													class={`px-1.5 py-0.5 rounded-md text-2xs font-medium ${scopeBadgeClass}`}
 													>{scopeLabel}</span
 												>
 											{/if}

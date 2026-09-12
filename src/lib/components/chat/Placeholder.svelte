@@ -34,7 +34,11 @@
 	import Suggestions from './Suggestions.svelte';
 	import ModelIcon from '$lib/components/common/ModelIcon.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
-	import { getModelChatDisplayName } from '$lib/utils/model-display';
+	import {
+		getModelBaseName,
+		getModelChatDisplayName,
+		getModelConnectionName
+	} from '$lib/utils/model-display';
 	import { findModelByIdentity } from '$lib/utils/model-identity';
 	import type { WebSearchMode, WebSearchModeSource } from '$lib/utils/web-search-mode';
 	import EyeSlash from '$lib/components/icons/EyeSlash.svelte';
@@ -264,14 +268,28 @@
 					</div>
 				</div>
 
-				<!-- 模型名称/问候语 - 字体适中 -->
-				<div class="text-xl @sm:text-2xl font-medium line-clamp-1 px-4" in:fade={{ duration: 100 }}>
-					{#if models[selectedModelIdx]?.name}
-						{getModelChatDisplayName(models[selectedModelIdx])}
-					{:else}
-						{$i18n.t('Hello, {{name}}', { name: $user?.name })}
-					{/if}
+				<!-- 问候语为主标题，模型名降为副标题（连接后缀弱化） -->
+				<div
+					class="text-xl @sm:text-2xl font-semibold tracking-tight line-clamp-1 px-4"
+					in:fade={{ duration: 100 }}
+				>
+					{$i18n.t('Hello, {{name}}', { name: $user?.name })}
 				</div>
+				{#if models[selectedModelIdx]?.name}
+					<div
+						class="mt-1 flex min-w-0 max-w-full items-baseline justify-center gap-1.5 px-4 text-sm text-gray-500 dark:text-gray-400"
+						in:fade={{ duration: 100, delay: 40 }}
+					>
+						<span class="truncate font-medium text-gray-700 dark:text-gray-200">
+							{getModelBaseName(models[selectedModelIdx])}
+						</span>
+						{#if getModelConnectionName(models[selectedModelIdx])}
+							<span class="shrink-0 text-2xs text-gray-400 dark:text-gray-500">
+								{getModelConnectionName(models[selectedModelIdx])}
+							</span>
+						{/if}
+					</div>
+				{/if}
 
 				<!-- 模型描述 -->
 				<div class="flex mt-2 mb-4">

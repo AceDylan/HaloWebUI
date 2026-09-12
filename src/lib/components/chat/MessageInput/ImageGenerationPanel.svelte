@@ -942,7 +942,7 @@
 								</div>
 								<div class="leading-4">
 									<div>{tr(preset.labelZh, preset.labelEn)}</div>
-									<div class="text-[11px] text-gray-400 dark:text-gray-500">
+									<div class="text-2xs text-gray-400 dark:text-gray-500">
 										{preset.ratio ?? tr('自动', 'Auto')}
 									</div>
 								</div>
@@ -1003,7 +1003,7 @@
 							{tr('负面提示词', 'Negative prompt')}
 						</div>
 						{#if !canUseNegativePrompt}
-							<div class="text-[11px] text-gray-400">
+							<div class="text-2xs text-gray-400">
 								{tr('当前模型不支持', 'Not supported')}
 							</div>
 						{/if}
@@ -1087,7 +1087,7 @@
 									{tr('生成数量', 'Images')}
 								</div>
 								{#if !supportsBatch}
-									<div class="text-[11px] text-gray-400">
+									<div class="text-2xs text-gray-400">
 										{tr('当前模型只支持 1 张', 'This model only supports 1 image')}
 									</div>
 								{/if}
@@ -1132,7 +1132,7 @@
 										</button>
 									</Tooltip>
 								</div>
-								<div class="text-[11px] text-gray-400">
+								<div class="text-2xs text-gray-400">
 									{#if canUseQuality}
 										{currentQualityLabel}{#if sizeTierOptimistic}&nbsp;·&nbsp;<span
 												class="text-amber-500">{tr('试验性', 'Experimental')}</span
@@ -1183,7 +1183,7 @@
 									<div class="text-xs font-medium text-gray-600 dark:text-gray-300">
 										{tr('质量', 'Quality')}
 									</div>
-									<div class="text-[11px] text-gray-400">
+									<div class="text-2xs text-gray-400">
 										{canUseOpenAIQuality
 											? tr('低档最快最省，高档细节最完整', 'Low is fastest, high keeps the most detail')
 											: tr('当前接口不支持', 'Not supported on this route')}
@@ -1216,7 +1216,7 @@
 									{tr('背景', 'Background')}
 								</div>
 								{#if !canUseBackground}
-									<div class="text-[11px] text-gray-400">
+									<div class="text-2xs text-gray-400">
 										{tr('当前模型不支持', 'Not supported')}
 									</div>
 								{/if}
@@ -1247,7 +1247,7 @@
 								<div class="text-xs font-medium text-gray-600 dark:text-gray-300">
 									{tr('步数', 'Steps')}
 								</div>
-								<div class="text-[11px] text-gray-400">
+								<div class="text-2xs text-gray-400">
 									{canUseSteps
 										? currentSteps === 0
 											? tr('自动', 'Auto')

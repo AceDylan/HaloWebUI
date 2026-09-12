@@ -186,9 +186,6 @@
 					<div class="workspace-count-pill">
 						{filteredItems.length} {$i18n.t('Tools')}
 					</div>
-					<div class="text-xs text-gray-500 dark:text-gray-400">
-						{$i18n.t('Create, import, and manage custom Python tools available inside the workspace.')}
-					</div>
 				</div>
 
 				<div class="workspace-toolbar">

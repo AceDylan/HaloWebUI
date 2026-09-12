@@ -62,23 +62,12 @@
 	}
 </script>
 
-<div class="mb-1 flex gap-1 text-xs font-medium items-center text-gray-400 dark:text-gray-500">
+<div
+	class="mb-1 flex min-h-4 gap-1 text-xs font-medium items-center text-gray-400 dark:text-gray-500"
+>
 	{#if filteredPrompts.length > 0}
 		<Bolt />
 		{$i18n.t('Suggested')}
-	{:else}
-		<!-- Brand Display - 现代极简风格 -->
-		<div
-			class="flex w-full items-center justify-center gap-1.5 text-gray-400/60 dark:text-gray-500/60"
-		>
-			<svg class="size-3" viewBox="0 0 24 24" fill="currentColor">
-				<circle cx="12" cy="12" r="3" />
-			</svg>
-			<span class="text-[11px] font-normal tracking-[0.2em] uppercase">Halo WebUI</span>
-			<svg class="size-3" viewBox="0 0 24 24" fill="currentColor">
-				<circle cx="12" cy="12" r="3" />
-			</svg>
-		</div>
 	{/if}
 </div>
 

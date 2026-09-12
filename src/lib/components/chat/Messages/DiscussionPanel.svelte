@@ -305,7 +305,7 @@
 					</div>
 
 					<div
-						class="inline-flex items-center gap-1.5 text-[11px] font-medium text-gray-500 dark:text-gray-400"
+						class="inline-flex items-center gap-1.5 text-2xs font-medium text-gray-500 dark:text-gray-400"
 					>
 						<span class="size-1.5 rounded-full {statusDotClass(status)}" />
 						{#if running}
@@ -315,7 +315,7 @@
 					</div>
 				</div>
 
-				<div class="mt-2 flex flex-wrap items-center gap-1.5 text-[11px] text-gray-500 dark:text-gray-400">
+				<div class="mt-2 flex flex-wrap items-center gap-1.5 text-2xs text-gray-500 dark:text-gray-400">
 					{#if participants.length > 0}
 						<span class="rounded-full bg-gray-100 px-2 py-0.5 dark:bg-gray-800/80">
 							{$i18n.t('共 {{count}} 个模型', { count: participants.length })}
@@ -378,7 +378,7 @@
 					<div class="mt-2 flex flex-wrap gap-1.5">
 						{#each stats as stat, statIdx}
 							<span
-								class="rounded-full border border-gray-200 bg-white/80 px-2 py-0.5 text-[11px] leading-4 dark:border-gray-700 dark:bg-gray-900/70 {statIdx ===
+								class="rounded-full border border-gray-200 bg-white/80 px-2 py-0.5 text-2xs leading-4 dark:border-gray-700 dark:bg-gray-900/70 {statIdx ===
 								stats.length - 1
 									? turnStatusClass(summaryTurn)
 									: 'text-gray-500 dark:text-gray-400'}"
@@ -418,7 +418,7 @@
 								on:click={() => selectParticipant(participant)}
 							>
 								<span class="truncate">{participant.label}</span>
-								<span class="text-[10px] opacity-70">{participantTurns(participant).length}</span>
+								<span class="text-2xs opacity-70">{participantTurns(participant).length}</span>
 							</button>
 						{/each}
 					{/if}
@@ -467,7 +467,7 @@
 									<div class="mt-2 flex flex-wrap gap-1.5">
 										{#each stats as stat, statIdx}
 											<span
-												class="rounded-full border border-gray-200 bg-white/80 px-2 py-0.5 text-[11px] leading-4 dark:border-gray-700 dark:bg-gray-900/70 {statIdx ===
+												class="rounded-full border border-gray-200 bg-white/80 px-2 py-0.5 text-2xs leading-4 dark:border-gray-700 dark:bg-gray-900/70 {statIdx ===
 												stats.length - 1
 													? turnStatusClass(turn)
 													: 'text-gray-500 dark:text-gray-400'}"
@@ -523,7 +523,7 @@
 											<div class="mt-2 flex flex-wrap gap-1.5">
 												{#each stats as stat, statIdx}
 													<span
-														class="rounded-full border border-gray-200 bg-white/80 px-2 py-0.5 text-[11px] leading-4 dark:border-gray-700 dark:bg-gray-900/70 {statIdx ===
+														class="rounded-full border border-gray-200 bg-white/80 px-2 py-0.5 text-2xs leading-4 dark:border-gray-700 dark:bg-gray-900/70 {statIdx ===
 														stats.length - 1
 															? turnStatusClass(turn)
 															: 'text-gray-500 dark:text-gray-400'}"

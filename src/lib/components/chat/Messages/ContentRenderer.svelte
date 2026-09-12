@@ -21,7 +21,11 @@
 		resolveChatTransitionMode,
 		type ChatTransitionMode
 	} from '$lib/utils/lobehub-chat-appearance';
-	import { renderResponseHtmlFormat } from '$lib/utils/response-html-format';
+	import {
+		hasHaloThemeVars,
+		renderResponseHtmlFormat,
+		resolveHaloThemeVars
+	} from '$lib/utils/response-html-format';
 	import { mergeAdjacentReasoningDetails } from '$lib/utils/reasoning-merge';
 	import {
 		buildInlineHtmlArtifactPreview,
@@ -184,8 +188,25 @@
 		};
 	};
 
+	// The formatted-response renderer styles everything through var(--halo-rf-*) so the card
+	// follows the theme. Copied HTML leaves the page, so swap those references for the colors
+	// currently in effect; the light palette is the fallback when a value is missing.
+	const inlineHaloThemeVars = (container: HTMLElement) => {
+		const rootStyle =
+			typeof getComputedStyle === 'function' ? getComputedStyle(document.documentElement) : null;
+		const lookup = (name: string) => rootStyle?.getPropertyValue(`--halo-rf-${name}`) ?? null;
+
+		container.querySelectorAll<HTMLElement>('[style]').forEach((node) => {
+			const style = node.getAttribute('style') ?? '';
+			if (hasHaloThemeVars(style)) {
+				node.setAttribute('style', resolveHaloThemeVars(style, lookup));
+			}
+		});
+	};
+
 	const normalizeCopyFragment = (container: HTMLElement) => {
 		container.querySelectorAll(INLINE_CITATION_SELECTOR).forEach((node) => node.remove());
+		inlineHaloThemeVars(container);
 
 		container.querySelectorAll('pre[data-halo-code="true"]').forEach((pre) => {
 			(pre as HTMLElement).style.whiteSpace = 'pre-wrap';
@@ -994,7 +1015,7 @@
 			{#if inlineHtmlArtifactSource}
 				<button
 					type="button"
-					class="inline-flex min-h-8 max-w-full items-center rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-600 transition-colors hover:bg-gray-50 hover:text-gray-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500/60 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-800 dark:hover:text-gray-100"
+					class="inline-flex min-h-8 max-w-full items-center rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-600 transition-colors hover:bg-gray-50 hover:text-gray-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/60 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-800 dark:hover:text-gray-100"
 					on:click={copyInlineHtmlArtifactSource}
 				>
 					{copiedInlineHtmlArtifactSource ? $i18n.t('Copied') : $i18n.t('Copy HTML')}
@@ -1002,7 +1023,7 @@
 			{/if}
 			<button
 				type="button"
-				class="inline-flex min-h-8 max-w-full items-center rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-600 transition-colors hover:bg-gray-50 hover:text-gray-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500/60 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-800 dark:hover:text-gray-100"
+				class="inline-flex min-h-8 max-w-full items-center rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-600 transition-colors hover:bg-gray-50 hover:text-gray-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/60 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-800 dark:hover:text-gray-100"
 				aria-expanded={showInlineHtmlArtifactOriginalText}
 				on:click={() => {
 					showInlineHtmlArtifactOriginalText = !showInlineHtmlArtifactOriginalText;

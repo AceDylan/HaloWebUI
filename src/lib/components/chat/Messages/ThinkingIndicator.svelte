@@ -282,7 +282,7 @@
 					{step.label}
 				</span>
 				{#if step.active}
-					<span class="text-[11px] text-gray-400/80 dark:text-gray-500/80 tabular-nums font-mono">
+					<span class="text-2xs text-gray-400/80 dark:text-gray-500/80 tabular-nums font-mono">
 						{formatTime(elapsed)}
 					</span>
 				{/if}

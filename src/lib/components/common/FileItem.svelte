@@ -144,7 +144,7 @@
 				{/if}
 			</div>
 			{#if failed}
-				<div class="mt-1 text-[11px] text-red-600 dark:text-red-300 line-clamp-2">
+				<div class="mt-1 text-2xs text-red-600 dark:text-red-300 line-clamp-2">
 					{failureTitle}
 				</div>
 			{/if}
@@ -162,7 +162,7 @@
 					<div class="text-gray-500 text-xs capitalize shrink-0">{formatFileSize(size)}</div>
 				</div>
 				{#if failed}
-					<div class="mt-1 text-[11px] text-red-600 dark:text-red-300 line-clamp-1">
+					<div class="mt-1 text-2xs text-red-600 dark:text-red-300 line-clamp-1">
 						{failureTitle}
 					</div>
 				{/if}

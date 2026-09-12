@@ -560,11 +560,6 @@
 						{filteredItems.length}
 						{$i18n.t('Notes')}
 					</div>
-					<div class="text-xs text-gray-500 dark:text-gray-400">
-						{$i18n.t(
-							'Capture collaborative notes, drafts, and reference material without leaving the workspace.'
-						)}
-					</div>
 				</div>
 				<div class="workspace-toolbar">
 					<div class="workspace-search workspace-toolbar-search">

@@ -73,7 +73,7 @@
 				{#if type === 'object'}
 					<span class="text-gray-500 dark:text-gray-400"
 						>{'{'}
-						<span class="text-gray-400 dark:text-gray-500 text-[11px] ml-0.5">
+						<span class="text-gray-400 dark:text-gray-500 text-2xs ml-0.5">
 							{Object.keys(data).length}
 							{Object.keys(data).length === 1 ? 'key' : 'keys'}
 						</span>
@@ -82,7 +82,7 @@
 				{:else}
 					<span class="text-gray-500 dark:text-gray-400"
 						>{'['}
-						<span class="text-gray-400 dark:text-gray-500 text-[11px] ml-0.5">
+						<span class="text-gray-400 dark:text-gray-500 text-2xs ml-0.5">
 							{data.length}
 							{data.length === 1 ? 'item' : 'items'}
 						</span>

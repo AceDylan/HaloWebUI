@@ -175,22 +175,23 @@
 />
 
 <div class="w-full h-screen max-h-[100dvh] text-white relative">
-	<div class="w-full h-full absolute top-0 left-0 bg-white dark:bg-black"></div>
+	<div class="w-full h-full absolute top-0 left-0 bg-white dark:bg-[var(--surface-base)]"></div>
 
 	<div class="w-full absolute top-0 left-0 right-0 h-8 drag-region" />
 
 	{#if loaded}
-		<div class="fixed m-10 z-50">
-			<div class="flex space-x-2">
+		<div class="fixed z-50 m-6 sm:m-10">
+			<div class="flex items-center gap-2.5 text-gray-900 dark:text-white">
 				<div class=" self-center">
 					<img
 						id="logo"
 						crossorigin="anonymous"
 						src="{WEBUI_BASE_URL}/static/splash.png"
-						class=" w-6 rounded-full"
+						class=" size-7 rounded-full"
 						alt="logo"
 					/>
 				</div>
+				<span class="text-sm font-semibold tracking-tight">{$WEBUI_NAME}</span>
 			</div>
 		</div>
 
@@ -222,7 +223,7 @@
 							}}
 						>
 							<div class="mb-1">
-								<div class=" text-2xl font-medium">
+								<div class=" text-2xl font-semibold tracking-tight">
 									{#if $config?.onboarding ?? false}
 										{$i18n.t(`Get started with {{WEBUI_NAME}}`, { WEBUI_NAME: $WEBUI_NAME })}
 									{:else if mode === 'ldap'}
@@ -252,7 +253,7 @@
 											<input
 												bind:value={name}
 												type="text"
-												class="my-0.5 w-full text-sm outline-hidden bg-transparent"
+												class="glass-input my-0.5 w-full px-3 py-2.5 text-sm"
 												autocomplete="name"
 												placeholder={$i18n.t('Enter Your Full Name')}
 												required
@@ -266,7 +267,7 @@
 											<input
 												bind:value={ldapUsername}
 												type="text"
-												class="my-0.5 w-full text-sm outline-hidden bg-transparent"
+												class="glass-input my-0.5 w-full px-3 py-2.5 text-sm"
 												autocomplete="username"
 												name="username"
 												placeholder={$i18n.t('Enter Your Username')}
@@ -279,7 +280,7 @@
 											<input
 												bind:value={email}
 												type="email"
-												class="my-0.5 w-full text-sm outline-hidden bg-transparent"
+												class="glass-input my-0.5 w-full px-3 py-2.5 text-sm"
 												autocomplete="email"
 												name="email"
 												placeholder={$i18n.t('Enter Your Email')}
@@ -294,7 +295,7 @@
 										<input
 											bind:value={password}
 											type="password"
-											class="my-0.5 w-full text-sm outline-hidden bg-transparent"
+											class="glass-input my-0.5 w-full px-3 py-2.5 text-sm"
 											placeholder={$i18n.t('Enter Your Password')}
 											autocomplete="current-password"
 											name="current-password"
@@ -307,14 +308,14 @@
 								{#if $config?.features.enable_login_form || $config?.features.enable_ldap}
 									{#if mode === 'ldap'}
 										<button
-											class="bg-gray-700/5 hover:bg-gray-700/10 dark:bg-gray-100/5 dark:hover:bg-gray-100/10 dark:text-gray-300 dark:hover:text-white transition w-full rounded-full font-medium text-sm py-2.5"
+											class="bg-primary-600 hover:bg-primary-700 text-white shadow-sm shadow-primary-600/25 focus-visible:ring-2 focus-visible:ring-primary-500/50 dark:bg-primary-500 dark:hover:bg-primary-400 transition w-full rounded-full font-medium text-sm py-2.5"
 											type="submit"
 										>
 											{$i18n.t('Authenticate')}
 										</button>
 									{:else}
 										<button
-											class="bg-gray-700/5 hover:bg-gray-700/10 dark:bg-gray-100/5 dark:hover:bg-gray-100/10 dark:text-gray-300 dark:hover:text-white transition w-full rounded-full font-medium text-sm py-2.5"
+											class="bg-primary-600 hover:bg-primary-700 text-white shadow-sm shadow-primary-600/25 focus-visible:ring-2 focus-visible:ring-primary-500/50 dark:bg-primary-500 dark:hover:bg-primary-400 transition w-full rounded-full font-medium text-sm py-2.5"
 											type="submit"
 										>
 											{mode === 'signin'
@@ -331,7 +332,7 @@
 													: $i18n.t('Already have an account?')}
 
 												<button
-													class=" font-medium underline"
+													class=" font-medium text-primary-700 underline decoration-primary-500/40 underline-offset-2 hover:text-primary-800 dark:text-primary-300 dark:hover:text-primary-200"
 													type="button"
 													on:click={() => {
 														if (mode === 'signin') {

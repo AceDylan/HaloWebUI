@@ -271,7 +271,7 @@
 									</OverflowTooltip>
 									{#if option.badge}
 										<span
-											class="shrink-0 rounded-full bg-gray-100 px-1.5 py-0.5 text-[10px] font-medium text-gray-500 dark:bg-gray-800 dark:text-gray-400"
+											class="shrink-0 rounded-full bg-gray-100 px-1.5 py-0.5 text-2xs font-medium text-gray-500 dark:bg-gray-800 dark:text-gray-400"
 										>
 											{option.badge}
 										</span>

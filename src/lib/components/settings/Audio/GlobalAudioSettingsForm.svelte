@@ -779,7 +779,7 @@
 						<div class="mb-0 text-sm font-medium flex items-center gap-2">
 							<span>{$i18n.t('STT Settings')}</span>
 							{#if showScopeBadges && scopeLabel}
-								<span class={`px-1.5 py-0.5 rounded-md text-[10px] font-medium ${scopeBadgeClass}`}>{scopeLabel}</span>
+								<span class={`px-1.5 py-0.5 rounded-md text-2xs font-medium ${scopeBadgeClass}`}>{scopeLabel}</span>
 							{/if}
 						</div>
 						<div class="transform transition-transform duration-200 {expandedSections.stt ? 'rotate-180' : ''}">
@@ -874,7 +874,7 @@
 						<div class="mb-0 text-sm font-medium flex items-center gap-2">
 							<span>{$i18n.t('TTS Settings')}</span>
 							{#if showScopeBadges && scopeLabel}
-								<span class={`px-1.5 py-0.5 rounded-md text-[10px] font-medium ${scopeBadgeClass}`}>{scopeLabel}</span>
+								<span class={`px-1.5 py-0.5 rounded-md text-2xs font-medium ${scopeBadgeClass}`}>{scopeLabel}</span>
 							{/if}
 						</div>
 						<div class="transform transition-transform duration-200 {expandedSections.tts ? 'rotate-180' : ''}">
@@ -1038,7 +1038,7 @@
 								<div class="text-base font-semibold text-gray-800 dark:text-gray-100">
 									{$i18n.t('STT Settings')}
 									{#if showScopeBadges && scopeLabel}
-										<span class={`ml-2 px-1.5 py-0.5 rounded-md text-[10px] font-medium ${scopeBadgeClass}`}>{scopeLabel}</span>
+										<span class={`ml-2 px-1.5 py-0.5 rounded-md text-2xs font-medium ${scopeBadgeClass}`}>{scopeLabel}</span>
 									{/if}
 								</div>
 							</div>
@@ -1244,7 +1244,7 @@
 								<div class="text-base font-semibold text-gray-800 dark:text-gray-100">
 									{$i18n.t('TTS Settings')}
 									{#if showScopeBadges && scopeLabel}
-										<span class={`ml-2 px-1.5 py-0.5 rounded-md text-[10px] font-medium ${scopeBadgeClass}`}>{scopeLabel}</span>
+										<span class={`ml-2 px-1.5 py-0.5 rounded-md text-2xs font-medium ${scopeBadgeClass}`}>{scopeLabel}</span>
 									{/if}
 								</div>
 							</div>

@@ -109,7 +109,7 @@
 								>
 									<div class="whitespace-pre-wrap break-words">{msg.content}</div>
 									<div
-										class="text-[10px] mt-1 {msg.role === 'user'
+										class="text-2xs mt-1 {msg.role === 'user'
 											? 'text-blue-200'
 											: 'text-gray-400'} flex items-center gap-1.5"
 									>

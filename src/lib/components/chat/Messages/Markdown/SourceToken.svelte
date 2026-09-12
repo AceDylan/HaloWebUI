@@ -30,7 +30,7 @@
 
 			const badge = document.createElement('span');
 			badge.className =
-				'flex-shrink-0 size-[1.125rem] rounded-md bg-gray-100 dark:bg-gray-600 text-[10px] flex items-center justify-center font-semibold';
+				'flex-shrink-0 size-[1.125rem] rounded-md bg-gray-100 dark:bg-gray-600 text-2xs flex items-center justify-center font-semibold';
 			badge.textContent = String(c.index);
 
 			const label = document.createElement('span');
@@ -76,7 +76,7 @@
 		<button
 			bind:this={buttonElement}
 			data-inline-citation="true"
-			class="inline-flex items-center gap-0.5 text-[10px] font-medium w-fit translate-y-[2px] px-2 py-0.5 dark:bg-white/5 dark:text-white/80 dark:hover:text-white bg-gray-50 text-black/80 hover:text-black transition rounded-xl"
+			class="inline-flex items-center gap-0.5 text-2xs font-medium w-fit translate-y-[2px] px-2 py-0.5 dark:bg-white/5 dark:text-white/80 dark:hover:text-white bg-gray-50 text-black/80 hover:text-black transition rounded-xl"
 		>
 			<span class="line-clamp-1 max-w-[200px]">
 				{formattedTitle(firstCitation.title)}
@@ -87,7 +87,7 @@
 		<!-- Single citation: click navigates directly -->
 		<button
 			data-inline-citation="true"
-			class="inline-flex items-center text-[10px] font-medium w-fit translate-y-[2px] px-2 py-0.5 dark:bg-white/5 dark:text-white/80 dark:hover:text-white bg-gray-50 text-black/80 hover:text-black transition rounded-xl"
+			class="inline-flex items-center text-2xs font-medium w-fit translate-y-[2px] px-2 py-0.5 dark:bg-white/5 dark:text-white/80 dark:hover:text-white bg-gray-50 text-black/80 hover:text-black transition rounded-xl"
 			on:click={() => {
 				onClick(id, firstCitation.identifier ?? firstCitation.index);
 			}}

@@ -177,9 +177,9 @@
 					class="line-clamp-1 text-2xs leading-4 text-gray-400 dark:text-gray-500"
 					data-halo-tool-running
 				>
-					{#if doneCount > 0}<span class="tabular-nums">{doneCount}/{totalCount} · </span>{/if}<span
+					{#if doneCount > 0}<span class="tabular-nums">{`${doneCount}/${totalCount} · `}</span>{/if}<span
 						class="font-medium text-gray-500 dark:text-gray-400">{runningToken.attributes?.name ?? ''}</span
-					>{#if runningPreview}<span class="font-mono"> · {runningPreview}</span>{/if}
+					>{#if runningPreview}<span class="font-mono">{` · ${runningPreview}`}</span>{/if}
 				</div>
 			{/if}
 		</div>

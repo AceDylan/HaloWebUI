@@ -48,6 +48,28 @@
 		type ImageTemplate,
 		type ImageTemplateSort
 	} from '$lib/utils/image-templates';
+	import {
+		clearImageStudioItems,
+		deleteImageStudioItem,
+		getImageStudioItems,
+		upsertImageStudioItems
+	} from '$lib/apis/image-studio';
+	import {
+		IMAGE_STUDIO_HISTORY_LIMIT,
+		IMAGE_STUDIO_MIGRATION_MARKER_KEY,
+		normalizeImageStudioData,
+		parseImageStudioMigrationMarker,
+		parseStoredImageStudioList,
+		partitionImageStudioItems,
+		planImageStudioLocalMigration,
+		serializeImageStudioMigrationMarker,
+		toImageStudioItemForms,
+		type GalleryImage,
+		type GenerationHistory,
+		type ImageStudioData,
+		type ImageStudioItemForm,
+		type ImageStudioMigrationMarker
+	} from '$lib/utils/image-studio-storage';
 
 	type GeneratedImage = {
 		url: string;
@@ -73,31 +95,6 @@
 
 	type ImageGenerationTemplate = ImageTemplate;
 
-	type GalleryImage = {
-		id: string;
-		url: string;
-		prompt: string;
-		negativePrompt?: string;
-		model: string;
-		size: string;
-		createdAt: number;
-		favorite?: boolean;
-		tags?: string[];
-	};
-
-	type GenerationHistory = {
-		id: string;
-		prompt: string;
-		negativePrompt?: string;
-		model: string;
-		parameters: Record<string, any>;
-		status: 'success' | 'failed';
-		images?: string[];
-		error?: string;
-		createdAt: number;
-		completedAt?: number;
-	};
-
 	type WorkspaceImagePrefs = {
 		selectionKey?: string;
 		model?: string;
@@ -119,6 +116,9 @@
 	};
 
 	const WORKSPACE_IMAGE_PREFS_KEY = 'workspace:image-studio:prefs:v1';
+	// Templates, gallery and history are stored per user on the server. The next
+	// three keys are legacy localStorage slots from older builds: read once to move
+	// that data into the account, never written again, never deleted.
 	const WORKSPACE_IMAGE_TEMPLATES_KEY = 'workspace:image-studio:templates:v1';
 	const WORKSPACE_IMAGE_GALLERY_KEY = 'workspace:image-studio:gallery:v1';
 	const WORKSPACE_IMAGE_HISTORY_KEY = 'workspace:image-studio:history:v1';
@@ -637,18 +637,103 @@
 			: translatedSuggestion;
 	};
 
-	const loadTemplates = () => {
+	const readLegacyStudioData = (): ImageStudioData => {
 		try {
-			const raw = localStorage.getItem(WORKSPACE_IMAGE_TEMPLATES_KEY);
-			if (raw) {
-				savedTemplates = normalizeImportedImageTemplates(JSON.parse(raw));
-			}
+			return normalizeImageStudioData({
+				templates: parseStoredImageStudioList(localStorage.getItem(WORKSPACE_IMAGE_TEMPLATES_KEY)),
+				gallery: parseStoredImageStudioList(localStorage.getItem(WORKSPACE_IMAGE_GALLERY_KEY)),
+				history: parseStoredImageStudioList(localStorage.getItem(WORKSPACE_IMAGE_HISTORY_KEY))
+			});
 		} catch (error) {
-			console.warn('Failed to load templates', error);
+			console.warn('Failed to read legacy image studio data', error);
+			return normalizeImageStudioData({});
 		}
 	};
 
-	const saveTemplate = () => {
+	const applyStudioData = (data: ImageStudioData) => {
+		savedTemplates = data.templates;
+		galleryImages = data.gallery;
+		generationHistory = data.history;
+	};
+
+	const persistStudioItems = async (items: ImageStudioItemForm[]) => {
+		if (items.length === 0) return true;
+		try {
+			await upsertImageStudioItems(localStorage.token, items);
+			return true;
+		} catch (error) {
+			console.warn('Failed to sync image studio items', error);
+			toast.error($i18n.t('Failed to sync to the server'));
+			return false;
+		}
+	};
+
+	// Uploads whatever an older build left in this browser's localStorage, once.
+	// The marker is per browser on purpose: a second account signing in on the
+	// same device must not inherit the first account's prompts and images.
+	const migrateLegacyStudioData = async (server: ImageStudioData) => {
+		let marker: ImageStudioMigrationMarker | null = null;
+		try {
+			marker = parseImageStudioMigrationMarker(
+				localStorage.getItem(IMAGE_STUDIO_MIGRATION_MARKER_KEY)
+			);
+		} catch (error) {
+			console.warn('Failed to read image studio migration marker', error);
+		}
+		if (marker) return;
+
+		const plan = planImageStudioLocalMigration(readLegacyStudioData(), server);
+		if (plan.forms.length > 0) {
+			try {
+				await upsertImageStudioItems(localStorage.token, plan.forms);
+			} catch (error) {
+				// No marker is written, so the upload is retried on the next visit.
+				console.warn('Failed to upload legacy image studio data', error);
+				toast.error($i18n.t('Failed to sync to the server'));
+				return;
+			}
+			applyStudioData(plan.merged);
+			toast.success(
+				$i18n.t('Moved {{count}} saved items from this browser to your account', {
+					count: plan.forms.length
+				})
+			);
+		}
+
+		try {
+			localStorage.setItem(
+				IMAGE_STUDIO_MIGRATION_MARKER_KEY,
+				serializeImageStudioMigrationMarker({
+					userId: $user?.id ?? '',
+					migratedAt: Date.now(),
+					uploaded: plan.forms.length
+				})
+			);
+		} catch (error) {
+			console.warn('Failed to record image studio migration', error);
+		}
+	};
+
+	const loadStudioData = async () => {
+		let server: ImageStudioData;
+		try {
+			server = partitionImageStudioItems(await getImageStudioItems(localStorage.token));
+		} catch (error) {
+			console.warn('Failed to load image studio data', error);
+			// Keep the page usable with whatever this browser still holds.
+			applyStudioData(readLegacyStudioData());
+			toast.error(
+				$i18n.t(
+					"Could not load your saved templates, gallery and history from the server. Showing this browser's local copy."
+				)
+			);
+			return;
+		}
+		applyStudioData(server);
+		await migrateLegacyStudioData(server);
+	};
+
+	const saveTemplate = async () => {
 		const name = templateName.trim();
 		if (!name) return;
 
@@ -675,14 +760,17 @@
 			}
 		};
 
-		savedTemplates = [template, ...savedTemplates];
-
 		try {
-			localStorage.setItem(WORKSPACE_IMAGE_TEMPLATES_KEY, JSON.stringify(savedTemplates));
+			await upsertImageStudioItems(
+				localStorage.token,
+				toImageStudioItemForms('template', [template])
+			);
+			savedTemplates = [template, ...savedTemplates];
 			toast.success($i18n.t('Template saved successfully'));
 			templateName = '';
 			templateTags = '';
 		} catch (error) {
+			console.warn('Failed to save template', error);
 			toast.error($i18n.t('Failed to save template'));
 		}
 	};
@@ -715,34 +803,38 @@
 		toast.success($i18n.t('Template loaded'));
 	};
 
-	const persistTemplates = () => {
-		localStorage.setItem(WORKSPACE_IMAGE_TEMPLATES_KEY, JSON.stringify(savedTemplates));
-	};
-
 	const importTemplatesFromFile = async (event: Event) => {
 		const input = event.currentTarget as HTMLInputElement | null;
 		const file = input?.files?.[0];
 		if (input) input.value = '';
 		if (!file) return;
+
+		let incoming: ImageGenerationTemplate[] = [];
 		try {
-			const incoming = normalizeImportedImageTemplates(JSON.parse(await file.text()));
-			if (incoming.length === 0) {
-				toast.error($i18n.t('Invalid template file'));
-				return;
-			}
-			const merged = mergeImageTemplates(savedTemplates, incoming);
-			savedTemplates = merged.templates;
-			persistTemplates();
-			toast.success(
-				$i18n.t('Imported {{added}} templates, skipped {{skipped}} duplicates', {
-					added: merged.added,
-					skipped: merged.skipped
-				})
-			);
+			incoming = normalizeImportedImageTemplates(JSON.parse(await file.text()));
 		} catch (error) {
 			console.warn('Failed to import templates', error);
-			toast.error($i18n.t('Invalid template file'));
 		}
+		if (incoming.length === 0) {
+			toast.error($i18n.t('Invalid template file'));
+			return;
+		}
+
+		const merged = mergeImageTemplates(savedTemplates, incoming);
+		if (
+			!(await persistStudioItems(
+				toImageStudioItemForms('template', merged.templates.slice(0, merged.added))
+			))
+		) {
+			return;
+		}
+		savedTemplates = merged.templates;
+		toast.success(
+			$i18n.t('Imported {{added}} templates, skipped {{skipped}} duplicates', {
+				added: merged.added,
+				skipped: merged.skipped
+			})
+		);
 	};
 
 	const exportTemplates = () => {
@@ -772,12 +864,13 @@
 		templateTagFilter = '';
 	}
 
-	const deleteTemplate = (id: string) => {
-		savedTemplates = savedTemplates.filter((t) => t.id !== id);
+	const deleteTemplate = async (id: string) => {
 		try {
-			localStorage.setItem(WORKSPACE_IMAGE_TEMPLATES_KEY, JSON.stringify(savedTemplates));
+			await deleteImageStudioItem(localStorage.token, id);
+			savedTemplates = savedTemplates.filter((t) => t.id !== id);
 			toast.success($i18n.t('Template deleted'));
 		} catch (error) {
+			console.warn('Failed to delete template', error);
 			toast.error($i18n.t('Failed to delete template'));
 		}
 	};
@@ -801,104 +894,83 @@
 		}
 	};
 
-	const addToGallery = (images: GeneratedImage[]) => {
-		try {
-			const raw = localStorage.getItem(WORKSPACE_IMAGE_GALLERY_KEY);
-			const existing: GalleryImage[] = raw ? JSON.parse(raw) : [];
-
-			const newImages: GalleryImage[] = images.map((img) => ({
-				id: `gallery_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-				url: img.url,
-				prompt: lastPrompt,
-				negativePrompt: negativePrompt.trim() || undefined,
-				model: selectedModelLabel,
-				size: activeSizeLabel,
-				createdAt: Date.now()
-			}));
-
-			galleryImages = [...newImages, ...existing];
-			localStorage.setItem(WORKSPACE_IMAGE_GALLERY_KEY, JSON.stringify(galleryImages));
-		} catch (error) {
-			console.warn('Failed to add to gallery', error);
-		}
+	const buildGalleryImages = (images: GeneratedImage[]): GalleryImage[] => {
+		const now = Date.now();
+		return images.map((img) => ({
+			id: `gallery_${now}_${Math.random().toString(36).substr(2, 9)}`,
+			url: img.url,
+			prompt: lastPrompt,
+			negativePrompt: negativePrompt.trim() || undefined,
+			model: selectedModelLabel,
+			size: activeSizeLabel,
+			createdAt: now
+		}));
 	};
 
-	const loadGallery = () => {
-		try {
-			const raw = localStorage.getItem(WORKSPACE_IMAGE_GALLERY_KEY);
-			if (raw) {
-				galleryImages = JSON.parse(raw);
-			}
-		} catch (error) {
-			console.warn('Failed to load gallery', error);
-		}
-	};
-
-	const toggleFavorite = (id: string) => {
-		galleryImages = galleryImages.map((img) =>
-			img.id === id ? { ...img, favorite: !img.favorite } : img
-		);
-		try {
-			localStorage.setItem(WORKSPACE_IMAGE_GALLERY_KEY, JSON.stringify(galleryImages));
-		} catch (error) {
-			console.warn('Failed to update favorite', error);
-		}
-	};
-
-	const addToHistory = (
+	const buildHistoryEntry = (
 		status: 'success' | 'failed',
 		images?: string[],
 		error?: string
+	): GenerationHistory => ({
+		id: `history_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+		prompt: lastPrompt,
+		negativePrompt: negativePrompt.trim() || undefined,
+		model: selectedModelLabel,
+		parameters: {
+			size: activeSizeLabel,
+			steps,
+			numberOfImages,
+			background
+		},
+		status,
+		images,
+		error,
+		createdAt: Date.now(),
+		completedAt: Date.now()
+	});
+
+	// Adds the run to the gallery (successful images) and to the history, then
+	// syncs both to the server in a single request.
+	const recordGeneration = (
+		status: 'success' | 'failed',
+		images?: GeneratedImage[],
+		error?: string
 	) => {
-		try {
-			const raw = localStorage.getItem(WORKSPACE_IMAGE_HISTORY_KEY);
-			const existing: GenerationHistory[] = raw ? JSON.parse(raw) : [];
+		const galleryEntries = images?.length ? buildGalleryImages(images) : [];
+		const historyEntry = buildHistoryEntry(
+			status,
+			images?.length ? images.map((img) => img.url) : undefined,
+			error
+		);
+		galleryImages = [...galleryEntries, ...galleryImages];
+		generationHistory = [historyEntry, ...generationHistory].slice(0, IMAGE_STUDIO_HISTORY_LIMIT);
+		void persistStudioItems([
+			...toImageStudioItemForms('gallery', galleryEntries),
+			...toImageStudioItemForms('history', [historyEntry])
+		]);
+	};
 
-			const historyItem: GenerationHistory = {
-				id: `history_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-				prompt: lastPrompt,
-				negativePrompt: negativePrompt.trim() || undefined,
-				model: selectedModelLabel,
-				parameters: {
-					size: activeSizeLabel,
-					steps,
-					numberOfImages,
-					background
-				},
-				status,
-				images,
-				error,
-				createdAt: Date.now(),
-				completedAt: Date.now()
-			};
-
-			generationHistory = [historyItem, ...existing].slice(0, 100); // 保留最近100条
-			localStorage.setItem(WORKSPACE_IMAGE_HISTORY_KEY, JSON.stringify(generationHistory));
-		} catch (error) {
-			console.warn('Failed to add to history', error);
+	const toggleFavorite = async (id: string) => {
+		const previous = galleryImages;
+		galleryImages = galleryImages.map((img) =>
+			img.id === id ? { ...img, favorite: !img.favorite } : img
+		);
+		const updated = galleryImages.find((img) => img.id === id);
+		if (!updated) return;
+		if (!(await persistStudioItems(toImageStudioItemForms('gallery', [updated])))) {
+			galleryImages = previous;
 		}
 	};
 
-	const loadHistory = () => {
+	const clearHistory = async () => {
+		if (!confirm($i18n.t('Are you sure you want to clear all history?'))) return;
 		try {
-			const raw = localStorage.getItem(WORKSPACE_IMAGE_HISTORY_KEY);
-			if (raw) {
-				generationHistory = JSON.parse(raw);
-			}
-		} catch (error) {
-			console.warn('Failed to load history', error);
-		}
-	};
-
-	const clearHistory = () => {
-		if (confirm($i18n.t('Are you sure you want to clear all history?'))) {
+			await clearImageStudioItems(localStorage.token, 'history');
 			generationHistory = [];
-			try {
-				localStorage.removeItem(WORKSPACE_IMAGE_HISTORY_KEY);
-				toast.success($i18n.t('History cleared'));
-			} catch (error) {
-				toast.error($i18n.t('Failed to clear history'));
-			}
+			toast.success($i18n.t('History cleared'));
+		} catch (error) {
+			console.warn('Failed to clear history', error);
+			toast.error($i18n.t('Failed to clear history'));
 		}
 	};
 
@@ -1190,15 +1262,14 @@
 
 			if (response?.length) {
 				generatedImages = response;
-				addToGallery(response);
-				addToHistory('success', response.map((img) => img.url));
+				recordGeneration('success', response);
 				await tick();
 				resultsSectionElement?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 			} else {
 				toast.error(
 					$i18n.t('Model returned an empty response. Try resending or switching models.')
 				);
-				addToHistory('failed', undefined, 'Empty response');
+				recordGeneration('failed', undefined, 'Empty response');
 			}
 		} catch (error) {
 			const resolutionDetail = getModelResolutionDetail(error);
@@ -1208,11 +1279,7 @@
 						? 'This image workspace was saved in an older version with only the model name. Multiple connections now share that model. Please reselect the correct image model with its connection suffix.'
 						: 'The saved image model connection is no longer available. Please reselect the correct image model with its connection suffix.'
 				);
-				addToHistory(
-					'failed',
-					undefined,
-					resolutionDetail.message || formatError(error)
-				);
+				recordGeneration('failed', undefined, resolutionDetail.message || formatError(error));
 				return;
 			}
 
@@ -1227,7 +1294,7 @@
 			} else {
 				toast.error(formatError(error));
 			}
-			addToHistory('failed', undefined, formatError(error));
+			recordGeneration('failed', undefined, formatError(error));
 		} finally {
 			loading = false;
 		}
@@ -1235,9 +1302,6 @@
 
 	onMount(async () => {
 		loadWorkspacePrefs();
-		loadTemplates();
-		loadGallery();
-		loadHistory();
 		loadActiveTab();
 		preferencesReady = true;
 
@@ -1251,6 +1315,7 @@
 
 		viewState = 'loading';
 		loaded = true;
+		void loadStudioData();
 
 		const usageResult = await getImageUsageConfig(localStorage.token).catch((error) => error);
 

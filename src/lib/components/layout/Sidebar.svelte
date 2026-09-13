@@ -66,6 +66,8 @@
 	import CommandLine from '../icons/CommandLine.svelte';
 	import Search from '../icons/Search.svelte';
 	import ArchiveBox from '../icons/ArchiveBox.svelte';
+	import FolderIcon from '../icons/Folder.svelte';
+	import FolderOpen from '../icons/FolderOpen.svelte';
 
 	type SidebarStyle = 'flat' | 'card';
 	type SidebarFolder = {
@@ -141,6 +143,68 @@
 
 	let showCreateChannel = false;
 	let showChatHistoryModal = false;
+
+	// "Chats" lists every chat, including the ones inside folders (with the
+	// folder name as a badge), unless the person switched the list to the
+	// classic ungrouped-only view. Folders keep their own listing either way.
+	let showAllChats = browser ? localStorage?.showAllChats !== 'false' : true;
+
+	// Collapsed rail (desktop): the pointer resting on it opens the full
+	// sidebar as an overlay — no layout shift, nothing persisted — until it
+	// leaves. Off on touch, on mobile, and when turned off in Settings.
+	let peek = false;
+	let peekTimer: ReturnType<typeof setTimeout> | null = null;
+	const PEEK_OPEN_DELAY_MS = 220;
+	const PEEK_CLOSE_DELAY_MS = 160;
+	$: peekEnabled = !$mobile && !$showSidebar && ($settings?.sidebarPeekOnHover ?? true);
+	$: if (!peekEnabled && peek) {
+		peek = false;
+	}
+	// What the template renders: the full sidebar or the 60px rail.
+	$: expanded = $showSidebar || $mobile || peek;
+
+	const clearPeekTimer = () => {
+		if (peekTimer) {
+			clearTimeout(peekTimer);
+			peekTimer = null;
+		}
+	};
+
+	const onSidebarPointerEnter = (e: PointerEvent) => {
+		if (!peekEnabled || e.pointerType === 'touch') return;
+		clearPeekTimer();
+		peekTimer = setTimeout(() => {
+			peekTimer = null;
+			if (peekEnabled) peek = true;
+		}, PEEK_OPEN_DELAY_MS);
+	};
+
+	const onSidebarPointerLeave = () => {
+		clearPeekTimer();
+		if (!peek) return;
+		peekTimer = setTimeout(() => {
+			peekTimer = null;
+			peek = false;
+		}, PEEK_CLOSE_DELAY_MS);
+	};
+
+	const toggleSidebar = () => {
+		clearPeekTimer();
+		peek = false;
+		showSidebar.set(!$showSidebar);
+	};
+
+	const toggleShowAllChats = async () => {
+		showAllChats = !showAllChats;
+		localStorage.setItem('showAllChats', `${showAllChats}`);
+		chats.set(null);
+		await initChatList();
+	};
+
+	const folderNameOf = (folderId: string | null | undefined): string | null => {
+		if (!folderId) return null;
+		return folders[folderId]?.name ?? null;
+	};
 
 	// Pagination variables
 	let chatListLoading = false;
@@ -348,7 +412,9 @@
 		} else if (search) {
 			nextChats = await getChatListBySearchText(localStorage.token, search, $currentChatPage);
 		} else {
-			nextChats = await getChatList(localStorage.token, $currentChatPage);
+			nextChats = await getChatList(localStorage.token, $currentChatPage, {
+				includeFolders: showAllChats
+			});
 		}
 
 		await chats.set(promoteChatToTop($chatListRefreshTarget, nextChats));
@@ -373,7 +439,9 @@
 		} else if (search) {
 			newChatList = await getChatListBySearchText(localStorage.token, search, $currentChatPage);
 		} else {
-			newChatList = await getChatList(localStorage.token, $currentChatPage);
+			newChatList = await getChatList(localStorage.token, $currentChatPage, {
+				includeFolders: showAllChats
+			});
 		}
 
 		// once the bottom of the list has been reached (no results) there is no need to continue querying
@@ -398,6 +466,11 @@
 
 		if ($selectedAssistantScene?.id) {
 			return chat.assistant_id === $selectedAssistantScene.id;
+		}
+
+		// The ungrouped-only view does not list a chat that sits in a folder.
+		if (!showAllChats && chat.folder_id) {
+			return false;
 		}
 
 		return true;
@@ -511,6 +584,10 @@
 		if (e.key === 'Shift') {
 			shiftKey = true;
 		}
+		if (e.key === 'Escape' && peek) {
+			clearPeekTimer();
+			peek = false;
+		}
 	};
 
 	const onKeyUp = (e) => {
@@ -543,26 +620,36 @@
 			? localStorage.showFolderSection === 'true'
 			: true;
 
+		// Desktop preference: expanded unless the person collapsed it. A
+		// phone-sized viewport starts hidden and never writes the preference,
+		// so going back to a desktop-sized window restores the desktop choice
+		// instead of forcing the sidebar open.
+		const isNarrowViewport = () => window.innerWidth < 768;
+		const desktopSidebarPreference = () => localStorage.sidebar !== 'false';
+
 		mobile.subscribe((value) => {
-			if ($showSidebar && value) {
-				showSidebar.set(false);
-			}
-
-			if ($showSidebar && !value) {
-				const navElement = document.getElementsByTagName('nav')[0];
-				if (navElement) {
-					navElement.style['-webkit-app-region'] = 'drag';
+			if (value) {
+				if ($showSidebar) {
+					showSidebar.set(false);
 				}
+				return;
 			}
 
-			if (!$showSidebar && !value) {
-				showSidebar.set(true);
+			const navElement = document.getElementsByTagName('nav')[0];
+			if (navElement) {
+				navElement.style['-webkit-app-region'] = 'drag';
+			}
+
+			if ($showSidebar !== desktopSidebarPreference()) {
+				showSidebar.set(desktopSidebarPreference());
 			}
 		});
 
-		showSidebar.set(!$mobile ? localStorage.sidebar === 'true' : false);
+		showSidebar.set(isNarrowViewport() ? false : desktopSidebarPreference());
 		showSidebar.subscribe((value) => {
-			localStorage.sidebar = value;
+			if (!isNarrowViewport()) {
+				localStorage.sidebar = value;
+			}
 
 			// nav element is not available on the first render
 			const navElement = document.getElementsByTagName('nav')[0];
@@ -597,6 +684,7 @@
 	});
 
 	onDestroy(() => {
+		clearPeekTimer();
 		window.removeEventListener('keydown', onKeyDown);
 		window.removeEventListener('keyup', onKeyUp);
 
@@ -667,7 +755,9 @@
 	class="h-screen max-h-[100dvh] min-h-screen select-none
 		{$isApp ? `ml-[4.5rem] md:ml-0 ` : ''}
 		shrink-0 bg-gray-50/80 backdrop-blur-xl border-r border-gray-200/50 dark:border-white/[0.08] text-gray-900 dark:text-gray-200
-		text-sm fixed md:relative z-50 top-0 left-0 overflow-hidden transform-gpu transition-[width,max-width,transform] duration-300 ease-in-out
+		text-sm fixed md:relative z-50 top-0 left-0 {peek
+		? 'overflow-visible'
+		: 'overflow-hidden'} transform-gpu transition-[width,max-width,transform] duration-300 ease-in-out
 		will-change-transform {!$mobile
 		? $showSidebar
 			? 'w-[260px] max-w-[260px] translate-x-0'
@@ -676,20 +766,26 @@
 			? 'w-[260px] max-w-[260px] translate-x-0'
 			: 'w-[0px] -translate-x-[260px]'}"
 	style="will-change: width, transform;"
-	data-state={$showSidebar ? 'expanded' : $mobile ? 'hidden' : 'collapsed'}
+	data-state={$showSidebar ? 'expanded' : peek ? 'peek' : $mobile ? 'hidden' : 'collapsed'}
 	data-style={sidebarStyle}
+	on:pointerenter={onSidebarPointerEnter}
+	on:pointerleave={onSidebarPointerLeave}
 >
+	<!-- While peeking, the panel floats over the page at full width; the rail
+	     keeps its 60px in the layout underneath. -->
 	<div
 		class="py-2 flex flex-col h-screen max-h-[100dvh] overflow-x-hidden z-50 transition-all duration-300 ease-in-out
-			{$showSidebar || $mobile ? 'w-[260px]' : 'w-[60px]'}"
+			{expanded ? 'w-[260px]' : 'w-[60px]'} {peek
+			? 'absolute top-0 left-0 border-r border-gray-200/70 bg-gray-50 shadow-2xl dark:border-white/[0.08] dark:bg-[var(--surface-raised)]'
+			: ''}"
 	>
 		<!-- 顶栏：Logo + 折叠按钮 -->
 		<div
-			class="shrink-0 flex items-center justify-between px-2 {$showSidebar || $mobile
+			class="shrink-0 flex items-center justify-between px-2 {expanded
 				? ''
 				: 'flex-col gap-2'}"
 		>
-			{#if $showSidebar || $mobile}
+			{#if expanded}
 				<!-- 展开状态：Logo左边，折叠按钮右边 -->
 				<a
 					href="/?fresh-chat=true"
@@ -716,12 +812,15 @@
 						>Halo WebUI</span
 					>
 				</a>
-				<Tooltip content={$i18n.t($showSidebar ? 'Collapse sidebar' : 'Expand sidebar')}>
+				<Tooltip
+					content="{$i18n.t($showSidebar ? 'Collapse sidebar' : 'Expand sidebar')} · {$i18n.t(
+						'Toggle with Ctrl+Shift+S'
+					)}"
+				>
 					<button
+						id="sidebar-collapse-button"
 						class={iconButtonClass}
-						on:click={() => {
-							showSidebar.set(!$showSidebar);
-						}}
+						on:click={toggleSidebar}
 						aria-label={$i18n.t($showSidebar ? 'Collapse sidebar' : 'Expand sidebar')}
 					>
 						<svg
@@ -744,12 +843,15 @@
 				</Tooltip>
 			{:else}
 				<!-- 折叠状态：垂直图标 -->
-				<Tooltip content={$i18n.t($showSidebar ? 'Collapse sidebar' : 'Expand sidebar')}>
+				<Tooltip
+					content="{$i18n.t($showSidebar ? 'Collapse sidebar' : 'Expand sidebar')} · {$i18n.t(
+						'Toggle with Ctrl+Shift+S'
+					)}"
+				>
 					<button
+						id="sidebar-collapse-button"
 						class={iconButtonClass}
-						on:click={() => {
-							showSidebar.set(!$showSidebar);
-						}}
+						on:click={toggleSidebar}
 						aria-label={$i18n.t($showSidebar ? 'Collapse sidebar' : 'Expand sidebar')}
 					>
 						<svg
@@ -773,7 +875,7 @@
 			{/if}
 		</div>
 
-		{#if $showSidebar || $mobile}
+		{#if expanded}
 			<!-- 新对话：独立一行 -->
 			<div class="flex text-gray-700 dark:text-gray-200 px-2 mt-1">
 				<a
@@ -790,7 +892,7 @@
 			</div>
 		{/if}
 
-		{#if ($user?.role === 'admin' || $user?.permissions?.workspace?.models || $user?.permissions?.workspace?.knowledge || $user?.permissions?.workspace?.prompts || $user?.permissions?.workspace?.tools) && ($showSidebar || $mobile)}
+		{#if ($user?.role === 'admin' || $user?.permissions?.workspace?.models || $user?.permissions?.workspace?.knowledge || $user?.permissions?.workspace?.prompts || $user?.permissions?.workspace?.tools) && expanded}
 			<div class="flex text-gray-700 dark:text-gray-200 px-2">
 				<a
 					class={actionItemClass}
@@ -826,7 +928,7 @@
 			</div>
 		{/if}
 
-		{#if $showSidebar || $mobile}
+		{#if expanded}
 			<!-- Hermes 会话：Telegram / QQ / CLI 的会话在网页继续 -->
 			<div class="flex text-gray-700 dark:text-gray-200 px-2">
 				<button
@@ -843,7 +945,7 @@
 			</div>
 		{/if}
 
-		{#if !$showSidebar && !$mobile}
+		{#if !expanded}
 			<div class="mt-3 px-2 flex flex-col items-center gap-2 text-gray-700 dark:text-gray-200">
 				<Tooltip content={$i18n.t('New Chat')}>
 					<a
@@ -906,6 +1008,8 @@
 					<button
 						class={iconButtonClass}
 						on:click={async () => {
+							clearPeekTimer();
+							peek = false;
 							showSidebar.set(true);
 							await tick();
 							document.querySelector('#chat-search input')?.focus();
@@ -944,7 +1048,7 @@
 			</div>
 		{/if}
 
-		{#if $showSidebar || $mobile}
+		{#if expanded}
 			<div class="shrink-0 relative {$temporaryChatEnabled ? 'opacity-20' : ''}">
 				{#if $temporaryChatEnabled}
 					<div class="absolute z-40 w-full h-full flex justify-center"></div>
@@ -960,7 +1064,7 @@
 			</div>
 		{/if}
 
-		{#if $showSidebar || $mobile}
+		{#if expanded}
 			<div
 				bind:this={sidebarScrollContainerElement}
 				class="sidebar-scroll relative flex flex-col flex-1 overflow-y-auto overflow-x-hidden {$temporaryChatEnabled
@@ -1098,6 +1202,36 @@
 					name={$i18n.t('Chats')}
 					dragAndDrop={false}
 				>
+					<svelte:fragment slot="actions">
+						{#if !$selectedAssistantScene}
+							<Tooltip
+								content={$i18n.t(
+									showAllChats
+										? 'Showing all chats, including those in folders'
+										: 'Showing only chats outside folders'
+								)}
+							>
+								<button
+									type="button"
+									class="flex size-6 items-center justify-center rounded-lg transition hover:bg-gray-200/70 dark:hover:bg-gray-850 {showAllChats
+										? 'text-gray-600 dark:text-gray-300'
+										: 'text-gray-400 dark:text-gray-500'}"
+									aria-pressed={showAllChats}
+									aria-label={$i18n.t('Include chats in folders')}
+									on:click={() => {
+										void toggleShowAllChats();
+									}}
+								>
+									{#if showAllChats}
+										<FolderOpen className="size-3.5" strokeWidth="2" />
+									{:else}
+										<FolderIcon className="size-3.5" strokeWidth="2" />
+									{/if}
+								</button>
+							</Tooltip>
+						{/if}
+					</svelte:fragment>
+
 					{#if $temporaryChatEnabled}
 						<div class="absolute z-40 w-full h-full flex justify-center"></div>
 					{/if}
@@ -1124,6 +1258,7 @@
 											id={chat.id}
 											title={chat.title}
 											folderId={chat.folder_id ?? null}
+											folderName={folderNameOf(chat.folder_id)}
 											assistantId={chat.assistant_id}
 											{folderOptions}
 											{shiftKey}
@@ -1186,6 +1321,7 @@
 										id={chat.id}
 										title={chat.title}
 										folderId={chat.folder_id ?? null}
+										folderName={folderNameOf(chat.folder_id)}
 										assistantId={chat.assistant_id ?? $selectedAssistantScene?.id ?? null}
 										{folderOptions}
 										{shiftKey}
@@ -1249,14 +1385,14 @@
 						}}
 					>
 						<button
-							class="group transition active:scale-[0.99] {$showSidebar || $mobile
+							class="group transition active:scale-[0.99] {expanded
 								? userItemClass
 								: iconButtonClass + ' mx-auto'}"
 							on:click={() => {
 								showDropdown = !showDropdown;
 							}}
 						>
-							<div class="{avatarContainerClass} {$showSidebar || $mobile ? 'mr-3' : ''}">
+							<div class="{avatarContainerClass} {expanded ? 'mr-3' : ''}">
 								<img
 									src={$user?.profile_image_url || '/user.png'}
 									class="w-full h-full object-cover rounded-full"
@@ -1264,7 +1400,7 @@
 									draggable="false"
 								/>
 							</div>
-							{#if $showSidebar || $mobile}
+							{#if expanded}
 								<div class="flex-1 text-left min-w-0">
 									<div class="text-sm font-medium text-gray-800 dark:text-gray-100 truncate">
 										{$user?.name}

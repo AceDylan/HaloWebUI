@@ -188,7 +188,12 @@
 				if (isCtrlPressed && isShiftPressed && event.key.toLowerCase() === 's') {
 					event.preventDefault();
 					console.log('toggleSidebar');
-					document.getElementById('sidebar-toggle-button')?.click();
+					// The navbar toggle exists on most pages; the sidebar's own
+					// collapse button covers the rest.
+					(
+						document.getElementById('sidebar-toggle-button') ??
+						document.getElementById('sidebar-collapse-button')
+					)?.click();
 				}
 
 				// Check if Ctrl + Shift + Backspace is pressed

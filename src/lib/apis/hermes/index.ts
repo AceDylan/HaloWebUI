@@ -25,23 +25,44 @@ const jsonHeaders = (token: string) => ({
 	authorization: `Bearer ${token}`
 });
 
+export class HermesSteerError extends Error {
+	status: number;
+	detail: string;
+
+	constructor(status: number, detail: string) {
+		super(detail);
+		this.name = 'HermesSteerError';
+		this.status = status;
+		this.detail = detail;
+	}
+
+	/** 404: no run is registered for the chat (it finished, or the server restarted). */
+	get runEnded(): boolean {
+		return this.status === 404 || this.status === 409;
+	}
+}
+
 /**
  * Inject guidance into the hermes run currently streaming in `chatId`.
- * Resolves null when nothing steerable is running there (no hermes run, run
- * already finishing, other model), so the caller can fall back to queueing.
+ * Throws a HermesSteerError when hermes did not take the text: 404 when no
+ * run is active for the chat, 409 when the run stopped accepting input, so
+ * the caller can tell the person instead of silently doing something else.
  */
 export const steerHermesRun = async (
 	token: string,
 	chatId: string,
 	text: string
-): Promise<{ accepted: boolean; run_id: string } | null> => {
+): Promise<{ accepted: boolean; run_id: string }> => {
 	const res = await fetch(`${WEBUI_API_BASE_URL}/hermes/steer`, {
 		method: 'POST',
 		headers: jsonHeaders(token),
 		body: JSON.stringify({ chat_id: chatId, text })
 	});
 	if (!res.ok) {
-		return null;
+		const body = await res.json().catch(() => ({}));
+		const detail =
+			typeof body?.detail === 'string' ? body.detail : `${res.status} ${res.statusText}`;
+		throw new HermesSteerError(res.status, detail);
 	}
 	return await res.json();
 };

@@ -117,12 +117,26 @@ export const importChatsBatch = async (
 	return res;
 };
 
-export const getChatList = async (token: string = '', page: number | null = null) => {
+/** The sidebar's "all chats" switch (localStorage `showAllChats`); on by default. */
+export const includeFolderChatsInList = (): boolean =>
+	typeof localStorage === 'undefined' || localStorage.getItem('showAllChats') !== 'false';
+
+export const getChatList = async (
+	token: string = '',
+	page: number | null = null,
+	options: { includeFolders?: boolean } = {}
+) => {
 	let error = null;
 	const searchParams = new URLSearchParams();
 
 	if (page !== null) {
 		searchParams.append('page', `${page}`);
+	}
+	// Also list the chats that sit in a folder (rows carry folder_id). Follows
+	// the sidebar's view preference unless the caller says otherwise, so every
+	// refresh of the shared chat list (import, delete, rename) matches it.
+	if (options.includeFolders ?? includeFolderChatsInList()) {
+		searchParams.append('include_folders', 'true');
 	}
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/chats/?${searchParams.toString()}`, {
@@ -1243,6 +1257,47 @@ export const deleteAllChats = async (token: string) => {
 	}
 
 	return res;
+};
+
+/**
+ * Archive the signed-in user's chats idle for `days` days (last activity, not
+ * creation; pinned chats are skipped). `dryRun` only returns the count.
+ */
+export const archiveInactiveChats = async (
+	token: string,
+	{ days, dryRun = false }: { days: number; dryRun?: boolean }
+): Promise<{ count: number; days: number; cutoff: number; dry_run: boolean }> => {
+	const res = await fetch(`${WEBUI_API_BASE_URL}/chats/archive/inactive`, {
+		method: 'POST',
+		headers: {
+			Accept: 'application/json',
+			'Content-Type': 'application/json',
+			...(token && { authorization: `Bearer ${token}` })
+		},
+		body: JSON.stringify({ days, dry_run: dryRun })
+	});
+	if (!res.ok) {
+		const body = await res.json().catch(() => ({}));
+		throw body?.detail ?? `${res.status} ${res.statusText}`;
+	}
+	return await res.json();
+};
+
+/** Bring back only the chats the inactivity sweep archived. */
+export const restoreAutoArchivedChats = async (token: string): Promise<{ count: number }> => {
+	const res = await fetch(`${WEBUI_API_BASE_URL}/chats/archive/inactive/restore`, {
+		method: 'POST',
+		headers: {
+			Accept: 'application/json',
+			'Content-Type': 'application/json',
+			...(token && { authorization: `Bearer ${token}` })
+		}
+	});
+	if (!res.ok) {
+		const body = await res.json().catch(() => ({}));
+		throw body?.detail ?? `${res.status} ${res.statusText}`;
+	}
+	return await res.json();
 };
 
 export const archiveAllChats = async (token: string) => {

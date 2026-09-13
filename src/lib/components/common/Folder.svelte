@@ -149,6 +149,23 @@
 					</div>
 				</button>
 
+				{#if $$slots.actions}
+					<!-- Extra header controls (a view toggle, a filter). Sits left of
+					     the add button when both are present. -->
+					<!-- svelte-ignore a11y-no-static-element-interactions a11y-click-events-have-key-events -->
+					<div
+						class="absolute z-10 {onAdd ? 'right-9' : 'right-2'} self-center flex items-center"
+						on:pointerup={(e) => {
+							e.stopPropagation();
+						}}
+						on:click={(e) => {
+							e.stopPropagation();
+						}}
+					>
+						<slot name="actions"></slot>
+					</div>
+				{/if}
+
 				{#if onAdd}
 					<button
 						class="absolute z-10 right-2 {addButtonClass} self-center flex items-center text-gray-500 transition-opacity dark:text-gray-300"

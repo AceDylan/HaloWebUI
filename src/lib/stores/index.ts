@@ -104,6 +104,7 @@ export const chatListRefreshTarget = writable<{
 	updated_at: number;
 	created_at: number;
 	assistant_id?: string | null;
+	folder_id?: string | null;
 } | null>(null);
 export const tags = writable([]);
 export const folders = writable([]);
@@ -292,6 +293,10 @@ type Settings = {
 	enableMessageQueue?: boolean;
 	mermaidTheme?: string;
 	temporaryChatByDefault?: boolean;
+	/** Collapsed sidebar rail expands as an overlay while the pointer rests on it. */
+	sidebarPeekOnHover?: boolean;
+	/** Per-user opt-in: archive chats idle for `days` days (see utils/chat_auto_archive.py). */
+	chatAutoArchive?: { enabled?: boolean; days?: number };
 	newChatInheritsPreviousState?: boolean;
 	chatFadeStreamingText?: boolean;
 	transitionMode?: 'none' | 'fadeIn' | 'smooth';

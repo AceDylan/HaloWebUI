@@ -8,6 +8,7 @@
 	import { goto } from '$app/navigation';
 
 	import { getChatList, getChatListBySearchText } from '$lib/apis/chats';
+	import { folders as folderStore } from '$lib/stores';
 
 	import Modal from '$lib/components/common/Modal.svelte';
 	import Loader from '$lib/components/common/Loader.svelte';
@@ -24,11 +25,18 @@
 	let chatListLoading = false;
 	let searchDebounceTimeout: ReturnType<typeof setTimeout> | null = null;
 
+	// History means everything: chats inside folders are listed too, with the
+	// folder name next to them.
 	const fetchChatPage = async (targetPage: number) => {
 		const query = searchValue.trim();
 		return query
 			? await getChatListBySearchText(localStorage.token, query, targetPage).catch(() => [])
-			: await getChatList(localStorage.token, targetPage).catch(() => []);
+			: await getChatList(localStorage.token, targetPage, { includeFolders: true }).catch(() => []);
+	};
+
+	const folderNameOf = (folderId: string | null | undefined): string | null => {
+		if (!folderId) return null;
+		return ($folderStore ?? []).find((folder) => folder.id === folderId)?.name ?? null;
 	};
 
 	const initList = async () => {
@@ -153,6 +161,14 @@
 								<div class="line-clamp-1 flex-1 text-left text-gray-800 dark:text-gray-100">
 									{chat.title}
 								</div>
+								{#if folderNameOf(chat.folder_id)}
+									<span
+										class="max-w-[8rem] shrink-0 truncate rounded-md bg-gray-200/70 px-1.5 py-0.5 text-[10px] leading-none text-gray-500 dark:bg-gray-800/80 dark:text-gray-400"
+										title={folderNameOf(chat.folder_id)}
+									>
+										{folderNameOf(chat.folder_id)}
+									</span>
+								{/if}
 								<div class="shrink-0 text-xs text-gray-600 dark:text-gray-400 whitespace-nowrap">
 									{dayjs(chat.updated_at * 1000).format('LL')}
 								</div>

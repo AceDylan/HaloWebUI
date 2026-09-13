@@ -35,6 +35,13 @@ from pydantic import BaseModel, Field
 from open_webui.utils.auth import get_admin_user, get_verified_user
 from open_webui.utils.access_control import has_permission
 from open_webui.utils.chat_image_refs import normalize_chat_payload_image_refs
+from open_webui.utils.chat_auto_archive import (
+    DEFAULT_INACTIVE_DAYS,
+    MAX_INACTIVE_DAYS,
+    MIN_INACTIVE_DAYS,
+    archive_inactive_chats,
+    restore_auto_archived_chats,
+)
 from open_webui.tasks import list_task_ids_by_chat_id
 
 log = logging.getLogger(__name__)
@@ -304,15 +311,24 @@ def _build_branch_chat_payload(
 @router.get("/", response_model=list[ChatTitleIdResponse])
 @router.get("/list", response_model=list[ChatTitleIdResponse])
 async def get_session_user_chat_list(
-    user=Depends(get_verified_user), page: Optional[int] = None
+    user=Depends(get_verified_user),
+    page: Optional[int] = None,
+    include_folders: bool = False,
 ):
+    """The sidebar list. ``include_folders`` also returns the chats that sit
+    in a folder (each row carries ``folder_id``) for the "all chats" view;
+    the default keeps the classic ungrouped-only list."""
     if page is not None:
         limit = 60
         skip = (page - 1) * limit
 
-        return Chats.get_chat_title_id_list_by_user_id(user.id, skip=skip, limit=limit)
+        return Chats.get_chat_title_id_list_by_user_id(
+            user.id, include_folders=include_folders, skip=skip, limit=limit
+        )
     else:
-        return Chats.get_chat_title_id_list_by_user_id(user.id)
+        return Chats.get_chat_title_id_list_by_user_id(
+            user.id, include_folders=include_folders
+        )
 
 
 ############################
@@ -724,6 +740,44 @@ async def get_archived_session_user_chat_list(
 @router.post("/archive/all", response_model=bool)
 async def archive_all_chats(user=Depends(get_verified_user)):
     return Chats.archive_all_chats_by_user_id(user.id)
+
+
+############################
+# ArchiveInactiveChats
+############################
+
+
+class ArchiveInactiveChatsForm(BaseModel):
+    days: int = Field(
+        default=DEFAULT_INACTIVE_DAYS, ge=MIN_INACTIVE_DAYS, le=MAX_INACTIVE_DAYS
+    )
+    dry_run: bool = False
+
+
+@router.post("/archive/inactive")
+async def archive_inactive_chats_now(
+    form_data: ArchiveInactiveChatsForm, user=Depends(get_verified_user)
+):
+    """Archive the caller's chats whose last activity is older than ``days``
+    days (pinned chats excluded). ``dry_run`` only reports the count, which
+    the settings page shows before asking for confirmation."""
+    result = await run_in_threadpool(
+        archive_inactive_chats, user.id, form_data.days, dry_run=form_data.dry_run
+    )
+    return {
+        "count": result["count"],
+        "days": result["days"],
+        "cutoff": result["cutoff"],
+        "dry_run": form_data.dry_run,
+    }
+
+
+@router.post("/archive/inactive/restore")
+async def restore_auto_archived_chats_now(user=Depends(get_verified_user)):
+    """Unarchive only the chats the inactivity sweep archived; chats the
+    person archived by hand stay archived."""
+    result = await run_in_threadpool(restore_auto_archived_chats, user.id)
+    return {"count": result["count"]}
 
 
 ############################

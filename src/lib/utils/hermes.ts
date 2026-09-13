@@ -36,6 +36,49 @@ export const isHermesAgentModelId = (
 	return dot > 0 && ids.includes(upstream.slice(dot + 1));
 };
 
+/**
+ * State the backend attaches to an assistant message once its hermes run
+ * ends (`chat:completion` → `hermes_run`). `active: false` arrives before
+ * the post-processing that keeps the message streaming, so the composer
+ * stops offering to steer a run that can no longer take input.
+ */
+export type HermesRunState = {
+	active: boolean;
+	run_id?: string | null;
+	steers?: number;
+	/** Guidance hermes accepted after its final reply and never read. */
+	pending_steer?: string;
+	/** Set locally when a steer was refused: the run is treated as ended. */
+	reason?: string;
+};
+
+type SteerableMessage = {
+	role?: string;
+	done?: boolean;
+	model?: string | null;
+	hermesRun?: HermesRunState | null;
+};
+
+/**
+ * True when `message` is the reply of a hermes run that still takes
+ * guidance: an assistant message that is not done, served by a hermes model,
+ * and not yet flagged by the backend (or a refused steer) as ended.
+ * `fallbackModel` covers a reply whose `model` is not set yet.
+ */
+export const isHermesRunSteerable = (
+	message: SteerableMessage | null | undefined,
+	hermesModelIds: readonly string[] | null | undefined = DEFAULT_HERMES_AGENT_MODEL_IDS,
+	fallbackModel: unknown = null
+): boolean => {
+	if (!message || message.role !== 'assistant' || message.done) {
+		return false;
+	}
+	if (message.hermesRun && message.hermesRun.active === false) {
+		return false;
+	}
+	return isHermesAgentModelId(message.model ?? fallbackModel, hermesModelIds);
+};
+
 /** Payload of the `hermes:approval` socket call (see backend hermes_agent.py). */
 export type HermesApprovalRequest = {
 	request_id: string;

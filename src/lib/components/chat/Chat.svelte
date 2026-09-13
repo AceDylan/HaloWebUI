@@ -146,8 +146,8 @@
 	} from '$lib/apis';
 	import { getTools } from '$lib/apis/tools';
 	import { getSkills } from '$lib/apis/skills';
-	import { steerHermesRun } from '$lib/apis/hermes';
-	import { isHermesAgentModelId, type HermesApprovalRequest } from '$lib/utils/hermes';
+	import { HermesSteerError, steerHermesRun } from '$lib/apis/hermes';
+	import { isHermesRunSteerable, type HermesApprovalRequest } from '$lib/utils/hermes';
 	import HermesApprovalDialog from './HermesApprovalDialog.svelte';
 	import { ensureModels } from '$lib/services/models';
 
@@ -608,17 +608,15 @@
 	}
 
 	// The reply on screen is a hermes run still executing: the composer sends
-	// text as guidance into it (steer) instead of queueing a new turn.
-	$: hermesRunActive = (() => {
-		const current = history?.currentId ? history.messages?.[history.currentId] : null;
-		if (!current || current.role !== 'assistant' || current.done) {
-			return false;
-		}
-		return isHermesAgentModelId(
-			current.model ?? selectedModels?.[0],
-			$config?.hermes_agent_model_ids
-		);
-	})();
+	// text as guidance into it (steer) instead of queueing a new turn. The
+	// backend flags the message (`hermesRun.active === false`) the moment the
+	// run ends, ahead of the post-processing that keeps it streaming, so the
+	// button does not offer a steer that can only be refused.
+	$: hermesRunActive = isHermesRunSteerable(
+		history?.currentId ? history.messages?.[history.currentId] : null,
+		$config?.hermes_agent_model_ids,
+		selectedModels?.[0]
+	);
 	// The dialog on screen is the freshest signal; the sidebar poll (10s) covers
 	// a request that arrived while this chat was not open.
 	$: hermesRunAwaitingApproval =
@@ -4497,7 +4495,8 @@
 				title: branchedChat.title,
 				updated_at: branchedChat.updated_at,
 				created_at: branchedChat.created_at,
-				assistant_id: branchedChat.assistant_id ?? null
+				assistant_id: branchedChat.assistant_id ?? null,
+				folder_id: branchedChat.folder_id ?? null
 			});
 			chatListRefreshRevision.update((value) => value + 1);
 			await goto(targetUrl);
@@ -4816,7 +4815,8 @@
 	};
 
 	const chatCompletionEventHandler = async (data, message, chatId) => {
-		const { id, done, choices, content, sources, error, usage, files, discussion } = data;
+		const { id, done, choices, content, sources, error, usage, files, discussion, hermes_run } =
+			data;
 		if (isResponseStopped(message) || stoppedResponseMessageIds.has(message?.id)) {
 			if (done) {
 				stoppedResponseMessageIds.delete(message.id);
@@ -4888,6 +4888,13 @@
 			message.usage = usage;
 		}
 
+		if (hermes_run && typeof hermes_run === 'object') {
+			// The hermes run behind this reply ended: the composer stops offering
+			// to steer it even while the message keeps streaming through the
+			// post-processing step.
+			message.hermesRun = { ...(message.hermesRun ?? {}), ...hermes_run };
+		}
+
 		commitHistoryMessage(message);
 
 		if (done) {
@@ -4903,6 +4910,23 @@
 			if (!shouldFinalize) {
 				if (shouldAutoScrollOnStreaming()) scrollToBottom();
 				return;
+			}
+
+			const pendingSteer = message.hermesRun?.pending_steer;
+			if (typeof pendingSteer === 'string' && pendingSteer.trim()) {
+				// hermes accepted this guidance after its final reply and never
+				// read it. Hand it back rather than let the quote in the
+				// transcript suggest it was followed.
+				if (!prompt.trim()) {
+					prompt = pendingSteer;
+					toast.warning(
+						$i18n.t('Guidance not read: the task finished first. It is back in the composer.')
+					);
+				} else {
+					toast.warning(
+						$i18n.t('Guidance not read: the task finished first. Send it again if still needed.')
+					);
+				}
 			}
 
 			if ($settings.responseAutoCopy) {
@@ -5036,18 +5060,48 @@
 		const hasPendingTask = Array.isArray(taskIds) && taskIds.length > 0;
 		const hasRunningResponse = messages.length !== 0 && messages.at(-1).done != true;
 		if (hasPendingTask || hasRunningResponse) {
-			// A hermes run accepts text while it executes: steer it instead of
-			// queueing the message for after it finishes. Anything with files, or
-			// a response that is not a hermes run, is not steerable (null) and
-			// falls through to the queue exactly as before.
-			if (hasRunningResponse && validFiles.length === 0 && referenceFiles.length === 0) {
-				const steered = await steerHermesRun(localStorage.token, $chatId, userPrompt).catch(
-					() => null
-				);
-				if (steered?.accepted) {
-					prompt = '';
-					files = structuredClone(failedFiles);
-					toast.success($i18n.t('Guidance sent to the running task'));
+			// The composer offered "steer" (a hermes run is executing): send the
+			// text into that run. Text with files, or a reply that is not a
+			// steerable hermes run, is queued for after the reply as before.
+			if (
+				hermesRunActive &&
+				hasRunningResponse &&
+				validFiles.length === 0 &&
+				referenceFiles.length === 0
+			) {
+				try {
+					const steered = await steerHermesRun(localStorage.token, $chatId, userPrompt);
+					if (steered?.accepted) {
+						prompt = '';
+						files = structuredClone(failedFiles);
+						toast.success($i18n.t('Guidance sent to the running task'));
+						return;
+					}
+				} catch (error) {
+					// hermes refused the text: the run ended between the last
+					// update and this send, or it stopped taking input. Say so and
+					// keep the text — nothing is queued behind the person's back.
+					// The reply is marked as no longer steerable, so the next send
+					// offers "queue" instead.
+					const current = history.currentId ? history.messages?.[history.currentId] : null;
+					if (current && current.role === 'assistant') {
+						current.hermesRun = {
+							...(current.hermesRun ?? {}),
+							active: false,
+							reason: 'steer_rejected'
+						};
+						commitHistoryMessage(current);
+					}
+					if (error instanceof HermesSteerError && error.runEnded) {
+						toast.error(
+							$i18n.t(
+								'Guidance not delivered: the task is no longer taking input. Your text is kept; send it again to queue it as a new message.'
+							)
+						);
+					} else {
+						const detail = error instanceof HermesSteerError ? error.detail : `${error}`;
+						toast.error($i18n.t('Guidance could not be sent: {{error}}', { error: detail }));
+					}
 					return;
 				}
 			}

@@ -525,6 +525,22 @@ FOLDER_AUTO_ASSIGNMENT_TIMEOUT = float(
 )
 
 ####################################
+# CHAT AUTO-ARCHIVE
+####################################
+
+# The in-process sweep that archives inactive chats for the users who opted
+# in (Settings > Interface > "Auto-archive inactive chats"). Seconds between
+# passes; 0 disables the sweep entirely (the manual "archive now" button in
+# the settings keeps working).
+CHAT_AUTO_ARCHIVE_SWEEP_INTERVAL = int(
+    os.environ.get("CHAT_AUTO_ARCHIVE_SWEEP_INTERVAL", str(6 * 60 * 60))
+)
+# Seconds to wait after startup before the first pass.
+CHAT_AUTO_ARCHIVE_STARTUP_DELAY = int(
+    os.environ.get("CHAT_AUTO_ARCHIVE_STARTUP_DELAY", "300")
+)
+
+####################################
 # OFFLINE_MODE
 ####################################
 

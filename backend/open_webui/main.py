@@ -657,6 +657,11 @@ async def lifespan(app: FastAPI):
 
     asyncio.create_task(periodic_usage_pool_cleanup())
 
+    # Archives inactive chats for the users who opted in (no-op otherwise).
+    from open_webui.utils.chat_auto_archive import periodic_chat_auto_archive
+
+    asyncio.create_task(periodic_chat_auto_archive())
+
     # HaloClaw: start messaging gateway adapters
     from open_webui.haloclaw.lifecycle import startup_haloclaw, shutdown_haloclaw
 

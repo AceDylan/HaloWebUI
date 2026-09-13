@@ -437,3 +437,81 @@ def test_manual_title_routes_mark_titles_as_manual(monkeypatch):
         (("chat-1", "Manual one"), {"auto_generated": False}),
         (("chat-1", "Manual two"), {"auto_generated": False}),
     ]
+
+
+def test_automatic_title_refresh_accepts_a_follow_up_on_the_same_branch(monkeypatch):
+    # Turn 1's title arrives after a queued turn 2 already moved currentId
+    # below it: the source reply is an ancestor of the current one, so the
+    # first title still lands instead of leaving "New Chat" until turn 3.
+    table = chats_mod.ChatTable()
+    chat_row = _fake_chat_row(title="New Chat", meta={})
+    chat_row.chat["history"] = {
+        "currentId": "assistant-2",
+        "messages": {
+            "user-1": {"parentId": None, "childrenIds": ["assistant-1"]},
+            "assistant-1": {"parentId": "user-1", "childrenIds": ["user-2"]},
+            "user-2": {"parentId": "assistant-1", "childrenIds": ["assistant-2"]},
+            "assistant-2": {"parentId": "user-2", "childrenIds": []},
+        },
+    }
+    commits = _install_fake_db(monkeypatch, chat_row)
+
+    result = table.update_chat_title_by_id(
+        "chat-1",
+        "First topic",
+        auto_generated=True,
+        last_user_message_count=1,
+        source_message_id="assistant-1",
+    )
+
+    assert result is not None
+    assert result.title == "First topic"
+    assert result.meta["title_generation"]["last_message_id"] == "assistant-1"
+    assert commits == [True]
+
+
+def test_automatic_title_refresh_rejects_a_regenerated_sibling(monkeypatch):
+    # A regenerate puts a sibling reply on screen; the title generated from
+    # the abandoned sibling must not overwrite the current branch.
+    table = chats_mod.ChatTable()
+    chat_row = _fake_chat_row(title="New Chat", meta={})
+    chat_row.chat["history"] = {
+        "currentId": "assistant-1b",
+        "messages": {
+            "user-1": {"parentId": None, "childrenIds": ["assistant-1a", "assistant-1b"]},
+            "assistant-1a": {"parentId": "user-1", "childrenIds": []},
+            "assistant-1b": {"parentId": "user-1", "childrenIds": []},
+        },
+    }
+    commits = _install_fake_db(monkeypatch, chat_row)
+
+    result = table.update_chat_title_by_id(
+        "chat-1",
+        "Abandoned topic",
+        auto_generated=True,
+        last_user_message_count=1,
+        source_message_id="assistant-1a",
+    )
+
+    assert result is None
+    assert chat_row.title == "New Chat"
+    assert commits == []
+
+
+@pytest.mark.parametrize(
+    ("history", "message_id", "expected"),
+    [
+        ({}, "a", True),
+        ({"currentId": None, "messages": {}}, "a", True),
+        ({"currentId": "a", "messages": {}}, "a", True),
+        ({"currentId": "b", "messages": {"b": {"parentId": "a"}}}, "a", True),
+        ({"currentId": "b", "messages": {}}, "a", False),
+        (
+            {"currentId": "c", "messages": {"c": {"parentId": "b"}, "b": {"parentId": "c"}}},
+            "a",
+            False,
+        ),
+    ],
+)
+def test_is_message_on_current_branch(history, message_id, expected):
+    assert chats_mod.is_message_on_current_branch(history, message_id) is expected

@@ -46,6 +46,8 @@
 	export let title;
 	export let assistantId: string | null = null;
 	export let folderId: string | null = null;
+	/** Name of the folder the chat sits in, shown as a badge in the "all chats" list. */
+	export let folderName: string | null = null;
 	export let folderOptions: Array<{
 		id: string;
 		name: string;
@@ -285,6 +287,14 @@
 				<div dir="auto" class={titleClass}>
 					{title}
 				</div>
+				{#if folderName}
+					<span
+						class="ml-1.5 max-w-[6.5rem] shrink-0 self-center truncate rounded-md bg-gray-200/70 px-1.5 py-0.5 text-[10px] leading-none text-gray-500 dark:bg-gray-800/80 dark:text-gray-400"
+						title={folderName}
+					>
+						{folderName}
+					</span>
+				{/if}
 				{#if $activeChatIds.has(id)}
 					<div class="flex-shrink-0 self-center ml-1">
 						<span class="relative flex h-2 w-2">

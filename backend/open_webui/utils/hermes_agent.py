@@ -612,6 +612,31 @@ def _materialize_run_input_image_refs(payload, *, user_id: str, is_admin: bool):
     }
 
 
+def _mark_undelivered_steers(blocks, pending_steer) -> int:
+    """Flag the steer blocks hermes never read.
+
+    hermes reports guidance it accepted after the final response in
+    ``pending_steer`` on ``run.completed``. Those quotes already sit in the
+    transcript; mark them so the rendering says the run ended before reading
+    them instead of implying they were followed. Returns the number flagged.
+    """
+    pending = str(pending_steer or "").strip()
+    if not pending:
+        return 0
+    flagged = 0
+    for block in reversed(blocks):
+        if block.get("type") != "steer" or block.get("undelivered"):
+            continue
+        text = str(block.get("content", "")).strip()
+        if text and text in pending:
+            block["undelivered"] = True
+            flagged += 1
+            pending = pending.replace(text, "", 1)
+            if not pending.strip():
+                break
+    return flagged
+
+
 def _serialize_blocks(blocks) -> str:
     content = ""
     for block in blocks:
@@ -627,6 +652,8 @@ def _serialize_blocks(blocks) -> str:
             for index, line in enumerate(lines):
                 prefix = "\U0001f9ed " if index == 0 else ""
                 quoted.append(f"> {prefix}{line}")
+            if block.get("undelivered"):
+                quoted.append("> \u26a0\ufe0f 未送达：任务在采纳这条指引前已结束")
             content = f"{content}\n" + "\n".join(quoted) + "\n\n"
         elif block["type"] == "tool":
             arguments = html.escape(
@@ -934,12 +961,39 @@ async def run_hermes_agent(request, form_data, user, metadata, model, events, ta
                     return
             blocks.append({"type": "text", "content": output})
 
-        async def _finalize(error=None, usage=None, successful=False):
+        def _run_state(pending_steer=None) -> dict:
+            state = {
+                "active": False,
+                "run_id": run_id,
+                "steers": sum(1 for block in blocks if block.get("type") == "steer"),
+            }
+            if pending_steer:
+                state["pending_steer"] = str(pending_steer)
+            return state
+
+        async def _finalize(
+            error=None, usage=None, successful=False, pending_steer=None
+        ):
             nonlocal finalized
             if finalized:
                 return
             finalized = True
             _unregister_run(metadata["chat_id"], run_id)
+            # hermes stopped reading input the moment the run ended, but the
+            # message keeps streaming through the HTML design step below (up
+            # to two minutes). Tell the composer now so its send button turns
+            # from "steer" into "queue" instead of offering a steer that can
+            # only be refused. Persisted too, so a reload shows the same.
+            _mark_undelivered_steers(blocks, pending_steer)
+            run_state = _run_state(pending_steer)
+            try:
+                await _emit_completion({"hermes_run": run_state})
+            except Exception as e:
+                log.debug(f"hermes run-state emit failed: {e}")
+            try:
+                upsert_response_message({"hermes_run": run_state})
+            except Exception as e:
+                log.debug(f"hermes run-state persist failed: {e}")
             content = _serialize_blocks(blocks)
             if successful and not error:
                 content = await design_html_visual_artifact_with_agy(content, metadata)
@@ -949,6 +1003,7 @@ async def run_hermes_agent(request, form_data, user, metadata, model, events, ta
                 "done": True,
                 "content": content,
                 "completedAt": completed_at,
+                "hermes_run": run_state,
             }
             mapped_usage = _map_usage(usage)
             if mapped_usage:
@@ -967,6 +1022,7 @@ async def run_hermes_agent(request, form_data, user, metadata, model, events, ta
                         "content": content,
                         "done": True,
                         "completedAt": completed_at,
+                        "hermes_run": run_state,
                         **({"usage": mapped_usage} if mapped_usage else {}),
                         **({"error": {"content": error}} if error else {}),
                     }
@@ -1139,7 +1195,9 @@ async def run_hermes_agent(request, form_data, user, metadata, model, events, ta
                         elif event_type == "run.completed":
                             _apply_final_output(event.get("output") or "")
                             await _finalize(
-                                usage=event.get("usage"), successful=True
+                                usage=event.get("usage"),
+                                successful=True,
+                                pending_steer=event.get("pending_steer"),
                             )
                         elif event_type == "run.failed":
                             await _finalize(
@@ -1153,6 +1211,7 @@ async def run_hermes_agent(request, form_data, user, metadata, model, events, ta
                 error = None
                 usage = None
                 successful = False
+                pending_steer = None
                 try:
                     timeout = aiohttp.ClientTimeout(total=15)
                     async with aiohttp.ClientSession(
@@ -1170,10 +1229,16 @@ async def run_hermes_agent(request, form_data, user, metadata, model, events, ta
                                 successful = status == "completed"
                                 if status == "failed":
                                     error = status_data.get("error") or "run failed"
+                                pending_steer = status_data.get("pending_steer")
                                 _apply_final_output(status_data.get("output") or "")
                 except Exception:
                     pass
-                await _finalize(error=error, usage=usage, successful=successful)
+                await _finalize(
+                    error=error,
+                    usage=usage,
+                    successful=successful,
+                    pending_steer=pending_steer,
+                )
         except asyncio.CancelledError:
             if run_id:
                 try:

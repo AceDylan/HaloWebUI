@@ -28,6 +28,10 @@ log.setLevel(SRC_LOG_LEVELS["MODELS"])
 
 TITLE_GENERATION_META_KEY = "title_generation"
 FOLDER_ASSIGNMENT_META_KEY = "folder_assignment"
+# ``chat.meta.auto_archive``: ``{"archived_at": ts, "days": n, "reason": "inactive",
+# "restored_at": ts}`` — written by the inactivity sweep so its archives can be
+# told apart from manual ones (and undone without touching those).
+AUTO_ARCHIVE_META_KEY = "auto_archive"
 DEFAULT_CHAT_TITLE = "New Chat"
 
 
@@ -90,6 +94,33 @@ def can_auto_generate_chat_title(
             return False
 
     return True
+
+
+def is_message_on_current_branch(history: Optional[dict], message_id: str) -> bool:
+    """True when ``message_id`` is ``history.currentId`` or one of its ancestors.
+
+    Walks ``parentId`` links from the current message. A chat without a
+    current message has no branch to compare against and counts as a match.
+    """
+    if not isinstance(history, dict) or not message_id:
+        return True
+    current_id = history.get("currentId")
+    if not current_id:
+        return True
+    messages = history.get("messages") or {}
+    if not isinstance(messages, dict):
+        return current_id == message_id
+    node = current_id
+    seen = set()
+    while node and node not in seen:
+        if node == message_id:
+            return True
+        seen.add(node)
+        message = messages.get(node)
+        if not isinstance(message, dict):
+            return False
+        node = message.get("parentId")
+    return False
 
 
 class Chat(Base):
@@ -646,16 +677,13 @@ class ChatTable:
                     return None
 
                 if auto_generated is True and source_message_id:
+                    # The title describes the branch the person is on. A
+                    # follow-up turn appended below the source message keeps
+                    # it on that branch (a queued message, a quick reply); a
+                    # regenerate or an edit switches to a sibling and the
+                    # stale title must not land.
                     history = chat.get("history") or {}
-                    if (
-                        history.get("currentId")
-                        and history.get("currentId") != source_message_id
-                    ):
-                        return None
-                    source_message = (history.get("messages") or {}).get(
-                        source_message_id
-                    )
-                    if source_message and source_message.get("childrenIds"):
+                    if not is_message_on_current_branch(history, source_message_id):
                         return None
 
                 chat["title"] = title
@@ -944,6 +972,81 @@ class ChatTable:
                 return True
         except Exception:
             return False
+
+    def get_inactive_chats_by_user_id(
+        self, user_id: str, cutoff: int
+    ) -> list[ChatModel]:
+        """Unarchived, unpinned chats whose last activity (``updated_at``) is
+        older than ``cutoff``; oldest first."""
+        with get_db() as db:
+            query = (
+                db.query(Chat)
+                .filter_by(user_id=user_id, archived=False)
+                .filter(or_(Chat.pinned == False, Chat.pinned == None))
+                .filter(Chat.updated_at < cutoff)
+                .order_by(Chat.updated_at.asc())
+            )
+            return [ChatModel.model_validate(chat) for chat in query.all()]
+
+    def archive_chats_by_ids_and_user_id(
+        self, ids: list[str], user_id: str, marker: dict
+    ) -> int:
+        """Archive the given chats of ``user_id`` and stamp ``meta.auto_archive``
+        with ``marker``. ``updated_at`` is left alone so the archived list keeps
+        the real last-activity order. Returns how many rows changed."""
+        if not ids:
+            return 0
+        with get_db() as db:
+            rows = (
+                db.query(Chat)
+                .filter(Chat.user_id == user_id, Chat.archived == False)
+                .filter(Chat.id.in_(list(ids)))
+                .all()
+            )
+            for chat in rows:
+                chat.archived = True
+                meta = dict(chat.meta) if isinstance(chat.meta, dict) else {}
+                meta[AUTO_ARCHIVE_META_KEY] = dict(marker)
+                chat.meta = meta
+                flag_modified(chat, "meta")
+            db.commit()
+            return len(rows)
+
+    def restore_auto_archived_chats_by_user_id(
+        self, user_id: str, restored_at: int
+    ) -> list[dict]:
+        """Unarchive the chats the inactivity sweep archived (those carrying
+        ``meta.auto_archive.archived_at``), leaving manually archived chats
+        alone. ``restored_at`` is recorded in the marker so the next sweep
+        treats the restore as activity. Returns ``[{"id", "tags"}]``."""
+        with get_db() as db:
+            rows = (
+                db.query(Chat)
+                .filter_by(user_id=user_id, archived=True)
+                .with_entities(Chat.id, Chat.meta)
+                .all()
+            )
+            targets = {}
+            for chat_id, meta in rows:
+                marker = meta.get(AUTO_ARCHIVE_META_KEY) if isinstance(meta, dict) else None
+                if isinstance(marker, dict) and marker.get("archived_at"):
+                    targets[chat_id] = meta
+            if not targets:
+                return []
+            restored = []
+            for chat in (
+                db.query(Chat).filter(Chat.id.in_(list(targets.keys()))).all()
+            ):
+                meta = dict(chat.meta) if isinstance(chat.meta, dict) else {}
+                marker = dict(meta.get(AUTO_ARCHIVE_META_KEY) or {})
+                marker["restored_at"] = restored_at
+                meta[AUTO_ARCHIVE_META_KEY] = marker
+                chat.archived = False
+                chat.meta = meta
+                flag_modified(chat, "meta")
+                restored.append({"id": chat.id, "tags": list(meta.get("tags") or [])})
+            db.commit()
+            return restored
 
     def get_archived_chat_list_by_user_id(
         self, user_id: str, skip: int = 0, limit: int = 50

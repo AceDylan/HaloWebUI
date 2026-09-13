@@ -117,3 +117,28 @@ def test_serialize_blocks_renders_a_steer_as_a_quoted_marker():
     assert content.index("Working on it.") < content.index("skip the docs") < content.index(
         "Understood."
     )
+
+
+def test_undelivered_steers_are_flagged_from_pending_steer_and_rendered():
+    from open_webui.utils.hermes_agent import _mark_undelivered_steers
+
+    blocks = [
+        {"type": "text", "content": "Working on it."},
+        {"type": "steer", "content": "use pytest"},
+        {"type": "text", "content": "Done."},
+        {"type": "steer", "content": "also lint"},
+    ]
+
+    # hermes joins the guidance it never read with newlines on run.completed.
+    assert _mark_undelivered_steers(blocks, "also lint") == 1
+    assert blocks[1].get("undelivered") is None
+    assert blocks[3]["undelivered"] is True
+
+    content = _serialize_blocks(blocks)
+    delivered, undelivered = content.split("Done.")
+    assert "未送达" not in delivered
+    assert "> \U0001f9ed also lint\n> ⚠️ 未送达" in undelivered
+
+    # Nothing pending, nothing flagged; already flagged blocks are not counted twice.
+    assert _mark_undelivered_steers(blocks, None) == 0
+    assert _mark_undelivered_steers(blocks, "also lint") == 0

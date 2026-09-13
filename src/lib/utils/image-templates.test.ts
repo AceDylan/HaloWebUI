@@ -1,11 +1,14 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+	applyImageTemplateEdit,
 	collectImageTemplateTags,
+	describeImageTemplateSettings,
 	filterImageTemplates,
 	isJsonPromptTemplate,
 	mergeImageTemplates,
 	normalizeImportedImageTemplates,
+	replaceImageTemplate,
 	serializeImageTemplates,
 	sortImageTemplates,
 	type ImageTemplate
@@ -120,5 +123,70 @@ describe('image-templates', () => {
 		expect(payload.version).toBe(1);
 		expect(payload.templates).toHaveLength(1);
 		expect(typeof payload.exportedAt).toBe('string');
+	});
+});
+
+describe('image-templates edits', () => {
+	const saved: ImageTemplate = {
+		id: 'template_1',
+		name: '把结论生成图片',
+		tags: ['图解'],
+		createdAt: 10,
+		updatedAt: 10,
+		config: { prompt: '旧提示词', size: '1536x1024', aspectRatio: '3:2', quality: 'high' }
+	};
+
+	it('applies text edits in place and keeps id, createdAt and generation settings', () => {
+		const updated = applyImageTemplateEdit(
+			saved,
+			{ name: '  架构图  ', tags: '运维, 架构,运维', prompt: '新提示词\n', negativePrompt: ' 模糊 ' },
+			99
+		);
+		expect(updated).toEqual({
+			id: 'template_1',
+			name: '架构图',
+			tags: ['运维', '架构'],
+			createdAt: 10,
+			updatedAt: 99,
+			config: {
+				prompt: '新提示词',
+				negativePrompt: '模糊',
+				size: '1536x1024',
+				aspectRatio: '3:2',
+				quality: 'high'
+			}
+		});
+		// The original is untouched and the list keeps its order.
+		expect(saved.name).toBe('把结论生成图片');
+		expect(saved.config.prompt).toBe('旧提示词');
+		const list = replaceImageTemplate([{ ...saved, id: 'other' }, saved], updated!);
+		expect(list.map((template) => template.id)).toEqual(['other', 'template_1']);
+		expect(list[1].name).toBe('架构图');
+	});
+
+	it('leaves untouched fields alone and clears emptied optional text', () => {
+		const withNegative = { ...saved, config: { ...saved.config, negativePrompt: '水印' } };
+		const updated = applyImageTemplateEdit(withNegative, { negativePrompt: '   ' }, 50);
+		expect(updated?.name).toBe('把结论生成图片');
+		expect(updated?.tags).toEqual(['图解']);
+		expect(updated?.config.prompt).toBe('旧提示词');
+		expect(updated?.config).not.toHaveProperty('negativePrompt');
+		expect(updated?.updatedAt).toBe(50);
+	});
+
+	it('refuses an edit that removes both the name and the prompt', () => {
+		expect(applyImageTemplateEdit(saved, { name: ' ', prompt: '' })).toBeNull();
+		expect(applyImageTemplateEdit(saved, { name: '', prompt: '只有提示词' })?.name).toBe(
+			'只有提示词'
+		);
+	});
+
+	it('describes only the generation settings a template carries', () => {
+		expect(describeImageTemplateSettings(saved.config)).toEqual([
+			{ key: 'size', value: '1536x1024' },
+			{ key: 'aspect', value: '3:2' },
+			{ key: 'quality', value: 'high' }
+		]);
+		expect(describeImageTemplateSettings({ prompt: 'x' })).toEqual([]);
 	});
 });

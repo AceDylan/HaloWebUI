@@ -10,17 +10,19 @@
 	import type { ImageGenerationModel, ImageUsageConfig } from '$lib/apis/images';
 	import HaloSelect from '$lib/components/common/HaloSelect.svelte';
 	import ImagePreview from '$lib/components/common/ImagePreview.svelte';
+	import Modal from '$lib/components/common/Modal.svelte';
 	import ArrowDownTray from '$lib/components/icons/ArrowDownTray.svelte';
 	import ArrowsPointingOut from '$lib/components/icons/ArrowsPointingOut.svelte';
 	import Clipboard from '$lib/components/icons/Clipboard.svelte';
 	import DocumentArrowDown from '$lib/components/icons/DocumentArrowDown.svelte';
 	import DocumentArrowUpSolid from '$lib/components/icons/DocumentArrowUpSolid.svelte';
 	import MagnifyingGlass from '$lib/components/icons/MagnifyingGlass.svelte';
+	import Pencil from '$lib/components/icons/Pencil.svelte';
 	import XMark from '$lib/components/icons/XMark.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import PhotoSolid from '$lib/components/icons/PhotoSolid.svelte';
 	import Sparkles from '$lib/components/icons/Sparkles.svelte';
-	import { WEBUI_NAME, user } from '$lib/stores';
+	import { WEBUI_NAME, imageStudioTemplates, user } from '$lib/stores';
 	import { copyToClipboard } from '$lib/utils';
 	import { localizeCommonError } from '$lib/utils/common-errors';
 	import { getModelChatDisplayName } from '$lib/utils/model-display';
@@ -38,11 +40,14 @@
 		type LearnedImageConstraint
 	} from '$lib/utils/workspace-image-generation';
 	import {
+		applyImageTemplateEdit,
 		collectImageTemplateTags,
+		describeImageTemplateSettings,
 		filterImageTemplates,
 		isJsonPromptTemplate,
 		mergeImageTemplates,
 		normalizeImportedImageTemplates,
+		replaceImageTemplate,
 		serializeImageTemplates,
 		sortImageTemplates,
 		type ImageTemplate,
@@ -260,6 +265,30 @@
 	let templateTagFilter = '';
 	let templateSortBy: ImageTemplateSort = 'recent';
 	let templateFileInput: HTMLInputElement | null = null;
+	// The saved template the workbench currently holds (set by "Load"), so the
+	// save section can overwrite it with the current settings instead of always
+	// creating a new one.
+	let loadedTemplateId: string | null = null;
+	$: loadedTemplate = loadedTemplateId
+		? (savedTemplates.find((template) => template.id === loadedTemplateId) ?? null)
+		: null;
+	// Editor (prompts tab) for a template's name, tags and prompt text.
+	let showTemplateEditor = false;
+	let editingTemplate: ImageGenerationTemplate | null = null;
+	let editName = '';
+	let editTags = '';
+	let editPrompt = '';
+	let editNegativePrompt = '';
+	let templateEditSaving = false;
+	$: editingTemplateSettings = editingTemplate
+		? describeImageTemplateSettings(editingTemplate.config)
+		: [];
+	// Once loaded, the list is mirrored into the store the chat composer reads
+	// its image-mode quick commands from, so edits show up there without a reload.
+	let studioDataLoaded = false;
+	$: if (studioDataLoaded) {
+		imageStudioTemplates.set(savedTemplates);
+	}
 	const activeTagChipClass =
 		'border-gray-900 bg-gray-900 text-white dark:border-gray-100 dark:bg-gray-100 dark:text-gray-900';
 	const idleTagChipClass =
@@ -656,6 +685,7 @@
 		savedTemplates = data.templates;
 		galleryImages = data.gallery;
 		generationHistory = data.history;
+		studioDataLoaded = true;
 	};
 
 	const persistStudioItems = async (items: ImageStudioItemForm[]) => {
@@ -750,31 +780,37 @@
 		await migrateLegacyStudioData(server);
 	};
 
-	const saveTemplate = async () => {
+	const buildWorkbenchTemplateConfig = (): ImageTemplate['config'] => ({
+		prompt: prompt.trim() || undefined,
+		negativePrompt: negativePrompt.trim() || undefined,
+		model: selectedModel || selectedModelRawId || undefined,
+		size: activeSize || undefined,
+		aspectRatio: selectedAspectRatioOption || undefined,
+		resolution: selectedResolution || undefined,
+		steps: steps > 0 ? steps : undefined,
+		numberOfImages: numberOfImages !== '1' ? numberOfImages : undefined,
+		background: background !== 'auto' ? background : undefined,
+		quality: showsQualityControl && quality !== 'auto' ? quality : undefined
+	});
+
+	// `update` overwrites the template the workbench was loaded from (same id and
+	// createdAt, everything else from the current workbench); `new` always adds one.
+	const saveTemplate = async (mode: 'new' | 'update' = 'new') => {
 		const name = templateName.trim();
 		if (!name) return;
 
+		const existing = mode === 'update' ? loadedTemplate : null;
+		const now = Date.now();
 		const template: ImageGenerationTemplate = {
-			id: `template_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+			id: existing?.id ?? `template_${now}_${Math.random().toString(36).substr(2, 9)}`,
 			name,
 			tags: templateTags
-				.split(',')
+				.split(/[,，]/)
 				.map((t) => t.trim())
 				.filter(Boolean),
-			createdAt: Date.now(),
-			updatedAt: Date.now(),
-			config: {
-				prompt: prompt.trim() || undefined,
-				negativePrompt: negativePrompt.trim() || undefined,
-				model: selectedModel || selectedModelRawId || undefined,
-				size: activeSize || undefined,
-				aspectRatio: selectedAspectRatioOption || undefined,
-				resolution: selectedResolution || undefined,
-				steps: steps > 0 ? steps : undefined,
-				numberOfImages: numberOfImages !== '1' ? numberOfImages : undefined,
-				background: background !== 'auto' ? background : undefined,
-				quality: showsQualityControl && quality !== 'auto' ? quality : undefined
-			}
+			createdAt: existing?.createdAt ?? now,
+			updatedAt: now,
+			config: buildWorkbenchTemplateConfig()
 		};
 
 		try {
@@ -782,18 +818,78 @@
 				localStorage.token,
 				toImageStudioItemForms('template', [template])
 			);
-			savedTemplates = [template, ...savedTemplates];
-			toast.success($i18n.t('Template saved successfully'));
-			templateName = '';
-			templateTags = '';
+			if (existing) {
+				savedTemplates = replaceImageTemplate(savedTemplates, template);
+				toast.success($i18n.t('Template updated'));
+			} else {
+				savedTemplates = [template, ...savedTemplates];
+				toast.success($i18n.t('Template saved successfully'));
+			}
+			// The workbench now holds this template, so the next save can update it.
+			loadedTemplateId = template.id;
 		} catch (error) {
 			console.warn('Failed to save template', error);
 			toast.error($i18n.t('Failed to save template'));
 		}
 	};
 
+	const openTemplateEditor = (template: ImageGenerationTemplate) => {
+		editingTemplate = template;
+		editName = template.name;
+		editTags = template.tags.join(', ');
+		editPrompt = template.config.prompt ?? '';
+		editNegativePrompt = template.config.negativePrompt ?? '';
+		showTemplateEditor = true;
+	};
+
+	const closeTemplateEditor = () => {
+		showTemplateEditor = false;
+		editingTemplate = null;
+	};
+	// Escape / backdrop close the modal through `show` alone; drop the draft too.
+	$: if (!showTemplateEditor && editingTemplate) {
+		editingTemplate = null;
+	}
+
+	const submitTemplateEdit = async () => {
+		if (!editingTemplate || templateEditSaving) return;
+		const updated = applyImageTemplateEdit(editingTemplate, {
+			name: editName,
+			tags: editTags,
+			prompt: editPrompt,
+			negativePrompt: editNegativePrompt
+		});
+		if (!updated) {
+			toast.error($i18n.t('A template needs a name or a prompt'));
+			return;
+		}
+
+		templateEditSaving = true;
+		try {
+			await upsertImageStudioItems(
+				localStorage.token,
+				toImageStudioItemForms('template', [updated])
+			);
+			savedTemplates = replaceImageTemplate(savedTemplates, updated);
+			if (loadedTemplateId === updated.id) {
+				templateName = updated.name;
+				templateTags = updated.tags.join(', ');
+			}
+			toast.success($i18n.t('Template updated'));
+			closeTemplateEditor();
+		} catch (error) {
+			console.warn('Failed to update template', error);
+			toast.error($i18n.t('Failed to update template'));
+		} finally {
+			templateEditSaving = false;
+		}
+	};
+
 	const loadTemplate = (template: ImageGenerationTemplate) => {
 		const config = template.config;
+		loadedTemplateId = template.id;
+		templateName = template.name;
+		templateTags = template.tags.join(', ');
 
 		if (config.prompt) prompt = config.prompt;
 		if (config.negativePrompt) {
@@ -885,6 +981,8 @@
 		try {
 			await deleteImageStudioItem(localStorage.token, id);
 			savedTemplates = savedTemplates.filter((t) => t.id !== id);
+			if (loadedTemplateId === id) loadedTemplateId = null;
+			if (editingTemplate?.id === id) closeTemplateEditor();
 			toast.success($i18n.t('Template deleted'));
 		} catch (error) {
 			console.warn('Failed to delete template', error);
@@ -1320,6 +1418,17 @@
 	onMount(async () => {
 		loadWorkspacePrefs();
 		loadActiveTab();
+		// `/workspace/images?tab=prompts` (linked from the chat composer) wins over
+		// the remembered tab.
+		const requestedTab = new URLSearchParams(window.location.search).get('tab');
+		if (
+			requestedTab === 'workbench' ||
+			requestedTab === 'prompts' ||
+			requestedTab === 'gallery' ||
+			requestedTab === 'history'
+		) {
+			activeTab = requestedTab;
+		}
 		preferencesReady = true;
 
 		const allowed =
@@ -1834,22 +1943,52 @@
 								class="w-full rounded-xl border border-gray-200/80 bg-white px-3 py-2 text-sm text-gray-800 outline-none transition focus:border-gray-300 dark:border-gray-700/60 dark:bg-gray-950/70 dark:text-gray-100 dark:focus:border-gray-600"
 							/>
 
-							<button
-								type="button"
-								class="workspace-secondary-button w-full"
-								on:click={saveTemplate}
-								disabled={!templateName.trim()}
-							>
-								<svg class="size-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-									<path
-										stroke-linecap="round"
-										stroke-linejoin="round"
-										stroke-width="2"
-										d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z"
-									/>
-								</svg>
-								<span>{$i18n.t('Save Template')}</span>
-							</button>
+							{#if loadedTemplate}
+								<div
+									class="truncate text-xs text-gray-500 dark:text-gray-400"
+									title={loadedTemplate.name}
+									data-halo-loaded-template={loadedTemplate.id}
+								>
+									{$i18n.t('Loaded template: {{name}}', { name: loadedTemplate.name })}
+								</div>
+								<button
+									type="button"
+									class="workspace-primary-button w-full"
+									on:click={() => saveTemplate('update')}
+									disabled={!templateName.trim()}
+									data-halo-template-update
+								>
+									<Pencil className="size-4" />
+									<span>{$i18n.t('Update template')}</span>
+								</button>
+								<button
+									type="button"
+									class="workspace-secondary-button w-full"
+									on:click={() => saveTemplate('new')}
+									disabled={!templateName.trim()}
+									data-halo-template-save-new
+								>
+									<span>{$i18n.t('Save as new template')}</span>
+								</button>
+							{:else}
+								<button
+									type="button"
+									class="workspace-secondary-button w-full"
+									on:click={() => saveTemplate('new')}
+									disabled={!templateName.trim()}
+									data-halo-template-save-new
+								>
+									<svg class="size-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+										<path
+											stroke-linecap="round"
+											stroke-linejoin="round"
+											stroke-width="2"
+											d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z"
+										/>
+									</svg>
+									<span>{$i18n.t('Save Template')}</span>
+								</button>
+							{/if}
 						</div>
 
 						{#if savedTemplates.length > 0}
@@ -2145,6 +2284,17 @@
 										>
 											{$i18n.t('Load')}
 										</button>
+										<Tooltip content={$i18n.t('Edit')}>
+											<button
+												type="button"
+												class="workspace-secondary-button px-2.5 py-1.5 text-xs"
+												aria-label={$i18n.t('Edit')}
+												data-halo-template-edit={template.id}
+												on:click={() => openTemplateEditor(template)}
+											>
+												<Pencil className="size-3.5" />
+											</button>
+										</Tooltip>
 										<Tooltip content={$i18n.t('Copy prompt')}>
 											<button
 												type="button"
@@ -2426,3 +2576,103 @@
 	src={previewSrc}
 	alt={previewAlt}
 />
+
+<Modal bind:show={showTemplateEditor} size="md">
+	{#if editingTemplate}
+		<form
+			class="flex flex-col gap-3 px-5 pb-5 pt-4 text-gray-800 dark:text-gray-100"
+			data-halo-template-editor={editingTemplate.id}
+			on:submit|preventDefault={submitTemplateEdit}
+		>
+			<div class="flex items-center justify-between gap-3">
+				<div class="text-lg font-semibold">{$i18n.t('Edit template')}</div>
+				<button
+					type="button"
+					class="rounded-full p-1 text-gray-400 transition hover:text-gray-600 dark:hover:text-gray-200"
+					aria-label={$i18n.t('Close')}
+					on:click={closeTemplateEditor}
+				>
+					<XMark className="size-4" />
+				</button>
+			</div>
+
+			<label class="flex flex-col gap-1 text-xs text-gray-500 dark:text-gray-400">
+				<span>{$i18n.t('Template name')}</span>
+				<input
+					bind:value={editName}
+					name="name"
+					maxlength="120"
+					class="w-full rounded-xl border border-gray-200/80 bg-white px-3 py-2 text-sm text-gray-800 outline-none transition focus:border-gray-300 dark:border-gray-700/60 dark:bg-gray-950/70 dark:text-gray-100 dark:focus:border-gray-600"
+				/>
+			</label>
+
+			<label class="flex flex-col gap-1 text-xs text-gray-500 dark:text-gray-400">
+				<span>{$i18n.t('Tags (comma separated)')}</span>
+				<input
+					bind:value={editTags}
+					name="tags"
+					class="w-full rounded-xl border border-gray-200/80 bg-white px-3 py-2 text-sm text-gray-800 outline-none transition focus:border-gray-300 dark:border-gray-700/60 dark:bg-gray-950/70 dark:text-gray-100 dark:focus:border-gray-600"
+				/>
+			</label>
+
+			<label class="flex flex-col gap-1 text-xs text-gray-500 dark:text-gray-400">
+				<span>{$i18n.t('Prompt')}</span>
+				<textarea
+					bind:value={editPrompt}
+					name="prompt"
+					rows="10"
+					class="w-full resize-y rounded-xl border border-gray-200/80 bg-white px-3 py-2 text-sm leading-relaxed text-gray-800 outline-none transition focus:border-gray-300 dark:border-gray-700/60 dark:bg-gray-950/70 dark:text-gray-100 dark:focus:border-gray-600 {isJsonPromptTemplate(
+						editPrompt
+					)
+						? 'font-mono'
+						: ''}"
+				/>
+			</label>
+
+			<label class="flex flex-col gap-1 text-xs text-gray-500 dark:text-gray-400">
+				<span>{$i18n.t('Negative prompt (optional)')}</span>
+				<textarea
+					bind:value={editNegativePrompt}
+					name="negativePrompt"
+					rows="2"
+					class="w-full resize-y rounded-xl border border-gray-200/80 bg-white px-3 py-2 text-sm text-gray-800 outline-none transition focus:border-gray-300 dark:border-gray-700/60 dark:bg-gray-950/70 dark:text-gray-100 dark:focus:border-gray-600"
+				/>
+			</label>
+
+			<div class="text-xs text-gray-500 dark:text-gray-400">
+				<span class="font-medium">{$i18n.t('Generation settings')}:</span>
+				{#if editingTemplateSettings.length > 0}
+					{#each editingTemplateSettings as setting (setting.key)}
+						<span
+							class="ml-1 inline-block rounded-full bg-gray-100 px-2 py-0.5 text-2xs text-gray-600 dark:bg-gray-800 dark:text-gray-300"
+							>{setting.key} {setting.value}</span
+						>
+					{/each}
+				{:else}
+					<span class="ml-1 italic">{$i18n.t('None')}</span>
+				{/if}
+				<div class="mt-1">
+					{$i18n.t('To change them, load the template into the workbench and use Update template.')}
+				</div>
+			</div>
+
+			<div class="flex justify-end gap-2 pt-1">
+				<button
+					type="button"
+					class="workspace-secondary-button text-xs"
+					on:click={closeTemplateEditor}
+				>
+					{$i18n.t('Cancel')}
+				</button>
+				<button
+					type="submit"
+					class="workspace-primary-button text-xs"
+					disabled={templateEditSaving || (!editName.trim() && !editPrompt.trim())}
+					data-halo-template-editor-save
+				>
+					{$i18n.t('Save')}
+				</button>
+			</div>
+		</form>
+	{/if}
+</Modal>

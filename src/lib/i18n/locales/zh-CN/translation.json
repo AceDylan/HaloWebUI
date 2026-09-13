@@ -3021,5 +3021,17 @@
 	"Archive {{count}} chat(s) with no activity for {{days}} days? They can be restored from Archived Chats.": "将归档 {{count}} 个超过 {{days}} 天没有活动的对话，可在“已归档对话”中恢复。是否继续？",
 	"Archived {{count}} chat(s).": "已归档 {{count}} 个对话。",
 	"Restored {{count}} auto-archived chat(s).": "已恢复 {{count}} 个自动归档的对话。",
-	"Toggle with Ctrl+Shift+S": "快捷键 Ctrl+Shift+S"
+	"Toggle with Ctrl+Shift+S": "快捷键 Ctrl+Shift+S",
+	"Edit template": "编辑模板",
+	"Update template": "更新模板",
+	"Save as new template": "另存为新模板",
+	"Loaded template: {{name}}": "已加载模板：{{name}}",
+	"Template updated": "模板已更新",
+	"Failed to update template": "模板更新失败",
+	"A template needs a name or a prompt": "模板至少要有名称或提示词",
+	"Negative prompt (optional)": "负面提示词（可选）",
+	"Generation settings": "生成参数",
+	"To change them, load the template into the workbench and use Update template.": "要修改这些参数，请先把模板加载到工作台，调整后点“更新模板”。",
+	"Image prompts": "生图提示词",
+	"Manage image prompts": "管理生图提示词"
 }

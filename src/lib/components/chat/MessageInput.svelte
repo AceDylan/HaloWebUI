@@ -68,6 +68,7 @@
 	import ModelIcon from '../common/ModelIcon.svelte';
 	import { getModelChatDisplayName } from '$lib/utils/model-display';
 	import { isDedicatedImageGenerationModel } from '$lib/utils/model-capabilities';
+	import { isChatImageMode } from '$lib/utils/chat-image-mode';
 	import type { ChatAssistantSnapshot } from '$lib/utils/chat-assistants';
 	import {
 		isWebSearchEnabled,
@@ -1814,6 +1815,7 @@
 											class="flex gap-1 items-center overflow-x-auto scrollbar-none flex-1 min-w-0 scroll-fade-x"
 										>
 											<QuickCommands
+												imageMode={isChatImageMode(imageGenerationEnabled, primarySelectedModel)}
 												on:select={async (e) => {
 													const chip = e.detail;
 													const body = (chip?.content ?? '').replace(/\s+$/, '');

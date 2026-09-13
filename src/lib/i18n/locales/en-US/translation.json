@@ -2334,5 +2334,17 @@
 	"Archive {{count}} chat(s) with no activity for {{days}} days? They can be restored from Archived Chats.": "Archive {{count}} chat(s) with no activity for {{days}} days? They can be restored from Archived Chats.",
 	"Archived {{count}} chat(s).": "Archived {{count}} chat(s).",
 	"Restored {{count}} auto-archived chat(s).": "Restored {{count}} auto-archived chat(s).",
-	"Toggle with Ctrl+Shift+S": "Toggle with Ctrl+Shift+S"
+	"Toggle with Ctrl+Shift+S": "Toggle with Ctrl+Shift+S",
+	"Edit template": "Edit template",
+	"Update template": "Update template",
+	"Save as new template": "Save as new template",
+	"Loaded template: {{name}}": "Loaded template: {{name}}",
+	"Template updated": "Template updated",
+	"Failed to update template": "Failed to update template",
+	"A template needs a name or a prompt": "A template needs a name or a prompt",
+	"Negative prompt (optional)": "Negative prompt (optional)",
+	"Generation settings": "Generation settings",
+	"To change them, load the template into the workbench and use Update template.": "To change them, load the template into the workbench and use Update template.",
+	"Image prompts": "Image prompts",
+	"Manage image prompts": "Manage image prompts"
 }

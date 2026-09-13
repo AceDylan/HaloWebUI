@@ -1,3 +1,4 @@
+import type { ImageTemplate } from '$lib/utils/image-templates';
 import { APP_NAME } from '$lib/constants';
 import { type Writable, writable } from 'svelte/store';
 import type { ModelConfig } from '$lib/apis';
@@ -116,6 +117,9 @@ export const modelsStatus: Writable<'idle' | 'loading' | 'ready' | 'error'> = wr
 export const modelsError: Writable<string | null> = writable(null);
 
 export const prompts: Writable<null | Prompt[]> = writable(null);
+// Image-studio prompt templates (Workspace → Images → Prompts), offered as the
+// composer's quick commands while a chat is in image mode. `null` = not loaded.
+export const imageStudioTemplates: Writable<null | ImageTemplate[]> = writable(null);
 export const skills: Writable<any[]> = writable([]);
 export const knowledge: Writable<null | Document[]> = writable(null);
 export const tools = writable(null);

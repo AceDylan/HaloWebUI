@@ -74,10 +74,8 @@
 	import { getAnthropicEffortSteps } from '$lib/utils/anthropic-thinking';
 	import {
 		buildModelIdentityLookup,
-		getModelCleanId,
 		getModelRef,
 		getModelSelectionId,
-		parseModelSelectionId,
 		resolveModelSelectionId
 	} from '$lib/utils/model-identity';
 	import {
@@ -105,7 +103,7 @@
 		type WebSearchModeSource
 	} from '$lib/utils/web-search-mode';
 	import { getFunctionPipeRootId } from '$lib/utils/image-generation';
-	import { isDedicatedImageGenerationModel } from '$lib/utils/model-capabilities';
+	import { isDedicatedImageGenerationChatModel } from '$lib/utils/chat-image-mode';
 	import { resolveModelBuiltinWebSearchState } from '$lib/utils/model-web-search-preference';
 	import { applyUserSettingsSnapshot } from '$lib/utils/user-settings';
 	import {
@@ -980,19 +978,6 @@
 		}
 
 		return isDedicatedImageGenerationChatModel(model) ? model : null;
-	};
-
-	const isDedicatedImageGenerationChatModel = (model: Model | null | undefined): boolean => {
-		const candidates = [
-			getModelCleanId(model),
-			(model as any)?.info?.base_model_id,
-			(model as any)?.info?.meta?.base_selection_id,
-			model?.id
-		].map((candidate) => {
-			const raw = `${candidate ?? ''}`.trim();
-			return parseModelSelectionId(raw)?.modelId ?? raw;
-		});
-		return candidates.some((candidate) => isDedicatedImageGenerationModel(`${candidate ?? ''}`));
 	};
 
 	const canUseChatImageGeneration = () =>

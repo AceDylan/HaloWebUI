@@ -9,8 +9,9 @@ Routes chats for configured model IDs through hermes's /v1/runs API (instead of
 - command approval requests pop the hermes approval dialog in every live tab
   of the user (socket "hermes:approval" call, answered with once / session /
   always / deny) and the choice is posted back to hermes via
-  POST /v1/runs/{run_id}/approval; with no tab connected the request is pushed
-  to the user's notification webhook.
+  POST /v1/runs/{run_id}/approval; with no tab connected (see utils/presence.py:
+  registered socket or the requesting tab, after a short grace for a
+  reconnect) the request is pushed to the user's notification webhook.
 
 Configuration (environment variables):
 
@@ -41,11 +42,9 @@ from open_webui.env import (
     WEBSOCKET_EVENT_CALLER_TIMEOUT,
 )
 from open_webui.models.chats import Chats
-from open_webui.models.users import Users
 from open_webui.socket.main import (
     SESSION_POOL,
     USER_POOL,
-    get_active_status_by_user_id,
     get_event_call,
     get_event_emitter,
     sio,
@@ -59,7 +58,10 @@ from open_webui.utils.html_visual_prompt import (
     design_html_visual_artifact_with_agy,
 )
 from open_webui.utils.model_identity import parse_selection_id
-from open_webui.utils.webhook import post_webhook
+from open_webui.utils.presence import (
+    APPROVAL_WEBHOOK_GRACE_SECONDS,
+    schedule_away_webhook,
+)
 
 log = logging.getLogger(__name__)
 log.setLevel(SRC_LOG_LEVELS.get("MAIN", logging.INFO))
@@ -463,51 +465,48 @@ def _webhook_summary(content: str) -> str:
     return text
 
 
-async def _post_completion_webhook(request, user, metadata, title, content):
-    """Push a finished hermes run to the user's notification webhook.
+def _schedule_completion_webhook(request, user, metadata, title, content):
+    """Push a finished hermes run to the user's notification webhook when no
+    tab shows it to them.
 
     hermes runs return from main.chat_completion before process_chat_response,
     so the completion webhook that lives there never fires for them - and hermes
-    turns are exactly the long ones the user walks away from. An open tab is
-    covered by the browser notification, so only push when none is connected.
+    turns are exactly the long ones the user walks away from. Presence decides
+    (a registered socket, or the requesting tab still connected, with a grace
+    window for a reconnect); the push runs in the background so it never delays
+    the completion event or the title/tags bookkeeping.
     """
     try:
-        if get_active_status_by_user_id(user.id):
-            return
-        webhook_url = Users.get_user_webhook_url_by_id(user.id)
-        if not webhook_url:
-            return
         summary = _webhook_summary(content)
         chat_url = f"{request.app.state.config.WEBUI_URL}/c/{metadata['chat_id']}"
         heading = f"{title} - {chat_url}" if title else chat_url
-        await asyncio.to_thread(
-            post_webhook,
-            request.app.state.WEBUI_NAME,
-            webhook_url,
-            f"{heading}\n\n{summary}",
-            {
+        schedule_away_webhook(
+            user_id=user.id,
+            session_id=metadata.get("session_id"),
+            name=request.app.state.WEBUI_NAME,
+            message=f"{heading}\n\n{summary}",
+            event_data={
                 "action": "chat",
                 "message": summary,
                 "title": title or "",
                 "url": chat_url,
             },
+            log_tag="hermes completion",
         )
     except Exception as e:
         log.warning(f"hermes completion webhook failed: {e}")
 
 
-async def _post_approval_webhook(request, user, metadata, approval: dict):
-    """Push a pending command approval to the user's notification webhook.
+def _schedule_approval_webhook(request, user, metadata, approval: dict):
+    """Push a pending command approval to the user's notification webhook when
+    no tab can show the dialog.
 
     Approvals auto-deny after HERMES_AGENT_APPROVAL_TIMEOUT. With no tab
     connected nothing else tells the person a run is waiting on them, and
-    hermes runs are exactly the ones they walk away from."""
+    hermes runs are exactly the ones they walk away from. The grace here is
+    short: it only rides out a reconnecting tab, the rest of the timeout
+    belongs to the person."""
     try:
-        if get_active_status_by_user_id(user.id):
-            return
-        webhook_url = Users.get_user_webhook_url_by_id(user.id)
-        if not webhook_url:
-            return
         title = Chats.get_chat_title_by_id(metadata["chat_id"]) or ""
         chat_url = f"{request.app.state.config.WEBUI_URL}/c/{metadata['chat_id']}"
         lines = [f"⏳ {APPROVAL_TITLE}", f"{title} - {chat_url}" if title else chat_url, ""]
@@ -519,17 +518,19 @@ async def _post_approval_webhook(request, user, metadata, approval: dict):
         message = "\n".join(lines)
         if len(message) > WEBHOOK_CONTENT_MAX_CHARS:
             message = message[:WEBHOOK_CONTENT_MAX_CHARS].rstrip() + "\u2026"
-        await asyncio.to_thread(
-            post_webhook,
-            request.app.state.WEBUI_NAME,
-            webhook_url,
-            message,
-            {
+        schedule_away_webhook(
+            user_id=user.id,
+            session_id=metadata.get("session_id"),
+            name=request.app.state.WEBUI_NAME,
+            message=message,
+            event_data={
                 "action": "approval",
                 "message": message,
                 "title": title,
                 "url": chat_url,
             },
+            grace_seconds=APPROVAL_WEBHOOK_GRACE_SECONDS,
+            log_tag="hermes approval",
         )
     except Exception as e:
         log.warning(f"hermes approval webhook failed: {e}")
@@ -871,7 +872,7 @@ async def run_hermes_agent(request, form_data, user, metadata, model, events, ta
             }
 
         await _emit_status("等待你批准命令审批...", False, action="hermes_approval")
-        await _post_approval_webhook(request, user, metadata, approval_data)
+        _schedule_approval_webhook(request, user, metadata, approval_data)
 
         choice = "deny"
         try:
@@ -1033,7 +1034,7 @@ async def run_hermes_agent(request, form_data, user, metadata, model, events, ta
                 await _emit_completion(data)
             except Exception as e:
                 log.warning(f"hermes completion emit failed: {e}")
-            await _post_completion_webhook(request, user, metadata, title, content)
+            _schedule_completion_webhook(request, user, metadata, title, content)
             # Post-response bookkeeping (title/tags/follow-ups), same as the
             # normal chat flow in process_chat_response.
             try:

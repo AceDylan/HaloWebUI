@@ -35,7 +35,6 @@ from open_webui.models.users import Users
 from open_webui.socket.main import (
     get_event_call,
     get_event_emitter,
-    get_active_status_by_user_id,
 )
 from open_webui.routers.tasks import (
     generate_queries,
@@ -84,7 +83,7 @@ from open_webui.routers.anthropic import (
     _get_anthropic_user_config,
 )
 
-from open_webui.utils.webhook import post_webhook
+from open_webui.utils.presence import schedule_away_webhook
 from open_webui.utils.chat_image_refs import extract_chat_image_file_id
 from open_webui.utils.chat_image_prompt import (
     compose_chat_image_prompt,
@@ -6188,23 +6187,23 @@ async def process_chat_response(
                         },
                     )
 
-                    # Send a webhook notification if the user is not active.
-                    # (get_active_status_by_user_id returns True/False, never
-                    # None - `is None` made this branch unreachable.)
-                    if not get_active_status_by_user_id(user.id):
-                        webhook_url = Users.get_user_webhook_url_by_id(user.id)
-                        if webhook_url:
-                            post_webhook(
-                                request.app.state.WEBUI_NAME,
-                                webhook_url,
-                                f"{title} - {request.app.state.config.WEBUI_URL}/c/{metadata['chat_id']}\n\n{content}",
-                                {
-                                    "action": "chat",
-                                    "message": content,
-                                    "title": title,
-                                    "url": f"{request.app.state.config.WEBUI_URL}/c/{metadata['chat_id']}",
-                                },
-                            )
+                    # Notification webhook only when no tab shows the reply:
+                    # presence counts a registered socket or the requesting tab,
+                    # waits a short grace for a reconnect, and posts off the loop.
+                    chat_url = f"{request.app.state.config.WEBUI_URL}/c/{metadata['chat_id']}"
+                    schedule_away_webhook(
+                        user_id=user.id,
+                        session_id=metadata.get("session_id"),
+                        name=request.app.state.WEBUI_NAME,
+                        message=f"{title} - {chat_url}\n\n{content}",
+                        event_data={
+                            "action": "chat",
+                            "message": content,
+                            "title": title,
+                            "url": chat_url,
+                        },
+                        log_tag="chat completion",
+                    )
 
                     await background_tasks_handler(request, user, metadata, tasks, event_emitter)
 
@@ -10186,24 +10185,24 @@ async def process_chat_response(
                     }
                 )
 
-                # Send a webhook notification if the user is not active. This is
-                # post-response work and must never delay the live chat completion event.
-                # (get_active_status_by_user_id returns True/False, never None -
-                # `is None` made this branch unreachable.)
-                if not get_active_status_by_user_id(user.id):
-                    webhook_url = Users.get_user_webhook_url_by_id(user.id)
-                    if webhook_url:
-                        post_webhook(
-                            request.app.state.WEBUI_NAME,
-                            webhook_url,
-                            f"{title} - {request.app.state.config.WEBUI_URL}/c/{metadata['chat_id']}\n\n{content}",
-                            {
-                                "action": "chat",
-                                "message": content,
-                                "title": title,
-                                "url": f"{request.app.state.config.WEBUI_URL}/c/{metadata['chat_id']}",
-                            },
-                        )
+                # Notification webhook only when no tab shows the reply. This is
+                # post-response work and must never delay the live chat completion
+                # event: presence counts a registered socket or the requesting tab,
+                # waits a short grace for a reconnect, and posts off the loop.
+                chat_url = f"{request.app.state.config.WEBUI_URL}/c/{metadata['chat_id']}"
+                schedule_away_webhook(
+                    user_id=user.id,
+                    session_id=metadata.get("session_id"),
+                    name=request.app.state.WEBUI_NAME,
+                    message=f"{title} - {chat_url}\n\n{content}",
+                    event_data={
+                        "action": "chat",
+                        "message": content,
+                        "title": title,
+                        "url": chat_url,
+                    },
+                    log_tag="chat completion",
+                )
 
                 await background_tasks_handler(request, user, metadata, tasks, event_emitter)
             except asyncio.CancelledError:

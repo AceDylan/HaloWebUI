@@ -99,6 +99,12 @@
 
 	const handleSocketConnect = () => {
 		console.log('connected', currentSocket?.id);
+		// A reconnect (network blip, backend restart, phone back from the background)
+		// gets a fresh server-side session that knows nothing about this user until
+		// it is told; re-join so presence and channel rooms follow the tab.
+		if ($user && localStorage.token) {
+			currentSocket?.emit('user-join', { auth: { token: localStorage.token } });
+		}
 		chatListRefreshRevision.update((value) => value + 1);
 	};
 
@@ -204,7 +210,11 @@
 			randomizationFactor: 0.5,
 			path: '/ws/socket.io',
 			transports: enableWebsocket ? ['websocket'] : ['polling', 'websocket'],
-			auth: { token: localStorage.token }
+			// Evaluated on every (re)connect: a token captured once would be presented
+			// again after a re-login, and the backend then serves the tab without
+			// knowing whose it is (no browser-side effect, but "no tab is open"
+			// notifications would go out while this tab shows the reply).
+			auth: (cb) => cb(localStorage.token ? { token: localStorage.token } : {})
 		});
 
 		currentSocket = _socket;

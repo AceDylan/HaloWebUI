@@ -1,12 +1,15 @@
+<!--
+	LEGACY, NOT MOUNTED. Nothing imports this component: /settings/interface renders
+	src/lib/components/settings/InterfaceSettingsPage.svelte -> InterfacePreferences.svelte.
+	Add new per-user interface/chat preferences there, not here.
+-->
 <script lang="ts">
 	import { getBackendConfig } from '$lib/apis';
 	import { setDefaultPromptSuggestions } from '$lib/apis/configs';
-	import { chatListRefreshRevision, config, settings, user } from '$lib/stores';
+	import { config, settings, user } from '$lib/stores';
 	import { createEventDispatcher, onMount, getContext } from 'svelte';
 	import { toast } from 'svelte-sonner';
 	import { updateUserInfo } from '$lib/apis/users';
-	import { archiveInactiveChats, restoreAutoArchivedChats } from '$lib/apis/chats';
-	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import { getUserPosition } from '$lib/utils';
 	import { translateWithDefault } from '$lib/i18n';
 	import { resolveCopyFormattedPreference } from '$lib/utils/copy-format';
@@ -28,18 +31,6 @@
 	// Addons
 	let titleAutoGenerate = true;
 	let autoTags = true;
-
-	// Sidebar: collapsed rail expands as an overlay while hovered.
-	let sidebarPeekOnHover = true;
-
-	// Auto-archive: per-user opt-in, counted from the last activity of a chat.
-	const AUTO_ARCHIVE_DEFAULT_DAYS = 30;
-	const AUTO_ARCHIVE_MAX_DAYS = 3650;
-	let chatAutoArchiveEnabled = false;
-	let chatAutoArchiveDays = AUTO_ARCHIVE_DEFAULT_DAYS;
-	let showArchiveInactiveConfirm = false;
-	let archiveInactivePreviewCount = 0;
-	let archiveInactiveBusy = false;
 
 	let responseAutoCopy = false;
 	let responseHtmlFormat = false;
@@ -287,88 +278,6 @@
 		saveSettings({ ctrlEnterToSend });
 	};
 
-	const toggleSidebarPeekOnHover = async () => {
-		sidebarPeekOnHover = !sidebarPeekOnHover;
-		saveSettings({ sidebarPeekOnHover });
-	};
-
-	const normalizeArchiveDays = (value: unknown): number => {
-		const days = Math.floor(Number(value));
-		if (!Number.isFinite(days) || days < 1) {
-			return AUTO_ARCHIVE_DEFAULT_DAYS;
-		}
-		return Math.min(days, AUTO_ARCHIVE_MAX_DAYS);
-	};
-
-	const saveChatAutoArchive = () => {
-		saveSettings({
-			chatAutoArchive: { enabled: chatAutoArchiveEnabled, days: chatAutoArchiveDays }
-		});
-	};
-
-	const toggleChatAutoArchive = () => {
-		chatAutoArchiveEnabled = !chatAutoArchiveEnabled;
-		chatAutoArchiveDays = normalizeArchiveDays(chatAutoArchiveDays);
-		saveChatAutoArchive();
-	};
-
-	const saveChatAutoArchiveDays = () => {
-		chatAutoArchiveDays = normalizeArchiveDays(chatAutoArchiveDays);
-		saveChatAutoArchive();
-	};
-
-	// "Archive now": count first, then ask, then archive — never a silent sweep.
-	const previewArchiveInactive = async () => {
-		if (archiveInactiveBusy) return;
-		chatAutoArchiveDays = normalizeArchiveDays(chatAutoArchiveDays);
-		archiveInactiveBusy = true;
-		const preview = await archiveInactiveChats(localStorage.token, {
-			days: chatAutoArchiveDays,
-			dryRun: true
-		}).catch((error) => {
-			toast.error(`${error}`);
-			return null;
-		});
-		archiveInactiveBusy = false;
-		if (!preview) return;
-		if (preview.count === 0) {
-			toast.info(
-				$i18n.t('No chats have been inactive for {{days}} days.', { days: chatAutoArchiveDays })
-			);
-			return;
-		}
-		archiveInactivePreviewCount = preview.count;
-		showArchiveInactiveConfirm = true;
-	};
-
-	const archiveInactiveNow = async () => {
-		if (archiveInactiveBusy) return;
-		archiveInactiveBusy = true;
-		const result = await archiveInactiveChats(localStorage.token, {
-			days: chatAutoArchiveDays
-		}).catch((error) => {
-			toast.error(`${error}`);
-			return null;
-		});
-		archiveInactiveBusy = false;
-		if (!result) return;
-		toast.success($i18n.t('Archived {{count}} chat(s).', { count: result.count }));
-		chatListRefreshRevision.update((value) => value + 1);
-	};
-
-	const restoreAutoArchived = async () => {
-		if (archiveInactiveBusy) return;
-		archiveInactiveBusy = true;
-		const result = await restoreAutoArchivedChats(localStorage.token).catch((error) => {
-			toast.error(`${error}`);
-			return null;
-		});
-		archiveInactiveBusy = false;
-		if (!result) return;
-		toast.success($i18n.t('Restored {{count}} auto-archived chat(s).', { count: result.count }));
-		chatListRefreshRevision.update((value) => value + 1);
-	};
-
 	const updateInterfaceHandler = async () => {
 		saveSettings({
 			models: defaultModelId ? [defaultModelId] : [],
@@ -379,12 +288,6 @@
 	onMount(async () => {
 		titleAutoGenerate = $settings?.title?.auto ?? true;
 		autoTags = $settings.autoTags ?? true;
-
-		sidebarPeekOnHover = $settings.sidebarPeekOnHover ?? true;
-		chatAutoArchiveEnabled = $settings.chatAutoArchive?.enabled ?? false;
-		chatAutoArchiveDays = normalizeArchiveDays(
-			$settings.chatAutoArchive?.days ?? AUTO_ARCHIVE_DEFAULT_DAYS
-		);
 
 		detectArtifacts = $settings.detectArtifacts ?? true;
 		svgPreviewAutoOpen = $settings.svgPreviewAutoOpen ?? $settings.detectArtifacts ?? true;
@@ -429,18 +332,6 @@
 		backgroundImageUrl = $settings.backgroundImageUrl ?? null;
 	});
 </script>
-
-<ConfirmDialog
-	bind:show={showArchiveInactiveConfirm}
-	title={$i18n.t('Archive inactive chats?')}
-	message={$i18n.t(
-		'Archive {{count}} chat(s) with no activity for {{days}} days? They can be restored from Archived Chats.',
-		{ count: archiveInactivePreviewCount, days: chatAutoArchiveDays }
-	)}
-	on:confirm={() => {
-		void archiveInactiveNow();
-	}}
-/>
 
 <form
 	class="flex flex-col h-full justify-between space-y-3 text-sm"
@@ -497,26 +388,6 @@
 							<span class="ml-2 self-center">{$i18n.t('Default')}</span>
 						{:else}
 							<span class="ml-2 self-center">{$i18n.t('Chat')}</span>
-						{/if}
-					</button>
-				</div>
-			</div>
-
-			<div>
-				<div class=" py-0.5 flex w-full justify-between">
-					<div class=" self-center text-xs">{$i18n.t('Expand collapsed sidebar on hover')}</div>
-
-					<button
-						class="p-1 px-3 text-xs flex rounded-sm transition"
-						on:click={() => {
-							toggleSidebarPeekOnHover();
-						}}
-						type="button"
-					>
-						{#if sidebarPeekOnHover === true}
-							<span class="ml-2 self-center">{$i18n.t('On')}</span>
-						{:else}
-							<span class="ml-2 self-center">{$i18n.t('Off')}</span>
 						{/if}
 					</button>
 				</div>
@@ -712,67 +583,6 @@
 						{:else}
 							<span class="ml-2 self-center">{$i18n.t('Off')}</span>
 						{/if}
-					</button>
-				</div>
-			</div>
-
-			<div>
-				<div class=" py-0.5 flex w-full justify-between">
-					<div class=" self-center text-xs">{$i18n.t('Auto-archive inactive chats')}</div>
-
-					<button
-						class="p-1 px-3 text-xs flex rounded-sm transition"
-						on:click={() => {
-							toggleChatAutoArchive();
-						}}
-						type="button"
-					>
-						{#if chatAutoArchiveEnabled === true}
-							<span class="ml-2 self-center">{$i18n.t('On')}</span>
-						{:else}
-							<span class="ml-2 self-center">{$i18n.t('Off')}</span>
-						{/if}
-					</button>
-				</div>
-
-				<div class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
-					{$i18n.t(
-						'Chats with no new activity for this many days are archived (last activity, not creation date). Pinned chats are kept. Archived chats can be restored from Archived Chats at any time.'
-					)}
-				</div>
-
-				<div class="mt-1.5 flex w-full items-center justify-between gap-2">
-					<div class="self-center text-xs">{$i18n.t('Days of inactivity')}</div>
-					<input
-						class="w-20 rounded-lg bg-gray-50 px-2 py-1 text-center text-xs outline-hidden dark:bg-gray-850"
-						type="number"
-						min="1"
-						max={AUTO_ARCHIVE_MAX_DAYS}
-						bind:value={chatAutoArchiveDays}
-						on:change={saveChatAutoArchiveDays}
-					/>
-				</div>
-
-				<div class="mt-1.5 flex flex-wrap gap-2">
-					<button
-						class="rounded-full bg-gray-100 px-3 py-1 text-xs font-medium transition hover:bg-gray-200 disabled:opacity-50 dark:bg-gray-850 dark:hover:bg-gray-800"
-						type="button"
-						disabled={archiveInactiveBusy}
-						on:click={() => {
-							void previewArchiveInactive();
-						}}
-					>
-						{$i18n.t('Archive inactive chats now')}
-					</button>
-					<button
-						class="rounded-full bg-gray-100 px-3 py-1 text-xs font-medium transition hover:bg-gray-200 disabled:opacity-50 dark:bg-gray-850 dark:hover:bg-gray-800"
-						type="button"
-						disabled={archiveInactiveBusy}
-						on:click={() => {
-							void restoreAutoArchived();
-						}}
-					>
-						{$i18n.t('Restore auto-archived chats')}
 					</button>
 				</div>
 			</div>

@@ -167,7 +167,7 @@
 	{disabled}
 >
 	<Select.Trigger
-		bind:this={triggerEl}
+		bind:el={triggerEl}
 		id={triggerId || undefined}
 		class="inline-flex items-center justify-between gap-2 rounded-lg
 					border border-gray-200 dark:border-gray-700

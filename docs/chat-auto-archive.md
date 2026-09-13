@@ -1,6 +1,8 @@
 # 不活跃对话自动归档
 
-每个账号自己在「设置 → 界面 → 对话」里打开「自动归档不活跃对话」并填写天数（默认 30 天）。没打开的账号完全不受影响；服务端没有全局开关会替所有人归档。
+每个账号自己在「设置 → 界面 → 对话功能 → 归档」（路由 `/settings/interface?tab=chat`）里打开「自动归档不活跃对话」并填写天数（默认 30 天），然后点右上角「保存」。没打开的账号完全不受影响；服务端没有全局开关会替所有人归档。
+
+前端入口在 `src/lib/components/settings/InterfacePreferences.svelte`（`chat` 分区，随该分区的「保存 / 重置」一起提交 `settings.ui.chatAutoArchive`）。`src/lib/components/chat/Settings/Interface.svelte` 是没有被任何路由挂载的旧组件，不要往那里加设置项。
 
 代码入口：`backend/open_webui/utils/chat_auto_archive.py`（策略、扫描、恢复）、`backend/open_webui/routers/chats.py` 的 `POST /api/v1/chats/archive/inactive` 与 `POST /api/v1/chats/archive/inactive/restore`、`backend/open_webui/main.py` 的 lifespan 里启动的 `periodic_chat_auto_archive`。
 
@@ -36,4 +38,4 @@
 
 ## 设置页的"立即归档"
 
-按钮先用 `dry_run=true` 取数量，再弹确认框显示"将归档 N 个超过 X 天没有活动的对话"，确认后才真正归档，并刷新侧栏列表。没有符合条件的对话时只提示，不弹框。
+同一分区里的「立即归档不活跃对话」按钮按输入框里的天数（不需要先保存）先用 `dry_run=true` 取数量，再弹确认框显示"将归档 N 个超过 X 天没有活动的对话"，确认后才真正归档，并刷新侧栏列表。没有符合条件的对话时只提示，不弹框。「恢复自动归档的对话」同样在这里。

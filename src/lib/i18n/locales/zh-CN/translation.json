@@ -3033,5 +3033,7 @@
 	"Generation settings": "生成参数",
 	"To change them, load the template into the workbench and use Update template.": "要修改这些参数，请先把模板加载到工作台，调整后点“更新模板”。",
 	"Image prompts": "生图提示词",
-	"Manage image prompts": "管理生图提示词"
+	"Manage image prompts": "管理生图提示词",
+	"Select a prompt to insert it into your message.": "点击模板即可插入输入框，支持按名称、标签或内容搜索。",
+	"Failed to load image prompts.": "生图提示词加载失败。"
 }

@@ -1696,7 +1696,10 @@
 								</div>
 
 								<div class=" flex justify-between mt-1.5 mb-3 mx-0.5 max-w-full" dir="ltr">
-									<div class="ml-1 self-end flex items-center flex-1 max-w-[80%] gap-1">
+									<div
+										class="ml-1 self-end flex items-center flex-1 max-w-[80%] gap-1"
+										class:flex-wrap={isChatImageMode(imageGenerationEnabled, primarySelectedModel)}
+									>
 										<InputMenu
 											bind:selectedToolIds
 											bind:toolSelectionTouched
@@ -1811,8 +1814,14 @@
 											/>
 										{/if}
 
+										<!-- Keep the image picker reachable when the other controls fill a narrow toolbar. -->
 										<div
-											class="flex gap-1 items-center overflow-x-auto scrollbar-none flex-1 min-w-0 scroll-fade-x"
+											class="flex gap-1 items-center overflow-x-auto scrollbar-none flex-1 {isChatImageMode(
+												imageGenerationEnabled,
+												primarySelectedModel
+											)
+												? 'min-w-[10rem]'
+												: 'min-w-0 scroll-fade-x'}"
 										>
 											<QuickCommands
 												imageMode={isChatImageMode(imageGenerationEnabled, primarySelectedModel)}

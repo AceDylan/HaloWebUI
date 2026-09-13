@@ -2346,5 +2346,7 @@
 	"Generation settings": "Generation settings",
 	"To change them, load the template into the workbench and use Update template.": "To change them, load the template into the workbench and use Update template.",
 	"Image prompts": "Image prompts",
-	"Manage image prompts": "Manage image prompts"
+	"Manage image prompts": "Manage image prompts",
+	"Select a prompt to insert it into your message.": "Select a prompt to insert it into your message.",
+	"Failed to load image prompts.": "Failed to load image prompts."
 }

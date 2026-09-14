@@ -88,15 +88,31 @@ const PREVIEW_NAVIGATION_GUARD = `<script data-halo-html-preview-guard="true">((
 	}, true);
 	document.addEventListener('submit', (event) => event.preventDefault(), true);
 })();</script>`;
+// The frame reports how tall it wants to be and the host writes that number
+// straight back as the iframe's `height`, so the measurement must never be a
+// function of the height the host already applied. `documentElement.scrollHeight`
+// is exactly that: per CSSOM it is clamped to the viewport, and the viewport here
+// IS the current iframe height, so it can only ever report "at least as tall as
+// now". Measuring it made the height a one-way latch - re-flowing narrower (the
+// sidebar opening, the controls pane opening, a window resize) grew the frame,
+// and re-flowing back wider could never shrink it again, leaving dead space under
+// the document. `body.scrollHeight` is not viewport-clamped, so it is the honest
+// content height; the body margins are added back because they used to reach the
+// host only through the root measurement. The bounding-rect term is the floor for
+// content that escapes the body's scroll area (floats, absolutely positioned
+// children) - dropping it would clip those documents.
 const PREVIEW_RESIZE_BRIDGE = `<script data-halo-html-preview-resize="true">(() => {
 	let frame = 0;
 	const reportSize = () => {
 		frame = 0;
 		const root = document.documentElement;
 		const body = document.body || root;
+		const style = getComputedStyle(body);
+		const marginTop = parseFloat(style.marginTop) || 0;
+		const marginBottom = parseFloat(style.marginBottom) || 0;
 		const height = Math.ceil(Math.max(
-			root.scrollHeight,
-			body.scrollHeight,
+			body.scrollHeight + marginTop + marginBottom,
+			body.getBoundingClientRect().bottom + marginBottom,
 			1
 		));
 		parent.postMessage({ type: 'halo-html-preview-resize', height }, '*');

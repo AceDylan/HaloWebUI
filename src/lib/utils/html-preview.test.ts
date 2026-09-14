@@ -5,6 +5,8 @@ import {
 	HTML_EXPORT_SANDBOX,
 	HTML_PREVIEW_CSP,
 	HTML_PREVIEW_SANDBOX,
+	INLINE_HTML_PREVIEW_MAX_HEIGHT,
+	INLINE_HTML_PREVIEW_MIN_HEIGHT,
 	buildHtmlArtifactPreview,
 	buildInlineHtmlArtifactPreview,
 	collectHtmlArtifactCompanionImages,
@@ -302,6 +304,121 @@ window.done = true;
 			getInlineHtmlPreviewHeight({ type: 'halo-html-preview-resize', height: Number.NaN })
 		).toBeNull();
 		expect(getInlineHtmlPreviewHeight({ type: 'other', height: 420 })).toBeNull();
+	});
+
+	it('clamps the inline preview height to both bounds and accepts shrinking', () => {
+		const height = (value: number) =>
+			getInlineHtmlPreviewHeight({ type: 'halo-html-preview-resize', height: value });
+
+		expect(height(INLINE_HTML_PREVIEW_MIN_HEIGHT)).toBe(INLINE_HTML_PREVIEW_MIN_HEIGHT);
+		expect(height(INLINE_HTML_PREVIEW_MAX_HEIGHT)).toBe(INLINE_HTML_PREVIEW_MAX_HEIGHT);
+		expect(height(1)).toBe(INLINE_HTML_PREVIEW_MIN_HEIGHT);
+		expect(height(100_000)).toBe(INLINE_HTML_PREVIEW_MAX_HEIGHT);
+		expect(height(645.4)).toBe(645);
+		// A frame that reflows shorter must be able to report a smaller height; the
+		// clamp is a range, never a floor at whatever was applied before.
+		expect(height(300)).toBe(300);
+	});
+
+	// The host writes the reported number straight back as the iframe's `height`
+	// (ContentRenderer applies `height: <reported>px`), so the measurement must not
+	// read anything derived from that height. `documentElement.scrollHeight` is
+	// exactly that - per CSSOM it is clamped to the viewport, and the viewport here
+	// IS the current iframe height - which made the height a one-way latch: the
+	// document reflowing narrower grew the frame, and reflowing back wider could
+	// never shrink it again, leaving dead space under the rendered document.
+	const resizeBridgeSource = () => {
+		const preview = hardenHtmlPreviewDocument('<p>measured</p>');
+		const script = preview.match(
+			/<script data-halo-html-preview-resize="true">([\s\S]*?)<\/script>/
+		)?.[1];
+		if (!script) {
+			throw new Error('resize bridge script not found in the hardened preview document');
+		}
+		return script;
+	};
+
+	// Executes the shipped `reportSize` body against a stubbed layout so the real
+	// measurement arithmetic is covered without a browser. `documentElement` is
+	// stubbed with a NaN scroll height on purpose: if a viewport-clamped term is
+	// ever reintroduced, every expectation below turns into NaN and fails loudly.
+	const reportHeightFor = (layout: {
+		bodyScrollHeight: number;
+		bodyRectBottom: number;
+		marginTop?: number;
+		marginBottom?: number;
+	}) => {
+		const reportSize = resizeBridgeSource().match(
+			/const reportSize = \(\) => \{([\s\S]*?)\n\t\};/
+		)?.[1];
+		if (!reportSize) {
+			throw new Error('reportSize body not found in the resize bridge');
+		}
+
+		const marginTop = layout.marginTop ?? 0;
+		const marginBottom = layout.marginBottom ?? 0;
+		let posted: { height: number } | null = null;
+
+		new Function('document', 'getComputedStyle', 'parent', 'frame', reportSize)(
+			{
+				documentElement: { scrollHeight: Number.NaN },
+				body: {
+					scrollHeight: layout.bodyScrollHeight,
+					getBoundingClientRect: () => ({ bottom: layout.bodyRectBottom })
+				}
+			},
+			() => ({ marginTop: `${marginTop}px`, marginBottom: `${marginBottom}px` }),
+			{
+				postMessage: (message: { height: number }) => {
+					posted = message;
+				}
+			},
+			0
+		);
+
+		return posted?.height ?? null;
+	};
+
+	it('reports a smaller height once the document reflows shorter', () => {
+		// Same document, measured in a narrow column and then in the restored wider
+		// one (the sidebar or the controls pane closing). The second measurement has
+		// to come back down or the frame keeps the taller box and shows blank space.
+		const narrow = reportHeightFor({
+			bodyScrollHeight: 958,
+			bodyRectBottom: 966,
+			marginTop: 8,
+			marginBottom: 8
+		});
+		const wide = reportHeightFor({
+			bodyScrollHeight: 629,
+			bodyRectBottom: 637,
+			marginTop: 8,
+			marginBottom: 8
+		});
+
+		expect(narrow).toBe(974);
+		expect(wide).toBe(645);
+		expect(wide).toBeLessThan(narrow as number);
+	});
+
+	it('keeps content that escapes the body scroll area from being clipped', () => {
+		// Floated and absolutely positioned children can extend past
+		// body.scrollHeight; the bounding-rect term is the floor that keeps them
+		// inside the frame instead of being cut off by `overflow: hidden`.
+		expect(reportHeightFor({ bodyScrollHeight: 100, bodyRectBottom: 500, marginBottom: 8 })).toBe(
+			508
+		);
+		expect(reportHeightFor({ bodyScrollHeight: 450, bodyRectBottom: 0 })).toBe(450);
+		expect(reportHeightFor({ bodyScrollHeight: 0, bodyRectBottom: 0 })).toBe(1);
+	});
+
+	it('never measures a viewport-clamped height in the resize bridge', () => {
+		const bridge = resizeBridgeSource();
+
+		expect(bridge).toContain('body.scrollHeight + marginTop + marginBottom');
+		expect(bridge).toContain('body.getBoundingClientRect().bottom + marginBottom');
+		expect(bridge).not.toMatch(/root\.scrollHeight/);
+		expect(bridge).not.toMatch(/documentElement\.scrollHeight/);
 	});
 
 	it('identifies only preview-consumed HTML artifact source tokens', () => {

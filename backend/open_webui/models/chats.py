@@ -1048,18 +1048,78 @@ class ChatTable:
             db.commit()
             return restored
 
+    @staticmethod
+    def _archived_chat_filters(user_id: str, query: Optional[str] = None) -> list:
+        """Rows behind the archived list: one user's archived chats, optionally
+        narrowed by a title substring (what the modal's search box asks for)."""
+        filters = [Chat.user_id == user_id, Chat.archived == True]
+
+        title = (query or "").strip()
+        if title:
+            filters.append(Chat.title.ilike(f"%{title}%"))
+
+        return filters
+
     def get_archived_chat_list_by_user_id(
-        self, user_id: str, skip: int = 0, limit: int = 50
-    ) -> list[ChatModel]:
+        self,
+        user_id: str,
+        skip: int = 0,
+        limit: int = 50,
+        query: Optional[str] = None,
+    ) -> list[ChatTitleIdResponse]:
+        """One page of the archived list, newest activity first. Only the
+        columns the list renders are read, so opening the modal never pulls
+        every archived conversation's messages out of the database. ``id``
+        breaks ties on ``updated_at`` so paging cannot repeat or skip a row."""
+        skip = max(int(skip or 0), 0)
+        limit = max(int(limit or 0), 0)
+
         with get_db() as db:
-            all_chats = (
+            db_query = (
                 db.query(Chat)
-                .filter_by(user_id=user_id, archived=True)
-                .order_by(Chat.updated_at.desc())
-                # .limit(limit).offset(skip)
-                .all()
+                .filter(*self._archived_chat_filters(user_id, query))
+                .order_by(Chat.updated_at.desc(), Chat.id.desc())
+                .with_entities(
+                    Chat.id,
+                    Chat.title,
+                    Chat.updated_at,
+                    Chat.created_at,
+                    Chat.folder_id,
+                    Chat.assistant_id,
+                )
             )
-            return [ChatModel.model_validate(chat) for chat in all_chats]
+
+            if skip:
+                db_query = db_query.offset(skip)
+            if limit:
+                db_query = db_query.limit(limit)
+
+            return [
+                ChatTitleIdResponse.model_validate(
+                    {
+                        "id": chat[0],
+                        "title": chat[1],
+                        "updated_at": chat[2],
+                        "created_at": chat[3],
+                        "folder_id": chat[4],
+                        "assistant_id": chat[5],
+                    }
+                )
+                for chat in db_query.all()
+            ]
+
+    def count_archived_chats_by_user_id(
+        self, user_id: str, query: Optional[str] = None
+    ) -> int:
+        """How many rows the archived list has, so the modal can draw its pager
+        without fetching them."""
+        with get_db() as db:
+            return (
+                db.query(func.count(Chat.id))
+                .filter(*self._archived_chat_filters(user_id, query))
+                .scalar()
+                or 0
+            )
 
     def get_chat_list_by_user_id(
         self,

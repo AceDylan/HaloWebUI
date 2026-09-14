@@ -198,17 +198,41 @@ export const getChatListByUserId = async (token: string = '', userId: string) =>
 	}));
 };
 
-export const getArchivedChatList = async (token: string = '') => {
+// One page of the archived list. The server does the slicing and the title
+// search, so the modal never has to hold every archived chat to show a page of
+// them; `page` is 1-based and omitting it keeps the server's own default page.
+export const getArchivedChatList = async (
+	token: string = '',
+	options: { page?: number; limit?: number; query?: string } = {}
+) => {
 	let error = null;
+	const searchParams = new URLSearchParams();
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/chats/archived`, {
-		method: 'GET',
-		headers: {
-			Accept: 'application/json',
-			'Content-Type': 'application/json',
-			...(token && { authorization: `Bearer ${token}` })
+	if (options.page !== undefined) {
+		searchParams.append('page', `${options.page}`);
+	}
+	if (options.limit !== undefined) {
+		searchParams.append('limit', `${options.limit}`);
+	}
+
+	const query = (options.query ?? '').trim();
+	if (query) {
+		searchParams.append('query', query);
+	}
+
+	const queryString = searchParams.toString();
+
+	const res = await fetch(
+		`${WEBUI_API_BASE_URL}/chats/archived${queryString ? `?${queryString}` : ''}`,
+		{
+			method: 'GET',
+			headers: {
+				Accept: 'application/json',
+				'Content-Type': 'application/json',
+				...(token && { authorization: `Bearer ${token}` })
+			}
 		}
-	})
+	)
 		.then(parseJsonResponse)
 		.then((json) => {
 			return json;
@@ -223,10 +247,48 @@ export const getArchivedChatList = async (token: string = '') => {
 		throw error;
 	}
 
-	return res.map((chat) => ({
+	return (res ?? []).map((chat) => ({
 		...chat,
 		time_range: getTimeRange(chat.updated_at)
 	}));
+};
+
+// How many rows `getArchivedChatList` would return under the same filter, so a
+// pager can be drawn without fetching them.
+export const getArchivedChatCount = async (token: string = '', query: string = '') => {
+	let error = null;
+	const searchParams = new URLSearchParams();
+
+	const trimmed = query.trim();
+	if (trimmed) {
+		searchParams.append('query', trimmed);
+	}
+
+	const queryString = searchParams.toString();
+
+	const res = await fetch(
+		`${WEBUI_API_BASE_URL}/chats/archived/count${queryString ? `?${queryString}` : ''}`,
+		{
+			method: 'GET',
+			headers: {
+				Accept: 'application/json',
+				'Content-Type': 'application/json',
+				...(token && { authorization: `Bearer ${token}` })
+			}
+		}
+	)
+		.then(parseJsonResponse)
+		.catch((err) => {
+			error = err;
+			console.log(err);
+			return null;
+		});
+
+	if (error) {
+		throw error;
+	}
+
+	return Number(res?.count ?? 0);
 };
 
 export const getAllChats = async (token: string) => {

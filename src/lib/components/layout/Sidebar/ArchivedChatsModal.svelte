@@ -3,7 +3,7 @@
 	const { saveAs } = fileSaver;
 	import { toast } from 'svelte-sonner';
 	import dayjs from 'dayjs';
-	import { getContext, createEventDispatcher } from 'svelte';
+	import { getContext, createEventDispatcher, onDestroy } from 'svelte';
 	import localizedFormat from 'dayjs/plugin/localizedFormat';
 
 	dayjs.extend(localizedFormat);
@@ -14,40 +14,139 @@
 		archiveChatById,
 		deleteChatById,
 		getAllArchivedChats,
+		getArchivedChatCount,
 		getArchivedChatList
 	} from '$lib/apis/chats';
 
 	import Modal from '$lib/components/common/Modal.svelte';
+	import Pagination from '$lib/components/common/Pagination.svelte';
+	import Spinner from '$lib/components/common/Spinner.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import UnarchiveAllConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	const i18n = getContext('i18n');
 
 	export let show = false;
 
+	// The archived list is fetched a page at a time: an account with thousands of
+	// archived chats used to send every one of them (titles and messages) down the
+	// wire the moment this modal opened.
+	const PER_PAGE = 20;
+	const SEARCH_DEBOUNCE_MS = 300;
+
 	let chats = [];
+	let total = 0;
+	let page = 1;
 
 	let searchValue = '';
+	let searchQuery = ''; // the debounced value the server filters on
+	let searchTimeout = null;
+
+	let loading = false;
+	let loadError = '';
+	let unarchivingAll = false;
+
+	// Only the newest request may write to the list; a slow page that lands after
+	// the person has moved on is dropped.
+	let requestId = 0;
+	let loadedKey = '';
+
 	let showUnarchiveAllConfirmDialog = false;
 
-	const unarchiveChatHandler = async (chatId) => {
-		const res = await archiveChatById(localStorage.token, chatId).catch((error) => {
-			toast.error(`${error}`);
-		});
+	const loadPage = async () => {
+		const id = ++requestId;
+		loading = true;
+		loadError = '';
 
-		chats = await getArchivedChatList(localStorage.token);
+		try {
+			const [items, count] = await Promise.all([
+				getArchivedChatList(localStorage.token, {
+					page,
+					limit: PER_PAGE,
+					query: searchQuery
+				}),
+				getArchivedChatCount(localStorage.token, searchQuery)
+			]);
+
+			if (id !== requestId) {
+				return;
+			}
+
+			// Unarchiving or deleting can empty the page we are standing on; fall
+			// back to the last page that still has rows instead of showing nothing.
+			const clamped = Math.max(1, Math.ceil(count / PER_PAGE));
+			if (page > clamped) {
+				page = clamped;
+				loadedKey = `${page}:${searchQuery}`;
+				await loadPage();
+				return;
+			}
+
+			chats = items;
+			total = count;
+		} catch (error) {
+			if (id !== requestId) {
+				return;
+			}
+
+			chats = [];
+			total = 0;
+			loadError = `${error}`;
+		} finally {
+			if (id === requestId) {
+				loading = false;
+			}
+		}
+	};
+
+	const reloadCurrentPage = async () => {
+		loadedKey = `${page}:${searchQuery}`;
+		await loadPage();
+	};
+
+	const searchInputHandler = () => {
+		clearTimeout(searchTimeout);
+		searchTimeout = setTimeout(() => {
+			const next = searchValue.trim();
+			if (next === searchQuery) {
+				return;
+			}
+
+			page = 1;
+			searchQuery = next;
+		}, SEARCH_DEBOUNCE_MS);
+	};
+
+	const unarchiveChatHandler = async (chatId) => {
+		try {
+			await archiveChatById(localStorage.token, chatId);
+		} catch (error) {
+			toast.error(`${error}`);
+		}
+
+		await reloadCurrentPage();
 		dispatch('change');
 	};
 
 	const deleteChatHandler = async (chatId) => {
-		const res = await deleteChatById(localStorage.token, chatId).catch((error) => {
+		try {
+			await deleteChatById(localStorage.token, chatId);
+		} catch (error) {
 			toast.error(`${error}`);
-		});
+		}
 
-		chats = await getArchivedChatList(localStorage.token);
+		await reloadCurrentPage();
 	};
 
 	const exportChatsHandler = async () => {
-		const chats = await getAllArchivedChats(localStorage.token);
+		const chats = await getAllArchivedChats(localStorage.token).catch((error) => {
+			toast.error(`${error}`);
+			return null;
+		});
+
+		if (!chats) {
+			return;
+		}
+
 		let blob = new Blob([JSON.stringify(chats)], {
 			type: 'application/json'
 		});
@@ -55,17 +154,62 @@
 	};
 
 	const unarchiveAllHandler = async () => {
-		for (const chat of chats) {
-			await archiveChatById(localStorage.token, chat.id);
+		// Walk the list a page at a time instead of holding all of it: each chat
+		// leaves the archive as it is unarchived, so the first page keeps refilling
+		// until nothing is left. Ids already tried guard against a chat that
+		// refuses to move, which would otherwise loop forever.
+		const attempted = new Set();
+		unarchivingAll = true;
+
+		try {
+			for (;;) {
+				const batch = await getArchivedChatList(localStorage.token, {
+					page: 1,
+					limit: PER_PAGE
+				});
+				const pending = batch.filter((chat) => !attempted.has(chat.id));
+
+				if (pending.length === 0) {
+					break;
+				}
+
+				for (const chat of pending) {
+					attempted.add(chat.id);
+					await archiveChatById(localStorage.token, chat.id);
+				}
+			}
+		} catch (error) {
+			toast.error(`${error}`);
 		}
-		chats = await getArchivedChatList(localStorage.token);
+
+		unarchivingAll = false;
+		page = 1;
+		await reloadCurrentPage();
+		dispatch('change');
 	};
 
 	$: if (show) {
-		(async () => {
-			chats = await getArchivedChatList(localStorage.token);
-		})();
+		const key = `${page}:${searchQuery}`;
+		if (key !== loadedKey) {
+			loadedKey = key;
+			loadPage();
+		}
+	} else if (loadedKey !== '') {
+		// Closing resets the view so the next open starts at the newest page.
+		loadedKey = '';
+		page = 1;
+		searchValue = '';
+		searchQuery = '';
+		chats = [];
+		total = 0;
+		loadError = '';
+		requestId += 1;
+		loading = false;
 	}
+
+	onDestroy(() => {
+		clearTimeout(searchTimeout);
+	});
 </script>
 
 <UnarchiveAllConfirmDialog
@@ -80,7 +224,12 @@
 <Modal size="lg" bind:show>
 	<div>
 		<div class=" flex justify-between dark:text-gray-300 px-5 pt-4 pb-1">
-			<div class=" text-lg font-medium self-center">{$i18n.t('Archived Chats')}</div>
+			<div class=" text-lg font-medium self-center">
+				{$i18n.t('Archived Chats')}
+				{#if total > 0}
+					<span class="text-sm font-normal text-gray-500 dark:text-gray-400">{total}</span>
+				{/if}
+			</div>
 			<button
 				class="self-center"
 				on:click={() => {
@@ -122,16 +271,41 @@
 					<input
 						class=" w-full text-sm pr-4 py-1 rounded-r-xl outline-hidden bg-transparent"
 						bind:value={searchValue}
+						on:input={searchInputHandler}
 						placeholder={$i18n.t('Search Chats')}
 					/>
 				</div>
 			</div>
 			<hr class="border-gray-100 dark:border-gray-850 my-2" />
 			<div class=" flex flex-col w-full sm:flex-row sm:justify-center sm:space-x-6">
-				{#if chats.length > 0}
-					<div class="w-full">
-						<div class="text-left text-sm w-full mb-3 max-h-[22rem] overflow-y-auto">
-							<div class="relative overflow-x-auto">
+				<div class="w-full">
+					<div class="text-left text-sm w-full mb-3 max-h-[22rem] overflow-y-auto">
+						{#if loading && chats.length === 0}
+							<div class="w-full py-8">
+								<Spinner className="size-5" />
+							</div>
+						{:else if loadError}
+							<div
+								class="flex flex-col items-start gap-2 w-full py-6 text-gray-600 dark:text-gray-400"
+							>
+								<div class="line-clamp-3">{loadError}</div>
+								<button
+									class="px-3.5 py-1.5 font-medium hover:bg-black/5 dark:hover:bg-white/5 outline outline-1 outline-gray-300 dark:outline-gray-800 rounded-3xl"
+									on:click={() => {
+										reloadCurrentPage();
+									}}
+								>
+									{$i18n.t('Retry')}
+								</button>
+							</div>
+						{:else if chats.length === 0}
+							<div class="text-left text-sm w-full py-6">
+								{searchQuery
+									? $i18n.t('No results found')
+									: $i18n.t('You have no archived conversations.')}
+							</div>
+						{:else}
+							<div class="relative overflow-x-auto {loading ? 'opacity-50' : ''}">
 								<table class="w-full text-sm text-left text-gray-600 dark:text-gray-400 table-auto">
 									<thead
 										class="text-xs text-gray-700 uppercase bg-transparent dark:text-gray-200 border-b-2 border-gray-50 dark:border-gray-850"
@@ -145,9 +319,7 @@
 										</tr>
 									</thead>
 									<tbody>
-										{#each chats.filter((c) => searchValue === '' || c.title
-													.toLowerCase()
-													.includes(searchValue.toLowerCase())) as chat, idx}
+										{#each chats as chat, idx}
 											<tr
 												class="bg-transparent {idx !== chats.length - 1 &&
 													'border-b'} dark:bg-gray-900 border-gray-50 dark:border-gray-850 text-xs"
@@ -222,11 +394,18 @@
 									</tbody>
 								</table>
 							</div>
-						</div>
+						{/if}
+					</div>
 
+					{#if total > PER_PAGE}
+						<Pagination bind:page count={total} perPage={PER_PAGE} />
+					{/if}
+
+					{#if total > 0 || searchQuery}
 						<div class="flex flex-wrap text-sm font-medium gap-1.5 mt-2 m-1 justify-end w-full">
 							<button
-								class=" px-3.5 py-1.5 font-medium hover:bg-black/5 dark:hover:bg-white/5 outline outline-1 outline-gray-300 dark:outline-gray-800 rounded-3xl"
+								class=" px-3.5 py-1.5 font-medium hover:bg-black/5 dark:hover:bg-white/5 outline outline-1 outline-gray-300 dark:outline-gray-800 rounded-3xl disabled:opacity-50 disabled:cursor-not-allowed"
+								disabled={unarchivingAll}
 								on:click={() => {
 									showUnarchiveAllConfirmDialog = true;
 								}}
@@ -235,7 +414,8 @@
 							</button>
 
 							<button
-								class="px-3.5 py-1.5 font-medium hover:bg-black/5 dark:hover:bg-white/5 outline outline-1 outline-gray-300 dark:outline-gray-800 rounded-3xl"
+								class="px-3.5 py-1.5 font-medium hover:bg-black/5 dark:hover:bg-white/5 outline outline-1 outline-gray-300 dark:outline-gray-800 rounded-3xl disabled:opacity-50 disabled:cursor-not-allowed"
+								disabled={unarchivingAll}
 								on:click={() => {
 									exportChatsHandler();
 								}}
@@ -243,12 +423,8 @@
 								{$i18n.t('Export All Archived Chats')}
 							</button>
 						</div>
-					</div>
-				{:else}
-					<div class="text-left text-sm w-full mb-8">
-						{$i18n.t('You have no archived conversations.')}
-					</div>
-				{/if}
+					{/if}
+				</div>
 			</div>
 		</div>
 	</div>

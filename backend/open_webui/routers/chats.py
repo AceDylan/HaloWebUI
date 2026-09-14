@@ -27,7 +27,7 @@ from open_webui.models.folders import Folders
 from open_webui.config import ENABLE_ADMIN_CHAT_ACCESS, ENABLE_ADMIN_EXPORT
 from open_webui.constants import ERROR_MESSAGES
 from open_webui.env import SRC_LOG_LEVELS, FOLDER_MAX_ITEM_COUNT
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
 
@@ -727,9 +727,32 @@ async def get_all_user_chats_in_db(user=Depends(get_admin_user)):
 
 @router.get("/archived", response_model=list[ChatTitleIdResponse])
 async def get_archived_session_user_chat_list(
-    user=Depends(get_verified_user), skip: int = 0, limit: int = 50
+    user=Depends(get_verified_user),
+    skip: int = Query(default=0, ge=0),
+    limit: int = Query(default=50, ge=1, le=200),
+    page: Optional[int] = Query(default=None, ge=1),
+    query: Optional[str] = None,
 ):
-    return Chats.get_archived_chat_list_by_user_id(user.id, skip, limit)
+    """One page of the caller's archived chats (titles only, newest activity
+    first). ``page`` is a 1-based convenience over ``skip``; ``query`` filters
+    on the title so the list never has to be sent whole to be searched."""
+    if page is not None:
+        skip = (page - 1) * limit
+
+    return Chats.get_archived_chat_list_by_user_id(user.id, skip, limit, query=query)
+
+
+############################
+# GetArchivedChatCount
+############################
+
+
+@router.get("/archived/count")
+async def get_archived_session_user_chat_count(
+    user=Depends(get_verified_user), query: Optional[str] = None
+):
+    """Total rows behind ``/archived`` under the same filter, for the pager."""
+    return {"count": Chats.count_archived_chats_by_user_id(user.id, query=query)}
 
 
 ############################

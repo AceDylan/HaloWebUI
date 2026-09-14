@@ -1231,6 +1231,30 @@ class ChatTable:
             )
             return [ChatModel.model_validate(chat) for chat in all_chats]
 
+    def get_existing_chat_ids_by_user_id(
+        self, ids: list[str], user_id: str
+    ) -> set[str]:
+        """Which of `ids` this user already owns — the id column only.
+
+        Callers that just need "does a chat exist for this id?" (the hermes
+        session list asking whether a session was imported) would otherwise
+        run get_chat_by_id_and_user_id per id, and each of those reads the
+        whole chat JSON out of the row to build a ChatModel.
+        """
+        ids = [chat_id for chat_id in (ids or []) if chat_id]
+        if not ids:
+            return set()
+        try:
+            with get_db() as db:
+                rows = (
+                    db.query(Chat.id)
+                    .filter(Chat.id.in_(ids), Chat.user_id == user_id)
+                    .all()
+                )
+                return {row[0] for row in rows}
+        except Exception:
+            return set()
+
     def get_chat_by_id(self, id: str) -> Optional[ChatModel]:
         try:
             with get_db() as db:

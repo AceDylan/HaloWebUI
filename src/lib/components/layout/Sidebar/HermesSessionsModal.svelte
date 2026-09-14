@@ -24,34 +24,107 @@
 		{ id: 'cli', label: 'CLI' }
 	];
 
+	// Each surface keeps hundreds of sessions. Read one page at a time and walk
+	// forward with the cursor the server hands back — hermes reports no total,
+	// so there is no page count to number a pager with.
+	const PAGE_SIZE = 20;
+
 	let source = 'telegram';
 	let sessions: HermesSession[] = [];
+	let nextOffset = 0;
+	let hasMore = false;
 	let loading = false;
+	let loadingMore = false;
+	let error = '';
 	let loadedFor = '';
 	let importing: string | null = null;
+	// Only the newest request may write to the list: switching tabs mid-flight
+	// must not let the previous surface's rows land on the new one.
+	let requestId = 0;
 
-	const load = async () => {
-		loading = true;
+	const load = async (append = false) => {
 		const wanted = source;
-		try {
-			sessions = await getHermesSessions(localStorage.token, wanted);
-		} catch (e) {
-			toast.error(`${e}`);
+		const seq = ++requestId;
+		const offset = append ? nextOffset : 0;
+		if (append) {
+			loadingMore = true;
+		} else {
+			loading = true;
+			error = '';
 			sessions = [];
+			nextOffset = 0;
+			hasMore = false;
+		}
+		try {
+			const page = await getHermesSessions(localStorage.token, wanted, {
+				limit: PAGE_SIZE,
+				offset
+			});
+			if (seq !== requestId) return;
+			// hermes repeats pinned conversations across windows, and a repeated
+			// id would also break the keyed #each below.
+			const seen = new Set<string>();
+			sessions = [...(append ? sessions : []), ...page.sessions].filter((session) => {
+				if (seen.has(session.id)) return false;
+				seen.add(session.id);
+				return true;
+			});
+			nextOffset = page.next_offset;
+			hasMore = page.has_more;
+			error = '';
+		} catch (e) {
+			if (seq !== requestId) return;
+			if (append) {
+				// Keep the rows already on screen; only the next page failed.
+				hasMore = true;
+				toast.error(`${e}`);
+			} else {
+				sessions = [];
+				hasMore = false;
+				error = `${e}`;
+			}
 		} finally {
-			loadedFor = wanted;
-			loading = false;
+			if (seq === requestId) {
+				loading = false;
+				loadingMore = false;
+			}
 		}
 	};
 
+	const loadMore = () => {
+		if (!hasMore || loading || loadingMore) return;
+		load(true);
+	};
+
+	/** Re-read the current surface from its first page. */
+	const reload = () => {
+		loadedFor = '';
+	};
+
 	// Fetch on open and whenever the source tab changes; forget on close so the
-	// next open shows fresh data.
+	// next open shows fresh data. `loadedFor` is claimed before awaiting so this
+	// statement cannot fire the same load twice.
 	$: if (!show && loadedFor) {
 		loadedFor = '';
 	}
-	$: if (show && !loading && loadedFor !== source) {
+	$: if (show && loadedFor !== source) {
+		loadedFor = source;
 		load();
 	}
+
+	// Pull the next page in as its marker scrolls into view; the button below it
+	// stays the way to do it where IntersectionObserver is unavailable.
+	const autoLoad = (node: HTMLElement) => {
+		if (typeof IntersectionObserver === 'undefined') return {};
+		const observer = new IntersectionObserver(
+			(entries) => {
+				if (entries.some((entry) => entry.isIntersecting)) loadMore();
+			},
+			{ rootMargin: '160px' }
+		);
+		observer.observe(node);
+		return { destroy: () => observer.disconnect() };
+	};
 
 	const when = (value: number | string | null | undefined) => {
 		if (value === null || value === undefined || value === '') return '';
@@ -122,10 +195,8 @@
 				<div class="flex-1"></div>
 				<button
 					class="rounded-full px-2 py-1 text-xs text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-850"
-					disabled={loading}
-					on:click={() => {
-						loadedFor = '';
-					}}
+					disabled={loading || loadingMore}
+					on:click={reload}
 				>
 					{$i18n.t('Refresh')}
 				</button>
@@ -135,11 +206,25 @@
 			<div class="max-h-[60vh] overflow-y-auto scrollbar-hidden">
 				{#if loading}
 					<div class="flex justify-center py-8"><Spinner className="size-5" /></div>
-				{:else if sessions.length === 0}
-					<div class="py-8 text-center text-sm text-gray-500">
-						{$i18n.t('No hermes sessions')}
+				{:else if error}
+					<div class="flex flex-col items-center gap-2 py-8 text-sm text-gray-500">
+						<div class="max-w-full truncate">{error}</div>
+						<button
+							class="rounded-full bg-gray-100 px-3 py-1 text-xs font-medium hover:bg-gray-200 dark:bg-gray-850 dark:hover:bg-gray-800"
+							on:click={reload}
+						>
+							{$i18n.t('Retry')}
+						</button>
 					</div>
 				{:else}
+					<!-- A page can come back empty while more remain — hermes hands over
+					     stretches of the empty shells dropped server-side — so "nothing
+					     here" is only true once the walk is over. -->
+					{#if sessions.length === 0 && !hasMore}
+						<div class="py-8 text-center text-sm text-gray-500">
+							{$i18n.t('No hermes sessions')}
+						</div>
+					{/if}
 					{#each sessions as session (session.id)}
 						<!-- The whole row opens the session; the pill on the right only states what
 						     will happen, so the touch target is the full width. -->
@@ -181,6 +266,21 @@
 							</span>
 						</button>
 					{/each}
+
+					{#if hasMore}
+						<div class="flex justify-center py-3" use:autoLoad>
+							{#if loadingMore}
+								<Spinner className="size-4" />
+							{:else}
+								<button
+									class="rounded-full bg-gray-100 px-3 py-1 text-xs font-medium text-gray-600 transition hover:bg-gray-200 dark:bg-gray-850 dark:text-gray-300 dark:hover:bg-gray-800"
+									on:click={loadMore}
+								>
+									{$i18n.t('Load more')}
+								</button>
+							{/if}
+						</div>
+					{/if}
 				{/if}
 			</div>
 		</div>

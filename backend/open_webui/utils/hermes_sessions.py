@@ -35,6 +35,14 @@ log.setLevel(SRC_LOG_LEVELS.get("MAIN", logging.INFO))
 SOURCES = ("telegram", "qqbot", "cli")
 LIST_LIMIT_DEFAULT = 50
 LIST_LIMIT_MAX = 100
+# hermes clamps its own offset at 1_000_000; asking for more is a 400 waiting
+# to happen, so refuse it here where the message can say why.
+LIST_OFFSET_MAX = 1_000_000
+# One page of ours can need several hermes windows, because the empty shells
+# hermes leaves behind are dropped below. Bound the walk so a long stretch of
+# them cannot turn one request into an unbounded fan-out: the short page comes
+# back with has_more set and the caller asks again.
+LIST_MAX_UPSTREAM_ROUNDS = 5
 IMPORT_MESSAGE_LIMIT = 500
 TOOL_PREVIEW_MAX_CHARS = 200
 HERMES_SESSION_META_KEY = "hermes_session"
@@ -142,41 +150,93 @@ async def list_sessions(
     *,
     source: str,
     limit: int = LIST_LIMIT_DEFAULT,
+    offset: int = 0,
     model_id: Optional[str] = None,
-) -> list[dict]:
+) -> dict:
+    """One page of a surface's hermes sessions, newest first.
+
+    Paging is by cursor, not page number: hermes' ``GET /api/sessions`` answers
+    ``limit``/``offset``/``has_more`` and no total, so there is no count to
+    build a numbered pager from. ``next_offset`` is the hermes offset the page
+    stopped at; hand it back to read the next one.
+
+    Two quirks of that endpoint shape the loop below:
+
+    * The empty shells hermes leaves behind when it rotates a session on idle
+      are dropped here, so a hermes window of N rows can yield fewer than N
+      conversations. We keep reading windows until the page is full rather
+      than handing back a page that is short for no visible reason.
+    * hermes back-fills every *pinned* conversation the window missed into the
+      response (``include_pinned=True`` in its handler), so a pin would repeat
+      on every page. They all land on the first page, so later pages drop them
+      instead of showing the same conversation twice.
+    """
     if source not in SOURCES:
         raise HermesSessionsError(400, f"source must be one of: {', '.join(SOURCES)}")
+    limit = max(1, min(int(limit), LIST_LIMIT_MAX))
+    offset = int(offset)
+    if offset < 0 or offset > LIST_OFFSET_MAX:
+        raise HermesSessionsError(400, f"offset must be 0..{LIST_OFFSET_MAX}")
     model = await resolve_hermes_model(request, user, model_id)
     root, headers = _connection(request, user, model)
-    data = await _get_json(
-        f"{root}/api/sessions",
-        headers,
-        {"source": source, "limit": str(max(1, min(int(limit), LIST_LIMIT_MAX)))},
-    )
-    sessions = []
-    for item in data.get("data") or []:
-        session_id = item.get("id")
-        if not session_id or not SESSION_ID_RE.match(str(session_id)):
-            continue
-        # hermes rotates sessions on idle; the empty shells it leaves behind
-        # are not conversations.
-        if not (item.get("message_count") or 0):
-            continue
-        sessions.append(
-            {
-                "id": session_id,
-                "source": item.get("source") or source,
-                "title": (item.get("title") or "").strip(),
-                "preview": (item.get("preview") or "").strip(),
-                "message_count": item.get("message_count") or 0,
-                "started_at": item.get("started_at"),
-                "last_active": item.get("last_active"),
-                "model": item.get("model"),
-                "imported": Chats.get_chat_by_id_and_user_id(session_id, user.id)
-                is not None,
-            }
+
+    kept: list[dict] = []
+    seen: set[str] = set()
+    cursor = offset
+    exhausted = False
+    for _ in range(LIST_MAX_UPSTREAM_ROUNDS):
+        data = await _get_json(
+            f"{root}/api/sessions",
+            headers,
+            {"source": source, "limit": str(limit), "offset": str(cursor)},
         )
-    return sessions
+        rows = [row for row in (data.get("data") or []) if isinstance(row, dict)]
+        cursor += limit
+        for item in rows:
+            session_id = item.get("id")
+            if not session_id or not SESSION_ID_RE.match(str(session_id)):
+                continue
+            if session_id in seen:
+                continue
+            if not (item.get("message_count") or 0):
+                continue
+            if offset and item.get("pinned"):
+                continue
+            seen.add(session_id)
+            kept.append(item)
+        # Back-filled pins arrive past the window, so a *full* response proves
+        # nothing; only a short one proves the window ran out. hermes' own
+        # has_more discounts pinned rows and can say False while rows remain,
+        # so it is read as a hint, never as the only reason to keep going.
+        if len(rows) < limit and not data.get("has_more"):
+            exhausted = True
+            break
+        if len(kept) >= limit:
+            break
+
+    imported_ids = Chats.get_existing_chat_ids_by_user_id(
+        [item["id"] for item in kept], user.id
+    )
+    sessions = [
+        {
+            "id": item["id"],
+            "source": item.get("source") or source,
+            "title": (item.get("title") or "").strip(),
+            "preview": (item.get("preview") or "").strip(),
+            "message_count": item.get("message_count") or 0,
+            "started_at": item.get("started_at"),
+            "last_active": item.get("last_active"),
+            "model": item.get("model"),
+            "imported": item["id"] in imported_ids,
+        }
+        for item in kept
+    ]
+    return {
+        "sessions": sessions,
+        "offset": offset,
+        "next_offset": cursor,
+        "has_more": not exhausted,
+    }
 
 
 # ---------------------------------------------------------------- transcript

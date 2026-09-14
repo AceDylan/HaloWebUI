@@ -97,13 +97,31 @@ const detailOf = async (res: Response) => {
 	return body?.detail ?? `${res.status} ${res.statusText}`;
 };
 
-/** hermes sessions from another surface (telegram | qqbot | cli), newest first. */
+export type HermesSessionPage = {
+	sessions: HermesSession[];
+	/** The hermes offset this page stopped at; pass it back to read the next one. */
+	next_offset: number;
+	has_more: boolean;
+};
+
+/**
+ * One page of hermes sessions from another surface (telegram | qqbot | cli),
+ * newest first.
+ *
+ * Cursor paging, not page numbers: hermes reports no total for a source, so
+ * there is nothing to build a numbered pager from. Start at offset 0 and walk
+ * forward with the `next_offset` each answer carries, while `has_more` holds.
+ */
 export const getHermesSessions = async (
 	token: string,
 	source = 'telegram',
-	limit = 50
-): Promise<HermesSession[]> => {
-	const params = new URLSearchParams({ source, limit: `${limit}` });
+	{ limit = 20, offset = 0 }: { limit?: number; offset?: number } = {}
+): Promise<HermesSessionPage> => {
+	const params = new URLSearchParams({
+		source,
+		limit: `${limit}`,
+		offset: `${offset}`
+	});
 	const res = await fetch(`${WEBUI_API_BASE_URL}/hermes/sessions?${params}`, {
 		method: 'GET',
 		headers: jsonHeaders(token)
@@ -112,7 +130,15 @@ export const getHermesSessions = async (
 		throw await detailOf(res);
 	}
 	const data = await res.json();
-	return Array.isArray(data?.sessions) ? data.sessions : [];
+	const sessions = Array.isArray(data?.sessions) ? data.sessions : [];
+	return {
+		sessions,
+		// An older backend answers `{sessions}` alone: treat that as the one
+		// page it is instead of paging past the end of it.
+		next_offset:
+			typeof data?.next_offset === 'number' ? data.next_offset : offset + sessions.length,
+		has_more: data?.has_more === true
+	};
 };
 
 /**

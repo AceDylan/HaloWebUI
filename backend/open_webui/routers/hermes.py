@@ -24,7 +24,7 @@ import asyncio
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from open_webui.env import SRC_LOG_LEVELS
@@ -38,6 +38,8 @@ from open_webui.utils.hermes_agent import (
 )
 from open_webui.utils.hermes_sessions import (
     LIST_LIMIT_DEFAULT,
+    LIST_LIMIT_MAX,
+    LIST_OFFSET_MAX,
     HermesSessionsError,
     import_session,
     list_sessions,
@@ -135,17 +137,28 @@ async def mark_hermes_chat_read(chat_id: str, user=Depends(get_verified_user)):
 async def list_hermes_sessions(
     request: Request,
     source: str = "telegram",
-    limit: int = LIST_LIMIT_DEFAULT,
+    limit: int = Query(LIST_LIMIT_DEFAULT, ge=1, le=LIST_LIMIT_MAX),
+    offset: int = Query(0, ge=0, le=LIST_OFFSET_MAX),
     model_id: Optional[str] = None,
     user=Depends(get_verified_user),
 ):
+    """One page of hermes sessions for a surface.
+
+    Cursor paging: hermes reports no total, so the answer carries
+    ``next_offset``/``has_more`` instead of a page count. ``sessions`` stays
+    the list it always was.
+    """
     try:
-        sessions = await list_sessions(
-            request, user, source=source, limit=limit, model_id=model_id
+        return await list_sessions(
+            request,
+            user,
+            source=source,
+            limit=limit,
+            offset=offset,
+            model_id=model_id,
         )
     except HermesSessionsError as e:
         raise HTTPException(status_code=e.status_code, detail=e.detail)
-    return {"sessions": sessions}
 
 
 class HermesSessionImportForm(BaseModel):

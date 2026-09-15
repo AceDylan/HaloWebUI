@@ -199,8 +199,10 @@ def test_dry_run_has_no_network_or_run_file_writes(
         ],
     )
     assert notify.main() == 0
-    report = json.loads(capsys.readouterr().out)
+    # The notifier logs how it resolved the origin before printing the report.
+    report = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
     assert report["chat_id"] == "origin"
+    assert report["origin_resolved_by"] == "state.db"
     assert report["attempted"] is False
     assert receipt.read_text() == '{"attempted":false}'
     assert state.read_bytes() == original_db
@@ -210,3 +212,144 @@ def test_gateway_origin_is_reported_but_not_sent_to_webui(state):
     add_launch(state, source="telegram")
     add_poll(state)
     assert origin(state) == ("origin", "telegram")
+
+
+# --- the origin the runner recorded at launch --------------------------------
+# Reconstructing the origin from state.db afterwards is a race: the notifier runs within
+# a second of the run finishing, often before the launching turn has been persisted, so a
+# run nobody polled was never delivered.  Both runners now record the launching hermes
+# session in meta.json at start and hand it to the notifier, which prefers it.
+
+
+def meta(tmp_path, **values):
+    (tmp_path / "meta.json").write_text(json.dumps(values))
+    return notify.read_meta(str(tmp_path))
+
+
+def test_the_runner_recorded_origin_is_used_without_any_state_db_lookup(state, tmp_path):
+    add_launch(state, "wrong-session")
+    add_poll(state, "wrong-session")
+    with sqlite3.connect(state) as db:
+        db.execute("insert into sessions values (?,?)", ("recorded", "api_server"))
+    assert notify.recorded_origin(
+        meta(tmp_path, origin_session_id="recorded", origin_platform="api_server"),
+        db_path=str(state),
+    ) == ("recorded", "api_server")
+
+
+def test_state_db_source_overrides_a_stale_recorded_platform(state, tmp_path):
+    """A misreported platform must never turn a telegram chat into a HaloWebUI POST."""
+    with sqlite3.connect(state) as db:
+        db.execute("insert into sessions values (?,?)", ("tg", "telegram"))
+    assert notify.recorded_origin(
+        meta(tmp_path, origin_session_id="tg", origin_platform="api_server"),
+        db_path=str(state),
+    ) == ("tg", "telegram")
+
+
+def test_the_recorded_platform_stands_in_when_the_session_row_is_gone(state, tmp_path):
+    assert notify.recorded_origin(
+        meta(tmp_path, origin_session_id="pruned", origin_platform="api_server"),
+        db_path=str(state),
+    ) == ("pruned", "api_server")
+
+
+def test_nothing_recorded_falls_back_to_the_provenance_lookup(state, tmp_path):
+    assert notify.recorded_origin(meta(tmp_path), db_path=str(state)) is None
+    add_launch(state)
+    add_poll(state)
+    assert origin(state) == ("origin", "api_server")
+
+
+def test_dry_run_reports_the_recorded_origin_as_coming_from_the_runner(
+    state, tmp_path, monkeypatch, capsys
+):
+    meta(tmp_path, origin_session_id="origin", origin_platform="api_server")
+    with sqlite3.connect(state) as db:
+        db.execute("insert into sessions values (?,?)", ("origin", "api_server"))
+    monkeypatch.setattr(
+        notify,
+        "find_origin",
+        lambda *_a, **_k: pytest.fail("the recorded origin must win"),
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [str(SCRIPT), "--run-id", "run-123", "--run-dir", str(tmp_path), "--status",
+         "success", "--tool-marker", "codex-run.sh", "--state-db", str(state), "--dry-run"],
+    )
+    assert notify.main() == 0
+    report = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    assert report["origin_resolved_by"] == "runner"
+    assert report["chat_id"] == "origin"
+
+
+# --- the layered notification config -----------------------------------------
+# codex-run.sh passes --config-file codex-runner.env --config-file reclaude-runner.env.
+# When "the first file that exists wins", an empty or half-written codex-runner.env
+# shadows the working one and every codex notification is skipped with "notify not
+# configured" while reclaude keeps working.
+
+
+@pytest.fixture
+def configs(tmp_path):
+    empty = tmp_path / "codex-runner.env"
+    empty.write_text("")
+    full = tmp_path / "reclaude-runner.env"
+    full.write_text(
+        "HALOWEBUI_NOTIFY_URL=http://127.0.0.1:3000/api/v1/hermes/notifications\n"
+        "HALOWEBUI_NOTIFY_TOKEN=secret-token\n"
+    )
+    return empty, full
+
+
+def test_an_empty_first_config_no_longer_shadows_the_working_one(configs, monkeypatch):
+    monkeypatch.delenv("RECLAUDE_NOTIFY_CONFIG", raising=False)
+    empty, full = configs
+    config, sources = notify.load_config([str(empty), str(full)])
+    assert notify.missing_config_keys(config) == []
+    assert config["HALOWEBUI_NOTIFY_TOKEN"] == "secret-token"
+    assert [entry["path"] for entry in sources] == [str(empty), str(full)]
+    assert sources[0]["provided"] == []
+
+
+def test_a_key_present_but_empty_does_not_claim_the_key(configs, tmp_path, monkeypatch):
+    monkeypatch.delenv("RECLAUDE_NOTIFY_CONFIG", raising=False)
+    _, full = configs
+    half = tmp_path / "half.env"
+    half.write_text("HALOWEBUI_NOTIFY_URL=\nHALOWEBUI_NOTIFY_TOKEN=\n")
+    config, _ = notify.load_config([str(half), str(full)])
+    assert notify.missing_config_keys(config) == []
+
+
+def test_an_earlier_config_still_wins_for_the_keys_it_defines(configs, tmp_path, monkeypatch):
+    monkeypatch.delenv("RECLAUDE_NOTIFY_CONFIG", raising=False)
+    _, full = configs
+    partial = tmp_path / "partial.env"
+    partial.write_text("HALOWEBUI_NOTIFY_URL=http://127.0.0.1:9/hook\n")
+    config, sources = notify.load_config([str(partial), str(full)])
+    assert config["HALOWEBUI_NOTIFY_URL"] == "http://127.0.0.1:9/hook"
+    assert config["HALOWEBUI_NOTIFY_TOKEN"] == "secret-token"
+    assert sources[1]["provided"] == ["HALOWEBUI_NOTIFY_TOKEN"]
+
+
+def test_no_usable_config_anywhere_names_both_missing_keys(configs, monkeypatch):
+    monkeypatch.delenv("RECLAUDE_NOTIFY_CONFIG", raising=False)
+    empty, _ = configs
+    config, _ = notify.load_config([str(empty)])
+    assert notify.missing_config_keys(config) == [
+        "HALOWEBUI_NOTIFY_URL",
+        "HALOWEBUI_NOTIFY_TOKEN",
+    ]
+
+
+def test_the_env_override_replaces_the_candidate_list(configs, monkeypatch):
+    """A test config must never fall through to the production credentials."""
+    empty, full = configs
+    monkeypatch.setenv("RECLAUDE_NOTIFY_CONFIG", str(empty))
+    assert notify.config_candidates([str(full)]) == [str(empty)]
+    config, _ = notify.load_config([str(full)])
+    assert notify.missing_config_keys(config) == [
+        "HALOWEBUI_NOTIFY_URL",
+        "HALOWEBUI_NOTIFY_TOKEN",
+    ]

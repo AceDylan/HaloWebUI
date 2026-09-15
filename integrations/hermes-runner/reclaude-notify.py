@@ -6,16 +6,31 @@ Shared by both runners: reclaude-run.sh (defaults) and codex-run.sh (which passe
 
 Hermes's API server cannot push a background completion back to a HaloWebUI
 chat, so the runner does it itself: it finds the hermes session that launched
-this run (read-only lookup in state.db), and if that session came from the API
-server (HaloWebUI) it POSTs a completion notice to HaloWebUI's
-/api/v1/hermes/notifications endpoint. HaloWebUI then appends a follow-up user
-turn to the chat and starts a normal hermes run, which reads result.md and
-reports. Telegram/QQ sessions are left alone: the gateway delivers those.
+this run, and if that session came from the API server (HaloWebUI) it POSTs a
+completion notice to HaloWebUI's /api/v1/hermes/notifications endpoint.
+HaloWebUI then appends a follow-up user turn to the chat and starts a normal
+hermes run, which reads result.md and reports. Telegram/QQ sessions are left
+alone: the gateway delivers those.
 
-Config file (KEY=VALUE lines): /root/.hermes/reclaude-runner.env, or the first
-existing path given with --config-file:
+Two ways to learn the origin, in order:
+  1. What the runner recorded at launch (--origin-session / meta.json's
+     origin_session_id), taken from the HERMES_SESSION_* variables hermes
+     bridges into every tool subprocess. This is exact and tool-name agnostic.
+  2. Legacy fallback: reverse-engineer it from tool-call provenance in state.db
+     (read-only) for runs launched before the runner recorded it.
+Path 2 is inherently fragile — it broke once when hermes renamed the `process`
+tool to `process_manage`, and it never worked for a plain background launch
+(`terminal(background=true)` returns "Background process started" with no run
+id, so nothing links the launch to the run until somebody polls).
+
+Config (KEY=VALUE lines):
   HALOWEBUI_NOTIFY_URL=http://127.0.0.1:3000/api/v1/hermes/notifications
   HALOWEBUI_NOTIFY_TOKEN=<same value as HERMES_AGENT_NOTIFY_TOKEN in the container>
+Every --config-file is consulted in order and the results are layered, earlier files
+winning per key; a file that defines nothing usable is logged and skipped over instead
+of shadowing the next one. $RECLAUDE_NOTIFY_CONFIG replaces the whole list (so a test
+never falls through to the production credentials); with no --config-file the default is
+/root/.hermes/reclaude-runner.env.
 
 Always exits 0; never affects the runner's own exit code. Stdlib only.
 """
@@ -31,9 +46,16 @@ import time
 import urllib.error
 import urllib.request
 
+SCRIPT_VERSION = "2026-09-15.2"
 CONFIG_FILE = "/root/.hermes/reclaude-runner.env"
+REQUIRED_CONFIG_KEYS = ("HALOWEBUI_NOTIFY_URL", "HALOWEBUI_NOTIFY_TOKEN")
 STATE_DB = "/root/.hermes/state.db"
 LOOKBACK_SECONDS = 48 * 3600
+# Poll/wait tool for background processes.  Hermes 0.21 renamed `process` to
+# `process_manage`; both names appear in state.db, so the provenance fallback
+# accepts either.  Add new spellings here rather than at the call sites.
+PROCESS_TOOL_NAMES = ("process", "process_manage")
+PROVENANCE_TOOL_NAMES = ("terminal",) + PROCESS_TOOL_NAMES
 RETRY_ATTEMPTS = 10
 RETRY_INTERVAL_SECONDS = 30
 HTTP_TIMEOUT_SECONDS = 30
@@ -45,21 +67,79 @@ def log(message):
     sys.stdout.flush()
 
 
-def load_config(paths=None):
-    """Load the first existing KEY=VALUE config file out of *paths*."""
-    candidates = [p for p in (paths or []) if p] or [CONFIG_FILE]
-    path = next((p for p in candidates if os.path.exists(p)), "")
+def read_config_file(path):
+    """The KEY=VALUE lines of *path* as a dict; {} when it cannot be read."""
     config = {}
-    if not path:
-        return config
-    with open(path, encoding="utf-8") as handle:
-        for line in handle:
-            line = line.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            key, _, value = line.partition("=")
-            config[key.strip()] = value.strip().strip('"').strip("'")
+    try:
+        with open(path, encoding="utf-8") as handle:
+            for line in handle:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, _, value = line.partition("=")
+                config[key.strip()] = value.strip().strip('"').strip("'")
+    except OSError as exc:
+        log(f"config {path} unreadable: {exc}")
     return config
+
+
+def config_candidates(paths=None):
+    """The config files to consult, most specific first.
+
+    ``RECLAUDE_NOTIFY_CONFIG`` *replaces* the list instead of heading it: a test or a
+    diagnostic run pointed at a throwaway config must never fall through to the
+    production credentials when its own file is incomplete.
+    """
+    override = os.environ.get("RECLAUDE_NOTIFY_CONFIG", "").strip()
+    if override:
+        return [override]
+    ordered, seen = [], set()
+    for path in [p for p in (paths or []) if p] or [CONFIG_FILE]:
+        if path not in seen:
+            seen.add(path)
+            ordered.append(path)
+    return ordered
+
+
+def load_config(paths=None, required=REQUIRED_CONFIG_KEYS):
+    """Layer the candidate config files, the earliest file winning per key.
+
+    Layering rather than "the first file that exists wins" is the point: codex-run.sh
+    passes ``--config-file codex-runner.env --config-file reclaude-runner.env``, so an
+    empty or half-written codex-runner.env used to shadow the working one and codex
+    notifications were skipped silently while reclaude kept working.  A candidate now
+    only supplies the keys it actually defines with a non-empty value, and one that
+    supplies none of *required* is logged instead of ending the search.
+
+    Returns ``(config, sources)``; *sources* lists every candidate with the key names it
+    contributed — paths and key names only, never values.
+    """
+    config, sources = {}, []
+    candidates = config_candidates(paths)
+    for index, path in enumerate(candidates):
+        if not os.path.exists(path):
+            sources.append({"path": path, "exists": False, "provided": []})
+            continue
+        provided = []
+        for key, value in read_config_file(path).items():
+            if key in config or not value.strip():
+                continue
+            config[key] = value
+            provided.append(key)
+        sources.append({"path": path, "exists": True, "provided": sorted(provided)})
+        if required and not any(key in provided for key in required):
+            remaining = len(candidates) - index - 1
+            log(
+                f"config {path} exists but defines no usable {' / '.join(required)}; "
+                + (f"reading the next candidate ({remaining} left)" if remaining
+                   else "no further candidate to fall back on")
+            )
+    return config, sources
+
+
+def missing_config_keys(config, required=REQUIRED_CONFIG_KEYS):
+    """Which *required* keys the merged config still lacks."""
+    return [key for key in required if not (config.get(key) or "").strip()]
 
 
 def _json_object(value):
@@ -145,12 +225,13 @@ def find_origin(
             + re.escape(run_id)
             + r" (?:started|finished)(?::|\s)"
         )
+        placeholders = ", ".join("?" * len(PROVENANCE_TOOL_NAMES))
         results = db.execute(
-            """select m.session_id, s.source, m.tool_name, m.tool_call_id, m.content
+            f"""select m.session_id, s.source, m.tool_name, m.tool_call_id, m.content
                from messages m join sessions s on s.id=m.session_id
                where m.role='tool' and m.timestamp >= ? and m.content like ?
-                 and m.tool_name in ('terminal', 'process')""",
-            (since, f"%{run_id}%"),
+                 and m.tool_name in ({placeholders})""",
+            (since, f"%{run_id}%", *PROVENANCE_TOOL_NAMES),
         )
         for session_id, source, tool_name, call_id, raw in results:
             result = _json_object(raw)
@@ -159,7 +240,7 @@ def find_origin(
                 continue
             terminal_call_ids = {call_id} if tool_name == "terminal" else set()
             process_id = result.get("session_id")
-            if tool_name == "process" and isinstance(process_id, str):
+            if tool_name in PROCESS_TOOL_NAMES and isinstance(process_id, str):
                 for terminal_call_id, content in db.execute(
                     """select tool_call_id, content from messages where session_id=?
                        and role='tool' and tool_name='terminal' and timestamp>=?
@@ -220,6 +301,55 @@ def find_origin(
     finally:
         db.close()
     return None
+
+
+def read_meta(run_dir):
+    """meta.json of *run_dir* as a dict; {} when missing or unreadable."""
+    try:
+        with open(os.path.join(run_dir, "meta.json"), encoding="utf-8") as handle:
+            meta = json.load(handle)
+    except (OSError, ValueError):
+        return {}
+    return meta if isinstance(meta, dict) else {}
+
+
+def session_source(session_id, db_path=STATE_DB):
+    """sessions.source for *session_id*; None when the row (or the DB) is missing."""
+    try:
+        db = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=10)
+    except sqlite3.Error as exc:
+        log(f"origin source lookup skipped: cannot open state.db ({exc})")
+        return None
+    try:
+        row = db.execute("select source from sessions where id=?", (session_id,)).fetchone()
+    except sqlite3.Error as exc:
+        log(f"origin source lookup failed: {exc}")
+        return None
+    finally:
+        db.close()
+    return row[0] if row else None
+
+
+def recorded_origin(meta, session_id="", platform="", db_path=STATE_DB):
+    """The launching session as the runner recorded it, or None if it recorded none.
+
+    The runner copies hermes's HERMES_SESSION_ID / HERMES_SESSION_PLATFORM into
+    meta.json at launch, so the origin is known before the run even starts.
+    state.db only supplies the authoritative `source`; when the row is missing
+    (pruned history, unreadable DB) the recorded platform stands in for it, so a
+    HaloWebUI run is still delivered.
+    """
+    session_id = (session_id or meta.get("origin_session_id") or "").strip()
+    if not session_id:
+        return None
+    platform = (
+        platform
+        or meta.get("origin_platform")
+        or meta.get("origin_source")
+        or ""
+    ).strip()
+    source = session_source(session_id, db_path)
+    return session_id, (platform if source is None else source)
 
 
 QUOTA_FOOTER_MARKER = "reclaude 额度"
@@ -320,7 +450,26 @@ def main():
         "--config-file",
         action="append",
         default=[],
-        help="KEY=VALUE config path; repeatable, first existing wins",
+        help="KEY=VALUE config path; repeatable, layered in order (earlier file wins "
+        "per key, a file that defines nothing usable is skipped over)",
+    )
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=SCRIPT_VERSION,
+        help="print the script version (install guards compare it before overwriting)",
+    )
+    parser.add_argument(
+        "--origin-session",
+        default="",
+        help="hermes session that launched this run (HERMES_SESSION_ID at launch); "
+        "defaults to meta.json's origin_session_id",
+    )
+    parser.add_argument(
+        "--origin-platform",
+        default="",
+        help="platform of that session (HERMES_SESSION_PLATFORM at launch), used only "
+        "when state.db has no row for it",
     )
     parser.add_argument(
         "--state-db", default=STATE_DB, help="Hermes state DB (always opened read-only)"
@@ -350,30 +499,51 @@ def main():
         except OSError:
             pass
 
-    config = {} if args.dry_run else load_config(args.config_file)
+    # dry-run resolves the origin only, so it never reads the notification credentials.
+    config, config_sources = ({}, []) if args.dry_run else load_config(args.config_file)
     url = config.get("HALOWEBUI_NOTIFY_URL", "").strip()
     token = config.get("HALOWEBUI_NOTIFY_TOKEN", "").strip()
-    if not args.dry_run and (not url or not token):
-        record["skipped"] = "notify not configured"
-        log("notify skipped: HALOWEBUI_NOTIFY_URL / HALOWEBUI_NOTIFY_TOKEN not set")
-        save()
-        return 0
+    if not args.dry_run:
+        record["config_files"] = config_sources
+        missing = missing_config_keys(config)
+        if missing:
+            record["skipped"] = "notify not configured"
+            record["config_missing"] = missing
+            looked_at = ", ".join(entry["path"] for entry in config_sources) or "(none)"
+            log(f"notify skipped: {' / '.join(missing)} not set in any config file ({looked_at})")
+            save()
+            return 0
 
-    origin = find_origin(
-        args.run_id,
-        args.launch_task_file,
-        args.parent_run,
-        tool_marker=args.tool_marker,
+    # What the runner recorded at launch beats anything reconstructed afterwards.
+    origin = recorded_origin(
+        read_meta(args.run_dir),
+        args.origin_session,
+        args.origin_platform,
         db_path=args.state_db,
     )
+    resolved_by = "runner"
+    if not origin:
+        resolved_by = "state.db"
+        origin = find_origin(
+            args.run_id,
+            args.launch_task_file,
+            args.parent_run,
+            tool_marker=args.tool_marker,
+            db_path=args.state_db,
+        )
     if not origin:
         record["skipped"] = "origin session not found"
-        log("notify skipped: launching hermes session not found in state.db")
+        log(
+            "notify skipped: the runner recorded no launching session and none could be "
+            "found in state.db"
+        )
         save()
         return 0
     session_id, source = origin
     record["origin_session"] = session_id
     record["origin_source"] = source
+    record["origin_resolved_by"] = resolved_by
+    log(f"origin session {session_id} (source={source or '?'}) resolved from {resolved_by}")
     if args.dry_run:
         record["chat_id"] = session_id if source == "api_server" else None
         save()

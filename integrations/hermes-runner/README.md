@@ -1,35 +1,111 @@
 # Hermes 后台运行完成通知
 
-`reclaude-notify.py` 是宿主机 Codex / reclaude runner 共用通知脚本的可维护副本，兼容现有 runner 参数与配置文件。它不运行 Codex、不重做任务，仅定位启动会话并向 HaloWebUI 的 `/api/v1/hermes/notifications` 发送完成通知。
+宿主机上的 `reclaude-run.sh` / `codex-run.sh`（Hermes 的 reclaude / Codex 独占运行器）
+跑完之后，Hermes 的 api_server 平台**无法**把结果推回 HaloWebUI 会话
+（`supports_async_delivery=False`），所以由 runner 自己 POST 到
+`/api/v1/hermes/notifications`。本目录是那条链路里两个宿主机脚本的**可维护副本**：
 
-## 为什么需要更新宿主机脚本
+| 文件 | 作用 |
+|---|---|
+| `reclaude-notify.py` | 完成通知本体；两个 runner 共用，Codex 侧额外传 `--agent codex` 等参数 |
+| `reclaude-notify-backfill.py` | 只读排障：对历史上“找不到来源会话”的 run 记录还能追回什么 |
+| `install.sh` | 带版本护栏的安装脚本（拒绝把旧副本装到新宿主机上） |
 
-内联 `codex-run.sh run --task '…'` 在启动后才生成运行 ID。旧脚本要求启动命令同时包含脚本名和运行 ID，因而查不到来源；后续排障提示词若引用了这个 ID，又可能误匹配其他会话。
+**这些脚本住在宿主机，拉取 HaloWebUI 镜像不会更新它们。** 安装由运维/用户执行。
 
-新脚本沿以下关联查找唯一来源：
+## 来源会话是怎么确定的
 
-`process poll 输出中的运行开始标记 → process session_id → 同一会话的 terminal 结果 → tool_call_id → 实际 runner 启动命令`
+按顺序两条路，第一条成功就不会走第二条：
 
-显式 `--run-id`、`--task-file`、`answer <parent-run>` 仍可使用，但按参数解析，不再匹配提示词里的引用。来源有歧义或缺少可验证记录时拒绝猜测；Telegram 等来源仍交由 gateway 处理。不能保证没有启动记录、也没有任何运行输出记录的任务能被追溯。
+1. **runner 在启动时记录的来源会话**（2026-09-15 起）。Hermes 把发起会话的
+   `HERMES_SESSION_ID` / `HERMES_SESSION_PLATFORM` 桥接进每个工具子进程，runner 直接写进
+   `meta.json` 的 `origin_session_id` / `origin_platform`，并用 `--origin-session` /
+   `--origin-platform` 交给通知脚本。`sessions.source` 只用于二次校验（查不到行时退回
+   runner 记录的 platform）。`notify.json` 里 `origin_resolved_by = "runner"`。
+2. **旧的反查兜底**：从 `state.db` 的工具调用溯源（只读）：
+   `poll 输出里的 run 开始横幅 → process session_id → 同一会话的 terminal 结果 →
+   tool_call_id → 真正的 runner 启动命令`。`origin_resolved_by = "state.db"`。
 
-**该脚本位于宿主机，拉取 HaloWebUI 镜像不会更新它。** 安装由运维/用户执行；本次排查没有替换线上脚本、改动配置或补发历史通知。
+第 2 条天生脆弱，只留给 2026-09-15 之前启动的 run：
+- Hermes 0.21 把 `process` 改名 `process_manage`，硬编码旧名字的版本从此全数失败
+  （现在两个名字都认）；
+- 通知在 run 结束后 1 秒内执行，而发起那一回合的工具调用行可能**几分钟后才落库** ——
+  于是形成“只有先 poll 过进度才投递得成功”的竞态，这正是第 1 条要消灭的东西；
+- `terminal(background=true)` 只返回 `Background process started`，不含 run id，
+  没人 poll 就根本没有可溯源的记录。
 
-在包含本文件的仓库 checkout 内，可保留旧脚本后安装：
+来源有歧义或缺少可验证记录时拒绝猜测；Telegram / QQ 来源主动跳过，交给 gateway 投递。
 
-```bash
-cp -pn /root/.hermes/scripts/reclaude-notify.py /root/.hermes/scripts/reclaude-notify.py.before-origin-fix
-install -m 755 integrations/hermes-runner/reclaude-notify.py /root/.hermes/scripts/reclaude-notify.py
+## 配置文件是**分层**的
+
+`--config-file` 可重复，按顺序**逐键分层**，先出现的文件赢：
+
+```
+codex-run.sh → --config-file /root/.hermes/codex-runner.env \
+               --config-file /root/.hermes/reclaude-runner.env
 ```
 
-不需要修改现有 token、runner 配置或 Codex 推理等级。新 runner 完成时会加载更新后的脚本。
+需要的键：
+
+```
+HALOWEBUI_NOTIFY_URL=http://127.0.0.1:3000/api/v1/hermes/notifications
+HALOWEBUI_NOTIFY_TOKEN=<与容器里的 HERMES_AGENT_NOTIFY_TOKEN 相同>
+```
+
+以前是“第一个存在的文件全赢”，于是**一个空的（或只写了一半的）`codex-runner.env`
+会遮住能用的 `reclaude-runner.env`，Codex 的通知被静默跳过，而 reclaude 毫发无伤** ——
+几乎没人会把病因联想到那个文件。现在：某个文件只提供它**确实定义且非空**的键；
+一个键都没提供的文件会打印一行日志并继续往下读；`notify.json` 的 `config_files`
+记录每个候选文件的路径与它提供了哪些**键名**（只有路径和键名，绝不写值）。
+`$RECLAUDE_NOTIFY_CONFIG` 会**整体替换**候选列表，所以测试用的临时配置永远不会
+回退到生产凭据。
+
+## 安装
+
+```bash
+./install.sh                 # 装到 /root/.hermes/scripts，自动备份被替换的文件
+./install.sh --dry-run       # 只看会做什么
+./install.sh --target-dir DIR
+```
+
+`install.sh` 比较 `reclaude-notify.py` 里的 `SCRIPT_VERSION`（递增的 `YYYY-MM-DD[.N]`），
+**旧副本装不上去**（没有 `SCRIPT_VERSION` 的副本视为最旧），除非显式 `--force`。
+这条护栏是有来历的：2026-09-11 到 2026-09-15 之间，本目录的副本一直停在修复前的版本，
+照着旧 README 的 `install` 命令同步一次就会把线上修复整个抹掉，而且不报任何错。
+
+安装不改 token、不改 runner 配置、不重启任何服务；下一个启动的 run 自动使用新脚本。
 
 ## 只读诊断
 
 ```bash
-python3 integrations/hermes-runner/reclaude-notify.py \
-  --run-id RUN_ID \
-  --run-dir /root/.hermes/codex-runs/RUN_ID \
+# 这次通知本该投递给谁（不发 HTTP、不读凭据、不写 notify.json）
+python3 reclaude-notify.py --run-id RUN_ID --run-dir /root/.hermes/codex-runs/RUN_ID \
   --status success --agent codex --tool-marker codex-run.sh --dry-run
+
+# 历史上“origin session not found”的 run，现在还能追回哪些（默认只报告不写盘）
+python3 reclaude-notify-backfill.py
+python3 reclaude-notify-backfill.py --apply    # 把结论写进各 run 目录的 origin-backfill.json
 ```
 
-`--dry-run` 不发 HTTP 请求、不读取通知凭据、不修改 `notify.json` 或其他运行文件。`--state-db PATH` 可指定隔离数据库，始终按只读方式打开。诊断不会补发该次通知；补发属于独立的生产写入操作，本次未执行。
+`--dry-run` 不发 HTTP 请求、不读取通知凭据、不修改 `notify.json` 或其他运行文件。
+`--state-db PATH` 可指定隔离数据库，始终只读打开。
+
+`reclaude-notify-backfill.py` 是**记录**不是**补发**：它不发送任何通知（脚本里根本没有
+HTTP 客户端），不改写 `notify.json` / `meta.json` / `result.md`，只在 run 目录里新增一个
+`origin-backfill.json`；追不回来的 run 会明确写成 `"resolved": false` 和原因，
+不会假装成功。补发历史通知会在真实会话里制造新一轮对话，属于独立的生产写操作，
+本目录的任何脚本都不做这件事。
+
+## 排障入口
+
+`<run_dir>/notify.json`：
+
+| 字段 | 含义 |
+|---|---|
+| `origin_resolved_by` | `runner`（启动时记录）或 `state.db`（旧的反查兜底） |
+| `skipped` | `origin is telegram; gateway delivers`（正常）/ `origin session not found` / `notify not configured` |
+| `config_missing` | 所有候选配置文件都没提供的键名 |
+| `config_files` | 查过哪些配置文件、各自提供了哪些键名（无值） |
+| `attempted` / `http_status` / `delivered_at` / `failed` | 实际投递结果 |
+
+`<run_dir>/notify.log` 是同一次执行的完整日志。

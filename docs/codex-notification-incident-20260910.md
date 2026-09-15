@@ -48,3 +48,58 @@ CodeMirror 的真实浏览器对照：旧初始化方式复现 `Calls to EditorV
 ## 尚未执行的操作
 
 没有替换宿主机线上通知脚本，没有修改生产配置/数据库，没有补发这次历史通知，没有调用真实模型，没有构建容器、部署或重启服务。通知根因需要用户按 [宿主机通知脚本安装说明](../integrations/hermes-runner/README.md) 更新脚本；仅拉镜像不能修复它。CodeMirror 修复随镜像更新生效。本次历史回答不会因为只读排查自动写入聊天，需要另行明确执行恢复操作。
+
+---
+
+## 2026-09-15 续：真正的根因与后续修复
+
+2026-09-10 的结论（内联任务查不到来源）只说对了一半。后续复查把三件事钉死了：
+
+**1. 根因是落库时序竞态，不只是启动命令的形状。**
+对 2026-09-10 那两个投递失败的 Codex run，用同一份 legacy `find_origin()` 在 2026-09-15
+重查，**两个都能查到来源会话**（当时都查不到）。数据一直都在，是通知在 run 结束后 1 秒
+就执行、而发起那一回合的工具调用行还没进 `state.db`：`20260910-124730` 那条用于反查的
+poll 行比通知**晚 5 分 23 秒**落库。旧行为实际上要求“有人在 run 结束前 poll 过、且那一
+回合已持久化”，于是出现“必须先看进度，自动回写才生效”的反直觉因果。
+
+**2. Hermes 0.21 把 `process` 改名 `process_manage`，且无向后别名。**
+`state.db` 里 `process` 末次出现 2026-09-14 09:08、`process_manage` 首次 16:05。
+硬编码 `tool_name in ('terminal','process')` 的通知脚本在改名后**必然**反查失败。
+Codex 侧看起来“没这个问题”只是采样假象：最后一个 Codex run 早于改名窗口，它用的是同一份
+有 bug 的脚本；24 个历史 Codex run 里仍有 2 个 `origin session not found`。
+
+**3. 修复：不再事后反查，改为启动时记录。**
+Hermes 把发起会话的 `HERMES_SESSION_*` 桥接进每个工具子进程，所以两个 runner 在
+`cmd_run()` 里就把 `origin_session_id` / `origin_platform` / `origin_source` /
+`origin_chat_id` 写进 `meta.json`，并传给通知脚本；通知优先用它
+（`notify.json` 的 `origin_resolved_by = "runner"`），无论是否有人 poll。
+`state.db` 反查降级为兜底，两个工具名都认。
+
+### 同批处理的三个次级风险
+
+- **仓库副本会把修复同步回旧版本。** 2026-09-11 到 2026-09-15，
+  `integrations/hermes-runner/reclaude-notify.py` 一直停在修复前版本；照旧 README 的
+  `install` 命令同步一次就会静默抹掉线上修复。现在副本与宿主机脚本逐字一致，并新增
+  `install.sh`：比较 `SCRIPT_VERSION`，**旧副本装不上去**（无版本号视为最旧），除非 `--force`。
+- **空的 `codex-runner.env` 会静默关掉 Codex 通知。** 配置加载以前是“第一个存在的文件
+  全赢”，只要有人创建了该文件却没写全两个键，Codex 的通知就会以
+  `skipped: notify not configured` 结束，而 reclaude 完全不受影响。现在配置**逐键分层**，
+  一个键都没提供的文件会打印日志并继续往下读；`notify.json` 增加 `config_files` /
+  `config_missing`（只记路径和键名，不记值）。
+- **历史 run 只做记录，不补发。** `reclaude-notify-backfill.py` 用同一套只读查找重跑历史上
+  `origin session not found` 的 run，把结论写进各 run 目录的 `origin-backfill.json`；
+  追不回来的写成 `"resolved": false` 和原因。它不发送任何通知（脚本里没有 HTTP 客户端），
+  也不改写 `notify.json`：补发会在真实会话里制造新一轮对话，属于独立的生产写操作。
+
+### 验证
+
+```bash
+python3 -m pytest -q backend/open_webui/test/unit/test_runner_notify_origin.py
+python3 /root/.hermes/scripts/tests/test_reclaude_notify.py     # 宿主机侧，纯标准库
+```
+
+宿主机测试套件包含**两个 runner 各自的真实端到端投递**（`reclaude-run.sh` /
+`codex-run.sh` 的真实脚本 + 打桩的 CLI + 本机 127.0.0.1 上的一次性 HTTP 端点），
+断言 `meta.json` 的 origin 四键、`notify.json` 的 `origin_resolved_by` / `chat_id` /
+`http_status`、POST body 的 `source`，以及“空 `codex-runner.env` 在前仍能投递”。
+没有向真实 HaloWebUI 发送通知，没有重跑任何历史任务，没有构建或部署容器。

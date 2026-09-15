@@ -31,6 +31,10 @@ FROM --platform=$BUILDPLATFORM node:22-alpine3.20 AS frontend-build
 ARG BUILD_HASH
 ARG ENABLE_PYODIDE=false
 ARG VITE_SOURCEMAP=false
+# Peak heap of `vite build` sits just under 4GB, which is also what node picks by
+# default on a 16GB builder - so the build OOMs by coin flip. Keep the ceiling
+# above the peak; lower it with --build-arg on a builder with less RAM to spare.
+ARG NODE_BUILD_MEMORY_MB=6144
 
 WORKDIR /app
 
@@ -49,7 +53,8 @@ COPY vite.config.ts ./
 
 ENV APP_BUILD_HASH=${BUILD_HASH} \
     ENABLE_PYODIDE=${ENABLE_PYODIDE} \
-    VITE_SOURCEMAP=${VITE_SOURCEMAP}
+    VITE_SOURCEMAP=${VITE_SOURCEMAP} \
+    NODE_OPTIONS="--max-old-space-size=${NODE_BUILD_MEMORY_MB}"
 
 RUN npm run build
 

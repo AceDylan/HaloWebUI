@@ -46,7 +46,7 @@ import time
 import urllib.error
 import urllib.request
 
-SCRIPT_VERSION = "2026-09-15.2"
+SCRIPT_VERSION = "2026-09-15.3"
 CONFIG_FILE = "/root/.hermes/reclaude-runner.env"
 REQUIRED_CONFIG_KEYS = ("HALOWEBUI_NOTIFY_URL", "HALOWEBUI_NOTIFY_TOKEN")
 STATE_DB = "/root/.hermes/state.db"
@@ -58,6 +58,16 @@ PROCESS_TOOL_NAMES = ("process", "process_manage")
 PROVENANCE_TOOL_NAMES = ("terminal",) + PROCESS_TOOL_NAMES
 RETRY_ATTEMPTS = 10
 RETRY_INTERVAL_SECONDS = 30
+# HTTP 409 from HaloWebUI means only "that chat is mid-turn", and a turn always ends —
+# unlike a 5xx, which may be a server that stays broken. Outlasting someone else's turn
+# is exactly what this notice has to do, and ten attempts is not enough to: on
+# 2026-09-15 codex run 20260915-193235-32b394d1 finished 56 seconds after it started,
+# spent all ten attempts against a busy chat between 19:33:31 and 19:38:01, and its
+# result was then lost for good — nothing anywhere redelivers a notice the notifier gave
+# up on (reclaude-notify-backfill.py only records what happened, it never re-sends).
+# So "busy" gets its own, longer budget; every other retryable error keeps the original.
+BUSY_HTTP_STATUS = 409
+BUSY_RETRY_ATTEMPTS = 40  # 40 x 30s = 20 minutes of someone else's turn
 HTTP_TIMEOUT_SECONDS = 30
 
 
@@ -578,7 +588,11 @@ def main():
     }
     record["attempted"] = True
     record["chat_id"] = session_id
-    for attempt in range(1, RETRY_ATTEMPTS + 1):
+    attempt = 0
+    busy_attempts = 0
+    other_attempts = 0
+    while True:
+        attempt += 1
         try:
             status, body = post_notification(
                 url, token, payload, user_agent=f"{args.runner_name}/1.0"
@@ -595,18 +609,33 @@ def main():
             body = exc.read().decode("utf-8", "replace")[:300] if exc.fp else ""
             record["http_status"] = exc.code
             record["response"] = body
-            retryable = exc.code in (409, 429) or exc.code >= 500
+            busy = exc.code == BUSY_HTTP_STATUS
+            retryable = busy or exc.code == 429 or exc.code >= 500
             log(
                 f"attempt {attempt}: HTTP {exc.code} {body[:160]}{' (will retry)' if retryable else ''}"
             )
             if not retryable:
                 break
+            if busy:
+                busy_attempts += 1
+            else:
+                other_attempts += 1
         except (urllib.error.URLError, OSError) as exc:
             log(f"attempt {attempt}: {exc} (will retry)")
-        if attempt < RETRY_ATTEMPTS:
-            time.sleep(RETRY_INTERVAL_SECONDS)
+            other_attempts += 1
+        # Each failure class spends its own budget, so a chat that stays busy cannot be
+        # cut short by the budget meant for broken servers, and vice versa. Whichever
+        # budget runs out first ends the loop, which keeps the total bounded.
+        if busy_attempts >= BUSY_RETRY_ATTEMPTS or other_attempts >= RETRY_ATTEMPTS:
+            break
+        time.sleep(RETRY_INTERVAL_SECONDS)
     record["failed"] = True
-    log("giving up; the user can ask Hermes for the run result by run id")
+    record["attempts"] = attempt
+    record["busy_attempts"] = busy_attempts
+    log(
+        f"giving up after {attempt} attempts ({busy_attempts} of them a busy chat); "
+        "the user can ask Hermes for the run result by run id"
+    )
     save()
     return 0
 

@@ -5,6 +5,7 @@ from pathlib import Path
 import sqlite3
 import sys
 import time
+import urllib.error
 
 import pytest
 
@@ -353,3 +354,96 @@ def test_the_env_override_replaces_the_candidate_list(configs, monkeypatch):
         "HALOWEBUI_NOTIFY_URL",
         "HALOWEBUI_NOTIFY_TOKEN",
     ]
+
+
+# --- the delivery retry budget ------------------------------------------------
+# A 409 means only "that chat is mid-turn", and a turn always ends; a 5xx may be a server
+# that stays broken.  The two deserve different patience, and running out of it is final:
+# nothing redelivers a notice the notifier gave up on.
+
+
+@pytest.fixture
+def delivery(state, tmp_path, monkeypatch):
+    """A configured notifier whose run belongs to a HaloWebUI chat.  Returns the sleeps."""
+    meta(tmp_path, origin_session_id="origin", origin_platform="api_server")
+    with sqlite3.connect(state) as db:
+        db.execute("insert into sessions values (?,?)", ("origin", "api_server"))
+    config = tmp_path / "notify.env"
+    config.write_text(
+        "HALOWEBUI_NOTIFY_URL=http://127.0.0.1:3000/api/v1/hermes/notifications\n"
+        "HALOWEBUI_NOTIFY_TOKEN=secret-token\n"
+    )
+    monkeypatch.setenv("RECLAUDE_NOTIFY_CONFIG", str(config))
+    slept = []
+    monkeypatch.setattr(notify.time, "sleep", slept.append)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [str(SCRIPT), "--run-id", "run-123", "--run-dir", str(tmp_path), "--status",
+         "success", "--tool-marker", "codex-run.sh", "--state-db", str(state)],
+    )
+    return slept
+
+
+def always(code):
+    def post(*_args, **_kwargs):
+        raise urllib.error.HTTPError("http://webui/hook", code, "nope", {}, None)
+
+    return post
+
+
+def receipt_of(tmp_path):
+    return json.loads((tmp_path / "notify.json").read_text())
+
+
+def test_a_busy_chat_is_waited_out_past_the_ordinary_budget(
+    delivery, tmp_path, monkeypatch
+):
+    monkeypatch.setattr(notify, "post_notification", always(409))
+    assert notify.main() == 0
+    record = receipt_of(tmp_path)
+    assert record["failed"] is True
+    assert record["attempts"] == notify.BUSY_RETRY_ATTEMPTS
+    assert record["busy_attempts"] == notify.BUSY_RETRY_ATTEMPTS
+    # ~20 minutes of someone else's turn, and no pointless sleep after the last attempt.
+    assert delivery == [notify.RETRY_INTERVAL_SECONDS] * (notify.BUSY_RETRY_ATTEMPTS - 1)
+
+
+def test_a_broken_server_still_gives_up_on_the_ordinary_budget(
+    delivery, tmp_path, monkeypatch
+):
+    monkeypatch.setattr(notify, "post_notification", always(503))
+    assert notify.main() == 0
+    record = receipt_of(tmp_path)
+    assert record["failed"] is True
+    assert record["attempts"] == notify.RETRY_ATTEMPTS
+    assert record["busy_attempts"] == 0
+
+
+def test_a_busy_chat_that_frees_up_late_is_still_delivered(
+    delivery, tmp_path, monkeypatch
+):
+    """The run this fixes: ten attempts all landed mid-turn and the result was lost."""
+    attempts = []
+
+    def busy_until_the_turn_ends(*_args, **_kwargs):
+        attempts.append(1)
+        if len(attempts) <= notify.RETRY_ATTEMPTS + 5:
+            raise urllib.error.HTTPError("http://webui/hook", 409, "busy", {}, None)
+        return 200, "queued"
+
+    monkeypatch.setattr(notify, "post_notification", busy_until_the_turn_ends)
+    assert notify.main() == 0
+    record = receipt_of(tmp_path)
+    assert record["delivered_at"]
+    assert "failed" not in record
+    assert len(attempts) == notify.RETRY_ATTEMPTS + 6
+
+
+def test_a_refused_notice_is_not_retried_at_all(delivery, tmp_path, monkeypatch):
+    monkeypatch.setattr(notify, "post_notification", always(404))
+    assert notify.main() == 0
+    record = receipt_of(tmp_path)
+    assert record["attempts"] == 1
+    assert record["busy_attempts"] == 0
+    assert delivery == []

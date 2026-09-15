@@ -60,6 +60,22 @@ HALOWEBUI_NOTIFY_TOKEN=<与容器里的 HERMES_AGENT_NOTIFY_TOKEN 相同>
 `$RECLAUDE_NOTIFY_CONFIG` 会**整体替换**候选列表，所以测试用的临时配置永远不会
 回退到生产凭据。
 
+## 投递重试：忙碌的会话单独计预算
+
+HaloWebUI 的 HTTP 409 只表示**那个会话正在回合中**，而回合总会结束；5xx 则可能是一台
+一直坏着的服务器。等到别人的回合结束正是这条通知要做的事，而**通知一旦放弃就永远没了**
+（`reclaude-notify-backfill.py` 只记录发生过什么，从不补发）——2026-09-15 的 codex run
+`20260915-193235-32b394d1` 开跑 56 秒就结束，10 次重试全部撞在忙碌会话上，结果就此丢失。
+
+所以两类失败各花各的预算，先用完的那个结束循环，总时长仍然有界：
+
+| 失败类型 | 预算 | 合计等待 |
+|---|---|---|
+| HTTP 409（会话忙） | `BUSY_RETRY_ATTEMPTS = 40` | 40 × 30s = 20 分钟 |
+| 429 / 5xx / 网络错误 | `RETRY_ATTEMPTS = 10` | 10 × 30s = 5 分钟 |
+
+其它状态码（4xx）仍然一次都不重试，直接记 `failed`。
+
 ## 安装
 
 ```bash
@@ -107,5 +123,6 @@ HTTP 客户端），不改写 `notify.json` / `meta.json` / `result.md`，只在
 | `config_missing` | 所有候选配置文件都没提供的键名 |
 | `config_files` | 查过哪些配置文件、各自提供了哪些键名（无值） |
 | `attempted` / `http_status` / `delivered_at` / `failed` | 实际投递结果 |
+| `attempts` / `busy_attempts` | 放弃时才写：一共试了多少次、其中多少次是会话忙（409） |
 
 `<run_dir>/notify.log` 是同一次执行的完整日志。

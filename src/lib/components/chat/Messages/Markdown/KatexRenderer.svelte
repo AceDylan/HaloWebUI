@@ -8,6 +8,7 @@
 
 	import { copyToClipboard } from '$lib/utils';
 	import { ensureKatexCopyTextEnabled, getKatexCopyText } from '$lib/utils/katex-copy';
+	import { KATEX_STRICT } from '$lib/utils/katex-options';
 	import { settings } from '$lib/stores';
 
 	const i18n = getContext('i18n');
@@ -49,7 +50,11 @@
 			</button>
 		{/if}
 
-		{@html katex.renderToString(content, { displayMode, throwOnError: false })}
+		{@html katex.renderToString(content, {
+			displayMode,
+			throwOnError: false,
+			strict: KATEX_STRICT
+		})}
 	</div>
 {:else}
 	<span class="katex-copy-container katex-copy-container-inline group">
@@ -65,7 +70,11 @@
 			</button>
 		{/if}
 
-		{@html katex.renderToString(content, { displayMode, throwOnError: false })}
+		{@html katex.renderToString(content, {
+			displayMode,
+			throwOnError: false,
+			strict: KATEX_STRICT
+		})}
 	</span>
 {/if}
 

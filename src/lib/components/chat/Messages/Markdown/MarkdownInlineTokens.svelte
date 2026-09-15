@@ -11,7 +11,7 @@
 	import { WEBUI_BASE_URL } from '$lib/constants';
 	import { copyToClipboard, unescapeHtml } from '$lib/utils';
 	import { getDataUrlDownloadName, rewriteDataUrlDownloadLinks } from '$lib/utils/download-links';
-	import { katexAutoRender } from '$lib/utils/katex-auto-render';
+	import KatexHtml from './KatexHtml.svelte';
 
 	import Image from '$lib/components/common/Image.svelte';
 	import {
@@ -106,7 +106,7 @@
 		{:else if tokenText.includes(`<source_id`)}
 			<Source {id} {token} onClick={onSourceClick} />
 		{:else}
-			<span class="contents" use:katexAutoRender={html}>{@html html}</span>
+			<KatexHtml {html} />
 		{/if}
 	{:else if token.type === 'link'}
 		{@const href = resolveLinkHref(token.href ?? '')}

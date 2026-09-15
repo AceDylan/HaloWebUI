@@ -26,7 +26,7 @@
 	import { isSvgMarkup, promoteSvgMarkupTokens } from './svgMarkupTokens';
 	import { getHeadingAnchorId } from '$lib/utils/headings';
 	import { rewriteDataUrlDownloadLinks } from '$lib/utils/download-links';
-	import { katexAutoRender } from '$lib/utils/katex-auto-render';
+	import KatexHtml from './KatexHtml.svelte';
 	import {
 		rewriteGeneratedFileHtmlLinks,
 		type GeneratedMessageFile
@@ -581,7 +581,7 @@
 			{:else if token.text.includes(`<source_id`)}
 				<Source {id} {token} onClick={onSourceClick} />
 			{:else}
-				<span class="contents" use:katexAutoRender={html}>{@html html}</span>
+				<KatexHtml {html} />
 			{/if}
 		{:else if token.type === 'iframe'}
 			{@const iframeSrc = buildLocalFileIframeSrc(token.fileId, WEBUI_BASE_URL)}

@@ -3036,5 +3036,12 @@
 	"Image prompts": "生图提示词",
 	"Manage image prompts": "管理生图提示词",
 	"Select a prompt to insert it into your message.": "点击模板即可插入输入框，支持按名称、标签或内容搜索。",
-	"Failed to load image prompts.": "生图提示词加载失败。"
+	"Failed to load image prompts.": "生图提示词加载失败。",
+	"Search prompts": "搜索提示词",
+	"Failed to load prompts.": "提示词加载失败。",
+	"Sort prompts": "排序提示词",
+	"Move to top": "置顶",
+	"Prompt order saved.": "提示词顺序已保存。",
+	"Prompt order changed elsewhere. Please try again.": "设置已在其他位置更新，请重新调整提示词顺序。",
+	"Failed to save prompt order. Please try again.": "提示词顺序保存失败，请重试。"
 }

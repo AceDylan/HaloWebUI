@@ -1814,14 +1814,9 @@
 											/>
 										{/if}
 
-										<!-- Keep the image picker reachable when the other controls fill a narrow toolbar. -->
+										<!-- Keep both prompt pickers reachable on narrow toolbars. -->
 										<div
-											class="flex gap-1 items-center overflow-x-auto scrollbar-none flex-1 {isChatImageMode(
-												imageGenerationEnabled,
-												primarySelectedModel
-											)
-												? 'min-w-[10rem]'
-												: 'min-w-0 scroll-fade-x'}"
+											class="flex gap-1 items-center overflow-x-auto scrollbar-none flex-1 min-w-[10rem]"
 										>
 											<QuickCommands
 												imageMode={isChatImageMode(imageGenerationEnabled, primarySelectedModel)}

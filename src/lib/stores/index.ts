@@ -257,6 +257,8 @@ type OllamaModelDetails = {
 };
 
 type Settings = {
+	chatPromptOrder?: string[];
+	imagePromptOrder?: string[];
 	models?: string[];
 	pinnedModels?: string[];
 	modelSelectorTagOrder?: string[];
@@ -385,6 +387,10 @@ type TitleSettings = {
 };
 
 type Prompt = {
+	id?: string;
+	name?: string;
+	tags?: string[] | null;
+	is_active?: boolean | null;
 	command: string;
 	user_id: string;
 	title: string;

@@ -1,4 +1,4 @@
-"""Exercise the real MessageInput in Chromium with synthetic, read-only data.
+"""Exercise the real MessageInput in Chromium with synthetic data and a mocked settings API.
 
 Requires the frontend node_modules, Python Playwright and its Chromium browser.
 PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH can select an already installed Chromium.
@@ -65,10 +65,12 @@ def write_fixture(root):
     )
     (root / "App.svelte").write_text(
         """<script>
-import {setContext, tick} from 'svelte';
+import {setContext, tick, onMount} from 'svelte';
 import {writable, get} from 'svelte/store';
 import MessageInput from '$lib/components/chat/MessageInput.svelte';
 import {config, user, models, settings, prompts, imageStudioTemplates, mobile} from '$lib/stores';
+import {getUserSettings} from '$lib/apis/users';
+import {applyUserSettingsSnapshot} from '$lib/utils/user-settings';
 import zh from '$lib/i18n/locales/zh-CN/translation.json';
 const tr = {language:'zh-CN', resolvedLanguage:'zh-CN',
  t:(key, opts)=>zh[key] || opts?.defaultValue || key, exists:(key)=>!!zh[key]};
@@ -80,8 +82,10 @@ models.set([
  {id:'gpt-image-1', name:'gpt-image-1', info:{meta:{capabilities:{vision:true}}}},
 ]);
 settings.set({richTextInput:false});
+onMount(async()=>applyUserSettingsSnapshot(await getUserSettings('fixture')));
 mobile.set(matchMedia('(pointer: coarse)').matches);
-prompts.set([{command:'/chat', title:'Chat only', content:'Chat instruction'}]);
+prompts.set([{command:'/chat', title:'Chat only', content:'Chat instruction'},
+ ...Array.from({length:11},(_,i)=>({id:'chat-'+i, command:'/chat-'+i, name:'Chat '+i, content:'Instruction '+i}))]);
 imageStudioTemplates.set(TEMPLATE_DATA);
 let prompt='已有输入';
 let imageMode=true;
@@ -140,6 +144,7 @@ def verify_context(browser, url, *, phone=False, width=1280, rich=False):
         color_scheme="dark" if phone else "light",
     )
     errors, api_writes = [], []
+    saved_settings = {"ui": {"richTextInput": False}, "revision": 0}
     page = context.new_page()
     page.set_default_timeout(15000)
     page.on("pageerror", lambda error: errors.append(str(error)))
@@ -147,9 +152,19 @@ def verify_context(browser, url, *, phone=False, width=1280, rich=False):
     def route_request(route):
         request = route.request
         if "/api/" in request.url:
-            if request.method != "GET":
-                api_writes.append(request.method + " " + request.url)
-            route.fulfill(status=200, content_type="application/json", body="[]")
+            if request.url.endswith("/users/user/settings/update"):
+                patch = request.post_data_json
+                assert patch["revision"] == saved_settings["revision"]
+                assert set(patch["ui"]).issubset({"chatPromptOrder", "imagePromptOrder"})
+                saved_settings["ui"].update(patch["ui"])
+                saved_settings["revision"] += 1
+                route.fulfill(status=200, content_type="application/json", body=json.dumps(saved_settings))
+            elif request.url.endswith("/users/user/settings"):
+                route.fulfill(status=200, content_type="application/json", body=json.dumps(saved_settings))
+            else:
+                if request.method != "GET":
+                    api_writes.append(request.method + " " + request.url)
+                route.fulfill(status=200, content_type="application/json", body="[]")
         elif request.url.startswith(url):
             route.continue_()
         else:
@@ -177,7 +192,7 @@ def verify_context(browser, url, *, phone=False, width=1280, rich=False):
             ).not_to_be_focused()  # Opening should not summon the soft keyboard.
         else:
             expect(search).to_be_focused()
-        expect(dialog.get_by_role("button")).to_have_count(24)  # 23 templates + close.
+        expect(dialog.locator("[data-prompt-select]")).to_have_count(23)
         first = dialog.get_by_role("button", name=TEMPLATES[0]["name"], exact=True)
         assert first.evaluate("el => el.scrollWidth <= el.clientWidth + 1")
         assert first.locator("span").first.evaluate(
@@ -252,7 +267,7 @@ def verify_context(browser, url, *, phone=False, width=1280, rich=False):
         for query in ["-22", "水彩", "  unique LIGHTHOUSE  "]:
             search.fill(query)
             expect(last).to_be_visible()
-            expect(dialog.get_by_role("button")).to_have_count(2)
+            expect(dialog.locator("[data-prompt-select]")).to_have_count(1)
         search.fill("missing-query")
         expect(
             dialog.get_by_text("没有匹配的模板，换个关键词或标签试试")
@@ -270,7 +285,7 @@ def verify_context(browser, url, *, phone=False, width=1280, rich=False):
         expect(trigger).to_be_focused()
         trigger.click()
         expect(search).to_have_value("")
-        expect(dialog.get_by_role("button")).to_have_count(24)
+        expect(dialog.locator("[data-prompt-select]")).to_have_count(23)
         search.fill("-22")
         search.press("ArrowDown")
         page.keyboard.press("Enter")
@@ -284,7 +299,12 @@ def verify_context(browser, url, *, phone=False, width=1280, rich=False):
         expect(trigger).to_have_count(0)
         assert page.evaluate("getComputedStyle(document.body).overflow") != "hidden"
         page.evaluate("fixture.prompt('原有问题')")
+        chat_trigger = page.locator('[data-halo-quick-commands="chat"]')
+        expect(chat_trigger).to_be_in_viewport(ratio=1)
         chat = page.get_by_role("button", name="Chat only", exact=True)
+        expect(chat).to_have_count(0)
+        chat_trigger.click()
+        expect(page.get_by_role("dialog").locator("[data-prompt-select]")).to_have_count(12)
         expect(chat).to_be_visible()
         chat.click()
         if rich:
@@ -298,13 +318,44 @@ def verify_context(browser, url, *, phone=False, width=1280, rich=False):
             trigger
         ).to_be_visible()  # Dedicated image model also enables image mode.
         expect(chat).to_have_count(0)
+        # Persist both families through the real client settings API, then reload.
+        for image_mode, item_id, setting in [
+            (True, "template-22", "imagePromptOrder"),
+            (False, "id:chat-10", "chatPromptOrder"),
+        ]:
+            page.evaluate("fixture.model('gpt-4o')")
+            page.evaluate("value=>fixture.mode(value)", image_mode)
+            page.locator('[data-halo-quick-commands]').click()
+            picker = page.get_by_role("dialog")
+            picker.get_by_role("button", name="排序提示词", exact=True).click()
+            expect(picker.get_by_role("searchbox")).to_be_disabled()
+            row = picker.locator(f'[data-prompt-id="{item_id}"]')
+            row.get_by_role("button", name="置顶", exact=True).click()
+            expect(picker.locator("[data-prompt-id]").first).to_have_attribute("data-prompt-id", item_id)
+            expect(picker.get_by_role("status").last).to_have_text("提示词顺序已保存。")
+            expect(row.get_by_role("button", name="上移", exact=True)).to_be_disabled()
+            row.get_by_role("button", name="下移", exact=True).click()
+            expect(picker.locator("[data-prompt-id]").nth(1)).to_have_attribute("data-prompt-id", item_id)
+            row.get_by_role("button", name="上移", exact=True).click()
+            expect(picker.locator("[data-prompt-id]").first).to_have_attribute("data-prompt-id", item_id)
+            picker.get_by_role("button", name="完成", exact=True).click()
+            picker.get_by_role("button", name="关闭", exact=True).click()
+            assert saved_settings["ui"][setting][0] == item_id
+
+        page.reload(wait_until="networkidle")
+        for image_mode, item_id in [(True, "template-22"), (False, "id:chat-10")]:
+            page.evaluate("value=>fixture.mode(value)", image_mode)
+            page.locator('[data-halo-quick-commands]').click()
+            picker = page.get_by_role("dialog")
+            expect(picker.locator("[data-prompt-id]").first).to_have_attribute("data-prompt-id", item_id)
+            picker.get_by_role("button", name="关闭", exact=True).click()
         assert page.evaluate("fixture.templates()") == TEMPLATES
         assert page.evaluate("fixture.submits()") == 0
         assert not api_writes, api_writes
         assert not errors, errors
         print(
             f"PASS: {'phone' if phone else 'desktop'} {width}px, "
-            f"{'rich text' if rich else 'textarea'}; scrolling/search/keyboard/insertion/modes",
+            f"{'rich text' if rich else 'textarea'}; scrolling/search/keyboard/insertion/modes/sorting/reload",
             flush=True,
         )
     except Exception:

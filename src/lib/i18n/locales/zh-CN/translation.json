@@ -3043,5 +3043,15 @@
 	"Move to top": "置顶",
 	"Prompt order saved.": "提示词顺序已保存。",
 	"Prompt order changed elsewhere. Please try again.": "设置已在其他位置更新，请重新调整提示词顺序。",
-	"Failed to save prompt order. Please try again.": "提示词顺序保存失败，请重试。"
+	"Failed to save prompt order. Please try again.": "提示词顺序保存失败，请重试。",
+	"Bookmarks": "书签",
+	"Open Bookmark Hub": "打开书签管理",
+	"Reload": "重新加载",
+	"Open in new tab": "在新标签页打开",
+	"Could not open the Bookmark Hub.": "无法打开书签管理。",
+	"The Bookmark Hub does not allow this site to embed it. Add {{origin}} to HUB_FRAME_ANCESTORS on the Hub.": "书签管理没有允许本站嵌入它：请在 Hub 端的 HUB_FRAME_ANCESTORS 里加上 {{origin}}。",
+	"Automatic sign-in is off: HUB_TRUSTED_EMBED_ADMIN_SECRET is not set on HaloWebUI. Unlock the Hub with its own password.": "自动登录未开启：HaloWebUI 端没有设置 HUB_TRUSTED_EMBED_ADMIN_SECRET。可在框内用 Hub 自己的管理密码解锁。",
+	"Automatic sign-in is off: HUB_TRUSTED_EMBED_ADMIN_SECRET is not set on the Hub. Unlock the Hub with its own password.": "自动登录未开启：Hub 端没有设置 HUB_TRUSTED_EMBED_ADMIN_SECRET。可在框内用 Hub 自己的管理密码解锁。",
+	"Automatic sign-in failed: HUB_TRUSTED_EMBED_ADMIN_SECRET differs between HaloWebUI and the Hub.": "自动登录失败：HaloWebUI 与 Hub 两端的 HUB_TRUSTED_EMBED_ADMIN_SECRET 不一致。",
+	"Automatic sign-in is unavailable. Unlock the Hub with its own password.": "暂时无法自动登录，可在框内用 Hub 自己的管理密码解锁。"
 }

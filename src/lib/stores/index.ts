@@ -413,6 +413,8 @@ type Config = {
 	default_models: string;
 	default_prompt_suggestions: PromptSuggestion[];
 	hermes_agent_model_ids?: string[];
+	/** Bookmark Hub embed (/hub). Only sent to admins; `url` is null when HUB_URL is empty. */
+	hub_embed?: { enabled: boolean; url: string | null };
 	features: {
 		auth: boolean;
 		auth_trusted_header: boolean;

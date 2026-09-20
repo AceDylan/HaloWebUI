@@ -1783,5 +1783,15 @@
 	"Archive {{count}} chat(s) with no activity for {{days}} days? They can be restored from Archived Chats.": "將封存 {{count}} 個超過 {{days}} 天沒有活動的對話，可在「封存的對話紀錄」中恢復。是否繼續？",
 	"Archived {{count}} chat(s).": "已封存 {{count}} 個對話。",
 	"Restored {{count}} auto-archived chat(s).": "已恢復 {{count}} 個自動封存的對話。",
-	"Toggle with Ctrl+Shift+S": "快速鍵 Ctrl+Shift+S"
+	"Toggle with Ctrl+Shift+S": "快速鍵 Ctrl+Shift+S",
+	"Bookmarks": "書籤",
+	"Open Bookmark Hub": "開啟書籤管理",
+	"Reload": "重新載入",
+	"Open in new tab": "在新分頁開啟",
+	"Could not open the Bookmark Hub.": "無法開啟書籤管理。",
+	"The Bookmark Hub does not allow this site to embed it. Add {{origin}} to HUB_FRAME_ANCESTORS on the Hub.": "書籤管理沒有允許本站嵌入：請在 Hub 端的 HUB_FRAME_ANCESTORS 加上 {{origin}}。",
+	"Automatic sign-in is off: HUB_TRUSTED_EMBED_ADMIN_SECRET is not set on HaloWebUI. Unlock the Hub with its own password.": "自動登入未開啟：HaloWebUI 端沒有設定 HUB_TRUSTED_EMBED_ADMIN_SECRET。可在框內用 Hub 自己的管理密碼解鎖。",
+	"Automatic sign-in is off: HUB_TRUSTED_EMBED_ADMIN_SECRET is not set on the Hub. Unlock the Hub with its own password.": "自動登入未開啟：Hub 端沒有設定 HUB_TRUSTED_EMBED_ADMIN_SECRET。可在框內用 Hub 自己的管理密碼解鎖。",
+	"Automatic sign-in failed: HUB_TRUSTED_EMBED_ADMIN_SECRET differs between HaloWebUI and the Hub.": "自動登入失敗：HaloWebUI 與 Hub 兩端的 HUB_TRUSTED_EMBED_ADMIN_SECRET 不一致。",
+	"Automatic sign-in is unavailable. Unlock the Hub with its own password.": "暫時無法自動登入，可在框內用 Hub 自己的管理密碼解鎖。"
 }

@@ -46,7 +46,7 @@ import time
 import urllib.error
 import urllib.request
 
-SCRIPT_VERSION = "2026-09-15.3"
+SCRIPT_VERSION = "2026-09-17.1"
 CONFIG_FILE = "/root/.hermes/reclaude-runner.env"
 REQUIRED_CONFIG_KEYS = ("HALOWEBUI_NOTIFY_URL", "HALOWEBUI_NOTIFY_TOKEN")
 STATE_DB = "/root/.hermes/state.db"
@@ -385,7 +385,8 @@ def build_prompt(
     answer_command="reclaude-run.sh answer",
 ):
     result_path = os.path.join(run_dir, "result.md")
-    session_label = "Claude 会话" if agent == "reclaude" else "codex thread"
+    session_label = {"reclaude": "Claude 会话", "codex": "codex thread",
+                     "agy": "AGY conversation"}.get(agent, "agent session")
     lines = [
         f"[后台任务完成通知] {agent} 运行 {run_id} 已结束，状态：{status}，{session_label}：{session_id}。",
         f"请用 read_file 读取 {result_path}，把其中内容如实转述给我（保留文件、提交、验证结果和风险，不要缩写成一句话）。",

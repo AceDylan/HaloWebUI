@@ -60,6 +60,7 @@ from open_webui.utils.encryption import decrypt_token
 from open_webui.utils.auth import (
     create_api_key,
     create_token,
+    decode_token,
     get_admin_user,
     get_verified_user,
     get_current_user,
@@ -67,6 +68,7 @@ from open_webui.utils.auth import (
 )
 from open_webui.utils.webhook import post_webhook
 from open_webui.utils.access_control import get_permissions
+from open_webui.utils.hub_embed import SESSION_EXPIRY_CLAIM, presented_session_expiry
 
 from typing import Optional, List
 
@@ -94,6 +96,19 @@ class SessionUserResponse(Token, UserResponse):
     permissions: Optional[dict] = None
 
 
+def _presented_token_payload(request: Request) -> Optional[dict]:
+    """Decoded JWT this request authenticated with (header first, then cookie),
+    mirroring get_current_user. None for API keys and anything undecodable."""
+    authorization = request.headers.get("Authorization", "")
+    scheme, _, credentials = authorization.partition(" ")
+    token = credentials.strip() if scheme.lower() == "bearer" else ""
+    if not token:
+        token = request.cookies.get("token", "")
+    if not token or token.startswith("sk-"):
+        return None
+    return decode_token(token)
+
+
 @router.get("/", response_model=SessionUserResponse)
 async def get_session_user(
     request: Request, response: Response, user=Depends(get_current_user)
@@ -103,8 +118,21 @@ async def get_session_user(
     if expires_delta:
         expires_at = int(time.time()) + int(expires_delta.total_seconds())
 
+    token_data = {"id": user.id}
+
+    # This endpoint re-issues the token on every page load. A session that was
+    # opened with a Bookmark Hub ticket is deliberately short: renew it with
+    # the expiry it was issued with, not with a fresh full-length one.
+    hub_expires_at = presented_session_expiry(_presented_token_payload(request))
+    if hub_expires_at:
+        expires_at = hub_expires_at
+        expires_delta = datetime.timedelta(
+            seconds=max(1, hub_expires_at - int(time.time()))
+        )
+        token_data[SESSION_EXPIRY_CLAIM] = hub_expires_at
+
     token = create_token(
-        data={"id": user.id},
+        data=token_data,
         expires_delta=expires_delta,
     )
 

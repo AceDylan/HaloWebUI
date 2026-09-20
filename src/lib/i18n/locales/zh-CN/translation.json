@@ -3030,6 +3030,7 @@
 	"Template updated": "模板已更新",
 	"Failed to update template": "模板更新失败",
 	"A template needs a name or a prompt": "模板至少要有名称或提示词",
+	"Automatic sign-in from the Bookmark Hub did not go through. Please sign in here.": "未能通过 Bookmark Hub 自动登录，请在此处登录。",
 	"Negative prompt (optional)": "负面提示词（可选）",
 	"Generation settings": "生成参数",
 	"To change them, load the template into the workbench and use Update template.": "要修改这些参数，请先把模板加载到工作台，调整后点“更新模板”。",

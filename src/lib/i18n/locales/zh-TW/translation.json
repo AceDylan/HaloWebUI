@@ -1782,6 +1782,7 @@
 	"Archive inactive chats?": "封存不活躍對話？",
 	"Archive {{count}} chat(s) with no activity for {{days}} days? They can be restored from Archived Chats.": "將封存 {{count}} 個超過 {{days}} 天沒有活動的對話，可在「封存的對話紀錄」中恢復。是否繼續？",
 	"Archived {{count}} chat(s).": "已封存 {{count}} 個對話。",
+	"Automatic sign-in from the Bookmark Hub did not go through. Please sign in here.": "未能透過 Bookmark Hub 自動登入，請在此處登入。",
 	"Restored {{count}} auto-archived chat(s).": "已恢復 {{count}} 個自動封存的對話。",
 	"Toggle with Ctrl+Shift+S": "快速鍵 Ctrl+Shift+S"
 }

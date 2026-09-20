@@ -7,12 +7,14 @@
 
 	import { getBackendConfig } from '$lib/apis';
 	import { ldapUserSignIn, getSessionUser, userSignIn, userSignUp } from '$lib/apis/auths';
+	import { exchangeHubTicket } from '$lib/apis/hub';
 
 	import { WEBUI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
 	import { WEBUI_NAME, config, user, socket } from '$lib/stores';
 
 	import { generateInitialsImage, canvasPixelTest } from '$lib/utils';
 	import { localizeCommonError } from '$lib/utils/common-errors';
+	import { takeHubTicket } from '$lib/utils/hub-embed';
 
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import OnBoarding from '$lib/components/OnBoarding.svelte';
@@ -117,6 +119,22 @@
 		await setSessionUser(sessionUser);
 	};
 
+	// Framed by the Bookmark Hub: its unlocked administrator arrives with a
+	// single-use ticket in the address fragment (see $lib/utils/hub-embed).
+	/** @param {string} ticket */
+	const signInWithHubTicket = async (ticket) => {
+		const sessionUser = await exchangeHubTicket(ticket).catch((error) => {
+			// Expired, already used, or the two deployments disagree on the secret.
+			// Nothing is broken for the person in front of the screen: the form below still works.
+			console.warn('Bookmark Hub ticket refused:', error?.reason ?? error?.error ?? error);
+			toast.info(
+				$i18n.t('Automatic sign-in from the Bookmark Hub did not go through. Please sign in here.')
+			);
+			return null;
+		});
+		await setSessionUser(sessionUser);
+	};
+
 	let onboarding = false;
 
 	async function setLogoImage() {
@@ -143,11 +161,18 @@
 	}
 
 	onMount(async () => {
+		// Single-use and short-lived: take it out of the address before anything else.
+		const hubTicket = takeHubTicket();
+
 		if ($user !== undefined) {
 			const redirectPath = querystringValue('redirect') || '/';
 			goto(redirectPath);
 		}
 		await checkOauthCallback();
+		// Already signed in (a password session is longer than the one a ticket opens): leave it alone.
+		if (hubTicket && $user === undefined) {
+			await signInWithHubTicket(hubTicket);
+		}
 
 		loaded = true;
 		setLogoImage();

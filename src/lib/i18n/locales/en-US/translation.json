@@ -2343,6 +2343,7 @@
 	"Template updated": "Template updated",
 	"Failed to update template": "Failed to update template",
 	"A template needs a name or a prompt": "A template needs a name or a prompt",
+	"Automatic sign-in from the Bookmark Hub did not go through. Please sign in here.": "",
 	"Negative prompt (optional)": "Negative prompt (optional)",
 	"Generation settings": "Generation settings",
 	"To change them, load the template into the workbench and use Update template.": "To change them, load the template into the workbench and use Update template.",

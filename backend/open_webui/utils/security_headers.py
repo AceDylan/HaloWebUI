@@ -29,6 +29,9 @@ def set_security_headers() -> Dict[str, str]:
     - x-permitted-cross-domain-policies
     - content-security-policy
 
+    Independently of those, ``allow_hub_framing`` adds the ``frame-ancestors``
+    allow-list for the Bookmark Hub.
+
     Each environment variable is associated with a specific setter function
     that constructs the header. If the environment variable is set, the
     corresponding header is added to the options dictionary.
@@ -56,7 +59,40 @@ def set_security_headers() -> Dict[str, str]:
             if header:
                 options.update(header)
 
+    allow_hub_framing(options)
+
     return options
+
+
+def allow_hub_framing(options: Dict[str, str]) -> None:
+    """Let the Bookmark Hub, and only it, put HaloWebUI in an iframe.
+
+    With HUB_URL configured (see ``open_webui.utils.hub_embed``) every response
+    gets ``frame-ancestors 'self' <hub origin>``: one exact origin, never a
+    wildcard. With HUB_URL empty nothing is added and framing stays whatever
+    the operator configured.
+
+    An operator who wrote their own ``frame-ancestors`` into
+    CONTENT_SECURITY_POLICY keeps it untouched. X-Frame-Options cannot express
+    "same origin plus one site" (ALLOW-FROM is long gone) and would veto the
+    Hub, so it is dropped in favour of the CSP directive, which every browser
+    that still honours X-Frame-Options also understands.
+    """
+    from open_webui.utils.hub_embed import frame_ancestors
+
+    origins = frame_ancestors()
+    if not origins:
+        return
+
+    policy = options.get("Content-Security-Policy", "").strip()
+    if "frame-ancestors" in policy.lower():
+        return
+
+    directive = "frame-ancestors 'self' " + " ".join(origins)
+    options["Content-Security-Policy"] = (
+        f"{policy.rstrip(';').rstrip()}; {directive}" if policy else directive
+    )
+    options.pop("X-Frame-Options", None)
 
 
 # Set HTTP Strict Transport Security(HSTS) response header

@@ -88,6 +88,7 @@ from open_webui.routers import (
     scim,
     skills,
     hermes,
+    hub,
     terminal,
     tools,
     users,
@@ -666,6 +667,11 @@ async def lifespan(app: FastAPI):
     from open_webui.haloclaw.lifecycle import startup_haloclaw, shutdown_haloclaw
 
     await startup_haloclaw(app)
+
+    # Bookmark Hub embed: say once whether the Hub may frame us and sign in.
+    from open_webui.utils.hub_embed import log_startup_state
+
+    log_startup_state()
 
     yield
 
@@ -1462,6 +1468,7 @@ app.include_router(skills.router, prefix="/api/v1/skills", tags=["skills"])
 app.include_router(analytics.router, prefix="/api/v1/analytics", tags=["analytics"])
 app.include_router(terminal.router, prefix="/api/v1/terminal", tags=["terminal"])
 app.include_router(hermes.router, prefix="/api/v1/hermes", tags=["hermes"])
+app.include_router(hub.router, prefix="/api/v1/hub", tags=["hub"])
 app.include_router(utils.router, prefix="/api/v1/utils", tags=["utils"])
 
 app.include_router(haloclaw_router, prefix="/api/v1/haloclaw", tags=["haloclaw"])

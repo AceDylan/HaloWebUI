@@ -2356,15 +2356,5 @@
 	"Move to top": "Move to top",
 	"Prompt order saved.": "Prompt order saved.",
 	"Prompt order changed elsewhere. Please try again.": "Prompt order changed elsewhere. Please try again.",
-	"Failed to save prompt order. Please try again.": "Failed to save prompt order. Please try again.",
-	"Bookmarks": "Bookmarks",
-	"Open Bookmark Hub": "Open Bookmark Hub",
-	"Reload": "Reload",
-	"Open in new tab": "Open in new tab",
-	"Could not open the Bookmark Hub.": "Could not open the Bookmark Hub.",
-	"The Bookmark Hub does not allow this site to embed it. Add {{origin}} to HUB_FRAME_ANCESTORS on the Hub.": "The Bookmark Hub does not allow this site to embed it. Add {{origin}} to HUB_FRAME_ANCESTORS on the Hub.",
-	"Automatic sign-in is off: HUB_TRUSTED_EMBED_ADMIN_SECRET is not set on HaloWebUI. Unlock the Hub with its own password.": "Automatic sign-in is off: HUB_TRUSTED_EMBED_ADMIN_SECRET is not set on HaloWebUI. Unlock the Hub with its own password.",
-	"Automatic sign-in is off: HUB_TRUSTED_EMBED_ADMIN_SECRET is not set on the Hub. Unlock the Hub with its own password.": "Automatic sign-in is off: HUB_TRUSTED_EMBED_ADMIN_SECRET is not set on the Hub. Unlock the Hub with its own password.",
-	"Automatic sign-in failed: HUB_TRUSTED_EMBED_ADMIN_SECRET differs between HaloWebUI and the Hub.": "Automatic sign-in failed: HUB_TRUSTED_EMBED_ADMIN_SECRET differs between HaloWebUI and the Hub.",
-	"Automatic sign-in is unavailable. Unlock the Hub with its own password.": "Automatic sign-in is unavailable. Unlock the Hub with its own password."
+	"Failed to save prompt order. Please try again.": "Failed to save prompt order. Please try again."
 }

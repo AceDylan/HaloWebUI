@@ -4,9 +4,7 @@
 
 	import { goto } from '$app/navigation';
 	import ArchiveBox from '$lib/components/icons/ArchiveBox.svelte';
-	import Bookmark from '$lib/components/icons/Bookmark.svelte';
-	import { activeUserIds, USAGE_POOL, config, mobile, showSidebar, user } from '$lib/stores';
-	import { openHubInNewTab } from '$lib/apis/hub';
+	import { activeUserIds, USAGE_POOL, mobile, showSidebar, user } from '$lib/stores';
 	import { fade } from 'svelte/transition';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import { userSignOut } from '$lib/apis/auths';
@@ -134,22 +132,6 @@
 				</div>
 				<div class=" self-center truncate">{$i18n.t('Settings')}</div>
 			</button>
-
-			{#if $user?.role === 'admin' && $config?.hub_embed?.enabled !== false}
-				<!-- 兜底入口：/hub 的内嵌页打不开时（被浏览器拦截等），在新标签页里直接打开书签管理，同样自动登录 -->
-				<button
-					class="flex rounded-md py-2 px-3 w-full hover:bg-gray-50 dark:hover:bg-gray-800 transition"
-					on:click={() => {
-						show = false;
-						openHubInNewTab(localStorage.token, $config?.hub_embed?.url);
-					}}
-				>
-					<div class=" self-center mr-3">
-						<Bookmark className="size-5" strokeWidth="1.5" />
-					</div>
-					<div class=" self-center truncate">{$i18n.t('Open Bookmark Hub')}</div>
-				</button>
-			{/if}
 
 			{#if $activeUserIds?.length > 0}
 				<hr class=" border-gray-100 dark:border-gray-850 my-1 p-0" />

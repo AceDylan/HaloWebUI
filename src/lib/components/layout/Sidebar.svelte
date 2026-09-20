@@ -58,7 +58,6 @@
 	import Tooltip from '../common/Tooltip.svelte';
 	import Folders from './Sidebar/Folders.svelte';
 	import ActiveHermesRuns from './Sidebar/ActiveHermesRuns.svelte';
-	import Bookmark from '../icons/Bookmark.svelte';
 	import { getChannels, createNewChannel } from '$lib/apis/channels';
 	import ChannelModal from './Sidebar/ChannelModal.svelte';
 	import ChannelItem from './Sidebar/ChannelItem.svelte';
@@ -213,8 +212,6 @@
 	let assistantScenes = [];
 	let folders: Record<string, SidebarFolder> = {};
 	let showHermesSessions = false;
-	// Bookmark Hub (/hub) signs the viewer into the Hub as its administrator: admins only.
-	$: showHubEntry = $user?.role === 'admin' && $config?.hub_embed?.enabled !== false;
 	let folderOptions: SidebarFolderOption[] = [];
 	let newFolderId: string | null = null;
 
@@ -948,29 +945,6 @@
 			</div>
 		{/if}
 
-		{#if showHubEntry && expanded}
-			<!-- 书签：内嵌 Bookmark Hub（/hub）。仅管理员——嵌入页会以 Hub 管理员身份自动登录 -->
-			<div class="flex text-gray-700 dark:text-gray-200 px-2">
-				<a
-					class={actionItemClass}
-					href="/hub"
-					on:click={() => {
-						selectedChatId = null;
-						chatId.set('');
-						selectedAssistantScene.set(null);
-
-						if ($mobile) {
-							showSidebar.set(false);
-						}
-					}}
-					draggable="false"
-				>
-					<Bookmark className="size-5" strokeWidth="2" />
-					<span class="text-sm font-medium whitespace-nowrap">{$i18n.t('Bookmarks')}</span>
-				</a>
-			</div>
-		{/if}
-
 		{#if !expanded}
 			<div class="mt-3 px-2 flex flex-col items-center gap-2 text-gray-700 dark:text-gray-200">
 				<Tooltip content={$i18n.t('New Chat')}>
@@ -1069,24 +1043,6 @@
 						<CommandLine className="size-5" strokeWidth="2" />
 					</button>
 				</Tooltip>
-
-				{#if showHubEntry}
-					<Tooltip content={$i18n.t('Bookmarks')}>
-						<a
-							class={iconButtonClass}
-							href="/hub"
-							on:click={() => {
-								selectedChatId = null;
-								chatId.set('');
-								selectedAssistantScene.set(null);
-							}}
-							draggable="false"
-							aria-label={$i18n.t('Bookmarks')}
-						>
-							<Bookmark className="size-5" strokeWidth="2" />
-						</a>
-					</Tooltip>
-				{/if}
 
 				<ActiveHermesRuns compact buttonClass={iconButtonClass} />
 			</div>

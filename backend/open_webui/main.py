@@ -88,6 +88,7 @@ from open_webui.routers import (
     scim,
     skills,
     hermes,
+    hub,
     terminal,
     tools,
     users,
@@ -666,6 +667,12 @@ async def lifespan(app: FastAPI):
     from open_webui.haloclaw.lifecycle import startup_haloclaw, shutdown_haloclaw
 
     await startup_haloclaw(app)
+
+    # Bookmark Hub embed: check in the background that the Hub accepts our
+    # shared secret, so the /hub page can explain a misconfiguration.
+    from open_webui.utils.hub_embed import startup_handshake
+
+    asyncio.create_task(startup_handshake())
 
     yield
 
@@ -1462,6 +1469,7 @@ app.include_router(skills.router, prefix="/api/v1/skills", tags=["skills"])
 app.include_router(analytics.router, prefix="/api/v1/analytics", tags=["analytics"])
 app.include_router(terminal.router, prefix="/api/v1/terminal", tags=["terminal"])
 app.include_router(hermes.router, prefix="/api/v1/hermes", tags=["hermes"])
+app.include_router(hub.router, prefix="/api/v1/hub", tags=["hub"])
 app.include_router(utils.router, prefix="/api/v1/utils", tags=["utils"])
 
 app.include_router(haloclaw_router, prefix="/api/v1/haloclaw", tags=["haloclaw"])
@@ -2236,6 +2244,13 @@ def _get_config_user(request: Request):
     return None
 
 
+def _hub_embed_config() -> dict:
+    from open_webui.utils.hub_embed import hub_url
+
+    url = hub_url()
+    return {"enabled": bool(url), "url": url}
+
+
 @app.get("/api/config")
 async def get_app_config(request: Request):
     user = _get_config_user(request)
@@ -2367,6 +2382,9 @@ async def get_app_config(request: Request):
                 **(
                     {
                         "active_entries": app.state.USER_COUNT,
+                        # Bookmark Hub embed (/hub): admins only, because the
+                        # embed signs them into the Hub as its administrator.
+                        "hub_embed": _hub_embed_config(),
                     }
                     if user.role == "admin"
                     else {}

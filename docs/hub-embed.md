@@ -17,6 +17,13 @@ the bookmarks and opens the chat. Two things live on this side:
 The reverse direction (HaloWebUI framing the Hub, HaloWebUI admin → Hub) was
 implemented once and reverted; nothing of it remains.
 
+3. **A question typed in the Hub arrives here as a new chat.** The Hub's
+   "send to AI chat" buttons open
+   `/auth?redirect=%2F%3Fq%3D<prompt>#hub_ticket=<ticket>`: the sign-in page takes the
+   ticket, then follows `?redirect=` to `/?q=<prompt>`, where `Chat.svelte` fills the
+   composer and submits. Nothing had to change here for that — `?q=` has always been
+   read — but `?redirect=` now goes through `safeRedirectPath()` first.
+
 ## Configuration
 
 | Variable | Default | Meaning |
@@ -29,6 +36,20 @@ implemented once and reverted; nothing of it remains.
 The live deployment's compose file passes environment through an `environment:` block
 and a `.env` next to it: add `HUB_URL` and `HUB_TRUSTED_EMBED_ADMIN_SECRET` there (the
 `.env` should be mode 0600), then `docker compose up -d`.
+
+## Where `?redirect=` may point
+
+`?redirect=` is attacker-reachable: anybody can send a link to our own sign-in page
+with any value in it. `src/lib/utils/safe-redirect.ts` accepts only a path on this
+site and rebuilds it from a parsed URL; everything else silently becomes `/`.
+
+Refused: absolute URLs, protocol-relative `//host`, `javascript:` and `data:`,
+backslashes (a browser reads `/\evil.example` as `//evil.example`), control
+characters a browser would strip back out (`/\thttps://evil.example`), and anything
+over 2048 characters. `..` segments are resolved away rather than passed on.
+
+Allowed, because the Hub depends on it: a path with a query string and a fragment,
+with its percent-encoding preserved byte for byte — `/?q=%E4%BD%A0%E5%A5%BD`.
 
 ## Ticket format
 
@@ -71,4 +92,6 @@ curl -s -o /dev/null -w '%{http_code}\n' -X POST -H 'Content-Type: application/j
 ```
 
 Backend unit tests: `backend/open_webui/test/unit/test_hub_embed.py`.
-Frontend unit tests: `src/lib/utils/hub-embed.test.ts` (`npx vitest run src/lib/utils/hub-embed.test.ts`).
+Frontend unit tests: `src/lib/utils/hub-embed.test.ts` and
+`src/lib/utils/safe-redirect.test.ts`
+(`npx vitest run src/lib/utils/hub-embed.test.ts src/lib/utils/safe-redirect.test.ts`).

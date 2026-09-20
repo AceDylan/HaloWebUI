@@ -15,6 +15,7 @@
 	import { generateInitialsImage, canvasPixelTest } from '$lib/utils';
 	import { localizeCommonError } from '$lib/utils/common-errors';
 	import { takeHubTicket } from '$lib/utils/hub-embed';
+	import { safeRedirectPath } from '$lib/utils/safe-redirect';
 
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import OnBoarding from '$lib/components/OnBoarding.svelte';
@@ -40,6 +41,10 @@
 		return urlParams.get(key);
 	};
 
+	// ?redirect= comes from whoever built the link, so only a path on this very
+	// site is ever followed (see $lib/utils/safe-redirect).
+	const redirectTarget = () => safeRedirectPath(querystringValue('redirect'));
+
 	const setSessionUser = async (sessionUser) => {
 		if (sessionUser) {
 			console.log(sessionUser);
@@ -52,8 +57,7 @@
 			await user.set(sessionUser);
 			await config.set(await getBackendConfig(sessionUser.token ?? localStorage.token));
 
-			const redirectPath = querystringValue('redirect') || '/';
-			goto(redirectPath);
+			goto(redirectTarget());
 		}
 	};
 
@@ -165,8 +169,7 @@
 		const hubTicket = takeHubTicket();
 
 		if ($user !== undefined) {
-			const redirectPath = querystringValue('redirect') || '/';
-			goto(redirectPath);
+			goto(redirectTarget());
 		}
 		await checkOauthCallback();
 		// Already signed in (a password session is longer than the one a ticket opens): leave it alone.

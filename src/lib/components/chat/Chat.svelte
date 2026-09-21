@@ -148,6 +148,7 @@
 	import { isHermesRunSteerable, type HermesApprovalRequest } from '$lib/utils/hermes';
 	import HermesApprovalDialog from './HermesApprovalDialog.svelte';
 	import { ensureModels } from '$lib/services/models';
+	import { takeLandingPrompt } from '$lib/utils/chat-landing';
 
 	import Banner from '../common/Banner.svelte';
 	import MessageInput from '$lib/components/chat/MessageInput.svelte';
@@ -526,6 +527,10 @@
 	let eventCallback = null;
 
 	let chatIdUnsubscriber: Unsubscriber | undefined;
+	// initNewChat 自己清空 $chatId 的那一下置位,让 onChatIdCleared 跳过这次通知。不然「当前开着
+	// 一个对话」时点一次「新对话」会把 initNewChat 跑两遍:第二遍还是默认的 fresh=false,把第一遍
+	// fresh=true 刚清掉的会话状态又捡回来;地址上若还留着 ?q=,同一个问题就发两遍、建两个对话。
+	let clearingChatIdForNewChat = false;
 	let selectedAssistantSceneUnsubscriber: Unsubscriber | undefined;
 
 	let selectedModels = [''];
@@ -2992,6 +2997,16 @@
 		chatInput?.focus();
 	};
 
+	// $chatId 被清空(侧栏删掉/归档当前对话、进入助手场景、Channel 页……)时开一个新对话。
+	// 订阅时会立刻拿到当前值,所以首次挂载在 / 上也是从这里进入 initNewChat。
+	const onChatIdCleared = async (value: string) => {
+		if (value || clearingChatIdForNewChat) {
+			return;
+		}
+		await tick(); // Wait for DOM updates
+		await initNewChat();
+	};
+
 	onMount(async () => {
 		window.addEventListener('message', onMessageHandler);
 		window.addEventListener('chat:set-input', onSetInputHandler as EventListener);
@@ -3007,12 +3022,7 @@
 		});
 
 		if (!chatIdProp && !$chatId) {
-			chatIdUnsubscriber = chatId.subscribe(async (value) => {
-				if (!value) {
-					await tick(); // Wait for DOM updates
-					await initNewChat();
-				}
-			});
+			chatIdUnsubscriber = chatId.subscribe(onChatIdCleared);
 		} else if (chatIdProp) {
 			if ($temporaryChatEnabled) {
 				await goto('/');
@@ -3397,10 +3407,17 @@
 		resetReasoningSelectionTracking();
 		webSearchSelectionSyncReady = false;
 
-		if ($page.url.searchParams.get('models')) {
-			selectedModels = $page.url.searchParams.get('models')?.split(',');
-		} else if ($page.url.searchParams.get('model')) {
-			const urlModels = $page.url.searchParams.get('model')?.split(',');
+		// 地址栏参数一律从 window.location 读,不从 $page.url 读。$page.url 只在真实导航时更新;
+		// initChatHandler 里那句浅路由 replaceState('/c/<id>') 不会动它(SvelteKit 2 的 replaceState
+		// 只改 history 和 page.state)。于是从 /?q=…&models=… 落地建出第一个对话之后,这个组件实例
+		// 里的 $page.url 一直停在落地地址上:之后每次 initNewChat 都会再读到同一个 q、同一个 models,
+		// 下面那句 pathname.includes('/c/') 也永远为假,地址栏就留在旧对话的 /c/<id> 上。
+		const landing = new URL(window.location.href);
+
+		if (landing.searchParams.get('models')) {
+			selectedModels = landing.searchParams.get('models')?.split(',');
+		} else if (landing.searchParams.get('model')) {
+			const urlModels = landing.searchParams.get('model')?.split(',');
 
 			if (urlModels.length === 1) {
 				const m = getModelById(urlModels[0]);
@@ -3487,9 +3504,10 @@
 		await showOverview.set(false);
 		await showArtifacts.set(false);
 
-		if ($page.url.pathname.includes('/c/')) {
-			// 用 SvelteKit 的 replaceState 走浅路由,同步 $page.url,
-			// 避免地址栏与路由状态不同步导致点击侧边栏首个对话不跳转。
+		if (landing.pathname.includes('/c/')) {
+			// 用 SvelteKit 的 replaceState 走浅路由:它维护 history 里的路由索引,
+			// 避免地址栏与路由状态不同步导致点击侧边栏首个对话不跳转。($page.url 不会跟着变,
+			// 所以地址栏参数都从上面的 landing 读。)
 			replaceState(
 				getTemporaryChatNavigationPath({
 					currentUrl: new URL(window.location.href),
@@ -3505,7 +3523,12 @@
 
 		resetAutoScrollLock();
 
-		await chatId.set('');
+		clearingChatIdForNewChat = true;
+		try {
+			await chatId.set('');
+		} finally {
+			clearingChatIdForNewChat = false;
+		}
 		await chatTitle.set('');
 
 		history = {
@@ -3563,29 +3586,29 @@
 			}
 		}
 
-		if ($page.url.searchParams.get('youtube')) {
+		if (landing.searchParams.get('youtube')) {
 			uploadYoutubeTranscription(
-				`https://www.youtube.com/watch?v=${$page.url.searchParams.get('youtube')}`
+				`https://www.youtube.com/watch?v=${landing.searchParams.get('youtube')}`
 			);
 		}
-		if ($page.url.searchParams.get('web-search') === 'true') {
+		if (landing.searchParams.get('web-search') === 'true') {
 			webSearchMode = 'halo';
 			webSearchModeSource = 'user';
 		}
 
-		if ($page.url.searchParams.get('image-generation') === 'true') {
+		if (landing.searchParams.get('image-generation') === 'true') {
 			imageGenerationEnabled = true;
 		}
 
-		if ($page.url.searchParams.get('tools')) {
-			selectedToolIds = $page.url.searchParams
+		if (landing.searchParams.get('tools')) {
+			selectedToolIds = landing.searchParams
 				.get('tools')
 				?.split(',')
 				.map((id) => id.trim())
 				.filter((id) => id);
 			toolSelectionTouched = true;
-		} else if ($page.url.searchParams.get('tool-ids')) {
-			selectedToolIds = $page.url.searchParams
+		} else if (landing.searchParams.get('tool-ids')) {
+			selectedToolIds = landing.searchParams
 				.get('tool-ids')
 				?.split(',')
 				.map((id) => id.trim())
@@ -3593,15 +3616,15 @@
 			toolSelectionTouched = true;
 		}
 
-		if ($page.url.searchParams.get('skills')) {
-			selectedSkillIds = $page.url.searchParams
+		if (landing.searchParams.get('skills')) {
+			selectedSkillIds = landing.searchParams
 				.get('skills')
 				?.split(',')
 				.map((id) => id.trim())
 				.filter((id) => id);
 			skillSelectionTouched = true;
-		} else if ($page.url.searchParams.get('skill-ids')) {
-			selectedSkillIds = $page.url.searchParams
+		} else if (landing.searchParams.get('skill-ids')) {
+			selectedSkillIds = landing.searchParams
 				.get('skill-ids')
 				?.split(',')
 				.map((id) => id.trim())
@@ -3609,24 +3632,28 @@
 			skillSelectionTouched = true;
 		}
 
-		if ($page.url.searchParams.get('call') === 'true') {
+		if (landing.searchParams.get('call') === 'true') {
 			showCallOverlay.set(true);
 			showControls.set(true);
 		}
 
-		// ?q= 是「落地就自动发」。发之前必须等模型列表到位:submitPrompt 会把 selectedModels
-		// 拿去和 $models 对照,列表还空着时连用户自己的默认模型也会被判成 stale,于是弹
-		// 「模型连接不可用,请重新选择模型」、把选择清空、问题一个字都发不出去。
-		// 手打的提示词撞不上这一幕(人打字的工夫模型早回来了),从地址带着问题落地的必撞——
-		// 页面刚开,下面那句 ensureModels 发出的请求还在路上。
-		// 没有 ?q= 时这里一步都不多走,行为与从前一致。
-		const urlPrompt = $page.url.searchParams.get('q');
-		if (urlPrompt) {
+		// ?q= 是「落地就自动发」,而且只发这一次:取到问题的同时就把 q 从地址栏摘掉。
+		// 这里必须现读 window.location、不能用上面的快照,更不能用 $page.url(见上):线上曾出现
+		// 从书签中心带问题落地、建出对话之后,再点一次「新对话」就把同一个问题又发两遍、
+		// 70 毫秒内两条 POST /api/v1/chats/new——就是 $page.url 上那个永远摘不掉的 q。
+		// 发之前必须等模型列表到位:submitPrompt 会把 selectedModels 拿去和 $models 对照,
+		// 列表还空着时连用户自己的默认模型也会被判成 stale,于是弹「模型连接不可用,请重新选择
+		// 模型」、把选择清空、问题一个字都发不出去。手打的提示词撞不上这一幕(人打字的工夫模型
+		// 早回来了),从地址带着问题落地的必撞——页面刚开,onMount 那句 ensureModels 发出的请求
+		// 还在路上。没有 ?q= 时这里一步都不多走,行为与从前一致。
+		const landingPrompt = takeLandingPrompt(window.location.href);
+		if (landingPrompt) {
+			replaceState(landingPrompt.path, $page.state);
 			if ($models.length === 0) {
 				await ensureModels(localStorage.token, { reason: 'chat-url-prompt' }).catch(() => {});
 				await tick(); // modelsMap / selectedModels 的响应式更新排在下一拍
 			}
-			prompt = urlPrompt;
+			prompt = landingPrompt.prompt;
 			await tick();
 			submitPrompt(prompt);
 		}
@@ -3652,7 +3679,7 @@
 			temporaryChatState = syncTemporaryChatState(fallbackSettings);
 		}
 
-		if (fresh && $page.url.searchParams.get('web-search') !== 'true') {
+		if (fresh && landing.searchParams.get('web-search') !== 'true') {
 			webSearchMode = getPreferredDefaultWebSearchMode();
 			webSearchModeSource = 'default';
 		}
@@ -3694,8 +3721,8 @@
 		initializeReasoningSelectionTracking();
 		syncImageGenerationForDedicatedModel({ force: true });
 
-		if (fresh && $page.url.searchParams.get('fresh-chat') === 'true') {
-			const url = new URL($page.url);
+		if (fresh && landing.searchParams.get('fresh-chat') === 'true') {
+			const url = new URL(window.location.href);
 			url.searchParams.delete('fresh-chat');
 			// 浅路由同步,理由同上
 			replaceState(`${url.pathname}${url.search}${url.hash}`, $page.state);

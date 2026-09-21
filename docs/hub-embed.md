@@ -19,10 +19,17 @@ implemented once and reverted; nothing of it remains.
 
 3. **A question typed in the Hub arrives here as a new chat.** The Hub's
    "send to AI chat" buttons open
-   `/auth?redirect=%2F%3Fq%3D<prompt>#hub_ticket=<ticket>`: the sign-in page takes the
-   ticket, then follows `?redirect=` to `/?q=<prompt>`, where `Chat.svelte` fills the
-   composer and submits. Nothing had to change here for that — `?q=` has always been
-   read — but `?redirect=` now goes through `safeRedirectPath()` first.
+   `/auth?redirect=%2F%3Fq%3D<prompt>%26models%3D<model>#hub_ticket=<ticket>`: the
+   sign-in page takes the ticket, then follows `?redirect=` to `/?q=<prompt>&models=<model>`,
+   where `Chat.svelte` waits for the model list, fills the composer and submits.
+   `?redirect=` goes through `safeRedirectPath()` first.
+
+   `?q=` is one-shot: `initNewChat()` takes it out of the address the moment it reads it
+   (`src/lib/utils/chat-landing.ts`), and reads every address parameter from
+   `window.location`, not from SvelteKit's `$page.url` — the first message switches the
+   address to `/c/<id>` with shallow routing, which leaves `$page.url` on the landing URL
+   for the life of the page. Before that, every later "New chat" in the same frame sent
+   the Hub's question again and created a second chat.
 
 ## Configuration
 

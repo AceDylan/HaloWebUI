@@ -3614,13 +3614,21 @@
 			showControls.set(true);
 		}
 
-		if ($page.url.searchParams.get('q')) {
-			prompt = $page.url.searchParams.get('q') ?? '';
-
-			if (prompt) {
-				await tick();
-				submitPrompt(prompt);
+		// ?q= 是「落地就自动发」。发之前必须等模型列表到位:submitPrompt 会把 selectedModels
+		// 拿去和 $models 对照,列表还空着时连用户自己的默认模型也会被判成 stale,于是弹
+		// 「模型连接不可用,请重新选择模型」、把选择清空、问题一个字都发不出去。
+		// 手打的提示词撞不上这一幕(人打字的工夫模型早回来了),从地址带着问题落地的必撞——
+		// 页面刚开,下面那句 ensureModels 发出的请求还在路上。
+		// 没有 ?q= 时这里一步都不多走,行为与从前一致。
+		const urlPrompt = $page.url.searchParams.get('q');
+		if (urlPrompt) {
+			if ($models.length === 0) {
+				await ensureModels(localStorage.token, { reason: 'chat-url-prompt' }).catch(() => {});
+				await tick(); // modelsMap / selectedModels 的响应式更新排在下一拍
 			}
+			prompt = urlPrompt;
+			await tick();
+			submitPrompt(prompt);
 		}
 
 		// Only validate model IDs when models are actually loaded

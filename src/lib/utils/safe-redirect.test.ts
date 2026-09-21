@@ -15,6 +15,21 @@ describe('safeRedirectPath', () => {
 		expect(safeRedirectPath(`/?q=${prompt}`)).toBe(`/?q=${prompt}`);
 	});
 
+	it('keeps the model the Bookmark Hub pins its question to', () => {
+		// The Hub sends `/?q=<prompt>&models=<id>`: a question asked from there is a
+		// one-shot question, so it names a chat model instead of landing on whatever
+		// default this account has. Both values arrive percent-encoded as one piece each.
+		const prompt = encodeURIComponent('你能做什么');
+		const model = encodeURIComponent('modelref::openai::personal::id:13c104eb::gpt-chat');
+		expect(safeRedirectPath(`/?q=${prompt}&models=${model}`)).toBe(`/?q=${prompt}&models=${model}`);
+
+		const landing = new URL(safeRedirectPath(`/?q=${prompt}&models=${model}`), 'http://x');
+		expect(landing.searchParams.get('q')).toBe('你能做什么');
+		expect(landing.searchParams.get('models')).toBe(
+			'modelref::openai::personal::id:13c104eb::gpt-chat'
+		);
+	});
+
 	it('refuses to leave this site', () => {
 		for (const hostile of [
 			'https://evil.example/phish',

@@ -217,7 +217,9 @@
 	});
 </script>
 
-<div class="m-auto w-full max-w-6xl px-4 @2xl:px-20 translate-y-2 py-16 text-center">
+<div
+	class="m-auto w-full max-w-6xl px-4 @2xl:px-20 translate-y-2 py-16 [@media(max-height:40rem)]:py-6 text-center"
+>
 	{#if $temporaryChatEnabled}
 		<Tooltip
 			content={$i18n.t('This chat won’t appear in history and your messages will not be saved.')}
@@ -332,7 +334,13 @@
 				</div>
 			{/if}
 
-			<div class="mx-auto w-full max-w-4xl pt-2 pb-3 text-base font-normal {atSelectedModel ? 'mt-2' : ''}">
+			<!-- sticky: on a frame too short for the greeting plus a long prompt, the greeting
+			     scrolls under the input instead of pushing the send button off screen. -->
+			<div
+				class="sticky bottom-0 z-10 mx-auto w-full max-w-4xl pt-2 pb-3 text-base font-normal {atSelectedModel
+					? 'mt-2'
+					: ''}"
+			>
 				<MessageInput
 					{history}
 					{selectedModels}

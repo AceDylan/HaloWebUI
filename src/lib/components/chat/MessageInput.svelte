@@ -1325,10 +1325,13 @@
 									</div>
 								{/if}
 
+								<!-- The box stops growing at 40% of the viewport (the frame's own height when
+								     embedded in the Bookmark Hub) and scrolls inside, so the toolbar and send
+								     button below it stay on screen however long the prompt gets. -->
 								<div class="px-2.5">
 									{#if $settings?.richTextInput ?? true}
 										<div
-											class="scrollbar-hidden text-left bg-transparent dark:text-gray-100 outline-hidden w-full pt-3 px-1 resize-none h-fit max-h-80 overflow-auto"
+											class="scrollbar-hidden text-left bg-transparent dark:text-gray-100 outline-hidden w-full pt-3 px-1 resize-none h-fit max-h-[min(20rem,40dvh)] overflow-auto"
 											id="chat-input-container"
 										>
 											<RichTextInput
@@ -1496,7 +1499,7 @@
 											id="chat-input"
 											dir="auto"
 											bind:this={chatInputElement}
-											class="scrollbar-hidden bg-transparent dark:text-gray-100 outline-hidden w-full pt-3 px-1 resize-none"
+											class="scrollbar-hidden bg-transparent dark:text-gray-100 outline-hidden w-full pt-3 px-1 resize-none max-h-[min(20rem,40dvh)]"
 											placeholder={effectivePlaceholder}
 											bind:value={prompt}
 											on:compositionstart={() => (isComposing = true)}

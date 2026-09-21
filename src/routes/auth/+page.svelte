@@ -125,7 +125,14 @@
 
 	// Framed by the Bookmark Hub: its unlocked administrator arrives with a
 	// single-use ticket in the address fragment (see $lib/utils/hub-embed).
-	/** @param {string} ticket */
+	//
+	// hubSigningIn holds from the moment the ticket is traded until the app
+	// replaces this page. The trade is quick, but the app's code still has to
+	// arrive after it — seconds over a slow link — and showing the sign-in form
+	// meanwhile looks exactly like a failed sign-in, which invites a reload.
+	let hubSigningIn = false;
+
+	/** @param {string} ticket @returns {Promise<boolean>} signed in */
 	const signInWithHubTicket = async (ticket) => {
 		const sessionUser = await exchangeHubTicket(ticket).catch((error) => {
 			// Expired, already used, or the two deployments disagree on the secret.
@@ -137,6 +144,7 @@
 			return null;
 		});
 		await setSessionUser(sessionUser);
+		return !!sessionUser;
 	};
 
 	let onboarding = false;
@@ -173,12 +181,15 @@
 		}
 		await checkOauthCallback();
 		// Already signed in (a password session is longer than the one a ticket opens): leave it alone.
-		if (hubTicket && $user === undefined) {
-			await signInWithHubTicket(hubTicket);
-		}
+		hubSigningIn = !!hubTicket && $user === undefined;
 
 		loaded = true;
 		setLogoImage();
+
+		if (hubSigningIn) {
+			// Refused: the form below takes over, with a note saying why.
+			hubSigningIn = await signInWithHubTicket(hubTicket);
+		}
 
 		if (($config?.features.auth_trusted_header ?? false) || $config?.features.auth === false) {
 			await signInHandler();
@@ -227,7 +238,7 @@
 			class="fixed bg-transparent min-h-screen w-full flex justify-center font-primary z-50 text-black dark:text-white"
 		>
 			<div class="w-full sm:max-w-md px-10 min-h-screen flex flex-col text-center">
-				{#if ($config?.features.auth_trusted_header ?? false) || $config?.features.auth === false}
+				{#if hubSigningIn || ($config?.features.auth_trusted_header ?? false) || $config?.features.auth === false}
 					<div class=" my-auto pb-10 w-full">
 						<div
 							class="flex items-center justify-center gap-3 text-xl sm:text-2xl text-center font-semibold dark:text-gray-200"

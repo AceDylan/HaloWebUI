@@ -672,11 +672,16 @@
 
 				const currentUrl = `${window.location.pathname}${window.location.search}`;
 				const encodedUrl = encodeURIComponent(currentUrl);
+				const onAuthPage = $page.url.pathname === '/auth';
 
 				if (localStorage.token) {
 					// Get Session User Info
 					const sessionUser = await getSessionUser(localStorage.token).catch((error) => {
-						toast.error(formatError(error));
+						// The sign-in page is already where an expired session leads; saying so
+						// there is noise (and, framed by the Hub, reads as if its ticket failed).
+						if (!onAuthPage) {
+							toast.error(formatError(error));
+						}
 						return null;
 					});
 
@@ -702,12 +707,18 @@
 					} else {
 						// Redirect Invalid Session User to /auth Page
 						localStorage.removeItem('token');
-						await goto(`/auth?redirect=${encodedUrl}`);
+						// Same rule as without a token: already on /auth, stay. Navigating
+						// drops the URL fragment, and with it an OAuth token or the Bookmark
+						// Hub's single-use ticket — which is how a stale token left behind by
+						// an expired Hub session made the first framed sign-in fail.
+						if (!onAuthPage) {
+							await goto(`/auth?redirect=${encodedUrl}`);
+						}
 					}
 				} else {
 					// Don't redirect if we're already on the auth page
 					// Needed because we pass in tokens from OAuth logins via URL fragments
-					if ($page.url.pathname !== '/auth') {
+					if (!onAuthPage) {
 						await goto(`/auth?redirect=${encodedUrl}`);
 					}
 				}

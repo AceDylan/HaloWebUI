@@ -1463,13 +1463,24 @@
 			canUseChatWebSearch()
 		);
 
+	// Picking a dedicated image model switches image generation on; switching
+	// from it to any other selection switches it off again, so the image chip,
+	// its settings and the image prompt templates leave with the model (the
+	// options stay for when an image model is picked again). Opening a chat or a
+	// new chat is not a switch: the image toggle it restores is left alone.
 	let lastAutoImageGenerationSelectionKey = '';
 	const syncImageGenerationForDedicatedModel = ({ force = false } = {}) => {
 		const dedicatedImageModel = getSingleSelectedDedicatedImageModel();
 		const dedicatedImageSelectionKey = dedicatedImageModel ? getModelRequestId(dedicatedImageModel) : '';
 
 		if (!dedicatedImageSelectionKey) {
+			const leftDedicatedImageModel = lastAutoImageGenerationSelectionKey !== '';
 			lastAutoImageGenerationSelectionKey = '';
+			if (leftDedicatedImageModel && composerStateSyncReady && imageGenerationEnabled) {
+				imageGenerationEnabled = false;
+				persistChatComposerState();
+				return true;
+			}
 			return false;
 		}
 

@@ -2,8 +2,18 @@ import { describe, expect, it } from 'vitest';
 
 import {
 	getModelBuiltinWebSearchPreference,
+	getModelWebSearchPreference,
 	resolveModelBuiltinWebSearchState
 } from './model-web-search-preference';
+
+const GPT_CHAT = {
+	id: 'modelref::openai::personal::id:13c104eb::gpt-chat',
+	model_id: 'gpt-chat'
+};
+const HERMES_AGENT = {
+	id: 'modelref::openai::personal::id:ee5e02db::hermes-agent',
+	model_id: 'hermes-agent'
+};
 
 describe('model builtin web search preference', () => {
 	it('reads explicit preferences from model meta and info meta', () => {
@@ -51,5 +61,46 @@ describe('model builtin web search preference', () => {
 				() => 'auto'
 			)
 		).toEqual({ mode: 'auto', source: 'model' });
+	});
+
+	it('keeps hermes agent models off and other models on the default mode', () => {
+		expect(resolveModelBuiltinWebSearchState([HERMES_AGENT], 'halo', () => 'auto')).toEqual({
+			mode: 'off',
+			source: 'model'
+		});
+		expect(resolveModelBuiltinWebSearchState([GPT_CHAT], 'halo', () => 'auto')).toEqual({
+			mode: 'halo',
+			source: 'default'
+		});
+		expect(
+			resolveModelBuiltinWebSearchState([GPT_CHAT, HERMES_AGENT], 'halo', () => 'auto')
+		).toEqual({ mode: 'off', source: 'model' });
+	});
+
+	it('matches hermes against the configured id list', () => {
+		const myAgent = {
+			id: 'modelref::openai::personal::id:ee5e02db::my-agent',
+			model_id: 'my-agent'
+		};
+		expect(
+			resolveModelBuiltinWebSearchState([myAgent], 'halo', () => 'auto', ['my-agent'])
+		).toEqual({ mode: 'off', source: 'model' });
+		expect(
+			resolveModelBuiltinWebSearchState([HERMES_AGENT], 'halo', () => 'auto', ['my-agent'])
+		).toEqual({ mode: 'halo', source: 'default' });
+	});
+
+	it('lets a hermes model turn web search on through its own settings', () => {
+		const hermesWithSearch = {
+			...HERMES_AGENT,
+			info: { meta: { builtin_tool_config: { ENABLE_WEB_SEARCH_TOOL: true } } }
+		};
+		expect(getModelWebSearchPreference(hermesWithSearch)).toBe(true);
+		expect(getModelWebSearchPreference(HERMES_AGENT)).toBe(false);
+		expect(getModelWebSearchPreference(GPT_CHAT)).toBe(null);
+		expect(resolveModelBuiltinWebSearchState([hermesWithSearch], 'halo', () => 'auto')).toEqual({
+			mode: 'auto',
+			source: 'model'
+		});
 	});
 });

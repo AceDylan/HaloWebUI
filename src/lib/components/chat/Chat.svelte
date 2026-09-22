@@ -104,7 +104,10 @@
 	} from '$lib/utils/web-search-mode';
 	import { getFunctionPipeRootId } from '$lib/utils/image-generation';
 	import { isDedicatedImageGenerationChatModel } from '$lib/utils/chat-image-mode';
-	import { resolveModelBuiltinWebSearchState } from '$lib/utils/model-web-search-preference';
+	import {
+		getModelWebSearchPreference,
+		resolveModelBuiltinWebSearchState
+	} from '$lib/utils/model-web-search-preference';
 	import { applyUserSettingsSnapshot } from '$lib/utils/user-settings';
 	import {
 		buildWebSearchModeOptions,
@@ -1041,7 +1044,8 @@
 		return resolveModelBuiltinWebSearchState(
 			resolvedModels,
 			getPreferredDefaultWebSearchMode(),
-			pickModelDefaultWebSearchMode
+			pickModelDefaultWebSearchMode,
+			$config?.hermes_agent_model_ids
 		);
 	};
 
@@ -1363,9 +1367,7 @@
 
 		const requestMessages = await buildFloatingRequestMessages(messages);
 		const requestSkillIds = collectRequestSkillIds(messages);
-		const requestedWebSearchMode = canUseChatWebSearch()
-			? normalizeWebSearchMode(webSearchMode, 'off')
-			: 'off';
+		const requestedWebSearchMode = getRequestWebSearchMode(model);
 		const requestFiles = structuredClone(chatFiles);
 		const imageGenerationActive = canUseChatImageGeneration()
 			? isImageGenerationActiveForRequest()
@@ -1441,6 +1443,15 @@
 	const canUseChatWebSearch = () =>
 		isChatWebSearchFeatureEnabled() &&
 		($user?.role === 'admin' || $user?.permissions?.features?.web_search);
+
+	// A model that turns web search off (its own ENABLE_WEB_SEARCH_TOOL, or any
+	// hermes agent model) never gets it, even while the composer still shows
+	// the mode a previous selection left behind.
+	const getRequestWebSearchMode = (model: Model): WebSearchMode =>
+		canUseChatWebSearch() &&
+		getModelWebSearchPreference(model, $config?.hermes_agent_model_ids) !== false
+			? normalizeWebSearchMode(webSearchMode, 'off')
+			: 'off';
 
 	const getPreferredDefaultWebSearchMode = (
 		selectedModelsForMode: Model[] = getResolvedSelectedWebSearchModels()
@@ -5627,9 +5638,7 @@
 		}
 
 		const requestSkillIds = collectRequestSkillIds(messages);
-		const requestedWebSearchMode = canUseChatWebSearch()
-			? normalizeWebSearchMode(webSearchMode, 'off')
-			: 'off';
+		const requestedWebSearchMode = getRequestWebSearchMode(model);
 		const imageGenerationActive = canUseChatImageGeneration()
 			? isImageGenerationActiveForRequest()
 			: false;

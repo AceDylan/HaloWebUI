@@ -36,6 +36,34 @@ export const isHermesAgentModelId = (
 	return dot > 0 && ids.includes(upstream.slice(dot + 1));
 };
 
+type ModelIdentity = {
+	id?: unknown;
+	selection_id?: unknown;
+	original_id?: unknown;
+	model_id?: unknown;
+	model_ref?: Record<string, unknown> | null;
+};
+
+/**
+ * True when a resolved model entry is served by hermes. `original_id` /
+ * `model_id` / `model_ref.model_id` carry the upstream id even when `id` is
+ * connection-prefixed (same order as the backend's `_model_upstream_id`).
+ */
+export const isHermesAgentModel = (
+	model: ModelIdentity | null | undefined,
+	hermesModelIds: readonly string[] | null | undefined = DEFAULT_HERMES_AGENT_MODEL_IDS
+): boolean => {
+	if (!model) return false;
+	const upstream = [
+		model.original_id,
+		model.model_id,
+		model.model_ref?.model_id,
+		model.id,
+		model.selection_id
+	].find((value) => typeof value === 'string' && value.trim() !== '');
+	return isHermesAgentModelId(upstream, hermesModelIds);
+};
+
 /**
  * State the backend attaches to an assistant message once its hermes run
  * ends (`chat:completion` → `hermes_run`). `active: false` arrives before

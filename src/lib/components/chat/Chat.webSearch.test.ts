@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
-import { parse, preprocess } from 'svelte/compiler';
+import { compile, parse, preprocess } from 'svelte/compiler';
 import { vitePreprocess } from '@sveltejs/vite-plugin-svelte';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 
 import {
 	getModelWebSearchPreference,
@@ -17,11 +17,12 @@ import { normalizeWebSearchMode } from '$lib/utils/web-search-mode';
 // current selection, and the mode a request is sent with) against a fake component
 // state. Same technique as Chat.initNewChat.test.ts.
 
+let filename: string;
 let code: string;
 let sourceOf: (name: string) => string;
 
 beforeAll(async () => {
-	const filename = process.env.HALO_CHAT_COMPONENT_SOURCE ?? 'src/lib/components/chat/Chat.svelte';
+	filename = process.env.HALO_CHAT_COMPONENT_SOURCE ?? 'src/lib/components/chat/Chat.svelte';
 	({ code } = await preprocess(readFileSync(filename, 'utf8'), vitePreprocess(), { filename }));
 	const ast = parse(code);
 	const declarations = ast.instance!.content.body.flatMap((node: any) => node.declarations ?? []);
@@ -67,6 +68,10 @@ const chat = (selectedModelIds: string[], overrides: Record<string, any> = {}) =
 		get: () => ({ t: (key: string) => key }),
 		selectedModelIds,
 		webSearchMode: 'off',
+		webSearchModeSource: 'default',
+		webSearchSelectionSyncReady: true,
+		webSearchStateBeforeModelOff: null,
+		persistChatComposerState: vi.fn(),
 		getModelById: (id: string) => MODELS.find((model) => model.id === id),
 		buildWebSearchModeOptions,
 		resolveConfiguredDefaultWebSearchMode,
@@ -83,7 +88,8 @@ const chat = (selectedModelIds: string[], overrides: Record<string, any> = {}) =
 		'canUseChatWebSearch',
 		'getPreferredDefaultWebSearchMode',
 		'getSelectionDrivenWebSearchState',
-		'getRequestWebSearchMode'
+		'getRequestWebSearchMode',
+		'syncWebSearchModeWithSelection'
 	]) {
 		context[name] = new Function('context', `with (context) { return ${sourceOf(name)}; }`)(
 			context
@@ -146,5 +152,90 @@ describe('the web search mode a request carries', () => {
 				$user: { role: 'user', permissions: { features: { web_search: false } } }
 			}).getRequestWebSearchMode(GPT_CHAT)
 		).toBe('off');
+	});
+});
+
+describe('switching models', () => {
+	const composer = (state: Record<string, any>) => ({
+		mode: state.webSearchMode,
+		source: state.webSearchModeSource
+	});
+	const select = (state: Record<string, any>, ids: string[]) => {
+		state.selectedModelIds = ids;
+		state.syncWebSearchModeWithSelection();
+		return composer(state);
+	};
+
+	// The bug 757c3a4 shipped with: the block that applies these states named none of
+	// the selection, so Svelte never re-ran it when the user picked another model.
+	it('re-runs the composer sync when the selection, the model list or the config changes', () => {
+		const { js } = compile(code, { filename, generate: 'dom' });
+		const update = js.code.slice(js.code.indexOf('$$self.$$.update = () =>'));
+		const call = update.search(/^\s*syncWebSearchModeWithSelection\(\);$/m);
+		expect(call).toBeGreaterThan(-1);
+		const guard = update
+			.slice(update.lastIndexOf('if ($$self.$$.dirty', call), call)
+			.split('\n')[0];
+		const dependencies = [...guard.matchAll(/\/\*([^*]*)\*\//g)].flatMap(([, names]) =>
+			names.split(',').map((name) => name.trim())
+		);
+		expect(dependencies).toEqual(
+			expect.arrayContaining([
+				'selectedModelIds',
+				'modelsMap',
+				'$config',
+				'$user',
+				'webSearchSelectionSyncReady',
+				'webSearchMode',
+				'webSearchModeSource'
+			])
+		);
+	});
+
+	it('turns HaloWebUI search on when leaving hermes-agent for another model', () => {
+		const state = chat([HERMES_AGENT.id], { webSearchMode: 'halo' });
+		expect(select(state, [HERMES_AGENT.id])).toEqual({ mode: 'off', source: 'model' });
+		expect(select(state, [GPT_CHAT.id])).toEqual({ mode: 'halo', source: 'default' });
+		expect(select(state, [HERMES_AGENT.id])).toEqual({ mode: 'off', source: 'model' });
+		expect(state.persistChatComposerState).toHaveBeenCalledTimes(3);
+	});
+
+	it('keeps what the user picked across other models', () => {
+		const state = chat([GPT_CHAT.id], { webSearchMode: 'off', webSearchModeSource: 'user' });
+		expect(select(state, [GPT_CHAT.id])).toEqual({ mode: 'off', source: 'user' });
+		expect(select(state, [])).toEqual({ mode: 'off', source: 'user' });
+		expect(state.persistChatComposerState).not.toHaveBeenCalled();
+	});
+
+	it('brings the user pick back after hermes-agent switched it off', () => {
+		for (const mode of ['off', 'native']) {
+			const state = chat([GPT_CHAT.id], { webSearchMode: mode, webSearchModeSource: 'user' });
+			expect(select(state, [HERMES_AGENT.id])).toEqual({ mode: 'off', source: 'model' });
+			expect(select(state, [GPT_CHAT.id, HERMES_AGENT.id])).toEqual({
+				mode: 'off',
+				source: 'model'
+			});
+			expect(select(state, [GPT_CHAT.id])).toEqual({ mode, source: 'user' });
+			expect(state.webSearchStateBeforeModelOff).toBe(null);
+		}
+	});
+
+	it('does not let the user turn it on for hermes-agent', () => {
+		const state = chat([HERMES_AGENT.id], { webSearchMode: 'halo', webSearchModeSource: 'user' });
+		expect(select(state, [HERMES_AGENT.id])).toEqual({ mode: 'off', source: 'model' });
+	});
+
+	it('waits for the chat to be ready and for the selected models to load', () => {
+		const loading = chat([HERMES_AGENT.id], {
+			webSearchMode: 'halo',
+			webSearchSelectionSyncReady: false
+		});
+		expect(select(loading, [HERMES_AGENT.id])).toEqual({ mode: 'halo', source: 'default' });
+
+		const modelsPending = chat([HERMES_AGENT.id], {
+			webSearchMode: 'halo',
+			getModelById: () => undefined
+		});
+		expect(select(modelsPending, [HERMES_AGENT.id])).toEqual({ mode: 'halo', source: 'default' });
 	});
 });

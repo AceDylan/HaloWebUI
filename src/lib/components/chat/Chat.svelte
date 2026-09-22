@@ -2364,21 +2364,57 @@
 		}
 	}
 
-	$: {
-		const selectionDrivenState = getSelectionDrivenWebSearchState();
-		const shouldApplyModelOff =
-			selectionDrivenState?.source === 'model' && selectionDrivenState.mode === 'off';
+	// What the user had picked before a selected model switched web search off
+	// (its own ENABLE_WEB_SEARCH_TOOL, or a hermes agent model): deselecting that
+	// model brings the choice back instead of the default.
+	let webSearchStateBeforeModelOff: { mode: WebSearchMode; source: WebSearchModeSource } | null =
+		null;
+
+	// Puts the composer on the mode the selected models call for, unless the user
+	// picked one; a model that turns web search off wins over the user's pick.
+	const syncWebSearchModeWithSelection = () => {
+		const selectionDrivenState = webSearchSelectionSyncReady
+			? getSelectionDrivenWebSearchState()
+			: null;
+		if (!selectionDrivenState) {
+			return;
+		}
+
+		let nextState = webSearchModeSource === 'user' ? null : selectionDrivenState;
+		if (selectionDrivenState.source === 'model' && selectionDrivenState.mode === 'off') {
+			if (webSearchModeSource === 'user') {
+				webSearchStateBeforeModelOff = { mode: webSearchMode, source: 'user' };
+			}
+			nextState = selectionDrivenState;
+		} else if (webSearchStateBeforeModelOff) {
+			nextState = webSearchStateBeforeModelOff;
+			webSearchStateBeforeModelOff = null;
+		}
+
 		if (
-			webSearchSelectionSyncReady &&
-			selectionDrivenState &&
-			(webSearchModeSource !== 'user' || shouldApplyModelOff) &&
-			(webSearchMode !== selectionDrivenState.mode ||
-				webSearchModeSource !== selectionDrivenState.source)
+			nextState &&
+			(webSearchMode !== nextState.mode || webSearchModeSource !== nextState.source)
 		) {
-			webSearchMode = selectionDrivenState.mode;
-			webSearchModeSource = selectionDrivenState.source;
+			webSearchMode = nextState.mode;
+			webSearchModeSource = nextState.source;
 			persistChatComposerState();
 		}
+	};
+
+	$: {
+		// Svelte re-runs a block only for what the block itself names, not for what
+		// the functions it calls read: without the selection and the model list here,
+		// switching models (say from hermes-agent to another one) left the composer
+		// on the mode of the previous model.
+		selectedModelIds;
+		modelsMap;
+		$config;
+		$user;
+		webSearchSelectionSyncReady;
+		webSearchMode;
+		webSearchModeSource;
+
+		syncWebSearchModeWithSelection();
 	}
 
 	// 加载某个已存在对话的统一入口。响应式块(chatIdProp 值变化)与 afterNavigate
@@ -2394,6 +2430,7 @@
 			composerStateSyncReady = false;
 			resetReasoningSelectionTracking();
 			webSearchSelectionSyncReady = false;
+			webSearchStateBeforeModelOff = null;
 
 			prompt = '';
 			files = [];
@@ -3417,6 +3454,7 @@
 		composerStateSyncReady = false;
 		resetReasoningSelectionTracking();
 		webSearchSelectionSyncReady = false;
+		webSearchStateBeforeModelOff = null;
 
 		// 地址栏参数一律从 window.location 读,不从 $page.url 读。$page.url 只在真实导航时更新;
 		// initChatHandler 里那句浅路由 replaceState('/c/<id>') 不会动它(SvelteKit 2 的 replaceState

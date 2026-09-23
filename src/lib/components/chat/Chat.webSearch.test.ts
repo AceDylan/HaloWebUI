@@ -51,15 +51,15 @@ const HERMES_AGENT = {
 };
 const MODELS = [GPT_CHAT, HERMES_AGENT];
 
-// The production web search settings: HaloWebUI search (tavily) and native search on,
-// new chats defaulting to HaloWebUI search.
+// The production web search settings: HaloWebUI search and native search on,
+// new chats defaulting to Smart Web Search.
 const chat = (selectedModelIds: string[], overrides: Record<string, any> = {}) => {
 	const context: Record<string, any> = {
 		$config: {
 			features: {
 				enable_halo_web_search: true,
 				enable_native_web_search: true,
-				default_web_search_mode: 'halo'
+				default_web_search_mode: 'auto'
 			},
 			hermes_agent_model_ids: ['hermes-agent']
 		},
@@ -99,9 +99,9 @@ const chat = (selectedModelIds: string[], overrides: Record<string, any> = {}) =
 };
 
 describe('web search defaults per model', () => {
-	it('starts other models on HaloWebUI search', () => {
+	it('starts other models on Smart Web Search', () => {
 		expect(chat([GPT_CHAT.id]).getSelectionDrivenWebSearchState()).toEqual({
-			mode: 'halo',
+			mode: 'auto',
 			source: 'default'
 		});
 	});
@@ -123,12 +123,12 @@ describe('web search defaults per model', () => {
 				features: {
 					enable_halo_web_search: true,
 					enable_native_web_search: true,
-					default_web_search_mode: 'halo'
+					default_web_search_mode: 'auto'
 				},
 				hermes_agent_model_ids: ['another-agent']
 			}
 		}).getSelectionDrivenWebSearchState();
-		expect(state).toEqual({ mode: 'halo', source: 'default' });
+		expect(state).toEqual({ mode: 'auto', source: 'default' });
 	});
 });
 
@@ -192,10 +192,10 @@ describe('switching models', () => {
 		);
 	});
 
-	it('turns HaloWebUI search on when leaving hermes-agent for another model', () => {
-		const state = chat([HERMES_AGENT.id], { webSearchMode: 'halo' });
+	it('turns Smart Web Search on when leaving hermes-agent for another model', () => {
+		const state = chat([HERMES_AGENT.id], { webSearchMode: 'auto' });
 		expect(select(state, [HERMES_AGENT.id])).toEqual({ mode: 'off', source: 'model' });
-		expect(select(state, [GPT_CHAT.id])).toEqual({ mode: 'halo', source: 'default' });
+		expect(select(state, [GPT_CHAT.id])).toEqual({ mode: 'auto', source: 'default' });
 		expect(select(state, [HERMES_AGENT.id])).toEqual({ mode: 'off', source: 'model' });
 		expect(state.persistChatComposerState).toHaveBeenCalledTimes(3);
 	});

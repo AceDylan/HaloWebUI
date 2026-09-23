@@ -3089,17 +3089,19 @@ ENABLE_NATIVE_WEB_SEARCH = PersistentConfig(
     os.getenv("ENABLE_NATIVE_WEB_SEARCH", "False").lower() == "true",
 )
 
-# New chats search with HaloWebUI by default; hermes agent models stay off
-# (src/lib/utils/model-web-search-preference.ts). Saved under a new key:
-# installs that saved the web search settings while "off" was the default
-# carry rag.web.search.default_mode = "off", which would keep overriding it.
+# Keep explicit non-Halo choices from the previous default. Its saved "halo"
+# was the old default, so use a new key to let existing installs start on auto.
+_previous_default_web_search_mode = get_config_value("rag.web.search.default_chat_mode")
+_default_web_search_mode = os.getenv("DEFAULT_WEB_SEARCH_MODE", "auto").lower()
+if _default_web_search_mode not in {"off", "halo", "native", "auto"}:
+    _default_web_search_mode = "auto"
+if _previous_default_web_search_mode in {"off", "native", "auto"}:
+    _default_web_search_mode = _previous_default_web_search_mode
+
 DEFAULT_WEB_SEARCH_MODE = PersistentConfig(
     "DEFAULT_WEB_SEARCH_MODE",
-    "rag.web.search.default_chat_mode",
-    os.getenv("DEFAULT_WEB_SEARCH_MODE", "halo").lower()
-    if os.getenv("DEFAULT_WEB_SEARCH_MODE", "halo").lower()
-    in {"off", "halo", "native", "auto"}
-    else "halo",
+    "rag.web.search.default_chat_mode_v2",
+    _default_web_search_mode,
 )
 
 WEB_SEARCH_ENGINE = PersistentConfig(

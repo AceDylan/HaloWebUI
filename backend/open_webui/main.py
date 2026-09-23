@@ -2309,6 +2309,7 @@ async def get_app_config(request: Request):
                         or app.state.config.ENABLE_NATIVE_WEB_SEARCH
                     ),
                     "enable_halo_web_search": app.state.config.ENABLE_WEB_SEARCH,
+                    "web_search_engine": app.state.config.WEB_SEARCH_ENGINE,
                     "enable_native_web_search": app.state.config.ENABLE_NATIVE_WEB_SEARCH,
                     "default_web_search_mode": app.state.config.DEFAULT_WEB_SEARCH_MODE,
                     "enable_code_execution": app.state.config.ENABLE_CODE_EXECUTION,

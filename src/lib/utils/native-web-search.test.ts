@@ -66,6 +66,19 @@ describe('native web search mode options', () => {
 		expect(getSmartWebSearchRouteLabel(t, config, models)).toBe('Smart · Model Native');
 	});
 
+	it('labels Hermes Auto mode as Halo when Smart Search is selected', () => {
+		const config = {
+			hermes_agent_model_ids: ['hermes-agent'],
+			features: {
+				enable_halo_web_search: true,
+				enable_native_web_search: true,
+				web_search_engine: 'smart_search'
+			}
+		};
+		const models = [{ id: 'hermes-agent', owned_by: 'openai' }];
+		expect(getSmartWebSearchRouteLabel(t, config, models)).toBe('Smart · HaloWebUI');
+	});
+
 	it('keeps smart web search on HaloWebUI for unverified compatible models', () => {
 		const config = {
 			features: {

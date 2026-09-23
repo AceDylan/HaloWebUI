@@ -71,6 +71,7 @@ from open_webui.retrieval.web.exa import search_exa
 from open_webui.retrieval.web.perplexity import search_perplexity
 from open_webui.retrieval.web.grok import search_grok
 from open_webui.retrieval.web.sougou import search_sougou
+from open_webui.retrieval.web.smart_search import search_smart_search
 
 from open_webui.retrieval.utils import (
     query_collection,
@@ -2572,6 +2573,12 @@ def search_web(request: Request, engine: str, query: str) -> list[SearchResult]:
             request.app.state.config.WEB_SEARCH_RESULT_COUNT,
             request.app.state.config.WEB_SEARCH_DOMAIN_FILTER_LIST,
             backend=request.app.state.config.DDGS_BACKEND,
+        )
+    elif engine == "smart_search":
+        return search_smart_search(
+            query,
+            request.app.state.config.WEB_SEARCH_RESULT_COUNT,
+            request.app.state.config.WEB_SEARCH_DOMAIN_FILTER_LIST,
         )
     elif engine == "tavily":
         if request.app.state.config.TAVILY_API_KEY:

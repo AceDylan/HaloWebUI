@@ -1045,7 +1045,8 @@
 			resolvedModels,
 			getPreferredDefaultWebSearchMode(),
 			pickModelDefaultWebSearchMode,
-			$config?.hermes_agent_model_ids
+			$config?.hermes_agent_model_ids,
+			$config?.features?.web_search_engine
 		);
 	};
 
@@ -1444,12 +1445,15 @@
 		isChatWebSearchFeatureEnabled() &&
 		($user?.role === 'admin' || $user?.permissions?.features?.web_search);
 
-	// A model that turns web search off (its own ENABLE_WEB_SEARCH_TOOL, or any
-	// hermes agent model) never gets it, even while the composer still shows
+	// A model that turns web search off never gets it, even while the composer still shows
 	// the mode a previous selection left behind.
 	const getRequestWebSearchMode = (model: Model): WebSearchMode =>
 		canUseChatWebSearch() &&
-		getModelWebSearchPreference(model, $config?.hermes_agent_model_ids) !== false
+		getModelWebSearchPreference(
+			model,
+			$config?.hermes_agent_model_ids,
+			$config?.features?.web_search_engine
+		) !== false
 			? normalizeWebSearchMode(webSearchMode, 'off')
 			: 'off';
 

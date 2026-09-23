@@ -88,6 +88,7 @@
 		'searchapi',
 		'serpapi',
 		'duckduckgo',
+		'smart_search',
 		'tavily',
 		'jina',
 		'bing',
@@ -110,6 +111,7 @@
 		searchapi: 'SearchApi',
 		serpapi: 'SerpApi',
 		duckduckgo: 'DuckDuckGo',
+		smart_search: 'Smart Search (CLI)',
 		tavily: 'Tavily',
 		jina: 'Jina',
 		bing: 'Bing',
@@ -1318,7 +1320,11 @@
 										</div>
 									</div>
 
-									{#if webConfig.WEB_SEARCH_ENGINE === 'searxng'}
+									{#if webConfig.WEB_SEARCH_ENGINE === 'smart_search'}
+										<div class="text-xs text-gray-500 dark:text-gray-400">
+											{tr('需在后端运行环境安装并配置 smart-search CLI。', 'Install and configure smart-search CLI in the backend environment.')}
+										</div>
+									{:else if webConfig.WEB_SEARCH_ENGINE === 'searxng'}
 										<div class="space-y-1.5">
 											<div class="text-xs font-medium text-gray-500 dark:text-gray-400">{$i18n.t('SearXNG Query URL')}</div>
 											<input

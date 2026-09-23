@@ -159,6 +159,27 @@ def test_auto_strategy_prefers_supported_native_web_search(monkeypatch):
     assert strategy["allow_halo_retry"] is True
 
 
+def test_auto_strategy_routes_hermes_to_smart_search(monkeypatch):
+    monkeypatch.setattr(
+        middleware_module,
+        "_resolve_native_web_search_support",
+        lambda *args, **kwargs: {"supported": True, "can_attempt": True},
+    )
+    request = _fake_request(halo_enabled=True, native_enabled=True)
+    request.app.state.config.WEB_SEARCH_ENGINE = "smart_search"
+
+    strategy = _resolve_web_search_strategy(
+        request,
+        SimpleNamespace(),
+        {"owned_by": "openai", "id": "hermes-agent"},
+        "hermes-agent",
+        {"web_search": True, "web_search_mode": "auto"},
+    )
+
+    assert strategy["effective_mode"] == WEB_SEARCH_MODE_HALO
+    assert strategy["allow_halo_retry"] is False
+
+
 def test_auto_strategy_keeps_unverified_models_on_halo(monkeypatch):
     monkeypatch.setattr(
         middleware_module,

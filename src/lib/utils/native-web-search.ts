@@ -1,15 +1,18 @@
 import type { Model, NativeWebSearchSupport } from '$lib/stores';
 import { normalizeWebSearchMode, type WebSearchMode } from '$lib/utils/web-search-mode';
 import nativeWebSearchRules from '$lib/data/native-web-search-rules.json';
+import { isHermesAgentModel } from '$lib/utils/hermes';
 
 type Translator = (key: string, options?: Record<string, unknown>) => string;
 
 type WebSearchConfigLike = {
+	hermes_agent_model_ids?: string[];
 	features?: {
 		enable_web_search?: boolean;
 		enable_halo_web_search?: boolean;
 		enable_native_web_search?: boolean;
 		default_web_search_mode?: string;
+		web_search_engine?: string;
 	};
 };
 
@@ -368,6 +371,14 @@ export function getSmartWebSearchRouteLabel(
 	);
 	const nativeEnabled = Boolean(config?.features?.enable_native_web_search);
 	const summary = summarizeNativeWebSearchSupport(models);
+	if (
+		haloEnabled &&
+		config?.features?.web_search_engine === 'smart_search' &&
+		models.length > 0 &&
+		models.every((model) => isHermesAgentModel(model, config?.hermes_agent_model_ids))
+	) {
+		return t('Smart · HaloWebUI');
+	}
 
 	if (nativeEnabled && summary.anySupported) {
 		return t('Smart · Model Native');

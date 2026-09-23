@@ -2283,6 +2283,12 @@ def _resolve_web_search_strategy(
     )
 
     native_support = _resolve_native_web_search_support(request, user, model, model_id)
+    from open_webui.utils.hermes_agent import is_hermes_agent_model
+
+    hermes_smart_search = (
+        getattr(request.app.state.config, "WEB_SEARCH_ENGINE", "") == "smart_search"
+        and (is_hermes_agent_model(model) or is_hermes_agent_model(model_id))
+    )
     effective_mode = WEB_SEARCH_MODE_OFF
     notification = None
 
@@ -2300,7 +2306,9 @@ def _resolve_web_search_strategy(
             effective_mode = WEB_SEARCH_MODE_OFF
             notification = "当前模型或连接无法使用模型原生联网，本次不联网。"
     elif requested_mode == WEB_SEARCH_MODE_AUTO:
-        if native_enabled and native_support.get("supported"):
+        if hermes_smart_search and halo_enabled:
+            effective_mode = WEB_SEARCH_MODE_HALO
+        elif native_enabled and native_support.get("supported"):
             effective_mode = WEB_SEARCH_MODE_NATIVE
         elif halo_enabled:
             effective_mode = WEB_SEARCH_MODE_HALO

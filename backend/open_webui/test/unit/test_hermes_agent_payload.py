@@ -9,6 +9,25 @@ from open_webui.utils.hermes_agent import _build_run_payload
 from open_webui.utils.html_visual_prompt import HTML_VISUAL_FALLBACK_MARKER
 
 
+def test_run_payload_includes_halo_search_context():
+    payload = _build_run_payload(
+        {
+            "messages": [
+                {
+                    "role": "system",
+                    "content": 'Search context: <source id="1">Current result</source>',
+                },
+                {"role": "user", "content": "What changed?"},
+            ]
+        },
+        {"chat_id": "chat-1"},
+        "hermes-agent",
+    )
+
+    assert "Current result" in payload["instructions"]
+    assert payload["input"] == "What changed?"
+
+
 def test_run_payload_omits_raw_images_from_conversation_history():
     historical_image = "data:image/png;base64," + ("A" * 100_000)
     form_data = {

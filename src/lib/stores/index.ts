@@ -421,6 +421,7 @@ type Config = {
 		enable_login_form: boolean;
 		enable_web_search?: boolean;
 		enable_halo_web_search?: boolean;
+		web_search_engine?: string;
 		enable_native_web_search?: boolean;
 		default_web_search_mode?: 'off' | 'halo' | 'native' | 'auto';
 		enable_google_drive_integration: boolean;

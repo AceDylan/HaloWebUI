@@ -103,4 +103,24 @@ describe('model builtin web search preference', () => {
 			source: 'model'
 		});
 	});
+
+	it('offers Halo Smart Search to Hermes without overriding an explicit model opt-out', () => {
+		expect(getModelWebSearchPreference(HERMES_AGENT, undefined, 'smart_search')).toBe(null);
+		expect(
+			resolveModelBuiltinWebSearchState(
+				[HERMES_AGENT],
+				'halo',
+				() => 'auto',
+				undefined,
+				'smart_search'
+			)
+		).toEqual({ mode: 'halo', source: 'default' });
+		expect(
+			getModelWebSearchPreference(
+				{ ...HERMES_AGENT, meta: { builtin_tool_config: { ENABLE_WEB_SEARCH_TOOL: false } } },
+				undefined,
+				'smart_search'
+			)
+		).toBe(false);
+	});
 });

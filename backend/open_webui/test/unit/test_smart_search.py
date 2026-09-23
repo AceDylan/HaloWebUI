@@ -6,47 +6,77 @@ import pytest
 from open_webui.retrieval.web import smart_search
 
 
-def evidence(url, *, title="Result", content="Fetched page content", verified=True):
-    return {"url": url, "title": title, "content": content, "verified": verified}
+def completed(argv, payload, code=0):
+    return subprocess.CompletedProcess(
+        argv, code, stdout=json.dumps(payload), stderr="private diagnostic"
+    )
 
 
-def test_smart_search_uses_research_evidence_and_filters_domains(monkeypatch):
+def doctor(*, web=(), docs=(), vertical=()):
+    return {
+        "ok": True,
+        "capability_status": {
+            "web_search": {"configured": list(web)},
+            "docs_search": {"configured": list(docs)},
+            "vertical_search": {"configured": list(vertical)},
+        },
+    }
+
+
+def test_research_uses_verified_evidence_and_filters_domains(monkeypatch):
     calls = []
 
     def fake_run(argv, **kwargs):
         calls.append((argv, kwargs))
-        return subprocess.CompletedProcess(
+        if "--help" in argv:
+            return subprocess.CompletedProcess(argv, 0, stdout="usage")
+        return completed(
             argv,
-            0,
-            stdout=json.dumps(
-                {
-                    "ok": True,
-                    "evidence_items": [
-                        evidence("https://other.example.org/first"),
-                        evidence(
-                            "https://docs.example.com/one",
-                            title="One",
-                            content="First\n page content",
-                        ),
-                        evidence("https://docs.example.com/one", title="Duplicate"),
-                        evidence("file:///etc/passwd"),
-                        evidence("https://[invalid"),
-                        evidence("https://:pass@docs.example.com/private"),
-                        evidence("https://docs.example.com/unverified", verified=False),
-                        evidence("https://docs.example.com/empty", content=""),
-                    ],
-                    "discovery_sources": [
-                        {"url": "https://docs.example.com/candidate"}
-                    ],
-                }
-            ),
+            {
+                "ok": True,
+                "evidence_items": [
+                    {
+                        "url": "https://other.example.org/first",
+                        "verified": True,
+                        "content": "Other",
+                    },
+                    {
+                        "url": "https://docs.example.com/one",
+                        "title": "One",
+                        "content": "First\n page content",
+                        "verified": True,
+                    },
+                    {
+                        "url": "https://docs.example.com/one",
+                        "content": "Duplicate",
+                        "verified": True,
+                    },
+                    {"url": "file:///etc/passwd", "content": "Local", "verified": True},
+                    {"url": "https://[invalid", "content": "Bad", "verified": True},
+                    {
+                        "url": "https://:pass@docs.example.com/private",
+                        "content": "Secret",
+                        "verified": True,
+                    },
+                    {
+                        "url": "https://docs.example.com/unverified",
+                        "content": "No",
+                        "verified": False,
+                    },
+                    {
+                        "url": "https://docs.example.com/empty",
+                        "content": "",
+                        "verified": True,
+                    },
+                ],
+                "discovery_sources": [],
+            },
         )
 
     monkeypatch.setattr(smart_search.subprocess, "run", fake_run)
     monkeypatch.setenv("SMART_SEARCH_CLI", "/opt/smart-search/bin/smart-search")
-
     results = smart_search.search_smart_search(
-        "release notes; $(echo unsafe)", 2, ["example.com"]
+        "release notes; $(echo unsafe)", 1, ["example.com"]
     )
 
     assert [result.model_dump() for result in results] == [
@@ -57,7 +87,8 @@ def test_smart_search_uses_research_evidence_and_filters_domains(monkeypatch):
             "favicon": None,
         }
     ]
-    assert calls[0][0] == [
+    assert calls[0][0] == ["/opt/smart-search/bin/smart-search", "research", "--help"]
+    assert calls[1][0] == [
         "/opt/smart-search/bin/smart-search",
         "research",
         "release notes; $(echo unsafe)",
@@ -68,147 +99,348 @@ def test_smart_search_uses_research_evidence_and_filters_domains(monkeypatch):
         "--format",
         "json",
     ]
-    assert calls[0][1]["timeout"] == 90
-    assert calls[0][1]["check"] is False
-    assert len(calls) == 1
+    assert calls[1][1]["timeout"] == 90
+    assert calls[1][1]["check"] is False
+    assert len(calls) == 2
 
 
-def test_smart_search_falls_back_to_generic_search(monkeypatch):
+def test_old_cli_routes_across_configured_source_providers(monkeypatch):
     calls = []
 
     def fake_run(argv, **kwargs):
         calls.append(argv)
-        if argv[1] == "research":
-            return subprocess.CompletedProcess(argv, 3, stdout="private diagnostic")
-        return subprocess.CompletedProcess(
-            argv,
-            0,
-            stdout=json.dumps(
+        stage = argv[1]
+        if stage == "research":
+            return subprocess.CompletedProcess(
+                argv, 2, stdout="", stderr="private diagnostic"
+            )
+        if stage == "search":
+            return completed(
+                argv,
+                {
+                    "ok": False,
+                    "error_type": "network_error",
+                    "error": "private diagnostic",
+                },
+                4,
+            )
+        if stage == "doctor":
+            return completed(
+                argv,
+                doctor(
+                    web=("zhipu", "tavily", "firecrawl"),
+                    docs=("exa",),
+                    vertical=("anysearch",),
+                ),
+            )
+        if stage == "zhipu-search":
+            return completed(
+                argv,
+                {
+                    "ok": False,
+                    "error_type": "provider_error",
+                    "error": "private diagnostic",
+                },
+                4,
+            )
+        if stage == "exa-search":
+            return completed(
+                argv,
                 {
                     "ok": True,
-                    "sources": [
+                    "results": [
+                        {"url": "https://docs.example.com/one", "title": "One"}
+                    ],
+                },
+            )
+        if stage == "anysearch-search":
+            return completed(
+                argv,
+                {
+                    "ok": True,
+                    "results": [
                         {
-                            "url": "https://docs.example.com/one",
-                            "title": "One",
-                            "description": "Source description",
+                            "url": "https://news.example.com/two",
+                            "title": "Two",
+                            "description": "Second source",
                         }
                     ],
-                }
-            ),
-        )
+                },
+            )
+        pytest.fail(f"Unexpected command: {stage}")
 
     monkeypatch.setattr(smart_search.subprocess, "run", fake_run)
+    results = smart_search.search_smart_search("query", 2)
 
-    results = smart_search.search_smart_search("query", 3)
-
-    assert [result.link for result in results] == ["https://docs.example.com/one"]
-    assert results[0].snippet == "Source description"
-    assert [argv[1] for argv in calls] == ["research", "search"]
+    assert [result.link for result in results] == [
+        "https://docs.example.com/one",
+        "https://news.example.com/two",
+    ]
+    assert results[1].snippet == "Second source"
+    assert [argv[1] for argv in calls] == [
+        "research",
+        "search",
+        "doctor",
+        "zhipu-search",
+        "exa-search",
+        "anysearch-search",
+    ]
     assert calls[1][3:] == [
         "--validation",
         "balanced",
         "--timeout",
         "30",
+        "--extra-sources",
+        "2",
         "--format",
         "json",
     ]
+    assert calls[3][3:] == ["--count", "2", "--format", "json"]
+    assert calls[4][3:] == ["--num-results", "2", "--format", "json"]
+    assert calls[5][3:] == ["--max-results", "2", "--format", "json"]
 
 
-def test_smart_search_falls_back_when_research_has_no_http_evidence(monkeypatch):
+def test_research_discovery_and_search_sources_fill_result_count(monkeypatch):
     calls = []
 
     def fake_run(argv, **kwargs):
         calls.append(argv[1])
+        if "--help" in argv:
+            return subprocess.CompletedProcess(argv, 0, stdout="usage")
         if argv[1] == "research":
-            payload = {"ok": True, "evidence_items": [evidence("context7:/library")]}
-        else:
-            payload = {"ok": True, "sources": [{"url": "https://example.org/result"}]}
-        return subprocess.CompletedProcess(argv, 0, stdout=json.dumps(payload))
+            return completed(
+                argv,
+                {
+                    "ok": True,
+                    "evidence_items": [
+                        {
+                            "url": "context7:/library",
+                            "verified": True,
+                            "content": "Docs",
+                        }
+                    ],
+                    "discovery_sources": [
+                        {"url": "https://example.org/discovered", "title": "Candidate"}
+                    ],
+                },
+            )
+        return completed(
+            argv,
+            {
+                "ok": True,
+                "sources": [
+                    {"url": "https://example.org/discovered"},
+                    {
+                        "url": "https://example.org/search",
+                        "description": "Model source",
+                    },
+                ],
+            },
+        )
 
     monkeypatch.setattr(smart_search.subprocess, "run", fake_run)
-
-    assert [result.link for result in smart_search.search_smart_search("query", 5)] == [
-        "https://example.org/result"
+    results = smart_search.search_smart_search("query", 2)
+    assert [result.link for result in results] == [
+        "https://example.org/discovered",
+        "https://example.org/search",
     ]
-    assert calls == ["research", "search"]
+    assert results[1].snippet == "Model source"
+    assert calls == ["research", "research", "search"]
 
 
 @pytest.mark.parametrize(
-    "returncode,stdout",
+    "provider,command,option",
     [
-        (1, '{"ok":false,"error":"private diagnostic"}'),
-        (0, "not json"),
-        (0, '{"ok":false,"evidence_items":[]}'),
-        (0, '{"ok":true,"evidence_items":"private diagnostic"}'),
+        ("zhipu-mcp", "zhipu-mcp-search", "--count"),
+        ("zhipu", "zhipu-search", "--count"),
+        ("exa", "exa-search", "--num-results"),
+        ("anysearch", "anysearch-search", "--max-results"),
     ],
 )
-def test_smart_search_errors_do_not_expose_cli_output(monkeypatch, returncode, stdout):
-    monkeypatch.setattr(
-        smart_search.subprocess,
-        "run",
-        lambda argv, **kwargs: subprocess.CompletedProcess(
-            argv, returncode, stdout=stdout, stderr="private diagnostic"
-        ),
-    )
+def test_direct_provider_json_results(monkeypatch, provider, command, option):
+    calls = []
 
+    def fake_run(argv, **kwargs):
+        calls.append(argv)
+        if argv[1] == "research":
+            return subprocess.CompletedProcess(argv, 2, stdout="")
+        if argv[1] == "search":
+            return completed(argv, {"ok": False, "error_type": "network_error"}, 4)
+        if argv[1] == "doctor":
+            return completed(
+                argv, doctor(web=(provider,), docs=(provider,), vertical=(provider,))
+            )
+        return completed(
+            argv,
+            {
+                "ok": True,
+                "results": [
+                    {
+                        "url": "https://example.org/result",
+                        "title": "Result",
+                        "description": "Source text",
+                    }
+                ],
+            },
+        )
+
+    monkeypatch.setattr(smart_search.subprocess, "run", fake_run)
+    results = smart_search.search_smart_search("query", 1)
+    assert [result.link for result in results] == ["https://example.org/result"]
+    assert results[0].snippet == "Source text"
+    assert calls[-1] == [
+        "smart-search",
+        command,
+        "query",
+        option,
+        "1",
+        "--format",
+        "json",
+    ]
+    assert len(calls) == 4
+
+
+def test_incomplete_doctor_profile_still_routes_configured_source(monkeypatch):
+    def fake_run(argv, **kwargs):
+        if argv[1] == "research":
+            return subprocess.CompletedProcess(argv, 2, stdout="")
+        if argv[1] == "search":
+            return completed(argv, {"ok": False, "error_type": "config_error"}, 3)
+        if argv[1] == "doctor":
+            payload = doctor(docs=("exa",))
+            payload.update(
+                ok=False, error_type="config_error", error="private diagnostic"
+            )
+            return completed(argv, payload, 3)
+        return completed(
+            argv, {"ok": True, "results": [{"url": "https://example.org/doc"}]}
+        )
+
+    monkeypatch.setattr(smart_search.subprocess, "run", fake_run)
+    assert [result.link for result in smart_search.search_smart_search("query", 1)] == [
+        "https://example.org/doc"
+    ]
+
+
+@pytest.mark.parametrize(
+    "source_response,expected",
+    [
+        (
+            subprocess.CompletedProcess(
+                [], 0, stdout="private diagnostic https://example.org"
+            ),
+            "invalid JSON",
+        ),
+        (
+            subprocess.CompletedProcess(
+                [], 0, stdout='{"ok":true,"results":"private diagnostic"}'
+            ),
+            "unsuccessful response",
+        ),
+        (
+            subprocess.CompletedProcess(
+                [],
+                4,
+                stdout='{"ok":false,"error_type":"provider_error","error":"private diagnostic"}',
+            ),
+            "exit 4 (provider_error)",
+        ),
+    ],
+)
+def test_text_malformed_and_failed_provider_outputs_are_sanitized(
+    monkeypatch, source_response, expected
+):
+    def fake_run(argv, **kwargs):
+        if argv[1] == "research":
+            return subprocess.CompletedProcess(argv, 2, stdout="")
+        if argv[1] == "search":
+            return completed(
+                argv,
+                {
+                    "ok": False,
+                    "error_type": "network_error",
+                    "error": "private diagnostic",
+                },
+                4,
+            )
+        if argv[1] == "doctor":
+            return completed(argv, doctor(web=("zhipu",)))
+        return source_response
+
+    monkeypatch.setattr(smart_search.subprocess, "run", fake_run)
     with pytest.raises(RuntimeError) as exc_info:
         smart_search.search_smart_search("query", 5)
+    message = str(exc_info.value)
+    assert "private diagnostic" not in message
+    assert "research: unavailable in installed CLI" in message
+    assert "search: exit 4 (network_error)" in message
+    assert f"zhipu-search: {expected}" in message
 
-    assert "private diagnostic" not in str(exc_info.value)
-    assert "research" in str(exc_info.value)
-    assert "search" in str(exc_info.value)
 
-
-def test_smart_search_timeout_falls_back_and_sanitizes_error(monkeypatch):
+def test_empty_success_does_not_hide_other_failures(monkeypatch):
     def fake_run(argv, **kwargs):
+        if "--help" in argv:
+            return subprocess.CompletedProcess(argv, 0, stdout="usage")
+        if argv[1] == "research":
+            return completed(argv, {"ok": True, "evidence_items": []})
+        if argv[1] == "search":
+            return completed(argv, {"ok": False, "error_type": "network_error"}, 4)
+        return completed(argv, doctor())
+
+    monkeypatch.setattr(smart_search.subprocess, "run", fake_run)
+    with pytest.raises(RuntimeError, match="search: exit 4"):
+        smart_search.search_smart_search("query", 3)
+
+
+def test_all_valid_empty_responses_return_no_results(monkeypatch):
+    def fake_run(argv, **kwargs):
+        if argv[1] == "research":
+            return subprocess.CompletedProcess(argv, 2, stdout="")
+        if argv[1] == "search":
+            return completed(argv, {"ok": True, "sources": []})
+        if argv[1] == "doctor":
+            return completed(argv, doctor(web=("zhipu",)))
+        return completed(argv, {"ok": True, "results": []})
+
+    monkeypatch.setattr(smart_search.subprocess, "run", fake_run)
+    assert smart_search.search_smart_search("query", 3) == []
+
+
+def test_timeout_errors_are_sanitized(monkeypatch):
+    def fake_run(argv, **kwargs):
+        if argv[1] == "research":
+            return subprocess.CompletedProcess(argv, 2, stdout="")
         raise subprocess.TimeoutExpired(
             argv, kwargs["timeout"], output="private diagnostic"
         )
 
     monkeypatch.setattr(smart_search.subprocess, "run", fake_run)
-
     with pytest.raises(
-        RuntimeError, match="research: timeout; search: timeout"
+        RuntimeError, match="search: timeout; doctor: timeout"
     ) as exc_info:
         smart_search.search_smart_search("query", 3)
-
     assert "private diagnostic" not in str(exc_info.value)
 
 
-def test_smart_search_empty_success_returns_no_results(monkeypatch):
-    def fake_run(argv, **kwargs):
-        key = "evidence_items" if argv[1] == "research" else "sources"
-        return subprocess.CompletedProcess(
-            argv, 0, stdout=json.dumps({"ok": True, key: []})
-        )
-
-    monkeypatch.setattr(smart_search.subprocess, "run", fake_run)
-
-    assert smart_search.search_smart_search("query", 3) == []
-
-
-def test_smart_search_missing_cli_explains_backend_runtime_requirement(monkeypatch):
+def test_missing_cli_explains_backend_runtime_requirement(monkeypatch):
     monkeypatch.setenv("SMART_SEARCH_CLI", "/missing/smart-search")
 
     def missing_cli(_argv, **_kwargs):
         raise FileNotFoundError(2, "No such file or directory")
 
     monkeypatch.setattr(smart_search.subprocess, "run", missing_cli)
-
     with pytest.raises(RuntimeError, match="backend environment") as exc_info:
         smart_search.search_smart_search("query", 5)
-
     assert "/missing/smart-search" in str(exc_info.value)
     assert "SMART_SEARCH_CLI" in str(exc_info.value)
 
 
-def test_smart_search_zero_count_skips_cli(monkeypatch):
+def test_zero_count_skips_cli(monkeypatch):
     monkeypatch.setattr(
         smart_search.subprocess,
         "run",
         lambda *_args, **_kwargs: pytest.fail("CLI should not run"),
     )
-
     assert smart_search.search_smart_search("query", 0) == []
 
 
@@ -232,6 +464,5 @@ def test_smart_search_is_available_through_shared_dispatch(monkeypatch):
             )
         )
     )
-
     assert retrieval.search_web(request, "smart_search", "query") is expected
     assert seen == [("query", 4, ["example.com"])]

@@ -10,7 +10,7 @@ ARG INSTALL_AGY=true
 # Install the Smart Search CLI in the backend image so the smart_search web
 # engine is available to the server process (and not only on the build host).
 ARG INSTALL_SMART_SEARCH=true
-ARG SMART_SEARCH_VERSION=0.1.14
+ARG SMART_SEARCH_VERSION=0.1.24
 # Tested with cu117 for CUDA 11 and cu121 for CUDA 12 (default)
 ARG USE_CUDA_VER=cu121
 # any sentence transformer model; models to use can be found at https://huggingface.co/models?library=sentence-transformers

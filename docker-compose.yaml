@@ -3,11 +3,43 @@ services:
     image: dylanha009/halowebui:custom
     container_name: halowebui
     ports:
+      # Nginx on the host terminates HTTPS at :3001 and proxies to this loopback port.
+      # Never publish the raw HaloWebUI HTTP backend directly to the public network.
       - "127.0.0.1:3000:8080"
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    environment:
+      # ---- hermes agent bridge (OpenAI-compatible) ----
+      # URL ends with /chat/completions on purpose: it triggers HaloWebUI's
+      # "force_mode" so it calls hermes /v1/chat/completions and NOT /v1/responses.
+      # The Responses API path surfaces hermes's internal tool calls (skill_view,
+      # terminal) as function_calls, which HaloWebUI can't execute -> "工具格式不规范".
+      # Models list still resolves to /v1/models (suffix is stripped for /models).
+      ENABLE_OPENAI_API: "true"
+      OPENAI_API_BASE_URLS: "http://host.docker.internal:8642/v1/chat/completions"
+      # Loaded from /root/halowebui/.env (mode 0600); fail closed if missing.
+      OPENAI_API_KEYS: "${HERMES_API_KEY:?HERMES_API_KEY must be set}"
+      # ---- hermes runs integration (tool display + approval buttons) ----
+      # Models listed here go through hermes /v1/runs (SSE) so tool calls and
+      # approval dialogs show up natively in the chat UI.
+      HERMES_AGENT_MODEL_IDS: "hermes-agent"
+      # One approval dialog waits up to 5 min for your click (matches hermes
+      # approvals.gateway_timeout=300 default; integration auto-denies at 240s).
+      WEBSOCKET_EVENT_CALLER_TIMEOUT: "300"
+      # ---- AGY server-side visual design pass ----
+      # Run the HOST's agy binary and token via read-only bind mounts (dirs, not
+      # single files, so rename-on-update is picked up). `agy update` or a
+      # re-login on the host takes effect immediately — no rebuild/recreate.
+      HALOWEBUI_AGY_COMMAND: "/opt/host-agy/bin/agy --sandbox --disable-slash-commands -p"
+      HALOWEBUI_AGY_OAUTH_TOKEN_FILE: "/opt/host-agy/antigravity-cli/antigravity-oauth-token"
+      HERMES_AGENT_NOTIFY_TOKEN: "${HERMES_AGENT_NOTIFY_TOKEN:?set in /root/halowebui/.env}"
+      HUB_URL: ${HUB_URL}
+      HUB_TRUSTED_EMBED_ADMIN_SECRET: ${HUB_TRUSTED_EMBED_ADMIN_SECRET}
     volumes:
       - open-webui:/app/backend/data
+      - /root/.local/bin:/opt/host-agy/bin:ro
+      - /root/.gemini/antigravity-cli:/opt/host-agy/antigravity-cli:ro
+      - /root/.config/smart-search:/root/.config/smart-search:ro
     restart: always
 
 

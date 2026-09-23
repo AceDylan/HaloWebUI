@@ -7,6 +7,10 @@ ARG USE_OLLAMA=false
 ARG INSTALL_PROFILE=core
 ARG PRELOAD_LOCAL_MODELS=false
 ARG INSTALL_AGY=true
+# Install the Smart Search CLI in the backend image so the smart_search web
+# engine is available to the server process (and not only on the build host).
+ARG INSTALL_SMART_SEARCH=true
+ARG SMART_SEARCH_VERSION=0.1.14
 # Tested with cu117 for CUDA 11 and cu121 for CUDA 12 (default)
 ARG USE_CUDA_VER=cu121
 # any sentence transformer model; models to use can be found at https://huggingface.co/models?library=sentence-transformers
@@ -74,6 +78,8 @@ ARG UID
 ARG GID
 ARG HALO_RUNTIME_PROFILE
 ARG INSTALL_AGY
+ARG INSTALL_SMART_SEARCH
+ARG SMART_SEARCH_VERSION
 ARG TARGETARCH
 
 ENV ENV=prod \
@@ -157,6 +163,14 @@ RUN set -eux; \
     fi; \
     if [ "$HALO_RUNTIME_PROFILE" = "main" ]; then \
         uv pip install --system -r requirements/storage-s3.txt --no-cache-dir; \
+    fi; \
+    if [ "$INSTALL_SMART_SEARCH" = "true" ]; then \
+        if [ "$HALO_RUNTIME_PROFILE" != "main" ]; then \
+            echo "Skipping Smart Search CLI for HALO_RUNTIME_PROFILE=$HALO_RUNTIME_PROFILE"; \
+        else \
+            npm install --global --no-fund --no-audit "@konbakuyomu/smart-search@${SMART_SEARCH_VERSION}"; \
+            smart-search --version; \
+        fi; \
     fi; \
     if [ "$PRELOAD_LOCAL_MODELS" = "true" ]; then \
         if [ "$INSTALL_PROFILE" = "local-rag" ] || [ "$INSTALL_PROFILE" = "full" ]; then \

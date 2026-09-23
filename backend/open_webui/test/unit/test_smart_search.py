@@ -81,6 +81,21 @@ def test_smart_search_errors_do_not_expose_cli_output(monkeypatch, returncode, s
     assert "private diagnostic" not in str(exc_info.value)
 
 
+def test_smart_search_missing_cli_explains_backend_runtime_requirement(monkeypatch):
+    monkeypatch.setenv("SMART_SEARCH_CLI", "/missing/smart-search")
+
+    def missing_cli(_argv, **_kwargs):
+        raise FileNotFoundError(2, "No such file or directory")
+
+    monkeypatch.setattr(smart_search.subprocess, "run", missing_cli)
+
+    with pytest.raises(RuntimeError, match="backend environment") as exc_info:
+        smart_search.search_smart_search("query", 5)
+
+    assert "/missing/smart-search" in str(exc_info.value)
+    assert "SMART_SEARCH_CLI" in str(exc_info.value)
+
+
 def test_smart_search_is_available_through_shared_dispatch(monkeypatch):
     from open_webui.routers import retrieval
 

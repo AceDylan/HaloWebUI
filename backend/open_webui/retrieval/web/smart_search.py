@@ -36,7 +36,9 @@ def search_smart_search(
         )
     except FileNotFoundError as exc:
         raise RuntimeError(
-            "smart-search CLI is not installed in the backend environment"
+            "smart-search CLI is not installed in the backend environment "
+            f"({command!r}); install it in the backend image or set "
+            "SMART_SEARCH_CLI to an executable visible to the backend process"
         ) from exc
     except subprocess.TimeoutExpired as exc:
         raise RuntimeError("smart-search CLI timed out") from exc

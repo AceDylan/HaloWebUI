@@ -9,6 +9,55 @@ import validators
 from open_webui.retrieval.web.main import SearchResult, get_filtered_results
 
 
+def _results_from_items(items: list, *, require_evidence: bool) -> list[dict]:
+    results = []
+    seen = set()
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        if require_evidence and (
+            item.get("verified") is not True
+            or not isinstance(item.get("content"), str)
+            or not item["content"].strip()
+        ):
+            continue
+        url = item.get("url")
+        if not isinstance(url, str):
+            continue
+        url = url.strip()
+        try:
+            parsed = urlparse(url)
+        except ValueError:
+            continue
+        if (
+            parsed.scheme not in {"http", "https"}
+            or not validators.url(url)
+            or parsed.username is not None
+            or parsed.password is not None
+            or url in seen
+        ):
+            continue
+        seen.add(url)
+        title = item.get("title")
+        description = (
+            item.get("content")
+            if require_evidence
+            else item.get("description") or item.get("snippet")
+        )
+        results.append(
+            {
+                "link": url,
+                "title": title.strip()
+                if isinstance(title, str) and title.strip()
+                else parsed.netloc,
+                "snippet": " ".join(description[:500].split())
+                if isinstance(description, str)
+                else "",
+            }
+        )
+    return results
+
+
 def search_smart_search(
     query: str, count: int, filter_list: list[str] | None = None
 ) -> list[SearchResult]:
@@ -18,22 +67,19 @@ def search_smart_search(
     if count <= 0:
         return []
 
-    # Source-oriented commands suit web search; the model-backed command remains
-    # available for installations configured without either source provider.
     commands = (
-        ("zhipu-search", ["--count", str(count)]),
-        ("exa-search", ["--num-results", str(count)]),
-        ("search", ["--validation", "balanced", "--timeout", "30"]),
+        ("research", ["--budget", "quick", "--fallback", "auto"], 90, "evidence_items"),
+        ("search", ["--validation", "balanced", "--timeout", "30"], 35, "sources"),
     )
     failures = []
     had_valid_response = False
-    for subcommand, options in commands:
+    for subcommand, options, timeout, source_key in commands:
         try:
             completed = subprocess.run(
                 [command, subcommand, query, *options, "--format", "json"],
                 capture_output=True,
                 text=True,
-                timeout=35,
+                timeout=timeout,
                 check=False,
             )
         except FileNotFoundError as exc:
@@ -45,6 +91,8 @@ def search_smart_search(
         except subprocess.TimeoutExpired:
             failures.append(f"{subcommand}: timeout")
             continue
+        except (OSError, UnicodeError) as exc:
+            raise RuntimeError(f"smart-search CLI could not run {subcommand}") from exc
 
         if completed.returncode != 0:
             failures.append(f"{subcommand}: exit {completed.returncode}")
@@ -54,7 +102,6 @@ def search_smart_search(
         except (ValueError, TypeError):
             failures.append(f"{subcommand}: invalid JSON")
             continue
-        source_key = "sources" if subcommand == "search" else "results"
         if (
             not isinstance(payload, dict)
             or payload.get("ok") is not True
@@ -64,35 +111,11 @@ def search_smart_search(
             continue
 
         had_valid_response = True
-        sources = []
-        seen = set()
-        for item in payload[source_key]:
-            if not isinstance(item, dict):
-                continue
-            url = item.get("url")
-            if not isinstance(url, str):
-                continue
-            url = url.strip()
-            parsed = urlparse(url)
-            if (
-                parsed.scheme not in {"http", "https"}
-                or not validators.url(url)
-                or parsed.username
-            ):
-                continue
-            if url in seen:
-                continue
-            seen.add(url)
-            sources.append(
-                {
-                    "link": url,
-                    "title": str(item.get("title") or parsed.netloc),
-                    "snippet": str(item.get("description") or ""),
-                }
-            )
-
-        if sources:
-            filtered = get_filtered_results(sources, filter_list)
+        results = _results_from_items(
+            payload[source_key], require_evidence=subcommand == "research"
+        )
+        if results:
+            filtered = get_filtered_results(results, filter_list)
             return [SearchResult(**item) for item in filtered[:count]]
 
     if had_valid_response:

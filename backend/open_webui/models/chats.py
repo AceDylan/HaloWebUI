@@ -764,7 +764,12 @@ class ChatTable:
         return chat.chat.get("history", {}).get("messages", {}).get(message_id, {})
 
     def upsert_message_to_chat_by_id_and_message_id(
-        self, id: str, message_id: str, message: dict, guard_stopped: bool = False
+        self,
+        id: str,
+        message_id: str,
+        message: dict,
+        guard_stopped: bool = False,
+        set_current: bool = True,
     ) -> Optional[ChatModel]:
         chat = self.get_chat_by_id(id)
         if chat is None:
@@ -813,7 +818,10 @@ class ChatTable:
         else:
             messages[message_id] = message
 
-        history["currentId"] = message_id
+        # set_current=False: a late update to a finished reply must not pull the
+        # chat back to it when the user has already moved on to a newer turn.
+        if set_current:
+            history["currentId"] = message_id
 
         chat_dict["history"] = history
         result = self.update_chat_by_id(id, chat_dict, update_title=False, base_chat=base_chat)

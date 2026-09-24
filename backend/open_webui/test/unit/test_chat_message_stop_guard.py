@@ -272,3 +272,34 @@ def test_full_chat_save_allows_manual_edit_of_completed_assistant_message(monkey
     message = chat_row.chat["history"]["messages"]["assistant-1"]
     assert message["content"] == "edited answer"
     assert message["done"] is True
+
+
+def test_set_current_false_updates_message_without_moving_current_id(monkeypatch):
+    table, chat_row = _chat_table_with_message(
+        monkeypatch,
+        {"id": "assistant-1", "role": "assistant", "content": "answer", "done": True},
+    )
+    # The user already moved on: a newer reply is the chat's current message.
+    chat_row.chat["history"]["messages"]["assistant-2"] = {
+        "id": "assistant-2",
+        "role": "assistant",
+        "content": "newer",
+    }
+    chat_row.chat["history"]["currentId"] = "assistant-2"
+    monkeypatch.setattr(
+        table,
+        "update_chat_by_id",
+        lambda _chat_id, chat, **_kwargs: setattr(chat_row, "chat", chat) or chat_row,
+    )
+
+    table.upsert_message_to_chat_by_id_and_message_id(
+        "chat-1",
+        "assistant-1",
+        {"content": "answer + designed html"},
+        guard_stopped=True,
+        set_current=False,
+    )
+
+    history = chat_row.chat["history"]
+    assert history["messages"]["assistant-1"]["content"] == "answer + designed html"
+    assert history["currentId"] == "assistant-2"

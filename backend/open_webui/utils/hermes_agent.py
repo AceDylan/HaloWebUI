@@ -49,7 +49,7 @@ from open_webui.socket.main import (
     get_event_emitter,
     sio,
 )
-from open_webui.tasks import create_task
+from open_webui.tasks import create_task, set_current_task_blocks_completion
 from open_webui.utils.chat_image_refs import materialize_openai_image_message_refs
 from open_webui.utils.hermes_unread import mark_unread
 from open_webui.utils.html_visual_prompt import (
@@ -980,11 +980,10 @@ async def run_hermes_agent(request, form_data, user, metadata, model, events, ta
                 return
             finalized = True
             _unregister_run(metadata["chat_id"], run_id)
-            # hermes stopped reading input the moment the run ended, but the
-            # message keeps streaming through the HTML design step below (up
-            # to two minutes). Tell the composer now so its send button turns
-            # from "steer" into "queue" instead of offering a steer that can
-            # only be refused. Persisted too, so a reload shows the same.
+            # hermes stopped reading input the moment the run ended. Tell the
+            # composer now so its send button turns from "steer" into "queue"
+            # instead of offering a steer that can only be refused. Persisted
+            # too, so a reload shows the same.
             _mark_undelivered_steers(blocks, pending_steer)
             run_state = _run_state(pending_steer)
             try:
@@ -995,10 +994,10 @@ async def run_hermes_agent(request, form_data, user, metadata, model, events, ta
                 upsert_response_message({"hermes_run": run_state})
             except Exception as e:
                 log.debug(f"hermes run-state persist failed: {e}")
+            # The reply is marked done with the plain answer; the AGY HTML
+            # design pass (tens of seconds, up to its timeout) runs afterwards
+            # in _design_html_visual and swaps the artifact in when ready.
             content = _serialize_blocks(blocks)
-            if successful and not error:
-                content = await design_html_visual_artifact_with_agy(content, metadata)
-                content = append_html_visual_fallback(content, metadata)
             completed_at = int(time.time())
             data = {
                 "done": True,
@@ -1034,17 +1033,55 @@ async def run_hermes_agent(request, form_data, user, metadata, model, events, ta
                 await _emit_completion(data)
             except Exception as e:
                 log.warning(f"hermes completion emit failed: {e}")
+            # Finished from the user's point of view; what follows is
+            # post-processing that must not keep the chat looking busy.
+            set_current_task_blocks_completion(False)
             _schedule_completion_webhook(request, user, metadata, title, content)
-            # Post-response bookkeeping (title/tags/follow-ups), same as the
-            # normal chat flow in process_chat_response.
-            try:
-                from open_webui.utils.middleware import background_tasks_handler
 
-                await background_tasks_handler(
-                    request, user, metadata, tasks, event_emitter
+            async def _background_tasks():
+                # Post-response bookkeeping (title/tags/follow-ups), same as the
+                # normal chat flow in process_chat_response.
+                try:
+                    from open_webui.utils.middleware import background_tasks_handler
+
+                    await background_tasks_handler(
+                        request, user, metadata, tasks, event_emitter
+                    )
+                except Exception as e:
+                    log.warning(f"hermes background tasks failed: {e}")
+
+            if successful and not error:
+                await asyncio.gather(
+                    _background_tasks(), _design_html_visual(content)
+                )
+            else:
+                await _background_tasks()
+
+        async def _design_html_visual(content):
+            try:
+                designed = await design_html_visual_artifact_with_agy(content, metadata)
+                designed = append_html_visual_fallback(designed, metadata)
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                log.warning(f"hermes html visual design failed: {e}")
+                return
+            if designed == content:
+                return
+            try:
+                Chats.upsert_message_to_chat_by_id_and_message_id(
+                    metadata["chat_id"],
+                    metadata["message_id"],
+                    {"content": designed},
+                    guard_stopped=True,
+                    set_current=False,
                 )
             except Exception as e:
-                log.warning(f"hermes background tasks failed: {e}")
+                log.warning(f"hermes html visual persist failed: {e}")
+            try:
+                await _emit_completion({"content": designed})
+            except Exception as e:
+                log.warning(f"hermes html visual emit failed: {e}")
 
         async def _steer(text: str):
             # Forward to hermes first; only a run that accepted the text gets

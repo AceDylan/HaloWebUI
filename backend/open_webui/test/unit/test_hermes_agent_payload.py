@@ -199,8 +199,8 @@ def _run_hermes_terminal_events(monkeypatch, terminal_events):
     monkeypatch.setattr(
         hermes_agent.Chats,
         "upsert_message_to_chat_by_id_and_message_id",
-        lambda chat_id, message_id, payload, **_kwargs: upserts.append(
-            (chat_id, message_id, payload)
+        lambda chat_id, message_id, payload, **kwargs: upserts.append(
+            (chat_id, message_id, payload, kwargs)
         ),
     )
     monkeypatch.setattr(
@@ -236,7 +236,22 @@ def _run_hermes_terminal_events(monkeypatch, terminal_events):
     return emitted, upserts
 
 
+def _stub_agy_design(monkeypatch, fragment=None):
+    """Replace the AGY subprocess: None models a failed/unavailable design."""
+    calls = []
+
+    async def fake_design(content, metadata):
+        calls.append(content)
+        if fragment is None:
+            return content
+        return f"{content}\n\n````html\n{fragment}\n````"
+
+    monkeypatch.setattr(hermes_agent, "design_html_visual_artifact_with_agy", fake_design)
+    return calls
+
+
 def test_hermes_completed_force_mode_finalizes_with_one_fallback(monkeypatch):
+    _stub_agy_design(monkeypatch)
     emitted, upserts = _run_hermes_terminal_events(
         monkeypatch,
         [
@@ -247,20 +262,58 @@ def test_hermes_completed_force_mode_finalizes_with_one_fallback(monkeypatch):
         ],
     )
 
-    final_data = [
-        event["data"]
-        for event in emitted
-        if event.get("type") == "chat:completion"
-        and event.get("data", {}).get("done") is True
+    completions = [
+        event["data"] for event in emitted if event.get("type") == "chat:completion"
+    ]
+    done_index, final_data = [
+        (index, data) for index, data in enumerate(completions) if data.get("done")
     ][-1]
+    # Done goes out with the plain answer; the design pass must not hold it.
     assert final_data["content"].startswith("Plain")
-    assert "<unsafe>" not in final_data["content"]
     assert '<details type="tool_calls" done="true"' in final_data["content"]
-    assert final_data["content"].count(HTML_VISUAL_FALLBACK_MARKER) == 1
-    assert upserts[-1][2]["content"] == final_data["content"]
+    assert HTML_VISUAL_FALLBACK_MARKER not in final_data["content"]
+
+    designed = [data for data in completions[done_index + 1 :] if "content" in data]
+    assert len(designed) == 1
+    designed_content = designed[0]["content"]
+    assert "done" not in designed[0]
+    assert designed_content.startswith("Plain")
+    assert "<unsafe>" not in designed_content
+    assert designed_content.count(HTML_VISUAL_FALLBACK_MARKER) == 1
+
+    # The late write must not move the chat's current message back to this
+    # reply, and it must respect a user stop.
+    assert upserts[-1][2] == {"content": designed_content}
+    assert upserts[-1][3] == {"guard_stopped": True, "set_current": False}
+
+
+def test_hermes_completed_marks_done_before_agy_design(monkeypatch):
+    fragment = '<div style="padding:8px;">AGY design</div>'
+    calls = _stub_agy_design(monkeypatch, fragment)
+    emitted, upserts = _run_hermes_terminal_events(
+        monkeypatch,
+        [
+            {"event": "message.delta", "delta": "Answer"},
+            {"event": "run.completed", "output": "Answer"},
+        ],
+    )
+
+    completions = [
+        event["data"] for event in emitted if event.get("type") == "chat:completion"
+    ]
+    done_index = [i for i, data in enumerate(completions) if data.get("done")][-1]
+    # AGY got the answer the user already has, not a still-pending message.
+    assert calls == [completions[done_index]["content"]]
+    late = [data for data in completions[done_index + 1 :] if "content" in data]
+    assert len(late) == 1
+    assert fragment in late[0]["content"]
+    assert HTML_VISUAL_FALLBACK_MARKER not in late[0]["content"]
+    assert upserts[-1][2] == {"content": late[0]["content"]}
+    assert upserts[-1][3]["set_current"] is False
 
 
 def test_hermes_cancelled_force_mode_does_not_append_fallback(monkeypatch):
+    calls = _stub_agy_design(monkeypatch)
     emitted, upserts = _run_hermes_terminal_events(
         monkeypatch,
         [
@@ -277,9 +330,11 @@ def test_hermes_cancelled_force_mode_does_not_append_fallback(monkeypatch):
     ][-1]
     assert HTML_VISUAL_FALLBACK_MARKER not in final_data["content"]
     assert HTML_VISUAL_FALLBACK_MARKER not in upserts[-1][2]["content"]
+    assert calls == []
 
 
 def test_hermes_failed_force_mode_does_not_append_fallback(monkeypatch):
+    calls = _stub_agy_design(monkeypatch)
     emitted, upserts = _run_hermes_terminal_events(
         monkeypatch,
         [
@@ -297,6 +352,7 @@ def test_hermes_failed_force_mode_does_not_append_fallback(monkeypatch):
     assert final_data["error"] == {"content": "provider unavailable"}
     assert HTML_VISUAL_FALLBACK_MARKER not in final_data["content"]
     assert HTML_VISUAL_FALLBACK_MARKER not in upserts[-1][2]["content"]
+    assert calls == []
 
 
 def test_run_payload_continues_when_last_message_is_the_assistant():

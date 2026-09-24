@@ -35,10 +35,24 @@ services:
       HERMES_AGENT_NOTIFY_TOKEN: "${HERMES_AGENT_NOTIFY_TOKEN:?set in /root/halowebui/.env}"
       HUB_URL: ${HUB_URL}
       HUB_TRUSTED_EMBED_ADMIN_SECRET: ${HUB_TRUSTED_EMBED_ADMIN_SECRET}
+      # ---- Smart Search CLI (Admin > Web Search engine "Smart Search (CLI)") ----
+      # Run the HOST's smart-search install (the npm global package with its
+      # bundled Python venv) through read-only bind mounts, so HaloWebUI uses
+      # the same CLI version, providers and credentials as hermes on the host.
+      # `npm i -g @konbakuyomu/smart-search` on the host takes effect on the
+      # next search — no rebuild/recreate. Drop this variable to fall back to
+      # the copy baked into the image (see docs/smart-search.md).
+      SMART_SEARCH_CLI: "/opt/host-smart-search/smart-search/npm/bin/smart-search.js"
     volumes:
       - open-webui:/app/backend/data
       - /root/.local/bin:/opt/host-agy/bin:ro
       - /root/.gemini/antigravity-cli:/opt/host-agy/antigravity-cli:ro
+      # Host smart-search: the npm scope dir (not the package dir, so a
+      # reinstall that replaces the package dir is picked up), the uv-managed
+      # interpreter its venv symlinks point at (same absolute path required),
+      # and its provider config with the credentials.
+      - /usr/local/lib/node_modules/@konbakuyomu:/opt/host-smart-search:ro
+      - /usr/local/share/uv/python:/usr/local/share/uv/python:ro
       - /root/.config/smart-search:/root/.config/smart-search:ro
     restart: always
 

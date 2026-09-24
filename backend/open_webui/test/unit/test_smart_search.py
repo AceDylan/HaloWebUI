@@ -300,6 +300,67 @@ def test_direct_provider_json_results(monkeypatch, provider, command, option):
     assert len(calls) == 4
 
 
+def test_search_failure_capability_status_routes_sources_without_doctor(monkeypatch):
+    calls = []
+
+    def fake_run(argv, **kwargs):
+        calls.append(argv[1])
+        if argv[1] == "research":
+            return subprocess.CompletedProcess(argv, 2, stdout="")
+        if argv[1] == "search":
+            payload = doctor(web=("zhipu", "tavily"), docs=("exa",))
+            payload.update(
+                ok=False, error_type="network_error", error="private diagnostic"
+            )
+            return completed(argv, payload, 4)
+        if argv[1] == "doctor":
+            pytest.fail("doctor must not run when search already reported capabilities")
+        if argv[1] == "zhipu-search":
+            return completed(
+                argv,
+                {
+                    "ok": True,
+                    "results": [
+                        {"url": "https://news.example.com/one", "description": "Direct"}
+                    ],
+                },
+            )
+        pytest.fail(f"Unexpected command: {argv[1]}")
+
+    monkeypatch.setattr(smart_search.subprocess, "run", fake_run)
+    results = smart_search.search_smart_search("query", 1)
+    assert [result.link for result in results] == ["https://news.example.com/one"]
+    assert results[0].snippet == "Direct"
+    assert calls == ["research", "search", "zhipu-search"]
+
+
+def test_thin_research_capability_status_routes_sources_without_doctor(monkeypatch):
+    calls = []
+
+    def fake_run(argv, **kwargs):
+        calls.append(argv[1])
+        if "--help" in argv:
+            return subprocess.CompletedProcess(argv, 0, stdout="usage")
+        if argv[1] == "research":
+            payload = doctor(docs=("exa",))
+            payload.update(evidence_items=[], discovery_sources=[])
+            return completed(argv, payload)
+        if argv[1] == "search":
+            return completed(argv, {"ok": True, "sources": []})
+        if argv[1] == "doctor":
+            pytest.fail("doctor must not run when research already reported capabilities")
+        if argv[1] == "exa-search":
+            return completed(
+                argv, {"ok": True, "results": [{"url": "https://docs.example.com/one"}]}
+            )
+        pytest.fail(f"Unexpected command: {argv[1]}")
+
+    monkeypatch.setattr(smart_search.subprocess, "run", fake_run)
+    results = smart_search.search_smart_search("query", 1)
+    assert [result.link for result in results] == ["https://docs.example.com/one"]
+    assert calls == ["research", "research", "search", "exa-search"]
+
+
 def test_incomplete_doctor_profile_still_routes_configured_source(monkeypatch):
     def fake_run(argv, **kwargs):
         if argv[1] == "research":

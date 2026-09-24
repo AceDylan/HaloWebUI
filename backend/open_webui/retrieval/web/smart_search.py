@@ -64,8 +64,17 @@ def _response(
     if not isinstance(payload, dict):
         return None, f"{stage}: invalid JSON"
     if payload.get("ok") is not True:
-        return None, f"{stage}: unsuccessful response"
+        return payload, f"{stage}: unsuccessful response"
     return payload, None
+
+
+def _capability_status(payload: dict | None) -> dict | None:
+    """The CLI's configured-provider summary, present in research, search and
+    doctor responses (including failed ones), so the slow doctor probe is only
+    needed when no earlier response carried it."""
+    if isinstance(payload, dict) and isinstance(payload.get("capability_status"), dict):
+        return payload["capability_status"]
+    return None
 
 
 def _source_commands(capabilities: dict, count: int) -> list[list[str]]:
@@ -150,6 +159,7 @@ def search_smart_search(
     failures = []
     unavailable = []
     had_valid_response = False
+    capability_status = None
     results = []
     seen = set()
 
@@ -205,6 +215,8 @@ def search_smart_search(
             failures.append(f"{subcommand}: timeout")
             continue
         payload, failure = _response(completed, subcommand)
+        if capability_status is None:
+            capability_status = _capability_status(payload)
         if failure:
             failures.append(failure)
             continue
@@ -221,42 +233,45 @@ def search_smart_search(
         if len(results) >= count:
             return results[:count]
 
-    try:
-        completed = _run(command, ["doctor", "--format", "json"], 30)
-    except subprocess.TimeoutExpired:
-        failures.append("doctor: timeout")
-        completed = None
-    if completed is not None:
-        payload, failure = _response(completed, "doctor")
+    # Direct provider commands recover from a failed or thin main route. The
+    # provider list normally comes from the research/search response itself;
+    # doctor is a slow probe (it tests every upstream connection), so it only
+    # runs when no earlier response reported the configured capabilities.
+    if capability_status is None:
+        try:
+            completed = _run(command, ["doctor", "--format", "json"], 30)
+        except subprocess.TimeoutExpired:
+            failures.append("doctor: timeout")
+        else:
+            payload, failure = _response(completed, "doctor")
+            if failure:
+                failures.append(failure)
+            capability_status = _capability_status(payload)
+            if capability_status is None and not failure:
+                failures.append("doctor: missing capability status")
+
+    for options in _source_commands(capability_status or {}, count):
+        subcommand = options[0]
+        try:
+            completed = _run(
+                command,
+                [subcommand, query, *options[1:], "--format", "json"],
+                35,
+            )
+        except subprocess.TimeoutExpired:
+            failures.append(f"{subcommand}: timeout")
+            continue
+        source_payload, failure = _response(completed, subcommand)
         if failure:
             failures.append(failure)
-        if isinstance(payload, dict) and isinstance(
-            payload.get("capability_status"), dict
-        ):
-            for options in _source_commands(payload["capability_status"], count):
-                subcommand = options[0]
-                try:
-                    completed = _run(
-                        command,
-                        [subcommand, query, *options[1:], "--format", "json"],
-                        35,
-                    )
-                except subprocess.TimeoutExpired:
-                    failures.append(f"{subcommand}: timeout")
-                    continue
-                source_payload, failure = _response(completed, subcommand)
-                if failure:
-                    failures.append(failure)
-                    continue
-                if not isinstance(source_payload.get("results"), list):
-                    failures.append(f"{subcommand}: unsuccessful response")
-                    continue
-                had_valid_response = True
-                add_items(source_payload["results"])
-                if len(results) >= count:
-                    return results[:count]
-        elif not failure:
-            failures.append("doctor: missing capability status")
+            continue
+        if not isinstance(source_payload.get("results"), list):
+            failures.append(f"{subcommand}: unsuccessful response")
+            continue
+        had_valid_response = True
+        add_items(source_payload["results"])
+        if len(results) >= count:
+            return results[:count]
 
     if results:
         return results[:count]

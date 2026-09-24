@@ -1,16 +1,21 @@
 #!/usr/bin/env python3
-"""reclaude-notify.py — tell HaloWebUI that a background agent run finished.
+"""reclaude-notify.py — deliver a finished background agent run to the chat that launched it.
 
-Shared by both runners: reclaude-run.sh (defaults) and codex-run.sh (which passes
---agent/--runner-name/--tool-marker/--answer-command/--config-file).
+Shared by the runners: reclaude-run.sh (defaults), codex-run.sh and agy_runner.py (which
+pass --agent/--runner-name/--tool-marker/--answer-command/--config-file).
 
-Hermes's API server cannot push a background completion back to a HaloWebUI
-chat, so the runner does it itself: it finds the hermes session that launched
-this run, and if that session came from the API server (HaloWebUI) it POSTs a
-completion notice to HaloWebUI's /api/v1/hermes/notifications endpoint.
-HaloWebUI then appends a follow-up user turn to the chat and starts a normal
-hermes run, which reads result.md and reports. Telegram/QQ sessions are left
-alone: the gateway delivers those.
+It finds the hermes session that launched this run, then:
+  * HaloWebUI (api_server): POSTs to HaloWebUI's /api/v1/hermes/notifications. The
+    payload carries the report itself (mode=display: HaloWebUI shows it as the reply,
+    no model turn) and, for an older HaloWebUI, the prompt of a follow-up turn in which
+    hermes reads result.md and reports.
+  * Telegram, for a run started with --detach (RUNNER_DETACHED_LOG is set): sends the
+    report straight to the chat through runner-deliver.py and records it in the chat's
+    session. Nothing else would: a detached run has no gateway watcher.
+  * Telegram without --detach, QQ, CLI: left alone; the gateway's background-process
+    notice delivers those.
+RUNNER_DIRECT_DELIVERY=0 turns both report paths off (HaloWebUI gets only the prompt,
+Telegram is left to the gateway).
 
 Two ways to learn the origin, in order:
   1. What the runner recorded at launch (--origin-session / meta.json's
@@ -41,12 +46,13 @@ import os
 import re
 import shlex
 import sqlite3
+import subprocess
 import sys
 import time
 import urllib.error
 import urllib.request
 
-SCRIPT_VERSION = "2026-09-17.1"
+SCRIPT_VERSION = "2026-09-24.1"
 CONFIG_FILE = "/root/.hermes/reclaude-runner.env"
 REQUIRED_CONFIG_KEYS = ("HALOWEBUI_NOTIFY_URL", "HALOWEBUI_NOTIFY_TOKEN")
 STATE_DB = "/root/.hermes/state.db"
@@ -69,6 +75,20 @@ RETRY_INTERVAL_SECONDS = 30
 BUSY_HTTP_STATUS = 409
 BUSY_RETRY_ATTEMPTS = 40  # 40 x 30s = 20 minutes of someone else's turn
 HTTP_TIMEOUT_SECONDS = 30
+# Report sent to the chat: result.md, capped (the quota footer, the last line, always kept).
+DIGEST_MAX_CHARS = 6000
+DIRECT_PLATFORMS = ("telegram",)
+HERMES_PYTHON = "/usr/local/lib/hermes-agent/venv/bin/python"
+DELIVER_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "runner-deliver.py")
+DELIVER_TIMEOUT_SECONDS = 180
+STATUS_LABELS = {
+    "success": ("✅", "已完成"),
+    "question": ("❓", "等你决定"),
+    "max_turns": ("⏸", "达到轮数上限"),
+    "quota_blocked": ("⛔", "没有启动"),
+    "timeout": ("⏱", "超时"),
+}
+SESSION_LABELS = {"reclaude": "Claude 会话", "codex": "codex thread", "agy": "AGY conversation"}
 
 
 def log(message):
@@ -412,6 +432,119 @@ def build_prompt(
     return "\n".join(lines)
 
 
+def direct_delivery_enabled():
+    return os.environ.get("RUNNER_DIRECT_DELIVERY", "1").strip() != "0"
+
+
+def _read_text(path):
+    try:
+        with open(path, encoding="utf-8", errors="replace") as handle:
+            return handle.read()
+    except OSError:
+        return ""
+
+
+def _tail_lines(path, count):
+    lines = [line for line in _read_text(path).splitlines() if line.strip()]
+    return lines[-count:]
+
+
+def build_digest(run_id, status, run_dir, session_id, agent="reclaude"):
+    """The report as the user reads it: a status line, result.md, and what to do next.
+
+    Capped at DIGEST_MAX_CHARS; a longer result keeps its head and the quota footer and
+    points at result.md for the rest.
+    """
+    result_path = os.path.join(run_dir, "result.md")
+    icon, label = STATUS_LABELS.get(status, ("❌", f"没有正常完成（{status}）"))
+    details = []
+    if session_id:
+        details.append(f"{SESSION_LABELS.get(agent, 'session')} {session_id}")
+    summary = _json_object(_read_text(os.path.join(run_dir, "result.json")))
+    if summary.get("num_turns"):
+        details.append(f"{summary['num_turns']} 轮")
+    if summary.get("duration_human"):
+        details.append(str(summary["duration_human"]))
+    lines = [f"{icon} {agent} 运行 {run_id} · {label}"]
+    if details:
+        lines.append(" · ".join(details))
+
+    body = _read_text(result_path).strip()
+    footer = ""
+    if body:
+        head, _, last = body.rpartition("\n")
+        if QUOTA_FOOTER_MARKER in last:
+            body, footer = head.rstrip(), last.strip()
+    if len(body) > DIGEST_MAX_CHARS:
+        rest = len(body) - DIGEST_MAX_CHARS
+        body = (body[:DIGEST_MAX_CHARS].rstrip()
+                + f"\n\n…（后面还有约 {rest} 字，完整结果在 {result_path}，需要时让 Hermes 读取）")
+    lines += ["", body or f"（没有 result.md：{result_path}）"]
+
+    if status == "question":
+        lines += ["", "↩️ 直接回复你的决定，Hermes 会在同一个会话里续跑。"]
+    elif status == "max_turns":
+        lines += ["", "↩️ 回复「继续」，可以在同一个会话里接着跑。"]
+    elif status != "success" and "runner 提示" not in body:
+        progress = _tail_lines(os.path.join(run_dir, "progress.log"), 8)
+        if progress:
+            lines += ["", "最后几步：", "```", *progress, "```"]
+    if footer:
+        lines += ["", footer]
+    return "\n".join(lines)
+
+
+def build_session_notice(run_id, status, run_dir, session_id, digest, agent="reclaude",
+                         answer_command="reclaude-run.sh answer"):
+    """What the chat's session records next to the delivered report (a user-role line)."""
+    result_path = os.path.join(run_dir, "result.md")
+    session_label = SESSION_LABELS.get(agent, "agent session")
+    hint = ""
+    if status in ("question", "max_turns"):
+        hint = f"用户回复后用 {answer_command} {run_id} --task \"<用户的话>\" --detach 续跑同一个会话。"
+    return (
+        f"[后台任务完成通知] {agent} 运行 {run_id} 已结束，状态：{status}，{session_label}：{session_id}。\n"
+        f"（下面的报告已由 runner 直接发给用户，不要再转述；用户接着问时以它为准，完整结果见 {result_path}。{hint}）\n\n"
+        + digest
+    )
+
+
+def deliver_to_chat(platform, chat_id, session_id, run_dir, digest, notice):
+    """Send *digest* to the chat through runner-deliver.py; record *notice* in its session.
+
+    Returns the helper's JSON result (``success`` True/False). A send is never repeated
+    once the helper exited 0, even if its output cannot be parsed.
+    """
+    message_file = os.path.join(run_dir, "delivery.md")
+    notice_file = os.path.join(run_dir, "delivery-notice.md")
+    for path, text in ((message_file, digest), (notice_file, notice)):
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write(text)
+        os.chmod(path, 0o600)
+    command = [
+        os.environ.get("HERMES_PYTHON", HERMES_PYTHON), DELIVER_SCRIPT,
+        "--platform", platform, "--chat-id", chat_id, "--session-id", session_id or "",
+        "--user-id", os.environ.get("HERMES_SESSION_USER_ID", ""),
+        "--thread-id", os.environ.get("HERMES_SESSION_THREAD_ID", ""),
+        "--message-file", message_file, "--mirror-file", notice_file,
+    ]
+    try:
+        proc = subprocess.run(command, capture_output=True, text=True, timeout=DELIVER_TIMEOUT_SECONDS)
+    except (OSError, subprocess.SubprocessError) as exc:
+        return {"success": False, "error": f"{type(exc).__name__}: {exc}"[:300]}
+    result = {}
+    for line in reversed((proc.stdout or "").splitlines()):
+        result = _json_object(line)
+        if result:
+            break
+    if proc.returncode == 0:
+        result["success"] = True
+    else:
+        result["success"] = False
+        result.setdefault("error", (proc.stderr or proc.stdout or f"exit {proc.returncode}").strip()[-300:])
+    return result
+
+
 def post_notification(url, token, payload, user_agent="reclaude-runner/1.0"):
     data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
     request = urllib.request.Request(
@@ -426,6 +559,42 @@ def post_notification(url, token, payload, user_agent="reclaude-runner/1.0"):
     )
     with urllib.request.urlopen(request, timeout=HTTP_TIMEOUT_SECONDS) as response:
         return response.status, response.read().decode("utf-8", "replace")[:500]
+
+
+def deliver_direct(args, record, save, platform, chat_id, session_id, agent_session):
+    """Report a detached run to its gateway chat, retrying like the HaloWebUI path."""
+    digest = build_digest(args.run_id, args.status, args.run_dir, agent_session, agent=args.agent)
+    notice = build_session_notice(
+        args.run_id, args.status, args.run_dir, agent_session, digest, agent=args.agent,
+        answer_command=args.answer_command,
+    )
+    record["attempted"] = True
+    record["delivery"] = f"{platform}-direct"
+    record["chat_id"] = chat_id
+    attempt = 0
+    while True:
+        attempt += 1
+        result = deliver_to_chat(platform, chat_id, session_id, args.run_dir, digest, notice)
+        if result.get("success"):
+            record["delivered_at"] = datetime.datetime.now().isoformat(timespec="seconds")
+            for key in ("message_id", "mirrored", "mirror_target"):
+                if key in result:
+                    record[key] = result[key]
+            log(f"sent the report to {platform} chat {chat_id} (session record: "
+                f"{result.get('mirror_target', '?')} mirrored={result.get('mirrored')})")
+            save()
+            return 0
+        record["error"] = result.get("error", "")
+        log(f"attempt {attempt}: {platform} delivery failed: {record['error'][:200]}"
+            f"{' (will retry)' if attempt < RETRY_ATTEMPTS else ''}")
+        if attempt >= RETRY_ATTEMPTS:
+            break
+        time.sleep(RETRY_INTERVAL_SECONDS)
+    record["failed"] = True
+    record["attempts"] = attempt
+    log(f"giving up after {attempt} attempts; the report stays in {args.run_dir}/result.md")
+    save()
+    return 0
 
 
 def main():
@@ -510,24 +679,10 @@ def main():
         except OSError:
             pass
 
-    # dry-run resolves the origin only, so it never reads the notification credentials.
-    config, config_sources = ({}, []) if args.dry_run else load_config(args.config_file)
-    url = config.get("HALOWEBUI_NOTIFY_URL", "").strip()
-    token = config.get("HALOWEBUI_NOTIFY_TOKEN", "").strip()
-    if not args.dry_run:
-        record["config_files"] = config_sources
-        missing = missing_config_keys(config)
-        if missing:
-            record["skipped"] = "notify not configured"
-            record["config_missing"] = missing
-            looked_at = ", ".join(entry["path"] for entry in config_sources) or "(none)"
-            log(f"notify skipped: {' / '.join(missing)} not set in any config file ({looked_at})")
-            save()
-            return 0
-
     # What the runner recorded at launch beats anything reconstructed afterwards.
+    meta = read_meta(args.run_dir)
     origin = recorded_origin(
-        read_meta(args.run_dir),
+        meta,
         args.origin_session,
         args.origin_platform,
         db_path=args.state_db,
@@ -555,11 +710,29 @@ def main():
     record["origin_source"] = source
     record["origin_resolved_by"] = resolved_by
     log(f"origin session {session_id} (source={source or '?'}) resolved from {resolved_by}")
+    # --detach (runner-detach.py) leaves this in the runner's environment, and nothing but
+    # this notifier reports a detached run: there is no gateway watcher behind it.
+    detached = bool(os.environ.get("RUNNER_DETACHED_LOG", "").strip())
+    record["launch"] = "detached" if detached else "background"
+    direct = (
+        source in DIRECT_PLATFORMS and detached and direct_delivery_enabled()
+    )
+    chat_id = (meta.get("origin_chat_id") or os.environ.get("HERMES_SESSION_CHAT_ID") or "").strip()
+    agent_session = meta.get("session_id", "") or meta.get("thread_id", "")
     if args.dry_run:
-        record["chat_id"] = session_id if source == "api_server" else None
+        record["chat_id"] = session_id if source == "api_server" else (chat_id if direct else None)
+        if direct:
+            record["would_deliver"] = f"{source}:{chat_id or '?'}"
         save()
         return 0
     if source != "api_server":
+        if direct:
+            if not chat_id:
+                record["skipped"] = f"origin is {source} but the runner recorded no chat id"
+                log(f"notify skipped: {record['skipped']}")
+                save()
+                return 0
+            return deliver_direct(args, record, save, source, chat_id, session_id, agent_session)
         record["skipped"] = f"origin is {source}; gateway delivers"
         log(
             f"notify skipped: origin session {session_id} came from {source}; the gateway delivers there"
@@ -567,12 +740,18 @@ def main():
         save()
         return 0
 
-    agent_session = ""
-    try:
-        with open(os.path.join(args.run_dir, "meta.json"), encoding="utf-8") as handle:
-            agent_session = json.load(handle).get("session_id", "")
-    except (OSError, ValueError):
-        pass
+    config, config_sources = load_config(args.config_file)
+    url = config.get("HALOWEBUI_NOTIFY_URL", "").strip()
+    token = config.get("HALOWEBUI_NOTIFY_TOKEN", "").strip()
+    record["config_files"] = config_sources
+    missing = missing_config_keys(config)
+    if missing:
+        record["skipped"] = "notify not configured"
+        record["config_missing"] = missing
+        looked_at = ", ".join(entry["path"] for entry in config_sources) or "(none)"
+        log(f"notify skipped: {' / '.join(missing)} not set in any config file ({looked_at})")
+        save()
+        return 0
 
     payload = {
         "chat_id": session_id,
@@ -587,6 +766,17 @@ def main():
             answer_command=args.answer_command,
         ),
     }
+    if direct_delivery_enabled():
+        # A HaloWebUI that knows mode=display shows the report as the reply, with no model
+        # turn; an older one ignores these keys and runs the prompt above.
+        digest = build_digest(args.run_id, args.status, args.run_dir, agent_session, agent=args.agent)
+        payload["mode"] = "display"
+        payload["content"] = digest
+        # The user turn HaloWebUI shows above the report: the notice's first line.
+        payload["notice"] = build_session_notice(
+            args.run_id, args.status, args.run_dir, agent_session, "", agent=args.agent,
+            answer_command=args.answer_command,
+        ).splitlines()[0]
     record["attempted"] = True
     record["chat_id"] = session_id
     attempt = 0

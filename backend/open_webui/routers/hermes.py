@@ -11,9 +11,12 @@ QQ, CLI); POST /api/v1/hermes/sessions/{id}/import turns one into a chat whose
 id is the hermes session id, so the chat continues that session.
 
 POST /api/v1/hermes/notifications — a background process started by hermes
-(for example a ``reclaude-run.sh`` run) reports its completion. HaloWebUI turns
-the notification into a follow-up user turn in the originating chat and starts a
-normal hermes run for it, so the report streams into the chat like any reply.
+(for example a ``reclaude-run.sh`` run) reports its completion. With
+``mode=display`` the payload carries the report itself (``content``, plus a short
+``notice``) and HaloWebUI shows it as the reply, with no model turn. Otherwise
+HaloWebUI turns ``prompt`` into a follow-up user turn in the originating chat and
+starts a normal hermes run for it, so the report streams into the chat like any
+reply. Runners send both, so an older HaloWebUI still works.
 
 Authentication is a shared bearer token (``HERMES_AGENT_NOTIFY_TOKEN``), not a
 user session: the caller is a server-side process, and the chat owner is derived
@@ -22,7 +25,7 @@ from the chat itself.
 
 import asyncio
 import logging
-from typing import Optional
+from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
@@ -48,9 +51,11 @@ from open_webui.utils.hermes_sessions import (
 from open_webui.utils.hermes_unread import list_unread_chat_ids, mark_read
 from open_webui.utils.webhook import post_webhook
 from open_webui.utils.hermes_notify import (
+    NOTIFICATION_CONTENT_MAX_CHARS,
     NOTIFICATION_PROMPT_MAX_CHARS,
     HermesNotifyError,
     notify_token_configured,
+    show_notification_report,
     start_follow_up_turn,
     verify_notify_token,
 )
@@ -66,6 +71,9 @@ class HermesNotificationForm(BaseModel):
     prompt: str = Field(min_length=1, max_length=NOTIFICATION_PROMPT_MAX_CHARS)
     source: Optional[str] = Field(default=None, max_length=64)
     run_id: Optional[str] = Field(default=None, max_length=128)
+    mode: Optional[Literal["display"]] = None
+    content: Optional[str] = Field(default=None, max_length=NOTIFICATION_CONTENT_MAX_CHARS)
+    notice: Optional[str] = Field(default=None, max_length=4000)
 
 
 @router.post("/notifications")
@@ -79,12 +87,21 @@ async def receive_hermes_notification(request: Request, form_data: HermesNotific
         raise HTTPException(status_code=401, detail="invalid notification token")
 
     try:
-        result = await start_follow_up_turn(
-            request,
-            chat_id=form_data.chat_id,
-            prompt=form_data.prompt,
-            source=form_data.source or "",
-        )
+        if form_data.mode == "display" and (form_data.content or "").strip():
+            result = await show_notification_report(
+                request,
+                chat_id=form_data.chat_id,
+                content=form_data.content,
+                notice=form_data.notice or "",
+                source=form_data.source or "",
+            )
+        else:
+            result = await start_follow_up_turn(
+                request,
+                chat_id=form_data.chat_id,
+                prompt=form_data.prompt,
+                source=form_data.source or "",
+            )
     except HermesNotifyError as e:
         raise HTTPException(status_code=e.status_code, detail=e.detail)
     except Exception as e:
@@ -97,6 +114,7 @@ async def receive_hermes_notification(request: Request, form_data: HermesNotific
         "user_message_id": result["user_message_id"],
         "assistant_message_id": result["assistant_message_id"],
         "run_id": form_data.run_id,
+        "mode": "display" if form_data.mode == "display" and (form_data.content or "").strip() else "turn",
     }
 
 

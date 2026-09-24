@@ -138,3 +138,97 @@ def test_build_follow_up_form_data_matches_web_client_shape():
         "follow_up_generation": False,
     }
     assert RELOAD_EVENT_TYPE == "chat:reload"
+
+
+def test_append_report_turn_is_a_finished_reply():
+    chat = _chat()
+    model_info = find_chat_model(chat)
+    user_id, assistant_id = hermes_notify.append_report_turn(
+        chat, "[后台任务完成通知] reclaude 运行 r1 已结束", "✅ 报告正文", model_info, now=10
+    )
+    messages = chat["history"]["messages"]
+    assert chat["history"]["currentId"] == assistant_id
+    assert messages[user_id]["parentId"] == "a1"
+    assert messages[user_id]["content"] == "[后台任务完成通知] reclaude 运行 r1 已结束"
+    assert messages[assistant_id]["content"] == "✅ 报告正文"
+    assert messages[assistant_id]["done"] is True
+    assert messages[assistant_id]["completedAt"] == 10
+    assert messages[assistant_id]["model"] == messages["a1"]["model"]
+
+
+def _patch_report_stack(monkeypatch, *, busy=False):
+    import asyncio
+    from types import SimpleNamespace
+
+    from open_webui.utils import hermes_agent, hermes_unread, html_visual_prompt
+
+    calls = {"saved": [], "events": [], "unread": [], "webhook": [], "designed": []}
+    chat_row = SimpleNamespace(id="chat-1", user_id="user-1", chat=_chat())
+    monkeypatch.setattr(hermes_notify.Chats, "get_chat_by_id", lambda _id: chat_row)
+    monkeypatch.setattr(hermes_notify.Chats, "get_chat_title_by_id", lambda _id: "标题")
+    monkeypatch.setattr(
+        hermes_notify.Chats,
+        "update_chat_by_id",
+        lambda chat_id, chat, **_kw: calls["saved"].append(chat) or chat_row,
+    )
+    monkeypatch.setattr(
+        hermes_notify.Users, "get_user_by_id", lambda _id: SimpleNamespace(id="user-1")
+    )
+    monkeypatch.setattr(
+        hermes_notify, "list_task_ids_by_chat_id", lambda _id: ["task"] if busy else []
+    )
+
+    async def emitter(event):
+        calls["events"].append(event)
+
+    monkeypatch.setattr(hermes_notify, "get_event_emitter", lambda _meta, update_db=True: emitter)
+    monkeypatch.setattr(hermes_unread, "mark_unread", lambda chat_id, user_id: calls["unread"].append(chat_id))
+    monkeypatch.setattr(
+        hermes_agent,
+        "_schedule_completion_webhook",
+        lambda request, user, metadata, title, content: calls["webhook"].append((title, content)),
+    )
+
+    async def fake_design(content, metadata):
+        calls["designed"].append(metadata)
+        return content
+
+    monkeypatch.setattr(html_visual_prompt, "design_html_visual_artifact_with_agy", fake_design)
+    monkeypatch.setattr(html_visual_prompt, "append_html_visual_fallback", lambda content, _m: content)
+
+    async def forbidden(*_args, **_kwargs):
+        raise AssertionError("display mode must not start a model turn")
+
+    monkeypatch.setattr(hermes_notify, "start_follow_up_turn", forbidden)
+    return calls, asyncio
+
+
+def test_show_notification_report_saves_announces_and_starts_no_turn(monkeypatch):
+    calls, asyncio = _patch_report_stack(monkeypatch)
+
+    async def run():
+        result = await hermes_notify.show_notification_report(
+            object(), chat_id="chat-1", content="✅ 报告", notice="[后台任务完成通知] x", source="reclaude-runner"
+        )
+        await asyncio.sleep(0)  # let the design task run
+        await asyncio.gather(*hermes_notify._REPORT_DESIGN_TASKS)
+        return result
+
+    result = asyncio.run(run())
+    saved = calls["saved"][-1]["history"]
+    assert saved["messages"][result["assistant_message_id"]]["content"] == "✅ 报告"
+    assert saved["messages"][result["user_message_id"]]["content"] == "[后台任务完成通知] x"
+    assert calls["events"][0]["type"] == RELOAD_EVENT_TYPE
+    assert calls["unread"] == ["chat-1"]
+    assert calls["webhook"] == [("标题", "✅ 报告")]
+    assert calls["designed"][0]["server_surface"] == "halowebui-web"
+
+
+def test_show_notification_report_respects_a_busy_chat(monkeypatch):
+    import pytest
+
+    calls, asyncio = _patch_report_stack(monkeypatch, busy=True)
+    with pytest.raises(hermes_notify.HermesNotifyError) as error:
+        asyncio.run(hermes_notify.show_notification_report(object(), chat_id="chat-1", content="x"))
+    assert error.value.status_code == 409
+    assert calls["saved"] == []

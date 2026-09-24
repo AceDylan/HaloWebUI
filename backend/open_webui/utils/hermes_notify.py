@@ -35,6 +35,10 @@ log.setLevel(SRC_LOG_LEVELS.get("MAIN", logging.INFO))
 
 HERMES_AGENT_NOTIFY_TOKEN_ENV = "HERMES_AGENT_NOTIFY_TOKEN"
 NOTIFICATION_PROMPT_MAX_CHARS = 8000
+# mode=display: the runner's own report, shown as the reply (runner caps it near 6000).
+NOTIFICATION_CONTENT_MAX_CHARS = 20000
+NOTIFICATION_NOTICE_MAX_CHARS = 1000
+DEFAULT_REPORT_NOTICE = "[后台任务完成通知]"
 CONVERSATION_MESSAGE_LIMIT = 20
 RELOAD_EVENT_TYPE = "chat:reload"
 # Give the browser a moment to reload the chat (and register the placeholder
@@ -203,6 +207,26 @@ def append_follow_up_turn(
     return user_id, assistant_id
 
 
+def append_report_turn(
+    chat_dict: dict[str, Any],
+    notice: str,
+    content: str,
+    model_info: dict[str, Any],
+    *,
+    now: Optional[int] = None,
+) -> tuple[str, str]:
+    """Append the notice as a user message and the report as a finished reply.
+
+    Same branch handling as :func:`append_follow_up_turn`; the assistant message is
+    complete (``done``) instead of a placeholder for a model turn to fill.
+    """
+    timestamp = int(now if now is not None else time.time())
+    user_id, assistant_id = append_follow_up_turn(chat_dict, notice, model_info, now=timestamp)
+    assistant = _history(chat_dict)["messages"][assistant_id]
+    assistant.update({"content": content, "done": True, "completedAt": timestamp})
+    return user_id, assistant_id
+
+
 def build_follow_up_form_data(
     *,
     model_id: str,
@@ -317,3 +341,130 @@ async def start_follow_up_turn(
         "assistant_message_id": assistant_message_id,
         "result": result,
     }
+
+
+
+_REPORT_DESIGN_TASKS: set = set()
+
+
+async def show_notification_report(
+    request, *, chat_id: str, content: str, notice: str = "", source: str = ""
+) -> dict[str, Any]:
+    """mode=display: show a finished background run's report as the reply, no model turn.
+
+    The runner already wrote the report (its result.md plus a status line), so a hermes
+    turn that only reads the file and retypes it (about two minutes) adds nothing. The
+    chat gets the notice as a user message and the report as a finished assistant
+    reply; open tabs reload, the chat is marked unread and the away webhook fires, as
+    for a finished hermes run. The HTML design pass runs afterwards and swaps its
+    artifact in, like a normal reply. Same errors as :func:`start_follow_up_turn`.
+    """
+    content = (content or "").strip()
+    notice = (notice or "").strip() or DEFAULT_REPORT_NOTICE
+    if not content:
+        raise HermesNotifyError(422, "content is empty")
+    if len(content) > NOTIFICATION_CONTENT_MAX_CHARS:
+        raise HermesNotifyError(422, "content is too long")
+    if len(notice) > NOTIFICATION_NOTICE_MAX_CHARS:
+        notice = notice[:NOTIFICATION_NOTICE_MAX_CHARS]
+
+    chat = Chats.get_chat_by_id(chat_id)
+    if chat is None:
+        raise HermesNotifyError(404, "chat not found")
+    user = Users.get_user_by_id(chat.user_id)
+    if user is None:
+        raise HermesNotifyError(404, "chat owner not found")
+    if list_task_ids_by_chat_id(chat_id):
+        raise HermesNotifyError(409, "chat is busy with another run; retry later")
+    chat_dict = dict(chat.chat or {})
+    model_info = find_chat_model(chat_dict)
+    if not model_info:
+        raise HermesNotifyError(422, "chat has no assistant model to continue with")
+
+    user_message_id, assistant_message_id = append_report_turn(
+        chat_dict, notice, content, model_info
+    )
+    if Chats.update_chat_by_id(chat_id, chat_dict, update_title=False) is None:
+        raise HermesNotifyError(500, "failed to persist the report")
+
+    # Imported lazily: hermes_agent pulls in the socket and middleware stack.
+    from open_webui.utils.hermes_agent import _schedule_completion_webhook
+    from open_webui.utils.hermes_unread import mark_unread
+    from open_webui.utils.html_visual_prompt import HTML_VISUAL_WEB_SURFACE
+
+    metadata = {
+        "user_id": user.id,
+        "chat_id": chat_id,
+        "message_id": assistant_message_id,
+        "server_surface": HTML_VISUAL_WEB_SURFACE,
+        "features": {
+            "html_visual_artifacts": "force",
+            "html_visual_surface": HTML_VISUAL_WEB_SURFACE,
+        },
+    }
+    emitter = get_event_emitter(metadata, update_db=False)
+    try:
+        await emitter(
+            {
+                "type": RELOAD_EVENT_TYPE,
+                "data": {
+                    "reason": "hermes_notification",
+                    "source": source or "",
+                    "user_message_id": user_message_id,
+                    "message_id": assistant_message_id,
+                },
+            }
+        )
+    except Exception as e:  # the report is saved; the chat shows it on next open
+        log.warning(f"hermes report reload event failed for chat {chat_id}: {e}")
+    mark_unread(chat_id, user.id)
+    _schedule_completion_webhook(
+        request, user, metadata, Chats.get_chat_title_by_id(chat_id), content
+    )
+
+    task = asyncio.create_task(_design_report(emitter, metadata, content))
+    _REPORT_DESIGN_TASKS.add(task)
+    task.add_done_callback(_REPORT_DESIGN_TASKS.discard)
+    log.info(
+        "hermes notification shown as a report chat=%s source=%s message=%s",
+        chat_id,
+        source or "",
+        assistant_message_id,
+    )
+    return {
+        "status": True,
+        "chat_id": chat_id,
+        "user_message_id": user_message_id,
+        "assistant_message_id": assistant_message_id,
+    }
+
+
+async def _design_report(emitter, metadata: dict[str, Any], content: str) -> None:
+    """The HTML design pass for a shown report: same helpers as a hermes reply."""
+    from open_webui.utils.html_visual_prompt import (
+        append_html_visual_fallback,
+        design_html_visual_artifact_with_agy,
+    )
+
+    try:
+        designed = await design_html_visual_artifact_with_agy(content, metadata)
+        designed = append_html_visual_fallback(designed, metadata)
+    except asyncio.CancelledError:
+        raise
+    except Exception as e:
+        log.warning(f"hermes report design failed: {e}")
+        return
+    if designed == content:
+        return
+    try:
+        Chats.upsert_message_to_chat_by_id_and_message_id(
+            metadata["chat_id"],
+            metadata["message_id"],
+            {"content": designed},
+            guard_stopped=True,
+            set_current=False,
+        )
+        await emitter({"type": "chat:completion", "data": {"content": designed}})
+    except Exception as e:
+        log.warning(f"hermes report design update failed: {e}")
+

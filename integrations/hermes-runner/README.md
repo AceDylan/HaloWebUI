@@ -34,7 +34,19 @@
 - `terminal(background=true)` 只返回 `Background process started`，不含 run id，
   没人 poll 就根本没有可溯源的记录。
 
-来源有歧义或缺少可验证记录时拒绝猜测；Telegram / QQ 来源主动跳过，交给 gateway 投递。
+来源有歧义或缺少可验证记录时拒绝猜测。
+
+## 投递方式（2026-09-24 起）
+
+- **HaloWebUI（api_server）**：POST 里同时带 `mode=display` + `content`（runner 的报告：状态行 +
+  result.md，超过约 6000 字截断、保留末行额度页脚）+ `notice`（聊天里那条通知的标题），以及旧的
+  `prompt`。新版 HaloWebUI 直接把报告显示成一条回复，不起模型回合；旧版忽略新字段，照旧用 `prompt`
+  起一轮 hermes 去读 result.md。
+- **Telegram，且 run 是用 `--detach` 启动的**（runner 环境里有 `RUNNER_DETACHED_LOG`）：用 Hermes 的
+  解释器跑 `/root/.hermes/scripts/runner-deliver.py`，经脱敏后直接发到来源聊天，并以 user 角色在该
+  聊天当前的会话里记一条 `[后台任务完成通知] …` 消息。`notify.json` 里是 `delivery=telegram-direct`。
+- **其他情况**（非 `--detach` 的 Telegram、QQ、CLI）：主动跳过，交给 gateway 的后台进程通知。
+- `RUNNER_DIRECT_DELIVERY=0`：两条新路径都关掉，回到旧行为。
 
 ## 配置文件是**分层**的
 
@@ -119,7 +131,8 @@ HTTP 客户端），不改写 `notify.json` / `meta.json` / `result.md`，只在
 | 字段 | 含义 |
 |---|---|
 | `origin_resolved_by` | `runner`（启动时记录）或 `state.db`（旧的反查兜底） |
-| `skipped` | `origin is telegram; gateway delivers`（正常）/ `origin session not found` / `notify not configured` |
+| `skipped` | `origin is telegram; gateway delivers`（非 `--detach` 启动，正常）/ `origin session not found` / `notify not configured` |
+| `launch` / `delivery` | `detached` 或 `background`；直接投递时为 `telegram-direct`，并带 `message_id` / `mirrored` / `mirror_target` |
 | `config_missing` | 所有候选配置文件都没提供的键名 |
 | `config_files` | 查过哪些配置文件、各自提供了哪些键名（无值） |
 | `attempted` / `http_status` / `delivered_at` / `failed` | 实际投递结果 |

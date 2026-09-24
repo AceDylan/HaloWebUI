@@ -136,5 +136,8 @@ def start_logger():
         uvicorn_logger = logging.getLogger(uvicorn_logger_name)
         uvicorn_logger.setLevel(GLOBAL_LOG_LEVEL)
         uvicorn_logger.handlers = [InterceptHandler()]
+    # httpx logs every request URL at INFO, and Telegram Bot API URLs carry the
+    # bot token (/bot<token>/getUpdates is polled every few seconds).
+    logging.getLogger("httpx").setLevel(logging.WARNING)
 
     logger.info(f"GLOBAL_LOG_LEVEL: {GLOBAL_LOG_LEVEL}")

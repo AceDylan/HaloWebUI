@@ -1,9 +1,11 @@
 <script lang="ts">
 	import { onMount, onDestroy, getContext } from 'svelte';
+	import { toast } from 'svelte-sonner';
 	import { chatId, hermesActiveRuns, hermesUnreadChatIds, mobile, showSidebar } from '$lib/stores';
 	import {
 		getHermesActivity,
 		markHermesChatRead,
+		HermesSessionExpiredError,
 		type HermesActiveRun
 	} from '$lib/apis/hermes';
 	import Folder from '../../common/Folder.svelte';
@@ -27,14 +29,46 @@
 	let now = Date.now() / 1000;
 	let pollTimer: ReturnType<typeof setInterval> | null = null;
 	let clockTimer: ReturnType<typeof setInterval> | null = null;
+	// Set once the token stops being accepted: polling stops (a tab left open
+	// overnight otherwise sends a failing request every 10s) and the indicators
+	// are cleared instead of showing a stale "running". Showing the tab again
+	// retries once, which picks up a sign-in made in another tab.
+	let sessionExpired = false;
+	let destroyed = false;
+
+	const startPolling = () => {
+		if (!pollTimer && !destroyed) pollTimer = setInterval(refresh, POLL_MS);
+	};
+
+	const stopPolling = () => {
+		if (pollTimer) clearInterval(pollTimer);
+		pollTimer = null;
+	};
+
+	const onSessionExpired = () => {
+		if (sessionExpired) return;
+		sessionExpired = true;
+		stopPolling();
+		runs = [];
+		hermesActiveRuns.set([]);
+		hermesUnreadChatIds.set(new Set());
+		toast.warning($i18n.t('Your session has expired. Please log in again.'));
+	};
 
 	const refresh = async () => {
 		if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
 			return;
 		}
-		const activity = await getHermesActivity(localStorage.token).catch(() => null);
-		if (!activity) {
+		let activity;
+		try {
+			activity = await getHermesActivity(localStorage.token);
+		} catch (error) {
+			if (error instanceof HermesSessionExpiredError) onSessionExpired();
 			return;
+		}
+		if (sessionExpired) {
+			sessionExpired = false;
+			startPolling();
 		}
 		runs = activity.runs;
 		hermesActiveRuns.set(activity.runs);
@@ -61,7 +95,7 @@
 
 	onMount(() => {
 		refresh();
-		pollTimer = setInterval(refresh, POLL_MS);
+		startPolling();
 		clockTimer = setInterval(() => {
 			now = Date.now() / 1000;
 		}, 1000);
@@ -69,7 +103,8 @@
 	});
 
 	onDestroy(() => {
-		if (pollTimer) clearInterval(pollTimer);
+		destroyed = true;
+		stopPolling();
 		if (clockTimer) clearInterval(clockTimer);
 		if (typeof document !== 'undefined') {
 			document.removeEventListener('visibilitychange', refresh);

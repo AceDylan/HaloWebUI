@@ -184,12 +184,23 @@ export const testNotificationWebhook = async (
 
 export type HermesActivity = { runs: HermesActiveRun[]; unread: string[] };
 
+/** The sign-in behind the token is gone (a framed Hub session lasts 12h). */
+export class HermesSessionExpiredError extends Error {
+	constructor() {
+		super('session expired');
+		this.name = 'HermesSessionExpiredError';
+	}
+}
+
 /**
  * Runs executing now plus the chats whose run finished and has not been opened
  * since — one poll feeds both sidebar indicators.
  */
 export const getHermesActivity = async (token: string): Promise<HermesActivity> => {
 	const res = await fetch(`${WEBUI_API_BASE_URL}/hermes/runs`, { headers: jsonHeaders(token) });
+	if (res.status === 401) {
+		throw new HermesSessionExpiredError();
+	}
 	if (!res.ok) {
 		throw await detailOf(res);
 	}

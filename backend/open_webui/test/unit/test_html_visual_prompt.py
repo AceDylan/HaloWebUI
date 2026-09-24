@@ -32,6 +32,19 @@ from open_webui.utils.html_visual_prompt import (
 )
 
 
+_REAL_AGY_ANSWER_DESIGN_ACTIVE = html_visual_prompt.agy_answer_design_active
+
+
+@pytest.fixture(autouse=True)
+def _model_owns_the_artifact_by_default(monkeypatch):
+    """The prompt tests below describe the model-built artifact, which is what force mode
+    asks for whenever the post-answer AGY pass is not in charge; whether it is depends on
+    the host (the container configures AGY), so pin it off here. The AGY-owned tests at
+    the end switch the real check back on. Also starts every test with a clean AGY health."""
+    monkeypatch.setattr(html_visual_prompt, "agy_answer_design_active", lambda: False)
+    monkeypatch.setattr(html_visual_prompt, "_agy_answer_health", {"failures": 0, "last_failure": 0.0})
+
+
 def _form_data():
     return {
         "messages": [
@@ -1300,3 +1313,64 @@ def test_safe_fallback_renders_generated_images_instead_of_their_markdown():
     # external links stay inert text, still with the escaped colon
     assert "![ext](https&#58;//cdn.example/a.png)" in artifact
     assert "&#96;code&#96;" in artifact
+
+
+def _web_metadata():
+    return {"server_surface": "halowebui-web"}
+
+
+def test_force_mode_leaves_the_artifact_to_agy_when_it_is_configured(monkeypatch):
+    monkeypatch.setattr(html_visual_prompt, "agy_answer_design_active", _REAL_AGY_ANSWER_DESIGN_ACTIVE)
+    monkeypatch.setenv(html_visual_prompt.HTML_VISUAL_AGY_COMMAND_ENV, "/opt/host-agy/bin/agy -p")
+    metadata = _web_metadata()
+
+    prompt = apply_html_visual_prompt_overlay(_form_data(), metadata)["messages"][1]["content"]
+
+    assert HTML_VISUAL_PROMPT_MARKER in prompt
+    assert html_visual_prompt.HTML_VISUAL_AGY_OWNED_PROMPT_MARKER in prompt
+    assert HTML_VISUAL_FORCE_PROMPT_MARKER not in prompt
+    assert "必须包含一个非空的 fenced" not in prompt
+    assert "不要自己输出 fenced `html`" in prompt
+    assert "Telegram" in prompt
+    assert metadata["html_visual_artifacts"] == {
+        "enabled": True, "surface": "halowebui-web", "mode": "force", "author": "agy"}
+
+
+def test_without_an_agy_command_the_model_still_writes_the_artifact(monkeypatch):
+    monkeypatch.setattr(html_visual_prompt, "agy_answer_design_active", _REAL_AGY_ANSWER_DESIGN_ACTIVE)
+    monkeypatch.setenv(html_visual_prompt.HTML_VISUAL_AGY_COMMAND_ENV, "")
+    metadata = _web_metadata()
+    prompt = apply_html_visual_prompt_overlay(_form_data(), metadata)["messages"][1]["content"]
+    assert HTML_VISUAL_FORCE_PROMPT_MARKER in prompt
+    assert metadata["html_visual_artifacts"]["author"] == "model"
+
+
+def test_repeated_agy_failures_hand_the_artifact_back_until_agy_succeeds(monkeypatch):
+    monkeypatch.setattr(html_visual_prompt, "agy_answer_design_active", _REAL_AGY_ANSWER_DESIGN_ACTIVE)
+    monkeypatch.setenv(html_visual_prompt.HTML_VISUAL_AGY_COMMAND_ENV, "/opt/host-agy/bin/agy -p")
+    started = 0.0
+    for _ in range(html_visual_prompt.AGY_ANSWER_FAILURE_THRESHOLD - 1):
+        html_visual_prompt._record_agy_html_status({}, "timeout", started)
+    assert _REAL_AGY_ANSWER_DESIGN_ACTIVE()  # not yet
+
+    html_visual_prompt._record_agy_html_status({}, "failed", started, reason="authentication_required")
+    assert not _REAL_AGY_ANSWER_DESIGN_ACTIVE()
+    prompt = apply_html_visual_prompt_overlay(_form_data(), _web_metadata())["messages"][1]["content"]
+    assert HTML_VISUAL_FORCE_PROMPT_MARKER in prompt
+
+    # The failures are old news after the window, and one success clears them at once.
+    health = html_visual_prompt._agy_answer_health
+    health["last_failure"] -= html_visual_prompt.AGY_ANSWER_FAILURE_WINDOW_SECONDS + 1
+    assert _REAL_AGY_ANSWER_DESIGN_ACTIVE()
+    health["last_failure"] += html_visual_prompt.AGY_ANSWER_FAILURE_WINDOW_SECONDS + 1
+    html_visual_prompt._record_agy_html_status({}, "success", started, html_fragment="<div>x</div>")
+    assert _REAL_AGY_ANSWER_DESIGN_ACTIVE()
+
+
+def test_a_legacy_pre_answer_agy_result_keeps_the_model_artifact(monkeypatch):
+    monkeypatch.setattr(html_visual_prompt, "agy_answer_design_active", lambda: True)
+    metadata = {**_web_metadata(), html_visual_prompt.HTML_VISUAL_AGY_METADATA_KEY: {"status": "timeout"}}
+    prompt = apply_html_visual_prompt_overlay(_form_data(), metadata)["messages"][1]["content"]
+    assert HTML_VISUAL_FORCE_PROMPT_MARKER in prompt
+    assert metadata["html_visual_artifacts"]["author"] == "model"
+

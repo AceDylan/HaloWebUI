@@ -5810,7 +5810,10 @@
 				model_item: model,
 
 				session_id: $socket?.id,
-				chat_id: $chatId,
+				// The chat this reply belongs to, fixed when sending started. $chatId
+				// is whatever is on screen after the awaits above: switching chats in
+				// that window used to run the reply against the other chat.
+				chat_id: _chatId,
 				id: responseMessageId,
 
 				...(requestTitleGeneration

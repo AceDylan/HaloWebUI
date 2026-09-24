@@ -278,7 +278,11 @@ async def start_follow_up_turn(
     if user is None:
         raise HermesNotifyError(404, "chat owner not found")
 
-    running = list_task_ids_by_chat_id(chat_id)
+    # Only a turn that is still producing its reply makes the chat busy. A finished
+    # reply's post-processing (the AGY design pass, title/tags) runs as a
+    # non-blocking task and used to hold every notice back until it ended (a 409
+    # per 30 s retry: about a minute for runs that finish right after launching).
+    running = list_task_ids_by_chat_id(chat_id, blocks_completion_only=True)
     if running:
         raise HermesNotifyError(409, "chat is busy with another run; retry later")
 
@@ -374,7 +378,7 @@ async def show_notification_report(
     user = Users.get_user_by_id(chat.user_id)
     if user is None:
         raise HermesNotifyError(404, "chat owner not found")
-    if list_task_ids_by_chat_id(chat_id):
+    if list_task_ids_by_chat_id(chat_id, blocks_completion_only=True):
         raise HermesNotifyError(409, "chat is busy with another run; retry later")
     chat_dict = dict(chat.chat or {})
     model_info = find_chat_model(chat_dict)

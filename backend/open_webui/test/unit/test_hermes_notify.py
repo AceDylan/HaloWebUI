@@ -174,8 +174,13 @@ def _patch_report_stack(monkeypatch, *, busy=False):
     monkeypatch.setattr(
         hermes_notify.Users, "get_user_by_id", lambda _id: SimpleNamespace(id="user-1")
     )
+    # Only blocking tasks count: a finished reply's post-processing must not hold a notice.
     monkeypatch.setattr(
-        hermes_notify, "list_task_ids_by_chat_id", lambda _id: ["task"] if busy else []
+        hermes_notify,
+        "list_task_ids_by_chat_id",
+        lambda _id, blocks_completion_only=False: (
+            ["task"] if busy or not blocks_completion_only else []
+        ),
     )
 
     async def emitter(event):

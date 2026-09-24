@@ -52,7 +52,7 @@ import time
 import urllib.error
 import urllib.request
 
-SCRIPT_VERSION = "2026-09-24.1"
+SCRIPT_VERSION = "2026-09-24.2"
 CONFIG_FILE = "/root/.hermes/reclaude-runner.env"
 REQUIRED_CONFIG_KEYS = ("HALOWEBUI_NOTIFY_URL", "HALOWEBUI_NOTIFY_TOKEN")
 STATE_DB = "/root/.hermes/state.db"
@@ -81,6 +81,10 @@ DIRECT_PLATFORMS = ("telegram",)
 HERMES_PYTHON = "/usr/local/lib/hermes-agent/venv/bin/python"
 DELIVER_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "runner-deliver.py")
 DELIVER_TIMEOUT_SECONDS = 180
+# A detached run can end before the turn that launched it has replied; hold its report
+# until that reply is in (RUNNER_LAUNCH_REPLY_WAIT seconds at most, 0 = never wait).
+LAUNCH_REPLY_WAIT_SECONDS = 60
+LAUNCH_REPLY_POLL_SECONDS = 2
 STATUS_LABELS = {
     "success": ("✅", "已完成"),
     "question": ("❓", "等你决定"),
@@ -509,6 +513,42 @@ def build_session_notice(run_id, status, run_dir, session_id, digest, agent="rec
     )
 
 
+def wait_for_launch_reply(session_id, since, db_path=STATE_DB, timeout=None):
+    """Hold a fast run's report until the turn that launched it has replied.
+
+    On 2026-09-24 an agy run finished 12 s after it started, so its report reached the
+    Telegram chat before the launching turn's own "已启动" reply. That reply is the first
+    assistant message without tool calls in the launching session after the run started.
+    Returns the seconds waited, or None when it gave up (then the report goes anyway).
+    """
+    if timeout is None:
+        try:
+            timeout = float(os.environ.get("RUNNER_LAUNCH_REPLY_WAIT", LAUNCH_REPLY_WAIT_SECONDS))
+        except ValueError:
+            timeout = LAUNCH_REPLY_WAIT_SECONDS
+    if timeout <= 0 or not session_id:
+        return None
+    started = time.monotonic()
+    while True:
+        try:
+            db = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=5)
+            try:
+                row = db.execute(
+                    """select 1 from messages where session_id=? and role='assistant' and timestamp>=?
+                       and (tool_calls is null or tool_calls in ('', '[]')) limit 1""",
+                    (session_id, since),
+                ).fetchone()
+            finally:
+                db.close()
+        except sqlite3.Error:
+            return None
+        if row:
+            return round(time.monotonic() - started, 1)
+        if time.monotonic() - started >= timeout:
+            return None
+        time.sleep(LAUNCH_REPLY_POLL_SECONDS)
+
+
 def deliver_to_chat(platform, chat_id, session_id, run_dir, digest, notice):
     """Send *digest* to the chat through runner-deliver.py; record *notice* in its session.
 
@@ -571,6 +611,14 @@ def deliver_direct(args, record, save, platform, chat_id, session_id, agent_sess
     record["attempted"] = True
     record["delivery"] = f"{platform}-direct"
     record["chat_id"] = chat_id
+    # An automatic continuation (reclaude's auto_chain) has no launching turn to wait for.
+    if not read_meta(args.run_dir).get("auto_chain"):
+        try:
+            since = os.path.getmtime(os.path.join(args.run_dir, "task.md"))
+        except OSError:
+            since = time.time()
+        waited = wait_for_launch_reply(session_id, since, db_path=args.state_db)
+        record["waited_for_launch_reply"] = waited if waited is not None else "gave up"
     attempt = 0
     while True:
         attempt += 1

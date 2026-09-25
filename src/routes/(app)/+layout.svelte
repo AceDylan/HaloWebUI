@@ -214,7 +214,7 @@
 					if ($page.url.pathname.startsWith('/settings')) {
 						history.back();
 					} else {
-						await goto('/settings');
+						await goto('/settings/interface');
 					}
 				}
 

@@ -1448,7 +1448,7 @@ input[type='range']::-moz-range-thumb {
    ========================================= */
 /* 标签页按钮 */
 .tab-button {
-	@apply flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium
+	@apply flex shrink-0 items-center gap-2 whitespace-nowrap px-4 py-2 rounded-lg text-sm font-medium
 	       transition-all duration-150
 	       text-gray-600 dark:text-gray-400
 	       hover:text-gray-900 dark:hover:text-gray-100

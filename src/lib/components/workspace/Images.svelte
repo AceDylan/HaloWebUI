@@ -25,7 +25,7 @@
 	import { WEBUI_NAME, imageStudioTemplates, user } from '$lib/stores';
 	import { copyToClipboard } from '$lib/utils';
 	import { localizeCommonError } from '$lib/utils/common-errors';
-	import { getModelChatDisplayName } from '$lib/utils/model-display';
+	import { getModelChatDisplayName, getModelDisplayParts } from '$lib/utils/model-display';
 	import {
 		GROK_IMAGE_ASPECT_RATIO_OPTIONS,
 		GROK_IMAGE_RESOLUTION_OPTIONS
@@ -460,15 +460,22 @@
 		imageModelSearchQuery.trim() ? imageModelSearchResults : [],
 		selectedModelSearchResult ? [selectedModelSearchResult] : []
 	);
-	$: modelOptions = selectableImageModels.map((model) => ({
-		value: getModelOptionValue(model),
-		label: getModelLabel(model),
-		description:
-			model.detection_method === 'search'
-				? $i18n.t('Search result. Use it only if this model supports image generation.')
-				: model.id,
-		badge: getModelSourceBadge(model)
-	}));
+	// Base name as the label and the connection as the small badge, the same
+	// split the chat model picker uses (was "gpt-image | cch").
+	$: modelOptions = selectableImageModels.map((model) => {
+		const parts = getModelDisplayParts(
+			model as { id?: string; name?: string; connection_name?: string } | null
+		);
+		return {
+			value: getModelOptionValue(model),
+			label: parts.base || getModelLabel(model),
+			description:
+				model.detection_method === 'search'
+					? $i18n.t('Search result. Use it only if this model supports image generation.')
+					: model.id,
+			badge: [parts.connection, getModelSourceBadge(model)].filter(Boolean).join(' · ')
+		};
+	});
 	$: nativeAspectRatioOptions = GROK_IMAGE_ASPECT_RATIO_OPTIONS.map((option) => ({
 		value: option.value,
 		label: option.label
@@ -1485,9 +1492,9 @@
 </svelte:head>
 
 {#if loaded}
-	<!-- 标签页导航 -->
+	<!-- 标签页导航：窄屏横向滚动，不再把标签挤成竖排字 -->
 	<div class="glass-item p-1 mb-4">
-		<div class="flex items-center gap-1">
+		<div class="flex items-center gap-1 overflow-x-auto scrollbar-hidden">
 			<button
 				class="tab-button {activeTab === 'workbench' ? 'active' : ''}"
 				on:click={() => (activeTab = 'workbench')}
@@ -1579,14 +1586,9 @@
 									{$i18n.t('Press Ctrl/Command + Enter to generate.')}
 								</span>
 							</div>
-							<div class="opacity-80">
+							<div class="hidden opacity-80 sm:block">
 								{$i18n.t(
 									'This image workbench remembers your last model and generation settings only in this browser.'
-								)}
-							</div>
-							<div class="opacity-80">
-								{$i18n.t(
-									'Shows all currently available image models. The suffix in the name indicates the source channel.'
 								)}
 							</div>
 						</div>
@@ -1606,6 +1608,9 @@
 							on:change={handleModelChange}
 						/>
 
+						<!-- Phones get this button under the prompt instead (below). The
+						     wrapper carries the breakpoint: app.css rules outrank utilities. -->
+						<div class="hidden sm:block">
 						<div class="workspace-toolbar-actions">
 							<button
 								type="submit"
@@ -1623,6 +1628,7 @@
 								{/if}
 								<span>{loading ? $i18n.t('Generating...') : $i18n.t('Generate')}</span>
 							</button>
+						</div>
 						</div>
 					</div>
 			</div>
@@ -1655,6 +1661,24 @@
 							</button>
 						{/each}
 					</div>
+
+					<button
+						type="submit"
+						class="workspace-primary-button w-full sm:!hidden"
+						disabled={!canSubmit}
+						title={blockedReason ?? ''}
+						data-halo-image-generate-mobile
+					>
+						{#if loading}
+							<svg class="size-4 animate-spin" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+								<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
+								<path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+							</svg>
+						{:else}
+							<Sparkles className="size-4" strokeWidth="2" />
+						{/if}
+						<span>{loading ? $i18n.t('Generating...') : $i18n.t('Generate')}</span>
+					</button>
 				</div>
 
 				<!-- 风格预设 -->

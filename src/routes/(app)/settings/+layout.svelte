@@ -110,12 +110,15 @@
 		};
 	}
 
+	// Unselected items were gray-400 on white (about 2.1:1); gray-600 reads.
 	const navLinkClass = (active: boolean) =>
 		`px-2 py-1.5 min-w-fit rounded-lg flex-1 lg:flex-none flex items-center transition ${
 			active
 				? 'text-gray-900 dark:text-white'
-				: 'text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-white'
+				: 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
 		}`;
+	const navGroupLabelClass =
+		'hidden lg:block px-2 pt-3 pb-1 text-2xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-500 first:pt-0';
 
 	// Interface sub-sections show as a second level under "Interface" on desktop; the page
 	// itself renders the same list as a chip strip on phones.
@@ -160,8 +163,10 @@
 					id="settings-tabs-container"
 					class="flex flex-row overflow-x-auto gap-2.5 max-w-full lg:gap-1 lg:flex-col lg:flex-none lg:w-44 dark:text-gray-200 text-sm font-medium text-left scrollbar-none scroll-fade-x-mobile"
 				>
+					<!-- Personal settings first; the admin-only system sections follow
+					     under their own heading (phones show one scrolling row). -->
 					{#if isAdmin}
-						<a class={navLinkClass(activeLinks.general)} href="/settings">{$i18n.t('General')}</a>
+						<div class={navGroupLabelClass}>{$i18n.t('Personal')}</div>
 					{/if}
 					<a class={navLinkClass(activeLinks.interface)} href="/settings/interface"
 						>{$i18n.t('Interface')}</a
@@ -202,6 +207,8 @@
 						>{$i18n.t('Account Management', { defaultValue: $i18n.t('Account') })}</a
 					>
 					{#if isAdmin}
+						<div class={navGroupLabelClass}>{$i18n.t('System')}</div>
+						<a class={navLinkClass(activeLinks.general)} href="/settings">{$i18n.t('General')}</a>
 						<a class={navLinkClass(activeLinks.userDefaults)} href="/settings/user-defaults">
 							账户预设
 						</a>

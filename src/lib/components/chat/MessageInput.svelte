@@ -929,6 +929,17 @@
 		files = files;
 	};
 
+	// Esc in the composer stops the running reply (and clears the per-message
+	// toggles) only when it is not doing something else: closing the `/` `#` `@`
+	// menu or cancelling IME input used to stop a hermes task that had been
+	// running for minutes.
+	const shouldEscapeStopResponse = (event: KeyboardEvent) =>
+		!event.isComposing &&
+		event.keyCode !== 229 &&
+		!isComposing &&
+		!document.getElementById('commands-container') &&
+		!document.getElementById('suggestions-container');
+
 	const handleKeyDown = (event: KeyboardEvent) => {
 		if (event.key === 'Escape') {
 			console.log('Escape');
@@ -1391,7 +1402,10 @@
 													const suggestionsContainerElement =
 														document.getElementById('suggestions-container');
 
-													if (e.key === 'Escape') {
+													// Read before any menu reacts to this key and closes.
+													const escapeOnComposer =
+														e.key === 'Escape' && shouldEscapeStopResponse(e);
+													if (escapeOnComposer) {
 														stopResponse();
 													}
 
@@ -1444,7 +1458,7 @@
 														}
 													}
 
-													if (e.key === 'Escape') {
+													if (escapeOnComposer) {
 														atSelectedModel = undefined;
 														selectedToolIds = [];
 														toolSelectionTouched = true;
@@ -1510,7 +1524,10 @@
 												const commandsContainerElement =
 													document.getElementById('commands-container');
 
-												if (e.key === 'Escape') {
+												// Read before any menu reacts to this key and closes.
+												const escapeOnComposer =
+													e.key === 'Escape' && shouldEscapeStopResponse(e);
+												if (escapeOnComposer) {
 													stopResponse();
 												}
 
@@ -1638,8 +1655,7 @@
 													e.target.style.height = Math.min(e.target.scrollHeight, 320) + 'px';
 												}
 
-												if (e.key === 'Escape') {
-													console.log('Escape');
+												if (escapeOnComposer) {
 													atSelectedModel = undefined;
 													selectedToolIds = [];
 													toolSelectionTouched = true;

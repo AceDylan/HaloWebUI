@@ -35,31 +35,50 @@
 			: null;
 
 	let modalElement: HTMLDivElement | null = null;
+	let dialogElement: HTMLDivElement | null = null;
 	let mounted = false;
 	let attached = false;
 
+	// The dialog can open while the person is typing in the composer. Nothing
+	// here answers from a stray key or click: Enter only activates the button
+	// that has focus (focus starts on the dialog itself, not on a button),
+	// clicks and keys in the first moment after opening are ignored, and the
+	// backdrop does nothing.
+	const ARMING_DELAY_MS = 600;
+	let armedAt = 0;
+
 	const choose = (choice: string) => {
-		if (!show) return;
+		if (!show || Date.now() < armedAt) return;
 		show = false;
 		dispatch('choose', choice);
 	};
 
 	const handleKeyDown = (event: KeyboardEvent) => {
+		if (event.key !== 'Escape' && event.key !== 'Enter') return;
+		// Keep Enter/Esc from reaching the composer behind the dialog.
+		event.stopPropagation();
 		if (event.key === 'Escape') {
 			event.preventDefault();
-			choose('deny');
-		} else if (event.key === 'Enter' && !event.shiftKey && !event.metaKey && !event.ctrlKey) {
+			if (!event.isComposing) choose('deny');
+			return;
+		}
+		const onChoiceButton =
+			event.target instanceof HTMLElement &&
+			event.target.closest('[data-halo-hermes-approval-choice]') !== null;
+		if (!onChoiceButton || event.isComposing || Date.now() < armedAt) {
 			event.preventDefault();
-			choose('once');
 		}
 	};
 
 	const attach = () => {
 		if (!modalElement || attached) return;
 		document.body.appendChild(modalElement);
-		window.addEventListener('keydown', handleKeyDown);
+		window.addEventListener('keydown', handleKeyDown, true);
 		lockBodyScroll();
 		attached = true;
+		armedAt = Date.now() + ARMING_DELAY_MS;
+		// Take focus away from the composer so typing does not continue into it.
+		dialogElement?.focus({ preventScroll: true });
 		now = Date.now() / 1000;
 		clock = setInterval(() => {
 			now = Date.now() / 1000;
@@ -72,7 +91,7 @@
 			clock = null;
 		}
 		if (!modalElement || !attached) return;
-		window.removeEventListener('keydown', handleKeyDown);
+		window.removeEventListener('keydown', handleKeyDown, true);
 		if (document.body.contains(modalElement)) {
 			document.body.removeChild(modalElement);
 		}
@@ -106,16 +125,16 @@
 		data-halo-hermes-approval-dialog
 		class="fixed inset-0 z-99999999 flex h-screen max-h-[100dvh] w-full justify-center overflow-hidden overscroll-contain bg-black/60"
 		in:fade={{ duration: 10 }}
-		on:mousedown={() => choose('deny')}
 	>
 		<!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
 		<div
-			class="m-auto mx-2 w-[36rem] max-w-full rounded-2xl border border-white bg-white/95 shadow-3xl backdrop-blur-sm dark:border-gray-900 dark:bg-gray-950/95"
+			bind:this={dialogElement}
+			class="m-auto mx-2 w-[36rem] max-w-full rounded-2xl border border-white bg-white/95 shadow-3xl backdrop-blur-sm outline-none dark:border-gray-900 dark:bg-gray-950/95"
 			role="dialog"
 			aria-modal="true"
 			aria-labelledby="hermes-approval-title"
+			tabindex="-1"
 			in:flyAndScale
-			on:mousedown={(e) => e.stopPropagation()}
 		>
 			<div class="flex flex-col px-6 py-5 sm:px-7">
 				<div class="flex items-start gap-3">
@@ -187,7 +206,7 @@
 						{/each}
 					</div>
 					<div class="text-2xs text-gray-400 dark:text-gray-500 sm:col-span-2 sm:text-right">
-						{$i18n.t('Enter = allow once · Esc = deny')}
+						{$i18n.t('Click a button to answer · Esc = deny')}
 					</div>
 				</div>
 			</div>

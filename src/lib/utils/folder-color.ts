@@ -1,19 +1,23 @@
 // A folder's colour in the sidebar: the chat list marks a chat's folder with a
-// small dot instead of a name badge, and the folder row tints its icon with the
-// same colour so the two can be matched. Derived from the folder id, so it is
-// stable across reloads and needs no stored setting.
+// short bar before the title instead of a name badge, and the folder row tints
+// its icon with the same colour so the two can be matched. Derived from the
+// folder id, so it is stable across reloads and needs no stored setting.
 //
 // Full class strings (not built from parts) so Tailwind keeps them.
 //
 // No blues or greens: a chat row also carries status dots — blue while a reply
-// runs, emerald when it finished unopened — and a folder dot in those colours
+// runs, emerald when it finished unopened — and a folder mark in those colours
 // read as a status (emerald-500 was the very same colour).
+//
+// Shades picked for distance from each other (OKLab): amber-500 next to
+// orange-600, and rose-500 next to orange-600, were hard to tell apart at this
+// size.
 const FOLDER_COLORS = [
-	{ dot: 'bg-amber-500', text: 'text-amber-500 dark:text-amber-400' },
-	{ dot: 'bg-rose-500', text: 'text-rose-500 dark:text-rose-400' },
+	{ dot: 'bg-yellow-500', text: 'text-yellow-600 dark:text-yellow-400' },
+	{ dot: 'bg-rose-600', text: 'text-rose-600 dark:text-rose-400' },
 	{ dot: 'bg-violet-500', text: 'text-violet-500 dark:text-violet-400' },
-	{ dot: 'bg-orange-600', text: 'text-orange-600 dark:text-orange-400' },
-	{ dot: 'bg-fuchsia-500', text: 'text-fuchsia-500 dark:text-fuchsia-400' },
+	{ dot: 'bg-orange-500', text: 'text-orange-500 dark:text-orange-400' },
+	{ dot: 'bg-fuchsia-400', text: 'text-fuchsia-500 dark:text-fuchsia-400' },
 	{ dot: 'bg-stone-400', text: 'text-stone-500 dark:text-stone-400' }
 ] as const;
 

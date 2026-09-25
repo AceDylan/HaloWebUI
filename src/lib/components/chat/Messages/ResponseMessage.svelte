@@ -745,7 +745,7 @@
 				);
 	const regenerateWithModel = (candidate: any) => {
 		showRegenerateMenu = false;
-		showMobileMoreMenu = false;
+		showMoreMenu = false;
 		regenerateResponse(message, { modelId: getModelSelectionId(candidate) });
 	};
 	const regenerateModelName = (candidate: any) =>
@@ -765,11 +765,10 @@
 	})();
 	$: stats = getStatsDisplay(message);
 
-	// Speed / tokens / elapsed used to sit as a permanent line under the name. They now live
-	// behind the info button: hover shows the usage card, click (works on touch) toggles this
-	// inline row so the numbers stay reachable without hover.
+	// Speed / tokens / elapsed used to sit as a permanent line under the name. "Stats" in the
+	// "More" menu toggles this inline row instead.
 	let showStats = false;
-	let showMobileMoreMenu = false;
+	let showMoreMenu = false;
 
 	const toggleStats = async () => {
 		showStats = !showStats;
@@ -784,7 +783,8 @@
 	// 36px touch targets (were 28px); the icons and the bar keep their look.
 	const mobileActionButtonClass =
 		'p-2.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-xl dark:hover:text-white hover:text-black transition-all duration-200 active:scale-95';
-	const mobileMenuItemClass =
+	// Items of the "More" menu (phone and desktop).
+	const menuItemClass =
 		'flex items-center gap-3 px-3 py-2.5 text-sm rounded-xl cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800';
 
 	const usageNumber = (value: unknown) => (typeof value === 'number' ? value.toLocaleString() : null);
@@ -1179,75 +1179,6 @@
 		})();
 	}
 
-	// Token 用量 — 生成毛玻璃卡片 HTML（供 Tooltip 渲染）
-	function formatUsageHtml(
-		usage: unknown,
-		statsInfo: { speed: string; tokens: string; elapsed: string } | null = null
-	): string {
-		if (!usage || typeof usage !== 'object') return '';
-
-		const data = usage as Record<string, unknown>;
-		const input = data.prompt_tokens ?? data.input_tokens;
-		const output = data.completion_tokens ?? data.output_tokens;
-		const total = data.total_tokens;
-		const compDetails = (data.completion_tokens_details ?? data.output_tokens_details) as Record<string, unknown> | null;
-		const reasoning = compDetails?.reasoning_tokens;
-		const promptDetails = (data.prompt_tokens_details ?? data.input_tokens_details) as Record<string, unknown> | null;
-		const cached = promptDetails?.cached_tokens;
-
-		const dk = document.documentElement.classList.contains('dark');
-		const bg = dk ? 'rgba(30,32,42,0.88)' : 'rgba(255,255,255,0.88)';
-		const bd = dk ? 'rgba(75,85,99,0.5)' : 'rgba(209,213,219,0.3)';
-		const dv = dk ? 'rgba(75,85,99,0.4)' : 'rgba(229,231,235,0.6)';
-		const lb = dk ? '#9ca3af' : '#6b7280';
-		const vl = dk ? '#d1d5db' : '#374151';
-		const hr = dk ? '#f3f4f6' : '#111827';
-		const dm = dk ? '#4b5563' : '#d1d5db';
-
-		const num = (v: unknown) => (typeof v === 'number' ? v.toLocaleString() : null);
-		const rows: [string, string | null][] = [
-			[tr('输入 Token', 'Input Tokens'), num(input)],
-			[tr('输出 Token', 'Output Tokens'), num(output)],
-			[tr('推理 Token', 'Reasoning Tokens'), num(reasoning)],
-			[tr('缓存 Token', 'Cached Tokens'), num(cached)]
-		];
-
-		let h = `<div style="background:${bg};backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border:1px solid ${bd};border-radius:1rem;padding:10px 14px;box-shadow:0 10px 15px -3px rgba(0,0,0,0.1);min-width:150px">`;
-
-		if (typeof total === 'number') {
-			h += `<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid ${dv}">`;
-			h += `<span style="font-size:12px;font-weight:500;color:${lb}">${tr('总消耗', 'Total')}</span>`;
-			h += `<span style="font-size:18px;font-weight:600;font-variant-numeric:tabular-nums;color:${hr}">${total.toLocaleString()}</span>`;
-			h += `</div>`;
-		}
-
-		h += `<div style="display:flex;flex-direction:column;gap:4px">`;
-		for (const [label, val] of rows) {
-			h += `<div style="display:flex;justify-content:space-between;align-items:center;font-size:12px">`;
-			h += `<span style="color:${lb}">${label}</span>`;
-			h += val !== null
-				? `<span style="font-weight:500;font-variant-numeric:tabular-nums;color:${vl}">${val}</span>`
-				: `<span style="color:${vl};font-style:italic">${tr('未返回', 'Not returned')}</span>`;
-			h += `</div>`;
-		}
-		h += `</div>`;
-
-		if (statsInfo && (statsInfo.speed || statsInfo.elapsed)) {
-			h += `<div style="display:flex;justify-content:space-between;gap:12px;margin-top:8px;padding-top:6px;border-top:1px solid ${dv};font-size:12px">`;
-			if (statsInfo.speed) {
-				h += `<span style="color:${lb}">${tr('速度', 'Speed')} <span style="font-weight:500;font-variant-numeric:tabular-nums;color:${vl}">${statsInfo.speed} T/s</span></span>`;
-			}
-			if (statsInfo.elapsed) {
-				h += `<span style="color:${lb}">${tr('耗时', 'Elapsed')} <span style="font-weight:500;font-variant-numeric:tabular-nums;color:${vl}">${statsInfo.elapsed} s</span></span>`;
-			}
-			h += `</div>`;
-		}
-
-		h += `</div>`;
-
-		return h;
-	}
-
 	function getStatsDisplay(
 		msg: MessageType
 	): { speed: string; tokens: string; elapsed: string } | null {
@@ -1350,10 +1281,13 @@
 						bare={true}
 						className="size-[26px] sm:size-[34px] rounded-xl -translate-y-[1px] ring-2 ring-white/60 dark:ring-white/20"
 					/>
-				<!-- Status indicator dot -->
-				<div
-					class="absolute -bottom-0.5 -right-0.5 size-1.5 sm:size-2 translate-x-px -translate-y-px bg-green-400 rounded-full ring-1 sm:ring-[1.5px] ring-white dark:ring-gray-900 animate-pulse"
-				/>
+				<!-- Only while the reply is being generated, in the sidebar's "running" blue. -->
+				{#if !message.done && !message.error}
+					<div
+						class="absolute -bottom-0.5 -right-0.5 size-1.5 sm:size-2 translate-x-px -translate-y-px bg-blue-500 rounded-full ring-1 sm:ring-[1.5px] ring-white dark:ring-gray-900 animate-pulse"
+						data-halo-generating-dot
+					/>
+				{/if}
 			</div>
 		</div>
 
@@ -2058,13 +1992,13 @@
 									</button>
 								{/if}
 
-								<Dropdown bind:show={showMobileMoreMenu} side="top" align="end">
+								<Dropdown bind:show={showMoreMenu} side="top" align="end">
 									<button
 										type="button"
 										class={mobileActionButtonClass}
 										aria-label={$i18n.t('More')}
 										aria-haspopup="menu"
-										aria-expanded={showMobileMoreMenu}
+										aria-expanded={showMoreMenu}
 									>
 										<EllipsisHorizontal className="size-4" strokeWidth="2" />
 									</button>
@@ -2079,9 +2013,9 @@
 										>
 											{#if !readOnly && ($user?.role === 'user' ? ($user?.permissions?.chat?.edit ?? true) : true)}
 												<DropdownMenu.Item
-													class={mobileMenuItemClass}
+													class={menuItemClass}
 													on:click={() => {
-														showMobileMoreMenu = false;
+														showMoreMenu = false;
 														editMessageHandler();
 													}}
 												>
@@ -2092,10 +2026,10 @@
 
 											{#if !readOnly && branchSupported}
 												<DropdownMenu.Item
-													class="{mobileMenuItemClass} {isBranching ? 'opacity-50' : ''}"
+													class="{menuItemClass} {isBranching ? 'opacity-50' : ''}"
 													disabled={isBranching}
 													on:click={() => {
-														showMobileMoreMenu = false;
+														showMoreMenu = false;
 														onBranchMessage(message.id);
 													}}
 												>
@@ -2106,9 +2040,9 @@
 
 											{#if $user?.role === 'admin' || ($user?.permissions?.chat?.tts ?? true)}
 												<DropdownMenu.Item
-													class={mobileMenuItemClass}
+													class={menuItemClass}
 													on:click={() => {
-														showMobileMoreMenu = false;
+														showMoreMenu = false;
 														if (!loadingSpeech) {
 															toggleSpeakMessage();
 														}
@@ -2126,9 +2060,9 @@
 
 											{#if message.usage}
 												<DropdownMenu.Item
-													class={mobileMenuItemClass}
+													class={menuItemClass}
 													on:click={() => {
-														showMobileMoreMenu = false;
+														showMoreMenu = false;
 														void toggleStats();
 													}}
 												>
@@ -2140,9 +2074,9 @@
 											{#if !readOnly}
 												{#if isLastMessage}
 													<DropdownMenu.Item
-														class={mobileMenuItemClass}
+														class={menuItemClass}
 														on:click={() => {
-															showMobileMoreMenu = false;
+															showMoreMenu = false;
 															continueResponse();
 														}}
 													>
@@ -2152,9 +2086,9 @@
 
 													{#each model?.actions ?? [] as action}
 														<DropdownMenu.Item
-															class={mobileMenuItemClass}
+															class={menuItemClass}
 															on:click={() => {
-																showMobileMoreMenu = false;
+																showMoreMenu = false;
 																actionMessage(action.id, message);
 															}}
 														>
@@ -2173,7 +2107,7 @@
 													</div>
 													{#each regenerateModelOptions as candidate (getModelSelectionId(candidate))}
 														<DropdownMenu.Item
-															class={mobileMenuItemClass}
+															class={menuItemClass}
 															data-halo-regenerate-model={getModelSelectionId(candidate)}
 															on:click={() => regenerateWithModel(candidate)}
 														>
@@ -2193,9 +2127,9 @@
 												<hr class="border-black/5 dark:border-white/5 my-0.5" />
 
 												<DropdownMenu.Item
-													class="{mobileMenuItemClass} text-red-600 dark:text-red-400"
+													class="{menuItemClass} text-red-600 dark:text-red-400"
 													on:click={() => {
-														showMobileMoreMenu = false;
+														showMoreMenu = false;
 														showDeleteConfirm = true;
 													}}
 												>
@@ -2300,27 +2234,24 @@
 								{/if}
 
 								{#if message.done}
-									{#if !readOnly}
-										{#if $user?.role === 'user' ? ($user?.permissions?.chat?.edit ?? true) : true}
-											<Tooltip content={$i18n.t('Edit')} placement="bottom">
-												<button
-													aria-label={$i18n.t('Edit')}
-													class="{isLastMessage
-														? 'visible'
-														: 'invisible group-hover:visible'} p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-xl dark:hover:text-white hover:text-black transition-all duration-200 hover:scale-110 active:scale-95"
-													on:click={() => {
-														editMessageHandler();
-													}}
-												>
-													<PencilLine class="w-4 h-4" strokeWidth={2} />
-												</button>
-											</Tooltip>
-										{/if}
-									{/if}
+									<!-- Copy and regenerate stay inline; the rest folds into "More", as on the phone. -->
+									<!-- Auto playback (Chat.svelte) clicks this; read aloud itself is in "More". -->
+									<button
+										id="speak-button-{message.id}"
+										type="button"
+										class="hidden"
+										tabindex="-1"
+										aria-hidden="true"
+										on:click={() => {
+											if (!loadingSpeech) {
+												toggleSpeakMessage();
+											}
+										}}
+									></button>
 
 									<Tooltip content={$i18n.t('Copy')} placement="bottom">
 										<button
-													aria-label={$i18n.t('Copy')}
+											aria-label={$i18n.t('Copy')}
 											class="{isLastMessage
 												? 'visible'
 												: 'invisible group-hover:visible'} p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-xl dark:hover:text-white hover:text-black transition-all duration-200 hover:scale-110 active:scale-95 copy-response-button"
@@ -2332,168 +2263,7 @@
 										</button>
 									</Tooltip>
 
-									{#if !readOnly && branchSupported}
-										<Tooltip content={branchTooltip} placement="bottom">
-											<button
-													aria-label={branchTooltip}
-												class="{isLastMessage
-													? 'visible'
-													: 'invisible group-hover:visible'} p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-xl dark:hover:text-white hover:text-black transition-all duration-200 hover:scale-110 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:scale-100"
-												on:click={() => {
-													onBranchMessage(message.id);
-												}}
-												disabled={isBranching}
-												aria-busy={isBranching}
-											>
-												<GitBranchPlus
-													class={`w-4 h-4 ${isBranching ? 'animate-spin' : ''}`}
-													strokeWidth={2}
-												/>
-											</button>
-										</Tooltip>
-									{/if}
-
-									<!-- [REACTION_FEATURE] Commented out - reaction button disabled for now
-								{#if !readOnly}
-									<div>
-										<Tooltip content={$i18n.t('React')} placement="bottom">
-											<button
-													aria-label={$i18n.t('React')}
-												bind:this={reactionBtnEl}
-												class="{isLastMessage
-													? 'visible'
-													: 'invisible group-hover:visible'} p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-xl dark:hover:text-white hover:text-black transition-all duration-200 hover:scale-110 active:scale-95"
-												on:click={() => {
-													if (!showReactionPicker && reactionBtnEl) {
-														const rect = reactionBtnEl.getBoundingClientRect();
-														reactionPickerPos = { top: rect.top, left: rect.left };
-													}
-													showReactionPicker = !showReactionPicker;
-												}}
-											>
-												<SmilePlus class="w-4 h-4" strokeWidth={2} />
-											</button>
-										</Tooltip>
-									</div>
-								{/if}
-								-->
-
-									{#if $user?.role === 'admin' || ($user?.permissions?.chat?.tts ?? true)}
-										<Tooltip content={$i18n.t('Read Aloud')} placement="bottom">
-											<button
-													aria-label={$i18n.t('Read Aloud')}
-												id="speak-button-{message.id}"
-												class="{isLastMessage
-													? 'visible'
-													: 'invisible group-hover:visible'} p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-xl dark:hover:text-white hover:text-black transition-all duration-200 hover:scale-110 active:scale-95"
-												on:click={() => {
-													if (!loadingSpeech) {
-														toggleSpeakMessage();
-													}
-												}}
-											>
-												{#if loadingSpeech}
-													<svg
-														class=" w-4 h-4"
-														fill="currentColor"
-														viewBox="0 0 24 24"
-														xmlns="http://www.w3.org/2000/svg"
-													>
-														<style>
-															.spinner_S1WN {
-																animation: spinner_MGfb 0.8s linear infinite;
-																animation-delay: -0.8s;
-															}
-
-															.spinner_Km9P {
-																animation-delay: -0.65s;
-															}
-
-															.spinner_JApP {
-																animation-delay: -0.5s;
-															}
-
-															@keyframes spinner_MGfb {
-																93.75%,
-																100% {
-																	opacity: 0.2;
-																}
-															}
-														</style>
-														<circle class="spinner_S1WN" cx="4" cy="12" r="3" />
-														<circle class="spinner_S1WN spinner_Km9P" cx="12" cy="12" r="3" />
-														<circle class="spinner_S1WN spinner_JApP" cx="20" cy="12" r="3" />
-													</svg>
-												{:else if speaking}
-													<VolumeX class="w-4 h-4" strokeWidth={2} />
-												{:else}
-													<Volume2 class="w-4 h-4" strokeWidth={2} />
-												{/if}
-											</button>
-										</Tooltip>
-									{/if}
-
-									{#if message.usage}
-										<Tooltip
-											content={formatUsageHtml(message.usage, stats)}
-											placement="bottom"
-											offset={[0, 8]}
-											tippyOptions={{
-												theme: 'none',
-												maxWidth: 'none',
-												duration: [100, 75],
-												onShow(instance) {
-													const box = instance.popper.firstElementChild;
-													if (box) {
-														box.style.background = 'transparent';
-														box.style.border = 'none';
-														box.style.boxShadow = 'none';
-														box.style.borderRadius = '0';
-													}
-													const tc = box?.querySelector('.tippy-content');
-													if (tc) tc.style.padding = '0';
-												}
-											}}
-										>
-											<button
-												class="{isLastMessage
-													? 'visible'
-													: 'invisible group-hover:visible'} p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-xl dark:hover:text-white hover:text-black transition-all duration-200 hover:scale-110 active:scale-95 {showStats
-													? 'text-primary-600 dark:text-primary-300'
-													: ''}"
-												id="info-{message.id}"
-												type="button"
-												aria-label={tr('统计信息', 'Stats')}
-												aria-expanded={showStats}
-												aria-controls="message-stats-{message.id}"
-												on:click={toggleStats}
-											>
-												<Info class="w-4 h-4" strokeWidth={2} />
-											</button>
-										</Tooltip>
-									{/if}
-
-									<div class="w-px h-4 bg-gray-300/40 dark:bg-gray-600/40 mx-0.5 self-center"></div>
-
 									{#if !readOnly}
-										{#if isLastMessage}
-											<Tooltip content={$i18n.t('Continue Response')} placement="bottom">
-												<button
-													aria-label={$i18n.t('Continue Response')}
-													type="button"
-													id="continue-response-button"
-													class="{isLastMessage
-														? 'visible'
-														: 'invisible group-hover:visible'} p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-xl dark:hover:text-white hover:text-black transition-all duration-200 hover:scale-110 active:scale-95 regenerate-response-button"
-													on:click={() => {
-														continueResponse();
-													}}
-												>
-													<PlayCircle class="w-4 h-4" strokeWidth={2} />
-												</button>
-											</Tooltip>
-										{/if}
-
 										{#if $settings?.regenerateMenu ?? true}
 											<Dropdown
 												bind:show={showRegenerateMenu}
@@ -2669,55 +2439,165 @@
 												</button>
 											</Tooltip>
 										{/if}
+									{/if}
 
-										<Tooltip content={$i18n.t('Delete')} placement="bottom">
+									{#if loadingSpeech || speaking}
+										<Tooltip content={$i18n.t('Stop')} placement="bottom">
 											<button
-													aria-label={$i18n.t('Delete')}
 												type="button"
-												id="delete-response-button"
-												class="{isLastMessage
-													? 'visible'
-													: 'invisible group-hover:visible'} p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-xl dark:hover:text-white hover:text-black transition-all duration-200 hover:scale-110 active:scale-95 regenerate-response-button"
+												aria-label={$i18n.t('Stop')}
+												class="p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-xl dark:hover:text-white hover:text-black transition-all duration-200 hover:scale-110 active:scale-95"
 												on:click={() => {
-													showDeleteConfirm = true;
+													if (!loadingSpeech) {
+														toggleSpeakMessage();
+													}
 												}}
 											>
-												<Trash2 class="w-4 h-4" strokeWidth={2} />
+												{#if loadingSpeech}
+													<Spinner className="size-4" />
+												{:else}
+													<VolumeX class="w-4 h-4" strokeWidth={2} />
+												{/if}
+											</button>
+										</Tooltip>
+									{/if}
+
+									<Dropdown bind:show={showMoreMenu} side="top" align="start">
+										<Tooltip content={$i18n.t('More')} placement="bottom">
+											<button
+												type="button"
+												class="{isLastMessage
+													? 'visible'
+													: 'invisible group-hover:visible'} p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-xl dark:hover:text-white hover:text-black transition-all duration-200 hover:scale-110 active:scale-95"
+												aria-label={$i18n.t('More')}
+												aria-haspopup="menu"
+												aria-expanded={showMoreMenu}
+											>
+												<EllipsisHorizontal className="w-4 h-4" strokeWidth="2" />
 											</button>
 										</Tooltip>
 
-										{#if isLastMessage}
-											{#each model?.actions ?? [] as action}
-												<Tooltip content={action.name} placement="bottom">
-													<button
-													aria-label={action.name}
-														type="button"
-														class="{isLastMessage
-															? 'visible'
-															: 'invisible group-hover:visible'} p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-xl dark:hover:text-white hover:text-black transition-all duration-200 hover:scale-110 active:scale-95"
+										<div slot="content">
+											<DropdownMenu.Content
+												class="w-52 max-h-[min(34rem,80dvh)] overflow-y-auto scrollbar-hidden rounded-2xl px-1.5 py-1.5 border border-gray-300/30 dark:border-gray-700/50 z-50 bg-white dark:bg-gray-850 dark:text-white shadow-lg"
+												sideOffset={8}
+												side="top"
+												align="start"
+												transition={flyAndScale}
+											>
+												{#if !readOnly && ($user?.role === 'user' ? ($user?.permissions?.chat?.edit ?? true) : true)}
+													<DropdownMenu.Item
+														class={menuItemClass}
 														on:click={() => {
-															actionMessage(action.id, message);
+															showMoreMenu = false;
+															editMessageHandler();
 														}}
 													>
-														{#if action.icon_url}
-															<div class="size-4">
-																<img
-																	src={action.icon_url}
-																	class="w-4 h-4 {action.icon_url.includes('svg')
-																		? 'dark:invert-[80%]'
-																		: ''}"
-																	style="fill: currentColor;"
-																	alt={action.name}
-																/>
-															</div>
+														<PencilLine class="w-4 h-4 shrink-0" strokeWidth={1.75} />
+														<span>{$i18n.t('Edit')}</span>
+													</DropdownMenu.Item>
+												{/if}
+
+												{#if !readOnly && branchSupported}
+													<DropdownMenu.Item
+														class="{menuItemClass} {isBranching ? 'opacity-50' : ''}"
+														disabled={isBranching}
+														on:click={() => {
+															showMoreMenu = false;
+															onBranchMessage(message.id);
+														}}
+													>
+														<GitBranchPlus class="w-4 h-4 shrink-0" strokeWidth={1.75} />
+														<span>{branchTooltip}</span>
+													</DropdownMenu.Item>
+												{/if}
+
+												{#if $user?.role === 'admin' || ($user?.permissions?.chat?.tts ?? true)}
+													<DropdownMenu.Item
+														class={menuItemClass}
+														on:click={() => {
+															showMoreMenu = false;
+															if (!loadingSpeech) {
+																toggleSpeakMessage();
+															}
+														}}
+													>
+														{#if speaking}
+															<VolumeX class="w-4 h-4 shrink-0" strokeWidth={1.75} />
+															<span>{$i18n.t('Stop')}</span>
 														{:else}
-															<Sparkles strokeWidth="2.1" className="size-4" />
+															<Volume2 class="w-4 h-4 shrink-0" strokeWidth={1.75} />
+															<span>{$i18n.t('Read Aloud')}</span>
 														{/if}
-													</button>
-												</Tooltip>
-											{/each}
-										{/if}
-									{/if}
+													</DropdownMenu.Item>
+												{/if}
+
+												{#if message.usage}
+													<DropdownMenu.Item
+														class={menuItemClass}
+														on:click={() => {
+															showMoreMenu = false;
+															void toggleStats();
+														}}
+													>
+														<Info class="w-4 h-4 shrink-0" strokeWidth={1.75} />
+														<span>{showStats ? tr('隐藏统计信息', 'Hide stats') : tr('统计信息', 'Stats')}</span>
+													</DropdownMenu.Item>
+												{/if}
+
+												{#if !readOnly}
+													{#if isLastMessage}
+														<DropdownMenu.Item
+															class={menuItemClass}
+															on:click={() => {
+																showMoreMenu = false;
+																continueResponse();
+															}}
+														>
+															<PlayCircle class="w-4 h-4 shrink-0" strokeWidth={1.75} />
+															<span>{$i18n.t('Continue Response')}</span>
+														</DropdownMenu.Item>
+
+														{#each model?.actions ?? [] as action}
+															<DropdownMenu.Item
+																class={menuItemClass}
+																on:click={() => {
+																	showMoreMenu = false;
+																	actionMessage(action.id, message);
+																}}
+															>
+																{#if action.icon_url}
+																	<img
+																		src={action.icon_url}
+																		class="w-4 h-4 shrink-0 {action.icon_url.includes('svg')
+																			? 'dark:invert-[80%]'
+																			: ''}"
+																		alt=""
+																	/>
+																{:else}
+																	<Sparkles strokeWidth="2.1" className="size-4 shrink-0" />
+																{/if}
+																<span>{action.name}</span>
+															</DropdownMenu.Item>
+														{/each}
+													{/if}
+
+													<hr class="border-black/5 dark:border-white/5 my-0.5" />
+
+													<DropdownMenu.Item
+														class="{menuItemClass} text-red-600 dark:text-red-400"
+														on:click={() => {
+															showMoreMenu = false;
+															showDeleteConfirm = true;
+														}}
+													>
+														<Trash2 class="w-4 h-4 shrink-0" strokeWidth={1.75} />
+														<span>{$i18n.t('Delete')}</span>
+													</DropdownMenu.Item>
+												{/if}
+											</DropdownMenu.Content>
+										</div>
+									</Dropdown>
 								{/if}
 							</div>
 						{/if}

@@ -1102,7 +1102,9 @@
 				</div>
 
 				<div class="w-full relative">
-					{#if atSelectedModel !== undefined || selectedToolIds.length > 0 || selectedSkillIds.length > 0 || webSearchActive || imageGenerationEnabled || codeInterpreterEnabled}
+					<!-- Only the "Talking to" row lives here. Search / tool / image toggles show in the
+					     input's own button row and must not render this empty gradient band. -->
+					{#if atSelectedModel !== undefined}
 						<div
 							class="px-3 pb-0.5 pt-1.5 text-left w-full flex flex-col absolute bottom-0 left-0 right-0 bg-linear-to-t from-white dark:from-gray-900 z-10"
 						>

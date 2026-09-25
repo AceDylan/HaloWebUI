@@ -47,8 +47,8 @@
 	export let assistantId: string | null = null;
 	export let folderId: string | null = null;
 	/**
-	 * The folder the chat sits in, shown in the "all chats" list as a small dot
-	 * in the folder's colour (the name is the dot's tooltip).
+	 * The folder the chat sits in, shown in the "all chats" list as a short bar
+	 * in the folder's colour before the title (the name is the bar's tooltip).
 	 */
 	export let folderName: string | null = null;
 	export let folderDotClass: string | null = null;
@@ -290,6 +290,18 @@
 			draggable="false"
 		>
 			<div class=" flex self-center flex-1 w-full">
+				{#if folderName}
+					<!-- A short bar at the left edge, so it cannot pass for the round status dots
+					     on the right. The negative margin keeps titles aligned with or without it. -->
+					<span
+						class="-ms-2 me-[5px] h-3.5 w-[3px] shrink-0 self-center rounded-full {folderDotClass ??
+							'bg-gray-400 dark:bg-gray-500'}"
+						title={folderName}
+						data-halo-chat-folder-dot
+					>
+						<span class="sr-only">{folderName}</span>
+					</span>
+				{/if}
 				<div dir="auto" class={titleClass}>
 					{title}
 				</div>
@@ -299,16 +311,6 @@
 						data-halo-chat-archived
 					>
 						{$i18n.t('Archived')}
-					</span>
-				{/if}
-				{#if folderName}
-					<span
-						class="ml-1.5 inline-flex size-1.5 shrink-0 self-center rounded-full {folderDotClass ??
-							'bg-gray-400 dark:bg-gray-500'}"
-						title={folderName}
-						data-halo-chat-folder-dot
-					>
-						<span class="sr-only">{folderName}</span>
 					</span>
 				{/if}
 				{#if $activeChatIds.has(id)}

@@ -260,6 +260,55 @@ describe('background sync lifecycle', () => {
 		await vi.advanceTimersByTimeAsync(100);
 		expect(apply).not.toHaveBeenCalled();
 	});
+
+	it('reads again after a load only when a refresh was dropped while loading', async () => {
+		vi.useFakeTimers();
+		let key: string | null = null;
+		const read = vi.fn().mockResolvedValue('snapshot');
+		const sync = createChatSync({ getKey: () => key, read, apply: vi.fn() });
+
+		key = 'chat-A';
+		sync.requestMissed();
+		await vi.advanceTimersByTimeAsync(100);
+		expect(read).not.toHaveBeenCalled();
+
+		key = null;
+		sync.request();
+		key = 'chat-B';
+		sync.requestMissed();
+		await vi.advanceTimersByTimeAsync(100);
+		expect(read).toHaveBeenCalledTimes(1);
+
+		sync.requestMissed();
+		await vi.advanceTimersByTimeAsync(100);
+		expect(read).toHaveBeenCalledTimes(1);
+		sync.dispose();
+	});
+
+	it('polls every 60 s while quiet and every 15 s while a reply runs or the socket is down', async () => {
+		vi.useFakeTimers();
+		let quiet = true;
+		const refresh = vi.fn();
+		const cleanup = subscribeChatSync({
+			socketStore: writable(null),
+			onEvent: vi.fn(),
+			refresh,
+			window: new EventTarget(),
+			document: Object.assign(new EventTarget(), { visibilityState: 'visible' }),
+			isQuiet: () => quiet
+		});
+		refresh.mockClear();
+
+		await vi.advanceTimersByTimeAsync(45000);
+		expect(refresh).not.toHaveBeenCalled();
+		await vi.advanceTimersByTimeAsync(15000);
+		expect(refresh).toHaveBeenCalledTimes(1);
+
+		quiet = false;
+		await vi.advanceTimersByTimeAsync(30000);
+		expect(refresh).toHaveBeenCalledTimes(3);
+		cleanup();
+	});
 });
 
 it('deduplicates fan-out events without sharing state between devices', () => {

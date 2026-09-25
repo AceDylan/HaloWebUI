@@ -101,10 +101,16 @@ export const createChatSync = <T>(options: {
 	let disposed = false;
 	let running = false;
 	let pending = false;
+	// A refresh asked for while there was no key (a chat load in flight).
+	let missed = false;
 	let timer: ReturnType<typeof setTimeout> | undefined;
 	let abort: AbortController | undefined;
 	const request = () => {
-		if (disposed || !options.getKey()) return;
+		if (disposed) return;
+		if (!options.getKey()) {
+			missed = true;
+			return;
+		}
 		pending = true;
 		if (!running && !timer) timer = setTimeout(run, options.delay ?? 100);
 	};
@@ -113,6 +119,7 @@ export const createChatSync = <T>(options: {
 		const key = options.getKey();
 		if (disposed || !key) return;
 		pending = false;
+		missed = false;
 		running = true;
 		abort = new AbortController();
 		const timeout = setTimeout(() => abort?.abort(), 10000);
@@ -130,6 +137,13 @@ export const createChatSync = <T>(options: {
 	};
 	return {
 		request,
+		// After a load that already fetched the chat: read again only if an
+		// event or trigger was dropped while it was loading.
+		requestMissed: () => {
+			if (!missed) return;
+			missed = false;
+			request();
+		},
 		dispose: () => {
 			disposed = true;
 			clearTimeout(timer);
@@ -138,18 +152,25 @@ export const createChatSync = <T>(options: {
 	};
 };
 
+const POLL_INTERVAL_MS = 15000;
+const QUIET_POLL_TICKS = 4;
+
 export const subscribeChatSync = ({
 	socketStore,
 	onEvent,
 	refresh,
 	window,
-	document
+	document,
+	isQuiet = () => false
 }: {
 	socketStore: { subscribe: (callback: (socket: any) => void) => () => void };
 	onEvent: (event: any, callback?: any) => void;
 	refresh: () => void;
 	window: EventTarget;
 	document: EventTarget & { visibilityState: string };
+	/** Socket connected and nothing generating: saves and background deliveries
+	 * already arrive as chat:reload, so the fallback poll slows down. */
+	isQuiet?: () => boolean;
 }) => {
 	let socket: any;
 	const resume = () => {
@@ -167,7 +188,12 @@ export const subscribeChatSync = ({
 	const events = ['focus', 'online', 'pageshow'];
 	for (const event of events) window.addEventListener(event, resume);
 	document.addEventListener('visibilitychange', resume);
-	const interval = setInterval(resume, 15000);
+	// Every 15 s while a reply runs or the socket is down, every 60 s otherwise.
+	let ticks = 0;
+	const interval = setInterval(() => {
+		ticks += 1;
+		if (ticks % QUIET_POLL_TICKS === 0 || !isQuiet()) resume();
+	}, POLL_INTERVAL_MS);
 	return () => {
 		clearInterval(interval);
 		unsubscribe();

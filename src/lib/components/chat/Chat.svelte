@@ -2494,7 +2494,7 @@
 				restoreChatInputDraft(input);
 
 				loading = false;
-				liveChatSync.request();
+				liveChatSync.requestMissed();
 				await tick();
 				scrollToBottomImmediately();
 				const chatInput = document.getElementById('chat-input');
@@ -3082,7 +3082,11 @@
 			onEvent: chatEventHandler,
 			refresh: liveChatSync.request,
 			window,
-			document
+			document,
+			isQuiet: () =>
+				Boolean($socket?.connected) &&
+				!(Array.isArray(taskIds) && taskIds.length > 0) &&
+				!Object.values(history?.messages ?? {}).some((message: any) => message?.done === false)
 		});
 
 		if (!chatIdProp && !$chatId) {

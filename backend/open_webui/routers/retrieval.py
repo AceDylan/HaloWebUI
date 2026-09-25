@@ -335,6 +335,8 @@ async def _load_web_documents_with_loader(
 ) -> list[Document]:
     from open_webui.retrieval.web.utils import get_web_loader
 
+    if not urls:
+        return []
     loader = get_web_loader(
         urls,
         verify_ssl=request.app.state.config.ENABLE_WEB_LOADER_SSL_VERIFICATION,
@@ -2699,7 +2701,7 @@ def _build_direct_docs_from_web_results(
     filenames = []
 
     for idx, result in enumerate(results):
-        content = str(result.snippet or "").strip()
+        content = str(result.content or result.snippet or "").strip()
         if not content:
             continue
 
@@ -2790,6 +2792,20 @@ async def process_web_search(
             for result in web_results
             if str(result.link or "").strip()
         ]
+        # Pages the engine already fetched (Smart Search research evidence)
+        # are used as they are; only the rest go through the web loader.
+        prefetched_docs = [
+            Document(
+                page_content=result.content,
+                metadata={
+                    "source": str(result.link).strip(),
+                    "title": result.title or str(result.link).strip(),
+                },
+            )
+            for result in web_results
+            if result.content and str(result.link or "").strip()
+        ]
+        prefetched_urls = {doc.metadata["source"] for doc in prefetched_docs}
         if not urls:
             direct_docs = _build_direct_docs_from_web_results(
                 form_data.query,
@@ -2812,6 +2828,7 @@ async def process_web_search(
                 "direct_content_only": True,
             }
 
+        urls = [url for url in urls if url not in prefetched_urls]
         try:
             docs = await _load_web_documents_with_loader(request, urls)
         except TavilyExtractAuthError as exc:
@@ -2895,6 +2912,7 @@ async def process_web_search(
                     "loader_runtime_notice": loader_runtime_notice,
                 }
 
+        docs = [*prefetched_docs, *docs]
         urls = [
             doc.metadata["source"] for doc in docs
         ]  # only keep URLs which could be retrieved

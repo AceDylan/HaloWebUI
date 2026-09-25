@@ -25,3 +25,6 @@ class SearchResult(BaseModel):
     title: Optional[str]
     snippet: Optional[str]
     favicon: Optional[str] = None
+    # Page text the engine already fetched (Smart Search research evidence);
+    # web search uses it instead of downloading the page again.
+    content: Optional[str] = None

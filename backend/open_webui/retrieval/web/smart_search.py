@@ -1,9 +1,16 @@
-"""Adapter for the separately installed smart-search CLI."""
+"""Adapter for the separately installed smart-search CLI.
+
+It routes the way Hermes's smart-search skill does: `research` first, and when
+research fetched pages, only that evidence, carrying the page text so the web
+loader does not download the page again. The CLI's model-backed `search` is
+never run. Without evidence, research's unfetched candidates and the direct
+provider commands supply URLs for the web loader to fetch.
+"""
 
 import json
 import os
 import subprocess
-from urllib.parse import urlparse
+from urllib.parse import parse_qsl, unquote, urlparse
 
 import validators
 from open_webui.retrieval.web.main import SearchResult, get_filtered_results
@@ -14,6 +21,24 @@ _SOURCE_COMMANDS = {
     "exa": ("exa-search", "--num-results"),
     "anysearch": ("anysearch-search", "--max-results"),
 }
+# Result listings of these engines link to sources but are not sources.
+_SEARCH_RESULT_HOSTS = {
+    "duckduckgo.com",
+    "html.duckduckgo.com",
+    "lite.duckduckgo.com",
+    "bing.com",
+    "cn.bing.com",
+    "baidu.com",
+    "sogou.com",
+    "so.com",
+    "search.yahoo.com",
+    "yandex.com",
+    "yandex.ru",
+}
+_SEARCH_QUERY_PARAMS = {"q", "wd", "word", "query", "p", "text"}
+# Research returns pages as markdown, sometimes several hundred KB; keep the
+# per-page cap web search's embedding path applies to downloaded pages.
+_MAX_CONTENT_CHARS = 100_000
 _ERROR_TYPES = {
     "config_error",
     "parameter_error",
@@ -69,9 +94,9 @@ def _response(
 
 
 def _capability_status(payload: dict | None) -> dict | None:
-    """The CLI's configured-provider summary, present in research, search and
-    doctor responses (including failed ones), so the slow doctor probe is only
-    needed when no earlier response carried it."""
+    """The CLI's configured-provider summary, present in research and doctor
+    responses (including failed ones), so the slow doctor probe is only needed
+    when research did not carry it."""
     if isinstance(payload, dict) and isinstance(payload.get("capability_status"), dict):
         return payload["capability_status"]
     return None
@@ -98,9 +123,29 @@ def _source_commands(capabilities: dict, count: int) -> list[list[str]]:
     return commands
 
 
+def _search_results_page(parsed) -> bool:
+    host = (parsed.hostname or "").lower().removeprefix("www.").removeprefix("m.")
+    if host not in _SEARCH_RESULT_HOSTS and not host.startswith("google."):
+        return False
+    return any(
+        key.lower() in _SEARCH_QUERY_PARAMS
+        for key, _ in parse_qsl(parsed.query, keep_blank_values=True)
+    )
+
+
+def _url_key(url: str) -> tuple[str, str, str]:
+    """Percent-encoded and plain spellings, http/https and a trailing slash or
+    fragment do not make a different page."""
+    parsed = urlparse(url)
+    return (
+        parsed.netloc.lower(),
+        unquote(parsed.path).rstrip("/"),
+        unquote(parsed.query),
+    )
+
+
 def _results_from_items(items: list, *, require_evidence: bool) -> list[dict]:
     results = []
-    seen = set()
     for item in items:
         if not isinstance(item, dict):
             continue
@@ -123,10 +168,9 @@ def _results_from_items(items: list, *, require_evidence: bool) -> list[dict]:
             or not validators.url(url)
             or parsed.username is not None
             or parsed.password is not None
-            or url in seen
+            or _search_results_page(parsed)
         ):
             continue
-        seen.add(url)
         title = item.get("title")
         description = (
             item.get("content")
@@ -142,6 +186,9 @@ def _results_from_items(items: list, *, require_evidence: bool) -> list[dict]:
                 "snippet": " ".join(description[:500].split())
                 if isinstance(description, str)
                 else "",
+                "content": item["content"].strip()[:_MAX_CONTENT_CHARS]
+                if require_evidence
+                else None,
             }
         )
     return results
@@ -167,8 +214,9 @@ def search_smart_search(
         for item in get_filtered_results(
             _results_from_items(items, require_evidence=require_evidence), filter_list
         ):
-            if item["link"] not in seen:
-                seen.add(item["link"])
+            key = _url_key(item["link"])
+            if key not in seen:
+                seen.add(key)
                 results.append(SearchResult(**item))
 
     try:
@@ -181,62 +229,47 @@ def search_smart_search(
     if research_help is not None and research_help.returncode == 2:
         unavailable.append("research: unavailable in installed CLI")
 
-    commands = []
     if research_help is not None and research_help.returncode == 0:
-        commands.append(
-            (
-                "research",
-                ["--budget", "quick", "--fallback", "auto"],
-                90,
-                "evidence_items",
-            )
-        )
-    commands.append(
-        (
-            "search",
-            [
-                "--validation",
-                "balanced",
-                "--timeout",
-                "30",
-                "--extra-sources",
-                str(min(count, 3)),
-            ],
-            35,
-            "sources",
-        )
-    )
-    for subcommand, options, timeout, source_key in commands:
         try:
             completed = _run(
-                command, [subcommand, query, *options, "--format", "json"], timeout
+                command,
+                [
+                    "research",
+                    query,
+                    "--budget",
+                    "quick",
+                    "--fallback",
+                    "auto",
+                    "--format",
+                    "json",
+                ],
+                90,
             )
         except subprocess.TimeoutExpired:
-            failures.append(f"{subcommand}: timeout")
-            continue
-        payload, failure = _response(completed, subcommand)
-        if capability_status is None:
+            failures.append("research: timeout")
+        else:
+            payload, failure = _response(completed, "research")
             capability_status = _capability_status(payload)
-        if failure:
-            failures.append(failure)
-            continue
-        if not isinstance(payload.get(source_key), list):
-            failures.append(f"{subcommand}: unsuccessful response")
-            continue
+            if failure:
+                failures.append(failure)
+            elif not isinstance(payload.get("evidence_items"), list):
+                failures.append("research: unsuccessful response")
+            else:
+                had_valid_response = True
+                # Fetched evidence answers the query on its own, as in Hermes's
+                # acceptance gate; unfetched candidates only stand in for it.
+                add_items(payload["evidence_items"], require_evidence=True)
+                if results:
+                    return results[:count]
+                if isinstance(payload.get("discovery_sources"), list):
+                    add_items(payload["discovery_sources"])
+                if len(results) >= count:
+                    return results[:count]
 
-        had_valid_response = True
-        add_items(payload[source_key], require_evidence=subcommand == "research")
-        if subcommand == "research" and isinstance(
-            payload.get("discovery_sources"), list
-        ):
-            add_items(payload["discovery_sources"])
-        if len(results) >= count:
-            return results[:count]
-
-    # Direct provider commands recover from a failed or thin main route. The
-    # provider list normally comes from the research/search response itself;
+    # Direct provider commands recover from a failed or evidence-less research.
+    # The provider list normally comes from the research response itself;
     # doctor is a slow probe (it tests every upstream connection), so it only
-    # runs when no earlier response reported the configured capabilities.
+    # runs when research did not report the configured capabilities.
     if capability_status is None:
         try:
             completed = _run(command, ["doctor", "--format", "json"], 30)

@@ -116,7 +116,7 @@ def get_builtin_tools(
                     request.app.state.config.WEB_SEARCH_ENGINE,
                     str(query),
                 )
-                return [r.model_dump() for r in results[:limit]]
+                return [r.model_dump(exclude={"content"}) for r in results[:limit]]
 
             results = await asyncio.to_thread(_run)
             return json.dumps(results, ensure_ascii=False)

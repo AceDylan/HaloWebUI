@@ -8,19 +8,26 @@ describe('getFolderColor', () => {
 		expect(getFolderColor(id)).toBe(getFolderColor(id));
 	});
 
-	it('gives up to eight listed folders distinct colours in creation order', () => {
+	it('gives up to six listed folders distinct colours in creation order', () => {
 		const folders = Object.fromEntries(
-			Array.from({ length: 8 }, (_, index) => [
+			Array.from({ length: 6 }, (_, index) => [
 				`folder-${index}`,
 				{ id: `folder-${index}`, created_at: 1000 + index }
 			])
 		);
 		const dots = Object.keys(folders).map((id) => getFolderColor(id, folders).dot);
-		expect(new Set(dots).size).toBe(8);
+		expect(new Set(dots).size).toBe(6);
 
 		// A new folder does not recolour the existing ones.
 		const withNew = { ...folders, 'folder-new': { id: 'folder-new', created_at: 5000 } };
 		expect(getFolderColor('folder-3', withNew)).toBe(getFolderColor('folder-3', folders));
+	});
+
+	it('never uses the status dot colours (blue running, emerald finished)', () => {
+		const ids = Array.from({ length: 40 }, (_, index) => `folder-${index}`);
+		for (const id of ids) {
+			expect(getFolderColor(id).dot).not.toMatch(/sky|blue|cyan|emerald|green|teal|lime/);
+		}
 	});
 
 	it('spreads different folders over the palette', () => {

@@ -1607,33 +1607,12 @@
 							on:search={handleModelSearch}
 							on:change={handleModelChange}
 						/>
-
-						<!-- Phones get this button under the prompt instead (below). The
-						     wrapper carries the breakpoint: app.css rules outrank utilities. -->
-						<div class="hidden sm:block">
-						<div class="workspace-toolbar-actions">
-							<button
-								type="submit"
-								class="workspace-primary-button"
-								disabled={!canSubmit}
-								title={blockedReason ?? ''}
-							>
-								{#if loading}
-									<svg class="size-4 animate-spin" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-										<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
-										<path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-									</svg>
-								{:else}
-									<Sparkles className="size-4" strokeWidth="2" />
-								{/if}
-								<span>{loading ? $i18n.t('Generating...') : $i18n.t('Generate')}</span>
-							</button>
-						</div>
-						</div>
 					</div>
 			</div>
 
-			<section class="workspace-section space-y-4">
+			<!-- The cards sit on the page: no extra section card around them (it made four
+			     nested boxes under the workspace header). -->
+			<section class="space-y-4">
 				<div class="glass-item p-4 space-y-3">
 					<div class="flex items-center justify-between">
 						<div class="text-sm font-semibold text-gray-900 dark:text-gray-100">
@@ -1662,12 +1641,15 @@
 						{/each}
 					</div>
 
+					<!-- Under the prompt on every screen: write, then generate (the button used
+					     to sit above-right of the prompt on desktop). -->
+					<div class="flex sm:justify-end">
 					<button
 						type="submit"
-						class="workspace-primary-button w-full sm:!hidden"
+						class="workspace-primary-button w-full sm:w-auto sm:min-w-32"
 						disabled={!canSubmit}
 						title={blockedReason ?? ''}
-						data-halo-image-generate-mobile
+						data-halo-image-generate
 					>
 						{#if loading}
 							<svg class="size-4 animate-spin" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
@@ -1679,6 +1661,7 @@
 						{/if}
 						<span>{loading ? $i18n.t('Generating...') : $i18n.t('Generate')}</span>
 					</button>
+					</div>
 				</div>
 
 				<!-- 风格预设 -->
@@ -2063,7 +2046,7 @@
 				</div>
 			</section>
 
-			<section bind:this={resultsSectionElement} class="workspace-section space-y-3">
+			<section bind:this={resultsSectionElement} class="space-y-3">
 				<div class="flex items-center justify-between">
 					<div class="min-w-0 flex-1">
 						<div class="text-sm font-semibold text-gray-900 dark:text-gray-100">

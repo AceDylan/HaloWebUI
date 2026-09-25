@@ -94,6 +94,16 @@
 	export let triggerClassName = 'text-base';
 
 	let tagsContainerElement: HTMLElement | null = null;
+	// The list scrolls with its scrollbar hidden; a fade at the bottom says there
+	// is more below (six models used to show five, the sixth out of sight).
+	let listElement: HTMLElement | null = null;
+	let listHasMoreBelow = false;
+	const updateListOverflow = () => {
+		listHasMoreBelow = Boolean(
+			listElement &&
+				listElement.scrollHeight - listElement.scrollTop - listElement.clientHeight > 4
+		);
+	};
 	let tagSortableElement: HTMLElement | null = null;
 	let tagSortable: { destroy: () => void } | null = null;
 	let tagSortMode = false;
@@ -513,7 +523,20 @@
 		await tick();
 		const item = document.querySelector(`[data-arrow-selected="true"]`);
 		item?.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' });
+		updateListOverflow();
 	};
+	$: if (listElement) {
+		visibleItems;
+		void tick().then(updateListOverflow);
+	}
+	// Rows settle to their real height after the first paint (content-visibility
+	// placeholders), so re-check whenever the list itself changes size.
+	let listResizeObserver: ResizeObserver | null = null;
+	$: if (listElement && typeof ResizeObserver !== 'undefined') {
+		listResizeObserver?.disconnect();
+		listResizeObserver = new ResizeObserver(updateListOverflow);
+		listResizeObserver.observe(listElement);
+	}
 
 	const pullModelHandler = async () => {
 		const sanitizedModelTag = searchValue.trim().replace(/^ollama\s+(run|pull)\s+/, '');
@@ -701,6 +724,7 @@
 
 	onDestroy(() => {
 		destroyTagSortable();
+		listResizeObserver?.disconnect();
 	});
 </script>
 
@@ -832,7 +856,12 @@
 				</div>
 			{/if}
 
-			<div class="px-3 max-h-64 overflow-y-auto scrollbar-hidden relative">
+			<div
+				class="px-3 max-h-[min(26rem,55dvh)] overflow-y-auto scrollbar-hidden relative"
+				bind:this={listElement}
+				on:scroll={updateListOverflow}
+				data-halo-model-list
+			>
 				{#if tags && hasVisibleItems}
 					<div class="sticky top-0 z-10 flex w-full items-center gap-1 bg-white dark:bg-gray-850">
 						<div
@@ -1255,6 +1284,13 @@
 						</div>
 					</div>
 				{/each}
+				{#if listHasMoreBelow}
+					<div
+						class="pointer-events-none sticky bottom-0 -mx-3 -mt-8 h-8 bg-linear-to-t from-white to-transparent dark:from-gray-850"
+						aria-hidden="true"
+						data-halo-model-list-more
+					></div>
+				{/if}
 			</div>
 
 			{#if onAddModel}

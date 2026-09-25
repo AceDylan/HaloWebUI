@@ -1206,39 +1206,40 @@
 								dir={$settings?.chatDirection ?? 'auto'}
 							>
 								{#if hasActiveImageGenerationReference}
-									<div class="px-2.5 mt-0.5 mb-1.5 pt-1.5">
+									<!-- One chip, not a card: on a phone the card plus the two toolbar
+									     rows took about a third of the screen. -->
+									<div class="px-2.5 mt-0.5 mb-1 pt-1.5" data-halo-image-reference>
 										<div
-											class="rounded-2xl border border-dashed border-primary-200/80 bg-primary-50/60 px-3 py-2 dark:border-primary-500/25 dark:bg-primary-950/20"
+											class="inline-flex max-w-full items-center gap-1.5 rounded-full border border-dashed border-primary-200/80 bg-primary-50/60 py-0.5 pl-0.5 pr-1 dark:border-primary-500/25 dark:bg-primary-950/20"
 										>
-											<div class="mb-2 flex items-center justify-between gap-2">
-												<div class="min-w-0 text-xs font-medium text-primary-700 dark:text-primary-200">
-													{tr(
-														'引用上一轮生成图 {{count}} 张',
-														'Referencing {{count}} generated image(s) from the previous turn',
-														{ count: imageGenerationReferenceFiles.length }
-													)}
-												</div>
-												<button
-													type="button"
-													class="shrink-0 rounded-full px-2 py-0.5 text-xs text-primary-700 transition hover:bg-primary-100 dark:text-primary-200 dark:hover:bg-primary-900/40"
-													on:click={() => onCancelImageGenerationReference?.()}
-												>
-													{tr('取消引用', 'Cancel reference')}
-												</button>
-											</div>
-											<div class="flex max-h-20 flex-wrap gap-2 overflow-y-auto scrollbar-none">
-												{#each imageGenerationReferenceFiles as file}
-													<div
-														class="relative shrink-0 rounded-xl ring-1 ring-primary-200/80 dark:ring-primary-500/25"
-													>
-														<Image
-															src={file.preview_url || file.url || file.content_url}
-															alt="referenced generated image"
-															imageClassName="size-12 rounded-xl object-cover"
-														/>
-													</div>
+											<span class="flex shrink-0 -space-x-2">
+												{#each imageGenerationReferenceFiles.slice(0, 3) as file}
+													<Image
+														src={file.preview_url || file.url || file.content_url}
+														alt="referenced generated image"
+														className="shrink-0 outline-hidden focus:outline-hidden"
+														imageClassName="size-6 rounded-full object-cover ring-2 ring-white dark:ring-gray-900"
+													/>
 												{/each}
-											</div>
+											</span>
+											<span
+												class="min-w-0 truncate text-xs font-medium text-primary-700 dark:text-primary-200"
+											>
+												{tr(
+													'引用上一轮生成图 {{count}} 张',
+													'Referencing {{count}} generated image(s) from the previous turn',
+													{ count: imageGenerationReferenceFiles.length }
+												)}
+											</span>
+											<button
+												type="button"
+												class="shrink-0 rounded-full p-1 text-primary-700 transition hover:bg-primary-100 dark:text-primary-200 dark:hover:bg-primary-900/40"
+												aria-label={tr('取消引用', 'Cancel reference')}
+												title={tr('取消引用', 'Cancel reference')}
+												on:click={() => onCancelImageGenerationReference?.()}
+											>
+												<XMark className="size-3.5" strokeWidth="2.5" />
+											</button>
 										</div>
 									</div>
 								{/if}

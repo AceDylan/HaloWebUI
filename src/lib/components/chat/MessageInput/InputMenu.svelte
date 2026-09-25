@@ -257,7 +257,7 @@
 
 	<div slot="content">
 		<DropdownMenu.Content
-			class="w-full max-w-[min(300px,calc(100vw-1rem))] rounded-xl px-1 py-1 border border-gray-300/30 dark:border-gray-700/50 z-50 bg-white dark:bg-gray-850 dark:text-white shadow-sm"
+			class="w-full max-w-[min(320px,calc(100vw-1rem))] rounded-xl px-1 py-1 border border-gray-300/30 dark:border-gray-700/50 z-50 bg-white dark:bg-gray-850 dark:text-white shadow-sm"
 			sideOffset={10}
 			alignOffset={-8}
 			side="top"
@@ -295,9 +295,13 @@
 											? '\n\n管理员：' + tools[toolId].ownerName
 											: '')}
 									placement="top-start"
-									className="truncate"
+									className="min-w-0"
 								>
-									<div class="truncate">{tools[toolId].name}</div>
+									<!-- Two lines rather than an ellipsis: "WebObsidian Vault (read-only)"
+									     is wider than the menu. -->
+									<div class="line-clamp-2 break-words text-left leading-snug" data-halo-tool-name>
+										{tools[toolId].name}
+									</div>
 								</Tooltip>
 							</div>
 

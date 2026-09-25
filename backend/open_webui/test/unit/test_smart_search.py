@@ -86,6 +86,7 @@ def test_research_uses_verified_evidence_and_filters_domains(monkeypatch):
             "snippet": "First page content",
             "favicon": None,
             "content": "First\n page content",
+            "provider": None,
         }
     ]
     assert calls[0][0] == ["/opt/smart-search/bin/smart-search", "research", "--help"]
@@ -403,6 +404,79 @@ def test_search_result_pages_and_encoded_duplicates_are_dropped(monkeypatch):
     ]
 
 
+def test_mirror_gateway_pages_are_dropped(monkeypatch):
+    # big5.<site>.gov.cn/gate/big5/<any host>/... re-serves other sites; spam is
+    # indexed through it and the page itself answers 403.
+    def fake_run(argv, **kwargs):
+        if "--help" in argv:
+            return subprocess.CompletedProcess(argv, 0, stdout="usage")
+        return completed(
+            argv,
+            {
+                "ok": True,
+                "evidence_items": [
+                    {"url": url, "content": "Page", "verified": True}
+                    for url in (
+                        "https://big5.locpg.gov.cn/gate/big5/www.8zz.org.cn/n3N8/x.phtml",
+                        "http://big5.www.gov.cn/gate/GB/www.gov.cn/zhengce/a.htm",
+                        "https://www.gov.cn/zhengce/a.htm",
+                        "https://example.org/gate/big5-guide",
+                    )
+                ],
+            },
+        )
+
+    monkeypatch.setattr(smart_search.subprocess, "run", fake_run)
+    assert [result.link for result in smart_search.search_smart_search("q", 5)] == [
+        "https://www.gov.cn/zhengce/a.htm",
+        "https://example.org/gate/big5-guide",
+    ]
+
+
+def test_results_name_the_search_that_found_them(monkeypatch):
+    # Research evidence reports the search that found the page (tavily), not
+    # the service that fetched it (firecrawl); a top-up names its command.
+    def fake_run(argv, **kwargs):
+        if "--help" in argv:
+            return subprocess.CompletedProcess(argv, 0, stdout="usage")
+        if argv[1] == "research":
+            payload = doctor(web=("tavily",), docs=("exa",))
+            payload.update(
+                evidence_items=[
+                    {
+                        "url": "https://example.org/a",
+                        "content": "A",
+                        "verified": True,
+                        "provider": "firecrawl",
+                    },
+                    {
+                        "url": "https://example.org/b",
+                        "content": "B",
+                        "verified": True,
+                        "provider": "tavily",
+                    },
+                ],
+                discovery_sources=[
+                    {"url": "https://example.org/a/", "provider": "tavily"},
+                ],
+            )
+            return completed(argv, payload)
+        if argv[1] == "exa-search":
+            return completed(
+                argv,
+                {"ok": True, "results": [{"url": "https://example.org/c", "text": "C"}]},
+            )
+        pytest.fail(f"Unexpected command: {argv[1]}")
+
+    monkeypatch.setattr(smart_search.subprocess, "run", fake_run)
+    results = smart_search.search_smart_search("q", 5)
+    assert [(result.link, result.provider) for result in results] == [
+        ("https://example.org/a", "tavily"),
+        ("https://example.org/b", "tavily"),
+        ("https://example.org/c", "exa"),
+    ]
+
+
 @pytest.mark.parametrize(
     "provider,command,options",
     [
@@ -441,6 +515,7 @@ def test_direct_provider_json_results(monkeypatch, provider, command, options):
     results = smart_search.search_smart_search("query", 1)
     assert [result.link for result in results] == ["https://example.org/result"]
     assert results[0].snippet == "Source text"
+    assert results[0].provider == provider
     assert calls[-1] == ["smart-search", command, "query", *options, "--format", "json"]
     assert len(calls) == 3
 

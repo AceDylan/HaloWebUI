@@ -66,7 +66,7 @@ describe('native web search mode options', () => {
 		expect(getSmartWebSearchRouteLabel(t, config, models)).toBe('Smart · Model Native');
 	});
 
-	it('labels Hermes Auto mode as Halo when Smart Search is selected', () => {
+	it('names Smart Search on the chip when it is the HaloWebUI search engine', () => {
 		const config = {
 			hermes_agent_model_ids: ['hermes-agent'],
 			features: {
@@ -76,7 +76,19 @@ describe('native web search mode options', () => {
 			}
 		};
 		const models = [{ id: 'hermes-agent', owned_by: 'openai' }];
-		expect(getSmartWebSearchRouteLabel(t, config, models)).toBe('Smart · HaloWebUI');
+		expect(getSmartWebSearchRouteLabel(zhT, config, models)).toBe('Smart Search');
+		// Any model routed to HaloWebUI search says so too.
+		expect(
+			getSmartWebSearchRouteLabel(zhT, config, [{ id: 'future-model', owned_by: 'openai' }])
+		).toBe('Smart Search');
+		// Another engine keeps the route label.
+		expect(
+			getSmartWebSearchRouteLabel(
+				zhT,
+				{ features: { enable_halo_web_search: true, web_search_engine: 'tavily' } },
+				models
+			)
+		).toBe('智能 · HaloWebUI');
 	});
 
 	it('keeps smart web search on HaloWebUI for unverified compatible models', () => {

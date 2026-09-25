@@ -4180,6 +4180,7 @@ async def chat_web_search_handler(
                 done=False,
             )
 
+            started_at = time.monotonic()
             try:
                 results = await process_web_search_with_progress(
                     searchQuery,
@@ -4187,6 +4188,7 @@ async def chat_web_search_handler(
                     total_queries,
                 )
             except Exception as e:
+                elapsed_ms = int((time.monotonic() - started_at) * 1000)
                 error_status = build_search_error_status(e)
                 if error_status.get("known"):
                     log.warning(
@@ -4213,8 +4215,10 @@ async def chat_web_search_handler(
                     "query": searchQuery,
                     "results": None,
                     "error_status": error_status,
+                    "elapsed_ms": elapsed_ms,
                 }
 
+            elapsed_ms = int((time.monotonic() - started_at) * 1000)
             if results:
                 result_count = len(results.get("filenames") or []) + len(
                     results.get("collection_names") or []
@@ -4238,6 +4242,7 @@ async def chat_web_search_handler(
                 "query": searchQuery,
                 "results": results,
                 "error_status": None,
+                "elapsed_ms": elapsed_ms,
             }
 
     query_outcomes = await asyncio.gather(
@@ -4248,6 +4253,27 @@ async def chat_web_search_handler(
     )
 
     query_outcomes.sort(key=lambda o: o["query_index"])
+
+    # Per keyword: which searches answered and how long it took, for the
+    # "已联网" badge's detail view. Engines that do not name their upstream
+    # report themselves.
+    search_engine = str(
+        getattr(request.app.state.config, "WEB_SEARCH_ENGINE", "") or ""
+    ).strip()
+    query_details = []
+    for outcome in query_outcomes:
+        outcome_results = outcome["results"] or {}
+        detail = {
+            "query": outcome["query"],
+            "elapsed_ms": outcome.get("elapsed_ms"),
+            "count": len(outcome_results.get("filenames") or [])
+            + len(outcome_results.get("collection_names") or []),
+            "providers": list(outcome_results.get("providers") or [])
+            or ([search_engine] if search_engine and outcome["results"] else []),
+        }
+        if outcome["error_status"] is not None:
+            detail["error"] = str(outcome["error_status"].get("message") or "")[:200]
+        query_details.append(detail)
 
     for outcome in query_outcomes:
         if outcome["error_status"] is not None:
@@ -4339,6 +4365,7 @@ async def chat_web_search_handler(
                 count=len(urls),
                 failed=total_failed,
                 failed_queries=failed_queries,
+                query_details=query_details,
                 done=True,
                 warning=True,
             )
@@ -4348,6 +4375,7 @@ async def chat_web_search_handler(
                 urls=urls,
                 count=len(urls),
                 failed_queries=failed_queries,
+                query_details=query_details,
                 done=True,
                 warning=True,
             )
@@ -4356,12 +4384,14 @@ async def chat_web_search_handler(
                 f"联网搜索完成，找到 {len(urls)} 个来源。",
                 urls=urls,
                 count=len(urls),
+                query_details=query_details,
                 done=True,
             )
     elif failed_queries:
         await emit_web_search_status(
             f"联网搜索失败：{failed_queries[0].get('message')}",
             failed_queries=failed_queries,
+            query_details=query_details,
             done=True,
             error=not bool(failed_queries[0].get("warning")),
             warning=bool(failed_queries[0].get("warning")),
@@ -4369,6 +4399,7 @@ async def chat_web_search_handler(
     else:
         await emit_web_search_status(
             "联网搜索完成，但没有找到可用结果。",
+            query_details=query_details,
             done=True,
             warning=True,
         )

@@ -28,3 +28,6 @@ class SearchResult(BaseModel):
     # Page text the engine already fetched (Smart Search research evidence);
     # web search uses it instead of downloading the page again.
     content: Optional[str] = None
+    # Which upstream search found the page (Smart Search: zhipu, tavily,
+    # exa, ...); shown with the search status.
+    provider: Optional[str] = None

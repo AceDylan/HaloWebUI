@@ -2778,6 +2778,22 @@ def _build_direct_docs_from_web_results(
 
 
 @router.post("/process/web/search")
+def _providers_for_urls(web_results: list[SearchResult], urls: list[str]) -> list[str]:
+    """The upstream searches (in order, once each) that found the pages in
+    ``urls``; empty when the engine does not say (single-source engines)."""
+    found_by = {
+        str(result.link or "").strip(): result.provider
+        for result in web_results
+        if getattr(result, "provider", None)
+    }
+    providers = []
+    for url in urls:
+        provider = found_by.get(url)
+        if provider and provider not in providers:
+            providers.append(provider)
+    return providers
+
+
 async def process_web_search(
     request: Request, form_data: SearchForm, user=Depends(get_verified_user)
 ):
@@ -2966,6 +2982,7 @@ async def process_web_search(
                 ],
                 "loaded_count": len(docs),
                 "failed_count": unreadable_count,
+                "providers": _providers_for_urls(web_results, urls),
             }
             if loader_runtime_notice is not None:
                 result["loader_runtime_notice"] = loader_runtime_notice
@@ -3035,6 +3052,7 @@ async def process_web_search(
                 "filenames": urls,
                 "loaded_count": len(docs),
                 "failed_count": failed_count,
+                "providers": _providers_for_urls(web_results, urls),
             }
             if loader_runtime_notice is not None:
                 result["loader_runtime_notice"] = loader_runtime_notice

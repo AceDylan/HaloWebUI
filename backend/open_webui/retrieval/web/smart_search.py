@@ -41,6 +41,11 @@ _SEARCH_RESULT_HOSTS = {
     "yandex.ru",
 }
 _SEARCH_QUERY_PARAMS = {"q", "wd", "word", "query", "p", "text"}
+# Simplified/traditional conversion gateways of Chinese government sites
+# (big5.xxx.gov.cn/gate/big5/<any host>/...) re-serve any other site under
+# the government domain; search engines index spam through them, and the
+# page itself usually answers 403.
+_MIRROR_GATEWAY_PREFIXES = ("/gate/big5/", "/gate/gb/")
 # Research returns pages as markdown, sometimes several hundred KB; keep the
 # per-page cap web search's embedding path applies to downloaded pages.
 _MAX_CONTENT_CHARS = 100_000
@@ -109,7 +114,7 @@ def _capability_status(payload: dict | None) -> dict | None:
 
 def _source_commands(
     capabilities: dict, count: int
-) -> list[tuple[list[str], str | None]]:
+) -> list[tuple[list[str], str | None, str]]:
     commands = []
     seen = set()
     for capability in ("web_search", "docs_search", "vertical_search"):
@@ -127,7 +132,11 @@ def _source_commands(
             seen.add(provider)
             subcommand, count_option, options, text_key = spec
             commands.append(
-                ([subcommand, count_option, str(min(count, 10)), *options], text_key)
+                (
+                    [subcommand, count_option, str(min(count, 10)), *options],
+                    text_key,
+                    provider,
+                )
             )
     return commands
 
@@ -142,6 +151,10 @@ def _search_results_page(parsed) -> bool:
     )
 
 
+def _mirror_gateway_page(parsed) -> bool:
+    return (parsed.path or "").lower().startswith(_MIRROR_GATEWAY_PREFIXES)
+
+
 def _url_key(url: str) -> tuple[str, str, str]:
     """Percent-encoded and plain spellings, http/https and a trailing slash or
     fragment do not make a different page."""
@@ -154,8 +167,18 @@ def _url_key(url: str) -> tuple[str, str, str]:
 
 
 def _results_from_items(
-    items: list, *, require_evidence: bool, text_key: str | None = None
+    items: list,
+    *,
+    require_evidence: bool,
+    text_key: str | None = None,
+    provider: str | None = None,
+    found_by: dict | None = None,
 ) -> list[dict]:
+    """``provider`` names the source of every item (a direct provider
+    command); otherwise each item's own ``provider`` is used, with
+    ``found_by`` (URL key -> the search that found it) taking precedence, so
+    research evidence reports the search that found a page rather than the
+    service that fetched it."""
     results = []
     for item in items:
         if not isinstance(item, dict):
@@ -184,8 +207,12 @@ def _results_from_items(
             or parsed.username is not None
             or parsed.password is not None
             or _search_results_page(parsed)
+            or _mirror_gateway_page(parsed)
         ):
             continue
+        item_provider = provider or (found_by or {}).get(_url_key(url))
+        if not item_provider and isinstance(item.get("provider"), str):
+            item_provider = item["provider"].strip() or None
         title = item.get("title")
         description = (
             item.get("content")
@@ -202,9 +229,25 @@ def _results_from_items(
                 if isinstance(description, str)
                 else "",
                 "content": page_text[:_MAX_CONTENT_CHARS] or None,
+                "provider": item_provider,
             }
         )
     return results
+
+
+def _discovery_providers(sources) -> dict:
+    """URL key -> the search provider research found the page with."""
+    found_by = {}
+    for source in sources if isinstance(sources, list) else []:
+        if not isinstance(source, dict):
+            continue
+        url, provider = source.get("url"), source.get("provider")
+        if isinstance(url, str) and isinstance(provider, str) and provider.strip():
+            try:
+                found_by.setdefault(_url_key(url.strip()), provider.strip())
+            except ValueError:
+                continue
+    return found_by
 
 
 def search_smart_search(
@@ -233,10 +276,16 @@ def search_smart_search(
         require_evidence: bool = False,
         text_key: str | None = None,
         require_text: bool = False,
+        provider: str | None = None,
+        found_by: dict | None = None,
     ) -> None:
         for item in get_filtered_results(
             _results_from_items(
-                items, require_evidence=require_evidence, text_key=text_key
+                items,
+                require_evidence=require_evidence,
+                text_key=text_key,
+                provider=provider,
+                found_by=found_by,
             ),
             filter_list,
         ):
@@ -284,7 +333,11 @@ def search_smart_search(
                 failures.append("research: unsuccessful response")
             else:
                 had_valid_response = True
-                add_items(payload["evidence_items"], require_evidence=True)
+                add_items(
+                    payload["evidence_items"],
+                    require_evidence=True,
+                    found_by=_discovery_providers(payload.get("discovery_sources")),
+                )
                 topping_up = bool(results)
                 # Unfetched candidates only stand in for missing evidence.
                 if not topping_up and isinstance(
@@ -311,7 +364,9 @@ def search_smart_search(
             if capability_status is None and not failure:
                 failures.append("doctor: missing capability status")
 
-    for options, text_key in _source_commands(capability_status or {}, count):
+    for options, text_key, provider in _source_commands(
+        capability_status or {}, count
+    ):
         if topping_up and text_key is None:
             continue
         subcommand = options[0]
@@ -333,7 +388,10 @@ def search_smart_search(
             continue
         had_valid_response = True
         add_items(
-            source_payload["results"], text_key=text_key, require_text=topping_up
+            source_payload["results"],
+            text_key=text_key,
+            require_text=topping_up,
+            provider=provider,
         )
         if len(results) >= count:
             return results[:count]

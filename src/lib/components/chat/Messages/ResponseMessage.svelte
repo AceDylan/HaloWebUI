@@ -88,7 +88,7 @@
 	import { KokoroWorker } from '$lib/workers/KokoroWorker';
 	import FileItem from '$lib/components/common/FileItem.svelte';
 	import { getModelChatDisplayName, getModelDisplayParts } from '$lib/utils/model-display';
-	import { findModelByIdentity } from '$lib/utils/model-identity';
+	import { findModelByIdentity, getModelSelectionId } from '$lib/utils/model-identity';
 	import {
 		getRenderableMessageError,
 		hasVisibleMessageFiles as messageHasVisibleFiles
@@ -135,6 +135,13 @@
 			urls?: string[];
 			query?: string;
 			web_search_state?: string;
+			query_details?: {
+				query: string;
+				providers?: string[];
+				elapsed_ms?: number | null;
+				count?: number;
+				error?: string;
+			}[];
 		}[];
 		status?: {
 			done: boolean;
@@ -525,6 +532,43 @@
 	$: webSearchBadge = computeWebSearchBadge(
 		message?.statusHistory ?? [...(message?.status ? [message?.status] : [])]
 	);
+	// Per keyword: which searches answered and how long it took (the backend's
+	// query_details on the final web_search status). Clicking "已联网 · N 源"
+	// shows them.
+	$: webSearchDetails = (() => {
+		const withDetails = (message?.statusHistory ?? []).filter(
+			(status) => status?.action === 'web_search' && Array.isArray(status?.query_details)
+		);
+		return (withDetails.at(-1)?.query_details ?? []).filter(
+			(detail) => detail && typeof detail.query === 'string'
+		);
+	})();
+	let showWebSearchDetails = false;
+	// "未联网" is a way in: answer again with web search on.
+	$: canRetryWithWebSearch =
+		!readOnly &&
+		message?.done === true &&
+		Boolean($config?.features?.enable_web_search) &&
+		message?.discussion?.enabled !== true;
+	const WEB_SEARCH_PROVIDER_NAMES: Record<string, string> = {
+		zhipu: '智谱',
+		'zhipu-mcp': '智谱 MCP',
+		tavily: 'Tavily',
+		exa: 'Exa',
+		firecrawl: 'Firecrawl',
+		anysearch: 'AnySearch',
+		smart_search: 'Smart Search'
+	};
+	const webSearchProviderNames = (providers: unknown): string =>
+		(Array.isArray(providers) ? providers : [])
+			.map((provider) => `${provider ?? ''}`.trim())
+			.filter(Boolean)
+			.map((provider) => WEB_SEARCH_PROVIDER_NAMES[provider.toLowerCase()] ?? provider)
+			.join(' + ');
+	const webSearchSeconds = (elapsedMs: unknown): string =>
+		typeof elapsedMs === 'number' && Number.isFinite(elapsedMs)
+			? `${(elapsedMs / 1000).toFixed(elapsedMs < 10000 ? 1 : 0)}s`
+			: '';
 	$: hasActiveImageGenerationStatus =
 		latestDisplayStatus?.action === 'image_generation' && latestDisplayStatus?.done === false;
 	$: activeImageGenerationStatus = hasActiveImageGenerationStatus ? latestDisplayStatus : null;
@@ -619,7 +663,6 @@
 		setupButtonsScroll();
 	}
 	let showDeleteConfirm = false;
-	let showRegenerateConfirm = false;
 	let showRegenerateMenu = false;
 	let regenerateInput = '';
 
@@ -687,6 +730,39 @@
 
 	let model: MessageModel | null = null;
 	$: model = findModelByIdentity($models, message.model) as unknown as MessageModel | null;
+
+	// "用 X 重答": the other models the picker offers, so comparing answers keeps
+	// them in this chat as versions instead of a new chat per model.
+	$: regenerateModelOptions =
+		readOnly || message?.discussion?.enabled === true
+			? []
+			: (($models ?? []) as any[]).filter(
+					(candidate) =>
+						candidate &&
+						!(candidate?.info?.meta?.hidden ?? false) &&
+						candidate !== (model as unknown) &&
+						getModelSelectionId(candidate) !== `${message?.model ?? ''}`.trim()
+				);
+	const regenerateWithModel = (candidate: any) => {
+		showRegenerateMenu = false;
+		showMobileMoreMenu = false;
+		regenerateResponse(message, { modelId: getModelSelectionId(candidate) });
+	};
+	const regenerateModelName = (candidate: any) =>
+		getModelDisplayParts(candidate).base || getModelChatDisplayName(candidate) || candidate?.id;
+
+	// The version switcher names the model of the version on screen when the
+	// versions come from different models.
+	$: siblingModelLabel = (() => {
+		const ids = new Set(
+			(siblings ?? [])
+				.map((id: string) => `${history?.messages?.[id]?.model ?? ''}`.trim())
+				.filter(Boolean)
+		);
+		if (ids.size < 2) return '';
+		const parts = model ? getModelDisplayParts(model as any) : null;
+		return parts?.base || message?.modelName || `${message?.model ?? ''}`;
+	})();
 	$: stats = getStatsDisplay(message);
 
 	// Speed / tokens / elapsed used to sit as a permanent line under the name. They now live
@@ -1256,16 +1332,6 @@
 {/if}
 -->
 
-<DeleteConfirmDialog
-	bind:show={showRegenerateConfirm}
-	title={$i18n.t('Regenerate with {{modelName}}?', {
-		modelName: getModelChatDisplayName(model) || message.modelName || message.model
-	})}
-	on:confirm={() => {
-		doRegenerate();
-	}}
-/>
-
 {#key message.id}
 	<div
 		class=" flex w-full message-{message.id} group/message relative"
@@ -1361,7 +1427,60 @@
 
 			{#if webSearchBadge}
 				<div class="mt-1 ml-0.5">
-					<WebSearchBadge state={webSearchBadge.state} label={webSearchBadgeLabel(webSearchBadge)} />
+					{#if webSearchBadge.state === 'skipped' && canRetryWithWebSearch}
+						<button
+							type="button"
+							class="rounded-full transition hover:opacity-80 active:scale-95"
+							title={tr('这条没有联网；点一下联网重答', 'Not searched; click to answer again with web search')}
+							data-halo-web-search-retry
+							on:click={() => regenerateResponse(message, { webSearch: true })}
+						>
+							<WebSearchBadge
+								state="skipped"
+								label={tr('未联网 · 联网重答', 'No web search · search and retry')}
+							/>
+						</button>
+					{:else if webSearchDetails.length > 0 && webSearchBadge.state !== 'searching'}
+						<button
+							type="button"
+							class="rounded-full transition hover:opacity-80"
+							aria-expanded={showWebSearchDetails}
+							title={tr('每个关键词用了哪个搜索、花了多久', 'Which search answered each keyword, and how long it took')}
+							data-halo-web-search-details-toggle
+							on:click={() => (showWebSearchDetails = !showWebSearchDetails)}
+						>
+							<WebSearchBadge state={webSearchBadge.state} label={webSearchBadgeLabel(webSearchBadge)} />
+						</button>
+						{#if showWebSearchDetails}
+							<div
+								class="mt-1.5 max-w-md rounded-xl border border-gray-200/70 bg-gray-50/70 px-3 py-2 text-xs text-gray-600 dark:border-gray-700/60 dark:bg-gray-800/40 dark:text-gray-300"
+								data-halo-web-search-details
+							>
+								{#each webSearchDetails as detail}
+									<div class="flex items-baseline gap-2 py-0.5">
+										<span class="min-w-0 flex-1 truncate" title={detail.query}>{detail.query}</span>
+										{#if detail.error}
+											<span class="shrink-0 text-red-600 dark:text-red-400" title={detail.error}>
+												{tr('失败', 'failed')}
+											</span>
+										{:else}
+											<span class="shrink-0 text-gray-500 dark:text-gray-400">
+												{webSearchProviderNames(detail.providers) || tr('无来源', 'no source')}
+											</span>
+											<span class="shrink-0 tabular-nums text-gray-500 dark:text-gray-400">
+												{tr('{{count}} 源', '{{count}} src', { count: Number(detail.count) || 0 })}
+											</span>
+										{/if}
+										<span class="shrink-0 w-10 text-right tabular-nums text-gray-400 dark:text-gray-500">
+											{webSearchSeconds(detail.elapsed_ms)}
+										</span>
+									</div>
+								{/each}
+							</div>
+						{/if}
+					{:else}
+						<WebSearchBadge state={webSearchBadge.state} label={webSearchBadgeLabel(webSearchBadge)} />
+					{/if}
 				</div>
 			{/if}
 
@@ -1893,6 +2012,14 @@
 										>
 											{siblings.indexOf(message.id) + 1}/{siblings.length}
 										</div>
+										{#if siblingModelLabel}
+											<div
+												class="self-center max-w-[6rem] truncate text-2xs font-medium text-gray-400 dark:text-gray-500"
+												data-halo-sibling-model
+											>
+												{siblingModelLabel}
+											</div>
+										{/if}
 										<button
 											type="button"
 											class="self-center p-2 hover:bg-black/5 dark:hover:bg-white/5 rounded-lg transition-all duration-200 active:scale-95"
@@ -1944,7 +2071,7 @@
 
 									<div slot="content">
 										<DropdownMenu.Content
-											class="w-52 rounded-2xl px-1.5 py-1.5 border border-gray-300/30 dark:border-gray-700/50 z-50 bg-white dark:bg-gray-850 dark:text-white shadow-lg"
+											class="w-52 max-h-[min(34rem,75dvh)] overflow-y-auto scrollbar-hidden rounded-2xl px-1.5 py-1.5 border border-gray-300/30 dark:border-gray-700/50 z-50 bg-white dark:bg-gray-850 dark:text-white shadow-lg"
 											sideOffset={8}
 											side="top"
 											align="end"
@@ -2037,6 +2164,32 @@
 													{/each}
 												{/if}
 
+												{#if regenerateModelOptions.length > 0}
+													<hr class="border-black/5 dark:border-white/5 my-0.5" />
+													<div
+														class="px-3 pt-1.5 pb-0.5 text-2xs font-medium text-gray-400 dark:text-gray-500"
+													>
+														{tr('换个模型重答', 'Answer with another model')}
+													</div>
+													{#each regenerateModelOptions as candidate (getModelSelectionId(candidate))}
+														<DropdownMenu.Item
+															class={mobileMenuItemClass}
+															data-halo-regenerate-model={getModelSelectionId(candidate)}
+															on:click={() => regenerateWithModel(candidate)}
+														>
+															<ModelIcon
+																src={candidate?.info?.meta?.profile_image_url ??
+																	candidate?.meta?.profile_image_url ??
+																	`${WEBUI_BASE_URL}/static/favicon.png`}
+																alt=""
+																bare={true}
+																className="size-4 shrink-0 rounded"
+															/>
+															<span class="truncate">{regenerateModelName(candidate)}</span>
+														</DropdownMenu.Item>
+													{/each}
+												{/if}
+
 												<hr class="border-black/5 dark:border-white/5 my-0.5" />
 
 												<DropdownMenu.Item
@@ -2117,6 +2270,15 @@
 												}}
 											>
 												{siblings.indexOf(message.id) + 1}/{siblings.length}
+											</div>
+										{/if}
+										{#if siblingModelLabel}
+											<div
+												class="self-center ml-1 max-w-[9rem] truncate text-xs font-medium text-gray-400 dark:text-gray-500"
+												title={siblingModelLabel}
+												data-halo-sibling-model
+											>
+												{siblingModelLabel}
 											</div>
 										{/if}
 
@@ -2355,7 +2517,7 @@
 
 												<div slot="content">
 													<DropdownMenu.Content
-														class="w-60 rounded-2xl px-1.5 py-1.5 border border-gray-300/30 dark:border-gray-700/50 z-50 bg-white dark:bg-gray-850 dark:text-white shadow-lg"
+														class="w-60 max-h-[min(34rem,80dvh)] overflow-y-auto scrollbar-hidden rounded-2xl px-1.5 py-1.5 border border-gray-300/30 dark:border-gray-700/50 z-50 bg-white dark:bg-gray-850 dark:text-white shadow-lg"
 														sideOffset={8}
 														side="top"
 														align="start"
@@ -2461,6 +2623,32 @@
 																<Globe class="w-4 h-4 shrink-0" strokeWidth={1.75} />
 																<span>{$i18n.t('Search the web')}</span>
 															</DropdownMenu.Item>
+														{/if}
+
+														{#if regenerateModelOptions.length > 0}
+															<hr class="border-black/5 dark:border-white/5 my-0.5" />
+															<div
+																class="px-3 pt-1.5 pb-0.5 text-2xs font-medium text-gray-400 dark:text-gray-500"
+															>
+																{tr('换个模型重答', 'Answer with another model')}
+															</div>
+															{#each regenerateModelOptions as candidate (getModelSelectionId(candidate))}
+																<DropdownMenu.Item
+																	class="flex items-center gap-3 px-3 py-2 text-sm rounded-xl cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800"
+																	data-halo-regenerate-model={getModelSelectionId(candidate)}
+																	on:click={() => regenerateWithModel(candidate)}
+																>
+																	<ModelIcon
+																		src={candidate?.info?.meta?.profile_image_url ??
+																			candidate?.meta?.profile_image_url ??
+																			`${WEBUI_BASE_URL}/static/favicon.png`}
+																		alt=""
+																		bare={true}
+																		className="size-4 shrink-0 rounded"
+																	/>
+																	<span class="truncate">{regenerateModelName(candidate)}</span>
+																</DropdownMenu.Item>
+															{/each}
 														{/if}
 													</DropdownMenu.Content>
 												</div>

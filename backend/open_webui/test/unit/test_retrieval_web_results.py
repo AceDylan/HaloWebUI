@@ -176,3 +176,19 @@ def test_unreadable_downloads_fall_back_to_the_snippet_or_are_dropped(monkeypatc
         "What the search engine saw on the page",
     ]
     assert result["failed_count"] == 1
+
+
+def test_providers_for_urls_lists_each_search_once_in_page_order():
+    from open_webui.routers.retrieval import _providers_for_urls
+
+    results = [
+        SearchResult(link="https://a.example/1", title="1", snippet="", provider="tavily"),
+        SearchResult(link="https://b.example/2", title="2", snippet="", provider="exa"),
+        SearchResult(link="https://c.example/3", title="3", snippet="", provider="tavily"),
+        SearchResult(link="https://d.example/4", title="4", snippet=""),
+    ]
+    assert _providers_for_urls(
+        results,
+        ["https://c.example/3", "https://b.example/2", "https://a.example/1", "https://d.example/4"],
+    ) == ["tavily", "exa"]
+    assert _providers_for_urls(results, ["https://d.example/4"]) == []

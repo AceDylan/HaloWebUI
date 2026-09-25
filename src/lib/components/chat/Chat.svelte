@@ -6309,7 +6309,14 @@
 
 	const regenerateResponse = async (
 		message,
-		options: { reasoningEffort?: string; webSearch?: boolean; instruction?: string } = {}
+		options: {
+			reasoningEffort?: string;
+			webSearch?: boolean;
+			instruction?: string;
+			// Answer again with this model instead (the menu's "用 X 重答"); the
+			// model picker keeps its selection for the next message.
+			modelId?: string;
+		} = {}
 	) => {
 		if (history.currentId) {
 			let userMessage = history.messages[message.parentId];
@@ -6332,7 +6339,12 @@
 			if (options.instruction) _pendingInstruction = options.instruction;
 
 			try {
-				if (message?.discussion?.enabled === true) {
+				if (options.modelId) {
+					await sendPrompt(history, userPrompt, userMessage.id, {
+						modelId: options.modelId,
+						modelIdx: message.modelIdx ?? 0
+					});
+				} else if (message?.discussion?.enabled === true) {
 					const currentModelIds =
 						atSelectedModel !== undefined
 							? [getModelSelectionId(atSelectedModel)].filter(Boolean)

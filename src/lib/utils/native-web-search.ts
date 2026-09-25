@@ -371,13 +371,17 @@ export function getSmartWebSearchRouteLabel(
 	);
 	const nativeEnabled = Boolean(config?.features?.enable_native_web_search);
 	const summary = summarizeNativeWebSearchSupport(models);
+	// The chip names the search engine when it is Smart Search: "HaloWebUI" is
+	// the route, and read as if Smart Search were not being used.
+	const haloRouteLabel =
+		config?.features?.web_search_engine === 'smart_search' ? 'Smart Search' : t('Smart · HaloWebUI');
 	if (
 		haloEnabled &&
 		config?.features?.web_search_engine === 'smart_search' &&
 		models.length > 0 &&
 		models.every((model) => isHermesAgentModel(model, config?.hermes_agent_model_ids))
 	) {
-		return t('Smart · HaloWebUI');
+		return haloRouteLabel;
 	}
 
 	if (nativeEnabled && summary.anySupported) {
@@ -385,7 +389,7 @@ export function getSmartWebSearchRouteLabel(
 	}
 
 	if (haloEnabled) {
-		return t('Smart · HaloWebUI');
+		return haloRouteLabel;
 	}
 
 	return t('Smart');

@@ -26,6 +26,7 @@ from open_webui.utils.html_visual_prompt import (
     append_html_visual_fallback,
     has_fenced_html_artifact,
     has_html_visual_artifact,
+    is_brief_plain_reply,
     normalize_html_visual_mode,
     prepare_html_visual_prompt_overlay,
     should_apply_html_visual_prompt,
@@ -33,6 +34,10 @@ from open_webui.utils.html_visual_prompt import (
 
 
 _REAL_AGY_ANSWER_DESIGN_ACTIVE = html_visual_prompt.agy_answer_design_active
+
+# A plain answer long enough to get a card. Shorter plain replies are left as
+# they are (is_brief_plain_reply), so tests of the card itself use this.
+LONG_PLAIN_RESPONSE = " ".join(["Plain response with enough detail to be worth a card."] * 5)
 
 
 @pytest.fixture(autouse=True)
@@ -507,7 +512,7 @@ def test_agy_failures_instruct_main_model_to_design_validate_and_force_fallback(
     assert "返回前逐项检查" in prompt
     assert "不得另外输出 `css`、`javascript` 或 `js`" in prompt
     assert HTML_VISUAL_FALLBACK_MARKER in append_html_visual_fallback(
-        "Plain response", metadata
+        LONG_PLAIN_RESPONSE, metadata
     )
 
 
@@ -730,7 +735,7 @@ def test_agy_capacity_exhaustion_falls_back_without_spawning(monkeypatch):
     assert metadata[HTML_VISUAL_AGY_METADATA_KEY]["reason"] == "busy"
     assert HTML_VISUAL_AGY_PROMPT_MARKER not in form_data["messages"][1]["content"]
     assert HTML_VISUAL_FALLBACK_MARKER in append_html_visual_fallback(
-        "Plain response", metadata
+        LONG_PLAIN_RESPONSE, metadata
     )
 
 
@@ -1088,7 +1093,7 @@ def test_force_fallback_preserves_hidden_details_across_ordinary_fences():
 
 
 def test_force_fallback_is_idempotent_and_respects_existing_html_artifact():
-    original = "Plain response"
+    original = LONG_PLAIN_RESPONSE
     once = append_html_visual_fallback(original, _metadata())
     twice = append_html_visual_fallback(once, _metadata())
     existing = 'Before\n```HTML\n<div style="color:red">Ready</div>\n```\nAfter'
@@ -1107,8 +1112,8 @@ def test_force_fallback_is_idempotent_and_respects_existing_html_artifact():
 def test_force_fallback_remains_idempotent_with_urls_and_backslashes():
     original = (
         r"See https://example.test, <https://example.test/docs>, "
-        r"and C:\\Users\\example"
-    )
+        r"and C:\\Users\\example. "
+    ) + LONG_PLAIN_RESPONSE
 
     once = append_html_visual_fallback(original, _metadata())
 
@@ -1213,7 +1218,7 @@ def test_force_fallback_ignores_html_hidden_in_tool_and_reasoning_details():
     hidden = (
         '<details type="tool_calls">```html\n<div>tool only</div>\n```</details>\n'
         '<details type="reasoning">```html\n<div>reasoning only</div>\n```</details>\n'
-        "Visible answer"
+        + LONG_PLAIN_RESPONSE
     )
 
     assert HTML_VISUAL_FALLBACK_MARKER in append_html_visual_fallback(
@@ -1230,8 +1235,52 @@ def test_force_fallback_closes_unterminated_source_fence_before_artifact():
     assert HTML_VISUAL_FALLBACK_MARKER in content
 
 
+def test_brief_plain_replies_get_no_card_and_no_agy_run(monkeypatch):
+    spawned = []
+
+    async def _fake_run_agy_process(*args, **kwargs):
+        spawned.append(args)
+        return b"", 0
+
+    monkeypatch.setattr(html_visual_prompt, "_run_agy_process", _fake_run_agy_process)
+    monkeypatch.setenv("HALOWEBUI_AGY_COMMAND", "agy")
+    metadata = _metadata()
+    image_only = "Image generated.\n\n![image](/api/v1/files/abc/content)"
+
+    for reply in ("好的，已经开始处理，完成后会通知你。", image_only):
+        assert is_brief_plain_reply(reply)
+        assert append_html_visual_fallback(reply, metadata) == reply
+        assert (
+            asyncio.run(
+                html_visual_prompt.design_html_visual_artifact_with_agy(reply, metadata)
+            )
+            == reply
+        )
+
+    assert spawned == []
+    # Skipping is not an AGY outcome: nothing recorded, health counter untouched.
+    assert html_visual_prompt.HTML_VISUAL_AGY_HTML_METADATA_KEY not in metadata
+
+
+def test_structured_long_or_raw_html_replies_are_not_brief():
+    for reply in (
+        "- one\n- two",
+        "## Title\ntext",
+        "1. step",
+        "| a | b |",
+        "```python\nprint(1)\n```",
+        "<div>raw</div>",
+        LONG_PLAIN_RESPONSE,
+        "```html\n<div>card</div>\n```",
+    ):
+        assert not is_brief_plain_reply(reply), reply
+    assert HTML_VISUAL_FALLBACK_MARKER in append_html_visual_fallback(
+        "- one\n- two", _metadata()
+    )
+
+
 def test_force_fallback_uses_flat_shell_without_nested_card_chrome():
-    content = append_html_visual_fallback("Plain response", _metadata())
+    content = append_html_visual_fallback(LONG_PLAIN_RESPONSE, _metadata())
     fallback = content.split("```html\n", 1)[1]
 
     assert "max-width:920px" in fallback
@@ -1246,7 +1295,7 @@ def test_server_web_surface_forces_fallback_for_every_client_mode(mode):
     if mode is not None:
         metadata["features"] = {"html_visual_artifacts": mode}
 
-    content = append_html_visual_fallback("Plain response", metadata)
+    content = append_html_visual_fallback(LONG_PLAIN_RESPONSE, metadata)
 
     assert HTML_VISUAL_FALLBACK_MARKER in content
     assert has_fenced_html_artifact(content)
@@ -1297,7 +1346,7 @@ def test_safe_fallback_renders_generated_images_instead_of_their_markdown():
     metadata = {"server_surface": html_visual_prompt.HTML_VISUAL_WEB_SURFACE}
     content = (
         "已生成：\n\n![image](/api/v1/files/0fcab4f1-4322/content?x=1&y=2)\n\n"
-        "参考 ![ext](https://cdn.example/a.png) 与 `code`"
+        "参考 ![ext](https://cdn.example/a.png) 与 `code`\n\n" + LONG_PLAIN_RESPONSE
     )
 
     result = append_html_visual_fallback(content, metadata)

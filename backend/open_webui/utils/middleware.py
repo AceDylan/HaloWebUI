@@ -6267,6 +6267,37 @@ async def process_chat_response(
             # Even number of segments means the last backticks are opening a new block
             return len(backtick_segments) > 1 and len(backtick_segments) % 2 == 0
 
+        async def _design_html_visual_after_done(content: str):
+            # Runs once the reply is already done. A late write must not pull
+            # history.currentId back to this reply when the user has moved on
+            # (set_current=False), and guard_stopped keeps a stop authoritative.
+            try:
+                designed = await design_html_visual_artifact_with_agy(content, metadata)
+                designed = append_html_visual_fallback(designed, metadata)
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                log.warning(f"html visual design failed: {e}")
+                return
+            if designed == content:
+                return
+            try:
+                Chats.upsert_message_to_chat_by_id_and_message_id(
+                    metadata["chat_id"],
+                    metadata["message_id"],
+                    {"content": designed},
+                    guard_stopped=True,
+                    set_current=False,
+                )
+            except Exception as e:
+                log.warning(f"html visual persist failed: {e}")
+            try:
+                await event_emitter(
+                    {"type": "chat:completion", "data": {"content": designed}}
+                )
+            except Exception as e:
+                log.warning(f"html visual emit failed: {e}")
+
         # Handle as a background task
         async def post_response_handler(response, events):
             def serialize_content_blocks(
@@ -10103,12 +10134,12 @@ async def process_chat_response(
                             "suggestion": "retry_or_switch",
                         }
 
+                # The reply is marked done with the plain answer; the AGY HTML
+                # design pass (tens of seconds, up to its timeout) runs after
+                # completion in _design_html_visual_after_done, next to the
+                # title/follow-up tasks, and swaps the card in when ready. Same
+                # order as the hermes path.
                 final_content = serialize_content_blocks(content_blocks)
-                if not finalize_error_payload:
-                    final_content = await design_html_visual_artifact_with_agy(
-                        final_content, metadata
-                    )
-                    final_content = append_html_visual_fallback(final_content, metadata)
 
                 completed_at = int(time.time())
                 data = {
@@ -10212,7 +10243,17 @@ async def process_chat_response(
                     log_tag="chat completion",
                 )
 
-                await background_tasks_handler(request, user, metadata, tasks, event_emitter)
+                if finalize_error_payload:
+                    await background_tasks_handler(
+                        request, user, metadata, tasks, event_emitter
+                    )
+                else:
+                    await asyncio.gather(
+                        background_tasks_handler(
+                            request, user, metadata, tasks, event_emitter
+                        ),
+                        _design_html_visual_after_done(final_content),
+                    )
             except asyncio.CancelledError:
                 log.warning("Task was cancelled!")
                 await event_emitter({"type": "task-cancelled"})

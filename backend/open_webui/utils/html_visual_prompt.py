@@ -1368,6 +1368,40 @@ def has_html_visual_artifact(content: Any) -> bool:
     )
 
 
+# Replies at or under this many visible characters, with no Markdown
+# structure, stay as they are: a card around "Image generated." or a one-line
+# confirmation adds a second frame (squeezing the picture on phones) and costs
+# an AGY run for nothing.
+HTML_VISUAL_BRIEF_REPLY_MAX_CHARS = 200
+_BRIEF_REPLY_IMAGE_RE = re.compile(r"!\[[^\]\n]*\]\([^)\s]+(?:\s+\"[^\"]*\")?\)")
+_BRIEF_REPLY_STRUCTURE_RE = re.compile(
+    r"^\s{0,3}(?:#{1,6}\s|[-*+]\s|\d+[.)]\s|>|\||```|~~~)",
+    re.MULTILINE,
+)
+
+
+def is_brief_plain_reply(content: Any) -> bool:
+    """Whether a finished reply is too small to be worth an HTML card.
+
+    True for image-only replies and for short plain text (at most
+    HTML_VISUAL_BRIEF_REPLY_MAX_CHARS visible characters, no headings, lists,
+    tables, quotes or code). Tool-call and reasoning blocks do not count as
+    visible text. A reply that already carries an HTML card is never brief,
+    and neither is one with raw HTML tags: those still go through the
+    fallback, which is what strips them.
+    """
+    if not isinstance(content, str) or has_fenced_html_artifact(content):
+        return False
+    visible = _NON_ARTIFACT_DETAILS_RE.sub("", content)
+    visible = _THINKING_BLOCK_RE.sub("", visible)
+    visible = _BRIEF_REPLY_IMAGE_RE.sub("", visible).strip()
+    if _BRIEF_REPLY_STRUCTURE_RE.search(visible) or _RAW_HTML_TAG_SOURCE_START_RE.search(
+        visible
+    ):
+        return False
+    return len(visible) <= HTML_VISUAL_BRIEF_REPLY_MAX_CHARS
+
+
 def _escape_fallback_content(content: str) -> str:
     # Escaping markup preserves the response as inert text. Encoding fence and
     # URL punctuation also prevents copied Markdown from closing the generated
@@ -1416,6 +1450,7 @@ def append_html_visual_fallback(content: Any, metadata: dict[str, Any] | None) -
         or get_html_visual_mode(metadata) != "force"
         or not should_apply_html_visual_prompt(metadata)
         or (has_fenced_html_artifact(content) and has_html_visual_artifact(content))
+        or is_brief_plain_reply(content)
     ):
         return content
 
@@ -1620,6 +1655,11 @@ async def design_html_visual_artifact_with_agy(
     ):
         return content
     if not isinstance(metadata, dict):
+        return content
+    if is_brief_plain_reply(content):
+        # Not an AGY outcome: nothing is recorded, so the health counter that
+        # decides between AGY and the main model is not touched.
+        log.info("HTML visual AGY answer design skipped: brief reply")
         return content
 
     previous_result = _as_mapping(metadata.get(HTML_VISUAL_AGY_HTML_METADATA_KEY))

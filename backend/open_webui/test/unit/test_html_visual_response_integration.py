@@ -56,8 +56,10 @@ def _patch_response_dependencies(monkeypatch, events, upserts):
     monkeypatch.setattr(
         middleware, "background_tasks_handler", background_tasks_handler
     )
+    # Gone from middleware (presence moved to utils/presence.py); kept
+    # harmless for older trees.
     monkeypatch.setattr(
-        middleware, "get_active_status_by_user_id", lambda _user_id: True
+        middleware, "get_active_status_by_user_id", lambda _user_id: True, raising=False
     )
     monkeypatch.setattr(
         middleware.Chats, "get_chat_title_by_id", lambda _chat_id: "Chat"
@@ -65,8 +67,8 @@ def _patch_response_dependencies(monkeypatch, events, upserts):
     monkeypatch.setattr(
         middleware.Chats,
         "upsert_message_to_chat_by_id_and_message_id",
-        lambda chat_id, message_id, payload, **_kwargs: upserts.append(
-            (chat_id, message_id, payload)
+        lambda chat_id, message_id, payload, **kwargs: upserts.append(
+            (chat_id, message_id, payload, kwargs)
         ),
     )
 
@@ -154,7 +156,7 @@ async def _sse_stream():
     yield b"data: [DONE]\n\n"
 
 
-def test_direct_streaming_force_mode_appends_fallback_only_at_finalization(monkeypatch):
+def test_direct_streaming_force_mode_marks_done_before_the_card(monkeypatch):
     events = []
     upserts = []
     created = {}
@@ -187,22 +189,37 @@ def test_direct_streaming_force_mode_appends_fallback_only_at_finalization(monke
 
     asyncio.run(created["coroutine"])
 
-    completions = [
-        event
-        for event in events
-        if event.get("type") == "chat:completion"
-        and event.get("data", {}).get("done") is True
+    completion_events = [
+        event for event in events if event.get("type") == "chat:completion"
     ]
-    final_content = completions[-1]["data"]["content"]
+    done_index = next(
+        index
+        for index, event in enumerate(completion_events)
+        if event.get("data", {}).get("done") is True
+    )
+    # Done goes out with the plain answer: the card is post-processing (AGY
+    # takes tens of seconds) and must not keep the reply looking unfinished.
+    done_content = completion_events[done_index]["data"]["content"]
+    assert HTML_VISUAL_FALLBACK_MARKER not in done_content
+    assert all(
+        HTML_VISUAL_FALLBACK_MARKER not in event.get("data", {}).get("content", "")
+        for event in completion_events[: done_index + 1]
+    )
+
+    # The card follows as a content-only update of the same reply.
+    card_update = completion_events[-1]["data"]
+    assert "done" not in card_update
+    final_content = card_update["content"]
     assert final_content.startswith("Streamed\n\n")
     assert "<unsafe>" not in final_content
     assert final_content.count(HTML_VISUAL_FALLBACK_MARKER) == 1
-    assert upserts[-1][2]["content"] == final_content
-    assert all(
-        HTML_VISUAL_FALLBACK_MARKER not in event.get("data", {}).get("content", "")
-        for event in events
-        if not event.get("data", {}).get("done")
-    )
+
+    # Persisted without pulling the chat's current message back to this reply.
+    chat_id, message_id, payload, kwargs = upserts[-1]
+    assert (chat_id, message_id) == ("chat-1", "assistant-1")
+    assert payload == {"content": final_content}
+    assert kwargs.get("set_current") is False
+    assert kwargs.get("guard_stopped") is True
 
 
 def test_streaming_force_mode_without_session_buffers_and_validates(monkeypatch):

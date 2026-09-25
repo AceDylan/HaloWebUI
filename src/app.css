@@ -229,6 +229,11 @@ body {
 	background-color: color-mix(in srgb, var(--surface-raised) 88%, transparent);
 	border-right-color: var(--surface-border);
 }
+/* On phones the sidebar is a drawer over a dimmed page: see-through, it turned muddy and
+   let the page text show through. */
+:is(.dark #sidebar[data-halo-drawer]) {
+	background-color: var(--surface-raised);
+}
 
 /* Brand focus ring wherever the browser default outline is still in use */
 :focus-visible {
@@ -443,7 +448,7 @@ body {
 }
 
 .workspace-count-pill {
-	@apply inline-flex items-center rounded-full border border-gray-200/70 bg-white/80 px-3 py-1 text-sm font-medium text-gray-600 dark:border-gray-700/70 dark:bg-gray-900/70 dark:text-gray-300;
+	@apply inline-flex items-center gap-1.5 rounded-full border border-gray-200/70 bg-white/80 px-3 py-1 text-sm font-medium text-gray-600 dark:border-gray-700/70 dark:bg-gray-900/70 dark:text-gray-300;
 }
 
 .workspace-search {

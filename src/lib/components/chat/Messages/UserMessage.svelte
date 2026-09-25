@@ -79,6 +79,11 @@
 	$: message = history.messages?.[messageId];
 	$: isBranching = branchingMessageId === message?.id;
 	$: branchTooltip = $i18n.t(isBranching ? 'Creating branch...' : 'Create branch');
+	$: avatarSrc = message?.user
+		? ($models.find((m) => m.id === message.user)?.info?.meta?.profile_image_url ??
+			$models.find((m) => m.id === message.user)?.meta?.profile_image_url ??
+			'/user.png')
+		: (user?.profile_image_url ?? '/user.png');
 
 	const IMAGE_INPUT_MIME_TYPES = [
 		'image/gif',
@@ -344,15 +349,9 @@
 
 <div class=" flex w-full user-message" dir={$settings.chatDirection} id="message-{message.id}">
 	{#if !($settings?.chatBubble ?? true)}
-		<div class={`shrink-0 ltr:mr-1.5 rtl:ml-1.5 ltr:sm:mr-3 rtl:sm:ml-3`}>
-			<ProfileImage
-				src={message.user
-					? ($models.find((m) => m.id === message.user)?.info?.meta?.profile_image_url ??
-						$models.find((m) => m.id === message.user)?.meta?.profile_image_url ??
-						'/user.png')
-					: (user?.profile_image_url ?? '/user.png')}
-				className={'size-[26px] sm:size-[34px]'}
-			/>
+		<!-- Phones show the avatar inline with the name (as for replies). -->
+		<div class={`max-sm:hidden shrink-0 ltr:mr-3 rtl:ml-3`}>
+			<ProfileImage src={avatarSrc} className={'size-[34px]'} />
 		</div>
 	{/if}
 
@@ -360,6 +359,9 @@
 		{#if !($settings?.chatBubble ?? true)}
 			<div>
 				<Name>
+					<span class="sm:hidden shrink-0 ltr:mr-1 rtl:ml-1" data-halo-inline-avatar>
+						<ProfileImage src={avatarSrc} className={'size-6'} />
+					</span>
 					{#if message.user}
 						{$i18n.t('You')}
 						<span class=" text-gray-500 text-sm font-medium">{message?.user ?? ''}</span>

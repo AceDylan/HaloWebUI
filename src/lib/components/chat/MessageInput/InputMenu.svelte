@@ -251,7 +251,8 @@
 		}
 	}}
 >
-	<Tooltip content={$i18n.t('More')}>
+	<!-- No tooltip while the menu is open: on a phone the tap leaves it up, covering the last item. -->
+	<Tooltip content={show ? '' : $i18n.t('More')}>
 		<slot />
 	</Tooltip>
 
@@ -308,6 +309,7 @@
 							<div class=" shrink-0" on:click|stopPropagation>
 								<Switch
 									state={tools[toolId].enabled}
+									ariaLabel={tools[toolId].name}
 									on:change={async (e) => {
 										toggleToolEnabled(toolId, e.detail);
 									}}

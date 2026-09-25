@@ -1573,24 +1573,20 @@
 	{:else}
 		{#if activeTab === 'workbench'}
 			<form class="space-y-4" on:submit|preventDefault={submitHandler}>
+			<!-- The "Workbench" tab above already names this view; no extra title pill here, so
+			     the prompt box starts higher. -->
 			<div class="workspace-toolbar-row">
 					<div class="workspace-toolbar-summary">
-						<div class="workspace-count-pill">
-							<PhotoSolid className="size-3.5" />
-							{$i18n.t('Image Studio')}
-						</div>
-						<div class="space-y-1 text-xs text-gray-500 dark:text-gray-400">
-							<div>
-								{$i18n.t('Create polished visuals from a single prompt.')}
-								<span class="hidden sm:inline ml-1 opacity-70">
-									{$i18n.t('Press Ctrl/Command + Enter to generate.')}
-								</span>
-							</div>
-							<div class="hidden opacity-80 sm:block">
-								{$i18n.t(
-									'This image workbench remembers your last model and generation settings only in this browser.'
-								)}
-							</div>
+						<div
+							class="text-xs text-gray-600 dark:text-gray-400"
+							title={$i18n.t(
+								'This image workbench remembers your last model and generation settings only in this browser.'
+							)}
+						>
+							{$i18n.t('Create polished visuals from a single prompt.')}
+							<span class="hidden sm:inline ml-1">
+								{$i18n.t('Press Ctrl/Command + Enter to generate.')}
+							</span>
 						</div>
 					</div>
 

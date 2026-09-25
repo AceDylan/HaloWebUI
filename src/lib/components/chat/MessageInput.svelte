@@ -1078,7 +1078,10 @@
 							class=" absolute -top-12 left-0 right-0 flex justify-center z-30 pointer-events-none"
 						>
 							<button
+								type="button"
 								class="liquid-glass-scroll-button p-1.5 rounded-full pointer-events-auto transition-all"
+								aria-label={tr('滚动到最新', 'Scroll to latest')}
+								title={tr('滚动到最新', 'Scroll to latest')}
 								on:click={() => {
 									autoScroll = true;
 									scrollToBottom();

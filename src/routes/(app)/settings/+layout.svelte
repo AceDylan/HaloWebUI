@@ -180,7 +180,7 @@
 								<a
 									class="rounded-md px-2 py-1 text-[13px] transition {activeInterfaceTab === tab.key
 										? 'bg-[var(--sidebar-active-bg)] text-[var(--sidebar-active-fg)] font-medium'
-										: 'text-gray-500 hover:bg-gray-100 hover:text-gray-800 dark:text-gray-400 dark:hover:bg-gray-850 dark:hover:text-gray-100'}"
+										: 'text-gray-600 hover:bg-gray-100 hover:text-gray-800 dark:text-gray-400 dark:hover:bg-gray-850 dark:hover:text-gray-100'}"
 									href={interfaceTabHref(tab.key)}
 									aria-current={activeInterfaceTab === tab.key ? 'page' : undefined}
 									data-sveltekit-noscroll

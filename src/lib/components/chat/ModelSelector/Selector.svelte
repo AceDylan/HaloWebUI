@@ -373,6 +373,18 @@
 	$: defaultModelId = userDefaultModelId;
 
 	$: defaultModelItem = items.find((item) => item.value === defaultModelId) ?? null;
+	// The connection tag only earns its place when two listed models share a name;
+	// otherwise every row carried the same "cch" pill. Hovering still shows the full name.
+	$: sharedBaseNames = (() => {
+		const seen = new Set<string>();
+		const shared = new Set<string>();
+		for (const item of items) {
+			const base = getModelDisplayParts(item.model).base.toLowerCase();
+			if (seen.has(base)) shared.add(base);
+			seen.add(base);
+		}
+		return shared;
+	})();
 
 	const setDefaultModel = async (modelId: string) => {
 		value = modelId;
@@ -850,7 +862,9 @@
 						/>
 						<span class="shrink-0">{$i18n.t('Default Model')}:</span>
 						<span class="truncate text-gray-700 dark:text-gray-300">
-							{(defaultModelItem?.label ?? defaultModelId) || $i18n.t('None')}
+							{(defaultModelItem
+								? getModelDisplayParts(defaultModelItem.model).base || defaultModelItem.label
+								: defaultModelId) || $i18n.t('None')}
 						</span>
 					</div>
 				</div>
@@ -883,7 +897,7 @@
 										class="min-w-fit outline-none p-1.5 {selectedTag === '' &&
 										selectedConnectionType === ''
 											? ''
-											: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} capitalize"
+											: 'text-gray-500 hover:text-gray-700 dark:hover:text-white'} capitalize"
 										on:click={() => {
 											selectedConnectionType = '';
 											selectedTag = '';
@@ -898,7 +912,7 @@
 										type="button"
 										class="min-w-fit outline-none p-1.5 {selectedConnectionType === 'ollama'
 											? ''
-											: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} capitalize"
+											: 'text-gray-500 hover:text-gray-700 dark:hover:text-white'} capitalize"
 										on:click={() => {
 											selectedTag = '';
 											selectedConnectionType = 'ollama';
@@ -910,7 +924,7 @@
 										type="button"
 										class="min-w-fit outline-none p-1.5 {selectedConnectionType === 'openai'
 											? ''
-											: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} capitalize"
+											: 'text-gray-500 hover:text-gray-700 dark:hover:text-white'} capitalize"
 										on:click={() => {
 											selectedTag = '';
 											selectedConnectionType = 'openai';
@@ -930,7 +944,7 @@
 												: `p-1.5 ${
 														selectedTag === tag
 															? ''
-															: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'
+															: 'text-gray-500 hover:text-gray-700 dark:hover:text-white'
 													}`}"
 											on:click={() => {
 												if (tagSortMode) return;
@@ -1037,7 +1051,7 @@
 											<div class="min-w-0 truncate">
 												{getModelDisplayParts(item.model).base || item.label}
 											</div>
-											{#if getModelDisplayParts(item.model).connection}
+											{#if getModelDisplayParts(item.model).connection && sharedBaseNames.has(getModelDisplayParts(item.model).base.toLowerCase())}
 												<span
 													class="shrink-0 rounded-md bg-gray-100 px-1.5 py-0.5 text-2xs font-medium text-gray-600 dark:bg-gray-800 dark:text-gray-300"
 													data-halo-model-connection="true"

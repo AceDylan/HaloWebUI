@@ -730,6 +730,10 @@
 
 	let model: MessageModel | null = null;
 	$: model = findModelByIdentity($models, message.model) as unknown as MessageModel | null;
+	$: modelAvatarSrc =
+		(model as any)?.info?.meta?.profile_image_url ??
+		(model as any)?.meta?.profile_image_url ??
+		`${WEBUI_BASE_URL}/static/favicon.png`;
 
 	// "用 X 重答": the other models the picker offers, so comparing answers keeps
 	// them in this chat as versions instead of a new chat per model.
@@ -1269,22 +1273,22 @@
 		id="message-{message.id}"
 		dir={$settings.chatDirection}
 	>
+		<!-- Phones show the avatar inline with the name instead, so the reply (and its HTML
+		     card) gets the full width rather than sitting beside an empty avatar column. -->
 		<div
-			class={`shrink-0 ml-0.5 sm:ml-0 ltr:mr-1.5 rtl:ml-1.5 ltr:sm:mr-3 rtl:sm:ml-3 relative z-10`}
+			class={`max-sm:hidden shrink-0 ltr:mr-3 rtl:ml-3 relative z-10`}
 		>
 			<div class="relative">
 					<ModelIcon
-						src={model?.info?.meta?.profile_image_url ??
-							model?.meta?.profile_image_url ??
-							`${WEBUI_BASE_URL}/static/favicon.png`}
+						src={modelAvatarSrc}
 						alt="model profile"
 						bare={true}
-						className="size-[26px] sm:size-[34px] rounded-xl -translate-y-[1px] ring-2 ring-white/60 dark:ring-white/20"
+						className="size-[34px] rounded-xl -translate-y-[1px] ring-2 ring-white/60 dark:ring-white/20"
 					/>
 				<!-- Only while the reply is being generated, in the sidebar's "running" blue. -->
 				{#if !message.done && !message.error}
 					<div
-						class="absolute -bottom-0.5 -right-0.5 size-1.5 sm:size-2 translate-x-px -translate-y-px bg-blue-500 rounded-full ring-1 sm:ring-[1.5px] ring-white dark:ring-gray-900 animate-pulse"
+						class="absolute -bottom-0.5 -right-0.5 size-2 translate-x-px -translate-y-px bg-blue-500 rounded-full ring-[1.5px] ring-white dark:ring-gray-900 animate-pulse"
 						data-halo-generating-dot
 					/>
 				{/if}
@@ -1293,6 +1297,20 @@
 
 		<div class="flex-auto w-0 sm:pl-1 relative z-10">
 			<Name>
+				<span class="sm:hidden relative shrink-0 ltr:mr-1 rtl:ml-1" data-halo-inline-avatar>
+					<ModelIcon
+						src={modelAvatarSrc}
+						alt=""
+						bare={true}
+						className="size-6 rounded-lg ring-2 ring-white/60 dark:ring-white/20"
+					/>
+					{#if !message.done && !message.error}
+						<span
+							class="absolute -bottom-0.5 -right-0.5 size-1.5 translate-x-px -translate-y-px bg-blue-500 rounded-full ring-1 ring-white dark:ring-gray-900 animate-pulse"
+							data-halo-generating-dot
+						/>
+					{/if}
+				</span>
 				{#if hasVisibleDiscussion}
 					<div class="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
 						<span class="line-clamp-1 text-black dark:text-white font-semibold">
@@ -1968,6 +1986,20 @@
 									<div class="w-px h-4 bg-gray-300/40 dark:bg-gray-600/40 mx-0.5 self-center"></div>
 								{/if}
 
+								<!-- Auto playback (Chat.svelte) clicks this, same as the desktop bar. -->
+								<button
+									id="speak-button-{message.id}"
+									type="button"
+									class="hidden"
+									tabindex="-1"
+									aria-hidden="true"
+									on:click={() => {
+										if (!loadingSpeech) {
+											toggleSpeakMessage();
+										}
+									}}
+								></button>
+
 								<button
 									type="button"
 									class="{mobileActionButtonClass} copy-response-button"
@@ -1989,6 +2021,25 @@
 										}}
 									>
 										<RefreshCw class="w-4 h-4" strokeWidth={2} />
+									</button>
+								{/if}
+
+								{#if loadingSpeech || speaking}
+									<button
+										type="button"
+										class={mobileActionButtonClass}
+										aria-label={$i18n.t('Stop')}
+										on:click={() => {
+											if (!loadingSpeech) {
+												toggleSpeakMessage();
+											}
+										}}
+									>
+										{#if loadingSpeech}
+											<Spinner className="size-4" />
+										{:else}
+											<VolumeX class="w-4 h-4" strokeWidth={2} />
+										{/if}
 									</button>
 								{/if}
 

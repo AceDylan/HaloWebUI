@@ -20,7 +20,7 @@
 		failed:
 			'text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-950/40 border-red-200 dark:border-red-800/60',
 		skipped:
-			'text-gray-500 dark:text-gray-400 bg-gray-50 dark:bg-gray-800/50 border-gray-200 dark:border-gray-700/60'
+			'text-gray-600 dark:text-gray-400 bg-gray-50 dark:bg-gray-800/50 border-gray-200 dark:border-gray-700/60'
 	};
 
 	$: styleClass = STYLES[state] ?? STYLES.skipped;

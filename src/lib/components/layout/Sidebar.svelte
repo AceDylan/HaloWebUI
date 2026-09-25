@@ -786,7 +786,7 @@
 	aria-label="Chat sidebar"
 	class="h-screen max-h-[100dvh] min-h-screen select-none
 		{$isApp ? `ml-[4.5rem] md:ml-0 ` : ''}
-		shrink-0 bg-gray-50/80 backdrop-blur-xl border-r border-gray-200/50 dark:border-white/[0.08] text-gray-900 dark:text-gray-200
+		shrink-0 {$mobile ? 'bg-gray-50' : 'bg-gray-50/80'} backdrop-blur-xl border-r border-gray-200/50 dark:border-white/[0.08] text-gray-900 dark:text-gray-200
 		text-sm fixed md:relative z-50 top-0 left-0 {peek
 		? 'overflow-visible'
 		: 'overflow-hidden'} transform-gpu transition-[width,max-width,transform] duration-300 ease-in-out
@@ -799,6 +799,7 @@
 			: 'w-[0px] -translate-x-[260px]'}"
 	style="will-change: width, transform;"
 	data-state={$showSidebar ? 'expanded' : peek ? 'peek' : $mobile ? 'hidden' : 'collapsed'}
+	data-halo-drawer={$mobile ? 'true' : undefined}
 	data-style={sidebarStyle}
 	on:pointerenter={onSidebarPointerEnter}
 	on:pointerleave={onSidebarPointerLeave}

@@ -20,8 +20,8 @@
 
 	$: inputClass =
 		uiStyle === 'card'
-			? 'w-full rounded-r-2xl py-2 pl-2 pr-2 text-sm bg-transparent dark:text-gray-200 outline-hidden placeholder-gray-400 dark:placeholder-gray-500'
-			: 'w-full rounded-r-lg py-2 pl-2 pr-2 text-sm bg-transparent dark:text-gray-200 outline-hidden placeholder-gray-400 dark:placeholder-gray-500';
+			? 'w-full rounded-r-2xl py-2 pl-2 pr-2 text-sm bg-transparent dark:text-gray-200 outline-hidden placeholder-gray-500 dark:placeholder-gray-500'
+			: 'w-full rounded-r-lg py-2 pl-2 pr-2 text-sm bg-transparent dark:text-gray-200 outline-hidden placeholder-gray-500 dark:placeholder-gray-500';
 
 	let selectedIdx = 0;
 
@@ -102,7 +102,7 @@
 
 <div class="px-2 mb-1.5 mt-2 flex justify-center space-x-2 relative z-10" id="search-container">
 	<div class={shellClass} id="chat-search">
-		<div class="self-center pl-3 py-2 text-gray-400 dark:text-gray-500">
+		<div class="self-center pl-3 py-2 text-gray-500">
 			<svg
 				xmlns="http://www.w3.org/2000/svg"
 				viewBox="0 0 20 20"

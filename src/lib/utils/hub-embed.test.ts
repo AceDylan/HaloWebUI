@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { parseHubTicket, stripHubTicket, takeHubTicket } from './hub-embed';
+import { parseHubTicket, postActivityToHub, stripHubTicket, takeHubTicket } from './hub-embed';
 
 const TICKET = [
 	'v2',
@@ -69,5 +69,35 @@ describe('takeHubTicket', () => {
 		const h = history();
 		expect(takeHubTicket({ href: 'https://host.example:3001/auth#token=abc' }, h)).toBeNull();
 		expect(h.replaceState).not.toHaveBeenCalled();
+	});
+});
+
+describe('postActivityToHub', () => {
+	const framed = () => {
+		const parent = { postMessage: vi.fn() };
+		return { win: { parent }, parent };
+	};
+
+	it('posts the state to the configured Hub origin when framed', () => {
+		const { win, parent } = framed();
+		expect(postActivityToHub('done', 'https://best.acedylan.us:5526', win)).toBe(true);
+		expect(parent.postMessage).toHaveBeenCalledWith(
+			{ source: 'halowebui', type: 'activity', state: 'done' },
+			'https://best.acedylan.us:5526'
+		);
+	});
+
+	it('stays quiet when not framed or no Hub is configured', () => {
+		const top: any = { postMessage: vi.fn() };
+		top.parent = top;
+		expect(postActivityToHub('done', 'https://best.acedylan.us:5526', top)).toBe(false);
+		expect(top.postMessage).not.toHaveBeenCalled();
+
+		const { win, parent } = framed();
+		expect(postActivityToHub('running', undefined, win)).toBe(false);
+		expect(postActivityToHub('running', '', win)).toBe(false);
+		expect(postActivityToHub('running', '*', win)).toBe(false);
+		expect(postActivityToHub('running', 'https://hub.example/path', win)).toBe(false);
+		expect(parent.postMessage).not.toHaveBeenCalled();
 	});
 });

@@ -553,6 +553,7 @@ from open_webui.utils.auth import (
 )
 from open_webui.utils.oauth import OAuthManager
 from open_webui.utils.security_headers import SecurityHeadersMiddleware
+from open_webui.utils import hub_embed
 
 from open_webui.tasks import (
     list_task_ids_by_chat_id,
@@ -2276,6 +2277,7 @@ async def get_app_config(request: Request):
             "default_reasoning_effort": HALOCLAW_DEFAULT_REASONING_EFFORT.value,
             "default_max_thinking_tokens": HALOCLAW_DEFAULT_MAX_THINKING_TOKENS.value,
         }
+    hub_origin = hub_embed.hub_origin() if user is not None else None
 
     return {
         **({"onboarding": True} if onboarding else {}),
@@ -2372,6 +2374,11 @@ async def get_app_config(request: Request):
                 },
                 "onedrive": {"client_id": ONEDRIVE_CLIENT_ID.value},
                 "license_metadata": app.state.LICENSE_METADATA,
+                # The Bookmark Hub that may frame this page: a framed page tells
+                # it (and only it) when a reply is running or has finished, so
+                # the Hub can mark its "AI 聊天" tab. Already public in the
+                # frame-ancestors header.
+                **({"hub_origin": hub_origin} if hub_origin else {}),
                 **(
                     {
                         "active_entries": app.state.USER_COUNT,

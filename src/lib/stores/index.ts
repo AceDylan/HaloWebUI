@@ -302,7 +302,7 @@ type Settings = {
 	/** Collapsed sidebar rail expands as an overlay while the pointer rests on it. */
 	sidebarPeekOnHover?: boolean;
 	/** Per-user opt-in: archive chats idle for `days` days (see utils/chat_auto_archive.py). */
-	chatAutoArchive?: { enabled?: boolean; days?: number };
+	chatAutoArchive?: { enabled?: boolean; days?: number; testChats?: boolean };
 	newChatInheritsPreviousState?: boolean;
 	chatFadeStreamingText?: boolean;
 	transitionMode?: 'none' | 'fadeIn' | 'smooth';
@@ -413,6 +413,8 @@ type Config = {
 	default_models: string;
 	default_prompt_suggestions: PromptSuggestion[];
 	hermes_agent_model_ids?: string[];
+	/** The Bookmark Hub allowed to frame this page (signed-in users only). */
+	hub_origin?: string;
 	features: {
 		auth: boolean;
 		auth_trusted_header: boolean;

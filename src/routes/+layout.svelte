@@ -51,6 +51,7 @@
 	import { getAllTags } from '$lib/apis/chats';
 	import { initPWAInstallSupport } from '$lib/utils/pwa';
 	import { getFaviconWithDot, tabActivity } from '$lib/utils/tab-activity';
+	import { postActivityToHub } from '$lib/utils/hub-embed';
 	import NotificationToast from '$lib/components/NotificationToast.svelte';
 	import AppSidebar from '$lib/components/app/AppSidebar.svelte';
 
@@ -778,6 +779,9 @@
 		}
 	};
 	$: void refreshFaviconBadge($tabActivity, faviconBaseHref);
+	// Framed by the Bookmark Hub: the same state marks the Hub's "AI 聊天" tab,
+	// since the Hub hides this frame instead of closing it.
+	$: postActivityToHub($tabActivity, $config?.hub_origin);
 </script>
 
 <svelte:head>

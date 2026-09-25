@@ -258,8 +258,9 @@ const PREVIEW_SNAPSHOT_BRIDGE = `<script data-halo-html-preview-snapshot="true">
 // hardcodes a light palette and none declare `prefers-color-scheme`, so in the
 // dark theme the frame would sit as a white slab in the page. The rules are
 // deliberately narrow: only *neutral* light backgrounds and *neutral* dark text
-// are remapped, saturated colours are left alone (dark ones are brightened for
-// contrast only), and images, SVG, canvas, video and gradients are never
+// are remapped, pastel tints become a dark surface of the same hue, saturated
+// colours are left alone (dark ones are brightened for contrast only), and
+// images, SVG, canvas, video and gradients are never
 // touched. Documents that declare their own dark palette (a
 // `prefers-color-scheme` media rule, `<meta name="color-scheme">` with dark, or
 // a `data-halo-color-scheme` root attribute) are left exactly as written; they
@@ -300,7 +301,7 @@ const PREVIEW_DARK_THEME_BRIDGE = `<script data-halo-html-preview-theme="true">(
 		const base = Math.round(230 - t * 76);
 		return rgb(base, base + 2, base + 8, c.a);
 	};
-	const brighten = (c) => {
+	const hsl = (c) => {
 		const r = c.r / 255, g = c.g / 255, b = c.b / 255;
 		const max = Math.max(r, g, b), min = Math.min(r, g, b);
 		const l = (max + min) / 2;
@@ -313,7 +314,23 @@ const PREVIEW_DARK_THEME_BRIDGE = `<script data-halo-html-preview-theme="true">(
 			else h = (r - g) / d + 4;
 			h *= 60;
 		}
-		return 'hsla(' + Math.round(h) + ', ' + Math.round(s * 100) + '%, ' + Math.round(Math.max(l, 0.7) * 100) + '%, ' + c.a + ')';
+		return { h, s, l };
+	};
+	const hsla = (h, s, l, a) => 'hsla(' + Math.round(h) + ', ' + Math.round(s * 100) + '%, ' + Math.round(l * 100) + '%, ' + a + ')';
+	// Pastel panels, tags and borders (amber-50 notes, peach code chips): too tinted for
+	// isLightNeutral, but just as glaring on a dark page. They keep their hue, darkened.
+	const isLightTint = (c) => c.a >= 0.5 && chroma(c) > 24 && luminance(c) >= 0.55 && hsl(c).l >= 0.75;
+	const tintedSurface = (c) => {
+		const { h, s, l } = hsl(c);
+		return hsla(h, Math.min(s, 0.4), 0.16 + (1 - l) * 0.3, c.a);
+	};
+	const tintedBorder = (c) => {
+		const { h, s } = hsl(c);
+		return hsla(h, Math.min(s, 0.5), 0.32, c.a);
+	};
+	const brighten = (c) => {
+		const { h, s, l } = hsl(c);
+		return hsla(h, s, Math.max(l, 0.7), c.a);
 	};
 	const authorHandlesDark = () => {
 		const meta = document.querySelector('meta[name="color-scheme"]');
@@ -379,6 +396,9 @@ const PREVIEW_DARK_THEME_BRIDGE = `<script data-halo-html-preview-theme="true">(
 				if (isLightNeutral(entry.bg)) {
 					setStyle(el, 'background-color', darkSurface(entry.bg));
 					dark = true;
+				} else if (isLightTint(entry.bg)) {
+					setStyle(el, 'background-color', tintedSurface(entry.bg));
+					dark = true;
 				} else {
 					dark = isDark(entry.bg);
 				}
@@ -395,7 +415,9 @@ const PREVIEW_DARK_THEME_BRIDGE = `<script data-halo-html-preview-theme="true">(
 			}
 			if (dark) {
 				for (const border of entry.borders) {
-					if (border.color && isLightNeutral(border.color)) setStyle(el, 'border-' + border.side + '-color', 'rgba(255, 255, 255, 0.12)');
+					if (!border.color) continue;
+					if (isLightNeutral(border.color)) setStyle(el, 'border-' + border.side + '-color', 'rgba(255, 255, 255, 0.12)');
+					else if (isLightTint(border.color)) setStyle(el, 'border-' + border.side + '-color', tintedBorder(border.color));
 				}
 			}
 		}

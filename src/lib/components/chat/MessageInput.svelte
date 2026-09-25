@@ -60,7 +60,6 @@
 	import CommandSuggestionList from './MessageInput/CommandSuggestionList.svelte';
 	import ImageGenerationPanel from './MessageInput/ImageGenerationPanel.svelte';
 
-	import RichTextInput from '../common/RichTextInput.svelte';
 	import { getSuggestionRenderer } from '../common/RichTextInput/suggestions';
 	import Tooltip from '../common/Tooltip.svelte';
 	import FileItem from '../common/FileItem.svelte';
@@ -542,6 +541,16 @@
 
 	let chatInputContainerElement;
 	let chatInputElement;
+
+	// The rich text composer (tiptap/ProseMirror) is fetched only while the
+	// setting is on; with the plain textarea it was downloaded and parsed on every
+	// page for nothing. It focuses itself when it mounts (autofocus).
+	let RichTextInput: typeof import('../common/RichTextInput.svelte').default | null = null;
+	$: if (($settings?.richTextInput ?? true) && !RichTextInput) {
+		void import('../common/RichTextInput.svelte').then((module) => {
+			RichTextInput = module.default;
+		});
+	}
 
 	let filesInputElement;
 	let commandsElement;
@@ -1351,7 +1360,8 @@
 											class="scrollbar-hidden text-left bg-transparent dark:text-gray-100 outline-hidden w-full pt-3 px-1 resize-none h-fit max-h-[min(20rem,40dvh)] overflow-auto"
 											id="chat-input-container"
 										>
-											<RichTextInput
+											<svelte:component
+												this={RichTextInput}
 												bind:this={chatInputElement}
 												value={prompt}
 												id="chat-input"

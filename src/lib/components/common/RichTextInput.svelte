@@ -13,7 +13,10 @@
 	import Placeholder from '@tiptap/extension-placeholder';
 	import StarterKit from '@tiptap/starter-kit';
 	import Typography from '@tiptap/extension-typography';
-	import { all, createLowlight } from 'lowlight';
+	import { common, createLowlight } from 'lowlight';
+	import dockerfile from 'highlight.js/lib/languages/dockerfile';
+	import nginx from 'highlight.js/lib/languages/nginx';
+	import powershell from 'highlight.js/lib/languages/powershell';
 
 	import { PASTED_TEXT_CHARACTER_LIMIT } from '$lib/constants';
 	import { AIAutocompletion } from './RichTextInput/AutoCompletion.js';
@@ -39,7 +42,9 @@
 	});
 
 	const eventDispatch = createEventDispatcher();
-	const lowlight = createLowlight(all);
+	// The 37 common languages plus a few that show up in pasted configs. `all`
+	// put ~190 grammars (~0.9 MB) on every page with a composer.
+	const lowlight = createLowlight({ ...common, dockerfile, nginx, powershell });
 
 	export let oncompositionstart = (_e) => {};
 	export let oncompositionend = (_e) => {};

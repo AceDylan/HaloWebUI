@@ -183,6 +183,21 @@ describe('/settings/interface: auto-archive and sidebar hover controls are mount
 		await waitFor(() => saveButton() === null, 'section clean after save');
 	});
 
+	it('test-chat archiving follows the switch above until it is changed itself', async () => {
+		const row = rowOf(target, 'Archive one-question test chats');
+		const toggle = row.querySelector('button[role="switch"]');
+		expect(toggle.getAttribute('aria-checked')).toBe('true'); // follows "enabled" saved above
+		click(toggle);
+		await waitFor(() => toggle.getAttribute('aria-checked') === 'false', 'test chats off');
+		await pressSave();
+		expect(saveSettings.mock.calls.at(-1)![0].chatAutoArchive).toEqual({
+			enabled: true,
+			days: 45,
+			testChats: false
+		});
+		await waitFor(() => saveButton() === null, 'section clean after save');
+	});
+
 	it('clamps out-of-range day counts on change', async () => {
 		const input = target.querySelector('#chat-auto-archive-days');
 		for (const [raw, expected] of [

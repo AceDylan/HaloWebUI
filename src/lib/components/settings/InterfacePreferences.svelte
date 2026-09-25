@@ -158,6 +158,9 @@
 	// One-question test chats ("你好", "你能做什么") idle for a day; unset follows
 	// the inactivity switch (see get_test_chat_policy in chat_auto_archive.py).
 	let chatAutoArchiveTestChats = false;
+	// Unset means "follow the inactivity switch" (backend chat_auto_archive.py);
+	// only a choice made on this switch is written back.
+	let chatAutoArchiveTestChatsExplicit = false;
 	let showArchiveInactiveConfirm = false;
 	let archiveInactivePreviewCount = 0;
 	let archiveInactiveBusy = false;
@@ -297,6 +300,7 @@
 			chatAutoArchiveEnabled: boolean;
 			chatAutoArchiveDays: number;
 			chatAutoArchiveTestChats: boolean;
+			chatAutoArchiveTestChatsExplicit: boolean;
 			autoFollowUps: boolean;
 			detectArtifacts: boolean;
 			svgPreviewAutoOpen: boolean;
@@ -691,6 +695,7 @@
 			chatAutoArchiveEnabled,
 			chatAutoArchiveDays: normalizeArchiveDays(chatAutoArchiveDays),
 			chatAutoArchiveTestChats,
+			chatAutoArchiveTestChatsExplicit,
 			autoFollowUps,
 			detectArtifacts,
 			svgPreviewAutoOpen,
@@ -777,6 +782,7 @@
 		chatAutoArchiveEnabled = snapshot.chatAutoArchiveEnabled ?? false;
 		chatAutoArchiveDays = normalizeArchiveDays(snapshot.chatAutoArchiveDays);
 		chatAutoArchiveTestChats = snapshot.chatAutoArchiveTestChats ?? false;
+		chatAutoArchiveTestChatsExplicit = snapshot.chatAutoArchiveTestChatsExplicit ?? false;
 		autoFollowUps = snapshot.autoFollowUps;
 		detectArtifacts = snapshot.detectArtifacts;
 		svgPreviewAutoOpen = snapshot.svgPreviewAutoOpen;
@@ -854,6 +860,7 @@
 		chatAutoArchiveEnabled;
 		chatAutoArchiveDays;
 		chatAutoArchiveTestChats;
+		chatAutoArchiveTestChatsExplicit;
 		autoFollowUps;
 		detectArtifacts;
 		svgPreviewAutoOpen;
@@ -1163,7 +1170,7 @@
 				chatAutoArchive: {
 					enabled: chatAutoArchiveEnabled,
 					days: chatAutoArchiveDays,
-					testChats: chatAutoArchiveTestChats
+					...(chatAutoArchiveTestChatsExplicit ? { testChats: chatAutoArchiveTestChats } : {})
 				},
 				autoFollowUps,
 				detectArtifacts,
@@ -1331,10 +1338,10 @@
 		chatAutoArchiveDays = normalizeArchiveDays(
 			$settings?.chatAutoArchive?.days ?? AUTO_ARCHIVE_DEFAULT_DAYS
 		);
+		const storedTestChats = $settings?.chatAutoArchive?.testChats;
+		chatAutoArchiveTestChatsExplicit = typeof storedTestChats === 'boolean';
 		chatAutoArchiveTestChats =
-			typeof $settings?.chatAutoArchive?.testChats === 'boolean'
-				? $settings.chatAutoArchive.testChats
-				: chatAutoArchiveEnabled;
+			typeof storedTestChats === 'boolean' ? storedTestChats : chatAutoArchiveEnabled;
 		autoFollowUps = $settings?.autoFollowUps ?? true;
 
 		detectArtifacts = $settings?.detectArtifacts ?? true;
@@ -2776,7 +2783,15 @@
 														)}
 													</p>
 												</div>
-												<Switch bind:state={chatAutoArchiveTestChats} />
+												<Switch
+													state={chatAutoArchiveTestChatsExplicit
+														? chatAutoArchiveTestChats
+														: chatAutoArchiveEnabled}
+													on:change={(event) => {
+														chatAutoArchiveTestChats = event.detail;
+														chatAutoArchiveTestChatsExplicit = true;
+													}}
+												/>
 											</div>
 										</div>
 										<div class="glass-item px-4 py-3">

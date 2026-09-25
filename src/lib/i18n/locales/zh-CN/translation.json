@@ -3199,5 +3199,6 @@
 	"{{count}} message(s) queued": "{{count}} 条消息排队中",
 	"{{count}} models hidden": "已隐藏 {{count}} 个模型",
 	"{{count}} models shown": "已显示 {{count}} 个模型",
-	"Add a model to compare": "添加模型对比"
+	"Add a model to compare": "添加模型对比",
+	"No page text was captured for this source.": "没有抓取到这个来源的网页正文。"
 }

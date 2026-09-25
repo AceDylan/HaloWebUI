@@ -176,11 +176,89 @@ def test_old_cli_routes_across_configured_source_providers(monkeypatch):
         "anysearch-search",
     ]
     assert calls[2][3:] == ["--count", "2", "--format", "json"]
-    assert calls[3][3:] == ["--num-results", "2", "--format", "json"]
+    assert calls[3][3:] == [
+        "--num-results",
+        "2",
+        "--include-text",
+        "--format",
+        "json",
+    ]
     assert calls[4][3:] == ["--max-results", "2", "--format", "json"]
 
 
-def test_research_evidence_is_the_whole_answer_like_hermes(monkeypatch):
+def research_with_one_page(argv, *, web=("zhipu",), docs=("exa",)):
+    payload = doctor(web=web, docs=docs)
+    payload.update(
+        evidence_items=[
+            {
+                "url": "https://example.org/fetched",
+                "title": "Fetched",
+                "content": "  Full page text  ",
+                "verified": True,
+            }
+        ],
+        discovery_sources=[
+            {"url": "https://example.org/fetched"},
+            {"url": "https://example.org/unfetched"},
+        ],
+    )
+    return completed(argv, payload)
+
+
+def test_thin_research_evidence_is_topped_up_with_exa_page_text(monkeypatch):
+    calls = []
+
+    def fake_run(argv, **kwargs):
+        calls.append((argv, kwargs["timeout"]))
+        if "--help" in argv:
+            return subprocess.CompletedProcess(argv, 0, stdout="usage")
+        if argv[1] == "research":
+            return research_with_one_page(argv)
+        if argv[1] == "exa-search":
+            return completed(
+                argv,
+                {
+                    "ok": True,
+                    "results": [
+                        {"url": "https://example.org/fetched/", "text": "Same page"},
+                        {"url": "https://example.org/no-text", "title": "No text"},
+                        {
+                            "url": "https://news.example.com/exa",
+                            "title": "Exa",
+                            "text": " Exa page text ",
+                        },
+                    ],
+                },
+            )
+        pytest.fail(f"Unexpected command: {argv[1]}")
+
+    monkeypatch.setattr(smart_search.subprocess, "run", fake_run)
+    results = smart_search.search_smart_search("query", 5)
+
+    # Discovery candidates, the research duplicate and Exa results without
+    # page text would all need a download; only page text tops up evidence.
+    assert [(result.link, result.content) for result in results] == [
+        ("https://example.org/fetched", "Full page text"),
+        ("https://news.example.com/exa", "Exa page text"),
+    ]
+    assert results[1].snippet == "Exa page text"
+    assert [argv[1] for argv, _ in calls] == ["research", "research", "exa-search"]
+    assert calls[2] == (
+        [
+            "smart-search",
+            "exa-search",
+            "query",
+            "--num-results",
+            "5",
+            "--include-text",
+            "--format",
+            "json",
+        ],
+        20,
+    )
+
+
+def test_enough_research_evidence_runs_nothing_else(monkeypatch):
     calls = []
 
     def fake_run(argv, **kwargs):
@@ -188,29 +266,38 @@ def test_research_evidence_is_the_whole_answer_like_hermes(monkeypatch):
         if "--help" in argv:
             return subprocess.CompletedProcess(argv, 0, stdout="usage")
         if argv[1] == "research":
-            payload = doctor(web=("zhipu",), docs=("exa",))
-            payload.update(
-                evidence_items=[
-                    {
-                        "url": "https://example.org/fetched",
-                        "title": "Fetched",
-                        "content": "  Full page text  ",
-                        "verified": True,
-                    }
-                ],
-                discovery_sources=[
-                    {"url": "https://example.org/fetched"},
-                    {"url": "https://example.org/unfetched"},
-                ],
-            )
-            return completed(argv, payload)
+            return research_with_one_page(argv)
+        pytest.fail(f"Unexpected command: {argv[1]}")
+
+    monkeypatch.setattr(smart_search.subprocess, "run", fake_run)
+    results = smart_search.search_smart_search("query", 1)
+    assert [result.link for result in results] == ["https://example.org/fetched"]
+    assert results[0].content == "Full page text"
+    assert calls == ["research", "research"]
+
+
+@pytest.mark.parametrize("exa_outcome", ["failure", "timeout", "not configured"])
+def test_thin_research_evidence_stands_when_no_top_up(monkeypatch, exa_outcome):
+    calls = []
+
+    def fake_run(argv, **kwargs):
+        calls.append(argv[1])
+        if "--help" in argv:
+            return subprocess.CompletedProcess(argv, 0, stdout="usage")
+        if argv[1] == "research":
+            docs = () if exa_outcome == "not configured" else ("exa",)
+            return research_with_one_page(argv, web=("zhipu", "tavily"), docs=docs)
+        if argv[1] == "exa-search" and exa_outcome == "failure":
+            return completed(argv, {"ok": False, "error_type": "network_error"}, 4)
+        if argv[1] == "exa-search" and exa_outcome == "timeout":
+            raise subprocess.TimeoutExpired(argv, kwargs["timeout"])
         pytest.fail(f"Unexpected command: {argv[1]}")
 
     monkeypatch.setattr(smart_search.subprocess, "run", fake_run)
     results = smart_search.search_smart_search("query", 5)
     assert [result.link for result in results] == ["https://example.org/fetched"]
-    assert results[0].content == "Full page text"
-    assert calls == ["research", "research"]
+    # zhipu-search would only return pages to download; doctor is never needed.
+    assert "zhipu-search" not in calls and "doctor" not in calls
 
 
 def test_research_page_text_is_capped(monkeypatch):
@@ -268,6 +355,7 @@ def test_research_without_evidence_uses_discovery_then_providers(monkeypatch):
                         {
                             "url": "https://example.org/exa",
                             "description": "Exa source",
+                            "text": "Exa page",
                         },
                     ],
                 },
@@ -280,7 +368,8 @@ def test_research_without_evidence_uses_discovery_then_providers(monkeypatch):
         "https://example.org/discovered",
         "https://example.org/exa",
     ]
-    assert [result.content for result in results] == [None, None]
+    # The candidate is downloaded by the web loader; Exa brought its page text.
+    assert [result.content for result in results] == [None, "Exa page"]
     assert results[1].snippet == "Exa source"
     assert calls == ["research", "research", "exa-search"]
 
@@ -315,15 +404,15 @@ def test_search_result_pages_and_encoded_duplicates_are_dropped(monkeypatch):
 
 
 @pytest.mark.parametrize(
-    "provider,command,option",
+    "provider,command,options",
     [
-        ("zhipu-mcp", "zhipu-mcp-search", "--count"),
-        ("zhipu", "zhipu-search", "--count"),
-        ("exa", "exa-search", "--num-results"),
-        ("anysearch", "anysearch-search", "--max-results"),
+        ("zhipu-mcp", "zhipu-mcp-search", ["--count", "1"]),
+        ("zhipu", "zhipu-search", ["--count", "1"]),
+        ("exa", "exa-search", ["--num-results", "1", "--include-text"]),
+        ("anysearch", "anysearch-search", ["--max-results", "1"]),
     ],
 )
-def test_direct_provider_json_results(monkeypatch, provider, command, option):
+def test_direct_provider_json_results(monkeypatch, provider, command, options):
     calls = []
 
     def fake_run(argv, **kwargs):
@@ -352,15 +441,7 @@ def test_direct_provider_json_results(monkeypatch, provider, command, option):
     results = smart_search.search_smart_search("query", 1)
     assert [result.link for result in results] == ["https://example.org/result"]
     assert results[0].snippet == "Source text"
-    assert calls[-1] == [
-        "smart-search",
-        command,
-        "query",
-        option,
-        "1",
-        "--format",
-        "json",
-    ]
+    assert calls[-1] == ["smart-search", command, "query", *options, "--format", "json"]
     assert len(calls) == 3
 
 

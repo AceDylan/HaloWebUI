@@ -23,7 +23,8 @@
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import EllipsisHorizontal from '$lib/components/icons/EllipsisHorizontal.svelte';
 	import { flyAndScale } from '$lib/utils/transitions';
-	import { getCitationEntries } from '$lib/utils/citations';
+	import { getCitationList } from '$lib/utils/citations';
+	import { decodeString, getDisplayTitle } from '$lib/utils/marked/citation-extension';
 	import type { GeneratedMessageFile } from '$lib/utils/generated-file-links';
 	import {
 		resolveChatTransitionMode,
@@ -45,6 +46,7 @@
 		HTML_PREVIEW_REFERRER_POLICY,
 		HTML_PREVIEW_SANDBOX,
 		initialInlineHtmlPreviewSizing,
+		isInlineHtmlPreviewCitationMessage,
 		isInlineHtmlPreviewCopyMessage,
 		isInlineHtmlPreviewImageMessage,
 		nextInlineHtmlPreviewSizing,
@@ -177,7 +179,7 @@
 	let messagesContainerElement: HTMLElement | null = null;
 	let syncThreadLayoutsRaf = 0;
 	let hadThreadLayouts = false;
-	let resolvedSourceIds: any[] = [];
+	let resolvedSourceIds: string[] = [];
 	let showImagePreview = false;
 	let imagePreviewSrc = '';
 	let imagePreviewAlt = '';
@@ -499,11 +501,20 @@
 	}
 	$: inlineHtmlPreviewColorScheme =
 		$isDarkMode && !inlineHtmlPreviewUseOriginalColors ? 'dark' : 'light';
+	// Labels for the [n] markers an HTML answer writes as plain text; none when
+	// the answer has no citable source, which leaves the frame without the
+	// citation bridge.
+	$: inlineHtmlPreviewCitations = resolvedSourceIds.every((title) => title === 'N/A')
+		? []
+		: resolvedSourceIds.map((title) =>
+				title === 'N/A' ? '' : getDisplayTitle(decodeString(title), 60, 30, 20)
+			);
 	$: inlineHtmlArtifactPreview = buildInlineHtmlArtifactPreview(normalizedContent, {
 		enabled: $settings?.detectArtifacts ?? true,
 		streaming,
 		labels: inlineHtmlPreviewLabels,
-		colorScheme: inlineHtmlPreviewColorScheme
+		colorScheme: inlineHtmlPreviewColorScheme,
+		citations: inlineHtmlPreviewCitations
 	});
 	$: inlineHtmlArtifactSource = inlineHtmlArtifactPreview
 		? getHtmlArtifactSource(normalizedContent)
@@ -593,6 +604,11 @@
 			return;
 		}
 
+		if (isInlineHtmlPreviewCitationMessage(event.data)) {
+			onSourceClick(id, event.data.index);
+			return;
+		}
+
 		if (isInlineHtmlPreviewImageMessage(event.data)) {
 			imagePreviewSrc = event.data.src;
 			imagePreviewAlt = String(event.data.alt ?? '').slice(0, HTML_PREVIEW_IMAGE_ALT_MAX_CHARS);
@@ -654,40 +670,12 @@
 		}, options);
 	};
 
-	const resolveSourceIds = (sourceList: MessageSource[] | null): any[] => {
-		const ids: any[] = [];
-
-		(sourceList ?? []).forEach((source) => {
-			if (!source || typeof source !== 'object') {
-				return;
-			}
-
-			getCitationEntries(source).forEach(({ metadata }) => {
-				if (model?.info?.meta?.capabilities?.citations == false) {
-					ids.push('N/A');
-					return;
-				}
-
-				const sourceId = metadata?.source ?? 'N/A';
-
-				if (metadata?.name) {
-					ids.push(metadata.name);
-					return;
-				}
-
-				if (
-					typeof sourceId === 'string' &&
-					(sourceId.startsWith('http://') || sourceId.startsWith('https://'))
-				) {
-					ids.push(sourceId);
-				} else {
-					ids.push(source?.source?.name ?? sourceId);
-				}
-			});
-		});
-
-		return ids.filter((item, index) => ids.indexOf(item) === index);
-	};
+	// One label per citation, in the order [1], [2], ... refer to (the list the
+	// sources button opens), so a chip always opens the source it names.
+	const resolveSourceIds = (sourceList: MessageSource[] | null): string[] =>
+		getCitationList(sourceList).map(({ title }) =>
+			model?.info?.meta?.capabilities?.citations == false ? 'N/A' : title
+		);
 
 	$: resolvedSourceIds = resolveSourceIds(sources);
 

@@ -5053,6 +5053,93 @@ def apply_params_to_form_data(form_data, model):
     return form_data
 
 
+def _sources_for_ui(sources: list, ui_sources: list) -> list:
+    """Named sources, then UI-only sources, without repeating a source whose
+    first document was already listed."""
+    sources_for_ui = []
+    seen = set()
+    for s in [*sources, *ui_sources]:
+        src = s.get("source") if isinstance(s, dict) else None
+        if not isinstance(src, dict) or not src.get("name", ""):
+            continue
+        try:
+            key = None
+            meta = s.get("metadata") or []
+            if isinstance(meta, list) and meta and isinstance(meta[0], dict):
+                key = meta[0].get("source") or meta[0].get("url")
+            if not key:
+                key = src.get("id") or src.get("url") or src.get("name")
+            key = str(key or "")
+            if key and key in seen:
+                continue
+            if key:
+                seen.add(key)
+        except Exception:
+            pass
+        sources_for_ui.append(s)
+    return sources_for_ui
+
+
+def _citation_key(source: dict, metadata: Any) -> str:
+    """What the chat UI numbers a citation by (getCitationKey in
+    src/lib/utils/citations.ts): the document's own source - the page URL for
+    web results - else the id of the source it belongs to. Web results carry no
+    file_id, so numbering by file_id gave every page [1]."""
+    key = metadata.get("source") if isinstance(metadata, dict) else None
+    if not key:
+        source_info = source.get("source")
+        key = source_info.get("id") if isinstance(source_info, dict) else None
+    return str(key or "N/A")
+
+
+def _as_citation_list(value: Any) -> list:
+    if isinstance(value, list):
+        return value
+    return [] if value is None else [value]
+
+
+def _citation_index_map(sources_for_ui: list) -> dict[str, int]:
+    """Citation number per key, in the order the UI lists them
+    (getCitationEntries/getCitationList in src/lib/utils/citations.ts)."""
+    index_map: dict[str, int] = {}
+    for source in sources_for_ui:
+        if not isinstance(source, dict) or not source:
+            continue
+        documents = source.get("document")
+        if documents is None:
+            documents = source.get("documents")
+        metadata = _as_citation_list(source.get("metadata"))
+        entry_count = max(
+            len(_as_citation_list(documents)),
+            len(metadata),
+            len(_as_citation_list(source.get("distances"))),
+            1 if source.get("source") else 0,
+        )
+        for index in range(entry_count):
+            key = _citation_key(
+                source, metadata[index] if index < len(metadata) else None
+            )
+            index_map.setdefault(key, len(index_map) + 1)
+    return index_map
+
+
+def _citation_context(sources: list, sources_for_ui: list) -> str:
+    """Documents as <source id="n"> blocks, n being the number the chat UI
+    shows for that document's citation."""
+    context_string = ""
+    citation_index = _citation_index_map(sources_for_ui)
+    for source in sources:
+        if "document" in source:
+            for doc_context, doc_meta in zip(source["document"], source["metadata"]):
+                key = _citation_key(source, doc_meta)
+                if key not in citation_index:
+                    citation_index[key] = len(citation_index) + 1
+                context_string += (
+                    f'<source id="{citation_index[key]}">{doc_context}</source>\n'
+                )
+    return context_string.strip()
+
+
 async def process_chat_payload(request, form_data, user, metadata, model, tasks=None):
 
     files_provided = bool(metadata.get("files_provided")) or "files" in form_data
@@ -5707,21 +5794,13 @@ async def process_chat_payload(request, form_data, user, metadata, model, tasks=
     except Exception as e:
         log.exception(e)
 
+    # The chat UI numbers citations over the sources it is sent, so the context
+    # numbers <source id> over that same list.
+    sources_for_ui = _sources_for_ui(sources, ui_sources)
+
     # If context is not empty, insert it into the messages
     if len(sources) > 0:
-        context_string = ""
-        citated_file_idx = {}
-        for _, source in enumerate(sources, 1):
-            if "document" in source:
-                for doc_context, doc_meta in zip(
-                    source["document"], source["metadata"]
-                ):
-                    file_id = doc_meta.get("file_id")
-                    if file_id not in citated_file_idx:
-                        citated_file_idx[file_id] = len(citated_file_idx) + 1
-                    context_string += f'<source id="{citated_file_idx[file_id]}">{doc_context}</source>\n'
-
-        context_string = context_string.strip()
+        context_string = _citation_context(sources, sources_for_ui)
         prompt = get_last_user_message(form_data["messages"])
 
         if prompt is None:
@@ -5760,35 +5839,8 @@ async def process_chat_payload(request, form_data, user, metadata, model, tasks=
         form_data["native_file_inputs"] = True
 
     # If there are citations, add them to the data_items
-    sources = [source for source in sources if source.get("source", {}).get("name", "")]
-    ui_sources = [
-        source for source in ui_sources if source.get("source", {}).get("name", "")
-    ]
-
-    sources_for_ui = []
-    if sources or ui_sources:
-        seen = set()
-        for s in [*sources, *ui_sources]:
-            try:
-                key = None
-                meta = (s or {}).get("metadata") or []
-                if isinstance(meta, list) and meta and isinstance(meta[0], dict):
-                    key = meta[0].get("source") or meta[0].get("url")
-                if not key:
-                    src = (s or {}).get("source") or {}
-                    if isinstance(src, dict):
-                        key = src.get("id") or src.get("url") or src.get("name")
-                key = str(key or "")
-                if key and key in seen:
-                    continue
-                if key:
-                    seen.add(key)
-            except Exception:
-                pass
-            sources_for_ui.append(s)
-
-        if sources_for_ui:
-            events.append({"sources": sources_for_ui})
+    if sources_for_ui:
+        events.append({"sources": sources_for_ui})
 
     if model_knowledge:
         await event_emitter(

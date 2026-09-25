@@ -1,10 +1,13 @@
 """Adapter for the separately installed smart-search CLI.
 
 It routes the way Hermes's smart-search skill does: `research` first, and when
-research fetched pages, only that evidence, carrying the page text so the web
-loader does not download the page again. The CLI's model-backed `search` is
-never run. Without evidence, research's unfetched candidates and the direct
-provider commands supply URLs for the web loader to fetch.
+research fetched pages, that evidence, carrying the page text so the web loader
+does not download the page again. When research fetched fewer pages than asked
+for (its web discovery stops at the first provider with any result, often a
+single page), providers that return page text themselves (Exa) top it up. The
+CLI's model-backed `search` is never run. Without evidence, research's unfetched
+candidates and the direct provider commands supply URLs for the web loader to
+fetch.
 """
 
 import json
@@ -15,11 +18,13 @@ from urllib.parse import parse_qsl, unquote, urlparse
 import validators
 from open_webui.retrieval.web.main import SearchResult, get_filtered_results
 
+# Direct provider commands: subcommand, its count option, extra options, and the
+# result field holding the page text (None: the web loader downloads the page).
 _SOURCE_COMMANDS = {
-    "zhipu": ("zhipu-search", "--count"),
-    "zhipu-mcp": ("zhipu-mcp-search", "--count"),
-    "exa": ("exa-search", "--num-results"),
-    "anysearch": ("anysearch-search", "--max-results"),
+    "zhipu": ("zhipu-search", "--count", (), None),
+    "zhipu-mcp": ("zhipu-mcp-search", "--count", (), None),
+    "exa": ("exa-search", "--num-results", ("--include-text",), "text"),
+    "anysearch": ("anysearch-search", "--max-results", (), None),
 }
 # Result listings of these engines link to sources but are not sources.
 _SEARCH_RESULT_HOSTS = {
@@ -102,7 +107,9 @@ def _capability_status(payload: dict | None) -> dict | None:
     return None
 
 
-def _source_commands(capabilities: dict, count: int) -> list[list[str]]:
+def _source_commands(
+    capabilities: dict, count: int
+) -> list[tuple[list[str], str | None]]:
     commands = []
     seen = set()
     for capability in ("web_search", "docs_search", "vertical_search"):
@@ -118,8 +125,10 @@ def _source_commands(capabilities: dict, count: int) -> list[list[str]]:
             if spec is None:
                 continue
             seen.add(provider)
-            subcommand, count_option = spec
-            commands.append([subcommand, count_option, str(min(count, 10))])
+            subcommand, count_option, options, text_key = spec
+            commands.append(
+                ([subcommand, count_option, str(min(count, 10)), *options], text_key)
+            )
     return commands
 
 
@@ -144,7 +153,9 @@ def _url_key(url: str) -> tuple[str, str, str]:
     )
 
 
-def _results_from_items(items: list, *, require_evidence: bool) -> list[dict]:
+def _results_from_items(
+    items: list, *, require_evidence: bool, text_key: str | None = None
+) -> list[dict]:
     results = []
     for item in items:
         if not isinstance(item, dict):
@@ -155,6 +166,10 @@ def _results_from_items(items: list, *, require_evidence: bool) -> list[dict]:
             or not item["content"].strip()
         ):
             continue
+        page_text = item.get("content") if require_evidence else None
+        if text_key and isinstance(item.get(text_key), str):
+            page_text = item[text_key]
+        page_text = page_text.strip() if isinstance(page_text, str) else ""
         url = item.get("url")
         if not isinstance(url, str):
             continue
@@ -186,9 +201,7 @@ def _results_from_items(items: list, *, require_evidence: bool) -> list[dict]:
                 "snippet": " ".join(description[:500].split())
                 if isinstance(description, str)
                 else "",
-                "content": item["content"].strip()[:_MAX_CONTENT_CHARS]
-                if require_evidence
-                else None,
+                "content": page_text[:_MAX_CONTENT_CHARS] or None,
             }
         )
     return results
@@ -209,11 +222,26 @@ def search_smart_search(
     capability_status = None
     results = []
     seen = set()
+    # With research evidence in hand, only providers that return the page text
+    # top it up (about a second, nothing left to download); pages that would
+    # still have to be downloaded are not worth the wait then.
+    topping_up = False
 
-    def add_items(items: list, *, require_evidence: bool = False) -> None:
+    def add_items(
+        items: list,
+        *,
+        require_evidence: bool = False,
+        text_key: str | None = None,
+        require_text: bool = False,
+    ) -> None:
         for item in get_filtered_results(
-            _results_from_items(items, require_evidence=require_evidence), filter_list
+            _results_from_items(
+                items, require_evidence=require_evidence, text_key=text_key
+            ),
+            filter_list,
         ):
+            if require_text and not item["content"]:
+                continue
             key = _url_key(item["link"])
             if key not in seen:
                 seen.add(key)
@@ -256,12 +284,12 @@ def search_smart_search(
                 failures.append("research: unsuccessful response")
             else:
                 had_valid_response = True
-                # Fetched evidence answers the query on its own, as in Hermes's
-                # acceptance gate; unfetched candidates only stand in for it.
                 add_items(payload["evidence_items"], require_evidence=True)
-                if results:
-                    return results[:count]
-                if isinstance(payload.get("discovery_sources"), list):
+                topping_up = bool(results)
+                # Unfetched candidates only stand in for missing evidence.
+                if not topping_up and isinstance(
+                    payload.get("discovery_sources"), list
+                ):
                     add_items(payload["discovery_sources"])
                 if len(results) >= count:
                     return results[:count]
@@ -270,7 +298,7 @@ def search_smart_search(
     # The provider list normally comes from the research response itself;
     # doctor is a slow probe (it tests every upstream connection), so it only
     # runs when research did not report the configured capabilities.
-    if capability_status is None:
+    if capability_status is None and not topping_up:
         try:
             completed = _run(command, ["doctor", "--format", "json"], 30)
         except subprocess.TimeoutExpired:
@@ -283,13 +311,15 @@ def search_smart_search(
             if capability_status is None and not failure:
                 failures.append("doctor: missing capability status")
 
-    for options in _source_commands(capability_status or {}, count):
+    for options, text_key in _source_commands(capability_status or {}, count):
+        if topping_up and text_key is None:
+            continue
         subcommand = options[0]
         try:
             completed = _run(
                 command,
                 [subcommand, query, *options[1:], "--format", "json"],
-                35,
+                20 if topping_up else 35,
             )
         except subprocess.TimeoutExpired:
             failures.append(f"{subcommand}: timeout")
@@ -302,7 +332,9 @@ def search_smart_search(
             failures.append(f"{subcommand}: unsuccessful response")
             continue
         had_valid_response = True
-        add_items(source_payload["results"])
+        add_items(
+            source_payload["results"], text_key=text_key, require_text=topping_up
+        )
         if len(results) >= count:
             return results[:count]
 

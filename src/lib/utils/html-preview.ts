@@ -438,7 +438,8 @@ const COMMON_POLICY_META = [
 ];
 const buildPreviewPolicyMeta = (
 	labels: HtmlPreviewLabels = DEFAULT_HTML_PREVIEW_LABELS,
-	colorScheme: HtmlPreviewColorScheme = 'light'
+	colorScheme: HtmlPreviewColorScheme = 'light',
+	citations: string[] = []
 ) =>
 	[
 		`<meta ${PREVIEW_POLICY_MARKER} http-equiv="Content-Security-Policy" content="${HTML_PREVIEW_CSP}">`,
@@ -447,6 +448,7 @@ const buildPreviewPolicyMeta = (
 		PREVIEW_RESIZE_BRIDGE,
 		PREVIEW_SNAPSHOT_BRIDGE,
 		buildPreviewInteractionsBridge(labels),
+		...(citations.length > 0 ? [buildPreviewCitationBridge(citations)] : []),
 		...(colorScheme === 'dark' ? [PREVIEW_DARK_THEME_BRIDGE] : [])
 	].join('');
 const EXPORT_POLICY_META = [
@@ -485,7 +487,7 @@ const stripInjectedPreviewPolicies = (html: unknown) =>
 			''
 		)
 		.replace(
-			/<script\b(?=[^>]*\bdata-halo-html-preview-(?:snapshot|export|resize|interactions|theme)=["']true["'])[^>]*>[\s\S]*?<\/script>/gi,
+			/<script\b(?=[^>]*\bdata-halo-html-preview-(?:snapshot|export|resize|interactions|citations|theme)=["']true["'])[^>]*>[\s\S]*?<\/script>/gi,
 			''
 		);
 
@@ -519,8 +521,9 @@ const hardenHtmlDocument = (html: unknown, policyMeta: string): string => {
 export const hardenHtmlPreviewDocument = (
 	html: unknown,
 	labels: HtmlPreviewLabels = DEFAULT_HTML_PREVIEW_LABELS,
-	colorScheme: HtmlPreviewColorScheme = 'light'
-): string => hardenHtmlDocument(html, buildPreviewPolicyMeta(labels, colorScheme));
+	colorScheme: HtmlPreviewColorScheme = 'light',
+	citations: string[] = []
+): string => hardenHtmlDocument(html, buildPreviewPolicyMeta(labels, colorScheme, citations));
 
 export const hardenHtmlArtifactExportDocument = (html: unknown): string => {
 	const source = stripDarkArtifactStyles(stripInjectedPreviewPolicies(html))
@@ -647,7 +650,12 @@ const buildArtifactStyles = (colorScheme: HtmlPreviewColorScheme) =>
 
 export const buildHtmlArtifactPreview = (
 	content: unknown,
-	options: { labels?: HtmlPreviewLabels; colorScheme?: HtmlPreviewColorScheme } = {}
+	options: {
+		labels?: HtmlPreviewLabels;
+		colorScheme?: HtmlPreviewColorScheme;
+		/** Source labels; [n] markers up to their count open source n. */
+		citations?: string[];
+	} = {}
 ): string | null => {
 	if (typeof content !== 'string' || !content.trim()) {
 		return null;
@@ -672,13 +680,14 @@ export const buildHtmlArtifactPreview = (
 		} else if (/<html\b[^>]*>/i.test(document)) {
 			document = insertAfterOpeningTag(document, 'html', `<head>${style}</head>`);
 		}
-		return hardenHtmlPreviewDocument(document, options.labels, colorScheme);
+		return hardenHtmlPreviewDocument(document, options.labels, colorScheme, options.citations);
 	}
 
 	return hardenHtmlPreviewDocument(
 		`<!DOCTYPE html><html lang="en"><head>${style}</head><body>${mergedHtml}</body></html>`,
 		options.labels,
-		colorScheme
+		colorScheme,
+		options.citations
 	);
 };
 
@@ -689,6 +698,7 @@ export const buildInlineHtmlArtifactPreview = (
 		streaming: boolean;
 		labels?: HtmlPreviewLabels;
 		colorScheme?: HtmlPreviewColorScheme;
+		citations?: string[];
 	}
 ): string | null => {
 	if (!options.enabled || options.streaming) {
@@ -697,7 +707,8 @@ export const buildInlineHtmlArtifactPreview = (
 
 	return buildHtmlArtifactPreview(content, {
 		labels: options.labels,
-		colorScheme: options.colorScheme
+		colorScheme: options.colorScheme,
+		citations: options.citations
 	});
 };
 
@@ -741,6 +752,7 @@ export const DEFAULT_HTML_PREVIEW_LABELS: HtmlPreviewLabels = {
 
 export const HTML_PREVIEW_COPY_MESSAGE_TYPE = 'halo-html-preview-copy';
 export const HTML_PREVIEW_IMAGE_MESSAGE_TYPE = 'halo-html-preview-image';
+export const HTML_PREVIEW_CITATION_MESSAGE_TYPE = 'halo-html-preview-citation';
 export const HTML_PREVIEW_COPY_MAX_CHARS = 200_000;
 export const HTML_PREVIEW_IMAGE_ALT_MAX_CHARS = 500;
 
@@ -764,6 +776,15 @@ export const isInlineHtmlPreviewImageMessage = (
 	/^data:image\//i.test((data as { src: string }).src) &&
 	(typeof (data as { alt?: unknown }).alt === 'undefined' ||
 		typeof (data as { alt?: unknown }).alt === 'string');
+
+export const isInlineHtmlPreviewCitationMessage = (
+	data: unknown
+): data is { type: typeof HTML_PREVIEW_CITATION_MESSAGE_TYPE; index: number } =>
+	typeof data === 'object' &&
+	data !== null &&
+	(data as { type?: unknown }).type === HTML_PREVIEW_CITATION_MESSAGE_TYPE &&
+	Number.isInteger((data as { index?: unknown }).index) &&
+	(data as { index: number }).index >= 1;
 
 const SAME_ORIGIN_PREVIEW_IMAGE_PATH_RE =
 	/^\/(?:api\/v1\/files\/[A-Za-z0-9_-]+\/content(?:\/[^?#"'\s]*)?|cache\/[^?#"'\s]+)(?:\?[^#"'\s]*)?$/;
@@ -923,6 +944,111 @@ export const buildPreviewInteractionsBridge = (labels: HtmlPreviewLabels): strin
 	const start = () => {
 		decorate();
 		new MutationObserver(schedule).observe(document.documentElement, { childList: true, subtree: true });
+	};
+	if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start, { once: true });
+	else start();
+})();</script>`;
+};
+
+// Answers written as HTML cite sources as plain "[1]" text inside the sandboxed
+// frame, where the chat's citation chips cannot reach. This turns each marker
+// whose numbers all name a source into a clickable one that asks the parent to
+// open that source; the label list only sets how many sources there are and
+// the hover title.
+export const buildPreviewCitationBridge = (citations: string[]): string => {
+	const serializedLabels = escapeForInlineScript(
+		JSON.stringify(citations.map((label) => String(label ?? '')))
+	);
+	return `<script data-halo-html-preview-citations="true">(() => {
+	const labels = ${serializedLabels};
+	const STYLE_ID = 'halo-html-preview-citation-style';
+	const css = '[data-halo-cite]{cursor:pointer;color:#2563eb;border-radius:3px}'
+		+ '[data-halo-cite]:hover,[data-halo-cite]:focus-visible{text-decoration:underline;background:rgba(37,99,235,.12);outline:none}'
+		+ 'html[data-halo-theme="dark"] [data-halo-cite]{color:#93c5fd}';
+	const MARKER = /[\\[\u3010](\\d{1,3}(?:\\s*[,\uff0c\u3001]\\s*\\d{1,3})*)[\\]\u3011]/g;
+	const SKIP = 'script,style,textarea,code,pre,kbd,samp,title,noscript,button,select,option,svg,math,[data-halo-cite]';
+	const ensureStyle = () => {
+		if (document.getElementById(STYLE_ID)) return;
+		const style = document.createElement('style');
+		style.id = STYLE_ID;
+		style.textContent = css;
+		(document.head || document.documentElement).appendChild(style);
+	};
+	const chip = (text, index) => {
+		const cite = document.createElement('span');
+		cite.setAttribute('data-halo-cite', String(index));
+		cite.setAttribute('role', 'button');
+		cite.setAttribute('tabindex', '0');
+		cite.setAttribute('title', labels[index - 1]);
+		cite.textContent = text;
+		return cite;
+	};
+	const decorateText = (node) => {
+		const text = node.nodeValue || '';
+		const fragment = document.createDocumentFragment();
+		const add = (child) => {
+			if (child !== '') fragment.appendChild(typeof child === 'string' ? document.createTextNode(child) : child);
+		};
+		let last = 0;
+		let changed = false;
+		MARKER.lastIndex = 0;
+		for (let match = MARKER.exec(text); match; match = MARKER.exec(text)) {
+			const numbers = match[1].split(/[,\uff0c\u3001]/).map((part) => Number(part.trim()));
+			if (!numbers.every((index) => index >= 1 && index <= labels.length)) continue;
+			changed = true;
+			add(text.slice(last, match.index));
+			const raw = match[0];
+			if (numbers.length === 1) {
+				add(chip(raw, numbers[0]));
+			} else {
+				let position = 0;
+				for (const digits of raw.matchAll(/\\d+/g)) {
+					add(raw.slice(position, digits.index));
+					add(chip(digits[0], Number(digits[0])));
+					position = digits.index + digits[0].length;
+				}
+				add(raw.slice(position));
+			}
+			last = match.index + raw.length;
+		}
+		if (!changed) return;
+		add(text.slice(last));
+		node.parentNode.replaceChild(fragment, node);
+	};
+	const decorate = () => {
+		ensureStyle();
+		const root = document.body || document.documentElement;
+		const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+		const nodes = [];
+		for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+			if (!node.parentElement || node.parentElement.closest(SKIP)) continue;
+			MARKER.lastIndex = 0;
+			if (MARKER.test(node.nodeValue || '')) nodes.push(node);
+		}
+		nodes.forEach(decorateText);
+	};
+	const open = (target) => {
+		const cite = target instanceof Element ? target.closest('[data-halo-cite]') : null;
+		if (!cite) return false;
+		parent.postMessage({ type: '${HTML_PREVIEW_CITATION_MESSAGE_TYPE}', index: Number(cite.getAttribute('data-halo-cite')) }, '*');
+		return true;
+	};
+	document.addEventListener('click', (event) => {
+		if (!open(event.target)) return;
+		event.preventDefault();
+		event.stopPropagation();
+	}, true);
+	document.addEventListener('keydown', (event) => {
+		if ((event.key === 'Enter' || event.key === ' ') && open(event.target)) event.preventDefault();
+	}, true);
+	let frame = 0;
+	const schedule = () => {
+		if (frame) return;
+		frame = requestAnimationFrame(() => { frame = 0; decorate(); });
+	};
+	const start = () => {
+		decorate();
+		new MutationObserver(schedule).observe(document.documentElement, { childList: true, subtree: true, characterData: true });
 	};
 	if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start, { once: true });
 	else start();

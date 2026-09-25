@@ -74,12 +74,12 @@ def test_web_search_uses_prefetched_pages_and_loads_only_the_rest(monkeypatch):
         ]
 
     loaded = []
+    downloaded = "Downloaded page text, long enough to be a real page body."
 
     async def fake_loader(_request, urls, **_kwargs):
         loaded.append(list(urls))
         return [
-            Document(page_content="Downloaded text", metadata={"source": url})
-            for url in urls
+            Document(page_content=downloaded, metadata={"source": url}) for url in urls
         ]
 
     monkeypatch.setattr(retrieval, "_search_web_async", fake_search)
@@ -109,9 +109,70 @@ def test_web_search_uses_prefetched_pages_and_loads_only_the_rest(monkeypatch):
     ]
     assert [doc["content"] for doc in result["docs"]] == [
         "Research page text",
-        "Downloaded text",
+        downloaded,
     ]
     assert result["docs"][0]["metadata"] == {
         "source": "https://example.org/fetched",
         "title": "Fetched",
     }
+
+
+def test_unreadable_downloads_fall_back_to_the_snippet_or_are_dropped(monkeypatch):
+    import asyncio
+    from types import SimpleNamespace
+
+    from langchain_core.documents import Document
+    from open_webui.routers import retrieval
+
+    page = "A readable page body that is comfortably longer than fifty chars."
+
+    async def fake_search(_request, _engine, _query):
+        return [
+            SearchResult(link="https://example.org/ok", title="Ok", snippet="x"),
+            SearchResult(
+                link="https://example.org/blocked",
+                title="Blocked",
+                snippet="What the search engine saw on the page",
+            ),
+            SearchResult(link="https://example.org/empty", title="Empty", snippet=""),
+        ]
+
+    async def fake_loader(_request, urls, **_kwargs):
+        texts = {
+            "https://example.org/ok": page,
+            "https://example.org/blocked": "403 Forbidden",
+            "https://example.org/empty": "",
+        }
+        return [
+            Document(page_content=texts[url], metadata={"source": url}) for url in urls
+        ]
+
+    monkeypatch.setattr(retrieval, "_search_web_async", fake_search)
+    monkeypatch.setattr(retrieval, "_load_web_documents_with_loader", fake_loader)
+    request = SimpleNamespace(
+        app=SimpleNamespace(
+            state=SimpleNamespace(
+                config=SimpleNamespace(
+                    WEB_SEARCH_ENGINE="smart_search",
+                    WEB_LOADER_ENGINE="",
+                    BYPASS_WEB_SEARCH_EMBEDDING_AND_RETRIEVAL=True,
+                )
+            )
+        )
+    )
+
+    result = asyncio.run(
+        retrieval.process_web_search(
+            request, retrieval.SearchForm(query="query"), user=None
+        )
+    )
+
+    assert result["filenames"] == [
+        "https://example.org/ok",
+        "https://example.org/blocked",
+    ]
+    assert [doc["content"] for doc in result["docs"]] == [
+        page,
+        "What the search engine saw on the page",
+    ]
+    assert result["failed_count"] == 1

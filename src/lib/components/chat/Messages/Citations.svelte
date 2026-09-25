@@ -4,7 +4,7 @@
 	import ChevronDown from '$lib/components/icons/ChevronDown.svelte';
 	import GlobeAlt from '$lib/components/icons/GlobeAlt.svelte';
 	import Document from '$lib/components/icons/Document.svelte';
-	import { getCitationEntries } from '$lib/utils/citations';
+	import { getCitationList } from '$lib/utils/citations';
 	import { getDisplayTitle, decodeString } from '$lib/utils/marked/citation-extension';
 
 	const i18n = getContext('i18n');
@@ -23,10 +23,22 @@
 	let buttonEl: HTMLElement;
 	let dropdownEl: HTMLElement | null = null;
 	let openAbove = false;
-	// The dropdown is rendered with position:fixed anchored to the pill button so it
-	// escapes any ancestor with overflow:hidden / its own stacking context (the chat
-	// message bubble clips an absolutely-positioned dropdown, hiding the source list).
+	// The dropdown is moved to <body> and anchored to the pill button with
+	// position:fixed. Inside the message it was clipped: the bubble hides
+	// overflow, and a chat opened from its link renders each message with
+	// `content-visibility: auto`, whose containment makes the message the
+	// containing block of fixed children and clips them to it - the list opened
+	// off-position and invisible.
 	let dropdownStyle = '';
+
+	function portal(node: HTMLElement) {
+		document.body.appendChild(node);
+		return {
+			destroy() {
+				node.remove();
+			}
+		};
+	}
 
 	function computeDropdownStyle() {
 		if (!buttonEl || typeof window === 'undefined') return;
@@ -52,7 +64,7 @@
 
 	function bindGlobalListeners(bind: boolean) {
 		if (typeof window === 'undefined') return;
-		const fn = bind ? window.addEventListener : window.removeEventListener;
+		const fn = (bind ? window.addEventListener : window.removeEventListener).bind(window);
 		fn('scroll', computeDropdownStyle, true);
 		fn('resize', computeDropdownStyle);
 		fn('pointerdown', handleOutsidePointer, true);
@@ -116,45 +128,7 @@
 	}
 
 	$: {
-		citations = sources.reduce((acc, source) => {
-			if (!source || typeof source !== 'object' || Object.keys(source).length === 0) {
-				return acc;
-			}
-
-			getCitationEntries(source).forEach(({ document, metadata, distance }) => {
-				const documentText = typeof document === 'string' ? document : `${document ?? ''}`;
-
-				const id = metadata?.source ?? source?.source?.id ?? 'N/A';
-				let _source = source?.source;
-
-				if (metadata?.name) {
-					_source = { ..._source, name: metadata.name };
-				}
-
-				if (id.startsWith('http://') || id.startsWith('https://')) {
-					_source = { ..._source, name: id, url: id };
-				}
-
-				const existingSource = acc.find((item) => item.id === id);
-
-				if (existingSource) {
-					existingSource.document.push(documentText);
-					existingSource.metadata.push(metadata);
-					if (distance !== undefined) existingSource.distances.push(distance);
-				} else {
-					acc.push({
-						id: id,
-						source: _source,
-						document: [documentText],
-						metadata: metadata ? [metadata] : [],
-						distances: distance !== undefined ? [distance] : []
-					});
-				}
-			});
-
-			return acc;
-		}, []);
-
+		citations = getCitationList(sources);
 		showRelevance = calculateShowRelevance(citations);
 		showPercentage = shouldShowPercentage(citations);
 	}
@@ -236,6 +210,7 @@
 		<!-- Expanded source list (fixed-positioned, anchored to the pill button) -->
 		{#if showCitations}
 			<div
+				use:portal
 				bind:this={dropdownEl}
 				class="flex flex-col gap-0.5
 					bg-white/90 dark:bg-gray-900/90 backdrop-blur-xl

@@ -2692,6 +2692,34 @@ def _fill_favicons(results: list[SearchResult]) -> list[SearchResult]:
     return results
 
 
+# A downloaded page shorter than this is an error or bot-check page; the
+# embedding path in process_web_search skips the same pages.
+_MIN_WEB_PAGE_CHARS = 50
+
+
+def _readable_web_docs(
+    docs: list[Document], results: list[SearchResult]
+) -> tuple[list[Document], int]:
+    """The downloaded pages with text, and how many had none. A page that came
+    back empty or as a short error page is replaced by the search engine's
+    snippet for it when there is one and dropped otherwise, so no source reaches
+    the model or the citation view without text."""
+    snippets = {
+        str(result.link or "").strip(): str(result.snippet or "").strip()
+        for result in results
+    }
+    readable = []
+    for doc in docs:
+        if len((doc.page_content or "").strip()) >= _MIN_WEB_PAGE_CHARS:
+            readable.append(doc)
+            continue
+        snippet = snippets.get(str(doc.metadata.get("source") or "").strip())
+        if snippet:
+            doc.page_content = snippet
+            readable.append(doc)
+    return readable, len(docs) - len(readable)
+
+
 def _build_direct_docs_from_web_results(
     query: str,
     results: list[SearchResult],
@@ -2912,12 +2940,19 @@ async def process_web_search(
                     "loader_runtime_notice": loader_runtime_notice,
                 }
 
+        bypass_embedding = (
+            request.app.state.config.BYPASS_WEB_SEARCH_EMBEDDING_AND_RETRIEVAL
+        )
+        unreadable_count = 0
+        if bypass_embedding:
+            # The embedding path below skips unreadable pages itself.
+            docs, unreadable_count = _readable_web_docs(docs, web_results)
         docs = [*prefetched_docs, *docs]
         urls = [
             doc.metadata["source"] for doc in docs
         ]  # only keep URLs which could be retrieved
 
-        if request.app.state.config.BYPASS_WEB_SEARCH_EMBEDDING_AND_RETRIEVAL:
+        if bypass_embedding:
             result = {
                 "status": True,
                 "collection_name": None,
@@ -2930,6 +2965,7 @@ async def process_web_search(
                     for doc in docs
                 ],
                 "loaded_count": len(docs),
+                "failed_count": unreadable_count,
             }
             if loader_runtime_notice is not None:
                 result["loader_runtime_notice"] = loader_runtime_notice

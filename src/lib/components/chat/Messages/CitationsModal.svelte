@@ -57,19 +57,30 @@
 		mergedDocuments = [];
 	}
 
+	// Source URLs come from search results; only real web links become hrefs.
+	const isWebUrl = (url: unknown): url is string =>
+		typeof url === 'string' && /^https?:\/\//i.test(url.trim());
+
 	function getSourceUrl(document: any): string {
 		if (document?.metadata?.file_id) {
 			return `${WEBUI_API_BASE_URL}/files/${document.metadata.file_id}/content${document?.metadata?.page !== undefined ? `#page=${document.metadata.page + 1}` : ''}`;
 		}
-		if (document?.source?.url?.includes('http')) {
-			return document.source.url;
+		if (isWebUrl(document?.source?.url)) {
+			return document.source.url.trim();
 		}
 		return '#';
 	}
 
 	function isLinkable(document: any): boolean {
-		return !!(document?.metadata?.file_id || document?.source?.url?.includes('http'));
+		return !!(document?.metadata?.file_id || isWebUrl(document?.source?.url));
 	}
+
+	// Web pages carry their page title; the source name is the URL itself.
+	$: pageTitle = String(mergedDocuments?.[0]?.metadata?.title ?? '')
+		.replace(/\s+/g, ' ')
+		.trim();
+	$: sourceName = decodeString(citation?.source?.name ?? '');
+	$: heading = pageTitle || sourceName;
 </script>
 
 <Modal size="lg" bind:show>
@@ -77,28 +88,36 @@
 		<!-- Header: source name as clickable link -->
 		<div class="flex justify-between dark:text-gray-300 px-4.5 pt-3 pb-2">
 			<div class="text-lg font-medium self-center flex items-center gap-2 min-w-0 flex-1 mr-3">
-				{#if citation?.source?.name}
+				{#if heading}
 					{@const firstDoc = mergedDocuments?.[0]}
-					{#if isLinkable(firstDoc)}
-						<Tooltip
-							className="w-fit min-w-0"
-							content={firstDoc?.source?.url?.includes('http')
-								? $i18n.t('Open link')
-								: $i18n.t('Open file')}
-							placement="top-start"
-							tippyOptions={{ duration: [500, 0] }}
-						>
-							<a
-								class="hover:text-gray-500 dark:hover:text-gray-100 underline grow line-clamp-1"
-								href={getSourceUrl(firstDoc)}
-								target="_blank"
+					<div class="flex flex-col min-w-0">
+						{#if isLinkable(firstDoc)}
+							<Tooltip
+								className="w-fit min-w-0"
+								content={firstDoc?.source?.url?.includes('http')
+									? $i18n.t('Open link')
+									: $i18n.t('Open file')}
+								placement="top-start"
+								tippyOptions={{ duration: [500, 0] }}
 							>
-								{decodeString(citation?.source?.name)}
-							</a>
-						</Tooltip>
-					{:else}
-						<span class="line-clamp-1">{decodeString(citation?.source?.name)}</span>
-					{/if}
+								<a
+									class="hover:text-gray-500 dark:hover:text-gray-100 underline grow line-clamp-1"
+									href={getSourceUrl(firstDoc)}
+									target="_blank"
+									rel="noopener noreferrer"
+								>
+									{heading}
+								</a>
+							</Tooltip>
+						{:else}
+							<span class="line-clamp-1">{heading}</span>
+						{/if}
+						{#if pageTitle && sourceName && pageTitle !== sourceName}
+							<span class="text-xs font-normal text-gray-500 dark:text-gray-400 truncate">
+								{sourceName}
+							</span>
+						{/if}
+					</div>
 				{:else}
 					{$i18n.t('Citation')}
 				{/if}
@@ -185,7 +204,23 @@
 								{/if}
 							</div>
 
-							{#if document.metadata?.html}
+							{#if !document.document?.trim()}
+								<div class="text-sm text-gray-500 dark:text-gray-400">
+									{$i18n.t('No page text was captured for this source.')}
+									{#if isLinkable(document)}
+										<a
+											class="underline hover:text-gray-700 dark:hover:text-gray-200"
+											href={getSourceUrl(document)}
+											target="_blank"
+											rel="noopener noreferrer"
+										>
+											{document?.source?.url?.includes('http')
+												? $i18n.t('Open link')
+												: $i18n.t('Open file')}
+										</a>
+									{/if}
+								</div>
+							{:else if document.metadata?.html}
 								<iframe
 									class="w-full border-0 h-auto rounded-none"
 									sandbox={HTML_PREVIEW_SANDBOX}

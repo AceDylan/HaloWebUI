@@ -99,6 +99,17 @@ class MemoriesTable:
             except Exception:
                 return None
 
+    def user_has_memories(self, user_id: str) -> bool:
+        """Whether the user saved any memory; a failed lookup counts as yes so
+        callers fall back to the full search."""
+        with get_db() as db:
+            try:
+                return (
+                    db.query(Memory.id).filter_by(user_id=user_id).first() is not None
+                )
+            except Exception:
+                return True
+
     def get_memory_by_id(self, id: str) -> Optional[MemoryModel]:
         with get_db() as db:
             try:

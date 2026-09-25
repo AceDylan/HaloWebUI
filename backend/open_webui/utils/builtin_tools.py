@@ -1045,10 +1045,16 @@ def get_builtin_tools(
 
         async def search_memories(query: str, k: int = 3) -> dict:
             limit = max(1, min(int(k or 3), 10))
-            result = VECTOR_DB_CLIENT.search(
-                collection_name=f"user-memory-{user.id}",
-                vectors=[request.app.state.EMBEDDING_FUNCTION(str(query), user=user)],
-                limit=limit,
+            result = (
+                VECTOR_DB_CLIENT.search(
+                    collection_name=f"user-memory-{user.id}",
+                    vectors=[
+                        request.app.state.EMBEDDING_FUNCTION(str(query), user=user)
+                    ],
+                    limit=limit,
+                )
+                if Memories.user_has_memories(user.id)
+                else None
             )
             if result is None:
                 return {

@@ -91,6 +91,12 @@ class QueryMemoryForm(BaseModel):
 async def query_memory(
     request: Request, form_data: QueryMemoryForm, user=Depends(get_verified_user)
 ):
+    # The chat asks before every message while memory is on. With nothing
+    # saved there is nothing to find, and embedding the question would load
+    # the embedding model first (about 10 s on the first message after a
+    # restart).
+    if not Memories.user_has_memories(user.id):
+        return _empty_memory_search_result()
     try:
         results = VECTOR_DB_CLIENT.search(
             collection_name=f"user-memory-{user.id}",

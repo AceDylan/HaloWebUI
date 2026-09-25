@@ -50,6 +50,7 @@
 	import { setTextScale, TEXT_SCALE_DEFAULT } from '$lib/utils/text-scale';
 	import { getAllTags } from '$lib/apis/chats';
 	import { initPWAInstallSupport } from '$lib/utils/pwa';
+	import { getFaviconWithDot, tabActivity } from '$lib/utils/tab-activity';
 	import NotificationToast from '$lib/components/NotificationToast.svelte';
 	import AppSidebar from '$lib/components/app/AppSidebar.svelte';
 
@@ -743,20 +744,34 @@
 			window.removeEventListener('resize', onResize);
 		};
 	});
-</script>
 
-<svelte:head>
-	<title>{$WEBUI_NAME}</title>
-	<link
-		crossorigin="anonymous"
-		rel="icon"
-		href="{WEBUI_BASE_URL}/static/{$theme === 'dark' ||
+	// A reply running, or finished while the tab was in the background, puts a
+	// dot on the favicon (blue / green); the chat page prefixes its title too.
+	$: faviconBaseHref = `${WEBUI_BASE_URL}/static/${
+		$theme === 'dark' ||
 		($theme === 'system' &&
 			typeof window !== 'undefined' &&
 			window.matchMedia('(prefers-color-scheme: dark)').matches)
 			? 'favicon-dark.png'
-			: 'favicon.png'}"
-	/>
+			: 'favicon.png'
+	}`;
+	let faviconBadgeHref = null;
+	const refreshFaviconBadge = async (activity, baseHref) => {
+		if (activity === 'idle' || typeof document === 'undefined') {
+			faviconBadgeHref = null;
+			return;
+		}
+		const href = await getFaviconWithDot(baseHref, activity);
+		if ($tabActivity === activity) {
+			faviconBadgeHref = href;
+		}
+	};
+	$: void refreshFaviconBadge($tabActivity, faviconBaseHref);
+</script>
+
+<svelte:head>
+	<title>{$WEBUI_NAME}</title>
+	<link crossorigin="anonymous" rel="icon" href={faviconBadgeHref ?? faviconBaseHref} />
 
 	<!-- rosepine themes have been disabled as it's not up to date with our latest version. -->
 	<!-- feel free to make a PR to fix if anyone wants to see it return -->

@@ -90,6 +90,18 @@
 					{/if}
 				</div>
 
+				<!-- The open chat's title. Inside the Hub the browser tab belongs to the
+				     Hub, so this is the only place it shows. -->
+				{#if $chatId && title}
+					<div
+						class="hidden sm:flex min-w-0 max-w-[40%] shrink items-center self-start py-2 pl-2 pr-1 text-sm text-gray-500 dark:text-gray-400"
+						title={title}
+						data-halo-navbar-chat-title
+					>
+						<span class="truncate">{title}</span>
+					</div>
+				{/if}
+
 				<div class="self-start flex flex-none items-center text-gray-600 dark:text-gray-400">
 					<!-- <div class="md:hidden flex self-center w-[1px] h-5 mx-2 bg-gray-300 dark:bg-stone-700" /> -->
 					{#if shareEnabled && chat && (chat.id || $temporaryChatEnabled)}

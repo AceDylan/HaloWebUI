@@ -150,6 +150,7 @@
 	import { HermesSteerError, steerHermesRun } from '$lib/apis/hermes';
 	import { isHermesRunSteerable, type HermesApprovalRequest } from '$lib/utils/hermes';
 	import HermesApprovalDialog from './HermesApprovalDialog.svelte';
+	import { TAB_ACTIVITY_TITLE_PREFIX, tabActivity } from '$lib/utils/tab-activity';
 	import { ensureModels } from '$lib/services/models';
 	import { takeLandingPrompt } from '$lib/utils/chat-landing';
 
@@ -6573,7 +6574,7 @@
 
 <svelte:head>
 	<title>
-		{$settings?.showChatTitleInTab !== false && $chatTitle
+		{TAB_ACTIVITY_TITLE_PREFIX[$tabActivity]}{$settings?.showChatTitleInTab !== false && $chatTitle
 			? `${$chatTitle.length > 30 ? `${$chatTitle.slice(0, 30)}...` : $chatTitle} | ${$WEBUI_NAME}`
 			: `${$WEBUI_NAME}`}
 	</title>

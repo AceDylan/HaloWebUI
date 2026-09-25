@@ -3,6 +3,8 @@
 	import type { Writable } from 'svelte/store';
 	import type { i18n as i18nType } from 'i18next';
 
+	import { formatElapsedSeconds } from '$lib/utils/elapsed';
+
 	const i18n = getContext<Writable<i18nType>>('i18n');
 
 	type StatusEntry = {
@@ -43,12 +45,6 @@
 		if (interval) clearInterval(interval);
 	});
 
-	function formatTime(seconds: number): string {
-		if (seconds < 60) return `${seconds}s`;
-		const mins = Math.floor(seconds / 60);
-		const secs = seconds % 60;
-		return secs > 0 ? `${mins}m ${secs}s` : `${mins}m`;
-	}
 
 	function toFiniteNumber(value: unknown): number | null {
 		const parsed = Number(value);
@@ -283,7 +279,7 @@
 				</span>
 				{#if step.active}
 					<span class="text-2xs text-gray-400/80 dark:text-gray-500/80 tabular-nums font-mono">
-						{formatTime(elapsed)}
+						{formatElapsedSeconds(elapsed)}
 					</span>
 				{/if}
 			</div>

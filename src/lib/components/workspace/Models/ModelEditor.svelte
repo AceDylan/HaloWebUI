@@ -1139,14 +1139,14 @@
 							<div class="glass-item p-4">
 								<FiltersSelector
 									bind:selectedFilterIds={filterIds}
-									filters={$functions.filter((func) => func.type === 'filter')}
+									filters={($functions ?? []).filter((func) => func.type === 'filter')}
 								/>
 							</div>
 
 							<div class="glass-item p-4">
 								<ActionsSelector
 									bind:selectedActionIds={actionIds}
-									actions={$functions.filter((func) => func.type === 'action')}
+									actions={($functions ?? []).filter((func) => func.type === 'action')}
 								/>
 							</div>
 

@@ -83,6 +83,7 @@
 	import ContentRenderer from './ContentRenderer.svelte';
 	import MessageOutline from './MessageOutline.svelte';
 	import ThinkingIndicator from './ThinkingIndicator.svelte';
+	import GenerationElapsed from './GenerationElapsed.svelte';
 	import DiscussionPanel from './DiscussionPanel.svelte';
 	import { KokoroWorker } from '$lib/workers/KokoroWorker';
 	import FileItem from '$lib/components/common/FileItem.svelte';
@@ -1325,6 +1326,10 @@
 							{/if}
 						</span>
 					</Tooltip>
+				{/if}
+
+				{#if !message.done && !message.error && !showInitialThinkingIndicator && message.timestamp}
+					<GenerationElapsed since={message.timestamp} />
 				{/if}
 
 				{#if message.timestamp}

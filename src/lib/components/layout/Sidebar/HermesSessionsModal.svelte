@@ -251,10 +251,12 @@
 									{/if}
 								</div>
 							</div>
+							<!-- A quiet label, not a button: a column of solid blue pills drew the
+							     eye away from the session titles. -->
 							<span
-								class="shrink-0 rounded-full px-3 py-1 text-xs font-medium transition {session.imported
-									? 'bg-gray-100 text-gray-700 dark:bg-gray-850 dark:text-gray-200'
-									: 'bg-primary-600 text-white dark:bg-primary-500'}"
+								class="shrink-0 rounded-full px-2.5 py-0.5 text-xs font-medium transition {session.imported
+									? 'text-gray-500 dark:text-gray-400'
+									: 'text-primary-700 ring-1 ring-inset ring-primary-200 dark:text-primary-300 dark:ring-primary-800'}"
 							>
 								{#if importing === session.id}
 									<Spinner className="size-3" />

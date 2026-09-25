@@ -9,7 +9,6 @@
 	import { fade } from 'svelte/transition';
 
 	import { getKnowledgeBases } from '$lib/apis/knowledge';
-	import { getFunctions } from '$lib/apis/functions';
 	import { getToolServersData } from '$lib/apis';
 	import { getAllTags } from '$lib/apis/chats';
 	import { getPrompts } from '$lib/apis/prompts';
@@ -34,7 +33,6 @@
 		prompts,
 		knowledge,
 		tools,
-		functions,
 		tags,
 		banners,
 		showChangelog,
@@ -105,8 +103,10 @@
 				// IndexedDB Not Found
 			}
 
-			// Fetch independent data in parallel to reduce page load time
-			const [userSettings, bannersData, toolsData, functionsData] = await Promise.all([
+			// Fetch independent data in parallel to reduce page load time. The
+			// functions list is not fetched here: only the Functions pages and the
+			// valves panel use it, and they load it when they open.
+			const [userSettings, bannersData, toolsData] = await Promise.all([
 				getUserSettings(localStorage.token).catch((error) => {
 					console.error(error);
 					return null;
@@ -117,10 +117,6 @@
 				}),
 				getTools(localStorage.token).catch((e) => {
 					console.error('Failed to load tools', e);
-					return null;
-				}),
-				getFunctions(localStorage.token).catch((e) => {
-					console.error('Failed to load functions', e);
 					return null;
 				})
 			]);
@@ -135,9 +131,6 @@
 			banners.set(bannersData);
 			if (Array.isArray(toolsData)) {
 				tools.set(toolsData);
-			}
-			if (Array.isArray(functionsData)) {
-				functions.set(functionsData);
 			}
 
 			// toolServers depends on $settings being set, so it runs after the parallel batch

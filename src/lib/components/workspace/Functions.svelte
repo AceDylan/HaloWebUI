@@ -167,6 +167,11 @@
 
 	onMount(async () => {
 		loaded = true;
+		if ($functions === null) {
+			// No longer preloaded with every page (only this page and the valves
+			// panel use the list).
+			functions.set(await getFunctions(localStorage.token).catch(() => []));
+		}
 
 		const onKeyDown = (event) => {
 			if (event.key === 'Shift') {

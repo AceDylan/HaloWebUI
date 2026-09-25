@@ -646,6 +646,10 @@ export const createMermaidConfig = (
 	return {
 		fontFamily: FONT_FAMILY,
 		gantt: { useWidth: 1920 },
+		// SVG <text> labels: the diagram is shown through DOMPurify's svg profile
+		// (SVGPanZoom), which drops <foreignObject> and with it every HTML label,
+		// leaving empty boxes.
+		htmlLabels: false,
 		securityLevel: 'loose',
 		startOnLoad: false,
 		theme: isLobeTheme ? (isDark ? 'dark' : 'neutral') : normalizedTheme,

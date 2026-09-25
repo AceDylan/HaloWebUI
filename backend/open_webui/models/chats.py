@@ -279,6 +279,12 @@ class ChatTitleIdResponse(BaseModel):
     assistant_id: Optional[str] = None
 
 
+class ChatSearchResultResponse(ChatTitleIdResponse):
+    # Sidebar search also finds archived chats (auto-archive moves most of the
+    # history there); the flag lets the list mark them.
+    archived: bool = False
+
+
 ####################
 # ChatReaction DB Schema
 ####################

@@ -46,8 +46,14 @@
 	export let title;
 	export let assistantId: string | null = null;
 	export let folderId: string | null = null;
-	/** Name of the folder the chat sits in, shown as a badge in the "all chats" list. */
+	/**
+	 * The folder the chat sits in, shown in the "all chats" list as a small dot
+	 * in the folder's colour (the name is the dot's tooltip).
+	 */
 	export let folderName: string | null = null;
+	export let folderDotClass: string | null = null;
+	/** Search results include archived chats; they carry this mark. */
+	export let archived = false;
 	export let folderOptions: Array<{
 		id: string;
 		name: string;
@@ -287,12 +293,22 @@
 				<div dir="auto" class={titleClass}>
 					{title}
 				</div>
+				{#if archived}
+					<span
+						class="ml-1.5 shrink-0 self-center rounded px-1 py-0.5 text-2xs leading-none text-gray-500 ring-1 ring-inset ring-gray-200 dark:text-gray-400 dark:ring-gray-700"
+						data-halo-chat-archived
+					>
+						{$i18n.t('Archived')}
+					</span>
+				{/if}
 				{#if folderName}
 					<span
-						class="ml-1.5 max-w-[6.5rem] shrink-0 self-center truncate rounded-md bg-gray-200/70 px-1.5 py-0.5 text-[10px] leading-none text-gray-500 dark:bg-gray-800/80 dark:text-gray-400"
+						class="ml-1.5 inline-flex size-1.5 shrink-0 self-center rounded-full {folderDotClass ??
+							'bg-gray-400 dark:bg-gray-500'}"
 						title={folderName}
+						data-halo-chat-folder-dot
 					>
-						{folderName}
+						<span class="sr-only">{folderName}</span>
 					</span>
 				{/if}
 				{#if $activeChatIds.has(id)}

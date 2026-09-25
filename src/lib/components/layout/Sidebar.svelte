@@ -40,6 +40,7 @@
 		getPinnedChatList
 	} from '$lib/apis/chats';
 	import { createNewFolder, getFolders } from '$lib/apis/folders';
+	import { getFolderColor } from '$lib/utils/folder-color';
 	import { WEBUI_BASE_URL } from '$lib/constants';
 	import { ensureModels } from '$lib/services/models';
 	import { getTimeRange } from '$lib/utils';
@@ -139,7 +140,9 @@
 	let showDropdown = false;
 	let showPinnedChat = browser ? localStorage?.showPinnedChat !== 'false' : true;
 	let showAssistantSection = browser ? localStorage?.showAssistantSection !== 'false' : true;
-	let showFolderSection = browser ? localStorage?.showFolderSection !== 'false' : true;
+	// Folders start collapsed so the chat list is on the first screen; opening
+	// the section is remembered.
+	let showFolderSection = browser ? localStorage?.showFolderSection === 'true' : false;
 
 	let showCreateChannel = false;
 	let showChatHistoryModal = false;
@@ -204,6 +207,11 @@
 	const folderNameOf = (folderId: string | null | undefined): string | null => {
 		if (!folderId) return null;
 		return folders[folderId]?.name ?? null;
+	};
+
+	const folderDotOf = (folderId: string | null | undefined): string | null => {
+		if (!folderId || !folders[folderId]) return null;
+		return getFolderColor(folderId, folders).dot;
 	};
 
 	// Pagination variables
@@ -395,7 +403,32 @@
 		}
 	};
 
-	const initChatList = async () => {
+	// Several triggers fire together on page load and after edits (the scene
+	// subscription, refresh events, folder changes). One load runs at a time;
+	// calls made meanwhile collapse into a single reload after it, which every
+	// caller awaits.
+	let chatListLoad: Promise<void> | null = null;
+	let chatListReloadQueued = false;
+
+	const initChatList = () => {
+		if (chatListLoad) {
+			chatListReloadQueued = true;
+			return chatListLoad;
+		}
+		chatListLoad = (async () => {
+			try {
+				do {
+					chatListReloadQueued = false;
+					await loadChatList();
+				} while (chatListReloadQueued);
+			} finally {
+				chatListLoad = null;
+			}
+		})();
+		return chatListLoad;
+	};
+
+	const loadChatList = async () => {
 		// Reset pagination variables
 		tags.set(await getAllTags(localStorage.token));
 		pinnedChats.set(await getPinnedChatList(localStorage.token));
@@ -616,9 +649,7 @@
 		showAssistantSection = localStorage?.showAssistantSection
 			? localStorage.showAssistantSection === 'true'
 			: true;
-		showFolderSection = localStorage?.showFolderSection
-			? localStorage.showFolderSection === 'true'
-			: true;
+		showFolderSection = localStorage?.showFolderSection === 'true';
 
 		// Desktop preference: expanded unless the person collapsed it. A
 		// phone-sized viewport starts hidden and never writes the preference,
@@ -668,7 +699,8 @@
 		});
 
 		await initChannels();
-		await initChatList();
+		// The chat list itself is loaded by the `$selectedAssistantScene` block
+		// above, which runs on init.
 		await loadAssistantScenes();
 
 		window.addEventListener('keydown', onKeyDown);
@@ -1098,7 +1130,10 @@
 					</Folder>
 				{/if}
 
-				{#if !search}
+				<!-- Only shown once an assistant exists: an empty placeholder here pushed
+				     the chat list below the first screen. Assistants are created from
+				     the workspace. -->
+				{#if !search && assistantScenes.length > 0}
 					<Folder
 						className="px-2 mt-0.5"
 						name={$i18n.t('Assistants')}
@@ -1108,49 +1143,37 @@
 							localStorage.setItem('showAssistantSection', e.detail);
 						}}
 					>
-						{#if assistantScenes.length > 0}
-							<div class="mt-1 flex flex-col gap-0.5">
-								{#each assistantScenes as assistant}
-									<button
-										type="button"
-										class="mx-2 flex w-auto items-center gap-2.5 rounded-xl px-3 py-2 text-left text-sm transition {($selectedAssistantScene?.id ?? null) ===
-										assistant.id
-											? 'bg-[var(--sidebar-active-bg)] text-[var(--sidebar-active-fg)]'
-											: 'text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-850'}"
-										on:click={() => {
-											void enterAssistantScene(assistant);
-										}}
-									>
-										<img
-											src={assistant?.meta?.profile_image_url ??
-												assistant?.info?.meta?.profile_image_url ??
-												`${WEBUI_BASE_URL}/static/favicon.png`}
-											alt={getModelChatDisplayName(assistant)}
-											class="size-6 shrink-0 rounded-md object-cover {(assistant?.meta?.profile_image_url ??
-											assistant?.info?.meta?.profile_image_url)
-												? ''
-												: 'dark:invert'}"
-											draggable="false"
-										/>
-										<div class="min-w-0 flex-1">
-											<div class="line-clamp-1 text-[13px] font-medium leading-5">
-												{getModelDisplayParts(assistant).base}
-											</div>
-										</div>
-									</button>
-								{/each}
-							</div>
-						{:else}
-							<div class="mx-2 mt-1 rounded-xl border border-dashed border-gray-200/80 px-3 py-3 text-xs text-gray-500 dark:border-gray-700/70 dark:text-gray-400">
-								<div>{$i18n.t('No assistants yet. Create your first assistant to get started.')}</div>
-								<a
-									class="mt-2 inline-flex rounded-full px-2.5 py-1.5 text-xs font-medium transition hover:bg-gray-100 dark:hover:bg-gray-850"
-									href="/workspace/models/create"
+						<div class="mt-1 flex flex-col gap-0.5">
+							{#each assistantScenes as assistant}
+								<button
+									type="button"
+									class="mx-2 flex w-auto items-center gap-2.5 rounded-xl px-3 py-2 text-left text-sm transition {($selectedAssistantScene?.id ?? null) ===
+									assistant.id
+										? 'bg-[var(--sidebar-active-bg)] text-[var(--sidebar-active-fg)]'
+										: 'text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-850'}"
+									on:click={() => {
+										void enterAssistantScene(assistant);
+									}}
 								>
-									{$i18n.t('Create')}
-								</a>
-							</div>
-						{/if}
+									<img
+										src={assistant?.meta?.profile_image_url ??
+											assistant?.info?.meta?.profile_image_url ??
+											`${WEBUI_BASE_URL}/static/favicon.png`}
+										alt={getModelChatDisplayName(assistant)}
+										class="size-6 shrink-0 rounded-md object-cover {(assistant?.meta?.profile_image_url ??
+										assistant?.info?.meta?.profile_image_url)
+											? ''
+											: 'dark:invert'}"
+										draggable="false"
+									/>
+									<div class="min-w-0 flex-1">
+										<div class="line-clamp-1 text-[13px] font-medium leading-5">
+											{getModelDisplayParts(assistant).base}
+										</div>
+									</div>
+								</button>
+							{/each}
+						</div>
 					</Folder>
 				{/if}
 
@@ -1259,6 +1282,7 @@
 											title={chat.title}
 											folderId={chat.folder_id ?? null}
 											folderName={folderNameOf(chat.folder_id)}
+											folderDotClass={folderDotOf(chat.folder_id)}
 											assistantId={chat.assistant_id}
 											{folderOptions}
 											{shiftKey}
@@ -1322,6 +1346,8 @@
 										title={chat.title}
 										folderId={chat.folder_id ?? null}
 										folderName={folderNameOf(chat.folder_id)}
+										folderDotClass={folderDotOf(chat.folder_id)}
+										archived={chat.archived === true}
 										assistantId={chat.assistant_id ?? $selectedAssistantScene?.id ?? null}
 										{folderOptions}
 										{shiftKey}
@@ -1354,7 +1380,7 @@
 											class="w-full flex justify-center py-1 text-xs animate-pulse items-center gap-2"
 										>
 											<Spinner className=" size-4" />
-											<div class=" ">Loading...</div>
+											<div class=" ">{$i18n.t('Loading...')}</div>
 										</div>
 									</Loader>
 								{/if}
@@ -1363,7 +1389,7 @@
 									class="w-full flex justify-center py-1 text-xs animate-pulse items-center gap-2"
 								>
 									<Spinner className=" size-4" />
-									<div class=" ">Loading...</div>
+									<div class=" ">{$i18n.t('Loading...')}</div>
 								</div>
 							{/if}
 						</div>

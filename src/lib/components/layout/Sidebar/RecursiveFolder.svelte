@@ -11,6 +11,7 @@
 	} from '$lib/apis/folders';
 	import { getChatsByFolderId } from '$lib/apis/chats';
 	import { chatId, selectedAssistantScene } from '$lib/stores';
+	import { getFolderColor } from '$lib/utils/folder-color';
 
 	import FolderOpen from '$lib/components/icons/FolderOpen.svelte';
 	import Folder from '$lib/components/icons/Folder.svelte';
@@ -37,6 +38,10 @@
 	let name = '';
 	let showDeleteConfirm = false;
 	let isExpandedUpdateTimeout;
+	// The expanded state the server has. Only a change the person made is
+	// saved; restoring the stored state on load used to POST it back for every
+	// folder on every page load.
+	let savedExpanded = null;
 
 	const getFolderChatCount = (sourceFolders, id) => {
 		const target = sourceFolders[id] ?? {};
@@ -67,9 +72,11 @@
 	$: folderIcon = folder?.meta?.icon || '';
 	$: chatCount = getFolderChatCount(folders, folderId);
 	$: hasActiveChat = folderContainsChat(folders, folderId, $chatId);
+	$: folderColor = getFolderColor(folderId, folders);
 
 	onMount(async () => {
-		open = folder.is_expanded;
+		open = Boolean(folder.is_expanded);
+		savedExpanded = open;
 
 		if (folder?.new) {
 			delete folders[folderId].new;
@@ -122,10 +129,19 @@
 	};
 
 	const isExpandedUpdateHandler = async () => {
-		await updateFolderIsExpandedById(localStorage.token, folderId, open).catch((error) => {
-			toast.error(`${error}`);
-			return null;
-		});
+		const expanded = Boolean(open);
+		if (savedExpanded === null || expanded === savedExpanded) {
+			return;
+		}
+		const res = await updateFolderIsExpandedById(localStorage.token, folderId, expanded).catch(
+			(error) => {
+				toast.error(`${error}`);
+				return null;
+			}
+		);
+		if (res !== null) {
+			savedExpanded = expanded;
+		}
 	};
 
 	const isExpandedUpdateDebounceHandler = () => {
@@ -201,7 +217,7 @@
 			<!-- svelte-ignore a11y-no-static-element-interactions -->
 			<div
 				id="folder-{folderId}-button"
-				class="relative flex min-h-[34px] w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left transition {hasActiveChat
+				class="relative flex min-h-[30px] w-full items-center gap-2 rounded-lg px-2 py-1 text-left transition {hasActiveChat
 					? 'bg-[var(--sidebar-active-bg)] text-[var(--sidebar-active-fg)]'
 					: 'text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-850'}"
 				on:dblclick={() => {
@@ -209,9 +225,9 @@
 				}}
 			>
 				<div
-					class="flex size-6 shrink-0 items-center justify-center rounded-md {hasActiveChat
+					class="flex size-5 shrink-0 items-center justify-center rounded-md {hasActiveChat
 						? 'text-[var(--sidebar-active-fg)]'
-						: 'text-gray-500 dark:text-gray-400'}"
+						: folderColor.text}"
 					aria-hidden="true"
 				>
 					{#if folderIcon}
@@ -269,7 +285,7 @@
 
 				<!-- svelte-ignore a11y-no-static-element-interactions -->
 				<div
-					class="z-10 flex shrink-0 items-center self-center rounded-md p-0.5 text-gray-400 opacity-70 transition hover:bg-gray-100 hover:text-gray-700 hover:opacity-100 dark:text-gray-500 dark:hover:bg-gray-800 dark:hover:text-gray-200"
+					class="z-10 flex shrink-0 items-center self-center rounded-md text-gray-400 opacity-70 transition hover:bg-gray-100 hover:text-gray-700 hover:opacity-100 dark:text-gray-500 dark:hover:bg-gray-800 dark:hover:text-gray-200"
 					on:pointerup={(e) => {
 						e.stopPropagation();
 					}}
@@ -288,7 +304,7 @@
 						}}
 					>
 						<button
-							class="flex size-7 items-center justify-center rounded-md touch-auto"
+							class="flex size-6 items-center justify-center rounded-md touch-auto"
 							aria-label={$i18n.t('Folder options')}
 							on:click={() => {}}
 						>

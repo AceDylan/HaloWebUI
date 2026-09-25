@@ -28,22 +28,12 @@
 	let lastWord = '';
 	$: lastWord = value ? value.split(' ').at(-1) : value;
 
+	// Only filters the search endpoint understands; `model:` / `before:` /
+	// `after:` used to be offered here and always came back empty.
 	let options = [
 		{
 			name: 'tag:',
 			description: $i18n.t('search for tags')
-		},
-		{
-			name: 'model:',
-			description: $i18n.t('filter by model name')
-		},
-		{
-			name: 'before:',
-			description: $i18n.t('before date (YYYY-MM-DD)')
-		},
-		{
-			name: 'after:',
-			description: $i18n.t('after date (YYYY-MM-DD)')
 		}
 	];
 	let focused = false;

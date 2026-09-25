@@ -15,6 +15,7 @@ from open_webui.models.chats import (
     ChatTitleForm,
     Chats,
     ChatMessages,
+    ChatSearchResultResponse,
     ChatTitleIdResponse,
     normalize_chat_payload,
     # [REACTION_FEATURE] Commented out - reaction feature disabled for now
@@ -552,7 +553,7 @@ async def import_chats_batch(
 ############################
 
 
-@router.get("/search", response_model=list[ChatTitleIdResponse])
+@router.get("/search", response_model=list[ChatSearchResultResponse])
 async def search_user_chats(
     text: str, page: Optional[int] = None, user=Depends(get_verified_user)
 ):
@@ -562,23 +563,15 @@ async def search_user_chats(
     limit = 60
     skip = (page - 1) * limit
 
-    chat_list = [
-        ChatTitleIdResponse(**chat.model_dump())
+    # Archived chats are searched too: auto-archive moves most of the history
+    # there, and a search that skips it cannot find last month's conversation.
+    # A search with no results never deletes the tag it was filtering on.
+    return [
+        ChatSearchResultResponse(**chat.model_dump())
         for chat in Chats.get_chats_by_user_id_and_search_text(
-            user.id, text, skip=skip, limit=limit
+            user.id, text, include_archived=True, skip=skip, limit=limit
         )
     ]
-
-    # Delete tag if no chat is found
-    words = text.strip().split(" ")
-    if page == 1 and len(words) == 1 and words[0].startswith("tag:"):
-        tag_id = words[0].replace("tag:", "")
-        if len(chat_list) == 0:
-            if Tags.get_tag_by_name_and_user_id(tag_id, user.id):
-                log.debug(f"deleting tag: {tag_id}")
-                Tags.delete_tag_by_name_and_user_id(tag_id, user.id)
-
-    return chat_list
 
 
 ############################

@@ -273,11 +273,24 @@ Closes #
 
 		const buttonMatch = html.match(/<button\b[^>]*>📋<\/button>/);
 		expect(buttonMatch).not.toBeNull();
-		expect(buttonMatch![0]).toMatch(/data-halo-copy-id="code-[a-z0-9]+"/);
+		expect(buttonMatch![0]).toMatch(/data-halo-copy-id="code-[a-z0-9-]+"/);
 
-		const idMatch = buttonMatch![0].match(/data-halo-copy-id="(code-[a-z0-9]+)"/)!;
+		const idMatch = buttonMatch![0].match(/data-halo-copy-id="(code-[a-z0-9-]+)"/)!;
 		expect(html).toContain(`<pre id="${idMatch[1]}"`);
 		expect(html).toContain('data-halo-code="true"');
+	});
+
+	it('renders the same markup every time so re-renders settle', () => {
+		const content =
+			'## Steps\n\n```bash\ndf -h\n```\n\nThen\n\n```bash\ndocker compose restart\n```';
+		const first = renderResponseHtmlFormat(content);
+
+		expect(renderResponseHtmlFormat(content)).toBe(first);
+
+		const ids = [...first.matchAll(/<pre id="([^"]+)"/g)].map((match) => match[1]);
+		expect(ids).toHaveLength(2);
+		expect(new Set(ids).size).toBe(2);
+		expect(renderResponseHtmlFormat(content.replace('df -h', 'du -sh'))).not.toContain(ids[0]);
 	});
 });
 

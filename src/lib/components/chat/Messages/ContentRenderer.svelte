@@ -551,10 +551,16 @@
 		inlineHtmlArtifactPreview,
 		showInlineHtmlArtifactOriginalText
 	);
-	$: if (!renderInlineHtmlArtifactOriginalText) {
+	// Reset through a function: assigning `headings` inside this block would make
+	// every bind:headings update from Markdown invalidate all of the block's
+	// inputs ($settings, sources, the preview) and re-render the answer again.
+	const resetOriginalTextState = () => {
 		headings = [];
 		threadLayouts = {};
 		clearSelectionHighlights();
+	};
+	$: if (!renderInlineHtmlArtifactOriginalText) {
+		resetOriginalTextState();
 	}
 	$: renderedMessageContent =
 		!inlineHtmlArtifactPreview && !streaming && ($settings?.responseHtmlFormat ?? false)

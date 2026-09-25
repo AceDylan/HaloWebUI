@@ -934,7 +934,19 @@ const renderActivityGroupBlock = (block: Extract<ParsedBlock, { type: 'activity-
 	)}">${rows}</div></details>`;
 };
 
-const renderBlock = (block: ParsedBlock) => {
+// Same content, same markup: a random id made every render a new string, and
+// the headings binding in ContentRenderer re-rendered the answer until the page
+// froze.
+const hashText = (value: string): string => {
+	let hash = 0x811c9dc5;
+	for (let i = 0; i < value.length; i += 1) {
+		hash ^= value.charCodeAt(i);
+		hash = Math.imul(hash, 0x01000193);
+	}
+	return (hash >>> 0).toString(36);
+};
+
+const renderBlock = (block: ParsedBlock, blockId: string) => {
 	switch (block.type) {
 		case 'heading': {
 			const tag = headingTag(block.level);
@@ -1051,7 +1063,7 @@ const renderBlock = (block: ParsedBlock) => {
 		}
 
 		case 'code': {
-			const codeBlockId = `code-${Math.random().toString(36).substring(2, 9)}`;
+			const codeBlockId = `code-${blockId}`;
 			const escapedCode = escapeHtml(block.text);
 
 			const buttonStyle = escapeAttribute(
@@ -1188,7 +1200,8 @@ export const renderResponseHtmlFormat = (content: string): string => {
 		return '';
 	}
 
-	const body = blocks.map(renderBlock).join('');
+	const fragmentId = hashText(normalized);
+	const body = blocks.map((block, index) => renderBlock(block, `${fragmentId}-${index}`)).join('');
 	const root = `<div data-halo-response-html-format="inline" style="${escapeAttribute(
 		toStyle({
 			margin: '8px 0',

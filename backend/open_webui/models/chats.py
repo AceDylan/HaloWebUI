@@ -1002,6 +1002,25 @@ class ChatTable:
             )
             return [ChatModel.model_validate(chat) for chat in query.all()]
 
+    def iter_idle_unshared_chats_by_user_id(
+        self, user_id: str, cutoff: int, batch_size: int = 25
+    ):
+        """Yield ``(id, chat, updated_at, meta)`` for the user's unarchived,
+        unpinned, unshared chats idle since before ``cutoff``, a batch at a
+        time, so a sweep never holds every history in memory at once."""
+        with get_db() as db:
+            query = (
+                db.query(Chat.id, Chat.chat, Chat.updated_at, Chat.meta)
+                .filter(Chat.user_id == user_id, Chat.archived == False)
+                .filter(or_(Chat.pinned == False, Chat.pinned == None))
+                .filter(Chat.share_id == None)
+                .filter(Chat.updated_at < cutoff)
+                .order_by(Chat.updated_at.asc())
+                .yield_per(batch_size)
+            )
+            for row in query:
+                yield row[0], row[1], row[2], row[3]
+
     def archive_chats_by_ids_and_user_id(
         self, ids: list[str], user_id: str, marker: dict
     ) -> int:

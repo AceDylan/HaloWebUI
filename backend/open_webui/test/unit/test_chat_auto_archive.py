@@ -135,3 +135,168 @@ def test_sweep_only_touches_users_who_opted_in(monkeypatch):
     assert auto.sweep_all_users(now=NOW) == {opted_in: 1}
     assert _state(mine)[0] is True
     assert _state(theirs)[0] is False
+
+
+# One-question test chats ("你好", "你能做什么") -------------------------------
+
+
+def _conversation_chat(user_id, prompts, *, age_days, pinned=False, reply="好的"):
+    """A chat whose history holds ``prompts`` as user turns, each answered."""
+    messages = {}
+    parent = None
+    for index, prompt in enumerate(prompts):
+        user_id_msg = f"u{index}-{uuid.uuid4().hex[:6]}"
+        reply_id = f"a{index}-{uuid.uuid4().hex[:6]}"
+        messages[user_id_msg] = {
+            "id": user_id_msg,
+            "parentId": parent,
+            "childrenIds": [reply_id],
+            "role": "user",
+            "content": prompt,
+            "timestamp": NOW - age_days * DAY,
+        }
+        messages[reply_id] = {
+            "id": reply_id,
+            "parentId": user_id_msg,
+            "childrenIds": [],
+            "role": "assistant",
+            "content": reply,
+            "timestamp": NOW - age_days * DAY,
+        }
+        parent = reply_id
+    chat = Chats.insert_new_chat(
+        user_id,
+        ChatForm(chat={"title": "t", "history": {"messages": messages, "currentId": parent}}),
+    )
+    assert chat is not None
+    with get_db() as db:
+        row = db.get(Chat, chat.id)
+        row.updated_at = NOW - age_days * DAY
+        row.pinned = pinned
+        db.commit()
+    return chat.id
+
+
+@pytest.mark.parametrize(
+    "prompt",
+    [
+        "你好",
+        "你能做什么",
+        "你能做什么？",
+        "你能做什么呢",
+        "你好 你能做什么？",
+        "你是谁 你能做什么呢",
+        "你擅长什么？",
+        "/codex\n任务：\n你能做什么",
+        "Hello!",
+        "hi 👋",
+        "测试",
+    ],
+)
+def test_test_prompts_are_recognised(prompt):
+    assert auto.is_test_prompt(prompt) is True
+
+
+@pytest.mark.parametrize(
+    "prompt",
+    [
+        "",
+        "   ",
+        "生命的意义是什么",
+        "贴吧消息",
+        "你好，帮我写一个九九乘法表",
+        "tibo是谁",
+        "/codex\n任务：\n查下gpt-6什么时候上线",
+        "testing the parser",
+        "你能做什么" * 20,
+        None,
+    ],
+)
+def test_real_questions_are_not_test_prompts(prompt):
+    assert auto.is_test_prompt(prompt) is False
+
+
+def test_test_chat_policy_follows_the_inactivity_switch_until_set():
+    assert auto.get_test_chat_policy(None) is False
+    assert auto.get_test_chat_policy({"ui": {}}) is False
+    assert auto.get_test_chat_policy({"ui": {"chatAutoArchive": {"enabled": True}}}) is True
+    assert auto.get_test_chat_policy({"ui": {"chatAutoArchive": {"enabled": False}}}) is False
+    assert (
+        auto.get_test_chat_policy(
+            {"ui": {"chatAutoArchive": {"enabled": True, "testChats": False}}}
+        )
+        is False
+    )
+    assert (
+        auto.get_test_chat_policy(
+            UserSettings(ui={"chatAutoArchive": {"enabled": False, "testChats": True}})
+        )
+        is True
+    )
+
+
+def test_archive_test_chats_takes_only_idle_one_question_greetings():
+    user = _user("test-chats")
+    greeting = _conversation_chat(user, ["你能做什么？"], age_days=2)
+    fresh = _conversation_chat(user, ["你好"], age_days=0)
+    real = _conversation_chat(user, ["今年国庆武夷山有什么好玩的"], age_days=2)
+    follow_up = _conversation_chat(user, ["你好", "帮我查下天气"], age_days=2)
+    pinned = _conversation_chat(user, ["你好"], age_days=2, pinned=True)
+    theirs = _conversation_chat(_user("test-chats-other"), ["你好"], age_days=2)
+
+    preview = auto.archive_test_chats(user, now=NOW, dry_run=True)
+    assert preview["chat_ids"] == [greeting]
+    assert _state(greeting)[0] is False  # a dry run writes nothing
+
+    result = auto.archive_test_chats(user, now=NOW)
+    assert result["count"] == 1
+    archived, updated_at, marker = _state(greeting)
+    assert archived is True
+    assert updated_at == NOW - 2 * DAY
+    assert marker == {"archived_at": NOW, "reason": "test"}
+    for chat_id in (fresh, real, follow_up, pinned, theirs):
+        assert _state(chat_id)[0] is False
+
+    # "Restore auto-archived chats" brings it back as well.
+    assert greeting in auto.restore_auto_archived_chats(user, now=NOW)["chat_ids"]
+
+
+def test_archive_test_chats_skips_shared_chats_and_counts_a_restore_as_activity():
+    user = _user("test-chats-shared")
+    shared = _conversation_chat(user, ["你好"], age_days=3)
+    with get_db() as db:
+        db.get(Chat, shared).share_id = f"share-{uuid.uuid4().hex[:8]}"
+        db.commit()
+    restored = _conversation_chat(user, ["你能做什么"], age_days=3)
+    assert auto.archive_test_chats(user, now=NOW)["chat_ids"] == [restored]
+    auto.restore_auto_archived_chats(user, now=NOW)
+    assert auto.archive_test_chats(user, now=NOW + DAY // 2)["count"] == 0
+    assert auto.archive_test_chats(user, now=NOW + 2 * DAY)["chat_ids"] == [restored]
+
+
+def test_sweep_archives_test_chats_for_users_who_want_it(monkeypatch):
+    wants = _user("sweep-test-wants")
+    declined = _user("sweep-test-declined")
+    mine = _conversation_chat(wants, ["你好"], age_days=3)
+    theirs = _conversation_chat(declined, ["你好"], age_days=3)
+
+    monkeypatch.setattr(
+        auto.Users,
+        "get_users",
+        lambda *args, **kwargs: [
+            SimpleNamespace(
+                id=wants,
+                settings=UserSettings(ui={"chatAutoArchive": {"testChats": True}}),
+            ),
+            SimpleNamespace(
+                id=declined,
+                settings=UserSettings(
+                    ui={"chatAutoArchive": {"enabled": True, "days": 30, "testChats": False}}
+                ),
+            ),
+        ],
+    )
+
+    assert auto.sweep_all_users(now=NOW) == {wants: 1}
+    assert _state(mine)[0] is True
+    assert _state(theirs)[0] is False

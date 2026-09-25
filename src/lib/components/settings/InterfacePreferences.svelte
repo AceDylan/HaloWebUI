@@ -155,6 +155,9 @@
 	const AUTO_ARCHIVE_MAX_DAYS = 3650;
 	let chatAutoArchiveEnabled = false;
 	let chatAutoArchiveDays: number | null = AUTO_ARCHIVE_DEFAULT_DAYS;
+	// One-question test chats ("你好", "你能做什么") idle for a day; unset follows
+	// the inactivity switch (see get_test_chat_policy in chat_auto_archive.py).
+	let chatAutoArchiveTestChats = false;
 	let showArchiveInactiveConfirm = false;
 	let archiveInactivePreviewCount = 0;
 	let archiveInactiveBusy = false;
@@ -293,6 +296,7 @@
 			autoTags: boolean;
 			chatAutoArchiveEnabled: boolean;
 			chatAutoArchiveDays: number;
+			chatAutoArchiveTestChats: boolean;
 			autoFollowUps: boolean;
 			detectArtifacts: boolean;
 			svgPreviewAutoOpen: boolean;
@@ -686,6 +690,7 @@
 			autoTags,
 			chatAutoArchiveEnabled,
 			chatAutoArchiveDays: normalizeArchiveDays(chatAutoArchiveDays),
+			chatAutoArchiveTestChats,
 			autoFollowUps,
 			detectArtifacts,
 			svgPreviewAutoOpen,
@@ -771,6 +776,7 @@
 		autoTags = snapshot.autoTags;
 		chatAutoArchiveEnabled = snapshot.chatAutoArchiveEnabled ?? false;
 		chatAutoArchiveDays = normalizeArchiveDays(snapshot.chatAutoArchiveDays);
+		chatAutoArchiveTestChats = snapshot.chatAutoArchiveTestChats ?? false;
 		autoFollowUps = snapshot.autoFollowUps;
 		detectArtifacts = snapshot.detectArtifacts;
 		svgPreviewAutoOpen = snapshot.svgPreviewAutoOpen;
@@ -847,6 +853,7 @@
 		autoTags;
 		chatAutoArchiveEnabled;
 		chatAutoArchiveDays;
+		chatAutoArchiveTestChats;
 		autoFollowUps;
 		detectArtifacts;
 		svgPreviewAutoOpen;
@@ -1153,7 +1160,11 @@
 					auto: titleAutoGenerate
 				},
 				autoTags,
-				chatAutoArchive: { enabled: chatAutoArchiveEnabled, days: chatAutoArchiveDays },
+				chatAutoArchive: {
+					enabled: chatAutoArchiveEnabled,
+					days: chatAutoArchiveDays,
+					testChats: chatAutoArchiveTestChats
+				},
 				autoFollowUps,
 				detectArtifacts,
 				svgPreviewAutoOpen,
@@ -1320,6 +1331,10 @@
 		chatAutoArchiveDays = normalizeArchiveDays(
 			$settings?.chatAutoArchive?.days ?? AUTO_ARCHIVE_DEFAULT_DAYS
 		);
+		chatAutoArchiveTestChats =
+			typeof $settings?.chatAutoArchive?.testChats === 'boolean'
+				? $settings.chatAutoArchive.testChats
+				: chatAutoArchiveEnabled;
 		autoFollowUps = $settings?.autoFollowUps ?? true;
 
 		detectArtifacts = $settings?.detectArtifacts ?? true;
@@ -2747,6 +2762,22 @@
 												max={AUTO_ARCHIVE_MAX_DAYS}
 												class="w-24 dark:bg-gray-850 rounded-lg px-3 py-2 text-sm bg-gray-50 outline-none border border-gray-200 dark:border-gray-700 text-center"
 											/>
+										</div>
+										<div class="glass-item px-4 py-3">
+											<div class="flex items-center justify-between gap-4">
+												<div class="min-w-0">
+													<div class="text-sm font-medium">
+														{tr('归档一句话测试对话', 'Archive one-question test chats')}
+													</div>
+													<p class="mt-1 text-xs leading-5 text-gray-500 dark:text-gray-400">
+														{tr(
+															'只问过一句「你好」「你能做什么」之类、超过 1 天没有新消息的对话自动归档；置顶和已分享的不动，「恢复」同样能撤销。',
+															'Chats whose only message is a greeting or "what can you do", idle for a day, are archived. Pinned and shared chats are kept; "Restore" undoes this too.'
+														)}
+													</p>
+												</div>
+												<Switch bind:state={chatAutoArchiveTestChats} />
+											</div>
 										</div>
 										<div class="glass-item px-4 py-3">
 											<div class="flex flex-wrap items-center justify-between gap-3">

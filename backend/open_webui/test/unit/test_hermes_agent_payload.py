@@ -426,3 +426,27 @@ def test_webhook_summary_drops_the_tool_transcript_and_caps_length():
     long_summary = hermes_agent._webhook_summary("x" * 5000)
     assert len(long_summary) == hermes_agent.WEBHOOK_CONTENT_MAX_CHARS + 1
     assert long_summary.endswith("\u2026")
+
+
+def test_run_payload_names_the_chat_as_the_hermes_session():
+    payload = _build_run_payload(
+        {"messages": [{"role": "user", "content": "hi"}]},
+        {"chat_id": "chat-1"},
+        "hermes-agent",
+    )
+    assert payload["session_id"] == "chat-1"
+
+
+def test_temporary_chats_do_not_share_a_hermes_session():
+    # Every temporary chat arrives as "local"; as a session id it would hand a
+    # new temporary chat the previous one's history.
+    for chat_id in ("local", "local:abc"):
+        payload = _build_run_payload(
+            {"messages": [{"role": "user", "content": "hi"}]},
+            {"chat_id": chat_id},
+            "hermes-agent",
+        )
+        assert "session_id" not in payload
+    assert hermes_agent.is_temporary_chat_id("local") is True
+    assert hermes_agent.is_temporary_chat_id("localhost-chat") is False
+    assert hermes_agent.is_temporary_chat_id("") is False

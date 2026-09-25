@@ -465,6 +465,13 @@ def _webhook_summary(content: str) -> str:
     return text
 
 
+def is_temporary_chat_id(chat_id) -> bool:
+    """A temporary chat ("临时对话") is never saved; the client sends the
+    placeholder id ``local`` for every one of them."""
+    chat_id = str(chat_id or "")
+    return chat_id == "local" or chat_id.startswith("local:")
+
+
 def _schedule_completion_webhook(request, user, metadata, title, content):
     """Push a finished hermes run to the user's notification webhook when no
     tab shows it to them.
@@ -591,7 +598,12 @@ def _build_run_payload(form_data, metadata, upstream_model_id):
         payload["conversation_history"] = history
     if instructions:
         payload["instructions"] = instructions
-    if metadata.get("chat_id"):
+    # The chat id doubles as the hermes session, so a chat keeps its session
+    # (approvals "for this chat", resumable history). Temporary chats all
+    # share the id "local": as a session it would hand one temporary chat
+    # another's history. Without an id hermes starts a fresh session per run;
+    # the conversation still travels in conversation_history.
+    if metadata.get("chat_id") and not is_temporary_chat_id(metadata["chat_id"]):
         payload["session_id"] = metadata["chat_id"]
     return payload
 
@@ -1015,7 +1027,10 @@ async def run_hermes_agent(request, form_data, user, metadata, model, events, ta
                 data["title"] = title
             # Unread until the chat is opened: the sidebar dot for runs that
             # finished while nobody was looking (the client clears it on open).
-            mark_unread(metadata["chat_id"], user.id)
+            # A temporary chat has no sidebar entry to open.
+            temporary = is_temporary_chat_id(metadata["chat_id"])
+            if not temporary:
+                mark_unread(metadata["chat_id"], user.id)
             try:
                 upsert_response_message(
                     {
@@ -1036,7 +1051,9 @@ async def run_hermes_agent(request, form_data, user, metadata, model, events, ta
             # Finished from the user's point of view; what follows is
             # post-processing that must not keep the chat looking busy.
             set_current_task_blocks_completion(False)
-            _schedule_completion_webhook(request, user, metadata, title, content)
+            # The push links to the chat; a temporary one cannot be reopened.
+            if not temporary:
+                _schedule_completion_webhook(request, user, metadata, title, content)
 
             async def _background_tasks():
                 # Post-response bookkeeping (title/tags/follow-ups), same as the

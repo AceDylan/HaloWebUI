@@ -98,6 +98,14 @@
 		console.log('connect_error', err);
 	};
 
+	// The first connect of a page load happens while the sidebar is loading its
+	// list anyway; refreshing it again doubled every sidebar request on load. A
+	// first connect that comes late (the socket could not connect at first)
+	// still refreshes, like any reconnect, to pick up what happened meanwhile.
+	const FIRST_CONNECT_GRACE_MS = 5000;
+	const socketSetupAt = Date.now();
+	let socketConnectedOnce = false;
+
 	const handleSocketConnect = () => {
 		console.log('connected', currentSocket?.id);
 		// A reconnect (network blip, backend restart, phone back from the background)
@@ -106,7 +114,10 @@
 		if ($user && localStorage.token) {
 			currentSocket?.emit('user-join', { auth: { token: localStorage.token } });
 		}
-		chatListRefreshRevision.update((value) => value + 1);
+		if (socketConnectedOnce || Date.now() - socketSetupAt > FIRST_CONNECT_GRACE_MS) {
+			chatListRefreshRevision.update((value) => value + 1);
+		}
+		socketConnectedOnce = true;
 	};
 
 	const handleSocketReconnectAttempt = (attempt) => {

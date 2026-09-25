@@ -5,7 +5,13 @@ export const HTML_EXPORT_SANDBOX = 'allow-same-origin';
 export const HTML_PREVIEW_REFERRER_POLICY = 'no-referrer';
 export const HTML_ARTIFACT_EXPORT_MAX_SNAPSHOT_CHARS = 2_000_000;
 export const INLINE_HTML_PREVIEW_MIN_HEIGHT = 200;
-export const INLINE_HTML_PREVIEW_MAX_HEIGHT = 1200;
+// The card is as tall as its document: a long answer used to sit behind a
+// 1200px inner scroll with nothing saying there was more. This is only a safety
+// ceiling; folding long history is ContentRenderer's "Show more" job.
+export const INLINE_HTML_PREVIEW_MAX_HEIGHT = 20000;
+// Identical growth steps in a row that mean the document is sized off the frame
+// itself (see nextInlineHtmlPreviewSizing).
+export const INLINE_HTML_PREVIEW_FEEDBACK_STEPS = 3;
 
 /**
  * Which palette the preview document is rendered for. `dark` adds a bounded
@@ -46,6 +52,73 @@ export const getInlineHtmlPreviewHeight = (data: unknown): number | null => {
 	return Math.round(
 		Math.max(INLINE_HTML_PREVIEW_MIN_HEIGHT, Math.min(INLINE_HTML_PREVIEW_MAX_HEIGHT, data.height))
 	);
+};
+
+export type InlineHtmlPreviewSizing = {
+	height: number;
+	/** Height before the current run of equal growth steps began. */
+	streakStart: number;
+	lastGrowth: number;
+	growthStreak: number;
+	/** Set once a feedback loop was seen; further growth is ignored. */
+	locked: boolean;
+};
+
+export const initialInlineHtmlPreviewSizing = (): InlineHtmlPreviewSizing => ({
+	height: INLINE_HTML_PREVIEW_MIN_HEIGHT,
+	streakStart: INLINE_HTML_PREVIEW_MIN_HEIGHT,
+	lastGrowth: 0,
+	growthStreak: 0,
+	locked: false
+});
+
+/**
+ * Applies a reported height (from getInlineHtmlPreviewHeight) to the frame.
+ *
+ * The frame's viewport is the height the host applied, so a document sized in
+ * viewport units (`min-height:100vh` plus padding) answers every resize with
+ * "applied + the same padding" and would climb to the ceiling in fixed steps.
+ * Content that really grows (images decoding, fonts arriving) does not repeat
+ * the exact same step, so INLINE_HTML_PREVIEW_FEEDBACK_STEPS equal steps in a
+ * row are treated as that loop: the height settles one step above where the
+ * loop started and stops growing. Shrinking is always accepted.
+ */
+export const nextInlineHtmlPreviewSizing = (
+	state: InlineHtmlPreviewSizing,
+	reported: number | null
+): InlineHtmlPreviewSizing => {
+	if (reported === null || reported === state.height) {
+		return state;
+	}
+
+	const growth = reported - state.height;
+	if (growth < 0) {
+		return {
+			...state,
+			height: reported,
+			streakStart: reported,
+			lastGrowth: 0,
+			growthStreak: 0
+		};
+	}
+	if (state.locked) {
+		return state;
+	}
+
+	const repeated = state.growthStreak > 0 && Math.abs(growth - state.lastGrowth) <= 1;
+	const growthStreak = repeated ? state.growthStreak + 1 : 1;
+	const streakStart = repeated ? state.streakStart : state.height;
+	if (growthStreak >= INLINE_HTML_PREVIEW_FEEDBACK_STEPS) {
+		return {
+			height: Math.min(state.height, streakStart + growth),
+			streakStart,
+			lastGrowth: growth,
+			growthStreak,
+			locked: true
+		};
+	}
+
+	return { height: reported, streakStart, lastGrowth: growth, growthStreak, locked: false };
 };
 
 export const HTML_PREVIEW_CSP = [

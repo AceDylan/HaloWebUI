@@ -5,6 +5,7 @@ import {
 	HTML_EXPORT_SANDBOX,
 	HTML_PREVIEW_CSP,
 	HTML_PREVIEW_SANDBOX,
+	INLINE_HTML_PREVIEW_FEEDBACK_STEPS,
 	INLINE_HTML_PREVIEW_MAX_HEIGHT,
 	INLINE_HTML_PREVIEW_MIN_HEIGHT,
 	buildHtmlArtifactPreview,
@@ -16,6 +17,8 @@ import {
 	inlineHtmlPreviewImages,
 	isInlineHtmlPreviewCopyMessage,
 	isInlineHtmlPreviewImageMessage,
+	initialInlineHtmlPreviewSizing,
+	nextInlineHtmlPreviewSizing,
 	normalizeSameOriginPreviewImageSource,
 	renderMarkdownImagesInsideHtml,
 	splitHtmlArtifactContent,
@@ -297,8 +300,9 @@ window.done = true;
 		).toBe(true);
 		expect(getInlineHtmlPreviewHeight({ type: 'halo-html-preview-resize', height: 420 })).toBe(420);
 		expect(getInlineHtmlPreviewHeight({ type: 'halo-html-preview-resize', height: 40 })).toBe(200);
+		// A 5000px answer is shown whole; there is no inner scroll to hide it in.
 		expect(getInlineHtmlPreviewHeight({ type: 'halo-html-preview-resize', height: 5000 })).toBe(
-			1200
+			5000
 		);
 		expect(
 			getInlineHtmlPreviewHeight({ type: 'halo-html-preview-resize', height: Number.NaN })
@@ -318,6 +322,46 @@ window.done = true;
 		// A frame that reflows shorter must be able to report a smaller height; the
 		// clamp is a range, never a floor at whatever was applied before.
 		expect(height(300)).toBe(300);
+	});
+
+	it('lets the frame follow tall content and shrink again', () => {
+		let sizing = initialInlineHtmlPreviewSizing();
+		for (const reported of [640, 1800, 5077]) {
+			sizing = nextInlineHtmlPreviewSizing(sizing, reported);
+		}
+		expect(sizing.height).toBe(5077);
+		expect(sizing.locked).toBe(false);
+
+		sizing = nextInlineHtmlPreviewSizing(sizing, 3000);
+		expect(sizing.height).toBe(3000);
+		expect(nextInlineHtmlPreviewSizing(sizing, null)).toBe(sizing);
+		expect(nextInlineHtmlPreviewSizing(sizing, 3000)).toBe(sizing);
+	});
+
+	it('stops a document sized off the frame from growing to the ceiling', () => {
+		// min-height:100vh plus 40px of padding: every applied height comes back
+		// 40px taller.
+		let sizing = initialInlineHtmlPreviewSizing();
+		sizing = nextInlineHtmlPreviewSizing(sizing, 800);
+		for (let step = 0; step < 50 && !sizing.locked; step += 1) {
+			sizing = nextInlineHtmlPreviewSizing(sizing, sizing.height + 40);
+		}
+		expect(sizing.locked).toBe(true);
+		expect(sizing.height).toBe(840);
+		expect(INLINE_HTML_PREVIEW_FEEDBACK_STEPS).toBeGreaterThan(1);
+
+		// Locked: later growth is ignored, shrinking still applies.
+		expect(nextInlineHtmlPreviewSizing(sizing, 2000)).toBe(sizing);
+		expect(nextInlineHtmlPreviewSizing(sizing, 600).height).toBe(600);
+	});
+
+	it('keeps growing when the steps differ, as with images decoding', () => {
+		let sizing = initialInlineHtmlPreviewSizing();
+		for (const reported of [400, 460, 700, 760, 1500, 1540]) {
+			sizing = nextInlineHtmlPreviewSizing(sizing, reported);
+		}
+		expect(sizing.locked).toBe(false);
+		expect(sizing.height).toBe(1540);
 	});
 
 	// The host writes the reported number straight back as the iframe's `height`

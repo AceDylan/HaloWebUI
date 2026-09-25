@@ -44,9 +44,10 @@
 		HTML_PREVIEW_IMAGE_ALT_MAX_CHARS,
 		HTML_PREVIEW_REFERRER_POLICY,
 		HTML_PREVIEW_SANDBOX,
-		INLINE_HTML_PREVIEW_MIN_HEIGHT,
+		initialInlineHtmlPreviewSizing,
 		isInlineHtmlPreviewCopyMessage,
 		isInlineHtmlPreviewImageMessage,
+		nextInlineHtmlPreviewSizing,
 		shouldRenderInlineHtmlArtifactOriginalText,
 		type HtmlArtifactCompanionImage,
 		type HtmlPreviewColorScheme
@@ -147,7 +148,7 @@
 	let showInlineHtmlArtifactOriginalText = false;
 	let renderInlineHtmlArtifactOriginalText = true;
 	let inlineHtmlPreviewFrame: HTMLIFrameElement | null = null;
-	let inlineHtmlPreviewHeight = INLINE_HTML_PREVIEW_MIN_HEIGHT;
+	let inlineHtmlPreviewSizing = initialInlineHtmlPreviewSizing();
 	let lastInlineHtmlPreviewDocument: string | null = null;
 	let lastInlineHtmlPreviewMessageId: string | null = null;
 	let lastInlineHtmlPreviewMessageContent: string | null = null;
@@ -530,7 +531,7 @@
 		lastInlineHtmlPreviewDocument = inlineHtmlArtifactPreview;
 		lastInlineHtmlPreviewMessageId = inlineHtmlArtifactPreview ? id : null;
 		lastInlineHtmlPreviewMessageContent = inlineHtmlArtifactPreview ? normalizedContent : null;
-		inlineHtmlPreviewHeight = INLINE_HTML_PREVIEW_MIN_HEIGHT;
+		inlineHtmlPreviewSizing = initialInlineHtmlPreviewSizing();
 		if (messageChanged) {
 			showInlineHtmlArtifactOriginalText = false;
 		}
@@ -599,9 +600,15 @@
 			return;
 		}
 
-		const nextHeight = getInlineHtmlPreviewHeight(event.data);
-		if (nextHeight !== null && nextHeight !== inlineHtmlPreviewHeight) {
-			inlineHtmlPreviewHeight = nextHeight;
+		const nextSizing = nextInlineHtmlPreviewSizing(
+			inlineHtmlPreviewSizing,
+			getInlineHtmlPreviewHeight(event.data)
+		);
+		if (nextSizing !== inlineHtmlPreviewSizing) {
+			inlineHtmlPreviewSizing = nextSizing;
+			// The card now grows with its document, so whether this reply needs
+			// the "Show more" fold is only known once the frame has reported.
+			void tick().then(checkTruncation);
 		}
 	};
 
@@ -1233,7 +1240,7 @@
 							? 'bg-[var(--surface-overlay)]'
 							: 'bg-white'}"
 						data-halo-color-scheme={inlineHtmlPreviewColorScheme}
-						style={`height: ${inlineHtmlPreviewHeight}px;`}
+						style={`height: ${inlineHtmlPreviewSizing.height}px;`}
 					></iframe>
 				{/key}
 			</div>

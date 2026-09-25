@@ -72,7 +72,7 @@
 	{/if}
 
 	{#if selectedModels.length <= 1}
-		<!-- 单模型：添加入口紧跟当前模型，避免被整行布局推到右侧角落。 -->
+		<!-- 单模型：「添加模型对比」收在模型下拉菜单里，顶栏不再常驻虚线 + 按钮。 -->
 		{#each selectedModels as selectedModel, selectedModelIdx}
 			<div class="flex w-fit max-w-full min-w-0 items-center gap-1.5">
 				<div class="min-w-0 max-w-full overflow-hidden">
@@ -84,46 +84,15 @@
 							showSetDefaultAction={showSetDefault && selectedModelIdx === 0}
 							showTemporaryChatControl={temporaryChatAccess.allowed &&
 								!temporaryChatAccess.enforced}
+							onAddModel={canUseMultipleModels && !disabled
+								? () => {
+										selectedModels = [...selectedModels, ''];
+									}
+								: null}
 							bind:value={selectedModel}
 						/>
 					</div>
 				</div>
-
-				{#if canUseMultipleModels}
-					<div class="shrink-0">
-						<Tooltip content={$i18n.t('Add Model')}>
-							<button
-								class="inline-flex items-center justify-center
-									size-7 shrink-0 rounded-xl
-									text-gray-400 dark:text-gray-500
-									bg-white dark:bg-gray-900/70
-									border border-dashed border-gray-300 dark:border-gray-600
-									hover:bg-gray-100/80 dark:hover:bg-gray-800/60
-									hover:border-gray-400 dark:hover:border-gray-500
-									hover:text-gray-600 dark:hover:text-gray-300
-									active:scale-[0.92]
-									transition-all duration-150
-									disabled:opacity-40 disabled:pointer-events-none"
-								{disabled}
-								on:click={() => {
-									selectedModels = [...selectedModels, ''];
-								}}
-								aria-label="Add Model"
-							>
-								<svg
-									xmlns="http://www.w3.org/2000/svg"
-									fill="none"
-									viewBox="0 0 24 24"
-									stroke-width="2"
-									stroke="currentColor"
-									class="size-3"
-								>
-									<path stroke-linecap="round" stroke-linejoin="round" d="M12 6v12m6-6H6" />
-								</svg>
-							</button>
-						</Tooltip>
-					</div>
-				{/if}
 			</div>
 		{/each}
 	{:else}

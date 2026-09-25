@@ -6697,7 +6697,8 @@
 							</div>
 						</div>
 
-						<div class=" pb-[1rem]">
+						<!-- Clear of the iPhone home indicator when the page runs edge to edge. -->
+						<div class="pb-[max(1rem,env(safe-area-inset-bottom))]">
 							<MessageQueue
 								queue={messageQueue}
 								onEdit={(id) => {

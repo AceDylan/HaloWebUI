@@ -78,6 +78,8 @@
 
 	export let showTemporaryChatControl = false;
 	export let showSetDefaultAction = false;
+	/** When set, the menu offers "add a model to compare" (replaces the old dashed + button). */
+	export let onAddModel: (() => void) | null = null;
 
 	export let items: {
 		label: string;
@@ -1254,6 +1256,38 @@
 					</div>
 				{/each}
 			</div>
+
+			{#if onAddModel}
+				<div
+					class="flex items-center mx-2 {showTemporaryChatControl ? '' : 'mb-2'}"
+					on:pointerenter={() => {
+						selectedModelIdx = -1;
+					}}
+				>
+					<button
+						type="button"
+						class="flex w-full items-center gap-2.5 rounded-lg py-2 px-3 text-left text-sm font-medium text-gray-700 outline-hidden hover:bg-gray-100 dark:text-gray-100 dark:hover:bg-gray-800"
+						data-halo-model-add
+						on:click={() => {
+							show = false;
+							onAddModel?.();
+						}}
+					>
+						<svg
+							xmlns="http://www.w3.org/2000/svg"
+							fill="none"
+							viewBox="0 0 24 24"
+							stroke-width="2.5"
+							stroke="currentColor"
+							class="size-4"
+							aria-hidden="true"
+						>
+							<path stroke-linecap="round" stroke-linejoin="round" d="M12 6v12m6-6H6" />
+						</svg>
+						{$i18n.t('Add a model to compare')}
+					</button>
+				</div>
+			{/if}
 
 			{#if showTemporaryChatControl}
 				<div

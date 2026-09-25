@@ -445,7 +445,9 @@
 				>
 					<button
 						aria-label={$i18n.t('Chat Menu')}
-						class="self-center rounded-md p-1 -m-1 dark:hover:text-white transition"
+						class="self-center rounded-md dark:hover:text-white transition {$mobile
+							? 'p-2 -m-2'
+							: 'p-1 -m-1'}"
 						on:click={() => {
 							dispatch('select');
 						}}

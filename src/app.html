@@ -29,10 +29,24 @@
 		<meta name="mobile-web-app-capable" content="yes" />
 
 		<link rel="manifest" href="/manifest.json" crossorigin="use-credentials" />
-		<meta
-			name="viewport"
-			content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover"
-		/>
+		<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+		<script>
+			// maximum-scale=1 stopped pinch zoom (small text in answer cards could not be
+			// enlarged), so it is gone. iOS is the exception: Safari ignores it for pinch
+			// zoom there and only uses it to skip the automatic zoom when a small-text
+			// input gets focus, so it stays on iOS.
+			if (
+				/iPhone|iPad|iPod/.test(navigator.userAgent) ||
+				(navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
+			) {
+				document
+					.querySelector('meta[name="viewport"]')
+					?.setAttribute(
+						'content',
+						'width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover'
+					);
+			}
+		</script>
 		<meta name="theme-color" content="#171717" />
 		<meta name="robots" content="noindex,nofollow" />
 		<meta name="description" content="Halo WebUI" />

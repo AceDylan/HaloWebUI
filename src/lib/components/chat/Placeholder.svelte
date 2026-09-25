@@ -337,7 +337,7 @@
 			<!-- sticky: on a frame too short for the greeting plus a long prompt, the greeting
 			     scrolls under the input instead of pushing the send button off screen. -->
 			<div
-				class="sticky bottom-0 z-10 mx-auto w-full max-w-4xl pt-2 pb-3 text-base font-normal {atSelectedModel
+				class="sticky bottom-0 z-10 mx-auto w-full max-w-4xl pt-2 pb-[max(0.75rem,env(safe-area-inset-bottom))] text-base font-normal {atSelectedModel
 					? 'mt-2'
 					: ''}"
 			>

@@ -704,8 +704,9 @@
 			?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
 	};
 
+	// 36px touch targets (were 28px); the icons and the bar keep their look.
 	const mobileActionButtonClass =
-		'p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-xl dark:hover:text-white hover:text-black transition-all duration-200 active:scale-95';
+		'p-2.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-xl dark:hover:text-white hover:text-black transition-all duration-200 active:scale-95';
 	const mobileMenuItemClass =
 		'flex items-center gap-3 px-3 py-2.5 text-sm rounded-xl cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800';
 
@@ -1867,14 +1868,14 @@
 							<!-- Phone: copy + regenerate stay inline, everything else folds into "More". Always
 							     visible because touch has no hover. -->
 							<div
-								class="flex items-center gap-0.5 buttons text-gray-600 dark:text-gray-300 px-0.5 h-[37px] w-fit min-w-0 max-w-full toolbar-appear"
+								class="flex items-center gap-0.5 buttons text-gray-600 dark:text-gray-300 px-0.5 h-10 w-fit min-w-0 max-w-full toolbar-appear"
 								data-halo-mobile-actions="true"
 							>
 								{#if siblings.length > 1}
 									<div class="flex self-center min-w-fit" dir="ltr">
 										<button
 											type="button"
-											class="self-center p-1 hover:bg-black/5 dark:hover:bg-white/5 rounded-lg transition-all duration-200 active:scale-95"
+											class="self-center p-2 hover:bg-black/5 dark:hover:bg-white/5 rounded-lg transition-all duration-200 active:scale-95"
 											aria-label={tr('上一条回复', 'Previous response')}
 											on:click={() => {
 												showPreviousMessage(message);
@@ -1889,7 +1890,7 @@
 										</div>
 										<button
 											type="button"
-											class="self-center p-1 hover:bg-black/5 dark:hover:bg-white/5 rounded-lg transition-all duration-200 active:scale-95"
+											class="self-center p-2 hover:bg-black/5 dark:hover:bg-white/5 rounded-lg transition-all duration-200 active:scale-95"
 											aria-label={tr('下一条回复', 'Next response')}
 											on:click={() => {
 												showNextMessage(message);

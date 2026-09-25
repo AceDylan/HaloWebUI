@@ -231,10 +231,14 @@
 
 	$: currentWebSearchModeOption =
 		webSearchModeOptions.find((option) => option.value === webSearchMode) ?? null;
+	// The value next to "Web Search" is a state, so "off" reads "未开启" rather
+	// than the menu option's own wording "关闭联网", which sounds like a button.
 	$: currentWebSearchModeLabel =
-		currentWebSearchModeOption?.shortLabel ??
-		currentWebSearchModeOption?.label ??
-		getWebSearchModeLabel(webSearchMode, $i18n.t.bind($i18n));
+		webSearchMode === 'off'
+			? tr('未开启', 'Off')
+			: (currentWebSearchModeOption?.shortLabel ??
+				currentWebSearchModeOption?.label ??
+				getWebSearchModeLabel(webSearchMode, $i18n.t.bind($i18n)));
 
 	const helpIconClass = 'size-3 shrink-0 cursor-help text-gray-400 dark:text-gray-500';
 </script>
@@ -253,7 +257,7 @@
 
 	<div slot="content">
 		<DropdownMenu.Content
-			class="w-full max-w-[220px] rounded-xl px-1 py-1 border border-gray-300/30 dark:border-gray-700/50 z-50 bg-white dark:bg-gray-850 dark:text-white shadow-sm"
+			class="w-full max-w-[min(300px,calc(100vw-1rem))] rounded-xl px-1 py-1 border border-gray-300/30 dark:border-gray-700/50 z-50 bg-white dark:bg-gray-850 dark:text-white shadow-sm"
 			sideOffset={10}
 			alignOffset={-8}
 			side="top"
@@ -455,7 +459,7 @@
 							<div class="truncate">{tr('图片生成', 'Image Generation')}</div>
 						</div>
 						<div class="shrink-0 text-xs text-gray-500 dark:text-gray-400">
-							{imageGenerationEnabled ? tr('开启生图', 'Image on') : tr('关闭生图', 'Image off')}
+							{imageGenerationEnabled ? tr('已开启', 'On') : tr('未开启', 'Off')}
 						</div>
 					</button>
 				{/if}

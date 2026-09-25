@@ -187,10 +187,31 @@ export const WORKSPACE_TABS: WorkspaceTabMeta[] = [
 	}
 ];
 
-export const getVisibleWorkspaceTabs = (params: { user?: any; config?: any }) =>
-	WORKSPACE_TABS.filter((tab) => tab.visibleWhen(params)).sort(
-		(a, b) => WORKSPACE_TAB_ORDER.indexOf(a.key) - WORKSPACE_TAB_ORDER.indexOf(b.key)
-	);
+// Tabs kept out of the tab strip because they are not used here (no knowledge
+// bases, notes, skills or functions; one tool; the file terminal is off). The
+// pages still work: open one by URL and its tab shows while it is open. Remove
+// a key from this list to bring the tab back.
+export const HIDDEN_WORKSPACE_TABS: WorkspaceTabKey[] = [
+	'knowledge',
+	'notes',
+	'tools',
+	'skills',
+	'functions',
+	'terminal'
+];
+
+const isTabOpen = (tab: WorkspaceTabMeta, pathname?: string) =>
+	Boolean(pathname) && tab.activeMatch.some((prefix) => pathname!.startsWith(prefix));
+
+export const getVisibleWorkspaceTabs = (
+	params: { user?: any; config?: any },
+	pathname?: string
+) =>
+	WORKSPACE_TABS.filter(
+		(tab) =>
+			tab.visibleWhen(params) &&
+			(!HIDDEN_WORKSPACE_TABS.includes(tab.key) || isTabOpen(tab, pathname))
+	).sort((a, b) => WORKSPACE_TAB_ORDER.indexOf(a.key) - WORKSPACE_TAB_ORDER.indexOf(b.key));
 
 export const getActiveWorkspaceTab = (
 	pathname: string,

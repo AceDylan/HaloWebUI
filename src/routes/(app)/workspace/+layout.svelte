@@ -48,7 +48,7 @@
 		loaded = true;
 	});
 
-	$: visibleTabs = getVisibleWorkspaceTabs({ user: $user, config: $config });
+	$: visibleTabs = getVisibleWorkspaceTabs({ user: $user, config: $config }, $page.url.pathname);
 	$: activeTab = getActiveWorkspaceTab($page.url.pathname, visibleTabs);
 </script>
 

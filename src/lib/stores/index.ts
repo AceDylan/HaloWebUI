@@ -75,6 +75,21 @@ export const requestNewChat = (options: Omit<NewChatRequest, 'id'> = {}) => {
 export const activeChatIds: Writable<Set<string>> = writable(new Set());
 // Chats whose hermes run finished and has not been opened since (sidebar dot)
 export const hermesUnreadChatIds: Writable<Set<string>> = writable(new Set());
+// Background runners (reclaude / codex / agy) a chat launched, from their own
+// progress reports: the sidebar lists them, the chat shows a banner.
+export const hermesBackgroundRuns: Writable<
+	{
+		run_id: string;
+		chat_id: string;
+		agent: string;
+		status: string;
+		started_at: number | null;
+		step: number | null;
+		last_activity: string;
+		updated_at: number;
+		title?: string | null;
+	}[]
+> = writable([]);
 // The signed-in user's hermes runs executing right now (sidebar poll); the
 // composer reads it to know a reply is steerable or blocked on an approval.
 export const hermesActiveRuns: Writable<

@@ -261,7 +261,7 @@
 {#each renderItems as item, idx (idx)}
 	{#if item.kind === 'tool_call_group'}
 		<div class="my-2 w-full">
-			<ToolCallGroup id={`${id}-tcg-${item.startIdx}`} tokens={item.tokens} />
+			<ToolCallGroup id={`${id}-tcg-${item.startIdx}`} tokens={item.tokens} {streaming} />
 		</div>
 	{:else}
 		{@const token = item.token}
@@ -485,6 +485,7 @@
 						title={token.summary}
 						open={getDetailsOpen(token, tokenIdx)}
 						attributes={token?.attributes}
+						settled={!streaming}
 						className="w-full"
 						dir="auto"
 						on:change={(e) => {

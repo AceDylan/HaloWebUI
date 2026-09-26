@@ -182,7 +182,24 @@ export const testNotificationWebhook = async (
 	return await res.json();
 };
 
-export type HermesActivity = { runs: HermesActiveRun[]; unread: string[] };
+/** A background runner (reclaude / codex / agy) as its last progress report described it. */
+export type HermesBackgroundRun = {
+	run_id: string;
+	chat_id: string;
+	agent: string;
+	status: string;
+	started_at: number | null;
+	step: number | null;
+	last_activity: string;
+	updated_at: number;
+	title?: string | null;
+};
+
+export type HermesActivity = {
+	runs: HermesActiveRun[];
+	unread: string[];
+	background: HermesBackgroundRun[];
+};
 
 /** The sign-in behind the token is gone (a framed Hub session lasts 12h). */
 export class HermesSessionExpiredError extends Error {
@@ -207,7 +224,8 @@ export const getHermesActivity = async (token: string): Promise<HermesActivity> 
 	const data = await res.json();
 	return {
 		runs: Array.isArray(data?.runs) ? data.runs : [],
-		unread: Array.isArray(data?.unread) ? data.unread : []
+		unread: Array.isArray(data?.unread) ? data.unread : [],
+		background: Array.isArray(data?.background) ? data.background : []
 	};
 };
 
@@ -220,4 +238,31 @@ export const markHermesChatRead = async (token: string, chatId: string): Promise
 	if (!res.ok) {
 		throw await detailOf(res);
 	}
+};
+
+export type HermesModelProvider = {
+	slug: string;
+	name: string;
+	current: boolean;
+	models: string[];
+};
+
+export type HermesModelOptions = {
+	/** hermes' configured default model and provider. */
+	model: string;
+	provider: string;
+	providers: HermesModelProvider[];
+};
+
+/** The models hermes can run a chat with, grouped by provider. */
+export const getHermesModelOptions = async (token: string): Promise<HermesModelOptions> => {
+	const res = await fetch(`${WEBUI_API_BASE_URL}/hermes/model-options`, {
+		method: 'GET',
+		headers: jsonHeaders(token)
+	});
+	if (!res.ok) {
+		const body = await res.json().catch(() => ({}));
+		throw new Error(body?.detail ?? `HTTP ${res.status}`);
+	}
+	return res.json();
 };

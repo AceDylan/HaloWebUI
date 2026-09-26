@@ -2,6 +2,7 @@ import { decode } from 'html-entities';
 
 import { getDataUrlDownloadName } from './download-links';
 import { resolveSafeMarkdownUrl } from './html-safety';
+import { getToolCallInput, isOutcomeOnlyResult, summarizeToolNames } from './tool-call-preview';
 
 type CssValue = string | number | null | undefined;
 type ActivityBlock = {
@@ -536,6 +537,40 @@ const renderFeatureBlock = (kind: string, inner: string, style: Record<string, C
 const isEmphasisParagraph = (text: string) =>
 	/^(?:核心答案|核心结论|结论|总结|注意|重点|提示|答案)\s*[：:]/.test(text.trim());
 
+type ToolOutcomeState = 'success' | 'error' | 'interrupted' | 'done';
+
+const TOOL_STATE_LABELS: Record<ToolOutcomeState, string> = {
+	success: '已完成',
+	done: '已完成',
+	error: '失败',
+	interrupted: '已中断'
+};
+
+const TOOL_STATE_TONES: Record<ToolOutcomeState, string> = {
+	success: THEME.success,
+	done: THEME.success,
+	error: THEME.danger,
+	interrupted: THEME.accent
+};
+
+function getToolCallOutcomeState(block: ActivityBlock): ToolOutcomeState {
+	if (block.attributes.done !== 'true') return 'interrupted';
+	const result = parseJsonLike(block.attributes.result ?? '');
+	if (!result || typeof result !== 'object' || Array.isArray(result)) return 'done';
+	const record = result as Record<string, unknown>;
+	const status = String(record.status ?? '').toLowerCase();
+	if (status === 'interrupted' || status === 'cancelled') return 'interrupted';
+	if (status === 'error' || status === 'failed' || record.error === true) return 'error';
+	return status === 'success' || status === 'ok' ? 'success' : 'done';
+}
+
+function getToolCallReason(block: ActivityBlock): string {
+	const result = parseJsonLike(block.attributes.result ?? '');
+	if (!result || typeof result !== 'object' || Array.isArray(result)) return '';
+	const reason = (result as Record<string, unknown>).reason;
+	return typeof reason === 'string' ? reason.trim() : '';
+}
+
 const getActivityMeta = (block: ActivityBlock) => {
 	const done = block.attributes.done === 'true';
 	const toolName = block.attributes.name || '';
@@ -559,11 +594,14 @@ const getActivityMeta = (block: ActivityBlock) => {
 		};
 	}
 
+	// Only finished replies are rendered here: a call that is not done never
+	// reported back and was cut short.
+	const state = getToolCallOutcomeState(block);
 	return {
 		icon: '工',
 		title: toolName ? `工具调用：${toolName}` : block.summary || '工具调用',
-		status: done ? '已完成' : '执行中',
-		tone: done ? THEME.success : THEME.primary
+		status: TOOL_STATE_LABELS[state],
+		tone: TOOL_STATE_TONES[state]
 	};
 };
 
@@ -634,6 +672,37 @@ const renderActivityContent = (block: ActivityBlock) => {
 		const reasoning = normalizeReasoningText(block.text || block.summary || '暂无可展示的思考内容');
 
 		return `<div style="${escapeAttribute(toStyle({ color: THEME.text, 'font-size': '13px', 'line-height': 1.72 }))}">${renderInline(reasoning)}</div>`;
+	}
+
+	const plainInput =
+		block.detailType === 'tool_calls' ? getToolCallInput(block.attributes.arguments ?? '') : null;
+	if (plainInput !== null && isOutcomeOnlyResult(block.attributes.result ?? '')) {
+		// hermes reports the command and an outcome, nothing else: show the
+		// command as code and the outcome in words, not two JSON dumps.
+		const state = getToolCallOutcomeState(block);
+		const duration = getToolCallDurationText(block);
+		const reason =
+			getToolCallReason(block) || (state === 'interrupted' ? '任务在这一步回报结果前就结束了' : '');
+		const outcome = [TOOL_STATE_LABELS[state], duration, reason].filter(Boolean).join(' · ');
+		return `<pre style="${escapeAttribute(
+			toStyle({
+				margin: 0,
+				padding: '10px 12px',
+				background: THEME.surface,
+				border: `1px solid ${THEME.borderSubtle}`,
+				'border-radius': '10px',
+				overflow: 'auto',
+				'max-height': '220px',
+				color: THEME.text,
+				'font-size': '12px',
+				'line-height': 1.55,
+				'white-space': 'pre-wrap',
+				'word-break': 'break-all',
+				'font-family': 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace'
+			})
+		)}"><code>${escapeHtml(plainInput)}</code></pre><div data-halo-tool-outcome="${escapeAttribute(state)}" style="${escapeAttribute(
+			toStyle({ color: TOOL_STATE_TONES[state], 'font-size': '12px', 'font-weight': 600 })
+		)}">${escapeHtml(outcome)}</div>`;
 	}
 
 	const args = parseJsonLike(block.attributes.arguments ?? '');
@@ -750,18 +819,8 @@ const getToolCallPreviewText = (block: ActivityBlock, max = 72) => {
 };
 
 const getToolCallOutcomeStatus = (block: ActivityBlock): 'success' | 'error' | null => {
-	if (block.attributes.done !== 'true') return null;
-	const result = parseJsonLike(block.attributes.result ?? '');
-	if (!result || typeof result !== 'object' || Array.isArray(result)) return null;
-	const status = String((result as Record<string, unknown>).status ?? '').toLowerCase();
-	if (
-		status === 'error' ||
-		status === 'failed' ||
-		(result as Record<string, unknown>).error === true
-	) {
-		return 'error';
-	}
-	return status === 'success' || status === 'ok' ? 'success' : null;
+	const state = getToolCallOutcomeState(block);
+	return state === 'error' ? 'error' : state === 'success' ? 'success' : null;
 };
 
 const getToolCallDurationText = (block: ActivityBlock) => {
@@ -778,21 +837,27 @@ const getToolCallDurationText = (block: ActivityBlock) => {
 
 const renderActivityGroupBlock = (block: Extract<ParsedBlock, { type: 'activity-group' }>) => {
 	const total = block.items.length;
-	const allDone = block.items.every((item) => item.attributes.done === 'true');
-	const tone = allDone ? THEME.success : THEME.primary;
+	const states = block.items.map((item) => getToolCallOutcomeState(item));
+	const failedCount = states.filter((state) => state === 'error').length;
+	const interruptedCount = states.filter((state) => state === 'interrupted').length;
+	// "skill_view ×20 · terminal ×6", not every name in a row.
 	const names = truncatePlainText(
-		block.items.map((item, index) => getToolCallLabel(item, index)).join('、'),
+		summarizeToolNames(block.items.map((item, index) => getToolCallLabel(item, index))),
 		56
 	);
-
-	const failedCount = block.items.filter(
-		(item) => getToolCallOutcomeStatus(item) === 'error'
-	).length;
+	const groupStatus =
+		failedCount > 0
+			? `${failedCount} 个失败`
+			: interruptedCount > 0
+				? '已中断'
+				: '已完成';
+	const tone =
+		failedCount > 0 ? THEME.danger : interruptedCount > 0 ? THEME.accent : THEME.success;
 
 	const rows = block.items
 		.map((item, index) => {
+			const itemState = states[index];
 			const itemDone = item.attributes.done === 'true';
-			const itemFailed = getToolCallOutcomeStatus(item) === 'error';
 			const itemPreview = getToolCallPreviewText(item);
 			const itemDuration = itemDone ? getToolCallDurationText(item) : '';
 			return `<details style="${escapeAttribute(
@@ -860,12 +925,12 @@ const renderActivityGroupBlock = (block: Extract<ParsedBlock, { type: 'activity-
 					: ''
 			}<span style="${escapeAttribute(
 				toStyle({
-					color: itemFailed ? THEME.danger : itemDone ? THEME.success : THEME.primary,
+					color: TOOL_STATE_TONES[itemState],
 					'font-size': '11px',
 					'font-weight': 700,
 					'flex-shrink': 0
 				})
-			)}">${itemFailed ? '失败' : itemDone ? '已完成' : '执行中'}</span></summary><div style="${escapeAttribute(
+			)}">${TOOL_STATE_LABELS[itemState]}</span></summary><div style="${escapeAttribute(
 				toStyle({ display: 'grid', gap: '10px', padding: '0 12px 12px' })
 			)}">${renderActivityContent(item)}</div></details>`;
 		})
@@ -925,7 +990,7 @@ const renderActivityGroupBlock = (block: Extract<ParsedBlock, { type: 'activity-
 			: ''
 	}</span><span style="${escapeAttribute(
 		toStyle({ color: tone, 'font-size': '12px', 'font-weight': 700, 'flex-shrink': 0 })
-	)}">${allDone ? '已完成' : '执行中'}</span></summary><div style="${escapeAttribute(
+	)}">${escapeHtml(groupStatus)}</span></summary><div style="${escapeAttribute(
 		toStyle({
 			display: 'grid',
 			gap: '8px',

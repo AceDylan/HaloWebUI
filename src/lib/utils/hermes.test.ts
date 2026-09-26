@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
+	EMPTY_HERMES_RUN_OPTIONS,
 	getUpstreamModelId,
+	hermesRunOptionsForRequest,
 	isHermesAgentModel,
 	isHermesAgentModelId,
-	isHermesRunSteerable
+	isHermesRunSteerable,
+	normalizeHermesRunOptions
 } from './hermes';
 
 describe('isHermesAgentModelId', () => {
@@ -88,5 +91,32 @@ describe('isHermesRunSteerable', () => {
 		expect(isHermesRunSteerable({ ...running, role: 'user' })).toBe(false);
 		expect(isHermesRunSteerable({ ...running, model: 'gpt-chat' })).toBe(false);
 		expect(isHermesRunSteerable(null)).toBe(false);
+	});
+});
+
+describe('hermes run options', () => {
+	it('keeps only valid choices', () => {
+		expect(
+			normalizeHermesRunOptions({
+				dispatch: 'reclaude',
+				model: ' claude-opus-5 ',
+				provider: 'anthropic',
+				reasoning_effort: 'ultra'
+			})
+		).toEqual({
+			dispatch: 'reclaude',
+			model: 'claude-opus-5',
+			provider: 'anthropic',
+			reasoning_effort: ''
+		});
+		expect(normalizeHermesRunOptions({ provider: 'anthropic' }).provider).toBe('');
+		expect(normalizeHermesRunOptions(null)).toEqual(EMPTY_HERMES_RUN_OPTIONS);
+	});
+
+	it('sends nothing when every choice is the default', () => {
+		expect(hermesRunOptionsForRequest(EMPTY_HERMES_RUN_OPTIONS)).toBeNull();
+		expect(
+			hermesRunOptionsForRequest({ ...EMPTY_HERMES_RUN_OPTIONS, dispatch: 'codex' })
+		).toEqual({ dispatch: 'codex' });
 	});
 });

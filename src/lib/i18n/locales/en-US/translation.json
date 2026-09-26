@@ -2359,5 +2359,14 @@
 	"Move to top": "Move to top",
 	"Prompt order saved.": "Prompt order saved.",
 	"Prompt order changed elsewhere. Please try again.": "Prompt order changed elsewhere. Please try again.",
-	"Failed to save prompt order. Please try again.": "Failed to save prompt order. Please try again."
+	"Failed to save prompt order. Please try again.": "Failed to save prompt order. Please try again.",
+	"Running step {{STEP}}": "Running step {{STEP}}",
+	"Interrupted": "Interrupted",
+	"Succeeded": "Succeeded",
+	"The run ended before this step reported back": "The run ended before this step reported back",
+	"Run the Hermes task again?": "Run the Hermes task again?",
+	"Hermes will redo the whole task from the start, including writing files, pushing and restarting services. Continue?": "Hermes will redo the whole task from the start, including writing files, pushing and restarting services. Continue?",
+	"Press again to stop the task": "Press again to stop the task",
+	"The reply is ready": "The reply is ready",
+	"Hermes options": "Hermes options"
 }

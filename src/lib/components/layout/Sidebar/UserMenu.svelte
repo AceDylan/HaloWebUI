@@ -4,6 +4,7 @@
 
 	import { goto } from '$app/navigation';
 	import ArchiveBox from '$lib/components/icons/ArchiveBox.svelte';
+	import CommandLine from '$lib/components/icons/CommandLine.svelte';
 	import { activeUserIds, USAGE_POOL, mobile, showSidebar, user } from '$lib/stores';
 	import { fade } from 'svelte/transition';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
@@ -15,6 +16,8 @@
 	export let show = false;
 	export let role = '';
 	export let className = 'max-w-[240px]';
+	// Only the sidebar hosts the Hermes sessions dialog.
+	export let hermesSessions = false;
 
 	const dispatch = createEventDispatcher();
 
@@ -103,6 +106,24 @@
 				</div>
 				<div class=" self-center truncate">{$i18n.t('Archived Chats')}</div>
 			</button>
+
+			<!-- Continuing a Telegram / QQ / CLI session here is rare: it lives in
+			     this menu rather than as a top-level sidebar entry. -->
+			{#if hermesSessions}
+			<button
+				class="flex rounded-md py-2 px-3 w-full hover:bg-gray-50 dark:hover:bg-gray-800 transition"
+				data-halo-user-menu-item="hermes-sessions"
+				on:click={() => {
+					dispatch('show', 'hermes-sessions');
+					show = false;
+				}}
+			>
+				<div class=" self-center mr-3">
+					<CommandLine className="size-5" strokeWidth="1.5" />
+				</div>
+				<div class=" self-center truncate">{$i18n.t('Hermes Sessions')}</div>
+			</button>
+			{/if}
 
 			{#if $activeUserIds?.length > 0}
 				<hr class=" border-gray-100 dark:border-gray-850 my-1 p-0" />

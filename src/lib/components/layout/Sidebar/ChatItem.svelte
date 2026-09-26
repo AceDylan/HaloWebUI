@@ -25,6 +25,7 @@
 		showSidebar,
 		currentChatPage,
 		tags,
+		hermesActiveRuns,
 		hermesUnreadChatIds,
 		activeChatIds
 	} from '$lib/stores';
@@ -313,8 +314,21 @@
 						{$i18n.t('Archived')}
 					</span>
 				{/if}
-				{#if $activeChatIds.has(id)}
-					<div class="flex-shrink-0 self-center ml-1">
+				{#if $hermesActiveRuns.some((run) => run.chat_id === id && run.awaiting_approval)}
+					<div
+						class="flex-shrink-0 self-center ml-1"
+						title={$i18n.t('Waiting for your approval')}
+						data-halo-chat-state="approval"
+					>
+						<span class="relative flex h-2 w-2">
+							<span
+								class="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"
+							></span>
+							<span class="relative inline-flex rounded-full h-2 w-2 bg-amber-500"></span>
+						</span>
+					</div>
+				{:else if $activeChatIds.has(id) || $hermesActiveRuns.some((run) => run.chat_id === id)}
+					<div class="flex-shrink-0 self-center ml-1" data-halo-chat-state="running">
 						<span class="relative flex h-2 w-2">
 							<span
 								class="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"

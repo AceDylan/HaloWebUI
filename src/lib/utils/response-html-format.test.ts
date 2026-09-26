@@ -161,6 +161,37 @@ This reasoning should be visible when expanded.
 		expect(html).toContain('最终答案。');
 	});
 
+	it('says which calls failed or were cut short, and counts names instead of listing them', () => {
+		const ok = '{&quot;status&quot;: &quot;success&quot;, &quot;duration&quot;: 1.2}';
+		const failed = '{&quot;status&quot;: &quot;error&quot;, &quot;duration&quot;: 0.4}';
+		const html = renderResponseHtmlFormat(`
+<details type="tool_calls" done="true" name="skill_view" arguments="{&quot;input&quot;: &quot;a&quot;}" result="${ok}"><summary>Tool Executed</summary></details>
+<details type="tool_calls" done="true" name="skill_view" arguments="{&quot;input&quot;: &quot;b&quot;}" result="${ok}"><summary>Tool Executed</summary></details>
+<details type="tool_calls" done="true" name="terminal" arguments="{&quot;input&quot;: &quot;npm test&quot;}" result="${failed}"><summary>Tool Executed</summary></details>
+<details type="tool_calls" done="false" name="terminal" arguments="{&quot;input&quot;: &quot;sleep 60&quot;}"><summary>Executing...</summary></details>
+
+答复。
+`);
+
+		expect(html).toContain('skill_view ×2 · terminal ×2');
+		expect(html).toContain('1 个失败');
+		expect(html).toContain('已中断');
+		expect(html).not.toContain('执行中');
+		// hermes calls show the command as code with the outcome in words.
+		expect(html).toContain('<code>npm test</code>');
+		expect(html).toContain('失败 · 400ms');
+		expect(html).not.toContain('&quot;input&quot;');
+	});
+
+	it('marks a failed single call as failed, not completed', () => {
+		const html = renderResponseHtmlFormat(`
+<details type="tool_calls" done="true" name="terminal" arguments="{&quot;input&quot;: &quot;false&quot;}" result="{&quot;status&quot;: &quot;error&quot;, &quot;duration&quot;: 0.1}"><summary>Tool Executed</summary></details>
+`);
+		expect(html).toContain('工具调用：terminal');
+		expect(html).toContain('>失败<');
+		expect(html).not.toContain('>已完成<');
+	});
+
 	it('keeps a single tool call as a standalone activity card', () => {
 		const html = renderResponseHtmlFormat(`
 <details type="tool_calls" done="true" name="search_web" arguments="{}" result="&quot;ok&quot;"><summary>Tool Executed</summary></details>

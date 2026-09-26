@@ -1,0 +1,254 @@
+<script lang="ts">
+	import { getContext, onDestroy } from 'svelte';
+
+	import { getHermesModelOptions, type HermesModelOptions } from '$lib/apis/hermes';
+	import {
+		EMPTY_HERMES_RUN_OPTIONS,
+		normalizeHermesRunOptions,
+		type HermesRunOptions
+	} from '$lib/utils/hermes';
+
+	const i18n: any = getContext('i18n');
+
+	// Per chat: how the next hermes run starts. "派发方式" puts /reclaude,
+	// /codex or /agy in front of the message (a forgotten or mistyped prefix
+	// used to mean stopping the run and sending again); model and reasoning
+	// override hermes' configured default for this chat only.
+	export let options: HermesRunOptions = { ...EMPTY_HERMES_RUN_OPTIONS };
+	export let disabled = false;
+
+	const DISPATCHES: { value: HermesRunOptions['dispatch']; label: string; hint: string }[] = [
+		{ value: '', label: '直接', hint: 'Hermes 自己做' },
+		{ value: 'reclaude', label: 'reclaude', hint: '/reclaude 独占执行' },
+		{ value: 'codex', label: 'codex', hint: '/codex 独占执行' },
+		{ value: 'agy', label: 'agy', hint: '/agy 独占执行' }
+	];
+	const EFFORTS: { value: HermesRunOptions['reasoning_effort']; label: string }[] = [
+		{ value: '', label: '默认' },
+		{ value: 'low', label: '低' },
+		{ value: 'medium', label: '中' },
+		{ value: 'high', label: '高' },
+		{ value: 'xhigh', label: '极高' }
+	];
+
+	let open = false;
+	let root: HTMLDivElement;
+	let button: HTMLButtonElement;
+	let panel: HTMLDivElement;
+	// The composer sits under the message list's stacking context (the list
+	// covered a panel positioned inside it): the panel lives on <body>, placed
+	// above the button.
+	let panelStyle = '';
+	const PANEL_WIDTH = 288;
+
+	const portal = (node: HTMLElement) => {
+		document.body.appendChild(node);
+		return {
+			destroy() {
+				node.remove();
+			}
+		};
+	};
+
+	const placePanel = () => {
+		if (!button || typeof window === 'undefined') return;
+		const rect = button.getBoundingClientRect();
+		const width = Math.min(PANEL_WIDTH, window.innerWidth - 16);
+		const left = Math.max(8, Math.min(rect.left, window.innerWidth - width - 8));
+		panelStyle =
+			`position: fixed; left: ${Math.round(left)}px; bottom: ${Math.round(window.innerHeight - rect.top + 8)}px; ` +
+			`width: ${Math.round(width)}px; z-index: 9999;`;
+	};
+	let modelOptions: HermesModelOptions | null = null;
+	let modelOptionsError = '';
+	let loadingModels = false;
+
+	$: current = normalizeHermesRunOptions(options);
+	$: dispatchLabel = DISPATCHES.find((item) => item.value === current.dispatch)?.label ?? '直接';
+	$: effortLabel = EFFORTS.find((item) => item.value === current.reasoning_effort)?.label ?? '';
+	$: summary = [
+		current.dispatch ? dispatchLabel : '',
+		current.model ? current.model : '',
+		current.reasoning_effort ? `思考${effortLabel}` : ''
+	]
+		.filter(Boolean)
+		.join(' · ');
+	$: modelValue = current.model ? `${current.provider}\u0000${current.model}` : '';
+
+	const update = (patch: Partial<HermesRunOptions>) => {
+		options = normalizeHermesRunOptions({ ...current, ...patch });
+	};
+
+	const loadModels = async () => {
+		if (modelOptions || loadingModels) return;
+		loadingModels = true;
+		modelOptionsError = '';
+		try {
+			modelOptions = await getHermesModelOptions(localStorage.token);
+		} catch (error) {
+			console.warn('hermes model options', error);
+			modelOptionsError = '没能读取 Hermes 的模型列表，可以先用默认模型';
+		} finally {
+			loadingModels = false;
+		}
+	};
+
+	const onWindowPointer = (event: PointerEvent) => {
+		const target = event.target as Node;
+		if (open && root && !root.contains(target) && !(panel && panel.contains(target))) open = false;
+	};
+	const onWindowKey = (event: KeyboardEvent) => {
+		if (open && event.key === 'Escape') {
+			event.stopPropagation();
+			open = false;
+		}
+	};
+	$: if (typeof window !== 'undefined') {
+		if (open) {
+			placePanel();
+			window.addEventListener('pointerdown', onWindowPointer, true);
+			window.addEventListener('keydown', onWindowKey, true);
+			window.addEventListener('resize', placePanel);
+			void loadModels();
+		} else {
+			window.removeEventListener('pointerdown', onWindowPointer, true);
+			window.removeEventListener('keydown', onWindowKey, true);
+			window.removeEventListener('resize', placePanel);
+		}
+	}
+	onDestroy(() => {
+		if (typeof window === 'undefined') return;
+		window.removeEventListener('pointerdown', onWindowPointer, true);
+		window.removeEventListener('keydown', onWindowKey, true);
+		window.removeEventListener('resize', placePanel);
+	});
+</script>
+
+<div class="relative" bind:this={root} data-halo-hermes-options>
+	<button
+		bind:this={button}
+		type="button"
+		class="flex max-w-[14rem] items-center gap-1 rounded-full px-2.5 py-1.5 text-xs font-medium ring-1 transition max-sm:py-2 {summary
+			? 'bg-primary-50 text-primary-700 ring-primary-200 dark:bg-primary-900/30 dark:text-primary-200 dark:ring-primary-800/60'
+			: 'text-gray-600 ring-gray-200 hover:bg-gray-100 dark:text-gray-300 dark:ring-gray-700 dark:hover:bg-gray-800'}"
+		aria-haspopup="dialog"
+		aria-expanded={open}
+		aria-label={$i18n.t('Hermes options')}
+		{disabled}
+		on:click={() => {
+			open = !open;
+		}}
+	>
+		<span class="shrink-0">Hermes</span>
+		{#if summary}
+			<span class="truncate" data-halo-hermes-options-summary>· {summary}</span>
+		{/if}
+	</button>
+
+	{#if open}
+		<div
+			bind:this={panel}
+			use:portal
+			style={panelStyle}
+			class="rounded-2xl border border-gray-200 bg-white p-3 text-sm text-gray-900 shadow-lg dark:border-gray-700 dark:bg-gray-850 dark:text-gray-100"
+			data-halo-hermes-options-panel
+			role="dialog"
+			aria-label={$i18n.t('Hermes options')}
+		>
+			<div class="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">派发方式</div>
+			<div class="grid grid-cols-4 gap-1" role="radiogroup" aria-label="派发方式">
+				{#each DISPATCHES as item}
+					<button
+						type="button"
+						role="radio"
+						aria-checked={current.dispatch === item.value}
+						title={item.hint}
+						data-halo-hermes-dispatch={item.value || 'direct'}
+						class="rounded-lg px-1.5 py-1.5 text-xs transition {current.dispatch === item.value
+							? 'bg-primary-600 text-white dark:bg-primary-500'
+							: 'bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700'}"
+						on:click={() => update({ dispatch: item.value })}
+					>
+						{item.label}
+					</button>
+				{/each}
+			</div>
+			<div class="mt-1 text-2xs text-gray-400 dark:text-gray-500">
+				{current.dispatch
+					? `发送时自动加上 /${current.dispatch}；消息自己以 / 开头时以消息为准`
+					: '消息直接交给 Hermes'}
+			</div>
+
+			<label class="mt-3 block">
+				<span class="mb-1.5 block text-xs font-medium text-gray-500 dark:text-gray-400">模型</span>
+				<select
+					class="w-full rounded-lg border border-gray-200 bg-white px-2 py-1.5 text-xs dark:border-gray-700 dark:bg-gray-900"
+					value={modelValue}
+					data-halo-hermes-model
+					on:change={(event) => {
+						const value = event.currentTarget.value;
+						if (!value) {
+							update({ model: '', provider: '' });
+							return;
+						}
+						const [provider, model] = value.split('\u0000');
+						update({ model, provider });
+					}}
+				>
+					<option value="">
+						默认{modelOptions?.model ? `（${modelOptions.model}）` : ''}
+					</option>
+					{#if current.model && !modelOptions}
+						<option value={modelValue}>{current.model}</option>
+					{/if}
+					{#each modelOptions?.providers ?? [] as provider}
+						<optgroup label={provider.name}>
+							{#each provider.models as model}
+								<option value={`${provider.slug}\u0000${model}`}>{model}</option>
+							{/each}
+						</optgroup>
+					{/each}
+				</select>
+			</label>
+			{#if loadingModels}
+				<div class="mt-1 text-2xs text-gray-400">正在读取 Hermes 的模型列表…</div>
+			{:else if modelOptionsError}
+				<div class="mt-1 text-2xs text-amber-600 dark:text-amber-400">{modelOptionsError}</div>
+			{/if}
+
+			<div class="mt-3 mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">思考强度</div>
+			<div class="grid grid-cols-5 gap-1" role="radiogroup" aria-label="思考强度">
+				{#each EFFORTS as item}
+					<button
+						type="button"
+						role="radio"
+						aria-checked={current.reasoning_effort === item.value}
+						data-halo-hermes-effort={item.value || 'default'}
+						class="rounded-lg px-1 py-1.5 text-xs transition {current.reasoning_effort ===
+						item.value
+							? 'bg-primary-600 text-white dark:bg-primary-500'
+							: 'bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700'}"
+						on:click={() => update({ reasoning_effort: item.value })}
+					>
+						{item.label}
+					</button>
+				{/each}
+			</div>
+
+			<div class="mt-3 flex items-center justify-between text-2xs text-gray-400 dark:text-gray-500">
+				<span>只对这个对话生效</span>
+				{#if summary}
+					<button
+						type="button"
+						class="rounded px-1.5 py-0.5 text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-gray-800 dark:hover:text-gray-200"
+						on:click={() => {
+							options = { ...EMPTY_HERMES_RUN_OPTIONS };
+						}}
+					>
+						恢复默认
+					</button>
+				{/if}
+			</div>
+		</div>
+	{/if}
+</div>

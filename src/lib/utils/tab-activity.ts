@@ -3,27 +3,34 @@ import { readable } from 'svelte/store';
 import { activeChatIds, hermesActiveRuns } from '$lib/stores';
 
 /**
- * What the browser tab shows about replies: `running` while a reply or a
- * hermes run is in progress, `done` when one finished while nobody was looking
- * at the tab (cleared as soon as the tab is looked at again), `idle` otherwise.
- * Drives the title prefix and the favicon dot.
+ * What the browser tab shows about replies: `approval` while a hermes run
+ * waits for the person to allow a command (it goes nowhere until they do),
+ * `running` while a reply or a hermes run is in progress, `done` when one
+ * finished while nobody was looking at the tab (cleared as soon as the tab is
+ * looked at again), `idle` otherwise. Drives the title prefix and the favicon
+ * dot.
  */
-export type TabActivity = 'idle' | 'running' | 'done';
+export type TabActivity = 'idle' | 'running' | 'done' | 'approval';
 
 export const nextTabActivity = (
 	previous: TabActivity,
 	running: boolean,
-	attended: boolean
+	attended: boolean,
+	awaitingApproval = false
 ): TabActivity => {
+	if (awaitingApproval) return 'approval';
 	if (running) return 'running';
-	if (!attended && (previous === 'running' || previous === 'done')) return 'done';
+	if (!attended && (previous === 'running' || previous === 'done' || previous === 'approval')) {
+		return 'done';
+	}
 	return 'idle';
 };
 
 export const TAB_ACTIVITY_TITLE_PREFIX: Record<TabActivity, string> = {
 	idle: '',
 	running: '● ',
-	done: '✓ '
+	done: '✓ ',
+	approval: '⏳ 待审批 · '
 };
 
 export const tabActivity = readable<TabActivity>('idle', (set) => {
@@ -34,10 +41,16 @@ export const tabActivity = readable<TabActivity>('idle', (set) => {
 	let state: TabActivity = 'idle';
 	let chatRunning = false;
 	let hermesRunning = false;
+	let awaitingApproval = false;
 
 	const attended = () => document.visibilityState === 'visible' && document.hasFocus();
 	const update = () => {
-		const next = nextTabActivity(state, chatRunning || hermesRunning, attended());
+		const next = nextTabActivity(
+			state,
+			chatRunning || hermesRunning,
+			attended(),
+			awaitingApproval
+		);
 		if (next !== state) {
 			state = next;
 			set(state);
@@ -50,6 +63,7 @@ export const tabActivity = readable<TabActivity>('idle', (set) => {
 	});
 	const unsubscribeRuns = hermesActiveRuns.subscribe((runs) => {
 		hermesRunning = (runs?.length ?? 0) > 0;
+		awaitingApproval = (runs ?? []).some((run) => run?.awaiting_approval);
 		update();
 	});
 
@@ -70,7 +84,8 @@ export const tabActivity = readable<TabActivity>('idle', (set) => {
 
 const FAVICON_DOT_COLORS: Record<Exclude<TabActivity, 'idle'>, string> = {
 	running: '#3b82f6',
-	done: '#10b981'
+	done: '#10b981',
+	approval: '#f59e0b'
 };
 
 const faviconCache = new Map<string, Promise<string | null>>();

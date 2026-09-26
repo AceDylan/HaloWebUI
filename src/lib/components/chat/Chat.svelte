@@ -148,7 +148,15 @@
 	import { getTools } from '$lib/apis/tools';
 	import { getSkills } from '$lib/apis/skills';
 	import { HermesSteerError, steerHermesRun } from '$lib/apis/hermes';
-	import { isHermesRunSteerable, type HermesApprovalRequest } from '$lib/utils/hermes';
+	import {
+		EMPTY_HERMES_RUN_OPTIONS,
+		hermesRunOptionsForRequest,
+		isHermesAgentModelId,
+		isHermesRunSteerable,
+		normalizeHermesRunOptions,
+		type HermesApprovalRequest,
+		type HermesRunOptions
+	} from '$lib/utils/hermes';
 	import HermesApprovalDialog from './HermesApprovalDialog.svelte';
 	import { TAB_ACTIVITY_TITLE_PREFIX, tabActivity } from '$lib/utils/tab-activity';
 	import { MODELS_ERROR_TOAST_ID, describeModelsError, ensureModels } from '$lib/services/models';
@@ -161,6 +169,7 @@
 	import Navbar from '$lib/components/chat/Navbar.svelte';
 	import ChatControls from './ChatControls.svelte';
 	import EventConfirmDialog from '../common/ConfirmDialog.svelte';
+	import BackgroundRunnerBanner from './BackgroundRunnerBanner.svelte';
 	import Placeholder from './Placeholder.svelte';
 	import NotificationToast from '../NotificationToast.svelte';
 	import Spinner from '../common/Spinner.svelte';
@@ -1074,7 +1083,31 @@
 
 	let taskIds = null;
 	let stoppedResponseMessageIds = new Set<string>();
-	let messageQueue: { id: string; prompt: string; files: any[]; referenceFiles?: any[] }[] = [];
+	// Messages typed while a reply runs, sent when it finishes. Each belongs
+	// to the chat it was typed in: one list for the whole page sent a message
+	// queued in chat A into chat B once B's reply ended.
+	let messageQueue: {
+		id: string;
+		chatId: string;
+		prompt: string;
+		files: any[];
+		referenceFiles?: any[];
+	}[] = [];
+	$: currentChatQueue = messageQueue.filter((item) => item.chatId === ($chatId || ''));
+
+	// Send the next message queued for `forChatId`, if that chat is on screen
+	// and idle (its reply may have finished while another chat was open).
+	const drainQueuedMessage = async (forChatId: string) => {
+		if (!forChatId || ($chatId || '') !== forChatId) return;
+		const currentMessage = history?.currentId ? history.messages?.[history.currentId] : null;
+		if ((taskIds?.length ?? 0) > 0 || (currentMessage && currentMessage.done === false)) return;
+		const next = messageQueue.find((item) => item.chatId === forChatId);
+		if (!next) return;
+		messageQueue = messageQueue.filter((item) => item.id !== next.id);
+		files = next.files;
+		await tick();
+		await submitPrompt(next.prompt, { referenceFiles: next.referenceFiles ?? [] });
+	};
 	let branchingMessageId: string | null = null;
 
 	// Temporary instruction for regeneration with modifications (e.g. "more concise")
@@ -1106,6 +1139,13 @@
 	};
 
 	let reasoningEffort: string | null = null;
+	// The composer's "Hermes 选项" for this chat (派发方式 / 模型 / 思考强度),
+	// kept in the chat's composer state.
+	let hermesOptions: HermesRunOptions = { ...EMPTY_HERMES_RUN_OPTIONS };
+	$: showHermesOptions = isHermesAgentModelId(
+		selectedModels?.[0],
+		$config?.hermes_agent_model_ids
+	);
 		let maxThinkingTokens: number | null = null;
 		let lastFreshChatRequest = '';
 
@@ -1780,7 +1820,8 @@
 		image_generation_options: sanitizeChatImageGenerationOptions(imageGenerationOptions),
 		code_interpreter_enabled: codeInterpreterEnabled,
 		reasoning_effort: reasoningEffort,
-		max_thinking_tokens: maxThinkingTokens
+		max_thinking_tokens: maxThinkingTokens,
+		hermes_options: hermesRunOptionsForRequest(hermesOptions)
 	});
 
 	const buildLocalChatSessionState = () => ({
@@ -1826,7 +1867,8 @@
 			'reasoning_effort',
 			'reasoningEffort',
 			'max_thinking_tokens',
-			'maxThinkingTokens'
+			'maxThinkingTokens',
+			'hermes_options'
 		].some((key) => key in state);
 		if (!hasComposerKeys) {
 			return false;
@@ -1920,6 +1962,8 @@
 				state.max_thinking_tokens ?? state.maxThinkingTokens ?? null
 			);
 		}
+		// Every chat starts from hermes' defaults unless it saved its own choice.
+		hermesOptions = normalizeHermesRunOptions(state.hermes_options ?? null);
 
 		hasPersistedComposerState = options.markPersisted === true;
 		return true;
@@ -2353,6 +2397,7 @@
 		codeInterpreterEnabled;
 		reasoningEffort;
 		maxThinkingTokens;
+		hermesOptions;
 		composerStateSyncReady;
 		persistChatComposerState($chatId);
 	}
@@ -3584,7 +3629,9 @@
 		}
 
 		let temporaryChatState = syncTemporaryChatState();
-		messageQueue = [];
+		hermesOptions = { ...EMPTY_HERMES_RUN_OPTIONS };
+		// Only what was queued in an unsaved new chat goes; other chats keep theirs.
+		messageQueue = messageQueue.filter((item) => item.chatId);
 
 		await showControls.set(false);
 		await showCallOverlay.set(false);
@@ -3896,6 +3943,7 @@
 				activeAssistant = toChatAssistantSnapshot(chatContent?.assistant ?? null);
 				chatFiles = chatContent?.files ?? [];
 				hasPersistedComposerState = false;
+				hermesOptions = { ...EMPTY_HERMES_RUN_OPTIONS };
 				applyComposerState(chatContent?.composer_state, { markPersisted: true });
 				composerStatePersister.markPersisted(targetChatId, buildComposerStatePayload());
 				setRuntimeSelectionThreadsState(normalizeSelectionThreads(chatContent?.selectionThreads));
@@ -3927,6 +3975,10 @@
 					tags = nextContext?.tags ?? [];
 					taskIds = nextContext?.task_ids ?? [];
 					reconcileLoadedAssistantMessages(taskIds);
+					// A reply that finished while another chat was open leaves the
+					// message queued here unsent: send it now that the chat is back.
+					await tick();
+					if (!isStale()) await drainQueuedMessage(targetChatId);
 				})();
 
 				resetAutoScrollLock();
@@ -4440,13 +4492,8 @@
 				(id) => history.messages[id] && history.messages[id].done !== true
 			);
 
-		if (!hasPendingSibling && messageQueue.length > 0) {
-			const next = messageQueue[0];
-			messageQueue = messageQueue.slice(1);
-
-			files = next.files;
-			await tick();
-			await submitPrompt(next.prompt, { referenceFiles: next.referenceFiles ?? [] });
+		if (!hasPendingSibling) {
+			await drainQueuedMessage(chatId);
 		}
 	};
 
@@ -5220,7 +5267,13 @@
 				}
 				messageQueue = [
 					...messageQueue,
-					{ id: uuidv4(), prompt: userPrompt, files: queuedFiles, referenceFiles }
+					{
+						id: uuidv4(),
+						chatId: $chatId || '',
+						prompt: userPrompt,
+						files: queuedFiles,
+						referenceFiles
+					}
 				];
 				prompt = '';
 				files = structuredClone(failedFiles);
@@ -5835,6 +5888,10 @@
 				model: getModelRequestId(model),
 				messages: messages,
 				...(options.discussion ? { discussion: options.discussion } : {}),
+				...(isHermesAgentModelId(getModelRequestId(model), $config?.hermes_agent_model_ids) &&
+				hermesRunOptionsForRequest(hermesOptions)
+					? { hermes_options: hermesRunOptionsForRequest(hermesOptions) }
+					: {}),
 				params: {
 					...$settings?.params,
 					...params,
@@ -6393,6 +6450,19 @@
 		await sendPrompt(history, userPrompt, userMessageId);
 	};
 
+	// Regenerating a hermes reply runs the whole task again - every file it
+	// writes, every push and restart. Ask first.
+	const confirmHermesRerun = () =>
+		new Promise<boolean>((resolve) => {
+			eventConfirmationTitle = $i18n.t('Run the Hermes task again?');
+			eventConfirmationMessage = $i18n.t(
+				'Hermes will redo the whole task from the start, including writing files, pushing and restarting services. Continue?'
+			);
+			eventConfirmationInput = false;
+			eventCallback = (answer: unknown) => resolve(Boolean(answer));
+			showEventConfirmation = true;
+		});
+
 	const regenerateResponse = async (
 		message,
 		options: {
@@ -6404,6 +6474,12 @@
 			modelId?: string;
 		} = {}
 	) => {
+		if (
+			isHermesAgentModelId(options.modelId ?? message?.model, $config?.hermes_agent_model_ids) &&
+			!(await confirmHermesRerun())
+		) {
+			return;
+		}
 		if (history.currentId) {
 			let userMessage = history.messages[message.parentId];
 			let userPrompt = userMessage.content;
@@ -6799,8 +6875,9 @@
 
 						<!-- Clear of the iPhone home indicator when the page runs edge to edge. -->
 						<div class="pb-[max(1rem,env(safe-area-inset-bottom))]">
+							<BackgroundRunnerBanner />
 							<MessageQueue
-								queue={messageQueue}
+								queue={currentChatQueue}
 								onEdit={(id) => {
 									const item = messageQueue.find((m) => m.id === id);
 									if (item) {
@@ -6813,7 +6890,9 @@
 									messageQueue = messageQueue.filter((m) => m.id !== id);
 								}}
 								onClearAll={() => {
-									messageQueue = [];
+									messageQueue = messageQueue.filter(
+										(item) => item.chatId !== ($chatId || '')
+									);
 								}}
 							/>
 
@@ -6846,6 +6925,12 @@
 								{createMessagePair}
 								steerable={hermesRunActive}
 								awaitingApproval={hermesRunAwaitingApproval}
+								{showHermesOptions}
+								bind:hermesOptions
+								stopConfirmAfterSeconds={hermesRunActive ? 30 : null}
+								runStartedAt={history?.currentId
+									? (history.messages?.[history.currentId]?.timestamp ?? null)
+									: null}
 								onChange={handleMessageInputChange}
 								on:upload={async (e) => {
 									const { type, data } = e.detail;

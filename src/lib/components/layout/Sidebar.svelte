@@ -65,7 +65,6 @@
 	import ChannelItem from './Sidebar/ChannelItem.svelte';
 	import ChatBubblePlus from '../icons/ChatBubblePlus.svelte';
 	import ChatBubbles from '../icons/ChatBubbles.svelte';
-	import CommandLine from '../icons/CommandLine.svelte';
 	import Search from '../icons/Search.svelte';
 	import ArchiveBox from '../icons/ArchiveBox.svelte';
 	import FolderIcon from '../icons/Folder.svelte';
@@ -964,23 +963,6 @@
 			</div>
 		{/if}
 
-		{#if expanded}
-			<!-- Hermes 会话：Telegram / QQ / CLI 的会话在网页继续 -->
-			<div class="flex text-gray-700 dark:text-gray-200 px-2">
-				<button
-					class={actionItemClass}
-					type="button"
-					on:click={() => {
-						showHermesSessions = true;
-					}}
-					aria-label={$i18n.t('Hermes Sessions')}
-				>
-					<CommandLine className="size-5" strokeWidth="2" />
-					<span class="text-sm font-medium whitespace-nowrap">{$i18n.t('Hermes Sessions')}</span>
-				</button>
-			</div>
-		{/if}
-
 		{#if !expanded}
 			<div class="mt-3 px-2 flex flex-col items-center gap-2 text-gray-700 dark:text-gray-200">
 				<Tooltip content={$i18n.t('New Chat')}>
@@ -1065,18 +1047,6 @@
 						aria-label={$i18n.t('Archived Chats')}
 					>
 						<ArchiveBox className="size-5" strokeWidth="2" />
-					</button>
-				</Tooltip>
-
-				<Tooltip content={$i18n.t('Hermes Sessions')}>
-					<button
-						class={iconButtonClass}
-						on:click={() => {
-							showHermesSessions = true;
-						}}
-						aria-label={$i18n.t('Hermes Sessions')}
-					>
-						<CommandLine className="size-5" strokeWidth="2" />
 					</button>
 				</Tooltip>
 
@@ -1414,9 +1384,16 @@
 				{#if $user !== undefined && $user !== null}
 					<UserMenu
 						role={$user?.role}
+						hermesSessions
 						on:show={(e) => {
 							if (e.detail === 'archived-chat') {
 								showArchivedChats.set(true);
+							} else if (e.detail === 'hermes-sessions') {
+								// Telegram / QQ / CLI 的会话在网页继续（入口在用户菜单里）
+								showHermesSessions = true;
+								if ($mobile) {
+									showSidebar.set(false);
+								}
 							}
 						}}
 						let:builder

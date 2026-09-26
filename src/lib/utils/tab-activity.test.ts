@@ -18,4 +18,12 @@ describe('nextTabActivity', () => {
 		expect(nextTabActivity('running', false, true)).toBe('idle');
 		expect(nextTabActivity('idle', false, false)).toBe('idle');
 	});
+
+	it('puts a waiting approval above everything else', () => {
+		expect(nextTabActivity('running', true, true, true)).toBe('approval');
+		expect(nextTabActivity('idle', false, false, true)).toBe('approval');
+		// Answered while the tab was in the background: the run goes on.
+		expect(nextTabActivity('approval', true, false, false)).toBe('running');
+		expect(nextTabActivity('approval', false, false, false)).toBe('done');
+	});
 });

@@ -1,8 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
 	formatToolDuration,
+	getToolCallInput,
 	getToolCallOutcome,
 	getToolCallPreview,
+	getToolCallStartedAt,
+	getToolCallState,
+	isOutcomeOnlyResult,
+	summarizeToolNames,
 	truncatePreview
 } from './tool-call-preview';
 
@@ -64,5 +69,54 @@ describe('formatToolDuration', () => {
 describe('truncatePreview', () => {
 	it('keeps short text untouched', () => {
 		expect(truncatePreview('  short   text ')).toBe('short text');
+	});
+});
+
+describe('tool call state after the run', () => {
+	it('reads an interrupted outcome and its reason', () => {
+		expect(
+			getToolCallOutcome('{&quot;status&quot;: &quot;interrupted&quot;, &quot;reason&quot;: &quot;网关重启&quot;}')
+		).toEqual({ status: 'interrupted', duration: null, reason: '网关重启' });
+	});
+
+	it('treats a call still running in a finished reply as interrupted', () => {
+		expect(getToolCallState({ done: 'false' }, false)).toBe('running');
+		expect(getToolCallState({ done: 'false' }, true)).toBe('interrupted');
+		expect(
+			getToolCallState({ done: 'true', result: JSON.stringify({ status: 'error' }) }, true)
+		).toBe('error');
+		expect(getToolCallState({ done: 'true', result: JSON.stringify({ duration: 1 }) })).toBe(
+			'done'
+		);
+	});
+
+	it('summarizes names by count, most used first', () => {
+		expect(
+			summarizeToolNames([
+				'terminal',
+				'skill_view',
+				'skill_view',
+				'terminal',
+				'skill_view',
+				'read_file',
+				'web',
+				'web',
+				'x'
+			])
+		).toBe('skill_view ×3 · terminal ×2 · web ×2 · +2');
+		expect(summarizeToolNames(['terminal'])).toBe('terminal');
+	});
+
+	it('gives the whole hermes input and recognises outcome-only results', () => {
+		const long = `echo ${'a'.repeat(300)}`;
+		expect(getToolCallInput(JSON.stringify({ input: long }))).toBe(long);
+		expect(getToolCallInput(JSON.stringify({ city: 'Paris', unit: 'c' }))).toBeNull();
+		expect(isOutcomeOnlyResult(JSON.stringify({ status: 'success', duration: 1.2 }))).toBe(true);
+		expect(isOutcomeOnlyResult(JSON.stringify([{ link: 'x' }]))).toBe(false);
+	});
+
+	it('reads the start time hermes stamps on a call', () => {
+		expect(getToolCallStartedAt({ started: '1790000000.5' })).toBe(1790000000.5);
+		expect(getToolCallStartedAt({})).toBeNull();
 	});
 });

@@ -3217,5 +3217,14 @@
 	"Chat sidebar": "对话侧边栏",
 	"Add Banner": "添加横幅",
 	"User Menu": "用户菜单",
-	"User profile": "用户头像"
+	"User profile": "用户头像",
+	"Running step {{STEP}}": "正在执行第 {{STEP}} 步",
+	"Interrupted": "已中断",
+	"Succeeded": "成功",
+	"The run ended before this step reported back": "任务在这一步回报结果前就结束了",
+	"Run the Hermes task again?": "让 Hermes 重跑这个任务？",
+	"Hermes will redo the whole task from the start, including writing files, pushing and restarting services. Continue?": "重新生成会让 Hermes 从头把整个任务再做一遍，包括写文件、推送和重启服务。确定继续吗？",
+	"Press again to stop the task": "再按一次停止任务",
+	"The reply is ready": "回复已完成",
+	"Hermes options": "Hermes 选项"
 }

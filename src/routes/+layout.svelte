@@ -51,6 +51,7 @@
 	import { getAllTags } from '$lib/apis/chats';
 	import { initPWAInstallSupport } from '$lib/utils/pwa';
 	import { getFaviconWithDot, tabActivity } from '$lib/utils/tab-activity';
+	import { getNotificationPreview } from '$lib/utils/notification-preview';
 	import { postActivityToHub } from '$lib/utils/hub-embed';
 	import NotificationToast from '$lib/components/NotificationToast.svelte';
 	import AppSidebar from '$lib/components/app/AppSidebar.svelte';
@@ -421,6 +422,21 @@
 		const type = event?.data?.type ?? null;
 		const data = event?.data?.data ?? null;
 
+		// A hermes approval is answered by the dialog in the chat it belongs to.
+		// A tab not showing that chat answers "nothing here" at once, so the
+		// backend asks again in two seconds - by then the person may have
+		// opened the chat (from the toast below) and the dialog shows. Holding
+		// the call instead used to block the whole approval window.
+		if (type === 'hermes:approval' && typeof cb === 'function') {
+			const showsChat =
+				event.chat_id === $chatId &&
+				($temporaryChatEnabled ||
+					window.location.pathname.includes(`/c/${event.chat_id}`));
+			if (!showsChat) {
+				cb(null);
+			}
+		}
+
 		if (type === 'chat:title' || type === 'chat:reload') {
 			refreshSidebarChatList(event.chat_id);
 		} else if (type === 'chat:tags') {
@@ -436,11 +452,17 @@
 					if (!shouldShowChatCompletionNotification(event, data)) {
 						return;
 					}
+					// The answer's last paragraph, not "Tool Executed Tool Executed…"
+					// from the transcript or the visual card's source.
+					const preview =
+						getNotificationPreview(content) ||
+						(data?.error?.content ? `${data.error.content}`.slice(0, 200) : '') ||
+						$i18n.t('The reply is ready');
 
 					if ($isLastActiveTab) {
 						if ($settings?.notificationEnabled ?? false) {
 							new Notification(`${title} | ${APP_NAME}`, {
-								body: content,
+								body: preview,
 								icon: `${WEBUI_BASE_URL}/static/favicon.png`
 							});
 						}
@@ -451,7 +473,7 @@
 							onClick: () => {
 								goto(`/c/${event.chat_id}`);
 							},
-							content: content,
+							content: preview,
 							title: title
 						},
 						duration: 15000,
@@ -758,7 +780,8 @@
 	});
 
 	// A reply running, or finished while the tab was in the background, puts a
-	// dot on the favicon (blue / green); the chat page prefixes its title too.
+	// dot on the favicon (blue / green; amber while a hermes run waits for an
+	// approval); the chat page prefixes its title too.
 	$: faviconBaseHref = `${WEBUI_BASE_URL}/static/${
 		$theme === 'dark' ||
 		($theme === 'system' &&
@@ -781,7 +804,10 @@
 	$: void refreshFaviconBadge($tabActivity, faviconBaseHref);
 	// Framed by the Bookmark Hub: the same state marks the Hub's "AI 聊天" tab,
 	// since the Hub hides this frame instead of closing it.
-	$: postActivityToHub($tabActivity, $config?.hub_origin);
+	$: postActivityToHub(
+		$tabActivity === 'approval' ? 'running' : $tabActivity,
+		$config?.hub_origin
+	);
 </script>
 
 <svelte:head>

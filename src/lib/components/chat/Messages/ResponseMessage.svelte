@@ -20,6 +20,7 @@
 		activeAudioId,
 		user
 	} from '$lib/stores';
+	import { isHermesAgentModelId } from '$lib/utils/hermes';
 	import { synthesizeOpenAISpeech } from '$lib/apis/audio';
 	// [REACTION_FEATURE] Commented out - reaction feature disabled for now
 	// import {
@@ -207,6 +208,7 @@
 	export let chatId = '';
 	export let history;
 	export let messageId;
+	$: isAgentReply = isHermesAgentModelId(message?.model, $config?.hermes_agent_model_ids);
 
 	let message: MessageType = history.messages?.[messageId] as MessageType;
 	$: message = history.messages?.[messageId] as MessageType;
@@ -1447,7 +1449,7 @@
 
 			<div
 				data-halo-response-card="true"
-				class="mt-1.5 -ml-4 w-[calc(100%+1rem)] px-1 py-0.5 sm:ml-0 sm:w-auto sm:px-1"
+				class="mt-1.5 -mx-2 w-[calc(100%+1rem)] px-1 py-0.5 sm:mx-0 sm:w-auto sm:px-1"
 			>
 				<div class="chat-{message.role} w-full min-w-full markdown-prose">
 					<div>
@@ -2659,7 +2661,8 @@
 							id="message-stats-{message.id}"
 							class="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 px-0.5 text-2xs text-gray-500 dark:text-gray-400 tabular-nums"
 						>
-							{#if stats?.speed}
+							<!-- An agent's tokens/s mixes model time with tool time: meaningless. -->
+							{#if stats?.speed && !isAgentReply}
 								<span>{tr('速度', 'Speed')} {stats.speed} T/s</span>
 							{/if}
 							{#if stats?.tokens}

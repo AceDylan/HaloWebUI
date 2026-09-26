@@ -853,6 +853,37 @@ export const removeAllDetails = (content) => {
 	return content;
 };
 
+const TOOL_HISTORY_INPUT_MAX_CHARS = 160;
+
+/** The `input` of a hermes tool call's (html-escaped) arguments, escaped again for an attribute. */
+export const getToolCallHistoryInput = (escapedArguments: string | undefined): string => {
+	if (!escapedArguments) return '';
+	const decoded = escapedArguments
+		.replace(/&quot;/g, '"')
+		.replace(/&#39;/g, "'")
+		.replace(/&lt;/g, '<')
+		.replace(/&gt;/g, '>')
+		.replace(/&amp;/g, '&');
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(decoded);
+	} catch {
+		return '';
+	}
+	if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return '';
+	const input = (parsed as Record<string, unknown>).input;
+	if (typeof input !== 'string' || Object.keys(parsed as object).length !== 1) return '';
+	let text = input.replace(/\s+/g, ' ').trim();
+	if (text.length > TOOL_HISTORY_INPUT_MAX_CHARS) {
+		text = `${text.slice(0, TOOL_HISTORY_INPUT_MAX_CHARS - 1)}…`;
+	}
+	return text
+		.replace(/&/g, '&amp;')
+		.replace(/"/g, '&quot;')
+		.replace(/</g, '&lt;')
+		.replace(/>/g, '&gt;');
+};
+
 export const processDetails = (content) => {
 	content = removeDetails(content, ['reasoning', 'code_interpreter']);
 
@@ -868,9 +899,14 @@ export const processDetails = (content) => {
 				attributes[attributeMatch[1]] = attributeMatch[2];
 			}
 
+			// hermes calls carry their command as {"input": ...}: keep a short
+			// copy so a follow-up still says what ran ("terminal: git status").
+			const input = getToolCallHistoryInput(attributes.arguments);
 			content = content.replace(
 				match,
-				`<tool_calls name="${attributes.name}" result="${attributes.result}"/>`
+				`<tool_calls name="${attributes.name}"${
+					input ? ` input="${input}"` : ''
+				} result="${attributes.result}"/>`
 			);
 		}
 	}

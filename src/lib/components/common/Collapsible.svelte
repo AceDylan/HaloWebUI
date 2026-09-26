@@ -45,7 +45,8 @@
 	import {
 		formatToolDuration,
 		getToolCallOutcome,
-		getToolCallPreview
+		getToolCallPreview,
+		getToolCallState
 	} from '$lib/utils/tool-call-preview';
 	import Image from './Image.svelte';
 	import ActivityCard from './ActivityCard.svelte';
@@ -71,6 +72,9 @@
 
 	export let disabled = false;
 	export let hide = false;
+	// The reply around this block has stopped streaming: a tool call still
+	// marked running never reported back and shows as interrupted.
+	export let settled = false;
 
 	// Auto-close activity blocks (reasoning / tool_calls) once they finish.
 	// We track the previous done state so we only react to the false→true transition,
@@ -125,7 +129,10 @@
 	$: activityDuration = attributes?.duration;
 	$: activityName = typeof attributes?.name === 'string' ? attributes.name : '';
 	$: isActivityBlock = title !== null && ACTIVITY_DETAIL_TYPES.has(activityType);
-	$: activityBusy = isActivityBlock && !activityDone;
+	$: toolState =
+		activityType === 'tool_calls' ? getToolCallState(attributes, settled) : null;
+	$: toolInterrupted = toolState === 'interrupted';
+	$: activityBusy = isActivityBlock && !activityDone && !toolInterrupted;
 	// A single tool call reads "terminal · npm test · 3.2s", and says when it failed.
 	$: toolPreview =
 		activityType === 'tool_calls' ? getToolCallPreview(decode(attributes?.arguments ?? '')) : '';
@@ -207,8 +214,12 @@
 		activityDuration,
 		activityName
 	);
-	$: activityStatus = getActivityStatus(activityType, activityDone, toolFailed);
-	$: activityStatusTone = getActivityStatusTone(activityDone, toolFailed);
+	$: activityStatus = toolInterrupted
+		? $i18n.t('Interrupted')
+		: getActivityStatus(activityType, activityDone, toolFailed);
+	$: activityStatusTone = toolInterrupted
+		? 'warning'
+		: getActivityStatusTone(activityDone, toolFailed || toolState === 'interrupted');
 	$: activitySubtitle =
 		activityType === 'tool_calls'
 			? [toolPreview, toolDurationText].filter(Boolean).join(' · ')

@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { decode } from 'html-entities';
-	import { getContext } from 'svelte';
+	import { getContext, onDestroy } from 'svelte';
 	import type { Writable } from 'svelte/store';
 	const i18n: Writable<any> = getContext('i18n');
 
@@ -15,28 +15,58 @@
 	import GlobeAlt from '../icons/GlobeAlt.svelte';
 	import {
 		formatToolDuration,
+		getToolCallInput,
 		getToolCallOutcome,
-		getToolCallPreview
+		getToolCallPreview,
+		getToolCallStartedAt,
+		getToolCallState,
+		isOutcomeOnlyResult,
+		summarizeToolNames
 	} from '$lib/utils/tool-call-preview';
 
 	export let id: string = '';
 	export let tokens: any[] = [];
+	// The reply is still streaming. Once it is not, a call that never
+	// reported back was cut short: it shows as interrupted, not "executing".
+	export let streaming = false;
 
 	$: totalCount = tokens.length;
-	$: doneCount = tokens.filter((t) => t.attributes?.done === 'true').length;
-	$: someExecuting = doneCount < totalCount;
-	// What the agent is doing right now, readable without expanding the card.
-	$: runningToken = tokens.find((t) => t.attributes?.done !== 'true');
+	$: states = tokens.map((t) => getToolCallState(t.attributes, !streaming));
+	$: someExecuting = states.includes('running');
+	$: failedCount = states.filter((state) => state === 'error').length;
+	$: interruptedCount = states.filter((state) => state === 'interrupted').length;
+	// What the agent is doing right now, readable without expanding the card:
+	// "第 3 步 · terminal · npm test · 45s". The step is the call's place in
+	// the run; the clock is its own, not the reply's.
+	$: runningIndex = states.indexOf('running');
+	$: runningToken = runningIndex >= 0 ? tokens[runningIndex] : null;
 	$: runningPreview = runningToken
 		? getToolCallPreview(runningToken.attributes?.arguments ?? '', 72)
 		: '';
-	$: failedCount = tokens.filter(
-		(t) =>
-			t.attributes?.done === 'true' &&
-			getToolCallOutcome(t.attributes?.result ?? '').status === 'error'
-	).length;
+	$: runningStartedAt = runningToken ? getToolCallStartedAt(runningToken.attributes) : null;
+	$: nameSummary = summarizeToolNames(tokens.map((t) => t.attributes?.name ?? ''));
 
-	let expanded = false;
+	let now = Date.now() / 1000;
+	let clock: ReturnType<typeof setInterval> | null = null;
+	$: if (someExecuting && runningStartedAt && !clock) {
+		now = Date.now() / 1000;
+		clock = setInterval(() => {
+			now = Date.now() / 1000;
+		}, 1000);
+	} else if ((!someExecuting || !runningStartedAt) && clock) {
+		clearInterval(clock);
+		clock = null;
+	}
+	onDestroy(() => {
+		if (clock) clearInterval(clock);
+	});
+	$: runningElapsed =
+		runningStartedAt !== null
+			? formatToolDuration(Math.max(0, Math.floor(now - runningStartedAt)))
+			: '';
+
+	// Open from the start (the list opened from a run summary).
+	export let expanded = false;
 	let selectedIdx: number | null = null;
 
 	function toggleGroup() {
@@ -140,6 +170,16 @@
 	$: selectedToken = selectedIdx !== null ? tokens[selectedIdx] : null;
 	$: selectedAttrs = selectedToken?.attributes;
 	$: selectedDone = selectedAttrs?.done === 'true';
+	$: selectedState = selectedIdx !== null ? states[selectedIdx] : null;
+	$: selectedInput = selectedAttrs ? getToolCallInput(decode(selectedAttrs?.arguments ?? '')) : null;
+	$: selectedOutcome = selectedAttrs?.done === 'true'
+		? getToolCallOutcome(decode(selectedAttrs?.result ?? ''))
+		: null;
+	// hermes reports a command and an outcome, nothing else: show those
+	// plainly instead of a JSON dump of {"input": …} / {"status": …}.
+	$: selectedIsPlain =
+		selectedInput !== null &&
+		(selectedAttrs?.done !== 'true' || isOutcomeOnlyResult(decode(selectedAttrs?.result ?? '')));
 </script>
 
 <div
@@ -167,7 +207,7 @@
 		<div class="min-w-0 flex-1">
 			<div class="line-clamp-1 text-[13px] font-medium leading-5 {someExecuting ? 'shimmer' : ''}">
 				{#if someExecuting}
-					{$i18n.t('Calling {{COUNT}} tools...', { COUNT: totalCount })}
+					{$i18n.t('Running step {{STEP}}', { STEP: runningIndex + 1 })}
 				{:else}
 					{$i18n.t('Called {{COUNT}} tools', { COUNT: totalCount })}
 				{/if}
@@ -177,9 +217,19 @@
 					class="line-clamp-1 text-2xs leading-4 text-gray-400 dark:text-gray-500"
 					data-halo-tool-running
 				>
-					{#if doneCount > 0}<span class="tabular-nums">{`${doneCount}/${totalCount} · `}</span>{/if}<span
-						class="font-medium text-gray-500 dark:text-gray-400">{runningToken.attributes?.name ?? ''}</span
-					>{#if runningPreview}<span class="font-mono">{` · ${runningPreview}`}</span>{/if}
+					<span class="font-medium text-gray-500 dark:text-gray-400"
+						>{runningToken.attributes?.name ?? ''}</span
+					>{#if runningPreview}<span class="font-mono">{` · ${runningPreview}`}</span>{/if}{#if runningElapsed}<span
+							class="tabular-nums"
+							data-halo-tool-elapsed>{` · ${runningElapsed}`}</span
+						>{/if}
+				</div>
+			{:else if nameSummary}
+				<div
+					class="line-clamp-1 text-2xs leading-4 text-gray-400 dark:text-gray-500"
+					data-halo-tool-names
+				>
+					{nameSummary}
 				</div>
 			{/if}
 		</div>
@@ -188,13 +238,20 @@
 			<span
 				class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-2xs font-medium ring-1 {someExecuting
 					? 'bg-primary-50 text-primary-600 ring-primary-200/70 dark:bg-primary-900/20 dark:text-primary-300 dark:ring-primary-800/50'
-					: failedCount > 0
+					: failedCount > 0 || interruptedCount > 0
 						? 'bg-amber-50 text-amber-700 ring-amber-200/70 dark:bg-amber-900/20 dark:text-amber-300 dark:ring-amber-800/60'
 						: 'bg-green-50 text-green-600 ring-green-200/70 dark:bg-green-900/20 dark:text-green-400 dark:ring-green-800/60'}"
+				data-halo-tool-group-state={someExecuting
+					? 'running'
+					: failedCount > 0
+						? 'failed'
+						: interruptedCount > 0
+							? 'interrupted'
+							: 'done'}
 			>
 				{#if someExecuting}
 					<Spinner className="size-3" />
-				{:else if failedCount > 0}
+				{:else if failedCount > 0 || interruptedCount > 0}
 					<span class="size-1.5 rounded-full bg-amber-500" />
 				{:else}
 					<span class="size-1.5 rounded-full bg-green-500" />
@@ -204,7 +261,9 @@
 						? $i18n.t('Executing')
 						: failedCount > 0
 							? $i18n.t('{{COUNT}} failed', { COUNT: failedCount })
-							: $i18n.t('Completed')}
+							: interruptedCount > 0
+								? $i18n.t('Interrupted')
+								: $i18n.t('Completed')}
 				</span>
 			</span>
 
@@ -214,16 +273,6 @@
 		</div>
 	</button>
 
-	<!-- Progress bar (only during execution) -->
-	{#if someExecuting}
-		<div class="mx-2 mt-1 h-0.5 overflow-hidden rounded-full bg-gray-100 dark:bg-gray-800">
-			<div
-				class="h-full bg-gradient-to-r from-primary-400 to-primary-600 transition-all duration-500 ease-out rounded-full"
-				style="width: {(doneCount / totalCount) * 100}%"
-			/>
-		</div>
-	{/if}
-
 	<!-- Expanded: chip grid + detail panel -->
 	{#if expanded}
 		<div class="mt-2 px-1 pb-1" transition:slide={{ duration: 200, easing: quintOut }}>
@@ -232,11 +281,13 @@
 			<div class="flex flex-col gap-px" data-halo-tool-rows>
 				{#each tokens as toolToken, toolIdx (toolToken.attributes?.id ?? toolIdx)}
 					{@const attrs = toolToken.attributes}
-					{@const isDone = attrs?.done === 'true'}
+					{@const rowState = states[toolIdx]}
+					{@const isDone = rowState !== 'running'}
 					{@const isSelected = selectedIdx === toolIdx}
 					{@const preview = getToolCallPreview(attrs?.arguments ?? '')}
-					{@const outcome = isDone ? getToolCallOutcome(attrs?.result ?? '') : null}
-					{@const failed = outcome?.status === 'error'}
+					{@const outcome = attrs?.done === 'true' ? getToolCallOutcome(attrs?.result ?? '') : null}
+					{@const failed = rowState === 'error'}
+					{@const interrupted = rowState === 'interrupted'}
 
 					<button
 						type="button"
@@ -248,13 +299,21 @@
 								? 'text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800/60'
 								: 'text-gray-400 dark:text-gray-500'}"
 						aria-pressed={isSelected}
-						data-halo-tool-row={failed ? 'failed' : isDone ? 'done' : 'running'}
+						data-halo-tool-row={failed
+							? 'failed'
+							: interrupted
+								? 'interrupted'
+								: isDone
+									? 'done'
+									: 'running'}
 						on:click={() => selectTool(toolIdx)}
 					>
 						{#if !isDone}
 							<Spinner className="size-3 shrink-0" />
 						{:else if failed}
 							<span class="size-1.5 shrink-0 rounded-full bg-red-500" />
+						{:else if interrupted}
+							<span class="size-1.5 shrink-0 rounded-full bg-amber-500" />
 						{:else}
 							<span class="size-1.5 shrink-0 rounded-full bg-green-500" />
 						{/if}
@@ -270,6 +329,10 @@
 						{#if failed}
 							<span class="shrink-0 text-2xs font-medium text-red-600 dark:text-red-400">
 								{$i18n.t('Failed')}
+							</span>
+						{:else if interrupted}
+							<span class="shrink-0 text-2xs font-medium text-amber-600 dark:text-amber-400">
+								{$i18n.t('Interrupted')}
 							</span>
 						{/if}
 						{#if outcome && outcome.duration !== null}
@@ -296,7 +359,43 @@
 						{toolName}
 					</div>
 
-					{#if isWebSearchTool(toolName) && selectedDone}
+					{#if selectedIsPlain}
+						<pre
+							class="max-h-60 overflow-auto whitespace-pre-wrap break-all rounded-lg bg-gray-100/80 px-3 py-2 font-mono text-xs leading-5 text-gray-700 dark:bg-gray-900/70 dark:text-gray-200"
+							data-halo-tool-input>{selectedInput}</pre>
+						<div
+							class="mt-1.5 flex flex-wrap items-center gap-1.5 text-2xs text-gray-500 dark:text-gray-400"
+							data-halo-tool-outcome={selectedState}
+						>
+							<span
+								class="font-medium {selectedState === 'error'
+									? 'text-red-600 dark:text-red-400'
+									: selectedState === 'interrupted'
+										? 'text-amber-600 dark:text-amber-400'
+										: selectedState === 'running'
+											? 'text-primary-600 dark:text-primary-300'
+											: 'text-green-600 dark:text-green-400'}"
+							>
+								{selectedState === 'error'
+									? $i18n.t('Failed')
+									: selectedState === 'interrupted'
+										? $i18n.t('Interrupted')
+										: selectedState === 'running'
+											? $i18n.t('Executing')
+											: selectedState === 'success'
+												? $i18n.t('Succeeded')
+												: $i18n.t('Completed')}
+							</span>
+							{#if selectedOutcome && selectedOutcome.duration !== null && selectedOutcome.duration > 0}
+								<span class="tabular-nums">· {formatToolDuration(selectedOutcome.duration)}</span>
+							{/if}
+							{#if selectedOutcome?.reason}
+								<span>· {selectedOutcome.reason}</span>
+							{:else if selectedState === 'interrupted'}
+								<span>· {$i18n.t('The run ended before this step reported back')}</span>
+							{/if}
+						</div>
+					{:else if isWebSearchTool(toolName) && selectedDone}
 						{@const searchQuery = parseSearchQuery(args)}
 						{@const searchResults = parseSearchResults(result)}
 

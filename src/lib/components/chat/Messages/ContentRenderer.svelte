@@ -22,6 +22,9 @@
 	import Dropdown from '$lib/components/common/Dropdown.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import EllipsisHorizontal from '$lib/components/icons/EllipsisHorizontal.svelte';
+	import ChevronDown from '$lib/components/icons/ChevronDown.svelte';
+	import ToolCallGroup from '$lib/components/common/ToolCallGroup.svelte';
+	import { extractToolCallTokens, summarizeRunActivity } from '$lib/utils/run-activity';
 	import { flyAndScale } from '$lib/utils/transitions';
 	import { getCitationList } from '$lib/utils/citations';
 	import { decodeString, getDisplayTitle } from '$lib/utils/marked/citation-extension';
@@ -547,6 +550,22 @@
 			showInlineHtmlArtifactOriginalText = false;
 		}
 	}
+	// The visual card replaces the reply text, and with it the tool transcript:
+	// say above it what the run did ("20 步 · 终端 8 · 1 分 37 秒 · 1 个失败"),
+	// expandable into the full list.
+	$: runToolTokens = inlineHtmlArtifactPreview ? extractToolCallTokens(normalizedContent) : [];
+	$: runMessage = history?.messages?.[id] ?? null;
+	$: runDurationSeconds =
+		runMessage?.completedAt && runMessage?.timestamp
+			? Number(runMessage.completedAt) - Number(runMessage.timestamp)
+			: null;
+	$: runActivitySummary =
+		runToolTokens.length > 0 ? summarizeRunActivity(runToolTokens, runDurationSeconds) : '';
+	let showRunActivity = false;
+	// With a summary (or on a phone, where the corner button covered the
+	// card's title) the preview options sit in a row above the card.
+	$: inlineHtmlToolbarRow = Boolean(runActivitySummary) || $mobile;
+
 	$: renderInlineHtmlArtifactOriginalText = shouldRenderInlineHtmlArtifactOriginalText(
 		inlineHtmlArtifactPreview,
 		showInlineHtmlArtifactOriginalText
@@ -1137,9 +1156,36 @@
 					users reach it; on pointer devices it only fades in fully on hover.
 				-->
 				<div
-					class="absolute right-2 z-10 {showInlineHtmlArtifactOriginalText ? 'top-6' : 'top-2'}"
-					data-halo-inline-html-original-text-toggle="true"
+					class={inlineHtmlToolbarRow
+						? 'mb-1.5 flex min-h-7 items-center gap-2'
+						: `absolute right-2 z-10 ${showInlineHtmlArtifactOriginalText ? 'top-6' : 'top-2'}`}
+					data-halo-inline-html-toolbar={inlineHtmlToolbarRow ? 'row' : 'overlay'}
 				>
+					{#if inlineHtmlToolbarRow}
+						{#if runActivitySummary}
+							<button
+								type="button"
+								class="flex min-w-0 flex-1 items-center gap-1.5 rounded-lg px-1.5 py-1 text-left text-xs text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/60 dark:text-gray-400 dark:hover:bg-gray-800/60 dark:hover:text-gray-200"
+								aria-expanded={showRunActivity}
+								data-halo-run-summary
+								on:click={() => {
+									showRunActivity = !showRunActivity;
+								}}
+							>
+								<span
+									class="flex size-4 shrink-0 items-center justify-center transition-transform duration-200 {showRunActivity
+										? ''
+										: '-rotate-90'}"
+								>
+									<ChevronDown strokeWidth="2.5" className="size-3" />
+								</span>
+								<span class="truncate tabular-nums">{runActivitySummary}</span>
+							</button>
+						{:else}
+							<div class="flex-1"></div>
+						{/if}
+					{/if}
+				<div class="shrink-0" data-halo-inline-html-original-text-toggle="true">
 					<Dropdown bind:show={showInlineHtmlPreviewMenu} side="bottom" align="end">
 						<Tooltip content={$i18n.t('Preview options')} placement="bottom">
 							<button
@@ -1212,6 +1258,17 @@
 						</div>
 					</Dropdown>
 				</div>
+				</div>
+				{#if inlineHtmlToolbarRow && runActivitySummary && showRunActivity}
+					<div class="mb-2" data-halo-run-activity>
+						<ToolCallGroup
+							id={`${id}-run-activity`}
+							tokens={runToolTokens}
+							streaming={false}
+							expanded
+						/>
+					</div>
+				{/if}
 				<!--
 					Each document gets its own iframe element. Swapping `srcdoc` on an
 					already-inserted frame while its initial (empty) navigation is still

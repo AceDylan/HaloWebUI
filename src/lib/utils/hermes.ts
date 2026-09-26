@@ -119,3 +119,51 @@ export type HermesApprovalRequest = {
 	timeout?: number;
 	requested_at?: number;
 };
+
+/**
+ * Per-chat choices for how a hermes run starts (the composer's "Hermes 选项"):
+ * `dispatch` puts /reclaude, /codex or /agy in front of the message; `model`
+ * (+ `provider`) and `reasoning_effort` override hermes' configured default
+ * for this chat. Empty strings mean "hermes decides".
+ */
+export type HermesRunOptions = {
+	dispatch: '' | 'reclaude' | 'codex' | 'agy';
+	model: string;
+	provider: string;
+	reasoning_effort: '' | 'none' | 'low' | 'medium' | 'high' | 'xhigh';
+};
+
+export const EMPTY_HERMES_RUN_OPTIONS: HermesRunOptions = {
+	dispatch: '',
+	model: '',
+	provider: '',
+	reasoning_effort: ''
+};
+
+const HERMES_DISPATCHES = new Set(['reclaude', 'codex', 'agy']);
+const HERMES_EFFORTS = new Set(['none', 'low', 'medium', 'high', 'xhigh']);
+
+export const normalizeHermesRunOptions = (value: unknown): HermesRunOptions => {
+	const record = value && typeof value === 'object' ? (value as Record<string, unknown>) : {};
+	const text = (key: string) => (typeof record[key] === 'string' ? (record[key] as string).trim() : '');
+	const dispatch = text('dispatch');
+	const effort = text('reasoning_effort');
+	const model = text('model').slice(0, 200);
+	return {
+		dispatch: (HERMES_DISPATCHES.has(dispatch) ? dispatch : '') as HermesRunOptions['dispatch'],
+		model,
+		provider: model ? text('provider').slice(0, 200) : '',
+		reasoning_effort: (HERMES_EFFORTS.has(effort) ? effort : '') as HermesRunOptions['reasoning_effort']
+	};
+};
+
+/** Only the choices that differ from the default, for the request body; null when none do. */
+export const hermesRunOptionsForRequest = (
+	options: HermesRunOptions | null | undefined
+): Partial<HermesRunOptions> | null => {
+	const normalized = normalizeHermesRunOptions(options);
+	const picked = Object.fromEntries(
+		Object.entries(normalized).filter(([, value]) => value !== '')
+	) as Partial<HermesRunOptions>;
+	return Object.keys(picked).length > 0 ? picked : null;
+};

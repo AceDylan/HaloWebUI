@@ -1,4 +1,6 @@
 <script lang="ts">
+	import HermesRunOptions from './MessageInput/HermesRunOptions.svelte';
+	import { EMPTY_HERMES_RUN_OPTIONS, type HermesRunOptions as HermesRunOptionsValue } from '$lib/utils/hermes';
 	import type { Writable } from 'svelte/store';
 	import { toast } from 'svelte-sonner';
 	import { v4 as uuidv4 } from 'uuid';
@@ -103,6 +105,33 @@
 	// The reply on screen is a hermes run: Enter/send injects guidance into it
 	// instead of queueing a new turn, and the placeholder says so.
 	export let steerable = false;
+	export let showHermesOptions = false;
+	export let hermesOptions: HermesRunOptionsValue = { ...EMPTY_HERMES_RUN_OPTIONS };
+	// A hermes run that has been going for a while is expensive to lose: the
+	// first press (or Esc) arms the stop button, the second one stops.
+	export let stopConfirmAfterSeconds: number | null = null;
+	export let runStartedAt: number | null = null;
+	let stopArmed = false;
+	let stopArmTimer: ReturnType<typeof setTimeout> | null = null;
+	const requestStop = () => {
+		const longRun =
+			stopConfirmAfterSeconds !== null &&
+			runStartedAt !== null &&
+			Date.now() / 1000 - Number(runStartedAt) > stopConfirmAfterSeconds;
+		if (longRun && !stopArmed) {
+			stopArmed = true;
+			if (stopArmTimer) clearTimeout(stopArmTimer);
+			stopArmTimer = setTimeout(() => {
+				stopArmed = false;
+				stopArmTimer = null;
+			}, 3000);
+			return;
+		}
+		stopArmed = false;
+		if (stopArmTimer) clearTimeout(stopArmTimer);
+		stopArmTimer = null;
+		stopResponse();
+	};
 	// That run is paused on a command approval dialog.
 	export let awaitingApproval = false;
 
@@ -1435,7 +1464,7 @@
 													const escapeOnComposer =
 														e.key === 'Escape' && shouldEscapeStopResponse(e);
 													if (escapeOnComposer) {
-														stopResponse();
+														requestStop();
 													}
 
 													if (isCtrlPressed && e.key === 'Enter' && e.shiftKey) {
@@ -1555,7 +1584,7 @@
 												const escapeOnComposer =
 													e.key === 'Escape' && shouldEscapeStopResponse(e);
 												if (escapeOnComposer) {
-													stopResponse();
+													requestStop();
 												}
 
 												// Command/Ctrl + Shift + Enter to submit a message pair
@@ -2007,12 +2036,17 @@
 												{/if}
 											{/if}
 
+											{#if showHermesOptions}
+												<HermesRunOptions bind:options={hermesOptions} />
+											{/if}
+
 											</div>
 											</div>
 
 									<div class="self-end flex space-x-1 mr-1 shrink-0">
 										{#if isResponding}
-											<div class=" flex items-center gap-1">
+											<!-- Wider apart on phones: steer and stop sat 4px apart. -->
+											<div class=" flex items-center gap-1 max-sm:gap-3">
 												{#if hasSubmittableContent}
 													<!-- Send while a reply runs: guidance into a hermes run, else queued
 													     for after the reply. Only Enter could do this before; on a phone
@@ -2068,12 +2102,19 @@
 														</button>
 													</Tooltip>
 												{/if}
-												<Tooltip content={$i18n.t('Stop')}>
+												<Tooltip
+													content={stopArmed ? $i18n.t('Press again to stop the task') : $i18n.t('Stop')}
+												>
 													<button
-														class="bg-white hover:bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-white dark:hover:bg-gray-800 transition rounded-full p-[7px] max-sm:p-2.5"
-														aria-label={$i18n.t('Stop')}
+														class="{stopArmed
+															? 'bg-red-600 text-white hover:bg-red-700 dark:bg-red-500 dark:hover:bg-red-400 ring-2 ring-red-300 dark:ring-red-800'
+															: 'bg-white hover:bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-white dark:hover:bg-gray-800'} transition rounded-full p-[7px] max-sm:p-2.5"
+														aria-label={stopArmed
+															? $i18n.t('Press again to stop the task')
+															: $i18n.t('Stop')}
+														data-halo-stop-armed={stopArmed ? 'true' : undefined}
 														on:click={() => {
-															stopResponse();
+															requestStop();
 														}}
 													>
 														<svg

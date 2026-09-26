@@ -849,6 +849,9 @@ def _schedule_approval_webhook(request, user, metadata, approval: dict):
 # The composer's "派发方式": the same prefixes a person types, so hermes (and
 # its skill bundles) sees exactly what /reclaude typed by hand would send.
 HERMES_DISPATCH_COMMANDS = {"reclaude": "/reclaude", "codex": "/codex", "agy": "/agy"}
+# "接着上次": the run a follow-up goes back to, as the runners name them
+# ("20260927-005655-f2dd355f", an answer round "…-a1").
+HERMES_RUNNER_RUN_ID_RE = re.compile(r"^\d{8}-\d{6}-[0-9a-f]{6,32}(?:-a\d+)*$")
 # What hermes' runs API takes as model_options.reasoning_effort ("ultra" is
 # hermes-only; the web UI never sends it).
 HERMES_REASONING_EFFORTS = ("none", "minimal", "low", "medium", "high", "xhigh", "max")
@@ -863,6 +866,9 @@ def _hermes_run_options(form_data) -> dict:
     dispatch = str(raw.get("dispatch") or "").strip().lower()
     if dispatch in HERMES_DISPATCH_COMMANDS:
         options["dispatch"] = dispatch
+        continue_run = str(raw.get("continue_run") or "").strip()
+        if HERMES_RUNNER_RUN_ID_RE.match(continue_run):
+            options["continue_run"] = continue_run
     model = str(raw.get("model") or "").strip()
     if model and len(model) <= 200:
         options["model"] = model
@@ -1098,11 +1104,18 @@ def _build_run_payload(form_data, metadata, upstream_model_id, user=None):
         run_input = user_message
 
     options = _hermes_run_options(form_data)
+    # "接着上次": the message goes back to that run's own session as typed (no
+    # /reclaude in front: that would be a new task). A typed command wins.
+    continue_run = (
+        options.get("continue_run")
+        if not continuing and not _starts_with_command(_run_input_text(run_input))
+        else None
+    )
     if not continuing:
         run_input = _append_run_input_text(
             run_input, _attachment_note(_attachment_host_paths(metadata, user))
         )
-        if options.get("dispatch"):
+        if options.get("dispatch") and not continue_run:
             run_input = _prefix_run_input(
                 run_input, HERMES_DISPATCH_COMMANDS[options["dispatch"]]
             )
@@ -1112,7 +1125,14 @@ def _build_run_payload(form_data, metadata, upstream_model_id, user=None):
         "model": options.get("model") or upstream_model_id,
     }
     runner = None if continuing else _dispatch_runner(run_input)
-    if runner and HERMES_AGENT_FAST_DISPATCH:
+    if continue_run:
+        # hermes resumes the run itself (`answer`), or tells its model which run
+        # the user meant when it cannot.
+        payload["dispatch"] = {
+            "runner": options["dispatch"],
+            "continue_run": continue_run,
+        }
+    elif runner and HERMES_AGENT_FAST_DISPATCH:
         # The typed prefix stays in the input: a hermes without the fast path
         # (or one that declines it) launches the same run through its model.
         payload["dispatch"] = {"runner": runner}
@@ -1719,6 +1739,9 @@ def _runtime_from_event(event) -> dict:
             runtime["runner_run_id"] = runner_run_id[:128]
         if dispatch.get("fast"):
             runtime["fast_dispatch"] = True
+        continued_from = str(dispatch.get("continued_from") or "").strip()
+        if continued_from:
+            runtime["continued_from"] = continued_from[:128]
     return runtime
 
 
@@ -2048,6 +2071,7 @@ async def run_hermes_agent(request, form_data, user, metadata, model, events, ta
                 "fallback_from": runtime.get("fallback_from"),
                 "runner_run_id": runtime.get("runner_run_id"),
                 "fast_dispatch": runtime.get("fast_dispatch"),
+                "continued_from": runtime.get("continued_from"),
             }
             state.update({key: value for key, value in details.items() if value})
             return state
@@ -2615,7 +2639,15 @@ async def _recover_inflight_run(app, chat_id: str, record: dict) -> None:
     completed_at = int(time.time())
     run_state = {"active": False, "run_id": run_id, "recovered": True}
     runtime = _runtime_from_event(outcome)
-    for key in ("dispatch", "model", "provider", "fallback_from", "runner_run_id", "fast_dispatch"):
+    for key in (
+        "dispatch",
+        "model",
+        "provider",
+        "fallback_from",
+        "runner_run_id",
+        "fast_dispatch",
+        "continued_from",
+    ):
         if runtime.get(key):
             run_state[key] = runtime[key]
     update = {

@@ -150,6 +150,8 @@
 	import { HermesSteerError, steerHermesRun } from '$lib/apis/hermes';
 	import {
 		EMPTY_HERMES_RUN_OPTIONS,
+		findHermesContinuation,
+		hermesDispatchToRestore,
 		hermesOptionsForMessage,
 		hermesOptionsForReply,
 		hermesOptionsToKeep,
@@ -1123,7 +1125,7 @@
 		prompt = item.prompt;
 		files = item.files;
 		if (item.hermesOptions?.dispatch) {
-			hermesOptions = { ...hermesOptions, dispatch: item.hermesOptions.dispatch };
+			hermesOptions = { ...hermesOptions, dispatch: hermesDispatchToRestore(item.hermesOptions) };
 		}
 		messageQueue = messageQueue.filter((m) => m.id !== id);
 	};
@@ -1165,13 +1167,23 @@
 		selectedModels?.[0],
 		$config?.hermes_agent_model_ids
 	);
+	// "接着上次": the chat ends on a runner's report, so a message left on
+	// "直接" goes back to that run's session instead of to hermes' model.
+	$: hermesContinuation = showHermesOptions ? findHermesContinuation(history) : null;
 
 	// What a message about to be sent carries (null when no hermes model is
 	// selected). A dispatch covers this one message: "进度怎么样？" in a chat
 	// left on reclaude started another reclaude run with that as its task.
-	const takeHermesOptionsForMessage = (): HermesRunOptions | null => {
+	const takeHermesOptionsForMessage = (
+		userPrompt: unknown = '',
+		parentId: string | null = history?.currentId ?? null
+	): HermesRunOptions | null => {
 		if (!showHermesOptions) return null;
-		const sent = hermesOptionsForMessage(hermesOptions);
+		const sent = hermesOptionsForMessage(
+			hermesOptions,
+			findHermesContinuation({ currentId: parentId, messages: history?.messages }),
+			userPrompt
+		);
 		if (hermesOptions.dispatch) {
 			hermesOptions = hermesOptionsToKeep(hermesOptions);
 		}
@@ -5325,7 +5337,7 @@
 						prompt: userPrompt,
 						files: queuedFiles,
 						referenceFiles,
-						hermesOptions: takeHermesOptionsForMessage()
+						hermesOptions: takeHermesOptionsForMessage(userPrompt)
 					}
 				];
 				prompt = '';
@@ -5366,7 +5378,9 @@
 
 		// Create user message
 		const sentHermesOptions =
-			hermesOptionsOverride !== undefined ? hermesOptionsOverride : takeHermesOptionsForMessage();
+			hermesOptionsOverride !== undefined
+				? hermesOptionsOverride
+				: takeHermesOptionsForMessage(userPrompt);
 		let userMessageId = uuidv4();
 		let userMessage = {
 			id: userMessageId,
@@ -5442,7 +5456,10 @@
 			files = [...sentFiles, ...files];
 			// The dispatch went with the message; it comes back with the prompt.
 			if (userMessage.hermesOptions?.dispatch) {
-				hermesOptions = { ...hermesOptions, dispatch: userMessage.hermesOptions.dispatch };
+				hermesOptions = {
+					...hermesOptions,
+					dispatch: hermesDispatchToRestore(userMessage.hermesOptions)
+				};
 			}
 			toast.error($i18n.t('Message not sent: {{error}}', { error: detail }));
 			return;
@@ -6488,7 +6505,7 @@
 		let userPrompt = prompt;
 		let userMessageId = uuidv4();
 
-		const sentHermesOptions = takeHermesOptionsForMessage();
+		const sentHermesOptions = takeHermesOptionsForMessage(userPrompt, parentId);
 		let userMessage = {
 			id: userMessageId,
 			parentId: parentId,
@@ -7044,6 +7061,7 @@
 								bind:maxThinkingTokens
 								{showHermesOptions}
 								bind:hermesOptions
+								{hermesContinuation}
 								{activeAssistant}
 								onActivateAssistant={activateAssistant}
 								onDeactivateAssistant={deactivateAssistant}

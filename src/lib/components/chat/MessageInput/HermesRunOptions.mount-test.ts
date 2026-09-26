@@ -24,7 +24,7 @@ let app: any;
 let target: any;
 let api: any;
 
-const mount = async (options: Record<string, string> = {}) => {
+const mount = async (options: Record<string, string> = {}, continuation: any = null) => {
 	const { writable } = await import('svelte/store');
 	const i18n = writable({ t: (key: string) => key });
 	const { default: HermesRunOptions } = await import('./HermesRunOptions.svelte');
@@ -32,7 +32,7 @@ const mount = async (options: Record<string, string> = {}) => {
 	document.body.appendChild(target);
 	app = new HermesRunOptions({
 		target,
-		props: { options: { dispatch: '', model: '', provider: '', ...options } },
+		props: { options: { dispatch: '', model: '', provider: '', ...options }, continuation },
 		context: new Map<string, any>([['i18n', i18n]])
 	});
 	(target.querySelector('button') as any).click();
@@ -99,6 +99,36 @@ describe('HermesRunOptions', () => {
 		expect(hint.textContent).toContain('交给 Codex 在后台独占执行');
 		expect(hint.textContent).toContain('只对下一条消息生效');
 		expect(panel.textContent).toContain('派发给 reclaude/codex/agy 时它们用自己的模型');
+	});
+
+	it('after a runner report, offers going back to that run first, and "直接" for hermes', async () => {
+		const run = { runner: 'reclaude', runId: '20260927-005655-f2dd355f', status: 'success' };
+		const panel: any = await mount({}, run);
+		const choice = (name: string) =>
+			panel.querySelector(`[data-halo-hermes-dispatch="${name}"]`) as any;
+		const summary = () =>
+			(target.querySelector('[data-halo-hermes-options-summary]') as any)?.textContent ?? '';
+		const hint = () => panel.querySelector('[data-halo-hermes-dispatch-hint]').textContent;
+		expect(choice('continue').getAttribute('aria-checked')).toBe('true');
+		expect(choice('direct').getAttribute('aria-checked')).toBe('false');
+		expect(summary()).toContain('接着 reclaude');
+		expect(hint()).toContain('交回 reclaude 运行 20260927-005655-f2dd355f 的原会话继续');
+		choice('direct').click();
+		await waitFor(() => choice('direct').getAttribute('aria-checked') === 'true', 'direct picked');
+		expect(choice('continue').getAttribute('aria-checked')).toBe('false');
+		expect(summary()).toContain('直接');
+		expect(hint()).toContain('Hermes 自己回答');
+		choice('continue').click();
+		await waitFor(() => choice('continue').getAttribute('aria-checked') === 'true', 'back to the run');
+	});
+
+	it('without a report to go back to, "直接" is the default and nothing is added', async () => {
+		const panel: any = await mount();
+		expect(Boolean(panel.querySelector('[data-halo-hermes-dispatch="continue"]'))).toBe(false);
+		expect(
+			(panel.querySelector('[data-halo-hermes-dispatch="direct"]') as any).getAttribute('aria-checked')
+		).toBe('true');
+		expect(Boolean(target.querySelector('[data-halo-hermes-options-summary]'))).toBe(false);
 	});
 
 	it('keeps showing a model picked earlier that the list no longer offers', async () => {

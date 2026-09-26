@@ -713,6 +713,64 @@ def test_a_fast_dispatch_is_recorded(monkeypatch):
     assert final["hermes_run"]["dispatch"] == "codex"
 
 
+def test_a_follow_up_goes_back_to_its_run_as_typed():
+    run_id = "20260927-005655-f2dd355f"
+    options = {"dispatch": "reclaude", "continue_run": run_id}
+    payload = hermes_agent._build_run_payload(
+        {"messages": [{"role": "user", "content": "多久观察一次？"}], "hermes_options": options},
+        {"chat_id": "chat-1"},
+        "hermes-agent",
+    )
+    # No /reclaude in front: that would be a new task.
+    assert payload["input"] == "多久观察一次？"
+    assert payload["dispatch"] == {"runner": "reclaude", "continue_run": run_id}
+    # A typed command is a new task, whatever the panel said.
+    typed = hermes_agent._build_run_payload(
+        {"messages": [{"role": "user", "content": "/codex 新任务"}], "hermes_options": options},
+        {"chat_id": "chat-1"},
+        "hermes-agent",
+    )
+    assert typed["input"] == "/codex 新任务" and typed["dispatch"] == {"runner": "codex"}
+    # Only a run id is passed on; without a dispatch there is nothing to continue.
+    for bad in (
+        {"dispatch": "reclaude", "continue_run": "../../etc/passwd"},
+        {"dispatch": "reclaude", "continue_run": "20260927-005655-f2dd355f; rm -rf /"},
+    ):
+        assert "continue_run" not in hermes_agent._hermes_run_options({"hermes_options": bad})
+    assert hermes_agent._hermes_run_options(
+        {"hermes_options": {"continue_run": run_id}}
+    ) == {}
+    assert hermes_agent._hermes_run_options(
+        {"hermes_options": {"dispatch": "codex", "continue_run": f"{run_id}-a1"}}
+    ) == {"dispatch": "codex", "continue_run": f"{run_id}-a1"}
+
+
+def test_a_continued_run_is_recorded(monkeypatch):
+    hermes = _Hermes(
+        events=[
+            {"event": "message.delta", "delta": "已交回 reclaude 上次的任务继续"},
+            {"event": "run.completed", "output": "已交回 reclaude 上次的任务继续",
+             "dispatch": {"runner": "reclaude", "run_id": "20260927-1-a1", "fast": True,
+                          "continued_from": "20260927-1"}},
+        ]
+    )
+    final, _emitted, _ = _run(
+        monkeypatch,
+        hermes,
+        "多久观察一次？",
+        {"hermes_options": {"dispatch": "reclaude", "continue_run": "20260927-005655-f2dd355f"}},
+    )
+    run = final["hermes_run"]
+    assert run["continued_from"] == "20260927-1" and run["runner_run_id"] == "20260927-1-a1"
+    assert run["dispatch"] == "reclaude" and run["fast_dispatch"] is True
+    started = json.loads(json.dumps(hermes.posts[0][1]["json"]))
+    assert started["input"] == "多久观察一次？"
+    assert started["dispatch"] == {
+        "runner": "reclaude",
+        "continue_run": "20260927-005655-f2dd355f",
+    }
+
+
 def test_parallel_calls_of_one_tool_close_by_their_call_id(monkeypatch):
     hermes = _Hermes(
         events=[

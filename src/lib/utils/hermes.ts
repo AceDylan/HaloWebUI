@@ -126,11 +126,18 @@ export type HermesApprovalRequest = {
  * (+ `provider`) overrides hermes' configured default for this chat. Empty
  * strings mean "hermes decides". The thinking level is HaloWebUI's (see
  * _inherited_reasoning_effort in the backend), not a hermes option.
+ *
+ * In the panel, `dispatch: ''` follows the chat: right after a runner's report
+ * the message goes back to that run ("接着上次", see findHermesContinuation),
+ * otherwise to hermes; `'hermes'` is hermes even then. A sent message records
+ * what that resolved to: a runner plus `continue_run` for a follow-up.
  */
 export type HermesRunOptions = {
-	dispatch: '' | 'reclaude' | 'codex' | 'agy';
+	dispatch: '' | 'hermes' | 'reclaude' | 'codex' | 'agy';
 	model: string;
 	provider: string;
+	/** The run a sent follow-up went back to (its session resumed, not a new task). */
+	continue_run?: string;
 };
 
 export const EMPTY_HERMES_RUN_OPTIONS: HermesRunOptions = {
@@ -139,17 +146,26 @@ export const EMPTY_HERMES_RUN_OPTIONS: HermesRunOptions = {
 	provider: ''
 };
 
-const HERMES_DISPATCHES = new Set(['reclaude', 'codex', 'agy']);
+const HERMES_RUNNERS = new Set(['reclaude', 'codex', 'agy']);
+const HERMES_DISPATCHES = new Set([...HERMES_RUNNERS, 'hermes']);
+// A run id as the runners name them: "20260927-005655-f2dd355f", an answer round "…-a1".
+const RUNNER_RUN_ID_RE = /^\d{8}-\d{6}-[0-9a-f]{6,32}(?:-a\d+)*$/;
+// "/reclaude …", "/model": a typed command wins over the panel ("/root/x" is a path).
+const SLASH_COMMAND_RE = /^\s*\/[A-Za-z][\w-]*(?:\s|$)/;
 
 export const normalizeHermesRunOptions = (value: unknown): HermesRunOptions => {
 	const record = value && typeof value === 'object' ? (value as Record<string, unknown>) : {};
 	const text = (key: string) => (typeof record[key] === 'string' ? (record[key] as string).trim() : '');
 	const dispatch = text('dispatch');
 	const model = text('model').slice(0, 200);
+	const continueRun = text('continue_run');
 	return {
 		dispatch: (HERMES_DISPATCHES.has(dispatch) ? dispatch : '') as HermesRunOptions['dispatch'],
 		model,
-		provider: model ? text('provider').slice(0, 200) : ''
+		provider: model ? text('provider').slice(0, 200) : '',
+		...(HERMES_RUNNERS.has(dispatch) && RUNNER_RUN_ID_RE.test(continueRun)
+			? { continue_run: continueRun }
+			: {})
 	};
 };
 
@@ -165,19 +181,75 @@ export const hermesRunOptionsForRequest = (
 };
 
 /**
+ * "接着上次": the run whose report ends the chat's current branch. The next
+ * message goes back to that run's own session, which remembers what it read
+ * and did; hermes' model only knows the report as text and used to answer on
+ * its own. Null while a run is still going or once anything was said after
+ * its report, and for a run that never started.
+ */
+export type HermesContinuation = {
+	runner: 'reclaude' | 'codex' | 'agy';
+	runId: string;
+	status: string;
+};
+
+type ChatHistoryLike =
+	| {
+			currentId?: string | null;
+			messages?: Record<string, any>;
+	  }
+	| null
+	| undefined;
+
+export const findHermesContinuation = (history: ChatHistoryLike): HermesContinuation | null => {
+	const last = history?.currentId ? history.messages?.[history.currentId] : null;
+	if (!last || last.role !== 'assistant' || last.done !== true || !last.parentId) return null;
+	const notice = parseHermesRunNotice(history?.messages?.[last.parentId]);
+	if (!notice || notice.status === 'quota_blocked') return null;
+	const runner = notice.agent.toLowerCase().replace(/-runner$/, '');
+	if (!HERMES_RUNNERS.has(runner) || !RUNNER_RUN_ID_RE.test(notice.runId)) return null;
+	return {
+		runner: runner as HermesContinuation['runner'],
+		runId: notice.runId,
+		status: notice.status
+	};
+};
+
+/**
  * The choices a message was sent with, kept on the user message: 派发方式 is
  * for that one message (the panel falls back to "直接" once it is sent), the
  * model stays for the chat. Regenerating a reply reuses what its message was
- * sent with, not whatever the panel shows now.
+ * sent with, not whatever the panel shows now. Left on "直接" right after a
+ * runner's report, the message goes back to that run (`continuation`), unless
+ * it starts with a command of its own.
  */
-export const hermesOptionsForMessage = (options: HermesRunOptions | null | undefined) =>
-	normalizeHermesRunOptions(options);
+export const hermesOptionsForMessage = (
+	options: HermesRunOptions | null | undefined,
+	continuation: HermesContinuation | null = null,
+	prompt: unknown = ''
+): HermesRunOptions => {
+	const { continue_run: _stale, ...picked } = normalizeHermesRunOptions(options);
+	if (picked.dispatch === 'hermes') return { ...picked, dispatch: '' };
+	if (!picked.dispatch && continuation && !SLASH_COMMAND_RE.test(String(prompt ?? ''))) {
+		return { ...picked, dispatch: continuation.runner, continue_run: continuation.runId };
+	}
+	return picked;
+};
 
 /** What the chat remembers between messages: the model, never a dispatch. */
-export const hermesOptionsToKeep = (value: unknown): HermesRunOptions => ({
-	...normalizeHermesRunOptions(value),
-	dispatch: ''
-});
+export const hermesOptionsToKeep = (value: unknown): HermesRunOptions => {
+	const { continue_run: _sent, ...kept } = normalizeHermesRunOptions(value);
+	return { ...kept, dispatch: '' };
+};
+
+/**
+ * The panel's 派发方式 for a message taken back into the input (edited from
+ * the queue, or not sent at all): what was picked, not what it resolved to.
+ */
+export const hermesDispatchToRestore = (sent: unknown): HermesRunOptions['dispatch'] => {
+	const options = normalizeHermesRunOptions(sent);
+	return options.continue_run ? '' : options.dispatch;
+};
 
 /**
  * The options a reply is (re)generated with: those recorded on its user
@@ -194,6 +266,7 @@ export const hermesOptionsForReply = (
 
 /** The run details the backend records on a hermes reply (`hermes_run`). */
 export type HermesRunDetails = {
+	active?: boolean;
 	dispatch?: string;
 	requested_model?: string;
 	model?: string;
@@ -201,6 +274,8 @@ export type HermesRunDetails = {
 	fallback_from?: string;
 	runner_run_id?: string;
 	fast_dispatch?: boolean;
+	/** The run a follow-up went back to ("接着上次"). */
+	continued_from?: string;
 };
 
 const DISPATCH_LABELS: Record<string, string> = {
@@ -223,9 +298,21 @@ export const describeHermesReply = (
 	const requested = String(run?.requested_model || sent?.model || '').trim();
 	const used = String(run?.model || '').trim();
 	const fallbackFrom = String(run?.fallback_from || '').trim();
+	const continuedFrom = String(run?.continued_from || '').trim();
+	const askedToContinue = String(sent?.continue_run || '').trim();
+	// Asked to go back to the run, but hermes' model took the message (the run
+	// was still going, or could not be resumed): the model answered.
+	const handedToModel =
+		Boolean(askedToContinue) && !continuedFrom && run?.active === false && !run.fast_dispatch;
 	const parts: string[] = [];
 	const lines: string[] = [];
-	if (dispatch) {
+	if (dispatch && continuedFrom) {
+		parts.push(`${DISPATCH_LABELS[dispatch] ?? dispatch} · 接着上次`);
+		lines.push(`交回 ${dispatch} 运行 ${continuedFrom} 的原会话继续（没有经过模型）`);
+		if (run?.runner_run_id) lines.push(`run ${run.runner_run_id}`);
+	} else if (handedToModel) {
+		lines.push(`没能直接交回 ${dispatch} 运行 ${askedToContinue}，由 Hermes 处理`);
+	} else if (dispatch) {
 		parts.push(DISPATCH_LABELS[dispatch] ?? dispatch);
 		lines.push(
 			run?.fast_dispatch
@@ -248,7 +335,7 @@ export const describeHermesReply = (
 		);
 	}
 	if (parts.length === 0) return null;
-	if (dispatch && !run?.fast_dispatch) {
+	if (dispatch && !run?.fast_dispatch && !handedToModel) {
 		lines.push('模型只管 Hermes 这一轮，不影响 runner 自己用什么模型');
 	}
 	return { label: parts.join(' · '), title: lines.join('\n'), fallback: Boolean(fallbackFrom) };

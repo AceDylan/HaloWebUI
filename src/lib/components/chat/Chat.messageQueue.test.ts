@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { parse, preprocess } from 'svelte/compiler';
 import { vitePreprocess } from '@sveltejs/vite-plugin-svelte';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
+import { hermesDispatchToRestore } from '$lib/utils/hermes';
 
 // Runs the real editQueuedMessage() out of Chat.svelte (same technique as
 // Chat.initNewChat.test.ts). A message queued with 派发方式 = reclaude had the
@@ -26,6 +27,7 @@ const composer = (queued: Record<string, any>) => {
 		prompt: '',
 		files: [],
 		hermesOptions: { dispatch: '', model: 'gemini-chat', provider: '' },
+		hermesDispatchToRestore,
 		messageQueue: [
 			{ id: 'q1', chatId: 'c', prompt: 'fix it', files: [{ id: 'f' }], ...queued },
 			{ id: 'q2', chatId: 'c', prompt: 'later', files: [] }
@@ -56,6 +58,21 @@ describe('editQueuedMessage', () => {
 		// The dispatch comes back; the chat's model stays what the panel shows now.
 		expect(store.hermesOptions).toEqual({ dispatch: 'reclaude', model: 'gemini-chat', provider: '' });
 		expect(store.messageQueue.map((item: any) => item.id)).toEqual(['q2']);
+	});
+
+	it('puts a follow-up back on following the chat, not on a new task', () => {
+		const { store, edit } = composer({
+			hermesOptions: {
+				dispatch: 'reclaude',
+				model: '',
+				provider: '',
+				continue_run: '20260927-005655-f2dd355f'
+			}
+		});
+
+		edit('q1');
+
+		expect(store.hermesOptions).toEqual({ dispatch: '', model: 'gemini-chat', provider: '' });
 	});
 
 	it('leaves the panel alone for a message queued without a dispatch', () => {

@@ -1,6 +1,10 @@
 <script lang="ts">
 	import HermesRunOptions from './MessageInput/HermesRunOptions.svelte';
-	import { EMPTY_HERMES_RUN_OPTIONS, type HermesRunOptions as HermesRunOptionsValue } from '$lib/utils/hermes';
+	import {
+		EMPTY_HERMES_RUN_OPTIONS,
+		type HermesContinuation,
+		type HermesRunOptions as HermesRunOptionsValue
+	} from '$lib/utils/hermes';
 	import type { Writable } from 'svelte/store';
 	import { toast } from 'svelte-sonner';
 	import { v4 as uuidv4 } from 'uuid';
@@ -107,6 +111,8 @@
 	export let steerable = false;
 	export let showHermesOptions = false;
 	export let hermesOptions: HermesRunOptionsValue = { ...EMPTY_HERMES_RUN_OPTIONS };
+	// The run whose report ends the chat: "直接" goes back to it ("接着上次").
+	export let hermesContinuation: HermesContinuation | null = null;
 	// A hermes run that has been going for a while is expensive to lose: the
 	// first press (or Esc) arms the stop button, the second one stops.
 	export let stopConfirmAfterSeconds: number | null = null;
@@ -291,8 +297,10 @@
 		? $i18n.t('Task paused for approval · answer the dialog to continue')
 		: steerable && isResponding
 			? $i18n.t('Task running · what you type is injected as guidance')
-			: showHermesOptions && hermesOptions?.dispatch
+			: showHermesOptions && hermesOptions?.dispatch && hermesOptions.dispatch !== 'hermes'
 				? `将交给 ${hermesOptions.dispatch} 执行…`
+				: showHermesOptions && !hermesOptions?.dispatch && hermesContinuation
+					? `将交回 ${hermesContinuation.runner} 上次的任务继续…`
 				: placeholder
 				? placeholder
 				: $i18n.t('How can I help you today?');
@@ -2039,7 +2047,10 @@
 											{/if}
 
 											{#if showHermesOptions}
-												<HermesRunOptions bind:options={hermesOptions} />
+												<HermesRunOptions
+													bind:options={hermesOptions}
+													continuation={hermesContinuation}
+												/>
 											{/if}
 
 											</div>

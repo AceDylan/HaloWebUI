@@ -666,10 +666,22 @@ def test_a_restart_finishes_the_reply_it_left_behind(monkeypatch):
     monkeypatch.setattr(hermes_agent, "create_task",
                         lambda coroutine, id=None: created.append((id, coroutine)) or ("t", None))
 
+    seen = []
+    original_wait = hermes_agent._await_run_outcome
+
+    async def watching_wait(*args, **kwargs):
+        seen.append(dict(hermes_agent._ACTIVE_RUNS.get("chat-1") or {}))
+        return await original_wait(*args, **kwargs)
+
+    monkeypatch.setattr(hermes_agent, "_await_run_outcome", watching_wait)
+
     assert hermes_agent.resume_inflight_runs(SimpleNamespace()) == 1
     chat_id, coroutine = created[0]
     assert chat_id == "chat-1"
     asyncio.run(coroutine)
+    # Listed as running (sidebar, steering) while it waited, and no longer after.
+    assert seen[0]["user_id"] == "user-1" and callable(seen[0]["steer"])
+    assert "chat-1" not in hermes_agent._ACTIVE_RUNS
 
     final = upserts[-1]
     assert final["done"] is True

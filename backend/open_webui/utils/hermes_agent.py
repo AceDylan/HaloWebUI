@@ -2636,11 +2636,43 @@ async def _recover_inflight_run(app, chat_id: str, record: dict) -> None:
         except Exception:
             pass
 
+    async def _steer(text: str):
+        # Guidance still reaches the run; this reply only waits for the outcome,
+        # so no transcript marker is added.
+        timeout = aiohttp.ClientTimeout(total=15)
+        async with aiohttp.ClientSession(trust_env=True, timeout=timeout) as session:
+            async with session.post(
+                f"{base_url}/runs/{run_id}/steer",
+                json={"input": text},
+                headers=headers,
+                ssl=AIOHTTP_CLIENT_SESSION_SSL,
+            ) as resp:
+                if resp.status >= 400:
+                    body = await resp.text()
+                    raise HermesSteerError(
+                        409 if resp.status in (404, 409) else 502,
+                        f"hermes did not accept the steer ({resp.status}): {body[:300]}",
+                    )
+
     log.info(f"picking up hermes run {run_id} for chat {chat_id} after a restart")
     await _status("HaloWebUI 重启过，正在向 Hermes 取回这次任务的结果…", False)
+    # Listed as running again (sidebar, tab title, steering) until the outcome is in;
+    # a deploy restarts HaloWebUI in the middle of runs.
+    _register_run(
+        chat_id,
+        {
+            "user_id": user.id,
+            "message_id": message_id,
+            "run_id": run_id,
+            "started_at": float(record.get("started_at") or time.time()),
+            "steers": 0,
+            "steer": _steer,
+        },
+    )
     try:
         outcome = await _await_run_outcome(base_url, headers, run_id)
     except asyncio.CancelledError:
+        _unregister_run(chat_id, run_id)
         if not _SHUTTING_DOWN:
             # Stopped from the chat while waiting: stop hermes too.
             try:
@@ -2656,6 +2688,10 @@ async def _recover_inflight_run(app, chat_id: str, record: dict) -> None:
                 pass
             _forget_inflight(chat_id, run_id)
         raise
+    except BaseException:
+        _unregister_run(chat_id, run_id)
+        raise
+    _unregister_run(chat_id, run_id)
 
     status = str(outcome.get("status") or "")
     output = None

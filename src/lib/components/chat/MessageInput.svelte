@@ -511,9 +511,10 @@
 	})();
 
 	// Active feature chips (web search, image generation) share one 28px pill with a
-	// primary tint, matching the quick-command and settings chips beside them.
+	// primary tint, matching the quick-command and settings chips beside them; 32px
+	// on phones, the height of the quick-command chip there, so it is easier to tap.
 	const featureBadgeBaseClass =
-		'group shrink-0 h-7 rounded-full flex items-center border transition-colors duration-200 cursor-pointer bg-primary-50 hover:bg-primary-100 dark:bg-primary-500/15 dark:hover:bg-primary-500/25 border-primary-200/80 dark:border-primary-500/30';
+		'group shrink-0 h-7 max-sm:h-8 rounded-full flex items-center border transition-colors duration-200 cursor-pointer bg-primary-50 hover:bg-primary-100 dark:bg-primary-500/15 dark:hover:bg-primary-500/25 border-primary-200/80 dark:border-primary-500/30';
 	const webSearchBadgeClass = `${featureBadgeBaseClass} px-2.5 gap-1.5`;
 	const compactFeatureBadgeClass = `${featureBadgeBaseClass} px-1.5 gap-1`;
 	const imageGenerationBadgeBaseClass = featureBadgeBaseClass;
@@ -1801,9 +1802,9 @@
 											}}
 										>
 											<button
-												class="bg-transparent hover:bg-gray-100 text-gray-800 dark:text-white dark:hover:bg-gray-800 transition rounded-full p-1.5 outline-hidden focus:outline-hidden"
+												class="bg-transparent hover:bg-gray-100 text-gray-800 dark:text-white dark:hover:bg-gray-800 transition rounded-full p-1.5 max-sm:p-2 outline-hidden focus:outline-hidden"
 												type="button"
-												aria-label="More"
+												aria-label={$i18n.t('More')}
 											>
 												<svg
 													xmlns="http://www.w3.org/2000/svg"
@@ -2026,7 +2027,7 @@
 															data-halo-composer-action={steerable ? 'steer' : 'queue'}
 															class="{steerable
 																? 'bg-primary-600 text-white hover:bg-primary-700 dark:bg-primary-500 dark:hover:bg-primary-400'
-																: 'bg-gray-200 text-gray-700 hover:bg-gray-300 dark:bg-gray-700 dark:text-gray-100 dark:hover:bg-gray-600'} transition rounded-full p-[7px] focus-visible:ring-2 focus-visible:ring-primary-500/50"
+																: 'bg-gray-200 text-gray-700 hover:bg-gray-300 dark:bg-gray-700 dark:text-gray-100 dark:hover:bg-gray-600'} transition rounded-full p-[7px] max-sm:p-2.5 focus-visible:ring-2 focus-visible:ring-primary-500/50"
 															type="button"
 															aria-label={steerable
 																? $i18n.t('Steer the running task')
@@ -2069,7 +2070,7 @@
 												{/if}
 												<Tooltip content={$i18n.t('Stop')}>
 													<button
-														class="bg-white hover:bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-white dark:hover:bg-gray-800 transition rounded-full p-[7px]"
+														class="bg-white hover:bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-white dark:hover:bg-gray-800 transition rounded-full p-[7px] max-sm:p-2.5"
 														aria-label={$i18n.t('Stop')}
 														on:click={() => {
 															stopResponse();
@@ -2113,7 +2114,7 @@
 														id="send-message-button"
 														class="{hasSubmittableContent
 															? 'bg-primary-600 text-white hover:bg-primary-700 shadow-sm shadow-primary-600/30 dark:bg-primary-500 dark:text-white dark:hover:bg-primary-400 '
-															: 'text-white bg-gray-200 dark:text-gray-900 dark:bg-gray-700 disabled'} transition rounded-full p-[7px] self-center focus-visible:ring-2 focus-visible:ring-primary-500/50"
+															: 'text-white bg-gray-200 dark:text-gray-900 dark:bg-gray-700 disabled'} transition rounded-full p-[7px] max-sm:p-2.5 self-center focus-visible:ring-2 focus-visible:ring-primary-500/50"
 														type="submit"
 														disabled={!hasSubmittableContent}
 														aria-label={tr('发送消息', 'Send message')}

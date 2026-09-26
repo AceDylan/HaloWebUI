@@ -1102,19 +1102,27 @@
 
 	// Send the next message queued for `forChatId`, if that chat is on screen
 	// and idle (its reply may have finished while another chat was open).
+	// Called when this tab's reply finishes and after every sync with the
+	// server, so a reply started in another tab or before a reload also lets
+	// the queue go. One message at a time: the next waits for this one's reply.
+	let drainingQueue = false;
 	const drainQueuedMessage = async (forChatId: string) => {
-		if (!forChatId || ($chatId || '') !== forChatId) return;
+		if (drainingQueue || !forChatId || ($chatId || '') !== forChatId) return;
 		const currentMessage = history?.currentId ? history.messages?.[history.currentId] : null;
 		if ((taskIds?.length ?? 0) > 0 || (currentMessage && currentMessage.done === false)) return;
 		const next = messageQueue.find((item) => item.chatId === forChatId);
 		if (!next) return;
 		messageQueue = messageQueue.filter((item) => item.id !== next.id);
-		files = next.files;
-		await tick();
-		await submitPrompt(next.prompt, {
-			referenceFiles: next.referenceFiles ?? [],
-			hermesOptions: next.hermesOptions
-		});
+		drainingQueue = true;
+		try {
+			await submitPrompt(next.prompt, {
+				referenceFiles: next.referenceFiles ?? [],
+				hermesOptions: next.hermesOptions,
+				queuedFiles: next.files ?? []
+			});
+		} finally {
+			drainingQueue = false;
+		}
 	};
 	// Take a queued message back into the input to edit it. Its dispatch was
 	// taken off the panel when it was queued; it comes back with the text, as an
@@ -1122,8 +1130,10 @@
 	const editQueuedMessage = (id: string) => {
 		const item = messageQueue.find((m) => m.id === id);
 		if (!item) return;
-		prompt = item.prompt;
-		files = item.files;
+		// Whatever is in the input already stays, after the queued text.
+		const draft = `${prompt ?? ''}`;
+		prompt = draft.trim() ? `${item.prompt}\n\n${draft}` : item.prompt;
+		files = [...(item.files ?? []), ...(files ?? [])];
 		if (item.hermesOptions?.dispatch) {
 			hermesOptions = { ...hermesOptions, dispatch: hermesDispatchToRestore(item.hermesOptions) };
 		}
@@ -2937,6 +2947,7 @@
 					else next.delete($chatId);
 					return next;
 				});
+				if (!taskIds.length) void drainQueuedMessage($chatId);
 			}
 			if (shouldAutoScrollOnStreaming()) scrollToBottom();
 		},
@@ -5196,14 +5207,19 @@
 		{
 			_raw = false,
 			referenceFiles: referenceFilesOverride = null,
-			hermesOptions: hermesOptionsOverride = undefined
+			hermesOptions: hermesOptionsOverride = undefined,
+			queuedFiles = null
 		}: {
 			_raw?: boolean;
 			referenceFiles?: any[] | null;
 			// Taken when the message was queued.
 			hermesOptions?: HermesRunOptions | null;
+			// A queued message going out: its own files, and the input (what the
+			// person is typing meanwhile) is left alone.
+			queuedFiles?: any[] | null;
 		} = {}
 	) => {
+		const fromQueue = Array.isArray(queuedFiles);
 		const messages = createMessagesList(history, history.currentId);
 		const blockingSelection = findBlockingSelectedModelResolution();
 		const _selectedModels = selectedModels.map((modelId, index) => {
@@ -5211,8 +5227,9 @@
 			return resolution.status === 'resolved' ? resolution.value : '';
 		});
 
-		const failedFiles = files.filter((file) => isFailedUploadFile(file));
-		const validFiles = files.filter((file) => !isFailedUploadFile(file));
+		const sendFiles = fromQueue ? queuedFiles : files;
+		const failedFiles = sendFiles.filter((file) => isFailedUploadFile(file));
+		const validFiles = sendFiles.filter((file) => !isFailedUploadFile(file));
 		const referenceFiles = Array.isArray(referenceFilesOverride)
 			? referenceFilesOverride
 			: validFiles.length === 0
@@ -5250,7 +5267,15 @@
 			return;
 		}
 
-		if (messages.length != 0 && messages.at(-1).error && !messages.at(-1).content) {
+		// An empty failed reply is left out of the request. Hermes keeps the
+		// conversation itself, and its error texts ask for a "继续", so a new
+		// message goes through; other models would get two user turns in a row.
+		if (
+			messages.length != 0 &&
+			messages.at(-1).error &&
+			!messages.at(-1).content &&
+			!isHermesAgentModelId(messages.at(-1).model, $config?.hermes_agent_model_ids)
+		) {
 			// Error in response
 			toast.error($i18n.t(`Oops! There was an error in the previous response.`));
 			return;
@@ -5291,8 +5316,10 @@
 				try {
 					const steered = await steerHermesRun(localStorage.token, $chatId, userPrompt);
 					if (steered?.accepted) {
-						prompt = '';
-						files = structuredClone(failedFiles);
+						if (!fromQueue) {
+							prompt = '';
+							files = structuredClone(failedFiles);
+						}
 						toast.success($i18n.t('Guidance sent to the running task'));
 						return;
 					}
@@ -5337,11 +5364,15 @@
 						prompt: userPrompt,
 						files: queuedFiles,
 						referenceFiles,
-						hermesOptions: takeHermesOptionsForMessage(userPrompt)
+						hermesOptions: fromQueue
+							? hermesOptionsOverride ?? null
+							: takeHermesOptionsForMessage(userPrompt)
 					}
 				];
-				prompt = '';
-				files = structuredClone(failedFiles);
+				if (!fromQueue) {
+					prompt = '';
+					files = structuredClone(failedFiles);
+				}
 				return;
 			}
 
@@ -5349,10 +5380,10 @@
 			await tick();
 		}
 
-		prompt = '';
+		if (!fromQueue) prompt = '';
 
 		// Reset chat input textarea
-		if (!($settings?.richTextInput ?? true)) {
+		if (!fromQueue && !($settings?.richTextInput ?? true)) {
 			const chatInputElement = document.getElementById('chat-input');
 
 			if (chatInputElement) {
@@ -5373,8 +5404,10 @@
 				array.findIndex((i) => JSON.stringify(i) === JSON.stringify(item)) === index
 		);
 
-		files = structuredClone(failedFiles);
-		prompt = '';
+		if (!fromQueue) {
+			files = structuredClone(failedFiles);
+			prompt = '';
+		}
 
 		// Create user message
 		const sentHermesOptions =
@@ -6559,8 +6592,12 @@
 			modelId?: string;
 		} = {}
 	) => {
+		// A reply that failed before running anything has nothing to redo.
+		const failedBeforeWork =
+			Boolean(message?.error) && !`${message?.content ?? ''}`.includes('type="tool_calls"');
 		if (
 			isHermesAgentModelId(options.modelId ?? message?.model, $config?.hermes_agent_model_ids) &&
+			!failedBeforeWork &&
 			!(await confirmHermesRerun())
 		) {
 			return;

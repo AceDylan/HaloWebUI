@@ -293,6 +293,9 @@
 	$: isResponding =
 		(taskIds && taskIds.length > 0) ||
 		(history?.currentId && history.messages?.[history.currentId]?.done != true);
+	// Attachments cannot go into a running task: with files the button queues
+	// the message for after the reply, and says so.
+	$: steerNow = steerable && files.length === 0 && !hasActiveImageGenerationReference;
 	$: effectivePlaceholder = awaitingApproval
 		? $i18n.t('Task paused for approval · answer the dialog to continue')
 		: steerable && isResponding
@@ -2065,25 +2068,25 @@
 													     for after the reply. Only Enter could do this before; on a phone
 													     there is no Enter. -->
 													<Tooltip
-														content={steerable
+														content={steerNow
 															? $i18n.t('Steer the running task')
 															: $i18n.t('Queue message')}
 													>
 														<button
 															id="steer-message-button"
-															data-halo-composer-action={steerable ? 'steer' : 'queue'}
-															class="{steerable
+															data-halo-composer-action={steerNow ? 'steer' : 'queue'}
+															class="{steerNow
 																? 'bg-primary-600 text-white hover:bg-primary-700 dark:bg-primary-500 dark:hover:bg-primary-400'
 																: 'bg-gray-200 text-gray-700 hover:bg-gray-300 dark:bg-gray-700 dark:text-gray-100 dark:hover:bg-gray-600'} transition rounded-full p-[7px] max-sm:p-2.5 focus-visible:ring-2 focus-visible:ring-primary-500/50"
 															type="button"
-															aria-label={steerable
+															aria-label={steerNow
 																? $i18n.t('Steer the running task')
 																: $i18n.t('Queue message')}
 															on:click={() => {
 																dispatch('submit', prompt);
 															}}
 														>
-															{#if steerable}
+															{#if steerNow}
 																<svg
 																	xmlns="http://www.w3.org/2000/svg"
 																	viewBox="0 0 24 24"

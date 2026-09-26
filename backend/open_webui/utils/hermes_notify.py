@@ -214,16 +214,24 @@ def append_report_turn(
     model_info: dict[str, Any],
     *,
     now: Optional[int] = None,
+    source: str = "",
+    run_id: str = "",
 ) -> tuple[str, str]:
     """Append the notice as a user message and the report as a finished reply.
 
     Same branch handling as :func:`append_follow_up_turn`; the assistant message is
-    complete (``done``) instead of a placeholder for a model turn to fill.
+    complete (``done``) instead of a placeholder for a model turn to fill. The notice
+    stays a user message (hermes reads the run id and session from it on the next
+    turn) but carries ``hermes_notice``, so the page shows it as a system line
+    instead of something the person said.
     """
     timestamp = int(now if now is not None else time.time())
     user_id, assistant_id = append_follow_up_turn(chat_dict, notice, model_info, now=timestamp)
-    assistant = _history(chat_dict)["messages"][assistant_id]
-    assistant.update({"content": content, "done": True, "completedAt": timestamp})
+    messages = _history(chat_dict)["messages"]
+    messages[user_id]["hermes_notice"] = {
+        key: value for key, value in {"source": source, "run_id": run_id}.items() if value
+    } or {"source": "runner"}
+    messages[assistant_id].update({"content": content, "done": True, "completedAt": timestamp})
     return user_id, assistant_id
 
 
@@ -352,7 +360,13 @@ _REPORT_DESIGN_TASKS: set = set()
 
 
 async def show_notification_report(
-    request, *, chat_id: str, content: str, notice: str = "", source: str = ""
+    request,
+    *,
+    chat_id: str,
+    content: str,
+    notice: str = "",
+    source: str = "",
+    run_id: str = "",
 ) -> dict[str, Any]:
     """mode=display: show a finished background run's report as the reply, no model turn.
 
@@ -386,7 +400,12 @@ async def show_notification_report(
         raise HermesNotifyError(422, "chat has no assistant model to continue with")
 
     user_message_id, assistant_message_id = append_report_turn(
-        chat_dict, notice, content, model_info
+        chat_dict,
+        notice,
+        content,
+        model_info,
+        source=(source or "")[:64],
+        run_id=(run_id or "")[:128],
     )
     if Chats.update_chat_by_id(chat_id, chat_dict, update_title=False) is None:
         raise HermesNotifyError(500, "failed to persist the report")

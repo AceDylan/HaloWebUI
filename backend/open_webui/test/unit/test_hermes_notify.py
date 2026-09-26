@@ -154,6 +154,20 @@ def test_append_report_turn_is_a_finished_reply():
     assert messages[assistant_id]["done"] is True
     assert messages[assistant_id]["completedAt"] == 10
     assert messages[assistant_id]["model"] == messages["a1"]["model"]
+    # Shown as a system line, not as something the person said.
+    assert messages[user_id]["hermes_notice"] == {"source": "runner"}
+
+
+def test_report_notice_keeps_its_runner_and_run_id():
+    chat = _chat()
+    user_id, _ = hermes_notify.append_report_turn(
+        chat, "[后台任务完成通知] codex 运行 r2 已结束", "✅", find_chat_model(chat),
+        source="codex-runner", run_id="r2",
+    )
+    assert chat["history"]["messages"][user_id]["hermes_notice"] == {
+        "source": "codex-runner",
+        "run_id": "r2",
+    }
 
 
 def _patch_report_stack(monkeypatch, *, busy=False):

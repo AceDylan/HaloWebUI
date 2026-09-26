@@ -128,6 +128,7 @@ async def receive_hermes_notification(request: Request, form_data: HermesNotific
                 content=form_data.content,
                 notice=form_data.notice or "",
                 source=form_data.source or "",
+                run_id=form_data.run_id or "",
             )
         else:
             result = await start_follow_up_turn(

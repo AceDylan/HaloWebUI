@@ -111,6 +111,24 @@ START_RETRY_MIN_DELAY = 3
 # half-written with its tools "running" forever.
 INFLIGHT_RUNS_FILE = "hermes_inflight_runs.json"
 
+# Answer text arrives one token per event and every event re-sent the whole
+# reply, which the page then re-rendered: on a long run that is quadratic.
+# Text updates are coalesced to at most one per interval; tool events, the
+# final answer and steers still go out at once. 0 turns coalescing off.
+try:
+    HERMES_AGENT_STREAM_EMIT_INTERVAL = max(
+        0.0, float(os.environ.get("HERMES_AGENT_STREAM_EMIT_INTERVAL", "0.15"))
+    )
+except ValueError:
+    HERMES_AGENT_STREAM_EMIT_INTERVAL = 0.15
+
+# "派发方式" (or a typed /reclaude …) is also sent as an explicit field, so a
+# hermes with the local fast-dispatch patch starts the runner without a model
+# call. Off: hermes gets only the typed prefix and its model launches the run.
+HERMES_AGENT_FAST_DISPATCH = os.environ.get(
+    "HERMES_AGENT_FAST_DISPATCH", "1"
+).strip().lower() not in {"0", "false", "off", "no"}
+
 # aiohttp's default per-line read buffer is 64KB, but a run.completed SSE
 # event carrying inlined base64 images (hermes resolves MEDIA:<path> tags,
 # up to 5MB per image) arrives as a single multi-MB line.
@@ -869,11 +887,42 @@ def _inherited_reasoning_effort(form_data) -> str | None:
     return effort if effort in HERMES_REASONING_EFFORTS else None
 
 
+# A command is "/name" followed by a space or the end: "/reclaude fix it",
+# "/model". "/root/app/x.txt" is a path, not a command.
+_SLASH_COMMAND_RE = re.compile(r"^/[A-Za-z][\w-]*(?:\s|$)")
+_RUNNER_COMMAND_RE = re.compile(r"^/(reclaude|codex|agy)(?:\s|$)", re.IGNORECASE)
+
+
+def _starts_with_command(text) -> bool:
+    return bool(_SLASH_COMMAND_RE.match(str(text or "").lstrip()))
+
+
+def _run_input_text(run_input) -> str:
+    """The first text of a run input (a string or a one-message array)."""
+    if isinstance(run_input, str):
+        return run_input
+    if isinstance(run_input, list) and run_input and isinstance(run_input[-1], dict):
+        content = run_input[-1].get("content")
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            for part in content:
+                if isinstance(part, dict) and part.get("type") in {"text", "input_text"}:
+                    return str(part.get("text") or "")
+    return ""
+
+
+def _dispatch_runner(run_input) -> str | None:
+    """"reclaude" / "codex" / "agy" when the input launches that runner."""
+    match = _RUNNER_COMMAND_RE.match(_run_input_text(run_input).lstrip())
+    return match.group(1).lower() if match else None
+
+
 def _prefix_run_input(run_input, prefix: str):
     """Put `prefix` in front of the user's text, unless the text already starts
     with a slash command (typed by hand, it wins over the composer setting)."""
     if isinstance(run_input, str):
-        if run_input.lstrip().startswith("/"):
+        if _starts_with_command(run_input):
             return run_input
         return f"{prefix} {run_input.lstrip()}"
     if isinstance(run_input, list) and run_input and isinstance(run_input[-1], dict):
@@ -882,7 +931,7 @@ def _prefix_run_input(run_input, prefix: str):
             for index, part in enumerate(content):
                 if isinstance(part, dict) and part.get("type") in {"text", "input_text"}:
                     text = str(part.get("text") or "")
-                    if text.lstrip().startswith("/"):
+                    if _starts_with_command(text):
                         return run_input
                     parts = list(content)
                     parts[index] = {**part, "text": f"{prefix} {text.lstrip()}"}
@@ -1062,6 +1111,11 @@ def _build_run_payload(form_data, metadata, upstream_model_id, user=None):
         "input": run_input,
         "model": options.get("model") or upstream_model_id,
     }
+    runner = None if continuing else _dispatch_runner(run_input)
+    if runner and HERMES_AGENT_FAST_DISPATCH:
+        # The typed prefix stays in the input: a hermes without the fast path
+        # (or one that declines it) launches the same run through its model.
+        payload["dispatch"] = {"runner": runner}
     if options.get("provider"):
         payload["provider"] = options["provider"]
     reasoning_effort = _inherited_reasoning_effort(form_data)
@@ -1182,6 +1236,51 @@ def _serialize_blocks(blocks) -> str:
                     f"<summary>Executing...</summary>\n</details>\n"
                 )
     return content.strip()
+
+
+def _complete_tool_block(blocks, event) -> bool:
+    """Mark the call a tool.completed event reports as done.
+
+    hermes (local patch) sends the call's id with both events; two calls of the
+    same tool running in parallel are then told apart. Without an id the latest
+    unfinished call of that name is taken, as before."""
+    call_id = str(event.get("tool_call_id") or "")
+    tool_name = event.get("tool")
+    target = None
+    if call_id:
+        target = next(
+            (
+                block
+                for block in blocks
+                if block["type"] == "tool"
+                and not block.get("done")
+                and block.get("call_id") == call_id
+            ),
+            None,
+        )
+    if target is None:
+        target = next(
+            (
+                block
+                for block in reversed(blocks)
+                if block["type"] == "tool"
+                and not block.get("done")
+                and (block.get("name") == tool_name or tool_name is None)
+            ),
+            None,
+        )
+    if target is None:
+        return False
+    target["done"] = True
+    target["duration"] = event.get("duration", 0)
+    target["error"] = bool(event.get("error"))
+    return True
+
+
+def _describe_model_fallback(event) -> str:
+    source = str(event.get("from_model") or "").strip() or "所选模型"
+    target = str(event.get("to_model") or "").strip() or "备用模型"
+    return f"{source} 不可用，已改用 {target}"
 
 
 def _settle_unfinished_tools(blocks, *, interrupted: bool, reason: str = "") -> int:
@@ -1590,6 +1689,54 @@ def _map_usage(usage):
     }
 
 
+def _runtime_from_event(event) -> dict:
+    """What a hermes run reports about how it ran (local hermes patch): the
+    model that actually answered (``model_used`` / ``provider_used``), the one
+    it fell back from, and for a fast dispatch the runner it started. Found on
+    run.completed and on the run status a recovery poll reads."""
+    if not isinstance(event, dict):
+        return {}
+    runtime = {}
+    for source, target in (
+        ("model_used", "model"),
+        ("provider_used", "provider"),
+        ("fallback_from", "fallback_from"),
+    ):
+        value = str(event.get(source) or "").strip()
+        if value:
+            runtime[target] = value[:200]
+    dispatch = event.get("dispatch")
+    if isinstance(dispatch, dict):
+        runner = str(dispatch.get("runner") or "").strip().lower()
+        if runner in HERMES_DISPATCH_COMMANDS:
+            runtime["dispatch"] = runner
+        runner_run_id = str(dispatch.get("run_id") or "").strip()
+        if runner_run_id:
+            runtime["runner_run_id"] = runner_run_id[:128]
+        if dispatch.get("fast"):
+            runtime["fast_dispatch"] = True
+    return runtime
+
+
+# The launch command of a background runner (reclaude-run.sh run|answer,
+# codex-run.sh, agy-run.sh), as the terminal call's preview shows it.
+_RUNNER_LAUNCH_RE = re.compile(
+    r"(?:reclaude|codex|agy)-run\.sh\s+(?:run|answer)\b|runner-detach\.py"
+)
+
+
+def _launched_runner(blocks, runtime) -> bool:
+    """True when the run started a background runner. Its reply is a
+    three-line receipt: no visual card (the runner's report gets one)."""
+    if runtime.get("runner_run_id") or runtime.get("fast_dispatch"):
+        return True
+    return any(
+        block.get("type") == "tool"
+        and _RUNNER_LAUNCH_RE.search(str(block.get("preview") or ""))
+        for block in blocks
+    )
+
+
 async def run_hermes_agent(request, form_data, user, metadata, model, events, tasks=None):
     """
     Execute the chat via hermes's runs API, streaming results over the chat
@@ -1788,10 +1935,59 @@ async def run_hermes_agent(request, form_data, user, metadata, model, events, ta
         except Exception as e:
             log.debug(f"hermes stop post error: {e}")
 
+    run_options = _hermes_run_options(form_data)
+    requested_dispatch = (run_payload.get("dispatch") or {}).get("runner") or _dispatch_runner(
+        run_payload.get("input")
+    )
+
     async def _run_handler():
         blocks = []
         run_id = None
         finalized = False
+        # How the run actually went (model used, fallback, fast dispatch);
+        # recorded on the reply next to what was asked for.
+        runtime: dict = {}
+        last_content_emit = 0.0
+        pending_flush = None
+
+        def _cancel_pending_flush():
+            nonlocal pending_flush
+            task = pending_flush
+            pending_flush = None
+            if task is not None and not task.done() and task is not asyncio.current_task():
+                task.cancel()
+
+        async def _flush_content_later(delay: float):
+            nonlocal pending_flush, last_content_emit
+            try:
+                await asyncio.sleep(delay)
+            except asyncio.CancelledError:
+                return
+            pending_flush = None
+            if finalized:
+                return
+            last_content_emit = time.monotonic()
+            try:
+                await _emit_completion({"content": _serialize_blocks(blocks)})
+            except Exception as e:
+                log.debug(f"hermes content flush failed: {e}")
+
+        async def _emit_content(throttle: bool = False):
+            """Send the reply so far. Text deltas pass throttle=True: at most
+            one update per HERMES_AGENT_STREAM_EMIT_INTERVAL, the rest folded
+            into a flush scheduled for the end of the interval."""
+            nonlocal pending_flush, last_content_emit
+            if finalized:
+                return
+            now = time.monotonic()
+            wait = HERMES_AGENT_STREAM_EMIT_INTERVAL - (now - last_content_emit)
+            if throttle and wait > 0:
+                if pending_flush is None or pending_flush.done():
+                    pending_flush = asyncio.create_task(_flush_content_later(wait))
+                return
+            _cancel_pending_flush()
+            last_content_emit = now
+            await _emit_completion({"content": _serialize_blocks(blocks)})
 
         def current_text_block():
             if not blocks or blocks[-1]["type"] != "text":
@@ -1837,6 +2033,19 @@ async def run_hermes_agent(request, form_data, user, metadata, model, events, ta
             }
             if pending_steer:
                 state["pending_steer"] = str(pending_steer)
+            # Who answered: the runner it was handed to and the model asked
+            # for (the reply header shows them, and a later look at the chat
+            # can tell), plus what hermes reports it actually used.
+            details = {
+                "dispatch": runtime.get("dispatch") or requested_dispatch,
+                "requested_model": run_options.get("model"),
+                "model": runtime.get("model"),
+                "provider": runtime.get("provider"),
+                "fallback_from": runtime.get("fallback_from"),
+                "runner_run_id": runtime.get("runner_run_id"),
+                "fast_dispatch": runtime.get("fast_dispatch"),
+            }
+            state.update({key: value for key, value in details.items() if value})
             return state
 
         async def _finalize(
@@ -1846,6 +2055,7 @@ async def run_hermes_agent(request, form_data, user, metadata, model, events, ta
             if finalized:
                 return
             finalized = True
+            _cancel_pending_flush()
             _unregister_run(metadata["chat_id"], run_id)
             _forget_inflight(metadata["chat_id"], run_id)
             _settle_unfinished_tools(
@@ -1928,7 +2138,9 @@ async def run_hermes_agent(request, form_data, user, metadata, model, events, ta
                 except Exception as e:
                     log.warning(f"hermes background tasks failed: {e}")
 
-            if successful and not error:
+            # A reply that only says a runner started is a receipt: turning it
+            # into a card took ~40 s and replaced three lines with a big block.
+            if successful and not error and not _launched_runner(blocks, runtime):
                 await asyncio.gather(
                     _background_tasks(), _design_html_visual(content)
                 )
@@ -1986,6 +2198,7 @@ async def run_hermes_agent(request, form_data, user, metadata, model, events, ta
                 on_approval=_approve_while_polling,
             )
             status = str(outcome.get("status") or "")
+            runtime.update(_runtime_from_event(outcome))
             if announced:
                 await _emit_status(
                     "已取回 Hermes 的结果" if status in ("completed", "lost") else "Hermes 任务已结束",
@@ -2038,7 +2251,7 @@ async def run_hermes_agent(request, form_data, user, metadata, model, events, ta
                             f"hermes did not accept the steer ({resp.status}): {body[:300]}",
                         )
             blocks.append({"type": "steer", "content": text})
-            await _emit_completion({"content": _serialize_blocks(blocks)})
+            await _emit_content()
 
         try:
             for event in events or []:
@@ -2159,40 +2372,42 @@ async def run_hermes_agent(request, form_data, user, metadata, model, events, ta
                                 delta = event.get("delta") or ""
                                 if delta:
                                     current_text_block()["content"] += delta
-                                    await _emit_completion(
-                                        {"content": _serialize_blocks(blocks)}
-                                    )
+                                    await _emit_content(throttle=True)
                             elif event_type == "tool.started":
                                 blocks.append(
                                     {
                                         "type": "tool",
                                         "id": f"hermes-{len(blocks)}",
+                                        "call_id": str(event.get("tool_call_id") or ""),
                                         "name": event.get("tool") or "tool",
                                         "preview": event.get("preview") or "",
                                         "done": False,
                                         "started_at": event.get("timestamp") or time.time(),
                                     }
                                 )
-                                await _emit_completion(
-                                    {"content": _serialize_blocks(blocks)}
-                                )
+                                await _emit_content()
                             elif event_type == "tool.completed":
-                                tool_name = event.get("tool")
-                                for block in reversed(blocks):
-                                    if (
-                                        block["type"] == "tool"
-                                        and not block.get("done")
-                                        and (
-                                            block.get("name") == tool_name
-                                            or tool_name is None
-                                        )
-                                    ):
-                                        block["done"] = True
-                                        block["duration"] = event.get("duration", 0)
-                                        block["error"] = bool(event.get("error"))
-                                        break
-                                await _emit_completion(
-                                    {"content": _serialize_blocks(blocks)}
+                                _complete_tool_block(blocks, event)
+                                await _emit_content()
+                            elif event_type == "run.model_fallback":
+                                # The chosen model failed and hermes moved on
+                                # to its fallback: say so now, not only in the
+                                # header once the run is over.
+                                runtime.update(
+                                    {
+                                        key: value
+                                        for key, value in {
+                                            "fallback_from": str(event.get("from_model") or "")[:200],
+                                            "model": str(event.get("to_model") or "")[:200],
+                                            "provider": str(event.get("to_provider") or "")[:200],
+                                        }.items()
+                                        if value
+                                    }
+                                )
+                                await _emit_status(
+                                    _describe_model_fallback(event),
+                                    True,
+                                    action="hermes_model_fallback",
                                 )
                             elif event_type == "reasoning.available":
                                 # Not real reasoning: hermes re-emits the assistant
@@ -2206,6 +2421,7 @@ async def run_hermes_agent(request, form_data, user, metadata, model, events, ta
                             elif event_type == "approval.responded":
                                 pass
                             elif event_type == "run.completed":
+                                runtime.update(_runtime_from_event(event))
                                 _apply_final_output(event.get("output") or "")
                                 await _finalize(
                                     usage=event.get("usage"),
@@ -2231,6 +2447,7 @@ async def run_hermes_agent(request, form_data, user, metadata, model, events, ta
                 # it were complete with its tools "running" forever.
                 await _conclude_after_stream_loss(run_started_at)
         except asyncio.CancelledError:
+            _cancel_pending_flush()
             if _SHUTTING_DOWN and run_id:
                 # This process is going away, not the person stopping the
                 # run: hermes keeps working. Save what arrived so far; after
@@ -2264,6 +2481,7 @@ async def run_hermes_agent(request, form_data, user, metadata, model, events, ta
             log.exception("hermes agent run failed")
             await _finalize(error=_describe_run_error(e, base_url))
         finally:
+            _cancel_pending_flush()
             _unregister_run(metadata["chat_id"], run_id)
 
     task_id, _ = create_task(_run_handler(), id=metadata["chat_id"])
@@ -2392,6 +2610,10 @@ async def _recover_inflight_run(app, chat_id: str, record: dict) -> None:
         content = _merge_recovered_output(content, output)
     completed_at = int(time.time())
     run_state = {"active": False, "run_id": run_id, "recovered": True}
+    runtime = _runtime_from_event(outcome)
+    for key in ("dispatch", "model", "provider", "fallback_from", "runner_run_id", "fast_dispatch"):
+        if runtime.get(key):
+            run_state[key] = runtime[key]
     update = {
         "content": content,
         "done": True,

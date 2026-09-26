@@ -48,7 +48,10 @@ def test_notification_display_mode_shows_the_report_and_prompt_mode_starts_a_tur
     )
     result = asyncio.run(hermes_router.receive_hermes_notification(request, form))
     assert result["mode"] == "display"
-    assert called[-1] == ("display", {"chat_id": "c1", "content": "✅ 报告", "notice": "[后台任务完成通知] x", "source": ""})
+    assert called[-1] == (
+        "display",
+        {"chat_id": "c1", "content": "✅ 报告", "notice": "[后台任务完成通知] x", "source": "", "run_id": ""},
+    )
 
     form = hermes_router.HermesNotificationForm(chat_id="c1", prompt="读取 result.md")
     result = asyncio.run(hermes_router.receive_hermes_notification(request, form))

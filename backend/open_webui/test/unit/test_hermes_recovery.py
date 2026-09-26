@@ -382,7 +382,7 @@ class _Session:
         return _Response(payload=body, status=code)
 
 
-def _run(monkeypatch, hermes, content="hi"):
+def _run(monkeypatch, hermes, content="hi", form_extra=None):
     emitted, upserts, created = [], [], {}
 
     async def event_emitter(event):
@@ -423,7 +423,11 @@ def _run(monkeypatch, hermes, content="hi"):
     asyncio.run(
         hermes_agent.run_hermes_agent(
             SimpleNamespace(),
-            {"model": "hermes-agent", "messages": [{"role": "user", "content": content}]},
+            {
+                "model": "hermes-agent",
+                "messages": [{"role": "user", "content": content}],
+                **(form_extra or {}),
+            },
             SimpleNamespace(id="user-1", role="user"),
             metadata,
             {"id": "hermes-agent"},
@@ -631,3 +635,127 @@ def test_a_restart_finishes_the_reply_it_left_behind(monkeypatch):
         event.get("type") == "chat:completion" and event["data"].get("done")
         for event in emitted
     )
+
+
+# ------------------------------------------------------------ round 2: dispatch, model, tools
+
+
+def test_a_path_is_not_a_command():
+    payload = hermes_agent._build_run_payload(
+        {
+            "messages": [{"role": "user", "content": "/root/app/x.txt 里的报错看一下"}],
+            "hermes_options": {"dispatch": "reclaude"},
+        },
+        {"chat_id": "chat-1"},
+        "hermes-agent",
+    )
+    assert payload["input"] == "/reclaude /root/app/x.txt 里的报错看一下"
+    assert payload["dispatch"] == {"runner": "reclaude"}
+
+
+def test_a_typed_runner_command_is_sent_as_dispatch(monkeypatch):
+    form = {"messages": [{"role": "user", "content": "/codex 修复登录页"}]}
+    payload = hermes_agent._build_run_payload(form, {"chat_id": "chat-1"}, "hermes-agent")
+    assert payload["dispatch"] == {"runner": "codex"}
+    plain = hermes_agent._build_run_payload(
+        {"messages": [{"role": "user", "content": "/model 看看"}]}, {"chat_id": "c"}, "hermes-agent"
+    )
+    assert "dispatch" not in plain
+    monkeypatch.setattr(hermes_agent, "HERMES_AGENT_FAST_DISPATCH", False)
+    payload = hermes_agent._build_run_payload(form, {"chat_id": "chat-1"}, "hermes-agent")
+    assert "dispatch" not in payload and payload["input"] == "/codex 修复登录页"
+
+
+def test_a_runner_launch_records_who_answered_and_gets_no_card(monkeypatch):
+    designed = []
+
+    async def design(content, _metadata):
+        designed.append(content)
+        return content
+
+    monkeypatch.setattr(hermes_agent, "design_html_visual_artifact_with_agy", design)
+    hermes = _Hermes(
+        events=[
+            {"event": "tool.started", "tool": "terminal", "tool_call_id": "c1",
+             "preview": "/root/.hermes/scripts/reclaude-run.sh run --detach --cwd /root --task-file t.md"},
+            {"event": "tool.completed", "tool": "terminal", "tool_call_id": "c1", "duration": 3.2},
+            {"event": "message.delta", "delta": "reclaude 已启动"},
+            {"event": "run.completed", "output": "reclaude 已启动", "model_used": "deepseek-chat",
+             "provider_used": "custom", "fallback_from": "gemini-chat"},
+        ]
+    )
+    final, _emitted, _ = _run(
+        monkeypatch,
+        hermes,
+        "修复登录页",
+        {"hermes_options": {"dispatch": "reclaude", "model": "gemini-chat"}},
+    )
+    run = final["hermes_run"]
+    assert run["dispatch"] == "reclaude"
+    assert run["requested_model"] == "gemini-chat"
+    assert run["model"] == "deepseek-chat" and run["fallback_from"] == "gemini-chat"
+    assert designed == []
+    started = json.loads(json.dumps(hermes.posts[0][1]["json"]))
+    assert started["dispatch"] == {"runner": "reclaude"}
+
+
+def test_a_fast_dispatch_is_recorded(monkeypatch):
+    hermes = _Hermes(
+        events=[
+            {"event": "message.delta", "delta": "codex 已启动"},
+            {"event": "run.completed", "output": "codex 已启动",
+             "dispatch": {"runner": "codex", "run_id": "20260926-1", "fast": True}},
+        ]
+    )
+    final, _emitted, _ = _run(monkeypatch, hermes, "/codex 看看")
+    assert final["hermes_run"]["fast_dispatch"] is True
+    assert final["hermes_run"]["runner_run_id"] == "20260926-1"
+    assert final["hermes_run"]["dispatch"] == "codex"
+
+
+def test_parallel_calls_of_one_tool_close_by_their_call_id(monkeypatch):
+    hermes = _Hermes(
+        events=[
+            {"event": "tool.started", "tool": "terminal", "tool_call_id": "a", "preview": "sleep 9"},
+            {"event": "tool.started", "tool": "terminal", "tool_call_id": "b", "preview": "false"},
+            {"event": "tool.completed", "tool": "terminal", "tool_call_id": "b", "duration": 0.1,
+             "error": True},
+            {"event": "tool.completed", "tool": "terminal", "tool_call_id": "a", "duration": 9.0},
+            {"event": "run.completed", "output": "好了"},
+        ]
+    )
+    final, _emitted, _ = _run(monkeypatch, hermes)
+    first, second = final["content"].split("</details>")[:2]
+    assert "sleep 9" in first and "&quot;success&quot;" in first
+    assert "false" in second and "&quot;error&quot;" in second
+
+
+def test_a_model_fallback_is_said_while_the_run_goes(monkeypatch):
+    hermes = _Hermes(
+        events=[
+            {"event": "run.model_fallback", "from_model": "gemini-chat", "to_model": "deepseek-chat",
+             "to_provider": "custom"},
+            {"event": "run.completed", "output": "答复"},
+        ]
+    )
+    final, emitted, _ = _run(monkeypatch, hermes)
+    assert "gemini-chat 不可用，已改用 deepseek-chat" in [
+        status["description"] for status in _statuses(emitted)
+    ]
+    assert final["hermes_run"]["fallback_from"] == "gemini-chat"
+    assert final["hermes_run"]["model"] == "deepseek-chat"
+
+
+def test_streamed_text_is_coalesced_but_complete(monkeypatch):
+    monkeypatch.setattr(hermes_agent, "HERMES_AGENT_STREAM_EMIT_INTERVAL", 60.0)
+    deltas = [{"event": "message.delta", "delta": f"{index} "} for index in range(50)]
+    hermes = _Hermes(events=[*deltas, {"event": "run.completed", "output": ""}])
+    final, emitted, _ = _run(monkeypatch, hermes)
+    content_updates = [
+        event for event in emitted
+        if event.get("type") == "chat:completion" and set(event["data"]) == {"content"}
+    ]
+    # The first delta goes out at once, the other 49 wait for the next interval,
+    # which the end of the run closes: the final reply carries all of them.
+    assert len(content_updates) == 1
+    assert final["content"] == " ".join(str(index) for index in range(50))

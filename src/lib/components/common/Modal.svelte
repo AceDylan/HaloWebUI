@@ -10,28 +10,52 @@
 	export let className = 'bg-white/95 dark:bg-gray-900/95 backdrop-blur-sm rounded-2xl';
 	export let dismissible = true; // 是否允许点击背景关闭
 
-	let modalElement = null;
+	let modalElement: HTMLDivElement | null = null;
 	let isAttached = false;
+	// Focus moves into the dialog while it is open and back where it was when it
+	// closes. Otherwise keys meant for the dialog (Esc to close it) also reach
+	// the element behind it, e.g. the chat composer when the dialog was opened
+	// with a keyboard shortcut.
+	let previouslyFocused: HTMLElement | null = null;
 
 	const attachModal = () => {
 		if (!modalElement || isAttached) return;
+		previouslyFocused =
+			document.activeElement instanceof HTMLElement && document.activeElement !== document.body
+				? document.activeElement
+				: null;
 		document.body.appendChild(modalElement);
 		window.addEventListener('keydown', handleKeyDown);
 		lockBodyScroll();
 		isAttached = true;
+		// After the content had its chance to autofocus a field.
+		requestAnimationFrame(() => {
+			if (isAttached && modalElement && !modalElement.contains(document.activeElement)) {
+				modalElement.focus({ preventScroll: true });
+			}
+		});
 	};
 
 	const detachModal = () => {
 		if (!modalElement || !isAttached) return;
 		window.removeEventListener('keydown', handleKeyDown);
+		const focusWasInside = modalElement.contains(document.activeElement);
 		if (modalElement.parentNode === document.body) {
 			document.body.removeChild(modalElement);
 		}
 		unlockBodyScroll();
 		isAttached = false;
+		const restore = previouslyFocused;
+		previouslyFocused = null;
+		if (
+			restore?.isConnected &&
+			(focusWasInside || !document.activeElement || document.activeElement === document.body)
+		) {
+			restore.focus({ preventScroll: true });
+		}
 	};
 
-	const sizeToWidth = (size) => {
+	const sizeToWidth = (size: string) => {
 		if (size === 'full') {
 			return 'w-full';
 		}
@@ -86,7 +110,8 @@
 		bind:this={modalElement}
 		aria-modal="true"
 		role="dialog"
-		class="modal fixed top-0 right-0 left-0 bottom-0 bg-black/30 dark:bg-black/60 w-full h-screen max-h-[100dvh] {containerClassName}  flex justify-center z-9999 overflow-y-auto overscroll-contain"
+		tabindex="-1"
+		class="modal outline-hidden fixed top-0 right-0 left-0 bottom-0 bg-black/30 dark:bg-black/60 w-full h-screen max-h-[100dvh] {containerClassName}  flex justify-center z-9999 overflow-y-auto overscroll-contain"
 		style="scrollbar-gutter: stable;"
 		in:fade={{ duration: 10 }}
 		on:mousedown={() => {

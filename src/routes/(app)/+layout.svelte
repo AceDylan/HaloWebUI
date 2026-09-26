@@ -37,7 +37,8 @@
 		banners,
 		showChangelog,
 		temporaryChatEnabled,
-		toolServers
+		toolServers,
+		showSidebar
 	} from '$lib/stores';
 
 	import Sidebar from '$lib/components/layout/Sidebar.svelte';
@@ -160,11 +161,31 @@
 					document.getElementById('chat-input')?.focus();
 				}
 
+				// Check if Ctrl + K (⌘K on macOS, where Ctrl+K deletes to the end of the line)
+				// is pressed: search chats. Code editors keep their own Ctrl+K.
+				const isMacPlatform = /mac/i.test(navigator.platform ?? '');
+				if (
+					(isMacPlatform ? event.metaKey : event.ctrlKey) &&
+					!isShiftPressed &&
+					!event.altKey &&
+					event.key.toLowerCase() === 'k' &&
+					!(event.target instanceof Element && event.target.closest('.cm-editor, .monaco-editor'))
+				) {
+					event.preventDefault();
+					showSidebar.set(true);
+					await tick();
+					document.querySelector<HTMLInputElement>('#chat-search input')?.focus();
+				}
+
 				// Check if Ctrl + Shift + ; is pressed
 				if (isCtrlPressed && isShiftPressed && event.key === ';') {
 					event.preventDefault();
 					console.log('copyLastCodeBlock');
-					const button = [...document.getElementsByClassName('copy-code-button')]?.at(-1);
+					// Code blocks rendered as components, and the ones inside formatted
+					// (responseHtmlFormat) replies, in document order.
+					const button = [
+						...document.querySelectorAll<HTMLElement>('.copy-code-button, [data-halo-copy-id]')
+					].at(-1);
 					button?.click();
 				}
 

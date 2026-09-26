@@ -949,8 +949,8 @@
 		files = files;
 	};
 
-	// Esc in the composer stops the running reply (and clears the per-message
-	// toggles) only when it is not doing something else: closing the `/` `#` `@`
+	// Esc in the composer stops the running reply (and drops a one-off @model
+	// pick) only when it is not doing something else: closing the `/` `#` `@`
 	// menu or cancelling IME input used to stop a hermes task that had been
 	// running for minutes.
 	const shouldEscapeStopResponse = (event: KeyboardEvent) =>
@@ -1485,14 +1485,12 @@
 														}
 													}
 
+													// Only the one-off @model pick is dropped. Web search, tools, skills and
+													// image generation are the chat's saved choices; Esc used to switch them
+													// all off (saved as the user's choice) when it only meant to close a
+													// dialog or stop a reply.
 													if (escapeOnComposer) {
 														atSelectedModel = undefined;
-														selectedToolIds = [];
-														toolSelectionTouched = true;
-														selectedSkillIds = [];
-														skillSelectionTouched = true;
-														setWebSearchModeFromUser('off');
-														imageGenerationEnabled = false;
 													}
 												}}
 												on:paste={async (e) => {
@@ -1682,14 +1680,12 @@
 													e.target.style.height = Math.min(e.target.scrollHeight, 320) + 'px';
 												}
 
+												// Only the one-off @model pick is dropped. Web search, tools, skills and
+												// image generation are the chat's saved choices; Esc used to switch them
+												// all off (saved as the user's choice) when it only meant to close a
+												// dialog or stop a reply.
 												if (escapeOnComposer) {
 													atSelectedModel = undefined;
-													selectedToolIds = [];
-													toolSelectionTouched = true;
-													selectedSkillIds = [];
-													skillSelectionTouched = true;
-													setWebSearchModeFromUser('off');
-													imageGenerationEnabled = false;
 												}
 											}}
 											rows="1"

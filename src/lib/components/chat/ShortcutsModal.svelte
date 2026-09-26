@@ -1,10 +1,47 @@
 <script lang="ts">
 	import { getContext } from 'svelte';
+	import type { Writable } from 'svelte/store';
 	import Modal from '../common/Modal.svelte';
 
-	const i18n = getContext('i18n');
+	const i18n: Writable<any> = getContext('i18n');
 
 	export let show = false;
+
+	type Shortcut = { label: string; keys: string[] };
+
+	// Every entry is handled in routes/(app)/+layout.svelte (or the composer);
+	// keep the two lists in step.
+	const shortcutColumns: Shortcut[][] = [
+		[
+			{ label: 'Search Chats', keys: ['Ctrl/⌘', 'K'] },
+			{ label: 'Open new chat', keys: ['Ctrl/⌘', 'Shift', 'O'] },
+			{ label: 'Focus chat input', keys: ['Shift', 'Esc'] },
+			{ label: 'Copy last code block', keys: ['Ctrl/⌘', 'Shift', ';'] },
+			{ label: 'Copy last response', keys: ['Ctrl/⌘', 'Shift', 'C'] },
+			{ label: 'Generate prompt pair', keys: ['Ctrl/⌘', 'Shift', 'Enter'] }
+		],
+		[
+			{ label: 'Toggle settings', keys: ['Ctrl/⌘', '.'] },
+			{ label: 'Toggle sidebar', keys: ['Ctrl/⌘', 'Shift', 'S'] },
+			{ label: 'Delete chat', keys: ['Ctrl/⌘', 'Shift', '⌫/Delete'] },
+			{ label: 'Temporary Chat', keys: ['Ctrl/⌘', 'Shift', "'"] },
+			{ label: 'Open model selector', keys: ['Ctrl/⌘', 'Shift', 'M'] },
+			{ label: 'Show shortcuts', keys: ['Ctrl/⌘', '/'] }
+		]
+	];
+
+	const inputCommandColumns: Shortcut[][] = [
+		[
+			{ label: 'Attach file from knowledge', keys: ['#'] },
+			{ label: 'Add custom prompt', keys: ['/'] },
+			{ label: 'Talk to model', keys: ['@'] }
+		],
+		[
+			{ label: 'Use a skill', keys: ['$'] },
+			{ label: 'Stop the running reply', keys: ['Esc'] },
+			{ label: 'Accept autocomplete generation / Jump to prompt variable', keys: ['TAB'] }
+		]
+	];
 </script>
 
 <Modal bind:show>
@@ -13,6 +50,7 @@
 			<div class=" text-lg font-medium self-center">{$i18n.t('Keyboard shortcuts')}</div>
 			<button
 				class="self-center"
+				aria-label={$i18n.t('Close')}
 				on:click={() => {
 					show = false;
 				}}
@@ -30,344 +68,34 @@
 			</button>
 		</div>
 
-		<div class="flex flex-col md:flex-row w-full p-5 md:space-x-4 dark:text-gray-200">
-			<div class=" flex flex-col w-full sm:flex-row sm:justify-center sm:space-x-6">
-				<div class="flex flex-col space-y-3 w-full self-start">
-					<div class="w-full flex justify-between items-center">
-						<div class=" text-sm">{$i18n.t('Open new chat')}</div>
-
-						<div class="flex space-x-1 text-xs">
-							<div
-								class=" h-fit py-1 px-2 flex items-center justify-center rounded-sm border border-black/10 capitalize text-gray-600 dark:border-white/10 dark:text-gray-300"
-							>
-								Ctrl/⌘
-							</div>
-
-							<div
-								class=" h-fit py-1 px-2 flex items-center justify-center rounded-sm border border-black/10 capitalize text-gray-600 dark:border-white/10 dark:text-gray-300"
-							>
-								Shift
-							</div>
-
-							<div
-								class=" h-fit py-1 px-2 flex items-center justify-center rounded-sm border border-black/10 capitalize text-gray-600 dark:border-white/10 dark:text-gray-300"
-							>
-								O
-							</div>
-						</div>
-					</div>
-
-					<div class="w-full flex justify-between items-center">
-						<div class=" text-sm">{$i18n.t('Focus chat input')}</div>
-
-						<div class="flex space-x-1 text-xs">
-							<div
-								class=" h-fit py-1 px-2 flex items-center justify-center rounded-sm border border-black/10 capitalize text-gray-600 dark:border-white/10 dark:text-gray-300"
-							>
-								Shift
-							</div>
-
-							<div
-								class=" h-fit py-1 px-2 flex items-center justify-center rounded-sm border border-black/10 capitalize text-gray-600 dark:border-white/10 dark:text-gray-300"
-							>
-								Esc
-							</div>
-						</div>
-					</div>
-
-					<div class="w-full flex justify-between items-center">
-						<div class=" text-sm">{$i18n.t('Copy last code block')}</div>
-
-						<div class="flex space-x-1 text-xs">
-							<div
-								class=" h-fit py-1 px-2 flex items-center justify-center rounded-sm border border-black/10 capitalize text-gray-600 dark:border-white/10 dark:text-gray-300"
-							>
-								Ctrl/⌘
-							</div>
-
-							<div
-								class=" h-fit py-1 px-2 flex items-center justify-center rounded-sm border border-black/10 capitalize text-gray-600 dark:border-white/10 dark:text-gray-300"
-							>
-								Shift
-							</div>
-
-							<div
-								class=" h-fit py-1 px-2 flex items-center justify-center rounded-sm border border-black/10 capitalize text-gray-600 dark:border-white/10 dark:text-gray-300"
-							>
-								;
-							</div>
-						</div>
-					</div>
-
-					<div class="w-full flex justify-between items-center">
-						<div class=" text-sm">{$i18n.t('Copy last response')}</div>
-
-						<div class="flex space-x-1 text-xs">
-							<div
-								class=" h-fit py-1 px-2 flex items-center justify-center rounded-sm border border-black/10 capitalize text-gray-600 dark:border-white/10 dark:text-gray-300"
-							>
-								Ctrl/⌘
-							</div>
-
-							<div
-								class=" h-fit py-1 px-2 flex items-center justify-center rounded-sm border border-black/10 capitalize text-gray-600 dark:border-white/10 dark:text-gray-300"
-							>
-								Shift
-							</div>
-
-							<div
-								class=" h-fit py-1 px-2 flex items-center justify-center rounded-sm border border-black/10 capitalize text-gray-600 dark:border-white/10 dark:text-gray-300"
-							>
-								C
-							</div>
-						</div>
-					</div>
-
-					<div class="w-full flex justify-between items-center">
-						<div class=" text-sm">{$i18n.t('Generate prompt pair')}</div>
-
-						<div class="flex space-x-1 text-xs">
-							<div
-								class=" h-fit py-1 px-2 flex items-center justify-center rounded-sm border border-black/10 capitalize text-gray-600 dark:border-white/10 dark:text-gray-300"
-							>
-								Ctrl/⌘
-							</div>
-
-							<div
-								class=" h-fit py-1 px-2 flex items-center justify-center rounded-sm border border-black/10 capitalize text-gray-600 dark:border-white/10 dark:text-gray-300"
-							>
-								Shift
-							</div>
-
-							<div
-								class=" h-fit py-1 px-2 flex items-center justify-center rounded-sm border border-black/10 capitalize text-gray-600 dark:border-white/10 dark:text-gray-300"
-							>
-								Enter
-							</div>
-						</div>
-					</div>
+		{#each [{ title: null, columns: shortcutColumns }, { title: 'Input commands', columns: inputCommandColumns }] as section}
+			{#if section.title}
+				<div class=" flex justify-between dark:text-gray-300 px-5">
+					<div class=" text-lg font-medium self-center">{$i18n.t(section.title)}</div>
 				</div>
+			{/if}
 
-				<div class="flex flex-col space-y-3 w-full self-start">
-					<div class="w-full flex justify-between items-center">
-						<div class=" text-sm">{$i18n.t('Toggle settings')}</div>
+			<div class="flex flex-col md:flex-row w-full p-5 gap-3 md:gap-6 dark:text-gray-200">
+				{#each section.columns as column}
+					<div class="flex flex-col gap-3 w-full self-start">
+						{#each column as shortcut}
+							<div class="w-full flex justify-between items-center gap-3">
+								<div class="text-sm min-w-0">{$i18n.t(shortcut.label)}</div>
 
-						<div class="flex space-x-1 text-xs">
-							<div
-								class=" h-fit py-1 px-2 flex items-center justify-center rounded-sm border border-black/10 capitalize text-gray-600 dark:border-white/10 dark:text-gray-300"
-							>
-								Ctrl/⌘
+								<div class="flex shrink-0 gap-1 text-xs">
+									{#each shortcut.keys as key}
+										<kbd
+											class="h-fit py-1 px-2 flex items-center justify-center whitespace-nowrap rounded-sm border border-black/10 font-sans capitalize text-gray-600 dark:border-white/10 dark:text-gray-300"
+										>
+											{key}
+										</kbd>
+									{/each}
+								</div>
 							</div>
-							<div
-								class=" h-fit py-1 px-2 flex items-center justify-center rounded-sm border border-black/10 capitalize text-gray-600 dark:border-white/10 dark:text-gray-300"
-							>
-								.
-							</div>
-						</div>
+						{/each}
 					</div>
-
-					<div class="w-full flex justify-between items-center">
-						<div class=" text-sm">{$i18n.t('Toggle sidebar')}</div>
-
-						<div class="flex space-x-1 text-xs">
-							<div
-								class=" h-fit py-1 px-2 flex items-center justify-center rounded-sm border border-black/10 capitalize text-gray-600 dark:border-white/10 dark:text-gray-300"
-							>
-								Ctrl/⌘
-							</div>
-
-							<div
-								class=" h-fit py-1 px-2 flex items-center justify-center rounded-sm border border-black/10 capitalize text-gray-600 dark:border-white/10 dark:text-gray-300"
-							>
-								Shift
-							</div>
-
-							<div
-								class=" h-fit py-1 px-2 flex items-center justify-center rounded-sm border border-black/10 capitalize text-gray-600 dark:border-white/10 dark:text-gray-300"
-							>
-								S
-							</div>
-						</div>
-					</div>
-
-					<div class="w-full flex justify-between items-center">
-						<div class=" text-sm">{$i18n.t('Delete chat')}</div>
-
-						<div class="flex space-x-1 text-xs">
-							<div
-								class=" h-fit py-1 px-2 flex items-center justify-center rounded-sm border border-black/10 capitalize text-gray-600 dark:border-white/10 dark:text-gray-300"
-							>
-								Ctrl/⌘
-							</div>
-							<div
-								class=" h-fit py-1 px-2 flex items-center justify-center rounded-sm border border-black/10 capitalize text-gray-600 dark:border-white/10 dark:text-gray-300"
-							>
-								Shift
-							</div>
-
-							<div
-								class=" h-fit py-1 px-2 flex items-center justify-center rounded-sm border border-black/10 capitalize text-gray-600 dark:border-white/10 dark:text-gray-300"
-							>
-								⌫/Delete
-							</div>
-						</div>
-					</div>
-
-					<div class="w-full flex justify-between items-center">
-						<div class=" text-sm">{$i18n.t('Voice input')}</div>
-
-						<div class="flex space-x-1 text-xs">
-							<div
-								class=" h-fit py-1 px-2 flex items-center justify-center rounded-sm border border-black/10 capitalize text-gray-600 dark:border-white/10 dark:text-gray-300"
-							>
-								Ctrl/⌘
-							</div>
-
-							<div
-								class=" h-fit py-1 px-2 flex items-center justify-center rounded-sm border border-black/10 capitalize text-gray-600 dark:border-white/10 dark:text-gray-300"
-							>
-								Shift
-							</div>
-
-							<div
-								class=" h-fit py-1 px-2 flex items-center justify-center rounded-sm border border-black/10 capitalize text-gray-600 dark:border-white/10 dark:text-gray-300"
-							>
-								L
-							</div>
-						</div>
-					</div>
-
-					<div class="w-full flex justify-between items-center">
-						<div class=" text-sm">{$i18n.t('Open model selector')}</div>
-
-						<div class="flex space-x-1 text-xs">
-							<div
-								class=" h-fit py-1 px-2 flex items-center justify-center rounded-sm border border-black/10 capitalize text-gray-600 dark:border-white/10 dark:text-gray-300"
-							>
-								Ctrl/⌘
-							</div>
-
-							<div
-								class=" h-fit py-1 px-2 flex items-center justify-center rounded-sm border border-black/10 capitalize text-gray-600 dark:border-white/10 dark:text-gray-300"
-							>
-								Shift
-							</div>
-
-							<div
-								class=" h-fit py-1 px-2 flex items-center justify-center rounded-sm border border-black/10 capitalize text-gray-600 dark:border-white/10 dark:text-gray-300"
-							>
-								M
-							</div>
-						</div>
-					</div>
-
-					<div class="w-full flex justify-between items-center">
-						<div class=" text-sm">{$i18n.t('Show shortcuts')}</div>
-
-						<div class="flex space-x-1 text-xs">
-							<div
-								class=" h-fit py-1 px-2 flex items-center justify-center rounded-sm border border-black/10 capitalize text-gray-600 dark:border-white/10 dark:text-gray-300"
-							>
-								Ctrl/⌘
-							</div>
-
-							<div
-								class=" h-fit py-1 px-2 flex items-center justify-center rounded-sm border border-black/10 capitalize text-gray-600 dark:border-white/10 dark:text-gray-300"
-							>
-								/
-							</div>
-						</div>
-					</div>
-				</div>
+				{/each}
 			</div>
-		</div>
-
-		<div class=" flex justify-between dark:text-gray-300 px-5">
-			<div class=" text-lg font-medium self-center">{$i18n.t('Input commands')}</div>
-		</div>
-
-		<div class="flex flex-col md:flex-row w-full p-5 md:space-x-4 dark:text-gray-200">
-			<div class=" flex flex-col w-full sm:flex-row sm:justify-center sm:space-x-6">
-				<div class="flex flex-col space-y-3 w-full self-start">
-					<div class="w-full flex justify-between items-center">
-						<div class=" text-sm">
-							{$i18n.t('Attach file from knowledge')}
-						</div>
-
-						<div class="flex space-x-1 text-xs">
-							<div
-								class=" h-fit py-1 px-2 flex items-center justify-center rounded-sm border border-black/10 capitalize text-gray-600 dark:border-white/10 dark:text-gray-300"
-							>
-								#
-							</div>
-						</div>
-					</div>
-
-					<div class="w-full flex justify-between items-center">
-						<div class=" text-sm">
-							{$i18n.t('Add custom prompt')}
-						</div>
-
-						<div class="flex space-x-1 text-xs">
-							<div
-								class=" h-fit py-1 px-2 flex items-center justify-center rounded-sm border border-black/10 capitalize text-gray-600 dark:border-white/10 dark:text-gray-300"
-							>
-								/
-							</div>
-						</div>
-					</div>
-
-					<div class="w-full flex justify-between items-center">
-						<div class=" text-sm">
-							{$i18n.t('Talk to model')}
-						</div>
-
-						<div class="flex space-x-1 text-xs">
-							<div
-								class=" h-fit py-1 px-2 flex items-center justify-center rounded-sm border border-black/10 capitalize text-gray-600 dark:border-white/10 dark:text-gray-300"
-							>
-								@
-							</div>
-						</div>
-					</div>
-
-					<div class="w-full flex justify-between items-center">
-						<div class=" text-sm">
-							{$i18n.t('Accept autocomplete generation / Jump to prompt variable')}
-						</div>
-
-						<div class="flex space-x-1 text-xs">
-							<div
-								class=" h-fit py-1 px-2 flex items-center justify-center rounded-sm border border-black/10 capitalize text-gray-600 dark:border-white/10 dark:text-gray-300"
-							>
-								TAB
-							</div>
-						</div>
-					</div>
-				</div>
-			</div>
-		</div>
+		{/each}
 	</div>
 </Modal>
-
-<style>
-	input::-webkit-outer-spin-button,
-	input::-webkit-inner-spin-button {
-		/* display: none; <- Crashes Chrome on hover */
-		-webkit-appearance: none;
-		margin: 0; /* <-- Apparently some margin are still there even though it's hidden */
-	}
-
-	.tabs::-webkit-scrollbar {
-		display: none; /* for Chrome, Safari and Opera */
-	}
-
-	.tabs {
-		-ms-overflow-style: none; /* IE and Edge */
-		scrollbar-width: none; /* Firefox */
-	}
-
-	input[type='number'] {
-		-moz-appearance: textfield; /* Firefox */
-	}
-</style>

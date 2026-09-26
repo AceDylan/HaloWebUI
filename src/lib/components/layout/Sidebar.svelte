@@ -1371,6 +1371,12 @@
 									/>
 								{/each}
 
+								{#if search && $chats.length === 0}
+									<div class="px-3 py-2 text-xs text-gray-500 dark:text-gray-400">
+										{$i18n.t('No chats found')}
+									</div>
+								{/if}
+
 								{#if $scrollPaginationEnabled && !allChatsLoaded}
 									<Loader
 										on:visible={(e) => {

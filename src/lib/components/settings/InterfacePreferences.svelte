@@ -2253,7 +2253,7 @@
 									<!-- Personal Default Model -->
 									<div class="space-y-2">
 										<div class="glass-item px-4 py-3">
-											<div class="flex items-center justify-between gap-3">
+											<div class="flex flex-wrap items-center justify-between gap-3">
 												<div class="min-w-0">
 													<div class="text-sm font-medium">
 														{$i18n.t('Default Model')}
@@ -2263,7 +2263,7 @@
 													</div>
 												</div>
 												<HaloSelect
-													className="w-60 shrink-0"
+													className="w-full sm:w-60 shrink-0"
 													bind:value={defaultModelId}
 													searchEnabled={true}
 													placeholder={$i18n.t('Select a model')}

@@ -21,7 +21,7 @@
 			<div class="flex items-center gap-2.5">
 				{#each pages as page (page.key)}
 					{#if page.type === 'ellipsis'}
-						<div class="text-sm font-medium text-foreground-alt">...</div>
+						<div class="text-sm font-medium text-foreground-alt whitespace-nowrap">…</div>
 					{:else}
 						<Pagination.Page
 							{page}

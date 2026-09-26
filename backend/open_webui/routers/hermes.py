@@ -45,10 +45,16 @@ from open_webui.utils.hermes_sessions import (
     LIST_OFFSET_MAX,
     HermesSessionsError,
     import_session,
+    list_model_options,
     list_sessions,
     validate_session_id,
 )
 from open_webui.utils.hermes_unread import list_unread_chat_ids, mark_read
+from open_webui.utils.hermes_runner_progress import (
+    clear_runner_progress,
+    list_runner_progress,
+    record_runner_progress,
+)
 from open_webui.utils.webhook import post_webhook
 from open_webui.utils.hermes_notify import (
     NOTIFICATION_CONTENT_MAX_CHARS,
@@ -68,12 +74,19 @@ router = APIRouter()
 
 class HermesNotificationForm(BaseModel):
     chat_id: str = Field(min_length=1, max_length=128)
-    prompt: str = Field(min_length=1, max_length=NOTIFICATION_PROMPT_MAX_CHARS)
+    # Required for a follow-up turn; a progress report carries none.
+    prompt: str = Field(default="", max_length=NOTIFICATION_PROMPT_MAX_CHARS)
     source: Optional[str] = Field(default=None, max_length=64)
     run_id: Optional[str] = Field(default=None, max_length=128)
-    mode: Optional[Literal["display"]] = None
+    mode: Optional[Literal["display", "progress"]] = None
     content: Optional[str] = Field(default=None, max_length=NOTIFICATION_CONTENT_MAX_CHARS)
     notice: Optional[str] = Field(default=None, max_length=4000)
+    # mode=progress: where a background runner is.
+    agent: Optional[str] = Field(default=None, max_length=32)
+    status: Optional[str] = Field(default=None, max_length=32)
+    started_at: Optional[float] = None
+    step: Optional[int] = Field(default=None, ge=0)
+    last_activity: Optional[str] = Field(default=None, max_length=2000)
 
 
 @router.post("/notifications")
@@ -86,8 +99,29 @@ async def receive_hermes_notification(request: Request, form_data: HermesNotific
     if not verify_notify_token(request.headers.get("Authorization")):
         raise HTTPException(status_code=401, detail="invalid notification token")
 
+    if form_data.mode == "progress":
+        entry = record_runner_progress(
+            chat_id=form_data.chat_id,
+            run_id=form_data.run_id or "",
+            agent=form_data.agent or form_data.source or "",
+            status=form_data.status or "running",
+            started_at=form_data.started_at,
+            step=form_data.step,
+            last_activity=form_data.last_activity or "",
+        )
+        return {
+            "status": True,
+            "chat_id": form_data.chat_id,
+            "run_id": form_data.run_id,
+            "mode": "progress",
+            "active": entry is not None,
+        }
+    if not form_data.prompt.strip():
+        raise HTTPException(status_code=422, detail="prompt is required")
+
     try:
         if form_data.mode == "display" and (form_data.content or "").strip():
+            clear_runner_progress(form_data.run_id)
             result = await show_notification_report(
                 request,
                 chat_id=form_data.chat_id,
@@ -140,7 +174,21 @@ async def get_active_hermes_runs(user=Depends(get_verified_user)):
     return {
         "runs": list_active_runs(user.id),
         "unread": list_unread_chat_ids(user.id),
+        # Background runners (reclaude / codex / agy) started from a chat.
+        "background": list_runner_progress(user.id),
     }
+
+
+@router.get("/model-options")
+async def get_hermes_model_options(
+    request: Request, model_id: Optional[str] = None, user=Depends(get_verified_user)
+):
+    """The models (by provider) hermes can run a chat with, for the composer's
+    per-chat model picker."""
+    try:
+        return await list_model_options(request, user, model_id)
+    except HermesSessionsError as e:
+        raise HTTPException(status_code=e.status_code, detail=e.detail)
 
 
 @router.post("/chats/{chat_id}/read")

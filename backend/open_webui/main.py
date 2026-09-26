@@ -674,7 +674,21 @@ async def lifespan(app: FastAPI):
 
     log_startup_state()
 
+    # Hermes runs that were streaming into chats when this process last
+    # stopped: ask hermes for their outcome instead of leaving the replies
+    # half-written with their tools "running" forever.
+    from open_webui.utils.hermes_agent import begin_shutdown, resume_inflight_runs
+
+    try:
+        resume_inflight_runs(app)
+    except Exception as e:
+        log.warning(f"hermes run recovery failed: {e}")
+
     yield
+
+    # From here on a cancelled hermes run task is this process going away,
+    # not a user stopping it: hermes must keep working.
+    begin_shutdown()
 
     # Graceful shutdown: wrap each step so one failure doesn't block others
     try:

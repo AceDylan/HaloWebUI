@@ -470,3 +470,59 @@ async def import_session(
         "created": True,
         "imported_turns": len(turns),
     }
+
+
+# ------------------------------------------------------------ model options
+
+MODEL_OPTIONS_PER_PROVIDER = 60
+MODEL_OPTIONS_CACHE_SECONDS = 300
+_MODEL_OPTIONS_CACHE: dict = {}
+
+
+def condense_model_options(body: Any) -> dict:
+    """hermes' GET /api/model/options, reduced to what the composer's picker
+    shows: providers that are set up and have models, their model ids."""
+    body = body if isinstance(body, dict) else {}
+    providers = []
+    for provider in body.get("providers") or []:
+        if not isinstance(provider, dict) or not provider.get("authenticated"):
+            continue
+        models = []
+        for model in provider.get("models") or []:
+            model_id = model if isinstance(model, str) else (
+                (model.get("id") or model.get("name")) if isinstance(model, dict) else None
+            )
+            if model_id and str(model_id) not in models:
+                models.append(str(model_id))
+        if not models:
+            continue
+        slug = str(provider.get("slug") or "").strip()
+        if not slug:
+            continue
+        providers.append(
+            {
+                "slug": slug,
+                "name": str(provider.get("name") or slug),
+                "current": bool(provider.get("is_current")),
+                "models": models[:MODEL_OPTIONS_PER_PROVIDER],
+            }
+        )
+    providers.sort(key=lambda item: (not item["current"], item["name"].lower()))
+    return {
+        "model": str(body.get("model") or ""),
+        "provider": str(body.get("provider") or ""),
+        "providers": providers,
+    }
+
+
+async def list_model_options(request, user, model_id: Optional[str] = None) -> dict:
+    """The models hermes can run a chat with (its own picker inventory)."""
+    cached = _MODEL_OPTIONS_CACHE.get(user.id)
+    if cached and cached[0] > time.time():
+        return cached[1]
+    model = await resolve_hermes_model(request, user, model_id)
+    root, headers = _connection(request, user, model)
+    body = await _get_json(f"{root}/api/model/options", headers)
+    options = condense_model_options(body)
+    _MODEL_OPTIONS_CACHE[user.id] = (time.time() + MODEL_OPTIONS_CACHE_SECONDS, options)
+    return options

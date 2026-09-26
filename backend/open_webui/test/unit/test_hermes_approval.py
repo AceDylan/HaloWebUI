@@ -132,4 +132,4 @@ def test_describe_run_error_names_the_gateway_for_connection_failures():
     assert _describe_run_error(asyncio.TimeoutError(), "http://h/v1").startswith(
         "等待 Hermes 网关响应超时"
     )
-    assert _describe_run_error(ValueError("boom"), "http://h/v1") == "Hermes agent error: boom"
+    assert _describe_run_error(ValueError("boom"), "http://h/v1") == "Hermes 出错：boom"

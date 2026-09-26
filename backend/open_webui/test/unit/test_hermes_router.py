@@ -54,3 +54,82 @@ def test_notification_display_mode_shows_the_report_and_prompt_mode_starts_a_tur
     result = asyncio.run(hermes_router.receive_hermes_notification(request, form))
     assert result["mode"] == "turn"
     assert called[-1][0] == "turn"
+
+
+def test_progress_reports_show_as_background_runs_until_the_report(monkeypatch):
+    import asyncio
+    from types import SimpleNamespace
+
+    from open_webui.routers import hermes as hermes_router
+    from open_webui.utils import hermes_runner_progress as progress
+
+    monkeypatch.setattr(progress, "_PROGRESS", {})
+    monkeypatch.setattr(
+        progress.Chats, "get_chat_by_id", lambda chat_id: SimpleNamespace(user_id="u1")
+    )
+    monkeypatch.setattr(progress.Chats, "get_chat_title_by_id", lambda chat_id: "标题")
+    monkeypatch.setattr(hermes_router, "notify_token_configured", lambda: True)
+    monkeypatch.setattr(hermes_router, "verify_notify_token", lambda _auth: True)
+
+    async def show(request, **kwargs):
+        return {"chat_id": kwargs["chat_id"], "user_message_id": "u", "assistant_message_id": "a"}
+
+    monkeypatch.setattr(hermes_router, "show_notification_report", show)
+    request = SimpleNamespace(headers={"Authorization": "Bearer t"})
+
+    form = hermes_router.HermesNotificationForm(
+        chat_id="c1", run_id="r1", mode="progress", agent="reclaude",
+        started_at=1000.0, step=198, last_activity="Bash: npm   test",
+    )
+    result = asyncio.run(hermes_router.receive_hermes_notification(request, form))
+    assert result == {"status": True, "chat_id": "c1", "run_id": "r1", "mode": "progress", "active": True}
+    runs = progress.list_runner_progress("u1")
+    assert runs[0]["agent"] == "reclaude" and runs[0]["step"] == 198
+    assert runs[0]["last_activity"] == "Bash: npm test"
+    assert progress.list_runner_progress("someone-else") == []
+
+    # The final report clears it.
+    form = hermes_router.HermesNotificationForm(
+        chat_id="c1", run_id="r1", prompt="x", mode="display", content="✅"
+    )
+    asyncio.run(hermes_router.receive_hermes_notification(request, form))
+    assert progress.list_runner_progress("u1") == []
+
+
+def test_progress_entries_expire_and_end_on_a_terminal_status(monkeypatch):
+    from types import SimpleNamespace
+
+    from open_webui.utils import hermes_runner_progress as progress
+
+    monkeypatch.setattr(progress, "_PROGRESS", {})
+    monkeypatch.setattr(
+        progress.Chats, "get_chat_by_id", lambda chat_id: SimpleNamespace(user_id="u1")
+    )
+    monkeypatch.setattr(progress.Chats, "get_chat_title_by_id", lambda chat_id: "标题")
+    progress.record_runner_progress(chat_id="c1", run_id="r1", now=0)
+    assert progress.list_runner_progress("u1", now=60)
+    assert progress.list_runner_progress("u1", now=progress.PROGRESS_STALE_SECONDS + 1) == []
+    progress.record_runner_progress(chat_id="c1", run_id="r2", now=0)
+    progress.record_runner_progress(chat_id="c1", run_id="r2", status="failed", now=1)
+    assert progress.list_runner_progress("u1", now=2) == []
+
+
+def test_a_follow_up_turn_still_needs_a_prompt(monkeypatch):
+    import asyncio
+    from types import SimpleNamespace
+
+    import pytest
+    from fastapi import HTTPException
+
+    from open_webui.routers import hermes as hermes_router
+
+    monkeypatch.setattr(hermes_router, "notify_token_configured", lambda: True)
+    monkeypatch.setattr(hermes_router, "verify_notify_token", lambda _auth: True)
+    form = hermes_router.HermesNotificationForm(chat_id="c1")
+    with pytest.raises(HTTPException) as error:
+        asyncio.run(
+            hermes_router.receive_hermes_notification(
+                SimpleNamespace(headers={"Authorization": "Bearer t"}), form
+            )
+        )
+    assert error.value.status_code == 422

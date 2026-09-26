@@ -23,6 +23,11 @@ Configuration (environment variables):
 - HERMES_AGENT_APPROVAL_TIMEOUT: seconds to wait for the user's approval
   decision before auto-denying (default: 240; keep below hermes's
   approvals.gateway_timeout which defaults to 300).
+- HERMES_AGENT_RECOVERY_MAX_SECONDS: how long to keep asking hermes for the
+  outcome of a run whose event stream dropped (default: 21600 = 6h).
+- HERMES_AGENT_HOST_DATA_DIR: where this container's data directory lives on
+  the hermes host, so uploaded files can be handed to hermes by path.
+  Detected from /proc/self/mountinfo when unset; "off" disables.
 """
 
 import asyncio
@@ -38,6 +43,7 @@ import aiohttp
 
 from open_webui.env import (
     AIOHTTP_CLIENT_SESSION_SSL,
+    DATA_DIR,
     SRC_LOG_LEVELS,
     WEBSOCKET_EVENT_CALLER_TIMEOUT,
 )
@@ -53,6 +59,7 @@ from open_webui.tasks import create_task, set_current_task_blocks_completion
 from open_webui.utils.chat_image_refs import materialize_openai_image_message_refs
 from open_webui.utils.hermes_unread import mark_unread
 from open_webui.utils.html_visual_prompt import (
+    _FENCED_HTML_BLOCK_RE,
     _fenced_html_artifacts_as_text,
     append_html_visual_fallback,
     design_html_visual_artifact_with_agy,
@@ -82,6 +89,27 @@ try:
     )
 except ValueError:
     HERMES_AGENT_APPROVAL_TIMEOUT = 240
+
+try:
+    HERMES_AGENT_RECOVERY_MAX_SECONDS = int(
+        os.environ.get("HERMES_AGENT_RECOVERY_MAX_SECONDS", str(6 * 3600))
+    )
+except ValueError:
+    HERMES_AGENT_RECOVERY_MAX_SECONDS = 6 * 3600
+
+# Pauses between status polls of a run whose event stream dropped: quick at
+# first (a blip), then settling at the slowest step for long runs.
+RECOVERY_POLL_DELAYS = (1, 2, 3, 5, 10, 15)
+
+# POST /v1/runs answers 429 while hermes runs its maximum of concurrent runs
+# (it sends Retry-After). Wait it out for about a minute before giving up.
+START_RETRY_MAX_SECONDS = 60
+START_RETRY_MIN_DELAY = 3
+
+# Where runs whose outcome is still owed to a chat are remembered, so a
+# restart of this process picks them up again instead of leaving the reply
+# half-written with its tools "running" forever.
+INFLIGHT_RUNS_FILE = "hermes_inflight_runs.json"
 
 # aiohttp's default per-line read buffer is 64KB, but a run.completed SSE
 # event carrying inlined base64 images (hermes resolves MEDIA:<path> tags,
@@ -181,7 +209,127 @@ def _describe_run_error(error: Exception, base_url: str) -> str:
             f"无法连接 Hermes 网关 ({base_url})，请确认 hermes gateway 正在运行: "
             f"{error}"
         )
-    return f"Hermes agent error: {error}"
+    return f"Hermes 出错：{error}"
+
+
+def _describe_start_failure(status: int, body: str) -> str:
+    """The chat error for a POST /v1/runs that hermes refused."""
+    detail = body
+    try:
+        parsed = json.loads(body)
+        if isinstance(parsed, dict):
+            error = parsed.get("error")
+            if isinstance(error, dict) and error.get("message"):
+                detail = str(error["message"])
+            elif isinstance(error, str):
+                detail = error
+    except (TypeError, ValueError):
+        pass
+    detail = str(detail or "").strip()[:300]
+    if status == 429:
+        return (
+            "Hermes 同时运行的任务已达上限，等了一分钟仍没有空位。"
+            "请等其他任务结束后重新发送。"
+            + (f"（{detail}）" if detail else "")
+        )
+    if status in (401, 403):
+        return f"Hermes 拒绝了访问（HTTP {status}），请检查连接里的 API 密钥。"
+    return f"Hermes 启动任务失败（HTTP {status}）" + (f"：{detail}" if detail else "")
+
+
+def _retry_after_seconds(headers, attempt: int) -> float:
+    """Seconds to wait before re-posting a run hermes answered with 429."""
+    try:
+        value = float((headers or {}).get("Retry-After") or 0)
+    except (TypeError, ValueError):
+        value = 0
+    return max(value, START_RETRY_MIN_DELAY + min(attempt, 4))
+
+
+# What hermes' dangerous-command detector calls a command, in the words the
+# approval dialog uses. Unknown descriptions keep hermes' text after a label.
+APPROVAL_DESCRIPTIONS_ZH = {
+    "recursive delete of root filesystem": "递归删除根文件系统",
+    "recursive delete of system directory": "递归删除系统目录",
+    "recursive delete of home directory": "递归删除用户主目录",
+    "format filesystem (mkfs)": "格式化文件系统（mkfs）",
+    "format filesystem": "格式化文件系统",
+    "dd to raw block device": "用 dd 写入块设备",
+    "redirect to raw block device": "重定向写入块设备",
+    "write to block device": "写入块设备",
+    "disk copy": "整盘复制",
+    "fork bomb": "fork 炸弹",
+    "kill all processes": "结束所有进程",
+    "system shutdown/reboot": "关机或重启系统",
+    "init 0/6 (shutdown/reboot)": "关机或重启系统（init 0/6）",
+    "systemctl poweroff/reboot": "关机或重启系统（systemctl）",
+    "telinit 0/6 (shutdown/reboot)": "关机或重启系统（telinit）",
+    "sudo password guessing via stdin (sudo -S)": "通过标准输入给 sudo 传密码（sudo -S）",
+    "delete in root path": "删除根路径下的文件",
+    "recursive delete": "递归删除",
+    "recursive delete (long flag)": "递归删除",
+    "world/other-writable permissions": "设置所有人可写权限",
+    "recursive world/other-writable (long flag)": "递归设置所有人可写权限",
+    "recursive chown to root": "递归把属主改成 root",
+    "recursive chown to root (long flag)": "递归把属主改成 root",
+    "SQL DROP": "SQL 删除表或库（DROP）",
+    "SQL DELETE without WHERE": "不带 WHERE 的 SQL DELETE",
+    "SQL TRUNCATE": "SQL 清空表（TRUNCATE）",
+    "overwrite system config": "覆盖系统配置",
+    "stop/restart system service": "停止或重启系统服务",
+    "force kill processes": "强制结束进程",
+    "force kill processes (killall -KILL)": "强制结束进程（killall -KILL）",
+    "force kill processes (killall -s KILL)": "强制结束进程（killall -s KILL）",
+    "kill processes by regex (killall -r)": "按正则结束进程（killall -r）",
+    "pipe remote content to shell": "把远程内容直接交给 shell 执行",
+    "execute remote script via process substitution": "通过进程替换执行远程脚本",
+    "execute remote content via command substitution": "通过命令替换执行远程内容",
+    "pipe decoded content to shell (possible command obfuscation)": "把解码后的内容交给 shell 执行（可能是混淆命令）",
+    "overwrite system file via tee": "用 tee 覆盖系统文件",
+    "overwrite system file via redirection": "用重定向覆盖系统文件",
+    "overwrite project env/config via tee": "用 tee 覆盖项目的 env/配置文件",
+    "overwrite project env/config via redirection": "用重定向覆盖项目的 env/配置文件",
+    "overwrite project env/config file": "覆盖项目的 env/配置文件",
+    "xargs with rm": "xargs 配合 rm 批量删除",
+    "find -exec/-execdir rm": "find -exec 批量删除",
+    "find -delete": "find -delete 批量删除",
+    "stop/restart hermes gateway (kills running agents)": "停止或重启 Hermes 网关（会中断正在运行的任务）",
+    "hermes update (restarts gateway, kills running agents)": "更新 Hermes（会重启网关并中断正在运行的任务）",
+    "docker compose restart/stop/kill/down (container lifecycle)": "重启、停止或删除 docker compose 容器",
+    "docker restart/stop/kill (container lifecycle)": "重启或停止 docker 容器",
+    "kill hermes/gateway process (self-termination)": "结束 Hermes 或网关进程（会中断自己）",
+    "kill process via pgrep/pidof expansion (self-termination)": "按 pgrep/pidof 结果结束进程（可能中断自己）",
+    "copy/move file into system config path": "把文件复制或移动到系统配置目录",
+    "copy/move file into sensitive credential/SSH/shell-rc path": "把文件复制或移动到凭据/SSH/shell 配置目录",
+    "in-place edit of sensitive credential/SSH/shell-rc path": "直接修改凭据/SSH/shell 配置文件",
+    "in-place edit of system config": "直接修改系统配置",
+    "in-place edit of Hermes config/env": "直接修改 Hermes 配置或 env",
+    "shell execution via heredoc": "通过 heredoc 执行 shell",
+    "git reset --hard (destroys uncommitted changes)": "git reset --hard（丢弃未提交的改动）",
+    "git force push (rewrites remote history)": "git 强制推送（改写远程历史）",
+    "git force push short flag (rewrites remote history)": "git 强制推送（改写远程历史）",
+    "git clean with force (deletes untracked files)": "git clean -f（删除未跟踪的文件）",
+    "git branch force delete": "强制删除 git 分支",
+    "chmod +x followed by immediate execution": "加执行权限后立即执行",
+    "sudo with privilege flag (stdin/askpass/shell/list)": "带提权参数的 sudo",
+    "sudo with combined-flag privilege escalation": "带组合提权参数的 sudo",
+}
+
+
+def _approval_description_zh(description: str) -> str:
+    """hermes' English reason for an approval, as the dialog shows it."""
+    text = str(description or "").strip()
+    if not text:
+        return ""
+    parts = [part.strip() for part in re.split(r";\s*|\n+", text) if part.strip()]
+    translated = []
+    for part in parts:
+        key = part.rstrip(".")
+        zh = APPROVAL_DESCRIPTIONS_ZH.get(key) or APPROVAL_DESCRIPTIONS_ZH.get(
+            re.sub(r"\s*\((?:long flag|long flags.*?)\)$", "", key)
+        )
+        translated.append(zh or f"危险操作：{part}")
+    return "；".join(translated)
 
 
 class HermesSteerError(Exception):
@@ -449,6 +597,143 @@ def _content_has_text(content) -> bool:
     return bool(str(content or "").strip())
 
 
+# What earlier assistant turns carry that hermes must not get back verbatim.
+# The visual card is AGY's rendering of an answer hermes already wrote (69%
+# of the characters a follow-up used to replay, on every model call of the
+# turn); the tool transcript arrives as markup. Both become one line each.
+HTML_CARD_PLACEHOLDER = "[已生成可视化卡片]"
+HISTORY_TOOL_LINES_MAX = 24
+HISTORY_TOOL_PREVIEW_MAX_CHARS = 160
+_HTML_ATTR_RE = re.compile(r'([\w-]+)="([^"]*)"')
+_TOOL_DETAILS_BLOCK_RE = re.compile(
+    r"<details\b(?=[^>]*\btype=\"tool_calls\")([^>]*)>.*?</details\s*>",
+    re.IGNORECASE | re.DOTALL,
+)
+_TOOL_CALLS_TAG_RE = re.compile(
+    r"<tool_calls\b([^>]*?)/?>(?:\s*</tool_calls>)?", re.IGNORECASE
+)
+_OTHER_DETAILS_BLOCK_RE = re.compile(
+    r"<details\b(?=[^>]*\btype=\"(?:reasoning|code_interpreter)\")[^>]*>.*?</details\s*>",
+    re.IGNORECASE | re.DOTALL,
+)
+_TOOL_LINE_MARK = "\u0000tool\u0000"
+_TOOL_STATUS_ZH = {"success": "成功", "error": "失败", "interrupted": "已中断"}
+
+
+def _json_attr(value: str):
+    """An HTML-escaped JSON attribute value, parsed (possibly double-encoded)."""
+    current = html.unescape(str(value or ""))
+    for _ in range(3):
+        if not isinstance(current, str):
+            break
+        text = current.strip()
+        if not text:
+            return None
+        try:
+            current = json.loads(text)
+        except ValueError:
+            break
+    return current
+
+
+def _format_duration(seconds) -> str:
+    try:
+        value = float(seconds)
+    except (TypeError, ValueError):
+        return ""
+    if value < 0:
+        return ""
+    if value < 10:
+        return f"{value:.1f}s"
+    if value < 60:
+        return f"{round(value)}s"
+    minutes, rest = divmod(int(round(value)), 60)
+    return f"{minutes}m{rest:02d}s"
+
+
+def _tool_call_history_line(attributes: str) -> str:
+    """One line for one tool call in a replayed turn: "terminal: git status（成功，2.1s）"."""
+    attrs = {key: value for key, value in _HTML_ATTR_RE.findall(attributes or "")}
+    name = html.unescape(attrs.get("name") or "tool").strip() or "tool"
+    preview = html.unescape(attrs.get("input") or "").strip()
+    if not preview:
+        arguments = _json_attr(attrs.get("arguments", ""))
+        if isinstance(arguments, dict) and isinstance(arguments.get("input"), str):
+            preview = arguments["input"]
+        elif isinstance(arguments, str):
+            preview = arguments
+    preview = re.sub(r"\s+", " ", preview).strip()
+    if len(preview) > HISTORY_TOOL_PREVIEW_MAX_CHARS:
+        preview = preview[: HISTORY_TOOL_PREVIEW_MAX_CHARS - 1].rstrip() + "\u2026"
+    result = _json_attr(attrs.get("result", ""))
+    outcome = []
+    if isinstance(result, dict):
+        status = str(result.get("status") or "").lower()
+        if result.get("error") is True:
+            status = "error"
+        if status in _TOOL_STATUS_ZH:
+            outcome.append(_TOOL_STATUS_ZH[status])
+        duration = _format_duration(result.get("duration"))
+        if duration and duration not in ("0.0s",):
+            outcome.append(duration)
+    elif attrs.get("done") == "false":
+        outcome.append("未完成")
+    line = f"{name}: {preview}" if preview else name
+    if outcome:
+        line = f"{line}（{'，'.join(outcome)}）"
+    return f"{_TOOL_LINE_MARK}{line}\n"
+
+
+def _collapse_tool_lines(text: str) -> str:
+    """Group consecutive tool lines under one label, eliding the middle of long runs."""
+    out_lines: list[str] = []
+    run: list[str] = []
+
+    def flush():
+        if not run:
+            return
+        lines = run
+        if len(lines) > HISTORY_TOOL_LINES_MAX:
+            head = HISTORY_TOOL_LINES_MAX // 3
+            tail = HISTORY_TOOL_LINES_MAX - head
+            skipped = len(lines) - head - tail
+            lines = lines[:head] + [f"…（省略 {skipped} 次工具调用）"] + lines[-tail:]
+        out_lines.append(f"[工具调用 ×{len(run)}]")
+        out_lines.extend(f"- {line}" for line in lines)
+        run.clear()
+
+    for line in text.split("\n"):
+        stripped = line.strip()
+        if stripped.startswith(_TOOL_LINE_MARK):
+            run.append(stripped[len(_TOOL_LINE_MARK):])
+            continue
+        if not stripped and run:
+            continue
+        flush()
+        out_lines.append(line)
+    flush()
+    return "\n".join(out_lines)
+
+
+def _compact_assistant_history(content: str) -> str:
+    """An earlier assistant turn as hermes should read it again: the answer
+    text, each visual card as a placeholder, each tool call as one line."""
+    text = str(content or "")
+    if not text:
+        return text
+    text = _FENCED_HTML_BLOCK_RE.sub(f"{HTML_CARD_PLACEHOLDER}\n", text)
+    text = _OTHER_DETAILS_BLOCK_RE.sub("", text)
+    text = _TOOL_DETAILS_BLOCK_RE.sub(
+        lambda match: _tool_call_history_line(match.group(1)), text
+    )
+    text = _TOOL_CALLS_TAG_RE.sub(
+        lambda match: _tool_call_history_line(match.group(1)), text
+    )
+    if _TOOL_LINE_MARK in text:
+        text = _collapse_tool_lines(text)
+    return _BLANK_RUN_RE.sub("\n\n", text).strip()
+
+
 _DETAILS_BLOCK_RE = re.compile(
     r"<details\b[^>]*>.*?</details>", re.IGNORECASE | re.DOTALL
 )
@@ -543,7 +828,159 @@ def _schedule_approval_webhook(request, user, metadata, approval: dict):
         log.warning(f"hermes approval webhook failed: {e}")
 
 
-def _build_run_payload(form_data, metadata, upstream_model_id):
+# The composer's "派发方式": the same prefixes a person types, so hermes (and
+# its skill bundles) sees exactly what /reclaude typed by hand would send.
+HERMES_DISPATCH_COMMANDS = {"reclaude": "/reclaude", "codex": "/codex", "agy": "/agy"}
+HERMES_REASONING_EFFORTS = ("none", "minimal", "low", "medium", "high", "xhigh")
+
+
+def _hermes_run_options(form_data) -> dict:
+    """The per-chat hermes choices the composer sent, validated."""
+    raw = form_data.get("hermes_options") if isinstance(form_data, dict) else None
+    if not isinstance(raw, dict):
+        return {}
+    options = {}
+    dispatch = str(raw.get("dispatch") or "").strip().lower()
+    if dispatch in HERMES_DISPATCH_COMMANDS:
+        options["dispatch"] = dispatch
+    model = str(raw.get("model") or "").strip()
+    if model and len(model) <= 200:
+        options["model"] = model
+        provider = str(raw.get("provider") or "").strip()
+        if provider and len(provider) <= 200:
+            options["provider"] = provider
+    effort = str(raw.get("reasoning_effort") or "").strip().lower()
+    if effort in HERMES_REASONING_EFFORTS:
+        options["reasoning_effort"] = effort
+    return options
+
+
+def _prefix_run_input(run_input, prefix: str):
+    """Put `prefix` in front of the user's text, unless the text already starts
+    with a slash command (typed by hand, it wins over the composer setting)."""
+    if isinstance(run_input, str):
+        if run_input.lstrip().startswith("/"):
+            return run_input
+        return f"{prefix} {run_input.lstrip()}"
+    if isinstance(run_input, list) and run_input and isinstance(run_input[-1], dict):
+        content = run_input[-1].get("content")
+        if isinstance(content, list):
+            for index, part in enumerate(content):
+                if isinstance(part, dict) and part.get("type") in {"text", "input_text"}:
+                    text = str(part.get("text") or "")
+                    if text.lstrip().startswith("/"):
+                        return run_input
+                    parts = list(content)
+                    parts[index] = {**part, "text": f"{prefix} {text.lstrip()}"}
+                    return [*run_input[:-1], {**run_input[-1], "content": parts}]
+            parts = [{"type": "text", "text": prefix}, *content]
+            return [*run_input[:-1], {**run_input[-1], "content": parts}]
+    return run_input
+
+
+def _append_run_input_text(run_input, text: str):
+    """Add a paragraph to the end of the user's text."""
+    if not text:
+        return run_input
+    if isinstance(run_input, str):
+        return f"{run_input.rstrip()}\n\n{text}"
+    if isinstance(run_input, list) and run_input and isinstance(run_input[-1], dict):
+        content = run_input[-1].get("content")
+        if isinstance(content, list):
+            parts = [*content, {"type": "text", "text": text}]
+            return [*run_input[:-1], {**run_input[-1], "content": parts}]
+    return run_input
+
+
+_HOST_DATA_DIR_CACHE: dict = {}
+
+
+def _host_data_dir():
+    """This container's data directory as the hermes host sees it, or None.
+
+    hermes runs on the host and cannot see container paths. The data volume's
+    host path is in /proc/self/mountinfo (the mount's root within its device,
+    which is the host path when that device is the host's root filesystem)."""
+    if "value" in _HOST_DATA_DIR_CACHE:
+        return _HOST_DATA_DIR_CACHE["value"]
+    value = None
+    configured = os.environ.get("HERMES_AGENT_HOST_DATA_DIR", "").strip()
+    if configured.lower() in {"off", "none", "0", "false"}:
+        value = None
+    elif configured:
+        value = configured.rstrip("/")
+    else:
+        try:
+            data_dir = str(DATA_DIR).rstrip("/")
+            with open("/proc/self/mountinfo", encoding="utf-8") as handle:
+                for line in handle:
+                    fields = line.split()
+                    if len(fields) > 4 and fields[4] == data_dir and fields[3] != "/":
+                        value = fields[3].rstrip("/")
+                        break
+        except OSError:
+            value = None
+    _HOST_DATA_DIR_CACHE["value"] = value
+    return value
+
+
+def _attachment_host_paths(metadata, user) -> list[tuple[str, str]]:
+    """(name, host path) of the non-image files attached to this turn.
+
+    Retrieval only put excerpts of them into the prompt; hermes runs on the
+    same host and can read the whole file when it is told where it is."""
+    host_dir = _host_data_dir()
+    files = metadata.get("files") if isinstance(metadata, dict) else None
+    if not host_dir or not isinstance(files, list):
+        return []
+    try:
+        from open_webui.models.files import Files
+    except Exception:
+        return []
+    data_dir = str(DATA_DIR).rstrip("/")
+    found = []
+    seen = set()
+    for item in files:
+        if not isinstance(item, dict) or item.get("type") not in (None, "file"):
+            continue
+        file_info = item.get("file") if isinstance(item.get("file"), dict) else {}
+        file_id = str(item.get("id") or file_info.get("id") or "").strip()
+        if not file_id or file_id in seen:
+            continue
+        seen.add(file_id)
+        content_type = str(
+            ((file_info.get("meta") or {}) if isinstance(file_info.get("meta"), dict) else {}).get(
+                "content_type"
+            )
+            or ""
+        )
+        if content_type.startswith("image/"):
+            continue
+        try:
+            record = Files.get_file_by_id(file_id)
+        except Exception:
+            record = None
+        if record is None or not record.path:
+            continue
+        if record.user_id != getattr(user, "id", None) and getattr(user, "role", "") != "admin":
+            continue
+        path = str(record.path)
+        if not path.startswith(data_dir + "/"):
+            continue
+        name = str(item.get("name") or record.filename or os.path.basename(path))
+        found.append((name, host_dir + path[len(data_dir):]))
+    return found
+
+
+def _attachment_note(paths: list[tuple[str, str]]) -> str:
+    if not paths:
+        return ""
+    lines = ["[附件原文件] 以下文件已上传到 HaloWebUI，上面只放了检索摘录；需要完整内容时直接读取本机路径："]
+    lines.extend(f"- {name}: {path}" for name, path in paths)
+    return "\n".join(lines)
+
+
+def _build_run_payload(form_data, metadata, upstream_model_id, user=None):
     messages = form_data.get("messages") or []
 
     instructions = None
@@ -571,7 +1008,14 @@ def _build_run_payload(form_data, metadata, upstream_model_id):
     # Inbound media is turn-scoped. Historical image data URLs must not be
     # replayed: /v1/runs would stringify them and count the base64 as text.
     history = [
-        {"role": message["role"], "content": _history_text_content(message["content"])}
+        {
+            "role": message["role"],
+            "content": (
+                _compact_assistant_history(_history_text_content(message["content"]))
+                if message["role"] == "assistant"
+                else _history_text_content(message["content"])
+            ),
+        }
         for message in history
     ]
 
@@ -590,10 +1034,24 @@ def _build_run_payload(form_data, metadata, upstream_model_id):
             user_message = fallback_input
         run_input = user_message
 
+    options = _hermes_run_options(form_data)
+    if not continuing:
+        run_input = _append_run_input_text(
+            run_input, _attachment_note(_attachment_host_paths(metadata, user))
+        )
+        if options.get("dispatch"):
+            run_input = _prefix_run_input(
+                run_input, HERMES_DISPATCH_COMMANDS[options["dispatch"]]
+            )
+
     payload = {
         "input": run_input,
-        "model": upstream_model_id,
+        "model": options.get("model") or upstream_model_id,
     }
+    if options.get("provider"):
+        payload["provider"] = options["provider"]
+    if options.get("reasoning_effort"):
+        payload["model_options"] = {"reasoning_effort": options["reasoning_effort"]}
     if history:
         payload["conversation_history"] = history
     if instructions:
@@ -672,19 +1130,31 @@ def _serialize_blocks(blocks) -> str:
             arguments = html.escape(
                 json.dumps({"input": block.get("preview") or ""}, ensure_ascii=False)
             )
+            # When the call started (epoch seconds): the running row shows
+            # its own clock instead of a bare "executing".
+            started = (
+                f' started="{float(block["started_at"]):.1f}"'
+                if block.get("started_at")
+                else ""
+            )
             if block.get("done"):
-                result = html.escape(
-                    json.dumps(
-                        {
-                            "status": "error" if block.get("error") else "success",
-                            "duration": block.get("duration", 0),
-                        }
-                    )
-                )
+                outcome = {"duration": block.get("duration", 0)}
+                if block.get("interrupted"):
+                    outcome = {"status": "interrupted", **outcome}
+                elif block.get("status_unknown"):
+                    pass
+                else:
+                    outcome = {
+                        "status": "error" if block.get("error") else "success",
+                        **outcome,
+                    }
+                if block.get("reason"):
+                    outcome["reason"] = str(block["reason"])
+                result = html.escape(json.dumps(outcome, ensure_ascii=False))
                 content = (
                     f"{content}\n"
                     f'<details type="tool_calls" done="true" id="{block["id"]}" '
-                    f'name="{html.escape(str(block.get("name") or "tool"))}" '
+                    f'name="{html.escape(str(block.get("name") or "tool"))}"{started} '
                     f'arguments="{arguments}" result="{result}">\n'
                     f"<summary>Tool Executed</summary>\n</details>\n"
                 )
@@ -692,11 +1162,82 @@ def _serialize_blocks(blocks) -> str:
                 content = (
                     f"{content}\n"
                     f'<details type="tool_calls" done="false" id="{block["id"]}" '
-                    f'name="{html.escape(str(block.get("name") or "tool"))}" '
+                    f'name="{html.escape(str(block.get("name") or "tool"))}"{started} '
                     f'arguments="{arguments}">\n'
                     f"<summary>Executing...</summary>\n</details>\n"
                 )
     return content.strip()
+
+
+def _settle_unfinished_tools(blocks, *, interrupted: bool, reason: str = "") -> int:
+    """Close the tool calls that never reported completion.
+
+    After a run ends, a call still "running" can only be one whose completion
+    event was lost. On a run that failed, stopped or broke off it was cut
+    short: mark it interrupted, with the reason. On a run that completed its
+    outcome is unknown: close it without a status rather than claim success.
+    Returns the number of calls closed."""
+    now = time.time()
+    closed = 0
+    for block in blocks:
+        if block.get("type") != "tool" or block.get("done"):
+            continue
+        block["done"] = True
+        started_at = block.get("started_at")
+        block["duration"] = round(max(0.0, now - float(started_at)), 1) if started_at else 0
+        if interrupted:
+            block["interrupted"] = True
+            if reason:
+                block["reason"] = reason
+        else:
+            block["status_unknown"] = True
+        closed += 1
+    return closed
+
+
+_UNFINISHED_TOOL_DETAILS_RE = re.compile(
+    r'<details type="tool_calls" done="false"([^>]*)>\s*<summary>[^<]*</summary>\s*</details>',
+    re.IGNORECASE,
+)
+
+
+def _settle_unfinished_tool_markup(content: str, reason: str) -> str:
+    """_settle_unfinished_tools for a reply known only as saved markup (a run
+    picked up again after this process restarted)."""
+    result = html.escape(
+        json.dumps({"status": "interrupted", "reason": reason}, ensure_ascii=False)
+    )
+
+    def _close(match):
+        attributes = match.group(1)
+        return (
+            f'<details type="tool_calls" done="true"{attributes} result="{result}">\n'
+            f"<summary>Tool Executed</summary>\n</details>"
+        )
+
+    return _UNFINISHED_TOOL_DETAILS_RE.sub(_close, str(content or ""))
+
+
+def _trailing_text(content: str) -> str:
+    """The reply text after its last tool call."""
+    text = str(content or "")
+    last = text.rfind("</details>")
+    return text[last + len("</details>"):] if last >= 0 else text
+
+
+def _merge_recovered_output(content: str, output: str) -> str:
+    """Add the final answer hermes kept to a reply whose stream broke off.
+
+    The stream may already have carried the start of that answer (text after
+    the last tool call); the answer replaces it instead of repeating it."""
+    output = str(output or "").strip()
+    if not output:
+        return content
+    content = str(content or "").rstrip()
+    trailing = _trailing_text(content).strip()
+    if trailing and (output.startswith(trailing) or trailing in output):
+        return f"{content[: len(content) - len(_trailing_text(content))].rstrip()}\n{output}".strip()
+    return f"{content}\n{output}".strip() if content else output
 
 
 _DATA_URL_IMAGE_RE = re.compile(
@@ -741,6 +1282,289 @@ def _store_data_url_images(request, user, metadata, text: str) -> str:
     return _DATA_URL_IMAGE_RE.sub(_repl, text)
 
 
+# ---------------------------------------------------------------- recovery
+
+# Set when this process starts shutting down. A run task cancelled then is
+# not a user's stop: hermes keeps working, and the run is picked up again
+# from INFLIGHT_RUNS_FILE after the restart.
+_SHUTTING_DOWN = False
+
+
+def begin_shutdown() -> None:
+    global _SHUTTING_DOWN
+    _SHUTTING_DOWN = True
+
+
+def _inflight_path() -> str:
+    return os.path.join(str(DATA_DIR), INFLIGHT_RUNS_FILE)
+
+
+def _load_inflight() -> dict:
+    try:
+        with open(_inflight_path(), encoding="utf-8") as handle:
+            data = json.load(handle)
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _save_inflight(data: dict) -> None:
+    path = _inflight_path()
+    temporary = f"{path}.tmp"
+    try:
+        with open(temporary, "w", encoding="utf-8") as handle:
+            json.dump(data, handle, ensure_ascii=False)
+        os.replace(temporary, path)
+    except OSError as e:
+        log.warning(f"hermes in-flight registry write failed: {e}")
+
+
+def _remember_inflight(chat_id: str, record: dict) -> None:
+    data = _load_inflight()
+    data[chat_id] = record
+    _save_inflight(data)
+
+
+def _forget_inflight(chat_id: str, run_id) -> None:
+    data = _load_inflight()
+    entry = data.get(chat_id)
+    if entry is not None and (not run_id or entry.get("run_id") == run_id):
+        data.pop(chat_id, None)
+        _save_inflight(data)
+
+
+# Statuses GET /v1/runs/{id} reports once a run is over.
+TERMINAL_RUN_STATUSES = {"completed", "failed", "cancelled", "interrupted"}
+
+RECOVERY_MESSAGES = {
+    "waiting": "与 Hermes 的实时连接断开了，任务仍在运行，正在等它结束…",
+    "interrupted": (
+        "Hermes 网关在任务结束前重启了，任务已中断。已经执行的步骤不会回滚，"
+        "可以发一句“继续”让 Hermes 接着做。"
+    ),
+    "lost": (
+        "与 Hermes 的连接断开后没能取回这次任务的结果（网关可能已重启）。"
+        "已经执行的步骤不会回滚，可以发一句“继续”让 Hermes 接着做。"
+    ),
+    "timeout": "等了很久也没等到 Hermes 任务结束，已停止等待。任务可能仍在后台运行。",
+}
+
+
+def _recovery_delay(attempt: int) -> float:
+    return RECOVERY_POLL_DELAYS[min(attempt, len(RECOVERY_POLL_DELAYS) - 1)]
+
+
+async def _fetch_run_status(base_url: str, headers: dict, run_id: str):
+    """(http status, body) of GET /v1/runs/{id}; (None, None) when unreachable."""
+    try:
+        timeout = aiohttp.ClientTimeout(total=15)
+        async with aiohttp.ClientSession(trust_env=True, timeout=timeout) as session:
+            async with session.get(
+                f"{base_url}/runs/{run_id}",
+                headers=headers,
+                ssl=AIOHTTP_CLIENT_SESSION_SSL,
+            ) as resp:
+                if resp.status >= 400:
+                    return resp.status, None
+                return resp.status, await resp.json()
+    except asyncio.CancelledError:
+        raise
+    except Exception as e:
+        log.debug(f"hermes run status poll failed for {run_id}: {e}")
+        return None, None
+
+
+async def _await_run_outcome(
+    base_url: str,
+    headers: dict,
+    run_id: str,
+    *,
+    max_seconds: float = None,
+    on_waiting=None,
+    on_approval=None,
+) -> dict:
+    """Poll GET /v1/runs/{id} until the run is over.
+
+    Returns hermes' status body for a finished run, ``{"status": "lost"}``
+    when hermes no longer knows the run (it restarted without a durable
+    record, or forgot it) and ``{"status": "timeout"}`` after `max_seconds`.
+    An unreachable gateway (restarting) is waited out like a running run.
+    ``on_approval(event)`` is awaited for an approval the run is blocked on."""
+    max_seconds = HERMES_AGENT_RECOVERY_MAX_SECONDS if max_seconds is None else max_seconds
+    deadline = time.time() + max_seconds
+    attempt = 0
+    announced = False
+    answered_approvals = set()
+    while True:
+        status_code, body = await _fetch_run_status(base_url, headers, run_id)
+        if status_code == 404:
+            return {"status": "lost"}
+        if isinstance(body, dict):
+            status = str(body.get("status") or "")
+            if status in TERMINAL_RUN_STATUSES:
+                return body
+            approval = body.get("approval")
+            if (
+                status == "waiting_for_approval"
+                and on_approval is not None
+                and isinstance(approval, dict)
+            ):
+                key = str(approval.get("request_id") or approval.get("command") or "")
+                if key not in answered_approvals:
+                    answered_approvals.add(key)
+                    await on_approval(approval)
+                    attempt = 0
+                    continue
+        if not announced and on_waiting is not None:
+            announced = True
+            try:
+                await on_waiting()
+            except Exception:
+                pass
+        if time.time() >= deadline:
+            return {"status": "timeout"}
+        await asyncio.sleep(_recovery_delay(attempt))
+        attempt += 1
+
+
+def _api_root(base_url: str) -> str:
+    base_url = str(base_url or "").rstrip("/")
+    return base_url[: -len("/v1")] if base_url.endswith("/v1") else base_url
+
+
+async def _final_answer_from_session(
+    base_url: str, headers: dict, session_id: str, since: float
+):
+    """The answer a run left in its hermes session, when the run itself is gone.
+
+    hermes writes every turn to the session store before it reports the run
+    finished, so after a restart the newest assistant message of the chat's
+    session (newer than the run, and not followed by a newer user turn) is
+    the answer the chat never received."""
+    if not session_id or is_temporary_chat_id(session_id):
+        return None
+    try:
+        timeout = aiohttp.ClientTimeout(total=15)
+        async with aiohttp.ClientSession(trust_env=True, timeout=timeout) as session:
+            async with session.get(
+                f"{_api_root(base_url)}/api/sessions/{session_id}/messages",
+                params={"order": "latest", "limit": "30", "offset": "0"},
+                headers=headers,
+                ssl=AIOHTTP_CLIENT_SESSION_SSL,
+            ) as resp:
+                if resp.status >= 400:
+                    return None
+                page = await resp.json()
+    except asyncio.CancelledError:
+        raise
+    except Exception as e:
+        log.debug(f"hermes session read failed for {session_id}: {e}")
+        return None
+    rows = page.get("data") if isinstance(page, dict) else None
+    if not isinstance(rows, list):
+        return None
+
+    def _stamp(row):
+        try:
+            value = float(row.get("timestamp") or 0)
+        except (TypeError, ValueError):
+            return 0.0
+        return value / 1000 if value > 1e12 else value
+
+    rows = sorted(
+        (row for row in rows if isinstance(row, dict)), key=_stamp, reverse=True
+    )
+    for row in rows:
+        role = row.get("role")
+        if role == "user":
+            return None
+        if role != "assistant" or row.get("display_kind") == "hidden":
+            continue
+        if _stamp(row) and _stamp(row) < since - 5:
+            return None
+        text = row.get("content")
+        if isinstance(text, list):
+            text = "\n".join(
+                str(part.get("text") or "")
+                for part in text
+                if isinstance(part, dict) and part.get("type") in {"text", "output_text"}
+            )
+        text = str(text or "").strip()
+        if text:
+            return text
+    return None
+
+
+# A file hermes attached to its answer (MEDIA:<path> of a non-image file,
+# inlined by hermes' /v1/runs as a markdown link to a data URL).
+_DATA_URL_FILE_RE = re.compile(
+    r"(?<!!)\[([^\]\n]{0,200})\]\((data:(?!image/)[a-zA-Z0-9.+-]+/[a-zA-Z0-9.+-]+;base64,[A-Za-z0-9+/=\s]+)\)"
+)
+
+
+def _store_generated_file(request, user, metadata, name: str, data: bytes, content_type: str) -> str:
+    """Save bytes hermes produced as one of the user's files; returns its URL."""
+    import io
+    import uuid
+
+    from open_webui.models.files import FileForm, Files
+    from open_webui.storage.provider import Storage
+
+    name = os.path.basename(str(name or "").strip()) or "file"
+    file_id = str(uuid.uuid4())
+    size, path = Storage.upload_file(io.BytesIO(data), f"{file_id}_{name}")
+    Files.insert_new_file(
+        user.id,
+        FileForm(
+            id=file_id,
+            filename=name,
+            path=path,
+            meta={
+                "name": name,
+                "content_type": content_type,
+                "size": size,
+                "data": {"source": "hermes-agent", "chat_id": metadata.get("chat_id")},
+            },
+        ),
+    )
+    return f"/api/v1/files/{file_id}/content"
+
+
+def _store_data_url_files(request, user, metadata, text: str) -> str:
+    """Persist files hermes inlined as data URLs and link to them instead.
+
+    Same reason as _store_data_url_images: the web UI cannot read hermes'
+    paths, and base64 in the chat would bloat it and be replayed to hermes."""
+    if not text or "data:" not in text:
+        return text
+
+    import base64
+    import binascii
+
+    def _repl(match):
+        label = match.group(1).strip()
+        header, _, payload = match.group(2).partition(",")
+        content_type = header[len("data:"):].split(";", 1)[0] or "application/octet-stream"
+        try:
+            data = base64.b64decode(re.sub(r"\s+", "", payload), validate=True)
+            name = label or f"hermes-file{mimetypes_guess(content_type)}"
+            url = _store_generated_file(request, user, metadata, name, data, content_type)
+            return f"[{label or name}]({url})"
+        except (binascii.Error, ValueError) as e:
+            log.warning(f"hermes media file decode failed: {e}")
+        except Exception as e:
+            log.warning(f"hermes media file upload failed: {e}")
+        return f"`{label or '文件'}`（文件未能保存）"
+
+    return _DATA_URL_FILE_RE.sub(_repl, text)
+
+
+def mimetypes_guess(content_type: str) -> str:
+    import mimetypes
+
+    return mimetypes.guess_extension(content_type or "") or ""
+
+
 def _map_usage(usage):
     if not isinstance(usage, dict):
         return None
@@ -781,7 +1605,7 @@ async def run_hermes_agent(request, form_data, user, metadata, model, events, ta
     # The normal OpenAI path materializes /api/v1/files/... image references,
     # but Hermes is dispatched before that path. Materialize the current input
     # only; replaying prior images would inflate later turns with base64 data.
-    run_payload = _build_run_payload(form_data, metadata, upstream_model_id)
+    run_payload = _build_run_payload(form_data, metadata, upstream_model_id, user)
     run_payload = _materialize_run_input_image_refs(
         run_payload,
         user_id=user.id,
@@ -854,7 +1678,7 @@ async def run_hermes_agent(request, form_data, user, metadata, model, events, ta
 
     async def _request_approval(session, run_id, event):
         command = str(event.get("command") or "")
-        description = str(event.get("description") or "")
+        description = _approval_description_zh(event.get("description") or "")
         choices = _approval_choices(event)
         timeout_seconds = max(HERMES_AGENT_APPROVAL_TIMEOUT, 30)
         requested_at = time.time()
@@ -959,7 +1783,7 @@ async def run_hermes_agent(request, form_data, user, metadata, model, events, ta
                 blocks.append({"type": "text", "content": ""})
             return blocks[-1]
 
-        def _apply_final_output(output):
+        def _apply_final_output(output, recovered=False):
             # Hermes resolves MEDIA:<path> image tags into markdown images
             # only in the final output; the delta stream carried the raw tag
             # text. Swap the streamed text for the resolved output so the
@@ -967,6 +1791,22 @@ async def run_hermes_agent(request, form_data, user, metadata, model, events, ta
             if not output:
                 return
             output = _store_data_url_images(request, user, metadata, output)
+            output = _store_data_url_files(request, user, metadata, output)
+            if recovered:
+                # The stream broke off: the answer may be missing entirely or
+                # only its first part arrived (the text after the last tool).
+                tail = len(blocks)
+                while tail > 0 and blocks[tail - 1]["type"] == "text":
+                    tail -= 1
+                trailing = "".join(
+                    str(block.get("content", "")) for block in blocks[tail:]
+                ).strip()
+                if trailing and (output.strip().startswith(trailing) or trailing in output):
+                    del blocks[tail:]
+                    blocks.append({"type": "text", "content": output})
+                elif trailing != output.strip():
+                    blocks.append({"type": "text", "content": output})
+                return
             for block in reversed(blocks):
                 if block["type"] == "text" and str(block.get("content", "")).strip():
                     if "MEDIA:" in block["content"] and "![" in output:
@@ -992,6 +1832,12 @@ async def run_hermes_agent(request, form_data, user, metadata, model, events, ta
                 return
             finalized = True
             _unregister_run(metadata["chat_id"], run_id)
+            _forget_inflight(metadata["chat_id"], run_id)
+            _settle_unfinished_tools(
+                blocks,
+                interrupted=bool(error) or not successful,
+                reason=(error or "")[:200] if error else "",
+            )
             # hermes stopped reading input the moment the run ended. Tell the
             # composer now so its send button turns from "steer" into "queue"
             # instead of offering a steer that can only be refused. Persisted
@@ -1100,6 +1946,62 @@ async def run_hermes_agent(request, form_data, user, metadata, model, events, ta
             except Exception as e:
                 log.warning(f"hermes html visual emit failed: {e}")
 
+        async def _conclude_after_stream_loss(run_started_at: float):
+            announced = False
+
+            async def _announce_waiting():
+                nonlocal announced
+                announced = True
+                await _emit_status(
+                    RECOVERY_MESSAGES["waiting"], False, action="hermes_recovering"
+                )
+
+            async def _approve_while_polling(approval_event):
+                timeout = aiohttp.ClientTimeout(total=30)
+                async with aiohttp.ClientSession(
+                    trust_env=True, timeout=timeout
+                ) as approval_session:
+                    await _request_approval(approval_session, run_id, approval_event)
+
+            outcome = await _await_run_outcome(
+                base_url,
+                headers,
+                run_id,
+                on_waiting=_announce_waiting,
+                on_approval=_approve_while_polling,
+            )
+            status = str(outcome.get("status") or "")
+            if announced:
+                await _emit_status(
+                    "已取回 Hermes 的结果" if status in ("completed", "lost") else "Hermes 任务已结束",
+                    True,
+                    action="hermes_recovering",
+                )
+            if status == "completed":
+                _apply_final_output(outcome.get("output") or "", recovered=True)
+                await _finalize(
+                    usage=outcome.get("usage"),
+                    successful=True,
+                    pending_steer=outcome.get("pending_steer"),
+                )
+            elif status == "failed":
+                await _finalize(error=outcome.get("error") or "Hermes 任务失败")
+            elif status == "cancelled":
+                await _finalize()
+            elif status == "interrupted":
+                await _finalize(error=RECOVERY_MESSAGES["interrupted"])
+            elif status == "lost":
+                answer = await _final_answer_from_session(
+                    base_url, headers, metadata["chat_id"], run_started_at
+                )
+                if answer:
+                    _apply_final_output(answer, recovered=True)
+                    await _finalize(successful=True)
+                else:
+                    await _finalize(error=RECOVERY_MESSAGES["lost"])
+            else:
+                await _finalize(error=RECOVERY_MESSAGES["timeout"])
+
         async def _steer(text: str):
             # Forward to hermes first; only a run that accepted the text gets
             # the transcript marker. 404/409 from hermes both mean "no longer
@@ -1129,184 +2031,215 @@ async def run_hermes_agent(request, form_data, user, metadata, model, events, ta
                 upsert_response_message({**event})
 
             timeout = aiohttp.ClientTimeout(total=None, connect=30, sock_read=120)
+            # The reply id as idempotency key: hermes then keeps the run's
+            # status durably, so after a gateway restart GET /v1/runs/{id}
+            # says "interrupted" instead of forgetting the run, and a start
+            # re-posted after a lost response cannot launch it twice.
+            start_headers = {
+                **headers,
+                "Idempotency-Key": f"halowebui-{metadata['message_id']}"[:255],
+            }
             async with aiohttp.ClientSession(
                 trust_env=True, timeout=timeout
             ) as session:
-                async with session.post(
-                    f"{base_url}/runs",
-                    json=run_payload,
-                    headers=headers,
-                    ssl=AIOHTTP_CLIENT_SESSION_SSL,
-                ) as resp:
-                    if resp.status >= 400:
-                        body = await resp.text()
-                        await _finalize(
-                            error=f"Hermes run start failed ({resp.status}): {body[:500]}"
-                        )
-                        return
-                    run_data = await resp.json()
-                    run_id = run_data.get("run_id")
-                    if not run_id:
-                        await _finalize(error="Hermes did not return a run_id")
-                        return
-                    _register_run(
+                start_deadline = time.time() + START_RETRY_MAX_SECONDS
+                attempt = 0
+                while True:
+                    async with session.post(
+                        f"{base_url}/runs",
+                        json=run_payload,
+                        headers=start_headers,
+                        ssl=AIOHTTP_CLIENT_SESSION_SSL,
+                    ) as resp:
+                        if resp.status == 429 and time.time() < start_deadline:
+                            delay = _retry_after_seconds(resp.headers, attempt)
+                            attempt += 1
+                            await _emit_status(
+                                f"Hermes 同时运行的任务已满，{int(delay)} 秒后自动重试（第 {attempt} 次）…",
+                                False,
+                                action="hermes_start_retry",
+                            )
+                            await asyncio.sleep(delay)
+                            continue
+                        if resp.status >= 400:
+                            body = await resp.text()
+                            await _finalize(
+                                error=_describe_start_failure(resp.status, body)
+                            )
+                            return
+                        run_data = await resp.json()
+                        break
+                if attempt:
+                    await _emit_status("Hermes 已开始执行", True, action="hermes_start_retry")
+                run_id = run_data.get("run_id")
+                if not run_id:
+                    await _finalize(error="Hermes 没有返回任务 ID，任务可能没有启动")
+                    return
+                run_started_at = time.time()
+                _register_run(
+                    metadata["chat_id"],
+                    {
+                        "user_id": user.id,
+                        "message_id": metadata["message_id"],
+                        "run_id": run_id,
+                        "started_at": run_started_at,
+                        "steers": 0,
+                        "steer": _steer,
+                    },
+                )
+                if not is_temporary_chat_id(metadata["chat_id"]):
+                    _remember_inflight(
                         metadata["chat_id"],
                         {
-                            "user_id": user.id,
-                            "message_id": metadata["message_id"],
                             "run_id": run_id,
-                            "started_at": time.time(),
-                            "steers": 0,
-                            "steer": _steer,
+                            "message_id": metadata["message_id"],
+                            "user_id": user.id,
+                            "base_url": base_url,
+                            "model_id": model_id,
+                            "started_at": run_started_at,
                         },
                     )
 
-                async with session.get(
-                    f"{base_url}/runs/{run_id}/events",
-                    headers=headers,
-                    ssl=AIOHTTP_CLIENT_SESSION_SSL,
-                    read_bufsize=HERMES_EVENTS_READ_BUFSIZE,
-                ) as resp:
-                    if resp.status >= 400:
-                        body = await resp.text()
-                        await _finalize(
-                            error=f"Hermes event stream failed ({resp.status}): {body[:500]}"
-                        )
-                        return
+                # A broken connection (gateway restart, network drop) is not
+                # the end of the run: fall through to the outcome poll below.
+                try:
+                    async with session.get(
+                        f"{base_url}/runs/{run_id}/events",
+                        headers=headers,
+                        ssl=AIOHTTP_CLIENT_SESSION_SSL,
+                        read_bufsize=HERMES_EVENTS_READ_BUFSIZE,
+                    ) as resp:
+                        if resp.status >= 400:
+                            body = await resp.text()
+                            await _finalize(
+                                error=f"无法读取 Hermes 任务进度（HTTP {resp.status}）：{body[:300]}"
+                            )
+                            return
 
-                    while True:
-                        try:
-                            raw_line = await resp.content.readline()
-                        except ValueError as e:
-                            # "Chunk too big": a single SSE line exceeded
-                            # read_bufsize. Don't fail the chat — fall through
-                            # to the status poll below, which reads the same
-                            # final output as plain JSON with no line limit.
-                            log.warning(f"hermes event stream read aborted: {e}")
-                            break
-                        if not raw_line:
-                            break
-                        line = raw_line.decode("utf-8", errors="ignore").strip()
-                        if not line or line.startswith(":"):
-                            continue
-                        if not line.startswith("data:"):
-                            continue
-                        try:
-                            event = json.loads(line[len("data:") :].strip())
-                        except Exception:
-                            continue
+                        while True:
+                            try:
+                                raw_line = await resp.content.readline()
+                            except ValueError as e:
+                                # "Chunk too big": a single SSE line exceeded
+                                # read_bufsize. Don't fail the chat — fall through
+                                # to the status poll below, which reads the same
+                                # final output as plain JSON with no line limit.
+                                log.warning(f"hermes event stream read aborted: {e}")
+                                break
+                            if not raw_line:
+                                break
+                            line = raw_line.decode("utf-8", errors="ignore").strip()
+                            if not line or line.startswith(":"):
+                                continue
+                            if not line.startswith("data:"):
+                                continue
+                            try:
+                                event = json.loads(line[len("data:") :].strip())
+                            except Exception:
+                                continue
 
-                        event_type = event.get("event")
+                            event_type = event.get("event")
 
-                        if event_type == "message.delta":
-                            delta = event.get("delta") or ""
-                            if delta:
-                                current_text_block()["content"] += delta
+                            if event_type == "message.delta":
+                                delta = event.get("delta") or ""
+                                if delta:
+                                    current_text_block()["content"] += delta
+                                    await _emit_completion(
+                                        {"content": _serialize_blocks(blocks)}
+                                    )
+                            elif event_type == "tool.started":
+                                blocks.append(
+                                    {
+                                        "type": "tool",
+                                        "id": f"hermes-{len(blocks)}",
+                                        "name": event.get("tool") or "tool",
+                                        "preview": event.get("preview") or "",
+                                        "done": False,
+                                        "started_at": event.get("timestamp") or time.time(),
+                                    }
+                                )
                                 await _emit_completion(
                                     {"content": _serialize_blocks(blocks)}
                                 )
-                        elif event_type == "tool.started":
-                            blocks.append(
-                                {
-                                    "type": "tool",
-                                    "id": f"hermes-{len(blocks)}",
-                                    "name": event.get("tool") or "tool",
-                                    "preview": event.get("preview") or "",
-                                    "done": False,
-                                }
-                            )
-                            await _emit_completion(
-                                {"content": _serialize_blocks(blocks)}
-                            )
-                        elif event_type == "tool.completed":
-                            tool_name = event.get("tool")
-                            for block in reversed(blocks):
-                                if (
-                                    block["type"] == "tool"
-                                    and not block.get("done")
-                                    and (
-                                        block.get("name") == tool_name
-                                        or tool_name is None
-                                    )
-                                ):
-                                    block["done"] = True
-                                    block["duration"] = event.get("duration", 0)
-                                    block["error"] = bool(event.get("error"))
-                                    break
-                            await _emit_completion(
-                                {"content": _serialize_blocks(blocks)}
-                            )
-                        elif event_type == "reasoning.available":
-                            # Not real reasoning: hermes re-emits the assistant
-                            # message content (first 500 chars) after every turn
-                            # for delegation progress displays. The same text
-                            # already arrives via message.delta, so rendering it
-                            # would duplicate the answer as a "thinking" block.
-                            pass
-                        elif event_type == "approval.request":
-                            await _request_approval(session, run_id, event)
-                        elif event_type == "approval.responded":
-                            pass
-                        elif event_type == "run.completed":
-                            _apply_final_output(event.get("output") or "")
-                            await _finalize(
-                                usage=event.get("usage"),
-                                successful=True,
-                                pending_steer=event.get("pending_steer"),
-                            )
-                        elif event_type == "run.failed":
-                            await _finalize(
-                                error=event.get("error") or "Hermes run failed"
-                            )
-                        elif event_type == "run.cancelled":
-                            await _finalize()
+                            elif event_type == "tool.completed":
+                                tool_name = event.get("tool")
+                                for block in reversed(blocks):
+                                    if (
+                                        block["type"] == "tool"
+                                        and not block.get("done")
+                                        and (
+                                            block.get("name") == tool_name
+                                            or tool_name is None
+                                        )
+                                    ):
+                                        block["done"] = True
+                                        block["duration"] = event.get("duration", 0)
+                                        block["error"] = bool(event.get("error"))
+                                        break
+                                await _emit_completion(
+                                    {"content": _serialize_blocks(blocks)}
+                                )
+                            elif event_type == "reasoning.available":
+                                # Not real reasoning: hermes re-emits the assistant
+                                # message content (first 500 chars) after every turn
+                                # for delegation progress displays. The same text
+                                # already arrives via message.delta, so rendering it
+                                # would duplicate the answer as a "thinking" block.
+                                pass
+                            elif event_type == "approval.request":
+                                await _request_approval(session, run_id, event)
+                            elif event_type == "approval.responded":
+                                pass
+                            elif event_type == "run.completed":
+                                _apply_final_output(event.get("output") or "")
+                                await _finalize(
+                                    usage=event.get("usage"),
+                                    successful=True,
+                                    pending_steer=event.get("pending_steer"),
+                                )
+                            elif event_type == "run.failed":
+                                await _finalize(
+                                    error=event.get("error") or "Hermes 任务失败"
+                                )
+                            elif event_type == "run.cancelled":
+                                await _finalize()
+                except (aiohttp.ClientError, asyncio.TimeoutError, ConnectionError) as e:
+                    if finalized:
+                        raise
+                    log.warning(f"hermes event stream for {run_id} broke off: {e!r}")
 
             if not finalized:
-                # Stream closed without a terminal event; poll final status.
-                error = None
-                usage = None
-                successful = False
-                pending_steer = None
+                # The event stream ended without the run's terminal event: the
+                # gateway restarted, the connection dropped, or a line was too
+                # big to read. The run may still be going (or be done); ask
+                # hermes until it is over instead of closing the reply as if
+                # it were complete with its tools "running" forever.
+                await _conclude_after_stream_loss(run_started_at)
+        except asyncio.CancelledError:
+            if _SHUTTING_DOWN and run_id:
+                # This process is going away, not the person stopping the
+                # run: hermes keeps working. Save what arrived so far; after
+                # the restart the run is picked up again from the registry.
                 try:
-                    timeout = aiohttp.ClientTimeout(total=15)
-                    async with aiohttp.ClientSession(
-                        trust_env=True, timeout=timeout
-                    ) as session:
-                        async with session.get(
-                            f"{base_url}/runs/{run_id}",
-                            headers=headers,
-                            ssl=AIOHTTP_CLIENT_SESSION_SSL,
-                        ) as resp:
-                            if resp.status < 400:
-                                status_data = await resp.json()
-                                usage = status_data.get("usage")
-                                status = status_data.get("status")
-                                successful = status == "completed"
-                                if status == "failed":
-                                    error = status_data.get("error") or "run failed"
-                                pending_steer = status_data.get("pending_steer")
-                                _apply_final_output(status_data.get("output") or "")
+                    upsert_response_message({"content": _serialize_blocks(blocks)})
                 except Exception:
                     pass
-                await _finalize(
-                    error=error,
-                    usage=usage,
-                    successful=successful,
-                    pending_steer=pending_steer,
-                )
-        except asyncio.CancelledError:
+                raise
             if run_id:
                 try:
                     await asyncio.shield(_post_stop(run_id))
                 except Exception:
                     pass
+                _forget_inflight(metadata["chat_id"], run_id)
             try:
+                _settle_unfinished_tools(blocks, interrupted=True, reason="已手动停止")
                 content = _serialize_blocks(blocks)
                 upsert_response_message(
                     {
                         "content": content,
                         "done": True,
                         "completedAt": int(time.time()),
+                        "hermes_run": _run_state(),
                     }
                 )
             except Exception:
@@ -1320,3 +2253,179 @@ async def run_hermes_agent(request, form_data, user, metadata, model, events, ta
 
     task_id, _ = create_task(_run_handler(), id=metadata["chat_id"])
     return {"status": True, "task_id": task_id}
+
+
+# ------------------------------------------------ recovery after a restart
+
+
+def _api_key_for_base_url(user, base_url: str) -> str:
+    """The key of the user's connection that points at `base_url`."""
+    if HERMES_AGENT_BASE_URL:
+        return HERMES_AGENT_API_KEY
+    try:
+        from open_webui.routers.openai import (
+            _get_openai_user_config,
+            _normalize_openai_connection_key,
+        )
+
+        base_urls, keys, configs = _get_openai_user_config(user)
+        for index, url in enumerate(base_urls):
+            if _normalize_base_url(url) != base_url:
+                continue
+            api_config = configs.get(str(index)) or configs.get(url) or {}
+            key, _ = _normalize_openai_connection_key(
+                keys[index] if index < len(keys) else "", api_config, url_idx=index
+            )
+            return key or ""
+    except Exception as e:
+        log.warning(f"hermes recovery could not resolve the connection key: {e}")
+    return ""
+
+
+async def _recover_inflight_run(app, chat_id: str, record: dict) -> None:
+    """Finish a reply whose run was still going when this process stopped."""
+    from types import SimpleNamespace
+
+    from open_webui.models.users import Users
+
+    run_id = str(record.get("run_id") or "")
+    message_id = str(record.get("message_id") or "")
+    user = Users.get_user_by_id(str(record.get("user_id") or ""))
+    base_url = str(record.get("base_url") or "")
+    if not (run_id and message_id and user and base_url):
+        _forget_inflight(chat_id, run_id)
+        return
+    message = Chats.get_message_by_id_and_message_id(chat_id, message_id) or {}
+    if message.get("done") or message.get("stoppedByUser") or message.get("stopped"):
+        _forget_inflight(chat_id, run_id)
+        return
+
+    api_key = _api_key_for_base_url(user, base_url)
+    headers = {"Content-Type": "application/json"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+    metadata = {"chat_id": chat_id, "message_id": message_id, "user_id": user.id}
+    emitter = get_event_emitter(metadata)
+    request = SimpleNamespace(app=app, state=SimpleNamespace())
+
+    async def _status(description: str, done: bool):
+        try:
+            await emitter(
+                {
+                    "type": "status",
+                    "data": {
+                        "action": "hermes_recovering",
+                        "description": description,
+                        "done": done,
+                    },
+                }
+            )
+        except Exception:
+            pass
+
+    log.info(f"picking up hermes run {run_id} for chat {chat_id} after a restart")
+    await _status("HaloWebUI 重启过，正在向 Hermes 取回这次任务的结果…", False)
+    try:
+        outcome = await _await_run_outcome(base_url, headers, run_id)
+    except asyncio.CancelledError:
+        if not _SHUTTING_DOWN:
+            # Stopped from the chat while waiting: stop hermes too.
+            try:
+                timeout = aiohttp.ClientTimeout(total=10)
+                async with aiohttp.ClientSession(trust_env=True, timeout=timeout) as session:
+                    await session.post(
+                        f"{base_url}/runs/{run_id}/stop",
+                        json={},
+                        headers=headers,
+                        ssl=AIOHTTP_CLIENT_SESSION_SSL,
+                    )
+            except Exception:
+                pass
+            _forget_inflight(chat_id, run_id)
+        raise
+
+    status = str(outcome.get("status") or "")
+    output = None
+    error = None
+    usage = None
+    if status == "completed":
+        output = outcome.get("output") or ""
+        usage = _map_usage(outcome.get("usage"))
+    elif status == "failed":
+        error = outcome.get("error") or "Hermes 任务失败"
+    elif status == "interrupted":
+        error = RECOVERY_MESSAGES["interrupted"]
+    elif status == "lost":
+        output = await _final_answer_from_session(
+            base_url, headers, chat_id, float(record.get("started_at") or 0)
+        )
+        if not output:
+            error = RECOVERY_MESSAGES["lost"]
+    elif status != "cancelled":
+        error = RECOVERY_MESSAGES["timeout"]
+
+    content = str(message.get("content") or "")
+    content = _settle_unfinished_tool_markup(
+        content, (error or "任务在 HaloWebUI 重启期间结束，这一步的结果没有传回来")[:200]
+    )
+    if output:
+        try:
+            output = _store_data_url_images(request, user, metadata, output)
+            output = _store_data_url_files(request, user, metadata, output)
+        except Exception as e:
+            log.warning(f"hermes recovered output media failed: {e}")
+        content = _merge_recovered_output(content, output)
+    completed_at = int(time.time())
+    run_state = {"active": False, "run_id": run_id, "recovered": True}
+    update = {
+        "content": content,
+        "done": True,
+        "completedAt": completed_at,
+        "hermes_run": run_state,
+        **({"usage": usage} if usage else {}),
+        **({"error": {"content": error}} if error else {}),
+    }
+    try:
+        Chats.upsert_message_to_chat_by_id_and_message_id(
+            chat_id, message_id, update, guard_stopped=True, set_current=False
+        )
+    except Exception as e:
+        log.warning(f"hermes recovered reply persist failed: {e}")
+    _forget_inflight(chat_id, run_id)
+    mark_unread(chat_id, user.id)
+    title = Chats.get_chat_title_by_id(chat_id)
+    await _status("已取回 Hermes 的结果" if output else "Hermes 任务已结束", True)
+    try:
+        await emitter(
+            {
+                "type": "chat:completion",
+                "data": {**update, **({"title": title} if title else {})},
+            }
+        )
+    except Exception as e:
+        log.debug(f"hermes recovered reply emit failed: {e}")
+    try:
+        _schedule_completion_webhook(request, user, metadata, title, content)
+    except Exception:
+        pass
+
+
+def resume_inflight_runs(app) -> int:
+    """Pick up every run this process was streaming when it last stopped.
+
+    Called once at startup. Each becomes a chat task again, so the chat shows
+    it as running (and can stop it) until hermes reports the outcome."""
+    records = _load_inflight()
+    resumed = 0
+    for chat_id, record in list(records.items()):
+        if not isinstance(record, dict):
+            _forget_inflight(chat_id, None)
+            continue
+        try:
+            create_task(_recover_inflight_run(app, chat_id, record), id=chat_id)
+            resumed += 1
+        except Exception as e:
+            log.warning(f"hermes run recovery for chat {chat_id} failed to start: {e}")
+    if resumed:
+        log.info(f"resuming {resumed} hermes run(s) left in flight by the last shutdown")
+    return resumed

@@ -252,3 +252,28 @@ def test_import_session_names_the_source_it_refuses(monkeypatch):
     assert e.value.status_code == 400
     assert "cron" in e.value.detail
     assert inserted == {}
+
+
+def test_model_options_keep_configured_providers_with_models():
+    from open_webui.utils.hermes_sessions import condense_model_options
+
+    options = condense_model_options(
+        {
+            "model": "gpt-chat",
+            "provider": "custom:relay",
+            "providers": [
+                {"slug": "nous", "name": "Nous", "authenticated": False, "models": ["x"]},
+                {"slug": "anthropic", "name": "Anthropic", "authenticated": True,
+                 "models": ["claude-opus-5", {"id": "claude-sonnet-5"}, "claude-opus-5"]},
+                {"slug": "empty", "name": "Empty", "authenticated": True, "models": []},
+                {"slug": "custom:relay", "name": "Relay", "authenticated": True,
+                 "is_current": True, "models": ["gpt-chat"]},
+            ],
+        }
+    )
+    assert options["model"] == "gpt-chat"
+    assert [provider["slug"] for provider in options["providers"]] == [
+        "custom:relay",
+        "anthropic",
+    ]
+    assert options["providers"][1]["models"] == ["claude-opus-5", "claude-sonnet-5"]

@@ -368,7 +368,10 @@ class _Session:
     def post(self, url, **kwargs):
         self.hermes.posts.append((url, kwargs))
         if url.endswith("/runs"):
-            return self.hermes.starts.pop(0)
+            start = self.hermes.starts.pop(0)
+            if isinstance(start, BaseException):
+                raise start
+            return start
         return _Response(payload={})
 
     def get(self, url, **kwargs):
@@ -467,7 +470,7 @@ def test_a_dropped_stream_waits_for_the_run_and_keeps_the_answer(monkeypatch):
     assert final["usage"]["prompt_tokens"] == 3
     descriptions = [status["description"] for status in _statuses(emitted)]
     assert hermes_agent.RECOVERY_MESSAGES["waiting"] in descriptions
-    assert hermes.posts[0][1]["headers"]["Idempotency-Key"] == "halowebui-assistant-1"
+    assert hermes.posts[0][1]["headers"]["Idempotency-Key"].startswith("halowebui-assistant-1-")
     # The run is no longer owed to the chat once the reply is closed.
     assert hermes_agent._load_inflight() == {}
 
@@ -527,6 +530,50 @@ def test_a_busy_gateway_is_retried_before_giving_up(monkeypatch):
     assert final["content"] == "ok"
     assert len([url for url, _ in hermes.posts if url.endswith("/runs")]) == 2
     assert any("自动重试" in status["description"] for status in _statuses(emitted))
+
+
+def test_a_restarting_gateway_is_waited_out(monkeypatch):
+    monkeypatch.setattr(hermes_agent, "START_RETRY_MIN_DELAY", 0)
+    down = hermes_agent.aiohttp.ClientConnectorError(
+        hermes_agent.aiohttp.client_reqrep.ConnectionKey(
+            "host.docker.internal", 8642, False, None, None, None, None
+        ),
+        OSError(111, "Connection refused"),
+    )
+    hermes = _Hermes(
+        starts=[
+            _Response(status=503, payload={"error": {"message": "Gateway is draining"}},
+                      headers={"Retry-After": "0"}),
+            down,
+            _Response(payload={"run_id": "run-1"}),
+        ],
+        events=[{"event": "run.completed", "output": "ok"}],
+    )
+    final, emitted, _ = _run(monkeypatch, hermes)
+    assert final["content"] == "ok"
+    starts = [kwargs for url, kwargs in hermes.posts if url.endswith("/runs")]
+    assert len(starts) == 3
+    # Every re-post carries the same key, so hermes replays instead of starting twice.
+    assert len({kwargs["headers"]["Idempotency-Key"] for kwargs in starts}) == 1
+    descriptions = [status["description"] for status in _statuses(emitted)]
+    assert any("正在重启" in text for text in descriptions)
+
+
+def test_a_gateway_that_stays_down_is_explained(monkeypatch):
+    monkeypatch.setattr(hermes_agent, "START_RETRY_MAX_SECONDS", 0)
+    hermes = _Hermes(starts=[_Response(status=503, payload={"error": {"message": "draining"}})])
+    final, _, _ = _run(monkeypatch, hermes)
+    assert "正在重启" in final["error"]["content"]
+    assert "draining" not in final["error"]["content"]
+
+
+def test_continuing_a_reply_starts_its_own_run():
+    # "继续生成" reuses the reply id with another input: a key of the reply id
+    # alone made hermes answer 409 (same key, different payload).
+    first = hermes_agent._start_idempotency_key("m1", {"input": "问题"})
+    assert first == hermes_agent._start_idempotency_key("m1", {"input": "问题"})
+    assert first != hermes_agent._start_idempotency_key("m1", {"input": "继续"})
+    assert first.startswith("halowebui-m1-")
 
 
 def test_a_refused_start_is_explained_in_chinese(monkeypatch):

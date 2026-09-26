@@ -127,7 +127,8 @@ def test_describe_run_error_names_the_gateway_for_connection_failures():
         OSError(111, "Connection refused"),
     )
     text = _describe_run_error(connect_error, "http://host.docker.internal:8642/v1")
-    assert text.startswith("无法连接 Hermes 网关 (http://host.docker.internal:8642/v1)")
+    assert text.startswith("连不上 Hermes 网关（http://host.docker.internal:8642/v1）")
+    assert "Connection refused" not in text
 
     assert _describe_run_error(asyncio.TimeoutError(), "http://h/v1").startswith(
         "等待 Hermes 网关响应超时"

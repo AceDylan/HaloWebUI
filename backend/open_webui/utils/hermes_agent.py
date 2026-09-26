@@ -31,6 +31,7 @@ Configuration (environment variables):
 """
 
 import asyncio
+import hashlib
 import html
 import json
 import logging
@@ -223,9 +224,10 @@ def _describe_run_error(error: Exception, base_url: str) -> str:
     if isinstance(error, (asyncio.TimeoutError, TimeoutError)):
         return f"等待 Hermes 网关响应超时 ({base_url})，请稍后重试"
     if isinstance(error, (aiohttp.ClientConnectionError, ConnectionRefusedError)):
+        # The raw error is in the log (log.exception at the call site).
         return (
-            f"无法连接 Hermes 网关 ({base_url})，请确认 hermes gateway 正在运行: "
-            f"{error}"
+            f"连不上 Hermes 网关（{base_url}），一分钟内没有恢复。"
+            "请确认 hermes gateway 正在运行，然后重新发送。"
         )
     return f"Hermes 出错：{error}"
 
@@ -252,11 +254,43 @@ def _describe_start_failure(status: int, body: str) -> str:
         )
     if status in (401, 403):
         return f"Hermes 拒绝了访问（HTTP {status}），请检查连接里的 API 密钥。"
+    if status in (502, 503, 504):
+        return (
+            "Hermes 网关正在重启或暂时不可用，等了一分钟仍没有恢复。"
+            "请稍后重新发送（或回复「继续」）。"
+        )
     return f"Hermes 启动任务失败（HTTP {status}）" + (f"：{detail}" if detail else "")
 
 
+# Answers to POST /v1/runs worth waiting out: the gateway is full (429) or
+# restarting (it drains with 503; a proxy in front says 502/504), and no answer
+# at all while it is down.
+START_RETRY_TEXTS = {
+    429: "Hermes 同时运行的任务已满，{delay} 秒后自动重试（第 {attempt} 次）…",
+    502: "Hermes 网关暂时不可用，{delay} 秒后自动重试（第 {attempt} 次）…",
+    503: "Hermes 网关正在重启，{delay} 秒后自动重试（第 {attempt} 次）…",
+    504: "Hermes 网关暂时不可用，{delay} 秒后自动重试（第 {attempt} 次）…",
+    "unreachable": "暂时连不上 Hermes 网关（可能正在重启），{delay} 秒后自动重试（第 {attempt} 次）…",
+}
+
+
+def _start_idempotency_key(message_id: str, run_payload: dict) -> str:
+    """Idempotency-Key for starting the run behind reply `message_id`.
+
+    With a key hermes keeps the run's status durably (after a gateway restart
+    GET /v1/runs/{id} says "interrupted" instead of forgetting the run), and a
+    start re-posted after a lost answer replays instead of launching twice.
+    The payload's hash is part of it: "继续生成" starts a new run for the same
+    reply with another input, which under the bare reply id was refused with
+    409 for a day."""
+    digest = hashlib.sha256(
+        json.dumps(run_payload, sort_keys=True, ensure_ascii=False, default=str).encode()
+    ).hexdigest()[:16]
+    return f"halowebui-{message_id}-{digest}"[:255]
+
+
 def _retry_after_seconds(headers, attempt: int) -> float:
-    """Seconds to wait before re-posting a run hermes answered with 429."""
+    """Seconds to wait before re-posting a run hermes could not take yet."""
     try:
         value = float((headers or {}).get("Retry-After") or 0)
     except (TypeError, ValueError):
@@ -2287,13 +2321,11 @@ async def run_hermes_agent(request, form_data, user, metadata, model, events, ta
                 upsert_response_message({**event})
 
             timeout = aiohttp.ClientTimeout(total=None, connect=30, sock_read=120)
-            # The reply id as idempotency key: hermes then keeps the run's
-            # status durably, so after a gateway restart GET /v1/runs/{id}
-            # says "interrupted" instead of forgetting the run, and a start
-            # re-posted after a lost response cannot launch it twice.
             start_headers = {
                 **headers,
-                "Idempotency-Key": f"halowebui-{metadata['message_id']}"[:255],
+                "Idempotency-Key": _start_idempotency_key(
+                    metadata["message_id"], run_payload
+                ),
             }
             async with aiohttp.ClientSession(
                 trust_env=True, timeout=timeout
@@ -2301,30 +2333,48 @@ async def run_hermes_agent(request, form_data, user, metadata, model, events, ta
                 start_deadline = time.time() + START_RETRY_MAX_SECONDS
                 attempt = 0
                 while True:
-                    async with session.post(
-                        f"{base_url}/runs",
-                        json=run_payload,
-                        headers=start_headers,
-                        ssl=AIOHTTP_CLIENT_SESSION_SSL,
-                    ) as resp:
-                        if resp.status == 429 and time.time() < start_deadline:
-                            delay = _retry_after_seconds(resp.headers, attempt)
-                            attempt += 1
-                            await _emit_status(
-                                f"Hermes 同时运行的任务已满，{int(delay)} 秒后自动重试（第 {attempt} 次）…",
-                                False,
-                                action="hermes_start_retry",
-                            )
-                            await asyncio.sleep(delay)
-                            continue
-                        if resp.status >= 400:
-                            body = await resp.text()
-                            await _finalize(
-                                error=_describe_start_failure(resp.status, body)
-                            )
-                            return
-                        run_data = await resp.json()
-                        break
+                    try:
+                        async with session.post(
+                            f"{base_url}/runs",
+                            json=run_payload,
+                            headers=start_headers,
+                            ssl=AIOHTTP_CLIENT_SESSION_SSL,
+                        ) as resp:
+                            retry_text = START_RETRY_TEXTS.get(resp.status)
+                            if retry_text and time.time() < start_deadline:
+                                delay = _retry_after_seconds(resp.headers, attempt)
+                                attempt += 1
+                                await _emit_status(
+                                    retry_text.format(delay=int(delay), attempt=attempt),
+                                    False,
+                                    action="hermes_start_retry",
+                                )
+                                await asyncio.sleep(delay)
+                                continue
+                            if resp.status >= 400:
+                                body = await resp.text()
+                                await _finalize(
+                                    error=_describe_start_failure(resp.status, body)
+                                )
+                                return
+                            run_data = await resp.json()
+                            break
+                    except (aiohttp.ClientConnectionError, asyncio.TimeoutError):
+                        # The gateway is restarting (or the answer was lost):
+                        # the same key makes the re-post replay, never a
+                        # second run.
+                        if time.time() >= start_deadline:
+                            raise
+                        delay = _retry_after_seconds(None, attempt)
+                        attempt += 1
+                        await _emit_status(
+                            START_RETRY_TEXTS["unreachable"].format(
+                                delay=int(delay), attempt=attempt
+                            ),
+                            False,
+                            action="hermes_start_retry",
+                        )
+                        await asyncio.sleep(delay)
                 if attempt:
                     await _emit_status("Hermes 已开始执行", True, action="hermes_start_retry")
                 run_id = run_data.get("run_id")

@@ -1,0 +1,7 @@
+name: halowebui-run-guard
+version: "0.1.0"
+description: "Keep one message from starting the same background run twice: replay parallel tool calls one at a time for native Gemini endpoints, and refuse an identical runner launch within the same turn."
+author: HaloWebUI
+hooks:
+  - pre_tool_call
+  - post_tool_call

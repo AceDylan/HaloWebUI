@@ -51,10 +51,31 @@ def _fetch_reasoning_effort() -> str | None:
     return effort if effort in VALID_REASONING_EFFORTS else None
 
 
+def _is_native_gemini_base_url(base_url: Any) -> bool:
+    """Google's Gemini endpoint or a relay speaking its native REST shape
+    (``<base>/v1beta``), as hermes' ``is_native_gemini_base_url`` decides."""
+    normalized = str(base_url or "").strip().rstrip("/").lower()
+    if not normalized or normalized.endswith("/openai"):
+        return False
+    if "generativelanguage.googleapis.com" in normalized:
+        return True
+    try:
+        path = urlsplit(normalized).path.rstrip("/")
+    except ValueError:
+        return False
+    return path.endswith("/v1beta") or path.endswith("/v1beta/models")
+
+
 def sync_reasoning_effort(**kwargs: Any) -> dict[str, Any] | None:
     """Replace only the outbound request's reasoning-effort field."""
     api_mode = kwargs.get("api_mode")
     if api_mode not in SUPPORTED_API_MODES:
+        return None
+    # hermes' native Gemini client ignores reasoning_effort (thinking travels
+    # in thinkingConfig), and llm_request middleware results replace each
+    # other instead of chaining: whichever plugin loads last wins, so a request
+    # returned here could undo halowebui-run-guard's rewrite of the same request.
+    if _is_native_gemini_base_url(kwargs.get("base_url")):
         return None
 
     request = kwargs.get("request")

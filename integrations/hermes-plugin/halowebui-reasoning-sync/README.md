@@ -22,7 +22,11 @@ Requests use a short timeout and fail open. Values outside
 leave the original Hermes request unchanged. There is no cache: each LLM
 request in a supported API mode reads the endpoint again. Other API modes,
 including Anthropic Messages and Bedrock Converse, are left unchanged without
-calling the endpoint.
+calling the endpoint. So are native Gemini endpoints (Google's or a base URL
+ending in `/v1beta`, such as `gemini-chat`): Hermes' native Gemini client
+ignores the field, and middleware results replace each other (the plugin loaded
+last wins), so returning a request there could undo the rewrite
+`halowebui-run-guard` makes to the same request.
 
 ## Install
 

@@ -99,6 +99,48 @@ def test_unsupported_api_modes_do_not_mutate_or_fetch(monkeypatch, api_mode):
     assert endpoint_calls == []
 
 
+@pytest.mark.parametrize(
+    "base_url",
+    [
+        "https://relay.example:23001/v1beta",
+        "https://relay.example:23001/v1beta/models",
+        "https://generativelanguage.googleapis.com/v1beta",
+    ],
+)
+def test_native_gemini_endpoints_are_left_to_the_run_guard(monkeypatch, base_url):
+    # llm_request results replace each other, so a request returned here could
+    # undo halowebui-run-guard's rewrite; the native client ignores the field.
+    endpoint_calls = []
+    monkeypatch.setattr(
+        plugin,
+        "urlopen",
+        lambda url, timeout: (
+            endpoint_calls.append(url) or _Response({"reasoning_effort": "max"})
+        ),
+    )
+
+    result = plugin.sync_reasoning_effort(
+        request={"messages": []}, api_mode="chat_completions", base_url=base_url
+    )
+
+    assert result is None
+    assert endpoint_calls == []
+
+
+def test_openai_compatible_gemini_path_is_still_synced(monkeypatch):
+    monkeypatch.setattr(
+        plugin, "urlopen", lambda url, timeout: _Response({"reasoning_effort": "low"})
+    )
+
+    result = plugin.sync_reasoning_effort(
+        request={"messages": []},
+        api_mode="chat_completions",
+        base_url="https://generativelanguage.googleapis.com/v1beta/openai",
+    )
+
+    assert result["request"]["reasoning_effort"] == "low"
+
+
 def test_every_llm_request_fetches_current_value(monkeypatch):
     responses = iter(
         [

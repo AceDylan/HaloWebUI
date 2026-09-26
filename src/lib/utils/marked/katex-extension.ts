@@ -72,6 +72,20 @@ function generateRegexRules(delimiters: Delimiter[]) {
 
 const { inlineRule, blockRule } = generateRegexRules(DELIMITER_LIST);
 
+/**
+ * True when the `$` at `index` opens inline math by this extension's rules: it starts at a
+ * boundary and a closing `$` follows that is itself followed by a boundary. "$12.79 / $80.00"
+ * is two amounts, not math. The HTML path (katex-auto-render) uses it to leave such `$` alone.
+ */
+export function opensInlineDollarMath(text: string, index: number): boolean {
+	if (text.charAt(index) !== '$' || text.charAt(index + 1) === '$') return false;
+	if (index > 0 && (text.charAt(index - 1) === '$' || !START_BOUNDARY_REGEX.test(text.charAt(index - 1)))) {
+		return false;
+	}
+	const match = text.slice(index).match(inlineRule);
+	return Boolean(match && match[0].startsWith('$') && !match[0].startsWith('$$'));
+}
+
 export default function (options = {}) {
 	return {
 		extensions: [inlineKatex(options), blockKatex(options)]

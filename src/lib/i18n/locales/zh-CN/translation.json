@@ -3006,6 +3006,8 @@
 	"Running tool": "正在执行工具",
 	"Guidance not delivered: the task is no longer taking input. Your text is kept; send it again to queue it as a new message.": "指引未送达：任务已不再接受输入。输入已保留，再次发送会作为新消息排队。",
 	"Guidance could not be sent: {{error}}": "指引发送失败：{{error}}",
+	"Message not sent: {{error}}": "消息未发出：{{error}}",
+	"This chat could not be opened. It may have been deleted, or the server could not be reached.": "无法打开这个对话：它可能已被删除，或暂时连不上服务器。",
 	"Guidance not read: the task finished first. It is back in the composer.": "指引未被采纳：任务已先行结束，内容已放回输入框。",
 	"Guidance not read: the task finished first. Send it again if still needed.": "指引未被采纳：任务已先行结束，如仍需要请重新发送。",
 	"Expand collapsed sidebar on hover": "折叠侧栏时悬停展开预览",

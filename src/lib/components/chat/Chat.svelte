@@ -2469,9 +2469,18 @@
 					return;
 				}
 
-				// 加载失败：回滚守卫以允许重试，跳转首页（保持 loading 直至卸载，避免空视图闪烁）
+				// 加载失败：提示并跳转首页（保持 loading 直至卸载，避免空视图闪烁）。
+				// 不回滚 lastRequestedChatIdProp：与下方 catch 同理，回滚会让响应式块在 goto 完成前
+				// 立即用同一 id 重跑，接口快速失败时陷入重复请求与重复提示；到首页后 chatIdProp 为空，
+				// 守卫自然复位，再点该对话即可重试。
 				if (!loaded) {
-					lastRequestedChatIdProp = '';
+					if (targetChatId === chatIdProp) {
+						toast.error(
+							$i18n.t(
+								'This chat could not be opened. It may have been deleted, or the server could not be reached.'
+							)
+						);
+					}
 					await goto('/');
 					return;
 				}
@@ -5266,7 +5275,62 @@
 
 		saveSessionSelectedModels();
 
-		await sendPrompt(history, userPrompt, userMessageId, { newChat: true, referenceFiles });
+		try {
+			await sendPrompt(history, userPrompt, userMessageId, { newChat: true, referenceFiles });
+		} catch (error) {
+			await recoverFromFailedSend(error, userMessageId, userPrompt, validFiles);
+		}
+	};
+
+	// fetch() rejects with a TypeError when the request cannot be made at all
+	// (Chrome "Failed to fetch", Firefox "NetworkError…", Safari "Load failed").
+	const isNetworkFailure = (error: unknown): boolean =>
+		error instanceof TypeError && /failed to fetch|networkerror|load failed/i.test(error.message);
+
+	// A send that throws before the reply is under way (the new chat could not be
+	// created: server restarting, network down) used to leave the reply spinning
+	// on "waiting for the model" with the prompt already cleared.
+	const recoverFromFailedSend = async (
+		error: unknown,
+		userMessageId: string,
+		userPrompt: string,
+		sentFiles: any[] = []
+	) => {
+		console.error(error);
+		const detail =
+			typeof error === 'string'
+				? error
+				: isNetworkFailure(error)
+					? $i18n.t('Network Problem')
+					: error instanceof Error
+						? error.message
+						: typeof (error as any)?.detail === 'string'
+							? (error as any).detail
+							: `${error}`;
+		const userMessage = history.messages[userMessageId];
+		if (!userMessage) return;
+
+		if (userMessage.parentId === null && !$chatId) {
+			// Nothing was saved: take the turn back and return the prompt to the input.
+			for (const id of userMessage.childrenIds ?? []) {
+				delete history.messages[id];
+			}
+			delete history.messages[userMessageId];
+			history.currentId = null;
+			history = history;
+			prompt = userPrompt;
+			files = [...sentFiles, ...files];
+			toast.error($i18n.t('Message not sent: {{error}}', { error: detail }));
+			return;
+		}
+
+		for (const id of userMessage.childrenIds ?? []) {
+			const responseMessage = history.messages[id];
+			if (responseMessage && responseMessage.done !== true) {
+				await handleOpenAIError(isNetworkFailure(error) ? error : detail, responseMessage);
+			}
+		}
+		history = history;
 	};
 
 	const sendPrompt = async (
@@ -6231,20 +6295,28 @@
 			return;
 		}
 
-		const errorMessage = extractOpenAIErrorMessage(innerError);
-		const localizedError = buildLocalizedOpenAIError(errorMessage);
-
-		if (localizedError) {
-			toast.error(localizedError.content.split('\n')[0]);
-			responseMessage.error = localizedError;
+		if (isNetworkFailure(innerError)) {
+			// The request never reached the server (offline, server restarting): say
+			// so rather than describing an upstream failure.
+			const content = `${$i18n.t('Network Problem')}: ${innerError.message}`;
+			toast.error(content);
+			responseMessage.error = { content };
 		} else {
-			if (errorMessage) {
-				toast.error(errorMessage);
-			}
+			const errorMessage = extractOpenAIErrorMessage(innerError);
+			const localizedError = buildLocalizedOpenAIError(errorMessage);
 
-			responseMessage.error = {
-				content: $i18n.t(`Uh-oh! There was an issue with the response.`) + '\n' + errorMessage
-			};
+			if (localizedError) {
+				toast.error(localizedError.content.split('\n')[0]);
+				responseMessage.error = localizedError;
+			} else {
+				if (errorMessage) {
+					toast.error(errorMessage);
+				}
+
+				responseMessage.error = {
+					content: $i18n.t(`Uh-oh! There was an issue with the response.`) + '\n' + errorMessage
+				};
+			}
 		}
 
 		responseMessage.done = true;

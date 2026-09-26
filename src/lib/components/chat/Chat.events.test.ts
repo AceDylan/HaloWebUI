@@ -17,6 +17,15 @@ let createCompletionHandler: (
 let createSaveHandler: (
 	context: Record<string, any>
 ) => (id: string, history: any) => Promise<void>;
+let createRecoverFromFailedSend: (
+	context: Record<string, any>
+) => (
+	error: unknown,
+	userMessageId: string,
+	userPrompt: string,
+	sentFiles?: any[]
+) => Promise<void>;
+let createIsNetworkFailure: (context: Record<string, any>) => (error: unknown) => boolean;
 beforeAll(async () => {
 	const filename = process.env.HALO_CHAT_COMPONENT_SOURCE ?? 'src/lib/components/chat/Chat.svelte';
 	const { code } = await preprocess(readFileSync(filename, 'utf8'), vitePreprocess(), { filename });
@@ -39,6 +48,16 @@ beforeAll(async () => {
 		'context',
 		`with (context) { return ${code.slice(save.init.start, save.init.end)}; }`
 	) as typeof createSaveHandler;
+	const recover = declarations.find((node: any) => node.id.name === 'recoverFromFailedSend');
+	createRecoverFromFailedSend = new Function(
+		'context',
+		`with (context) { return ${code.slice(recover.init.start, recover.init.end)}; }`
+	) as typeof createRecoverFromFailedSend;
+	const network = declarations.find((node: any) => node.id.name === 'isNetworkFailure');
+	createIsNetworkFailure = new Function(
+		'context',
+		`with (context) { return ${code.slice(network.init.start, network.init.end)}; }`
+	) as typeof createIsNetworkFailure;
 });
 
 const fixture = () => {
@@ -194,5 +213,84 @@ describe('chat socket listener', () => {
 		expect(message.done).toBe(true);
 		expect(context.history.messages.answer.files).toHaveLength(1);
 		expect(context.chatCompletedHandler).toHaveBeenCalledTimes(owner ? 1 : 0);
+	});
+});
+
+describe('a send that fails before the reply starts', () => {
+	const setup = (chatId: string, parentId: string | null) => {
+		const context: Record<string, any> = {
+			$chatId: chatId,
+			$i18n: { t: (key: string, vars?: Record<string, string>) => `${key}|${vars?.error ?? ''}` },
+			toast: { error: vi.fn() },
+			console: { error: vi.fn() },
+			TypeError,
+			Error,
+			prompt: '',
+			files: [],
+			handleOpenAIError: vi.fn(async (_error: unknown, message: any) => {
+				message.done = true;
+			}),
+			history: {
+				currentId: 'answer',
+				messages: {
+					question: { id: 'question', parentId, role: 'user', childrenIds: ['answer'] },
+					answer: {
+						id: 'answer',
+						parentId: 'question',
+						role: 'assistant',
+						done: false,
+						content: ''
+					}
+				} as Record<string, any>
+			}
+		};
+		context.isNetworkFailure = createIsNetworkFailure(context);
+		return { context, recover: createRecoverFromFailedSend(context) };
+	};
+
+	it('takes a new chat turn back and returns the prompt when the chat was never created', async () => {
+		const { context, recover } = setup('', null);
+		const file = { type: 'file', id: 'f1' };
+		await recover(new TypeError('Failed to fetch'), 'question', '测试一下', [file]);
+		expect(context.history.messages).toEqual({});
+		expect(context.history.currentId).toBeNull();
+		expect(context.prompt).toBe('测试一下');
+		expect(context.files).toEqual([file]);
+		expect(context.toast.error).toHaveBeenCalledWith(
+			'Message not sent: {{error}}|Network Problem|'
+		);
+		expect(context.handleOpenAIError).not.toHaveBeenCalled();
+	});
+
+	it('marks the pending reply as failed in a chat that already exists', async () => {
+		const network = new TypeError('Failed to fetch');
+		const { context, recover } = setup('current-chat', 'earlier');
+		await recover(network, 'question', 'hello');
+		expect(context.handleOpenAIError).toHaveBeenCalledWith(
+			network,
+			context.history.messages.answer
+		);
+		expect(context.history.messages.answer.done).toBe(true);
+		expect(context.prompt).toBe('');
+
+		const other = setup('current-chat', 'earlier');
+		await other.recover(new Error('boom'), 'question', 'hello');
+		expect(other.context.handleOpenAIError).toHaveBeenCalledWith(
+			'boom',
+			other.context.history.messages.answer
+		);
+	});
+
+	it('only treats fetch rejections as network failures', () => {
+		const isNetworkFailure = createIsNetworkFailure({});
+		expect(isNetworkFailure(new TypeError('Failed to fetch'))).toBe(true);
+		expect(isNetworkFailure(new TypeError('NetworkError when attempting to fetch resource.'))).toBe(
+			true
+		);
+		expect(isNetworkFailure(new TypeError('Load failed'))).toBe(true);
+		expect(
+			isNetworkFailure(new TypeError("Cannot read properties of undefined (reading 'id')"))
+		).toBe(false);
+		expect(isNetworkFailure('Failed to fetch')).toBe(false);
 	});
 });

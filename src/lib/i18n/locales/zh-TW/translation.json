@@ -1767,6 +1767,8 @@
 	"Imported {{added}} templates, skipped {{skipped}} duplicates": "已匯入 {{added}} 個模板，略過 {{skipped}} 個重複項",
 	"Guidance not delivered: the task is no longer taking input. Your text is kept; send it again to queue it as a new message.": "指引未送達：任務已不再接受輸入。輸入已保留，再次送出會作為新訊息排隊。",
 	"Guidance could not be sent: {{error}}": "指引傳送失敗：{{error}}",
+	"Message not sent: {{error}}": "訊息未送出：{{error}}",
+	"This chat could not be opened. It may have been deleted, or the server could not be reached.": "無法開啟這個對話：它可能已被刪除，或暫時連不上伺服器。",
 	"Guidance not read: the task finished first. It is back in the composer.": "指引未被採納：任務已先行結束，內容已放回輸入框。",
 	"Guidance not read: the task finished first. Send it again if still needed.": "指引未被採納：任務已先行結束，如仍需要請重新送出。",
 	"Expand collapsed sidebar on hover": "收合側邊欄時滑鼠懸停展開預覽",

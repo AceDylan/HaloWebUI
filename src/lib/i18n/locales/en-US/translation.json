@@ -2319,6 +2319,8 @@
 	"Running tool": "",
 	"Guidance not delivered: the task is no longer taking input. Your text is kept; send it again to queue it as a new message.": "Guidance not delivered: the task is no longer taking input. Your text is kept; send it again to queue it as a new message.",
 	"Guidance could not be sent: {{error}}": "Guidance could not be sent: {{error}}",
+	"Message not sent: {{error}}": "Message not sent: {{error}}",
+	"This chat could not be opened. It may have been deleted, or the server could not be reached.": "This chat could not be opened. It may have been deleted, or the server could not be reached.",
 	"Guidance not read: the task finished first. It is back in the composer.": "Guidance not read: the task finished first. It is back in the composer.",
 	"Guidance not read: the task finished first. Send it again if still needed.": "Guidance not read: the task finished first. Send it again if still needed.",
 	"Expand collapsed sidebar on hover": "Expand collapsed sidebar on hover",

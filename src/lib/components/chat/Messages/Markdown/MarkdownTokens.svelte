@@ -33,7 +33,8 @@
 	} from '$lib/utils/generated-file-links';
 	import {
 		buildLocalFileIframeSrc,
-		resolveLocalFileIframeSrcFromHtml
+		resolveLocalFileIframeSrcFromHtml,
+		SAFE_HTML_URI_REGEXP
 	} from '$lib/utils/html-safety';
 	import { HTML_PREVIEW_REFERRER_POLICY, HTML_PREVIEW_SANDBOX } from '$lib/utils/html-preview';
 
@@ -56,8 +57,6 @@
 
 	let detailsOpenState = new Map<string, boolean>();
 
-	const SAFE_HTML_URI_REGEXP =
-		/^(?:(?:https?|mailto|tel):|[^a-z]|[a-z+.-]+(?:[^a-z+.-:]|$)|data:(?:text\/(?:plain|csv|markdown)|application\/(?:json|pdf|zip|vnd\.openxmlformats-officedocument\.(?:spreadsheetml\.sheet|wordprocessingml\.document))|image\/(?:png|jpeg|jpg|gif|webp))(?:[;,]|$))/i;
 
 	const getDetailsStateKey = (token: any, tokenIdx: number) =>
 		[messageId, ...pathPrefix, tokenIdx, token?.attributes?.type ?? '', token?.summary ?? ''].join(

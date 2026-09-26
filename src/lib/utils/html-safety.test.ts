@@ -3,7 +3,8 @@ import { describe, expect, it } from 'vitest';
 import {
 	buildLocalFileIframeSrc,
 	resolveLocalFileIframeSrcFromHtml,
-	resolveSafeMarkdownUrl
+	resolveSafeMarkdownUrl,
+	SAFE_HTML_URI_REGEXP
 } from './html-safety';
 
 describe('html-safety', () => {
@@ -104,5 +105,28 @@ describe('html-safety', () => {
 				'https://webui.example.com'
 			)
 		).toBeNull();
+	});
+
+	it('keeps SVG paths and relative links in model HTML but not script or HTML data URLs', () => {
+		// DOMPurify runs every non-URI-safe attribute through this, e.g. <path d>.
+		for (const value of [
+			'M12 6.75a5.25 5.25 0 0 1 6.775-5.025Z',
+			'images/chart.png',
+			'report2.html',
+			'evenodd',
+			'https://example.com/a',
+			'data:image/png;base64,AAAA'
+		]) {
+			expect(SAFE_HTML_URI_REGEXP.test(value), value).toBe(true);
+		}
+		for (const value of [
+			'javascript:alert(1)',
+			'JaVaScRiPt:alert(1)',
+			'vbscript:msgbox',
+			'data:text/html,<script>alert(1)</script>',
+			'data:image/svg+xml,<svg onload=alert(1)>'
+		]) {
+			expect(SAFE_HTML_URI_REGEXP.test(value), value).toBe(false);
+		}
 	});
 });

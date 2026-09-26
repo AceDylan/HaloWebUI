@@ -23,7 +23,8 @@
 	import {
 		buildLocalFileIframeSrc,
 		resolveLocalFileIframeSrcFromHtml,
-		resolveSafeMarkdownUrl
+		resolveSafeMarkdownUrl,
+		SAFE_HTML_URI_REGEXP
 	} from '$lib/utils/html-safety';
 	import { HTML_PREVIEW_REFERRER_POLICY, HTML_PREVIEW_SANDBOX } from '$lib/utils/html-preview';
 	import KatexRenderer from './KatexRenderer.svelte';
@@ -41,8 +42,6 @@
 	let renderTokens: RenderableHtmlToken[] = [];
 	$: renderTokens = mergeSvgMarkupTokens(tokens);
 
-	const SAFE_HTML_URI_REGEXP =
-		/^(?:(?:https?|mailto|tel):|[^a-z]|[a-z+.-]+(?:[^a-z+.-:]|$)|data:(?:text\/(?:plain|csv|markdown)|application\/(?:json|pdf|zip|vnd\.openxmlformats-officedocument\.(?:spreadsheetml\.sheet|wordprocessingml\.document))|image\/(?:png|jpeg|jpg|gif|webp))(?:[;,]|$))/i;
 
 	const resolveLinkHref = (href: string) => {
 		const resolved = resolveGeneratedFileDownloadUrl(href, generatedFiles) ?? href;

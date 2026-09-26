@@ -17,6 +17,17 @@ const SAFE_DATA_DOWNLOAD_MIME_TYPES = new Set([
 ]);
 const DATA_URL_MIME_RE = /^data:([^;,]+)?(?:;[^,]*)?,/i;
 
+/**
+ * DOMPurify's ALLOWED_URI_REGEXP for model HTML. DOMPurify checks every allowed
+ * attribute that is not URI-safe against it, not only href/src, so it must keep
+ * values like an SVG path (`d="M12 6.75…"`) or a relative link. It is DOMPurify's
+ * default with a narrower set of schemes and data: types; the `\-` escapes matter
+ * (an unescaped `.-:` is a range covering `/` and the digits, which dropped every
+ * SVG path and blanked the icons).
+ */
+export const SAFE_HTML_URI_REGEXP =
+	/^(?:(?:https?|mailto|tel):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$)|data:(?:text\/(?:plain|csv|markdown)|application\/(?:json|pdf|zip|vnd\.openxmlformats-officedocument\.(?:spreadsheetml\.sheet|wordprocessingml\.document))|image\/(?:png|jpeg|jpg|gif|webp))(?:[;,]|$))/i;
+
 type SafeUrlOptions = {
 	allowHash?: boolean;
 	allowRelative?: boolean;

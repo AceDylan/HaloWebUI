@@ -857,7 +857,12 @@ def _hermes_run_options(form_data) -> dict:
 def _inherited_reasoning_effort(form_data) -> str | None:
     """The chat's own thinking level (对话控制 / the admin default /
     "深度思考发送"), which the middleware lifts from params into the body.
-    Without one hermes keeps its configured reasoning_effort."""
+    Without one hermes keeps its configured reasoning_effort.
+
+    For codex_responses / chat_completions models hermes' halowebui-reasoning-sync
+    plugin (integrations/hermes-plugin) then sets the admin default on every
+    request, so a per-chat level only changes models on other API modes
+    (anthropic_messages)."""
     if not isinstance(form_data, dict):
         return None
     effort = str(form_data.get("reasoning_effort") or "").strip().lower()

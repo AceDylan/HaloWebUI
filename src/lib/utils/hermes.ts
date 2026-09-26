@@ -124,8 +124,8 @@ export type HermesApprovalRequest = {
  * Per-chat choices for how a hermes run starts (the composer's "Hermes 选项"):
  * `dispatch` puts /reclaude, /codex or /agy in front of the message; `model`
  * (+ `provider`) overrides hermes' configured default for this chat. Empty
- * strings mean "hermes decides". The thinking level is the chat's own
- * (对话控制), which the backend hands to hermes.
+ * strings mean "hermes decides". The thinking level is HaloWebUI's (see
+ * _inherited_reasoning_effort in the backend), not a hermes option.
  */
 export type HermesRunOptions = {
 	dispatch: '' | 'reclaude' | 'codex' | 'agy';

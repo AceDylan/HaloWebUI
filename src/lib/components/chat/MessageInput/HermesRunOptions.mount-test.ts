@@ -1,7 +1,7 @@
 // Mounts the composer's Hermes options against the model list the backend
 // condenses from hermes' config. Regression guard for the picker offering the
 // default model twice, and for a 思考强度 row of its own: the thinking level is
-// the chat's (对话控制), handed to hermes by the backend.
+// HaloWebUI's (admin default via hermes' reasoning-sync plugin, plus the chat's).
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { installDominoDom } from '$lib/test-support/domino-dom';
 
@@ -90,7 +90,7 @@ describe('HermesRunOptions', () => {
 		const panel: any = await mount();
 		expect(Boolean(panel.querySelector('[data-halo-hermes-effort]'))).toBe(false);
 		expect(panel.textContent).not.toContain('极高');
-		expect(panel.textContent).toContain('思考强度沿用对话设置');
+		expect(panel.textContent).toContain('思考强度跟随 HaloWebUI 设置');
 	});
 
 	it('keeps showing a model picked earlier that the list no longer offers', async () => {

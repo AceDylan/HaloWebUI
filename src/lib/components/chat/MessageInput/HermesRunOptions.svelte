@@ -13,8 +13,9 @@
 	// Per chat: how the next hermes run starts. "派发方式" puts /reclaude,
 	// /codex or /agy in front of the message (a forgotten or mistyped prefix
 	// used to mean stopping the run and sending again); the model overrides
-	// hermes' configured default for this chat only. The thinking level is the
-	// chat's own (对话控制), handed to hermes by the backend.
+	// hermes' configured default for this chat only. The thinking level is
+	// HaloWebUI's: hermes' halowebui-reasoning-sync plugin applies the admin
+	// default, and the backend passes the chat's own along.
 	export let options: HermesRunOptions = { ...EMPTY_HERMES_RUN_OPTIONS };
 	export let disabled = false;
 
@@ -215,7 +216,7 @@
 			{/if}
 
 			<div class="mt-3 flex items-center justify-between text-2xs text-gray-400 dark:text-gray-500">
-				<span>只对这个对话生效；思考强度沿用对话设置</span>
+				<span>只对这个对话生效；思考强度跟随 HaloWebUI 设置</span>
 				{#if summary}
 					<button
 						type="button"

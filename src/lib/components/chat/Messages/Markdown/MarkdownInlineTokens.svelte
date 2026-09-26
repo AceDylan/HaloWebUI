@@ -29,6 +29,7 @@
 	import KatexRenderer from './KatexRenderer.svelte';
 	import Source from './Source.svelte';
 	import SourceToken from './SourceToken.svelte';
+	import StreamText from './StreamText.svelte';
 	import { isSvgMarkup, mergeSvgMarkupTokens, type RenderableHtmlToken } from './svgMarkupTokens';
 
 	export let id: string;
@@ -72,7 +73,7 @@
 {#each renderTokens as token}
 	{#if token.type === 'escape'}
 		{#if charAnimation}
-			{#each [...decodeHtmlText(token.text)] as char}<span class="stream-char">{char}</span>{/each}
+			<StreamText text={decodeHtmlText(token.text)} />
 		{:else}
 			{decodeHtmlText(token.text)}
 		{/if}
@@ -216,8 +217,7 @@
 		<SourceToken {id} {token} onClick={onSourceClick} />
 	{:else if token.type === 'text'}
 		{#if charAnimation}
-			{#each [...toText(token.raw ?? token.text)] as char}<span class="stream-char">{char}</span
-				>{/each}
+			<StreamText text={toText(token.raw ?? token.text)} />
 		{:else}
 			{toText(token.raw ?? token.text)}
 		{/if}

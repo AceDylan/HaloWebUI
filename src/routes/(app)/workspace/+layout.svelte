@@ -1,4 +1,5 @@
 <script lang="ts">
+	import type { Writable } from 'svelte/store';
 	import { onMount, getContext } from 'svelte';
 	import { WEBUI_NAME, config, showSidebar, user, mobile } from '$lib/stores';
 	import { page } from '$app/stores';
@@ -11,7 +12,7 @@
 		getVisibleWorkspaceTabs
 	} from '$lib/components/workspace/shell/meta';
 
-	const i18n = getContext('i18n');
+	const i18n: Writable<any> = getContext('i18n');
 
 	let loaded = false;
 	let activeTab = null;
@@ -69,7 +70,7 @@
 						on:click={() => {
 							showSidebar.set(!$showSidebar);
 						}}
-						aria-label="Toggle Sidebar"
+						aria-label={$i18n.t('Toggle Sidebar')}
 					>
 						<div class=" m-auto self-center">
 							<MenuLines />

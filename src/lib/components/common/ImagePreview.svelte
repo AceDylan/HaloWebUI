@@ -1,7 +1,10 @@
 <script lang="ts">
-	import { onDestroy } from 'svelte';
+	import { getContext, onDestroy } from 'svelte';
+	import type { Writable } from 'svelte/store';
 	import panzoom, { type PanZoom } from 'panzoom';
 	import { lockBodyScroll, unlockBodyScroll } from '$lib/utils/body-scroll-lock';
+
+	const i18n: Writable<any> = getContext('i18n');
 
 	export let show = false;
 	export let src = '';
@@ -97,7 +100,7 @@
 			<div>
 				<button
 					class=" p-5"
-					aria-label="Close"
+					aria-label={$i18n.t('Close')}
 					on:pointerdown={(e) => {
 						e.stopImmediatePropagation();
 						e.preventDefault();
@@ -123,7 +126,7 @@
 			<div class="flex">
 				<button
 					class=" p-5"
-					aria-label="Reset zoom"
+					aria-label={$i18n.t('Reset zoom')}
 					on:pointerdown={(e) => {
 						e.stopImmediatePropagation();
 						e.preventDefault();
@@ -147,7 +150,7 @@
 				</button>
 				<button
 					class=" p-5"
-					aria-label="Download"
+					aria-label={$i18n.t('Download')}
 					on:pointerdown={(e) => {
 						e.stopImmediatePropagation();
 						e.preventDefault();

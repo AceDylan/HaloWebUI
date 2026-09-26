@@ -17,27 +17,59 @@
 	// the element behind it, e.g. the chat composer when the dialog was opened
 	// with a keyboard shortcut.
 	let previouslyFocused: HTMLElement | null = null;
+	let focusRetryTimers: ReturnType<typeof setTimeout>[] = [];
+
+	// Where focus goes back to on close. A dialog opened from a dropdown item
+	// would return to an item that no longer exists, so use the menu's trigger.
+	const getReturnFocusTarget = (): HTMLElement | null => {
+		const active = document.activeElement;
+		if (!(active instanceof HTMLElement) || active === document.body) return null;
+		const menu = active.closest('[role="menu"]');
+		if (menu?.id) {
+			const menuId = typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(menu.id) : menu.id;
+			const trigger = document.querySelector(`[aria-controls="${menuId}"]`);
+			if (trigger instanceof HTMLElement) {
+				// common/Dropdown puts the trigger attributes on a wrapper <div>; the
+				// control the person used is the button inside it.
+				const control = trigger.matches('button, a[href], input')
+					? null
+					: trigger.querySelector<HTMLElement>('button, a[href], input');
+				return control ?? trigger;
+			}
+		}
+		return active;
+	};
+
+	const focusIntoModal = () => {
+		if (!isAttached || !modalElement || !isTopModal()) return;
+		if (modalElement.contains(document.activeElement)) return;
+		modalElement.focus({ preventScroll: true });
+	};
+
+	const clearFocusRetries = () => {
+		focusRetryTimers.forEach((timer) => clearTimeout(timer));
+		focusRetryTimers = [];
+	};
 
 	const attachModal = () => {
 		if (!modalElement || isAttached) return;
-		previouslyFocused =
-			document.activeElement instanceof HTMLElement && document.activeElement !== document.body
-				? document.activeElement
-				: null;
+		previouslyFocused = getReturnFocusTarget();
 		document.body.appendChild(modalElement);
 		window.addEventListener('keydown', handleKeyDown);
 		lockBodyScroll();
 		isAttached = true;
 		// After the content had its chance to autofocus a field.
-		requestAnimationFrame(() => {
-			if (isAttached && modalElement && !modalElement.contains(document.activeElement)) {
-				modalElement.focus({ preventScroll: true });
-			}
-		});
+		requestAnimationFrame(focusIntoModal);
+		// A dropdown menu that opened the dialog keeps handling focus while it fades
+		// out (bits-ui puts it back on its trigger, or on <body>), which undoes the
+		// first attempt; try again once the menu is gone.
+		clearFocusRetries();
+		focusRetryTimers = [150, 350].map((delay) => setTimeout(focusIntoModal, delay));
 	};
 
 	const detachModal = () => {
 		if (!modalElement || !isAttached) return;
+		clearFocusRetries();
 		window.removeEventListener('keydown', handleKeyDown);
 		const focusWasInside = modalElement.contains(document.activeElement);
 		if (modalElement.parentNode === document.body) {

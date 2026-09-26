@@ -1,4 +1,5 @@
 <script lang="ts">
+	import type { Writable } from 'svelte/store';
 	import { getContext } from 'svelte';
 	import { toast } from 'svelte-sonner';
 
@@ -11,7 +12,7 @@
 	import MenuLines from '../icons/MenuLines.svelte';
 	import PencilSquare from '../icons/PencilSquare.svelte';
 
-	const i18n = getContext('i18n');
+	const i18n: Writable<any> = getContext('i18n');
 
 	export let channel;
 </script>
@@ -34,7 +35,7 @@
 					on:click={() => {
 						showSidebar.set(!$showSidebar);
 					}}
-					aria-label="Toggle Sidebar"
+					aria-label={$i18n.t('Toggle Sidebar')}
 				>
 					<div class=" m-auto self-center">
 						<MenuLines />
@@ -64,10 +65,13 @@
 								showArchivedChats.set(true);
 							}
 						}}
+						let:builder
 					>
 						<button
+							{...builder}
+							use:builder.action
 							class="select-none flex rounded-xl p-1.5 w-full hover:bg-gray-50 dark:hover:bg-gray-850 transition"
-							aria-label="User Menu"
+							aria-label={$i18n.t('User Menu')}
 						>
 							<div class=" self-center">
 								<img

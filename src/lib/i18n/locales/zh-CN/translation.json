@@ -3204,5 +3204,18 @@
 	"Add a model to compare": "添加模型对比",
 	"No page text was captured for this source.": "没有抓取到这个来源的网页正文。",
 	"Use a skill": "使用 Skill",
-	"Stop the running reply": "停止正在生成的回复"
+	"Stop the running reply": "停止正在生成的回复",
+	"Toggle Sidebar": "切换侧边栏",
+	"Toggle expand": "展开或收起",
+	"Selected Skills": "已选 Skill",
+	"Drag and Drop Container": "拖放上传区域",
+	"Model responses": "各模型回复",
+	"Move Left": "左移",
+	"Move Right": "右移",
+	"Remove Assistant": "移除助手",
+	"Reset zoom": "重置缩放",
+	"Chat sidebar": "对话侧边栏",
+	"Add Banner": "添加横幅",
+	"User Menu": "用户菜单",
+	"User profile": "用户头像"
 }

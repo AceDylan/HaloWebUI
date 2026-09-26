@@ -38,8 +38,10 @@
 		dispatch('change', state);
 	}}
 >
-	<DropdownMenu.Trigger>
-		<slot />
+	<!-- The caller's own button is the trigger (it receives `builder`); wrapping
+	     it in the default trigger button nested one button inside another. -->
+	<DropdownMenu.Trigger asChild let:builder>
+		<slot {builder} />
 	</DropdownMenu.Trigger>
 
 	<slot name="content">

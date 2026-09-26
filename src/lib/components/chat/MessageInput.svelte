@@ -1,4 +1,5 @@
 <script lang="ts">
+	import type { Writable } from 'svelte/store';
 	import { toast } from 'svelte-sonner';
 	import { v4 as uuidv4 } from 'uuid';
 	import { createPicker, getAuthToken } from '$lib/utils/google-drive-picker';
@@ -92,7 +93,7 @@
 	import Sparkles from '../icons/Sparkles.svelte';
 	import { Image as ImageIcon } from 'lucide-svelte';
 
-	const i18n = getContext('i18n');
+	const i18n: Writable<any> = getContext('i18n');
 
 	export let transparentBackground = false;
 
@@ -1890,7 +1891,7 @@
 												>
 													<button
 														class="translate-y-[0.5px] flex gap-1 items-center text-gray-600 dark:text-gray-300 hover:text-gray-700 dark:hover:text-gray-200 rounded-lg p-1 self-center transition"
-														aria-label="Available Tools"
+														aria-label={$i18n.t('Available Tools')}
 														type="button"
 														on:click={() => {
 															showTools = !showTools;
@@ -1909,7 +1910,7 @@
 												<Tooltip content={`已选择 ${selectedSkillIds.length} 个技能`}>
 													<button
 														class="translate-y-[0.5px] flex gap-1 items-center text-amber-700 dark:text-amber-300 hover:text-amber-800 dark:hover:text-amber-200 rounded-lg p-1 self-center transition"
-														aria-label="Selected Skills"
+														aria-label={$i18n.t('Selected Skills')}
 														type="button"
 														on:click={() => {
 															showTools = !showTools;

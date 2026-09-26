@@ -1,4 +1,5 @@
 <script lang="ts">
+	import type { Writable } from 'svelte/store';
 	import { toast } from 'svelte-sonner';
 	import { marked } from 'marked';
 
@@ -53,7 +54,7 @@
 	import ArrowLeft from '$lib/components/icons/ArrowLeft.svelte';
 	import ArrowRight from '$lib/components/icons/ArrowRight.svelte';
 
-	const i18n = getContext('i18n');
+	const i18n: Writable<any> = getContext('i18n');
 
 	export let transparentBackground = false;
 
@@ -443,7 +444,7 @@
 											class="rounded-full bg-white/90 p-1 text-gray-500 shadow-sm transition hover:bg-white hover:text-gray-700 dark:bg-gray-800/90 dark:hover:bg-gray-800 dark:hover:text-gray-200"
 											on:click={() => moveFeaturedAssistant(index, -1)}
 											disabled={index === 0}
-											aria-label="Move Left"
+											aria-label={$i18n.t('Move Left')}
 										>
 											<ArrowLeft className="size-3.5" strokeWidth="2.2" />
 										</button>
@@ -451,7 +452,7 @@
 											class="rounded-full bg-white/90 p-1 text-gray-500 shadow-sm transition hover:bg-white hover:text-gray-700 dark:bg-gray-800/90 dark:hover:bg-gray-800 dark:hover:text-gray-200"
 											on:click={() => moveFeaturedAssistant(index, 1)}
 											disabled={index === featuredAssistants.length - 1}
-											aria-label="Move Right"
+											aria-label={$i18n.t('Move Right')}
 										>
 											<ArrowRight className="size-3.5" strokeWidth="2.2" />
 										</button>
@@ -459,7 +460,7 @@
 									<button
 										class="rounded-full bg-white/90 p-1 text-gray-500 shadow-sm transition hover:bg-white hover:text-red-600 dark:bg-gray-800/90 dark:hover:bg-gray-800 dark:hover:text-red-400"
 										on:click={() => removeFeaturedAssistant(assistant.id)}
-										aria-label="Remove Assistant"
+										aria-label={$i18n.t('Remove Assistant')}
 									>
 										<XMark className="size-3.5" strokeWidth="2.4" />
 									</button>

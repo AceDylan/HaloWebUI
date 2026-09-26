@@ -1901,7 +1901,7 @@
 												<button
 													class="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition"
 													type="button"
-													aria-label="Add Banner"
+													aria-label={$i18n.t('Add Banner')}
 													on:click={() => {
 														if (banners.length === 0 || banners.at(-1)?.content !== '') {
 															banners = [

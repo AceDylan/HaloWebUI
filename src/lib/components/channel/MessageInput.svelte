@@ -1,10 +1,11 @@
 <script lang="ts">
+	import type { Writable } from 'svelte/store';
 	import { toast } from 'svelte-sonner';
 	import { v4 as uuidv4 } from 'uuid';
 
 	import { tick, getContext, onMount, onDestroy } from 'svelte';
 
-	const i18n = getContext('i18n');
+	const i18n: Writable<any> = getContext('i18n');
 
 	import { config, mobile, settings, socket, user } from '$lib/stores';
 	import {
@@ -943,7 +944,7 @@
 									<button
 										class="bg-transparent hover:bg-white/80 text-gray-800 dark:text-white dark:hover:bg-gray-800 transition rounded-full p-1.5 outline-hidden focus:outline-hidden"
 										type="button"
-										aria-label="More"
+										aria-label={$i18n.t('More')}
 									>
 										<svg
 											xmlns="http://www.w3.org/2000/svg"
@@ -989,7 +990,7 @@
 													toast.error($i18n.t('Permission denied when accessing microphone'));
 												}
 											}}
-											aria-label="Voice Input"
+											aria-label={$i18n.t('Voice Input')}
 										>
 											<svg
 												xmlns="http://www.w3.org/2000/svg"

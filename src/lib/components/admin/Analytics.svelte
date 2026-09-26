@@ -1,4 +1,5 @@
 <script lang="ts">
+	import type { Writable } from 'svelte/store';
 	import { onMount, getContext } from 'svelte';
 	import { user, models } from '$lib/stores';
 	import { goto } from '$app/navigation';
@@ -30,7 +31,7 @@
 	import Check from '$lib/components/icons/Check.svelte';
 	import { translateWithDefault } from '$lib/i18n';
 
-	const i18n = getContext('i18n');
+	const i18n: Writable<any> = getContext('i18n');
 	const tr = (key: string, defaultValue: string) =>
 		translateWithDefault($i18n, key, defaultValue);
 
@@ -749,7 +750,7 @@
 											<button
 												class="p-0.5 rounded hover:bg-gray-200/60 dark:hover:bg-gray-700/30 transition text-gray-500 dark:text-gray-400"
 												type="button"
-												aria-label="Toggle expand"
+												aria-label={$i18n.t('Toggle expand')}
 												on:click|stopPropagation={() => toggleModelExpand(stat.model)}
 											>
 												<svg

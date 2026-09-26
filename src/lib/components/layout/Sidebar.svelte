@@ -1,4 +1,5 @@
 <script lang="ts">
+	import type { Writable } from 'svelte/store';
 	import { browser } from '$app/environment';
 	import { toast } from 'svelte-sonner';
 	import { goto } from '$app/navigation';
@@ -30,7 +31,7 @@
 	} from '$lib/stores';
 	import { onMount, getContext, tick, onDestroy } from 'svelte';
 
-	const i18n = getContext('i18n');
+	const i18n: Writable<any> = getContext('i18n');
 
 	import {
 		getChatList,
@@ -785,7 +786,7 @@
 	bind:this={navElement}
 	id="sidebar"
 	role="navigation"
-	aria-label="Chat sidebar"
+	aria-label={$i18n.t('Chat sidebar')}
 	class="h-screen max-h-[100dvh] min-h-screen select-none
 		{$isApp ? `ml-[4.5rem] md:ml-0 ` : ''}
 		shrink-0 {$mobile ? 'bg-gray-50' : 'bg-gray-50/80'} backdrop-blur-xl border-r border-gray-200/50 dark:border-white/[0.08] text-gray-900 dark:text-gray-200
@@ -1418,8 +1419,11 @@
 								showArchivedChats.set(true);
 							}
 						}}
+						let:builder
 					>
 						<button
+							{...builder}
+							use:builder.action
 							class="group transition active:scale-[0.99] {expanded
 								? userItemClass
 								: iconButtonClass + ' mx-auto'}"
@@ -1431,7 +1435,7 @@
 								<img
 									src={$user?.profile_image_url || '/user.png'}
 									class="w-full h-full object-cover rounded-full"
-									alt="User profile"
+									alt={$i18n.t('User profile')}
 									draggable="false"
 								/>
 							</div>

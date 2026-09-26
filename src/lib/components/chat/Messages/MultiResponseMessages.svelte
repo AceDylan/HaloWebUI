@@ -1,4 +1,5 @@
 <script lang="ts">
+	import type { Writable } from 'svelte/store';
 	import dayjs from 'dayjs';
 	import { onMount, tick, getContext } from 'svelte';
 	import { createEventDispatcher } from 'svelte';
@@ -19,7 +20,7 @@
 	import Name from './Name.svelte';
 	import Skeleton from './Skeleton.svelte';
 	import localizedFormat from 'dayjs/plugin/localizedFormat';
-	const i18n = getContext('i18n');
+	const i18n: Writable<any> = getContext('i18n');
 	dayjs.extend(localizedFormat);
 
 	export let chatId;
@@ -304,7 +305,7 @@
 						<div
 							class="flex gap-2 overflow-x-auto scrollbar-none text-sm font-medium pt-1"
 							role="tablist"
-							aria-label="Model responses"
+							aria-label={$i18n.t('Model responses')}
 							on:keydown={handleTabKeydown}
 							on:wheel|passive={handleTabWheel}
 						>

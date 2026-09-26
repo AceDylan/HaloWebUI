@@ -135,7 +135,10 @@
 			<div
 				class="w-full group rounded-md relative flex items-center justify-between hover:bg-gray-100 dark:hover:bg-gray-900 text-gray-600 dark:text-gray-400 transition"
 			>
-				<button class="w-full py-1.5 pl-2 flex items-center gap-1.5 text-xs font-medium">
+				<button
+					class="w-full py-1.5 pl-2 flex items-center gap-1.5 text-xs font-medium"
+					aria-expanded={open}
+				>
 					<div class="text-gray-300 dark:text-gray-600">
 						{#if open}
 							<ChevronDown className=" size-3" strokeWidth="2.5" />
@@ -179,14 +182,13 @@
 						}}
 					>
 						<Tooltip content={onAddLabel}>
-							<button
+							<!-- Visual only: the outer button is the control (a button inside a
+							     button is invalid and read as a second, unnamed control). -->
+							<span
 								class="flex size-6 items-center justify-center rounded-lg hover:bg-gray-200/70 dark:hover:bg-gray-850 touch-auto"
-								aria-label={onAddLabel}
-								tabindex="-1"
-								on:click={(e) => {}}
 							>
 								<Plus className=" size-3" strokeWidth="2.5" />
-							</button>
+							</span>
 						</Tooltip>
 					</button>
 				{/if}

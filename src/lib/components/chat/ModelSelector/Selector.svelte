@@ -42,7 +42,12 @@
 		getTemporaryChatNavigationPath,
 		persistTemporaryChatOverride
 	} from '$lib/utils/temporary-chat';
-	import { ensureModels, refreshModels } from '$lib/services/models';
+	import {
+		MODELS_ERROR_TOAST_ID,
+		describeModelsError,
+		ensureModels,
+		refreshModels
+	} from '$lib/services/models';
 	import { getErrorDetail } from '$lib/apis/response';
 	import { saveUserSettingsPatch } from '$lib/utils/user-settings';
 
@@ -762,8 +767,9 @@
 
 		if ($models.length === 0) {
 			void ensureModels(localStorage.token, { reason: 'model-selector' }).catch((error) => {
-				const msg = error instanceof Error ? error.message : `${error}`;
-				toast.error(msg);
+				toast.error(`${$i18n.t('Failed to load models')}: ${describeModelsError(error)}`, {
+					id: MODELS_ERROR_TOAST_ID
+				});
 			});
 		}
 	}}

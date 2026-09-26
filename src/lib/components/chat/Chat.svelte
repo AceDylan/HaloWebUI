@@ -150,7 +150,7 @@
 	import { isHermesRunSteerable, type HermesApprovalRequest } from '$lib/utils/hermes';
 	import HermesApprovalDialog from './HermesApprovalDialog.svelte';
 	import { TAB_ACTIVITY_TITLE_PREFIX, tabActivity } from '$lib/utils/tab-activity';
-	import { ensureModels } from '$lib/services/models';
+	import { MODELS_ERROR_TOAST_ID, describeModelsError, ensureModels } from '$lib/services/models';
 	import { takeLandingPrompt } from '$lib/utils/chat-landing';
 
 	import Banner from '../common/Banner.svelte';
@@ -3159,8 +3159,9 @@
 
 		if ($models.length === 0) {
 			void ensureModels(localStorage.token, { reason: 'chat' }).catch((error) => {
-				const msg = error instanceof Error ? error.message : `${error}`;
-				toast.error(msg);
+				toast.error(`${$i18n.t('Failed to load models')}: ${describeModelsError(error)}`, {
+					id: MODELS_ERROR_TOAST_ID
+				});
 			});
 		}
 

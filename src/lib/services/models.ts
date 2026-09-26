@@ -23,6 +23,12 @@ const getDirectConnections = () => {
 	return null;
 };
 
+// One toast for a failed model list, however many places asked for it.
+export const MODELS_ERROR_TOAST_ID = 'models-load-error';
+
+/** Readable reason for a failed model list (the API rejects with `{ detail }`). */
+export const describeModelsError = (error: unknown) => stringifyError(error);
+
 const stringifyError = (error: unknown) => {
 	if (typeof error === 'string') return error;
 	if (error instanceof Error) return error.message;

@@ -42,7 +42,7 @@
 	import { createNewFolder, getFolders } from '$lib/apis/folders';
 	import { getFolderColor } from '$lib/utils/folder-color';
 	import { WEBUI_BASE_URL } from '$lib/constants';
-	import { ensureModels } from '$lib/services/models';
+	import { MODELS_ERROR_TOAST_ID, describeModelsError, ensureModels } from '$lib/services/models';
 	import { getTimeRange } from '$lib/utils';
 	import { getModelChatDisplayName, getModelDisplayParts } from '$lib/utils/model-display';
 
@@ -253,7 +253,9 @@
 
 	const loadAssistantScenes = async () => {
 		await ensureModels(localStorage.token, { reason: 'sidebar-assistants' }).catch((error) => {
-			toast.error(`${error}`);
+			toast.error(`${$i18n.t('Failed to load models')}: ${describeModelsError(error)}`, {
+				id: MODELS_ERROR_TOAST_ID
+			});
 			return [];
 		});
 

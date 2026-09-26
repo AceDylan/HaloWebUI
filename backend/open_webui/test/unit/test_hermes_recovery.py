@@ -120,14 +120,15 @@ def test_a_typed_slash_command_wins_over_the_dispatch_option():
     assert payload["input"] == "/codex 修复登录页"
 
 
-def test_model_and_reasoning_options_reach_hermes():
+def test_model_option_and_the_chats_thinking_level_reach_hermes():
     payload = hermes_agent._build_run_payload(
         {
             "messages": [{"role": "user", "content": "hi"}],
+            # The chat's thinking level, lifted from params by the middleware.
+            "reasoning_effort": "HIGH",
             "hermes_options": {
                 "model": "claude-opus-5",
                 "provider": "anthropic",
-                "reasoning_effort": "HIGH",
                 "dispatch": "nonsense",
             },
         },
@@ -140,9 +141,31 @@ def test_model_and_reasoning_options_reach_hermes():
     assert payload["input"] == "hi"
 
 
+def test_thinking_turned_off_in_the_chat_turns_it_off_for_hermes():
+    payload = hermes_agent._build_run_payload(
+        {"messages": [{"role": "user", "content": "hi"}], "reasoning_effort": "none"},
+        {"chat_id": "chat-1"},
+        "hermes-agent",
+    )
+    assert payload["model_options"] == {"reasoning_effort": "none"}
+
+
+def test_the_hermes_panel_no_longer_sets_the_thinking_level():
+    # Composer states saved before the panel lost its 思考强度 row.
+    payload = hermes_agent._build_run_payload(
+        {
+            "messages": [{"role": "user", "content": "hi"}],
+            "hermes_options": {"reasoning_effort": "low"},
+        },
+        {"chat_id": "chat-1"},
+        "hermes-agent",
+    )
+    assert "model_options" not in payload
+
+
 def test_without_options_the_gateway_default_model_is_used():
     payload = hermes_agent._build_run_payload(
-        {"messages": [{"role": "user", "content": "hi"}]},
+        {"messages": [{"role": "user", "content": "hi"}], "reasoning_effort": "turbo"},
         {"chat_id": "chat-1"},
         "hermes-agent",
     )

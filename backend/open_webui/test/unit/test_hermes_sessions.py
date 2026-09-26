@@ -254,26 +254,61 @@ def test_import_session_names_the_source_it_refuses(monkeypatch):
     assert inserted == {}
 
 
-def test_model_options_keep_configured_providers_with_models():
+def test_model_options_offer_only_the_models_the_config_chooses():
     from open_webui.utils.hermes_sessions import condense_model_options
 
+    relay_catalog = ["(LH)Grok 4.6", "[free]claude-opus-5", "gpt-chat", "zzz"]
     options = condense_model_options(
         {
             "model": "gpt-chat",
             "provider": "custom:relay",
             "providers": [
                 {"slug": "nous", "name": "Nous", "authenticated": False, "models": ["x"]},
+                # Found through ambient credentials, not configured.
                 {"slug": "anthropic", "name": "Anthropic", "authenticated": True,
-                 "models": ["claude-opus-5", {"id": "claude-sonnet-5"}, "claude-opus-5"]},
-                {"slug": "empty", "name": "Empty", "authenticated": True, "models": []},
-                {"slug": "custom:relay", "name": "Relay", "authenticated": True,
-                 "is_current": True, "models": ["gpt-chat"]},
+                 "is_user_defined": False, "models": ["claude-opus-5", "claude-sonnet-5"]},
+                {"slug": "moa", "name": "MoA", "authenticated": True, "models": ["default"]},
+                # `providers: custom: models: gpt-chat: ...` settings row.
+                {"slug": "custom", "name": "custom", "authenticated": True,
+                 "is_user_defined": True, "models": ["gpt-chat"]},
+                # The current provider's list is re-probed: its whole catalog, sorted.
+                {"slug": "custom:relay", "name": "relay", "authenticated": True,
+                 "is_user_defined": True, "is_current": True, "models": relay_catalog},
+                # Other entries list their selected model first, then the catalog.
+                {"slug": "custom:deepseek-chat", "name": "deepseek-chat",
+                 "authenticated": True, "is_user_defined": True,
+                 "models": [{"id": "deepseek-chat"}, "[次]claude-opus-4-5", "gpt-chat"]},
+                {"slug": "custom:claude-chat", "name": "claude-chat",
+                 "authenticated": True, "is_user_defined": True, "models": ["claude-chat"]},
+                {"slug": "custom:empty", "name": "empty", "authenticated": True,
+                 "is_user_defined": True, "models": []},
             ],
         }
     )
     assert options["model"] == "gpt-chat"
-    assert [provider["slug"] for provider in options["providers"]] == [
-        "custom:relay",
-        "anthropic",
+    assert options["provider"] == "custom:relay"
+    assert [(p["slug"], p["models"], p["current"]) for p in options["providers"]] == [
+        ("custom:relay", ["gpt-chat"], True),
+        ("custom:claude-chat", ["claude-chat"], False),
+        ("custom:deepseek-chat", ["deepseek-chat"], False),
     ]
-    assert options["providers"][1]["models"] == ["claude-opus-5", "claude-sonnet-5"]
+
+
+def test_model_options_keep_a_current_provider_hermes_did_not_mark_as_configured():
+    from open_webui.utils.hermes_sessions import condense_model_options
+
+    options = condense_model_options(
+        {
+            "model": "claude-opus-5",
+            "provider": "anthropic",
+            "providers": [
+                {"slug": "anthropic", "name": "Anthropic", "authenticated": True,
+                 "is_current": True, "models": ["claude-sonnet-5", "claude-opus-5"]},
+            ],
+        }
+    )
+    assert options["providers"] == [
+        {"slug": "anthropic", "name": "Anthropic", "current": True, "models": ["claude-opus-5"]}
+    ]
+    assert condense_model_options(None) == {"model": "", "provider": "", "providers": []}
+

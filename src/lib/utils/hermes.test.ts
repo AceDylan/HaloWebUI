@@ -101,13 +101,13 @@ describe('hermes run options', () => {
 				dispatch: 'reclaude',
 				model: ' claude-opus-5 ',
 				provider: 'anthropic',
-				reasoning_effort: 'ultra'
+				// Saved before the thinking level followed the chat's own.
+				reasoning_effort: 'high'
 			})
 		).toEqual({
 			dispatch: 'reclaude',
 			model: 'claude-opus-5',
-			provider: 'anthropic',
-			reasoning_effort: ''
+			provider: 'anthropic'
 		});
 		expect(normalizeHermesRunOptions({ provider: 'anthropic' }).provider).toBe('');
 		expect(normalizeHermesRunOptions(null)).toEqual(EMPTY_HERMES_RUN_OPTIONS);

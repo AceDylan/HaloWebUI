@@ -831,7 +831,9 @@ def _schedule_approval_webhook(request, user, metadata, approval: dict):
 # The composer's "派发方式": the same prefixes a person types, so hermes (and
 # its skill bundles) sees exactly what /reclaude typed by hand would send.
 HERMES_DISPATCH_COMMANDS = {"reclaude": "/reclaude", "codex": "/codex", "agy": "/agy"}
-HERMES_REASONING_EFFORTS = ("none", "minimal", "low", "medium", "high", "xhigh")
+# What hermes' runs API takes as model_options.reasoning_effort ("ultra" is
+# hermes-only; the web UI never sends it).
+HERMES_REASONING_EFFORTS = ("none", "minimal", "low", "medium", "high", "xhigh", "max")
 
 
 def _hermes_run_options(form_data) -> dict:
@@ -849,10 +851,17 @@ def _hermes_run_options(form_data) -> dict:
         provider = str(raw.get("provider") or "").strip()
         if provider and len(provider) <= 200:
             options["provider"] = provider
-    effort = str(raw.get("reasoning_effort") or "").strip().lower()
-    if effort in HERMES_REASONING_EFFORTS:
-        options["reasoning_effort"] = effort
     return options
+
+
+def _inherited_reasoning_effort(form_data) -> str | None:
+    """The chat's own thinking level (对话控制 / the admin default /
+    "深度思考发送"), which the middleware lifts from params into the body.
+    Without one hermes keeps its configured reasoning_effort."""
+    if not isinstance(form_data, dict):
+        return None
+    effort = str(form_data.get("reasoning_effort") or "").strip().lower()
+    return effort if effort in HERMES_REASONING_EFFORTS else None
 
 
 def _prefix_run_input(run_input, prefix: str):
@@ -1050,8 +1059,9 @@ def _build_run_payload(form_data, metadata, upstream_model_id, user=None):
     }
     if options.get("provider"):
         payload["provider"] = options["provider"]
-    if options.get("reasoning_effort"):
-        payload["model_options"] = {"reasoning_effort": options["reasoning_effort"]}
+    reasoning_effort = _inherited_reasoning_effort(form_data)
+    if reasoning_effort:
+        payload["model_options"] = {"reasoning_effort": reasoning_effort}
     if history:
         payload["conversation_history"] = history
     if instructions:

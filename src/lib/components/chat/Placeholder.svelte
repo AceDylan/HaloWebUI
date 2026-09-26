@@ -31,6 +31,7 @@
 		toChatAssistantSnapshot
 	} from '$lib/utils/chat-assistants';
 	import { translateWithDefault } from '$lib/i18n';
+	import { EMPTY_HERMES_RUN_OPTIONS, type HermesRunOptions } from '$lib/utils/hermes';
 
 	import Suggestions from './Suggestions.svelte';
 	import ModelIcon from '$lib/components/common/ModelIcon.svelte';
@@ -87,6 +88,10 @@
 
 	export let reasoningEffort: string | null = null;
 	export let maxThinkingTokens: number | null = null;
+	// A new chat with hermes offers its options before the first message,
+	// which is when 派发方式 and the model matter.
+	export let showHermesOptions = false;
+	export let hermesOptions: HermesRunOptions = { ...EMPTY_HERMES_RUN_OPTIONS };
 
 	export let toolServers = [];
 
@@ -361,6 +366,8 @@
 					bind:atSelectedModel
 					bind:reasoningEffort
 					bind:maxThinkingTokens
+					{showHermesOptions}
+					bind:hermesOptions
 					{onChange}
 					{onDeactivateAssistant}
 					{toolServers}

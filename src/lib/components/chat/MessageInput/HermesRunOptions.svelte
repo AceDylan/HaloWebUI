@@ -12,8 +12,9 @@
 
 	// Per chat: how the next hermes run starts. "派发方式" puts /reclaude,
 	// /codex or /agy in front of the message (a forgotten or mistyped prefix
-	// used to mean stopping the run and sending again); model and reasoning
-	// override hermes' configured default for this chat only.
+	// used to mean stopping the run and sending again); the model overrides
+	// hermes' configured default for this chat only. The thinking level is the
+	// chat's own (对话控制), handed to hermes by the backend.
 	export let options: HermesRunOptions = { ...EMPTY_HERMES_RUN_OPTIONS };
 	export let disabled = false;
 
@@ -22,13 +23,6 @@
 		{ value: 'reclaude', label: 'reclaude', hint: '/reclaude 独占执行' },
 		{ value: 'codex', label: 'codex', hint: '/codex 独占执行' },
 		{ value: 'agy', label: 'agy', hint: '/agy 独占执行' }
-	];
-	const EFFORTS: { value: HermesRunOptions['reasoning_effort']; label: string }[] = [
-		{ value: '', label: '默认' },
-		{ value: 'low', label: '低' },
-		{ value: 'medium', label: '中' },
-		{ value: 'high', label: '高' },
-		{ value: 'xhigh', label: '极高' }
 	];
 
 	let open = false;
@@ -65,15 +59,23 @@
 
 	$: current = normalizeHermesRunOptions(options);
 	$: dispatchLabel = DISPATCHES.find((item) => item.value === current.dispatch)?.label ?? '直接';
-	$: effortLabel = EFFORTS.find((item) => item.value === current.reasoning_effort)?.label ?? '';
-	$: summary = [
-		current.dispatch ? dispatchLabel : '',
-		current.model ? current.model : '',
-		current.reasoning_effort ? `思考${effortLabel}` : ''
-	]
+	$: summary = [current.dispatch ? dispatchLabel : '', current.model ? current.model : '']
 		.filter(Boolean)
 		.join(' · ');
 	$: modelValue = current.model ? `${current.provider}\u0000${current.model}` : '';
+	// The configured models (one per hermes provider entry), without the
+	// default, which "默认" already stands for.
+	$: modelChoices = (modelOptions?.providers ?? []).flatMap((provider) =>
+		provider.models
+			.filter((model) => !(provider.current && model === modelOptions?.model))
+			.map((model) => ({
+				value: `${provider.slug}\u0000${model}`,
+				label: model,
+				provider: provider.name
+			}))
+	);
+	// A model chosen earlier that the list no longer offers stays visible.
+	$: pinnedMissing = Boolean(current.model) && !modelChoices.some((item) => item.value === modelValue);
 
 	const update = (patch: Partial<HermesRunOptions>) => {
 		options = normalizeHermesRunOptions({ ...current, ...patch });
@@ -198,15 +200,11 @@
 					<option value="">
 						默认{modelOptions?.model ? `（${modelOptions.model}）` : ''}
 					</option>
-					{#if current.model && !modelOptions}
+					{#if pinnedMissing}
 						<option value={modelValue}>{current.model}</option>
 					{/if}
-					{#each modelOptions?.providers ?? [] as provider}
-						<optgroup label={provider.name}>
-							{#each provider.models as model}
-								<option value={`${provider.slug}\u0000${model}`}>{model}</option>
-							{/each}
-						</optgroup>
+					{#each modelChoices as item (item.value)}
+						<option value={item.value} title={item.provider}>{item.label}</option>
 					{/each}
 				</select>
 			</label>
@@ -216,27 +214,8 @@
 				<div class="mt-1 text-2xs text-amber-600 dark:text-amber-400">{modelOptionsError}</div>
 			{/if}
 
-			<div class="mt-3 mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">思考强度</div>
-			<div class="grid grid-cols-5 gap-1" role="radiogroup" aria-label="思考强度">
-				{#each EFFORTS as item}
-					<button
-						type="button"
-						role="radio"
-						aria-checked={current.reasoning_effort === item.value}
-						data-halo-hermes-effort={item.value || 'default'}
-						class="rounded-lg px-1 py-1.5 text-xs transition {current.reasoning_effort ===
-						item.value
-							? 'bg-primary-600 text-white dark:bg-primary-500'
-							: 'bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700'}"
-						on:click={() => update({ reasoning_effort: item.value })}
-					>
-						{item.label}
-					</button>
-				{/each}
-			</div>
-
 			<div class="mt-3 flex items-center justify-between text-2xs text-gray-400 dark:text-gray-500">
-				<span>只对这个对话生效</span>
+				<span>只对这个对话生效；思考强度沿用对话设置</span>
 				{#if summary}
 					<button
 						type="button"

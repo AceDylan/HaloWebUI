@@ -6981,6 +6981,8 @@
 								bind:atSelectedModel
 								bind:reasoningEffort
 								bind:maxThinkingTokens
+								{showHermesOptions}
+								bind:hermesOptions
 								{activeAssistant}
 								onActivateAssistant={activateAssistant}
 								onDeactivateAssistant={deactivateAssistant}

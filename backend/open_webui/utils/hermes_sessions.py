@@ -474,49 +474,82 @@ async def import_session(
 
 # ------------------------------------------------------------ model options
 
-MODEL_OPTIONS_PER_PROVIDER = 60
 MODEL_OPTIONS_CACHE_SECONDS = 300
 _MODEL_OPTIONS_CACHE: dict = {}
 
 
+def _model_option_id(model: Any) -> str:
+    if isinstance(model, dict):
+        model = model.get("id") or model.get("name")
+    return str(model or "").strip()
+
+
 def condense_model_options(body: Any) -> dict:
-    """hermes' GET /api/model/options, reduced to what the composer's picker
-    shows: providers that are set up and have models, their model ids."""
+    """hermes' GET /api/model/options, reduced to the models its config
+    chooses: hermes' default, and for every provider the user set up
+    (custom_providers / providers) the model that entry selects.
+
+    The inventory is hermes' whole picker: providers it found through ambient
+    credentials (anthropic, openai-api, moa) and every id an endpoint's
+    /v1/models advertises — thousands on a relay — none of which the config
+    picked. Hermes lists an entry's selected model first; the current
+    provider's list is re-probed and sorted, so its choice is the top-level
+    `model`."""
     body = body if isinstance(body, dict) else {}
+    default_model = _model_option_id(body.get("model"))
+    default_provider = str(body.get("provider") or "").strip()
+
+    def is_current(row: dict) -> bool:
+        slug = str(row.get("slug") or "").strip()
+        return bool(row.get("is_current")) or bool(slug and slug == default_provider)
+
     providers = []
-    for provider in body.get("providers") or []:
-        if not isinstance(provider, dict) or not provider.get("authenticated"):
-            continue
-        models = []
-        for model in provider.get("models") or []:
-            model_id = model if isinstance(model, str) else (
-                (model.get("id") or model.get("name")) if isinstance(model, dict) else None
-            )
-            if model_id and str(model_id) not in models:
-                models.append(str(model_id))
-        if not models:
-            continue
+    seen = set()
+    rows = [row for row in body.get("providers") or [] if isinstance(row, dict)]
+    # The current provider first: the model it runs is the one to keep when
+    # another row repeats it.
+    rows.sort(key=lambda row: not is_current(row))
+    for provider in rows:
         slug = str(provider.get("slug") or "").strip()
-        if not slug:
+        if not slug or not provider.get("authenticated"):
             continue
+        current = is_current(provider)
+        if not current and not provider.get("is_user_defined"):
+            continue
+        if current and default_model:
+            model = default_model
+        else:
+            model = next(
+                (
+                    model_id
+                    for model_id in map(_model_option_id, provider.get("models") or [])
+                    if model_id
+                ),
+                "",
+            )
+        # `providers: custom: models:` (per-model settings, no endpoint of its
+        # own) repeats the default model under a bare "custom" row.
+        if not model or model in seen:
+            continue
+        seen.add(model)
         providers.append(
             {
                 "slug": slug,
                 "name": str(provider.get("name") or slug),
-                "current": bool(provider.get("is_current")),
-                "models": models[:MODEL_OPTIONS_PER_PROVIDER],
+                "current": current,
+                "models": [model],
             }
         )
     providers.sort(key=lambda item: (not item["current"], item["name"].lower()))
     return {
-        "model": str(body.get("model") or ""),
-        "provider": str(body.get("provider") or ""),
+        "model": default_model,
+        "provider": default_provider,
         "providers": providers,
     }
 
 
 async def list_model_options(request, user, model_id: Optional[str] = None) -> dict:
-    """The models hermes can run a chat with (its own picker inventory)."""
+    """The models hermes' config offers for a chat (see condense_model_options)."""
     cached = _MODEL_OPTIONS_CACHE.get(user.id)
     if cached and cached[0] > time.time():
         return cached[1]

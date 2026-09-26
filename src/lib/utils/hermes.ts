@@ -123,37 +123,33 @@ export type HermesApprovalRequest = {
 /**
  * Per-chat choices for how a hermes run starts (the composer's "Hermes 选项"):
  * `dispatch` puts /reclaude, /codex or /agy in front of the message; `model`
- * (+ `provider`) and `reasoning_effort` override hermes' configured default
- * for this chat. Empty strings mean "hermes decides".
+ * (+ `provider`) overrides hermes' configured default for this chat. Empty
+ * strings mean "hermes decides". The thinking level is the chat's own
+ * (对话控制), which the backend hands to hermes.
  */
 export type HermesRunOptions = {
 	dispatch: '' | 'reclaude' | 'codex' | 'agy';
 	model: string;
 	provider: string;
-	reasoning_effort: '' | 'none' | 'low' | 'medium' | 'high' | 'xhigh';
 };
 
 export const EMPTY_HERMES_RUN_OPTIONS: HermesRunOptions = {
 	dispatch: '',
 	model: '',
-	provider: '',
-	reasoning_effort: ''
+	provider: ''
 };
 
 const HERMES_DISPATCHES = new Set(['reclaude', 'codex', 'agy']);
-const HERMES_EFFORTS = new Set(['none', 'low', 'medium', 'high', 'xhigh']);
 
 export const normalizeHermesRunOptions = (value: unknown): HermesRunOptions => {
 	const record = value && typeof value === 'object' ? (value as Record<string, unknown>) : {};
 	const text = (key: string) => (typeof record[key] === 'string' ? (record[key] as string).trim() : '');
 	const dispatch = text('dispatch');
-	const effort = text('reasoning_effort');
 	const model = text('model').slice(0, 200);
 	return {
 		dispatch: (HERMES_DISPATCHES.has(dispatch) ? dispatch : '') as HermesRunOptions['dispatch'],
 		model,
-		provider: model ? text('provider').slice(0, 200) : '',
-		reasoning_effort: (HERMES_EFFORTS.has(effort) ? effort : '') as HermesRunOptions['reasoning_effort']
+		provider: model ? text('provider').slice(0, 200) : ''
 	};
 };
 

@@ -243,6 +243,39 @@ def test_show_notification_report_saves_announces_and_starts_no_turn(monkeypatch
     assert calls["designed"][0]["server_surface"] == "halowebui-web"
 
 
+def test_show_notification_report_shows_a_run_once(monkeypatch):
+    from types import SimpleNamespace
+
+    calls, asyncio = _patch_report_stack(monkeypatch)
+
+    async def run():
+        first = await hermes_notify.show_notification_report(
+            object(), chat_id="chat-1", content="✅ 报告", source="reclaude-runner", run_id="r-1"
+        )
+        await asyncio.gather(*hermes_notify._REPORT_DESIGN_TASKS)
+        return first
+
+    first = asyncio.run(run())
+    # The chat now holds the report; the notifier re-posts it after a timeout.
+    saved = calls["saved"][-1]
+    monkeypatch.setattr(
+        hermes_notify.Chats,
+        "get_chat_by_id",
+        lambda _id: SimpleNamespace(id="chat-1", user_id="user-1", chat=saved),
+    )
+    again = asyncio.run(
+        hermes_notify.show_notification_report(
+            object(), chat_id="chat-1", content="✅ 报告", source="reclaude-runner", run_id="r-1"
+        )
+    )
+    assert again["duplicate"] is True
+    assert (again["user_message_id"], again["assistant_message_id"]) == (
+        first["user_message_id"],
+        first["assistant_message_id"],
+    )
+    assert len(calls["saved"]) == 1
+
+
 def test_show_notification_report_respects_a_busy_chat(monkeypatch):
     import pytest
 

@@ -359,6 +359,20 @@ async def start_follow_up_turn(
 _REPORT_DESIGN_TASKS: set = set()
 
 
+def _delivered_report_turn(chat_dict: dict[str, Any], run_id: str) -> Optional[tuple[str, str]]:
+    """(notice id, report id) of the report already shown for `run_id`, if any."""
+    run_id = (run_id or "").strip()[:128]
+    if not run_id:
+        return None
+    messages = _history(chat_dict).get("messages") or {}
+    for message_id, message in messages.items():
+        notice = message.get("hermes_notice") if isinstance(message, dict) else None
+        if isinstance(notice, dict) and notice.get("run_id") == run_id:
+            children = message.get("childrenIds") or []
+            return message_id, (children[0] if children else "")
+    return None
+
+
 async def show_notification_report(
     request,
     *,
@@ -392,9 +406,21 @@ async def show_notification_report(
     user = Users.get_user_by_id(chat.user_id)
     if user is None:
         raise HermesNotifyError(404, "chat owner not found")
+    chat_dict = dict(chat.chat or {})
+    delivered = _delivered_report_turn(chat_dict, run_id)
+    if delivered:
+        # The notifier re-posts after a timeout even when the report was saved;
+        # the second copy would show the same report twice.
+        log.info("hermes report for run %s already in chat %s", run_id, chat_id)
+        return {
+            "status": True,
+            "chat_id": chat_id,
+            "user_message_id": delivered[0],
+            "assistant_message_id": delivered[1],
+            "duplicate": True,
+        }
     if list_task_ids_by_chat_id(chat_id, blocks_completion_only=True):
         raise HermesNotifyError(409, "chat is busy with another run; retry later")
-    chat_dict = dict(chat.chat or {})
     model_info = find_chat_model(chat_dict)
     if not model_info:
         raise HermesNotifyError(422, "chat has no assistant model to continue with")

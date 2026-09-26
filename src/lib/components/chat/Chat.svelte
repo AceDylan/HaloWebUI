@@ -1114,6 +1114,19 @@
 			hermesOptions: next.hermesOptions
 		});
 	};
+	// Take a queued message back into the input to edit it. Its dispatch was
+	// taken off the panel when it was queued; it comes back with the text, as an
+	// unsent message's does.
+	const editQueuedMessage = (id: string) => {
+		const item = messageQueue.find((m) => m.id === id);
+		if (!item) return;
+		prompt = item.prompt;
+		files = item.files;
+		if (item.hermesOptions?.dispatch) {
+			hermesOptions = { ...hermesOptions, dispatch: item.hermesOptions.dispatch };
+		}
+		messageQueue = messageQueue.filter((m) => m.id !== id);
+	};
 	let branchingMessageId: string | null = null;
 
 	// Temporary instruction for regeneration with modifications (e.g. "more concise")
@@ -6933,14 +6946,7 @@
 							<BackgroundRunnerBanner />
 							<MessageQueue
 								queue={currentChatQueue}
-								onEdit={(id) => {
-									const item = messageQueue.find((m) => m.id === id);
-									if (item) {
-										prompt = item.prompt;
-										files = item.files;
-										messageQueue = messageQueue.filter((m) => m.id !== id);
-									}
-								}}
+								onEdit={editQueuedMessage}
 								onDelete={(id) => {
 									messageQueue = messageQueue.filter((m) => m.id !== id);
 								}}

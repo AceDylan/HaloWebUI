@@ -276,6 +276,10 @@
 				// New user message
 				let userPrompt = content;
 				let userMessageId = uuidv4();
+				// An edited message is resent with the Hermes choices it was sent
+				// with, as regenerating does: fixing a typo in a task handed to
+				// reclaude must not turn it into a direct Hermes reply.
+				const sentHermesOptions = history.messages[messageId].hermesOptions;
 
 				let userMessage = {
 					id: userMessageId,
@@ -286,6 +290,7 @@
 					...(Array.isArray(messageFiles) && messageFiles.length > 0
 						? { files: structuredClone(messageFiles) }
 						: {}),
+					...(sentHermesOptions ? { hermesOptions: structuredClone(sentHermesOptions) } : {}),
 					models: selectedModels,
 					timestamp: Math.floor(Date.now() / 1000) // Unix epoch
 				};

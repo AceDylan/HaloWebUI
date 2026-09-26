@@ -76,9 +76,12 @@ const fetchOnce = async () => {
 	hermesActiveRuns.set(activity.runs);
 	hermesBackgroundRuns.set(activity.background);
 	const unread = new Set(activity.unread);
-	// The chat on screen is read by definition; clear it server-side too.
+	// The chat on screen is read by definition; clear it server-side too. Not
+	// from a hidden tab: nobody is looking, and marking it read there took the
+	// "finished" dot off the phone and the other tabs too. Showing the tab
+	// again refreshes, and that refresh marks it read.
 	const current = get(chatId);
-	if (current && unread.has(current)) {
+	if (current && unread.has(current) && !hidden()) {
 		unread.delete(current);
 		markHermesChatRead(localStorage.token, current).catch(() => {});
 	}
@@ -178,7 +181,7 @@ export const applyHermesChatEvent = (event: ChatEvent | null | undefined) => {
 			removed = next.length !== runs.length;
 			return removed ? next : runs;
 		});
-		if (removed && eventChatId !== get(chatId)) {
+		if (removed && (eventChatId !== get(chatId) || hidden())) {
 			hermesUnreadChatIds.update((ids) =>
 				ids.has(eventChatId) ? ids : new Set([...ids, eventChatId])
 			);

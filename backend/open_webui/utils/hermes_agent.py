@@ -2081,7 +2081,9 @@ async def run_hermes_agent(request, form_data, user, metadata, model, events, ta
                 return
             for block in reversed(blocks):
                 if block["type"] == "text" and str(block.get("content", "")).strip():
-                    if "MEDIA:" in block["content"] and "![" in output:
+                    # The streamed text still has the raw MEDIA:<path>; the
+                    # output links the image or the stored file instead.
+                    if "MEDIA:" in block["content"] and "](" in output:
                         block["content"] = output
                     return
             blocks.append({"type": "text", "content": output})

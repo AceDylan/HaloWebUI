@@ -864,3 +864,24 @@ def test_streamed_text_is_coalesced_but_complete(monkeypatch):
     # which the end of the run closes: the final reply carries all of them.
     assert len(content_updates) == 1
     assert final["content"] == " ".join(str(index) for index in range(50))
+
+
+def test_a_file_hermes_attaches_is_linked_in_the_live_reply(monkeypatch):
+    stored = []
+
+    def store(request, user, metadata, name, data, content_type):
+        stored.append((name, data, content_type))
+        return "/api/v1/files/f1/content"
+
+    monkeypatch.setattr(hermes_agent, "_store_generated_file", store)
+    hermes = _Hermes(
+        events=[
+            {"event": "message.delta", "delta": "报告在这里：MEDIA:/root/out/report.pdf"},
+            {"event": "run.completed",
+             "output": "报告在这里：[report.pdf](data:application/pdf;base64,JVBERi0=)"},
+        ],
+    )
+    final, _, _ = _run(monkeypatch, hermes)
+    assert stored == [("report.pdf", b"%PDF-", "application/pdf")]
+    assert final["content"].endswith("报告在这里：[report.pdf](/api/v1/files/f1/content)")
+    assert "MEDIA:" not in final["content"]

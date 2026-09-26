@@ -324,8 +324,16 @@ describe('接着上次: a follow-up goes back to the run whose report ends the c
 			{ active: false, dispatch: 'reclaude', model: 'gpt-chat' },
 			{ dispatch: 'reclaude', model: '', provider: '', continue_run: runId }
 		);
-		expect(answered?.label).toBe('gpt-chat');
+		expect(answered?.label).toBe('未交回 reclaude · gpt-chat');
+		expect(answered?.fallback).toBe(true);
 		expect(answered?.title).toContain(`没能直接交回 reclaude 运行 ${runId}，由 Hermes 处理`);
 		expect(answered?.title).not.toContain('模型只管 Hermes 这一轮');
+		// No model recorded either: the header still says it.
+		expect(
+			describeHermesReply(
+				{ active: false, dispatch: 'reclaude' },
+				{ dispatch: 'reclaude', model: '', provider: '', continue_run: runId }
+			)?.label
+		).toBe('未交回 reclaude');
 	});
 });

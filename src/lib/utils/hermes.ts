@@ -311,6 +311,9 @@ export const describeHermesReply = (
 		lines.push(`交回 ${dispatch} 运行 ${continuedFrom} 的原会话继续（没有经过模型）`);
 		if (run?.runner_run_id) lines.push(`run ${run.runner_run_id}`);
 	} else if (handedToModel) {
+		// Visible, not only in the tooltip (phones have none): the person meant
+		// the runner to get this and should know it did not.
+		parts.push(`未交回 ${DISPATCH_LABELS[dispatch] ?? dispatch}`);
 		lines.push(`没能直接交回 ${dispatch} 运行 ${askedToContinue}，由 Hermes 处理`);
 	} else if (dispatch) {
 		parts.push(DISPATCH_LABELS[dispatch] ?? dispatch);
@@ -338,7 +341,11 @@ export const describeHermesReply = (
 	if (dispatch && !run?.fast_dispatch && !handedToModel) {
 		lines.push('模型只管 Hermes 这一轮，不影响 runner 自己用什么模型');
 	}
-	return { label: parts.join(' · '), title: lines.join('\n'), fallback: Boolean(fallbackFrom) };
+	return {
+		label: parts.join(' · '),
+		title: lines.join('\n'),
+		fallback: Boolean(fallbackFrom) || handedToModel
+	};
 };
 
 /**

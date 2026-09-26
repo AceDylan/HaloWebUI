@@ -8,6 +8,7 @@ id appends to the transcript hermes already keeps for that Telegram/QQ session
 here is there when the session is picked up from Telegram again.
 """
 
+import asyncio
 import json
 import logging
 import re
@@ -476,6 +477,7 @@ async def import_session(
 
 MODEL_OPTIONS_CACHE_SECONDS = 300
 _MODEL_OPTIONS_CACHE: dict = {}
+_MODEL_OPTIONS_REFRESH: dict = {}
 
 
 def _model_option_id(model: Any) -> str:
@@ -548,14 +550,41 @@ def condense_model_options(body: Any) -> dict:
     }
 
 
-async def list_model_options(request, user, model_id: Optional[str] = None) -> dict:
-    """The models hermes' config offers for a chat (see condense_model_options)."""
-    cached = _MODEL_OPTIONS_CACHE.get(user.id)
-    if cached and cached[0] > time.time():
-        return cached[1]
+async def _fetch_model_options(request, user, model_id: Optional[str]) -> dict:
     model = await resolve_hermes_model(request, user, model_id)
     root, headers = _connection(request, user, model)
     body = await _get_json(f"{root}/api/model/options", headers)
     options = condense_model_options(body)
     _MODEL_OPTIONS_CACHE[user.id] = (time.time() + MODEL_OPTIONS_CACHE_SECONDS, options)
     return options
+
+
+def _refresh_model_options(request, user, model_id: Optional[str]) -> None:
+    """One background refresh per user at a time; a failure keeps the old list."""
+    running = _MODEL_OPTIONS_REFRESH.get(user.id)
+    if running and not running.done():
+        return
+
+    async def refresh():
+        try:
+            await _fetch_model_options(request, user, model_id)
+        except Exception as error:  # the stale list keeps being served
+            log.debug("hermes model options refresh failed: %s", error)
+        finally:
+            _MODEL_OPTIONS_REFRESH.pop(user.id, None)
+
+    _MODEL_OPTIONS_REFRESH[user.id] = asyncio.create_task(refresh())
+
+
+async def list_model_options(request, user, model_id: Optional[str] = None) -> dict:
+    """The models hermes' config offers for a chat (see condense_model_options).
+
+    Hermes answers with its whole picker (~500 KB, 1.5-3 s). After the first
+    call the panel gets the last list at once; an expired one is refreshed in
+    the background for the next open."""
+    cached = _MODEL_OPTIONS_CACHE.get(user.id)
+    if cached:
+        if cached[0] <= time.time():
+            _refresh_model_options(request, user, model_id)
+        return cached[1]
+    return await _fetch_model_options(request, user, model_id)

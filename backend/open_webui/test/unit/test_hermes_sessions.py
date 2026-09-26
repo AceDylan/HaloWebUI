@@ -312,3 +312,59 @@ def test_model_options_keep_a_current_provider_hermes_did_not_mark_as_configured
     ]
     assert condense_model_options(None) == {"model": "", "provider": "", "providers": []}
 
+
+
+def test_model_options_serve_the_last_list_while_one_refresh_runs(monkeypatch):
+    from open_webui.utils import hermes_sessions
+
+    calls = []
+    gate = asyncio.Event()
+
+    async def fake_fetch(request, user, model_id):
+        calls.append(model_id)
+        await gate.wait()
+        options = {"model": f"m{len(calls)}", "provider": "", "providers": []}
+        hermes_sessions._MODEL_OPTIONS_CACHE[user.id] = (10**12, options)
+        return options
+
+    monkeypatch.setattr(hermes_sessions, "_fetch_model_options", fake_fetch)
+    monkeypatch.setattr(hermes_sessions, "_MODEL_OPTIONS_CACHE", {})
+    monkeypatch.setattr(hermes_sessions, "_MODEL_OPTIONS_REFRESH", {})
+    user = SimpleNamespace(id="u1")
+
+    async def scenario():
+        stale = {"model": "old", "provider": "", "providers": []}
+        hermes_sessions._MODEL_OPTIONS_CACHE["u1"] = (0, stale)
+        # Expired: answered at once with the old list, one refresh for both calls.
+        assert await hermes_sessions.list_model_options(None, user) is stale
+        assert await hermes_sessions.list_model_options(None, user) is stale
+        await asyncio.sleep(0)
+        assert len(calls) == 1
+        gate.set()
+        await asyncio.sleep(0.01)
+        assert (await hermes_sessions.list_model_options(None, user))["model"] == "m1"
+        assert hermes_sessions._MODEL_OPTIONS_REFRESH == {}
+
+    asyncio.run(scenario())
+
+
+def test_model_options_refresh_failure_keeps_the_old_list(monkeypatch):
+    from open_webui.utils import hermes_sessions
+
+    async def failing_fetch(request, user, model_id):
+        raise RuntimeError("hermes down")
+
+    monkeypatch.setattr(hermes_sessions, "_fetch_model_options", failing_fetch)
+    monkeypatch.setattr(hermes_sessions, "_MODEL_OPTIONS_CACHE", {"u1": (0, {"model": "old"})})
+    monkeypatch.setattr(hermes_sessions, "_MODEL_OPTIONS_REFRESH", {})
+    user = SimpleNamespace(id="u1")
+
+    async def scenario():
+        assert (await hermes_sessions.list_model_options(None, user))["model"] == "old"
+        await asyncio.sleep(0.01)
+        # Still expired, so the next open tries again (one at a time).
+        assert (await hermes_sessions.list_model_options(None, user))["model"] == "old"
+        await asyncio.gather(*hermes_sessions._MODEL_OPTIONS_REFRESH.values())
+        assert hermes_sessions._MODEL_OPTIONS_REFRESH == {}
+
+    asyncio.run(scenario())

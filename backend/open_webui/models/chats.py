@@ -573,7 +573,10 @@ class ChatTable:
         *,
         update_title: bool = True,
         base_chat: Optional[dict] = None,
+        touch: bool = True,
     ) -> Optional[ChatModel]:
+        # touch=False keeps updated_at (the sidebar order and the auto-archive
+        # clock) for writes that are not activity in the chat.
         try:
             with get_db() as db:
                 normalized_chat = normalize_chat_payload(chat)
@@ -618,9 +621,10 @@ class ChatTable:
                 chat_item.chat = normalized_chat
                 flag_modified(chat_item, "chat")
                 chat_item.title = next_title
-                chat_item.updated_at = self._next_user_chat_timestamp(
-                    db, chat_item.user_id
-                )
+                if touch:
+                    chat_item.updated_at = self._next_user_chat_timestamp(
+                        db, chat_item.user_id
+                    )
                 db.commit()
                 db.refresh(chat_item)
 
@@ -645,12 +649,20 @@ class ChatTable:
                 }
             )
         )
+        next_composer_state = sanitized_composer_state.get("composer_state", {})
+        if chat_dict.get("composer_state") == next_composer_state:
+            return chat
+
         next_chat = {
             **chat_dict,
-            "composer_state": sanitized_composer_state.get("composer_state", {}),
+            "composer_state": next_composer_state,
         }
 
-        return self.update_chat_by_id(id, next_chat, update_title=False, base_chat=chat_dict)
+        # Toggling web search or tools is not activity in the chat: it must not
+        # move the chat to the top of the sidebar or restart its archive clock.
+        return self.update_chat_by_id(
+            id, next_chat, update_title=False, base_chat=chat_dict, touch=False
+        )
 
     def update_chat_title_by_id(
         self,

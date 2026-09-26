@@ -70,6 +70,7 @@
 		type PersistedSelectionThreads
 	} from '$lib/utils/selection-threads';
 	import { getModelChatDisplayName } from '$lib/utils/model-display';
+	import { createComposerStatePersister } from '$lib/utils/composer-state-persist';
 	import { getAnthropicEffortSteps } from '$lib/utils/anthropic-thinking';
 	import {
 		buildModelIdentityLookup,
@@ -592,9 +593,10 @@
 	const selectionThreadsStore = writable<PersistedSelectionThreads>(selectionThreads);
 	const expandedSelectionThreadId = writable<string | null>(null);
 	let selectionThreadsPersistTimeout: ReturnType<typeof setTimeout> | null = null;
-	let composerStatePersistTimeout: ReturnType<typeof setTimeout> | null = null;
+	const composerStatePersister = createComposerStatePersister({
+		save: (id, payload) => updateChatComposerStateById(localStorage.token, id, payload as object)
+	});
 	let pendingChatSave: Promise<void> = Promise.resolve();
-	let pendingComposerStateSave: Promise<void> = Promise.resolve();
 	let hasPersistedComposerState = false;
 	let composerStateSyncReady = false;
 	let lastRequestedChatIdProp = '';
@@ -2014,7 +2016,9 @@
 		}
 	};
 
-	const persistChatSessionState = (id: string | null | undefined = $chatId || chatIdProp) => {
+	// Saves use `$chatId` alone: after "new chat" on /c/X the route param (chatIdProp)
+	// still names X while the composer already holds the new chat's state.
+	const persistChatSessionState = (id: string | null | undefined = $chatId) => {
 		const scopedKey = getChatSessionStateKey(id);
 		const legacyKey = getLegacyChatSessionStateKey(id);
 		localStorage.setItem(scopedKey, JSON.stringify(buildLocalChatSessionState()));
@@ -2023,27 +2027,19 @@
 		}
 	};
 
-	const persistChatComposerState = (id: string | null | undefined = $chatId || chatIdProp) => {
+	// While a chat is loading (or a new chat is being set up) the composer holds
+	// reset or half-applied state and `$chatId` can still name the chat being
+	// left, so nothing is saved until the load marks the composer ready.
+	const persistChatComposerState = (id: string | null | undefined = $chatId) => {
+		if (!composerStateSyncReady) {
+			return;
+		}
 		persistChatSessionState(id);
-		if (!composerStateSyncReady || !id || $temporaryChatEnabled) {
+		if (!id || $temporaryChatEnabled) {
 			return;
 		}
 
-		if (composerStatePersistTimeout) {
-			clearTimeout(composerStatePersistTimeout);
-			composerStatePersistTimeout = null;
-		}
-
-		composerStatePersistTimeout = setTimeout(() => {
-			pendingComposerStateSave = pendingComposerStateSave
-				.catch(() => undefined)
-				.then(async () => {
-					await updateChatComposerStateById(localStorage.token, id, buildComposerStatePayload());
-				})
-				.catch((error) => {
-					console.error(error);
-				});
-		}, 250);
+		composerStatePersister.schedule(id, buildComposerStatePayload());
 	};
 
 	const handleMessageInputChange = (input) => {
@@ -2336,13 +2332,29 @@
 		currentSystemPrompt;
 		activeAssistant;
 
-		persistChatSessionState($chatId || chatIdProp);
+		if (composerStateSyncReady) {
+			persistChatSessionState($chatId);
+		}
 	}
 
+	// Every composer field is named here: Svelte re-runs a block only for what it
+	// names itself, not for what buildComposerStatePayload() reads, so toggling web
+	// search or a tool used to be saved only by the (wrong) write on leaving the chat.
 	$: {
-		const composerStateSignature = JSON.stringify(buildComposerStatePayload());
-		composerStateSignature;
-		persistChatComposerState($chatId || chatIdProp);
+		selectedToolIds;
+		toolSelectionTouched;
+		selectedSkillIds;
+		skillSelectionTouched;
+		multiModelDiscussionEnabled;
+		webSearchMode;
+		webSearchModeSource;
+		imageGenerationEnabled;
+		imageGenerationOptions;
+		codeInterpreterEnabled;
+		reasoningEffort;
+		maxThinkingTokens;
+		composerStateSyncReady;
+		persistChatComposerState($chatId);
 	}
 
 	// 正向同步: Controls(params) → ThinkingControl(reasoningEffort/maxThinkingTokens)
@@ -3200,10 +3212,7 @@
 			clearTimeout(selectionThreadsPersistTimeout);
 			selectionThreadsPersistTimeout = null;
 		}
-		if (composerStatePersistTimeout) {
-			clearTimeout(composerStatePersistTimeout);
-			composerStatePersistTimeout = null;
-		}
+		void composerStatePersister.flush();
 		scrollObserver?.disconnect();
 		cancelScheduledScrollToBottom();
 		clearResponseAnimationControllers();
@@ -3888,6 +3897,7 @@
 				chatFiles = chatContent?.files ?? [];
 				hasPersistedComposerState = false;
 				applyComposerState(chatContent?.composer_state, { markPersisted: true });
+				composerStatePersister.markPersisted(targetChatId, buildComposerStatePayload());
 				setRuntimeSelectionThreadsState(normalizeSelectionThreads(chatContent?.selectionThreads));
 				expandedSelectionThreadId.set(null);
 
@@ -6565,6 +6575,8 @@
 
 			_chatId = chat.id;
 			persistedChatSnapshot = structuredClone(chat.chat);
+			// Created with the current composer state; no separate save needed.
+			composerStatePersister.markPersisted(_chatId, buildComposerStatePayload());
 			await chatId.set(_chatId);
 			migrateChatSessionState('', _chatId);
 

@@ -389,11 +389,14 @@
 						{$i18n.t('Webhook URL')}
 					</div>
 					<div class="flex items-center gap-2">
-						<input
-							class="flex-1 min-w-0 py-2 px-3 text-sm dark:text-gray-300 glass-input"
-							type="url"
+						<!-- Masked: a Telegram Bot API URL carries the bot token. -->
+						<SensitiveInput
 							bind:value={webhookUrl}
+							required={false}
 							placeholder={$i18n.t('Enter your webhook URL')}
+							outerClassName="flex flex-1 min-w-0 items-center py-2 px-3 glass-input"
+							inputClassName="w-full min-w-0 text-sm dark:text-gray-300 bg-transparent outline-hidden placeholder:text-gray-400 dark:placeholder:text-gray-500"
+							showButtonClassName="shrink-0 pl-1.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition bg-transparent"
 						/>
 						<button
 							class="shrink-0 px-3 py-2 text-xs font-medium border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition disabled:opacity-50 disabled:cursor-not-allowed"

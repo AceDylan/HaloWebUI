@@ -2,6 +2,7 @@
 	import type { Writable } from 'svelte/store';
 	import { getContext, createEventDispatcher } from 'svelte';
 	import Modal from '$lib/components/common/Modal.svelte';
+	import SensitiveInput from '$lib/components/common/SensitiveInput.svelte';
 	import HaloSelect from '$lib/components/common/HaloSelect.svelte';
 	import { getModelChatDisplayName } from '$lib/utils/model-display';
 	import { getModelSelectionId, resolveModelSelectionId } from '$lib/utils/model-identity';
@@ -244,12 +245,12 @@
 							<label class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1 block">
 								{$i18n.t('Bot Token')}
 							</label>
-							<input
-								class="w-full"
-								type="text"
+							<SensitiveInput
 								placeholder="123456:ABC-DEF..."
 								bind:value={botToken}
-								required
+								outerClassName="flex w-full items-center"
+								inputClassName="w-full min-w-0 bg-transparent outline-hidden"
+								showButtonClassName="shrink-0 pl-1.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition bg-transparent"
 							/>
 							<p class="text-xs text-gray-500 mt-1">
 								{$i18n.t('Get from')}
@@ -287,33 +288,33 @@
 						</div>
 						<div>
 							<label class="text-xs text-gray-500 mb-1 block">Secret</label>
-							<input
-								class="w-full"
-								type="text"
+							<SensitiveInput
 								placeholder={$i18n.t('App Secret')}
 								bind:value={wxSecret}
-								required
+								outerClassName="flex w-full items-center"
+								inputClassName="w-full min-w-0 bg-transparent outline-hidden"
+								showButtonClassName="shrink-0 pl-1.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition bg-transparent"
 							/>
 						</div>
 						<div class="grid grid-cols-2 gap-3">
 							<div>
 								<label class="text-xs text-gray-500 mb-1 block">{$i18n.t('Callback Token')}</label>
-								<input
-									class="w-full"
-									type="text"
+								<SensitiveInput
 									placeholder={$i18n.t('Token for signature verification')}
 									bind:value={wxToken}
-									required
+									outerClassName="flex w-full items-center"
+									inputClassName="w-full min-w-0 bg-transparent outline-hidden"
+									showButtonClassName="shrink-0 pl-1.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition bg-transparent"
 								/>
 							</div>
 							<div>
 								<label class="text-xs text-gray-500 mb-1 block">EncodingAESKey</label>
-								<input
-									class="w-full"
-									type="text"
+								<SensitiveInput
 									placeholder={$i18n.t('43-character key')}
 									bind:value={aesKey}
-									required
+									outerClassName="flex w-full items-center"
+									inputClassName="w-full min-w-0 bg-transparent outline-hidden"
+									showButtonClassName="shrink-0 pl-1.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition bg-transparent"
 								/>
 							</div>
 						</div>
@@ -332,12 +333,12 @@
 							</div>
 							<div>
 								<label class="text-xs text-gray-500 mb-1 block">App Secret</label>
-								<input
-									class="w-full"
-									type="text"
+								<SensitiveInput
 									placeholder={$i18n.t('App Secret')}
 									bind:value={appSecret}
-									required
+									outerClassName="flex w-full items-center"
+									inputClassName="w-full min-w-0 bg-transparent outline-hidden"
+									showButtonClassName="shrink-0 pl-1.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition bg-transparent"
 								/>
 							</div>
 						</div>
@@ -346,24 +347,25 @@
 								<label class="text-xs text-gray-500 mb-1 block"
 									>{$i18n.t('Verification Token')}</label
 								>
-								<input
-									class="w-full"
-									type="text"
+								<SensitiveInput
 									placeholder={$i18n.t('Event subscription token')}
 									bind:value={verificationToken}
-									required
+									outerClassName="flex w-full items-center"
+									inputClassName="w-full min-w-0 bg-transparent outline-hidden"
+									showButtonClassName="shrink-0 pl-1.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition bg-transparent"
 								/>
 							</div>
 							<div>
 								<label class="text-xs text-gray-500 mb-1 block"
 									>Encrypt Key <span class="text-gray-400">({$i18n.t('optional')})</span></label
 								>
-								<input
-									class="w-full"
-									type="text"
+								<SensitiveInput
 									placeholder={$i18n.t('Leave empty to disable encryption')}
 									bind:value={encryptKey}
-									required
+									required={false}
+									outerClassName="flex w-full items-center"
+									inputClassName="w-full min-w-0 bg-transparent outline-hidden"
+									showButtonClassName="shrink-0 pl-1.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition bg-transparent"
 								/>
 							</div>
 						</div>

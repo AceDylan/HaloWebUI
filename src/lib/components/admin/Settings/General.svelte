@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { getWebhookUrl, updateWebhookUrl } from '$lib/apis';
+	import SensitiveInput from '$lib/components/common/SensitiveInput.svelte';
 	import { getAdminConfig, updateAdminConfig } from '$lib/apis/auths';
 	import Switch from '$lib/components/common/Switch.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
@@ -901,11 +902,13 @@
 							class="glass-item p-4"
 						>
 							<div class="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5">{$i18n.t('Webhook URL')}</div>
-							<input
-								class="w-full py-2 px-3 text-sm dark:text-gray-300 glass-input"
-								type="text"
+							<SensitiveInput
 								placeholder={`https://example.com/webhook`}
 								bind:value={webhookUrl}
+								required={false}
+								outerClassName="flex w-full items-center py-2 px-3 glass-input"
+								inputClassName="w-full min-w-0 text-sm dark:text-gray-300 bg-transparent outline-hidden"
+								showButtonClassName="shrink-0 pl-1.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition bg-transparent"
 							/>
 							<div class="mt-1.5 text-xs text-gray-400 dark:text-gray-500">
 								{$i18n.t('Configure webhook endpoint for system notifications')}

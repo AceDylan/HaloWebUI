@@ -381,6 +381,7 @@ async def show_notification_report(
     notice: str = "",
     source: str = "",
     run_id: str = "",
+    quiet: bool = False,
 ) -> dict[str, Any]:
     """mode=display: show a finished background run's report as the reply, no model turn.
 
@@ -466,6 +467,15 @@ async def show_notification_report(
         )
     except Exception as e:  # the report is saved; the chat shows it on next open
         log.warning(f"hermes report reload event failed for chat {chat_id}: {e}")
+    if quiet:
+        # The person caused it (a run they stopped) and is looking at the page:
+        # no unread mark, no push, no design pass for a three-line notice.
+        return {
+            "status": True,
+            "chat_id": chat_id,
+            "user_message_id": user_message_id,
+            "assistant_message_id": assistant_message_id,
+        }
     mark_unread(chat_id, user.id)
     _schedule_completion_webhook(
         request, user, metadata, Chats.get_chat_title_by_id(chat_id), content

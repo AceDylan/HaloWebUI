@@ -276,6 +276,20 @@ def test_show_notification_report_shows_a_run_once(monkeypatch):
     assert len(calls["saved"]) == 1
 
 
+def test_a_quiet_report_neither_marks_unread_nor_pushes(monkeypatch):
+    calls, asyncio = _patch_report_stack(monkeypatch)
+    result = asyncio.run(
+        hermes_notify.show_notification_report(
+            object(), chat_id="chat-1", content="⏹️ 已停止", notice="[后台任务完成通知] x",
+            source="reclaude-runner", run_id="r-9", quiet=True,
+        )
+    )
+    saved = calls["saved"][-1]["history"]
+    assert saved["messages"][result["assistant_message_id"]]["content"] == "⏹️ 已停止"
+    assert calls["events"][0]["type"] == RELOAD_EVENT_TYPE
+    assert calls["unread"] == [] and calls["webhook"] == [] and calls["designed"] == []
+
+
 def test_show_notification_report_respects_a_busy_chat(monkeypatch):
     import pytest
 

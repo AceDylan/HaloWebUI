@@ -399,7 +399,8 @@ const NOTICE_STATUS: Record<string, { icon: string; label: string }> = {
 	question: { icon: '❓', label: '等你决定' },
 	max_turns: { icon: '⏸', label: '达到轮数上限' },
 	quota_blocked: { icon: '⛔', label: '没有启动' },
-	timeout: { icon: '⏱', label: '超时' }
+	timeout: { icon: '⏱', label: '超时' },
+	stopped: { icon: '⏹️', label: '已停止' }
 };
 
 /** "✅ reclaude 已完成" for the notice line. */

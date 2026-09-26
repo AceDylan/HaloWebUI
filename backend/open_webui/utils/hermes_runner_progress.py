@@ -72,6 +72,12 @@ def record_runner_progress(
     return entry
 
 
+def get_runner_progress(run_id: Optional[str]) -> Optional[dict]:
+    """The live entry for `run_id`, if its runner is still reporting."""
+    _prune(time.time())
+    return _PROGRESS.get(str(run_id or ""))
+
+
 def clear_runner_progress(run_id: Optional[str]) -> None:
     """The run's report arrived: it is no longer running."""
     if run_id:

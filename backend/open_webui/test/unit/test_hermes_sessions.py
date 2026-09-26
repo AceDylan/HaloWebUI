@@ -368,3 +368,103 @@ def test_model_options_refresh_failure_keeps_the_old_list(monkeypatch):
         assert hermes_sessions._MODEL_OPTIONS_REFRESH == {}
 
     asyncio.run(scenario())
+
+
+class _StopResponse:
+    def __init__(self, status, body):
+        self.status, self.body = status, body
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *_args):
+        return False
+
+    async def json(self, content_type=None):
+        return self.body
+
+
+class _StopSession:
+    def __init__(self, answer, posts):
+        self.answer, self.posts = answer, posts
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *_args):
+        return False
+
+    def post(self, url, **kwargs):
+        self.posts.append((url, kwargs.get("json")))
+        return _StopResponse(*self.answer)
+
+
+def _stop_world(monkeypatch, answer):
+    from open_webui.utils import hermes_notify, hermes_runner_progress, hermes_sessions
+
+    rid = "20260927-005655-f2dd355f"
+    monkeypatch.setattr(
+        hermes_runner_progress,
+        "_PROGRESS",
+        {rid: {"run_id": rid, "chat_id": "chat-1", "user_id": "u1", "agent": "reclaude",
+               "status": "running", "updated_at": 10**12}},
+    )
+    posts, shown = [], []
+
+    async def resolve(request, user, model_id=None):
+        return {"id": "hermes-agent"}
+
+    async def show(request, **kwargs):
+        shown.append(kwargs)
+        return {"status": True}
+
+    monkeypatch.setattr(hermes_sessions, "resolve_hermes_model", resolve)
+    monkeypatch.setattr(
+        hermes_sessions, "_connection", lambda *_a: ("http://hermes.test", {"Authorization": "Bearer k"})
+    )
+    monkeypatch.setattr(
+        hermes_sessions.aiohttp, "ClientSession", lambda **_kw: _StopSession(answer, posts)
+    )
+    monkeypatch.setattr(hermes_notify, "show_notification_report", show)
+    return hermes_sessions, hermes_runner_progress, rid, posts, shown
+
+
+def test_stopping_a_runner_asks_hermes_and_shows_the_notice(monkeypatch):
+    sessions, progress, rid, posts, shown = _stop_world(
+        monkeypatch,
+        (200, {"stopped": True, "notice": "[后台任务完成通知] reclaude 运行 x 已结束，状态：stopped，Claude 会话：s。",
+               "report": "⏹️ 已停止"}),
+    )
+    result = asyncio.run(sessions.stop_background_runner(None, SimpleNamespace(id="u1"), rid))
+    assert result["stopped"] is True and result["report_shown"] is True
+    assert posts == [(f"http://hermes.test/v1/runners/reclaude/{rid}/stop", {"session_id": "chat-1"})]
+    assert shown[0]["chat_id"] == "chat-1" and shown[0]["quiet"] is True
+    assert shown[0]["run_id"] == rid and shown[0]["source"] == "reclaude-runner"
+    assert progress.get_runner_progress(rid) is None
+
+
+def test_only_the_owner_stops_a_runner(monkeypatch):
+    sessions, _progress, rid, posts, _shown = _stop_world(monkeypatch, (200, {}))
+    with pytest.raises(sessions.HermesSessionsError) as error:
+        asyncio.run(sessions.stop_background_runner(None, SimpleNamespace(id="someone-else"), rid))
+    assert error.value.status_code == 404 and posts == []
+    with pytest.raises(sessions.HermesSessionsError):
+        asyncio.run(sessions.stop_background_runner(None, SimpleNamespace(id="u1"), "../etc"))
+
+
+def test_a_runner_that_already_ended_leaves_the_banner(monkeypatch):
+    sessions, progress, rid, _posts, shown = _stop_world(
+        monkeypatch, (409, {"error": {"message": "reclaude 运行 20260927-005655-f2dd355f 已经结束"}})
+    )
+    with pytest.raises(sessions.HermesSessionsError) as error:
+        asyncio.run(sessions.stop_background_runner(None, SimpleNamespace(id="u1"), rid))
+    assert error.value.status_code == 409 and "已经结束" in error.value.detail
+    assert progress.get_runner_progress(rid) is None and shown == []
+
+
+def test_an_older_hermes_says_it_cannot_stop_runners(monkeypatch):
+    sessions, progress, rid, _posts, _shown = _stop_world(monkeypatch, (404, {}))
+    with pytest.raises(sessions.HermesSessionsError) as error:
+        asyncio.run(sessions.stop_background_runner(None, SimpleNamespace(id="u1"), rid))
+    assert error.value.status_code == 501 and "重启网关" in error.value.detail
+    assert progress.get_runner_progress(rid) is not None

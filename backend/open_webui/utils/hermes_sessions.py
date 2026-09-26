@@ -588,3 +588,84 @@ async def list_model_options(request, user, model_id: Optional[str] = None) -> d
             _refresh_model_options(request, user, model_id)
         return cached[1]
     return await _fetch_model_options(request, user, model_id)
+
+
+# ------------------------------------------------------- background runners
+
+RUNNER_NAMES = ("reclaude", "codex", "agy")
+RUNNER_RUN_ID_RE = re.compile(r"^\d{8}-\d{6}-[0-9a-f]{6,32}(?:-a\d+)*$")
+RUNNER_STOP_TIMEOUT_SECONDS = 60
+
+
+def _hermes_error_message(body: Any) -> str:
+    error = body.get("error") if isinstance(body, dict) else None
+    if isinstance(error, dict) and error.get("message"):
+        return str(error["message"])
+    return str(error or "")
+
+
+async def stop_background_runner(request, user, run_id: str) -> dict:
+    """Stop a reclaude / codex / agy run one of the user's chats launched.
+
+    The runner is detached (its own scope on the hermes host), so stopping the reply
+    that launched it never reached it. Hermes stops it and answers with the notice
+    and the short report the chat then shows, like a finished run's; "接着上次" can
+    resume its session from there."""
+    from open_webui.utils.hermes_notify import HermesNotifyError, show_notification_report
+    from open_webui.utils.hermes_runner_progress import (
+        clear_runner_progress,
+        get_runner_progress,
+    )
+
+    entry = get_runner_progress(run_id) if RUNNER_RUN_ID_RE.match(run_id or "") else None
+    if not entry or entry.get("user_id") != user.id:
+        raise HermesSessionsError(404, "这个后台任务已经结束，或者不是你的对话启动的")
+    agent = str(entry.get("agent") or "")
+    if agent not in RUNNER_NAMES:
+        raise HermesSessionsError(400, f"不认识的后台任务类型：{agent}")
+    chat_id = str(entry["chat_id"])
+    model = await resolve_hermes_model(request, user, None)
+    root, headers = _connection(request, user, model)
+    timeout = aiohttp.ClientTimeout(total=RUNNER_STOP_TIMEOUT_SECONDS)
+    async with aiohttp.ClientSession(trust_env=True, timeout=timeout) as session:
+        async with session.post(
+            f"{root}/v1/runners/{agent}/{run_id}/stop",
+            json={"session_id": chat_id},
+            headers=headers,
+            ssl=AIOHTTP_CLIENT_SESSION_SSL,
+        ) as resp:
+            try:
+                body = await resp.json(content_type=None)
+            except Exception:
+                body = {}
+            if resp.status == 404:
+                raise HermesSessionsError(
+                    501, "这个 Hermes 还不能停止后台任务，更新 Hermes 并重启网关后再试"
+                )
+            if resp.status == 409:
+                message = _hermes_error_message(body) or "这个后台任务现在不能停止"
+                if "已经结束" in message:
+                    clear_runner_progress(run_id)
+                raise HermesSessionsError(409, message)
+            if resp.status >= 400:
+                message = _hermes_error_message(body) or f"HTTP {resp.status}"
+                raise HermesSessionsError(502, f"停止失败：{message}")
+    clear_runner_progress(run_id)
+    shown = True
+    try:
+        await show_notification_report(
+            request,
+            chat_id=chat_id,
+            content=str(body.get("report") or f"⏹️ {agent} 运行 {run_id} · 已停止"),
+            notice=str(body.get("notice") or ""),
+            source=f"{agent}-runner",
+            run_id=run_id,
+            quiet=True,
+        )
+    except HermesNotifyError as e:
+        # A hermes turn is running in that chat: the run is stopped all the same.
+        log.info("runner stop report for %s not shown: %s", run_id, e)
+        shown = False
+    log.info("stopped %s run %s from chat %s", agent, run_id, chat_id)
+    return {"stopped": True, "run_id": run_id, "agent": agent, "chat_id": chat_id, "report_shown": shown}
+

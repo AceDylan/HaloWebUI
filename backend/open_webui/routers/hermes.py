@@ -6,6 +6,10 @@ one of their own chats.
 
 GET /api/v1/hermes/runs — the signed-in user's hermes runs executing right now.
 
+POST /api/v1/hermes/runners/{run_id}/stop — stop a background runner (reclaude /
+codex / agy) that one of the user's chats launched (hermes
+``POST /v1/runners/{runner}/{run_id}/stop``).
+
 GET /api/v1/hermes/sessions — hermes sessions from another surface (Telegram,
 QQ, CLI); POST /api/v1/hermes/sessions/{id}/import turns one into a chat whose
 id is the hermes session id, so the chat continues that session.
@@ -47,6 +51,7 @@ from open_webui.utils.hermes_sessions import (
     import_session,
     list_model_options,
     list_sessions,
+    stop_background_runner,
     validate_session_id,
 )
 from open_webui.utils.hermes_unread import list_unread_chat_ids, mark_read
@@ -188,6 +193,18 @@ async def get_hermes_model_options(
     per-chat model picker."""
     try:
         return await list_model_options(request, user, model_id)
+    except HermesSessionsError as e:
+        raise HTTPException(status_code=e.status_code, detail=e.detail)
+
+
+@router.post("/runners/{run_id}/stop")
+async def stop_hermes_background_runner(
+    request: Request, run_id: str, user=Depends(get_verified_user)
+):
+    """Stop a background runner (reclaude / codex / agy) one of the user's chats
+    launched; the chat then shows a short "已停止" report."""
+    try:
+        return await stop_background_runner(request, user, run_id)
     except HermesSessionsError as e:
         raise HTTPException(status_code=e.status_code, detail=e.detail)
 

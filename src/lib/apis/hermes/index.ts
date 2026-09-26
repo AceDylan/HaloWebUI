@@ -240,6 +240,30 @@ export const markHermesChatRead = async (token: string, chatId: string): Promise
 	}
 };
 
+export type HermesRunnerStopResult = {
+	stopped: boolean;
+	run_id: string;
+	agent: string;
+	chat_id: string;
+	/** False when a hermes turn was running in the chat, so no "已停止" line was added. */
+	report_shown: boolean;
+};
+
+/** Stop a background runner (reclaude / codex / agy) one of the user's chats launched. */
+export const stopHermesBackgroundRunner = async (
+	token: string,
+	runId: string
+): Promise<HermesRunnerStopResult> => {
+	const res = await fetch(
+		`${WEBUI_API_BASE_URL}/hermes/runners/${encodeURIComponent(runId)}/stop`,
+		{ method: 'POST', headers: jsonHeaders(token) }
+	);
+	if (!res.ok) {
+		throw await detailOf(res);
+	}
+	return res.json();
+};
+
 export type HermesModelProvider = {
 	slug: string;
 	name: string;

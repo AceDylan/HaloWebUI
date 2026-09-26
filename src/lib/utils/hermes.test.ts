@@ -200,6 +200,9 @@ describe('runner completion notices', () => {
 		expect(
 			describeHermesRunNotice(parseHermesRunNotice({ role: 'user', content: content.replace('success', 'question') })!)
 		).toBe('❓ reclaude 等你决定');
+		expect(
+			describeHermesRunNotice(parseHermesRunNotice({ role: 'user', content: content.replace('success', 'stopped') })!)
+		).toBe('⏹️ reclaude 已停止');
 	});
 
 	it('leaves the person\'s own messages alone', () => {
@@ -242,6 +245,8 @@ describe('接着上次: a follow-up goes back to the run whose report ends the c
 	it('finds the run from the report at the end of the chat', () => {
 		expect(findHermesContinuation(chat())).toEqual({ runner: 'reclaude', runId, status: 'success' });
 		expect(findHermesContinuation(chat({}, 'question'))?.status).toBe('question');
+		// A run stopped from the banner: the next message takes it up with new instructions.
+		expect(findHermesContinuation(chat({}, 'stopped'))?.status).toBe('stopped');
 		// The notice as the backend stores it, without the text the runner wrote.
 		const stored = chat();
 		stored.messages.notice.content = '通知';

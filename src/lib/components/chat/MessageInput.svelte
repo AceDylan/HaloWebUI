@@ -546,11 +546,22 @@
 	// setting is on; with the plain textarea it was downloaded and parsed on every
 	// page for nothing. It focuses itself when it mounts (autofocus).
 	let RichTextInput: typeof import('../common/RichTextInput.svelte').default | null = null;
-	$: if (($settings?.richTextInput ?? true) && !RichTextInput) {
-		void import('../common/RichTextInput.svelte').then((module) => {
-			RichTextInput = module.default;
-		});
-	}
+	// If its chunk cannot be fetched (offline, or a tab left open across a deploy
+	// asking for a file that is gone), this page uses the plain textarea instead
+	// of showing no input at all.
+	let richTextInputFailed = false;
+	const loadRichTextInput = () => {
+		void import('../common/RichTextInput.svelte')
+			.then((module) => {
+				RichTextInput = module.default;
+			})
+			.catch((error) => {
+				console.error('Rich text input failed to load; using the plain text box', error);
+				richTextInputFailed = true;
+			});
+	};
+	$: useRichTextInput = ($settings?.richTextInput ?? true) && !richTextInputFailed;
+	$: if (useRichTextInput && !RichTextInput) loadRichTextInput();
 
 	let filesInputElement;
 	let commandsElement;
@@ -1159,7 +1170,7 @@
 					{/if}
 
 
-					{#if !($settings?.richTextInput ?? true)}
+					{#if !useRichTextInput}
 						<Commands
 							bind:this={commandsElement}
 							bind:prompt
@@ -1355,7 +1366,7 @@
 								     embedded in the Bookmark Hub) and scrolls inside, so the toolbar and send
 								     button below it stay on screen however long the prompt gets. -->
 								<div class="px-2.5">
-									{#if $settings?.richTextInput ?? true}
+									{#if useRichTextInput}
 										<div
 											class="scrollbar-hidden text-left bg-transparent dark:text-gray-100 outline-hidden w-full pt-3 px-1 resize-none h-fit max-h-[min(20rem,40dvh)] overflow-auto"
 											id="chat-input-container"

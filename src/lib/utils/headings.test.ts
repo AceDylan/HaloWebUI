@@ -32,9 +32,12 @@ describe('extractHeadings', () => {
   ### Nested Heading
 `;
 
+		// Ids count every lexer token, the leading blank line (a `space` token)
+		// included, exactly like MarkdownTokens' `originalIdx`, so each outline item
+		// points at the element that is rendered.
 		expect(extractHeadings(createParser().lexer(markdown), 'message-2')).toEqual([
-			{ depth: 2, text: 'Quote Heading', id: 'heading-message-2-0-0' },
-			{ depth: 3, text: 'Nested Heading', id: 'heading-message-2-1-0-1' }
+			{ depth: 2, text: 'Quote Heading', id: 'heading-message-2-1-0' },
+			{ depth: 3, text: 'Nested Heading', id: 'heading-message-2-2-0-1' }
 		]);
 	});
 
@@ -48,9 +51,10 @@ describe('extractHeadings', () => {
 	it('extracts code blocks as outline items', () => {
 		const markdown = '```sql\nselect 1;\n```\n\n```dockerfile\nFROM alpine:3.18\n```';
 
+		// The blank line between the fences is its own `space` token (index 1).
 		expect(extractHeadings(createParser().lexer(markdown), 'message-4')).toEqual([
 			{ depth: 2, text: 'SQL', id: 'heading-message-4-0' },
-			{ depth: 2, text: 'Dockerfile', id: 'heading-message-4-1' }
+			{ depth: 2, text: 'Dockerfile', id: 'heading-message-4-2' }
 		]);
 	});
 

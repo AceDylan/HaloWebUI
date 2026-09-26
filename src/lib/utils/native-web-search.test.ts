@@ -233,6 +233,25 @@ describe('native web search mode options', () => {
 			)
 		).toBe('off');
 
+		// Native search is impossible for a provider without native web search.
+		expect(
+			resolveConfiguredDefaultWebSearchMode(
+				t,
+				{
+					features: {
+						enable_halo_web_search: true,
+						enable_native_web_search: true,
+						default_web_search_mode: 'native'
+					}
+				},
+				[{ id: 'llama3', owned_by: 'ollama' }],
+				true
+			)
+		).toBe('off');
+
+		// Since 1c39528 native search is tried first for OpenAI/Gemini/Anthropic
+		// models instead of being judged by the model name, so an unknown Anthropic
+		// model keeps the configured native default.
 		expect(
 			resolveConfiguredDefaultWebSearchMode(
 				t,
@@ -246,7 +265,7 @@ describe('native web search mode options', () => {
 				[{ id: 'local-model', owned_by: 'anthropic' }],
 				true
 			)
-		).toBe('off');
+		).toBe('native');
 	});
 
 	it('keeps new chats off when the user cannot use web search', () => {

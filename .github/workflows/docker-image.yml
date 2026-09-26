@@ -7,7 +7,70 @@ on:
     branches: [ "main" ]
 
 jobs:
+  # Gate: the image is only built and pushed when these pass.
+  frontend-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Unit tests
+        run: npx vitest run
+
+      - name: Component mount tests
+        run: npm run test:frontend:mount
+
+  backend-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/requirements/base.txt
+
+      - name: Install dependencies
+        run: pip install -r backend/requirements/base.txt pytest==8.3.5
+
+      # Chat storage, titles, archive and upload diagnostics: pure unit tests on
+      # an in-memory/temporary SQLite database, no network or model services.
+      - name: Targeted backend tests
+        working-directory: backend
+        env:
+          DATA_DIR: ${{ runner.temp }}/halowebui-data
+          DATABASE_URL: sqlite:///${{ runner.temp }}/halowebui-data/webui.db
+          WEBUI_SECRET_KEY: ci-only
+        run: |
+          mkdir -p "$DATA_DIR"
+          python -m pytest -p no:cacheprovider -q \
+            open_webui/test/unit/test_chat_composer_state.py \
+            open_webui/test/unit/test_chat_snapshot_storage.py \
+            open_webui/test/unit/test_chat_snapshot.py \
+            open_webui/test/unit/test_chat_title_update.py \
+            open_webui/test/unit/test_chat_title_refresh.py \
+            open_webui/test/unit/test_chat_auto_archive.py \
+            open_webui/test/unit/test_chat_search_archived.py \
+            open_webui/test/unit/test_archived_chat_paging.py \
+            open_webui/test/unit/test_chat_branch_files.py \
+            open_webui/test/unit/test_file_upload_diagnostics.py
+
   build:
+    needs: [frontend-test, backend-test]
     runs-on: ubuntu-latest
 
     steps:

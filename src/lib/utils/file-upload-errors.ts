@@ -197,7 +197,10 @@ export const getLocalizedFileUploadDiagnostic = (
 			getEmbeddingHintKey(diagnostic.code, options.isAdmin ?? false) ??
 			getEmbeddingServiceHintKey(diagnostic.code, options.isAdmin ?? false) ??
 			keys?.hint;
-		const hint = hintKey ? t(hintKey) : diagnostic.hint ?? '';
+		// A known code with `hint: null` has no hint on purpose (its message already
+		// says what to do); falling back to the server's English hint showed an
+		// untranslated line under the localized message.
+		const hint = hintKey ? t(hintKey) : keys && keys.hint === null ? '' : diagnostic.hint ?? '';
 
 		return {
 			code: diagnostic.code,

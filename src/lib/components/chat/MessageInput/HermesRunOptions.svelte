@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { getContext, onDestroy } from 'svelte';
+	import { getContext, onDestroy, tick } from 'svelte';
 
 	import { getHermesModelOptions, type HermesModelOptions } from '$lib/apis/hermes';
 	import {
@@ -10,20 +10,20 @@
 
 	const i18n: any = getContext('i18n');
 
-	// Per chat: how the next hermes run starts. "派发方式" puts /reclaude,
-	// /codex or /agy in front of the message (a forgotten or mistyped prefix
-	// used to mean stopping the run and sending again); the model overrides
-	// hermes' configured default for this chat only. The thinking level is
-	// HaloWebUI's: hermes' halowebui-reasoning-sync plugin applies the admin
-	// default, and the backend passes the chat's own along.
+	// How the next hermes run starts. "派发方式" puts /reclaude, /codex or /agy
+	// in front of the next message only (left on, every later "进度怎么样？"
+	// started another run); the model overrides hermes' configured default
+	// for this chat. The thinking level is HaloWebUI's: hermes'
+	// halowebui-reasoning-sync plugin applies the admin default, and the
+	// backend passes the chat's own along.
 	export let options: HermesRunOptions = { ...EMPTY_HERMES_RUN_OPTIONS };
 	export let disabled = false;
 
 	const DISPATCHES: { value: HermesRunOptions['dispatch']; label: string; hint: string }[] = [
 		{ value: '', label: '直接', hint: 'Hermes 自己做' },
-		{ value: 'reclaude', label: 'reclaude', hint: '/reclaude 独占执行' },
-		{ value: 'codex', label: 'codex', hint: '/codex 独占执行' },
-		{ value: 'agy', label: 'agy', hint: '/agy 独占执行' }
+		{ value: 'reclaude', label: 'reclaude', hint: '交给 Claude Code 在后台独占执行' },
+		{ value: 'codex', label: 'codex', hint: '交给 Codex 在后台独占执行' },
+		{ value: 'agy', label: 'agy', hint: '交给 AGY 在后台独占执行' }
 	];
 
 	let open = false;
@@ -104,7 +104,14 @@
 		if (open && event.key === 'Escape') {
 			event.stopPropagation();
 			open = false;
+			button?.focus();
 		}
+	};
+	// Keyboard users land in the panel, on the current choice.
+	const focusCurrentChoice = async () => {
+		await tick();
+		const selected = panel?.querySelector<HTMLElement>('[role="radio"][aria-checked="true"]');
+		selected?.focus();
 	};
 	$: if (typeof window !== 'undefined') {
 		if (open) {
@@ -113,6 +120,7 @@
 			window.addEventListener('keydown', onWindowKey, true);
 			window.addEventListener('resize', placePanel);
 			void loadModels();
+			void focusCurrentChoice();
 		} else {
 			window.removeEventListener('pointerdown', onWindowPointer, true);
 			window.removeEventListener('keydown', onWindowKey, true);
@@ -176,9 +184,9 @@
 					</button>
 				{/each}
 			</div>
-			<div class="mt-1 text-2xs text-gray-400 dark:text-gray-500">
+			<div class="mt-1 text-2xs text-gray-500 dark:text-gray-400" data-halo-hermes-dispatch-hint>
 				{current.dispatch
-					? `发送时自动加上 /${current.dispatch}；消息自己以 / 开头时以消息为准`
+					? `${DISPATCHES.find((item) => item.value === current.dispatch)?.hint ?? ''}。只对下一条消息生效，发送后回到「直接」；消息自己以 /命令 开头时以消息为准`
 					: '消息直接交给 Hermes'}
 			</div>
 
@@ -209,18 +217,21 @@
 					{/each}
 				</select>
 			</label>
+			<div class="mt-1 text-2xs text-gray-400 dark:text-gray-500">
+				只管 Hermes 自己这一轮；派发给 reclaude/codex/agy 时它们用自己的模型
+			</div>
 			{#if loadingModels}
 				<div class="mt-1 text-2xs text-gray-400">正在读取 Hermes 的模型列表…</div>
 			{:else if modelOptionsError}
 				<div class="mt-1 text-2xs text-amber-600 dark:text-amber-400">{modelOptionsError}</div>
 			{/if}
 
-			<div class="mt-3 flex items-center justify-between text-2xs text-gray-400 dark:text-gray-500">
-				<span>只对这个对话生效；思考强度跟随 HaloWebUI 设置</span>
+			<div class="mt-3 flex items-start justify-between gap-2 text-2xs text-gray-400 dark:text-gray-500">
+				<span class="min-w-0">模型对这个对话一直生效；思考强度跟随 HaloWebUI 设置</span>
 				{#if summary}
 					<button
 						type="button"
-						class="rounded px-1.5 py-0.5 text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-gray-800 dark:hover:text-gray-200"
+						class="shrink-0 whitespace-nowrap rounded px-1.5 py-0.5 text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-gray-800 dark:hover:text-gray-200"
 						on:click={() => {
 							options = { ...EMPTY_HERMES_RUN_OPTIONS };
 						}}

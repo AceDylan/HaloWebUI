@@ -8,6 +8,9 @@
 	import { settings } from '$lib/stores';
 	import { copyToClipboard } from '$lib/utils';
 
+	import { parseHermesRunNotice } from '$lib/utils/hermes';
+
+	import HermesRunNotice from './HermesRunNotice.svelte';
 	import MultiResponseMessages from './MultiResponseMessages.svelte';
 	import ResponseMessage from './ResponseMessage.svelte';
 	import UserMessage from './UserMessage.svelte';
@@ -43,6 +46,8 @@
 	export let readOnly = false;
 	export let forceExpandContent = false;
 	export let deferOffscreenRendering = false;
+
+	$: runNotice = parseHermesRunNotice(history.messages[messageId]);
 </script>
 
 <div
@@ -54,7 +59,13 @@
 		: ''}
 >
 	{#if history.messages[messageId]}
-		{#if history.messages[messageId].role === 'user'}
+		{#if runNotice}
+			<HermesRunNotice
+				notice={runNotice}
+				content={history.messages[messageId].content ?? ''}
+				report={history.messages[history.messages[messageId].childrenIds?.[0]]?.content ?? ''}
+			/>
+		{:else if history.messages[messageId].role === 'user'}
 			<UserMessage
 				{user}
 				{history}

@@ -57,12 +57,20 @@ describe('getToolCallOutcome', () => {
 });
 
 describe('formatToolDuration', () => {
-	it('formats milliseconds, seconds and minutes', () => {
-		expect(formatToolDuration(0.479)).toBe('479ms');
-		expect(formatToolDuration(3.26)).toBe('3.3s');
-		expect(formatToolDuration(46.227)).toBe('46s');
-		expect(formatToolDuration(125)).toBe('2m 5s');
+	it('says a call\'s time in the same words as a run\'s', () => {
+		expect(formatToolDuration(0.479)).toBe('0.5 秒');
+		expect(formatToolDuration(0.04)).toBe('不到 0.1 秒');
+		expect(formatToolDuration(3.26)).toBe('3.3 秒');
+		expect(formatToolDuration(46.227)).toBe('46 秒');
+		expect(formatToolDuration(125)).toBe('2 分 5 秒');
+		expect(formatToolDuration(3725)).toBe('1 小时 2 分');
 		expect(formatToolDuration(null)).toBe('');
+	});
+
+	it('shows a ticking clock in whole seconds', () => {
+		expect(formatToolDuration(0)).toBe('0 秒');
+		expect(formatToolDuration(7)).toBe('7 秒');
+		expect(formatToolDuration(754)).toBe('12 分 34 秒');
 	});
 });
 
@@ -103,8 +111,9 @@ describe('tool call state after the run', () => {
 				'web',
 				'x'
 			])
-		).toBe('skill_view ×3 · terminal ×2 · web ×2 · +2');
-		expect(summarizeToolNames(['terminal'])).toBe('terminal');
+		).toBe('技能 3 · 终端 2 · web 2 · +2');
+		expect(summarizeToolNames(['terminal'])).toBe('终端');
+		expect(summarizeToolNames(['browser_click', 'browser_navigate'])).toBe('浏览器 2');
 	});
 
 	it('gives the whole hermes input and recognises outcome-only results', () => {

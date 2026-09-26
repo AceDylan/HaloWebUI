@@ -291,7 +291,9 @@
 		? $i18n.t('Task paused for approval · answer the dialog to continue')
 		: steerable && isResponding
 			? $i18n.t('Task running · what you type is injected as guidance')
-			: placeholder
+			: showHermesOptions && hermesOptions?.dispatch
+				? `将交给 ${hermesOptions.dispatch} 执行…`
+				: placeholder
 				? placeholder
 				: $i18n.t('How can I help you today?');
 	$: hasReferenceImageForImageGeneration =

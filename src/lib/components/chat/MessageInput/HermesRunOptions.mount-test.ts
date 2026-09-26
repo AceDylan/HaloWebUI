@@ -93,6 +93,14 @@ describe('HermesRunOptions', () => {
 		expect(panel.textContent).toContain('思考强度跟随 HaloWebUI 设置');
 	});
 
+	it('says a dispatch covers the next message only, readable without hovering', async () => {
+		const panel: any = await mount({ dispatch: 'codex' });
+		const hint = panel.querySelector('[data-halo-hermes-dispatch-hint]');
+		expect(hint.textContent).toContain('交给 Codex 在后台独占执行');
+		expect(hint.textContent).toContain('只对下一条消息生效');
+		expect(panel.textContent).toContain('派发给 reclaude/codex/agy 时它们用自己的模型');
+	});
+
 	it('keeps showing a model picked earlier that the list no longer offers', async () => {
 		await mount({ model: '[free]claude-opus-5', provider: 'custom:relay' });
 		expect(optionTexts()).toEqual([

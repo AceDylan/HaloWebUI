@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { toast } from 'svelte-sonner';
-	import { onMount, tick, getContext } from 'svelte';
+	import { onMount, onDestroy, tick, getContext } from 'svelte';
 	import { openDB, deleteDB } from 'idb';
 	import fileSaver from 'file-saver';
 	const { saveAs } = fileSaver;
@@ -48,6 +48,7 @@
 	import { get } from 'svelte/store';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import { applyUserSettingsSnapshot } from '$lib/utils/user-settings';
+	import { startHermesActivityPolling, stopHermesActivityPolling } from '$lib/utils/hermes-activity';
 
 	const i18n = getContext('i18n');
 
@@ -305,6 +306,19 @@
 		}
 
 		loaded = true;
+		if ($user && ['user', 'admin'].includes($user?.role)) {
+			// hermes activity for the sidebar, the chat banner and the tab title;
+			// page-level so it does not stop when the sidebar list unmounts.
+			startHermesActivityPolling({
+				onSessionExpired: () => {
+					toast.warning($i18n.t('Your session has expired. Please log in again.'));
+				}
+			});
+		}
+	});
+
+	onDestroy(() => {
+		stopHermesActivityPolling();
 	});
 
 	const checkForVersionUpdates = async () => {

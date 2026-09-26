@@ -20,7 +20,7 @@
 		activeAudioId,
 		user
 	} from '$lib/stores';
-	import { isHermesAgentModelId } from '$lib/utils/hermes';
+	import { describeHermesReply, isHermesAgentModelId } from '$lib/utils/hermes';
 	import { synthesizeOpenAISpeech } from '$lib/apis/audio';
 	// [REACTION_FEATURE] Commented out - reaction feature disabled for now
 	// import {
@@ -212,6 +212,15 @@
 
 	let message: MessageType = history.messages?.[messageId] as MessageType;
 	$: message = history.messages?.[messageId] as MessageType;
+	// "codex · claude-chat": which runner and model a hermes reply came from.
+	// The run details come from the backend (hermes' actual model when it
+	// reports one), the choices from the message the reply answers.
+	$: hermesReplyLabel = isAgentReply
+		? describeHermesReply(
+				((message as any)?.hermesRun ?? (message as any)?.hermes_run ?? null) as any,
+				(history.messages?.[message?.parentId as string] as any)?.hermesOptions ?? null
+			)
+		: null;
 	const tr = (key: string, defaultValue: string, options: Record<string, any> = {}) =>
 		translateWithDefault($i18n, key, defaultValue, options);
 
@@ -1346,6 +1355,22 @@
 							{/if}
 						</span>
 					</Tooltip>
+					{#if hermesReplyLabel}
+						<Tooltip
+							content={hermesReplyLabel.title.split('\n').join('<br>')}
+							placement="top-start"
+							className="flex min-w-0 shrink"
+						>
+							<span
+								class="min-w-0 truncate self-center rounded-md px-1.5 py-0.5 text-2xs font-medium {hermesReplyLabel.fallback
+									? 'bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'
+									: 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300'}"
+								data-halo-hermes-reply-label
+							>
+								{hermesReplyLabel.label}
+							</span>
+						</Tooltip>
+					{/if}
 				{/if}
 
 				{#if !message.done && !message.error && !showInitialThinkingIndicator && message.timestamp}

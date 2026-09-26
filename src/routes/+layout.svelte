@@ -51,6 +51,7 @@
 	import { getAllTags } from '$lib/apis/chats';
 	import { initPWAInstallSupport } from '$lib/utils/pwa';
 	import { getFaviconWithDot, tabActivity } from '$lib/utils/tab-activity';
+	import { applyHermesChatEvent } from '$lib/utils/hermes-activity';
 	import { getNotificationPreview } from '$lib/utils/notification-preview';
 	import { postActivityToHub } from '$lib/utils/hub-embed';
 	import NotificationToast from '$lib/components/NotificationToast.svelte';
@@ -421,6 +422,9 @@
 		await tick();
 		const type = event?.data?.type ?? null;
 		const data = event?.data?.data ?? null;
+		// Runs ending and approvals update the sidebar / tab state now, not at
+		// the next poll.
+		applyHermesChatEvent(event);
 
 		// A hermes approval is answered by the dialog in the chat it belongs to.
 		// A tab not showing that chat answers "nothing here" at once, so the

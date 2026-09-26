@@ -20,6 +20,7 @@
 		getToolCallPreview,
 		getToolCallStartedAt,
 		getToolCallState,
+		getToolLabel,
 		isOutcomeOnlyResult,
 		summarizeToolNames
 	} from '$lib/utils/tool-call-preview';
@@ -217,8 +218,10 @@
 					class="line-clamp-1 text-2xs leading-4 text-gray-400 dark:text-gray-500"
 					data-halo-tool-running
 				>
-					<span class="font-medium text-gray-500 dark:text-gray-400"
-						>{runningToken.attributes?.name ?? ''}</span
+					<span
+						class="font-medium text-gray-500 dark:text-gray-400"
+						title={decode(runningToken.attributes?.name ?? '')}
+						>{getToolLabel(runningToken.attributes?.name)}</span
 					>{#if runningPreview}<span class="font-mono">{` · ${runningPreview}`}</span>{/if}{#if runningElapsed}<span
 							class="tabular-nums"
 							data-halo-tool-elapsed>{` · ${runningElapsed}`}</span
@@ -317,7 +320,10 @@
 						{:else}
 							<span class="size-1.5 shrink-0 rounded-full bg-green-500" />
 						{/if}
-						<span class="shrink-0 font-medium {!isDone ? 'shimmer' : ''}">{attrs?.name ?? 'Unknown'}</span>
+						<span
+							class="shrink-0 font-medium {!isDone ? 'shimmer' : ''}"
+							title={decode(attrs?.name ?? '')}>{getToolLabel(attrs?.name)}</span
+						>
 						{#if preview}
 							<span
 								class="min-w-0 flex-1 truncate font-mono text-2xs text-gray-500 dark:text-gray-400"

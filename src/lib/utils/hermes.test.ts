@@ -6,7 +6,13 @@ import {
 	isHermesAgentModel,
 	isHermesAgentModelId,
 	isHermesRunSteerable,
-	normalizeHermesRunOptions
+	normalizeHermesRunOptions,
+	describeHermesReply,
+	describeHermesRunNotice,
+	hermesOptionsForReply,
+	hermesOptionsToKeep,
+	parseHermesRunNotice,
+	reportDurationSeconds
 } from './hermes';
 
 describe('isHermesAgentModelId', () => {
@@ -118,5 +124,95 @@ describe('hermes run options', () => {
 		expect(
 			hermesRunOptionsForRequest({ ...EMPTY_HERMES_RUN_OPTIONS, dispatch: 'codex' })
 		).toEqual({ dispatch: 'codex' });
+	});
+});
+
+describe('per-message hermes options', () => {
+	it('keeps the model for the chat but never a dispatch', () => {
+		expect(hermesOptionsToKeep({ dispatch: 'reclaude', model: 'claude-chat', provider: 'p' })).toEqual({
+			dispatch: '',
+			model: 'claude-chat',
+			provider: 'p'
+		});
+	});
+
+	it('regenerates with what the message was sent with', () => {
+		const panel = { dispatch: 'codex', model: 'deepseek-chat', provider: 'd' } as const;
+		expect(hermesOptionsForReply({ dispatch: 'agy', model: '', provider: '' }, panel)).toEqual({
+			dispatch: 'agy',
+			model: '',
+			provider: ''
+		});
+		// Sent before options were recorded: the panel's model, no dispatch.
+		expect(hermesOptionsForReply(undefined, panel)).toEqual({
+			dispatch: '',
+			model: 'deepseek-chat',
+			provider: 'd'
+		});
+	});
+});
+
+describe('describeHermesReply', () => {
+	it('names the runner and the model hermes actually used', () => {
+		expect(describeHermesReply({ dispatch: 'codex', model: 'claude-chat' }, null)?.label).toBe(
+			'codex · claude-chat'
+		);
+		const fallback = describeHermesReply(
+			{ model: 'deepseek-chat', fallback_from: 'gemini-chat' },
+			{ model: 'gemini-chat' }
+		);
+		expect(fallback?.label).toBe('gemini-chat → deepseek-chat');
+		expect(fallback?.fallback).toBe(true);
+		expect(fallback?.title).toContain('gemini-chat 不可用，已改用 deepseek-chat');
+	});
+
+	it('falls back to what was asked for, and says nothing for a plain default reply', () => {
+		expect(describeHermesReply(null, { dispatch: '', model: 'claude-chat' })?.label).toBe(
+			'claude-chat'
+		);
+		expect(describeHermesReply({ active: false } as any, { dispatch: '', model: '' })).toBeNull();
+		const fast = describeHermesReply(
+			{ dispatch: 'reclaude', fast_dispatch: true, runner_run_id: 'r1', model: 'x' },
+			null
+		);
+		expect(fast?.label).toBe('reclaude');
+		expect(fast?.title).toContain('没有经过模型');
+	});
+});
+
+describe('runner completion notices', () => {
+	const content =
+		'[后台任务完成通知] reclaude 运行 20260926-214156-38f80bb8 已结束，状态：success，Claude 会话：f11131eb-4cc9-44a4-929b-c0c5b3cef3b6。';
+
+	it('recognises the notice the runner writes', () => {
+		const notice = parseHermesRunNotice({ role: 'user', content });
+		expect(notice).toEqual({
+			agent: 'reclaude',
+			runId: '20260926-214156-38f80bb8',
+			status: 'success',
+			sessionLabel: 'Claude 会话',
+			sessionId: 'f11131eb-4cc9-44a4-929b-c0c5b3cef3b6'
+		});
+		expect(describeHermesRunNotice(notice!)).toBe('✅ reclaude 已完成');
+		expect(
+			describeHermesRunNotice(parseHermesRunNotice({ role: 'user', content: content.replace('success', 'question') })!)
+		).toBe('❓ reclaude 等你决定');
+	});
+
+	it('leaves the person\'s own messages alone', () => {
+		expect(parseHermesRunNotice({ role: 'user', content: '后台任务完成通知是什么？' })).toBeNull();
+		expect(parseHermesRunNotice({ role: 'assistant', content })).toBeNull();
+		expect(
+			parseHermesRunNotice({ role: 'user', content: 'x', hermes_notice: { source: 'codex-runner' } })
+				?.agent
+		).toBe('codex-runner');
+	});
+
+	it('reads the duration from the report', () => {
+		expect(
+			reportDurationSeconds('✅ reclaude 运行 r · 已完成\nClaude 会话 s · 116 轮 · 27m47s\n\n正文')
+		).toBe(27 * 60 + 47);
+		expect(reportDurationSeconds('✅ codex 运行 r · 已完成\ncodex thread t · 1h2m\n')).toBe(3720);
+		expect(reportDurationSeconds('<div>card</div>')).toBeNull();
 	});
 });

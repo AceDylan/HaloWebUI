@@ -150,10 +150,12 @@
 	import { HermesSteerError, steerHermesRun } from '$lib/apis/hermes';
 	import {
 		EMPTY_HERMES_RUN_OPTIONS,
+		hermesOptionsForMessage,
+		hermesOptionsForReply,
+		hermesOptionsToKeep,
 		hermesRunOptionsForRequest,
 		isHermesAgentModelId,
 		isHermesRunSteerable,
-		normalizeHermesRunOptions,
 		type HermesApprovalRequest,
 		type HermesRunOptions
 	} from '$lib/utils/hermes';
@@ -1092,6 +1094,7 @@
 		prompt: string;
 		files: any[];
 		referenceFiles?: any[];
+		hermesOptions?: HermesRunOptions | null;
 	}[] = [];
 	$: currentChatQueue = messageQueue.filter((item) => item.chatId === ($chatId || ''));
 
@@ -1106,7 +1109,10 @@
 		messageQueue = messageQueue.filter((item) => item.id !== next.id);
 		files = next.files;
 		await tick();
-		await submitPrompt(next.prompt, { referenceFiles: next.referenceFiles ?? [] });
+		await submitPrompt(next.prompt, {
+			referenceFiles: next.referenceFiles ?? [],
+			hermesOptions: next.hermesOptions
+		});
 	};
 	let branchingMessageId: string | null = null;
 
@@ -1139,13 +1145,25 @@
 	};
 
 	let reasoningEffort: string | null = null;
-	// The composer's "Hermes 选项" for this chat (派发方式 / 模型 / 思考强度),
-	// kept in the chat's composer state.
+	// The composer's "Hermes 选项": the model is kept for the chat (in its
+	// composer state); 派发方式 applies to the next message only.
 	let hermesOptions: HermesRunOptions = { ...EMPTY_HERMES_RUN_OPTIONS };
 	$: showHermesOptions = isHermesAgentModelId(
 		selectedModels?.[0],
 		$config?.hermes_agent_model_ids
 	);
+
+	// What a message about to be sent carries (null when no hermes model is
+	// selected). A dispatch covers this one message: "进度怎么样？" in a chat
+	// left on reclaude started another reclaude run with that as its task.
+	const takeHermesOptionsForMessage = (): HermesRunOptions | null => {
+		if (!showHermesOptions) return null;
+		const sent = hermesOptionsForMessage(hermesOptions);
+		if (hermesOptions.dispatch) {
+			hermesOptions = hermesOptionsToKeep(hermesOptions);
+		}
+		return sent;
+	};
 		let maxThinkingTokens: number | null = null;
 		let lastFreshChatRequest = '';
 
@@ -1821,7 +1839,7 @@
 		code_interpreter_enabled: codeInterpreterEnabled,
 		reasoning_effort: reasoningEffort,
 		max_thinking_tokens: maxThinkingTokens,
-		hermes_options: hermesRunOptionsForRequest(hermesOptions)
+		hermes_options: hermesRunOptionsForRequest(hermesOptionsToKeep(hermesOptions))
 	});
 
 	const buildLocalChatSessionState = () => ({
@@ -1962,8 +1980,9 @@
 				state.max_thinking_tokens ?? state.maxThinkingTokens ?? null
 			);
 		}
-		// Every chat starts from hermes' defaults unless it saved its own choice.
-		hermesOptions = normalizeHermesRunOptions(state.hermes_options ?? null);
+		// Every chat starts from hermes' defaults unless it saved its own model.
+		// A dispatch saved by an older version is not restored: it is per message.
+		hermesOptions = hermesOptionsToKeep(state.hermes_options ?? null);
 
 		hasPersistedComposerState = options.markPersisted === true;
 		return true;
@@ -2912,6 +2931,14 @@
 			}
 			let message = history.messages[event.message_id];
 			if (!message) {
+				// A reply this page has not loaded yet (a turn the server started,
+				// e.g. after a runner's notification). An approval for it answered
+				// "not here" at once, so the backend asks again in two seconds -
+				// after the reload below has brought the message and its dialog -
+				// instead of holding the whole approval window and then denying.
+				if (event?.data?.type === 'hermes:approval' && typeof cb === 'function') {
+					cb(null);
+				}
 				liveChatSync.request();
 				return;
 			}
@@ -5139,7 +5166,19 @@
 	// Chat functions
 	//////////////////////////
 
-	const submitPrompt = async (userPrompt, { _raw = false, referenceFiles: referenceFilesOverride = null } = {}) => {
+	const submitPrompt = async (
+		userPrompt,
+		{
+			_raw = false,
+			referenceFiles: referenceFilesOverride = null,
+			hermesOptions: hermesOptionsOverride = undefined
+		}: {
+			_raw?: boolean;
+			referenceFiles?: any[] | null;
+			// Taken when the message was queued.
+			hermesOptions?: HermesRunOptions | null;
+		} = {}
+	) => {
 		const messages = createMessagesList(history, history.currentId);
 		const blockingSelection = findBlockingSelectedModelResolution();
 		const _selectedModels = selectedModels.map((modelId, index) => {
@@ -5272,7 +5311,8 @@
 						chatId: $chatId || '',
 						prompt: userPrompt,
 						files: queuedFiles,
-						referenceFiles
+						referenceFiles,
+						hermesOptions: takeHermesOptionsForMessage()
 					}
 				];
 				prompt = '';
@@ -5312,6 +5352,8 @@
 		prompt = '';
 
 		// Create user message
+		const sentHermesOptions =
+			hermesOptionsOverride !== undefined ? hermesOptionsOverride : takeHermesOptionsForMessage();
 		let userMessageId = uuidv4();
 		let userMessage = {
 			id: userMessageId,
@@ -5321,7 +5363,8 @@
 			content: userPrompt,
 			files: _files.length > 0 ? _files : undefined,
 			timestamp: Math.floor(Date.now() / 1000), // Unix epoch
-			models: selectedModels
+			models: selectedModels,
+			...(sentHermesOptions ? { hermesOptions: sentHermesOptions } : {})
 		};
 
 		// Add message to history and Set currentId to messageId
@@ -5384,6 +5427,10 @@
 			history = history;
 			prompt = userPrompt;
 			files = [...sentFiles, ...files];
+			// The dispatch went with the message; it comes back with the prompt.
+			if (userMessage.hermesOptions?.dispatch) {
+				hermesOptions = { ...hermesOptions, dispatch: userMessage.hermesOptions.dispatch };
+			}
 			toast.error($i18n.t('Message not sent: {{error}}', { error: detail }));
 			return;
 		}
@@ -5721,6 +5768,12 @@
 		ownedResponseMessageIds.add(responseMessageId);
 		const responseMessage = _history.messages[responseMessageId];
 		const files = structuredClone(chatFiles);
+		// The hermes choices of the message this reply answers (regenerating
+		// an older reply keeps its dispatch and model).
+		const replyHermesOptions = hermesOptionsForReply(
+			_history.messages[responseMessage?.parentId]?.hermesOptions,
+			hermesOptions
+		);
 
 		resetAutoScrollLock();
 		scrollToBottom();
@@ -5889,8 +5942,8 @@
 				messages: messages,
 				...(options.discussion ? { discussion: options.discussion } : {}),
 				...(isHermesAgentModelId(getModelRequestId(model), $config?.hermes_agent_model_ids) &&
-				hermesRunOptionsForRequest(hermesOptions)
-					? { hermes_options: hermesRunOptionsForRequest(hermesOptions) }
+				hermesRunOptionsForRequest(replyHermesOptions)
+					? { hermes_options: hermesRunOptionsForRequest(replyHermesOptions) }
 					: {}),
 				params: {
 					...$settings?.params,
@@ -6422,13 +6475,15 @@
 		let userPrompt = prompt;
 		let userMessageId = uuidv4();
 
+		const sentHermesOptions = takeHermesOptionsForMessage();
 		let userMessage = {
 			id: userMessageId,
 			parentId: parentId,
 			childrenIds: [],
 			role: 'user',
 			content: userPrompt,
-			models: selectedModels
+			models: selectedModels,
+			...(sentHermesOptions ? { hermesOptions: sentHermesOptions } : {})
 		};
 
 		if (parentId !== null) {

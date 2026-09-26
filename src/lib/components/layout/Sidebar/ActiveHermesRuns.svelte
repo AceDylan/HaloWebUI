@@ -1,6 +1,5 @@
 <script lang="ts">
 	import { onMount, onDestroy, getContext } from 'svelte';
-	import { toast } from 'svelte-sonner';
 	import {
 		chatId,
 		hermesActiveRuns,
@@ -10,13 +9,7 @@
 		showSidebar
 	} from '$lib/stores';
 	import { describeBackgroundRun } from '$lib/utils/run-activity';
-	import {
-		getHermesActivity,
-		markHermesChatRead,
-		HermesSessionExpiredError,
-		type HermesActiveRun,
-		type HermesBackgroundRun
-	} from '$lib/apis/hermes';
+	import { formatToolDuration } from '$lib/utils/tool-call-preview';
 	import Folder from '../../common/Folder.svelte';
 	import Tooltip from '../../common/Tooltip.svelte';
 	import Bolt from '../../icons/Bolt.svelte';
@@ -30,104 +23,33 @@
 
 	// hermes turns run for minutes. This is the one place that answers "what is
 	// still executing, and for how long" without remembering which chat it was.
-	// The same poll carries the chats whose run finished unopened (unread).
-	// Colours match the chat list: blue = running, green = finished and not
-	// opened yet, amber = waiting for your approval.
-	const POLL_MS = 10000;
+	// The data comes from the page-level poll (utils/hermes-activity.ts), which
+	// keeps going while this list is not shown. Colours match the chat list:
+	// blue = running, green = finished and not opened yet, amber = waiting for
+	// your approval.
+	let now = Date.now() / 1000;
+	let clockTimer: ReturnType<typeof setInterval> | null = null;
 
-	let runs: HermesActiveRun[] = [];
+	$: runs = $hermesActiveRuns;
 	// reclaude / codex / agy runs a chat launched, as their reporters last
 	// described them (the launching hermes turn is over by then).
-	let background: HermesBackgroundRun[] = [];
-	let unreadCount = 0;
-	let now = Date.now() / 1000;
-	let pollTimer: ReturnType<typeof setInterval> | null = null;
-	let clockTimer: ReturnType<typeof setInterval> | null = null;
-	// Set once the token stops being accepted: polling stops (a tab left open
-	// overnight otherwise sends a failing request every 10s) and the indicators
-	// are cleared instead of showing a stale "running". Showing the tab again
-	// retries once, which picks up a sign-in made in another tab.
-	let sessionExpired = false;
-	let destroyed = false;
-
-	const startPolling = () => {
-		if (!pollTimer && !destroyed) pollTimer = setInterval(refresh, POLL_MS);
-	};
-
-	const stopPolling = () => {
-		if (pollTimer) clearInterval(pollTimer);
-		pollTimer = null;
-	};
-
-	const onSessionExpired = () => {
-		if (sessionExpired) return;
-		sessionExpired = true;
-		stopPolling();
-		runs = [];
-		background = [];
-		hermesActiveRuns.set([]);
-		hermesBackgroundRuns.set([]);
-		hermesUnreadChatIds.set(new Set());
-		toast.warning($i18n.t('Your session has expired. Please log in again.'));
-	};
-
-	const refresh = async () => {
-		if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
-			return;
-		}
-		let activity;
-		try {
-			activity = await getHermesActivity(localStorage.token);
-		} catch (error) {
-			if (error instanceof HermesSessionExpiredError) onSessionExpired();
-			return;
-		}
-		if (sessionExpired) {
-			sessionExpired = false;
-			startPolling();
-		}
-		runs = activity.runs;
-		hermesActiveRuns.set(activity.runs);
-		background = activity.background;
-		hermesBackgroundRuns.set(activity.background);
-		const unread = new Set(activity.unread);
-		// The chat on screen is read by definition; clear it server-side too.
-		if ($chatId && unread.has($chatId)) {
-			unread.delete($chatId);
-			markHermesChatRead(localStorage.token, $chatId).catch(() => {});
-		}
-		hermesUnreadChatIds.set(unread);
-	};
-
+	$: background = $hermesBackgroundRuns;
 	$: unreadCount = $hermesUnreadChatIds.size;
 	$: approvalCount = runs.filter((run) => run.awaiting_approval).length;
 	$: runningCount = runs.length + background.length;
 
-	const elapsed = (startedAt: number) => {
-		const seconds = Math.max(0, Math.floor(now - startedAt));
-		const minutes = Math.floor(seconds / 60);
-		if (minutes >= 60) {
-			return `${Math.floor(minutes / 60)}h${String(minutes % 60).padStart(2, '0')}m`;
-		}
-		return `${minutes}:${String(seconds % 60).padStart(2, '0')}`;
-	};
+	// Same words as every other duration: "45 秒", "12 分 3 秒".
+	const elapsed = (startedAt: number) =>
+		formatToolDuration(Math.max(0, Math.floor(now - startedAt)));
 
 	onMount(() => {
-		refresh();
-		startPolling();
 		clockTimer = setInterval(() => {
 			now = Date.now() / 1000;
 		}, 1000);
-		document.addEventListener('visibilitychange', refresh);
 	});
 
 	onDestroy(() => {
-		destroyed = true;
-		stopPolling();
 		if (clockTimer) clearInterval(clockTimer);
-		if (typeof document !== 'undefined') {
-			document.removeEventListener('visibilitychange', refresh);
-		}
 	});
 </script>
 

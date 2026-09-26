@@ -163,3 +163,169 @@ export const hermesRunOptionsForRequest = (
 	) as Partial<HermesRunOptions>;
 	return Object.keys(picked).length > 0 ? picked : null;
 };
+
+/**
+ * The choices a message was sent with, kept on the user message: 派发方式 is
+ * for that one message (the panel falls back to "直接" once it is sent), the
+ * model stays for the chat. Regenerating a reply reuses what its message was
+ * sent with, not whatever the panel shows now.
+ */
+export const hermesOptionsForMessage = (options: HermesRunOptions | null | undefined) =>
+	normalizeHermesRunOptions(options);
+
+/** What the chat remembers between messages: the model, never a dispatch. */
+export const hermesOptionsToKeep = (value: unknown): HermesRunOptions => ({
+	...normalizeHermesRunOptions(value),
+	dispatch: ''
+});
+
+/**
+ * The options a reply is (re)generated with: those recorded on its user
+ * message; for a message sent before they were recorded, the panel's model
+ * without a dispatch (a typed "/reclaude …" is in the text itself).
+ */
+export const hermesOptionsForReply = (
+	recorded: unknown,
+	panel: HermesRunOptions | null | undefined
+): HermesRunOptions =>
+	recorded && typeof recorded === 'object'
+		? normalizeHermesRunOptions(recorded)
+		: hermesOptionsToKeep(panel);
+
+/** The run details the backend records on a hermes reply (`hermes_run`). */
+export type HermesRunDetails = {
+	dispatch?: string;
+	requested_model?: string;
+	model?: string;
+	provider?: string;
+	fallback_from?: string;
+	runner_run_id?: string;
+	fast_dispatch?: boolean;
+};
+
+const DISPATCH_LABELS: Record<string, string> = {
+	reclaude: 'reclaude',
+	codex: 'codex',
+	agy: 'agy'
+};
+
+/**
+ * "codex · claude-chat", "gemini-chat → deepseek-chat": who answered a hermes
+ * reply, for its header. `run` is what the backend recorded (hermes' actual
+ * model when it reports one), `sent` what the user message was sent with.
+ * Null when there is nothing to say.
+ */
+export const describeHermesReply = (
+	run: HermesRunDetails | null | undefined,
+	sent: Partial<HermesRunOptions> | null | undefined
+): { label: string; title: string; fallback: boolean } | null => {
+	const dispatch = String(run?.dispatch || sent?.dispatch || '').trim();
+	const requested = String(run?.requested_model || sent?.model || '').trim();
+	const used = String(run?.model || '').trim();
+	const fallbackFrom = String(run?.fallback_from || '').trim();
+	const parts: string[] = [];
+	const lines: string[] = [];
+	if (dispatch) {
+		parts.push(DISPATCH_LABELS[dispatch] ?? dispatch);
+		lines.push(
+			run?.fast_dispatch
+				? `交给 ${dispatch} 执行（直接启动，没有经过模型）`
+				: `交给 ${dispatch} 执行`
+		);
+		if (run?.runner_run_id) lines.push(`run ${run.runner_run_id}`);
+	}
+	if (run?.fast_dispatch) {
+		// No hermes model took part: the runner's own model does the work.
+	} else if (fallbackFrom && used) {
+		parts.push(`${fallbackFrom} → ${used}`);
+		lines.push(`${fallbackFrom} 不可用，已改用 ${used}`);
+	} else if (used || requested) {
+		parts.push(used || requested);
+		lines.push(
+			used
+				? `Hermes 使用的模型：${used}${run?.provider ? `（${run.provider}）` : ''}`
+				: `选择的模型：${requested}`
+		);
+	}
+	if (parts.length === 0) return null;
+	if (dispatch && !run?.fast_dispatch) {
+		lines.push('模型只管 Hermes 这一轮，不影响 runner 自己用什么模型');
+	}
+	return { label: parts.join(' · '), title: lines.join('\n'), fallback: Boolean(fallbackFrom) };
+};
+
+/**
+ * A background runner's completion notice ("[后台任务完成通知] reclaude 运行
+ * <id> 已结束，状态：success，Claude 会话：<id>。"), which hermes needs in the
+ * transcript but the person did not write. Null for anything else.
+ */
+export type HermesRunNotice = {
+	agent: string;
+	runId: string;
+	status: string;
+	sessionLabel: string;
+	sessionId: string;
+};
+
+const RUN_NOTICE_RE =
+	/^\s*\[后台任务完成通知\]\s*(\S+)\s+运行\s+(\S+)\s+已结束，状态：([^，。\s]+)(?:，([^：\n]+)：([^。\n]+))?/;
+
+export const parseHermesRunNotice = (message: {
+	role?: string;
+	content?: unknown;
+	hermes_notice?: unknown;
+} | null | undefined): HermesRunNotice | null => {
+	if (!message || message.role !== 'user') return null;
+	const content = typeof message.content === 'string' ? message.content : '';
+	const match = content.match(RUN_NOTICE_RE);
+	if (match) {
+		return {
+			agent: match[1],
+			runId: match[2],
+			status: match[3],
+			sessionLabel: (match[4] ?? '').trim(),
+			sessionId: (match[5] ?? '').trim()
+		};
+	}
+	if (message.hermes_notice && typeof message.hermes_notice === 'object') {
+		const notice = message.hermes_notice as Record<string, unknown>;
+		return {
+			agent: String(notice.source ?? 'runner'),
+			runId: String(notice.run_id ?? ''),
+			status: '',
+			sessionLabel: '',
+			sessionId: ''
+		};
+	}
+	return null;
+};
+
+const NOTICE_STATUS: Record<string, { icon: string; label: string }> = {
+	success: { icon: '✅', label: '已完成' },
+	question: { icon: '❓', label: '等你决定' },
+	max_turns: { icon: '⏸', label: '达到轮数上限' },
+	quota_blocked: { icon: '⛔', label: '没有启动' },
+	timeout: { icon: '⏱', label: '超时' }
+};
+
+/** "✅ reclaude 已完成" for the notice line. */
+export const describeHermesRunNotice = (notice: HermesRunNotice): string => {
+	const status = NOTICE_STATUS[notice.status] ?? {
+		icon: notice.status ? '❌' : '📋',
+		label: notice.status ? `没有正常完成（${notice.status}）` : '已结束'
+	};
+	return `${status.icon} ${notice.agent} ${status.label}`;
+};
+
+/**
+ * The run's duration in seconds from the report under the notice, whose
+ * second line reads "Claude 会话 … · 12 轮 · 27m47s"; null when absent.
+ */
+export const reportDurationSeconds = (report: unknown): number | null => {
+	const details = (typeof report === 'string' ? report : '').split('\n', 3)[1] ?? '';
+	const match = details.match(/(?:^|·\s*)((?:\d+h)?(?:\d+m)?(?:\d+s)?)\s*$/);
+	if (!match || !match[1]) return null;
+	const part = (unit: string) => Number(match[1].match(new RegExp(`(\\d+)${unit}`))?.[1] ?? 0);
+	const seconds = part('h') * 3600 + part('m') * 60 + part('s');
+	return seconds > 0 ? seconds : null;
+};

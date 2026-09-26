@@ -2,7 +2,18 @@ import { decode } from 'html-entities';
 
 import { getDataUrlDownloadName } from './download-links';
 import { resolveSafeMarkdownUrl } from './html-safety';
-import { getToolCallInput, isOutcomeOnlyResult, summarizeToolNames } from './tool-call-preview';
+import {
+	formatToolDuration,
+	getToolCallInput,
+	getToolLabel,
+	isOutcomeOnlyResult,
+	summarizeToolNames
+} from './tool-call-preview';
+
+// The wrench the tool group in the chat uses (WrenchSolid), so a formatted
+// reply shows tools the same way instead of a "工" glyph.
+const TOOL_ICON_SVG =
+	'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="13" height="13" aria-hidden="true"><path fill-rule="evenodd" clip-rule="evenodd" d="M12 6.75a5.25 5.25 0 0 1 6.775-5.025.75.75 0 0 1 .313 1.248l-3.32 3.319c.063.475.276.934.641 1.299.365.365.824.578 1.3.64l3.318-3.319a.75.75 0 0 1 1.248.313 5.25 5.25 0 0 1-5.472 6.756c-1.018-.086-1.87.1-2.309.634L7.344 21.3A3.298 3.298 0 1 1 2.7 16.657l8.684-7.151c.533-.44.72-1.291.634-2.309A5.342 5.342 0 0 1 12 6.75ZM4.117 19.125a.75.75 0 0 1 .75-.75h.008a.75.75 0 0 1 .75.75v.008a.75.75 0 0 1-.75.75h-.008a.75.75 0 0 1-.75-.75v-.008Z"/></svg>';
 
 type CssValue = string | number | null | undefined;
 type ActivityBlock = {
@@ -598,8 +609,9 @@ const getActivityMeta = (block: ActivityBlock) => {
 	// reported back and was cut short.
 	const state = getToolCallOutcomeState(block);
 	return {
-		icon: '工',
-		title: toolName ? `工具调用：${toolName}` : block.summary || '工具调用',
+		icon: '',
+		iconHtml: TOOL_ICON_SVG,
+		title: toolName ? getToolLabel(toolName) : block.summary || '工具',
 		status: TOOL_STATE_LABELS[state],
 		tone: TOOL_STATE_TONES[state]
 	};
@@ -756,7 +768,11 @@ const renderActivityBlock = (block: ActivityBlock) => {
 			border: `1px solid ${THEME.borderSubtle}`,
 			'font-size': '12px'
 		})
-	)}">${escapeHtml(meta.icon)}</span><span style="${escapeAttribute(toStyle({ flex: 1 }))}">${escapeHtml(meta.title)}</span><span style="${escapeAttribute(
+	)}">${'iconHtml' in meta && meta.iconHtml ? meta.iconHtml : escapeHtml(meta.icon)}</span><span style="${escapeAttribute(toStyle({ flex: 1 }))}"${
+		block.detailType === 'tool_calls' && block.attributes.name
+			? ` title="${escapeAttribute(block.attributes.name)}"`
+			: ''
+	}>${escapeHtml(meta.title)}</span><span style="${escapeAttribute(
 		toStyle({ color: meta.tone, 'font-size': '12px', 'font-weight': 700 })
 	)}">${escapeHtml(meta.status)}</span></summary><div style="${escapeAttribute(
 		toStyle({
@@ -796,7 +812,7 @@ const groupToolCallBlocks = (blocks: ParsedBlock[]): ParsedBlock[] => {
 };
 
 const getToolCallLabel = (block: ActivityBlock, index: number) =>
-	block.attributes.name || block.summary || `工具调用 ${index + 1}`;
+	block.attributes.name ? getToolLabel(block.attributes.name) : block.summary || `第 ${index + 1} 步`;
 
 // "terminal · npm test" instead of "terminal": the call's input as one line.
 const getToolCallPreviewText = (block: ActivityBlock, max = 72) => {
@@ -827,12 +843,8 @@ const getToolCallDurationText = (block: ActivityBlock) => {
 	const result = parseJsonLike(block.attributes.result ?? '');
 	if (!result || typeof result !== 'object' || Array.isArray(result)) return '';
 	const seconds = Number((result as Record<string, unknown>).duration);
-	if (!Number.isFinite(seconds) || seconds < 0) return '';
-	if (seconds < 1) return `${Math.round(seconds * 1000)}ms`;
-	if (seconds < 60) return `${seconds < 10 ? seconds.toFixed(1) : Math.round(seconds)}s`;
-	const minutes = Math.floor(seconds / 60);
-	const rest = Math.round(seconds % 60);
-	return rest > 0 ? `${minutes}m ${rest}s` : `${minutes}m`;
+	if (!Number.isFinite(seconds) || seconds <= 0) return '';
+	return formatToolDuration(seconds);
 };
 
 const renderActivityGroupBlock = (block: Extract<ParsedBlock, { type: 'activity-group' }>) => {
@@ -840,9 +852,11 @@ const renderActivityGroupBlock = (block: Extract<ParsedBlock, { type: 'activity-
 	const states = block.items.map((item) => getToolCallOutcomeState(item));
 	const failedCount = states.filter((state) => state === 'error').length;
 	const interruptedCount = states.filter((state) => state === 'interrupted').length;
-	// "skill_view ×20 · terminal ×6", not every name in a row.
+	// "技能 20 · 终端 6", not every name in a row (same words as the run summary).
 	const names = truncatePlainText(
-		summarizeToolNames(block.items.map((item, index) => getToolCallLabel(item, index))),
+		summarizeToolNames(
+			block.items.map((item, index) => item.attributes.name || getToolCallLabel(item, index))
+		),
 		56
 	);
 	const groupStatus =
@@ -969,7 +983,7 @@ const renderActivityGroupBlock = (block: Extract<ParsedBlock, { type: 'activity-
 			'font-size': '12px',
 			'flex-shrink': 0
 		})
-	)}">工</span><span style="${escapeAttribute(
+	)}">${TOOL_ICON_SVG}</span><span style="${escapeAttribute(
 		toStyle({
 			flex: 1,
 			'min-width': 0,
@@ -977,7 +991,7 @@ const renderActivityGroupBlock = (block: Extract<ParsedBlock, { type: 'activity-
 			'text-overflow': 'ellipsis',
 			'white-space': 'nowrap'
 		})
-	)}">工具调用 ×${total}${
+	)}">${total} 步${
 		names
 			? `<span style="${escapeAttribute(
 					toStyle({

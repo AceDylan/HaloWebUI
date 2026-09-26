@@ -135,7 +135,10 @@ This reasoning should be visible when expanded.
 `);
 
 		expect(html).toContain('data-halo-activity-type="tool_calls"');
-		expect(html).toContain('工具调用：search_web');
+		// The tool in the words the chat's tool group and run summary use.
+		expect(html).toContain('>搜索</span>');
+		expect(html).toContain('title="search_web"');
+		expect(html).not.toContain('>工</span>');
 		expect(html).toContain('CNBC report');
 		expect(html).not.toContain('&lt;details');
 		expect(html).not.toContain('arguments=');
@@ -152,10 +155,10 @@ This reasoning should be visible when expanded.
 `);
 
 		expect(html).toContain('data-halo-block="activity-group"');
-		expect(html).toContain('工具调用 ×3');
-		expect(html).toContain('search_web');
-		expect(html).toContain('fetch_url');
-		expect(html).toContain('read_file');
+		expect(html).toContain('3 步');
+		expect(html).toContain('搜索');
+		expect(html).toContain('读网页');
+		expect(html).toContain('读文件');
 		// 不再是每个调用一张独立卡片
 		expect(html.match(/data-halo-block="activity"/g)).toBeNull();
 		expect(html).toContain('最终答案。');
@@ -173,13 +176,13 @@ This reasoning should be visible when expanded.
 答复。
 `);
 
-		expect(html).toContain('skill_view ×2 · terminal ×2');
+		expect(html).toContain('技能 2 · 终端 2');
 		expect(html).toContain('1 个失败');
 		expect(html).toContain('已中断');
 		expect(html).not.toContain('执行中');
 		// hermes calls show the command as code with the outcome in words.
 		expect(html).toContain('<code>npm test</code>');
-		expect(html).toContain('失败 · 400ms');
+		expect(html).toContain('失败 · 0.4 秒');
 		expect(html).not.toContain('&quot;input&quot;');
 	});
 
@@ -187,7 +190,7 @@ This reasoning should be visible when expanded.
 		const html = renderResponseHtmlFormat(`
 <details type="tool_calls" done="true" name="terminal" arguments="{&quot;input&quot;: &quot;false&quot;}" result="{&quot;status&quot;: &quot;error&quot;, &quot;duration&quot;: 0.1}"><summary>Tool Executed</summary></details>
 `);
-		expect(html).toContain('工具调用：terminal');
+		expect(html).toContain('>终端</span>');
 		expect(html).toContain('>失败<');
 		expect(html).not.toContain('>已完成<');
 	});
@@ -199,7 +202,7 @@ This reasoning should be visible when expanded.
 
 		expect(html).toContain('data-halo-block="activity"');
 		expect(html).not.toContain('data-halo-block="activity-group"');
-		expect(html).toContain('工具调用：search_web');
+		expect(html).toContain('>搜索</span>');
 	});
 
 	it('renders code interpreter details as activity blocks', () => {

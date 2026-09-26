@@ -1,6 +1,4 @@
-import { decode } from 'html-entities';
-
-import { getToolCallState } from './tool-call-preview';
+import { formatRunDuration, getToolCallState, getToolLabel } from './tool-call-preview';
 
 /**
  * What a finished agent reply did, in one line: "20 步 · 终端 8 · 读文件 5 ·
@@ -26,51 +24,7 @@ export const extractToolCallTokens = (content: string): RunToolToken[] => {
 	return tokens;
 };
 
-/** hermes tool names in the words the summary uses; unknown names stay as they are. */
-export const TOOL_LABELS_ZH: Record<string, string> = {
-	terminal: '终端',
-	process: '进程',
-	read_file: '读文件',
-	write_file: '写文件',
-	patch: '改文件',
-	search_files: '搜文件',
-	web_search: '搜索',
-	search_web: '搜索',
-	web_extract: '读网页',
-	fetch_url: '读网页',
-	skill_view: '技能',
-	skills_list: '技能',
-	execute_code: '运行代码',
-	delegate_task: '子任务',
-	todo: '待办',
-	memory: '记忆',
-	session_search: '查会话',
-	send_message: '发消息',
-	clarify: '询问',
-	image_generate: '生图',
-	vision_analyze: '看图',
-	cronjob: '定时任务'
-};
-
-const toolLabel = (name: string) => {
-	const key = (name ?? '').trim();
-	if (!key) return '工具';
-	if (key.startsWith('browser_')) return '浏览器';
-	return TOOL_LABELS_ZH[key] ?? decode(key);
-};
-
-export const formatRunDuration = (seconds: number | null | undefined): string => {
-	if (seconds === null || seconds === undefined || !Number.isFinite(seconds) || seconds < 1) {
-		return '';
-	}
-	const total = Math.round(seconds);
-	const hours = Math.floor(total / 3600);
-	const minutes = Math.floor((total % 3600) / 60);
-	const rest = total % 60;
-	if (hours > 0) return `${hours} 小时 ${minutes} 分`;
-	if (minutes > 0) return rest > 0 ? `${minutes} 分 ${rest} 秒` : `${minutes} 分`;
-	return `${rest} 秒`;
-};
+export { TOOL_LABELS_ZH, formatRunDuration } from './tool-call-preview';
 
 export const summarizeRunActivity = (
 	tokens: RunToolToken[],
@@ -82,7 +36,7 @@ export const summarizeRunActivity = (
 	let failed = 0;
 	let interrupted = 0;
 	for (const token of tokens) {
-		const label = toolLabel(token.attributes?.name ?? '');
+		const label = getToolLabel(token.attributes?.name ?? '');
 		counts.set(label, (counts.get(label) ?? 0) + 1);
 		const state = getToolCallState(token.attributes, true);
 		if (state === 'error') failed += 1;

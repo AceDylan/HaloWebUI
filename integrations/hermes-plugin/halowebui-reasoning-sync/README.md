@@ -28,6 +28,13 @@ ignores the field, and middleware results replace each other (the plugin loaded
 last wins), so returning a request there could undo the rewrite
 `halowebui-run-guard` makes to the same request.
 
+## Logs
+
+One line when a request's effort is actually changed (`reasoning effort high ->
+medium (chat_completions, model gpt-chat)`, INFO; an unchanged one is DEBUG), and
+a WARNING at most every 10 minutes while HaloWebUI cannot be read (the request then
+keeps its own effort). `grep halowebui-reasoning-sync ~/.hermes/logs/agent.log`.
+
 ## Install
 
 From the HaloWebUI repository, either symlink the plugin:

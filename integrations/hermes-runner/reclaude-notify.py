@@ -52,7 +52,7 @@ import time
 import urllib.error
 import urllib.request
 
-SCRIPT_VERSION = "2026-09-24.2"
+SCRIPT_VERSION = "2026-09-26.1"
 CONFIG_FILE = "/root/.hermes/reclaude-runner.env"
 REQUIRED_CONFIG_KEYS = ("HALOWEBUI_NOTIFY_URL", "HALOWEBUI_NOTIFY_TOKEN")
 STATE_DB = "/root/.hermes/state.db"
@@ -453,18 +453,49 @@ def _tail_lines(path, count):
     return lines[-count:]
 
 
+def _strip_result_header(body, agent, run_id):
+    """result.md without the runner's own header: "# <agent> run <id>", the status /
+    session / model / turns / cost list, then a "---" line. The digest's first two lines
+    already say all of it; repeated, it came right under them and used up the excerpt a
+    later fast dispatch quotes. A result.md not starting with that header is kept whole
+    (agy writes none, and a "---" in its text is part of the answer)."""
+    lines = body.splitlines()
+    if not lines or not re.match(rf"#\s+{re.escape(agent)}\s+run\s+{re.escape(run_id)}\s*$", lines[0].strip()):
+        return body
+    for index, line in enumerate(lines[1:], start=1):
+        if line.strip() == "---":
+            return "\n".join(lines[index + 1:]).strip()
+        if line.strip() and not line.lstrip().startswith("- "):
+            break  # not the header list: leave the text alone
+    return body
+
+
+def _cost_label(value):
+    try:
+        cost = float(value)
+    except (TypeError, ValueError):
+        return ""
+    return f"${cost:.2f}" if cost > 0 else ""
+
+
 def build_digest(run_id, status, run_dir, session_id, agent="reclaude"):
     """The report as the user reads it: a status line, result.md, and what to do next.
 
-    Capped at DIGEST_MAX_CHARS; a longer result keeps its head and the quota footer and
-    points at result.md for the rest.
+    The second line says who answered and what it took (model, turns, duration, cost,
+    session); result.md's own header, which repeats that, is left out. Capped at
+    DIGEST_MAX_CHARS; a longer result keeps its head and the quota footer and points at
+    result.md for the rest.
     """
     result_path = os.path.join(run_dir, "result.md")
     icon, label = STATUS_LABELS.get(status, ("❌", f"没有正常完成（{status}）"))
+    summary = _json_object(_read_text(os.path.join(run_dir, "result.json")))
     details = []
+    if summary.get("model"):
+        details.append(str(summary["model"]))
     if session_id:
         details.append(f"{SESSION_LABELS.get(agent, 'session')} {session_id}")
-    summary = _json_object(_read_text(os.path.join(run_dir, "result.json")))
+    if _cost_label(summary.get("total_cost_usd")):
+        details.append(_cost_label(summary.get("total_cost_usd")))
     if summary.get("num_turns"):
         details.append(f"{summary['num_turns']} 轮")
     if summary.get("duration_human"):
@@ -473,7 +504,7 @@ def build_digest(run_id, status, run_dir, session_id, agent="reclaude"):
     if details:
         lines.append(" · ".join(details))
 
-    body = _read_text(result_path).strip()
+    body = _strip_result_header(_read_text(result_path).strip(), agent, run_id)
     footer = ""
     if body:
         head, _, last = body.rpartition("\n")

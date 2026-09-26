@@ -16,6 +16,7 @@ Two parts, both scoped narrowly:
 from __future__ import annotations
 
 import json
+import logging
 import re
 import threading
 import time
@@ -24,6 +25,9 @@ from urllib.parse import urlsplit
 
 
 SOURCE = "halowebui-run-guard"
+# One line each time the guard changes something (agent.log / gateway.log), so
+# whether it ever acted can be read from the logs.
+logger = logging.getLogger(__name__)
 
 # ── Gemini: replay parallel tool calls one at a time ─────────────────────────
 
@@ -98,6 +102,19 @@ def _sequential_tool_messages(messages: list) -> tuple[list, int]:
     return result, split
 
 
+def _latest_turn_is_parallel(messages: list) -> bool:
+    """Whether an assistant message after the last user message made several calls."""
+    for message in reversed(messages):
+        if not isinstance(message, dict):
+            continue
+        if message.get("role") == "user":
+            return False
+        calls = message.get("tool_calls")
+        if message.get("role") == "assistant" and isinstance(calls, list) and len(calls) > 1:
+            return True
+    return False
+
+
 def replay_gemini_tool_calls_one_by_one(**kwargs: Any) -> dict[str, Any] | None:
     if not _is_native_gemini_base_url(kwargs.get("base_url")):
         return None
@@ -107,6 +124,14 @@ def replay_gemini_tool_calls_one_by_one(**kwargs: Any) -> dict[str, Any] | None:
     messages, split = _sequential_tool_messages(request["messages"])
     if not split:
         return None
+    # The history is resent with every call: a split of the turn just made is
+    # news, the same old turn split again on every later call is not.
+    level = logging.INFO if _latest_turn_is_parallel(request["messages"]) else logging.DEBUG
+    logger.log(
+        level,
+        "%s: replayed %d parallel tool-call turn(s) one call at a time (native Gemini, model %s)",
+        SOURCE, split, request.get("model") or kwargs.get("model") or "?",
+    )
     return {
         "request": {**request, "messages": messages},
         "source": SOURCE,
@@ -186,6 +211,12 @@ def block_repeated_launch(
             return None
         run_id = earlier["run_id"]
     which = f"run {run_id}" if run_id else "that run"
+    # The runner and subcommand only: a command line is no place to trust with secrets.
+    launch = RUNNER_LAUNCH_RE.search(key[2])
+    logger.warning(
+        "%s: blocked a repeated %s in session %s turn %s (%s already started)",
+        SOURCE, " ".join(launch.groups()) if launch else "launch", key[0], key[1], which,
+    )
     return {
         "action": "block",
         "message": (
@@ -232,6 +263,12 @@ def record_launch_outcome(
         else:
             # Failed or refused (guard, approval, bad flags): a retry is fine.
             del _launches[key]
+    if went_through:
+        logger.info("%s: session %s turn %s started run %s; a repeat in this turn is refused",
+                    SOURCE, session, turn, run_id or "?")
+    else:
+        logger.info("%s: launch in session %s turn %s did not start (status %s); a retry is allowed",
+                    SOURCE, session, turn, status)
 
 
 def register(ctx: Any) -> None:

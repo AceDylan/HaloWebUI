@@ -10,7 +10,11 @@ reads the run directory — meta.json (status, started_at) and progress.log (the
 the completion report uses:
 
   * once as soon as the run directory exists ("started"),
-  * then every --interval seconds (default 180, RUNNER_PROGRESS_INTERVAL),
+  * once more about FIRST_UPDATE_SECONDS in, so a two-minute run shows what it is
+    doing instead of only "已运行 N 分钟",
+  * then whenever the step count has moved, at most once per MIN_GAP_SECONDS,
+  * at least every --interval seconds (default 180, RUNNER_PROGRESS_INTERVAL) while
+    nothing moves,
   * and once when meta.json says the run is over (the report itself follows from
     reclaude-notify.py and replaces the progress line in the chat).
 
@@ -33,12 +37,14 @@ import time
 import urllib.error
 import urllib.request
 
-SCRIPT_VERSION = "2026-09-26.1"
+SCRIPT_VERSION = "2026-09-26.2"
 DEFAULT_CONFIG = "/root/.hermes/reclaude-runner.env"
 REQUIRED_KEYS = ("HALOWEBUI_NOTIFY_URL", "HALOWEBUI_NOTIFY_TOKEN")
 RUNNING_STATUSES = {"", "running", "queued", "starting", "waiting", "retrying"}
 CHECK_SECONDS = 15
 DEFAULT_INTERVAL = 180
+FIRST_UPDATE_SECONDS = 40
+MIN_GAP_SECONDS = 60
 MAX_LIFETIME_SECONDS = 12 * 3600
 MISSING_RUN_DIR_SECONDS = 300
 HTTP_TIMEOUT_SECONDS = 10
@@ -190,6 +196,8 @@ def run(args, *, sleep=time.sleep, clock=time.monotonic, send=post):
     run_dir = os.path.join(args.runs_root, args.run_id)
     started = clock()
     last_post = None
+    last_step = None
+    posts = 0
     while True:
         elapsed = clock() - started
         meta = read_meta(run_dir)
@@ -201,9 +209,17 @@ def run(args, *, sleep=time.sleep, clock=time.monotonic, send=post):
             if status not in RUNNING_STATUSES:
                 send(url, token, build_payload(args.chat_id, args.run_id, args.agent, meta, run_dir, final=True))
                 return 0
-            if last_post is None or clock() - last_post >= args.interval:
-                send(url, token, build_payload(args.chat_id, args.run_id, args.agent, meta, run_dir))
-                last_post = clock()
+            payload = build_payload(args.chat_id, args.run_id, args.agent, meta, run_dir)
+            since = None if last_post is None else clock() - last_post
+            due = (
+                since is None
+                or since >= args.interval
+                or (posts == 1 and elapsed >= FIRST_UPDATE_SECONDS)
+                or (payload.get("step") != last_step and since >= MIN_GAP_SECONDS)
+            )
+            if due:
+                send(url, token, payload)
+                last_post, last_step, posts = clock(), payload.get("step"), posts + 1
         if elapsed > MAX_LIFETIME_SECONDS:
             return 0
         sleep(CHECK_SECONDS)

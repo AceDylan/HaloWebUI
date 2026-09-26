@@ -36,19 +36,22 @@ def test_progress_line_reads_the_step_and_the_last_activity(tmp_path):
     assert "abcdefghijklmnop" not in last and "s3cret" not in last
 
 
-def test_reporter_posts_at_start_on_interval_and_once_at_the_end(tmp_path):
-    run_dir = _run_dir(tmp_path, lines=["17:44:01 [tool#1] Read: a"])
+def _reporter(tmp_path, run_dir, events, end_at):
+    """Run the reporter on a fake clock; ``events`` maps a time to progress.log lines
+    written then; the run ends at ``end_at``. Returns [(time, payload)]."""
     config = tmp_path / "runner.env"
     config.write_text("HALOWEBUI_NOTIFY_URL=http://halo.test/n\nHALOWEBUI_NOTIFY_TOKEN=t\n")
     sent = []
     now = [0.0]
-
-    def clock():
-        return now[0]
+    pending = dict(events)
 
     def sleep(seconds):
         now[0] += seconds
-        if now[0] >= 400:
+        for at in sorted(pending):
+            if at <= now[0]:
+                with (run_dir / "progress.log").open("a") as handle:
+                    handle.write("\n".join(pending.pop(at)) + "\n")
+        if now[0] >= end_at:
             meta = json.loads((run_dir / "meta.json").read_text())
             meta["status"] = "success"
             (run_dir / "meta.json").write_text(json.dumps(meta))
@@ -61,13 +64,34 @@ def test_reporter_posts_at_start_on_interval_and_once_at_the_end(tmp_path):
         interval=180,
         config_file=[str(config)],
     )
-    assert progress.run(args, sleep=sleep, clock=clock, send=lambda u, t, p: sent.append(p)) == 0
-    statuses = [payload["status"] for payload in sent]
+    send = lambda u, t, p: sent.append((now[0], p))
+    assert progress.run(args, sleep=sleep, clock=lambda: now[0], send=send) == 0
+    return sent
+
+
+def test_reporter_posts_at_start_early_on_interval_and_once_at_the_end(tmp_path):
+    run_dir = _run_dir(tmp_path, lines=["17:44:01 [tool#1] Read: a"])
+    sent = _reporter(tmp_path, run_dir, {}, end_at=400)
+    # Started; an early update a little after 40 s; then nothing moves, so every 180 s.
+    assert [at for at, _ in sent] == [0, 45, 225, 405]
+    statuses = [payload["status"] for _, payload in sent]
     assert statuses == ["running", "running", "running", "finished"]
-    assert sent[0]["chat_id"] == "chat-1" and sent[0]["mode"] == "progress"
-    assert sent[0]["step"] == 1
-    assert sent[0]["started_at"] == progress.parse_started_at("2026-09-26 17:43:54 +0800")
-    assert sent[-1]["runner_status"] == "success"
+    first = sent[0][1]
+    assert first["chat_id"] == "chat-1" and first["mode"] == "progress"
+    assert first["step"] == 1
+    assert first["started_at"] == progress.parse_started_at("2026-09-26 17:43:54 +0800")
+    assert sent[-1][1]["runner_status"] == "success"
+
+
+def test_reporter_follows_the_steps_at_most_once_a_minute(tmp_path):
+    run_dir = _run_dir(tmp_path, lines=["17:44:01 [tool#1] Read: a"])
+    events = {at: [f"17:45:{at % 60:02d} [tool#{at}] Bash: step {at}"] for at in range(20, 300, 20)}
+    sent = _reporter(tmp_path, run_dir, events, end_at=300)
+    times = [at for at, _ in sent]
+    # Steps move every 20 s; the chat hears of it once a minute, and of the end at once.
+    assert times == [0, 45, 105, 165, 225, 285, 300]
+    assert sent[2][1]["step"] > sent[1][1]["step"]
+    assert sent[2][1]["last_activity"].startswith("Bash: step")
 
 
 def test_reporter_does_nothing_without_config(tmp_path, monkeypatch):

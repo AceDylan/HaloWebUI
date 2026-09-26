@@ -1680,13 +1680,17 @@ def mimetypes_guess(content_type: str) -> str:
 
 
 def _map_usage(usage):
+    """OpenAI-style usage from a run's; None when it counted nothing (a fast
+    dispatch, or a hermes that reported no usage), which the UI would otherwise
+    show as "消耗 0 Token"."""
     if not isinstance(usage, dict):
         return None
-    return {
+    mapped = {
         "prompt_tokens": usage.get("input_tokens", 0),
         "completion_tokens": usage.get("output_tokens", 0),
         "total_tokens": usage.get("total_tokens", 0),
     }
+    return mapped if any(isinstance(v, (int, float)) and v > 0 for v in mapped.values()) else None
 
 
 def _runtime_from_event(event) -> dict:

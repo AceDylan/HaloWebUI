@@ -37,6 +37,19 @@ the result of the one loaded last, so `halowebui-reasoning-sync` leaves native
 Gemini requests alone (its effort field has no effect on them anyway); otherwise
 the plugin load order would decide whether this rewrite survives.
 
+## Logs
+
+Each time the guard acts it writes one line to Hermes' logs (`agent.log` /
+`gateway.log`, logger `…halowebui-run-guard…`):
+
+- `blocked a repeated reclaude-run.sh run in session … turn …` (WARNING) — a duplicate
+  was refused (the runner and subcommand only, never the command line);
+- `session … turn … started run …` / `launch … did not start` (INFO) — a launch it tracks;
+- `replayed N parallel tool-call turn(s) one call at a time` (INFO for the turn just
+  made, DEBUG when the same old turn is resent with a later call).
+
+`grep halowebui-run-guard ~/.hermes/logs/agent.log` shows whether it ever acted.
+
 ## Install
 
 From the HaloWebUI repository:

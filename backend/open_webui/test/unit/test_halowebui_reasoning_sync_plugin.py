@@ -193,3 +193,36 @@ def test_registers_llm_request_middleware():
     plugin.register(context)
 
     assert registrations == [("llm_request", plugin.sync_reasoning_effort)]
+
+
+def test_a_changed_effort_is_logged_an_unchanged_one_quietly(monkeypatch, caplog):
+    caplog.set_level("DEBUG", logger=plugin.logger.name)
+    monkeypatch.setattr(
+        plugin, "urlopen", lambda url, timeout: _Response({"reasoning_effort": "medium"})
+    )
+    plugin.sync_reasoning_effort(
+        request={"model": "gpt-chat", "reasoning_effort": "high"}, api_mode="chat_completions"
+    )
+    assert caplog.records[-1].levelname == "INFO"
+    assert "reasoning effort high -> medium (chat_completions, model gpt-chat)" in (
+        caplog.records[-1].getMessage()
+    )
+    plugin.sync_reasoning_effort(
+        request={"reasoning": {"effort": "medium"}}, api_mode="codex_responses"
+    )
+    assert caplog.records[-1].levelname == "DEBUG"
+
+
+def test_an_unreachable_halowebui_is_logged_once_per_window(monkeypatch, caplog):
+    caplog.set_level("DEBUG", logger=plugin.logger.name)
+    monkeypatch.setattr(plugin, "_last_failure_log", 0.0)
+
+    def unavailable(url, timeout):
+        raise OSError("down")
+
+    monkeypatch.setattr(plugin, "urlopen", unavailable)
+    for _ in range(3):
+        assert plugin.sync_reasoning_effort(request={}, api_mode="chat_completions") is None
+    warnings = [r for r in caplog.records if r.levelname == "WARNING"]
+    assert len(warnings) == 1
+    assert "OSError" in warnings[0].getMessage()

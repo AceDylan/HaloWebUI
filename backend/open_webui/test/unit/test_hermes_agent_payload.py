@@ -450,3 +450,15 @@ def test_temporary_chats_do_not_share_a_hermes_session():
     assert hermes_agent.is_temporary_chat_id("local") is True
     assert hermes_agent.is_temporary_chat_id("localhost-chat") is False
     assert hermes_agent.is_temporary_chat_id("") is False
+
+
+def test_a_run_that_counted_nothing_reports_no_usage():
+    # A fast dispatch (no model call) reports all-zero usage; shown, it read "消耗 0 Token".
+    assert hermes_agent._map_usage({"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}) is None
+    assert hermes_agent._map_usage({}) is None
+    assert hermes_agent._map_usage(None) is None
+    assert hermes_agent._map_usage({"input_tokens": 12, "output_tokens": 3, "total_tokens": 15}) == {
+        "prompt_tokens": 12,
+        "completion_tokens": 3,
+        "total_tokens": 15,
+    }

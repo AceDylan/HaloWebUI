@@ -445,3 +445,51 @@ def test_registers_middleware_and_hooks():
         ("hook", "pre_tool_call", plugin.block_repeated_launch),
         ("hook", "post_tool_call", plugin.record_launch_outcome),
     ]
+
+
+# ── What the guard leaves in the logs ────────────────────────────────────────
+
+
+def test_each_action_leaves_one_log_line(caplog):
+    caplog.set_level("DEBUG", logger=plugin.logger.name)
+    args = {"command": LAUNCH}
+    plugin.block_repeated_launch(tool_name="terminal", args=args, **_ids("call_2"))
+    plugin.record_launch_outcome(
+        tool_name="terminal", args=args, result=STARTED, status="ok", **_ids("call_2")
+    )
+    plugin.block_repeated_launch(tool_name="terminal", args=args, **_ids("call_3"))
+
+    started, blocked = [r for r in caplog.records if r.levelname in ("INFO", "WARNING")]
+    assert started.levelname == "INFO"
+    assert "started run 20260926-200514-5f8303dd" in started.getMessage()
+    assert blocked.levelname == "WARNING"
+    assert "blocked a repeated reclaude-run.sh run in session chat-1 turn turn-1" in blocked.getMessage()
+    assert "--task-file" not in blocked.getMessage()
+
+
+def test_a_failed_launch_is_logged_as_retryable(caplog):
+    caplog.set_level("INFO", logger=plugin.logger.name)
+    args = {"command": LAUNCH}
+    plugin.block_repeated_launch(tool_name="terminal", args=args, **_ids("call_2"))
+    plugin.record_launch_outcome(
+        tool_name="terminal", args=args, result='{"exit_code": 2}', status="ok", **_ids("call_2")
+    )
+    assert "did not start" in caplog.records[-1].getMessage()
+
+
+def test_a_split_of_the_turn_just_made_is_logged_once_old_turns_quietly(caplog):
+    caplog.set_level("DEBUG", logger=plugin.logger.name)
+    fresh = {"messages": _messages(WRITE_RESULT, RUN_RESULT)}
+    plugin.replay_gemini_tool_calls_one_by_one(request=fresh, base_url=GEMINI_RELAY)
+    assert caplog.records[-1].levelname == "INFO"
+    assert "replayed 1 parallel tool-call turn(s)" in caplog.records[-1].getMessage()
+
+    later = {
+        "messages": _messages(
+            WRITE_RESULT, RUN_RESULT,
+            {"role": "assistant", "content": "已启动"},
+            {"role": "user", "content": "进度？"},
+        )
+    }
+    plugin.replay_gemini_tool_calls_one_by_one(request=later, base_url=GEMINI_RELAY)
+    assert caplog.records[-1].levelname == "DEBUG"

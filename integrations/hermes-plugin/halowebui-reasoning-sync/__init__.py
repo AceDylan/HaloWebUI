@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
+import time
 from typing import Any
 from urllib.parse import urlsplit
 from urllib.request import urlopen
@@ -14,6 +16,22 @@ VALID_REASONING_EFFORTS = frozenset({"none", "low", "medium", "high", "xhigh", "
 SUPPORTED_API_MODES = frozenset({"codex_responses", "chat_completions"})
 REQUEST_TIMEOUT_SECONDS = 0.75
 MAX_RESPONSE_BYTES = 1024
+# Logged when the effort actually changes and when HaloWebUI cannot be read
+# (at most once per FAILURE_LOG_SECONDS: every model request tries again).
+FAILURE_LOG_SECONDS = 600
+SOURCE = "halowebui-reasoning-sync"
+logger = logging.getLogger(__name__)
+_last_failure_log = 0.0
+
+
+def _log_failure(reason: str) -> None:
+    global _last_failure_log
+    now = time.monotonic()
+    if _last_failure_log and now - _last_failure_log < FAILURE_LOG_SECONDS:
+        logger.debug("%s: %s", SOURCE, reason)
+        return
+    _last_failure_log = now
+    logger.warning("%s: %s; requests keep their own reasoning effort", SOURCE, reason)
 
 
 def _reasoning_effort_url() -> str | None:
@@ -36,13 +54,16 @@ def _fetch_reasoning_effort() -> str | None:
     try:
         with urlopen(url, timeout=REQUEST_TIMEOUT_SECONDS) as response:
             if getattr(response, "status", 200) != 200:
+                _log_failure(f"HaloWebUI answered {getattr(response, 'status', '?')}")
                 return None
             raw = response.read(MAX_RESPONSE_BYTES + 1)
         if len(raw) > MAX_RESPONSE_BYTES:
+            _log_failure("HaloWebUI's answer is too long")
             return None
         payload = json.loads(raw.decode("utf-8"))
-    except Exception:
+    except Exception as exc:
         # Endpoint parsing/network failures must never block the model request.
+        _log_failure(f"could not read the effort from HaloWebUI ({type(exc).__name__})")
         return None
 
     if not isinstance(payload, dict):
@@ -92,14 +113,21 @@ def sync_reasoning_effort(**kwargs: Any) -> dict[str, Any] | None:
         reasoning = (
             dict(existing_reasoning) if isinstance(existing_reasoning, dict) else {}
         )
+        previous = reasoning.get("effort")
         reasoning["effort"] = effort
         updated_request["reasoning"] = reasoning
     else:
+        previous = request.get("reasoning_effort")
         updated_request["reasoning_effort"] = effort
+    logger.log(
+        logging.INFO if previous != effort else logging.DEBUG,
+        "%s: reasoning effort %s -> %s (%s, model %s)",
+        SOURCE, previous or "unset", effort, api_mode, request.get("model") or "?",
+    )
 
     return {
         "request": updated_request,
-        "source": "halowebui-reasoning-sync",
+        "source": SOURCE,
         "reason": "applied current HaloWebUI Message Gateway reasoning effort",
     }
 

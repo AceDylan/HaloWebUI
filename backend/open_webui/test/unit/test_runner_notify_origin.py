@@ -447,3 +447,81 @@ def test_a_refused_notice_is_not_retried_at_all(delivery, tmp_path, monkeypatch)
     assert record["attempts"] == 1
     assert record["busy_attempts"] == 0
     assert delivery == []
+
+
+# --- The report text (build_digest) ---------------------------------------------------
+
+
+def write_run(run_dir, result_md, summary=None):
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "result.md").write_text(result_md, encoding="utf-8")
+    if summary is not None:
+        (run_dir / "result.json").write_text(json.dumps(summary), encoding="utf-8")
+
+
+RECLAUDE_RESULT = """# reclaude run r1
+
+- status: success
+- session_id: sid-1
+- model: claude-opus-5-5[1m]
+- turns: 7 | duration: 2m12s | cost_usd: 9.229317000000002
+- tool calls: 195 (errors: 1)
+
+---
+
+上一批改动已经上线。
+
+## 部署状态
+
+- 一切正常
+"""
+
+
+def test_the_report_leaves_out_the_result_header_it_already_says(tmp_path):
+    write_run(
+        tmp_path,
+        RECLAUDE_RESULT,
+        {"model": "claude-opus-5-5[1m]", "num_turns": 7, "duration_human": "2m12s",
+         "total_cost_usd": 9.229317000000002},
+    )
+    digest = notify.build_digest("r1", "success", str(tmp_path), "sid-1")
+    lines = digest.splitlines()
+    assert lines[0] == "✅ reclaude 运行 r1 · 已完成"
+    # Who answered and what it took, on the line the web UI reads the duration from.
+    assert lines[1] == "claude-opus-5-5[1m] · Claude 会话 sid-1 · $9.23 · 7 轮 · 2m12s"
+    assert lines[3] == "上一批改动已经上线。"
+    assert "# reclaude run" not in digest
+    assert "cost_usd" not in digest
+    assert "## 部署状态" in digest
+
+
+def test_a_codex_result_loses_its_header_too(tmp_path):
+    write_run(
+        tmp_path,
+        "# codex run c1\n\n- status: success\n- thread_id: t\n"
+        "- tokens: input=1 cached=0 output=2 reasoning=0\n\n---\n\n答案\n",
+        {"model": "", "num_turns": 1, "duration_human": "0m43s", "total_cost_usd": None},
+    )
+    digest = notify.build_digest("c1", "success", str(tmp_path), "t", agent="codex")
+    assert digest.splitlines()[1] == "codex thread t · 1 轮 · 0m43s"
+    assert digest.endswith("答案")
+    assert "tokens:" not in digest
+
+
+def test_a_result_without_the_header_is_kept_whole(tmp_path):
+    # agy writes no header, and its "---" is part of the answer.
+    body = "我是 Antigravity。\n\n---\n\n### 1. 代码开发"
+    write_run(tmp_path, body)
+    digest = notify.build_digest("a1", "success", str(tmp_path), "conv", agent="agy")
+    assert digest.endswith(body)
+    # Another run's header is not this run's header.
+    write_run(tmp_path, "# reclaude run other\n\n- status: success\n\n---\n\nx")
+    assert "# reclaude run other" in notify.build_digest("r1", "success", str(tmp_path), "s")
+
+
+def test_the_quota_footer_still_ends_the_report(tmp_path):
+    footer = "**reclaude 额度**：剩余 $29.29 / $80.00"
+    write_run(tmp_path, RECLAUDE_RESULT + "\n---\n\n" + footer + "\n")
+    digest = notify.build_digest("r1", "success", str(tmp_path), "sid-1")
+    assert digest.splitlines()[-1] == footer
+    assert "# reclaude run" not in digest

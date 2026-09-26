@@ -943,7 +943,7 @@ async def generate_multi_model_discussion_completion(
                 guard_stopped=True,
             )
 
-    task_id, _task = create_task(discussion_task(), id=chat_id)
+    task_id, _task = create_task(discussion_task(), id=chat_id, owner_id=getattr(user, "id", None))
     Chats.upsert_message_to_chat_by_id_and_message_id(
         chat_id,
         message_id,

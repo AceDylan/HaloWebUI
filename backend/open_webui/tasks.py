@@ -23,9 +23,10 @@ def cleanup_task(task_id: str, id=None):
             chat_tasks.pop(id, None)
 
 
-def create_task(coroutine, id=None, *, blocks_completion: bool = True):
+def create_task(coroutine, id=None, *, blocks_completion: bool = True, owner_id=None):
     """
     Create a new asyncio task and add it to the global task dictionary.
+    `owner_id` is the user whose request it serves (see task_owner_id).
     """
     task_id = str(uuid4())  # Generate a unique ID for the task
     task = asyncio.create_task(coroutine)  # Create the task
@@ -36,6 +37,7 @@ def create_task(coroutine, id=None, *, blocks_completion: bool = True):
     task_metadata[task_id] = {
         "chat_id": id,
         "blocks_completion": blocks_completion,
+        "owner_id": owner_id,
     }
 
     # If an ID is provided, associate the task with that ID
@@ -78,6 +80,21 @@ def list_tasks():
     List all currently active task IDs.
     """
     return list(tasks.keys())
+
+
+def task_owner_id(task_id: str):
+    """The user a task works for: recorded at creation, else its chat's owner.
+    None when neither is known (a temporary chat's task created without one)."""
+    metadata = task_metadata.get(task_id) or {}
+    if metadata.get("owner_id"):
+        return metadata["owner_id"]
+    chat_id = metadata.get("chat_id")
+    if not chat_id or chat_id == "local":
+        return None
+    from open_webui.models.chats import Chats
+
+    chat = Chats.get_chat_by_id(chat_id)
+    return chat.user_id if chat is not None else None
 
 
 def list_task_ids_by_chat_id(id, *, blocks_completion_only: bool = False):

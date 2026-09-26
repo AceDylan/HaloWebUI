@@ -559,6 +559,7 @@ from open_webui.tasks import (
     list_task_ids_by_chat_id,
     stop_task,
     list_tasks,
+    task_owner_id,
 )  # Import from tasks.py
 
 from open_webui.utils.redis import get_sentinels_from_env
@@ -2184,8 +2185,19 @@ async def chat_action(
         _raise_preserving_http_exception(e, status.HTTP_400_BAD_REQUEST)
 
 
+def _may_manage_task(user, task_id: str) -> bool:
+    # Stopping a hermes task also stops its run in hermes: only its own user
+    # (or an admin) may, and nobody else learns the id.
+    return user.role == "admin" or task_owner_id(task_id) == user.id
+
+
 @app.post("/api/tasks/stop/{task_id}")
 async def stop_task_endpoint(task_id: str, user=Depends(get_verified_user)):
+    if not _may_manage_task(user, task_id):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Task with ID {task_id} not found.",
+        )
     try:
         result = await stop_task(task_id)
         return result
@@ -2195,7 +2207,9 @@ async def stop_task_endpoint(task_id: str, user=Depends(get_verified_user)):
 
 @app.get("/api/tasks")
 async def list_tasks_endpoint(user=Depends(get_verified_user)):
-    return {"tasks": list_tasks()}
+    return {
+        "tasks": [task_id for task_id in list_tasks() if _may_manage_task(user, task_id)]
+    }
 
 
 @app.get("/api/tasks/chat/{chat_id}")

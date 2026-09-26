@@ -112,7 +112,7 @@ def test_multi_model_discussion_orchestrates_models_and_events(monkeypatch):
             },
         }
 
-    def fake_create_task(coroutine, id=None):
+    def fake_create_task(coroutine, id=None, **_kwargs):
         task = asyncio.create_task(coroutine)
         scheduled["task"] = task
         scheduled["chat_id"] = id
@@ -229,7 +229,7 @@ window.discussionUnsafe = true;
 ```"""
         return {"choices": [{"message": {"content": content}}]}
 
-    def fake_create_task(coroutine, id=None):
+    def fake_create_task(coroutine, id=None, **_kwargs):
         task = asyncio.create_task(coroutine)
         scheduled["task"] = task
         return "task-force", task
@@ -315,7 +315,7 @@ def test_multi_model_discussion_passes_transcript_to_later_rounds_and_final(
             },
         }
 
-    def fake_create_task(coroutine, id=None):
+    def fake_create_task(coroutine, id=None, **_kwargs):
         task = asyncio.create_task(coroutine)
         scheduled["task"] = task
         scheduled["chat_id"] = id
@@ -417,7 +417,7 @@ def test_multi_model_discussion_isolates_failed_turns_from_transcript(monkeypatc
             },
         }
 
-    def fake_create_task(coroutine, id=None):
+    def fake_create_task(coroutine, id=None, **_kwargs):
         task = asyncio.create_task(coroutine)
         scheduled["task"] = task
         scheduled["chat_id"] = id
@@ -523,7 +523,7 @@ def test_multi_model_discussion_cancellation_marks_message_stopped(monkeypatch):
     async def never_finish(*_args, **_kwargs):
         await asyncio.Event().wait()
 
-    def fake_create_task(coroutine, id=None):
+    def fake_create_task(coroutine, id=None, **_kwargs):
         task = asyncio.create_task(coroutine)
         scheduled["task"] = task
         scheduled["chat_id"] = id
@@ -622,7 +622,7 @@ def test_multi_model_discussion_persists_final_state_when_events_fail(monkeypatc
             },
         }
 
-    def fake_create_task(coroutine, id=None):
+    def fake_create_task(coroutine, id=None, **_kwargs):
         task = asyncio.create_task(coroutine)
         scheduled["task"] = task
         scheduled["chat_id"] = id
@@ -696,7 +696,7 @@ def test_multi_model_discussion_persists_error_when_final_model_fails(monkeypatc
             },
         }
 
-    def fake_create_task(coroutine, id=None):
+    def fake_create_task(coroutine, id=None, **_kwargs):
         task = asyncio.create_task(coroutine)
         scheduled["task"] = task
         scheduled["chat_id"] = id
@@ -784,7 +784,7 @@ def test_multi_model_discussion_generates_chat_title_via_external_task_model(
             ],
         }
 
-    def fake_create_task(coroutine, id=None):
+    def fake_create_task(coroutine, id=None, **_kwargs):
         task = asyncio.create_task(coroutine)
         scheduled["task"] = task
         scheduled["chat_id"] = id
@@ -893,7 +893,7 @@ def test_multi_model_discussion_title_falls_back_when_external_task_model_unavai
             content={"detail": "no external task model", "skipped": True},
         )
 
-    def fake_create_task(coroutine, id=None):
+    def fake_create_task(coroutine, id=None, **_kwargs):
         task = asyncio.create_task(coroutine)
         scheduled["task"] = task
         scheduled["chat_id"] = id
@@ -985,7 +985,7 @@ def test_multi_model_discussion_preserves_user_provided_title(monkeypatch):
         generate_title_calls.append(form_data)
         return {"choices": [{"message": {"content": "新建对话"}}]}
 
-    def fake_create_task(coroutine, id=None):
+    def fake_create_task(coroutine, id=None, **_kwargs):
         task = asyncio.create_task(coroutine)
         scheduled["task"] = task
         return "task-1", task

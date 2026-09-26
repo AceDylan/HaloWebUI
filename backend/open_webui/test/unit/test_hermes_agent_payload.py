@@ -169,7 +169,7 @@ def _run_hermes_terminal_events(monkeypatch, terminal_events):
     async def background_tasks_handler(*_args, **_kwargs):
         return None
 
-    def create_task(coroutine, id=None):
+    def create_task(coroutine, id=None, **_kwargs):
         created["coroutine"] = coroutine
         return "task-1", SimpleNamespace()
 

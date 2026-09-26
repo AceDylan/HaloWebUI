@@ -2564,7 +2564,7 @@ async def run_hermes_agent(request, form_data, user, metadata, model, events, ta
             _cancel_pending_flush()
             _unregister_run(metadata["chat_id"], run_id)
 
-    task_id, _ = create_task(_run_handler(), id=metadata["chat_id"])
+    task_id, _ = create_task(_run_handler(), id=metadata["chat_id"], owner_id=user.id)
     return {"status": True, "task_id": task_id}
 
 

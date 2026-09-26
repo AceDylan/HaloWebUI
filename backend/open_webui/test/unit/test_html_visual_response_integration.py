@@ -163,7 +163,7 @@ def test_direct_streaming_force_mode_marks_done_before_the_card(monkeypatch):
     _patch_response_dependencies(monkeypatch, events, upserts)
     monkeypatch.setattr(middleware, "ENABLE_REALTIME_CHAT_SAVE", False)
 
-    def create_task(coroutine, id=None, *, blocks_completion=True):
+    def create_task(coroutine, id=None, *, blocks_completion=True, **_kwargs):
         created["coroutine"] = coroutine
         return "task-1", SimpleNamespace()
 

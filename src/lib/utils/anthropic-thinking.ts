@@ -165,10 +165,10 @@ export const getAnthropicEffortSteps = (
 	return [
 		{ value: 'none', label: translateLabel(t, '关闭', 'Off') },
 		{ value: null, label: translateLabel(t, '默认', 'Default') },
-		{ value: 'low', label: 'Low' },
-		{ value: 'medium', label: 'Medium' },
-		{ value: 'high', label: 'High' },
-		{ value: 'max', label: 'Max' }
+		{ value: 'low', label: translateLabel(t, '低', 'Low') },
+		{ value: 'medium', label: translateLabel(t, '中', 'Medium') },
+		{ value: 'high', label: translateLabel(t, '高', 'High') },
+		{ value: 'max', label: translateLabel(t, '最大', 'Max') }
 	];
 };
 

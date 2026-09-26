@@ -482,11 +482,22 @@
 				<div class="relative">
 					<h3 class="text-[13px] font-medium text-gray-500 dark:text-gray-400 mb-3">{$i18n.t('Daily Activity')}</h3>
 					<div class="relative">
-						<div class="flex items-end gap-1 h-36 rounded-2xl p-3 pb-1 bg-white/70 dark:bg-gray-900/60 border border-gray-100/90 dark:border-gray-800/70 shadow-sm shadow-gray-900/[0.04] dark:shadow-black/30">
+						<div class="relative flex items-end gap-1 h-36 rounded-2xl p-3 pb-1 bg-white/70 dark:bg-gray-900/60 border border-gray-100/90 dark:border-gray-800/70 shadow-sm shadow-gray-900/[0.04] dark:shadow-black/30">
+							<!-- Scale: the tallest bar and half of it, so heights read as numbers. -->
+							<div class="pointer-events-none absolute inset-x-3 top-3 bottom-1 z-[1]" aria-hidden="true">
+								<div class="absolute inset-x-0 top-0 border-t border-dashed border-gray-200 dark:border-gray-700/80">
+									<span class="absolute right-0 -top-[7px] bg-white/90 dark:bg-gray-900/90 pl-1 text-2xs leading-none text-gray-400 dark:text-gray-500 tabular-nums">{maxDailyCount}</span>
+								</div>
+								<div class="absolute inset-x-0 top-1/2 border-t border-dashed border-gray-100 dark:border-gray-800">
+									<span class="absolute right-0 -top-[7px] bg-white/90 dark:bg-gray-900/90 pl-1 text-2xs leading-none text-gray-400 dark:text-gray-500 tabular-nums">{Math.round(maxDailyCount / 2)}</span>
+								</div>
+							</div>
 							{#each dailyStats as day, idx}
 								<div
-									class="flex-1 bg-blue-200/80 dark:bg-blue-800/40 rounded-t min-h-[2px] transition-all duration-200 hover:bg-blue-500 dark:hover:bg-blue-400 cursor-pointer"
+									class="relative flex-1 bg-blue-300 dark:bg-blue-500/70 rounded-t min-h-[2px] transition-all duration-200 hover:bg-blue-500 dark:hover:bg-blue-400 cursor-pointer"
 									style="height: {(day.message_count / maxDailyCount) * 100}%"
+									role="img"
+									aria-label={`${day.date}: ${$i18n.t('Messages')} ${day.message_count}`}
 									on:mouseenter={() => {
 										hoveredDay = {
 											date: day.date,
@@ -504,8 +515,12 @@
 						{#if hoveredDay}
 							<div
 								class="absolute -top-12 px-3 py-1.5 bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 text-xs rounded-lg shadow-lg pointer-events-none whitespace-nowrap z-10"
-								style="left: {(hoveredDay.idx / dailyStats.length) *
-									100}%; transform: translateX(-50%)"
+								style="left: {((hoveredDay.idx + 0.5) / dailyStats.length) * 100}%; transform: translateX({hoveredDay.idx <
+								dailyStats.length * 0.15
+									? '-15%'
+									: hoveredDay.idx > dailyStats.length * 0.85
+										? '-85%'
+										: '-50%'})"
 							>
 								<div class="font-medium">{hoveredDay.date}</div>
 								<div class="text-zinc-300 dark:text-zinc-600">

@@ -2,6 +2,7 @@
 	import dayjs from 'dayjs';
 	import { getContext, onMount } from 'svelte';
 	import { page } from '$app/stores';
+	import { goto } from '$app/navigation';
 
 	import { user, config } from '$lib/stores';
 	import { getUsers } from '$lib/apis/users';
@@ -24,6 +25,15 @@
 	let loaded = false;
 
 	$: isAdmin = $user?.role === 'admin';
+
+	// The URL decides the tab: "账户管理" (Personal) opens the profile; "用户管理"
+	// under System opens ?tab=users, where users and permission groups share a strip.
+	$: requestedTab = $page.url.searchParams.get('tab');
+	$: selectedTab =
+		isAdmin && (requestedTab === 'users' || requestedTab === 'groups') ? requestedTab : 'personal';
+
+	const openAdminTab = (tab: 'users' | 'groups') =>
+		goto(`/settings/account?tab=${tab}`, { replaceState: true, noScroll: true, keepFocus: true });
 
 	const getUsersHandler = async () => {
 		users = await getUsers(localStorage.token);
@@ -81,15 +91,8 @@
 
 	$: activeTabMeta = tabMeta[selectedTab];
 
-	const shouldSpanAccountTabFullRowOnMobile = (index: number) => index === 2;
 
 	onMount(async () => {
-		// Read tab from URL query parameter
-		const tabParam = $page.url.searchParams.get('tab');
-		if (tabParam && (tabParam === 'users' || tabParam === 'groups') && isAdmin) {
-			selectedTab = tabParam;
-		}
-
 		if (isAdmin) {
 			await getUsersHandler();
 		}
@@ -131,51 +134,36 @@
 									</div>
 								</div>
 
-								<!-- Tabs -->
-								<div class="inline-flex max-w-full flex-wrap items-center gap-1.5 self-start rounded-xl bg-gray-100/70 p-1 shadow-[inset_0_1px_0_rgba(255,255,255,0.65)] dark:bg-gray-850/80 dark:shadow-none @[64rem]:flex-nowrap @[64rem]:shrink-0">
-									<button
-										type="button"
-										class={`flex min-w-0 items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-all ${
-											selectedTab === 'personal'
-												? 'bg-white text-gray-900 shadow-[0_1px_3px_rgba(15,23,42,0.08)] dark:bg-gray-800 dark:text-white'
-												: 'text-gray-500 hover:bg-white/50 hover:text-gray-800 dark:text-gray-400 dark:hover:bg-gray-800/50 dark:hover:text-gray-200'
-										}`}
-										on:click={() => { selectedTab = 'personal'; }}
-									>
-										<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-4">
-											<path stroke-linecap="round" stroke-linejoin="round" d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A17.933 17.933 0 0 1 12 21.75c-2.676 0-5.216-.584-7.499-1.632Z" />
-										</svg>
-										<span>{$i18n.t('Personal Settings')}</span>
-									</button>
+								<!-- Tabs: users and permission groups only; the profile has its own nav entry -->
+								{#if selectedTab !== 'personal'}
+									<div class="inline-flex max-w-full flex-wrap items-center gap-1.5 self-start rounded-xl bg-gray-100/70 p-1 shadow-[inset_0_1px_0_rgba(255,255,255,0.65)] dark:bg-gray-850/80 dark:shadow-none @[64rem]:flex-nowrap @[64rem]:shrink-0">
+										<button
+											type="button"
+											class={`flex min-w-0 items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-all ${
+												selectedTab === 'users'
+													? 'bg-white text-gray-900 shadow-[0_1px_3px_rgba(15,23,42,0.08)] dark:bg-gray-800 dark:text-white'
+													: 'text-gray-500 hover:bg-white/50 hover:text-gray-800 dark:text-gray-400 dark:hover:bg-gray-800/50 dark:hover:text-gray-200'
+											}`}
+											on:click={() => openAdminTab('users')}
+										>
+											<UsersSolid className="size-4" />
+											<span>{$i18n.t('User Management')}</span>
+										</button>
 
-									<button
-										type="button"
-										class={`flex min-w-0 items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-all ${
-											selectedTab === 'users'
-												? 'bg-white text-gray-900 shadow-[0_1px_3px_rgba(15,23,42,0.08)] dark:bg-gray-800 dark:text-white'
-												: 'text-gray-500 hover:bg-white/50 hover:text-gray-800 dark:text-gray-400 dark:hover:bg-gray-800/50 dark:hover:text-gray-200'
-										}`}
-										on:click={() => { selectedTab = 'users'; }}
-									>
-										<UsersSolid className="size-4" />
-										<span>{$i18n.t('User Management')}</span>
-									</button>
-
-									<button
-										type="button"
-										class={`flex min-w-0 items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-all ${
-											shouldSpanAccountTabFullRowOnMobile(2) ? 'col-span-2 md:col-span-1 ' : ''
-										}${
-											selectedTab === 'groups'
-												? 'bg-white text-gray-900 shadow-[0_1px_3px_rgba(15,23,42,0.08)] dark:bg-gray-800 dark:text-white'
-												: 'text-gray-500 hover:bg-white/50 hover:text-gray-800 dark:text-gray-400 dark:hover:bg-gray-800/50 dark:hover:text-gray-200'
-										}`}
-										on:click={() => { selectedTab = 'groups'; }}
-									>
-										<WrenchSolid className="size-4" />
-										<span>{$i18n.t('Permission Groups')}</span>
-									</button>
-								</div>
+										<button
+											type="button"
+											class={`flex min-w-0 items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-all ${
+												selectedTab === 'groups'
+													? 'bg-white text-gray-900 shadow-[0_1px_3px_rgba(15,23,42,0.08)] dark:bg-gray-800 dark:text-white'
+													: 'text-gray-500 hover:bg-white/50 hover:text-gray-800 dark:text-gray-400 dark:hover:bg-gray-800/50 dark:hover:text-gray-200'
+											}`}
+											on:click={() => openAdminTab('groups')}
+										>
+											<WrenchSolid className="size-4" />
+											<span>{$i18n.t('Permission Groups')}</span>
+										</button>
+									</div>
+								{/if}
 							</div>
 
 							<!-- Hero Stats (only for users/groups tabs) -->

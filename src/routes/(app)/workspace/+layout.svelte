@@ -54,7 +54,7 @@
 
 <svelte:head>
 	<title>
-		{$i18n.t('Workspace')} | {$WEBUI_NAME}
+		{activeTab ? $i18n.t(activeTab.labelKey) : $i18n.t('Workspace')} | {$WEBUI_NAME}
 	</title>
 </svelte:head>
 

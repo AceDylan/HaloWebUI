@@ -2342,6 +2342,8 @@
 												bind:state={autoFollowUps}
 											/>
 										</div>
+										<!-- Only when the admin allows tag generation; otherwise the switch did nothing. -->
+										{#if $config?.features?.enable_tags_generation !== false}
 										<div class="flex items-center justify-between glass-item px-4 py-3">
 											<div class="flex min-w-0 items-center gap-1.5 text-sm font-medium">
 												<span>{$i18n.t('Chat Tags Auto-Generation')}</span>
@@ -2365,6 +2367,7 @@
 												bind:state={autoTags}
 											/>
 										</div>
+										{/if}
 										<div class="flex items-center justify-between glass-item px-4 py-3">
 											<div class="text-sm font-medium">
 												{$i18n.t('Detect Artifacts Automatically')}

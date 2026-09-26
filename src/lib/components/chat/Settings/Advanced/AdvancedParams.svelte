@@ -20,6 +20,9 @@
 	// Chat-level advanced menu should follow the global Tools setting (no separate "auto/admin" label).
 	export let followGlobalToolCallingMode = false;
 	export let enableCustomParams = false;
+	// Sampling options only Ollama reads (mirostat, tfs_z, num_ctx …). Hidden for
+	// other providers unless a value is already set, so nothing set stays out of sight.
+	export let showOllamaParams = true;
 
 	// NOTE: This component binds a large "bag of optional params" into multiple
 	// settings UIs. Use a loose type to avoid TS inferring every field as `null`.
@@ -589,6 +592,7 @@
 		{/if}
 	</div>
 
+	{#if showOllamaParams || (params?.mirostat ?? null) !== null}
 	<div
 		class="py-1.5 px-1 w-full justify-between rounded-lg hover:bg-gray-50/80 dark:hover:bg-white/[0.02] transition-colors duration-150"
 	>
@@ -649,7 +653,9 @@
 			</div>
 		{/if}
 	</div>
+	{/if}
 
+	{#if showOllamaParams || (params?.mirostat_eta ?? null) !== null}
 	<div
 		class="py-1.5 px-1 w-full justify-between rounded-lg hover:bg-gray-50/80 dark:hover:bg-white/[0.02] transition-colors duration-150"
 	>
@@ -712,7 +718,9 @@
 			</div>
 		{/if}
 	</div>
+	{/if}
 
+	{#if showOllamaParams || (params?.mirostat_tau ?? null) !== null}
 	<div
 		class="py-1.5 px-1 w-full justify-between rounded-lg hover:bg-gray-50/80 dark:hover:bg-white/[0.02] transition-colors duration-150"
 	>
@@ -776,6 +784,7 @@
 			</div>
 		{/if}
 	</div>
+	{/if}
 
 	<div
 		class="py-1.5 px-1 w-full justify-between rounded-lg hover:bg-gray-50/80 dark:hover:bg-white/[0.02] transition-colors duration-150"
@@ -1095,6 +1104,7 @@
 		{/if}
 	</div>
 
+	{#if showOllamaParams || (params?.repeat_last_n ?? null) !== null}
 	<div
 		class="py-1.5 px-1 w-full justify-between rounded-lg hover:bg-gray-50/80 dark:hover:bg-white/[0.02] transition-colors duration-150"
 	>
@@ -1156,7 +1166,9 @@
 			</div>
 		{/if}
 	</div>
+	{/if}
 
+	{#if showOllamaParams || (params?.tfs_z ?? null) !== null}
 	<div
 		class="py-1.5 px-1 w-full justify-between rounded-lg hover:bg-gray-50/80 dark:hover:bg-white/[0.02] transition-colors duration-150"
 	>
@@ -1220,7 +1232,9 @@
 			</div>
 		{/if}
 	</div>
+	{/if}
 
+	{#if showOllamaParams || (params?.num_keep ?? null) !== null}
 	<div
 		class="py-1.5 px-1 w-full justify-between rounded-lg hover:bg-gray-50/80 dark:hover:bg-white/[0.02] transition-colors duration-150"
 	>
@@ -1283,6 +1297,7 @@
 			</div>
 		{/if}
 	</div>
+	{/if}
 
 	<div
 		class="py-1.5 px-1 w-full justify-between rounded-lg hover:bg-gray-50/80 dark:hover:bg-white/[0.02] transition-colors duration-150"
@@ -1347,6 +1362,7 @@
 		{/if}
 	</div>
 
+	{#if showOllamaParams || (params?.repeat_penalty ?? null) !== null}
 	<div
 		class="py-1.5 px-1 w-full justify-between rounded-lg hover:bg-gray-50/80 dark:hover:bg-white/[0.02] transition-colors duration-150"
 	>
@@ -1410,7 +1426,9 @@
 			</div>
 		{/if}
 	</div>
+	{/if}
 
+	{#if showOllamaParams || (params?.num_ctx ?? null) !== null}
 	<div
 		class="py-1.5 px-1 w-full justify-between rounded-lg hover:bg-gray-50/80 dark:hover:bg-white/[0.02] transition-colors duration-150"
 	>
@@ -1472,7 +1490,9 @@
 			</div>
 		{/if}
 	</div>
+	{/if}
 
+	{#if showOllamaParams || (params?.num_batch ?? null) !== null}
 	<div
 		class="py-1.5 px-1 w-full justify-between rounded-lg hover:bg-gray-50/80 dark:hover:bg-white/[0.02] transition-colors duration-150"
 	>
@@ -1535,6 +1555,7 @@
 			</div>
 		{/if}
 	</div>
+	{/if}
 
 	{#if enableCustomParams}
 		<div

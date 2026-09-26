@@ -345,11 +345,11 @@
 	$: defaultEffortSteps = [
 		{ value: 'none', label: tr('关闭', 'Off') },
 		{ value: null, label: tr('默认', 'Default') },
-		{ value: 'low', label: 'Low' },
-		{ value: 'medium', label: 'Medium' },
-		{ value: 'high', label: 'High' },
-		{ value: 'xhigh', label: 'XHigh' },
-		{ value: 'max', label: 'Max' }
+		{ value: 'low', label: tr('低', 'Low') },
+		{ value: 'medium', label: tr('中', 'Medium') },
+		{ value: 'high', label: tr('高', 'High') },
+		{ value: 'xhigh', label: tr('超高', 'XHigh') },
+		{ value: 'max', label: tr('最大', 'Max') }
 	];
 
 	$: defaultTokenSteps = [
@@ -921,6 +921,7 @@
 							globalToolCallingMode={displayedGlobalToolCallingMode}
 							followGlobalToolCallingMode={FOLLOW_GLOBAL_TOOL_CALLING_MODE}
 							enableCustomParams={true}
+							showOllamaParams={!models?.length || models.some((model) => model?.owned_by === 'ollama')}
 							bind:params
 							on:change={handleAdvancedParamsChange}
 							on:updateGlobalToolCallingMode={handleUpdateGlobalToolCallingMode}

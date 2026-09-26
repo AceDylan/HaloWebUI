@@ -72,7 +72,7 @@
 		audio: false,
 		dataManagement: false,
 		account: false,
-		// users removed - merged into account
+		users: false,
 		functions: false,
 		models: false,
 		documents: false,
@@ -85,6 +85,11 @@
 		userAgent: false
 	};
 	$: currentPath = $page.url.pathname;
+	// User management and permission groups are admin pages that live on the
+	// account page (?tab=users|groups); they are listed under System, not Personal.
+	$: accountTab = $page.url.searchParams.get('tab');
+	$: onAdminAccountTab =
+		currentPath.startsWith('/settings/account') && (accountTab === 'users' || accountTab === 'groups');
 	$: {
 		const path = currentPath || '';
 		activeLinks = {
@@ -95,8 +100,8 @@
 			tools: path.startsWith('/settings/tools'),
 			audio: path.startsWith('/settings/audio') || path.startsWith('/settings/system-audio'),
 			dataManagement: path.startsWith('/settings/chats'),
-			account: path.startsWith('/settings/account'),
-			// users removed - merged into account
+			account: path.startsWith('/settings/account') && !onAdminAccountTab,
+			users: onAdminAccountTab,
 			functions: path.startsWith('/settings/functions'),
 			models: path.startsWith('/settings/models'),
 			documents: path.startsWith('/settings/documents'),
@@ -126,10 +131,35 @@
 	$: activeInterfaceTab = activeLinks.interface
 		? resolveInterfaceTab($page.url.searchParams.get(INTERFACE_TAB_QUERY_KEY), isAdmin)
 		: null;
+
+	// Tab title names the open section (every page used to read just "Settings").
+	const sectionTitleKeys: Array<[keyof typeof activeLinks, string]> = [
+		['interface', 'Interface'],
+		['connections', 'Connections'],
+		['tools', 'Tool Integrations'],
+		['audio', 'Audio'],
+		['dataManagement', 'Database'],
+		['account', 'Account Management'],
+		['users', 'User Management'],
+		['general', 'General'],
+		['userDefaults', '账户预设'],
+		['models', 'Model Management'],
+		['documents', 'Documents'],
+		['webSearch', 'Web Search'],
+		['codeExecution', 'Code Execution'],
+		['userAgent', 'User-Agent'],
+		['images', 'Images'],
+		['analytics', 'Analytics'],
+		['externalApi', '外部 API'],
+		['haloclaw', 'HaloClaw'],
+		['functions', 'Functions']
+	];
+	$: activeSectionTitleKey = sectionTitleKeys.find(([key]) => activeLinks[key])?.[1] ?? '';
+	$: activeSectionTitle = activeSectionTitleKey ? $i18n.t(activeSectionTitleKey) : '';
 </script>
 
 <svelte:head>
-	<title>{$i18n.t('Settings')} | {$WEBUI_NAME}</title>
+	<title>{activeSectionTitle || $i18n.t('Settings')} | {$WEBUI_NAME}</title>
 </svelte:head>
 
 {#if loaded}
@@ -209,6 +239,9 @@
 					{#if isAdmin}
 						<div class={navGroupLabelClass}>{$i18n.t('System')}</div>
 						<a class={navLinkClass(activeLinks.general)} href="/settings">{$i18n.t('General')}</a>
+						<a class={navLinkClass(activeLinks.users)} href="/settings/account?tab=users"
+							>{$i18n.t('User Management')}</a
+						>
 						<a class={navLinkClass(activeLinks.userDefaults)} href="/settings/user-defaults">
 							账户预设
 						</a>

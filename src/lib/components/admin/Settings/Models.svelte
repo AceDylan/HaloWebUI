@@ -1214,9 +1214,9 @@
 				<!-- ==================== Search / Filter Toolbar ==================== -->
 				<section class="glass-section p-4 space-y-3">
 					<!-- Search + Filter button row -->
-					<div class="flex items-center gap-2">
+					<div class="flex flex-wrap items-center gap-2">
 						<div
-							class="flex flex-1 items-center bg-gray-50 dark:bg-gray-900/40 rounded-xl px-3 py-2 border border-gray-200/60 dark:border-gray-800"
+							class="flex flex-1 basis-full sm:basis-0 min-w-0 items-center bg-gray-50 dark:bg-gray-900/40 rounded-xl px-3 py-2 border border-gray-200/60 dark:border-gray-800"
 						>
 							<div class="self-center mr-2.5 text-gray-500 dark:text-gray-400">
 								<Search className="size-4" />
@@ -1229,7 +1229,7 @@
 						</div>
 
 						<button
-							class="flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-xl border border-gray-200/60 dark:border-gray-800 text-gray-500 dark:text-gray-400 transition hover:bg-gray-100 dark:hover:bg-gray-800/60 disabled:cursor-not-allowed disabled:opacity-60"
+							class="flex shrink-0 items-center gap-1.5 whitespace-nowrap px-3 py-2 text-xs font-medium rounded-xl border border-gray-200/60 dark:border-gray-800 text-gray-500 dark:text-gray-400 transition hover:bg-gray-100 dark:hover:bg-gray-800/60 disabled:cursor-not-allowed disabled:opacity-60"
 							type="button"
 							disabled={refreshingModels || listLoading}
 							on:click={manualRefreshModels}
@@ -1243,7 +1243,7 @@
 						</button>
 
 						<button
-							class="flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-xl border transition
+							class="flex shrink-0 items-center gap-1.5 whitespace-nowrap px-3 py-2 text-xs font-medium rounded-xl border transition
 									{selectMode
 								? 'border-blue-300 dark:border-blue-700 bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300'
 								: 'border-gray-200/60 dark:border-gray-800 text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800/60'}"
@@ -1269,7 +1269,7 @@
 						</button>
 
 						<button
-							class="flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-xl border transition
+							class="flex shrink-0 items-center gap-1.5 whitespace-nowrap px-3 py-2 text-xs font-medium rounded-xl border transition
 									{filterOpen || activeFilterCount > 0
 								? 'border-emerald-300 dark:border-emerald-700 bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300'
 								: 'border-gray-200/60 dark:border-gray-800 text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800/60'}"
@@ -1299,7 +1299,7 @@
 						</button>
 
 						<button
-							class="flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-xl border transition
+							class="flex shrink-0 items-center gap-1.5 whitespace-nowrap px-3 py-2 text-xs font-medium rounded-xl border transition
 										border-gray-200/60 dark:border-gray-800 text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800/60"
 							type="button"
 							on:click={() => {

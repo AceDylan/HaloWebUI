@@ -203,12 +203,25 @@ def record_launch_outcome(
     status: Any = None,
     **kwargs: Any,
 ) -> None:
-    key = _launch_key(tool_name, args, kwargs)
-    if key is None:
+    if tool_name != "terminal":
         return
     tool_call_id = str(kwargs.get("tool_call_id") or "")
+    session = str(kwargs.get("session_id") or kwargs.get("task_id") or "")
+    turn = str(kwargs.get("turn_id") or "")
     with _lock:
-        entry = _launches.get(key)
+        # Found by call id first: another pre_tool_call hook (rtk-rewrite)
+        # may have rewritten the command this call reports back with.
+        key = next(
+            (
+                k
+                for k, v in _launches.items()
+                if tool_call_id
+                and v["tool_call_id"] == tool_call_id
+                and k[:2] == (session, turn)
+            ),
+            None,
+        ) or _launch_key(tool_name, args, kwargs)
+        entry = _launches.get(key) if key else None
         # Only the call that registered the launch settles it; a blocked
         # duplicate reports back too and must not clear the original.
         if entry is None or entry["tool_call_id"] != tool_call_id:

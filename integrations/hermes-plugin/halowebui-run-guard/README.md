@@ -55,4 +55,10 @@ plugins:
     - halowebui-run-guard
 ```
 
+Check it before restarting: `hermes plugins doctor --ci halowebui-run-guard`
+should print `OK: runtime discovery, manifest parsing, import, and registration
+passed`, and `hermes plugins show halowebui-run-guard` should say
+`Status: enabled`. Plugins load when the gateway starts, so nothing changes
+until the restart.
+
 To turn it off, remove the line and restart the gateway.

@@ -289,6 +289,28 @@ def test_a_launch_that_did_not_start_can_be_retried(result, status):
     )
 
 
+def test_the_outcome_is_matched_by_call_id_when_the_command_was_rewritten():
+    # Another pre_tool_call hook (rtk-rewrite) may rewrite the command in place,
+    # so the call reports back with a command the launch was not keyed on.
+    plugin.block_repeated_launch(
+        tool_name="terminal", args={"command": LAUNCH}, **_ids("call_2")
+    )
+    plugin.record_launch_outcome(
+        tool_name="terminal",
+        args={"command": "rtk " + LAUNCH},
+        result=json.dumps({"output": "Error: bad flag", "exit_code": 2, "error": None}),
+        status="ok",
+        **_ids("call_2"),
+    )
+
+    assert (
+        plugin.block_repeated_launch(
+            tool_name="terminal", args={"command": LAUNCH}, **_ids("call_3")
+        )
+        is None
+    )
+
+
 def test_background_launch_without_a_run_id_still_counts():
     args = {"command": LAUNCH, "background": True}
     plugin.block_repeated_launch(tool_name="terminal", args=args, **_ids("call_2"))

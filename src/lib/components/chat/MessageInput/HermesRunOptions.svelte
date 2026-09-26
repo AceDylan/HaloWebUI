@@ -196,7 +196,7 @@
 						aria-checked={continuing}
 						title="交回 {continuation.runner} 运行 {continuation.runId} 的原会话"
 						data-halo-hermes-dispatch="continue"
-						class="col-span-4 truncate rounded-lg px-1.5 py-1.5 text-xs transition {continuing
+						class="col-span-4 truncate rounded-lg px-1.5 py-1.5 text-xs transition max-sm:py-2.5 max-sm:text-sm {continuing
 							? 'bg-primary-600 text-white dark:bg-primary-500'
 							: 'bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700'}"
 						on:click={() => update({ dispatch: '' })}
@@ -212,7 +212,7 @@
 						aria-checked={checked}
 						title={item.hint}
 						data-halo-hermes-dispatch={item.value || 'direct'}
-						class="rounded-lg px-1.5 py-1.5 text-xs transition {checked
+						class="rounded-lg px-1.5 py-1.5 text-xs transition max-sm:py-2.5 max-sm:text-sm {checked
 							? 'bg-primary-600 text-white dark:bg-primary-500'
 							: 'bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700'}"
 						on:click={() => update({ dispatch: item.value || (continuation ? 'hermes' : '') })}

@@ -21,7 +21,7 @@
 				{$i18n.t('{{count}} message(s) queued', { count: queue.length })}
 			</span>
 			<button
-				class="text-xs text-gray-400 hover:text-red-500 dark:hover:text-red-400 transition-colors"
+				class="text-xs text-gray-400 hover:text-red-500 dark:hover:text-red-400 transition-colors max-sm:px-2 max-sm:py-1.5"
 				on:click={onClearAll}
 			>
 				{$i18n.t('Clear All')}
@@ -51,7 +51,7 @@
 					<!-- 编辑 -->
 					<Tooltip content={$i18n.t('Edit')}>
 						<button
-							class="text-gray-400 hover:text-blue-500 dark:hover:text-blue-400 transition-colors p-0.5"
+							class="text-gray-400 hover:text-blue-500 dark:hover:text-blue-400 transition-colors p-0.5 max-sm:p-2"
 							on:click={() => onEdit(item.id)}
 						>
 							<Pencil className="size-3.5" />
@@ -61,7 +61,7 @@
 					<!-- 删除 -->
 					<Tooltip content={$i18n.t('Remove')}>
 						<button
-							class="text-gray-400 hover:text-red-500 dark:hover:text-red-400 transition-colors p-0.5"
+							class="text-gray-400 hover:text-red-500 dark:hover:text-red-400 transition-colors p-0.5 max-sm:p-2"
 							on:click={() => onDelete(item.id)}
 						>
 							<XMark className="size-3.5" />

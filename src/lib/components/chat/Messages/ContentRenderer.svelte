@@ -7,6 +7,7 @@
 		artifactAutoOpenDismissedMessageId,
 		artifactPreviewTarget,
 		chatId,
+		config,
 		mobile,
 		settings,
 		showArtifacts,
@@ -62,6 +63,7 @@
 		inlineSameOriginPreviewImages
 	} from '$lib/utils/html-preview-images';
 	import ImagePreview from '$lib/components/common/ImagePreview.svelte';
+	import { openNoteInHub } from '$lib/utils/hub-embed';
 	import {
 		createEmptySelectionThreads,
 		hashSelectionThreadSource,
@@ -414,7 +416,27 @@
 		showImagePreview = true;
 	};
 
+	// A note link of a formatted reply (response-html-format.ts): framed by the
+	// Hub, a plain click opens the note in the Hub's 笔记 tab instead of a new tab.
+	const handleHubNoteClick = (event: MouseEvent) => {
+		if (event.button || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
+			return;
+		}
+		const link = (event.target as HTMLElement | null)?.closest?.('a[data-hub-note]');
+		if (!link || !contentContainerElement?.contains(link)) {
+			return;
+		}
+		if (openNoteInHub(link.getAttribute('data-hub-note') ?? '', $config?.hub_origin)) {
+			event.preventDefault();
+		}
+	};
+
 	const handleMessageContentClick = (event: MouseEvent) => {
+		handleHubNoteClick(event);
+		if (event.defaultPrevented) {
+			return;
+		}
+
 		handleHaloCopyClick(event);
 
 		if (event.defaultPrevented) {
@@ -583,7 +605,10 @@
 	}
 	$: renderedMessageContent =
 		!inlineHtmlArtifactPreview && !streaming && ($settings?.responseHtmlFormat ?? false)
-			? renderResponseHtmlFormat(normalizedContent) || normalizedContent
+			? renderResponseHtmlFormat(normalizedContent, {
+					vaultRoot: $config?.hub_vault_root,
+					hubOrigin: $config?.hub_origin
+				}) || normalizedContent
 			: normalizedContent;
 
 	const syncInlineHtmlPreviewDocument = async (document: string | null) => {

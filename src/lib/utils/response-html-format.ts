@@ -2,6 +2,7 @@ import { decode } from 'html-entities';
 
 import { getDataUrlDownloadName } from './download-links';
 import { resolveSafeMarkdownUrl } from './html-safety';
+import { hubNoteUrl, splitVaultNotePaths, vaultNotePath } from './hub-embed';
 import {
 	formatToolDuration,
 	getToolCallInput,
@@ -303,18 +304,65 @@ const normalizeReasoningText = (value: string) =>
 		.replace(/\n{3,}/g, '\n\n')
 		.trim();
 
-const renderInlineWithoutLinks = (value: string): string => {
+export type ResponseHtmlFormatOptions = {
+	/** The Hub's note vault on the host and the Hub's origin (see hub-embed.ts). */
+	vaultRoot?: string | null;
+	hubOrigin?: string | null;
+};
+
+// Notes named by their host path open in the Hub (hub-embed.ts). Set only for
+// the duration of one (synchronous) renderResponseHtmlFormat call.
+let noteLinks: { root: string; hubOrigin: string } | null = null;
+
+// A note link carries its vault path in data-hub-note: framed by the Hub, the
+// message's click handler asks the Hub to open it instead of following href.
+const noteLinkHtml = (path: string, inner: string, button = false) => {
+	const href = noteLinks ? hubNoteUrl(path, noteLinks.hubOrigin) : null;
+	if (!href) {
+		return inner;
+	}
+	const style = button
+		? toStyle({
+				'margin-left': '4px',
+				padding: '1px 6px',
+				'border-radius': '6px',
+				background: THEME.primarySoft,
+				color: THEME.primary,
+				'font-size': '12px',
+				'font-weight': 650,
+				'text-decoration': 'none',
+				'white-space': 'nowrap'
+			})
+		: toStyle({
+				color: THEME.primary,
+				'text-decoration': 'underline',
+				'text-underline-offset': '3px'
+			});
+	return `<a href="${escapeAttribute(href)}" target="_blank" rel="noopener noreferrer" data-hub-note="${escapeAttribute(
+		path
+	)}" title="在笔记中打开" style="${escapeAttribute(style)}">${inner}</a>`;
+};
+
+const renderInlineWithoutLinks = (value: string, allowNoteLinks = true): string => {
 	const input = normalizeText(value);
 	let html = '';
 	let cursor = 0;
 	const codePattern = /`([^`\n]+)`/g;
 	let match: RegExpExecArray | null;
 
-	const renderEmphasis = (text: string) =>
+	const renderPlain = (text: string) =>
 		escapeHtml(text)
 			.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
 			.replace(/__([^_]+)__/g, '<strong>$1</strong>')
 			.replace(/\n+/g, '<br>');
+	const renderEmphasis = (text: string) =>
+		noteLinks && allowNoteLinks
+			? splitVaultNotePaths(text, noteLinks.root)
+					.map((piece) =>
+						piece.path ? noteLinkHtml(piece.path, escapeHtml(piece.text)) : renderPlain(piece.text)
+					)
+					.join('')
+			: renderPlain(text);
 
 	while ((match = codePattern.exec(input))) {
 		html += renderEmphasis(input.slice(cursor, match.index));
@@ -327,6 +375,10 @@ const renderInlineWithoutLinks = (value: string): string => {
 				'font-size': '0.92em'
 			})
 		)}">${escapeHtml(match[1])}</code>`;
+		const notePath = noteLinks && allowNoteLinks ? vaultNotePath(match[1], noteLinks.root) : null;
+		if (notePath) {
+			html += noteLinkHtml(notePath, '打开笔记', true);
+		}
 		cursor = match.index + match[0].length;
 	}
 
@@ -338,18 +390,20 @@ const renderInline = (value: string): string => {
 	const input = normalizeText(value);
 	let html = '';
 	let cursor = 0;
-	const linkPattern = /(!?)\[([^\]\n]{1,200})\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g;
+	// [label](target) or [label](<target with spaces>).
+	const linkPattern = /(!?)\[([^\]\n]{1,200})\]\((?:<([^<>\n]+)>|([^)\s]+))(?:\s+"[^"]*")?\)/g;
 	let match: RegExpExecArray | null;
 
 	while ((match = linkPattern.exec(input))) {
 		html += renderInlineWithoutLinks(input.slice(cursor, match.index));
 		const label = match[2];
+		const target = match[3] ?? match[4];
 
 		if (match[1] === '!') {
 			// Markdown image, e.g. generated images referenced as
 			// ![image](/api/v1/files/<id>/content). Relative file-content
 			// URLs are the norm here, unlike links below.
-			const src = resolveSafeMarkdownUrl(match[3], {
+			const src = resolveSafeMarkdownUrl(target, {
 				allowHash: false,
 				allowRelative: true,
 				allowDataImage: true
@@ -373,7 +427,15 @@ const renderInline = (value: string): string => {
 			continue;
 		}
 
-		const href = resolveSafeMarkdownUrl(match[3], {
+		// A link to a note on disk (there is no such page here) opens it in the Hub.
+		const notePath = noteLinks ? vaultNotePath(target, noteLinks.root) : null;
+		if (notePath) {
+			html += noteLinkHtml(notePath, renderInlineWithoutLinks(label, false));
+			cursor = match.index + match[0].length;
+			continue;
+		}
+
+		const href = resolveSafeMarkdownUrl(target, {
 			allowHash: true,
 			allowRelative: false,
 			allowDataDownload: true
@@ -393,7 +455,7 @@ const renderInline = (value: string): string => {
 					'text-underline-offset': downloadName ? undefined : '3px',
 					'font-weight': 650
 				})
-			)}">${downloadName ? '下载 ' : ''}${renderInlineWithoutLinks(label)}</a>`;
+			)}">${downloadName ? '下载 ' : ''}${renderInlineWithoutLinks(label, false)}</a>`;
 		} else {
 			html += renderInlineWithoutLinks(match[0]);
 		}
@@ -1264,7 +1326,21 @@ export const isKnownInlineHtmlFormatFragment = (content: unknown): content is st
 		content
 	);
 
-export const renderResponseHtmlFormat = (content: string): string => {
+export const renderResponseHtmlFormat = (
+	content: string,
+	options: ResponseHtmlFormatOptions = {}
+): string => {
+	const root = typeof options.vaultRoot === 'string' ? options.vaultRoot : '';
+	const hubOrigin = typeof options.hubOrigin === 'string' ? options.hubOrigin : '';
+	noteLinks = root && hubOrigin && hubNoteUrl('x.md', hubOrigin) ? { root, hubOrigin } : null;
+	try {
+		return renderResponseHtml(content);
+	} finally {
+		noteLinks = null;
+	}
+};
+
+const renderResponseHtml = (content: string): string => {
 	const normalized = normalizeText(content);
 	if (!normalized) {
 		return '';

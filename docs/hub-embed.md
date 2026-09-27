@@ -52,7 +52,9 @@ Hermes reports the notes it writes by their host path
 `/api/config` gives signed-in users `hub_vault_root`, and the reply renderer turns a
 Markdown note under it into a link: in plain text and link targets the path itself, after
 a code span a small "打开笔记" button (the code span keeps click-to-copy). Nothing outside
-the vault, no `..`, no dot-folders, only `.md`.
+the vault, no `..`, no dot-folders, only `.md`. Replies rendered with the formatted-HTML
+option (`responseHtmlFormat`, `src/lib/utils/response-html-format.ts`) get the same links,
+marked `data-hub-note="<path>"`; the message's click handler does the framed case.
 
 Framed by the Hub, a plain click posts `{source: 'halowebui', type: 'open-note', path}` to
 the Hub's origin only; the Hub checks the sender is its chat frame, validates the path

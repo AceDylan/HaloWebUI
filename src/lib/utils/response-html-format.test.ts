@@ -350,3 +350,58 @@ describe('response-html-format theme variables', () => {
 		expect(hasHaloThemeVars(resolveHaloThemeVars(style))).toBe(false);
 	});
 });
+
+describe('renderResponseHtmlFormat: notes of the Hub vault', () => {
+	const ROOT = '/root/Documents/Obsidian Vault';
+	const HUB = 'https://best.acedylan.us:5526';
+	const options = { vaultRoot: ROOT, hubOrigin: HUB };
+	const noteHref = (path: string) => `${HUB}/?note=${encodeURIComponent(path)}#vault`;
+
+	it('links a plain-text path to the Hub, carrying the vault path', () => {
+		const html = renderResponseHtmlFormat(
+			`记录已更新：${ROOT}/系统/Hermes/YCE 更新（2026-08-11）.md，完成。`,
+			options
+		);
+		expect(html).toContain(`href="${noteHref('系统/Hermes/YCE 更新（2026-08-11）.md')}"`);
+		expect(html).toContain('data-hub-note="系统/Hermes/YCE 更新（2026-08-11）.md"');
+		expect(html).toContain(`>${ROOT}/系统/Hermes/YCE 更新（2026-08-11）.md</a>，完成。`);
+	});
+
+	it('keeps a code span and adds an open button after it', () => {
+		const html = renderResponseHtmlFormat(`见 \`${ROOT}/项目/HaloWebUI.md\` 一节。`, options);
+		expect(html).toMatch(
+			/<code [^>]*>\/root\/Documents\/Obsidian Vault\/项目\/HaloWebUI\.md<\/code><a /
+		);
+		expect(html).toContain('data-hub-note="项目/HaloWebUI.md"');
+		expect(html).toContain('>打开笔记</a>');
+	});
+
+	it('turns a link to the note on disk into a Hub link without nesting links', () => {
+		const html = renderResponseHtmlFormat(
+			`已更新 [${ROOT}/项目/HaloWebUI.md](<${ROOT}/项目/HaloWebUI.md>)。`,
+			options
+		);
+		expect(html.match(/<a /g)).toHaveLength(1);
+		expect(html).toContain(`href="${noteHref('项目/HaloWebUI.md')}"`);
+		expect(html).not.toContain('](<');
+	});
+
+	it('reads angle-bracket link targets for ordinary links too', () => {
+		const html = renderResponseHtmlFormat('看 [文档](<https://example.com/a b>)。');
+		expect(html).toContain('href="https://example.com/a b"');
+	});
+
+	it('leaves paths as text without a vault root or a Hub, or outside the vault', () => {
+		for (const opts of [
+			{},
+			{ vaultRoot: ROOT },
+			{ hubOrigin: HUB },
+			{ vaultRoot: ROOT, hubOrigin: '*' }
+		]) {
+			const html = renderResponseHtmlFormat(`写入 ${ROOT}/项目/a.md`, opts);
+			expect(html).not.toContain('data-hub-note');
+		}
+		const html = renderResponseHtmlFormat(`Vault 是 ${ROOT}，另见 ${ROOT}/.obsidian/a.md`, options);
+		expect(html).not.toContain('data-hub-note');
+	});
+});

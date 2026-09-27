@@ -190,11 +190,24 @@ async def get_hermes_model_options(
     request: Request, model_id: Optional[str] = None, user=Depends(get_verified_user)
 ):
     """The models (by provider) hermes can run a chat with, for the composer's
-    per-chat model picker."""
+    per-chat model picker, and the thinking level every hermes model request
+    gets (hermes' halowebui-reasoning-sync plugin applies the Message Gateway
+    default to all of them, Telegram included)."""
+    from open_webui.haloclaw.config import (
+        HALOCLAW_DEFAULT_REASONING_EFFORT,
+        normalize_default_reasoning_effort,
+    )
+
     try:
-        return await list_model_options(request, user, model_id)
+        options = await list_model_options(request, user, model_id)
     except HermesSessionsError as e:
         raise HTTPException(status_code=e.status_code, detail=e.detail)
+    return {
+        **options,
+        "reasoning_effort": normalize_default_reasoning_effort(
+            HALOCLAW_DEFAULT_REASONING_EFFORT.value
+        ),
+    }
 
 
 @router.post("/runners/{run_id}/stop")

@@ -136,3 +136,23 @@ def test_a_follow_up_turn_still_needs_a_prompt(monkeypatch):
             )
         )
     assert error.value.status_code == 422
+
+
+def test_model_options_say_which_thinking_level_every_hermes_request_gets(monkeypatch):
+    import asyncio
+
+    from open_webui.haloclaw import config as haloclaw_config
+    from open_webui.routers import hermes as hermes_router
+
+    async def options(request, user, model_id=None):
+        return {"model": "gpt-chat", "provider": "custom", "providers": []}
+
+    monkeypatch.setattr(hermes_router, "list_model_options", options)
+    monkeypatch.setattr(haloclaw_config.HALOCLAW_DEFAULT_REASONING_EFFORT, "value", "high")
+    result = asyncio.run(hermes_router.get_hermes_model_options(None, None, user=object()))
+    assert result == {
+        "model": "gpt-chat",
+        "provider": "custom",
+        "providers": [],
+        "reasoning_effort": "high",
+    }

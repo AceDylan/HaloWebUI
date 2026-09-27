@@ -93,6 +93,34 @@ describe('HermesRunOptions', () => {
 		expect(panel.textContent).toContain('思考强度跟随 HaloWebUI 设置');
 	});
 
+	it('says which thinking level every hermes request gets, and where an admin changes it', async () => {
+		const { user } = await import('$lib/stores');
+		api.getHermesModelOptions.mockResolvedValue({
+			model: 'gpt-chat',
+			provider: 'custom:relay',
+			providers: [
+				{ slug: 'custom:relay', name: 'relay', current: true, models: ['gpt-chat'] },
+				{ slug: 'custom:deepseek-chat', name: 'deepseek', current: false, models: ['deepseek-chat'] }
+			],
+			reasoning_effort: 'high'
+		});
+		user.set({ role: 'admin' } as any);
+		let panel: any = await mount();
+		let note = panel.querySelector('[data-halo-hermes-effort-note]');
+		expect(note.textContent).toContain('思考强度高');
+		expect(note.textContent).toContain('调低回复更快');
+		expect(note.querySelector('a')?.getAttribute('href')).toBe('/settings/haloclaw');
+		app.$destroy();
+		target.remove();
+
+		user.set({ role: 'user' } as any);
+		panel = await mount();
+		note = panel.querySelector('[data-halo-hermes-effort-note]');
+		expect(note.textContent).toContain('思考强度高');
+		expect(note.querySelectorAll('a').length).toBe(0);
+		user.set(undefined as any);
+	});
+
 	it('says a dispatch covers the next message only, readable without hovering', async () => {
 		const panel: any = await mount({ dispatch: 'codex' });
 		const hint = panel.querySelector('[data-halo-hermes-dispatch-hint]');

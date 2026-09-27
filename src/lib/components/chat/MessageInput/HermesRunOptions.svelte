@@ -2,6 +2,7 @@
 	import { getContext, onDestroy, tick } from 'svelte';
 
 	import { getHermesModelOptions, type HermesModelOptions } from '$lib/apis/hermes';
+	import { user } from '$lib/stores';
 	import {
 		EMPTY_HERMES_RUN_OPTIONS,
 		normalizeHermesRunOptions,
@@ -98,6 +99,18 @@
 				provider: provider.name
 			}))
 	);
+	// The thinking level is not per chat: hermes' reasoning-sync plugin sets the
+	// Message Gateway default on every request (Telegram too). Saying which
+	// level, and where it is changed, is the one speed lever the panel can point at.
+	const EFFORT_LABELS: Record<string, string> = {
+		none: '关闭',
+		low: '低',
+		medium: '中',
+		high: '高',
+		xhigh: '很高',
+		max: '最高'
+	};
+	$: effortLabel = EFFORT_LABELS[modelOptions?.reasoning_effort ?? ''] ?? '';
 	// A model chosen earlier that the list no longer offers stays visible.
 	$: pinnedMissing =
 		Boolean(current.model) && !modelChoices.some((item) => item.value === modelValue);
@@ -267,7 +280,7 @@
 			<div
 				class="mt-3 flex items-start justify-between gap-2 text-2xs text-gray-400 dark:text-gray-500"
 			>
-				<span class="min-w-0">模型对这个对话一直生效；思考强度跟随 HaloWebUI 设置</span>
+				<span class="min-w-0">模型对这个对话一直生效</span>
 				{#if summary}
 					<button
 						type="button"
@@ -278,6 +291,21 @@
 					>
 						恢复默认
 					</button>
+				{/if}
+			</div>
+			<div class="mt-1 text-2xs text-gray-400 dark:text-gray-500" data-halo-hermes-effort-note>
+				{#if effortLabel}
+					思考强度{effortLabel}，Hermes 各入口共用，调低回复更快{#if $user?.role === 'admin'}
+						·
+						<a
+							class="text-primary-600 hover:underline dark:text-primary-400"
+							href="/settings/haloclaw"
+							on:click={() => {
+								open = false;
+							}}>去修改</a
+						>{/if}
+				{:else}
+					思考强度跟随 HaloWebUI 设置（消息网关）
 				{/if}
 			</div>
 		</div>

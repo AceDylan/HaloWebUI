@@ -276,6 +276,8 @@ export type HermesModelOptions = {
 	model: string;
 	provider: string;
 	providers: HermesModelProvider[];
+	/** The Message Gateway thinking level hermes applies to every model request. */
+	reasoning_effort?: string;
 };
 
 /** The models hermes can run a chat with, grouped by provider. */

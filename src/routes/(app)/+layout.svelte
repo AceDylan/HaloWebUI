@@ -49,7 +49,7 @@
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import { applyUserSettingsSnapshot } from '$lib/utils/user-settings';
 	import { startHermesActivityPolling, stopHermesActivityPolling } from '$lib/utils/hermes-activity';
-	import { requestHubReauth } from '$lib/utils/hub-embed';
+	import { isFramed, requestHubReauth } from '$lib/utils/hub-embed';
 
 	const i18n = getContext('i18n');
 
@@ -229,7 +229,9 @@
 					event.preventDefault();
 					console.log('openSettings');
 					if ($page.url.pathname.startsWith('/settings')) {
-						history.back();
+						// In the Hub's frame there is no entry of ours behind this one (see hub-embed).
+						if (isFramed()) await goto('/');
+						else history.back();
 					} else {
 						await goto('/settings/interface');
 					}

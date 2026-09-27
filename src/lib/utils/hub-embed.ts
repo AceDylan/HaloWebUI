@@ -48,6 +48,48 @@ export const takeHubTicket = (
 };
 
 // ---------------------------------------------------------------------------
+// Browser history inside the Hub's frame.
+//
+// The Hub owns the page's Back: from any of its tabs Back returns to its
+// library, and from the library it leaves the Hub. An entry this frame pushes
+// (every chat opened from the sidebar) lands behind the Hub's own. Once the Hub
+// shows another tab, Back pages through chats in a frame that is hidden, and
+// nothing visible happens; and after the Hub shows this tab again the browser
+// keeps no record of where the frame was, so the first Back after opening
+// another chat does nothing at all. So, framed, a navigation replaces the
+// current entry instead of adding one (SvelteKit looks history.pushState up at
+// call time). Only the Hub may frame this app (frame-ancestors), so framed at
+// all means framed by the Hub.
+
+type HistoryWindow = {
+	parent: unknown;
+	history: Pick<History, 'pushState' | 'replaceState'>;
+};
+
+export const isFramed = (win: { parent: unknown } = window): boolean => {
+	try {
+		return !!win.parent && win.parent !== win;
+	} catch {
+		return true;
+	}
+};
+
+/** Framed: pushState becomes replaceState. Returns whether it did. */
+export const keepHistoryWithHub = (
+	win: HistoryWindow = window as unknown as HistoryWindow
+): boolean => {
+	if (!isFramed(win)) {
+		return false;
+	}
+	const history = win.history;
+	const replace = history.replaceState;
+	history.pushState = function (data: unknown, unused: string, url?: string | URL | null) {
+		return replace.call(this, data, unused, url);
+	};
+	return true;
+};
+
+// ---------------------------------------------------------------------------
 // Reply activity for the Hub's "AI 聊天" tab.
 //
 // When the Hub shows another of its pages it only hides this frame, so our

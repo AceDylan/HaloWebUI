@@ -5,6 +5,8 @@ import {
 	hubNoteUrl,
 	hubPlacePath,
 	hubReturnPath,
+	isFramed,
+	keepHistoryWithHub,
 	openNoteInHub,
 	parseHubTicket,
 	postActivityToHub,
@@ -84,6 +86,48 @@ describe('takeHubTicket', () => {
 		const h = history();
 		expect(takeHubTicket({ href: 'https://host.example:3001/auth#token=abc' }, h)).toBeNull();
 		expect(h.replaceState).not.toHaveBeenCalled();
+	});
+});
+
+describe('keepHistoryWithHub', () => {
+	const fakeHistory = () => {
+		const calls: string[] = [];
+		const history = {
+			state: null as unknown,
+			pushState(data: unknown, _unused: string, url?: string | URL | null) {
+				calls.push(`push ${url}`);
+				this.state = data;
+			},
+			replaceState(data: unknown, _unused: string, url?: string | URL | null) {
+				calls.push(`replace ${url}`);
+				this.state = data;
+			}
+		};
+		return { calls, history };
+	};
+
+	it('framed by the Hub, a navigation replaces the entry and keeps its state', () => {
+		const { calls, history } = fakeHistory();
+		const win = { parent: {}, history };
+		expect(keepHistoryWithHub(win)).toBe(true);
+		const state = { 'sveltekit:history': 3 };
+		win.history.pushState(state, '', '/c/abc');
+		win.history.replaceState(null, '', '/');
+		expect(calls).toEqual(['replace /c/abc', 'replace /']);
+		expect(history.state).toBe(null);
+		win.history.pushState(state, '', '/c/def');
+		expect(history.state).toBe(state);
+	});
+
+	it('on its own, history is left alone', () => {
+		const { calls, history } = fakeHistory();
+		const win: { parent: unknown; history: typeof history } = { parent: null, history };
+		win.parent = win;
+		expect(keepHistoryWithHub(win)).toBe(false);
+		win.history.pushState(null, '', '/c/abc');
+		expect(calls).toEqual(['push /c/abc']);
+		expect(isFramed(win)).toBe(false);
+		expect(isFramed({ parent: {} })).toBe(true);
 	});
 });
 

@@ -55,6 +55,7 @@
 	import { getNotificationPreview } from '$lib/utils/notification-preview';
 	import {
 		hubPlacePath,
+		keepHistoryWithHub,
 		postActivityToHub,
 		postPlaceToHub,
 		rememberHubOrigin,
@@ -64,6 +65,12 @@
 	import AppSidebar from '$lib/components/app/AppSidebar.svelte';
 
 	setContext('i18n', i18n);
+
+	// In the Bookmark Hub's frame the Hub owns Back: navigations replace the entry
+	// (see hub-embed). Here, before any page below can navigate.
+	if (typeof window !== 'undefined') {
+		keepHistoryWithHub();
+	}
 
 	const bc = new BroadcastChannel('active-tab-channel');
 	const PYODIDE_DISABLED_MESSAGE = 'Pyodide is disabled in this build.';

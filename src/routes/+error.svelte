@@ -3,6 +3,7 @@
 	import { writable } from 'svelte/store';
 	import { page } from '$app/stores';
 	import { WEBUI_NAME } from '$lib/stores';
+	import { isFramed } from '$lib/utils/hub-embed';
 
 	// The root layout provides i18n; fall back to English if the boundary renders before it.
 	const i18n = getContext<any>('i18n') ?? writable<any>(null);
@@ -10,6 +11,9 @@
 		const translated = $i18n?.t?.(key);
 		return translated && translated !== key ? translated : fallback;
 	};
+
+	// In the Bookmark Hub's frame, Back belongs to the Hub (it would leave this tab); "Back to home" stays.
+	const framed = typeof window !== 'undefined' && isFramed();
 
 	$: notFound = $page.status === 404;
 	$: title = notFound ? t('Page not found', 'Page not found') : $page.error?.message || '';
@@ -47,13 +51,15 @@
 			>
 				{t('Back to home', 'Back to home')}
 			</a>
-			<button
-				type="button"
-				class="inline-flex items-center justify-center rounded-xl border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/40 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
-				on:click={() => history.back()}
-			>
-				{t('Go back', 'Go back')}
-			</button>
+			{#if !framed}
+				<button
+					type="button"
+					class="inline-flex items-center justify-center rounded-xl border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/40 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
+					on:click={() => history.back()}
+				>
+					{t('Go back', 'Go back')}
+				</button>
+			{/if}
 		</div>
 	</div>
 </div>

@@ -1405,12 +1405,15 @@ _UNFINISHED_TOOL_DETAILS_RE = re.compile(
 )
 
 
-def _settle_unfinished_tool_markup(content: str, reason: str) -> str:
+def _settle_unfinished_tool_markup(
+    content: str, reason: str, *, interrupted: bool = True
+) -> str:
     """_settle_unfinished_tools for a reply known only as saved markup (a run
-    picked up again after this process restarted)."""
-    result = html.escape(
-        json.dumps({"status": "interrupted", "reason": reason}, ensure_ascii=False)
-    )
+    picked up again after this process restarted). A run that completed ran
+    its calls to the end - only their results never reached this process -
+    so they close without a status instead of reading "已中断"."""
+    outcome = {"status": "interrupted", "reason": reason} if interrupted else {}
+    result = html.escape(json.dumps(outcome, ensure_ascii=False))
 
     def _close(match):
         attributes = match.group(1)
@@ -2441,6 +2444,13 @@ async def run_hermes_agent(request, form_data, user, metadata, model, events, ta
                             "base_url": base_url,
                             "model_id": model_id,
                             "started_at": run_started_at,
+                            # The title/tags a finished reply triggers: a
+                            # new chat whose reply is picked up after a
+                            # restart otherwise stays "新对话" for good.
+                            "tasks": tasks if isinstance(tasks, dict) else None,
+                            "skip_text_enhancements": bool(
+                                metadata.get("skip_text_enhancements")
+                            ),
                         },
                     )
 
@@ -2631,10 +2641,30 @@ def _api_key_for_base_url(user, base_url: str) -> str:
     return ""
 
 
+def _background_request(app):
+    """A request for work no HTTP request is behind (a reply picked up after a
+    restart): request.app and request.state behave as in a real one, which
+    title generation and file storage rely on."""
+    from starlette.requests import Request
+
+    return Request(
+        {
+            "type": "http",
+            "app": app,
+            "method": "POST",
+            "path": "/api/chat/completions",
+            "root_path": "",
+            "scheme": "http",
+            "query_string": b"",
+            "headers": [],
+            "server": ("localhost", 8080),
+            "client": ("127.0.0.1", 0),
+        }
+    )
+
+
 async def _recover_inflight_run(app, chat_id: str, record: dict) -> None:
     """Finish a reply whose run was still going when this process stopped."""
-    from types import SimpleNamespace
-
     from open_webui.models.users import Users
 
     run_id = str(record.get("run_id") or "")
@@ -2654,8 +2684,10 @@ async def _recover_inflight_run(app, chat_id: str, record: dict) -> None:
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
     metadata = {"chat_id": chat_id, "message_id": message_id, "user_id": user.id}
+    if record.get("skip_text_enhancements"):
+        metadata["skip_text_enhancements"] = True
     emitter = get_event_emitter(metadata)
-    request = SimpleNamespace(app=app, state=SimpleNamespace())
+    request = _background_request(app)
 
     async def _status(description: str, done: bool):
         try:
@@ -2751,7 +2783,9 @@ async def _recover_inflight_run(app, chat_id: str, record: dict) -> None:
 
     content = str(message.get("content") or "")
     content = _settle_unfinished_tool_markup(
-        content, (error or "任务在 HaloWebUI 重启期间结束，这一步的结果没有传回来")[:200]
+        content,
+        (error or "任务在 HaloWebUI 重启期间结束，这一步的结果没有传回来")[:200],
+        interrupted=not (status == "completed" or output),
     )
     if output:
         try:
@@ -2805,6 +2839,14 @@ async def _recover_inflight_run(app, chat_id: str, record: dict) -> None:
         _schedule_completion_webhook(request, user, metadata, title, content)
     except Exception:
         pass
+    tasks = record.get("tasks")
+    if isinstance(tasks, dict) and tasks:
+        try:
+            from open_webui.utils.middleware import background_tasks_handler
+
+            await background_tasks_handler(request, user, metadata, tasks, emitter)
+        except Exception as e:
+            log.warning(f"hermes recovered reply background tasks failed: {e}")
 
 
 def resume_inflight_runs(app) -> int:

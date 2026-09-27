@@ -250,6 +250,10 @@ def test_saved_markup_is_settled_after_a_restart():
     settled = hermes_agent._settle_unfinished_tool_markup(content, "重启")
     assert 'done="true"' in settled and "Executing" not in settled
     assert html.escape('"status": "interrupted"') in settled
+    # The run completed: its calls ran to the end, only their results are missing.
+    completed = hermes_agent._settle_unfinished_tool_markup(content, "重启", interrupted=False)
+    assert 'done="true"' in completed and "status" not in html.unescape(completed)
+    assert "重启" not in completed
 
 
 def test_recovered_answer_replaces_its_streamed_start():
@@ -688,12 +692,88 @@ def test_a_restart_finishes_the_reply_it_left_behind(monkeypatch):
     assert final["content"].startswith("开始")
     assert final["content"].endswith("全部完成")
     assert 'done="false"' not in final["content"]
+    # Completed: the terminal call is closed as done, not "已中断".
+    assert "interrupted" not in html.unescape(final["content"])
     assert final["hermes_run"]["recovered"] is True
     assert hermes_agent._load_inflight() == {}
     assert any(
         event.get("type") == "chat:completion" and event["data"].get("done")
         for event in emitted
     )
+
+
+def _recover(monkeypatch, record, outcome, saved=None):
+    """Run _recover_inflight_run for one saved reply; returns (upserts, background calls)."""
+    hermes_agent._remember_inflight("chat-1", record)
+    saved = saved or hermes_agent._serialize_blocks(
+        [{"type": "tool", "id": "h-1", "name": "terminal", "preview": "ls", "done": False}]
+    )
+    hermes = _Hermes(statuses=[(200, outcome)])
+    upserts, background = [], []
+
+    async def event_emitter(event):
+        pass
+
+    async def background_tasks_handler(*args, **_kwargs):
+        background.append(args)
+
+    import open_webui.models.users as users_module
+    from open_webui.utils import middleware
+
+    monkeypatch.setattr(users_module.Users, "get_user_by_id",
+                        lambda _id: SimpleNamespace(id="user-1", role="admin"))
+    monkeypatch.setattr(hermes_agent.Chats, "get_message_by_id_and_message_id",
+                        lambda *_args: {"content": saved, "done": False})
+    monkeypatch.setattr(hermes_agent.Chats, "get_chat_title_by_id", lambda _chat_id: "新对话")
+    monkeypatch.setattr(
+        hermes_agent.Chats,
+        "upsert_message_to_chat_by_id_and_message_id",
+        lambda chat_id, message_id, payload, **kwargs: upserts.append(payload),
+    )
+    monkeypatch.setattr(hermes_agent, "get_event_emitter", lambda _metadata: event_emitter)
+    monkeypatch.setattr(hermes_agent, "_api_key_for_base_url", lambda *_args: "")
+    monkeypatch.setattr(hermes_agent, "_schedule_completion_webhook", lambda *_args: None)
+    monkeypatch.setattr(hermes_agent.aiohttp, "ClientSession", hermes.session)
+    monkeypatch.setattr(middleware, "background_tasks_handler", background_tasks_handler)
+    app = SimpleNamespace(state=SimpleNamespace())
+    asyncio.run(hermes_agent._recover_inflight_run(app, "chat-1", record))
+    return upserts, background, app
+
+
+_RECORD = {"run_id": "run-1", "message_id": "assistant-1", "user_id": "user-1",
+           "base_url": "http://hermes.test/v1", "started_at": 1.0}
+
+
+def test_a_reply_picked_up_after_a_restart_still_gets_its_title(monkeypatch):
+    # A new chat whose first reply was recovered stayed "新对话" in the sidebar.
+    tasks = {"title_generation": True, "tags_generation": True}
+    upserts, background, app = _recover(
+        monkeypatch, {**_RECORD, "tasks": tasks}, {"status": "completed", "output": "好了"}
+    )
+    assert upserts[-1]["done"] is True
+    assert len(background) == 1
+    request, user, metadata, passed_tasks, _emitter = background[0]
+    assert passed_tasks == tasks
+    assert request.app is app and user.id == "user-1"
+    assert metadata["chat_id"] == "chat-1" and metadata["message_id"] == "assistant-1"
+    # request.state works like a real request's (title generation caches models there).
+    request.state.MODELS = {"m": {}}
+    assert request.state.MODELS == {"m": {}}
+
+
+def test_a_record_without_tasks_skips_the_bookkeeping(monkeypatch):
+    _upserts, background, _app = _recover(
+        monkeypatch, dict(_RECORD), {"status": "completed", "output": "好了"}
+    )
+    assert background == []
+
+
+def test_tools_of_a_recovered_failed_run_still_read_as_interrupted(monkeypatch):
+    upserts, _background, _app = _recover(
+        monkeypatch, dict(_RECORD), {"status": "failed", "error": {"message": "boom"}}
+    )
+    content = html.unescape(upserts[-1]["content"])
+    assert '"status": "interrupted"' in content
 
 
 # ------------------------------------------------------------ round 2: dispatch, model, tools

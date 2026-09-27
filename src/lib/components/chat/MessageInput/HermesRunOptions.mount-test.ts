@@ -108,7 +108,7 @@ describe('HermesRunOptions', () => {
 		let panel: any = await mount();
 		let note = panel.querySelector('[data-halo-hermes-effort-note]');
 		expect(note.textContent).toContain('思考强度高');
-		expect(note.textContent).toContain('调低回复更快');
+		expect(note.textContent).toContain('调低回复更快 · 去修改');
 		expect(note.querySelector('a')?.getAttribute('href')).toBe('/settings/haloclaw');
 		app.$destroy();
 		target.remove();

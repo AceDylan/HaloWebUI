@@ -21,6 +21,7 @@
 		deleteGateway
 	} from '$lib/apis/haloclaw';
 	import { revealExpandedSection } from '$lib/utils/expanded-section-scroll';
+	import { translateWithDefault } from '$lib/i18n';
 	import Switch from '$lib/components/common/Switch.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import ChevronDown from '$lib/components/icons/ChevronDown.svelte';
@@ -46,7 +47,15 @@
 	let defaultThinkingBudget: string = '';
 	let anthropicEffortPassthrough = true;
 
-	const REASONING_EFFORT_OPTIONS = ['none', 'low', 'medium', 'high', 'xhigh', 'max'];
+	// Same words as the chat's thinking slider and the Hermes options panel.
+	$: reasoningEffortOptions = [
+		{ value: 'none', label: translateWithDefault($i18n, '关闭', 'Off') },
+		{ value: 'low', label: translateWithDefault($i18n, '低', 'Low') },
+		{ value: 'medium', label: translateWithDefault($i18n, '中', 'Medium') },
+		{ value: 'high', label: translateWithDefault($i18n, '高', 'High') },
+		{ value: 'xhigh', label: translateWithDefault($i18n, '超高', 'XHigh') },
+		{ value: 'max', label: translateWithDefault($i18n, '最大', 'Max') }
+	];
 
 	// 预算输入框（字符串）<-> 后端值（number|null）互转
 	const thinkingBudgetToString = (value: unknown): string => {
@@ -503,8 +512,8 @@
 										bind:value={defaultReasoningEffort}
 										on:change={syncMainDirty}
 									>
-										{#each REASONING_EFFORT_OPTIONS as effort}
-											<option value={effort}>{effort}</option>
+										{#each reasoningEffortOptions as effort}
+											<option value={effort.value}>{effort.label}</option>
 										{/each}
 									</select>
 								</div>

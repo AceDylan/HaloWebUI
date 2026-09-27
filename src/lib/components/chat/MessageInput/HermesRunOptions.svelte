@@ -107,8 +107,8 @@
 		low: '低',
 		medium: '中',
 		high: '高',
-		xhigh: '很高',
-		max: '最高'
+		xhigh: '超高',
+		max: '最大'
 	};
 	$: effortLabel = EFFORT_LABELS[modelOptions?.reasoning_effort ?? ''] ?? '';
 	// A model chosen earlier that the list no longer offers stays visible.
@@ -295,9 +295,7 @@
 			</div>
 			<div class="mt-1 text-2xs text-gray-400 dark:text-gray-500" data-halo-hermes-effort-note>
 				{#if effortLabel}
-					思考强度{effortLabel}，Hermes 各入口共用，调低回复更快{#if $user?.role === 'admin'}
-						·
-						<a
+					思考强度{effortLabel}，Hermes 各入口共用，调低回复更快{#if $user?.role === 'admin'}{' · '}<a
 							class="text-primary-600 hover:underline dark:text-primary-400"
 							href="/settings/haloclaw"
 							on:click={() => {

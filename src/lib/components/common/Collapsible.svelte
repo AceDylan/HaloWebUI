@@ -46,7 +46,8 @@
 		formatToolDuration,
 		getToolCallOutcome,
 		getToolCallPreview,
-		getToolCallState
+		getToolCallState,
+		getToolLabel
 	} from '$lib/utils/tool-call-preview';
 	import Image from './Image.svelte';
 	import ActivityCard from './ActivityCard.svelte';
@@ -181,8 +182,10 @@
 			return done ? $i18n.t('Analysis completed') : $i18n.t('Analyzing...');
 		}
 
+		// The same words as the tool group and the formatted reply, so a card
+		// does not switch from "execute_code" to "运行代码" when the reply ends.
 		if (type === 'tool_calls') {
-			return name || $i18n.t('Tool call');
+			return name ? getToolLabel(name) : $i18n.t('Tool call');
 		}
 
 		return title ?? '';

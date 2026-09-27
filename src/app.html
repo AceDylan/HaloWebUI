@@ -68,7 +68,35 @@
 			// On page load or when changing themes, best to add inline in `head` to avoid FOUC
 			(() => {
 				const metaThemeColorTag = document.querySelector('meta[name="theme-color"]');
-				const prefersDarkTheme = window.matchMedia('(prefers-color-scheme: dark)').matches;
+				// Framed by the Bookmark Hub, "system" follows the Hub's own dark / light
+				// (a cross-origin frame cannot see it): the Hub puts it in the address,
+				// #...&hub_theme=dark, kept for this tab in sessionStorage (see hub-embed.ts,
+				// which also takes the Hub's later changes). Read and removed before anything else.
+				const hubTheme = (() => {
+					try {
+						if (window.parent === window) return null;
+						const key = 'halowebui.hubTheme';
+						const params = new URLSearchParams(location.hash.slice(1));
+						const given = params.get('hub_theme');
+						if (params.has('hub_theme')) {
+							params.delete('hub_theme');
+							const rest = params.toString();
+							history.replaceState(
+								history.state,
+								'',
+								location.pathname + location.search + (rest ? '#' + rest : '')
+							);
+						}
+						if (given === 'dark' || given === 'light') sessionStorage.setItem(key, given);
+						const kept = sessionStorage.getItem(key);
+						return kept === 'dark' || kept === 'light' ? kept : null;
+					} catch {
+						return null;
+					}
+				})();
+				const prefersDarkTheme = hubTheme
+					? hubTheme === 'dark'
+					: window.matchMedia('(prefers-color-scheme: dark)').matches;
 
 				const normalizeTheme = (rawTheme) => {
 					if (rawTheme === 'system' || rawTheme === 'dark' || rawTheme === 'light') return rawTheme;
@@ -100,6 +128,12 @@
 				const media = window.matchMedia('(prefers-color-scheme: dark)');
 				const onSystemThemeChange = (e) => {
 					if (localStorage.theme !== 'system') return;
+					try {
+						// The Hub's theme, not the device's (it may have arrived since boot).
+						if (window.parent !== window && sessionStorage.getItem('halowebui.hubTheme')) return;
+					} catch {
+						// no storage: follow the device
+					}
 					if (e.matches) {
 						document.documentElement.classList.add('dark');
 						document.documentElement.classList.remove('light');

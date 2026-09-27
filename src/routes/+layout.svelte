@@ -54,6 +54,8 @@
 	import { applyHermesChatEvent } from '$lib/utils/hermes-activity';
 	import { getNotificationPreview } from '$lib/utils/notification-preview';
 	import {
+		acceptHubTheme,
+		followHubTheme,
 		hubPlacePath,
 		keepHistoryWithHub,
 		postActivityToHub,
@@ -61,6 +63,7 @@
 		rememberHubOrigin,
 		requestHubReauth
 	} from '$lib/utils/hub-embed';
+	import { isDarkMode } from '$lib/utils/dark-mode';
 	import NotificationToast from '$lib/components/NotificationToast.svelte';
 	import AppSidebar from '$lib/components/app/AppSidebar.svelte';
 
@@ -673,6 +676,13 @@
 		}
 		theme.set(normalizedTheme);
 
+		// Framed by the Bookmark Hub: its theme changed (see hub-embed).
+		const onHubTheme = (event) => {
+			const next = acceptHubTheme(event, $config?.hub_origin);
+			if (next) followHubTheme(next, normalizeTheme(localStorage.theme));
+		};
+		window.addEventListener('message', onHubTheme);
+
 		mobile.set(window.innerWidth < BREAKPOINT);
 
 		const onResize = () => {
@@ -796,6 +806,7 @@
 			bc.close();
 			teardownSocket(currentSocket);
 			window.removeEventListener('resize', onResize);
+			window.removeEventListener('message', onHubTheme);
 		};
 	});
 
@@ -871,13 +882,7 @@
 {/if}
 
 <Toaster
-	theme={$theme.includes('dark')
-		? 'dark'
-		: $theme === 'system'
-			? window.matchMedia('(prefers-color-scheme: dark)').matches
-				? 'dark'
-				: 'light'
-			: 'light'}
+	theme={$isDarkMode ? 'dark' : 'light'}
 	richColors
 	closeButton
 	position="top-right"

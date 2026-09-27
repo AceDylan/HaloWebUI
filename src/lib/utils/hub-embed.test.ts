@@ -1,7 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 
+import { readFileSync } from 'node:fs';
+
 import {
 	HUB_REAUTH_GUARD_MS,
+	acceptHubTheme,
+	followHubTheme,
+	hubTheme,
 	hubNoteUrl,
 	hubPlacePath,
 	hubReturnPath,
@@ -351,5 +356,145 @@ describe('hubPlacePath / postPlaceToHub', () => {
 		expect(postPlaceToHub('/c/abc', '*', { parent })).toBe(false);
 		expect(postPlaceToHub('/c/abc', undefined, { parent })).toBe(false);
 		expect(parent.postMessage).toHaveBeenCalledTimes(2);
+	});
+});
+
+describe("the Hub's theme", () => {
+	const memory = (init: Record<string, string> = {}) => {
+		const data = new Map(Object.entries(init));
+		return {
+			getItem: (k: string) => data.get(k) ?? null,
+			setItem: (k: string, v: string) => void data.set(k, v),
+			data
+		};
+	};
+	const parent = {};
+	const framed = { parent };
+	const fakeDoc = (classes: string[]) => {
+		const set = new Set(classes);
+		const meta = { content: '', setAttribute: (_: string, v: string) => (meta.content = v) };
+		return {
+			documentElement: {
+				classList: {
+					add: (c: string) => set.add(c),
+					remove: (...c: string[]) => c.forEach((x) => set.delete(x)),
+					contains: (c: string) => set.has(c)
+				}
+			},
+			querySelector: () => meta,
+			set,
+			meta
+		} as any;
+	};
+
+	it('is known only framed, and only as dark or light', () => {
+		expect(hubTheme(framed, memory({ 'halowebui.hubTheme': 'dark' }))).toBe('dark');
+		expect(hubTheme(framed, memory({ 'halowebui.hubTheme': 'light' }))).toBe('light');
+		expect(hubTheme(framed, memory({ 'halowebui.hubTheme': 'system' }))).toBeNull();
+		expect(hubTheme(framed, memory())).toBeNull();
+		const top: any = {};
+		top.parent = top;
+		expect(hubTheme(top, memory({ 'halowebui.hubTheme': 'dark' }))).toBeNull();
+	});
+
+	it('is taken from the parent on the Hub origin only', () => {
+		const msg = { source: 'hub', type: 'theme', theme: 'light' };
+		const store = memory();
+		expect(acceptHubTheme({ source: parent, origin: HUB, data: msg }, HUB, framed, store)).toBe('light');
+		// The origin kept at sign-in stands in when the config has none.
+		const kept = memory({ 'halowebui.hubOrigin': HUB });
+		expect(acceptHubTheme({ source: parent, origin: HUB, data: msg }, null, framed, kept)).toBe('light');
+		expect(acceptHubTheme({ source: parent, origin: HUB, data: msg }, null, framed, store)).toBeNull();
+		expect(acceptHubTheme({ source: parent, origin: 'https://evil.example', data: msg }, HUB, framed, store)).toBeNull();
+		expect(acceptHubTheme({ source: {}, origin: HUB, data: msg }, HUB, framed, store)).toBeNull();
+		for (const data of [
+			{ ...msg, theme: 'system' },
+			{ ...msg, theme: 'oled-dark' },
+			{ ...msg, source: 'halowebui' },
+			{ ...msg, type: 'place' },
+			'light',
+			null
+		]) {
+			expect(acceptHubTheme({ source: parent, origin: HUB, data }, HUB, framed, store)).toBeNull();
+		}
+		const top: any = {};
+		top.parent = top;
+		expect(acceptHubTheme({ source: top, origin: HUB, data: msg }, HUB, top, store)).toBeNull();
+	});
+
+	it('repaints only while the setting here is "system", and is kept for the tab either way', () => {
+		const store = memory();
+		const doc = fakeDoc(['dark']);
+		expect(followHubTheme('light', 'system', doc, store)).toBe(true);
+		expect([...doc.set]).toEqual(['light']);
+		expect(doc.meta.content).toBe('#ffffff');
+		expect(store.data.get('halowebui.hubTheme')).toBe('light');
+
+		const chosen = fakeDoc(['dark']);
+		expect(followHubTheme('light', 'dark', chosen, store)).toBe(false);
+		expect([...chosen.set]).toEqual(['dark']);
+		expect(followHubTheme('dark', 'system', doc, store)).toBe(true);
+		expect([...doc.set]).toEqual(['dark']);
+		expect(store.data.get('halowebui.hubTheme')).toBe('dark');
+	});
+});
+
+describe('app.html boot script and the Hub theme', () => {
+	// The inline script that sets the theme before anything paints.
+	const html = readFileSync(new URL('../../app.html', import.meta.url), 'utf8');
+	const start = html.indexOf('// On page load or when changing themes');
+	const source = html.slice(start, html.indexOf('</script>', start));
+
+	const boot = ({ hash = '', framed = true, theme = 'system', deviceDark = false, kept = '' }) => {
+		const classes = new Set<string>();
+		const session = new Map<string, string>(kept ? [['halowebui.hubTheme', kept]] : []);
+		const replaced: string[] = [];
+		const win: any = {};
+		win.parent = framed ? {} : win;
+		const env = {
+			window: Object.assign(win, {
+				matchMedia: () => ({ matches: deviceDark, addEventListener: () => {} })
+			}),
+			document: {
+				documentElement: {
+					classList: {
+						add: (c: string) => classes.add(c),
+						remove: (...c: string[]) => c.forEach((x) => classes.delete(x)),
+						contains: (c: string) => classes.has(c)
+					}
+				},
+				querySelector: () => null,
+				getElementById: () => null
+			},
+			location: { hash, pathname: '/auth', search: '?redirect=%2Fc%2F1' },
+			history: { state: null, replaceState: (_s: unknown, _t: string, url: string) => replaced.push(url) },
+			sessionStorage: {
+				getItem: (k: string) => session.get(k) ?? null,
+				setItem: (k: string, v: string) => void session.set(k, v)
+			},
+			localStorage: { theme } as Record<string, string>
+		};
+		new Function(...Object.keys(env), source)(...Object.values(env));
+		return { classes: [...classes], replaced, session };
+	};
+
+	it('paints with the Hub theme from the address and removes it from there, keeping the ticket', () => {
+		const out = boot({ hash: `#hub_ticket=${TICKET}&hub_theme=dark`, deviceDark: false });
+		expect(out.classes).toEqual(['dark']);
+		expect(out.replaced).toEqual([`/auth?redirect=%2Fc%2F1#hub_ticket=${TICKET}`]);
+		expect(out.session.get('halowebui.hubTheme')).toBe('dark');
+		expect(parseHubTicket(out.replaced[0].split('#')[1])).toBe(TICKET);
+	});
+
+	it('keeps the Hub theme for the tab after a reload', () => {
+		expect(boot({ kept: 'light', deviceDark: true }).classes).toEqual(['light']);
+	});
+
+	it('leaves an explicit choice, and pages outside the Hub, alone', () => {
+		expect(boot({ hash: '#hub_theme=light', theme: 'dark' }).classes).toEqual(['dark']);
+		const top = boot({ hash: '#hub_theme=light', framed: false, deviceDark: true });
+		expect(top.classes).toEqual(['dark']);
+		expect(top.replaced).toEqual([]);
+		expect(boot({ hash: '#hub_theme=purple', deviceDark: true }).classes).toEqual(['dark']);
 	});
 });

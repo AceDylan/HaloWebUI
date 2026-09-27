@@ -53,6 +53,7 @@
 	import MermaidThemePreview from '$lib/components/settings/MermaidThemePreview.svelte';
 	import ChatTransitionPreview from '$lib/components/settings/ChatTransitionPreview.svelte';
 	import { cloneSettingsSnapshot, isSettingsSnapshotEqual } from '$lib/utils/settings-dirty';
+	import { systemPrefersDark } from '$lib/utils/hub-embed';
 	import {
 		DEFAULT_CHAT_TRANSITION_MODE,
 		DEFAULT_HIGHLIGHTER_THEME,
@@ -442,7 +443,8 @@
 		let themeToApply = _theme;
 
 		if (_theme === 'system') {
-			themeToApply = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+			// Framed by the Bookmark Hub, "system" is the Hub's theme (see hub-embed).
+			themeToApply = systemPrefersDark() ? 'dark' : 'light';
 		}
 
 		if (themeToApply === 'dark') {
@@ -467,9 +469,7 @@
 		const metaThemeColor = document.querySelector('meta[name="theme-color"]');
 		if (metaThemeColor) {
 			if (_theme === 'system') {
-				const systemTheme = window.matchMedia('(prefers-color-scheme: dark)').matches
-					? 'dark'
-					: 'light';
+				const systemTheme = systemPrefersDark() ? 'dark' : 'light';
 				metaThemeColor.setAttribute('content', systemTheme === 'light' ? '#ffffff' : '#171717');
 			} else {
 				metaThemeColor.setAttribute('content', _theme === 'dark' ? '#171717' : '#ffffff');

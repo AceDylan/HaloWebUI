@@ -412,3 +412,110 @@ export const postPlaceToHub = (
 		return false;
 	}
 };
+
+// ---------------------------------------------------------------------------
+// The Hub's dark / light.
+//
+// The Hub keeps its own theme (dark unless changed), while this app follows the
+// device by default ("system"): on a light device the dark Hub showed a white
+// chat. A cross-origin frame cannot see the Hub's choice (the frame element's
+// color-scheme does not reach our prefers-color-scheme), so the Hub tells us:
+// in the address when it opens the frame (#...&hub_theme=dark, read by the
+// boot script in app.html and kept for this tab), and by a message when it
+// changes its theme later. Framed, "system" then means the Hub's theme; an
+// explicit dark or light chosen here still wins.
+
+export type HubTheme = 'dark' | 'light';
+export const HUB_THEME_KEY = 'halowebui.hubTheme';
+export const HUB_THEME_MESSAGE_SOURCE = 'hub';
+export const HUB_THEME_MESSAGE_TYPE = 'theme';
+
+const asHubTheme = (value: unknown): HubTheme | null =>
+	value === 'dark' || value === 'light' ? value : null;
+
+/** The Hub's theme for this tab, when framed by it and it has told us one. */
+export const hubTheme = (
+	win: { parent: unknown } = window,
+	store: SessionStore | null = sessionStore()
+): HubTheme | null => {
+	if (!isFramed(win) || !store) {
+		return null;
+	}
+	try {
+		return asHubTheme(store.getItem(HUB_THEME_KEY));
+	} catch {
+		return null;
+	}
+};
+
+/** What "system" resolves to here: the Hub's theme when framed by it, else the device's. */
+export const systemPrefersDark = (): boolean => {
+	const theme = hubTheme();
+	if (theme) {
+		return theme === 'dark';
+	}
+	return typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: dark)').matches;
+};
+
+type HubMessageEvent = { source: unknown; origin: string; data: unknown };
+
+/**
+ * The theme in a message from the framing Hub, else null. Only our parent, only
+ * from the Hub's origin (from the config, else the one kept at sign-in).
+ */
+export const acceptHubTheme = (
+	event: HubMessageEvent,
+	hubOrigin: unknown,
+	win: { parent: unknown } = window,
+	store: SessionStore | null = sessionStore()
+): HubTheme | null => {
+	if (!isFramed(win) || event.source !== win.parent) {
+		return null;
+	}
+	let origin = typeof hubOrigin === 'string' && PLAIN_ORIGIN.test(hubOrigin) ? hubOrigin : null;
+	try {
+		origin = origin ?? store?.getItem(HUB_ORIGIN_KEY) ?? null;
+	} catch {
+		origin = null;
+	}
+	if (!origin || event.origin !== origin) {
+		return null;
+	}
+	const data = event.data as { source?: unknown; type?: unknown; theme?: unknown } | null;
+	if (
+		!data ||
+		typeof data !== 'object' ||
+		data.source !== HUB_THEME_MESSAGE_SOURCE ||
+		data.type !== HUB_THEME_MESSAGE_TYPE
+	) {
+		return null;
+	}
+	return asHubTheme(data.theme);
+};
+
+/**
+ * Keeps the Hub's new theme for this tab and, while the theme setting here is
+ * "system", repaints with it (the same classes the boot script sets).
+ */
+export const followHubTheme = (
+	theme: HubTheme,
+	storedTheme: unknown,
+	doc: Pick<Document, 'documentElement' | 'querySelector'> = document,
+	store: SessionStore | null = sessionStore()
+): boolean => {
+	try {
+		store?.setItem(HUB_THEME_KEY, theme);
+	} catch {
+		// Storage refused: this page still repaints.
+	}
+	if (storedTheme !== 'system') {
+		return false;
+	}
+	const root = doc.documentElement;
+	root.classList.remove(theme === 'dark' ? 'light' : 'dark');
+	root.classList.add(theme);
+	doc
+		.querySelector('meta[name="theme-color"]')
+		?.setAttribute('content', theme === 'dark' ? '#171717' : '#ffffff');
+	return true;
+};

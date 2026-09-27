@@ -54,6 +54,14 @@
 	};
 
 	$: runs = $hermesBackgroundRuns.filter((run) => run.chat_id === $chatId);
+
+	// The reporter posts every few minutes (at least every 3); twice that without a
+	// word means the runner may be stuck rather than working.
+	const STALE_AFTER_SECONDS = 7 * 60;
+	const quietMinutes = (run: { updated_at: number }, at: number) => {
+		const quiet = at - Number(run.updated_at || 0);
+		return run.updated_at && quiet > STALE_AFTER_SECONDS ? Math.floor(quiet / 60) : 0;
+	};
 </script>
 
 {#each runs as run (run.run_id)}
@@ -72,6 +80,11 @@
 			<div class="font-medium tabular-nums">
 				{describeBackgroundRun(run, now)} · 后台运行中，结束后报告会自动发到这里
 			</div>
+			{#if quietMinutes(run, now)}
+				<div class="mt-0.5 text-2xs text-amber-700 dark:text-amber-300" data-halo-background-runner-quiet>
+					已经 {quietMinutes(run, now)} 分钟没有新进度，可能卡住了；需要时可以停止它
+				</div>
+			{/if}
 			{#if run.last_activity}
 				<div
 					class="mt-0.5 truncate font-mono text-2xs text-blue-700/80 dark:text-blue-300/80"
@@ -83,7 +96,7 @@
 		</div>
 		<button
 			type="button"
-			class="shrink-0 self-center rounded-lg px-2.5 py-1 text-xs font-medium transition max-sm:px-3 max-sm:py-1.5 {armed ===
+			class="shrink-0 self-center rounded-lg px-2.5 py-1 text-xs font-medium transition max-sm:px-3 max-sm:py-2 {armed ===
 			run.run_id
 				? 'bg-red-600 text-white hover:bg-red-700'
 				: 'text-blue-700 hover:bg-blue-100 dark:text-blue-200 dark:hover:bg-blue-900/60'} disabled:opacity-60"

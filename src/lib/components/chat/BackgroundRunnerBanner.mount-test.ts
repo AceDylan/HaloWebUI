@@ -84,4 +84,14 @@ describe('BackgroundRunnerBanner', () => {
 		expect(toast.error.mock.calls[0][0]).toContain('这个 Hermes 还不能停止后台任务');
 		expect(button().textContent.trim()).toBe('停止');
 	});
+
+	it('says when a runner has gone quiet', async () => {
+		const stores = await mount();
+		expect(target.querySelectorAll('[data-halo-background-runner-quiet]').length).toBe(0);
+		stores.hermesBackgroundRuns.set([{ ...RUN, updated_at: Date.now() / 1000 - 12.5 * 60 }]);
+		await sleep(10);
+		expect(target.querySelector('[data-halo-background-runner-quiet]').textContent).toContain(
+			'12 分钟没有新进度'
+		);
+	});
 });

@@ -52,7 +52,7 @@ import time
 import urllib.error
 import urllib.request
 
-SCRIPT_VERSION = "2026-09-26.1"
+SCRIPT_VERSION = "2026-09-27.1"
 CONFIG_FILE = "/root/.hermes/reclaude-runner.env"
 REQUIRED_CONFIG_KEYS = ("HALOWEBUI_NOTIFY_URL", "HALOWEBUI_NOTIFY_TOKEN")
 STATE_DB = "/root/.hermes/state.db"
@@ -478,6 +478,15 @@ def _cost_label(value):
     return f"${cost:.2f}" if cost > 0 else ""
 
 
+def _short_session(session_id):
+    """A session UUID as its first 8 characters: the report line is read on a phone, the
+    full id stays in the notice line and meta.json for resuming."""
+    session_id = str(session_id or "")
+    if re.fullmatch(r"[0-9a-fA-F]{8}-[0-9a-fA-F-]{27,}", session_id):
+        return session_id[:8]
+    return session_id
+
+
 def build_digest(run_id, status, run_dir, session_id, agent="reclaude"):
     """The report as the user reads it: a status line, result.md, and what to do next.
 
@@ -493,7 +502,7 @@ def build_digest(run_id, status, run_dir, session_id, agent="reclaude"):
     if summary.get("model"):
         details.append(str(summary["model"]))
     if session_id:
-        details.append(f"{SESSION_LABELS.get(agent, 'session')} {session_id}")
+        details.append(f"{SESSION_LABELS.get(agent, 'session')} {_short_session(session_id)}")
     if _cost_label(summary.get("total_cost_usd")):
         details.append(_cost_label(summary.get("total_cost_usd")))
     if summary.get("num_turns"):

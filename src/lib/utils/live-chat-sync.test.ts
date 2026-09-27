@@ -4,6 +4,7 @@ import { writable } from 'svelte/store';
 import {
 	createChatSync,
 	createEventDeduplicator,
+	isChatGone,
 	reconcileChatHistory,
 	subscribeChatSync
 } from './live-chat-sync';
@@ -319,4 +320,13 @@ it('deduplicates fan-out events without sharing state between devices', () => {
 		expect(device('same-event')).toBe(false);
 		expect(device('another-event')).toBe(true);
 	}
+});
+
+describe('isChatGone', () => {
+	it('recognises only the server saying the chat does not exist', () => {
+		expect(isChatGone("We could not find what you're looking for :/")).toBe(true);
+		expect(isChatGone('Your session has expired or the token is invalid. Please sign in again.')).toBe(false);
+		expect(isChatGone(new TypeError('Failed to fetch'))).toBe(false);
+		expect(isChatGone(undefined)).toBe(false);
+	});
 });

@@ -11,6 +11,7 @@
 	import {
 		createChatSync,
 		createEventDeduplicator,
+		isChatGone,
 		reconcileChatHistory,
 		subscribeChatSync
 	} from '$lib/utils/live-chat-sync';
@@ -2907,10 +2908,15 @@
 		return message;
 	};
 
+	// A chat deleted elsewhere (another tab, the phone) while this page shows it: the
+	// page used to read it again every few seconds for as long as it stayed open, each
+	// read a 401, and kept showing it. Stop, say so, and go to a new chat - as opening
+	// a deleted chat does.
+	let goneChatId = '';
 	const liveChatSync = createChatSync({
 		getKey: () =>
 			$user?.id && !loading && !pendingHistorySaves && !$temporaryChatEnabled &&
-			$chatId && $chatId !== 'local'
+			$chatId && $chatId !== 'local' && $chatId !== goneChatId
 				? `${$user?.id}:${$chatId}:${activeChatLoadToken}:${chatSyncRevision}:${$page.url.pathname}`
 				: null,
 		read: async (signal) => {
@@ -2951,7 +2957,13 @@
 			}
 			if (shouldAutoScrollOnStreaming()) scrollToBottom();
 		},
-		onError: () => {} // A transient network failure must leave the current page intact.
+		onError: (error) => {
+			// A transient network failure must leave the current page intact.
+			if (!isChatGone(error) || !$chatId || $chatId === goneChatId) return;
+			goneChatId = $chatId;
+			toast.info($i18n.t('This chat was deleted elsewhere.'));
+			void goto('/');
+		}
 	});
 
 	const chatEventHandler = async (event, cb) => {

@@ -91,6 +91,13 @@ export const reconcileChatHistory = (
 
 // Coalesce reload bursts, retry on the next trigger after a failed request, and
 // discard responses after navigation/unmount. No routing or persistence here.
+// The detail the server answers for a chat that does not exist (for this user):
+// deleted in another tab or on another device while this page shows it.
+const CHAT_NOT_FOUND = "We could not find what you're looking for :/";
+
+/** Whether a failed read means the chat is gone, not that the network or the session failed. */
+export const isChatGone = (error: unknown): boolean => error === CHAT_NOT_FOUND;
+
 export const createChatSync = <T>(options: {
 	getKey: () => string | null;
 	read: (signal: AbortSignal) => Promise<T>;

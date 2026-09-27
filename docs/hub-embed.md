@@ -39,10 +39,25 @@ implemented once and reverted; nothing of it remains.
 | `HUB_TRUSTED_EMBED_ADMIN_SECRET` | unset | Shared secret, ≥ 32 characters, same value as the Hub's variable of the same name. Generated at deploy time, never committed. Unset = framing still works, the admin signs in by hand. |
 | `HUB_EMBED_USER_EMAIL` | unset | Account a ticket signs in as. Default: the primary admin. An explicitly named ordinary user is allowed (a way to give the Hub less than admin); a pending account never is. |
 | `HUB_EMBED_SESSION_TTL` | `43200` | Lifetime in seconds of a ticket-opened session, clamped to 5 minutes .. 30 days. |
+| `HUB_VAULT_ROOT` | unset | Absolute host path of the note vault the Hub's 笔记 tab shows (live: `/root/Documents/Obsidian Vault`). Replies name the notes they write by that path; with it set, such a path opens the note in the Hub (see below). Unset = paths stay text. |
 
 The live deployment's compose file passes environment through an `environment:` block
 and a `.env` next to it: add `HUB_URL` and `HUB_TRUSTED_EMBED_ADMIN_SECRET` there (the
 `.env` should be mode 0600), then `docker compose up -d`.
+
+## Notes named in a reply
+
+Hermes reports the notes it writes by their host path
+(`/root/Documents/Obsidian Vault/项目/HaloWebUI.md`). With `HUB_VAULT_ROOT` set,
+`/api/config` gives signed-in users `hub_vault_root`, and the reply renderer turns a
+Markdown note under it into a link: in plain text and link targets the path itself, after
+a code span a small "打开笔记" button (the code span keeps click-to-copy). Nothing outside
+the vault, no `..`, no dot-folders, only `.md`.
+
+Framed by the Hub, a plain click posts `{source: 'halowebui', type: 'open-note', path}` to
+the Hub's origin only; the Hub checks the sender is its chat frame, validates the path
+again and opens `/note/<path>` in its 笔记 tab through its usual sign-in page. On its
+own, the link is the Hub's address `/?note=<path>#vault` and opens in a new tab.
 
 ## Where `?redirect=` may point
 
@@ -100,5 +115,7 @@ curl -s -o /dev/null -w '%{http_code}\n' -X POST -H 'Content-Type: application/j
 
 Backend unit tests: `backend/open_webui/test/unit/test_hub_embed.py`.
 Frontend unit tests: `src/lib/utils/hub-embed.test.ts` and
-`src/lib/utils/safe-redirect.test.ts`
+`src/lib/utils/safe-redirect.test.ts`; the note links are mounted by
+`src/lib/components/chat/Messages/Markdown/VaultNoteLink.mount-test.ts`
+(`npm run test:frontend:mount`)
 (`npx vitest run src/lib/utils/hub-embed.test.ts src/lib/utils/safe-redirect.test.ts`).

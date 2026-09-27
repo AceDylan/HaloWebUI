@@ -102,3 +102,129 @@ export const postActivityToHub = (
 		return false;
 	}
 };
+
+// ---------------------------------------------------------------------------
+// Notes named in a reply.
+//
+// Hermes names the notes it writes by their path on the host
+// (`/root/Documents/Obsidian Vault/项目/HaloWebUI.md`). When the server names
+// that vault root (`hub_vault_root` in /api/config, from HUB_VAULT_ROOT), such a
+// path becomes a link to the note in the Hub's 笔记 tab: framed by the Hub, the
+// page asks the Hub (and only the Hub) to open it there; on its own, the link is
+// an ordinary address of the Hub (/?note=<path>#vault) opening in a new tab.
+
+export const HUB_OPEN_NOTE_MESSAGE_TYPE = 'open-note';
+
+const NOTE_PATH_MAX = 512;
+const PLAIN_ORIGIN = /^https?:\/\/[^/]+$/;
+
+const cleanRoot = (root: unknown): string | null => {
+	if (typeof root !== 'string') {
+		return null;
+	}
+	const base = root.trim().replace(/\/+$/, '');
+	return base.startsWith('/') ? base : null;
+};
+
+/**
+ * The vault-relative path when `value` is the absolute path of a Markdown note
+ * under `root`, else null. Nothing outside the vault, no `..`, no dot-folders.
+ */
+export const vaultNotePath = (value: unknown, root: unknown): string | null => {
+	const base = cleanRoot(root);
+	if (typeof value !== 'string' || !base) {
+		return null;
+	}
+	let text = value.trim();
+	if (text.startsWith('file://')) {
+		text = text.slice('file://'.length);
+	}
+	if (!text.startsWith(`${base}/`) && text.includes('%')) {
+		// A Markdown link target arrives percent-encoded (spaces, CJK).
+		try {
+			text = decodeURI(text);
+		} catch {
+			return null;
+		}
+	}
+	if (!text.startsWith(`${base}/`)) {
+		return null;
+	}
+	const rel = text.slice(base.length + 1);
+	if (
+		!rel ||
+		rel.length > NOTE_PATH_MAX ||
+		!/\.md$/i.test(rel) ||
+		// eslint-disable-next-line no-control-regex
+		/[\\\u0000-\u001f\u007f]/.test(rel)
+	) {
+		return null;
+	}
+	return rel.split('/').some((part) => !part || part.startsWith('.')) ? null : rel;
+};
+
+export type NotePathPiece = { text: string; path: string | null };
+
+/**
+ * Splits plain text around the absolute note paths in it. A path may contain
+ * spaces, so it runs from the vault root to the first `.md` that ends a word.
+ */
+export const splitVaultNotePaths = (text: string, root: unknown): NotePathPiece[] => {
+	const base = cleanRoot(root);
+	const marker = base ? `${base}/` : '';
+	if (!marker || !text.includes(marker)) {
+		return [{ text, path: null }];
+	}
+	const pieces: NotePathPiece[] = [];
+	let rest = text;
+	for (let at = rest.indexOf(marker); at >= 0; at = rest.indexOf(marker)) {
+		const match = /^[^\n`<>"|*]*?\.md(?![\p{L}\p{N}_.])/iu.exec(rest.slice(at));
+		if (!match) {
+			break;
+		}
+		if (at > 0) {
+			pieces.push({ text: rest.slice(0, at), path: null });
+		}
+		pieces.push({ text: match[0], path: vaultNotePath(match[0], base) });
+		rest = rest.slice(at + match[0].length);
+	}
+	if (rest) {
+		pieces.push({ text: rest, path: null });
+	}
+	return pieces;
+};
+
+/** The Hub's own address for a note: it switches to 笔记 and opens it. */
+export const hubNoteUrl = (path: string, hubOrigin: unknown): string | null =>
+	typeof hubOrigin === 'string' && PLAIN_ORIGIN.test(hubOrigin)
+		? `${hubOrigin}/?note=${encodeURIComponent(path)}#vault`
+		: null;
+
+/**
+ * When framed by the Hub, asks it to open `path` in its 笔记 tab and returns
+ * true; the message is addressed to the Hub's origin, so any other parent never
+ * sees it. Returns false when not framed: the caller lets the link open the
+ * Hub's address in a new tab instead.
+ */
+export const openNoteInHub = (
+	path: string,
+	hubOrigin: unknown,
+	win: FrameWindow = window as unknown as FrameWindow
+): boolean => {
+	if (typeof hubOrigin !== 'string' || !PLAIN_ORIGIN.test(hubOrigin)) {
+		return false;
+	}
+	const parent = win.parent;
+	if (!parent || parent === (win as unknown)) {
+		return false;
+	}
+	try {
+		parent.postMessage(
+			{ source: HUB_ACTIVITY_MESSAGE_SOURCE, type: HUB_OPEN_NOTE_MESSAGE_TYPE, path },
+			hubOrigin
+		);
+		return true;
+	} catch {
+		return false;
+	}
+};

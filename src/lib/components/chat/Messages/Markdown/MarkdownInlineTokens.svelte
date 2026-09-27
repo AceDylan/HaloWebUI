@@ -9,7 +9,9 @@
 	const i18n: Writable<any> = getContext('i18n');
 
 	import { WEBUI_BASE_URL } from '$lib/constants';
+	import { config } from '$lib/stores';
 	import { copyToClipboard, unescapeHtml } from '$lib/utils';
+	import { splitVaultNotePaths, vaultNotePath } from '$lib/utils/hub-embed';
 	import { getDataUrlDownloadName, rewriteDataUrlDownloadLinks } from '$lib/utils/download-links';
 	import KatexHtml from './KatexHtml.svelte';
 
@@ -31,6 +33,7 @@
 	import Source from './Source.svelte';
 	import SourceToken from './SourceToken.svelte';
 	import StreamText from './StreamText.svelte';
+	import VaultNoteLink from './VaultNoteLink.svelte';
 	import { isSvgMarkup, mergeSvgMarkupTokens, type RenderableHtmlToken } from './svgMarkupTokens';
 
 	export let id: string;
@@ -38,10 +41,11 @@
 	export let onSourceClick: Function = () => {};
 	export let charAnimation = false;
 	export let generatedFiles: GeneratedMessageFile[] = [];
+	/** Inside a link: note paths in the text stay text (no link in a link). */
+	export let inLink = false;
 
 	let renderTokens: RenderableHtmlToken[] = [];
 	$: renderTokens = mergeSvgMarkupTokens(tokens);
-
 
 	const resolveLinkHref = (href: string) => {
 		const resolved = resolveGeneratedFileDownloadUrl(href, generatedFiles) ?? href;
@@ -64,6 +68,9 @@
 
 	const resolveDownloadName = (href: string, label: string = '') =>
 		getDataUrlDownloadName(href, label);
+
+	// Absolute paths of the Hub's vault notes become links (see VaultNoteLink).
+	$: vaultRoot = $config?.hub_origin ? $config?.hub_vault_root : undefined;
 
 	const toText = (value: unknown) => String(value ?? '');
 	const decodeHtmlText = (value: unknown) => unescapeHtml(toText(value)) ?? '';
@@ -109,9 +116,21 @@
 			<KatexHtml {html} />
 		{/if}
 	{:else if token.type === 'link'}
-		{@const href = resolveLinkHref(token.href ?? '')}
+		{@const notePath = inLink ? null : vaultNotePath(token.href ?? '', vaultRoot)}
+		{@const href = notePath ? null : resolveLinkHref(token.href ?? '')}
 		{@const download = href ? resolveDownloadName(href, token.text ?? '') : null}
-		{#if href && token.tokens}
+		{#if notePath}
+			<VaultNoteLink path={notePath}
+				>{#if token.tokens}<svelte:self
+						id={`${id}-a`}
+						tokens={token.tokens}
+						{charAnimation}
+						{onSourceClick}
+						{generatedFiles}
+						inLink
+					/>{:else}{toText(token.text)}{/if}</VaultNoteLink
+			>
+		{:else if href && token.tokens}
 			<a
 				{href}
 				target={download ? undefined : '_blank'}
@@ -125,6 +144,7 @@
 					{charAnimation}
 					{onSourceClick}
 					{generatedFiles}
+					inLink
 				/>
 			</a>
 		{:else if token.tokens}
@@ -134,6 +154,7 @@
 				{charAnimation}
 				{onSourceClick}
 				{generatedFiles}
+				{inLink}
 			/>
 		{:else if href}
 			<a
@@ -161,6 +182,7 @@
 				{charAnimation}
 				{onSourceClick}
 				{generatedFiles}
+				{inLink}
 			/>
 		</strong>
 	{:else if token.type === 'em'}
@@ -171,6 +193,7 @@
 				{charAnimation}
 				{onSourceClick}
 				{generatedFiles}
+				{inLink}
 			/>
 		</em>
 	{:else if token.type === 'codespan'}
@@ -182,7 +205,10 @@
 				copyToClipboard(decodeHtmlText(token.text));
 				toast.success($i18n.t('Copied to clipboard'));
 			}}>{decodeHtmlText(token.text)}</code
-		>
+		>{#if vaultRoot && !inLink}{@const notePath = vaultNotePath(
+				decodeHtmlText(token.text),
+				vaultRoot
+			)}{#if notePath}<VaultNoteLink path={notePath} compact />{/if}{/if}
 	{:else if token.type === 'br'}
 		<br />
 	{:else if token.type === 'del'}
@@ -193,6 +219,7 @@
 				{charAnimation}
 				{onSourceClick}
 				{generatedFiles}
+				{inLink}
 			/>
 		</del>
 	{:else if token.type === 'inlineKatex'}
@@ -217,6 +244,10 @@
 	{:else if token.type === 'text'}
 		{#if charAnimation}
 			<StreamText text={toText(token.raw ?? token.text)} />
+		{:else if vaultRoot && !inLink && toText(token.raw ?? token.text).includes(vaultRoot)}
+			{#each splitVaultNotePaths(toText(token.raw ?? token.text), vaultRoot) as piece}{#if piece.path}<VaultNoteLink
+						path={piece.path}>{piece.text}</VaultNoteLink
+					>{:else}{piece.text}{/if}{/each}
 		{:else}
 			{toText(token.raw ?? token.text)}
 		{/if}

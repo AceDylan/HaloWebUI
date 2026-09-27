@@ -2385,6 +2385,8 @@
 	"Failed to inspect GitHub repository: {{error}}": "检查 GitHub 仓库失败：{{error}}",
 	"GitHub repository is missing a default branch.": "GitHub 仓库缺少默认分支。",
 	"New Skill": "新建 Skill",
+	"Open in notes": "在笔记中打开",
+	"Open note": "打开笔记",
 	"Open": "打开",
 	"Skill Store": "Skill Store",
 	"GitHub URL": "GitHub 链接",

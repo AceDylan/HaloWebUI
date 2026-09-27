@@ -430,6 +430,8 @@ type Config = {
 	hermes_agent_model_ids?: string[];
 	/** The Bookmark Hub allowed to frame this page (signed-in users only). */
 	hub_origin?: string;
+	/** Host path of the Hub's note vault (HUB_VAULT_ROOT); note paths under it open in the Hub. */
+	hub_vault_root?: string;
 	features: {
 		auth: boolean;
 		auth_trusted_header: boolean;

@@ -46,6 +46,10 @@ Configuration (environment variables):
   admin (the first account created).
 - HUB_EMBED_SESSION_TTL: lifetime in seconds of a session opened by a ticket.
   Default 43200 (12 hours), clamped to 5 minutes .. 30 days.
+- HUB_VAULT_ROOT: absolute path of the note vault on the host (the one the
+  Hub's 笔记 tab shows). Replies name the notes they write by that path; with
+  it set, such a path becomes a link that opens the note in the Hub. Unset:
+  paths stay plain text.
 """
 
 import base64
@@ -70,6 +74,7 @@ HUB_URL_ENV = "HUB_URL"
 HUB_SECRET_ENV = "HUB_TRUSTED_EMBED_ADMIN_SECRET"
 HUB_USER_EMAIL_ENV = "HUB_EMBED_USER_EMAIL"
 HUB_SESSION_TTL_ENV = "HUB_EMBED_SESSION_TTL"
+HUB_VAULT_ROOT_ENV = "HUB_VAULT_ROOT"
 DEFAULT_HUB_URL = "https://best.acedylan.us:5526"
 
 SECRET_MIN_LENGTH = 32
@@ -141,6 +146,19 @@ def _parse_hub_url(raw: str) -> Optional[str]:
 def hub_origin() -> Optional[str]:
     """Origin of the Hub, or None when the feature is off."""
     return _parse_hub_url(os.environ.get(HUB_URL_ENV, DEFAULT_HUB_URL))
+
+
+def vault_root() -> Optional[str]:
+    """Absolute vault path from HUB_VAULT_ROOT without its trailing slash, or None.
+
+    Only meaningful next to a Hub (the note opens in the Hub's 笔记 tab), so it
+    is None whenever the Hub feature is off."""
+    if hub_origin() is None:
+        return None
+    value = os.environ.get(HUB_VAULT_ROOT_ENV, "").strip().rstrip("/")
+    if not value.startswith("/") or len(value) > 512 or re.search(r"[\x00-\x1f\x7f]", value):
+        return None
+    return value
 
 
 def frame_ancestors() -> list[str]:

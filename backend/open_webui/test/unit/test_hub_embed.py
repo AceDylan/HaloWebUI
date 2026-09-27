@@ -21,6 +21,7 @@ def _clean_state(monkeypatch):
         hub_embed.HUB_SECRET_ENV,
         hub_embed.HUB_USER_EMAIL_ENV,
         hub_embed.HUB_SESSION_TTL_ENV,
+        hub_embed.HUB_VAULT_ROOT_ENV,
         "CONTENT_SECURITY_POLICY",
         "XFRAME_OPTIONS",
     ):
@@ -76,6 +77,21 @@ def test_hub_origin_defaults_and_can_be_switched_off(monkeypatch):
 def test_anything_but_one_exact_origin_means_nobody_may_frame_us(monkeypatch, value):
     monkeypatch.setenv(hub_embed.HUB_URL_ENV, value)
     assert hub_embed.frame_ancestors() == []
+
+
+def test_the_vault_root_is_an_absolute_path_next_to_a_hub(monkeypatch):
+    assert hub_embed.vault_root() is None
+
+    monkeypatch.setenv(hub_embed.HUB_VAULT_ROOT_ENV, " /root/Documents/Obsidian Vault/ ")
+    assert hub_embed.vault_root() == "/root/Documents/Obsidian Vault"
+
+    for bad in ("relative/vault", "/", "/a\nb", "/" + "x" * 600):
+        monkeypatch.setenv(hub_embed.HUB_VAULT_ROOT_ENV, bad)
+        assert hub_embed.vault_root() is None, bad
+
+    monkeypatch.setenv(hub_embed.HUB_VAULT_ROOT_ENV, "/vault")
+    monkeypatch.setenv(hub_embed.HUB_URL_ENV, "")
+    assert hub_embed.vault_root() is None
 
 
 def test_a_short_secret_is_treated_as_unset(monkeypatch):

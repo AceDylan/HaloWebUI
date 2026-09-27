@@ -2306,6 +2306,7 @@ async def get_app_config(request: Request):
             "default_max_thinking_tokens": HALOCLAW_DEFAULT_MAX_THINKING_TOKENS.value,
         }
     hub_origin = hub_embed.hub_origin() if user is not None else None
+    hub_vault_root = hub_embed.vault_root() if user is not None else None
 
     return {
         **({"onboarding": True} if onboarding else {}),
@@ -2408,6 +2409,9 @@ async def get_app_config(request: Request):
                 # the Hub can mark its "AI 聊天" tab. Already public in the
                 # frame-ancestors header.
                 **({"hub_origin": hub_origin} if hub_origin else {}),
+                # Where the Hub's notes live on the host: replies name the notes
+                # they write by that path, and such a path opens the note there.
+                **({"hub_vault_root": hub_vault_root} if hub_vault_root else {}),
                 **(
                     {
                         "active_entries": app.state.USER_COUNT,

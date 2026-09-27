@@ -2962,6 +2962,10 @@
 			if (!isChatGone(error) || !$chatId || $chatId === goneChatId) return;
 			goneChatId = $chatId;
 			toast.info($i18n.t('This chat was deleted elsewhere.'));
+			// Clear it first: the new chat page mounting next would otherwise still see the
+			// deleted id, read it once more and say so twice (and the Hub would keep it as
+			// the chat to reopen).
+			chatId.set('');
 			void goto('/');
 		}
 	});

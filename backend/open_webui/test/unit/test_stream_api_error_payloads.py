@@ -159,3 +159,67 @@ def test_stream_background_task_exception_finalizes_message(monkeypatch):
     final_upsert = upserts[-1][2]
     assert final_upsert["done"] is True
     assert final_upsert["error"]["type"] == "generation_interrupted"
+
+
+async def _empty_stream():
+    yield b'data: {"choices": [{"delta": {}, "index": 0}]}\n\n'
+    yield b"data: [DONE]\n\n"
+
+
+def test_empty_response_names_the_model_as_the_picker_does(monkeypatch):
+    events, created = [], {}
+
+    async def fake_event_emitter(event):
+        events.append(event)
+
+    def fake_create_task(coroutine, id=None, *, blocks_completion=True, **_kwargs):
+        created["coroutine"] = coroutine
+        return "task-1", SimpleNamespace()
+
+    monkeypatch.setattr(middleware, "get_event_emitter", lambda _metadata: fake_event_emitter)
+    monkeypatch.setattr(middleware, "get_event_call", lambda _metadata: object())
+    monkeypatch.setattr(middleware, "get_sorted_filters", lambda _model: [])
+    monkeypatch.setattr(middleware, "process_filter_functions", lambda **kwargs: None)
+    monkeypatch.setattr(middleware, "create_task", fake_create_task)
+    monkeypatch.setattr(middleware, "set_current_task_blocks_completion", lambda _value: True)
+    monkeypatch.setattr(
+        middleware.Chats, "upsert_message_to_chat_by_id_and_message_id", lambda *_a, **_k: None
+    )
+    request = SimpleNamespace(
+        app=SimpleNamespace(
+            state=SimpleNamespace(
+                WEBUI_NAME="Halo WebUI",
+                config=SimpleNamespace(
+                    ENABLE_CHAT_RESPONSE_BASE64_IMAGE_URL_CONVERSION=False,
+                    WEBUI_URL="http://localhost",
+                ),
+            )
+        )
+    )
+    user = SimpleNamespace(id="user-1", email="u@example.com", name="User", role="user")
+    metadata = {"session_id": "session-1", "chat_id": "chat-1", "message_id": "assistant-1", "features": {}}
+    ref = "modelref::gemini::personal::id:09b78e68::gemini-chat"
+    response = StreamingResponse(_empty_stream(), media_type="text/event-stream")
+
+    asyncio.run(
+        middleware.process_chat_response(
+            request,
+            response,
+            {"model": ref, "messages": [{"role": "user", "content": "hi"}]},
+            user,
+            metadata,
+            {"id": ref, "name": "gemini-chat"},
+            [],
+            {},
+        )
+    )
+    asyncio.run(created["coroutine"])
+
+    final = [
+        event["data"]
+        for event in events
+        if event.get("type") == "chat:completion" and event.get("data", {}).get("done")
+    ][-1]
+    assert final["error"]["type"] == "empty_response"
+    assert final["error"]["content"].startswith("模型 gemini-chat 返回了空响应")
+    assert "modelref" not in final["error"]["content"]

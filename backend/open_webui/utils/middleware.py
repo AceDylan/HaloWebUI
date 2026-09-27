@@ -10206,10 +10206,16 @@ async def process_chat_response(
                             "This may be caused by content filtering, an unavailable model, or a proxy issue.",
                             model_id_display,
                         )
+                        # The name the picker shows ("gemini-chat"), not the
+                        # request id ("modelref::gemini::personal::id:…::gemini-chat").
+                        model_label = (
+                            str((model or {}).get("name") or "").strip()
+                            or str(model_id_display).rsplit("::", 1)[-1]
+                        )
                         finalize_error_payload = {
                             "type": "empty_response",
                             "model_id": model_id_display,
-                            "content": f"模型 {model_id_display} 返回了空响应（0 token）。",
+                            "content": f"模型 {model_label} 返回了空响应（0 token），可以重新发送或换一个模型。",
                             "reasons": [
                                 "content_filter",
                                 "proxy_error",

@@ -3,10 +3,12 @@ import { describe, expect, it, vi } from 'vitest';
 import {
 	HUB_REAUTH_GUARD_MS,
 	hubNoteUrl,
+	hubPlacePath,
 	hubReturnPath,
 	openNoteInHub,
 	parseHubTicket,
 	postActivityToHub,
+	postPlaceToHub,
 	rememberHubOrigin,
 	requestHubReauth,
 	splitVaultNotePaths,
@@ -271,5 +273,39 @@ describe('requestHubReauth', () => {
 			{ source: 'halowebui', type: 'reauth', path: '/c/x' },
 			HUB
 		);
+	});
+});
+
+describe('hubPlacePath / postPlaceToHub', () => {
+	it('names the chat on screen, a brand-new one included', () => {
+		expect(hubPlacePath('/c/abc-1', '')).toBe('/c/abc-1');
+		// A new chat has its id before the address catches up.
+		expect(hubPlacePath('/', 'f00d-2')).toBe('/c/f00d-2');
+		expect(hubPlacePath('/', '')).toBe('/');
+		expect(hubPlacePath('/', 'local')).toBe('/');
+		// Elsewhere the old chat id does not count.
+		expect(hubPlacePath('/workspace', 'f00d-2')).toBe('/');
+		expect(hubPlacePath('/c/abc?x=1', '')).toBe('/');
+	});
+
+	it('tells only the Hub, and only when framed', () => {
+		const parent = { postMessage: vi.fn() };
+		expect(postPlaceToHub('/c/abc', HUB, { parent })).toBe(true);
+		expect(parent.postMessage).toHaveBeenCalledWith(
+			{ source: 'halowebui', type: 'place', path: '/c/abc' },
+			HUB
+		);
+		expect(postPlaceToHub('/settings', HUB, { parent })).toBe(true);
+		expect(parent.postMessage).toHaveBeenLastCalledWith(
+			{ source: 'halowebui', type: 'place', path: '/' },
+			HUB
+		);
+
+		const top: any = { postMessage: vi.fn() };
+		top.parent = top;
+		expect(postPlaceToHub('/c/abc', HUB, top)).toBe(false);
+		expect(postPlaceToHub('/c/abc', '*', { parent })).toBe(false);
+		expect(postPlaceToHub('/c/abc', undefined, { parent })).toBe(false);
+		expect(parent.postMessage).toHaveBeenCalledTimes(2);
 	});
 });

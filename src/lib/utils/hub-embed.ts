@@ -320,3 +320,53 @@ export const requestHubReauth = (
 		return false;
 	}
 };
+
+// ---------------------------------------------------------------------------
+// Which chat is on screen.
+//
+// The Hub's 「重新载入」 and 「新标签页打开」 used to start over at the home
+// page: a stuck frame came back as an empty new chat, and popping the chat out
+// into its own tab lost it. So, framed by the Hub, the page tells the Hub (and
+// only the Hub) which chat it shows: the same /c/<id> it already sends when
+// asking to be signed in again, else '/'. Nothing else about the chat.
+
+export const HUB_PLACE_MESSAGE_TYPE = 'place';
+
+/**
+ * The chat on screen as the Hub should reopen it. A new chat gets its id (the
+ * chatId store) a moment before the address becomes /c/<id>, so on '/' a real
+ * chat id counts too; a temporary chat ('local') has no address to come back to.
+ */
+export const hubPlacePath = (pathname: unknown, currentChatId: unknown): string => {
+	const path = hubReturnPath(pathname);
+	if (path !== '/' || pathname !== '/') {
+		return path;
+	}
+	return typeof currentChatId === 'string' && currentChatId !== 'local'
+		? hubReturnPath(`/c/${currentChatId}`)
+		: '/';
+};
+
+/** Tells the framing Hub which chat is on screen. Returns whether a message was posted. */
+export const postPlaceToHub = (
+	path: unknown,
+	hubOrigin: unknown,
+	win: FrameWindow = window as unknown as FrameWindow
+): boolean => {
+	if (typeof hubOrigin !== 'string' || !PLAIN_ORIGIN.test(hubOrigin)) {
+		return false;
+	}
+	const parent = win.parent;
+	if (!parent || parent === (win as unknown)) {
+		return false;
+	}
+	try {
+		parent.postMessage(
+			{ source: HUB_ACTIVITY_MESSAGE_SOURCE, type: HUB_PLACE_MESSAGE_TYPE, path: hubReturnPath(path) },
+			hubOrigin
+		);
+		return true;
+	} catch {
+		return false;
+	}
+};

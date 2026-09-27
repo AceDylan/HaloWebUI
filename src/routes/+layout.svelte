@@ -53,7 +53,13 @@
 	import { getFaviconWithDot, tabActivity } from '$lib/utils/tab-activity';
 	import { applyHermesChatEvent } from '$lib/utils/hermes-activity';
 	import { getNotificationPreview } from '$lib/utils/notification-preview';
-	import { postActivityToHub, rememberHubOrigin, requestHubReauth } from '$lib/utils/hub-embed';
+	import {
+		hubPlacePath,
+		postActivityToHub,
+		postPlaceToHub,
+		rememberHubOrigin,
+		requestHubReauth
+	} from '$lib/utils/hub-embed';
 	import NotificationToast from '$lib/components/NotificationToast.svelte';
 	import AppSidebar from '$lib/components/app/AppSidebar.svelte';
 
@@ -816,6 +822,13 @@
 		$config?.hub_origin
 	);
 	$: rememberHubOrigin($config?.hub_origin);
+	// ...and which chat is on screen, so the Hub's 「重新载入」 / 「新标签页打开」 come
+	// back to it. The address is read from window.location: a new chat's shallow
+	// replaceState('/c/<id>') leaves $page.url behind, while $chatId catches it.
+	$: postPlaceToHub(
+		hubPlacePath($page.url && typeof window !== 'undefined' ? window.location.pathname : '', $chatId),
+		$config?.hub_origin
+	);
 </script>
 
 <svelte:head>

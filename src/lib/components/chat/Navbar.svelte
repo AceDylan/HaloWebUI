@@ -96,7 +96,7 @@
 				{#if $chatId && title}
 					<div
 						class="hidden sm:flex min-w-0 max-w-[40%] shrink items-center self-start py-2 pl-2 pr-1 text-sm text-gray-500 dark:text-gray-400"
-						title={title}
+						{title}
 						data-halo-navbar-chat-title
 					>
 						<span class="truncate">{title}</span>
@@ -106,39 +106,43 @@
 				<div class="self-start flex flex-none items-center text-gray-600 dark:text-gray-400">
 					<!-- <div class="md:hidden flex self-center w-[1px] h-5 mx-2 bg-gray-300 dark:bg-stone-700" /> -->
 					{#if shareEnabled && chat && (chat.id || $temporaryChatEnabled)}
-						<Menu
-							{chat}
-							{shareEnabled}
-							shareHandler={() => {
-								showShareChatModal = !showShareChatModal;
-							}}
-							downloadHandler={() => {
-								showDownloadChatModal = !showDownloadChatModal;
-							}}
-						>
-							<button
-								class="flex cursor-pointer px-2 py-2 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-850 transition"
-								id="chat-context-menu-button"
-								aria-label={$i18n.t('Chat Menu')}
+						<!-- Dropdown's trigger is min-w-0, which let this row squeeze it to 16px
+						     while the 36px button kept drawing over "Controls". -->
+						<div class="flex shrink-0">
+							<Menu
+								{chat}
+								{shareEnabled}
+								shareHandler={() => {
+									showShareChatModal = !showShareChatModal;
+								}}
+								downloadHandler={() => {
+									showDownloadChatModal = !showDownloadChatModal;
+								}}
 							>
-								<div class=" m-auto self-center">
-									<svg
-										xmlns="http://www.w3.org/2000/svg"
-										fill="none"
-										viewBox="0 0 24 24"
-										stroke-width="1.5"
-										stroke="currentColor"
-										class="size-5"
-									>
-										<path
-											stroke-linecap="round"
-											stroke-linejoin="round"
-											d="M6.75 12a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0ZM12.75 12a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0ZM18.75 12a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0Z"
-										/>
-									</svg>
-								</div>
-							</button>
-						</Menu>
+								<button
+									class="flex cursor-pointer px-2 py-2 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-850 transition"
+									id="chat-context-menu-button"
+									aria-label={$i18n.t('Chat Menu')}
+								>
+									<div class=" m-auto self-center">
+										<svg
+											xmlns="http://www.w3.org/2000/svg"
+											fill="none"
+											viewBox="0 0 24 24"
+											stroke-width="1.5"
+											stroke="currentColor"
+											class="size-5"
+										>
+											<path
+												stroke-linecap="round"
+												stroke-linejoin="round"
+												d="M6.75 12a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0ZM12.75 12a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0ZM18.75 12a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0Z"
+											/>
+										</svg>
+									</div>
+								</button>
+							</Menu>
+						</div>
 					{/if}
 
 					<Tooltip content={$i18n.t('Controls')}>

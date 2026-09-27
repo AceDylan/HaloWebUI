@@ -97,7 +97,8 @@
 			}))
 	);
 	// A model chosen earlier that the list no longer offers stays visible.
-	$: pinnedMissing = Boolean(current.model) && !modelChoices.some((item) => item.value === modelValue);
+	$: pinnedMissing =
+		Boolean(current.model) && !modelChoices.some((item) => item.value === modelValue);
 
 	const update = (patch: Partial<HermesRunOptions>) => {
 		options = normalizeHermesRunOptions({ ...current, ...patch });
@@ -160,9 +161,9 @@
 	<button
 		bind:this={button}
 		type="button"
-		class="flex max-w-[14rem] items-center gap-1 rounded-full px-2.5 py-1.5 text-xs font-medium ring-1 transition max-sm:py-2 {summary
-			? 'bg-primary-50 text-primary-700 ring-primary-200 dark:bg-primary-900/30 dark:text-primary-200 dark:ring-primary-800/60'
-			: 'text-gray-600 ring-gray-200 hover:bg-gray-100 dark:text-gray-300 dark:ring-gray-700 dark:hover:bg-gray-800'}"
+		class="flex h-8 max-w-[14rem] items-center gap-1 whitespace-nowrap rounded-full border px-2.5 text-xs font-medium transition {summary
+			? 'border-primary-200 bg-primary-50 text-primary-700 dark:border-primary-800/60 dark:bg-primary-900/30 dark:text-primary-200'
+			: 'border-gray-200 text-gray-600 hover:bg-gray-100 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800'}"
 		aria-haspopup="dialog"
 		aria-expanded={open}
 		aria-label={$i18n.t('Hermes options')}
@@ -261,7 +262,9 @@
 				<div class="mt-1 text-2xs text-amber-600 dark:text-amber-400">{modelOptionsError}</div>
 			{/if}
 
-			<div class="mt-3 flex items-start justify-between gap-2 text-2xs text-gray-400 dark:text-gray-500">
+			<div
+				class="mt-3 flex items-start justify-between gap-2 text-2xs text-gray-400 dark:text-gray-500"
+			>
 				<span class="min-w-0">模型对这个对话一直生效；思考强度跟随 HaloWebUI 设置</span>
 				{#if summary}
 					<button

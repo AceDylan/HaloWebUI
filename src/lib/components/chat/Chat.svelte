@@ -6616,6 +6616,19 @@
 			let userMessage = history.messages[message.parentId];
 			let userPrompt = userMessage.content;
 
+			// An earlier reply answered again while the latest one still runs:
+			// that one is on the branch being left, stop it (as editing does).
+			// A reply of the same turn (another model's) keeps running.
+			const latest = history.messages[history.currentId];
+			if (
+				latest?.role === 'assistant' &&
+				latest.parentId !== message.parentId &&
+				latest.done !== true
+			) {
+				await stopResponse();
+				toast.info($i18n.t('The reply that was running has been stopped.'));
+			}
+
 			if (autoScroll) {
 				scrollToBottom();
 			}

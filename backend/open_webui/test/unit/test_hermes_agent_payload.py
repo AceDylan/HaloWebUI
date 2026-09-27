@@ -375,6 +375,77 @@ def test_run_payload_continues_when_last_message_is_the_assistant():
     }
 
 
+def test_a_reply_stopped_before_it_said_anything_stays_between_the_requests():
+    """Left out, the stopped request and the next message were two user turns
+    in a row; hermes merged them and ran the stopped request again."""
+    form_data = {
+        "messages": [
+            {"role": "user", "content": "run sleep 40"},
+            {"role": "assistant", "content": "", "stopped": True},
+            {"role": "user", "content": "just say hi"},
+        ]
+    }
+
+    payload = _build_run_payload(form_data, {"chat_id": "c1"}, "hermes-agent")
+
+    assert payload["input"] == "just say hi"
+    assert payload["conversation_history"] == [
+        {"role": "user", "content": "run sleep 40"},
+        {"role": "assistant", "content": hermes_agent.STOPPED_REPLY_NOTE},
+    ]
+
+
+def test_a_stopped_reply_with_progress_says_where_it_was_stopped():
+    form_data = {
+        "messages": [
+            {"role": "user", "content": "fix the bug"},
+            {"role": "assistant", "content": "Looking at the logs.", "stopped": True},
+            {"role": "user", "content": "what are you doing?"},
+        ]
+    }
+
+    payload = _build_run_payload(form_data, {"chat_id": "c1"}, "hermes-agent")
+
+    assert payload["conversation_history"][-1] == {
+        "role": "assistant",
+        "content": "Looking at the logs.\n\n" + hermes_agent.STOPPED_REPLY_NOTE,
+    }
+    assert "stopped" not in payload["conversation_history"][-1]
+
+
+def test_continuing_a_stopped_reply_does_not_call_it_stopped():
+    form_data = {
+        "messages": [
+            {"role": "user", "content": "Write a long report"},
+            {"role": "assistant", "content": "Section 1 ...", "stopped": True},
+        ]
+    }
+
+    payload = _build_run_payload(form_data, {"chat_id": "c1"}, "hermes-agent")
+
+    assert payload["input"] == hermes_agent.CONTINUE_RUN_INPUT
+    assert payload["conversation_history"][-1] == {
+        "role": "assistant",
+        "content": "Section 1 ...",
+    }
+
+
+def test_continuing_a_stopped_reply_that_said_nothing_asks_again():
+    """Nothing to continue from: the request goes again, as it did before
+    stopped replies were sent."""
+    form_data = {
+        "messages": [
+            {"role": "user", "content": "Write a long report"},
+            {"role": "assistant", "content": "", "stopped": True},
+        ]
+    }
+
+    payload = _build_run_payload(form_data, {"chat_id": "c1"}, "hermes-agent")
+
+    assert payload["input"] == "Write a long report"
+    assert "conversation_history" not in payload
+
+
 def test_run_payload_fills_in_an_attachment_only_turn():
     """A file submitted with no text leaves an empty user message, which
     /v1/runs rejects with "Missing 'input' field"."""

@@ -148,6 +148,10 @@ ATTACHMENT_ONLY_RUN_INPUT = (
     "The attached file(s) are the request; no other text was provided. "
     "Work with them and report what you find."
 )
+# Ends an earlier reply the person stopped (the chat sends it as `stopped`).
+# Without it a reply stopped before it said anything was left out, hermes
+# merged the stopped request into the next message and ran it again.
+STOPPED_REPLY_NOTE = "[用户在这里停止了这条回复，上面的请求没有做完]"
 
 # A completion webhook is read on a phone: no tool transcript, no artifact
 # source, and short enough that Telegram/Bark render it in one screen.
@@ -1135,8 +1139,19 @@ def _build_run_payload(form_data, metadata, upstream_model_id, user=None):
                 else system_content
             )
         else:
-            history.append({"role": role, "content": content})
+            entry = {"role": role, "content": content}
+            if role == "assistant" and message.get("stopped") is True:
+                entry["stopped"] = True
+            history.append(entry)
 
+    # "Continue" on a stopped reply that said nothing has nothing to continue:
+    # its request goes again, as before the chat sent stopped replies.
+    if (
+        history
+        and history[-1].get("stopped")
+        and not _content_has_text(history[-1].get("content"))
+    ):
+        history.pop()
     # No trailing user turn means the UI asked to continue the assistant's own
     # last message ("continue response"), which stays in the history below.
     continuing = bool(history) and history[-1].get("role") != "user"
@@ -1144,18 +1159,25 @@ def _build_run_payload(form_data, metadata, upstream_model_id, user=None):
     if history and history[-1].get("role") == "user":
         user_message = history.pop()["content"]
 
+    def _assistant_history(message, last):
+        text = _compact_assistant_history(_history_text_content(message["content"]))
+        # The reply being continued is the one the person wants finished.
+        if message.get("stopped") and not (continuing and last):
+            text = f"{text}\n\n{STOPPED_REPLY_NOTE}" if text else STOPPED_REPLY_NOTE
+        return text
+
     # Inbound media is turn-scoped. Historical image data URLs must not be
     # replayed: /v1/runs would stringify them and count the base64 as text.
     history = [
         {
             "role": message["role"],
             "content": (
-                _compact_assistant_history(_history_text_content(message["content"]))
+                _assistant_history(message, index == len(history) - 1)
                 if message["role"] == "assistant"
                 else _history_text_content(message["content"])
             ),
         }
-        for message in history
+        for index, message in enumerate(history)
     ]
 
     # The runs API accepts a string input or an OpenAI-style message array.  A

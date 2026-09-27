@@ -5943,6 +5943,13 @@
 		const imageGenerationActive = canUseChatImageGeneration()
 			? isImageGenerationActiveForRequest()
 			: false;
+		// Hermes is told which of its earlier replies the person stopped. A reply
+		// stopped before it said anything was dropped as empty, and hermes then
+		// merged the stopped request into the next message and ran it again.
+		const hermesRequest = isHermesAgentModelId(
+			getModelRequestId(model),
+			$config?.hermes_agent_model_ids
+		);
 
 		messages = messages
 			.map((message, idx, arr) => {
@@ -5984,11 +5991,14 @@
 							}
 						: {
 								content: textContent
-							})
+							}),
+					...(hermesRequest && message.role === 'assistant' && isResponseStopped(message)
+						? { stopped: true }
+						: {})
 				};
 			})
 			.filter((message) => {
-				if (message?.role === 'user') {
+				if (message?.role === 'user' || message?.stopped) {
 					return true;
 				}
 				if (Array.isArray(message?.content)) {

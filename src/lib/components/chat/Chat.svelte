@@ -7082,6 +7082,7 @@
 								awaitingApproval={hermesRunAwaitingApproval}
 								{showHermesOptions}
 								bind:hermesOptions
+								{hermesContinuation}
 								stopConfirmAfterSeconds={hermesRunActive ? 30 : null}
 								runStartedAt={history?.currentId
 									? (history.messages?.[history.currentId]?.timestamp ?? null)
@@ -7138,7 +7139,6 @@
 								bind:maxThinkingTokens
 								{showHermesOptions}
 								bind:hermesOptions
-								{hermesContinuation}
 								{activeAssistant}
 								onActivateAssistant={activateAssistant}
 								onDeactivateAssistant={deactivateAssistant}

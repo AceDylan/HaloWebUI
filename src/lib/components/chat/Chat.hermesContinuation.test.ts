@@ -14,11 +14,14 @@ import {
 // back to that run: 2026-09-27, "多久观察一次" after "如何破局呢".
 
 let source: string;
+let template: any;
 
 beforeAll(async () => {
 	const filename = process.env.HALO_CHAT_COMPONENT_SOURCE ?? 'src/lib/components/chat/Chat.svelte';
 	const { code } = await preprocess(readFileSync(filename, 'utf8'), vitePreprocess(), { filename });
-	const declarations = parse(code).instance!.content.body.flatMap(
+	const ast = parse(code);
+	template = ast.html;
+	const declarations = ast.instance!.content.body.flatMap(
 		(node: any) => node.declarations ?? []
 	);
 	const declaration = declarations.find(
@@ -86,5 +89,42 @@ describe('takeHermesOptionsForMessage after a runner report', () => {
 		// submitMessage(parentId, …) under a later reply: no report above it.
 		expect(take('x', 'hermesReply').continue_run).toBeUndefined();
 		expect(take('/reclaude 新任务').continue_run).toBeUndefined();
+	});
+});
+
+describe('the composer under a chat', () => {
+	// 05420ac passed the continuation to <Placeholder>, the empty new-chat page,
+	// which never ends on a report (and has no such prop), not to the composer
+	// under a chat: after a report the button still read "Hermes" and the panel
+	// "直接", with no "接着上次" (2026-09-27, chat 9d3eb38b). A message sent from
+	// there still went back to the run, whatever the panel said.
+	const components = (name: string) => {
+		const found: any[] = [];
+		const walk = (node: any) => {
+			if (!node || typeof node !== 'object') return;
+			if (node.type === 'InlineComponent' && node.name === name) found.push(node);
+			for (const value of Object.values(node)) {
+				if (Array.isArray(value)) value.forEach(walk);
+				else if (value && typeof value === 'object' && (value as any).type) walk(value);
+			}
+		};
+		walk(template);
+		return found;
+	};
+	const passes = (node: any, prop: string) =>
+		node.attributes.some((attribute: any) => attribute.name === prop);
+
+	it('is told which run the next message goes back to', () => {
+		const inputs = components('MessageInput');
+		expect(inputs.length).toBeGreaterThan(0);
+		expect(inputs.map((node) => passes(node, 'hermesContinuation'))).toEqual(
+			inputs.map(() => true)
+		);
+	});
+
+	it('is not handed to the new-chat page, which has nothing to go back to', () => {
+		expect(components('Placeholder').some((node) => passes(node, 'hermesContinuation'))).toBe(
+			false
+		);
 	});
 });

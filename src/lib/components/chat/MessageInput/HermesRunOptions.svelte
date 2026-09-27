@@ -54,7 +54,9 @@
 	const placePanel = () => {
 		if (!button || typeof window === 'undefined') return;
 		const rect = button.getBoundingClientRect();
-		const width = Math.min(PANEL_WIDTH, window.innerWidth - 16);
+		// On a phone the four dispatch choices need the width: at 288px "reclaude" broke
+		// mid-word into "reclaud / e".
+		const width = window.innerWidth < 640 ? window.innerWidth - 16 : PANEL_WIDTH;
 		const left = Math.max(8, Math.min(rect.left, window.innerWidth - width - 8));
 		panelStyle =
 			`position: fixed; left: ${Math.round(left)}px; bottom: ${Math.round(window.innerHeight - rect.top + 8)}px; ` +
@@ -213,7 +215,7 @@
 						aria-checked={checked}
 						title={item.hint}
 						data-halo-hermes-dispatch={item.value || 'direct'}
-						class="rounded-lg px-1.5 py-1.5 text-xs transition max-sm:py-2.5 max-sm:text-sm {checked
+						class="min-w-0 truncate rounded-lg px-1.5 py-1.5 text-xs transition max-sm:py-2.5 max-sm:text-sm {checked
 							? 'bg-primary-600 text-white dark:bg-primary-500'
 							: 'bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700'}"
 						on:click={() => update({ dispatch: item.value || (continuation ? 'hermes' : '') })}

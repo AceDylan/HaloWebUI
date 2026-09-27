@@ -52,7 +52,7 @@ import time
 import urllib.error
 import urllib.request
 
-SCRIPT_VERSION = "2026-09-27.1"
+SCRIPT_VERSION = "2026-09-27.2"
 CONFIG_FILE = "/root/.hermes/reclaude-runner.env"
 REQUIRED_CONFIG_KEYS = ("HALOWEBUI_NOTIFY_URL", "HALOWEBUI_NOTIFY_TOKEN")
 STATE_DB = "/root/.hermes/state.db"
@@ -487,8 +487,11 @@ def _short_session(session_id):
     return session_id
 
 
-def build_digest(run_id, status, run_dir, session_id, agent="reclaude"):
+def build_digest(run_id, status, run_dir, session_id, agent="reclaude", chat=False):
     """The report as the user reads it: a status line, result.md, and what to do next.
+
+    *chat* (a Telegram report): the next step is spelled as the command that goes straight
+    back to the run's session; a plain reply there takes a model turn (about a minute).
 
     The second line says who answered and what it took (model, turns, duration, cost,
     session); result.md's own header, which repeats that, is left out. Capped at
@@ -525,8 +528,12 @@ def build_digest(run_id, status, run_dir, session_id, agent="reclaude"):
                 + f"\n\n…（后面还有约 {rest} 字，完整结果在 {result_path}，需要时让 Hermes 读取）")
     lines += ["", body or f"（没有 result.md：{result_path}）"]
 
-    if status == "question":
+    if status == "question" and chat:
+        lines += ["", f"↩️ 发「/{agent} 你的决定」，直接交回同一个会话续跑（不经过模型）。"]
+    elif status == "question":
         lines += ["", "↩️ 直接回复你的决定，Hermes 会在同一个会话里续跑。"]
+    elif status == "max_turns" and chat:
+        lines += ["", f"↩️ 发 /{agent} 继续，在同一个会话里接着跑。"]
     elif status == "max_turns":
         lines += ["", "↩️ 回复「继续」，可以在同一个会话里接着跑。"]
     elif status != "success" and "runner 提示" not in body:
@@ -643,7 +650,7 @@ def post_notification(url, token, payload, user_agent="reclaude-runner/1.0"):
 
 def deliver_direct(args, record, save, platform, chat_id, session_id, agent_session):
     """Report a detached run to its gateway chat, retrying like the HaloWebUI path."""
-    digest = build_digest(args.run_id, args.status, args.run_dir, agent_session, agent=args.agent)
+    digest = build_digest(args.run_id, args.status, args.run_dir, agent_session, agent=args.agent, chat=True)
     notice = build_session_notice(
         args.run_id, args.status, args.run_dir, agent_session, digest, agent=args.agent,
         answer_command=args.answer_command,

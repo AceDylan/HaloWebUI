@@ -233,6 +233,7 @@
 					<div class="flex items-center">{$i18n.t('Move to group')}</div>
 				</DropdownMenu.SubTrigger>
 				<DropdownMenu.SubContent
+					overlap
 					class="select-none w-full min-w-[180px] max-w-[240px] rounded-xl p-1 z-50 bg-white dark:bg-gray-850 dark:text-white shadow-lg border border-gray-300/30 dark:border-gray-700/50"
 					transition={flyAndScale}
 					sideOffset={8}
@@ -298,6 +299,7 @@
 					<div class="flex items-center">{$i18n.t('Download')}</div>
 				</DropdownMenu.SubTrigger>
 				<DropdownMenu.SubContent
+					overlap
 					class="select-none w-full rounded-xl p-1 z-50 bg-white dark:bg-gray-850 dark:text-white shadow-lg border border-gray-300/30 dark:border-gray-700/50"
 					transition={flyAndScale}
 					sideOffset={8}

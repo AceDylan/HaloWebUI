@@ -478,6 +478,7 @@
 	</DropdownMenu.SubTrigger>
 
 	<DropdownMenu.SubContent
+		overlap
 		class="w-full min-w-[260px] rounded-xl px-1 py-1 border border-gray-300/30 dark:border-gray-700/50 z-50 bg-white dark:bg-gray-850 dark:text-white shadow-sm"
 		sideOffset={8}
 		transition={flyAndScale}
@@ -525,6 +526,7 @@
 							</div>
 						</DropdownMenu.SubTrigger>
 						<DropdownMenu.SubContent
+							overlap
 							class="w-full min-w-[240px] rounded-xl px-1 py-1 border border-gray-300/30 dark:border-gray-700/50 z-50 bg-white dark:bg-gray-850 dark:text-white shadow-sm"
 							sideOffset={8}
 							transition={flyAndScale}
@@ -575,6 +577,7 @@
 							</div>
 						</DropdownMenu.SubTrigger>
 						<DropdownMenu.SubContent
+							overlap
 							class="w-full min-w-[220px] rounded-xl px-1 py-1 border border-gray-300/30 dark:border-gray-700/50 z-50 bg-white dark:bg-gray-850 dark:text-white shadow-sm"
 							sideOffset={8}
 							transition={flyAndScale}
@@ -615,6 +618,7 @@
 							</div>
 						</DropdownMenu.SubTrigger>
 						<DropdownMenu.SubContent
+							overlap
 							class="w-full min-w-[200px] rounded-xl px-1 py-1 border border-gray-300/30 dark:border-gray-700/50 z-50 bg-white dark:bg-gray-850 dark:text-white shadow-sm"
 							sideOffset={8}
 							transition={flyAndScale}
@@ -655,6 +659,7 @@
 							</div>
 						</DropdownMenu.SubTrigger>
 						<DropdownMenu.SubContent
+							overlap
 							class="w-full min-w-[200px] rounded-xl px-1 py-1 border border-gray-300/30 dark:border-gray-700/50 z-50 bg-white dark:bg-gray-850 dark:text-white shadow-sm max-h-[60vh] overflow-y-auto"
 							sideOffset={8}
 							transition={flyAndScale}
@@ -699,6 +704,7 @@
 								</div>
 							</DropdownMenu.SubTrigger>
 							<DropdownMenu.SubContent
+								overlap
 								class="w-full min-w-[200px] rounded-xl px-1 py-1 border border-gray-300/30 dark:border-gray-700/50 z-50 bg-white dark:bg-gray-850 dark:text-white shadow-sm max-h-[60vh] overflow-y-auto"
 								sideOffset={8}
 								transition={flyAndScale}
@@ -739,6 +745,7 @@
 								</div>
 							</DropdownMenu.SubTrigger>
 							<DropdownMenu.SubContent
+								overlap
 								class="w-full min-w-[200px] rounded-xl px-1 py-1 border border-gray-300/30 dark:border-gray-700/50 z-50 bg-white dark:bg-gray-850 dark:text-white shadow-sm max-h-[60vh] overflow-y-auto"
 								sideOffset={8}
 								transition={flyAndScale}
@@ -779,6 +786,7 @@
 								</div>
 							</DropdownMenu.SubTrigger>
 							<DropdownMenu.SubContent
+								overlap
 								class="w-full min-w-[200px] rounded-xl px-1 py-1 border border-gray-300/30 dark:border-gray-700/50 z-50 bg-white dark:bg-gray-850 dark:text-white shadow-sm max-h-[60vh] overflow-y-auto"
 								sideOffset={8}
 								transition={flyAndScale}

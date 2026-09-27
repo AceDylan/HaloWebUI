@@ -269,6 +269,7 @@ code{font-size:0.9em;}</style></head><body><h1>${title}</h1>`;
 					<div class="flex items-center">{$i18n.t('Download')}</div>
 				</DropdownMenu.SubTrigger>
 				<DropdownMenu.SubContent
+					overlap
 					class="w-full rounded-xl px-1 py-1.5 z-50 bg-white dark:bg-gray-850 dark:text-white shadow-lg"
 					transition={flyAndScale}
 					sideOffset={8}

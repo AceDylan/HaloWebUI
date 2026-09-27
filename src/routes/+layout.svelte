@@ -53,7 +53,7 @@
 	import { getFaviconWithDot, tabActivity } from '$lib/utils/tab-activity';
 	import { applyHermesChatEvent } from '$lib/utils/hermes-activity';
 	import { getNotificationPreview } from '$lib/utils/notification-preview';
-	import { postActivityToHub } from '$lib/utils/hub-embed';
+	import { postActivityToHub, rememberHubOrigin, requestHubReauth } from '$lib/utils/hub-embed';
 	import NotificationToast from '$lib/components/NotificationToast.svelte';
 	import AppSidebar from '$lib/components/app/AppSidebar.svelte';
 
@@ -746,6 +746,9 @@
 					} else {
 						// Redirect Invalid Session User to /auth Page
 						localStorage.removeItem('token');
+						// Framed by the Bookmark Hub (it signed this tab in before): it signs us in
+						// again and reopens this chat, replacing the sign-in page shown meanwhile.
+						if (!onAuthPage) requestHubReauth(null, window.location.pathname);
 						// Same rule as without a token: already on /auth, stay. Navigating
 						// drops the URL fragment, and with it an OAuth token or the Bookmark
 						// Hub's single-use ticket — which is how a stale token left behind by
@@ -812,6 +815,7 @@
 		$tabActivity === 'approval' ? 'running' : $tabActivity,
 		$config?.hub_origin
 	);
+	$: rememberHubOrigin($config?.hub_origin);
 </script>
 
 <svelte:head>

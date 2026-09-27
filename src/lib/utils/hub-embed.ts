@@ -228,3 +228,95 @@ export const openNoteInHub = (
 		return false;
 	}
 };
+
+// ---------------------------------------------------------------------------
+// Signing in again through the Hub.
+//
+// A session opened by a Hub ticket ends after 12 hours (HUB_EMBED_SESSION_TTL),
+// while a Hub tab — a browser's start page, a phone tab — stays open for days.
+// The frame then only said "Your session has expired. Please log in again.",
+// though the Hub can sign its administrator in again at no cost. So, framed by
+// the Hub, the page asks the Hub to: the Hub opens a fresh frame with a new
+// ticket that lands on the same chat (the Hub refuses when it has been locked
+// meanwhile, and when it cannot sign tickets at all).
+
+export const HUB_REAUTH_MESSAGE_TYPE = 'reauth';
+const HUB_ORIGIN_KEY = 'halowebui.hubOrigin';
+const REAUTH_KEY = 'halowebui.hubReauthAt';
+// At most one request a minute: if the new session cannot stick (cookies
+// blocked, the two deployments disagree), the frame must not bounce forever.
+export const HUB_REAUTH_GUARD_MS = 60_000;
+
+type SessionStore = Pick<Storage, 'getItem' | 'setItem'>;
+
+const sessionStore = (): SessionStore | null => {
+	try {
+		return window.sessionStorage;
+	} catch {
+		return null;
+	}
+};
+
+/**
+ * Keeps the Hub's origin for this tab. The configuration names the Hub only to
+ * a signed-in user, and a request to sign in again is exactly what is needed
+ * once the session is gone.
+ */
+export const rememberHubOrigin = (
+	hubOrigin: unknown,
+	store: SessionStore | null = sessionStore()
+): void => {
+	if (typeof hubOrigin !== 'string' || !PLAIN_ORIGIN.test(hubOrigin) || !store) {
+		return;
+	}
+	try {
+		store.setItem(HUB_ORIGIN_KEY, hubOrigin);
+	} catch {
+		// Storage refused: the in-session path still has the origin from the config.
+	}
+};
+
+/** The chat to land on again: /c/<id>, else home. Never a query: `/?q=` would send its prompt once more. */
+export const hubReturnPath = (pathname: unknown): string =>
+	typeof pathname === 'string' && /^\/c\/[A-Za-z0-9-]{1,64}$/.test(pathname) ? pathname : '/';
+
+/**
+ * Framed by the Hub, asks it to sign this tab in again and come back to
+ * `pathname`. Returns true when the request went out (the Hub replaces this
+ * frame shortly; the caller need not tell anyone to sign in).
+ */
+export const requestHubReauth = (
+	hubOrigin: unknown,
+	pathname: unknown,
+	win: FrameWindow = window as unknown as FrameWindow,
+	store: SessionStore | null = sessionStore(),
+	now: number = Date.now()
+): boolean => {
+	const parent = win.parent;
+	if (!parent || parent === (win as unknown) || !store) {
+		return false;
+	}
+	let origin = typeof hubOrigin === 'string' && PLAIN_ORIGIN.test(hubOrigin) ? hubOrigin : null;
+	try {
+		origin = origin ?? store.getItem(HUB_ORIGIN_KEY);
+		if (!origin || !PLAIN_ORIGIN.test(origin)) {
+			return false;
+		}
+		const last = Number(store.getItem(REAUTH_KEY) || 0);
+		if (last > 0 && now - last >= 0 && now - last < HUB_REAUTH_GUARD_MS) {
+			return false;
+		}
+		store.setItem(REAUTH_KEY, String(now));
+		parent.postMessage(
+			{
+				source: HUB_ACTIVITY_MESSAGE_SOURCE,
+				type: HUB_REAUTH_MESSAGE_TYPE,
+				path: hubReturnPath(pathname)
+			},
+			origin
+		);
+		return true;
+	} catch {
+		return false;
+	}
+};

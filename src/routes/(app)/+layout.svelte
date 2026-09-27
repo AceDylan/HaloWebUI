@@ -49,6 +49,7 @@
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import { applyUserSettingsSnapshot } from '$lib/utils/user-settings';
 	import { startHermesActivityPolling, stopHermesActivityPolling } from '$lib/utils/hermes-activity';
+	import { requestHubReauth } from '$lib/utils/hub-embed';
 
 	const i18n = getContext('i18n');
 
@@ -311,7 +312,16 @@
 			// page-level so it does not stop when the sidebar list unmounts.
 			startHermesActivityPolling({
 				onSessionExpired: () => {
-					toast.warning($i18n.t('Your session has expired. Please log in again.'));
+					const expired = () =>
+						toast.warning($i18n.t('Your session has expired. Please log in again.'));
+					// Framed by the Bookmark Hub, whose ticket session ran out: the Hub signs
+					// this tab in again and replaces this frame, landing on the same chat. Only
+					// if that does not happen (the Hub is locked meanwhile) is there anything to say.
+					if (requestHubReauth($config?.hub_origin, window.location.pathname)) {
+						setTimeout(expired, 8000);
+						return;
+					}
+					expired();
 				}
 			});
 		}

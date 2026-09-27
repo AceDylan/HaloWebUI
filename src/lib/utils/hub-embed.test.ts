@@ -1,10 +1,14 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import {
+	HUB_REAUTH_GUARD_MS,
 	hubNoteUrl,
+	hubReturnPath,
 	openNoteInHub,
 	parseHubTicket,
 	postActivityToHub,
+	rememberHubOrigin,
+	requestHubReauth,
 	splitVaultNotePaths,
 	stripHubTicket,
 	takeHubTicket,
@@ -212,5 +216,60 @@ describe('hubNoteUrl / openNoteInHub', () => {
 		expect(top.postMessage).not.toHaveBeenCalled();
 		expect(openNoteInHub('项目/x.md', '*', { parent })).toBe(false);
 		expect(parent.postMessage).toHaveBeenCalledTimes(1);
+	});
+});
+
+describe('requestHubReauth', () => {
+	const memory = () => {
+		const data = new Map<string, string>();
+		return {
+			getItem: (k: string) => (data.has(k) ? data.get(k)! : null),
+			setItem: (k: string, v: string) => void data.set(k, String(v))
+		};
+	};
+
+	it('lands on the same chat, never on a query', () => {
+		expect(hubReturnPath('/c/0b5e-42')).toBe('/c/0b5e-42');
+		expect(hubReturnPath('/')).toBe('/');
+		expect(hubReturnPath('/?q=hi')).toBe('/');
+		expect(hubReturnPath('/c/../admin')).toBe('/');
+		expect(hubReturnPath('/workspace')).toBe('/');
+		expect(hubReturnPath(undefined)).toBe('/');
+	});
+
+	it('asks only the Hub, once a minute, and only when framed', () => {
+		const store = memory();
+		const parent = { postMessage: vi.fn() };
+		expect(requestHubReauth(HUB, '/c/abc', { parent }, store, 1_000_000)).toBe(true);
+		expect(parent.postMessage).toHaveBeenCalledWith(
+			{ source: 'halowebui', type: 'reauth', path: '/c/abc' },
+			HUB
+		);
+		expect(requestHubReauth(HUB, '/c/abc', { parent }, store, 1_000_000 + 5_000)).toBe(false);
+		expect(
+			requestHubReauth(HUB, '/', { parent }, store, 1_000_000 + HUB_REAUTH_GUARD_MS)
+		).toBe(true);
+		expect(parent.postMessage).toHaveBeenCalledTimes(2);
+
+		const top: any = { postMessage: vi.fn() };
+		top.parent = top;
+		expect(requestHubReauth(HUB, '/', top, memory(), 1)).toBe(false);
+		expect(requestHubReauth('*', '/', { parent }, memory(), 1)).toBe(false);
+		expect(requestHubReauth(HUB, '/', { parent }, null, 1)).toBe(false);
+		expect(parent.postMessage).toHaveBeenCalledTimes(2);
+	});
+
+	it('uses the origin remembered while signed in once the config no longer names it', () => {
+		const store = memory();
+		const parent = { postMessage: vi.fn() };
+		expect(requestHubReauth(undefined, '/', { parent }, store, 1)).toBe(false);
+		rememberHubOrigin('https://evil.example/path', store);
+		expect(requestHubReauth(undefined, '/', { parent }, store, 1)).toBe(false);
+		rememberHubOrigin(HUB, store);
+		expect(requestHubReauth(undefined, '/c/x', { parent }, store, 1)).toBe(true);
+		expect(parent.postMessage).toHaveBeenCalledWith(
+			{ source: 'halowebui', type: 'reauth', path: '/c/x' },
+			HUB
+		);
 	});
 });

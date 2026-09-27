@@ -43,10 +43,21 @@ from open_webui.utils.chat_auto_archive import (
     archive_inactive_chats,
     restore_auto_archived_chats,
 )
-from open_webui.tasks import list_task_ids_by_chat_id
+from open_webui.tasks import list_task_ids_by_chat_id, stop_task
 
 log = logging.getLogger(__name__)
 log.setLevel(SRC_LOG_LEVELS["MODELS"])
+
+
+async def _stop_chat_tasks(chat_id: str) -> None:
+    """Stop the replies still running in a chat that is being deleted. Left
+    running, a hermes task went on executing (and pushing, restarting...) for
+    a chat that no longer exists."""
+    for task_id in list_task_ids_by_chat_id(chat_id):
+        try:
+            await stop_task(task_id)
+        except Exception as e:
+            log.debug(f"stopping task {task_id} of deleted chat {chat_id}: {e}")
 
 router = APIRouter()
 
@@ -1114,6 +1125,7 @@ async def delete_chat_by_id(request: Request, id: str, user=Depends(get_verified
             for tag in chat.meta.get("tags", []):
                 if Chats.count_chats_by_tag_name_and_user_id(tag, user.id) == 1:
                     Tags.delete_tag_by_name_and_user_id(tag, user.id)
+            await _stop_chat_tasks(id)
 
         result = Chats.delete_chat_by_id(id)
 
@@ -1132,6 +1144,8 @@ async def delete_chat_by_id(request: Request, id: str, user=Depends(get_verified
             for tag in chat.meta.get("tags", []):
                 if Chats.count_chats_by_tag_name_and_user_id(tag, user.id) == 1:
                     Tags.delete_tag_by_name_and_user_id(tag, user.id)
+            if chat.user_id == user.id:
+                await _stop_chat_tasks(id)
 
         result = Chats.delete_chat_by_id_and_user_id(id, user.id)
         return result

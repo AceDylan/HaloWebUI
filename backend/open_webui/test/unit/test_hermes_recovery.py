@@ -897,3 +897,22 @@ def test_a_file_hermes_attaches_is_linked_in_the_live_reply(monkeypatch):
     assert stored == [("report.pdf", b"%PDF-", "application/pdf")]
     assert final["content"].endswith("报告在这里：[report.pdf](/api/v1/files/f1/content)")
     assert "MEDIA:" not in final["content"]
+
+
+def test_known_run_failures_read_as_what_to_do():
+    describe = hermes_agent._describe_run_failure
+    timed_out = describe("Non-streaming API call timed out after 90s with no response (threshold: 90s)")
+    assert timed_out.startswith("模型 90 秒没有响应") and "原始信息：Non-streaming" in timed_out
+    assert describe("Codex stream produced no SSE events for 60s after first byte").startswith("模型 60 秒没有响应")
+    assert describe("Context length exceeded (684,459 tokens). Cannot compress further.").startswith("对话太长")
+    assert describe("HTTP 503: Service Unavailable").startswith("模型服务暂时不可用")
+    assert describe("RateLimitError: 429 Too Many Requests").startswith("上游模型限流")
+    # Anything else is shown as hermes wrote it.
+    assert describe("tool crashed: boom") == "tool crashed: boom"
+    assert describe(None) == "Hermes 任务失败"
+
+
+def test_a_failed_run_is_explained(monkeypatch):
+    hermes = _Hermes(events=[{"event": "run.failed", "error": "Non-streaming API call timed out after 90s"}])
+    final, _, _ = _run(monkeypatch, hermes)
+    assert final["error"]["content"].startswith("模型 90 秒没有响应")

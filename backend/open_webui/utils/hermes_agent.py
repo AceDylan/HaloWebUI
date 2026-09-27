@@ -232,6 +232,42 @@ def _describe_run_error(error: Exception, base_url: str) -> str:
     return f"Hermes 出错：{error}"
 
 
+# Hermes reports a failed run with its agent's own English text. The known cases
+# read as what happened and what to do; the original stays underneath.
+_RUN_FAILURE_TEXTS = (
+    (
+        re.compile(r"timed out (?:after (\d+)s|before request dispatch)|no SSE events for (\d+)s", re.I),
+        "模型{seconds}没有响应，这一轮已停止。可以回复「继续」重试，或换一个模型。",
+    ),
+    (
+        re.compile(r"context length exceeded|context_length_exceeded|maximum context length", re.I),
+        "对话太长，超出了模型能处理的上下文，压缩后仍然放不下。请开一个新对话接着做（可以先让 Hermes 把要点总结出来）。",
+    ),
+    (
+        re.compile(r"\b(?:429|rate.?limit(?:ed)?|too many requests)\b", re.I),
+        "上游模型限流，这一轮没有完成。稍等一会再发，或换一个模型。",
+    ),
+    (
+        re.compile(r"\b(?:502|503|504|service unavailable|bad gateway|overloaded)\b", re.I),
+        "模型服务暂时不可用，备用模型也没有接上，这一轮没有完成。稍后重试或换一个模型。",
+    ),
+)
+
+
+def _describe_run_failure(error) -> str:
+    """The chat error for a run hermes reports as failed."""
+    raw = " ".join(str(error or "").split())
+    if not raw:
+        return "Hermes 任务失败"
+    for pattern, text in _RUN_FAILURE_TEXTS:
+        match = pattern.search(raw)
+        if match:
+            seconds = next((group for group in match.groups() if group), None)
+            friendly = text.format(seconds=f" {seconds} 秒" if seconds else "长时间")
+            return f"{friendly}\n\n原始信息：{raw[:300]}"
+    return raw
+
+
 def _describe_start_failure(status: int, body: str) -> str:
     """The chat error for a POST /v1/runs that hermes refused."""
     detail = body
@@ -2277,7 +2313,7 @@ async def run_hermes_agent(request, form_data, user, metadata, model, events, ta
                     pending_steer=outcome.get("pending_steer"),
                 )
             elif status == "failed":
-                await _finalize(error=outcome.get("error") or "Hermes 任务失败")
+                await _finalize(error=_describe_run_failure(outcome.get("error")))
             elif status == "cancelled":
                 await _finalize()
             elif status == "interrupted":
@@ -2510,7 +2546,7 @@ async def run_hermes_agent(request, form_data, user, metadata, model, events, ta
                                 )
                             elif event_type == "run.failed":
                                 await _finalize(
-                                    error=event.get("error") or "Hermes 任务失败"
+                                    error=_describe_run_failure(event.get("error"))
                                 )
                             elif event_type == "run.cancelled":
                                 await _finalize()
@@ -2701,7 +2737,7 @@ async def _recover_inflight_run(app, chat_id: str, record: dict) -> None:
         output = outcome.get("output") or ""
         usage = _map_usage(outcome.get("usage"))
     elif status == "failed":
-        error = outcome.get("error") or "Hermes 任务失败"
+        error = _describe_run_failure(outcome.get("error"))
     elif status == "interrupted":
         error = RECOVERY_MESSAGES["interrupted"]
     elif status == "lost":

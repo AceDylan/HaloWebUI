@@ -17,6 +17,7 @@
 	import { getBackendConfig } from '$lib/apis';
 	import { getNativeToolsConfig, setNativeToolsConfig } from '$lib/apis/configs';
 	import { cloneSettingsSnapshot, isSettingsSnapshotEqual } from '$lib/utils/settings-dirty';
+	import { isHermesAgentModel } from '$lib/utils/hermes';
 	import {
 		getAnthropicBudgetSteps,
 		getAnthropicEffortSteps,
@@ -439,6 +440,14 @@
 	$: globalSystemPrompt = typeof $settings?.system === 'string' ? $settings.system : '';
 	$: displayedGlobalToolCallingMode = ($config as any)?.tools?.calling_mode ?? null;
 	$: selectedModel = getSelectedModel(models, modelId);
+	// A hermes run gets the system prompt (as its instructions) and nothing
+	// else from here: hermes' halowebui-reasoning-sync plugin sets the 消息网关
+	// default thinking level on every request, and sampling params never leave
+	// HaloWebUI (backend hermes_agent.py). Showing 30 dials that do nothing
+	// only invites tuning them.
+	$: hermesOnly =
+		models?.length > 0 &&
+		models.every((model) => isHermesAgentModel(model, ($config as any)?.hermes_agent_model_ids));
 	$: modelSystemPrompt = getModelSystemPrompt(selectedModel);
 	$: hasCurrentChatSystemPromptOverride = normalizeSystemValue(params?.system) !== null;
 	$: hasGlobalSystemPrompt = normalizeSystemValue($settings?.system) !== null;
@@ -696,6 +705,20 @@
 				</Collapsible>
 			</div>
 
+			{#if hermesOnly}
+				<div
+					class="rounded-xl border border-gray-100 dark:border-gray-800/60 bg-gray-50/40 dark:bg-white/[0.02] px-3 py-2.5 space-y-1.5 text-xs text-gray-600 dark:text-gray-300"
+					data-halo-hermes-controls-note
+				>
+					<div class="text-sm font-medium text-gray-900 dark:text-gray-100">Hermes 对话</div>
+					<p>上面的系统提示词会随每条消息发给 Hermes。</p>
+					<p class="text-gray-500 dark:text-gray-400">
+						思考强度由管理员设置的「消息网关」默认值统一决定；温度、Top K、Seed
+						等参数 Hermes 不接收，按它自己的模型配置运行。换模型或派发给 reclaude，用输入框旁的
+						Hermes 选项。
+					</p>
+				</div>
+			{:else}
 			<!-- svelte-ignore a11y-no-static-element-interactions -->
 			<div
 				class="rounded-xl border bg-gray-50/40 dark:bg-white/[0.02] transition-all duration-300 relative
@@ -929,6 +952,7 @@
 					</div>
 				</Collapsible>
 			</div>
+			{/if}
 		{/if}
 	</div>
 </div>

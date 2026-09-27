@@ -760,14 +760,14 @@
 						// Hub's single-use ticket — which is how a stale token left behind by
 						// an expired Hub session made the first framed sign-in fail.
 						if (!onAuthPage) {
-							await goto(`/auth?redirect=${encodedUrl}`);
+							await goto(`/auth?redirect=${encodedUrl}`, { replaceState: true });
 						}
 					}
 				} else {
 					// Don't redirect if we're already on the auth page
 					// Needed because we pass in tokens from OAuth logins via URL fragments
 					if (!onAuthPage) {
-						await goto(`/auth?redirect=${encodedUrl}`);
+						await goto(`/auth?redirect=${encodedUrl}`, { replaceState: true });
 					}
 				}
 			}

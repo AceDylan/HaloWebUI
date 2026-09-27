@@ -86,7 +86,8 @@
 
 	onMount(async () => {
 		if ($user === undefined || $user === null) {
-			await goto('/auth');
+			// Replace: Back from the sign-in page must not land here only to bounce there again.
+			await goto('/auth', { replaceState: true });
 		} else if (['user', 'admin'].includes($user?.role)) {
 			try {
 				// Check if IndexedDB exists

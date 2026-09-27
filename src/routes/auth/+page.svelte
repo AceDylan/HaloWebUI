@@ -57,7 +57,10 @@
 			await user.set(sessionUser);
 			await config.set(await getBackendConfig(sessionUser.token ?? localStorage.token));
 
-			goto(redirectTarget());
+			// Replace, don't push: a sign-in page left behind in the history bounces Back
+			// forward again (signed in → off to the target). Framed by the Bookmark Hub, that
+			// entry sits in the Hub tab's own history, so Back could never leave the Hub.
+			goto(redirectTarget(), { replaceState: true });
 		}
 	};
 
@@ -177,7 +180,7 @@
 		const hubTicket = takeHubTicket();
 
 		if ($user !== undefined) {
-			goto(redirectTarget());
+			goto(redirectTarget(), { replaceState: true });
 		}
 		await checkOauthCallback();
 		// Already signed in (a password session is longer than the one a ticket opens): leave it alone.

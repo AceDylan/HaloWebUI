@@ -1233,8 +1233,10 @@ def _build_run_payload(form_data, metadata, upstream_model_id, user=None):
     reasoning_effort = _inherited_reasoning_effort(form_data)
     if reasoning_effort:
         payload["model_options"] = {"reasoning_effort": reasoning_effort}
-    if history:
-        payload["conversation_history"] = history
+    # Always sent, even empty: hermes loads the session's stored history when
+    # it is missing, and for an edited first message that is the branch the
+    # edit replaced.
+    payload["conversation_history"] = history
     if instructions:
         payload["instructions"] = instructions
     # The chat id doubles as the hermes session, so a chat keeps its session

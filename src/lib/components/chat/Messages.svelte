@@ -44,6 +44,7 @@
 	export let chatActionHandler: Function;
 	export let showMessage: Function = () => {};
 	export let submitMessage: Function = () => {};
+	export let stopResponse: Function = async () => {};
 	export let addMessages: Function = () => {};
 	export let onBranchMessage: Function = () => {};
 	export let branchingMessageId: string | null = null;
@@ -267,12 +268,30 @@
 		}
 	};
 
+	// A reply of the chat's latest turn is still being written.
+	const replyRunning = () => {
+		const current = history.currentId ? history.messages[history.currentId] : null;
+		if (current?.role !== 'assistant') return false;
+		const parent = current.parentId ? history.messages[current.parentId] : null;
+		return (parent?.childrenIds ?? [current.id]).some((id) => {
+			const reply = history.messages[id];
+			return reply?.role === 'assistant' && reply.done !== true;
+		});
+	};
+
 	const editMessage = async (messageId, content, submit = true, files = undefined) => {
 		if (history.messages[messageId].role === 'user') {
 			const hasEditedFiles = Array.isArray(files);
 			const messageFiles = hasEditedFiles ? structuredClone(files) : history.messages[messageId].files;
 
 			if (submit) {
+				// The reply still running at the end of the chat is on the branch
+				// this edit replaces: stop it first. Left running, a hermes task
+				// went on executing out of sight next to the edited one.
+				if (replyRunning()) {
+					await stopResponse();
+					toast.info($i18n.t('The reply that was running has been stopped.'));
+				}
 				// New user message
 				let userPrompt = content;
 				let userMessageId = uuidv4();

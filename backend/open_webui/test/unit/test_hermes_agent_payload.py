@@ -443,7 +443,7 @@ def test_continuing_a_stopped_reply_that_said_nothing_asks_again():
     payload = _build_run_payload(form_data, {"chat_id": "c1"}, "hermes-agent")
 
     assert payload["input"] == "Write a long report"
-    assert "conversation_history" not in payload
+    assert payload["conversation_history"] == []
 
 
 def test_run_payload_fills_in_an_attachment_only_turn():
@@ -454,7 +454,7 @@ def test_run_payload_fills_in_an_attachment_only_turn():
     payload = _build_run_payload(form_data, {"chat_id": "c1"}, "hermes-agent")
 
     assert payload["input"] == hermes_agent.ATTACHMENT_ONLY_RUN_INPUT
-    assert "conversation_history" not in payload
+    assert payload["conversation_history"] == []
 
 
 def test_run_payload_keeps_a_real_user_message_untouched():

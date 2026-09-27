@@ -6988,6 +6988,7 @@
 									{sendPrompt}
 									{showMessage}
 									{submitMessage}
+									{stopResponse}
 									{continueResponse}
 									{regenerateResponse}
 									{mergeResponses}

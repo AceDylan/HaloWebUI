@@ -2996,6 +2996,7 @@
 	"Hermes is waiting for your approval": "Hermes 正在等待你审批命令",
 	"Open the chat to allow or deny the command.": "打开对话以允许或拒绝该命令。",
 	"Guidance sent to the running task": "已注入指引，Hermes 会在下一步采纳",
+	"The reply that was running has been stopped.": "正在进行的回复已停止，改为发送编辑后的消息",
 	"Steer the running task": "注入指引到当前任务",
 	"Queue message": "加入队列，回复完成后发送",
 	"Task running · what you type is injected as guidance": "任务执行中 · 输入的内容会作为指引注入",

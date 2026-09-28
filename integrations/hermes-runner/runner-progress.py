@@ -18,6 +18,13 @@ the completion report uses:
   * and once when meta.json says the run is over (the report itself follows from
     reclaude-notify.py and replaces the progress line in the chat).
 
+When the runner resumes the same session by itself — max turns reached, or parked until
+the quota resets (meta.json auto_resume=scheduled|started, auto_resume_run=<id>-aN) — the
+reporter goes on with that run: the continuation used to work for an hour with nothing
+on the chat's banner. It waits for the continuation's directory (through a quota wait,
+unless the parked run is stopped) and reports it the same way, at most MAX_CONTINUATIONS
+times.
+
 The chat shows "reclaude · 已运行 12 分钟 · 第 198 步 · 最近：<what the agent last said it is doing>"
 (its last command, "Bash: npm test", until it has said anything).
 
@@ -38,7 +45,7 @@ import time
 import urllib.error
 import urllib.request
 
-SCRIPT_VERSION = "2026-09-28.1"
+SCRIPT_VERSION = "2026-09-28.2"
 DEFAULT_CONFIG = "/root/.hermes/reclaude-runner.env"
 REQUIRED_KEYS = ("HALOWEBUI_NOTIFY_URL", "HALOWEBUI_NOTIFY_TOKEN")
 RUNNING_STATUSES = {"", "running", "queued", "starting", "waiting", "retrying"}
@@ -51,6 +58,15 @@ MISSING_RUN_DIR_SECONDS = 300
 HTTP_TIMEOUT_SECONDS = 10
 TAIL_BYTES = 64 * 1024
 ACTIVITY_MAX_CHARS = 240
+MAX_CONTINUATIONS = 8
+# After a run ends the runner still classifies it and may schedule a continuation
+# (auto_resume=…) before it notifies (notify.json): wait this long for either.
+SETTLE_SECONDS = 90
+SETTLE_CHECK_SECONDS = 3
+AUTO_RESUMING = ("scheduled", "started")
+# Endings the runner never continues by itself: reported at once, no settling.
+FINAL_STATUSES = {"success", "finished", "question", "stopped", "cancelled", "quota_blocked"}
+_RUN_ID_RE = re.compile(r"^[0-9]{8}-[0-9]{6}-[0-9a-f]{6,32}(?:-a[0-9]+)*$")
 
 _TOOL_STEP_RE = re.compile(r"\[tool#(\d+)\]")
 _LINE_PREFIX_RE = re.compile(r"^\d{2}:\d{2}:\d{2}\s+\[[^\]]+\]\s*")
@@ -205,6 +221,40 @@ def post(url, token, payload):
         return None
 
 
+def continuation_of(meta):
+    """The run id the runner resumes this session as by itself (max turns, a quota wait), else ""."""
+    if str((meta or {}).get("auto_resume") or "") not in AUTO_RESUMING:
+        return ""
+    following = str(meta.get("auto_resume_run") or "")
+    return following if _RUN_ID_RE.match(following) else ""
+
+
+def settle(run_dir, meta, *, sleep=time.sleep, clock=time.monotonic):
+    """meta.json once the runner has decided what follows the ended run: a continuation
+    (auto_resume) or its report (notify.json); after SETTLE_SECONDS, as it is."""
+    if str(meta.get("status") or "").strip().lower() in FINAL_STATUSES:
+        return meta
+    deadline = clock() + SETTLE_SECONDS
+    while ("auto_resume" not in meta and not os.path.exists(os.path.join(run_dir, "notify.json"))
+           and clock() < deadline):
+        sleep(SETTLE_CHECK_SECONDS)
+        meta = read_meta(run_dir) or meta
+    return meta
+
+
+def wait_for_continuation(run_dir, next_dir, *, sleep=time.sleep, clock=time.monotonic):
+    """True once the continuation's meta.json exists; False when the ended run stops waiting
+    for it (stopped while parked: auto_resume=cancelled) or after MAX_LIFETIME_SECONDS."""
+    deadline = clock() + MAX_LIFETIME_SECONDS
+    while clock() < deadline:
+        if read_meta(next_dir) is not None:
+            return True
+        if str((read_meta(run_dir) or {}).get("auto_resume") or "") not in AUTO_RESUMING:
+            return False
+        sleep(CHECK_SECONDS)
+    return False
+
+
 def run(args, *, sleep=time.sleep, clock=time.monotonic, send=post):
     config = read_config(config_paths(args.config_file))
     missing = [key for key in REQUIRED_KEYS if not config.get(key)]
@@ -212,11 +262,13 @@ def run(args, *, sleep=time.sleep, clock=time.monotonic, send=post):
         print(f"runner-progress: {' / '.join(missing)} not configured; not reporting", file=sys.stderr)
         return 0
     url, token = config["HALOWEBUI_NOTIFY_URL"], config["HALOWEBUI_NOTIFY_TOKEN"]
-    run_dir = os.path.join(args.runs_root, args.run_id)
+    run_id = args.run_id
+    run_dir = os.path.join(args.runs_root, run_id)
     started = clock()
     last_post = None
     last_step = None
     posts = 0
+    hops = 0
     while True:
         elapsed = clock() - started
         meta = read_meta(run_dir)
@@ -226,9 +278,18 @@ def run(args, *, sleep=time.sleep, clock=time.monotonic, send=post):
         else:
             status = str(meta.get("status") or "").strip().lower()
             if status not in RUNNING_STATUSES:
-                send(url, token, build_payload(args.chat_id, args.run_id, args.agent, meta, run_dir, final=True))
-                return 0
-            payload = build_payload(args.chat_id, args.run_id, args.agent, meta, run_dir)
+                meta = settle(run_dir, meta, sleep=sleep, clock=clock)
+                send(url, token, build_payload(args.chat_id, run_id, args.agent, meta, run_dir, final=True))
+                following = continuation_of(meta)
+                if not following or hops >= MAX_CONTINUATIONS:
+                    return 0
+                next_dir = os.path.join(args.runs_root, following)
+                if not wait_for_continuation(run_dir, next_dir, sleep=sleep, clock=clock):
+                    return 0
+                run_id, run_dir, hops = following, next_dir, hops + 1
+                started, last_post, last_step, posts = clock(), None, None, 0
+                continue
+            payload = build_payload(args.chat_id, run_id, args.agent, meta, run_dir)
             since = None if last_post is None else clock() - last_post
             due = (
                 since is None

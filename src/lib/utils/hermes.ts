@@ -122,7 +122,7 @@ export type HermesApprovalRequest = {
 
 /**
  * Per-chat choices for how a hermes run starts (the composer's "Hermes 选项"):
- * `dispatch` puts /reclaude, /codex or /agy in front of the message; `model`
+ * `dispatch` puts /reclaude, /cchclaude, /codex or /agy in front of the message; `model`
  * (+ `provider`) overrides hermes' configured default for this chat. Empty
  * strings mean "hermes decides". The thinking level is HaloWebUI's (see
  * _inherited_reasoning_effort in the backend), not a hermes option.
@@ -133,7 +133,7 @@ export type HermesApprovalRequest = {
  * what that resolved to: a runner plus `continue_run` for a follow-up.
  */
 export type HermesRunOptions = {
-	dispatch: '' | 'hermes' | 'reclaude' | 'codex' | 'agy';
+	dispatch: '' | 'hermes' | 'reclaude' | 'cchclaude' | 'codex' | 'agy';
 	model: string;
 	provider: string;
 	/** The run a sent follow-up went back to (its session resumed, not a new task). */
@@ -146,7 +146,8 @@ export const EMPTY_HERMES_RUN_OPTIONS: HermesRunOptions = {
 	provider: ''
 };
 
-const HERMES_RUNNERS = new Set(['reclaude', 'codex', 'agy']);
+// cchclaude: the reclaude runner driving Claude Code through the user's own cch hub.
+const HERMES_RUNNERS = new Set(['reclaude', 'cchclaude', 'codex', 'agy']);
 const HERMES_DISPATCHES = new Set([...HERMES_RUNNERS, 'hermes']);
 // A run id as the runners name them: "20260927-005655-f2dd355f", an answer round "…-a1".
 const RUNNER_RUN_ID_RE = /^\d{8}-\d{6}-[0-9a-f]{6,32}(?:-a\d+)*$/;
@@ -188,7 +189,7 @@ export const hermesRunOptionsForRequest = (
  * its report, and for a run that never started.
  */
 export type HermesContinuation = {
-	runner: 'reclaude' | 'codex' | 'agy';
+	runner: 'reclaude' | 'cchclaude' | 'codex' | 'agy';
 	runId: string;
 	status: string;
 };
@@ -284,6 +285,7 @@ export type HermesRunDetails = {
 
 const DISPATCH_LABELS: Record<string, string> = {
 	reclaude: 'reclaude',
+	cchclaude: 'cchclaude',
 	codex: 'codex',
 	agy: 'agy'
 };

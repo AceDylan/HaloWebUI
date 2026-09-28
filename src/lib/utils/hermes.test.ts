@@ -122,6 +122,14 @@ describe('hermes run options', () => {
 		expect(normalizeHermesRunOptions(null)).toEqual(EMPTY_HERMES_RUN_OPTIONS);
 	});
 
+	it('knows cchclaude as a runner of its own', () => {
+		expect(normalizeHermesRunOptions({ dispatch: 'cchclaude' }).dispatch).toBe('cchclaude');
+		expect(
+			normalizeHermesRunOptions({ dispatch: 'cchclaude', continue_run: '20260928-031629-59f293d2' })
+		).toEqual({ dispatch: 'cchclaude', model: '', provider: '', continue_run: '20260928-031629-59f293d2' });
+		expect(normalizeHermesRunOptions({ dispatch: 'claude' }).dispatch).toBe('');
+	});
+
 	it('sends nothing when every choice is the default', () => {
 		expect(hermesRunOptionsForRequest(EMPTY_HERMES_RUN_OPTIONS)).toBeNull();
 		expect(
@@ -167,6 +175,12 @@ describe('describeHermesReply', () => {
 		expect(fallback?.label).toBe('gemini-chat → deepseek-chat');
 		expect(fallback?.fallback).toBe(true);
 		expect(fallback?.title).toContain('gemini-chat 不可用，已改用 deepseek-chat');
+	});
+
+	it('labels a cchclaude reply with its own name', () => {
+		expect(describeHermesReply({ dispatch: 'cchclaude', progress_check: true }, null)?.label).toBe(
+			'cchclaude · 进度'
+		);
 	});
 
 	it('falls back to what was asked for, and says nothing for a plain default reply', () => {
@@ -286,6 +300,13 @@ describe('接着上次: a follow-up goes back to the run whose report ends the c
 		stored.messages.notice.content = '通知';
 		stored.messages.notice.hermes_notice = { source: 'codex-runner', run_id: `${runId}-a1` };
 		expect(findHermesContinuation(stored)).toEqual({ runner: 'codex', runId: `${runId}-a1`, status: '' });
+	});
+
+	it('goes back to a cchclaude run like any other', () => {
+		const stored = chat();
+		stored.messages.notice.content = `[后台任务完成通知] cchclaude 运行 ${runId} 已结束，状态：question，Claude 会话：s-1。`;
+		stored.messages.notice.hermes_notice = { source: 'cchclaude-runner', run_id: runId };
+		expect(findHermesContinuation(stored)).toEqual({ runner: 'cchclaude', runId, status: 'question' });
 	});
 
 	it('finds nothing once anything else ends the chat', () => {

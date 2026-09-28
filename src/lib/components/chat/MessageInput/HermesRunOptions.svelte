@@ -12,7 +12,7 @@
 
 	const i18n: any = getContext('i18n');
 
-	// How the next hermes run starts. "派发方式" puts /reclaude, /codex or /agy
+	// How the next hermes run starts. "派发方式" puts /reclaude, /cchclaude, /codex or /agy
 	// in front of the next message only (left on, every later "进度怎么样？"
 	// started another run); right after a runner's report the next message
 	// goes back to that run unless "直接" is picked; the model overrides
@@ -28,7 +28,8 @@
 
 	const DISPATCHES: { value: HermesRunOptions['dispatch']; label: string; hint: string }[] = [
 		{ value: '', label: '直接', hint: 'Hermes 自己做' },
-		{ value: 'reclaude', label: 'reclaude', hint: '交给 Claude Code 在后台独占执行' },
+		{ value: 'reclaude', label: 'reclaude', hint: '交给 Claude Code（reclaude 拼车）在后台独占执行' },
+		{ value: 'cchclaude', label: 'cchclaude', hint: '交给 Claude Code（自己的 cch 中转）在后台独占执行' },
 		{ value: 'codex', label: 'codex', hint: '交给 Codex 在后台独占执行' },
 		{ value: 'agy', label: 'agy', hint: '交给 AGY 在后台独占执行' }
 	];
@@ -55,8 +56,8 @@
 	const placePanel = () => {
 		if (!button || typeof window === 'undefined') return;
 		const rect = button.getBoundingClientRect();
-		// On a phone the four dispatch choices need the width: at 288px "reclaude" broke
-		// mid-word into "reclaud / e".
+		// On a phone the dispatch choices need the width: at 288px "reclaude" broke
+		// mid-word into "reclaud / e". Five choices sit three to a row.
 		const width = window.innerWidth < 640 ? window.innerWidth - 16 : PANEL_WIDTH;
 		const left = Math.max(8, Math.min(rect.left, window.innerWidth - width - 8));
 		panelStyle =
@@ -204,7 +205,7 @@
 			aria-label={$i18n.t('Hermes options')}
 		>
 			<div class="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">派发方式</div>
-			<div class="grid grid-cols-4 gap-1" role="radiogroup" aria-label="派发方式">
+			<div class="grid grid-cols-3 gap-1" role="radiogroup" aria-label="派发方式">
 				{#if continuation}
 					<button
 						type="button"
@@ -212,7 +213,7 @@
 						aria-checked={continuing}
 						title="交回 {continuation.runner} 运行 {continuation.runId} 的原会话"
 						data-halo-hermes-dispatch="continue"
-						class="col-span-4 truncate rounded-lg px-1.5 py-1.5 text-xs transition max-sm:py-2.5 max-sm:text-sm {continuing
+						class="col-span-3 truncate rounded-lg px-1.5 py-1.5 text-xs transition max-sm:py-2.5 max-sm:text-sm {continuing
 							? 'bg-primary-600 text-white dark:bg-primary-500'
 							: 'bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700'}"
 						on:click={() => update({ dispatch: '' })}
@@ -269,7 +270,7 @@
 				</select>
 			</label>
 			<div class="mt-1 text-2xs text-gray-400 dark:text-gray-500">
-				只管 Hermes 自己这一轮；派发给 reclaude/codex/agy 时它们用自己的模型
+				只管 Hermes 自己这一轮；派发给 reclaude/cchclaude/codex/agy 时它们用自己的模型
 			</div>
 			{#if loadingModels}
 				<div class="mt-1 text-2xs text-gray-400">正在读取 Hermes 的模型列表…</div>

@@ -930,7 +930,13 @@ def _schedule_approval_webhook(request, user, metadata, approval: dict):
 
 # The composer's "派发方式": the same prefixes a person types, so hermes (and
 # its skill bundles) sees exactly what /reclaude typed by hand would send.
-HERMES_DISPATCH_COMMANDS = {"reclaude": "/reclaude", "codex": "/codex", "agy": "/agy"}
+# cchclaude is the reclaude runner driving Claude Code through the user's own cch hub.
+HERMES_DISPATCH_COMMANDS = {
+    "reclaude": "/reclaude",
+    "cchclaude": "/cchclaude",
+    "codex": "/codex",
+    "agy": "/agy",
+}
 # "接着上次": the run a follow-up goes back to, as the runners name them
 # ("20260927-005655-f2dd355f", an answer round "…-a1").
 HERMES_RUNNER_RUN_ID_RE = re.compile(r"^\d{8}-\d{6}-[0-9a-f]{6,32}(?:-a\d+)*$")
@@ -978,7 +984,7 @@ def _inherited_reasoning_effort(form_data) -> str | None:
 # A command is "/name" followed by a space or the end: "/reclaude fix it",
 # "/model". "/root/app/x.txt" is a path, not a command.
 _SLASH_COMMAND_RE = re.compile(r"^/[A-Za-z][\w-]*(?:\s|$)")
-_RUNNER_COMMAND_RE = re.compile(r"^/(reclaude|codex|agy)(?:\s|$)", re.IGNORECASE)
+_RUNNER_COMMAND_RE = re.compile(r"^/(reclaude|cchclaude|codex|agy)(?:\s|$)", re.IGNORECASE)
 
 
 def _starts_with_command(text) -> bool:
@@ -1001,7 +1007,7 @@ def _run_input_text(run_input) -> str:
 
 
 def _dispatch_runner(run_input) -> str | None:
-    """"reclaude" / "codex" / "agy" when the input launches that runner."""
+    """"reclaude" / "cchclaude" / "codex" / "agy" when the input launches that runner."""
     match = _RUNNER_COMMAND_RE.match(_run_input_text(run_input).lstrip())
     return match.group(1).lower() if match else None
 
@@ -1872,9 +1878,9 @@ def _runtime_from_event(event) -> dict:
 
 
 # The launch command of a background runner (reclaude-run.sh run|answer,
-# codex-run.sh, agy-run.sh), as the terminal call's preview shows it.
+# cchclaude-run.sh, codex-run.sh, agy-run.sh), as the terminal call's preview shows it.
 _RUNNER_LAUNCH_RE = re.compile(
-    r"(?:reclaude|codex|agy)-run\.sh\s+(?:run|answer)\b|runner-detach\.py"
+    r"(?:reclaude|cchclaude|codex|agy)-run\.sh\s+(?:run|answer)\b|runner-detach\.py"
 )
 
 

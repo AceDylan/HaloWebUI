@@ -52,7 +52,7 @@ import time
 import urllib.error
 import urllib.request
 
-SCRIPT_VERSION = "2026-09-28.1"
+SCRIPT_VERSION = "2026-09-28.2"
 CONFIG_FILE = "/root/.hermes/reclaude-runner.env"
 REQUIRED_CONFIG_KEYS = ("HALOWEBUI_NOTIFY_URL", "HALOWEBUI_NOTIFY_TOKEN")
 STATE_DB = "/root/.hermes/state.db"
@@ -92,7 +92,8 @@ STATUS_LABELS = {
     "quota_blocked": ("⛔", "没有启动"),
     "timeout": ("⏱", "超时"),
 }
-SESSION_LABELS = {"reclaude": "Claude 会话", "codex": "codex thread", "agy": "AGY conversation"}
+SESSION_LABELS = {"reclaude": "Claude 会话", "cchclaude": "Claude 会话", "codex": "codex thread",
+                  "agy": "AGY conversation"}
 
 
 def log(message):
@@ -255,7 +256,7 @@ def find_origin(
     try:
         origins = set()
         banner = re.compile(
-            r"(?:^|\n)==== (?:codex|reclaude) run "
+            r"(?:^|\n)==== (?:codex|reclaude|cchclaude) run "
             + re.escape(run_id)
             + r" (?:started|finished)(?::|\s)"
         )
@@ -409,8 +410,7 @@ def build_prompt(
     answer_command="reclaude-run.sh answer",
 ):
     result_path = os.path.join(run_dir, "result.md")
-    session_label = {"reclaude": "Claude 会话", "codex": "codex thread",
-                     "agy": "AGY conversation"}.get(agent, "agent session")
+    session_label = SESSION_LABELS.get(agent, "agent session")
     lines = [
         f"[后台任务完成通知] {agent} 运行 {run_id} 已结束，状态：{status}，{session_label}：{session_id}。",
         f"请用 read_file 读取 {result_path}，把其中内容如实转述给我（保留文件、提交、验证结果和风险，不要缩写成一句话）。",
@@ -735,7 +735,7 @@ def main():
     parser.add_argument(
         "--agent",
         default="reclaude",
-        help="agent label used in the notice text (reclaude, codex)",
+        help="agent label used in the notice text (reclaude, cchclaude, codex, agy)",
     )
     parser.add_argument(
         "--runner-name",

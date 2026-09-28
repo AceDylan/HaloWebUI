@@ -108,6 +108,27 @@ def test_dispatch_option_prefixes_the_runner_command():
     assert payload["input"] == "/reclaude 修复登录页"
 
 
+def test_cchclaude_dispatch_goes_to_its_own_runner():
+    payload = hermes_agent._build_run_payload(
+        {
+            "messages": [{"role": "user", "content": "修复登录页"}],
+            "hermes_options": {"dispatch": "cchclaude"},
+        },
+        {"chat_id": "chat-1"},
+        "hermes-agent",
+    )
+    # hermes' fast dispatch needs both: the runner in the body and the command in the text.
+    assert payload["input"] == "/cchclaude 修复登录页"
+    assert payload["dispatch"] == {"runner": "cchclaude"}
+    typed = hermes_agent._build_run_payload(
+        {"messages": [{"role": "user", "content": "/cchclaude 进度"}]}, {"chat_id": "c"}, "hermes-agent"
+    )
+    assert typed["dispatch"] == {"runner": "cchclaude"}
+    assert hermes_agent._RUNNER_LAUNCH_RE.search(
+        "/root/.hermes/scripts/cchclaude-run.sh run --detach --cwd /root --task-file /tmp/t.md"
+    )
+
+
 def test_a_typed_slash_command_wins_over_the_dispatch_option():
     payload = hermes_agent._build_run_payload(
         {

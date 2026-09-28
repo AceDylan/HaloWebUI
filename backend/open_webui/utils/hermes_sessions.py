@@ -592,7 +592,7 @@ async def list_model_options(request, user, model_id: Optional[str] = None) -> d
 
 # ------------------------------------------------------- background runners
 
-RUNNER_NAMES = ("reclaude", "codex", "agy")
+RUNNER_NAMES = ("reclaude", "cchclaude", "codex", "agy")
 RUNNER_RUN_ID_RE = re.compile(r"^\d{8}-\d{6}-[0-9a-f]{6,32}(?:-a\d+)*$")
 RUNNER_STOP_TIMEOUT_SECONDS = 60
 
@@ -605,7 +605,7 @@ def _hermes_error_message(body: Any) -> str:
 
 
 async def stop_background_runner(request, user, run_id: str) -> dict:
-    """Stop a reclaude / codex / agy run one of the user's chats launched.
+    """Stop a reclaude / cchclaude / codex / agy run one of the user's chats launched.
 
     The runner is detached (its own scope on the hermes host), so stopping the reply
     that launched it never reached it. Hermes stops it and answers with the notice

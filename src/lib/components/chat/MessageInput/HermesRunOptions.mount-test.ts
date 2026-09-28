@@ -126,7 +126,24 @@ describe('HermesRunOptions', () => {
 		const hint = panel.querySelector('[data-halo-hermes-dispatch-hint]');
 		expect(hint.textContent).toContain('交给 Codex 在后台独占执行');
 		expect(hint.textContent).toContain('只对下一条消息生效');
-		expect(panel.textContent).toContain('派发给 reclaude/codex/agy 时它们用自己的模型');
+		expect(panel.textContent).toContain('派发给 reclaude/cchclaude/codex/agy 时它们用自己的模型');
+	});
+
+	it('offers cchclaude next to reclaude, three choices to a row', async () => {
+		const panel: any = await mount({ dispatch: 'cchclaude' });
+		const choices = Array.from(panel.querySelectorAll('[data-halo-hermes-dispatch]')).map(
+			(el: any) => el.getAttribute('data-halo-hermes-dispatch')
+		);
+		expect(choices).toEqual(['direct', 'reclaude', 'cchclaude', 'codex', 'agy']);
+		const cch = panel.querySelector('[data-halo-hermes-dispatch="cchclaude"]') as any;
+		expect(cch.getAttribute('aria-checked')).toBe('true');
+		expect(panel.querySelector('[data-halo-hermes-dispatch-hint]').textContent).toContain(
+			'交给 Claude Code（自己的 cch 中转）在后台独占执行'
+		);
+		expect(panel.querySelector('[role="radiogroup"]').className).toContain('grid-cols-3');
+		expect((target.querySelector('[data-halo-hermes-options-summary]') as any)?.textContent).toContain(
+			'cchclaude'
+		);
 	});
 
 	it('after a runner report, offers going back to that run first, and "直接" for hermes', async () => {

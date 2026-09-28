@@ -443,6 +443,19 @@ def test_stopping_a_runner_asks_hermes_and_shows_the_notice(monkeypatch):
     assert progress.get_runner_progress(rid) is None
 
 
+def test_a_cchclaude_run_is_stopped_through_its_own_runner(monkeypatch):
+    sessions, progress, rid, posts, shown = _stop_world(
+        monkeypatch,
+        (200, {"stopped": True, "notice": "[后台任务完成通知] cchclaude 运行 x 已结束，状态：stopped，Claude 会话：s。",
+               "report": "⏹️ 已停止"}),
+    )
+    progress._PROGRESS[rid]["agent"] = "cchclaude"
+    result = asyncio.run(sessions.stop_background_runner(None, SimpleNamespace(id="u1"), rid))
+    assert result["stopped"] is True
+    assert posts == [(f"http://hermes.test/v1/runners/cchclaude/{rid}/stop", {"session_id": "chat-1"})]
+    assert shown[0]["source"] == "cchclaude-runner"
+
+
 def test_only_the_owner_stops_a_runner(monkeypatch):
     sessions, _progress, rid, posts, _shown = _stop_world(monkeypatch, (200, {}))
     with pytest.raises(sessions.HermesSessionsError) as error:

@@ -187,6 +187,17 @@ describe('describeHermesReply', () => {
 		);
 		expect(progress?.label).toBe('reclaude · 进度');
 		expect(progress?.title).toContain('没有启动新任务');
+		// "服务器健康吗": the fleet report, even when sent with 派发方式 reclaude.
+		const health = describeHermesReply(
+			{ dispatch: 'reclaude', fast_dispatch: true, health_check: true },
+			{ dispatch: 'reclaude', continue_run: '20260928-144702-78fff71c' }
+		);
+		expect(health?.label).toBe('服务器体检');
+		expect(health?.title).toContain('没有经过模型');
+		expect(health?.fallback).toBe(false);
+		expect(describeHermesReply({ fast_dispatch: true, health_check: true }, null)?.label).toBe(
+			'服务器体检'
+		);
 	});
 });
 

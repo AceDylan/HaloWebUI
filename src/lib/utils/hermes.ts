@@ -276,6 +276,8 @@ export type HermesRunDetails = {
 	fast_dispatch?: boolean;
 	/** "/reclaude 进度" answered from the run directories: nothing launched. */
 	progress_check?: boolean;
+	/** "服务器健康吗" answered by hermes' fleet report: no model, no run. */
+	health_check?: boolean;
 	/** The run a follow-up went back to ("接着上次"). */
 	continued_from?: string;
 };
@@ -308,7 +310,11 @@ export const describeHermesReply = (
 		Boolean(askedToContinue) && !continuedFrom && run?.active === false && !run.fast_dispatch;
 	const parts: string[] = [];
 	const lines: string[] = [];
-	if (dispatch && run?.progress_check) {
+	if (run?.health_check) {
+		// Whatever 派发方式 it was sent with: the report ran, nothing was launched.
+		parts.push('服务器体检');
+		lines.push('直接读取各台服务器、代理线路和网站的状态（没有经过模型，没有启动任务）');
+	} else if (dispatch && run?.progress_check) {
 		parts.push(`${DISPATCH_LABELS[dispatch] ?? dispatch} · 进度`);
 		lines.push('直接读取后台任务的运行状态（没有经过模型，没有启动新任务）');
 	} else if (dispatch && continuedFrom) {

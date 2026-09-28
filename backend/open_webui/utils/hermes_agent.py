@@ -1862,6 +1862,9 @@ def _runtime_from_event(event) -> dict:
         if dispatch.get("progress"):
             # "/reclaude 进度" answered from the run directories: nothing launched.
             runtime["progress_check"] = True
+        if dispatch.get("health"):
+            # "服务器健康吗" answered by hermes' fleet report: no model, no run.
+            runtime["health_check"] = True
         continued_from = str(dispatch.get("continued_from") or "").strip()
         if continued_from:
             runtime["continued_from"] = continued_from[:128]
@@ -2197,6 +2200,7 @@ async def run_hermes_agent(request, form_data, user, metadata, model, events, ta
                 "runner_run_id": runtime.get("runner_run_id"),
                 "fast_dispatch": runtime.get("fast_dispatch"),
                 "progress_check": runtime.get("progress_check"),
+                "health_check": runtime.get("health_check"),
                 "continued_from": runtime.get("continued_from"),
             }
             state.update({key: value for key, value in details.items() if value})
@@ -2870,6 +2874,7 @@ async def _recover_inflight_run(app, chat_id: str, record: dict) -> None:
         "runner_run_id",
         "fast_dispatch",
         "progress_check",
+        "health_check",
         "continued_from",
     ):
         if runtime.get(key):

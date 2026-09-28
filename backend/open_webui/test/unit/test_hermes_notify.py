@@ -298,3 +298,34 @@ def test_show_notification_report_respects_a_busy_chat(monkeypatch):
         asyncio.run(hermes_notify.show_notification_report(object(), chat_id="chat-1", content="x"))
     assert error.value.status_code == 409
     assert calls["saved"] == []
+
+
+def test_the_away_push_of_a_question_report_leads_with_the_question():
+    report = "\n".join([
+        "❓ reclaude 运行 20260928-102915-46faac75 · 等你决定",
+        "claude-opus-5-5[1m] · Claude 会话 3dd46f60 · $0.22 · 1 轮 · 0m03s",
+        "",
+        "我先查了三处配置，" + "细节很长。" * 400,
+        "",
+        "QUESTION: 选 A（保留旧接口）还是 B（直接迁移）？",
+        "",
+        "---",
+        "",
+        "**Obsidian 归档（runner 按回执核验）**",
+        "- 追加 x.md",
+        "",
+        "↩️ 直接回复你的决定，Hermes 会在同一个会话里续跑。",
+        "",
+        "**reclaude 额度**：剩余 **$74.10** / $80.00",
+    ])
+    push = hermes_notify.report_push_text(report)
+    assert push.startswith("❓ reclaude 运行 20260928-102915-46faac75 · 等你决定\nclaude-opus-5-5[1m]")
+    assert "QUESTION: 选 A（保留旧接口）还是 B（直接迁移）？" in push
+    assert "细节很长" not in push and "Obsidian" not in push and "额度" not in push
+    assert "直接回复你的决定" not in push and push.endswith(hermes_notify.PUSH_REPLY_HINT)
+    assert len(push) < 1200  # the push is cut there
+
+
+def test_the_away_push_of_a_plain_report_drops_the_reply_hint_and_quota():
+    report = "✅ reclaude 运行 r · 已完成\nx · 3m\n\n都改好了。\n\n↩️ 回复「继续」，可以在同一个会话里接着跑。\n\n**reclaude 额度**：剩余 $1"
+    assert hermes_notify.report_push_text(report) == "✅ reclaude 运行 r · 已完成\nx · 3m\n\n都改好了。"

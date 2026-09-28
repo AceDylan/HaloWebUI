@@ -48,6 +48,17 @@ RELOAD_SETTLE_SECONDS = 1.0
 _DETAILS_BLOCK_RE = re.compile(r"<details\b[^>]*>.*?</details\s*>", re.IGNORECASE | re.DOTALL)
 _WHITESPACE_RUN_RE = re.compile(r"[ \t]+")
 
+# The away push of a runner report (usually into the same Telegram chat hermes talks in).
+# The report's "↩️ 直接回复…" is for this web chat: a reply to the push never reaches the
+# run. The push is cut near 1200 characters from the top, which for a QUESTION report
+# was all preamble and no question.
+_REPLY_HINT_LINE_RE = re.compile(r"^↩️.*(?:\n|$)", re.MULTILINE)
+_QUOTA_FOOTER_LINE_RE = re.compile(r"^\*\*reclaude 额度\*\*.*(?:\n|$)", re.MULTILINE)
+_QUESTION_START_RE = re.compile(r"^\s*(?:\*\*)?QUESTION(?:\*\*)?\s*[:：]", re.MULTILINE)
+_QUESTION_END_RE = re.compile(r"\n\s*(?:---+|\*\*Obsidian 归档|\*\*runner 提示\*\*)")
+PUSH_QUESTION_MAX_CHARS = 900
+PUSH_REPLY_HINT = "↩️ 要回复请打开上面的链接，在网页的这个对话里直接说（回复这条推送，它收不到）。"
+
 
 class HermesNotifyError(Exception):
     """Notification could not be turned into a follow-up turn."""
@@ -373,6 +384,22 @@ def _delivered_report_turn(chat_dict: dict[str, Any], run_id: str) -> Optional[t
     return None
 
 
+def report_push_text(content: str) -> str:
+    """A runner report as the away push shows it: the status lines, then the QUESTION
+    itself when the run is waiting for an answer, and where to answer."""
+    text = _QUOTA_FOOTER_LINE_RE.sub("", _REPLY_HINT_LINE_RE.sub("", content or "")).strip()
+    questions = list(_QUESTION_START_RE.finditer(text))
+    if not questions:
+        return text
+    head = "\n".join(text.split("\n", 2)[:2]).strip()
+    question = text[questions[-1].start():].strip()
+    end = _QUESTION_END_RE.search(question)
+    question = question[: end.start()].strip() if end else question
+    if len(question) > PUSH_QUESTION_MAX_CHARS:
+        question = question[:PUSH_QUESTION_MAX_CHARS].rstrip() + "…"
+    return f"{head}\n\n{question}\n\n{PUSH_REPLY_HINT}"
+
+
 async def show_notification_report(
     request,
     *,
@@ -478,7 +505,11 @@ async def show_notification_report(
         }
     mark_unread(chat_id, user.id)
     _schedule_completion_webhook(
-        request, user, metadata, Chats.get_chat_title_by_id(chat_id), content
+        request,
+        user,
+        metadata,
+        Chats.get_chat_title_by_id(chat_id),
+        report_push_text(content),
     )
 
     task = asyncio.create_task(_design_report(emitter, metadata, content))

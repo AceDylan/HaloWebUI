@@ -51,9 +51,11 @@ HTML_VISUAL_AGY_QUEUE_TIMEOUT_SECONDS = 1.0
 # Post-answer AGY HTML design pass: the final answer is handed to AGY, which
 # returns the actual HTML fragment. Larger budgets than the (legacy) pre-answer
 # design-spec pass because full HTML for a rich answer is bigger and slower.
+# Successful runs take 30-50 s but some need more than 90 s, and a timeout leaves
+# the reply without a designed card, so the default is 150 s.
 HTML_VISUAL_AGY_HTML_METADATA_KEY = "html_visual_agy_html"
 HTML_VISUAL_AGY_HTML_TIMEOUT_ENV = "HALOWEBUI_AGY_HTML_TIMEOUT_SECONDS"
-HTML_VISUAL_AGY_HTML_DEFAULT_TIMEOUT_SECONDS = 90.0
+HTML_VISUAL_AGY_HTML_DEFAULT_TIMEOUT_SECONDS = 150.0
 HTML_VISUAL_AGY_HTML_MAX_TIMEOUT_SECONDS = 300.0
 HTML_VISUAL_AGY_HTML_MAX_OUTPUT_BYTES = 64 * 1024
 HTML_VISUAL_AGY_HTML_MAX_INPUT_CHARS = 24 * 1024
@@ -114,7 +116,8 @@ HTML_VISUAL_FORCE_PROMPT = f"""{HTML_VISUAL_PROMPT}
 # finished answer (design_html_visual_artifact_with_agy) and replaces any HTML the model
 # wrote, so the model's own artifact was pure overhead — about 300 output tokens, 10-30 s
 # at the end of every reply. The model writes the content only; if AGY then fails,
-# append_html_visual_fallback still guarantees a card.
+# append_html_visual_fallback adds a plain card unless the reply is already
+# structured Markdown.
 HTML_VISUAL_AGY_OWNED_PROMPT = f"""[{HTML_VISUAL_PROMPT_MARKER}]
 [{HTML_VISUAL_AGY_OWNED_PROMPT_MARKER}]
 当前输出 surface 是 HaloWebUI Web Chat；本规则只适用于当前 Web 会话，不代表 Telegram/纯文本平台也支持 HTML。
@@ -1436,6 +1439,26 @@ def _render_fallback_markdown_images(escaped_content: str) -> str:
     return _ESCAPED_FALLBACK_IMAGE_RE.sub(_img, escaped_content)
 
 
+_STRUCTURED_REPLY_HEADING_RE = re.compile(r"^\s{0,3}#{1,6}\s+\S", re.MULTILINE)
+_STRUCTURED_REPLY_BLOCK_RE = re.compile(
+    r"^\s{0,3}(?:[-*+]\s+\S|\d+[.)]\s+\S|\|.*\|)", re.MULTILINE
+)
+
+
+def is_structured_markdown_reply(content: str) -> bool:
+    """Whether a reply is laid out as Markdown: a heading plus a list, table or code block.
+
+    Such a reply already reads well in the chat. The safe fallback shows its
+    escaped source ("## …", "```python", "| a | b |") as plain text under the
+    rendered answer, so it only repeats the answer in a worse form.
+    Headings and lists inside code blocks do not count.
+    """
+    blocks, outside, _ = _scan_top_level_markdown_fences(content)
+    if not _STRUCTURED_REPLY_HEADING_RE.search(outside):
+        return False
+    return bool(blocks) or bool(_STRUCTURED_REPLY_BLOCK_RE.search(outside))
+
+
 def append_html_visual_fallback(content: Any, metadata: dict[str, Any] | None) -> Any:
     """Append one safe local Artifact for a successful force-mode response.
 
@@ -1443,6 +1466,7 @@ def append_html_visual_fallback(content: Any, metadata: dict[str, Any] | None) -
     responses. The helper additionally fails closed for disabled/advisory modes,
     pure-text surfaces, empty content, and replies that already have exactly one
     safe fenced HTML Artifact without a competing raw preview source.
+    Structured Markdown replies get no card, only the preview-source cleanup.
     """
     if (
         not isinstance(content, str)
@@ -1457,6 +1481,9 @@ def append_html_visual_fallback(content: Any, metadata: dict[str, Any] | None) -
     safe_content = _remove_rejected_preview_artifact_source(content)
     display_content = _NON_ARTIFACT_DETAILS_RE.sub("", safe_content)
     display_content = _THINKING_BLOCK_RE.sub("", display_content).strip()
+    if is_structured_markdown_reply(display_content):
+        # Nothing to strip: hand back the original so callers see no change.
+        return content if safe_content == content.strip() else safe_content
     if not display_content:
         display_content = "任务已完成，详细过程请查看原回复中的工具调用记录。"
     escaped_content = _render_fallback_markdown_images(
@@ -1645,7 +1672,8 @@ async def design_html_visual_artifact_with_agy(
     Runs after the main model's response is complete, so AGY designs around the
     actual answer content. Every failure path returns the content unchanged,
     which keeps the main model's own HTML artifact as the fallback; the caller's
-    ``append_html_visual_fallback`` still guarantees an artifact exists.
+    ``append_html_visual_fallback`` then adds a plain card unless the reply is
+    already structured Markdown.
     """
     if (
         not isinstance(content, str)

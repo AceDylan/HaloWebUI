@@ -1315,6 +1315,94 @@ def test_force_fallback_does_not_create_an_empty_artifact():
     assert append_html_visual_fallback("", _metadata()) == ""
 
 
+# Shaped like the cchclaude report that timed out in AGY on 2026-09-28: the card
+# repeated it as "## 1. 赋值", "```python" and "| 操作 |" text.
+STRUCTURED_REPORT = """✅ cchclaude 运行 20260928-200030-153d16dc · 已完成
+
+理解 Python 中的复制，关键是先记住一句话：
+
+> **变量名绑定到对象；赋值不等于复制对象。**
+
+## 1. 赋值：同一个对象，多一个名字
+
+```python
+a = [1, 2]
+b = a
+```
+
+## 2. 怎么选择？
+
+| 操作 | 新建外层容器 |
+|---|---|
+| `b = a` | 否 |
+
+- `==`：值是否相等。
+- `is`：是否就是同一个对象。
+"""
+
+
+def test_agy_timeout_on_a_structured_report_adds_no_fallback_card(monkeypatch):
+    timeouts = []
+
+    async def _timed_out(*args, **kwargs):
+        timeouts.append(kwargs["timeout_seconds"])
+        raise asyncio.TimeoutError
+
+    monkeypatch.setattr(html_visual_prompt, "_run_agy_process", _timed_out)
+    monkeypatch.setenv("HALOWEBUI_AGY_COMMAND", "agy")
+    monkeypatch.delenv(html_visual_prompt.HTML_VISUAL_AGY_HTML_TIMEOUT_ENV, raising=False)
+    metadata = _metadata()
+
+    designed = asyncio.run(
+        html_visual_prompt.design_html_visual_artifact_with_agy(STRUCTURED_REPORT, metadata)
+    )
+
+    assert timeouts == [150.0]
+    assert metadata[html_visual_prompt.HTML_VISUAL_AGY_HTML_METADATA_KEY]["status"] == "timeout"
+    assert append_html_visual_fallback(designed, metadata) == STRUCTURED_REPORT
+
+
+@pytest.mark.parametrize(
+    "reply",
+    [
+        "## 结论\n\n- 第一点\n- 第二点",
+        "## 步骤\n\n1. 安装\n2. 运行",
+        "### 对比\n\n| a | b |\n|---|---|\n| 1 | 2 |",
+        "## 用法\n\n```bash\nls -la\n```",
+    ],
+)
+def test_structured_markdown_replies_keep_no_fallback_card(reply):
+    assert html_visual_prompt.is_structured_markdown_reply(reply)
+    assert append_html_visual_fallback(reply, _metadata()) == reply
+
+
+@pytest.mark.parametrize(
+    "reply",
+    [
+        "- one\n- two",
+        "## 只有标题\n\n" + LONG_PLAIN_RESPONSE,
+        "```markdown\n## heading inside code\n```\n\n" + LONG_PLAIN_RESPONSE,
+        "<details type=\"reasoning\">\n## hidden\n- hidden\n</details>\n" + LONG_PLAIN_RESPONSE,
+    ],
+)
+def test_replies_without_heading_and_block_structure_still_get_the_card(reply):
+    content = append_html_visual_fallback(reply, _metadata())
+
+    assert content.count(HTML_VISUAL_FALLBACK_MARKER) == 1
+
+
+def test_structured_reply_still_loses_rejected_preview_source_without_a_card():
+    reply = "## 结论\n\n- 第一点\n\n```css\nbody { color: red; }\n```\n\n<div>raw</div>\n"
+
+    content = append_html_visual_fallback(reply, _metadata())
+
+    assert HTML_VISUAL_FALLBACK_MARKER not in content
+    assert "color: red" not in content
+    assert "<div>" not in content
+    assert content.startswith("## 结论\n\n- 第一点")
+    assert append_html_visual_fallback(content, _metadata()) == content
+
+
 def test_agy_html_request_replaces_draft_html_card_with_its_text():
     from open_webui.utils.html_visual_prompt import _build_agy_html_request_prompt
 

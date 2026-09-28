@@ -18,7 +18,8 @@ the completion report uses:
   * and once when meta.json says the run is over (the report itself follows from
     reclaude-notify.py and replaces the progress line in the chat).
 
-The chat shows "reclaude · 已运行 12 分钟 · 第 198 步 · 最近：Bash: npm test".
+The chat shows "reclaude · 已运行 12 分钟 · 第 198 步 · 最近：<what the agent last said it is doing>"
+(its last command, "Bash: npm test", until it has said anything).
 
 Config: HALOWEBUI_NOTIFY_URL / HALOWEBUI_NOTIFY_TOKEN from the same KEY=VALUE files the
 notifier reads (RECLAUDE_NOTIFY_CONFIG, then each --config-file, earlier file winning per
@@ -37,7 +38,7 @@ import time
 import urllib.error
 import urllib.request
 
-SCRIPT_VERSION = "2026-09-26.2"
+SCRIPT_VERSION = "2026-09-28.1"
 DEFAULT_CONFIG = "/root/.hermes/reclaude-runner.env"
 REQUIRED_KEYS = ("HALOWEBUI_NOTIFY_URL", "HALOWEBUI_NOTIFY_TOKEN")
 RUNNING_STATUSES = {"", "running", "queued", "starting", "waiting", "retrying"}
@@ -53,6 +54,10 @@ ACTIVITY_MAX_CHARS = 240
 
 _TOOL_STEP_RE = re.compile(r"\[tool#(\d+)\]")
 _LINE_PREFIX_RE = re.compile(r"^\d{2}:\d{2}:\d{2}\s+\[[^\]]+\]\s*")
+# What the agent last said it is doing ("本机重启后已核对…，现在查 jp/sg 的失败服务") reads better
+# than its last shell command; the command is the fallback (no narration yet, or a runner that
+# writes none). Same rule as the Telegram "/reclaude 进度" reply (gateway/runner_dispatch.py).
+_NARRATION_RE = re.compile(r"^\d{2}:\d{2}:\d{2}\s+\[assistant\]\s*(.+)$")
 # Progress lines echo commands; a token in one must not end up on screen.
 _SECRET_RES = (
     re.compile(r"(?i)\b(authorization:\s*bearer)\s+\S+"),
@@ -132,8 +137,8 @@ def read_progress(run_dir):
         return None, ""
     steps = [int(value) for value in _TOOL_STEP_RE.findall(tail)]
     step = max(steps) if steps else None
-    last = ""
-    for line in reversed(tail.splitlines()):
+    last = next((match.group(1) for match in map(_NARRATION_RE.match, reversed(tail.splitlines())) if match), "")
+    for line in reversed(tail.splitlines()) if not last else ():
         line = line.strip()
         if not line or "[tool-result]" in line:
             continue
@@ -145,9 +150,23 @@ def read_progress(run_dir):
     return step, last
 
 
+def _clock(text):
+    """'2026-09-28 04:30:59 +0800' -> '04:30' in that offset (with the date when it is not today there)."""
+    try:
+        moment = datetime.datetime.strptime(str(text or "").strip(), "%Y-%m-%d %H:%M:%S %z")
+    except ValueError:
+        return str(text or "")
+    today = datetime.datetime.now(moment.tzinfo).date()
+    return moment.strftime("%H:%M") if moment.date() == today else moment.strftime("%m-%d %H:%M")
+
+
 def build_payload(chat_id, run_id, agent, meta, run_dir, *, final=False):
     status = str((meta or {}).get("status") or "running").strip().lower()
     step, last = read_progress(run_dir)
+    if not final and str((meta or {}).get("phase") or "") == "waiting_quota":
+        # The quota preflight is sleeping until the reset; nothing has run yet.
+        until = _clock(meta.get("waiting_until")) if meta.get("waiting_until") else "额度重置"
+        step, last = None, f"额度不足，排队中，{until} 额度重置后自动开始"
     payload = {
         "chat_id": chat_id,
         "run_id": run_id,

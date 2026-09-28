@@ -52,7 +52,7 @@ import time
 import urllib.error
 import urllib.request
 
-SCRIPT_VERSION = "2026-09-27.2"
+SCRIPT_VERSION = "2026-09-28.1"
 CONFIG_FILE = "/root/.hermes/reclaude-runner.env"
 REQUIRED_CONFIG_KEYS = ("HALOWEBUI_NOTIFY_URL", "HALOWEBUI_NOTIFY_TOKEN")
 STATE_DB = "/root/.hermes/state.db"
@@ -487,6 +487,24 @@ def _short_session(session_id):
     return session_id
 
 
+RUNNER_NOTE_HEADING = "**runner 提示**"
+
+
+def _scheduled_resume_label(run_dir):
+    """"04:31" (or "09-29 04:31" on another day) when the runner parked this run and will
+    resume it by itself (meta.json auto_resume=scheduled); "" otherwise."""
+    meta = read_meta(run_dir)
+    if meta.get("auto_resume") != "scheduled":
+        return ""
+    match = re.match(r"(\d{4})-(\d{2}-\d{2}) (\d{2}:\d{2})", str(meta.get("auto_resume_at") or ""))
+    if not match:
+        return ""
+    beijing_today = (datetime.datetime.now(datetime.timezone.utc)
+                     + datetime.timedelta(hours=8)).strftime("%Y-%m-%d")
+    day = f"{match.group(1)}-{match.group(2)}"
+    return match.group(3) if day == beijing_today else f"{match.group(2)} {match.group(3)}"
+
+
 def build_digest(run_id, status, run_dir, session_id, agent="reclaude", chat=False):
     """The report as the user reads it: a status line, result.md, and what to do next.
 
@@ -500,6 +518,11 @@ def build_digest(run_id, status, run_dir, session_id, agent="reclaude", chat=Fal
     """
     result_path = os.path.join(run_dir, "result.md")
     icon, label = STATUS_LABELS.get(status, ("❌", f"没有正常完成（{status}）"))
+    resume_at = _scheduled_resume_label(run_dir) if status != "success" else ""
+    if resume_at:
+        # Parked until the quota resets, not failed: a ❌ here had the user wake up to
+        # "没有正常完成（error）" for a run that went on by itself an hour later.
+        icon, label = "⏳", f"额度用完，暂停中，约 {resume_at} 自动接着跑（不用管）"
     summary = _json_object(_read_text(os.path.join(run_dir, "result.json")))
     details = []
     if summary.get("model"):
@@ -517,6 +540,10 @@ def build_digest(run_id, status, run_dir, session_id, agent="reclaude", chat=Fal
         lines.append(" · ".join(details))
 
     body = _strip_result_header(_read_text(result_path).strip(), agent, run_id)
+    if resume_at and body.startswith("API Error") and RUNNER_NOTE_HEADING in body:
+        # The raw upstream error ("… (not your usage limit) · 拼车 5 小时额度已用完 …") only
+        # contradicts itself; the runner note below says the same thing plainly.
+        body = body[body.index(RUNNER_NOTE_HEADING):]
     footer = ""
     if body:
         head, _, last = body.rpartition("\n")

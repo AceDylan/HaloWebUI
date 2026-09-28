@@ -180,6 +180,13 @@ describe('describeHermesReply', () => {
 		);
 		expect(fast?.label).toBe('reclaude');
 		expect(fast?.title).toContain('没有经过模型');
+		// "/reclaude 进度": a status read, not a launch.
+		const progress = describeHermesReply(
+			{ dispatch: 'reclaude', fast_dispatch: true, progress_check: true },
+			null
+		);
+		expect(progress?.label).toBe('reclaude · 进度');
+		expect(progress?.title).toContain('没有启动新任务');
 	});
 });
 
@@ -203,6 +210,22 @@ describe('runner completion notices', () => {
 		expect(
 			describeHermesRunNotice(parseHermesRunNotice({ role: 'user', content: content.replace('success', 'stopped') })!)
 		).toBe('⏹️ reclaude 已停止');
+	});
+
+	it('takes the runner report headline over the status word', () => {
+		const notice = parseHermesRunNotice({ role: 'user', content: content.replace('success', 'error') })!;
+		expect(describeHermesRunNotice(notice)).toBe('❌ reclaude 没有正常完成（error）');
+		expect(
+			describeHermesRunNotice(
+				notice,
+				'⏳ reclaude 运行 20260926-214156-38f80bb8 · 额度用完，暂停中，约 04:31 自动接着跑（不用管）\nClaude 会话 f11131eb · 3m\n\n正文'
+			)
+		).toBe('⏳ reclaude 额度用完，暂停中，约 04:31 自动接着跑');
+		// Another run's report, or no runner headline at all: the status word.
+		expect(
+			describeHermesRunNotice(notice, '⏳ reclaude 运行 20260926-000000-00000000 · 额度用完，暂停中')
+		).toBe('❌ reclaude 没有正常完成（error）');
+		expect(describeHermesRunNotice(notice, '<div>card</div>')).toBe('❌ reclaude 没有正常完成（error）');
 	});
 
 	it('leaves the person\'s own messages alone', () => {

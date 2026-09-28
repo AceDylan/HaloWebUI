@@ -852,6 +852,20 @@ def test_a_fast_dispatch_is_recorded(monkeypatch):
     assert final["hermes_run"]["dispatch"] == "codex"
 
 
+def test_a_progress_answer_is_recorded_as_one(monkeypatch):
+    hermes = _Hermes(
+        events=[
+            {"event": "message.delta", "delta": "这个对话现在没有后台任务在跑。"},
+            {"event": "run.completed", "output": "这个对话现在没有后台任务在跑。",
+             "dispatch": {"runner": "reclaude", "fast": True, "progress": True}},
+        ]
+    )
+    final, _emitted, _ = _run(monkeypatch, hermes, "/reclaude 进度")
+    run = final["hermes_run"]
+    assert run["progress_check"] is True and run["fast_dispatch"] is True
+    assert "runner_run_id" not in run
+
+
 def test_a_follow_up_goes_back_to_its_run_as_typed():
     run_id = "20260927-005655-f2dd355f"
     options = {"dispatch": "reclaude", "continue_run": run_id}

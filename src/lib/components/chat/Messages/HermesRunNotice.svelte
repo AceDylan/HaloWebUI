@@ -12,13 +12,13 @@
 	// click away instead of a full UUID in the transcript.
 	export let notice: HermesRunNotice;
 	export let content = '';
-	// The report right under the notice, for the run's duration.
+	// The report right under the notice, for the run's headline and duration.
 	export let report = '';
 
 	let open = false;
 
 	$: duration = formatRunDuration(reportDurationSeconds(report));
-	$: headline = [describeHermesRunNotice(notice), duration].filter(Boolean).join(' · ');
+	$: headline = [describeHermesRunNotice(notice, report), duration].filter(Boolean).join(' · ');
 </script>
 
 <div class="flex w-full flex-col items-center py-1" data-halo-hermes-run-notice>

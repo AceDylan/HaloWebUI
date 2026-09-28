@@ -274,6 +274,8 @@ export type HermesRunDetails = {
 	fallback_from?: string;
 	runner_run_id?: string;
 	fast_dispatch?: boolean;
+	/** "/reclaude 进度" answered from the run directories: nothing launched. */
+	progress_check?: boolean;
 	/** The run a follow-up went back to ("接着上次"). */
 	continued_from?: string;
 };
@@ -306,7 +308,10 @@ export const describeHermesReply = (
 		Boolean(askedToContinue) && !continuedFrom && run?.active === false && !run.fast_dispatch;
 	const parts: string[] = [];
 	const lines: string[] = [];
-	if (dispatch && continuedFrom) {
+	if (dispatch && run?.progress_check) {
+		parts.push(`${DISPATCH_LABELS[dispatch] ?? dispatch} · 进度`);
+		lines.push('直接读取后台任务的运行状态（没有经过模型，没有启动新任务）');
+	} else if (dispatch && continuedFrom) {
 		parts.push(`${DISPATCH_LABELS[dispatch] ?? dispatch} · 接着上次`);
 		lines.push(`交回 ${dispatch} 运行 ${continuedFrom} 的原会话继续（没有经过模型）`);
 		if (run?.runner_run_id) lines.push(`run ${run.runner_run_id}`);
@@ -403,8 +408,21 @@ const NOTICE_STATUS: Record<string, { icon: string; label: string }> = {
 	stopped: { icon: '⏹️', label: '已停止' }
 };
 
-/** "✅ reclaude 已完成" for the notice line. */
-export const describeHermesRunNotice = (notice: HermesRunNotice): string => {
+// The runner's own first report line: "⏳ reclaude 运行 <id> · 额度用完，暂停中，约 04:31 自动接着跑（不用管）".
+const REPORT_HEADLINE_RE = /^\s*(\S+)\s+(\S+)\s+运行\s+(\S+)\s+·\s+(.+?)\s*$/;
+
+/**
+ * "✅ reclaude 已完成" for the notice line. With the report under it, the
+ * runner's own headline wins: it knows more than the status word (a run parked
+ * until the quota resets ends as "error" but resumes by itself).
+ */
+export const describeHermesRunNotice = (notice: HermesRunNotice, report?: unknown): string => {
+	const headline = (typeof report === 'string' ? report : '').split('\n', 1)[0].match(REPORT_HEADLINE_RE);
+	if (headline && headline[3] === notice.runId) {
+		// "（不用管）" and the like are asides for the full report, not the pill.
+		const label = headline[4].replace(/（[^（）]*）$/, '').trim();
+		if (label) return `${headline[1]} ${headline[2]} ${label}`;
+	}
 	const status = NOTICE_STATUS[notice.status] ?? {
 		icon: notice.status ? '❌' : '📋',
 		label: notice.status ? `没有正常完成（${notice.status}）` : '已结束'

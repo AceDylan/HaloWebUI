@@ -1,12 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import {
 	formatToolDuration,
+	formatToolOutput,
 	getToolCallInput,
 	getToolCallOutcome,
+	getToolCallOutput,
 	getToolCallPreview,
 	getToolCallStartedAt,
 	getToolCallState,
 	isOutcomeOnlyResult,
+	stripToolCallOutput,
 	summarizeToolNames,
 	truncatePreview
 } from './tool-call-preview';
@@ -122,6 +125,29 @@ describe('tool call state after the run', () => {
 		expect(getToolCallInput(JSON.stringify({ city: 'Paris', unit: 'c' }))).toBeNull();
 		expect(isOutcomeOnlyResult(JSON.stringify({ status: 'success', duration: 1.2 }))).toBe(true);
 		expect(isOutcomeOnlyResult(JSON.stringify([{ link: 'x' }]))).toBe(false);
+	});
+
+	it('shows what a hermes call returned, readable', () => {
+		const terminal = JSON.stringify({ output: 'app\nlogs\n', exit_code: 0, error: null });
+		const result = JSON.stringify({ status: 'success', duration: 0.2, output: terminal });
+		expect(isOutcomeOnlyResult(result)).toBe(true);
+		expect(getToolCallOutput(result)).toBe('app\nlogs\nexit_code: 0');
+		expect(stripToolCallOutput(result)).toBe('{"status":"success","duration":0.2}');
+		// As it arrives in the attribute, html-encoded.
+		expect(getToolCallOutput(result.replace(/"/g, '&quot;'))).toBe('app\nlogs\nexit_code: 0');
+		// No preview (hermes before 975738a413), or a native tool's own JSON.
+		expect(getToolCallOutput(JSON.stringify({ status: 'success', duration: 1 }))).toBe('');
+		expect(getToolCallOutput(JSON.stringify({ output: 'x', rows: 3 }))).toBe('');
+	});
+
+	it('reads a result preview cut short or in plain text', () => {
+		const cut = `${JSON.stringify({ output: `第一行\n${'x'.repeat(600)}` }).slice(0, 497)}...`;
+		const text = formatToolOutput(cut);
+		expect(text.startsWith('第一行\nxxx')).toBe(true);
+		expect(text.endsWith('...')).toBe(true);
+		expect(formatToolOutput('{"output": "\\u4e2d\\t1')).toBe('中\t1');
+		expect(formatToolOutput('# Skill\nbody')).toBe('# Skill\nbody');
+		expect(formatToolOutput('[1, 2]')).toBe('[\n  1,\n  2\n]');
 	});
 
 	it('reads the start time hermes stamps on a call', () => {

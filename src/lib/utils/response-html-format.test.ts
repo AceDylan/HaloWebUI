@@ -186,6 +186,25 @@ This reasoning should be visible when expanded.
 		expect(html).not.toContain('&quot;input&quot;');
 	});
 
+	it('shows what a hermes call returned under its outcome', () => {
+		const result = JSON.stringify({
+			status: 'success',
+			duration: 0.2,
+			output: JSON.stringify({ output: 'app\n<logs>', exit_code: 0 })
+		})
+			// html.escape, as hermes_agent._serialize_blocks writes the attribute
+			.replace(/&/g, '&amp;')
+			.replace(/</g, '&lt;')
+			.replace(/>/g, '&gt;')
+			.replace(/"/g, '&quot;');
+		const html = renderResponseHtmlFormat(`
+<details type="tool_calls" done="true" name="terminal" arguments="{&quot;input&quot;: &quot;ls /srv&quot;}" result="${result}"><summary>Tool Executed</summary></details>
+`);
+		expect(html).toContain('<code>ls /srv</code>');
+		expect(html).toContain('已完成 · 0.2 秒');
+		expect(html).toContain('<code>app&#10;&lt;logs&gt;&#10;exit_code: 0</code>');
+	});
+
 	it('marks a failed single call as failed, not completed', () => {
 		const html = renderResponseHtmlFormat(`
 <details type="tool_calls" done="true" name="terminal" arguments="{&quot;input&quot;: &quot;false&quot;}" result="{&quot;status&quot;: &quot;error&quot;, &quot;duration&quot;: 0.1}"><summary>Tool Executed</summary></details>

@@ -536,6 +536,12 @@
 			return false;
 		}
 
+		// hermes' running commentary ("先看一下配置文件") says what the run is
+		// doing; once the reply is done it says nothing any more.
+		if (status?.action === 'hermes_interim' && message?.done) {
+			return false;
+		}
+
 		return true;
 	});
 	$: latestDisplayStatus = displayStatusHistory.at(-1);
@@ -1524,6 +1530,18 @@
 													</div>
 												</div>
 											</WebSearchResults>
+										{:else if status?.action === 'hermes_interim'}
+											<!-- The model's own words: shown as they are, not looked up as a translation key. -->
+											<div class="flex flex-col justify-center -space-y-0.5">
+												<div
+													class="{status?.done === false
+														? 'shimmer'
+														: ''} text-gray-600 dark:text-gray-400 text-base line-clamp-1 text-wrap"
+													data-halo-hermes-interim
+												>
+													{status?.description}
+												</div>
+											</div>
 										{:else if status?.action === 'knowledge_search'}
 											<div class="flex flex-col justify-center -space-y-0.5">
 												<div

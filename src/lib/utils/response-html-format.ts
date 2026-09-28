@@ -6,6 +6,7 @@ import { hubNoteUrl, splitVaultNotePaths, vaultNotePath } from './hub-embed';
 import {
 	formatToolDuration,
 	getToolCallInput,
+	getToolCallOutput,
 	getToolLabel,
 	isOutcomeOnlyResult,
 	summarizeToolNames
@@ -758,25 +759,32 @@ const renderActivityContent = (block: ActivityBlock) => {
 		const reason =
 			getToolCallReason(block) || (state === 'interrupted' ? '任务在这一步回报结果前就结束了' : '');
 		const outcome = [TOOL_STATE_LABELS[state], duration, reason].filter(Boolean).join(' · ');
-		return `<pre style="${escapeAttribute(
-			toStyle({
-				margin: 0,
-				padding: '10px 12px',
-				background: THEME.surface,
-				border: `1px solid ${THEME.borderSubtle}`,
-				'border-radius': '10px',
-				overflow: 'auto',
-				'max-height': '220px',
-				color: THEME.text,
-				'font-size': '12px',
-				'line-height': 1.55,
-				'white-space': 'pre-wrap',
-				'word-break': 'break-all',
-				'font-family': 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace'
-			})
-		)}"><code>${escapeHtml(plainInput)}</code></pre><div data-halo-tool-outcome="${escapeAttribute(state)}" style="${escapeAttribute(
+		const preStyle = (extra: Record<string, string | number>) =>
+			escapeAttribute(
+				toStyle({
+					margin: 0,
+					padding: '10px 12px',
+					border: `1px solid ${THEME.borderSubtle}`,
+					'border-radius': '10px',
+					overflow: 'auto',
+					'max-height': '220px',
+					'font-size': '12px',
+					'line-height': 1.55,
+					'white-space': 'pre-wrap',
+					'word-break': 'break-all',
+					'font-family': 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
+					...extra
+				})
+			);
+		// What the call returned, when hermes sent a preview of it.
+		const output = getToolCallOutput(block.attributes.result ?? '');
+		return `<pre style="${preStyle({ background: THEME.surface, color: THEME.text })}"><code>${escapeHtml(plainInput)}</code></pre><div data-halo-tool-outcome="${escapeAttribute(state)}" style="${escapeAttribute(
 			toStyle({ color: TOOL_STATE_TONES[state], 'font-size': '12px', 'font-weight': 600 })
-		)}">${escapeHtml(outcome)}</div>`;
+		)}">${escapeHtml(outcome)}</div>${
+			output
+				? `<pre data-halo-tool-output style="${preStyle({ color: THEME.muted })}"><code>${escapeHtml(output)}</code></pre>`
+				: ''
+		}`;
 	}
 
 	const args = parseJsonLike(block.attributes.arguments ?? '');

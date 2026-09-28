@@ -17,6 +17,7 @@
 		formatToolDuration,
 		getToolCallInput,
 		getToolCallOutcome,
+		getToolCallOutput,
 		getToolCallPreview,
 		getToolCallStartedAt,
 		getToolCallState,
@@ -181,6 +182,8 @@
 	$: selectedIsPlain =
 		selectedInput !== null &&
 		(selectedAttrs?.done !== 'true' || isOutcomeOnlyResult(decode(selectedAttrs?.result ?? '')));
+	// What the call returned, when hermes sent a preview of it.
+	$: selectedOutput = selectedDone ? getToolCallOutput(decode(selectedAttrs?.result ?? '')) : '';
 </script>
 
 <div
@@ -401,6 +404,11 @@
 								<span>· {$i18n.t('The run ended before this step reported back')}</span>
 							{/if}
 						</div>
+						{#if selectedOutput}
+							<pre
+								class="mt-1.5 max-h-60 overflow-auto whitespace-pre-wrap break-all rounded-lg border border-gray-200/70 px-3 py-2 font-mono text-xs leading-5 text-gray-600 dark:border-gray-700/60 dark:text-gray-300"
+								data-halo-tool-output>{selectedOutput}</pre>
+						{/if}
 					{:else if isWebSearchTool(toolName) && selectedDone}
 						{@const searchQuery = parseSearchQuery(args)}
 						{@const searchResults = parseSearchResults(result)}

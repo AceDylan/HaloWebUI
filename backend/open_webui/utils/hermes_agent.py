@@ -160,6 +160,14 @@ WEBHOOK_CONTENT_MAX_CHARS = 1200
 # Longest guidance accepted mid-run.
 STEER_TEXT_MAX_CHARS = 4000
 
+# What a finished tool call returned, as hermes previews it on tool.completed
+# (already redacted, 500 chars there): kept on the call for its detail panel.
+TOOL_RESULT_PREVIEW_MAX_CHARS = 1000
+
+# Codex's mid-turn commentary ("先看一下配置文件"), shown as the live status
+# line while the run works; one line of it is enough.
+INTERIM_STATUS_MAX_CHARS = 200
+
 # Choices hermes accepts on POST /v1/runs/{run_id}/approval, in the order the
 # dialog lists them. "session" scopes the grant to the hermes session, which is
 # this chat (session_id = chat_id), so it reads as "allow for this chat".
@@ -1333,6 +1341,8 @@ def _serialize_blocks(blocks) -> str:
                     }
                 if block.get("reason"):
                     outcome["reason"] = str(block["reason"])
+                if block.get("result_preview"):
+                    outcome["output"] = str(block["result_preview"])
                 result = html.escape(json.dumps(outcome, ensure_ascii=False))
                 content = (
                     f"{content}\n"
@@ -1388,7 +1398,20 @@ def _complete_tool_block(blocks, event) -> bool:
     target["done"] = True
     target["duration"] = event.get("duration", 0)
     target["error"] = bool(event.get("error"))
+    # What the call returned (hermes sends it redacted and cut short); not the
+    # tool.started preview, which is the call's input and stays in "preview".
+    result_preview = event.get("preview")
+    if isinstance(result_preview, str) and result_preview.strip():
+        target["result_preview"] = result_preview[:TOOL_RESULT_PREVIEW_MAX_CHARS]
     return True
+
+
+def _interim_status_text(text) -> str:
+    """A message.interim commentary as one status line ("" when nothing to show)."""
+    line = re.sub(r"\s+", " ", str(text or "")).strip()
+    if len(line) > INTERIM_STATUS_MAX_CHARS:
+        line = line[: INTERIM_STATUS_MAX_CHARS - 1].rstrip() + "\u2026"
+    return line
 
 
 def _describe_model_fallback(event) -> str:
@@ -2559,6 +2582,20 @@ async def run_hermes_agent(request, form_data, user, metadata, model, events, ta
                                     True,
                                     action="hermes_model_fallback",
                                 )
+                            elif event_type == "message.interim":
+                                # Codex's commentary between tool calls ("先看一下
+                                # 配置文件"): what the run is doing now, shown as
+                                # the live status line. Never added to the reply
+                                # (the answer arrives via message.delta and
+                                # run.completed); the chat drops these statuses
+                                # once the reply is done. Text already streamed
+                                # as message.delta is on screen already.
+                                if not event.get("already_streamed"):
+                                    note = _interim_status_text(event.get("text"))
+                                    if note:
+                                        await _emit_status(
+                                            note, False, action="hermes_interim"
+                                        )
                             elif event_type == "reasoning.available":
                                 # Not real reasoning: hermes re-emits the assistant
                                 # message content (first 500 chars) after every turn

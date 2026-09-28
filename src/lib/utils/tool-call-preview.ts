@@ -191,16 +191,86 @@ export const getToolCallInput = (argumentsValue: unknown): string | null => {
 };
 
 /**
- * True when the result is only an outcome (status/duration/reason), which is
- * all hermes reports: nothing worth showing as JSON.
+ * True when the result is what hermes reports: an outcome (status/duration/
+ * reason) and, from hermes 975738a413 on, a short preview of what the call
+ * returned (`output`). Nothing worth showing as JSON.
  */
 export const isOutcomeOnlyResult = (resultValue: unknown): boolean => {
 	const parsed = parseJsonLike(resultValue);
 	if (parsed === '' || parsed === null || parsed === undefined) return true;
 	if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return false;
-	return Object.keys(parsed as Record<string, unknown>).every((key) =>
-		['status', 'duration', 'reason', 'error'].includes(key)
+	return Object.entries(parsed as Record<string, unknown>).every(
+		([key, value]) =>
+			['status', 'duration', 'reason', 'error'].includes(key) ||
+			(key === 'output' && typeof value === 'string')
 	);
+};
+
+/** Fields that hold a result's text, in the order they are looked for. */
+const RESULT_TEXT_FIELDS = ['output', 'content', 'result', 'text', 'stdout', 'stderr', 'error'];
+const JSON_ESCAPE_RE = /\\(u[0-9a-fA-F]{4}|["\\/bfnrt])/g;
+const JSON_ESCAPES: Record<string, string> = { b: '', f: '', n: '\n', r: '', t: '\t' };
+const TRUNCATED_TEXT_FIELD_RE = new RegExp(`^\\{\\s*"(?:${RESULT_TEXT_FIELDS.join('|')})"\\s*:\\s*"`);
+
+/**
+ * A hermes result preview as it should read: a JSON result gives its text
+ * field with real line breaks, then its other plain fields as "key: value";
+ * a preview cut short at 500 characters is no longer JSON, but its escapes
+ * still become line breaks.
+ */
+export const formatToolOutput = (preview: string): string => {
+	const text = String(preview ?? '').trim();
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(text);
+	} catch {
+		if (!/^[[{"]/.test(text)) return text;
+		return text
+			.replace(TRUNCATED_TEXT_FIELD_RE, '')
+			.replace(JSON_ESCAPE_RE, (_match, escape: string) =>
+				escape.length === 5
+					? String.fromCharCode(parseInt(escape.slice(1), 16))
+					: (JSON_ESCAPES[escape] ?? escape)
+			);
+	}
+	if (typeof parsed === 'string') return parsed;
+	if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+		const record = parsed as Record<string, unknown>;
+		const main = RESULT_TEXT_FIELDS.find(
+			(key) => typeof record[key] === 'string' && (record[key] as string).trim()
+		);
+		if (main) {
+			const rest = Object.entries(record)
+				.filter(
+					([key, value]) =>
+						key !== main &&
+						value !== '' &&
+						['string', 'number', 'boolean'].includes(typeof value)
+				)
+				.map(([key, value]) => `${key}: ${value}`);
+			return [(record[main] as string).trimEnd(), ...rest].join('\n');
+		}
+	}
+	return JSON.stringify(parsed, null, 2);
+};
+
+/** What a hermes call returned, readable ('' when hermes sent no preview). */
+export const getToolCallOutput = (resultValue: unknown): string => {
+	if (!isOutcomeOnlyResult(resultValue)) return '';
+	const parsed = parseJsonLike(resultValue);
+	const output =
+		parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>).output : null;
+	return typeof output === 'string' && output.trim() ? formatToolOutput(output) : '';
+};
+
+/** A hermes result without its `output` preview: the outcome JSON shown beside it. */
+export const stripToolCallOutput = (resultValue: unknown): string => {
+	const parsed = parseJsonLike(resultValue);
+	if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+		return decode(String(resultValue ?? ''));
+	}
+	const { output: _output, ...outcome } = parsed as Record<string, unknown>;
+	return JSON.stringify(outcome);
 };
 
 /** Epoch seconds the call started at, from the `started` attribute hermes runs set. */

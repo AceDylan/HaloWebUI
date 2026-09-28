@@ -45,9 +45,11 @@
 	import {
 		formatToolDuration,
 		getToolCallOutcome,
+		getToolCallOutput,
 		getToolCallPreview,
 		getToolCallState,
-		getToolLabel
+		getToolLabel,
+		stripToolCallOutput
 	} from '$lib/utils/tool-call-preview';
 	import Image from './Image.svelte';
 	import ActivityCard from './ActivityCard.svelte';
@@ -142,6 +144,11 @@
 			? getToolCallOutcome(decode(attributes?.result ?? ''))
 			: null;
 	$: toolFailed = toolOutcome?.status === 'error';
+	// What a hermes call returned, shown as text under the call's JSON.
+	$: toolOutput =
+		activityType === 'tool_calls' && activityDone
+			? getToolCallOutput(decode(attributes?.result ?? ''))
+			: '';
 	$: toolDurationText = toolOutcome ? formatToolDuration(toolOutcome.duration) : '';
 
 	function formatReasoningTitle(done: boolean, duration: unknown): string {
@@ -278,7 +285,7 @@
 							id={`${collapsibleId}-tool-calls-${attributes?.id}-result`}
 							content={`> \`\`\`json
 > ${formatJSONString(args)}
-> ${formatJSONString(result)}
+> ${formatJSONString(toolOutput ? stripToolCallOutput(result) : result)}
 > \`\`\``}
 						/>
 					{:else}
@@ -288,6 +295,12 @@
 > ${formatJSONString(args)}
 > \`\`\``}
 						/>
+					{/if}
+
+					{#if toolOutput}
+						<pre
+							class="mt-1.5 max-h-60 overflow-auto whitespace-pre-wrap break-all rounded-lg border border-gray-200/70 px-3 py-2 font-mono text-xs leading-5 text-gray-600 dark:border-gray-700/60 dark:text-gray-300"
+							data-halo-tool-output>{toolOutput}</pre>
 					{/if}
 
 					{#if activityDone && !isImageGenerationTool(activityName)}
@@ -452,7 +465,7 @@
 								id={`${collapsibleId}-tool-calls-${attributes?.id}-result`}
 								content={`> \`\`\`json
 > ${formatJSONString(args)}
-> ${formatJSONString(result)}
+> ${formatJSONString(toolOutput ? stripToolCallOutput(result) : result)}
 > \`\`\``}
 							/>
 						{:else}
@@ -462,6 +475,11 @@
 > ${formatJSONString(args)}
 > \`\`\``}
 							/>
+						{/if}
+						{#if toolOutput}
+							<pre
+								class="mt-1.5 max-h-60 overflow-auto whitespace-pre-wrap break-all rounded-lg border border-gray-200/70 px-3 py-2 font-mono text-xs leading-5 text-gray-600 dark:border-gray-700/60 dark:text-gray-300"
+								data-halo-tool-output>{toolOutput}</pre>
 						{/if}
 					{:else}
 						<slot name="content" />

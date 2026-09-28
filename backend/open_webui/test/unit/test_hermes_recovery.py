@@ -927,6 +927,54 @@ def test_parallel_calls_of_one_tool_close_by_their_call_id(monkeypatch):
     assert "false" in second and "&quot;error&quot;" in second
 
 
+def test_a_finished_call_keeps_what_it_returned(monkeypatch):
+    hermes = _Hermes(
+        events=[
+            {"event": "tool.started", "tool": "terminal", "tool_call_id": "a", "preview": "ls /srv"},
+            {"event": "tool.completed", "tool": "terminal", "tool_call_id": "a", "duration": 0.2,
+             "preview": '{"output": "app\\nlogs", "exit_code": 0}'},
+            {"event": "tool.started", "tool": "read_file", "tool_call_id": "b", "preview": "a.txt"},
+            {"event": "tool.completed", "tool": "read_file", "tool_call_id": "b", "duration": 0.1},
+            {"event": "run.completed", "output": "好了"},
+        ]
+    )
+    final, _emitted, _ = _run(monkeypatch, hermes)
+    first, second = final["content"].split("</details>")[:2]
+    # The call's input stays its input; the result preview goes with the outcome.
+    assert html.escape('{"input": "ls /srv"}') in first
+    assert html.escape(
+        json.dumps({"status": "success", "duration": 0.2,
+                    "output": '{"output": "app\\nlogs", "exit_code": 0}'}, ensure_ascii=False)
+    ) in first
+    # hermes before 975738a413 sends no preview: the outcome is as it was.
+    assert html.escape('{"status": "success", "duration": 0.1}') in second
+
+
+def test_codex_commentary_is_the_live_status_and_not_the_reply(monkeypatch):
+    hermes = _Hermes(
+        events=[
+            {"event": "message.interim", "text": "先看一下\n配置文件。", "already_streamed": False},
+            {"event": "tool.started", "tool": "read_file", "preview": "config.yaml"},
+            {"event": "tool.completed", "tool": "read_file", "duration": 0.1},
+            # Already on screen via message.delta: not repeated.
+            {"event": "message.delta", "delta": "改好了"},
+            {"event": "message.interim", "text": "改好了", "already_streamed": True},
+            {"event": "message.interim", "text": "   "},
+            {"event": "message.interim", "text": "长" * 300},
+            {"event": "run.completed", "output": "改好了"},
+        ]
+    )
+    final, emitted, _ = _run(monkeypatch, hermes)
+    interim = [s for s in _statuses(emitted) if s["action"] == "hermes_interim"]
+    assert [s["description"] for s in interim] == [
+        "先看一下 配置文件。",
+        "长" * (hermes_agent.INTERIM_STATUS_MAX_CHARS - 1) + "\u2026",
+    ]
+    assert all(s["done"] is False for s in interim)
+    assert "配置文件。" not in final["content"]
+    assert final["content"].endswith("改好了")
+
+
 def test_a_model_fallback_is_said_while_the_run_goes(monkeypatch):
     hermes = _Hermes(
         events=[

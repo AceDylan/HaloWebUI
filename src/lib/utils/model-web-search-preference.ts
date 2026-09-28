@@ -1,4 +1,5 @@
 import type { Model } from '$lib/stores';
+import { isGptImageChatModel } from './chat-image-mode';
 import { isHermesAgentModel } from './hermes';
 import type { WebSearchMode, WebSearchModeSource } from './web-search-mode';
 
@@ -18,8 +19,9 @@ export const getModelBuiltinWebSearchPreference = (
 };
 
 /**
- * The model's explicit ENABLE_WEB_SEARCH_TOOL takes precedence. Hermes uses
- * its own tools unless Smart Search is selected for Halo's shared search path.
+ * The model's explicit ENABLE_WEB_SEARCH_TOOL takes precedence. gpt-image only
+ * draws, so it never searches. Hermes uses its own tools unless Smart Search is
+ * selected for Halo's shared search path.
  */
 export const getModelWebSearchPreference = (
 	model: Model | Record<string, any> | null | undefined,
@@ -27,7 +29,8 @@ export const getModelWebSearchPreference = (
 	webSearchEngine?: string | null
 ): boolean | null =>
 	getModelBuiltinWebSearchPreference(model) ??
-	(isHermesAgentModel(model as any, hermesModelIds) && webSearchEngine !== 'smart_search'
+	(isGptImageChatModel(model as any) ||
+	(isHermesAgentModel(model as any, hermesModelIds) && webSearchEngine !== 'smart_search')
 		? false
 		: null);
 

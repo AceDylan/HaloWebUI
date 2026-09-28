@@ -14,6 +14,10 @@ const HERMES_AGENT = {
 	id: 'modelref::openai::personal::id:ee5e02db::hermes-agent',
 	model_id: 'hermes-agent'
 };
+const GPT_IMAGE = {
+	id: 'modelref::openai::personal::id:c153e2d2::gpt-image',
+	model_id: 'gpt-image'
+};
 
 describe('model builtin web search preference', () => {
 	it('reads explicit preferences from model meta and info meta', () => {
@@ -122,5 +126,43 @@ describe('model builtin web search preference', () => {
 				'smart_search'
 			)
 		).toBe(false);
+	});
+
+	it('keeps the gpt-image family off, also behind a preset and with Smart Search', () => {
+		const gptImage2 = {
+			id: 'modelref::openai::personal::id:c153e2d2::gpt-image-2',
+			model_id: 'gpt-image-2'
+		};
+		const preset = {
+			id: 'my-drawing-preset',
+			info: { base_model_id: 'modelref::openai::personal::id:c153e2d2::gpt-image' }
+		};
+		for (const model of [GPT_IMAGE, gptImage2, preset]) {
+			expect(getModelWebSearchPreference(model)).toBe(false);
+			expect(getModelWebSearchPreference(model, undefined, 'smart_search')).toBe(false);
+			expect(resolveModelBuiltinWebSearchState([model], 'auto', () => 'auto')).toEqual({
+				mode: 'off',
+				source: 'model'
+			});
+		}
+		expect(
+			getModelWebSearchPreference({
+				id: 'gemini-3.1-flash-image',
+				model_id: 'gemini-3.1-flash-image'
+			})
+		).toBe(null);
+		expect(resolveModelBuiltinWebSearchState([GPT_CHAT, GPT_IMAGE], 'auto', () => 'auto')).toEqual({
+			mode: 'off',
+			source: 'model'
+		});
+	});
+
+	it('lets gpt-image turn web search on through its own settings', () => {
+		expect(
+			getModelWebSearchPreference({
+				...GPT_IMAGE,
+				info: { meta: { builtin_tool_config: { ENABLE_WEB_SEARCH_TOOL: true } } }
+			})
+		).toBe(true);
 	});
 });

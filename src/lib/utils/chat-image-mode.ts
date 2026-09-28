@@ -18,6 +18,20 @@ const bareModelId = (candidate: unknown): string => {
 	return parseModelSelectionId(raw)?.modelId ?? raw;
 };
 
+// The ids a chat model may be known by: its own, and the base model a
+// workspace preset wraps.
+const chatModelIdCandidates = (model: ChatModelLike | null | undefined): string[] =>
+	model && typeof model === 'object'
+		? [
+				getModelCleanId(model),
+				model.info?.base_model_id,
+				model.info?.meta?.base_selection_id,
+				model.id
+			]
+				.map(bareModelId)
+				.filter(Boolean)
+		: [];
+
 /**
  * True when the selected chat model draws pictures itself. Workspace presets
  * are resolved through their base model, and `modelref::` selection ids and
@@ -25,18 +39,11 @@ const bareModelId = (candidate: unknown): string => {
  */
 export const isDedicatedImageGenerationChatModel = (
 	model: ChatModelLike | null | undefined
-): boolean => {
-	if (!model || typeof model !== 'object') {
-		return false;
-	}
-	const candidates = [
-		getModelCleanId(model),
-		model.info?.base_model_id,
-		model.info?.meta?.base_selection_id,
-		model.id
-	].map(bareModelId);
-	return candidates.some((candidate) => candidate && isDedicatedImageGenerationModel(candidate));
-};
+): boolean => chatModelIdCandidates(model).some(isDedicatedImageGenerationModel);
+
+/** OpenAI's gpt-image family (gpt-image, gpt-image-2, chatgpt-image-latest …), resolved like above. */
+export const isGptImageChatModel = (model: ChatModelLike | null | undefined): boolean =>
+	chatModelIdCandidates(model).some((candidate) => candidate.toLowerCase().includes('gpt-image'));
 
 /** The composer is in image mode: the image toggle is on or the model itself generates images. */
 export const isChatImageMode = (

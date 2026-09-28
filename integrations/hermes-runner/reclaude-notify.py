@@ -555,12 +555,16 @@ def build_digest(run_id, status, run_dir, session_id, agent="reclaude", chat=Fal
                 + f"\n\n…（后面还有约 {rest} 字，完整结果在 {result_path}，需要时让 Hermes 读取）")
     lines += ["", body or f"（没有 result.md：{result_path}）"]
 
+    # Telegram: the gateway hands a plain reply to this report straight back to the run
+    # (runner_dispatch.awaited_report, up to an hour; the command works after that too).
     if status == "question" and chat:
-        lines += ["", f"↩️ 发「/{agent} 你的决定」，直接交回同一个会话续跑（不经过模型）。"]
+        lines += ["", f"↩️ 直接回复你的决定，原样交回同一个会话续跑（不经过模型）；"
+                      f"隔了一小时以上再回，发「/{agent} 你的决定」。"]
     elif status == "question":
         lines += ["", "↩️ 直接回复你的决定，Hermes 会在同一个会话里续跑。"]
     elif status == "max_turns" and chat:
-        lines += ["", f"↩️ 发 /{agent} 继续，在同一个会话里接着跑。"]
+        lines += ["", f"↩️ 回复「继续」（后面可以接着写要求），在同一个会话里接着跑（不经过模型）；"
+                      f"隔了一小时以上再回，发 /{agent} 继续。"]
     elif status == "max_turns":
         lines += ["", "↩️ 回复「继续」，可以在同一个会话里接着跑。"]
     elif status != "success" and "runner 提示" not in body:

@@ -12,7 +12,7 @@
 
 	const i18n: any = getContext('i18n');
 
-	// How the next hermes run starts. "派发方式" puts /reclaude, /cchclaude, /codex or /agy
+	// How the next hermes run starts. "派发方式" puts /reclaude, /cchclaude, /anyclaude, /codex or /agy
 	// in front of the next message only (left on, every later "进度怎么样？"
 	// started another run); right after a runner's report the next message
 	// goes back to that run unless "直接" is picked; the model overrides
@@ -30,6 +30,11 @@
 		{ value: '', label: '直接', hint: 'Hermes 自己做' },
 		{ value: 'reclaude', label: 'reclaude', hint: '交给 Claude Code（reclaude 拼车）在后台独占执行' },
 		{ value: 'cchclaude', label: 'cchclaude', hint: '交给 Claude Code（自己的 cch 中转）在后台独占执行' },
+		{
+			value: 'anyclaude',
+			label: 'anyclaude',
+			hint: '交给 Claude Code（anyrouter 免费服务，较慢，失败会自动重试）在后台独占执行'
+		},
 		{ value: 'codex', label: 'codex', hint: '交给 Codex 在后台独占执行' },
 		{ value: 'agy', label: 'agy', hint: '交给 AGY 在后台独占执行' }
 	];
@@ -57,7 +62,7 @@
 		if (!button || typeof window === 'undefined') return;
 		const rect = button.getBoundingClientRect();
 		// On a phone the dispatch choices need the width: at 288px "reclaude" broke
-		// mid-word into "reclaud / e". Five choices sit three to a row.
+		// mid-word into "reclaud / e". Six choices sit three to a row.
 		const width = window.innerWidth < 640 ? window.innerWidth - 16 : PANEL_WIDTH;
 		const left = Math.max(8, Math.min(rect.left, window.innerWidth - width - 8));
 		panelStyle =
@@ -270,7 +275,7 @@
 				</select>
 			</label>
 			<div class="mt-1 text-2xs text-gray-400 dark:text-gray-500">
-				只管 Hermes 自己这一轮；派发给 reclaude/cchclaude/codex/agy 时它们用自己的模型
+				只管 Hermes 自己这一轮；派发给 reclaude/cchclaude/anyclaude/codex/agy 时它们用自己的模型
 			</div>
 			{#if loadingModels}
 				<div class="mt-1 text-2xs text-gray-400">正在读取 Hermes 的模型列表…</div>

@@ -1,14 +1,15 @@
 # Hermes 后台运行完成通知
 
-宿主机上的 `reclaude-run.sh` / `cchclaude-run.sh` / `codex-run.sh`（Hermes 的 reclaude / cchclaude / Codex
-独占运行器；cchclaude 就是 reclaude 的 runner 换成走自己 cch 中转的 Claude Code）
+宿主机上的 `reclaude-run.sh` / `cchclaude-run.sh` / `anyclaude-run.sh` / `codex-run.sh`（Hermes 的 reclaude /
+cchclaude / anyclaude / Codex 独占运行器；cchclaude、anyclaude 就是 reclaude 的 runner 换成走自己 cch 中转、
+走 anyrouter 免费服务的 Claude Code）
 跑完之后，Hermes 的 api_server 平台**无法**把结果推回 HaloWebUI 会话
 （`supports_async_delivery=False`），所以由 runner 自己 POST 到
 `/api/v1/hermes/notifications`。本目录是那条链路里两个宿主机脚本的**可维护副本**：
 
 | 文件 | 作用 |
 |---|---|
-| `reclaude-notify.py` | 完成通知本体；各 runner 共用，cchclaude / Codex 侧额外传 `--agent cchclaude` / `--agent codex` 等参数 |
+| `reclaude-notify.py` | 完成通知本体；各 runner 共用，cchclaude / anyclaude / Codex 侧额外传 `--agent cchclaude` / `--agent anyclaude` / `--agent codex` 等参数 |
 | `reclaude-notify-backfill.py` | 只读排障：对历史上“找不到来源会话”的 run 记录还能追回什么 |
 | `install.sh` | 带版本护栏的安装脚本（拒绝把旧副本装到新宿主机上） |
 
@@ -57,6 +58,8 @@
 codex-run.sh → --config-file /root/.hermes/codex-runner.env \
                --config-file /root/.hermes/reclaude-runner.env
 cchclaude-run.sh → --config-file /root/.hermes/cchclaude-runner.env \
+                   --config-file /root/.hermes/reclaude-runner.env
+anyclaude-run.sh → --config-file /root/.hermes/anyclaude-runner.env \
                    --config-file /root/.hermes/reclaude-runner.env
 ```
 

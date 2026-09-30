@@ -25,7 +25,7 @@ task file did not exist yet.
    message per call, each followed by its own result. Nothing else in the
    request changes.
 2. `pre_tool_call` / `post_tool_call`: a terminal command that launches a
-   runner (`reclaude-run.sh`, `cchclaude-run.sh`, `codex-run.sh` or `agy-run.sh` with `run` or
+   runner (`reclaude-run.sh`, `cchclaude-run.sh`, `anyclaude-run.sh`, `codex-run.sh` or `agy-run.sh` with `run` or
    `answer`) is remembered for its session and turn. The identical command
    (whitespace aside) in the same turn is refused while the first one is
    running or after it started, and the refusal names the run id. A launch that

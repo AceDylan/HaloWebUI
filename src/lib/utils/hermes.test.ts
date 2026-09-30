@@ -130,6 +130,16 @@ describe('hermes run options', () => {
 		expect(normalizeHermesRunOptions({ dispatch: 'claude' }).dispatch).toBe('');
 	});
 
+	it('knows anyclaude as a runner of its own', () => {
+		expect(normalizeHermesRunOptions({ dispatch: 'anyclaude' }).dispatch).toBe('anyclaude');
+		expect(
+			normalizeHermesRunOptions({ dispatch: 'anyclaude', continue_run: '20260930-112556-677bec3c' })
+		).toEqual({ dispatch: 'anyclaude', model: '', provider: '', continue_run: '20260930-112556-677bec3c' });
+		expect(hermesRunOptionsForRequest({ ...EMPTY_HERMES_RUN_OPTIONS, dispatch: 'anyclaude' })).toEqual({
+			dispatch: 'anyclaude'
+		});
+	});
+
 	it('sends nothing when every choice is the default', () => {
 		expect(hermesRunOptionsForRequest(EMPTY_HERMES_RUN_OPTIONS)).toBeNull();
 		expect(
@@ -180,6 +190,12 @@ describe('describeHermesReply', () => {
 	it('labels a cchclaude reply with its own name', () => {
 		expect(describeHermesReply({ dispatch: 'cchclaude', progress_check: true }, null)?.label).toBe(
 			'cchclaude · 进度'
+		);
+	});
+
+	it('labels an anyclaude reply with its own name', () => {
+		expect(describeHermesReply({ dispatch: 'anyclaude', progress_check: true }, null)?.label).toBe(
+			'anyclaude · 进度'
 		);
 	});
 
@@ -307,6 +323,13 @@ describe('接着上次: a follow-up goes back to the run whose report ends the c
 		stored.messages.notice.content = `[后台任务完成通知] cchclaude 运行 ${runId} 已结束，状态：question，Claude 会话：s-1。`;
 		stored.messages.notice.hermes_notice = { source: 'cchclaude-runner', run_id: runId };
 		expect(findHermesContinuation(stored)).toEqual({ runner: 'cchclaude', runId, status: 'question' });
+	});
+
+	it('goes back to an anyclaude run like any other', () => {
+		const stored = chat();
+		stored.messages.notice.content = `[后台任务完成通知] anyclaude 运行 ${runId} 已结束，状态：error，Claude 会话：s-1。`;
+		stored.messages.notice.hermes_notice = { source: 'anyclaude-runner', run_id: runId };
+		expect(findHermesContinuation(stored)).toEqual({ runner: 'anyclaude', runId, status: 'error' });
 	});
 
 	it('finds nothing once anything else ends the chat', () => {

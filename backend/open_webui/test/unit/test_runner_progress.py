@@ -36,6 +36,25 @@ def test_progress_line_reads_the_step_and_the_last_activity(tmp_path):
     assert "abcdefghijklmnop" not in last and "s3cret" not in last
 
 
+def test_while_claude_code_retries_the_banner_says_so(tmp_path):
+    # anyclaude (anyrouter) often needs several of Claude Code's own retries; the banner shows
+    # the retry while it is the newest line, and the agent's own words once it got through.
+    retry = "上游请求失败（HTTP 429），Claude Code 自动重试第 3/10 次，2.1 秒后重发"
+    run_dir = _run_dir(
+        tmp_path,
+        lines=[
+            "10:00:01 [assistant] 先看一下目录结构",
+            "10:00:02 [tool#1] Bash: ls",
+            "10:00:03 [tool-result] ok: x",
+            f"10:00:06 [api-retry] {retry}",
+        ],
+    )
+    assert progress.read_progress(str(run_dir)) == (1, retry)
+    with open(run_dir / "progress.log", "a", encoding="utf-8") as handle:
+        handle.write("10:01:00 [assistant] 目录看完了\n")
+    assert progress.read_progress(str(run_dir)) == (1, "目录看完了")
+
+
 def _reporter(tmp_path, run_dir, events, end_at):
     """Run the reporter on a fake clock; ``events`` maps a time to progress.log lines
     written then; the run ends at ``end_at``. Returns [(time, payload)]."""

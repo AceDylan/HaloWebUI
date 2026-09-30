@@ -74,6 +74,9 @@ _LINE_PREFIX_RE = re.compile(r"^\d{2}:\d{2}:\d{2}\s+\[[^\]]+\]\s*")
 # than its last shell command; the command is the fallback (no narration yet, or a runner that
 # writes none). Same rule as the Telegram "/reclaude 进度" reply (gateway/runner_dispatch.py).
 _NARRATION_RE = re.compile(r"^\d{2}:\d{2}:\d{2}\s+\[assistant\]\s*(.+)$")
+# Claude Code retrying a failed API request by itself (reclaude-stream.py writes the line): while
+# that is the newest line, it is what the run is doing — anyrouter can take minutes to answer.
+_RETRY_RE = re.compile(r"^\d{2}:\d{2}:\d{2}\s+\[api-retry\]\s*(.+)$")
 # Progress lines echo commands; a token in one must not end up on screen.
 _SECRET_RES = (
     re.compile(r"(?i)\b(authorization:\s*bearer)\s+\S+"),
@@ -153,7 +156,10 @@ def read_progress(run_dir):
         return None, ""
     steps = [int(value) for value in _TOOL_STEP_RE.findall(tail)]
     step = max(steps) if steps else None
-    last = next((match.group(1) for match in map(_NARRATION_RE.match, reversed(tail.splitlines())) if match), "")
+    lines = [line for line in tail.splitlines() if line.strip()]
+    retrying = _RETRY_RE.match(lines[-1]) if lines else None
+    last = retrying.group(1) if retrying else next(
+        (match.group(1) for match in map(_NARRATION_RE.match, reversed(lines)) if match), "")
     for line in reversed(tail.splitlines()) if not last else ():
         line = line.strip()
         if not line or "[tool-result]" in line:

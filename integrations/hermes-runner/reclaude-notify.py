@@ -52,7 +52,7 @@ import time
 import urllib.error
 import urllib.request
 
-SCRIPT_VERSION = "2026-09-28.2"
+SCRIPT_VERSION = "2026-09-30.1"
 CONFIG_FILE = "/root/.hermes/reclaude-runner.env"
 REQUIRED_CONFIG_KEYS = ("HALOWEBUI_NOTIFY_URL", "HALOWEBUI_NOTIFY_TOKEN")
 STATE_DB = "/root/.hermes/state.db"
@@ -92,8 +92,8 @@ STATUS_LABELS = {
     "quota_blocked": ("⛔", "没有启动"),
     "timeout": ("⏱", "超时"),
 }
-SESSION_LABELS = {"reclaude": "Claude 会话", "cchclaude": "Claude 会话", "codex": "codex thread",
-                  "agy": "AGY conversation"}
+SESSION_LABELS = {"reclaude": "Claude 会话", "cchclaude": "Claude 会话", "anyclaude": "Claude 会话",
+                  "codex": "codex thread", "agy": "AGY conversation"}
 
 
 def log(message):
@@ -256,7 +256,7 @@ def find_origin(
     try:
         origins = set()
         banner = re.compile(
-            r"(?:^|\n)==== (?:codex|reclaude|cchclaude) run "
+            r"(?:^|\n)==== (?:codex|reclaude|cchclaude|anyclaude) run "
             + re.escape(run_id)
             + r" (?:started|finished)(?::|\s)"
         )
@@ -735,7 +735,7 @@ def main():
     parser.add_argument(
         "--agent",
         default="reclaude",
-        help="agent label used in the notice text (reclaude, cchclaude, codex, agy)",
+        help="agent label used in the notice text (reclaude, cchclaude, anyclaude, codex, agy)",
     )
     parser.add_argument(
         "--runner-name",

@@ -40,6 +40,7 @@ DEFAULT_ROOTS = (
     ("/root/.hermes/reclaude-runs", "reclaude-run.sh"),
     ("/root/.hermes/codex-runs", "codex-run.sh"),
     ("/root/.hermes/cchclaude-runs", "cchclaude-run.sh"),
+    ("/root/.hermes/anyclaude-runs", "anyclaude-run.sh"),
 )
 # Everything the notifier could not deliver for want of an origin.  A run that was
 # correctly skipped (telegram/qqbot) or delivered is left alone.
@@ -129,7 +130,7 @@ def main():
         action="append",
         default=[],
         metavar="DIR[:TOOL_MARKER]",
-        help="runs directory to scan; repeatable. Defaults to the reclaude, codex and cchclaude roots.",
+        help="runs directory to scan; repeatable. Defaults to the reclaude, codex, cchclaude and anyclaude roots.",
     )
     parser.add_argument("--state-db", default=None, help="hermes state DB (read-only)")
     parser.add_argument(

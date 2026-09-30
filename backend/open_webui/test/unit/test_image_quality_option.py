@@ -10,6 +10,7 @@ from open_webui.routers.images import (  # noqa: E402
     _CAPABILITY_OVERRIDE_BOOL_FIELDS,
     GenerateImageForm,
     _classify_openai_image_model,
+    _normalize_openai_image_background,
     _normalize_openai_image_quality,
 )
 from open_webui.utils.image_generation_options import (  # noqa: E402
@@ -26,6 +27,13 @@ def test_quality_normalizes_to_the_gpt_image_tiers_and_drops_auto():
     assert _normalize_openai_image_quality("auto") is None
     assert _normalize_openai_image_quality("ultra") is None
     assert _normalize_openai_image_quality(None) is None
+
+
+def test_background_is_opaque_unless_transparent_is_chosen():
+    # Left at auto, the relay's gpt-image returned fully transparent PNGs.
+    assert _normalize_openai_image_background(" Transparent ") == "transparent"
+    for value in (None, "", "auto", "opaque", "white", "black"):
+        assert _normalize_openai_image_background(value) == "opaque"
 
 
 def test_bare_gpt_image_relay_alias_advertises_quality_and_background():

@@ -183,6 +183,14 @@ OPENAI_IMAGE_ALLOWED_SIZES = {"1024x1024", "1536x1024", "1024x1536"}
 OPENAI_IMAGE_QUALITY_VALUES = ("auto", "low", "medium", "high")
 
 
+def _normalize_openai_image_background(value: Any) -> str:
+    """gpt-image background. Only an explicit ``transparent`` keeps the alpha
+    channel; auto/empty (the default) and the chat panel's white/black go out
+    as ``opaque`` -- left at auto, the relay's gpt-image often returned fully
+    transparent PNGs that are unreadable on dark chat themes."""
+    return "transparent" if str(value or "").strip().lower() == "transparent" else "opaque"
+
+
 def _normalize_openai_image_quality(value: Any) -> Optional[str]:
     """gpt-image quality tier. ``auto``/unknown -> None so the field is omitted
     and the upstream default applies (the relay decides which gpt-image
@@ -7712,7 +7720,7 @@ async def image_generations(
                 else 1
             )
             background = (
-                form_data.background
+                _normalize_openai_image_background(form_data.background)
                 if (selected_model_meta or {}).get("supports_background")
                 else None
             )

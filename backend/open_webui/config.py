@@ -2079,9 +2079,10 @@ Pick the ONE existing folder that best matches the main topic of this chat, or a
 {{FOLDER_OPTIONS}}
 
 ### Guidelines:
-- Choose only from the folders listed above; copy the folder name exactly.
-- Judge by the actual subject of the conversation, not by which model or tool answered it.
-- If the chat clearly fits none of the folders, or you are unsure, answer null. Do not invent folders.
+- Choose only from the folders listed above; copy the folder name exactly. Do not invent folders.
+- Judge by the actual subject of the conversation, not by which model or tool answered it. A note that a background task was started or finished is not a topic.
+- Every chat with a real subject belongs in a folder. When none fits exactly, pick the closest one; a personal, everyday or open-ended subject goes to the most general folder.
+- Answer null only when the chat has no subject yet, such as a bare greeting or a command with nothing to do.
 - Prefer the most specific folder whose purpose covers the sustained topic of the chat.
 
 ### Output:

@@ -133,6 +133,7 @@ def make_deps(
         evaluations,
         last_user_message_count=None,
         last_message_id=None,
+        last_status=None,
     ):
         chat = state["chat"]
         meta = dict(chat.meta or {})
@@ -146,6 +147,7 @@ def make_deps(
             evaluations=evaluations,
             last_user_message_count=last_user_message_count,
             last_message_id=last_message_id,
+            last_status=last_status,
         )
         if apply_folder:
             chat.folder_id = folder_id
@@ -460,6 +462,7 @@ def test_first_evaluation_creates_presets_and_moves_the_chat():
         "evaluations": 1,
         "last_user_message_count": 1,
         "last_message_id": "assistant-1",
+        "last_status": "assigned",
         "folder_id": result.folder_id,
     }
 
@@ -495,6 +498,7 @@ def test_null_answer_counts_but_never_moves():
     assert state["chat"].folder_id is None
     assert state["chat"].meta["folder_assignment"]["evaluations"] == 1
     assert state["chat"].meta["folder_assignment"]["source"] == "auto"
+    assert state["chat"].meta["folder_assignment"]["last_status"] == "no_match"
 
 
 def test_model_error_counts_and_leaves_chat_in_place():
@@ -505,6 +509,7 @@ def test_model_error_counts_and_leaves_chat_in_place():
     assert result.status == "error" and "502" in result.detail
     assert state["chat"].folder_id is None
     assert state["commits"][-1]["evaluations"] == 1
+    assert state["chat"].meta["folder_assignment"]["last_status"] == "error"
 
 
 def test_model_timeout_counts_and_leaves_chat_in_place():
@@ -519,6 +524,7 @@ def test_model_timeout_counts_and_leaves_chat_in_place():
     assert result.status == "timeout"
     assert state["chat"].folder_id is None
     assert state["chat"].meta["folder_assignment"]["evaluations"] == 1
+    assert state["chat"].meta["folder_assignment"]["last_status"] == "timeout"
 
 
 def test_bad_completion_shape_counts_as_empty():
@@ -756,7 +762,7 @@ def test_auto_commit_writes_folder_and_marker_without_touching_other_meta(monkey
     db = _install_db(monkeypatch, row)
 
     result = table.update_chat_folder_assignment_by_id_and_user_id(
-        "chat-1", "user-1", "f-4", apply_folder=True, evaluations=1, last_user_message_count=1, last_message_id="assistant-1"
+        "chat-1", "user-1", "f-4", apply_folder=True, evaluations=1, last_user_message_count=1, last_message_id="assistant-1", last_status="assigned"
     )
 
     assert result is not None and row.folder_id == "f-4"
@@ -766,6 +772,7 @@ def test_auto_commit_writes_folder_and_marker_without_touching_other_meta(monkey
     assignment = row.meta["folder_assignment"]
     assert assignment["source"] == "auto" and assignment["evaluations"] == 1
     assert assignment["folder_id"] == "f-4" and assignment["last_message_id"] == "assistant-1"
+    assert assignment["last_status"] == "assigned"
     assert db.commits == 1
 
 
@@ -775,12 +782,13 @@ def test_auto_commit_without_apply_only_counts(monkeypatch):
     _install_db(monkeypatch, row)
 
     result = table.update_chat_folder_assignment_by_id_and_user_id(
-        "chat-1", "user-1", None, apply_folder=False, evaluations=2, last_user_message_count=3, last_message_id="assistant-3"
+        "chat-1", "user-1", None, apply_folder=False, evaluations=2, last_user_message_count=3, last_message_id="assistant-3", last_status="timeout"
     )
 
     assert result is not None and row.folder_id == "f-1"
     assert row.meta["folder_assignment"]["folder_id"] == "f-1"
     assert row.meta["folder_assignment"]["evaluations"] == 2
+    assert row.meta["folder_assignment"]["last_status"] == "timeout"
 
 
 def test_auto_commit_respects_manual_marker_and_legacy_folders(monkeypatch):

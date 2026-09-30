@@ -7,7 +7,9 @@ user's existing top-level folders for the chat, or ``null``.
 Rules (kept deliberately small and testable):
 
 * ``chat.meta.folder_assignment`` carries ``source`` (``auto`` | ``manual``),
-  ``evaluations`` and the last evaluated turn / message id.
+  ``evaluations``, the last evaluated turn / message id and ``last_status``
+  (``assigned``, ``empty``, ``no_match``, ``timeout``, ``error``...), so a chat
+  left outside the folders shows why.
 * ``manual`` is written by the sidebar move / remove endpoint and freezes the
   chat forever. A chat that sits in a folder without any marker is treated as
   manual as well.
@@ -488,6 +490,7 @@ async def assign_chat_folder(
             evaluations=evaluations,
             last_user_message_count=user_message_count,
             last_message_id=message_id,
+            last_status=status,
         )
         if updated is None:
             return FolderAssignmentResult(

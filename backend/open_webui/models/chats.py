@@ -45,7 +45,8 @@ def get_title_generation_metadata(meta: Optional[dict]) -> dict:
 
 def get_folder_assignment_metadata(meta: Optional[dict]) -> dict:
     """``chat.meta.folder_assignment``: ``{"source": "auto"|"manual", "evaluations": n,
-    "last_user_message_count": n, "last_message_id": str, "folder_id": str|None}``.
+    "last_user_message_count": n, "last_message_id": str, "last_status": str,
+    "folder_id": str|None}``.
 
     ``manual`` is written by the sidebar move/remove endpoint and freezes the chat
     for the automatic folder assignment; ``auto`` records what the background
@@ -1637,12 +1638,14 @@ class ChatTable:
         evaluations: int,
         last_user_message_count: Optional[int] = None,
         last_message_id: Optional[str] = None,
+        last_status: Optional[str] = None,
     ) -> Optional[ChatModel]:
         """Persist one automatic folder evaluation.
 
         Runs under a row lock and re-reads the marker, so a manual move that
         landed while the task model was thinking always wins. ``apply_folder``
-        False records the attempt (counts it) without touching ``folder_id``.
+        False records the attempt (counts it) without touching ``folder_id``;
+        ``last_status`` says why (``empty``, ``timeout``...).
         Returns None when nothing was written."""
         try:
             with get_db() as db:
@@ -1668,6 +1671,8 @@ class ChatTable:
                     assignment["last_user_message_count"] = last_user_message_count
                 if last_message_id:
                     assignment["last_message_id"] = last_message_id
+                if last_status:
+                    assignment["last_status"] = last_status
                 assignment["updated_at"] = int(time.time())
                 if apply_folder:
                     chat.folder_id = folder_id

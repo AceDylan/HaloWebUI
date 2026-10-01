@@ -34,7 +34,8 @@ _SOURCE_COMMANDS = {
 # first. They answer English queries with Chinese pages (and Baidu spends a
 # daily free quota), while LangSearch answers Chinese queries off-topic; so a
 # query without Chinese characters tries LangSearch first, the CLI's own
-# web-search routing rule.
+# web-search routing rule. A Chinese query tries LangSearch last of all, after
+# Exa too.
 _DOMESTIC_WEB_PROVIDERS = ("baidu", "baidu-ai", "zhipu", "zhipu-mcp")
 _CJK_PATTERN = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]")
 # Result listings of these engines link to sources but are not sources.
@@ -154,6 +155,8 @@ def _source_commands(
                     provider,
                 )
             )
+    if _CJK_PATTERN.search(query):
+        commands.sort(key=lambda command: command[2] == "langsearch")
     return commands
 
 

@@ -744,5 +744,5 @@ def test_source_commands_order_web_search_by_query_language():
     def providers(query):
         return [p for _, _, p in smart_search._source_commands(capabilities, 5, query)]
 
-    assert providers("黄山 门票") == ["baidu", "baidu-ai", "zhipu", "langsearch", "exa"]
+    assert providers("黄山 门票") == ["baidu", "baidu-ai", "zhipu", "exa", "langsearch"]
     assert providers("python release") == ["langsearch", "baidu", "baidu-ai", "zhipu", "exa"]

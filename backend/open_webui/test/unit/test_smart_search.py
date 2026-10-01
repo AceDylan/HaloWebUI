@@ -483,6 +483,7 @@ def test_results_name_the_search_that_found_them(monkeypatch):
         ("zhipu-mcp", "zhipu-mcp-search", ["--count", "1"]),
         ("zhipu", "zhipu-search", ["--count", "1"]),
         ("baidu", "baidu-search", ["--count", "1"]),
+        ("baidu-ai", "baidu-ai-search", ["--count", "1"]),
         ("langsearch", "langsearch-search", ["--count", "1"]),
         ("exa", "exa-search", ["--num-results", "1", "--include-text"]),
         ("anysearch", "anysearch-search", ["--max-results", "1"]),
@@ -736,12 +737,12 @@ def test_smart_search_is_available_through_shared_dispatch(monkeypatch):
 
 def test_source_commands_order_web_search_by_query_language():
     capabilities = {
-        "web_search": {"configured": ["baidu", "zhipu", "langsearch", "tavily"]},
+        "web_search": {"configured": ["baidu", "baidu-ai", "zhipu", "langsearch", "tavily"]},
         "docs_search": {"configured": ["exa"]},
     }
 
     def providers(query):
         return [p for _, _, p in smart_search._source_commands(capabilities, 5, query)]
 
-    assert providers("黄山 门票") == ["baidu", "zhipu", "langsearch", "exa"]
-    assert providers("python release") == ["langsearch", "baidu", "zhipu", "exa"]
+    assert providers("黄山 门票") == ["baidu", "baidu-ai", "zhipu", "langsearch", "exa"]
+    assert providers("python release") == ["langsearch", "baidu", "baidu-ai", "zhipu", "exa"]

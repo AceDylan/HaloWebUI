@@ -23,6 +23,7 @@ from open_webui.retrieval.web.main import SearchResult, get_filtered_results
 # result field holding the page text (None: the web loader downloads the page).
 _SOURCE_COMMANDS = {
     "baidu": ("baidu-search", "--count", (), None),
+    "baidu-ai": ("baidu-ai-search", "--count", (), None),
     "zhipu": ("zhipu-search", "--count", (), None),
     "zhipu-mcp": ("zhipu-mcp-search", "--count", (), None),
     "exa": ("exa-search", "--num-results", ("--include-text",), "text"),
@@ -34,7 +35,7 @@ _SOURCE_COMMANDS = {
 # daily free quota), while LangSearch answers Chinese queries off-topic; so a
 # query without Chinese characters tries LangSearch first, the CLI's own
 # web-search routing rule.
-_DOMESTIC_WEB_PROVIDERS = ("baidu", "zhipu", "zhipu-mcp")
+_DOMESTIC_WEB_PROVIDERS = ("baidu", "baidu-ai", "zhipu", "zhipu-mcp")
 _CJK_PATTERN = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]")
 # Result listings of these engines link to sources but are not sources.
 _SEARCH_RESULT_HOSTS = {

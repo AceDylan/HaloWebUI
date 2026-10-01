@@ -18,6 +18,7 @@
 	import UsersSolid from '../icons/UsersSolid.svelte';
 	import ChartBar from '../icons/ChartBar.svelte';
 	import { getModelChatDisplayName } from '$lib/utils/model-display';
+	import { buildModelIdentityLookup, parseModelSelectionId } from '$lib/utils/model-identity';
 	import { ensureModels } from '$lib/services/models';
 	import HaloSelect from '$lib/components/common/HaloSelect.svelte';
 	import Checkbox from '$lib/components/common/Checkbox.svelte';
@@ -131,8 +132,11 @@
 	};
 	let cleanupConfirmDisabled = true;
 
+	// Stats are keyed by what the chat stored: the selection id
+	// ("modelref::openai::personal::id:<conn>::<model>") today, a legacy
+	// "<conn>.<model>" id on older rows. Look both up through every alias.
 	let modelById: Map<string, any> = new Map();
-	$: modelById = new Map(($models ?? []).map((m: any) => [m.id, m]));
+	$: modelById = buildModelIdentityLookup($models ?? []).byId;
 
 	const isModelActive = (modelId: string): boolean => {
 		return modelById.has(modelId);
@@ -141,6 +145,8 @@
 	const getModelDisplayName = (modelId: string): string => {
 		const model = modelById.get(modelId);
 		if (model) return getModelChatDisplayName(model);
+		const parsed = parseModelSelectionId(modelId);
+		if (parsed) return parsed.modelId;
 		const dotIdx = modelId.indexOf('.');
 		return dotIdx > 0 ? modelId.substring(dotIdx + 1) : modelId;
 	};
@@ -148,6 +154,11 @@
 	const getUserDisplayName = (userId: string): string => {
 		return userMap[userId] || userId;
 	};
+
+	// Every day of the range has a bar (idle days too), so a year needs
+	// thinner gaps or the bars run out of width.
+	const barGapClass = (count: number, roomy: string) =>
+		count > 120 ? 'gap-0' : count > 45 ? 'gap-px' : roomy;
 
 	const formatNumber = (n: number) => {
 		if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M';
@@ -483,7 +494,7 @@
 				<div class="relative">
 					<h3 class="text-[13px] font-medium text-gray-500 dark:text-gray-400 mb-3">{$i18n.t('Daily Activity')}</h3>
 					<div class="relative">
-						<div class="relative flex items-end gap-1 h-36 rounded-2xl p-3 pb-1 bg-white/70 dark:bg-gray-900/60 border border-gray-100/90 dark:border-gray-800/70 shadow-sm shadow-gray-900/[0.04] dark:shadow-black/30">
+						<div class="relative flex items-end {barGapClass(dailyStats.length, 'gap-1')} h-36 rounded-2xl p-3 pb-1 bg-white/70 dark:bg-gray-900/60 border border-gray-100/90 dark:border-gray-800/70 shadow-sm shadow-gray-900/[0.04] dark:shadow-black/30">
 							<!-- Scale: the tallest bar and half of it, so heights read as numbers. -->
 							<div class="pointer-events-none absolute inset-x-3 top-3 bottom-1 z-[1]" aria-hidden="true">
 								<div class="absolute inset-x-0 top-0 border-t border-dashed border-gray-200 dark:border-gray-700/80">
@@ -809,7 +820,7 @@
 											{#if modelDailyStats.length > 0}
 												<div class="relative">
 													<div
-														class="flex items-end gap-0.5 h-20 bg-white dark:bg-gray-900/60 rounded-xl p-2 border border-gray-100 dark:border-white/[0.04]"
+														class="flex items-end {barGapClass(modelDailyStats.length, 'gap-0.5')} h-20 bg-white dark:bg-gray-900/60 rounded-xl p-2 border border-gray-100 dark:border-white/[0.04]"
 													>
 														{#each modelDailyStats as day, idx}
 															<div

@@ -2,7 +2,7 @@ import asyncio
 import json
 import logging
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -108,6 +108,39 @@ def _format_local_analytics_day(timestamp_seconds: int, tzinfo) -> str:
         .astimezone(tzinfo)
         .strftime("%Y-%m-%d")
     )
+
+
+def _reply_filters(cutoff: int) -> list:
+    """Rows every analytics view counts: model replies in the range. User
+    turns carry no model, so counting them in one view and not another made
+    the daily bars, the per-user totals and the overview disagree."""
+    return [
+        ChatMessage.model.isnot(None),
+        ChatMessage.model != "",
+        ChatMessage.created_at >= cutoff,
+    ]
+
+
+def _fill_missing_days(daily_stats: dict[str, dict], cutoff: int, tzinfo) -> list[dict]:
+    """One bucket per local day from the cutoff to today, zeros included, so
+    the chart's bars are evenly spaced in time instead of skipping idle days."""
+    day = datetime.fromtimestamp(int(cutoff), timezone.utc).astimezone(tzinfo).date()
+    today = datetime.now(timezone.utc).astimezone(tzinfo).date()
+    filled: list[dict] = []
+    while day <= today:
+        date = day.strftime("%Y-%m-%d")
+        filled.append(
+            daily_stats.get(date)
+            or {
+                "date": date,
+                "message_count": 0,
+                "total_prompt_tokens": 0,
+                "total_completion_tokens": 0,
+                "total_tokens": 0,
+            }
+        )
+        day += timedelta(days=1)
+    return filled
 
 
 def _safe_chat_dict(chat_value: object) -> Optional[dict]:
@@ -404,11 +437,7 @@ async def get_model_usage_stats(
                     "total_completion_tokens"
                 ),
             )
-            .filter(
-                ChatMessage.model.isnot(None),
-                ChatMessage.model != "",
-                ChatMessage.created_at >= cutoff,
-            )
+            .filter(*_reply_filters(cutoff))
         )
 
         if group_user_ids is not None:
@@ -469,10 +498,7 @@ async def get_user_activity_stats(
                     "total_completion_tokens"
                 ),
             )
-            .filter(
-                ChatMessage.user_id.isnot(None),
-                ChatMessage.created_at >= cutoff,
-            )
+            .filter(ChatMessage.user_id.isnot(None), *_reply_filters(cutoff))
         )
 
         if group_user_ids is not None:
@@ -522,7 +548,7 @@ async def get_daily_stats(
             ChatMessage.created_at.label("created_at"),
             func.coalesce(ChatMessage.prompt_tokens, 0).label("prompt_tokens"),
             func.coalesce(ChatMessage.completion_tokens, 0).label("completion_tokens"),
-        ).filter(ChatMessage.created_at >= cutoff)
+        ).filter(*_reply_filters(cutoff))
 
         if model:
             query = query.filter(ChatMessage.model == model)
@@ -548,4 +574,4 @@ async def get_daily_stats(
             bucket["total_completion_tokens"] += completion_tokens
             bucket["total_tokens"] += prompt_tokens + completion_tokens
 
-        return list(daily_stats.values())
+        return _fill_missing_days(daily_stats, cutoff, tzinfo)

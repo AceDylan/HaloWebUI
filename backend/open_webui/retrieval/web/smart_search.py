@@ -12,6 +12,7 @@ fetch.
 
 import json
 import os
+import re
 import subprocess
 from urllib.parse import parse_qsl, unquote, urlparse
 
@@ -21,11 +22,20 @@ from open_webui.retrieval.web.main import SearchResult, get_filtered_results
 # Direct provider commands: subcommand, its count option, extra options, and the
 # result field holding the page text (None: the web loader downloads the page).
 _SOURCE_COMMANDS = {
+    "baidu": ("baidu-search", "--count", (), None),
     "zhipu": ("zhipu-search", "--count", (), None),
     "zhipu-mcp": ("zhipu-mcp-search", "--count", (), None),
     "exa": ("exa-search", "--num-results", ("--include-text",), "text"),
     "anysearch": ("anysearch-search", "--max-results", (), None),
+    "langsearch": ("langsearch-search", "--count", (), None),
 }
+# The CLI lists web_search providers in declaration order, domestic indexes
+# first. They answer English queries with Chinese pages (and Baidu spends a
+# daily free quota), while LangSearch answers Chinese queries off-topic; so a
+# query without Chinese characters tries LangSearch first, the CLI's own
+# web-search routing rule.
+_DOMESTIC_WEB_PROVIDERS = ("baidu", "zhipu", "zhipu-mcp")
+_CJK_PATTERN = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]")
 # Result listings of these engines link to sources but are not sources.
 _SEARCH_RESULT_HOSTS = {
     "duckduckgo.com",
@@ -113,7 +123,7 @@ def _capability_status(payload: dict | None) -> dict | None:
 
 
 def _source_commands(
-    capabilities: dict, count: int
+    capabilities: dict, count: int, query: str = ""
 ) -> list[tuple[list[str], str | None, str]]:
     commands = []
     seen = set()
@@ -123,7 +133,12 @@ def _source_commands(
             status.get("configured"), list
         ):
             continue
-        for provider in status["configured"]:
+        providers = status["configured"]
+        if capability == "web_search" and not _CJK_PATTERN.search(query):
+            providers = sorted(
+                providers, key=lambda name: name in _DOMESTIC_WEB_PROVIDERS
+            )
+        for provider in providers:
             if not isinstance(provider, str) or provider in seen:
                 continue
             spec = _SOURCE_COMMANDS.get(provider)
@@ -365,7 +380,7 @@ def search_smart_search(
                 failures.append("doctor: missing capability status")
 
     for options, text_key, provider in _source_commands(
-        capability_status or {}, count
+        capability_status or {}, count, query
     ):
         if topping_up and text_key is None:
             continue

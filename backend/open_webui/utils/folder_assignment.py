@@ -19,6 +19,8 @@ Rules (kept deliberately small and testable):
 * Old chats are never back-filled; an unmarked, unfoldered chat starts being
   evaluated at the next title milestone it reaches and then gets the usual
   budget of three evaluations at consecutive milestones.
+* A milestone that passed without an evaluation (a runner report landed on
+  it) is made up at the next turn that runs the background tasks.
 * The model only ever chooses among the caller's own existing folders; it
   cannot create folders. Sub-folders are not candidates in this first version.
 * The six default folders are created once per user, the first time the
@@ -109,6 +111,27 @@ def is_folder_assignment_milestone(user_message_count: Any) -> bool:
     )
 
 
+def _last_milestone_before(user_message_count: int) -> int:
+    """The latest milestone strictly before this turn (0 when there is none)."""
+    previous = user_message_count - 1
+    if previous >= 3:
+        return previous - previous % 3
+    return 1 if previous >= 1 else 0
+
+
+def missed_folder_assignment_milestone(
+    last_user_message_count: Any, user_message_count: Any
+) -> bool:
+    """A milestone fell between the last evaluation and this turn without being
+    evaluated. Runner reports count as a user turn but skip the background
+    tasks, so a report landing on turn 6 would otherwise push the next
+    evaluation to turn 9."""
+    for value in (last_user_message_count, user_message_count):
+        if isinstance(value, bool) or not isinstance(value, int):
+            return False
+    return _last_milestone_before(user_message_count) > last_user_message_count
+
+
 def get_evaluation_count(meta: Optional[dict]) -> int:
     evaluations = get_folder_assignment_metadata(meta).get("evaluations")
     if isinstance(evaluations, bool) or not isinstance(evaluations, int):
@@ -123,11 +146,15 @@ def can_auto_assign_folder(
     message_id: Optional[str] = None,
 ) -> bool:
     """Return whether the background task may evaluate this chat right now."""
-    if not is_folder_assignment_milestone(user_message_count):
-        return False
-
     assignment = get_folder_assignment_metadata(meta)
     source = assignment.get("source")
+
+    if not is_folder_assignment_milestone(
+        user_message_count
+    ) and not missed_folder_assignment_milestone(
+        assignment.get("last_user_message_count"), user_message_count
+    ):
+        return False
 
     if source == "manual":
         return False

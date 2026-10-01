@@ -244,6 +244,33 @@ def test_auto_marker_allows_correction_until_budget_is_spent():
     assert fa.can_auto_assign_folder("f-1", three, 9, "m9") is False
 
 
+@pytest.mark.parametrize(
+    ("last", "count", "expected"),
+    [
+        (1, 2, False),
+        (1, 4, True),  # turn 3 was a runner report
+        (3, 5, False),
+        (3, 7, True),  # turn 6 was a runner report
+        (6, 8, False),
+        (6, 11, True),
+        (None, 4, False),
+        (True, 4, False),
+    ],
+)
+def test_missed_milestone_is_made_up_at_the_next_turn(last, count, expected):
+    assert fa.missed_folder_assignment_milestone(last, count) is expected
+    meta = {"folder_assignment": {"source": "auto", "evaluations": 1, "last_user_message_count": last}}
+    assert fa.can_auto_assign_folder(None, meta, count, f"m{count}") is expected
+
+
+def test_missed_milestone_does_not_wake_unmarked_or_manual_chats():
+    assert fa.can_auto_assign_folder(None, {}, 4, "m4") is False
+    manual = {"folder_assignment": {"source": "manual", "evaluations": 0, "last_user_message_count": 1}}
+    assert fa.can_auto_assign_folder(None, manual, 4, "m4") is False
+    spent = {"folder_assignment": {"source": "auto", "evaluations": 3, "last_user_message_count": 1}}
+    assert fa.can_auto_assign_folder(None, spent, 4, "m4") is False
+
+
 def test_auto_marker_dedups_same_message_and_stale_turn_counts():
     meta = {
         "folder_assignment": {

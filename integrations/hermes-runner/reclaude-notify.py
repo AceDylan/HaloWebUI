@@ -52,7 +52,7 @@ import time
 import urllib.error
 import urllib.request
 
-SCRIPT_VERSION = "2026-10-01.1"
+SCRIPT_VERSION = "2026-10-01.2"
 CONFIG_FILE = "/root/.hermes/reclaude-runner.env"
 REQUIRED_CONFIG_KEYS = ("HALOWEBUI_NOTIFY_URL", "HALOWEBUI_NOTIFY_TOKEN")
 STATE_DB = "/root/.hermes/state.db"
@@ -85,6 +85,10 @@ DELIVER_TIMEOUT_SECONDS = 180
 # until that reply is in (RUNNER_LAUNCH_REPLY_WAIT seconds at most, 0 = never wait).
 LAUNCH_REPLY_WAIT_SECONDS = 60
 LAUNCH_REPLY_POLL_SECONDS = 2
+# A cron job's own reply reaches the chat only after its turn ends and the worker delivers
+# it; the job's execution stays claimed/running in cron/executions.db until then.
+CRON_SESSION_RE = re.compile(r"^cron_(.+)_\d{8}_\d{6}$")
+CRON_DELIVERY_WAIT_SECONDS = 180
 STATUS_LABELS = {
     "success": ("✅", "已完成"),
     "question": ("❓", "等你决定"),
@@ -631,6 +635,42 @@ def wait_for_launch_reply(session_id, since, db_path=STATE_DB, timeout=None):
         time.sleep(LAUNCH_REPLY_POLL_SECONDS)
 
 
+def wait_for_cron_delivery(job_id, db_path, timeout=None):
+    """Hold a cron-launched run's report until the cron job has delivered its own reply.
+
+    That reply ("已启动") is sent only after the cron turn ends and the worker cleans up,
+    20-40 s after it is written: on 2026-10-01 run 20261001-090605-f4a96bf9 finished in
+    10 s and its report reached Telegram before the job's reply. Waits while an execution
+    of *job_id* is still claimed/running. Returns the seconds waited, or None when it gave
+    up or cannot tell (then the report goes anyway).
+    """
+    if timeout is None:
+        try:
+            timeout = float(os.environ.get("RUNNER_LAUNCH_REPLY_WAIT", CRON_DELIVERY_WAIT_SECONDS))
+        except ValueError:
+            timeout = CRON_DELIVERY_WAIT_SECONDS
+    if timeout <= 0 or not job_id:
+        return None
+    started = time.monotonic()
+    while True:
+        try:
+            db = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=5)
+            try:
+                row = db.execute(
+                    "select 1 from executions where job_id=? and status in ('claimed','running') limit 1",
+                    (job_id,),
+                ).fetchone()
+            finally:
+                db.close()
+        except sqlite3.Error:
+            return None
+        if not row:
+            return round(time.monotonic() - started, 1)
+        if time.monotonic() - started >= timeout:
+            return None
+        time.sleep(LAUNCH_REPLY_POLL_SECONDS)
+
+
 def deliver_to_chat(platform, chat_id, session_id, run_dir, digest, notice):
     """Send *digest* to the chat through runner-deliver.py; record *notice* in its session.
 
@@ -699,7 +739,13 @@ def deliver_direct(args, record, save, platform, chat_id, session_id, agent_sess
             since = os.path.getmtime(os.path.join(args.run_dir, "task.md"))
         except OSError:
             since = time.time()
-        waited = wait_for_launch_reply(session_id, since, db_path=args.state_db)
+        cron = CRON_SESSION_RE.match(session_id or "")
+        if cron:
+            executions_db = os.path.join(os.path.dirname(args.state_db), "cron", "executions.db")
+            waited = wait_for_cron_delivery(cron.group(1), executions_db)
+            record["waited_for"] = "cron delivery"
+        else:
+            waited = wait_for_launch_reply(session_id, since, db_path=args.state_db)
         record["waited_for_launch_reply"] = waited if waited is not None else "gave up"
     attempt = 0
     while True:

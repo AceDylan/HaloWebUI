@@ -47,6 +47,9 @@ cchclaude / anyclaude / Codex 独占运行器；cchclaude、anyclaude 就是 rec
 - **Telegram，且 run 是用 `--detach` 启动的**（runner 环境里有 `RUNNER_DETACHED_LOG`）：用 Hermes 的
   解释器跑 `/root/.hermes/scripts/runner-deliver.py`，经脱敏后直接发到来源聊天，并以 user 角色在该
   聊天当前的会话里记一条 `[后台任务完成通知] …` 消息。`notify.json` 里是 `delivery=telegram-direct`。
+- **Hermes 定时任务（cron）里 `--detach` 启动的**（2026-10-01 起）：cron 回合没有自己的聊天，
+  `runner-detach.py` 把任务的 Telegram 投递目标（`HERMES_CRON_AUTO_DELIVER_*`）记成来源平台和 chat id；
+  `sessions.source` 是 `cron` 而记录的平台是 telegram 时，按上一条直接发到那个聊天。
 - **其他情况**（非 `--detach` 的 Telegram、QQ、CLI）：主动跳过，交给 gateway 的后台进程通知。
 - `RUNNER_DIRECT_DELIVERY=0`：两条新路径都关掉，回到旧行为。
 

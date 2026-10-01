@@ -52,7 +52,7 @@ import time
 import urllib.error
 import urllib.request
 
-SCRIPT_VERSION = "2026-09-30.1"
+SCRIPT_VERSION = "2026-10-01.1"
 CONFIG_FILE = "/root/.hermes/reclaude-runner.env"
 REQUIRED_CONFIG_KEYS = ("HALOWEBUI_NOTIFY_URL", "HALOWEBUI_NOTIFY_TOKEN")
 STATE_DB = "/root/.hermes/state.db"
@@ -384,6 +384,10 @@ def recorded_origin(meta, session_id="", platform="", db_path=STATE_DB):
         or ""
     ).strip()
     source = session_source(session_id, db_path)
+    if source == "cron" and platform in DIRECT_PLATFORMS:
+        # A cron job's turn has no chat; runner-detach.py recorded the job's Telegram
+        # delivery target as the platform, and that chat is where the report goes.
+        return session_id, platform
     return session_id, (platform if source is None else source)
 
 

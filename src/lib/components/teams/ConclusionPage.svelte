@@ -6,7 +6,9 @@
 	import { getTeam, type LiveSnapshot, type Team } from '$lib/apis/teams';
 	import MenuLines from '$lib/components/icons/MenuLines.svelte';
 	import ConclusionView from './ConclusionView.svelte';
-	import { PHASE_LABEL } from './model';
+	import TeamAvatar from './TeamAvatar.svelte';
+	import { elapsed } from './clock';
+	import { avatarKind, PHASE_LABEL, runnerLabel } from './model';
 
 	/** The conclusion as a page of its own: wide reading column, table of contents, print-friendly. */
 	export let teamId: string;
@@ -18,6 +20,11 @@
 	$: phase = live?.team.phase ?? team?.phase ?? 'running';
 	$: done = live?.tasks.filter((t) => t.status === 'done').length ?? 0;
 	$: total = live?.tasks.length ?? team?.task_count ?? 0;
+	$: members = team?.plan?.members ?? [];
+	$: runners = [...new Set((live?.tasks ?? []).map((t) => t.executor).filter(Boolean))];
+	$: took = team?.approved_at && team?.finished_at ? team.finished_at - team.approved_at : null;
+	$: leadModel =
+		live?.team.lead_model?.model ?? team?.plan?.lead_model?.model ?? team?.plan?.lead?.model ?? '';
 
 	onMount(async () => {
 		try {
@@ -81,6 +88,38 @@
 						>
 							{team.goal}
 						</p>
+						<div
+							class="mt-4 flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-gray-500 dark:text-gray-400"
+							data-conclusion-facts
+						>
+							{#if members.length}
+								<span class="flex items-center gap-2">
+									<span class="flex -space-x-1.5" aria-hidden="true">
+										<span class="stack"><TeamAvatar kind="lead" size={22} /></span>
+										{#each members.slice(0, 5) as m}
+											<span class="stack"><TeamAvatar kind={avatarKind(m)} size={22} /></span>
+										{/each}
+									</span>
+									负责人 + {members.length} 位成员
+								</span>
+							{/if}
+							{#if took !== null}
+								<span
+									>用时 <b class="tm-num font-semibold text-gray-800 dark:text-gray-200"
+										>{elapsed(took)}</b
+									></span
+								>
+							{/if}
+							{#if runners.length}
+								<span class="font-mono">{runners.map(runnerLabel).join(' · ')}</span>
+							{/if}
+							{#if leadModel}
+								<span
+									>负责人 <span class="font-mono text-gray-700 dark:text-gray-300">{leadModel}</span
+									></span
+								>
+							{/if}
+						</div>
 					</div>
 				{/if}
 				<ConclusionView
@@ -95,3 +134,10 @@
 		{/if}
 	</div>
 </div>
+
+<style>
+	.stack {
+		border-radius: 9999px;
+		box-shadow: 0 0 0 2px hsl(var(--tm-surface));
+	}
+</style>

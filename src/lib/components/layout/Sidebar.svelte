@@ -69,6 +69,7 @@
 	import ArchiveBox from '../icons/ArchiveBox.svelte';
 	import FolderIcon from '../icons/Folder.svelte';
 	import FolderOpen from '../icons/FolderOpen.svelte';
+	import TeamsBadge from '../teams/TeamsBadge.svelte';
 
 	type SidebarStyle = 'flat' | 'card';
 	type SidebarFolder = {
@@ -997,6 +998,7 @@
 						<path d="M16 3.13a4 4 0 0 1 0 7.75" />
 					</svg>
 					<span class="text-sm font-medium whitespace-nowrap">协作台</span>
+					<TeamsBadge />
 				</a>
 			</div>
 		{/if}
@@ -1049,7 +1051,7 @@
 				{#if $config?.features?.enable_agent_teams}
 					<Tooltip content="协作台">
 						<a
-							class={iconButtonClass}
+							class="{iconButtonClass} relative"
 							href="/teams"
 							aria-label="协作台"
 							on:click={() => {
@@ -1075,6 +1077,7 @@
 								<path d="M22 21v-2a4 4 0 0 0-3-3.87" />
 								<path d="M16 3.13a4 4 0 0 1 0 7.75" />
 							</svg>
+							<TeamsBadge compact />
 						</a>
 					</Tooltip>
 				{/if}

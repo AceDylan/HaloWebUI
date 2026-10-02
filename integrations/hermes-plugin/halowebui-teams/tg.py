@@ -240,6 +240,13 @@ def _dispatch(event: Any) -> Optional[dict]:
     return None
 
 
+def command_fallback(raw_args: str = "") -> str:
+    """``/team`` when the hook did not take it: not a linked Telegram user (or not Telegram)."""
+    if not link.config():
+        return "协作台还没有和 Telegram 接通（缺 ~/.hermes/halo-teams.json）。"
+    return "这个账号没有绑定协作台用户（~/.hermes/halo-teams.json → telegram.owners），请在网页的协作台发起。"
+
+
 def _origin(source: Any) -> dict:
     origin = {"platform": "telegram", "chat_id": str(source.chat_id), "user_id": str(source.user_id or "")}
     if getattr(source, "thread_id", None):

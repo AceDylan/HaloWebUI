@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { TeamEvent } from '$lib/apis/teams';
 import {
+	activityText,
 	avatarKind,
 	countStates,
 	deliveryAt,
@@ -9,6 +10,7 @@ import {
 	EXECUTOR_OPTIONS,
 	foldStates,
 	isRunnerExecutor,
+	latestActivity,
 	layoutTasks,
 	memberStatus,
 	mergeEvents,
@@ -45,7 +47,9 @@ describe('layout', () => {
 	it('puts each dependency depth in its own lane, parallel tasks side by side', () => {
 		const layout = layoutTasks(tasks);
 		const depth = (id: string) => layout.positions.get(id)!.depth;
-		expect([depth('t1'), depth('t2'), depth('t3'), depth('t4'), depth('t6'), depth('t5')]).toEqual([0, 1, 2, 3, 3, 4]);
+		expect([depth('t1'), depth('t2'), depth('t3'), depth('t4'), depth('t6'), depth('t5')]).toEqual([
+			0, 1, 2, 3, 3, 4
+		]);
 		expect(layout.columns).toBe(5);
 		expect(layout.positions.get('t4')!.x).toBe(layout.positions.get('t6')!.x);
 		expect(layout.positions.get('t4')!.y).toBeLessThan(layout.positions.get('t6')!.y);
@@ -78,7 +82,10 @@ describe('fold', () => {
 	const list = [{ id: 't4' }, { id: 't5' }, { id: 't6' }];
 
 	it('gives the state at any point; events without a status change nothing', () => {
-		expect(foldStates(list, events, 0).get('t4')).toEqual({ status: 'pending', sub_status: 'pending' });
+		expect(foldStates(list, events, 0).get('t4')).toEqual({
+			status: 'pending',
+			sub_status: 'pending'
+		});
 		const mid = foldStates(list, events, 6);
 		expect(mid.get('t4')).toEqual({ status: 'running', sub_status: 'running' });
 		expect(mid.get('t5')!.sub_status).toBe('waiting_deps');
@@ -94,10 +101,20 @@ describe('fold', () => {
 	});
 
 	it('derives member and team phase from the same states', () => {
-		expect(memberStatus([{ status: 'done', sub_status: 'done' }, { status: 'running', sub_status: 'running' }])).toBe('running');
+		expect(
+			memberStatus([
+				{ status: 'done', sub_status: 'done' },
+				{ status: 'running', sub_status: 'running' }
+			])
+		).toBe('running');
 		expect(memberStatus([{ status: 'done', sub_status: 'done' }])).toBe('done');
 		expect(memberStatus([{ status: 'todo', sub_status: 'waiting_deps' }])).toBe('waiting_deps');
-		expect(memberStatus([{ status: 'blocked', sub_status: 'failed' }, { status: 'todo', sub_status: 'waiting_deps' }])).toBe('failed');
+		expect(
+			memberStatus([
+				{ status: 'blocked', sub_status: 'failed' },
+				{ status: 'todo', sub_status: 'waiting_deps' }
+			])
+		).toBe('failed');
 		const end = foldStates(list, events);
 		expect(phaseAt(end, events, events.length - 1)).toBe('running');
 		const paused = [...events, ev(10, { type: 'team', data: { action: 'paused' } })];
@@ -119,7 +136,11 @@ describe('events', () => {
 	});
 
 	it('reports a note as queued until the delivery event, also in replay', () => {
-		const note = ev(5, { type: 'message', who: 'user', data: { delivered_seq: 9, delivered_via: 'steer' } });
+		const note = ev(5, {
+			type: 'message',
+			who: 'user',
+			data: { delivered_seq: 9, delivered_via: 'steer' }
+		});
 		expect(deliveryAt(note, 7)!.state).toBe('queued');
 		expect(deliveryAt(note, 9)!.label).toBe('已送达（运行中注入）');
 		expect(deliveryAt(note, null)!.state).toBe('delivered');
@@ -137,6 +158,31 @@ describe('events', () => {
 	});
 });
 
+describe('activity', () => {
+	it('says in one line what each member did last, ignoring your own notes', () => {
+		const list = [
+			ev(1, { member: 'a', type: 'attempt', text: '开始第 1 次执行' }),
+			ev(2, { member: 'b', type: 'tool', text: 'npm  test\n--watch', data: { name: 'terminal' } }),
+			ev(3, {
+				member: 'a',
+				type: 'runner',
+				text: '',
+				data: { runner: 'codex', phase: 'launched' }
+			}),
+			ev(4, { member: 'a', type: 'message', who: 'user', text: '加上错误处理' }),
+			ev(5, { member: 'c', type: 'delivery', text: 'x' })
+		];
+		const map = latestActivity(list, ['a', 'b', 'c']);
+		expect(map.get('a')).toEqual({ text: 'codex 已启动', ts: 1003, type: 'runner' });
+		expect(map.get('b')!.text).toBe('terminal · npm test --watch');
+		expect(map.has('c')).toBe(false);
+		expect(activityText(ev(6, { type: 'handoff', text: '见 api.md' }))).toBe(
+			'完成并交接 · 见 api.md'
+		);
+		expect(activityText(ev(7, { type: 'status', sub_status: 'running' }))).toBe('执行中');
+	});
+});
+
 describe('avatars', () => {
 	it('maps roles to occupational avatars, lead first', () => {
 		expect(avatarKind({ name: 'backend-dev', role: '后端开发' })).toBe('backend');
@@ -149,10 +195,19 @@ describe('avatars', () => {
 
 describe('executors', () => {
 	it('offers Hermes and every runner, and only runners count as runners', () => {
-		expect(EXECUTOR_OPTIONS.map((o) => o.value)).toEqual(['hermes', 'reclaude', 'cchclaude', 'anyclaude', 'codex', 'agy']);
+		expect(EXECUTOR_OPTIONS.map((o) => o.value)).toEqual([
+			'hermes',
+			'reclaude',
+			'cchclaude',
+			'anyclaude',
+			'codex',
+			'agy'
+		]);
 		expect(EXECUTOR_LABEL.hermes).toBe('Hermes 代理');
 		expect(EXECUTOR_LABEL.codex).toBe('codex');
-		expect(['reclaude', 'cchclaude', 'anyclaude', 'codex', 'agy'].every(isRunnerExecutor)).toBe(true);
+		expect(['reclaude', 'cchclaude', 'anyclaude', 'codex', 'agy'].every(isRunnerExecutor)).toBe(
+			true
+		);
 		expect(isRunnerExecutor('hermes')).toBe(false);
 		expect(isRunnerExecutor('gpt')).toBe(false);
 		expect(isRunnerExecutor(undefined)).toBe(false);

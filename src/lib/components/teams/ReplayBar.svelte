@@ -79,57 +79,66 @@
 </script>
 
 <div
-	class="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-2xl border border-gray-100 bg-white/80 px-3 py-2 text-xs dark:border-gray-850 dark:bg-gray-900/80"
+	class="replay tm-card-quiet flex flex-wrap items-center gap-x-3 gap-y-2 px-3 py-2 text-xs"
 	data-replay-bar
+	data-live={live ? 'true' : 'false'}
 >
 	{#if live}
-		<span class="inline-flex items-center gap-1.5 font-semibold text-emerald-700 dark:text-emerald-300">
-			<span class="size-2 rounded-full bg-emerald-500 animate-pulse" aria-hidden="true" />实时
+		<span
+			class="inline-flex items-center gap-1.5 font-semibold tracking-wide text-emerald-700 dark:text-emerald-300"
+		>
+			<span
+				class="tm-pulse-dot size-2 rounded-full bg-emerald-500 text-emerald-500"
+				aria-hidden="true"
+			/>实时
 		</span>
 		<button
 			type="button"
-			class="rounded-full bg-gray-100 px-3 py-1 font-medium text-gray-700 hover:bg-gray-200 disabled:opacity-40 dark:bg-gray-850 dark:text-gray-200"
+			class="tm-btn-ghost"
 			disabled={events.length < 2}
 			on:click={play}
-			aria-label="从头回放协作过程（只回看记录，不影响执行）">▶ 回放</button
+			aria-label="从头回放协作过程（只回看记录，不影响执行）"
+			><svg class="size-3" viewBox="0 0 12 12" aria-hidden="true"
+				><path d="M3 1.8v8.4L10 6 3 1.8Z" fill="currentColor" /></svg
+			>回放</button
 		>
 	{:else}
 		<span class="font-semibold text-sky-700 dark:text-sky-300">回放中</span>
 		{#if playing}
 			<button
 				type="button"
-				class="rounded-full bg-gray-100 px-3 py-1 font-medium hover:bg-gray-200 dark:bg-gray-850 dark:text-gray-200"
+				class="tm-btn-ghost"
 				on:click={pause}
-				aria-label="暂停回放（不影响正在执行的成员）">⏸ 暂停回放</button
+				aria-label="暂停回放（不影响正在执行的成员）"
+				><svg class="size-3" viewBox="0 0 12 12" aria-hidden="true"
+					><path d="M3 2h2v8H3zM7 2h2v8H7z" fill="currentColor" /></svg
+				>暂停回放</button
 			>
 		{:else}
-			<button
-				type="button"
-				class="rounded-full bg-gray-100 px-3 py-1 font-medium hover:bg-gray-200 dark:bg-gray-850 dark:text-gray-200"
-				on:click={play}
-				aria-label="继续回放">▶ 播放</button
+			<button type="button" class="tm-btn-ghost" on:click={play} aria-label="继续回放"
+				><svg class="size-3" viewBox="0 0 12 12" aria-hidden="true"
+					><path d="M3 1.8v8.4L10 6 3 1.8Z" fill="currentColor" /></svg
+				>播放</button
 			>
 		{/if}
-		<div class="flex items-center gap-0.5" role="radiogroup" aria-label="回放速度">
+		<div class="tm-segment !p-[2px]" role="radiogroup" aria-label="回放速度">
 			{#each REPLAY_SPEEDS as option}
 				<button
 					type="button"
 					role="radio"
 					aria-checked={speed === option}
-					class="rounded-md px-1.5 py-0.5 font-mono {speed === option
-						? 'bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900'
-						: 'text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-850'}"
+					class="!px-1.5 !py-0.5 font-mono"
 					on:click={() => setSpeed(option)}>{option}×</button
 				>
 			{/each}
 		</div>
 		<button
 			type="button"
-			class="rounded-full px-3 py-1 font-medium text-emerald-700 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/40 dark:text-emerald-300"
+			class="tm-btn-ghost !text-emerald-700 dark:!text-emerald-300"
 			on:click={goLive}>回到实时</button
 		>
 	{/if}
-	<label class="flex min-w-[160px] flex-1 items-center gap-2">
+	<label class="flex min-w-[160px] flex-1 items-center gap-3">
 		<span class="sr-only">回放时间轴</span>
 		<input
 			type="range"
@@ -138,14 +147,61 @@
 			value={cursor}
 			disabled={events.length < 2}
 			on:input={onSlide}
-			class="flex-1 accent-sky-500"
+			class="scrub flex-1"
+			style="--p:{last ? (cursor / last) * 100 : 100}%"
 			aria-valuetext="{formatClock(at)}，第 {cursor + 1} / {events.length} 条记录"
 		/>
-		<span class="font-mono tabular-nums text-gray-500 dark:text-gray-400 whitespace-nowrap">
-			{formatClock(at)}<span class="hidden sm:inline"> · {formatDuration(at - start)}/{formatDuration(end - start)}</span>
+		<span class="tm-num whitespace-nowrap text-gray-500 dark:text-gray-400">
+			{formatClock(at)}<span class="hidden opacity-70 sm:inline">
+				· {formatDuration(at - start)}/{formatDuration(end - start)}</span
+			>
 		</span>
 	</label>
 	{#if !live && compressed && playing}
 		<span class="text-gray-400">长时间无动静的间隔已压缩</span>
 	{/if}
 </div>
+
+<style>
+	.scrub {
+		-webkit-appearance: none;
+		appearance: none;
+		height: 4px;
+		border-radius: 9999px;
+		background: linear-gradient(
+			90deg,
+			hsl(var(--tm-accent)) 0%,
+			hsl(var(--tm-accent-2)) var(--p),
+			hsl(var(--tm-line-strong)) var(--p)
+		);
+		outline: none;
+	}
+	[data-live='true'] .scrub {
+		background: linear-gradient(90deg, hsl(var(--tm-ok) / 0.55), hsl(var(--tm-ok)));
+	}
+	.scrub::-webkit-slider-thumb {
+		-webkit-appearance: none;
+		width: 14px;
+		height: 14px;
+		border-radius: 9999px;
+		background: hsl(var(--tm-surface));
+		border: 2px solid hsl(var(--tm-accent));
+		box-shadow: 0 0 0 4px hsl(var(--tm-accent) / 0.15);
+		cursor: pointer;
+	}
+	.scrub::-moz-range-thumb {
+		width: 12px;
+		height: 12px;
+		border-radius: 9999px;
+		background: hsl(var(--tm-surface));
+		border: 2px solid hsl(var(--tm-accent));
+		cursor: pointer;
+	}
+	[data-live='true'] .scrub::-webkit-slider-thumb {
+		border-color: hsl(var(--tm-ok));
+		box-shadow: 0 0 0 4px hsl(var(--tm-ok) / 0.15);
+	}
+	.scrub:disabled {
+		opacity: 0.5;
+	}
+</style>

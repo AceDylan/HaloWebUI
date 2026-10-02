@@ -64,45 +64,52 @@
 
 {#if plan}
 	<div class="flex flex-col gap-6" data-plan-review>
-		<section class="flex flex-col gap-2">
-			{#if plan.summary}
-				<p
-					class="max-w-3xl text-[15px] leading-relaxed text-gray-800 dark:text-gray-200 whitespace-pre-wrap"
-				>
-					{plan.summary}
-				</p>
-			{/if}
-			{#if lead?.model}
-				<p class="text-xs text-gray-500" data-lead-model>
-					负责人用 <span class="font-mono text-gray-700 dark:text-gray-300">{lead.model}</span
-					>{lead.label ? `（${lead.label}）` : ''}做的计划{#if lead.fallback_from?.length}，<span
-							class="text-amber-700 dark:text-amber-300"
-							>{lead.fallback_from.join('、')} 没有回答，改用了 {lead.model}</span
-						>{/if}
-				</p>
-			{/if}
+		<section class="flex items-start gap-3.5">
+			<TeamAvatar kind="lead" status="done" size={40} />
+			<div class="flex min-w-0 flex-col gap-1.5">
+				<div class="flex items-center gap-2">
+					<span class="tm-display text-base font-semibold text-gray-900 dark:text-gray-50"
+						>负责人的计划</span
+					>
+					<StatusChip status="waiting_user" label="等你批准" />
+				</div>
+				{#if plan.summary}
+					<p
+						class="max-w-3xl whitespace-pre-wrap text-[15px] leading-relaxed text-gray-700 dark:text-gray-200"
+					>
+						{plan.summary}
+					</p>
+				{/if}
+				{#if lead?.model}
+					<p class="text-xs text-gray-500" data-lead-model>
+						负责人用 <span class="font-mono text-gray-700 dark:text-gray-300">{lead.model}</span
+						>{lead.label ? `（${lead.label}）` : ''}做的计划{#if lead.fallback_from?.length}，<span
+								class="text-amber-700 dark:text-amber-300"
+								>{lead.fallback_from.join('、')} 没有回答，改用了 {lead.model}</span
+							>{/if}
+					</p>
+				{/if}
+			</div>
 		</section>
 
-		<dl
-			class="grid grid-cols-2 gap-px overflow-hidden rounded-2xl border border-gray-100 bg-gray-100 text-xs sm:grid-cols-4 dark:border-gray-850 dark:bg-gray-850"
-		>
-			<div class="bg-white px-4 py-3 dark:bg-gray-900">
+		<dl class="stats tm-card grid grid-cols-2 overflow-hidden text-xs sm:grid-cols-4">
+			<div class="stat px-4 py-3.5">
 				<dt class="text-gray-500">成员</dt>
-				<dd class="mt-0.5 text-lg font-semibold tabular-nums text-gray-900 dark:text-gray-100">
+				<dd class="tm-num mt-1 text-xl font-semibold text-gray-900 dark:text-gray-50">
 					1 + {memberCount}
 				</dd>
 				<dd class="text-gray-400">负责人 + 成员</dd>
 			</div>
-			<div class="bg-white px-4 py-3 dark:bg-gray-900">
+			<div class="stat px-4 py-3.5">
 				<dt class="text-gray-500">任务</dt>
-				<dd class="mt-0.5 text-lg font-semibold tabular-nums text-gray-900 dark:text-gray-100">
+				<dd class="tm-num mt-1 text-xl font-semibold text-gray-900 dark:text-gray-50">
 					{plan.tasks.length}
 				</dd>
 				<dd class="text-gray-400">{layers.length} 步</dd>
 			</div>
-			<div class="bg-white px-4 py-3 dark:bg-gray-900">
+			<div class="stat px-4 py-3.5">
 				<dt class="text-gray-500">同时执行</dt>
-				<dd class="mt-0.5 text-lg font-semibold tabular-nums text-gray-900 dark:text-gray-100">
+				<dd class="tm-num mt-1 text-xl font-semibold text-gray-900 dark:text-gray-50">
 					最多 {parallel}
 				</dd>
 				<dd class="text-gray-400">
@@ -111,7 +118,7 @@
 						: `本机上限 ${parallelCap}`}
 				</dd>
 			</div>
-			<div class="bg-white px-4 py-3 dark:bg-gray-900">
+			<div class="stat px-4 py-3.5">
 				<dt class="text-gray-500">执行来源</dt>
 				<dd
 					class="mt-0.5 truncate font-mono text-[15px] font-semibold text-gray-900 dark:text-gray-100"
@@ -130,11 +137,9 @@
 		</dl>
 
 		<section>
-			<h3 class="mb-3 text-sm font-semibold text-gray-900 dark:text-gray-100">成员分工</h3>
+			<h3 class="tm-eyebrow mb-3">成员分工</h3>
 			<ul class="grid gap-3 md:grid-cols-2">
-				<li
-					class="flex items-center gap-3 self-start rounded-2xl border border-indigo-100 bg-indigo-50/40 px-3 py-2.5 md:col-span-2 dark:border-indigo-900/50 dark:bg-indigo-950/20"
-				>
+				<li class="lead tm-card flex items-center gap-3 self-start px-3.5 py-3 md:col-span-2">
 					<TeamAvatar kind="lead" size={38} />
 					<div class="min-w-0">
 						<div class="text-sm font-semibold">
@@ -150,7 +155,7 @@
 				{#each plan.members as member (member.name)}
 					{@const d = memberRunner(member)}
 					<li
-						class="flex min-w-0 flex-col gap-3 rounded-2xl border border-gray-100 p-3 dark:border-gray-850"
+						class="tm-card tm-hover flex min-w-0 flex-col gap-3 p-3.5"
 						data-plan-member={member.name}
 					>
 						<div class="flex items-start gap-3">
@@ -168,7 +173,7 @@
 								<div class="mt-1 flex flex-wrap gap-1.5 text-[11px]">
 									{#if member.assistant}
 										<span
-											class="inline-flex max-w-full items-center gap-1 rounded-md bg-orange-50 px-1.5 py-0.5 text-orange-800 dark:bg-orange-950/40 dark:text-orange-200"
+											class="inline-flex max-w-full items-center gap-1 rounded-md bg-orange-500/10 px-1.5 py-0.5 text-orange-800 ring-1 ring-inset ring-orange-500/20 dark:text-orange-200"
 											title={member.assistant.description
 												? `助手模板：${member.assistant.description}`
 												: '助手模板'}
@@ -179,13 +184,13 @@
 										>
 									{:else}
 										<span
-											class="rounded-md bg-gray-100 px-1.5 py-0.5 text-gray-500 dark:bg-gray-850"
+											class="rounded-md bg-gray-500/10 px-1.5 py-0.5 text-gray-500"
 											title="没有合适的助手模板，负责人自定义了这个角色">自定义角色</span
 										>
 									{/if}
 									{#if member.kind}
 										<span
-											class="rounded-md bg-gray-100 px-1.5 py-0.5 text-gray-600 dark:bg-gray-850 dark:text-gray-300"
+											class="rounded-md bg-gray-500/10 px-1.5 py-0.5 text-gray-600 dark:text-gray-300"
 											>{kindLabel(member.kind)}</span
 										>
 									{/if}
@@ -201,7 +206,7 @@
 								{/if}
 							</div>
 						</div>
-						<div class="mt-auto rounded-xl bg-gray-50 px-3 py-2.5 dark:bg-gray-850/60">
+						<div class="runner-box mt-auto rounded-xl px-3 py-2.5">
 							<div class="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1.5">
 								<label class="shrink-0 text-xs text-gray-500" for="runner-{member.name}"
 									>执行来源</label
@@ -279,13 +284,13 @@
 		/>
 
 		<section>
-			<h3 class="mb-3 text-sm font-semibold text-gray-900 dark:text-gray-100">任务和依赖</h3>
-			<ol class="flex flex-col gap-4">
+			<h3 class="tm-eyebrow mb-3">任务和依赖</h3>
+			<ol class="steps flex flex-col gap-5">
 				{#each layers as layer, depth}
-					<li>
-						<div class="mb-1.5 flex items-center gap-2 text-xs text-gray-500">
+					<li class="step relative pl-9">
+						<div class="mb-2 flex items-center gap-2 text-xs text-gray-500">
 							<span
-								class="grid size-5 place-items-center rounded-full bg-gray-100 font-mono text-[10px] font-semibold text-gray-600 dark:bg-gray-850 dark:text-gray-300"
+								class="step-node tm-num absolute left-0 top-0 grid size-6 place-items-center rounded-full text-[11px] font-semibold"
 								>{depth + 1}</span
 							>
 							第 {depth + 1} 步{layer.length > 1 ? ` · ${layer.length} 个任务可并行` : ''}
@@ -294,9 +299,7 @@
 							{#each layer as key}
 								{@const task = byKey.get(key)}
 								{#if task}
-									<li
-										class="min-w-0 rounded-2xl border border-gray-100 px-3 py-2.5 dark:border-gray-850"
-									>
+									<li class="tm-card min-w-0 px-3.5 py-3">
 										<div class="flex min-w-0 items-center gap-2 text-xs">
 											<span class="font-mono font-semibold text-gray-500">#{task.key}</span>
 											<span class="min-w-0 truncate text-gray-500">{task.member}</span>
@@ -335,29 +338,40 @@
 		</section>
 
 		{#if editable}
-			<div
-				class="sticky -bottom-6 -mx-1 flex flex-col gap-2 border-t border-gray-100 bg-white/95 px-1 pb-7 pt-3 backdrop-blur dark:border-gray-850 dark:bg-gray-900/95"
-			>
+			<div class="dock tm-glass sticky bottom-3 z-10 flex flex-col gap-2 rounded-2xl px-4 py-3">
 				<p class="text-xs text-gray-500">
 					批准后成员才开始工作（普通聊天不会自动启动多代理）。每个成员会消耗模型额度；可以随时暂停派发或停止。
 				</p>
 				<div class="flex flex-wrap items-center gap-2">
 					<button
 						type="button"
-						class="rounded-xl bg-gray-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-gray-800 active:scale-[0.98] disabled:opacity-50 dark:bg-gray-100 dark:text-gray-900 dark:hover:bg-white"
+						class="tm-btn-primary"
 						disabled={busy}
-						on:click={() => dispatch('approve')}>{busy ? '处理中…' : '批准并开始'}</button
+						on:click={() => dispatch('approve')}
+						>{busy ? '处理中…' : '批准并开始'}<svg
+							class="size-3.5"
+							viewBox="0 0 16 16"
+							fill="none"
+							aria-hidden="true"
+							><path
+								d="M3 8h9.5M8.5 4l4 4-4 4"
+								stroke="currentColor"
+								stroke-width="1.7"
+								stroke-linecap="round"
+								stroke-linejoin="round"
+							/></svg
+						></button
 					>
 					<button
 						type="button"
-						class="rounded-xl bg-gray-100 px-4 py-2 text-sm text-gray-700 transition hover:bg-gray-200 active:scale-[0.98] disabled:opacity-50 dark:bg-gray-850 dark:text-gray-200 dark:hover:bg-gray-800"
+						class="tm-btn-ghost !px-3.5 !py-2 !text-sm"
 						disabled={busy}
 						aria-expanded={showFeedback}
 						on:click={() => (showFeedback = !showFeedback)}>按意见重新规划</button
 					>
 					<button
 						type="button"
-						class="rounded-xl px-4 py-2 text-sm text-gray-500 transition hover:text-red-600 disabled:opacity-50"
+						class="rounded-xl px-3 py-2 text-sm text-gray-500 transition hover:text-red-600 disabled:opacity-50"
 						disabled={busy}
 						on:click={() => dispatch('cancel')}>取消</button
 					>
@@ -378,10 +392,8 @@
 							class="w-full rounded-xl border border-gray-200 bg-white px-2.5 py-2 text-sm outline-none transition focus:border-sky-400 dark:border-gray-800 dark:bg-gray-900"
 							placeholder="例如：再加一个测试成员；前端交给 codex；把评审放到最后"
 						/>
-						<button
-							type="submit"
-							class="self-start rounded-xl bg-sky-600 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-sky-700 disabled:opacity-50"
-							disabled={busy}>让负责人重新规划</button
+						<button type="submit" class="tm-btn-primary self-start !py-1.5 !text-xs" disabled={busy}
+							>让负责人重新规划</button
 						>
 					</form>
 				{/if}
@@ -391,6 +403,42 @@
 {/if}
 
 <style>
+	.stats .stat + .stat {
+		border-left: 1px solid hsl(var(--tm-line));
+	}
+	@media (max-width: 639px) {
+		.stats .stat:nth-child(3) {
+			border-left: 0;
+		}
+		.stats .stat:nth-child(n + 3) {
+			border-top: 1px solid hsl(var(--tm-line));
+		}
+	}
+	.lead {
+		background: radial-gradient(120% 160% at 0% 0%, hsl(250 90% 65% / 0.1), transparent 55%),
+			hsl(var(--tm-surface));
+	}
+	.runner-box {
+		background: hsl(var(--tm-surface-2));
+		border: 1px solid hsl(var(--tm-line));
+	}
+	.steps .step:not(:last-child)::before {
+		content: '';
+		position: absolute;
+		left: 11.5px;
+		top: 28px;
+		bottom: -16px;
+		width: 1px;
+		background: linear-gradient(hsl(var(--tm-line-strong)), hsl(var(--tm-line)));
+	}
+	.step-node {
+		color: hsl(var(--tm-accent));
+		background: hsl(var(--tm-accent) / 0.08);
+		box-shadow: inset 0 0 0 1px hsl(var(--tm-accent) / 0.25);
+	}
+	.dock {
+		box-shadow: var(--tm-shadow-lift);
+	}
 	/* The app's global `select` rule (unlayered) outranks Tailwind's utilities: size these here. */
 	.compact-select {
 		font-size: 0.75rem;

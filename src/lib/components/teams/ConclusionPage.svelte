@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 
+	import './teams.css';
 	import { mobile, showSidebar } from '$lib/stores';
 	import { getTeam, type LiveSnapshot, type Team } from '$lib/apis/teams';
 	import MenuLines from '$lib/components/icons/MenuLines.svelte';
@@ -29,7 +30,11 @@
 	});
 </script>
 
-<div class="relative flex h-screen max-h-[100dvh] w-full max-w-full flex-col" data-conclusion-page>
+<div
+	class="tm-ambient relative flex h-screen max-h-[100dvh] w-full max-w-full flex-col"
+	data-conclusion-page
+	data-teams-ui
+>
 	<nav class="flex min-w-0 items-center gap-2 px-3 pt-2 pb-1">
 		<div class="{$mobile ? '' : 'hidden'} flex flex-none items-center">
 			<button
@@ -51,7 +56,7 @@
 		<span class="text-gray-300 dark:text-gray-700">/</span>
 		<h1 class="shrink-0 text-sm font-semibold text-gray-900 dark:text-gray-100">结论</h1>
 	</nav>
-	<div class="flex-1 overflow-y-auto px-4 pb-16 sm:px-6">
+	<div class="tm-scroll flex-1 overflow-y-auto px-4 pb-16 sm:px-6">
 		{#if error}
 			<div class="mx-auto mt-16 max-w-md text-center text-sm text-gray-500">
 				{error}
@@ -67,7 +72,7 @@
 								: ''}
 						</div>
 						<div
-							class="mt-1.5 text-[1.65rem] font-semibold leading-tight tracking-tight text-gray-900 sm:text-[2rem] dark:text-gray-50"
+							class="tm-display mt-1.5 text-[1.65rem] font-semibold leading-tight tracking-tight text-gray-900 sm:text-[2rem] dark:text-gray-50"
 						>
 							{team.title}
 						</div>

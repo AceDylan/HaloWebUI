@@ -40,11 +40,7 @@
 				: 'bg-red-500';
 </script>
 
-<section
-	class="rounded-2xl border border-gray-100 dark:border-gray-850"
-	aria-label="执行来源可用性"
-	data-runner-status
->
+<section class="tm-card" aria-label="执行来源可用性" data-runner-status>
 	<header class="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 pt-3">
 		<h3 class="text-sm font-semibold text-gray-900 dark:text-gray-100">执行来源</h3>
 		<span class="text-xs text-gray-500 dark:text-gray-400">
@@ -55,7 +51,7 @@
 		</span>
 		<button
 			type="button"
-			class="ml-auto inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs text-gray-600 transition hover:bg-gray-100 active:scale-[0.98] disabled:opacity-50 dark:text-gray-300 dark:hover:bg-gray-850"
+			class="tm-btn-ghost ml-auto"
 			disabled={checking}
 			on:click={() => dispatch('check')}
 		>
@@ -78,24 +74,29 @@
 	{#if error}
 		<p class="px-4 pt-1 text-xs text-red-600 dark:text-red-400" role="alert">{error}</p>
 	{/if}
-	<ol class="flex flex-wrap gap-1.5 px-4 pb-3 pt-2.5" aria-label="兜底顺序">
+	<ol class="flex flex-wrap items-center gap-y-2 px-4 pb-3.5 pt-3" aria-label="兜底顺序">
 		{#each order.length ? order : runners.map((r) => r.name) as name, index}
 			{@const r = runners.find((x) => x.name === name)}
 			{#if r}
-				<li class="flex items-center gap-1.5">
+				<li class="flex items-center">
 					<button
 						type="button"
-						class="group inline-flex max-w-[16rem] items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-400
-						{open === r.name
-							? 'border-gray-300 bg-gray-50 dark:border-gray-700 dark:bg-gray-850'
-							: 'border-gray-100 hover:border-gray-200 dark:border-gray-850 dark:hover:border-gray-700'}"
+						class="chip group inline-flex max-w-[16rem] items-center gap-1.5 rounded-xl px-2.5 py-1.5 text-xs transition focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 {open ===
+						r.name
+							? 'is-open'
+							: ''} {r.available ? '' : 'is-down'}"
 						aria-expanded={open === r.name}
 						title={r.available ? `${runnerLabel(r.name)}：${r.reason}` : r.reason}
 						on:click={() => (open = open === r.name ? null : r.name)}
 						data-runner-chip={r.name}
 						data-available={r.available ? 'true' : 'false'}
 					>
-						<span class="size-1.5 shrink-0 rounded-full {dot(r)}" aria-hidden="true" />
+						<span
+							class="size-1.5 shrink-0 rounded-full {dot(r)} {r.available
+								? 'tm-pulse-dot text-emerald-500'
+								: ''}"
+							aria-hidden="true"
+						/>
 						<span class="font-mono font-medium text-gray-800 dark:text-gray-100"
 							>{runnerLabel(r.name)}</span
 						>
@@ -103,7 +104,7 @@
 						<span class="sr-only">{r.available ? '可用' : `不可用：${r.reason}`}</span>
 					</button>
 					{#if index < (order.length || runners.length) - 1}
-						<span class="text-[10px] text-gray-300 dark:text-gray-700" aria-hidden="true">›</span>
+						<span class="link mx-1 h-px w-3 sm:w-4" aria-hidden="true" />
 					{/if}
 				</li>
 			{/if}
@@ -112,10 +113,7 @@
 	{#if open}
 		{@const r = runners.find((x) => x.name === open)}
 		{#if r}
-			<div
-				class="border-t border-gray-100 px-4 py-3 text-xs dark:border-gray-850"
-				transition:slide={{ duration: 160 }}
-			>
+			<div class="border-t px-4 py-3 text-xs tm-hairline" transition:slide={{ duration: 160 }}>
 				<div class="flex flex-wrap items-baseline gap-x-2">
 					<span class="font-semibold text-gray-900 dark:text-gray-100">{runnerLabel(r.name)}</span>
 					<span class="text-gray-500">{r.note}</span>
@@ -153,3 +151,23 @@
 		{/if}
 	{/if}
 </section>
+
+<style>
+	.chip {
+		border: 1px solid hsl(var(--tm-line));
+		background: hsl(var(--tm-surface-2));
+	}
+	.chip:hover {
+		border-color: hsl(var(--tm-line-strong));
+	}
+	.chip.is-open {
+		border-color: hsl(var(--tm-accent) / 0.45);
+		background: hsl(var(--tm-accent) / 0.06);
+	}
+	.chip.is-down {
+		border-style: dashed;
+	}
+	.link {
+		background: linear-gradient(90deg, hsl(var(--tm-line-strong)), hsl(var(--tm-line)));
+	}
+</style>

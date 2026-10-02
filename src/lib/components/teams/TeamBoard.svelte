@@ -5,6 +5,7 @@
 	import '@xyflow/svelte/dist/style.css';
 
 	import { theme } from '$lib/stores';
+	import FlowEdge from './FlowEdge.svelte';
 	import TaskNode from './TaskNode.svelte';
 	import {
 		avatarKind,
@@ -30,20 +31,26 @@
 		trail?: { from: string; to: string | null; reason: string }[];
 		parents: string[];
 		attempts?: number;
+		started_at?: number | null;
+		completed_at?: number | null;
 	}[] = [];
 	export let states: Map<string, TaskState> = new Map();
 	export let members: { name: string; role: string }[] = [];
 	export let selectedTaskId: string | null = null;
+	/** In a replay the timers would lie: hide them. */
+	export let replay = false;
 
 	const dispatch = createEventDispatcher();
 	const nodes = writable([]);
 	const edges = writable([]);
 	const nodeTypes = { task: TaskNode };
+	const edgeTypes = { flow: FlowEdge };
 
 	$: layout = layoutTasks(tasks);
-	$: height = Math.min(560, Math.max(260, layout.height + 40));
+	$: height = Math.min(580, Math.max(280, layout.height + 48));
 	$: byKey = new Map(tasks.map((t) => [t.id, t.key]));
 	$: roles = new Map(members.map((m) => [m.name, m]));
+	$: dark = colorMode === 'dark';
 
 	$: {
 		nodes.set(
@@ -72,6 +79,8 @@
 						sub_status: state.sub_status,
 						statusText: statusLabel(state.sub_status),
 						waitingFor: waiting,
+						startedAt: replay ? null : (t.started_at ?? null),
+						completedAt: replay || state.status !== 'done' ? null : (t.completed_at ?? null),
 						avatar: avatarKind(roles.get(t.member) ?? { name: t.member }),
 						selected: t.id === selectedTaskId,
 						onSelect: (id: string) => dispatch('select', id)
@@ -85,15 +94,20 @@
 					const parent = states.get(p)?.sub_status ?? 'pending';
 					const done = parent === 'done';
 					const running = toneOf(parent) === 'run';
-					const color = done ? TONE_STROKE.done : running ? TONE_STROKE.run : TONE_STROKE.idle;
+					const color = done
+						? TONE_STROKE.done
+						: running
+							? TONE_STROKE.run
+							: dark
+								? '#475569'
+								: TONE_STROKE.idle;
 					return {
 						id: `${p}->${t.id}`,
 						source: p,
 						target: t.id,
-						type: 'smoothstep',
-						animated: running,
-						style: `stroke:${color};stroke-width:2;${done ? '' : 'stroke-dasharray:6 5;'}`,
-						markerEnd: { type: MarkerType.ArrowClosed, color, width: 16, height: 16 }
+						type: 'flow',
+						data: { state: done ? 'done' : running ? 'run' : 'wait', color },
+						markerEnd: { type: MarkerType.ArrowClosed, color, width: 14, height: 14 }
 					};
 				})
 			)
@@ -110,7 +124,7 @@
 </script>
 
 <div
-	class="w-full rounded-2xl border border-gray-100 dark:border-gray-850 overflow-hidden"
+	class="board tm-card relative w-full overflow-hidden"
 	style="height:{height}px"
 	data-team-board
 >
@@ -118,8 +132,9 @@
 		{nodes}
 		{edges}
 		{nodeTypes}
+		{edgeTypes}
 		fitView
-		fitViewOptions={{ padding: 0.12, maxZoom: 1 }}
+		fitViewOptions={{ padding: 0.14, maxZoom: 1 }}
 		minZoom={0.3}
 		maxZoom={1.5}
 		nodesDraggable={false}
@@ -130,6 +145,73 @@
 		on:paneclick={() => dispatch('select', null)}
 	>
 		<Controls showLock={false} />
-		<Background variant={BackgroundVariant.Dots} />
+		<Background
+			variant={BackgroundVariant.Dots}
+			gap={20}
+			size={1.2}
+			bgColor="transparent"
+			patternColor={dark ? 'rgba(148,163,184,0.16)' : 'rgba(15,23,42,0.13)'}
+		/>
 	</SvelteFlow>
+	<div class="vignette pointer-events-none absolute inset-0" aria-hidden="true" />
 </div>
+
+<style>
+	.board {
+		background: radial-gradient(80% 60% at 50% 0%, hsl(var(--tm-accent) / 0.05), transparent 70%),
+			hsl(var(--tm-surface-2));
+	}
+	.vignette {
+		border-radius: inherit;
+		box-shadow: inset 0 0 60px -20px hsl(var(--tm-surface-2));
+	}
+	.board :global(.svelte-flow) {
+		background: transparent;
+	}
+	.board :global(.svelte-flow__controls) {
+		border-radius: 0.8rem;
+		overflow: hidden;
+		border: 1px solid hsl(var(--tm-line));
+		box-shadow: var(--tm-shadow);
+		background: hsl(var(--tm-surface) / 0.8);
+		backdrop-filter: blur(10px);
+	}
+	.board :global(.svelte-flow__controls-button) {
+		background: transparent;
+		border-bottom: 1px solid hsl(var(--tm-line));
+		color: hsl(var(--tm-muted));
+		width: 28px;
+		height: 28px;
+	}
+	.board :global(.svelte-flow__controls-button:hover) {
+		background: hsl(var(--tm-line));
+		color: hsl(var(--tm-ink));
+	}
+	.board :global(.svelte-flow__controls-button svg) {
+		fill: currentColor;
+	}
+	.board :global(.tm-edge-run) {
+		stroke-dasharray: 6 6;
+		animation: tm-edge-flow 0.9s linear infinite;
+	}
+	.board :global(.tm-edge-wait) {
+		stroke-dasharray: 4 6;
+		opacity: 0.8;
+	}
+	.board :global(.tm-edge-done) {
+		opacity: 0.75;
+	}
+	@keyframes -global-tm-edge-flow {
+		to {
+			stroke-dashoffset: -24;
+		}
+	}
+	@media (prefers-reduced-motion: reduce) {
+		.board :global(.tm-edge-run) {
+			animation: none;
+		}
+		.board :global(.tm-edge-pulse) {
+			display: none;
+		}
+	}
+</style>

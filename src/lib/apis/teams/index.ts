@@ -97,6 +97,12 @@ export type Team = {
 	executors: TeamExecutor[];
 	/** The model this team asked the lead to use (null = Hermes' default). */
 	lead_model?: string | null;
+	/** Tasks done / running / needing you / total, as last read from Hermes (running teams). */
+	progress?: { done: number; running: number; attention: number; total: number } | null;
+	/** Nothing runs in it (never approved, cancelled, failed or finished): it can be removed. */
+	deletable?: boolean;
+	/** Who is on the team (list view: names and roles only). */
+	roster?: { name: string; role: string }[];
 };
 
 export type SubStatus =
@@ -420,6 +426,10 @@ export const approveTeam = (token: string, teamId: string) =>
 
 export const cancelTeam = (token: string, teamId: string) =>
 	request<Team>(token, 'POST', `/${id(teamId)}/cancel`);
+
+/** Remove a team nothing runs in from your list (its workspace files stay on Hermes). */
+export const deleteTeam = (token: string, teamId: string) =>
+	request<{ ok: boolean; id: string }>(token, 'DELETE', `/${id(teamId)}`);
 
 export const getTeamEvents = (token: string, teamId: string, after: number, limit = 1000) =>
 	request<TeamEventsPage>(token, 'GET', `/${id(teamId)}/events?after=${after}&limit=${limit}`);

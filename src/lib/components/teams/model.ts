@@ -278,6 +278,61 @@ export const feedCategory = (ev: TeamEvent): FeedCategory => {
 	return 'system';
 };
 
+/** What a member is doing, in one line, from its latest event (null = nothing to show). */
+export const activityText = (ev: TeamEvent): string | null => {
+	const text = (ev.text ?? '').replace(/\s+/g, ' ').trim();
+	switch (ev.type) {
+		case 'tool': {
+			const name = ev.data?.name ? String(ev.data.name) : '工具';
+			return text ? `${name} · ${text}` : name;
+		}
+		case 'subagent':
+			return ev.data?.phase === 'start' ? '派出子代理' : '子代理结束';
+		case 'runner': {
+			const runner = ev.data?.runner ? String(ev.data.runner) : 'runner';
+			const phase = RUNNER_EVENT_LABEL[ev.data?.phase as string] ?? ev.data?.phase ?? '';
+			return `${runner} ${phase}${text ? ` · ${text}` : ''}`.trim();
+		}
+		case 'handoff':
+			return text ? `完成并交接 · ${text}` : '完成并交接';
+		case 'message':
+			if (ev.who === 'user') return null;
+			return text || null;
+		case 'status':
+		case 'attempt':
+			return text || (ev.sub_status ? statusLabel(ev.sub_status) : null);
+		default:
+			return null;
+	}
+};
+
+export const RUNNER_EVENT_LABEL: Record<string, string> = {
+	launched: '已启动',
+	continued: '续跑',
+	answered: '已回答',
+	quota_wait: '额度等待',
+	question: '等你回答',
+	failed: '失败',
+	stopped: '已停止',
+	fallback: '改派'
+};
+
+/** Each member's latest activity among the events (newest first scan, stops when all found). */
+export const latestActivity = (
+	events: TeamEvent[],
+	members: string[]
+): Map<string, { text: string; ts: number; type: string }> => {
+	const out = new Map<string, { text: string; ts: number; type: string }>();
+	const wanted = new Set(members);
+	for (let i = events.length - 1; i >= 0 && out.size < wanted.size; i--) {
+		const ev = events[i];
+		if (!ev.member || !wanted.has(ev.member) || out.has(ev.member)) continue;
+		const text = activityText(ev);
+		if (text) out.set(ev.member, { text, ts: ev.ts, type: ev.type });
+	}
+	return out;
+};
+
 export type Delivery = {
 	state: 'queued' | 'delivered' | 'undelivered';
 	via?: string;

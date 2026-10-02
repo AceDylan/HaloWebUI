@@ -3,7 +3,7 @@
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
 
-	import { WEBUI_NAME, config } from '$lib/stores';
+	import { config } from '$lib/stores';
 	import TeamWorkbench from '$lib/components/teams/TeamWorkbench.svelte';
 
 	onMount(() => {
@@ -11,8 +11,7 @@
 	});
 </script>
 
-<svelte:head><title>协作台 | {$WEBUI_NAME}</title></svelte:head>
-
+<!-- the workbench sets the title: the team's name and progress -->
 {#key $page.params.id}
 	<TeamWorkbench teamId={$page.params.id} />
 {/key}

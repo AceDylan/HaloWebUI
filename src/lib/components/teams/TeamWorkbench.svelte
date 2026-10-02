@@ -3,7 +3,8 @@
 	import { goto } from '$app/navigation';
 	import { toast } from 'svelte-sonner';
 
-	import { mobile, showSidebar } from '$lib/stores';
+	import './teams.css';
+	import { mobile, showSidebar, WEBUI_NAME } from '$lib/stores';
 	import {
 		approveTeam,
 		cancelTeam,
@@ -32,9 +33,12 @@
 	import StatusChip from './StatusChip.svelte';
 	import TeamBoard from './TeamBoard.svelte';
 	import TeamProgress from './TeamProgress.svelte';
+	import TeamAvatar from './TeamAvatar.svelte';
+	import { elapsed, now } from './clock';
 	import {
 		countStates,
 		foldStates,
+		latestActivity,
 		layoutTasks,
 		leadStatus,
 		liveStates,
@@ -44,7 +48,8 @@
 		PHASE_LABEL,
 		phaseAt,
 		statusLabel,
-		taskRunner
+		taskRunner,
+		toneOf
 	} from './model';
 
 	export let teamId: string;
@@ -80,6 +85,7 @@
 	let registryError = '';
 	let checking = false;
 	let metaRequested = false;
+	let goalOpen = false;
 
 	// --- derived view: live = authoritative snapshot, replay = fold of events up to the cursor ---
 	$: tasks = live?.tasks ?? [];
@@ -100,6 +106,10 @@
 			task_ids: [],
 			current_task: null
 		}));
+	$: activity = latestActivity(
+		shownEvents,
+		planMembers.map((m) => m.name)
+	);
 	$: memberViews = planMembers.map((m) => {
 		const mine = tasks.filter((t) => t.member === m.name);
 		const mineStates = mine.map(
@@ -111,7 +121,7 @@
 			)
 		);
 		const waiting = mine.find((t) => states.get(t.id)?.sub_status === 'waiting_deps');
-		const now =
+		const current =
 			running ??
 			mine.find((t) => !['done', 'archived'].includes(states.get(t.id)?.status ?? t.status)) ??
 			mine[mine.length - 1];
@@ -123,7 +133,8 @@
 			waitingFor: waiting ? openParents(waiting, states).map((p) => `#${keyOf.get(p) ?? p}`) : [],
 			// The member's chosen runner and the one on its current (or next / last) task.
 			chosenRunner: m.executor,
-			actualRunner: now?.executor ?? m.runner ?? m.executor
+			actualRunner: current?.executor ?? m.runner ?? m.executor,
+			activity: activity.get(m.name) ?? null
 		};
 	});
 	$: lead = {
@@ -135,7 +146,8 @@
 				: team?.status === 'planning'
 					? 'running'
 					: 'idle',
-		note: PHASE_LABEL[phase] ?? ''
+		note: PHASE_LABEL[phase] ?? '',
+		model: leadModel
 	};
 	$: titles = new Map(tasks.map((t) => [t.id, t.key]));
 	$: conclusionBrief = live?.team.conclusion;
@@ -148,6 +160,27 @@
 	$: stopped = phase === 'stopped' || live?.team.state === 'stopped';
 	$: finished = phase === 'completed' || stopped;
 	$: running = team?.status === 'running';
+	$: headerStatus = !team
+		? null
+		: team.status === 'running'
+			? ({ completed: 'done', attention: 'waiting_user', paused: 'paused', stopped: 'stopped' }[
+					phase
+				] ?? 'running')
+			: team.status === 'planning'
+				? 'running'
+				: team.status === 'plan_ready'
+					? 'waiting_user'
+					: team.status === 'cancelled'
+						? 'stopped'
+						: team.status.endsWith('failed')
+							? 'failed'
+							: 'queued';
+	$: headerLabel = team
+		? (PHASE_LABEL[team.status === 'running' ? phase : team.status] ?? team.status)
+		: '';
+	$: pageTitle = team
+		? `${running && !finished && counts.total ? `(${counts.done}/${counts.total}) ` : ''}${team.title}`
+		: '协作台';
 	$: layers = (() => {
 		const layout = layoutTasks(tasks);
 		const out: (typeof tasks)[] = [];
@@ -344,8 +377,16 @@
 	};
 </script>
 
-<div class="relative flex h-screen max-h-[100dvh] w-full max-w-full flex-col" data-team-workbench>
-	<nav class="flex items-center gap-2 px-3 pt-2 pb-1">
+<svelte:head>
+	<title>{pageTitle} · 协作台 | {$WEBUI_NAME}</title>
+</svelte:head>
+
+<div
+	class="relative flex h-screen max-h-[100dvh] w-full max-w-full flex-col"
+	data-team-workbench
+	data-teams-ui
+>
+	<nav class="flex items-center gap-2 px-3 pt-2.5 pb-2 sm:px-4">
 		<div class="{$mobile ? '' : 'hidden'} flex flex-none items-center">
 			<button
 				class="cursor-pointer rounded-xl p-1.5 hover:bg-gray-100 dark:hover:bg-gray-850"
@@ -355,122 +396,164 @@
 		</div>
 		<a
 			href="/teams"
-			class="shrink-0 whitespace-nowrap text-sm text-gray-500 hover:text-gray-900 dark:hover:text-gray-100"
+			class="shrink-0 whitespace-nowrap text-sm text-gray-500 transition hover:text-gray-900 dark:hover:text-gray-100"
 			>协作台</a
 		>
-		<span class="text-gray-300 dark:text-gray-700">/</span>
-		<h1 class="min-w-0 truncate text-sm font-semibold text-gray-900 dark:text-gray-100">
+		<span class="text-gray-300 dark:text-gray-700" aria-hidden="true">/</span>
+		<h1
+			class="tm-display min-w-0 truncate text-[15px] font-semibold text-gray-900 dark:text-gray-50"
+			title={team?.title ?? ''}
+		>
 			{team?.title ?? '…'}
 		</h1>
-		{#if team}
-			<StatusChip
-				status={team.status === 'running'
-					? phase === 'completed'
-						? 'done'
-						: phase === 'attention'
-							? 'waiting_user'
-							: phase === 'paused'
-								? 'paused'
-								: phase === 'stopped'
-									? 'stopped'
-									: 'running'
-					: team.status === 'planning'
-						? 'running'
-						: team.status === 'plan_ready'
-							? 'waiting_user'
-							: team.status === 'cancelled'
-								? 'stopped'
-								: team.status.endsWith('failed')
-									? 'failed'
-									: 'queued'}
-				label={PHASE_LABEL[team.status === 'running' ? phase : team.status] ?? team.status}
-				size="sm"
-			/>
+		{#if team && headerStatus}
+			<span class="shrink-0"
+				><StatusChip status={headerStatus} label={headerLabel} size="sm" /></span
+			>
 		{/if}
-		<div class="ml-auto flex items-center gap-1.5">
+		<div class="ml-auto flex shrink-0 items-center gap-1.5">
 			{#if running && (conclusionBrief?.status || finished)}
 				<a
 					href="/teams/{teamId}/conclusion"
-					class="hidden rounded-xl px-2.5 py-1 text-xs font-medium text-emerald-700 hover:bg-emerald-50 sm:inline-flex dark:text-emerald-300 dark:hover:bg-emerald-950/40"
-					data-header-conclusion>结论</a
+					class="tm-btn-ghost hidden !text-emerald-700 sm:inline-flex dark:!text-emerald-300"
+					data-header-conclusion
+					><svg class="size-3.5" viewBox="0 0 16 16" fill="none" aria-hidden="true"
+						><path
+							d="M4 1.8h5.2L12.5 5v9.2H4V1.8Z"
+							stroke="currentColor"
+							stroke-width="1.4"
+							stroke-linejoin="round"
+						/><path
+							d="M6 8h4.5M6 10.8h3"
+							stroke="currentColor"
+							stroke-width="1.4"
+							stroke-linecap="round"
+						/></svg
+					>结论</a
 				>
 			{/if}
 			{#if team?.chat_id}
-				<a
-					href="/c/{team.chat_id}"
-					class="rounded-xl px-2.5 py-1 text-xs text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-850"
-					>返回对话</a
-				>
+				<a href="/c/{team.chat_id}" class="tm-btn-ghost hidden sm:inline-flex">返回对话</a>
 			{/if}
 			{#if running && !finished && !replay}
 				{#if phase === 'paused'}
 					<button
 						type="button"
-						class="rounded-xl bg-gray-100 px-2.5 py-1 text-xs font-medium hover:bg-gray-200 disabled:opacity-50 dark:bg-gray-850"
+						class="tm-btn-ghost"
 						disabled={busy}
 						on:click={resumeDispatch}
-						title="让派发器继续开始新的任务">恢复派发</button
+						title="让派发器继续开始新的任务"
+						><svg class="size-3" viewBox="0 0 12 12" aria-hidden="true"
+							><path d="M3 1.8v8.4L10 6 3 1.8Z" fill="currentColor" /></svg
+						>恢复派发</button
 					>
 				{:else}
 					<button
 						type="button"
-						class="rounded-xl bg-gray-100 px-2.5 py-1 text-xs font-medium hover:bg-gray-200 disabled:opacity-50 dark:bg-gray-850"
+						class="tm-btn-ghost"
 						disabled={busy}
 						on:click={pauseDispatch}
-						title="不再开始新任务；正在执行的成员会继续做完手上的任务">暂停派发</button
+						title="不再开始新任务；正在执行的成员会继续做完手上的任务"
+						><svg class="size-3" viewBox="0 0 12 12" aria-hidden="true"
+							><path d="M3 2h2v8H3zM7 2h2v8H7z" fill="currentColor" /></svg
+						>暂停派发</button
 					>
 				{/if}
 				<button
 					type="button"
-					class="rounded-xl bg-red-50 px-2.5 py-1 text-xs font-medium text-red-700 hover:bg-red-100 disabled:opacity-50 dark:bg-red-950/40 dark:text-red-300"
+					class="tm-btn-ghost tm-btn-danger"
 					disabled={busy}
 					on:click={() => (showStop = true)}
-					title="结束所有正在执行的成员，整个协作任务停止，不会被自动恢复">停止执行</button
+					title="结束所有正在执行的成员，整个协作任务停止，不会被自动恢复"
+					><svg class="size-3" viewBox="0 0 12 12" aria-hidden="true"
+						><rect x="2.5" y="2.5" width="7" height="7" rx="1.5" fill="currentColor" /></svg
+					>停止执行</button
 				>
 			{/if}
 		</div>
 	</nav>
 
-	<div class="flex-1 min-h-0 overflow-y-auto px-3 pb-6">
+	<div class="tm-scroll min-h-0 flex-1 overflow-y-auto px-3 pb-6 sm:px-4">
 		{#if loadError && !team}
 			<div class="mx-auto mt-16 max-w-md text-center text-sm text-gray-500">
 				{loadError}
 				<div class="mt-3"><a class="text-sky-600 hover:underline" href="/teams">回到协作台</a></div>
 			</div>
 		{:else if !team}
-			<div class="mt-16 text-center text-sm text-gray-400">正在加载…</div>
+			<div class="mx-auto mt-10 flex max-w-4xl flex-col gap-3" aria-busy="true">
+				<div class="tm-card-quiet h-20 animate-pulse" />
+				<div class="tm-card-quiet h-64 animate-pulse" />
+			</div>
 		{:else if team.status !== 'running'}
-			<div class="mx-auto max-w-4xl flex flex-col gap-4 pt-2">
-				<div
-					class="rounded-2xl bg-gray-50 px-4 py-3 text-sm text-gray-700 dark:bg-gray-850 dark:text-gray-300"
-				>
-					<div class="text-xs text-gray-500 mb-1">目标</div>
-					<div class="whitespace-pre-wrap break-words">{team.goal}</div>
-				</div>
-				{#if team.status === 'planning'}
+			<div class="mx-auto flex max-w-4xl flex-col gap-5 pt-2">
+				<section class="goal tm-card-quiet px-5 py-4" aria-label="目标">
+					<div class="tm-eyebrow mb-1.5">目标</div>
 					<div
-						class="flex items-center gap-3 rounded-2xl border border-gray-100 px-4 py-6 dark:border-gray-850"
-						role="status"
+						class="whitespace-pre-wrap break-words text-sm leading-relaxed text-gray-800 dark:text-gray-200 {goalOpen
+							? ''
+							: 'line-clamp-6'}"
 					>
-						<span class="size-3 rounded-full bg-sky-500 animate-pulse" aria-hidden="true" />
-						<div>
-							<div class="text-sm font-medium">负责人正在制定计划…</div>
-							<div class="text-xs text-gray-500">
-								通常 10–60 秒；计划出来后要你批准才会开始执行。
+						{team.goal}
+					</div>
+					{#if team.goal.split('\n').length > 6 || team.goal.length > 420}
+						<button
+							type="button"
+							class="mt-1.5 text-xs text-sky-700 hover:underline dark:text-sky-300"
+							on:click={() => (goalOpen = !goalOpen)}>{goalOpen ? '收起' : '展开全部'}</button
+						>
+					{/if}
+				</section>
+				{#if team.status === 'planning'}
+					<section
+						class="tm-card tm-live flex items-start gap-4 px-5 py-5"
+						role="status"
+						data-team-planning
+					>
+						<TeamAvatar kind="lead" status="running" size={46} />
+						<div class="min-w-0 flex-1">
+							<div class="flex items-center gap-2">
+								<span class="tm-shimmer text-[15px] font-semibold text-gray-900 dark:text-gray-50"
+									>负责人正在制定计划</span
+								>
+								<span class="tm-num ml-auto text-xs text-gray-400"
+									>{elapsed($now - (team.updated_at || team.created_at))}</span
+								>
+							</div>
+							<p class="mt-1 text-xs leading-relaxed text-gray-500 dark:text-gray-400">
+								理解目标 → 从助手模板里挑选成员 → 拆分带依赖的任务 → 为每位成员匹配执行来源。通常
+								10–60 秒；计划出来后要你批准才会开始执行。
+							</p>
+							<div class="mt-4 grid gap-2 sm:grid-cols-3" aria-hidden="true">
+								{#each [0, 1, 2] as i}
+									<div
+										class="ghost tm-card-quiet flex items-center gap-2.5 px-3 py-2.5"
+										style="--i:{i}"
+									>
+										<span
+											class="size-7 shrink-0 rounded-full bg-gray-900/[0.06] dark:bg-white/[0.07]"
+										/>
+										<span class="flex flex-1 flex-col gap-1.5">
+											<span
+												class="h-2 w-3/4 rounded-full bg-gray-900/[0.07] dark:bg-white/[0.08]"
+											/>
+											<span
+												class="h-2 w-1/2 rounded-full bg-gray-900/[0.05] dark:bg-white/[0.05]"
+											/>
+										</span>
+									</div>
+								{/each}
 							</div>
 						</div>
-					</div>
+					</section>
 				{:else if team.status === 'starting'}
-					<div
-						class="rounded-2xl border border-gray-100 px-4 py-6 text-sm dark:border-gray-850"
-						role="status"
-					>
-						正在启动…
-					</div>
+					<section class="tm-card tm-live flex items-center gap-3 px-5 py-5 text-sm" role="status">
+						<TeamAvatar kind="lead" status="running" size={36} />
+						<span class="tm-shimmer font-medium">正在启动成员…</span>
+					</section>
 				{/if}
 				{#if team.error}
 					<div
-						class="rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-800 dark:bg-red-950/40 dark:text-red-200 whitespace-pre-wrap break-words"
+						class="whitespace-pre-wrap break-words rounded-2xl border border-red-500/20 bg-red-500/[0.06] px-4 py-3 text-sm text-red-800 dark:text-red-200"
 						role="alert"
 					>
 						{team.error}
@@ -478,17 +561,11 @@
 				{/if}
 				{#if team.status === 'plan_failed'}
 					<div class="flex gap-2">
-						<button
-							type="button"
-							class="rounded-xl bg-gray-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50 dark:bg-gray-100 dark:text-gray-900"
-							disabled={busy}
-							on:click={() => replan('')}>重新生成计划</button
+						<button type="button" class="tm-btn-primary" disabled={busy} on:click={() => replan('')}
+							>重新生成计划</button
 						>
-						<button
-							type="button"
-							class="rounded-xl px-4 py-2 text-sm text-gray-500"
-							disabled={busy}
-							on:click={cancel}>取消</button
+						<button type="button" class="tm-btn-ghost" disabled={busy} on:click={cancel}
+							>取消</button
 						>
 					</div>
 				{/if}
@@ -511,28 +588,33 @@
 				{/if}
 			</div>
 		{:else}
-			<div class="flex flex-col gap-3 pt-1">
-				<TeamProgress {counts} {fallbacks} {leadModel} workspace={live?.team.workspace ?? ''} />
+			<div class="flex flex-col gap-4 pt-1">
+				<TeamProgress
+					{counts}
+					{fallbacks}
+					{leadModel}
+					workspace={live?.team.workspace ?? ''}
+					startedAt={replay ? null : team.approved_at}
+					finishedAt={finished ? (team.finished_at ?? null) : null}
+				/>
 
 				{#if liveError}
 					<div
-						class="rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:bg-amber-950/40 dark:text-amber-200"
+						class="rounded-xl border border-amber-500/20 bg-amber-500/[0.07] px-3 py-2 text-xs text-amber-800 dark:text-amber-200"
 						role="alert"
 					>
 						读不到 Hermes 上的实时状态：{liveError}（显示的是最后一次读到的内容）
 					</div>
 				{:else if disconnected > 0}
 					<div
-						class="rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:bg-amber-950/40 dark:text-amber-200"
+						class="rounded-xl border border-amber-500/20 bg-amber-500/[0.07] px-3 py-2 text-xs text-amber-800 dark:text-amber-200"
 						role="status"
 					>
 						连接中断，正在重试（第 {disconnected} 次）…恢复后会补上漏掉的记录
 					</div>
 				{/if}
 				{#if reconcile.length && !replay}
-					<div
-						class="rounded-xl bg-gray-50 px-3 py-2 text-xs text-gray-600 dark:bg-gray-850 dark:text-gray-300"
-					>
+					<div class="tm-card-quiet px-3 py-2 text-xs text-gray-600 dark:text-gray-300">
 						历史记录与当前状态不一致：{reconcile
 							.map(
 								(r) =>
@@ -542,47 +624,49 @@
 					</div>
 				{/if}
 				{#if truncated}
-					<div
-						class="rounded-xl bg-gray-50 px-3 py-2 text-xs text-gray-600 dark:bg-gray-850 dark:text-gray-300"
-					>
+					<div class="tm-card-quiet px-3 py-2 text-xs text-gray-600 dark:text-gray-300">
 						记录太多，只载入了最早的一部分；回放和通讯不完整。
 					</div>
 				{/if}
 
 				{#if phase === 'completed' && !replay}
 					<div
-						class="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-2xl border border-emerald-200/70 bg-emerald-50/70 px-4 py-3 dark:border-emerald-900/60 dark:bg-emerald-950/25"
+						class="done-banner tm-card flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3.5"
 						data-completed-banner
 					>
 						<span
-							class="grid size-8 shrink-0 place-items-center rounded-full bg-emerald-500 text-white"
+							class="check grid size-9 shrink-0 place-items-center rounded-full text-white"
 							aria-hidden="true"
 							><svg class="size-4" viewBox="0 0 16 16" fill="none"
 								><path
 									d="m3.5 8.5 3 3 6-7"
 									stroke="currentColor"
-									stroke-width="1.9"
+									stroke-width="2"
 									stroke-linecap="round"
 									stroke-linejoin="round"
+									pathLength="1"
 								/></svg
 							></span
 						>
 						<div class="min-w-0 flex-1">
-							<div class="text-sm font-semibold text-emerald-900 dark:text-emerald-100">
-								全部 {counts.total} 个任务已完成
+							<div class="text-sm font-semibold text-gray-900 dark:text-gray-50">
+								全部 {counts.total} 个任务已完成{#if team.approved_at && team.finished_at}<span
+										class="tm-num ml-2 text-xs font-normal text-gray-500"
+										>用时 {elapsed(team.finished_at - team.approved_at)}</span
+									>{/if}
 							</div>
-							<div class="text-xs text-emerald-800/80 dark:text-emerald-200/80">
-								{conclusionBrief?.status === 'ready'
-									? `负责人写好了结论${conclusionBrief.model ? `（${conclusionBrief.model}）` : ''}`
-									: conclusionBrief?.status === 'failed'
-										? '结论没写成，可以在「结论」里重新生成'
-										: '负责人正在根据所有成员的结果写结论…'}
+							<div class="text-xs text-gray-500 dark:text-gray-400">
+								{#if conclusionBrief?.status === 'ready'}
+									负责人写好了结论{conclusionBrief.model ? `（${conclusionBrief.model}）` : ''}
+								{:else if conclusionBrief?.status === 'failed'}
+									结论没写成，可以在「结论」里重新生成
+								{:else}
+									<span class="tm-shimmer">负责人正在根据所有成员的结果写结论…</span>
+								{/if}
 							</div>
 						</div>
-						<button
-							type="button"
-							class="rounded-xl bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-emerald-700 active:scale-[0.98]"
-							on:click={showConclusion}>阅读结论</button
+						<button type="button" class="tm-btn-primary !py-1.5 !text-xs" on:click={showConclusion}
+							>阅读结论</button
 						>
 					</div>
 				{/if}
@@ -598,28 +682,19 @@
 				<ReplayBar {events} index={replayIndex} on:seek={(e) => seek(e.detail)} />
 
 				{#if $mobile}
-					<div
-						class="flex rounded-xl bg-gray-100 p-0.5 text-sm dark:bg-gray-850"
-						role="tablist"
-						aria-label="协作台视图"
-					>
+					<div class="tm-segment w-full" role="tablist" aria-label="协作台视图">
 						{#each [['tasks', '任务'], ['members', '成员'], ['feed', '通讯'], ['conclusion', '结论']] as [value, label]}
 							<button
 								type="button"
 								role="tab"
 								aria-selected={mobileTab === value}
-								class="flex-1 rounded-lg py-1.5 {mobileTab === value
-									? 'bg-white shadow-sm dark:bg-gray-900'
-									: 'text-gray-500'}"
+								class="flex-1 !py-1.5 !text-sm"
 								on:click={() => (mobileTab = value)}>{label}</button
 							>
 						{/each}
 					</div>
 					{#if selectedTask || selectedMember}
-						<div
-							id="team-inspector"
-							class="rounded-2xl border border-gray-100 p-3 dark:border-gray-850"
-						>
+						<div id="team-inspector" class="tm-card p-3">
 							<Inspector
 								{teamId}
 								taskId={selectedTask}
@@ -642,26 +717,30 @@
 						</div>
 					{/if}
 					{#if mobileTab === 'tasks'}
-						<ol class="flex flex-col gap-3">
+						<ol class="flex flex-col gap-4">
 							{#each layers as layer, depth}
 								<li>
-									<div class="mb-1 text-xs text-gray-500">
+									<div class="mb-1.5 flex items-center gap-2 text-xs text-gray-500">
+										<span
+											class="tm-num grid size-5 place-items-center rounded-full border text-[10px] font-semibold tm-hairline"
+											>{depth + 1}</span
+										>
 										第 {depth + 1} 步{layer.length > 1 ? ` · ${layer.length} 个并行` : ''}
 									</div>
-									<ul class="flex flex-col gap-1.5">
+									<ul class="flex flex-col gap-2">
 										{#each layer as t (t.id)}
 											{@const s = states.get(t.id)}
 											<li>
 												<button
 													type="button"
-													class="w-full rounded-2xl border px-3 py-2 text-left {selectedTask ===
-													t.id
-														? 'border-sky-300 dark:border-sky-700'
-														: 'border-gray-100 dark:border-gray-850'}"
+													class="tm-card w-full px-3 py-2.5 text-left {toneOf(s?.sub_status) ===
+													'run'
+														? 'tm-live'
+														: ''} {selectedTask === t.id ? '!border-sky-400/60' : ''}"
 													on:click={() => selectTask(t.id)}
 												>
 													<div class="flex items-center gap-2 text-xs">
-														<span class="font-mono font-semibold text-gray-500">#{t.key}</span>
+														<span class="font-mono font-semibold text-gray-400">#{t.key}</span>
 														<span class="min-w-0 truncate text-gray-500">{t.member}</span>
 														<RunnerBadge
 															chosen={taskRunner(t).chosen}
@@ -672,7 +751,7 @@
 															><StatusChip status={s?.sub_status} /></span
 														>
 													</div>
-													<div class="mt-0.5 text-sm font-medium">{t.title}</div>
+													<div class="mt-1 text-sm font-medium">{t.title}</div>
 													{#if s?.sub_status === 'waiting_deps'}
 														<div class="text-xs text-amber-600 dark:text-amber-400">
 															等 {openParents(t, states)
@@ -688,12 +767,13 @@
 							{/each}
 						</ol>
 					{:else if mobileTab === 'feed'}
-						<div class="h-[60vh]">
+						<div class="tm-card h-[60vh] p-3">
 							<CommFeed
 								events={shownEvents}
 								{cursorSeq}
 								memberFilter={selectedMember}
 								{titles}
+								members={planMembers}
 								on:task={(e) => selectTask(e.detail)}
 								on:clearfilter={() => selectMember(null)}
 							/>
@@ -709,32 +789,45 @@
 					{/if}
 				{:else}
 					<div
-						class="grid gap-3 {asideTab === 'conclusion' && !selectedTask && !selectedMember
+						class="grid gap-4 {asideTab === 'conclusion' && !selectedTask && !selectedMember
 							? 'lg:grid-cols-[minmax(0,1fr)_420px] xl:grid-cols-[minmax(0,1fr)_520px]'
 							: 'lg:grid-cols-[minmax(0,1fr)_380px]'}"
 					>
-						<div class="flex min-w-0 flex-col gap-3">
+						<div class="flex min-w-0 flex-col gap-2">
 							<TeamBoard
 								{tasks}
 								{states}
+								{replay}
 								members={memberViews}
 								selectedTaskId={selectedTask}
 								on:select={(e) => selectTask(e.detail)}
 							/>
 							<div
-								class="flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-gray-500"
+								class="flex flex-wrap items-center gap-x-4 gap-y-1 px-1 text-[11px] text-gray-500"
 								aria-label="图例"
 							>
-								<span>实线 = 前置任务已完成</span><span>流动虚线 = 前置任务执行中</span><span
-									>灰色虚线 = 还在等</span
+								<span class="flex items-center gap-1.5"
+									><span
+										class="h-0.5 w-4 rounded bg-emerald-500"
+										aria-hidden="true"
+									/>前置任务已完成</span
+								>
+								<span class="flex items-center gap-1.5"
+									><span
+										class="legend-run h-0.5 w-4 rounded"
+										aria-hidden="true"
+									/>前置任务执行中</span
+								>
+								<span class="flex items-center gap-1.5"
+									><span class="legend-wait h-0.5 w-4 rounded" aria-hidden="true" />还在等</span
 								>
 							</div>
 						</div>
 						<aside
-							class="flex min-h-[420px] flex-col rounded-2xl border border-gray-100 p-3 dark:border-gray-850 lg:sticky lg:top-0 lg:max-h-[calc(100dvh-9rem)]"
+							class="tm-card flex min-h-[420px] flex-col p-3 lg:sticky lg:top-0 lg:max-h-[calc(100dvh-9rem)]"
 						>
 							{#if selectedTask || selectedMember}
-								<div class="min-h-0 overflow-y-auto">
+								<div class="tm-scroll min-h-0 overflow-y-auto">
 									<Inspector
 										{teamId}
 										taskId={selectedTask}
@@ -756,30 +849,29 @@
 									/>
 								</div>
 							{:else}
-								<div class="mb-2 flex items-center gap-1" role="tablist" aria-label="通讯与结论">
-									{#each [['feed', '通讯与日志'], ['conclusion', '结论']] as [value, label]}
-										<button
-											type="button"
-											role="tab"
-											aria-selected={asideTab === value}
-											class="relative rounded-lg px-2.5 py-1 text-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 {asideTab ===
-											value
-												? 'bg-gray-100 font-semibold text-gray-900 dark:bg-gray-850 dark:text-gray-100'
-												: 'text-gray-500 hover:text-gray-900 dark:hover:text-gray-200'}"
-											on:click={() => {
-												asideTab = value;
-												asideTouched = true;
-											}}
-											data-aside-tab={value}
-											>{label}{#if value === 'conclusion' && conclusionBrief?.status === 'ready' && asideTab !== 'conclusion'}<span
-													class="absolute right-1 top-1 size-1.5 rounded-full bg-emerald-500"
-													aria-label="结论已生成"
-												/>{/if}</button
-										>
-									{/each}
+								<div class="mb-3 flex items-center">
+									<div class="tm-segment" role="tablist" aria-label="通讯与结论">
+										{#each [['feed', '通讯与日志'], ['conclusion', '结论']] as [value, label]}
+											<button
+												type="button"
+												role="tab"
+												aria-selected={asideTab === value}
+												class="relative focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-400"
+												on:click={() => {
+													asideTab = value;
+													asideTouched = true;
+												}}
+												data-aside-tab={value}
+												>{label}{#if value === 'conclusion' && conclusionBrief?.status === 'ready' && asideTab !== 'conclusion'}<span
+														class="absolute right-1 top-1 size-1.5 rounded-full bg-emerald-500"
+														aria-label="结论已生成"
+													/>{/if}</button
+											>
+										{/each}
+									</div>
 								</div>
 								{#if asideTab === 'conclusion'}
-									<div class="min-h-0 flex-1 overflow-y-auto pr-1">
+									<div class="tm-scroll min-h-0 flex-1 overflow-y-auto pr-1">
 										<ConclusionView
 											{teamId}
 											title={team.title}
@@ -794,6 +886,7 @@
 											events={shownEvents}
 											{cursorSeq}
 											{titles}
+											members={planMembers}
 											on:task={(e) => selectTask(e.detail)}
 											on:clearfilter={() => selectMember(null)}
 										/>
@@ -815,3 +908,52 @@
 	confirmLabel="停止执行"
 	on:confirm={stopAll}
 />
+
+<style>
+	.goal {
+		position: relative;
+	}
+	.ghost {
+		animation: ghost 1.6s ease-in-out infinite;
+		animation-delay: calc(var(--i) * 0.2s);
+	}
+	@keyframes ghost {
+		50% {
+			opacity: 0.45;
+		}
+	}
+	.done-banner {
+		background: radial-gradient(120% 160% at 0% 0%, hsl(var(--tm-ok) / 0.14), transparent 55%),
+			hsl(var(--tm-surface));
+		border-color: hsl(var(--tm-ok) / 0.28);
+	}
+	.check {
+		background: linear-gradient(160deg, hsl(152 70% 48%), hsl(162 80% 34%));
+		box-shadow: 0 6px 18px -6px hsl(158 70% 40% / 0.7);
+	}
+	.check path {
+		stroke-dasharray: 1;
+		stroke-dashoffset: 1;
+		animation: draw 0.6s 0.15s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+	}
+	@keyframes draw {
+		to {
+			stroke-dashoffset: 0;
+		}
+	}
+	.legend-run {
+		background: repeating-linear-gradient(90deg, #1d8cff 0 4px, transparent 4px 7px);
+	}
+	.legend-wait {
+		background: repeating-linear-gradient(90deg, #94a3b8 0 3px, transparent 3px 6px);
+	}
+	@media (prefers-reduced-motion: reduce) {
+		.ghost {
+			animation: none;
+		}
+		.check path {
+			animation: none;
+			stroke-dashoffset: 0;
+		}
+	}
+</style>

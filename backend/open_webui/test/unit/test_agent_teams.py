@@ -230,6 +230,20 @@ def test_meta_conclusion_and_files_are_proxied_per_owner(hermes, monkeypatch):
         assert other.get(f"/api/v1/teams/{team_id}{path}").status_code == 404
 
 
+def test_a_team_can_ask_for_another_lead_model(hermes):
+    client = _client("u1")
+    created = client.post("/api/v1/teams/", json={"goal": "写一份报告", "lead_model": "claude-chat"}).json()
+    assert created["lead_model"] == "claude-chat"
+    team = AgentTeams.get(created["id"], "u1")
+    target = teams_utils.HermesTarget("http://hermes", {}, "u1")
+    hermes.responses[("POST", "/plan")] = {"ok": True, "plan": PLAN}
+    asyncio.run(teams_utils._plan_job(team, target, "", None))
+    sent = [c for c in hermes.calls if c[2] == "/plan"][-1][3]
+    assert sent["lead_model"] == "claude-chat"
+    plain = client.post("/api/v1/teams/", json={"goal": "x"}).json()
+    assert plain["lead_model"] is None
+
+
 def test_replan_sends_feedback_and_previous_plan(hermes):
     client = _client("u1")
     team_id = _ready_team(client, hermes)

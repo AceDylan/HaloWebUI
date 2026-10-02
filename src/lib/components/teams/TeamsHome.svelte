@@ -27,6 +27,11 @@
 	let meta: TeamsMeta | null = null;
 	let metaError = '';
 	let checking = false;
+	let leadModel = '';
+
+	// The lead follows Hermes' default model unless this team picks another configured one.
+	$: defaultModel = meta?.lead_model?.choices?.[0] ?? meta?.lead_model?.model ?? '';
+	$: modelChoices = (meta?.lead_model?.choices ?? []).filter((m) => m !== defaultModel);
 
 	$: chatTeams = chatId ? teams.filter((t) => t.chat_id === chatId) : [];
 
@@ -86,7 +91,7 @@
 		if (!text || creating) return;
 		creating = true;
 		try {
-			const team = await createTeam(localStorage.token, text, chatId);
+			const team = await createTeam(localStorage.token, text, chatId, leadModel || null);
 			goto(`/teams/${team.id}`);
 		} catch (e) {
 			toast.error(`${e?.message ?? e}`);
@@ -174,18 +179,28 @@
 						if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) create();
 					}}
 				/>
-				<div class="flex items-center gap-2">
+				<div class="flex flex-wrap items-center gap-x-3 gap-y-2">
 					<button
 						type="submit"
-						class="rounded-xl bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-800 disabled:opacity-50 dark:bg-gray-100 dark:text-gray-900"
+						class="rounded-xl bg-gray-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-gray-800 active:scale-[0.98] disabled:opacity-50 dark:bg-gray-100 dark:text-gray-900 dark:hover:bg-white"
 						disabled={creating || !goal.trim()}>{creating ? '提交中…' : '让负责人做计划'}</button
 					>
-					<span class="text-xs text-gray-400" data-lead-model
-						>做计划只调用一次模型，不会启动任何成员{#if meta?.lead_model?.model}
-							· 负责人模型 <span class="font-mono text-gray-600 dark:text-gray-300"
-								>{meta.lead_model.model}</span
-							>{meta.lead_model.label ? `（${meta.lead_model.label}）` : ''}{/if}</span
-					>
+					<label class="flex min-w-0 items-center gap-1.5 text-xs text-gray-500" data-lead-model>
+						<span class="shrink-0">负责人模型</span>
+						<select
+							bind:value={leadModel}
+							class="min-w-0 max-w-[14rem] truncate rounded-lg border border-gray-200 bg-white py-1 pl-2 pr-7 font-mono text-xs text-gray-800 transition focus:border-sky-400 focus:outline-none dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+							title="负责人做计划、写结论用的模型；默认跟随 Hermes 当前的默认模型"
+						>
+							<option value=""
+								>{meta?.lead_model?.model ? `Hermes 默认 · ${defaultModel}` : 'Hermes 默认'}</option
+							>
+							{#each modelChoices as model}
+								<option value={model}>{model}</option>
+							{/each}
+						</select>
+					</label>
+					<span class="text-xs text-gray-400">做计划只调用一次模型，不会启动任何成员</span>
 				</div>
 			</form>
 

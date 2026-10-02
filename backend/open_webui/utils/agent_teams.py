@@ -137,6 +137,7 @@ async def _plan_job(team: AgentTeamModel, target: HermesTarget, feedback: str, p
     try:
         body = await hermes_call(target, "POST", "/plan", json_body={
             "goal": team.goal, "team_id": team.id, "feedback": feedback, "previous": previous,
+            "lead_model": (team.meta or {}).get("lead_model") or "",
         }, timeout=PLAN_TIMEOUT_SECONDS)
         ok = isinstance(body, dict) and body.get("ok") and isinstance(body.get("plan"), dict)
         if ok:
@@ -200,7 +201,8 @@ async def reconcile(team: AgentTeamModel, target: Optional[HermesTarget]) -> tup
 def public_team(team: AgentTeamModel, *, with_plan: bool = True) -> dict:
     data = team.model_dump()
     data.pop("user_id", None)
-    data.pop("meta", None)
+    meta = data.pop("meta", None) or {}
+    data["lead_model"] = meta.get("lead_model")
     plan = data.get("plan") or {}
     data["member_count"] = len(plan.get("members") or [])
     data["task_count"] = len(plan.get("tasks") or [])

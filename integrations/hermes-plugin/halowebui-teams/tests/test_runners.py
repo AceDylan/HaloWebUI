@@ -416,3 +416,17 @@ def test_cache_follows_the_override_file(pkg, override, monkeypatch):
     override({"unavailable": {"cchclaude": "维护中"}})
     assert not r.check_live(["cchclaude"])["cchclaude"]["available"] and calls == ["cchclaude", "cchclaude"]
     r.forget()
+
+
+def test_a_team_can_prefer_another_configured_model(pkg):
+    cfg = {"model": {"default": "gpt-chat", "provider": "custom:best"},
+           "custom_providers": [{"name": "best", "model": "gpt-chat"}, {"name": "claude-chat", "model": "claude-chat"},
+                                {"name": "deepseek-chat", "model": "deepseek-chat"}],
+           "fallback_providers": [{"provider": "custom", "model": "deepseek-chat"}]}
+    assert [m["model"] for m in pkg.plan.configured_models(cfg)] == ["gpt-chat", "claude-chat", "deepseek-chat"]
+    routes = pkg.plan.lead_routes(cfg, preferred="claude-chat")
+    assert [(r["model"], r["source"]) for r in routes] == [
+        ("claude-chat", "team"), ("gpt-chat", "hermes_default"), ("deepseek-chat", "hermes_fallback")]
+    # An unknown model is ignored, not called.
+    assert pkg.plan.lead_routes(cfg, preferred="gpt-9")[0]["model"] == "gpt-chat"
+    assert pkg.plan.lead_model_info(cfg)["choices"] == ["gpt-chat", "claude-chat", "deepseek-chat"]

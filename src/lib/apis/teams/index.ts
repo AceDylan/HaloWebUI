@@ -42,6 +42,10 @@ export type LeadModel = {
 	fallback_from?: string[];
 	fallback_reason?: string;
 	fallbacks?: string[];
+	/** The model this team asked for (when not Hermes' default). */
+	requested?: string;
+	/** Models Hermes has configured that the lead can use (the default first). */
+	choices?: string[];
 };
 
 export type TeamPlanTask = {
@@ -91,6 +95,8 @@ export type Team = {
 	member_count: number;
 	task_count: number;
 	executors: TeamExecutor[];
+	/** The model this team asked the lead to use (null = Hermes' default). */
+	lead_model?: string | null;
 };
 
 export type SubStatus =
@@ -361,8 +367,17 @@ const id = (value: string) => encodeURIComponent(value);
 export const listTeams = (token: string, chatId?: string | null) =>
 	request<{ teams: Team[] }>(token, 'GET', chatId ? `/?chat_id=${id(chatId)}` : '/');
 
-export const createTeam = (token: string, goal: string, chatId?: string | null) =>
-	request<Team>(token, 'POST', '/', { goal, chat_id: chatId || null });
+export const createTeam = (
+	token: string,
+	goal: string,
+	chatId?: string | null,
+	leadModel?: string | null
+) =>
+	request<Team>(token, 'POST', '/', {
+		goal,
+		chat_id: chatId || null,
+		lead_model: leadModel || null
+	});
 
 export const getTeam = (token: string, teamId: string) =>
 	request<{ team: Team; live: LiveSnapshot | null; live_error: string | null }>(

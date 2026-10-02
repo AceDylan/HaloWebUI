@@ -59,7 +59,7 @@ def test_propose_plan_retries_once_with_the_validation_errors(pkg, monkeypatch, 
     replies = iter([json.dumps({"members": [], "tasks": []}), json.dumps(plan_dict)])
     seen = []
 
-    def fake(messages, timeout=150):
+    def fake(messages, timeout=150, **_):
         seen.append(messages)
         return next(replies), "", {"model": "gpt-chat", "source": "hermes_default"}
 

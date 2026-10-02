@@ -127,9 +127,33 @@ def _config() -> dict:
     return cfg if isinstance(cfg, dict) else {}
 
 
-def lead_routes(cfg: Optional[dict] = None) -> list[dict]:
+def configured_models(cfg: Optional[dict] = None) -> list[dict]:
+    """Models Hermes has configured that a lead can run on: [{model, provider, default}] — the
+    main default first, then each custom provider's own model and the fallback models."""
+    cfg = _config() if cfg is None else cfg
+    out: list[dict] = []
+
+    def add(provider: Any, model: Any, default: bool = False) -> None:
+        model = str(model or "").strip()
+        if model and not any(m["model"] == model for m in out):
+            out.append({"model": model, "provider": str(provider or "main"), "default": default})
+
+    main = cfg.get("model") if isinstance(cfg.get("model"), dict) else {}
+    add(main.get("provider"), main.get("default"), True)
+    customs = cfg.get("custom_providers") if isinstance(cfg.get("custom_providers"), list) else []
+    for entry in customs:
+        if isinstance(entry, dict) and entry.get("name") and entry.get("model"):
+            add(f"custom:{entry['name']}", entry["model"])
+    for entry in cfg.get("fallback_providers") or []:
+        if isinstance(entry, dict) and entry.get("provider") not in (None, "", "custom"):
+            add(entry.get("provider"), entry.get("model"))
+    return out
+
+
+def lead_routes(cfg: Optional[dict] = None, preferred: Optional[str] = None) -> list[dict]:
     """The models the lead tries, in order: [{provider, model, source, label}]. Read from Hermes'
-    config on every call — the lead follows Hermes' default model, it does not pin one."""
+    config on every call — the lead follows Hermes' default model, it does not pin one. A team
+    may prefer another configured model (``preferred``); the default chain follows it."""
     cfg = _config() if cfg is None else cfg
     routes: list[dict] = []
 
@@ -139,6 +163,10 @@ def lead_routes(cfg: Optional[dict] = None) -> list[dict]:
             return
         routes.append({"provider": provider or "main", "model": model, "source": source, **extra})
 
+    if preferred:
+        match = next((m for m in configured_models(cfg) if m["model"] == preferred), None)
+        if match:
+            add(match["provider"], match["model"], "team")
     aux = ((cfg.get("auxiliary") or {}).get(LEAD_TASK) or {}) if isinstance(cfg.get("auxiliary"), dict) else {}
     if isinstance(aux, dict) and aux.get("model"):
         add(aux.get("provider"), aux.get("model"), "config")
@@ -158,27 +186,31 @@ def lead_routes(cfg: Optional[dict] = None) -> list[dict]:
     return routes
 
 
-SOURCE_LABEL = {"config": "协作台配置", "hermes_default": "Hermes 默认模型", "hermes_fallback": "Hermes 备用模型"}
+SOURCE_LABEL = {"team": "这个协作任务指定", "config": "协作台配置", "hermes_default": "Hermes 默认模型",
+                "hermes_fallback": "Hermes 备用模型"}
 
 
 def lead_model_info(cfg: Optional[dict] = None) -> dict:
-    """What the lead will use now (shown in HaloWebUI before a plan is made)."""
+    """What the lead will use now (shown in HaloWebUI before a plan is made) and the models a
+    team can pick instead."""
+    cfg = _config() if cfg is None else cfg
     routes = lead_routes(cfg)
+    choices = [m["model"] for m in configured_models(cfg)]
     if not routes:
-        return {"model": "", "source": "", "label": "没有配置模型", "fallbacks": []}
+        return {"model": "", "source": "", "label": "没有配置模型", "fallbacks": [], "choices": choices}
     first = routes[0]
     return {"model": first["model"], "source": first["source"], "label": SOURCE_LABEL.get(first["source"], ""),
-            "fallbacks": [r["model"] for r in routes[1:]]}
+            "fallbacks": [r["model"] for r in routes[1:]], "choices": choices}
 
 
 def call_model(messages: list, timeout: int = 150, *, max_tokens: int = 4000,
-               temperature: float = 0.3) -> tuple[Optional[str], str, dict]:
+               temperature: float = 0.3, preferred: Optional[str] = None) -> tuple[Optional[str], str, dict]:
     """One lead call along ``lead_routes``: ``(text, "", used)`` or ``(None, reason, used)``. Never raises."""
     try:
         from agent.auxiliary_client import call_llm
     except Exception as exc:  # pragma: no cover - import smoke
         return None, f"auxiliary client unavailable: {type(exc).__name__}", {}
-    routes = lead_routes()
+    routes = lead_routes(preferred=preferred)
     if not routes:
         return None, "Hermes 没有配置默认模型（config.yaml 的 model.default）", {}
     failures: list[str] = []
@@ -195,7 +227,8 @@ def call_model(messages: list, timeout: int = 150, *, max_tokens: int = 4000,
             failures.append(f"{route['model']}：没有返回内容")
             continue
         used = {"model": route["model"], "source": route["source"], "label": SOURCE_LABEL.get(route["source"], ""),
-                "fallback_from": [f.split("：", 1)[0] for f in failures], "fallback_reason": "；".join(failures)}
+                "fallback_from": [f.split("：", 1)[0] for f in failures], "fallback_reason": "；".join(failures),
+                **({"requested": preferred} if preferred else {})}
         return text, "", used
     return None, "负责人模型都调用失败：" + "；".join(failures), {"model": "", "fallback_reason": "；".join(failures)}
 
@@ -442,12 +475,12 @@ def _find_cycle(tasks: list[dict]) -> Optional[list[str]]:
 
 
 def propose_plan(goal: str, workspace: str, *, feedback: str = "", previous: Optional[dict] = None,
-                 parallel_cap: int = DEFAULT_PARALLEL_CAP, timeout: int = 150) -> dict:
+                 parallel_cap: int = DEFAULT_PARALLEL_CAP, timeout: int = 150, lead_model: str = "") -> dict:
     """Ask the lead model for a plan, then validate it. One retry when the reply is not usable."""
     messages = build_messages(goal, workspace, feedback, previous)
     last_errors: list[str] = []
     for attempt in range(2):
-        text, reason, used = call_model(messages, timeout=timeout)
+        text, reason, used = call_model(messages, timeout=timeout, preferred=lead_model or None)
         if text is None:
             return {"ok": False, "error": reason, "lead_model": used}
         parsed = extract_json(text)

@@ -88,8 +88,10 @@ async def _plan(request):
     team_id = str(data.get("team_id") or "")
     workspace = default_workspace(board_slug(team_id)) if valid_team_id(team_id) else default_workspace("halo-<新团队>")
     previous = data.get("previous") if isinstance(data.get("previous"), dict) else None
+    lead_model = str(data.get("lead_model") or "").strip()[:120]
     result = await asyncio.to_thread(
         plan_mod.propose_plan, goal, workspace, feedback=str(data.get("feedback") or ""), previous=previous,
+        lead_model=lead_model,
     )
     return _json_response(result, status=200 if result.get("ok") else 502)
 

@@ -51,6 +51,8 @@ def _own(team_id: str, user):
 class CreateTeamForm(BaseModel):
     goal: str = Field(min_length=1, max_length=GOAL_MAX_CHARS)
     chat_id: Optional[str] = Field(default=None, max_length=128)
+    # One of the models Hermes has configured for the lead (plan + conclusion); empty = Hermes' default.
+    lead_model: Optional[str] = Field(default=None, max_length=120)
 
 
 class ReplanForm(BaseModel):
@@ -119,7 +121,8 @@ async def create_team(request: Request, form: CreateTeamForm, user=Depends(get_v
         target = await hermes_target(request, user)
     except TeamsError as exc:
         _raise(exc)
-    team = AgentTeams.insert(user.id, goal, chat_id, default_title(goal))
+    lead_model = (form.lead_model or "").strip() or None
+    team = AgentTeams.insert(user.id, goal, chat_id, default_title(goal), meta={"lead_model": lead_model} if lead_model else None)
     start_planning(team, target)
     return public_team(team)
 

@@ -252,7 +252,9 @@ def generate(slug: str, *, by: str = "auto") -> dict:
     from .plan import call_model
 
     started = time.time()
-    text, reason, used = call_model(_messages(team, rows, files, texts), timeout=300, max_tokens=8000, temperature=0.2)
+    lead = team.get("lead_model") if isinstance(team.get("lead_model"), dict) else {}
+    text, reason, used = call_model(_messages(team, rows, files, texts), timeout=300, max_tokens=8000, temperature=0.2,
+                                    preferred=lead.get("requested") or None)
     source = "lead"
     if text is None or len(text.strip()) < 40:
         source = "assembled"

@@ -66,7 +66,8 @@ class AgentTeamModel(BaseModel):
 
 
 class AgentTeamsTable:
-    def insert(self, user_id: str, goal: str, chat_id: Optional[str], title: str) -> AgentTeamModel:
+    def insert(self, user_id: str, goal: str, chat_id: Optional[str], title: str,
+               meta: Optional[dict] = None) -> AgentTeamModel:
         now = int(time.time())
         with get_db() as db:
             row = AgentTeam(
@@ -77,9 +78,9 @@ class AgentTeamsTable:
                 goal=goal,
                 status="planning",
                 created_at=now,
-                updated_at=now,
-                meta={},
-            )
+                    updated_at=now,
+                    meta=meta or {},
+                )
             db.add(row)
             db.commit()
             db.refresh(row)

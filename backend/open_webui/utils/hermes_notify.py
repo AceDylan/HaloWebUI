@@ -411,6 +411,7 @@ async def show_notification_report(
     quiet: bool = False,
     push: bool = True,
     design: bool = True,
+    max_chars: int = NOTIFICATION_CONTENT_MAX_CHARS,
 ) -> dict[str, Any]:
     """mode=display: show a finished background run's report as the reply, no model turn.
 
@@ -423,12 +424,13 @@ async def show_notification_report(
 
     ``push=False``: no away push (the sender already told the person elsewhere, e.g. a team's
     Telegram notice). ``design=False``: no HTML design pass (a team's conclusion has its own page).
+    ``max_chars``: in-process callers with longer content (a team's complete result).
     """
     content = (content or "").strip()
     notice = (notice or "").strip() or DEFAULT_REPORT_NOTICE
     if not content:
         raise HermesNotifyError(422, "content is empty")
-    if len(content) > NOTIFICATION_CONTENT_MAX_CHARS:
+    if len(content) > max_chars:
         raise HermesNotifyError(422, "content is too long")
     if len(notice) > NOTIFICATION_NOTICE_MAX_CHARS:
         notice = notice[:NOTIFICATION_NOTICE_MAX_CHARS]

@@ -204,7 +204,7 @@ def test_finished_team_reopens_with_new_work_and_rewrites_its_conclusion(pkg, te
     # the second check judges against the goal *and* what the user asked for since
     acceptance_prompt = [text for head, text in lead.fake.prompts if "验收" in head][-1]
     assert "用户在执行中追加" in acceptance_prompt and "按验收发现的缺口补上" in acceptance_prompt
-    report_prompt = [text for head, text in lead.fake.prompts if "最终结论" in head][-1]
+    report_prompt = [text for head, text in lead.fake.prompts if "完整结果" in head][-1]
     assert "用户在执行中追加" in report_prompt
     linked.notify.tick_board(slug, pkg.common.read_team(slug))
     assert "完成" in linked.sent[-1]["text"] and "目标已达成" in linked.sent[-1]["text"]  # a second done notice

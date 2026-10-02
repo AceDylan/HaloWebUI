@@ -134,3 +134,103 @@ def test_bridge_notices_a_finished_team_nobody_is_watching(pkg, monkeypatch):
     bridge._catch_up_conclusion(slug, pkg.common.read_team(slug))
     team = pkg.common.read_team(slug)
     assert team["state"] == "completed" and team["conclusion"]["status"] == "ready"
+
+
+# --- the conclusion is the complete result -------------------------------------------------------
+
+GUIDE = "# 科学戒烟行动指南\n\n## 一、设定戒烟日\n\n" + "选一个具体日子。" * 900 + "\n\n![流程](img/flow.png)\n\n[来源](refs.md)\n"
+
+
+def _guide_team(pkg):
+    team_id, slug, ws = _finished_team(pkg, results={"T1": "查到了权威资料", "T2": "完整指南写在 docs/guide.md"})
+    (ws / "docs" / "img").mkdir(parents=True)
+    (ws / "docs" / "guide.md").write_text("---\ntitle: x\n---\n" + GUIDE, encoding="utf-8")
+    (ws / "docs" / "img" / "flow.png").write_bytes(b"\x89PNG\r\n\x1a\n" + b"0" * 64)
+    return team_id, slug, ws
+
+
+def test_the_lead_places_a_finished_document_in_full(pkg, monkeypatch):
+    seen = []
+
+    def fake(messages, timeout=150, **kw):
+        seen.append((messages, kw, timeout))
+        if "验收" in messages[0]["content"][:80]:
+            return '{"verdict": "met", "summary": "达成", "gaps": []}', "", {"model": "gpt-chat"}
+        return ("# 戒烟：完整方案\n\n> 先定戒烟日。\n\n<!-- halo:include docs/guide.md -->\n\n"
+                "```\n<!-- halo:include report.md -->\n```\n\n<!-- halo:include ../../etc/passwd -->\n"
+                "<!-- halo:include shots/home.png -->\n\n## 附注\n\n没有个性化。\n"), "", {"model": "gpt-chat"}
+
+    monkeypatch.setattr(pkg.plan, "call_model", fake)
+    team_id, slug, _ws = _guide_team(pkg)
+    pkg.teams.snapshot(team_id, "u1")
+    data = pkg.conclusion.read(slug, pkg.common.read_team(slug))
+    md = data["markdown"]
+    # The whole document, not a summary: every sentence of it, its headings under the result's title.
+    assert md.count("选一个具体日子。") == 900
+    assert "\n## 科学戒烟行动指南\n" in md and "\n### 一、设定戒烟日\n" in md and md.startswith("# 戒烟：完整方案")
+    assert "title: x" not in md  # front matter dropped
+    # Its relative links now resolve from the workspace root.
+    assert "![流程](docs/img/flow.png)" in md and "[来源](docs/refs.md)" in md
+    # Inside code it stays literal; outside the workspace / binary files are never placed.
+    assert "```\n<!-- halo:include report.md -->\n```" in md
+    assert "passwd" not in md.replace("../../etc/passwd", "") and "PNG" not in md
+    assert md.rstrip().endswith("没有个性化。")
+    entry = data["entry"]
+    assert entry["format"] == 2 and entry["included"] == ["docs/guide.md"] and entry["chars"] == len(md)
+    brief = pkg.teams.snapshot(team_id, "u1")["team"]["conclusion"]
+    assert brief["format"] == 2 and brief["included"] == ["docs/guide.md"]
+    # The lead was asked for the complete result, with room for it, and saw the whole document.
+    messages, kw, timeout = seen[0]
+    assert "完整结果" in messages[0]["content"] and "halo:include" in messages[0]["content"]
+    assert kw["max_tokens"] >= 16000 and timeout >= 600
+    assert messages[1]["content"].count("选一个具体日子。") == 900
+
+
+def test_a_long_document_is_cut_in_the_prompt_but_placed_in_full(pkg, monkeypatch):
+    seen = []
+    monkeypatch.setattr(pkg.plan, "call_model", lambda m, *a, **k: (seen.append(m) or "# 结果\n\n<!-- halo:include book.md -->\n", "", {"model": "gpt-chat"}))
+    team_id, slug, ws = _finished_team(pkg)
+    (ws / "book.md").write_text("# 书\n\n" + "长" * 90000 + "\n结尾句。\n", encoding="utf-8")
+    pkg.teams.snapshot(team_id, "u1")
+    prompt = seen[0][1]["content"]
+    assert "全文 9" in prompt and "用 halo:include 引用时放的是全文" in prompt and "结尾句" not in prompt
+    md = pkg.conclusion.read(slug, pkg.common.read_team(slug))["markdown"]
+    assert md.count("长") >= 90000 and "结尾句。" in md
+
+
+def test_a_wrapped_answer_is_unwrapped_and_includes_still_work(pkg, monkeypatch):
+    monkeypatch.setattr(pkg.plan, "call_model", lambda *a, **k: ("```markdown\n# 结果\n\n<!-- halo:include report.md -->\n```", "", {"model": "gpt-chat"}))
+    team_id, slug, _ws = _finished_team(pkg)
+    pkg.teams.snapshot(team_id, "u1")
+    md = pkg.conclusion.read(slug, pkg.common.read_team(slug))["markdown"]
+    assert md.startswith("# 结果") and "## 报告" in md and "结论：可行。" in md and "```" not in md
+
+
+def test_without_a_model_the_main_document_is_still_there_in_full(pkg, monkeypatch):
+    monkeypatch.setattr(pkg.plan, "call_model", lambda *a, **k: (None, "负责人模型都调用失败", {}))
+    team_id, slug, _ws = _guide_team(pkg)
+    pkg.teams.snapshot(team_id, "u1")
+    data = pkg.conclusion.read(slug, pkg.common.read_team(slug))
+    assert data["entry"]["source"] == "assembled" and data["markdown"].count("选一个具体日子。") == 900
+    assert data["entry"]["included"] == ["docs/guide.md"]
+
+
+def test_a_provider_with_a_lower_output_cap_gets_its_cap(pkg, monkeypatch):
+    import agent.auxiliary_client as aux
+
+    calls = []
+
+    class Resp:
+        def __init__(self, text):
+            self.choices = [type("C", (), {"message": type("M", (), {"content": text})()})()]
+
+    def fake_llm(**kw):
+        calls.append(kw["max_tokens"])
+        if kw["max_tokens"] > 8192:
+            raise RuntimeError("Invalid max_tokens value, the valid range of max_tokens is [1, 8192]")
+        return Resp("好")
+
+    monkeypatch.setattr(aux, "call_llm", fake_llm)
+    monkeypatch.setattr(pkg.plan, "lead_routes", lambda **k: [{"provider": "deepseek", "model": "deepseek-chat", "source": "hermes_default"}])
+    text, reason, used = pkg.plan.call_model([{"role": "user", "content": "x"}], max_tokens=16000)
+    assert text == "好" and calls == [16000, pkg.plan.SAFE_MAX_TOKENS] and used["model"] == "deepseek-chat"

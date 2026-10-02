@@ -728,11 +728,11 @@
 							</div>
 							<div class="text-xs text-gray-500 dark:text-gray-400">
 								{#if conclusionBrief?.status === 'ready'}
-									负责人写好了结论{conclusionBrief.model ? `（${conclusionBrief.model}）` : ''}
+									完整结果已整理好{conclusionBrief.model ? `（${conclusionBrief.model}）` : ''}
 								{:else if conclusionBrief?.status === 'failed'}
 									结论没写成，可以在「结论」里重新生成
 								{:else}
-									<span class="tm-shimmer">负责人正在根据所有成员的结果写结论…</span>
+									<span class="tm-shimmer">负责人正在把各成员的成果整合成完整结果…</span>
 								{/if}
 							</div>
 						</div>

@@ -267,6 +267,11 @@ def lead_model_info(cfg: Optional[dict] = None) -> dict:
             "fallbacks": [r["model"] for r in routes[1:]], "choices": choices}
 
 
+SAFE_MAX_TOKENS = 8000
+_MAX_TOKENS_ERROR = re.compile(r"max_tokens|max_completion_tokens|max_output_tokens|maximum.{0,30}tokens|"
+                               r"tokens.{0,40}(exceed|too large|range|limit)", re.I)
+
+
 def call_model(messages: list, timeout: int = 150, *, max_tokens: int = 4000,
                temperature: float = 0.3, preferred: Optional[str] = None) -> tuple[Optional[str], str, dict]:
     """One lead call along ``lead_routes``: ``(text, "", used)`` or ``(None, reason, used)``. Never raises."""
@@ -280,8 +285,16 @@ def call_model(messages: list, timeout: int = 150, *, max_tokens: int = 4000,
     failures: list[str] = []
     for route in routes:
         try:
-            resp = call_llm(task=None, provider=route["provider"], model=route["model"], messages=messages,
-                            temperature=temperature, max_tokens=max_tokens, timeout=timeout)
+            try:
+                resp = call_llm(task=None, provider=route["provider"], model=route["model"], messages=messages,
+                                temperature=temperature, max_tokens=max_tokens, timeout=timeout)
+            except Exception as exc:
+                # A long answer asks for more output than some providers allow (deepseek-chat: 8192):
+                # the same route once more within the common cap.
+                if max_tokens <= SAFE_MAX_TOKENS or not _MAX_TOKENS_ERROR.search(str(exc)):
+                    raise
+                resp = call_llm(task=None, provider=route["provider"], model=route["model"], messages=messages,
+                                temperature=temperature, max_tokens=SAFE_MAX_TOKENS, timeout=timeout)
             text = resp.choices[0].message.content or ""
         except Exception as exc:
             failures.append(f"{route['model']}：{type(exc).__name__}: {redact(exc, 160)}")

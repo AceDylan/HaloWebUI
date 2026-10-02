@@ -35,9 +35,13 @@ is the Hermes side. It adds no service, port or second task store:
   prompt is its role in the task body.
 * **The lead** (`plan.py`) runs on Hermes' `model.default` read on every call, then its
   `fallback_providers`; `auxiliary.halo_team_lead` overrides.
-* **The conclusion** (`conclusion.py`): when a team finishes, the lead writes a Markdown report
-  from every task's full result and the workspace files (assembled from the records when no model
-  answers), stored in `<workspace>/.halo/conclusion.md`.
+* **The conclusion** (`conclusion.py`): when a team finishes, the lead hands over the task's
+  **complete result** — the full answer / document / images the goal asked for, not a report on
+  who did what — from every task's full result and the workspace files. A member's finished
+  document is placed in full (`<!-- halo:include path -->`, expanded by `expand_includes`: links
+  rebased, headings under the result's title), never rewritten or shortened. Assembled from the
+  deliverables and records when no model answers; stored in `<workspace>/.halo/conclusion.md`
+  (entry `format: 2`, `included`).
 * **The lead stays in the loop** (`lead.py`): 「对负责人说」 — the user says something while the
   team works or after it finished; the lead reads the team's state and answers, proposing a plan
   change when needed (new members, new tasks that may build on finished ones, cancelling or

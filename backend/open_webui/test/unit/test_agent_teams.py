@@ -624,6 +624,7 @@ def test_the_conclusion_goes_into_the_chat_the_team_came_from(hermes, monkeypatc
     call = shown[0]
     assert call["chat_id"] == "chat-1" and call["source"] == "team" and call["run_id"] == f"team:{team_id}:1700000123"
     assert call["push"] is False and call["design"] is False and call["quiet"] is False  # Telegram already told them
+    assert call["max_chars"] >= 60000  # the complete result, not a 20000-char report
     content = call["content"]
     assert f"](/api/v1/teams/{team_id}/files/charts/a.png)" in content
     assert f"![charts/b.png](/api/v1/teams/{team_id}/files/charts/b.png)" in content  # a bare path of a known image
@@ -653,6 +654,20 @@ def test_the_conclusion_goes_into_the_chat_the_team_came_from(hermes, monkeypatc
 
     monkeypatch.setattr(hermes_notify, "show_notification_report", busy)
     assert bare.post(f"/api/v1/teams/hermes/teams/{team_id}/concluded", headers=h, json={}).status_code == 409
+
+
+def test_a_long_complete_result_goes_into_the_chat_whole(hermes):
+    from open_webui.utils import agent_team_outputs as outputs
+
+    client = _client("u1")
+    team = AgentTeams.get(_finished_team(client, hermes, chat_id="chat-1"), "u1")
+    body = "# 科学戒烟行动指南\n\n" + "完整的一句话。" * 6000  # ~42 000 characters
+    content = outputs.chat_content(team, {**CONCLUSION, "markdown": body})
+    assert content.count("完整的一句话。") == 6000 and "结果较长" not in content
+    assert len(content) <= outputs.CHAT_POST_MAX_CHARS
+    huge = outputs.chat_content(team, {**CONCLUSION, "markdown": "长" * 90000})
+    assert "结果较长" in huge and len(huge) <= outputs.CHAT_POST_MAX_CHARS
+    assert "完整结果" in outputs.notice_text(team, CONCLUSION)
 
 
 def test_follow_up_opens_a_new_chat_with_the_conclusion_for_a_team_without_one(hermes, monkeypatch):

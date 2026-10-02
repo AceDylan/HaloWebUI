@@ -268,6 +268,10 @@ export type ConclusionEntry = {
 	by?: string;
 	error?: string;
 	acceptance?: Acceptance;
+	/** 2: the conclusion is the task's complete result (older ones were a report about the work) */
+	format?: number;
+	/** workspace files the lead placed in the result in full */
+	included?: string[];
 };
 
 export type WorkspaceFile = {

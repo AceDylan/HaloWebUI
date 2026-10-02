@@ -456,7 +456,7 @@ def _mark_completed(slug: str, team: dict) -> None:
 def _conclusion_brief(team: dict) -> dict:
     entry = team.get("conclusion") or {}
     keep = ("status", "source", "model", "model_label", "generated_at", "started_at", "chars", "error",
-            "tasks_done", "tasks_total", "acceptance")
+            "tasks_done", "tasks_total", "acceptance", "format", "included")
     return {k: entry[k] for k in keep if entry.get(k) not in (None, "")}
 
 

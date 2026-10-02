@@ -26,7 +26,10 @@ log = logging.getLogger(__name__)
 
 KNOWLEDGE_NAME = "协作结论"
 KNOWLEDGE_DESCRIPTION = "协作台各团队的结论报告（在结论页点「存入知识库」时存入）。"
-CHAT_CONTENT_MAX_CHARS = 18000  # show_notification_report takes up to 20000
+# The conclusion is the task's complete result: it goes into the chat whole up to this size (the
+# chat's next Hermes turn reads it as history), longer ones end with a pointer to the page.
+CHAT_CONTENT_MAX_CHARS = 60000
+CHAT_POST_MAX_CHARS = CHAT_CONTENT_MAX_CHARS + 4000
 NOTICE_SOURCE = "team"
 
 _FENCE_RE = re.compile(r"^\s*(`{3,}|~{3,})")
@@ -113,11 +116,11 @@ def chat_content(team: AgentTeamModel, conclusion: dict) -> str:
     markdown = chat_links(team.id, conclusion.get("markdown") or "", conclusion.get("workspace") or "",
                           [f.get("path") for f in conclusion.get("files") or [] if isinstance(f, dict)]).strip()
     if len(markdown) > CHAT_CONTENT_MAX_CHARS:
-        markdown = markdown[:CHAT_CONTENT_MAX_CHARS].rstrip() + "\n\n…（结论较长，后面的部分请在协作台看）"
+        markdown = markdown[:CHAT_CONTENT_MAX_CHARS].rstrip() + "\n\n…（结果较长，后面的部分请在协作台看）"
     tail = ["---", *_acceptance_lines(conclusion.get("entry") or {})]
     if len(tail) > 1:
         tail.append("")
-    tail.append(f"[在协作台看完整结论、产出文件和各任务的原始结果](/teams/{team.id}/conclusion)")
+    tail.append(f"[在协作台看结果页、产出文件和过程记录](/teams/{team.id}/conclusion)")
     return markdown + "\n\n" + "\n".join(tail)
 
 
@@ -126,7 +129,7 @@ def notice_text(team: AgentTeamModel, conclusion: dict) -> str:
     its files are."""
     title = (team.title or "协作任务").strip()
     state = "已停止" if team.phase == "stopped" else "已完成"
-    head = f"[协作任务结论] 「{title}」{state}，下面是负责人写的结论。"
+    head = f"[协作任务结论] 「{title}」{state}，下面是负责人整理的完整结果。"
     parts = []
     workspace = str(conclusion.get("workspace") or "").strip()
     if workspace:
@@ -188,6 +191,7 @@ async def post_to_chat(request, team: AgentTeamModel, conclusion: dict, *, quiet
             quiet=quiet,
             push=push,
             design=False,
+            max_chars=CHAT_POST_MAX_CHARS,
         )
     except HermesNotifyError as exc:
         raise _notify_error(exc) from exc

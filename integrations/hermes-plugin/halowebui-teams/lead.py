@@ -960,6 +960,14 @@ ACCEPTANCE_SYSTEM = """你是协作团队的负责人（team-lead）。团队做
 - 用户在执行中追加 / 调整过要求时，按调整后的要求验收：用户要求加的任务不算超出范围，用户同意取消 / 跳过的任务不算缺口。"""
 
 
+def _head_tail(text: str, limit: int) -> str:
+    """At most *limit* characters of a long text: its start and its end."""
+    if len(text) <= limit:
+        return text
+    tail = limit // 5
+    return text[: limit - tail] + f"\n\n…（中间省略 {len(text) - limit} 字）…\n\n" + text[-tail:]
+
+
 def check_acceptance(slug: str) -> None:
     """After the conclusion is written: the lead's acceptance against the goal (in the entry)."""
     from .conclusion import _set, conclusion_path
@@ -980,7 +988,7 @@ def check_acceptance(slug: str) -> None:
                 {"role": "user", "content": f"协作目标：\n{redact(team.get('goal'), 3000, one_line=False)}\n\n"
                                             + (later_requests(team) + "\n\n" if later_requests(team) else "")
                                             + f"任务：\n{statuses}\n\n"
-                                            f"结论：\n{markdown[:20000]}"}]
+                                            f"结论（交给用户的完整结果）：\n{_head_tail(markdown, 50000)}"}]
     parsed, error, used, _text = _call(team, messages, max_tokens=1500, timeout=120)
     if parsed is None:
         _set(slug, acceptance={"status": "failed", "error": redact(error, 300), "at": now()})

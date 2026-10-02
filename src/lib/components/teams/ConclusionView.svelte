@@ -61,6 +61,9 @@
 	$: fileList = data?.files ?? [];
 	$: images = fileList.filter((f) => f.kind === 'image');
 	$: others = fileList.filter((f) => f.kind !== 'image');
+	// Files the lead placed in the result in full (format 2: the conclusion is the complete result).
+	$: included = new Set(entry.included ?? []);
+	$: oldFormat = status === 'ready' && entry.source === 'lead' && !entry.format;
 	$: reportOpts = {
 		workspace: data?.workspace ?? null,
 		fileUrl: (path: string) => teamFilePath(teamId, path),
@@ -108,7 +111,7 @@
 					status: 'generating',
 					entry: { ...data.entry, status: 'generating', error: '' }
 				};
-			toast.success('负责人开始写结论，通常 30–90 秒');
+			toast.success('负责人开始整理完整结果，通常 1–3 分钟');
 		} catch (e) {
 			toast.error(`${(e as Error)?.message ?? e}`);
 		} finally {
@@ -225,7 +228,7 @@
 					<p class="mt-1 max-w-sm text-xs leading-relaxed text-gray-500">
 						{phase === 'stopped'
 							? `协作任务已停止，${doneTasks} 个任务有结果。`
-							: ''}让负责人把各成员的结果整理成一份完整的结论报告。
+							: ''}让负责人把各成员的成果整合成一份完整结果。
 					</p>
 				</div>
 				<button type="button" class="tm-btn-primary" disabled={writing} on:click={write}
@@ -235,7 +238,7 @@
 				<div>
 					<div class="text-sm font-medium text-gray-900 dark:text-gray-100">结论还没开始写</div>
 					<p class="mt-1 max-w-xs text-xs leading-relaxed text-gray-500">
-						所有任务完成后，负责人会根据每个成员的完整结果和工作目录里的产出写一份结论报告，显示在这里。
+						所有任务完成后，负责人会把各成员的成果整合成这次任务的完整结果（完整的答案、文档、图片），显示在这里。
 					</p>
 				</div>
 				{#if progress && progress.total}
@@ -263,7 +266,7 @@
 				{#if generating}
 					<StatusChip
 						status="running"
-						label={data?.markdown ? '正在重写结论' : '负责人正在写结论'}
+						label={data?.markdown ? '正在重写结论' : '负责人正在整理结果'}
 					/>
 				{:else if status === 'failed'}
 					<StatusChip status="failed" label="生成失败" />
@@ -365,9 +368,9 @@
 					<div class="conclusion-progress h-full w-1/3 bg-sky-500" />
 				</div>
 				<div class="px-3 py-2">
-					负责人{entry.model ? `（${entry.model}）` : ''}正在根据 {data?.tasks.length ??
+					负责人{entry.model ? `（${entry.model}）` : ''}正在把 {data?.tasks.length ??
 						progress?.total ??
-						''} 个任务的完整结果和工作目录里的产出写结论，通常 30–90 秒。{data?.markdown
+						''} 个任务的成果和工作目录里的产出整合成完整结果，成员写好的成品文件会原样放进来，通常 1–3 分钟。{data?.markdown
 						? '下面是上一版。'
 						: ''}
 				</div>
@@ -380,6 +383,22 @@
 				data-conclusion-outdated
 			>
 				团队按你的要求接着干活了，这是上一版结论；新的任务做完后负责人会重写。
+			</div>
+		{/if}
+		{#if oldFormat && !generating}
+			<div
+				class="mb-3 flex flex-wrap items-center gap-x-2 gap-y-1 rounded-xl border border-sky-500/20 bg-sky-500/[0.06] px-3 py-2 text-xs text-sky-900 dark:text-sky-100"
+				data-conclusion-old-format
+			>
+				<span class="min-w-0 flex-1"
+					>这是旧版的概述式结论。现在的结论就是任务的完整结果——成员写好的完整文档会原样放进来。</span
+				>
+				<button
+					type="button"
+					class="shrink-0 font-medium underline underline-offset-2"
+					disabled={writing}
+					on:click={write}>整理成完整结果</button
+				>
 			</div>
 		{/if}
 		{#if status === 'failed' && entry.error}
@@ -523,6 +542,11 @@
 										class="min-w-0 flex-1 truncate font-mono text-gray-700 dark:text-gray-200"
 										title={f.path}>{f.path}</span
 									>
+									{#if included.has(f.path)}<span
+											class="shrink-0 rounded-full bg-emerald-500/10 px-1.5 py-0.5 text-[10px] text-emerald-700 dark:text-emerald-300"
+											title="这个文件的全文已经放在上面的结果里"
+											data-file-included>全文在上面</span
+										>{/if}
 									<span class="shrink-0 tabular-nums text-gray-400">{formatBytes(f.size)}</span>
 								</a>
 							</li>
@@ -541,8 +565,29 @@
 				aria-label="各任务的原始结果"
 				data-conclusion-tasks
 			>
-				<h3 class="tm-eyebrow mb-1">各任务的原始结果</h3>
-				<p class="mb-3 text-xs text-gray-500">成员交付时写的完整结果，结论就是根据它们写的。</p>
+				<details class="process">
+					<summary
+						class="tm-eyebrow flex cursor-pointer select-none list-none items-center gap-1.5 [&::-webkit-details-marker]:hidden"
+						data-conclusion-process
+						><svg
+							class="process-caret size-3 shrink-0 transition-transform"
+							viewBox="0 0 16 16"
+							fill="none"
+							aria-hidden="true"
+							><path
+								d="m6 3.5 4.5 4.5L6 12.5"
+								stroke="currentColor"
+								stroke-width="1.6"
+								stroke-linecap="round"
+								stroke-linejoin="round"
+							/></svg
+						>过程记录<span class="tm-num ml-1 font-normal normal-case"
+							>{data.tasks.length} 个任务的原始结果</span
+						></summary
+					>
+					<p class="mb-3 mt-1.5 text-xs text-gray-500">
+						上面就是这次任务的完整结果；这里是成员交付时的原始记录，想看某一步怎么做的再展开。
+					</p>
 				<ul class="flex flex-col gap-2">
 					{#each data.tasks as t (t.id)}
 						<li>
@@ -604,6 +649,7 @@
 						</li>
 					{/each}
 				</ul>
+				</details>
 			</section>
 		{/if}
 	{/if}
@@ -618,6 +664,9 @@
 />
 
 <style>
+	.process[open] .process-caret {
+		transform: rotate(90deg);
+	}
 	.files > li + li {
 		border-color: hsl(var(--tm-line));
 	}

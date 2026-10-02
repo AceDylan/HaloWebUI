@@ -329,3 +329,16 @@ def test_the_away_push_of_a_question_report_leads_with_the_question():
 def test_the_away_push_of_a_plain_report_drops_the_reply_hint_and_quota():
     report = "✅ reclaude 运行 r · 已完成\nx · 3m\n\n都改好了。\n\n↩️ 回复「继续」，可以在同一个会话里接着跑。\n\n**reclaude 额度**：剩余 $1"
     assert hermes_notify.report_push_text(report) == "✅ reclaude 运行 r · 已完成\nx · 3m\n\n都改好了。"
+
+
+def test_a_longer_report_needs_an_in_process_caller_that_allows_it(monkeypatch):
+    import pytest
+
+    calls, asyncio = _patch_report_stack(monkeypatch)
+    long = "✅ " + "完整结果" * 6000  # 24 002 characters
+    with pytest.raises(hermes_notify.HermesNotifyError) as error:
+        asyncio.run(hermes_notify.show_notification_report(object(), chat_id="chat-1", content=long, design=False))
+    assert error.value.status_code == 422 and calls["saved"] == []
+    result = asyncio.run(hermes_notify.show_notification_report(object(), chat_id="chat-1", content=long,
+                                                               design=False, max_chars=64000))
+    assert calls["saved"][-1]["history"]["messages"][result["assistant_message_id"]]["content"] == long

@@ -295,7 +295,7 @@
 					把目标交给一支 AI 团队
 				</h2>
 				<p class="max-w-xl text-sm leading-relaxed text-gray-500 dark:text-gray-400">
-					负责人拆分任务、为每位成员挑选最合适的代理并按依赖并行推进；你批准计划后才开工，结束时交付一份完整结论。
+					负责人拆分任务、为每位成员挑选最合适的代理并按依赖并行推进；你批准计划后才开工，结束时交付完整结果——完整的答案、文档和图片。
 				</p>
 				<p
 					class="max-w-xl text-xs leading-relaxed text-gray-400 dark:text-gray-500"
@@ -663,7 +663,7 @@
 							还没有协作任务 · 三步走完一次
 						</div>
 						<ol class="grid gap-3 sm:grid-cols-3">
-							{#each [['描述目标', '在上面写下要完成的事，或点一个快速开始'], ['批准计划', '负责人给出成员分工和任务依赖，你可以改执行来源或要求重做'], ['收结论', '成员并行执行、自动兜底，完成后负责人写出完整报告']] as [title, text], i}
+							{#each [['描述目标', '在上面写下要完成的事，或点一个快速开始'], ['批准计划', '负责人给出成员分工和任务依赖，你可以改执行来源或要求重做'], ['收结论', '成员并行执行、自动兜底，完成后负责人交付完整结果']] as [title, text], i}
 								<li class="flex gap-3">
 									<span
 										class="tm-num grid size-6 shrink-0 place-items-center rounded-full border text-[11px] font-semibold text-gray-500 tm-hairline"

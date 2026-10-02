@@ -164,8 +164,12 @@ describe('ConclusionView', () => {
 		const files = target.querySelector('[data-conclusion-files]');
 		expect(files.querySelectorAll('img').length).toBe(1);
 		expect(files.textContent).toContain('compare.md');
-		// Task results open on demand; a whole-JSON result is shown as a JSON code block.
-		const details = target.querySelectorAll('[data-conclusion-tasks] details');
+		// The process record (every task's raw result) is folded away under the result, and each
+		// result opens on demand; a whole-JSON result is shown as a JSON code block.
+		const process = target.querySelector('[data-conclusion-tasks] details.process');
+		expect(process.open).toBeFalsy();
+		expect(target.querySelector('[data-conclusion-process]').textContent).toContain('过程记录');
+		const details = target.querySelectorAll('[data-conclusion-tasks] li > details');
 		expect(details.length).toBe(2);
 		expect(details[1].textContent).toContain('anyclaude');
 		details[0].open = true;
@@ -293,6 +297,29 @@ describe('ConclusionView', () => {
 		expect(api.writeTeamConclusion).toHaveBeenCalledWith('tok', 'team-1');
 	});
 
+	it('the complete result marks the files placed in it; an old summary offers to become one', async () => {
+		api.getTeamConclusion.mockResolvedValue({
+			...CONCLUSION,
+			entry: { ...CONCLUSION.entry, format: 2, included: ['compare.md'] }
+		});
+		await mount(ConclusionView, { teamId: 'team-1', phase: 'completed', variant: 'page' });
+		await until(() => !!target.querySelector('[data-team-report] h1'));
+		const included = target.querySelectorAll('[data-file-included]');
+		expect(included.length).toBe(1);
+		expect(included[0].closest('a').textContent).toContain('compare.md');
+		expect(target.querySelectorAll('[data-conclusion-old-format]').length).toBe(0);
+		app.$destroy();
+		target.remove();
+		// A conclusion written before (a report about the work): one click rewrites it as the result.
+		api.getTeamConclusion.mockResolvedValue(CONCLUSION);
+		api.writeTeamConclusion.mockResolvedValue({ status: 'generating' });
+		await mount(ConclusionView, { teamId: 'team-1', phase: 'completed', variant: 'page' });
+		await until(() => !!target.querySelector('[data-conclusion-old-format]'));
+		target.querySelector('[data-conclusion-old-format] button').click();
+		await until(() => api.writeTeamConclusion.mock.calls.length === 1);
+		expect(api.writeTeamConclusion.mock.calls[0][1]).toBe('team-1');
+	});
+
 	it('shows generation in progress and an assembled fallback honestly', async () => {
 		api.getTeamConclusion.mockResolvedValue({
 			...CONCLUSION,
@@ -300,8 +327,8 @@ describe('ConclusionView', () => {
 			entry: { status: 'generating', model: 'gpt-chat' }
 		});
 		await mount(ConclusionView, { teamId: 'team-1', phase: 'completed' });
-		await until(() => target.textContent.includes('正在根据'));
-		expect(target.textContent).toContain('负责人（gpt-chat）正在根据 2 个任务');
+		await until(() => target.textContent.includes('整合成完整结果'));
+		expect(target.textContent).toContain('负责人（gpt-chat）正在把 2 个任务的成果');
 		app.$destroy();
 		target.remove();
 		api.getTeamConclusion.mockResolvedValue({

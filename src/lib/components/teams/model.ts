@@ -195,7 +195,9 @@ export const boardDirection = (
 	minZoom = 0.8
 ): 'LR' | 'TB' => {
 	if (!boxWidth || tasks.length < 2) return 'LR';
-	const zoom = (l: BoardLayout) => Math.min(1, boxWidth / l.width, maxHeight / l.height);
+	// fitView keeps a little padding round the cards (TeamBoard: 6% each side).
+	const zoom = (l: BoardLayout) =>
+		Math.min(1, boxWidth / (l.width * 1.12), maxHeight / (l.height * 1.12));
 	const lr = zoom(layoutTasks(tasks, 'LR'));
 	if (lr >= minZoom) return 'LR';
 	return zoom(layoutTasks(tasks, 'TB')) > lr + 0.05 ? 'TB' : 'LR';

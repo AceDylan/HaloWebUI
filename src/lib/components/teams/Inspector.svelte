@@ -30,6 +30,22 @@
 		type TaskState
 	} from './model';
 
+	const OUTCOME_LABEL: Record<string, string> = {
+		completed: '完成',
+		done: '完成',
+		failed: '失败',
+		crashed: '中途退出',
+		blocked: '受阻',
+		stopped: '已停止',
+		timed_out: '超时',
+		running: '执行中',
+		reclaimed: '被收回重派',
+		spawn_failed: '没启动起来',
+		cancelled: '已取消',
+		timeout: '超时',
+		review_requested: '转评审'
+	};
+
 	/** Details of the selected task or member. Read-only in a replay. */
 	export let teamId: string;
 	export let taskId: string | null = null;
@@ -376,7 +392,11 @@
 								<li class="rounded-xl border tm-hairline px-2 py-1.5 text-xs">
 									<div class="flex items-center gap-2 flex-wrap">
 										<span class="font-medium">第 {attempt.n} 次</span>
-										<span class="text-gray-500">{attempt.outcome ?? attempt.status}</span>
+										<span class="text-gray-500"
+											>{OUTCOME_LABEL[attempt.outcome ?? attempt.status] ??
+												attempt.outcome ??
+												attempt.status}</span
+										>
 										<span class="text-gray-400 font-mono"
 											>{formatClock(attempt.started_at)}{attempt.ended_at
 												? ` – ${formatClock(attempt.ended_at)}`

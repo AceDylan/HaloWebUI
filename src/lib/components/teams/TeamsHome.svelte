@@ -303,13 +303,16 @@
 				<div class="flex items-center gap-2 px-3 pt-1 pb-3">
 					<div class="tm-scroll flex min-w-0 flex-1 items-center gap-2 overflow-x-auto">
 						<label
-							class="pill flex min-w-0 items-center gap-1.5 rounded-full py-1 pr-1 pl-2.5 text-xs"
+							class="pill flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full py-1 pr-1 pl-2.5 text-xs"
 							data-lead-model
 							title="负责人做计划、写结论用的模型；默认跟随 Hermes 当前的默认模型"
 						>
 							<TeamAvatar kind="lead" size={16} />
 							<span class="shrink-0 text-gray-500 dark:text-gray-400">负责人</span>
-							<select bind:value={leadModel} class="compact-select min-w-0 max-w-[12rem] truncate">
+							<select
+								bind:value={leadModel}
+								class="compact-select min-w-0 max-w-[9rem] truncate sm:max-w-[12rem]"
+							>
 								<option value=""
 									>{meta?.lead_model?.model
 										? `Hermes 默认 · ${defaultModel}`
@@ -322,7 +325,7 @@
 						</label>
 						<button
 							type="button"
-							class="pill inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs text-gray-600 dark:text-gray-300"
+							class="pill inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-1 text-xs text-gray-600 dark:text-gray-300"
 							aria-expanded={showRunners}
 							on:click={() => (showRunners = !showRunners)}
 							data-runner-summary
@@ -367,8 +370,9 @@
 						>
 						<button
 							type="submit"
-							class="tm-btn-primary"
+							class="tm-btn-primary max-sm:!px-2.5"
 							disabled={creating || !goal.trim()}
+							aria-label="让负责人做计划"
 							data-create-team
 						>
 							{#if creating}
@@ -377,7 +381,7 @@
 									aria-hidden="true"
 								/>提交中…
 							{:else}
-								让负责人做计划
+								<span class="max-sm:sr-only">让负责人做计划</span>
 								<svg class="size-3.5" viewBox="0 0 16 16" fill="none" aria-hidden="true"
 									><path
 										d="M3 8h9.5M8.5 4l4 4-4 4"

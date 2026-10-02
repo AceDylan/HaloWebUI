@@ -29,7 +29,7 @@ class Lead:
 
     def __call__(self, messages, *a, **k):
         system = messages[0]["content"]
-        self.prompts.append((system[:40], messages[-1]["content"]))
+        self.prompts.append((system, messages[-1]["content"]))
         if "说了一段话" in system:
             reply = self.change.pop(0) if self.change else {"reply": "收到", "add_tasks": []}
             return json.dumps(reply, ensure_ascii=False), "", {"model": "gpt-chat"}
@@ -114,7 +114,7 @@ def test_change_request_is_proposed_then_applied_onto_the_board(pkg, team_id, pl
         assert "wireframe.md" in _kb().get_task(conn, t2["id"]).body
         assert "qa-engineer（测试）" in _kb().get_task(conn, t5["id"]).body  # new members known to the team
     texts = [e["text"] for e in pkg.teams.timeline(team_id, OWNER)["events"] if e["type"] == "team"]
-    assert any(t.startswith("Ace对负责人说：加上接口测试") for t in texts)
+    assert any(t.startswith("Ace 对负责人说：加上接口测试") for t in texts)
     assert any("负责人提出计划变更" in t for t in texts)
     assert any(t.startswith("计划变更已应用：加入成员 qa-engineer；新任务 T4、T5；改写 T2") for t in texts)
     with pytest.raises(pkg.teams.TeamError):  # once only
@@ -201,6 +201,11 @@ def test_finished_team_reopens_with_new_work_and_rewrites_its_conclusion(pkg, te
     data = pkg.conclusion.read(slug, pkg.common.read_team(slug))
     assert data["markdown"].startswith("# 第二版报告")  # rewritten, not the old one
     assert snap["team"]["conclusion"]["acceptance"]["verdict"] == "met"
+    # the second check judges against the goal *and* what the user asked for since
+    acceptance_prompt = [text for head, text in lead.fake.prompts if "验收" in head][-1]
+    assert "用户在执行中追加" in acceptance_prompt and "按验收发现的缺口补上" in acceptance_prompt
+    report_prompt = [text for head, text in lead.fake.prompts if "最终结论" in head][-1]
+    assert "用户在执行中追加" in report_prompt
     linked.notify.tick_board(slug, pkg.common.read_team(slug))
     assert "完成" in linked.sent[-1]["text"] and "目标已达成" in linked.sent[-1]["text"]  # a second done notice
     assert "done:1" in pkg.common.read_team(slug)["notified"]

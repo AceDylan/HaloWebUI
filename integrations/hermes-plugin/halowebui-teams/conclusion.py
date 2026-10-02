@@ -205,7 +205,9 @@ def _messages(team: dict, rows: list[dict], files: list[dict], texts: list[tuple
     members = "\n".join(
         f"- {m.get('name')}（{m.get('role')}{'，助手模板「' + m['assistant']['name'] + '」' if isinstance(m.get('assistant'), dict) else ''}）"
         for m in team.get("members") or [])
-    parts = [f"协作目标：\n{team.get('goal') or ''}", f"团队：{team.get('title') or ''}\n负责人的分工说明：{team.get('summary') or '（无）'}\n成员：\n{members}"]
+    from .lead import later_requests
+
+    parts = [f"协作目标：\n{team.get('goal') or ''}" + ("\n\n" + later_requests(team) if later_requests(team) else ""), f"团队：{team.get('title') or ''}\n负责人的分工说明：{team.get('summary') or '（无）'}\n成员：\n{members}"]
     budget = PROMPT_RESULTS_CHARS
     for r in rows:
         result = r["result"] or "（没有结果）"

@@ -787,7 +787,7 @@ def _team_text(payload: dict) -> str:
         "completed": "所有任务已完成，负责人开始写结论",
         "concluded": "负责人写好了结论" if payload.get("source") != "assembled" else "结论已按任务记录整理（负责人模型没有回答）",
         "retry": "用户要求重试失败的任务",
-        "change_requested": f"{payload.get('by') or '你'}对负责人说：{payload.get('text') or ''}"
+        "change_requested": (f"{payload['by']} 对负责人说：" if payload.get("by") else "你对负责人说：") + str(payload.get("text") or "")
                             if payload.get("source") != "acceptance" else "让团队补上验收发现的缺口",
         "change_proposed": f"负责人提出计划变更（{payload.get('summary') or '见提案'}），等你确认",
         "change_answered": f"负责人回答：{payload.get('reply') or ''}",

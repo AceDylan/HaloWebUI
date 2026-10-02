@@ -144,16 +144,31 @@ def _team_context(team: dict, snap: dict, *, results: int = 500) -> str:
         deps = "、".join(_key_of(snap, p) for p in t.get("parents") or []) or "无"
         state = STATE_WORD.get(t.get("sub_status") or t.get("status"), t.get("status"))
         line = f"- {t.get('key')} {t.get('title')} · 成员 {t.get('member')} · {state} · 依赖：{deps}"
-        if t.get("sub_status") in FAILED and t.get("block_reason"):
+        if t.get("block_reason"):
             line += f"\n  原因：{redact(t['block_reason'], 200)}"
         if t.get("status") == "done" and t.get("result") and results:
             line += f"\n  结果摘要：{redact(t['result'], results)}"
         lines.append(line)
     phase = (snap.get("team") or {}).get("phase")
     phase_word = {"completed": "全部完成", "paused": "已暂停派发", "attention": "有任务需要处理", "running": "执行中"}.get(phase, phase)
-    return (f"协作目标：\n{team.get('goal') or ''}\n\n"
+    later = later_requests(team)
+    return (f"协作目标：\n{team.get('goal') or ''}\n\n" + (later + "\n\n" if later else "") +
             f"团队：{team.get('title')}（{where}；现在{phase_word}）\n"
             f"当初的分工说明：{team.get('summary') or '（无）'}\n\n成员：\n{members}\n\n任务：\n" + "\n".join(lines))
+
+
+def later_requests(team: dict) -> str:
+    """What the user asked for after approval and applied (对负责人说): part of the goal from then on."""
+    lines = []
+    for entry in team.get("changes_log") or []:
+        if entry.get("status") != "applied" or not entry.get("text"):
+            continue
+        added = "、".join((entry.get("applied") or {}).get("added") or [])
+        lines.append(f"- {redact(entry['text'], 600, one_line=False)}" + (f"（新增任务 {added}）" if added else ""))
+    if not lines:
+        return ""
+    return ("用户在执行中追加 / 调整的要求（已应用；它们和原目标一起构成现在的目标，有冲突时以后来的为准，"
+            "按这些要求增加或取消的任务不算偏离目标）：\n" + "\n".join(lines))
 
 
 def _key_of(snap: dict, task_id: str) -> str:
@@ -902,7 +917,8 @@ ACCEPTANCE_SYSTEM = """你是协作团队的负责人（team-lead）。团队做
 {"verdict": "met | partial | unmet", "summary": "一句话验收结论", "gaps": [{"title": "缺口（10 个字左右）", "detail": "缺了什么、该怎么补（1 到 2 句）"}]}
 
 - verdict 为 met 时 gaps 为空数组。gaps 最多 5 条，只列目标真正要求、团队没做到或做错的；锦上添花的建议不算缺口。
-- 有任务失败或被停止、导致目标没达成的，也是缺口。"""
+- 有任务失败或被停止、导致目标没达成的，也是缺口。
+- 用户在执行中追加 / 调整过要求时，按调整后的要求验收：用户要求加的任务不算超出范围，用户同意取消 / 跳过的任务不算缺口。"""
 
 
 def check_acceptance(slug: str) -> None:
@@ -923,7 +939,9 @@ def check_acceptance(slug: str) -> None:
     statuses = "\n".join(f"- {t.get('key')} {t.get('title')}：{STATE_WORD.get(t.get('sub_status') or t.get('status'), t.get('status'))}"
                          for t in snap.get("tasks") or [])
     messages = [{"role": "system", "content": ACCEPTANCE_SYSTEM},
-                {"role": "user", "content": f"协作目标：\n{redact(team.get('goal'), 3000, one_line=False)}\n\n任务：\n{statuses}\n\n"
+                {"role": "user", "content": f"协作目标：\n{redact(team.get('goal'), 3000, one_line=False)}\n\n"
+                                            + (later_requests(team) + "\n\n" if later_requests(team) else "")
+                                            + f"任务：\n{statuses}\n\n"
                                             f"结论：\n{markdown[:20000]}"}]
     parsed, error, used, _text = _call(team, messages, max_tokens=1500, timeout=120)
     if parsed is None:

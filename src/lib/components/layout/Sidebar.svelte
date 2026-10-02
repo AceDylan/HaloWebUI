@@ -963,6 +963,44 @@
 			</div>
 		{/if}
 
+		{#if $config?.features?.enable_agent_teams && expanded}
+			<div class="flex text-gray-700 dark:text-gray-200 px-2">
+				<a
+					class={actionItemClass}
+					href="/teams"
+					on:click={() => {
+						selectedChatId = null;
+						chatId.set('');
+						selectedAssistantScene.set(null);
+
+						if ($mobile) {
+							showSidebar.set(false);
+						}
+					}}
+					draggable="false"
+					data-sidebar-teams
+				>
+					<svg
+						xmlns="http://www.w3.org/2000/svg"
+						fill="none"
+						viewBox="0 0 24 24"
+						stroke-width="2"
+						stroke="currentColor"
+						stroke-linecap="round"
+						stroke-linejoin="round"
+						class="size-5"
+						aria-hidden="true"
+					>
+						<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+						<circle cx="9" cy="7" r="4" />
+						<path d="M22 21v-2a4 4 0 0 0-3-3.87" />
+						<path d="M16 3.13a4 4 0 0 1 0 7.75" />
+					</svg>
+					<span class="text-sm font-medium whitespace-nowrap">协作台</span>
+				</a>
+			</div>
+		{/if}
+
 		{#if !expanded}
 			<div class="mt-3 px-2 flex flex-col items-center gap-2 text-gray-700 dark:text-gray-200">
 				<Tooltip content={$i18n.t('New Chat')}>
@@ -1003,6 +1041,39 @@
 								<path d="M16 6V4a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2" />
 								<path d="M22 13a18.15 18.15 0 0 1-20 0" />
 								<rect width="20" height="14" x="2" y="6" rx="2" />
+							</svg>
+						</a>
+					</Tooltip>
+				{/if}
+
+				{#if $config?.features?.enable_agent_teams}
+					<Tooltip content="协作台">
+						<a
+							class={iconButtonClass}
+							href="/teams"
+							aria-label="协作台"
+							on:click={() => {
+								selectedChatId = null;
+								chatId.set('');
+								selectedAssistantScene.set(null);
+							}}
+							draggable="false"
+						>
+							<svg
+								xmlns="http://www.w3.org/2000/svg"
+								fill="none"
+								viewBox="0 0 24 24"
+								stroke-width="2"
+								stroke="currentColor"
+								stroke-linecap="round"
+								stroke-linejoin="round"
+								class="size-5"
+								aria-hidden="true"
+							>
+								<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+								<circle cx="9" cy="7" r="4" />
+								<path d="M22 21v-2a4 4 0 0 0-3-3.87" />
+								<path d="M16 3.13a4 4 0 0 1 0 7.75" />
 							</svg>
 						</a>
 					</Tooltip>

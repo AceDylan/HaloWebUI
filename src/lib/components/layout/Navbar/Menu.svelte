@@ -16,8 +16,11 @@
 		showControls,
 		showArtifacts,
 		mobile,
-		temporaryChatEnabled
+		temporaryChatEnabled,
+		config
 	} from '$lib/stores';
+	import { goto } from '$app/navigation';
+	import UsersSolid from '$lib/components/icons/UsersSolid.svelte';
 	import { flyAndScale } from '$lib/utils/transitions';
 
 	import Dropdown from '$lib/components/common/Dropdown.svelte';
@@ -246,6 +249,20 @@ code{font-size:0.9em;}</style></head><body><h1>${title}</h1>`;
 				<Cube className=" size-4" strokeWidth="1.5" />
 				<div class="flex items-center">{$i18n.t('Artifacts')}</div>
 			</DropdownMenu.Item>
+
+			{#if $config?.features?.enable_agent_teams && chat?.id && !String(chat.id).startsWith('local') && !$temporaryChatEnabled}
+				<DropdownMenu.Item
+					class="flex gap-2 items-center px-3 py-2 text-sm  cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-md"
+					id="chat-agent-teams-button"
+					on:click={() => {
+						onClose();
+						goto(`/teams?chat=${encodeURIComponent(chat.id)}`);
+					}}
+				>
+					<UsersSolid className=" size-4" />
+					<div class="flex items-center">协作任务</div>
+				</DropdownMenu.Item>
+			{/if}
 
 			<DropdownMenu.Sub>
 				<DropdownMenu.SubTrigger

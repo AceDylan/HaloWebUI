@@ -197,9 +197,11 @@ def _messages(team: dict, rows: list[dict], files: list[dict], texts: list[tuple
         result = r["result"] or "（没有结果）"
         result = result[: min(TASK_RESULT_CHARS, max(800, budget))]
         budget -= len(result)
-        status = {"done": "已完成", "blocked": "失败/受阻", "running": "未结束"}.get(r["status"], r["status"])
+        stopped = r["status"] == "blocked" and "用户停止" in (r["error"] or "")
+        status = "被用户停止，没做完" if stopped else {"done": "已完成", "blocked": "失败/受阻", "running": "未结束"}.get(
+            r["status"], r["status"])
         parts.append(f"### 任务 {r['key']} {r['title']}（成员 {r['member']}，执行 {r['executor'] or '—'}，{status}，{r['attempts']} 次执行）\n"
-                     + (f"错误：{r['error']}\n" if r["error"] and r["status"] != "done" else "") + result)
+                     + (f"错误：{r['error']}\n" if r["error"] and r["status"] != "done" and not stopped else "") + result)
     listing = "\n".join(f"- {f['path']}（{f['kind']}，{f['size']} 字节）" for f in files[:120]) or "（工作目录里没有文件）"
     parts.append(f"工作目录 {team.get('workspace')} 的文件：\n{listing}")
     for path, text in texts:

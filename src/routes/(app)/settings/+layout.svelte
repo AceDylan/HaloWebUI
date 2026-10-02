@@ -117,10 +117,10 @@
 
 	// Unselected items were gray-400 on white (about 2.1:1); gray-600 reads.
 	const navLinkClass = (active: boolean) =>
-		`px-2 py-1.5 min-w-fit rounded-lg flex-1 lg:flex-none flex items-center transition ${
+		`px-2.5 py-1.5 min-w-fit rounded-[0.625rem] flex-1 lg:flex-none flex items-center text-[13px] transition-colors ${
 			active
-				? 'text-gray-900 dark:text-white'
-				: 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
+				? 'bg-[var(--sidebar-active-bg)] text-gray-950 dark:text-white'
+				: 'text-gray-600 dark:text-gray-400 hover:bg-gray-900/[0.04] hover:text-gray-900 dark:hover:bg-white/[0.05] dark:hover:text-white'
 		}`;
 	const navGroupLabelClass =
 		'hidden lg:block px-2 pt-3 pb-1 text-2xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-500 first:pt-0';
@@ -169,7 +169,7 @@
 				<div class="{$mobile ? '' : 'hidden'} self-center flex flex-none items-center">
 					<button
 						id="sidebar-toggle-button"
-						class="cursor-pointer p-1.5 flex rounded-xl hover:bg-gray-100 dark:hover:bg-gray-850 transition"
+						class="cursor-pointer halo-icon-btn !p-1.5"
 						on:click={() => {
 							showSidebar.set(!$showSidebar);
 						}}
@@ -181,7 +181,7 @@
 					</button>
 				</div>
 
-				<div class="flex items-center text-sm font-semibold px-1 py-1">
+				<div class="halo-crumb flex items-center px-1 py-1">
 					{$i18n.t('Settings')}
 				</div>
 			</div>

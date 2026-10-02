@@ -15,34 +15,35 @@
 }
 
 [data-teams-ui] {
-	--tm-accent: 214 100% 54%;
+	/* aligned with the app's Halo tokens (halo.css): ion blue accent, ink neutrals */
+	--tm-accent: 227 92% 57%;
 	--tm-accent-2: 192 95% 52%;
 	--tm-ok: 158 64% 42%;
 	--tm-warn: 38 92% 50%;
 	--tm-bad: 0 72% 54%;
 	--tm-violet: 262 83% 62%;
-	--tm-ink: 222 26% 12%;
-	--tm-muted: 220 9% 46%;
-	--tm-line: 220 20% 12% / 0.075;
-	--tm-line-strong: 220 20% 12% / 0.13;
+	--tm-ink: 228 24% 9%;
+	--tm-muted: 224 7% 44%;
+	--tm-line: 228 22% 14% / 0.08;
+	--tm-line-strong: 228 22% 14% / 0.14;
 	--tm-surface: 0 0% 100%;
 	--tm-surface-2: 220 20% 98%;
 	--tm-shadow: 0 1px 2px hsl(222 30% 20% / 0.04), 0 10px 30px -18px hsl(222 40% 20% / 0.22);
 	--tm-shadow-lift: 0 2px 6px hsl(222 30% 20% / 0.06), 0 18px 44px -20px hsl(222 45% 25% / 0.32);
 	--tm-ease: cubic-bezier(0.22, 1, 0.36, 1);
 	/* the app's page background behind 协作台 content (light: body gray-50; dark: surface-base) */
-	--tm-page: #ffffff;
+	--tm-page: var(--surface-base, #ffffff);
 }
 :is(.dark [data-teams-ui]),
 :is(.dark[data-teams-ui]) {
-	--tm-accent: 213 100% 64%;
+	--tm-accent: 222 100% 72%;
 	--tm-accent-2: 190 90% 60%;
 	--tm-ok: 156 60% 52%;
 	--tm-warn: 40 95% 60%;
 	--tm-bad: 0 85% 66%;
 	--tm-violet: 262 90% 74%;
-	--tm-ink: 220 20% 94%;
-	--tm-muted: 220 10% 62%;
+	--tm-ink: 228 14% 92%;
+	--tm-muted: 226 8% 63%;
 	--tm-line: 220 30% 90% / 0.08;
 	--tm-line-strong: 220 30% 90% / 0.14;
 	--tm-surface: 228 14% 10%;

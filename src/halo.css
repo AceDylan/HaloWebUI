@@ -74,7 +74,7 @@
 	--surface-border: oklch(0.3 0.02 268 / 0.09);
 	--surface-border-strong: oklch(0.3 0.02 268 / 0.16);
 	/* Opaque on purpose: a row's hover menu fades in over the title from this colour. */
-	--sidebar-active-bg: color-mix(in oklab, var(--frame-bg) 91.5%, oklch(0.25 0.04 268));
+	--sidebar-active-bg: color-mix(in oklab, var(--frame-bg) 93.5%, oklch(0.25 0.04 268));
 	--sidebar-active-fg: var(--color-gray-950);
 
 	/* Elevation: ink-tinted, two layers (contact + ambient). */
@@ -413,6 +413,7 @@ body {
 	font-weight: 500;
 	letter-spacing: 0.02em;
 	color: var(--color-gray-400);
+	white-space: nowrap;
 	opacity: 0;
 	transition: opacity var(--dur-fast) ease;
 }
@@ -447,6 +448,16 @@ body {
 	background-color: var(--surface-overlay);
 	border-color: color-mix(in oklab, var(--color-primary-500) 45%, transparent);
 	box-shadow: 0 0 0 3px color-mix(in oklab, var(--color-primary-500) 14%, transparent);
+}
+
+/* "Today", "Yesterday"… */
+.halo-group-label {
+	font-family: var(--font-mono);
+	font-size: 0.625rem;
+	font-weight: 500;
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+	color: var(--color-gray-500);
 }
 
 /* User row at the foot */
@@ -643,6 +654,31 @@ body {
 	border-radius: inherit;
 	pointer-events: none;
 }
+/* faint orbits echoing the sign-in stage; they fade out downward so the greeting stays clean */
+.halo-orb__orbit {
+	position: absolute;
+	left: 50%;
+	top: 50%;
+	width: calc(var(--orb-size) * var(--r));
+	height: calc(var(--orb-size) * var(--r));
+	border-radius: 9999px;
+	border: 1px solid oklch(0.3 0.03 268 / 0.08);
+	transform: translate(-50%, -50%);
+	-webkit-mask-image: linear-gradient(to bottom, #000 30%, transparent 62%);
+	mask-image: linear-gradient(to bottom, #000 30%, transparent 62%);
+	pointer-events: none;
+	z-index: -3;
+}
+.halo-orb__orbit--far {
+	border-style: dashed;
+	border-color: oklch(0.3 0.03 268 / 0.06);
+}
+.dark .halo-orb__orbit {
+	border-color: oklch(1 0 0 / 0.07);
+}
+.dark .halo-orb__orbit--far {
+	border-color: oklch(1 0 0 / 0.05);
+}
 /* soft light behind the ring */
 .halo-orb__bloom {
 	inset: -38%;
@@ -799,6 +835,308 @@ body:has(#chat-input:focus) .halo-orb__arc {
 		transform: none;
 		filter: none;
 	}
+}
+
+/* ---------------------------------------------------------------- messages */
+
+/* Names above messages: the display face, a step quieter than the reply's own headings. */
+.halo-name {
+	font-family: var(--font-display);
+	font-size: 0.875rem;
+	font-weight: 600;
+	letter-spacing: -0.01em;
+	color: var(--color-gray-900);
+}
+.dark .halo-name {
+	color: var(--color-gray-50);
+}
+
+/* The assistant's avatar wears a faint halo; while it writes, light runs round it. The
+   blue "generating" dot the ring replaces stays in the markup (selectors use it). */
+.halo-avatar {
+	isolation: isolate;
+	border-radius: 9999px;
+}
+.halo-avatar::before {
+	content: '';
+	position: absolute;
+	inset: -3px;
+	border-radius: inherit;
+	padding: 1px;
+	background: var(--halo-spectrum);
+	-webkit-mask:
+		linear-gradient(#000 0 0) content-box,
+		linear-gradient(#000 0 0);
+	-webkit-mask-composite: xor;
+	mask-composite: exclude;
+	opacity: 0.4;
+	pointer-events: none;
+	z-index: -1;
+	transition: opacity var(--dur-slow) ease;
+}
+.halo-avatar[data-halo-live]::before {
+	inset: -3.5px;
+	padding: 1.5px;
+	background: conic-gradient(
+		from var(--halo-angle),
+		transparent 0 45%,
+		var(--halo-ion) 68%,
+		var(--halo-violet) 85%,
+		var(--halo-solar) 97%,
+		transparent 100%
+	);
+	opacity: 1;
+	animation: halo-spin 1.6s linear infinite;
+}
+.halo-avatar[data-halo-live] [data-halo-generating-dot] {
+	display: none;
+}
+.halo-avatar--sm::before {
+	inset: -2.5px;
+}
+
+/* Formatted replies (responseHtmlFormat): the card palette follows the ink/ion tokens.
+   Hex on purpose — ContentRenderer copies these as literal colours into pasted HTML. */
+:root {
+	--halo-rf-bg: #f9fafc;
+	--halo-rf-surface: #ffffff;
+	--halo-rf-panel: #f1f3f6;
+	--halo-rf-text: #13161d;
+	--halo-rf-muted: #686d79;
+	--halo-rf-primary: #2c56f1;
+	--halo-rf-primary-light: #6c98ff;
+	--halo-rf-primary-soft: #eff5ff;
+	--halo-rf-border: #d1d3da;
+	--halo-rf-border-subtle: #e5e7ec;
+	--halo-rf-code-bg: #0f1118;
+	--halo-rf-code-text: #e5e8ed;
+	--halo-rf-shadow: 0 1px 2px rgba(19, 22, 29, 0.05), 0 1px 1px rgba(19, 22, 29, 0.03);
+	--halo-rf-shadow-md: 0 8px 24px -6px rgba(19, 22, 29, 0.1);
+	--halo-rf-shadow-lg: 0 24px 48px -12px rgba(19, 22, 29, 0.18);
+	--halo-rf-heading-glow: 0 6px 16px rgba(44, 86, 241, 0.18);
+}
+.dark {
+	--halo-rf-bg: #0f1117;
+	--halo-rf-surface: #16181e;
+	--halo-rf-panel: #1e2129;
+	--halo-rf-text: #e6e8ec;
+	--halo-rf-muted: #9a9ea9;
+	--halo-rf-primary: #81a7ff;
+	--halo-rf-primary-light: #acc7ff;
+	--halo-rf-primary-soft: rgba(108, 152, 255, 0.12);
+	--halo-rf-border: #32353e;
+	--halo-rf-border-subtle: #262931;
+	--halo-rf-code-bg: #06070c;
+	--halo-rf-code-text: #e5e8ed;
+}
+
+/* ---------------------------------------------------------------- page heads (workspace, settings) */
+
+.halo-crumb {
+	font-family: var(--font-display);
+	font-size: 0.8125rem;
+	font-weight: 500;
+	letter-spacing: -0.005em;
+	color: var(--color-gray-500);
+}
+
+.halo-page-head {
+	display: flex;
+	flex-direction: column;
+	gap: 1.25rem;
+	padding-top: 0.75rem;
+}
+.halo-page-icon {
+	display: grid;
+	place-items: center;
+	width: 2.5rem;
+	height: 2.5rem;
+	border-radius: 0.75rem;
+	box-shadow: inset 0 0 0 1px var(--surface-border);
+}
+.halo-page-title {
+	font-family: var(--font-display);
+	font-size: clamp(1.375rem, 1.1rem + 0.8vw, 1.75rem);
+	line-height: 1.15;
+	font-weight: 600;
+	letter-spacing: -0.028em;
+	color: var(--color-gray-950);
+}
+.dark .halo-page-title {
+	color: var(--color-gray-50);
+}
+.halo-page-desc {
+	margin-top: 0.375rem;
+	font-size: 0.8125rem;
+	line-height: 1.55;
+	color: var(--color-gray-500);
+}
+
+/* Tabs: text with an ink underline for the current one, on a hairline rule. */
+.halo-tabs {
+	display: flex;
+	gap: 0.25rem;
+	margin: 0 -0.25rem;
+	padding: 0 0.25rem;
+	overflow-x: auto;
+	border-bottom: 1px solid var(--surface-border);
+}
+.halo-tab {
+	position: relative;
+	display: inline-flex;
+	flex-shrink: 0;
+	align-items: center;
+	gap: 0.4rem;
+	padding: 0.625rem 0.625rem 0.75rem;
+	white-space: nowrap;
+	font-size: 0.8125rem;
+	font-weight: 500;
+	color: var(--color-gray-500);
+	transition: color var(--dur-fast) ease;
+}
+.halo-tab svg {
+	opacity: 0.75;
+}
+.halo-tab::after {
+	content: '';
+	position: absolute;
+	left: 0.5rem;
+	right: 0.5rem;
+	bottom: -1px;
+	height: 2px;
+	border-radius: 2px 2px 0 0;
+	background: currentColor;
+	transform: scaleX(0);
+	transition: transform var(--dur-base) var(--ease-out-expo);
+}
+.halo-tab:hover {
+	color: var(--color-gray-900);
+}
+.dark .halo-tab:hover {
+	color: var(--color-gray-100);
+}
+.halo-tab[aria-current='page'] {
+	color: var(--color-gray-950);
+}
+.dark .halo-tab[aria-current='page'] {
+	color: var(--color-gray-50);
+}
+.halo-tab[aria-current='page']::after {
+	transform: scaleX(1);
+}
+.halo-tab[aria-current='page'] svg {
+	opacity: 1;
+}
+
+/* ---------------------------------------------------------------- overlays: modals, menus, tooltips, toasts */
+
+.modal {
+	background-color: oklch(0.16 0.02 268 / 0.32);
+	-webkit-backdrop-filter: blur(6px) saturate(120%);
+	backdrop-filter: blur(6px) saturate(120%);
+}
+.dark .modal {
+	background-color: oklch(0.06 0.01 268 / 0.62);
+}
+.halo-modal {
+	box-shadow:
+		0 0 0 1px var(--surface-border),
+		var(--shadow-lg);
+}
+.dark .halo-modal {
+	box-shadow:
+		0 0 0 1px var(--surface-border),
+		inset 0 1px 0 oklch(1 0 0 / 0.05),
+		var(--shadow-lg);
+}
+
+/* Every bits-ui menu (dropdowns, context menus, submenus): one surface, one edge, one shadow. */
+[data-menu-content],
+[data-menu-sub-content] {
+	background-color: var(--surface-overlay);
+	border-color: transparent;
+	box-shadow:
+		0 0 0 1px var(--surface-border),
+		var(--shadow-lg);
+}
+.dark [data-menu-content],
+.dark [data-menu-sub-content] {
+	box-shadow:
+		0 0 0 1px var(--surface-border),
+		inset 0 1px 0 oklch(1 0 0 / 0.05),
+		var(--shadow-lg);
+}
+[data-menu-item][data-highlighted],
+[data-menu-sub-trigger][data-highlighted] {
+	background-color: oklch(0.3 0.03 268 / 0.055);
+}
+.dark [data-menu-item][data-highlighted],
+.dark [data-menu-sub-trigger][data-highlighted] {
+	background-color: oklch(1 0 0 / 0.06);
+}
+[data-menu-separator] {
+	background-color: var(--surface-border);
+}
+
+.tippy-box[data-theme~='dark'] {
+	border: 0;
+	border-radius: 0.5rem;
+	background-color: oklch(0.2 0.014 268);
+	color: oklch(0.96 0.005 268);
+	box-shadow:
+		0 0 0 1px oklch(1 0 0 / 0.06),
+		0 6px 20px -4px oklch(0.1 0.02 268 / 0.4);
+	font-size: 0.75rem;
+	font-weight: 500;
+	letter-spacing: 0.005em;
+}
+.dark .tippy-box[data-theme~='dark'] {
+	background-color: oklch(0.96 0.005 268);
+	color: oklch(0.18 0.014 268);
+	box-shadow: 0 6px 20px -4px oklch(0 0 0 / 0.6);
+}
+
+[data-sonner-toast][data-styled='true'] {
+	background: color-mix(in oklab, var(--surface-overlay) 94%, transparent);
+	border: 0;
+	box-shadow:
+		0 0 0 1px var(--surface-border),
+		var(--shadow-lg);
+	-webkit-backdrop-filter: blur(16px) saturate(140%);
+	backdrop-filter: blur(16px) saturate(140%);
+}
+[data-sonner-toaster][data-theme='dark'] [data-sonner-toast][data-styled='true'] {
+	background: color-mix(in oklab, oklch(0.21 0.013 268) 94%, transparent);
+	box-shadow:
+		0 0 0 1px oklch(1 0 0 / 0.08),
+		inset 0 1px 0 oklch(1 0 0 / 0.05),
+		0 24px 48px -12px oklch(0 0 0 / 0.65);
+}
+
+/* Code blocks: a tinted plate with a hairline edge; the language in small mono caps. */
+.halo-code {
+	--code-head: oklch(0.972 0.005 268);
+	background-color: oklch(0.985 0.003 268);
+	box-shadow: 0 0 0 1px var(--surface-border);
+}
+.dark .halo-code {
+	--code-head: oklch(0.2 0.013 268);
+	background-color: oklch(0.175 0.012 268);
+	box-shadow:
+		0 0 0 1px var(--surface-border),
+		inset 0 1px 0 oklch(1 0 0 / 0.03);
+}
+.halo-code__head {
+	background-color: var(--code-head);
+	border-bottom: 1px solid var(--surface-border);
+}
+.halo-code__lang {
+	font-family: var(--font-mono);
+	font-size: 0.6875rem;
+	font-weight: 500;
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
+	color: var(--color-gray-500);
 }
 
 /* ---------------------------------------------------------------- form controls (auth first) */
@@ -1122,7 +1460,14 @@ body:has(#chat-input:focus) .halo-orb__arc {
 	bottom: clamp(1.5rem, 5vh, 3.25rem);
 }
 @media (max-width: 1023px) {
+	/* phones: only the eyebrow (the product name), top-left of the stage */
 	.halo-auth__caption {
+		top: 1.25rem;
+		left: 1.25rem;
+		bottom: auto;
+	}
+	.halo-auth__headline,
+	.halo-auth__lede {
 		display: none;
 	}
 }
@@ -1216,6 +1561,7 @@ body:has(#chat-input:focus) .halo-orb__arc {
 	.halo-orb__ring,
 	.halo-orb__arc,
 	.halo-composer[data-halo-live]::after,
+	.halo-avatar[data-halo-live]::before,
 	.halo-presence::after,
 	.halo-auth__orbit--moving,
 	.halo-auth__bloom,

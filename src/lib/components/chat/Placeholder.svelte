@@ -261,6 +261,8 @@
 				     faster while the prompt box has focus (halo.css, .halo-orb). -->
 				<div class="halo-hero">
 					<div class="halo-orb halo-rise" style="--i: 0" data-halo-orb>
+						<span class="halo-orb__orbit" style="--r: 2.1" aria-hidden="true"></span>
+						<span class="halo-orb__orbit halo-orb__orbit--far" style="--r: 3.3" aria-hidden="true"></span>
 						<span class="halo-orb__bloom" aria-hidden="true"></span>
 						<span class="halo-orb__ring" aria-hidden="true"></span>
 						<span class="halo-orb__arc" aria-hidden="true"></span>

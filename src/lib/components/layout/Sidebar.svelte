@@ -1377,9 +1377,9 @@
 								{#each $chats as chat, idx}
 									{#if idx === 0 || (idx > 0 && chat.time_range !== $chats[idx - 1].time_range)}
 										<div
-											class="w-full px-3 pb-1 text-2xs text-gray-600 dark:text-gray-400 font-medium {idx !== 0
-												? 'pt-3'
-												: 'pt-1'}"
+											class="halo-group-label w-full px-2.5 pb-1 {idx !== 0
+												? 'pt-4'
+												: 'pt-1.5'}"
 										>
 											{$i18n.t(chat.time_range)}
 											<!-- localisation keys for time_range to be recognized from the i18next parser (so they don't get automatically removed):

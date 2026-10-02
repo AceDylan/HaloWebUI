@@ -133,10 +133,10 @@
 		>
 			<!-- svelte-ignore a11y-no-static-element-interactions -->
 			<div
-				class="w-full group rounded-md relative flex items-center justify-between hover:bg-gray-100 dark:hover:bg-gray-900 text-gray-600 dark:text-gray-400 transition"
+				class="w-full group rounded-lg relative flex items-center justify-between hover:bg-gray-900/[0.04] dark:hover:bg-white/[0.04] text-gray-600 dark:text-gray-400 transition"
 			>
 				<button
-					class="w-full py-1.5 pl-2 flex items-center gap-1.5 text-xs font-medium"
+					class="w-full py-1.5 pl-2 flex items-center gap-1.5 text-[11.5px] font-medium tracking-[0.01em] text-gray-500 dark:text-gray-500"
 					aria-expanded={open}
 				>
 					<div class="text-gray-300 dark:text-gray-600">

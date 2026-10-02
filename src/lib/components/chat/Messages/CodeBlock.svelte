@@ -513,7 +513,7 @@
 
 <div>
 	<div
-		class="relative {className} group/codeblock flex flex-col rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-950 my-2 overflow-hidden"
+		class="halo-code relative {className} group/codeblock flex flex-col rounded-xl my-2 overflow-hidden"
 		dir="ltr"
 	>
 		{#if sourceMaskedForStreamingPreview}
@@ -579,7 +579,7 @@
 			{/if}
 		{:else}
 			<div
-				class="sticky {stickyButtonsClassName} left-0 right-0 z-10 flex items-center justify-between gap-2 px-3 py-1.5 min-h-[36px] bg-white dark:bg-gray-900 text-gray-500 dark:text-gray-400 border-b border-gray-200 dark:border-gray-800"
+				class="halo-code__head sticky {stickyButtonsClassName} left-0 right-0 z-10 flex items-center justify-between gap-2 px-3 py-1.5 min-h-[36px] text-gray-500 dark:text-gray-400"
 			>
 				{#if needsCollapse}
 					<button
@@ -592,7 +592,7 @@
 						<span class="size-4 flex-shrink-0" aria-hidden="true">
 							{@html langIcon.svg}
 						</span>
-						<span class="truncate text-[13px] font-medium text-gray-600 dark:text-gray-400">
+						<span class="halo-code__lang truncate">
 							{langIcon.label}
 						</span>
 					</button>
@@ -601,7 +601,7 @@
 						<span class="size-4 flex-shrink-0" aria-hidden="true">
 							{@html langIcon.svg}
 						</span>
-						<span class="truncate text-[13px] font-medium text-gray-600 dark:text-gray-400">
+						<span class="halo-code__lang truncate">
 							{langIcon.label}
 						</span>
 					</div>

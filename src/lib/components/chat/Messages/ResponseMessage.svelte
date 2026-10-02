@@ -1298,12 +1298,15 @@
 		<div
 			class={`max-sm:hidden shrink-0 ltr:mr-3 rtl:ml-3 relative z-10`}
 		>
-			<div class="relative">
+			<div
+				class="halo-avatar relative"
+				data-halo-live={!message.done && !message.error ? '' : undefined}
+			>
 					<ModelIcon
 						src={modelAvatarSrc}
 						alt="model profile"
 						bare={true}
-						className="size-[34px] rounded-xl -translate-y-[1px] ring-2 ring-white/60 dark:ring-white/20"
+						className="size-8 rounded-full"
 					/>
 				<!-- Only while the reply is being generated, in the sidebar's "running" blue. -->
 				{#if !message.done && !message.error}
@@ -1317,12 +1320,16 @@
 
 		<div class="flex-auto w-0 sm:pl-1 relative z-10">
 			<Name>
-				<span class="sm:hidden relative shrink-0 ltr:mr-1 rtl:ml-1" data-halo-inline-avatar>
+				<span
+					class="halo-avatar halo-avatar--sm sm:hidden relative shrink-0 ltr:mr-1.5 rtl:ml-1.5"
+					data-halo-inline-avatar
+					data-halo-live={!message.done && !message.error ? '' : undefined}
+				>
 					<ModelIcon
 						src={modelAvatarSrc}
 						alt=""
 						bare={true}
-						className="size-6 rounded-lg ring-2 ring-white/60 dark:ring-white/20"
+						className="size-6 rounded-full"
 					/>
 					{#if !message.done && !message.error}
 						<span

@@ -66,7 +66,7 @@
 				<div class="{$mobile ? '' : 'hidden'} self-center flex flex-none items-center">
 					<button
 						id="sidebar-toggle-button"
-						class="cursor-pointer p-1.5 flex rounded-xl hover:bg-gray-100 dark:hover:bg-gray-850 transition"
+						class="cursor-pointer halo-icon-btn !p-1.5"
 						on:click={() => {
 							showSidebar.set(!$showSidebar);
 						}}
@@ -78,7 +78,7 @@
 					</button>
 				</div>
 
-				<div class="flex items-center text-sm font-semibold px-1 py-1">
+				<div class="halo-crumb flex items-center px-1 py-1">
 					{$i18n.t('Workspace')}
 				</div>
 			</div>

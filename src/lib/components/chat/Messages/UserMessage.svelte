@@ -351,7 +351,7 @@
 	{#if !($settings?.chatBubble ?? true)}
 		<!-- Phones show the avatar inline with the name (as for replies). -->
 		<div class={`max-sm:hidden shrink-0 ltr:mr-3 rtl:ml-3`}>
-			<ProfileImage src={avatarSrc} className={'size-[34px]'} />
+			<ProfileImage src={avatarSrc} className={'size-8 !rounded-full ring-1 ring-[var(--surface-border)]'} />
 		</div>
 	{/if}
 
@@ -359,8 +359,8 @@
 		{#if !($settings?.chatBubble ?? true)}
 			<div>
 				<Name>
-					<span class="sm:hidden shrink-0 ltr:mr-1 rtl:ml-1" data-halo-inline-avatar>
-						<ProfileImage src={avatarSrc} className={'size-6'} />
+					<span class="sm:hidden shrink-0 ltr:mr-1.5 rtl:ml-1.5" data-halo-inline-avatar>
+						<ProfileImage src={avatarSrc} className={'size-6 !rounded-full'} />
 					</span>
 					{#if message.user}
 						{$i18n.t('You')}

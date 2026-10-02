@@ -776,7 +776,7 @@
 	closeFocus={false}
 >
 	<DropdownMenu.Trigger
-		class="relative font-primary inline-flex min-w-0 max-w-full items-center gap-1.5
+		class="halo-model-trigger relative font-primary inline-flex min-w-0 max-w-full items-center gap-1.5
 			px-3 py-1.5 rounded-xl
 			bg-white dark:bg-gray-900
 			border border-gray-200/50 dark:border-gray-700/30
@@ -794,7 +794,7 @@
 		>
 			{#if selectedModel}
 				{@const parts = getModelDisplayParts(selectedModel.model)}
-				<span class="min-w-0 truncate">{parts.base || selectedModel.label}</span>
+				<span class="halo-model-name min-w-0 truncate">{parts.base || selectedModel.label}</span>
 				{#if parts.connection}
 					<span
 						class="hidden shrink-0 text-2xs font-medium text-gray-500 dark:text-gray-400 sm:inline"

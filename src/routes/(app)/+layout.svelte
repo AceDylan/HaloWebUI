@@ -366,7 +366,8 @@
 
 <div class="app relative">
 	<div
-		class="text-gray-700 dark:text-gray-100 bg-white dark:bg-[var(--surface-base)] h-screen max-h-[100dvh] overflow-auto flex flex-row"
+		class="text-gray-700 dark:text-gray-100 h-screen max-h-[100dvh] overflow-auto flex flex-row"
+		data-halo-frame
 	>
 		{#if !['user', 'admin'].includes($user?.role)}
 			<AccountPending />
@@ -426,7 +427,7 @@
 
 		<Sidebar />
 
-		<div class="flex-1 min-w-0">
+		<div class="flex-1 min-w-0" data-halo-main>
 			{#if loaded}
 				<slot />
 			{:else}

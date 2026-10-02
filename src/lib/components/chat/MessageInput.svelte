@@ -1271,7 +1271,8 @@
 							}}
 						>
 							<div
-								class="flex-1 flex flex-col relative w-full rounded-3xl border border-gray-200/50 dark:border-gray-700/20 hover:border-gray-300/60 dark:hover:border-gray-600/40 focus-within:border-primary-300/40 dark:focus-within:border-primary-500/25 shadow-sm dark:shadow-none focus-within:shadow-lg focus-within:shadow-primary-500/5 dark:focus-within:shadow-primary-400/[0.07] transition-all duration-300 px-1 pt-1 bg-white/80 dark:bg-[var(--surface-raised)] backdrop-blur-xl dark:text-gray-100"
+								class="halo-composer flex-1 flex flex-col relative w-full px-1 pt-1 dark:text-gray-100"
+								data-halo-live={isResponding ? '' : undefined}
 								dir={$settings?.chatDirection ?? 'auto'}
 							>
 								{#if hasActiveImageGenerationReference}
@@ -2169,9 +2170,9 @@
 												<Tooltip content={tr('发送消息', 'Send message')}>
 													<button
 														id="send-message-button"
-														class="{hasSubmittableContent
-															? 'bg-primary-600 text-white hover:bg-primary-700 shadow-sm shadow-primary-600/30 dark:bg-primary-500 dark:text-white dark:hover:bg-primary-400 '
-															: 'text-white bg-gray-200 dark:text-gray-900 dark:bg-gray-700 disabled'} transition rounded-full p-[7px] max-sm:p-2.5 self-center focus-visible:ring-2 focus-visible:ring-primary-500/50"
+														class="halo-send {hasSubmittableContent
+															? ''
+															: 'disabled'} rounded-full p-[7px] max-sm:p-2.5 self-center focus-visible:ring-2 focus-visible:ring-primary-500/50"
 														type="submit"
 														disabled={!hasSubmittableContent}
 														aria-label={tr('发送消息', 'Send message')}

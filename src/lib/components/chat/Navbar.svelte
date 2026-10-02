@@ -64,7 +64,7 @@
 				>
 					<button
 						id="sidebar-toggle-button"
-						class="cursor-pointer px-2 py-2 flex rounded-xl hover:bg-gray-50 dark:hover:bg-gray-850 transition"
+						class="cursor-pointer halo-icon-btn"
 						on:click={() => {
 							showSidebar.set(!$showSidebar);
 						}}
@@ -95,7 +95,7 @@
 				     Hub, so this is the only place it shows. -->
 				{#if $chatId && title}
 					<div
-						class="hidden sm:flex min-w-0 max-w-[40%] shrink items-center self-start py-2 pl-2 pr-1 text-sm text-gray-500 dark:text-gray-400"
+						class="hidden sm:flex min-w-0 max-w-[40%] shrink items-center self-start py-2 pl-2 pr-1 text-[13px] text-gray-500 dark:text-gray-400"
 						{title}
 						data-halo-navbar-chat-title
 					>
@@ -120,7 +120,7 @@
 								}}
 							>
 								<button
-									class="flex cursor-pointer px-2 py-2 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-850 transition"
+									class="cursor-pointer halo-icon-btn"
 									id="chat-context-menu-button"
 									aria-label={$i18n.t('Chat Menu')}
 								>
@@ -147,7 +147,7 @@
 
 					<Tooltip content={$i18n.t('Controls')}>
 						<button
-							class=" flex cursor-pointer px-2 py-2 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-850 transition"
+							class="cursor-pointer halo-icon-btn"
 							on:click={async () => {
 								await showControls.set(!$showControls);
 							}}
@@ -164,7 +164,7 @@
 							id="new-chat-button"
 							class="{$mobile ? 'hidden' : 'flex'} {$showSidebar
 								? 'md:hidden'
-								: ''} cursor-pointer px-2 py-2 rounded-xl text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-850 transition"
+								: ''} cursor-pointer halo-icon-btn"
 							on:click={() => {
 								selectedAssistantScene.set(null);
 								requestNewChat({ source: 'navbar' });
@@ -191,7 +191,7 @@
 							<button
 								{...builder}
 								use:builder.action
-								class="select-none flex rounded-xl p-1.5 w-full hover:bg-gray-50 dark:hover:bg-gray-850 transition"
+								class="select-none flex rounded-full p-1 w-full hover:ring-2 hover:ring-gray-200 dark:hover:ring-gray-700 transition"
 								aria-label={$i18n.t('User Menu')}
 							>
 								<div class=" self-center">

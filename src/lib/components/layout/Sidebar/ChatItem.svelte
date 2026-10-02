@@ -72,7 +72,7 @@
 			? 'w-full flex justify-between rounded-md border border-transparent px-2.5 py-1.5 text-[13px] transition-colors duration-150'
 			: uiStyle === 'card'
 			? 'w-full flex justify-between rounded-xl border border-transparent px-3 py-2 transition-colors duration-150'
-			: 'w-full flex justify-between rounded-lg px-3 py-2 transition-colors duration-150';
+			: 'w-full flex justify-between rounded-[0.625rem] px-2.5 py-[7px] text-[13px] transition-colors duration-150';
 
 	$: itemStateClass =
 		isFolderVariant
@@ -90,8 +90,8 @@
 			: id === $chatId || confirmEdit
 				? 'bg-[var(--sidebar-active-bg)] text-[var(--sidebar-active-fg)] font-medium'
 				: selected
-					? 'bg-gray-100 dark:bg-gray-850'
-					: 'group-hover:bg-gray-100 dark:group-hover:bg-gray-850';
+					? 'bg-[var(--sb-row-hover)] text-gray-900 dark:text-gray-100'
+					: 'text-gray-700 dark:text-gray-300 group-hover:bg-[var(--sb-row-hover)] group-hover:text-gray-900 dark:group-hover:text-gray-100';
 
 	$: menuFromClass =
 		isFolderVariant
@@ -109,8 +109,8 @@
 			: id === $chatId || confirmEdit
 				? 'from-[var(--sidebar-active-bg)]'
 				: selected
-					? 'from-gray-100 dark:from-gray-850'
-					: 'invisible group-hover:visible from-gray-100 dark:from-gray-850';
+					? 'from-[var(--sb-row-hover)]'
+					: 'invisible group-hover:visible from-[var(--sb-row-hover)]';
 
 	$: titleClass = isFolderVariant
 		? 'text-left self-center overflow-hidden w-full h-[19px] leading-5'

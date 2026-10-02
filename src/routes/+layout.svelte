@@ -31,6 +31,7 @@
 
 	import '../tailwind.css';
 	import '../app.css';
+	import '../halo.css';
 
 	import 'tippy.js/dist/tippy.css';
 

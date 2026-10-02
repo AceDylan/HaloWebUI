@@ -1,0 +1,820 @@
+/* =====================================================================
+   Halo design language (2026-10 redesign) — tokens and the shell's shared pieces.
+
+   Idea: Halo = a ring of light around intelligence. The neutrals are "ink" (grays tinted
+   toward the brand hue 268), the one solid accent is ion blue, and the halo spectrum
+   (ion → violet → solar) appears only where the AI is present or working: the ring around
+   the assistant on the home page, the composer while a reply streams, the brand mark.
+
+   Plain CSS on purpose (no @apply): it is loaded after app.css, unlayered, so it wins over
+   Tailwind's layered theme variables — every gray-*/blue-*/primary-* utility in the app
+   picks up these values without touching the components that use them.
+   ===================================================================== */
+
+:root {
+	/* Ink neutrals (OKLCH, hue 268). Lightness follows the old neutral scale step for step so
+	   contrast between any two steps stays what the components were tuned for. */
+	--color-gray-50: oklch(0.984 0.003 268);
+	--color-gray-100: oklch(0.963 0.005 268);
+	--color-gray-200: oklch(0.928 0.007 268);
+	--color-gray-300: oklch(0.868 0.01 268);
+	--color-gray-400: oklch(0.772 0.014 268);
+	--color-gray-500: oklch(0.66 0.017 268);
+	--color-gray-600: oklch(0.535 0.019 268);
+	--color-gray-700: oklch(0.44 0.019 268);
+	--color-gray-800: oklch(0.325 0.017 268);
+	--color-gray-850: oklch(0.262 0.016 268);
+	--color-gray-900: oklch(0.205 0.014 268);
+	--color-gray-950: oklch(0.16 0.012 268);
+
+	/* Ion blue — the single solid accent (links, focus, selection, primary actions). */
+	--color-primary-50: oklch(0.97 0.02 266);
+	--color-primary-100: oklch(0.935 0.04 266);
+	--color-primary-200: oklch(0.88 0.075 266);
+	--color-primary-300: oklch(0.8 0.12 266);
+	--color-primary-400: oklch(0.7 0.17 266);
+	--color-primary-500: oklch(0.6 0.215 266);
+	--color-primary-600: oklch(0.53 0.235 266);
+	--color-primary-700: oklch(0.46 0.21 266);
+	--color-primary-800: oklch(0.39 0.17 266);
+	--color-primary-900: oklch(0.32 0.12 266);
+	--color-primary-950: oklch(0.24 0.08 266);
+
+	/* Tailwind's own blue is used all over the app for "active / info" — make it the same ion
+	   blue so there is one blue, not two. */
+	--color-blue-50: var(--color-primary-50);
+	--color-blue-100: var(--color-primary-100);
+	--color-blue-200: var(--color-primary-200);
+	--color-blue-300: var(--color-primary-300);
+	--color-blue-400: var(--color-primary-400);
+	--color-blue-500: var(--color-primary-500);
+	--color-blue-600: var(--color-primary-600);
+	--color-blue-700: var(--color-primary-700);
+	--color-blue-800: var(--color-primary-800);
+	--color-blue-900: var(--color-primary-900);
+	--color-blue-950: var(--color-primary-950);
+
+	/* The halo spectrum: only for AI presence (rings, the live composer edge, the mark). */
+	--halo-ion: oklch(0.66 0.2 264);
+	--halo-violet: oklch(0.64 0.21 300);
+	--halo-solar: oklch(0.82 0.14 65);
+	--halo-spectrum: conic-gradient(
+		from var(--halo-angle, 0deg),
+		var(--halo-ion),
+		var(--halo-violet) 30%,
+		var(--halo-solar) 52%,
+		var(--halo-ion) 78%,
+		var(--halo-ion)
+	);
+
+	/* Surfaces (light). page = main column, raised = sidebar, overlay = menus/cards. */
+	--surface-base: oklch(0.995 0.0015 268);
+	--surface-raised: oklch(0.976 0.004 268);
+	--surface-overlay: #ffffff;
+	--surface-border: oklch(0.3 0.02 268 / 0.09);
+	--surface-border-strong: oklch(0.3 0.02 268 / 0.16);
+	/* Opaque on purpose: a row's hover menu fades in over the title from this colour. */
+	--sidebar-active-bg: color-mix(in oklab, var(--frame-bg) 91.5%, oklch(0.25 0.04 268));
+	--sidebar-active-fg: var(--color-gray-950);
+
+	/* Elevation: ink-tinted, two layers (contact + ambient). */
+	--shadow-hairline: 0 0 0 1px var(--surface-border);
+	--shadow-sm: 0 1px 2px oklch(0.2 0.03 268 / 0.06), 0 1px 1px oklch(0.2 0.03 268 / 0.03);
+	--shadow-md: 0 2px 4px oklch(0.2 0.03 268 / 0.04), 0 8px 24px -6px oklch(0.2 0.03 268 / 0.1);
+	--shadow-lg: 0 4px 8px oklch(0.2 0.03 268 / 0.04), 0 24px 48px -12px oklch(0.2 0.03 268 / 0.18);
+
+	/* Motion */
+	--ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+	--ease-out-quart: cubic-bezier(0.25, 1, 0.5, 1);
+	--ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+	--dur-fast: 140ms;
+	--dur-base: 240ms;
+	--dur-slow: 480ms;
+
+	/* Type */
+	--font-display: 'Mona Sans', var(--font-sans);
+}
+
+.dark {
+	--surface-base: oklch(0.155 0.011 268);
+	--surface-raised: oklch(0.178 0.012 268);
+	--surface-overlay: oklch(0.21 0.013 268);
+	--surface-border: oklch(1 0 0 / 0.075);
+	--surface-border-strong: oklch(1 0 0 / 0.13);
+	--sidebar-active-bg: color-mix(in oklab, var(--frame-bg) 90.5%, oklch(0.98 0.01 268));
+	--sidebar-active-fg: var(--color-gray-50);
+
+	--halo-ion: oklch(0.72 0.18 264);
+	--halo-violet: oklch(0.7 0.19 300);
+	--halo-solar: oklch(0.86 0.13 65);
+
+	--shadow-sm: 0 1px 2px oklch(0 0 0 / 0.4);
+	--shadow-md: 0 2px 4px oklch(0 0 0 / 0.3), 0 8px 24px -6px oklch(0 0 0 / 0.5);
+	--shadow-lg: 0 4px 8px oklch(0 0 0 / 0.3), 0 24px 48px -12px oklch(0 0 0 / 0.65);
+}
+
+@property --halo-angle {
+	syntax: '<angle>';
+	inherits: false;
+	initial-value: 0deg;
+}
+
+/* ---------------------------------------------------------------- base */
+
+body {
+	font-feature-settings: 'cv11', 'ss01';
+	text-rendering: optimizeLegibility;
+}
+
+::selection {
+	background: oklch(0.6 0.215 266 / 0.2);
+	color: inherit;
+}
+
+:where(a, button, summary, [role='button'], [role='tab'], [role='menuitem'], [role='option'], [role='switch'], [role='checkbox'], [role='radio']):focus-visible {
+	outline: 2px solid var(--color-primary-500);
+	outline-offset: 2px;
+}
+
+.font-display {
+	font-family: var(--font-display);
+	letter-spacing: -0.022em;
+	font-feature-settings: 'ss01', 'ss02';
+}
+
+/* ---------------------------------------------------------------- halo ring
+   .halo-ring: put it on a positioned wrapper; it draws a 1.5px spectrum ring around it.
+   Add .is-live to make the light travel (AI working). */
+
+.halo-ring {
+	position: relative;
+	isolation: isolate;
+}
+.halo-ring::before {
+	content: '';
+	position: absolute;
+	inset: calc(var(--halo-gap, 4px) * -1);
+	border-radius: inherit;
+	padding: var(--halo-width, 1.5px);
+	background: var(--halo-spectrum);
+	-webkit-mask:
+		linear-gradient(#000 0 0) content-box,
+		linear-gradient(#000 0 0);
+	-webkit-mask-composite: xor;
+	mask-composite: exclude;
+	opacity: var(--halo-opacity, 0.9);
+	pointer-events: none;
+	z-index: -1;
+}
+.halo-ring.is-live::before {
+	animation: halo-spin 3.2s linear infinite;
+}
+
+@keyframes halo-spin {
+	to {
+		--halo-angle: 360deg;
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.halo-ring.is-live::before {
+		animation: none;
+	}
+}
+
+/* ---------------------------------------------------------------- app frame
+   Desktop: the sidebar sits on the frame colour, the page is a raised panel with a hairline
+   edge. The pages inside were written for a full-height viewport (h-screen /
+   max-h-[100dvh]); inside the panel those mean "the panel's height". Phones: no frame. */
+
+:root {
+	--frame-bg: oklch(0.958 0.006 268);
+	--frame-gap: 8px;
+	--panel-radius: 14px;
+}
+.dark {
+	--frame-bg: oklch(0.125 0.01 268);
+}
+
+[data-halo-frame] {
+	background-color: var(--frame-bg);
+}
+[data-halo-main] {
+	background-color: var(--surface-base);
+}
+
+@media (min-width: 768px) {
+	[data-halo-main] {
+		position: relative;
+		margin: var(--frame-gap) var(--frame-gap) var(--frame-gap) 0;
+		height: calc(100dvh - var(--frame-gap) * 2);
+		border-radius: var(--panel-radius);
+		background-color: var(--surface-base);
+		box-shadow:
+			0 0 0 1px var(--surface-border),
+			var(--shadow-sm);
+		overflow: hidden;
+		/* own stacking context: menus portaled to <body> still draw above it */
+		isolation: isolate;
+	}
+	.dark [data-halo-main] {
+		box-shadow:
+			0 0 0 1px var(--surface-border),
+			inset 0 1px 0 oklch(1 0 0 / 0.035),
+			var(--shadow-md);
+	}
+	[data-halo-main] .h-screen {
+		height: 100%;
+	}
+	[data-halo-main] .max-h-\[100dvh\] {
+		max-height: 100%;
+	}
+	[data-halo-main] .min-h-screen {
+		min-height: 100%;
+	}
+}
+
+/* The navbar's fade now melts into the panel, not into a grey page. */
+.glass {
+	background: linear-gradient(
+		to bottom,
+		color-mix(in oklab, var(--surface-base) 94%, transparent) 62%,
+		transparent
+	);
+}
+:is(.dark .glass) {
+	background: linear-gradient(
+		to bottom,
+		color-mix(in oklab, var(--surface-base) 94%, transparent) 62%,
+		transparent
+	);
+}
+
+/* ---------------------------------------------------------------- sidebar */
+
+#sidebar {
+	--sb-row-hover: color-mix(in oklab, var(--frame-bg) 95%, oklch(0.25 0.04 268));
+	--sb-ink: var(--color-gray-800);
+	--sb-muted: var(--color-gray-500);
+	background-color: var(--frame-bg);
+	border-right-color: transparent;
+}
+.dark #sidebar {
+	--sb-row-hover: color-mix(in oklab, var(--frame-bg) 94.5%, oklch(0.98 0.01 268));
+	--sb-ink: var(--color-gray-100);
+	--sb-muted: var(--color-gray-500);
+}
+@media (min-width: 768px) {
+	#sidebar,
+	:is(.dark #sidebar) {
+		background-color: transparent;
+		border-right-color: transparent;
+		backdrop-filter: none;
+		-webkit-backdrop-filter: none;
+	}
+	/* While it floats over the page (peek), it needs its own ground again. */
+	#sidebar[data-state='peek'] > div {
+		background-color: var(--frame-bg);
+		border-right-color: var(--surface-border);
+	}
+}
+:is(.dark #sidebar[data-halo-drawer]) {
+	background-color: var(--frame-bg);
+}
+
+/* Brand lockup */
+.halo-brand {
+	display: flex;
+	align-items: center;
+	gap: 0.6rem;
+	padding: 0.375rem 0.5rem;
+	border-radius: 0.625rem;
+	transition: background-color var(--dur-fast) ease;
+}
+.halo-brand:hover {
+	background-color: var(--sb-row-hover);
+}
+.halo-mark {
+	width: 1.5rem;
+	height: 1.5rem;
+	flex-shrink: 0;
+	overflow: visible;
+}
+.halo-mark__ring {
+	fill: none;
+	stroke: currentColor;
+	stroke-width: 14;
+	stroke-linecap: round;
+	transform-origin: 60px 60px;
+	transition: transform var(--dur-slow) var(--ease-out-expo);
+}
+.halo-mark__core {
+	fill: currentColor;
+}
+.halo-mark__glow {
+	fill: none;
+	stroke: url(#halo-mark-spectrum);
+	stroke-width: 14;
+	stroke-linecap: round;
+	opacity: 0;
+	transform-origin: 60px 60px;
+	transition:
+		opacity var(--dur-base) ease,
+		transform var(--dur-slow) var(--ease-out-expo);
+}
+.halo-brand:hover .halo-mark__ring,
+.halo-brand:hover .halo-mark__glow {
+	transform: rotate(-90deg);
+}
+.halo-brand:hover .halo-mark__glow {
+	opacity: 1;
+}
+.halo-wordmark {
+	font-family: var(--font-display);
+	font-size: 0.95rem;
+	font-weight: 650;
+	letter-spacing: -0.02em;
+	color: var(--sb-ink);
+	white-space: nowrap;
+}
+.halo-wordmark span {
+	font-weight: 450;
+	color: var(--sb-muted);
+	margin-left: 0.15em;
+}
+
+/* Rows (new chat / workspace / teams / chats) */
+.halo-nav-row {
+	display: flex;
+	align-items: center;
+	gap: 0.625rem;
+	width: 100%;
+	padding: 0.4375rem 0.625rem;
+	border-radius: 0.625rem;
+	font-size: 0.8125rem;
+	font-weight: 500;
+	color: var(--color-gray-700);
+	transition:
+		background-color var(--dur-fast) ease,
+		color var(--dur-fast) ease;
+}
+.dark .halo-nav-row {
+	color: var(--color-gray-300);
+}
+.halo-nav-row:hover {
+	background-color: var(--sb-row-hover);
+	color: var(--sb-ink);
+}
+.halo-nav-row svg {
+	width: 1.125rem;
+	height: 1.125rem;
+	flex-shrink: 0;
+	opacity: 0.85;
+}
+.halo-nav-row[aria-current='page'] {
+	background-color: var(--sidebar-active-bg);
+	color: var(--sb-ink);
+}
+
+/* "New chat" is the one primary action in the sidebar: a raised key, not a list row. */
+.halo-new-chat {
+	background-color: var(--surface-overlay);
+	color: var(--sb-ink);
+	box-shadow:
+		0 0 0 1px var(--surface-border),
+		var(--shadow-sm);
+}
+.dark .halo-new-chat {
+	background-color: oklch(1 0 0 / 0.055);
+	box-shadow:
+		0 0 0 1px var(--surface-border),
+		inset 0 1px 0 oklch(1 0 0 / 0.05);
+}
+.halo-new-chat:hover {
+	background-color: var(--surface-overlay);
+	box-shadow:
+		0 0 0 1px var(--surface-border-strong),
+		var(--shadow-md);
+}
+.dark .halo-new-chat:hover {
+	background-color: oklch(1 0 0 / 0.08);
+}
+.halo-new-chat:active {
+	transform: scale(0.985);
+}
+
+.halo-kbd {
+	margin-left: auto;
+	display: inline-flex;
+	align-items: center;
+	gap: 0.15rem;
+	font-family: var(--font-mono);
+	font-size: 0.625rem;
+	font-weight: 500;
+	letter-spacing: 0.02em;
+	color: var(--color-gray-400);
+	opacity: 0;
+	transition: opacity var(--dur-fast) ease;
+}
+.dark .halo-kbd {
+	color: var(--color-gray-500);
+}
+:is(.halo-nav-row, #chat-search):hover .halo-kbd,
+.halo-kbd[data-always] {
+	opacity: 1;
+}
+
+/* Search: a quiet well that wakes up on focus */
+#chat-search.halo-search {
+	border-radius: 0.625rem;
+	background-color: oklch(0.3 0.03 268 / 0.04);
+	border: 1px solid transparent;
+	transition:
+		background-color var(--dur-fast) ease,
+		border-color var(--dur-fast) ease,
+		box-shadow var(--dur-base) ease;
+}
+.dark #chat-search.halo-search {
+	background-color: oklch(1 0 0 / 0.04);
+}
+#chat-search.halo-search:hover {
+	background-color: oklch(0.3 0.03 268 / 0.06);
+}
+.dark #chat-search.halo-search:hover {
+	background-color: oklch(1 0 0 / 0.06);
+}
+#chat-search.halo-search:focus-within {
+	background-color: var(--surface-overlay);
+	border-color: color-mix(in oklab, var(--color-primary-500) 45%, transparent);
+	box-shadow: 0 0 0 3px color-mix(in oklab, var(--color-primary-500) 14%, transparent);
+}
+
+/* User row at the foot */
+.halo-user-row {
+	display: flex;
+	align-items: center;
+	width: 100%;
+	padding: 0.5rem;
+	border-radius: 0.75rem;
+	transition: background-color var(--dur-fast) ease;
+}
+.halo-user-row:hover {
+	background-color: var(--sb-row-hover);
+}
+
+/* ---------------------------------------------------------------- navbar: model selector */
+
+.halo-model-trigger {
+	border: 0 !important;
+	background: transparent !important;
+	padding: 0.375rem 0.625rem !important;
+	border-radius: 0.625rem !important;
+	transition: background-color var(--dur-fast) ease !important;
+}
+.halo-model-trigger:hover {
+	background-color: oklch(0.3 0.03 268 / 0.05) !important;
+}
+.dark .halo-model-trigger:hover {
+	background-color: oklch(1 0 0 / 0.06) !important;
+}
+.halo-model-trigger .halo-model-name {
+	font-family: var(--font-display);
+	font-weight: 600;
+	letter-spacing: -0.012em;
+	font-size: 0.9375rem;
+	color: var(--color-gray-900);
+}
+.dark .halo-model-trigger .halo-model-name {
+	color: var(--color-gray-50);
+}
+.halo-model-trigger [data-halo-model-connection] {
+	font-family: var(--font-mono);
+	font-size: 0.625rem;
+	font-weight: 500;
+	letter-spacing: 0.02em;
+	padding: 0.125rem 0.375rem;
+	border-radius: 0.375rem;
+	background-color: oklch(0.3 0.03 268 / 0.06);
+	color: var(--color-gray-600);
+	align-self: center;
+}
+.dark .halo-model-trigger [data-halo-model-connection] {
+	background-color: oklch(1 0 0 / 0.07);
+	color: var(--color-gray-400);
+}
+
+.halo-icon-btn {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	padding: 0.5rem;
+	border-radius: 0.625rem;
+	color: var(--color-gray-500);
+	transition:
+		background-color var(--dur-fast) ease,
+		color var(--dur-fast) ease;
+}
+.halo-icon-btn:hover {
+	background-color: oklch(0.3 0.03 268 / 0.05);
+	color: var(--color-gray-900);
+}
+.dark .halo-icon-btn {
+	color: var(--color-gray-400);
+}
+.dark .halo-icon-btn:hover {
+	background-color: oklch(1 0 0 / 0.06);
+	color: var(--color-gray-50);
+}
+
+/* ---------------------------------------------------------------- composer */
+
+.halo-composer {
+	border-radius: 1.625rem;
+	border: 1px solid var(--surface-border-strong);
+	background-color: var(--surface-overlay);
+	box-shadow: var(--shadow-md);
+	transition:
+		border-color var(--dur-base) ease,
+		box-shadow var(--dur-slow) var(--ease-out-expo);
+}
+.dark .halo-composer {
+	background-color: var(--surface-raised);
+	box-shadow:
+		inset 0 1px 0 oklch(1 0 0 / 0.04),
+		var(--shadow-md);
+}
+.halo-composer:hover {
+	border-color: color-mix(in oklab, var(--color-gray-500) 40%, transparent);
+}
+.halo-composer:focus-within {
+	border-color: color-mix(in oklab, var(--color-primary-500) 42%, transparent);
+	box-shadow:
+		0 0 0 4px color-mix(in oklab, var(--color-primary-500) 9%, transparent),
+		var(--shadow-lg);
+}
+.dark .halo-composer:focus-within {
+	border-color: color-mix(in oklab, var(--color-primary-400) 40%, transparent);
+	box-shadow:
+		0 0 0 4px color-mix(in oklab, var(--color-primary-400) 10%, transparent),
+		inset 0 1px 0 oklch(1 0 0 / 0.05),
+		var(--shadow-lg);
+}
+
+/* While a reply streams, a streak of halo light runs round the composer's edge. */
+.halo-composer[data-halo-live]::after {
+	content: '';
+	position: absolute;
+	inset: -1px;
+	border-radius: inherit;
+	padding: 1.5px;
+	background: conic-gradient(
+		from var(--halo-angle),
+		transparent 0 58%,
+		color-mix(in oklab, var(--halo-ion) 70%, transparent) 72%,
+		var(--halo-violet) 86%,
+		var(--halo-solar) 96%,
+		transparent 100%
+	);
+	-webkit-mask:
+		linear-gradient(#000 0 0) content-box,
+		linear-gradient(#000 0 0);
+	-webkit-mask-composite: xor;
+	mask-composite: exclude;
+	pointer-events: none;
+	animation: halo-spin 2.8s linear infinite;
+}
+
+.halo-send {
+	background-color: var(--color-gray-900) !important;
+	color: var(--color-gray-50) !important;
+	box-shadow: 0 1px 2px oklch(0.2 0.03 268 / 0.25) !important;
+	transition:
+		transform var(--dur-fast) var(--ease-out-quart),
+		background-color var(--dur-fast) ease,
+		box-shadow var(--dur-base) ease !important;
+}
+.dark .halo-send {
+	background-color: var(--color-gray-50) !important;
+	color: var(--color-gray-950) !important;
+}
+.halo-send:hover {
+	transform: translateY(-1px);
+	box-shadow:
+		0 0 0 3px color-mix(in oklab, var(--color-primary-500) 22%, transparent),
+		0 4px 12px -2px oklch(0.2 0.03 268 / 0.3) !important;
+}
+.halo-send:active {
+	transform: scale(0.94);
+}
+.halo-send[disabled] {
+	background-color: var(--color-gray-200) !important;
+	color: var(--color-gray-400) !important;
+	box-shadow: none !important;
+	transform: none;
+}
+.dark .halo-send[disabled] {
+	background-color: oklch(1 0 0 / 0.08) !important;
+	color: var(--color-gray-600) !important;
+}
+
+/* ---------------------------------------------------------------- home: the halo around the assistant */
+
+.halo-hero {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+}
+
+.halo-orb {
+	--orb-size: 5.5rem;
+	position: relative;
+	display: grid;
+	place-items: center;
+	width: var(--orb-size);
+	height: var(--orb-size);
+	margin-bottom: 1.75rem;
+	border-radius: 9999px;
+	isolation: isolate;
+}
+.halo-orb__bloom,
+.halo-orb__ring,
+.halo-orb__arc {
+	position: absolute;
+	border-radius: inherit;
+	pointer-events: none;
+}
+/* soft light behind the ring */
+.halo-orb__bloom {
+	inset: -38%;
+	background: var(--halo-spectrum);
+	filter: blur(28px);
+	opacity: 0.22;
+	z-index: -2;
+	animation: halo-spin 14s linear infinite;
+	transition: opacity var(--dur-slow) var(--ease-out-expo);
+}
+.dark .halo-orb__bloom {
+	opacity: 0.3;
+}
+/* the thin full ring */
+.halo-orb__ring {
+	inset: -9px;
+	padding: 1px;
+	background: var(--halo-spectrum);
+	-webkit-mask:
+		linear-gradient(#000 0 0) content-box,
+		linear-gradient(#000 0 0);
+	-webkit-mask-composite: xor;
+	mask-composite: exclude;
+	opacity: 0.55;
+	z-index: -1;
+	animation: halo-spin 18s linear infinite;
+	transition: opacity var(--dur-slow) var(--ease-out-expo);
+}
+/* the bright travelling arc */
+.halo-orb__arc {
+	inset: -9px;
+	padding: 2px;
+	background: conic-gradient(
+		from var(--halo-angle),
+		transparent 0 70%,
+		color-mix(in oklab, var(--halo-ion) 60%, transparent) 82%,
+		var(--halo-violet) 92%,
+		var(--halo-solar) 99%,
+		transparent 100%
+	);
+	-webkit-mask:
+		linear-gradient(#000 0 0) content-box,
+		linear-gradient(#000 0 0);
+	-webkit-mask-composite: xor;
+	mask-composite: exclude;
+	z-index: -1;
+	animation: halo-spin 6s linear infinite;
+	transition: opacity var(--dur-slow) var(--ease-out-expo);
+}
+.halo-orb > :not(span) {
+	position: relative;
+	z-index: 1;
+}
+.halo-orb img {
+	border-radius: 9999px !important;
+	border: 0 !important;
+	box-shadow:
+		0 0 0 1px var(--surface-border),
+		var(--shadow-md) !important;
+}
+
+/* The halo answers you: it brightens while you write to it. */
+body:has(#chat-input:focus) .halo-orb__ring {
+	opacity: 0.85;
+}
+body:has(#chat-input:focus) .halo-orb__bloom {
+	opacity: 0.32;
+}
+.dark body:has(#chat-input:focus) .halo-orb__bloom,
+body.dark:has(#chat-input:focus) .halo-orb__bloom {
+	opacity: 0.42;
+}
+body:has(#chat-input:focus) .halo-orb__arc {
+	animation-duration: 2.6s;
+}
+
+.halo-greeting {
+	font-family: var(--font-display);
+	font-size: clamp(1.625rem, 1.2rem + 1.6vw, 2.375rem);
+	line-height: 1.12;
+	font-weight: 600;
+	letter-spacing: -0.03em;
+	color: var(--color-gray-950);
+	text-wrap: balance;
+}
+.dark .halo-greeting {
+	color: var(--color-gray-50);
+}
+
+/* "ready" light next to the model name */
+.halo-presence {
+	position: relative;
+	width: 0.4375rem;
+	height: 0.4375rem;
+	flex-shrink: 0;
+	border-radius: 9999px;
+	background: oklch(0.72 0.17 155);
+	box-shadow: 0 0 0 3px oklch(0.72 0.17 155 / 0.16);
+}
+.halo-presence::after {
+	content: '';
+	position: absolute;
+	inset: 0;
+	border-radius: inherit;
+	background: inherit;
+	animation: halo-ping 2.4s var(--ease-out-quart) infinite;
+}
+@keyframes halo-ping {
+	0% {
+		transform: scale(1);
+		opacity: 0.55;
+	}
+	70%,
+	100% {
+		transform: scale(2.6);
+		opacity: 0;
+	}
+}
+
+/* small mono tag: connection names, model ids */
+.halo-chip {
+	display: inline-flex;
+	align-items: center;
+	padding: 0.125rem 0.4375rem;
+	border-radius: 0.375rem;
+	font-family: var(--font-mono);
+	font-size: 0.625rem;
+	font-weight: 500;
+	letter-spacing: 0.02em;
+	line-height: 1.4;
+	color: var(--color-gray-600);
+	background-color: oklch(0.3 0.03 268 / 0.06);
+	box-shadow: inset 0 0 0 1px oklch(0.3 0.03 268 / 0.05);
+}
+.dark .halo-chip {
+	color: var(--color-gray-400);
+	background-color: oklch(1 0 0 / 0.06);
+	box-shadow: inset 0 0 0 1px oklch(1 0 0 / 0.04);
+}
+
+/* staggered entrance for the hero pieces */
+.halo-rise {
+	animation: halo-rise 720ms var(--ease-out-expo) both;
+	animation-delay: calc(var(--i, 0) * 70ms);
+}
+@keyframes halo-rise {
+	from {
+		opacity: 0;
+		transform: translateY(10px);
+		filter: blur(4px);
+	}
+	to {
+		opacity: 1;
+		transform: none;
+		filter: none;
+	}
+}
+
+/* ---------------------------------------------------------------- reduced motion */
+
+@media (prefers-reduced-motion: reduce) {
+	.halo-orb__bloom,
+	.halo-orb__ring,
+	.halo-orb__arc,
+	.halo-composer[data-halo-live]::after,
+	.halo-presence::after,
+	.halo-rise {
+		animation: none !important;
+	}
+	.halo-mark__ring,
+	.halo-mark__glow,
+	.halo-send {
+		transition: none !important;
+	}
+}

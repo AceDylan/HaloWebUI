@@ -16,14 +16,18 @@
 	$: shellClass =
 		uiStyle === 'card'
 			? 'flex w-full rounded-2xl bg-white/70 dark:bg-gray-900/45 border border-gray-200/60 dark:border-gray-800/60 shadow-sm focus-within:border-blue-400 dark:focus-within:border-blue-500 focus-within:ring-2 focus-within:ring-blue-100/70 dark:focus-within:ring-blue-500/20 focus-within:shadow-md transition-all'
-			: 'flex w-full rounded-lg bg-gray-100 dark:bg-gray-850 border border-gray-200/60 dark:border-gray-700/50 focus-within:border-blue-400 dark:focus-within:border-blue-500 focus-within:ring-2 focus-within:ring-blue-100 dark:focus-within:ring-blue-500/20 transition-all';
+			: 'halo-search flex w-full';
 
 	$: inputClass =
 		uiStyle === 'card'
 			? 'w-full rounded-r-2xl py-2 pl-2 pr-2 text-sm bg-transparent dark:text-gray-200 outline-hidden placeholder-gray-500 dark:placeholder-gray-500'
-			: 'w-full rounded-r-lg py-2 pl-2 pr-2 text-sm bg-transparent dark:text-gray-200 outline-hidden placeholder-gray-500 dark:placeholder-gray-500';
+			: 'w-full rounded-r-lg py-[7px] pl-2 pr-2 text-[13px] bg-transparent text-gray-900 dark:text-gray-100 outline-hidden placeholder-gray-500 dark:placeholder-gray-500';
 
 	let selectedIdx = 0;
+
+	// Ctrl+K / ⌘K focuses this box (see (app)/+layout.svelte).
+	const searchShortcut =
+		typeof navigator !== 'undefined' && /mac/i.test(navigator.platform ?? '') ? '⌘K' : 'Ctrl K';
 
 	let lastWord = '';
 	$: lastWord = value ? value.split(' ').at(-1) : value;
@@ -102,7 +106,7 @@
 
 <div class="px-2 mb-1.5 mt-2 flex justify-center space-x-2 relative z-10" id="search-container">
 	<div class={shellClass} id="chat-search">
-		<div class="self-center pl-3 py-2 text-gray-500">
+		<div class="self-center pl-2.5 py-2 text-gray-400 dark:text-gray-500">
 			<svg
 				xmlns="http://www.w3.org/2000/svg"
 				viewBox="0 0 20 20"
@@ -160,6 +164,10 @@
 				}
 			}}
 		/>
+
+		{#if !value && uiStyle === 'flat'}
+			<span class="halo-kbd self-center pr-2.5" data-always aria-hidden="true">{searchShortcut}</span>
+		{/if}
 
 		{#if showClearButton && value}
 			<div class="self-center pr-2 pl-1 bg-transparent">

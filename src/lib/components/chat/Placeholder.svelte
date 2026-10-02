@@ -59,6 +59,15 @@
 
 	export let transparentBackground = false;
 
+	// The greeting follows the time of day (the hour the page opened is enough).
+	const greetingKey = (() => {
+		const hour = new Date().getHours();
+		if (hour < 5) return 'Working late, {{name}}';
+		if (hour < 12) return 'Good morning, {{name}}';
+		if (hour < 18) return 'Good afternoon, {{name}}';
+		return 'Good evening, {{name}}';
+	})();
+
 	export let createMessagePair: Function;
 	export let stopResponse: Function;
 	export let onChange: Function = () => {};
@@ -248,56 +257,59 @@
 					}}
 				/>
 			{:else}
-				<!-- Logo/Avatar 区域 - 居中显示，更大尺寸 -->
-				<div class="flex justify-center mb-4" in:fade={{ duration: 100 }}>
-					<div class="flex -space-x-4">
-						{#each models as model, modelIdx}
-							<Tooltip
-								content={(models[modelIdx]?.info?.meta?.tags ?? [])
-									.map((tag) => tag.name.toUpperCase())
-									.join(', ')}
-								placement="top"
-							>
-								<button
-									on:click={() => {
-										selectedModelIdx = modelIdx;
-									}}
+				<!-- The assistant sits inside its halo: the ring brightens and the light runs
+				     faster while the prompt box has focus (halo.css, .halo-orb). -->
+				<div class="halo-hero">
+					<div class="halo-orb halo-rise" style="--i: 0" data-halo-orb>
+						<span class="halo-orb__bloom" aria-hidden="true"></span>
+						<span class="halo-orb__ring" aria-hidden="true"></span>
+						<span class="halo-orb__arc" aria-hidden="true"></span>
+						<div class="flex -space-x-4">
+							{#each models as model, modelIdx}
+								<Tooltip
+									content={(models[modelIdx]?.info?.meta?.tags ?? [])
+										.map((tag) => tag.name.toUpperCase())
+										.join(', ')}
+									placement="top"
 								>
-									<ModelIcon
-										src={model?.info?.meta?.profile_image_url ??
-											model?.meta?.profile_image_url ??
-											`${WEBUI_BASE_URL}/static/favicon.png`}
-										className="size-14 @sm:size-16 rounded-2xl border-2 border-white dark:border-gray-800 shadow-lg"
-										alt="logo"
-									/>
-								</button>
-							</Tooltip>
-						{/each}
+									<button
+										on:click={() => {
+											selectedModelIdx = modelIdx;
+										}}
+									>
+										<ModelIcon
+											src={model?.info?.meta?.profile_image_url ??
+												model?.meta?.profile_image_url ??
+												`${WEBUI_BASE_URL}/static/favicon.png`}
+											className="size-16 @sm:size-[4.5rem] rounded-full"
+											alt="logo"
+										/>
+									</button>
+								</Tooltip>
+							{/each}
+						</div>
 					</div>
-				</div>
 
-				<!-- 问候语为主标题，模型名降为副标题（连接后缀弱化） -->
-				<div
-					class="text-xl @sm:text-2xl font-semibold tracking-tight line-clamp-1 px-4"
-					in:fade={{ duration: 100 }}
-				>
-					{$i18n.t('Hello, {{name}}', { name: $user?.name })}
-				</div>
-				{#if models[selectedModelIdx]?.name}
-					<div
-						class="mt-1 flex min-w-0 max-w-full items-baseline justify-center gap-1.5 px-4 text-sm text-gray-500 dark:text-gray-400"
-						in:fade={{ duration: 100, delay: 40 }}
-					>
-						<span class="truncate font-medium text-gray-700 dark:text-gray-200">
-							{getModelBaseName(models[selectedModelIdx])}
-						</span>
-						{#if getModelConnectionName(models[selectedModelIdx])}
-							<span class="shrink-0 text-2xs text-gray-600 dark:text-gray-400">
-								{getModelConnectionName(models[selectedModelIdx])}
+					<h1 class="halo-greeting halo-rise line-clamp-2 px-4" style="--i: 1">
+						{$i18n.t(greetingKey, { name: $user?.name })}
+					</h1>
+					{#if models[selectedModelIdx]?.name}
+						<div
+							class="halo-rise mt-2.5 flex min-w-0 max-w-full items-center justify-center gap-2 px-4 text-[13px] text-gray-500 dark:text-gray-400"
+							style="--i: 2"
+						>
+							<span class="halo-presence" aria-hidden="true"></span>
+							<span class="truncate font-medium text-gray-700 dark:text-gray-200">
+								{getModelBaseName(models[selectedModelIdx])}
 							</span>
-						{/if}
-					</div>
-				{/if}
+							{#if getModelConnectionName(models[selectedModelIdx])}
+								<span class="halo-chip shrink-0">
+									{getModelConnectionName(models[selectedModelIdx])}
+								</span>
+							{/if}
+						</div>
+					{/if}
+				</div>
 
 				<!-- 模型描述 -->
 				<div class="flex mt-2 mb-4">

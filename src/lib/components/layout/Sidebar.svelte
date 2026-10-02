@@ -99,6 +99,10 @@
 
 	let sidebarStyle: SidebarStyle = 'flat';
 
+	// Shown next to "New Chat" (Ctrl/⌘+Shift+O, see (app)/+layout.svelte).
+	const shortcutModifier =
+		typeof navigator !== 'undefined' && /mac/i.test(navigator.platform ?? '') ? '⌘' : 'Ctrl';
+
 	$: {
 		const fromQuery = normalizeSidebarStyle(
 			$page?.url?.searchParams?.get(SIDEBAR_STYLE_QUERY_KEY) ?? null
@@ -109,17 +113,17 @@
 	$: iconButtonClass =
 		sidebarStyle === 'card'
 			? 'group flex items-center justify-center w-11 h-11 rounded-2xl bg-white/85 dark:bg-gray-900/55 border border-gray-200/70 dark:border-gray-800/70 shadow-sm hover:bg-white dark:hover:bg-gray-900/75 hover:shadow-md transition active:scale-[0.98]'
-			: 'group flex items-center justify-center w-11 h-11 rounded-xl bg-transparent hover:bg-gray-100 dark:hover:bg-gray-850 transition active:scale-[0.98]';
+			: 'group flex items-center justify-center w-10 h-10 rounded-xl bg-transparent text-gray-600 dark:text-gray-300 hover:bg-[var(--sb-row-hover)] hover:text-gray-900 dark:hover:text-white transition active:scale-[0.96]';
 
 	$: actionItemClass =
 		sidebarStyle === 'card'
 			? 'flex items-center gap-2.5 rounded-2xl bg-white/70 dark:bg-gray-900/45 border border-gray-200/60 dark:border-gray-800/60 shadow-sm hover:bg-white/85 dark:hover:bg-gray-900/60 hover:shadow-md transition w-full px-3 py-2'
-			: 'flex items-center gap-2.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-850 transition w-full px-3 py-2';
+			: 'halo-nav-row';
 
 	$: userItemClass =
 		sidebarStyle === 'card'
 			? 'flex items-center rounded-2xl bg-white/70 dark:bg-gray-900/45 border border-gray-200/60 dark:border-gray-800/60 hover:bg-white/85 dark:hover:bg-gray-900/60 transition w-full px-2 py-2'
-			: 'flex items-center rounded-xl py-2 px-2 w-full hover:bg-gray-100 dark:hover:bg-gray-850 transition';
+			: 'halo-user-row';
 
 	$: avatarContainerClass =
 		sidebarStyle === 'card'
@@ -129,7 +133,7 @@
 	$: brandLinkClass =
 		sidebarStyle === 'card'
 			? 'flex items-center gap-2 px-2 py-1.5 rounded-2xl bg-white/60 dark:bg-gray-900/40 border border-gray-200/60 dark:border-gray-800/60 hover:bg-white/80 dark:hover:bg-gray-900/55 transition'
-			: 'flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-850 transition';
+			: 'halo-brand';
 
 	let navElement;
 	let sidebarScrollContainerElement: HTMLDivElement | null = null;
@@ -836,17 +840,24 @@
 					}}
 					draggable="false"
 				>
-					<svg class="size-6" viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg">
-						<path
-							class="fill-none stroke-gray-900 dark:stroke-white"
-							style="stroke-width: 14; stroke-linecap: round;"
-							d="M60 17 A43 43 0 1 1 17 60"
-						/>
-						<circle class="fill-gray-900 dark:fill-white" cx="60" cy="60" r="13" />
-					</svg>
-					<span class="font-semibold text-sm text-gray-800 dark:text-gray-100 whitespace-nowrap"
-						>Halo WebUI</span
+					<svg
+						class="halo-mark text-gray-900 dark:text-white"
+						viewBox="0 0 120 120"
+						xmlns="http://www.w3.org/2000/svg"
+						aria-hidden="true"
 					>
+						<defs>
+							<linearGradient id="halo-mark-spectrum" x1="0" y1="0" x2="1" y2="1">
+								<stop offset="0" stop-color="var(--halo-ion)" />
+								<stop offset="0.55" stop-color="var(--halo-violet)" />
+								<stop offset="1" stop-color="var(--halo-solar)" />
+							</linearGradient>
+						</defs>
+						<path class="halo-mark__ring" d="M60 17 A43 43 0 1 1 17 60" />
+						<path class="halo-mark__glow" d="M60 17 A43 43 0 1 1 17 60" />
+						<circle class="halo-mark__core" cx="60" cy="60" r="13" />
+					</svg>
+					<span class="halo-wordmark">Halo<span>WebUI</span></span>
 				</a>
 				<Tooltip
 					content="{$i18n.t($showSidebar ? 'Collapse sidebar' : 'Expand sidebar')} · {$i18n.t(
@@ -913,10 +924,12 @@
 
 		{#if expanded}
 			<!-- 新对话：独立一行 -->
-			<div class="flex text-gray-700 dark:text-gray-200 px-2 mt-1">
+			<div class="flex text-gray-700 dark:text-gray-200 px-2 mt-2 mb-1.5">
 				<a
 					id="sidebar-new-chat-button"
-					class={actionItemClass + ' no-drag-region'}
+					class={actionItemClass +
+						' no-drag-region' +
+						(sidebarStyle === 'flat' ? ' halo-new-chat' : '')}
 					href="/"
 					draggable="false"
 					aria-label={$i18n.t('New Chat')}
@@ -924,6 +937,7 @@
 				>
 					<ChatBubblePlus className="size-5" strokeWidth="2" />
 					<span class="text-sm font-medium whitespace-nowrap">{$i18n.t('New Chat')}</span>
+					<span class="halo-kbd" aria-hidden="true">{shortcutModifier}⇧O</span>
 				</a>
 			</div>
 		{/if}
@@ -933,6 +947,7 @@
 				<a
 					class={actionItemClass}
 					href="/workspace"
+					aria-current={$page?.url?.pathname?.startsWith('/workspace') ? 'page' : undefined}
 					on:click={() => {
 						selectedChatId = null;
 						chatId.set('');
@@ -969,6 +984,7 @@
 				<a
 					class={actionItemClass}
 					href="/teams"
+					aria-current={$page?.url?.pathname?.startsWith('/teams') ? 'page' : undefined}
 					on:click={() => {
 						selectedChatId = null;
 						chatId.set('');
@@ -1453,7 +1469,7 @@
 		{/if}
 
 		<!-- 底部用户区 -->
-		<div class="shrink-0 mt-auto px-2 pt-2 pb-1 border-t border-gray-200/60 dark:border-white/[0.08]">
+		<div class="shrink-0 mt-auto px-2 pt-1.5 pb-1">
 			<div class="flex flex-col font-primary">
 				{#if $user !== undefined && $user !== null}
 					<UserMenu

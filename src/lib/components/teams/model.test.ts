@@ -17,6 +17,7 @@ import {
 	mergeEvents,
 	openParents,
 	phaseAt,
+	plainPreview,
 	replayDelay,
 	taskDepths
 } from './model';
@@ -205,6 +206,18 @@ describe('activity', () => {
 			'完成并交接 · 见 api.md'
 		);
 		expect(activityText(ev(7, { type: 'status', sub_status: 'running' }))).toBe('执行中');
+	});
+});
+
+describe('plain preview', () => {
+	it('drops markdown syntax members write, keeps the words and lines', () => {
+		expect(plainPreview('## T3 评审结论：**不通过**，见 `review.md`')).toBe(
+			'T3 评审结论：不通过，见 review.md'
+		);
+		expect(plainPreview('> 引用\n- [文档](./a.md) 与 *重点*\n\n\n\n结束')).toBe(
+			'引用\n- 文档 与 重点\n\n结束'
+		);
+		expect(plainPreview('a * b * c')).toBe('a * b * c');
 	});
 });
 

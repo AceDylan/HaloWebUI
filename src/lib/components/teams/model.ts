@@ -381,6 +381,21 @@ export const latestActivity = (
 	return out;
 };
 
+/** Markdown written by members, as plain text for a short preview (feed bubbles): headings,
+ *  emphasis, inline code and link syntax removed; line breaks kept. */
+export const plainPreview = (text: string): string =>
+	(text ?? '')
+		.replace(/```[a-z0-9_-]*\n?/gi, '')
+		.replace(/^\s{0,3}#{1,6}\s+/gm, '')
+		.replace(/^\s{0,3}>\s?/gm, '')
+		.replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1')
+		.replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+		.replace(/(\*\*|__)(.+?)\1/g, '$2')
+		.replace(/(^|[^*\w])\*(?!\s)([^*\n]+?)\*(?!\w)/g, '$1$2')
+		.replace(/`([^`\n]+)`/g, '$1')
+		.replace(/\n{3,}/g, '\n\n')
+		.trim();
+
 export type Delivery = {
 	state: 'queued' | 'delivered' | 'undelivered';
 	via?: string;

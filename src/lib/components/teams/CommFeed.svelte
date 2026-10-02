@@ -9,6 +9,7 @@
 		deliveryAt,
 		feedCategory,
 		formatClock,
+		plainPreview,
 		RUNNER_EVENT_LABEL,
 		type FeedCategory
 	} from './model';
@@ -29,6 +30,11 @@
 	const dispatch = createEventDispatcher();
 	let category: FeedCategory | 'all' = 'all';
 	let shown = pageSize;
+	let expanded = new Set<string>();
+	const toggle = (id: string) => {
+		expanded.has(id) ? expanded.delete(id) : expanded.add(id);
+		expanded = expanded;
+	};
 
 	const FILTERS: { value: FeedCategory | 'all'; label: string }[] = [
 		{ value: 'all', label: '全部' },
@@ -212,7 +218,20 @@
 											? 'text-[12.5px] text-gray-700 dark:text-gray-200'
 											: 'text-gray-600 dark:text-gray-300'}"
 							>
-								{ev.text}
+								{#if ev.type === 'message' || ev.type === 'handoff'}
+									{@const plain = plainPreview(ev.text)}
+									<span class={expanded.has(ev.id) ? '' : 'line-clamp-4'}>{plain}</span>
+									{#if plain.length > 160 || plain.split('\n').length > 4}
+										<button
+											type="button"
+											class="mt-1 block text-[11px] font-medium text-sky-700 hover:underline dark:text-sky-300"
+											on:click={() => toggle(ev.id)}
+											>{expanded.has(ev.id) ? '收起' : '展开全文'}</button
+										>
+									{/if}
+								{:else}
+									{ev.text}
+								{/if}
 							</div>
 						{/if}
 						{#if delivery}

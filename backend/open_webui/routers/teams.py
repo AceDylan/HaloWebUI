@@ -6,7 +6,9 @@ utils/agent_teams.py for the split between HaloWebUI and Hermes.
 """
 
 import asyncio
+import hmac
 import logging
+import time
 from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -14,6 +16,7 @@ from pydantic import BaseModel, Field
 
 from open_webui.models.agent_teams import AgentTeams
 from open_webui.models.chats import Chats
+from open_webui.models.users import Users
 from open_webui.utils.agent_teams import (
     ENABLE_AGENT_TEAMS,
     FEEDBACK_MAX_CHARS,
@@ -27,6 +30,7 @@ from open_webui.utils.agent_teams import (
     public_team,
     reconcile,
     start_planning,
+    team_origin,
 )
 from open_webui.utils.auth import get_verified_user
 
@@ -111,16 +115,21 @@ LIST_REFRESH_SECONDS = 4
 
 @router.get("/", dependencies=[Depends(_enabled)])
 async def list_teams(request: Request, chat_id: Optional[str] = None, user=Depends(get_verified_user)):
+    return {"teams": [public_team(t, with_plan=False) for t in await _fresh_list(request, user, chat_id)]}
+
+
+async def _fresh_list(request: Request, user, chat_id: Optional[str] = None, target=None):
     teams = AgentTeams.list_for_user(user.id, chat_id=chat_id)
     # Teams still at work are read from Hermes once here, so the list shows where they are now
     # (phase, tasks done) without opening each one. Best effort and bounded: a slow or missing
     # Hermes leaves the last recorded state.
     live = [t for t in teams if t.status in ("running", "starting") and t.phase not in ("completed", "stopped")]
     if live:
-        try:
-            target = await hermes_target(request, user)
-        except TeamsError:
-            target = None
+        if target is None:
+            try:
+                target = await hermes_target(request, user)
+            except TeamsError:
+                target = None
         if target is not None:
             async def refresh(team):
                 try:
@@ -130,7 +139,7 @@ async def list_teams(request: Request, chat_id: Optional[str] = None, user=Depen
             fresh = await asyncio.gather(*(refresh(t) for t in live[:LIST_REFRESH_LIMIT]))
             by_id = {t.id: t for t in fresh}
             teams = [by_id.get(t.id, t) for t in teams]
-    return {"teams": [public_team(t, with_plan=False) for t in teams]}
+    return teams
 
 
 @router.post("/", dependencies=[Depends(_enabled)])
@@ -145,10 +154,19 @@ async def create_team(request: Request, form: CreateTeamForm, user=Depends(get_v
         target = await hermes_target(request, user)
     except TeamsError as exc:
         _raise(exc)
-    lead_model = (form.lead_model or "").strip() or None
-    team = AgentTeams.insert(user.id, goal, chat_id, default_title(goal), meta={"lead_model": lead_model} if lead_model else None)
+    return public_team(_start(user, goal, target, chat_id=chat_id, lead_model=form.lead_model))
+
+
+def _start(user, goal: str, target, *, chat_id: Optional[str] = None, lead_model: Optional[str] = None,
+           origin: Optional[dict] = None):
+    meta: dict = {}
+    if (lead_model or "").strip():
+        meta["lead_model"] = lead_model.strip()
+    if origin:
+        meta["origin"] = origin
+    team = AgentTeams.insert(user.id, goal, chat_id, default_title(goal), meta=meta or None)
     start_planning(team, target)
-    return public_team(team)
+    return team
 
 
 @router.get("/{team_id}", dependencies=[Depends(_enabled)])
@@ -171,13 +189,17 @@ async def replan(request: Request, team_id: str, form: ReplanForm, user=Depends(
         target = await hermes_target(request, user)
     except TeamsError as exc:
         _raise(exc)
+    return public_team(_replan(team, user, target, form.feedback))
+
+
+def _replan(team, user, target, feedback: str):
     previous = team.plan
     updated = AgentTeams.update(team.id, user.id, expect_status=("plan_ready", "plan_failed", "start_failed"),
                                 status="planning", error=None)
     if updated is None:
         raise HTTPException(status_code=409, detail="现在不能重新规划（计划已批准或正在规划）")
-    start_planning(updated, target, form.feedback.strip(), previous)
-    return public_team(updated)
+    start_planning(updated, target, feedback.strip(), previous)
+    return updated
 
 
 @router.put("/{team_id}/plan", dependencies=[Depends(_enabled)])
@@ -227,6 +249,12 @@ async def approve(request: Request, team_id: str, user=Depends(get_verified_user
         target = await hermes_target(request, user)
     except TeamsError as exc:
         _raise(exc)
+    return public_team(await _approve(team, user, target))
+
+
+async def _approve(team, user, target):
+    if not team.plan:
+        raise HTTPException(status_code=409, detail="还没有可批准的计划")
     starting = AgentTeams.update(team.id, user.id, expect_status=("plan_ready", "start_failed"),
                                  status="starting", error=None)
     if starting is None:
@@ -234,26 +262,28 @@ async def approve(request: Request, team_id: str, user=Depends(get_verified_user
     try:
         result = await hermes_call(target, "POST", "", json_body={
             "team_id": team.id, "plan": team.plan, "goal": team.goal, "title": team.title, "chat_id": team.chat_id or "",
+            "origin": team_origin(team),
         }, timeout=60)
     except TeamsError as exc:
         AgentTeams.update(team.id, user.id, expect_status=("starting",), status="start_failed",
                           error=f"启动失败：{exc.detail}")
         raise HTTPException(status_code=exc.status_code if exc.status_code < 500 else 502, detail=f"启动失败：{exc.detail}")
-    import time as _time
-
     updated = AgentTeams.update(team.id, user.id, expect_status=("starting",), status="running", phase="running",
-                                board=(result or {}).get("board"), approved_at=int(_time.time()), error=None)
-    return public_team(updated or team)
+                                board=(result or {}).get("board"), approved_at=int(time.time()), error=None)
+    return updated or team
 
 
 @router.post("/{team_id}/cancel", dependencies=[Depends(_enabled)])
 async def cancel(team_id: str, user=Depends(get_verified_user)):
-    team = _own(team_id, user)
+    return public_team(_cancel(_own(team_id, user), user))
+
+
+def _cancel(team, user):
     updated = AgentTeams.update(team.id, user.id, expect_status=("planning", "plan_ready", "plan_failed", "start_failed"),
                                 status="cancelled")
     if updated is None:
         raise HTTPException(status_code=409, detail="已经开始执行的协作任务请用「停止」")
-    return public_team(updated)
+    return updated
 
 
 @router.delete("/{team_id}", dependencies=[Depends(_enabled)])
@@ -280,14 +310,17 @@ async def _running_target(request: Request, team_id: str, user):
 
 
 @router.get("/{team_id}/events", dependencies=[Depends(_enabled)])
-async def events(request: Request, team_id: str, after: int = 0, limit: int = 500, user=Depends(get_verified_user)):
+async def events(request: Request, team_id: str, after: int = 0, limit: int = 500, visible: int = 0,
+                 user=Depends(get_verified_user)):
     team = _own(team_id, user)
     if team.status != "running":
         return {"events": [], "next_after": 0, "has_more": False, "latest_seq": 0, "reconcile": []}
+    params = {"after": max(0, int(after)), "limit": max(1, min(int(limit), 2000))}
+    if visible:  # the page is in front of the user: Hermes holds back its Telegram notices for this team
+        params["visible"] = "1"
     try:
         target = await hermes_target(request, user)
-        return await hermes_call(target, "GET", f"/{team.id}/events",
-                                 params={"after": max(0, int(after)), "limit": max(1, min(int(limit), 2000))})
+        return await hermes_call(target, "GET", f"/{team.id}/events", params=params)
     except TeamsError as exc:
         _raise(exc)
 
@@ -333,9 +366,7 @@ async def control(request: Request, team_id: str, form: ControlForm, user=Depend
     except TeamsError as exc:
         _raise(exc)
     if form.action == "stop":
-        import time as _time
-
-        AgentTeams.update(team.id, user.id, phase="stopped", finished_at=team.finished_at or int(_time.time()))
+        AgentTeams.update(team.id, user.id, phase="stopped", finished_at=team.finished_at or int(time.time()))
     elif form.action in ("pause", "resume"):
         AgentTeams.update(team.id, user.id, phase="paused" if form.action == "pause" else "running")
     return result
@@ -401,3 +432,94 @@ def _task_id(task_id: str) -> str:
     if not re.match(r"^t_[0-9a-f]{4,32}$", task_id or ""):
         raise HTTPException(status_code=404, detail="任务不存在")
     return task_id
+
+
+# --- Hermes calling back --------------------------------------------------------------------------
+# Hermes (the halowebui-teams plugin) starts and approves teams for a user from Telegram. It
+# proves who it is with the key HaloWebUI itself uses to call that user's Hermes (the API key of
+# the user's Hermes connection) and names the user in X-Halo-Owner; the team is then theirs, with
+# the same plan / approval flow as in the browser. Only the steps before execution live here:
+# once a team runs, Hermes drives it on its own board.
+
+_HERMES_AUTH_TTL = 60
+_hermes_auth_cache: dict = {}
+
+
+class HermesCreateForm(BaseModel):
+    goal: str = Field(min_length=1, max_length=GOAL_MAX_CHARS)
+    origin: dict = Field(default_factory=dict)
+
+
+async def _hermes_caller(request: Request):
+    _enabled()
+    key = (request.headers.get("X-Hermes-Key") or "").strip()
+    owner = (request.headers.get("X-Halo-Owner") or "").strip()
+    denied = HTTPException(status_code=401, detail="unauthorized")
+    if not key or not owner or len(owner) > 64 or len(key) > 512:
+        raise denied
+    user = Users.get_user_by_id(owner)
+    if user is None:
+        raise denied
+    now = time.monotonic()
+    cached = _hermes_auth_cache.get(owner)
+    if cached and cached[0] > now:
+        target = cached[1]
+    else:
+        try:
+            target = await hermes_target(request, user)
+        except TeamsError:
+            raise denied
+        _hermes_auth_cache[owner] = (now + _HERMES_AUTH_TTL, target)
+    expected = target.headers.get("Authorization") or ""
+    if not expected or not hmac.compare_digest(expected.encode(), f"Bearer {key}".encode()):
+        _hermes_auth_cache.pop(owner, None)
+        raise denied
+    return user, target
+
+
+def _clean_origin(origin: dict) -> Optional[dict]:
+    if not isinstance(origin, dict):
+        return None
+    out = {k: str(origin.get(k) or "").strip()[:64] for k in ("platform", "chat_id", "user_id", "thread_id")}
+    out = {k: v for k, v in out.items() if v}
+    return out if out.get("platform") else None
+
+
+@router.get("/hermes/teams")
+async def hermes_list(request: Request, caller=Depends(_hermes_caller)):
+    user, target = caller
+    return {"teams": [public_team(t, with_plan=False) for t in await _fresh_list(request, user, target=target)]}
+
+
+@router.post("/hermes/teams")
+async def hermes_create(request: Request, form: HermesCreateForm, caller=Depends(_hermes_caller)):
+    user, target = caller
+    goal = form.goal.strip()
+    if not goal:
+        raise HTTPException(status_code=400, detail="请写下要协作完成的目标")
+    return public_team(_start(user, goal, target, origin=_clean_origin(form.origin)))
+
+
+@router.get("/hermes/teams/{team_id}")
+async def hermes_get(request: Request, team_id: str, caller=Depends(_hermes_caller)):
+    user, target = caller
+    team, _snap, _err = await reconcile(_own(team_id, user), None)
+    return public_team(team)
+
+
+@router.post("/hermes/teams/{team_id}/approve")
+async def hermes_approve(request: Request, team_id: str, caller=Depends(_hermes_caller)):
+    user, target = caller
+    return public_team(await _approve(_own(team_id, user), user, target))
+
+
+@router.post("/hermes/teams/{team_id}/cancel")
+async def hermes_cancel(request: Request, team_id: str, caller=Depends(_hermes_caller)):
+    user, _target = caller
+    return public_team(_cancel(_own(team_id, user), user))
+
+
+@router.post("/hermes/teams/{team_id}/replan")
+async def hermes_replan(request: Request, team_id: str, form: ReplanForm, caller=Depends(_hermes_caller)):
+    user, target = caller
+    return public_team(_replan(_own(team_id, user), user, target, form.feedback))

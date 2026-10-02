@@ -42,6 +42,15 @@ is the Hermes side. It adds no service, port or second task store:
   native subagent start/stop, and the moment a user's note reached the running member, as
   `halo_*` events in the same `task_events` sequence.
 
+* **Telegram** (`tg.py`, `notify.py`, `link.py`): `/team <目标>` starts a team from Telegram
+  (HaloWebUI creates and plans it through its `/api/v1/teams/hermes/*` routes; the plan card comes
+  back with 批准 / 取消 buttons, a reply re-plans), `/team` lists recent teams; the bridge loop sends
+  a notice when a member asks something, a task fails, or the team finishes (with the start of
+  the conclusion) — to the chat the team came from, else the owner's linked chat — and holds it
+  back while the team's page is open (`events?visible=1`). Replies to notices answer the member /
+  add a note and retry. Settings and the user link: `~/.hermes/halo-teams.json` (see `link.py`).
+  The hook runs before the gateway's auth: only Telegram users listed there are handled.
+
 ## HTTP API (api_server, same key as `/v1/runs`)
 
 HaloWebUI sends `X-Halo-Owner: <user id>`; a team recorded for another owner is a 404.
@@ -62,6 +71,7 @@ HaloWebUI sends `X-Halo-Owner: <user id>`; a team recorded for another owner is 
 | `GET /v1/halo-teams/{id}/conclusion` | the report (markdown), its status / model, every task's full result, workspace files |
 | `POST /v1/halo-teams/{id}/conclusion` | (re)write the report now |
 | `GET /v1/halo-teams/{id}/files[/{path}]` | the workspace listing / one file (confined to the workspace; HTML served as text) |
+| `POST /v1/halo-teams/notify` `{event, team, origin}` | HaloWebUI hands over a finished plan (or why there is none) of a team started from Telegram; the plan card goes to that chat |
 
 `sub_status` values: `queued` (ready, waiting for a slot), `waiting_deps`, `running`,
 `quota_wait`, `waiting_user`, `failed`, `blocked`, `stopped`, `done`.

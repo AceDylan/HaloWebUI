@@ -18,6 +18,8 @@ or drive another user's team through this API either.
   GET  /v1/halo-teams/{team_id}/conclusion          the final report (markdown) + task results + workspace files
   POST /v1/halo-teams/{team_id}/conclusion          (re)write the report now
   GET  /v1/halo-teams/{team_id}/files/{path}        a file from the team's workspace (images in the report)
+  POST /v1/halo-teams/notify                        {event: plan_ready|plan_failed, team, origin} → the plan card
+                                                    for a team started from Telegram (see notify.py)
 """
 
 from __future__ import annotations
@@ -111,8 +113,21 @@ async def _create(request):
     result = await asyncio.to_thread(
         create_team, team_id, data["plan"], owner=owner, chat_id=str(data.get("chat_id") or ""),
         goal=str(data.get("goal") or ""), title=str(data.get("title") or ""),
+        origin=data.get("origin") if isinstance(data.get("origin"), dict) else None,
     )
     return _json_response(result, status=201 if result.get("created") else 200)
+
+
+async def _notify(request):
+    from .notify import plan_notice
+
+    data = await _body(request)
+    owner = _owner(request)
+    if not owner:
+        return _error(400, "X-Halo-Owner is required")
+    result = await asyncio.to_thread(plan_notice, owner, str(data.get("event") or ""), data.get("team") or {},
+                                     data.get("origin") or {})
+    return _json_response(result)
 
 
 async def _snapshot(request):
@@ -129,6 +144,10 @@ async def _events(request):
         limit = int(request.query.get("limit") or 500)
     except ValueError:
         return _error(400, "after/limit must be integers")
+    if request.query.get("visible") == "1":
+        from .notify import mark_seen
+
+        mark_seen(request.match_info["team_id"])  # the page is open: no Telegram notices for it now
     return _json_response(
         await asyncio.to_thread(timeline, request.match_info["team_id"], _owner(request), after, limit)
     )
@@ -282,6 +301,7 @@ def install(app: Any, adapter: Any) -> None:
     router.add_post(base + "/runners/check", _wrap(adapter, _runners_check))
     router.add_post(base + "/plan/resolve", _wrap(adapter, _plan_resolve))
     router.add_post(base + "/plan", _wrap(adapter, _plan))
+    router.add_post(base + "/notify", _wrap(adapter, _notify))
     router.add_post(base, _wrap(adapter, _create))
     router.add_get(base + "/{team_id}", _wrap(adapter, _snapshot))
     router.add_get(base + "/{team_id}/events", _wrap(adapter, _events))

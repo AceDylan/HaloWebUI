@@ -214,7 +214,13 @@
 	const fetchEvents = async () => {
 		let got = 0;
 		for (let page = 0; page < 20; page++) {
-			const res = await getTeamEvents(localStorage.token, teamId, after, 1000);
+			const res = await getTeamEvents(
+				localStorage.token,
+				teamId,
+				after,
+				1000,
+				typeof document !== 'undefined' && document.visibilityState === 'visible'
+			);
 			const before = events.length;
 			events = mergeEvents(events, res.events);
 			got += events.length - before;
@@ -435,6 +441,13 @@
 		{#if team && headerStatus}
 			<span class="shrink-0"
 				><StatusChip status={headerStatus} label={headerLabel} size="sm" /></span
+			>
+		{/if}
+		{#if team?.origin === 'telegram'}
+			<span
+				class="shrink-0 rounded-full border border-sky-200 px-2 py-0.5 text-[11px] text-sky-700 max-sm:hidden dark:border-sky-800 dark:text-sky-300"
+				title="在 Telegram 用 /team 发起：成员提问、失败和完成会推送到 Telegram（你正在看这个页面时不推）"
+				data-team-origin="telegram">Telegram</span
 			>
 		{/if}
 		<div class="ml-auto flex shrink-0 items-center gap-1.5">

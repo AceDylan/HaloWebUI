@@ -271,6 +271,16 @@
 				<p class="max-w-xl text-sm leading-relaxed text-gray-500 dark:text-gray-400">
 					负责人拆分任务、为每位成员挑选最合适的代理并按依赖并行推进；你批准计划后才开工，结束时交付一份完整结论。
 				</p>
+				<p
+					class="max-w-xl text-xs leading-relaxed text-gray-400 dark:text-gray-500"
+					data-teams-tg-hint
+				>
+					不在电脑前也行：在 Telegram 给 Hermes 发 <code
+						class="rounded bg-gray-100 px-1 py-0.5 font-mono text-[11px] text-gray-600 dark:bg-gray-800 dark:text-gray-300"
+						>/team 目标</code
+					>
+					就能发起；计划、成员提问和完成结论都会推送到 Telegram，直接点按钮或回复即可。
+				</p>
 			</header>
 
 			<!-- composer -->
@@ -630,6 +640,14 @@
 										class="mt-1 flex min-w-0 items-center gap-1.5 truncate text-xs text-gray-500 dark:text-gray-400"
 									>
 										<span class="shrink-0">{timeAgo(team.updated_at, $now)}</span>
+										{#if team.origin === 'telegram'}
+											<span aria-hidden="true">·</span>
+											<span
+												class="shrink-0 text-sky-600 dark:text-sky-400"
+												title="在 Telegram 用 /team 发起，计划、提问和完成会推送到那里"
+												data-team-origin="telegram">Telegram</span
+											>
+										{/if}
 										{#if team.task_count}
 											<span aria-hidden="true">·</span>
 											<span class="shrink-0">{team.member_count} 位成员</span>

@@ -110,7 +110,7 @@ def _task_body(team: dict, task: dict, member: dict) -> str:
 
 
 def create_team(team_id: str, plan: dict, *, owner: str, chat_id: str = "", goal: str = "",
-                title: str = "") -> dict:
+                title: str = "", origin: Optional[dict] = None) -> dict:
     """Create (or return) the board for *team_id* from a validated *plan*; idempotent."""
     from .plan import validate_plan
 
@@ -135,6 +135,9 @@ def create_team(team_id: str, plan: dict, *, owner: str, chat_id: str = "", goal
             "summary": checked.get("summary") or "",
             "owner": str(owner),
             "chat_id": str(chat_id or ""),
+            # Where the team was started from when not the browser (Telegram): its notices go there.
+            "origin": {k: str(v)[:64] for k, v in (origin or {}).items()
+                       if k in ("platform", "chat_id", "user_id", "thread_id") and v},
             "workspace": workspace,
             "lead": checked["lead"],
             "members": checked["members"],

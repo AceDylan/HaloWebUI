@@ -23,6 +23,10 @@ HaloWebUI 里的多代理协作：一位负责人（team-lead）拆分工，几�
   - 「停止执行」：结束正在执行的成员（runner 的运行会被停止），不会被自动恢复，也不能再继续。
 - **回放**：从头回看，0.5/1/2/4 倍速，可拖时间轴；成员、任务板、统计和通讯都对应同一时点。回放只读已有记录，不会触发任何模型、工具、消息或重试。长时间没动静的间隔会被压缩。
 - **手机**：同一页面换成「任务 / 成员 / 通讯」标签，不显示画布。
+- **Telegram**（和 Hermes 同一个机器人）：
+  - `/team 目标` 发起；负责人做好计划后发来计划卡片（成员、任务顺序、执行来源），点「批准并开始」或「取消」，或者直接回复卡片写修改意见让负责人重新规划；卡片发出后 30 分钟内直接发「批准」也行。`/team` 单独发 = 最近的协作任务。
+  - 执行中：成员提问、任务失败/受阻、全部完成（附结论开头）会推送过来——TG 发起的团队推到发起的对话，网页发起的推到你绑定的 TG 私聊；**你正开着这个团队的页面时不推**（页面上已经看到了）。回复提问 = 回答成员；回复失败通知 = 补充说明并重试；失败通知上也有「重试」按钮。
+  - 协作台列表和工作台标题旁的「Telegram」标记表示这个团队是在 Telegram 发起的。
 
 ### 补充说明什么时候送达
 
@@ -50,6 +54,7 @@ HaloWebUI 里的多代理协作：一位负责人（team-lead）拆分工，几�
 
 - 关闭：HaloWebUI 环境变量 `ENABLE_AGENT_TEAMS=false`（接口 404、入口隐藏）；Hermes 侧从 `plugins.enabled` 去掉 `halowebui-teams` 并重启网关。
 - runner 策略可选覆盖文件 `~/.hermes/halo-teams-runners.json`（改了立即生效，不用重启）：`{"order": [...], "kinds": {"code": "codex"}, "disabled": ["anyclaude"], "unavailable": {"cchclaude": "中转维护中"}, "quota_wait_max_seconds": 1200}`——`unavailable` 是手动维护开关，标记的 runner 会像真的不可用一样被兜底跳过。
+- Telegram 联动：`~/.hermes/halo-teams.json`（`halowebui.url` 本机地址、`halowebui.public_url` 按钮里的网页地址、`telegram.owners` = {TG 用户 id: HaloWebUI 用户 id}、`telegram.notify_web_teams` 网页发起的团队是否也推送，默认开），改了立即生效；没有这个文件或没列出的 TG 用户，`/team` 等消息原样交给 Hermes。HaloWebUI 侧 `/api/v1/teams/hermes/*` 只认该用户 Hermes 连接里的同一把 API key。
 - 负责人模型默认跟随 Hermes `model.default`；要单独指定，在 Hermes `config.yaml` 加 `auxiliary.halo_team_lead: {provider: ..., model: ...}`。
 - 并发：`kanban.max_in_progress: 2`（全机，含 runner 成员）；同一种 runner 的成员同时最多 1 个（不同种类互不占用，比如一个 reclaude 加一个 codex 可以同时跑）。
 - 已知限制：

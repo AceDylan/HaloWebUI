@@ -142,18 +142,32 @@ async def _plan_job(team: AgentTeamModel, target: HermesTarget, feedback: str, p
         ok = isinstance(body, dict) and body.get("ok") and isinstance(body.get("plan"), dict)
         if ok:
             plan = body["plan"]
-            AgentTeams.update(team.id, team.user_id, expect_status=("planning",), status="plan_ready",
-                              plan=plan, error=None, title=(plan.get("title") or team.title)[:60])
+            updated = AgentTeams.update(team.id, team.user_id, expect_status=("planning",), status="plan_ready",
+                                        plan=plan, error=None, title=(plan.get("title") or team.title)[:60])
         else:
             error = (body or {}).get("error") if isinstance(body, dict) else None
-            AgentTeams.update(team.id, team.user_id, expect_status=("planning",), status="plan_failed",
-                              error=str(error or "负责人没有给出可用的计划")[:1000])
+            updated = AgentTeams.update(team.id, team.user_id, expect_status=("planning",), status="plan_failed",
+                                        error=str(error or "负责人没有给出可用的计划")[:1000])
     except TeamsError as exc:
-        AgentTeams.update(team.id, team.user_id, expect_status=("planning",), status="plan_failed", error=exc.detail)
+        updated = AgentTeams.update(team.id, team.user_id, expect_status=("planning",), status="plan_failed",
+                                    error=exc.detail)
     except Exception as exc:  # pragma: no cover - defensive
         log.exception("agent team planning failed")
-        AgentTeams.update(team.id, team.user_id, expect_status=("planning",), status="plan_failed",
-                          error=f"规划出错：{type(exc).__name__}")
+        updated = AgentTeams.update(team.id, team.user_id, expect_status=("planning",), status="plan_failed",
+                                    error=f"规划出错：{type(exc).__name__}")
+    if updated is not None and team_origin(updated):
+        await _tell_origin(updated, target)
+
+
+async def _tell_origin(team: AgentTeamModel, target: HermesTarget) -> None:
+    """A team started from a chat outside HaloWebUI (Telegram): Hermes sends the plan (or why
+    there is none) back there, with buttons to approve or cancel. Best effort."""
+    try:
+        await hermes_call(target, "POST", "/notify", json_body={"event": team.status, "team": public_team(team),
+                                                              "origin": team_origin(team)},
+                          timeout=CALL_TIMEOUT_SECONDS)
+    except TeamsError as exc:
+        log.info("teams: could not hand the plan of %s to Hermes for its chat (%s)", team.id, exc.detail)
 
 
 def start_planning(team: AgentTeamModel, target: HermesTarget, feedback: str = "", previous: Optional[dict] = None) -> None:
@@ -220,6 +234,12 @@ def snapshot_progress(snap: Any) -> Optional[dict]:
     return out
 
 
+def team_origin(team: AgentTeamModel) -> Optional[dict]:
+    """Where the team was started from when that was not the browser (Telegram via Hermes)."""
+    origin = (team.meta or {}).get("origin")
+    return origin if isinstance(origin, dict) and origin.get("platform") else None
+
+
 def deletable(team: AgentTeamModel) -> bool:
     """Only a team nothing is happening in can go: never planned, cancelled, failed, or finished."""
     if team.status in ("plan_ready", "plan_failed", "start_failed", "cancelled"):
@@ -237,6 +257,7 @@ def public_team(team: AgentTeamModel, *, with_plan: bool = True) -> dict:
     data["task_count"] = len(plan.get("tasks") or [])
     data["executors"] = plan.get("executors") or []
     data["progress"] = meta.get("progress")
+    data["origin"] = (meta.get("origin") or {}).get("platform") if isinstance(meta.get("origin"), dict) else None
     data["deletable"] = deletable(team)
     # Who is on the team, for the list's avatar stack (names and roles only).
     data["roster"] = [

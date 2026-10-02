@@ -347,3 +347,90 @@ def test_delete_only_when_nothing_runs_and_only_your_own(hermes):
     assert resp.status_code == 409 and "停止" in resp.json()["detail"]
     AgentTeams.update(running, "u-del", phase="stopped")
     assert a.delete(f"/api/v1/teams/{running}").status_code == 200
+
+
+# --- Hermes calling back (Telegram) -----------------------------------------------------------------
+
+def _hermes_client(monkeypatch, owners=("u1",)):
+    known = {o: _User(o) for o in owners}
+    monkeypatch.setattr(teams_router.Users, "get_user_by_id", lambda uid: known.get(uid))
+    teams_router._hermes_auth_cache.clear()
+    app = FastAPI()
+    app.include_router(teams_router.router, prefix="/api/v1/teams")
+    return TestClient(app)
+
+
+def test_hermes_routes_need_the_users_own_hermes_key(hermes, monkeypatch):
+    client = _hermes_client(monkeypatch)
+    base = "/api/v1/teams/hermes/teams"
+    assert client.get(base).status_code == 401
+    assert client.get(base, headers={"X-Hermes-Key": "k", "X-Halo-Owner": "nobody"}).status_code == 401
+    assert client.get(base, headers={"X-Hermes-Key": "wrong", "X-Halo-Owner": "u1"}).status_code == 401
+    ok = client.get(base, headers={"X-Hermes-Key": "k", "X-Halo-Owner": "u1"})
+    assert ok.status_code == 200 and isinstance(ok.json()["teams"], list)
+    # the browser session is not accepted on these routes, nor the Hermes key on the browser ones
+    assert _client("u1").get(base).status_code == 401
+
+
+def test_telegram_team_runs_the_same_plan_and_approve_flow(hermes, monkeypatch):
+    client = _hermes_client(monkeypatch)
+    h = {"X-Hermes-Key": "k", "X-Halo-Owner": "u1"}
+    created = client.post("/api/v1/teams/hermes/teams", headers=h,
+                          json={"goal": "研究下雨天山上的云", "origin": {"platform": "telegram", "chat_id": "5550001",
+                                                                   "user_id": "5550001", "junk": "x"}})
+    assert created.status_code == 200
+    team = created.json()
+    assert team["status"] == "planning" and team["origin"] == "telegram" and hermes.planned[-1][0] == team["id"]
+    row = AgentTeams.get(team["id"], "u1")
+    assert row.meta["origin"] == {"platform": "telegram", "chat_id": "5550001", "user_id": "5550001"}
+    # the owner sees it in the browser list too, marked as started from Telegram
+    listed = _client("u1").get("/api/v1/teams/").json()["teams"]
+    assert any(t["id"] == team["id"] and t["origin"] == "telegram" for t in listed)
+    # plan ready → Hermes gets the plan card for the chat
+    target = teams_utils.HermesTarget("http://hermes", {}, "u1")
+    hermes.responses[("POST", "/plan")] = {"ok": True, "plan": PLAN}
+    asyncio.run(teams_utils._plan_job(row, target, "", None))
+    notice = next(c for c in hermes.calls if c[2] == "/notify")
+    assert notice[3]["event"] == "plan_ready" and notice[3]["team"]["plan"]["title"] == "计算器设计"
+    assert notice[3]["origin"]["chat_id"] == "5550001"
+    got = client.get(f"/api/v1/teams/hermes/teams/{team['id']}", headers=h).json()
+    assert got["status"] == "plan_ready" and got["plan"]["tasks"][0]["key"] == "T1"
+    # approve from Telegram: same start, origin handed to Hermes for the team's notices
+    hermes.responses[("POST", "")] = {"board": "halo-tg", "created": True, "tasks": {}}
+    approved = client.post(f"/api/v1/teams/hermes/teams/{team['id']}/approve", headers=h)
+    assert approved.status_code == 200 and approved.json()["status"] == "running"
+    start = next(c for c in hermes.calls if c[1] == "POST" and c[2] == "")
+    assert start[3]["origin"]["platform"] == "telegram"
+    assert client.post(f"/api/v1/teams/hermes/teams/{team['id']}/approve", headers=h).status_code == 409
+    assert client.post(f"/api/v1/teams/hermes/teams/{team['id']}/cancel", headers=h).status_code == 409
+
+
+def test_browser_teams_do_not_notify_hermes_about_plans(hermes):
+    client = _client("u1")
+    team = AgentTeams.get(client.post("/api/v1/teams/", json={"goal": "网页里发起"}).json()["id"], "u1")
+    hermes.responses[("POST", "/plan")] = {"ok": True, "plan": PLAN}
+    asyncio.run(teams_utils._plan_job(team, teams_utils.HermesTarget("http://hermes", {}, "u1"), "", None))
+    assert not any(c[2] == "/notify" for c in hermes.calls)
+
+
+def test_hermes_replan_and_cancel_and_other_owners(hermes, monkeypatch):
+    client = _hermes_client(monkeypatch, owners=("u1", "u2"))
+    team_id = _ready_team(_client("u1"), hermes)
+    other = {"X-Hermes-Key": "k", "X-Halo-Owner": "u2"}
+    assert client.get(f"/api/v1/teams/hermes/teams/{team_id}", headers=other).status_code == 404
+    h = {"X-Hermes-Key": "k", "X-Halo-Owner": "u1"}
+    resp = client.post(f"/api/v1/teams/hermes/teams/{team_id}/replan", headers=h, json={"feedback": "加一个评审"})
+    assert resp.status_code == 200 and resp.json()["status"] == "planning"
+    assert hermes.planned[-1][1] == "加一个评审"
+    AgentTeams.update(team_id, "u1", status="plan_ready")
+    assert client.post(f"/api/v1/teams/hermes/teams/{team_id}/cancel", headers=h).json()["status"] == "cancelled"
+
+
+def test_events_pass_the_visible_flag(hermes):
+    client = _client("u1")
+    team_id = _ready_team(client, hermes)
+    AgentTeams.update(team_id, "u1", status="running", phase="running")
+    client.get(f"/api/v1/teams/{team_id}/events?after=3&visible=1")
+    client.get(f"/api/v1/teams/{team_id}/events?after=4")
+    params = [c[4] for c in hermes.calls if c[2].endswith("/events")]
+    assert params[-2] == {"after": 3, "limit": 500, "visible": "1"} and "visible" not in params[-1]

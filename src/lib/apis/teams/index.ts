@@ -103,6 +103,8 @@ export type Team = {
 	deletable?: boolean;
 	/** Who is on the team (list view: names and roles only). */
 	roster?: { name: string; role: string }[];
+	/** Started outside the browser ("telegram": with /team in Hermes' Telegram chat). */
+	origin?: string | null;
 };
 
 export type SubStatus =
@@ -431,8 +433,19 @@ export const cancelTeam = (token: string, teamId: string) =>
 export const deleteTeam = (token: string, teamId: string) =>
 	request<{ ok: boolean; id: string }>(token, 'DELETE', `/${id(teamId)}`);
 
-export const getTeamEvents = (token: string, teamId: string, after: number, limit = 1000) =>
-	request<TeamEventsPage>(token, 'GET', `/${id(teamId)}/events?after=${after}&limit=${limit}`);
+/** ``visible``: the page is in front of the user — Hermes holds back this team's Telegram notices. */
+export const getTeamEvents = (
+	token: string,
+	teamId: string,
+	after: number,
+	limit = 1000,
+	visible = false
+) =>
+	request<TeamEventsPage>(
+		token,
+		'GET',
+		`/${id(teamId)}/events?after=${after}&limit=${limit}${visible ? '&visible=1' : ''}`
+	);
 
 export const getTeamTask = (token: string, teamId: string, taskId: string, log = false) =>
 	request<TaskDetail>(token, 'GET', `/${id(teamId)}/tasks/${id(taskId)}${log ? '?log=true' : ''}`);

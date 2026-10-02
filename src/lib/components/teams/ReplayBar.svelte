@@ -2,7 +2,7 @@
 	import { createEventDispatcher, onDestroy } from 'svelte';
 
 	import type { TeamEvent } from '$lib/apis/teams';
-	import { formatClock, formatDuration, REPLAY_SPEEDS, replayDelay } from './model';
+	import { formatClock, formatDuration, REPLAY_SPEEDS, replayDelay, replayMarks } from './model';
 
 	/**
 	 * Replay = moving a cursor over the recorded events. It only changes what is shown: it never
@@ -23,6 +23,15 @@
 	$: start = events[0]?.ts ?? 0;
 	$: end = events[last]?.ts ?? start;
 	$: at = events[cursor]?.ts ?? start;
+	$: marks = events.length > 1 ? replayMarks(events) : [];
+
+	const MARK: Record<string, string> = {
+		fail: 'bg-red-500',
+		handoff: 'bg-emerald-500',
+		team: 'bg-indigo-500',
+		user: 'bg-violet-500',
+		message: 'bg-sky-500'
+	};
 
 	const stopTimer = () => {
 		if (timer) clearTimeout(timer);
@@ -140,17 +149,36 @@
 	{/if}
 	<label class="flex min-w-[160px] flex-1 items-center gap-3">
 		<span class="sr-only">回放时间轴</span>
-		<input
-			type="range"
-			min="0"
-			max={last}
-			value={cursor}
-			disabled={events.length < 2}
-			on:input={onSlide}
-			class="scrub flex-1"
-			style="--p:{last ? (cursor / last) * 100 : 100}%"
-			aria-valuetext="{formatClock(at)}，第 {cursor + 1} / {events.length} 条记录"
-		/>
+		<span class="relative flex flex-1 items-center">
+			<input
+				type="range"
+				min="0"
+				max={last}
+				value={cursor}
+				disabled={events.length < 2}
+				on:input={onSlide}
+				class="scrub w-full"
+				style="--p:{last ? (cursor / last) * 100 : 100}%"
+				aria-valuetext="{formatClock(at)}，第 {cursor + 1} / {events.length} 条记录"
+			/>
+			{#if marks.length}
+				<!-- Landmarks: red failure, green handoff, indigo team, violet your note, blue message. -->
+				<span
+					class="pointer-events-none absolute inset-x-[7px] top-full mt-[6px] h-[4px]"
+					aria-hidden="true"
+					data-replay-marks
+				>
+					{#each marks as mark (mark.index)}
+						<span
+							class="absolute top-0 size-[4px] -translate-x-1/2 rounded-full transition-opacity {MARK[
+								mark.kind
+							]} {!live && mark.index > cursor ? 'opacity-30' : 'opacity-80'}"
+							style="left:{(mark.index / last) * 100}%"
+						/>
+					{/each}
+				</span>
+			{/if}
+		</span>
 		<span class="tm-num whitespace-nowrap text-gray-500 dark:text-gray-400">
 			{formatClock(at)}<span class="hidden opacity-70 sm:inline">
 				· {formatDuration(at - start)}/{formatDuration(end - start)}</span

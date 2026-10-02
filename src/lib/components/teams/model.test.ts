@@ -19,6 +19,7 @@ import {
 	phaseAt,
 	plainPreview,
 	replayDelay,
+	replayMarks,
 	taskDepths
 } from './model';
 
@@ -181,6 +182,30 @@ describe('events', () => {
 		expect(replayDelay(list, 0, 4).ms).toBe(250);
 		expect(replayDelay(list, 1, 1)).toEqual({ ms: 2500, compressed: true });
 		expect(replayDelay(list, 2, 1).ms).toBe(120);
+	});
+});
+
+describe('replay marks', () => {
+	it('marks failures, handoffs, team milestones and messages, thinning messages first', () => {
+		const list = [
+			ev(1, { type: 'team', text: '计划已批准' }),
+			ev(2, { type: 'tool' }),
+			ev(3, { type: 'message', who: 'member', text: 'hi' }),
+			ev(4, { type: 'message', who: 'user', text: '加上测试' }),
+			ev(5, { type: 'attempt', sub_status: 'failed' }),
+			ev(6, { type: 'runner', data: { phase: 'failed' } }),
+			ev(7, { type: 'handoff', sub_status: 'done' })
+		];
+		expect(replayMarks(list)).toEqual([
+			{ index: 0, kind: 'team' },
+			{ index: 2, kind: 'message' },
+			{ index: 3, kind: 'user' },
+			{ index: 4, kind: 'fail' },
+			{ index: 5, kind: 'fail' },
+			{ index: 6, kind: 'handoff' }
+		]);
+		expect(replayMarks(list, 5).map((m) => m.kind)).not.toContain('message');
+		expect(replayMarks(list, 2)).toHaveLength(2);
 	});
 });
 

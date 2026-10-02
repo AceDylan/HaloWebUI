@@ -444,6 +444,41 @@ export const replayDelay = (events: TeamEvent[], index: number, speed: number) =
 	return { ms: clamped / speed, compressed: real > REPLAY_MAX_GAP_MS };
 };
 
+export type ReplayMark = {
+	index: number;
+	kind: 'fail' | 'handoff' | 'team' | 'user' | 'message';
+};
+
+/**
+ * Landmarks on the replay track: failures, handoffs, team milestones, your notes and member
+ * messages. Over `max`, member messages go first, then the rest is thinned evenly.
+ */
+export const replayMarks = (events: TeamEvent[], max = 80): ReplayMark[] => {
+	const marks: ReplayMark[] = [];
+	events.forEach((ev, index) => {
+		const failed =
+			['failed', 'blocked'].includes(ev.sub_status ?? '') ||
+			(ev.type === 'runner' && ev.data?.phase === 'failed');
+		const kind: ReplayMark['kind'] | null = failed
+			? 'fail'
+			: ev.type === 'handoff'
+				? 'handoff'
+				: ev.type === 'team'
+					? 'team'
+					: ev.type === 'message'
+						? ev.who === 'user'
+							? 'user'
+							: 'message'
+						: null;
+		if (kind) marks.push({ index, kind });
+	});
+	if (marks.length <= max) return marks;
+	const kept = marks.filter((m) => m.kind !== 'message');
+	if (kept.length <= max) return kept;
+	const step = kept.length / max;
+	return Array.from({ length: max }, (_, i) => kept[Math.floor(i * step)]);
+};
+
 // --- avatars / formatting -------------------------------------------------------------------
 
 export type AvatarKind =

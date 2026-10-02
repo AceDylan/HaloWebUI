@@ -9,6 +9,7 @@ import {
 	normalizeHermesRunOptions,
 	describeHermesReply,
 	describeHermesRunNotice,
+	describeTeamNotice,
 	findHermesContinuation,
 	hermesDispatchToRestore,
 	hermesOptionsForMessage,
@@ -316,6 +317,21 @@ describe('接着上次: a follow-up goes back to the run whose report ends the c
 		stored.messages.notice.content = '通知';
 		stored.messages.notice.hermes_notice = { source: 'codex-runner', run_id: `${runId}-a1` };
 		expect(findHermesContinuation(stored)).toEqual({ runner: 'codex', runId: `${runId}-a1`, status: '' });
+	});
+
+	it('a team conclusion posted into the chat is not a run to go back to', () => {
+		const stored = chat();
+		stored.messages.notice.content =
+			'[协作任务结论] 「看板调研」已完成，下面是负责人写的结论。；团队工作目录：/root/work/agent-teams/halo-x';
+		stored.messages.notice.hermes_notice = { source: 'team', run_id: 'team:abc-123:1790900000' };
+		expect(findHermesContinuation(stored)).toBeNull();
+		const notice = parseHermesRunNotice(stored.messages.notice)!;
+		expect(describeTeamNotice(notice, stored.messages.notice.content)).toEqual({
+			headline: '🤝 协作任务「看板调研」已完成 · 负责人的结论',
+			teamId: 'abc-123'
+		});
+		const runner = parseHermesRunNotice(chat().messages.notice)!;
+		expect(describeTeamNotice(runner, chat().messages.notice.content)).toBeNull();
 	});
 
 	it('goes back to a cchclaude run like any other', () => {

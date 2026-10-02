@@ -66,6 +66,13 @@ is the Hermes side. It adds no service, port or second task store:
   back while the team's page is open (`events?visible=1`). Replies to notices answer the member /
   add a note and retry. Settings and the user link: `~/.hermes/halo-teams.json` (see `link.py`).
   The hook runs before the gateway's auth: only Telegram users listed there are handled.
+* **Where the conclusion goes** (`bridge.report_conclusion`, `link.concluded`): once the lead has
+  written a conclusion when the team finished (after its acceptance check, bounded wait), the
+  bridge tells HaloWebUI (`POST /api/v1/teams/hermes/teams/{id}/concluded`), which posts it as a
+  finished reply in the chat the team was started from (one post per written version; a rewrite
+  the user asked for is not re-sent; conclusions from before this existed are not sent). The
+  finish notice in Telegram has 「存入知识库」 (HaloWebUI saves it in the owner's 「协作结论」
+  knowledge base); the conclusion page has the same plus 「在对话里追问」.
 
 ## HTTP API (api_server, same key as `/v1/runs`)
 

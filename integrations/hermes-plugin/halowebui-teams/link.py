@@ -110,6 +110,11 @@ def _api_key() -> str:
     return os.environ.get("API_SERVER_KEY", "").strip()
 
 
+def configured() -> bool:
+    """Calls back into HaloWebUI are possible (its URL is set and the gateway has its API key)."""
+    return bool(str(_section("halowebui").get("url") or "").strip() and _api_key())
+
+
 def call(method: str, path: str, owner: str, body: Any = None, *, timeout: float = 30) -> Any:
     """One call to HaloWebUI's ``/api/v1/teams/hermes`` routes as *owner*."""
     base = str(_section("halowebui").get("url") or "").rstrip("/")
@@ -174,3 +179,14 @@ def replan(owner: str, team_id: str, feedback: str) -> dict:
 def sync(owner: str, team_id: str) -> dict:
     """A change applied here reopened a finished team: HaloWebUI reads its live state again."""
     return call("POST", f"/teams/{team_id}/sync", owner, {}, timeout=30)
+
+
+def concluded(owner: str, team_id: str, *, telegram: bool) -> dict:
+    """The lead has written the team's conclusion: HaloWebUI puts it in the chat the team was
+    started from, if any (``telegram``: the finish is told there too, so no second push)."""
+    return call("POST", f"/teams/{team_id}/concluded", owner, {"telegram": bool(telegram)}, timeout=60)
+
+
+def save_knowledge(owner: str, team_id: str) -> dict:
+    """「存入知识库」: the conclusion into the owner's 「协作结论」 knowledge base in HaloWebUI."""
+    return call("POST", f"/teams/{team_id}/knowledge", owner, {}, timeout=180)

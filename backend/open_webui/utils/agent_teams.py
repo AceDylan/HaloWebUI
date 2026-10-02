@@ -301,6 +301,13 @@ def public_team(team: AgentTeamModel, *, with_plan: bool = True) -> dict:
     project = plan.get("project") if isinstance(plan.get("project"), dict) else None
     data["project"] = {"name": project.get("name"), "path": project.get("path")} if project else None
     data["deletable"] = deletable(team)
+    # Where the conclusion went (the chat it was posted to, the knowledge base it was saved in).
+    knowledge = meta.get("knowledge") if isinstance(meta.get("knowledge"), dict) else None
+    posted = meta.get("chat_posted") if isinstance(meta.get("chat_posted"), dict) else None
+    data["outputs"] = {
+        "knowledge": {"id": knowledge.get("id"), "generated_at": knowledge.get("generated_at")} if knowledge else None,
+        "chat_posted": {"generated_at": posted.get("generated_at")} if posted else None,
+    }
     # Who is on the team, for the list's avatar stack (names and roles only).
     data["roster"] = [
         {"name": str(m.get("name") or "")[:40], "role": str(m.get("role") or "")[:40]}

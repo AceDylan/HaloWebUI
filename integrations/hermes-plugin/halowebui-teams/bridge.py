@@ -8,7 +8,9 @@ Every few seconds, for each team board that is running (not paused/stopped):
   ``reclaude.py``): claim, launch, follow, finish;
 * has the lead diagnose a task that failed or got blocked (see ``lead.py``);
 * sends the team's Telegram notices (a member asks, a task fails, the team finished; see
-  ``notify.py``).
+  ``notify.py``);
+* hands a freshly written conclusion to HaloWebUI, which puts it in the chat the team was
+  started from (``report_conclusion``).
 
 Paused (board archived) and stopped teams are left alone: nothing new starts there.
 HALO_TEAMS_BRIDGE=0 disables the loop (the gateway's own dispatcher still runs Hermes members).
@@ -20,7 +22,7 @@ import os
 import threading
 import time
 
-from .common import board_conn, logger, now, read_team, team_boards
+from .common import board_conn, logger, now, read_team, team_boards, update_team
 
 INTERVAL = float(os.environ.get("HALO_TEAMS_BRIDGE_INTERVAL", "8") or 8)
 _started = {"thread": None}
@@ -70,6 +72,10 @@ def tick() -> None:
                 notify.tick_board(slug, read_team(slug) or team)
             except Exception:
                 logger.warning("halowebui-teams: notice tick failed for %s", slug, exc_info=True)
+            try:
+                report_conclusion(slug, read_team(slug) or team)
+            except Exception:
+                logger.warning("halowebui-teams: conclusion hand-over failed for %s", slug, exc_info=True)
         except Exception:
             logger.warning("halowebui-teams: bridge tick failed for %s", slug, exc_info=True)
 
@@ -89,7 +95,6 @@ def _commit_finished(slug: str, team: dict) -> None:
     if not done:
         return
     from . import projects
-    from .common import update_team
 
     rows = []
     for t in ids:
@@ -131,6 +136,54 @@ def _catch_up_conclusion(slug: str, team: dict) -> None:
         conclusion.start(slug, by="auto")
     elif not entry and now() - int(team.get("completed_at") or 0) < CONCLUSION_CATCH_UP:
         conclusion.start(slug, by="auto")
+
+
+REPORT_RETRY = 60            # a hand-over HaloWebUI could not take (chat busy, HaloWebUI down) is tried again
+REPORT_WINDOW = 6 * 3600     # ... for this long after the conclusion was written
+REPORT_BASELINE_AGE = 600    # conclusions older than this when first seen predate the hand-over: not sent
+
+
+def report_conclusion(slug: str, team: dict) -> None:
+    """A conclusion the lead wrote when the team finished (or finished again after new work) goes
+    to HaloWebUI, which puts it in the chat the team was started from. Once per written version,
+    after the lead's acceptance check (bounded wait); a rewrite the user asked for is not re-sent."""
+    from . import link, notify
+
+    if team.get("state") != "completed" or not team.get("owner"):
+        return
+    entry = team.get("conclusion") or {}
+    generated = int(entry.get("generated_at") or 0)
+    if entry.get("status") != "ready" or not generated:
+        return
+    key = str(generated)
+    reported = team.get("reported")
+    if reported == key:
+        return
+    if (entry.get("by") or "auto") != "auto" or now() - generated > REPORT_WINDOW or (
+            reported is None and now() - generated > REPORT_BASELINE_AGE):
+        update_team(slug, lambda rec: rec.update({"reported": key}))
+        return
+    acceptance = entry.get("acceptance") or {}
+    if (acceptance.get("status") == "checking"
+            and now() - int(acceptance.get("started_at") or 0) < notify.ACCEPTANCE_WAIT):
+        return
+    if not link.configured() or now() - int(team.get("report_tried_at") or 0) < REPORT_RETRY:
+        return
+    update_team(slug, lambda rec: rec.update({"report_tried_at": now()}))
+    from . import tg as telegram
+
+    told = telegram.ready() and notify.target_for(team) is not None
+    try:
+        result = link.concluded(team["owner"], team["team_id"], telegram=told)
+    except link.HaloError as exc:
+        if exc.status in (404, 422):  # the team is gone from HaloWebUI / its chat cannot take a reply
+            update_team(slug, lambda rec: rec.update({"reported": key}))
+        else:
+            logger.info("halowebui-teams: HaloWebUI did not take the conclusion of %s yet (%s)", slug, exc.message)
+        return
+    update_team(slug, lambda rec: rec.update({"reported": key}))
+    if isinstance(result, dict) and result.get("posted"):
+        logger.info("halowebui-teams: conclusion of %s posted to its chat", slug)
 
 
 def _loop() -> None:

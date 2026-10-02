@@ -409,6 +409,24 @@ export const parseHermesRunNotice = (message: {
 	return null;
 };
 
+/**
+ * A 协作台 team's conclusion posted into its chat ("[协作任务结论] 「标题」已完成，…"; run id
+ * "team:<team id>:<version>"): the line reads as the team's, and links back to its page.
+ */
+export const describeTeamNotice = (
+	notice: HermesRunNotice,
+	content: unknown
+): { headline: string; teamId: string } | null => {
+	if (notice.agent !== 'team') return null;
+	const text = typeof content === 'string' ? content : '';
+	const match = text.match(/「(.+?)」(已完成|已停止)/);
+	const teamId = notice.runId.match(/^team:([^:]+):/)?.[1] ?? '';
+	return {
+		headline: match ? `🤝 协作任务「${match[1]}」${match[2]} · 负责人的结论` : '🤝 协作任务的结论',
+		teamId
+	};
+};
+
 const NOTICE_STATUS: Record<string, { icon: string; label: string }> = {
 	success: { icon: '✅', label: '已完成' },
 	question: { icon: '❓', label: '等你决定' },

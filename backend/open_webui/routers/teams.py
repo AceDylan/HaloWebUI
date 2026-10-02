@@ -32,6 +32,7 @@ from open_webui.utils.agent_teams import (
     start_planning,
     start_team,
 )
+from open_webui.utils.agent_team_outputs import concluded, follow_up, save_to_knowledge
 from open_webui.utils.auth import get_verified_user
 
 log = logging.getLogger(__name__)
@@ -398,6 +399,26 @@ async def make_conclusion(request: Request, team_id: str, user=Depends(get_verif
         _raise(exc)
 
 
+@router.post("/{team_id}/conclusion/chat", dependencies=[Depends(_enabled)])
+async def conclusion_chat(request: Request, team_id: str, user=Depends(get_verified_user)):
+    """「在对话里追问」: the team's chat (or a new one) with the conclusion in it → {chat_id}."""
+    team, target = await _running_target(request, team_id, user)
+    try:
+        return await follow_up(request, user, team, target)
+    except TeamsError as exc:
+        _raise(exc)
+
+
+@router.post("/{team_id}/conclusion/knowledge", dependencies=[Depends(_enabled)])
+async def conclusion_knowledge(request: Request, team_id: str, user=Depends(get_verified_user)):
+    """「存入知识库」: the conclusion into the user's own 「协作结论」 knowledge base."""
+    team, target = await _running_target(request, team_id, user)
+    try:
+        return await save_to_knowledge(request, user, team, target)
+    except TeamsError as exc:
+        _raise(exc)
+
+
 @router.get("/{team_id}/files", dependencies=[Depends(_enabled)])
 async def list_files(request: Request, team_id: str, user=Depends(get_verified_user)):
     team, target = await _running_target(request, team_id, user)
@@ -631,6 +652,37 @@ async def hermes_sync(request: Request, team_id: str, caller=Depends(_hermes_cal
     user, target = caller
     team, _snap, _err = await reconcile(_own(team_id, user), target)
     return public_team(team, with_plan=False)
+
+
+class ConcludedForm(BaseModel):
+    # Hermes tells Telegram about this team's finish itself: no away push from here.
+    telegram: bool = False
+
+
+@router.post("/hermes/teams/{team_id}/concluded")
+async def hermes_concluded(request: Request, team_id: str, form: ConcludedForm, caller=Depends(_hermes_caller)):
+    """The lead has written the team's conclusion: it goes into the chat the team came from."""
+    user, target = caller
+    team, _snap, _err = await reconcile(_own(team_id, user), target)
+    if team.status != "running":
+        return {"posted": False, "reason": "not running"}
+    try:
+        return await concluded(request, team, target, telegram=form.telegram)
+    except TeamsError as exc:
+        _raise(exc)
+
+
+@router.post("/hermes/teams/{team_id}/knowledge")
+async def hermes_knowledge(request: Request, team_id: str, caller=Depends(_hermes_caller)):
+    """「存入知识库」 from Telegram."""
+    user, target = caller
+    team = _own(team_id, user)
+    if team.status != "running":
+        raise HTTPException(status_code=409, detail="这个协作任务还没有开始执行")
+    try:
+        return await save_to_knowledge(request, user, team, target)
+    except TeamsError as exc:
+        _raise(exc)
 
 
 @router.post("/hermes/teams/{team_id}/approve")

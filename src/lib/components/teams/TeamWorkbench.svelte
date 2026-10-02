@@ -929,6 +929,8 @@
 							{phase}
 							brief={conclusionBrief}
 							progress={{ done: counts.done, total: counts.total }}
+							chatId={team.chat_id}
+							outputs={team.outputs}
 						/>
 					{:else if mobileTab === 'changes'}
 						<ChangesView {teamId} {phase} />
@@ -1024,6 +1026,8 @@
 											{phase}
 											brief={conclusionBrief}
 											progress={{ done: counts.done, total: counts.total }}
+											chatId={team.chat_id}
+											outputs={team.outputs}
 										/>
 									</div>
 								{:else if asideTab === 'changes'}

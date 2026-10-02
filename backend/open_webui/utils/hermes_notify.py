@@ -409,6 +409,8 @@ async def show_notification_report(
     source: str = "",
     run_id: str = "",
     quiet: bool = False,
+    push: bool = True,
+    design: bool = True,
 ) -> dict[str, Any]:
     """mode=display: show a finished background run's report as the reply, no model turn.
 
@@ -418,6 +420,9 @@ async def show_notification_report(
     reply; open tabs reload, the chat is marked unread and the away webhook fires, as
     for a finished hermes run. The HTML design pass runs afterwards and swaps its
     artifact in, like a normal reply. Same errors as :func:`start_follow_up_turn`.
+
+    ``push=False``: no away push (the sender already told the person elsewhere, e.g. a team's
+    Telegram notice). ``design=False``: no HTML design pass (a team's conclusion has its own page).
     """
     content = (content or "").strip()
     notice = (notice or "").strip() or DEFAULT_REPORT_NOTICE
@@ -504,17 +509,19 @@ async def show_notification_report(
             "assistant_message_id": assistant_message_id,
         }
     mark_unread(chat_id, user.id)
-    _schedule_completion_webhook(
-        request,
-        user,
-        metadata,
-        Chats.get_chat_title_by_id(chat_id),
-        report_push_text(content),
-    )
+    if push:
+        _schedule_completion_webhook(
+            request,
+            user,
+            metadata,
+            Chats.get_chat_title_by_id(chat_id),
+            report_push_text(content),
+        )
 
-    task = asyncio.create_task(_design_report(emitter, metadata, content))
-    _REPORT_DESIGN_TASKS.add(task)
-    task.add_done_callback(_REPORT_DESIGN_TASKS.discard)
+    if design:
+        task = asyncio.create_task(_design_report(emitter, metadata, content))
+        _REPORT_DESIGN_TASKS.add(task)
+        task.add_done_callback(_REPORT_DESIGN_TASKS.discard)
     log.info(
         "hermes notification shown as a report chat=%s source=%s message=%s",
         chat_id,

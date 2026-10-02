@@ -8,10 +8,14 @@ installDominoDom('http://localhost/');
 const api = vi.hoisted(() => ({
 	getTeamConclusion: vi.fn(),
 	writeTeamConclusion: vi.fn(),
+	followUpTeamConclusion: vi.fn(),
+	saveTeamConclusionToKnowledge: vi.fn(),
 	teamFilePath: (teamId: string, path: string) => `/api/v1/teams/${teamId}/files/${path}`,
 	teamFileUrl: (teamId: string, path: string) => `/api/v1/teams/${teamId}/files/${path}`
 }));
 vi.mock('$lib/apis/teams', () => api);
+const nav = vi.hoisted(() => ({ goto: vi.fn() }));
+vi.mock('$app/navigation', () => nav);
 vi.mock('dompurify', () => ({ default: { sanitize: (html: unknown) => String(html ?? '') } }));
 // CodeMirror cannot run in the test DOM; code blocks render through a plain stand-in.
 vi.mock('$lib/components/common/CodeEditor.svelte', async () => ({
@@ -168,6 +172,77 @@ describe('ConclusionView', () => {
 		details[0].dispatchEvent(new (globalThis as any).Event('toggle'));
 		await until(() => (details[0].textContent ?? '').includes('"Focalboard"'));
 		expect(details[0].textContent).toContain('"tools"');
+	});
+
+	it('接下来: ask about it in a chat, or keep it in the knowledge base (per version)', async () => {
+		api.getTeamConclusion.mockResolvedValue(CONCLUSION);
+		api.followUpTeamConclusion.mockResolvedValue({
+			chat_id: 'chat-9',
+			created: true,
+			posted: true
+		});
+		api.saveTeamConclusionToKnowledge.mockResolvedValue({
+			knowledge_id: 'kb-1',
+			knowledge_name: '协作结论',
+			file_id: 'f-1',
+			replaced: false,
+			duplicate: false,
+			generated_at: 1790900000
+		});
+		nav.goto.mockReset();
+		await mount(ConclusionView, {
+			teamId: 'team-1',
+			title: '看板调研',
+			phase: 'completed',
+			variant: 'page',
+			chatId: null,
+			outputs: { knowledge: { id: 'kb-1', generated_at: 1780000000 }, chat_posted: null }
+		});
+		await until(() => !!target.querySelector('[data-conclusion-next]'));
+		const next = target.querySelector('[data-conclusion-next]');
+		const ask = next.querySelector('[data-conclusion-ask]');
+		expect(ask.textContent).toContain('在对话里追问');
+		expect(ask.textContent).toContain('开一个新对话');
+		// an older version is in the base: offer to replace it
+		const save = next.querySelector('[data-conclusion-save]');
+		expect(save.textContent).toContain('更新知识库里的结论');
+		save.click();
+		await until(() => !!target.querySelector('[data-conclusion-saved]'));
+		expect(api.saveTeamConclusionToKnowledge).toHaveBeenCalledWith('tok', 'team-1');
+		expect(target.querySelector('[data-conclusion-saved]').getAttribute('href')).toBe(
+			'/workspace/knowledge/kb-1'
+		);
+		ask.click();
+		await until(() => nav.goto.mock.calls.length > 0);
+		expect(api.followUpTeamConclusion).toHaveBeenCalledWith('tok', 'team-1');
+		expect(nav.goto).toHaveBeenCalledWith('/c/chat-9');
+	});
+
+	it('a team started from a chat goes back there; nothing to do while it is rewritten', async () => {
+		api.getTeamConclusion.mockResolvedValue(CONCLUSION);
+		await mount(ConclusionView, {
+			teamId: 'team-1',
+			title: '看板调研',
+			phase: 'completed',
+			variant: 'panel',
+			chatId: 'chat-1',
+			outputs: { knowledge: null, chat_posted: { generated_at: 1790900000 } }
+		});
+		await until(() => !!target.querySelector('[data-conclusion-next]'));
+		const ask = target.querySelector('[data-conclusion-ask]');
+		expect(ask.textContent).toContain('回到对话接着问');
+		expect(ask.textContent).toContain('结论已经发回发起它的对话');
+		expect(target.querySelector('[data-conclusion-save]').textContent).toContain('存入知识库');
+		app.$destroy();
+		target.remove();
+		api.getTeamConclusion.mockResolvedValue({
+			...CONCLUSION,
+			status: 'generating',
+			entry: { ...CONCLUSION.entry, status: 'generating' }
+		});
+		await mount(ConclusionView, { teamId: 'team-1', phase: 'completed', chatId: 'chat-1' });
+		await until(() => !!target.querySelector('[data-team-report]'));
+		expect(target.querySelector('[data-conclusion-next]')).toBeFalsy();
 	});
 
 	it('before the team finishes it says when the conclusion will come', async () => {

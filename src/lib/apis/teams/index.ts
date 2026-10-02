@@ -118,6 +118,12 @@ export type Team = {
 	auto_start?: boolean;
 	/** The git repository the plan works in (its own branch), when it is a project team. */
 	project?: { name: string; path: string } | null;
+	/** Where the conclusion went: the version (generated_at) posted to the team's chat / saved
+	 *  in the user's 「协作结论」 knowledge base. */
+	outputs?: {
+		knowledge: { id: string; generated_at: number } | null;
+		chat_posted: { generated_at: number } | null;
+	};
 };
 
 export type SubStatus =
@@ -565,6 +571,26 @@ export const getTeamConclusion = (token: string, teamId: string) =>
 
 export const writeTeamConclusion = (token: string, teamId: string) =>
 	request<ConclusionEntry>(token, 'POST', `/${id(teamId)}/conclusion`);
+
+/** 「在对话里追问」: the team's chat (the conclusion is added if it is not there yet), or a new
+ *  chat that opens with it. */
+export const followUpTeamConclusion = (token: string, teamId: string) =>
+	request<{ chat_id: string; created: boolean; posted: boolean; busy?: boolean }>(
+		token,
+		'POST',
+		`/${id(teamId)}/conclusion/chat`
+	);
+
+/** 「存入知识库」: the conclusion into the user's own 「协作结论」 knowledge base. */
+export const saveTeamConclusionToKnowledge = (token: string, teamId: string) =>
+	request<{
+		knowledge_id: string;
+		knowledge_name: string;
+		file_id: string;
+		replaced: boolean;
+		duplicate: boolean;
+		generated_at: number;
+	}>(token, 'POST', `/${id(teamId)}/conclusion/knowledge`);
 
 /** A workspace file's path on this site (the session cookie authenticates it). Markdown images
  *  take this form: the chat's Image component adds WEBUI_BASE_URL itself. */

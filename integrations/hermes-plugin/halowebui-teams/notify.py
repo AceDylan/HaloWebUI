@@ -276,9 +276,12 @@ def done_message(team: dict, snap: dict, markdown: str) -> tuple[str, list]:
     tail = "\n\n<i>回复这条消息对负责人说要追加或修改什么。</i>"
     room = TG_LIMIT - len(head) - len(tail) - 80
     text = head + "\n\n" + esc(clip(body, max(400, room))) + tail
-    buttons = []
+    actions = []
     if acceptance.get("status") == "ready" and acceptance.get("gaps"):
-        buttons.append([("🛠 让团队补上", f"cb:fx:{team['team_id']}")])
+        actions.append(("🛠 让团队补上", f"cb:fx:{team['team_id']}"))
+    if markdown:
+        actions.append(("📚 存入知识库", f"cb:kb:{team['team_id']}"))
+    buttons = [actions] if actions else []
     buttons.append([*_open_row(team["team_id"], "📄 阅读结论", "/conclusion"), *_open_row(team["team_id"], "🌐 工作台")])
     return text, [b for b in buttons if b]
 

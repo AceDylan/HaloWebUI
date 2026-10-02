@@ -133,6 +133,92 @@ def test_done_notice_carries_the_conclusion(pkg, team_id, plan_dict, linked):
     assert len(done) == 1
     assert "3/3 个任务" in done[0]["text"]
     assert any(b.endswith(f"/teams/{team_id}/conclusion") for b in _buttons(done[0]))
+    assert f"cb:kb:{team_id}" in _buttons(done[0])  # 存入知识库
+
+
+def _finish(pkg, team_id, plan_dict, linked):
+    first = _create(pkg, team_id, plan_dict)
+    slug = pkg.common.board_slug(team_id)
+    kb = _kb()
+    with pkg.common.board_conn(slug) as conn:
+        for key in ("T1", "T2"):
+            kb.claim_task(conn, first["tasks"][key], claimer="w")
+            kb.complete_task(conn, first["tasks"][key], result="ok", summary="ok")
+        kb.recompute_ready(conn)
+        kb.claim_task(conn, first["tasks"]["T3"], claimer="w")
+        kb.complete_task(conn, first["tasks"]["T3"], result="评审通过", summary="评审通过")
+    pkg.teams.snapshot(team_id)  # completes; the conclusion is written synchronously in tests
+    return slug
+
+
+def test_a_written_conclusion_is_handed_to_halowebui_once(pkg, team_id, plan_dict, linked, monkeypatch):
+    import halowebui_teams.bridge as bridge
+
+    calls = []
+    outcome = {"error": None}
+
+    def concluded(owner, tid, *, telegram):
+        calls.append((owner, tid, telegram))
+        if outcome["error"]:
+            raise linked.link.HaloError(*outcome["error"])
+        return {"posted": True, "chat_id": "c1"}
+
+    monkeypatch.setattr(linked.link, "concluded", concluded)
+    monkeypatch.setenv("API_SERVER_KEY", "k-test")
+    slug = _finish(pkg, team_id, plan_dict, linked)
+    team = pkg.common.read_team(slug)
+    assert team["state"] == "completed" and team["conclusion"]["status"] == "ready"
+    # the lead is still checking it against the goal: wait (bounded)
+    pkg.common.update_team(slug, lambda rec: rec["conclusion"].update(acceptance={"status": "checking",
+                                                                                   "started_at": pkg.common.now()}))
+    bridge.report_conclusion(slug, pkg.common.read_team(slug))
+    assert calls == []
+    pkg.common.update_team(slug, lambda rec: rec["conclusion"].update(acceptance={"status": "ready", "verdict": "met"}))
+    # HaloWebUI busy: tried again a minute later, not every tick
+    outcome["error"] = (409, "这个对话正在回答别的问题")
+    bridge.report_conclusion(slug, pkg.common.read_team(slug))
+    bridge.report_conclusion(slug, pkg.common.read_team(slug))
+    assert calls == [(OWNER, team_id, True)]  # Telegram is told about the finish: no second push
+    outcome["error"] = None
+    pkg.common.update_team(slug, lambda rec: rec.update(report_tried_at=pkg.common.now() - 61))
+    bridge.report_conclusion(slug, pkg.common.read_team(slug))
+    bridge.report_conclusion(slug, pkg.common.read_team(slug))
+    assert len(calls) == 2 and pkg.common.read_team(slug)["reported"] == str(team["conclusion"]["generated_at"])
+    # a rewrite the user asked for is not sent again on its own
+    pkg.common.update_team(slug, lambda rec: rec["conclusion"].update(generated_at=pkg.common.now() + 5, by="user"))
+    bridge.report_conclusion(slug, pkg.common.read_team(slug))
+    assert len(calls) == 2
+    # ... but the one written after new work is (a new version, by the bridge)
+    pkg.common.update_team(slug, lambda rec: (rec["conclusion"].update(generated_at=pkg.common.now() + 9, by="auto"),
+                                              rec.update(report_tried_at=0)))
+    bridge.report_conclusion(slug, pkg.common.read_team(slug))
+    assert len(calls) == 3
+    # HaloWebUI no longer has the team: given up, not retried forever
+    outcome["error"] = (404, "协作任务不存在")
+    pkg.common.update_team(slug, lambda rec: (rec["conclusion"].update(generated_at=pkg.common.now() + 20),
+                                              rec.update(report_tried_at=0)))
+    bridge.report_conclusion(slug, pkg.common.read_team(slug))
+    pkg.common.update_team(slug, lambda rec: rec.update(report_tried_at=0))
+    bridge.report_conclusion(slug, pkg.common.read_team(slug))
+    assert len(calls) == 4
+
+
+def test_conclusions_from_before_the_hand_over_are_not_sent(pkg, team_id, plan_dict, linked, monkeypatch):
+    import halowebui_teams.bridge as bridge
+
+    calls = []
+    monkeypatch.setattr(linked.link, "concluded", lambda *a, **kw: calls.append(a) or {})
+    monkeypatch.setenv("API_SERVER_KEY", "k-test")
+    slug = _finish(pkg, team_id, plan_dict, linked)
+    old = pkg.common.now() - 3600
+    pkg.common.update_team(slug, lambda rec: (rec["conclusion"].update(generated_at=old), rec.pop("reported", None)))
+    bridge.report_conclusion(slug, pkg.common.read_team(slug))
+    assert calls == [] and pkg.common.read_team(slug)["reported"] == str(old)
+    # not linked to HaloWebUI (no API key): nothing is tried
+    monkeypatch.delenv("API_SERVER_KEY")
+    pkg.common.update_team(slug, lambda rec: (rec["conclusion"].update(generated_at=pkg.common.now()),))
+    bridge.report_conclusion(slug, pkg.common.read_team(slug))
+    assert calls == []
 
 
 def test_plan_card_lists_members_tasks_and_buttons(linked):
@@ -262,6 +348,38 @@ def test_buttons_approve_and_retry(linked, monkeypatch):
     asyncio.run(linked.telegram._handle_callback(Query("ht:ap:team-1", "999")))
     assert calls == [("approve", OWNER, "team-1"), ("retry", "team-1", "t_9", OWNER)]
     assert answers[-1].startswith("只有") and edits[0].endswith("<b>✅ 已批准，成员开始干活了</b>")
+
+
+def test_knowledge_button_saves_and_keeps_the_notices_other_buttons(linked, monkeypatch):
+    saved, answers, edits = [], [], []
+    monkeypatch.setattr(linked.link, "save_knowledge", lambda o, t: saved.append((o, t)) or {"knowledge_id": "kb1"})
+    button = lambda text, data=None, url=None: SimpleNamespace(text=text, callback_data=data, url=url)  # noqa: E731
+    keyboard = [[button("🛠 让团队补上", "ht:fx:team-1"), button("📚 存入知识库", "ht:kb:team-1")],
+                [button("📄 阅读结论", url="https://halo.example/teams/team-1/conclusion")]]
+
+    class Query:
+        data = "ht:kb:team-1"
+        from_user = SimpleNamespace(id=int(TG_USER), first_name="Ace")
+        message = SimpleNamespace(chat_id=int(TG_USER), message_id=9, text_html="✅ 完成",
+                                  reply_markup=SimpleNamespace(inline_keyboard=keyboard))
+
+        async def answer(self, text="", show_alert=False):
+            answers.append((text, show_alert))
+
+        async def edit_message_text(self, **kw):
+            edits.append(kw)
+
+    asyncio.run(linked.telegram._handle_callback(Query()))
+    assert saved == [(OWNER, "team-1")] and answers == [("📚 已存入「协作结论」知识库", False)]
+    rows = [[(b.text, b.callback_data or b.url) for b in row] for row in edits[0]["reply_markup"].inline_keyboard]
+    assert rows == [[("🛠 让团队补上", "ht:fx:team-1")], [("📄 阅读结论", "https://halo.example/teams/team-1/conclusion")]]
+
+    def refuse(o, t):
+        raise linked.link.HaloError(409, "还没有结论可以存")
+
+    monkeypatch.setattr(linked.link, "save_knowledge", refuse)
+    asyncio.run(linked.telegram._handle_callback(Query()))
+    assert answers[-1] == ("还没有结论可以存", True)
 
 
 # --- HaloWebUI client ----------------------------------------------------------------------------

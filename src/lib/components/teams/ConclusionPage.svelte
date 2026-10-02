@@ -129,6 +129,8 @@
 					{phase}
 					brief={live?.team.conclusion}
 					progress={{ done, total }}
+					chatId={team?.chat_id ?? null}
+					outputs={team?.outputs}
 				/>
 			</div>
 		{/if}

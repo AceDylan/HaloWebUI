@@ -550,3 +550,185 @@ def test_auto_start_skips_approval_only_when_every_member_can_run(hermes, monkey
     assert row4.status == "start_failed" and "启动失败" in row4.error
     notice = [c for c in hermes.calls if c[2] == "/notify"][-1]
     assert notice[3]["event"] == "start_failed"
+
+
+# --- where the conclusion goes: the chat, a follow-up chat, the knowledge base ------------------------
+
+CONCLUSION = {
+    "status": "ready",
+    "markdown": "# 结论\n\n见图：\n![走势](charts/a.png)\n\n/root/work/agent-teams/halo-x/charts/b.png\n\n"
+                "[外链](https://example.com/x) [报告](report.md#part)\n\n```\n![原样](raw.png)\n```",
+    "entry": {"status": "ready", "generated_at": 1700000123, "model": "gpt-chat",
+              "acceptance": {"status": "ready", "verdict": "partial", "summary": "少一张图",
+                             "gaps": [{"title": "补图", "detail": "缺月度图"}]}},
+    "workspace": "/root/work/agent-teams/halo-x",
+    "files": [{"path": "charts/a.png"}, {"path": "charts/b.png"}, {"path": "report.md"}],
+    "tasks": [],
+}
+
+
+def _finished_team(client, hermes, user_id="u1", chat_id=None):
+    team_id = _ready_team(client, hermes, user_id)
+    AgentTeams.update(team_id, user_id, status="running", phase="completed", finished_at=int(time.time()),
+                      chat_id=chat_id)
+    hermes.responses[("GET", "/conclusion")] = CONCLUSION
+    hermes.responses[("GET", team_id)] = {"team": {"phase": "completed"}, "tasks": []}
+    return team_id
+
+
+def test_the_conclusion_goes_into_the_chat_the_team_came_from(hermes, monkeypatch):
+    from open_webui.utils import hermes_notify
+
+    shown = []
+
+    async def show(request, **kwargs):
+        shown.append(kwargs)
+        return {"status": True, "chat_id": kwargs["chat_id"], "duplicate": len(shown) > 1}
+
+    monkeypatch.setattr(hermes_notify, "show_notification_report", show)
+    monkeypatch.setattr(teams_router.Chats, "get_chat_by_id_and_user_id",
+                        lambda chat_id, user_id: object() if chat_id == "chat-1" and user_id == "u1" else None)
+    from open_webui.utils import agent_team_outputs as outputs
+
+    monkeypatch.setattr(outputs.Chats, "get_chat_by_id_and_user_id",
+                        lambda chat_id, user_id: object() if chat_id == "chat-1" and user_id == "u1" else None)
+    client = _client("u1")
+    team_id = _finished_team(client, hermes, chat_id="chat-1")
+    bare = _hermes_client(monkeypatch)
+    h = {"X-Hermes-Key": "k", "X-Halo-Owner": "u1"}
+    out = bare.post(f"/api/v1/teams/hermes/teams/{team_id}/concluded", headers=h, json={"telegram": True})
+    assert out.status_code == 200 and out.json() == {"posted": True, "chat_id": "chat-1", "duplicate": False}
+    call = shown[0]
+    assert call["chat_id"] == "chat-1" and call["source"] == "team" and call["run_id"] == f"team:{team_id}:1700000123"
+    assert call["push"] is False and call["design"] is False and call["quiet"] is False  # Telegram already told them
+    content = call["content"]
+    assert f"](/api/v1/teams/{team_id}/files/charts/a.png)" in content
+    assert f"![charts/b.png](/api/v1/teams/{team_id}/files/charts/b.png)" in content  # a bare path of a known image
+    assert "(https://example.com/x)" in content and f"(/api/v1/teams/{team_id}/files/report.md#part)" in content
+    assert "![原样](raw.png)" in content  # code blocks stay as written
+    assert "负责人验收：部分达成" in content and "**补图**：缺月度图" in content
+    assert f"(/teams/{team_id}/conclusion)" in content
+    assert "/root/work/agent-teams/halo-x" in call["notice"] and "计算器设计" in call["notice"]
+    team = client.get(f"/api/v1/teams/{team_id}").json()["team"]
+    assert team["outputs"]["chat_posted"] == {"generated_at": 1700000123}
+    # the same version again: the chat dedups it; without Telegram the away push may go out
+    bare.post(f"/api/v1/teams/hermes/teams/{team_id}/concluded", headers=h, json={})
+    assert shown[1]["push"] is True
+    # a team with no chat, or whose chat is gone: nothing to post
+    lone = _finished_team(client, hermes)
+    assert bare.post(f"/api/v1/teams/hermes/teams/{lone}/concluded", headers=h, json={}).json()["posted"] is False
+    gone = _finished_team(client, hermes, chat_id="deleted-chat")
+    assert bare.post(f"/api/v1/teams/hermes/teams/{gone}/concluded", headers=h, json={}).json()["reason"] == "chat gone"
+    assert len(shown) == 2
+    # not the owner's team: 404; a busy chat: 409 so Hermes tries again later
+    other = _hermes_client(monkeypatch, owners=("u1", "u2"))
+    assert other.post(f"/api/v1/teams/hermes/teams/{team_id}/concluded",
+                      headers={"X-Hermes-Key": "k", "X-Halo-Owner": "u2"}, json={}).status_code == 404
+
+    async def busy(request, **kwargs):
+        raise hermes_notify.HermesNotifyError(409, "chat is busy with another run; retry later")
+
+    monkeypatch.setattr(hermes_notify, "show_notification_report", busy)
+    assert bare.post(f"/api/v1/teams/hermes/teams/{team_id}/concluded", headers=h, json={}).status_code == 409
+
+
+def test_follow_up_opens_a_new_chat_with_the_conclusion_for_a_team_without_one(hermes, monkeypatch):
+    from open_webui.models.chats import Chats
+    from open_webui.utils import hermes_sessions
+
+    async def model(request, user, model_id=None):
+        return {"id": "hermes.hermes-agent", "name": "Hermes", "model_ref": "conn::hermes-agent"}
+
+    monkeypatch.setattr(hermes_sessions, "resolve_hermes_model", model)
+    from open_webui.utils import hermes_notify
+
+    monkeypatch.setattr(hermes_notify.Users, "get_user_by_id", lambda uid: _User(uid))
+    client = _client("u1")
+    team_id = _finished_team(client, hermes)
+    out = client.post(f"/api/v1/teams/{team_id}/conclusion/chat")
+    assert out.status_code == 200, out.text
+    body = out.json()
+    assert body["created"] is True and body["posted"] is True
+    chat = Chats.get_chat_by_id_and_user_id(body["chat_id"], "u1")
+    assert chat is not None and chat.title == "计算器设计"
+    history = chat.chat["history"]
+    reply = history["messages"][history["currentId"]]
+    notice = history["messages"][reply["parentId"]]
+    assert notice["role"] == "user" and notice["hermes_notice"] == {"source": "team", "run_id": f"team:{team_id}:1700000123"}
+    assert "/root/work/agent-teams/halo-x" in notice["content"]
+    assert reply["role"] == "assistant" and reply["done"] is True and reply["model"] == "hermes.hermes-agent"
+    assert reply["model_ref"] == "conn::hermes-agent" and "# 结论" in reply["content"]
+    row = AgentTeams.get(team_id, "u1")
+    assert row.chat_id == body["chat_id"] and row.meta["chat_posted"]["generated_at"] == 1700000123
+    # again: back to the same chat, the conclusion is already there
+    again = client.post(f"/api/v1/teams/{team_id}/conclusion/chat").json()
+    assert again == {"chat_id": body["chat_id"], "created": False, "posted": False}
+    assert len(Chats.get_chat_by_id(body["chat_id"]).chat["history"]["messages"]) == 2
+    # no conclusion yet / someone else's team
+    hermes.responses[("GET", "/conclusion")] = {"status": "generating", "markdown": "", "entry": {}}
+    assert client.post(f"/api/v1/teams/{_finished_team(client, hermes)}/conclusion/chat").status_code == 200
+    hermes.responses[("GET", "/conclusion")] = {"status": "none", "markdown": "", "entry": {}}
+    fresh = _ready_team(client, hermes)
+    AgentTeams.update(fresh, "u1", status="running", phase="completed")
+    assert client.post(f"/api/v1/teams/{fresh}/conclusion/chat").status_code == 409
+    assert _client("u2").post(f"/api/v1/teams/{team_id}/conclusion/chat").status_code == 404
+
+
+def test_saving_the_conclusion_to_the_knowledge_base(hermes, monkeypatch):
+    from open_webui.models.knowledge import Knowledges
+    from open_webui.routers import files as files_router
+    from open_webui.routers import knowledge as knowledge_router
+
+    uploads, removed = [], []
+
+    class Stored:
+        def __init__(self, id):
+            self.id = id
+
+    def upload(request, file, user=None, file_metadata=None, process=True, processing_mode=None):
+        uploads.append((file.filename, file.content_type, file.file.read().decode(), file_metadata, process))
+        return Stored(f"file-{len(uploads)}")
+
+    def add(request, id, form_data, user=None):
+        kb = Knowledges.get_knowledge_by_id(id)
+        data = dict(kb.data or {})
+        data["file_ids"] = [*(data.get("file_ids") or []), form_data.file_id]
+        Knowledges.update_knowledge_data_by_id(id=id, data=data)
+
+    def remove(id, form_data, user=None):
+        removed.append(form_data.file_id)
+        kb = Knowledges.get_knowledge_by_id(id)
+        data = dict(kb.data or {})
+        data["file_ids"] = [f for f in data.get("file_ids") or [] if f != form_data.file_id]
+        Knowledges.update_knowledge_data_by_id(id=id, data=data)
+
+    monkeypatch.setattr(files_router, "upload_file", upload)
+    monkeypatch.setattr(knowledge_router, "add_file_to_knowledge_by_id", add)
+    monkeypatch.setattr(knowledge_router, "remove_file_from_knowledge_by_id", remove)
+    client = _client("u-kb")
+    team_id = _finished_team(client, hermes, "u-kb")
+    out = client.post(f"/api/v1/teams/{team_id}/conclusion/knowledge")
+    assert out.status_code == 200, out.text
+    body = out.json()
+    assert body["knowledge_name"] == "协作结论" and body["file_id"] == "file-1" and body["duplicate"] is False
+    kb = Knowledges.get_knowledge_by_id(body["knowledge_id"])
+    assert kb.user_id == "u-kb" and kb.access_control == {}  # private, not shared
+    name, ctype, text, meta, process = uploads[0]
+    assert name == "计算器设计 · 结论.md" and ctype == "text/markdown" and meta == {"agent_team": team_id} and not process
+    assert text.startswith("# 计算器设计 · 结论") and "设计一个计算器" in text and "# 结论" in text
+    assert client.get(f"/api/v1/teams/{team_id}").json()["team"]["outputs"]["knowledge"] == {
+        "id": kb.id, "generated_at": 1700000123}
+    # the same version again: nothing new
+    again = client.post(f"/api/v1/teams/{team_id}/conclusion/knowledge").json()
+    assert again["duplicate"] is True and len(uploads) == 1
+    # a rewritten conclusion replaces the team's file in the same base
+    hermes.responses[("GET", "/conclusion")] = {**CONCLUSION, "entry": {**CONCLUSION["entry"], "generated_at": 1700000999}}
+    newer = client.post(f"/api/v1/teams/{team_id}/conclusion/knowledge").json()
+    assert newer["knowledge_id"] == kb.id and newer["file_id"] == "file-2" and newer["replaced"] is True
+    assert removed == ["file-1"] and Knowledges.get_knowledge_by_id(kb.id).data["file_ids"] == ["file-2"]
+    # another team of the same user goes into the same base; from Telegram too
+    other = _finished_team(client, hermes, "u-kb")
+    bare = _hermes_client(monkeypatch, owners=("u-kb",))
+    tg = bare.post(f"/api/v1/teams/hermes/teams/{other}/knowledge", headers={"X-Hermes-Key": "k", "X-Halo-Owner": "u-kb"})
+    assert tg.status_code == 200 and tg.json()["knowledge_id"] == kb.id
+    assert Knowledges.get_knowledge_by_id(kb.id).data["file_ids"] == ["file-2", "file-3"]

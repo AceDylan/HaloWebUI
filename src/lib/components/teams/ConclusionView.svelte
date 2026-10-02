@@ -9,11 +9,13 @@
 		teamFileUrl,
 		writeTeamConclusion,
 		type ConclusionEntry,
+		type Team,
 		type TeamConclusion
 	} from '$lib/apis/teams';
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import { copyToClipboard } from '$lib/utils';
 	import type { HeadingItem } from '$lib/utils/headings';
+	import ConclusionNext from './ConclusionNext.svelte';
 	import ReportMarkdown from './ReportMarkdown.svelte';
 	import RunnerBadge from './RunnerBadge.svelte';
 	import StatusChip from './StatusChip.svelte';
@@ -31,6 +33,9 @@
 	export let phase = 'running';
 	export let brief: ConclusionEntry | undefined = undefined;
 	export let progress: { done: number; total: number } | null = null;
+	/** The team's chat and where its conclusion went (from the team record). */
+	export let chatId: string | null = null;
+	export let outputs: Team['outputs'] = undefined;
 
 	const POLL_MS = 3000;
 	let data: TeamConclusion | null = null;
@@ -457,6 +462,10 @@
 					</article>
 				</div>
 			</div>
+		{/if}
+
+		{#if data?.markdown && !generating && status !== 'outdated'}
+			<ConclusionNext {teamId} {chatId} {outputs} generatedAt={entry.generated_at} {variant} />
 		{/if}
 
 		{#if fileList.length}

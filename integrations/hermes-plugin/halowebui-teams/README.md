@@ -21,6 +21,23 @@ is the Hermes side. It adds no service, port or second task store:
   carry no `HERMES_SESSION_*`: no chat gets their completion notice and autopilot-supervisor
   does not resume them (it only resumes runs whose origin can get a report); only this
   bridge does.
+* **Runners as data** (`runners.py`): the registry (reclaude, cchclaude, anyclaude, codex, agy,
+  hermes), task kinds and the runner each starts on (code → cchclaude, ui → agy, complex →
+  reclaude, research / writing → hermes), the fallback order reclaude → cchclaude → anyclaude →
+  codex → agy → hermes, and layered availability checks (configured, installed, executable,
+  account / quota, reachable, recent failure; cached 120 s). `fallback.py` moves a task forward
+  along its chain at approval, before launch, on a runtime failure of the runner itself (quota,
+  login, region, network, missing command; quota waits over 20 min) and on retry, and records
+  every move. `~/.hermes/halo-teams-runners.json` overrides order / kinds / disabled / marks a
+  runner down (`unavailable`), effective at once.
+* **Roles are HaloWebUI assistant templates** (`assistants.py`): the 「协作」 group of
+  `src/lib/data/agents-zh.json` (with `team_kind`) is the lead's catalog; a member's template
+  prompt is its role in the task body.
+* **The lead** (`plan.py`) runs on Hermes' `model.default` read on every call, then its
+  `fallback_providers`; `auxiliary.halo_team_lead` overrides.
+* **The conclusion** (`conclusion.py`): when a team finishes, the lead writes a Markdown report
+  from every task's full result and the workspace files (assembled from the records when no model
+  answers), stored in `<workspace>/.halo/conclusion.md`.
 * **Member activity** (`hooks.py`, inside each Kanban worker of a team board): tool calls,
   native subagent start/stop, and the moment a user's note reached the running member, as
   `halo_*` events in the same `task_events` sequence.
@@ -39,6 +56,12 @@ HaloWebUI sends `X-Halo-Owner: <user id>`; a team recorded for another owner is 
 | `POST /v1/halo-teams/{id}/tasks/{task}/messages` `{body, author_name}` | a user note on the task (a Kanban comment) |
 | `POST /v1/halo-teams/{id}/tasks/{task}/retry` | unblock a failed / blocked task: a new attempt; finished tasks are not touched |
 | `POST /v1/halo-teams/{id}/control` `{action: pause|resume|stop}` | pause = board archived (the dispatcher skips it, running members go on); stop = final: running members reclaimed / runner stopped, tasks blocked |
+| `GET /v1/halo-teams/meta` | the lead's model, runners with availability, task kinds, assistant templates |
+| `POST /v1/halo-teams/runners/check` `{names?}` | re-run the availability checks now |
+| `POST /v1/halo-teams/plan/resolve` `{plan}` | the plan with every member's runner worked out again (after a user edit) |
+| `GET /v1/halo-teams/{id}/conclusion` | the report (markdown), its status / model, every task's full result, workspace files |
+| `POST /v1/halo-teams/{id}/conclusion` | (re)write the report now |
+| `GET /v1/halo-teams/{id}/files[/{path}]` | the workspace listing / one file (confined to the workspace; HTML served as text) |
 
 `sub_status` values: `queued` (ready, waiting for a slot), `waiting_deps`, `running`,
 `quota_wait`, `waiting_user`, `failed`, `blocked`, `stopped`, `done`.

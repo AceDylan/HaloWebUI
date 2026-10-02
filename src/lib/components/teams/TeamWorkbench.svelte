@@ -358,19 +358,27 @@
 		asideTouched = true;
 	};
 
-	const selectTask = async (id: string | null) => {
+	// On a phone the details open above the tab's content: bring them into view.
+	const showInspector = async () => {
+		if (!$mobile) return;
+		await tick();
+		document
+			.getElementById('team-inspector')
+			?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+	};
+	const selectTask = (id: string | null) => {
 		selectedTask = id;
-		if (id) selectedMember = null;
-		if ($mobile && id) {
-			await tick();
-			document
-				.getElementById('team-inspector')
-				?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+		if (id) {
+			selectedMember = null;
+			showInspector();
 		}
 	};
 	const selectMember = (name: string | null) => {
 		selectedMember = name;
-		if (name) selectedTask = null;
+		if (name) {
+			selectedTask = null;
+			showInspector();
+		}
 	};
 	// Esc closes the task / member details (not while typing a note).
 	const onKey = (e: KeyboardEvent) => {
@@ -689,13 +697,14 @@
 					</div>
 				{/if}
 
-				<MemberStrip
-					{lead}
-					members={memberViews}
-					selected={selectedMember}
-					layout={$mobile && mobileTab === 'members' ? 'list' : 'row'}
-					on:select={(e) => selectMember(e.detail)}
-				/>
+				{#if !($mobile && mobileTab === 'members')}
+					<MemberStrip
+						{lead}
+						members={memberViews}
+						selected={selectedMember}
+						on:select={(e) => selectMember(e.detail)}
+					/>
+				{/if}
 
 				<ReplayBar {events} index={replayIndex} on:seek={(e) => seek(e.detail)} />
 
@@ -734,7 +743,15 @@
 							/>
 						</div>
 					{/if}
-					{#if mobileTab === 'tasks'}
+					{#if mobileTab === 'members'}
+						<MemberStrip
+							{lead}
+							members={memberViews}
+							selected={selectedMember}
+							layout="list"
+							on:select={(e) => selectMember(e.detail)}
+						/>
+					{:else if mobileTab === 'tasks'}
 						<ol class="flex flex-col gap-4">
 							{#each layers as layer, depth}
 								<li>

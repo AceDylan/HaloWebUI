@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { createEventDispatcher, getContext } from 'svelte';
+	import { createEventDispatcher, getContext, onDestroy, tick } from 'svelte';
 	import { toast } from 'svelte-sonner';
 
 	import {
@@ -69,6 +69,11 @@
 	let lastExpect = '';
 	let retrying = false;
 	let loadedFor = '';
+	// The log of a running task follows along (re-read every few seconds, kept scrolled to the end).
+	const LOG_FOLLOW_MS = 4000;
+	let follow = true;
+	let logTimer: ReturnType<typeof setInterval> | null = null;
+	let logEl: HTMLPreElement | null = null;
 
 	$: task = tasks.find((t) => t.id === taskId) ?? null;
 	$: state = task
@@ -132,17 +137,35 @@
 		load(taskId);
 	}
 
-	const loadLog = async () => {
+	const loadLog = async (quiet = false) => {
 		if (!taskId) return;
-		logLoading = true;
+		const id = taskId;
+		const atEnd = !logEl || logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 24;
+		if (!quiet) logLoading = true;
 		try {
-			logText = (await getTeamTask(localStorage.token, teamId, taskId, true)).log ?? null;
+			const log = (await getTeamTask(localStorage.token, teamId, id, true)).log ?? null;
+			if (id !== taskId) return;
+			logText = log;
+			await tick();
+			if (logEl && (atEnd || !quiet)) logEl.scrollTop = logEl.scrollHeight;
 		} catch (error) {
-			toast.error(`读取日志失败：${error?.message ?? error}`);
+			if (!quiet) toast.error(`读取日志失败：${error?.message ?? error}`);
 		} finally {
 			logLoading = false;
 		}
 	};
+
+	$: liveTask = ['running', 'review'].includes(state?.sub_status ?? '');
+	$: following = !!logText && follow && liveTask && !replay;
+	$: if (following && !logTimer) {
+		logTimer = setInterval(() => loadLog(true), LOG_FOLLOW_MS);
+	} else if (!following && logTimer) {
+		clearInterval(logTimer);
+		logTimer = null;
+	}
+	onDestroy(() => {
+		if (logTimer) clearInterval(logTimer);
+	});
 
 	const send = async () => {
 		const body = note.trim();
@@ -381,17 +404,43 @@
 							<span class="font-medium text-gray-600 dark:text-gray-300"
 								>日志（{logText.source}，最后一段）</span
 							>
-							<button type="button" class="text-sky-600 hover:underline" on:click={loadLog}
-								>刷新</button
-							>
+							<span class="flex items-center gap-2">
+								{#if liveTask && !replay}
+									<button
+										type="button"
+										class="inline-flex items-center gap-1 {follow
+											? 'text-emerald-600 dark:text-emerald-300'
+											: 'text-gray-400'}"
+										aria-pressed={follow}
+										title="运行中每 4 秒刷新一次并停在末尾"
+										on:click={() => (follow = !follow)}
+										data-log-follow
+										><span
+											class="size-1.5 rounded-full {following
+												? 'tm-pulse-dot bg-emerald-500 text-emerald-500'
+												: 'bg-gray-400'}"
+											aria-hidden="true"
+										/>实时跟随</button
+									>
+								{/if}
+								<button
+									type="button"
+									class="text-sky-600 hover:underline"
+									on:click={() => loadLog()}>刷新</button
+								>
+							</span>
 						</div>
 						{#if logText.note}<div class="text-xs text-gray-400">{logText.note}</div>{/if}
 						<pre
+							bind:this={logEl}
 							class="tm-scroll mt-1 max-h-72 overflow-auto whitespace-pre-wrap break-words rounded-xl bg-[#0b0d13] p-3 text-[11px] leading-snug text-gray-100 ring-1 ring-white/10">{logText.text ||
 								'（空）'}</pre>
 					{:else}
-						<button type="button" class="tm-btn-ghost" disabled={logLoading} on:click={loadLog}
-							>{logLoading ? '读取中…' : '查看日志'}</button
+						<button
+							type="button"
+							class="tm-btn-ghost"
+							disabled={logLoading}
+							on:click={() => loadLog()}>{logLoading ? '读取中…' : '查看日志'}</button
 						>
 					{/if}
 				</div>

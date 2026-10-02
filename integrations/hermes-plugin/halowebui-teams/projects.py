@@ -28,6 +28,10 @@ GIT_TIMEOUT = 60
 PUSH_TIMEOUT = 180
 DIFF_MAX = 200_000
 EXCLUDE = ":(exclude).halo"
+# Never committed or shown even in a repository that does not ignore them: what running tests or
+# installing packages leaves behind (members run tests in the worktree).
+JUNK = (EXCLUDE, ":(exclude,glob)**/__pycache__/**", ":(exclude,glob)**/*.py[co]", ":(exclude,glob)**/.pytest_cache/**",
+        ":(exclude,glob)**/node_modules/**", ":(exclude,glob)**/.DS_Store")
 AUTHOR = ("Halo Team", "halo-team@localhost")
 _BRANCH_RE = re.compile(r"^[A-Za-z0-9._/-]{1,120}$")
 
@@ -203,7 +207,7 @@ def prepare(repo: str, slug: str, workspace: str) -> dict:
 
 
 def _commit(workspace: str, message: str) -> Optional[str]:
-    git(workspace, "add", "-A", "--", ".", EXCLUDE, check=True)
+    git(workspace, "add", "-A", "--", ".", *JUNK, check=True)
     if git(workspace, "diff", "--cached", "--quiet").returncode == 0:
         return None
     git(workspace, "-c", f"user.name={AUTHOR[0]}", "-c", f"user.email={AUTHOR[1]}", "commit", "-q", "--no-verify",
@@ -218,6 +222,8 @@ def commit_finished(slug: str, team: dict, done: list[dict]) -> list[str]:
     if not project.get("branch") or not os.path.isdir(workspace):
         return []
     handled = []
+    last = project.get("last_head") or project.get("base_sha")
+    owners: dict[str, list] = {}
     for task in done:
         member = task.get("member") or ""
         message = f"[{task.get('key') or ''} · {member}] {task.get('title') or ''}".strip()
@@ -230,12 +236,27 @@ def commit_finished(slug: str, team: dict, done: list[dict]) -> list[str]:
         handled.append(task["id"])
         if sha:
             logger.info("halowebui-teams: %s committed %s for %s", slug, sha[:10], task.get("key"))
+        # Commits the member made itself since the last finished task are this task's too.
+        head = git(workspace, "rev-parse", "HEAD").stdout.strip()
+        if last and head and head != last:
+            for made in git(workspace, "rev-list", f"{last}..{head}").stdout.split():
+                owners[made] = [task.get("key") or "", member]
+        last = head or last
+    if handled:
+        from .common import update_team
+
+        def apply(rec: dict) -> None:
+            entry = rec.setdefault("project", {})
+            entry["last_head"] = last
+            entry["task_commits"] = {**(entry.get("task_commits") or {}), **owners}
+
+        update_team(slug, apply)
     return handled
 
 
 def _numstat(cwd: str, *spec: str) -> list[dict]:
     out = []
-    result = git(cwd, "diff", "--numstat", "-M", *spec, "--", ".", EXCLUDE)
+    result = git(cwd, "diff", "--numstat", "-M", *spec, "--", ".", *JUNK)
     for line in result.stdout.splitlines():
         parts = line.split("\t")
         if len(parts) != 3:
@@ -259,13 +280,15 @@ def changes(team: dict) -> dict:
     base = project["base_sha"]
     log = git(workspace, "log", "--format=%H%x1f%s%x1f%an%x1f%at", f"{base}..HEAD", "-n", "200").stdout
     commits = []
+    owners = project.get("task_commits") or {}
     for line in log.splitlines():
         sha, subject, author, at = (line.split("\x1f") + ["", "", "", ""])[:4]
         key = re.match(r"^\[(\S+) · ([^\]]+)\]", subject)
+        task_key, member = (key.group(1), key.group(2)) if key else (owners.get(sha) or [None, None])[:2]
         commits.append({"sha": sha, "subject": subject, "author": author, "at": int(at or 0),
-                        "task_key": key.group(1) if key else None, "member": key.group(2) if key else None})
+                        "task_key": task_key or None, "member": member or None})
     files = _numstat(workspace, base)  # committed + not yet committed, against the base
-    pending = [line[3:] for line in git(workspace, "status", "--porcelain", "--", ".", EXCLUDE).stdout.splitlines()
+    pending = [line[3:] for line in git(workspace, "status", "--porcelain", "--", ".", *JUNK).stdout.splitlines()
                if len(line) > 3]
     repo = project["path"]
     base_branch = project.get("base_branch") or ""
@@ -289,7 +312,7 @@ def changed_paths(team: dict) -> Optional[list[str]]:
     if not os.path.isdir(workspace):
         return []
     paths = [f["path"] for f in _numstat(workspace, project["base_sha"])]
-    untracked = git(workspace, "ls-files", "--others", "--exclude-standard", "--", ".", EXCLUDE).stdout.splitlines()
+    untracked = git(workspace, "ls-files", "--others", "--exclude-standard", "--", ".", *JUNK).stdout.splitlines()
     return list(dict.fromkeys(p.split(" => ")[-1].rstrip("}") for p in paths + untracked if p))
 
 
@@ -395,6 +418,8 @@ def discard(slug: str, team: dict) -> dict:
     repo, branch = project.get("path"), project.get("branch")
     if not repo or not branch:
         raise ProjectError(404, "这个团队不是在项目里做的")
+    if (team.get("conclusion") or {}).get("status") == "generating":
+        raise ProjectError(409, "负责人正在写结论（要读这些文件），写完再放弃分支")
     workspace = team.get("workspace") or ""
     if os.path.isdir(workspace):
         # The conclusion lives in <workspace>/.halo: keep it through the removal.
@@ -407,8 +432,8 @@ def discard(slug: str, team: dict) -> dict:
             saved = Path(tempfile.mkdtemp(prefix="halo-keep-")) / ".halo"
             shutil.copytree(keep, saved)
         git(repo, "worktree", "remove", "--force", workspace, check=True)
+        Path(workspace).mkdir(parents=True, exist_ok=True)  # the team's record still points here
         if saved is not None:
-            Path(workspace).mkdir(parents=True, exist_ok=True)
             shutil.copytree(saved, keep)
             shutil.rmtree(saved.parent, ignore_errors=True)
     git(repo, "worktree", "prune", timeout=20)

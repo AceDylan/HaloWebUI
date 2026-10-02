@@ -174,3 +174,39 @@ def test_errors_never_carry_url_credentials(pkg):
 
     err = projects.ProjectError(502, "推送失败：fatal: unable to access 'https://bot:ghp_secret123@github.com/x/y.git/'")
     assert "ghp_secret123" not in err.message and "https://***@github.com" in err.message
+
+
+def test_member_commits_count_for_their_task_and_junk_is_never_committed(pkg, team_id, plan_dict, repo):
+    import halowebui_teams.bridge as bridge
+    import halowebui_teams.projects as projects
+
+    first = _create(pkg, team_id, plan_dict, repo)
+    slug = pkg.common.board_slug(team_id)
+    ws = pkg.common.read_team(slug)["workspace"]
+
+    def work():  # the member commits its own work, and running tests leaves caches behind
+        open(os.path.join(ws, "app.py"), "w").write("print('v2')\n")
+        _git(ws, "-c", "user.email=m@x", "-c", "user.name=m", "commit", "-qam", "feat: v2")
+        os.makedirs(os.path.join(ws, "__pycache__"), exist_ok=True)
+        open(os.path.join(ws, "__pycache__", "app.cpython-311.pyc"), "wb").write(b"\0")
+
+    _finish(pkg, slug, first["tasks"]["T1"], work)
+    bridge._commit_finished(slug, pkg.common.read_team(slug))
+    data = projects.changes(pkg.common.read_team(slug))
+    assert [(c["subject"], c["task_key"], c["member"]) for c in data["commits"]] == [("feat: v2", "T1", "backend-dev")]
+    assert data["pending"] == [] and {f["path"] for f in data["files"]} == {"app.py"}
+    projects.merge(slug, pkg.common.read_team(slug))
+    assert "__pycache__" not in _git(repo, "ls-files")
+
+
+def test_discard_waits_for_the_conclusion(pkg, team_id, plan_dict, repo):
+    import halowebui_teams.projects as projects
+
+    _create(pkg, team_id, plan_dict, repo)
+    slug = pkg.common.board_slug(team_id)
+    team = {**pkg.common.read_team(slug), "conclusion": {"status": "generating"}}
+    with pytest.raises(projects.ProjectError) as err:
+        projects.discard(slug, team)
+    assert "写结论" in err.value.message
+    projects.discard(slug, pkg.common.read_team(slug))
+    assert os.path.isdir(pkg.common.read_team(slug)["workspace"])  # still there (empty) for the record

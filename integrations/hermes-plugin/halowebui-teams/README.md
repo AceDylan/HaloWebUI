@@ -61,6 +61,16 @@ is the Hermes side. It adds no service, port or second task store:
   native subagent start/stop, and the moment a user's note reached the running member, as
   `halo_*` events in the same `task_events` sequence.
 
+* **Stage and estimate** (`progress.py`): every snapshot carries `team.stage` — the step
+  (计划 → 批准 → 执行 → 整理结果 → 验收), what is happening now (each running member's latest tool
+  call / runner event, in words), since when, and about how long is left. Estimates come from this
+  machine's own history (cached 10 min): finished attempts on every team board by executor *and*
+  task kind (Hermes research ≈ 4× Hermes writing), the lead's conclusions, acceptance checks and
+  plans (`~/.hermes/halo-teams/plan-times.json`); the remaining tasks are replayed on their
+  dependencies with the parallel cap and one member per runner kind; the high end is ≥ 1.35×.
+  While the lead plans, `GET /plan/progress?team_id=` says its current step (which model, retry and
+  why); a plan comes with `estimate` (how long it takes once approved). Telegram's `/team` list
+  shows the same line.
 * **Projects** (`projects.py`): a plan can work in a git repository on this machine (chosen in
   HaloWebUI, or the one the goal names — HERMES_DISPATCH_PROJECTS and where recent runner runs
   worked; never the home directory or the Hermes home). At approval the team gets the branch
@@ -105,7 +115,8 @@ HaloWebUI sends `X-Halo-Owner: <user id>`; a team recorded for another owner is 
 | `POST /v1/halo-teams/{id}/tasks/{task}/diagnosis/{apply,again}` | do what the lead suggested for a failed task / diagnose again |
 | `GET /v1/halo-teams/meta` | the lead's model, runners with availability, task kinds, assistant templates |
 | `POST /v1/halo-teams/runners/check` `{names?}` | re-run the availability checks now |
-| `POST /v1/halo-teams/plan/resolve` `{plan}` | the plan with every member's runner worked out again (after a user edit) |
+| `POST /v1/halo-teams/plan/resolve` `{plan}` | the plan with every member's runner worked out again (after a user edit), with its `estimate` |
+| `GET /v1/halo-teams/plan/progress?team_id=` | while the lead plans: its current step and how long plans take here |
 | `GET /v1/halo-teams/{id}/conclusion` | the report (markdown), its status / model, every task's full result, workspace files |
 | `POST /v1/halo-teams/{id}/conclusion` | (re)write the report now |
 | `GET /v1/halo-teams/{id}/files[/{path}]` | the workspace listing / one file (confined to the workspace; HTML served as text) |

@@ -85,6 +85,8 @@ export type TeamPlan = {
 		dirty?: boolean;
 		auto?: boolean;
 	} | null;
+	/** About how long the plan takes once approved (tasks, result, acceptance), from this machine's history. */
+	estimate?: StageEta | null;
 };
 
 export type TeamStatus =
@@ -95,6 +97,76 @@ export type TeamStatus =
 	| 'start_failed'
 	| 'running'
 	| 'cancelled';
+
+/** 阶段: where a team stands — the same keys for every status (HaloWebUI knows planning /
+ *  approval / starting itself, Hermes the rest). */
+export type StageKey =
+	| 'planning'
+	| 'approval'
+	| 'starting'
+	| 'running'
+	| 'attention'
+	| 'paused'
+	| 'concluding'
+	| 'checking'
+	| 'done'
+	| 'stopped'
+	| 'plan_failed'
+	| 'start_failed'
+	| 'cancelled';
+
+/** An estimate in seconds, counted from the stage's `at` (high: the slow end). */
+export type StageEta = { seconds: number; high?: number; overtime?: boolean; basis?: string };
+
+export type StageRunningLine = {
+	key: string;
+	member: string;
+	executor?: string;
+	model?: string;
+	title?: string;
+	/** what the member is doing now (its latest tool call / runner event) */
+	text: string;
+	/** when that happened, and when the task's current attempt started */
+	at?: number | null;
+	since?: number | null;
+	/** how long this kind of task usually takes here (median / slow end) */
+	typical?: number;
+	typical_high?: number;
+};
+
+export type TeamStage = {
+	key: StageKey;
+	label?: string;
+	/** one line: what is happening right now */
+	now?: string;
+	/** when this stage's numbers were computed (epoch seconds) and when the stage began */
+	at?: number;
+	started_at?: number | null;
+	eta?: StageEta | null;
+	/** plan ready: about how long the plan takes once approved */
+	after_approval?: StageEta | null;
+	steps?: { key: 'plan' | 'approve' | 'run' | 'conclude' | 'check'; state: 'done' | 'active' | 'pending' }[];
+	running?: StageRunningLine[];
+	done?: number;
+	total?: number;
+	model?: string | null;
+	attempt?: number | null;
+	task?: string;
+};
+
+/** What the team list carries of a stage. */
+export type StageBrief = {
+	key: StageKey;
+	label?: string;
+	now?: string;
+	at?: number;
+	started_at?: number;
+	eta?: number;
+	eta_high?: number;
+	overtime?: boolean;
+	after_approval?: number;
+	after_approval_high?: number;
+};
 
 export type Team = {
 	id: string;
@@ -133,6 +205,8 @@ export type Team = {
 		knowledge: { id: string; generated_at: number } | null;
 		chat_posted: { generated_at: number } | null;
 	};
+	/** list only: the stage of a team at work (and of one that just finished) */
+	stage?: StageBrief;
 };
 
 export type SubStatus =
@@ -363,6 +437,8 @@ export type LiveSnapshot = {
 		/** The open 对负责人说 request / proposal, and the latest decided ones. */
 		change?: TeamChangeRequest | null;
 		changes_log?: TeamChangeRequest[];
+		/** 阶段 + what is happening now + estimate (Hermes' view of a started team) */
+		stage?: TeamStage | null;
 	};
 	members: LiveMember[];
 	tasks: LiveTask[];
@@ -503,7 +579,7 @@ export const createTeam = (
 	});
 
 export const getTeam = (token: string, teamId: string) =>
-	request<{ team: Team; live: LiveSnapshot | null; live_error: string | null }>(
+	request<{ team: Team; live: LiveSnapshot | null; live_error: string | null; stage?: TeamStage | null }>(
 		token,
 		'GET',
 		`/${id(teamId)}`

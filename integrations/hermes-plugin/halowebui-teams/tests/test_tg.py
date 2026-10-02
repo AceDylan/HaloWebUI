@@ -447,3 +447,24 @@ def test_auto_started_plan_is_a_notice_and_a_failed_start_is_a_plan_card(linked)
     assert linked.notify.plan_notice(OWNER, "start_failed", failed, origin)["sent"]
     card = linked.sent[-1]
     assert "没能直接开始" in card["text"] and f"cb:ap:{team['id']}" in _buttons(card)
+
+
+def test_team_list_says_what_happens_now_and_how_long_is_left(linked):
+    import time
+
+    at = int(time.time()) - 60
+    text, buttons = linked.telegram.list_message([
+        {"id": "t-run", "title": "调研看板", "status": "running", "phase": "running",
+         "progress": {"done": 1, "total": 3},
+         "stage": {"key": "running", "now": "#T2 writer：写文件 · advice.md", "eta": 420, "eta_high": 600, "at": at}},
+        {"id": "t-plan", "title": "写方案", "status": "plan_ready",
+         "stage": {"key": "approval", "now": "计划好了", "after_approval": 540, "after_approval_high": 760}},
+        {"id": "t-late", "title": "老任务", "status": "running", "phase": "completed",
+         "stage": {"key": "concluding", "now": "负责人在整合", "eta": 30, "eta_high": 40, "at": at}},
+        {"id": "t-done", "title": "完成了", "status": "running", "phase": "completed"},
+    ])
+    lines = text.split("\n")
+    assert "执行中 1/3" in lines[1] and "└ #T2 writer：写文件 · advice.md · 还要约 6–9 分钟" in lines[2]
+    assert "等你批准" in lines[3] and "批准后约 9–13 分钟出结果" in lines[4]
+    assert "比平时久，快好了" in lines[6]
+    assert lines[-1].startswith("✅") and "└" not in lines[-1]

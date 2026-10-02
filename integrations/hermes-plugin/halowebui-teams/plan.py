@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from . import assistants, runners
 from .common import EXECUTORS, LEAD_NAME, logger, redact
@@ -273,8 +273,10 @@ _MAX_TOKENS_ERROR = re.compile(r"max_tokens|max_completion_tokens|max_output_tok
 
 
 def call_model(messages: list, timeout: int = 150, *, max_tokens: int = 4000,
-               temperature: float = 0.3, preferred: Optional[str] = None) -> tuple[Optional[str], str, dict]:
-    """One lead call along ``lead_routes``: ``(text, "", used)`` or ``(None, reason, used)``. Never raises."""
+               temperature: float = 0.3, preferred: Optional[str] = None,
+               on_route: Optional[Callable[[dict, list], None]] = None) -> tuple[Optional[str], str, dict]:
+    """One lead call along ``lead_routes``: ``(text, "", used)`` or ``(None, reason, used)``. Never raises.
+    ``on_route(route, failures so far)`` before each model is tried (progress)."""
     try:
         from agent.auxiliary_client import call_llm
     except Exception as exc:  # pragma: no cover - import smoke
@@ -284,6 +286,11 @@ def call_model(messages: list, timeout: int = 150, *, max_tokens: int = 4000,
         return None, "Hermes 没有配置默认模型（config.yaml 的 model.default）", {}
     failures: list[str] = []
     for route in routes:
+        if on_route is not None:
+            try:
+                on_route(route, list(failures))
+            except Exception:  # noqa: BLE001 — progress must never break the call
+                pass
         try:
             try:
                 resp = call_llm(task=None, provider=route["provider"], model=route["model"], messages=messages,
@@ -576,16 +583,31 @@ def resolve_project(goal: str, choice: str) -> Optional[dict]:
 
 def propose_plan(goal: str, workspace: str, *, feedback: str = "", previous: Optional[dict] = None,
                  parallel_cap: int = DEFAULT_PARALLEL_CAP, timeout: int = 150, lead_model: str = "",
-                 project: Optional[dict] = None) -> dict:
-    """Ask the lead model for a plan, then validate it. One retry when the reply is not usable."""
+                 project: Optional[dict] = None, team_id: str = "") -> dict:
+    """Ask the lead model for a plan, then validate it. One retry when the reply is not usable.
+    Each step is visible to HaloWebUI while it runs (``progress.planning``)."""
+    from . import progress
+
     if project and project.get("path"):
         workspace = project["path"] + "（团队分支的 worktree，批准时创建）"
+    progress.planning_step(team_id, "prepare", "读目标，整理可选的成员模板、执行来源和模型" + (
+        f"；在项目 {project.get('name') or project['path']} 里做" if project and project.get("path") else ""))
     messages = build_messages(goal, workspace, feedback, previous, project)
     last_errors: list[str] = []
     for attempt in range(2):
-        text, reason, used = call_model(messages, timeout=timeout, preferred=lead_model or None)
+        def on_route(route: dict, failures: list, attempt: int = attempt) -> None:
+            note = f"（{failures[-1].split('：', 1)[0]} 没有响应，改用 {route['model']}）" if failures else ""
+            if attempt == 0:
+                text = f"负责人（{route['model']}）在理解目标、挑选成员、拆分带依赖的任务{note}"
+            else:
+                text = f"上一版计划没通过检查（{'；'.join(last_errors)[:120]}），负责人（{route['model']}）在改{note}"
+            progress.planning_step(team_id, "model", text, model=route["model"], attempt=attempt + 1)
+
+        text, reason, used = call_model(messages, timeout=timeout, preferred=lead_model or None, on_route=on_route)
         if text is None:
             return {"ok": False, "error": reason, "lead_model": used}
+        progress.planning_step(team_id, "check", "检查计划：成员、任务依赖，为每位成员匹配可用的执行来源",
+                               model=used.get("model") or "", attempt=attempt + 1)
         parsed = extract_json(text)
         if parsed is None:
             last_errors = ["负责人返回的不是 JSON"]
@@ -598,6 +620,9 @@ def propose_plan(goal: str, workspace: str, *, feedback: str = "", previous: Opt
                 parsed["lead"]["model"] = used.get("model")
             plan, last_errors = validate_plan(parsed, parallel_cap=parallel_cap)
             if plan is not None:
+                estimate = progress.estimate_plan(plan)
+                if estimate:
+                    plan["estimate"] = estimate
                 return {"ok": True, "plan": plan, "attempts": attempt + 1}
         messages = messages + [
             {"role": "assistant", "content": text[:6000]},

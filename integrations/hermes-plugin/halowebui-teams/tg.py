@@ -361,6 +361,22 @@ def list_message(teams: list) -> tuple[str, list]:
         if url:
             title = f'<a href="{html.escape(url)}">{title}</a>'
         lines.append(f"{icon} {title} · {word}")
+        stage = team.get("stage") if isinstance(team.get("stage"), dict) else {}
+        if stage.get("key") in ("planning", "running", "attention", "concluding", "checking", "approval"):
+            from .progress import eta_text
+
+            when = ""
+            if stage.get("key") == "approval" and stage.get("after_approval"):
+                when = f"批准后{eta_text(stage['after_approval'], stage.get('after_approval_high'))}出结果"
+            elif stage.get("eta") is not None:  # counted from when HaloWebUI read it
+                gone = max(0, int(time.time()) - int(stage.get("at") or time.time()))
+                left = max(0, int(stage["eta"]) - gone)
+                high = max(left, int(stage.get("eta_high") or 0) - gone)
+                when = f"还要{eta_text(left, high)}" if high > 0 else "比平时久，快好了"
+            now_text = esc(clip(stage.get("now") or "", 60))
+            detail = " · ".join(x for x in (now_text, when) if x)
+            if detail:
+                lines.append(f"   └ {detail}")
         if team.get("status") == "plan_ready" and len(buttons) < 3:
             buttons.append([(f"✅ 批准「{clip(team.get('title'), 16)}」", f"cb:ap:{team['id']}")])
     home = link.public_url("/teams")

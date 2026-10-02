@@ -400,6 +400,13 @@ def snapshot(team_id: str, owner: Optional[str] = None) -> dict:
     phase = team_phase(team, tasks_out)
     if phase == "completed" and not team.get("completed_at"):
         _mark_completed(slug, team)
+    try:  # 阶段 + 现在在做什么 + 预计时间 (never breaks the snapshot)
+        from . import progress
+
+        stage_data = progress.stage(slug, team, tasks_out, phase)
+    except Exception:  # noqa: BLE001
+        logger.warning("halowebui-teams: stage of %s failed", slug, exc_info=True)
+        stage_data = None
     members = []
     for m in team.get("members") or []:
         mine = [t for t in tasks_out if t["member"] == m["name"]]
@@ -426,6 +433,7 @@ def snapshot(team_id: str, owner: Optional[str] = None) -> dict:
             "lead_model": team.get("lead_model") or {},
             "conclusion": _conclusion_brief(team),
             "round": int(team.get("round") or 0),
+            "stage": stage_data,
             **_lead_state(team),
         },
         "members": members,

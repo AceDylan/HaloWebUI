@@ -343,9 +343,10 @@ def test_list_reads_running_teams_live_and_carries_progress_and_roster(hermes):
     listed = {t["id"]: t for t in client.get("/api/v1/teams/").json()["teams"]}[team_id]
     assert listed["progress"]["done"] == 1
 
-    # Finished teams are not asked again.
+    # Finished teams are not asked again once the lead is done with them (result written and checked).
     del hermes.fail[("GET", team_id)]
-    hermes.responses[("GET", team_id)] = {"team": {"phase": "completed"}, "tasks": [
+    hermes.responses[("GET", team_id)] = {"team": {"phase": "completed", "conclusion": {
+        "status": "ready", "acceptance": {"status": "ready", "verdict": "met"}}}, "tasks": [
         {"id": "t_1", "status": "done"}, {"id": "t_2", "status": "done"}]}
     client.get("/api/v1/teams/")
     calls = len(hermes.calls)
@@ -773,3 +774,67 @@ def test_saving_the_conclusion_to_the_knowledge_base(hermes, monkeypatch):
     tg = bare.post(f"/api/v1/teams/hermes/teams/{other}/knowledge", headers={"X-Hermes-Key": "k", "X-Halo-Owner": "u-kb"})
     assert tg.status_code == 200 and tg.json()["knowledge_id"] == kb.id
     assert Knowledges.get_knowledge_by_id(kb.id).data["file_ids"] == ["file-2", "file-3"]
+
+
+# --- stage: where the team is, what happens now, how long it may still take ----------------------
+
+def test_every_stage_says_where_the_team_is_and_how_long_it_may_take(hermes):
+    client = _client("u1")
+    team_id = client.post("/api/v1/teams/", json={"goal": "调研三个看板工具"}).json()["id"]
+
+    def listed():
+        return next(t for t in client.get("/api/v1/teams/").json()["teams"] if t["id"] == team_id)
+
+    # planning: the lead's current step on Hermes and how long plans take there
+    hermes.responses[("GET", "/plan/progress")] = {
+        "progress": {"step": "model", "text": "负责人（gpt-chat）在理解目标、挑选成员、拆分带依赖的任务",
+                     "model": "gpt-chat", "attempt": 1},
+        "typical": {"median": 40, "p75": 70, "basis": "本机最近 12 次"}}
+    stage = client.get(f"/api/v1/teams/{team_id}").json()["stage"]
+    assert stage["key"] == "planning" and "gpt-chat" in stage["now"] and stage["model"] == "gpt-chat"
+    assert 0 < stage["eta"]["seconds"] <= 40 and stage["eta"]["high"] >= stage["eta"]["seconds"]
+    assert "本机最近 12 次" in stage["eta"]["basis"]
+    assert [s["state"] for s in stage["steps"]] == ["active", "pending", "pending", "pending", "pending"]
+    assert [c for c in hermes.calls if c[2] == "/plan/progress"][-1][4] == {"team_id": team_id}
+    assert listed()["stage"]["key"] == "planning"
+    # Hermes does not answer: the stage still says what is going on, on typical numbers
+    hermes.fail[("GET", "/plan/progress")] = (502, "x")
+    stage = client.get(f"/api/v1/teams/{team_id}").json()["stage"]
+    assert stage["key"] == "planning" and stage["now"] and stage["eta"]["seconds"] > 0
+    hermes.fail.clear()
+
+    # plan ready: waiting for you, and how long it takes once approved
+    AgentTeams.update(team_id, "u1", status="plan_ready",
+                      plan={**PLAN, "estimate": {"seconds": 540, "high": 760, "basis": "按本机最近 8 次 hermes 调研任务的用时估算"}})
+    stage = client.get(f"/api/v1/teams/{team_id}").json()["stage"]
+    assert stage["key"] == "approval" and stage["after_approval"]["seconds"] == 540
+    assert [s["state"] for s in stage["steps"]][:2] == ["done", "active"]
+    assert listed()["stage"]["after_approval"] == 540 and listed()["stage"]["after_approval_high"] == 760
+
+    # running: Hermes' own stage, stamped with the snapshot's time so the page can count down
+    AgentTeams.update(team_id, "u1", status="running", phase="running")
+    hermes.responses[("GET", team_id)] = {
+        "team": {"phase": "running", "stage": {"key": "running", "label": "成员执行中", "now": "#T1 researcher：搜索 · 看板工具",
+                                               "eta": {"seconds": 300, "high": 420, "basis": "按…"}}},
+        "tasks": [], "generated_at": 1790000000}
+    stage = client.get(f"/api/v1/teams/{team_id}").json()["stage"]
+    assert stage["key"] == "running" and stage["at"] == 1790000000 and stage["eta"]["seconds"] == 300
+    brief = listed()["stage"]
+    assert brief["now"].startswith("#T1") and brief["eta"] == 300 and brief["eta_high"] == 420
+
+    # just finished: the list still reads it while the lead writes and checks the result
+    hermes.responses[("GET", team_id)] = {
+        "team": {"phase": "completed", "conclusion": {"status": "generating"},
+                 "stage": {"key": "concluding", "label": "整理完整结果", "now": "负责人在整合",
+                           "eta": {"seconds": 30, "high": 50}}},
+        "tasks": [], "generated_at": 1790000100}
+    AgentTeams.update(team_id, "u1", phase="completed", finished_at=int(time.time()))
+    assert listed()["stage"]["key"] == "concluding" and listed()["stage"]["key"] == "concluding"
+    hermes.responses[("GET", team_id)] = {
+        "team": {"phase": "completed", "conclusion": {"status": "ready", "acceptance": {"status": "ready"}},
+                 "stage": {"key": "done", "label": "已完成", "now": "完整结果已经整理好"}},
+        "tasks": [], "generated_at": 1790000200}
+    assert listed()["stage"]["key"] == "done"
+    mine = lambda: sum(1 for c in hermes.calls if c[2] == f"/{team_id}")  # noqa: E731
+    calls = mine()
+    assert "stage" not in listed() and mine() == calls  # settled: not asked again

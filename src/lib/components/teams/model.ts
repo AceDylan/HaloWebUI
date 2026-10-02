@@ -749,3 +749,61 @@ export const formatStamp = (ts: number | null | undefined) => {
 /** A runner's display name ("Hermes" for the native agent, the command name otherwise). */
 export const runnerLabel = (name: string | null | undefined) =>
 	name === 'hermes' ? 'Hermes' : (name ?? '');
+
+// --- stage: what happens now and how long it may still take --------------------------------------
+
+export const STAGE_STEPS: { key: 'plan' | 'approve' | 'run' | 'conclude' | 'check'; label: string }[] = [
+	{ key: 'plan', label: '计划' },
+	{ key: 'approve', label: '批准' },
+	{ key: 'run', label: '执行' },
+	{ key: 'conclude', label: '整理结果' },
+	{ key: 'check', label: '验收' }
+];
+
+/** Stages in which something is underway on its own (a clock and an estimate make sense). */
+export const STAGE_MOVING = new Set(['planning', 'starting', 'running', 'concluding', 'checking']);
+
+/**
+ * What is left of an estimate made at `at`, now: {low, high, overtime}. A stage past its usual
+ * time keeps a small floor and says so rather than counting below zero.
+ */
+export const etaLeft = (
+	eta: { seconds?: number; high?: number; overtime?: boolean } | null | undefined,
+	at: number | null | undefined,
+	nowTs: number
+): { low: number; high: number; overtime: boolean } | null => {
+	if (!eta || typeof eta.seconds !== 'number') return null;
+	const gone = at ? Math.max(0, nowTs - at) : 0;
+	const low = eta.seconds - gone;
+	const high = Math.max(low, (eta.high ?? eta.seconds) - gone);
+	if (high <= 0) return { low: 0, high: 0, overtime: true };
+	return { low: Math.max(0, low), high, overtime: !!eta.overtime || low <= 0 };
+};
+
+const minutesOf = (s: number) => Math.max(1, Math.round(s / 60));
+
+/** 「不到 1 分钟」「约 3 分钟」「约 3–6 分钟」「约 1.5–2 小时」. */
+export const formatEta = (low: number, high?: number): string => {
+	const top = Math.max(low, high ?? low);
+	if (top < 50) return '不到 1 分钟';
+	if (low >= 5400) {
+		const h = (s: number) => (Math.round((s / 3600) * 2) / 2).toString();
+		return h(top) === h(low) ? `约 ${h(low)} 小时` : `约 ${h(low)}–${h(top)} 小时`;
+	}
+	const a = low < 50 ? 1 : minutesOf(low);
+	const b = minutesOf(top);
+	return b > a ? `约 ${a}–${b} 分钟` : `约 ${a} 分钟`;
+};
+
+/** The estimate as a sentence for the stage line: 「预计还要约 3–6 分钟」 / 「比平时久，快好了」. */
+export const etaSentence = (
+	eta: { seconds?: number; high?: number; overtime?: boolean } | null | undefined,
+	at: number | null | undefined,
+	nowTs: number
+): string => {
+	const left = etaLeft(eta, at, nowTs);
+	if (!left) return '';
+	if (left.high <= 0) return '比平时久一些，应该快好了';
+	if (left.overtime && left.low <= 0) return `比平时久一些，可能还要 ${formatEta(0, left.high).replace('约 ', '')}`;
+	return `预计还要${formatEta(left.low, left.high)}`;
+};

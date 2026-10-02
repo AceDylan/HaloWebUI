@@ -27,8 +27,11 @@ from open_webui.utils.agent_teams import (
     hermes_call,
     hermes_file,
     hermes_target,
+    planning_progress,
     public_team,
     reconcile,
+    stage_brief,
+    stage_of,
     start_planning,
     start_team,
 )
@@ -128,19 +131,42 @@ async def check_runners(request: Request, form: RunnerCheckForm, user=Depends(ge
 
 LIST_REFRESH_LIMIT = 6
 LIST_REFRESH_SECONDS = 4
+RECENT_FINISH_SECONDS = 600
 
 
 @router.get("/", dependencies=[Depends(_enabled)])
 async def list_teams(request: Request, chat_id: Optional[str] = None, user=Depends(get_verified_user)):
-    return {"teams": [public_team(t, with_plan=False) for t in await _fresh_list(request, user, chat_id)]}
+    return {"teams": _with_stages(*await _fresh_list(request, user, chat_id))}
+
+
+def _with_stages(teams: list, snaps: dict) -> list[dict]:
+    out = []
+    for team in teams:
+        data = public_team(team, with_plan=False)
+        stage = stage_brief(stage_of(team, snaps.get(team.id)))
+        if stage:
+            data["stage"] = stage
+        out.append(data)
+    return out
+
+
+def _recently_finished(team, now: int) -> bool:
+    """A team that finished in the last minutes: its conclusion / acceptance may still be underway."""
+    return (team.status == "running" and team.phase == "completed" and not (team.meta or {}).get("settled")
+            and now - int(team.finished_at or 0) < RECENT_FINISH_SECONDS)
 
 
 async def _fresh_list(request: Request, user, chat_id: Optional[str] = None, target=None):
+    """(teams, {team id: live snapshot}) — the user's teams, those at work read from Hermes once."""
     teams = AgentTeams.list_for_user(user.id, chat_id=chat_id)
+    snaps: dict = {}
     # Teams still at work are read from Hermes once here, so the list shows where they are now
-    # (phase, tasks done) without opening each one. Best effort and bounded: a slow or missing
-    # Hermes leaves the last recorded state.
-    live = [t for t in teams if t.status in ("running", "starting") and t.phase not in ("completed", "stopped")]
+    # (phase, tasks done, stage, estimate) without opening each one; so are teams that just finished
+    # (the lead may still be writing the result). Best effort and bounded: a slow or missing Hermes
+    # leaves the last recorded state.
+    now = int(time.time())
+    live = [t for t in teams if (t.status in ("running", "starting") and t.phase not in ("completed", "stopped"))
+            or _recently_finished(t, now)]
     if live:
         if target is None:
             try:
@@ -150,13 +176,16 @@ async def _fresh_list(request: Request, user, chat_id: Optional[str] = None, tar
         if target is not None:
             async def refresh(team):
                 try:
-                    return (await asyncio.wait_for(reconcile(team, target), LIST_REFRESH_SECONDS))[0]
+                    fresh, snap, _err = await asyncio.wait_for(reconcile(team, target), LIST_REFRESH_SECONDS)
+                    if snap is not None:
+                        snaps[team.id] = snap
+                    return fresh
                 except Exception:  # noqa: BLE001 — the list must load even when Hermes does not answer
                     return team
             fresh = await asyncio.gather(*(refresh(t) for t in live[:LIST_REFRESH_LIMIT]))
             by_id = {t.id: t for t in fresh}
             teams = [by_id.get(t.id, t) for t in teams]
-    return teams
+    return teams, snaps
 
 
 @router.post("/", dependencies=[Depends(_enabled)])
@@ -200,8 +229,15 @@ async def get_team(request: Request, team_id: str, user=Depends(get_verified_use
             target = await hermes_target(request, user)
         except TeamsError as exc:
             return {"team": public_team(team), "live": None, "live_error": exc.detail}
+    planning = None
+    if team.status == "planning":
+        try:
+            planning = await planning_progress(team, await hermes_target(request, user))
+        except TeamsError:
+            planning = None
     team, snap, live_error = await reconcile(team, target)
-    return {"team": public_team(team), "live": snap, "live_error": live_error}
+    return {"team": public_team(team), "live": snap, "live_error": live_error,
+            "stage": stage_of(team, snap, planning)}
 
 
 @router.post("/{team_id}/replan", dependencies=[Depends(_enabled)])
@@ -639,7 +675,7 @@ def _clean_origin(origin: dict) -> Optional[dict]:
 @router.get("/hermes/teams")
 async def hermes_list(request: Request, caller=Depends(_hermes_caller)):
     user, target = caller
-    return {"teams": [public_team(t, with_plan=False) for t in await _fresh_list(request, user, target=target)]}
+    return {"teams": _with_stages(*await _fresh_list(request, user, target=target))}
 
 
 @router.post("/hermes/teams")

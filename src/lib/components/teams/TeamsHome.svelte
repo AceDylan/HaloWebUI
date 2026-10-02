@@ -21,7 +21,19 @@
 	import StatusChip from './StatusChip.svelte';
 	import TeamAvatar from './TeamAvatar.svelte';
 	import { now, timeAgo } from './clock';
-	import { avatarKind, PHASE_LABEL, runnerLabel } from './model';
+	import { avatarKind, etaSentence, formatEta, PHASE_LABEL, runnerLabel } from './model';
+
+	// Stages a list row describes in words (what happens now, how long is left) instead of its facts.
+	const LIST_STAGES = new Set([
+		'planning',
+		'approval',
+		'starting',
+		'running',
+		'attention',
+		'paused',
+		'concluding',
+		'checking'
+	]);
 
 	/** Your collaboration tasks (only yours) and a box to start a new one. */
 	let teams: Team[] = [];
@@ -105,6 +117,8 @@
 			(!needle || `${t.title}\n${t.goal}`.toLowerCase().includes(needle))
 	);
 	$: activeCount = counts.active ?? 0;
+	// A team that just finished is still moving while the lead writes and checks its result.
+	$: settling = teams.some((t) => t.stage && ['concluding', 'checking'].includes(t.stage.key));
 
 	const QUICK_STARTS = [
 		{
@@ -232,7 +246,7 @@
 	const startRefresh = () => {
 		if (refreshTimer) return;
 		refreshTimer = setInterval(() => {
-			if (document.visibilityState === 'visible' && activeCount > 0) load();
+			if (document.visibilityState === 'visible' && (activeCount > 0 || settling)) load();
 		}, 15000);
 	};
 
@@ -712,10 +726,33 @@
 											>{team.title}</span
 										>
 									</div>
+									{#if team.stage && LIST_STAGES.has(team.stage.key)}
+										{@const st = team.stage}
+										{@const etaText =
+											st.key === 'approval'
+												? st.after_approval
+													? `批准后${formatEta(st.after_approval, st.after_approval_high)}出结果`
+													: ''
+												: etaSentence({ seconds: st.eta, high: st.eta_high, overtime: st.overtime }, st.at, $now)}
+										<div
+											class="mt-1 flex min-w-0 items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400"
+											data-team-stage={st.key}
+										>
+											<span class="stage-label shrink-0 font-medium" data-tone={st.key}>{st.label ?? ''}</span>
+											{#if st.now}
+												<span aria-hidden="true">·</span>
+												<span class="min-w-0 truncate text-gray-600 dark:text-gray-300">{st.now}</span>
+											{/if}
+											{#if etaText}
+												<span aria-hidden="true">·</span>
+												<span class="tm-num shrink-0" data-team-eta>{etaText.replace('预计', '')}</span>
+											{/if}
+										</div>
+									{:else}
 									<div
-										class="mt-1 flex min-w-0 items-center gap-1.5 truncate text-xs text-gray-500 dark:text-gray-400"
+									class="mt-1 flex min-w-0 items-center gap-1.5 truncate text-xs text-gray-500 dark:text-gray-400"
 									>
-										<span class="shrink-0">{timeAgo(team.updated_at, $now)}</span>
+									<span class="shrink-0">{timeAgo(team.updated_at, $now)}</span>
 										{#if team.origin === 'telegram'}
 											<span aria-hidden="true">·</span>
 											<span
@@ -732,10 +769,11 @@
 											<span aria-hidden="true">·</span>
 											<span class="truncate font-mono text-[11px]"
 												>{team.executors.map(runnerLabel).join(' + ')}</span
-											>
-										{/if}
-									</div>
-								</a>
+												>
+												{/if}
+												</div>
+												{/if}
+												</a>
 								<span
 									class="hidden w-[7.5rem] shrink-0 items-center justify-end -space-x-1.5 md:flex"
 									aria-hidden="true"
@@ -869,6 +907,26 @@
 />
 
 <style>
+	.stage-label {
+		color: hsl(214 90% 44%);
+	}
+	.stage-label[data-tone='attention'] {
+		color: hsl(262 70% 52%);
+	}
+	.stage-label[data-tone='approval'],
+	.stage-label[data-tone='paused'] {
+		color: hsl(30 90% 38%);
+	}
+	:global(.dark) .stage-label {
+		color: hsl(var(--tm-accent));
+	}
+	:global(.dark) .stage-label[data-tone='attention'] {
+		color: hsl(var(--tm-violet));
+	}
+	:global(.dark) .stage-label[data-tone='approval'],
+	:global(.dark) .stage-label[data-tone='paused'] {
+		color: hsl(var(--tm-warn));
+	}
 	/* Tasks running now: a blue segment with light flowing through it. */
 	.bar-run {
 		background:

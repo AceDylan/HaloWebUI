@@ -10,7 +10,8 @@
 		writeTeamConclusion,
 		type ConclusionEntry,
 		type Team,
-		type TeamConclusion
+		type TeamConclusion,
+		type TeamStage
 	} from '$lib/apis/teams';
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import { copyToClipboard } from '$lib/utils';
@@ -19,7 +20,8 @@
 	import ReportMarkdown from './ReportMarkdown.svelte';
 	import RunnerBadge from './RunnerBadge.svelte';
 	import StatusChip from './StatusChip.svelte';
-	import { formatBytes, formatStamp, prepareReport, statusLabel } from './model';
+	import { etaSentence, formatBytes, formatStamp, prepareReport, statusLabel } from './model';
+	import { now } from './clock';
 
 	/**
 	 * The team's conclusion: the lead's final report (Markdown, images from the workspace), the
@@ -36,6 +38,10 @@
 	/** The team's chat and where its conclusion went (from the team record). */
 	export let chatId: string | null = null;
 	export let outputs: Team['outputs'] = undefined;
+	/** The team's stage (the workbench passes it): how long writing the result may still take. */
+	export let stage: TeamStage | null = null;
+	$: writingEta =
+		stage?.key === 'concluding' ? etaSentence(stage.eta, stage.at, $now) : '';
 
 	const POLL_MS = 3000;
 	let data: TeamConclusion | null = null;
@@ -370,7 +376,7 @@
 				<div class="px-3 py-2">
 					负责人{entry.model ? `（${entry.model}）` : ''}正在把 {data?.tasks.length ??
 						progress?.total ??
-						''} 个任务的成果和工作目录里的产出整合成完整结果，成员写好的成品文件会原样放进来，通常 1–3 分钟。{data?.markdown
+						''} 个任务的成果和工作目录里的产出整合成完整结果，成员写好的成品文件会原样放进来，{writingEta || '通常 1–3 分钟'}。{data?.markdown
 						? '下面是上一版。'
 						: ''}
 				</div>

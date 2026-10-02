@@ -19,6 +19,7 @@
 		type LiveSnapshot,
 		type Team,
 		type TeamEvent,
+		type TeamStage,
 		type TeamExecutor,
 		type TeamsMeta
 	} from '$lib/apis/teams';
@@ -36,6 +37,7 @@
 	import StatusChip from './StatusChip.svelte';
 	import TeamBoard from './TeamBoard.svelte';
 	import TeamProgress from './TeamProgress.svelte';
+	import StageRail from './StageRail.svelte';
 	import TeamAvatar from './TeamAvatar.svelte';
 	import { elapsed, now } from './clock';
 	import {
@@ -64,6 +66,9 @@
 
 	let team: Team | null = null;
 	let live: LiveSnapshot | null = null;
+	/** 阶段: what happens now and about how long is left (HaloWebUI's view before the team starts,
+	 *  Hermes' once it runs). */
+	let stage: TeamStage | null = null;
 	let liveError: string | null = null;
 	let loadError: string | null = null;
 	let events: TeamEvent[] = [];
@@ -168,6 +173,8 @@
 	$: if (!replay && phase === 'completed' && !asideTouched && asideTab !== 'conclusion')
 		asideTab = 'conclusion';
 	$: stopped = phase === 'stopped' || live?.team.state === 'stopped';
+	// The rail while something is underway or waits for you; a finished team has its banner instead.
+	$: showStage = !!stage && !replay && !['done', 'stopped'].includes(stage.key);
 	$: finished = phase === 'completed' || stopped;
 	$: running = team?.status === 'running';
 	$: headerStatus = !team
@@ -219,6 +226,7 @@
 		team = data.team;
 		live = data.live ?? live;
 		liveError = data.live_error;
+		stage = data.stage ?? (data.live ? null : stage);
 	};
 
 	const fetchEvents = async () => {
@@ -551,6 +559,9 @@
 			</div>
 		{:else if team.status !== 'running'}
 			<div class="mx-auto flex max-w-4xl flex-col gap-5 pt-2">
+				{#if stage}
+					<StageRail {stage} />
+				{/if}
 				<section class="goal tm-card-quiet px-5 py-4" aria-label="目标">
 					<div class="tm-eyebrow mb-1.5">目标</div>
 					<div
@@ -580,13 +591,14 @@
 								<span class="tm-shimmer text-[15px] font-semibold text-gray-900 dark:text-gray-50"
 									>负责人正在制定计划</span
 								>
-								<span class="tm-num ml-auto text-xs text-gray-400"
-									>{elapsed($now - (team.updated_at || team.created_at))}</span
-								>
-							</div>
-							<p class="mt-1 text-xs leading-relaxed text-gray-500 dark:text-gray-400">
-								理解目标 → 从助手模板里挑选成员 → 拆分带依赖的任务 → 为每位成员匹配执行来源。通常
-								10–60 秒；{team.auto_start
+								{#if !stage}
+									<span class="tm-num ml-auto text-xs text-gray-400"
+										>{elapsed($now - (team.updated_at || team.created_at))}</span
+									>
+								{/if}
+								</div>
+								<p class="mt-1 text-xs leading-relaxed text-gray-500 dark:text-gray-400">
+								理解目标 → 从助手模板里挑选成员 → 拆分带依赖的任务 → 为每位成员匹配执行来源。{team.auto_start
 									? '你选了「直接开始」：计划出来就开始执行（有成员没有可用的执行来源时仍会等你批准）。'
 									: '计划出来后要你批准才会开始执行。'}
 							</p>
@@ -660,12 +672,15 @@
 			</div>
 		{:else}
 			<div class="flex flex-col gap-4 pt-1">
+				{#if showStage}
+					<StageRail {stage} />
+				{/if}
 				<TeamProgress
 					{counts}
 					{fallbacks}
 					{leadModel}
 					workspace={live?.team.workspace ?? ''}
-					startedAt={replay ? null : team.approved_at}
+					startedAt={replay || (showStage && !finished) ? null : team.approved_at}
 					finishedAt={finished ? (team.finished_at ?? null) : null}
 				/>
 
@@ -943,6 +958,7 @@
 							progress={{ done: counts.done, total: counts.total }}
 							chatId={team.chat_id}
 							outputs={team.outputs}
+							{stage}
 						/>
 					{:else if mobileTab === 'changes'}
 						<ChangesView {teamId} {phase} />
@@ -1040,6 +1056,7 @@
 											progress={{ done: counts.done, total: counts.total }}
 											chatId={team.chat_id}
 											outputs={team.outputs}
+											{stage}
 										/>
 									</div>
 								{:else if asideTab === 'changes'}

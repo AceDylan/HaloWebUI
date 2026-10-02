@@ -276,3 +276,25 @@ describe('executors', () => {
 		expect(isRunnerExecutor(undefined)).toBe(false);
 	});
 });
+
+describe('stage estimates', () => {
+	it('formats how long is left the way people say it', async () => {
+		const { formatEta } = await import('./model');
+		expect(formatEta(20)).toBe('不到 1 分钟');
+		expect(formatEta(170, 175)).toBe('约 3 分钟');
+		expect(formatEta(170, 400)).toBe('约 3–7 分钟');
+		expect(formatEta(30, 200)).toBe('约 1–3 分钟');
+		expect(formatEta(6000, 9000)).toBe('约 1.5–2.5 小时');
+	});
+
+	it('counts down from when the estimate was made and admits running late', async () => {
+		const { etaLeft, etaSentence } = await import('./model');
+		const eta = { seconds: 300, high: 420 };
+		expect(etaLeft(eta, 1000, 1100)).toEqual({ low: 200, high: 320, overtime: false });
+		expect(etaSentence(eta, 1000, 1100)).toBe('预计还要约 3–5 分钟');
+		expect(etaLeft(eta, 1000, 1350)).toEqual({ low: 0, high: 70, overtime: true });
+		expect(etaSentence(eta, 1000, 1350)).toBe('比平时久一些，可能还要 1 分钟');
+		expect(etaSentence(eta, 1000, 2000)).toBe('比平时久一些，应该快好了');
+		expect(etaSentence(null, 1000, 2000)).toBe('');
+	});
+});

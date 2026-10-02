@@ -247,11 +247,28 @@ async def reconcile(team: AgentTeamModel, target: Optional[HermesTarget]) -> tup
         elif phase not in ("completed", "stopped") and team.finished_at:
             fields["finished_at"] = None  # a finished team that got new work runs again
     progress = snapshot_progress(snap)
-    if progress is not None and progress != (team.meta or {}).get("progress"):
-        fields["meta"] = {**(team.meta or {}), "progress": progress}
+    meta = dict(team.meta or {})
+    if progress is not None and progress != meta.get("progress"):
+        meta["progress"] = progress
+    # A finished team is "settled" once its result is written and checked: nothing more happens
+    # on its own, so the list stops asking Hermes about it.
+    settled = phase in ("completed", "stopped") and result_settled(live)
+    if settled != bool(meta.get("settled")):
+        meta["settled"] = settled
+    if meta != (team.meta or {}):
+        fields["meta"] = meta
     if fields:
         team = AgentTeams.update(team.id, team.user_id, **fields) or team
     return team, snap, None
+
+
+def result_settled(live: Optional[dict]) -> bool:
+    """The lead is done with a finished team: the result is written (or failed) and not being checked."""
+    conclusion = (live or {}).get("conclusion") if isinstance(live, dict) else None
+    if not isinstance(conclusion, dict):
+        return False
+    acceptance = conclusion.get("acceptance") if isinstance(conclusion.get("acceptance"), dict) else {}
+    return conclusion.get("status") in ("ready", "failed") and acceptance.get("status") != "checking"
 
 
 def snapshot_progress(snap: Any) -> Optional[dict]:
@@ -271,6 +288,78 @@ def snapshot_progress(snap: Any) -> Optional[dict]:
         elif sub in ("failed", "blocked", "waiting_user", "stopped", "triage") or task.get("status") == "triage":
             out["attention"] += 1
     return out
+
+
+# --- stage (阶段 + 现在在做什么 + 预计时间) ----------------------------------------------------------
+
+PLAN_TYPICAL_DEFAULT = {"median": 45, "p75": 80, "basis": "经验值"}
+STAGE_LABELS = {"planning": "负责人制定计划", "approval": "等你批准", "starting": "启动成员",
+                "plan_failed": "计划没做成", "start_failed": "启动失败", "cancelled": "已取消"}
+
+
+async def planning_progress(team: AgentTeamModel, target: Optional[HermesTarget]) -> Optional[dict]:
+    """The lead's current planning step on Hermes, and how long plans take there. Best effort."""
+    if target is None:
+        return None
+    try:
+        body = await hermes_call(target, "GET", "/plan/progress", params={"team_id": team.id}, timeout=4)
+    except TeamsError:
+        return None
+    return body if isinstance(body, dict) else None
+
+
+def stage_of(team: AgentTeamModel, snap: Any = None, planning: Optional[dict] = None) -> Optional[dict]:
+    """Where the team stands, the same shape for every status: {key, label, now, started_at, at,
+    eta?: {seconds, high, overtime, basis} counted from ``at``, steps?}. Running teams take Hermes'
+    own (the snapshot's ``team.stage``); before that HaloWebUI knows the stage itself."""
+    now = int(time.time())
+    if team.status in ("running", "starting") and isinstance(snap, dict):
+        live = (snap.get("team") or {}).get("stage")
+        if isinstance(live, dict) and live.get("key"):
+            return {**live, "at": int(snap.get("generated_at") or now)}
+    if team.status == "planning":
+        typical = {**PLAN_TYPICAL_DEFAULT, **((planning or {}).get("typical") or {})}
+        step = (planning or {}).get("progress") or {}
+        started = int(team.updated_at or team.created_at or now)
+        spent = max(0, now - started)
+        left = int(typical["median"]) - spent
+        return {"key": "planning", "label": STAGE_LABELS["planning"], "started_at": started, "at": now,
+                "now": step.get("text") or "负责人在理解目标、挑选成员、拆分带依赖的任务",
+                "model": step.get("model") or None, "attempt": step.get("attempt") or None,
+                "eta": {"seconds": max(5, left), "high": max(5, int(typical["p75"]) - spent, left),
+                        "overtime": left <= 0, "basis": f"按{typical.get('basis') or '经验值'}做计划的用时估算"},
+                "steps": _steps(0)}
+    if team.status == "plan_ready":
+        estimate = (team.plan or {}).get("estimate") if isinstance(team.plan, dict) else None
+        return {"key": "approval", "label": STAGE_LABELS["approval"], "at": now, "started_at": team.updated_at,
+                "now": "计划好了：看一下成员和任务，批准后才开始执行", "after_approval": estimate or None,
+                "steps": _steps(1)}
+    if team.status == "starting":
+        return {"key": "starting", "label": STAGE_LABELS["starting"], "at": now, "started_at": team.updated_at,
+                "now": "正在把计划交给 Hermes：建任务板、启动第一批成员", "steps": _steps(2)}
+    if team.status in ("plan_failed", "start_failed", "cancelled"):
+        return {"key": team.status, "label": STAGE_LABELS[team.status], "at": now,
+                "now": (team.error or "")[:200] or STAGE_LABELS[team.status]}
+    return None
+
+
+def _steps(position: int) -> list[dict]:
+    order = ["plan", "approve", "run", "conclude", "check"]
+    return [{"key": k, "state": "done" if i < position else ("active" if i == position else "pending")}
+            for i, k in enumerate(order)]
+
+
+def stage_brief(stage: Optional[dict]) -> Optional[dict]:
+    """What the team list shows of a stage."""
+    if not isinstance(stage, dict) or not stage.get("key"):
+        return None
+    eta = stage.get("eta") if isinstance(stage.get("eta"), dict) else {}
+    after = stage.get("after_approval") if isinstance(stage.get("after_approval"), dict) else {}
+    out = {"key": stage["key"], "label": stage.get("label"), "now": str(stage.get("now") or "")[:160],
+           "at": stage.get("at"), "started_at": stage.get("started_at"),
+           "eta": eta.get("seconds"), "eta_high": eta.get("high"), "overtime": bool(eta.get("overtime")),
+           "after_approval": after.get("seconds"), "after_approval_high": after.get("high")}
+    return {k: v for k, v in out.items() if v not in (None, "", False)}
 
 
 def team_origin(team: AgentTeamModel) -> Optional[dict]:

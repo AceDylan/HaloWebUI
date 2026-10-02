@@ -19,6 +19,7 @@ or drive another user's team through this API either.
   GET  /v1/halo-teams/meta                          lead model, runners (+ availability), task kinds, assistant templates
   POST /v1/halo-teams/runners/check                 re-run the runner availability checks now
   POST /v1/halo-teams/plan/resolve                  {plan} → the plan with every member's runner worked out again
+  GET  /v1/halo-teams/plan/progress?team_id=        the lead's current planning step + how long plans take here
   GET  /v1/halo-teams/{team_id}/conclusion          the final report (markdown) + task results + workspace files
   POST /v1/halo-teams/{team_id}/conclusion          (re)write the report now
   GET  /v1/halo-teams/{team_id}/files/{path}        a file from the team's workspace (images in the report)
@@ -35,6 +36,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from typing import Any, Callable
 
 from .common import board_slug, logger, valid_team_id
@@ -105,12 +107,30 @@ async def _plan(request):
     choice = str(data.get("project") or "").strip()[:500]
     if not choice and previous is not None:
         choice = str((previous.get("project") or {}).get("path") or "none")
-    project = await asyncio.to_thread(plan_mod.resolve_project, goal, choice)
-    result = await asyncio.to_thread(
-        plan_mod.propose_plan, goal, workspace, feedback=str(data.get("feedback") or ""), previous=previous,
-        lead_model=lead_model, project=project,
-    )
+    from . import progress
+
+    plan_key = team_id if valid_team_id(team_id) else ""
+    started = time.time()
+    progress.planning_step(plan_key, "prepare", "读目标，看看它点名了哪个项目")
+    try:
+        project = await asyncio.to_thread(plan_mod.resolve_project, goal, choice)
+        result = await asyncio.to_thread(
+            plan_mod.propose_plan, goal, workspace, feedback=str(data.get("feedback") or ""), previous=previous,
+            lead_model=lead_model, project=project, team_id=plan_key,
+        )
+    finally:
+        progress.planning_done(plan_key)
+    if result.get("ok"):
+        progress.record_plan(time.time() - started)
     return _json_response(result, status=200 if result.get("ok") else 502)
+
+
+async def _plan_progress(request):
+    """While HaloWebUI waits for a plan: the lead's current step and how long plans usually take."""
+    from . import progress
+
+    team_id = request.query.get("team_id") or ""
+    return _json_response(progress.planning(team_id if valid_team_id(team_id) else ""))
 
 
 async def _create(request):
@@ -280,6 +300,12 @@ async def _plan_resolve(request):
     if not isinstance(data.get("plan"), dict):
         return _error(400, "plan is required")
     plan, errors = await asyncio.to_thread(validate_plan, data["plan"])
+    if plan is not None:
+        from . import progress
+
+        estimate = await asyncio.to_thread(progress.estimate_plan, plan)
+        if estimate:
+            plan["estimate"] = estimate
     if plan is None:
         return _error(400, "计划没有通过检查：" + "；".join(errors))
     for key in ("lead_model", "lead"):
@@ -418,6 +444,7 @@ def install(app: Any, adapter: Any) -> None:
     router.add_get(base + "/meta", _wrap(adapter, _meta))
     router.add_post(base + "/runners/check", _wrap(adapter, _runners_check))
     router.add_post(base + "/plan/resolve", _wrap(adapter, _plan_resolve))
+    router.add_get(base + "/plan/progress", _wrap(adapter, _plan_progress))
     router.add_post(base + "/plan", _wrap(adapter, _plan))
     router.add_post(base + "/notify", _wrap(adapter, _notify))
     router.add_post(base, _wrap(adapter, _create))

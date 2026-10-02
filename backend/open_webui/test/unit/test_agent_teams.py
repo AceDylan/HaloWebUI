@@ -296,3 +296,54 @@ def test_feature_flag_off_hides_every_route(hermes, monkeypatch):
     client = _client("u1")
     assert client.get("/api/v1/teams/").status_code == 404
     assert client.post("/api/v1/teams/", json={"goal": "x"}).status_code == 404
+
+
+def test_list_reads_running_teams_live_and_carries_progress_and_roster(hermes):
+    client = _client("u-list")
+    team_id = _ready_team(client, hermes, "u-list")
+    hermes.responses[("POST", "")] = {"board": "halo-abc"}
+    client.post(f"/api/v1/teams/{team_id}/approve")
+    hermes.responses[("GET", team_id)] = {
+        "team": {"phase": "running"},
+        "tasks": [
+            {"id": "t_1", "status": "done", "sub_status": "done"},
+            {"id": "t_2", "status": "running", "sub_status": "running"},
+        ],
+    }
+    listed = {t["id"]: t for t in client.get("/api/v1/teams/").json()["teams"]}[team_id]
+    assert listed["progress"] == {"done": 1, "running": 1, "attention": 0, "total": 2}
+    assert [m["name"] for m in listed["roster"]] == ["spec-writer", "reviewer"]
+    assert listed["deletable"] is False and "plan" not in listed
+
+    # Hermes down: the list still loads with the last recorded progress.
+    hermes.fail[("GET", team_id)] = (502, "Hermes 不可用")
+    listed = {t["id"]: t for t in client.get("/api/v1/teams/").json()["teams"]}[team_id]
+    assert listed["progress"]["done"] == 1
+
+    # Finished teams are not asked again.
+    del hermes.fail[("GET", team_id)]
+    hermes.responses[("GET", team_id)] = {"team": {"phase": "completed"}, "tasks": [
+        {"id": "t_1", "status": "done"}, {"id": "t_2", "status": "done"}]}
+    client.get("/api/v1/teams/")
+    calls = len(hermes.calls)
+    listed = {t["id"]: t for t in client.get("/api/v1/teams/").json()["teams"]}[team_id]
+    assert listed["phase"] == "completed" and listed["deletable"] is True and len(hermes.calls) == calls
+
+
+def test_delete_only_when_nothing_runs_and_only_your_own(hermes):
+    a, b = _client("u-del"), _client("u2")
+    planning = a.post("/api/v1/teams/", json={"goal": "x"}).json()["id"]
+    assert a.delete(f"/api/v1/teams/{planning}").status_code == 409
+
+    ready = _ready_team(a, hermes, "u-del")
+    assert b.delete(f"/api/v1/teams/{ready}").status_code == 404
+    assert a.delete(f"/api/v1/teams/{ready}").json() == {"ok": True, "id": ready}
+    assert a.get(f"/api/v1/teams/{ready}").status_code == 404
+
+    running = _ready_team(a, hermes, "u-del")
+    hermes.responses[("POST", "")] = {"board": "halo-abc"}
+    a.post(f"/api/v1/teams/{running}/approve")
+    resp = a.delete(f"/api/v1/teams/{running}")
+    assert resp.status_code == 409 and "停止" in resp.json()["detail"]
+    AgentTeams.update(running, "u-del", phase="stopped")
+    assert a.delete(f"/api/v1/teams/{running}").status_code == 200

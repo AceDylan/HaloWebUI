@@ -116,5 +116,11 @@ class AgentTeamsTable:
             row = db.query(AgentTeam).filter_by(id=team_id, user_id=user_id).first()
             return AgentTeamModel.model_validate(row) if row else None
 
+    def delete(self, team_id: str, user_id: str) -> bool:
+        with get_db() as db:
+            count = db.query(AgentTeam).filter_by(id=team_id, user_id=user_id).delete(synchronize_session=False)
+            db.commit()
+            return count == 1
+
 
 AgentTeams = AgentTeamsTable()

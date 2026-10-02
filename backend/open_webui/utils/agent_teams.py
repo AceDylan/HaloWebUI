@@ -193,9 +193,38 @@ async def reconcile(team: AgentTeamModel, target: Optional[HermesTarget]) -> tup
         fields["phase"] = phase
         if phase in ("completed", "stopped") and not team.finished_at:
             fields["finished_at"] = now
+    progress = snapshot_progress(snap)
+    if progress is not None and progress != (team.meta or {}).get("progress"):
+        fields["meta"] = {**(team.meta or {}), "progress": progress}
     if fields:
         team = AgentTeams.update(team.id, team.user_id, **fields) or team
     return team, snap, None
+
+
+def snapshot_progress(snap: Any) -> Optional[dict]:
+    """How far a running team is, for the list: tasks done / running / needing you / total."""
+    tasks = snap.get("tasks") if isinstance(snap, dict) else None
+    if not isinstance(tasks, list):
+        return None
+    out = {"done": 0, "running": 0, "attention": 0, "total": len(tasks)}
+    for task in tasks:
+        if not isinstance(task, dict):
+            continue
+        sub = task.get("sub_status") or task.get("status")
+        if task.get("status") in ("done", "archived"):
+            out["done"] += 1
+        elif sub in ("running", "review"):
+            out["running"] += 1
+        elif sub in ("failed", "blocked", "waiting_user", "stopped", "triage") or task.get("status") == "triage":
+            out["attention"] += 1
+    return out
+
+
+def deletable(team: AgentTeamModel) -> bool:
+    """Only a team nothing is happening in can go: never planned, cancelled, failed, or finished."""
+    if team.status in ("plan_ready", "plan_failed", "start_failed", "cancelled"):
+        return True
+    return team.status == "running" and team.phase in ("completed", "stopped")
 
 
 def public_team(team: AgentTeamModel, *, with_plan: bool = True) -> dict:
@@ -207,6 +236,14 @@ def public_team(team: AgentTeamModel, *, with_plan: bool = True) -> dict:
     data["member_count"] = len(plan.get("members") or [])
     data["task_count"] = len(plan.get("tasks") or [])
     data["executors"] = plan.get("executors") or []
+    data["progress"] = meta.get("progress")
+    data["deletable"] = deletable(team)
+    # Who is on the team, for the list's avatar stack (names and roles only).
+    data["roster"] = [
+        {"name": str(m.get("name") or "")[:40], "role": str(m.get("role") or "")[:40]}
+        for m in (plan.get("members") or [])[:8]
+        if isinstance(m, dict)
+    ]
     if not with_plan:
         data.pop("plan", None)
     return data

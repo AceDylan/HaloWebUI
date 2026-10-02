@@ -5,6 +5,7 @@ it (administrators included — the global entry shows only your own teams). See
 utils/agent_teams.py for the split between HaloWebUI and Hermes.
 """
 
+import asyncio
 import logging
 from typing import Literal, Optional
 
@@ -19,6 +20,7 @@ from open_webui.utils.agent_teams import (
     GOAL_MAX_CHARS,
     TeamsError,
     default_title,
+    deletable,
     hermes_call,
     hermes_file,
     hermes_target,
@@ -103,9 +105,31 @@ async def check_runners(request: Request, form: RunnerCheckForm, user=Depends(ge
         _raise(exc)
 
 
+LIST_REFRESH_LIMIT = 6
+LIST_REFRESH_SECONDS = 4
+
+
 @router.get("/", dependencies=[Depends(_enabled)])
-async def list_teams(chat_id: Optional[str] = None, user=Depends(get_verified_user)):
+async def list_teams(request: Request, chat_id: Optional[str] = None, user=Depends(get_verified_user)):
     teams = AgentTeams.list_for_user(user.id, chat_id=chat_id)
+    # Teams still at work are read from Hermes once here, so the list shows where they are now
+    # (phase, tasks done) without opening each one. Best effort and bounded: a slow or missing
+    # Hermes leaves the last recorded state.
+    live = [t for t in teams if t.status in ("running", "starting") and t.phase not in ("completed", "stopped")]
+    if live:
+        try:
+            target = await hermes_target(request, user)
+        except TeamsError:
+            target = None
+        if target is not None:
+            async def refresh(team):
+                try:
+                    return (await asyncio.wait_for(reconcile(team, target), LIST_REFRESH_SECONDS))[0]
+                except Exception:  # noqa: BLE001 — the list must load even when Hermes does not answer
+                    return team
+            fresh = await asyncio.gather(*(refresh(t) for t in live[:LIST_REFRESH_LIMIT]))
+            by_id = {t.id: t for t in fresh}
+            teams = [by_id.get(t.id, t) for t in teams]
     return {"teams": [public_team(t, with_plan=False) for t in teams]}
 
 
@@ -230,6 +254,19 @@ async def cancel(team_id: str, user=Depends(get_verified_user)):
     if updated is None:
         raise HTTPException(status_code=409, detail="已经开始执行的协作任务请用「停止」")
     return public_team(updated)
+
+
+@router.delete("/{team_id}", dependencies=[Depends(_enabled)])
+async def delete_team(team_id: str, user=Depends(get_verified_user)):
+    """Remove a team from your list. Only when nothing runs in it; the files its members wrote
+    stay in the workspace on Hermes."""
+    team = _own(team_id, user)
+    if team.status == "planning":
+        raise HTTPException(status_code=409, detail="负责人正在制定计划，等计划出来再删除")
+    if not deletable(team):
+        raise HTTPException(status_code=409, detail="正在执行的协作任务要先停止才能删除")
+    AgentTeams.delete(team.id, user.id)
+    return {"ok": True, "id": team.id}
 
 
 async def _running_target(request: Request, team_id: str, user):

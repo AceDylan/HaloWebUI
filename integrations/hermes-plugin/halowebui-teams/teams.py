@@ -386,10 +386,10 @@ def snapshot(team_id: str, owner: Optional[str] = None) -> dict:
                 "block_reason": _block_reason(task, last_events.get(task.id)),
                 "consecutive_failures": task.consecutive_failures,
             })
-            if sub in ("failed", "blocked"):
-                from .lead import public_diagnosis
+            if sub in ("failed", "blocked", "waiting_user"):
+                from .lead import diagnosable, public_diagnosis
 
-                diagnosis = public_diagnosis(team, tasks_out[-1])
+                diagnosis = public_diagnosis(team, tasks_out[-1]) if diagnosable(tasks_out[-1]) else None
                 if diagnosis:
                     tasks_out[-1]["diagnosis"] = diagnosis
     tasks_out.sort(key=lambda t: (t.get("seq") or 0, t["id"]))
@@ -922,6 +922,14 @@ def post_message(team_id: str, task_id: str, body: str, *, author_name: str, own
         author = USER_AUTHOR_PREFIX + (redact(author_name, 40) or "用户")
         comment_id = kb().add_comment(conn, task_id, author, text)
     executor = task_executor(team, task_id, task.assignee)
+    if task.status == "blocked" and (task.block_kind or "") == "needs_input":
+        # The member stopped to ask: the answer resumes it (a new attempt reads the note).
+        try:
+            retry(team_id, task_id, owner=owner, actor=author_name)
+            return {"comment_id": comment_id, "delivery": "queued", "resumed": True,
+                    "expect": "成员停下来在等你：已带着你的回答重新开始，新的执行会读到它"}
+        except TeamError as exc:
+            logger.info("halowebui-teams: resume after the answer to %s: %s", task_id, exc.message)
     if task.status == "running":
         expect = (f"{executor} 不能在运行中接收消息：会在它这一轮结束后续跑同一会话时送达" if is_runner(executor)
                   else "成员正在执行：会在它当前这批工具调用结束后读到（约 6 秒检查一次）")

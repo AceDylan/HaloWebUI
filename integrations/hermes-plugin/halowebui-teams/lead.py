@@ -58,6 +58,14 @@ _jobs_lock = threading.Lock()
 
 NOT_STARTED = ("queued", "waiting_deps")
 FAILED = ("failed", "blocked")
+
+
+def diagnosable(task: dict) -> bool:
+    """A task that stopped on the board: failed, blocked, or blocked asking the user (Kanban
+    ``needs_input``). A runner asking while its run is still open (status running) is not: the
+    answer goes to that run."""
+    sub = task.get("sub_status")
+    return sub in FAILED or (sub == "waiting_user" and task.get("status") in ("blocked", "triage"))
 ACTIONS = ("retry", "retry_with_note", "switch_runner", "skip", "ask_user")
 ACTION_LABEL = {"retry": "原样重试", "retry_with_note": "带说明重试", "switch_runner": "换执行器重试",
                 "skip": "跳过这个任务", "ask_user": "需要你决定"}
@@ -667,7 +675,7 @@ def _notify_change(slug: str) -> None:
 
 # --- failure diagnosis -------------------------------------------------------------------------------
 
-DIAGNOSIS_SYSTEM = """你是协作团队的负责人（team-lead）。团队里一个成员的任务失败了（或受阻），你要判断原因，给出一个处理建议。
+DIAGNOSIS_SYSTEM = """你是协作团队的负责人（team-lead）。团队里一个成员的任务失败了、受阻，或者停下来问用户，你要判断原因，给出一个处理建议。成员在问问题时，先看团队目标和其他任务的结果里有没有答案：有就用 retry_with_note 替用户回答；这个任务已经没必要做了就 skip；只有用户才能回答时才 ask_user。
 
 只输出一个 JSON 对象：
 {"cause": "一两句话说清楚为什么失败（写给不看代码的人）", "action": "retry | retry_with_note | switch_runner | skip | ask_user", "note": "见下", "runner": "见下"}
@@ -716,7 +724,7 @@ def tick_board(slug: str, team: dict) -> None:
 
     snap = snapshot(team["team_id"])
     for task in snap.get("tasks") or []:
-        if task.get("sub_status") not in FAILED:
+        if not diagnosable(task):
             continue
         entry = _diagnosis_entry(team, task["id"])
         if entry and int(entry.get("attempt") or -1) == int(task.get("attempts") or 0):
@@ -818,8 +826,8 @@ def request_diagnosis(team_id: str, task_id: str, *, owner: Optional[str] = None
     task = next((t for t in snap.get("tasks") or [] if t["id"] == task_id), None)
     if task is None:
         raise TeamError(404, "task not found")
-    if task.get("sub_status") not in FAILED:
-        raise TeamError(409, "只有失败或受阻的任务需要诊断")
+    if not diagnosable(task):
+        raise TeamError(409, "只有失败、受阻或停下来等你的任务需要诊断")
     if _alive("diag:" + task_id):
         raise TeamError(409, "负责人正在诊断")
     start_diagnosis(slug, task_id, attempt=int(task.get("attempts") or 0))
@@ -841,8 +849,8 @@ def apply_diagnosis(team_id: str, task_id: str, *, owner: Optional[str] = None, 
     diagnosis = public_diagnosis(team, task)
     if not diagnosis or diagnosis.get("status") != "ready":
         raise TeamError(409, "负责人还没有给出建议")
-    if task.get("sub_status") not in FAILED:
-        raise TeamError(409, "这个任务已经不在失败状态了")
+    if not diagnosable(task):
+        raise TeamError(409, "这个任务已经不需要处理了")
     action = diagnosis["action"]
     if action == "ask_user":
         raise TeamError(409, "这一步需要你来决定：回答负责人的问题后再重试")

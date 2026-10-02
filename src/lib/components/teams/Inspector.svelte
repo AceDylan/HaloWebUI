@@ -127,8 +127,14 @@
 			: [];
 	$: canWrite =
 		!replay && !teamStopped && task && !['done', 'archived'].includes(state?.status ?? '');
+	// A member that stopped on the board to ask (Kanban block, not a runner's open question) can be
+	// started again too; a note answering it does that by itself.
 	$: canRetry =
-		!replay && !teamStopped && task && ['failed', 'blocked'].includes(state?.sub_status ?? '');
+		!replay &&
+		!teamStopped &&
+		task &&
+		(['failed', 'blocked'].includes(state?.sub_status ?? '') ||
+			(state?.sub_status === 'waiting_user' && state?.status === 'blocked'));
 	$: memberTasks = memberName ? tasks.filter((t) => t.member === memberName) : [];
 	// A note to a member goes to the task it is on now, else its next unfinished one.
 	$: memberTarget =
@@ -277,7 +283,7 @@
 	};
 
 	// The lead's suggestion for a failed task: apply it, or have the lead look again.
-	$: diagnosis = !replay && canRetry ? (task?.diagnosis ?? null) : null;
+	$: diagnosis = canRetry ? (task?.diagnosis ?? null) : null;
 	const diagnose = async (action: 'apply' | 'again') => {
 		if (!taskId || diagnosing) return;
 		diagnosing = action;
@@ -484,7 +490,9 @@
 						</p>
 					{/if}
 					{#if diagnosis.action === 'ask_user'}
-						<p class="mt-1 text-gray-500">在下面给成员写上你的答复，再点重试。</p>
+						<p class="mt-1 text-gray-500">
+							在下面给成员写上你的答复：停下来等你的任务，发出去就接着做；失败的任务写完再点重试。
+						</p>
 					{/if}
 				{/if}
 				{#if diagnosis.status !== 'thinking'}

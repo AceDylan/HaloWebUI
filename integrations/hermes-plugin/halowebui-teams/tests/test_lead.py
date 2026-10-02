@@ -345,3 +345,34 @@ def test_telegram_reply_to_the_done_notice_goes_to_the_lead_and_the_card_comes_b
     again = Query(f"ht:ca:{team_id}:{change_id}")
     asyncio.run(linked.telegram._handle_callback(again))
     assert "已经" in again.answers[0]  # a second tap is refused with the reason
+
+
+def test_a_member_that_stops_to_ask_gets_the_leads_take_and_an_answer_resumes_it(pkg, team_id, plan_dict, lead, linked):
+    first = _create(pkg, team_id, plan_dict, origin={"platform": "telegram", "chat_id": TG_USER, "user_id": TG_USER})
+    slug = pkg.common.board_slug(team_id)
+    linked.notify.tick_board(slug, pkg.common.read_team(slug))
+    t1 = first["tasks"]["T1"]
+    with pkg.common.board_conn(slug) as conn:
+        _kb().claim_task(conn, t1, claimer="w")
+        _kb().block_task(conn, t1, reason="input.txt 不存在，要补文件还是作废？", kind="needs_input")
+    lead.fake.diagnosis = {"cause": "输入文件不存在，接口说明已在目标里写清", "action": "retry_with_note",
+                           "note": "不用 input.txt，按目标里的接口清单写 api.md"}
+    lead.mod.tick_board(slug, pkg.common.read_team(slug))
+    task = _task(pkg.teams.snapshot(team_id, OWNER), "T1")
+    assert task["sub_status"] == "waiting_user" and task["diagnosis"]["action"] == "retry_with_note"
+    assert "input.txt 不存在" in lead.fake.prompts[-1][1]  # the lead read the member's question
+    linked.notify.tick_board(slug, pkg.common.read_team(slug))
+    ask = linked.sent[-1]
+    assert "问你" in ask["text"] and "负责人判断" in ask["text"] and f"cb:dx:{team_id}:{t1}" in _buttons(ask)
+
+    # the user's own answer (here, in the browser) resumes the member: a new attempt reads it
+    out = pkg.teams.post_message(team_id, t1, "作废 input.txt，按目标写", author_name="Ace", owner=OWNER)
+    assert out["resumed"] is True
+    assert _task(pkg.teams.snapshot(team_id, OWNER), "T1")["status"] == "ready"
+
+
+def test_a_runner_question_on_an_open_run_is_not_diagnosed(pkg, lead):
+    assert lead.mod.diagnosable({"sub_status": "waiting_user", "status": "running"}) is False
+    assert lead.mod.diagnosable({"sub_status": "waiting_user", "status": "blocked"}) is True
+    assert lead.mod.diagnosable({"sub_status": "failed", "status": "blocked"}) is True
+    assert lead.mod.diagnosable({"sub_status": "stopped", "status": "blocked"}) is False

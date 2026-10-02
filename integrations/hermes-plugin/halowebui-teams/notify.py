@@ -202,10 +202,29 @@ def ask_message(team: dict, task: dict) -> tuple[str, list]:
     who = f"{esc(task.get('member'))}{f'（{esc(role)}）' if role else ''}"
     text = (f"❓ <b>{esc(clip(team.get('title'), 60))}</b>\n"
             f"{who} 在任务「{esc(clip(task.get('title'), 40))}」里问你：\n\n"
-            f"{esc(clip(plain(question), 2500))}\n\n"
-            "<i>直接回复这条消息就是回答它。</i>")
+            f"{esc(clip(plain(question), 2500))}")
+    lead_line, lead_buttons = _diagnosis_lines(team, task)
+    text += lead_line + "\n\n<i>直接回复这条消息就是回答它。</i>"
+    buttons = [lead_buttons] if lead_buttons else []
     row = _open_row(team["team_id"])
-    return text, [row] if row else []
+    if row:
+        buttons.append(row)
+    return text, buttons
+
+
+def _diagnosis_lines(team: dict, task: dict) -> tuple[str, list]:
+    """The lead's take on a stopped task, for a notice: text and the 「按建议处理」 button."""
+    diagnosis = task.get("diagnosis") or {}
+    if diagnosis.get("status") != "ready":
+        return "", []
+    text = f"\n\n🩺 <b>负责人判断</b>：{esc(clip(diagnosis.get('cause'), 400))}"
+    action = diagnosis.get("action")
+    if action == "ask_user":
+        return text + f"\n❓ 需要你决定：{esc(clip(diagnosis.get('note'), 600))}", []
+    detail = {"retry_with_note": f"带说明重试——「{esc(clip(diagnosis.get('note'), 400))}」",
+              "switch_runner": f"换成 {esc(diagnosis.get('runner'))} 重试",
+              "skip": "跳过这个任务，后面的任务照常开始", "retry": "原样重试"}.get(action, "")
+    return text + f"\n💡 建议：{detail}", [("✅ 按建议处理", f"cb:dx:{team['team_id']}:{task['id']}")]
 
 
 def fail_message(team: dict, task: dict) -> tuple[str, list]:
@@ -213,20 +232,8 @@ def fail_message(team: dict, task: dict) -> tuple[str, list]:
     text = (f"⚠️ <b>{esc(clip(team.get('title'), 60))}</b>\n"
             f"{esc(task.get('member'))} 的任务「{esc(clip(task.get('title'), 40))}」{word}：\n"
             f"{esc(clip(plain(task.get('block_reason') or '原因未知'), 800))}")
-    diagnosis = task.get("diagnosis") or {}
-    first: list = []
-    if diagnosis.get("status") == "ready":
-        text += f"\n\n🩺 <b>负责人判断</b>：{esc(clip(diagnosis.get('cause'), 400))}"
-        action = diagnosis.get("action")
-        if action == "ask_user":
-            text += f"\n❓ 需要你决定：{esc(clip(diagnosis.get('note'), 600))}"
-        else:
-            detail = {"retry_with_note": f"带说明重试——「{esc(clip(diagnosis.get('note'), 400))}」",
-                      "switch_runner": f"换成 {esc(diagnosis.get('runner'))} 重试",
-                      "skip": "跳过这个任务，后面的任务照常开始", "retry": "原样重试"}.get(action, "")
-            text += f"\n💡 建议：{detail}"
-            first.append(("✅ 按建议处理", f"cb:dx:{team['team_id']}:{task['id']}"))
-    text += "\n\n<i>回复这条消息写补充说明，会带着说明重试。</i>"
+    lead_line, first = _diagnosis_lines(team, task)
+    text += lead_line + "\n\n<i>回复这条消息写补充说明，会带着说明重试。</i>"
     buttons = [[*first, ("🔁 重试", f"cb:rt:{team['team_id']}:{task['id']}")]]
     row = _open_row(team["team_id"])
     if row:
@@ -336,15 +343,18 @@ def pending(team: dict, snap: dict) -> list[tuple[str, str, Optional[dict]]]:
     for task in snap.get("tasks") or []:
         sub = task.get("sub_status")
         attempt = task.get("attempts") or 0
+        if sub not in ("waiting_user", "failed", "blocked"):
+            continue
+        # Held back while the lead is still working out what went wrong (a bounded wait).
+        diagnosis = ((team.get("diagnoses") or {}).get(task["id"])) or {}
+        thinking = (diagnosis.get("status") == "thinking" and int(diagnosis.get("attempt") or -1) == attempt
+                    and now() - int(diagnosis.get("started_at") or 0) < DIAGNOSIS_WAIT)
+        if thinking:
+            continue
         if sub == "waiting_user":
             out.append((f"ask:{task['id']}:{attempt}", "ask", task))
-        elif sub in ("failed", "blocked"):
-            # Held back while the lead is still working out what went wrong (a bounded wait).
-            diagnosis = ((team.get("diagnoses") or {}).get(task["id"])) or {}
-            thinking = (diagnosis.get("status") == "thinking" and int(diagnosis.get("attempt") or -1) == attempt
-                        and now() - int(diagnosis.get("started_at") or 0) < DIAGNOSIS_WAIT)
-            if not thinking:
-                out.append((f"fail:{task['id']}:{attempt}", "fail", task))
+        else:
+            out.append((f"fail:{task['id']}:{attempt}", "fail", task))
     if (snap.get("team") or {}).get("phase") == "completed":
         entry = team.get("conclusion") or {}
         waited = now() - int(team.get("completed_at") or now())

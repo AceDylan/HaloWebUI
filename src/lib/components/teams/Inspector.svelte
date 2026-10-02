@@ -22,13 +22,17 @@
 		KIND_LABEL,
 		memberRunner,
 		openParents,
+		plainPreview,
 		prepareReport,
+		RUNNER_EVENT_LABEL,
 		RUNNER_PHASE_LABEL,
 		runnerLabel,
 		SOURCE_LABEL,
 		taskRunner,
+		toneOf,
 		type TaskState
 	} from './model';
+	import { TONE_DOT } from './tones';
 
 	const OUTCOME_LABEL: Record<string, string> = {
 		completed: '完成',
@@ -130,6 +134,58 @@
 	$: resultMd = detail?.result
 		? prepareReport(detail.result, { workspace, fileUrl: (path) => teamFilePath(teamId, path) })
 		: '';
+
+	/**
+	 * Dot colour, headline and headline colour of one entry on a task's record. Status and attempt
+	 * events are one short sentence, so that sentence is the headline and there is no body.
+	 */
+	const eventMark = (
+		ev: TeamEvent
+	): { dot: string; text: string; label: string; body: boolean } => {
+		if (ev.type === 'message' && ev.who === 'user')
+			return {
+				dot: 'bg-violet-500',
+				text: 'text-violet-700 dark:text-violet-300',
+				label: `${ev.author ?? '你'} → ${ev.member ?? '成员'}`,
+				body: true
+			};
+		if (ev.type === 'message')
+			return {
+				dot: 'bg-sky-500',
+				text: 'text-gray-800 dark:text-gray-100',
+				label: `${ev.member ?? ev.author ?? '成员'} 留言`,
+				body: true
+			};
+		if (ev.type === 'handoff')
+			return {
+				dot: 'bg-emerald-500',
+				text: 'text-emerald-700 dark:text-emerald-300',
+				label: ev.data?.to?.length
+					? `完成并交接 → ${ev.data.to.map((t) => t.member).join('、')}`
+					: '完成',
+				body: true
+			};
+		if (ev.type === 'runner')
+			return {
+				dot: 'bg-orange-500',
+				text: 'text-orange-700 dark:text-orange-300',
+				label: `${ev.data?.runner ?? 'runner'} ${RUNNER_EVENT_LABEL[ev.data?.phase] ?? ev.data?.phase ?? ''}`,
+				body: true
+			};
+		if (ev.type === 'subagent')
+			return {
+				dot: 'bg-gray-300 dark:bg-gray-600',
+				text: 'text-gray-500',
+				label: ev.data?.phase === 'start' ? '派出子代理' : '子代理结束',
+				body: true
+			};
+		return {
+			dot: ev.sub_status ? TONE_DOT[toneOf(ev.sub_status)] : 'bg-gray-400 dark:bg-gray-500',
+			text: 'text-gray-700 dark:text-gray-200',
+			label: ev.text || (ev.type === 'delivery' ? '说明送达' : '状态变化'),
+			body: false
+		};
+	};
 
 	const load = async (id: string) => {
 		loading = true;
@@ -468,17 +524,32 @@
 		{/if}
 
 		{#if taskEvents.length}
-			<div>
+			<div data-task-timeline>
 				<div class="tm-eyebrow">这个任务的记录</div>
-				<ol class="mt-1 space-y-0.5 text-xs">
+				<ol class="trail relative mt-2 text-xs" aria-label="这个任务的记录，最新的在上面">
 					{#each taskEvents as ev (ev.id)}
-						<li class="flex gap-1.5 text-gray-600 dark:text-gray-400">
-							<time class="font-mono text-gray-400 shrink-0">{formatClock(ev.ts)}</time>
-							<span class="break-words min-w-0"
-								>{ev.type === 'message'
-									? `${ev.who === 'user' ? (ev.author ?? '你') : ev.member}：`
-									: ''}{ev.text ?? ''}</span
-							>
+						{@const mark = eventMark(ev)}
+						<li class="relative pb-2.5 pl-5 last:pb-0">
+							<span
+								class="absolute left-[3px] top-[5px] size-[7px] rounded-full ring-[3px] ring-[hsl(var(--tm-surface))] {mark.dot}"
+								aria-hidden="true"
+							/>
+							<div class="flex min-w-0 items-center gap-1.5">
+								<span class="min-w-0 truncate font-medium {mark.text}">{mark.label}</span>
+								{#if ev.sub_status && (ev.type === 'status' || ev.type === 'attempt')}
+									<StatusChip status={ev.sub_status} />
+								{/if}
+								<time class="tm-num ml-auto shrink-0 text-[11px] text-gray-400"
+									>{formatClock(ev.ts)}</time
+								>
+							</div>
+							{#if ev.text && mark.body}
+								<div
+									class="mt-0.5 line-clamp-3 whitespace-pre-wrap break-words text-gray-600 dark:text-gray-300"
+								>
+									{plainPreview(ev.text)}
+								</div>
+							{/if}
 						</li>
 					{/each}
 				</ol>
@@ -600,12 +671,29 @@
 			{#if memberTools.length === 0}
 				<div class="mt-1 text-xs text-gray-400">还没有工具记录</div>
 			{:else}
-				<ol class="mt-1 space-y-0.5 font-mono text-[11px] text-gray-600 dark:text-gray-400">
+				<ol class="trail relative mt-2 text-[11px]">
 					{#each memberTools as ev (ev.id)}
-						<li class="break-words">
-							<span class="text-gray-400">{formatClock(ev.ts)}</span>
-							{ev.data?.name ?? (ev.data?.phase === 'start' ? '子代理开始' : '子代理结束')}
-							{ev.text ?? ''}
+						<li class="relative pb-1.5 pl-5 last:pb-0">
+							<span
+								class="absolute left-[4px] top-[5px] size-[5px] rounded-full bg-gray-300 ring-[3px] ring-[hsl(var(--tm-surface))] dark:bg-gray-600"
+								aria-hidden="true"
+							/>
+							<div class="flex min-w-0 items-baseline gap-1.5">
+								<span
+									class="min-w-0 truncate font-mono font-medium text-gray-700 dark:text-gray-300"
+									>{ev.data?.name ??
+										(ev.data?.phase === 'start' ? '子代理开始' : '子代理结束')}</span
+								>
+								{#if ev.key}<span class="shrink-0 font-mono text-gray-400">#{ev.key}</span>{/if}
+								<time class="tm-num ml-auto shrink-0 text-gray-400">{formatClock(ev.ts)}</time>
+							</div>
+							{#if ev.text}
+								<div
+									class="mt-0.5 line-clamp-2 break-words font-mono text-gray-500 dark:text-gray-400"
+								>
+									{ev.text}
+								</div>
+							{/if}
 						</li>
 					{/each}
 				</ol>
@@ -621,6 +709,15 @@
 		transition:
 			border-color 0.15s ease,
 			box-shadow 0.15s ease;
+	}
+	.trail::before {
+		content: '';
+		position: absolute;
+		left: 6px;
+		top: 8px;
+		bottom: 6px;
+		width: 1px;
+		background: linear-gradient(hsl(var(--tm-line-strong)), hsl(var(--tm-line)) 85%, transparent);
 	}
 	.note:focus {
 		border-color: hsl(var(--tm-accent) / 0.5);

@@ -145,8 +145,9 @@ def call(method: str, path: str, owner: str, body: Any = None, *, timeout: float
         raise HaloError(502, "HaloWebUI 返回的不是 JSON") from None
 
 
-def create(owner: str, goal: str, origin: dict) -> dict:
-    return call("POST", "/teams", owner, {"goal": goal, "origin": origin}, timeout=60)
+def create(owner: str, goal: str, origin: dict, auto_start: bool = False) -> dict:
+    body = {"goal": goal, "origin": origin, **({"auto_start": True} if auto_start else {})}
+    return call("POST", "/teams", owner, body, timeout=60)
 
 
 def get(owner: str, team_id: str) -> dict:

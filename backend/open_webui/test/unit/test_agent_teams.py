@@ -511,3 +511,42 @@ def test_hermes_sync_reads_the_live_phase_after_a_telegram_change(hermes, monkey
     out = bare.post(f"/api/v1/teams/hermes/teams/{team_id}/sync", headers={"X-Hermes-Key": "k", "X-Halo-Owner": "u1"})
     assert out.status_code == 200 and out.json()["phase"] == "running"
     assert AgentTeams.get(team_id, "u1").finished_at is None
+
+
+def test_auto_start_skips_approval_only_when_every_member_can_run(hermes, monkeypatch):
+    client = _client("u1")
+    created = client.post("/api/v1/teams/", json={"goal": "直接开始的目标", "auto_start": True}).json()
+    assert created["auto_start"] is True
+    team = AgentTeams.get(created["id"], "u1")
+    target = teams_utils.HermesTarget("http://hermes", {}, "u1")
+    runnable = {**PLAN, "members": [{**m, "runner": "hermes"} for m in PLAN["members"]]}
+    hermes.responses[("POST", "/plan")] = {"ok": True, "plan": runnable}
+    hermes.responses[("POST", "")] = {"board": "halo-auto", "created": True, "tasks": {}}
+    asyncio.run(teams_utils._plan_job(team, target, "", None))
+    row = AgentTeams.get(team.id, "u1")
+    assert row.status == "running" and row.board == "halo-auto" and row.approved_at
+    assert any(c[1] == "POST" and c[2] == "" and c[3]["team_id"] == team.id for c in hermes.calls)
+
+    # a member with no runner available: the plan waits for the user, as without auto-start
+    team2 = AgentTeams.get(client.post("/api/v1/teams/", json={"goal": "目标二", "auto_start": True}).json()["id"], "u1")
+    down = {**PLAN, "members": [{**PLAN["members"][0], "runner": None}, {**PLAN["members"][1], "runner": "hermes"}]}
+    hermes.responses[("POST", "/plan")] = {"ok": True, "plan": down}
+    asyncio.run(teams_utils._plan_job(team2, target, "", None))
+    assert AgentTeams.get(team2.id, "u1").status == "plan_ready"
+
+    # without auto_start nothing starts on its own
+    team3 = AgentTeams.get(client.post("/api/v1/teams/", json={"goal": "目标三"}).json()["id"], "u1")
+    hermes.responses[("POST", "/plan")] = {"ok": True, "plan": runnable}
+    asyncio.run(teams_utils._plan_job(team3, target, "", None))
+    assert AgentTeams.get(team3.id, "u1").status == "plan_ready"
+
+    # a start that fails is recorded, not a fake running state; Telegram gets the outcome
+    team4 = AgentTeams.get(client.post("/api/v1/teams/", json={"goal": "目标四", "auto_start": True}).json()["id"], "u1")
+    AgentTeams.update(team4.id, "u1", meta={**(team4.meta or {}), "origin": {"platform": "telegram", "chat_id": "5"}})
+    team4 = AgentTeams.get(team4.id, "u1")
+    hermes.fail[("POST", "")] = (502, "Hermes 不可用")
+    asyncio.run(teams_utils._plan_job(team4, target, "", None))
+    row4 = AgentTeams.get(team4.id, "u1")
+    assert row4.status == "start_failed" and "启动失败" in row4.error
+    notice = [c for c in hermes.calls if c[2] == "/notify"][-1]
+    assert notice[3]["event"] == "start_failed"

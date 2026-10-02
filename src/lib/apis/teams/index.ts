@@ -114,6 +114,8 @@ export type Team = {
 	roster?: { name: string; role: string }[];
 	/** Started outside the browser ("telegram": with /team in Hermes' Telegram chat). */
 	origin?: string | null;
+	/** 「直接开始」: the plan was (or will be) approved as soon as it was ready. */
+	auto_start?: boolean;
 	/** The git repository the plan works in (its own branch), when it is a project team. */
 	project?: { name: string; path: string } | null;
 };
@@ -466,13 +468,15 @@ export const createTeam = (
 	goal: string,
 	chatId?: string | null,
 	leadModel?: string | null,
-	project?: string | null
+	project?: string | null,
+	autoStart = false
 ) =>
 	request<Team>(token, 'POST', '/', {
 		goal,
 		chat_id: chatId || null,
 		lead_model: leadModel || null,
-		project: project || null
+		project: project || null,
+		auto_start: autoStart
 	});
 
 export const getTeam = (token: string, teamId: string) =>

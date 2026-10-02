@@ -126,13 +126,17 @@ def _open_row(team_id: str, label: str = "🌐 在网页看", suffix: str = "") 
     return [(label, "url:" + url)] if url else []
 
 
-def plan_message(team: dict) -> tuple[str, list]:
-    """The plan card: who does what, in which order; approve / cancel."""
+def plan_message(team: dict, *, started: bool = False) -> tuple[str, list]:
+    """The plan card: who does what, in which order; approve / cancel. ``started``: the plan was
+    approved on its own (「直接开始」) — the same card as a notice, without the buttons."""
     plan = team.get("plan") or {}
     team_id = team["id"]
     members = [m for m in plan.get("members") or [] if isinstance(m, dict)]
     tasks = [t for t in plan.get("tasks") or [] if isinstance(t, dict)]
-    lines = [f"🧭 <b>{esc(clip(team.get('title') or plan.get('title'), 60))}</b> · 计划好了"]
+    head = "已直接开始" if started else "计划好了"
+    lines = [f"{'🚀' if started else '🧭'} <b>{esc(clip(team.get('title') or plan.get('title'), 60))}</b> · {head}"]
+    if team.get("status") == "start_failed" and team.get("error"):
+        lines.append(f"⚠️ 没能直接开始：{esc(clip(team['error'], 300))}。看过计划后可以手动批准。")
     if plan.get("summary"):
         lines.append(esc(clip(plan["summary"], 300)))
     project = plan.get("project") if isinstance(plan.get("project"), dict) else None
@@ -160,6 +164,10 @@ def plan_message(team: dict) -> tuple[str, list]:
         lines.append("")
         lines.append(f"负责人模型：{esc(lead)}")
     lines.append("")
+    if started:
+        lines.append("<i>成员已经开始干活，完成或需要你时我会告诉你；回复完成通知可以对负责人说要改什么。</i>")
+        row = _open_row(team_id, "🌐 看工作台")
+        return clip("\n".join(lines), TG_LIMIT), [row] if row else []
     lines.append("<i>回复这条消息写修改意见，负责人会按意见重新规划。</i>")
     buttons = [[("✅ 批准并开始", f"cb:ap:{team_id}"), ("✖ 取消", f"cb:cx:{team_id}")]]
     row = _open_row(team_id)
@@ -427,9 +435,12 @@ def plan_notice(owner: str, event: str, team: dict, origin: dict) -> dict:
         return {"sent": False, "reason": "Telegram is not connected"}
     if not isinstance(team, dict) or not team.get("id"):
         return {"sent": False, "reason": "no team"}
-    if event == "plan_ready":
+    if event in ("plan_ready", "start_failed"):
         text, buttons = plan_message(team)
         kind = "plan"
+    elif event == "running":  # 「直接开始」: approved on its own
+        text, buttons = plan_message(team, started=True)
+        kind = "started"
     elif event == "plan_failed":
         text, buttons = plan_failed_message(team)
         kind = "plan_failed"

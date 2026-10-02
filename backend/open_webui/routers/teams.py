@@ -30,7 +30,7 @@ from open_webui.utils.agent_teams import (
     public_team,
     reconcile,
     start_planning,
-    team_origin,
+    start_team,
 )
 from open_webui.utils.auth import get_verified_user
 
@@ -62,6 +62,8 @@ class CreateTeamForm(BaseModel):
     # Where the team works: a git repository on the Hermes host (its path), "none" = a fresh
     # directory, empty = the project the goal names, if any (Hermes decides).
     project: Optional[str] = Field(default=None, max_length=500)
+    # 「计划好直接开始」: approve the plan as soon as it is ready (when every member can run now).
+    auto_start: bool = False
 
 
 class ReplanForm(BaseModel):
@@ -163,12 +165,15 @@ async def create_team(request: Request, form: CreateTeamForm, user=Depends(get_v
         target = await hermes_target(request, user)
     except TeamsError as exc:
         _raise(exc)
-    return public_team(_start(user, goal, target, chat_id=chat_id, lead_model=form.lead_model, project=form.project))
+    return public_team(_start(user, goal, target, chat_id=chat_id, lead_model=form.lead_model, project=form.project,
+                              auto_start=form.auto_start))
 
 
 def _start(user, goal: str, target, *, chat_id: Optional[str] = None, lead_model: Optional[str] = None,
-           origin: Optional[dict] = None, project: Optional[str] = None):
+           origin: Optional[dict] = None, project: Optional[str] = None, auto_start: bool = False):
     meta: dict = {}
+    if auto_start:
+        meta["auto_start"] = True
     if (lead_model or "").strip():
         meta["lead_model"] = lead_model.strip()
     if (project or "").strip():
@@ -267,24 +272,10 @@ async def approve(request: Request, team_id: str, user=Depends(get_verified_user
 
 
 async def _approve(team, user, target):
-    if not team.plan:
-        raise HTTPException(status_code=409, detail="还没有可批准的计划")
-    starting = AgentTeams.update(team.id, user.id, expect_status=("plan_ready", "start_failed"),
-                                 status="starting", error=None)
-    if starting is None:
-        raise HTTPException(status_code=409, detail="这个计划已经批准过或状态已变化")
     try:
-        result = await hermes_call(target, "POST", "", json_body={
-            "team_id": team.id, "plan": team.plan, "goal": team.goal, "title": team.title, "chat_id": team.chat_id or "",
-            "origin": team_origin(team),
-        }, timeout=60)
+        return await start_team(team, target)
     except TeamsError as exc:
-        AgentTeams.update(team.id, user.id, expect_status=("starting",), status="start_failed",
-                          error=f"启动失败：{exc.detail}")
-        raise HTTPException(status_code=exc.status_code if exc.status_code < 500 else 502, detail=f"启动失败：{exc.detail}")
-    updated = AgentTeams.update(team.id, user.id, expect_status=("starting",), status="running", phase="running",
-                                board=(result or {}).get("board"), approved_at=int(time.time()), error=None)
-    return updated or team
+        _raise(exc)
 
 
 @router.post("/{team_id}/cancel", dependencies=[Depends(_enabled)])
@@ -573,6 +564,7 @@ _hermes_auth_cache: dict = {}
 class HermesCreateForm(BaseModel):
     goal: str = Field(min_length=1, max_length=GOAL_MAX_CHARS)
     origin: dict = Field(default_factory=dict)
+    auto_start: bool = False
 
 
 async def _hermes_caller(request: Request):
@@ -622,7 +614,7 @@ async def hermes_create(request: Request, form: HermesCreateForm, caller=Depends
     goal = form.goal.strip()
     if not goal:
         raise HTTPException(status_code=400, detail="请写下要协作完成的目标")
-    return public_team(_start(user, goal, target, origin=_clean_origin(form.origin)))
+    return public_team(_start(user, goal, target, origin=_clean_origin(form.origin), auto_start=form.auto_start))
 
 
 @router.get("/hermes/teams/{team_id}")

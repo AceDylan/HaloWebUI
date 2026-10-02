@@ -145,6 +145,12 @@ async def _plan_job(team: AgentTeamModel, target: HermesTarget, feedback: str, p
             plan = body["plan"]
             updated = AgentTeams.update(team.id, team.user_id, expect_status=("planning",), status="plan_ready",
                                         plan=plan, error=None, title=(plan.get("title") or team.title)[:60])
+            if updated is not None and (team.meta or {}).get("auto_start") and auto_startable(plan):
+                try:  # 「计划好直接开始」: no approval step
+                    updated = await start_team(updated, target)
+                except TeamsError as exc:
+                    log.info("teams: auto-start of %s did not go through (%s)", team.id, exc.detail)
+                    updated = AgentTeams.get(team.id, team.user_id) or updated
         else:
             error = (body or {}).get("error") if isinstance(body, dict) else None
             updated = AgentTeams.update(team.id, team.user_id, expect_status=("planning",), status="plan_failed",
@@ -169,6 +175,36 @@ async def _tell_origin(team: AgentTeamModel, target: HermesTarget) -> None:
                           timeout=CALL_TIMEOUT_SECONDS)
     except TeamsError as exc:
         log.info("teams: could not hand the plan of %s to Hermes for its chat (%s)", team.id, exc.detail)
+
+
+def auto_startable(plan: dict) -> bool:
+    """A plan starts without approval only when every member has a runner that can take it now
+    (otherwise the user should see why first)."""
+    members = [m for m in plan.get("members") or [] if isinstance(m, dict)]
+    return bool(members) and all(m.get("runner") for m in members)
+
+
+async def start_team(team: AgentTeamModel, target: HermesTarget) -> AgentTeamModel:
+    """Hand the plan to Hermes: the board and its tasks are created and the members start.
+    The approve button, Telegram's 批准 and 「计划好直接开始」 all go through here."""
+    if not team.plan:
+        raise TeamsError(409, "还没有可批准的计划")
+    starting = AgentTeams.update(team.id, team.user_id, expect_status=("plan_ready", "start_failed"),
+                                 status="starting", error=None)
+    if starting is None:
+        raise TeamsError(409, "这个计划已经批准过或状态已变化")
+    try:
+        result = await hermes_call(target, "POST", "", json_body={
+            "team_id": team.id, "plan": team.plan, "goal": team.goal, "title": team.title, "chat_id": team.chat_id or "",
+            "origin": team_origin(team),
+        }, timeout=60)
+    except TeamsError as exc:
+        AgentTeams.update(team.id, team.user_id, expect_status=("starting",), status="start_failed",
+                          error=f"启动失败：{exc.detail}")
+        raise TeamsError(exc.status_code if exc.status_code < 500 else 502, f"启动失败：{exc.detail}")
+    updated = AgentTeams.update(team.id, team.user_id, expect_status=("starting",), status="running", phase="running",
+                                board=(result or {}).get("board"), approved_at=int(time.time()), error=None)
+    return updated or team
 
 
 def start_planning(team: AgentTeamModel, target: HermesTarget, feedback: str = "", previous: Optional[dict] = None) -> None:
@@ -255,6 +291,7 @@ def public_team(team: AgentTeamModel, *, with_plan: bool = True) -> dict:
     data.pop("user_id", None)
     meta = data.pop("meta", None) or {}
     data["lead_model"] = meta.get("lead_model")
+    data["auto_start"] = bool(meta.get("auto_start"))
     plan = data.get("plan") or {}
     data["member_count"] = len(plan.get("members") or [])
     data["task_count"] = len(plan.get("tasks") or [])

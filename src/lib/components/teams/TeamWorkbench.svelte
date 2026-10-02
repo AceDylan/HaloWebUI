@@ -577,7 +577,9 @@
 							</div>
 							<p class="mt-1 text-xs leading-relaxed text-gray-500 dark:text-gray-400">
 								理解目标 → 从助手模板里挑选成员 → 拆分带依赖的任务 → 为每位成员匹配执行来源。通常
-								10–60 秒；计划出来后要你批准才会开始执行。
+								10–60 秒；{team.auto_start
+									? '你选了「直接开始」：计划出来就开始执行（有成员没有可用的执行来源时仍会等你批准）。'
+									: '计划出来后要你批准才会开始执行。'}
 							</p>
 							<div class="mt-4 grid gap-2 sm:grid-cols-3" aria-hidden="true">
 								{#each [0, 1, 2] as i}

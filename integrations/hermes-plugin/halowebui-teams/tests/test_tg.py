@@ -192,8 +192,8 @@ def _run(coro_fn):
 
 def test_team_command_starts_a_team_with_its_origin(linked, monkeypatch):
     calls = []
-    monkeypatch.setattr(linked.link, "create", lambda owner, goal, origin: calls.append((owner, goal, origin)) or
-                        {"id": "11111111-2222-3333-4444-555555555555", "title": goal})
+    monkeypatch.setattr(linked.link, "create", lambda owner, goal, origin, auto_start=False:
+                        calls.append((owner, goal, origin)) or {"id": "11111111-2222-3333-4444-555555555555", "title": goal})
     result = _run(lambda: linked.telegram.on_pre_gateway_dispatch(event=_event("/team 研究下雨天山上的云")))
     assert result == {"action": "skip", "reason": "halo team command"}
     assert calls == [(OWNER, "研究下雨天山上的云", {"platform": "telegram", "chat_id": TG_USER, "user_id": TG_USER})]
@@ -302,3 +302,28 @@ def test_halowebui_client_sends_key_and_owner_and_reads_errors(linked, monkeypat
         server.shutdown()
     assert seen[0][:3] == ("/api/v1/teams/hermes/teams", "k-test", OWNER)
     assert seen[0][3] == {"goal": "目标", "origin": {"platform": "telegram"}}
+
+
+def test_team_command_can_start_without_approval(linked, monkeypatch):
+    calls = []
+    monkeypatch.setattr(linked.link, "create", lambda owner, goal, origin, auto_start=False:
+                        calls.append((goal, auto_start)) or {"id": "11111111-2222-3333-4444-555555555555", "title": goal})
+    for text in ("/team 直接 写一首诗", "/team ！写一首诗", "/team 自动：写一首诗", "/team 直接对比两个方案"):
+        _run(lambda: linked.telegram.on_pre_gateway_dispatch(event=_event(text)))
+    assert calls == [("写一首诗", True), ("写一首诗", True), ("写一首诗", True), ("直接对比两个方案", False)]
+    assert "直接开始" in linked.sent[0]["text"] and "批准后才会开始" in linked.sent[-1]["text"]
+
+
+def test_auto_started_plan_is_a_notice_and_a_failed_start_is_a_plan_card(linked):
+    origin = {"platform": "telegram", "chat_id": TG_USER, "user_id": TG_USER}
+    team = {"id": "11111111-2222-3333-4444-555555555555", "title": "写诗", "status": "running",
+            "plan": {"members": [{"name": "poet", "role": "诗人", "runner": "hermes"}],
+                     "tasks": [{"key": "T1", "title": "写诗", "member": "poet", "depends_on": []}]}}
+    assert linked.notify.plan_notice(OWNER, "running", team, origin)["sent"]
+    started = linked.sent[-1]
+    assert "已直接开始" in started["text"] and not any(spec.startswith("cb:") for spec in _buttons(started))
+    assert linked.telegram.lookup(TG_USER, 1000 + len(linked.sent))["kind"] == "started"
+    failed = {**team, "status": "start_failed", "error": "启动失败：Hermes 不可用"}
+    assert linked.notify.plan_notice(OWNER, "start_failed", failed, origin)["sent"]
+    card = linked.sent[-1]
+    assert "没能直接开始" in card["text"] and f"cb:ap:{team['id']}" in _buttons(card)

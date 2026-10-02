@@ -291,7 +291,9 @@ async def _say(source: Any, text: str, buttons: Optional[list] = None, event: An
 
 USAGE = ("<b>协作台</b>\n"
          "/team 目标 —— 交给一个团队：负责人先做计划发给你，批准后成员分工执行，完成后把结论发回来。\n"
-         "/team —— 最近的协作任务。")
+         "/team 直接 目标 —— 计划好就直接开始，不用批准。\n"
+         "/team —— 最近的协作任务。\n"
+         "回复完成通知 —— 对负责人说还要补什么、改什么。")
 
 
 async def _team_command(source: Any, owner: str, args: str, event: Any) -> None:
@@ -301,15 +303,36 @@ async def _team_command(source: Any, owner: str, args: str, event: Any) -> None:
     if args in ("help", "帮助", "?", "？"):
         await _say(source, USAGE, None, event)
         return
+    goal, auto_start = split_auto_start(args)
+    if not goal:
+        await _say(source, USAGE, None, event)
+        return
     try:
-        team = await asyncio.to_thread(link.create, owner, args, _origin(source))
+        team = await asyncio.to_thread(link.create, owner, goal, _origin(source), auto_start)
     except link.HaloError as exc:
         await _say(source, f"⚠️ 没能发起协作：{esc(exc.message)}", None, event)
         return
     url = link.team_url(team["id"])
-    await _say(source, (f"🧭 已交给负责人做计划：<b>{esc(clip(team.get('title'), 60))}</b>\n"
-                        "计划好了发到这里（一般 1 分钟内），你批准后才会开始。"),
+    after = ("计划好就直接开始（不用批准），计划发到这里给你过目。" if auto_start
+             else "计划好了发到这里（一般 1 分钟内），你批准后才会开始。")
+    await _say(source, f"🧭 已交给负责人做计划：<b>{esc(clip(team.get('title'), 60))}</b>\n{after}",
                [[("🌐 在网页看", "url:" + url)]] if url else None, event)
+
+
+AUTO_START_WORDS = ("直接开始", "直接", "自动开始", "自动")
+AUTO_START_SEPARATORS = " ：:，,\u3000"
+
+
+def split_auto_start(args: str) -> tuple[str, bool]:
+    """``/team 直接 <目标>`` (also ``自动 …`` or ``! …``): start as soon as the plan is ready. A word
+    counts only with a separator after it, so a goal that merely begins with 「直接」 is a goal."""
+    text = (args or "").strip()
+    if text[:1] in ("!", "！"):
+        return text[1:].strip(), True
+    for word in AUTO_START_WORDS:
+        if text.startswith(word) and text[len(word):len(word) + 1] in tuple(AUTO_START_SEPARATORS):
+            return text[len(word):].strip(AUTO_START_SEPARATORS), True
+    return text, False
 
 
 STATUS_LINE = {

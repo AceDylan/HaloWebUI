@@ -114,10 +114,14 @@ async def hermes_file(target: HermesTarget, path: str, *, timeout: int = 60) -> 
                     raise TeamsError(resp.status if resp.status in (400, 404, 409) else 502, _message(body, resp.status))
                 if (resp.content_length or 0) > FILE_MAX_BYTES:
                     raise TeamsError(413, "文件太大")
-                data = await resp.content.read(FILE_MAX_BYTES + 1)
-                if len(data) > FILE_MAX_BYTES:
-                    raise TeamsError(413, "文件太大")
-                return data, dict(resp.headers)
+                # The whole body: StreamReader.read(n) returns only what has arrived so far (the first
+                # chunk of a picture — a megabyte PNG came through as its first 14 KB, a broken image).
+                data = bytearray()
+                async for chunk in resp.content.iter_chunked(1 << 16):
+                    data.extend(chunk)
+                    if len(data) > FILE_MAX_BYTES:
+                        raise TeamsError(413, "文件太大")
+                return bytes(data), dict(resp.headers)
     except TeamsError:
         raise
     except asyncio.TimeoutError as exc:

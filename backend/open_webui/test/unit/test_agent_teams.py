@@ -891,3 +891,36 @@ def test_the_result_can_be_drawn_in_one_of_the_users_image_templates(hermes):
     client.post(f"/api/v1/teams/{team_id}/conclusion/illustrate", json={})
     assert [c for c in hermes.calls if c[2] == f"/{team_id}/conclusion/illustrate"][-1][3] == {}
     assert client.post(f"/api/v1/teams/{team_id}/conclusion/illustrate", json={"template_id": "theirs"}).status_code == 404
+
+
+def test_a_big_workspace_file_comes_through_whole():
+    """A conclusion's picture (megabytes) used to arrive as its first chunk only: a broken image."""
+    from aiohttp import web
+
+    body = bytes(range(256)) * (3 * 4096)  # 3 MB
+
+    async def serve_file(request):
+        resp = web.StreamResponse(headers={"Content-Type": "image/png"})
+        await resp.prepare(request)
+        for i in range(0, len(body), 50_000):  # in pieces, like a real network
+            await resp.write(body[i:i + 50_000])
+            await asyncio.sleep(0)
+        await resp.write_eof()
+        return resp
+
+    async def run():
+        app = web.Application()
+        app.router.add_get("/v1/halo-teams/team-1/files/images/big.png", serve_file)
+        runner = web.AppRunner(app)
+        await runner.setup()
+        site = web.TCPSite(runner, "127.0.0.1", 0)
+        await site.start()
+        port = site._server.sockets[0].getsockname()[1]
+        try:
+            target = teams_utils.HermesTarget(f"http://127.0.0.1:{port}", {}, "u1")
+            return await teams_utils.hermes_file(target, "/team-1/files/images/big.png")
+        finally:
+            await runner.cleanup()
+
+    data, headers = asyncio.run(run())
+    assert len(data) == len(body) and data == body and headers["Content-Type"] == "image/png"

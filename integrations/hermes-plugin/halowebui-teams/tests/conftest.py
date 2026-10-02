@@ -19,6 +19,7 @@ os.environ["HERMES_HOME"] = os.path.join(_TMP, "home")
 os.environ["HERMES_HALO_TEAMS_NO_NUDGE"] = "1"
 os.environ["HALO_TEAMS_BRIDGE"] = "0"
 os.environ["HALO_TEAMS_WORKSPACE_ROOT"] = os.path.join(_TMP, "workspaces")
+os.environ["HALO_TEAMS_RUNS_HOME"] = _TMP  # <runner>-runs for every runner member kind
 os.environ["HALO_TEAMS_RECLAUDE_RUNS_ROOT"] = os.path.join(_TMP, "reclaude-runs")
 os.environ["HALO_TEAMS_TASK_DIR"] = os.path.join(_TMP, "tasks")
 for key in [k for k in os.environ if k.startswith("HERMES_KANBAN_") and k != "HERMES_KANBAN_HOME"]:

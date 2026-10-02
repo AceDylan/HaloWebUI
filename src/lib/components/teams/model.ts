@@ -6,7 +6,7 @@
  * stream up to that point (each event carries the task status after it, computed by Hermes).
  * The live view additionally trusts Hermes' authoritative snapshot for the current state.
  */
-import type { LiveTask, TeamEvent } from '$lib/apis/teams';
+import type { LiveTask, TeamEvent, TeamExecutor } from '$lib/apis/teams';
 
 export type TaskState = { status: string; sub_status: string };
 
@@ -322,4 +322,20 @@ export const formatDuration = (seconds: number) => {
 		: `${String(m).padStart(2, '0')}:${String(r).padStart(2, '0')}`;
 };
 
-export const EXECUTOR_LABEL: Record<string, string> = { hermes: 'Hermes 代理', reclaude: 'reclaude' };
+/** Who can run a member, as offered when reviewing a plan (the runners are the ones `/reclaude`, `/codex` … start). */
+export const EXECUTOR_OPTIONS: { value: TeamExecutor; label: string }[] = [
+	{ value: 'hermes', label: 'Hermes 代理' },
+	{ value: 'reclaude', label: 'reclaude（Claude Code）' },
+	{ value: 'cchclaude', label: 'cchclaude（Claude Code · cch）' },
+	{ value: 'anyclaude', label: 'anyclaude（Claude Code · 免费较慢）' },
+	{ value: 'codex', label: 'codex（Codex）' },
+	{ value: 'agy', label: 'agy（Antigravity）' }
+];
+
+export const EXECUTOR_LABEL: Record<string, string> = Object.fromEntries(
+	EXECUTOR_OPTIONS.map((o) => [o.value, o.value === 'hermes' ? o.label : o.value])
+);
+
+/** A member run by an external runner: it cannot take notes mid-run and is stopped through the runner. */
+export const isRunnerExecutor = (executor: string | null | undefined): boolean =>
+	!!executor && executor !== 'hermes' && EXECUTOR_OPTIONS.some((o) => o.value === executor);

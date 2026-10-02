@@ -11,9 +11,13 @@ is the Hermes side. It adds no service, port or second task store:
 * **Hermes members** are assigned to the `default` profile and run by the gateway's
   built-in Kanban dispatcher (`hermes -p default chat -q "work kanban task <id>"`). The
   member identity is the team record, not a profile.
-* **reclaude members** are assigned to `reclaude`, which the dispatcher leaves alone (not a
-  profile). `reclaude.py` claims them and drives `reclaude-run.sh` directly — see its
-  docstring for launch / follow / quota wait / QUESTION / notes / stop. Runner runs it starts
+* **Runner members** (`reclaude`, `cchclaude`, `anyclaude`, `codex`, `agy`) are assigned to the
+  runner's name, which the dispatcher leaves alone (not a profile). `reclaude.py` claims them
+  and drives the runner script in `~/.hermes/scripts` (`<name>-run.sh`) directly — see its
+  docstring for launch / follow / quota wait / QUESTION / notes / stop. Only reclaude-run.sh
+  and its cchclaude/anyclaude wrappers park a run for a quota reset (`auto_resume`); codex and
+  agy runs that hit a limit end as failed (retry from the 协作台). agy's progress.log has no
+  tool lines, so agy members show no tool records. Runner runs it starts
   carry no `HERMES_SESSION_*`: no chat gets their completion notice and autopilot-supervisor
   does not resume them (it only resumes runs whose origin can get a report); only this
   bridge does.
@@ -48,12 +52,12 @@ ln -s /root/HaloWebUI/integrations/hermes-plugin/halowebui-teams /root/.hermes/p
 hermes gateway restart
 ```
 
-`kanban.max_in_progress` is host-wide (every board, reclaude members included).
+`kanban.max_in_progress` is host-wide (every board, runner members included).
 `auto_decompose: false` because a task that keeps getting blocked lands in `triage`, and the
 gateway would otherwise ask a model to split it into new tasks on the team's board.
 
 Environment knobs: `HALO_TEAMS_BRIDGE=0` (no bridge loop), `HALO_TEAMS_BRIDGE_INTERVAL`
-(8 s), `HALO_TEAMS_RECLAUDE_MAX` (1 concurrent reclaude member), `HALO_TEAMS_WORKSPACE_ROOT`
+(8 s), `HALO_TEAMS_RUNNER_MAX` (1 concurrent member per runner kind; old name `HALO_TEAMS_RECLAUDE_MAX`), `HALO_TEAMS_WORKSPACE_ROOT`
 (`/root/work/agent-teams`), `HALO_TEAMS_NATIVE_MAX_RUNTIME` (3600 s per Hermes attempt),
 `HALO_TEAMS_MAX_TOOL_EVENTS` (400 tool events per attempt, then one "truncated" note).
 

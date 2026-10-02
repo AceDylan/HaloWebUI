@@ -15,11 +15,14 @@ from .common import (
     ASSIGNEE_EXECUTOR,
     EXECUTOR_ASSIGNEE,
     LEAD_NAME,
+    RUNNER_EXECUTORS,
+    RUNNER_FAIL_PREFIXES,
     TEAM_EVENT_TASK,
     append_event,
     board_conn,
     board_slug,
     executor_of,
+    is_runner,
     kb,
     logger,
     member_of,
@@ -37,7 +40,7 @@ EVENT_LIMIT_MAX = 2000
 TIMELINE_HARD_CAP = 50000
 USER_AUTHOR_PREFIX = "user:"
 STOP_REASON = "用户停止了协作任务"
-RUNNER_FAIL_PREFIX = "reclaude 运行失败"
+RUNNER_FAIL_PREFIX = RUNNER_FAIL_PREFIXES  # str.startswith takes the tuple
 VALID_STATUSES = {"triage", "todo", "scheduled", "ready", "running", "blocked", "review", "done", "archived"}
 # Kanban event kind -> task status after it (when the payload does not say).
 STATUS_BY_KIND = {
@@ -440,7 +443,7 @@ def _author_kind(author: str, member: str) -> tuple[str, str]:
     author = author or ""
     if author.startswith(USER_AUTHOR_PREFIX):
         return "user", author[len(USER_AUTHOR_PREFIX):] or "用户"
-    if author in ("default", "reclaude", member) or (member and author.startswith(member)):
+    if author in ("default", *RUNNER_EXECUTORS, member) or (member and author.startswith(member)):
         return "member", member or author
     return "system", author
 
@@ -666,8 +669,8 @@ def _delivery_text(via: Optional[str]) -> str:
     return {
         "steer": "补充说明已送达运行中的成员（当前工具批次结束后读到）",
         "attempt_context": "补充说明已随新的执行尝试送达",
-        "runner_answer": "补充说明已通过续跑送达 reclaude",
-        "runner_task": "补充说明已写入 reclaude 的任务说明",
+        "runner_answer": "补充说明已通过续跑送达",
+        "runner_task": "补充说明已写入 runner 的任务说明",
         "task_read": "成员读取任务时看到了补充说明",
     }.get(via or "", "补充说明已送达")
 
@@ -734,19 +737,22 @@ def task_detail(team_id: str, task_id: str, owner: Optional[str] = None, *, log:
 
 def worker_log(slug: str, team: dict, task_id: str, runs: list) -> dict:
     """Tail of the member's log, redacted and capped: the Kanban worker log for Hermes members,
-    the runner's progress.log for reclaude members."""
+    the runner's progress.log for runner members (reclaude, codex, ...)."""
     member = member_of(team, task_id)
-    if executor_of(team, member) == "reclaude":
+    executor = executor_of(team, member)
+    if is_runner(executor):
+        from .reclaude import RUNNERS
+
         run_meta = _json(runs[-1].metadata) if runs else {}
         run_id = run_meta.get("runner_run_id")
         if not run_id or not re.match(r"^[0-9A-Za-z-]{8,80}$", str(run_id)):
-            return {"text": "", "source": "reclaude", "note": "还没有 reclaude 运行记录"}
-        path = Path("/root/.hermes/reclaude-runs") / str(run_id) / "progress.log"
+            return {"text": "", "source": executor, "note": f"还没有 {executor} 运行记录"}
+        path = RUNNERS[executor].runs_root / str(run_id) / "progress.log"
         try:
             data = path.read_bytes()[-16000:].decode("utf-8", "replace")
         except OSError:
-            return {"text": "", "source": "reclaude", "note": "读不到 reclaude 进度日志"}
-        return {"text": redact(data, 16000, one_line=False), "source": f"reclaude {run_id}", "truncated": True}
+            return {"text": "", "source": executor, "note": f"读不到 {executor} 进度日志"}
+        return {"text": redact(data, 16000, one_line=False), "source": f"{executor} {run_id}", "truncated": True}
     try:
         text = kb().read_worker_log(task_id, tail_bytes=16000, board=slug) or ""
     except TypeError:
@@ -779,7 +785,7 @@ def post_message(team_id: str, task_id: str, body: str, *, author_name: str, own
         comment_id = kb().add_comment(conn, task_id, author, text)
     executor = executor_of(team, member_of(team, task_id))
     if task.status == "running":
-        expect = ("reclaude 不能在运行中接收消息：会在它这一轮结束后续跑同一会话时送达" if executor == "reclaude"
+        expect = (f"{executor} 不能在运行中接收消息：会在它这一轮结束后续跑同一会话时送达" if is_runner(executor)
                   else "成员正在执行：会在它当前这批工具调用结束后读到（约 6 秒检查一次）")
     else:
         expect = "这个任务还没开始执行：会随它下一次开始执行时一起送达"
@@ -827,7 +833,7 @@ def control(team_id: str, action: str, *, owner: Optional[str] = None, actor: st
                     kb().reclaim_task(conn, task_id, reason=STOP_REASON)
                 except Exception:
                     logger.warning("halowebui-teams: reclaim failed for %s", task_id, exc_info=True)
-            if executor_of(team, member_of(team, task_id)) == "reclaude":
+            if is_runner(executor_of(team, member_of(team, task_id))):
                 try:
                     from .bridge import stop_task_runner
 
@@ -838,7 +844,7 @@ def control(team_id: str, action: str, *, owner: Optional[str] = None, actor: st
             # task that has no open attempt (the reclaim above closed it), which would show as one
             # more execution. The reason travels on halo_task_stopped instead.
             try:
-                if executor_of(team, member_of(team, task_id)) == "reclaude":
+                if is_runner(executor_of(team, member_of(team, task_id))):
                     from .reclaude import close_preserving
 
                     close_preserving(conn, task.current_run_id, lambda: kb().block_task(conn, task_id))

@@ -4,7 +4,7 @@
 	import type { Team, TeamExecutor } from '$lib/apis/teams';
 	import StatusChip from './StatusChip.svelte';
 	import TeamAvatar from './TeamAvatar.svelte';
-	import { avatarKind, EXECUTOR_LABEL } from './model';
+	import { avatarKind, EXECUTOR_LABEL, EXECUTOR_OPTIONS } from './model';
 
 	/** The lead's plan, shown before anything runs: approve it, ask for changes, or cancel. */
 	export let team: Team;
@@ -78,10 +78,14 @@
 								value={member.executor}
 								disabled={!editable || busy}
 								on:change={(e) =>
-									dispatch('executor', { name: member.name, executor: e.currentTarget.value === 'reclaude' ? 'reclaude' : 'hermes' })}
+									dispatch('executor', {
+										name: member.name,
+										executor: EXECUTOR_OPTIONS.find((o) => o.value === e.currentTarget.value)?.value ?? 'hermes'
+									})}
 							>
-								<option value="hermes">Hermes 代理</option>
-								<option value="reclaude">reclaude</option>
+								{#each EXECUTOR_OPTIONS as option}
+									<option value={option.value}>{option.label}</option>
+								{/each}
 							</select>
 						</label>
 					</li>

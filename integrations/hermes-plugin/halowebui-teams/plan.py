@@ -38,7 +38,7 @@ SYSTEM_PROMPT = """你是一个多代理团队的负责人（team-lead）。用�
 - depends_on 写这个任务开始前必须完成的任务 key。互不依赖的任务要能并行；需要汇总或评审的任务依赖它要看的所有任务。不能有循环依赖。
 - 合适时安排一个 reviewer 或 qa 成员在最后检查前面成员的产出。
 - 每个任务的 description 要自成一体：写清楚要做什么、产出物写到工作目录下的哪个文件、完成标准。并行任务不能写同一个文件。
-- executor 默认 "hermes"（Hermes 代理）。只有用户明确要求用 reclaude / Claude Code 执行某部分时，那个成员才用 "reclaude"。
+- executor 默认 "hermes"（Hermes 代理）。只有用户明确点名用某个 runner 执行某部分时，那个成员才用它的名字："reclaude" / "cchclaude" / "anyclaude"（Claude Code）、"codex"（Codex）、"agy"（Antigravity）。
 - 不要安排需要用户手动操作、需要密钥或会改动生产服务的任务。"""
 
 USER_TEMPLATE = """协作目标：

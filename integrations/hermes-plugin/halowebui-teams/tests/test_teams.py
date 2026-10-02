@@ -38,7 +38,7 @@ def test_plan_validation_normalizes_layers_and_parallelism(pkg, plan_dict):
     (lambda p: p["tasks"][2].update(member="ghost"), "不存在的成员"),
     (lambda p: p["tasks"][2].update(depends_on=["T9"]), "不存在的任务"),
     (lambda p: p["tasks"][1].update(key="T1"), "重复"),
-    (lambda p: p["members"][0].update(executor="codex"), "不支持"),
+    (lambda p: p["members"][0].update(executor="gpt"), "不支持"),
     (lambda p: p["members"][0].update(name="Team Lead!"), "不合法"),
     (lambda p: p["tasks"][0].update(depends_on=["T1"]), "依赖了它自己"),
 ])

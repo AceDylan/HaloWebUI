@@ -4,7 +4,8 @@ Every few seconds, for each team board that is running (not paused/stopped):
 * nudges the Kanban dispatcher for that board, so a task whose dependencies just finished
   starts within seconds instead of at the gateway's next 60 s tick (same settings, same
   per-board lock as the gateway's own tick);
-* drives tasks assigned to reclaude (see ``reclaude.py``): claim, launch, follow, finish.
+* drives tasks assigned to an external runner — reclaude, cchclaude, anyclaude, codex, agy (see
+  ``reclaude.py``): claim, launch, follow, finish.
 
 Paused (board archived) and stopped teams are left alone: nothing new starts there.
 HALO_TEAMS_BRIDGE=0 disables the loop (the gateway's own dispatcher still runs Hermes members).
@@ -49,7 +50,7 @@ def tick() -> None:
 
                 reclaude.tick_board(slug, team)
             except Exception:
-                logger.warning("halowebui-teams: reclaude tick failed for %s", slug, exc_info=True)
+                logger.warning("halowebui-teams: runner tick failed for %s", slug, exc_info=True)
             if _active(slug) and _has_ready_native(slug):
                 nudge_dispatch(slug)
         except Exception:

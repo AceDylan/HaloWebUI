@@ -144,3 +144,51 @@ describe('Inspector (member)', () => {
 		expect(target.querySelectorAll('[data-member-note]').length).toBe(0);
 	});
 });
+
+describe('PlanReview', () => {
+	it('lets each member be run by Hermes or any runner', async () => {
+		const { default: PlanReview } = await import('./PlanReview.svelte');
+		const team = {
+			id: 'team-1',
+			status: 'plan_ready',
+			plan: {
+				title: '小工具',
+				members: [{ name: 'backend-dev', role: '后端开发', executor: 'hermes' }],
+				tasks: [{ key: 'T1', title: '写接口', member: 'backend-dev', depends_on: [] }],
+				layers: [['T1']],
+				widest_layer: 1
+			}
+		};
+		await mount(PlanReview, { team });
+		const picked: any[] = [];
+		app.$on('executor', (e: any) => picked.push(e.detail));
+		const select = target.querySelector('select') as any;
+		expect(Array.from(select.querySelectorAll('option')).map((o: any) => o.value)).toEqual([
+			'hermes',
+			'reclaude',
+			'cchclaude',
+			'anyclaude',
+			'codex',
+			'agy'
+		]);
+		select.value = 'codex';
+		select.dispatchEvent(new (globalThis as any).Event('change', { bubbles: true }));
+		await sleep(5);
+		expect(picked).toEqual([{ name: 'backend-dev', executor: 'codex' }]);
+	});
+});
+
+describe('Inspector (runner member)', () => {
+	it('tells the user a runner member gets the note after its current run', async () => {
+		const { default: Inspector } = await import('./Inspector.svelte');
+		const tasks = [
+			{ id: 't_1', key: 'T1', seq: 1, title: '写接口', member: 'coder', executor: 'codex', status: 'running', sub_status: 'running', parents: [], children: [], attempts: 1 }
+		];
+		const states = new Map(tasks.map((t) => [t.id, { status: t.status, sub_status: t.sub_status }]));
+		const members = [{ name: 'coder', role: '开发', executor: 'codex', status: 'running' }];
+		await mount(Inspector, { teamId: 'team-1', memberName: 'coder', tasks, states, members, events: [] });
+		const textarea = target.querySelector('[data-member-note] textarea') as any;
+		expect(textarea.getAttribute('placeholder')).toContain('codex 运行中收不到消息');
+		expect(target.textContent).toContain('开发 · codex');
+	});
+});

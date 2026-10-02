@@ -1,8 +1,13 @@
-"""reclaude as a team member: the executor bridge for tasks assigned to ``reclaude``.
+"""External runners as team members: the executor bridge for tasks assigned to a runner
+(``reclaude``, ``cchclaude``, ``anyclaude``, ``codex``, ``agy``).
 
-The Kanban dispatcher leaves such tasks alone (``reclaude`` is not a Hermes profile), so this
-bridge claims them like any external worker would and drives the existing runner
-(``reclaude-run.sh``) — no Hermes agent sits in between waiting for it.
+The Kanban dispatcher leaves such tasks alone (a runner name is not a Hermes profile), so this
+bridge claims them like any external worker would and drives the existing runner script
+(``reclaude-run.sh``, ``cchclaude-run.sh``, ``anyclaude-run.sh``, ``codex-run.sh``,
+``agy-run.sh``) — no Hermes agent sits in between waiting for it. All of them share the run
+directory protocol (meta.json / progress.log / result.json + result.md, QUESTION: and
+``answer`` in the same session); only reclaude-run.sh and its two siblings park a run for a
+quota reset and continue it by themselves (``auto_resume``).
 
 Per task attempt (one Kanban ``task_runs`` row = one claim):
 * launch: claim → write the task file (the same context a Hermes worker reads:
@@ -36,7 +41,7 @@ import secrets
 import subprocess
 import time
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, NamedTuple, Optional
 
 from .common import (
     append_event,
@@ -48,33 +53,69 @@ from .common import (
     member_of,
     now,
     read_team,
+    RUNNER_EXECUTORS,
     redact,
     task_key,
     team_boards,
 )
 
-RUNS_ROOT = Path(os.environ.get("HALO_TEAMS_RECLAUDE_RUNS_ROOT", "/root/.hermes/reclaude-runs"))
-RUNNER = os.environ.get("HALO_TEAMS_RECLAUDE_RUNNER", "/root/.hermes/scripts/reclaude-run.sh")
 TASK_DIR = Path(os.environ.get("HALO_TEAMS_TASK_DIR", "/root/.hermes/halo-teams/tasks"))
-CLAIMER = "halowebui-teams-reclaude"
+CLAIMER = "halowebui-teams-reclaude"  # the claim name of every runner member (kept from reclaude-only days)
 CLAIM_TTL = 1800
-MAX_CONCURRENT = int(os.environ.get("HALO_TEAMS_RECLAUDE_MAX", "1") or 1)
+# Runner members of the same kind that run at once (host-wide cap kanban.max_in_progress on top).
+MAX_CONCURRENT = int(os.environ.get("HALO_TEAMS_RUNNER_MAX") or os.environ.get("HALO_TEAMS_RECLAUDE_MAX") or 1)
 MAX_TURNS = int(os.environ.get("HALO_TEAMS_RECLAUDE_MAX_TURNS", "150") or 150)
 MAX_PROGRESS_EVENTS = 400
 LAUNCH_GRACE = 90          # seconds for the run dir to appear after systemd-run
 INTERRUPT_RESUMES = 1      # a runner that died mid-run is resumed this many times per attempt
-FAIL_PREFIX = "reclaude 运行失败"
 QUOTA_BLOCKED_RETRY = 600
+_HOME = os.environ.get("HALO_TEAMS_RUNS_HOME", "/root/.hermes")
+_SCRIPTS = os.environ.get("HALO_TEAMS_RUNNER_SCRIPTS", "/root/.hermes/scripts")
+
+
+class Runner(NamedTuple):
+    name: str
+    runs_root: Path
+    script: str
+    extra_args: tuple       # added to run and answer (what this runner accepts)
+    answer_sets_id: bool    # answer is told the new run id (--run-id) instead of picking <id>-aN itself
+
+    @property
+    def fail_prefix(self) -> str:
+        return f"{self.name} 运行失败"
+
+
+def _runner(name: str, script: str, extra_args: tuple = (), answer_sets_id: bool = False) -> Runner:
+    env = name.upper()
+    root = os.environ.get(f"HALO_TEAMS_{env}_RUNS_ROOT") or os.path.join(_HOME, f"{name}-runs")
+    path = os.environ.get(f"HALO_TEAMS_{env}_RUNNER") or os.path.join(_SCRIPTS, script)
+    return Runner(name, Path(root), path, tuple(extra_args), answer_sets_id)
+
+
+_TURNS = ("--max-turns", str(MAX_TURNS))
+RUNNERS = {
+    "reclaude": _runner("reclaude", "reclaude-run.sh", _TURNS),
+    "cchclaude": _runner("cchclaude", "cchclaude-run.sh", _TURNS),
+    "anyclaude": _runner("anyclaude", "anyclaude-run.sh", _TURNS),
+    "codex": _runner("codex", "codex-run.sh"),            # codex exec has no turn cap
+    "agy": _runner("agy", "agy-run.sh", answer_sets_id=True),  # agy's answer takes --run-id, no --max-turns
+}
+assert tuple(RUNNERS) == RUNNER_EXECUTORS
+_ASSIGNEES_SQL = "(" + ",".join("'%s'" % name for name in RUNNERS) + ")"
 _RUN_ID_RE = re.compile(r"^[0-9]{8}-[0-9]{6}-[0-9a-f]{8}(-a[0-9]+)*$")
 _PROGRESS_TOOL_RE = re.compile(r"^(\d\d:\d\d:\d\d) \[tool#(\d+)\] ([^:]{1,60}):\s?(.*)$")
 _launcher = {"fn": None}  # tests replace the systemd launch
 
 
-def _read_meta(run_id: str) -> dict:
+def runner_of(name: Any) -> Optional[Runner]:
+    return RUNNERS.get(str(name or ""))
+
+
+def _read_meta(rn: Runner, run_id: str) -> dict:
     if not run_id or not _RUN_ID_RE.match(run_id):
         return {}
     try:
-        data = json.loads((RUNS_ROOT / run_id / "meta.json").read_text(encoding="utf-8"))
+        data = json.loads((rn.runs_root / run_id / "meta.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return {}
     return data if isinstance(data, dict) else {}
@@ -98,9 +139,9 @@ def new_run_id() -> str:
     return time.strftime("%Y%m%d-%H%M%S") + "-" + secrets.token_hex(4)
 
 
-def _next_answer_id(run_id: str) -> str:
+def _next_answer_id(rn: Runner, run_id: str) -> str:
     n = 1
-    while (RUNS_ROOT / f"{run_id}-a{n}").exists():
+    while (rn.runs_root / f"{run_id}-a{n}").exists():
         n += 1
     return f"{run_id}-a{n}"
 
@@ -159,13 +200,13 @@ def _run_meta(conn: Any, run_row_id: Optional[int]) -> dict:
     return value if isinstance(value, dict) else {}
 
 
-def _running_reclaude_count() -> int:
+def _running_count(name: str) -> int:
     count = 0
     for slug in team_boards():
         try:
             with board_conn(slug) as conn:
                 count += conn.execute(
-                    "SELECT COUNT(*) FROM tasks WHERE status = 'running' AND assignee = 'reclaude'"
+                    "SELECT COUNT(*) FROM tasks WHERE status = 'running' AND assignee = ?", (name,)
                 ).fetchone()[0]
         except Exception:
             continue
@@ -221,7 +262,7 @@ def _task_text(conn: Any, team: dict, task_id: str) -> str:
     )
 
 
-def launch(slug: str, conn: Any, team: dict, task_id: str, *, previous_run: str = "") -> Optional[str]:
+def launch(rn: Runner, slug: str, conn: Any, team: dict, task_id: str, *, previous_run: str = "") -> Optional[str]:
     claimed = kb().claim_task(conn, task_id, ttl_seconds=CLAIM_TTL, claimer=CLAIMER)
     if claimed is None:
         return None
@@ -232,26 +273,26 @@ def launch(slug: str, conn: Any, team: dict, task_id: str, *, previous_run: str 
     task_file.write_text(_task_text(conn, team, task_id), encoding="utf-8")
     cwd = team.get("workspace") or "/root"
     Path(cwd).mkdir(parents=True, exist_ok=True)
-    argv = [RUNNER, "run", "--cwd", cwd, "--task-file", str(task_file), "--run-id", run_id,
-            "--max-turns", str(MAX_TURNS), "--no-vault-archive"]
+    argv = [rn.script, "run", "--cwd", cwd, "--task-file", str(task_file), "--run-id", run_id,
+            *rn.extra_args, "--no-vault-archive"]
     _set_run_meta(conn, run_row, {
-        "runner": "reclaude", "runner_run_id": run_id, "runner_runs": [{"run_id": run_id, "kind": "launch"}],
+        "runner": rn.name, "runner_run_id": run_id, "runner_runs": [{"run_id": run_id, "kind": "launch"}],
         "runner_phase": "starting", "launched_at": now(), "progress_seen": 0, "tool_events": 0,
         "interrupt_resumes": 0, **({"parent_runner_run_id": previous_run} if previous_run else {}),
     })
     ok, why = _launch(f"halo-team-{run_id}", argv)
     if not ok:
-        _fail(conn, task_id, run_row, f"{FAIL_PREFIX}：启动失败（{why or '未知原因'}）")
+        _fail(rn, conn, task_id, run_row, f"{rn.fail_prefix}：启动失败（{why or '未知原因'}）")
         return None
-    append_event(conn, task_id, "halo_runner", {"phase": "launched", "runner": "reclaude", "runner_run_id": run_id,
-                                                 "text": f"reclaude 已启动（run {run_id}）"}, run_id=run_row)
+    append_event(conn, task_id, "halo_runner", {"phase": "launched", "runner": rn.name, "runner_run_id": run_id,
+                                                 "text": f"{rn.name} 已启动（run {run_id}）"}, run_id=run_row)
     return run_id
 
 
-def _fail(conn: Any, task_id: str, run_row: Optional[int], reason: str) -> None:
+def _fail(rn: Runner, conn: Any, task_id: str, run_row: Optional[int], reason: str) -> None:
     if run_row:
         _set_run_meta(conn, run_row, {"runner_phase": "failed"})
-    append_event(conn, task_id, "halo_runner", {"phase": "failed", "runner": "reclaude", "text": redact(reason, 600)},
+    append_event(conn, task_id, "halo_runner", {"phase": "failed", "runner": rn.name, "text": redact(reason, 600)},
                  run_id=run_row)
     try:
         close_preserving(conn, run_row, lambda: kb().block_task(conn, task_id, reason=redact(reason, 400)))
@@ -261,22 +302,22 @@ def _fail(conn: Any, task_id: str, run_row: Optional[int], reason: str) -> None:
 
 # --- follow -------------------------------------------------------------------------------------
 
-def _effective_run(run_id: str) -> tuple[str, dict]:
+def _effective_run(rn: Runner, run_id: str) -> tuple[str, dict]:
     """Follow the runner's own continuations (<id>-aN started by auto_resume) to the live run."""
     seen = set()
-    meta = _read_meta(run_id)
+    meta = _read_meta(rn, run_id)
     while meta and run_id not in seen:
         seen.add(run_id)
         nxt = str(meta.get("auto_resume_run") or "")
-        if meta.get("auto_resume") in ("started",) and nxt and (RUNS_ROOT / nxt / "meta.json").exists():
-            run_id, meta = nxt, _read_meta(nxt)
+        if meta.get("auto_resume") in ("started",) and nxt and (rn.runs_root / nxt / "meta.json").exists():
+            run_id, meta = nxt, _read_meta(rn, nxt)
             continue
         break
     return run_id, meta
 
 
-def _copy_progress(conn: Any, task_id: str, run_row: int, rmeta: dict, runner_run: str) -> dict:
-    path = RUNS_ROOT / runner_run / "progress.log"
+def _copy_progress(rn: Runner, conn: Any, task_id: str, run_row: int, rmeta: dict, runner_run: str) -> dict:
+    path = rn.runs_root / runner_run / "progress.log"
     key = f"progress_seen:{runner_run}"
     seen = int(rmeta.get(key) or 0)
     try:
@@ -298,16 +339,16 @@ def _copy_progress(conn: Any, task_id: str, run_row: int, rmeta: dict, runner_ru
     return {key: len(lines), "tool_events": written}
 
 
-def _final_answer(runner_run: str) -> str:
+def _final_answer(rn: Runner, runner_run: str) -> str:
     try:
-        data = json.loads((RUNS_ROOT / runner_run / "result.json").read_text(encoding="utf-8"))
-        text = data.get("result") or data.get("answer") or ""
+        data = json.loads((rn.runs_root / runner_run / "result.json").read_text(encoding="utf-8"))
+        text = data.get("result") or data.get("answer") or data.get("response") or ""
         if text:
             return str(text)
     except (OSError, ValueError, AttributeError):
         pass
     try:
-        return (RUNS_ROOT / runner_run / "result.md").read_text(encoding="utf-8")
+        return (rn.runs_root / runner_run / "result.md").read_text(encoding="utf-8")
     except OSError:
         return ""
 
@@ -325,13 +366,16 @@ def _undelivered_notes(conn: Any, task_id: str, since_ts: int, delivered: list) 
     return [r for r in rows if str(r[1] or "").startswith("user:") and int(r[0]) not in set(delivered)]
 
 
-def _answer(conn: Any, task_id: str, run_row: int, rmeta: dict, runner_run: str, text: str, kind: str) -> Optional[str]:
-    next_id = _next_answer_id(runner_run)
+def _answer(rn: Runner, conn: Any, task_id: str, run_row: int, rmeta: dict, runner_run: str, text: str,
+            kind: str) -> Optional[str]:
+    next_id = _next_answer_id(rn, runner_run)
     TASK_DIR.mkdir(parents=True, exist_ok=True)
     task_file = TASK_DIR / f"answer-{next_id}.md"
     task_file.write_text(text, encoding="utf-8")
-    ok, why = _launch(f"halo-team-{next_id}", [RUNNER, "answer", runner_run, "--task-file", str(task_file),
-                                              "--max-turns", str(MAX_TURNS)])
+    argv = [rn.script, "answer", runner_run, "--task-file", str(task_file), *rn.extra_args]
+    if rn.answer_sets_id:
+        argv += ["--run-id", next_id]
+    ok, why = _launch(f"halo-team-{next_id}", argv)
     if not ok:
         logger.warning("halowebui-teams: answer launch failed for %s: %s", runner_run, why)
         return None
@@ -339,40 +383,40 @@ def _answer(conn: Any, task_id: str, run_row: int, rmeta: dict, runner_run: str,
     _set_run_meta(conn, run_row, {"runner_run_id": next_id, "runner_runs": runs, "runner_phase": "starting",
                                   "launched_at": now(), "question": None})
     append_event(conn, task_id, "halo_runner", {
-        "phase": "answered" if kind == "answer" else "continued", "runner": "reclaude", "runner_run_id": next_id,
-        "text": {"answer": f"已把你的说明交给 reclaude，同一会话续跑（run {next_id}）",
-                 "notes": f"reclaude 这一轮结束，带着你的补充说明续跑同一会话（run {next_id}）",
+        "phase": "answered" if kind == "answer" else "continued", "runner": rn.name, "runner_run_id": next_id,
+        "text": {"answer": f"已把你的说明交给 {rn.name}，同一会话续跑（run {next_id}）",
+                 "notes": f"{rn.name} 这一轮结束，带着你的补充说明续跑同一会话（run {next_id}）",
                  "resume": f"runner 被打断，已在同一会话里接着跑（run {next_id}）"}.get(kind, f"续跑 run {next_id}")},
         run_id=run_row)
     return next_id
 
 
-def follow(slug: str, conn: Any, team: dict, task: Any) -> None:
+def follow(rn: Runner, slug: str, conn: Any, team: dict, task: Any) -> None:
     run_row = task.current_run_id
     rmeta = _run_meta(conn, run_row)
     runner_run = str(rmeta.get("runner_run_id") or "")
     if not runner_run:
         # Claimed by us but nothing recorded (crash between claim and launch): retry the launch.
         if task.claim_lock == CLAIMER and now() - int(task.started_at or now()) > LAUNCH_GRACE:
-            _fail(conn, task.id, run_row, f"{FAIL_PREFIX}：认领后没有启动记录")
+            _fail(rn, conn, task.id, run_row, f"{rn.fail_prefix}：认领后没有启动记录")
         return
-    live_id, meta = _effective_run(runner_run)
+    live_id, meta = _effective_run(rn, runner_run)
     if live_id != runner_run:
         runs = list(rmeta.get("runner_runs") or [])
         if not any(r.get("run_id") == live_id for r in runs):
             runs.append({"run_id": live_id, "kind": "auto_continue", "parent": runner_run})
         rmeta = _set_run_meta(conn, run_row, {"runner_run_id": live_id, "runner_runs": runs, "runner_phase": "running",
                                               "resume_at": None})
-        append_event(conn, task.id, "halo_runner", {"phase": "continued", "runner": "reclaude", "runner_run_id": live_id,
+        append_event(conn, task.id, "halo_runner", {"phase": "continued", "runner": rn.name, "runner_run_id": live_id,
                                                      "text": f"runner 自动续跑同一会话（run {live_id}）"}, run_id=run_row)
         runner_run = live_id
     if not meta:
         if now() - int(rmeta.get("launched_at") or now()) > LAUNCH_GRACE:
-            _fail(conn, task.id, run_row, f"{FAIL_PREFIX}：run {runner_run} 没有生成运行目录")
+            _fail(rn, conn, task.id, run_row, f"{rn.fail_prefix}：run {runner_run} 没有生成运行目录")
         else:
             kb().heartbeat_claim(conn, task.id, ttl_seconds=CLAIM_TTL, claimer=CLAIMER)
         return
-    updates = _copy_progress(conn, task.id, run_row, rmeta, runner_run)
+    updates = _copy_progress(rn, conn, task.id, run_row, rmeta, runner_run)
     if updates:
         rmeta = _set_run_meta(conn, run_row, updates)
     status = str(meta.get("status") or "")
@@ -396,8 +440,8 @@ def follow(slug: str, conn: Any, team: dict, task: Any) -> None:
                 kind = str(meta.get("failure_kind") or "")
                 why = "额度用完" if "quota" in kind else ("达到轮数上限" if "turn" in kind else "暂时中断")
                 append_event(conn, task.id, "halo_runner", {
-                    "phase": "quota_wait", "runner": "reclaude", "runner_run_id": runner_run, "resume_at": resume_at,
-                    "status": status, "text": f"reclaude {why}，runner 会在 {resume_at or '重置后'} 自动续跑同一会话（不是失败）"},
+                    "phase": "quota_wait", "runner": rn.name, "runner_run_id": runner_run, "resume_at": resume_at,
+                    "status": status, "text": f"{rn.name} {why}，runner 会在 {resume_at or '重置后'} 自动续跑同一会话（不是失败）"},
                     run_id=run_row)
             return
         status = "interrupted"  # the waiting runner died (reboot): resume it ourselves below
@@ -406,11 +450,11 @@ def follow(slug: str, conn: Any, team: dict, task: Any) -> None:
         if rmeta.get("runner_phase") != "quota_wait":
             _set_run_meta(conn, run_row, {"runner_phase": "quota_wait", "quota_blocked_at": now()})
             append_event(conn, task.id, "halo_runner", {
-                "phase": "quota_wait", "runner": "reclaude", "runner_run_id": runner_run, "status": status,
-                "text": "拼车额度不足，reclaude 还没开始；额度恢复后会重新启动这个任务（不是失败）"}, run_id=run_row)
+                "phase": "quota_wait", "runner": rn.name, "runner_run_id": runner_run, "status": status,
+                "text": f"额度不足，{rn.name} 还没开始；额度恢复后会重新启动这个任务（不是失败）"}, run_id=run_row)
         elif now() - int(rmeta.get("quota_blocked_at") or now()) > QUOTA_BLOCKED_RETRY:
             try:
-                close_preserving(conn, run_row, lambda: kb().reclaim_task(conn, task.id, reason="reclaude 额度不足，稍后重新启动"))
+                close_preserving(conn, run_row, lambda: kb().reclaim_task(conn, task.id, reason=f"{rn.name} 额度不足，稍后重新启动"))
             except Exception:
                 pass
         return
@@ -420,14 +464,14 @@ def follow(slug: str, conn: Any, team: dict, task: Any) -> None:
         if notes:
             text = "用户在协作台给你补充了说明，请按说明继续，完成后同样在最终回答里写交接摘要：\n" + "\n".join(
                 f"- {redact(r[2], 2000, one_line=False)}" for r in notes)
-            next_id = _answer(conn, task.id, run_row, rmeta, runner_run, text, "notes")
+            next_id = _answer(rn, conn, task.id, run_row, rmeta, runner_run, text, "notes")
             if next_id:
                 ids = [int(r[0]) for r in notes]
                 _set_run_meta(conn, run_row, {"delivered_comment_ids": delivered + ids})
                 append_event(conn, task.id, "halo_comment_delivered", {"comment_ids": ids, "via": "runner_answer"},
                              run_id=run_row)
                 return
-        answer = _final_answer(runner_run)
+        answer = _final_answer(rn, runner_run)
         summary = redact(answer, 1500, one_line=False)
         final = _set_run_meta(conn, run_row, {"runner_phase": "done"})
         kb().complete_task(conn, task.id, result=redact(answer, 6000, one_line=False), summary=summary,
@@ -436,31 +480,31 @@ def follow(slug: str, conn: Any, team: dict, task: Any) -> None:
     if status == "question":
         kb().heartbeat_claim(conn, task.id, ttl_seconds=CLAIM_TTL, claimer=CLAIMER)
         if rmeta.get("runner_phase") != "question":
-            question = _question_text(_final_answer(runner_run))
+            question = _question_text(_final_answer(rn, runner_run))
             _set_run_meta(conn, run_row, {"runner_phase": "question", "question": redact(question, 1500, one_line=False),
                                           "question_at": now()})
-            append_event(conn, task.id, "halo_runner", {"phase": "question", "runner": "reclaude",
+            append_event(conn, task.id, "halo_runner", {"phase": "question", "runner": rn.name,
                                                          "runner_run_id": runner_run,
                                                          "text": redact(question, 1500, one_line=False)}, run_id=run_row)
             return
         notes = _undelivered_notes(conn, task.id, int(rmeta.get("question_at") or 0), delivered)
         if notes:
             text = "\n\n".join(redact(r[2], 4000, one_line=False) for r in notes)
-            if _answer(conn, task.id, run_row, rmeta, runner_run, text, "answer"):
+            if _answer(rn, conn, task.id, run_row, rmeta, runner_run, text, "answer"):
                 ids = [int(r[0]) for r in notes]
                 _set_run_meta(conn, run_row, {"delivered_comment_ids": delivered + ids})
                 append_event(conn, task.id, "halo_comment_delivered", {"comment_ids": ids, "via": "runner_answer"},
                              run_id=run_row)
         return
     if status == "stopped":
-        _fail(conn, task.id, run_row, f"{FAIL_PREFIX}：reclaude 运行 {runner_run} 被停止")
+        _fail(rn, conn, task.id, run_row, f"{rn.fail_prefix}：{rn.name} 运行 {runner_run} 被停止")
         return
     if status == "interrupted" and int(rmeta.get("interrupt_resumes") or 0) < INTERRUPT_RESUMES and meta.get("session_id"):
-        if _answer(conn, task.id, run_row, rmeta, runner_run,
+        if _answer(rn, conn, task.id, run_row, rmeta, runner_run,
                    "你上一轮被打断了（runner 进程意外退出或本机重启）。请检查已完成的部分，接着把任务做完。", "resume"):
             _set_run_meta(conn, run_row, {"interrupt_resumes": int(rmeta.get("interrupt_resumes") or 0) + 1})
             return
-    _fail(conn, task.id, run_row, f"{FAIL_PREFIX}：run {runner_run} 状态 {status or '未知'}")
+    _fail(rn, conn, task.id, run_row, f"{rn.fail_prefix}：run {runner_run} 状态 {status or '未知'}")
 
 
 # --- board tick / stop --------------------------------------------------------------------------
@@ -468,23 +512,23 @@ def follow(slug: str, conn: Any, team: dict, task: Any) -> None:
 def tick_board(slug: str, team: dict) -> None:
     with board_conn(slug) as conn:
         running = conn.execute(
-            "SELECT id FROM tasks WHERE status = 'running' AND assignee = 'reclaude'"
+            "SELECT id, assignee FROM tasks WHERE status = 'running' AND assignee IN " + _ASSIGNEES_SQL
         ).fetchall()
-        for (task_id,) in running:
+        for task_id, assignee in running:
             task = kb().get_task(conn, task_id)
             if task is not None and task.claim_lock == CLAIMER:
-                follow(slug, conn, team, task)
+                follow(RUNNERS[assignee], slug, conn, team, task)
         if team.get("archived") or team.get("state") != "running":
             return
         ready = conn.execute(
-            "SELECT id FROM tasks WHERE status = 'ready' AND assignee = 'reclaude' AND claim_lock IS NULL "
-            "ORDER BY priority DESC, created_at"
+            "SELECT id, assignee FROM tasks WHERE status = 'ready' AND assignee IN " + _ASSIGNEES_SQL
+            + " AND claim_lock IS NULL ORDER BY priority DESC, created_at"
         ).fetchall()
     if not ready:
         return
-    for (task_id,) in ready:
-        if _running_reclaude_count() >= MAX_CONCURRENT:
-            return
+    for task_id, assignee in ready:
+        if _running_count(assignee) >= MAX_CONCURRENT:
+            continue
         cap = _host_cap()
         if cap is not None and _host_running_count() >= cap:
             return
@@ -493,7 +537,7 @@ def tick_board(slug: str, team: dict) -> None:
             runs = kb().list_runs(conn, task_id)
             if runs:
                 previous = str(_run_meta(conn, runs[-1].id).get("runner_run_id") or "")
-            launch(slug, conn, team, task_id, previous_run=previous)
+            launch(RUNNERS[assignee], slug, conn, team, task_id, previous_run=previous)
 
 
 def stop_task(slug: str, conn: Any, task_id: str) -> bool:
@@ -501,11 +545,14 @@ def stop_task(slug: str, conn: Any, task_id: str) -> bool:
     task = kb().get_task(conn, task_id)
     if task is None:
         return False
+    rn = runner_of(task.assignee)
+    if rn is None:
+        return False
     rmeta = _run_meta(conn, task.current_run_id)
     runner_run = str(rmeta.get("runner_run_id") or "")
     if not runner_run:
         return False
-    live_id, meta = _effective_run(runner_run)
+    live_id, meta = _effective_run(rn, runner_run)
     if not meta:
         return False
     stoppable = meta.get("status") == "running" or meta.get("auto_resume") == "scheduled"
@@ -513,16 +560,16 @@ def stop_task(slug: str, conn: Any, task_id: str) -> bool:
         try:
             from gateway.runner_dispatch import stop_run
 
-            why = asyncio.run(stop_run({**meta, "run_id": live_id, "_agent": "reclaude",
-                                        "_dir": str(RUNS_ROOT / live_id)}, stopped_by="HaloWebUI 协作台"))
+            why = asyncio.run(stop_run({**meta, "run_id": live_id, "_agent": rn.name,
+                                        "_dir": str(rn.runs_root / live_id)}, stopped_by="HaloWebUI 协作台"))
             if why:
                 logger.warning("halowebui-teams: stop %s: %s", live_id, why)
         except Exception:
             logger.warning("halowebui-teams: stop %s failed", live_id, exc_info=True)
     if task.current_run_id:
         _set_run_meta(conn, task.current_run_id, {"runner_phase": "stopped"})
-    append_event(conn, task_id, "halo_runner", {"phase": "stopped", "runner": "reclaude", "runner_run_id": live_id,
-                                                 "text": f"reclaude 运行 {live_id} 已停止"}, run_id=task.current_run_id)
+    append_event(conn, task_id, "halo_runner", {"phase": "stopped", "runner": rn.name, "runner_run_id": live_id,
+                                                 "text": f"{rn.name} 运行 {live_id} 已停止"}, run_id=task.current_run_id)
     return True
 
 

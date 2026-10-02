@@ -115,7 +115,7 @@
 						{:else if ev.type === 'subagent'}
 							<span class="text-gray-600 dark:text-gray-300">{ev.member} {ev.data?.phase === 'start' ? '派出子代理' : '子代理结束'}</span>
 						{:else if ev.type === 'runner'}
-							<span class="font-medium text-orange-700 dark:text-orange-300">reclaude {runnerLabel[ev.data?.phase] ?? ev.data?.phase}</span>
+							<span class="font-medium text-orange-700 dark:text-orange-300">{ev.data?.runner ?? 'runner'} {runnerLabel[ev.data?.phase] ?? ev.data?.phase}</span>
 						{:else if ev.type === 'team'}
 							<span class="font-medium text-indigo-700 dark:text-indigo-300">团队</span>
 						{:else if ev.member}

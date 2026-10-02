@@ -12,7 +12,7 @@
 	} from '$lib/apis/teams';
 	import StatusChip from './StatusChip.svelte';
 	import TeamAvatar from './TeamAvatar.svelte';
-	import { avatarKind, EXECUTOR_LABEL, formatClock, openParents, type TaskState } from './model';
+	import { avatarKind, EXECUTOR_LABEL, formatClock, isRunnerExecutor, openParents, type TaskState } from './model';
 
 	/** Details of the selected task or member. Read-only in a replay. */
 	export let teamId: string;
@@ -177,7 +177,7 @@
 		{/if}
 		{#if !replay && task.current_run?.question}
 			<div class="rounded-xl bg-violet-50 px-3 py-2 text-xs text-violet-900 dark:bg-violet-950/40 dark:text-violet-100 whitespace-pre-wrap break-words">
-				<div class="font-semibold mb-1">reclaude 在等你回答：</div>{task.current_run.question}
+				<div class="font-semibold mb-1">{task.executor} 在等你回答：</div>{task.current_run.question}
 			</div>
 		{/if}
 		{#if !replay && task.current_run?.runner_phase === 'quota_wait'}
@@ -224,7 +224,7 @@
 										<span class="text-gray-400 font-mono">{formatClock(attempt.started_at)}{attempt.ended_at ? ` – ${formatClock(attempt.ended_at)}` : ''}</span>
 									</div>
 									{#if attempt.runner_run_id}
-										<div class="mt-0.5 text-gray-500 font-mono break-all">reclaude run {attempt.runner_run_id}{attempt.parent_runner_run_id ? `（接续 ${attempt.parent_runner_run_id}）` : ''}</div>
+										<div class="mt-0.5 text-gray-500 font-mono break-all">{attempt.runner ?? task.executor} run {attempt.runner_run_id}{attempt.parent_runner_run_id ? `（接续 ${attempt.parent_runner_run_id}）` : ''}</div>
 									{/if}
 									{#if attempt.error}<div class="mt-0.5 text-red-600 break-words">{attempt.error}</div>{/if}
 								</li>
@@ -275,8 +275,8 @@
 					rows="3"
 					maxlength="4000"
 					class="w-full resize-y rounded-xl border border-gray-200 bg-white px-2.5 py-2 text-sm outline-none focus:border-sky-400 dark:border-gray-800 dark:bg-gray-900"
-					placeholder={task.executor === 'reclaude'
-						? 'reclaude 运行中收不到消息，会在它这一轮结束后续跑送达'
+					placeholder={isRunnerExecutor(task.executor)
+						? `${task.executor} 运行中收不到消息，会在它这一轮结束后续跑送达`
 						: '成员正在执行时，会在当前这批工具调用结束后读到'}
 					on:keydown={(e) => {
 						if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) send();
@@ -308,8 +308,8 @@
 					rows="3"
 					maxlength="4000"
 					class="w-full resize-y rounded-xl border border-gray-200 bg-white px-2.5 py-2 text-sm outline-none focus:border-sky-400 dark:border-gray-800 dark:bg-gray-900"
-					placeholder={member.executor === 'reclaude'
-						? 'reclaude 运行中收不到消息，会在它这一轮结束后续跑送达'
+					placeholder={isRunnerExecutor(member.executor)
+						? `${member.executor} 运行中收不到消息，会在它这一轮结束后续跑送达`
 						: '成员正在执行时，会在当前这批工具调用结束后读到'}
 					on:keydown={(e) => {
 						if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) send();

@@ -58,7 +58,8 @@ class ReplanForm(BaseModel):
 
 class MemberExecutor(BaseModel):
     name: str = Field(max_length=40)
-    executor: Literal["hermes", "reclaude"]
+    # Hermes members, or one of the runners the Hermes teams plugin can drive (see its reclaude.py).
+    executor: Literal["hermes", "reclaude", "cchclaude", "anyclaude", "codex", "agy"]
 
 
 class PlanEditForm(BaseModel):

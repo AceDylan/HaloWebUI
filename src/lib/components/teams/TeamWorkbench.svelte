@@ -498,7 +498,7 @@
 <ConfirmDialog
 	bind:show={showStop}
 	title="停止整个协作任务？"
-	message="正在执行的成员会被结束（reclaude 运行会被停止），还没开始的任务不再开始。已完成的产出保留。停止后不会被自动恢复，也不能再继续这个协作任务。"
+	message="正在执行的成员会被结束（reclaude、codex 等 runner 的运行会被停止），还没开始的任务不再开始。已完成的产出保留。停止后不会被自动恢复，也不能再继续这个协作任务。"
 	confirmLabel="停止执行"
 	on:confirm={stopAll}
 />

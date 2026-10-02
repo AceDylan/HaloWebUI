@@ -27,45 +27,51 @@ PLAN = {
 
 
 class FakeRunner:
-    def __init__(self, root):
-        self.root = root
+    """Stands in for every runner script; run directories go to that runner's runs root."""
+
+    def __init__(self, runners, default="reclaude"):
+        self.roots = {str(r.script): str(r.runs_root) for r in runners.values()}
+        self.root = str(runners[default].runs_root)
+        for root in self.roots.values():
+            os.makedirs(root, exist_ok=True)
         self.calls = []
 
     def __call__(self, unit, argv):
         self.calls.append(argv)
+        root = self.roots[argv[0]]
         if argv[1] == "run":
             run_id = argv[argv.index("--run-id") + 1]
             parent = ""
-        else:  # answer RUN_ID
+        elif "--run-id" in argv:  # answer RUN_ID --run-id NEXT (agy)
+            parent, run_id = argv[2], argv[argv.index("--run-id") + 1]
+        else:  # answer RUN_ID: the runner picks <id>-aN
             parent = argv[2]
             n = 1
-            while os.path.exists(os.path.join(self.root, f"{parent}-a{n}")):
+            while os.path.exists(os.path.join(root, f"{parent}-a{n}")):
                 n += 1
             run_id = f"{parent}-a{n}"
-        self.write(run_id, status="running", runner_pid=os.getpid(), session_id="sess-1", parent_run=parent)
+        self.write(run_id, status="running", runner_pid=os.getpid(), session_id="sess-1", parent_run=parent, _root=root)
         return True, ""
 
-    def write(self, run_id, **meta):
-        d = os.path.join(self.root, run_id)
+    def write(self, run_id, _root=None, **meta):
+        d = os.path.join(_root or self.root, run_id)
         os.makedirs(d, exist_ok=True)
         path = os.path.join(d, "meta.json")
         current = json.load(open(path)) if os.path.exists(path) else {"run_id": run_id}
         current.update(meta)
         json.dump(current, open(path, "w"))
 
-    def result(self, run_id, text):
-        json.dump({"result": text, "status": "success"}, open(os.path.join(self.root, run_id, "result.json"), "w"))
+    def result(self, run_id, text, _root=None, key="result"):
+        json.dump({key: text, "status": "success"}, open(os.path.join(_root or self.root, run_id, "result.json"), "w"))
 
-    def progress(self, run_id, lines):
-        with open(os.path.join(self.root, run_id, "progress.log"), "a") as handle:
+    def progress(self, run_id, lines, _root=None):
+        with open(os.path.join(_root or self.root, run_id, "progress.log"), "a") as handle:
             handle.write("\n".join(lines) + "\n")
 
 
 @pytest.fixture
 def setup(pkg, monkeypatch):
-    root = os.environ["HALO_TEAMS_RECLAUDE_RUNS_ROOT"]
-    os.makedirs(root, exist_ok=True)
-    fake = FakeRunner(root)
+    fake = FakeRunner(pkg.reclaude.RUNNERS)
     monkeypatch.setitem(pkg.reclaude._launcher, "fn", fake)
     plan, errors = pkg.plan.validate_plan(json.loads(json.dumps(PLAN)))
     assert not errors
@@ -234,3 +240,137 @@ def test_one_reclaude_member_runs_at_a_time(pkg, setup, monkeypatch):
     slug2 = pkg.common.board_slug(other)
     pkg.reclaude.tick_board(slug2, pkg.common.read_team(slug2))
     assert sum(1 for c in s.fake.calls if c[1] == "run") == 1
+
+
+def _runner_team(pkg, s, members):
+    plan, errors = pkg.plan.validate_plan({
+        "members": [{"name": n, "role": n, "executor": e} for n, e in members],
+        "tasks": [{"key": f"T{i}", "title": n, "description": f"写 {n}.md", "member": n}
+                  for i, (n, _e) in enumerate(members, 1)],
+    })
+    assert not errors
+    team_id = str(uuid.uuid4())
+    created = pkg.teams.create_team(team_id, plan, owner="u1")
+    slug = pkg.common.board_slug(team_id)
+    s.mine.append(slug)
+
+    def tick():
+        pkg.reclaude.tick_board(slug, pkg.common.read_team(slug))
+
+    def run_meta(key):
+        with pkg.common.board_conn(slug) as conn:
+            return pkg.reclaude._run_meta(conn, _kb().get_task(conn, created["tasks"][key]).current_run_id)
+
+    def task(key):
+        with pkg.common.board_conn(slug) as conn:
+            return _kb().get_task(conn, created["tasks"][key])
+
+    return team_id, created["tasks"], tick, run_meta, task
+
+
+def test_every_runner_is_a_valid_executor_and_not_spawned_by_the_dispatcher(pkg):
+    for name in ("reclaude", "cchclaude", "anyclaude", "codex", "agy"):
+        plan, errors = pkg.plan.validate_plan({"members": [{"name": "mm", "role": "r", "executor": name}],
+                                               "tasks": [{"key": "T1", "title": "x", "member": "mm"}]})
+        assert not errors and plan["members"][0]["executor"] == name
+        assert pkg.common.EXECUTOR_ASSIGNEE[name] == name and pkg.common.is_runner(name)
+    _plan, errors = pkg.plan.validate_plan({"members": [{"name": "mm", "role": "r", "executor": "gpt"}],
+                                            "tasks": [{"key": "T1", "title": "x", "member": "mm"}]})
+    assert errors
+
+
+def test_codex_member_runs_through_codex_run_sh_and_completes(pkg, setup):
+    s = setup
+    codex = pkg.reclaude.RUNNERS["codex"]
+    team_id, tasks, tick, run_meta, task = _runner_team(pkg, s, [("coder", "codex")])
+    tick()
+    argv = s.fake.calls[-1]
+    assert argv[0] == codex.script and argv[1] == "run" and "--max-turns" not in argv and "--no-vault-archive" in argv
+    meta = run_meta("T1")
+    run_id = meta["runner_run_id"]
+    assert meta["runner"] == "codex" and os.path.isdir(os.path.join(codex.runs_root, run_id))
+    s.fake.progress(run_id, ["20:37:03 [tool#1] shell: /bin/bash -lc pwd"], _root=str(codex.runs_root))
+    s.fake.write(run_id, status="success", _root=str(codex.runs_root))
+    s.fake.result(run_id, "写好了 coder.md", _root=str(codex.runs_root))
+    tick()
+    assert task("T1").status == "done" and "coder.md" in (task("T1").result or "")
+    tl = pkg.teams.timeline(team_id, "u1")
+    assert [e["data"]["name"] for e in tl["events"] if e["type"] == "tool"] == ["shell"]
+    assert any(e["type"] == "runner" and e["data"]["runner"] == "codex" for e in tl["events"])
+    detail = pkg.teams.task_detail(team_id, tasks["T1"], owner="u1", log=True)
+    assert detail["log"]["source"] == f"codex {run_id}" and "[tool#1] shell" in detail["log"]["text"]
+
+
+def test_agy_question_is_answered_with_a_fixed_run_id_and_its_response_is_the_handoff(pkg, setup):
+    s = setup
+    agy = pkg.reclaude.RUNNERS["agy"]
+    root = str(agy.runs_root)
+    team_id, tasks, tick, run_meta, task = _runner_team(pkg, s, [("designer", "agy")])
+    tick()
+    argv = s.fake.calls[-1]
+    assert argv[0] == agy.script and "--max-turns" not in argv
+    run_id = run_meta("T1")["runner_run_id"]
+    s.fake.write(run_id, status="question", _root=root)
+    s.fake.result(run_id, "QUESTION: 用蓝色还是绿色？", _root=root, key="response")
+    tick()
+    snap = next(t for t in pkg.teams.snapshot(team_id, "u1")["tasks"] if t["key"] == "T1")
+    assert snap["sub_status"] == "waiting_user" and "蓝色" in snap["current_run"]["question"]
+    out = pkg.teams.post_message(team_id, tasks["T1"], "用绿色", author_name="Ace", owner="u1")
+    assert out["expect"].startswith("agy 不能在运行中接收消息")
+    tick()
+    answer = s.fake.calls[-1]
+    assert answer[1] == "answer" and answer[2] == run_id
+    assert answer[answer.index("--run-id") + 1] == f"{run_id}-a1" and "--max-turns" not in answer
+    assert run_meta("T1")["runner_run_id"] == f"{run_id}-a1"
+    s.fake.write(f"{run_id}-a1", status="success", _root=root)
+    s.fake.result(f"{run_id}-a1", "绿色方案写在 designer.md", _root=root, key="response")
+    tick()
+    assert task("T1").status == "done" and "designer.md" in (task("T1").result or "")
+
+
+def test_runner_failure_reason_counts_as_failed_for_every_runner(pkg, setup):
+    s = setup
+    cch = pkg.reclaude.RUNNERS["cchclaude"]
+    team_id, tasks, tick, run_meta, task = _runner_team(pkg, s, [("helper", "cchclaude")])
+    tick()
+    run_id = run_meta("T1")["runner_run_id"]
+    assert s.fake.calls[-1][0] == cch.script and "--max-turns" in s.fake.calls[-1]
+    s.fake.write(run_id, status="error", _root=str(cch.runs_root))
+    tick()
+    snap = next(t for t in pkg.teams.snapshot(team_id, "u1")["tasks"] if t["key"] == "T1")
+    assert task("T1").status == "blocked" and snap["sub_status"] == "failed"
+    tl = pkg.teams.timeline(team_id, "u1")
+    assert any(e["type"] == "runner" and e["data"]["phase"] == "failed" and e["text"].startswith("cchclaude 运行失败")
+               for e in tl["events"])
+
+
+def test_one_member_per_runner_kind_at_a_time_but_kinds_do_not_block_each_other(pkg, setup, monkeypatch):
+    s = setup
+    monkeypatch.setattr(pkg.reclaude, "_host_cap", lambda: None)  # earlier tests leave running tasks on other boards
+    _team_id, _tasks, tick, _run_meta, task = _runner_team(
+        pkg, s, [("c1", "codex"), ("c2", "codex"), ("a1", "anyclaude")])
+    tick()
+    started = [c[0] for c in s.fake.calls if c[1] == "run"]
+    assert started.count(pkg.reclaude.RUNNERS["codex"].script) == 1
+    assert started.count(pkg.reclaude.RUNNERS["anyclaude"].script) == 1
+    assert {task("T1").status, task("T2").status} == {"running", "ready"} and task("T3").status == "running"
+
+
+def test_stop_passes_the_runner_kind_to_stop_run(pkg, setup, monkeypatch):
+    s = setup
+    codex = pkg.reclaude.RUNNERS["codex"]
+    team_id, _tasks, tick, run_meta, _task = _runner_team(pkg, s, [("coder", "codex")])
+    tick()
+    run_id = run_meta("T1")["runner_run_id"]
+    seen = []
+
+    async def fake_stop(meta, stopped_by=""):
+        seen.append((meta["_agent"], meta["_dir"], meta["run_id"]))
+        s.fake.write(meta["run_id"], status="stopped", _root=str(codex.runs_root))
+        return ""
+
+    import gateway.runner_dispatch as rd
+
+    monkeypatch.setattr(rd, "stop_run", fake_stop)
+    pkg.teams.control(team_id, "stop", owner="u1")
+    assert seen == [("codex", str(codex.runs_root / run_id), run_id)]

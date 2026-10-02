@@ -2,7 +2,8 @@ import { WEBUI_API_BASE_URL } from '$lib/constants';
 
 /** 协作台 (agent teams) API — see backend/open_webui/routers/teams.py. */
 
-export type TeamExecutor = 'hermes' | 'reclaude';
+/** A Hermes agent, or one of the runners Hermes drives (each brings its own model and account). */
+export type TeamExecutor = 'hermes' | 'reclaude' | 'cchclaude' | 'anyclaude' | 'codex' | 'agy';
 
 export type TeamPlanMember = {
 	name: string;

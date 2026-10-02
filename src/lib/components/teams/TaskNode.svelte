@@ -3,7 +3,7 @@
 
 	import StatusChip from './StatusChip.svelte';
 	import TeamAvatar from './TeamAvatar.svelte';
-	import { toneOf } from './model';
+	import { isRunnerExecutor, toneOf } from './model';
 	import { TONE_BORDER } from './tones';
 
 	type $$Props = NodeProps;
@@ -33,8 +33,8 @@
 	<div class="mt-1 flex items-center gap-1.5 min-w-0 text-[11px] text-gray-500 dark:text-gray-400">
 		<TeamAvatar kind={data?.avatar} size={18} />
 		<span class="truncate">{data?.member}</span>
-		{#if data?.executor === 'reclaude'}
-			<span class="shrink-0 rounded bg-gray-100 px-1 text-[10px] text-gray-600 dark:bg-gray-800 dark:text-gray-300">reclaude</span>
+		{#if isRunnerExecutor(data?.executor)}
+			<span class="shrink-0 rounded bg-gray-100 px-1 text-[10px] text-gray-600 dark:bg-gray-800 dark:text-gray-300">{data.executor}</span>
 		{/if}
 		{#if data?.waitingFor?.length}
 			<span class="ml-auto shrink-0 text-amber-600 dark:text-amber-400">等 {data.waitingFor.join('、')}</span>

@@ -26,11 +26,20 @@ META_KEY = "halowebui_team"
 # task_events.task_id for team-level events (approve, pause, stop): the column is NOT NULL
 # without a foreign key, and no task id starts with "_" (Kanban ids are t_<hex>).
 TEAM_EVENT_TASK = "_team"
-EXECUTORS = ("hermes", "reclaude")
+# The external runners in ~/.hermes/scripts that a member can be run by (same run-directory
+# protocol: meta.json / progress.log / result.*, QUESTION: + answer in the same session).
+RUNNER_EXECUTORS = ("reclaude", "cchclaude", "anyclaude", "codex", "agy")
+EXECUTORS = ("hermes", *RUNNER_EXECUTORS)
 # Kanban assignee per executor. "default" is the Hermes profile the gateway's dispatcher
-# spawns; "reclaude" is not a profile, so the dispatcher leaves it to an external claimer
+# spawns; a runner name is not a profile, so the dispatcher leaves it to an external claimer
 # (skipped_nonspawnable) and the bridge in this plugin runs it.
-EXECUTOR_ASSIGNEE = {"hermes": "default", "reclaude": "reclaude"}
+EXECUTOR_ASSIGNEE = {"hermes": "default", **{name: name for name in RUNNER_EXECUTORS}}
+# Reason prefix of a task the bridge blocked because its runner run failed.
+RUNNER_FAIL_PREFIXES = tuple(f"{name} 运行失败" for name in RUNNER_EXECUTORS)
+
+
+def is_runner(executor: Any) -> bool:
+    return executor in RUNNER_EXECUTORS
 ASSIGNEE_EXECUTOR = {v: k for k, v in EXECUTOR_ASSIGNEE.items()}
 LEAD_NAME = "team-lead"
 _TEAM_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]{7,63}$")

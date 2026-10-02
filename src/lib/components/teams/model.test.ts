@@ -5,7 +5,10 @@ import {
 	avatarKind,
 	countStates,
 	deliveryAt,
+	EXECUTOR_LABEL,
+	EXECUTOR_OPTIONS,
 	foldStates,
+	isRunnerExecutor,
 	layoutTasks,
 	memberStatus,
 	mergeEvents,
@@ -141,5 +144,17 @@ describe('avatars', () => {
 		expect(avatarKind({ name: 'reviewer', role: '技术评审' })).toBe('reviewer');
 		expect(avatarKind({ name: 'x', role: '杂项' })).toBe('generic');
 		expect(avatarKind({ name: 'reviewer' }, true)).toBe('lead');
+	});
+});
+
+describe('executors', () => {
+	it('offers Hermes and every runner, and only runners count as runners', () => {
+		expect(EXECUTOR_OPTIONS.map((o) => o.value)).toEqual(['hermes', 'reclaude', 'cchclaude', 'anyclaude', 'codex', 'agy']);
+		expect(EXECUTOR_LABEL.hermes).toBe('Hermes 代理');
+		expect(EXECUTOR_LABEL.codex).toBe('codex');
+		expect(['reclaude', 'cchclaude', 'anyclaude', 'codex', 'agy'].every(isRunnerExecutor)).toBe(true);
+		expect(isRunnerExecutor('hermes')).toBe(false);
+		expect(isRunnerExecutor('gpt')).toBe(false);
+		expect(isRunnerExecutor(undefined)).toBe(false);
 	});
 });

@@ -637,7 +637,8 @@ def test_follow_up_opens_a_new_chat_with_the_conclusion_for_a_team_without_one(h
     from open_webui.utils import hermes_sessions
 
     async def model(request, user, model_id=None):
-        return {"id": "hermes.hermes-agent", "name": "Hermes", "model_ref": "conn::hermes-agent"}
+        return {"id": "conn.hermes-agent", "selection_id": "modelref::openai::personal::id:conn::hermes-agent",
+                "name": "Hermes", "model_ref": {"provider": "openai", "connection_id": "conn"}}
 
     monkeypatch.setattr(hermes_sessions, "resolve_hermes_model", model)
     from open_webui.utils import hermes_notify
@@ -656,8 +657,10 @@ def test_follow_up_opens_a_new_chat_with_the_conclusion_for_a_team_without_one(h
     notice = history["messages"][reply["parentId"]]
     assert notice["role"] == "user" and notice["hermes_notice"] == {"source": "team", "run_id": f"team:{team_id}:1700000123"}
     assert "/root/work/agent-teams/halo-x" in notice["content"]
-    assert reply["role"] == "assistant" and reply["done"] is True and reply["model"] == "hermes.hermes-agent"
-    assert reply["model_ref"] == "conn::hermes-agent" and "# 结论" in reply["content"]
+    assert reply["role"] == "assistant" and reply["done"] is True
+    assert reply["model"] == "modelref::openai::personal::id:conn::hermes-agent"
+    assert chat.chat["models"] == [reply["model"]] and notice["models"] == [reply["model"]]
+    assert reply["model_ref"] == {"provider": "openai", "connection_id": "conn"} and "# 结论" in reply["content"]
     row = AgentTeams.get(team_id, "u1")
     assert row.chat_id == body["chat_id"] and row.meta["chat_posted"]["generated_at"] == 1700000123
     # again: back to the same chat, the conclusion is already there

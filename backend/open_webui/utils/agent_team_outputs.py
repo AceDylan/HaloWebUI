@@ -210,14 +210,17 @@ async def concluded(request, team: AgentTeamModel, target: HermesTarget, *, tele
 def _new_chat(user_id: str, title: str, model: dict, notice: str, content: str, *, source: str,
               run: str) -> str:
     from open_webui.utils.hermes_notify import append_report_turn
+    from open_webui.utils.model_identity import get_model_selection_id
 
-    model_info = {"model": model["id"], "modelName": model.get("name") or model["id"], "modelIdx": 0}
+    # The id the model picker stores for this model (modelref::…), as a chat started in the page has.
+    selection = get_model_selection_id(model)
+    model_info = {"model": selection, "modelName": model.get("name") or selection, "modelIdx": 0}
     if model.get("model_ref") is not None:
         model_info["model_ref"] = model["model_ref"]
     chat: dict = {
         "id": "",
         "title": title,
-        "models": [model["id"]],
+        "models": [selection],
         "params": {},
         "files": [],
         "history": {"messages": {}, "currentId": None},
@@ -227,7 +230,7 @@ def _new_chat(user_id: str, title: str, model: dict, notice: str, content: str, 
     }
     user_message, assistant_message = append_report_turn(chat, notice, content, model_info, source=source, run_id=run)
     messages = chat["history"]["messages"]
-    messages[user_message]["models"] = [model["id"]]
+    messages[user_message]["models"] = [selection]
     chat["messages"] = [messages[user_message], messages[assistant_message]]
     created = Chats.insert_new_chat(user_id, ChatForm(chat=chat, title_auto_generated=False))
     if created is None:

@@ -47,6 +47,12 @@
 	$: canWrite = !replay && !teamStopped && task && !['done', 'archived'].includes(state?.status ?? '');
 	$: canRetry = !replay && !teamStopped && task && ['failed', 'blocked'].includes(state?.sub_status ?? '');
 	$: memberTasks = memberName ? tasks.filter((t) => t.member === memberName) : [];
+	// A note to a member goes to the task it is on now, else its next unfinished one.
+	$: memberTarget =
+		memberTasks.find((t) => ['running', 'review'].includes(states.get(t.id)?.status ?? t.status)) ??
+		memberTasks.find((t) => !['done', 'archived'].includes(states.get(t.id)?.status ?? t.status)) ??
+		null;
+	$: canWriteMember = !replay && !teamStopped && !!memberTarget;
 	$: memberTools = memberName
 		? events.filter((e) => e.member === memberName && (e.type === 'tool' || e.type === 'subagent')).slice(-40).reverse()
 		: [];
@@ -88,10 +94,11 @@
 
 	const send = async () => {
 		const body = note.trim();
-		if (!body || !taskId || sending) return;
+		const target = taskId ?? memberTarget?.id ?? null;
+		if (!body || !target || sending) return;
 		sending = true;
 		try {
-			const result = await sendTeamMessage(localStorage.token, teamId, taskId, body);
+			const result = await sendTeamMessage(localStorage.token, teamId, target, body);
 			note = '';
 			lastExpect = result.expect;
 			dispatch('changed');
@@ -288,6 +295,34 @@
 		{/if}
 	{:else if member}
 		{#if member.focus}<p class="text-xs text-gray-600 dark:text-gray-300">{member.focus}</p>{/if}
+		{#if canWriteMember && memberTarget}
+			<form class="flex flex-col gap-1.5" on:submit|preventDefault={send} data-member-note>
+				<label class="text-xs font-medium text-gray-600 dark:text-gray-300" for="team-member-note-{member.name}"
+					>给 {member.name} 补充说明（发到它{['running', 'review'].includes(states.get(memberTarget.id)?.status ?? memberTarget.status)
+						? '正在做'
+						: '接下来要做'}的 #{memberTarget.key}）</label
+				>
+				<textarea
+					id="team-member-note-{member.name}"
+					bind:value={note}
+					rows="3"
+					maxlength="4000"
+					class="w-full resize-y rounded-xl border border-gray-200 bg-white px-2.5 py-2 text-sm outline-none focus:border-sky-400 dark:border-gray-800 dark:bg-gray-900"
+					placeholder={member.executor === 'reclaude'
+						? 'reclaude 运行中收不到消息，会在它这一轮结束后续跑送达'
+						: '成员正在执行时，会在当前这批工具调用结束后读到'}
+					on:keydown={(e) => {
+						if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) send();
+					}}
+				/>
+				<button
+					type="submit"
+					class="self-start rounded-xl bg-sky-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-sky-700 disabled:opacity-50"
+					disabled={sending || !note.trim()}>{sending ? '发送中…' : '发送'}</button
+				>
+				{#if lastExpect}<div class="text-xs text-violet-700 dark:text-violet-300">已排队：{lastExpect}</div>{/if}
+			</form>
+		{/if}
 		<div>
 			<div class="text-xs font-medium text-gray-600 dark:text-gray-300">负责的任务</div>
 			<ul class="mt-1 space-y-1">

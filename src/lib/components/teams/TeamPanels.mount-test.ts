@@ -1,7 +1,7 @@
 // 协作台: the communication feed and the replay bar, mounted in a DOM. The feed shows a note's
 // delivery as it stood at the replay cursor; the replay bar only moves a cursor (seek events),
 // it never calls an API.
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { installDominoDom } from '$lib/test-support/domino-dom';
 
 installDominoDom('http://localhost/');
@@ -48,6 +48,10 @@ const mount = async (Component: any, props: Record<string, unknown>) => {
 	await sleep(5);
 	return app;
 };
+
+beforeEach(() => {
+	(globalThis as any).localStorage.token = 'tok';
+});
 
 afterEach(() => {
 	app?.$destroy();
@@ -112,5 +116,31 @@ describe('ReplayBar', () => {
 		await sleep(5);
 		expect(seeks[seeks.length - 1]).toBeNull();
 		for (const fn of Object.values(api)) expect(fn).not.toHaveBeenCalled();
+	});
+});
+
+describe('Inspector (member)', () => {
+	it('sends a note to the task the selected member is on, and is read-only in a replay', async () => {
+		api.sendTeamMessage.mockResolvedValue({ comment_id: 7, delivery: 'queued', expect: '成员正在执行：会在它当前这批工具调用结束后读到' });
+		const { default: Inspector } = await import('./Inspector.svelte');
+		const tasks = [
+			{ id: 't_1', key: 'T1', seq: 1, title: '写接口', member: 'backend-dev', executor: 'hermes', status: 'done', sub_status: 'done', parents: [], children: [], attempts: 1 },
+			{ id: 't_2', key: 'T2', seq: 2, title: '写测试', member: 'backend-dev', executor: 'hermes', status: 'running', sub_status: 'running', parents: [], children: [], attempts: 1 }
+		];
+		const states = new Map(tasks.map((t) => [t.id, { status: t.status, sub_status: t.sub_status }]));
+		const members = [{ name: 'backend-dev', role: '后端开发', executor: 'hermes', status: 'running' }];
+		await mount(Inspector, { teamId: 'team-1', memberName: 'backend-dev', tasks, states, members, events: [] });
+		expect(target.querySelectorAll('[data-member-note]').length).toBe(1);
+		expect(target.textContent).toContain('正在做的 #T2');
+		const textarea = target.querySelector('[data-member-note] textarea') as any;
+		textarea.value = '加上错误处理';
+		textarea.dispatchEvent(new (globalThis as any).Event('input', { bubbles: true }));
+		await sleep(5);
+		(target.querySelector('[data-member-note]') as any).dispatchEvent(new (globalThis as any).Event('submit', { bubbles: true, cancelable: true }));
+		await sleep(20);
+		expect(api.sendTeamMessage).toHaveBeenCalledWith('tok', 'team-1', 't_2', '加上错误处理');
+		app.$set({ replay: true });
+		await sleep(5);
+		expect(target.querySelectorAll('[data-member-note]').length).toBe(0);
 	});
 });

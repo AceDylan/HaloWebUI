@@ -220,6 +220,9 @@ def test_reply_to_plan_replans_and_plain_approve_approves(linked, monkeypatch):
     assert _run(lambda: linked.telegram.on_pre_gateway_dispatch(event=_event("批准")))
     assert calls[-1] == ("approve", team_id)
     assert linked.telegram.on_pre_gateway_dispatch(event=_event("批准")) is None  # nothing open any more
+    linked.telegram.remember_message(TG_USER, 503, {"team": team_id, "kind": "plan", "owner": OWNER})
+    linked.telegram.close_plan_cards(team_id, "approved")  # approved in the browser meanwhile
+    assert linked.telegram.on_pre_gateway_dispatch(event=_event("批准")) is None
 
 
 def test_reply_to_question_answers_the_member(linked, monkeypatch):

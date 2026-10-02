@@ -176,6 +176,19 @@ def mark_acted(chat_id: Any, message_id: Any, how: str) -> None:
             _save(data)
 
 
+def close_plan_cards(team_id: str, how: str) -> None:
+    """The team's plan was approved somewhere (button, text, browser): its cards are answered."""
+    with _store_lock:
+        data = _load()
+        changed = False
+        for entry in data.values():
+            if entry.get("team") == team_id and entry.get("kind") in ("plan", "plan_failed") and not entry.get("acted"):
+                entry["acted"] = how
+                changed = True
+        if changed:
+            _save(data)
+
+
 def latest_open_plan(chat_id: Any) -> Optional[tuple[str, dict]]:
     """The newest plan card in this chat nobody acted on yet, if it is recent."""
     prefix = f"{chat_id}:"

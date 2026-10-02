@@ -196,6 +196,12 @@ def create_team(team_id: str, plan: dict, *, owner: str, chat_id: str = "", goal
                         "text": f"{chosen} 现在不可用，改由 {executor} 执行（{trail[0]['reason'] or '原因未知'}）"})
         update_team(slug, lambda rec: rec.update({"tasks": task_map, "keys": keys}))
     nudge_dispatch(slug)
+    try:  # a plan card in Telegram for this team is answered now, wherever it was approved
+        from .tg import close_plan_cards
+
+        close_plan_cards(team_id, "approved")
+    except Exception:  # noqa: BLE001
+        logger.debug("halowebui-teams: could not close the plan cards of %s", team_id, exc_info=True)
     return {"board": slug, "created": True, "tasks": keys}
 
 

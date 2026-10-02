@@ -325,3 +325,26 @@ def test_completion_is_recorded_once(pkg, team_id, plan_dict):
     assert snap["team"]["phase"] == "completed" and snap["team"]["lead"]["status"] == "done"
     events = pkg.teams.timeline(team_id, "u1")["events"]
     assert sum(1 for ev in events if ev["type"] == "team" and ev["data"]["action"] == "completed") == 1
+
+
+def test_note_read_through_kanban_show_counts_as_delivered(pkg, team_id, plan_dict, monkeypatch):
+    first = _create(pkg, team_id, plan_dict)
+    kb = _kb()
+    slug = pkg.common.board_slug(team_id)
+    t1 = first["tasks"]["T1"]
+    with pkg.common.board_conn(slug) as conn:
+        kb.claim_task(conn, t1, claimer="w1")
+    out = pkg.teams.post_message(team_id, t1, "最后一行写上已收到", author_name="Ace", owner="u1")
+    from tools import kanban_tools
+
+    monkeypatch.setenv("HERMES_KANBAN_BOARD", slug)
+    monkeypatch.setenv("HERMES_KANBAN_TASK", t1)
+    pkg.hooks._state.update({"tool_events": 0, "truncated": False, "delivered_upto": None, "read_upto": 0,
+                             "reported": set()})
+    kanban_tools._comment_watermark[t1] = out["comment_id"]  # first poll seeded past it: never steered
+    pkg.hooks.on_post_tool_call(tool_name="kanban_show", args={"task_id": t1})
+    pkg.hooks.on_post_tool_call(tool_name="kanban_show", args={"task_id": t1})  # no second delivery
+    events = pkg.teams.timeline(team_id, "u1")["events"]
+    note = next(ev for ev in events if ev["type"] == "message")
+    assert note["data"]["delivered_via"] == "task_read"
+    assert sum(1 for ev in events if ev["type"] == "delivery") == 1

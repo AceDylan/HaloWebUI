@@ -258,6 +258,7 @@ export const deliveryAt = (ev: TeamEvent, cursorSeq: number | null): Delivery | 
 				steer: '已送达（运行中注入）',
 				attempt_context: '已随新的执行尝试送达',
 				runner_answer: '已通过续跑送达',
+				task_read: '已送达（成员读取任务时看到）',
 				runner_task: '已写入任务说明'
 			} as Record<string, string>)[via] ?? '已送达';
 		return { state: 'delivered', via, label };

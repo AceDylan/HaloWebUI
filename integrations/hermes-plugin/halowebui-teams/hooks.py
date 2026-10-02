@@ -27,7 +27,7 @@ MAX_TOOL_EVENTS_PER_RUN = int(os.environ.get("HALO_TEAMS_MAX_TOOL_EVENTS", "400"
 # Kanban tools that already leave their own events (complete → handoff, comment → message, …).
 SKIP_TOOLS = {"kanban_heartbeat", "kanban_show", "kanban_complete", "kanban_block", "kanban_comment",
               "kanban_request_review", "todo"}
-_state = {"tool_events": 0, "truncated": False, "delivered_upto": None}
+_state = {"tool_events": 0, "truncated": False, "delivered_upto": None, "read_upto": 0, "reported": set()}
 _state_lock = threading.Lock()
 _subagent_ids: dict[str, str] = {}
 
@@ -107,11 +107,36 @@ def _check_delivery() -> None:
                 "SELECT id, author FROM task_comments WHERE task_id = ? AND id > ? AND id <= ? ORDER BY id",
                 (task, previous, mark),
             ).fetchall()
-            ids = [int(r[0]) for r in rows if (r[1] or "").strip() != own and str(r[1] or "").startswith("user:")]
+            ids = [int(r[0]) for r in rows if (r[1] or "").strip() != own and str(r[1] or "").startswith("user:")
+                   and int(r[0]) not in _state["reported"]]
             if ids:
+                _state["reported"].update(ids)
                 append_event(conn, task, "halo_comment_delivered", {"comment_ids": ids, "via": "steer"}, run_id=run_id)
     except Exception:
         logger.debug("halowebui-teams: delivery check failed", exc_info=True)
+
+
+def _record_read() -> None:
+    """kanban_show returns the task's comments: user notes that existed when the member read its
+    task reached it that way (the usual path for a note written just after the member started)."""
+    ctx = _context()
+    if ctx is None:
+        return
+    board, task, run_id = ctx
+    try:
+        with board_conn(board) as conn:
+            rows = conn.execute(
+                "SELECT id FROM task_comments WHERE task_id = ? AND id > ? AND author LIKE 'user:%' ORDER BY id",
+                (task, int(_state["read_upto"] or 0)),
+            ).fetchall()
+            ids = [int(r[0]) for r in rows if int(r[0]) not in _state["reported"]]
+            if rows:
+                _state["read_upto"] = max(int(r[0]) for r in rows)
+            if ids:
+                _state["reported"].update(ids)
+                append_event(conn, task, "halo_comment_delivered", {"comment_ids": ids, "via": "task_read"}, run_id=run_id)
+    except Exception:
+        logger.debug("halowebui-teams: read check failed", exc_info=True)
 
 
 def on_post_tool_call(tool_name: str = "", args: Any = None, result: Any = None, task_id: str = "",
@@ -119,6 +144,8 @@ def on_post_tool_call(tool_name: str = "", args: Any = None, result: Any = None,
     if _context() is None:
         return
     try:
+        if tool_name == "kanban_show" and not str(task_id or "").startswith("sa-"):
+            _record_read()
         _check_delivery()
         if tool_name in SKIP_TOOLS:
             return

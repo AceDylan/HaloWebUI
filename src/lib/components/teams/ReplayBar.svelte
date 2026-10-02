@@ -129,7 +129,7 @@
 			on:click={goLive}>回到实时</button
 		>
 	{/if}
-	<label class="flex min-w-[180px] flex-1 items-center gap-2">
+	<label class="flex min-w-[160px] flex-1 items-center gap-2">
 		<span class="sr-only">回放时间轴</span>
 		<input
 			type="range"
@@ -142,7 +142,7 @@
 			aria-valuetext="{formatClock(at)}，第 {cursor + 1} / {events.length} 条记录"
 		/>
 		<span class="font-mono tabular-nums text-gray-500 dark:text-gray-400 whitespace-nowrap">
-			{formatClock(at)} · {formatDuration(at - start)}/{formatDuration(end - start)}
+			{formatClock(at)}<span class="hidden sm:inline"> · {formatDuration(at - start)}/{formatDuration(end - start)}</span>
 		</span>
 	</label>
 	{#if !live && compressed && playing}

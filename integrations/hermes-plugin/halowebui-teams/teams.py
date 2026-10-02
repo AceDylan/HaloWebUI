@@ -667,6 +667,7 @@ def _delivery_text(via: Optional[str]) -> str:
         "attempt_context": "补充说明已随新的执行尝试送达",
         "runner_answer": "补充说明已通过续跑送达 reclaude",
         "runner_task": "补充说明已写入 reclaude 的任务说明",
+        "task_read": "成员读取任务时看到了补充说明",
     }.get(via or "", "补充说明已送达")
 
 

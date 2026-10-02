@@ -669,7 +669,7 @@
 						<div class="min-w-0 flex-1">
 							<div class="text-sm font-semibold text-gray-900 dark:text-gray-50">
 								全部 {counts.total} 个任务已完成{#if team.approved_at && team.finished_at}<span
-										class="tm-num ml-2 text-xs font-normal text-gray-500"
+										class="tm-num ml-2 inline-block whitespace-nowrap text-xs font-normal text-gray-500"
 										>用时 {elapsed(team.finished_at - team.approved_at)}</span
 									>{/if}
 							</div>
@@ -775,6 +775,27 @@
 															等 {openParents(t, states)
 																.map((p) => `#${keyOf.get(p) ?? p}`)
 																.join('、')} 完成
+														</div>
+													{:else if toneOf(s?.sub_status) === 'run'}
+														{@const act = activity.get(t.member)}
+														<div
+															class="mt-1 flex min-w-0 items-center gap-1.5 font-mono text-[11px]"
+															data-task-activity
+														>
+															<span class="shrink-0 text-sky-500" aria-hidden="true">›</span>
+															<span
+																class="tm-caret min-w-0 truncate text-gray-600 dark:text-gray-300"
+																>{act?.text ?? '开始执行…'}</span
+															>
+															{#if !replay && t.started_at}
+																<span class="tm-num ml-auto shrink-0 text-sky-600 dark:text-sky-300"
+																	>{elapsed($now - t.started_at)}</span
+																>
+															{/if}
+														</div>
+													{:else if s?.status === 'done' && !replay && t.started_at && t.completed_at}
+														<div class="tm-num mt-0.5 text-[11px] text-gray-400">
+															用时 {elapsed(t.completed_at - t.started_at)}
 														</div>
 													{/if}
 												</button>

@@ -60,6 +60,7 @@ STATUS_BY_KIND = {
     "spawn_failed": "ready",
     "protocol_violation": "ready",
     "reconciled": "ready",
+    "unblocked": "ready",   # payload is None exactly when it went back to ready
 }
 ATTEMPT_END_KINDS = {"completed", "crashed", "timed_out", "stale", "reclaimed", "rate_limited",
                      "spawn_failed", "protocol_violation", "gave_up", "blocked", "review_requested"}

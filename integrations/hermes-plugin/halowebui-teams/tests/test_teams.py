@@ -132,6 +132,8 @@ def test_timeline_fold_matches_live_rows_and_pages_without_duplicates(pkg, team_
     assert msg["who"] == "member" and msg["member"] == "backend-dev" and msg["text"] == "我先写接口草稿"
     blocked = next(ev for ev in full["events"] if ev["kind"] == "blocked")
     assert blocked["sub_status"] == "blocked" and "缺少设计稿" in blocked["text"]
+    unblocked = next(ev for ev in full["events"] if ev["kind"] == "unblocked")
+    assert (unblocked["status"], unblocked["sub_status"]) == ("ready", "queued")
     # Paging: small pages concatenate to the full list, no duplicates.
     seen, after = [], 0
     while True:

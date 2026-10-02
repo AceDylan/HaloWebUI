@@ -677,7 +677,7 @@
 						<div class="min-w-0 flex-1">
 							<div class="text-sm font-semibold text-gray-900 dark:text-gray-50">
 								全部 {counts.total} 个任务已完成{#if team.approved_at && team.finished_at}<span
-										class="tm-num ml-2 inline-block whitespace-nowrap text-xs font-normal text-gray-500"
+										class="tm-num block whitespace-nowrap text-xs font-normal text-gray-500 sm:ml-2 sm:inline-block"
 										>用时 {elapsed(team.finished_at - team.approved_at)}</span
 									>{/if}
 							</div>

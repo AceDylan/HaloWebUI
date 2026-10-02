@@ -10,9 +10,25 @@
 		type TaskDetail,
 		type TeamEvent
 	} from '$lib/apis/teams';
+	import { teamFilePath } from '$lib/apis/teams';
+	import ReportMarkdown from './ReportMarkdown.svelte';
+	import RunnerBadge from './RunnerBadge.svelte';
 	import StatusChip from './StatusChip.svelte';
 	import TeamAvatar from './TeamAvatar.svelte';
-	import { avatarKind, EXECUTOR_LABEL, formatClock, isRunnerExecutor, openParents, type TaskState } from './model';
+	import {
+		avatarKind,
+		formatClock,
+		isRunnerExecutor,
+		KIND_LABEL,
+		memberRunner,
+		openParents,
+		prepareReport,
+		RUNNER_PHASE_LABEL,
+		runnerLabel,
+		SOURCE_LABEL,
+		taskRunner,
+		type TaskState
+	} from './model';
 
 	/** Details of the selected task or member. Read-only in a replay. */
 	export let teamId: string;
@@ -20,7 +36,22 @@
 	export let memberName: string | null = null;
 	export let tasks: LiveTask[] = [];
 	export let states: Map<string, TaskState> = new Map();
-	export let members: { name: string; role: string; executor: string; focus?: string; status?: string }[] = [];
+	export let members: {
+		name: string;
+		role: string;
+		executor: string;
+		focus?: string;
+		status?: string;
+		kind?: string;
+		assistant?: { id: string; name: string; emoji?: string; description?: string } | null;
+		recommended?: string;
+		executor_source?: string;
+		runner?: string | null;
+		runner_note?: string;
+		actualRunner?: string | null;
+	}[] = [];
+	/** Workspace of the team: absolute paths in a result that point into it become links. */
+	export let workspace: string | null = null;
 	export let events: TeamEvent[] = [];
 	export let replay = false;
 	export let teamStopped = false;
@@ -40,12 +71,19 @@
 	let loadedFor = '';
 
 	$: task = tasks.find((t) => t.id === taskId) ?? null;
-	$: state = task ? (states.get(task.id) ?? { status: task.status, sub_status: task.sub_status }) : null;
+	$: state = task
+		? (states.get(task.id) ?? { status: task.status, sub_status: task.sub_status })
+		: null;
 	$: member = members.find((m) => m.name === (task ? task.member : memberName)) ?? null;
 	$: keyOf = new Map(tasks.map((t) => [t.id, t.key]));
-	$: waitingFor = task && state?.sub_status === 'waiting_deps' ? openParents(task, states).map((p) => keyOf.get(p) ?? p) : [];
-	$: canWrite = !replay && !teamStopped && task && !['done', 'archived'].includes(state?.status ?? '');
-	$: canRetry = !replay && !teamStopped && task && ['failed', 'blocked'].includes(state?.sub_status ?? '');
+	$: waitingFor =
+		task && state?.sub_status === 'waiting_deps'
+			? openParents(task, states).map((p) => keyOf.get(p) ?? p)
+			: [];
+	$: canWrite =
+		!replay && !teamStopped && task && !['done', 'archived'].includes(state?.status ?? '');
+	$: canRetry =
+		!replay && !teamStopped && task && ['failed', 'blocked'].includes(state?.sub_status ?? '');
 	$: memberTasks = memberName ? tasks.filter((t) => t.member === memberName) : [];
 	// A note to a member goes to the task it is on now, else its next unfinished one.
 	$: memberTarget =
@@ -54,9 +92,23 @@
 		null;
 	$: canWriteMember = !replay && !teamStopped && !!memberTarget;
 	$: memberTools = memberName
-		? events.filter((e) => e.member === memberName && (e.type === 'tool' || e.type === 'subagent')).slice(-40).reverse()
+		? events
+				.filter((e) => e.member === memberName && (e.type === 'tool' || e.type === 'subagent'))
+				.slice(-40)
+				.reverse()
 		: [];
-	$: taskEvents = task ? events.filter((e) => e.task_id === task.id && e.type !== 'tool').slice(-30).reverse() : [];
+	$: taskEvents = task
+		? events
+				.filter((e) => e.task_id === task.id && e.type !== 'tool')
+				.slice(-30)
+				.reverse()
+		: [];
+	$: decision = task ? taskRunner(task) : null;
+	$: trail = task?.trail ?? detail?.runner?.trail ?? [];
+	$: memberDecision = member ? memberRunner(member) : null;
+	$: resultMd = detail?.result
+		? prepareReport(detail.result, { workspace, fileUrl: (path) => teamFilePath(teamId, path) })
+		: '';
 
 	const load = async (id: string) => {
 		loading = true;
@@ -124,22 +176,31 @@
 	};
 </script>
 
-<section class="flex flex-col gap-3 text-sm min-w-0" aria-label={task ? `任务 ${task.key} 详情` : `成员 ${memberName} 详情`} data-team-inspector>
+<section
+	class="flex flex-col gap-3 text-sm min-w-0"
+	aria-label={task ? `任务 ${task.key} 详情` : `成员 ${memberName} 详情`}
+	data-team-inspector
+>
 	<div class="flex items-start gap-2">
 		<div class="min-w-0 flex-1">
 			{#if task}
 				<div class="flex items-center gap-2 flex-wrap">
 					<span class="font-mono text-xs font-semibold text-gray-500">#{task.key}</span>
 					<StatusChip status={state?.sub_status} size="sm" />
-					{#if task.attempts > 0}<span class="text-xs text-gray-400">{task.attempts} 次执行</span>{/if}
+					{#if task.attempts > 0}<span class="text-xs text-gray-400">{task.attempts} 次执行</span
+						>{/if}
 				</div>
-				<h3 class="mt-1 font-semibold text-gray-900 dark:text-gray-100 break-words">{task.title}</h3>
+				<h3 class="mt-1 font-semibold text-gray-900 dark:text-gray-100 break-words">
+					{task.title}
+				</h3>
 			{:else if member}
 				<div class="flex items-center gap-2.5">
 					<TeamAvatar kind={avatarKind(member)} status={member.status} size={40} />
 					<div class="min-w-0">
 						<h3 class="font-semibold text-gray-900 dark:text-gray-100">{member.name}</h3>
-						<div class="text-xs text-gray-500">{member.role} · {EXECUTOR_LABEL[member.executor] ?? member.executor}</div>
+						<div class="truncate text-xs text-gray-500">
+							{member.role}{member.kind ? ` · ${KIND_LABEL[member.kind] ?? member.kind}` : ''}
+						</div>
 					</div>
 				</div>
 			{/if}
@@ -153,7 +214,9 @@
 	</div>
 
 	{#if replay}
-		<div class="rounded-xl bg-sky-50 px-3 py-2 text-xs text-sky-800 dark:bg-sky-950/40 dark:text-sky-200">
+		<div
+			class="rounded-xl bg-sky-50 px-3 py-2 text-xs text-sky-800 dark:bg-sky-950/40 dark:text-sky-200"
+		>
 			回放中：这里只显示到当前时点的记录，发送说明、重试等操作已停用。回到实时后可以操作。
 		</div>
 	{/if}
@@ -162,27 +225,83 @@
 		{#if member}
 			<div class="flex items-center gap-2 text-xs text-gray-500">
 				<TeamAvatar kind={avatarKind(member)} size={22} />
-				<span>{member.name}（{member.role}）· {EXECUTOR_LABEL[task.executor] ?? task.executor}</span>
+				<span class="min-w-0 truncate"
+					>{member.name}（{member.assistant?.emoji
+						? `${member.assistant.emoji} `
+						: ''}{member.role}）</span
+				>
+			</div>
+		{/if}
+		{#if decision}
+			<div
+				class="rounded-xl border border-gray-100 px-3 py-2 text-xs dark:border-gray-850"
+				data-task-runner
+			>
+				<div class="flex flex-wrap items-center gap-x-2 gap-y-1">
+					<span class="text-gray-500">执行来源</span>
+					<RunnerBadge
+						chosen={decision.chosen}
+						actual={decision.actual}
+						reason={decision.reason}
+						size="sm"
+					/>
+					<span class="text-gray-400">{SOURCE_LABEL[decision.source] ?? ''}</span>
+				</div>
+				{#if decision.changed && decision.chosen !== decision.actual}
+					<div class="mt-1 text-amber-800 dark:text-amber-200">
+						默认 {runnerLabel(decision.chosen)}，实际由 {runnerLabel(decision.actual)} 执行{decision.reason
+							? `：${decision.reason}`
+							: ''}
+					</div>
+				{/if}
+				{#if trail.length}
+					<ol
+						class="mt-1.5 space-y-0.5 border-t border-gray-100 pt-1.5 dark:border-gray-850"
+						aria-label="改派记录"
+					>
+						{#each trail as step}
+							<li class="flex gap-1.5 text-gray-500">
+								<time class="shrink-0 font-mono text-gray-400">{formatClock(step.at)}</time>
+								<span class="min-w-0 break-words"
+									>{RUNNER_PHASE_LABEL[step.phase] ?? step.phase}：{runnerLabel(step.from)} → {step.to
+										? runnerLabel(step.to)
+										: '无可用'}{step.reason ? `（${step.reason}）` : ''}</span
+								>
+							</li>
+						{/each}
+					</ol>
+				{/if}
 			</div>
 		{/if}
 		{#if waitingFor.length}
-			<div class="rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
+			<div
+				class="rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:bg-amber-950/40 dark:text-amber-200"
+			>
 				等待前置任务：{waitingFor.map((k) => `#${k}`).join('、')} 完成后才会开始（由派发器检查依赖，不会提前执行）。
 			</div>
 		{/if}
 		{#if task.block_reason && !replay}
-			<div class="rounded-xl bg-red-50 px-3 py-2 text-xs text-red-800 dark:bg-red-950/40 dark:text-red-200 whitespace-pre-wrap break-words">
+			<div
+				class="rounded-xl bg-red-50 px-3 py-2 text-xs text-red-800 dark:bg-red-950/40 dark:text-red-200 whitespace-pre-wrap break-words"
+			>
 				{task.block_reason}
 			</div>
 		{/if}
 		{#if !replay && task.current_run?.question}
-			<div class="rounded-xl bg-violet-50 px-3 py-2 text-xs text-violet-900 dark:bg-violet-950/40 dark:text-violet-100 whitespace-pre-wrap break-words">
-				<div class="font-semibold mb-1">{task.executor} 在等你回答：</div>{task.current_run.question}
+			<div
+				class="rounded-xl bg-violet-50 px-3 py-2 text-xs text-violet-900 dark:bg-violet-950/40 dark:text-violet-100 whitespace-pre-wrap break-words"
+			>
+				<div class="font-semibold mb-1">{task.executor} 在等你回答：</div>
+				{task.current_run.question}
 			</div>
 		{/if}
 		{#if !replay && task.current_run?.runner_phase === 'quota_wait'}
-			<div class="rounded-xl bg-orange-50 px-3 py-2 text-xs text-orange-900 dark:bg-orange-950/40 dark:text-orange-100">
-				额度等待中（不是失败）：{task.current_run.resume_at ? `约 ${task.current_run.resume_at} 自动续跑同一会话` : '额度恢复后自动继续'}
+			<div
+				class="rounded-xl bg-orange-50 px-3 py-2 text-xs text-orange-900 dark:bg-orange-950/40 dark:text-orange-100"
+			>
+				额度等待中（不是失败）：{task.current_run.resume_at
+					? `约 ${task.current_run.resume_at} 自动续跑同一会话`
+					: '额度恢复后自动继续'}
 			</div>
 		{/if}
 
@@ -203,13 +322,24 @@
 			{/if}
 			{#if detail}
 				<details class="group">
-					<summary class="cursor-pointer text-xs font-medium text-gray-600 dark:text-gray-300">任务说明</summary>
-					<div class="mt-1 max-h-60 overflow-y-auto whitespace-pre-wrap break-words rounded-xl bg-gray-50 p-2 text-xs text-gray-700 dark:bg-gray-850 dark:text-gray-300">{detail.body}</div>
+					<summary class="cursor-pointer text-xs font-medium text-gray-600 dark:text-gray-300"
+						>任务说明</summary
+					>
+					<div
+						class="mt-1 max-h-60 overflow-y-auto whitespace-pre-wrap break-words rounded-xl bg-gray-50 p-2 text-xs text-gray-700 dark:bg-gray-850 dark:text-gray-300"
+					>
+						{detail.body}
+					</div>
 				</details>
-				{#if detail.result}
+				{#if resultMd}
 					<div>
 						<div class="text-xs font-medium text-gray-600 dark:text-gray-300">结果 / 交接</div>
-						<div class="mt-1 max-h-60 overflow-y-auto whitespace-pre-wrap break-words rounded-xl bg-emerald-50/60 p-2 text-xs text-gray-800 dark:bg-emerald-950/20 dark:text-gray-200">{detail.result}</div>
+						<div
+							class="mt-1 max-h-96 overflow-y-auto rounded-xl border border-emerald-100 bg-emerald-50/40 px-3 py-2 dark:border-emerald-900/40 dark:bg-emerald-950/15"
+							data-task-result
+						>
+							<ReportMarkdown id={`team-task-${task.key}`} content={resultMd} />
+						</div>
 					</div>
 				{/if}
 				{#if detail.attempts.length}
@@ -217,16 +347,28 @@
 						<div class="text-xs font-medium text-gray-600 dark:text-gray-300">执行尝试</div>
 						<ol class="mt-1 space-y-1">
 							{#each detail.attempts as attempt (attempt.id)}
-								<li class="rounded-xl border border-gray-100 px-2 py-1.5 text-xs dark:border-gray-850">
+								<li
+									class="rounded-xl border border-gray-100 px-2 py-1.5 text-xs dark:border-gray-850"
+								>
 									<div class="flex items-center gap-2 flex-wrap">
 										<span class="font-medium">第 {attempt.n} 次</span>
 										<span class="text-gray-500">{attempt.outcome ?? attempt.status}</span>
-										<span class="text-gray-400 font-mono">{formatClock(attempt.started_at)}{attempt.ended_at ? ` – ${formatClock(attempt.ended_at)}` : ''}</span>
+										<span class="text-gray-400 font-mono"
+											>{formatClock(attempt.started_at)}{attempt.ended_at
+												? ` – ${formatClock(attempt.ended_at)}`
+												: ''}</span
+										>
 									</div>
 									{#if attempt.runner_run_id}
-										<div class="mt-0.5 text-gray-500 font-mono break-all">{attempt.runner ?? task.executor} run {attempt.runner_run_id}{attempt.parent_runner_run_id ? `（接续 ${attempt.parent_runner_run_id}）` : ''}</div>
+										<div class="mt-0.5 text-gray-500 font-mono break-all">
+											{attempt.runner ?? task.executor} run {attempt.runner_run_id}{attempt.parent_runner_run_id
+												? `（接续 ${attempt.parent_runner_run_id}）`
+												: ''}
+										</div>
 									{/if}
-									{#if attempt.error}<div class="mt-0.5 text-red-600 break-words">{attempt.error}</div>{/if}
+									{#if attempt.error}<div class="mt-0.5 text-red-600 break-words">
+											{attempt.error}
+										</div>{/if}
 								</li>
 							{/each}
 						</ol>
@@ -235,11 +377,17 @@
 				<div>
 					{#if logText}
 						<div class="flex items-center justify-between text-xs">
-							<span class="font-medium text-gray-600 dark:text-gray-300">日志（{logText.source}，最后一段）</span>
-							<button type="button" class="text-sky-600 hover:underline" on:click={loadLog}>刷新</button>
+							<span class="font-medium text-gray-600 dark:text-gray-300"
+								>日志（{logText.source}，最后一段）</span
+							>
+							<button type="button" class="text-sky-600 hover:underline" on:click={loadLog}
+								>刷新</button
+							>
 						</div>
 						{#if logText.note}<div class="text-xs text-gray-400">{logText.note}</div>{/if}
-						<pre class="mt-1 max-h-72 overflow-auto whitespace-pre-wrap break-words rounded-xl bg-gray-900 p-2 text-[11px] leading-snug text-gray-100">{logText.text || '（空）'}</pre>
+						<pre
+							class="mt-1 max-h-72 overflow-auto whitespace-pre-wrap break-words rounded-xl bg-gray-900 p-2 text-[11px] leading-snug text-gray-100">{logText.text ||
+								'（空）'}</pre>
 					{:else}
 						<button
 							type="button"
@@ -259,7 +407,11 @@
 					{#each taskEvents as ev (ev.id)}
 						<li class="flex gap-1.5 text-gray-600 dark:text-gray-400">
 							<time class="font-mono text-gray-400 shrink-0">{formatClock(ev.ts)}</time>
-							<span class="break-words min-w-0">{ev.type === 'message' ? `${ev.who === 'user' ? ev.author ?? '你' : ev.member}：` : ''}{ev.text ?? ''}</span>
+							<span class="break-words min-w-0"
+								>{ev.type === 'message'
+									? `${ev.who === 'user' ? (ev.author ?? '你') : ev.member}：`
+									: ''}{ev.text ?? ''}</span
+							>
 						</li>
 					{/each}
 				</ol>
@@ -268,7 +420,10 @@
 
 		{#if canWrite}
 			<form class="flex flex-col gap-1.5" on:submit|preventDefault={send}>
-				<label class="text-xs font-medium text-gray-600 dark:text-gray-300" for="team-note-{task.id}">给 {task.member} 补充说明</label>
+				<label
+					class="text-xs font-medium text-gray-600 dark:text-gray-300"
+					for="team-note-{task.id}">给 {task.member} 补充说明</label
+				>
 				<textarea
 					id="team-note-{task.id}"
 					bind:value={note}
@@ -290,15 +445,50 @@
 					>
 					<span class="text-[11px] text-gray-400">Ctrl+Enter 发送 · 只发给这个任务的成员</span>
 				</div>
-				{#if lastExpect}<div class="text-xs text-violet-700 dark:text-violet-300">已排队：{lastExpect}</div>{/if}
+				{#if lastExpect}<div class="text-xs text-violet-700 dark:text-violet-300">
+						已排队：{lastExpect}
+					</div>{/if}
 			</form>
 		{/if}
 	{:else if member}
 		{#if member.focus}<p class="text-xs text-gray-600 dark:text-gray-300">{member.focus}</p>{/if}
+		<dl
+			class="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1.5 rounded-xl border border-gray-100 px-3 py-2 text-xs dark:border-gray-850"
+			data-member-profile
+		>
+			<dt class="text-gray-500">助手模板</dt>
+			<dd class="min-w-0 text-gray-800 dark:text-gray-200">
+				{#if member.assistant}
+					<span title={member.assistant.description ?? ''}
+						>{member.assistant.emoji ?? ''} {member.assistant.name}</span
+					>
+				{:else}
+					<span class="text-gray-500">自定义角色（没有合适的模板）</span>
+				{/if}
+			</dd>
+			<dt class="text-gray-500">执行来源</dt>
+			<dd class="flex min-w-0 flex-wrap items-center gap-1.5">
+				<RunnerBadge
+					chosen={member.executor}
+					actual={member.actualRunner ?? memberDecision?.actual ?? member.executor}
+					size="sm"
+				/>
+				<span class="text-gray-400"
+					>{SOURCE_LABEL[memberDecision?.source ?? 'auto']}{member.recommended &&
+					member.recommended !== member.executor
+						? `（推荐 ${runnerLabel(member.recommended)}）`
+						: ''}</span
+				>
+			</dd>
+		</dl>
 		{#if canWriteMember && memberTarget}
 			<form class="flex flex-col gap-1.5" on:submit|preventDefault={send} data-member-note>
-				<label class="text-xs font-medium text-gray-600 dark:text-gray-300" for="team-member-note-{member.name}"
-					>给 {member.name} 补充说明（发到它{['running', 'review'].includes(states.get(memberTarget.id)?.status ?? memberTarget.status)
+				<label
+					class="text-xs font-medium text-gray-600 dark:text-gray-300"
+					for="team-member-note-{member.name}"
+					>给 {member.name} 补充说明（发到它{['running', 'review'].includes(
+						states.get(memberTarget.id)?.status ?? memberTarget.status
+					)
 						? '正在做'
 						: '接下来要做'}的 #{memberTarget.key}）</label
 				>
@@ -320,7 +510,9 @@
 					class="self-start rounded-xl bg-sky-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-sky-700 disabled:opacity-50"
 					disabled={sending || !note.trim()}>{sending ? '发送中…' : '发送'}</button
 				>
-				{#if lastExpect}<div class="text-xs text-violet-700 dark:text-violet-300">已排队：{lastExpect}</div>{/if}
+				{#if lastExpect}<div class="text-xs text-violet-700 dark:text-violet-300">
+						已排队：{lastExpect}
+					</div>{/if}
 			</form>
 		{/if}
 		<div>
@@ -348,7 +540,11 @@
 			{:else}
 				<ol class="mt-1 space-y-0.5 font-mono text-[11px] text-gray-600 dark:text-gray-400">
 					{#each memberTools as ev (ev.id)}
-						<li class="break-words"><span class="text-gray-400">{formatClock(ev.ts)}</span> {ev.data?.name ?? (ev.data?.phase === 'start' ? '子代理开始' : '子代理结束')} {ev.text ?? ''}</li>
+						<li class="break-words">
+							<span class="text-gray-400">{formatClock(ev.ts)}</span>
+							{ev.data?.name ?? (ev.data?.phase === 'start' ? '子代理开始' : '子代理结束')}
+							{ev.text ?? ''}
+						</li>
 					{/each}
 				</ol>
 			{/if}

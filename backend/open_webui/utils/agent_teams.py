@@ -98,6 +98,34 @@ async def hermes_call(target: HermesTarget, method: str, path: str, *, json_body
         raise TeamsError(502, f"连不上 Hermes：{type(exc).__name__}") from exc
 
 
+FILE_MAX_BYTES = 26 * 1024 * 1024
+
+
+async def hermes_file(target: HermesTarget, path: str, *, timeout: int = 60) -> tuple[bytes, dict]:
+    """A raw (non-JSON) GET from the plugin API: (body, headers). TeamsError on failure."""
+    try:
+        async with aiohttp.ClientSession(trust_env=True, timeout=aiohttp.ClientTimeout(total=timeout)) as session:
+            async with session.get(target.url(path), headers=target.headers, ssl=AIOHTTP_CLIENT_SESSION_SSL) as resp:
+                if resp.status >= 400:
+                    try:
+                        body = await resp.json(content_type=None)
+                    except Exception:
+                        body = await resp.text()
+                    raise TeamsError(resp.status if resp.status in (400, 404, 409) else 502, _message(body, resp.status))
+                if (resp.content_length or 0) > FILE_MAX_BYTES:
+                    raise TeamsError(413, "文件太大")
+                data = await resp.content.read(FILE_MAX_BYTES + 1)
+                if len(data) > FILE_MAX_BYTES:
+                    raise TeamsError(413, "文件太大")
+                return data, dict(resp.headers)
+    except TeamsError:
+        raise
+    except asyncio.TimeoutError as exc:
+        raise TeamsError(504, f"Hermes 超过 {timeout} 秒没有响应") from exc
+    except aiohttp.ClientError as exc:
+        raise TeamsError(502, f"连不上 Hermes：{type(exc).__name__}") from exc
+
+
 # --- planning ---------------------------------------------------------------------------------
 
 def _keep(task: "asyncio.Task") -> None:

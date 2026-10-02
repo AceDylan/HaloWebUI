@@ -4,10 +4,18 @@
 	import { toast } from 'svelte-sonner';
 
 	import { mobile, showSidebar } from '$lib/stores';
-	import { createTeam, listTeams, type Team } from '$lib/apis/teams';
+	import {
+		checkRunners,
+		createTeam,
+		getTeamsMeta,
+		listTeams,
+		type Team,
+		type TeamsMeta
+	} from '$lib/apis/teams';
 	import MenuLines from '$lib/components/icons/MenuLines.svelte';
+	import RunnerStatus from './RunnerStatus.svelte';
 	import StatusChip from './StatusChip.svelte';
-	import { EXECUTOR_LABEL, PHASE_LABEL } from './model';
+	import { PHASE_LABEL, runnerLabel } from './model';
 
 	/** Your collaboration tasks (only yours) and a box to start a new one. */
 	let teams: Team[] = [];
@@ -16,10 +24,13 @@
 	let goal = '';
 	let creating = false;
 	let chatId: string | null = null;
+	let meta: TeamsMeta | null = null;
+	let metaError = '';
+	let checking = false;
 
 	$: chatTeams = chatId ? teams.filter((t) => t.chat_id === chatId) : [];
 
-	const statusOf = (t: Team) => (t.status === 'running' ? t.phase ?? 'running' : t.status);
+	const statusOf = (t: Team) => (t.status === 'running' ? (t.phase ?? 'running') : t.status);
 	const chipOf = (s: string) =>
 		({
 			planning: 'running',
@@ -46,6 +57,30 @@
 		}
 	};
 
+	const loadMeta = async () => {
+		try {
+			meta = await getTeamsMeta(localStorage.token);
+			metaError = '';
+		} catch (e) {
+			metaError = `${e?.message ?? e}`;
+		}
+	};
+
+	const recheck = async () => {
+		if (checking) return;
+		checking = true;
+		try {
+			const registry = await checkRunners(localStorage.token);
+			meta = meta ? { ...meta, registry } : meta;
+			if (!meta) await loadMeta();
+			metaError = '';
+		} catch (e) {
+			metaError = `${e?.message ?? e}`;
+		} finally {
+			checking = false;
+		}
+	};
+
 	const create = async () => {
 		const text = goal.trim();
 		if (!text || creating) return;
@@ -66,13 +101,18 @@
 		chatId = params.get('chat');
 		goal = params.get('goal') ?? '';
 		load();
+		loadMeta();
 	});
 </script>
 
 <div class="relative flex h-screen max-h-[100dvh] w-full flex-col" data-teams-home>
 	<nav class="flex items-center gap-2 px-3 pt-2 pb-1">
 		<div class="{$mobile ? '' : 'hidden'} flex flex-none items-center">
-			<button class="rounded-xl p-1.5 hover:bg-gray-100 dark:hover:bg-gray-850" on:click={() => showSidebar.set(!$showSidebar)} aria-label="切换侧栏"><MenuLines /></button>
+			<button
+				class="rounded-xl p-1.5 hover:bg-gray-100 dark:hover:bg-gray-850"
+				on:click={() => showSidebar.set(!$showSidebar)}
+				aria-label="切换侧栏"><MenuLines /></button
+			>
 		</div>
 		<h1 class="text-sm font-semibold text-gray-900 dark:text-gray-100">协作台</h1>
 	</nav>
@@ -80,17 +120,29 @@
 		<div class="mx-auto flex max-w-3xl flex-col gap-5 pt-2">
 			{#if chatId}
 				<div class="flex items-center gap-2 text-xs">
-					<a href="/c/{chatId}" class="rounded-xl px-2.5 py-1 text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-850">← 返回对话</a>
+					<a
+						href="/c/{chatId}"
+						class="rounded-xl px-2.5 py-1 text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-850"
+						>← 返回对话</a
+					>
 				</div>
 				{#if chatTeams.length}
 					<section aria-label="这个对话的协作任务">
-						<h2 class="mb-2 text-sm font-semibold text-gray-900 dark:text-gray-100">这个对话的协作任务</h2>
+						<h2 class="mb-2 text-sm font-semibold text-gray-900 dark:text-gray-100">
+							这个对话的协作任务
+						</h2>
 						<ul class="flex flex-col gap-2">
 							{#each chatTeams as team (team.id)}
 								<li>
-									<a href="/teams/{team.id}" class="flex items-center gap-3 rounded-2xl border border-sky-200 bg-sky-50/50 px-4 py-3 hover:border-sky-300 dark:border-sky-900 dark:bg-sky-950/20">
+									<a
+										href="/teams/{team.id}"
+										class="flex items-center gap-3 rounded-2xl border border-sky-200 bg-sky-50/50 px-4 py-3 hover:border-sky-300 dark:border-sky-900 dark:bg-sky-950/20"
+									>
 										<span class="min-w-0 flex-1 truncate text-sm font-medium">{team.title}</span>
-										<StatusChip status={chipOf(statusOf(team))} label={PHASE_LABEL[statusOf(team)] ?? statusOf(team)} />
+										<StatusChip
+											status={chipOf(statusOf(team))}
+											label={PHASE_LABEL[statusOf(team)] ?? statusOf(team)}
+										/>
 										<span class="text-xs text-sky-700 dark:text-sky-300">打开协作台 →</span>
 									</a>
 								</li>
@@ -99,11 +151,17 @@
 					</section>
 				{/if}
 			{/if}
-			<form class="flex flex-col gap-2 rounded-2xl border border-gray-100 p-4 dark:border-gray-850" on:submit|preventDefault={create}>
-				<label for="team-goal" class="text-sm font-semibold text-gray-900 dark:text-gray-100">发起协作任务</label>
+			<form
+				class="flex flex-col gap-2 rounded-2xl border border-gray-100 p-4 dark:border-gray-850"
+				on:submit|preventDefault={create}
+			>
+				<label for="team-goal" class="text-sm font-semibold text-gray-900 dark:text-gray-100"
+					>发起协作任务</label
+				>
 				<p class="text-xs text-gray-500">
 					写下要多个代理一起完成的事。负责人会先给出成员分工和带依赖的任务计划，你批准后才开始执行。
-					{#if chatId}<span class="text-sky-700 dark:text-sky-300">会关联到你刚才的对话。</span>{/if}
+					{#if chatId}<span class="text-sky-700 dark:text-sky-300">会关联到你刚才的对话。</span
+						>{/if}
 				</p>
 				<textarea
 					id="team-goal"
@@ -122,9 +180,21 @@
 						class="rounded-xl bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-800 disabled:opacity-50 dark:bg-gray-100 dark:text-gray-900"
 						disabled={creating || !goal.trim()}>{creating ? '提交中…' : '让负责人做计划'}</button
 					>
-					<span class="text-xs text-gray-400">做计划只调用一次模型，不会启动任何成员</span>
+					<span class="text-xs text-gray-400" data-lead-model
+						>做计划只调用一次模型，不会启动任何成员{#if meta?.lead_model?.model}
+							· 负责人模型 <span class="font-mono text-gray-600 dark:text-gray-300"
+								>{meta.lead_model.model}</span
+							>{meta.lead_model.label ? `（${meta.lead_model.label}）` : ''}{/if}</span
+					>
 				</div>
 			</form>
+
+			<RunnerStatus
+				registry={meta?.registry ?? null}
+				{checking}
+				error={metaError}
+				on:check={recheck}
+			/>
 
 			<section>
 				<h2 class="mb-2 text-sm font-semibold text-gray-900 dark:text-gray-100">我的协作任务</h2>
@@ -133,25 +203,43 @@
 				{:else if error}
 					<div class="text-sm text-red-600" role="alert">{error}</div>
 				{:else if teams.length === 0}
-					<div class="rounded-2xl bg-gray-50 px-4 py-6 text-center text-sm text-gray-500 dark:bg-gray-850">还没有协作任务</div>
+					<div
+						class="rounded-2xl bg-gray-50 px-4 py-6 text-center text-sm text-gray-500 dark:bg-gray-850"
+					>
+						还没有协作任务
+					</div>
 				{:else}
 					<ul class="flex flex-col gap-2">
 						{#each teams as team (team.id)}
-							<li>
+							<li
+								class="relative flex items-center gap-3 rounded-2xl border border-gray-100 px-4 py-3 transition hover:border-gray-200 hover:bg-gray-50/50 dark:border-gray-850 dark:hover:border-gray-700 dark:hover:bg-gray-900/40"
+							>
 								<a
 									href="/teams/{team.id}"
-									class="flex items-center gap-3 rounded-2xl border border-gray-100 px-4 py-3 hover:border-gray-200 dark:border-gray-850 dark:hover:border-gray-700"
+									class="min-w-0 flex-1 after:absolute after:inset-0 after:rounded-2xl focus:outline-none focus-visible:after:ring-2 focus-visible:after:ring-sky-400"
 								>
-									<div class="min-w-0 flex-1">
-										<div class="truncate text-sm font-medium text-gray-900 dark:text-gray-100">{team.title}</div>
-										<div class="truncate text-xs text-gray-500">
-											{new Date(team.updated_at * 1000).toLocaleString('zh-CN', { hour12: false })}
-											{#if team.task_count} · {team.member_count} 位成员 · {team.task_count} 个任务{/if}
-											{#if team.executors?.length} · {team.executors.map((e) => EXECUTOR_LABEL[e] ?? e).join(' + ')}{/if}
-										</div>
+									<div class="truncate text-sm font-medium text-gray-900 dark:text-gray-100">
+										{team.title}
 									</div>
-									<StatusChip status={chipOf(statusOf(team))} label={PHASE_LABEL[statusOf(team)] ?? statusOf(team)} />
+									<div class="truncate text-xs text-gray-500">
+										{new Date(team.updated_at * 1000).toLocaleString('zh-CN', { hour12: false })}
+										{#if team.task_count}
+											· {team.member_count} 位成员 · {team.task_count} 个任务{/if}
+										{#if team.executors?.length}
+											· {team.executors.map(runnerLabel).join(' + ')}{/if}
+									</div>
 								</a>
+								{#if statusOf(team) === 'completed' || statusOf(team) === 'stopped'}
+									<a
+										href="/teams/{team.id}/conclusion"
+										class="relative z-10 hidden shrink-0 rounded-lg px-2 py-1 text-xs font-medium text-emerald-700 transition hover:bg-emerald-50 sm:inline-flex dark:text-emerald-300 dark:hover:bg-emerald-950/40"
+										>结论</a
+									>
+								{/if}
+								<StatusChip
+									status={chipOf(statusOf(team))}
+									label={PHASE_LABEL[statusOf(team)] ?? statusOf(team)}
+								/>
 							</li>
 						{/each}
 					</ul>

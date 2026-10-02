@@ -180,6 +180,56 @@ def test_edit_plan_executors_only_before_approval(hermes):
     assert bad.status_code == 422
 
 
+def test_edit_plan_records_the_users_choice_and_lets_hermes_resolve_the_runner(hermes):
+    client = _client("u1")
+    team_id = _ready_team(client, hermes)
+    resolved = {**PLAN, "members": [
+        {**PLAN["members"][0]},
+        {**PLAN["members"][1], "executor": "codex", "executor_source": "user", "runner": "agy",
+         "runner_note": "codex 没有登录"}]}
+    hermes.responses[("POST", "/plan/resolve")] = {"ok": True, "plan": resolved}
+    resp = client.put(f"/api/v1/teams/{team_id}/plan", json={"members": [{"name": "reviewer", "executor": "codex"}]})
+    assert resp.status_code == 200
+    sent = next(c for c in hermes.calls if c[2] == "/plan/resolve")[3]["plan"]
+    assert sent["members"][1]["executor"] == "codex" and sent["members"][1]["executor_source"] == "user"
+    member = resp.json()["plan"]["members"][1]
+    assert member["runner"] == "agy" and "没有登录" in member["runner_note"]
+    assert resp.json()["plan"]["executors"] == ["agy", "hermes"]
+    # "auto" goes back to the kind's recommendation.
+    AgentTeams.update(team_id, "u1", plan={**PLAN, "members": [PLAN["members"][0], {**PLAN["members"][1], "recommended": "cchclaude"}]})
+    hermes.responses.pop(("POST", "/plan/resolve"))
+    resp = client.put(f"/api/v1/teams/{team_id}/plan", json={"members": [{"name": "reviewer", "executor": "codex", "source": "auto"}]})
+    member = resp.json()["plan"]["members"][1]
+    assert member["executor"] == "cchclaude" and member["executor_source"] == "auto" and member["runner"] == "cchclaude"
+
+
+def test_meta_conclusion_and_files_are_proxied_per_owner(hermes, monkeypatch):
+    client, other = _client("u1"), _client("u2")
+    hermes.responses[("GET", "/meta")] = {"lead_model": {"model": "gpt-chat"}}
+    assert client.get("/api/v1/teams/meta").json()["lead_model"]["model"] == "gpt-chat"
+    team_id = _ready_team(client, hermes)
+    assert client.get(f"/api/v1/teams/{team_id}/conclusion").json()["status"] == "none"  # not started: no call
+    AgentTeams.update(team_id, "u1", status="running", board="halo-x")
+    hermes.responses[("GET", "/conclusion")] = {"status": "ready", "markdown": "# 结论"}
+    assert client.get(f"/api/v1/teams/{team_id}/conclusion").json()["markdown"] == "# 结论"
+    assert hermes.calls[-1][:3] == ("u1", "GET", f"/{team_id}/conclusion")
+    hermes.responses[("POST", "/conclusion")] = {"status": "generating"}
+    assert client.post(f"/api/v1/teams/{team_id}/conclusion").json()["status"] == "generating"
+    fetched = []
+
+    async def fake_file(target, path, timeout=60):
+        fetched.append((target.headers["X-Halo-Owner"], path))
+        return b"\x89PNG", {"Content-Type": "image/png", "Content-Disposition": "inline", "Server": "x"}
+
+    monkeypatch.setattr(teams_router, "hermes_file", fake_file)
+    resp = client.get(f"/api/v1/teams/{team_id}/files/shots/home%20page.png")
+    assert resp.status_code == 200 and resp.content == b"\x89PNG" and resp.headers["content-type"] == "image/png"
+    assert resp.headers["x-content-type-options"] == "nosniff" and "server" not in resp.headers
+    assert fetched == [("u1", f"/{team_id}/files/shots/home%20page.png")]
+    for path in ("/conclusion", "/files", "/files/a.png"):
+        assert other.get(f"/api/v1/teams/{team_id}{path}").status_code == 404
+
+
 def test_replan_sends_feedback_and_previous_plan(hermes):
     client = _client("u1")
     team_id = _ready_team(client, hermes)

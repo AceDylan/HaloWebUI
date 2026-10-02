@@ -20,6 +20,7 @@ from open_webui.utils.agent_teams import (
     TeamsError,
     default_title,
     hermes_call,
+    hermes_file,
     hermes_target,
     public_team,
     reconcile,
@@ -58,8 +59,11 @@ class ReplanForm(BaseModel):
 
 class MemberExecutor(BaseModel):
     name: str = Field(max_length=40)
-    # Hermes members, or one of the runners the Hermes teams plugin can drive (see its reclaude.py).
+    # Hermes members, or one of the runners the Hermes teams plugin can drive (see its runners.py).
     executor: Literal["hermes", "reclaude", "cchclaude", "anyclaude", "codex", "agy"]
+    # "user": the user picked this runner (the automatic choice never overrides it; it still falls
+    # back when the runner is down). "auto": back to the runner the member's task kind defaults to.
+    source: Literal["user", "auto"] = "user"
 
 
 class PlanEditForm(BaseModel):
@@ -72,6 +76,29 @@ class MessageForm(BaseModel):
 
 class ControlForm(BaseModel):
     action: Literal["pause", "resume", "stop"]
+
+
+class RunnerCheckForm(BaseModel):
+    names: list[str] = Field(default_factory=list, max_length=12)
+
+
+@router.get("/meta", dependencies=[Depends(_enabled)])
+async def meta(request: Request, user=Depends(get_verified_user)):
+    """The lead's model (Hermes' default), runners with availability, task kinds, assistant templates."""
+    try:
+        target = await hermes_target(request, user)
+        return await hermes_call(target, "GET", "/meta", timeout=40)
+    except TeamsError as exc:
+        _raise(exc)
+
+
+@router.post("/runners/check", dependencies=[Depends(_enabled)])
+async def check_runners(request: Request, form: RunnerCheckForm, user=Depends(get_verified_user)):
+    try:
+        target = await hermes_target(request, user)
+        return await hermes_call(target, "POST", "/runners/check", json_body={"names": form.names}, timeout=40)
+    except TeamsError as exc:
+        _raise(exc)
 
 
 @router.get("/", dependencies=[Depends(_enabled)])
@@ -127,20 +154,37 @@ async def replan(request: Request, team_id: str, form: ReplanForm, user=Depends(
 
 
 @router.put("/{team_id}/plan", dependencies=[Depends(_enabled)])
-async def edit_plan(team_id: str, form: PlanEditForm, user=Depends(get_verified_user)):
+async def edit_plan(request: Request, team_id: str, form: PlanEditForm, user=Depends(get_verified_user)):
     team = _own(team_id, user)
     if team.status not in ("plan_ready", "start_failed") or not team.plan:
         raise HTTPException(status_code=409, detail="只有待批准的计划可以修改")
     plan = dict(team.plan)
-    chosen = {m.name: m.executor for m in form.members}
+    chosen = {m.name: m for m in form.members}
     members = []
     for member in plan.get("members") or []:
         member = dict(member)
-        if member.get("name") in chosen:
-            member["executor"] = chosen[member["name"]]
+        pick = chosen.get(member.get("name"))
+        if pick is not None:
+            member["executor"] = pick.executor
+            member["executor_source"] = pick.source
+            if pick.source == "auto":
+                member["executor"] = member.get("recommended") or pick.executor
         members.append(member)
     plan["members"] = members
-    plan["executors"] = sorted({m.get("executor") or "hermes" for m in members})
+    # Hermes works out which runner will actually run each member now (availability, fallback).
+    resolved = None
+    try:
+        target = await hermes_target(request, user)
+        resolved = await hermes_call(target, "POST", "/plan/resolve", json_body={"plan": plan}, timeout=40)
+    except TeamsError as exc:
+        log.info("teams: plan resolve unavailable (%s); keeping the edit as is", exc.detail)
+    if isinstance(resolved, dict) and isinstance(resolved.get("plan"), dict):
+        plan = resolved["plan"]
+    else:  # Hermes is checked again at approval; until then show the choice as the runner
+        for member in plan["members"]:
+            member["runner"] = member.get("executor")
+            member["runner_note"] = ""
+    plan["executors"] = sorted({m.get("runner") or m.get("executor") or "hermes" for m in plan["members"]})
     updated = AgentTeams.update(team.id, user.id, expect_status=("plan_ready", "start_failed"), plan=plan)
     if updated is None:
         raise HTTPException(status_code=409, detail="计划状态已变化，请刷新")
@@ -255,6 +299,60 @@ async def control(request: Request, team_id: str, form: ControlForm, user=Depend
     elif form.action in ("pause", "resume"):
         AgentTeams.update(team.id, user.id, phase="paused" if form.action == "pause" else "running")
     return result
+
+
+@router.get("/{team_id}/conclusion", dependencies=[Depends(_enabled)])
+async def get_conclusion(request: Request, team_id: str, user=Depends(get_verified_user)):
+    team = _own(team_id, user)
+    if team.status != "running":
+        return {"status": "none", "markdown": "", "tasks": [], "files": [], "entry": {}}
+    try:
+        target = await hermes_target(request, user)
+        return await hermes_call(target, "GET", f"/{team.id}/conclusion", timeout=40)
+    except TeamsError as exc:
+        _raise(exc)
+
+
+@router.post("/{team_id}/conclusion", dependencies=[Depends(_enabled)])
+async def make_conclusion(request: Request, team_id: str, user=Depends(get_verified_user)):
+    team, target = await _running_target(request, team_id, user)
+    try:
+        return await hermes_call(target, "POST", f"/{team.id}/conclusion", json_body={})
+    except TeamsError as exc:
+        _raise(exc)
+
+
+@router.get("/{team_id}/files", dependencies=[Depends(_enabled)])
+async def list_files(request: Request, team_id: str, user=Depends(get_verified_user)):
+    team, target = await _running_target(request, team_id, user)
+    try:
+        return await hermes_call(target, "GET", f"/{team.id}/files")
+    except TeamsError as exc:
+        _raise(exc)
+
+
+_PASS_HEADERS = ("Content-Type", "Content-Disposition", "Cache-Control", "Content-Security-Policy")
+
+
+@router.get("/{team_id}/files/{path:path}", dependencies=[Depends(_enabled)])
+async def get_file(request: Request, team_id: str, path: str, user=Depends(get_verified_user)):
+    """A file from the team's workspace (images in the conclusion load through here with the
+    session cookie). Confinement to the workspace is enforced by Hermes; HTML comes back as text."""
+    from urllib.parse import quote
+
+    from fastapi.responses import Response
+
+    team, target = await _running_target(request, team_id, user)
+    if not path or len(path) > 1000 or "\x00" in path:
+        raise HTTPException(status_code=404, detail="文件不存在")
+    try:
+        data, headers = await hermes_file(target, f"/{team.id}/files/{quote(path)}")
+    except TeamsError as exc:
+        _raise(exc)
+    out = {k: headers[k] for k in _PASS_HEADERS if headers.get(k)}
+    out["X-Content-Type-Options"] = "nosniff"
+    media = out.pop("Content-Type", "application/octet-stream")
+    return Response(content=data, media_type=media, headers=out)
 
 
 def _task_id(task_id: str) -> str:

@@ -6,11 +6,31 @@
 
 	import { theme } from '$lib/stores';
 	import TaskNode from './TaskNode.svelte';
-	import { avatarKind, layoutTasks, openParents, statusLabel, toneOf, type TaskState } from './model';
+	import {
+		avatarKind,
+		layoutTasks,
+		openParents,
+		statusLabel,
+		taskRunner,
+		toneOf,
+		type TaskState
+	} from './model';
 	import { TONE_STROKE } from './tones';
 
 	/** The shared task board: one lane per dependency depth, edges coloured by the parent's state. */
-	export let tasks: { id: string; key: string; seq: number; title: string; member: string; executor: string; parents: string[]; attempts?: number }[] = [];
+	export let tasks: {
+		id: string;
+		key: string;
+		seq: number;
+		title: string;
+		member: string;
+		executor: string;
+		chosen?: string;
+		chosen_by?: string;
+		trail?: { from: string; to: string | null; reason: string }[];
+		parents: string[];
+		attempts?: number;
+	}[] = [];
 	export let states: Map<string, TaskState> = new Map();
 	export let members: { name: string; role: string }[] = [];
 	export let selectedTaskId: string | null = null;
@@ -30,7 +50,10 @@
 			tasks.map((t) => {
 				const pos = layout.positions.get(t.id);
 				const state = states.get(t.id) ?? { status: 'pending', sub_status: 'pending' };
-				const waiting = state.sub_status === 'waiting_deps' ? openParents(t, states).map((p) => byKey.get(p) ?? p) : [];
+				const waiting =
+					state.sub_status === 'waiting_deps'
+						? openParents(t, states).map((p) => byKey.get(p) ?? p)
+						: [];
 				return {
 					id: t.id,
 					type: 'task',
@@ -44,6 +67,7 @@
 						title: t.title,
 						member: t.member,
 						executor: t.executor,
+						runner: taskRunner(t),
 						attempts: t.attempts ?? 0,
 						sub_status: state.sub_status,
 						statusText: statusLabel(state.sub_status),
@@ -78,12 +102,18 @@
 
 	$: colorMode = $theme?.includes('dark')
 		? 'dark'
-		: $theme === 'system' && typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: dark)').matches
+		: $theme === 'system' &&
+			  typeof window !== 'undefined' &&
+			  window.matchMedia('(prefers-color-scheme: dark)').matches
 			? 'dark'
 			: 'light';
 </script>
 
-<div class="w-full rounded-2xl border border-gray-100 dark:border-gray-850 overflow-hidden" style="height:{height}px" data-team-board>
+<div
+	class="w-full rounded-2xl border border-gray-100 dark:border-gray-850 overflow-hidden"
+	style="height:{height}px"
+	data-team-board
+>
 	<SvelteFlow
 		{nodes}
 		{edges}

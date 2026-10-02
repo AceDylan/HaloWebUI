@@ -68,7 +68,8 @@ export const PHASE_LABEL: Record<string, string> = {
 
 export const statusLabel = (value: string | null | undefined) =>
 	SUB_STATUS_LABEL[value ?? ''] ?? value ?? '';
-export const toneOf = (value: string | null | undefined): Tone => SUB_STATUS_TONE[value ?? ''] ?? 'idle';
+export const toneOf = (value: string | null | undefined): Tone =>
+	SUB_STATUS_TONE[value ?? ''] ?? 'idle';
 
 // --- layout ---------------------------------------------------------------------------------
 
@@ -83,7 +84,14 @@ export type BoardLayout = {
 	lanes: { depth: number; x: number; count: number }[];
 };
 
-export const LAYOUT = { laneWidth: 248, laneGap: 56, cardWidth: 220, cardHeight: 104, rowGap: 18, pad: 24 };
+export const LAYOUT = {
+	laneWidth: 248,
+	laneGap: 56,
+	cardWidth: 220,
+	cardHeight: 104,
+	rowGap: 18,
+	pad: 24
+};
 
 /** Longest dependency path per task; cycles and unknown parents count as depth 0. */
 export const taskDepths = (tasks: LayoutTask[]): Map<string, number> => {
@@ -108,7 +116,8 @@ export const taskDepths = (tasks: LayoutTask[]): Map<string, number> => {
 };
 
 const order = (a: LayoutTask, b: LayoutTask) =>
-	(a.seq ?? 0) - (b.seq ?? 0) || (a.key ?? a.id).localeCompare(b.key ?? b.id, 'en', { numeric: true });
+	(a.seq ?? 0) - (b.seq ?? 0) ||
+	(a.key ?? a.id).localeCompare(b.key ?? b.id, 'en', { numeric: true });
 
 /** One left-to-right lane per dependency depth ("#4 and #6 side by side, #5 to their right"). */
 export const layoutTasks = (tasks: LayoutTask[]): BoardLayout => {
@@ -139,7 +148,8 @@ export const layoutTasks = (tasks: LayoutTask[]): BoardLayout => {
 		});
 		laneList.push({ depth, x, count: lane.length });
 	}
-	const width = LAYOUT.pad * 2 + columns * LAYOUT.laneWidth + Math.max(0, columns - 1) * LAYOUT.laneGap;
+	const width =
+		LAYOUT.pad * 2 + columns * LAYOUT.laneWidth + Math.max(0, columns - 1) * LAYOUT.laneGap;
 	return { positions, columns, rows, width, height, lanes: laneList };
 };
 
@@ -151,7 +161,9 @@ export const foldStates = (
 	events: TeamEvent[],
 	upto: number = events.length - 1
 ): Map<string, TaskState> => {
-	const states = new Map<string, TaskState>(tasks.map((t) => [t.id, { status: 'pending', sub_status: 'pending' }]));
+	const states = new Map<string, TaskState>(
+		tasks.map((t) => [t.id, { status: 'pending', sub_status: 'pending' }])
+	);
 	const end = Math.min(upto, events.length - 1);
 	for (let i = 0; i <= end; i++) {
 		const ev = events[i];
@@ -171,7 +183,16 @@ export const foldStates = (
 export const liveStates = (tasks: LiveTask[]): Map<string, TaskState> =>
 	new Map(tasks.map((t) => [t.id, { status: t.status, sub_status: t.sub_status }]));
 
-const MEMBER_PRIORITY = ['running', 'quota_wait', 'waiting_user', 'failed', 'stopped', 'blocked', 'queued', 'waiting_deps'];
+const MEMBER_PRIORITY = [
+	'running',
+	'quota_wait',
+	'waiting_user',
+	'failed',
+	'stopped',
+	'blocked',
+	'queued',
+	'waiting_deps'
+];
 
 export const memberStatus = (states: TaskState[]): string => {
 	if (!states.length) return 'idle';
@@ -183,7 +204,11 @@ export const memberStatus = (states: TaskState[]): string => {
 };
 
 /** Team phase at the end of events[0..upto] (replay) — same rules as Hermes' team_phase. */
-export const phaseAt = (states: Map<string, TaskState>, events: TeamEvent[], upto: number): string => {
+export const phaseAt = (
+	states: Map<string, TaskState>,
+	events: TeamEvent[],
+	upto: number
+): string => {
 	let paused = false;
 	let stopped = false;
 	for (let i = 0; i <= Math.min(upto, events.length - 1); i++) {
@@ -196,22 +221,29 @@ export const phaseAt = (states: Map<string, TaskState>, events: TeamEvent[], upt
 	}
 	const list = [...states.values()];
 	if (stopped) return 'stopped';
-	if (list.length && list.every((s) => s.status === 'done' || s.status === 'archived')) return 'completed';
+	if (list.length && list.every((s) => s.status === 'done' || s.status === 'archived'))
+		return 'completed';
 	if (paused) return 'paused';
-	if (list.some((s) => ['failed', 'blocked', 'waiting_user'].includes(s.sub_status) || s.status === 'triage'))
+	if (
+		list.some(
+			(s) => ['failed', 'blocked', 'waiting_user'].includes(s.sub_status) || s.status === 'triage'
+		)
+	)
 		return 'attention';
 	return 'running';
 };
 
 export const leadStatus = (phase: string) =>
-	({ completed: 'done', stopped: 'stopped', paused: 'paused', attention: 'waiting_user' })[phase] ?? 'coordinating';
+	({ completed: 'done', stopped: 'stopped', paused: 'paused', attention: 'waiting_user' })[phase] ??
+	'coordinating';
 
 export const countStates = (states: Map<string, TaskState>) => {
 	const counts = { done: 0, running: 0, waiting: 0, attention: 0, total: states.size };
 	for (const s of states.values()) {
 		if (s.status === 'done' || s.status === 'archived') counts.done++;
 		else if (s.sub_status === 'running' || s.sub_status === 'review') counts.running++;
-		else if (['failed', 'blocked', 'waiting_user', 'stopped', 'triage'].includes(s.sub_status)) counts.attention++;
+		else if (['failed', 'blocked', 'waiting_user', 'stopped', 'triage'].includes(s.sub_status))
+			counts.attention++;
 		else counts.waiting++;
 	}
 	return counts;
@@ -221,7 +253,8 @@ export const countStates = (states: Map<string, TaskState>) => {
 export const openParents = (
 	task: Pick<LiveTask, 'parents'>,
 	states: Map<string, TaskState>
-): string[] => task.parents.filter((p) => !['done', 'archived'].includes(states.get(p)?.status ?? ''));
+): string[] =>
+	task.parents.filter((p) => !['done', 'archived'].includes(states.get(p)?.status ?? ''));
 
 // --- events ----------------------------------------------------------------------------------
 
@@ -245,7 +278,11 @@ export const feedCategory = (ev: TeamEvent): FeedCategory => {
 	return 'system';
 };
 
-export type Delivery = { state: 'queued' | 'delivered' | 'undelivered'; via?: string; label: string };
+export type Delivery = {
+	state: 'queued' | 'delivered' | 'undelivered';
+	via?: string;
+	label: string;
+};
 
 /** Delivery of a user note as it stood at event index `cursorSeq` (null = now). */
 export const deliveryAt = (ev: TeamEvent, cursorSeq: number | null): Delivery | null => {
@@ -254,13 +291,15 @@ export const deliveryAt = (ev: TeamEvent, cursorSeq: number | null): Delivery | 
 	if (typeof seq === 'number' && (cursorSeq === null || seq <= cursorSeq)) {
 		const via = ev.data?.delivered_via as string;
 		const label =
-			({
-				steer: '已送达（运行中注入）',
-				attempt_context: '已随新的执行尝试送达',
-				runner_answer: '已通过续跑送达',
-				task_read: '已送达（成员读取任务时看到）',
-				runner_task: '已写入任务说明'
-			} as Record<string, string>)[via] ?? '已送达';
+			(
+				{
+					steer: '已送达（运行中注入）',
+					attempt_context: '已随新的执行尝试送达',
+					runner_answer: '已通过续跑送达',
+					task_read: '已送达（成员读取任务时看到）',
+					runner_task: '已写入任务说明'
+				} as Record<string, string>
+			)[via] ?? '已送达';
 		return { state: 'delivered', via, label };
 	}
 	if (ev.data?.delivery === 'undelivered' && cursorSeq === null) {
@@ -279,14 +318,25 @@ export const REPLAY_MIN_GAP_MS = 120;
 export const replayDelay = (events: TeamEvent[], index: number, speed: number) => {
 	const a = events[index]?.ts;
 	const b = events[index + 1]?.ts;
-	const real = typeof a === 'number' && typeof b === 'number' && b > a ? (b - a) * 1000 : REPLAY_MIN_GAP_MS;
+	const real =
+		typeof a === 'number' && typeof b === 'number' && b > a ? (b - a) * 1000 : REPLAY_MIN_GAP_MS;
 	const clamped = Math.min(REPLAY_MAX_GAP_MS, Math.max(REPLAY_MIN_GAP_MS, real));
 	return { ms: clamped / speed, compressed: real > REPLAY_MAX_GAP_MS };
 };
 
 // --- avatars / formatting -------------------------------------------------------------------
 
-export type AvatarKind = 'lead' | 'backend' | 'frontend' | 'qa' | 'reviewer' | 'docs' | 'data' | 'ops' | 'design' | 'generic';
+export type AvatarKind =
+	| 'lead'
+	| 'backend'
+	| 'frontend'
+	| 'qa'
+	| 'reviewer'
+	| 'docs'
+	| 'data'
+	| 'ops'
+	| 'design'
+	| 'generic';
 
 const AVATAR_RULES: [AvatarKind, RegExp][] = [
 	['reviewer', /review|评审|审查|audit|security|检查/],
@@ -299,7 +349,10 @@ const AVATAR_RULES: [AvatarKind, RegExp][] = [
 	['ops', /ops|deploy|release|运维|部署|发布/]
 ];
 
-export const avatarKind = (member: { name?: string; role?: string }, isLead = false): AvatarKind => {
+export const avatarKind = (
+	member: { name?: string; role?: string },
+	isLead = false
+): AvatarKind => {
 	if (isLead) return 'lead';
 	const text = `${member.name ?? ''} ${member.role ?? ''}`.toLowerCase();
 	for (const [kind, re] of AVATAR_RULES) if (re.test(text)) return kind;
@@ -339,3 +392,200 @@ export const EXECUTOR_LABEL: Record<string, string> = Object.fromEntries(
 /** A member run by an external runner: it cannot take notes mid-run and is stopped through the runner. */
 export const isRunnerExecutor = (executor: string | null | undefined): boolean =>
 	!!executor && executor !== 'hermes' && EXECUTOR_OPTIONS.some((o) => o.value === executor);
+
+// --- runners: chosen vs actual ---------------------------------------------------------------
+
+/** Labels when the live registry (GET /teams/meta) is not loaded yet. */
+export const KIND_LABEL: Record<string, string> = {
+	code: '后端 / 通用代码',
+	ui: '前端 / UI / UX',
+	complex: '复杂任务',
+	research: '调研 / 分析',
+	writing: '写作 / 文档'
+};
+
+export const SOURCE_LABEL: Record<string, string> = {
+	auto: '按任务类型自动选择',
+	goal: '目标里点名',
+	user: '你手动指定'
+};
+
+export type RunnerDecision = {
+	chosen: string;
+	actual: string | null;
+	changed: boolean;
+	reason: string;
+	source: 'auto' | 'goal' | 'user';
+};
+
+/** A plan member's runner: where its chain starts and what will actually run it now. */
+export const memberRunner = (m: {
+	executor?: string;
+	runner?: string | null;
+	runner_note?: string;
+	executor_source?: string;
+}): RunnerDecision => {
+	const chosen = m.executor || 'hermes';
+	const actual = m.runner === undefined ? chosen : m.runner;
+	const source = (
+		['auto', 'goal', 'user'].includes(m.executor_source ?? '') ? m.executor_source : 'auto'
+	) as RunnerDecision['source'];
+	return { chosen, actual, changed: actual !== chosen, reason: m.runner_note ?? '', source };
+};
+
+/** A live task's runner: chosen (the member's) vs the one on it now, and why it moved. */
+export const taskRunner = (t: {
+	executor?: string;
+	chosen?: string;
+	chosen_by?: string;
+	trail?: { from: string; to: string | null; reason: string }[];
+}): RunnerDecision => {
+	const actual = t.executor || 'hermes';
+	const chosen = t.chosen || actual;
+	const last = [...(t.trail ?? [])].reverse().find((s) => s.from !== s.to);
+	const source = (
+		['auto', 'goal', 'user'].includes(t.chosen_by ?? '') ? t.chosen_by : 'auto'
+	) as RunnerDecision['source'];
+	return {
+		chosen,
+		actual,
+		changed: actual !== chosen || !!(t.trail ?? []).length,
+		reason: last?.reason ?? '',
+		source
+	};
+};
+
+export const RUNNER_PHASE_LABEL: Record<string, string> = {
+	plan: '批准时',
+	launch: '启动前',
+	runtime: '运行中',
+	retry: '重试时'
+};
+
+// --- the conclusion report ------------------------------------------------------------------
+
+const IMAGE_RE = /\.(png|jpe?g|gif|webp|svg|avif|bmp)(\?[^\s)]*)?$/i;
+const SCHEME_RE = /^[a-z][a-z0-9+.-]*:/i;
+
+export const isImagePath = (path: string) => IMAGE_RE.test(path.trim());
+
+/** A link target in the report → URL: workspace-relative (or absolute inside the workspace)
+ *  paths go to the workspace file route, anything with a scheme / anchor stays as written. */
+export const reportHref = (
+	href: string,
+	opts: { workspace?: string | null; fileUrl: (path: string) => string }
+): string => {
+	const raw = href.trim().replace(/^<|>$/g, '');
+	if (!raw || raw.startsWith('#') || SCHEME_RE.test(raw) || raw.startsWith('//')) return raw;
+	let path = raw;
+	const ws = (opts.workspace ?? '').replace(/\/+$/, '');
+	if (path.startsWith('/')) {
+		if (!ws || !(path === ws || path.startsWith(ws + '/'))) return raw;
+		path = path.slice(ws.length + 1);
+	}
+	path = path.replace(/^\.\//, '');
+	if (!path || path.split('/').includes('..')) return raw;
+	const [clean, query] = path.split(/(?=[?#])/);
+	let decoded = clean;
+	try {
+		decoded = decodeURIComponent(clean);
+	} catch {
+		/* a literal % in a file name */
+	}
+	return opts.fileUrl(decoded) + (query ?? '');
+};
+
+const looksLikeYaml = (text: string) => {
+	const lines = text.split('\n').filter((l) => l.trim() && !l.trim().startsWith('#'));
+	if (lines.length < 3) return false;
+	if (/^\s*(#{1,6}\s|[-*]\s+\S.*[.。]$|>|\|)/m.test(text) && !/^\s*[\w.-]+:\s*$/m.test(text))
+		return false;
+	const keyed = lines.filter((l) => /^\s*(- )?[\w.-]+:(\s|$)/.test(l)).length;
+	return keyed / lines.length >= 0.6;
+};
+
+/**
+ * Make an agent's report renderable whatever shape it came in: a whole-JSON or YAML reply
+ * becomes a code block; workspace paths in links / images point at the workspace file route;
+ * a bare image URL or a known image file on its own line becomes an image. Fenced code is left
+ * untouched.
+ */
+export const prepareReport = (
+	text: string,
+	opts: { workspace?: string | null; fileUrl: (path: string) => string; files?: string[] }
+): string => {
+	const src = (text ?? '').replace(/\r\n?/g, '\n').trim();
+	if (!src) return '';
+	if (/^[[{]/.test(src)) {
+		try {
+			return '```json\n' + JSON.stringify(JSON.parse(src), null, 2) + '\n```';
+		} catch {
+			/* not JSON: fall through */
+		}
+	}
+	if (!src.includes('```') && looksLikeYaml(src)) return '```yaml\n' + src + '\n```';
+	const known = new Set(opts.files ?? []);
+	const ws = (opts.workspace ?? '').replace(/\/+$/, '');
+	let fence: string | null = null;
+	const out: string[] = [];
+	for (const line of src.split('\n')) {
+		const marker = line.match(/^\s*(`{3,}|~{3,})/);
+		if (marker) {
+			if (fence === null) fence = marker[1][0];
+			else if (marker[1][0] === fence) fence = null;
+			out.push(line);
+			continue;
+		}
+		if (fence !== null) {
+			out.push(line);
+			continue;
+		}
+		const bare = line.trim();
+		if (/^https?:\/\/\S+$/i.test(bare) && isImagePath(bare)) {
+			out.push(`![](${bare})`);
+			continue;
+		}
+		const local = bare.replace(/^`|`$/g, '');
+		const rel = ws && local.startsWith(ws + '/') ? local.slice(ws.length + 1) : local;
+		if (rel && known.has(rel) && isImagePath(rel) && !/\s/.test(rel)) {
+			out.push(`![${rel}](${opts.fileUrl(rel)})`);
+			continue;
+		}
+		out.push(
+			line.replace(
+				/(!?\[[^\]]*\]\()(\s*<?[^)\s>]+>?)((?:\s+"[^"]*")?\))/g,
+				(_m, head, href, tail) => {
+					return head + reportHref(href, opts) + tail;
+				}
+			)
+		);
+	}
+	return out.join('\n');
+};
+
+export const formatBytes = (n: number) => {
+	if (!Number.isFinite(n) || n < 0) return '';
+	if (n < 1024) return `${n} B`;
+	if (n < 1024 * 1024) return `${(n / 1024).toFixed(n < 10 * 1024 ? 1 : 0)} KB`;
+	return `${(n / 1024 / 1024).toFixed(1)} MB`;
+};
+
+export const formatStamp = (ts: number | null | undefined) => {
+	if (!ts) return '';
+	const d = new Date(ts * 1000);
+	const today = new Date();
+	const sameDay = d.toDateString() === today.toDateString();
+	return sameDay
+		? d.toLocaleTimeString('zh-CN', { hour12: false, hour: '2-digit', minute: '2-digit' })
+		: d.toLocaleString('zh-CN', {
+				hour12: false,
+				month: 'numeric',
+				day: 'numeric',
+				hour: '2-digit',
+				minute: '2-digit'
+			});
+};
+
+/** A runner's display name ("Hermes" for the native agent, the command name otherwise). */
+export const runnerLabel = (name: string | null | undefined) =>
+	name === 'hermes' ? 'Hermes' : (name ?? '');

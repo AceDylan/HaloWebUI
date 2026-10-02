@@ -507,8 +507,7 @@ def follow(rn: Runner, slug: str, conn: Any, team: dict, task: Any) -> None:
         text = runner_registry.run_failure_text(runner_registry.BY_NAME[rn.name], rn.runs_root / runner_run)
         kind = runner_registry.classify_failure(text, meta.get("failure_kind"), status)
         if kind:
-            _fail(rn, conn, task.id, run_row,
-                  f"{rn.fail_prefix}：{runner_registry.FAIL_KINDS[kind]}（{redact(text, 200) or status}）",
+            _fail(rn, conn, task.id, run_row, f"{rn.fail_prefix}：{runner_registry.failure_line(text) or status}",
                   fail_kind=kind, slug=slug)
             return
     if status == "interrupted" and int(rmeta.get("interrupt_resumes") or 0) < INTERRUPT_RESUMES and meta.get("session_id"):

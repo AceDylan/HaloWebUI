@@ -430,3 +430,10 @@ def test_a_team_can_prefer_another_configured_model(pkg):
     # An unknown model is ignored, not called.
     assert pkg.plan.lead_routes(cfg, preferred="gpt-9")[0]["model"] == "gpt-chat"
     assert pkg.plan.lead_model_info(cfg)["choices"] == ["gpt-chat", "claude-chat", "deepseek-chat"]
+
+
+def test_failure_line_is_the_readable_part(pkg):
+    text = ('error: FAILED_PRECONDITION (code 400): User location is not supported for the API use.\n'
+            'AGY_ERROR: {"short_error":"FAILED_PRECONDITION"}')
+    assert pkg.runners.failure_line(text) == "FAILED_PRECONDITION (code 400): User location is not supported for the API use."
+    assert pkg.runners.failure_line('{"x": 1}\n\n') == ""

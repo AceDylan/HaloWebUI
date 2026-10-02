@@ -353,6 +353,15 @@ def run_failure_text(spec: RunnerSpec, run_dir: Path) -> str:
     return "\n".join(parts)
 
 
+def failure_line(text: Any, limit: int = 160) -> str:
+    """The one line of a runner's error worth showing ("error: X\nAGY_ERROR: {json}" → "X")."""
+    for line in str(text or "").splitlines():
+        line = re.sub(r"^\s*(error|Error|ERROR)\s*:\s*", "", line).strip()
+        if line and not line.startswith(("AGY_ERROR", "{", "Traceback")):
+            return redact(line, limit)
+    return ""
+
+
 def _recent_failure(spec: RunnerSpec, now: float) -> Optional[tuple[str, str]]:
     """The newest finished run of *spec*: (kind, detail) if it failed in the last RECENT_WINDOW
     for a reason that says the runner itself is down."""

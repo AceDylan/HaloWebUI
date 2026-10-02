@@ -10,6 +10,8 @@ const api = vi.hoisted(() => ({
 	writeTeamConclusion: vi.fn(),
 	followUpTeamConclusion: vi.fn(),
 	saveTeamConclusionToKnowledge: vi.fn(),
+	getTeamsMeta: vi.fn(),
+	illustrateTeamConclusion: vi.fn(),
 	teamFilePath: (teamId: string, path: string) => `/api/v1/teams/${teamId}/files/${path}`,
 	teamFileUrl: (teamId: string, path: string) => `/api/v1/teams/${teamId}/files/${path}`
 }));
@@ -318,6 +320,44 @@ describe('ConclusionView', () => {
 		target.querySelector('[data-conclusion-old-format] button').click();
 		await until(() => api.writeTeamConclusion.mock.calls.length === 1);
 		expect(api.writeTeamConclusion.mock.calls[0][1]).toBe('team-1');
+	});
+
+	it('为结果配图: pick one of your image templates, then watch it being drawn', async () => {
+		api.getTeamConclusion.mockResolvedValue({
+			...CONCLUSION,
+			entry: { ...CONCLUSION.entry, format: 2 }
+		});
+		api.getTeamsMeta.mockResolvedValue({
+			image_templates: [
+				{ id: 'halo_daily_v2_knowledge_card', name: '知识卡片 · 小红书封面', aspect: '2:3' },
+				{ id: 'halo_hand_v1_auto_style', name: '手绘万能图 · 自动选画风与画幅', aspect: '3:2' }
+			]
+		});
+		api.illustrateTeamConclusion.mockResolvedValue({
+			status: 'generating',
+			template: '手绘万能图 · 自动选画风与画幅',
+			step: 'condense',
+			started_at: Math.floor(Date.now() / 1000)
+		});
+		await mount(ConclusionView, { teamId: 'team-1', phase: 'completed', variant: 'page' });
+		await until(() => !!target.querySelector('[data-conclusion-illustrate]'));
+		const card = () => target.querySelector('[data-conclusion-illustrate]');
+		expect(card().getAttribute('data-conclusion-illustrate')).toBe('none');
+		expect(card().textContent).toContain('为结果配图');
+		card().querySelector('button').click();
+		await until(() => !!target.querySelector('[data-illustrate-start]'));
+		const select = target.querySelector('[data-illustrate-picker] select');
+		expect(select.querySelectorAll('option').length).toBe(3); // Hermes' default + two of yours
+		await sleep(20);
+		target.querySelector('[data-illustrate-start]').click(); // the all-round template is preselected
+		await until(() => api.illustrateTeamConclusion.mock.calls.length === 1);
+		expect(api.illustrateTeamConclusion.mock.calls[0].slice(1)).toEqual([
+			'team-1',
+			'halo_hand_v1_auto_style'
+		]);
+		await until(() => card().getAttribute('data-conclusion-illustrate') === 'generating');
+		expect(card().textContent).toContain('负责人在提炼图上的要点');
+		expect(card().classList.contains('tm-live')).toBe(true);
 	});
 
 	it('shows generation in progress and an assembled fallback honestly', async () => {

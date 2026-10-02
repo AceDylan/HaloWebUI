@@ -838,3 +838,56 @@ def test_every_stage_says_where_the_team_is_and_how_long_it_may_take(hermes):
     mine = lambda: sum(1 for c in hermes.calls if c[2] == f"/{team_id}")  # noqa: E731
     calls = mine()
     assert "stage" not in listed() and mine() == calls  # settled: not asked again
+
+
+def test_a_plan_that_draws_takes_the_users_own_image_templates_along(hermes):
+    from open_webui.models.image_studio import ImageStudioItemForm, ImageStudioItems
+
+    ImageStudioItems.upsert_items("u-img", [
+        ImageStudioItemForm(id="halo_hand_v1_auto_style", kind="template", data={
+            "name": "手绘万能图 · 自动选画风与画幅", "tags": ["图解"],
+            "config": {"prompt": "请把下面的内容画成一张手绘信息图。\n\n内容：", "aspectRatio": "3:2", "size": "1536x1024"}}),
+        ImageStudioItemForm(id="no-prompt", kind="template", data={"name": "空模板", "config": {}}),
+        ImageStudioItemForm(id="g1", kind="gallery", data={"name": "一张旧图", "config": {"prompt": "x"}}),
+    ])
+    ImageStudioItems.upsert_items("u-other", [ImageStudioItemForm(id="theirs", kind="template", data={
+        "name": "别人的模板", "config": {"prompt": "y"}})])
+    client = _client("u-img")
+    drawing = {**PLAN, "members": [*PLAN["members"], {"name": "illustrator", "role": "插画师", "kind": "image",
+                                                    "executor": "hermes"}]}
+    hermes.responses[("POST", "")] = {"board": "halo-img", "created": True, "tasks": {}}
+    team_id = client.post("/api/v1/teams/", json={"goal": "画一张图解"}).json()["id"]
+    AgentTeams.update(team_id, "u-img", status="plan_ready", plan=drawing, title="图解")
+    assert client.post(f"/api/v1/teams/{team_id}/approve").status_code == 200
+    body = [c for c in hermes.calls if c[1] == "POST" and c[2] == ""][-1][3]
+    assert [t["name"] for t in body["image_templates"]] == ["手绘万能图 · 自动选画风与画幅"]
+    assert body["image_templates"][0]["prompt"].endswith("内容：") and body["image_templates"][0]["aspect"] == "3:2"
+    # a plan that does not draw sends none
+    plain = client.post("/api/v1/teams/", json={"goal": "写个说明"}).json()["id"]
+    AgentTeams.update(plain, "u-img", status="plan_ready", plan=PLAN, title="说明")
+    assert client.post(f"/api/v1/teams/{plain}/approve").status_code == 200
+    assert "image_templates" not in [c for c in hermes.calls if c[1] == "POST" and c[2] == ""][-1][3]
+
+
+def test_the_result_can_be_drawn_in_one_of_the_users_image_templates(hermes):
+    from open_webui.models.image_studio import ImageStudioItemForm, ImageStudioItems
+
+    ImageStudioItems.upsert_items("u-draw", [ImageStudioItemForm(id="halo_daily_v2_knowledge_card", kind="template", data={
+        "name": "知识卡片 · 小红书封面", "tags": ["社交媒体"],
+        "config": {"prompt": "做成一张竖版知识卡片。\n\n内容：", "aspectRatio": "2:3", "size": "1024x1536"}})])
+    client = _client("u-draw")
+    hermes.responses[("GET", "/meta")] = {"lead": {"model": "gpt-chat"}}
+    meta = client.get("/api/v1/teams/meta").json()
+    assert meta["image_templates"] == [{"id": "halo_daily_v2_knowledge_card", "name": "知识卡片 · 小红书封面",
+                                        "tags": ["社交媒体"], "aspect": "2:3"}]  # names only, no prompts
+    team_id = _ready_team(client, hermes, "u-draw")
+    AgentTeams.update(team_id, "u-draw", status="running", phase="completed")
+    hermes.responses[("POST", "/conclusion/illustrate")] = {"status": "generating", "template": "知识卡片 · 小红书封面"}
+    out = client.post(f"/api/v1/teams/{team_id}/conclusion/illustrate", json={"template_id": "halo_daily_v2_knowledge_card"})
+    assert out.status_code == 200 and out.json()["status"] == "generating"
+    call = [c for c in hermes.calls if c[2] == f"/{team_id}/conclusion/illustrate"][-1]
+    assert call[3]["template"]["prompt"].endswith("内容：") and call[3]["template"]["aspect"] == "2:3"
+    # no template: Hermes' own hand-drawn infographic; someone else's / unknown template: 404
+    client.post(f"/api/v1/teams/{team_id}/conclusion/illustrate", json={})
+    assert [c for c in hermes.calls if c[2] == f"/{team_id}/conclusion/illustrate"][-1][3] == {}
+    assert client.post(f"/api/v1/teams/{team_id}/conclusion/illustrate", json={"template_id": "theirs"}).status_code == 404

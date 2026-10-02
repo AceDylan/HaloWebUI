@@ -6,7 +6,7 @@ import { WEBUI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
 export type TeamExecutor = 'hermes' | 'reclaude' | 'cchclaude' | 'anyclaude' | 'codex' | 'agy';
 
 /** What a member's work is, which decides the runner it starts on (see the plugin's runners.py). */
-export type TaskKind = 'code' | 'ui' | 'complex' | 'research' | 'writing';
+export type TaskKind = 'code' | 'ui' | 'complex' | 'research' | 'writing' | 'image';
 
 /** A HaloWebUI assistant template the lead staffed a member with (src/lib/data/agents-zh.json). */
 export type AssistantRef = {
@@ -108,6 +108,7 @@ export type StageKey =
 	| 'attention'
 	| 'paused'
 	| 'concluding'
+	| 'illustrating'
 	| 'checking'
 	| 'done'
 	| 'stopped'
@@ -346,6 +347,7 @@ export type ConclusionEntry = {
 	format?: number;
 	/** workspace files the lead placed in the result in full */
 	included?: string[];
+	illustration?: ConclusionIllustration | null;
 };
 
 export type WorkspaceFile = {
@@ -404,6 +406,23 @@ export type TeamsMeta = {
 	assistants: AssistantRef[];
 	/** Git repositories on the Hermes host a team can work in (its own branch, a worktree). */
 	projects?: { path: string; name: string; aliases: string[] }[];
+	/** The user's own image templates (HaloWebUI 生图模板): styles 「为结果配图」 can draw in. */
+	image_templates?: ImageTemplateRef[];
+};
+
+export type ImageTemplateRef = { id: string; name: string; tags?: string[]; aspect?: string };
+
+/** 「为结果配图」: a gpt-image picture for the result, placed under its title. */
+export type ConclusionIllustration = {
+	status: 'generating' | 'ready' | 'failed';
+	path?: string;
+	prompt_path?: string;
+	template?: string;
+	started_at?: number;
+	at?: number;
+	seconds?: number;
+	error?: string;
+	step?: 'condense' | 'draw' | '';
 };
 
 export type LiveMember = TeamPlanMember & {
@@ -692,6 +711,15 @@ export const saveTeamConclusionToKnowledge = (token: string, teamId: string) =>
 		duplicate: boolean;
 		generated_at: number;
 	}>(token, 'POST', `/${id(teamId)}/conclusion/knowledge`);
+
+/** 「为结果配图」: draw the result in one of the user's image templates (none: Hermes' hand-drawn infographic). */
+export const illustrateTeamConclusion = (token: string, teamId: string, templateId?: string) =>
+	request<ConclusionIllustration>(
+		token,
+		'POST',
+		`/${id(teamId)}/conclusion/illustrate`,
+		templateId ? { template_id: templateId } : {}
+	);
 
 /** A workspace file's path on this site (the session cookie authenticates it). Markdown images
  *  take this form: the chat's Image component adds WEBUI_BASE_URL itself. */

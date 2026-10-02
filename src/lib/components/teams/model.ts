@@ -501,7 +501,7 @@ const AVATAR_RULES: [AvatarKind, RegExp][] = [
 	['qa', /\bqa\b|test|quality|测试|验证|verify/],
 	['frontend', /front|\bui\b|\bux\b|page|页面|前端|界面/],
 	['backend', /back|server|\bapi\b|service|后端|服务|接口/],
-	['design', /design|设计|product|产品/],
+	['design', /design|设计|product|产品|插画|绘图|画师|illustrat|image|visual|视觉|海报/],
 	['docs', /doc|writer|spec|文档|说明|写作/],
 	['data', /data|research|analy|调研|数据|研究|资料/],
 	['ops', /ops|deploy|release|运维|部署|发布/]
@@ -559,7 +559,8 @@ export const KIND_LABEL: Record<string, string> = {
 	ui: '前端 / UI / UX',
 	complex: '复杂任务',
 	research: '调研 / 分析',
-	writing: '写作 / 文档'
+	writing: '写作 / 文档',
+	image: '生图 / 插画 / 信息图'
 };
 
 export const SOURCE_LABEL: Record<string, string> = {
@@ -761,7 +762,14 @@ export const STAGE_STEPS: { key: 'plan' | 'approve' | 'run' | 'conclude' | 'chec
 ];
 
 /** Stages in which something is underway on its own (a clock and an estimate make sense). */
-export const STAGE_MOVING = new Set(['planning', 'starting', 'running', 'concluding', 'checking']);
+export const STAGE_MOVING = new Set([
+	'planning',
+	'starting',
+	'running',
+	'concluding',
+	'illustrating',
+	'checking'
+]);
 
 /**
  * What is left of an estimate made at `at`, now: {low, high, overtime}. A stage past its usual

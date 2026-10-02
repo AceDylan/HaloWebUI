@@ -27,6 +27,7 @@ from open_webui.utils.agent_teams import (
     hermes_call,
     hermes_file,
     hermes_target,
+    image_templates,
     planning_progress,
     public_team,
     reconcile,
@@ -115,9 +116,14 @@ async def meta(request: Request, user=Depends(get_verified_user)):
     """The lead's model (Hermes' default), runners with availability, task kinds, assistant templates."""
     try:
         target = await hermes_target(request, user)
-        return await hermes_call(target, "GET", "/meta", timeout=40)
+        data = await hermes_call(target, "GET", "/meta", timeout=40)
     except TeamsError as exc:
         _raise(exc)
+    if isinstance(data, dict):
+        # The user's own image templates (names only): the styles 「为结果配图」 can draw in.
+        data["image_templates"] = [{k: t[k] for k in ("id", "name", "tags", "aspect")}
+                                   for t in image_templates(user.id)]
+    return data
 
 
 @router.post("/runners/check", dependencies=[Depends(_enabled)])
@@ -444,6 +450,28 @@ async def make_conclusion(request: Request, team_id: str, user=Depends(get_verif
     team, target = await _running_target(request, team_id, user)
     try:
         return await hermes_call(target, "POST", f"/{team.id}/conclusion", json_body={})
+    except TeamsError as exc:
+        _raise(exc)
+
+
+class IllustrateForm(BaseModel):
+    # One of the user's image templates (HaloWebUI 生图模板); empty = Hermes' hand-drawn infographic.
+    template_id: Optional[str] = Field(default=None, max_length=120)
+
+
+@router.post("/{team_id}/conclusion/illustrate", dependencies=[Depends(_enabled)])
+async def conclusion_illustrate(request: Request, team_id: str, form: IllustrateForm,
+                                user=Depends(get_verified_user)):
+    """「为结果配图」: gpt-image draws the result in one of the user's template styles (async)."""
+    team, target = await _running_target(request, team_id, user)
+    template = None
+    if form.template_id:
+        template = next((t for t in image_templates(user.id) if t["id"] == form.template_id), None)
+        if template is None:
+            raise HTTPException(status_code=404, detail="没有这个生图模板")
+    try:
+        return await hermes_call(target, "POST", f"/{team.id}/conclusion/illustrate",
+                                 json_body={"template": template} if template else {})
     except TeamsError as exc:
         _raise(exc)
 

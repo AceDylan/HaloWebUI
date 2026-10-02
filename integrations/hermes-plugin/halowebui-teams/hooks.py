@@ -6,6 +6,9 @@ same task_events sequence as the Kanban's own events:
 * ``halo_tool`` — each tool call of the member (name, a short redacted preview, ok, ms), and
   of its native subagents (``subagent`` = the subagent id);
 * ``halo_subagent`` — native subagent start / stop (goal, role, status, summary);
+* every image the member generates (``image_generate`` → gpt-image) is copied from Hermes' media
+  cache (cleared after a day) into the workspace as ``images/<task key>-<n>.<ext>`` with its prompt
+  in ``images/<task key>-<n>.prompt.md`` — the conclusion shows the images and their prompts;
 * ``halo_comment_delivered`` — a user's note written on the task reached the running member:
   Hermes' worker polls new comments (at most every 6 s) and steers them into the agent, and
   ``tools.kanban_tools._comment_watermark`` moves past the comment id when it did.
@@ -18,10 +21,13 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import threading
+import time
+from pathlib import Path
 from typing import Any
 
-from .common import BOARD_PREFIX, append_event, board_conn, logger, redact
+from .common import BOARD_PREFIX, append_event, board_conn, logger, read_team, redact, task_key
 
 MAX_TOOL_EVENTS_PER_RUN = int(os.environ.get("HALO_TEAMS_MAX_TOOL_EVENTS", "400") or 400)
 # Kanban tools that already leave their own events (complete → handoff, comment → message, …).
@@ -52,7 +58,7 @@ def _args_preview(tool_name: str, args: Any) -> str:
             return redact(args, 160)
     if not isinstance(args, dict):
         return ""
-    for key in ("command", "cmd", "path", "file_path", "url", "query", "pattern", "goal", "summary", "body",
+    for key in ("command", "cmd", "path", "file_path", "url", "query", "pattern", "goal", "summary", "body", "prompt",
                 "code", "name"):
         value = args.get(key)
         if isinstance(value, str) and value.strip():
@@ -63,6 +69,64 @@ def _args_preview(tool_name: str, args: Any) -> str:
         return redact(json.dumps(args, ensure_ascii=False), 160)
     except (TypeError, ValueError):
         return ""
+
+
+IMAGE_TOOLS = {"image_generate", "generate_image", "edit_image"}
+IMAGES_DIR = "images"
+IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
+
+
+def _as_dict(value: Any) -> dict:
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except ValueError:
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+    return {}
+
+
+def keep_image(workspace: str, key: str, args: Any, result: Any, *, who: str = "") -> str:
+    """Copy a generated image (``image_generate``'s result) out of Hermes' media cache into
+    ``<workspace>/images/<key>-<n>.<ext>`` with its prompt next to it (``.prompt.md``). Returns the
+    path relative to the workspace, or "" when there is nothing to keep."""
+    data = _as_dict(result)
+    source = str(data.get("image") or data.get("path") or "")
+    if data.get("success") is False or not source or source.startswith(("http://", "https://", "data:")):
+        return ""
+    src = Path(source)
+    if not src.is_file() or src.suffix.lower() not in IMAGE_SUFFIXES:
+        return ""
+    if not workspace or not Path(workspace).is_dir():
+        return ""
+    folder = Path(workspace) / IMAGES_DIR
+    folder.mkdir(parents=True, exist_ok=True)
+    n = 1
+    while any((folder / f"{key}-{n}{ext}").exists() for ext in IMAGE_SUFFIXES):
+        n += 1
+    dest = folder / f"{key}-{n}{src.suffix.lower()}"
+    shutil.copy2(src, dest)
+    params = _as_dict(args)
+    prompt = str(params.get("prompt") or "").strip()
+    facts = ([f"- {who}"] if who else []) + [
+        f"- 模型：{data.get('model') or 'gpt-image'}" + (f"（{data['provider']}）" if data.get("provider") else ""),
+        f"- 画幅：{params.get('aspect_ratio') or data.get('aspect_ratio') or '—'}"
+        + (f" · 实际 {data['actual_size']}" if data.get("actual_size") else ""),
+        f"- 生成于：{time.strftime('%Y-%m-%d %H:%M')}"]
+    dest.with_suffix(".prompt.md").write_text(
+        f"# {dest.name} 的生图提示词\n\n" + "\n".join(facts) + "\n\n## 提示词\n\n````\n"
+        + redact(prompt, 20000, one_line=False) + "\n````\n", encoding="utf-8")
+    return f"{IMAGES_DIR}/{dest.name}"
+
+
+def save_image(board: str, task: str, args: Any, result: Any) -> str:
+    """A member's image: ``images/T3-1.png`` (its task key), see ``keep_image``."""
+    team = read_team(board) or {}
+    member = ((team.get("tasks") or {}).get(task) or {}).get("member") or "—"
+    key = task_key(team, task) or "image"
+    return keep_image(team.get("workspace") or "", key, args, result, who=f"任务：{key}（成员 {member}）")
 
 
 def _write(kind: str, payload: dict) -> None:
@@ -171,6 +235,16 @@ def on_post_tool_call(tool_name: str = "", args: Any = None, result: Any = None,
         payload = {"name": str(tool_name)[:60], "preview": _args_preview(tool_name, args), "ok": ok, "ms": ms}
         if subagent:
             payload["subagent"] = subagent
+        if tool_name in IMAGE_TOOLS:
+            ctx = _context()
+            try:
+                saved = save_image(ctx[0], ctx[1], args, result) if ctx else ""
+            except Exception:  # noqa: BLE001 — never cost the member its tool call
+                logger.warning("halowebui-teams: could not keep a generated image", exc_info=True)
+                saved = ""
+            if saved:
+                payload["saved"] = saved
+                payload["preview"] = redact(f"已保存 {saved} · {payload['preview']}", 160)
         _write("halo_tool", payload)
     except Exception:
         logger.debug("halowebui-teams: post_tool_call hook failed", exc_info=True)

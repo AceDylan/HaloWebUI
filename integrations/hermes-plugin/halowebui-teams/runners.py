@@ -115,6 +115,9 @@ KINDS: dict[str, dict] = {
                  "hint": "联网调研、资料搜集、数据分析、对比评估（不改代码）"},
     "writing": {"label": "写作 / 文档", "default": "hermes",
                 "hint": "写文档、报告、方案、说明，汇总前面成员的产出"},
+    # Only a Hermes worker has the image tool (image_generate → gpt-image): its chain is Hermes alone.
+    "image": {"label": "生图 / 插画 / 信息图", "default": "hermes",
+              "hint": "要生成图片：插画、配图、海报、封面、信息图、示意图（用 gpt-image 生图，只有 Hermes 成员能调用）"},
 }
 DEFAULT_KIND = "code"
 
@@ -194,7 +197,8 @@ def normalize_kind(kind: Any) -> str:
     aliases = {"backend": "code", "server": "code", "general": "code", "coding": "code", "review": "code",
                "test": "code", "qa": "code", "frontend": "ui", "design": "ui", "ux": "ui", "visual": "ui",
                "docs": "writing", "doc": "writing", "report": "writing", "analysis": "research",
-               "data": "research"}
+               "data": "research", "illustration": "image", "picture": "image", "img": "image", "art": "image",
+               "poster": "image", "infographic": "image"}
     value = aliases.get(value, value)
     return value if value in KINDS else ""
 

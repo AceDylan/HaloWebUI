@@ -58,6 +58,7 @@ SYSTEM_PROMPT = """你是一个多代理团队的负责人（team-lead）。用�
 - depends_on 写这个任务开始前必须完成的任务 key。互不依赖的任务要能并行；需要汇总或评审的任务依赖它要看的所有任务。不能有循环依赖。
 - 合适时安排一个评审 / 测试成员在最后检查前面成员的产出。
 - 每个任务的 description 要自成一体：写清楚要做什么、产出物写到工作目录下的哪个文件、完成标准。并行任务不能写同一个文件。
+- 目标要图片（生成一张图、配图、插画、海报、封面、信息图、示意图）时，安排一个 kind 为 "image" 的成员：只有它能调用 gpt-image 生图。它的任务依赖提供内容的任务；description 写清要几张图（一般 1 到 3 张）、每张画什么、给谁看、用在哪、横版 / 竖版 / 方形、图里要出现的文字（逐字写出）。不要让别的成员用 SVG、代码或网上找图来代替生图——除非目标要的就是可编辑的矢量图或代码生成的数据图表。
 - 不要安排需要用户手动操作、需要密钥或会改动生产服务的任务。
 - 如果给了「项目」：团队在这个 git 仓库的独立分支（一个 worktree）上工作，工作目录就是仓库根。任务要指向真实的文件和模块，description 写清改哪些文件、怎么验证（跑哪些测试 / 检查）；并行任务改不同的文件；不要安排 push、合并到主分支、部署、构建镜像的任务——合并和推送由用户在协作台里决定。"""
 
@@ -324,6 +325,8 @@ def _clean_text(value: Any, limit: int, *, one_line: bool = True) -> str:
 
 
 _KIND_WORDS = (
+    ("image", re.compile(r"生图|配图|插画|海报|封面图|信息图|示意图|画一张|画一幅|生成.{0,6}(图片|图像|一张图|图)|"
+                         r"illustration|poster|infographic|image gen", re.I)),
     ("complex", re.compile(r"重构|跨.{0,6}项目|架构调整|大规模|迁移|整体改造", re.I)),
     ("ui", re.compile(r"前端|界面|\bui\b|\bux\b|视觉|设计稿|页面|组件|样式|交互|css|frontend|design", re.I)),
     ("code", re.compile(r"后端|服务端|接口|\bapi\b|数据库|脚本|测试|代码|bug|修复|实现|开发|部署|运维|backend|server|test|code|review|评审", re.I)),
@@ -349,6 +352,8 @@ def assign_runners(members: list[dict], availability: Optional[dict] = None) -> 
         source = m.get("executor_source") if m.get("executor_source") in EXECUTOR_SOURCES else "auto"
         default = runners.kind_default(m["kind"])
         start = m.get("executor") if source in ("goal", "user") and m.get("executor") in EXECUTORS else default
+        if m["kind"] == "image":  # gpt-image is a Hermes tool: no runner can draw for this member
+            start, source = "hermes", "auto"
         m.update(executor_source=source, recommended=default, executor=start)
         starts.append(start)
     if availability is None:

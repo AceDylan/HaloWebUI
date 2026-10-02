@@ -28,7 +28,7 @@ from .common import RUNNER_EXECUTORS, board_conn, logger, now, read_team, redact
 STATS_TTL = 600
 MIN_SAMPLES = 3
 # Seconds, when this machine has (almost) no history of its own.
-DEFAULTS = {"task": 180, "plan": 45, "conclusion": 40, "acceptance": 25}
+DEFAULTS = {"task": 180, "plan": 45, "conclusion": 40, "acceptance": 25, "illustration": 100}
 HOST_PARALLEL = 2          # kanban.max_in_progress (host-wide), the usual cap
 HIGH_SPREAD = 1.35
 PLAN_TIMES_MAX = 60
@@ -49,6 +49,7 @@ TOOL_LABELS = {
 STAGE_LABELS = {
     "planning": "负责人制定计划", "approval": "等你批准", "starting": "启动成员", "running": "成员执行中",
     "attention": "需要你处理", "paused": "已暂停派发", "concluding": "整理完整结果", "checking": "对照目标验收",
+    "illustrating": "为结果配图",
     "done": "已完成", "stopped": "已停止",
 }
 
@@ -76,6 +77,7 @@ def _collect() -> dict:
     every: list[float] = []
     conclusion: list[float] = []
     acceptance: list[float] = []
+    illustration: list[float] = []
     for slug in team_boards():
         team = read_team(slug) or {}
         task_map = team.get("tasks") or {}
@@ -83,6 +85,9 @@ def _collect() -> dict:
         entry = team.get("conclusion") or {}
         if entry.get("seconds"):
             conclusion.append(float(entry["seconds"]))
+        ill = entry.get("illustration") or {}
+        if ill.get("status") == "ready" and ill.get("seconds"):
+            illustration.append(float(ill["seconds"]))
         acc = entry.get("acceptance") or {}
         if acc.get("status") == "ready" and acc.get("at") and entry.get("generated_at"):
             spent = int(acc["at"]) - int(entry["generated_at"])
@@ -116,6 +121,7 @@ def _collect() -> dict:
         "task_all": _summary(every),
         "conclusion": _summary(conclusion),
         "acceptance": _summary(acceptance),
+        "illustration": _summary(illustration),
         "plan": _summary(plans),
         "at": now(),
     }
@@ -359,7 +365,7 @@ def _latest_activity(slug: str, task_ids: list[str]) -> dict[str, dict]:
 def _step_states(key: str) -> list[dict]:
     order = ["plan", "approve", "run", "conclude", "check"]
     position = {"planning": 0, "approval": 1, "starting": 2, "running": 2, "attention": 2, "paused": 2,
-                "concluding": 3, "checking": 4, "done": 5, "stopped": 5}.get(key, 2)
+                "concluding": 3, "illustrating": 3, "checking": 4, "done": 5, "stopped": 5}.get(key, 2)
     out = []
     for i, name in enumerate(order):
         state = "done" if i < position else ("active" if i == position else "pending")
@@ -391,6 +397,17 @@ def stage(slug: str, team: dict, tasks: list[dict], phase: str, stats: Optional[
                        now=f"负责人{f'（{model}）' if model else ''}在把 {len(tasks)} 个任务的成果整合成完整结果",
                        eta={"seconds": int(max(10, left) + a["median"]), "high": int(max(left, 0) + t["p75"] + a["p75"]),
                             "overtime": left <= 0, "basis": f"按{t['basis']}写结论的用时估算"})
+        elif (entry.get("illustration") or {}).get("status") == "generating" and \
+                now() - int((entry.get("illustration") or {}).get("started_at") or 0) < 900:
+            ill = entry["illustration"]
+            t = typical("illustration", stats=stats)
+            started = int(ill.get("started_at") or at)
+            left = t["median"] - (at - started)
+            step = "负责人在把结果提炼成图上的要点" if ill.get("step") == "condense" else "gpt-image 在画图"
+            out.update(key="illustrating", started_at=started,
+                       now=f"为结果配图（{ill.get('template') or '手绘信息图'}）：{step}",
+                       eta={"seconds": int(max(10, left)), "high": int(max(left, 0) + t["p75"]), "overtime": left <= 0,
+                            "basis": f"按{t['basis']}配图的用时估算"})
         elif acceptance.get("status") == "checking":
             a = typical("acceptance", stats=stats)
             started = int(acceptance.get("started_at") or entry.get("generated_at") or at)

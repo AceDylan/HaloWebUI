@@ -55,7 +55,8 @@ SYSTEM_PROMPT = """你是协作团队的负责人（team-lead）。团队已经�
 - 问题 / 咨询 → 完整、可以直接照着做的答案（不要写成「指南已写好，见某文件」）；
 - 文章 / 报告 / 方案 / 指南 / 文案 → 完整正文；
 - 调研 / 对比 / 核实 → 完整的发现、数据、对比表和明确的结论或建议，附上材料里的来源链接；
-- 图片 / 设计 / 图解 → 把图直接展示出来（![说明](相对路径.png)），写清每张图是什么；材料里有生图提示词的，放在图下面的「提示词」引用块里；
+- 图片 / 设计 / 图解 → 把图直接展示出来（![说明](相对路径.png)），写清每张图是什么；
+- 工作目录 images/ 里的图是成员用 gpt-image 生成的，同名的 .prompt.md 记着它的提示词：凡是和目标相关的图都要展示在结果里合适的位置，并在图下面用引用块写「提示词：」加上提示词（模板很长时保留描述画面的部分）；
 - 代码 / 项目改动 → 做成了什么、怎么用、改了哪些文件（链接）、怎么验证、合并前要注意什么；关键代码用代码块，不贴整份文件。
 
 成员已经写好的完整成品文件（例如一篇完整的指南、报告、文章），不要重写，也不要缩成摘要：在要放它的位置单独占一行写
@@ -424,6 +425,9 @@ def generate(slug: str, *, by: str = "auto") -> dict:
     text = _strip_wrapping_fence(redact(text, CONCLUSION_MAX_CHARS, one_line=False))
     text, included = expand_includes(text, team)
     text = text[:CONCLUSION_MAX_CHARS]
+    from . import illustrate
+
+    text = illustrate.reinsert(team, text)  # the picture made for the previous version stays
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".tmp")
     tmp.write_text(text, encoding="utf-8")
@@ -505,6 +509,10 @@ def read(slug: str, team: dict) -> dict:
             markdown = ""
     rows = _task_rows(slug, team)
     files = list_files(team)
+    from . import illustrate
+
+    if entry.get("illustration"):
+        entry["illustration"] = illustrate.public(entry["illustration"])
     return {
         # A failed regeneration keeps showing the previous report, with the error beside it.
         "status": entry.get("status") or ("ready" if markdown else "none"),

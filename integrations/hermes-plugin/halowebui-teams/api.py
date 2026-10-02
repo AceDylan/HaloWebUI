@@ -5,7 +5,7 @@ refuses a team whose recorded owner differs (404), so a bug on the HaloWebUI sid
 or drive another user's team through this API either.
 
   POST /v1/halo-teams/plan                         {goal, feedback?, previous?, team_id?}
-  POST /v1/halo-teams                              {team_id, plan, goal, title?, chat_id?}
+  POST /v1/halo-teams                              {team_id, plan, goal, title?, chat_id?, image_templates?}
   GET  /v1/halo-teams/{team_id}                    snapshot
   GET  /v1/halo-teams/{team_id}/events?after=&limit=
   GET  /v1/halo-teams/{team_id}/tasks/{task_id}?log=1
@@ -20,6 +20,7 @@ or drive another user's team through this API either.
   POST /v1/halo-teams/runners/check                 re-run the runner availability checks now
   POST /v1/halo-teams/plan/resolve                  {plan} → the plan with every member's runner worked out again
   GET  /v1/halo-teams/plan/progress?team_id=        the lead's current planning step + how long plans take here
+  POST /v1/halo-teams/{team_id}/conclusion/illustrate {template?} → a gpt-image picture for the result (202, async)
   GET  /v1/halo-teams/{team_id}/conclusion          the final report (markdown) + task results + workspace files
   POST /v1/halo-teams/{team_id}/conclusion          (re)write the report now
   GET  /v1/halo-teams/{team_id}/files/{path}        a file from the team's workspace (images in the report)
@@ -149,6 +150,7 @@ async def _create(request):
         create_team, team_id, data["plan"], owner=owner, chat_id=str(data.get("chat_id") or ""),
         goal=str(data.get("goal") or ""), title=str(data.get("title") or ""),
         origin=data.get("origin") if isinstance(data.get("origin"), dict) else None,
+        image_templates=data.get("image_templates") if isinstance(data.get("image_templates"), list) else None,
     )
     return _json_response(result, status=201 if result.get("created") else 200)
 
@@ -342,6 +344,24 @@ async def _conclusion_post(request):
     return _json_response(await asyncio.to_thread(run), status=202)
 
 
+async def _illustrate_post(request):
+    """结论配图: draw a picture for the result (``{template?: {name, prompt, aspect, size}}``)."""
+    from . import illustrate
+    from .teams import TeamError, _require_team
+
+    data = await _body(request)
+
+    def run() -> dict:
+        slug, _team = _require_team(request.match_info["team_id"], _owner(request))
+        try:
+            return illustrate.public(illustrate.start(slug, data.get("template") if isinstance(data.get("template"), dict)
+                                                      else None)) or {}
+        except ValueError as exc:
+            raise TeamError(409, str(exc)) from None
+
+    return _json_response(await asyncio.to_thread(run), status=202)
+
+
 def _project_action(request, action: str):
     from . import projects
     from .teams import TeamError, _require_team, snapshot
@@ -460,6 +480,7 @@ def install(app: Any, adapter: Any) -> None:
     router.add_post(base + "/{team_id}/tasks/{task_id}/diagnosis/{action:apply|again}", _wrap(adapter, _diagnosis_post))
     router.add_get(base + "/{team_id}/conclusion", _wrap(adapter, _conclusion_get))
     router.add_post(base + "/{team_id}/conclusion", _wrap(adapter, _conclusion_post))
+    router.add_post(base + "/{team_id}/conclusion/illustrate", _wrap(adapter, _illustrate_post))
     router.add_get(base + "/{team_id}/files", _wrap(adapter, _files))
     router.add_get(base + "/{team_id}/changes", _wrap(adapter, _changes))
     router.add_get(base + "/{team_id}/changes/diff", _wrap(adapter, _changes_diff))

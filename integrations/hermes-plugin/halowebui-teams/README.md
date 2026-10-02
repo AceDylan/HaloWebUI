@@ -61,6 +61,16 @@ is the Hermes side. It adds no service, port or second task store:
   native subagent start/stop, and the moment a user's note reached the running member, as
   `halo_*` events in the same `task_events` sequence.
 
+* **Images** (`hooks.py`, `illustrate.py`): a goal that needs pictures gets an `image` member
+  (生图 / 插画 / 信息图) — always a Hermes worker, the only executor with `image_generate`
+  (gpt-image through `image_gen`'s provider). Its task says how to prompt, and lists the owner's own
+  HaloWebUI image templates (sent by HaloWebUI at approval, written to `.halo/image-templates.md`).
+  The `post_tool_call` hook copies every generated image out of Hermes' media cache (cleared after a
+  day) into `images/<task key>-<n>.png` with its prompt in `.prompt.md`; the conclusion shows the
+  images with their prompts. 「为结果配图」 (`POST /{id}/conclusion/illustrate {template?}`): the lead
+  condenses the result into title + points, gpt-image draws it in the chosen template's style (else
+  Hermes' hand-drawn infographic template), the picture goes under the result's title between
+  `<!-- halo:illustration -->` marks (kept when the conclusion is rewritten); stage `illustrating`.
 * **Stage and estimate** (`progress.py`): every snapshot carries `team.stage` — the step
   (计划 → 批准 → 执行 → 整理结果 → 验收), what is happening now (each running member's latest tool
   call / runner event, in words), since when, and about how long is left. Estimates come from this
@@ -119,6 +129,7 @@ HaloWebUI sends `X-Halo-Owner: <user id>`; a team recorded for another owner is 
 | `GET /v1/halo-teams/plan/progress?team_id=` | while the lead plans: its current step and how long plans take here |
 | `GET /v1/halo-teams/{id}/conclusion` | the report (markdown), its status / model, every task's full result, workspace files |
 | `POST /v1/halo-teams/{id}/conclusion` | (re)write the report now |
+| `POST /v1/halo-teams/{id}/conclusion/illustrate` `{template?: {name, prompt, aspect, size}}` | 为结果配图 (202; `conclusion.illustration` says where it stands) |
 | `GET /v1/halo-teams/{id}/files[/{path}]` | the workspace listing / one file (confined to the workspace; HTML served as text) |
 | `GET /v1/halo-teams/{id}/changes` | a project team's branch: commits, files (+/−), not yet committed, merged / pushed |
 | `GET /v1/halo-teams/{id}/changes/diff?path=` | one file's diff against the base |

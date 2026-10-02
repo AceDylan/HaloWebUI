@@ -92,13 +92,17 @@
 
 	const schedule = () => {
 		if (timer) clearTimeout(timer);
-		if (destroyed || !(data?.status === 'generating' || writing)) return;
+		if (
+			destroyed ||
+			!(data?.status === 'generating' || writing || data?.entry?.illustration?.status === 'generating')
+		)
+			return;
 		timer = setTimeout(load, POLL_MS);
 	};
 
 	// The workbench's snapshot says when the report changed (written / regenerated): reload then.
 	$: {
-		const key = `${brief?.status ?? ''}:${brief?.generated_at ?? ''}`;
+		const key = `${brief?.status ?? ''}:${brief?.generated_at ?? ''}:${brief?.illustration?.status ?? ''}:${brief?.illustration?.at ?? ''}`;
 		if (key !== lastBrief) {
 			const first = lastBrief === '';
 			lastBrief = key;
@@ -490,7 +494,18 @@
 		{/if}
 
 		{#if data?.markdown && !generating && status !== 'outdated'}
-			<ConclusionNext {teamId} {chatId} {outputs} generatedAt={entry.generated_at} {variant} />
+			<ConclusionNext
+				{teamId}
+				{chatId}
+				{outputs}
+				generatedAt={entry.generated_at}
+				{variant}
+				illustration={entry.illustration}
+				on:illustrate={(e) => {
+					if (data) data = { ...data, entry: { ...data.entry, illustration: e.detail } };
+					schedule();
+				}}
+			/>
 		{/if}
 
 		{#if fileList.length}

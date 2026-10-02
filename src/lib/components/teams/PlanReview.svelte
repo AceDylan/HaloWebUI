@@ -327,7 +327,10 @@
 									id="runner-{member.name}"
 									class="compact-select min-w-0 max-w-[16rem] flex-1 truncate rounded-lg border border-gray-200 bg-white py-1 pl-2 pr-7 text-xs text-gray-900 transition focus:border-sky-400 focus:outline-none disabled:opacity-60 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
 									value={member.executor}
-									disabled={!editable || busy}
+									disabled={!editable || busy || member.kind === 'image'}
+									title={member.kind === 'image'
+										? '生图成员只能由 Hermes 执行：gpt-image 是 Hermes 的生图工具'
+										: ''}
 									on:change={(e) =>
 										dispatch('executor', {
 											name: member.name,
@@ -343,7 +346,9 @@
 										>
 									{/each}
 								</select>
-								<span class="min-w-0 truncate text-[11px] text-gray-400">{sourceText(member)}</span>
+								<span class="min-w-0 truncate text-[11px] text-gray-400"
+									>{member.kind === 'image' ? '用 gpt-image 生图，只能由 Hermes 执行' : sourceText(member)}</span
+								>
 								{#if member.executor_source === 'user' && editable}
 									<button
 										type="button"

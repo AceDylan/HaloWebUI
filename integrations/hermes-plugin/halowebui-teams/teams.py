@@ -103,11 +103,57 @@ def _task_body(team: dict, task: dict, member: dict) -> str:
         f"前置任务：{deps}（它们的完成摘要会出现在你的上下文「Parent task results」里）。\n"
         + _workspace_text(team)
         + "\n\n"
-        "完成后调用 kanban_complete，summary 写清楚：做了什么、产出物在哪个文件、给后续成员的交接要点；"
+        + (_image_text(team) if member.get("kind") == "image" else "")
+        + "完成后调用 kanban_complete，summary 写清楚：做了什么、产出物在哪个文件、给后续成员的交接要点；"
         "result 写完整的结果（负责人会据此写最终结论；图片、截图等产出写明它在工作目录里的相对路径）。"
         "需要和别的成员沟通时用 kanban_comment 写在你的任务上。"
         "确实无法继续（缺信息、需要用户决定）时调用 kanban_block 并写明原因，不要编造结果。"
     )
+
+
+IMAGE_TEMPLATES_FILE = ".halo/image-templates.md"
+MAX_IMAGES_PER_TASK = 6
+
+
+def _image_text(team: dict) -> str:
+    """How an image member works: gpt-image through image_generate; the hook saves every image."""
+    text = ("生图：用 image_generate 工具（gpt-image）生成，不要用 SVG、代码画图或网上找图代替。"
+            "prompt 要完整：画面内容、风格、构图、配色，图里要出现的文字逐字写出（中文要写清楚、不要错字），"
+            "aspect_ratio 选 landscape（横）/ portrait（竖）/ square（方）。"
+            "每生成一张，系统会自动把它存进工作目录 images/（例如 images/T3-1.png，同名 .prompt.md 记着提示词），"
+            "你不用自己复制；不满意就改提示词再生成，"
+            f"整个任务最多生成 {MAX_IMAGES_PER_TASK} 张。result 里逐张写：文件路径、画的是什么、用在哪里。\n")
+    names = team.get("image_templates") or []
+    if names:
+        text += (f"用户在 HaloWebUI 里存了自己的生图模板（风格提示词，全文在工作目录的 {IMAGE_TEMPLATES_FILE}）："
+                 + "；".join(names[:40]) + "。合适时选一个：先读那个文件里它的全文，把模板放在 prompt 开头，"
+                 "后面接上要画的内容（模板以「内容：」结尾）；没有合适的就自己写。\n")
+    return text + "\n"
+
+
+def write_image_templates(workspace: str, templates: Any) -> list[str]:
+    """The owner's HaloWebUI image templates as one Markdown file in the workspace (for image members).
+    Returns the names written."""
+    rows = [t for t in (templates or []) if isinstance(t, dict) and t.get("name") and t.get("prompt")][:40]
+    if not rows or not workspace:
+        return []
+    lines = ["# 生图模板（来自 HaloWebUI，用户自己的）", "",
+             "用法：选一个最合适的，把它的提示词全文放在 image_generate 的 prompt 开头，后面接要画的内容。", ""]
+    names = []
+    for t in rows:
+        name = redact(t.get("name"), 60)
+        extra = "；".join(x for x in (" / ".join(str(v) for v in (t.get("tags") or [])[:4]),
+                                      str(t.get("aspect") or ""), str(t.get("size") or "")) if x)
+        lines += [f"## {name}" + (f"（{extra}）" if extra else ""), "", "````", str(t.get("prompt"))[:6000].strip(), "````", ""]
+        names.append(name + (f"（{t['aspect']}）" if t.get("aspect") else ""))
+    path = Path(workspace) / IMAGE_TEMPLATES_FILE
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("\n".join(lines), encoding="utf-8")
+    except OSError:
+        logger.warning("halowebui-teams: could not write the image templates into %s", workspace, exc_info=True)
+        return []
+    return names
 
 
 def _workspace_text(team: dict) -> str:
@@ -122,8 +168,9 @@ def _workspace_text(team: dict) -> str:
 
 
 def create_team(team_id: str, plan: dict, *, owner: str, chat_id: str = "", goal: str = "",
-                title: str = "", origin: Optional[dict] = None) -> dict:
-    """Create (or return) the board for *team_id* from a validated *plan*; idempotent."""
+                title: str = "", origin: Optional[dict] = None, image_templates: Optional[list] = None) -> dict:
+    """Create (or return) the board for *team_id* from a validated *plan*; idempotent.
+    ``image_templates``: the owner's HaloWebUI image templates, offered to image members."""
     from .plan import task_model, validate_plan
 
     slug = board_slug(team_id)
@@ -147,6 +194,8 @@ def create_team(team_id: str, plan: dict, *, owner: str, chat_id: str = "", goal
                 raise TeamError(exc.status, "没能在项目里建团队分支：" + exc.message) from None
         else:
             Path(workspace).mkdir(parents=True, exist_ok=True)
+        template_names = (write_image_templates(workspace, image_templates)
+                          if any(m.get("kind") == "image" for m in checked["members"]) else [])
         team_title = redact(title or checked["title"], 60) or "协作任务"
         team = {
             "team_id": team_id,
@@ -164,6 +213,7 @@ def create_team(team_id: str, plan: dict, *, owner: str, chat_id: str = "", goal
             "lead": checked["lead"],
             "members": checked["members"],
             "max_parallel": checked["max_parallel"],
+            "image_templates": template_names,
             "state": "running",
             "created_at": now(),
             "approved_at": now(),
@@ -462,10 +512,16 @@ def _mark_completed(slug: str, team: dict) -> None:
 
 
 def _conclusion_brief(team: dict) -> dict:
+    from .illustrate import public
+
     entry = team.get("conclusion") or {}
     keep = ("status", "source", "model", "model_label", "generated_at", "started_at", "chars", "error",
             "tasks_done", "tasks_total", "acceptance", "format", "included")
-    return {k: entry[k] for k in keep if entry.get(k) not in (None, "")}
+    out = {k: entry[k] for k in keep if entry.get(k) not in (None, "")}
+    illustration = public(entry.get("illustration"))
+    if illustration:
+        out["illustration"] = illustration
+    return out
 
 
 def _lead_state(team: dict) -> dict:

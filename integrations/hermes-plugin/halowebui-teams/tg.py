@@ -362,7 +362,7 @@ def list_message(teams: list) -> tuple[str, list]:
             title = f'<a href="{html.escape(url)}">{title}</a>'
         lines.append(f"{icon} {title} · {word}")
         stage = team.get("stage") if isinstance(team.get("stage"), dict) else {}
-        if stage.get("key") in ("planning", "running", "attention", "concluding", "checking", "approval"):
+        if stage.get("key") in ("planning", "running", "attention", "concluding", "illustrating", "checking", "approval"):
             from .progress import eta_text
 
             when = ""

@@ -184,6 +184,41 @@ def auto_startable(plan: dict) -> bool:
     return bool(members) and all(m.get("runner") for m in members)
 
 
+IMAGE_TEMPLATE_LIMIT = 40
+
+
+def image_templates(user_id: str) -> list[dict]:
+    """The user's own image templates (HaloWebUI 生图模板: name, tags, canvas, prompt) for a team's
+    image members — the styles the user already uses in the image studio and in chats."""
+    try:
+        from open_webui.models.image_studio import ImageStudioItems
+
+        items = ImageStudioItems.get_items_by_user_id(user_id, kind="template", limit=200)
+    except Exception:  # noqa: BLE001 — a team starts without them rather than not at all
+        log.warning("teams: could not read the image templates of %s", user_id, exc_info=True)
+        return []
+    out = []
+    for item in items:
+        data = item.data if isinstance(item.data, dict) else {}
+        config = data.get("config") if isinstance(data.get("config"), dict) else {}
+        prompt = str(config.get("prompt") or "").strip()
+        name = str(data.get("name") or "").strip()
+        if not prompt or not name:
+            continue
+        out.append({"id": str(item.id)[:80], "name": name[:60],
+                    "tags": [str(t)[:20] for t in (data.get("tags") or []) if t][:4],
+                    "aspect": str(config.get("aspectRatio") or "")[:10], "size": str(config.get("size") or "")[:20],
+                    "prompt": prompt[:6000]})
+        if len(out) >= IMAGE_TEMPLATE_LIMIT:
+            break
+    return out
+
+
+def plan_draws(plan: Optional[dict]) -> bool:
+    """The plan has a member that generates images (kind ``image``)."""
+    return any(isinstance(m, dict) and m.get("kind") == "image" for m in (plan or {}).get("members") or [])
+
+
 async def start_team(team: AgentTeamModel, target: HermesTarget) -> AgentTeamModel:
     """Hand the plan to Hermes: the board and its tasks are created and the members start.
     The approve button, Telegram's 批准 and 「计划好直接开始」 all go through here."""
@@ -194,10 +229,11 @@ async def start_team(team: AgentTeamModel, target: HermesTarget) -> AgentTeamMod
     if starting is None:
         raise TeamsError(409, "这个计划已经批准过或状态已变化")
     try:
-        result = await hermes_call(target, "POST", "", json_body={
-            "team_id": team.id, "plan": team.plan, "goal": team.goal, "title": team.title, "chat_id": team.chat_id or "",
-            "origin": team_origin(team),
-        }, timeout=60)
+        body = {"team_id": team.id, "plan": team.plan, "goal": team.goal, "title": team.title,
+                "chat_id": team.chat_id or "", "origin": team_origin(team)}
+        if plan_draws(team.plan):
+            body["image_templates"] = image_templates(team.user_id)
+        result = await hermes_call(target, "POST", "", json_body=body, timeout=60)
     except TeamsError as exc:
         AgentTeams.update(team.id, team.user_id, expect_status=("starting",), status="start_failed",
                           error=f"启动失败：{exc.detail}")
@@ -268,7 +304,9 @@ def result_settled(live: Optional[dict]) -> bool:
     if not isinstance(conclusion, dict):
         return False
     acceptance = conclusion.get("acceptance") if isinstance(conclusion.get("acceptance"), dict) else {}
-    return conclusion.get("status") in ("ready", "failed") and acceptance.get("status") != "checking"
+    illustration = conclusion.get("illustration") if isinstance(conclusion.get("illustration"), dict) else {}
+    return (conclusion.get("status") in ("ready", "failed") and acceptance.get("status") != "checking"
+            and illustration.get("status") != "generating")
 
 
 def snapshot_progress(snap: Any) -> Optional[dict]:

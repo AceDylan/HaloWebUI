@@ -89,6 +89,7 @@ from open_webui.routers import (
     skills,
     hermes,
     hub,
+    teams,
     terminal,
     tools,
     users,
@@ -96,6 +97,7 @@ from open_webui.routers import (
 )
 
 from open_webui.haloclaw.router import router as haloclaw_router
+from open_webui.utils.agent_teams import ENABLE_AGENT_TEAMS
 from open_webui.external_api.router import router as external_api_router
 
 from open_webui.retrieval.runtime import ensure_embedding_runtime
@@ -1485,6 +1487,7 @@ app.include_router(analytics.router, prefix="/api/v1/analytics", tags=["analytic
 app.include_router(terminal.router, prefix="/api/v1/terminal", tags=["terminal"])
 app.include_router(hermes.router, prefix="/api/v1/hermes", tags=["hermes"])
 app.include_router(hub.router, prefix="/api/v1/hub", tags=["hub"])
+app.include_router(teams.router, prefix="/api/v1/teams", tags=["teams"])
 app.include_router(utils.router, prefix="/api/v1/utils", tags=["utils"])
 
 app.include_router(haloclaw_router, prefix="/api/v1/haloclaw", tags=["haloclaw"])
@@ -2359,6 +2362,7 @@ async def get_app_config(request: Request):
                     "database_restore_reason": database_restore_support["reason"],
                     "uvicorn_workers": database_restore_support["worker_count"],
                     "haloclaw": haloclaw_features,
+                    "enable_agent_teams": ENABLE_AGENT_TEAMS,
                 }
                 if user is not None
                 else {}

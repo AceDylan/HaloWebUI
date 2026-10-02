@@ -24,7 +24,9 @@ from typing import Any
 from .common import BOARD_PREFIX, append_event, board_conn, logger, redact
 
 MAX_TOOL_EVENTS_PER_RUN = int(os.environ.get("HALO_TEAMS_MAX_TOOL_EVENTS", "400") or 400)
-SKIP_TOOLS = {"kanban_heartbeat", "kanban_show", "todo"}
+# Kanban tools that already leave their own events (complete → handoff, comment → message, …).
+SKIP_TOOLS = {"kanban_heartbeat", "kanban_show", "kanban_complete", "kanban_block", "kanban_comment",
+              "kanban_request_review", "todo"}
 _state = {"tool_events": 0, "truncated": False, "delivered_upto": None}
 _state_lock = threading.Lock()
 _subagent_ids: dict[str, str] = {}

@@ -552,7 +552,7 @@ def timeline(team_id: str, owner: Optional[str] = None, after: int = 0, limit: i
                 summary = payload.get("summary") or payload.get("result")
                 if summary:
                     events.append(ev)
-                    ev = {**base, "seq": seq, "type": "handoff", "text": redact(summary, 1500, one_line=False),
+                    ev = {**base, "id": f"{seq}:handoff", "type": "handoff", "text": redact(summary, 1500, one_line=False),
                           "status": status.get(task_id), "sub_status": sub.get(task_id),
                           "data": {"to": [{"task_id": c, "key": task_key(team, c), "member": member_of(team, c)}
                                           for c in children.get(task_id, [])]}}
@@ -561,6 +561,8 @@ def timeline(team_id: str, owner: Optional[str] = None, after: int = 0, limit: i
                     c["data"]["undelivered"] = True
         if ev is not None:
             events.append(ev)
+    for ev in events:
+        ev.setdefault("id", str(ev["seq"]))
     # Delivery state of every user message (and when it changed, for replays).
     for ev in events:
         if ev["type"] == "message" and ev.get("who") == "user":

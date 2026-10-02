@@ -157,6 +157,43 @@ def _team_context(team: dict, snap: dict, *, results: int = 500) -> str:
             f"当初的分工说明：{team.get('summary') or '（无）'}\n\n成员：\n{members}\n\n任务：\n" + "\n".join(lines))
 
 
+def task_story(slug: str, team: dict, snap: dict) -> list[str]:
+    """One line per task for the lead's acceptance / conclusion: its state and, for a task that left
+    the plan, why (the member's block reason; who took it out — the user's change or the lead's
+    suggestion the user applied)."""
+    cancelled_by_user = {key for entry in team.get("changes_log") or [] if entry.get("status") == "applied"
+                         for key in (entry.get("applied") or {}).get("cancelled") or []}
+    with board_conn(slug) as conn:
+        reasons = {row[0]: _json_reason(row[1]) for row in conn.execute(
+            "SELECT task_id, payload FROM task_events WHERE id IN (SELECT MAX(id) FROM task_events "
+            "WHERE kind IN ('blocked','gave_up') GROUP BY task_id)")}
+    lines = []
+    for t in snap.get("tasks") or []:
+        state = STATE_WORD.get(t.get("sub_status") or t.get("status"), t.get("status"))
+        if t.get("status") == "archived":
+            diagnosis = (team.get("diagnoses") or {}).get(t["id"]) or {}
+            if t.get("key") in cancelled_by_user:
+                state = "用户要求取消"
+            elif diagnosis.get("applied_at") and diagnosis.get("action") == "skip":
+                state = "用户采纳了负责人「跳过」的建议，已取消"
+            else:
+                state = "已取消"
+        line = f"- {t.get('key')} {t.get('title')}：{state}"
+        reason = t.get("block_reason") or reasons.get(t["id"]) or ""
+        if reason and t.get("status") != "done":
+            line += f"（成员说明：{redact(reason, 300)}）"
+        lines.append(line)
+    return lines
+
+
+def _json_reason(payload) -> str:
+    try:
+        data = json.loads(payload) if isinstance(payload, str) else (payload or {})
+    except ValueError:
+        return ""
+    return str((data or {}).get("reason") or "") if isinstance(data, dict) else ""
+
+
 def later_requests(team: dict) -> str:
     """What the user asked for after approval and applied (对负责人说): part of the goal from then on."""
     lines = []
@@ -936,8 +973,7 @@ def check_acceptance(slug: str) -> None:
     from .teams import snapshot
 
     snap = snapshot(team["team_id"])
-    statuses = "\n".join(f"- {t.get('key')} {t.get('title')}：{STATE_WORD.get(t.get('sub_status') or t.get('status'), t.get('status'))}"
-                         for t in snap.get("tasks") or [])
+    statuses = "\n".join(task_story(slug, team, snap))
     messages = [{"role": "system", "content": ACCEPTANCE_SYSTEM},
                 {"role": "user", "content": f"协作目标：\n{redact(team.get('goal'), 3000, one_line=False)}\n\n"
                                             + (later_requests(team) + "\n\n" if later_requests(team) else "")

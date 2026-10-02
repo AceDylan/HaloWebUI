@@ -214,7 +214,8 @@ def _messages(team: dict, rows: list[dict], files: list[dict], texts: list[tuple
         result = result[: min(TASK_RESULT_CHARS, max(800, budget))]
         budget -= len(result)
         stopped = r["status"] == "blocked" and "用户停止" in (r["error"] or "")
-        status = "被用户停止，没做完" if stopped else {"done": "已完成", "blocked": "失败/受阻", "running": "未结束"}.get(
+        status = "被用户停止，没做完" if stopped else {"done": "已完成", "blocked": "失败/受阻", "running": "未结束",
+                                                  "archived": "已取消（用户要求取消或采纳了负责人跳过的建议）"}.get(
             r["status"], r["status"])
         parts.append(f"### 任务 {r['key']} {r['title']}（成员 {r['member']}，执行 {r['executor'] or '—'}，{status}，{r['attempts']} 次执行）\n"
                      + (f"错误：{r['error']}\n" if r["error"] and r["status"] != "done" and not stopped else "") + result)

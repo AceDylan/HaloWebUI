@@ -252,6 +252,8 @@ def test_failed_task_is_diagnosed_and_the_suggestion_applies_in_one_click(pkg, t
     lead.mod.apply_diagnosis(team_id, t2, owner=OWNER)
     snap = pkg.teams.snapshot(team_id, OWNER)
     assert _task(snap, "T2")["status"] == "archived" and _task(snap, "T3")["status"] == "ready"
+    story = lead.mod.task_story(slug, pkg.common.read_team(slug), snap)
+    assert any(line.startswith("- T2") and "采纳了负责人「跳过」" in line and "页面写不出来" in line for line in story)
 
 
 def test_ask_user_suggestion_is_not_applied_by_a_click(pkg, team_id, plan_dict, lead):

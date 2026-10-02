@@ -167,3 +167,10 @@ def test_plan_project_choice(pkg, repo, monkeypatch):
         pkg.plan.resolve_project("x", "/definitely/not/a/repo")
     messages = pkg.plan.build_messages("给 myapp 加接口", "/w", project=auto)
     assert "README.md 开头" in messages[1]["content"] and "不要安排 push" in messages[0]["content"]
+
+
+def test_errors_never_carry_url_credentials(pkg):
+    import halowebui_teams.projects as projects
+
+    err = projects.ProjectError(502, "推送失败：fatal: unable to access 'https://bot:ghp_secret123@github.com/x/y.git/'")
+    assert "ghp_secret123" not in err.message and "https://***@github.com" in err.message

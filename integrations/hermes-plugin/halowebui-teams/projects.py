@@ -32,8 +32,15 @@ AUTHOR = ("Halo Team", "halo-team@localhost")
 _BRANCH_RE = re.compile(r"^[A-Za-z0-9._/-]{1,120}$")
 
 
+_URL_CREDENTIALS = re.compile(r"(\w+://)[^/\s@]+@")
+
+
 class ProjectError(Exception):
     def __init__(self, status: int, message: str):
+        # git output can carry a remote URL with credentials in it: never pass those on.
+        from .common import redact
+
+        message = redact(_URL_CREDENTIALS.sub(r"\1***@", str(message)), 600)
         super().__init__(message)
         self.status = status
         self.message = message

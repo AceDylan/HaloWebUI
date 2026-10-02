@@ -24,7 +24,7 @@ export const SUB_STATUS_LABEL: Record<string, string> = {
 	review: '评审中',
 	triage: '需人工处理',
 	scheduled: '已排期',
-	archived: '已归档',
+	archived: '已取消',
 	idle: '空闲',
 	coordinating: '协调中',
 	paused: '已暂停'

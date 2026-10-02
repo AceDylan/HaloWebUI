@@ -82,6 +82,20 @@ const ready = true;
 		expect(html).toContain('>3</span><span');
 	});
 
+	it('links pages and files of this site, not other relative targets', () => {
+		const html = renderResponseHtmlFormat(
+			'[结论](/teams/t-1/conclusion) [文件](/api/v1/teams/t-1/files/a.md) [对话](/c/abc) ' +
+				'[报告](report.md) [磁盘](/root/work/x.md) [协议相对](//evil.example/x)'
+		);
+
+		expect(html).toContain('href="/teams/t-1/conclusion"');
+		expect(html).toContain('href="/api/v1/teams/t-1/files/a.md"');
+		expect(html).toContain('href="/c/abc"');
+		expect(html).not.toContain('href="report.md"');
+		expect(html).not.toContain('href="/root/work/x.md"');
+		expect(html).not.toContain('href="//evil.example');
+	});
+
 	it('marks markdown images for delegated image preview clicks', () => {
 		const html = renderResponseHtmlFormat('![generated image](/api/v1/files/image-id/content)');
 

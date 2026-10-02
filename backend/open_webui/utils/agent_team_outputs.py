@@ -126,7 +126,8 @@ def notice_text(team: AgentTeamModel, conclusion: dict) -> str:
     its files are."""
     title = (team.title or "协作任务").strip()
     state = "已停止" if team.phase == "stopped" else "已完成"
-    parts = [f"[协作任务结论] 「{title}」{state}，下面是负责人写的结论。"]
+    head = f"[协作任务结论] 「{title}」{state}，下面是负责人写的结论。"
+    parts = []
     workspace = str(conclusion.get("workspace") or "").strip()
     if workspace:
         parts.append(f"团队工作目录：{workspace}")
@@ -134,7 +135,7 @@ def notice_text(team: AgentTeamModel, conclusion: dict) -> str:
     if project and project.get("branch"):
         parts.append(f"项目 {project.get('name') or ''} · 分支 {project['branch']}（还没合并）")
     parts.append(f"协作台：/teams/{team.id}")
-    return "；".join(parts)[:900]
+    return (head + "；".join(parts) + "。")[:900]
 
 
 async def read_conclusion(target: HermesTarget, team: AgentTeamModel) -> dict:

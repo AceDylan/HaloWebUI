@@ -387,6 +387,10 @@ const renderInlineWithoutLinks = (value: string, allowNoteLinks = true): string 
 	return html;
 };
 
+// Pages and files of this site (a 协作台 team, its files, a chat, the workspace) are links even
+// though other relative targets are not: a model's "report.md" or "/root/x" means nothing here.
+const SITE_ROUTE_RE = /^\/(?:api\/v1\/|teams(?:[/?#]|$)|c\/|workspace(?:[/?#]|$))/;
+
 const renderInline = (value: string): string => {
 	const input = normalizeText(value);
 	let html = '';
@@ -438,7 +442,7 @@ const renderInline = (value: string): string => {
 
 		const href = resolveSafeMarkdownUrl(target, {
 			allowHash: true,
-			allowRelative: false,
+			allowRelative: SITE_ROUTE_RE.test(target.trim()),
 			allowDataDownload: true
 		});
 

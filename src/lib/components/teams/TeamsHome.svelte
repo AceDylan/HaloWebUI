@@ -605,6 +605,8 @@
 							{@const p = team.progress}
 							{@const total = p?.total || team.task_count || 0}
 							{@const done = s === 'completed' ? total : (p?.done ?? 0)}
+							{@const running = bucket === 'active' ? (p?.running ?? 0) : 0}
+							{@const attention = bucket === 'active' ? (p?.attention ?? 0) : 0}
 							<li
 								class="row tm-card tm-hover tm-rise relative flex items-center gap-3 px-4 py-3 {bucket ===
 									'active' && s !== 'paused'
@@ -659,19 +661,35 @@
 								</span>
 								<span class="hidden w-20 shrink-0 sm:block">
 									{#if total && (bucket === 'active' || bucket === 'done' || s === 'stopped')}
-										<span class="flex flex-col gap-1" title="{done}/{total} 个任务完成">
+										<span
+											class="flex flex-col gap-1"
+											title="{done}/{total} 个任务完成{running
+												? `，${running} 个执行中`
+												: ''}{attention ? `，${attention} 个需要你处理` : ''}"
+											data-team-bar
+										>
 											<span class="tm-num text-right text-[11px] text-gray-500"
 												>{done}<span class="opacity-50">/{total}</span></span
 											>
 											<span
-												class="flex h-1 overflow-hidden rounded-full bg-gray-900/[0.06] dark:bg-white/[0.08]"
+												class="flex h-1 gap-px overflow-hidden rounded-full bg-gray-900/[0.06] dark:bg-white/[0.08]"
 											>
 												<span
-													class="h-full rounded-full {s === 'completed'
-														? 'bg-emerald-500'
-														: 'bg-sky-500'} transition-[width] duration-700"
+													class="h-full bg-emerald-500 transition-[width] duration-700"
 													style="width:{Math.round((done / total) * 100)}%"
 												/>
+												{#if running}
+													<span
+														class="bar-run h-full transition-[width] duration-700"
+														style="width:{Math.round((running / total) * 100)}%"
+													/>
+												{/if}
+												{#if attention}
+													<span
+														class="h-full bg-violet-500 transition-[width] duration-700"
+														style="width:{Math.round((attention / total) * 100)}%"
+													/>
+												{/if}
 											</span>
 										</span>
 									{/if}
@@ -757,6 +775,31 @@
 />
 
 <style>
+	/* Tasks running now: a blue segment with light flowing through it. */
+	.bar-run {
+		background:
+			linear-gradient(90deg, transparent 0%, hsl(0 0% 100% / 0.55) 50%, transparent 100%) 0 0 / 200%
+				100%,
+			rgb(14 165 233);
+		animation: bar-run 1.6s linear infinite;
+	}
+	@keyframes bar-run {
+		from {
+			background-position:
+				150% 0,
+				0 0;
+		}
+		to {
+			background-position:
+				-50% 0,
+				0 0;
+		}
+	}
+	@media (prefers-reduced-motion: reduce) {
+		.bar-run {
+			animation: none;
+		}
+	}
 	.composer {
 		border-radius: 1.4rem;
 		transition:

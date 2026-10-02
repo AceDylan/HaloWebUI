@@ -390,27 +390,6 @@
 						</label>
 						<button
 							type="button"
-							class="pill inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-1 text-xs {autoStart
-								? 'pill-on'
-								: 'text-gray-600 dark:text-gray-300'}"
-							aria-pressed={autoStart}
-							on:click={toggleAutoStart}
-							title="打开后，负责人做好计划就直接开始，不用你批准（有成员没有可用的执行来源时仍会等你）。计划照样能在工作台里看，运行中也能对负责人说要改什么。"
-							data-auto-start
-						>
-							<svg class="size-3.5 shrink-0" viewBox="0 0 16 16" fill="none" aria-hidden="true"
-								><path
-									d="M9 1.75 3.75 9h3.5L6.5 14.25 12.25 6.75h-3.5L9 1.75Z"
-									stroke="currentColor"
-									stroke-width="1.3"
-									stroke-linejoin="round"
-									fill={autoStart ? 'currentColor' : 'none'}
-								/></svg
-							>
-							直接开始
-						</button>
-						<button
-							type="button"
 							class="pill inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-1 text-xs text-gray-600 dark:text-gray-300"
 							aria-expanded={showRunners}
 							on:click={() => (showRunners = !showRunners)}
@@ -450,6 +429,27 @@
 						</button>
 					</div>
 					<div class="ml-auto flex shrink-0 items-center gap-2">
+						<button
+							type="button"
+							class="pill inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-1 text-xs {autoStart
+								? 'pill-on'
+								: 'text-gray-600 dark:text-gray-300'}"
+							aria-pressed={autoStart}
+							on:click={toggleAutoStart}
+							title="打开后，负责人做好计划就直接开始，不用你批准（有成员没有可用的执行来源时仍会等你）。计划照样能在工作台里看，运行中也能对负责人说要改什么。"
+							data-auto-start
+						>
+							<svg class="size-3.5 shrink-0" viewBox="0 0 16 16" fill="none" aria-hidden="true"
+								><path
+									d="M9 1.75 3.75 9h3.5L6.5 14.25 12.25 6.75h-3.5L9 1.75Z"
+									stroke="currentColor"
+									stroke-width="1.3"
+									stroke-linejoin="round"
+									fill={autoStart ? 'currentColor' : 'none'}
+								/></svg
+							>
+							直接开始
+						</button>
 						<kbd
 							class="hidden rounded-md px-1.5 py-0.5 font-mono text-[11px] text-gray-400 sm:inline-block"
 							title="快捷键提交">{isMac ? '⌘' : 'Ctrl'} ↵</kbd

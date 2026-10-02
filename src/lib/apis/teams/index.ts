@@ -67,6 +67,15 @@ export type TeamPlan = {
 	max_parallel?: number;
 	widest_layer?: number;
 	executors?: TeamExecutor[];
+	/** Where the team will work: a git repository (``auto``: the goal named it). */
+	project?: {
+		path: string;
+		name: string;
+		branch?: string;
+		head?: string;
+		dirty?: boolean;
+		auto?: boolean;
+	} | null;
 };
 
 export type TeamStatus =
@@ -105,6 +114,8 @@ export type Team = {
 	roster?: { name: string; role: string }[];
 	/** Started outside the browser ("telegram": with /team in Hermes' Telegram chat). */
 	origin?: string | null;
+	/** The git repository the plan works in (its own branch), when it is a project team. */
+	project?: { name: string; path: string } | null;
 };
 
 export type SubStatus =
@@ -225,6 +236,8 @@ export type TeamsMeta = {
 		cache_seconds: number;
 	};
 	assistants: AssistantRef[];
+	/** Git repositories on the Hermes host a team can work in (its own branch, a worktree). */
+	projects?: { path: string; name: string; aliases: string[] }[];
 };
 
 export type LiveMember = TeamPlanMember & {
@@ -375,16 +388,19 @@ const id = (value: string) => encodeURIComponent(value);
 export const listTeams = (token: string, chatId?: string | null) =>
 	request<{ teams: Team[] }>(token, 'GET', chatId ? `/?chat_id=${id(chatId)}` : '/');
 
+/** ``project``: a repository path, "none" for a fresh directory, empty = the one the goal names. */
 export const createTeam = (
 	token: string,
 	goal: string,
 	chatId?: string | null,
-	leadModel?: string | null
+	leadModel?: string | null,
+	project?: string | null
 ) =>
 	request<Team>(token, 'POST', '/', {
 		goal,
 		chat_id: chatId || null,
-		lead_model: leadModel || null
+		lead_model: leadModel || null,
+		project: project || null
 	});
 
 export const getTeam = (token: string, teamId: string) =>
@@ -394,8 +410,68 @@ export const getTeam = (token: string, teamId: string) =>
 		`/${id(teamId)}`
 	);
 
-export const replanTeam = (token: string, teamId: string, feedback: string) =>
-	request<Team>(token, 'POST', `/${id(teamId)}/replan`, { feedback });
+/** ``project``: undefined keeps the plan's place; "" or "none" = a fresh directory; a path = that repository. */
+export const replanTeam = (token: string, teamId: string, feedback: string, project?: string) =>
+	request<Team>(
+		token,
+		'POST',
+		`/${id(teamId)}/replan`,
+		project === undefined ? { feedback } : { feedback, project }
+	);
+
+export type TeamCommit = {
+	sha: string;
+	subject: string;
+	author: string;
+	at: number;
+	task_key: string | null;
+	member: string | null;
+};
+
+export type TeamChanges = {
+	project: {
+		path: string;
+		name: string;
+		base_branch: string;
+		base_sha: string;
+		branch: string;
+		merged_at?: number | null;
+		merged_sha?: string | null;
+		pushed?: { branch?: number; base?: number } | null;
+		discarded_at?: number | null;
+	} | null;
+	available?: boolean;
+	commits?: TeamCommit[];
+	files?: { path: string; added: number | null; removed: number | null; binary: boolean }[];
+	pending?: string[];
+	added?: number;
+	removed?: number;
+	base_moved?: number;
+	merged?: boolean;
+};
+
+export const getTeamChanges = (token: string, teamId: string) =>
+	request<TeamChanges>(token, 'GET', `/${id(teamId)}/changes`);
+
+export const getTeamChangeDiff = (token: string, teamId: string, path: string) =>
+	request<{ path: string; diff: string }>(
+		token,
+		'GET',
+		`/${id(teamId)}/changes/diff?path=${encodeURIComponent(path)}`
+	);
+
+export const mergeTeamChanges = (token: string, teamId: string) =>
+	request<{ merged: boolean; how: string; sha: string; base_branch: string }>(
+		token,
+		'POST',
+		`/${id(teamId)}/changes/merge`
+	);
+
+export const pushTeamChanges = (token: string, teamId: string, what: 'branch' | 'base') =>
+	request<{ pushed: boolean; ref: string }>(token, 'POST', `/${id(teamId)}/changes/push`, { what });
+
+export const discardTeamChanges = (token: string, teamId: string) =>
+	request<{ discarded: boolean }>(token, 'POST', `/${id(teamId)}/changes/discard`);
 
 export const editTeamPlan = (
 	token: string,

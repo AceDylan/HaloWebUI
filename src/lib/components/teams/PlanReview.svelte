@@ -19,10 +19,14 @@
 	export let registry: TeamsMeta['registry'] | null = null;
 	export let registryError = '';
 	export let checking = false;
+	/** Git repositories the team could work in instead (from the teams meta). */
+	export let projects: { path: string; name: string }[] = [];
 
 	const dispatch = createEventDispatcher<{
 		approve: void;
 		replan: string;
+		/** Plan again in another place: a repository path, or "none" for a fresh directory. */
+		'replan-project': string;
 		cancel: void;
 		executor: { name: string; executor: TeamExecutor; source: 'user' | 'auto' };
 		recheck: void;
@@ -101,6 +105,84 @@
 					</p>
 				{/if}
 			</div>
+		</section>
+
+		<section
+			class="tm-card-quiet flex flex-col gap-1.5 px-4 py-3 text-[13px] text-gray-700 dark:text-gray-200"
+			data-plan-project={plan.project?.path ?? 'none'}
+		>
+			<div class="flex flex-wrap items-center gap-x-2 gap-y-1.5">
+				<svg
+					class="size-4 shrink-0 text-gray-400"
+					viewBox="0 0 16 16"
+					fill="none"
+					aria-hidden="true"
+					><path
+						d="M2 4.5A1.5 1.5 0 0 1 3.5 3h2.6l1.4 1.5h5A1.5 1.5 0 0 1 14 6v5.5a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 11.5v-7Z"
+						stroke="currentColor"
+						stroke-width="1.3"
+						stroke-linejoin="round"
+					/></svg
+				>
+				{#if plan.project}
+					<span
+						>在项目 <b class="font-semibold text-gray-900 dark:text-gray-50">{plan.project.name}</b>
+						里做</span
+					>
+					<span class="font-mono text-xs text-gray-500" title={plan.project.path}
+						>{plan.project.path}</span
+					>
+					{#if plan.project.auto}
+						<span
+							class="rounded-full bg-sky-50 px-2 py-0.5 text-[11px] text-sky-700 dark:bg-sky-950 dark:text-sky-300"
+							>目标里点名了它</span
+						>
+					{/if}
+				{:else}
+					<span>在一个新的工作目录里做</span>
+				{/if}
+				{#if editable}
+					<span class="ml-auto flex items-center gap-2">
+						{#if plan.project}
+							<button
+								type="button"
+								class="tm-btn-ghost !py-1 !text-xs"
+								disabled={busy}
+								on:click={() => dispatch('replan-project', 'none')}
+								data-plan-project-none>改在新目录重做计划</button
+							>
+						{:else if projects.length}
+							<label class="flex items-center gap-1.5 text-xs text-gray-500">
+								换到项目里重做
+								<select
+									class="plan-project-select rounded-lg border bg-transparent px-2 py-1 text-xs tm-hairline"
+									disabled={busy}
+									on:change={(e) => {
+										const value = e.currentTarget.value;
+										if (value) dispatch('replan-project', value);
+									}}
+								>
+									<option value="">选择项目…</option>
+									{#each projects as p (p.path)}
+										<option value={p.path}>{p.name}</option>
+									{/each}
+								</select>
+							</label>
+						{/if}
+					</span>
+				{/if}
+			</div>
+			{#if plan.project}
+				<p class="text-xs leading-relaxed text-gray-500 dark:text-gray-400">
+					批准后团队从 <span class="font-mono">{plan.project.branch || 'HEAD'}</span>
+					{plan.project.head ? `（${plan.project.head}）` : ''}开一个自己的分支，在独立的 worktree
+					里改，不碰你正在用的工作区；每个任务完成自动提交。结束后在「变更」里看差异，合并、推送都由你来点。{#if plan.project.dirty}<span
+							class="text-amber-700 dark:text-amber-300"
+						>
+							你的工作区现在有未提交的改动：不影响团队，合并前需要先提交。</span
+						>{/if}
+				</p>
+			{/if}
 		</section>
 
 		<dl class="stats tm-card grid grid-cols-2 overflow-hidden text-xs sm:grid-cols-4">

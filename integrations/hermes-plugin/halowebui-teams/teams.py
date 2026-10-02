@@ -101,12 +101,24 @@ def _task_body(team: dict, task: dict, member: dict) -> str:
         + f"团队目标：\n{team['goal']}\n\n"
         f"你的任务 {task['key']}：{task['title']}\n{task['description']}\n\n"
         f"前置任务：{deps}（它们的完成摘要会出现在你的上下文「Parent task results」里）。\n"
-        f"工作目录：{team['workspace']}（全队共用；只写你的任务说明里指定的文件，不要改别人的产出）。\n\n"
+        + _workspace_text(team)
+        + "\n\n"
         "完成后调用 kanban_complete，summary 写清楚：做了什么、产出物在哪个文件、给后续成员的交接要点；"
         "result 写完整的结果（负责人会据此写最终结论；图片、截图等产出写明它在工作目录里的相对路径）。"
         "需要和别的成员沟通时用 kanban_comment 写在你的任务上。"
         "确实无法继续（缺信息、需要用户决定）时调用 kanban_block 并写明原因，不要编造结果。"
     )
+
+
+def _workspace_text(team: dict) -> str:
+    project = team.get("project") or {}
+    if project.get("branch"):
+        return (f"工作目录：{team['workspace']}——项目 {project['name']}（{project['path']}）的一个 git worktree，"
+                f"在团队分支 {project['branch']} 上（基于 {project.get('base_branch') or '当前提交'}）。全队共用这个目录；"
+                "只改你的任务说明里涉及的文件，不要改别人的产出。可以 git commit（留在这个分支上），"
+                "**不要 git push、不要切换分支、不要合并到主分支、不要部署**——合并和推送由用户在协作台决定。"
+                "按任务说明里的方法验证（测试 / 检查），把验证结果写进 result。")
+    return f"工作目录：{team['workspace']}（全队共用；只写你的任务说明里指定的文件，不要改别人的产出）。"
 
 
 def create_team(team_id: str, plan: dict, *, owner: str, chat_id: str = "", goal: str = "",
@@ -125,7 +137,16 @@ def create_team(team_id: str, plan: dict, *, owner: str, chat_id: str = "", goal
         if checked is None:
             raise TeamError(400, "计划没有通过检查：" + "；".join(errors))
         workspace = default_workspace(slug)
-        Path(workspace).mkdir(parents=True, exist_ok=True)
+        project = None
+        if isinstance(checked.get("project"), dict) and checked["project"].get("path"):
+            from . import projects
+
+            try:  # the team's own branch, checked out at the workspace path
+                project = projects.prepare(checked["project"]["path"], slug, workspace)
+            except projects.ProjectError as exc:
+                raise TeamError(exc.status, "没能在项目里建团队分支：" + exc.message) from None
+        else:
+            Path(workspace).mkdir(parents=True, exist_ok=True)
         team_title = redact(title or checked["title"], 60) or "协作任务"
         team = {
             "team_id": team_id,
@@ -139,6 +160,7 @@ def create_team(team_id: str, plan: dict, *, owner: str, chat_id: str = "", goal
             "origin": {k: str(v)[:64] for k, v in (origin or {}).items()
                        if k in ("platform", "chat_id", "user_id", "thread_id") and v},
             "workspace": workspace,
+            "project": project,
             "lead": checked["lead"],
             "members": checked["members"],
             "max_parallel": checked["max_parallel"],

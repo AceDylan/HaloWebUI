@@ -59,10 +59,15 @@ class CreateTeamForm(BaseModel):
     chat_id: Optional[str] = Field(default=None, max_length=128)
     # One of the models Hermes has configured for the lead (plan + conclusion); empty = Hermes' default.
     lead_model: Optional[str] = Field(default=None, max_length=120)
+    # Where the team works: a git repository on the Hermes host (its path), "none" = a fresh
+    # directory, empty = the project the goal names, if any (Hermes decides).
+    project: Optional[str] = Field(default=None, max_length=500)
 
 
 class ReplanForm(BaseModel):
     feedback: str = Field(default="", max_length=FEEDBACK_MAX_CHARS)
+    # None = keep the plan's project; "none" = a fresh directory; a path = that repository.
+    project: Optional[str] = Field(default=None, max_length=500)
 
 
 class MemberExecutor(BaseModel):
@@ -154,14 +159,16 @@ async def create_team(request: Request, form: CreateTeamForm, user=Depends(get_v
         target = await hermes_target(request, user)
     except TeamsError as exc:
         _raise(exc)
-    return public_team(_start(user, goal, target, chat_id=chat_id, lead_model=form.lead_model))
+    return public_team(_start(user, goal, target, chat_id=chat_id, lead_model=form.lead_model, project=form.project))
 
 
 def _start(user, goal: str, target, *, chat_id: Optional[str] = None, lead_model: Optional[str] = None,
-           origin: Optional[dict] = None):
+           origin: Optional[dict] = None, project: Optional[str] = None):
     meta: dict = {}
     if (lead_model or "").strip():
         meta["lead_model"] = lead_model.strip()
+    if (project or "").strip():
+        meta["project"] = project.strip()
     if origin:
         meta["origin"] = origin
     team = AgentTeams.insert(user.id, goal, chat_id, default_title(goal), meta=meta or None)
@@ -189,13 +196,16 @@ async def replan(request: Request, team_id: str, form: ReplanForm, user=Depends(
         target = await hermes_target(request, user)
     except TeamsError as exc:
         _raise(exc)
-    return public_team(_replan(team, user, target, form.feedback))
+    return public_team(_replan(team, user, target, form.feedback, form.project))
 
 
-def _replan(team, user, target, feedback: str):
+def _replan(team, user, target, feedback: str, project: Optional[str] = None):
     previous = team.plan
+    fields: dict = {}
+    if project is not None:  # the user picked another place to work: the next plan uses it
+        fields["meta"] = {**(team.meta or {}), "project": project.strip() or "none"}
     updated = AgentTeams.update(team.id, user.id, expect_status=("plan_ready", "plan_failed", "start_failed"),
-                                status="planning", error=None)
+                                status="planning", error=None, **fields)
     if updated is None:
         raise HTTPException(status_code=409, detail="现在不能重新规划（计划已批准或正在规划）")
     start_planning(updated, target, feedback.strip(), previous)
@@ -402,6 +412,58 @@ async def list_files(request: Request, team_id: str, user=Depends(get_verified_u
         _raise(exc)
 
 
+class PushForm(BaseModel):
+    what: Literal["branch", "base"]
+
+
+@router.get("/{team_id}/changes", dependencies=[Depends(_enabled)])
+async def get_changes(request: Request, team_id: str, user=Depends(get_verified_user)):
+    """A team that worked on a project: its branch, commits and changed files."""
+    team, target = await _running_target(request, team_id, user)
+    try:
+        return await hermes_call(target, "GET", f"/{team.id}/changes", timeout=40)
+    except TeamsError as exc:
+        _raise(exc)
+
+
+@router.get("/{team_id}/changes/diff", dependencies=[Depends(_enabled)])
+async def get_change_diff(request: Request, team_id: str, path: str, user=Depends(get_verified_user)):
+    team, target = await _running_target(request, team_id, user)
+    if not path or len(path) > 1000 or "\x00" in path:
+        raise HTTPException(status_code=400, detail="路径不对")
+    try:
+        return await hermes_call(target, "GET", f"/{team.id}/changes/diff", params={"path": path}, timeout=40)
+    except TeamsError as exc:
+        _raise(exc)
+
+
+@router.post("/{team_id}/changes/merge", dependencies=[Depends(_enabled)])
+async def merge_changes(request: Request, team_id: str, user=Depends(get_verified_user)):
+    team, target = await _running_target(request, team_id, user)
+    try:
+        return await hermes_call(target, "POST", f"/{team.id}/changes/merge", json_body={}, timeout=120)
+    except TeamsError as exc:
+        _raise(exc)
+
+
+@router.post("/{team_id}/changes/push", dependencies=[Depends(_enabled)])
+async def push_changes(request: Request, team_id: str, form: PushForm, user=Depends(get_verified_user)):
+    team, target = await _running_target(request, team_id, user)
+    try:
+        return await hermes_call(target, "POST", f"/{team.id}/changes/push", json_body={"what": form.what}, timeout=200)
+    except TeamsError as exc:
+        _raise(exc)
+
+
+@router.post("/{team_id}/changes/discard", dependencies=[Depends(_enabled)])
+async def discard_changes(request: Request, team_id: str, user=Depends(get_verified_user)):
+    team, target = await _running_target(request, team_id, user)
+    try:
+        return await hermes_call(target, "POST", f"/{team.id}/changes/discard", json_body={}, timeout=120)
+    except TeamsError as exc:
+        _raise(exc)
+
+
 _PASS_HEADERS = ("Content-Type", "Content-Disposition", "Cache-Control", "Content-Security-Policy")
 
 
@@ -522,4 +584,4 @@ async def hermes_cancel(request: Request, team_id: str, caller=Depends(_hermes_c
 @router.post("/hermes/teams/{team_id}/replan")
 async def hermes_replan(request: Request, team_id: str, form: ReplanForm, caller=Depends(_hermes_caller)):
     user, target = caller
-    return public_team(_replan(_own(team_id, user), user, target, form.feedback))
+    return public_team(_replan(_own(team_id, user), user, target, form.feedback, form.project))

@@ -18,6 +18,11 @@ or drive another user's team through this API either.
   GET  /v1/halo-teams/{team_id}/conclusion          the final report (markdown) + task results + workspace files
   POST /v1/halo-teams/{team_id}/conclusion          (re)write the report now
   GET  /v1/halo-teams/{team_id}/files/{path}        a file from the team's workspace (images in the report)
+  GET  /v1/halo-teams/{team_id}/changes           a project team's branch: commits, files (+/-), pending
+  GET  /v1/halo-teams/{team_id}/changes/diff?path= one file's diff against the base
+  POST /v1/halo-teams/{team_id}/changes/merge     merge the team branch into the base branch (user action)
+  POST /v1/halo-teams/{team_id}/changes/push      {what: branch|base} push to origin (user action)
+  POST /v1/halo-teams/{team_id}/changes/discard   remove the worktree and branch (user action)
   POST /v1/halo-teams/notify                        {event: plan_ready|plan_failed, team, origin} → the plan card
                                                     for a team started from Telegram (see notify.py)
 """
@@ -91,9 +96,15 @@ async def _plan(request):
     workspace = default_workspace(board_slug(team_id)) if valid_team_id(team_id) else default_workspace("halo-<新团队>")
     previous = data.get("previous") if isinstance(data.get("previous"), dict) else None
     lead_model = str(data.get("lead_model") or "").strip()[:120]
+    # project: "" → the one the goal names (if any), "none" → a fresh directory, a path → that repository.
+    # A re-plan keeps the previous plan's project unless the request names one.
+    choice = str(data.get("project") or "").strip()[:500]
+    if not choice and previous is not None:
+        choice = str((previous.get("project") or {}).get("path") or "none")
+    project = await asyncio.to_thread(plan_mod.resolve_project, goal, choice)
     result = await asyncio.to_thread(
         plan_mod.propose_plan, goal, workspace, feedback=str(data.get("feedback") or ""), previous=previous,
-        lead_model=lead_model,
+        lead_model=lead_model, project=project,
     )
     return _json_response(result, status=200 if result.get("ok") else 502)
 
@@ -197,8 +208,11 @@ async def _meta(request):
     from .plan import lead_model_info
 
     def build() -> dict:
+        from . import projects
+
         return {"lead_model": lead_model_info(), "registry": runners.public_registry(),
-                "assistants": [assistants.public(a) for a in assistants.catalog()]}
+                "assistants": [assistants.public(a) for a in assistants.catalog()],
+                "projects": projects.candidates()}
 
     return _json_response(await asyncio.to_thread(build))
 
@@ -253,6 +267,63 @@ async def _conclusion_post(request):
         return conclusion.start(slug, by="user", force=True)
 
     return _json_response(await asyncio.to_thread(run), status=202)
+
+
+def _project_action(request, action: str):
+    from . import projects
+    from .teams import TeamError, _require_team, snapshot
+
+    team_id = request.match_info["team_id"]
+    slug, team = _require_team(team_id, _owner(request))
+    if action != "view":
+        phase = snapshot(team_id, _owner(request))["team"]["phase"]
+        if phase not in ("completed", "stopped"):
+            raise TeamError(409, "成员还在干活，等团队完成或停止后再合并 / 推送 / 放弃")
+    return slug, team, projects
+
+
+def _project_call(fn):
+    from . import projects
+    from .teams import TeamError
+
+    try:
+        return fn()
+    except projects.ProjectError as exc:
+        raise TeamError(exc.status, exc.message) from None
+
+
+async def _changes(request):
+    def build() -> dict:
+        _slug, team, projects = _project_action(request, "view")
+        return _project_call(lambda: projects.changes(team))
+
+    return _json_response(await asyncio.to_thread(build))
+
+
+async def _changes_diff(request):
+    def build() -> dict:
+        _slug, team, projects = _project_action(request, "view")
+        path = str(request.query.get("path") or "")[:1000]
+        return {"path": path, "diff": _project_call(lambda: projects.diff(team, path))}
+
+    return _json_response(await asyncio.to_thread(build))
+
+
+async def _changes_post(request):
+    data = await _body(request)
+    action = request.match_info["action"]
+
+    def run() -> dict:
+        slug, team, projects = _project_action(request, action)
+        if action == "merge":
+            return _project_call(lambda: projects.merge(slug, team))
+        if action == "push":
+            return _project_call(lambda: projects.push(slug, team, str(data.get("what") or "")))
+        if action == "discard":
+            return _project_call(lambda: projects.discard(slug, team))
+        return {"error": "unknown action"}
+
+    return _json_response(await asyncio.to_thread(run))
 
 
 async def _file(request):
@@ -312,6 +383,9 @@ def install(app: Any, adapter: Any) -> None:
     router.add_get(base + "/{team_id}/conclusion", _wrap(adapter, _conclusion_get))
     router.add_post(base + "/{team_id}/conclusion", _wrap(adapter, _conclusion_post))
     router.add_get(base + "/{team_id}/files", _wrap(adapter, _files))
+    router.add_get(base + "/{team_id}/changes", _wrap(adapter, _changes))
+    router.add_get(base + "/{team_id}/changes/diff", _wrap(adapter, _changes_diff))
+    router.add_post(base + "/{team_id}/changes/{action:merge|push|discard}", _wrap(adapter, _changes_post))
     router.add_get(base + "/{team_id}/files/{path:.+}", _wrap(adapter, _file))
     if not _installed["done"]:
         _installed["done"] = True

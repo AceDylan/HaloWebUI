@@ -55,6 +55,7 @@ def tick() -> None:
                 logger.warning("halowebui-teams: runner tick failed for %s", slug, exc_info=True)
             if _active(slug) and _has_ready_native(slug):
                 nudge_dispatch(slug)
+            _commit_finished(slug, read_team(slug) or team)
             _catch_up_conclusion(slug, team)
             try:
                 from . import notify
@@ -64,6 +65,37 @@ def tick() -> None:
                 logger.warning("halowebui-teams: notice tick failed for %s", slug, exc_info=True)
         except Exception:
             logger.warning("halowebui-teams: bridge tick failed for %s", slug, exc_info=True)
+
+
+def _commit_finished(slug: str, team: dict) -> None:
+    """A team working on a project commits each finished task on its branch (see projects.py)."""
+    if not (team.get("project") or {}).get("branch") or not team.get("tasks"):
+        return
+    committed = set(team.get("committed") or [])
+    ids = [t for t in team["tasks"] if t not in committed]
+    if not ids:
+        return
+    with board_conn(slug) as conn:
+        done = {row[0]: row[1] or "" for row in conn.execute(
+            f"SELECT id, title FROM tasks WHERE id IN ({','.join('?' * len(ids))}) AND status IN ('done','archived')",
+            ids)}
+    if not done:
+        return
+    from . import projects
+    from .common import update_team
+
+    rows = []
+    for t in ids:
+        if t in done:
+            entry = team["tasks"][t]
+            title = done[t]
+            if entry.get("key") and title.startswith(entry["key"] + " "):
+                title = title[len(entry["key"]) + 1:]
+            rows.append({"id": t, **entry, "title": title})
+    rows.sort(key=lambda r: r.get("seq") or 0)
+    handled = projects.commit_finished(slug, team, rows)
+    if handled:
+        update_team(slug, lambda rec: rec.update({"committed": [*(rec.get("committed") or []), *handled]}))
 
 
 CONCLUSION_CATCH_UP = 6 * 3600

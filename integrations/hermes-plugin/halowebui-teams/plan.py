@@ -42,7 +42,7 @@ SYSTEM_PROMPT = """你是一个多代理团队的负责人（team-lead）。用�
 }
 
 成员：
-- 2 到 4 个为宜，最多 6 个；name 用小写英文和连字符（如 backend-dev、frontend-dev、qa-engineer、reviewer），role 用中文。
+- 人数跟着目标的分量走：一个简单问题或一次事实查询 1 个成员就够（不要评审）；一般的调研 / 写作 / 小功能 2 到 3 个；大的改动 3 到 4 个；最多 6 个。不要为了凑人数拆出没必要的角色。name 用小写英文和连字符（如 backend-dev、frontend-dev、qa-engineer、reviewer），role 用中文。
 - assistant：优先从下面的「助手模板」里选最贴切的一个，填它的编号；同一个模板可以给多个成员。确实没有合适的模板时填 null，并在 role / focus 里写清这个角色做什么。
 - kind：这个成员的任务类型，决定由哪种执行器（runner）来做：
 {kinds}
@@ -52,17 +52,18 @@ SYSTEM_PROMPT = """你是一个多代理团队的负责人（team-lead）。用�
 {catalog}
 
 任务：
-- 2 到 8 个为宜，最多 10 个；key 用 T1、T2…；每个任务只分给一个成员，member 必须是 members 里的 name。
+- 和人数一样按分量来：简单目标 1 到 2 个任务，一般 2 到 6 个，最多 10 个；key 用 T1、T2…；每个任务只分给一个成员，member 必须是 members 里的 name。
 - depends_on 写这个任务开始前必须完成的任务 key。互不依赖的任务要能并行；需要汇总或评审的任务依赖它要看的所有任务。不能有循环依赖。
 - 合适时安排一个评审 / 测试成员在最后检查前面成员的产出。
 - 每个任务的 description 要自成一体：写清楚要做什么、产出物写到工作目录下的哪个文件、完成标准。并行任务不能写同一个文件。
-- 不要安排需要用户手动操作、需要密钥或会改动生产服务的任务。"""
+- 不要安排需要用户手动操作、需要密钥或会改动生产服务的任务。
+- 如果给了「项目」：团队在这个 git 仓库的独立分支（一个 worktree）上工作，工作目录就是仓库根。任务要指向真实的文件和模块，description 写清改哪些文件、怎么验证（跑哪些测试 / 检查）；并行任务改不同的文件；不要安排 push、合并到主分支、部署、构建镜像的任务——合并和推送由用户在协作台里决定。"""
 
 USER_TEMPLATE = """协作目标：
 {goal}
 
 工作目录（所有成员共用，产出物写在这里）：{workspace}
-{extra}"""
+{project}{extra}"""
 
 
 def system_prompt() -> str:
@@ -73,13 +74,20 @@ def system_prompt() -> str:
     return SYSTEM_PROMPT.replace("{kinds}", kinds).replace("{catalog}", catalog).replace("{executors}", executors)
 
 
-def build_messages(goal: str, workspace: str, feedback: str = "", previous: Optional[dict] = None) -> list:
+def build_messages(goal: str, workspace: str, feedback: str = "", previous: Optional[dict] = None,
+                   project: Optional[dict] = None) -> list:
     extra = ""
     if previous:
         extra += "\n上一版计划（用户要求修改）：\n" + json.dumps(_plan_for_lead(previous), ensure_ascii=False)[:6000] + "\n"
     if feedback:
         extra += "\n用户对计划的修改意见：\n" + feedback.strip()[:2000] + "\n"
-    user = USER_TEMPLATE.format(goal=goal.strip()[:6000], workspace=workspace, extra=extra)
+    project_text = ""
+    if project and project.get("path"):
+        from . import projects
+
+        project_text = ("\n在项目里做（团队分支，工作目录是它的一个 worktree）：\n"
+                        + (projects.context_text(project["path"]) or project["path"]) + "\n")
+    user = USER_TEMPLATE.format(goal=goal.strip()[:6000], workspace=workspace, project=project_text, extra=extra)
     return [{"role": "system", "content": system_prompt()}, {"role": "user", "content": user}]
 
 
@@ -418,6 +426,9 @@ def validate_plan(raw: Any, *, parallel_cap: int = DEFAULT_PARALLEL_CAP,
     }
     if isinstance(raw.get("lead_model"), dict):
         plan["lead_model"] = raw["lead_model"]
+    if isinstance(raw.get("project"), dict) and raw["project"].get("path"):
+        plan["project"] = {k: raw["project"].get(k) for k in ("path", "name", "branch", "head", "dirty", "auto")
+                           if raw["project"].get(k) not in (None, "")}
     return plan, []
 
 
@@ -474,10 +485,31 @@ def _find_cycle(tasks: list[dict]) -> Optional[list[str]]:
     return None
 
 
+def resolve_project(goal: str, choice: str) -> Optional[dict]:
+    """The project a plan works in: "none" → none; a path → that repository; "" → the project the
+    goal names, if any (``auto``). Raises ValueError for a path that is not a usable repository."""
+    from . import projects
+
+    choice = (choice or "").strip()
+    if choice == "none":
+        return None
+    if choice:
+        described = projects.describe(choice)
+        if described is None:
+            raise ValueError(f"{choice} 不是可以协作的 git 仓库（要是本机某个仓库的根目录，不能是主目录）")
+        return described
+    suggested = projects.suggest(goal)
+    described = projects.describe(suggested["path"]) if suggested else None
+    return {**described, "auto": True} if described else None
+
+
 def propose_plan(goal: str, workspace: str, *, feedback: str = "", previous: Optional[dict] = None,
-                 parallel_cap: int = DEFAULT_PARALLEL_CAP, timeout: int = 150, lead_model: str = "") -> dict:
+                 parallel_cap: int = DEFAULT_PARALLEL_CAP, timeout: int = 150, lead_model: str = "",
+                 project: Optional[dict] = None) -> dict:
     """Ask the lead model for a plan, then validate it. One retry when the reply is not usable."""
-    messages = build_messages(goal, workspace, feedback, previous)
+    if project and project.get("path"):
+        workspace = project["path"] + "（团队分支的 worktree，批准时创建）"
+    messages = build_messages(goal, workspace, feedback, previous, project)
     last_errors: list[str] = []
     for attempt in range(2):
         text, reason, used = call_model(messages, timeout=timeout, preferred=lead_model or None)
@@ -488,6 +520,8 @@ def propose_plan(goal: str, workspace: str, *, feedback: str = "", previous: Opt
             last_errors = ["负责人返回的不是 JSON"]
         else:
             parsed["lead_model"] = used
+            if project:
+                parsed["project"] = project
             parsed.setdefault("lead", {})
             if isinstance(parsed["lead"], dict):
                 parsed["lead"]["model"] = used.get("model")

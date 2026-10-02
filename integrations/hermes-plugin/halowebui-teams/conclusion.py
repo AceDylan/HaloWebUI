@@ -87,6 +87,20 @@ def list_files(team: dict) -> list[dict]:
     if root is None:
         return []
     out = []
+    from . import projects
+
+    changed = projects.changed_paths(team)
+    if changed is not None:  # a project team: its deliverables are what it changed, not the whole repository
+        for rel in changed:
+            full = root / rel
+            try:
+                st = full.lstat()
+            except OSError:
+                continue
+            if full.is_file() and not full.is_symlink():
+                out.append({"path": rel, "size": st.st_size, "mtime": int(st.st_mtime), "kind": file_kind(full.name)})
+        out.sort(key=lambda f: (-f["mtime"], f["path"]))
+        return out[:MAX_LISTED_FILES]
     for dirpath, dirnames, filenames in os.walk(root):
         dirnames[:] = sorted(d for d in dirnames if d not in SKIP_DIRS and not d.startswith("."))
         for name in filenames:
@@ -203,7 +217,15 @@ def _messages(team: dict, rows: list[dict], files: list[dict], texts: list[tuple
         parts.append(f"### 任务 {r['key']} {r['title']}（成员 {r['member']}，执行 {r['executor'] or '—'}，{status}，{r['attempts']} 次执行）\n"
                      + (f"错误：{r['error']}\n" if r["error"] and r["status"] != "done" and not stopped else "") + result)
     listing = "\n".join(f"- {f['path']}（{f['kind']}，{f['size']} 字节）" for f in files[:120]) or "（工作目录里没有文件）"
-    parts.append(f"工作目录 {team.get('workspace')} 的文件：\n{listing}")
+    from . import projects
+
+    change_set = projects.summary_text(team) if team.get("project") else ""
+    if change_set:
+        parts.append("代码改动（团队在项目的独立分支上工作；结论里写清改了什么、为什么、怎么验证、合并前要注意什么）：\n"
+                     + change_set)
+        parts.append(f"改动的文件：\n{listing}")
+    else:
+        parts.append(f"工作目录 {team.get('workspace')} 的文件：\n{listing}")
     for path, text in texts:
         parts.append(f"文件 {path} 的内容：\n```\n{text}\n```")
     return [{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": "\n\n".join(parts)}]

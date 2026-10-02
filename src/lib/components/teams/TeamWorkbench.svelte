@@ -25,6 +25,7 @@
 	import MenuLines from '$lib/components/icons/MenuLines.svelte';
 	import CommFeed from './CommFeed.svelte';
 	import ConclusionView from './ConclusionView.svelte';
+	import ChangesView from './ChangesView.svelte';
 	import RunnerBadge from './RunnerBadge.svelte';
 	import Inspector from './Inspector.svelte';
 	import MemberStrip from './MemberStrip.svelte';
@@ -70,8 +71,10 @@
 	let replayIndex: number | null = null;
 	let selectedTask: string | null = null;
 	let selectedMember: string | null = null;
-	let mobileTab: 'tasks' | 'members' | 'feed' | 'conclusion' = 'tasks';
-	let asideTab: 'feed' | 'conclusion' = 'feed';
+	let mobileTab: 'tasks' | 'members' | 'feed' | 'conclusion' | 'changes' = 'tasks';
+	let asideTab: 'feed' | 'conclusion' | 'changes' = 'feed';
+	// A team working on a git project has a 变更 tab (its branch, commits, diff, merge / push).
+	$: projectTeam = !!team?.plan?.project;
 	let asideTouched = false;
 	let busy = false;
 	let showStop = false;
@@ -82,6 +85,7 @@
 	let finishedFetches = 0;
 	let refreshKey = 0;
 	let registry: TeamsMeta['registry'] | null = null;
+	let projects: NonNullable<TeamsMeta['projects']> = [];
 	let registryError = '';
 	let checking = false;
 	let metaRequested = false;
@@ -302,7 +306,8 @@
 	};
 
 	const approve = () => act(() => approveTeam(localStorage.token, teamId), '已批准，成员开始工作');
-	const replan = (feedback: string) => act(() => replanTeam(localStorage.token, teamId, feedback));
+	const replan = (feedback: string, project?: string) =>
+		act(() => replanTeam(localStorage.token, teamId, feedback, project));
 	const cancel = () => act(() => cancelTeam(localStorage.token, teamId), '已取消');
 	const setExecutor = (name: string, executor: TeamExecutor, source: 'user' | 'auto') =>
 		act(async () => {
@@ -314,7 +319,9 @@
 	const loadMeta = async () => {
 		metaRequested = true;
 		try {
-			registry = (await getTeamsMeta(localStorage.token)).registry;
+			const meta = await getTeamsMeta(localStorage.token);
+			registry = meta.registry;
+			projects = meta.projects ?? [];
 			registryError = '';
 		} catch (error) {
 			registryError = `${error?.message ?? error}`;
@@ -618,8 +625,10 @@
 						{registry}
 						{registryError}
 						{checking}
+						{projects}
 						on:approve={approve}
 						on:replan={(e) => replan(e.detail)}
+						on:replan-project={(e) => replan('', e.detail)}
 						on:cancel={cancel}
 						on:executor={(e) => setExecutor(e.detail.name, e.detail.executor, e.detail.source)}
 						on:recheck={recheck}
@@ -723,7 +732,7 @@
 
 				{#if $mobile}
 					<div class="tm-segment w-full" role="tablist" aria-label="协作台视图">
-						{#each [['tasks', '任务'], ['members', '成员'], ['feed', '通讯'], ['conclusion', '结论']] as [value, label]}
+						{#each [['tasks', '任务'], ['members', '成员'], ['feed', '通讯'], ['conclusion', '结论'], ...(projectTeam ? [['changes', '变更']] : [])] as [value, label]}
 							<button
 								type="button"
 								role="tab"
@@ -855,10 +864,12 @@
 							brief={conclusionBrief}
 							progress={{ done: counts.done, total: counts.total }}
 						/>
+					{:else if mobileTab === 'changes'}
+						<ChangesView {teamId} {phase} />
 					{/if}
 				{:else}
 					<div
-						class="grid gap-4 {asideTab === 'conclusion' && !selectedTask && !selectedMember
+						class="grid gap-4 {asideTab !== 'feed' && !selectedTask && !selectedMember
 							? 'lg:grid-cols-[minmax(0,1fr)_420px] xl:grid-cols-[minmax(0,1fr)_520px]'
 							: 'lg:grid-cols-[minmax(0,1fr)_380px]'}"
 					>
@@ -920,7 +931,7 @@
 							{:else}
 								<div class="mb-3 flex items-center">
 									<div class="tm-segment" role="tablist" aria-label="通讯与结论">
-										{#each [['feed', '通讯与日志'], ['conclusion', '结论']] as [value, label]}
+										{#each [['feed', '通讯与日志'], ['conclusion', '结论'], ...(projectTeam ? [['changes', '变更']] : [])] as [value, label]}
 											<button
 												type="button"
 												role="tab"
@@ -948,6 +959,10 @@
 											brief={conclusionBrief}
 											progress={{ done: counts.done, total: counts.total }}
 										/>
+									</div>
+								{:else if asideTab === 'changes'}
+									<div class="tm-scroll min-h-0 flex-1 overflow-y-auto pr-1">
+										<ChangesView {teamId} {phase} />
 									</div>
 								{:else}
 									<div class="min-h-0 flex-1">

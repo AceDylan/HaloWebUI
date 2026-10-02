@@ -34,6 +34,9 @@
 	let metaError = '';
 	let checking = false;
 	let leadModel = '';
+	// Where the team works: "" = the project the goal names (if any), "none" = a fresh directory,
+	// a path = that git repository (the team gets its own branch there).
+	let project = '';
 	let showRunners = false;
 	let filter: 'all' | 'active' | 'review' | 'done' | 'ended' = 'all';
 	let query = '';
@@ -172,7 +175,7 @@
 		if (!text || creating) return;
 		creating = true;
 		try {
-			const team = await createTeam(localStorage.token, text, chatId, leadModel || null);
+			const team = await createTeam(localStorage.token, text, chatId, leadModel || null, project);
 			goto(`/teams/${team.id}`);
 		} catch (e) {
 			toast.error(`${e?.message ?? e}`);
@@ -330,6 +333,35 @@
 								>
 								{#each modelChoices as model}
 									<option value={model}>{model}</option>
+								{/each}
+							</select>
+						</label>
+						<label
+							class="pill flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full py-1 pr-1 pl-2.5 text-xs"
+							data-team-project
+							title="团队在哪干活：项目 = 在这个 git 仓库的独立分支上改（合并、推送由你在协作台决定）；新目录 = 一个空的工作目录"
+						>
+							<svg
+								class="size-3.5 shrink-0 text-gray-400"
+								viewBox="0 0 16 16"
+								fill="none"
+								aria-hidden="true"
+								><path
+									d="M2 4.5A1.5 1.5 0 0 1 3.5 3h2.6l1.4 1.5h5A1.5 1.5 0 0 1 14 6v5.5a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 11.5v-7Z"
+									stroke="currentColor"
+									stroke-width="1.3"
+									stroke-linejoin="round"
+								/></svg
+							>
+							<span class="shrink-0 text-gray-500 dark:text-gray-400">在哪做</span>
+							<select
+								bind:value={project}
+								class="compact-select min-w-0 max-w-[9rem] truncate sm:max-w-[12rem]"
+							>
+								<option value="">自动（目标点名项目就在项目里）</option>
+								<option value="none">新目录</option>
+								{#each meta?.projects ?? [] as p (p.path)}
+									<option value={p.path}>项目 · {p.name}</option>
 								{/each}
 							</select>
 						</label>

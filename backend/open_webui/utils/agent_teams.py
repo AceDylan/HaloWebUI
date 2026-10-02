@@ -138,6 +138,7 @@ async def _plan_job(team: AgentTeamModel, target: HermesTarget, feedback: str, p
         body = await hermes_call(target, "POST", "/plan", json_body={
             "goal": team.goal, "team_id": team.id, "feedback": feedback, "previous": previous,
             "lead_model": (team.meta or {}).get("lead_model") or "",
+            "project": (team.meta or {}).get("project") or "",
         }, timeout=PLAN_TIMEOUT_SECONDS)
         ok = isinstance(body, dict) and body.get("ok") and isinstance(body.get("plan"), dict)
         if ok:
@@ -258,6 +259,8 @@ def public_team(team: AgentTeamModel, *, with_plan: bool = True) -> dict:
     data["executors"] = plan.get("executors") or []
     data["progress"] = meta.get("progress")
     data["origin"] = (meta.get("origin") or {}).get("platform") if isinstance(meta.get("origin"), dict) else None
+    project = plan.get("project") if isinstance(plan.get("project"), dict) else None
+    data["project"] = {"name": project.get("name"), "path": project.get("path")} if project else None
     data["deletable"] = deletable(team)
     # Who is on the team, for the list's avatar stack (names and roles only).
     data["roster"] = [

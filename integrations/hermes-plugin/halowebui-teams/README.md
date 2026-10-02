@@ -42,6 +42,14 @@ is the Hermes side. It adds no service, port or second task store:
   native subagent start/stop, and the moment a user's note reached the running member, as
   `halo_*` events in the same `task_events` sequence.
 
+* **Projects** (`projects.py`): a plan can work in a git repository on this machine (chosen in
+  HaloWebUI, or the one the goal names — HERMES_DISPATCH_PROJECTS and where recent runner runs
+  worked; never the home directory or the Hermes home). At approval the team gets the branch
+  `halo/<board>` from the repository's HEAD as a linked worktree at its usual workspace path;
+  every finished task is committed there (`[T2 · member] title`), the conclusion lists the
+  changed files and the change set, and merge into the base branch / push / discard are explicit
+  user actions (`/changes/*`). Nothing pushes on its own; a merge needs a clean checkout of the
+  base branch (fast-forward, else a merge commit, a conflict is aborted and reported).
 * **Telegram** (`tg.py`, `notify.py`, `link.py`): `/team <目标>` starts a team from Telegram
   (HaloWebUI creates and plans it through its `/api/v1/teams/hermes/*` routes; the plan card comes
   back with 批准 / 取消 buttons, a reply re-plans), `/team` lists recent teams; the bridge loop sends
@@ -71,6 +79,9 @@ HaloWebUI sends `X-Halo-Owner: <user id>`; a team recorded for another owner is 
 | `GET /v1/halo-teams/{id}/conclusion` | the report (markdown), its status / model, every task's full result, workspace files |
 | `POST /v1/halo-teams/{id}/conclusion` | (re)write the report now |
 | `GET /v1/halo-teams/{id}/files[/{path}]` | the workspace listing / one file (confined to the workspace; HTML served as text) |
+| `GET /v1/halo-teams/{id}/changes` | a project team's branch: commits, files (+/−), not yet committed, merged / pushed |
+| `GET /v1/halo-teams/{id}/changes/diff?path=` | one file's diff against the base |
+| `POST /v1/halo-teams/{id}/changes/{merge,push,discard}` | user actions once the team is completed or stopped; push `{what: branch|base}` |
 | `POST /v1/halo-teams/notify` `{event, team, origin}` | HaloWebUI hands over a finished plan (or why there is none) of a team started from Telegram; the plan card goes to that chat |
 
 `sub_status` values: `queued` (ready, waiting for a slot), `waiting_deps`, `running`,

@@ -434,3 +434,37 @@ def test_events_pass_the_visible_flag(hermes):
     client.get(f"/api/v1/teams/{team_id}/events?after=4")
     params = [c[4] for c in hermes.calls if c[2].endswith("/events")]
     assert params[-2] == {"after": 3, "limit": 500, "visible": "1"} and "visible" not in params[-1]
+
+
+# --- teams on a project ------------------------------------------------------------------------------
+
+def test_project_choice_reaches_the_lead_and_replan_can_change_it(hermes):
+    client = _client("u1")
+    team = AgentTeams.get(client.post("/api/v1/teams/", json={"goal": "给 HaloWebUI 加接口", "project": "/root/HaloWebUI"})
+                          .json()["id"], "u1")
+    assert team.meta["project"] == "/root/HaloWebUI"
+    hermes.responses[("POST", "/plan")] = {"ok": True, "plan": {**PLAN, "project": {"path": "/root/HaloWebUI",
+                                                                                     "name": "HaloWebUI"}}}
+    asyncio.run(teams_utils._plan_job(team, teams_utils.HermesTarget("http://hermes", {}, "u1"), "", None))
+    assert next(c for c in hermes.calls if c[2] == "/plan")[3]["project"] == "/root/HaloWebUI"
+    got = client.get(f"/api/v1/teams/{team.id}").json()["team"]
+    assert got["project"] == {"name": "HaloWebUI", "path": "/root/HaloWebUI"}
+    client.post(f"/api/v1/teams/{team.id}/replan", json={"feedback": "", "project": ""})
+    assert AgentTeams.get(team.id, "u1").meta["project"] == "none"
+
+
+def test_change_routes_are_proxied_only_for_running_teams(hermes):
+    client = _client("u1")
+    team_id = _ready_team(client, hermes)
+    assert client.get(f"/api/v1/teams/{team_id}/changes").status_code == 409
+    AgentTeams.update(team_id, "u1", status="running", phase="completed")
+    hermes.responses[("GET", "/changes")] = {"project": {"branch": "halo/x"}, "files": []}
+    assert client.get(f"/api/v1/teams/{team_id}/changes").json()["project"]["branch"] == "halo/x"
+    client.get(f"/api/v1/teams/{team_id}/changes/diff", params={"path": "src/a.py"})
+    assert hermes.calls[-1][2].endswith("/changes/diff") and hermes.calls[-1][4] == {"path": "src/a.py"}
+    assert client.post(f"/api/v1/teams/{team_id}/changes/push", json={"what": "main"}).status_code == 422
+    client.post(f"/api/v1/teams/{team_id}/changes/push", json={"what": "branch"})
+    assert hermes.calls[-1][2].endswith("/changes/push") and hermes.calls[-1][3] == {"what": "branch"}
+    client.post(f"/api/v1/teams/{team_id}/changes/merge")
+    assert hermes.calls[-1][2].endswith("/changes/merge")
+    assert _client("u2").post(f"/api/v1/teams/{team_id}/changes/merge").status_code == 404

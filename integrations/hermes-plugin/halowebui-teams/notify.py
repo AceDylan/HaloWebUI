@@ -133,6 +133,11 @@ def plan_message(team: dict) -> tuple[str, list]:
     lines = [f"🧭 <b>{esc(clip(team.get('title') or plan.get('title'), 60))}</b> · 计划好了"]
     if plan.get("summary"):
         lines.append(esc(clip(plan["summary"], 300)))
+    project = plan.get("project") if isinstance(plan.get("project"), dict) else None
+    if project and project.get("path"):
+        lines.append("")
+        lines.append(f"📁 在项目 <b>{esc(project.get('name'))}</b> 里做：团队开自己的分支，不碰你的工作区；"
+                     "合并、推送由你在协作台决定" + ("（目标里点名了它）" if project.get("auto") else ""))
     lines.append("")
     lines.append(f"<b>成员 {len(members)} 位</b>")
     for m in members[:8]:
@@ -213,6 +218,18 @@ def done_message(team: dict, snap: dict, markdown: str) -> tuple[str, list]:
     took = duration((team.get("completed_at") or now()) - started) if started else ""
     head = (f"✅ <b>{esc(clip(team.get('title'), 60))}</b> · 完成\n"
             f"{done}/{len(tasks)} 个任务{' · 用时 ' + took if took else ''}")
+    project = team.get("project") or {}
+    if project.get("branch"):
+        from . import projects
+
+        try:
+            change = projects.changes(team)
+        except Exception:  # noqa: BLE001 — the notice goes out without the change line
+            change = {}
+        if change.get("available"):
+            head += (f"\n📁 {esc(project.get('name'))} · 分支 <code>{esc(project['branch'])}</code>："
+                     f"{len(change.get('files') or [])} 个文件 +{change.get('added', 0)} −{change.get('removed', 0)}，"
+                     "还没合并——在工作台「变更」里看差异、合并或推送")
     body = plain(markdown) if markdown else ""
     if not body:
         body = "\n".join(f"• {t.get('title')}：{plain(t.get('result') or '')[:200]}" for t in tasks[:8])

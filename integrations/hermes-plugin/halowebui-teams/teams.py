@@ -386,6 +386,12 @@ def snapshot(team_id: str, owner: Optional[str] = None) -> dict:
                 "block_reason": _block_reason(task, last_events.get(task.id)),
                 "consecutive_failures": task.consecutive_failures,
             })
+            if sub in ("failed", "blocked"):
+                from .lead import public_diagnosis
+
+                diagnosis = public_diagnosis(team, tasks_out[-1])
+                if diagnosis:
+                    tasks_out[-1]["diagnosis"] = diagnosis
     tasks_out.sort(key=lambda t: (t.get("seq") or 0, t["id"]))
     phase = team_phase(team, tasks_out)
     if phase == "completed" and not team.get("completed_at"):
@@ -415,6 +421,8 @@ def snapshot(team_id: str, owner: Optional[str] = None) -> dict:
             "lead": {**(team.get("lead") or {"name": LEAD_NAME, "role": "负责人"}), "status": lead_status(phase)},
             "lead_model": team.get("lead_model") or {},
             "conclusion": _conclusion_brief(team),
+            "round": int(team.get("round") or 0),
+            **_lead_state(team),
         },
         "members": members,
         "tasks": tasks_out,
@@ -438,14 +446,20 @@ def _mark_completed(slug: str, team: dict) -> None:
     # Every finished team gets its conclusion written by the lead (in the background).
     from . import conclusion
 
-    team["conclusion"] = conclusion.start(slug, by="auto")
+    team["conclusion"] = conclusion.start(slug, by="auto", force=bool(fresh.get("round")))
 
 
 def _conclusion_brief(team: dict) -> dict:
     entry = team.get("conclusion") or {}
     keep = ("status", "source", "model", "model_label", "generated_at", "started_at", "chars", "error",
-            "tasks_done", "tasks_total")
+            "tasks_done", "tasks_total", "acceptance")
     return {k: entry[k] for k in keep if entry.get(k) not in (None, "")}
+
+
+def _lead_state(team: dict) -> dict:
+    from .lead import public_state
+
+    return public_state(team)
 
 
 def _task_runner_info(team: dict, task_id: str, assignee: Optional[str]) -> dict:
@@ -520,6 +534,8 @@ def _comment_rows(conn: Any) -> dict[str, list]:
 
 def _author_kind(author: str, member: str) -> tuple[str, str]:
     author = author or ""
+    if author == USER_AUTHOR_PREFIX + LEAD_NAME:
+        return "lead", LEAD_NAME
     if author.startswith(USER_AUTHOR_PREFIX):
         return "user", author[len(USER_AUTHOR_PREFIX):] or "用户"
     if author in ("default", *RUNNER_EXECUTORS, member) or (member and author.startswith(member)):
@@ -580,7 +596,7 @@ def timeline(team_id: str, owner: Optional[str] = None, after: int = 0, limit: i
                 who, author = _author_kind(row["author"], member)
                 ev = {**base, "type": "message", "who": who, "author": author,
                       "text": redact(row["body"], 2000, one_line=False), "data": {"comment_id": row["id"]}}
-                if who == "user":
+                if who in ("user", "lead"):
                     pending_user_comments.setdefault(task_id, []).append(ev)
         elif kind == "halo_comment_delivered":
             ids = [int(i) for i in payload.get("comment_ids") or [] if str(i).isdigit()]
@@ -653,7 +669,7 @@ def timeline(team_id: str, owner: Optional[str] = None, after: int = 0, limit: i
         ev.setdefault("id", str(ev["seq"]))
     # Delivery state of every user message (and when it changed, for replays).
     for ev in events:
-        if ev["type"] == "message" and ev.get("who") == "user":
+        if ev["type"] == "message" and ev.get("who") in ("user", "lead"):
             cid = ev["data"].get("comment_id")
             info = delivered.get(cid)
             if info:
@@ -728,7 +744,7 @@ KIND_TEXT = {
     "spawn_failed": "成员进程启动失败",
     "protocol_violation": "成员退出时没有报告完成",
     "dependency_wait": "等待前置任务",
-    "archived": "已归档",
+    "archived": "已从计划中移除",
     "review_requested": "提交评审",
     "changes_requested": "评审要求修改",
     "claim_rejected": "前置任务未完成，不能开始",
@@ -771,7 +787,40 @@ def _team_text(payload: dict) -> str:
         "completed": "所有任务已完成，负责人开始写结论",
         "concluded": "负责人写好了结论" if payload.get("source") != "assembled" else "结论已按任务记录整理（负责人模型没有回答）",
         "retry": "用户要求重试失败的任务",
+        "change_requested": f"{payload.get('by') or '你'}对负责人说：{payload.get('text') or ''}"
+                            if payload.get("source") != "acceptance" else "让团队补上验收发现的缺口",
+        "change_proposed": f"负责人提出计划变更（{payload.get('summary') or '见提案'}），等你确认",
+        "change_answered": f"负责人回答：{payload.get('reply') or ''}",
+        "change_failed": f"负责人没能给出变更：{payload.get('error') or ''}",
+        "change_applied": _applied_text(payload),
+        "change_discarded": "放弃了负责人的变更提案",
+        "task_cancelled": "已从计划中取消",
+        "task_edited": "负责人改写了任务说明",
+        "diagnosed": f"负责人诊断：{payload.get('cause') or ''}（建议{_suggestion_label(payload.get('suggestion'))}）",
+        "diagnosis_applied": f"按负责人的建议处理：{_suggestion_label(payload.get('suggestion'))}",
+        "accepted": "负责人验收：目标已达成" if payload.get("verdict") == "met"
+                    else f"负责人验收：发现 {payload.get('gaps') or 0} 处缺口",
     }.get(action, str(action or "团队事件"))
+
+
+def _suggestion_label(action: Any) -> str:
+    from .lead import ACTION_LABEL
+
+    return ACTION_LABEL.get(str(action or ""), str(action or ""))
+
+
+def _applied_text(payload: dict) -> str:
+    parts = []
+    if payload.get("members"):
+        parts.append("加入成员 " + "、".join(payload["members"]))
+    if payload.get("added"):
+        parts.append("新任务 " + "、".join(payload["added"]))
+    if payload.get("edited"):
+        parts.append("改写 " + "、".join(payload["edited"]))
+    if payload.get("cancelled"):
+        parts.append("取消 " + "、".join(payload["cancelled"]))
+    text = "计划变更已应用：" + ("；".join(parts) or "无改动")
+    return text + ("。团队重新开工，完成后重写结论" if payload.get("reopened") else "")
 
 
 # --- task detail -----------------------------------------------------------------------------

@@ -208,6 +208,8 @@ async def reconcile(team: AgentTeamModel, target: Optional[HermesTarget]) -> tup
         fields["phase"] = phase
         if phase in ("completed", "stopped") and not team.finished_at:
             fields["finished_at"] = now
+        elif phase not in ("completed", "stopped") and team.finished_at:
+            fields["finished_at"] = None  # a finished team that got new work runs again
     progress = snapshot_progress(snap)
     if progress is not None and progress != (team.meta or {}).get("progress"):
         fields["meta"] = {**(team.meta or {}), "progress": progress}

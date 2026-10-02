@@ -291,7 +291,9 @@ def generate(slug: str, *, by: str = "auto") -> dict:
     entry = _set(slug, status="ready", source=source, model=used.get("model") or "",
                  model_label=used.get("label") or "", fallback_reason=used.get("fallback_reason") or (reason if source == "assembled" else ""),
                  generated_at=now(), seconds=round(time.time() - started, 1), chars=len(text),
-                 tasks_done=sum(1 for r in rows if r["status"] == "done"), tasks_total=len(rows), by=by, error="")
+                 tasks_done=sum(1 for r in rows if r["status"] == "done"), tasks_total=len(rows), by=by, error="",
+                 # the lead checks it against the goal next (see _run); the done notice waits for that
+                 acceptance={"status": "checking", "started_at": now()} if source == "lead" else None)
     with board_conn(slug) as conn:
         from .common import TEAM_EVENT_TASK, append_event
 
@@ -302,7 +304,15 @@ def generate(slug: str, *, by: str = "auto") -> dict:
 
 def _run(slug: str, by: str) -> None:
     try:
-        generate(slug, by=by)
+        entry = generate(slug, by=by)
+        if entry.get("status") == "ready" and entry.get("source") == "lead":
+            from .lead import check_acceptance
+
+            try:  # the lead checks the result against the goal (gaps → 「让团队补上」)
+                check_acceptance(slug)
+            except Exception:  # noqa: BLE001
+                logger.warning("halowebui-teams: acceptance check for %s failed", slug, exc_info=True)
+                _set(slug, acceptance={"status": "failed", "error": "验收出错", "at": now()})
     except Exception as exc:
         logger.warning("halowebui-teams: conclusion for %s failed", slug, exc_info=True)
         _set(slug, status="failed", error=f"生成结论出错：{type(exc).__name__}", finished_at=now())

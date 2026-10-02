@@ -72,7 +72,9 @@
 	const nodeOf = (ev: TeamEvent) =>
 		ev.type === 'message' && ev.who === 'user'
 			? NODE.user
-			: (NODE[ev.type] ?? 'bg-gray-300 dark:bg-gray-600');
+			: ev.type === 'message' && ev.who === 'lead'
+				? NODE.team
+				: (NODE[ev.type] ?? 'bg-gray-300 dark:bg-gray-600');
 </script>
 
 <div class="flex h-full min-h-0 flex-col" data-team-feed>
@@ -170,6 +172,11 @@
 								<span class="font-medium text-violet-700 dark:text-violet-300"
 									>{ev.author ?? '你'} → {ev.member ?? '成员'}</span
 								>
+							{:else if ev.type === 'message' && ev.who === 'lead'}
+								<TeamAvatar kind="lead" size={16} />
+								<span class="font-medium text-indigo-700 dark:text-indigo-300"
+									>负责人 → {ev.member ?? '成员'}</span
+								>
 							{:else if ev.type === 'message'}
 								<TeamAvatar kind={kindOf(ev.member)} size={16} />
 								<span class="font-medium text-gray-800 dark:text-gray-100"
@@ -211,7 +218,9 @@
 								class="mt-1 whitespace-pre-wrap break-words {ev.type === 'message'
 									? ev.who === 'user'
 										? 'bubble bubble-user'
-										: 'bubble'
+										: ev.who === 'lead'
+											? 'bubble bubble-lead'
+											: 'bubble'
 									: ev.type === 'handoff'
 										? 'bubble bubble-handoff'
 										: ev.type === 'runner'
@@ -286,6 +295,10 @@
 	.bubble-user {
 		background: hsl(var(--tm-violet) / 0.08);
 		border-color: hsl(var(--tm-violet) / 0.2);
+	}
+	.bubble-lead {
+		background: hsl(var(--tm-accent) / 0.07);
+		border-color: hsl(var(--tm-accent) / 0.2);
 	}
 	.bubble-handoff {
 		background: hsl(var(--tm-ok) / 0.07);

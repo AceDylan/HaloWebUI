@@ -30,6 +30,8 @@ DONE_WAIT = 6 * 60          # how long the done notice waits for the conclusion
 RECENT = 6 * 3600           # finished teams older than this are not looked at
 NOTIFIED_KEEP = 200
 TG_LIMIT = 3800
+DIAGNOSIS_WAIT = 120        # a failure notice waits this long for the lead's diagnosis
+ACCEPTANCE_WAIT = 180       # the done notice waits this long for the lead's acceptance check
 
 _seen: dict[str, float] = {}
 _seen_lock = threading.Lock()
@@ -202,12 +204,25 @@ def fail_message(team: dict, task: dict) -> tuple[str, list]:
     word = "受阻" if task.get("sub_status") == "blocked" else "失败"
     text = (f"⚠️ <b>{esc(clip(team.get('title'), 60))}</b>\n"
             f"{esc(task.get('member'))} 的任务「{esc(clip(task.get('title'), 40))}」{word}：\n"
-            f"{esc(clip(plain(task.get('block_reason') or '原因未知'), 800))}\n\n"
-            "<i>回复这条消息写补充说明，会带着说明重试。</i>")
-    buttons = [[("🔁 重试", f"cb:rt:{team['team_id']}:{task['id']}")]]
+            f"{esc(clip(plain(task.get('block_reason') or '原因未知'), 800))}")
+    diagnosis = task.get("diagnosis") or {}
+    first: list = []
+    if diagnosis.get("status") == "ready":
+        text += f"\n\n🩺 <b>负责人判断</b>：{esc(clip(diagnosis.get('cause'), 400))}"
+        action = diagnosis.get("action")
+        if action == "ask_user":
+            text += f"\n❓ 需要你决定：{esc(clip(diagnosis.get('note'), 600))}"
+        else:
+            detail = {"retry_with_note": f"带说明重试——「{esc(clip(diagnosis.get('note'), 400))}」",
+                      "switch_runner": f"换成 {esc(diagnosis.get('runner'))} 重试",
+                      "skip": "跳过这个任务，后面的任务照常开始", "retry": "原样重试"}.get(action, "")
+            text += f"\n💡 建议：{detail}"
+            first.append(("✅ 按建议处理", f"cb:dx:{team['team_id']}:{task['id']}"))
+    text += "\n\n<i>回复这条消息写补充说明，会带着说明重试。</i>"
+    buttons = [[*first, ("🔁 重试", f"cb:rt:{team['team_id']}:{task['id']}")]]
     row = _open_row(team["team_id"])
     if row:
-        buttons[0].extend(row)
+        buttons.append(row)
     return text, buttons
 
 
@@ -230,13 +245,78 @@ def done_message(team: dict, snap: dict, markdown: str) -> tuple[str, list]:
             head += (f"\n📁 {esc(project.get('name'))} · 分支 <code>{esc(project['branch'])}</code>："
                      f"{len(change.get('files') or [])} 个文件 +{change.get('added', 0)} −{change.get('removed', 0)}，"
                      "还没合并——在工作台「变更」里看差异、合并或推送")
+    acceptance = (team.get("conclusion") or {}).get("acceptance") or {}
+    check = ""
+    if acceptance.get("status") == "ready":
+        if acceptance.get("verdict") == "met":
+            check = "\n🎯 负责人验收：目标已达成"
+        else:
+            gaps = acceptance.get("gaps") or []
+            check = (f"\n🎯 负责人验收：{esc(clip(acceptance.get('summary'), 200)) or '没有完全达成'}\n"
+                     + "\n".join(f"  · {esc(clip(g.get('title'), 40))}：{esc(clip(g.get('detail'), 160))}" for g in gaps[:5]))
+    head += check
     body = plain(markdown) if markdown else ""
     if not body:
         body = "\n".join(f"• {t.get('title')}：{plain(t.get('result') or '')[:200]}" for t in tasks[:8])
-    room = TG_LIMIT - len(head) - 80
-    text = head + "\n\n" + esc(clip(body, max(400, room)))
-    buttons = [[*_open_row(team["team_id"], "📄 阅读结论", "/conclusion"), *_open_row(team["team_id"], "🌐 工作台")]]
+    tail = "\n\n<i>回复这条消息对负责人说要追加或修改什么。</i>"
+    room = TG_LIMIT - len(head) - len(tail) - 80
+    text = head + "\n\n" + esc(clip(body, max(400, room))) + tail
+    buttons = []
+    if acceptance.get("status") == "ready" and acceptance.get("gaps"):
+        buttons.append([("🛠 让团队补上", f"cb:fx:{team['team_id']}")])
+    buttons.append([*_open_row(team["team_id"], "📄 阅读结论", "/conclusion"), *_open_row(team["team_id"], "🌐 工作台")])
     return text, [b for b in buttons if b]
+
+
+def change_message(team: dict, entry: dict) -> tuple[str, list]:
+    """The lead's answer to something said from Telegram: its reply and, when there is one, the
+    plan change to apply or discard."""
+    team_id = team["team_id"]
+    title = esc(clip(team.get("title"), 60))
+    if entry.get("status") == "failed":
+        return (f"⚠️ <b>{title}</b> · 负责人没能给出调整\n{esc(clip(entry.get('error'), 600))}\n\n"
+                "<i>回复这条消息再说一次。</i>"), [r for r in [_open_row(team_id)] if r]
+    proposal = entry.get("proposal") or {}
+    lines = [f"🧭 <b>{title}</b> · 负责人回复", esc(clip(proposal.get("reply"), 1200))]
+    if entry.get("status") == "ready":
+        lines += ["", "<b>计划变更</b>（应用后才生效）"]
+        for m in proposal.get("add_members") or []:
+            runner = m.get("runner") or m.get("executor") or "hermes"
+            lines.append(f"＋ 成员 {esc(m.get('name'))} · {esc(clip(m.get('role'), 24))} · {esc(RUNNER_LABEL.get(runner, runner))}")
+        for t in proposal.get("add_tasks") or []:
+            wait = f"（等 {'、'.join(t.get('depends_on') or [])}）" if t.get("depends_on") else ""
+            lines.append(f"＋ {esc(t.get('key'))} {esc(clip(t.get('title'), 40))} — {esc(t.get('member'))}{esc(wait)}")
+        for t in proposal.get("edit_tasks") or []:
+            lines.append(f"✎ {esc(t.get('key'))} {esc(clip(t.get('title'), 40))}：改写说明{'并重试' if t.get('retry') else ''}")
+        for t in proposal.get("cancel_tasks") or []:
+            lines.append(f"✕ 取消 {esc(t.get('key'))} {esc(clip(t.get('title'), 40))}")
+        for note in proposal.get("notes") or []:
+            lines.append(f"<i>注意：{esc(clip(note, 200))}</i>")
+        if team.get("state") == "completed":
+            lines.append("<i>团队已经做完：应用后重新开工，做完会重写结论。</i>")
+        lines += ["", "<i>回复这条消息可以让负责人再改。</i>"]
+        buttons = [[("✅ 应用变更", f"cb:ca:{team_id}:{entry['id']}"), ("✖ 放弃", f"cb:cd:{team_id}:{entry['id']}")]]
+    else:
+        lines += ["", "<i>不需要改计划。回复这条消息可以接着说。</i>"]
+        buttons = []
+    row = _open_row(team_id)
+    if row:
+        buttons.append(row)
+    return clip("\n".join(lines), TG_LIMIT), buttons
+
+
+def change_notice(team: dict, entry: dict, target: dict) -> Optional[int]:
+    from . import tg as telegram
+
+    if not telegram.ready():
+        return None
+    text, buttons = change_message(team, entry)
+    message_id = telegram.send(target["chat_id"], text, buttons, thread_id=target.get("thread_id"))
+    if message_id is not None:
+        telegram.remember_message(target["chat_id"], message_id, {
+            "team": team["team_id"], "kind": "change", "change": entry.get("id"), "owner": team.get("owner"),
+            "text": clip(entry.get("text"), 600)})
+    return message_id
 
 
 # --- what is new ---------------------------------------------------------------------------------
@@ -251,12 +331,20 @@ def pending(team: dict, snap: dict) -> list[tuple[str, str, Optional[dict]]]:
         if sub == "waiting_user":
             out.append((f"ask:{task['id']}:{attempt}", "ask", task))
         elif sub in ("failed", "blocked"):
-            out.append((f"fail:{task['id']}:{attempt}", "fail", task))
+            # Held back while the lead is still working out what went wrong (a bounded wait).
+            diagnosis = ((team.get("diagnoses") or {}).get(task["id"])) or {}
+            thinking = (diagnosis.get("status") == "thinking" and int(diagnosis.get("attempt") or -1) == attempt
+                        and now() - int(diagnosis.get("started_at") or 0) < DIAGNOSIS_WAIT)
+            if not thinking:
+                out.append((f"fail:{task['id']}:{attempt}", "fail", task))
     if (snap.get("team") or {}).get("phase") == "completed":
         entry = team.get("conclusion") or {}
         waited = now() - int(team.get("completed_at") or now())
-        if entry.get("status") in ("ready", "failed") or waited >= DONE_WAIT:
-            out.append(("done", "done", None))
+        checking = ((entry.get("acceptance") or {}).get("status") == "checking"
+                    and now() - int((entry.get("acceptance") or {}).get("started_at") or 0) < ACCEPTANCE_WAIT)
+        if (entry.get("status") in ("ready", "failed") and not checking) or waited >= DONE_WAIT:
+            rounds = int(team.get("round") or 0)
+            out.append(("done" if not rounds else f"done:{rounds}", "done", None))
     return out
 
 

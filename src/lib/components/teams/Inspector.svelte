@@ -6,6 +6,7 @@
 		getTeamTask,
 		retryTeamTask,
 		sendTeamMessage,
+		taskDiagnosis,
 		type LiveTask,
 		type TaskDetail,
 		type TeamEvent
@@ -106,6 +107,7 @@
 	let sending = false;
 	let lastExpect = '';
 	let retrying = false;
+	let diagnosing: '' | 'apply' | 'again' = '';
 	let loadedFor = '';
 	// The log of a running task follows along (re-read every few seconds, kept scrolled to the end).
 	const LOG_FOLLOW_MS = 4000;
@@ -274,6 +276,22 @@
 		}
 	};
 
+	// The lead's suggestion for a failed task: apply it, or have the lead look again.
+	$: diagnosis = !replay && canRetry ? (task?.diagnosis ?? null) : null;
+	const diagnose = async (action: 'apply' | 'again') => {
+		if (!taskId || diagnosing) return;
+		diagnosing = action;
+		try {
+			await taskDiagnosis(localStorage.token, teamId, taskId, action);
+			if (action === 'apply') toast.success('已按负责人的建议处理');
+			dispatch('changed');
+		} catch (error) {
+			toast.error(`${error?.message ?? error}`);
+		} finally {
+			diagnosing = '';
+		}
+	};
+
 	const retry = async () => {
 		if (!taskId || retrying) return;
 		retrying = true;
@@ -420,6 +438,75 @@
 				额度等待中（不是失败）：{task.current_run.resume_at
 					? `约 ${task.current_run.resume_at} 自动续跑同一会话`
 					: '额度恢复后自动继续'}
+			</div>
+		{/if}
+
+		{#if diagnosis}
+			<div
+				class="diagnosis rounded-xl border px-3 py-2.5 text-xs"
+				data-task-diagnosis={diagnosis.status}
+			>
+				<div class="flex items-center gap-2">
+					<TeamAvatar
+						kind="lead"
+						size={18}
+						status={diagnosis.status === 'thinking' ? 'running' : null}
+					/>
+					<span class="font-semibold text-gray-900 dark:text-gray-50">负责人诊断</span>
+					{#if diagnosis.model}<span class="ml-auto font-mono text-[11px] text-gray-400"
+							>{diagnosis.model}</span
+						>{/if}
+				</div>
+				{#if diagnosis.status === 'thinking'}
+					<p class="tm-shimmer mt-1.5 text-gray-500">负责人在看原因和日志，想怎么处理…</p>
+				{:else if diagnosis.status === 'failed'}
+					<p class="mt-1.5 text-gray-600 dark:text-gray-300">
+						没诊断出来：{diagnosis.error ?? '原因未知'}
+					</p>
+				{:else}
+					<p
+						class="mt-1.5 whitespace-pre-wrap break-words text-[12.5px] text-gray-800 dark:text-gray-100"
+					>
+						{diagnosis.cause}
+					</p>
+					<p class="mt-1.5 text-gray-600 dark:text-gray-300">
+						<span class="font-medium text-violet-700 dark:text-violet-300"
+							>建议：{diagnosis.action_label}</span
+						>{#if diagnosis.action === 'switch_runner' && diagnosis.runner}（改由 {runnerLabel(
+								diagnosis.runner
+							)} 执行）{/if}
+					</p>
+					{#if diagnosis.note}
+						<p
+							class="mt-1 whitespace-pre-wrap break-words rounded-lg bg-violet-500/[0.07] px-2 py-1.5 text-gray-700 dark:text-gray-200"
+						>
+							{diagnosis.action === 'ask_user' ? '要问你：' : '给成员的说明：'}{diagnosis.note}
+						</p>
+					{/if}
+					{#if diagnosis.action === 'ask_user'}
+						<p class="mt-1 text-gray-500">在下面给成员写上你的答复，再点重试。</p>
+					{/if}
+				{/if}
+				{#if diagnosis.status !== 'thinking'}
+					<div class="mt-2 flex flex-wrap gap-2">
+						{#if diagnosis.status === 'ready' && diagnosis.action !== 'ask_user'}
+							<button
+								type="button"
+								class="tm-btn-primary !py-1 !text-xs"
+								disabled={!!diagnosing || retrying}
+								on:click={() => diagnose('apply')}
+								data-diagnosis-apply>{diagnosing === 'apply' ? '正在处理…' : '按建议处理'}</button
+							>
+						{/if}
+						<button
+							type="button"
+							class="tm-btn-ghost"
+							disabled={!!diagnosing}
+							on:click={() => diagnose('again')}
+							data-diagnosis-again>{diagnosing === 'again' ? '正在请负责人…' : '再诊断一次'}</button
+						>
+					</div>
+				{/if}
 			</div>
 		{/if}
 
@@ -736,6 +823,10 @@
 </section>
 
 <style>
+	.diagnosis {
+		border-color: hsl(var(--tm-violet) / 0.25);
+		background: hsl(var(--tm-violet) / 0.05);
+	}
 	.note {
 		border: 1px solid hsl(var(--tm-line-strong));
 		background: hsl(var(--tm-surface-2));

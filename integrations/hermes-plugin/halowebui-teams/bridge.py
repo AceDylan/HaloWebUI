@@ -6,6 +6,7 @@ Every few seconds, for each team board that is running (not paused/stopped):
   per-board lock as the gateway's own tick);
 * drives tasks assigned to an external runner — reclaude, cchclaude, anyclaude, codex, agy (see
   ``reclaude.py``): claim, launch, follow, finish;
+* has the lead diagnose a task that failed or got blocked (see ``lead.py``);
 * sends the team's Telegram notices (a member asks, a task fails, the team finished; see
   ``notify.py``).
 
@@ -57,6 +58,12 @@ def tick() -> None:
                 nudge_dispatch(slug)
             _commit_finished(slug, read_team(slug) or team)
             _catch_up_conclusion(slug, team)
+            try:
+                from . import lead
+
+                lead.tick_board(slug, read_team(slug) or team)  # the lead diagnoses failed tasks
+            except Exception:
+                logger.warning("halowebui-teams: diagnosis tick failed for %s", slug, exc_info=True)
             try:
                 from . import notify
 

@@ -85,7 +85,13 @@ def test_no_model_answer_still_gives_a_conclusion_from_the_records(pkg, monkeypa
 
 def test_regenerate_replaces_the_report(pkg, monkeypatch):
     replies = iter(["# 第一版\n\n" + "内容" * 30, "# 第二版\n\n" + "内容" * 30])
-    monkeypatch.setattr(pkg.plan, "call_model", lambda *a, **k: (next(replies), "", {"model": "gpt-chat"}))
+
+    def fake(messages, *a, **k):  # the acceptance check after each report answers on its own
+        if "验收" in messages[0]["content"][:80]:
+            return '{"verdict": "met", "summary": "达成", "gaps": []}', "", {"model": "gpt-chat"}
+        return next(replies), "", {"model": "gpt-chat"}
+
+    monkeypatch.setattr(pkg.plan, "call_model", fake)
     team_id, slug, _ws = _finished_team(pkg)
     pkg.teams.snapshot(team_id, "u1")
     assert pkg.conclusion.read(slug, pkg.common.read_team(slug))["markdown"].startswith("# 第一版")

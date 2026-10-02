@@ -168,3 +168,8 @@ def cancel(owner: str, team_id: str) -> dict:
 
 def replan(owner: str, team_id: str, feedback: str) -> dict:
     return call("POST", f"/teams/{team_id}/replan", owner, {"feedback": feedback[:2000]})
+
+
+def sync(owner: str, team_id: str) -> dict:
+    """A change applied here reopened a finished team: HaloWebUI reads its live state again."""
+    return call("POST", f"/teams/{team_id}/sync", owner, {}, timeout=30)

@@ -154,8 +154,73 @@ export type LiveTask = {
 	consecutive_failures: number;
 	/** Where the task's runner chain starts (the member's choice) and how it got to executor. */
 	chosen?: TeamExecutor;
-	chosen_by?: 'auto' | 'goal' | 'user';
+	chosen_by?: 'auto' | 'goal' | 'user' | 'lead';
 	trail?: RunnerStep[];
+	/** The lead's reading of a failed / blocked task's current attempt, with one suggested action. */
+	diagnosis?: TaskDiagnosis;
+};
+
+export type DiagnosisAction = 'retry' | 'retry_with_note' | 'switch_runner' | 'skip' | 'ask_user';
+
+export type TaskDiagnosis = {
+	status: 'thinking' | 'ready' | 'failed';
+	cause?: string;
+	action?: DiagnosisAction;
+	action_label?: string;
+	note?: string;
+	runner?: TeamExecutor;
+	model?: string;
+	error?: string;
+	applied_at?: number;
+};
+
+/** A plan change the lead proposes after 对负责人说 (nothing changes until it is applied). */
+export type ChangeProposal = {
+	reply: string;
+	add_members: (TeamPlanMember & { runner?: TeamExecutor; runner_note?: string })[];
+	add_tasks: {
+		key: string;
+		title: string;
+		description: string;
+		member: string;
+		depends_on: string[];
+	}[];
+	cancel_tasks: { key: string; task_id: string; title: string; state: string }[];
+	edit_tasks: {
+		key: string;
+		task_id: string;
+		title: string;
+		description: string;
+		retry: boolean;
+		member?: string;
+	}[];
+	notes: string[];
+};
+
+export type TeamChangeRequest = {
+	id: string;
+	/** thinking → ready (a change to apply) | answered (a reply only) | failed; then applied / discarded */
+	status: 'thinking' | 'ready' | 'answered' | 'failed' | 'applied' | 'discarded' | 'superseded';
+	text: string;
+	by?: string;
+	via?: 'web' | 'telegram';
+	source?: 'user' | 'acceptance';
+	requested_at: number;
+	proposal?: ChangeProposal;
+	model?: string;
+	error?: string;
+	decided_at?: number;
+	decided_by?: string;
+	applied?: { added: string[]; members: string[]; cancelled: string[]; edited: string[] };
+};
+
+export type Acceptance = {
+	status: 'checking' | 'ready' | 'failed';
+	verdict?: 'met' | 'partial' | 'unmet';
+	summary?: string;
+	gaps?: { title: string; detail: string }[];
+	model?: string;
+	error?: string;
 };
 
 /** One move of a task to another runner. */
@@ -164,12 +229,13 @@ export type RunnerStep = {
 	to: TeamExecutor | null;
 	reason: string;
 	at: number;
-	phase: 'plan' | 'launch' | 'runtime' | 'retry';
+	phase: 'plan' | 'launch' | 'runtime' | 'retry' | 'lead';
 	fail_kind?: string;
 };
 
 export type ConclusionEntry = {
-	status?: 'generating' | 'ready' | 'failed';
+	/** outdated: the team got new work after this report; it is rewritten when the team finishes again */
+	status?: 'generating' | 'ready' | 'failed' | 'outdated';
 	source?: 'lead' | 'assembled';
 	model?: string;
 	model_label?: string;
@@ -182,6 +248,7 @@ export type ConclusionEntry = {
 	tasks_total?: number;
 	by?: string;
 	error?: string;
+	acceptance?: Acceptance;
 };
 
 export type WorkspaceFile = {
@@ -192,7 +259,7 @@ export type WorkspaceFile = {
 };
 
 export type TeamConclusion = {
-	status: 'none' | 'generating' | 'ready' | 'failed';
+	status: 'none' | 'generating' | 'ready' | 'failed' | 'outdated';
 	entry: ConclusionEntry;
 	markdown: string;
 	tasks: {
@@ -266,6 +333,11 @@ export type LiveSnapshot = {
 		lead: { name: string; role: string; status: string; model?: string };
 		lead_model?: LeadModel;
 		conclusion?: ConclusionEntry;
+		/** How many times new work reopened the finished team. */
+		round?: number;
+		/** The open 对负责人说 request / proposal, and the latest decided ones. */
+		change?: TeamChangeRequest | null;
+		changes_log?: TeamChangeRequest[];
 	};
 	members: LiveMember[];
 	tasks: LiveTask[];
@@ -296,7 +368,7 @@ export type TeamEvent = {
 	text?: string;
 	status?: string | null;
 	sub_status?: string | null;
-	who?: 'user' | 'member' | 'system';
+	who?: 'user' | 'member' | 'system' | 'lead';
 	author?: string;
 	data?: Record<string, any>;
 };
@@ -536,6 +608,36 @@ export const sendTeamMessage = (token: string, teamId: string, taskId: string, b
 
 export const retryTeamTask = (token: string, teamId: string, taskId: string) =>
 	request<{ retried: boolean }>(token, 'POST', `/${id(teamId)}/tasks/${id(taskId)}/retry`);
+
+export const adjustTeam = (token: string, teamId: string, text: string) =>
+	request<TeamChangeRequest>(token, 'POST', `/${id(teamId)}/adjust`, { text });
+
+export const fillTeamGaps = (token: string, teamId: string) =>
+	request<TeamChangeRequest>(token, 'POST', `/${id(teamId)}/adjust/gaps`);
+
+export const decideTeamChange = (
+	token: string,
+	teamId: string,
+	changeId: string,
+	action: 'apply' | 'discard'
+) =>
+	request<{ applied?: boolean; discarded?: boolean; reopened?: boolean; added?: string[] }>(
+		token,
+		'POST',
+		`/${id(teamId)}/change/${id(changeId)}/${action}`
+	);
+
+export const taskDiagnosis = (
+	token: string,
+	teamId: string,
+	taskId: string,
+	action: 'apply' | 'again'
+) =>
+	request<{ applied?: DiagnosisAction } & Partial<TaskDiagnosis>>(
+		token,
+		'POST',
+		`/${id(teamId)}/tasks/${id(taskId)}/diagnosis/${action}`
+	);
 
 export const controlTeam = (token: string, teamId: string, action: 'pause' | 'resume' | 'stop') =>
 	request<{ state: string; changed: boolean }>(token, 'POST', `/${id(teamId)}/control`, { action });

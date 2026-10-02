@@ -6,8 +6,11 @@
 * Buttons on our messages (callback data ``ht:<action>:<team>[:<task>]``): approve / cancel /
   re-plan a plan, retry a failed task.
 * A reply to one of our notices: to a plan → re-plan with it as feedback; to a question → the
-  answer, delivered to the member; to a failure → a note for the member, then a retry. Plain
-  「批准」 right after a plan card approves it.
+  answer, delivered to the member; to a failure → a note for the member, then a retry; to the
+  done notice or a change card → said to the lead (``lead.request_change``; its reply and plan
+  change come back here). Plain 「批准」 right after a plan card approves it.
+* Buttons also apply the lead's suggestion for a failed task (``dx``), turn the acceptance gaps
+  into a change request (``fx``), and apply / discard a change proposal (``ca`` / ``cd``).
 
 Only Telegram users listed in ``halo-teams.json`` → ``telegram.owners`` are handled here (the
 hook runs before the gateway's own auth); every other message goes on to Hermes untouched.
@@ -189,6 +192,20 @@ def close_plan_cards(team_id: str, how: str) -> None:
             _save(data)
 
 
+def close_change_cards(team_id: str, change_id: str, how: str) -> None:
+    """A change proposal was applied / discarded somewhere: its Telegram card is answered."""
+    with _store_lock:
+        data = _load()
+        changed = False
+        for entry in data.values():
+            if entry.get("team") == team_id and entry.get("kind") == "change" and entry.get("change") == change_id \
+                    and not entry.get("acted"):
+                entry["acted"] = how
+                changed = True
+        if changed:
+            _save(data)
+
+
 def latest_open_plan(chat_id: Any) -> Optional[tuple[str, dict]]:
     """The newest plan card in this chat nobody acted on yet, if it is recent."""
     prefix = f"{chat_id}:"
@@ -241,7 +258,7 @@ def _dispatch(event: Any) -> Optional[dict]:
     reply_to = getattr(event, "reply_to_message_id", None)
     if reply_to:
         entry = lookup(source.chat_id, reply_to)
-        if entry and entry.get("kind") in ("plan", "plan_failed", "ask", "fail"):
+        if entry and entry.get("kind") in ("plan", "plan_failed", "ask", "fail", "done", "change"):
             _spawn(_reply(source, owner, entry, str(reply_to), text, event))
             return {"action": "skip", "reason": "reply to a team notice"}
     if text.rstrip("。.!！ ").lower() in APPROVE_WORDS:
@@ -363,10 +380,26 @@ async def _reply(source: Any, owner: str, entry: dict, message_id: str, text: st
             await asyncio.to_thread(retry, team_id, entry["task"], owner=owner, actor=_author(event, source))
             mark_acted(source.chat_id, message_id, "retry")
             await _say(source, "🔁 已带着你的说明重试。", None, event)
+        elif kind in ("done", "change"):
+            from .lead import request_change
+
+            said = text
+            if kind == "change" and entry.get("text"):
+                said = f"（接着上一条）上一条要求：{entry['text']}\n用户补充：{text}"
+            await asyncio.to_thread(request_change, team_id, said, owner=owner, actor=_author(event, source),
+                                    via="telegram", reply_to=_reply_target(source))
+            await _say(source, "🧭 已交给负责人，它看完团队现在的状态会把回复和要改的计划发到这里。", None, event)
     except link.HaloError as exc:
         await _say(source, f"⚠️ {esc(exc.message)}", None, event)
     except TeamError as exc:
         await _say(source, f"⚠️ {esc(exc.message)}", None, event)
+
+
+def _reply_target(source: Any) -> dict:
+    target = {"chat_id": str(source.chat_id)}
+    if getattr(source, "thread_id", None):
+        target["thread_id"] = str(source.thread_id)
+    return target
 
 
 async def _approve_by_text(source: Any, owner: str, message_id: str, entry: dict, event: Any) -> None:
@@ -392,7 +425,9 @@ async def _on_callback(update: Any, context: Any) -> None:
     raise ApplicationHandlerStop
 
 
-CALLBACK_DONE = {"ap": "✅ 已批准，成员开始干活了", "cx": "✖ 已取消", "rp": "🔄 负责人在重新规划", "rt": "🔁 已重试"}
+CALLBACK_DONE = {"ap": "✅ 已批准，成员开始干活了", "cx": "✖ 已取消", "rp": "🔄 负责人在重新规划", "rt": "🔁 已重试",
+                 "dx": "✅ 已按负责人的建议处理", "fx": "🛠 已交给负责人：补缺口的计划好了发到这里",
+                 "ca": "✅ 变更已应用", "cd": "✖ 已放弃这个变更"}
 
 
 async def _handle_callback(query: Any) -> None:
@@ -417,6 +452,27 @@ async def _handle_callback(query: Any) -> None:
             await asyncio.to_thread(link.replan, owner, team_id, "")
         elif action == "rt" and task_id:
             await asyncio.to_thread(retry, team_id, task_id, owner=owner, actor=str(query.from_user.first_name or ""))
+        elif action == "dx" and task_id:
+            from .lead import apply_diagnosis
+
+            await asyncio.to_thread(apply_diagnosis, team_id, task_id, owner=owner, actor=str(query.from_user.first_name or ""))
+        elif action == "fx":
+            from .lead import fill_gaps
+
+            chat = getattr(query.message, "chat_id", None) or getattr(getattr(query.message, "chat", None), "id", None)
+            thread = getattr(query.message, "message_thread_id", None)
+            await asyncio.to_thread(fill_gaps, team_id, owner=owner, actor=str(query.from_user.first_name or ""),
+                                    via="telegram", reply_to={"chat_id": chat, "thread_id": thread})
+        elif action in ("ca", "cd") and task_id:
+            from .lead import apply_change, discard_change
+
+            fn = apply_change if action == "ca" else discard_change
+            result = await asyncio.to_thread(fn, team_id, task_id, owner=owner, actor=str(query.from_user.first_name or ""))
+            if isinstance(result, dict) and result.get("reopened"):
+                try:  # HaloWebUI's list shows the team at work again
+                    await asyncio.to_thread(link.sync, owner, team_id)
+                except link.HaloError as exc:
+                    logger.info("halowebui-teams: HaloWebUI sync after reopening %s: %s", team_id, exc.message)
         else:
             await query.answer("按钮已失效")
             return

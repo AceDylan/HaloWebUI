@@ -11,6 +11,7 @@
 		checkRunners,
 		controlTeam,
 		editTeamPlan,
+		fillTeamGaps,
 		getTeam,
 		getTeamEvents,
 		getTeamsMeta,
@@ -28,6 +29,7 @@
 	import ChangesView from './ChangesView.svelte';
 	import RunnerBadge from './RunnerBadge.svelte';
 	import Inspector from './Inspector.svelte';
+	import LeadDesk from './LeadDesk.svelte';
 	import MemberStrip from './MemberStrip.svelte';
 	import PlanReview from './PlanReview.svelte';
 	import ReplayBar from './ReplayBar.svelte';
@@ -155,6 +157,8 @@
 	};
 	$: titles = new Map(tasks.map((t) => [t.id, t.key]));
 	$: conclusionBrief = live?.team.conclusion;
+	$: acceptance = conclusionBrief?.acceptance;
+	$: leadChange = live?.team.change ?? null;
 	$: leadModel =
 		live?.team.lead_model?.model ?? team?.plan?.lead_model?.model ?? team?.plan?.lead?.model ?? '';
 	$: fallbacks = tasks.filter((t) => taskRunner(t).changed).length;
@@ -265,7 +269,11 @@
 		// Nothing more happens on its own once finished — except the lead's conclusion being written.
 		const conclusionPending =
 			phase === 'completed' && !['ready', 'failed'].includes(live?.team.conclusion?.status ?? '');
-		if (settled || (finished && finishedFetches > 2 && !conclusionPending)) return;
+		// … and the lead answering 对负责人说, or checking the result against the goal.
+		const leadPending =
+			live?.team.change?.status === 'thinking' ||
+			live?.team.conclusion?.acceptance?.status === 'checking';
+		if (settled || (finished && finishedFetches > 2 && !conclusionPending && !leadPending)) return;
 		schedule();
 	};
 
@@ -352,6 +360,8 @@
 		);
 	const resumeDispatch = () =>
 		act(() => controlTeam(localStorage.token, teamId, 'resume'), '已恢复派发');
+	const fillGaps = () =>
+		act(() => fillTeamGaps(localStorage.token, teamId), '已交给负责人：它会按验收缺口提出补充计划');
 	const stopAll = () =>
 		act(
 			() => controlTeam(localStorage.token, teamId, 'stop'),
@@ -716,7 +726,61 @@
 						<button type="button" class="tm-btn-primary !py-1.5 !text-xs" on:click={showConclusion}
 							>阅读结论</button
 						>
+						{#if conclusionBrief?.status === 'ready' && acceptance}
+							<div
+								class="accept basis-full border-t pt-2.5 text-xs"
+								data-acceptance={acceptance.status === 'ready'
+									? acceptance.verdict
+									: acceptance.status}
+							>
+								{#if acceptance.status === 'checking'}
+									<span class="tm-shimmer text-gray-500">负责人在对照目标验收…</span>
+								{:else if acceptance.status === 'ready' && acceptance.verdict === 'met'}
+									<span class="font-semibold text-emerald-700 dark:text-emerald-300"
+										>负责人验收：目标已达成</span
+									>{#if acceptance.summary}<span class="text-gray-500">
+											· {acceptance.summary}</span
+										>{/if}
+								{:else if acceptance.status === 'ready'}
+									<div class="flex flex-wrap items-start gap-x-3 gap-y-2">
+										<div class="min-w-0 flex-1">
+											<div class="font-semibold text-amber-800 dark:text-amber-200">
+												负责人验收：{acceptance.verdict === 'unmet'
+													? '目标没有达成'
+													: '部分达成'}{#if acceptance.summary}<span
+														class="font-normal text-gray-600 dark:text-gray-300"
+													>
+														· {acceptance.summary}</span
+													>{/if}
+											</div>
+											<ul class="mt-1 flex flex-col gap-0.5 text-gray-600 dark:text-gray-300">
+												{#each acceptance.gaps ?? [] as gap}
+													<li class="break-words">
+														<span class="font-medium text-gray-800 dark:text-gray-100"
+															>{gap.title}</span
+														>{gap.detail ? `：${gap.detail}` : ''}
+													</li>
+												{/each}
+											</ul>
+										</div>
+										{#if acceptance.gaps?.length}
+											<button
+												type="button"
+												class="tm-btn-ghost shrink-0"
+												disabled={busy || leadChange?.status === 'thinking'}
+												on:click={fillGaps}
+												data-fill-gaps>让团队补上</button
+											>
+										{/if}
+									</div>
+								{/if}
+							</div>
+						{/if}
 					</div>
+				{/if}
+
+				{#if running && !replay && !stopped && team.status === 'running'}
+					<LeadDesk {teamId} change={leadChange} {phase} on:changed={restart} />
 				{/if}
 
 				{#if !($mobile && mobileTab === 'members')}
@@ -1005,6 +1069,9 @@
 		50% {
 			opacity: 0.45;
 		}
+	}
+	.accept {
+		border-color: hsl(var(--tm-line));
 	}
 	.done-banner {
 		background: radial-gradient(120% 160% at 0% 0%, hsl(var(--tm-ok) / 0.14), transparent 55%),

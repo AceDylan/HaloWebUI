@@ -24,6 +24,7 @@ os.environ["HALO_TEAMS_RECLAUDE_RUNS_ROOT"] = os.path.join(_TMP, "reclaude-runs"
 os.environ["HALO_TEAMS_TASK_DIR"] = os.path.join(_TMP, "tasks")
 os.environ["HALO_TEAMS_RUNNERS_FILE"] = os.path.join(_TMP, "halo-teams-runners.json")
 os.environ["HALO_TEAMS_CONCLUSION_SYNC"] = "1"
+os.environ["HALO_TEAMS_LEAD_SYNC"] = "1"
 for key in [k for k in os.environ if k.startswith("HERMES_KANBAN_") and k != "HERMES_KANBAN_HOME"]:
     del os.environ[key]
 os.makedirs(os.environ["HERMES_HOME"], exist_ok=True)

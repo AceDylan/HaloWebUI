@@ -262,6 +262,8 @@
 					/>
 				{:else if status === 'failed'}
 					<StatusChip status="failed" label="生成失败" />
+				{:else if status === 'outdated'}
+					<StatusChip status="paused" label="上一版结论" />
 				{:else}
 					<StatusChip status="done" label={entry.source === 'assembled' ? '按记录整理' : '结论'} />
 				{/if}
@@ -364,6 +366,15 @@
 						? '下面是上一版。'
 						: ''}
 				</div>
+			</div>
+		{/if}
+		{#if status === 'outdated' && !generating}
+			<div
+				class="mb-3 rounded-xl border border-amber-500/20 bg-amber-500/[0.07] px-3 py-2 text-xs text-amber-900 dark:text-amber-100"
+				role="status"
+				data-conclusion-outdated
+			>
+				团队按你的要求接着干活了，这是上一版结论；新的任务做完后负责人会重写。
 			</div>
 		{/if}
 		{#if status === 'failed' && entry.error}

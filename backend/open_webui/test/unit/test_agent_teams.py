@@ -468,3 +468,46 @@ def test_change_routes_are_proxied_only_for_running_teams(hermes):
     client.post(f"/api/v1/teams/{team_id}/changes/merge")
     assert hermes.calls[-1][2].endswith("/changes/merge")
     assert _client("u2").post(f"/api/v1/teams/{team_id}/changes/merge").status_code == 404
+
+
+def test_lead_routes_are_proxied_and_new_work_reopens_a_finished_team(hermes):
+    client = _client("u1")
+    team_id = _ready_team(client, hermes)
+    assert client.post(f"/api/v1/teams/{team_id}/adjust", json={"text": "加个测试"}).status_code == 409  # not running
+    AgentTeams.update(team_id, "u1", status="running", phase="completed", finished_at=int(time.time()))
+    hermes.responses[("POST", "/adjust")] = {"id": "abcd1234", "status": "thinking"}
+    out = client.post(f"/api/v1/teams/{team_id}/adjust", json={"text": "加个测试"}).json()
+    assert out["status"] == "thinking" and hermes.calls[-1][3] == {"text": "加个测试", "actor": "Ace"}
+    assert client.post(f"/api/v1/teams/{team_id}/adjust", json={"text": ""}).status_code == 422
+    client.post(f"/api/v1/teams/{team_id}/adjust/gaps")
+    assert hermes.calls[-1][2].endswith("/adjust/gaps")
+    assert client.post(f"/api/v1/teams/{team_id}/change/../apply").status_code == 404
+    assert client.post(f"/api/v1/teams/{team_id}/change/abcd1234/explode").status_code == 422
+    hermes.responses[("POST", "/change/abcd1234/apply")] = {"applied": True, "reopened": True, "added": ["T4"]}
+    assert client.post(f"/api/v1/teams/{team_id}/change/abcd1234/apply").json()["added"] == ["T4"]
+    row = AgentTeams.get(team_id, "u1")
+    assert row.phase == "running" and row.finished_at is None  # back at work
+    client.post(f"/api/v1/teams/{team_id}/change/abcd1234/discard")
+    assert hermes.calls[-1][2].endswith("/change/abcd1234/discard")
+    client.post(f"/api/v1/teams/{team_id}/tasks/t_1a2b3c4d/diagnosis/apply")
+    assert hermes.calls[-1][2].endswith("/tasks/t_1a2b3c4d/diagnosis/apply") and hermes.calls[-1][3] == {"actor": "Ace"}
+    assert client.post(f"/api/v1/teams/{team_id}/tasks/t_bad!/diagnosis/apply").status_code == 404
+    assert _client("u2").post(f"/api/v1/teams/{team_id}/adjust", json={"text": "x"}).status_code == 404
+    # reopened from elsewhere (Telegram): the page reading the live phase clears finished_at too
+    AgentTeams.update(team_id, "u1", phase="completed", finished_at=int(time.time()))
+    hermes.responses[("GET", team_id)] = {"team": {"phase": "running"}, "tasks": []}
+    data = client.get(f"/api/v1/teams/{team_id}").json()
+    assert data["team"]["phase"] == "running" and data["team"]["finished_at"] is None
+
+
+def test_hermes_sync_reads_the_live_phase_after_a_telegram_change(hermes, monkeypatch):
+    client = _client("u1")
+    team_id = _ready_team(client, hermes)
+    AgentTeams.update(team_id, "u1", status="running", phase="completed", finished_at=int(time.time()))
+    hermes.responses[("GET", team_id)] = {"team": {"phase": "running"}, "tasks": []}
+    bare = _hermes_client(monkeypatch)
+    assert bare.post(f"/api/v1/teams/hermes/teams/{team_id}/sync",
+                     headers={"X-Hermes-Key": "wrong", "X-Halo-Owner": "u1"}).status_code == 401
+    out = bare.post(f"/api/v1/teams/hermes/teams/{team_id}/sync", headers={"X-Hermes-Key": "k", "X-Halo-Owner": "u1"})
+    assert out.status_code == 200 and out.json()["phase"] == "running"
+    assert AgentTeams.get(team_id, "u1").finished_at is None

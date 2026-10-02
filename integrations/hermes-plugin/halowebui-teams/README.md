@@ -38,6 +38,14 @@ is the Hermes side. It adds no service, port or second task store:
 * **The conclusion** (`conclusion.py`): when a team finishes, the lead writes a Markdown report
   from every task's full result and the workspace files (assembled from the records when no model
   answers), stored in `<workspace>/.halo/conclusion.md`.
+* **The lead stays in the loop** (`lead.py`): 「对负责人说」 — the user says something while the
+  team works or after it finished; the lead reads the team's state and answers, proposing a plan
+  change when needed (new members, new tasks that may build on finished ones, cancelling or
+  rewriting tasks that have not started, rewriting a failed one → retried). Nothing changes until
+  the user applies it; new work on a finished team reopens it and its conclusion is rewritten.
+  A task that fails or gets blocked is diagnosed by the lead (cause + one action: retry, retry with
+  a note, another runner, skip, ask the user), applied in one click. After the conclusion the
+  lead checks the result against the goal; 「让团队补上」 turns the gaps into a change request.
 * **Member activity** (`hooks.py`, inside each Kanban worker of a team board): tool calls,
   native subagent start/stop, and the moment a user's note reached the running member, as
   `halo_*` events in the same `task_events` sequence.
@@ -73,6 +81,10 @@ HaloWebUI sends `X-Halo-Owner: <user id>`; a team recorded for another owner is 
 | `POST /v1/halo-teams/{id}/tasks/{task}/messages` `{body, author_name}` | a user note on the task (a Kanban comment) |
 | `POST /v1/halo-teams/{id}/tasks/{task}/retry` | unblock a failed / blocked task: a new attempt; finished tasks are not touched |
 | `POST /v1/halo-teams/{id}/control` `{action: pause|resume|stop}` | pause = board archived (the dispatcher skips it, running members go on); stop = final: running members reclaimed / runner stopped, tasks blocked |
+| `POST /v1/halo-teams/{id}/adjust` `{text, actor}` | 对负责人说: the lead proposes a plan change in the background (202; snapshot `team.change`) |
+| `POST /v1/halo-teams/{id}/adjust/gaps` | the acceptance gaps as a change request |
+| `POST /v1/halo-teams/{id}/change/{change}/{apply,discard}` | the user decides on the proposal (apply re-checks it against the board first) |
+| `POST /v1/halo-teams/{id}/tasks/{task}/diagnosis/{apply,again}` | do what the lead suggested for a failed task / diagnose again |
 | `GET /v1/halo-teams/meta` | the lead's model, runners with availability, task kinds, assistant templates |
 | `POST /v1/halo-teams/runners/check` `{names?}` | re-run the availability checks now |
 | `POST /v1/halo-teams/plan/resolve` `{plan}` | the plan with every member's runner worked out again (after a user edit) |

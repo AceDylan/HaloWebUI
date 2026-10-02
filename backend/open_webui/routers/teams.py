@@ -91,6 +91,10 @@ class ControlForm(BaseModel):
     action: Literal["pause", "resume", "stop"]
 
 
+class AdjustForm(BaseModel):
+    text: str = Field(min_length=1, max_length=2000)
+
+
 class RunnerCheckForm(BaseModel):
     names: list[str] = Field(default_factory=list, max_length=12)
 
@@ -412,6 +416,65 @@ async def list_files(request: Request, team_id: str, user=Depends(get_verified_u
         _raise(exc)
 
 
+# --- the lead after approval (对负责人说, failure diagnosis, acceptance gaps; see lead.py in the plugin)
+
+
+def _reopened(team, result) -> None:
+    """New work on a finished team: it runs again (the page and the list follow at once)."""
+    if isinstance(result, dict) and result.get("reopened"):
+        AgentTeams.update(team.id, team.user_id, phase="running", finished_at=None)
+
+
+@router.post("/{team_id}/adjust", dependencies=[Depends(_enabled)])
+async def adjust(request: Request, team_id: str, form: AdjustForm, user=Depends(get_verified_user)):
+    """Say something to the lead; it proposes a plan change in the background (snapshot → team.change)."""
+    team, target = await _running_target(request, team_id, user)
+    try:
+        return await hermes_call(target, "POST", f"/{team.id}/adjust",
+                                 json_body={"text": form.text, "actor": user.name or ""})
+    except TeamsError as exc:
+        _raise(exc)
+
+
+@router.post("/{team_id}/adjust/gaps", dependencies=[Depends(_enabled)])
+async def fill_gaps(request: Request, team_id: str, user=Depends(get_verified_user)):
+    """「让团队补上」: the lead's acceptance gaps as a change request."""
+    team, target = await _running_target(request, team_id, user)
+    try:
+        return await hermes_call(target, "POST", f"/{team.id}/adjust/gaps", json_body={"actor": user.name or ""})
+    except TeamsError as exc:
+        _raise(exc)
+
+
+@router.post("/{team_id}/change/{change_id}/{action}", dependencies=[Depends(_enabled)])
+async def decide_change(request: Request, team_id: str, change_id: str, action: Literal["apply", "discard"],
+                        user=Depends(get_verified_user)):
+    import re
+
+    if not re.match(r"^[0-9a-f]{8}$", change_id or ""):
+        raise HTTPException(status_code=404, detail="提案不存在")
+    team, target = await _running_target(request, team_id, user)
+    try:
+        result = await hermes_call(target, "POST", f"/{team.id}/change/{change_id}/{action}",
+                                   json_body={"actor": user.name or ""}, timeout=60)
+    except TeamsError as exc:
+        _raise(exc)
+    _reopened(team, result)
+    return result
+
+
+@router.post("/{team_id}/tasks/{task_id}/diagnosis/{action}", dependencies=[Depends(_enabled)])
+async def task_diagnosis(request: Request, team_id: str, task_id: str, action: Literal["apply", "again"],
+                         user=Depends(get_verified_user)):
+    """Apply the lead's suggestion for a failed task, or have it look again."""
+    team, target = await _running_target(request, team_id, user)
+    try:
+        return await hermes_call(target, "POST", f"/{team.id}/tasks/{_task_id(task_id)}/diagnosis/{action}",
+                                 json_body={"actor": user.name or ""}, timeout=60)
+    except TeamsError as exc:
+        _raise(exc)
+
+
 class PushForm(BaseModel):
     what: Literal["branch", "base"]
 
@@ -567,6 +630,15 @@ async def hermes_get(request: Request, team_id: str, caller=Depends(_hermes_call
     user, target = caller
     team, _snap, _err = await reconcile(_own(team_id, user), None)
     return public_team(team)
+
+
+@router.post("/hermes/teams/{team_id}/sync")
+async def hermes_sync(request: Request, team_id: str, caller=Depends(_hermes_caller)):
+    """Hermes changed a running team on its own (a change applied from Telegram reopened it):
+    read its live state now, so the list shows it at work again."""
+    user, target = caller
+    team, _snap, _err = await reconcile(_own(team_id, user), target)
+    return public_team(team, with_plan=False)
 
 
 @router.post("/hermes/teams/{team_id}/approve")

@@ -324,6 +324,9 @@ export type FeedCategory = 'message' | 'tool' | 'system';
 
 export const feedCategory = (ev: TeamEvent): FeedCategory => {
 	if (ev.type === 'message' || ev.type === 'handoff' || ev.type === 'delivery') return 'message';
+	// Talking with the lead (对负责人说, its proposals, diagnoses) reads as conversation too.
+	if (ev.type === 'team' && /^(change_|diagnos)/.test(String(ev.data?.action ?? '')))
+		return 'message';
 	if (ev.type === 'tool' || ev.type === 'subagent') return 'tool';
 	return 'system';
 };
@@ -406,7 +409,7 @@ export type Delivery = {
 
 /** Delivery of a user note as it stood at event index `cursorSeq` (null = now). */
 export const deliveryAt = (ev: TeamEvent, cursorSeq: number | null): Delivery | null => {
-	if (ev.type !== 'message' || ev.who !== 'user') return null;
+	if (ev.type !== 'message' || (ev.who !== 'user' && ev.who !== 'lead')) return null;
 	const seq = ev.data?.delivered_seq;
 	if (typeof seq === 'number' && (cursorSeq === null || seq <= cursorSeq)) {
 		const via = ev.data?.delivered_via as string;
@@ -562,7 +565,8 @@ export const KIND_LABEL: Record<string, string> = {
 export const SOURCE_LABEL: Record<string, string> = {
 	auto: '按任务类型自动选择',
 	goal: '目标里点名',
-	user: '你手动指定'
+	user: '你手动指定',
+	lead: '负责人诊断后改选'
 };
 
 export type RunnerDecision = {
@@ -614,7 +618,8 @@ export const RUNNER_PHASE_LABEL: Record<string, string> = {
 	plan: '批准时',
 	launch: '启动前',
 	runtime: '运行中',
-	retry: '重试时'
+	retry: '重试时',
+	lead: '负责人建议'
 };
 
 // --- the conclusion report ------------------------------------------------------------------

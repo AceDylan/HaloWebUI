@@ -12,6 +12,10 @@ or drive another user's team through this API either.
   POST /v1/halo-teams/{team_id}/tasks/{task_id}/messages {body, author_name}
   POST /v1/halo-teams/{team_id}/tasks/{task_id}/retry
   POST /v1/halo-teams/{team_id}/control           {action: pause|resume|stop}
+  POST /v1/halo-teams/{team_id}/adjust            {text, actor} → the lead proposes a plan change (202, async)
+  POST /v1/halo-teams/{team_id}/adjust/gaps       the acceptance gaps as a change request
+  POST /v1/halo-teams/{team_id}/change/{id}/apply|discard   the user decides on the proposal
+  POST /v1/halo-teams/{team_id}/tasks/{task}/diagnosis/apply|again   the lead's suggestion for a failed task
   GET  /v1/halo-teams/meta                          lead model, runners (+ availability), task kinds, assistant templates
   POST /v1/halo-teams/runners/check                 re-run the runner availability checks now
   POST /v1/halo-teams/plan/resolve                  {plan} → the plan with every member's runner worked out again
@@ -203,6 +207,49 @@ async def _control(request):
     ))
 
 
+async def _adjust(request):
+    from .lead import request_change
+
+    data = await _body(request)
+    return _json_response(await asyncio.to_thread(
+        request_change, request.match_info["team_id"], str(data.get("text") or ""), owner=_owner(request),
+        actor=str(data.get("actor") or ""), via="web",
+    ), status=202)
+
+
+async def _fill_gaps(request):
+    from .lead import fill_gaps
+
+    data = await _body(request)
+    return _json_response(await asyncio.to_thread(
+        fill_gaps, request.match_info["team_id"], owner=_owner(request), actor=str(data.get("actor") or ""),
+    ), status=202)
+
+
+async def _change_post(request):
+    from .lead import apply_change, discard_change
+
+    data = await _body(request)
+    fn = apply_change if request.match_info["action"] == "apply" else discard_change
+    return _json_response(await asyncio.to_thread(
+        fn, request.match_info["team_id"], request.match_info["change_id"], owner=_owner(request),
+        actor=str(data.get("actor") or ""),
+    ))
+
+
+async def _diagnosis_post(request):
+    from .lead import apply_diagnosis, request_diagnosis
+
+    data = await _body(request)
+    team_id, task_id = request.match_info["team_id"], request.match_info["task_id"]
+    if request.match_info["action"] == "apply":
+        result = await asyncio.to_thread(apply_diagnosis, team_id, task_id, owner=_owner(request),
+                                         actor=str(data.get("actor") or ""))
+    else:
+        result = await asyncio.to_thread(request_diagnosis, team_id, task_id, owner=_owner(request))
+    return _json_response(result)
+
+
 async def _meta(request):
     from . import assistants, runners
     from .plan import lead_model_info
@@ -380,6 +427,10 @@ def install(app: Any, adapter: Any) -> None:
     router.add_post(base + "/{team_id}/tasks/{task_id}/messages", _wrap(adapter, _message))
     router.add_post(base + "/{team_id}/tasks/{task_id}/retry", _wrap(adapter, _retry))
     router.add_post(base + "/{team_id}/control", _wrap(adapter, _control))
+    router.add_post(base + "/{team_id}/adjust", _wrap(adapter, _adjust))
+    router.add_post(base + "/{team_id}/adjust/gaps", _wrap(adapter, _fill_gaps))
+    router.add_post(base + "/{team_id}/change/{change_id:[0-9a-f]{8}}/{action:apply|discard}", _wrap(adapter, _change_post))
+    router.add_post(base + "/{team_id}/tasks/{task_id}/diagnosis/{action:apply|again}", _wrap(adapter, _diagnosis_post))
     router.add_get(base + "/{team_id}/conclusion", _wrap(adapter, _conclusion_get))
     router.add_post(base + "/{team_id}/conclusion", _wrap(adapter, _conclusion_post))
     router.add_get(base + "/{team_id}/files", _wrap(adapter, _files))

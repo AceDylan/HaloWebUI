@@ -190,11 +190,15 @@
 										>
 									{/if}
 								</div>
-								{#if member.focus}<p
+								{#if member.focus}
+									<!-- a div: the global `li p { display: inline }` would undo the clamp -->
+									<div
 										class="mt-1.5 text-xs leading-relaxed text-gray-500 line-clamp-2"
+										title={member.focus}
 									>
 										{member.focus}
-									</p>{/if}
+									</div>
+								{/if}
 							</div>
 						</div>
 						<div class="mt-auto rounded-xl bg-gray-50 px-3 py-2.5 dark:bg-gray-850/60">
@@ -204,7 +208,7 @@
 								>
 								<select
 									id="runner-{member.name}"
-									class="min-w-0 max-w-[16rem] flex-1 truncate rounded-lg border border-gray-200 bg-white py-1 pl-2 pr-7 text-xs text-gray-900 transition focus:border-sky-400 focus:outline-none disabled:opacity-60 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+									class="compact-select min-w-0 max-w-[16rem] flex-1 truncate rounded-lg border border-gray-200 bg-white py-1 pl-2 pr-7 text-xs text-gray-900 transition focus:border-sky-400 focus:outline-none disabled:opacity-60 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
 									value={member.executor}
 									disabled={!editable || busy}
 									on:change={(e) =>
@@ -385,3 +389,13 @@
 		{/if}
 	</div>
 {/if}
+
+<style>
+	/* The app's global `select` rule (unlayered) outranks Tailwind's utilities: size these here. */
+	.compact-select {
+		font-size: 0.75rem;
+		line-height: 1rem;
+		padding: 0.3rem 1.75rem 0.3rem 0.55rem;
+		background-size: 1em 1em;
+	}
+</style>

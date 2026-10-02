@@ -189,7 +189,7 @@
 						<span class="shrink-0">负责人模型</span>
 						<select
 							bind:value={leadModel}
-							class="min-w-0 max-w-[14rem] truncate rounded-lg border border-gray-200 bg-white py-1 pl-2 pr-7 font-mono text-xs text-gray-800 transition focus:border-sky-400 focus:outline-none dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+							class="compact-select min-w-0 max-w-[16rem] truncate rounded-lg border border-gray-200 bg-white py-1 pl-2 pr-7 text-xs text-gray-800 transition focus:border-sky-400 focus:outline-none dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
 							title="负责人做计划、写结论用的模型；默认跟随 Hermes 当前的默认模型"
 						>
 							<option value=""
@@ -263,3 +263,13 @@
 		</div>
 	</div>
 </div>
+
+<style>
+	/* The app's global `select` rule (unlayered) outranks Tailwind's utilities: size these here. */
+	.compact-select {
+		font-size: 0.75rem;
+		line-height: 1rem;
+		padding: 0.3rem 1.75rem 0.3rem 0.55rem;
+		background-size: 1em 1em;
+	}
+</style>

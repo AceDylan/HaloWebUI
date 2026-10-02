@@ -365,6 +365,7 @@ def test_a_member_that_stops_to_ask_gets_the_leads_take_and_an_answer_resumes_it
     lead.mod.tick_board(slug, pkg.common.read_team(slug))
     task = _task(pkg.teams.snapshot(team_id, OWNER), "T1")
     assert task["sub_status"] == "waiting_user" and task["diagnosis"]["action"] == "retry_with_note"
+    assert task["block_reason"] == "input.txt 不存在，要补文件还是作废？"  # the lead's note does not hide it
     assert "input.txt 不存在" in lead.fake.prompts[-1][1]  # the lead read the member's question
     linked.notify.tick_board(slug, pkg.common.read_team(slug))
     ask = linked.sent[-1]

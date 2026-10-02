@@ -340,7 +340,7 @@ def snapshot(team_id: str, owner: Optional[str] = None) -> dict:
             for row in conn.execute(
                 "SELECT task_id, kind, payload FROM task_events WHERE id IN "
                 "(SELECT MAX(id) FROM task_events WHERE kind NOT IN ('heartbeat','claim_extended','commented',"
-                "'halo_tool','halo_subagent','halo_comment_delivered') GROUP BY task_id)"
+                "'halo_tool','halo_subagent','halo_comment_delivered','halo_team') GROUP BY task_id)"
             ).fetchall()
         }
         for task in kb().list_tasks(conn, include_archived=True):

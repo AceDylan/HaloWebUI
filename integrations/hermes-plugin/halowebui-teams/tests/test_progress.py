@@ -110,6 +110,10 @@ def test_a_running_team_says_what_each_member_is_doing(pkg, progress, team_id, p
         t1 = created["tasks"]["T1"]
         assert kb.claim_task(conn, t1, claimer="test") is not None
         pkg.common.append_event(conn, t1, "halo_tool", {"name": "web_search", "preview": "看板工具 对比", "ok": True})
+        ws = pkg.common.read_team(slug)["workspace"]
+        t2 = created["tasks"]["T2"]
+        assert kb.claim_task(conn, t2, claimer="test") is not None
+        pkg.common.append_event(conn, t2, "halo_tool", {"name": "read_file", "preview": f"{ws}/inputs/开销.csv", "ok": True})
     snap = pkg.teams.snapshot(team_id, "u1")
     stage = snap["team"]["stage"]
     assert stage["key"] == "running" and stage["label"] == "成员执行中"
@@ -119,8 +123,10 @@ def test_a_running_team_says_what_each_member_is_doing(pkg, progress, team_id, p
     assert stage["eta"]["seconds"] > 0 and stage["done"] == 0 and stage["total"] == 3
     assert [s["state"] for s in stage["steps"]] == ["done", "done", "active", "pending", "pending"]
     assert progress.brief(stage)["now"].startswith("#T1")
+    assert stage["running"][1]["text"] == "读文件 · inputs/开销.csv"  # relative to the workspace
     with pkg.common.board_conn(slug) as conn:  # running tasks count against the host-wide cap of later tests
         kb.complete_task(conn, t1, result="好了", summary="好了")
+        kb.complete_task(conn, t2, result="好了", summary="好了")
 
 
 def test_a_finished_team_goes_through_writing_and_checking_the_result(pkg, progress, team_id, plan_dict, monkeypatch):

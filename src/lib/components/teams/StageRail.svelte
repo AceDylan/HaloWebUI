@@ -40,7 +40,7 @@
 		aria-label="当前阶段"
 	>
 		{#if steps && stage.steps?.length}
-			<ol class="rail mb-2.5 flex items-center" aria-label="阶段">
+			<ol class="rail mb-2.5 flex list-none items-center p-0" aria-label="阶段">
 				{#each STAGE_STEPS as step, i (step.key)}
 					{@const state = stepState.get(step.key) ?? 'pending'}
 					<li
@@ -105,7 +105,7 @@
 			{/if}
 		</div>
 		{#if lines.length > 1}
-			<ul class="mt-2 flex flex-col gap-1" aria-label="正在执行的成员" data-stage-lines>
+			<ul class="mt-2 flex list-none flex-col gap-1 p-0" aria-label="正在执行的成员" data-stage-lines>
 				{#each lines as l (l.key)}
 					<li class="flex min-w-0 items-center gap-2 font-mono text-[11px]">
 						<span class="shrink-0 font-semibold text-gray-400">#{l.key}</span>
@@ -139,6 +139,13 @@
 <style>
 	.stage {
 		--stage-tone: var(--tm-accent);
+	}
+	/* Wherever it sits (a chat reply's Markdown styles too): steps are not a numbered list. */
+	.stage :global(li) {
+		list-style: none;
+	}
+	.stage li::marker {
+		content: none;
 	}
 	.stage[data-tone='attention'] {
 		--stage-tone: var(--tm-violet);

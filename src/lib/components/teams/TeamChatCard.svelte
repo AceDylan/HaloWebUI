@@ -78,7 +78,8 @@
 	});
 </script>
 
-<div class="my-2 flex max-w-2xl flex-col gap-2" data-teams-ui data-team-chat-card={teamId}>
+<!-- not-prose: the chat's Markdown typography must not number the rail's steps -->
+<div class="not-prose my-2 flex max-w-2xl flex-col gap-2" data-teams-ui data-team-chat-card={teamId}>
 	<div class="flex min-w-0 items-center gap-2.5">
 		<TeamAvatar kind="lead" status={settled ? (key === 'done' ? 'done' : 'idle') : 'running'} size={28} />
 		<div class="min-w-0 flex-1">

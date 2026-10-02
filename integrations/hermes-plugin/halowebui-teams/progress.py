@@ -436,6 +436,10 @@ def stage(slug: str, team: dict, tasks: list[dict], phase: str, stats: Optional[
     if out["key"] in ("running", "attention", "paused"):
         running = [t for t in tasks if t.get("status") == "running"]
         activity = _latest_activity(slug, [t["id"] for t in running])
+        workspace = str(team.get("workspace") or "").rstrip("/")
+        if workspace:  # "读文件 · inputs/家庭开销.csv", not the whole host path
+            for act in activity.values():
+                act["text"] = act["text"].replace(workspace + "/", "").replace(workspace, "工作目录")
         lines = []
         for t in running[:4]:
             act = activity.get(t["id"]) or {}

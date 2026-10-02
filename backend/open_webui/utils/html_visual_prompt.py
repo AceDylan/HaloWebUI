@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import html
+import json
 import logging
 import math
 import os
@@ -38,6 +39,13 @@ HTML_VISUAL_AGY_COMMAND_ENV = "HALOWEBUI_AGY_COMMAND"
 HTML_VISUAL_AGY_TIMEOUT_ENV = "HALOWEBUI_AGY_TIMEOUT_SECONDS"
 HTML_VISUAL_AGY_WORKDIR_ENV = "HALOWEBUI_AGY_WORKDIR"
 HTML_VISUAL_AGY_OAUTH_TOKEN_FILE_ENV = "HALOWEBUI_AGY_OAUTH_TOKEN_FILE"
+# The host AGY's own switch (settings.json "modelProvider": "gemini", Gemini API-key
+# mode) decides for this pass too; the host exports the Hermes gemini-chat provider
+# next to it (hermes-gateway.json, agy_gateway.py --export-gateway). Both default to
+# the directory of the OAuth token file, which is already mounted read-only.
+HTML_VISUAL_AGY_SETTINGS_FILE_ENV = "HALOWEBUI_AGY_SETTINGS_FILE"
+HTML_VISUAL_AGY_GATEWAY_FILE_ENV = "HALOWEBUI_AGY_GATEWAY_FILE"
+HTML_VISUAL_AGY_MAX_CONFIG_BYTES = 64 * 1024
 HTML_VISUAL_AGY_DEFAULT_COMMAND = "agy --sandbox --disable-slash-commands -p"
 HTML_VISUAL_AGY_DEFAULT_TIMEOUT_SECONDS = 30.0
 HTML_VISUAL_AGY_MAX_TIMEOUT_SECONDS = 120.0
@@ -208,6 +216,7 @@ _AGY_FALLBACK_REASON_ALLOWLIST = frozenset(
         "busy",
         "authentication_required",
         "oauth_token_file_unavailable",
+        "gateway_config_unavailable",
         "stdout_too_large",
         "stderr_too_large",
         "nonzero_exit",
@@ -248,6 +257,10 @@ class _AgyAuthenticationRequiredError(Exception):
 
 
 class _AgyOAuthTokenStagingError(Exception):
+    pass
+
+
+class _AgyGatewayConfigError(Exception):
     pass
 
 
@@ -412,6 +425,84 @@ def _stage_agy_oauth_token(isolated_home: str) -> None:
         raise _AgyOAuthTokenStagingError from None
 
 
+def _agy_config_path(env_name: str, file_name: str) -> str | None:
+    explicit = os.environ.get(env_name, "").strip()
+    if explicit:
+        return explicit
+    token_source = os.environ.get(HTML_VISUAL_AGY_OAUTH_TOKEN_FILE_ENV, "").strip()
+    return os.path.join(os.path.dirname(token_source), file_name) if token_source else None
+
+
+def _read_agy_config_json(path: str) -> Any:
+    if not stat.S_ISREG(os.stat(path).st_mode):
+        raise ValueError
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NONBLOCK", 0)
+    descriptor = os.open(path, flags)
+    with os.fdopen(descriptor, "rb") as handle:
+        data = handle.read(HTML_VISUAL_AGY_MAX_CONFIG_BYTES + 1)
+    if len(data) > HTML_VISUAL_AGY_MAX_CONFIG_BYTES:
+        raise ValueError
+    return json.loads(data)
+
+
+def _agy_gateway_config() -> dict[str, str] | None:
+    """Follow the host AGY's switch; None keeps the account sign-in (OAuth token).
+
+    With "modelProvider": "gemini" in the host settings.json, AGY must run in Gemini
+    API-key mode against the Hermes provider exported to hermes-gateway.json, exactly
+    like the host's terminal and /agy runs, so one switch governs every AGY caller.
+    """
+    settings_path = _agy_config_path(HTML_VISUAL_AGY_SETTINGS_FILE_ENV, "settings.json")
+    if not settings_path:
+        return None
+    try:
+        settings = _read_agy_config_json(settings_path)
+    except (OSError, ValueError):
+        return None  # Like AGY itself: no readable settings -> the default sign-in.
+    if not isinstance(settings, dict) or settings.get("modelProvider") != "gemini":
+        return None
+    gateway_path = _agy_config_path(HTML_VISUAL_AGY_GATEWAY_FILE_ENV, "hermes-gateway.json")
+    try:
+        gateway = _read_agy_config_json(gateway_path) if gateway_path else None
+    except (OSError, ValueError):
+        raise _AgyGatewayConfigError from None
+    if not isinstance(gateway, dict):
+        raise _AgyGatewayConfigError
+    api_key = gateway.get("api_key")
+    base_url = gateway.get("base_url")
+    model = gateway.get("model")
+    if not (
+        isinstance(api_key, str)
+        and api_key
+        and api_key.isprintable()
+        and isinstance(base_url, str)
+        and base_url.startswith(("https://", "http://"))
+        and isinstance(model, str)
+        and model.startswith("gemini-api://")
+    ):
+        raise _AgyGatewayConfigError
+    return {"api_key": api_key, "base_url": base_url, "model": model}
+
+
+def _stage_agy_gateway_settings(isolated_home: str) -> None:
+    """Give AGY's ephemeral HOME only the API-key switch, never the host settings."""
+    gemini_dir = os.path.join(isolated_home, ".gemini")
+    settings_dir = os.path.join(gemini_dir, "antigravity-cli")
+    try:
+        os.makedirs(settings_dir, mode=0o700)
+        os.chmod(gemini_dir, 0o700)
+        os.chmod(settings_dir, 0o700)
+        descriptor = os.open(
+            os.path.join(settings_dir, "settings.json"),
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+            0o600,
+        )
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            handle.write('{"modelProvider": "gemini"}\n')
+    except OSError:
+        raise _AgyGatewayConfigError from None
+
+
 def _get_latest_user_request(form_data: dict[str, Any]) -> str:
     messages = form_data.get("messages")
     if not isinstance(messages, list):
@@ -542,14 +633,24 @@ async def _run_agy_process(
     try:
         workdir = tempfile.mkdtemp(prefix="halowebui-agy-", dir=workdir_parent)
         try:
-            _stage_agy_oauth_token(workdir)
+            subprocess_env = _agy_subprocess_env(workdir)
+            argv = list(command)
+            gateway = _agy_gateway_config()
+            if gateway is None:
+                _stage_agy_oauth_token(workdir)
+            else:
+                _stage_agy_gateway_settings(workdir)
+                subprocess_env["GEMINI_API_KEY"] = gateway["api_key"]
+                subprocess_env["GOOGLE_GEMINI_BASE_URL"] = gateway["base_url"]
+                argv[1:1] = ["--model", gateway["model"]]
+                log.info("HTML visual AGY runs via the Hermes gateway model=%s", gateway["model"])
             process: asyncio.subprocess.Process | None = None
             try:
                 process = await asyncio.create_subprocess_exec(
-                    *command,
+                    *argv,
                     prompt,
                     cwd=workdir,
-                    env=_agy_subprocess_env(workdir),
+                    env=subprocess_env,
                     stdin=asyncio.subprocess.DEVNULL,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
@@ -768,6 +869,11 @@ async def prepare_html_visual_prompt_overlay(
     except _AgyOAuthTokenStagingError:
         _record_agy_status(
             metadata, "failed", started_at, reason="oauth_token_file_unavailable"
+        )
+        return apply_html_visual_prompt_overlay(form_data, metadata)
+    except _AgyGatewayConfigError:
+        _record_agy_status(
+            metadata, "failed", started_at, reason="gateway_config_unavailable"
         )
         return apply_html_visual_prompt_overlay(form_data, metadata)
     except asyncio.TimeoutError:
@@ -1749,6 +1855,11 @@ async def design_html_visual_artifact_with_agy(
     except _AgyOAuthTokenStagingError:
         _record_agy_html_status(
             metadata, "failed", started_at, reason="oauth_token_file_unavailable"
+        )
+        return content
+    except _AgyGatewayConfigError:
+        _record_agy_html_status(
+            metadata, "failed", started_at, reason="gateway_config_unavailable"
         )
         return content
     except asyncio.TimeoutError:

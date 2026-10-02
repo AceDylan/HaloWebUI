@@ -1,4 +1,5 @@
 import asyncio
+import json
 import os
 import shlex
 import sys
@@ -932,6 +933,152 @@ def test_agy_subprocess_environment_excludes_parent_secrets(monkeypatch, tmp_pat
 
     assert metadata[HTML_VISUAL_AGY_METADATA_KEY]["status"] == "success"
     assert environment_path.read_text() == "1"
+
+
+
+def _agy_host_dir(tmp_path, *, provider=None, gateway=None):
+    """A stand-in for the mounted host dir: OAuth token, settings.json, gateway export."""
+    host_dir = tmp_path / "host-agy"
+    host_dir.mkdir()
+    (host_dir / "antigravity-oauth-token").write_text("fake-agy-oauth-token")
+    settings = {"model": "Gemini 3.8 Flash (High)"}
+    if provider:
+        settings["modelProvider"] = provider
+    (host_dir / "settings.json").write_text(json.dumps(settings))
+    if gateway is not None:
+        (host_dir / "hermes-gateway.json").write_text(
+            gateway if isinstance(gateway, str) else json.dumps(gateway)
+        )
+    return host_dir
+
+
+def _recording_agy(tmp_path):
+    """An executable fake AGY (argv[0] stays a program, so --model can follow it)."""
+    record = tmp_path / "agy-record.json"
+    fake = tmp_path / "fake-agy"
+    fake.write_text(
+        f"#!{sys.executable}\n"
+        "import json, os, pathlib, sys\n"
+        "home = pathlib.Path(os.environ['HOME']) / '.gemini/antigravity-cli'\n"
+        "settings = home / 'settings.json'\n"
+        f"pathlib.Path({str(record)!r}).write_text(json.dumps({{\n"
+        "    'argv': sys.argv[1:-1],\n"
+        "    'key': os.environ.get('GEMINI_API_KEY'),\n"
+        "    'base_url': os.environ.get('GOOGLE_GEMINI_BASE_URL'),\n"
+        "    'settings': settings.read_text() if settings.exists() else None,\n"
+        "    'token': (home / 'antigravity-oauth-token').exists(),\n"
+        "}))\n"
+        f"print({AGY_DESIGN_SPEC!r})\n"
+    )
+    fake.chmod(0o755)
+    return shlex.join([str(fake), "--sandbox", "--disable-slash-commands", "-p"]), record
+
+
+AGY_GATEWAY_EXPORT = {
+    "api_key": "sk-gateway-secret-marker",
+    "base_url": "https://gw.example:23001",
+    "model": "gemini-api://models/gemini-chat",
+    "provider": "gemini-chat",
+}
+
+
+def test_agy_follows_the_host_api_key_switch_through_the_hermes_gateway(
+    monkeypatch, tmp_path, caplog
+):
+    host_dir = _agy_host_dir(tmp_path, provider="gemini", gateway=AGY_GATEWAY_EXPORT)
+    command, record = _recording_agy(tmp_path)
+    monkeypatch.setenv("HALOWEBUI_AGY_COMMAND", command)
+    monkeypatch.setenv("HALOWEBUI_AGY_WORKDIR", str(tmp_path))
+    monkeypatch.setenv(
+        "HALOWEBUI_AGY_OAUTH_TOKEN_FILE", str(host_dir / "antigravity-oauth-token")
+    )
+    metadata = _metadata(mode="auto")
+    caplog.set_level("INFO", logger=html_visual_prompt.__name__)
+
+    asyncio.run(prepare_html_visual_prompt_overlay(_form_data(), metadata))
+
+    seen = json.loads(record.read_text())
+    assert metadata[HTML_VISUAL_AGY_METADATA_KEY]["status"] == "success"
+    assert seen["argv"] == [
+        "--model", "gemini-api://models/gemini-chat",
+        "--sandbox", "--disable-slash-commands", "-p",
+    ]
+    assert seen["key"] == "sk-gateway-secret-marker"
+    assert seen["base_url"] == "https://gw.example:23001"
+    assert json.loads(seen["settings"]) == {"modelProvider": "gemini"}
+    assert seen["token"] is False
+    assert "sk-gateway-secret-marker" not in f"{metadata!r}\n{caplog.text}"
+    assert "via the Hermes gateway model=gemini-api://models/gemini-chat" in caplog.text
+
+
+@pytest.mark.parametrize(
+    "gateway",
+    [None, "{not json", {**AGY_GATEWAY_EXPORT, "model": "gemini-chat"},
+     {**AGY_GATEWAY_EXPORT, "api_key": ""}],
+    ids=["missing", "malformed", "model-not-agy-form", "empty-key"],
+)
+def test_agy_api_key_switch_without_a_usable_export_fails_without_spawning(
+    monkeypatch, tmp_path, caplog, gateway
+):
+    host_dir = _agy_host_dir(tmp_path, provider="gemini", gateway=gateway)
+    command, record = _recording_agy(tmp_path)
+    monkeypatch.setenv("HALOWEBUI_AGY_COMMAND", command)
+    monkeypatch.setenv("HALOWEBUI_AGY_WORKDIR", str(tmp_path))
+    monkeypatch.setenv(
+        "HALOWEBUI_AGY_OAUTH_TOKEN_FILE", str(host_dir / "antigravity-oauth-token")
+    )
+    metadata = _metadata(mode="auto")
+    caplog.set_level("WARNING", logger=html_visual_prompt.__name__)
+
+    asyncio.run(prepare_html_visual_prompt_overlay(_form_data(), metadata))
+
+    agy_metadata = metadata[HTML_VISUAL_AGY_METADATA_KEY]
+    assert agy_metadata["status"] == "failed"
+    assert agy_metadata["reason"] == "gateway_config_unavailable"
+    assert not record.exists()
+    assert "sk-gateway-secret-marker" not in f"{metadata!r}\n{caplog.text}"
+    assert not list(tmp_path.glob("halowebui-agy-*"))
+
+
+def test_agy_without_the_api_key_switch_keeps_the_oauth_sign_in(monkeypatch, tmp_path):
+    host_dir = _agy_host_dir(tmp_path, gateway=AGY_GATEWAY_EXPORT)
+    command, record = _recording_agy(tmp_path)
+    monkeypatch.setenv("HALOWEBUI_AGY_COMMAND", command)
+    monkeypatch.setenv("HALOWEBUI_AGY_WORKDIR", str(tmp_path))
+    monkeypatch.setenv(
+        "HALOWEBUI_AGY_OAUTH_TOKEN_FILE", str(host_dir / "antigravity-oauth-token")
+    )
+    metadata = _metadata(mode="auto")
+
+    asyncio.run(prepare_html_visual_prompt_overlay(_form_data(), metadata))
+
+    seen = json.loads(record.read_text())
+    assert metadata[HTML_VISUAL_AGY_METADATA_KEY]["status"] == "success"
+    assert seen["argv"] == ["--sandbox", "--disable-slash-commands", "-p"]
+    assert seen["key"] is None and seen["base_url"] is None
+    assert seen["settings"] is None and seen["token"] is True
+
+
+def test_agy_answer_design_reports_an_unusable_gateway_export(monkeypatch, tmp_path):
+    host_dir = _agy_host_dir(tmp_path, provider="gemini")
+    command, record = _recording_agy(tmp_path)
+    monkeypatch.setenv("HALOWEBUI_AGY_COMMAND", command)
+    monkeypatch.setenv("HALOWEBUI_AGY_WORKDIR", str(tmp_path))
+    monkeypatch.setenv(
+        "HALOWEBUI_AGY_OAUTH_TOKEN_FILE", str(host_dir / "antigravity-oauth-token")
+    )
+    monkeypatch.setenv("HALOWEBUI_AGY_SETTINGS_FILE", str(host_dir / "settings.json"))
+    metadata = _metadata()
+
+    result = asyncio.run(
+        html_visual_prompt.design_html_visual_artifact_with_agy(LONG_PLAIN_RESPONSE, metadata)
+    )
+
+    assert result == LONG_PLAIN_RESPONSE
+    assert metadata[html_visual_prompt.HTML_VISUAL_AGY_HTML_METADATA_KEY]["reason"] == (
+        "gateway_config_unavailable"
+    )
+    assert not record.exists()
 
 
 def test_agy_timeout_kills_descendant_process_group(monkeypatch, tmp_path):

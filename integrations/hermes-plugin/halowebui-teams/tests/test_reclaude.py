@@ -5,6 +5,13 @@ import uuid
 import pytest
 
 
+def _cst(seconds_from_now):
+    """A runner's auto_resume_at, *seconds_from_now* ahead (Beijing time, its own format)."""
+    import time
+
+    return time.strftime("%Y-%m-%d %H:%M:%S +0800", time.gmtime(time.time() + 8 * 3600 + seconds_from_now))
+
+
 def _kb():
     from hermes_cli import kanban_db
 
@@ -118,7 +125,7 @@ def test_launch_follow_quota_wait_continuation_and_success(pkg, setup):
     assert [(t["data"]["name"], t["text"]) for t in tools] == [("Bash", "npm test")]
     # Quota: the runner parks itself and will resume as <id>-a1. Not a failure.
     s.fake.write(run_id, status="error", auto_resume="scheduled", auto_resume_pid=os.getpid(),
-                 auto_resume_at="2026-10-02 13:00:00 +0800", auto_resume_run=f"{run_id}-a1", failure_kind="quota_exhausted")
+                 auto_resume_at=_cst(600), auto_resume_run=f"{run_id}-a1", failure_kind="quota_exhausted")
     s.tick()
     s.tick()
     assert s.snap("T1")["sub_status"] == "quota_wait" and s.task("T1").status == "running"

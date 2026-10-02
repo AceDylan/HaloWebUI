@@ -22,6 +22,8 @@ os.environ["HALO_TEAMS_WORKSPACE_ROOT"] = os.path.join(_TMP, "workspaces")
 os.environ["HALO_TEAMS_RUNS_HOME"] = _TMP  # <runner>-runs for every runner member kind
 os.environ["HALO_TEAMS_RECLAUDE_RUNS_ROOT"] = os.path.join(_TMP, "reclaude-runs")
 os.environ["HALO_TEAMS_TASK_DIR"] = os.path.join(_TMP, "tasks")
+os.environ["HALO_TEAMS_RUNNERS_FILE"] = os.path.join(_TMP, "halo-teams-runners.json")
+os.environ["HALO_TEAMS_CONCLUSION_SYNC"] = "1"
 for key in [k for k in os.environ if k.startswith("HERMES_KANBAN_") and k != "HERMES_KANBAN_HOME"]:
     del os.environ[key]
 os.makedirs(os.environ["HERMES_HOME"], exist_ok=True)
@@ -36,6 +38,35 @@ sys.modules["halowebui_teams"] = plugin
 _SPEC.loader.exec_module(plugin)
 
 
+class FakeAvailability:
+    """Every runner available unless a test marks it down: tests never probe real runners."""
+
+    def __init__(self):
+        self.down = {}
+        self.calls = 0
+
+    def __call__(self, names=None, *, force=False):
+        import halowebui_teams.runners as runners
+
+        self.calls += 1
+        out = {}
+        for name in names or runners.NAMES:
+            reason = self.down.get(name)
+            out[name] = {"name": name, "label": name, "available": reason is None,
+                         "state": "ok" if reason is None else "unreachable", "reason": reason or "可用",
+                         "checked_at": 0, "layers": []}
+        return out
+
+
+@pytest.fixture(autouse=True)
+def availability(monkeypatch):
+    import halowebui_teams.runners as runners
+
+    fake = FakeAvailability()
+    monkeypatch.setattr(runners, "check", fake)
+    return fake
+
+
 @pytest.fixture
 def pkg():
     import halowebui_teams.common as common
@@ -43,8 +74,14 @@ def pkg():
     import halowebui_teams.plan as plan
     import halowebui_teams.reclaude as reclaude
     import halowebui_teams.teams as teams
+    import halowebui_teams.runners as runners
+    import halowebui_teams.fallback as fallback
+    import halowebui_teams.assistants as assistants
+    import halowebui_teams.conclusion as conclusion
 
-    return type("Pkg", (), {"common": common, "hooks": hooks, "plan": plan, "teams": teams, "reclaude": reclaude})
+    return type("Pkg", (), {"common": common, "hooks": hooks, "plan": plan, "teams": teams, "reclaude": reclaude,
+                            "runners": runners, "fallback": fallback, "assistants": assistants,
+                            "conclusion": conclusion})
 
 
 PLAN = {

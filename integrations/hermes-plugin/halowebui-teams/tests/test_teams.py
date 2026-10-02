@@ -61,7 +61,7 @@ def test_propose_plan_retries_once_with_the_validation_errors(pkg, monkeypatch, 
 
     def fake(messages, timeout=150):
         seen.append(messages)
-        return next(replies), ""
+        return next(replies), "", {"model": "gpt-chat", "source": "hermes_default"}
 
     monkeypatch.setattr(pkg.plan, "call_model", fake)
     out = pkg.plan.propose_plan("目标", "/tmp/ws")

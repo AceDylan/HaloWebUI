@@ -11,6 +11,7 @@ import threading
 from pathlib import Path
 from typing import Any, Optional
 
+from . import assistants
 from .common import (
     ASSIGNEE_EXECUTOR,
     EXECUTOR_ASSIGNEE,
@@ -23,6 +24,7 @@ from .common import (
     board_slug,
     executor_of,
     is_runner,
+    task_executor,
     kb,
     logger,
     member_of,
@@ -40,7 +42,8 @@ EVENT_LIMIT_MAX = 2000
 TIMELINE_HARD_CAP = 50000
 USER_AUTHOR_PREFIX = "user:"
 STOP_REASON = "用户停止了协作任务"
-RUNNER_FAIL_PREFIX = RUNNER_FAIL_PREFIXES  # str.startswith takes the tuple
+# str.startswith takes the tuple; a task whose whole runner chain is down is failed too.
+RUNNER_FAIL_PREFIX = RUNNER_FAIL_PREFIXES + ("所有执行来源都不可用",)
 VALID_STATUSES = {"triage", "todo", "scheduled", "ready", "running", "blocked", "review", "done", "archived"}
 # Kanban event kind -> task status after it (when the payload does not say).
 STATUS_BY_KIND = {
@@ -86,14 +89,21 @@ def default_workspace(slug: str) -> str:
 
 def _task_body(team: dict, task: dict, member: dict) -> str:
     deps = "、".join(task["depends_on"]) or "无"
+    template = assistants.by_id((member.get("assistant") or {}).get("id")) if isinstance(member.get("assistant"), dict) else None
+    role = ""
+    if template and template.get("prompt"):
+        role = (f"你的角色设定（来自 HaloWebUI 助手模板「{template['name']}」，团队里你负责的部分以下面的任务为准）：\n"
+                f"{template['prompt']}\n\n")
     return (
         f"你是协作团队「{team['title']}」的成员 {member['name']}（{member['role']}）。"
         f"负责人是 {LEAD_NAME}，团队里还有：{'、'.join(m['name'] + '（' + m['role'] + '）' for m in team['members'] if m['name'] != member['name']) or '无'}。\n\n"
-        f"团队目标：\n{team['goal']}\n\n"
+        + role
+        + f"团队目标：\n{team['goal']}\n\n"
         f"你的任务 {task['key']}：{task['title']}\n{task['description']}\n\n"
         f"前置任务：{deps}（它们的完成摘要会出现在你的上下文「Parent task results」里）。\n"
         f"工作目录：{team['workspace']}（全队共用；只写你的任务说明里指定的文件，不要改别人的产出）。\n\n"
-        "完成后调用 kanban_complete，summary 写清楚：做了什么、产出物在哪个文件、给后续成员的交接要点。"
+        "完成后调用 kanban_complete，summary 写清楚：做了什么、产出物在哪个文件、给后续成员的交接要点；"
+        "result 写完整的结果（负责人会据此写最终结论；图片、截图等产出写明它在工作目录里的相对路径）。"
         "需要和别的成员沟通时用 kanban_comment 写在你的任务上。"
         "确实无法继续（缺信息、需要用户决定）时调用 kanban_block 并写明原因，不要编造结果。"
     )
@@ -120,6 +130,7 @@ def create_team(team_id: str, plan: dict, *, owner: str, chat_id: str = "", goal
         team = {
             "team_id": team_id,
             "title": team_title,
+            "lead_model": checked.get("lead_model") or {},
             "goal": redact(goal, 4000, one_line=False),
             "summary": checked.get("summary") or "",
             "owner": str(owner),
@@ -137,6 +148,7 @@ def create_team(team_id: str, plan: dict, *, owner: str, chat_id: str = "", goal
         kb().create_board(slug, name=team_title, description=team["goal"][:200], default_workdir=workspace)
         update_team(slug, lambda rec: (rec.clear(), rec.update(team)))
         members = {m["name"]: m for m in checked["members"]}
+        stamp = now()
         keys: dict[str, str] = {}
         task_map: dict[str, dict] = {}
         order = [key for layer in checked["layers"] for key in layer]
@@ -149,7 +161,10 @@ def create_team(team_id: str, plan: dict, *, owner: str, chat_id: str = "", goal
             for seq, key in enumerate(order, 1):
                 task = by_key[key]
                 member = members[task["member"]]
-                executor = member["executor"]
+                chosen = member["executor"]
+                # Where the member's chain stands now; with nothing available it stays on the chosen
+                # runner and the bridge blocks it with the reasons when it would start.
+                executor = member.get("runner") or chosen
                 task_id = kb().create_task(
                     conn,
                     title=f"{key} {task['title']}",
@@ -165,8 +180,17 @@ def create_team(team_id: str, plan: dict, *, owner: str, chat_id: str = "", goal
                     board=slug,
                 )
                 keys[key] = task_id
-                task_map[task_id] = {"key": key, "member": member["name"], "seq": seq,
-                                     "executor": executor, "depends_on": task["depends_on"]}
+                trail = []
+                if executor != chosen:
+                    trail.append({"from": chosen, "to": executor, "reason": member.get("runner_note") or "", "at": stamp,
+                                  "phase": "plan"})
+                task_map[task_id] = {"key": key, "member": member["name"], "seq": seq, "executor": executor,
+                                     "chosen": chosen, "chosen_by": member.get("executor_source") or "auto",
+                                     "trail": trail, "depends_on": task["depends_on"]}
+                if trail:
+                    append_event(conn, task_id, "halo_runner", {
+                        "phase": "fallback", "runner": chosen, "to": executor, "reason": trail[0]["reason"],
+                        "text": f"{chosen} 现在不可用，改由 {executor} 执行（{trail[0]['reason'] or '原因未知'}）"})
         update_team(slug, lambda rec: rec.update({"tasks": task_map, "keys": keys}))
     nudge_dispatch(slug)
     return {"board": slug, "created": True, "tasks": keys}
@@ -314,7 +338,10 @@ def snapshot(team_id: str, owner: Optional[str] = None) -> dict:
                 "seq": entry.get("seq"),
                 "title": re.sub(r"^\S+\s+", "", task.title, count=1) if entry.get("key") and task.title.startswith(entry["key"] + " ") else task.title,
                 "member": entry.get("member"),
-                "executor": entry.get("executor") or ASSIGNEE_EXECUTOR.get(task.assignee or "", "hermes"),
+                "executor": ASSIGNEE_EXECUTOR.get(task.assignee or "", "") or entry.get("executor") or "hermes",
+                "chosen": entry.get("chosen") or entry.get("executor"),
+                "chosen_by": entry.get("chosen_by") or "auto",
+                "trail": entry.get("trail") or [],
                 "status": task.status,
                 "sub_status": sub,
                 "parents": parents.get(task.id, []),
@@ -355,6 +382,8 @@ def snapshot(team_id: str, owner: Optional[str] = None) -> dict:
             "stopped_at": team.get("stopped_at"),
             "max_parallel": team.get("max_parallel"),
             "lead": {**(team.get("lead") or {"name": LEAD_NAME, "role": "负责人"}), "status": lead_status(phase)},
+            "lead_model": team.get("lead_model") or {},
+            "conclusion": _conclusion_brief(team),
         },
         "members": members,
         "tasks": tasks_out,
@@ -375,6 +404,25 @@ def _mark_completed(slug: str, team: dict) -> None:
             append_event(conn, TEAM_EVENT_TASK, "halo_team", {"action": "completed"})
     team["completed_at"] = stamp
     team["state"] = "completed"
+    # Every finished team gets its conclusion written by the lead (in the background).
+    from . import conclusion
+
+    team["conclusion"] = conclusion.start(slug, by="auto")
+
+
+def _conclusion_brief(team: dict) -> dict:
+    entry = team.get("conclusion") or {}
+    keep = ("status", "source", "model", "model_label", "generated_at", "started_at", "chars", "error",
+            "tasks_done", "tasks_total")
+    return {k: entry[k] for k in keep if entry.get(k) not in (None, "")}
+
+
+def _task_runner_info(team: dict, task_id: str, assignee: Optional[str]) -> dict:
+    """Chosen vs actual runner of a task and why they differ (the fallback trail)."""
+    entry = (team.get("tasks") or {}).get(task_id) or {}
+    actual = task_executor(team, task_id, assignee)
+    return {"chosen": entry.get("chosen") or actual, "chosen_by": entry.get("chosen_by") or "auto",
+            "actual": actual, "trail": entry.get("trail") or []}
 
 
 def _block_reason(task: Any, last_event: Optional[dict]) -> str:
@@ -521,11 +569,16 @@ def timeline(team_id: str, owner: Optional[str] = None, after: int = 0, limit: i
         elif kind == "halo_runner":
             phase = payload.get("phase")
             ev = {**base, "type": "runner", "text": redact(payload.get("text"), 600, one_line=False),
-                  "data": {k: payload.get(k) for k in ("phase", "runner", "runner_run_id", "resume_at", "status")}}
+                  "data": {k: payload.get(k) for k in ("phase", "runner", "runner_run_id", "resume_at", "status", "to",
+                                                       "reason", "fail_kind")}}
             if phase in ("quota_wait", "question"):
                 sub[task_id] = "quota_wait" if phase == "quota_wait" else "waiting_user"
                 ev["status"] = status.get(task_id)
                 ev["sub_status"] = sub[task_id]
+            elif phase == "unavailable" and status.get(task_id) == "blocked":
+                sub[task_id] = "failed"
+                ev["status"] = "blocked"
+                ev["sub_status"] = "failed"
             elif phase in ("continued", "answered", "launched"):
                 if status.get(task_id) == "running":
                     sub[task_id] = "running"
@@ -656,6 +709,8 @@ KIND_TEXT = {
 
 
 def _kind_text(kind: str, payload: dict, attempt: int) -> str:
+    if kind == "assigned" and payload.get("assignee"):
+        return f"改由 {ASSIGNEE_EXECUTOR.get(payload['assignee'], payload['assignee'])} 执行"
     text = KIND_TEXT.get(kind, kind)
     if "{n}" in text:
         text = text.format(n=max(attempt, 1))
@@ -682,7 +737,8 @@ def _team_text(payload: dict) -> str:
         "paused": "已暂停派发新任务（正在执行的成员继续）",
         "resumed": "已恢复派发",
         "stopped": "已停止整个协作任务",
-        "completed": "所有任务已完成",
+        "completed": "所有任务已完成，负责人开始写结论",
+        "concluded": "负责人写好了结论" if payload.get("source") != "assembled" else "结论已按任务记录整理（负责人模型没有回答）",
         "retry": "用户要求重试失败的任务",
     }.get(action, str(action or "团队事件"))
 
@@ -718,11 +774,12 @@ def task_detail(team_id: str, task_id: str, owner: Optional[str] = None, *, log:
         "task_id": task_id,
         "key": task_key(team, task_id),
         "member": member,
-        "executor": executor_of(team, member),
+        "executor": task_executor(team, task_id, task.assignee),
         "title": task.title,
         "body": redact(task.body, 6000, one_line=False),
         "status": task.status,
-        "result": redact(task.result, 4000, one_line=False) if task.result else "",
+        "result": redact(task.result, 20000, one_line=False) if task.result else "",
+        "runner": _task_runner_info(team, task_id, task.assignee),
         "attempts": attempts,
         "comments": [
             {"id": c.id, "who": _author_kind(c.author, member)[0], "author": _author_kind(c.author, member)[1],
@@ -731,19 +788,20 @@ def task_detail(team_id: str, task_id: str, owner: Optional[str] = None, *, log:
         ],
     }
     if log:
-        out["log"] = worker_log(slug, team, task_id, runs)
+        out["log"] = worker_log(slug, team, task_id, runs, task.assignee)
     return out
 
 
-def worker_log(slug: str, team: dict, task_id: str, runs: list) -> dict:
+def worker_log(slug: str, team: dict, task_id: str, runs: list, assignee: Optional[str] = None) -> dict:
     """Tail of the member's log, redacted and capped: the Kanban worker log for Hermes members,
     the runner's progress.log for runner members (reclaude, codex, ...)."""
-    member = member_of(team, task_id)
-    executor = executor_of(team, member)
+    executor = task_executor(team, task_id, assignee)
+    run_meta = _json(runs[-1].metadata) if runs else {}
+    if run_meta.get("runner") in RUNNER_EXECUTORS:
+        executor = run_meta["runner"]  # the log of the attempt shown, even if the task moved on since
     if is_runner(executor):
         from .reclaude import RUNNERS
 
-        run_meta = _json(runs[-1].metadata) if runs else {}
         run_id = run_meta.get("runner_run_id")
         if not run_id or not re.match(r"^[0-9A-Za-z-]{8,80}$", str(run_id)):
             return {"text": "", "source": executor, "note": f"还没有 {executor} 运行记录"}
@@ -783,7 +841,7 @@ def post_message(team_id: str, task_id: str, body: str, *, author_name: str, own
             raise TeamError(409, "这个任务已经结束，说明不会再被读到")
         author = USER_AUTHOR_PREFIX + (redact(author_name, 40) or "用户")
         comment_id = kb().add_comment(conn, task_id, author, text)
-    executor = executor_of(team, member_of(team, task_id))
+    executor = task_executor(team, task_id, task.assignee)
     if task.status == "running":
         expect = (f"{executor} 不能在运行中接收消息：会在它这一轮结束后续跑同一会话时送达" if is_runner(executor)
                   else "成员正在执行：会在它当前这批工具调用结束后读到（约 6 秒检查一次）")
@@ -828,12 +886,13 @@ def control(team_id: str, action: str, *, owner: Optional[str] = None, actor: st
             task = kb().get_task(conn, task_id)
             if task is None or task.status not in ("running", "ready", "review"):
                 continue
-            if task.status in ("running", "review") and executor_of(team, member_of(team, task_id)) == "hermes":
+            executor = task_executor(team, task_id, task.assignee)
+            if task.status in ("running", "review") and executor == "hermes":
                 try:
                     kb().reclaim_task(conn, task_id, reason=STOP_REASON)
                 except Exception:
                     logger.warning("halowebui-teams: reclaim failed for %s", task_id, exc_info=True)
-            if is_runner(executor_of(team, member_of(team, task_id))):
+            if is_runner(executor):
                 try:
                     from .bridge import stop_task_runner
 
@@ -844,7 +903,7 @@ def control(team_id: str, action: str, *, owner: Optional[str] = None, actor: st
             # task that has no open attempt (the reclaim above closed it), which would show as one
             # more execution. The reason travels on halo_task_stopped instead.
             try:
-                if is_runner(executor_of(team, member_of(team, task_id))):
+                if is_runner(executor):
                     from .reclaude import close_preserving
 
                     close_preserving(conn, task.current_run_id, lambda: kb().block_task(conn, task_id))
@@ -872,6 +931,12 @@ def retry(team_id: str, task_id: str, *, owner: Optional[str] = None, actor: str
         if task.status == "triage":
             conn.execute("UPDATE tasks SET status = 'blocked' WHERE id = ? AND status = 'triage'", (task_id,))
             conn.commit()
+        from .fallback import reselect_for_retry
+
+        try:
+            reselect_for_retry(slug, conn, task_id)
+        except Exception:
+            logger.warning("halowebui-teams: runner reselect on retry failed for %s", task_id, exc_info=True)
         if not kb().unblock_task(conn, task_id):
             raise TeamError(409, "任务状态已变化，请刷新后再试")
         append_event(conn, TEAM_EVENT_TASK, "halo_team", {"action": "retry", "task_id": task_id, "by": actor})

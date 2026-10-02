@@ -43,11 +43,14 @@ import time
 from pathlib import Path
 from typing import Any, NamedTuple, Optional
 
+from . import fallback
+from . import runners as runner_registry
 from .common import (
     append_event,
     board_conn,
     executor_of,
     kb,
+    task_executor,
     kbc,
     logger,
     member_of,
@@ -68,7 +71,6 @@ MAX_TURNS = int(os.environ.get("HALO_TEAMS_RECLAUDE_MAX_TURNS", "150") or 150)
 MAX_PROGRESS_EVENTS = 400
 LAUNCH_GRACE = 90          # seconds for the run dir to appear after systemd-run
 INTERRUPT_RESUMES = 1      # a runner that died mid-run is resumed this many times per attempt
-QUOTA_BLOCKED_RETRY = 600
 _HOME = os.environ.get("HALO_TEAMS_RUNS_HOME", "/root/.hermes")
 _SCRIPTS = os.environ.get("HALO_TEAMS_RUNNER_SCRIPTS", "/root/.hermes/scripts")
 
@@ -85,20 +87,12 @@ class Runner(NamedTuple):
         return f"{self.name} 运行失败"
 
 
-def _runner(name: str, script: str, extra_args: tuple = (), answer_sets_id: bool = False) -> Runner:
-    env = name.upper()
-    root = os.environ.get(f"HALO_TEAMS_{env}_RUNS_ROOT") or os.path.join(_HOME, f"{name}-runs")
-    path = os.environ.get(f"HALO_TEAMS_{env}_RUNNER") or os.path.join(_SCRIPTS, script)
-    return Runner(name, Path(root), path, tuple(extra_args), answer_sets_id)
-
-
 _TURNS = ("--max-turns", str(MAX_TURNS))
+# One Runner per external runner in the registry (runners.SPECS): codex and agy take no
+# --max-turns, agy's `answer` is told the new run id.
 RUNNERS = {
-    "reclaude": _runner("reclaude", "reclaude-run.sh", _TURNS),
-    "cchclaude": _runner("cchclaude", "cchclaude-run.sh", _TURNS),
-    "anyclaude": _runner("anyclaude", "anyclaude-run.sh", _TURNS),
-    "codex": _runner("codex", "codex-run.sh"),            # codex exec has no turn cap
-    "agy": _runner("agy", "agy-run.sh", answer_sets_id=True),  # agy's answer takes --run-id, no --max-turns
+    spec.name: Runner(spec.name, spec.runs_root, spec.script_path, _TURNS if spec.max_turns else (), spec.answer_sets_id)
+    for spec in runner_registry.SPECS if not spec.native
 }
 assert tuple(RUNNERS) == RUNNER_EXECUTORS
 _ASSIGNEES_SQL = "(" + ",".join("'%s'" % name for name in RUNNERS) + ")"
@@ -285,22 +279,31 @@ def launch(rn: Runner, slug: str, conn: Any, team: dict, task_id: str, *, previo
     })
     ok, why = _launch(f"halo-team-{run_id}", argv)
     if not ok:
-        _fail(rn, conn, task_id, run_row, f"{rn.fail_prefix}：启动失败（{why or '未知原因'}）")
+        _fail(rn, conn, task_id, run_row, f"{rn.fail_prefix}：启动失败（{why or '未知原因'}）", fail_kind="missing",
+              slug=slug)
         return None
     append_event(conn, task_id, "halo_runner", {"phase": "launched", "runner": rn.name, "runner_run_id": run_id,
                                                  "text": f"{rn.name} 已启动（run {run_id}）"}, run_id=run_row)
     return run_id
 
 
-def _fail(rn: Runner, conn: Any, task_id: str, run_row: Optional[int], reason: str) -> None:
+def _fail(rn: Runner, conn: Any, task_id: str, run_row: Optional[int], reason: str, *, fail_kind: str = "",
+          slug: str = "") -> None:
+    """Close the attempt as failed. With *fail_kind* (the runner itself cannot work: missing /
+    auth / quota / network) the task then moves on to the next runner of its chain."""
     if run_row:
-        _set_run_meta(conn, run_row, {"runner_phase": "failed"})
-    append_event(conn, task_id, "halo_runner", {"phase": "failed", "runner": rn.name, "text": redact(reason, 600)},
+        _set_run_meta(conn, run_row, {"runner_phase": "failed", **({"fail_kind": fail_kind} if fail_kind else {})})
+    append_event(conn, task_id, "halo_runner", {"phase": "failed", "runner": rn.name, "text": redact(reason, 600),
+                                                 **({"fail_kind": fail_kind} if fail_kind else {})},
                  run_id=run_row)
     try:
         close_preserving(conn, run_row, lambda: kb().block_task(conn, task_id, reason=redact(reason, 400)))
     except Exception:
         logger.warning("halowebui-teams: could not block %s", task_id, exc_info=True)
+        return
+    if fail_kind and slug:
+        why = f"{runner_registry.FAIL_KINDS.get(fail_kind, fail_kind)}：{reason.split('：', 1)[-1]}"
+        fallback.reroute(slug, conn, task_id, rn.name, why, phase="runtime", fail_kind=fail_kind, run_row=run_row)
 
 
 # --- follow -------------------------------------------------------------------------------------
@@ -415,7 +418,8 @@ def follow(rn: Runner, slug: str, conn: Any, team: dict, task: Any) -> None:
         runner_run = live_id
     if not meta:
         if now() - int(rmeta.get("launched_at") or now()) > LAUNCH_GRACE:
-            _fail(rn, conn, task.id, run_row, f"{rn.fail_prefix}：run {runner_run} 没有生成运行目录")
+            _fail(rn, conn, task.id, run_row, f"{rn.fail_prefix}：run {runner_run} 没有生成运行目录", fail_kind="missing",
+                  slug=slug)
         else:
             kb().heartbeat_claim(conn, task.id, ttl_seconds=CLAIM_TTL, claimer=CLAIMER)
         return
@@ -436,6 +440,12 @@ def follow(rn: Runner, slug: str, conn: Any, team: dict, task: Any) -> None:
         status = "interrupted"
     if auto == "scheduled":
         kb().heartbeat_claim(conn, task.id, ttl_seconds=CLAIM_TTL, claimer=CLAIMER)
+        if _pid_alive(meta.get("auto_resume_pid")) and _wait_too_long(meta):
+            resume_at = str(meta.get("auto_resume_at") or "")
+            _stop_runner_run(rn, live_id, meta)
+            _fail(rn, conn, task.id, run_row, f"{rn.fail_prefix}：额度用完，要到 {resume_at or '很久以后'} 才能续跑",
+                  fail_kind="quota", slug=slug)
+            return
         if _pid_alive(meta.get("auto_resume_pid")):
             if rmeta.get("runner_phase") != "quota_wait":
                 resume_at = str(meta.get("auto_resume_at") or "")
@@ -449,17 +459,8 @@ def follow(rn: Runner, slug: str, conn: Any, team: dict, task: Any) -> None:
             return
         status = "interrupted"  # the waiting runner died (reboot): resume it ourselves below
     if status == "quota_blocked":
-        kb().heartbeat_claim(conn, task.id, ttl_seconds=CLAIM_TTL, claimer=CLAIMER)
-        if rmeta.get("runner_phase") != "quota_wait":
-            _set_run_meta(conn, run_row, {"runner_phase": "quota_wait", "quota_blocked_at": now()})
-            append_event(conn, task.id, "halo_runner", {
-                "phase": "quota_wait", "runner": rn.name, "runner_run_id": runner_run, "status": status,
-                "text": f"额度不足，{rn.name} 还没开始；额度恢复后会重新启动这个任务（不是失败）"}, run_id=run_row)
-        elif now() - int(rmeta.get("quota_blocked_at") or now()) > QUOTA_BLOCKED_RETRY:
-            try:
-                close_preserving(conn, run_row, lambda: kb().reclaim_task(conn, task.id, reason=f"{rn.name} 额度不足，稍后重新启动"))
-            except Exception:
-                pass
+        reason = redact(_final_answer(rn, runner_run) or "额度预检没有通过", 200)
+        _fail(rn, conn, task.id, run_row, f"{rn.fail_prefix}：额度不足，没有启动（{reason}）", fail_kind="quota", slug=slug)
         return
     delivered = list(rmeta.get("delivered_comment_ids") or [])
     if status == "success":
@@ -477,7 +478,7 @@ def follow(rn: Runner, slug: str, conn: Any, team: dict, task: Any) -> None:
         answer = _final_answer(rn, runner_run)
         summary = redact(answer, 1500, one_line=False)
         final = _set_run_meta(conn, run_row, {"runner_phase": "done"})
-        kb().complete_task(conn, task.id, result=redact(answer, 6000, one_line=False), summary=summary,
+        kb().complete_task(conn, task.id, result=redact(answer, 60000, one_line=False), summary=summary,
                            metadata=final)
         return
     if status == "question":
@@ -502,12 +503,38 @@ def follow(rn: Runner, slug: str, conn: Any, team: dict, task: Any) -> None:
     if status == "stopped":
         _fail(rn, conn, task.id, run_row, f"{rn.fail_prefix}：{rn.name} 运行 {runner_run} 被停止")
         return
+    if status in ("error", "no_result"):
+        text = runner_registry.run_failure_text(runner_registry.BY_NAME[rn.name], rn.runs_root / runner_run)
+        kind = runner_registry.classify_failure(text, meta.get("failure_kind"), status)
+        if kind:
+            _fail(rn, conn, task.id, run_row,
+                  f"{rn.fail_prefix}：{runner_registry.FAIL_KINDS[kind]}（{redact(text, 200) or status}）",
+                  fail_kind=kind, slug=slug)
+            return
     if status == "interrupted" and int(rmeta.get("interrupt_resumes") or 0) < INTERRUPT_RESUMES and meta.get("session_id"):
         if _answer(rn, conn, task.id, run_row, rmeta, runner_run,
                    "你上一轮被打断了（runner 进程意外退出或本机重启）。请检查已完成的部分，接着把任务做完。", "resume"):
             _set_run_meta(conn, run_row, {"interrupt_resumes": int(rmeta.get("interrupt_resumes") or 0) + 1})
             return
     _fail(rn, conn, task.id, run_row, f"{rn.fail_prefix}：run {runner_run} 状态 {status or '未知'}")
+
+
+def _wait_too_long(meta: dict) -> bool:
+    """A quota wait that ends later than the allowed wait moves the task to the next runner."""
+    resume = runner_registry._iso_or_text_ts(meta.get("auto_resume_at"))
+    if resume is None:
+        return False
+    return resume - time.time() > runner_registry.quota_wait_max()
+
+
+def _stop_runner_run(rn: Runner, run_id: str, meta: dict) -> None:
+    try:
+        from gateway.runner_dispatch import stop_run
+
+        asyncio.run(stop_run({**meta, "run_id": run_id, "_agent": rn.name, "_dir": str(rn.runs_root / run_id)},
+                             stopped_by="HaloWebUI 协作台（改用下一个执行来源）"))
+    except Exception:
+        logger.warning("halowebui-teams: stop %s failed", run_id, exc_info=True)
 
 
 # --- board tick / stop --------------------------------------------------------------------------
@@ -530,6 +557,12 @@ def tick_board(slug: str, team: dict) -> None:
     if not ready:
         return
     for task_id, assignee in ready:
+        info = runner_registry.check([assignee]).get(assignee) or {}
+        if not info.get("available"):
+            with board_conn(slug) as conn:
+                fallback.reroute(slug, conn, task_id, assignee, info.get("reason") or f"{assignee} 不可用",
+                                 phase="launch")
+            continue
         if _running_count(assignee) >= MAX_CONCURRENT:
             continue
         cap = _host_cap()
@@ -578,4 +611,4 @@ def stop_task(slug: str, conn: Any, task_id: str) -> bool:
 
 def member_label(team: dict, task_id: str) -> str:
     member = member_of(team, task_id)
-    return f"{task_key(team, task_id)} {member}（{executor_of(team, member)}）"
+    return f"{task_key(team, task_id)} {member}（{task_executor(team, task_id)}）"

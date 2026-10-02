@@ -190,7 +190,19 @@ def task_key(team: Optional[dict], task_id: str) -> str:
 
 
 def executor_of(team: Optional[dict], member: str) -> str:
+    """The runner a member's tasks start on (its chosen runner; a task may have fallen back)."""
     for entry in (team or {}).get("members") or []:
         if entry.get("name") == member:
-            return str(entry.get("executor") or "hermes")
+            return str(entry.get("runner") or entry.get("executor") or "hermes")
     return "hermes"
+
+
+def task_executor(team: Optional[dict], task_id: str, assignee: Optional[str] = None) -> str:
+    """Who runs *task_id* now: its Kanban assignee when known (the authority after a fallback),
+    else the team record's per-task executor, else its member's."""
+    if assignee:
+        return ASSIGNEE_EXECUTOR.get(assignee, "hermes")
+    entry = ((team or {}).get("tasks") or {}).get(task_id) or {}
+    if entry.get("executor") in EXECUTORS:
+        return str(entry["executor"])
+    return executor_of(team, member_of(team, task_id))

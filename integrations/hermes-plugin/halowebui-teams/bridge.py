@@ -17,7 +17,7 @@ import os
 import threading
 import time
 
-from .common import board_conn, logger, read_team, team_boards
+from .common import board_conn, logger, now, read_team, team_boards
 
 INTERVAL = float(os.environ.get("HALO_TEAMS_BRIDGE_INTERVAL", "8") or 8)
 _started = {"thread": None}
@@ -53,8 +53,37 @@ def tick() -> None:
                 logger.warning("halowebui-teams: runner tick failed for %s", slug, exc_info=True)
             if _active(slug) and _has_ready_native(slug):
                 nudge_dispatch(slug)
+            _catch_up_conclusion(slug, team)
         except Exception:
             logger.warning("halowebui-teams: bridge tick failed for %s", slug, exc_info=True)
+
+
+CONCLUSION_CATCH_UP = 6 * 3600
+
+
+def _catch_up_conclusion(slug: str, team: dict) -> None:
+    """A team that finished while no snapshot was read, or whose report was being written when
+    the gateway restarted, still gets its conclusion (recent teams only: older ones on request)."""
+    if team.get("state") == "running" and team.get("tasks"):
+        ids = list(team["tasks"])
+        with board_conn(slug) as conn:
+            open_tasks = conn.execute(
+                f"SELECT COUNT(*) FROM tasks WHERE id IN ({','.join('?' * len(ids))}) AND status NOT IN ('done','archived')",
+                ids).fetchone()[0]
+        if open_tasks == 0:
+            from .teams import snapshot
+
+            snapshot(team["team_id"])  # marks the team completed and starts its conclusion
+        return
+    if team.get("state") != "completed":
+        return
+    entry = team.get("conclusion") or {}
+    from . import conclusion
+
+    if entry.get("status") == "generating" and now() - int(entry.get("started_at") or 0) > conclusion.STALE_GENERATING:
+        conclusion.start(slug, by="auto")
+    elif not entry and now() - int(team.get("completed_at") or 0) < CONCLUSION_CATCH_UP:
+        conclusion.start(slug, by="auto")
 
 
 def _loop() -> None:

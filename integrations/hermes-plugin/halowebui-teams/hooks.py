@@ -88,7 +88,7 @@ def _check_delivery() -> None:
     except Exception:
         return
     mark = (getattr(kanban_tools, "_comment_watermark", None) or {}).get(task)
-    if not mark:
+    if mark is None:  # 0 is a real watermark: the first poll saw no comments yet
         return
     with _state_lock:
         previous = _state["delivered_upto"]

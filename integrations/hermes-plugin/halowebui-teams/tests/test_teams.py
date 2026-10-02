@@ -350,3 +350,28 @@ def test_note_read_through_kanban_show_counts_as_delivered(pkg, team_id, plan_di
     note = next(ev for ev in events if ev["type"] == "message")
     assert note["data"]["delivered_via"] == "task_read"
     assert sum(1 for ev in events if ev["type"] == "delivery") == 1
+
+
+def test_note_steered_after_an_empty_first_poll_is_delivered(pkg, team_id, plan_dict, monkeypatch):
+    """E2E-9: the worker's first comment poll found no comments (watermark 0); the note came later
+    and was steered in. 0 must count as a seen watermark."""
+    first = _create(pkg, team_id, plan_dict)
+    kb = _kb()
+    slug = pkg.common.board_slug(team_id)
+    t1 = first["tasks"]["T1"]
+    with pkg.common.board_conn(slug) as conn:
+        kb.claim_task(conn, t1, claimer="w1")
+    from tools import kanban_tools
+
+    monkeypatch.setenv("HERMES_KANBAN_BOARD", slug)
+    monkeypatch.setenv("HERMES_KANBAN_TASK", t1)
+    monkeypatch.setenv("HERMES_PROFILE", "default")
+    pkg.hooks._state.update({"tool_events": 0, "truncated": False, "delivered_upto": None, "read_upto": 0,
+                             "reported": set()})
+    kanban_tools._comment_watermark[t1] = 0
+    pkg.hooks.on_post_tool_call(tool_name="terminal", args={"command": "sleep 50"})
+    out = pkg.teams.post_message(team_id, t1, "加第二行：收到", author_name="Ace", owner="u1")
+    kanban_tools._comment_watermark[t1] = out["comment_id"]
+    pkg.hooks.on_post_tool_call(tool_name="write_file", args={"path": "a.md"})
+    note = next(ev for ev in pkg.teams.timeline(team_id, "u1")["events"] if ev["type"] == "message")
+    assert note["data"]["delivered_via"] == "steer"

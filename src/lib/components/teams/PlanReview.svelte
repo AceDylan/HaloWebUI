@@ -74,7 +74,8 @@
 						<label class="shrink-0 text-xs">
 							<span class="sr-only">{member.name} 的执行来源</span>
 							<select
-								class="rounded-lg border border-gray-200 bg-white px-1.5 py-1 text-xs dark:border-gray-700 dark:bg-gray-900 disabled:opacity-60"
+								class="max-w-[9rem] truncate rounded-lg border border-gray-200 bg-white px-1.5 py-1 text-xs dark:border-gray-700 dark:bg-gray-900 disabled:opacity-60"
+								title="执行来源：Hermes 代理，或聊天里 /reclaude、/codex … 用的同一套 runner"
 								value={member.executor}
 								disabled={!editable || busy}
 								on:change={(e) =>

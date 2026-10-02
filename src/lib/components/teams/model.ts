@@ -325,11 +325,11 @@ export const formatDuration = (seconds: number) => {
 /** Who can run a member, as offered when reviewing a plan (the runners are the ones `/reclaude`, `/codex` … start). */
 export const EXECUTOR_OPTIONS: { value: TeamExecutor; label: string }[] = [
 	{ value: 'hermes', label: 'Hermes 代理' },
-	{ value: 'reclaude', label: 'reclaude（Claude Code）' },
-	{ value: 'cchclaude', label: 'cchclaude（Claude Code · cch）' },
-	{ value: 'anyclaude', label: 'anyclaude（Claude Code · 免费较慢）' },
-	{ value: 'codex', label: 'codex（Codex）' },
-	{ value: 'agy', label: 'agy（Antigravity）' }
+	{ value: 'reclaude', label: 'reclaude · Claude' },
+	{ value: 'cchclaude', label: 'cchclaude · Claude' },
+	{ value: 'anyclaude', label: 'anyclaude · 慢' },
+	{ value: 'codex', label: 'codex' },
+	{ value: 'agy', label: 'agy' }
 ];
 
 export const EXECUTOR_LABEL: Record<string, string> = Object.fromEntries(

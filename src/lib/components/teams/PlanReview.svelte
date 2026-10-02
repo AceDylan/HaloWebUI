@@ -157,10 +157,13 @@
 							<TeamAvatar kind={avatarKind(member)} size={38} />
 							<div class="min-w-0 flex-1">
 								<div class="flex min-w-0 items-baseline gap-1.5">
-									<span class="truncate text-sm font-semibold text-gray-900 dark:text-gray-100"
-										>{member.name}</span
+									<span
+										class="max-w-[70%] shrink-0 truncate text-sm font-semibold text-gray-900 dark:text-gray-100"
+										title={member.name}>{member.name}</span
 									>
-									<span class="shrink-0 text-xs text-gray-500">{member.role}</span>
+									<span class="min-w-0 truncate text-xs text-gray-500" title={member.role}
+										>{member.role}</span
+									>
 								</div>
 								<div class="mt-1 flex flex-wrap gap-1.5 text-[11px]">
 									{#if member.assistant}
@@ -236,24 +239,24 @@
 								{/if}
 							</div>
 							{#if d.actual === null}
-								<p
+								<div
 									class="mt-1.5 text-[11px] leading-relaxed text-red-700 dark:text-red-300"
 									role="alert"
 								>
 									{runnerLabel(d.chosen)} 之后的执行来源都不可用：{d.reason}
-								</p>
+								</div>
 							{:else if d.changed}
-								<p
+								<div
 									class="mt-1.5 text-[11px] leading-relaxed text-amber-800 dark:text-amber-200"
 									data-runner-fallback
 								>
 									实际将由 <b class="font-mono">{runnerLabel(d.actual)}</b> 执行 · {d.reason ||
 										`${runnerLabel(d.chosen)} 现在不可用`}
-								</p>
+								</div>
 							{:else if runnersBy.get(d.chosen)?.available}
-								<p class="mt-1.5 text-[11px] text-emerald-700 dark:text-emerald-300">
+								<div class="mt-1.5 text-[11px] text-emerald-700 dark:text-emerald-300">
 									{runnerLabel(d.chosen)} 可用
-								</p>
+								</div>
 							{/if}
 						</div>
 					</li>

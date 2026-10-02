@@ -353,7 +353,9 @@
 				aria-label="切换侧栏"><MenuLines /></button
 			>
 		</div>
-		<a href="/teams" class="text-sm text-gray-500 hover:text-gray-900 dark:hover:text-gray-100"
+		<a
+			href="/teams"
+			class="shrink-0 whitespace-nowrap text-sm text-gray-500 hover:text-gray-900 dark:hover:text-gray-100"
 			>协作台</a
 		>
 		<span class="text-gray-300 dark:text-gray-700">/</span>

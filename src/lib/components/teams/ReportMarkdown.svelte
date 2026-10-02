@@ -104,11 +104,6 @@
 		border-radius: 0.75rem;
 		margin: 0.75em 0;
 	}
-	.team-report :global(table) {
-		display: block;
-		max-width: 100%;
-		overflow-x: auto;
-	}
 	.team-report :global(pre) {
 		max-width: 100%;
 	}

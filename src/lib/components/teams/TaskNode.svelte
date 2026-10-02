@@ -52,6 +52,7 @@
 				chosen={data?.runner?.chosen}
 				actual={data?.executor}
 				reason={data?.runner?.reason}
+				compact
 			/></span
 		>
 		{#if data?.waitingFor?.length}

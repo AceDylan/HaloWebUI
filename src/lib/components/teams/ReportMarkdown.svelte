@@ -89,6 +89,11 @@
 		border-radius: 0 0.75rem 0.75rem 0;
 		background: rgb(0 0 0 / 0.025);
 	}
+	/* A report quotes its one-line verdict; the typography plugin's curly quotes add nothing. */
+	.team-report :global(blockquote p::before),
+	.team-report :global(blockquote p::after) {
+		content: none;
+	}
 	:global(.dark) .team-report :global(blockquote) {
 		background: rgb(255 255 255 / 0.035);
 	}

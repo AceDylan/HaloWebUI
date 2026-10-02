@@ -36,7 +36,7 @@
 >
 	<div
 		role="listitem"
-		class="flex items-center gap-2.5 rounded-2xl border border-indigo-200/70 bg-indigo-50/60 px-3 py-2 dark:border-indigo-900/60 dark:bg-indigo-950/30 {layout ===
+		class="flex items-center gap-2.5 rounded-2xl border border-indigo-100 bg-indigo-50/40 px-3 py-2 dark:border-indigo-900/50 dark:bg-indigo-950/20 {layout ===
 		'row'
 			? 'min-w-[200px] shrink-0'
 			: ''}"

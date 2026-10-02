@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { fly } from 'svelte/transition';
+
 	import { runnerLabel } from './model';
 
 	/** Who does the work: "codex", or "cchclaude → anyclaude" when it fell back (with why). */
@@ -6,6 +8,8 @@
 	export let actual: string | null | undefined;
 	export let reason = '';
 	export let size: 'xs' | 'sm' = 'xs';
+	/** Tight spots (board cards): the actual runner with a fallback mark; details in the title. */
+	export let compact = false;
 
 	$: moved = !!chosen && chosen !== actual;
 	$: title = moved
@@ -24,7 +28,18 @@
 	data-runner={actual ?? ''}
 	data-runner-chosen={chosen ?? ''}
 >
-	{#if moved}
+	{#if moved && compact}
+		<svg class="size-3 shrink-0 opacity-80" viewBox="0 0 16 16" fill="none" aria-hidden="true"
+			><path
+				d="M4 3v5.5A2.5 2.5 0 0 0 6.5 11H12m-2.5-2.5L12 11l-2.5 2.5"
+				stroke="currentColor"
+				stroke-width="1.6"
+				stroke-linecap="round"
+				stroke-linejoin="round"
+			/></svg
+		>
+		<span class="sr-only">由 {runnerLabel(chosen)} 改为</span>
+	{:else if moved}
 		<span class="truncate line-through decoration-amber-500/50 opacity-60"
 			>{runnerLabel(chosen)}</span
 		>
@@ -39,5 +54,10 @@
 		>
 		<span class="sr-only">改为</span>
 	{/if}
-	<span class="truncate">{actual ? runnerLabel(actual) : '无可用'}</span>
+	{#key actual}
+		<!-- a fallback swaps the runner in place: let the change be seen -->
+		<span class="truncate" in:fly={{ y: 4, duration: 220 }}
+			>{actual ? runnerLabel(actual) : '无可用'}</span
+		>
+	{/key}
 </span>

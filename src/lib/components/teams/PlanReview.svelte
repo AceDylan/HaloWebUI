@@ -133,7 +133,7 @@
 			<h3 class="mb-3 text-sm font-semibold text-gray-900 dark:text-gray-100">成员分工</h3>
 			<ul class="grid gap-3 md:grid-cols-2">
 				<li
-					class="flex items-center gap-3 rounded-2xl border border-indigo-200/70 bg-indigo-50/50 p-3 dark:border-indigo-900/60 dark:bg-indigo-950/25"
+					class="flex items-center gap-3 self-start rounded-2xl border border-indigo-100 bg-indigo-50/40 px-3 py-2.5 md:col-span-2 dark:border-indigo-900/50 dark:bg-indigo-950/20"
 				>
 					<TeamAvatar kind="lead" size={38} />
 					<div class="min-w-0">
@@ -201,7 +201,7 @@
 								>
 								<select
 									id="runner-{member.name}"
-									class="min-w-0 max-w-[13rem] flex-1 truncate rounded-lg border border-gray-200 bg-white py-1 pl-2 pr-7 text-xs text-gray-900 transition focus:border-sky-400 focus:outline-none disabled:opacity-60 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+									class="min-w-0 max-w-[16rem] flex-1 truncate rounded-lg border border-gray-200 bg-white py-1 pl-2 pr-7 text-xs text-gray-900 transition focus:border-sky-400 focus:outline-none disabled:opacity-60 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
 									value={member.executor}
 									disabled={!editable || busy}
 									on:change={(e) =>
@@ -329,7 +329,7 @@
 
 		{#if editable}
 			<div
-				class="sticky bottom-0 -mx-1 flex flex-col gap-2 border-t border-gray-100 bg-white/95 px-1 pb-1 pt-3 backdrop-blur dark:border-gray-850 dark:bg-gray-900/95"
+				class="sticky -bottom-6 -mx-1 flex flex-col gap-2 border-t border-gray-100 bg-white/95 px-1 pb-7 pt-3 backdrop-blur dark:border-gray-850 dark:bg-gray-900/95"
 			>
 				<p class="text-xs text-gray-500">
 					批准后成员才开始工作（普通聊天不会自动启动多代理）。每个成员会消耗模型额度；可以随时暂停派发或停止。

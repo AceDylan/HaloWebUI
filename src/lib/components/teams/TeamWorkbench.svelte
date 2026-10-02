@@ -31,6 +31,7 @@
 	import ReplayBar from './ReplayBar.svelte';
 	import StatusChip from './StatusChip.svelte';
 	import TeamBoard from './TeamBoard.svelte';
+	import TeamProgress from './TeamProgress.svelte';
 	import {
 		countStates,
 		foldStates,
@@ -218,7 +219,10 @@
 		const settled =
 			team && ['plan_ready', 'plan_failed', 'cancelled', 'start_failed'].includes(team.status);
 		if (finished) finishedFetches += 1;
-		if (settled || (finished && finishedFetches > 2)) return; // nothing more will happen on its own
+		// Nothing more happens on its own once finished — except the lead's conclusion being written.
+		const conclusionPending =
+			phase === 'completed' && !['ready', 'failed'].includes(live?.team.conclusion?.status ?? '');
+		if (settled || (finished && finishedFetches > 2 && !conclusionPending)) return;
 		schedule();
 	};
 
@@ -506,35 +510,7 @@
 			</div>
 		{:else}
 			<div class="flex flex-col gap-3 pt-1">
-				<div
-					class="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-gray-500"
-					aria-label="进度"
-				>
-					<span
-						>完成 <b class="text-gray-900 dark:text-gray-100 tabular-nums">{counts.done}</b
-						>/{counts.total}</span
-					>
-					<span
-						>执行中 <b class="text-sky-700 dark:text-sky-300 tabular-nums">{counts.running}</b
-						></span
-					>
-					<span>等待 <b class="tabular-nums">{counts.waiting}</b></span>
-					{#if counts.attention}<span
-							>需处理 <b class="text-red-600 tabular-nums">{counts.attention}</b></span
-						>{/if}
-					{#if fallbacks}<span
-							class="text-amber-700 dark:text-amber-300"
-							title="有任务因为默认执行来源不可用而改由下一个执行"
-							>兜底改派 <b class="tabular-nums">{fallbacks}</b></span
-						>{/if}
-					{#if leadModel}<span
-							>负责人模型 <span class="font-mono text-gray-700 dark:text-gray-300">{leadModel}</span
-							></span
-						>{/if}
-					{#if live?.team.workspace}<span class="truncate"
-							>工作目录 <span class="font-mono">{live.team.workspace}</span></span
-						>{/if}
-				</div>
+				<TeamProgress {counts} {fallbacks} {leadModel} workspace={live?.team.workspace ?? ''} />
 
 				{#if liveError}
 					<div

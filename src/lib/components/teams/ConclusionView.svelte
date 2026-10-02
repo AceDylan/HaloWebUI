@@ -274,8 +274,7 @@
 				>
 					{#if entry.model}<span class="font-mono text-gray-700 dark:text-gray-300"
 							>{entry.model}</span
-						>{#if entry.model_label}<span class="text-gray-400">
-								· {entry.model_label}</span
+						>{#if entry.model_label}<span class="text-gray-400">{' · '}{entry.model_label}</span
 							>{/if}{/if}
 					{#if entry.generated_at}
 						· {formatStamp(entry.generated_at)}{/if}

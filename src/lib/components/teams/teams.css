@@ -390,6 +390,48 @@
 	scrollbar-color: hsl(var(--tm-line-strong)) transparent;
 }
 
+/* A sideways-scrolling row fades at an edge that has more behind it (scroll-driven, so the fade
+   follows the scroll position; a row that fits, or a browser without scroll timelines, gets none). */
+@property --tm-fade-l {
+	syntax: '<length>';
+	inherits: false;
+	initial-value: 0px;
+}
+@property --tm-fade-r {
+	syntax: '<length>';
+	inherits: false;
+	initial-value: 0px;
+}
+@supports (animation-timeline: scroll()) {
+	.tm-fade-x {
+		mask-image: linear-gradient(
+			90deg,
+			transparent,
+			#000 var(--tm-fade-l),
+			#000 calc(100% - var(--tm-fade-r)),
+			transparent
+		);
+		animation: tm-fade-x linear both;
+		animation-timeline: scroll(self inline);
+	}
+}
+@keyframes tm-fade-x {
+	0% {
+		--tm-fade-l: 0px;
+		--tm-fade-r: 32px;
+	}
+	6% {
+		--tm-fade-l: 24px;
+	}
+	94% {
+		--tm-fade-r: 32px;
+	}
+	100% {
+		--tm-fade-l: 24px;
+		--tm-fade-r: 0px;
+	}
+}
+
 @media (prefers-reduced-motion: reduce) {
 	.tm-live::before,
 	.tm-shimmer,

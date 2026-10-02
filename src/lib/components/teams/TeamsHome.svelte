@@ -301,7 +301,7 @@
 					<div class="px-5 pb-1 text-xs text-sky-700 dark:text-sky-300">会关联到你刚才的对话</div>
 				{/if}
 				<div class="flex items-center gap-2 px-3 pt-1 pb-3">
-					<div class="tm-scroll flex min-w-0 flex-1 items-center gap-2 overflow-x-auto">
+					<div class="tm-scroll tm-fade-x flex min-w-0 flex-1 items-center gap-2 overflow-x-auto">
 						<label
 							class="pill flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full py-1 pr-1 pl-2.5 text-xs"
 							data-lead-model
@@ -544,7 +544,7 @@
 					</label>
 				</div>
 				{#if teams.length}
-					<div class="tm-scroll mb-3 overflow-x-auto pb-1">
+					<div class="tm-scroll tm-fade-x mb-3 overflow-x-auto pb-1">
 						<div class="tm-segment" role="tablist" aria-label="按状态筛选">
 							{#each FILTERS as f}
 								<button

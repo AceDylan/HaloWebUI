@@ -116,10 +116,15 @@ def reselect_for_retry(slug: str, conn: Any, task_id: str) -> Optional[str]:
     target = picked["executor"]
     if target is None or target == current:
         return current
-    _record(slug, task_id, {"from": current, "to": target, "reason": "重试时重新按首选执行来源选择",
-                            "at": now(), "phase": "retry"}, target)
+    if target == chosen:
+        reason = f"首选的 {chosen} 已恢复"
+        text = f"重试：{chosen} 已恢复，改回由 {chosen} 执行"
+    else:
+        reason = runners.fallback_reason(picked) or f"{chosen} 不可用"
+        text = f"重试：{reason}，改由 {target} 执行"
+    _record(slug, task_id, {"from": current, "to": target, "reason": redact(reason, 300), "at": now(), "phase": "retry"},
+            target)
     _assign(conn, task_id, target)
     append_event(conn, task_id, "halo_runner", {
-        "phase": "fallback", "runner": current, "to": target, "reason": "重试",
-        "text": f"重试：首选的 {chosen} 链上 {target} 现在可用，改由 {target} 执行"})
+        "phase": "fallback", "runner": current, "to": target, "reason": redact(reason, 300), "text": redact(text, 600)})
     return target

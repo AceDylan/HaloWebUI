@@ -121,6 +121,7 @@ DEFAULT_KIND = "code"
 FAIL_KINDS = {
     "missing": "命令或脚本不存在",
     "auth": "登录 / 密钥失效",
+    "account": "账号或所在地区不可用",
     "quota": "额度或限流",
     "network": "网络或上游服务不可用",
 }
@@ -130,6 +131,9 @@ FAIL_KINDS = {
 _FAIL_PATTERNS: tuple[tuple[str, re.Pattern], ...] = (
     ("missing", re.compile(r"No such file or directory|command not found|could not start|not found in PATH|"
                            r"Exec format error|Permission denied \(.*exec", re.I)),
+    ("account", re.compile(r"location is not supported|not (available|supported) in your (country|region|location)|"
+                           r"unsupported[_ ](country|region|location)|FAILED_PRECONDITION|PERMISSION_DENIED|"
+                           r"account.{0,20}(disabled|suspended|banned|deactivated)", re.I)),
     ("auth", re.compile(r"\b401\b|\b403\b|unauthori[sz]ed|invalid[ _-]?api[ _-]?key|authentication|"
                         r"not logged in|please (run )?.{0,12}login|token (has )?expired|API 密钥无效|"
                         r"设备.{0,6}解绑|账号.{0,8}(停用|不可用)", re.I)),
@@ -437,15 +441,26 @@ def _check_one(spec: RunnerSpec, now: float) -> dict:
 
 
 _cache: dict[str, dict] = {}
+_cache_overrides: dict[str, Any] = {}  # override-file mtime each cached result was computed with
 _cache_lock = threading.Lock()
 
 
-def check(names: Optional[list[str]] = None, *, force: bool = False) -> dict[str, dict]:
-    """Availability of *names* (all runners by default), cached for CACHE_SECONDS."""
+def _override_mtime() -> Optional[float]:
+    try:
+        return OVERRIDE_FILE.stat().st_mtime
+    except OSError:
+        return None
+
+
+def check_live(names: Optional[list[str]] = None, *, force: bool = False) -> dict[str, dict]:
+    """Availability of *names* (all runners by default), cached for CACHE_SECONDS — and
+    recomputed at once when the override file changed (marking a runner down takes effect now)."""
     wanted = [n for n in (names or NAMES) if n in BY_NAME]
     now = time.time()
+    ov = _override_mtime()
     with _cache_lock:
-        stale = [n for n in wanted if force or n not in _cache or now - _cache[n]["checked_at"] > CACHE_SECONDS]
+        stale = [n for n in wanted if force or n not in _cache or now - _cache[n]["checked_at"] > CACHE_SECONDS
+                 or _cache_overrides.get(n, "unset") != ov]
     if stale:
         def one(name: str) -> dict:
             try:
@@ -461,8 +476,12 @@ def check(names: Optional[list[str]] = None, *, force: bool = False) -> dict[str
         with _cache_lock:
             for result in results:
                 _cache[result["name"]] = result
+                _cache_overrides[result["name"]] = ov
     with _cache_lock:
         return {n: dict(_cache[n]) for n in wanted}
+
+
+check = check_live  # the name everything calls (tests replace it with a fake)
 
 
 def mark_down(name: str, state: str, reason: str) -> None:
@@ -470,6 +489,7 @@ def mark_down(name: str, state: str, reason: str) -> None:
     if name not in BY_NAME or BY_NAME[name].native:
         return
     with _cache_lock:
+        _cache_overrides[name] = _override_mtime()
         _cache[name] = {"name": name, "label": BY_NAME[name].label, "engine": BY_NAME[name].engine,
                         "note": BY_NAME[name].note, "native": False, "available": False, "state": state,
                         "reason": reason, "resume_at": None, "checked_at": int(time.time()), "layers": []}

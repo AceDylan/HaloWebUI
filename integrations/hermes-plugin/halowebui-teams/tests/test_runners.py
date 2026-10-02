@@ -105,10 +105,25 @@ def test_failures_are_classified_only_when_the_runner_itself_is_down(pkg):
     assert c("API Error: 401 Unauthorized") == "auth"
     assert c("You've hit your usage limit · resets 5pm") == "quota"
     assert c("connect ECONNREFUSED 127.0.0.1:443") == "network"
+    assert c("error: FAILED_PRECONDITION (code 400): User location is not supported for the API use.") == "account"
     assert c("", "quota_window") == "quota" and c("", "device_unbound") == "auth"
     assert c("", None, "quota_blocked") == "quota"
     assert c("测试没有通过：test_login 断言失败") is None
     assert c("x" * 700 + " quota 401") is None  # only the head of the text counts
+
+
+def test_agy_region_failure_in_stderr_marks_it_down(pkg, tmp_path, monkeypatch):
+    """agy writes an empty error and the reason only to stderr (seen live 2026-10-02)."""
+    r = pkg.runners
+    monkeypatch.setenv("HALO_TEAMS_AGY_RUNS_ROOT", str(tmp_path))
+    run = tmp_path / "20261002-120849-444d98dd"
+    run.mkdir()
+    (run / "meta.json").write_text(json.dumps({"status": "error", "ended_at": "2026-10-02T04:08:52.704917+00:00"}))
+    (run / "result.json").write_text(json.dumps({"status": "error", "response": "", "error": "", "agy_exit_code": 3}))
+    (run / "stderr.log").write_text("error: FAILED_PRECONDITION (code 400): User location is not supported for the API use.\n")
+    now = r._iso_or_text_ts("2026-10-02T04:10:00+00:00")
+    found = r._recent_failure(r.BY_NAME["agy"], now)
+    assert found and found[0] == "account" and "地区" in found[1]
 
 
 def test_recent_quota_failure_marks_a_runner_down(pkg, tmp_path, monkeypatch):
@@ -382,3 +397,22 @@ def test_retry_goes_back_to_the_chosen_runner_when_it_is_back(pkg, availability,
     pkg.teams.retry(t.team_id, t.tasks["T1"], owner="u1")
     assert t.task().assignee == "cchclaude" and t.task().status == "ready"
     assert t.snap()["trail"][-1]["phase"] == "retry"
+
+
+def test_cache_follows_the_override_file(pkg, override, monkeypatch):
+    r = pkg.runners
+    r.forget()
+    calls = []
+
+    def fake_one(spec, now):
+        calls.append(spec.name)
+        down = (r.overrides().get("unavailable") or {}).get(spec.name)
+        return {"name": spec.name, "label": spec.label, "available": not down, "state": "manual" if down else "ok",
+                "reason": down or "可用", "checked_at": int(now), "layers": []}
+
+    monkeypatch.setattr(r, "_check_one", fake_one)
+    assert r.check_live(["cchclaude"])["cchclaude"]["available"] and calls == ["cchclaude"]
+    assert r.check_live(["cchclaude"])["cchclaude"]["available"] and calls == ["cchclaude"]  # cached
+    override({"unavailable": {"cchclaude": "维护中"}})
+    assert not r.check_live(["cchclaude"])["cchclaude"]["available"] and calls == ["cchclaude", "cchclaude"]
+    r.forget()

@@ -107,4 +107,15 @@
 	.team-report :global(pre) {
 		max-width: 100%;
 	}
+	/* `overflow-wrap: anywhere` (and the cell's own `break-normal` wrapper) let a table squeeze a
+	   short column to one character a line ("已完 / 成"). Cells break Chinese only at punctuation
+	   or spaces; an overlong run still breaks once it overflows, and tables scroll. */
+	.team-report :global(th) {
+		white-space: nowrap;
+	}
+	.team-report :global(td),
+	.team-report :global(td > div) {
+		word-break: keep-all;
+		overflow-wrap: break-word;
+	}
 </style>

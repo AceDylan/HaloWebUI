@@ -372,6 +372,14 @@
 		selectedMember = name;
 		if (name) selectedTask = null;
 	};
+	// Esc closes the task / member details (not while typing a note).
+	const onKey = (e: KeyboardEvent) => {
+		if (e.key !== 'Escape' || !(selectedTask || selectedMember)) return;
+		const el = e.target as HTMLElement | null;
+		if (el && (el.tagName === 'TEXTAREA' || el.tagName === 'INPUT' || el.isContentEditable)) return;
+		selectedTask = null;
+		selectedMember = null;
+	};
 	const seek = (index: number | null) => {
 		replayIndex = index === null ? null : Math.max(0, Math.min(index, events.length - 1));
 	};
@@ -380,6 +388,7 @@
 <svelte:head>
 	<title>{pageTitle} · 协作台 | {$WEBUI_NAME}</title>
 </svelte:head>
+<svelte:window on:keydown={onKey} />
 
 <div
 	class="relative flex h-screen max-h-[100dvh] w-full max-w-full flex-col"

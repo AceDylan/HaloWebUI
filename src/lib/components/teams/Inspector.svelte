@@ -190,7 +190,9 @@
 					{#if task.attempts > 0}<span class="text-xs text-gray-400">{task.attempts} 次执行</span
 						>{/if}
 				</div>
-				<h3 class="mt-1 font-semibold text-gray-900 dark:text-gray-100 break-words">
+				<h3
+					class="tm-display mt-1 break-words text-[15px] font-semibold text-gray-900 dark:text-gray-50"
+				>
 					{task.title}
 				</h3>
 			{:else if member}
@@ -207,15 +209,24 @@
 		</div>
 		<button
 			type="button"
-			class="rounded-lg p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-gray-850 dark:hover:text-gray-200"
+			class="grid size-7 place-items-center rounded-lg text-gray-400 transition hover:bg-gray-500/10 hover:text-gray-700 dark:hover:text-gray-200"
 			aria-label="关闭详情"
-			on:click={() => dispatch('close')}>✕</button
+			title="关闭（Esc）"
+			on:click={() => dispatch('close')}
+			><svg class="size-3.5" viewBox="0 0 16 16" fill="none" aria-hidden="true"
+				><path
+					d="m4 4 8 8M12 4l-8 8"
+					stroke="currentColor"
+					stroke-width="1.6"
+					stroke-linecap="round"
+				/></svg
+			></button
 		>
 	</div>
 
 	{#if replay}
 		<div
-			class="rounded-xl bg-sky-50 px-3 py-2 text-xs text-sky-800 dark:bg-sky-950/40 dark:text-sky-200"
+			class="rounded-xl border border-sky-500/20 bg-sky-500/[0.07] px-3 py-2 text-xs text-sky-800 dark:text-sky-200"
 		>
 			回放中：这里只显示到当前时点的记录，发送说明、重试等操作已停用。回到实时后可以操作。
 		</div>
@@ -233,10 +244,7 @@
 			</div>
 		{/if}
 		{#if decision}
-			<div
-				class="rounded-xl border border-gray-100 px-3 py-2 text-xs dark:border-gray-850"
-				data-task-runner
-			>
+			<div class="rounded-xl border tm-hairline px-3 py-2 text-xs" data-task-runner>
 				<div class="flex flex-wrap items-center gap-x-2 gap-y-1">
 					<span class="text-gray-500">执行来源</span>
 					<RunnerBadge
@@ -255,10 +263,7 @@
 					</div>
 				{/if}
 				{#if trail.length}
-					<ol
-						class="mt-1.5 space-y-0.5 border-t border-gray-100 pt-1.5 dark:border-gray-850"
-						aria-label="改派记录"
-					>
+					<ol class="mt-1.5 space-y-0.5 border-t tm-hairline pt-1.5" aria-label="改派记录">
 						{#each trail as step}
 							<li class="flex gap-1.5 text-gray-500">
 								<time class="shrink-0 font-mono text-gray-400">{formatClock(step.at)}</time>
@@ -275,21 +280,21 @@
 		{/if}
 		{#if waitingFor.length}
 			<div
-				class="rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:bg-amber-950/40 dark:text-amber-200"
+				class="rounded-xl border border-amber-500/20 bg-amber-500/[0.07] px-3 py-2 text-xs text-amber-800 dark:text-amber-200"
 			>
 				等待前置任务：{waitingFor.map((k) => `#${k}`).join('、')} 完成后才会开始（由派发器检查依赖，不会提前执行）。
 			</div>
 		{/if}
 		{#if task.block_reason && !replay}
 			<div
-				class="rounded-xl bg-red-50 px-3 py-2 text-xs text-red-800 dark:bg-red-950/40 dark:text-red-200 whitespace-pre-wrap break-words"
+				class="rounded-xl border border-red-500/20 bg-red-500/[0.07] px-3 py-2 text-xs text-red-800 dark:text-red-200 whitespace-pre-wrap break-words"
 			>
 				{task.block_reason}
 			</div>
 		{/if}
 		{#if !replay && task.current_run?.question}
 			<div
-				class="rounded-xl bg-violet-50 px-3 py-2 text-xs text-violet-900 dark:bg-violet-950/40 dark:text-violet-100 whitespace-pre-wrap break-words"
+				class="rounded-xl border border-violet-500/20 bg-violet-500/[0.07] px-3 py-2 text-xs text-violet-900 dark:text-violet-100 whitespace-pre-wrap break-words"
 			>
 				<div class="font-semibold mb-1">{task.executor} 在等你回答：</div>
 				{task.current_run.question}
@@ -297,7 +302,7 @@
 		{/if}
 		{#if !replay && task.current_run?.runner_phase === 'quota_wait'}
 			<div
-				class="rounded-xl bg-orange-50 px-3 py-2 text-xs text-orange-900 dark:bg-orange-950/40 dark:text-orange-100"
+				class="rounded-xl border border-orange-500/20 bg-orange-500/[0.07] px-3 py-2 text-xs text-orange-900 dark:text-orange-100"
 			>
 				额度等待中（不是失败）：{task.current_run.resume_at
 					? `约 ${task.current_run.resume_at} 自动续跑同一会话`
@@ -308,7 +313,7 @@
 		{#if canRetry}
 			<button
 				type="button"
-				class="self-start rounded-xl bg-gray-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-gray-800 disabled:opacity-50 dark:bg-gray-100 dark:text-gray-900"
+				class="tm-btn-primary self-start !py-1.5 !text-xs"
 				disabled={retrying}
 				on:click={retry}>{retrying ? '正在重试…' : '重试这个任务（新的执行尝试）'}</button
 			>
@@ -322,20 +327,18 @@
 			{/if}
 			{#if detail}
 				<details class="group">
-					<summary class="cursor-pointer text-xs font-medium text-gray-600 dark:text-gray-300"
-						>任务说明</summary
-					>
+					<summary class="tm-eyebrow cursor-pointer">任务说明</summary>
 					<div
-						class="mt-1 max-h-60 overflow-y-auto whitespace-pre-wrap break-words rounded-xl bg-gray-50 p-2 text-xs text-gray-700 dark:bg-gray-850 dark:text-gray-300"
+						class="tm-card-quiet tm-scroll mt-1 max-h-60 overflow-y-auto whitespace-pre-wrap break-words p-2.5 text-xs text-gray-700 dark:text-gray-300"
 					>
 						{detail.body}
 					</div>
 				</details>
 				{#if resultMd}
 					<div>
-						<div class="text-xs font-medium text-gray-600 dark:text-gray-300">结果 / 交接</div>
+						<div class="tm-eyebrow">结果 / 交接</div>
 						<div
-							class="mt-1 max-h-96 overflow-y-auto rounded-xl border border-emerald-100 bg-emerald-50/40 px-3 py-2 dark:border-emerald-900/40 dark:bg-emerald-950/15"
+							class="tm-scroll mt-1 max-h-96 overflow-y-auto rounded-xl border border-emerald-500/20 bg-emerald-500/[0.05] px-3 py-2"
 							data-task-result
 						>
 							<ReportMarkdown id={`team-task-${task.key}`} content={resultMd} />
@@ -344,12 +347,10 @@
 				{/if}
 				{#if detail.attempts.length}
 					<div>
-						<div class="text-xs font-medium text-gray-600 dark:text-gray-300">执行尝试</div>
+						<div class="tm-eyebrow">执行尝试</div>
 						<ol class="mt-1 space-y-1">
 							{#each detail.attempts as attempt (attempt.id)}
-								<li
-									class="rounded-xl border border-gray-100 px-2 py-1.5 text-xs dark:border-gray-850"
-								>
+								<li class="rounded-xl border tm-hairline px-2 py-1.5 text-xs">
 									<div class="flex items-center gap-2 flex-wrap">
 										<span class="font-medium">第 {attempt.n} 次</span>
 										<span class="text-gray-500">{attempt.outcome ?? attempt.status}</span>
@@ -386,14 +387,11 @@
 						</div>
 						{#if logText.note}<div class="text-xs text-gray-400">{logText.note}</div>{/if}
 						<pre
-							class="mt-1 max-h-72 overflow-auto whitespace-pre-wrap break-words rounded-xl bg-gray-900 p-2 text-[11px] leading-snug text-gray-100">{logText.text ||
+							class="tm-scroll mt-1 max-h-72 overflow-auto whitespace-pre-wrap break-words rounded-xl bg-[#0b0d13] p-3 text-[11px] leading-snug text-gray-100 ring-1 ring-white/10">{logText.text ||
 								'（空）'}</pre>
 					{:else}
-						<button
-							type="button"
-							class="rounded-lg bg-gray-100 px-2.5 py-1 text-xs text-gray-700 hover:bg-gray-200 dark:bg-gray-850 dark:text-gray-200"
-							disabled={logLoading}
-							on:click={loadLog}>{logLoading ? '读取中…' : '查看日志'}</button
+						<button type="button" class="tm-btn-ghost" disabled={logLoading} on:click={loadLog}
+							>{logLoading ? '读取中…' : '查看日志'}</button
 						>
 					{/if}
 				</div>
@@ -402,7 +400,7 @@
 
 		{#if taskEvents.length}
 			<div>
-				<div class="text-xs font-medium text-gray-600 dark:text-gray-300">这个任务的记录</div>
+				<div class="tm-eyebrow">这个任务的记录</div>
 				<ol class="mt-1 space-y-0.5 text-xs">
 					{#each taskEvents as ev (ev.id)}
 						<li class="flex gap-1.5 text-gray-600 dark:text-gray-400">
@@ -420,16 +418,13 @@
 
 		{#if canWrite}
 			<form class="flex flex-col gap-1.5" on:submit|preventDefault={send}>
-				<label
-					class="text-xs font-medium text-gray-600 dark:text-gray-300"
-					for="team-note-{task.id}">给 {task.member} 补充说明</label
-				>
+				<label class="tm-eyebrow" for="team-note-{task.id}">给 {task.member} 补充说明</label>
 				<textarea
 					id="team-note-{task.id}"
 					bind:value={note}
 					rows="3"
 					maxlength="4000"
-					class="w-full resize-y rounded-xl border border-gray-200 bg-white px-2.5 py-2 text-sm outline-none focus:border-sky-400 dark:border-gray-800 dark:bg-gray-900"
+					class="note w-full resize-y rounded-xl px-3 py-2 text-sm outline-none"
 					placeholder={isRunnerExecutor(task.executor)
 						? `${task.executor} 运行中收不到消息，会在它这一轮结束后续跑送达`
 						: '成员正在执行时，会在当前这批工具调用结束后读到'}
@@ -440,7 +435,7 @@
 				<div class="flex items-center gap-2">
 					<button
 						type="submit"
-						class="rounded-xl bg-sky-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-sky-700 disabled:opacity-50"
+						class="tm-btn-primary !py-1.5 !text-xs"
 						disabled={sending || !note.trim()}>{sending ? '发送中…' : '发送'}</button
 					>
 					<span class="text-[11px] text-gray-400">Ctrl+Enter 发送 · 只发给这个任务的成员</span>
@@ -453,7 +448,7 @@
 	{:else if member}
 		{#if member.focus}<p class="text-xs text-gray-600 dark:text-gray-300">{member.focus}</p>{/if}
 		<dl
-			class="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1.5 rounded-xl border border-gray-100 px-3 py-2 text-xs dark:border-gray-850"
+			class="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1.5 rounded-xl border tm-hairline px-3 py-2 text-xs"
 			data-member-profile
 		>
 			<dt class="text-gray-500">助手模板</dt>
@@ -483,9 +478,7 @@
 		</dl>
 		{#if canWriteMember && memberTarget}
 			<form class="flex flex-col gap-1.5" on:submit|preventDefault={send} data-member-note>
-				<label
-					class="text-xs font-medium text-gray-600 dark:text-gray-300"
-					for="team-member-note-{member.name}"
+				<label class="tm-eyebrow" for="team-member-note-{member.name}"
 					>给 {member.name} 补充说明（发到它{['running', 'review'].includes(
 						states.get(memberTarget.id)?.status ?? memberTarget.status
 					)
@@ -497,7 +490,7 @@
 					bind:value={note}
 					rows="3"
 					maxlength="4000"
-					class="w-full resize-y rounded-xl border border-gray-200 bg-white px-2.5 py-2 text-sm outline-none focus:border-sky-400 dark:border-gray-800 dark:bg-gray-900"
+					class="note w-full resize-y rounded-xl px-3 py-2 text-sm outline-none"
 					placeholder={isRunnerExecutor(member.executor)
 						? `${member.executor} 运行中收不到消息，会在它这一轮结束后续跑送达`
 						: '成员正在执行时，会在当前这批工具调用结束后读到'}
@@ -507,7 +500,7 @@
 				/>
 				<button
 					type="submit"
-					class="self-start rounded-xl bg-sky-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-sky-700 disabled:opacity-50"
+					class="tm-btn-primary self-start !py-1.5 !text-xs"
 					disabled={sending || !note.trim()}>{sending ? '发送中…' : '发送'}</button
 				>
 				{#if lastExpect}<div class="text-xs text-violet-700 dark:text-violet-300">
@@ -516,13 +509,13 @@
 			</form>
 		{/if}
 		<div>
-			<div class="text-xs font-medium text-gray-600 dark:text-gray-300">负责的任务</div>
+			<div class="tm-eyebrow">负责的任务</div>
 			<ul class="mt-1 space-y-1">
 				{#each memberTasks as t (t.id)}
 					<li>
 						<button
 							type="button"
-							class="flex w-full items-center gap-2 rounded-xl border border-gray-100 px-2 py-1.5 text-left text-xs hover:border-gray-200 dark:border-gray-850 dark:hover:border-gray-700"
+							class="flex w-full items-center gap-2 rounded-xl border tm-hairline px-2 py-1.5 text-left text-xs tm-hover"
 							on:click={() => dispatch('task', t.id)}
 						>
 							<span class="font-mono text-gray-500">#{t.key}</span>
@@ -534,7 +527,7 @@
 			</ul>
 		</div>
 		<div>
-			<div class="text-xs font-medium text-gray-600 dark:text-gray-300">最近的工具记录</div>
+			<div class="tm-eyebrow">最近的工具记录</div>
 			{#if memberTools.length === 0}
 				<div class="mt-1 text-xs text-gray-400">还没有工具记录</div>
 			{:else}
@@ -551,3 +544,17 @@
 		</div>
 	{/if}
 </section>
+
+<style>
+	.note {
+		border: 1px solid hsl(var(--tm-line-strong));
+		background: hsl(var(--tm-surface-2));
+		transition:
+			border-color 0.15s ease,
+			box-shadow 0.15s ease;
+	}
+	.note:focus {
+		border-color: hsl(var(--tm-accent) / 0.5);
+		box-shadow: 0 0 0 3px hsl(var(--tm-accent) / 0.1);
+	}
+</style>

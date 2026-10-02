@@ -185,14 +185,14 @@
 >
 	{#if loading && !data}
 		<div class="flex flex-col gap-3 py-2" aria-busy="true">
-			<div class="h-6 w-2/3 rounded-lg bg-gray-100 dark:bg-gray-850 animate-pulse" />
-			<div class="h-3 w-full rounded bg-gray-100 dark:bg-gray-850 animate-pulse" />
-			<div class="h-3 w-5/6 rounded bg-gray-100 dark:bg-gray-850 animate-pulse" />
-			<div class="h-3 w-4/6 rounded bg-gray-100 dark:bg-gray-850 animate-pulse" />
+			<div class="h-6 w-2/3 rounded-lg bg-gray-500/10 animate-pulse" />
+			<div class="h-3 w-full rounded bg-gray-500/10 animate-pulse" />
+			<div class="h-3 w-5/6 rounded bg-gray-500/10 animate-pulse" />
+			<div class="h-3 w-4/6 rounded bg-gray-500/10 animate-pulse" />
 		</div>
 	{:else if error && !data}
 		<div
-			class="rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-800 dark:bg-red-950/40 dark:text-red-200"
+			class="rounded-2xl border border-red-500/20 bg-red-500/[0.07] px-4 py-3 text-sm text-red-800 dark:text-red-200"
 			role="alert"
 		>
 			读不到结论：{error}
@@ -201,7 +201,7 @@
 	{:else if status === 'none'}
 		<div class="flex flex-col items-center gap-3 px-4 py-10 text-center" data-conclusion-empty>
 			<div
-				class="grid size-12 place-items-center rounded-2xl bg-gray-50 text-gray-400 dark:bg-gray-850 dark:text-gray-500"
+				class="tm-card-quiet grid size-12 place-items-center text-gray-400 dark:text-gray-500"
 				aria-hidden="true"
 			>
 				<svg class="size-6" viewBox="0 0 24 24" fill="none"
@@ -223,11 +223,8 @@
 							: ''}让负责人把各成员的结果整理成一份完整的结论报告。
 					</p>
 				</div>
-				<button
-					type="button"
-					class="rounded-xl bg-gray-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-gray-800 active:scale-[0.98] disabled:opacity-50 dark:bg-gray-100 dark:text-gray-900 dark:hover:bg-white"
-					disabled={writing}
-					on:click={write}>{writing ? '正在开始…' : '让负责人写结论'}</button
+				<button type="button" class="tm-btn-primary" disabled={writing} on:click={write}
+					>{writing ? '正在开始…' : '让负责人写结论'}</button
 				>
 			{:else}
 				<div>
@@ -238,7 +235,7 @@
 				</div>
 				{#if progress && progress.total}
 					<div class="w-full max-w-[14rem]">
-						<div class="h-1.5 overflow-hidden rounded-full bg-gray-100 dark:bg-gray-850">
+						<div class="h-1.5 overflow-hidden rounded-full bg-gray-500/10">
 							<div
 								class="h-full rounded-full bg-emerald-500 transition-[width] duration-500"
 								style="width:{Math.round((progress.done / progress.total) * 100)}%"
@@ -254,7 +251,7 @@
 	{:else}
 		<header
 			class="flex flex-wrap items-center gap-x-3 gap-y-2 {variant === 'page'
-				? 'border-b border-gray-100 pb-4 dark:border-gray-850'
+				? 'tm-hairline border-b pb-4'
 				: 'pb-3'}"
 		>
 			<div class="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1">
@@ -286,12 +283,7 @@
 			</div>
 			{#if data?.markdown}
 				<div class="flex items-center gap-1">
-					<button
-						type="button"
-						class="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs text-gray-600 transition hover:bg-gray-100 active:scale-[0.97] dark:text-gray-300 dark:hover:bg-gray-850"
-						on:click={copy}
-						aria-live="polite"
-					>
+					<button type="button" class="tm-btn-ghost" on:click={copy} aria-live="polite">
 						{#if copied}
 							<svg
 								class="size-3.5 text-emerald-600"
@@ -326,13 +318,13 @@
 					</button>
 					<button
 						type="button"
-						class="hidden items-center gap-1 rounded-lg px-2 py-1 text-xs text-gray-600 transition hover:bg-gray-100 active:scale-[0.97] sm:inline-flex dark:text-gray-300 dark:hover:bg-gray-850"
+						class="tm-btn-ghost !hidden sm:!inline-flex"
 						on:click={download}
 						title="下载 Markdown 文件">下载</button
 					>
 					<button
 						type="button"
-						class="rounded-lg px-2 py-1 text-xs text-gray-600 transition hover:bg-gray-100 active:scale-[0.97] disabled:opacity-40 dark:text-gray-300 dark:hover:bg-gray-850"
+						class="tm-btn-ghost"
 						disabled={generating}
 						on:click={() => (confirmRewrite = true)}
 						title="让负责人根据现在的记录重新写一遍">重写</button
@@ -340,7 +332,7 @@
 					{#if variant === 'panel'}
 						<a
 							href="/teams/{teamId}/conclusion"
-							class="inline-flex items-center gap-1 rounded-lg bg-gray-900 px-2.5 py-1 text-xs font-medium text-white transition hover:bg-gray-800 active:scale-[0.97] dark:bg-gray-100 dark:text-gray-900"
+							class="tm-btn-primary !gap-1 !px-2.5 !py-1 !text-xs"
 							data-conclusion-open
 							>全文阅读<svg class="size-3" viewBox="0 0 16 16" fill="none" aria-hidden="true"
 								><path
@@ -358,11 +350,11 @@
 
 		{#if generating}
 			<div
-				class="mb-3 overflow-hidden rounded-xl bg-sky-50 text-xs text-sky-900 dark:bg-sky-950/40 dark:text-sky-100"
+				class="mb-3 overflow-hidden rounded-xl border border-sky-500/20 bg-sky-500/[0.07] text-xs text-sky-900 dark:text-sky-100"
 				role="status"
 				in:fade={{ duration: 150 }}
 			>
-				<div class="h-0.5 w-full overflow-hidden bg-sky-100 dark:bg-sky-900/60">
+				<div class="h-0.5 w-full overflow-hidden bg-sky-500/15">
 					<div class="conclusion-progress h-full w-1/3 bg-sky-500" />
 				</div>
 				<div class="px-3 py-2">
@@ -376,7 +368,7 @@
 		{/if}
 		{#if status === 'failed' && entry.error}
 			<div
-				class="mb-3 rounded-xl bg-red-50 px-3 py-2 text-xs text-red-800 dark:bg-red-950/40 dark:text-red-200"
+				class="mb-3 rounded-xl border border-red-500/20 bg-red-500/[0.07] px-3 py-2 text-xs text-red-800 dark:text-red-200"
 				role="alert"
 			>
 				{entry.error}
@@ -390,7 +382,7 @@
 		{/if}
 		{#if entry.source === 'assembled' && !generating}
 			<div
-				class="mb-3 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:bg-amber-950/40 dark:text-amber-100"
+				class="mb-3 rounded-xl border border-amber-500/20 bg-amber-500/[0.07] px-3 py-2 text-xs text-amber-900 dark:text-amber-100"
 			>
 				负责人模型这次没有给出结论，下面按各任务的记录整理。{entry.fallback_reason
 					? `（${entry.fallback_reason}）`
@@ -406,14 +398,14 @@
 							<div class="mb-2 text-[11px] font-medium uppercase tracking-wider text-gray-400">
 								目录
 							</div>
-							<ol class="flex flex-col gap-0.5 border-l border-gray-100 dark:border-gray-850">
+							<ol class="tm-hairline flex flex-col gap-0.5 border-l">
 								{#each toc as h (h.id)}
 									<li>
 										<button
 											type="button"
 											class="-ml-px block w-full border-l-2 py-1 pr-1 text-left text-[13px] leading-snug transition
 											{activeHeading === h.id
-												? 'border-gray-900 font-medium text-gray-900 dark:border-gray-100 dark:text-gray-100'
+												? 'border-sky-500 font-medium text-gray-900 dark:border-sky-400 dark:text-gray-100'
 												: 'border-transparent text-gray-500 hover:text-gray-900 dark:hover:text-gray-200'}"
 											style="padding-left:{0.75 + (h.depth - tocMin) * 0.75}rem"
 											on:click={() => jump(h.id)}>{h.text}</button
@@ -426,9 +418,7 @@
 				{/if}
 				<div class="min-w-0">
 					{#if variant === 'page' && toc.length > 2}
-						<details
-							class="mb-4 rounded-xl border border-gray-100 px-3 py-2 text-sm lg:hidden dark:border-gray-850"
-						>
+						<details class="tm-card-quiet mb-4 px-3 py-2 text-sm lg:hidden">
 							<summary
 								class="cursor-pointer select-none text-xs font-medium text-gray-600 dark:text-gray-300"
 								>目录 · {toc.length} 节</summary
@@ -464,8 +454,8 @@
 				aria-label="产出文件"
 				data-conclusion-files
 			>
-				<h3 class="mb-3 text-sm font-semibold text-gray-900 dark:text-gray-100">
-					产出文件 <span class="font-normal text-gray-400">{fileList.length}</span>
+				<h3 class="tm-eyebrow mb-3">
+					产出文件 <span class="tm-num ml-1 font-normal normal-case">{fileList.length}</span>
 				</h3>
 				{#if images.length}
 					<ul
@@ -479,7 +469,7 @@
 									href={teamFileUrl(teamId, f.path)}
 									target="_blank"
 									rel="noopener"
-									class="group block overflow-hidden rounded-xl border border-gray-100 bg-gray-50 transition hover:border-gray-300 dark:border-gray-850 dark:bg-gray-900 dark:hover:border-gray-700"
+									class="tm-card tm-hover group block overflow-hidden !rounded-xl"
 								>
 									<img
 										src={teamFileUrl(teamId, f.path)}
@@ -496,19 +486,17 @@
 					</ul>
 				{/if}
 				{#if others.length}
-					<ul
-						class="divide-y divide-gray-100 overflow-hidden rounded-xl border border-gray-100 dark:divide-gray-850 dark:border-gray-850"
-					>
+					<ul class="tm-card files divide-y overflow-hidden !rounded-xl">
 						{#each others.slice(0, 60) as f (f.path)}
 							<li>
 								<a
 									href={teamFileUrl(teamId, f.path)}
 									target="_blank"
 									rel="noopener"
-									class="flex items-center gap-3 px-3 py-2 text-xs transition hover:bg-gray-50 dark:hover:bg-gray-850"
+									class="flex items-center gap-3 px-3 py-2 text-xs transition hover:bg-gray-500/[0.06]"
 								>
 									<span
-										class="grid size-7 shrink-0 place-items-center rounded-lg bg-gray-100 font-mono text-[9px] uppercase text-gray-500 dark:bg-gray-800 dark:text-gray-400"
+										class="ext grid size-7 shrink-0 place-items-center rounded-lg font-mono text-[9px] uppercase"
 										aria-hidden="true">{(f.path.split('.').pop() ?? '').slice(0, 4)}</span
 									>
 									<span
@@ -533,15 +521,13 @@
 				aria-label="各任务的原始结果"
 				data-conclusion-tasks
 			>
-				<h3 class="mb-1 text-sm font-semibold text-gray-900 dark:text-gray-100">
-					各任务的原始结果
-				</h3>
+				<h3 class="tm-eyebrow mb-1">各任务的原始结果</h3>
 				<p class="mb-3 text-xs text-gray-500">成员交付时写的完整结果，结论就是根据它们写的。</p>
 				<ul class="flex flex-col gap-2">
 					{#each data.tasks as t (t.id)}
 						<li>
 							<details
-								class="group rounded-xl border border-gray-100 open:border-gray-200 dark:border-gray-850 dark:open:border-gray-800"
+								class="tm-card group !rounded-xl"
 								on:toggle={(e) => toggleResult(t.id, e.currentTarget.open)}
 							>
 								<summary
@@ -580,7 +566,7 @@
 									/>
 								</summary>
 								{#if openResults.has(t.id)}
-									<div class="border-t border-gray-100 px-4 py-3 dark:border-gray-850">
+									<div class="tm-hairline border-t px-4 py-3">
 										{#if t.result}
 											<div class="max-h-[70vh] overflow-y-auto">
 												<ReportMarkdown
@@ -612,6 +598,13 @@
 />
 
 <style>
+	.files > li + li {
+		border-color: hsl(var(--tm-line));
+	}
+	.ext {
+		color: hsl(var(--tm-accent));
+		background: hsl(var(--tm-accent) / 0.08);
+	}
 	.conclusion-progress {
 		animation: conclusion-slide 1.4s ease-in-out infinite;
 	}

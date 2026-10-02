@@ -208,6 +208,8 @@ export type Team = {
 	};
 	/** list only: the stage of a team at work (and of one that just finished) */
 	stage?: StageBrief;
+	/** Names of the files given with the goal (in the workspace's inputs/ once it starts). */
+	inputs?: string[];
 };
 
 export type SubStatus =
@@ -587,14 +589,16 @@ export const createTeam = (
 	chatId?: string | null,
 	leadModel?: string | null,
 	project?: string | null,
-	autoStart = false
+	autoStart = false,
+	files: string[] = []
 ) =>
 	request<Team>(token, 'POST', '/', {
 		goal,
 		chat_id: chatId || null,
 		lead_model: leadModel || null,
 		project: project || null,
-		auto_start: autoStart
+		auto_start: autoStart,
+		...(files.length ? { files } : {})
 	});
 
 export const getTeam = (token: string, teamId: string) =>

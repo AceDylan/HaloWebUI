@@ -130,6 +130,29 @@ async def hermes_file(target: HermesTarget, path: str, *, timeout: int = 60) -> 
         raise TeamsError(502, f"连不上 Hermes：{type(exc).__name__}") from exc
 
 
+# --- input files ------------------------------------------------------------------------------
+
+INPUT_FILES_MAX = 20
+
+
+def input_files(file_ids: Any, user) -> list[dict]:
+    """[{name, path}] — the user's uploaded files (ids) as the Hermes host sees them, for a team's
+    inputs/ (images too). Files that are not the user's, or not on the shared data volume, are left
+    out (the caller says so)."""
+    ids = [str(i).strip() for i in (file_ids or []) if str(i or "").strip()][:INPUT_FILES_MAX]
+    if not ids:
+        return []
+    from open_webui.utils.hermes_agent import _attachment_host_paths
+
+    items = [{"id": file_id, "type": "file"} for file_id in dict.fromkeys(ids)]
+    return [{"name": name, "path": path} for name, path in _attachment_host_paths({"files": items}, user, images=True)]
+
+
+def team_inputs(team: AgentTeamModel) -> list[dict]:
+    inputs = (team.meta or {}).get("inputs")
+    return [i for i in inputs if isinstance(i, dict) and i.get("path")] if isinstance(inputs, list) else []
+
+
 # --- planning ---------------------------------------------------------------------------------
 
 def _keep(task: "asyncio.Task") -> None:
@@ -143,6 +166,7 @@ async def _plan_job(team: AgentTeamModel, target: HermesTarget, feedback: str, p
             "goal": team.goal, "team_id": team.id, "feedback": feedback, "previous": previous,
             "lead_model": (team.meta or {}).get("lead_model") or "",
             "project": (team.meta or {}).get("project") or "",
+            "inputs": [i["name"] for i in team_inputs(team)],
         }, timeout=PLAN_TIMEOUT_SECONDS)
         ok = isinstance(body, dict) and body.get("ok") and isinstance(body.get("plan"), dict)
         if ok:
@@ -237,6 +261,8 @@ async def start_team(team: AgentTeamModel, target: HermesTarget) -> AgentTeamMod
                 "chat_id": team.chat_id or "", "origin": team_origin(team)}
         if plan_draws(team.plan):
             body["image_templates"] = image_templates(team.user_id)
+        if team_inputs(team):
+            body["inputs"] = team_inputs(team)
         result = await hermes_call(target, "POST", "", json_body=body, timeout=60)
     except TeamsError as exc:
         AgentTeams.update(team.id, team.user_id, expect_status=("starting",), status="start_failed",
@@ -432,6 +458,7 @@ def public_team(team: AgentTeamModel, *, with_plan: bool = True) -> dict:
     project = plan.get("project") if isinstance(plan.get("project"), dict) else None
     data["project"] = {"name": project.get("name"), "path": project.get("path")} if project else None
     data["deletable"] = deletable(team)
+    data["inputs"] = [str(i.get("name") or "")[:120] for i in team_inputs(team)]
     # Where the conclusion went (the chat it was posted to, the knowledge base it was saved in).
     knowledge = meta.get("knowledge") if isinstance(meta.get("knowledge"), dict) else None
     posted = meta.get("chat_posted") if isinstance(meta.get("chat_posted"), dict) else None

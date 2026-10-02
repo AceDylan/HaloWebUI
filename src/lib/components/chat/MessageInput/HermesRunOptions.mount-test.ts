@@ -134,7 +134,7 @@ describe('HermesRunOptions', () => {
 		const choices = Array.from(panel.querySelectorAll('[data-halo-hermes-dispatch]')).map(
 			(el: any) => el.getAttribute('data-halo-hermes-dispatch')
 		);
-		expect(choices).toEqual(['direct', 'reclaude', 'cchclaude', 'anyclaude', 'codex', 'agy']);
+		expect(choices).toEqual(['direct', 'reclaude', 'cchclaude', 'anyclaude', 'codex', 'agy', 'team']);
 		const cch = panel.querySelector('[data-halo-hermes-dispatch="cchclaude"]') as any;
 		expect(cch.getAttribute('aria-checked')).toBe('true');
 		expect(panel.querySelector('[data-halo-hermes-dispatch-hint]').textContent).toContain(
@@ -143,6 +143,17 @@ describe('HermesRunOptions', () => {
 		expect(panel.querySelector('[role="radiogroup"]').className).toContain('grid-cols-3');
 		expect((target.querySelector('[data-halo-hermes-options-summary]') as any)?.textContent).toContain(
 			'cchclaude'
+		);
+	});
+
+	it('offers 协作台: the message goes to a team, on a row of its own', async () => {
+		const panel: any = await mount({ dispatch: 'team' });
+		const team = panel.querySelector('[data-halo-hermes-dispatch="team"]') as any;
+		expect(team.getAttribute('aria-checked')).toBe('true');
+		expect(team.className).toContain('col-span-3');
+		expect(team.textContent).toContain('协作台');
+		expect(panel.querySelector('[data-halo-hermes-dispatch-hint]').textContent).toContain(
+			'完整结果发回这里'
 		);
 	});
 

@@ -71,6 +71,11 @@ is the Hermes side. It adds no service, port or second task store:
   condenses the result into title + points, gpt-image draws it in the chosen template's style (else
   Hermes' hand-drawn infographic template), the picture goes under the result's title between
   `<!-- halo:illustration -->` marks (kept when the conclusion is rewritten); stage `illustrating`.
+* **Files given with the goal** (`teams.copy_inputs`): HaloWebUI hands over the uploads of a team
+  (the 协作台 composer's attachments, or a chat message dispatched with 派发方式「协作台」) as host
+  paths; the lead plans knowing their names, and at approval they are copied into the workspace's
+  `inputs/` (`.halo/inputs/` in a project's worktree, never committed); every member's task says
+  where they are. `inputs/` is not listed among the team's deliverables.
 * **Stage and estimate** (`progress.py`): every snapshot carries `team.stage` — the step
   (计划 → 批准 → 执行 → 整理结果 → 验收), what is happening now (each running member's latest tool
   call / runner event, in words), since when, and about how long is left. Estimates come from this
@@ -111,8 +116,8 @@ HaloWebUI sends `X-Halo-Owner: <user id>`; a team recorded for another owner is 
 
 | Route | |
 |---|---|
-| `POST /v1/halo-teams/plan` `{goal, feedback?, previous?, team_id?}` | the lead's plan: one `auxiliary.kanban_decomposer` call + deterministic validation (names, executors, references, cycles), one retry with the errors |
-| `POST /v1/halo-teams` `{team_id, plan, goal, title?, chat_id?}` | create the board and tasks from an approved plan (idempotent per team id) |
+| `POST /v1/halo-teams/plan` `{goal, feedback?, previous?, team_id?, inputs?: [names]}` | the lead's plan: one `auxiliary.kanban_decomposer` call + deterministic validation (names, executors, references, cycles), one retry with the errors |
+| `POST /v1/halo-teams` `{team_id, plan, goal, title?, chat_id?, image_templates?, inputs?: [{name, path}]}` | create the board and tasks from an approved plan (idempotent per team id) |
 | `GET /v1/halo-teams/{id}` | authoritative snapshot: team, lead, members (status), tasks (status, sub_status, parents, attempts, current run) |
 | `GET /v1/halo-teams/{id}/events?after=&limit=` | normalized events after a cursor; each event carries the task status after it, so a replay is a plain fold; `reconcile` lists tasks whose folded history disagrees with the live row |
 | `GET /v1/halo-teams/{id}/tasks/{task}?log=1` | attempts, comments, redacted log tail |

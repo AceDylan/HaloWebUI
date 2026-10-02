@@ -533,3 +533,34 @@ def test_a_run_that_counted_nothing_reports_no_usage():
         "completion_tokens": 3,
         "total_tokens": 15,
     }
+
+
+def test_the_team_dispatch_starts_a_team_instead_of_a_hermes_run(monkeypatch):
+    from open_webui.utils import agent_team_dispatch
+
+    calls = []
+
+    async def fake_dispatch(request, form_data, user, metadata, model_id):
+        calls.append((form_data["hermes_options"], metadata["chat_id"], model_id))
+        return {"status": True, "task_id": "team-task"}
+
+    monkeypatch.setattr(
+        hermes_agent,
+        "_resolve_hermes_connection",
+        lambda *_args: ("http://hermes.test/v1", "", "hermes-agent"),
+    )
+    monkeypatch.setattr(agent_team_dispatch, "run_team_dispatch", fake_dispatch)
+    monkeypatch.setattr(
+        hermes_agent.aiohttp,
+        "ClientSession",
+        lambda **_kwargs: (_ for _ in ()).throw(AssertionError("no hermes run for a team dispatch")),
+    )
+    metadata = {"session_id": "s", "chat_id": "chat-7", "message_id": "m-7"}
+    form_data = {"model": "hermes-agent", "messages": [{"role": "user", "content": "x"}],
+                 "hermes_options": {"dispatch": "team"}}
+    out = asyncio.run(hermes_agent.run_hermes_agent(None, form_data, SimpleNamespace(id="u", role="user"), metadata,
+                                                    {"id": "hermes-agent"}, []))
+    assert out == {"status": True, "task_id": "team-task"}
+    assert calls == [({"dispatch": "team"}, "chat-7", "hermes-agent")]
+    # every other dispatch is untouched: a runner still goes through _hermes_run_options
+    assert hermes_agent._hermes_run_options({"hermes_options": {"dispatch": "team"}}) == {}

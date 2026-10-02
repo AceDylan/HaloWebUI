@@ -5049,8 +5049,19 @@
 	};
 
 	const chatCompletionEventHandler = async (data, message, chatId) => {
-		const { id, done, choices, content, sources, error, usage, files, discussion, hermes_run } =
-			data;
+		const {
+			id,
+			done,
+			choices,
+			content,
+			sources,
+			error,
+			usage,
+			files,
+			discussion,
+			hermes_run,
+			team_dispatch
+		} = data;
 		if (isResponseStopped(message) || stoppedResponseMessageIds.has(message?.id)) {
 			if (done) {
 				stoppedResponseMessageIds.delete(message.id);
@@ -5127,6 +5138,11 @@
 			// to steer it even while the message keeps streaming through the
 			// post-processing step.
 			message.hermesRun = { ...(message.hermesRun ?? {}), ...hermes_run };
+		}
+
+		if (team_dispatch && typeof team_dispatch === 'object' && team_dispatch.team_id) {
+			// 派发方式「协作台」: this reply is a team's card (TeamChatCard), not a Hermes answer.
+			message.team_dispatch = { team_id: String(team_dispatch.team_id) };
 		}
 
 		commitHistoryMessage(message);

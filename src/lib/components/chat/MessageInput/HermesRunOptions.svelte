@@ -36,7 +36,12 @@
 			hint: '交给 Claude Code（anyrouter 免费服务，较慢，失败会自动重试）在后台独占执行'
 		},
 		{ value: 'codex', label: 'codex', hint: '交给 Codex 在后台独占执行' },
-		{ value: 'agy', label: 'agy', hint: '交给 AGY 在后台独占执行' }
+		{ value: 'agy', label: 'agy', hint: '交给 AGY 在后台独占执行' },
+		{
+			value: 'team',
+			label: '协作台',
+			hint: '交给一支团队：负责人拆任务、成员并行（含生图），进度在对话里实时显示，完整结果发回这里'
+		}
 	];
 
 	let open = false;
@@ -234,12 +239,15 @@
 						aria-checked={checked}
 						title={item.hint}
 						data-halo-hermes-dispatch={item.value || 'direct'}
-						class="min-w-0 truncate rounded-lg px-1.5 py-1.5 text-xs transition max-sm:py-2.5 max-sm:text-sm {checked
+						class="min-w-0 truncate rounded-lg px-1.5 py-1.5 text-xs transition max-sm:py-2.5 max-sm:text-sm {item.value ===
+						'team'
+							? 'col-span-3'
+							: ''} {checked
 							? 'bg-primary-600 text-white dark:bg-primary-500'
 							: 'bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700'}"
 						on:click={() => update({ dispatch: item.value || (continuation ? 'hermes' : '') })}
 					>
-						{item.label}
+						{item.value === 'team' ? '🤝 协作台（交给一支团队）' : item.label}
 					</button>
 				{/each}
 			</div>

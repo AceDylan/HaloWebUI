@@ -115,7 +115,9 @@ def list_files(team: dict) -> list[dict]:
         out.sort(key=lambda f: (-f["mtime"], f["path"]))
         return out[:MAX_LISTED_FILES]
     for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = sorted(d for d in dirnames if d not in SKIP_DIRS and not d.startswith("."))
+        # inputs/ at the top holds the files the user gave with the goal: not something the team made
+        dirnames[:] = sorted(d for d in dirnames if d not in SKIP_DIRS and not d.startswith(".")
+                             and not (d == "inputs" and Path(dirpath) == root))
         for name in filenames:
             if name.startswith("."):
                 continue

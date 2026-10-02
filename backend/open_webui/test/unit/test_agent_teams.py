@@ -893,6 +893,108 @@ def test_the_result_can_be_drawn_in_one_of_the_users_image_templates(hermes):
     assert client.post(f"/api/v1/teams/{team_id}/conclusion/illustrate", json={"template_id": "theirs"}).status_code == 404
 
 
+# --- 派发方式「协作台」: a chat message becomes a team ------------------------------------------------
+
+def test_a_chat_message_becomes_a_team_with_what_was_said_before(hermes, monkeypatch):
+    from open_webui.utils import agent_team_dispatch as dispatch
+
+    messages = [
+        {"role": "system", "content": "你是助手"},
+        {"role": "user", "content": "我在考虑戒烟"},
+        {"role": "assistant", "content": [{"type": "text", "text": "可以先定一个戒烟日。"}]},
+        {"role": "user", "content": "帮我做一份完整的戒烟计划，配一张激励海报"},
+    ]
+    goal, ask = dispatch.goal_from(messages)
+    assert ask == "帮我做一份完整的戒烟计划，配一张激励海报"
+    assert goal.startswith(ask) and "用户：我在考虑戒烟" in goal and "Hermes：可以先定一个戒烟日。" in goal
+    assert goal.index("我在考虑戒烟") < goal.index("可以先定一个戒烟日")  # oldest first
+    long = [{"role": "user", "content": "旧" * 5000}, {"role": "user", "content": "新问题"}]
+    assert len(dispatch.goal_from(long)[0]) < 1400  # one earlier turn is cut, not the whole goal
+    assert dispatch.goal_from([{"role": "assistant", "content": "x"}]) == ("", "")
+
+    emitted, saved, titles, planned = [], [], {"chat-9": "新对话"}, []
+    jobs = []
+
+    async def emitter(event):
+        emitted.append(event)
+
+    monkeypatch.setattr("open_webui.socket.main.get_event_emitter", lambda metadata: emitter)
+    monkeypatch.setattr("open_webui.tasks.create_task", lambda coro, id=None, owner_id=None: (jobs.append(coro) or "task-1", None))
+    monkeypatch.setattr(dispatch, "start_planning", lambda team, target: planned.append(team))
+    monkeypatch.setattr(dispatch, "hermes_target", teams_router.hermes_target)
+    monkeypatch.setattr(dispatch.Chats, "upsert_message_to_chat_by_id_and_message_id",
+                        lambda chat_id, message_id, fields: saved.append((chat_id, message_id, fields)))
+    monkeypatch.setattr(dispatch.Chats, "get_chat_title_by_id", lambda chat_id: titles.get(chat_id))
+    monkeypatch.setattr(dispatch.Chats, "update_chat_title_by_id",
+                        lambda chat_id, title: titles.__setitem__(chat_id, title))
+    monkeypatch.setattr(dispatch, "attachments", lambda metadata, user: [{"name": "体检报告.pdf", "path": "/data/uploads/a.pdf"}])
+    user = _User("u-chat")
+    out = asyncio.run(dispatch.run_team_dispatch(None, {"messages": messages}, user,
+                                                 {"chat_id": "chat-9", "message_id": "m-2"}, "hermes-agent"))
+    assert out == {"status": True, "task_id": "task-1"}
+    asyncio.run(jobs[0])
+    team = planned[0]
+    assert team.chat_id == "chat-9" and team.goal.startswith("帮我做一份完整的戒烟计划")
+    assert team.meta["auto_start"] is True and team.meta["inputs"] == [{"name": "体检报告.pdf", "path": "/data/uploads/a.pdf"}]
+    chat_id, message_id, fields = saved[0]
+    assert (chat_id, message_id) == ("chat-9", "m-2") and fields["done"] is True
+    assert fields["team_dispatch"] == {"team_id": team.id} and "已交给协作台" in fields["content"]
+    assert "附带的 1 个文件" in fields["content"]
+    assert titles["chat-9"] == team.title  # a new chat is named after its team
+    event = emitted[0]
+    assert event["type"] == "chat:completion" and event["data"]["team_dispatch"] == {"team_id": team.id}
+    assert event["data"]["title"] == team.title
+
+    # no Hermes connection: the reply says so, no team
+    async def no_target(request, user):
+        raise teams_utils.TeamsError(403, "你的账号没有可用的 Hermes 连接，不能使用协作台")
+
+    monkeypatch.setattr(dispatch, "hermes_target", no_target)
+    saved.clear()
+    jobs.clear()
+    asyncio.run(dispatch.run_team_dispatch(None, {"messages": messages}, user,
+                                           {"chat_id": "chat-9", "message_id": "m-3"}, "hermes-agent"))
+    asyncio.run(jobs[0])
+    fields = saved[0][2]
+    assert "team_dispatch" not in fields and "没有可用的 Hermes 连接" in fields["content"] and fields["error"]
+
+
+def test_files_given_with_the_goal_reach_the_lead_and_the_team(hermes, monkeypatch):
+    from open_webui.env import DATA_DIR
+    from open_webui.models.files import FileForm, Files
+    from open_webui.utils import hermes_agent
+
+    monkeypatch.setenv("HERMES_AGENT_HOST_DATA_DIR", "/srv/halowebui/data")
+    hermes_agent._HOST_DATA_DIR_CACHE.clear()
+    data_dir = str(DATA_DIR).rstrip("/")
+    Files.insert_new_file("u-files", FileForm(id="f-pdf", filename="体检报告.pdf", path=f"{data_dir}/uploads/f-pdf_体检报告.pdf",
+                                              meta={"content_type": "application/pdf"}))
+    Files.insert_new_file("u-files", FileForm(id="f-img", filename="舌苔.png", path=f"{data_dir}/uploads/f-img_舌苔.png",
+                                              meta={"content_type": "image/png"}))
+    Files.insert_new_file("u-other", FileForm(id="f-theirs", filename="x.txt", path=f"{data_dir}/uploads/x.txt"))
+    client = _client("u-files")
+    # a file that is not there is refused (404), nothing is created (another user's file is refused the
+    # same way for non-admins, see _attachment_host_paths)
+    before = len(AgentTeams.list_for_user("u-files"))
+    assert client.post("/api/v1/teams/", json={"goal": "看看", "files": ["f-missing"]}).status_code == 404
+    assert len(AgentTeams.list_for_user("u-files")) == before
+    team = client.post("/api/v1/teams/", json={"goal": "根据体检报告和照片给饮食建议", "files": ["f-pdf", "f-img"]}).json()
+    assert team["inputs"] == ["体检报告.pdf", "舌苔.png"]  # images too
+    row = AgentTeams.get(team["id"], "u-files")
+    assert row.meta["inputs"] == [{"name": "体检报告.pdf", "path": "/srv/halowebui/data/uploads/f-pdf_体检报告.pdf"},
+                                  {"name": "舌苔.png", "path": "/srv/halowebui/data/uploads/f-img_舌苔.png"}]
+    # the lead plans knowing their names; the start hands Hermes the files to copy
+    hermes.responses[("POST", "/plan")] = {"ok": True, "plan": PLAN}
+    asyncio.run(teams_utils._plan_job(row, teams_utils.HermesTarget("http://h", {}, "u-files"), "", None))
+    plan_call = [c for c in hermes.calls if c[2] == "/plan"][-1]
+    assert plan_call[3]["inputs"] == ["体检报告.pdf", "舌苔.png"]
+    hermes.responses[("POST", "")] = {"board": "halo-f", "created": True, "tasks": {}}
+    assert client.post(f"/api/v1/teams/{team['id']}/approve").status_code == 200
+    body = [c for c in hermes.calls if c[1] == "POST" and c[2] == ""][-1][3]
+    assert [i["name"] for i in body["inputs"]] == ["体检报告.pdf", "舌苔.png"]
+    hermes_agent._HOST_DATA_DIR_CACHE.clear()
+
+
 def test_a_big_workspace_file_comes_through_whole():
     """A conclusion's picture (megabytes) used to arrive as its first chunk only: a broken image."""
     from aiohttp import web

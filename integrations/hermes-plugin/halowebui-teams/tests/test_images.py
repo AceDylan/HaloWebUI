@@ -51,6 +51,7 @@ def test_an_image_member_runs_on_hermes_and_is_told_how_images_work(pkg, team_id
         bodies = {k: _kb().get_task(conn, tid).body for k, tid in created["tasks"].items()}
     assert "image_generate" in bodies["T2"] and "images/" in bodies["T2"] and ".halo/image-templates.md" in bodies["T2"]
     assert "手绘万能图" in bodies["T2"]
+    assert "绝不要因此停下来问人" in bodies["T2"]  # a rate-limited vision check once blocked a finished picture
     assert "image_generate" not in bodies["T1"]
     # the image is not in a listing of the team's deliverables (.halo is hidden)
     assert not any(f["path"].startswith(".halo") for f in pkg.conclusion.list_files(team))

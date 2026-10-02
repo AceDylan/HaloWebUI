@@ -26,8 +26,10 @@ from open_webui.utils.agent_teams import (
     deletable,
     hermes_call,
     hermes_file,
+    INPUT_FILES_MAX,
     hermes_target,
     image_templates,
+    input_files,
     planning_progress,
     public_team,
     reconcile,
@@ -69,6 +71,8 @@ class CreateTeamForm(BaseModel):
     project: Optional[str] = Field(default=None, max_length=500)
     # 「计划好直接开始」: approve the plan as soon as it is ready (when every member can run now).
     auto_start: bool = False
+    # Files uploaded for the team (their ids, /api/v1/files): copied into its workspace's inputs/.
+    files: list[str] = Field(default_factory=list, max_length=INPUT_FILES_MAX)
 
 
 class ReplanForm(BaseModel):
@@ -206,13 +210,19 @@ async def create_team(request: Request, form: CreateTeamForm, user=Depends(get_v
         target = await hermes_target(request, user)
     except TeamsError as exc:
         _raise(exc)
+    inputs = input_files(form.files, user)
+    if form.files and len(inputs) < len(set(form.files)):
+        raise HTTPException(status_code=404, detail="有附件找不到（没上传成功，或不是你的文件）")
     return public_team(_start(user, goal, target, chat_id=chat_id, lead_model=form.lead_model, project=form.project,
-                              auto_start=form.auto_start))
+                              auto_start=form.auto_start, inputs=inputs))
 
 
 def _start(user, goal: str, target, *, chat_id: Optional[str] = None, lead_model: Optional[str] = None,
-           origin: Optional[dict] = None, project: Optional[str] = None, auto_start: bool = False):
+           origin: Optional[dict] = None, project: Optional[str] = None, auto_start: bool = False,
+           inputs: Optional[list] = None):
     meta: dict = {}
+    if inputs:
+        meta["inputs"] = inputs
     if auto_start:
         meta["auto_start"] = True
     if (lead_model or "").strip():

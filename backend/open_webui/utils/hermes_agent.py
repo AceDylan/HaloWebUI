@@ -1085,8 +1085,9 @@ def _host_data_dir():
     return value
 
 
-def _attachment_host_paths(metadata, user) -> list[tuple[str, str]]:
-    """(name, host path) of the non-image files attached to this turn.
+def _attachment_host_paths(metadata, user, images: bool = False) -> list[tuple[str, str]]:
+    """(name, host path) of the non-image files attached to this turn
+    (``images=True``: images too — a 协作台 team gets every file as a file).
 
     Retrieval only put excerpts of them into the prompt; hermes runs on the
     same host and can read the whole file when it is told where it is."""
@@ -1115,7 +1116,7 @@ def _attachment_host_paths(metadata, user) -> list[tuple[str, str]]:
             )
             or ""
         )
-        if content_type.startswith("image/"):
+        if content_type.startswith("image/") and not images:
             continue
         try:
             record = Files.get_file_by_id(file_id)
@@ -1919,6 +1920,13 @@ async def run_hermes_agent(request, form_data, user, metadata, model, events, ta
     )
     if not base_url:
         return None
+
+    raw_options = form_data.get("hermes_options") if isinstance(form_data, dict) else None
+    if isinstance(raw_options, dict) and str(raw_options.get("dispatch") or "").strip().lower() == "team":
+        # 派发方式「协作台」: the message becomes a 协作台 team, no Hermes run.
+        from open_webui.utils.agent_team_dispatch import run_team_dispatch
+
+        return await run_team_dispatch(request, form_data, user, metadata, model_id)
 
     event_emitter = get_event_emitter(metadata)
     event_caller = get_event_call(metadata)

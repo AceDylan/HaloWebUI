@@ -118,6 +118,7 @@ async def _plan(request):
         result = await asyncio.to_thread(
             plan_mod.propose_plan, goal, workspace, feedback=str(data.get("feedback") or ""), previous=previous,
             lead_model=lead_model, project=project, team_id=plan_key,
+            inputs=[str(n)[:120] for n in data.get("inputs") or [] if n][:20] if isinstance(data.get("inputs"), list) else None,
         )
     finally:
         progress.planning_done(plan_key)
@@ -151,6 +152,7 @@ async def _create(request):
         goal=str(data.get("goal") or ""), title=str(data.get("title") or ""),
         origin=data.get("origin") if isinstance(data.get("origin"), dict) else None,
         image_templates=data.get("image_templates") if isinstance(data.get("image_templates"), list) else None,
+        inputs=data.get("inputs") if isinstance(data.get("inputs"), list) else None,
     )
     return _json_response(result, status=201 if result.get("created") else 200)
 

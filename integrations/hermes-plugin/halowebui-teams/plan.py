@@ -81,8 +81,15 @@ def system_prompt() -> str:
 
 
 def build_messages(goal: str, workspace: str, feedback: str = "", previous: Optional[dict] = None,
-                   project: Optional[dict] = None) -> list:
+                   project: Optional[dict] = None, inputs: Optional[list] = None) -> list:
     extra = ""
+    if inputs:
+        from .teams import inputs_dir, safe_input_name
+
+        folder = inputs_dir(project and project.get("path"))
+        extra += ("\n用户随目标附带了文件，开工时会放进工作目录的 " + folder + "/ 下，成员可以直接读（图片可以看图）；"
+                  "计划里要用到它们的任务，description 写清读哪个文件：\n"
+                  + "\n".join(f"- {folder}/{safe_input_name(n)}" for n in inputs[:20]) + "\n")
     if previous:
         extra += "\n上一版计划（用户要求修改）：\n" + json.dumps(_plan_for_lead(previous), ensure_ascii=False)[:6000] + "\n"
     if feedback:
@@ -588,7 +595,7 @@ def resolve_project(goal: str, choice: str) -> Optional[dict]:
 
 def propose_plan(goal: str, workspace: str, *, feedback: str = "", previous: Optional[dict] = None,
                  parallel_cap: int = DEFAULT_PARALLEL_CAP, timeout: int = 150, lead_model: str = "",
-                 project: Optional[dict] = None, team_id: str = "") -> dict:
+                 project: Optional[dict] = None, team_id: str = "", inputs: Optional[list] = None) -> dict:
     """Ask the lead model for a plan, then validate it. One retry when the reply is not usable.
     Each step is visible to HaloWebUI while it runs (``progress.planning``)."""
     from . import progress
@@ -597,7 +604,7 @@ def propose_plan(goal: str, workspace: str, *, feedback: str = "", previous: Opt
         workspace = project["path"] + "（团队分支的 worktree，批准时创建）"
     progress.planning_step(team_id, "prepare", "读目标，整理可选的成员模板、执行来源和模型" + (
         f"；在项目 {project.get('name') or project['path']} 里做" if project and project.get("path") else ""))
-    messages = build_messages(goal, workspace, feedback, previous, project)
+    messages = build_messages(goal, workspace, feedback, previous, project, inputs)
     last_errors: list[str] = []
     for attempt in range(2):
         def on_route(route: dict, failures: list, attempt: int = attempt) -> None:

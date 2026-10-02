@@ -141,6 +141,20 @@ describe('hermes run options', () => {
 		});
 	});
 
+	it('knows 协作台 as a dispatch that starts a team (never a run to continue)', () => {
+		expect(normalizeHermesRunOptions({ dispatch: 'team' }).dispatch).toBe('team');
+		expect(
+			normalizeHermesRunOptions({ dispatch: 'team', continue_run: '20260930-112556-677bec3c' })
+		).toEqual({ dispatch: 'team', model: '', provider: '' });
+		expect(hermesRunOptionsForRequest({ ...EMPTY_HERMES_RUN_OPTIONS, dispatch: 'team' })).toEqual({
+			dispatch: 'team'
+		});
+		expect(hermesOptionsToKeep({ dispatch: 'team', model: 'gpt-chat' }).dispatch).toBe('');
+		const reply = describeHermesReply(null, { dispatch: 'team' });
+		expect(reply?.label).toContain('协作台');
+		expect(reply?.title).toContain('结果会发回这个对话');
+	});
+
 	it('sends nothing when every choice is the default', () => {
 		expect(hermesRunOptionsForRequest(EMPTY_HERMES_RUN_OPTIONS)).toBeNull();
 		expect(

@@ -1,9 +1,12 @@
 // 协作台 stage rail, mounted in a DOM: every stage says where the team is (计划 → 批准 → 执行 →
 // 整理结果 → 验收), what is happening right now, how long it has taken and about how long is left.
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { installDominoDom } from '$lib/test-support/domino-dom';
 
 installDominoDom('http://localhost/');
+
+const api = vi.hoisted(() => ({ getTeam: vi.fn() }));
+vi.mock('$lib/apis/teams', () => api);
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const nowTs = () => Math.floor(Date.now() / 1000);
@@ -135,5 +138,49 @@ describe('StageRail', () => {
 			}
 		});
 		expect(text('[data-stage-eta]')).toBe('比平时久一些，应该快好了');
+	});
+});
+
+describe('TeamChatCard (派发方式「协作台」 in a chat)', () => {
+	it('shows the team’s stage live, then where its result is', async () => {
+		const at = nowTs();
+		const responses = [
+			{
+				team: { id: 'team-c', title: '戒烟计划', status: 'planning', member_count: 0, task_count: 0 },
+				live: null,
+				stage: {
+					key: 'planning',
+					label: '负责人制定计划',
+					now: '负责人（gpt-chat）在理解目标、挑选成员、拆分带依赖的任务',
+					started_at: at - 5,
+					at,
+					eta: { seconds: 40, high: 70 },
+					steps: steps(0)
+				}
+			},
+			{
+				team: { id: 'team-c', title: '戒烟计划', status: 'running', phase: 'completed', member_count: 2, task_count: 3 },
+				live: {},
+				stage: { key: 'done', label: '已完成', now: '完整结果已经整理好', at, steps: steps(5) }
+			}
+		];
+		api.getTeam.mockImplementation(async () => responses.shift() ?? responses[0]);
+		const { default: TeamChatCard } = await import('./TeamChatCard.svelte');
+		target = document.createElement('div');
+		document.body.appendChild(target);
+		(globalThis as any).localStorage.token = 'tok';
+		app = new TeamChatCard({ target, props: { teamId: 'team-c' } });
+		const until = async (check: () => boolean) => {
+			const end = Date.now() + 15000;
+			while (!check()) {
+				if (Date.now() > end) throw new Error('timed out');
+				await sleep(20);
+			}
+		};
+		await until(() => !!target.querySelector('[data-stage="planning"]'));
+		expect(target.querySelector('[data-team-chat-card]').textContent).toContain('戒烟计划');
+		expect(target.querySelector('[data-team-chat-open]').getAttribute('href')).toBe('/teams/team-c');
+		expect(text('[data-stage-now]')).toContain('gpt-chat');
+		expect(api.getTeam.mock.calls[0].slice(1)).toEqual(['team-c']);
 	});
 });

@@ -133,7 +133,7 @@ export type HermesApprovalRequest = {
  * what that resolved to: a runner plus `continue_run` for a follow-up.
  */
 export type HermesRunOptions = {
-	dispatch: '' | 'hermes' | 'reclaude' | 'cchclaude' | 'anyclaude' | 'codex' | 'agy';
+	dispatch: '' | 'hermes' | 'reclaude' | 'cchclaude' | 'anyclaude' | 'codex' | 'agy' | 'team';
 	model: string;
 	provider: string;
 	/** The run a sent follow-up went back to (its session resumed, not a new task). */
@@ -149,7 +149,8 @@ export const EMPTY_HERMES_RUN_OPTIONS: HermesRunOptions = {
 // cchclaude: the reclaude runner driving Claude Code through the user's own cch hub;
 // anyclaude: the same on anyrouter (free and slow).
 const HERMES_RUNNERS = new Set(['reclaude', 'cchclaude', 'anyclaude', 'codex', 'agy']);
-const HERMES_DISPATCHES = new Set([...HERMES_RUNNERS, 'hermes']);
+// 'team': the message becomes a 协作台 team (agent_team_dispatch in the backend), no Hermes run.
+const HERMES_DISPATCHES = new Set([...HERMES_RUNNERS, 'hermes', 'team']);
 // A run id as the runners name them: "20260927-005655-f2dd355f", an answer round "…-a1".
 const RUNNER_RUN_ID_RE = /^\d{8}-\d{6}-[0-9a-f]{6,32}(?:-a\d+)*$/;
 // "/reclaude …", "/model": a typed command wins over the panel ("/root/x" is a path).
@@ -289,7 +290,8 @@ const DISPATCH_LABELS: Record<string, string> = {
 	cchclaude: 'cchclaude',
 	anyclaude: 'anyclaude',
 	codex: 'codex',
-	agy: 'agy'
+	agy: 'agy',
+	team: '协作台'
 };
 
 /**
@@ -330,6 +332,9 @@ export const describeHermesReply = (
 		// the runner to get this and should know it did not.
 		parts.push(`未交回 ${DISPATCH_LABELS[dispatch] ?? dispatch}`);
 		lines.push(`没能直接交回 ${dispatch} 运行 ${askedToContinue}，由 Hermes 处理`);
+	} else if (dispatch === 'team') {
+		parts.push('协作台');
+		lines.push('交给协作台的团队：负责人做计划、成员分工执行，结果会发回这个对话（没有经过模型）');
 	} else if (dispatch) {
 		parts.push(DISPATCH_LABELS[dispatch] ?? dispatch);
 		lines.push(

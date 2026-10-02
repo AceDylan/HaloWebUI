@@ -20,6 +20,7 @@
 	import RunnerStatus from './RunnerStatus.svelte';
 	import StatusChip from './StatusChip.svelte';
 	import TeamAvatar from './TeamAvatar.svelte';
+	import { uploadFile } from '$lib/apis/files';
 	import { now, timeAgo } from './clock';
 	import { avatarKind, etaSentence, formatEta, PHASE_LABEL, runnerLabel } from './model';
 
@@ -198,9 +199,42 @@
 		}
 	};
 
+	// Files given with the goal (uploaded first, then handed to the team by id).
+	let attached: { id: string | null; name: string; size: number; error?: string }[] = [];
+	let fileInput: HTMLInputElement;
+	$: uploading = attached.some((f) => !f.id && !f.error);
+	const ATTACH_MAX = 20;
+	const ATTACH_MAX_BYTES = 50 * 1024 * 1024;
+
+	const attach = async (files: FileList | File[] | null) => {
+		for (const file of Array.from(files ?? [])) {
+			if (attached.length >= ATTACH_MAX) {
+				toast.error(`最多带 ${ATTACH_MAX} 个文件`);
+				break;
+			}
+			if (file.size > ATTACH_MAX_BYTES) {
+				toast.error(`「${file.name}」超过 50 MB`);
+				continue;
+			}
+			const entry = { id: null as string | null, name: file.name, size: file.size };
+			attached = [...attached, entry];
+			try {
+				const res = await uploadFile(localStorage.token, file, { process: false });
+				entry.id = res?.id ?? null;
+				if (!entry.id) throw new Error('上传没有返回文件');
+			} catch (e) {
+				(entry as any).error = `${(e as any)?.message ?? e}`;
+				toast.error(`「${file.name}」上传失败`);
+			}
+			attached = [...attached];
+		}
+		if (fileInput) fileInput.value = '';
+	};
+	const detach = (i: number) => (attached = attached.filter((_, j) => j !== i));
+
 	const create = async () => {
 		const text = goal.trim();
-		if (!text || creating) return;
+		if (!text || creating || uploading) return;
 		creating = true;
 		try {
 			const team = await createTeam(
@@ -209,7 +243,8 @@
 				chatId,
 				leadModel || null,
 				project,
-				autoStart
+				autoStart,
+				attached.filter((f) => f.id).map((f) => f.id as string)
 			);
 			goto(`/teams/${team.id}`);
 		} catch (e) {
@@ -331,6 +366,8 @@
 				class="tm-rise composer tm-card relative flex flex-col"
 				style="--i:1"
 				on:submit|preventDefault={create}
+				on:dragover|preventDefault
+				on:drop|preventDefault={(e) => attach(e.dataTransfer?.files ?? null)}
 				data-team-composer
 			>
 				<label for="team-goal" class="sr-only">要协作完成的目标</label>
@@ -343,6 +380,13 @@
 					class="tm-scroll w-full resize-none bg-transparent px-5 pt-4 pb-2 text-[15px] leading-relaxed text-gray-900 outline-none placeholder:text-gray-400 dark:text-gray-100 dark:placeholder:text-gray-500"
 					placeholder="描述你想完成的事，比如：调研三个开源看板工具并写一份对比报告，最后由评审成员检查结论"
 					on:input={resize}
+					on:paste={(e) => {
+						const files = e.clipboardData?.files;
+						if (files?.length) {
+							e.preventDefault();
+							attach(files);
+						}
+					}}
 					on:keydown={(e) => {
 						if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
 							e.preventDefault();
@@ -353,7 +397,58 @@
 				{#if chatId}
 					<div class="px-5 pb-1 text-xs text-sky-700 dark:text-sky-300">会关联到你刚才的对话</div>
 				{/if}
+				{#if attached.length}
+					<ul class="flex flex-wrap gap-1.5 px-4 pb-1.5" aria-label="附带的文件" data-team-attachments>
+						{#each attached as f, i (f.name + i)}
+							<li
+								class="pill flex max-w-[16rem] items-center gap-1.5 rounded-full py-0.5 pr-1 pl-2.5 text-xs {f.error
+									? '!border-red-400/50 text-red-700 dark:text-red-300'
+									: ''}"
+								data-attachment-state={f.error ? 'failed' : f.id ? 'ready' : 'uploading'}
+							>
+								{#if !f.id && !f.error}
+									<span
+										class="size-3 shrink-0 animate-spin rounded-full border-2 border-current border-r-transparent"
+										aria-hidden="true"
+									/>
+								{/if}
+								<span class="min-w-0 truncate" title={f.error ?? f.name}>{f.name}</span>
+								<button
+									type="button"
+									class="grid size-4 shrink-0 place-items-center rounded-full text-gray-400 hover:bg-gray-500/10 hover:text-gray-700 dark:hover:text-gray-200"
+									aria-label="去掉 {f.name}"
+									on:click={() => detach(i)}>×</button
+								>
+							</li>
+						{/each}
+					</ul>
+				{/if}
 				<div class="flex items-center gap-2 px-3 pt-1 pb-3">
+					<input
+						bind:this={fileInput}
+						type="file"
+						multiple
+						class="hidden"
+						on:change={(e) => attach(e.currentTarget.files)}
+						data-team-file-input
+					/>
+					<button
+						type="button"
+						class="pill grid size-7 shrink-0 place-items-center rounded-full text-gray-600 dark:text-gray-300"
+						title="附带文件或图片：团队开工时会放进工作目录的 inputs/，成员都能读"
+						aria-label="附带文件"
+						on:click={() => fileInput?.click()}
+						data-team-attach
+						><svg class="size-3.5" viewBox="0 0 16 16" fill="none" aria-hidden="true"
+							><path
+								d="M10.5 4.5 5.4 9.6a1.6 1.6 0 0 0 2.3 2.3l5.2-5.2a3 3 0 0 0-4.3-4.3L3.4 7.6a4.4 4.4 0 0 0 6.2 6.2l4-4"
+								stroke="currentColor"
+								stroke-width="1.3"
+								stroke-linecap="round"
+								stroke-linejoin="round"
+							/></svg
+						></button
+					>
 					<div class="tm-scroll tm-fade-x flex min-w-0 flex-1 items-center gap-2 overflow-x-auto">
 						<label
 							class="pill flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full py-1 pr-1 pl-2.5 text-xs"
@@ -474,7 +569,7 @@
 						<button
 							type="submit"
 							class="tm-btn-primary max-sm:!px-2.5"
-							disabled={creating || !goal.trim()}
+							disabled={creating || uploading || !goal.trim()}
 							aria-label="让负责人做计划"
 							data-create-team
 						>

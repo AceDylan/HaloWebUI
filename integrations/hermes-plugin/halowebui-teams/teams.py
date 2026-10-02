@@ -103,12 +103,58 @@ def _task_body(team: dict, task: dict, member: dict) -> str:
         f"前置任务：{deps}（它们的完成摘要会出现在你的上下文「Parent task results」里）。\n"
         + _workspace_text(team)
         + "\n\n"
+        + (_inputs_text(team))
         + (_image_text(team) if member.get("kind") == "image" else "")
         + "完成后调用 kanban_complete，summary 写清楚：做了什么、产出物在哪个文件、给后续成员的交接要点；"
         "result 写完整的结果（负责人会据此写最终结论；图片、截图等产出写明它在工作目录里的相对路径）。"
         "需要和别的成员沟通时用 kanban_comment 写在你的任务上。"
         "确实无法继续（缺信息、需要用户决定）时调用 kanban_block 并写明原因，不要编造结果。"
     )
+
+
+INPUT_MAX_BYTES = 100 * 1024 * 1024
+INPUTS_MAX = 20
+
+
+def inputs_dir(project: Any) -> str:
+    """Where the files given with the goal go: inputs/, or .halo/inputs/ in a project's worktree
+    (never committed to the team's branch)."""
+    return ".halo/inputs" if project else "inputs"
+
+
+def safe_input_name(name: Any) -> str:
+    base = os.path.basename(str(name or "").replace("\\", "/")).strip()
+    base = re.sub(r"[\x00-\x1f/]", "", base).lstrip(".").strip()
+    return base[:120] or "file"
+
+
+def copy_inputs(workspace: str, inputs: Any, *, project: Any = None) -> list[str]:
+    """Copy the files given with the goal (HaloWebUI uploads, host paths) into the workspace.
+    Returns their paths relative to the workspace; missing / oversized / non-regular files skipped."""
+    import shutil
+
+    rows = [i for i in (inputs or []) if isinstance(i, dict) and i.get("path")][:INPUTS_MAX]
+    if not rows or not workspace:
+        return []
+    folder = Path(workspace) / inputs_dir(project)
+    out: list[str] = []
+    for row in rows:
+        src = Path(str(row["path"]))
+        try:
+            if not src.is_absolute() or src.is_symlink() or not src.is_file() or src.stat().st_size > INPUT_MAX_BYTES:
+                logger.info("halowebui-teams: input %s skipped (missing, not a file or too big)", src.name)
+                continue
+            folder.mkdir(parents=True, exist_ok=True)
+            name = safe_input_name(row.get("name") or src.name)
+            stem, ext = os.path.splitext(name)
+            dest, n = folder / name, 2
+            while dest.exists():
+                dest, n = folder / f"{stem} ({n}){ext}", n + 1
+            shutil.copyfile(src, dest)
+            out.append(dest.relative_to(Path(workspace)).as_posix())
+        except OSError:
+            logger.warning("halowebui-teams: could not copy an input into %s", workspace, exc_info=True)
+    return out
 
 
 IMAGE_TEMPLATES_FILE = ".halo/image-templates.md"
@@ -122,13 +168,23 @@ def _image_text(team: dict) -> str:
             "aspect_ratio 选 landscape（横）/ portrait（竖）/ square（方）。"
             "每生成一张，系统会自动把它存进工作目录 images/（例如 images/T3-1.png，同名 .prompt.md 记着提示词），"
             "你不用自己复制；不满意就改提示词再生成，"
-            f"整个任务最多生成 {MAX_IMAGES_PER_TASK} 张。result 里逐张写：文件路径、画的是什么、用在哪里。\n")
+            f"整个任务最多生成 {MAX_IMAGES_PER_TASK} 张。result 里逐张写：文件路径、画的是什么、用在哪里。"
+            "生成成功就算交付：不必再用看图工具逐字核对；看图工具限流或出错时，绝不要因此停下来问人，"
+            "在 result 里注明「未做视觉核对」直接完成。\n")
     names = team.get("image_templates") or []
     if names:
         text += (f"用户在 HaloWebUI 里存了自己的生图模板（风格提示词，全文在工作目录的 {IMAGE_TEMPLATES_FILE}）："
                  + "；".join(names[:40]) + "。合适时选一个：先读那个文件里它的全文，把模板放在 prompt 开头，"
                  "后面接上要画的内容（模板以「内容：」结尾）；没有合适的就自己写。\n")
     return text + "\n"
+
+
+def _inputs_text(team: dict) -> str:
+    files = team.get("inputs") or []
+    if not files:
+        return ""
+    return ("用户随目标附带的文件（在工作目录里，按需直接读取；图片用看图工具看，PDF / 表格用合适的工具读）："
+            + "、".join(files[:20]) + "\n\n")
 
 
 def write_image_templates(workspace: str, templates: Any) -> list[str]:
@@ -168,7 +224,8 @@ def _workspace_text(team: dict) -> str:
 
 
 def create_team(team_id: str, plan: dict, *, owner: str, chat_id: str = "", goal: str = "",
-                title: str = "", origin: Optional[dict] = None, image_templates: Optional[list] = None) -> dict:
+                title: str = "", origin: Optional[dict] = None, image_templates: Optional[list] = None,
+                inputs: Optional[list] = None) -> dict:
     """Create (or return) the board for *team_id* from a validated *plan*; idempotent.
     ``image_templates``: the owner's HaloWebUI image templates, offered to image members."""
     from .plan import task_model, validate_plan
@@ -196,6 +253,7 @@ def create_team(team_id: str, plan: dict, *, owner: str, chat_id: str = "", goal
             Path(workspace).mkdir(parents=True, exist_ok=True)
         template_names = (write_image_templates(workspace, image_templates)
                           if any(m.get("kind") == "image" for m in checked["members"]) else [])
+        input_paths = copy_inputs(workspace, inputs, project=project)
         team_title = redact(title or checked["title"], 60) or "协作任务"
         team = {
             "team_id": team_id,
@@ -214,6 +272,7 @@ def create_team(team_id: str, plan: dict, *, owner: str, chat_id: str = "", goal
             "members": checked["members"],
             "max_parallel": checked["max_parallel"],
             "image_templates": template_names,
+            "inputs": input_paths,
             "state": "running",
             "created_at": now(),
             "approved_at": now(),

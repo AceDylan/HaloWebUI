@@ -82,6 +82,7 @@
 	import Citations from './Citations.svelte';
 	import CodeExecutions from './CodeExecutions.svelte';
 	import ContentRenderer from './ContentRenderer.svelte';
+	import TeamChatCard from '$lib/components/teams/TeamChatCard.svelte';
 	import MessageOutline from './MessageOutline.svelte';
 	import ThinkingIndicator from './ThinkingIndicator.svelte';
 	import GenerationElapsed from './GenerationElapsed.svelte';
@@ -1244,6 +1245,8 @@
 		await tick();
 		setupButtonsScroll();
 	});
+	// 派发方式「协作台」: this reply is a team's live card.
+	$: teamDispatchId = ((message as any)?.team_dispatch?.team_id as string | undefined) ?? null;
 </script>
 
 <DeleteConfirmDialog
@@ -1924,6 +1927,10 @@
 													}
 												}}
 											/>
+										{/if}
+
+										{#if teamDispatchId}
+											<TeamChatCard teamId={teamDispatchId} />
 										{/if}
 
 										{#if showContinuationIndicator}

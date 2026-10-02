@@ -349,65 +349,69 @@
 		</section>
 
 		{#if editable}
-			<div class="dock tm-glass sticky bottom-3 z-10 flex flex-col gap-2 rounded-2xl px-4 py-3">
-				<p class="text-xs text-gray-500">
-					批准后成员才开始工作（普通聊天不会自动启动多代理）。每个成员会消耗模型额度；可以随时暂停派发或停止。
-				</p>
-				<div class="flex flex-wrap items-center gap-2">
-					<button
-						type="button"
-						class="tm-btn-primary"
-						disabled={busy}
-						on:click={() => dispatch('approve')}
-						>{busy ? '处理中…' : '批准并开始'}<svg
-							class="size-3.5"
-							viewBox="0 0 16 16"
-							fill="none"
-							aria-hidden="true"
-							><path
-								d="M3 8h9.5M8.5 4l4 4-4 4"
-								stroke="currentColor"
-								stroke-width="1.7"
-								stroke-linecap="round"
-								stroke-linejoin="round"
-							/></svg
-						></button
-					>
-					<button
-						type="button"
-						class="tm-btn-ghost !px-3.5 !py-2 !text-sm"
-						disabled={busy}
-						aria-expanded={showFeedback}
-						on:click={() => (showFeedback = !showFeedback)}>按意见重新规划</button
-					>
-					<button
-						type="button"
-						class="rounded-xl px-3 py-2 text-sm text-gray-500 transition hover:text-red-600 disabled:opacity-50"
-						disabled={busy}
-						on:click={() => dispatch('cancel')}>取消</button
-					>
+			<div class="dock-wrap sticky -bottom-6 z-10 -mx-2 px-2 pb-9 pt-6">
+				<div class="dock tm-glass flex flex-col gap-2 rounded-2xl px-4 py-3">
+					<p class="text-xs text-gray-500">
+						批准后成员才开始工作（普通聊天不会自动启动多代理）。每个成员会消耗模型额度；可以随时暂停派发或停止。
+					</p>
+					<div class="flex flex-wrap items-center gap-2">
+						<button
+							type="button"
+							class="tm-btn-primary"
+							disabled={busy}
+							on:click={() => dispatch('approve')}
+							>{busy ? '处理中…' : '批准并开始'}<svg
+								class="size-3.5"
+								viewBox="0 0 16 16"
+								fill="none"
+								aria-hidden="true"
+								><path
+									d="M3 8h9.5M8.5 4l4 4-4 4"
+									stroke="currentColor"
+									stroke-width="1.7"
+									stroke-linecap="round"
+									stroke-linejoin="round"
+								/></svg
+							></button
+						>
+						<button
+							type="button"
+							class="tm-btn-ghost !px-3.5 !py-2 !text-sm"
+							disabled={busy}
+							aria-expanded={showFeedback}
+							on:click={() => (showFeedback = !showFeedback)}>按意见重新规划</button
+						>
+						<button
+							type="button"
+							class="rounded-xl px-3 py-2 text-sm text-gray-500 transition hover:text-red-600 disabled:opacity-50"
+							disabled={busy}
+							on:click={() => dispatch('cancel')}>取消</button
+						>
+					</div>
+					{#if showFeedback}
+						<form
+							class="flex flex-col gap-1.5"
+							on:submit|preventDefault={() => dispatch('replan', feedback)}
+						>
+							<label class="text-xs text-gray-600 dark:text-gray-300" for="team-replan"
+								>你希望怎么改？</label
+							>
+							<textarea
+								id="team-replan"
+								bind:value={feedback}
+								rows="3"
+								maxlength="2000"
+								class="w-full rounded-xl border border-gray-200 bg-white px-2.5 py-2 text-sm outline-none transition focus:border-sky-400 dark:border-gray-800 dark:bg-gray-900"
+								placeholder="例如：再加一个测试成员；前端交给 codex；把评审放到最后"
+							/>
+							<button
+								type="submit"
+								class="tm-btn-primary self-start !py-1.5 !text-xs"
+								disabled={busy}>让负责人重新规划</button
+							>
+						</form>
+					{/if}
 				</div>
-				{#if showFeedback}
-					<form
-						class="flex flex-col gap-1.5"
-						on:submit|preventDefault={() => dispatch('replan', feedback)}
-					>
-						<label class="text-xs text-gray-600 dark:text-gray-300" for="team-replan"
-							>你希望怎么改？</label
-						>
-						<textarea
-							id="team-replan"
-							bind:value={feedback}
-							rows="3"
-							maxlength="2000"
-							class="w-full rounded-xl border border-gray-200 bg-white px-2.5 py-2 text-sm outline-none transition focus:border-sky-400 dark:border-gray-800 dark:bg-gray-900"
-							placeholder="例如：再加一个测试成员；前端交给 codex；把评审放到最后"
-						/>
-						<button type="submit" class="tm-btn-primary self-start !py-1.5 !text-xs" disabled={busy}
-							>让负责人重新规划</button
-						>
-					</form>
-				{/if}
 			</div>
 		{/if}
 	</div>
@@ -449,6 +453,10 @@
 	}
 	.dock {
 		box-shadow: var(--tm-shadow-lift);
+	}
+	/* The page fades out under the floating dock instead of peeking out below it. */
+	.dock-wrap {
+		background: linear-gradient(to bottom, transparent, var(--tm-page) 55%);
 	}
 	/* The app's global `select` rule (unlayered) outranks Tailwind's utilities: size these here. */
 	.compact-select {

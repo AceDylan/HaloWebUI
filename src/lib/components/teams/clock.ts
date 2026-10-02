@@ -35,3 +35,15 @@ export const elapsed = (seconds: number): string => {
 	const h = Math.floor(m / 60);
 	return `${h}h ${String(m % 60).padStart(2, '0')}m`;
 };
+
+/** Very short "when", for tight rows: "12s", "5m", "23:12", "9/30". */
+export const shortAgo = (ts: number | null | undefined, at: number = Date.now() / 1000): string => {
+	if (!ts) return '';
+	const s = Math.max(0, at - ts);
+	if (s < 60) return `${Math.floor(s)}s`;
+	if (s < 3600) return `${Math.floor(s / 60)}m`;
+	const d = new Date(ts * 1000);
+	if (d.toDateString() === new Date(at * 1000).toDateString())
+		return d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false });
+	return `${d.getMonth() + 1}/${d.getDate()}`;
+};

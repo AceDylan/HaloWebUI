@@ -95,21 +95,25 @@
 	const QUICK_STARTS = [
 		{
 			icon: 'research',
+			desc: '多方调研 → 对比报告 → 评审核对',
 			title: '调研对比',
 			text: '调研 3 个主流的开源看板工具，对比功能、活跃度、部署难度和上手成本，写一份带推荐结论的报告；最后由评审成员核对事实和出处。'
 		},
 		{
 			icon: 'build',
+			desc: '后端与测试、前端页面、说明文档',
 			title: '功能开发',
 			text: '在工作目录实现一个命令行待办工具：后端成员写核心逻辑和单元测试并跑通，前端成员做一个单文件网页界面，最后写 README 说明用法和测试结果。'
 		},
 		{
 			icon: 'review',
+			desc: '正确性 / 性能 / 安全三路并查',
 			title: '代码审查',
 			text: '审查 /root/项目路径 最近的改动：分别从正确性、性能、安全三个角度找问题，按严重程度列出并给出修改建议，最后汇总成一份审查报告。'
 		},
 		{
 			icon: 'doc',
+			desc: '方案初稿与架构图，评审后修订',
 			title: '方案撰写',
 			text: '为「团队知识库」写一份技术方案：背景与目标、架构图（Mermaid）、数据模型、里程碑和风险；写完由评审成员挑错并修订。'
 		}
@@ -296,66 +300,71 @@
 				{#if chatId}
 					<div class="px-5 pb-1 text-xs text-sky-700 dark:text-sky-300">会关联到你刚才的对话</div>
 				{/if}
-				<div class="flex flex-wrap items-center gap-2 px-3 pt-1 pb-3">
-					<label
-						class="pill flex min-w-0 items-center gap-1.5 rounded-full py-1 pr-1 pl-2.5 text-xs"
-						data-lead-model
-						title="负责人做计划、写结论用的模型；默认跟随 Hermes 当前的默认模型"
-					>
-						<TeamAvatar kind="lead" size={16} />
-						<span class="shrink-0 text-gray-500 dark:text-gray-400">负责人</span>
-						<select bind:value={leadModel} class="compact-select min-w-0 max-w-[12rem] truncate">
-							<option value=""
-								>{meta?.lead_model?.model ? `Hermes 默认 · ${defaultModel}` : 'Hermes 默认'}</option
-							>
-							{#each modelChoices as model}
-								<option value={model}>{model}</option>
-							{/each}
-						</select>
-					</label>
-					<button
-						type="button"
-						class="pill inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs text-gray-600 dark:text-gray-300"
-						aria-expanded={showRunners}
-						on:click={() => (showRunners = !showRunners)}
-						data-runner-summary
-					>
-						<span class="flex -space-x-0.5" aria-hidden="true">
-							{#each runners.slice(0, 6) as r}
-								<span
-									class="size-1.5 rounded-full ring-2 ring-white dark:ring-gray-900 {r.available
-										? 'bg-emerald-500'
-										: r.state === 'not_configured'
-											? 'bg-gray-300 dark:bg-gray-600'
-											: 'bg-red-500'}"
-								/>
-							{/each}
-						</span>
-						{#if !meta && !metaError}
-							检测执行来源…
-						{:else if metaError}
-							执行来源检测失败
-						{:else}
-							执行来源 <b class="tm-num font-semibold">{runnersUp}/{runners.length}</b> 可用
-						{/if}
-						<svg
-							class="size-3 transition-transform {showRunners ? 'rotate-180' : ''}"
-							viewBox="0 0 12 12"
-							fill="none"
-							aria-hidden="true"
-							><path
-								d="m3 4.5 3 3 3-3"
-								stroke="currentColor"
-								stroke-width="1.4"
-								stroke-linecap="round"
-								stroke-linejoin="round"
-							/></svg
+				<div class="flex items-center gap-2 px-3 pt-1 pb-3">
+					<div class="tm-scroll flex min-w-0 flex-1 items-center gap-2 overflow-x-auto">
+						<label
+							class="pill flex min-w-0 items-center gap-1.5 rounded-full py-1 pr-1 pl-2.5 text-xs"
+							data-lead-model
+							title="负责人做计划、写结论用的模型；默认跟随 Hermes 当前的默认模型"
 						>
-					</button>
-					<div class="ml-auto flex items-center gap-2">
-						<span class="hidden items-center gap-1 text-[11px] text-gray-400 sm:inline-flex">
-							<kbd class="tm-kbd">{isMac ? '⌘' : 'Ctrl'}</kbd><kbd class="tm-kbd">↵</kbd>
-						</span>
+							<TeamAvatar kind="lead" size={16} />
+							<span class="shrink-0 text-gray-500 dark:text-gray-400">负责人</span>
+							<select bind:value={leadModel} class="compact-select min-w-0 max-w-[12rem] truncate">
+								<option value=""
+									>{meta?.lead_model?.model
+										? `Hermes 默认 · ${defaultModel}`
+										: 'Hermes 默认'}</option
+								>
+								{#each modelChoices as model}
+									<option value={model}>{model}</option>
+								{/each}
+							</select>
+						</label>
+						<button
+							type="button"
+							class="pill inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs text-gray-600 dark:text-gray-300"
+							aria-expanded={showRunners}
+							on:click={() => (showRunners = !showRunners)}
+							data-runner-summary
+						>
+							<span class="flex -space-x-0.5" aria-hidden="true">
+								{#each runners.slice(0, 6) as r}
+									<span
+										class="size-1.5 rounded-full ring-2 ring-white dark:ring-gray-900 {r.available
+											? 'bg-emerald-500'
+											: r.state === 'not_configured'
+												? 'bg-gray-300 dark:bg-gray-600'
+												: 'bg-red-500'}"
+									/>
+								{/each}
+							</span>
+							{#if !meta && !metaError}
+								检测执行来源…
+							{:else if metaError}
+								执行来源检测失败
+							{:else}
+								执行来源 <b class="tm-num font-semibold">{runnersUp}/{runners.length}</b> 可用
+							{/if}
+							<svg
+								class="size-3 transition-transform {showRunners ? 'rotate-180' : ''}"
+								viewBox="0 0 12 12"
+								fill="none"
+								aria-hidden="true"
+								><path
+									d="m3 4.5 3 3 3-3"
+									stroke="currentColor"
+									stroke-width="1.4"
+									stroke-linecap="round"
+									stroke-linejoin="round"
+								/></svg
+							>
+						</button>
+					</div>
+					<div class="ml-auto flex shrink-0 items-center gap-2">
+						<kbd
+							class="hidden rounded-md px-1.5 py-0.5 font-mono text-[11px] text-gray-400 sm:inline-block"
+							title="快捷键提交">{isMac ? '⌘' : 'Ctrl'} ↵</kbd
+						>
 						<button
 							type="submit"
 							class="tm-btn-primary"
@@ -460,9 +469,14 @@
 										{/if}
 									</svg>
 								</span>
-								<span class="text-[13px] font-medium text-gray-800 dark:text-gray-100"
-									>{q.title}</span
-								>
+								<span class="flex flex-col gap-0.5">
+									<span class="text-[13px] font-medium text-gray-800 dark:text-gray-100"
+										>{q.title}</span
+									>
+									<span class="text-[11px] leading-snug text-gray-500 dark:text-gray-400"
+										>{q.desc}</span
+									>
+								</span>
 							</button>
 						</li>
 					{/each}
@@ -622,11 +636,11 @@
 										{/if}
 									</div>
 								</a>
-								{#if team.roster?.length}
-									<span
-										class="hidden shrink-0 items-center -space-x-1.5 md:flex"
-										aria-hidden="true"
-									>
+								<span
+									class="hidden w-[7.5rem] shrink-0 items-center justify-end -space-x-1.5 md:flex"
+									aria-hidden="true"
+								>
+									{#if team.roster?.length}
 										<span class="stack"><TeamAvatar kind="lead" size={22} /></span>
 										{#each team.roster.slice(0, 4) as m}
 											<span class="stack"><TeamAvatar kind={avatarKind(m)} size={22} /></span>
@@ -637,32 +651,33 @@
 												>+{team.roster.length - 4}</span
 											>
 										{/if}
-									</span>
-								{/if}
-								{#if total && (bucket === 'active' || bucket === 'done' || s === 'stopped')}
-									<span
-										class="hidden w-20 shrink-0 flex-col gap-1 sm:flex"
-										title="{done}/{total} 个任务完成"
-									>
-										<span class="tm-num text-right text-[11px] text-gray-500"
-											>{done}<span class="opacity-50">/{total}</span></span
-										>
-										<span
-											class="flex h-1 overflow-hidden rounded-full bg-gray-900/[0.06] dark:bg-white/[0.08]"
-										>
+									{/if}
+								</span>
+								<span class="hidden w-20 shrink-0 sm:block">
+									{#if total && (bucket === 'active' || bucket === 'done' || s === 'stopped')}
+										<span class="flex flex-col gap-1" title="{done}/{total} 个任务完成">
+											<span class="tm-num text-right text-[11px] text-gray-500"
+												>{done}<span class="opacity-50">/{total}</span></span
+											>
 											<span
-												class="h-full rounded-full {s === 'completed'
-													? 'bg-emerald-500'
-													: 'bg-sky-500'} transition-[width] duration-700"
-												style="width:{Math.round((done / total) * 100)}%"
-											/>
+												class="flex h-1 overflow-hidden rounded-full bg-gray-900/[0.06] dark:bg-white/[0.08]"
+											>
+												<span
+													class="h-full rounded-full {s === 'completed'
+														? 'bg-emerald-500'
+														: 'bg-sky-500'} transition-[width] duration-700"
+													style="width:{Math.round((done / total) * 100)}%"
+												/>
+											</span>
 										</span>
-									</span>
-								{/if}
-								<span class="shrink-0">
+									{/if}
+								</span>
+								<span class="flex shrink-0 justify-end sm:w-[6.5rem]">
 									<StatusChip status={chipOf(s)} label={PHASE_LABEL[s] ?? s} />
 								</span>
-								<span class="actions relative z-10 flex shrink-0 items-center gap-0.5">
+								<span
+									class="actions relative z-10 flex shrink-0 items-center justify-end gap-0.5 sm:w-[5.75rem]"
+								>
 									{#if s === 'completed' || s === 'stopped'}
 										<a
 											href="/teams/{team.id}/conclusion"

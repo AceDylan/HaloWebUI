@@ -4,7 +4,7 @@
 	import StatusChip from './StatusChip.svelte';
 	import TeamAvatar from './TeamAvatar.svelte';
 	import RunnerBadge from './RunnerBadge.svelte';
-	import { now, timeAgo } from './clock';
+	import { now, shortAgo, timeAgo } from './clock';
 	import { avatarKind, toneOf } from './model';
 
 	/** The lead and every member: who is on the team and what each one is doing right now —
@@ -118,8 +118,9 @@
 									? 'text-gray-700 dark:text-gray-200 tm-caret'
 									: 'text-gray-400 dark:text-gray-500'}">{member.activity.text}</span
 							>
-							<span class="ml-auto shrink-0 text-gray-400 dark:text-gray-500"
-								>{timeAgo(member.activity.ts, $now)}</span
+							<span
+								class="tm-num ml-auto shrink-0 text-gray-400 dark:text-gray-500"
+								title={timeAgo(member.activity.ts, $now)}>{shortAgo(member.activity.ts, $now)}</span
 							>
 						</div>
 					{/if}

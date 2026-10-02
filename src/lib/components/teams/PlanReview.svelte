@@ -71,7 +71,18 @@
 					<span class="tm-display text-base font-semibold text-gray-900 dark:text-gray-50"
 						>负责人的计划</span
 					>
-					<StatusChip status="waiting_user" label="等你批准" />
+					<StatusChip
+						status={team.status === 'plan_ready'
+							? 'waiting_user'
+							: team.status === 'cancelled'
+								? 'stopped'
+								: 'failed'}
+						label={team.status === 'plan_ready'
+							? '等你批准'
+							: team.status === 'cancelled'
+								? '已取消'
+								: '启动失败，可以重新批准'}
+					/>
 				</div>
 				{#if plan.summary}
 					<p

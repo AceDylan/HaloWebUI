@@ -37,11 +37,20 @@
 	data-task-key={data?.key}
 	data-sub-status={data?.sub_status}
 >
-	<div class="flex items-center justify-between gap-2">
-		<span class="font-mono text-[11px] font-semibold tracking-wide text-gray-400 dark:text-gray-500"
+	<div class="flex min-w-0 items-center gap-1.5">
+		<span
+			class="shrink-0 font-mono text-[11px] font-semibold tracking-wide text-gray-400 dark:text-gray-500"
 			>#{data?.key}</span
 		>
-		<StatusChip status={data?.sub_status} />
+		<span class="min-w-0 shrink"
+			><RunnerBadge
+				chosen={data?.runner?.chosen}
+				actual={data?.executor}
+				reason={data?.runner?.reason}
+				compact
+			/></span
+		>
+		<span class="ml-auto shrink-0"><StatusChip status={data?.sub_status} /></span>
 	</div>
 	<div
 		class="mt-1 line-clamp-2 text-[13px] font-semibold leading-snug text-gray-900 dark:text-gray-50"
@@ -53,14 +62,6 @@
 	>
 		<TeamAvatar kind={data?.avatar} size={18} />
 		<span class="min-w-0 truncate">{data?.member}</span>
-		<span class="min-w-0 shrink-[2]"
-			><RunnerBadge
-				chosen={data?.runner?.chosen}
-				actual={data?.executor}
-				reason={data?.runner?.reason}
-				compact
-			/></span
-		>
 		{#if data?.waitingFor?.length}
 			<span class="ml-auto shrink-0 text-amber-600 dark:text-amber-400"
 				>等 {data.waitingFor.join('、')}</span

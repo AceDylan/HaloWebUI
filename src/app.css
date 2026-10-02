@@ -454,7 +454,7 @@ body {
 }
 
 .workspace-count-pill {
-	@apply inline-flex items-center gap-1.5 rounded-full bg-gray-900/[0.05] px-3 py-1 text-[13px] font-medium tabular-nums text-gray-700 dark:bg-white/[0.06] dark:text-gray-300;
+	@apply inline-flex w-fit self-start items-center gap-1.5 rounded-full bg-gray-900/[0.05] px-3 py-1 text-[13px] font-medium tabular-nums text-gray-700 dark:bg-white/[0.06] dark:text-gray-300;
 }
 
 .workspace-search {
@@ -807,8 +807,8 @@ textarea::placeholder {
 
 /* Enhanced blockquote in user messages for quoted selections */
 .chat-user blockquote {
-	border-left: 2.5px solid hsl(215 100% 60% / 0.5);
-	background: hsl(215 100% 50% / 0.04);
+	border-left: 2.5px solid color-mix(in oklab, var(--color-primary-500) 50%, transparent);
+	background: color-mix(in oklab, var(--color-primary-500) 5%, transparent);
 	border-radius: 0 0.375rem 0.375rem 0;
 	padding: 0.5rem 0.75rem;
 	margin: 0.25rem 0;

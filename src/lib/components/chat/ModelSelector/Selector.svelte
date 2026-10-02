@@ -817,7 +817,7 @@
 	<DropdownMenu.Content
 		class=" z-40 {$mobile
 			? `w-full`
-			: `${className}`} max-w-[calc(100vw-1rem)] justify-start rounded-xl  bg-white dark:bg-gray-850 dark:text-white shadow-lg  outline-hidden"
+			: `${className}`} max-w-[calc(100vw-1rem)] justify-start rounded-2xl dark:text-white outline-hidden"
 		transition={(node) => flyAndScale(node, { duration: 80 })}
 		side={$mobile ? 'bottom' : 'bottom-start'}
 		sideOffset={3}
@@ -883,7 +883,7 @@
 				data-halo-model-list
 			>
 				{#if tags && hasVisibleItems}
-					<div class="sticky top-0 z-10 flex w-full items-center gap-1 bg-white dark:bg-gray-850">
+					<div class="sticky top-0 z-10 flex w-full items-center gap-1 bg-[var(--surface-overlay)]">
 						<div
 							class="min-w-0 flex-1 overflow-x-auto scrollbar-none"
 							bind:this={tagsContainerElement}

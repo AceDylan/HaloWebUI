@@ -494,7 +494,7 @@
 
 <div class=" dark:text-white">
 	<div class=" flex items-center justify-between dark:text-gray-100 mb-3">
-		<div class=" text-lg font-medium self-center font-primary">{$i18n.t('Chat Controls')}</div>
+		<div class="font-display text-[17px] font-semibold self-center">{$i18n.t('Chat Controls')}</div>
 		<div class="flex items-center gap-1">
 			{#if anyModified}
 				<button

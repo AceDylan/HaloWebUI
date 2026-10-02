@@ -211,15 +211,9 @@
 </script>
 
 <div class="py-3 pl-1 pr-2 select-none" role="status" aria-live="polite">
-	<div class="flex items-center gap-1 mb-2">
-		<div class="flex gap-1">
-			<div class="w-1.5 h-1.5 rounded-full bg-blue-500/60 animate-bounce [animation-delay:-0.3s]" />
-			<div
-				class="w-1.5 h-1.5 rounded-full bg-blue-500/60 animate-bounce [animation-delay:-0.15s]"
-			/>
-			<div class="w-1.5 h-1.5 rounded-full bg-blue-500/60 animate-bounce" />
-		</div>
-		<span class="text-xs text-gray-500 dark:text-gray-400 font-medium">
+	<div class="flex items-center gap-2 mb-2">
+		<span class="halo-spinner" aria-hidden="true"></span>
+		<span class="halo-shimmer text-xs font-medium">
 			{activeHeaderLabel}
 		</span>
 	</div>

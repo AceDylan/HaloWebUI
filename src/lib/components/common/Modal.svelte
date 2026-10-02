@@ -7,7 +7,7 @@
 	export let show = true;
 	export let size = 'md';
 	export let containerClassName = 'p-3';
-	export let className = 'bg-white/95 dark:bg-gray-900/95 backdrop-blur-sm rounded-2xl';
+	export let className = 'bg-[var(--surface-overlay)] rounded-2xl';
 	export let dismissible = true; // 是否允许点击背景关闭
 
 	let modalElement: HTMLDivElement | null = null;

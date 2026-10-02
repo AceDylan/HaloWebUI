@@ -90,7 +90,10 @@ export const LAYOUT = {
 	cardWidth: 220,
 	cardHeight: 104,
 	rowGap: 18,
-	pad: 24
+	pad: 24,
+	/** Top-to-bottom layout: gap between lanes (rows) and between cards in a lane. */
+	laneGapV: 46,
+	colGap: 22
 };
 
 /** Longest dependency path per task; cycles and unknown parents count as depth 0. */
@@ -119,8 +122,10 @@ const order = (a: LayoutTask, b: LayoutTask) =>
 	(a.seq ?? 0) - (b.seq ?? 0) ||
 	(a.key ?? a.id).localeCompare(b.key ?? b.id, 'en', { numeric: true });
 
-/** One left-to-right lane per dependency depth ("#4 and #6 side by side, #5 to their right"). */
-export const layoutTasks = (tasks: LayoutTask[]): BoardLayout => {
+/** One lane per dependency depth ("#4 and #6 side by side, #5 after them"): left to right
+ *  (`LR`, lanes are columns) or top to bottom (`TB`, lanes are rows — for long chains on a
+ *  narrow board). */
+export const layoutTasks = (tasks: LayoutTask[], direction: 'LR' | 'TB' = 'LR'): BoardLayout => {
 	const depths = taskDepths(tasks);
 	const lanes = new Map<number, LayoutTask[]>();
 	for (const t of [...tasks].sort(order)) {
@@ -129,10 +134,37 @@ export const layoutTasks = (tasks: LayoutTask[]): BoardLayout => {
 	}
 	const columns = tasks.length ? Math.max(...depths.values()) + 1 : 0;
 	const rows = Math.max(0, ...[...lanes.values()].map((l) => l.length));
-	const stack = (n: number) => n * LAYOUT.cardHeight + Math.max(0, n - 1) * LAYOUT.rowGap;
-	const height = LAYOUT.pad * 2 + stack(rows);
 	const positions = new Map<string, PositionedTask>();
 	const laneList: BoardLayout['lanes'] = [];
+	if (direction === 'TB') {
+		const across = (n: number) => n * LAYOUT.cardWidth + Math.max(0, n - 1) * LAYOUT.colGap;
+		for (let depth = 0; depth < columns; depth++) {
+			const lane = lanes.get(depth) ?? [];
+			const y = LAYOUT.pad + depth * (LAYOUT.cardHeight + LAYOUT.laneGapV);
+			const offset = (across(rows) - across(lane.length)) / 2;
+			lane.forEach((t, row) => {
+				positions.set(t.id, {
+					id: t.id,
+					depth,
+					row,
+					x: LAYOUT.pad + offset + row * (LAYOUT.cardWidth + LAYOUT.colGap),
+					y
+				});
+			});
+			laneList.push({ depth, x: y, count: lane.length });
+		}
+		return {
+			positions,
+			columns,
+			rows,
+			width: LAYOUT.pad * 2 + across(rows),
+			height:
+				LAYOUT.pad * 2 + columns * LAYOUT.cardHeight + Math.max(0, columns - 1) * LAYOUT.laneGapV,
+			lanes: laneList
+		};
+	}
+	const stack = (n: number) => n * LAYOUT.cardHeight + Math.max(0, n - 1) * LAYOUT.rowGap;
+	const height = LAYOUT.pad * 2 + stack(rows);
 	for (let depth = 0; depth < columns; depth++) {
 		const lane = lanes.get(depth) ?? [];
 		const x = LAYOUT.pad + depth * (LAYOUT.laneWidth + LAYOUT.laneGap);
@@ -151,6 +183,22 @@ export const layoutTasks = (tasks: LayoutTask[]): BoardLayout => {
 	const width =
 		LAYOUT.pad * 2 + columns * LAYOUT.laneWidth + Math.max(0, columns - 1) * LAYOUT.laneGap;
 	return { positions, columns, rows, width, height, lanes: laneList };
+};
+
+/** Which way to lay the board out in a box `boxWidth` wide (height capped at `maxHeight`): the
+ *  direction whose fitted zoom is larger, preferring left-to-right unless it would shrink the
+ *  cards below `minZoom`. */
+export const boardDirection = (
+	tasks: LayoutTask[],
+	boxWidth: number,
+	maxHeight: number,
+	minZoom = 0.8
+): 'LR' | 'TB' => {
+	if (!boxWidth || tasks.length < 2) return 'LR';
+	const zoom = (l: BoardLayout) => Math.min(1, boxWidth / l.width, maxHeight / l.height);
+	const lr = zoom(layoutTasks(tasks, 'LR'));
+	if (lr >= minZoom) return 'LR';
+	return zoom(layoutTasks(tasks, 'TB')) > lr + 0.05 ? 'TB' : 'LR';
 };
 
 // --- fold -----------------------------------------------------------------------------------

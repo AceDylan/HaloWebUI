@@ -21,7 +21,7 @@
 
 <Handle
 	type="target"
-	position={Position.Left}
+	position={data?.direction === 'TB' ? Position.Top : Position.Left}
 	class="!opacity-0 !pointer-events-none"
 	isConnectable={false}
 />
@@ -78,7 +78,7 @@
 </button>
 <Handle
 	type="source"
-	position={Position.Right}
+	position={data?.direction === 'TB' ? Position.Bottom : Position.Right}
 	class="!opacity-0 !pointer-events-none"
 	isConnectable={false}
 />

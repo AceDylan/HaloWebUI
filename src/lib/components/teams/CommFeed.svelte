@@ -157,7 +157,9 @@
 							</div>
 						{/if}
 					{:else}
-						<div class="flex min-w-0 items-center gap-1.5 text-gray-400 dark:text-gray-500">
+						<div
+							class="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-gray-400 dark:text-gray-500"
+						>
 							{#if ev.type === 'message' && ev.who === 'user'}
 								<span class="font-medium text-violet-700 dark:text-violet-300"
 									>{ev.author ?? '你'} → {ev.member ?? '成员'}</span
@@ -189,7 +191,7 @@
 							{#if ev.key}
 								<button
 									type="button"
-									class="font-mono text-gray-400 hover:text-sky-600 dark:hover:text-sky-300"
+									class="shrink-0 whitespace-nowrap font-mono text-gray-400 hover:text-sky-600 dark:hover:text-sky-300"
 									on:click={() => dispatch('task', ev.task_id)}>#{ev.key}</button
 								>
 							{/if}

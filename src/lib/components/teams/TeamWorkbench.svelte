@@ -405,10 +405,19 @@
 		</div>
 		<a
 			href="/teams"
-			class="shrink-0 whitespace-nowrap text-sm text-gray-500 transition hover:text-gray-900 dark:hover:text-gray-100"
-			>协作台</a
+			class="flex shrink-0 items-center whitespace-nowrap text-sm text-gray-500 transition hover:text-gray-900 dark:hover:text-gray-100"
+			aria-label="回到协作台"
+			><svg class="size-4 sm:hidden" viewBox="0 0 16 16" fill="none" aria-hidden="true"
+				><path
+					d="M10 3.5 5.5 8l4.5 4.5"
+					stroke="currentColor"
+					stroke-width="1.6"
+					stroke-linecap="round"
+					stroke-linejoin="round"
+				/></svg
+			><span class="max-sm:hidden">协作台</span></a
 		>
-		<span class="text-gray-300 dark:text-gray-700" aria-hidden="true">/</span>
+		<span class="text-gray-300 max-sm:hidden dark:text-gray-700" aria-hidden="true">/</span>
 		<h1
 			class="tm-display min-w-0 truncate text-[15px] font-semibold text-gray-900 dark:text-gray-50"
 			title={team?.title ?? ''}
@@ -454,7 +463,7 @@
 						title="让派发器继续开始新的任务"
 						><svg class="size-3" viewBox="0 0 12 12" aria-hidden="true"
 							><path d="M3 1.8v8.4L10 6 3 1.8Z" fill="currentColor" /></svg
-						>恢复派发</button
+						><span class="max-sm:sr-only">恢复派发</span></button
 					>
 				{:else}
 					<button
@@ -465,7 +474,7 @@
 						title="不再开始新任务；正在执行的成员会继续做完手上的任务"
 						><svg class="size-3" viewBox="0 0 12 12" aria-hidden="true"
 							><path d="M3 2h2v8H3zM7 2h2v8H7z" fill="currentColor" /></svg
-						>暂停派发</button
+						><span class="max-sm:sr-only">暂停派发</span></button
 					>
 				{/if}
 				<button
@@ -476,7 +485,7 @@
 					title="结束所有正在执行的成员，整个协作任务停止，不会被自动恢复"
 					><svg class="size-3" viewBox="0 0 12 12" aria-hidden="true"
 						><rect x="2.5" y="2.5" width="7" height="7" rx="1.5" fill="currentColor" /></svg
-					>停止执行</button
+					><span class="max-sm:sr-only">停止执行</span></button
 				>
 			{/if}
 		</div>

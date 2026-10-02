@@ -9,6 +9,7 @@
 	import TaskNode from './TaskNode.svelte';
 	import {
 		avatarKind,
+		boardDirection,
 		layoutTasks,
 		openParents,
 		statusLabel,
@@ -46,8 +47,12 @@
 	const nodeTypes = { task: TaskNode };
 	const edgeTypes = { flow: FlowEdge };
 
-	$: layout = layoutTasks(tasks);
-	$: height = Math.min(580, Math.max(280, layout.height + 48));
+	// Long chains on a narrow board read better top to bottom than shrunk left to right.
+	const MAX_HEIGHT = 640;
+	let boxWidth = 0;
+	$: direction = boardDirection(tasks, boxWidth - 24, MAX_HEIGHT);
+	$: layout = layoutTasks(tasks, direction);
+	$: height = Math.min(direction === 'TB' ? MAX_HEIGHT : 580, Math.max(280, layout.height + 48));
 	$: byKey = new Map(tasks.map((t) => [t.id, t.key]));
 	$: roles = new Map(members.map((m) => [m.name, m]));
 	$: dark = colorMode === 'dark';
@@ -79,6 +84,7 @@
 						sub_status: state.sub_status,
 						statusText: statusLabel(state.sub_status),
 						waitingFor: waiting,
+						direction,
 						startedAt: replay ? null : (t.started_at ?? null),
 						completedAt: replay || state.status !== 'done' ? null : (t.completed_at ?? null),
 						avatar: avatarKind(roles.get(t.member) ?? { name: t.member }),
@@ -126,33 +132,37 @@
 <div
 	class="board tm-card relative w-full overflow-hidden"
 	style="height:{height}px"
+	bind:clientWidth={boxWidth}
 	data-team-board
+	data-direction={direction}
 >
-	<SvelteFlow
-		{nodes}
-		{edges}
-		{nodeTypes}
-		{edgeTypes}
-		fitView
-		fitViewOptions={{ padding: 0.14, maxZoom: 1 }}
-		minZoom={0.3}
-		maxZoom={1.5}
-		nodesDraggable={false}
-		nodesConnectable={false}
-		elementsSelectable={false}
-		proOptions={{ hideAttribution: true }}
-		{colorMode}
-		on:paneclick={() => dispatch('select', null)}
-	>
-		<Controls showLock={false} />
-		<Background
-			variant={BackgroundVariant.Dots}
-			gap={20}
-			size={1.2}
-			bgColor="transparent"
-			patternColor={dark ? 'rgba(148,163,184,0.16)' : 'rgba(15,23,42,0.13)'}
-		/>
-	</SvelteFlow>
+	{#key direction}
+		<SvelteFlow
+			{nodes}
+			{edges}
+			{nodeTypes}
+			{edgeTypes}
+			fitView
+			fitViewOptions={{ padding: 0.14, maxZoom: 1 }}
+			minZoom={0.3}
+			maxZoom={1.5}
+			nodesDraggable={false}
+			nodesConnectable={false}
+			elementsSelectable={false}
+			proOptions={{ hideAttribution: true }}
+			{colorMode}
+			on:paneclick={() => dispatch('select', null)}
+		>
+			<Controls showLock={false} />
+			<Background
+				variant={BackgroundVariant.Dots}
+				gap={20}
+				size={1.2}
+				bgColor="transparent"
+				patternColor={dark ? 'rgba(148,163,184,0.16)' : 'rgba(15,23,42,0.13)'}
+			/>
+		</SvelteFlow>
+	{/key}
 	<div class="vignette pointer-events-none absolute inset-0" aria-hidden="true" />
 </div>
 

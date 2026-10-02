@@ -4,6 +4,7 @@ import type { TeamEvent } from '$lib/apis/teams';
 import {
 	activityText,
 	avatarKind,
+	boardDirection,
 	countStates,
 	deliveryAt,
 	EXECUTOR_LABEL,
@@ -64,6 +65,30 @@ describe('layout', () => {
 		]);
 		expect(depths.get('c')).toBe(0);
 		expect([...depths.values()].every((d) => Number.isFinite(d))).toBe(true);
+	});
+});
+
+describe('board direction', () => {
+	const chain = [1, 2, 3, 4].map((n) => ({
+		id: `c${n}`,
+		key: `T${n}`,
+		seq: n,
+		parents: n > 1 ? [`c${n - 1}`] : []
+	}));
+	it('lays a long chain top to bottom on a narrow board, keeps wide boards left to right', () => {
+		expect(boardDirection(chain, 760, 640)).toBe('TB');
+		expect(boardDirection(chain, 1400, 640)).toBe('LR');
+		expect(boardDirection(tasks, 760, 640)).toBe('TB'); // five steps deep
+		const fan = [
+			...[1, 2, 3, 4].map((n) => ({ id: `f${n}`, key: `F${n}`, seq: n, parents: [] })),
+			{ id: 'f5', key: 'F5', seq: 5, parents: ['f1', 'f2', 'f3', 'f4'] }
+		];
+		expect(boardDirection(fan, 760, 640)).toBe('LR'); // wide and shallow
+		const tb = layoutTasks(chain, 'TB');
+		const ys = chain.map((t) => tb.positions.get(t.id)!.y);
+		expect(ys).toEqual([...ys].sort((a, b) => a - b));
+		expect(new Set(chain.map((t) => tb.positions.get(t.id)!.x)).size).toBe(1);
+		expect(tb.height).toBeGreaterThan(tb.width);
 	});
 });
 

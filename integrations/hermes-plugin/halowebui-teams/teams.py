@@ -832,16 +832,19 @@ def control(team_id: str, action: str, *, owner: Optional[str] = None, actor: st
                     stop_task_runner(slug, conn, task_id)
                 except Exception:
                     logger.warning("halowebui-teams: runner stop failed for %s", task_id, exc_info=True)
+            # No reason on the block: with a reason Kanban synthesizes an extra attempt row for a
+            # task that has no open attempt (the reclaim above closed it), which would show as one
+            # more execution. The reason travels on halo_task_stopped instead.
             try:
                 if executor_of(team, member_of(team, task_id)) == "reclaude":
                     from .reclaude import close_preserving
 
-                    close_preserving(conn, task.current_run_id, lambda: kb().block_task(conn, task_id, reason=STOP_REASON))
+                    close_preserving(conn, task.current_run_id, lambda: kb().block_task(conn, task_id))
                 else:
-                    kb().block_task(conn, task_id, reason=STOP_REASON)
+                    kb().block_task(conn, task_id)
             except Exception:
                 logger.warning("halowebui-teams: block failed for %s", task_id, exc_info=True)
-            append_event(conn, task_id, "halo_task_stopped", {"by": actor})
+            append_event(conn, task_id, "halo_task_stopped", {"by": actor, "reason": STOP_REASON})
             stopped_tasks.append(task_id)
     return {"state": "stopped", "changed": True, "stopped_tasks": stopped_tasks}
 

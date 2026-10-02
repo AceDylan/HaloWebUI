@@ -274,6 +274,9 @@ def test_pause_resume_stop(pkg, team_id, plan_dict):
     states, snap = _statuses(pkg, team_id)
     assert states["T1"] == ("blocked", "stopped") and states["T2"] == ("blocked", "stopped")
     assert snap["team"]["phase"] == "stopped"
+    by_key = {t["key"]: t for t in snap["tasks"]}
+    assert by_key["T1"]["attempts"] == 1 and by_key["T2"]["attempts"] == 0  # stop adds no attempt
+    assert by_key["T1"]["block_reason"] == "用户停止了协作任务"
     with pytest.raises(pkg.teams.TeamError):
         pkg.teams.retry(team_id, first["tasks"]["T1"], owner="u1")
     with pytest.raises(pkg.teams.TeamError):

@@ -152,8 +152,11 @@ def _launch(unit: str, argv: list[str]) -> tuple[bool, str]:
     env = dict(os.environ)
     env.setdefault("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")
     env.setdefault("DBUS_SESSION_BUS_ADDRESS", f"unix:path={env['XDG_RUNTIME_DIR']}/bus")
+    # The unit gets the user manager's bare PATH, not ours: agy-run.sh calls `agy` by name and it
+    # lives in /root/.local/bin, so hand down the gateway's PATH (what /agy from a chat runs with).
     cmd = ["systemd-run", "--user", "--quiet", "--collect", "--unit", unit,
-           "--setenv=HERMES_HOME=/root/.hermes", "--setenv=HALO_TEAMS_MEMBER_RUN=1", "--", *argv]
+           "--setenv=HERMES_HOME=/root/.hermes", "--setenv=HALO_TEAMS_MEMBER_RUN=1",
+           f"--setenv=PATH={env.get('PATH') or '/usr/local/bin:/usr/bin:/bin'}", "--", *argv]
     try:
         proc = subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=60)
     except (OSError, subprocess.SubprocessError) as exc:

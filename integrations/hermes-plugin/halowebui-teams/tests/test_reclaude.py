@@ -374,3 +374,23 @@ def test_stop_passes_the_runner_kind_to_stop_run(pkg, setup, monkeypatch):
     monkeypatch.setattr(rd, "stop_run", fake_stop)
     pkg.teams.control(team_id, "stop", owner="u1")
     assert seen == [("codex", str(codex.runs_root / run_id), run_id)]
+
+
+def test_systemd_launch_hands_down_our_path(pkg, monkeypatch):
+    seen = []
+
+    class Done:
+        returncode = 0
+        stdout = stderr = ""
+
+    def fake_run(cmd, **kwargs):
+        seen.append(cmd)
+        return Done()
+
+    monkeypatch.setattr(pkg.reclaude.subprocess, "run", fake_run)
+    monkeypatch.setenv("PATH", "/root/.local/bin:/usr/bin:/bin")
+    monkeypatch.setitem(pkg.reclaude._launcher, "fn", None)
+    assert pkg.reclaude._launch("halo-team-x", ["/root/.hermes/scripts/agy-run.sh", "run"]) == (True, "")
+    cmd = seen[0]
+    assert "--setenv=PATH=/root/.local/bin:/usr/bin:/bin" in cmd
+    assert cmd[cmd.index("--") + 1:] == ["/root/.hermes/scripts/agy-run.sh", "run"]

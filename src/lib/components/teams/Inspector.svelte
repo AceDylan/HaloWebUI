@@ -30,9 +30,11 @@
 		SOURCE_LABEL,
 		taskRunner,
 		toneOf,
-		type TaskState
+		type TaskState,
+		type Tone
 	} from './model';
-	import { TONE_DOT } from './tones';
+	import { elapsed, now } from './clock';
+	import { TONE_DOT, TONE_TEXT } from './tones';
 
 	const OUTCOME_LABEL: Record<string, string> = {
 		completed: '完成',
@@ -48,6 +50,22 @@
 		cancelled: '已取消',
 		timeout: '超时',
 		review_requested: '转评审'
+	};
+
+	const OUTCOME_TONE: Record<string, Tone> = {
+		completed: 'done',
+		done: 'done',
+		failed: 'fail',
+		crashed: 'fail',
+		spawn_failed: 'fail',
+		timed_out: 'fail',
+		timeout: 'fail',
+		blocked: 'deps',
+		reclaimed: 'deps',
+		stopped: 'stop',
+		cancelled: 'stop',
+		running: 'run',
+		review_requested: 'user'
 	};
 
 	/** Details of the selected task or member. Read-only in a replay. */
@@ -445,28 +463,43 @@
 						<div class="tm-eyebrow">执行尝试</div>
 						<ol class="mt-1 space-y-1">
 							{#each detail.attempts as attempt (attempt.id)}
-								<li class="rounded-xl border tm-hairline px-2 py-1.5 text-xs">
-									<div class="flex items-center gap-2 flex-wrap">
-										<span class="font-medium">第 {attempt.n} 次</span>
-										<span class="text-gray-500"
-											>{OUTCOME_LABEL[attempt.outcome ?? attempt.status] ??
-												attempt.outcome ??
-												attempt.status}</span
+								{@const result = attempt.outcome ?? attempt.status}
+								{@const tone = OUTCOME_TONE[result] ?? 'wait'}
+								<li class="rounded-xl border tm-hairline px-2.5 py-1.5 text-xs">
+									<div class="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+										<span
+											class="size-1.5 shrink-0 rounded-full {TONE_DOT[tone]} {tone === 'run'
+												? 'tm-pulse-dot text-sky-500'
+												: ''}"
+											aria-hidden="true"
+										/>
+										<span class="font-medium text-gray-800 dark:text-gray-100"
+											>第 {attempt.n} 次</span
 										>
-										<span class="text-gray-400 font-mono"
+										<span class="{TONE_TEXT[tone]} font-medium"
+											>{OUTCOME_LABEL[result] ?? result}</span
+										>
+										{#if attempt.started_at}
+											<span class="tm-num text-gray-500 dark:text-gray-400"
+												>{attempt.ended_at
+													? elapsed(attempt.ended_at - attempt.started_at)
+													: elapsed($now - attempt.started_at)}</span
+											>
+										{/if}
+										<span class="tm-num ml-auto text-[11px] text-gray-400"
 											>{formatClock(attempt.started_at)}{attempt.ended_at
 												? ` – ${formatClock(attempt.ended_at)}`
 												: ''}</span
 										>
 									</div>
 									{#if attempt.runner_run_id}
-										<div class="mt-0.5 text-gray-500 font-mono break-all">
+										<div class="mt-0.5 break-all font-mono text-[11px] text-gray-500">
 											{attempt.runner ?? task.executor} run {attempt.runner_run_id}{attempt.parent_runner_run_id
 												? `（接续 ${attempt.parent_runner_run_id}）`
 												: ''}
 										</div>
 									{/if}
-									{#if attempt.error}<div class="mt-0.5 text-red-600 break-words">
+									{#if attempt.error}<div class="mt-0.5 break-words text-red-600 dark:text-red-300">
 											{attempt.error}
 										</div>{/if}
 								</li>

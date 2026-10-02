@@ -1,4 +1,5 @@
 {
+	"Ask. Research. Collaborate.": "提問。研究。協作。",
 	"Backup file": "備份檔案",
 	"Backup is ready to merge import.": "備份已準備好合併匯入。",
 	"Backup merge import finished. Refreshing the page...": "備份合併匯入完成，正在重新整理頁面...",
@@ -37,6 +38,7 @@
 	"(latest)": "（最新版）",
 	"(Ollama)": "(Ollama)",
 	"1 Source": "1 個引用來源",
+	"Your models, agents and teams, gathered in one halo.": "你的模型、智慧體與團隊，聚在同一圈光裡。",
 	"{{ models }}": "{{ models }}",
 	"{{COUNT}} Sources": "{{COUNT}} 個引用來源",
 	"{{COUNT}} Available Tools": "{{COUNT}} 個可用工具",

@@ -1612,6 +1612,52 @@ body:has(#chat-input:focus) .halo-orb__arc {
 	}
 }
 
+/* ---------------------------------------------------------------- page change (View Transitions) */
+
+[data-halo-main] {
+	view-transition-name: halo-main;
+}
+::view-transition-old(root),
+::view-transition-new(root) {
+	animation: none;
+}
+::view-transition-old(halo-main) {
+	animation: halo-vt-out 120ms ease-out both;
+}
+::view-transition-new(halo-main) {
+	animation: halo-vt-in 300ms var(--ease-out-expo) both;
+}
+::view-transition-group(halo-main) {
+	animation-duration: 0s;
+}
+@keyframes halo-vt-out {
+	to {
+		opacity: 0;
+	}
+}
+@keyframes halo-vt-in {
+	from {
+		opacity: 0;
+		transform: translateY(6px);
+	}
+}
+
+/* ---------------------------------------------------------------- empty states */
+
+/* every "nothing here yet" box opens with a small unlit halo */
+.workspace-empty-state::before {
+	content: '';
+	display: block;
+	width: 2.25rem;
+	height: 2.25rem;
+	margin: 0 auto 1rem;
+	border-radius: 9999px;
+	background: var(--halo-spectrum);
+	-webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 2.5px), #000 calc(100% - 2px));
+	mask: radial-gradient(farthest-side, transparent calc(100% - 2.5px), #000 calc(100% - 2px));
+	opacity: 0.55;
+}
+
 /* ---------------------------------------------------------------- touch */
 
 @media (hover: none) {

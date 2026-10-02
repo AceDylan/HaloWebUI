@@ -516,6 +516,6 @@ export const followHubTheme = (
 	root.classList.add(theme);
 	doc
 		.querySelector('meta[name="theme-color"]')
-		?.setAttribute('content', theme === 'dark' ? '#171717' : '#ffffff');
+		?.setAttribute('content', theme === 'dark' ? '#0a0b10' : '#ffffff');
 	return true;
 };

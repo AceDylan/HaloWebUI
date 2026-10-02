@@ -295,7 +295,7 @@
 					<!-- A short bar at the left edge, so it cannot pass for the round status dots
 					     on the right. The negative margin keeps titles aligned with or without it. -->
 					<span
-						class="-ms-2 me-[5px] h-3.5 w-[3px] shrink-0 self-center rounded-full {folderDotClass ??
+						class="-ms-2 me-[5px] h-3 w-[3px] shrink-0 self-center rounded-full opacity-75 {folderDotClass ??
 							'bg-gray-400 dark:bg-gray-500'}"
 						title={folderName}
 						data-halo-chat-folder-dot

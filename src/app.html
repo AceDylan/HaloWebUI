@@ -47,7 +47,7 @@
 					);
 			}
 		</script>
-		<meta name="theme-color" content="#171717" />
+		<meta name="theme-color" content="#0a0b10" />
 		<meta name="robots" content="noindex,nofollow" />
 		<meta name="description" content="Halo WebUI" />
 		<link
@@ -116,13 +116,13 @@
 
 				if (storedTheme === 'system') {
 					document.documentElement.classList.add(prefersDarkTheme ? 'dark' : 'light');
-					metaThemeColorTag?.setAttribute('content', prefersDarkTheme ? '#171717' : '#ffffff');
+					metaThemeColorTag?.setAttribute('content', prefersDarkTheme ? '#0a0b10' : '#ffffff');
 				} else if (storedTheme === 'light') {
 					document.documentElement.classList.add('light');
 					metaThemeColorTag?.setAttribute('content', '#ffffff');
 				} else {
 					document.documentElement.classList.add('dark');
-					metaThemeColorTag?.setAttribute('content', '#171717');
+					metaThemeColorTag?.setAttribute('content', '#0a0b10');
 				}
 
 				const media = window.matchMedia('(prefers-color-scheme: dark)');
@@ -137,7 +137,7 @@
 					if (e.matches) {
 						document.documentElement.classList.add('dark');
 						document.documentElement.classList.remove('light');
-						metaThemeColorTag?.setAttribute('content', '#171717');
+						metaThemeColorTag?.setAttribute('content', '#0a0b10');
 					} else {
 						document.documentElement.classList.add('light');
 						document.documentElement.classList.remove('dark');
@@ -153,6 +153,8 @@
 
 				function setSplashImage() {
 					const logo = document.getElementById('logo');
+					// The splash is the inline Halo mark now (no image to swap); kept for a custom one.
+					if (!logo || logo.tagName !== 'IMG') return;
 					const isDarkMode = document.documentElement.classList.contains('dark');
 
 					if (isDarkMode) {
@@ -193,18 +195,20 @@
 				}
 			</style>
 
-			<img
-				id="logo"
-				style="
-					position: absolute;
-					width: auto;
-					height: 6rem;
-					top: 44%;
-					left: 50%;
-					transform: translateX(-50%);
-				"
-				src="/static/splash.png"
-			/>
+			<!-- The Halo mark, its arc turning while the app loads. Styled by the <style> at the
+			     end of this file (app.css is not loaded yet). -->
+			<svg id="halo-splash" viewBox="0 0 120 120" aria-hidden="true">
+				<defs>
+					<linearGradient id="halo-splash-spectrum" x1="0" y1="0" x2="1" y2="1">
+						<stop offset="0" stop-color="#5b7cff" />
+						<stop offset="0.55" stop-color="#a26bf5" />
+						<stop offset="1" stop-color="#f7b267" />
+					</linearGradient>
+				</defs>
+				<circle class="track" cx="60" cy="60" r="43" />
+				<path class="arc" d="M60 17 A43 43 0 1 1 17 60" />
+				<circle class="core" cx="60" cy="60" r="12" />
+			</svg>
 
 			<div
 				style="
@@ -267,11 +271,64 @@
 	}
 
 	#splash-screen {
-		background: #fff;
+		background: #fbfbfd;
+		color: #0b0d13;
 	}
 
 	html.dark #splash-screen {
-		background: #000;
+		background: #0a0b10;
+		color: #f4f5f8;
+	}
+
+	#halo-splash {
+		position: absolute;
+		top: 50%;
+		left: 50%;
+		width: 4.5rem;
+		height: 4.5rem;
+		margin: -2.25rem 0 0 -2.25rem;
+		overflow: visible;
+	}
+
+	#halo-splash .track {
+		fill: none;
+		stroke: currentColor;
+		stroke-opacity: 0.1;
+		stroke-width: 3;
+	}
+
+	#halo-splash .arc {
+		fill: none;
+		stroke: url(#halo-splash-spectrum);
+		stroke-width: 8;
+		stroke-linecap: round;
+		transform-origin: 60px 60px;
+		animation: halo-splash-turn 1.4s cubic-bezier(0.65, 0, 0.35, 1) infinite;
+	}
+
+	#halo-splash .core {
+		fill: currentColor;
+		transform-origin: 60px 60px;
+		animation: halo-splash-breathe 1.4s ease-in-out infinite;
+	}
+
+	@keyframes halo-splash-turn {
+		to {
+			transform: rotate(360deg);
+		}
+	}
+
+	@keyframes halo-splash-breathe {
+		50% {
+			transform: scale(0.82);
+		}
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		#halo-splash .arc,
+		#halo-splash .core {
+			animation: none;
+		}
 	}
 
 	html.her #splash-screen {

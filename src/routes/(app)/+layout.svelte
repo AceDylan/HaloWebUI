@@ -4,7 +4,7 @@
 	import { openDB, deleteDB } from 'idb';
 	import fileSaver from 'file-saver';
 	const { saveAs } = fileSaver;
-	import { goto, afterNavigate } from '$app/navigation';
+	import { goto, afterNavigate, onNavigate } from '$app/navigation';
 	import { page } from '$app/stores';
 	import { fade } from 'svelte/transition';
 
@@ -52,6 +52,22 @@
 	import { isFramed, requestHubReauth } from '$lib/utils/hub-embed';
 
 	const i18n = getContext('i18n');
+
+	// Moving to another page cross-fades the page panel (View Transitions API; the sidebar stays
+	// still — see [data-halo-main] in halo.css). Same-path changes (?tab=, ?q=) and reduced
+	// motion skip it; browsers without the API just navigate.
+	onNavigate((navigation) => {
+		if (navigation.willUnload || typeof document === 'undefined') return;
+		if (!('startViewTransition' in document)) return;
+		if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+		if (navigation.from?.url.pathname === navigation.to?.url.pathname) return;
+		return new Promise<void>((resolve) => {
+			(document as any).startViewTransition(async () => {
+				resolve();
+				await navigation.complete;
+			});
+		});
+	});
 
 	let loaded = false;
 	let DB = null;

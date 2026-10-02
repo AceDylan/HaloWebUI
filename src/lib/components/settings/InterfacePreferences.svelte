@@ -447,11 +447,10 @@
 			themeToApply = systemPrefersDark() ? 'dark' : 'light';
 		}
 
-		if (themeToApply === 'dark') {
-			document.documentElement.style.setProperty('--color-gray-800', '#333');
-			document.documentElement.style.setProperty('--color-gray-850', '#262626');
-			document.documentElement.style.setProperty('--color-gray-900', '#171717');
-			document.documentElement.style.setProperty('--color-gray-950', '#0d0d0d');
+		// The grays come from the Halo tokens (halo.css). Older builds pinned four of them inline
+		// here, which overrode the tokens for the rest of the session; clear any such leftovers.
+		for (const step of ['800', '850', '900', '950']) {
+			document.documentElement.style.removeProperty(`--color-gray-${step}`);
 		}
 
 		themes
@@ -470,9 +469,9 @@
 		if (metaThemeColor) {
 			if (_theme === 'system') {
 				const systemTheme = systemPrefersDark() ? 'dark' : 'light';
-				metaThemeColor.setAttribute('content', systemTheme === 'light' ? '#ffffff' : '#171717');
+				metaThemeColor.setAttribute('content', systemTheme === 'light' ? '#ffffff' : '#0a0b10');
 			} else {
-				metaThemeColor.setAttribute('content', _theme === 'dark' ? '#171717' : '#ffffff');
+				metaThemeColor.setAttribute('content', _theme === 'dark' ? '#0a0b10' : '#ffffff');
 			}
 		}
 

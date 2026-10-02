@@ -25,9 +25,7 @@
 	$: proposal = change?.proposal ?? null;
 	$: thinking = status === 'thinking';
 	$: completed = phase === 'completed';
-	$: placeholder = completed
-		? '团队做完了。还要补什么、改什么，对负责人说…'
-		: '对负责人说：追加需求、调整分工、改某个任务的做法…';
+	$: placeholder = completed ? '还要补什么？对负责人说…' : '对负责人说：追加或调整…';
 	$: changeCount = proposal
 		? proposal.add_members.length +
 			proposal.add_tasks.length +
@@ -239,7 +237,9 @@
 		<div class="shrink-0 pb-1.5" aria-hidden="true">
 			<TeamAvatar kind="lead" size={22} />
 		</div>
-		<label class="sr-only" for="lead-say-{teamId}">对负责人说</label>
+		<label class="sr-only" for="lead-say-{teamId}"
+			>对负责人说：追加需求、调整分工、改某个任务的做法；负责人给出计划变更，你确认后才生效</label
+		>
 		<textarea
 			id="lead-say-{teamId}"
 			bind:this={input}

@@ -124,7 +124,7 @@ def _workspace_text(team: dict) -> str:
 def create_team(team_id: str, plan: dict, *, owner: str, chat_id: str = "", goal: str = "",
                 title: str = "", origin: Optional[dict] = None) -> dict:
     """Create (or return) the board for *team_id* from a validated *plan*; idempotent."""
-    from .plan import validate_plan
+    from .plan import task_model, validate_plan
 
     slug = board_slug(team_id)
     with _lock:
@@ -203,6 +203,8 @@ def create_team(team_id: str, plan: dict, *, owner: str, chat_id: str = "", goal
                     idempotency_key=f"{team_id}:{key}",
                     max_runtime_seconds=NATIVE_MAX_RUNTIME if executor == "hermes" else None,
                     board=slug,
+                    # the member's model, used whenever this task runs on Hermes (also after a fallback)
+                    **task_model(member),
                 )
                 keys[key] = task_id
                 trail = []
@@ -370,6 +372,8 @@ def snapshot(team_id: str, owner: Optional[str] = None) -> dict:
                 "title": re.sub(r"^\S+\s+", "", task.title, count=1) if entry.get("key") and task.title.startswith(entry["key"] + " ") else task.title,
                 "member": entry.get("member"),
                 "executor": ASSIGNEE_EXECUTOR.get(task.assignee or "", "") or entry.get("executor") or "hermes",
+                # the model a Hermes worker runs this task on (pinned at creation from the member's)
+                "model": getattr(task, "model_override", None) or "",
                 "chosen": entry.get("chosen") or entry.get("executor"),
                 "chosen_by": entry.get("chosen_by") or "auto",
                 "trail": entry.get("trail") or [],

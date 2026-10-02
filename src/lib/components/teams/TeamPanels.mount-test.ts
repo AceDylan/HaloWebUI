@@ -245,6 +245,77 @@ describe('PlanReview', () => {
 		await sleep(5);
 		expect(picked).toEqual([{ name: 'backend-dev', executor: 'codex', source: 'user' }]);
 	});
+
+	it("a Hermes member comes with the lead's model, which you can change and put back", async () => {
+		const { default: PlanReview } = await import('./PlanReview.svelte');
+		const models = [
+			{ model: 'gpt-chat', default: true, hint: '综合最强' },
+			{ model: 'claude-chat', default: false, hint: '写作和长文' },
+			{ model: 'deepseek-chat', default: false, hint: '快而省' }
+		];
+		const plan = {
+			title: '小工具',
+			members: [
+				{
+					name: 'writer',
+					role: '写作',
+					executor: 'hermes',
+					model: 'claude-chat',
+					model_source: 'lead',
+					model_recommended: 'claude-chat'
+				},
+				{
+					name: 'coder',
+					role: '后端',
+					executor: 'cchclaude',
+					runner: 'cchclaude',
+					model: 'gpt-chat',
+					model_source: 'default'
+				},
+				{
+					name: 'fixer',
+					role: '修复',
+					executor: 'hermes',
+					model: 'deepseek-chat',
+					model_source: 'user',
+					model_recommended: 'gpt-chat'
+				}
+			],
+			tasks: [
+				{ key: 'T1', title: '写', member: 'writer', depends_on: [] },
+				{ key: 'T2', title: '改', member: 'coder', depends_on: [] },
+				{ key: 'T3', title: '修', member: 'fixer', depends_on: [] }
+			],
+			layers: [['T1', 'T2', 'T3']],
+			widest_layer: 3
+		};
+		await mount(PlanReview, { team: { id: 'team-1', status: 'plan_ready', plan }, models });
+		const picked: any[] = [];
+		app.$on('model', (e: any) => picked.push(e.detail));
+		const row = (name: string) =>
+			target.querySelector(`[data-plan-member="${name}"] [data-member-model]`) as any;
+		// a runner member runs on its own model: no picker
+		expect(row('coder')).toBeFalsy();
+		const writer = row('writer');
+		expect(writer.getAttribute('data-member-model')).toBe('claude-chat');
+		expect(writer.textContent).toContain('负责人推荐');
+		const select = writer.querySelector('select') as any;
+		expect(Array.from(select.querySelectorAll('option')).map((o: any) => o.textContent)).toEqual([
+			'gpt-chat · 默认',
+			'claude-chat · 推荐',
+			'deepseek-chat'
+		]);
+		select.value = 'deepseek-chat';
+		select.dispatchEvent(new (globalThis as any).Event('change', { bubbles: true }));
+		await sleep(5);
+		expect(picked).toEqual([{ name: 'writer', model: 'deepseek-chat', source: 'user' }]);
+		// your own pick says so and can go back to the lead's
+		const fixer = row('fixer');
+		expect(fixer.textContent).toContain('你手动指定');
+		fixer.querySelector('[data-model-reset]').click();
+		await sleep(5);
+		expect(picked[1]).toEqual({ name: 'fixer', model: '', source: 'auto' });
+	});
 });
 
 describe('Inspector (runner member)', () => {

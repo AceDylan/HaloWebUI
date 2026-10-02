@@ -76,10 +76,15 @@ class ReplanForm(BaseModel):
 class MemberExecutor(BaseModel):
     name: str = Field(max_length=40)
     # Hermes members, or one of the runners the Hermes teams plugin can drive (see its runners.py).
-    executor: Literal["hermes", "reclaude", "cchclaude", "anyclaude", "codex", "agy"]
+    # None: the runner stays as it is (only the model changes).
+    executor: Optional[Literal["hermes", "reclaude", "cchclaude", "anyclaude", "codex", "agy"]] = None
     # "user": the user picked this runner (the automatic choice never overrides it; it still falls
     # back when the runner is down). "auto": back to the runner the member's task kind defaults to.
     source: Literal["user", "auto"] = "user"
+    # The model the member runs on when it runs on Hermes (one Hermes has configured; Hermes checks).
+    model: Optional[str] = Field(default=None, max_length=80)
+    # "user": the user picked it. "auto": back to what the lead recommended.
+    model_source: Literal["user", "auto"] = "user"
 
 
 class PlanEditForm(BaseModel):
@@ -233,11 +238,19 @@ async def edit_plan(request: Request, team_id: str, form: PlanEditForm, user=Dep
     for member in plan.get("members") or []:
         member = dict(member)
         pick = chosen.get(member.get("name"))
-        if pick is not None:
+        if pick is not None and pick.executor is not None:
             member["executor"] = pick.executor
             member["executor_source"] = pick.source
             if pick.source == "auto":
                 member["executor"] = member.get("recommended") or pick.executor
+        if pick is not None and (pick.model is not None or pick.model_source == "auto"):
+            if pick.model_source == "auto":
+                recommended = member.get("model_recommended") or ""
+                member["model"] = recommended
+                member["model_source"] = "lead" if recommended else "default"
+            else:
+                member["model"] = pick.model.strip()
+                member["model_source"] = "user"
         members.append(member)
     plan["members"] = members
     # Hermes works out which runner will actually run each member now (availability, fallback).

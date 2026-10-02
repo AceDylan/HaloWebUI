@@ -224,13 +224,15 @@ def test_conclusions_from_before_the_hand_over_are_not_sent(pkg, team_id, plan_d
 def test_plan_card_lists_members_tasks_and_buttons(linked):
     team = {"id": "11111111-2222-3333-4444-555555555555", "title": "研究 <雨>", "plan": {
         "summary": "两人并行", "max_parallel": 2,
-        "members": [{"name": "researcher", "role": "研究员", "executor": "hermes", "runner": "hermes"},
-                    {"name": "dev", "role": "开发", "executor": "agy", "runner": "codex", "runner_note": "agy 不可用"}],
+        "members": [{"name": "researcher", "role": "研究员", "executor": "hermes", "runner": "hermes", "model": "gemini-chat"},
+                    {"name": "dev", "role": "开发", "executor": "agy", "runner": "codex", "runner_note": "agy 不可用",
+                     "model": "gpt-chat"}],
         "tasks": [{"key": "T1", "title": "查资料", "member": "researcher", "depends_on": []},
                   {"key": "T2", "title": "画图", "member": "dev", "depends_on": ["T1"]}],
         "lead_model": {"model": "gpt-chat"}}}
     text, buttons = linked.notify.plan_message(team)
     assert "研究 &lt;雨&gt;" in text and "codex（agy 不可用）" in text and "2. 画图 — dev（等 1）" in text
+    assert "研究员 · Hermes · gemini-chat" in text and "codex · gpt-chat" not in text  # runners bring their own model
     specs = [spec for row in buttons for _l, spec in row]
     assert f"cb:ap:{team['id']}" in specs and f"cb:cx:{team['id']}" in specs
     assert "gpt-chat" in text

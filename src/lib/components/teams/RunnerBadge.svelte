@@ -10,11 +10,15 @@
 	export let size: 'xs' | 'sm' = 'xs';
 	/** Tight spots (board cards): the actual runner with a fallback mark; details in the title. */
 	export let compact = false;
+	/** The model, shown when Hermes does the work (runners bring their own). */
+	export let model: string | null | undefined = '';
 
 	$: moved = !!chosen && chosen !== actual;
-	$: title = moved
-		? `默认 ${runnerLabel(chosen)}，实际 ${actual ? runnerLabel(actual) : '没有可用的执行来源'}${reason ? `：${reason}` : ''}`
-		: `由 ${runnerLabel(actual)} 执行`;
+	$: withModel = actual === 'hermes' && !!model;
+	$: title =
+		(moved
+			? `默认 ${runnerLabel(chosen)}，实际 ${actual ? runnerLabel(actual) : '没有可用的执行来源'}${reason ? `：${reason}` : ''}`
+			: `由 ${runnerLabel(actual)} 执行`) + (withModel ? `，模型 ${model}` : '');
 </script>
 
 <span
@@ -60,4 +64,7 @@
 			>{actual ? runnerLabel(actual) : '无可用'}</span
 		>
 	{/key}
+	{#if withModel && !compact}
+		<span class="truncate opacity-70" data-runner-model>· {model}</span>
+	{/if}
 </span>

@@ -46,6 +46,13 @@ is the Hermes side. It adds no service, port or second task store:
   A task that fails or gets blocked is diagnosed by the lead (cause + one action: retry, retry with
   a note, another runner, skip, ask the user), applied in one click. After the conclusion the
   lead checks the result against the goal; 「让团队补上」 turns the gaps into a change request.
+* **Models of Hermes members** (`plan.member_model` / `task_model`): every member carries a
+  `model` (one Hermes has configured; the lead recommends one per member from `hermes_models()`
+  with a hint each, else Hermes' default; the user can change it before approval, 「恢复推荐」 goes
+  back). Every Kanban task is created with its member's model **and provider** pinned
+  (`model_override` / `provider_override`), so a Hermes worker — the member's own runner or the
+  fallback at the end of a runner chain — runs exactly that model and never depends on the CLI's
+  own resolution of the default (which used to land on the first fallback, deepseek-chat).
 * **Member activity** (`hooks.py`, inside each Kanban worker of a team board): tool calls,
   native subagent start/stop, and the moment a user's note reached the running member, as
   `halo_*` events in the same `task_events` sequence.

@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { createEventDispatcher } from 'svelte';
 
-	import type { Team, TeamExecutor, TeamsMeta } from '$lib/apis/teams';
+	import type { HermesModel, Team, TeamExecutor, TeamPlanMember, TeamsMeta } from '$lib/apis/teams';
 	import RunnerStatus from './RunnerStatus.svelte';
 	import StatusChip from './StatusChip.svelte';
 	import TeamAvatar from './TeamAvatar.svelte';
@@ -21,6 +21,8 @@
 	export let checking = false;
 	/** Git repositories the team could work in instead (from the teams meta). */
 	export let projects: { path: string; name: string }[] = [];
+	/** Models a member running on Hermes can use (from the teams meta). */
+	export let models: HermesModel[] = [];
 
 	const dispatch = createEventDispatcher<{
 		approve: void;
@@ -29,6 +31,8 @@
 		'replan-project': string;
 		cancel: void;
 		executor: { name: string; executor: TeamExecutor; source: 'user' | 'auto' };
+		/** source auto: back to the lead's recommendation. */
+		model: { name: string; model: string; source: 'user' | 'auto' };
 		recheck: void;
 	}>();
 	let feedback = '';
@@ -57,6 +61,21 @@
 			name === 'hermes' ? 'Hermes 代理' : `${name}${info?.engine ? ` · ${info.engine}` : ''}`;
 		return info && !info.available ? `${base}（不可用）` : base;
 	};
+
+	// The model matters when Hermes does the member's work: its own runner, or where it fell back to.
+	const runsOnHermes = (m: TeamPlanMember, actual: string | null | undefined) =>
+		m.executor === 'hermes' || actual === 'hermes';
+	const modelOptions = (m: TeamPlanMember): HermesModel[] =>
+		m.model && !models.some((o) => o.model === m.model)
+			? [...models, { model: m.model, default: false, hint: '' }]
+			: models;
+	const modelHint = (name?: string) => models.find((o) => o.model === name)?.hint ?? '';
+	const modelSourceText = (m: TeamPlanMember) =>
+		m.model_source === 'user'
+			? '你手动指定'
+			: m.model_source === 'lead'
+				? '负责人推荐'
+				: 'Hermes 默认模型';
 
 	const sourceText = (m: { executor_source?: string; kind?: string; recommended?: string }) =>
 		m.executor_source === 'user'
@@ -360,12 +379,70 @@
 									{runnerLabel(d.chosen)} 可用
 								</div>
 							{/if}
+							{#if runsOnHermes(member, d.actual) && (models.length || member.model)}
+								<div
+									class="tm-hairline mt-2 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1.5 border-t pt-2"
+									data-member-model={member.model ?? ''}
+								>
+									<label class="shrink-0 text-xs text-gray-500" for="model-{member.name}"
+										>模型</label
+									>
+									{#if models.length}
+										<select
+											id="model-{member.name}"
+											class="compact-select min-w-0 max-w-[16rem] flex-1 truncate rounded-lg border border-gray-200 bg-white py-1 pl-2 pr-7 font-mono text-xs text-gray-900 transition focus:border-sky-400 focus:outline-none disabled:opacity-60 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+											value={member.model ?? ''}
+											disabled={!editable || busy}
+											on:change={(e) =>
+												dispatch('model', {
+													name: member.name,
+													model: e.currentTarget.value,
+													source: 'user'
+												})}
+										>
+											{#each modelOptions(member) as option (option.model)}
+												<option value={option.model} title={option.hint}
+													>{option.model}{option.model === member.model_recommended
+														? ' · 推荐'
+														: option.default
+															? ' · 默认'
+															: ''}</option
+												>
+											{/each}
+										</select>
+									{:else}
+										<span class="font-mono text-xs text-gray-700 dark:text-gray-200"
+											>{member.model}</span
+										>
+									{/if}
+									<span class="min-w-0 truncate text-[11px] text-gray-400"
+										>{modelSourceText(member)}</span
+									>
+									{#if member.model_source === 'user' && editable && member.model_recommended && member.model_recommended !== member.model}
+										<button
+											type="button"
+											class="ml-auto shrink-0 rounded-md px-1.5 py-0.5 text-[11px] text-sky-700 transition hover:bg-sky-50 disabled:opacity-50 dark:text-sky-300 dark:hover:bg-sky-950/40"
+											disabled={busy}
+											on:click={() =>
+												dispatch('model', { name: member.name, model: '', source: 'auto' })}
+											title="用负责人推荐的 {member.model_recommended}"
+											data-model-reset>恢复推荐</button
+										>
+									{/if}
+								</div>
+								{#if modelHint(member.model)}
+									<div class="mt-1 text-[11px] leading-relaxed text-gray-400">
+										{modelHint(member.model)}
+									</div>
+								{/if}
+							{/if}
 						</div>
 					</li>
 				{/each}
 			</ul>
 			<p class="mt-2 text-[11px] leading-relaxed text-gray-400">
-				执行来源不可用时会沿 {order.map(runnerLabel).join(' → ')} 往后兜底，你手动选的也一样；每次改派都会在任务上记下原因。
+				执行来源不可用时会沿 {order.map(runnerLabel).join(' → ')} 往后兜底，你手动选的也一样；每次改派都会在任务上记下原因。由
+				Hermes 执行的成员用上面选的模型（负责人按分工推荐，可以改）。
 			</p>
 		</section>
 

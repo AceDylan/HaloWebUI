@@ -203,6 +203,29 @@ def test_edit_plan_records_the_users_choice_and_lets_hermes_resolve_the_runner(h
     assert member["executor"] == "cchclaude" and member["executor_source"] == "auto" and member["runner"] == "cchclaude"
 
 
+def test_edit_plan_changes_a_members_model_without_touching_its_runner(hermes):
+    client = _client("u1")
+    team_id = _ready_team(client, hermes)
+    members = [{**PLAN["members"][0], "model": "claude-chat", "model_source": "lead", "model_recommended": "claude-chat"},
+               {**PLAN["members"][1], "executor_source": "goal", "model": "gpt-chat", "model_source": "default",
+                "model_recommended": "gpt-chat"}]
+    AgentTeams.update(team_id, "u1", plan={**PLAN, "members": members})
+    resp = client.put(f"/api/v1/teams/{team_id}/plan", json={"members": [{"name": "spec-writer", "model": "deepseek-chat"}]})
+    assert resp.status_code == 200, resp.text
+    sent = next(c for c in hermes.calls if c[2] == "/plan/resolve")[3]["plan"]["members"]
+    assert (sent[0]["model"], sent[0]["model_source"], sent[0]["model_recommended"]) == ("deepseek-chat", "user", "claude-chat")
+    assert sent[0]["executor"] == "hermes" and "executor_source" not in PLAN["members"][0]  # runner untouched
+    assert sent[1]["executor_source"] == "goal" and sent[1]["model"] == "gpt-chat"
+    stored = AgentTeams.get(team_id, "u1").plan["members"][0]
+    assert stored["model"] == "deepseek-chat" and stored["model_source"] == "user"
+    # back to the lead's recommendation
+    resp = client.put(f"/api/v1/teams/{team_id}/plan", json={"members": [{"name": "spec-writer", "model_source": "auto"}]})
+    stored = AgentTeams.get(team_id, "u1").plan["members"][0]
+    assert (stored["model"], stored["model_source"]) == ("claude-chat", "lead")
+    assert client.put(f"/api/v1/teams/{team_id}/plan",
+                      json={"members": [{"name": "spec-writer", "model": "x" * 81}]}).status_code == 422
+
+
 def test_meta_conclusion_and_files_are_proxied_per_owner(hermes, monkeypatch):
     client, other = _client("u1"), _client("u2")
     hermes.responses[("GET", "/meta")] = {"lead_model": {"model": "gpt-chat"}}

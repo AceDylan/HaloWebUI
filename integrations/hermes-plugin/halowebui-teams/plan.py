@@ -34,7 +34,7 @@ SYSTEM_PROMPT = """你是一个多代理团队的负责人（team-lead）。用�
   "title": "不超过 20 个字的团队任务名",
   "summary": "一两句话说明你打算怎么分工",
   "members": [
-    {"name": "backend-dev", "role": "后端开发", "assistant": "17", "kind": "code", "focus": "负责什么"}
+    {"name": "backend-dev", "role": "后端开发", "assistant": "17", "kind": "code", "model": "模型名", "focus": "负责什么"}
   ],
   "tasks": [
     {"key": "T1", "title": "任务名", "description": "完整、可独立执行的任务说明", "member": "backend-dev", "depends_on": []}
@@ -47,6 +47,8 @@ SYSTEM_PROMPT = """你是一个多代理团队的负责人（team-lead）。用�
 - kind：这个成员的任务类型，决定由哪种执行器（runner）来做：
 {kinds}
 - 只有用户在目标里明确点名用某个执行器做某部分时，那个成员才加 "executor"：{executors} 之一；否则不要写 executor，系统会按 kind 自动选择并检查可用性。
+- model：这个成员由 Hermes 执行时用哪个模型（kind 默认走 Hermes 的成员一定用它；其他成员在 runner 不可用、退回 Hermes 时用它）。按这个成员的活从下面挑最合适的一个；用户在目标里点名了模型就用点名的；拿不准就用默认：
+{models}
 
 助手模板（编号：名称（类型）— 说明）：
 {catalog}
@@ -70,8 +72,11 @@ def system_prompt() -> str:
     kinds = "\n".join(f"  - \"{k}\"：{v['label']}（{v['hint']}）" for k, v in runners.KINDS.items())
     catalog = assistants.catalog_text() or "（没有可用的助手模板，assistant 一律填 null）"
     executors = " / ".join(f'"{n}"' for n in EXECUTORS)
+    models = "\n".join(f"  - \"{m['model']}\"{'（默认）' if m['default'] else ''}" + (f"：{m['hint']}" if m["hint"] else "")
+                       for m in hermes_models()) or "  （Hermes 没有可选的模型，不写 model）"
     # str.replace, not format: the prompt's JSON example has braces of its own.
-    return SYSTEM_PROMPT.replace("{kinds}", kinds).replace("{catalog}", catalog).replace("{executors}", executors)
+    return (SYSTEM_PROMPT.replace("{kinds}", kinds).replace("{catalog}", catalog).replace("{executors}", executors)
+            .replace("{models}", models))
 
 
 def build_messages(goal: str, workspace: str, feedback: str = "", previous: Optional[dict] = None,
@@ -99,6 +104,8 @@ def _plan_for_lead(plan: dict) -> dict:
         entry["assistant"] = (m.get("assistant") or {}).get("id") if isinstance(m.get("assistant"), dict) else m.get("assistant")
         if m.get("executor_source") in ("goal", "user") and m.get("executor"):
             entry["executor"] = m["executor"]
+        if m.get("model_source") == "user" and m.get("model"):
+            entry["model"] = m["model"]  # the user's pick stays
         members.append(entry)
     return {"title": plan.get("title"), "summary": plan.get("summary"), "members": members,
             "tasks": [{k: t.get(k) for k in ("key", "title", "description", "member", "depends_on")}
@@ -156,6 +163,55 @@ def configured_models(cfg: Optional[dict] = None) -> list[dict]:
         if isinstance(entry, dict) and entry.get("provider") not in (None, "", "custom"):
             add(entry.get("provider"), entry.get("model"))
     return out
+
+
+# A member that runs on Hermes (its own kind's default, or the fallback at the end of every runner
+# chain) runs a Kanban worker on one of the models Hermes has configured. The lead recommends one
+# per member; the user can change it before approval. What the lead and the picker say about each:
+MODEL_HINTS = {
+    "gpt-chat": "综合最强：推理、规划、调研、代码",
+    "claude-chat": "写作和长文、代码、细致的分析",
+    "gemini-chat": "长上下文、读大量资料、多模态",
+    "deepseek-chat": "快而省：简单查询、整理格式、小改动",
+}
+MODEL_SOURCES = ("lead", "default", "user")
+
+
+def hermes_models(cfg: Optional[dict] = None) -> list[dict]:
+    """[{model, default, hint}] — what a Hermes member can run on (no providers or keys)."""
+    return [{"model": m["model"], "default": m["default"], "hint": MODEL_HINTS.get(m["model"], "")}
+            for m in configured_models(cfg)]
+
+
+def member_model(entry: dict, models: Optional[list] = None) -> dict:
+    """``{model, model_source, model_recommended}`` for a member: the user's or the lead's pick when
+    Hermes has that model, else Hermes' default model. ``models``: configured_models()."""
+    models = configured_models() if models is None else models
+    names = [m["model"] for m in models]
+    default = next((m["model"] for m in models if m["default"]), names[0] if names else "")
+    requested = str(entry.get("model") or "").strip()[:80]
+    source = entry.get("model_source") if entry.get("model_source") in MODEL_SOURCES else ("lead" if requested else "default")
+    if names and requested not in names:
+        requested = ""  # not a model Hermes has (any more)
+    if not requested:
+        requested, source = default, "default"
+    recommended = str(entry.get("model_recommended") or "").strip()
+    if source != "user" or (names and recommended not in names) or not recommended:
+        recommended = requested if source != "user" else default
+    return {"model": requested, "model_source": source, "model_recommended": recommended}
+
+
+def task_model(member: dict, cfg: Optional[dict] = None) -> dict:
+    """Kanban ``create_task`` fields that pin a member's model and its provider, so its Hermes
+    worker runs exactly that (never the CLI's own resolution of the default). {} when unknown."""
+    models = configured_models(cfg)
+    model = str(member.get("model") or "").strip()
+    route = next((m for m in models if m["model"] == model), None) if model else None
+    route = route or next((m for m in models if m["default"]), None)
+    if route is None:
+        return {}
+    provider = route["provider"] if route["provider"] not in ("", "main", "auto") else None
+    return {"model_override": route["model"], "provider_override": provider}
 
 
 def lead_routes(cfg: Optional[dict] = None, preferred: Optional[str] = None) -> list[dict]:
@@ -308,6 +364,7 @@ def validate_plan(raw: Any, *, parallel_cap: int = DEFAULT_PARALLEL_CAP,
 
     members: list[dict] = []
     names: set[str] = set()
+    models = configured_models()
     for index, entry in enumerate(members_in[:MAX_MEMBERS], 1):
         if not isinstance(entry, dict):
             errors.append(f"第 {index} 个成员格式不对")
@@ -341,6 +398,7 @@ def validate_plan(raw: Any, *, parallel_cap: int = DEFAULT_PARALLEL_CAP,
             "assistant": assistants.public(template),
             "executor": executor or "",
             "executor_source": source,
+            **member_model(entry, models),
         })
 
     tasks: list[dict] = []

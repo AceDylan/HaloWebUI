@@ -21,6 +21,7 @@
 		waitingFor?: string[];
 		chosenRunner?: string;
 		actualRunner?: string | null;
+		model?: string;
 		assistant?: { name: string; emoji?: string } | null;
 		activity?: { text: string; ts: number; type: string } | null;
 	}[] = [];
@@ -123,6 +124,7 @@
 								><RunnerBadge
 									chosen={member.chosenRunner ?? member.executor}
 									actual={member.actualRunner ?? member.executor}
+									model={member.model}
 								/></span
 							>
 						</div>

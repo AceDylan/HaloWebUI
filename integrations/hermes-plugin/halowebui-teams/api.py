@@ -252,12 +252,12 @@ async def _diagnosis_post(request):
 
 async def _meta(request):
     from . import assistants, runners
-    from .plan import lead_model_info
+    from .plan import hermes_models, lead_model_info
 
     def build() -> dict:
         from . import projects
 
-        return {"lead_model": lead_model_info(), "registry": runners.public_registry(),
+        return {"lead_model": lead_model_info(), "hermes_models": hermes_models(), "registry": runners.public_registry(),
                 "assistants": [assistants.public(a) for a in assistants.catalog()],
                 "projects": projects.candidates()}
 

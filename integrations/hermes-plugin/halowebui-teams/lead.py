@@ -222,7 +222,7 @@ CHANGE_SYSTEM = """你是协作团队的负责人（team-lead）。团队正在�
 只输出一个 JSON 对象，不要输出任何其他文字：
 {
   "reply": "对用户说的话：你理解的要求和打算怎么改；只是问进展就直接回答（1 到 4 句中文）",
-  "add_members": [{"name": "qa-engineer", "role": "测试", "assistant": "模板编号或 null", "kind": "code", "focus": "负责什么"}],
+  "add_members": [{"name": "qa-engineer", "role": "测试", "assistant": "模板编号或 null", "kind": "code", "model": "可选：Hermes 的模型名，不写用默认", "focus": "负责什么"}],
   "add_tasks": [{"key": "N1", "title": "任务名", "description": "完整、可独立执行的说明：做什么、产出写到哪个文件、完成标准", "member": "成员 name", "depends_on": ["T2"]}],
   "cancel_tasks": ["T4"],
   "edit_tasks": [{"key": "T3", "title": "可选的新标题", "description": "新的完整说明"}]
@@ -419,7 +419,7 @@ def validate_change(team: dict, snap: dict, raw: Any) -> tuple[Optional[dict], l
     """Normalize the lead's change against the team's current state: ``(proposal, [])`` or
     ``(None, errors)``. Existing tasks are referred to by key; new ones get the next T numbers."""
     from . import assistants, runners
-    from .plan import _KEY_RE, _NAME_RE, _clean_text, _find_cycle, infer_kind
+    from .plan import _KEY_RE, _NAME_RE, _clean_text, _find_cycle, infer_kind, member_model
 
     errors: list[str] = []
     if not isinstance(raw, dict):
@@ -449,7 +449,8 @@ def validate_change(team: dict, snap: dict, raw: Any) -> tuple[Optional[dict], l
                         or infer_kind(role, focus),
                         "assistant": assistants.public(template),
                         "executor": executor if executor in EXECUTORS else "",
-                        "executor_source": "goal" if executor in EXECUTORS else "auto"})
+                        "executor_source": "goal" if executor in EXECUTORS else "auto",
+                        **member_model(entry)})
     if len(members) > MAX_NEW_MEMBERS:
         errors.append(f"一次最多加 {MAX_NEW_MEMBERS} 个成员")
     if len(existing_members) + len(members) > MAX_TOTAL_MEMBERS:
@@ -595,7 +596,7 @@ def apply_change(team_id: str, change_id: str, *, owner: Optional[str] = None, a
     """Put a proposal on the board: members, tasks, cancels, edits — checked again against the
     current state first (a task that started since is not touched; the user is told)."""
     from . import teams
-    from .plan import assign_runners
+    from .plan import assign_runners, task_model
     from .teams import TeamError, _require_team, _task_body, snapshot
 
     with teams._lock:
@@ -669,7 +670,8 @@ def apply_change(team_id: str, change_id: str, *, owner: Optional[str] = None, a
                     workspace_kind="dir", workspace_path=team["workspace"], tenant=team_id,
                     parents=[keys[d] for d in t["depends_on"] if d in keys],
                     idempotency_key=f"{team_id}:{t['key']}",
-                    max_runtime_seconds=teams.NATIVE_MAX_RUNTIME if executor == "hermes" else None, board=slug)
+                    max_runtime_seconds=teams.NATIVE_MAX_RUNTIME if executor == "hermes" else None, board=slug,
+                    **task_model(member))
                 keys[t["key"]] = task_id
                 added[task_id] = {"key": t["key"], "member": member["name"], "seq": seq, "executor": executor,
                                   "chosen": member.get("executor") or executor,

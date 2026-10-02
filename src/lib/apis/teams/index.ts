@@ -33,7 +33,16 @@ export type TeamPlanMember = {
 	runner?: TeamExecutor | null;
 	/** Why runner differs from executor. */
 	runner_note?: string;
+	/** The model the member runs on whenever it runs on Hermes (its own runner or the fallback). */
+	model?: string;
+	/** lead = the lead recommended it; default = Hermes' default model; user = you picked it. */
+	model_source?: 'lead' | 'default' | 'user';
+	/** What the lead recommended (「恢复推荐」 goes back to it). */
+	model_recommended?: string;
 };
+
+/** A model Hermes has configured that a Hermes member can run on. */
+export type HermesModel = { model: string; default: boolean; hint: string };
 
 export type LeadModel = {
 	model: string;
@@ -148,6 +157,8 @@ export type LiveTask = {
 	title: string;
 	member: string;
 	executor: TeamExecutor;
+	/** The model a Hermes worker runs this task on (pinned from its member when it was created). */
+	model?: string;
 	status: string;
 	sub_status: SubStatus;
 	parents: string[];
@@ -304,6 +315,8 @@ export type RunnerInfo = {
 
 export type TeamsMeta = {
 	lead_model: LeadModel;
+	/** Models a Hermes member can run on (the default first). */
+	hermes_models?: HermesModel[];
 	registry: {
 		runners: RunnerInfo[];
 		kinds: { value: TaskKind; label: string; hint: string; default: TeamExecutor }[];
@@ -558,7 +571,15 @@ export const discardTeamChanges = (token: string, teamId: string) =>
 export const editTeamPlan = (
 	token: string,
 	teamId: string,
-	members: { name: string; executor: TeamExecutor; source?: 'user' | 'auto' }[]
+	members: {
+		name: string;
+		/** Leave out to keep the runner (only the model changes). */
+		executor?: TeamExecutor;
+		source?: 'user' | 'auto';
+		model?: string;
+		/** auto = back to what the lead recommended. */
+		model_source?: 'user' | 'auto';
+	}[]
 ) => request<Team>(token, 'PUT', `/${id(teamId)}/plan`, { members });
 
 export const getTeamsMeta = (token: string) => request<TeamsMeta>(token, 'GET', '/meta');

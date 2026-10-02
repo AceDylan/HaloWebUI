@@ -149,7 +149,8 @@ def plan_message(team: dict, *, started: bool = False) -> tuple[str, list]:
     for m in members[:8]:
         runner = m.get("runner") or m.get("executor") or "hermes"
         note = f"（{esc(clip(m.get('runner_note'), 60))}）" if m.get("runner_note") else ""
-        lines.append(f"• {esc(m.get('name'))} · {esc(clip(m.get('role'), 24))} · {esc(RUNNER_LABEL.get(runner, runner))}{note}")
+        model = f" · {esc(m['model'])}" if runner == "hermes" and m.get("model") else ""
+        lines.append(f"• {esc(m.get('name'))} · {esc(clip(m.get('role'), 24))} · {esc(RUNNER_LABEL.get(runner, runner))}{model}{note}")
     lines.append("")
     lines.append(f"<b>任务 {len(tasks)} 个</b>（最多同时 {plan.get('max_parallel') or 2} 个）")
     keys = {t.get("key"): i for i, t in enumerate(tasks, 1)}

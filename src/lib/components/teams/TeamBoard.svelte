@@ -27,6 +27,7 @@
 		title: string;
 		member: string;
 		executor: string;
+		model?: string;
 		chosen?: string;
 		chosen_by?: string;
 		trail?: { from: string; to: string | null; reason: string }[];
@@ -79,6 +80,7 @@
 						title: t.title,
 						member: t.member,
 						executor: t.executor,
+						model: t.model ?? '',
 						runner: taskRunner(t),
 						attempts: t.attempts ?? 0,
 						sub_status: state.sub_status,

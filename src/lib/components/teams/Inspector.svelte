@@ -88,6 +88,7 @@
 		runner?: string | null;
 		runner_note?: string;
 		actualRunner?: string | null;
+		model?: string;
 	}[] = [];
 	/** Workspace of the team: absolute paths in a result that point into it become links. */
 	export let workspace: string | null = null;
@@ -388,6 +389,7 @@
 						chosen={decision.chosen}
 						actual={decision.actual}
 						reason={decision.reason}
+						model={task?.model}
 						size="sm"
 					/>
 					<span class="text-gray-400">{SOURCE_LABEL[decision.source] ?? ''}</span>
@@ -734,6 +736,7 @@
 				<RunnerBadge
 					chosen={member.executor}
 					actual={member.actualRunner ?? memberDecision?.actual ?? member.executor}
+					model={member.model}
 					size="sm"
 				/>
 				<span class="text-gray-400"

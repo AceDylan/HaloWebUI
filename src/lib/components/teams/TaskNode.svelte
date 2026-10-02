@@ -47,6 +47,7 @@
 				chosen={data?.runner?.chosen}
 				actual={data?.executor}
 				reason={data?.runner?.reason}
+				model={data?.model}
 				compact
 			/></span
 		>

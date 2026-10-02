@@ -88,6 +88,7 @@
 	let refreshKey = 0;
 	let registry: TeamsMeta['registry'] | null = null;
 	let projects: NonNullable<TeamsMeta['projects']> = [];
+	let hermesModels: NonNullable<TeamsMeta['hermes_models']> = [];
 	let registryError = '';
 	let checking = false;
 	let metaRequested = false;
@@ -140,6 +141,7 @@
 			// The member's chosen runner and the one on its current (or next / last) task.
 			chosenRunner: m.executor,
 			actualRunner: current?.executor ?? m.runner ?? m.executor,
+			model: current?.model || m.model,
 			activity: activity.get(m.name) ?? null
 		};
 	});
@@ -321,6 +323,12 @@
 		act(async () => {
 			team = await editTeamPlan(localStorage.token, teamId, [{ name, executor, source }]);
 		});
+	const setModel = (name: string, model: string, source: 'user' | 'auto') =>
+		act(async () => {
+			team = await editTeamPlan(localStorage.token, teamId, [
+				source === 'auto' ? { name, model_source: 'auto' } : { name, model, model_source: 'user' }
+			]);
+		});
 
 	// Runner availability for the plan review: loaded once, re-checked on request (which also lets
 	// Hermes work out every member's runner again).
@@ -330,6 +338,7 @@
 			const meta = await getTeamsMeta(localStorage.token);
 			registry = meta.registry;
 			projects = meta.projects ?? [];
+			hermesModels = meta.hermes_models ?? [];
 			registryError = '';
 		} catch (error) {
 			registryError = `${error?.message ?? error}`;
@@ -638,11 +647,13 @@
 						{registryError}
 						{checking}
 						{projects}
+						models={hermesModels}
 						on:approve={approve}
 						on:replan={(e) => replan(e.detail)}
 						on:replan-project={(e) => replan('', e.detail)}
 						on:cancel={cancel}
 						on:executor={(e) => setExecutor(e.detail.name, e.detail.executor, e.detail.source)}
+						on:model={(e) => setModel(e.detail.name, e.detail.model, e.detail.source)}
 						on:recheck={recheck}
 					/>
 				{/if}
@@ -869,6 +880,7 @@
 															chosen={taskRunner(t).chosen}
 															actual={t.executor}
 															reason={taskRunner(t).reason}
+															model={t.model}
 														/>
 														<span class="ml-auto shrink-0"
 															><StatusChip status={s?.sub_status} /></span

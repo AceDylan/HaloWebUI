@@ -105,6 +105,7 @@ def _task_body(team: dict, task: dict, member: dict) -> str:
         + "\n\n"
         + (_inputs_text(team))
         + (_image_text(team) if member.get("kind") == "image" else "")
+        + (QUICK_TEXT if team.get("effort") == "quick" else "")
         + "完成后调用 kanban_complete，summary 写清楚：做了什么、产出物在哪个文件、给后续成员的交接要点；"
         "result 写完整的结果（负责人会据此写最终结论；图片、截图等产出写明它在工作目录里的相对路径）。"
         "需要和别的成员沟通时用 kanban_comment 写在你的任务上。"
@@ -116,6 +117,14 @@ def _task_body(team: dict, task: dict, member: dict) -> str:
         "团队结论由负责人汇总，用户可以在结论页一键存入知识库。"
     )
 
+
+# A quick answer (the lead's plan effort "quick": one simple question or fact check). The 旭旭宝宝
+# 开播了吗 and 如何戒烟 members each ran 8–11 minutes of thorough research; Hermes answers such a
+# question directly in about 3.
+QUICK_TEXT = ("这是一个快答任务：目标只是一个简单问题或一次事实查询，用户在等答案。"
+              "用最少的步骤查清——通常一两次 smart-search research --budget quick 就够，必要时打开一两个来源核对——"
+              "几分钟内交付。result 直接写答案和依据（来源链接、核查时间），不必另写文件；"
+              "不要扩写成长篇指南，也不要走完整的引用整理流程。\n\n")
 
 INPUT_MAX_BYTES = 100 * 1024 * 1024
 INPUTS_MAX = 20
@@ -276,6 +285,7 @@ def create_team(team_id: str, plan: dict, *, owner: str, chat_id: str = "", goal
             "lead": checked["lead"],
             "members": checked["members"],
             "max_parallel": checked["max_parallel"],
+            "effort": checked.get("effort") or "",
             "image_templates": template_names,
             "inputs": input_paths,
             "state": "running",

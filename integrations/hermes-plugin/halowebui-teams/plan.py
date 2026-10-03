@@ -33,6 +33,7 @@ SYSTEM_PROMPT = """你是一个多代理团队的负责人（team-lead）。用�
 {
   "title": "不超过 20 个字的团队任务名",
   "summary": "一两句话说明你打算怎么分工",
+  "effort": "quick（只有快答才写这个键，见下）",
   "members": [
     {"name": "backend-dev", "role": "后端开发", "assistant": "17", "kind": "code", "model": "模型名", "focus": "负责什么"}
   ],
@@ -52,6 +53,10 @@ SYSTEM_PROMPT = """你是一个多代理团队的负责人（team-lead）。用�
 
 助手模板（编号：名称（类型）— 说明）：
 {catalog}
+
+快答：
+- 目标只是一个简单问题或一次事实查询——几分钟能查清、答案一两段话就够（例如「某某开播了吗」「某比赛结束了吗」「A 和 B 哪个更贵」「某个词是什么意思」）——写 "effort": "quick"：只安排 1 个成员、1 个任务，不要评审；任务 description 写清要回答的问题本身和需要给出的依据（来源、时间），不要求写成文件。
+- 要讲方法、给步骤或写成文的（「如何…」「怎么做…」「写一份…」、指南、报告、方案、长文），要生图、要写代码或在项目里做、要多方面对比分析的，都不是快答，不要写 effort。拿不准就不写。
 
 任务：
 - 和人数一样按分量来：简单目标 1 到 2 个任务，一般 2 到 6 个，最多 10 个；key 用 T1、T2…；每个任务只分给一个成员，member 必须是 members 里的 name。
@@ -115,7 +120,8 @@ def _plan_for_lead(plan: dict) -> dict:
         if m.get("model_source") == "user" and m.get("model"):
             entry["model"] = m["model"]  # the user's pick stays
         members.append(entry)
-    return {"title": plan.get("title"), "summary": plan.get("summary"), "members": members,
+    return {"title": plan.get("title"), "summary": plan.get("summary"),
+            **({"effort": plan["effort"]} if plan.get("effort") else {}), "members": members,
             "tasks": [{k: t.get(k) for k in ("key", "title", "description", "member", "depends_on")}
                       for t in plan.get("tasks") or []]}
 
@@ -503,6 +509,7 @@ def validate_plan(raw: Any, *, parallel_cap: int = DEFAULT_PARALLEL_CAP,
             m.setdefault("runner_note", "")
     layers = layers_of(tasks)
     widest = max((len(layer) for layer in layers), default=0)
+    effort = quick_effort(raw, members, tasks)
     plan = {
         "title": _clean_text(raw.get("title"), 40) or (tasks[0]["title"] if tasks else "协作任务"),
         "summary": _clean_text(raw.get("summary"), 400, one_line=False),
@@ -514,12 +521,28 @@ def validate_plan(raw: Any, *, parallel_cap: int = DEFAULT_PARALLEL_CAP,
         "widest_layer": widest,
         "executors": sorted({m["runner"] or m["executor"] for m in members}),
     }
+    if effort:
+        plan["effort"] = effort
     if isinstance(raw.get("lead_model"), dict):
         plan["lead_model"] = raw["lead_model"]
     if isinstance(raw.get("project"), dict) and raw["project"].get("path"):
         plan["project"] = {k: raw["project"].get(k) for k in ("path", "name", "branch", "head", "dirty", "auto")
                            if raw["project"].get(k) not in (None, "")}
     return plan, []
+
+
+QUICK = "quick"
+QUICK_KINDS = ("research", "writing")
+
+
+def quick_effort(raw: dict, members: list[dict], tasks: list[dict]) -> str:
+    """"quick" when the lead marked the goal as a quick answer and the plan is one: a single
+    research / writing task outside a project (an image, code or a second task is not)."""
+    if str(raw.get("effort") or "").strip().lower() != QUICK:
+        return ""
+    if len(tasks) != 1 or len(members) != 1 or (isinstance(raw.get("project"), dict) and raw["project"].get("path")):
+        return ""
+    return QUICK if members[0].get("kind") in QUICK_KINDS else ""
 
 
 def layers_of(tasks: list[dict]) -> list[list[str]]:

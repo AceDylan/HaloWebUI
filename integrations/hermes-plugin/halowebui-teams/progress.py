@@ -28,7 +28,8 @@ from .common import RUNNER_EXECUTORS, board_conn, logger, now, read_team, redact
 STATS_TTL = 600
 MIN_SAMPLES = 3
 # Seconds, when this machine has (almost) no history of its own.
-DEFAULTS = {"task": 180, "plan": 45, "conclusion": 40, "acceptance": 25, "illustration": 100}
+DEFAULTS = {"task": 180, "plan": 45, "conclusion": 40, "acceptance": 25, "illustration": 100,
+            "quick": 150}
 HOST_PARALLEL = 2          # kanban.max_in_progress (host-wide), the usual cap
 HIGH_SPREAD = 1.35
 PLAN_TIMES_MAX = 60
@@ -106,6 +107,12 @@ def _collect() -> dict:
                 continue
             entry = task_map.get(task_id) or {}
             executor = entry.get("executor") or "hermes"
+            if team.get("effort") == "quick":
+                # a quick answer is its own kind of task: counted with the rest it would drag every
+                # estimate down, and the research history would make each quick answer look ten
+                # minutes long
+                by_executor.setdefault(f"{executor}/quick", []).append(spent)
+                continue
             by_executor.setdefault(executor, []).append(spent)
             kind = kinds.get(entry.get("member"))
             if kind:  # research on Hermes takes ~4× a writing task: kind matters as much as the runner
@@ -149,6 +156,12 @@ def typical(kind: str, executor: Optional[str] = None, stats: Optional[dict] = N
     """{median, p75, n, basis} for a stage ("plan" / "conclusion" / "acceptance") or a task by
     executor and task kind (the member's: research / writing / code …)."""
     stats = stats or history()
+    if kind == "task" and task_kind == "quick":
+        found = (stats.get("task") or {}).get(f"{executor}/quick") if executor else None
+        if found:
+            return {**found, "basis": f"本机最近 {found['n']} 次 {executor} 快答"}
+        base = DEFAULTS["quick"]
+        return {"median": base, "p75": round(base * 1.8), "n": 0, "basis": "快答经验值（本机记录还不够）"}
     if kind == "task":
         table = stats.get("task") or {}
         found = table.get(f"{executor}/{task_kind}") if executor and task_kind else None
@@ -300,7 +313,8 @@ def estimate_plan(plan: dict) -> Optional[dict]:
             continue
         member = members.get(t.get("member")) or {}
         tasks.append({"id": t["key"], "parents": list(t.get("depends_on") or []), "status": "todo",
-                      "executor": member.get("runner") or member.get("executor") or "hermes", "kind": member.get("kind")})
+                      "executor": member.get("runner") or member.get("executor") or "hermes",
+                      "kind": "quick" if plan.get("effort") == "quick" else member.get("kind")})
     if not tasks:
         return None
     try:
@@ -379,7 +393,8 @@ def stage(slug: str, team: dict, tasks: list[dict], phase: str, stats: Optional[
     stats = stats or history()
     at = now()
     kinds = {m.get("name"): m.get("kind") for m in team.get("members") or [] if isinstance(m, dict)}
-    tasks = [{**t, "kind": kinds.get(t.get("member"))} for t in tasks]
+    quick = team.get("effort") == "quick"
+    tasks = [{**t, "kind": "quick" if quick else kinds.get(t.get("member"))} for t in tasks]
     done = sum(1 for t in tasks if t.get("status") in ("done", "archived"))
     out: dict[str, Any] = {"done": done, "total": len(tasks)}
     entry = team.get("conclusion") or {}

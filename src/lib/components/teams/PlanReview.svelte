@@ -106,6 +106,13 @@
 								? '已取消'
 								: '启动失败，可以重新批准'}
 					/>
+					{#if plan.effort === 'quick'}
+						<span
+							class="whitespace-nowrap rounded-full px-2 py-[3px] text-[11px] font-medium leading-none text-gray-600 ring-1 ring-inset ring-gray-200 dark:text-gray-300 dark:ring-gray-700"
+							title="简单问题：一个成员直接查清作答，几分钟出结果"
+							data-plan-effort="quick">快答</span
+						>
+					{/if}
 				</div>
 				{#if plan.summary}
 					<p

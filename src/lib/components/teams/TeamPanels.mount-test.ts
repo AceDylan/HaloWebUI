@@ -244,6 +244,27 @@ describe('PlanReview', () => {
 		select.dispatchEvent(new (globalThis as any).Event('change', { bubbles: true }));
 		await sleep(5);
 		expect(picked).toEqual([{ name: 'backend-dev', executor: 'codex', source: 'user' }]);
+		expect(target.querySelector('[data-plan-effort]')).toBeFalsy();
+	});
+
+	it('says when the lead read the goal as a quick answer', async () => {
+		const { default: PlanReview } = await import('./PlanReview.svelte');
+		const team = {
+			id: 'team-1',
+			status: 'plan_ready',
+			plan: {
+				title: '核查开播状态',
+				effort: 'quick',
+				members: [{ name: 'researcher', role: '调研', executor: 'hermes', kind: 'research' }],
+				tasks: [{ key: 'T1', title: '核实当前开播状态', member: 'researcher', depends_on: [] }],
+				layers: [['T1']],
+				widest_layer: 1
+			}
+		};
+		await mount(PlanReview, { team });
+		const chip = target.querySelector('[data-plan-effort="quick"]') as any;
+		expect(chip?.textContent?.trim()).toBe('快答');
+		expect(chip?.getAttribute('title')).toContain('几分钟出结果');
 	});
 
 	it("a Hermes member comes with the lead's model, which you can change and put back", async () => {

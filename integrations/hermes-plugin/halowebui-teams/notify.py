@@ -134,6 +134,8 @@ def plan_message(team: dict, *, started: bool = False) -> tuple[str, list]:
     members = [m for m in plan.get("members") or [] if isinstance(m, dict)]
     tasks = [t for t in plan.get("tasks") or [] if isinstance(t, dict)]
     head = "已直接开始" if started else "计划好了"
+    if plan.get("effort") == "quick":
+        head += " · 快答"
     lines = [f"{'🚀' if started else '🧭'} <b>{esc(clip(team.get('title') or plan.get('title'), 60))}</b> · {head}"]
     if team.get("status") == "start_failed" and team.get("error"):
         lines.append(f"⚠️ 没能直接开始：{esc(clip(team['error'], 300))}。看过计划后可以手动批准。")

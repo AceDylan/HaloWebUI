@@ -87,6 +87,8 @@ export type TeamPlan = {
 	} | null;
 	/** About how long the plan takes once approved (tasks, result, acceptance), from this machine's history. */
 	estimate?: StageEta | null;
+	/** quick: the lead read the goal as one simple question / fact check — one member answers it directly. */
+	effort?: 'quick';
 };
 
 export type TeamStatus =

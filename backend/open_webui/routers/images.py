@@ -191,6 +191,20 @@ def _normalize_openai_image_background(value: Any) -> str:
     return "transparent" if str(value or "").strip().lower() == "transparent" else "opaque"
 
 
+async def _send_dropping_default_background(send, payload: dict[str, Any]):
+    """Sends ``payload``; if the upstream rejects it with 400 while it carries the
+    default ``background: opaque`` (our choice, not the person's), sends it once
+    more without the field. Relays route the bare ``gpt-image`` to models that
+    reject the parameter outright ("background is only supported for GPT image
+    models"), and the relay may rewrite that reason into a generic 400."""
+    result, headers = await send(payload)
+    if result.get("status") == 400 and payload.get("background") == "opaque":
+        log.info("openai_image_retry_without_background status=400")
+        retry_payload = {key: value for key, value in payload.items() if key != "background"}
+        result, headers = await send(retry_payload)
+    return result, headers
+
+
 def _normalize_openai_image_quality(value: Any) -> Optional[str]:
     """gpt-image quality tier. ``auto``/unknown -> None so the field is omitted
     and the upstream default applies (the relay decides which gpt-image
@@ -6240,16 +6254,19 @@ async def _generate_via_openai_image_edits_endpoint(
         )
 
     generation_url = _get_openai_images_edit_url(base_url, api_config)
-    result, headers = await _send_openai_image_request_with_key_pool(
-        provider="openai",
-        source=source,
-        api_config=api_config,
-        route_label="edits",
-        headers_factory=build_attempt_headers,
-        url=generation_url,
-        request_kind="multipart",
-        form_fields=payload,
-        files=image_files,
+    result, headers = await _send_dropping_default_background(
+        lambda body: _send_openai_image_request_with_key_pool(
+            provider="openai",
+            source=source,
+            api_config=api_config,
+            route_label="edits",
+            headers_factory=build_attempt_headers,
+            url=generation_url,
+            request_kind="multipart",
+            form_fields=body,
+            files=image_files,
+        ),
+        payload,
     )
 
     response_status = result.get("status")
@@ -6368,15 +6385,18 @@ async def _generate_via_openai_images_endpoint(
         payload["quality"] = quality
 
     generation_url = _get_openai_images_generation_url(base_url, api_config)
-    result, headers = await _send_openai_image_request_with_key_pool(
-        provider="openai",
-        source=source,
-        api_config=api_config,
-        route_label="generations",
-        headers_factory=build_attempt_headers,
-        url=generation_url,
-        request_kind="json",
-        json_body=payload,
+    result, headers = await _send_dropping_default_background(
+        lambda body: _send_openai_image_request_with_key_pool(
+            provider="openai",
+            source=source,
+            api_config=api_config,
+            route_label="generations",
+            headers_factory=build_attempt_headers,
+            url=generation_url,
+            request_kind="json",
+            json_body=body,
+        ),
+        payload,
     )
 
     response_status = result.get("status")

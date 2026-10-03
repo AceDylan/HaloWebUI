@@ -71,3 +71,32 @@ def test_quality_travels_through_chat_options_overrides_and_the_form():
     assert GenerateImageForm(prompt="cat", quality="medium").quality == "medium"
     assert GenerateImageForm(prompt="cat").quality is None
     assert "supports_quality" in _CAPABILITY_OVERRIDE_BOOL_FIELDS
+
+
+def test_a_rejected_default_background_is_dropped_and_sent_once_more():
+    import asyncio
+
+    from open_webui.routers.images import _send_dropping_default_background
+
+    def run(payload, statuses):
+        sent = []
+
+        async def send(body):
+            sent.append(dict(body))
+            return {"status": statuses[len(sent) - 1]}, {}
+
+        result, _ = asyncio.run(_send_dropping_default_background(send, payload))
+        return result["status"], sent
+
+    # The relay's sunburst model: "background is only supported for GPT image models".
+    status, sent = run({"prompt": "p", "background": "opaque"}, [400, 200])
+    assert status == 200
+    assert sent == [{"prompt": "p", "background": "opaque"}, {"prompt": "p"}]
+
+    # A transparent background the person asked for is not silently dropped.
+    status, sent = run({"prompt": "p", "background": "transparent"}, [400])
+    assert (status, len(sent)) == (400, 1)
+
+    # Other failures and successes are left alone.
+    assert run({"prompt": "p", "background": "opaque"}, [500])[0] == 500
+    assert len(run({"prompt": "p", "background": "opaque"}, [200])[1]) == 1

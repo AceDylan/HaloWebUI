@@ -29,6 +29,7 @@ from open_webui.routers import gemini as gemini_router
 from open_webui.routers import grok as grok_router
 from open_webui.routers import openai as openai_router
 from open_webui.routers.files import upload_file
+from open_webui.utils.image_output import as_png_for_upstream, compact_generated_image
 from open_webui.utils.chat_image_refs import (
     extract_chat_image_file_id,
     resolve_chat_image_url_to_bytes,
@@ -4475,6 +4476,7 @@ def load_url_image_data(
 
 
 def upload_image(request, image_metadata, image_data, content_type, user):
+    image_data, content_type = compact_generated_image(image_data, content_type)
     image_format = mimetypes.guess_extension(content_type) or ".png"
     file = UploadFile(
         file=io.BytesIO(image_data),
@@ -6196,7 +6198,7 @@ async def _generate_via_openai_image_edits_endpoint(
             )
 
         image_mime, image_bytes = resolved_image
-        mime_type = image_mime or "image/png"
+        mime_type, image_bytes = as_png_for_upstream(image_mime or "image/png", image_bytes)
         resolved_images.append((mime_type, image_bytes))
         input_summaries.append(
             {

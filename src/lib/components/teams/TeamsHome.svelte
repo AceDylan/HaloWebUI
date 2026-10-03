@@ -322,7 +322,7 @@
 				aria-label="切换侧栏"><MenuLines /></button
 			>
 		</div>
-		<h1 class="text-sm font-semibold text-gray-900 dark:text-gray-100">协作台</h1>
+		<h1 class="halo-crumb px-1">协作台</h1>
 		{#if chatId}
 			<a
 				href="/c/{chatId}"

@@ -20,10 +20,8 @@
 	const i18n: Writable<any> = getContext('i18n');
 	const dispatch = createEventDispatcher();
 
-	$: enabledTrackClass =
-		variant === 'primary'
-			? 'bg-primary-500 dark:bg-primary-500'
-			: 'bg-emerald-500 dark:bg-emerald-500';
+	// Halo: "on" is the ion accent for both variants (green was a second accent colour).
+	$: enabledTrackClass = 'bg-primary-500 dark:bg-primary-500';
 	$: compactOffTrackClass = 'bg-gray-200 dark:bg-white/15';
 	$: focusClass =
 		($settings?.highContrastMode ?? false)

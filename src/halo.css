@@ -1039,6 +1039,22 @@ body:has(#chat-input:focus) .halo-orb__arc {
 	--halo-rf-code-text: #e5e8ed;
 }
 
+/* ---------------------------------------------------------------- switches
+   "On" is the ion accent, like every other selected state; it used to be green, a second
+   accent. (:root raises these above the component's own :global rules.) */
+
+:root .halo-switch-field[data-state='checked'] .halo-switch-track {
+	background: var(--color-primary-500);
+	box-shadow:
+		inset 0 0 0 1px oklch(1 0 0 / 0.2),
+		0 2px 8px -4px oklch(0.6 0.215 266 / 0.55);
+}
+:root .halo-switch-field[data-state='checked'][data-variant='success'] {
+	box-shadow:
+		0 1px 3px oklch(0.2 0.03 268 / 0.06),
+		0 4px 12px -8px oklch(0.6 0.215 266 / 0.3);
+}
+
 /* ---------------------------------------------------------------- page heads (workspace, settings) */
 
 .halo-crumb {

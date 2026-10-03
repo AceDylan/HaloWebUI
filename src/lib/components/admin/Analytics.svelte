@@ -36,13 +36,6 @@
 	const tr = (key: string, defaultValue: string) =>
 		translateWithDefault($i18n, key, defaultValue);
 
-	const cardColorMap: Record<string, { bg: string; text: string }> = {
-		blue: { bg: 'bg-blue-100 dark:bg-blue-900/30', text: 'text-blue-600 dark:text-blue-400' },
-		amber: { bg: 'bg-amber-100 dark:bg-amber-900/30', text: 'text-amber-600 dark:text-amber-400' },
-		violet: { bg: 'bg-violet-100 dark:bg-violet-900/30', text: 'text-violet-600 dark:text-violet-400' },
-		emerald: { bg: 'bg-emerald-100 dark:bg-emerald-900/30', text: 'text-emerald-600 dark:text-emerald-400' }
-	};
-
 	let tabMeta: Record<
 		string,
 		{ label: string; description: string; badgeColor: string; iconColor: string }
@@ -472,18 +465,19 @@
 		{#if activeTab === 'overview'}
 			<div class="grid grid-cols-2 md:grid-cols-4 gap-3">
 				{#each [
-					{ icon: ChatBubbleOvalEllipsis, value: formatNumber(totalMessages), label: $i18n.t('Total Messages'), color: 'blue' },
-					{ icon: Bolt, value: formatNumber(totalTokens), label: $i18n.t('Total Tokens'), color: 'amber' },
-					{ icon: Cube, value: activeModels, label: $i18n.t('Active Models'), color: 'violet' },
-					{ icon: UsersSolid, value: activeUsers, label: $i18n.t('Active Users'), color: 'emerald' }
+					{ icon: ChatBubbleOvalEllipsis, value: formatNumber(totalMessages), label: $i18n.t('Total Messages') },
+					{ icon: Bolt, value: formatNumber(totalTokens), label: $i18n.t('Total Tokens') },
+					{ icon: Cube, value: activeModels, label: $i18n.t('Active Models') },
+					{ icon: UsersSolid, value: activeUsers, label: $i18n.t('Active Users') }
 				] as card}
 					<div
 						class="group min-h-[102px] p-4 rounded-2xl border border-gray-100/90 bg-white/70 shadow-sm shadow-gray-900/[0.04] dark:border-gray-800/70 dark:bg-gray-900/60 dark:shadow-black/30 hover:border-gray-300/60 dark:hover:border-white/10 transition-all duration-200"
 					>
-						<div class="w-9 h-9 rounded-xl {cardColorMap[card.color].bg} flex items-center justify-center mb-3">
-							<svelte:component this={card.icon} className="size-[18px] {cardColorMap[card.color].text}" />
+						<!-- Halo: the icon is an ink tile like every section icon; the number carries the card. -->
+						<div class="glass-icon-badge !w-9 !h-9 mb-3">
+							<svelte:component this={card.icon} className="size-[18px]" />
 						</div>
-						<div class="text-2xl font-semibold tracking-tight text-gray-900 dark:text-gray-100">{card.value}</div>
+						<div class="font-display text-2xl font-semibold tracking-tight tabular-nums text-gray-900 dark:text-gray-100">{card.value}</div>
 						<div class="text-[13px] text-gray-400 dark:text-gray-500 mt-0.5">{card.label}</div>
 					</div>
 				{/each}

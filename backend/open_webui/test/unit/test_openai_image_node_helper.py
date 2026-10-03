@@ -1342,3 +1342,41 @@ def test_generate_via_openai_image_edits_endpoint_strips_connection_prefix(monke
     )
 
     assert captured["form_fields"]["model"] == "gpt-image-2"
+
+
+def test_images_endpoint_without_images_reports_why_instead_of_crashing(monkeypatch):
+    """An upstream /images/generations reply with no image data is a 400 that says so, not a
+    NameError (the branch once reused variables from the chat route)."""
+
+    async def fake_send(**kwargs):
+        return (
+            {
+                "status": 200,
+                "response_body": json.dumps({"data": []}),
+                "headers": {"x-request-id": "req-1"},
+                "elapsed_ms": 12,
+            },
+            {"Authorization": "Bearer never-logged"},
+        )
+
+    monkeypatch.setattr(images_router, "_send_openai_image_request_with_key_pool", fake_send)
+
+    async def run():
+        return await images_router._generate_via_openai_images_endpoint(
+            SimpleNamespace(),
+            _make_user(),
+            model_id="gpt-image-2",
+            prompt="a cat",
+            n=1,
+            size="1024x1024",
+            background=None,
+            source={"base_url": "https://api.example.com/v1", "key": "k", "api_config": {}},
+        )
+
+    try:
+        asyncio.run(run())
+    except images_router.HTTPException as exc:
+        assert exc.status_code == 400
+        assert "上游图片生成请求已完成" in str(exc.detail)
+    else:
+        raise AssertionError("expected an HTTPException")

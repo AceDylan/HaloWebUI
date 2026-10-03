@@ -6408,15 +6408,16 @@ async def _generate_via_openai_images_endpoint(
         allowed_base_urls=[base_url],
     )
     if not images:
-        context = empty_image_context or _build_openai_empty_image_context(
-            route_label="responses" if use_responses_api else "chat",
-            status_code=last_response_status,
-            headers=last_response_headers,
+        response_headers = result.get("headers")
+        context = _build_openai_empty_image_context(
+            route_label="generations",
+            status_code=response_status,
+            headers=response_headers if isinstance(response_headers, dict) else {},
             usage=usage,
         )
         try:
             log.warning(
-                "openai_chat_image_empty_response context=%s",
+                "openai_image_generations_empty_response context=%s",
                 json.dumps(context, ensure_ascii=False, default=str),
             )
         except Exception:

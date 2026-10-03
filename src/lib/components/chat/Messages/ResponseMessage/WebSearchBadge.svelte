@@ -3,12 +3,15 @@
 
 	// 独立的联网状态标记：一眼看出这条回答到底有没有联网、联网结果如何。
 	// state 由后端 web_search 状态推导（见 ResponseMessage.svelte computeWebSearchBadge）。
-	// 取值：searching | searched | skipped | native_pending | no_results | failed
+	// 取值：deciding | searching | searched | skipped | native_pending | no_results | failed
 	export let state = 'skipped';
 	export let label = '';
 
 	// 每种状态对应一套配色（浅色/深色都覆盖）。
 	const STYLES: Record<string, string> = {
+		// 还在判断要不要联网：和联网中一样是进行中，不能看起来像「未联网」
+		deciding:
+			'text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-950/40 border-blue-200 dark:border-blue-800/60',
 		searching:
 			'text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-950/40 border-blue-200 dark:border-blue-800/60',
 		searched:
@@ -30,7 +33,7 @@
 	class="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium leading-none {styleClass}"
 	title={label}
 >
-	{#if state === 'searching'}
+	{#if state === 'searching' || state === 'deciding'}
 		<Spinner className="size-3" />
 	{:else if state === 'searched'}
 		<!-- 地球 + 对勾：已联网 -->

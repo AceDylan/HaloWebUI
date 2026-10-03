@@ -234,7 +234,8 @@
 	// 优先用后端给的显式 web_search_state（skipped/native_pending/searched），
 	// 其余（Halo 模式等）按 count/done/error/warning 数值推断，避免依赖中文文案匹配。
 	const computeWebSearchBadge = (
-		statuses: NonNullable<MessageType['statusHistory']>
+		statuses: NonNullable<MessageType['statusHistory']>,
+		messageDone = false
 	): { state: string; count: number } | null => {
 		const web = (statuses ?? []).filter((s) => s?.action === 'web_search' && !s?.hidden);
 		if (web.length === 0) return null;
@@ -243,7 +244,8 @@
 		const count = Number(last?.count ?? last?.urls?.length ?? 0) || 0;
 
 		if (last?.done === false && last?.web_search_state === 'deciding')
-			return { state: 'deciding', count: 0 };
+			// stopped before the decision came back: nothing was decided, so no badge
+			return messageDone ? null : { state: 'deciding', count: 0 };
 		if (last?.done === false) return { state: 'searching', count };
 
 		const explicit = last?.web_search_state;
@@ -557,7 +559,8 @@
 	$: latestDisplayStatus = displayStatusHistory.at(-1);
 	$: hasActiveVisibleStatus = latestDisplayStatus?.done === false;
 	$: webSearchBadge = computeWebSearchBadge(
-		message?.statusHistory ?? [...(message?.status ? [message?.status] : [])]
+		message?.statusHistory ?? [...(message?.status ? [message?.status] : [])],
+		message?.done === true
 	);
 	// Per keyword: which searches answered and how long it took (the backend's
 	// query_details on the final web_search status). Clicking "已联网 · N 源"

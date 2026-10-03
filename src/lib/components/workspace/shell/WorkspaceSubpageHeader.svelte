@@ -10,9 +10,10 @@
 	export let backLabelKey = 'Back';
 </script>
 
-<section class="workspace-section space-y-3">
+<!-- Halo: no card around it. A quiet "← Back" over the title, which takes the display face. -->
+<section class="halo-subpage-head">
 	{#if backHref}
-		<a class="workspace-secondary-button w-fit px-3 py-2" href={backHref}>
+		<a class="halo-back" href={backHref}>
 			<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-4">
 				<path
 					fill-rule="evenodd"
@@ -24,10 +25,10 @@
 		</a>
 	{/if}
 
-	<div class="space-y-1">
-		<div class="text-base font-semibold text-gray-900 dark:text-gray-100">{$i18n.t(titleKey)}</div>
+	<div class="min-w-0">
+		<div class="halo-subpage-title">{$i18n.t(titleKey)}</div>
 		{#if descKey}
-			<p class="text-xs leading-6 text-gray-500 dark:text-gray-400">{$i18n.t(descKey)}</p>
+			<p class="halo-settings-desc">{$i18n.t(descKey)}</p>
 		{/if}
 	</div>
 </section>

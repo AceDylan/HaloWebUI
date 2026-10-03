@@ -1110,6 +1110,54 @@ body:has(#chat-input:focus) .halo-orb__arc {
 	color: var(--color-gray-500);
 }
 
+/* Sub-pages (create / edit): "← Back" as a quiet key over a display-face title, no card. */
+.halo-subpage-head {
+	display: flex;
+	flex-direction: column;
+	gap: 0.625rem;
+	padding: 0.25rem 0 0.5rem;
+}
+.halo-back {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.375rem;
+	width: fit-content;
+	margin-left: -0.5rem;
+	padding: 0.25rem 0.625rem 0.25rem 0.5rem;
+	border-radius: 0.5rem;
+	font-size: 0.8125rem;
+	font-weight: 500;
+	color: var(--color-gray-500);
+	transition:
+		background-color var(--dur-fast) ease,
+		color var(--dur-fast) ease;
+}
+.halo-back svg {
+	transition: transform var(--dur-base) var(--ease-out-expo);
+}
+.halo-back:hover {
+	color: var(--color-gray-900);
+	background-color: oklch(0.3 0.03 268 / 0.045);
+}
+.dark .halo-back:hover {
+	color: var(--color-gray-50);
+	background-color: oklch(1 0 0 / 0.05);
+}
+.halo-back:hover svg {
+	transform: translateX(-2px);
+}
+.halo-subpage-title {
+	font-family: var(--font-display);
+	font-size: clamp(1.125rem, 1rem + 0.45vw, 1.375rem);
+	line-height: 1.2;
+	font-weight: 600;
+	letter-spacing: -0.024em;
+	color: var(--color-gray-950);
+}
+.dark .halo-subpage-title {
+	color: var(--color-gray-50);
+}
+
 /* Tabs: text with an ink underline for the current one, on a hairline rule. */
 .halo-tabs {
 	display: flex;
@@ -1201,6 +1249,22 @@ body:has(#chat-input:focus) .halo-orb__arc {
 	font-size: 0.8125rem;
 	line-height: 1.5;
 	color: var(--color-gray-500);
+}
+
+/* Inside a sub-page (the assistant editor under "Create Assistant") the head is one step
+   down, so the page title stays the larger one. */
+.halo-settings-head--compact .glass-icon-badge {
+	width: 2rem;
+	height: 2rem;
+	border-radius: 0.625rem;
+}
+.halo-settings-head--compact .glass-icon-badge svg {
+	width: 1.125rem;
+	height: 1.125rem;
+}
+.halo-settings-head--compact .halo-settings-title {
+	font-size: 1.0625rem;
+	letter-spacing: -0.016em;
 }
 
 /* Section icons: one ink tile everywhere instead of a different colour per section. The
@@ -2101,6 +2165,7 @@ body:has(#chat-input:focus) .halo-orb__arc {
 	.halo-mark__ring,
 	.halo-mark__glow,
 	.halo-rail-toggle > svg,
+	.halo-back svg,
 	.halo-auth__scene,
 	.halo-btn-arrow,
 	.halo-send {

@@ -1236,6 +1236,176 @@ body:has(#chat-input:focus) .halo-orb__arc {
 	quotes: none;
 }
 
+/* Formatted replies, part 2 (page only, hence !important over the inline styles kept for copied HTML):
+   thinking and tool steps are quiet ink rows (a small drawn halo for thinking, an ink wrench, a chevron
+   that turns when opened); "done" is muted text, only failures and interruptions keep their colour;
+   a thought reads as a ruled aside in the muted ink. Lists mark with small ink dots and mono numerals
+   instead of blue discs; tables get an ink header and row rules only; a conclusion carries the halo
+   spectrum on its edge, which is what tells it apart from a quote. */
+:is([data-halo-block='activity'], [data-halo-block='activity-group']) {
+	background: color-mix(in oklab, var(--halo-rf-panel) 45%, var(--halo-rf-surface)) !important;
+	border-color: var(--halo-rf-border-subtle) !important;
+	border-radius: 12px !important;
+}
+[data-halo-response-html-format] details > summary {
+	list-style: none;
+	font-weight: 600 !important;
+	transition: background-color var(--dur-fast) ease;
+}
+[data-halo-response-html-format] details > summary::-webkit-details-marker {
+	display: none;
+}
+:is([data-halo-block='activity'], [data-halo-block='activity-group']) > summary {
+	padding: 10px 12px !important;
+}
+[data-halo-response-html-format] details > summary:hover {
+	background-color: oklch(0.5 0.02 268 / 0.05);
+}
+.dark [data-halo-response-html-format] details > summary:hover {
+	background-color: oklch(1 0 0 / 0.035);
+}
+[data-halo-response-html-format] details > summary:focus-visible {
+	outline: 2px solid var(--color-primary-500);
+	outline-offset: -2px;
+	border-radius: inherit;
+}
+[data-halo-response-html-format] details > summary::after {
+	content: '';
+	flex-shrink: 0;
+	width: 0.875rem;
+	height: 0.875rem;
+	margin-left: -2px;
+	background-color: var(--halo-rf-muted);
+	opacity: 0.7;
+	-webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m9 18 6-6-6-6'/%3E%3C/svg%3E") center / contain no-repeat;
+	mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m9 18 6-6-6-6'/%3E%3C/svg%3E") center / contain no-repeat;
+	transition: transform var(--dur-base) var(--ease-out-expo);
+}
+[data-halo-response-html-format] details[open] > summary::after {
+	transform: rotate(90deg);
+}
+[data-halo-response-html-format] details > summary > span:first-child {
+	border: 0 !important;
+	background: transparent !important;
+	color: var(--halo-rf-muted) !important;
+}
+[data-halo-block='activity-group'] details > summary > span:first-child {
+	width: 16px !important;
+	font-family: var(--font-mono);
+	font-weight: 500;
+}
+[data-halo-response-html-format] details > summary > span:last-child {
+	font-weight: 500 !important;
+}
+[data-halo-activity-type='reasoning'] > summary > span:last-child,
+[data-halo-activity-type='code_interpreter'] > summary > span:last-child,
+[data-halo-response-html-format] details > summary > span:last-child[style*='--halo-rf-success'] {
+	color: var(--halo-rf-muted) !important;
+}
+[data-halo-activity-type='reasoning'] > summary > span:first-child {
+	font-size: 0 !important;
+}
+[data-halo-activity-type='reasoning'] > summary > span:first-child::before {
+	content: '';
+	width: 14px;
+	height: 14px;
+	border-radius: 50%;
+	border: 2px solid color-mix(in oklab, var(--halo-rf-muted) 30%, transparent);
+	border-top-color: var(--halo-ion);
+	border-right-color: var(--halo-violet);
+	transform: rotate(-30deg);
+	transition: transform var(--dur-slow) var(--ease-out-expo);
+}
+[data-halo-activity-type='reasoning'] > summary:hover > span:first-child::before {
+	transform: rotate(150deg);
+}
+[data-halo-activity-type='reasoning'] > summary + div {
+	margin: 0 0 12px 22px;
+	padding: 2px 14px 2px 23px !important;
+	border-left: 1.5px solid var(--halo-rf-border-subtle);
+}
+[data-halo-activity-type='reasoning'] > summary + div > div {
+	color: var(--halo-rf-muted) !important;
+}
+[data-halo-block='activity-group'] > summary + div {
+	padding: 0 10px 10px !important;
+	gap: 6px !important;
+}
+[data-halo-block='activity-group'] > summary + div > details {
+	border-radius: 9px !important;
+}
+[data-halo-block='activity-group'] > summary + div > details > summary {
+	padding: 8px 10px !important;
+}
+[data-halo-response-html-format] details pre {
+	font-family: var(--font-mono);
+}
+
+[data-halo-response-html-format] ul > li > span:first-child:empty {
+	width: 5px !important;
+	height: 5px !important;
+	margin: 10.5px 5.5px 0 !important;
+	background: var(--halo-rf-muted) !important;
+	opacity: 0.75;
+}
+[data-halo-response-html-format] ol > li:has(> span:first-child) {
+	align-items: baseline !important;
+}
+[data-halo-response-html-format] ol > li > span:first-child {
+	width: auto !important;
+	min-width: 16px;
+	height: auto !important;
+	margin: 0 !important;
+	justify-content: flex-start !important;
+	background: none !important;
+	border: 0 !important;
+	border-radius: 0 !important;
+	color: var(--halo-rf-muted) !important;
+	font-family: var(--font-mono);
+	font-size: 12px !important;
+	font-weight: 500 !important;
+	font-variant-numeric: tabular-nums;
+}
+
+[data-halo-block='table'] {
+	border-radius: 12px !important;
+	box-shadow: none !important;
+}
+[data-halo-block='table'] th {
+	padding: 9px 12px !important;
+	border-width: 0 0 1px !important;
+	background: color-mix(in oklab, var(--halo-rf-panel) 65%, var(--halo-rf-surface)) !important;
+	color: var(--halo-rf-muted) !important;
+	font-weight: 600;
+}
+[data-halo-block='table'] td {
+	padding: 10px 12px !important;
+	border-width: 0 0 1px !important;
+	font-variant-numeric: tabular-nums;
+}
+[data-halo-block='table'] tbody > tr:last-child > td {
+	border-bottom-width: 0 !important;
+}
+[data-halo-block='table'] tbody > tr {
+	transition: background-color var(--dur-fast) ease;
+}
+[data-halo-block='table'] tbody > tr:hover {
+	background-color: color-mix(in oklab, var(--halo-rf-panel) 45%, transparent);
+}
+
+[data-halo-block='highlight'] {
+	background:
+		linear-gradient(180deg, var(--halo-ion), var(--halo-violet) 62%, var(--halo-solar)) left / 3px 100% no-repeat,
+		color-mix(in oklab, var(--halo-rf-panel) 50%, var(--halo-rf-surface)) !important;
+	border: 1px solid var(--halo-rf-border-subtle) !important;
+	border-left-width: 0 !important;
+	border-radius: 4px 12px 12px 4px !important;
+	padding-left: 17px !important;
+}
+[data-halo-block='highlight'] > p {
+	font-weight: 600 !important;
+}
+
 /* ---------------------------------------------------------------- switches
    "On" is the ion accent, like every other selected state; it used to be green, a second
    accent. (:root raises these above the component's own :global rules.) */

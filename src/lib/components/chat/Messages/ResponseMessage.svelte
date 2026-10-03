@@ -1745,7 +1745,11 @@
 											data-halo-image-natural={naturalImage ? 'true' : undefined}
 										>
 											<div
-												class="halo-image-card relative {naturalImage ? '' : 'aspect-[4/5]'} bg-gray-100 dark:bg-gray-950"
+												class="halo-image-card relative {naturalImage
+													? ''
+													: imageGenerationResultSlotCount === 1 && file && !(file.type === 'image' && file.url)
+														? 'flex min-h-36'
+														: 'aspect-[4/5]'} bg-gray-100 dark:bg-gray-950"
 											>
 												{#if file?.type === 'image' && file.url}
 													<Image

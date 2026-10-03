@@ -45,7 +45,7 @@ import time
 import urllib.error
 import urllib.request
 
-SCRIPT_VERSION = "2026-10-03.1"
+SCRIPT_VERSION = "2026-10-03.2"
 DEFAULT_CONFIG = "/root/.hermes/reclaude-runner.env"
 REQUIRED_KEYS = ("HALOWEBUI_NOTIFY_URL", "HALOWEBUI_NOTIFY_TOKEN")
 RUNNING_STATUSES = {"", "running", "queued", "starting", "waiting", "retrying"}
@@ -77,6 +77,9 @@ _NARRATION_RE = re.compile(r"^\d{2}:\d{2}:\d{2}\s+\[assistant\]\s*(.+)$")
 # Claude Code retrying a failed API request by itself (reclaude-stream.py writes the line): while
 # that is the newest line, it is what the run is doing — anyrouter can take minutes to answer.
 _RETRY_RE = re.compile(r"^\d{2}:\d{2}:\d{2}\s+\[api-retry\]\s*(.+)$")
+# The runner's own bookkeeping, not what the agent is doing: agy's first lines are
+# "[gateway] model=…" and "[init] conversation=?" (the banner showed the latter as 在做).
+_HOUSEKEEPING_RE = re.compile(r"^(?:====|\[(?:init|gateway|result|protocol|runner)\])")
 # Progress lines echo commands; a token in one must not end up on screen.
 _SECRET_RES = (
     re.compile(r"(?i)\b(authorization:\s*bearer)\s+\S+"),
@@ -168,7 +171,7 @@ def read_progress(run_dir):
         (match.group(1) for match in map(_NARRATION_RE.match, reversed(lines)) if match), "")
     for line in reversed(tail.splitlines()) if not last else ():
         line = line.strip()
-        if not line or "[tool-result]" in line:
+        if not line or "[tool-result]" in line or _HOUSEKEEPING_RE.match(line):
             continue
         last = _LINE_PREFIX_RE.sub("", line)
         break

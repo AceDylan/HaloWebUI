@@ -67,7 +67,9 @@ export const describeBackgroundRun = (
 		parts.push(
 			minutes >= 60
 				? `已运行 ${Math.floor(minutes / 60)} 小时 ${minutes % 60} 分钟`
-				: `已运行 ${minutes} 分钟`
+				: minutes > 0
+					? `已运行 ${minutes} 分钟`
+					: '刚开始'
 		);
 	}
 	if (run.step) parts.push(`第 ${run.step} 步`);

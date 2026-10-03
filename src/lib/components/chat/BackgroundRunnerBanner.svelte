@@ -86,7 +86,7 @@
 				<span class="halo-runner__name font-display shrink-0">{run.agent}</span>
 				<span class="truncate text-gray-500 dark:text-gray-400"
 					>{describeBackgroundRun(run, now).split(' · ').slice(1).join(' · ') ||
-						'刚开始'}<span class="max-sm:hidden"> · 后台进行中，做完报告发到这里</span></span
+						'刚开始'}<span class="max-sm:hidden">{' · '}后台进行中，做完报告发到这里</span></span
 				>
 			</div>
 			{#if quiet}

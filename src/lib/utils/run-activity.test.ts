@@ -47,6 +47,7 @@ describe('run activity summary', () => {
 			'reclaude · 已运行 12 分钟 · 第 198 步'
 		);
 		expect(describeBackgroundRun({ agent: 'codex', started_at: 0 }, 3 * 3600 + 120)).toBe('codex');
+		expect(describeBackgroundRun({ agent: 'agy', started_at: 1000 }, 1030)).toBe('agy · 刚开始');
 		expect(describeBackgroundRun({ agent: 'agy', started_at: 10 }, 10 + 3660)).toBe(
 			'agy · 已运行 1 小时 1 分钟'
 		);

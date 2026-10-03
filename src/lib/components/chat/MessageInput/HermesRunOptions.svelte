@@ -44,7 +44,7 @@
 		{
 			value: 'cchclaude',
 			label: 'cchclaude',
-			sub: 'Claude · 自己的中转',
+			sub: 'Claude · 自有中转',
 			hint: '交给 Claude Code（自己的 cch 中转）在后台独占执行'
 		},
 		{

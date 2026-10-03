@@ -260,7 +260,7 @@
 					<label class="flex items-center justify-between glass-item px-4 py-3">
 						<div>
 							<div class="text-sm font-medium">OpenAI 网关</div>
-							<div class="text-xs text-gray-500 mt-1">提供 `{gatewayBasePath}/openai/v1/*` 入口</div>
+							<div class="text-xs text-gray-500 mt-1">提供 <code class="font-mono text-[11px] break-all">{gatewayBasePath}/openai/v1/*</code> 入口</div>
 						</div>
 						<Switch bind:state={gatewayConfig.protocols.openai} />
 					</label>
@@ -268,7 +268,7 @@
 					<label class="flex items-center justify-between glass-item px-4 py-3">
 						<div>
 							<div class="text-sm font-medium">Anthropic 网关</div>
-							<div class="text-xs text-gray-500 mt-1">提供 `{gatewayBasePath}/anthropic/v1/*` 入口</div>
+							<div class="text-xs text-gray-500 mt-1">提供 <code class="font-mono text-[11px] break-all">{gatewayBasePath}/anthropic/v1/*</code> 入口</div>
 						</div>
 						<Switch bind:state={gatewayConfig.protocols.anthropic} />
 					</label>

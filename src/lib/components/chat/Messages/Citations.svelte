@@ -178,12 +178,7 @@
 		<!-- Compact pill button -->
 		<button
 			bind:this={buttonEl}
-			class="text-xs font-medium text-gray-600 dark:text-gray-300 px-3 rounded-xl
-				bg-white/60 dark:bg-gray-800/60 backdrop-blur-xl
-				hover:bg-white/80 dark:hover:bg-gray-700/60 transition-all duration-200
-				flex items-center gap-1.5
-				border border-gray-200/50 dark:border-gray-700/50"
-			style="height: 36px;"
+			class="halo-source-chip flex items-center gap-1.5"
 			aria-expanded={showCitations}
 			aria-label={citations.length === 1
 				? $i18n.t('1 Source')
@@ -212,9 +207,7 @@
 			<div
 				use:portal
 				bind:this={dropdownEl}
-				class="flex flex-col gap-0.5
-					bg-white/90 dark:bg-gray-900/90 backdrop-blur-xl
-					rounded-xl shadow-lg border border-gray-200/50 dark:border-gray-700/50 p-1"
+				class="halo-source-menu flex flex-col gap-0.5 rounded-xl p-1"
 				style={dropdownStyle}
 			>
 				{#each citations as citation, idx}
@@ -235,7 +228,7 @@
 						}}
 					>
 						<span
-							class="flex-shrink-0 size-5 rounded-md bg-gray-100 dark:bg-gray-800
+							class="halo-source-icon flex-shrink-0 size-5 rounded-md bg-gray-100 dark:bg-gray-800
 								flex items-center justify-center text-gray-400 dark:text-gray-500"
 						>
 							{#if isWebCitation(citation)}

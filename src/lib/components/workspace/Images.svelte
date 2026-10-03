@@ -1492,38 +1492,36 @@
 </svelte:head>
 
 {#if loaded}
-	<!-- 标签页导航：窄屏横向滚动，不再把标签挤成竖排字 -->
-	<div class="glass-item p-1 mb-4">
-		<div class="flex items-center gap-1 overflow-x-auto scrollbar-hidden">
-			<button
-				class="tab-button {activeTab === 'workbench' ? 'active' : ''}"
-				on:click={() => (activeTab = 'workbench')}
-			>
-				<PhotoSolid className="size-4" />
-				<span>{$i18n.t('Workbench')}</span>
-			</button>
-			<button
-				class="tab-button {activeTab === 'prompts' ? 'active' : ''}"
-				on:click={() => (activeTab = 'prompts')}
-			>
-				<Sparkles className="size-4" />
-				<span>{$i18n.t('Prompt Management')}</span>
-			</button>
-			<button
-				class="tab-button {activeTab === 'gallery' ? 'active' : ''}"
-				on:click={() => (activeTab = 'gallery')}
-			>
-				<PhotoSolid className="size-4" />
-				<span>{$i18n.t('Gallery')}</span>
-			</button>
-			<button
-				class="tab-button {activeTab === 'history' ? 'active' : ''}"
-				on:click={() => (activeTab = 'history')}
-			>
-				<Clipboard className="size-4" />
-				<span>{$i18n.t('History')}</span>
-			</button>
-		</div>
+	<!-- 标签页导航：一个紧凑的分段切换，窄屏横向滚动，不再把标签挤成竖排字 -->
+	<div class="halo-seg mb-4 flex w-fit max-w-full items-center overflow-x-auto scrollbar-hidden">
+		<button
+			class="tab-button {activeTab === 'workbench' ? 'active' : ''}"
+			on:click={() => (activeTab = 'workbench')}
+		>
+			<PhotoSolid className="size-4" />
+			<span>{$i18n.t('Workbench')}</span>
+		</button>
+		<button
+			class="tab-button {activeTab === 'prompts' ? 'active' : ''}"
+			on:click={() => (activeTab = 'prompts')}
+		>
+			<Sparkles className="size-4" />
+			<span>{$i18n.t('Prompt Management')}</span>
+		</button>
+		<button
+			class="tab-button {activeTab === 'gallery' ? 'active' : ''}"
+			on:click={() => (activeTab = 'gallery')}
+		>
+			<PhotoSolid className="size-4" />
+			<span>{$i18n.t('Gallery')}</span>
+		</button>
+		<button
+			class="tab-button {activeTab === 'history' ? 'active' : ''}"
+			on:click={() => (activeTab = 'history')}
+		>
+			<Clipboard className="size-4" />
+			<span>{$i18n.t('History')}</span>
+		</button>
 	</div>
 
 	{#if viewState !== 'ready' || workspaceNoModels}

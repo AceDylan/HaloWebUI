@@ -9,6 +9,12 @@
 	import { goto, replaceState, afterNavigate } from '$app/navigation';
 	import { page } from '$app/stores';
 	import {
+		CHAT_IMAGE_MEMORY_KEY,
+		chatImageMemoryFromOptions,
+		parseChatImageMemory,
+		type ImageTemplateConfig
+	} from '$lib/utils/image-templates';
+	import {
 		createChatSync,
 		createEventDeduplicator,
 		isChatGone,
@@ -403,6 +409,13 @@
 
 		return [];
 	};
+	// The image references a user message was sent with; null for a message
+	// from before they were recorded (the server then looks back through the
+	// conversation, as it always did).
+	const getMessageImageReferences = (message: any): any[] | null =>
+		message?.role === 'user' && Array.isArray(message?.imageReferences)
+			? message.imageReferences
+			: null;
 	const appendReferenceFilesToRequestHistory = (
 		historyState: any,
 		parentId: string,
@@ -1151,6 +1164,25 @@
 	let chatFiles = [];
 	let files = [];
 	let params = {};
+	// The frame and quality a new chat's image generation starts with (the last ones sent).
+	let rememberedImageConfig: ImageTemplateConfig | null = null;
+	const recallChatImageMemory = () => {
+		try {
+			return parseChatImageMemory(localStorage.getItem(CHAT_IMAGE_MEMORY_KEY));
+		} catch {
+			return null;
+		}
+	};
+	const rememberChatImageOptions = () => {
+		try {
+			localStorage.setItem(
+				CHAT_IMAGE_MEMORY_KEY,
+				JSON.stringify(chatImageMemoryFromOptions(imageGenerationOptions))
+			);
+		} catch {
+			// Storage full or blocked: the next chat starts at the defaults.
+		}
+	};
 	let dismissedImageGenerationReferenceKey = '';
 	let latestImageGenerationReferenceFiles: any[] = [];
 	let latestImageGenerationReferenceKey = '';
@@ -1687,8 +1719,11 @@
 		}
 	};
 
-	const getImageGenerationOptionsPayload = () => {
-		const payload = sanitizeChatImageGenerationOptions(imageGenerationOptions);
+	const getImageGenerationOptionsPayload = (requestOptions: Record<string, string> = {}) => {
+		const payload = {
+			...sanitizeChatImageGenerationOptions(imageGenerationOptions),
+			...requestOptions
+		};
 		const dedicatedImageModel = getSingleSelectedDedicatedImageModel();
 		if (dedicatedImageModel?.id) {
 			payload.model = getModelRequestId(dedicatedImageModel);
@@ -2571,6 +2606,7 @@
 			webSearchModeSource = 'default';
 			imageGenerationEnabled = false;
 			imageGenerationOptions = {};
+			rememberedImageConfig = null;
 			reasoningEffort = null;
 			maxThinkingTokens = null;
 
@@ -3769,6 +3805,7 @@
 			hasPersistedComposerState = false;
 			imageGenerationEnabled = false;
 			imageGenerationOptions = {};
+			rememberedImageConfig = recallChatImageMemory();
 			codeInterpreterEnabled = false;
 		}
 
@@ -5447,6 +5484,7 @@
 			hermesOptionsOverride !== undefined
 				? hermesOptionsOverride
 				: takeHermesOptionsForMessage(userPrompt);
+		const sendsImage = canUseChatImageGeneration() && isImageGenerationActiveForRequest();
 		let userMessageId = uuidv4();
 		let userMessage = {
 			id: userMessageId,
@@ -5457,8 +5495,15 @@
 			files: _files.length > 0 ? _files : undefined,
 			timestamp: Math.floor(Date.now() / 1000), // Unix epoch
 			models: selectedModels,
-			...(sentHermesOptions ? { hermesOptions: sentHermesOptions } : {})
+			...(sentHermesOptions ? { hermesOptions: sentHermesOptions } : {}),
+			// Sent to the image model: the earlier images this message edits (none
+			// when the reference was dismissed). Regenerating uses them again, and
+			// the server takes the sources from this message alone.
+			...(sendsImage
+				? { imageReferences: referenceFiles.map((file) => normalizeInputFileForMessage(file)) }
+				: {})
 		};
+		if (sendsImage) rememberChatImageOptions();
 
 		// Add message to history and Set currentId to messageId
 		history.messages[userMessageId] = userMessage;
@@ -5552,6 +5597,9 @@
 
 		let _chatId = $chatId;
 		_history = structuredClone(_history);
+		if (referenceFiles.length === 0) {
+			referenceFiles = getMessageImageReferences(_history.messages?.[parentId]) ?? [];
+		}
 
 		const responseMessageIds: Record<PropertyKey, string> = {};
 		// If modelId is provided, use it, else use selected model
@@ -6087,7 +6135,11 @@
 					html_visual_surface: 'halowebui-web',
 					image_generation: imageGenerationActive,
 					image_generation_options: imageGenerationActive
-						? getImageGenerationOptionsPayload()
+						? getImageGenerationOptionsPayload(
+								getMessageImageReferences(_history.messages?.[responseMessage?.parentId])
+									? { source_scope: 'message' }
+									: {}
+							)
 						: undefined,
 					code_interpreter:
 						$config?.features?.enable_code_interpreter &&
@@ -7087,6 +7139,7 @@
 								bind:skillSelectionTouched
 								bind:imageGenerationEnabled
 								bind:imageGenerationOptions
+								bind:rememberedImageConfig
 								bind:codeInterpreterEnabled
 								bind:webSearchMode
 								{webSearchModeSource}
@@ -7154,6 +7207,7 @@
 								bind:skillSelectionTouched
 								bind:imageGenerationEnabled
 								bind:imageGenerationOptions
+								bind:rememberedImageConfig
 								bind:codeInterpreterEnabled
 								bind:webSearchMode
 								{webSearchModeSource}

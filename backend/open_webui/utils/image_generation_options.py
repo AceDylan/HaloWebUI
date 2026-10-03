@@ -23,6 +23,12 @@ CHAT_IMAGE_GENERATION_OPTION_KEYS = (
 
 _IMAGE_GENERATION_OPTIONS_KEYS = ("image_generation_options", "imageGenerationOptions")
 
+# Where the source images of an edit come from. "message": only the images of
+# the message being answered (its uploads and the earlier images the person
+# kept referenced). Not sent: the latest image anywhere in the conversation,
+# which also picked up a reference the person had dismissed.
+CHAT_IMAGE_GENERATION_SOURCE_SCOPES = ("message",)
+
 
 def sanitize_chat_image_generation_options(
     value: Any, *, allow_size: bool = True
@@ -47,6 +53,9 @@ def sanitize_chat_image_generation_options(
             continue
 
         cleaned[key] = deepcopy(option_value)
+
+    if value.get("source_scope") in CHAT_IMAGE_GENERATION_SOURCE_SCOPES:
+        cleaned["source_scope"] = value["source_scope"]
 
     return cleaned
 

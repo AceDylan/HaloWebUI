@@ -55,6 +55,7 @@ const mount = async (models: unknown[], options: Record<string, unknown> = {}) =
 };
 const options = () => app.$$.ctx[app.$$.props.imageGenerationOptions];
 const pending = () => app.$$.ctx[app.$$.props.pendingTemplateConfig];
+const remembered = () => app.$$.ctx[app.$$.props.rememberedConfig];
 
 afterEach(() => {
 	app?.$destroy();
@@ -81,5 +82,32 @@ describe('image template settings in the chat image panel', () => {
 		expect(options()).toEqual({ size: '1536x1024' });
 		expect(pending()).toBeNull();
 		expect(toast.success).not.toHaveBeenCalled();
+	});
+});
+
+describe('a new chat starts with the last frame and quality', () => {
+	it('takes the remembered size and quality quietly, and only once', async () => {
+		await mount([gptImage]);
+		app.$set({ rememberedConfig: { size: '1536x1024', quality: 'medium' } });
+		await settle();
+		expect(options()).toMatchObject({ size: '1536x1024', aspect_ratio: null, quality: 'medium' });
+		expect(remembered()).toBeNull();
+		expect(toast.success).not.toHaveBeenCalled();
+
+		app.$set({ imageGenerationOptions: { size: '1024x1024' } });
+		await settle();
+		expect(options()).toEqual({ size: '1024x1024' });
+	});
+
+	it('gives way to a template picked at the same time', async () => {
+		await mount([gptImage]);
+		app.$set({
+			rememberedConfig: { size: '1536x1024', quality: 'medium' },
+			pendingTemplateConfig: { size: '1024x1536' }
+		});
+		await settle();
+		expect(options()).toMatchObject({ size: '1024x1536' });
+		expect(options().quality).toBeUndefined();
+		expect(remembered()).toBeNull();
 	});
 });

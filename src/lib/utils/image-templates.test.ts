@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
 	applyImageTemplateEdit,
+	chatImageMemoryFromOptions,
 	collectImageTemplateTags,
 	describeImageTemplateSettings,
 	templateChatImageOptions,
@@ -11,6 +12,7 @@ import {
 	normalizeImportedImageTemplates,
 	replaceImageTemplate,
 	serializeImageTemplates,
+	parseChatImageMemory,
 	sortImageTemplates,
 	type ImageTemplate
 } from './image-templates';
@@ -269,5 +271,29 @@ describe('templateChatImageOptions', () => {
 			)
 		).toEqual({});
 		expect(templateChatImageOptions(null, all)).toEqual({});
+	});
+});
+
+describe('chat image memory', () => {
+	it('keeps the frame and quality, not the count or background', () => {
+		expect(
+			chatImageMemoryFromOptions({
+				size: '1536X1024',
+				aspect_ratio: null,
+				quality: 'High',
+				n: 3,
+				background: 'transparent'
+			})
+		).toEqual({ size: '1536x1024', quality: 'high' });
+		expect(chatImageMemoryFromOptions({})).toEqual({});
+		expect(chatImageMemoryFromOptions(null)).toEqual({});
+	});
+
+	it('reads back what it wrote and ignores anything else', () => {
+		const raw = JSON.stringify(chatImageMemoryFromOptions({ aspect_ratio: '16:9', quality: 'low' }));
+		expect(parseChatImageMemory(raw)).toEqual({ aspectRatio: '16:9', quality: 'low' });
+		expect(parseChatImageMemory(null)).toBeNull();
+		expect(parseChatImageMemory('not json')).toBeNull();
+		expect(parseChatImageMemory('[1]')).toBeNull();
 	});
 });

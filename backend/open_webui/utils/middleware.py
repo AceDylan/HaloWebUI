@@ -2553,34 +2553,62 @@ def _extract_files_from_messages(messages: list[dict]) -> list[dict]:
     return result
 
 
+def _find_image_urls_in_message(message: Any) -> list[str]:
+    if not isinstance(message, dict):
+        return []
+
+    normalized_files = _normalize_message_files(
+        [message.get("files"), message.get("content")]
+    )
+    urls: list[str] = []
+    seen: set[str] = set()
+    for file_item in normalized_files:
+        if not isinstance(file_item, dict):
+            continue
+        if str(file_item.get("type") or "").strip().lower() != "image":
+            continue
+
+        url = str(file_item.get("url") or "").strip()
+        if url and url not in seen:
+            seen.add(url)
+            urls.append(url)
+
+    return urls
+
+
 def _find_latest_image_urls_from_messages(messages: Any) -> list[str]:
     if not isinstance(messages, list):
         return []
 
     for message in reversed(messages):
-        if not isinstance(message, dict):
-            continue
-
-        normalized_files = _normalize_message_files(
-            [message.get("files"), message.get("content")]
-        )
-        urls: list[str] = []
-        seen: set[str] = set()
-        for file_item in normalized_files:
-            if not isinstance(file_item, dict):
-                continue
-            if str(file_item.get("type") or "").strip().lower() != "image":
-                continue
-
-            url = str(file_item.get("url") or "").strip()
-            if url and url not in seen:
-                seen.add(url)
-                urls.append(url)
-
+        urls = _find_image_urls_in_message(message)
         if urls:
             return urls
 
     return []
+
+
+def _find_image_urls_in_last_user_message(messages: Any) -> list[str]:
+    if not isinstance(messages, list):
+        return []
+
+    for message in reversed(messages):
+        if isinstance(message, dict) and message.get("role") == "user":
+            return _find_image_urls_in_message(message)
+
+    return []
+
+
+def _find_chat_image_generation_source_urls(
+    messages: Any, image_generation_options: dict[str, Any]
+) -> list[str]:
+    # The page says which images an edit starts from: those on the message
+    # being answered. A dismissed "previous image" reference is not there, so
+    # the request is a new image. Older messages (and other clients) still get
+    # the latest image anywhere in the conversation.
+    if (image_generation_options or {}).get("source_scope") == "message":
+        return _find_image_urls_in_last_user_message(messages)
+    return _find_latest_image_urls_from_messages(messages)
 
 
 def _find_latest_image_url_from_messages(messages: Any) -> Optional[str]:
@@ -4682,7 +4710,9 @@ async def _build_chat_image_generation_local_response(
 
     messages = form_data["messages"]
     user_message = get_last_user_message(messages)
-    source_image_urls = _find_latest_image_urls_from_messages(messages)
+    source_image_urls = _find_chat_image_generation_source_urls(
+        messages, image_generation_options
+    )
     source_image_url = source_image_urls[0] if source_image_urls else None
     try:
         source_summaries: list[dict[str, Any]] = []

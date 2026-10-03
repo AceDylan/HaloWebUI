@@ -94,6 +94,9 @@
 	// Settings of an image template just picked from the prompt picker; applied (and cleared)
 	// once this model's capabilities are known.
 	export let pendingTemplateConfig: ImageTemplateConfig | null = null;
+	// A new chat's frame and quality, carried over from the last image sent from a chat; applied
+	// (and cleared) like a template's once this model's capabilities are known, without a toast.
+	export let rememberedConfig: ImageTemplateConfig | null = null;
 
 	let builtinLoading = false;
 	let builtinReady = false;
@@ -572,6 +575,7 @@
 		capabilities: ImageTemplateChatCapabilities
 	) => {
 		pendingTemplateConfig = null;
+		rememberedConfig = null;
 		const patch = templateChatImageOptions(config, capabilities);
 		const changed = (Object.keys(patch) as Array<keyof typeof patch>).filter(
 			(key) => (imageGenerationOptions?.[key] ?? null) !== (patch[key] ?? null)
@@ -592,6 +596,17 @@
 				})
 			);
 		}
+	};
+
+	const applyRememberedSettings = (
+		config: ImageTemplateConfig,
+		capabilities: ImageTemplateChatCapabilities
+	) => {
+		rememberedConfig = null;
+		imageGenerationOptions = {
+			...imageGenerationOptions,
+			...templateChatImageOptions(config, capabilities)
+		};
 	};
 
 	const optionDisabledClass = 'opacity-45 cursor-not-allowed grayscale';
@@ -743,6 +758,15 @@
 			quality: canUseOpenAIQuality,
 			background: canUseBackground,
 			batch: canUseBatch
+		});
+	}
+	$: if (rememberedConfig && !pendingTemplateConfig && imageGenerationEnabled && !loading && builtinReady) {
+		applyRememberedSettings(rememberedConfig, {
+			exactSize: canUseExactSizeControl,
+			aspectRatio: canUseAspectRatioControl,
+			quality: canUseOpenAIQuality,
+			background: false,
+			batch: false
 		});
 	}
 	$: canUseSteps = imageGenerationEnabled && !loading && !hasBuiltinImage;

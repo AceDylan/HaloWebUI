@@ -166,76 +166,12 @@
 	export let files: any[] = [];
 	export let imageGenerationReferenceFiles: any[] = [];
 	export let onCancelImageGenerationReference: (() => void) | null = null;
+	// See ImageGenerationPanel's rememberedConfig.
+	export let rememberedImageConfig: ImageTemplateConfig | null = null;
 
 	const isImageReferenceFile = (file: any) => {
 		const type = `${file?.type ?? ''}`.trim().toLowerCase();
 		return ['image', 'image_url', 'input_image', 'output_image'].includes(type);
-	};
-
-	const contentHasImageReference = (content: any): boolean => {
-		if (Array.isArray(content)) {
-			return content.some(contentHasImageReference);
-		}
-
-		if (!content || typeof content !== 'object') {
-			return false;
-		}
-
-		const type = `${content.type ?? ''}`.trim().toLowerCase();
-		if (['image', 'image_url', 'input_image', 'output_image'].includes(type)) {
-			return true;
-		}
-
-		if (content.image_url) {
-			return true;
-		}
-
-		if (imagePayloadHasReference(content.images)) {
-			return true;
-		}
-
-		return contentHasImageReference(content.content);
-	};
-
-	const imagePayloadHasReference = (value: any): boolean => {
-		if (Array.isArray(value)) {
-			return value.some(imagePayloadHasReference);
-		}
-
-		if (typeof value === 'string') {
-			return value.trim().length > 0;
-		}
-
-		if (!value || typeof value !== 'object') {
-			return false;
-		}
-
-		if (value.image_url || value.url) {
-			return true;
-		}
-
-		return contentHasImageReference(value);
-	};
-
-	const messageHasImageReference = (message: any) => {
-		if (!message || typeof message !== 'object') {
-			return false;
-		}
-
-		return (
-			(Array.isArray(message.files) && message.files.some(isImageReferenceFile)) ||
-			imagePayloadHasReference(message.images) ||
-			contentHasImageReference(message.content)
-		);
-	};
-
-	const historyHasImageReference = (historyState: any) => {
-		const currentId = historyState?.currentId ?? null;
-		if (!currentId || !historyState?.messages?.[currentId]) {
-			return false;
-		}
-
-		return createMessagesList(historyState, currentId).some(messageHasImageReference);
 	};
 
 	export let toolServers = [];
@@ -308,10 +244,10 @@
 				: placeholder
 				? placeholder
 				: $i18n.t('How can I help you today?');
+	// Only what this message sends: an uploaded image or the kept reference to
+	// the previous turn's image (a dismissed one is not sent).
 	$: hasReferenceImageForImageGeneration =
-		files.some(isImageReferenceFile) ||
-		imageGenerationReferenceFiles.some(isImageReferenceFile) ||
-		historyHasImageReference(history);
+		files.some(isImageReferenceFile) || imageGenerationReferenceFiles.some(isImageReferenceFile);
 	let inputVariablesModalCallback = (_variableValues) => {};
 
 	const replaceVariablesInPlainText = (variables: Record<string, any>) => {
@@ -1900,6 +1836,7 @@
 												bind:imageGenerationEnabled
 												bind:imageGenerationOptions
 												bind:pendingTemplateConfig={pendingImageTemplateConfig}
+												bind:rememberedConfig={rememberedImageConfig}
 												currentModel={primarySelectedModel}
 												hasReferenceImage={hasReferenceImageForImageGeneration}
 											/>

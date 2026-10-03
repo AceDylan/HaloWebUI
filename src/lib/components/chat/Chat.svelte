@@ -1173,11 +1173,13 @@
 			return null;
 		}
 	};
-	const rememberChatImageOptions = () => {
+	// Takes what a request actually sent: at the moment Enter is pressed the panel may
+	// not have applied a new chat's remembered frame yet.
+	const rememberChatImageOptions = (sentOptions: Record<string, any> | undefined) => {
 		try {
 			localStorage.setItem(
 				CHAT_IMAGE_MEMORY_KEY,
-				JSON.stringify(chatImageMemoryFromOptions(imageGenerationOptions))
+				JSON.stringify(chatImageMemoryFromOptions(sentOptions ?? {}))
 			);
 		} catch {
 			// Storage full or blocked: the next chat starts at the defaults.
@@ -5503,7 +5505,6 @@
 				? { imageReferences: referenceFiles.map((file) => normalizeInputFileForMessage(file)) }
 				: {})
 		};
-		if (sendsImage) rememberChatImageOptions();
 
 		// Add message to history and Set currentId to messageId
 		history.messages[userMessageId] = userMessage;
@@ -6024,6 +6025,15 @@
 		const imageGenerationActive = canUseChatImageGeneration()
 			? isImageGenerationActiveForRequest()
 			: false;
+		// Sources come from the message being answered when it recorded them (A4).
+		const imageOptionsSent = imageGenerationActive
+			? getImageGenerationOptionsPayload(
+					getMessageImageReferences(_history.messages?.[responseMessage?.parentId])
+						? { source_scope: 'message' }
+						: {}
+				)
+			: undefined;
+		if (imageOptionsSent) rememberChatImageOptions(imageOptionsSent);
 		// Hermes is told which of its earlier replies the person stopped. A reply
 		// stopped before it said anything was dropped as empty, and hermes then
 		// merged the stopped request into the next message and ran it again.
@@ -6134,13 +6144,7 @@
 					html_visual_artifacts: serializeHtmlVisualMode($settings?.htmlVisualArtifacts),
 					html_visual_surface: 'halowebui-web',
 					image_generation: imageGenerationActive,
-					image_generation_options: imageGenerationActive
-						? getImageGenerationOptionsPayload(
-								getMessageImageReferences(_history.messages?.[responseMessage?.parentId])
-									? { source_scope: 'message' }
-									: {}
-							)
-						: undefined,
+					image_generation_options: imageOptionsSent,
 					code_interpreter:
 						$config?.features?.enable_code_interpreter &&
 						($user?.role === 'admin' || $user?.permissions?.features?.code_interpreter)

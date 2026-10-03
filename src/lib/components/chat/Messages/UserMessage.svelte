@@ -386,7 +386,7 @@
 
 		<div class="chat-{message.role} w-full min-w-full markdown-prose">
 			{#if edit === true}
-				<div class=" w-full bg-gray-50 dark:bg-gray-800 rounded-3xl px-5 py-3 mb-2">
+				<div class="halo-edit w-full px-5 py-3 mb-2">
 					<input
 						bind:this={editImageInputElement}
 						bind:files={editImageInputFiles}
@@ -491,7 +491,7 @@
 								<button
 									aria-label={$i18n.t('Upload Image')}
 									type="button"
-									class="p-2 bg-gray-50 hover:bg-gray-100 dark:bg-gray-800 dark:hover:bg-gray-700 border border-gray-100 dark:border-gray-700 text-gray-700 dark:text-gray-200 transition rounded-3xl disabled:opacity-60 disabled:cursor-not-allowed"
+									class="halo-edit-key halo-edit-key--icon disabled:opacity-60 disabled:cursor-not-allowed"
 									on:click={openAddEditedImage}
 									disabled={imageUploadBusy}
 								>
@@ -501,7 +501,7 @@
 
 							<button
 								id="save-edit-message-button"
-								class=" px-4 py-2 bg-gray-50 hover:bg-gray-100 dark:bg-gray-800 dark:hover:bg-gray-700 border border-gray-100 dark:border-gray-700 text-gray-700 dark:text-gray-200 transition rounded-3xl"
+								class="halo-edit-key"
 								disabled={imageUploadBusy}
 								on:click={() => {
 									editMessageConfirmHandler(false);
@@ -514,7 +514,7 @@
 						<div class="flex space-x-1.5">
 							<button
 								id="close-edit-message-button"
-								class="px-4 py-2 bg-white dark:bg-gray-900 hover:bg-gray-100 text-gray-800 dark:text-gray-100 transition rounded-3xl"
+								class="halo-edit-key"
 								on:click={() => {
 									cancelEditMessage();
 								}}
@@ -524,7 +524,7 @@
 
 							<button
 								id="confirm-edit-message-button"
-								class=" px-4 py-2 bg-gray-900 dark:bg-white hover:bg-gray-850 text-gray-100 dark:text-gray-800 transition rounded-3xl"
+								class="halo-edit-key halo-edit-key--primary"
 								disabled={imageUploadBusy}
 								on:click={() => {
 									editMessageConfirmHandler();

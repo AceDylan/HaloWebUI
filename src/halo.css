@@ -600,6 +600,84 @@ body {
 		var(--shadow-lg);
 }
 
+/* Editing a sent message: the same surface as the composer (solid, hairline, ion ring on focus);
+   only Send is a filled key, Save-without-sending, Cancel and the image key are quiet. */
+.halo-edit {
+	border-radius: 1.25rem;
+	border: 1px solid var(--surface-border-strong);
+	background-color: var(--surface-overlay);
+	box-shadow: var(--shadow-sm);
+	transition:
+		border-color var(--dur-base) ease,
+		box-shadow var(--dur-slow) var(--ease-out-expo);
+}
+.dark .halo-edit {
+	background-color: var(--surface-raised);
+	box-shadow: inset 0 1px 0 oklch(1 0 0 / 0.04);
+}
+.halo-edit:focus-within {
+	border-color: color-mix(in oklab, var(--color-primary-500) 42%, transparent);
+	box-shadow:
+		0 0 0 4px color-mix(in oklab, var(--color-primary-500) 9%, transparent),
+		var(--shadow-md);
+}
+.dark .halo-edit:focus-within {
+	border-color: color-mix(in oklab, var(--color-primary-400) 40%, transparent);
+	box-shadow:
+		0 0 0 4px color-mix(in oklab, var(--color-primary-400) 10%, transparent),
+		inset 0 1px 0 oklch(1 0 0 / 0.05);
+}
+.halo-edit-key {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	height: 2.125rem;
+	padding: 0 0.875rem;
+	border-radius: 0.75rem;
+	font-size: 0.8125rem;
+	font-weight: 500;
+	color: var(--color-gray-600);
+	transition:
+		background-color var(--dur-fast) ease,
+		color var(--dur-fast) ease,
+		transform var(--dur-fast) var(--ease-out-quart);
+}
+.dark .halo-edit-key {
+	color: var(--color-gray-300);
+}
+.halo-edit-key:hover:not(:disabled) {
+	color: var(--color-gray-900);
+	background-color: oklch(0.5 0.02 268 / 0.09);
+}
+.dark .halo-edit-key:hover:not(:disabled) {
+	color: var(--color-gray-50);
+	background-color: oklch(1 0 0 / 0.07);
+}
+.halo-edit-key--icon {
+	width: 2.125rem;
+	padding: 0;
+}
+.halo-edit-key.halo-edit-key--primary {
+	color: var(--color-gray-50);
+	background-color: var(--color-gray-900);
+	box-shadow: 0 1px 2px oklch(0.2 0.03 268 / 0.25);
+}
+.dark .halo-edit-key.halo-edit-key--primary {
+	color: var(--color-gray-950);
+	background-color: var(--color-gray-50);
+}
+.halo-edit-key.halo-edit-key--primary:hover:not(:disabled) {
+	color: var(--color-gray-50);
+	background-color: var(--color-gray-800);
+}
+.dark .halo-edit-key.halo-edit-key--primary:hover:not(:disabled) {
+	color: var(--color-gray-950);
+	background-color: #fff;
+}
+.halo-edit-key:active:not(:disabled) {
+	transform: scale(0.97);
+}
+
 /* While a reply streams, a streak of halo light runs round the composer's edge. */
 .halo-composer[data-halo-live]::after {
 	content: '';
@@ -1037,6 +1115,125 @@ body:has(#chat-input:focus) .halo-orb__arc {
 	--halo-rf-border-subtle: #262931;
 	--halo-rf-code-bg: #06070c;
 	--halo-rf-code-text: #e5e8ed;
+}
+
+/* Formatted replies, on the page only (inline styles stay for the copied HTML, hence !important):
+   headings in the display face with a plain ion rule instead of a glowing gradient bar; code on
+   the same tinted plate as .halo-code, language in mono caps, a drawn copy key whose confirmation
+   comes from data-halo-copied (ContentRenderer); quotes keep one ion edge (the prose rule used to
+   draw a second, grey line inside the amber one). */
+[data-halo-response-html-format] :is(h2, h3, h4, h5) {
+	font-family: var(--font-display) !important;
+	font-weight: 650 !important;
+	letter-spacing: -0.018em !important;
+}
+[data-halo-response-html-format] div > span:first-child:has(+ :is(h2, h3, h4, h5)) {
+	width: 3px !important;
+	background: var(--color-primary-500) !important;
+	box-shadow: none !important;
+}
+
+[data-halo-block='code'] {
+	--code-head: oklch(0.972 0.005 268);
+	background: oklch(0.985 0.003 268) !important;
+	box-shadow: 0 0 0 1px var(--surface-border) !important;
+	border-radius: 12px !important;
+}
+.dark [data-halo-block='code'] {
+	--code-head: oklch(0.2 0.013 268);
+	background: oklch(0.175 0.012 268) !important;
+	box-shadow:
+		0 0 0 1px var(--surface-border),
+		inset 0 1px 0 oklch(1 0 0 / 0.03) !important;
+}
+[data-halo-block='code'] > div:first-child {
+	min-height: 2.25rem;
+	padding: 0 0.375rem 0 0.875rem !important;
+	opacity: 1 !important;
+	color: var(--color-gray-500) !important;
+	background-color: var(--code-head);
+	border-bottom: 1px solid var(--surface-border);
+	font-family: var(--font-mono);
+	font-size: 0.6875rem !important;
+	font-weight: 500;
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
+}
+[data-halo-block='code'] > pre {
+	padding: 0.75rem 0.875rem 0.875rem !important;
+	color: var(--color-gray-800) !important;
+	font-family: var(--font-mono);
+	font-size: 0.8125rem !important;
+}
+.dark [data-halo-block='code'] > pre {
+	color: var(--color-gray-200) !important;
+}
+
+[data-halo-copy-id] {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.375rem;
+	height: 1.75rem;
+	padding: 0 0.5rem !important;
+	border-radius: 0.5rem;
+	font-size: 0 !important;
+	color: var(--color-gray-500) !important;
+	opacity: 1 !important;
+	text-transform: none;
+	letter-spacing: normal;
+	transition:
+		color var(--dur-fast) ease,
+		background-color var(--dur-fast) ease !important;
+}
+[data-halo-copy-id]::before {
+	content: '';
+	width: 0.875rem;
+	height: 0.875rem;
+	background-color: currentColor;
+	-webkit-mask: var(--halo-copy-icon) center / contain no-repeat;
+	mask: var(--halo-copy-icon) center / contain no-repeat;
+	--halo-copy-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect width='13' height='13' x='9' y='9' rx='2'/%3E%3Cpath d='M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1'/%3E%3C/svg%3E");
+}
+[data-halo-copy-id]:hover {
+	color: var(--color-gray-900) !important;
+	background-color: oklch(0.5 0.02 268 / 0.1) !important;
+}
+.dark [data-halo-copy-id]:hover {
+	color: var(--color-gray-50) !important;
+}
+[data-halo-copy-id][data-halo-copied] {
+	color: var(--color-primary-600) !important;
+}
+.dark [data-halo-copy-id][data-halo-copied] {
+	color: var(--color-primary-300) !important;
+}
+[data-halo-copy-id][data-halo-copied]::before {
+	--halo-copy-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 6 9 17l-5-5'/%3E%3C/svg%3E");
+}
+[data-halo-copy-id][data-halo-copied]::after {
+	content: attr(data-halo-copied);
+	font-family: var(--font-sans);
+	font-size: 0.75rem;
+	font-weight: 500;
+	animation: halo-copied-in var(--dur-base) var(--ease-out-expo);
+}
+@keyframes halo-copied-in {
+	from {
+		opacity: 0;
+		transform: translateX(-3px);
+	}
+}
+
+[data-halo-block='quote'] {
+	background: color-mix(in oklab, var(--color-primary-500) 5%, var(--halo-rf-surface)) !important;
+	border-color: var(--halo-rf-border-subtle) !important;
+	border-left: 3px solid var(--color-primary-500) !important;
+	border-radius: 4px 12px 12px 4px !important;
+}
+[data-halo-block='quote'] > blockquote {
+	padding: 0 !important;
+	border: 0 !important;
+	quotes: none;
 }
 
 /* ---------------------------------------------------------------- switches
@@ -2159,7 +2356,8 @@ body:has(#chat-input:focus) .halo-orb__arc {
 	.halo-auth__arc,
 	.halo-auth__core,
 	.halo-auth__body,
-	.halo-rise {
+	.halo-rise,
+	[data-halo-copy-id]::after {
 		animation: none !important;
 	}
 	.halo-mark__ring,

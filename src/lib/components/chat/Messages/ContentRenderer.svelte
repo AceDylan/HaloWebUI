@@ -359,15 +359,10 @@
 		event.preventDefault();
 		event.stopPropagation();
 
+		// halo.css draws the icon from this attribute (a check plus the label) while it is set.
 		const flashSuccess = () => {
-			const original = trigger.innerHTML;
-			const originalColor = trigger.style.color;
-			trigger.innerHTML = '✓';
-			trigger.style.color = '#10b981';
-			setTimeout(() => {
-				trigger.innerHTML = original;
-				trigger.style.color = originalColor;
-			}, 1000);
+			trigger.setAttribute('data-halo-copied', $i18n.t('Copied'));
+			setTimeout(() => trigger.removeAttribute('data-halo-copied'), 1400);
 		};
 
 		const fallbackCopy = () => {

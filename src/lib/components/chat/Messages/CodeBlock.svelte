@@ -670,12 +670,13 @@
 
 					<button
 						type="button"
-						class="copy-code-button inline-flex items-center text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-white p-1.5 rounded-md hover:bg-gray-100 dark:hover:bg-gray-800 transition"
+						class="copy-code-button inline-flex items-center gap-1.5 text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-white p-1.5 rounded-md hover:bg-gray-100 dark:hover:bg-gray-800 transition"
 						on:click={copyCode}
 						title={$i18n.t('Copy')}
 					>
 						{#if copied}
-							<Check class="size-4 text-green-500" size={16} strokeWidth={2.3} />
+							<Check class="size-4 text-primary-600 dark:text-primary-300" size={16} strokeWidth={2.3} />
+							<span class="text-xs font-medium text-primary-600 dark:text-primary-300">{$i18n.t('Copied')}</span>
 						{:else}
 							<Copy class="size-4" size={16} strokeWidth={2.1} />
 						{/if}

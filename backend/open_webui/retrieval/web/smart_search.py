@@ -66,6 +66,10 @@ _MAX_CONTENT_CHARS = 100_000
 # start a Python process just to ask whether research exists.
 _RESEARCH_PROBE_TTL = 600
 _research_probe_ok_at: dict[str, float] = {}
+# `research --pages` exists only in the personal smart-search build; the CLI
+# baked into the image or a fresh npm install rejects it (exit 2), which would
+# fail every research call.
+_research_pages_supported: dict[str, bool] = {}
 _ERROR_TYPES = {
     "config_error",
     "parameter_error",
@@ -337,6 +341,7 @@ def search_smart_search(
         research_available = research_help is not None and research_help.returncode == 0
         if research_available:
             _research_probe_ok_at[command] = time.monotonic()
+            _research_pages_supported[command] = "--pages" in (research_help.stdout or "")
 
     if research_available:
         try:
@@ -349,8 +354,11 @@ def search_smart_search(
                     "quick",
                     # read as many pages as were asked for, from the free
                     # readers first, before topping up with a paid search
-                    "--pages",
-                    str(min(count, 10)),
+                    *(
+                        ["--pages", str(min(count, 10))]
+                        if _research_pages_supported.get(command)
+                        else []
+                    ),
                     "--fallback",
                     "auto",
                     "--format",

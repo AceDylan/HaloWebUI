@@ -11,8 +11,13 @@ def fresh_research_probe():
     # Each test describes its own CLI, so a probe remembered from another test
     # would skip the `research --help` call it expects.
     smart_search._research_probe_ok_at.clear()
+    smart_search._research_pages_supported.clear()
     yield
     smart_search._research_probe_ok_at.clear()
+    smart_search._research_pages_supported.clear()
+
+
+RESEARCH_HELP = "usage: smart-search research [--budget B] [--pages N] query"
 
 
 def completed(argv, payload, code=0):
@@ -38,7 +43,7 @@ def test_research_uses_verified_evidence_and_filters_domains(monkeypatch):
     def fake_run(argv, **kwargs):
         calls.append((argv, kwargs))
         if "--help" in argv:
-            return subprocess.CompletedProcess(argv, 0, stdout="usage")
+            return subprocess.CompletedProcess(argv, 0, stdout=RESEARCH_HELP)
         return completed(
             argv,
             {
@@ -223,7 +228,7 @@ def test_thin_research_evidence_is_topped_up_with_exa_page_text(monkeypatch):
     def fake_run(argv, **kwargs):
         calls.append((argv, kwargs["timeout"]))
         if "--help" in argv:
-            return subprocess.CompletedProcess(argv, 0, stdout="usage")
+            return subprocess.CompletedProcess(argv, 0, stdout=RESEARCH_HELP)
         if argv[1] == "research":
             return research_with_one_page(argv)
         if argv[1] == "exa-search":
@@ -276,7 +281,7 @@ def test_enough_research_evidence_runs_nothing_else(monkeypatch):
     def fake_run(argv, **kwargs):
         calls.append(argv[1])
         if "--help" in argv:
-            return subprocess.CompletedProcess(argv, 0, stdout="usage")
+            return subprocess.CompletedProcess(argv, 0, stdout=RESEARCH_HELP)
         if argv[1] == "research":
             return research_with_one_page(argv)
         pytest.fail(f"Unexpected command: {argv[1]}")
@@ -295,7 +300,7 @@ def test_thin_research_evidence_stands_when_no_top_up(monkeypatch, exa_outcome):
     def fake_run(argv, **kwargs):
         calls.append(argv[1])
         if "--help" in argv:
-            return subprocess.CompletedProcess(argv, 0, stdout="usage")
+            return subprocess.CompletedProcess(argv, 0, stdout=RESEARCH_HELP)
         if argv[1] == "research":
             docs = () if exa_outcome == "not configured" else ("exa",)
             return research_with_one_page(argv, web=("zhipu", "tavily"), docs=docs)
@@ -315,7 +320,7 @@ def test_thin_research_evidence_stands_when_no_top_up(monkeypatch, exa_outcome):
 def test_research_page_text_is_capped(monkeypatch):
     def fake_run(argv, **kwargs):
         if "--help" in argv:
-            return subprocess.CompletedProcess(argv, 0, stdout="usage")
+            return subprocess.CompletedProcess(argv, 0, stdout=RESEARCH_HELP)
         return completed(
             argv,
             {
@@ -341,7 +346,7 @@ def test_research_without_evidence_uses_discovery_then_providers(monkeypatch):
     def fake_run(argv, **kwargs):
         calls.append(argv[1])
         if "--help" in argv:
-            return subprocess.CompletedProcess(argv, 0, stdout="usage")
+            return subprocess.CompletedProcess(argv, 0, stdout=RESEARCH_HELP)
         if argv[1] == "research":
             payload = doctor(docs=("exa",))
             payload.update(
@@ -389,7 +394,7 @@ def test_research_without_evidence_uses_discovery_then_providers(monkeypatch):
 def test_search_result_pages_and_encoded_duplicates_are_dropped(monkeypatch):
     def fake_run(argv, **kwargs):
         if "--help" in argv:
-            return subprocess.CompletedProcess(argv, 0, stdout="usage")
+            return subprocess.CompletedProcess(argv, 0, stdout=RESEARCH_HELP)
         return completed(
             argv,
             {
@@ -420,7 +425,7 @@ def test_mirror_gateway_pages_are_dropped(monkeypatch):
     # indexed through it and the page itself answers 403.
     def fake_run(argv, **kwargs):
         if "--help" in argv:
-            return subprocess.CompletedProcess(argv, 0, stdout="usage")
+            return subprocess.CompletedProcess(argv, 0, stdout=RESEARCH_HELP)
         return completed(
             argv,
             {
@@ -449,7 +454,7 @@ def test_results_name_the_search_that_found_them(monkeypatch):
     # the service that fetched it (firecrawl); a top-up names its command.
     def fake_run(argv, **kwargs):
         if "--help" in argv:
-            return subprocess.CompletedProcess(argv, 0, stdout="usage")
+            return subprocess.CompletedProcess(argv, 0, stdout=RESEARCH_HELP)
         if argv[1] == "research":
             payload = doctor(web=("tavily",), docs=("exa",))
             payload.update(
@@ -540,7 +545,7 @@ def test_research_failure_capability_status_routes_sources_without_doctor(monkey
     def fake_run(argv, **kwargs):
         calls.append(argv[1])
         if "--help" in argv:
-            return subprocess.CompletedProcess(argv, 0, stdout="usage")
+            return subprocess.CompletedProcess(argv, 0, stdout=RESEARCH_HELP)
         if argv[1] == "research":
             payload = doctor(web=("zhipu", "tavily"), docs=("exa",))
             payload.update(
@@ -574,7 +579,7 @@ def test_thin_research_capability_status_routes_sources_without_doctor(monkeypat
     def fake_run(argv, **kwargs):
         calls.append(argv[1])
         if "--help" in argv:
-            return subprocess.CompletedProcess(argv, 0, stdout="usage")
+            return subprocess.CompletedProcess(argv, 0, stdout=RESEARCH_HELP)
         if argv[1] == "research":
             payload = doctor(docs=("exa",))
             payload.update(evidence_items=[], discovery_sources=[])
@@ -660,7 +665,7 @@ def test_text_malformed_and_failed_provider_outputs_are_sanitized(
 def test_empty_success_does_not_hide_other_failures(monkeypatch):
     def fake_run(argv, **kwargs):
         if "--help" in argv:
-            return subprocess.CompletedProcess(argv, 0, stdout="usage")
+            return subprocess.CompletedProcess(argv, 0, stdout=RESEARCH_HELP)
         if argv[1] == "research":
             payload = doctor(web=("zhipu",))
             payload.update(evidence_items=[])
@@ -687,7 +692,7 @@ def test_all_valid_empty_responses_return_no_results(monkeypatch):
 def test_timeout_errors_are_sanitized(monkeypatch):
     def fake_run(argv, **kwargs):
         if "--help" in argv:
-            return subprocess.CompletedProcess(argv, 0, stdout="usage")
+            return subprocess.CompletedProcess(argv, 0, stdout=RESEARCH_HELP)
         raise subprocess.TimeoutExpired(
             argv, kwargs["timeout"], output="private diagnostic"
         )
@@ -765,7 +770,7 @@ def test_a_successful_research_probe_is_remembered(monkeypatch):
     def fake_run(argv, **kwargs):
         calls.append(argv[1:3])
         if "--help" in argv:
-            return subprocess.CompletedProcess(argv, 0, stdout="usage")
+            return subprocess.CompletedProcess(argv, 0, stdout=RESEARCH_HELP)
         return completed(
             argv,
             {
@@ -783,6 +788,37 @@ def test_a_successful_research_probe_is_remembered(monkeypatch):
     smart_search.search_smart_search("second", 2)
 
     assert calls == [["research", "--help"], ["research", "first"], ["research", "second"]]
+
+
+def test_research_without_pages_option_is_not_passed_one(monkeypatch):
+    # The CLI baked into the image (or a fresh npm install) has no --pages;
+    # passing it would make every research call exit 2.
+    calls = []
+
+    def fake_run(argv, **kwargs):
+        calls.append(argv[1:])
+        if "--help" in argv:
+            return subprocess.CompletedProcess(
+                argv, 0, stdout="usage: smart-search research [--budget B] query"
+            )
+        return completed(
+            argv,
+            {
+                "ok": True,
+                "evidence_items": [
+                    {"url": "https://a.example.com/x", "content": "A", "verified": True},
+                ],
+                "discovery_sources": [],
+            },
+        )
+
+    monkeypatch.setattr(smart_search.subprocess, "run", fake_run)
+    results = smart_search.search_smart_search("first", 1)
+
+    assert [r.link for r in results] == ["https://a.example.com/x"]
+    assert calls[1] == [
+        "research", "first", "--budget", "quick", "--fallback", "auto", "--format", "json",
+    ]
 
 
 def test_usage_reads_the_cli_ledger(monkeypatch):

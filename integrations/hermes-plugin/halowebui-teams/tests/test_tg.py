@@ -136,6 +136,16 @@ def test_done_notice_carries_the_conclusion(pkg, team_id, plan_dict, linked):
     assert f"cb:kb:{team_id}" in _buttons(done[0])  # 存入知识库
 
 
+def test_done_notice_time_runs_until_the_answer_is_checked(linked):
+    """A quick answer: 1m55s of tasks + conclusion and check → 「用时 2 分 6 秒」, not 「1 分钟」."""
+    team = {"team_id": "t-1", "title": "查询武夷山明日天气", "approved_at": 1000, "completed_at": 1115,
+            "conclusion": {"generated_at": 1122, "acceptance": {"status": "ready", "verdict": "met", "at": 1126}}}
+    text, _buttons_ = linked.notify.done_message(team, {"tasks": [{"title": "T1", "status": "done"}]}, "答案")
+    assert "1/1 个任务 · 用时 2 分 6 秒" in text
+    assert [linked.notify.duration(s) for s in (59, 60, 115, 600, 3725)] == [
+        "59 秒", "1 分钟", "1 分 55 秒", "10 分钟", "1 小时 2 分钟"]
+
+
 def _finish(pkg, team_id, plan_dict, linked):
     first = _create(pkg, team_id, plan_dict)
     slug = pkg.common.board_slug(team_id)

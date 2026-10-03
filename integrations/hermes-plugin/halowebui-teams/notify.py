@@ -112,6 +112,8 @@ def duration(seconds: Any) -> str:
     if seconds < 60:
         return f"{seconds} 秒"
     minutes = seconds // 60
+    if minutes < 10:  # a quick answer: 1 分 55 秒, not 1 分钟
+        return f"{minutes} 分 {seconds % 60} 秒" if seconds % 60 else f"{minutes} 分钟"
     if minutes < 60:
         return f"{minutes} 分钟"
     return f"{minutes // 60} 小时 {minutes % 60} 分钟" if minutes % 60 else f"{minutes // 60} 小时"
@@ -248,7 +250,11 @@ def done_message(team: dict, snap: dict, markdown: str) -> tuple[str, list]:
     tasks = snap.get("tasks") or []
     done = sum(1 for t in tasks if t.get("status") in ("done", "archived"))
     started = team.get("approved_at") or team.get("created_at") or 0
-    took = duration((team.get("completed_at") or now()) - started) if started else ""
+    # Until the answer was ready: the conclusion and its check come after the last task.
+    conclusion = team.get("conclusion") or {}
+    finished = max(team.get("completed_at") or 0, conclusion.get("generated_at") or 0,
+                   (conclusion.get("acceptance") or {}).get("at") or 0) or now()
+    took = duration(finished - started) if started else ""
     head = (f"✅ <b>{esc(clip(team.get('title'), 60))}</b> · 完成\n"
             f"{done}/{len(tasks)} 个任务{' · 用时 ' + took if took else ''}")
     project = team.get("project") or {}

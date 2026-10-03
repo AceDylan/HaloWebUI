@@ -96,6 +96,7 @@ from open_webui.utils.image_generation_options import (
 )
 from open_webui.utils.html_visual_prompt import (
     append_html_visual_fallback,
+    compact_html_cards_in_history,
     design_html_visual_artifact_with_agy,
     get_html_visual_mode,
     should_apply_html_visual_prompt,
@@ -5176,6 +5177,9 @@ async def process_chat_payload(request, form_data, user, metadata, model, tasks=
 
     files_provided = bool(metadata.get("files_provided")) or "files" in form_data
     form_data = apply_params_to_form_data(form_data, model)
+    # Earlier replies without their visual cards (the markup repeats the answer, four times
+    # its length): the model reads what was said, not how it was laid out.
+    form_data["messages"] = compact_html_cards_in_history(form_data.get("messages"))
     if log.isEnabledFor(logging.DEBUG):
         log.debug(
             "process_chat_payload summary=%s",

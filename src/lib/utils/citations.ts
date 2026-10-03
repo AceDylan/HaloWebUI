@@ -130,3 +130,27 @@ export const getCitationList = (sources: unknown): CitationGroup[] => {
 	}
 	return citations;
 };
+
+/**
+ * A line appended to an earlier reply when the conversation goes back to the model: the request
+ * carries role and content only, so a model asked "你刚才搜了吗 / 来源可靠吗" about a researched
+ * answer said it had searched nothing (2026-09-23, twice). Names the first few sources.
+ */
+export const sourcesHistoryNote = (sources: unknown, max = 5): string => {
+	const list = getCitationList(sources);
+	if (list.length === 0) return '';
+	const names = list.slice(0, max).map((citation) => {
+		const title = String(citation.metadata?.[0]?.title || citation.title || '').trim();
+		let name = title;
+		if (isWebUrl(title)) {
+			try {
+				name = new URL(title).hostname.replace(/^www\./, '');
+			} catch {
+				name = title;
+			}
+		}
+		return name.length > 40 ? `${name.slice(0, 40)}…` : name;
+	});
+	const more = list.length > max ? ' 等' : '';
+	return `[这条回答参考了 ${list.length} 个检索来源：${names.filter(Boolean).join('；')}${more}]`;
+};

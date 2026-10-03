@@ -1658,3 +1658,28 @@ def test_a_legacy_pre_answer_agy_result_keeps_the_model_artifact(monkeypatch):
     assert HTML_VISUAL_FORCE_PROMPT_MARKER in prompt
     assert metadata["html_visual_artifacts"]["author"] == "model"
 
+
+
+def test_history_replies_go_back_without_their_visual_cards():
+    from open_webui.utils.html_visual_prompt import (
+        HISTORY_HTML_CARD_PLACEHOLDER,
+        compact_html_cards_in_history,
+    )
+
+    card = "````html\n<div style=\"padding:8px\"><h2>武夷山</h2><p>竹筏提前 7 天预约</p></div>\n````"
+    answer = "武夷山国庆出行要点：竹筏要提前 7 天 8:00 预约，天游峰早上去人少，九曲溪漂流约 1.5 小时。" * 2
+    messages = [
+        {"role": "user", "content": "武夷山怎么玩"},
+        {"role": "assistant", "content": f"{answer}\n\n{card}"},
+        {"role": "assistant", "content": card},
+        {"role": "user", "content": "你刚才搜了吗"},
+        {"role": "assistant", "content": f"继续中\n\n{card}"},
+    ]
+    out = compact_html_cards_in_history(messages)
+    assert out[1]["content"] == f"{answer}\n\n{HISTORY_HTML_CARD_PLACEHOLDER}"
+    # A reply that is only a card keeps the card's words.
+    assert "竹筏提前 7 天预约" in out[2]["content"] and "<div" not in out[2]["content"]
+    assert out[0] == messages[0] and out[3] == messages[3]
+    # The last message (a reply being continued) stays whole.
+    assert out[4] == messages[4]
+    assert compact_html_cards_in_history(None) is None

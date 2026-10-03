@@ -70,6 +70,7 @@
 		normalizeSelectionThreads,
 		type PersistedSelectionThreads
 	} from '$lib/utils/selection-threads';
+	import { sourcesHistoryNote } from '$lib/utils/citations';
 	import { getModelChatDisplayName } from '$lib/utils/model-display';
 	import { createComposerStatePersister } from '$lib/utils/composer-state-persist';
 	import { getAnthropicEffortSteps } from '$lib/utils/anthropic-thinking';
@@ -5994,6 +5995,12 @@
 					idx === arr.findLastIndex((m) => m.role === 'user')
 				) {
 					textContent = `${textContent}\n\n${_pendingInstruction}`;
+				}
+
+				// An earlier researched reply says so: the request carries role and content only.
+				if (message.role === 'assistant' && message.id !== responseMessageId) {
+					const sourcesNote = sourcesHistoryNote(message.sources);
+					if (sourcesNote && textContent) textContent = `${textContent}\n\n${sourcesNote}`;
 				}
 
 				const imageFiles = message.files?.filter((file) => file.type === 'image') ?? [];

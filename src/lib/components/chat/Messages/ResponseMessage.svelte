@@ -20,7 +20,12 @@
 		activeAudioId,
 		user
 	} from '$lib/stores';
-	import { describeHermesReply, isHermesAgentModelId } from '$lib/utils/hermes';
+	import {
+		describeHermesReply,
+		isHermesAgentModelId,
+		parseHermesRunNotice,
+		splitRunReport
+	} from '$lib/utils/hermes';
 	import { synthesizeOpenAISpeech } from '$lib/apis/audio';
 	// [REACTION_FEATURE] Commented out - reaction feature disabled for now
 	// import {
@@ -1247,6 +1252,13 @@
 	});
 	// 派发方式「协作台」: this reply is a team's live card.
 	$: teamDispatchId = ((message as any)?.team_dispatch?.team_id as string | undefined) ?? null;
+	// A runner's report under its notice line: the line above already says who finished and
+	// how (its 详情 has the model, cost and turns), so the runner's two header lines are not
+	// shown again. Copy and edit still use the whole content.
+	$: reportNotice = parseHermesRunNotice(history.messages?.[message?.parentId ?? '']);
+	$: renderedContent =
+		(reportNotice && splitRunReport(message?.content, reportNotice.runId)?.body) ||
+		message?.content;
 </script>
 
 <DeleteConfirmDialog
@@ -1887,7 +1899,7 @@
 												bind:headings={messageHeadings}
 												id={message.id}
 												{history}
-												content={message.content}
+												content={renderedContent}
 												streaming={!message.done}
 												{isLastMessage}
 												generatedFiles={message.files ?? []}

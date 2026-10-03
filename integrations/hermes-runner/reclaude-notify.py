@@ -52,7 +52,7 @@ import time
 import urllib.error
 import urllib.request
 
-SCRIPT_VERSION = "2026-10-03.1"
+SCRIPT_VERSION = "2026-10-03.2"
 CONFIG_FILE = "/root/.hermes/reclaude-runner.env"
 REQUIRED_CONFIG_KEYS = ("HALOWEBUI_NOTIFY_URL", "HALOWEBUI_NOTIFY_TOKEN")
 STATE_DB = "/root/.hermes/state.db"
@@ -77,6 +77,9 @@ BUSY_RETRY_ATTEMPTS = 40  # 40 x 30s = 20 minutes of someone else's turn
 HTTP_TIMEOUT_SECONDS = 30
 # Report sent to the chat: result.md, capped (the quota footer, the last line, always kept).
 DIGEST_MAX_CHARS = 6000
+# HaloWebUI shows the whole report on one page and accepts 20000 characters
+# (NOTIFICATION_CONTENT_MAX_CHARS); a prompt the user asked for was cut at 6000 there.
+HALOWEBUI_DIGEST_MAX_CHARS = 18000
 DIRECT_PLATFORMS = ("telegram",)
 HERMES_PYTHON = "/usr/local/lib/hermes-agent/venv/bin/python"
 DELIVER_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "runner-deliver.py")
@@ -642,7 +645,8 @@ def report_figures(run_dir):
     return total
 
 
-def build_digest(run_id, status, run_dir, session_id, agent="reclaude", chat=False):
+def build_digest(run_id, status, run_dir, session_id, agent="reclaude", chat=False,
+                 max_chars=DIGEST_MAX_CHARS):
     """The report as the user reads it: a status line, result.md, and what to do next.
 
     *chat* (a Telegram report): the next step is spelled as the command that goes straight
@@ -650,8 +654,8 @@ def build_digest(run_id, status, run_dir, session_id, agent="reclaude", chat=Fal
 
     The second line says who answered and what it took (model, turns, duration, cost,
     session); result.md's own header, which repeats that, is left out. Capped at
-    DIGEST_MAX_CHARS; a longer result keeps its head and the quota footer and points at
-    result.md for the rest.
+    *max_chars* (DIGEST_MAX_CHARS for a chat, more for HaloWebUI); a longer result keeps its
+    head and the quota footer and points at result.md for the rest.
     """
     result_path = os.path.join(run_dir, "result.md")
     icon, label = STATUS_LABELS.get(status, ("❌", f"没有正常完成（{status}）"))
@@ -695,9 +699,9 @@ def build_digest(run_id, status, run_dir, session_id, agent="reclaude", chat=Fal
         head, _, last = body.rpartition("\n")
         if QUOTA_FOOTER_MARKER in last:
             body, footer = head.rstrip(), last.strip()
-    if len(body) > DIGEST_MAX_CHARS:
-        rest = len(body) - DIGEST_MAX_CHARS
-        body = (body[:DIGEST_MAX_CHARS].rstrip()
+    if len(body) > max_chars:
+        rest = len(body) - max_chars
+        body = (body[:max_chars].rstrip()
                 + f"\n\n…（后面还有约 {rest} 字，完整结果在 {result_path}，需要时让 Hermes 读取）")
     lines += ["", body or f"（没有 result.md：{result_path}）"]
 
@@ -713,6 +717,10 @@ def build_digest(run_id, status, run_dir, session_id, agent="reclaude", chat=Fal
                       f"隔了一小时以上再回，发 /{agent} 继续。"]
     elif status == "max_turns":
         lines += ["", "↩️ 回复「继续」，可以在同一个会话里接着跑。"]
+    elif status == "success" and chat:
+        # The gateway sends a reply that quotes this report back to the run (runner_dispatch
+        # replied_report); a fresh message goes to Hermes' model, which may start something new.
+        lines += ["", "↩️ 要接着做：引用回复这条报告写新要求，回到同一个会话（不经过模型）。"]
     elif status != "success" and "runner 提示" not in body:
         progress = _tail_lines(os.path.join(run_dir, "progress.log"), 8)
         if progress:
@@ -1087,7 +1095,8 @@ def main():
     if direct_delivery_enabled():
         # A HaloWebUI that knows mode=display shows the report as the reply, with no model
         # turn; an older one ignores these keys and runs the prompt above.
-        digest = build_digest(args.run_id, args.status, args.run_dir, agent_session, agent=args.agent)
+        digest = build_digest(args.run_id, args.status, args.run_dir, agent_session, agent=args.agent,
+                              max_chars=HALOWEBUI_DIGEST_MAX_CHARS)
         payload["mode"] = "display"
         payload["content"] = digest
         # The user turn HaloWebUI shows above the report: the notice's first line.

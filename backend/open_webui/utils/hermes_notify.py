@@ -538,23 +538,49 @@ async def show_notification_report(
     }
 
 
+# A runner report's first line ("✅ agy 运行 <id> · 已完成") and, when present, its details
+# line ("AGY conversation e87… · 1 轮" / "claude-opus · Claude 会话 … · $1.12 · 26 轮 · 4m08s").
+_REPORT_HEADLINE_RE = re.compile(r"^\S+\s+\S+\s+运行\s+\S+\s+·\s+\S")
+_REPORT_BODY_START_RE = re.compile(r"^(#|[-*>]|```|<)")
+
+
+def split_report_header(content: str) -> tuple[str, str]:
+    """(header, body) of a runner report; ("", content) when it has no runner header.
+
+    The chat shows the header in the notice line above the report (HermesRunNotice), so the
+    designed card leaves it out — the designer used to turn it into a chip row with the run
+    id and "AGY conversation …" at the top of every card."""
+    lines = (content or "").split("\n")
+    if not lines or not _REPORT_HEADLINE_RE.match(lines[0].strip()):
+        return "", content
+    count = 1
+    second = lines[1].strip() if len(lines) > 1 else ""
+    if second and not _REPORT_BODY_START_RE.match(second):
+        count = 2
+    return "\n".join(lines[:count]), "\n".join(lines[count:]).lstrip("\n")
+
+
 async def _design_report(emitter, metadata: dict[str, Any], content: str) -> None:
-    """The HTML design pass for a shown report: same helpers as a hermes reply."""
+    """The HTML design pass for a shown report: same helpers as a hermes reply; the runner's
+    header lines stay outside the card (see :func:`split_report_header`)."""
     from open_webui.utils.html_visual_prompt import (
         append_html_visual_fallback,
         design_html_visual_artifact_with_agy,
     )
 
+    header, body = split_report_header(content)
     try:
-        designed = await design_html_visual_artifact_with_agy(content, metadata)
+        designed = await design_html_visual_artifact_with_agy(body, metadata)
         designed = append_html_visual_fallback(designed, metadata)
     except asyncio.CancelledError:
         raise
     except Exception as e:
         log.warning(f"hermes report design failed: {e}")
         return
-    if designed == content:
+    if designed == body:
         return
+    if header:
+        designed = f"{header}\n\n{designed}"
     try:
         Chats.upsert_message_to_chat_by_id_and_message_id(
             metadata["chat_id"],

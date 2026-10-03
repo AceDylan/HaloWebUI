@@ -1660,6 +1660,40 @@ def _fenced_html_artifacts_as_text(answer: str) -> str:
     return _FENCED_HTML_BLOCK_RE.sub(_to_text, answer)
 
 
+# An earlier reply's visual card, as the model reads the conversation again.
+HISTORY_HTML_CARD_PLACEHOLDER = "[已生成可视化卡片]"
+# Less text than this outside the card: the card is the answer, keep its words.
+_CARD_ONLY_TEXT_CHARS = 80
+
+
+def compact_html_cards_in_history(messages: Any) -> Any:
+    """Earlier assistant replies as the model should read them again: the answer's text, each
+    visual card (````html … ````) as a placeholder. The card restates the answer in markup —
+    8.4k characters at the median, four times the text — and every later turn sent it back.
+    A reply that is only a card keeps the card's visible text. The last message is left whole
+    (a reply being continued). Same idea as hermes' _compact_assistant_history."""
+    if not isinstance(messages, list):
+        return messages
+    compacted = []
+    for index, message in enumerate(messages):
+        content = message.get("content") if isinstance(message, dict) else None
+        if (
+            index == len(messages) - 1
+            or not isinstance(content, str)
+            or message.get("role") != "assistant"
+            or not _FENCED_HTML_BLOCK_RE.search(content)
+        ):
+            compacted.append(message)
+            continue
+        outside = _FENCED_HTML_BLOCK_RE.sub("", content).strip()
+        if len(outside) >= _CARD_ONLY_TEXT_CHARS:
+            text = _FENCED_HTML_BLOCK_RE.sub(f"{HISTORY_HTML_CARD_PLACEHOLDER}\n", content)
+        else:
+            text = _fenced_html_artifacts_as_text(content)
+        compacted.append({**message, "content": text.strip()})
+    return compacted
+
+
 def _build_agy_html_request_prompt(content: str) -> str:
     answer = _NON_ARTIFACT_DETAILS_RE.sub("", content)
     answer = _THINKING_BLOCK_RE.sub("", answer)

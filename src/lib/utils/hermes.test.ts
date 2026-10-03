@@ -16,7 +16,8 @@ import {
 	hermesOptionsForReply,
 	hermesOptionsToKeep,
 	parseHermesRunNotice,
-	reportDurationSeconds
+	reportDurationSeconds,
+	splitRunReport
 } from './hermes';
 
 describe('isHermesAgentModelId', () => {
@@ -299,6 +300,25 @@ describe('runner completion notices', () => {
 		).toBe(27 * 60 + 47);
 		expect(reportDurationSeconds('✅ codex 运行 r · 已完成\ncodex thread t · 1h2m\n')).toBe(3720);
 		expect(reportDurationSeconds('<div>card</div>')).toBeNull();
+	});
+
+	it('splits the runner header off its report for the page', () => {
+		const report =
+			'✅ agy 运行 20261003-141945-01dcc758 · 已完成\nAGY conversation e8721069 · 1 轮\n\n本机负载如下：\n\n- ok';
+		expect(splitRunReport(report, '20261003-141945-01dcc758')).toEqual({
+			headline: '✅ agy 运行 20261003-141945-01dcc758 · 已完成',
+			details: 'AGY conversation e8721069 · 1 轮',
+			body: '本机负载如下：\n\n- ok'
+		});
+		// No details line: the body starts right after the headline.
+		expect(splitRunReport('⏹️ reclaude 运行 r1 · 已停止（你停的）\n\n## 做到哪了', 'r1')).toEqual({
+			headline: '⏹️ reclaude 运行 r1 · 已停止（你停的）',
+			details: '',
+			body: '## 做到哪了'
+		});
+		// Another run's report, or no header at all: left alone.
+		expect(splitRunReport(report, 'other')).toBeNull();
+		expect(splitRunReport('正文', 'r1')).toBeNull();
 	});
 });
 

@@ -3,6 +3,7 @@
 		describeHermesRunNotice,
 		describeTeamNotice,
 		reportDurationSeconds,
+		splitRunReport,
 		type HermesRunNotice
 	} from '$lib/utils/hermes';
 	import { formatRunDuration } from '$lib/utils/run-activity';
@@ -19,6 +20,9 @@
 	let open = false;
 
 	$: duration = formatRunDuration(reportDurationSeconds(report));
+	// The report's own second line (model · cost · turns · time): the page hides the
+	// runner's header under this line, so it lives in 详情.
+	$: reportDetails = splitRunReport(report, notice.runId)?.details ?? '';
 	// A 协作台 team's conclusion: posted by the team, not a runner.
 	$: team = describeTeamNotice(notice, content);
 	$: headline = team
@@ -55,8 +59,13 @@
 						data-halo-team-notice-link>在协作台打开结论 →</a
 					>
 				{/if}
-			{:else if notice.runId}
-				<div class="break-all">run：<span class="font-mono">{notice.runId}</span></div>
+			{:else}
+				{#if reportDetails}
+					<div class="break-words" data-halo-hermes-run-notice-figures>{reportDetails}</div>
+				{/if}
+				{#if notice.runId}
+					<div class="break-all">运行编号：<span class="font-mono">{notice.runId}</span></div>
+				{/if}
 			{/if}
 			{#if !team && notice.sessionId}
 				<div class="break-all">

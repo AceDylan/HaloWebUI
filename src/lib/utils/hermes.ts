@@ -475,3 +475,30 @@ export const reportDurationSeconds = (report: unknown): number | null => {
 	const seconds = part('h') * 3600 + part('m') * 60 + part('s');
 	return seconds > 0 ? seconds : null;
 };
+
+/**
+ * A runner report under its notice line, split for the chat: the runner's own two header
+ * lines ("✅ agy 运行 <id> · 已完成" / "AGY conversation e87… · 1 轮") repeat what the
+ * notice line right above already says, so the page shows the body only and the notice's
+ * 详情 shows the second line (model, cost, turns, time). null when the content does not
+ * start with this run's headline (an old report, a team's conclusion, a reply in its place).
+ */
+export const splitRunReport = (
+	content: unknown,
+	runId: string
+): { headline: string; details: string; body: string } | null => {
+	const text = typeof content === 'string' ? content : '';
+	if (!runId || !text) return null;
+	const lines = text.split('\n');
+	const headline = lines[0]?.match(REPORT_HEADLINE_RE);
+	if (!headline || headline[3] !== runId) return null;
+	// The second line is the details line when it is not blank and not the body's start.
+	const second = (lines[1] ?? '').trim();
+	const details = second && !/^(#|[-*>]|```|<)/.test(second) ? second : '';
+	const body = lines
+		.slice(details ? 2 : 1)
+		.join('\n')
+		.replace(/^\s*\n/, '')
+		.trimStart();
+	return { headline: lines[0].trim(), details, body };
+};

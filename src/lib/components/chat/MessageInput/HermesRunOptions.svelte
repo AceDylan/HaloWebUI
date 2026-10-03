@@ -26,20 +26,39 @@
 	// answers ('hermes'), a runner starts a new task.
 	export let continuation: HermesContinuation | null = null;
 
-	const DISPATCHES: { value: HermesRunOptions['dispatch']; label: string; hint: string }[] = [
-		{ value: '', label: '直接', hint: 'Hermes 自己做' },
-		{ value: 'reclaude', label: 'reclaude', hint: '交给 Claude Code（reclaude 拼车）在后台独占执行' },
-		{ value: 'cchclaude', label: 'cchclaude', hint: '交给 Claude Code（自己的 cch 中转）在后台独占执行' },
+	// label + a few words on each choice (sub) so the grid says who does the work without
+	// hovering; hint is the full sentence under the grid for the one picked.
+	const DISPATCHES: {
+		value: HermesRunOptions['dispatch'];
+		label: string;
+		sub: string;
+		hint: string;
+	}[] = [
+		{ value: '', label: '直接', sub: 'Hermes 回答', hint: 'Hermes 自己做' },
+		{
+			value: 'reclaude',
+			label: 'reclaude',
+			sub: 'Claude · 拼车',
+			hint: '交给 Claude Code（reclaude 拼车）在后台独占执行'
+		},
+		{
+			value: 'cchclaude',
+			label: 'cchclaude',
+			sub: 'Claude · 自己的中转',
+			hint: '交给 Claude Code（自己的 cch 中转）在后台独占执行'
+		},
 		{
 			value: 'anyclaude',
 			label: 'anyclaude',
+			sub: 'Claude · 免费较慢',
 			hint: '交给 Claude Code（anyrouter 免费服务，较慢，失败会自动重试）在后台独占执行'
 		},
-		{ value: 'codex', label: 'codex', hint: '交给 Codex 在后台独占执行' },
-		{ value: 'agy', label: 'agy', hint: '交给 AGY 在后台独占执行' },
+		{ value: 'codex', label: 'codex', sub: 'OpenAI Codex', hint: '交给 Codex 在后台独占执行' },
+		{ value: 'agy', label: 'agy', sub: 'Gemini · 快', hint: '交给 AGY 在后台独占执行' },
 		{
 			value: 'team',
 			label: '协作台',
+			sub: '一支团队：拆任务、并行、含生图',
 			hint: '交给一支团队：负责人拆任务、成员并行（含生图），进度在对话里实时显示，完整结果发回这里'
 		}
 	];
@@ -209,13 +228,13 @@
 			bind:this={panel}
 			use:portal
 			style={panelStyle}
-			class="rounded-2xl border border-gray-200 bg-white p-3 text-sm text-gray-900 shadow-lg dark:border-gray-700 dark:bg-gray-850 dark:text-gray-100"
+			class="halo-dispatch rounded-2xl p-3 text-sm text-gray-900 dark:text-gray-100"
 			data-halo-hermes-options-panel
 			role="dialog"
 			aria-label={$i18n.t('Hermes options')}
 		>
-			<div class="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">派发方式</div>
-			<div class="grid grid-cols-3 gap-1" role="radiogroup" aria-label="派发方式">
+			<div class="halo-dispatch__label mb-2">派发给谁</div>
+			<div class="grid grid-cols-3 gap-1.5" role="radiogroup" aria-label="派发方式">
 				{#if continuation}
 					<button
 						type="button"
@@ -223,12 +242,13 @@
 						aria-checked={continuing}
 						title="交回 {continuation.runner} 运行 {continuation.runId} 的原会话"
 						data-halo-hermes-dispatch="continue"
-						class="col-span-3 truncate rounded-lg px-1.5 py-1.5 text-xs transition max-sm:py-2.5 max-sm:text-sm {continuing
-							? 'bg-primary-600 text-white dark:bg-primary-500'
-							: 'bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700'}"
+						class="halo-dispatch__choice col-span-3 {continuing ? 'is-on' : ''}"
 						on:click={() => update({ dispatch: '' })}
 					>
-						接着上次 · {continuation.runner}
+						<span class="halo-dispatch__name">接着上次 · {continuation.runner}</span>
+						<span class="halo-dispatch__sub"
+							>{continuation.status === 'question' ? '它在等你决定，回到同一个会话' : '回到同一个会话，之前读过、做过的都在'}</span
+						>
 					</button>
 				{/if}
 				{#each DISPATCHES as item}
@@ -239,26 +259,24 @@
 						aria-checked={checked}
 						title={item.hint}
 						data-halo-hermes-dispatch={item.value || 'direct'}
-						class="min-w-0 truncate rounded-lg px-1.5 py-1.5 text-xs transition max-sm:py-2.5 max-sm:text-sm {item.value ===
-						'team'
-							? 'col-span-3'
-							: ''} {checked
-							? 'bg-primary-600 text-white dark:bg-primary-500'
-							: 'bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700'}"
+						class="halo-dispatch__choice {item.value === 'team' ? 'col-span-3' : ''} {checked
+							? 'is-on'
+							: ''}"
 						on:click={() => update({ dispatch: item.value || (continuation ? 'hermes' : '') })}
 					>
-						{item.value === 'team' ? '🤝 协作台（交给一支团队）' : item.label}
+						<span class="halo-dispatch__name">{item.label}</span>
+						<span class="halo-dispatch__sub">{item.sub}</span>
 					</button>
 				{/each}
 			</div>
-			<div class="mt-1 text-2xs text-gray-500 dark:text-gray-400" data-halo-hermes-dispatch-hint>
+			<div class="mt-2 text-2xs leading-relaxed text-gray-500 dark:text-gray-400" data-halo-hermes-dispatch-hint>
 				{dispatchHint}
 			</div>
 
 			<label class="mt-3 block">
-				<span class="mb-1.5 block text-xs font-medium text-gray-500 dark:text-gray-400">模型</span>
+				<span class="halo-dispatch__label mb-1.5 block">Hermes 用的模型</span>
 				<select
-					class="w-full rounded-lg border border-gray-200 bg-white px-2 py-1.5 text-xs dark:border-gray-700 dark:bg-gray-900"
+					class="halo-dispatch__select w-full rounded-xl px-2.5 py-2 text-xs"
 					value={modelValue}
 					data-halo-hermes-model
 					on:change={(event) => {

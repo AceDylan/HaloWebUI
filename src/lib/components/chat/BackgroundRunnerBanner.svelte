@@ -58,6 +58,13 @@
 	// The reporter posts every few minutes (at least every 3); twice that without a
 	// word means the runner may be stuck rather than working.
 	const STALE_AFTER_SECONDS = 7 * 60;
+	// What the runner last reported: its own words ("在做：核对部署…"), or — a runner that
+	// narrates nothing yet — its last tool call ("最近：Bash: npm test"), shown as code.
+	const COMMAND_RE = /^[A-Za-z][\w.-]*(?:#\d+)?:\s/;
+	const describeActivity = (text: string | null | undefined) => {
+		const value = String(text ?? '').trim();
+		return { text: value, command: COMMAND_RE.test(value) };
+	};
 	const quietMinutes = (run: { updated_at: number }, at: number) => {
 		const quiet = at - Number(run.updated_at || 0);
 		return run.updated_at && quiet > STALE_AFTER_SECONDS ? Math.floor(quiet / 60) : 0;
@@ -65,41 +72,45 @@
 </script>
 
 {#each runs as run (run.run_id)}
+	{@const quiet = quietMinutes(run, now)}
+	{@const activity = describeActivity(run.last_activity)}
 	<div
-		class="mx-auto mb-2 flex w-full max-w-3xl items-start gap-2 rounded-xl border border-blue-200/70 bg-blue-50/80 px-3 py-2 text-xs text-blue-800 dark:border-blue-900/60 dark:bg-blue-950/40 dark:text-blue-200"
+		class="halo-runner mx-auto mb-2 flex w-full max-w-3xl items-center gap-3 rounded-2xl px-3.5 py-2.5 text-xs"
+		class:is-quiet={quiet > 0}
 		role="status"
 		data-halo-background-runner={run.agent}
 	>
-		<span class="relative mt-1 flex h-2 w-2 shrink-0">
-			<span
-				class="absolute inline-flex h-full w-full animate-ping rounded-full bg-blue-400 opacity-60"
-			></span>
-			<span class="relative inline-flex h-2 w-2 rounded-full bg-blue-500"></span>
-		</span>
+		<span class="halo-runner__ring" aria-hidden="true"><span></span></span>
 		<div class="min-w-0 flex-1">
-			<div class="font-medium tabular-nums">
-				{describeBackgroundRun(run, now)} · 后台运行中，结束后报告会自动发到这里
+			<div class="flex min-w-0 items-baseline gap-1.5 tabular-nums">
+				<span class="halo-runner__name font-display shrink-0">{run.agent}</span>
+				<span class="truncate text-gray-500 dark:text-gray-400"
+					>{describeBackgroundRun(run, now).split(' · ').slice(1).join(' · ') ||
+						'刚开始'}<span class="max-sm:hidden"> · 后台进行中，做完报告发到这里</span></span
+				>
 			</div>
-			{#if quietMinutes(run, now)}
-				<div class="mt-0.5 text-2xs text-amber-700 dark:text-amber-300" data-halo-background-runner-quiet>
-					已经 {quietMinutes(run, now)} 分钟没有新进度，可能卡住了；需要时可以停止它
-				</div>
-			{/if}
-			{#if run.last_activity}
+			{#if quiet}
 				<div
-					class="mt-0.5 truncate font-mono text-2xs text-blue-700/80 dark:text-blue-300/80"
+					class="mt-0.5 text-2xs text-amber-700 dark:text-amber-300"
+					data-halo-background-runner-quiet
+				>
+					已经 {quiet} 分钟没有新进度，可能卡住了；需要时可以停止它
+				</div>
+			{:else if activity.text}
+				<div
+					class="mt-0.5 truncate text-2xs text-gray-500 dark:text-gray-400 {activity.command
+						? 'font-mono'
+						: ''}"
 					title={run.last_activity}
 				>
-					最近：{run.last_activity}
+					{activity.command ? '最近' : '在做'}：{activity.text}
 				</div>
 			{/if}
 		</div>
 		<button
 			type="button"
-			class="shrink-0 self-center rounded-lg px-2.5 py-1 text-xs font-medium transition max-sm:px-3 max-sm:py-2 {armed ===
-			run.run_id
-				? 'bg-red-600 text-white hover:bg-red-700'
-				: 'text-blue-700 hover:bg-blue-100 dark:text-blue-200 dark:hover:bg-blue-900/60'} disabled:opacity-60"
+			class="halo-runner__stop shrink-0 rounded-full px-3 py-1 text-xs font-medium transition max-sm:px-3.5 max-sm:py-2 disabled:opacity-60"
+			class:is-armed={armed === run.run_id}
 			disabled={stopping === run.run_id}
 			data-halo-background-runner-stop={run.run_id}
 			aria-label={armed === run.run_id ? `确认停止 ${run.agent}` : `停止 ${run.agent}`}

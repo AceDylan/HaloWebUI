@@ -342,3 +342,44 @@ def test_a_longer_report_needs_an_in_process_caller_that_allows_it(monkeypatch):
     result = asyncio.run(hermes_notify.show_notification_report(object(), chat_id="chat-1", content=long,
                                                                design=False, max_chars=64000))
     assert calls["saved"][-1]["history"]["messages"][result["assistant_message_id"]]["content"] == long
+
+
+def test_split_report_header_keeps_the_runner_lines_out_of_the_card():
+    report = "✅ agy 运行 20261003-141945-01dcc758 · 已完成\nAGY conversation e8721069 · 1 轮\n\n本机负载如下：\n- ok"
+    assert hermes_notify.split_report_header(report) == (
+        "✅ agy 运行 20261003-141945-01dcc758 · 已完成\nAGY conversation e8721069 · 1 轮",
+        "本机负载如下：\n- ok",
+    )
+    # No details line; and content without a runner header is left whole.
+    assert hermes_notify.split_report_header("⏹️ reclaude 运行 r1 · 已停止\n\n## 做到哪了") == (
+        "⏹️ reclaude 运行 r1 · 已停止",
+        "## 做到哪了",
+    )
+    assert hermes_notify.split_report_header("✅ 报告") == ("", "✅ 报告")
+
+
+def test_the_design_pass_gets_the_report_body_and_keeps_the_header_outside(monkeypatch):
+    calls, asyncio = _patch_report_stack(monkeypatch)
+    seen, upserts = [], []
+
+    async def design(content, metadata):
+        seen.append(content)
+        return content + "\n\n````html\n<div>card</div>\n````"
+
+    from open_webui.utils import html_visual_prompt
+
+    monkeypatch.setattr(html_visual_prompt, "design_html_visual_artifact_with_agy", design)
+    monkeypatch.setattr(
+        hermes_notify.Chats,
+        "upsert_message_to_chat_by_id_and_message_id",
+        lambda chat_id, message_id, message, **_kw: upserts.append(message),
+    )
+    report = "✅ agy 运行 r9 · 已完成\nAGY conversation e87 · 1 轮\n\n正文"
+
+    async def run():
+        await hermes_notify.show_notification_report(object(), chat_id="chat-1", content=report, run_id="r9")
+        await asyncio.gather(*hermes_notify._REPORT_DESIGN_TASKS)
+
+    asyncio.run(run())
+    assert seen == ["正文"]
+    assert upserts[-1]["content"] == "✅ agy 运行 r9 · 已完成\nAGY conversation e87 · 1 轮\n\n正文\n\n````html\n<div>card</div>\n````"

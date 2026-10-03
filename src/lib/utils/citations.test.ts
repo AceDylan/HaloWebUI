@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { getCitationEntries, getCitationKey, getCitationList } from './citations';
+import { getCitationEntries, getCitationKey, getCitationList, sourcesHistoryNote } from './citations';
 
 // Stored shape of a HaloWebUI web search answer: one page per source, the
 // query as the source name, no file_id.
@@ -64,5 +64,26 @@ describe('citations', () => {
 		);
 
 		expect(entry.document).toBe('What the page is about');
+	});
+});
+
+describe('sourcesHistoryNote', () => {
+	it('names the sources of an earlier researched reply for the model', () => {
+		const sources = [
+			{
+				source: { name: 'web search' },
+				document: ['a', 'b', 'c'],
+				metadata: [
+					{ source: 'https://www.wuyishan.gov.cn/a', title: '武夷山景区公告' },
+					{ source: 'https://news.example.com/b' },
+					{ source: 'https://news.example.com/b' }
+				]
+			}
+		];
+		expect(sourcesHistoryNote(sources)).toBe(
+			'[这条回答参考了 2 个检索来源：武夷山景区公告；news.example.com]'
+		);
+		expect(sourcesHistoryNote([])).toBe('');
+		expect(sourcesHistoryNote(undefined)).toBe('');
 	});
 });

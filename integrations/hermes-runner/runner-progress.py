@@ -45,7 +45,7 @@ import time
 import urllib.error
 import urllib.request
 
-SCRIPT_VERSION = "2026-09-28.2"
+SCRIPT_VERSION = "2026-10-03.1"
 DEFAULT_CONFIG = "/root/.hermes/reclaude-runner.env"
 REQUIRED_KEYS = ("HALOWEBUI_NOTIFY_URL", "HALOWEBUI_NOTIFY_TOKEN")
 RUNNING_STATUSES = {"", "running", "queued", "starting", "waiting", "retrying"}
@@ -138,6 +138,12 @@ def parse_started_at(value):
             return datetime.datetime.strptime(text, fmt).timestamp()
         except ValueError:
             continue
+    try:
+        # agy writes isoformat() with microseconds ("2026-10-03T06:19:45.960782+00:00"): without
+        # this its banner never showed how long it had been running.
+        return datetime.datetime.fromisoformat(text).timestamp()
+    except ValueError:
+        pass
     try:
         return float(text)
     except ValueError:

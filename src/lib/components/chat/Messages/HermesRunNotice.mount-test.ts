@@ -38,5 +38,9 @@ describe('HermesRunNotice', () => {
 		expect(details.textContent).toContain('20260926-1');
 		expect(details.textContent).toContain('Claude 会话');
 		expect(details.textContent).toContain('f111-2222');
+		// The report's own figures line moves here: the page hides the runner's header.
+		expect(
+			details.querySelector('[data-halo-hermes-run-notice-figures]')?.textContent
+		).toContain('12 轮 · 1m55s');
 	});
 });

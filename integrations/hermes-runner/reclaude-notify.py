@@ -52,7 +52,7 @@ import time
 import urllib.error
 import urllib.request
 
-SCRIPT_VERSION = "2026-10-01.2"
+SCRIPT_VERSION = "2026-10-03.1"
 CONFIG_FILE = "/root/.hermes/reclaude-runner.env"
 REQUIRED_CONFIG_KEYS = ("HALOWEBUI_NOTIFY_URL", "HALOWEBUI_NOTIFY_TOKEN")
 STATE_DB = "/root/.hermes/state.db"
@@ -513,6 +513,135 @@ def _scheduled_resume_label(run_dir):
     return match.group(3) if day == beijing_today else f"{match.group(2)} {match.group(3)}"
 
 
+def _number(value):
+    return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else None
+
+
+def _meta_epoch(value):
+    """A meta.json time ("2026-10-02 22:56:14 +0800", or agy's ISO form) as epoch seconds."""
+    text = str(value or "").strip()
+    for parse in (lambda t: datetime.datetime.strptime(t, "%Y-%m-%d %H:%M:%S %z"),
+                  lambda t: datetime.datetime.fromisoformat(t.replace("Z", "+00:00"))):
+        try:
+            moment = parse(text)
+        except ValueError:
+            continue
+        if moment.tzinfo is not None:
+            return moment.timestamp()
+    return None
+
+
+def _human_duration(ms):
+    seconds = int(ms) // 1000
+    minutes, sec = divmod(seconds, 60)
+    hours, minutes = divmod(minutes, 60)
+    return f"{hours}h{minutes:02d}m{sec:02d}s" if hours else f"{minutes}m{sec:02d}s"
+
+
+def _result_events(run_dir):
+    """(count, summed num_turns, last total_cost_usd) of Claude Code's result events."""
+    count, turns, cost = 0, 0, None
+    try:
+        handle = open(os.path.join(run_dir, "events.jsonl"), encoding="utf-8", errors="replace")
+    except OSError:
+        return 0, 0, None
+    with handle:
+        for line in handle:
+            if '"result"' not in line:
+                continue
+            event = _json_object(line)
+            if event.get("type") != "result":
+                continue
+            count += 1
+            turns += int(_number(event.get("num_turns")) or 0)
+            cost = _number(event.get("total_cost_usd"))
+    return count, turns, cost
+
+
+def _session_cost(run_dir):
+    """The session's running cost at the end of *run_dir* (Claude Code keeps counting on --resume)."""
+    summary = _json_object(_read_text(os.path.join(run_dir, "result.json")))
+    if "session_cost_usd" in summary:
+        return _number(summary.get("session_cost_usd"))
+    return _number(summary.get("total_cost_usd"))  # before 2026-10-03 it was the running total
+
+
+def _cost_before(run_dir, session):
+    """What the session had cost when *run_dir* started: the run it resumed, or 0.0."""
+    meta = read_meta(run_dir)
+    if not meta.get("resume_from"):
+        return 0.0
+    root, parent = os.path.dirname(os.path.abspath(run_dir)), meta.get("parent_run")
+    for _ in range(50):
+        if not parent or "/" in str(parent):
+            break
+        parent_dir = os.path.join(root, str(parent))
+        summary = _json_object(_read_text(os.path.join(parent_dir, "result.json")))
+        if session and summary.get("session_id") and summary["session_id"] != session:
+            break
+        value = _session_cost(parent_dir)
+        if value is not None:
+            return value
+        parent = read_meta(parent_dir).get("parent_run")
+    return 0.0
+
+
+def run_figures(run_dir):
+    """This run's own cost, turns and duration: {"cost", "turns", "duration_ms"} (None = unknown).
+
+    reclaude-stream.py writes them into result.json since 2026-10-03 (session_cost_usd marks
+    that).  An older result.json had the last result event's turns and duration (a run whose
+    background agents reported back answers several prompts: 080100 said 21 turns · 9m12s for
+    291 turns in 107 minutes) and the session's running cost (each continuation of
+    20261001-173907 showed everything spent since its first run); those are worked out again
+    from events.jsonl and meta.json."""
+    summary = _json_object(_read_text(os.path.join(run_dir, "result.json")))
+    if "session_cost_usd" in summary:
+        return {"cost": _number(summary.get("total_cost_usd")), "turns": _number(summary.get("num_turns")),
+                "duration_ms": _number(summary.get("duration_ms"))}
+    figures = {"cost": _number(summary.get("total_cost_usd")), "turns": _number(summary.get("num_turns")),
+               "duration_ms": _number(summary.get("duration_ms"))}
+    count, turns, session_cost = _result_events(run_dir)
+    if count > 1:
+        meta = read_meta(run_dir)
+        started, ended = _meta_epoch(meta.get("started_at")), _meta_epoch(meta.get("ended_at"))
+        figures["turns"] = float(turns)
+        if started is not None and ended is not None and ended >= started:
+            figures["duration_ms"] = (ended - started) * 1000
+    if session_cost is not None:
+        figures["cost"] = session_cost
+    if figures["cost"] is not None:
+        before = _cost_before(run_dir, summary.get("session_id"))
+        if before and figures["cost"] >= before:
+            figures["cost"] = figures["cost"] - before
+    return figures
+
+
+def report_figures(run_dir):
+    """The figures for the report: this run's, plus the runs the runner itself continued into it
+    (max_turns, a quota wait: meta auto_resume=started) — one task, one report, its whole cost.
+    {"cost", "turns", "duration_ms", "segments"}."""
+    dirs, current = [run_dir], run_dir
+    root = os.path.dirname(os.path.abspath(run_dir))
+    for _ in range(50):
+        parent = read_meta(current).get("parent_run")
+        if not parent or "/" in str(parent):
+            break
+        parent_dir = os.path.join(root, str(parent))
+        if read_meta(parent_dir).get("auto_resume") != "started":
+            break
+        dirs.insert(0, parent_dir)
+        current = parent_dir
+    total = {"cost": None, "turns": None, "duration_ms": None}
+    for directory in dirs:
+        figures = run_figures(directory)
+        for key, value in figures.items():
+            if value is not None:
+                total[key] = (total[key] or 0.0) + value
+    total["segments"] = len(dirs)
+    return total
+
+
 def build_digest(run_id, status, run_dir, session_id, agent="reclaude", chat=False):
     """The report as the user reads it: a status line, result.md, and what to do next.
 
@@ -532,17 +661,26 @@ def build_digest(run_id, status, run_dir, session_id, agent="reclaude", chat=Fal
         # "没有正常完成（error）" for a run that went on by itself an hour later.
         icon, label = "⏳", f"额度用完，暂停中，约 {resume_at} 自动接着跑（不用管）"
     summary = _json_object(_read_text(os.path.join(run_dir, "result.json")))
+    figures = report_figures(run_dir)
     details = []
     if summary.get("model"):
         details.append(str(summary["model"]))
     if session_id:
         details.append(f"{SESSION_LABELS.get(agent, 'session')} {_short_session(session_id)}")
-    if _cost_label(summary.get("total_cost_usd")):
-        details.append(_cost_label(summary.get("total_cost_usd")))
-    if summary.get("num_turns"):
-        details.append(f"{summary['num_turns']} 轮")
-    if summary.get("duration_human"):
-        details.append(str(summary["duration_human"]))
+    amounts = []
+    if _cost_label(figures["cost"]):
+        amounts.append(_cost_label(figures["cost"]))
+    if figures["turns"]:
+        amounts.append(f"{int(figures['turns'])} 轮")
+    if figures["duration_ms"]:
+        amounts.append(_human_duration(figures["duration_ms"]))
+    elif summary.get("duration_human"):
+        amounts.append(str(summary["duration_human"]))
+    if figures["segments"] > 1 and amounts:
+        # The amounts cover the whole task, not just the last stretch of it.
+        details.append(f"自动续跑 {figures['segments'] - 1} 次")
+        amounts[0] = "共 " + amounts[0]
+    details += amounts
     lines = [f"{icon} {agent} 运行 {run_id} · {label}"]
     if details:
         lines.append(" · ".join(details))
@@ -746,6 +884,10 @@ def deliver_direct(args, record, save, platform, chat_id, session_id, agent_sess
             record["waited_for"] = "cron delivery"
         else:
             waited = wait_for_launch_reply(session_id, since, db_path=args.state_db)
+            if waited is None and os.environ.get("RUNNER_LAUNCH_REPLY_WAIT", "").strip() in ("0", "0.0"):
+                # A chain's next round or a resume by autopilot-supervisor: no turn launched
+                # it, so nothing will reply first (waiting held each such report back 60 s).
+                waited = "off"
         record["waited_for_launch_reply"] = waited if waited is not None else "gave up"
     attempt = 0
     while True:

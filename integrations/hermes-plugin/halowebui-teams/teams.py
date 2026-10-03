@@ -109,6 +109,11 @@ def _task_body(team: dict, task: dict, member: dict) -> str:
         "result 写完整的结果（负责人会据此写最终结论；图片、截图等产出写明它在工作目录里的相对路径）。"
         "需要和别的成员沟通时用 kanban_comment 写在你的任务上。"
         "确实无法继续（缺信息、需要用户决定）时调用 kanban_block 并写明原因，不要编造结果。"
+        # A Hermes member follows SOUL.md's Obsidian rule like any session: on 2026-10-02 the
+        # 戒烟 member spent its last 100 s checking the vault (and wrote nothing). The team's
+        # result reaches the knowledge base through the conclusion page instead.
+        "这是团队里的一项任务：不要写 Obsidian / 知识库笔记，也不要做归档检查——"
+        "团队结论由负责人汇总，用户可以在结论页一键存入知识库。"
     )
 
 

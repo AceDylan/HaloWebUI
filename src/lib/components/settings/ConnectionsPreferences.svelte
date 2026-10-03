@@ -210,7 +210,7 @@
 	{#if connections !== null}
 		<div class="max-w-6xl mx-auto space-y-6">
 			<!-- ==================== Hero Section ==================== -->
-			<section class="glass-section p-5 space-y-5">
+			<section class="halo-settings-head glass-section p-5 space-y-5">
 				<div class="@container flex flex-col gap-5">
 					<div class="flex flex-col gap-4">
 						<div class="min-w-0 @[64rem]:flex-1">
@@ -232,8 +232,8 @@
 									{/if}
 								</div>
 								<div class="min-w-0">
-									<div class="text-base font-semibold text-gray-800 dark:text-gray-100">{$i18n.t(tabMeta[selectedTab].label)}</div>
-									<p class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-gray-400 dark:text-gray-500">
+									<div class="halo-settings-title text-base font-semibold text-gray-800 dark:text-gray-100">{$i18n.t(tabMeta[selectedTab].label)}</div>
+									<p class="halo-settings-desc mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-gray-400 dark:text-gray-500">
 										<span>{$i18n.t(tabMeta[selectedTab].descKey)}</span>
 										<span class="hidden h-3 w-px bg-gray-200 dark:bg-gray-700 sm:inline-block" aria-hidden="true"></span>
 										<span>{$i18n.t('接口按账户独立保存，其他用户无法查看或使用你的密钥')}</span>
@@ -243,7 +243,7 @@
 						</div>
 
 						<!-- Tab pill bar -->
-						<div class="inline-flex max-w-full flex-wrap items-center gap-1.5 self-start rounded-xl bg-gray-100/70 p-1 shadow-[inset_0_1px_0_rgba(255,255,255,0.65)] dark:bg-gray-850/80 dark:shadow-none @[64rem]:flex-nowrap @[64rem]:shrink-0">
+						<div class="halo-seg inline-flex max-w-full flex-wrap items-center gap-1.5 self-start rounded-xl bg-gray-100/70 p-1 shadow-[inset_0_1px_0_rgba(255,255,255,0.65)] dark:bg-gray-850/80 dark:shadow-none @[64rem]:flex-nowrap @[64rem]:shrink-0">
 							{#each tabOrder as tab}
 								<button type="button" class={`flex min-w-0 items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-all ${selectedTab === tab ? 'bg-white text-gray-900 shadow-[0_1px_3px_rgba(15,23,42,0.08)] dark:bg-gray-800 dark:text-white' : 'text-gray-500 hover:bg-white/50 hover:text-gray-800 dark:text-gray-400 dark:hover:bg-gray-800/50 dark:hover:text-gray-200'}`} on:click={() => { selectedTab = tab; }}>
 									{#if tab === 'openai'}

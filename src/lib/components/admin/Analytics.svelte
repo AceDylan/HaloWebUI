@@ -411,7 +411,7 @@
 
 	<div class="max-w-6xl mx-auto space-y-6">
 		<!-- ==================== Hero Section ==================== -->
-		<section class="glass-section p-5 space-y-5">
+		<section class="halo-settings-head glass-section p-5 space-y-5">
 			<div class="@container flex flex-col gap-5">
 				<div class="flex flex-col gap-4">
 					<div class="min-w-0 @[64rem]:flex-1">
@@ -428,7 +428,7 @@
 							</div>
 							<div class="min-w-0">
 								<div class="flex items-center gap-3">
-									<div class="shrink-0 whitespace-nowrap text-base font-semibold text-gray-800 dark:text-gray-100">
+									<div class="shrink-0 whitespace-nowrap halo-settings-title text-base font-semibold text-gray-800 dark:text-gray-100">
 										{$i18n.t(activeTabMeta.label)}
 									</div>
 									<HaloSelect
@@ -442,7 +442,7 @@
 										on:change={handleDaysChange}
 									/>
 								</div>
-								<p class="mt-1 text-xs text-gray-400 dark:text-gray-500">
+								<p class="halo-settings-desc mt-1 text-xs text-gray-400 dark:text-gray-500">
 									{$i18n.t(activeTabMeta.description)}
 								</p>
 							</div>
@@ -450,7 +450,7 @@
 					</div>
 
 					<!-- Tab pill bar -->
-					<div class="inline-flex max-w-full flex-wrap items-center gap-1.5 self-start rounded-xl bg-gray-100/70 p-1 shadow-[inset_0_1px_0_rgba(255,255,255,0.65)] dark:bg-gray-850/80 dark:shadow-none @[64rem]:flex-nowrap @[64rem]:shrink-0">
+					<div class="halo-seg inline-flex max-w-full flex-wrap items-center gap-1.5 self-start rounded-xl bg-gray-100/70 p-1 shadow-[inset_0_1px_0_rgba(255,255,255,0.65)] dark:bg-gray-850/80 dark:shadow-none @[64rem]:flex-nowrap @[64rem]:shrink-0">
 						<button type="button" class={`flex shrink-0 items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-all ${activeTab === 'overview' ? 'bg-white text-gray-900 shadow-[0_1px_3px_rgba(15,23,42,0.08)] dark:bg-gray-800 dark:text-white' : 'text-gray-500 hover:bg-white/50 hover:text-gray-800 dark:text-gray-400 dark:hover:bg-gray-800/50 dark:hover:text-gray-200'}`} on:click={() => { exitSelectionMode(); activeTab = 'overview'; }}>
 							<ChartBar className="size-4" />
 							<span>{tr('总览', 'Overview')}</span>

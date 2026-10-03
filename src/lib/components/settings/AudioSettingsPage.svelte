@@ -93,7 +93,7 @@
 <div class="h-full space-y-6 overflow-y-auto scrollbar-hidden">
 	<div class="max-w-6xl mx-auto space-y-6">
 		<!-- ==================== Hero Section ==================== -->
-		<section class="glass-section p-5 space-y-5">
+		<section class="halo-settings-head glass-section p-5 space-y-5">
 			<div class="@container flex flex-col gap-5">
 				<div class="flex flex-col gap-4">
 					<div class="min-w-0 @[64rem]:flex-1">
@@ -112,7 +112,7 @@
 							</div>
 							<div class="min-w-0">
 								<div class="flex items-center gap-3">
-									<div class="text-base font-semibold text-gray-800 dark:text-gray-100">
+									<div class="halo-settings-title text-base font-semibold text-gray-800 dark:text-gray-100">
 										{$i18n.t(activeTabMeta.label)}
 									</div>
 									<InlineDirtyActions
@@ -123,7 +123,7 @@
 										on:save={selectedTab === 'personal' ? savePersonal : saveGlobal}
 									/>
 								</div>
-								<p class="mt-1 text-xs text-gray-400 dark:text-gray-500">
+								<p class="halo-settings-desc mt-1 text-xs text-gray-400 dark:text-gray-500">
 									{$i18n.t(activeTabMeta.description)}
 								</p>
 							</div>
@@ -132,7 +132,7 @@
 
 					<!-- Tab buttons -->
 					{#if isAdmin}
-						<div class="inline-flex max-w-full flex-wrap items-center gap-1.5 self-start rounded-xl bg-gray-100/70 p-1 shadow-[inset_0_1px_0_rgba(255,255,255,0.65)] dark:bg-gray-850/80 dark:shadow-none @[64rem]:flex-nowrap @[64rem]:shrink-0">
+						<div class="halo-seg inline-flex max-w-full flex-wrap items-center gap-1.5 self-start rounded-xl bg-gray-100/70 p-1 shadow-[inset_0_1px_0_rgba(255,255,255,0.65)] dark:bg-gray-850/80 dark:shadow-none @[64rem]:flex-nowrap @[64rem]:shrink-0">
 							<button type="button" class={`flex min-w-0 items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-all ${selectedTab === 'personal' ? 'bg-white text-gray-900 shadow-[0_1px_3px_rgba(15,23,42,0.08)] dark:bg-gray-800 dark:text-white' : 'text-gray-500 hover:bg-white/50 hover:text-gray-800 dark:text-gray-400 dark:hover:bg-gray-800/50 dark:hover:text-gray-200'}`} on:click={() => { selectedTab = 'personal'; }}>
 								<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="size-4">
 									<path fill-rule="evenodd" d="M7.5 6a4.5 4.5 0 119 0 4.5 4.5 0 01-9 0zM3.751 20.105a8.25 8.25 0 0116.498 0 .75.75 0 01-.437.695A18.683 18.683 0 0112 22.5c-2.786 0-5.433-.608-7.812-1.7a.75.75 0 01-.437-.695z" clip-rule="evenodd" />

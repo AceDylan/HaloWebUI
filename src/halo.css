@@ -343,6 +343,35 @@ body {
 	margin-left: 0.15em;
 }
 
+/* Collapsed rail: the mark stands at the top; under the pointer (or keyboard focus) it turns
+   away and the "expand" icon takes its place. */
+.halo-rail-toggle {
+	display: grid !important;
+	place-items: center;
+}
+.halo-rail-toggle > svg {
+	grid-area: 1 / 1;
+	transition:
+		opacity var(--dur-base) ease,
+		transform var(--dur-slow) var(--ease-out-expo);
+}
+.halo-rail-toggle__mark {
+	width: 1.375rem;
+	height: 1.375rem;
+}
+.halo-rail-toggle__icon {
+	opacity: 0;
+	transform: scale(0.8);
+}
+.halo-rail-toggle:is(:hover, :focus-visible) .halo-rail-toggle__mark {
+	opacity: 0;
+	transform: rotate(-90deg) scale(0.8);
+}
+.halo-rail-toggle:is(:hover, :focus-visible) .halo-rail-toggle__icon {
+	opacity: 1;
+	transform: none;
+}
+
 /* Rows (new chat / workspace / teams / chats) */
 .halo-nav-row {
 	display: flex;
@@ -952,7 +981,20 @@ body:has(#chat-input:focus) .halo-orb__arc {
 	width: 2.5rem;
 	height: 2.5rem;
 	border-radius: 0.75rem;
+	/* ink, like every section icon: the page's colour is not a second accent */
+	background-color: oklch(0.3 0.03 268 / 0.045);
 	box-shadow: inset 0 0 0 1px var(--surface-border);
+}
+.dark .halo-page-icon {
+	background-color: oklch(1 0 0 / 0.045);
+}
+.halo-page-icon svg {
+	width: 1.25rem;
+	height: 1.25rem;
+	color: var(--color-gray-700);
+}
+.dark .halo-page-icon svg {
+	color: var(--color-gray-300);
 }
 .halo-page-title {
 	font-family: var(--font-display);
@@ -1026,6 +1068,150 @@ body:has(#chat-input:focus) .halo-orb__arc {
 }
 .halo-tab[aria-current='page'] svg {
 	opacity: 1;
+}
+
+/* ---------------------------------------------------------------- settings surfaces */
+
+/* The head of a settings page sits on the panel like the workspace heads: no card around it,
+   the section name in the display face, its description underneath. */
+.glass-section.halo-settings-head {
+	padding: 0.25rem 0;
+	background: none;
+	border-color: transparent;
+	box-shadow: none;
+}
+.halo-settings-head .glass-icon-badge {
+	width: 2.5rem;
+	height: 2.5rem;
+	border-radius: 0.75rem;
+}
+.halo-settings-head .glass-icon-badge svg {
+	width: 1.25rem;
+	height: 1.25rem;
+}
+.halo-settings-title {
+	font-family: var(--font-display);
+	font-size: clamp(1.25rem, 1.05rem + 0.6vw, 1.5rem);
+	line-height: 1.2;
+	font-weight: 600;
+	letter-spacing: -0.026em;
+	color: var(--color-gray-950);
+}
+.dark .halo-settings-title {
+	color: var(--color-gray-50);
+}
+.halo-settings-desc {
+	margin-top: 0.25rem;
+	font-size: 0.8125rem;
+	line-height: 1.5;
+	color: var(--color-gray-500);
+}
+
+/* Section icons: one ink tile everywhere instead of a different colour per section. The
+   danger zone keeps its red: there the colour means something. */
+.glass-icon-badge:not([class*='bg-red-']) {
+	background-color: oklch(0.3 0.03 268 / 0.045);
+	box-shadow: inset 0 0 0 1px var(--surface-border);
+	color: var(--color-gray-700);
+}
+.dark .glass-icon-badge:not([class*='bg-red-']) {
+	background-color: oklch(1 0 0 / 0.045);
+	color: var(--color-gray-300);
+}
+.glass-icon-badge:not([class*='bg-red-']) svg {
+	color: var(--color-gray-700);
+}
+.dark .glass-icon-badge:not([class*='bg-red-']) svg {
+	color: var(--color-gray-300);
+}
+
+/* The sub-section switch in a settings head: a compact segmented control. */
+.halo-seg {
+	gap: 2px;
+	padding: 3px;
+	border-radius: 0.75rem;
+	background-color: oklch(0.3 0.03 268 / 0.05);
+	box-shadow: inset 0 0 0 1px var(--surface-border);
+}
+.dark .halo-seg {
+	background-color: oklch(1 0 0 / 0.04);
+}
+.halo-seg > button {
+	gap: 0.4rem;
+	padding: 0.375rem 0.75rem;
+	border-radius: 0.5625rem;
+	font-size: 0.8125rem;
+}
+
+/* Rows inside a section card are tinted wells, not cards inside a card. */
+.glass-section .glass-item {
+	border-color: transparent;
+	background-color: oklch(0.3 0.03 268 / 0.028);
+	box-shadow: none;
+}
+.glass-section .glass-item:hover {
+	border-color: transparent;
+	background-color: oklch(0.3 0.03 268 / 0.045);
+	box-shadow: none;
+}
+.dark .glass-section .glass-item {
+	background-color: oklch(1 0 0 / 0.03);
+}
+.dark .glass-section .glass-item:hover {
+	background-color: oklch(1 0 0 / 0.045);
+}
+
+/* Category lists beside a grid (assistant templates): rows like the sidebar's on desktop,
+   a scrolling row of tags on phones. */
+.halo-cat-row {
+	display: flex;
+	flex-shrink: 0;
+	align-items: center;
+	justify-content: space-between;
+	gap: 0.75rem;
+	padding: 0.375rem 0.75rem;
+	border-radius: 0.625rem;
+	font-size: 0.8125rem;
+	font-weight: 500;
+	white-space: nowrap;
+	text-align: left;
+	color: var(--color-gray-600);
+	box-shadow: inset 0 0 0 1px var(--surface-border);
+	transition:
+		background-color var(--dur-fast) ease,
+		color var(--dur-fast) ease;
+}
+.dark .halo-cat-row {
+	color: var(--color-gray-400);
+}
+.halo-cat-row:hover {
+	background-color: oklch(0.3 0.03 268 / 0.045);
+	color: var(--color-gray-900);
+}
+.dark .halo-cat-row:hover {
+	background-color: oklch(1 0 0 / 0.05);
+	color: var(--color-gray-100);
+}
+.halo-cat-row[aria-current='true'] {
+	background-color: var(--sidebar-active-bg);
+	color: var(--sidebar-active-fg);
+	box-shadow: none;
+}
+.halo-cat-count {
+	font-family: var(--font-mono);
+	font-size: 0.6875rem;
+	font-variant-numeric: tabular-nums;
+	color: var(--color-gray-400);
+}
+.dark .halo-cat-count {
+	color: var(--color-gray-500);
+}
+@media (min-width: 1024px) {
+	.halo-cat-row {
+		width: 100%;
+		padding: 0.4375rem 0.75rem;
+		box-shadow: none;
+	}
 }
 
 /* ---------------------------------------------------------------- overlays: modals, menus, tooltips, toasts */
@@ -1644,6 +1830,11 @@ body:has(#chat-input:focus) .halo-orb__arc {
 
 /* ---------------------------------------------------------------- empty states */
 
+/* Inside a card the empty state needs no second (dashed) frame of its own. */
+:is(.workspace-section, .glass-section) .workspace-empty-state {
+	border-color: transparent;
+}
+
 /* every "nothing here yet" box opens with a small unlit halo */
 .workspace-empty-state::before {
 	content: '';
@@ -1695,6 +1886,7 @@ body:has(#chat-input:focus) .halo-orb__arc {
 	}
 	.halo-mark__ring,
 	.halo-mark__glow,
+	.halo-rail-toggle > svg,
 	.halo-auth__scene,
 	.halo-btn-arrow,
 	.halo-send {

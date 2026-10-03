@@ -81,7 +81,7 @@
 <div class="h-full space-y-6 overflow-y-auto scrollbar-hidden">
 	<div class="max-w-6xl mx-auto space-y-6">
 		<!-- ==================== Section header ==================== -->
-		<section class="glass-section p-4 space-y-3 sm:p-5">
+		<section class="halo-settings-head glass-section p-4 space-y-3 sm:p-5">
 			{#if activeTab}
 				<div class="flex items-start gap-3">
 					<div class="glass-icon-badge shrink-0 {activeTab.badgeColor}">
@@ -97,15 +97,17 @@
 						</svg>
 					</div>
 					<div class="min-w-0 flex-1">
-						<div class="flex flex-wrap items-center gap-3">
-							<!-- One compact line: section name + description. The sub-sections themselves live in
-							     the left nav (desktop) or the chip strip below (phone), not in this card. -->
-							<h2 class="text-sm font-semibold text-gray-800 dark:text-gray-100">
-								{activeTab.title}
-							</h2>
-							<p class="text-xs text-gray-400 dark:text-gray-500">
-								{activeTab.description}
-							</p>
+						<div class="flex flex-wrap items-start gap-3">
+							<!-- Section name with its description underneath. The sub-sections themselves live in
+							     the left nav (desktop) or the chip strip below (phone). -->
+							<div class="min-w-0 flex-1">
+								<h2 class="halo-settings-title text-sm font-semibold text-gray-800 dark:text-gray-100">
+									{activeTab.title}
+								</h2>
+								<p class="halo-settings-desc mt-1 text-xs text-gray-400 dark:text-gray-500">
+									{activeTab.description}
+								</p>
+							</div>
 							<div class="ml-auto">
 								<InlineDirtyActions
 									dirty={activeDirty}

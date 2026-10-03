@@ -889,7 +889,7 @@
 					</button>
 				</Tooltip>
 			{:else}
-				<!-- 折叠状态：垂直图标 -->
+				<!-- 折叠状态：垂直图标。顶上是品牌标，指针移上去变成展开按钮的图标。 -->
 				<Tooltip
 					content="{$i18n.t($showSidebar ? 'Collapse sidebar' : 'Expand sidebar')} · {$i18n.t(
 						'Toggle with Ctrl+Shift+S'
@@ -897,17 +897,26 @@
 				>
 					<button
 						id="sidebar-collapse-button"
-						class={iconButtonClass}
+						class="{iconButtonClass} halo-rail-toggle"
 						on:click={toggleSidebar}
 						aria-label={$i18n.t($showSidebar ? 'Collapse sidebar' : 'Expand sidebar')}
 					>
+						<svg
+							class="halo-mark halo-rail-toggle__mark text-gray-900 dark:text-white"
+							viewBox="0 0 120 120"
+							xmlns="http://www.w3.org/2000/svg"
+							aria-hidden="true"
+						>
+							<path class="halo-mark__ring" d="M60 17 A43 43 0 1 1 17 60" />
+							<circle class="halo-mark__core" cx="60" cy="60" r="13" />
+						</svg>
 						<svg
 							xmlns="http://www.w3.org/2000/svg"
 							fill="none"
 							viewBox="0 0 24 24"
 							stroke-width="1.75"
 							stroke="currentColor"
-							class="size-5"
+							class="size-5 halo-rail-toggle__icon"
 						>
 							<rect x="3" y="4" width="18" height="16" rx="2" />
 							<path stroke-linecap="round" stroke-linejoin="round" d="M9 4v16" />

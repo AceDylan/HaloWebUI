@@ -299,7 +299,7 @@
 {:else}
 	<div class="h-full space-y-6 overflow-y-auto scrollbar-hidden">
 		<div class="mx-auto max-w-6xl space-y-6 pb-8">
-			<section class="glass-section p-5 space-y-5">
+			<section class="halo-settings-head glass-section p-5 space-y-5">
 				<div class="@container flex flex-col gap-5">
 					<div
 						class="flex flex-col gap-4"
@@ -316,7 +316,7 @@
 								</div>
 								<div class="min-w-0">
 									<div class="flex flex-wrap items-center gap-2.5">
-										<div class="text-base font-semibold text-gray-800 dark:text-gray-100">
+										<div class="halo-settings-title text-base font-semibold text-gray-800 dark:text-gray-100">
 											{pageMeta.title}
 										</div>
 										<InlineDirtyActions
@@ -329,7 +329,7 @@
 											on:save={save}
 										/>
 									</div>
-									<p class="mt-1 text-xs text-gray-400 dark:text-gray-500">
+									<p class="halo-settings-desc mt-1 text-xs text-gray-400 dark:text-gray-500">
 										{pageMeta.description}
 									</p>
 								</div>
@@ -337,7 +337,7 @@
 						</div>
 
 						<div
-							class="inline-flex max-w-full flex-wrap items-center gap-1.5 self-start rounded-xl bg-gray-100/70 p-1 shadow-[inset_0_1px_0_rgba(255,255,255,0.65)] dark:bg-gray-850/80 dark:shadow-none @[64rem]:flex-nowrap @[64rem]:shrink-0"
+							class="halo-seg inline-flex max-w-full flex-wrap items-center gap-1.5 self-start rounded-xl bg-gray-100/70 p-1 shadow-[inset_0_1px_0_rgba(255,255,255,0.65)] dark:bg-gray-850/80 dark:shadow-none @[64rem]:flex-nowrap @[64rem]:shrink-0"
 						>
 							{#each sectionOrder as section}
 								<button

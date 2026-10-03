@@ -110,39 +110,36 @@
 
 {#if loaded}
 	<div class="flex h-full flex-col gap-4 lg:flex-row">
-		<!-- 左侧分类列表 -->
-		<div class="workspace-section w-full shrink-0 overflow-y-auto lg:w-56">
+		<!-- 左侧分类列表：桌面是一列导航行，手机是一行可横向滚动的标签 -->
+		<nav class="w-full shrink-0 lg:w-52 lg:overflow-y-auto lg:pr-1" aria-label={$i18n.t('Assistant Templates')}>
 			<div class="workspace-count-pill">
 				{filteredAgents.length} {$i18n.t('Assistant Templates')}
 			</div>
-			<div class="mt-4 space-y-1.5">
+			<div class="-mx-1 mt-3 flex gap-1.5 overflow-x-auto px-1 pb-1 scrollbar-none lg:flex-col lg:gap-0.5 lg:overflow-visible">
 				<button
-					class="glass-item w-full text-left px-3 py-2 text-sm transition {selectedGroup === ''
-						? 'border-gray-300/70 dark:border-gray-600/60 font-medium'
-						: ''}"
+					class="halo-cat-row"
+					aria-current={selectedGroup === '' ? 'true' : undefined}
 					on:click={() => (selectedGroup = '')}
 				>
-					{$i18n.t('All')}
-					<span class="text-gray-400 ml-1">{agentsData.length}</span>
+					<span class="truncate">{$i18n.t('All')}</span>
+					<span class="halo-cat-count">{agentsData.length}</span>
 				</button>
 
 				{#each groups as group}
 					<button
-						class="glass-item w-full text-left px-3 py-2 text-sm transition {selectedGroup ===
-						group.name
-							? 'border-gray-300/70 dark:border-gray-600/60 font-medium'
-							: ''}"
+						class="halo-cat-row"
+						aria-current={selectedGroup === group.name ? 'true' : undefined}
 						on:click={() => (selectedGroup = group.name)}
 					>
-						{group.name}
-						<span class="text-gray-400 ml-1">{group.count}</span>
+						<span class="truncate">{group.name}</span>
+						<span class="halo-cat-count">{group.count}</span>
 					</button>
 				{/each}
 			</div>
-		</div>
+		</nav>
 
 		<!-- 右侧内容区 -->
-		<div class="workspace-section flex-1 overflow-y-auto">
+		<div class="min-w-0 flex-1 overflow-y-auto">
 			<div class="space-y-4">
 				<!-- 搜索栏 -->
 				<div class="flex items-center gap-2">
@@ -159,7 +156,7 @@
 				<!-- 助手标题 -->
 				<div class="flex items-center justify-between">
 					<div class="flex items-center gap-2">
-						<span class="text-base font-semibold text-gray-900 dark:text-gray-100">
+						<span class="font-display text-base font-semibold text-gray-900 dark:text-gray-100">
 							{selectedGroup || $i18n.t('All')}
 						</span>
 						<span class="text-sm text-gray-400">{filteredAgents.length}</span>

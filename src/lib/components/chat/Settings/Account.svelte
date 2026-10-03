@@ -106,7 +106,7 @@
 			<div class="mx-auto max-w-6xl min-w-0 space-y-6">
 				<!-- Hero Section (only for admin) -->
 				{#if isAdmin}
-					<section class="glass-section p-5 space-y-5">
+					<section class="halo-settings-head glass-section p-5 space-y-5">
 						<div class="@container flex flex-col gap-5">
 							<div class="flex flex-col gap-4">
 								<div class="min-w-0 @[64rem]:flex-1">
@@ -124,10 +124,10 @@
 										</div>
 
 										<div class="min-w-0">
-											<div class="text-base font-semibold text-gray-800 dark:text-gray-100">
+											<div class="halo-settings-title text-base font-semibold text-gray-800 dark:text-gray-100">
 												{$i18n.t(activeTabMeta.label)}
 											</div>
-											<p class="mt-1 text-xs text-gray-400 dark:text-gray-500">
+											<p class="halo-settings-desc mt-1 text-xs text-gray-400 dark:text-gray-500">
 												{$i18n.t(activeTabMeta.description)}
 											</p>
 										</div>
@@ -136,7 +136,7 @@
 
 								<!-- Tabs: users and permission groups only; the profile has its own nav entry -->
 								{#if selectedTab !== 'personal'}
-									<div class="inline-flex max-w-full flex-wrap items-center gap-1.5 self-start rounded-xl bg-gray-100/70 p-1 shadow-[inset_0_1px_0_rgba(255,255,255,0.65)] dark:bg-gray-850/80 dark:shadow-none @[64rem]:flex-nowrap @[64rem]:shrink-0">
+									<div class="halo-seg inline-flex max-w-full flex-wrap items-center gap-1.5 self-start rounded-xl bg-gray-100/70 p-1 shadow-[inset_0_1px_0_rgba(255,255,255,0.65)] dark:bg-gray-850/80 dark:shadow-none @[64rem]:flex-nowrap @[64rem]:shrink-0">
 										<button
 											type="button"
 											class={`flex min-w-0 items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-all ${

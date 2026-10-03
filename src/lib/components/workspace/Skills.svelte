@@ -712,12 +712,6 @@
 					{installedSkills.length}
 					{$i18n.t('Installed')}
 				</div>
-				<div class="text-xs text-gray-500 dark:text-gray-400">
-					{$i18n.t(
-						'Add skills to give chats task-specific instructions, resources, and automation.'
-					)}
-				</div>
-
 				{#if runtimeCapabilities}
 					<div class="flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-500 dark:text-gray-400">
 						<span>运行环境：{getRuntimeProfileLabel(runtimeCapabilities.profile)}</span>

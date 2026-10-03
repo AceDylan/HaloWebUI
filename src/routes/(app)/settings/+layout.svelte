@@ -181,7 +181,7 @@
 					</button>
 				</div>
 
-				<div class="halo-crumb flex items-center px-1 py-1">
+				<div class="halo-crumb flex items-center py-1 pr-1 {$mobile ? 'pl-1' : 'pl-[1.125rem]'}">
 					{$i18n.t('Settings')}
 				</div>
 			</div>

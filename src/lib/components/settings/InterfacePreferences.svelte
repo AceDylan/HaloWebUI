@@ -438,7 +438,14 @@
 		return resolveDefaultModelId($settings?.models?.at(0));
 	};
 
-	const applyTheme = (rawTheme: string) => {
+	// Halo: a saved theme change spreads as a circle from the last click (View Transitions,
+	// halo.css .halo-theme-vt). Without support, or with reduced motion, it switches at once.
+	let lastPointer: { x: number; y: number } | null = null;
+	const rememberPointer = (event: PointerEvent) => {
+		lastPointer = { x: event.clientX, y: event.clientY };
+	};
+
+	const applyTheme = (rawTheme: string, reveal = false) => {
 		const _theme = normalizeTheme(rawTheme);
 		let themeToApply = _theme;
 
@@ -453,17 +460,38 @@
 			document.documentElement.style.removeProperty(`--color-gray-${step}`);
 		}
 
-		themes
-			.filter((e) => e !== themeToApply)
-			.forEach((e) => {
-				e.split(' ').forEach((e) => {
-					document.documentElement.classList.remove(e);
+		const root = document.documentElement;
+		const swapClasses = () => {
+			themes
+				.filter((e) => e !== themeToApply)
+				.forEach((e) => {
+					e.split(' ').forEach((e) => {
+						root.classList.remove(e);
+					});
 				});
-			});
 
-		themeToApply.split(' ').forEach((e) => {
-			document.documentElement.classList.add(e);
-		});
+			themeToApply.split(' ').forEach((e) => {
+				root.classList.add(e);
+			});
+		};
+
+		const changesShade = root.classList.contains('dark') !== themeToApply.split(' ').includes('dark');
+		if (
+			reveal &&
+			changesShade &&
+			'startViewTransition' in document &&
+			!window.matchMedia('(prefers-reduced-motion: reduce)').matches
+		) {
+			const x = lastPointer?.x ?? window.innerWidth / 2;
+			const y = lastPointer?.y ?? window.innerHeight / 2;
+			root.style.setProperty('--halo-reveal-x', `${x}px`);
+			root.style.setProperty('--halo-reveal-y', `${y}px`);
+			root.classList.add('halo-theme-vt');
+			const transition = (document as any).startViewTransition(swapClasses);
+			transition.finished.finally(() => root.classList.remove('halo-theme-vt'));
+		} else {
+			swapClasses();
+		}
 
 		const metaThemeColor = document.querySelector('meta[name="theme-color"]');
 		if (metaThemeColor) {
@@ -484,7 +512,7 @@
 		const nextTheme = normalizeTheme(rawTheme);
 		selectedTheme = nextTheme;
 		theme.set(nextTheme);
-		applyTheme(nextTheme);
+		applyTheme(nextTheme, true);
 	};
 
 	const commitLanguageSelection = async (nextLang: string) => {
@@ -1435,9 +1463,16 @@
 		void modelsPromise;
 	});
 
+	onMount(() => {
+		document.addEventListener('pointerdown', rememberPointer, true);
+	});
+
 	onDestroy(() => {
 		if (sectionBaselineSyncTimeout) {
 			clearTimeout(sectionBaselineSyncTimeout);
+		}
+		if (typeof document !== 'undefined') {
+			document.removeEventListener('pointerdown', rememberPointer, true);
 		}
 	});
 

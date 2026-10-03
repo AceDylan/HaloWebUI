@@ -1936,6 +1936,26 @@ body:has(#chat-input:focus) .halo-orb__arc {
 	}
 }
 
+/* A saved theme change spreads from where you clicked (InterfacePreferences.applyTheme). The
+   panel gives up its own transition name meanwhile so the whole page reveals as one. */
+.halo-theme-vt [data-halo-main] {
+	view-transition-name: none;
+}
+:root.halo-theme-vt::view-transition-old(root) {
+	animation: none;
+}
+:root.halo-theme-vt::view-transition-new(root) {
+	animation: halo-theme-reveal 560ms var(--ease-in-out) both;
+}
+@keyframes halo-theme-reveal {
+	from {
+		clip-path: circle(0 at var(--halo-reveal-x, 50%) var(--halo-reveal-y, 50%));
+	}
+	to {
+		clip-path: circle(150vmax at var(--halo-reveal-x, 50%) var(--halo-reveal-y, 50%));
+	}
+}
+
 /* ---------------------------------------------------------------- empty states */
 
 /* Inside a card the empty state needs no second (dashed) frame of its own. */

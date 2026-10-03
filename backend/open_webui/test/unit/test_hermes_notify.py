@@ -319,7 +319,8 @@ def test_the_away_push_of_a_question_report_leads_with_the_question():
         "**reclaude 额度**：剩余 **$74.10** / $80.00",
     ])
     push = hermes_notify.report_push_text(report)
-    assert push.startswith("❓ reclaude 运行 20260928-102915-46faac75 · 等你决定\nclaude-opus-5-5[1m]")
+    assert push.startswith("❓ reclaude 运行 20260928-102915-46faac75 · 等你决定\n\n")
+    assert "claude-opus" not in push  # the details line only took room
     assert "QUESTION: 选 A（保留旧接口）还是 B（直接迁移）？" in push
     assert "细节很长" not in push and "Obsidian" not in push and "额度" not in push
     assert "直接回复你的决定" not in push and push.endswith(hermes_notify.PUSH_REPLY_HINT)
@@ -328,7 +329,7 @@ def test_the_away_push_of_a_question_report_leads_with_the_question():
 
 def test_the_away_push_of_a_plain_report_drops_the_reply_hint_and_quota():
     report = "✅ reclaude 运行 r · 已完成\nx · 3m\n\n都改好了。\n\n↩️ 回复「继续」，可以在同一个会话里接着跑。\n\n**reclaude 额度**：剩余 $1"
-    assert hermes_notify.report_push_text(report) == "✅ reclaude 运行 r · 已完成\nx · 3m\n\n都改好了。"
+    assert hermes_notify.report_push_text(report) == "✅ reclaude 运行 r · 已完成\n\n都改好了。"
 
 
 def test_a_longer_report_needs_an_in_process_caller_that_allows_it(monkeypatch):

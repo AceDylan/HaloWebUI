@@ -388,6 +388,11 @@ def report_push_text(content: str) -> str:
     """A runner report as the away push shows it: the status lines, then the QUESTION
     itself when the run is waiting for an answer, and where to answer."""
     text = _QUOTA_FOOTER_LINE_RE.sub("", _REPLY_HINT_LINE_RE.sub("", content or "")).strip()
+    # The headline says who finished and how; the details line (model, session, cost, turns)
+    # only took room from the 1200 characters a push has.
+    header, body = split_report_header(text)
+    if header:
+        text = f"{header.splitlines()[0]}\n\n{body}".strip()
     questions = list(_QUESTION_START_RE.finditer(text))
     if not questions:
         return text

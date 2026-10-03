@@ -277,6 +277,7 @@
 									placement="top"
 								>
 									<button
+										class="flex"
 										on:click={() => {
 											selectedModelIdx = modelIdx;
 										}}

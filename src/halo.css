@@ -959,12 +959,14 @@ body:has(#chat-input:focus) .halo-orb__arc {
 }
 
 /* The assistant's avatar wears a faint halo; while it writes, light runs round it. The
-   blue "generating" dot the ring replaces stays in the markup (selectors use it). */
+   blue "generating" dot the ring replaces stays in the markup (selectors use it).
+   The wrapper must be exactly the icon's square (flex in the markup), or the ring is an oval. */
 .halo-avatar {
 	isolation: isolate;
 	border-radius: 9999px;
 }
-.halo-avatar::before {
+.halo-avatar::before,
+.halo-avatar[data-halo-live]::after {
 	content: '';
 	position: absolute;
 	inset: -3px;
@@ -981,24 +983,34 @@ body:has(#chat-input:focus) .halo-orb__arc {
 	z-index: -1;
 	transition: opacity var(--dur-slow) ease;
 }
-.halo-avatar[data-halo-live]::before {
+/* While it writes the ring stays whole: the spectrum turns underneath and a bright head
+   runs over it, so no part of the circle ever goes blank. */
+.halo-avatar[data-halo-live]::before,
+.halo-avatar[data-halo-live]::after {
 	inset: -3.5px;
 	padding: 1.5px;
+	animation: halo-spin 1.6s linear infinite;
+}
+.halo-avatar[data-halo-live]::before {
+	background: var(--halo-spectrum);
+	opacity: 0.75;
+}
+.halo-avatar[data-halo-live]::after {
 	background: conic-gradient(
 		from var(--halo-angle),
-		transparent 0 45%,
-		var(--halo-ion) 68%,
-		var(--halo-violet) 85%,
+		transparent 0 50%,
+		var(--halo-ion) 72%,
+		var(--halo-violet) 87%,
 		var(--halo-solar) 97%,
 		transparent 100%
 	);
 	opacity: 1;
-	animation: halo-spin 1.6s linear infinite;
 }
 .halo-avatar[data-halo-live] [data-halo-generating-dot] {
 	display: none;
 }
-.halo-avatar--sm::before {
+.halo-avatar.halo-avatar--sm::before,
+.halo-avatar.halo-avatar--sm::after {
 	inset: -2.5px;
 }
 
@@ -2992,6 +3004,7 @@ body:has(#chat-input:focus) .halo-orb__arc {
 	.halo-orb__arc,
 	.halo-composer[data-halo-live]::after,
 	.halo-avatar[data-halo-live]::before,
+	.halo-avatar[data-halo-live]::after,
 	.halo-presence::after,
 	.halo-spinner,
 	.halo-shimmer,

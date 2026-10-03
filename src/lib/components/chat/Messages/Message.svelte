@@ -50,8 +50,10 @@
 	$: runNotice = parseHermesRunNotice(history.messages[messageId]);
 </script>
 
+<!-- pt-1/-mt-1: content-visibility clips painting to this box, and the avatar's halo
+     reaches 3.5px above the message; the padding gives it room without moving anything. -->
 <div
-	class="flex flex-col justify-between px-4 sm:px-8 mb-3 w-full {($settings?.widescreenMode ?? null)
+	class="flex flex-col justify-between px-4 sm:px-8 pt-1 -mt-1 mb-3 w-full {($settings?.widescreenMode ?? null)
 		? 'max-w-full'
 		: 'max-w-5xl'} mx-auto rounded-lg group"
 	style={deferOffscreenRendering

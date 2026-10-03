@@ -1321,7 +1321,7 @@
 			class={`max-sm:hidden shrink-0 ltr:mr-3 rtl:ml-3 relative z-10`}
 		>
 			<div
-				class="halo-avatar relative"
+				class="halo-avatar relative flex"
 				data-halo-live={!message.done && !message.error ? '' : undefined}
 			>
 					<ModelIcon
@@ -1343,7 +1343,7 @@
 		<div class="flex-auto w-0 sm:pl-1 relative z-10">
 			<Name>
 				<span
-					class="halo-avatar halo-avatar--sm sm:hidden relative shrink-0 ltr:mr-1.5 rtl:ml-1.5"
+					class="halo-avatar halo-avatar--sm flex sm:hidden relative shrink-0 ltr:mr-1.5 rtl:ml-1.5"
 					data-halo-inline-avatar
 					data-halo-live={!message.done && !message.error ? '' : undefined}
 				>

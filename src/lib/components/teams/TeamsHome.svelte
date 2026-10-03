@@ -463,7 +463,7 @@
 							>
 								<option value=""
 									>{meta?.lead_model?.model
-										? `Hermes 默认 · ${defaultModel}`
+										? `默认 · ${defaultModel}`
 										: 'Hermes 默认'}</option
 								>
 								{#each modelChoices as model}
@@ -474,7 +474,7 @@
 						<label
 							class="pill flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full py-1 pr-1 pl-2.5 text-xs"
 							data-team-project
-							title="团队在哪干活：项目 = 在这个 git 仓库的独立分支上改（合并、推送由你在协作台决定）；新目录 = 一个空的工作目录"
+							title="团队在哪干活：自动 = 目标里点名了项目就在项目里，否则新目录；项目 = 在这个 git 仓库的独立分支上改（合并、推送由你在协作台决定）；新目录 = 一个空的工作目录"
 						>
 							<svg
 								class="size-3.5 shrink-0 text-gray-400"
@@ -493,7 +493,7 @@
 								bind:value={project}
 								class="compact-select min-w-0 max-w-[9rem] truncate sm:max-w-[12rem]"
 							>
-								<option value="">自动（目标点名项目就在项目里）</option>
+								<option value="" title="目标里点名了项目就在项目里，否则用新目录">自动</option>
 								<option value="none">新目录</option>
 								{#each meta?.projects ?? [] as p (p.path)}
 									<option value={p.path}>项目 · {p.name}</option>

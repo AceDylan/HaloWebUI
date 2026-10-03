@@ -1367,6 +1367,12 @@ body:has(#chat-input:focus) .halo-orb__arc {
 	color: var(--color-gray-800) !important;
 	font-family: var(--font-mono);
 	font-size: 0.8125rem !important;
+	/* Columns stay columns (free -h, df -h, tables in logs): scroll sideways like the plain
+	   code blocks do, instead of wrapping every row on a phone. Copies keep the inline wrap. */
+	white-space: pre !important;
+	overflow-wrap: normal !important;
+	word-wrap: normal !important;
+	overflow-x: auto !important;
 }
 .dark [data-halo-block='code'] > pre {
 	color: var(--color-gray-200) !important;

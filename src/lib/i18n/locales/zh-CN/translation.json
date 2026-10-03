@@ -3013,7 +3013,7 @@
 	"The reply that was running has been stopped.": "正在进行的回复已停止，改为发送编辑后的消息",
 	"Steer the running task": "注入指引到当前任务",
 	"Queue message": "加入队列，回复完成后发送",
-	"Task running · what you type is injected as guidance": "任务执行中 · 输入的内容会作为指引注入",
+	"Task running · what you type is injected as guidance": "正在做 · 现在发的话会补充给它，不用等它做完",
 	"Task paused for approval · answer the dialog to continue": "任务等待审批 · 请在弹窗中选择后继续",
 	"Failed": "失败",
 	"{{COUNT}} failed": "{{COUNT}} 个失败",

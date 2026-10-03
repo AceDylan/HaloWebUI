@@ -4,6 +4,7 @@
 		describeTeamNotice,
 		reportDurationSeconds,
 		splitRunReport,
+		describeReportFigures,
 		type HermesRunNotice
 	} from '$lib/utils/hermes';
 	import { formatRunDuration } from '$lib/utils/run-activity';
@@ -22,7 +23,7 @@
 	$: duration = formatRunDuration(reportDurationSeconds(report));
 	// The report's own second line (model · cost · turns · time): the page hides the
 	// runner's header under this line, so it lives in 详情.
-	$: reportDetails = splitRunReport(report, notice.runId)?.details ?? '';
+	$: reportDetails = describeReportFigures(splitRunReport(report, notice.runId)?.details ?? '');
 	// A 协作台 team's conclusion: posted by the team, not a runner.
 	$: team = describeTeamNotice(notice, content);
 	$: headline = team

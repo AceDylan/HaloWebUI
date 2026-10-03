@@ -1,4 +1,5 @@
 import { parseModelSelectionId } from '$lib/utils/model-identity';
+import { formatRunDuration } from '$lib/utils/tool-call-preview';
 
 export const DEFAULT_HERMES_AGENT_MODEL_IDS = ['hermes-agent'];
 
@@ -475,6 +476,27 @@ export const reportDurationSeconds = (report: unknown): number | null => {
 	const seconds = part('h') * 3600 + part('m') * 60 + part('s');
 	return seconds > 0 ? seconds : null;
 };
+
+/**
+ * The report's figures line for the notice's 详情: "claude-opus-5-5[1m] · Claude 会话 c6fe25fb ·
+ * $4.18 · 52 轮 · 20m47s" reads "claude-opus-5-5 · $4.18 · 52 轮 · 用时 20 分 47 秒" — the
+ * session is listed in full right below, the context tag and the compact time are not for reading.
+ */
+export const describeReportFigures = (details: string): string =>
+	String(details ?? '')
+		.split(' · ')
+		.map((part) => part.trim())
+		.filter((part) => part && !/(会话|conversation|thread|session)\s+\S+$/i.test(part))
+		.map((part) => {
+			const time = part.match(/^(共 )?((?:\d+h)?(?:\d+m)?(?:\d+s)?)$/);
+			if (time && time[2]) {
+				const seconds = reportDurationSeconds(`x\nx · ${time[2]}`);
+				const human = seconds ? formatRunDuration(seconds) : '';
+				return human ? `${time[1] ?? ''}用时 ${human}` : part;
+			}
+			return part.replace(/\[[^\]]*\]$/, '');
+		})
+		.join(' · ');
 
 /**
  * A runner report under its notice line, split for the chat: the runner's own two header

@@ -17,7 +17,8 @@ import {
 	hermesOptionsToKeep,
 	parseHermesRunNotice,
 	reportDurationSeconds,
-	splitRunReport
+	splitRunReport,
+	describeReportFigures
 } from './hermes';
 
 describe('isHermesAgentModelId', () => {
@@ -300,6 +301,17 @@ describe('runner completion notices', () => {
 		).toBe(27 * 60 + 47);
 		expect(reportDurationSeconds('✅ codex 运行 r · 已完成\ncodex thread t · 1h2m\n')).toBe(3720);
 		expect(reportDurationSeconds('<div>card</div>')).toBeNull();
+	});
+
+	it('reads the report figures for the notice details', () => {
+		expect(
+			describeReportFigures('claude-opus-5-5[1m] · Claude 会话 c6fe25fb · $4.18 · 52 轮 · 20m47s')
+		).toBe('claude-opus-5-5 · $4.18 · 52 轮 · 用时 20 分 47 秒');
+		expect(
+			describeReportFigures('claude-opus-5-5 · Claude 会话 b0f4 · 自动续跑 1 次 · 共 $48.92 · 388 轮 · 2h00m00s')
+		).toBe('claude-opus-5-5 · 自动续跑 1 次 · 共 $48.92 · 388 轮 · 用时 2 小时');
+		expect(describeReportFigures('AGY conversation e8721069 · 1 轮')).toBe('1 轮');
+		expect(describeReportFigures('codex thread t · 1h2m')).toBe('用时 1 小时 2 分');
 	});
 
 	it('splits the runner header off its report for the page', () => {

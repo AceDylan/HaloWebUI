@@ -41,6 +41,6 @@ describe('HermesRunNotice', () => {
 		// The report's own figures line moves here: the page hides the runner's header.
 		expect(
 			details.querySelector('[data-halo-hermes-run-notice-figures]')?.textContent
-		).toContain('12 轮 · 1m55s');
+		).toContain('12 轮 · 用时 1 分 55 秒');
 	});
 });

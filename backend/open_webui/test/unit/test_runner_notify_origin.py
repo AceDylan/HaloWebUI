@@ -488,14 +488,14 @@ def test_the_report_leaves_out_the_result_header_it_already_says(tmp_path):
     lines = digest.splitlines()
     assert lines[0] == "✅ reclaude 运行 r1 · 已完成"
     # Who answered and what it took, on the line the web UI reads the duration from.
-    assert lines[1] == "claude-opus-5-5[1m] · Claude 会话 sid-1 · $9.23 · 7 轮 · 2m12s"
+    assert lines[1] == "claude-opus-5-5 · Claude 会话 sid-1 · $9.23 · 7 轮 · 2m12s"
     assert lines[3] == "上一批改动已经上线。"
     assert "# reclaude run" not in digest
     assert "cost_usd" not in digest
     assert "## 部署状态" in digest
     # A real session UUID is shortened on that line; the notice keeps it whole.
     long_id = notify.build_digest("r1", "success", str(tmp_path), "8533575c-1d1a-43ea-be77-6b32dd576d15")
-    assert long_id.splitlines()[1] == "claude-opus-5-5[1m] · Claude 会话 8533575c · $9.23 · 7 轮 · 2m12s"
+    assert long_id.splitlines()[1] == "claude-opus-5-5 · Claude 会话 8533575c · $9.23 · 7 轮 · 2m12s"
 
 
 def test_a_codex_result_loses_its_header_too(tmp_path):

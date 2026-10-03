@@ -893,6 +893,24 @@ def test_a_fast_dispatch_is_recorded(monkeypatch):
     assert final["hermes_run"]["dispatch"] == "codex"
 
 
+def test_a_fast_dispatch_receipt_keeps_the_text_without_the_launch_step(monkeypatch):
+    # The "终端 已完成" step (the launch command) shows while it runs; the receipt that stays is
+    # who has the task, where and its run id.
+    hermes = _Hermes(
+        events=[
+            {"event": "tool.started", "tool": "terminal", "tool_call_id": "f1",
+             "preview": "/root/.hermes/scripts/agy-run.sh run --detach --cwd /root --task-file t.md"},
+            {"event": "tool.completed", "tool": "terminal", "tool_call_id": "f1", "duration": 2.4},
+            {"event": "message.delta", "delta": "已交给 agy 在后台做，做完报告直接发到这个对话。"},
+            {"event": "run.completed", "output": "已交给 agy 在后台做，做完报告直接发到这个对话。",
+             "dispatch": {"runner": "agy", "run_id": "20261003-1", "fast": True}},
+        ]
+    )
+    final, _emitted, _ = _run(monkeypatch, hermes, "/agy 看看")
+    assert final["content"].strip() == "已交给 agy 在后台做，做完报告直接发到这个对话。"
+    assert "tool_calls" not in final["content"]
+
+
 def test_a_progress_answer_is_recorded_as_one(monkeypatch):
     hermes = _Hermes(
         events=[

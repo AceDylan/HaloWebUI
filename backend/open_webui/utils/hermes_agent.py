@@ -2315,7 +2315,13 @@ async def run_hermes_agent(request, form_data, user, metadata, model, events, ta
             # The reply is marked done with the plain answer; the AGY HTML
             # design pass (tens of seconds, up to its timeout) runs afterwards
             # in _design_html_visual and swaps the artifact in when ready.
-            content = _serialize_blocks(blocks)
+            # A fast dispatch's launch command (the "终端 已完成" step) was shown while it ran;
+            # the receipt that stays says who has the task, where, and its run id.
+            content = _serialize_blocks(
+                [block for block in blocks if block.get("type") != "tool"]
+                if successful and not error and runtime.get("fast_dispatch")
+                else blocks
+            )
             completed_at = int(time.time())
             data = {
                 "done": True,

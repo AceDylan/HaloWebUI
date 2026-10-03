@@ -15,6 +15,7 @@
 	import Modal from '$lib/components/common/Modal.svelte';
 	import ArrowDownTray from '$lib/components/icons/ArrowDownTray.svelte';
 	import ArrowsPointingOut from '$lib/components/icons/ArrowsPointingOut.svelte';
+	import ChatBubble from '$lib/components/icons/ChatBubble.svelte';
 	import Clipboard from '$lib/components/icons/Clipboard.svelte';
 	import DocumentArrowDown from '$lib/components/icons/DocumentArrowDown.svelte';
 	import DocumentArrowUpSolid from '$lib/components/icons/DocumentArrowUpSolid.svelte';
@@ -81,6 +82,12 @@
 		type ImageStudioMigrationMarker
 	} from '$lib/utils/image-studio-storage';
 	import { downloadImageFile } from '$lib/utils/image-download';
+	import {
+		CHAT_IMAGE_HANDOFF_KEY,
+		readStudioRequest,
+		serializeChatImageHandoff
+	} from '$lib/utils/image-handoff';
+	import { goto, replaceState } from '$app/navigation';
 
 	type GeneratedImage = {
 		url: string;
@@ -1382,6 +1389,40 @@
 		}
 	};
 
+	// A new chat opens with this image in the message box (see image-handoff.ts).
+	const sendImageToChat = async (url: string, name = '') => {
+		const handoff = serializeChatImageHandoff(url, name);
+		if (!handoff) {
+			toast.error($i18n.t('Only images saved here can be sent to a chat'));
+			return;
+		}
+		try {
+			sessionStorage.setItem(CHAT_IMAGE_HANDOFF_KEY, handoff);
+		} catch {
+			toast.error($i18n.t('Only images saved here can be sent to a chat'));
+			return;
+		}
+		await goto('/');
+	};
+
+	$: previewActions = previewSrc
+		? [
+				{
+					id: 'chat',
+					label: $i18n.t('Send to chat'),
+					run: () => void sendImageToChat(previewSrc)
+				},
+				{
+					id: 'reference',
+					label: $i18n.t('Use as reference'),
+					run: () => {
+						addReferenceUrl(previewSrc);
+						activeTab = 'workbench';
+					}
+				}
+			]
+		: [];
+
 	const openPreview = (image: GeneratedImage, index: number) => {
 		previewSrc = image.url;
 		previewAlt = `${$i18n.t('Generated image')} ${index + 1}`;
@@ -1569,6 +1610,21 @@
 			requestedTab === 'history'
 		) {
 			activeTab = requestedTab;
+		}
+		// "Open in the image studio" from a chat: the image becomes a reference and the
+		// prompt that made it is filled in. The address is cleaned so a reload does not
+		// add it again.
+		const studioRequest = readStudioRequest(window.location.search, window.location.origin);
+		if (studioRequest.fileId) {
+			addReferenceUrl(`${WEBUI_API_BASE_URL}/files/${studioRequest.fileId}/content`);
+			if (studioRequest.prompt && !prompt.trim()) prompt = studioRequest.prompt;
+			activeTab = 'workbench';
+			toast.success($i18n.t('Opened from a chat: the image is a reference'));
+			try {
+				replaceState('/workspace/images?tab=workbench', {});
+			} catch {
+				// Router not ready: the reference is already on the workbench.
+			}
 		}
 		preferencesReady = true;
 
@@ -2291,6 +2347,16 @@
 											<button
 												type="button"
 												class="rounded-xl bg-white/15 p-2 backdrop-blur transition hover:bg-white/25"
+												data-image-result-chat
+												on:click|stopPropagation={() => void sendImageToChat(image.url)}
+												aria-label={$i18n.t('Send to chat')}
+												title={$i18n.t('Send to chat')}
+											>
+												<ChatBubble className="size-4" />
+											</button>
+											<button
+												type="button"
+												class="rounded-xl bg-white/15 p-2 backdrop-blur transition hover:bg-white/25"
 												on:click|stopPropagation={() => downloadImage(image.url, index)}
 												aria-label={$i18n.t('Save image')}
 											>
@@ -2619,7 +2685,19 @@
 										{image.prompt}
 									</div>
 									<div class="mt-1 flex items-center justify-between gap-2 text-xs text-gray-500 dark:text-gray-500">
-										<span>{new Date(image.createdAt).toLocaleDateString()}</span>
+										<span class="flex min-w-0 items-center gap-1.5">
+											<span>{new Date(image.createdAt).toLocaleDateString()}</span>
+											{#if image.chatId}
+												<a
+													href={`/c/${encodeURIComponent(image.chatId)}`}
+													class="truncate rounded-full px-1.5 py-0.5 text-gray-500 underline-offset-2 hover:text-gray-800 hover:underline dark:hover:text-gray-200"
+													title={$i18n.t('Made in a chat')}
+													data-image-gallery-chat
+												>
+													{$i18n.t('Open the chat')}
+												</a>
+											{/if}
+										</span>
 										<button
 											type="button"
 											class="rounded-full px-2 py-0.5 font-medium text-gray-700 transition hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-800"
@@ -2727,6 +2805,17 @@
 												<span>•</span>
 												<span class="tabular-nums">{historyDuration(item)}</span>
 											{/if}
+											{#if item.parameters?.origin === 'chat' && item.parameters?.chatId}
+												<span>•</span>
+												<a
+													href={`/c/${encodeURIComponent(item.parameters.chatId)}`}
+													class="underline-offset-2 hover:text-gray-800 hover:underline dark:hover:text-gray-200"
+													title={$i18n.t('Made in a chat')}
+													data-image-history-chat
+												>
+													{$i18n.t('Open the chat')}
+												</a>
+											{/if}
 											<button
 												type="button"
 												class="ml-auto rounded-full px-2.5 py-1 font-medium text-gray-700 transition hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-800"
@@ -2789,6 +2878,7 @@
 	bind:show={previewOpen}
 	src={previewSrc}
 	alt={previewAlt}
+	actions={previewActions}
 />
 
 <Modal bind:show={showTemplateEditor} size="md">

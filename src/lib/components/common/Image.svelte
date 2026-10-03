@@ -7,6 +7,8 @@
 
 	export let className = ' w-full outline-hidden focus:outline-hidden';
 	export let imageClassName = 'rounded-lg';
+	// See ImagePreview's actions.
+	export let previewActions: { id: string; label: string; run: () => void }[] = [];
 
 	let _src = '';
 	$: _src = src.startsWith('/') ? `${WEBUI_BASE_URL}${src}` : src;
@@ -24,4 +26,4 @@
 	<img src={_src} {alt} class={imageClassName} draggable="false" data-cy="image" />
 </button>
 
-<ImagePreview bind:show={showImagePreview} src={_src} {alt} />
+<ImagePreview bind:show={showImagePreview} src={_src} {alt} actions={previewActions} />

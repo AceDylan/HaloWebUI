@@ -50,6 +50,14 @@
 	import Name from './Name.svelte';
 	import ModelIcon from '$lib/components/common/ModelIcon.svelte';
 	import Image from '$lib/components/common/Image.svelte';
+	import PencilSquare from '$lib/components/icons/PencilSquare.svelte';
+	import Photo from '$lib/components/icons/Photo.svelte';
+	import { goto } from '$app/navigation';
+	import {
+		imageFileIdFromUrl,
+		requestChatImageEdit,
+		studioUrlForImage
+	} from '$lib/utils/image-handoff';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import WebSearchResults from './ResponseMessage/WebSearchResults.svelte';
@@ -229,6 +237,32 @@
 		: null;
 	const tr = (key: string, defaultValue: string, options: Record<string, any> = {}) =>
 		translateWithDefault($i18n, key, defaultValue, options);
+
+	// A generated image goes on from here: "改这张" puts it in the message box
+	// (Chat.svelte), "在工作台打开" opens it in the image studio as a reference
+	// with the prompt that made it (the message this reply answers).
+	const canHandOffImage = (url: unknown) =>
+		Boolean(imageFileIdFromUrl(url, typeof window === 'undefined' ? '' : window.location.origin));
+	const editGeneratedImage = (file: any) => {
+		if (!requestChatImageEdit(String(file?.url ?? ''), String(file?.name ?? ''))) {
+			toast.error(tr('这张图不能在这里修改', 'This image cannot be edited here'));
+		}
+	};
+	const openGeneratedImageInStudio = (file: any) => {
+		const parentPrompt = (history.messages?.[message?.parentId as string] as any)?.content;
+		void goto(studioUrlForImage(String(file?.url ?? ''), String(parentPrompt ?? '')));
+	};
+	const generatedImagePreviewActions = (file: any) =>
+		canHandOffImage(file?.url)
+			? [
+					{ id: 'edit', label: tr('改这张', 'Edit this'), run: () => editGeneratedImage(file) },
+					{
+						id: 'studio',
+						label: tr('在工作台打开', 'Open in the studio'),
+						run: () => openGeneratedImageInStudio(file)
+					}
+				]
+			: [];
 
 	// 独立联网状态标记：从 statusHistory 里的 web_search 状态推导出本条回答的最终联网状态。
 	// 优先用后端给的显式 web_search_state（skipped/native_pending/searched），
@@ -1658,7 +1692,7 @@
 											data-halo-image-natural={naturalImage ? 'true' : undefined}
 										>
 											<div
-												class="relative {naturalImage ? '' : 'aspect-[4/5]'} bg-gray-100 dark:bg-gray-950"
+												class="halo-image-card relative {naturalImage ? '' : 'aspect-[4/5]'} bg-gray-100 dark:bg-gray-950"
 											>
 												{#if file?.type === 'image' && file.url}
 													<Image
@@ -1672,7 +1706,35 @@
 														imageClassName={naturalImage
 															? 'block h-auto max-h-[32rem] w-auto max-w-full !my-0'
 															: 'h-full w-full object-contain'}
+														previewActions={generatedImagePreviewActions(file)}
 													/>
+													{#if canHandOffImage(file.url)}
+														<div
+															class="halo-image-actions absolute right-2 bottom-2 flex gap-1.5"
+															data-image-actions
+														>
+															<button
+																type="button"
+																class="flex items-center gap-1 rounded-full bg-black/55 px-2.5 py-1 text-xs font-medium text-white backdrop-blur transition hover:bg-black/75"
+																data-image-action="edit"
+																title={tr('把这张图放进输入框，接着改', 'Put this image in the message box to edit it')}
+																on:click|stopPropagation={() => editGeneratedImage(file)}
+															>
+																<PencilSquare className="size-3.5" strokeWidth="2" />
+																{tr('改这张', 'Edit')}
+															</button>
+															<button
+																type="button"
+																class="flex items-center gap-1 rounded-full bg-black/55 px-2.5 py-1 text-xs font-medium text-white backdrop-blur transition hover:bg-black/75"
+																data-image-action="studio"
+																title={tr('在图片工作台打开（作为参考图）', 'Open in the image studio as a reference')}
+																on:click|stopPropagation={() => openGeneratedImageInStudio(file)}
+															>
+																<Photo className="size-3.5" strokeWidth="2" />
+																{tr('工作台', 'Studio')}
+															</button>
+														</div>
+													{/if}
 												{:else if file}
 													<div
 														class="flex h-full w-full flex-col justify-between gap-3 bg-red-50 p-3 text-red-800 dark:bg-red-950/30 dark:text-red-200"
@@ -2864,6 +2926,21 @@
 			linear-gradient(90deg, rgba(148, 163, 184, 0.12) 1px, transparent 1px);
 		background-size: 24px 24px;
 		mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.75), rgba(0, 0, 0, 0.08));
+	}
+
+	/* Shown on hover / keyboard focus; always there on touch screens. */
+	.halo-image-actions {
+		opacity: 0;
+		transition: opacity 150ms ease;
+	}
+	.halo-image-card:hover .halo-image-actions,
+	.halo-image-card:focus-within .halo-image-actions {
+		opacity: 1;
+	}
+	@media (hover: none) {
+		.halo-image-actions {
+			opacity: 1;
+		}
 	}
 
 	.image-generation-sweep {

@@ -25,6 +25,12 @@
 	import { get, writable, type Unsubscriber, type Writable } from 'svelte/store';
 	import type { i18n as i18nType } from 'i18next';
 	import { WEBUI_BASE_URL, WEBUI_API_BASE_URL } from '$lib/constants';
+	import {
+		CHAT_EDIT_IMAGE_EVENT,
+		chatImageFileFromHandoff,
+		takeChatImageHandoff,
+		type ChatEditImageDetail
+	} from '$lib/utils/image-handoff';
 
 	import {
 		chatId,
@@ -3244,6 +3250,27 @@
 		chatInput?.focus();
 	};
 
+	// An image to edit — "改这张" on a reply's image, or "发到对话" in the image
+	// studio — goes into the message box as an attachment with image generation
+	// on, so the next message edits it.
+	const attachImageForEditing = async (fileId: string, name = '') => {
+		const file = chatImageFileFromHandoff({ fileId, name, at: 0 }, WEBUI_API_BASE_URL, uuidv4());
+		if (!files.some((item) => item?.type === 'image' && extractChatImageFileId(item) === fileId)) {
+			files = [...files, file];
+		}
+		if (canUseChatImageGeneration() && !imageGenerationEnabled) {
+			imageGenerationEnabled = true;
+			persistChatComposerState();
+		}
+		await tick();
+		document.getElementById('chat-input')?.focus();
+	};
+
+	const onEditImageHandler = (event: CustomEvent<ChatEditImageDetail>) => {
+		const fileId = event?.detail?.fileId ?? '';
+		if (fileId) void attachImageForEditing(fileId, event.detail.name ?? '');
+	};
+
 	// $chatId 被清空(侧栏删掉/归档当前对话、进入助手场景、Channel 页……)时开一个新对话。
 	// 订阅时会立刻拿到当前值,所以首次挂载在 / 上也是从这里进入 initNewChat。
 	const onChatIdCleared = async (value: string) => {
@@ -3257,6 +3284,7 @@
 	onMount(async () => {
 		window.addEventListener('message', onMessageHandler);
 		window.addEventListener('chat:set-input', onSetInputHandler as EventListener);
+		window.addEventListener(CHAT_EDIT_IMAGE_EVENT, onEditImageHandler as EventListener);
 		window.addEventListener('keydown', handleMessageOutlineKeydown, true);
 		window.addEventListener('pointerup', clearMessageOutlineScrollbarDragPrime, true);
 		window.addEventListener('pointercancel', clearMessageOutlineScrollbarDragPrime, true);
@@ -3384,6 +3412,7 @@
 		overviewFocusedMessageId.set(null);
 		window.removeEventListener('message', onMessageHandler);
 		window.removeEventListener('chat:set-input', onSetInputHandler as EventListener);
+		window.removeEventListener(CHAT_EDIT_IMAGE_EVENT, onEditImageHandler as EventListener);
 		window.removeEventListener('keydown', handleMessageOutlineKeydown, true);
 		window.removeEventListener('pointerup', clearMessageOutlineScrollbarDragPrime, true);
 		window.removeEventListener('pointercancel', clearMessageOutlineScrollbarDragPrime, true);
@@ -3950,6 +3979,14 @@
 				selectedAssistantScene.set(null);
 				activateAssistant(pendingAssistant);
 			}
+		}
+
+		// "发到对话" in the image studio (see image-handoff.ts): read once.
+		const imageHandoff = takeChatImageHandoff(
+			typeof sessionStorage === 'undefined' ? null : sessionStorage
+		);
+		if (imageHandoff) {
+			await attachImageForEditing(imageHandoff.fileId, imageHandoff.name);
 		}
 
 		if (window.location.pathname === '/') {

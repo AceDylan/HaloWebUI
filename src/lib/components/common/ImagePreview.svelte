@@ -10,6 +10,8 @@
 	export let show = false;
 	export let src = '';
 	export let alt = '';
+	// Extra buttons in the top bar (e.g. "send to chat"); each closes the preview first.
+	export let actions: { id: string; label: string; run: () => void }[] = [];
 
 	let previewElement = null;
 	let isAttached = false;
@@ -112,7 +114,24 @@
 				</button>
 			</div>
 
-			<div class="flex">
+			<div class="flex items-center">
+				{#each actions as action (action.id)}
+					<button
+						type="button"
+						class="mx-1 rounded-full bg-white/15 px-3 py-1.5 text-sm font-medium backdrop-blur transition hover:bg-white/25"
+						data-image-preview-action={action.id}
+						on:pointerdown={(e) => {
+							e.stopImmediatePropagation();
+							e.preventDefault();
+						}}
+						on:click={() => {
+							show = false;
+							action.run();
+						}}
+					>
+						{action.label}
+					</button>
+				{/each}
 				<button
 					class=" p-5"
 					aria-label={$i18n.t('Reset zoom')}

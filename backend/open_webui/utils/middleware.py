@@ -31,6 +31,7 @@ from starlette.responses import Response, StreamingResponse
 
 from open_webui.models.chats import Chats, can_auto_generate_chat_title
 from open_webui.models.files import FileForm, Files
+from open_webui.utils.image_studio_record import record_chat_images_in_studio
 from open_webui.models.users import Users
 from open_webui.socket.main import (
     get_event_call,
@@ -4762,6 +4763,21 @@ async def _build_chat_image_generation_local_response(
         )
     negative_prompt = ""
 
+    # Every image made here also lands in the image studio's gallery and history.
+    def record_studio_images(images: list[Any]) -> None:
+        metadata = extra_params.get("__metadata__") or {}
+        record_chat_images_in_studio(
+            getattr(user, "id", ""),
+            chat_id=metadata.get("chat_id"),
+            message_id=metadata.get("message_id"),
+            prompt=str(user_message or ""),
+            options=image_generation_options,
+            images=images,
+            source_urls=source_image_urls,
+            started_at_ms=started_at_ms,
+            completed_at_ms=int(time.time() * 1000),
+        )
+
     system_message_content = ""
     partial_image_files: dict[int, dict[str, Any]] = {}
     partial_image_urls: set[str] = set()
@@ -4843,6 +4859,7 @@ async def _build_chat_image_generation_local_response(
                 "open_webui_image_generation_partial_callback",
                 emit_partial_image_generation_file,
             )
+        started_at_ms = int(time.time() * 1000)
         try:
             images = await image_generations(
                 request=request,
@@ -4889,6 +4906,7 @@ async def _build_chat_image_generation_local_response(
             failures=[],
             requested_n=requested_n,
         )
+        record_studio_images(images)
         success_count = len(
             [item for item in image_result_files if item.get("status") == "success"]
         )
@@ -4950,6 +4968,7 @@ async def _build_chat_image_generation_local_response(
             failures=e.failures,
             requested_n=e.requested_n,
         )
+        record_studio_images(e.images)
         success_count = len(
             [item for item in image_result_files if item.get("status") == "success"]
         )

@@ -242,6 +242,8 @@
 		const last = web[web.length - 1];
 		const count = Number(last?.count ?? last?.urls?.length ?? 0) || 0;
 
+		if (last?.done === false && last?.web_search_state === 'deciding')
+			return { state: 'deciding', count: 0 };
 		if (last?.done === false) return { state: 'searching', count };
 
 		const explicit = last?.web_search_state;
@@ -257,6 +259,8 @@
 	const webSearchBadgeLabel = (badge: { state: string; count: number } | null): string => {
 		if (!badge) return '';
 		switch (badge.state) {
+			case 'deciding':
+				return tr('判断是否联网…', 'Deciding on web search…');
 			case 'searching':
 				return tr('联网中…', 'Searching…');
 			case 'searched':

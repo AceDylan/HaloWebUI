@@ -220,3 +220,68 @@ def test_quick_auto_web_search_skips_small_talk_without_a_model_call():
         assert decision == {"should_search": False, "queries": [], "reason": "small_talk", "source": "heuristic"}, text
     for text in ["你好，今天武夷山天气怎么样", "你能做什么样的旅游攻略，帮我规划杭州", "谢谢，再帮我看看旭旭宝宝开播没"]:
         assert _quick_auto_web_search_decision([{"role": "user", "content": text}]) is None, text
+
+
+def _decision_request():
+    return SimpleNamespace(
+        app=SimpleNamespace(
+            state=SimpleNamespace(
+                config=SimpleNamespace(
+                    ENABLE_SEARCH_QUERY_GENERATION=True,
+                    AUTO_WEB_SEARCH_DECISION_USE_MAIN_MODEL=False,
+                )
+            )
+        ),
+        state=SimpleNamespace(metadata={}),
+    )
+
+
+@pytest.mark.asyncio
+async def test_the_chat_hears_about_a_model_decision_before_it_is_asked(monkeypatch):
+    order = []
+
+    async def fake_completion(request, form_data, user):
+        order.append("model")
+        return {"choices": [{"message": {"content": '{"should_search": true, "queries": ["杭州 天气"]}'}}]}
+
+    async def deciding():
+        order.append("status")
+
+    monkeypatch.setattr(middleware_module, "generate_chat_completion", fake_completion)
+    form = {"model": "m", "messages": [{"role": "user", "content": "帮我看看杭州这周末适合出去玩吗"}]}
+
+    decision = await middleware_module._resolve_auto_web_search_decision(
+        _decision_request(), form, None, "task", on_model_decision=deciding
+    )
+
+    assert order == ["status", "model"]
+    assert decision["should_search"] is True
+
+
+@pytest.mark.asyncio
+async def test_quick_decisions_and_failing_statuses_do_not_announce_or_change_anything(monkeypatch):
+    calls = []
+
+    async def fake_completion(request, form_data, user):
+        calls.append("model")
+        return {"choices": [{"message": {"content": '{"should_search": false}'}}]}
+
+    async def broken_status():
+        calls.append("status")
+        raise RuntimeError("socket closed")
+
+    monkeypatch.setattr(middleware_module, "generate_chat_completion", fake_completion)
+
+    quick = await middleware_module._resolve_auto_web_search_decision(
+        _decision_request(), {"model": "m", "messages": [{"role": "user", "content": "你好"}]},
+        None, "task", on_model_decision=broken_status,
+    )
+    assert quick["source"] == "heuristic" and calls == []
+
+    asked = await middleware_module._resolve_auto_web_search_decision(
+        _decision_request(),
+        {"model": "m", "messages": [{"role": "user", "content": "帮我看看杭州这周末适合出去玩吗"}]},
+        None, "task", on_model_decision=broken_status,
+    )
+    assert calls == ["status", "model"]
+    assert asked["source"] == "task_model" and asked["reason"] != "decision_failed"

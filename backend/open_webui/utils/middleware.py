@@ -2016,7 +2016,10 @@ async def _resolve_auto_web_search_decision(
     form_data: dict,
     user: UserModel,
     task_model_id: str,
+    on_model_decision=None,
 ) -> dict:
+    """``on_model_decision`` is awaited just before a model is asked (the quick
+    keyword rules answer without one), so the chat can say it is deciding."""
     messages = form_data.get("messages") if isinstance(form_data, dict) else []
     if not isinstance(messages, list):
         messages = []
@@ -2069,6 +2072,12 @@ async def _resolve_auto_web_search_decision(
             },
         },
     }
+
+    if on_model_decision is not None:
+        try:
+            await on_model_decision()
+        except Exception as exc:  # a status that could not be shown changes nothing
+            log.debug("Auto web search decision status failed: %s", exc)
 
     try:
         response = await generate_chat_completion(request, form_data=payload, user=user)
@@ -5449,8 +5458,26 @@ async def process_chat_payload(request, form_data, user, metadata, model, tasks=
             web_search_strategy["requested_mode"] == WEB_SEARCH_MODE_AUTO
             and web_search_strategy["effective_mode"] != WEB_SEARCH_MODE_OFF
         ):
+            async def say_deciding():
+                # The decision is a full, non-streamed call to the chat model
+                # (minutes on a slow one); without a status the reply just sat
+                # there. Whatever is decided next replaces it with a web_search
+                # status of its own (skipped, the searches, or native_pending).
+                if event_emitter:
+                    await event_emitter(
+                        {
+                            "type": "status",
+                            "data": {
+                                "action": "web_search",
+                                "web_search_state": "deciding",
+                                "description": "正在判断这次要不要联网…",
+                                "done": False,
+                            },
+                        }
+                    )
+
             auto_decision = await _resolve_auto_web_search_decision(
-                request, form_data, user, task_model_id
+                request, form_data, user, task_model_id, on_model_decision=say_deciding
             )
             metadata["auto_web_search_decision"] = auto_decision
             if not auto_decision.get("should_search"):

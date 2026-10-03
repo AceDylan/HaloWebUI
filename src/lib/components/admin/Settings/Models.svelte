@@ -1605,7 +1605,7 @@
 									<div class="group-sortable-item" data-group-key={key}>
 										<div class="px-2 py-1.5">
 											<div
-												class="flex items-center justify-between gap-2 w-full px-3 py-2 rounded-xl border border-gray-200/60 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-900/30 hover:bg-gray-100/60 dark:hover:bg-gray-900/40 transition cursor-pointer"
+												class="flex items-center justify-between gap-2 w-full px-3 py-2 rounded-xl bg-gray-900/[0.028] dark:bg-white/[0.03] hover:bg-gray-900/[0.05] dark:hover:bg-white/[0.05] transition cursor-pointer"
 												on:click={() => toggleGroupExpanded(key)}
 												role="button"
 												tabindex="0"

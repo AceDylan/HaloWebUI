@@ -169,7 +169,7 @@
 	<Select.Trigger
 		bind:el={triggerEl}
 		id={triggerId || undefined}
-		class="inline-flex items-center justify-between gap-2 rounded-lg
+		class="inline-flex items-center justify-between gap-2 rounded-lg text-left
 					border border-gray-200 dark:border-gray-700
 					bg-gray-50 dark:bg-gray-850
 					text-sm text-gray-800 dark:text-gray-200

@@ -1395,6 +1395,18 @@ body:has(#chat-input:focus) .halo-orb__arc {
 		0 24px 48px -12px oklch(0 0 0 / 0.65);
 }
 
+/* Table heads in lists (archived chats…): small mono caps on a hairline, like the sidebar's
+   date labels. */
+.halo-table-head {
+	font-family: var(--font-mono);
+	font-size: 0.625rem;
+	font-weight: 500;
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+	color: var(--color-gray-500);
+	border-bottom: 1px solid var(--surface-border);
+}
+
 /* Code blocks: a tinted plate with a hairline edge; the language in small mono caps. */
 .halo-code {
 	--code-head: oklch(0.972 0.005 268);

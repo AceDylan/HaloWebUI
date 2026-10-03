@@ -224,10 +224,10 @@
 <Modal size="lg" bind:show>
 	<div>
 		<div class=" flex justify-between dark:text-gray-300 px-5 pt-4 pb-1">
-			<div class=" text-lg font-medium self-center">
+			<div class="font-display text-lg font-semibold self-center">
 				{$i18n.t('Archived Chats')}
 				{#if total > 0}
-					<span class="text-sm font-normal text-gray-500 dark:text-gray-400">{total}</span>
+					<span class="ml-1 font-mono text-xs font-normal tabular-nums text-gray-500 dark:text-gray-400">{total}</span>
 				{/if}
 			</div>
 			<button
@@ -308,7 +308,7 @@
 							<div class="relative overflow-x-auto {loading ? 'opacity-50' : ''}">
 								<table class="w-full text-sm text-left text-gray-600 dark:text-gray-400 table-auto">
 									<thead
-										class="text-xs text-gray-700 uppercase bg-transparent dark:text-gray-200 border-b-2 border-gray-50 dark:border-gray-850"
+										class="halo-table-head bg-transparent"
 									>
 										<tr>
 											<th scope="col" class="px-3 py-2"> {$i18n.t('Name')} </th>
@@ -322,11 +322,11 @@
 										{#each chats as chat, idx}
 											<tr
 												class="bg-transparent {idx !== chats.length - 1 &&
-													'border-b'} dark:bg-gray-900 border-gray-50 dark:border-gray-850 text-xs"
+													'border-b'} border-[var(--surface-border)] text-xs"
 											>
 												<td class="px-3 py-1 w-2/3">
 													<a href="/c/{chat.id}" target="_blank">
-														<div class=" underline line-clamp-1">
+														<div class="line-clamp-1 font-medium text-gray-800 underline-offset-2 hover:underline dark:text-gray-100">
 															{chat.title}
 														</div>
 													</a>

@@ -71,7 +71,7 @@
 	{/if}
 </div>
 
-<div class="h-40 overflow-auto scrollbar-none {className} items-start">
+<div class="{sortedPrompts.length > 0 ? 'h-40' : 'h-0'} overflow-auto scrollbar-none {className} items-start">
 	{#if filteredPrompts.length > 0}
 		{#each filteredPrompts as prompt, idx (prompt.id || prompt.content)}
 			<button

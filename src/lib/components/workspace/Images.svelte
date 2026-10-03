@@ -1673,7 +1673,7 @@
 								class="style-preset-card"
 								on:click={() => applyStylePreset(preset)}
 							>
-								<div class="text-2xl">{preset.icon}</div>
+								<span class="halo-preset-swatch" data-preset={preset.id} aria-hidden="true"></span>
 								<div class="text-xs font-medium text-gray-700 dark:text-gray-300 text-center">
 									{$i18n.t(preset.nameKey)}
 								</div>

@@ -1518,6 +1518,29 @@ body:has(#chat-input:focus) .halo-orb__arc {
 	background-color: oklch(1 0 0 / 0.045);
 }
 
+/* Cards you can open answer the pointer: the edge firms up and a soft, longer shadow lifts the
+   card. No transform: a transformed card would become the box for the fixed-position menus
+   inside it. */
+:is(a, button, .cursor-pointer).glass-item:not(.glass-section .glass-item) {
+	transition:
+		border-color var(--dur-fast) ease,
+		background-color var(--dur-fast) ease,
+		box-shadow var(--dur-base) var(--ease-out-expo);
+}
+:is(a, button, .cursor-pointer).glass-item:not(.glass-section .glass-item):hover {
+	border-color: oklch(0.3 0.03 268 / 0.2);
+	box-shadow:
+		0 1px 2px oklch(0.2 0.03 268 / 0.05),
+		0 10px 24px -12px oklch(0.2 0.03 268 / 0.22);
+}
+.dark :is(a, button, .cursor-pointer).glass-item:not(.glass-section .glass-item):hover {
+	border-color: oklch(1 0 0 / 0.16);
+	background-color: oklch(1 0 0 / 0.055);
+	box-shadow:
+		inset 0 1px 0 oklch(1 0 0 / 0.05),
+		0 10px 24px -12px oklch(0 0 0 / 0.6);
+}
+
 /* Category lists beside a grid (assistant templates): rows like the sidebar's on desktop,
    a scrolling row of tags on phones. */
 .halo-cat-row {
@@ -1692,6 +1715,184 @@ body:has(#chat-input:focus) .halo-orb__arc {
 	letter-spacing: 0.06em;
 	text-transform: uppercase;
 	color: var(--color-gray-500);
+}
+
+/* ---------------------------------------------------------------- theme thumbnails (settings)
+   The app in miniature: sidebar lines on the frame colour, the floating panel, the halo over a
+   composer. Auto is both scenes cut on a diagonal. Literal colours, because a thumbnail shows its
+   own theme whatever the current one is. The little halo turns while the card is hovered. */
+
+.halo-theme-mini {
+	position: relative;
+	height: 100%;
+	border-radius: 6px;
+	overflow: hidden;
+}
+.halo-theme-mini__scene {
+	--frame: oklch(0.955 0.006 268);
+	--panel: oklch(0.995 0.0015 268);
+	--well: #fff;
+	--line: oklch(0.3 0.03 268 / 0.16);
+	--edge: oklch(0.3 0.02 268 / 0.12);
+	position: absolute;
+	inset: 0;
+	display: flex;
+	gap: 3px;
+	padding: 4px;
+	background: var(--frame);
+}
+.halo-theme-mini__scene[data-scene='dark'] {
+	--frame: oklch(0.13 0.008 268);
+	--panel: oklch(0.175 0.01 268);
+	--well: oklch(0.215 0.012 268);
+	--line: oklch(1 0 0 / 0.16);
+	--edge: oklch(1 0 0 / 0.09);
+}
+.halo-theme-mini[data-mode='system'] .halo-theme-mini__scene[data-scene='dark'] {
+	clip-path: polygon(64% 0, 100% 0, 100% 100%, 36% 100%);
+}
+.halo-theme-mini__side {
+	display: flex;
+	flex-direction: column;
+	gap: 3px;
+	width: 22%;
+	padding: 3px 1px 0;
+}
+.halo-theme-mini__side > span {
+	height: 3px;
+	border-radius: 2px;
+	background: var(--line);
+}
+.halo-theme-mini__side > span:nth-child(2) {
+	width: 80%;
+}
+.halo-theme-mini__side > span:nth-child(3) {
+	width: 60%;
+}
+.halo-theme-mini__panel {
+	position: relative;
+	flex: 1;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	gap: 5px;
+	border-radius: 4px;
+	background: var(--panel);
+	box-shadow: 0 0 0 1px var(--edge);
+}
+.halo-theme-mini__orb {
+	width: 13px;
+	height: 13px;
+	padding: 1.5px;
+	border-radius: 9999px;
+	background: conic-gradient(
+		from var(--halo-angle),
+		oklch(0.66 0.2 264),
+		oklch(0.64 0.21 300) 30%,
+		oklch(0.82 0.14 65) 52%,
+		oklch(0.66 0.2 264) 78%
+	);
+	-webkit-mask:
+		linear-gradient(#000 0 0) content-box,
+		linear-gradient(#000 0 0);
+	-webkit-mask-composite: xor;
+	mask-composite: exclude;
+}
+.group:hover .halo-theme-mini__orb {
+	animation: halo-spin 2.4s linear infinite;
+}
+.halo-theme-mini__composer {
+	width: 64%;
+	height: 7px;
+	border-radius: 4px;
+	background: var(--well);
+	box-shadow: 0 0 0 1px var(--edge);
+}
+
+/* ---------------------------------------------------------------- error / not found
+   The halo with a piece missing: a still spectrum ring open at the top-right, and the planet
+   from the sign-in stage drifting just outside the gap (a turning partial ring would read as
+   loading). The status sits under it in mono. */
+
+.halo-lost__mark {
+	position: relative;
+	width: 7.5rem;
+	height: 7.5rem;
+	margin: 1.75rem auto 3rem;
+	isolation: isolate;
+}
+.halo-lost__mark::before {
+	content: '';
+	position: absolute;
+	inset: -12%;
+	border-radius: 9999px;
+	background: var(--halo-spectrum);
+	filter: blur(30px);
+	opacity: 0.14;
+	z-index: -1;
+}
+.dark .halo-lost__mark::before {
+	opacity: 0.2;
+}
+.halo-lost__orbit,
+.halo-lost__ring,
+.halo-lost__planet {
+	position: absolute;
+	border-radius: 9999px;
+}
+.halo-lost__orbit {
+	inset: -1.75rem;
+	border: 1px dashed oklch(0.3 0.03 268 / 0.12);
+}
+.dark .halo-lost__orbit {
+	border-color: oklch(1 0 0 / 0.09);
+}
+.halo-lost__ring {
+	inset: 0;
+	padding: 2px;
+	background: conic-gradient(
+		from 70deg,
+		var(--halo-ion),
+		var(--halo-violet) 90deg,
+		var(--halo-solar) 170deg,
+		var(--halo-violet) 240deg,
+		var(--halo-ion) 297deg,
+		transparent 297deg 360deg
+	);
+	-webkit-mask:
+		linear-gradient(#000 0 0) content-box,
+		linear-gradient(#000 0 0);
+	-webkit-mask-composite: xor;
+	mask-composite: exclude;
+}
+.halo-lost__planet {
+	width: 0.625rem;
+	height: 0.625rem;
+	top: -0.5rem;
+	right: -1.375rem;
+	background: var(--halo-solar);
+	box-shadow: 0 0 0 4px color-mix(in oklab, var(--halo-solar) 18%, transparent);
+	animation: halo-lost-drift 7s var(--ease-out-quart) infinite alternate;
+}
+@keyframes halo-lost-drift {
+	to {
+		transform: translate(0.5rem, -0.375rem);
+	}
+}
+.halo-lost__code {
+	font-family: var(--font-mono);
+	font-size: 0.8125rem;
+	font-weight: 500;
+	letter-spacing: 0.24em;
+	color: var(--color-gray-500);
+}
+.halo-lost__title {
+	margin-top: 0.5rem;
+	font-size: 1.75rem;
+	font-weight: 650;
+	letter-spacing: -0.02em;
+	line-height: 1.2;
 }
 
 /* ---------------------------------------------------------------- form controls (auth first) */
@@ -2357,7 +2558,9 @@ body:has(#chat-input:focus) .halo-orb__arc {
 	.halo-auth__core,
 	.halo-auth__body,
 	.halo-rise,
-	[data-halo-copy-id]::after {
+	[data-halo-copy-id]::after,
+	.halo-lost__planet,
+	.group:hover .halo-theme-mini__orb {
 		animation: none !important;
 	}
 	.halo-mark__ring,

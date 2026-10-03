@@ -38,51 +38,18 @@
 					}
 				`}
 			>
-				<!-- Preview Window -->
+				<!-- Preview: the app in miniature (halo.css .halo-theme-mini) -->
 				<div class="aspect-[5/3] p-1.5">
-					<div
-						class={`
-							h-full rounded-md overflow-hidden
-							${theme.value === 'light' ? 'bg-gradient-to-br from-blue-50 to-blue-100' : ''}
-							${theme.value === 'dark' ? 'bg-gradient-to-br from-gray-900 to-gray-800' : ''}
-							${theme.value === 'system' ? 'bg-gradient-to-br from-blue-50 via-gray-100 to-gray-900' : ''}
-						`}
-					>
-						<!-- Window Chrome -->
-						<div
-							class={`
-								flex items-center gap-0.5 px-1.5 py-1 border-b
-								${theme.value === 'light' ? 'bg-white/80 border-gray-200' : ''}
-								${theme.value === 'dark' ? 'bg-gray-800/80 border-gray-700' : ''}
-								${theme.value === 'system' ? 'bg-gradient-to-r from-white/80 to-gray-800/80 border-gray-400' : ''}
-							`}
-						>
-							<div class="flex gap-0.5">
-								<div class="w-1.5 h-1.5 rounded-full bg-red-500"></div>
-								<div class="w-1.5 h-1.5 rounded-full bg-yellow-500"></div>
-								<div class="w-1.5 h-1.5 rounded-full bg-green-500"></div>
+					<div class="halo-theme-mini" data-mode={theme.value}>
+						{#each theme.value === 'system' ? ['light', 'dark'] : [theme.value] as scene}
+							<div class="halo-theme-mini__scene" data-scene={scene}>
+								<span class="halo-theme-mini__side"><span></span><span></span><span></span></span>
+								<span class="halo-theme-mini__panel">
+									<span class="halo-theme-mini__orb"></span>
+									<span class="halo-theme-mini__composer"></span>
+								</span>
 							</div>
-						</div>
-
-						<!-- Content Area -->
-						<div class="p-1.5 space-y-1">
-							<div
-								class={`
-									h-1 rounded-full w-3/4
-									${theme.value === 'light' ? 'bg-gray-300' : ''}
-									${theme.value === 'dark' ? 'bg-gray-600' : ''}
-									${theme.value === 'system' ? 'bg-gradient-to-r from-gray-300 to-gray-600' : ''}
-								`}
-							></div>
-							<div
-								class={`
-									h-1 rounded-full w-1/2
-									${theme.value === 'light' ? 'bg-gray-200' : ''}
-									${theme.value === 'dark' ? 'bg-gray-700' : ''}
-									${theme.value === 'system' ? 'bg-gradient-to-r from-gray-200 to-gray-700' : ''}
-								`}
-							></div>
-						</div>
+						{/each}
 					</div>
 				</div>
 

@@ -311,7 +311,7 @@
 									viewBox="0 0 24 24"
 									stroke-width="1.5"
 									stroke="currentColor"
-									class="w-4 h-4 text-green-500"
+									class="w-4 h-4 text-primary-500 dark:text-primary-400"
 								>
 									<path
 										stroke-linecap="round"

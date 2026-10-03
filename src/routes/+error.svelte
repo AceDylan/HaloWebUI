@@ -24,14 +24,17 @@
 </svelte:head>
 
 <div
-	class="flex min-h-screen w-full items-center justify-center bg-[var(--surface-base)] px-6 text-gray-900 dark:text-gray-100"
+	class="halo-lost flex min-h-screen w-full items-center justify-center bg-[var(--surface-base)] px-6 text-gray-900 dark:text-gray-100"
 >
 	<div class="w-full max-w-md text-center" role="alert">
-		<div class="text-6xl font-semibold tracking-tight text-gray-300 dark:text-gray-700">
-			{$page.status}
+		<div class="halo-lost__mark" aria-hidden="true">
+			<span class="halo-lost__orbit"></span>
+			<span class="halo-lost__ring"></span>
+			<span class="halo-lost__planet"></span>
 		</div>
-		<h1 class="mt-3 text-xl font-semibold">{title}</h1>
-		<p class="mt-2 text-sm text-gray-600 dark:text-gray-400">
+		<div class="halo-lost__code">{$page.status}</div>
+		<h1 class="halo-lost__title font-display">{title}</h1>
+		<p class="mt-2 text-sm text-gray-500 dark:text-gray-400">
 			{#if notFound}
 				{t(
 					'The page you are looking for does not exist or has been moved.',
@@ -44,19 +47,12 @@
 				)}
 			{/if}
 		</p>
-		<div class="mt-6 flex flex-wrap items-center justify-center gap-2">
-			<a
-				href="/"
-				class="inline-flex items-center justify-center rounded-xl bg-primary-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-primary-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/40 dark:bg-primary-500 dark:hover:bg-primary-400"
-			>
+		<div class="mt-7 flex flex-wrap items-center justify-center gap-2">
+			<a href="/" class="workspace-primary-button">
 				{t('Back to home', 'Back to home')}
 			</a>
 			{#if !framed}
-				<button
-					type="button"
-					class="inline-flex items-center justify-center rounded-xl border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/40 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
-					on:click={() => history.back()}
-				>
+				<button type="button" class="workspace-secondary-button" on:click={() => history.back()}>
 					{t('Go back', 'Go back')}
 				</button>
 			{/if}

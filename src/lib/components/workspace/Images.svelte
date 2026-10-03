@@ -316,6 +316,24 @@
 	let generatedImages: GeneratedImage[] = [];
 	let lastPrompt = '';
 	let generationStartedAt = 0;
+	// While a run is out: the seconds waited, and how long the last finished run of
+	// this model took (gpt-image takes 20 s to a few minutes, the button alone said nothing).
+	let elapsedSeconds = 0;
+	let elapsedTimer: ReturnType<typeof setInterval> | null = null;
+	const stopElapsedTimer = () => {
+		if (elapsedTimer) clearInterval(elapsedTimer);
+		elapsedTimer = null;
+	};
+	$: lastRunSeconds = (() => {
+		const last = generationHistory.find(
+			(item) =>
+				item.status === 'success' &&
+				item.createdAt &&
+				item.completedAt &&
+				(!selectedModel || item.parameters?.modelId === selectedModel)
+		);
+		return last ? Math.round(((last.completedAt ?? 0) - (last.createdAt ?? 0)) / 1000) : 0;
+	})();
 
 	// Reference images: with any, the request goes to the model's edit route (gpt-image edits
 	// from them). Uploaded like chat attachments; gallery images can be added as they are.
@@ -1528,6 +1546,11 @@
 		generatedImages = [];
 		lastPrompt = trimmedPrompt;
 		generationStartedAt = Date.now();
+		elapsedSeconds = 0;
+		stopElapsedTimer();
+		elapsedTimer = setInterval(() => {
+			elapsedSeconds = Math.floor((Date.now() - generationStartedAt) / 1000);
+		}, 1000);
 
 		try {
 			const response = await imageGenerations(localStorage.token, {
@@ -1594,6 +1617,7 @@
 			recordGeneration('failed', undefined, formatError(error));
 		} finally {
 			loading = false;
+			stopElapsedTimer();
 		}
 	};
 
@@ -1674,6 +1698,7 @@
 		if (imageModelSearchTimer) {
 			clearTimeout(imageModelSearchTimer);
 		}
+		stopElapsedTimer();
 	});
 </script>
 
@@ -1901,7 +1926,13 @@
 						{:else}
 							<Sparkles className="size-4" strokeWidth="2" />
 						{/if}
-						<span>{loading ? $i18n.t('Generating...') : $i18n.t('Generate')}</span>
+						<span data-image-studio-elapsed={loading ? elapsedSeconds : undefined}
+							>{loading
+								? elapsedSeconds > 0
+									? $i18n.t('Generating... {{seconds}}s', { seconds: elapsedSeconds })
+									: $i18n.t('Generating...')
+								: $i18n.t('Generate')}</span
+						>
 					</button>
 					</div>
 				</div>
@@ -2306,7 +2337,21 @@
 
 				{#if loading}
 					<div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-						<div class="shimmer h-56 rounded-xl glass-item" />
+						<div class="shimmer relative h-56 rounded-xl glass-item">
+							<div
+								class="absolute inset-0 flex flex-col items-center justify-center gap-1 text-center"
+								data-image-studio-wait
+							>
+								<div class="text-sm font-medium tabular-nums text-gray-700 dark:text-gray-200">
+									{$i18n.t('Waited {{seconds}}s', { seconds: elapsedSeconds })}
+								</div>
+								{#if lastRunSeconds > 0}
+									<div class="text-xs tabular-nums text-gray-500 dark:text-gray-400">
+										{$i18n.t('Last run took {{seconds}}s', { seconds: lastRunSeconds })}
+									</div>
+								{/if}
+							</div>
+						</div>
 					</div>
 				{:else if generatedImages.length > 0}
 					<div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">

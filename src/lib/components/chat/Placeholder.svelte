@@ -63,7 +63,9 @@
 	const greetingKey = (() => {
 		const hour = new Date().getHours();
 		if (hour < 5) return 'Working late, {{name}}';
-		if (hour < 12) return 'Good morning, {{name}}';
+		if (hour < 9) return 'Good morning, {{name}}';
+		if (hour < 12) return 'Good forenoon, {{name}}';
+		if (hour < 14) return 'Good noon, {{name}}';
 		if (hour < 18) return 'Good afternoon, {{name}}';
 		return 'Good evening, {{name}}';
 	})();

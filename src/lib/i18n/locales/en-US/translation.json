@@ -666,6 +666,8 @@
 	"Hello, {{name}}": "",
 	"Good afternoon, {{name}}": "",
 	"Good evening, {{name}}": "",
+	"Good forenoon, {{name}}": "Good morning, {{name}}",
+	"Good noon, {{name}}": "Good afternoon, {{name}}",
 	"Good morning, {{name}}": "",
 	"Working late, {{name}}": "",
 	"Help": "",

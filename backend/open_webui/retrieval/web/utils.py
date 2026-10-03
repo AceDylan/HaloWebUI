@@ -1,4 +1,5 @@
 import asyncio
+import importlib
 import logging
 import socket
 import ssl
@@ -153,6 +154,14 @@ def _get_playwright_loader_class():
         install_profiles=["core", "full"],
     )
     return module.PlaywrightURLLoader
+
+
+def _firecrawl_package_available() -> bool:
+    try:
+        importlib.import_module("firecrawl")
+        return True
+    except Exception:
+        return False
 
 
 def _get_firecrawl_loader_class():
@@ -668,6 +677,15 @@ def get_web_loader(
         if PLAYWRIGHT_WS_URL.value:
             web_loader_args["playwright_ws_url"] = PLAYWRIGHT_WS_URL.value
 
+    elif effective_loader_engine == "firecrawl" and not _firecrawl_package_available():
+        # Without the firecrawl package every URL would fail and be skipped;
+        # downloading the pages here keeps web search working.
+        log.warning(
+            "WEB_LOADER_ENGINE is firecrawl but the firecrawl package is not "
+            "installed; loading %s URLs with the built-in loader",
+            len(safe_urls),
+        )
+        WebLoaderClass = SafeWebBaseLoader
     elif effective_loader_engine == "firecrawl":
         WebLoaderClass = SafeFireCrawlLoader
         web_loader_args["api_key"] = FIRECRAWL_API_KEY.value

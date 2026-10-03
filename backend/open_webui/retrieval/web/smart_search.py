@@ -14,6 +14,7 @@ import json
 import os
 import re
 import subprocess
+import time
 from urllib.parse import parse_qsl, unquote, urlparse
 
 import validators
@@ -61,6 +62,10 @@ _MIRROR_GATEWAY_PREFIXES = ("/gate/big5/", "/gate/gb/")
 # Research returns pages as markdown, sometimes several hundred KB; keep the
 # per-page cap web search's embedding path applies to downloaded pages.
 _MAX_CONTENT_CHARS = 100_000
+# A successful `research --help` probe holds this long: every keyword used to
+# start a Python process just to ask whether research exists.
+_RESEARCH_PROBE_TTL = 600
+_research_probe_ok_at: dict[str, float] = {}
 _ERROR_TYPES = {
     "config_error",
     "parameter_error",
@@ -315,17 +320,25 @@ def search_smart_search(
                 seen.add(key)
                 results.append(SearchResult(**item))
 
-    try:
-        research_help = _run(command, ["research", "--help"], 5)
-    except subprocess.TimeoutExpired:
-        failures.append("research help: timeout")
-        research_help = None
-    if research_help is not None and research_help.returncode not in (0, 2):
-        failures.append(f"research help: exit {research_help.returncode}")
-    if research_help is not None and research_help.returncode == 2:
-        unavailable.append("research: unavailable in installed CLI")
+    research_available = (
+        time.monotonic() - _research_probe_ok_at.get(command, -_RESEARCH_PROBE_TTL)
+        < _RESEARCH_PROBE_TTL
+    )
+    if not research_available:
+        try:
+            research_help = _run(command, ["research", "--help"], 5)
+        except subprocess.TimeoutExpired:
+            failures.append("research help: timeout")
+            research_help = None
+        if research_help is not None and research_help.returncode not in (0, 2):
+            failures.append(f"research help: exit {research_help.returncode}")
+        if research_help is not None and research_help.returncode == 2:
+            unavailable.append("research: unavailable in installed CLI")
+        research_available = research_help is not None and research_help.returncode == 0
+        if research_available:
+            _research_probe_ok_at[command] = time.monotonic()
 
-    if research_help is not None and research_help.returncode == 0:
+    if research_available:
         try:
             completed = _run(
                 command,
@@ -334,6 +347,10 @@ def search_smart_search(
                     query,
                     "--budget",
                     "quick",
+                    # read as many pages as were asked for, from the free
+                    # readers first, before topping up with a paid search
+                    "--pages",
+                    str(min(count, 10)),
                     "--fallback",
                     "auto",
                     "--format",
@@ -422,3 +439,21 @@ def search_smart_search(
     raise RuntimeError(
         f"smart-search CLI search failed ({'; '.join([*unavailable, *failures])})"
     )
+
+
+def smart_search_usage(live: bool = False) -> dict:
+    """The CLI's usage ledger (``smart-search usage``): calls per provider today and
+    this month, free allowances, providers parked after a quota error; with
+    ``live``, Tavily's and Firecrawl's own remaining credits too."""
+    command = os.getenv("SMART_SEARCH_CLI", "smart-search").strip()
+    if not command:
+        raise RuntimeError("SMART_SEARCH_CLI must name an executable")
+    args = ["usage", "--format", "json", *(["--live"] if live else [])]
+    try:
+        completed = _run(command, args, 40 if live else 15)
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError("smart-search usage: timeout") from exc
+    payload, failure = _response(completed, "usage")
+    if failure:
+        raise RuntimeError(f"smart-search {failure}")
+    return payload

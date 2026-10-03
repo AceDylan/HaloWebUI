@@ -54,6 +54,11 @@ services:
       - /usr/local/lib/node_modules/@konbakuyomu:/opt/host-smart-search:ro
       - /usr/local/share/uv/python:/usr/local/share/uv/python:ro
       - /root/.config/smart-search:/root/.config/smart-search:ro
+      # Writable and shared with the host: the usage ledger behind
+      # `smart-search usage` and the admin page's usage panel, the page cache
+      # and which sites block a direct read, so HaloWebUI and Hermes searches
+      # count against the same free allowances.
+      - /root/.local/state/smart-search:/root/.local/state/smart-search
     restart: always
 
 

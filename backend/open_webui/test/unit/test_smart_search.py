@@ -6,6 +6,15 @@ import pytest
 from open_webui.retrieval.web import smart_search
 
 
+@pytest.fixture(autouse=True)
+def fresh_research_probe():
+    # Each test describes its own CLI, so a probe remembered from another test
+    # would skip the `research --help` call it expects.
+    smart_search._research_probe_ok_at.clear()
+    yield
+    smart_search._research_probe_ok_at.clear()
+
+
 def completed(argv, payload, code=0):
     return subprocess.CompletedProcess(
         argv, code, stdout=json.dumps(payload), stderr="private diagnostic"
@@ -96,6 +105,8 @@ def test_research_uses_verified_evidence_and_filters_domains(monkeypatch):
         "release notes; $(echo unsafe)",
         "--budget",
         "quick",
+        "--pages",
+        "1",
         "--fallback",
         "auto",
         "--format",
@@ -746,3 +757,42 @@ def test_source_commands_order_web_search_by_query_language():
 
     assert providers("黄山 门票") == ["baidu", "baidu-ai", "zhipu", "exa", "langsearch"]
     assert providers("python release") == ["langsearch", "baidu", "baidu-ai", "zhipu", "exa"]
+
+
+def test_a_successful_research_probe_is_remembered(monkeypatch):
+    calls = []
+
+    def fake_run(argv, **kwargs):
+        calls.append(argv[1:3])
+        if "--help" in argv:
+            return subprocess.CompletedProcess(argv, 0, stdout="usage")
+        return completed(
+            argv,
+            {
+                "ok": True,
+                "evidence_items": [
+                    {"url": "https://a.example.com/x", "content": "A", "verified": True},
+                    {"url": "https://b.example.com/y", "content": "B", "verified": True},
+                ],
+                "discovery_sources": [],
+            },
+        )
+
+    monkeypatch.setattr(smart_search.subprocess, "run", fake_run)
+    smart_search.search_smart_search("first", 2)
+    smart_search.search_smart_search("second", 2)
+
+    assert calls == [["research", "--help"], ["research", "first"], ["research", "second"]]
+
+
+def test_usage_reads_the_cli_ledger(monkeypatch):
+    calls = []
+
+    def fake_run(argv, **kwargs):
+        calls.append(argv[1:])
+        return completed(argv, {"ok": True, "available": True, "providers": {"direct": {}}})
+
+    monkeypatch.setattr(smart_search.subprocess, "run", fake_run)
+
+    assert smart_search.smart_search_usage(live=True)["providers"] == {"direct": {}}
+    assert calls == [["usage", "--format", "json", "--live"]]

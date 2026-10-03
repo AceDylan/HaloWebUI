@@ -33,9 +33,11 @@ def get_runtime_capabilities() -> dict[str, Any]:
     local_reranking_available = _module_available("sentence_transformers")
     colbert_reranking_available = _module_available("colbert")
     playwright_available = _module_available("playwright")
+    # The langchain wrapper imports without the firecrawl package itself, and
+    # loading then fails for every URL.
     firecrawl_available = _module_available(
         "langchain_community.document_loaders.firecrawl"
-    )
+    ) and _module_available("firecrawl")
 
     return {
         "local_embedding_available": local_embedding_available,

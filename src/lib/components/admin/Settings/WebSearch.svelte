@@ -23,6 +23,7 @@
 	import HaloSelect from '$lib/components/common/HaloSelect.svelte';
 	import { revealExpandedSection } from '$lib/utils/expanded-section-scroll';
 	import InlineDirtyActions from './InlineDirtyActions.svelte';
+	import SmartSearchUsage from './SmartSearchUsage.svelte';
 	import { cloneSettingsSnapshot, isSettingsSnapshotEqual } from '$lib/utils/settings-dirty';
 	import { translateWithDefault } from '$lib/i18n';
 
@@ -1324,6 +1325,7 @@
 										<div class="text-xs text-gray-500 dark:text-gray-400">
 											{tr('需在后端运行环境安装并配置 smart-search CLI。', 'Install and configure smart-search CLI in the backend environment.')}
 										</div>
+										<SmartSearchUsage />
 									{:else if webConfig.WEB_SEARCH_ENGINE === 'searxng'}
 										<div class="space-y-1.5">
 											<div class="text-xs font-medium text-gray-500 dark:text-gray-400">{$i18n.t('SearXNG Query URL')}</div>

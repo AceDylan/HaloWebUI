@@ -4032,6 +4032,24 @@ async def chat_web_search_handler(
                 )
             )
 
+        def smart_search_failure(message: str) -> dict | None:
+            # "smart-search CLI search failed (research: timeout; doctor: ...)"
+            if "smart-search CLI" not in message:
+                return None
+            lowered = message.lower()
+            if "not installed" in lowered or "could not run" in lowered:
+                reason = "搜索程序不可用"
+            elif "timeout" in lowered:
+                reason = "等待超时"
+            else:
+                reason = "各个搜索来源都没有返回可用结果"
+            return {
+                "code": "smart_search_failed",
+                "message": f"这个关键词没搜到（{reason}），已跳过。",
+                "detail": message,
+                "known": True,
+            }
+
         detail = getattr(exc, "detail", None)
         if isinstance(detail, dict):
             code = str(detail.get("code") or "web_search_error")
@@ -4049,6 +4067,8 @@ async def chat_web_search_handler(
             }
 
         if isinstance(detail, str) and detail.strip():
+            if smart_search_status := smart_search_failure(detail):
+                return smart_search_status
             if is_duckduckgo_rate_limit_message(detail):
                 return {
                     "code": "duckduckgo_rate_limit",
@@ -4064,6 +4084,8 @@ async def chat_web_search_handler(
             }
 
         message = str(exc).strip()
+        if smart_search_status := smart_search_failure(message):
+            return smart_search_status
         if is_duckduckgo_rate_limit_message(message):
             return {
                 "code": "duckduckgo_rate_limit",
@@ -4375,8 +4397,11 @@ async def chat_web_search_handler(
         urls = []
         total_failed = 0
         for results in all_results:
-            if "filenames" in results:
-                urls.extend(results["filenames"])
+            # Keywords often find the same page; the badge and the source list
+            # count it once, as the citations do.
+            for url in results.get("filenames") or []:
+                if url not in urls:
+                    urls.append(url)
             total_failed += results.get("failed_count", 0)
 
         if total_failed > 0:

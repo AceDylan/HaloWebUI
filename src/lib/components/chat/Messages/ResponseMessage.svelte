@@ -574,6 +574,9 @@
 		Boolean($config?.features?.enable_web_search) &&
 		message?.discussion?.enabled !== true;
 	const WEB_SEARCH_PROVIDER_NAMES: Record<string, string> = {
+		baidu: '百度',
+		'baidu-ai': '百度 AI 搜索',
+		langsearch: 'LangSearch',
 		zhipu: '智谱',
 		'zhipu-mcp': '智谱 MCP',
 		tavily: 'Tavily',

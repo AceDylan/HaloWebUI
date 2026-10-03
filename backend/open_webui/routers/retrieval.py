@@ -71,7 +71,7 @@ from open_webui.retrieval.web.exa import search_exa
 from open_webui.retrieval.web.perplexity import search_perplexity
 from open_webui.retrieval.web.grok import search_grok
 from open_webui.retrieval.web.sougou import search_sougou
-from open_webui.retrieval.web.smart_search import search_smart_search
+from open_webui.retrieval.web.smart_search import search_smart_search, smart_search_usage
 
 from open_webui.retrieval.utils import (
     query_collection,
@@ -1560,6 +1560,20 @@ async def verify_web_config(
     }
 
 
+@router.get("/config/web/smart-search/usage")
+async def get_smart_search_usage(live: bool = False, user=Depends(get_admin_user)):
+    """What Smart Search used per provider (its local ledger), for the admin page."""
+    del user
+    try:
+        return await run_in_threadpool(smart_search_usage, live)
+    except Exception as e:
+        log.warning("smart-search usage failed: %s", e)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"读取 Smart Search 用量失败：{e}",
+        )
+
+
 @router.post("/config/web/playwright/verify")
 async def verify_playwright_web_config(
     form_data: PlaywrightConfigVerifyForm,
@@ -2777,7 +2791,6 @@ def _build_direct_docs_from_web_results(
     }
 
 
-@router.post("/process/web/search")
 def _providers_for_urls(web_results: list[SearchResult], urls: list[str]) -> list[str]:
     """The upstream searches (in order, once each) that found the pages in
     ``urls``; empty when the engine does not say (single-source engines)."""
@@ -2794,6 +2807,7 @@ def _providers_for_urls(web_results: list[SearchResult], urls: list[str]) -> lis
     return providers
 
 
+@router.post("/process/web/search")
 async def process_web_search(
     request: Request, form_data: SearchForm, user=Depends(get_verified_user)
 ):

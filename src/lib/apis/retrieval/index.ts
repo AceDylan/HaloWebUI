@@ -655,3 +655,62 @@ export const resetVectorDB = async (token: string) => {
 
 	return res;
 };
+
+export type SmartSearchUsagePeriod = {
+	calls: number;
+	ok: number;
+	errors: number;
+	units: number;
+	avg_ms: number;
+};
+
+export type SmartSearchUsage = {
+	ok: boolean;
+	available: boolean;
+	today: string;
+	days: number;
+	providers: Record<
+		string,
+		{
+			today?: SmartSearchUsagePeriod;
+			month?: SmartSearchUsagePeriod;
+			window?: SmartSearchUsagePeriod;
+			free_allowance?: { period: 'day' | 'month'; allowance: number; used_here: number; note: string };
+			paid_unit?: string;
+		}
+	>;
+	exhausted: Record<string, string>;
+	free_page_reads: Record<string, number>;
+	origins: Record<string, number>;
+	live?: Record<
+		string,
+		{ used?: number | null; limit?: number | null; remaining?: number | null; error?: string }
+	>;
+};
+
+export const getSmartSearchUsage = async (token: string, live = false): Promise<SmartSearchUsage> => {
+	let error = null;
+
+	const res = await fetch(
+		`${RETRIEVAL_API_BASE_URL}/config/web/smart-search/usage${live ? '?live=true' : ''}`,
+		{
+			method: 'GET',
+			headers: {
+				'Content-Type': 'application/json',
+				Authorization: `Bearer ${token}`
+			}
+		}
+	)
+		.then(parseJsonResponse)
+		.catch((err) => {
+			console.log(err);
+			error = err.detail ?? err;
+			return null;
+		});
+
+	if (error) {
+		throw error;
+	}
+
+	return res;
+};

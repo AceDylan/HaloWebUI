@@ -8,6 +8,8 @@
 		imageGenerations
 	} from '$lib/apis/images';
 	import type { ImageGenerationModel, ImageUsageConfig } from '$lib/apis/images';
+	import { uploadFile } from '$lib/apis/files';
+	import { WEBUI_API_BASE_URL } from '$lib/constants';
 	import HaloSelect from '$lib/components/common/HaloSelect.svelte';
 	import ImagePreview from '$lib/components/common/ImagePreview.svelte';
 	import Modal from '$lib/components/common/Modal.svelte';
@@ -307,6 +309,71 @@
 	let generatedImages: GeneratedImage[] = [];
 	let lastPrompt = '';
 	let generationStartedAt = 0;
+
+	// Reference images: with any, the request goes to the model's edit route (gpt-image edits
+	// from them). Uploaded like chat attachments; gallery images can be added as they are.
+	const MAX_REFERENCE_IMAGES = 4;
+	type ReferenceImage = { url: string; preview?: string; uploading?: boolean };
+	let referenceImages: ReferenceImage[] = [];
+	let referenceInput: HTMLInputElement;
+	$: referenceUploading = referenceImages.some((ref) => ref.uploading);
+	$: referenceUrls = referenceImages.filter((ref) => !ref.uploading && ref.url).map((ref) => ref.url);
+
+	const addReferenceFiles = async (fileList: Iterable<File> | null | undefined) => {
+		const images = Array.from(fileList ?? []).filter((file) => file.type.startsWith('image/'));
+		const room = MAX_REFERENCE_IMAGES - referenceImages.length;
+		if (images.length > room) {
+			toast.info($i18n.t('Up to {{count}} reference images', { count: MAX_REFERENCE_IMAGES }));
+		}
+		await Promise.all(
+			images.slice(0, Math.max(0, room)).map(async (file) => {
+				const ref: ReferenceImage = { url: '', preview: URL.createObjectURL(file), uploading: true };
+				referenceImages = [...referenceImages, ref];
+				try {
+					const uploaded = await uploadFile(localStorage.token, file, { process: false });
+					if (!uploaded?.id) throw new Error('upload failed');
+					ref.url = `${WEBUI_API_BASE_URL}/files/${uploaded.id}/content`;
+					ref.uploading = false;
+					referenceImages = referenceImages;
+				} catch (error) {
+					console.warn('Failed to upload reference image', error);
+					referenceImages = referenceImages.filter((item) => item !== ref);
+					toast.error($i18n.t('Failed to upload image'));
+				}
+			})
+		);
+	};
+
+	const addReferenceUrl = (url: string) => {
+		if (!url || referenceImages.some((ref) => ref.url === url)) return;
+		if (referenceImages.length >= MAX_REFERENCE_IMAGES) {
+			toast.info($i18n.t('Up to {{count}} reference images', { count: MAX_REFERENCE_IMAGES }));
+			return;
+		}
+		referenceImages = [...referenceImages, { url }];
+	};
+
+	const removeReference = (index: number) => {
+		const [removed] = referenceImages.splice(index, 1);
+		if (removed?.preview) URL.revokeObjectURL(removed.preview);
+		referenceImages = referenceImages;
+	};
+
+	const handlePromptPaste = (event: ClipboardEvent) => {
+		const files = Array.from(event.clipboardData?.files ?? []).filter((file) =>
+			file.type.startsWith('image/')
+		);
+		if (files.length === 0) return;
+		event.preventDefault();
+		void addReferenceFiles(files);
+	};
+
+	const handleReferenceDrop = (event: DragEvent) => {
+		const files = Array.from(event.dataTransfer?.files ?? []);
+		if (!files.some((file) => file.type.startsWith('image/'))) return;
+		event.preventDefault();
+		void addReferenceFiles(files);
+	};
 	let resultsSectionElement: HTMLElement | null = null;
 
 	let previewOpen = false;
@@ -609,6 +676,7 @@
 		Boolean(selectedModel) &&
 		!selectedModelNeedsReselection &&
 		Boolean(prompt.trim()) &&
+		!referenceUploading &&
 		!sizeValidation?.blocking;
 
 	$: currentPrefsSnapshot = preferencesReady
@@ -1068,7 +1136,8 @@
 			quality: showsQualityControl ? quality : undefined,
 			steps: showsStepsControl ? steps : undefined,
 			numberOfImages,
-			background
+			background,
+			references: referenceUrls.length ? [...referenceUrls] : undefined
 		},
 		status,
 		images,
@@ -1105,6 +1174,12 @@
 		if (typeof params.steps === 'number') steps = params.steps;
 		if (params.numberOfImages) numberOfImages = `${params.numberOfImages}`;
 		if (params.background) background = params.background;
+		if (Array.isArray(params.references)) {
+			referenceImages = params.references
+				.filter((url: unknown) => typeof url === 'string' && url)
+				.slice(0, MAX_REFERENCE_IMAGES)
+				.map((url: string) => ({ url }));
+		}
 		activeTab = 'workbench';
 		toast.success($i18n.t('Settings restored from history'));
 	};
@@ -1416,6 +1491,9 @@
 		try {
 			const response = await imageGenerations(localStorage.token, {
 				prompt: trimmedPrompt,
+				...(referenceUrls.length
+					? { image_url: referenceUrls[0], image_urls: [...referenceUrls] }
+					: {}),
 				model: selectedModel || selectedModelMeta?.id || selectedModelRawId || undefined,
 				model_ref: selectedModelMeta?.model_ref ?? undefined,
 				size: usesNativeAspectRatioControls ? undefined : activeSize || undefined,
@@ -1663,7 +1741,14 @@
 			<!-- The cards sit on the page: no extra section card around them (it made four
 			     nested boxes under the workspace header). -->
 			<section class="space-y-4">
-				<div class="glass-item p-4 space-y-3">
+				<!-- svelte-ignore a11y-no-static-element-interactions -->
+				<div
+					class="glass-item p-4 space-y-3"
+					on:dragover={(event) => {
+						if (event.dataTransfer?.types?.includes('Files')) event.preventDefault();
+					}}
+					on:drop={handleReferenceDrop}
+				>
 					<div class="flex items-center justify-between">
 						<div class="text-sm font-semibold text-gray-900 dark:text-gray-100">
 							{$i18n.t('Main Prompt')}
@@ -1675,6 +1760,7 @@
 						rows="5"
 						bind:value={prompt}
 						on:keydown={handleComposerKeydown}
+						on:paste={handlePromptPaste}
 						placeholder={$i18n.t('Describe the image you want to generate...')}
 						class="min-h-[8rem] w-full resize-none rounded-xl border border-gray-200/60 bg-white/85 p-3 text-sm leading-6 text-gray-900 outline-none placeholder:text-gray-400 dark:border-gray-700/50 dark:bg-gray-900/70 dark:text-gray-100 dark:placeholder:text-gray-500"
 					/>
@@ -1689,6 +1775,56 @@
 								{$i18n.t(idea)}
 							</button>
 						{/each}
+					</div>
+
+					<div class="flex flex-wrap items-center gap-2" data-image-studio-references>
+						{#each referenceImages as ref, index (ref.preview ?? ref.url)}
+							<div class="relative shrink-0">
+								<img
+									src={ref.preview ?? ref.url}
+									alt={$i18n.t('Reference image')}
+									class="size-14 rounded-xl object-cover ring-1 ring-gray-200/70 dark:ring-white/10 {ref.uploading
+										? 'opacity-50'
+										: ''}"
+								/>
+								<button
+									type="button"
+									class="absolute -right-1.5 -top-1.5 rounded-full bg-gray-900 p-0.5 text-white shadow ring-2 ring-white transition hover:bg-gray-700 dark:bg-gray-100 dark:text-gray-900 dark:ring-gray-900"
+									aria-label={$i18n.t('Remove reference image')}
+									title={$i18n.t('Remove reference image')}
+									on:click={() => removeReference(index)}
+								>
+									<XMark className="size-3" strokeWidth="2.5" />
+								</button>
+							</div>
+						{/each}
+						{#if referenceImages.length < MAX_REFERENCE_IMAGES}
+							<button
+								type="button"
+								class="inline-flex items-center gap-1.5 rounded-full border border-dashed border-gray-300 px-3 py-1.5 text-xs text-gray-600 transition hover:border-gray-400 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+								on:click={() => referenceInput?.click()}
+							>
+								<PhotoSolid className="size-3.5" />
+								{$i18n.t('Add reference image')}
+							</button>
+						{/if}
+						<span class="text-xs text-gray-500 dark:text-gray-400">
+							{referenceImages.length
+								? $i18n.t('Generates from these images (edit)')
+								: $i18n.t('Optional · paste or drop a photo here')}
+						</span>
+						<input
+							bind:this={referenceInput}
+							type="file"
+							accept="image/*"
+							multiple
+							hidden
+							on:change={(event) => {
+								const input = event.currentTarget;
+								void addReferenceFiles(input.files);
+								input.value = '';
+							}}
+						/>
 					</div>
 
 					<!-- Under the prompt on every screen: write, then generate (the button used
@@ -2482,8 +2618,19 @@
 									<div class="text-xs text-gray-600 dark:text-gray-400 line-clamp-2">
 										{image.prompt}
 									</div>
-									<div class="text-xs text-gray-500 dark:text-gray-500 mt-1">
-										{new Date(image.createdAt).toLocaleDateString()}
+									<div class="mt-1 flex items-center justify-between gap-2 text-xs text-gray-500 dark:text-gray-500">
+										<span>{new Date(image.createdAt).toLocaleDateString()}</span>
+										<button
+											type="button"
+											class="rounded-full px-2 py-0.5 font-medium text-gray-700 transition hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-800"
+											data-image-gallery-reference
+											on:click={() => {
+												addReferenceUrl(image.url);
+												activeTab = 'workbench';
+											}}
+										>
+											{$i18n.t('Use as reference')}
+										</button>
 									</div>
 								</div>
 							</div>

@@ -17,6 +17,9 @@ export type ImageGenerationRequest = {
 	background?: string;
 	quality?: 'auto' | 'low' | 'medium' | 'high' | string;
 	image_route_mode?: 'auto' | 'generations' | 'chat' | 'responses' | 'edits' | string;
+	// Source / reference images (file content URLs): the request becomes an edit.
+	image_url?: string;
+	image_urls?: string[];
 };
 
 export type ImageUsageConfig = {

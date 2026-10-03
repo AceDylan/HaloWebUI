@@ -247,6 +247,7 @@ export type HermesRunnerStopResult = {
 	chat_id: string;
 	/** False when a hermes turn was running in the chat, so no "已停止" line was added. */
 	report_shown: boolean;
+	resumable?: boolean;
 };
 
 /** Stop a background runner (reclaude / codex / agy) one of the user's chats launched. */

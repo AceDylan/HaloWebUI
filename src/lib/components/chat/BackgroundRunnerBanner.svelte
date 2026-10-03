@@ -42,7 +42,7 @@
 			const result = await stopHermesBackgroundRunner(localStorage.token, run.run_id);
 			hermesBackgroundRuns.update((runs) => runs.filter((item) => item.run_id !== run.run_id));
 			toast.success(
-				result.report_shown
+				result.report_shown && result.resumable !== false
 					? `已停止 ${run.agent}，直接回复就能让它按新说明接着做`
 					: `已停止 ${run.agent}`
 			);

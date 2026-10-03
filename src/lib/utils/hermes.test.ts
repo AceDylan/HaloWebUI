@@ -358,6 +358,11 @@ describe('接着上次: a follow-up goes back to the run whose report ends the c
 		expect(findHermesContinuation(chat({}, 'question'))?.status).toBe('question');
 		// A run stopped from the banner: the next message takes it up with new instructions.
 		expect(findHermesContinuation(chat({}, 'stopped'))?.status).toBe('stopped');
+		// Stopped before it had a session (agy before its first result): nothing to go back to.
+		const early = chat({}, 'stopped');
+		early.messages.notice.content = `[后台任务完成通知] agy 运行 ${runId} 已结束，状态：stopped。`;
+		early.messages.notice.hermes_notice = { source: 'agy-runner', run_id: runId };
+		expect(findHermesContinuation(early)).toBeNull();
 		// The notice as the backend stores it, without the text the runner wrote.
 		const stored = chat();
 		stored.messages.notice.content = '通知';

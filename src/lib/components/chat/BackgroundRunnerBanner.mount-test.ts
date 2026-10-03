@@ -68,7 +68,18 @@ describe('BackgroundRunnerBanner', () => {
 		const { get } = await import('svelte/store');
 		expect(get(stores.hermesBackgroundRuns)).toEqual([]);
 		expect(toast.success).toHaveBeenCalledTimes(1);
+		expect(toast.success.mock.calls[0][0]).toContain('直接回复就能让它按新说明接着做');
 		expect(target.querySelector('[data-halo-background-runner]')).toBeFalsy();
+	});
+
+	it('does not promise a follow-up for a run stopped before it had a session', async () => {
+		await mount();
+		api.stopHermesBackgroundRunner.mockResolvedValue({ stopped: true, report_shown: true, resumable: false });
+		button().click();
+		await sleep(10);
+		button().click();
+		await sleep(20);
+		expect(toast.success.mock.calls[0][0]).toBe('已停止 reclaude');
 	});
 
 	it('keeps the banner and says why when the stop fails', async () => {

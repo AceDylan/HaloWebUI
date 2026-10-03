@@ -667,5 +667,13 @@ async def stop_background_runner(request, user, run_id: str) -> dict:
         log.info("runner stop report for %s not shown: %s", run_id, e)
         shown = False
     log.info("stopped %s run %s from chat %s", agent, run_id, chat_id)
-    return {"stopped": True, "run_id": run_id, "agent": agent, "chat_id": chat_id, "report_shown": shown}
+    return {
+        "stopped": True,
+        "run_id": run_id,
+        "agent": agent,
+        "chat_id": chat_id,
+        "report_shown": shown,
+        # An older hermes does not say; it always had a session to go back to then.
+        "resumable": body.get("resumable") is not False,
+    }
 

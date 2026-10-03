@@ -210,6 +210,8 @@ export const findHermesContinuation = (history: ChatHistoryLike): HermesContinua
 	if (!last || last.role !== 'assistant' || last.done !== true || !last.parentId) return null;
 	const notice = parseHermesRunNotice(history?.messages?.[last.parentId]);
 	if (!notice || notice.status === 'quota_blocked') return null;
+	// Stopped before it had a session (agy before its first result): nothing to go back to.
+	if (notice.status === 'stopped' && !notice.sessionId && notice.runId) return null;
 	const runner = notice.agent.toLowerCase().replace(/-runner$/, '');
 	if (!HERMES_RUNNERS.has(runner) || !RUNNER_RUN_ID_RE.test(notice.runId)) return null;
 	return {

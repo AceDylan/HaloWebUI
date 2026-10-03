@@ -74,9 +74,19 @@
 		}
 	};
 
+	// A refused sign-in nudges the form sideways once (halo.css .halo-shake; off with reduced motion).
+	let formElement = null;
+	const nudge = () => {
+		if (!formElement) return;
+		formElement.classList.remove('halo-shake');
+		void formElement.offsetWidth;
+		formElement.classList.add('halo-shake');
+	};
+
 	const signInHandler = async () => {
 		const sessionUser = await userSignIn(email, password).catch((error) => {
 			toast.error(formatError(error));
+			nudge();
 			return null;
 		});
 
@@ -87,6 +97,7 @@
 		const sessionUser = await userSignUp(name, email, password, generateInitialsImage(name)).catch(
 			(error) => {
 				toast.error(formatError(error));
+				nudge();
 				return null;
 			}
 		);
@@ -97,6 +108,7 @@
 	const ldapSignInHandler = async () => {
 		const sessionUser = await ldapUserSignIn(ldapUsername, password).catch((error) => {
 			toast.error(formatError(error));
+			nudge();
 			return null;
 		});
 		await setSessionUser(sessionUser);
@@ -304,7 +316,9 @@
 			{:else}
 				<div class="w-full text-gray-900 dark:text-gray-100">
 					<form
+						bind:this={formElement}
 						class=" flex flex-col justify-center"
+						on:animationend={() => formElement?.classList.remove('halo-shake')}
 						on:submit={(e) => {
 							e.preventDefault();
 							submitHandler();

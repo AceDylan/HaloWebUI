@@ -1810,6 +1810,25 @@ body:has(#chat-input:focus) .halo-orb__arc {
 	box-shadow: 0 0 0 1px var(--edge);
 }
 
+/* A refused sign-in: the form shakes its head once. */
+.halo-shake {
+	animation: halo-shake 380ms var(--ease-out-quart);
+}
+@keyframes halo-shake {
+	20% {
+		transform: translateX(-6px);
+	}
+	40% {
+		transform: translateX(5px);
+	}
+	60% {
+		transform: translateX(-3px);
+	}
+	80% {
+		transform: translateX(2px);
+	}
+}
+
 /* ---------------------------------------------------------------- error / not found
    The halo with a piece missing: a still spectrum ring open at the top-right, and the planet
    from the sign-in stage drifting just outside the gap (a turning partial ring would read as
@@ -2560,7 +2579,8 @@ body:has(#chat-input:focus) .halo-orb__arc {
 	.halo-rise,
 	[data-halo-copy-id]::after,
 	.halo-lost__planet,
-	.group:hover .halo-theme-mini__orb {
+	.group:hover .halo-theme-mini__orb,
+	.halo-shake {
 		animation: none !important;
 	}
 	.halo-mark__ring,

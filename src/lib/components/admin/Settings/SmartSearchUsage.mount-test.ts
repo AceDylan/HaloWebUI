@@ -59,7 +59,7 @@ describe('Smart Search usage panel', () => {
 		expect(text).toContain('百度搜索：每天 免费 50，已用 本机记账约 4');
 		expect(text).toContain('额度用完、今天先跳过： 智谱');
 		expect(text).toContain('近 7 天免费读到网页 23 页');
-		expect(text).toContain('Hermes 40，HaloWebUI 17');
+		expect(text).toContain('近 7 天调用次数：Hermes 40，HaloWebUI 17');
 		// rows sort by calls: direct first
 		expect(target.querySelector('tbody tr td').textContent).toContain('本机直抓');
 

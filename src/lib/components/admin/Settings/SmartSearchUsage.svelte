@@ -60,6 +60,7 @@
 		? Object.entries(usage.providers).filter(([, entry]) => entry.free_allowance)
 		: [];
 	$: freeReads = usage?.free_page_reads ?? {};
+	$: freePages = (freeReads.direct ?? 0) + (freeReads.cache ?? 0);
 	$: origins = Object.entries(usage?.origins ?? {}).sort(([, a], [, b]) => b - a);
 
 	const allowanceUsed = (provider: string, used: number): string => {
@@ -161,15 +162,19 @@
 		</div>
 	{/if}
 
-	{#if (freeReads.direct ?? 0) + (freeReads.cache ?? 0) > 0 || origins.length > 0}
+	{#if freePages > 0 || origins.length > 0}
 		<div class="text-xs text-gray-400">
-			{#if (freeReads.direct ?? 0) + (freeReads.cache ?? 0) > 0}
+			{#if freePages > 0}
 				{tr('近 7 天免费读到网页', 'Pages read for free (7d)')}
-				{(freeReads.direct ?? 0) + (freeReads.cache ?? 0)}
+				{freePages}
 				{tr('页', '')}
 			{/if}
 			{#if origins.length > 0}
-				· {origins.map(([origin, count]) => `${ORIGIN_NAMES[origin] ?? origin} ${count}`).join('，')}
+				<!-- calls per caller, not pages: say so, or "Hermes 78" reads as 78 pages -->
+				{freePages > 0 ? '·' : ''}
+				{tr('近 7 天调用次数', 'Calls (7d)')}：{origins
+					.map(([origin, count]) => `${ORIGIN_NAMES[origin] ?? origin} ${count}`)
+					.join('，')}
 			{/if}
 		</div>
 	{/if}

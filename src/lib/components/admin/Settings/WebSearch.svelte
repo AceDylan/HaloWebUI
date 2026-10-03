@@ -251,8 +251,8 @@
 	const getLoaderAvailabilityMessage = (engine: string) => {
 		if (engine === 'firecrawl') {
 			return tr(
-				'当前部署环境未启用 Firecrawl 网页加载能力。请检查服务端依赖，或切换为其他网页加载方式。',
-				'Firecrawl web loading is not enabled in the current deployment. Check the server dependencies or switch to another web loading method.'
+				'当前部署没有安装 Firecrawl，读网页时会自动改用内置加载器。要用 Firecrawl，请在服务端安装 firecrawl-py。',
+				'Firecrawl is not installed in this deployment, so pages are read with the built-in loader instead. Install firecrawl-py on the server to use Firecrawl.'
 			);
 		}
 
@@ -819,10 +819,9 @@
 
 	const submitHandler = async () => {
 		if (!webConfig) return false;
-		if (selectedLoaderUnavailable) {
-			toast.error(selectedLoaderCapabilityMessage || $i18n.t('Current web loader is unavailable.'));
-			return false;
-		}
+		// An unavailable Firecrawl loader only warns: the backend reads pages with
+		// the built-in loader instead, so refusing to save would block every
+		// other web search setting.
 
 		// Sync UI values back to webConfig
 		webConfig.YOUTUBE_LOADER_LANGUAGE = youtubeLanguage;

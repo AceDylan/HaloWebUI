@@ -74,7 +74,7 @@
 </script>
 
 <div class="space-y-2 rounded-xl border border-gray-100 p-3 dark:border-gray-800">
-	<div class="flex items-center justify-between gap-2">
+	<div class="flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
 		<div class="text-xs font-medium text-gray-600 dark:text-gray-300">
 			{tr('Smart Search 用量', 'Smart Search usage')}
 			{#if usage?.today}
@@ -100,30 +100,32 @@
 	{:else if rows.length > 0}
 		<div class="overflow-x-auto">
 			<table class="w-full text-xs tabular-nums">
-				<thead class="text-gray-400">
+				<thead class="whitespace-nowrap text-gray-400">
 					<tr>
 						<th class="py-1 pr-2 text-left font-normal">{tr('来源', 'Source')}</th>
-						<th class="px-2 py-1 text-right font-normal">{tr('今天', 'Today')}</th>
-						<th class="px-2 py-1 text-right font-normal">{tr('本月', 'Month')}</th>
-						<th class="px-2 py-1 text-right font-normal">{tr('近 7 天出错', 'Errors (7d)')}</th>
-						<th class="py-1 pl-2 text-right font-normal">{tr('平均耗时', 'Avg time')}</th>
+						<th class="px-1.5 py-1 text-right font-normal">{tr('今天', 'Today')}</th>
+						<th class="px-1.5 py-1 text-right font-normal">{tr('本月', 'Month')}</th>
+						<th class="hidden px-1.5 py-1 text-right font-normal sm:table-cell">{tr('7天出错', 'Errors 7d')}</th>
+						<th class="hidden py-1 pl-1.5 text-right font-normal sm:table-cell">{tr('平均耗时', 'Avg')}</th>
 					</tr>
 				</thead>
 				<tbody class="text-gray-600 dark:text-gray-300">
 					{#each rows as [provider, entry] (provider)}
 						<tr>
 							<td class="py-0.5 pr-2">
-								{PROVIDER_NAMES[provider] ?? provider}
+								<div class="whitespace-nowrap">{PROVIDER_NAMES[provider] ?? provider}</div>
 								{#if FREE_PROVIDERS.has(provider)}
-									<span class="text-gray-400">· {tr('免费', 'free')}</span>
+									<div class="text-[11px] leading-tight text-gray-400">{tr('免费', 'free')}</div>
 								{:else if entry.paid_unit}
-									<span class="text-gray-400">· {entry.paid_unit}</span>
+									<div class="text-[11px] leading-tight text-gray-400">{entry.paid_unit}</div>
 								{/if}
 							</td>
-							<td class="px-2 py-0.5 text-right">{entry.today?.calls ?? 0}</td>
-							<td class="px-2 py-0.5 text-right">{entry.month?.calls ?? 0}</td>
-							<td class="px-2 py-0.5 text-right">{entry.window?.errors ?? 0}</td>
-							<td class="py-0.5 pl-2 text-right">
+							<td class="whitespace-nowrap px-1.5 py-0.5 text-right">{entry.today?.calls ?? 0}</td>
+							<td class="whitespace-nowrap px-1.5 py-0.5 text-right">{entry.month?.calls ?? 0}</td>
+							<td class="hidden whitespace-nowrap px-1.5 py-0.5 text-right sm:table-cell">
+								{entry.window?.errors ?? 0}
+							</td>
+							<td class="hidden whitespace-nowrap py-0.5 pl-1.5 text-right sm:table-cell">
 								{entry.window?.avg_ms ? `${(entry.window.avg_ms / 1000).toFixed(1)}s` : '—'}
 							</td>
 						</tr>

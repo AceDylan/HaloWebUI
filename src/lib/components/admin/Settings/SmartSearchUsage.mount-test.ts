@@ -54,8 +54,8 @@ describe('Smart Search usage panel', () => {
 		await sleep(20);
 
 		const text = target.textContent.replace(/\s+/g, ' ');
-		expect(text).toContain('本机直抓 · 免费');
-		expect(text).toContain('智谱 · ¥0.05/次');
+		expect(text).toContain('本机直抓 免费');
+		expect(text).toContain('智谱 ¥0.05/次');
 		expect(text).toContain('百度搜索：每天 免费 50，已用 本机记账约 4');
 		expect(text).toContain('额度用完、今天先跳过： 智谱');
 		expect(text).toContain('近 7 天免费读到网页 23 页');

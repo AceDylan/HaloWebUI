@@ -1134,6 +1134,57 @@ def _attachment_host_paths(metadata, user, images: bool = False) -> list[tuple[s
     return found
 
 
+def _image_parts_as_host_paths(run_input, user):
+    """A run input with pictures, as text for a runner: (text with a note listing the
+    pictures' paths on this host, number of pictures), or None when it has no pictures or
+    one of them is not a HaloWebUI file this user may read (a pasted data URL).
+
+    hermes' fast dispatch takes text only: with a picture attached, a /reclaude message
+    went through a model turn instead (135 s to start, 2026-10-01). The runners read
+    images from disk (Claude Code's Read, codex, agy), so they get the paths."""
+    if not (isinstance(run_input, list) and run_input and isinstance(run_input[-1], dict)):
+        return None
+    content = run_input[-1].get("content")
+    if not isinstance(content, list):
+        return None
+    host_dir = _host_data_dir()
+    if not host_dir:
+        return None
+    try:
+        from open_webui.models.files import Files
+        from open_webui.utils.chat_image_refs import extract_chat_image_file_id
+    except Exception:
+        return None
+    data_dir = str(DATA_DIR).rstrip("/")
+    texts, pictures = [], []
+    for part in content:
+        if not isinstance(part, dict):
+            continue
+        kind = part.get("type")
+        if kind in {"text", "input_text"}:
+            texts.append(str(part.get("text") or ""))
+            continue
+        if kind not in {"image", "image_url", "input_image"}:
+            continue
+        image = part.get("image_url")
+        url = image.get("url") if isinstance(image, dict) else (image or part.get("url"))
+        file_id = extract_chat_image_file_id(url)
+        record = Files.get_file_by_id(file_id) if file_id else None
+        if record is None or not record.path or not str(record.path).startswith(data_dir + "/"):
+            return None
+        if record.user_id != getattr(user, "id", None) and getattr(user, "role", "") != "admin":
+            return None
+        meta = record.meta if isinstance(record.meta, dict) else {}
+        name = str(meta.get("name") or record.filename or os.path.basename(record.path))
+        pictures.append((name, host_dir + str(record.path)[len(data_dir):]))
+    if not pictures:
+        return None
+    lines = ["[附件原文件] 消息里附带的图片在本机，直接打开这些路径查看："]
+    lines.extend(f"- {name}: {path}" for name, path in pictures)
+    text = "\n".join(part for part in texts if part.strip()).strip()
+    return (f"{text}\n\n" if text else "") + "\n".join(lines), len(pictures)
+
+
 def _attachment_note(paths: list[tuple[str, str]]) -> str:
     if not paths:
         return ""
@@ -1223,6 +1274,14 @@ def _build_run_payload(form_data, metadata, upstream_model_id, user=None):
         else None
     )
     if not continuing:
+        if (options.get("dispatch") in HERMES_DISPATCH_COMMANDS or continue_run) or _dispatch_runner(
+            run_input
+        ):
+            # A runner gets the pictures as files, and hermes can hand a text input
+            # straight to it (its fast dispatch skips multimodal input).
+            as_text = _image_parts_as_host_paths(run_input, user)
+            if as_text is not None:
+                run_input = as_text[0]
         run_input = _append_run_input_text(
             run_input, _attachment_note(_attachment_host_paths(metadata, user))
         )

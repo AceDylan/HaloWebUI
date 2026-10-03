@@ -1113,3 +1113,40 @@ def test_a_failed_run_is_explained(monkeypatch):
     hermes = _Hermes(events=[{"event": "run.failed", "error": "Non-streaming API call timed out after 90s"}])
     final, _, _ = _run(monkeypatch, hermes)
     assert final["error"]["content"].startswith("模型 90 秒没有响应")
+
+
+def test_a_dispatched_message_hands_its_pictures_over_by_host_path(monkeypatch, tmp_path):
+    # 2026-10-01: a /anyclaude message with a screenshot was multimodal, hermes' fast dispatch
+    # skipped it and a model turn took 135 s to start the run. Runners read pictures from disk.
+    monkeypatch.setenv("HERMES_AGENT_HOST_DATA_DIR", "/srv/halo-data")
+    record = SimpleNamespace(
+        path=f"{tmp_path}/uploads/i1_image.png", user_id="user-1", filename="image.png",
+        meta={"name": "截图.png"},
+    )
+    import open_webui.models.files as files_module
+
+    monkeypatch.setattr(files_module.Files, "get_file_by_id", lambda file_id: {"i1": record}.get(file_id))
+    message = {
+        "role": "user",
+        "content": [
+            {"type": "text", "text": "看看这个图里的编排界面"},
+            {"type": "image_url", "image_url": {"url": "openwebui-file://i1"}},
+        ],
+    }
+    user = SimpleNamespace(id="user-1", role="user")
+
+    def build(options):
+        return hermes_agent._build_run_payload(
+            {"messages": [message], "hermes_options": options}, {"chat_id": "chat-1"}, "hermes-agent", user
+        )
+
+    payload = build({"dispatch": "anyclaude"})
+    assert isinstance(payload["input"], str)
+    assert payload["input"].startswith("/anyclaude 看看这个图里的编排界面\n\n[附件原文件] 消息里附带的图片在本机")
+    assert "- 截图.png: /srv/halo-data/uploads/i1_image.png" in payload["input"]
+    assert payload["dispatch"]["runner"] == "anyclaude"
+    # Hermes itself (no dispatch) still sees the picture.
+    assert isinstance(build({})["input"], list)
+    # A picture that is not a HaloWebUI file (a pasted data URL) keeps the multimodal input.
+    message["content"][1]["image_url"]["url"] = "data:image/png;base64,AAAA"
+    assert isinstance(build({"dispatch": "anyclaude"})["input"], list)

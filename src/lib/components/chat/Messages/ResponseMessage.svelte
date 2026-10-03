@@ -1748,7 +1748,7 @@
 												class="halo-image-card relative {naturalImage
 													? ''
 													: imageGenerationResultSlotCount === 1 && file && !(file.type === 'image' && file.url)
-														? 'flex min-h-36'
+														? 'min-h-36'
 														: 'aspect-[4/5]'} bg-gray-100 dark:bg-gray-950"
 											>
 												{#if file?.type === 'image' && file.url}
@@ -1770,7 +1770,7 @@
 													{/if}
 												{:else if file}
 													<div
-														class="flex h-full w-full flex-col justify-between gap-3 bg-red-50 p-3 text-red-800 dark:bg-red-950/30 dark:text-red-200"
+														class="flex h-full min-h-36 w-full flex-col justify-between gap-3 bg-red-50 p-3 text-red-800 dark:bg-red-950/30 dark:text-red-200"
 													>
 													<div class="flex items-center gap-2 text-sm font-medium">
 														<CircleAlert className="size-4 shrink-0" strokeWidth="1.9" />

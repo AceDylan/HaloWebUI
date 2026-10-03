@@ -1749,6 +1749,17 @@ _AUTO_WEB_SEARCH_EXPLICIT_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Greetings, thanks and "what can you do": nothing to look up. Each one used to cost a decision
+# call to the chat's own model first (task.auto_web_search_decision.use_main_model), 143 s for
+# claude-chat on "你能做什么" (2026-09-30); 20 of 26 decisions in ten days were "no search".
+_AUTO_WEB_SEARCH_SMALL_TALK_RE = re.compile(
+    r"^(?:(?:你好|您好|hi|hello|hey|嗨|哈喽|早上好|中午好|下午好|晚上好|谢谢你?|多谢|感谢|辛苦了|在吗|在不在|"
+    r"你是谁|你叫什么(?:名字)?|你是(?:什么|哪个)模型|你(?:都)?能(?:做|干)(?:些)?什么|你(?:都)?会(?:做|干)?(?:些)?什么|"
+    r"你(?:更|最)?擅长(?:做)?什么|你有(?:什么|哪些)(?:功能|能力|本事)|(?:请)?介绍(?:一下)?你?自己|自我介绍(?:一下)?)"
+    r"(?:呢|吗|呀|啊|吧|哈)?[\s,，.。!！?？~～、]*)+$",
+    re.IGNORECASE,
+)
+
 _NATIVE_WEB_SEARCH_RETRY_PATTERNS = (
     "responses api",
     "/responses",
@@ -1989,6 +2000,14 @@ def _quick_auto_web_search_decision(messages: list[dict]) -> Optional[dict]:
             "source": "heuristic",
         }
 
+    if len(text) <= 40 and _AUTO_WEB_SEARCH_SMALL_TALK_RE.match(text):
+        return {
+            "should_search": False,
+            "queries": [],
+            "reason": "small_talk",
+            "source": "heuristic",
+        }
+
     return None
 
 
@@ -2086,6 +2105,7 @@ def _describe_auto_web_search_skip(reason: Any) -> str:
         "search_query_generation_disabled": "（搜索词生成功能已关闭）",
         "decision_failed": "（联网判断出错，已保守跳过）",
         "empty_user_message": "",
+        "small_talk": "（寒暄或问我能做什么，不用查）",
     }
     suffix = suffix_map.get(str(reason or ""), "")
     return f"智能联网：本次判断无需联网，已直接用模型已有知识回答。{suffix}".strip()

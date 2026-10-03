@@ -212,3 +212,11 @@ def test_native_web_search_halo_retry_is_single_use(allow_retry, expected):
         )
         is expected
     )
+
+
+def test_quick_auto_web_search_skips_small_talk_without_a_model_call():
+    for text in ["你好", "你能做什么 你更擅长什么呢？", "谢谢！", "你是谁呀", "介绍一下你自己", "Hello"]:
+        decision = _quick_auto_web_search_decision([{"role": "user", "content": text}])
+        assert decision == {"should_search": False, "queries": [], "reason": "small_talk", "source": "heuristic"}, text
+    for text in ["你好，今天武夷山天气怎么样", "你能做什么样的旅游攻略，帮我规划杭州", "谢谢，再帮我看看旭旭宝宝开播没"]:
+        assert _quick_auto_web_search_decision([{"role": "user", "content": text}]) is None, text

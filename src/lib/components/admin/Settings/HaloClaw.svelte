@@ -378,6 +378,26 @@
 <div class="flex h-full min-h-0 flex-col text-sm">
 	<div class="h-full space-y-6 overflow-y-auto scrollbar-hidden">
 		<div class="max-w-6xl mx-auto space-y-6">
+				<section class="halo-settings-head glass-section p-5">
+					<div class="flex items-start gap-3">
+						<div class="glass-icon-badge">
+							<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-[18px]" aria-hidden="true">
+								<path stroke-linecap="round" stroke-linejoin="round" d="M6 12 3.269 3.125A59.769 59.769 0 0 1 21.485 12 59.768 59.768 0 0 1 3.27 20.875L5.999 12Zm0 0h7.5" />
+							</svg>
+						</div>
+						<div class="min-w-0">
+							<div class="halo-settings-title text-base font-semibold text-gray-800 dark:text-gray-100">
+								{$i18n.t('HaloClaw')}
+							</div>
+							<p class="halo-settings-desc mt-1 text-xs text-gray-400 dark:text-gray-500">
+								{$i18n.t(
+									'Chat-platform gateways (Telegram and others) and their defaults. The default reasoning effort here is also the one Hermes uses everywhere: the web, Telegram and the API.'
+								)}
+							</p>
+						</div>
+					</div>
+				</section>
+
 				<!-- Global Settings -->
 				<section
 					bind:this={sectionEl_main}
@@ -411,7 +431,9 @@
 										/>
 									</svg>
 								</div>
-								<div class="text-base font-semibold text-gray-800 dark:text-gray-100">HaloClaw</div>
+								<div class="text-base font-semibold text-gray-800 dark:text-gray-100">
+									{$i18n.t('Gateway Defaults')}
+								</div>
 							</div>
 							<div class="flex items-center gap-3">
 								<span
@@ -599,7 +621,7 @@
 							<div class="flex items-center gap-3">
 								<button
 									type="button"
-									class="px-3 py-1 text-xs font-medium bg-blue-500 hover:bg-blue-600 text-white rounded-full transition"
+									class="px-3 py-1 text-xs font-medium rounded-full border border-[var(--surface-border-strong)] text-gray-700 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-white/5 transition"
 									on:click|stopPropagation={() => {
 										editingGateway = null;
 										showGatewayModal = true;

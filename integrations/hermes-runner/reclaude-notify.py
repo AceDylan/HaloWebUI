@@ -52,7 +52,7 @@ import time
 import urllib.error
 import urllib.request
 
-SCRIPT_VERSION = "2026-10-03.2"
+SCRIPT_VERSION = "2026-10-03.3"
 CONFIG_FILE = "/root/.hermes/reclaude-runner.env"
 REQUIRED_CONFIG_KEYS = ("HALOWEBUI_NOTIFY_URL", "HALOWEBUI_NOTIFY_TOKEN")
 STATE_DB = "/root/.hermes/state.db"
@@ -534,6 +534,16 @@ def _meta_epoch(value):
     return None
 
 
+def _chat_duration(ms):
+    """'2 小时 3 分', '4 分 8 秒', '45 秒': the Telegram report's time, read on a phone."""
+    seconds = int(ms) // 1000
+    minutes, sec = divmod(seconds, 60)
+    hours, minutes = divmod(minutes, 60)
+    if hours:
+        return f"{hours} 小时 {minutes} 分" if minutes else f"{hours} 小时"
+    return f"{minutes} 分 {sec} 秒" if minutes else f"{sec} 秒"
+
+
 def _human_duration(ms):
     seconds = int(ms) // 1000
     minutes, sec = divmod(seconds, 60)
@@ -668,8 +678,11 @@ def build_digest(run_id, status, run_dir, session_id, agent="reclaude", chat=Fal
     figures = report_figures(run_dir)
     details = []
     if summary.get("model"):
-        details.append(str(summary["model"]))
-    if session_id:
+        # "claude-opus-5-5[1m]": the context-window tag is not something to read.
+        details.append(re.sub(r"\[[^\]]*\]$", "", str(summary["model"])))
+    if session_id and not chat:
+        # Telegram: the session id helps nobody reading on a phone (the run id in the first
+        # line is what "继续" and a quoted reply go by); HaloWebUI keeps it in 详情.
         details.append(f"{SESSION_LABELS.get(agent, 'session')} {_short_session(session_id)}")
     amounts = []
     if _cost_label(figures["cost"]):
@@ -677,7 +690,7 @@ def build_digest(run_id, status, run_dir, session_id, agent="reclaude", chat=Fal
     if figures["turns"]:
         amounts.append(f"{int(figures['turns'])} 轮")
     if figures["duration_ms"]:
-        amounts.append(_human_duration(figures["duration_ms"]))
+        amounts.append(_chat_duration(figures["duration_ms"]) if chat else _human_duration(figures["duration_ms"]))
     elif summary.get("duration_human"):
         amounts.append(str(summary["duration_human"]))
     if figures["segments"] > 1 and amounts:
@@ -699,6 +712,8 @@ def build_digest(run_id, status, run_dir, session_id, agent="reclaude", chat=Fal
         head, _, last = body.rpartition("\n")
         if QUOTA_FOOTER_MARKER in last:
             body, footer = head.rstrip(), last.strip()
+            # reclaude-quota.py puts a rule above its line; without the line it dangles.
+            body = re.sub(r"\n+-{3,}\s*$", "", body).rstrip()
     if len(body) > max_chars:
         rest = len(body) - max_chars
         body = (body[:max_chars].rstrip()

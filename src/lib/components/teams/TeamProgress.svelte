@@ -22,7 +22,7 @@
 
 	$: total = Math.max(1, counts.total);
 	$: segments = [
-		{ key: 'done', n: counts.done, cls: 'bg-emerald-500', label: '完成' },
+		{ key: 'done', n: counts.done, cls: 'bg-gray-400 dark:bg-gray-500', label: '完成' },
 		{ key: 'running', n: counts.running, cls: 'bg-sky-500 team-progress-live', label: '执行中' },
 		{ key: 'attention', n: counts.attention, cls: 'bg-red-500', label: '需处理' },
 		{ key: 'waiting', n: counts.waiting, cls: 'bg-gray-900/10 dark:bg-white/10', label: '等待' }
@@ -32,6 +32,8 @@
 	$: shortWorkspace = workspace.split('/').filter(Boolean).slice(-2).join('/');
 	$: took = startedAt ? (finishedAt ?? $now) - startedAt : null;
 	const R = 15;
+	// a finished team closes the halo: the ring turns into the spectrum (ion → violet → solar)
+	const haloId = `team-halo-${Math.random().toString(36).slice(2, 8)}`;
 	const C = 2 * Math.PI * R;
 
 	const copy = async () => {
@@ -48,6 +50,13 @@
 	<div class="flex flex-wrap items-center gap-x-5 gap-y-2">
 		<div class="flex items-center gap-3">
 			<svg class="size-10 -rotate-90" viewBox="0 0 36 36" aria-hidden="true">
+				<defs>
+					<linearGradient id={haloId} x1="0" y1="0" x2="1" y2="1">
+						<stop offset="0" style="stop-color: var(--halo-ion)" />
+						<stop offset="0.6" style="stop-color: var(--halo-violet)" />
+						<stop offset="1" style="stop-color: var(--halo-solar)" />
+					</linearGradient>
+				</defs>
 				<circle
 					cx="18"
 					cy="18"
@@ -63,7 +72,8 @@
 					fill="none"
 					stroke-width="3"
 					stroke-linecap="round"
-					class="ring-arc {complete ? 'stroke-emerald-500' : 'stroke-sky-500'}"
+					class="ring-arc {complete ? '' : 'stroke-sky-500'}"
+					stroke={complete ? `url(#${haloId})` : undefined}
 					stroke-dasharray="{(C * percent) / 100} {C}"
 				/>
 			</svg>

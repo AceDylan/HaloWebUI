@@ -155,7 +155,7 @@
 		--stage-tone: var(--tm-warn);
 	}
 	.stage[data-tone='done'] {
-		--stage-tone: var(--tm-ok);
+		--stage-tone: var(--tm-done);
 	}
 	.stage[data-tone='ended'] {
 		--stage-tone: var(--tm-muted);
@@ -169,7 +169,7 @@
 	}
 	.step[data-state='done'] .dot {
 		border-color: transparent;
-		background: hsl(var(--tm-ok));
+		background: hsl(var(--tm-done));
 		color: white;
 	}
 	.step[data-state='active'] .dot {
@@ -197,7 +197,7 @@
 		background: hsl(var(--tm-line-strong));
 	}
 	.bar[data-state='done'] {
-		background: hsl(var(--tm-ok) / 0.6);
+		background: hsl(var(--tm-done) / 0.6);
 	}
 	@keyframes stage-beat {
 		50% {

@@ -488,7 +488,7 @@
 			{#if running && (conclusionBrief?.status || finished)}
 				<a
 					href="/teams/{teamId}/conclusion"
-					class="tm-btn-ghost hidden !text-emerald-700 sm:inline-flex dark:!text-emerald-300"
+					class="tm-btn-ghost hidden !text-[hsl(var(--tm-accent))] sm:inline-flex"
 					data-header-conclusion
 					><svg class="size-3.5" viewBox="0 0 16 16" fill="none" aria-hidden="true"
 						><path
@@ -721,7 +721,7 @@
 						data-completed-banner
 					>
 						<span
-							class="check grid size-9 shrink-0 place-items-center rounded-full text-white"
+							class="check relative grid size-9 shrink-0 place-items-center rounded-full"
 							aria-hidden="true"
 							><svg class="size-4" viewBox="0 0 16 16" fill="none"
 								><path
@@ -764,7 +764,7 @@
 								{#if acceptance.status === 'checking'}
 									<span class="tm-shimmer text-gray-500">负责人在对照目标验收…</span>
 								{:else if acceptance.status === 'ready' && acceptance.verdict === 'met'}
-									<span class="font-semibold text-emerald-700 dark:text-emerald-300"
+									<span class="font-semibold text-gray-900 dark:text-gray-50"
 										>负责人验收：目标已达成</span
 									>{#if acceptance.summary}<span class="text-gray-500">
 											· {acceptance.summary}</span
@@ -984,7 +984,7 @@
 							>
 								<span class="flex items-center gap-1.5"
 									><span
-										class="h-0.5 w-4 rounded bg-emerald-500"
+										class="h-0.5 w-4 rounded bg-gray-500"
 										aria-hidden="true"
 									/>前置任务已完成</span
 								>
@@ -1039,7 +1039,7 @@
 												}}
 												data-aside-tab={value}
 												>{label}{#if value === 'conclusion' && conclusionBrief?.status === 'ready' && asideTab !== 'conclusion'}<span
-														class="absolute right-1 top-1 size-1.5 rounded-full bg-emerald-500"
+														class="absolute right-1 top-1 size-1.5 rounded-full bg-[hsl(var(--tm-accent))]"
 														aria-label="结论已生成"
 													/>{/if}</button
 											>
@@ -1108,14 +1108,47 @@
 	.accept {
 		border-color: hsl(var(--tm-line));
 	}
+	/* the one celebratory moment: the halo closes around an ink check (it used to be a green disc) */
 	.done-banner {
-		background: radial-gradient(120% 160% at 0% 0%, hsl(var(--tm-ok) / 0.14), transparent 55%),
+		background: radial-gradient(120% 160% at 0% 0%, hsl(var(--tm-accent) / 0.08), transparent 55%),
 			hsl(var(--tm-surface));
-		border-color: hsl(var(--tm-ok) / 0.28);
+		border-color: hsl(var(--tm-line-strong));
 	}
 	.check {
-		background: linear-gradient(160deg, hsl(152 70% 48%), hsl(162 80% 34%));
-		box-shadow: 0 6px 18px -6px hsl(158 70% 40% / 0.7);
+		color: hsl(var(--tm-ink));
+		background: hsl(var(--tm-surface));
+		box-shadow: 0 6px 18px -8px hsl(var(--tm-violet) / 0.55);
+	}
+	.check::before {
+		content: '';
+		position: absolute;
+		inset: 0;
+		padding: 2px;
+		border-radius: inherit;
+		background: conic-gradient(
+			from 210deg,
+			var(--halo-ion),
+			var(--halo-violet),
+			var(--halo-solar),
+			var(--halo-ion)
+		);
+		-webkit-mask:
+			linear-gradient(#000 0 0) content-box,
+			linear-gradient(#000 0 0);
+		-webkit-mask-composite: xor;
+		mask-composite: exclude;
+		animation: halo-close 0.9s cubic-bezier(0.22, 1, 0.36, 1) both;
+	}
+	@keyframes halo-close {
+		from {
+			opacity: 0;
+			transform: rotate(-150deg) scale(0.8);
+		}
+	}
+	@media (prefers-reduced-motion: reduce) {
+		.check::before {
+			animation: none;
+		}
 	}
 	.check path {
 		stroke-dasharray: 1;

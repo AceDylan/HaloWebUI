@@ -97,7 +97,7 @@
 		box-shadow: var(--tm-shadow-lift);
 	}
 	.node[data-tone='done'] {
-		background: linear-gradient(180deg, hsl(var(--tm-ok) / 0.06), transparent 60%),
+		background: linear-gradient(180deg, hsl(var(--tm-done) / 0.05), transparent 60%),
 			hsl(var(--tm-surface));
 	}
 	.node[data-tone='fail'] {

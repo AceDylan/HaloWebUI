@@ -19,6 +19,8 @@
 	--tm-accent: 227 92% 57%;
 	--tm-accent-2: 192 95% 52%;
 	--tm-ok: 158 64% 42%;
+	/* done is settled ink, not a second accent: green stays for "added" / "available" only */
+	--tm-done: 228 10% 44%;
 	--tm-warn: 38 92% 50%;
 	--tm-bad: 0 72% 54%;
 	--tm-violet: 262 83% 62%;
@@ -39,6 +41,7 @@
 	--tm-accent: 222 100% 72%;
 	--tm-accent-2: 190 90% 60%;
 	--tm-ok: 156 60% 52%;
+	--tm-done: 226 10% 64%;
 	--tm-warn: 40 95% 60%;
 	--tm-bad: 0 85% 66%;
 	--tm-violet: 262 90% 74%;

@@ -27,7 +27,7 @@
 
 	const MARK: Record<string, string> = {
 		fail: 'bg-red-500',
-		handoff: 'bg-emerald-500',
+		handoff: 'bg-gray-500 dark:bg-gray-400',
 		team: 'bg-indigo-500',
 		user: 'bg-violet-500',
 		message: 'bg-sky-500'
@@ -94,10 +94,10 @@
 >
 	{#if live}
 		<span
-			class="inline-flex items-center gap-1.5 font-semibold tracking-wide text-emerald-700 dark:text-emerald-300"
+			class="inline-flex items-center gap-1.5 font-semibold tracking-wide text-[hsl(var(--tm-accent))]"
 		>
 			<span
-				class="tm-pulse-dot size-2 rounded-full bg-emerald-500 text-emerald-500"
+				class="tm-pulse-dot size-2 rounded-full bg-[hsl(var(--tm-accent))] text-[hsl(var(--tm-accent))]"
 				aria-hidden="true"
 			/>实时
 		</span>
@@ -143,7 +143,7 @@
 		</div>
 		<button
 			type="button"
-			class="tm-btn-ghost !text-emerald-700 dark:!text-emerald-300"
+			class="tm-btn-ghost !text-[hsl(var(--tm-accent))]"
 			on:click={goLive}>回到实时</button
 		>
 	{/if}
@@ -205,7 +205,7 @@
 		outline: none;
 	}
 	[data-live='true'] .scrub {
-		background: linear-gradient(90deg, hsl(var(--tm-ok) / 0.55), hsl(var(--tm-ok)));
+		background: linear-gradient(90deg, hsl(var(--tm-accent) / 0.55), hsl(var(--tm-accent)) 60%, hsl(var(--tm-violet)));
 	}
 	.scrub::-webkit-slider-thumb {
 		-webkit-appearance: none;
@@ -226,8 +226,8 @@
 		cursor: pointer;
 	}
 	[data-live='true'] .scrub::-webkit-slider-thumb {
-		border-color: hsl(var(--tm-ok));
-		box-shadow: 0 0 0 4px hsl(var(--tm-ok) / 0.15);
+		border-color: hsl(var(--tm-violet));
+		box-shadow: 0 0 0 4px hsl(var(--tm-violet) / 0.15);
 	}
 	.scrub:disabled {
 		opacity: 0.5;

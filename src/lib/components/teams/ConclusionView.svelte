@@ -255,7 +255,7 @@
 					<div class="w-full max-w-[14rem]">
 						<div class="h-1.5 overflow-hidden rounded-full bg-gray-500/10">
 							<div
-								class="h-full rounded-full bg-emerald-500 transition-[width] duration-500"
+								class="h-full rounded-full bg-[hsl(var(--tm-accent))] transition-[width] duration-500"
 								style="width:{Math.round((progress.done / progress.total) * 100)}%"
 							/>
 						</div>
@@ -306,7 +306,7 @@
 					<button type="button" class="tm-btn-ghost" on:click={copy} aria-live="polite">
 						{#if copied}
 							<svg
-								class="size-3.5 text-emerald-600"
+								class="size-3.5 text-[hsl(var(--tm-accent))]"
 								viewBox="0 0 16 16"
 								fill="none"
 								aria-hidden="true"
@@ -564,7 +564,7 @@
 										title={f.path}>{f.path}</span
 									>
 									{#if included.has(f.path)}<span
-											class="shrink-0 rounded-full bg-emerald-500/10 px-1.5 py-0.5 text-[10px] text-emerald-700 dark:text-emerald-300"
+											class="shrink-0 rounded-full bg-gray-500/10 px-1.5 py-0.5 text-[10px] text-gray-600 dark:text-gray-300"
 											title="这个文件的全文已经放在上面的结果里"
 											data-file-included>全文在上面</span
 										>{/if}

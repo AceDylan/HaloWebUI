@@ -185,8 +185,8 @@
 			};
 		if (ev.type === 'handoff')
 			return {
-				dot: 'bg-emerald-500',
-				text: 'text-emerald-700 dark:text-emerald-300',
+				dot: 'bg-gray-500 dark:bg-gray-400',
+				text: 'text-gray-900 dark:text-gray-100',
 				label: ev.data?.to?.length
 					? `完成并交接 → ${ev.data.to.map((t) => t.member).join('、')}`
 					: '完成',
@@ -548,7 +548,7 @@
 					<div>
 						<div class="tm-eyebrow">结果 / 交接</div>
 						<div
-							class="tm-scroll mt-1 max-h-96 overflow-y-auto rounded-xl border border-emerald-500/20 bg-emerald-500/[0.05] px-3 py-2"
+							class="tm-scroll mt-1 max-h-96 overflow-y-auto rounded-xl border border-gray-900/[0.08] bg-gray-500/[0.05] px-3 py-2 dark:border-white/[0.08] dark:bg-white/[0.03]"
 							data-task-result
 						>
 							<ReportMarkdown id={`team-task-${task.key}`} content={resultMd} />
@@ -615,7 +615,7 @@
 									<button
 										type="button"
 										class="inline-flex items-center gap-1 {follow
-											? 'text-emerald-600 dark:text-emerald-300'
+											? 'text-[hsl(var(--tm-accent))]'
 											: 'text-gray-400'}"
 										aria-pressed={follow}
 										title="运行中每 4 秒刷新一次并停在末尾"
@@ -623,7 +623,7 @@
 										data-log-follow
 										><span
 											class="size-1.5 rounded-full {following
-												? 'tm-pulse-dot bg-emerald-500 text-emerald-500'
+												? 'tm-pulse-dot bg-[hsl(var(--tm-accent))] text-[hsl(var(--tm-accent))]'
 												: 'bg-gray-400'}"
 											aria-hidden="true"
 										/>实时跟随</button

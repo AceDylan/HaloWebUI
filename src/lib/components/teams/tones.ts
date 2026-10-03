@@ -10,7 +10,7 @@ export const TONE_CHIP: Record<Tone, string> = {
 		'bg-orange-500/10 text-orange-700 ring-orange-500/25 dark:bg-orange-400/10 dark:text-orange-300 dark:ring-orange-400/25',
 	fail: 'bg-red-500/10 text-red-700 ring-red-500/25 dark:bg-red-400/10 dark:text-red-300 dark:ring-red-400/25',
 	stop: 'bg-zinc-500/10 text-zinc-600 ring-zinc-500/20 dark:bg-white/[0.06] dark:text-zinc-300 dark:ring-white/10',
-	done: 'bg-emerald-500/10 text-emerald-700 ring-emerald-500/25 dark:bg-emerald-400/10 dark:text-emerald-300 dark:ring-emerald-400/25',
+	done: 'bg-gray-500/[0.07] text-gray-600 ring-gray-500/15 dark:bg-white/[0.05] dark:text-gray-300 dark:ring-white/10',
 	idle: 'bg-gray-500/[0.05] text-gray-500 ring-gray-500/10 dark:bg-white/[0.03] dark:text-gray-400 dark:ring-white/[0.08]'
 };
 
@@ -22,7 +22,7 @@ export const TONE_BORDER: Record<Tone, string> = {
 	quota: 'border-orange-400/60 dark:border-orange-400/45',
 	fail: 'border-red-400/60 dark:border-red-400/45',
 	stop: 'border-zinc-400/50 dark:border-zinc-500/40',
-	done: 'border-emerald-500/30 dark:border-emerald-400/25',
+	done: 'border-gray-900/[0.12] dark:border-white/[0.12]',
 	idle: 'border-gray-900/[0.08] border-dashed dark:border-white/[0.08]'
 };
 
@@ -35,7 +35,7 @@ export const TONE_STROKE: Record<Tone, string> = {
 	quota: '#f97316',
 	fail: '#ef4444',
 	stop: '#71717a',
-	done: '#10b981',
+	done: '#6b7280',
 	idle: '#cbd5e1'
 };
 
@@ -47,7 +47,7 @@ export const TONE_DOT: Record<Tone, string> = {
 	quota: 'bg-orange-500',
 	fail: 'bg-red-500',
 	stop: 'bg-zinc-500',
-	done: 'bg-emerald-500',
+	done: 'bg-gray-500 dark:bg-gray-400',
 	idle: 'bg-gray-300 dark:bg-gray-600'
 };
 
@@ -60,6 +60,6 @@ export const TONE_TEXT: Record<Tone, string> = {
 	quota: 'text-orange-600 dark:text-orange-300',
 	fail: 'text-red-600 dark:text-red-300',
 	stop: 'text-zinc-500 dark:text-zinc-400',
-	done: 'text-emerald-600 dark:text-emerald-300',
+	done: 'text-gray-600 dark:text-gray-300',
 	idle: 'text-gray-400 dark:text-gray-500'
 };

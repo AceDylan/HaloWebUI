@@ -62,7 +62,7 @@
 	const NODE: Record<string, string> = {
 		message: 'bg-sky-500',
 		user: 'bg-violet-500',
-		handoff: 'bg-emerald-500',
+		handoff: 'bg-gray-500 dark:bg-gray-400',
 		runner: 'bg-orange-500',
 		team: 'bg-indigo-500',
 		tool: 'bg-gray-300 dark:bg-gray-600',
@@ -185,7 +185,7 @@
 								<span>留言</span>
 							{:else if ev.type === 'handoff'}
 								<TeamAvatar kind={kindOf(ev.member)} size={16} />
-								<span class="font-medium text-emerald-700 dark:text-emerald-300"
+								<span class="font-medium text-gray-900 dark:text-gray-100"
 									>{ev.member} 完成并交接{ev.data?.to?.length
 										? ` → ${ev.data.to.map((t) => `${t.member}(#${t.key})`).join('、')}`
 										: ''}</span
@@ -301,8 +301,8 @@
 		border-color: hsl(var(--tm-accent) / 0.2);
 	}
 	.bubble-handoff {
-		background: hsl(var(--tm-ok) / 0.07);
-		border-color: hsl(var(--tm-ok) / 0.2);
+		background: hsl(var(--tm-done) / 0.06);
+		border-color: hsl(var(--tm-done) / 0.2);
 	}
 	.item {
 		animation: feed-in 0.4s cubic-bezier(0.22, 1, 0.36, 1) both;

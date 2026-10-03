@@ -623,51 +623,32 @@
 								on:click={() => useQuickStart(q.text)}
 								title={q.text}
 							>
-								<span class="quick-icon grid size-7 place-items-center rounded-lg">
-									<svg class="size-4" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+								<span class="quick-icon grid h-7 w-[3.25rem] shrink-0 place-items-center rounded-lg">
+									<!-- the team's shape, not a generic icon: chain / fan-out / three-way check / draft ⇄ review -->
+									<svg class="h-5 w-11" viewBox="0 0 44 20" fill="none" aria-hidden="true">
 										{#if q.icon === 'research'}
-											<circle cx="7" cy="7" r="4.2" stroke="currentColor" stroke-width="1.5" />
-											<path
-												d="m10.2 10.2 3.3 3.3"
-												stroke="currentColor"
-												stroke-width="1.6"
-												stroke-linecap="round"
-											/>
+											<path d="M7 10h30" stroke="currentColor" stroke-opacity="0.45" stroke-width="1.3" />
+											<circle cx="6" cy="10" r="3" fill="currentColor" />
+											<circle cx="22" cy="10" r="3" fill="currentColor" fill-opacity="0.55" />
+											<circle cx="38" cy="10" r="3" stroke="currentColor" stroke-width="1.4" fill="none" />
 										{:else if q.icon === 'build'}
-											<path
-												d="M5.5 4.5 2 8l3.5 3.5M10.5 4.5 14 8l-3.5 3.5"
-												stroke="currentColor"
-												stroke-width="1.5"
-												stroke-linecap="round"
-												stroke-linejoin="round"
-											/>
+											<path d="M9 10C20 10 22 3.5 35 3.5M9 10h26M9 10c11 0 13 6.5 26 6.5" stroke="currentColor" stroke-opacity="0.45" stroke-width="1.3" />
+											<circle cx="6" cy="10" r="3" fill="currentColor" />
+											<circle cx="38" cy="3.5" r="2.4" fill="currentColor" fill-opacity="0.55" />
+											<circle cx="38" cy="10" r="2.4" fill="currentColor" fill-opacity="0.55" />
+											<circle cx="38" cy="16.5" r="2.4" fill="currentColor" fill-opacity="0.55" />
 										{:else if q.icon === 'review'}
-											<path
-												d="M8 1.8 13.2 4v3.6c0 3-2.2 5.4-5.2 6.6-3-1.2-5.2-3.6-5.2-6.6V4L8 1.8Z"
-												stroke="currentColor"
-												stroke-width="1.4"
-												stroke-linejoin="round"
-											/>
-											<path
-												d="m5.8 8 1.6 1.6 3-3.2"
-												stroke="currentColor"
-												stroke-width="1.5"
-												stroke-linecap="round"
-												stroke-linejoin="round"
-											/>
+											<path d="M8 10c7 0 7-6.5 14-6.5S29 10 36 10M8 10h28M8 10c7 0 7 6.5 14 6.5S29 10 36 10" stroke="currentColor" stroke-opacity="0.45" stroke-width="1.3" />
+											<circle cx="6" cy="10" r="2.6" fill="currentColor" fill-opacity="0.55" />
+											<circle cx="22" cy="3.5" r="2.4" fill="currentColor" fill-opacity="0.55" />
+											<circle cx="22" cy="10" r="2.4" fill="currentColor" fill-opacity="0.55" />
+											<circle cx="22" cy="16.5" r="2.4" fill="currentColor" fill-opacity="0.55" />
+											<circle cx="38" cy="10" r="3" fill="currentColor" />
 										{:else}
-											<path
-												d="M4 1.8h5.2L12.5 5v9.2H4V1.8Z"
-												stroke="currentColor"
-												stroke-width="1.4"
-												stroke-linejoin="round"
-											/>
-											<path
-												d="M6 8h4.5M6 10.8h3"
-												stroke="currentColor"
-												stroke-width="1.4"
-												stroke-linecap="round"
-											/>
+											<path d="M14 7.5c4-3.5 12-3.5 16 0M30 12.5c-4 3.5-12 3.5-16 0" stroke="currentColor" stroke-opacity="0.45" stroke-width="1.3" stroke-linecap="round" />
+											<path d="m27.5 4.8 2.7 2.8-3.6 1" stroke="currentColor" stroke-opacity="0.6" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" />
+											<circle cx="11" cy="10" r="3.2" fill="currentColor" />
+											<circle cx="33" cy="10" r="3.2" stroke="currentColor" stroke-width="1.4" fill="none" />
 										{/if}
 									</svg>
 								</span>
@@ -905,7 +886,7 @@
 												class="flex h-1 gap-px overflow-hidden rounded-full bg-gray-900/[0.06] dark:bg-white/[0.08]"
 											>
 												<span
-													class="h-full bg-emerald-500 transition-[width] duration-700"
+													class="h-full bg-gray-400 transition-[width] duration-700 dark:bg-gray-500"
 													style="width:{Math.round((done / total) * 100)}%"
 												/>
 												{#if running}
@@ -933,7 +914,7 @@
 									{#if s === 'completed' || s === 'stopped'}
 										<a
 											href="/teams/{team.id}/conclusion"
-											class="icon-btn text-emerald-600 dark:text-emerald-300"
+											class="icon-btn text-[hsl(var(--tm-accent))]"
 											title="阅读结论"
 											aria-label="阅读「{team.title}」的结论"
 											><svg class="size-4" viewBox="0 0 16 16" fill="none" aria-hidden="true"

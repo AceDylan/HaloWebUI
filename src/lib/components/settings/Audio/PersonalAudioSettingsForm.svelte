@@ -525,7 +525,7 @@
 					</div>
 					<div class="mt-3 flex gap-2">
 						<button
-							class="rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-amber-700"
+							class="rounded-lg bg-gray-900 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-gray-800 dark:bg-gray-50 dark:text-gray-900 dark:hover:bg-white"
 							type="button"
 							on:click={async () => {
 								approveKokoroConsent();
@@ -536,7 +536,7 @@
 							下载并启用
 						</button>
 						<button
-							class="rounded-lg bg-white px-3 py-1.5 text-xs font-medium text-amber-700 transition hover:bg-amber-100 dark:bg-transparent dark:text-amber-200 dark:hover:bg-amber-900/30"
+							class="rounded-lg px-3 py-1.5 text-xs font-medium text-gray-700 transition hover:bg-amber-100/70 dark:text-gray-200 dark:hover:bg-amber-900/30"
 							type="button"
 							on:click={() => {
 								TTSEngine = lastNonKokoroEngine;
@@ -854,7 +854,7 @@
 									</div>
 									<div class="mt-3 flex gap-2">
 										<button
-											class="rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-amber-700"
+											class="rounded-lg bg-gray-900 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-gray-800 dark:bg-gray-50 dark:text-gray-900 dark:hover:bg-white"
 											type="button"
 											on:click={async () => {
 												approveKokoroConsent();
@@ -865,7 +865,7 @@
 											下载并启用
 										</button>
 										<button
-											class="rounded-lg bg-white px-3 py-1.5 text-xs font-medium text-amber-700 transition hover:bg-amber-100 dark:bg-transparent dark:text-amber-200 dark:hover:bg-amber-900/30"
+											class="rounded-lg px-3 py-1.5 text-xs font-medium text-gray-700 transition hover:bg-amber-100/70 dark:text-gray-200 dark:hover:bg-amber-900/30"
 											type="button"
 											on:click={() => {
 												TTSEngine = lastNonKokoroEngine;

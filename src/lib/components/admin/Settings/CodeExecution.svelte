@@ -147,6 +147,24 @@
 	>
 		<div class="h-full space-y-6 overflow-y-auto scrollbar-hidden">
 			<div class="max-w-6xl mx-auto space-y-6">
+				<section class="halo-settings-head glass-section p-5">
+					<div class="flex items-start gap-3">
+						<div class="glass-icon-badge">
+							<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-[18px]" aria-hidden="true">
+								<path stroke-linecap="round" stroke-linejoin="round" d="M17.25 6.75 22.5 12l-5.25 5.25m-10.5 0L1.5 12l5.25-5.25m7.5-3-4.5 16.5" />
+							</svg>
+						</div>
+						<div class="min-w-0">
+							<div class="halo-settings-title text-base font-semibold text-gray-800 dark:text-gray-100">
+								{$i18n.t('Code Execution')}
+							</div>
+							<p class="halo-settings-desc mt-1 text-xs text-gray-400 dark:text-gray-500">
+								{$i18n.t('Run code from chats and the code interpreter, and open a terminal and file browser on the server.')}
+							</p>
+						</div>
+					</div>
+				</section>
+
 				<!-- ====== 代码执行设置 Code Execution Settings ====== -->
 				<section
 					class="scroll-mt-2 p-5 space-y-5 transition-all duration-300 {dirtySections.general

@@ -50,6 +50,10 @@
 	let clientLogs = [];
 
 	const gatewayBasePath = `${WEBUI_BASE_URL}/api/v1/external_api/gateway`;
+	const gatewayEndpoints = [
+		{ label: 'OpenAI', protocol: 'openai', paths: ['models', 'chat/completions', 'responses'] },
+		{ label: 'Anthropic', protocol: 'anthropic', paths: ['models', 'messages'] }
+	];
 
 	const clone = (value) => JSON.parse(JSON.stringify(value));
 
@@ -208,6 +212,22 @@
 <div class="flex h-full min-h-0 flex-col text-sm">
 	<div class="h-full space-y-6 overflow-y-auto scrollbar-hidden">
 		<div class="max-w-6xl mx-auto space-y-6">
+			<section class="halo-settings-head glass-section p-5">
+				<div class="flex items-start gap-3">
+					<div class="glass-icon-badge">
+						<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-[18px]" aria-hidden="true">
+							<path stroke-linecap="round" stroke-linejoin="round" d="M13.19 8.688a4.5 4.5 0 0 1 1.242 7.244l-4.5 4.5a4.5 4.5 0 0 1-6.364-6.364l1.757-1.757m13.35-.622 1.757-1.757a4.5 4.5 0 0 0-6.364-6.364l-4.5 4.5a4.5 4.5 0 0 0 1.242 7.244" />
+						</svg>
+					</div>
+					<div class="min-w-0">
+						<div class="halo-settings-title text-base font-semibold text-gray-800 dark:text-gray-100">外部 API</div>
+						<p class="halo-settings-desc mt-1 text-xs text-gray-400 dark:text-gray-500">
+							让外部程序和客户端通过 OpenAI / Anthropic 兼容入口调用这里的模型，并为它们签发服务账号密钥。
+						</p>
+					</div>
+				</div>
+			</section>
+
 			<section class="glass-section p-5 space-y-5">
 				<div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
 					<div class="text-base font-semibold text-gray-800 dark:text-gray-100">外部 API 网关</div>
@@ -254,9 +274,15 @@
 					</label>
 				</div>
 
-				<div class="rounded-2xl border border-dashed border-gray-200 dark:border-gray-700 p-4 text-xs text-gray-500 space-y-1">
-					<div>OpenAI: `{gatewayBasePath}/openai/v1/models` `{gatewayBasePath}/openai/v1/chat/completions` `{gatewayBasePath}/openai/v1/responses`</div>
-					<div>Anthropic: `{gatewayBasePath}/anthropic/v1/models` `{gatewayBasePath}/anthropic/v1/messages`</div>
+				<div class="glass-item px-4 py-3 space-y-2 text-xs text-gray-500 dark:text-gray-400">
+					{#each gatewayEndpoints as { label, protocol, paths }}
+						<div class="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+							<span class="w-16 shrink-0 font-medium text-gray-700 dark:text-gray-300">{label}</span>
+							{#each paths as path}
+								<code class="font-mono text-[11px] break-all text-gray-600 dark:text-gray-300">{gatewayBasePath}/{protocol}/v1/{path}</code>
+							{/each}
+						</div>
+					{/each}
 				</div>
 			</section>
 
@@ -266,7 +292,7 @@
 					<div class="flex items-center gap-2">
 						<button
 							type="button"
-							class="px-3 py-1 text-xs font-medium bg-blue-500 hover:bg-blue-600 text-white rounded-full transition"
+							class="px-3 py-1 text-xs font-medium rounded-full border border-[var(--surface-border-strong)] text-gray-700 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-white/5 transition"
 							on:click={openCreateClient}
 						>
 							+ 新增
@@ -297,24 +323,24 @@
 
 				<div class="space-y-3">
 					{#if clients.length === 0}
-						<div class="rounded-2xl border border-dashed border-gray-200 dark:border-gray-700 px-4 py-8 text-center text-gray-400">
-							暂无外部客户端密钥
+						<div class="workspace-empty-state">
+							<p class="text-sm text-gray-500 dark:text-gray-400">暂无外部客户端密钥</p>
 						</div>
 					{:else}
 						{#each clients as client}
-							<div class="rounded-2xl border border-gray-200 dark:border-gray-700 px-4 py-4 space-y-3">
+							<div class="glass-item px-4 py-4 space-y-3">
 								<div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
 									<div class="min-w-0">
 										<div class="flex items-center gap-2 flex-wrap">
 											<div class="text-sm font-semibold text-gray-800 dark:text-gray-100">{client.name}</div>
 											<span class="text-2xs rounded-full px-2 py-0.5 bg-gray-100 dark:bg-gray-800 text-gray-500">{client.key_prefix}</span>
 											{#if client.enabled}
-												<span class="text-2xs rounded-full px-2 py-0.5 bg-green-100 dark:bg-green-900/30 text-green-600">启用</span>
+												<span class="text-2xs rounded-full px-2 py-0.5 bg-primary-500/10 text-primary-600 dark:text-primary-300">启用</span>
 											{:else}
 												<span class="text-2xs rounded-full px-2 py-0.5 bg-gray-100 dark:bg-gray-800 text-gray-500">停用</span>
 											{/if}
 											{#if client.allow_tools}
-												<span class="text-2xs rounded-full px-2 py-0.5 bg-blue-100 dark:bg-blue-900/30 text-blue-600">工具</span>
+												<span class="text-2xs rounded-full px-2 py-0.5 bg-gray-100 dark:bg-gray-800 text-gray-500">工具</span>
 											{/if}
 										</div>
 										<div class="mt-1 text-xs text-gray-500 break-all">

@@ -2609,11 +2609,6 @@ body:has(#chat-input:focus) .halo-orb__arc {
 
 /* ---------------------------------------------------------------- empty states */
 
-/* Inside a card the empty state needs no second (dashed) frame of its own. */
-:is(.workspace-section, .glass-section) .workspace-empty-state {
-	border-color: transparent;
-}
-
 /* every "nothing here yet" box opens with a small unlit halo */
 .workspace-empty-state::before {
 	content: '';
@@ -2626,6 +2621,56 @@ body:has(#chat-input:focus) .halo-orb__arc {
 	-webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 2.5px), #000 calc(100% - 2px));
 	mask: radial-gradient(farthest-side, transparent calc(100% - 2.5px), #000 calc(100% - 2px));
 	opacity: 0.55;
+}
+
+/* Page-level empty states lose the dashed frame as well: an unlit halo, a line or two, and open
+   space, sitting a little lower so the page does not read as broken. Empty states that bring their
+   own icon tile (image generation) keep the tile, drawn in ink, without a second halo above it.
+   While a list is still loading, the halo turns in place of a separate spinner. */
+:root .workspace-empty-state {
+	border-color: transparent;
+}
+:root .workspace-empty-state:not(:is(.workspace-section, .glass-section) .workspace-empty-state) {
+	padding-block: clamp(3.5rem, 12vh, 6rem);
+}
+:root .workspace-empty-state::before {
+	width: 2.75rem;
+	height: 2.75rem;
+	margin-bottom: 1.125rem;
+}
+.workspace-empty-state > :first-child:is(.text-sm.font-medium, .text-base.font-semibold, h2) {
+	font-family: var(--font-display);
+	letter-spacing: -0.01em;
+}
+.workspace-empty-state:has(> .size-14:first-child)::before {
+	display: none;
+}
+.workspace-empty-state > .size-14:first-child {
+	color: var(--color-gray-500);
+	background: transparent;
+	box-shadow: inset 0 0 0 1px var(--surface-border-strong);
+	border-radius: 9999px;
+}
+.workspace-empty-state:has(.spinner_ajPY)::before {
+	opacity: 0.9;
+	-webkit-mask: conic-gradient(#000 0 72%, transparent 0) , radial-gradient(farthest-side, transparent calc(100% - 2.5px), #000 calc(100% - 2px));
+	mask: conic-gradient(#000 0 72%, transparent 0), radial-gradient(farthest-side, transparent calc(100% - 2.5px), #000 calc(100% - 2px));
+	-webkit-mask-composite: source-in;
+	mask-composite: intersect;
+	animation: halo-empty-spin 1.1s linear infinite;
+}
+.workspace-empty-state:has(.spinner_ajPY) > :has(> svg) {
+	display: none;
+}
+@keyframes halo-empty-spin {
+	to {
+		transform: rotate(360deg);
+	}
+}
+@media (prefers-reduced-motion: reduce) {
+	.workspace-empty-state:has(.spinner_ajPY)::before {
+		animation: none;
+	}
 }
 
 /* ---------------------------------------------------------------- "back to latest" key

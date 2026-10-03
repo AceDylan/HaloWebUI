@@ -4203,6 +4203,11 @@ async def chat_web_search_handler(
         except Exception as e:
             log.exception(e)
             queries = [user_message]
+        # Search is on: an empty or repetitive list from the query model still
+        # searches (at most three keywords), with what the user wrote if need be.
+        queries = _normalize_auto_web_search_queries(
+            queries
+        ) or _normalize_auto_web_search_queries([user_message])
     else:
         queries = _normalize_auto_web_search_queries(queries)
 

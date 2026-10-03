@@ -2607,7 +2607,10 @@ def _find_chat_image_generation_source_urls(
     # being answered. A dismissed "previous image" reference is not there, so
     # the request is a new image. Older messages (and other clients) still get
     # the latest image anywhere in the conversation.
-    if (image_generation_options or {}).get("source_scope") == "message":
+    source_scope = (image_generation_options or {}).get("source_scope")
+    if source_scope == "none":
+        return []
+    if source_scope == "message":
         return _find_image_urls_in_last_user_message(messages)
     return _find_latest_image_urls_from_messages(messages)
 

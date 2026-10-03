@@ -70,6 +70,22 @@ def test_messages_from_before_the_scope_still_look_back():
     ]
 
 
+def test_retrying_without_the_reference_uses_no_source():
+    # The failed edit's "retry without the reference image": neither the
+    # message's own upload nor an earlier image is sent.
+    messages = DISMISSED_REFERENCE[:-1] + [
+        {
+            "role": "user",
+            "content": [{"type": "text", "text": "make it blue"}, _image(PREVIOUS)],
+            "files": [{"type": "image", "url": UPLOADED}],
+        }
+    ]
+    assert _find_chat_image_generation_source_urls(messages, {"source_scope": "none"}) == []
+    assert sanitize_chat_image_generation_options({"source_scope": "none"}) == {
+        "source_scope": "none"
+    }
+
+
 def test_only_known_scopes_pass_the_sanitizer():
     assert sanitize_chat_image_generation_options(
         {"size": "1024x1024", "source_scope": "message"}

@@ -26,8 +26,10 @@ _IMAGE_GENERATION_OPTIONS_KEYS = ("image_generation_options", "imageGenerationOp
 # Where the source images of an edit come from. "message": only the images of
 # the message being answered (its uploads and the earlier images the person
 # kept referenced). Not sent: the latest image anywhere in the conversation,
-# which also picked up a reference the person had dismissed.
-CHAT_IMAGE_GENERATION_SOURCE_SCOPES = ("message",)
+# which also picked up a reference the person had dismissed. "none": no source
+# at all, a new image from the prompt (the failed edit's "retry without the
+# reference image").
+CHAT_IMAGE_GENERATION_SOURCE_SCOPES = ("message", "none")
 
 
 def sanitize_chat_image_generation_options(

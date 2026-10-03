@@ -1164,6 +1164,9 @@
 
 	// Temporary instruction for regeneration with modifications (e.g. "more concise")
 	let _pendingInstruction: string | null = null;
+	// A failed edit retried without its reference images: the image request of
+	// this one regeneration has no source ("none"), the reply records it.
+	let _pendingImageSourceScope: 'none' | null = null;
 
 	// Chat Input
 	let prompt = '';
@@ -5635,7 +5638,7 @@
 
 		let _chatId = $chatId;
 		_history = structuredClone(_history);
-		if (referenceFiles.length === 0) {
+		if (referenceFiles.length === 0 && _pendingImageSourceScope !== 'none') {
 			referenceFiles = getMessageImageReferences(_history.messages?.[parentId]) ?? [];
 		}
 
@@ -5835,7 +5838,8 @@
 					modelIdx: modelIdx ? modelIdx : _modelIdx,
 					userContext: null,
 					timestamp: Math.floor(Date.now() / 1000), // Unix epoch
-					...(_pendingInstruction ? { instruction: _pendingInstruction } : {})
+					...(_pendingInstruction ? { instruction: _pendingInstruction } : {}),
+					...(_pendingImageSourceScope ? { imageSourceScope: _pendingImageSourceScope } : {})
 				};
 
 				// Add message to history and Set currentId to messageId
@@ -6062,14 +6066,23 @@
 		const imageGenerationActive = canUseChatImageGeneration()
 			? isImageGenerationActiveForRequest()
 			: false;
-		// Sources come from the message being answered when it recorded them (A4).
+		// Sources come from the message being answered when it recorded them (A4);
+		// a retry without the reference images sends none (and no forced edit route).
 		const imageOptionsSent = imageGenerationActive
 			? getImageGenerationOptionsPayload(
-					getMessageImageReferences(_history.messages?.[responseMessage?.parentId])
-						? { source_scope: 'message' }
-						: {}
+					_pendingImageSourceScope === 'none'
+						? { source_scope: 'none' }
+						: getMessageImageReferences(_history.messages?.[responseMessage?.parentId])
+							? { source_scope: 'message' }
+							: {}
 				)
 			: undefined;
+		if (
+			imageOptionsSent?.source_scope === 'none' &&
+			/^edits?$/.test(`${imageOptionsSent.image_route_mode ?? ''}`)
+		) {
+			delete imageOptionsSent.image_route_mode;
+		}
 		if (imageOptionsSent) rememberChatImageOptions(imageOptionsSent);
 		// Hermes is told which of its earlier replies the person stopped. A reply
 		// stopped before it said anything was dropped as empty, and hermes then
@@ -6732,6 +6745,8 @@
 			// Answer again with this model instead (the menu's "用 X 重答"); the
 			// model picker keeps its selection for the next message.
 			modelId?: string;
+			// A failed image edit drawn again from the prompt alone.
+			withoutImageReferences?: boolean;
 		} = {}
 	) => {
 		// A reply that failed before running anything has nothing to redo.
@@ -6776,6 +6791,7 @@
 						: getPreferredDefaultWebSearchMode();
 			}
 			if (options.instruction) _pendingInstruction = options.instruction;
+			if (options.withoutImageReferences) _pendingImageSourceScope = 'none';
 
 			try {
 				if (options.modelId) {
@@ -6809,6 +6825,7 @@
 				reasoningEffort = origReasoningEffort;
 				webSearchMode = origWebSearchMode;
 				_pendingInstruction = null;
+				_pendingImageSourceScope = null;
 			}
 		}
 	};

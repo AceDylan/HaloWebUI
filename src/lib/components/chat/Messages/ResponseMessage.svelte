@@ -51,6 +51,11 @@
 	import ModelIcon from '$lib/components/common/ModelIcon.svelte';
 	import Image from '$lib/components/common/Image.svelte';
 	import ImageHandoffActions from './ImageHandoffActions.svelte';
+	import {
+		classifyImageGenerationError,
+		imageRequestHadReferences,
+		type ImageGenerationErrorKind
+	} from '$lib/utils/image-generation-errors';
 	import { goto } from '$app/navigation';
 	import {
 		imageFileIdFromUrl,
@@ -556,6 +561,55 @@
 		!isImageGenerationResultFile(file) &&
 		!isDuplicateOfImageGenerationResult(file);
 	$: showImageGenerationResultGrid = imageGenerationResultFiles.length > 0;
+	// A finished image reply with a failed picture: say what the error likely
+	// means and offer to draw again, also without the reference images when the
+	// request edited some (edits are what the relay rejects most).
+	$: imageGenerationFailedFile = showImageGenerationResultGrid
+		? (imageGenerationResultSlots.find(
+				(file) => file?.type === 'image_generation_error' || file?.status === 'failed'
+			) ?? null)
+		: null;
+	$: imageRetryWithoutReferences =
+		Boolean(imageGenerationFailedFile) &&
+		(message as any)?.imageSourceScope !== 'none' &&
+		imageRequestHadReferences(history.messages as any, message?.parentId as string);
+	$: imageGenerationFailureHint = imageGenerationFailedFile
+		? imageGenerationFailureHintText(
+				classifyImageGenerationError(imageGenerationFailedFile.error),
+				imageRetryWithoutReferences
+			)
+		: '';
+	const imageGenerationFailureHintText = (
+		kind: ImageGenerationErrorKind | null,
+		hadReferences: boolean
+	) => {
+		switch (kind) {
+			case 'moderation':
+				return tr('内容审核没通过，换个说法再试。', 'Blocked by content moderation; try rewording.');
+			case 'quota':
+				return tr('生图通道额度不足，稍后再试。', 'The image channel is out of quota; try later.');
+			case 'rate_limit':
+				return tr('请求太频繁，等一会儿再试。', 'Too many requests; wait a moment.');
+			case 'timeout':
+				return tr('等太久超时了，再试一次通常就好。', 'It timed out; another try usually works.');
+			case 'reference':
+				return tr(
+					'参考图没被接受（格式或尺寸），可以不带参考图重试，或换一张。',
+					'The reference image was not accepted; retry without it or use another.'
+				);
+			case 'relay_hidden':
+				return hadReferences
+					? tr(
+							'中转站没给出具体原因。带参考图改图时最常见，可以先不带参考图重试。',
+							'The relay hid the cause. This is most common when editing; try without the reference image.'
+						)
+					: tr('中转站没给出具体原因，可以再试一次。', 'The relay hid the cause; try again.');
+			default:
+				return hadReferences
+					? tr('也可以不带参考图重试。', 'You can also retry without the reference image.')
+					: '';
+		}
+	};
 	$: otherVisibleMessageFiles = showImageGenerationResultGrid
 		? visibleMessageFiles.filter(isSeparateAttachmentWhenImageGenerationGridShown)
 		: visibleMessageFiles.filter((file) => !isImageGenerationResultFile(file));
@@ -1757,6 +1811,36 @@
 										</div>
 								{/each}
 							</div>
+							{#if imageGenerationFailedFile && message?.done && !readOnly}
+								<div
+									class="-mt-1 mb-2 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs"
+									data-image-retry-row
+								>
+									{#if imageGenerationFailureHint}
+										<span class="text-gray-600 dark:text-gray-300">{imageGenerationFailureHint}</span>
+									{/if}
+									<div class="flex flex-wrap items-center gap-1.5">
+										<button
+											type="button"
+											class="rounded-lg border border-gray-200 px-2.5 py-1 font-medium text-gray-700 transition hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-850"
+											data-image-retry
+											on:click={() => regenerateResponse(message)}
+										>
+											{tr('重试', 'Retry')}
+										</button>
+										{#if imageRetryWithoutReferences}
+											<button
+												type="button"
+												class="rounded-lg border border-gray-200 px-2.5 py-1 font-medium text-gray-700 transition hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-850"
+												data-image-retry-without-references
+												on:click={() => regenerateResponse(message, { withoutImageReferences: true })}
+											>
+												{tr('不带参考图重试', 'Retry without the reference image')}
+											</button>
+										{/if}
+									</div>
+								</div>
+							{/if}
 						{/if}
 
 						{#if otherVisibleMessageFiles.filter((f) => f.type === 'image').length > 0}

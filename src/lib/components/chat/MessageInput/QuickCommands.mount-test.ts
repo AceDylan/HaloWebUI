@@ -98,7 +98,8 @@ describe('image prompts in the message input', () => {
 		expect(selected).toHaveBeenCalledTimes(1);
 		expect(selected).toHaveBeenCalledWith({
 			name: templates[22].name,
-			content: templates[22].config.prompt
+			content: templates[22].config.prompt,
+			config: templates[22].config
 		});
 		expect(document.querySelector('[role="dialog"]')).toBeFalsy();
 		expect(get(imageStudioTemplates)).toEqual(templates);

@@ -4,6 +4,7 @@ import {
 	applyImageTemplateEdit,
 	collectImageTemplateTags,
 	describeImageTemplateSettings,
+	templateChatImageOptions,
 	filterImageTemplates,
 	isJsonPromptTemplate,
 	mergeImageTemplates,
@@ -96,9 +97,27 @@ describe('image-templates', () => {
 
 	it('counts tags, filters by query or tag and sorts by recency or name', () => {
 		const templates = [
-			template({ id: '1', name: 'Beta poster', tags: ['海报', 'json'], updatedAt: 2, config: { prompt: 'x' } }),
-			template({ id: '2', name: 'alpha ui', tags: ['UI'], updatedAt: 5, config: { prompt: 'screen' } }),
-			template({ id: '3', name: 'Gamma', tags: ['海报'], updatedAt: 3, config: { prompt: 'Movie POSTER' } })
+			template({
+				id: '1',
+				name: 'Beta poster',
+				tags: ['海报', 'json'],
+				updatedAt: 2,
+				config: { prompt: 'x' }
+			}),
+			template({
+				id: '2',
+				name: 'alpha ui',
+				tags: ['UI'],
+				updatedAt: 5,
+				config: { prompt: 'screen' }
+			}),
+			template({
+				id: '3',
+				name: 'Gamma',
+				tags: ['海报'],
+				updatedAt: 3,
+				config: { prompt: 'Movie POSTER' }
+			})
 		];
 
 		// ties fall back to locale order, which is case-insensitive: json < UI
@@ -108,7 +127,10 @@ describe('image-templates', () => {
 			{ tag: 'UI', count: 1 }
 		]);
 		expect(filterImageTemplates(templates, { tag: '海报' }).map((t) => t.id)).toEqual(['1', '3']);
-		expect(filterImageTemplates(templates, { query: 'poster' }).map((t) => t.id)).toEqual(['1', '3']);
+		expect(filterImageTemplates(templates, { query: 'poster' }).map((t) => t.id)).toEqual([
+			'1',
+			'3'
+		]);
 		expect(filterImageTemplates(templates, { query: 'UI', tag: '海报' })).toEqual([]);
 		expect(sortImageTemplates(templates, 'recent').map((t) => t.id)).toEqual(['2', '3', '1']);
 		expect(sortImageTemplates(templates, 'name').map((t) => t.id)).toEqual(['2', '1', '3']);
@@ -139,7 +161,12 @@ describe('image-templates edits', () => {
 	it('applies text edits in place and keeps id, createdAt and generation settings', () => {
 		const updated = applyImageTemplateEdit(
 			saved,
-			{ name: '  架构图  ', tags: '运维, 架构,运维', prompt: '新提示词\n', negativePrompt: ' 模糊 ' },
+			{
+				name: '  架构图  ',
+				tags: '运维, 架构,运维',
+				prompt: '新提示词\n',
+				negativePrompt: ' 模糊 '
+			},
 			99
 		);
 		expect(updated).toEqual({
@@ -188,5 +215,59 @@ describe('image-templates edits', () => {
 			{ key: 'quality', value: 'high' }
 		]);
 		expect(describeImageTemplateSettings({ prompt: 'x' })).toEqual([]);
+	});
+});
+
+describe('templateChatImageOptions', () => {
+	const all = { exactSize: true, aspectRatio: true, quality: true, background: true, batch: true };
+	const none = {
+		exactSize: false,
+		aspectRatio: false,
+		quality: false,
+		background: false,
+		batch: false
+	};
+
+	it('turns a template into the chat options the model takes, exact size first', () => {
+		expect(
+			templateChatImageOptions(
+				{
+					prompt: 'p',
+					size: '1024X1536',
+					aspectRatio: '2:3',
+					quality: 'high',
+					background: 'transparent',
+					numberOfImages: '2'
+				},
+				all
+			)
+		).toEqual({
+			size: '1024x1536',
+			aspect_ratio: null,
+			quality: 'high',
+			background: 'transparent',
+			n: 2
+		});
+	});
+
+	it('falls back to the aspect ratio when the model has no exact sizes', () => {
+		expect(
+			templateChatImageOptions(
+				{ size: '1536x1024', aspectRatio: '3:2' },
+				{ ...none, aspectRatio: true }
+			)
+		).toEqual({ aspect_ratio: '3:2', size: null });
+	});
+
+	it('leaves out what the template does not carry or the model cannot take', () => {
+		expect(templateChatImageOptions({ prompt: 'only text' }, all)).toEqual({});
+		expect(templateChatImageOptions({ size: '1024x1024', quality: 'high' }, none)).toEqual({});
+		expect(
+			templateChatImageOptions(
+				{ size: 'auto', quality: 'auto', background: '#fff', numberOfImages: '9' },
+				all
+			)
+		).toEqual({});
+		expect(templateChatImageOptions(null, all)).toEqual({});
 	});
 });

@@ -137,7 +137,12 @@
 		open = false;
 		// Release the dialog's focus trap before MessageInput focuses the editor.
 		await tick();
-		dispatch('select', { name: template.name, content: template.config.prompt ?? '' });
+		// An image template also carries its generation settings (size, quality …) for the panel.
+		dispatch('select', {
+			name: template.name,
+			content: template.config.prompt ?? '',
+			config: imageMode ? template.config : undefined
+		});
 	};
 </script>
 

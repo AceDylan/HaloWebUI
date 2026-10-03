@@ -29,6 +29,11 @@
 		getModelCleanId,
 		getModelRef
 	} from '$lib/utils/model-identity';
+	import {
+		templateChatImageOptions,
+		type ImageTemplateChatCapabilities,
+		type ImageTemplateConfig
+	} from '$lib/utils/image-templates';
 
 	import Switch from '$lib/components/common/Switch.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
@@ -86,6 +91,9 @@
 	export let imageGenerationOptions: ImageGenerationOptions = {};
 	export let currentModel: Model | null = null;
 	export let hasReferenceImage = false;
+	// Settings of an image template just picked from the prompt picker; applied (and cleared)
+	// once this model's capabilities are known.
+	export let pendingTemplateConfig: ImageTemplateConfig | null = null;
 
 	let builtinLoading = false;
 	let builtinReady = false;
@@ -559,6 +567,33 @@
 		}
 	};
 
+	const applyTemplateSettings = (
+		config: ImageTemplateConfig,
+		capabilities: ImageTemplateChatCapabilities
+	) => {
+		pendingTemplateConfig = null;
+		const patch = templateChatImageOptions(config, capabilities);
+		const changed = (Object.keys(patch) as Array<keyof typeof patch>).filter(
+			(key) => (imageGenerationOptions?.[key] ?? null) !== (patch[key] ?? null)
+		);
+		if (changed.length === 0) return;
+		imageGenerationOptions = { ...imageGenerationOptions, ...patch };
+		const preset = ratioPresets.find(
+			(item) =>
+				(patch.size && item.size === patch.size) ||
+				(patch.aspect_ratio && item.ratio === patch.aspect_ratio)
+		);
+		const frame = patch.size ?? patch.aspect_ratio;
+		if (frame) {
+			const label = preset ? tr(preset.labelZh, preset.labelEn) : '';
+			toast.success(
+				tr('已按模板设为 {{frame}}', 'Set to {{frame}} from the template', {
+					frame: label ? `${label} ${frame.replace('x', '×')}` : frame.replace('x', '×')
+				})
+			);
+		}
+	};
+
 	const optionDisabledClass = 'opacity-45 cursor-not-allowed grayscale';
 
 	$: {
@@ -701,6 +736,15 @@
 		hasBuiltinImage &&
 		Boolean(builtinModelMeta?.supports_quality) &&
 		openAIRouteUsesExactSize;
+	$: if (pendingTemplateConfig && imageGenerationEnabled && !loading && builtinReady) {
+		applyTemplateSettings(pendingTemplateConfig, {
+			exactSize: canUseExactSizeControl,
+			aspectRatio: canUseAspectRatioControl,
+			quality: canUseOpenAIQuality,
+			background: canUseBackground,
+			batch: canUseBatch
+		});
+	}
 	$: canUseSteps = imageGenerationEnabled && !loading && !hasBuiltinImage;
 	$: canUseNegativePrompt = imageGenerationEnabled && !loading && !hasBuiltinImage;
 	$: canUseQuality =

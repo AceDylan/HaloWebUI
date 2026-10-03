@@ -66,6 +66,7 @@
 	import SendMenu from './MessageInput/SendMenu.svelte';
 	import CommandSuggestionList from './MessageInput/CommandSuggestionList.svelte';
 	import ImageGenerationPanel from './MessageInput/ImageGenerationPanel.svelte';
+	import type { ImageTemplateConfig } from '$lib/utils/image-templates';
 
 	import { getSuggestionRenderer } from '../common/RichTextInput/suggestions';
 	import Tooltip from '../common/Tooltip.svelte';
@@ -578,6 +579,8 @@
 
 	let showTools = false;
 	let imageGenerationPanelOpen = false;
+	// An image template's size / quality / background / count, handed to the panel to apply.
+	let pendingImageTemplateConfig: ImageTemplateConfig | null = null;
 
 	let loaded = false;
 
@@ -1896,6 +1899,7 @@
 												bind:prompt
 												bind:imageGenerationEnabled
 												bind:imageGenerationOptions
+												bind:pendingTemplateConfig={pendingImageTemplateConfig}
 												currentModel={primarySelectedModel}
 												hasReferenceImage={hasReferenceImageForImageGeneration}
 											/>
@@ -1912,6 +1916,7 @@
 													const body = (chip?.content ?? '').replace(/\s+$/, '');
 													const current = (prompt ?? '').trim();
 													prompt = current ? `${body}\n${current}` : `${body}\n`;
+													if (chip?.config) pendingImageTemplateConfig = chip.config;
 													await tick();
 													const chatInput = document.getElementById('chat-input');
 													if (chatInput instanceof HTMLTextAreaElement) {

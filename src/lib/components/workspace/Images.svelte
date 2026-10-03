@@ -27,6 +27,7 @@
 	import { localizeCommonError } from '$lib/utils/common-errors';
 	import { getModelChatDisplayName, getModelDisplayParts } from '$lib/utils/model-display';
 	import {
+		getBuiltinImageEngine,
 		GROK_IMAGE_ASPECT_RATIO_OPTIONS,
 		GROK_IMAGE_RESOLUTION_OPTIONS
 	} from '$lib/utils/image-generation';
@@ -77,6 +78,7 @@
 		type ImageStudioItemForm,
 		type ImageStudioMigrationMarker
 	} from '$lib/utils/image-studio-storage';
+	import { downloadImageFile } from '$lib/utils/image-download';
 
 	type GeneratedImage = {
 		url: string;
@@ -304,6 +306,7 @@
 
 	let generatedImages: GeneratedImage[] = [];
 	let lastPrompt = '';
+	let generationStartedAt = 0;
 	let resultsSectionElement: HTMLElement | null = null;
 
 	let previewOpen = false;
@@ -506,7 +509,26 @@
 			(selectedModelMeta?.size_mode === 'aspect_ratio' || selectedModelMeta?.supports_resolution)
 	);
 	$: showsResolutionControl = Boolean(selectedModelMeta?.supports_resolution);
-	$: showsStepsControl = !showsResolutionControl;
+	// gpt-image and the other OpenAI-route models take neither steps nor a negative prompt, and
+	// only tell transparent from opaque backgrounds (routers/images.py drops the rest).
+	$: usesOpenAIImageRoute = getBuiltinImageEngine(selectedModelMeta) === 'openai';
+	$: showsStepsControl = !showsResolutionControl && !usesOpenAIImageRoute;
+	$: backgroundOptions = usesOpenAIImageRoute
+		? [
+				{ value: 'auto', label: $i18n.t('Auto') },
+				{ value: 'transparent', label: $i18n.t('Transparent') },
+				{ value: 'opaque', label: $i18n.t('Opaque') }
+			]
+		: [
+				{ value: 'auto', label: $i18n.t('Auto') },
+				{ value: 'transparent', label: $i18n.t('Transparent') },
+				{ value: 'white', label: $i18n.t('White') },
+				{ value: 'black', label: $i18n.t('Black') },
+				{ value: 'custom', label: $i18n.t('Custom') }
+			];
+	$: if (usesOpenAIImageRoute && ['white', 'black', 'custom'].includes(background)) {
+		background = 'opaque';
+	}
 	$: showsQualityControl = Boolean(selectedModelMeta?.supports_quality);
 	$: activeSize = usingCustomSize ? `${customSizeInput ?? ''}`.trim() : selectedPresetSize;
 	$: activeSizeLabel =
@@ -1039,17 +1061,53 @@
 		negativePrompt: negativePrompt.trim() || undefined,
 		model: selectedModelLabel,
 		parameters: {
-			size: activeSizeLabel,
-			steps,
+			modelId: selectedModel || undefined,
+			size: usesNativeAspectRatioControls ? undefined : activeSize || undefined,
+			aspectRatio: usesNativeAspectRatioControls ? selectedAspectRatioOption : undefined,
+			resolution: showsResolutionControl ? selectedResolution : undefined,
+			quality: showsQualityControl ? quality : undefined,
+			steps: showsStepsControl ? steps : undefined,
 			numberOfImages,
 			background
 		},
 		status,
 		images,
 		error,
-		createdAt: Date.now(),
+		createdAt: generationStartedAt || Date.now(),
 		completedAt: Date.now()
 	});
+
+	const historyDuration = (item: GenerationHistory) => {
+		const seconds = Math.round(((item.completedAt ?? 0) - (item.createdAt ?? 0)) / 1000);
+		return seconds >= 1 ? $i18n.t('{{seconds}}s', { seconds }) : '';
+	};
+
+	// Puts a past run's prompt and settings back on the workbench for another go.
+	const reuseHistoryEntry = (item: GenerationHistory) => {
+		const params = item.parameters ?? {};
+		prompt = item.prompt ?? '';
+		if (params.modelId && modelOptions.some((option) => option.value === params.modelId)) {
+			selectedModel = params.modelId;
+		}
+		const size = `${params.size ?? ''}`.trim();
+		if (/^\d+x\d+$/i.test(size)) {
+			if (curatedSizeOptions.some((option) => option.value === size)) {
+				selectedPresetSize = size;
+				usingCustomSize = false;
+			} else {
+				customSizeInput = size;
+				usingCustomSize = true;
+			}
+		}
+		if (params.aspectRatio) selectedAspectRatioOption = params.aspectRatio;
+		if (params.resolution) selectedResolution = params.resolution;
+		if (params.quality) quality = params.quality;
+		if (typeof params.steps === 'number') steps = params.steps;
+		if (params.numberOfImages) numberOfImages = `${params.numberOfImages}`;
+		if (params.background) background = params.background;
+		activeTab = 'workbench';
+		toast.success($i18n.t('Settings restored from history'));
+	};
 
 	// Adds the run to the gallery (successful images) and to the history, then
 	// syncs both to the server in a single request.
@@ -1256,12 +1314,9 @@
 	};
 
 	const downloadImage = (url: string, index: number) => {
-		const link = document.createElement('a');
-		link.href = url;
-		link.download = `generated-image-${index + 1}.png`;
-		document.body.appendChild(link);
-		link.click();
-		document.body.removeChild(link);
+		downloadImageFile(url, '', `generated-image-${index + 1}`).catch((error) =>
+			console.error('Error downloading image:', error)
+		);
 	};
 
 	const setLearnedConstraint = (constraint: LearnedImageConstraint | null) => {
@@ -1356,6 +1411,7 @@
 		loading = true;
 		generatedImages = [];
 		lastPrompt = trimmedPrompt;
+		generationStartedAt = Date.now();
 
 		try {
 			const response = await imageGenerations(localStorage.token, {
@@ -1367,7 +1423,7 @@
 				resolution: showsResolutionControl ? selectedResolution : undefined,
 				steps: showsStepsControl && steps > 0 ? steps : undefined,
 				n: parseInt(numberOfImages) || 1,
-				negative_prompt: negativePrompt.trim() || undefined,
+				negative_prompt: usesOpenAIImageRoute ? undefined : negativePrompt.trim() || undefined,
 				background:
 					background === 'custom'
 						? customBackground.trim() || undefined
@@ -1682,42 +1738,44 @@
 					</div>
 				</div>
 
-				<!-- 负面提示词 -->
-				<div class="glass-item p-4 space-y-3">
-					<div class="flex items-center justify-between">
-						<div class="text-sm font-semibold text-gray-900 dark:text-gray-100">
-							{$i18n.t('Negative Prompt')}
+				<!-- 负面提示词（OpenAI 路线的模型不收，不显示） -->
+				{#if !usesOpenAIImageRoute}
+					<div class="glass-item p-4 space-y-3">
+						<div class="flex items-center justify-between">
+							<div class="text-sm font-semibold text-gray-900 dark:text-gray-100">
+								{$i18n.t('Negative Prompt')}
+							</div>
+							<button
+								type="button"
+								class="text-xs text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition"
+								on:click={() => (showNegativePrompt = !showNegativePrompt)}
+							>
+								{showNegativePrompt ? $i18n.t('Hide') : $i18n.t('Show')}
+							</button>
 						</div>
-						<button
-							type="button"
-							class="text-xs text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition"
-							on:click={() => (showNegativePrompt = !showNegativePrompt)}
-						>
-							{showNegativePrompt ? $i18n.t('Hide') : $i18n.t('Show')}
-						</button>
+
+						{#if showNegativePrompt}
+							<textarea
+								rows="3"
+								bind:value={negativePrompt}
+								placeholder={$i18n.t('Describe what you want to avoid in the image...')}
+								class="min-h-[6rem] w-full resize-none rounded-xl border border-gray-200/60 bg-white/85 p-3 text-sm leading-6 text-gray-900 outline-none placeholder:text-gray-400 dark:border-gray-700/50 dark:bg-gray-900/70 dark:text-gray-100 dark:placeholder:text-gray-500"
+							/>
+
+							<div class="flex flex-wrap gap-1.5">
+								{#each negativePromptSuggestions as suggestion}
+									<button
+										type="button"
+										class="rounded-full border border-gray-200/60 bg-white/85 px-2.5 py-1 text-xs text-gray-600 transition hover:bg-gray-50 dark:border-gray-700/50 dark:bg-gray-900/70 dark:text-gray-400 dark:hover:bg-gray-800"
+										on:click={() => addNegativePromptSuggestion(suggestion)}
+									>
+										{$i18n.t(suggestion)}
+									</button>
+								{/each}
+							</div>
+						{/if}
 					</div>
-
-					{#if showNegativePrompt}
-						<textarea
-							rows="3"
-							bind:value={negativePrompt}
-							placeholder={$i18n.t('Describe what you want to avoid in the image...')}
-							class="min-h-[6rem] w-full resize-none rounded-xl border border-gray-200/60 bg-white/85 p-3 text-sm leading-6 text-gray-900 outline-none placeholder:text-gray-400 dark:border-gray-700/50 dark:bg-gray-900/70 dark:text-gray-100 dark:placeholder:text-gray-500"
-						/>
-
-						<div class="flex flex-wrap gap-1.5">
-							{#each negativePromptSuggestions as suggestion}
-								<button
-									type="button"
-									class="rounded-full border border-gray-200/60 bg-white/85 px-2.5 py-1 text-xs text-gray-600 transition hover:bg-gray-50 dark:border-gray-700/50 dark:bg-gray-900/70 dark:text-gray-400 dark:hover:bg-gray-800"
-									on:click={() => addNegativePromptSuggestion(suggestion)}
-								>
-									{$i18n.t(suggestion)}
-								</button>
-							{/each}
-						</div>
-					{/if}
-				</div>
+				{/if}
 
 				<div class="glass-item p-4 space-y-4">
 					<div class="text-sm font-semibold text-gray-900 dark:text-gray-100">
@@ -1826,7 +1884,7 @@
 							</div>
 						{/if}
 
-						<div class="space-y-1.5">
+						<div class="space-y-1.5" class:hidden={!showsResolutionControl && !showsStepsControl}>
 							{#if showsResolutionControl}
 								<div class="text-xs font-medium text-gray-500 dark:text-gray-400">
 									{$i18n.t('Resolution')}
@@ -1905,13 +1963,7 @@
 							</div>
 							<HaloSelect
 								bind:value={background}
-								options={[
-									{ value: 'auto', label: $i18n.t('Auto') },
-									{ value: 'transparent', label: $i18n.t('Transparent') },
-									{ value: 'white', label: $i18n.t('White') },
-									{ value: 'black', label: $i18n.t('Black') },
-									{ value: 'custom', label: $i18n.t('Custom') }
-								]}
+								options={backgroundOptions}
 								className="w-full text-xs"
 							/>
 
@@ -2518,10 +2570,24 @@
 										<div class="text-sm text-gray-900 dark:text-gray-100 line-clamp-2">
 											{item.prompt}
 										</div>
-										<div class="flex items-center gap-2 mt-1 text-xs text-gray-500 dark:text-gray-400">
+										<div
+											class="flex flex-wrap items-center gap-x-2 gap-y-1 mt-1 text-xs text-gray-500 dark:text-gray-400"
+										>
 											<span>{item.model}</span>
 											<span>•</span>
 											<span>{new Date(item.createdAt).toLocaleString()}</span>
+											{#if historyDuration(item)}
+												<span>•</span>
+												<span class="tabular-nums">{historyDuration(item)}</span>
+											{/if}
+											<button
+												type="button"
+												class="ml-auto rounded-full px-2.5 py-1 font-medium text-gray-700 transition hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-800"
+												data-image-history-reuse
+												on:click={() => reuseHistoryEntry(item)}
+											>
+												{$i18n.t('Use again')}
+											</button>
 										</div>
 
 										{#if item.status === 'success' && item.images}

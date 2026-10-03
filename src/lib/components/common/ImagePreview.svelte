@@ -3,6 +3,7 @@
 	import type { Writable } from 'svelte/store';
 	import panzoom, { type PanZoom } from 'panzoom';
 	import { lockBodyScroll, unlockBodyScroll } from '$lib/utils/body-scroll-lock';
+	import { downloadImageFile } from '$lib/utils/image-download';
 
 	const i18n: Writable<any> = getContext('i18n');
 
@@ -32,20 +33,8 @@
 		console.log(instance.getTransform());
 	};
 
-	const downloadImage = (url, filename, prefixName = '') => {
-		fetch(url)
-			.then((response) => response.blob())
-			.then((blob) => {
-				const objectUrl = window.URL.createObjectURL(blob);
-				const link = document.createElement('a');
-				link.href = objectUrl;
-				link.download = `${prefixName}${filename}`;
-				document.body.appendChild(link);
-				link.click();
-				document.body.removeChild(link);
-				window.URL.revokeObjectURL(objectUrl);
-			})
-			.catch((error) => console.error('Error downloading image:', error));
+	const downloadImage = () => {
+		downloadImageFile(src, alt).catch((error) => console.error('Error downloading image:', error));
 	};
 
 	const handleKeyDown = (event: KeyboardEvent) => {
@@ -152,13 +141,12 @@
 					class=" p-5"
 					aria-label={$i18n.t('Download')}
 					on:pointerdown={(e) => {
+						// Keep the press away from the pan/zoom layer; the click (mouse, touch or
+						// keyboard) downloads once.
 						e.stopImmediatePropagation();
 						e.preventDefault();
-						downloadImage(src, src.substring(src.lastIndexOf('/') + 1), alt);
 					}}
-					on:click={(e) => {
-						downloadImage(src, src.substring(src.lastIndexOf('/') + 1), alt);
-					}}
+					on:click={downloadImage}
 				>
 					<svg
 						xmlns="http://www.w3.org/2000/svg"

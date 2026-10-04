@@ -55,6 +55,14 @@
 	export let folderDotClass: string | null = null;
 	/** Search results include archived chats; they carry this mark. */
 	export let archived = false;
+	/** What kind of work this chat is (utils/chat_kinds.py): 'discuss' | 'team' | 'image'. */
+	export let kind: string | null = null;
+	const KIND_LABEL: Record<string, string> = { discuss: '讨论', team: '协作', image: '生图' };
+	const KIND_TITLE: Record<string, string> = {
+		discuss: '讨论台里的多模型讨论',
+		team: '有协作台任务在为这个对话工作',
+		image: '这个对话里生成过图片'
+	};
 	export let folderOptions: Array<{
 		id: string;
 		name: string;
@@ -265,7 +273,7 @@
 	{:else}
 		<a
 			class="{itemShellClass} {itemStateClass} whitespace-nowrap text-ellipsis"
-			href="/c/{id}"
+			href={kind === 'discuss' ? `/discuss/${id}` : `/c/${id}`}
 			on:click={() => {
 				dispatch('select');
 
@@ -306,6 +314,15 @@
 				<div dir="auto" class={titleClass}>
 					{title}
 				</div>
+				{#if kind && KIND_LABEL[kind]}
+					<span
+						class="ml-1.5 shrink-0 self-center rounded px-1 py-0.5 text-2xs leading-none text-gray-500 ring-1 ring-inset ring-gray-200 dark:text-gray-400 dark:ring-gray-700"
+						title={KIND_TITLE[kind]}
+						data-halo-chat-kind={kind}
+					>
+						{KIND_LABEL[kind]}
+					</span>
+				{/if}
 				{#if archived}
 					<span
 						class="ml-1.5 shrink-0 self-center rounded px-1 py-0.5 text-2xs leading-none text-gray-500 ring-1 ring-inset ring-gray-200 dark:text-gray-400 dark:ring-gray-700"

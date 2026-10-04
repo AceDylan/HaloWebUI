@@ -69,8 +69,7 @@
 	import ArchiveBox from '../icons/ArchiveBox.svelte';
 	import FolderIcon from '../icons/Folder.svelte';
 	import FolderOpen from '../icons/FolderOpen.svelte';
-	import TeamsBadge from '../teams/TeamsBadge.svelte';
-	import DiscussBadge from '../discuss/DiscussBadge.svelte';
+	import SidebarModes from './Sidebar/SidebarModes.svelte';
 
 	type SidebarStyle = 'flat' | 'card';
 	type SidebarFolder = {
@@ -280,6 +279,16 @@
 		await chatId.set('');
 		await goto('/');
 
+		if ($mobile) {
+			showSidebar.set(false);
+		}
+	};
+
+	// Going to one of the chat's modes (讨论台 / 协作台 / 生图工作台) leaves the open chat.
+	const leaveChatForMode = () => {
+		selectedChatId = null;
+		chatId.set('');
+		selectedAssistantScene.set(null);
 		if ($mobile) {
 			showSidebar.set(false);
 		}
@@ -950,6 +959,8 @@
 					<span class="halo-kbd" aria-hidden="true">{shortcutModifier}⇧O</span>
 				</a>
 			</div>
+			<!-- 对话的几种模式：讨论 / 协作 / 生图，和新对话放在一起 -->
+			<SidebarModes onNavigate={leaveChatForMode} />
 		{/if}
 
 		{#if ($user?.role === 'admin' || $user?.permissions?.workspace?.models || $user?.permissions?.workspace?.knowledge || $user?.permissions?.workspace?.prompts || $user?.permissions?.workspace?.tools) && expanded}
@@ -957,7 +968,7 @@
 				<a
 					class={actionItemClass}
 					href="/workspace"
-					aria-current={$page?.url?.pathname?.startsWith('/workspace') ? 'page' : undefined}
+					aria-current={$page?.url?.pathname?.startsWith('/workspace') && !$page?.url?.pathname?.startsWith('/workspace/images') ? 'page' : undefined}
 					on:click={() => {
 						selectedChatId = null;
 						chatId.set('');
@@ -989,83 +1000,6 @@
 			</div>
 		{/if}
 
-		{#if $config?.features?.enable_agent_teams && expanded}
-			<div class="flex text-gray-700 dark:text-gray-200 px-2">
-				<a
-					class={actionItemClass}
-					href="/teams"
-					aria-current={$page?.url?.pathname?.startsWith('/teams') ? 'page' : undefined}
-					on:click={() => {
-						selectedChatId = null;
-						chatId.set('');
-						selectedAssistantScene.set(null);
-
-						if ($mobile) {
-							showSidebar.set(false);
-						}
-					}}
-					draggable="false"
-					data-sidebar-teams
-				>
-					<svg
-						xmlns="http://www.w3.org/2000/svg"
-						fill="none"
-						viewBox="0 0 24 24"
-						stroke-width="2"
-						stroke="currentColor"
-						stroke-linecap="round"
-						stroke-linejoin="round"
-						class="size-5"
-						aria-hidden="true"
-					>
-						<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
-						<circle cx="9" cy="7" r="4" />
-						<path d="M22 21v-2a4 4 0 0 0-3-3.87" />
-						<path d="M16 3.13a4 4 0 0 1 0 7.75" />
-					</svg>
-					<span class="text-sm font-medium whitespace-nowrap">协作台</span>
-					<TeamsBadge />
-				</a>
-			</div>
-		{/if}
-
-		{#if expanded}
-			<div class="flex text-gray-700 dark:text-gray-200 px-2">
-				<a
-					class={actionItemClass}
-					href="/discuss"
-					aria-current={$page?.url?.pathname?.startsWith('/discuss') ? 'page' : undefined}
-					on:click={() => {
-						selectedChatId = null;
-						chatId.set('');
-						selectedAssistantScene.set(null);
-
-						if ($mobile) {
-							showSidebar.set(false);
-						}
-					}}
-					draggable="false"
-					data-sidebar-discuss
-				>
-					<svg
-						xmlns="http://www.w3.org/2000/svg"
-						fill="none"
-						viewBox="0 0 24 24"
-						stroke-width="2"
-						stroke="currentColor"
-						stroke-linecap="round"
-						stroke-linejoin="round"
-						class="size-5"
-						aria-hidden="true"
-					>
-						<path d="M14 9a2 2 0 0 1-2 2H6l-4 4V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2z" />
-						<path d="M18 9h2a2 2 0 0 1 2 2v11l-4-4h-6a2 2 0 0 1-2-2v-1" />
-					</svg>
-					<span class="text-sm font-medium whitespace-nowrap">讨论台</span>
-					<DiscussBadge />
-				</a>
-			</div>
-		{/if}
 
 		{#if !expanded}
 			<div class="mt-3 px-2 flex flex-col items-center gap-2 text-gray-700 dark:text-gray-200">
@@ -1112,69 +1046,7 @@
 					</Tooltip>
 				{/if}
 
-				{#if $config?.features?.enable_agent_teams}
-					<Tooltip content="协作台">
-						<a
-							class="{iconButtonClass} relative"
-							href="/teams"
-							aria-label="协作台"
-							on:click={() => {
-								selectedChatId = null;
-								chatId.set('');
-								selectedAssistantScene.set(null);
-							}}
-							draggable="false"
-						>
-							<svg
-								xmlns="http://www.w3.org/2000/svg"
-								fill="none"
-								viewBox="0 0 24 24"
-								stroke-width="2"
-								stroke="currentColor"
-								stroke-linecap="round"
-								stroke-linejoin="round"
-								class="size-5"
-								aria-hidden="true"
-							>
-								<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
-								<circle cx="9" cy="7" r="4" />
-								<path d="M22 21v-2a4 4 0 0 0-3-3.87" />
-								<path d="M16 3.13a4 4 0 0 1 0 7.75" />
-							</svg>
-							<TeamsBadge compact />
-						</a>
-					</Tooltip>
-				{/if}
-
-				<Tooltip content="讨论台">
-					<a
-						class="{iconButtonClass} relative"
-						href="/discuss"
-						aria-label="讨论台"
-						on:click={() => {
-							selectedChatId = null;
-							chatId.set('');
-							selectedAssistantScene.set(null);
-						}}
-						draggable="false"
-					>
-						<svg
-							xmlns="http://www.w3.org/2000/svg"
-							fill="none"
-							viewBox="0 0 24 24"
-							stroke-width="2"
-							stroke="currentColor"
-							stroke-linecap="round"
-							stroke-linejoin="round"
-							class="size-5"
-							aria-hidden="true"
-						>
-							<path d="M14 9a2 2 0 0 1-2 2H6l-4 4V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2z" />
-							<path d="M18 9h2a2 2 0 0 1 2 2v11l-4-4h-6a2 2 0 0 1-2-2v-1" />
-						</svg>
-						<DiscussBadge compact />
-					</a>
-				</Tooltip>
+				<SidebarModes compact {iconButtonClass} onNavigate={leaveChatForMode} />
 
 				<div class="w-full h-px bg-gray-200/70 dark:bg-gray-800/70 my-1" />
 
@@ -1422,6 +1294,7 @@
 											uiStyle={sidebarStyle}
 											id={chat.id}
 											title={chat.title}
+											kind={chat.kind ?? null}
 											folderId={chat.folder_id ?? null}
 											folderName={folderNameOf(chat.folder_id)}
 											folderDotClass={folderDotOf(chat.folder_id)}
@@ -1486,6 +1359,7 @@
 										uiStyle={sidebarStyle}
 										id={chat.id}
 										title={chat.title}
+										kind={chat.kind ?? null}
 										folderId={chat.folder_id ?? null}
 										folderName={folderNameOf(chat.folder_id)}
 										folderDotClass={folderDotOf(chat.folder_id)}

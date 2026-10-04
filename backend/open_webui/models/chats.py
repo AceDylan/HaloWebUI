@@ -278,6 +278,8 @@ class ChatTitleIdResponse(BaseModel):
     created_at: int
     folder_id: Optional[str] = None
     assistant_id: Optional[str] = None
+    # 'discuss' | 'team' | 'image' for the sidebar's marks (utils/chat_kinds.py); None = a plain chat
+    kind: Optional[str] = None
 
 
 class ChatSearchResultResponse(ChatTitleIdResponse):

@@ -33,6 +33,7 @@
 	import { translateWithDefault } from '$lib/i18n';
 	import { EMPTY_HERMES_RUN_OPTIONS, type HermesRunOptions } from '$lib/utils/hermes';
 
+	import ModeShortcuts from './ModeShortcuts.svelte';
 	import Suggestions from './Suggestions.svelte';
 	import ModelIcon from '$lib/components/common/ModelIcon.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
@@ -400,6 +401,11 @@
 					}}
 				/>
 			</div>
+			{#if !$selectedAssistantScene && !activeAssistant}
+				<div class="mx-auto mt-1 w-full max-w-4xl px-2.5" in:fade={{ duration: 160, delay: 80 }}>
+					<ModeShortcuts {prompt} {files} />
+				</div>
+			{/if}
 		</div>
 	</div>
 	{#if !$selectedAssistantScene && !activeAssistant && onActivateAssistant && ($settings?.showFeaturedAssistantsOnHome ?? true)}

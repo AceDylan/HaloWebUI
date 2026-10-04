@@ -7,6 +7,7 @@ from typing import Literal, Optional
 
 
 from open_webui.socket.main import get_event_emitter
+from open_webui.utils.chat_kinds import with_kinds
 from open_webui.models.chats import (
     ChatForm,
     ChatComposerStateForm,
@@ -334,12 +335,16 @@ async def get_session_user_chat_list(
         limit = 60
         skip = (page - 1) * limit
 
-        return Chats.get_chat_title_id_list_by_user_id(
-            user.id, include_folders=include_folders, skip=skip, limit=limit
+        return with_kinds(
+            user.id,
+            Chats.get_chat_title_id_list_by_user_id(
+                user.id, include_folders=include_folders, skip=skip, limit=limit
+            ),
         )
     else:
-        return Chats.get_chat_title_id_list_by_user_id(
-            user.id, include_folders=include_folders
+        return with_kinds(
+            user.id,
+            Chats.get_chat_title_id_list_by_user_id(user.id, include_folders=include_folders),
         )
 
 
@@ -577,12 +582,15 @@ async def search_user_chats(
     # Archived chats are searched too: auto-archive moves most of the history
     # there, and a search that skips it cannot find last month's conversation.
     # A search with no results never deletes the tag it was filtering on.
-    return [
-        ChatSearchResultResponse(**chat.model_dump())
-        for chat in Chats.get_chats_by_user_id_and_search_text(
-            user.id, text, include_archived=True, skip=skip, limit=limit
-        )
-    ]
+    return with_kinds(
+        user.id,
+        [
+            ChatSearchResultResponse(**chat.model_dump())
+            for chat in Chats.get_chats_by_user_id_and_search_text(
+                user.id, text, include_archived=True, skip=skip, limit=limit
+            )
+        ],
+    )
 
 
 ############################
@@ -612,19 +620,22 @@ async def get_chat_list_by_folder_id(
         limit = 10
         skip = max((page or 1) - 1, 0) * limit
 
-        return [
-            ChatTitleIdResponse(
-                id=chat.id,
-                title=chat.title,
-                updated_at=chat.updated_at,
-                created_at=chat.created_at,
-                folder_id=chat.folder_id,
-                assistant_id=chat.assistant_id,
-            )
-            for chat in Chats.get_chats_by_folder_id_and_user_id(
-                folder_id, user.id, skip=skip, limit=limit
-            )
-        ]
+        return with_kinds(
+            user.id,
+            [
+                ChatTitleIdResponse(
+                    id=chat.id,
+                    title=chat.title,
+                    updated_at=chat.updated_at,
+                    created_at=chat.created_at,
+                    folder_id=chat.folder_id,
+                    assistant_id=chat.assistant_id,
+                )
+                for chat in Chats.get_chats_by_folder_id_and_user_id(
+                    folder_id, user.id, skip=skip, limit=limit
+                )
+            ],
+        )
     except Exception as e:
         log.exception(e)
         raise HTTPException(

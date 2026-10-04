@@ -355,6 +355,7 @@
 								variant="folder"
 								id={chat.id}
 								title={chat.title}
+								kind={chat.kind ?? null}
 								assistantId={chat.assistant_id ?? null}
 								folderId={folderId}
 								{folderOptions}

@@ -1174,6 +1174,19 @@
 	let chatFiles = [];
 	let files = [];
 
+	// A draft handed over (「继续对话」 from 讨论台): the new chat's composer mounts after this and its
+	// editor starts out empty, writing '' back; so the draft is set again once it is on screen.
+	const applyHandedDraft = async (text: string) => {
+		prompt = text;
+		// for the first seconds, put it back whenever the mounting composer empties it (not after a send)
+		const until = Date.now() + 3000;
+		while (Date.now() < until) {
+			await new Promise((resolve) => setTimeout(resolve, 100));
+			if (history?.currentId) return;
+			if (!prompt.trim()) prompt = text;
+		}
+	};
+
 	// Ticking several models in the model menu means a discussion: 讨论台 opens with them as
 	// seats, the draft as its question, the attachments, and — in a chat that has messages — this
 	// conversation as background, with a way back here. The chat itself is left as it was.
@@ -4010,7 +4023,7 @@
 			'chat'
 		);
 		if (chatHandoffEntry) {
-			if (chatHandoffEntry.text) prompt = chatHandoffEntry.text;
+			if (chatHandoffEntry.text) void applyHandedDraft(chatHandoffEntry.text);
 			if (chatHandoffEntry.files.length) {
 				files = [
 					...files,

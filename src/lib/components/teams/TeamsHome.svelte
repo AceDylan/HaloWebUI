@@ -365,7 +365,7 @@
 					把目标交给一支 AI 团队
 				</h2>
 				<p class="max-w-xl text-sm leading-relaxed text-gray-500 dark:text-gray-400">
-					负责人拆分任务、为每位成员挑选最合适的代理并按依赖并行推进；你批准计划后才开工，结束时交付完整结果——完整的答案、文档和图片。
+					负责人拆分任务、为每位成员挑选最合适的代理并按依赖并行推进；你批准计划后才开工，结束时交付完整结果——完整的答案、文档和图片。在对话的「+」菜单、回答的「⋯」或讨论结论下，也能直接交给协作台。
 				</p>
 				<p
 					class="max-w-xl text-xs leading-relaxed text-gray-400 dark:text-gray-500"

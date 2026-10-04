@@ -2882,6 +2882,28 @@
 														{/each}
 													{/if}
 
+													{#if message?.parentId}
+														<hr class="border-black/5 dark:border-white/5 my-0.5" />
+														<DropdownMenu.Item
+															class={menuItemClass}
+															data-halo-reply-handoff="discuss"
+															on:click={() => handOffReply('discuss')}
+														>
+															<MessagesSquare class="w-4 h-4 shrink-0" strokeWidth={1.75} />
+															<span>{tr('让几个模型讨论', 'Discuss with several models')}</span>
+														</DropdownMenu.Item>
+														{#if $config?.features?.enable_agent_teams}
+															<DropdownMenu.Item
+																class={menuItemClass}
+																data-halo-reply-handoff="teams"
+																on:click={() => handOffReply('teams')}
+															>
+																<Users class="w-4 h-4 shrink-0" strokeWidth={1.75} />
+																<span>{tr('交给协作台', 'Hand to a team')}</span>
+															</DropdownMenu.Item>
+														{/if}
+													{/if}
+
 													<hr class="border-black/5 dark:border-white/5 my-0.5" />
 
 													<DropdownMenu.Item

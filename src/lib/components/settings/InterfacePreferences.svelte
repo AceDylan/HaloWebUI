@@ -45,7 +45,6 @@
 	import QuestionMarkCircle from '$lib/components/icons/QuestionMarkCircle.svelte';
 	import HaloSelect from '$lib/components/common/HaloSelect.svelte';
 	import ThemeSelector from '$lib/components/common/ThemeSelector.svelte';
-	import ManageModal from '$lib/components/chat/Settings/Personalization/ManageModal.svelte';
 	import Textarea from '$lib/components/common/Textarea.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import InlineDirtyActions from '$lib/components/admin/Settings/InlineDirtyActions.svelte';
@@ -220,10 +219,6 @@
 		'When enabled, each chat may send one extra model request besides the main response. If all three options are enabled, one message can trigger 3-4 rapid requests, which may hit RPM or rate limits on the model service or upstream proxy and could cause a temporary block.'
 	);
 
-	// Memory
-	let enableMemory = false;
-	let showManageModal = false;
-
 	// Input
 	let richTextInput = true;
 	let promptAutocomplete = false;
@@ -335,7 +330,6 @@
 				input: boolean;
 				prompt: string;
 			}> | null;
-			enableMemory: boolean;
 			showEmojiInCall: boolean;
 			voiceInterruption: boolean;
 			imageCompression: boolean;
@@ -751,7 +745,6 @@
 			stylizedPdfExport,
 			showFloatingActionButtons,
 			floatingActionButtons,
-			enableMemory,
 			showEmojiInCall,
 			voiceInterruption,
 			imageCompression,
@@ -840,7 +833,6 @@
 		stylizedPdfExport = snapshot.stylizedPdfExport;
 		showFloatingActionButtons = snapshot.showFloatingActionButtons;
 		floatingActionButtons = cloneSettingsSnapshot(snapshot.floatingActionButtons);
-		enableMemory = snapshot.enableMemory;
 		showEmojiInCall = snapshot.showEmojiInCall;
 		voiceInterruption = snapshot.voiceInterruption;
 		imageCompression = snapshot.imageCompression;
@@ -918,7 +910,6 @@
 		stylizedPdfExport;
 		showFloatingActionButtons;
 		floatingActionButtons;
-		enableMemory;
 		showEmojiInCall;
 		voiceInterruption;
 		hapticFeedback;
@@ -1228,7 +1219,6 @@
 				stylizedPdfExport,
 				showFloatingActionButtons,
 				floatingActionButtons,
-				memory: enableMemory,
 				voiceInterruption,
 				showEmojiInCall,
 				imageCompression,
@@ -1394,7 +1384,6 @@
 		stylizedPdfExport = $settings?.stylizedPdfExport ?? true;
 		showFloatingActionButtons = $settings?.showFloatingActionButtons ?? true;
 		floatingActionButtons = $settings?.floatingActionButtons ?? null;
-		enableMemory = $settings?.memory ?? false;
 
 		showUsername = $settings?.showUsername ?? false;
 		showFeaturedAssistantsOnHome = $settings?.showFeaturedAssistantsOnHome ?? true;
@@ -1537,7 +1526,6 @@
 	$: filteredSections = activeSection ? sections.filter((s) => s.key === activeSection) : sections;
 </script>
 
-<ManageModal bind:show={showManageModal} />
 
 <ConfirmDialog
 	bind:show={showArchiveInactiveConfirm}
@@ -2861,44 +2849,6 @@
 												</div>
 											</div>
 										</div>
-									</div>
-
-									<!-- Sub-group D: Memory -->
-									<div class="text-sm font-medium text-gray-500 dark:text-gray-400 pl-1 mt-3">
-										<Tooltip
-											content={$i18n.t(
-												'This is an experimental feature, it may not function as expected and is subject to change at any time.'
-											)}
-										>
-											{$i18n.t('Memory')}
-											<span class="normal-case">({$i18n.t('Experimental')})</span>
-										</Tooltip>
-									</div>
-									<div class="space-y-2">
-										<div class="flex items-center justify-between glass-item px-4 py-3">
-											<div class="text-sm font-medium">
-												{$i18n.t('Enable Memory')}
-											</div>
-											<Switch
-												bind:state={enableMemory}
-											/>
-										</div>
-									</div>
-									<div class="text-xs text-gray-500 dark:text-gray-400 mt-1.5 pl-1">
-										{$i18n.t(
-											"You can personalize your interactions with LLMs by adding memories through the 'Manage' button below, making them more helpful and tailored to you."
-										)}
-									</div>
-									<div class="mt-2">
-										<button
-											type="button"
-											class="px-3.5 py-1.5 font-medium hover:bg-black/5 dark:hover:bg-white/5 outline outline-1 outline-gray-300 dark:outline-gray-800 rounded-3xl text-sm"
-											on:click={() => {
-												showManageModal = true;
-											}}
-										>
-											{$i18n.t('Manage')}
-										</button>
 									</div>
 
 									<!-- Sub-group E: Voice & Media -->

@@ -20,9 +20,7 @@
 
 	onMount(async () => {
 		if ($user?.role !== 'admin') {
-			if ($page.url.pathname.includes('/terminal')) {
-				goto('/');
-			} else if ($page.url.pathname.includes('/models') && !$user?.permissions?.workspace?.models) {
+			if ($page.url.pathname.includes('/models') && !$user?.permissions?.workspace?.models) {
 				goto('/');
 			} else if (
 				$page.url.pathname.includes('/knowledge') &&

@@ -169,9 +169,11 @@
 		if (canUseSTT) {
 			patch.audio = {
 				...(patch.audio ?? {}),
+				// '' (not undefined) so choosing "Default" overwrites the stored choice:
+				// the server deep-merges the patch, and undefined keys never reach it.
 				stt: {
-					engine: STTEngine !== '' ? STTEngine : undefined,
-					language: STTLanguage !== '' ? STTLanguage : undefined
+					engine: STTEngine,
+					language: STTLanguage
 				}
 			};
 			patch.speechAutoSend = speechAutoSend;
@@ -187,13 +189,13 @@
 			patch.audio = {
 				...(patch.audio ?? {}),
 				tts: {
-					engine: TTSEngine !== '' ? TTSEngine : undefined,
+					engine: TTSEngine,
 					engineConfig: TTSEngineConfig,
 					playbackRate: normalizePlaybackRate(playbackRate),
-					voice: voice !== '' ? voice : undefined,
+					voice,
 					defaultVoice: $config?.audio?.tts?.voice ?? '',
 					nonLocalVoices: $config.audio.tts.engine === '' ? nonLocalVoices : undefined,
-					modelVoices: Object.keys(cleanedModelVoices).length > 0 ? cleanedModelVoices : undefined
+					modelVoices: cleanedModelVoices
 				}
 			};
 			patch.responseAutoPlayback = responseAutoPlayback;

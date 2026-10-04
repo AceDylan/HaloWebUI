@@ -392,7 +392,7 @@
 						const voice =
 							voices
 								?.filter(
-									(v) => v.voiceURI === ($settings?.audio?.tts?.voice ?? $config?.audio?.tts?.voice)
+									(v) => v.voiceURI === ($settings?.audio?.tts?.voice || $config?.audio?.tts?.voice)
 								)
 								?.at(0) ?? undefined;
 
@@ -492,7 +492,7 @@
 					const blob = await $TTSWorker
 						.generate({
 							text: content,
-							voice: $settings?.audio?.tts?.voice ?? $config?.audio?.tts?.voice
+							voice: $settings?.audio?.tts?.voice || $config?.audio?.tts?.voice
 						})
 						.catch((error) => {
 							console.error(error);
@@ -506,7 +506,7 @@
 					const res = await synthesizeOpenAISpeech(
 						localStorage.token,
 						$settings?.audio?.tts?.defaultVoice === $config.audio.tts.voice
-							? ($settings?.audio?.tts?.voice ?? $config?.audio?.tts?.voice)
+							? ($settings?.audio?.tts?.voice || $config?.audio?.tts?.voice)
 							: $config?.audio?.tts?.voice,
 						content
 					).catch((error) => {

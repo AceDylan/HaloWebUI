@@ -143,11 +143,11 @@
 		ENABLE_IMAGE_GENERATION_TOOL: true,
 		ENABLE_IMAGE_EDIT: false,
 
-		ENABLE_MEMORY_TOOLS: true,
+		ENABLE_MEMORY_TOOLS: false,
 		ENABLE_NOTES: false,
 		ENABLE_CHAT_HISTORY_TOOLS: true,
 		ENABLE_TIME_TOOLS: true,
-		ENABLE_CHANNEL_TOOLS: true,
+		ENABLE_CHANNEL_TOOLS: false,
 		ENABLE_TERMINAL_TOOL: false
 	};
 	let nativeToolsConfig = cloneSettingsSnapshot(defaultNativeToolsConfig);
@@ -1108,48 +1108,6 @@
 							</div>
 						</div>
 
-						<!-- Memory Tools -->
-						<div
-							class="glass-item p-4"
-						>
-							<div class="text-sm font-medium text-gray-600 dark:text-gray-300 mb-2.5">{$i18n.t('记忆工具')}</div>
-							<div class="space-y-2">
-								<div class="flex items-center justify-between">
-									<div class="text-xs text-gray-500">
-										{$i18n.t('启用记忆工具')}
-										<code class="text-2xs bg-gray-100/80 dark:bg-gray-800/60 px-1 py-0.5 rounded font-mono">add_memory</code
-										>
-										<code class="text-2xs bg-gray-100/80 dark:bg-gray-800/60 px-1 py-0.5 rounded font-mono"
-											>search_memories</code
-										>
-										<code class="text-2xs bg-gray-100/80 dark:bg-gray-800/60 px-1 py-0.5 rounded font-mono"
-											>forget_memory</code
-										>
-									</div>
-									<Switch bind:state={nativeToolsConfig.ENABLE_MEMORY_TOOLS} />
-								</div>
-							</div>
-						</div>
-
-						<!-- Notes Tools -->
-						<div
-							class="glass-item p-4"
-						>
-							<div class="text-sm font-medium text-gray-600 dark:text-gray-300 mb-2.5">{$i18n.t('笔记工具')}</div>
-							<div class="space-y-2">
-								<div class="flex items-center justify-between">
-									<div class="text-xs text-gray-500">
-										{$i18n.t('启用笔记工具（实验）')}
-										<code class="text-2xs bg-gray-100/80 dark:bg-gray-800/60 px-1 py-0.5 rounded font-mono">add_note</code>
-										<code class="text-2xs bg-gray-100/80 dark:bg-gray-800/60 px-1 py-0.5 rounded font-mono"
-											>search_notes</code
-										>
-									</div>
-									<Switch bind:state={nativeToolsConfig.ENABLE_NOTES} />
-								</div>
-							</div>
-						</div>
-
 						<!-- Chat & Time Tools -->
 						<div
 							class="glass-item p-4"
@@ -1179,30 +1137,6 @@
 										>
 									</div>
 									<Switch bind:state={nativeToolsConfig.ENABLE_TIME_TOOLS} />
-								</div>
-								<div class="flex items-center justify-between">
-									<div class="text-xs text-gray-500">
-										{$i18n.t('频道工具')}
-										<code class="text-2xs bg-gray-100/80 dark:bg-gray-800/60 px-1 py-0.5 rounded font-mono"
-											>search_channels</code
-										>
-										<code class="text-2xs bg-gray-100/80 dark:bg-gray-800/60 px-1 py-0.5 rounded font-mono"
-											>search_channel_messages</code
-										>
-										<code class="text-2xs bg-gray-100/80 dark:bg-gray-800/60 px-1 py-0.5 rounded font-mono"
-											>view_channel_message</code
-										>
-									</div>
-									<Switch bind:state={nativeToolsConfig.ENABLE_CHANNEL_TOOLS} />
-								</div>
-								<div class="flex items-center justify-between">
-									<div class="text-xs text-gray-500">
-										{$i18n.t('终端命令')}
-										<code class="text-2xs bg-gray-100/80 dark:bg-gray-800/60 px-1 py-0.5 rounded font-mono"
-											>execute_command</code
-										>
-									</div>
-									<Switch bind:state={nativeToolsConfig.ENABLE_TERMINAL_TOOL} />
 								</div>
 							</div>
 						</div>

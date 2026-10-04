@@ -7,6 +7,7 @@ import shutil
 import uuid
 from functools import lru_cache
 from pathlib import Path
+from typing import Optional
 from pydub import AudioSegment
 from pydub.silence import split_on_silence
 
@@ -113,10 +114,46 @@ FFMPEG_MISSING_ERROR = (
 )
 
 
+def _has_ffmpeg() -> bool:
+    return bool(shutil.which("ffmpeg") and shutil.which("ffprobe"))
+
+
 def _check_ffmpeg():
     """Raise a clear error if ffmpeg/ffprobe are not installed."""
-    if not shutil.which("ffmpeg") or not shutil.which("ffprobe"):
+    if not _has_ffmpeg():
         raise Exception(FFMPEG_MISSING_ERROR)
+
+
+# Browsers record webm (Chrome) or mp4 (Safari) but upload it as "recording.wav".
+_AUDIO_MAGIC = (
+    (b"RIFF", "wav"),
+    (b"OggS", "ogg"),
+    (b"\x1a\x45\xdf\xa3", "webm"),
+    (b"ID3", "mp3"),
+    (b"fLaC", "flac"),
+)
+
+
+def sniff_audio_extension(file_path) -> Optional[str]:
+    """Container of an audio file from its first bytes (None when unknown)."""
+    with open(file_path, "rb") as f:
+        head = f.read(12)
+    for magic, ext in _AUDIO_MAGIC:
+        if head.startswith(magic):
+            return ext
+    if head[4:8] == b"ftyp":
+        return "m4a"
+    if head[:2] in (b"\xff\xfb", b"\xff\xf3", b"\xff\xf2"):
+        return "mp3"
+    return None
+
+
+# SenseVoice wraps the text in audio-event / emotion emoji (🎼 … 😊).
+_SENSEVOICE_TAGS = "😊😔😡😰🤢😮🎼👏😀😭🤧😷"
+
+
+def strip_sensevoice_tags(text: str) -> str:
+    return text.strip().strip(_SENSEVOICE_TAGS).strip()
 
 
 def get_audio_format(file_path):
@@ -730,15 +767,23 @@ def transcribe(request: Request, file_path, language: str = ""):
         log.debug(data)
         return data
     elif request.app.state.config.STT_ENGINE == "openai":
-        audio_format = get_audio_format(file_path)
-        if audio_format:
-            os.rename(file_path, file_path.replace(".wav", f".{audio_format}"))
-            # Convert unsupported audio file to WAV format
-            convert_audio_to_wav(
-                file_path.replace(".wav", f".{audio_format}"),
-                file_path,
-                audio_format,
-            )
+        upload_name = filename
+        if _has_ffmpeg():
+            audio_format = get_audio_format(file_path)
+            if audio_format:
+                os.rename(file_path, file_path.replace(".wav", f".{audio_format}"))
+                # Convert unsupported audio file to WAV format
+                convert_audio_to_wav(
+                    file_path.replace(".wav", f".{audio_format}"),
+                    file_path,
+                    audio_format,
+                )
+        else:
+            # No ffmpeg in the image: send the recording as it is, named by its real
+            # container. OpenAI-compatible endpoints take webm/ogg/mp4/mp3/wav directly.
+            ext = sniff_audio_extension(file_path)
+            if ext:
+                upload_name = f"{id}.{ext}"
 
         r = None
         try:
@@ -753,13 +798,15 @@ def transcribe(request: Request, file_path, language: str = ""):
                     headers={
                         "Authorization": f"Bearer {request.app.state.config.STT_OPENAI_API_KEY}"
                     },
-                    files={"file": (filename, audio_file)},
+                    files={"file": (upload_name, audio_file)},
                     data=form_data_fields,
                     verify=REQUESTS_VERIFY,
                 )
 
             r.raise_for_status()
             data = r.json()
+            if "sensevoice" in (request.app.state.config.STT_MODEL or "").lower():
+                data["text"] = strip_sensevoice_tags(str(data.get("text") or ""))
 
             # save the transcript to a json file
             transcript_file = f"{file_dir}/{id}.json"

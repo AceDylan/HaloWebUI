@@ -77,11 +77,9 @@
 		models: false,
 		documents: false,
 		webSearch: false,
-		codeExecution: false,
 		images: false,
 		analytics: false,
 		haloclaw: false,
-		externalApi: false,
 		userAgent: false
 	};
 	$: currentPath = $page.url.pathname;
@@ -106,11 +104,9 @@
 			models: path.startsWith('/settings/models'),
 			documents: path.startsWith('/settings/documents'),
 			webSearch: path.startsWith('/settings/web-search'),
-			codeExecution: path.startsWith('/settings/code-execution'),
 			images: path.startsWith('/settings/images'),
 			analytics: path.startsWith('/settings/analytics'),
 			haloclaw: path.startsWith('/settings/haloclaw'),
-			externalApi: path.startsWith('/settings/external-api'),
 			userAgent: path.startsWith('/settings/user-agent')
 		};
 	}
@@ -146,11 +142,9 @@
 		['models', 'Model Management'],
 		['documents', 'Documents'],
 		['webSearch', 'Web Search'],
-		['codeExecution', 'Code Execution'],
 		['userAgent', 'User-Agent'],
 		['images', 'Images'],
 		['analytics', 'Analytics'],
-		['externalApi', '外部 API'],
 		['haloclaw', 'HaloClaw'],
 		['functions', 'Functions']
 	];
@@ -254,9 +248,6 @@
 						<a class={navLinkClass(activeLinks.webSearch)} href="/settings/web-search"
 							>{$i18n.t('Web Search')}</a
 						>
-						<a class={navLinkClass(activeLinks.codeExecution)} href="/settings/code-execution"
-							>{$i18n.t('Code Execution')}</a
-						>
 						<a class={navLinkClass(activeLinks.userAgent)} href="/settings/user-agent">
 							User-Agent
 						</a>
@@ -266,9 +257,6 @@
 						<a class={navLinkClass(activeLinks.analytics)} href="/settings/analytics"
 							>{$i18n.t('Analytics')}</a
 						>
-						<a class={navLinkClass(activeLinks.externalApi)} href="/settings/external-api">
-							外部 API
-						</a>
 						<a class={navLinkClass(activeLinks.haloclaw)} href="/settings/haloclaw"
 							>{$i18n.t('HaloClaw')}</a
 						>

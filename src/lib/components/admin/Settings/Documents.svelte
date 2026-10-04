@@ -1918,22 +1918,6 @@
 								</div>
 							</div>
 						</div>
-
-						<div class="glass-item p-5">
-							<div class="mb-3 text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">
-								{tr('云存储', 'Cloud Storage')}
-							</div>
-							<div class="space-y-3">
-								<div class="flex items-center justify-between gap-4">
-									<div class="text-sm font-medium">{$i18n.t('Google Drive')}</div>
-									<Switch bind:state={RAGConfig.ENABLE_GOOGLE_DRIVE_INTEGRATION} />
-								</div>
-								<div class="flex items-center justify-between gap-4">
-									<div class="text-sm font-medium">{$i18n.t('OneDrive')}</div>
-									<Switch bind:state={RAGConfig.ENABLE_ONEDRIVE_INTEGRATION} />
-								</div>
-							</div>
-						</div>
 					</div>
 				</section>
 			{:else if selectedTab === 'embedding'}

@@ -344,7 +344,8 @@ async def update_user_settings_by_session_user(
         )
         patch_payload["ui"] = patch_ui
 
-    replace_paths = {("ui", "connections")}
+    # modelVoices is sent whole by the audio form; merging would keep removed entries.
+    replace_paths = {("ui", "connections"), ("ui", "audio", "tts", "modelVoices")}
     next_settings_dict = _deep_merge_dict(
         existing_settings_dict,
         patch_payload,

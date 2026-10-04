@@ -13,7 +13,6 @@
 		else if (rest === 'models') target = '/settings/models';
 		else if (rest === 'documents') target = '/settings/documents';
 		else if (rest === 'web-search' || rest === 'web') target = '/settings/web-search';
-		else if (rest === 'code-execution') target = '/settings/code-execution';
 		else if (rest === 'audio') target = '/settings/audio';
 		else if (rest === 'images') target = '/settings/images';
 		else if (rest.startsWith('functions/')) target = `/workspace/${rest}`;

@@ -62,7 +62,6 @@
 	let STT_AZURE_LOCALES = '';
 	let STT_DEEPGRAM_API_KEY = '';
 
-	let STT_WHISPER_MODEL_LOADING = false;
 	let isSaving = false;
 	let expandedSections = { stt: true, tts: true, advanced: true };
 	let sectionEl_stt: HTMLElement;
@@ -378,12 +377,6 @@
 		return await updateConfigHandler({ notify: false });
 	};
 
-	const sttModelUpdateHandler = async () => {
-		STT_WHISPER_MODEL_LOADING = true;
-		await updateConfigHandler({ notify: autoPersistOnEngineChange });
-		STT_WHISPER_MODEL_LOADING = false;
-	};
-
 	const onSubmitHandler = async () => {
 		if (!showSubmit) {
 			return;
@@ -490,7 +483,6 @@
 					bind:value={STT_ENGINE}
 					placeholder="Select an engine"
 					options={[
-						{ value: '', label: $i18n.t('Whisper (Local)') },
 						{ value: 'openai', label: 'OpenAI' },
 						{ value: 'web', label: $i18n.t('Web API') },
 						{ value: 'deepgram', label: 'Deepgram' },
@@ -558,29 +550,6 @@
 				<div class="glass-item p-4">
 					<div class="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5">{$i18n.t('Language Locales')}</div>
 					<input class="w-full py-2 px-3 text-sm dark:text-gray-300 glass-input" bind:value={STT_AZURE_LOCALES} placeholder={$i18n.t('e.g., en-US,ja-JP (leave blank for auto-detect)')} />
-				</div>
-			</div>
-		{:else if STT_ENGINE === ''}
-			<div class="space-y-3">
-				<div class="text-sm font-medium text-gray-500 dark:text-gray-400 pl-1">
-					{$i18n.t('Model Configuration')}
-				</div>
-				<div class="glass-item p-4">
-					<div class="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5">{$i18n.t('STT Model')}</div>
-					<div class="flex w-full gap-2">
-						<input class="flex-1 py-2 px-3 text-sm dark:text-gray-300 glass-input" placeholder={$i18n.t('Set whisper model')} bind:value={STT_WHISPER_MODEL} />
-						<button type="button" class="px-2.5 bg-gray-50 hover:bg-gray-200 text-gray-800 dark:bg-gray-850 dark:hover:bg-gray-800 dark:text-gray-100 rounded-lg transition" on:click={() => { sttModelUpdateHandler(); }} disabled={STT_WHISPER_MODEL_LOADING}>
-							{#if STT_WHISPER_MODEL_LOADING}
-								<div class="self-center"><svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><style>.spinner_ajPY{transform-origin:center;animation:spinner_AtaB .75s infinite linear}@keyframes spinner_AtaB{100%{transform:rotate(360deg)}}</style><path d="M12,1A11,11,0,1,0,23,12,11,11,0,0,0,12,1Zm0,19a8,8,0,1,1,8-8A8,8,0,0,1,12,20Z" opacity=".25"/><path d="M10.14,1.16a11,11,0,0,0-9,8.92A1.59,1.59,0,0,0,2.46,12,1.52,1.52,0,0,0,4.11,10.7a8,8,0,0,1,6.66-6.61A1.42,1.42,0,0,0,12,2.69h0A1.57,1.57,0,0,0,10.14,1.16Z" class="spinner_ajPY"/></svg></div>
-							{:else}
-								<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" class="w-4 h-4"><path d="M8.75 2.75a.75.75 0 0 0-1.5 0v5.69L5.03 6.22a.75.75 0 0 0-1.06 1.06l3.5 3.5a.75.75 0 0 0 1.06 0l3.5-3.5a.75.75 0 0 0-1.06-1.06L8.75 8.44V2.75Z"/><path d="M3.5 9.75a.75.75 0 0 0-1.5 0v1.5A2.75 2.75 0 0 0 4.75 14h6.5A2.75 2.75 0 0 0 14 11.25v-1.5a.75.75 0 0 0-1.5 0v1.5c0 .69-.56 1.25-1.25 1.25h-6.5c-.69 0-1.25-.56-1.25-1.25v-1.5Z"/></svg>
-							{/if}
-						</button>
-					</div>
-					<div class="mt-1.5 text-xs text-gray-400 dark:text-gray-500">
-						{$i18n.t(`Open WebUI uses faster-whisper internally.`)}
-						<a class="hover:underline dark:text-gray-200 text-gray-800" href="https://github.com/SYSTRAN/faster-whisper" target="_blank">{$i18n.t(`Click here to learn more about faster-whisper and see the available models.`)}</a>
-					</div>
 				</div>
 			</div>
 		{/if}
@@ -799,7 +768,6 @@
 										bind:value={STT_ENGINE}
 										placeholder="Select an engine"
 										options={[
-											{ value: '', label: $i18n.t('Whisper (Local)') },
 											{ value: 'openai', label: 'OpenAI' },
 											{ value: 'web', label: $i18n.t('Web API') },
 											{ value: 'deepgram', label: 'Deepgram' },
@@ -838,24 +806,6 @@
 								<hr class="border-gray-100 dark:border-gray-850 my-2" />
 								<div class="mb-1.5 text-sm font-medium">{$i18n.t('Language Locales')}</div>
 								<input class="w-full rounded-lg py-2 px-4 text-sm bg-gray-50 dark:text-gray-300 dark:bg-gray-850 outline-hidden" bind:value={STT_AZURE_LOCALES} placeholder={$i18n.t('e.g., en-US,ja-JP (leave blank for auto-detect)')} />
-							{:else if STT_ENGINE === ''}
-								<div class="mb-1.5 text-sm font-medium">{$i18n.t('STT Model')}</div>
-								<div class="flex w-full">
-									<div class="flex-1 mr-2">
-										<input class="w-full rounded-lg py-2 px-4 text-sm bg-gray-50 dark:text-gray-300 dark:bg-gray-850 outline-hidden" placeholder={$i18n.t('Set whisper model')} bind:value={STT_WHISPER_MODEL} />
-									</div>
-									<button class="px-2.5 bg-gray-50 hover:bg-gray-200 text-gray-800 dark:bg-gray-850 dark:hover:bg-gray-800 dark:text-gray-100 rounded-lg transition" on:click={() => { sttModelUpdateHandler(); }} disabled={STT_WHISPER_MODEL_LOADING}>
-										{#if STT_WHISPER_MODEL_LOADING}
-											<div class="self-center"><svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><style>.spinner_ajPY{transform-origin:center;animation:spinner_AtaB .75s infinite linear}@keyframes spinner_AtaB{100%{transform:rotate(360deg)}}</style><path d="M12,1A11,11,0,1,0,23,12,11,11,0,0,0,12,1Zm0,19a8,8,0,1,1,8-8A8,8,0,0,1,12,20Z" opacity=".25"/><path d="M10.14,1.16a11,11,0,0,0-9,8.92A1.59,1.59,0,0,0,2.46,12,1.52,1.52,0,0,0,4.11,10.7a8,8,0,0,1,6.66-6.61A1.42,1.42,0,0,0,12,2.69h0A1.57,1.57,0,0,0,10.14,1.16Z" class="spinner_ajPY"/></svg></div>
-										{:else}
-											<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" class="w-4 h-4"><path d="M8.75 2.75a.75.75 0 0 0-1.5 0v5.69L5.03 6.22a.75.75 0 0 0-1.06 1.06l3.5 3.5a.75.75 0 0 0 1.06 0l3.5-3.5a.75.75 0 0 0-1.06-1.06L8.75 8.44V2.75Z"/><path d="M3.5 9.75a.75.75 0 0 0-1.5 0v1.5A2.75 2.75 0 0 0 4.75 14h6.5A2.75 2.75 0 0 0 14 11.25v-1.5a.75.75 0 0 0-1.5 0v1.5c0 .69-.56 1.25-1.25 1.25h-6.5c-.69 0-1.25-.56-1.25-1.25v-1.5Z"/></svg>
-										{/if}
-									</button>
-								</div>
-								<div class="mt-2 mb-1 text-xs text-gray-400 dark:text-gray-500">
-									{$i18n.t(`Open WebUI uses faster-whisper internally.`)}
-									<a class="hover:underline dark:text-gray-200 text-gray-800" href="https://github.com/SYSTRAN/faster-whisper" target="_blank">{$i18n.t(`Click here to learn more about faster-whisper and see the available models.`)}</a>
-								</div>
 							{/if}
 						</div>
 					{/if}
@@ -1066,7 +1016,6 @@
 										bind:value={STT_ENGINE}
 										placeholder="Select an engine"
 										options={[
-											{ value: '', label: $i18n.t('Whisper (Local)') },
 											{ value: 'openai', label: 'OpenAI' },
 											{ value: 'web', label: $i18n.t('Web API') },
 											{ value: 'deepgram', label: 'Deepgram' },
@@ -1175,40 +1124,6 @@
 											bind:value={STT_AZURE_LOCALES}
 											placeholder={$i18n.t('e.g., en-US,ja-JP (leave blank for auto-detect)')}
 										/>
-									</div>
-								</div>
-							{:else if STT_ENGINE === ''}
-								<div class="space-y-3">
-									<div class="text-sm font-medium text-gray-500 dark:text-gray-400 pl-1">
-										{$i18n.t('Model Configuration')}
-									</div>
-									<div class="glass-item p-4">
-										<div class="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5">{$i18n.t('STT Model')}</div>
-										<div class="flex w-full gap-2">
-											<input
-												class="flex-1 py-2 px-3 text-sm dark:text-gray-300 glass-input"
-												placeholder={$i18n.t('Set whisper model')}
-												bind:value={STT_WHISPER_MODEL}
-											/>
-											<button
-												type="button"
-												class="px-2.5 bg-gray-50 hover:bg-gray-200 text-gray-800 dark:bg-gray-850 dark:hover:bg-gray-800 dark:text-gray-100 rounded-lg transition"
-												on:click={() => { sttModelUpdateHandler(); }}
-												disabled={STT_WHISPER_MODEL_LOADING}
-											>
-												{#if STT_WHISPER_MODEL_LOADING}
-													<div class="self-center"><svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><style>.spinner_ajPY{transform-origin:center;animation:spinner_AtaB .75s infinite linear}@keyframes spinner_AtaB{100%{transform:rotate(360deg)}}</style><path d="M12,1A11,11,0,1,0,23,12,11,11,0,0,0,12,1Zm0,19a8,8,0,1,1,8-8A8,8,0,0,1,12,20Z" opacity=".25"/><path d="M10.14,1.16a11,11,0,0,0-9,8.92A1.59,1.59,0,0,0,2.46,12,1.52,1.52,0,0,0,4.11,10.7a8,8,0,0,1,6.66-6.61A1.42,1.42,0,0,0,12,2.69h0A1.57,1.57,0,0,0,10.14,1.16Z" class="spinner_ajPY"/></svg></div>
-												{:else}
-													<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" class="w-4 h-4"><path d="M8.75 2.75a.75.75 0 0 0-1.5 0v5.69L5.03 6.22a.75.75 0 0 0-1.06 1.06l3.5 3.5a.75.75 0 0 0 1.06 0l3.5-3.5a.75.75 0 0 0-1.06-1.06L8.75 8.44V2.75Z"/><path d="M3.5 9.75a.75.75 0 0 0-1.5 0v1.5A2.75 2.75 0 0 0 4.75 14h6.5A2.75 2.75 0 0 0 14 11.25v-1.5a.75.75 0 0 0-1.5 0v1.5c0 .69-.56 1.25-1.25 1.25h-6.5c-.69 0-1.25-.56-1.25-1.25v-1.5Z"/></svg>
-												{/if}
-											</button>
-										</div>
-										<div class="mt-1.5 text-xs text-gray-400 dark:text-gray-500">
-											{$i18n.t(`Open WebUI uses faster-whisper internally.`)}
-											<a class="hover:underline dark:text-gray-200 text-gray-800" href="https://github.com/SYSTRAN/faster-whisper" target="_blank">
-												{$i18n.t(`Click here to learn more about faster-whisper and see the available models.`)}
-											</a>
-										</div>
 									</div>
 								</div>
 							{/if}

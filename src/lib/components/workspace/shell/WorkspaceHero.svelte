@@ -31,21 +31,12 @@
 
 	const swapWorkspaceHeroTabs = (items: WorkspaceTabMeta[]) => {
 		let reordered = swapTabs(items, 'tools', 'images');
-		reordered = swapTabs(reordered, 'tools', 'terminal');
 		reordered = swapTabs(reordered, 'images', 'skills');
 		return reordered;
 	};
 
-	const getWorkspaceHeroTabLabel = (tab: WorkspaceTabMeta | null) => {
-		if (!tab) return '';
-		if (tab.key !== 'terminal') return $i18n.t(tab.labelKey);
-
-		const filesLabel = $i18n.t('Files');
-		const terminalLabel = $i18n.t('Terminal');
-		const useCompactJoin = /[\u3040-\u30ff\u3400-\u9fff]/.test(`${filesLabel}${terminalLabel}`);
-
-		return `${filesLabel}${useCompactJoin ? '' : ' '}${terminalLabel}`;
-	};
+	const getWorkspaceHeroTabLabel = (tab: WorkspaceTabMeta | null) =>
+		tab ? $i18n.t(tab.labelKey) : '';
 
 	$: heroTabs = swapWorkspaceHeroTabs(tabs);
 </script>

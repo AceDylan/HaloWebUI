@@ -7,8 +7,7 @@ export type WorkspaceTabKey =
 	| 'functions'
 	| 'skills'
 	| 'images'
-	| 'assistants'
-	| 'terminal';
+	| 'assistants';
 
 export type WorkspaceTabMeta = {
 	key: WorkspaceTabKey;
@@ -31,7 +30,6 @@ const WORKSPACE_TAB_ORDER: WorkspaceTabKey[] = [
 	'tools',
 	'skills',
 	'functions',
-	'terminal',
 	'images'
 ];
 
@@ -170,34 +168,19 @@ export const WORKSPACE_TABS: WorkspaceTabMeta[] = [
 		],
 		activeMatch: ['/workspace/assistants'],
 		visibleWhen: () => true
-	},
-	{
-		key: 'terminal',
-		href: '/workspace/terminal',
-		labelKey: 'Files',
-		descKey: 'Switch between file browser and terminal access for advanced workspace operations.',
-		badgeColor: 'bg-slate-50 dark:bg-slate-950/30',
-		iconColor: 'text-slate-500 dark:text-slate-400',
-		iconPaths: [
-			'M19.9057 9C20.2877 9 20.6549 9.05664 21 9.16156V9C21 7.34315 19.6569 6 18 6H14.1213C13.9224 6 13.7316 5.92098 13.591 5.78033L11.4697 3.65901C11.0477 3.23705 10.4754 3 9.87868 3H6C4.34315 3 3 4.34315 3 6V9.16152C3.34508 9.05663 3.71223 9 4.09421 9H19.9057Z',
-			'M4.0943 10.5C2.72506 10.5 1.67327 11.7127 1.86691 13.0682L2.72405 19.0682C2.8824 20.1767 3.83173 21 4.95144 21H19.0486C20.1683 21 21.1176 20.1767 21.276 19.0682L22.1331 13.0682C22.3268 11.7127 21.275 10.5 19.9058 10.5H4.0943Z'
-		],
-		activeMatch: ['/workspace/terminal'],
-		visibleWhen: ({ user }) => user?.role === 'admin'
 	}
 ];
 
 // Tabs kept out of the tab strip because they are not used here (no knowledge
-// bases, notes, skills or functions; one tool; the file terminal is off). The
-// pages still work: open one by URL and its tab shows while it is open. Remove
-// a key from this list to bring the tab back.
+// bases, notes, skills or functions; one tool). The pages still work: open one
+// by URL and its tab shows while it is open. Remove a key from this list to
+// bring the tab back.
 export const HIDDEN_WORKSPACE_TABS: WorkspaceTabKey[] = [
 	'knowledge',
 	'notes',
 	'tools',
 	'skills',
-	'functions',
-	'terminal'
+	'functions'
 ];
 
 const isTabOpen = (tab: WorkspaceTabMeta, pathname?: string) =>

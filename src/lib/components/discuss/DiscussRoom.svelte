@@ -32,6 +32,7 @@
 	import {
 		applyEvent,
 		discussionMarkdown,
+		hermesHandoffPrompt,
 		isLive,
 		modelRef,
 		modeSpec,
@@ -199,15 +200,7 @@
 
 	const openHermes = () => {
 		if (!last) return;
-		hermesPrompt = [
-			'下面是一次多模型讨论的结论。请用你的工具（联网搜索、读文件等）核查其中需要事实支撑的说法：哪些成立、哪些不成立或要修正，并给出依据。',
-			'如果结论里有可以直接做的下一步，先说你打算怎么做，等我确认再动手。',
-			'',
-			`问题：${last.question}`,
-			'',
-			'讨论结论：',
-			last.conclusion.content
-		].join('\n');
+		hermesPrompt = hermesHandoffPrompt(last);
 		showHermes = true;
 	};
 	const sendToHermes = () => {

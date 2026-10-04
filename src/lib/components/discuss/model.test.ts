@@ -7,6 +7,7 @@ import {
 	domainOf,
 	linkCitations,
 	discussionMarkdown,
+	hermesHandoffPrompt,
 	modelById,
 	modeSpec,
 	parseSections,
@@ -177,5 +178,36 @@ describe('citations', () => {
 	it('names domains', () => {
 		expect(domainOf('https://www.postgresql.org/docs')).toBe('postgresql.org');
 		expect(domainOf('not a url')).toBe('not a url');
+	});
+});
+
+describe('hand-off to Hermes and the Markdown copy', () => {
+	const done = (research: DiscussAsk['research'] = null) =>
+		ask({
+			status: 'done',
+			research,
+			conclusion: { status: 'done', content: '## 结论\n用 Postgres [1]。', model: 'c', name: 'c' }
+		});
+
+	it('carries the question and the conclusion, and no source list when nothing was looked up', () => {
+		const text = hermesHandoffPrompt(done());
+		expect(text).toContain('问题：用哪个数据库？');
+		expect(text).toContain('## 结论\n用 Postgres [1]。');
+		expect(text).not.toContain('查到的资料');
+	});
+
+	it('lists the sources the [n] marks point at', () => {
+		const research = {
+			status: 'done' as const,
+			queries: ['postgres vs mongodb'],
+			sources: [
+				{ n: 1, title: 'PostgreSQL 文档', url: 'https://www.postgresql.org/docs/', excerpt: '…' },
+				{ n: 2, title: '', url: 'https://example.com/a', excerpt: '…' }
+			]
+		};
+		const text = hermesHandoffPrompt(done(research));
+		expect(text).toContain('讨论时查到的资料（结论里的 [n] 指这些）：\n[1] PostgreSQL 文档 https://www.postgresql.org/docs/\n[2] example.com https://example.com/a');
+		const md = discussionMarkdown('选型', [done(research)]);
+		expect(md).toContain('### 资料\n\n- [1] [PostgreSQL 文档](https://www.postgresql.org/docs/)\n- [2] [example.com](https://example.com/a)');
 	});
 });

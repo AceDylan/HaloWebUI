@@ -272,8 +272,32 @@ export const discussionMarkdown = (title: string, asks: DiscussAsk[]): string =>
 			}
 		}
 		if (ask.conclusion?.content) out.push(`\n### 主持人结论（${ask.conclusion.name}）\n\n${ask.conclusion.content}`);
+		const sources = ask.research?.sources ?? [];
+		if (sources.length) {
+			out.push(`\n### 资料\n\n${sources.map((s) => `- [${s.n}] [${s.title || domainOf(s.url)}](${s.url})`).join('\n')}`);
+		}
 	}
 	return out.join('\n') + '\n';
+};
+
+/** What "交给 Hermes 核查" sends (the user edits it first): the question, the conclusion and,
+ * when the seats looked things up, the sources its [n] marks point at. */
+export const hermesHandoffPrompt = (ask: DiscussAsk): string => {
+	const lines = [
+		'下面是一次多模型讨论的结论。请用你的工具（联网搜索、读文件等）核查其中需要事实支撑的说法：哪些成立、哪些不成立或要修正，并给出依据。',
+		'如果结论里有可以直接做的下一步，先说你打算怎么做，等我确认再动手。',
+		'',
+		`问题：${ask.question}`,
+		'',
+		'讨论结论：',
+		ask.conclusion?.content ?? ''
+	];
+	const sources = ask.research?.sources ?? [];
+	if (sources.length) {
+		lines.push('', '讨论时查到的资料（结论里的 [n] 指这些）：');
+		lines.push(...sources.map((s) => `[${s.n}] ${s.title || domainOf(s.url)} ${s.url}`));
+	}
+	return lines.join('\n');
 };
 
 // -------------------------------------------------------------------------------------------

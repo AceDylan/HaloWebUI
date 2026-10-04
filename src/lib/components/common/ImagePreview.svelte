@@ -21,18 +21,31 @@
 	let sceneParentElement: HTMLElement;
 	let sceneElement: HTMLElement;
 
+	// Whether the image is zoomed in: the zoom button zooms in from 1x and resets otherwise
+	// (it only reset before, so on a phone it looked like it did nothing).
+	let zoomed = false;
+
 	$: if (sceneElement) {
+		zoomed = false;
 		instance = panzoom(sceneElement, {
 			bounds: true,
 			boundsPadding: 0.1,
 
 			zoomSpeed: 0.065
 		});
+		instance.on('transform', () => {
+			zoomed = instance.getTransform().scale > 1.01;
+		});
 	}
-	const resetPanZoomViewport = () => {
-		instance.moveTo(0, 0);
-		instance.zoomAbs(0, 0, 1);
-		console.log(instance.getTransform());
+	const toggleZoom = () => {
+		if (!instance) return;
+		if (zoomed) {
+			instance.moveTo(0, 0);
+			instance.zoomAbs(0, 0, 1);
+			return;
+		}
+		// panzoom takes points relative to the overlay, which covers the viewport.
+		instance.smoothZoom(window.innerWidth / 2, window.innerHeight / 2, 2);
 	};
 
 	const downloadImage = () => {
@@ -41,7 +54,6 @@
 
 	const handleKeyDown = (event: KeyboardEvent) => {
 		if (event.key === 'Escape') {
-			console.log('Escape');
 			show = false;
 		}
 	};
@@ -87,10 +99,16 @@
 		bind:this={previewElement}
 		class="modal fixed top-0 right-0 left-0 bottom-0 bg-black text-white w-full min-h-screen h-screen flex justify-center z-9999 overflow-hidden overscroll-contain"
 	>
-		<div class=" absolute left-0 w-full flex justify-between select-none z-10">
-			<div>
+		<!-- panzoom listens for touchstart on the whole overlay and cancels it, which on a phone
+		     also cancels the click of any button here; the bar keeps its touches to itself. -->
+		<div
+			class=" absolute left-0 w-full flex justify-between select-none z-10 pt-[env(safe-area-inset-top)]"
+			data-image-preview-bar
+			on:touchstart|stopPropagation
+		>
+			<div class="shrink-0">
 				<button
-					class=" p-5"
+					class=" p-3.5 sm:p-5"
 					aria-label={$i18n.t('Close')}
 					on:pointerdown={(e) => {
 						e.stopImmediatePropagation();
@@ -114,11 +132,11 @@
 				</button>
 			</div>
 
-			<div class="flex items-center">
+			<div class="flex min-w-0 items-center">
 				{#each actions as action (action.id)}
 					<button
 						type="button"
-						class="mx-1 rounded-full bg-white/15 px-3 py-1.5 text-sm font-medium backdrop-blur transition hover:bg-white/25"
+						class="mx-0.5 shrink-0 whitespace-nowrap rounded-full bg-white/15 px-3 py-1.5 text-sm font-medium backdrop-blur transition hover:bg-white/25 sm:mx-1"
 						data-image-preview-action={action.id}
 						on:pointerdown={(e) => {
 							e.stopImmediatePropagation();
@@ -133,13 +151,15 @@
 					</button>
 				{/each}
 				<button
-					class=" p-5"
-					aria-label={$i18n.t('Reset zoom')}
+					class=" shrink-0 p-3.5 sm:p-5"
+					aria-label={$i18n.t(zoomed ? 'Reset zoom' : 'Zoom in')}
+					title={$i18n.t(zoomed ? 'Reset zoom' : 'Zoom in')}
+					data-image-preview-zoom={zoomed ? 'reset' : 'in'}
 					on:pointerdown={(e) => {
 						e.stopImmediatePropagation();
 						e.preventDefault();
-						resetPanZoomViewport();
 					}}
+					on:click={toggleZoom}
 				>
 					<svg
 						xmlns="http://www.w3.org/2000/svg"
@@ -157,8 +177,9 @@
 					</svg>
 				</button>
 				<button
-					class=" p-5"
+					class=" shrink-0 p-3.5 sm:p-5"
 					aria-label={$i18n.t('Download')}
+					data-image-preview-download
 					on:pointerdown={(e) => {
 						// Keep the press away from the pan/zoom layer; the click (mouse, touch or
 						// keyboard) downloads once.

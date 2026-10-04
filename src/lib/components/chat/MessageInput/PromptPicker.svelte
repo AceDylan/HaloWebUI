@@ -20,8 +20,12 @@
 	import XMark from '$lib/components/icons/XMark.svelte';
 
 	const i18n = getContext<Readable<I18n>>('i18n');
-	const dispatch = createEventDispatcher<{ select: { name: string; content: string } }>();
+	const dispatch = createEventDispatcher<{
+		select: { id?: string; name: string; content: string; config?: ImageTemplate['config'] };
+	}>();
 	export let imageMode = false;
+	// The image studio hides the "manage" link: it is already on that page.
+	export let showManage = true;
 	let orderKey: 'imagePromptOrder' | 'chatPromptOrder';
 	let open = false;
 	let sorting = false;
@@ -139,6 +143,7 @@
 		await tick();
 		// An image template also carries its generation settings (size, quality …) for the panel.
 		dispatch('select', {
+			id: imageMode ? template.id : undefined,
 			name: template.name,
 			content: template.config.prompt ?? '',
 			config: imageMode ? template.config : undefined
@@ -313,7 +318,7 @@
 					{/each}
 				{/if}
 			</div>
-			{#if canManage}
+			{#if canManage && showManage}
 				<div class="shrink-0 border-t border-gray-100 px-4 py-3 dark:border-gray-800">
 					<a
 						href={imageMode ? '/workspace/images?tab=prompts' : '/workspace/prompts'}

@@ -4,6 +4,7 @@ import {
 	applyImageTemplateEdit,
 	chatImageMemoryFromOptions,
 	collectImageTemplateTags,
+	composeTemplatePrompt,
 	describeImageTemplateSettings,
 	templateChatImageOptions,
 	filterImageTemplates,
@@ -295,5 +296,27 @@ describe('chat image memory', () => {
 		expect(parseChatImageMemory(null)).toBeNull();
 		expect(parseChatImageMemory('not json')).toBeNull();
 		expect(parseChatImageMemory('[1]')).toBeNull();
+	});
+
+	describe('composeTemplatePrompt', () => {
+		it('puts what the user wrote after a template that ends in a lead-in', () => {
+			expect(composeTemplatePrompt('  三层架构  ', null, '画成架构图。\n\n内容：')).toBe(
+				'画成架构图。\n\n内容：三层架构'
+			);
+		});
+
+		it('keeps only the written part when switching from another template', () => {
+			expect(composeTemplatePrompt('旧模板 内容：三层架构', '旧模板 内容：', '新模板。')).toBe(
+				'新模板。\n\n三层架构'
+			);
+		});
+
+		it('replaces an untouched template and leaves the prompt for an empty one', () => {
+			expect(composeTemplatePrompt('旧模板 内容：', '旧模板 内容：', '新模板 内容：')).toBe(
+				'新模板 内容：'
+			);
+			expect(composeTemplatePrompt('', null, '新模板')).toBe('新模板');
+			expect(composeTemplatePrompt('草稿', null, '  ')).toBe('草稿');
+		});
 	});
 });

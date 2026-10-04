@@ -97,6 +97,7 @@ describe('image prompts in the message input', () => {
 		await settle();
 		expect(selected).toHaveBeenCalledTimes(1);
 		expect(selected).toHaveBeenCalledWith({
+			id: templates[22].id,
 			name: templates[22].name,
 			content: templates[22].config.prompt,
 			config: templates[22].config

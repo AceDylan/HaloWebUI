@@ -26,7 +26,10 @@
 	import UploadProgress from '$lib/components/common/UploadProgress.svelte';
 	import PhotoSolid from '$lib/components/icons/PhotoSolid.svelte';
 	import Sparkles from '$lib/components/icons/Sparkles.svelte';
-	import { WEBUI_NAME, imageStudioTemplates, user } from '$lib/stores';
+	import GarbageBin from '$lib/components/icons/GarbageBin.svelte';
+	import PromptPicker from '$lib/components/chat/MessageInput/PromptPicker.svelte';
+	import { WEBUI_NAME, imageStudioTemplates, settings, user } from '$lib/stores';
+	import { orderPrompts } from '$lib/utils/prompt-order';
 	import { copyToClipboard } from '$lib/utils';
 	import { localizeCommonError } from '$lib/utils/common-errors';
 	import { getModelChatDisplayName, getModelDisplayParts } from '$lib/utils/model-display';
@@ -47,6 +50,7 @@
 	import {
 		applyImageTemplateEdit,
 		collectImageTemplateTags,
+		composeTemplatePrompt,
 		describeImageTemplateSettings,
 		filterImageTemplates,
 		isJsonPromptTemplate,
@@ -106,14 +110,6 @@
 
 	type TabKey = 'workbench' | 'prompts' | 'gallery' | 'history';
 
-	type StylePreset = {
-		id: string;
-		nameKey: string;
-		icon: string;
-		promptTemplate: string;
-		category?: string;
-	};
-
 	type ImageGenerationTemplate = ImageTemplate;
 
 	type WorkspaceImagePrefs = {
@@ -145,74 +141,6 @@
 	const WORKSPACE_IMAGE_HISTORY_KEY = 'workspace:image-studio:history:v1';
 	const WORKSPACE_IMAGE_ACTIVE_TAB_KEY = 'workspace:image-studio:active-tab:v1';
 	const i18n = getContext('i18n');
-
-	const promptIdeas = [
-		'Cinematic portrait',
-		'Clean product shot',
-		'Editorial poster',
-		'Cozy illustration',
-		'Neon cityscape',
-		'Minimal interior'
-	];
-
-	const BUILT_IN_STYLE_PRESETS: StylePreset[] = [
-		{
-			id: 'cinematic-realistic',
-			nameKey: 'Cinematic Realistic',
-			icon: '🎬',
-			promptTemplate: 'cinematic photography, photorealistic, dramatic lighting, film grain, professional color grading',
-			category: 'photography'
-		},
-		{
-			id: 'ecommerce-product',
-			nameKey: 'E-commerce Product',
-			icon: '🛍️',
-			promptTemplate: 'clean product photography, white background, studio lighting, high resolution, commercial quality',
-			category: 'commercial'
-		},
-		{
-			id: 'transparent-sticker',
-			nameKey: 'Transparent Sticker',
-			icon: '🏷️',
-			promptTemplate: 'sticker design, transparent background, clean edges, vibrant colors, die-cut style',
-			category: 'design'
-		},
-		{
-			id: '3d-toy',
-			nameKey: '3D Designer Toy',
-			icon: '🎨',
-			promptTemplate: '3D render, designer toy, smooth plastic material, studio lighting, trendy collectible style',
-			category: 'design'
-		},
-		{
-			id: 'flat-icon',
-			nameKey: 'Flat Icon',
-			icon: '📱',
-			promptTemplate: 'flat design icon, minimalist, simple shapes, solid colors, modern UI style',
-			category: 'design'
-		},
-		{
-			id: 'vintage-poster',
-			nameKey: 'Vintage Poster',
-			icon: '📜',
-			promptTemplate: 'vintage poster design, retro style, aged paper texture, classic typography, nostalgic aesthetic',
-			category: 'art'
-		},
-		{
-			id: 'anime-illustration',
-			nameKey: 'Anime Illustration',
-			icon: '🎌',
-			promptTemplate: 'anime style illustration, vibrant colors, detailed linework, expressive characters, Japanese animation aesthetic',
-			category: 'art'
-		},
-		{
-			id: 'minimal-wallpaper',
-			nameKey: 'Minimal Wallpaper',
-			icon: '🖼️',
-			promptTemplate: 'minimalist wallpaper, clean composition, subtle gradients, modern aesthetic, high resolution',
-			category: 'design'
-		}
-	];
 
 	const negativePromptSuggestions = [
 		'blurry',
@@ -283,6 +211,7 @@
 	// save section can overwrite it with the current settings instead of always
 	// creating a new one.
 	let loadedTemplateId: string | null = null;
+	let showSaveTemplate = false;
 	$: loadedTemplate = loadedTemplateId
 		? (savedTemplates.find((template) => template.id === loadedTemplateId) ?? null)
 		: null;
@@ -788,25 +717,6 @@
 		return filtered;
 	})();
 
-	const applyPromptIdea = (idea: string) => {
-		const translatedIdea = $i18n.t(idea);
-		prompt = prompt.trim() ? `${prompt.trim()}, ${translatedIdea}` : translatedIdea;
-	};
-
-	const applyStylePreset = (preset: StylePreset) => {
-		const currentPrompt = prompt.trim();
-		const template = preset.promptTemplate;
-
-		if (!currentPrompt) {
-			prompt = template;
-		} else {
-			// 智能合并，避免重复
-			if (!currentPrompt.toLowerCase().includes(template.toLowerCase())) {
-				prompt = `${currentPrompt}, ${template}`;
-			}
-		}
-	};
-
 	const addNegativePromptSuggestion = (suggestion: string) => {
 		const translatedSuggestion = $i18n.t(suggestion);
 		negativePrompt = negativePrompt.trim()
@@ -1031,13 +941,17 @@
 		}
 	};
 
-	const loadTemplate = (template: ImageGenerationTemplate) => {
+	let promptTextarea: HTMLTextAreaElement;
+
+	// Applies a template's prompt and settings. What the user already wrote stays, after the
+	// template's prompt (see composeTemplatePrompt), and the caret goes to the end to go on writing.
+	const loadTemplate = async (template: ImageGenerationTemplate) => {
 		const config = template.config;
+		prompt = composeTemplatePrompt(prompt, loadedTemplate?.config.prompt, config.prompt);
 		loadedTemplateId = template.id;
 		templateName = template.name;
 		templateTags = template.tags.join(', ');
 
-		if (config.prompt) prompt = config.prompt;
 		if (config.negativePrompt) {
 			negativePrompt = config.negativePrompt;
 			showNegativePrompt = true;
@@ -1060,7 +974,38 @@
 		if (config.quality) quality = config.quality;
 
 		toast.success($i18n.t('Template loaded'));
+		activeTab = 'workbench';
+		await tick();
+		if (promptTextarea) {
+			promptTextarea.focus({ preventScroll: true });
+			promptTextarea.setSelectionRange(prompt.length, prompt.length);
+			promptTextarea.scrollTop = promptTextarea.scrollHeight;
+		}
 	};
+
+	const loadTemplateById = (id: string) => {
+		const template = savedTemplates.find((item) => item.id === id);
+		if (template) void loadTemplate(template);
+	};
+
+	// One-tap templates above the prompt: the first few in the order the user keeps for image
+	// prompts in chats (sortable in the template picker), the loaded one always among them.
+	const QUICK_TEMPLATE_COUNT = 6;
+	$: orderedTemplates = orderPrompts(
+		sortImageTemplates(savedTemplates, 'recent').filter((template) =>
+			Boolean(template.config.prompt?.trim())
+		),
+		$settings?.imagePromptOrder,
+		(template) => template.id
+	);
+	$: quickTemplates = (() => {
+		const top = orderedTemplates.slice(0, QUICK_TEMPLATE_COUNT);
+		return loadedTemplate && !top.some((template) => template.id === loadedTemplate.id)
+			? [loadedTemplate, ...top.slice(0, QUICK_TEMPLATE_COUNT - 1)]
+			: top;
+	})();
+	// "系统架构图 · 服务与部署拓扑" → "系统架构图" on the chip; the full name is its tooltip.
+	const shortTemplateName = (name: string) => name.split(' · ')[0].trim() || name;
 
 	const importTemplatesFromFile = async (event: Event) => {
 		const input = event.currentTarget as HTMLInputElement | null;
@@ -1263,6 +1208,24 @@
 		if (!updated) return;
 		if (!(await persistStudioItems(toImageStudioItemForms('gallery', [updated])))) {
 			galleryImages = previous;
+		}
+	};
+
+	// Removes one gallery picture or history entry. The image file itself stays: a chat or
+	// another entry may still show it.
+	const deleteStudioItem = async (kind: 'gallery' | 'history', id: string) => {
+		try {
+			// false = not on the server (any more): gone either way.
+			await deleteImageStudioItem(localStorage.token, id);
+			if (kind === 'gallery') {
+				galleryImages = galleryImages.filter((item) => item.id !== id);
+			} else {
+				generationHistory = generationHistory.filter((item) => item.id !== id);
+			}
+			toast.success($i18n.t('Deleted'));
+		} catch (error) {
+			console.warn(`Failed to delete ${kind} item`, error);
+			toast.error($i18n.t('Failed to delete'));
 		}
 	};
 
@@ -1827,10 +1790,16 @@
 		</div>
 	{:else}
 		{#if activeTab === 'workbench'}
-			<form class="space-y-4" on:submit|preventDefault={submitHandler}>
+			<!-- Desktop: write on the left, the result stays in view on the right. Phone: one
+			     column with the result right under the prompt (the left column's wrapper is
+			     display:contents there, so `order` interleaves its cards with the result). -->
+			<form
+				class="flex flex-col gap-4 lg:grid lg:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)] lg:items-start"
+				on:submit|preventDefault={submitHandler}
+			>
 			<!-- The "Workbench" tab above already names this view; no extra title pill here, so
 			     the prompt box starts higher. -->
-			<div class="workspace-toolbar-row">
+			<div class="workspace-toolbar-row lg:col-span-2">
 					<div class="workspace-toolbar-summary">
 						<div
 							class="text-xs text-gray-600 dark:text-gray-400"
@@ -1863,42 +1832,78 @@
 
 			<!-- The cards sit on the page: no extra section card around them (it made four
 			     nested boxes under the workspace header). -->
-			<section class="space-y-4">
+			<section class="contents lg:flex lg:flex-col lg:gap-4">
 				<!-- svelte-ignore a11y-no-static-element-interactions -->
 				<div
-					class="glass-item p-4 space-y-3"
+					class="glass-item order-1 p-4 space-y-3"
 					on:dragover={(event) => {
 						if (event.dataTransfer?.types?.includes('Files')) event.preventDefault();
 					}}
 					on:drop={handleReferenceDrop}
 				>
-					<div class="flex items-center justify-between">
+					<!-- The user writes from their own templates: the picker (search, their order) sits
+					     by the title and their first few templates are one tap away above the box. -->
+					<div class="flex items-center justify-between gap-2">
 						<div class="text-sm font-semibold text-gray-900 dark:text-gray-100">
 							{$i18n.t('Main Prompt')}
 						</div>
-						<Sparkles className="size-4 text-gray-400" />
+						<div class="flex min-w-0 items-center gap-1.5">
+							{#if prompt.trim()}
+								<button
+									type="button"
+									class="h-8 shrink-0 rounded-full px-2.5 text-xs text-gray-500 transition hover:bg-gray-100 hover:text-gray-800 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-200"
+									data-image-studio-clear-prompt
+									on:click={() => {
+										prompt = '';
+										loadedTemplateId = null;
+										promptTextarea?.focus();
+									}}
+								>
+									{$i18n.t('Clear')}
+								</button>
+							{/if}
+							<PromptPicker
+								imageMode
+								showManage={false}
+								on:select={(event) => loadTemplateById(event.detail.id ?? '')}
+							/>
+						</div>
 					</div>
 
+					{#if quickTemplates.length > 0}
+						<div
+							class="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-0.5 scrollbar-hidden"
+							data-image-studio-quick-templates
+						>
+							{#each quickTemplates as template (template.id)}
+								<button
+									type="button"
+									class="max-w-[14rem] shrink-0 truncate rounded-full border px-3 py-1.5 text-xs transition {template.id ===
+									loadedTemplateId
+										? activeTagChipClass
+										: idleTagChipClass}"
+									title={template.name}
+									aria-pressed={template.id === loadedTemplateId}
+									data-image-studio-template={template.id}
+									on:click={() => loadTemplate(template)}
+								>
+									{shortTemplateName(template.name)}
+								</button>
+							{/each}
+						</div>
+					{/if}
+
 					<textarea
-						rows="5"
+						bind:this={promptTextarea}
+						rows="7"
 						bind:value={prompt}
 						on:keydown={handleComposerKeydown}
 						on:paste={handlePromptPaste}
-						placeholder={$i18n.t('Describe the image you want to generate...')}
-						class="min-h-[8rem] w-full resize-none rounded-xl border border-gray-200/60 bg-white/85 p-3 text-sm leading-6 text-gray-900 outline-none placeholder:text-gray-400 dark:border-gray-700/50 dark:bg-gray-900/70 dark:text-gray-100 dark:placeholder:text-gray-500"
+						placeholder={savedTemplates.length > 0
+							? $i18n.t('Pick a template above, then write what to draw…')
+							: $i18n.t('Describe the image you want to generate...')}
+						class="min-h-[9rem] max-h-[60vh] w-full resize-y rounded-xl border border-gray-200/60 bg-white/85 p-3 text-base leading-6 text-gray-900 outline-none placeholder:text-gray-400 sm:text-sm dark:border-gray-700/50 dark:bg-gray-900/70 dark:text-gray-100 dark:placeholder:text-gray-500"
 					/>
-
-					<div class="flex flex-wrap gap-1.5">
-						{#each promptIdeas as idea}
-							<button
-								type="button"
-								class="rounded-full border border-gray-200/60 bg-white/85 px-2.5 py-1 text-xs text-gray-600 transition hover:bg-gray-50 dark:border-gray-700/50 dark:bg-gray-900/70 dark:text-gray-400 dark:hover:bg-gray-800"
-								on:click={() => applyPromptIdea(idea)}
-							>
-								{$i18n.t(idea)}
-							</button>
-						{/each}
-					</div>
 
 					<div class="flex flex-wrap items-center gap-2" data-image-studio-references>
 						{#each referenceImages as ref, index (ref.preview ?? ref.url)}
@@ -1989,33 +1994,9 @@
 					</div>
 				</div>
 
-				<!-- 风格预设 -->
-				<div class="glass-item p-4 space-y-3">
-					<div class="flex items-center justify-between">
-						<div class="text-sm font-semibold text-gray-900 dark:text-gray-100">
-							{$i18n.t('Style Presets')}
-						</div>
-					</div>
-
-					<div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
-						{#each BUILT_IN_STYLE_PRESETS as preset}
-							<button
-								type="button"
-								class="style-preset-card"
-								on:click={() => applyStylePreset(preset)}
-							>
-								<span class="halo-preset-swatch" data-preset={preset.id} aria-hidden="true"></span>
-								<div class="text-xs font-medium text-gray-700 dark:text-gray-300 text-center">
-									{$i18n.t(preset.nameKey)}
-								</div>
-							</button>
-						{/each}
-					</div>
-				</div>
-
 				<!-- 负面提示词（OpenAI 路线的模型不收，不显示） -->
 				{#if !usesOpenAIImageRoute}
-					<div class="glass-item p-4 space-y-3">
+					<div class="glass-item order-3 p-4 space-y-3">
 						<div class="flex items-center justify-between">
 							<div class="text-sm font-semibold text-gray-900 dark:text-gray-100">
 								{$i18n.t('Negative Prompt')}
@@ -2052,12 +2033,12 @@
 					</div>
 				{/if}
 
-				<div class="glass-item p-4 space-y-4">
+				<div class="glass-item order-3 p-4 space-y-4">
 					<div class="text-sm font-semibold text-gray-900 dark:text-gray-100">
 						{$i18n.t('Generation Settings')}
 					</div>
 
-					<div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+					<div class="grid gap-4 sm:grid-cols-2">
 						{#if usesNativeAspectRatioControls}
 							<div class="space-y-1.5">
 								<div class="text-xs font-medium text-gray-500 dark:text-gray-400">
@@ -2252,13 +2233,28 @@
 						</div>
 					</div>
 
-					<!-- 模板保存 -->
-					<div class="mt-4 pt-4 border-t border-gray-200/60 dark:border-gray-700/50">
-						<div class="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-3">
-							{$i18n.t('Save as Template')}
-						</div>
+					<!-- 模板保存：平时收起，模板在提示词上方选 -->
+					<div class="mt-4 pt-3 border-t border-gray-200/60 dark:border-gray-700/50">
+						<button
+							type="button"
+							class="flex w-full items-center justify-between gap-2 py-1 text-left text-sm font-semibold text-gray-900 dark:text-gray-100"
+							aria-expanded={showSaveTemplate}
+							data-image-studio-save-toggle
+							data-halo-loaded-template={loadedTemplate?.id}
+							on:click={() => (showSaveTemplate = !showSaveTemplate)}
+						>
+							<span class="min-w-0 truncate" title={loadedTemplate?.name}>
+								{loadedTemplate
+									? $i18n.t('Loaded template: {{name}}', { name: loadedTemplate.name })
+									: $i18n.t('Save as Template')}
+							</span>
+							<span class="shrink-0 text-xs font-normal text-gray-500 dark:text-gray-400">
+								{showSaveTemplate ? $i18n.t('Hide') : $i18n.t('Save…')}
+							</span>
+						</button>
 
-						<div class="space-y-2">
+						{#if showSaveTemplate}
+						<div class="mt-2 space-y-2">
 							<input
 								bind:value={templateName}
 								placeholder={$i18n.t('Template name')}
@@ -2272,13 +2268,6 @@
 							/>
 
 							{#if loadedTemplate}
-								<div
-									class="truncate text-xs text-gray-500 dark:text-gray-400"
-									title={loadedTemplate.name}
-									data-halo-loaded-template={loadedTemplate.id}
-								>
-									{$i18n.t('Loaded template: {{name}}', { name: loadedTemplate.name })}
-								</div>
 								<button
 									type="button"
 									class="workspace-primary-button w-full"
@@ -2318,56 +2307,16 @@
 								</button>
 							{/if}
 						</div>
-
-						{#if savedTemplates.length > 0}
-							<div class="border-t border-gray-200/60 dark:border-gray-700/50 pt-3 mt-3">
-								<div class="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2">
-									{$i18n.t('Saved Templates')} ({savedTemplates.length})
-								</div>
-								<div class="space-y-1">
-									{#each savedTemplates.slice(0, 3) as template}
-										<button
-											type="button"
-											class="w-full flex items-center justify-between p-2 rounded-lg hover:bg-gray-100/50 dark:hover:bg-gray-800/50 transition"
-											on:click={() => loadTemplate(template)}
-										>
-											<div class="text-left min-w-0 flex-1">
-												<div class="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
-													{template.name}
-												</div>
-												{#if template.tags.length > 0}
-													<div class="text-xs text-gray-500 dark:text-gray-400 truncate">
-														{template.tags.join(', ')}
-													</div>
-												{/if}
-											</div>
-											<svg class="size-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-												<path
-													stroke-linecap="round"
-													stroke-linejoin="round"
-													stroke-width="2"
-													d="M9 5l7 7-7 7"
-												/>
-											</svg>
-										</button>
-									{/each}
-									{#if savedTemplates.length > 3}
-										<button
-											type="button"
-											class="w-full text-xs text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 py-1 transition"
-											on:click={() => (activeTab = 'prompts')}
-										>
-											{$i18n.t('View all')} ({savedTemplates.length})
-										</button>
-									{/if}
-								</div>
-							</div>
 						{/if}
 					</div>
 				</div>
 			</section>
 
-			<section bind:this={resultsSectionElement} class="space-y-3">
+			<section
+				bind:this={resultsSectionElement}
+				class="order-2 space-y-3 lg:sticky lg:top-4"
+				data-image-studio-results
+			>
 				<div class="flex items-center justify-between">
 					<div class="min-w-0 flex-1">
 						<div class="text-sm font-semibold text-gray-900 dark:text-gray-100">
@@ -2388,7 +2337,7 @@
 				</div>
 
 				{#if loading}
-					<div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+					<div class="grid gap-3 sm:grid-cols-2">
 						<div class="shimmer relative h-56 rounded-xl glass-item">
 							<div
 								class="absolute inset-0 flex flex-col items-center justify-center gap-1 text-center"
@@ -2406,7 +2355,7 @@
 						</div>
 					</div>
 				{:else if generatedImages.length > 0}
-					<div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+					<div class="grid gap-3 sm:grid-cols-2">
 						{#each generatedImages as image, index}
 							<div
 								role="button"
@@ -2429,7 +2378,7 @@
 										loading="lazy"
 									/>
 									<div
-										class="absolute inset-x-0 bottom-0 flex items-end justify-between gap-2 bg-gradient-to-t from-black/70 via-black/20 to-transparent p-3 text-white opacity-0 transition duration-200 group-hover:opacity-100"
+										class="absolute inset-x-0 bottom-0 flex items-end justify-between gap-2 bg-gradient-to-t from-black/70 via-black/20 to-transparent p-3 text-white opacity-0 transition duration-200 group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100"
 									>
 										<div class="text-xs font-medium">{activeSizeLabel}</div>
 										<div class="flex items-center gap-2">
@@ -2739,7 +2688,7 @@
 
 				{#if sortedGalleryImages.length > 0}
 					<div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-						{#each sortedGalleryImages as image}
+						{#each sortedGalleryImages as image (image.id)}
 							<div class="glass-item p-1.5 group">
 								<div class="relative overflow-hidden rounded-lg bg-gray-100 dark:bg-gray-950">
 									<img
@@ -2753,10 +2702,21 @@
 											previewOpen = true;
 										}}
 									/>
-									<div class="absolute top-2 right-2">
+									<div class="absolute top-2 right-2 flex gap-1.5">
+										<button
+											type="button"
+											class="rounded-lg bg-white/90 dark:bg-gray-900/90 p-1.5 text-gray-500 backdrop-blur transition hover:bg-white hover:text-red-600 dark:text-gray-400 dark:hover:bg-gray-900 dark:hover:text-red-400"
+											aria-label={$i18n.t('Delete')}
+											title={$i18n.t('Delete')}
+											data-image-gallery-delete={image.id}
+											on:click={() => deleteStudioItem('gallery', image.id)}
+										>
+											<GarbageBin className="size-4" />
+										</button>
 										<button
 											type="button"
 											class="rounded-lg bg-white/90 dark:bg-gray-900/90 p-1.5 backdrop-blur transition hover:bg-white dark:hover:bg-gray-900"
+											aria-label={$i18n.t('Favorite')}
 											on:click={() => toggleFavorite(image.id)}
 										>
 											<svg
@@ -2849,7 +2809,7 @@
 
 				{#if generationHistory.length > 0}
 					<div class="space-y-2">
-						{#each generationHistory as item}
+						{#each generationHistory as item (item.id)}
 							<div class="glass-item p-4">
 								<div class="flex items-start gap-3">
 									<div class="shrink-0">
@@ -2913,14 +2873,26 @@
 													{$i18n.t('Open the chat')}
 												</a>
 											{/if}
-											<button
-												type="button"
-												class="ml-auto rounded-full px-2.5 py-1 font-medium text-gray-700 transition hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-800"
-												data-image-history-reuse
-												on:click={() => reuseHistoryEntry(item)}
-											>
-												{$i18n.t('Use again')}
-											</button>
+											<span class="ml-auto flex items-center gap-0.5">
+												<button
+													type="button"
+													class="rounded-full px-2.5 py-1 font-medium text-gray-700 transition hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-800"
+													data-image-history-reuse
+													on:click={() => reuseHistoryEntry(item)}
+												>
+													{$i18n.t('Use again')}
+												</button>
+												<button
+													type="button"
+													class="rounded-full p-1.5 text-gray-400 transition hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/40 dark:hover:text-red-400"
+													aria-label={$i18n.t('Delete')}
+													title={$i18n.t('Delete')}
+													data-image-history-delete={item.id}
+													on:click={() => deleteStudioItem('history', item.id)}
+												>
+													<GarbageBin className="size-4" />
+												</button>
+											</span>
 										</div>
 
 										{#if item.status === 'success' && item.images}

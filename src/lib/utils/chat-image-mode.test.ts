@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import { isChatImageMode, isDedicatedImageGenerationChatModel } from './chat-image-mode';
+import {
+	isChatImageMode,
+	isDedicatedImageGenerationChatModel,
+	pickChatImageModel
+} from './chat-image-mode';
 
 const GPT_IMAGE_SELECTION = 'modelref::openai::personal::id:c153e2d2::gpt-image';
 
@@ -45,5 +49,38 @@ describe('chat-image-mode', () => {
 		expect(isChatImageMode(false, { id: 'gpt-4o' })).toBe(false);
 		expect(isChatImageMode(false, null)).toBe(false);
 		expect(isChatImageMode(false, { id: GPT_IMAGE_SELECTION })).toBe(true);
+	});
+
+	describe('pickChatImageModel', () => {
+		const hermes = { id: 'hermes.hermes-agent', model_id: 'hermes-agent' };
+		const gptImage = { id: GPT_IMAGE_SELECTION, model_id: 'gpt-image' };
+		const gptImage2 = {
+			id: 'modelref::openai::personal::id:c153e2d2::gpt-image-2',
+			model_id: 'gpt-image-2'
+		};
+		const dalle = { id: 'openai.dall-e-3', model_id: 'dall-e-3' };
+
+		it('prefers the model the studio used, then gpt-image, then any image model', () => {
+			expect(pickChatImageModel([hermes, gptImage, gptImage2], 'gpt-image-2')).toBe(gptImage2);
+			expect(
+				pickChatImageModel([hermes, gptImage, gptImage2], 'modelref::openai::personal::id:x::gpt-image')
+			).toBe(gptImage);
+			const otherConnection = {
+				id: 'modelref::openai::personal::id:9f00aa11::gpt-image',
+				selection_id: 'modelref::openai::personal::id:9f00aa11::gpt-image',
+				model_id: 'gpt-image'
+			};
+			expect(pickChatImageModel([gptImage, otherConnection], otherConnection.selection_id)).toBe(
+				otherConnection
+			);
+			expect(pickChatImageModel([hermes, dalle, gptImage], 'flux-pro')).toBe(gptImage);
+			expect(pickChatImageModel([hermes, dalle])).toBe(dalle);
+		});
+
+		it('skips hidden models and returns null without an image model', () => {
+			expect(pickChatImageModel([hermes, { ...gptImage, info: { meta: { hidden: true } } }])).toBeNull();
+			expect(pickChatImageModel([hermes])).toBeNull();
+			expect(pickChatImageModel(null)).toBeNull();
+		});
 	});
 });

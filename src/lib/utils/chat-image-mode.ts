@@ -6,7 +6,7 @@
 // dedicated image model (also when it is a workspace preset wrapping one).
 
 import { isDedicatedImageGenerationModel } from './model-capabilities';
-import { getModelCleanId, parseModelSelectionId } from './model-identity';
+import { getModelCleanId, getModelSelectionId, parseModelSelectionId } from './model-identity';
 
 // Structural on purpose: the chat passes `Model` objects whose `info` is typed
 // tightly elsewhere, and only these fields matter here.
@@ -50,3 +50,31 @@ export const isChatImageMode = (
 	imageGenerationEnabled: boolean,
 	model: ChatModelLike | null | undefined
 ): boolean => Boolean(imageGenerationEnabled) || isDedicatedImageGenerationChatModel(model);
+
+/**
+ * The chat model an image from the image studio goes to: the visible dedicated
+ * image model the studio used (`preferredId`, bare or as a selection id), else
+ * the same model on another connection, else the first gpt-image one, else any
+ * dedicated image model; null when the chat has none, and the image then joins
+ * whatever model is selected.
+ */
+export const pickChatImageModel = <T extends ChatModelLike>(
+	models: T[] | null | undefined,
+	preferredId = ''
+): T | null => {
+	const candidates = (models ?? []).filter(
+		(model) => !model?.info?.meta?.hidden && isDedicatedImageGenerationChatModel(model)
+	);
+	const exact = preferredId.trim();
+	const preferred = bareModelId(exact).toLowerCase();
+	return (
+		(exact && candidates.find((model) => getModelSelectionId(model) === exact)) ||
+		(preferred &&
+			candidates.find((model) =>
+				chatModelIdCandidates(model).some((candidate) => candidate.toLowerCase() === preferred)
+			)) ||
+		candidates.find(isGptImageChatModel) ||
+		candidates[0] ||
+		null
+	);
+};

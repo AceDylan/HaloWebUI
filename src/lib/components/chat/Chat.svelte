@@ -117,7 +117,7 @@
 		type WebSearchModeSource
 	} from '$lib/utils/web-search-mode';
 	import { getFunctionPipeRootId } from '$lib/utils/image-generation';
-	import { isDedicatedImageGenerationChatModel } from '$lib/utils/chat-image-mode';
+	import { isDedicatedImageGenerationChatModel, pickChatImageModel } from '$lib/utils/chat-image-mode';
 	import {
 		getModelWebSearchPreference,
 		resolveModelBuiltinWebSearchState
@@ -3282,7 +3282,7 @@
 	// studio — goes into the message box as an attachment with image generation
 	// on, so the next message edits it.
 	const attachImageForEditing = async (fileId: string, name = '') => {
-		const file = chatImageFileFromHandoff({ fileId, name, at: 0 }, WEBUI_API_BASE_URL, uuidv4());
+		const file = chatImageFileFromHandoff({ fileId, name }, WEBUI_API_BASE_URL);
 		if (!files.some((item) => item?.type === 'image' && extractChatImageFileId(item) === fileId)) {
 			files = [...files, file];
 		}
@@ -4009,15 +4009,23 @@
 			}
 		}
 
-		// "发到对话" in the image studio (see image-handoff.ts): read once.
+		// "发到对话" in the image studio (see image-handoff.ts): read once. The chat
+		// switches to the studio's image model, so the image chip and its options
+		// come and go with the model like any other pick of an image model.
 		const imageHandoff = takeChatImageHandoff(
 			typeof sessionStorage === 'undefined' ? null : sessionStorage
 		);
 		if (imageHandoff) {
+			const imageModel = pickChatImageModel($models, imageHandoff.model);
+			if (imageModel) {
+				selectedModels = [getModelRequestId(imageModel)];
+			}
 			await attachImageForEditing(imageHandoff.fileId, imageHandoff.name);
 		}
 
 		// 「继续对话」 from 讨论台 / 协作台: the draft is filled in (not sent), files attached.
+		// No itemId on them: they belong to the discussion or team, so taking one out
+		// of the message box must not delete it (see chatImageFileFromHandoff).
 		const chatHandoffEntry = takeHandoff(
 			typeof sessionStorage === 'undefined' ? null : sessionStorage,
 			'chat'
@@ -4034,16 +4042,14 @@
 									id: f.id,
 									url: `${WEBUI_API_BASE_URL}/files/${f.id}/content`,
 									name: f.name,
-									status: 'uploaded',
-									itemId: uuidv4()
+									status: 'uploaded'
 								}
 							: {
 									type: 'file',
 									id: f.id,
 									url: `${WEBUI_API_BASE_URL}/files/${f.id}`,
 									name: f.name,
-									status: 'uploaded',
-									itemId: uuidv4()
+									status: 'uploaded'
 								}
 					)
 				];

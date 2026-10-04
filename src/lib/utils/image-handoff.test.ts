@@ -48,17 +48,18 @@ describe('opening a chat image in the studio', () => {
 
 describe('sending a studio image to a chat', () => {
 	it('is read once, fresh, and becomes an uploaded image attachment', () => {
-		const raw = JSON.stringify({ fileId: 'abc', name: 'fox.png', at: 1_000 });
+		const raw = JSON.stringify({ fileId: 'abc', name: 'fox.png', model: 'gpt-image', at: 1_000 });
 		const handoff = parseChatImageHandoff(raw, 2_000);
-		expect(handoff).toEqual({ fileId: 'abc', name: 'fox.png', at: 1_000 });
-		expect(chatImageFileFromHandoff(handoff!, '/api/v1', 'item-1')).toEqual({
+		expect(handoff).toEqual({ fileId: 'abc', name: 'fox.png', model: 'gpt-image', at: 1_000 });
+		// No itemId: removing it from the message box must not delete the gallery's file.
+		expect(chatImageFileFromHandoff(handoff!, '/api/v1')).toEqual({
 			type: 'image',
 			id: 'abc',
 			url: '/api/v1/files/abc/content',
 			name: 'fox.png',
-			status: 'uploaded',
-			itemId: 'item-1'
+			status: 'uploaded'
 		});
+		expect(parseChatImageHandoff(JSON.stringify({ fileId: 'abc', at: 1_000 }), 2_000)?.model).toBe('');
 	});
 
 	it('drops stale or malformed handoffs', () => {

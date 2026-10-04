@@ -1431,9 +1431,10 @@
 		}
 	};
 
-	// A new chat opens with this image in the message box (see image-handoff.ts).
+	// A new chat opens with this image in the message box and the studio's image
+	// model selected (see image-handoff.ts).
 	const sendImageToChat = async (url: string, name = '') => {
-		const handoff = serializeChatImageHandoff(url, name);
+		const handoff = serializeChatImageHandoff(url, name, selectedModel || selectedModelRawId);
 		if (!handoff) {
 			toast.error($i18n.t('Only images saved here can be sent to a chat'));
 			return;

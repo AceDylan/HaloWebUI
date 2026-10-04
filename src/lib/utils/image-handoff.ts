@@ -48,12 +48,23 @@ export const CHAT_IMAGE_HANDOFF_KEY = 'halo.chatImageHandoff';
 // Left over from a tab closed before the chat opened: not picked up later.
 const HANDOFF_TTL_MS = 5 * 60 * 1000;
 
-export type ChatImageHandoff = { fileId: string; name: string; at: number };
+// `model` is the image model the studio was using, so the chat can pick the same one.
+export type ChatImageHandoff = { fileId: string; name: string; model: string; at: number };
 
-export const serializeChatImageHandoff = (url: string, name = '', now = Date.now()): string | null => {
+export const serializeChatImageHandoff = (
+	url: string,
+	name = '',
+	model = '',
+	now = Date.now()
+): string | null => {
 	const fileId = imageFileIdFromUrl(url, typeof location === 'undefined' ? '' : location.origin);
 	if (!fileId) return null;
-	return JSON.stringify({ fileId, name: name.trim().slice(0, 120), at: now });
+	return JSON.stringify({
+		fileId,
+		name: name.trim().slice(0, 120),
+		model: model.trim().slice(0, 200),
+		at: now
+	});
 };
 
 export const parseChatImageHandoff = (
@@ -67,20 +78,32 @@ export const parseChatImageHandoff = (
 		const at = Number(value?.at);
 		if (!/^[A-Za-z0-9_-]{1,128}$/.test(fileId)) return null;
 		if (!Number.isFinite(at) || now - at > HANDOFF_TTL_MS || at - now > 60_000) return null;
-		return { fileId, name: typeof value.name === 'string' ? value.name : '', at };
+		return {
+			fileId,
+			name: typeof value.name === 'string' ? value.name : '',
+			model: typeof value.model === 'string' ? value.model : '',
+			at
+		};
 	} catch {
 		return null;
 	}
 };
 
-/** The composer attachment for a handed-off image (already on the server, nothing to upload). */
-export const chatImageFileFromHandoff = (handoff: ChatImageHandoff, apiBaseUrl: string, itemId: string) => ({
+/**
+ * The composer attachment for a handed-off image (already on the server, nothing
+ * to upload). No `itemId`: that marks a file the composer uploaded itself, which
+ * removing it from the message box deletes from the server. This image belongs
+ * to the gallery or a chat, so removing it must only take it out of the box.
+ */
+export const chatImageFileFromHandoff = (
+	handoff: Pick<ChatImageHandoff, 'fileId' | 'name'>,
+	apiBaseUrl: string
+) => ({
 	type: 'image',
 	id: handoff.fileId,
 	url: `${apiBaseUrl}/files/${handoff.fileId}/content`,
 	name: handoff.name || 'image.png',
-	status: 'uploaded',
-	itemId
+	status: 'uploaded'
 });
 
 /** Reads the handed-off image once (it is removed either way). */

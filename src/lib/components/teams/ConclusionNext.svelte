@@ -286,8 +286,9 @@
 					</span>
 					<span class="mt-0.5 block text-xs leading-relaxed text-gray-500 dark:text-gray-400">
 						{#if drawingNow}
-							{illustration?.template ? `「${illustration.template}」· ` : ''}{illustration?.step ===
-							'draw'
+							{illustration?.by === 'auto' ? '结论写好了，自动配图 · ' : ''}{illustration?.template
+								? `「${illustration.template}」· `
+								: ''}{illustration?.step === 'draw'
 								? 'gpt-image 在画图'
 								: '负责人在提炼图上的要点'}{#if illustration?.started_at}
 								· 已 {elapsed($now - illustration.started_at)}{/if}
@@ -296,7 +297,7 @@
 						{:else if illustration?.status === 'ready'}
 							图在结果的标题下面{illustration.template ? `（${illustration.template}）` : ''}，提示词也存在工作目录里
 						{:else}
-							用 gpt-image 把结果画成一张图，放在结果最上面；可以选你在生图工作台存的模板风格
+							用 gpt-image 把结果画成一张图，放在结果最上面（新写好的结论会自动按「手绘万能图」配一张）；也可以选别的模板风格重画
 						{/if}
 					</span>
 				</span>

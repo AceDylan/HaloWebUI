@@ -188,3 +188,56 @@ def test_drawing_shows_as_a_stage(pkg, team_id, plan_dict, monkeypatch):
     assert stage["key"] == "illustrating" and "手绘万能图" in stage["now"] and "gpt-image 在画图" in stage["now"]
     assert stage["eta"]["seconds"] > 0
     assert illustrate.aspect_of({"aspect": "1:1"}) == "square" and illustrate.aspect_of({"size": "1536x1024"}) == "landscape"
+
+
+def test_a_written_result_gets_its_picture_on_its_own_in_the_template_handed_over(pkg, team_id, plan_dict,
+                                                                                 monkeypatch, tmp_path):
+    import halowebui_teams.illustrate as illustrate
+
+    monkeypatch.setenv("HALO_TEAMS_AUTO_ILLUSTRATE", "1")
+    drawn = tmp_path / "openai_gpt-image-2_auto.png"
+    drawn.write_bytes(b"\x89PNG\r\n\x1a\n" + b"7" * 32)
+    report = "# 科学戒烟行动指南\n\n> 先定戒烟日。\n\n## 一、准备\n\n选一个具体的日子，告诉家人朋友，清理香烟和打火机。\n"
+    draws = []
+
+    def model(messages, *a, **k):
+        if messages[0]["content"] == illustrate.CONDENSE_SYSTEM:
+            return "标题：科学戒烟\n要点：\n🗓 定戒烟日", "", {"model": "gpt-chat"}
+        return report, "", {"model": "gpt-chat"}
+
+    def draw(args):
+        draws.append(args)
+        return json.dumps({"success": True, "image": str(drawn), "model": "gpt-image-2-medium", "provider": "openai"})
+
+    monkeypatch.setattr(pkg.plan, "call_model", model)
+    monkeypatch.setattr(illustrate, "generate_image", draw)
+    plan, errors = pkg.plan.validate_plan(plan_dict)
+    hand = {"id": "halo_hand_v1_auto_style", "name": "手绘万能图 · 自动选画风与画幅", "aspect": "3:2",
+            "size": "1536x1024", "prompt": "请把下面的内容画成一张手绘信息图，画风和画幅都根据内容自动决定。\n\n内容："}
+    created = pkg.teams.create_team(team_id, plan, owner="u1", goal="如何戒烟", conclusion_template=hand)
+    slug = pkg.common.board_slug(team_id)
+    assert pkg.common.read_team(slug)["illustrate_template"]["name"] == "手绘万能图 · 自动选画风与画幅"
+    with pkg.common.board_conn(slug) as conn:
+        for tid in created["tasks"].values():
+            assert _kb().claim_task(conn, tid, claimer="test") is not None
+            _kb().complete_task(conn, tid, result="好了", summary="好了")
+    pkg.teams.snapshot(team_id, "u1")  # completes → writes the conclusion → draws its picture (sync in tests)
+    assert len(draws) == 1 and draws[0]["prompt"].startswith("请把下面的内容画成一张手绘信息图")
+    assert draws[0]["prompt"].endswith("内容：\n标题：科学戒烟\n要点：\n🗓 定戒烟日") and draws[0]["aspect_ratio"] == "landscape"
+    brief = pkg.teams.snapshot(team_id, "u1")["team"]["conclusion"]["illustration"]
+    assert brief["status"] == "ready" and brief["by"] == "auto" and brief["template"] == "手绘万能图 · 自动选画风与画幅"
+    ws = Path(pkg.common.read_team(slug)["workspace"])
+    md = (ws / ".halo" / "conclusion.md").read_text(encoding="utf-8")
+    assert md.count(illustrate.MARK) == 1 and "images/result-1.png" in md
+    # a rewrite keeps that picture rather than drawing another one
+    pkg.conclusion.start(slug, by="user", force=True)
+    assert len(draws) == 1 and "images/result-1.png" in (ws / ".halo" / "conclusion.md").read_text(encoding="utf-8")
+    # a picture that failed is drawn again with the next version
+    illustrate._set(slug, status="failed", error="生图失败")
+    pkg.conclusion.start(slug, by="auto", force=True)
+    assert len(draws) == 2
+    # turned off: left to the button
+    monkeypatch.setenv("HALO_TEAMS_AUTO_ILLUSTRATE", "0")
+    illustrate._set(slug, status="failed", error="生图失败")
+    pkg.conclusion.start(slug, by="auto", force=True)
+    assert len(draws) == 2

@@ -146,7 +146,8 @@ REPORT_BASELINE_AGE = 600    # conclusions older than this when first seen preda
 def report_conclusion(slug: str, team: dict) -> None:
     """A conclusion the lead wrote when the team finished (or finished again after new work) goes
     to HaloWebUI, which puts it in the chat the team was started from. Once per written version,
-    after the lead's acceptance check (bounded wait); a rewrite the user asked for is not re-sent."""
+    after the lead's acceptance check and the result's picture (bounded waits); a rewrite the user
+    asked for is not re-sent."""
     from . import link, notify
 
     if team.get("state") != "completed" or not team.get("owner"):
@@ -166,6 +167,10 @@ def report_conclusion(slug: str, team: dict) -> None:
     acceptance = entry.get("acceptance") or {}
     if (acceptance.get("status") == "checking"
             and now() - int(acceptance.get("started_at") or 0) < notify.ACCEPTANCE_WAIT):
+        return
+    from . import illustrate
+
+    if illustrate.drawing(entry):  # the chat gets the result with its picture (bounded wait)
         return
     if not link.configured() or now() - int(team.get("report_tried_at") or 0) < REPORT_RETRY:
         return

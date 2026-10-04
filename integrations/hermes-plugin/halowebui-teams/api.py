@@ -5,7 +5,8 @@ refuses a team whose recorded owner differs (404), so a bug on the HaloWebUI sid
 or drive another user's team through this API either.
 
   POST /v1/halo-teams/plan                         {goal, feedback?, previous?, team_id?}
-  POST /v1/halo-teams                              {team_id, plan, goal, title?, chat_id?, image_templates?}
+  POST /v1/halo-teams                              {team_id, plan, goal, title?, chat_id?, image_templates?,
+                                                    conclusion_template?}
   GET  /v1/halo-teams/{team_id}                    snapshot
   GET  /v1/halo-teams/{team_id}/events?after=&limit=
   GET  /v1/halo-teams/{team_id}/tasks/{task_id}?log=1
@@ -153,6 +154,7 @@ async def _create(request):
         origin=data.get("origin") if isinstance(data.get("origin"), dict) else None,
         image_templates=data.get("image_templates") if isinstance(data.get("image_templates"), list) else None,
         inputs=data.get("inputs") if isinstance(data.get("inputs"), list) else None,
+        conclusion_template=data.get("conclusion_template") if isinstance(data.get("conclusion_template"), dict) else None,
     )
     return _json_response(result, status=201 if result.get("created") else 200)
 

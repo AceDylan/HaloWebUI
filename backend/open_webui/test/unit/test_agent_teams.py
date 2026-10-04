@@ -866,7 +866,30 @@ def test_a_plan_that_draws_takes_the_users_own_image_templates_along(hermes):
     plain = client.post("/api/v1/teams/", json={"goal": "写个说明"}).json()["id"]
     AgentTeams.update(plain, "u-img", status="plan_ready", plan=PLAN, title="说明")
     assert client.post(f"/api/v1/teams/{plain}/approve").status_code == 200
-    assert "image_templates" not in [c for c in hermes.calls if c[1] == "POST" and c[2] == ""][-1][3]
+    body = [c for c in hermes.calls if c[1] == "POST" and c[2] == ""][-1][3]
+    assert "image_templates" not in body
+    # every team takes the template its result is drawn in on its own once written: 「手绘万能图」
+    assert body["conclusion_template"]["id"] == "halo_hand_v1_auto_style"
+    assert body["conclusion_template"]["prompt"].endswith("内容：") and body["conclusion_template"]["aspect"] == "3:2"
+
+
+def test_the_result_picture_template_is_found_by_name_and_left_out_without_one(hermes):
+    from open_webui.models.image_studio import ImageStudioItemForm, ImageStudioItems
+
+    ImageStudioItems.upsert_items("u-pic", [
+        ImageStudioItemForm(id="把结论生成图片", kind="template", data={
+            "name": "把结论生成图片", "config": {"prompt": "结论图。\n\n内容：", "aspectRatio": "1:1"}}),
+        ImageStudioItemForm(id="copy-1", kind="template", data={
+            "name": "手绘万能图（我的副本）", "config": {"prompt": "手绘。\n\n内容：", "aspectRatio": "3:2"}}),
+    ])
+    hermes.responses[("POST", "")] = {"board": "halo-pic", "created": True, "tasks": {}}
+    for user, expected in (("u-pic", "手绘万能图（我的副本）"), ("u-none", None)):
+        client = _client(user)
+        team_id = client.post("/api/v1/teams/", json={"goal": "写个说明"}).json()["id"]
+        AgentTeams.update(team_id, user, status="plan_ready", plan=PLAN, title="说明")
+        assert client.post(f"/api/v1/teams/{team_id}/approve").status_code == 200
+        body = [c for c in hermes.calls if c[1] == "POST" and c[2] == ""][-1][3]
+        assert (body.get("conclusion_template") or {}).get("name") == expected
 
 
 def test_the_result_can_be_drawn_in_one_of_the_users_image_templates(hermes):

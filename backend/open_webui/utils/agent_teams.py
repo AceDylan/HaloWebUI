@@ -215,7 +215,7 @@ def auto_startable(plan: dict) -> bool:
 IMAGE_TEMPLATE_LIMIT = 40
 
 
-def image_templates(user_id: str) -> list[dict]:
+def image_templates(user_id: str, limit: int = IMAGE_TEMPLATE_LIMIT) -> list[dict]:
     """The user's own image templates (HaloWebUI 生图模板: name, tags, canvas, prompt) for a team's
     image members — the styles the user already uses in the image studio and in chats."""
     try:
@@ -237,9 +237,21 @@ def image_templates(user_id: str) -> list[dict]:
                     "tags": [str(t)[:20] for t in (data.get("tags") or []) if t][:4],
                     "aspect": str(config.get("aspectRatio") or "")[:10], "size": str(config.get("size") or "")[:20],
                     "prompt": prompt[:6000]})
-        if len(out) >= IMAGE_TEMPLATE_LIMIT:
+        if len(out) >= limit:
             break
     return out
+
+
+CONCLUSION_TEMPLATE_ID = "halo_hand_v1_auto_style"
+CONCLUSION_TEMPLATE_NAME = "手绘万能图"
+
+
+def conclusion_template(templates: list[dict]) -> Optional[dict]:
+    """The template a finished team's result is drawn in on its own (「为结果配图」 right after the
+    lead writes it): the user's 「手绘万能图 · 自动选画风与画幅」 (by id, else by name); None →
+    Hermes' own hand-drawn infographic."""
+    return (next((t for t in templates if t.get("id") == CONCLUSION_TEMPLATE_ID), None)
+            or next((t for t in templates if CONCLUSION_TEMPLATE_NAME in str(t.get("name") or "")), None))
 
 
 def plan_draws(plan: Optional[dict]) -> bool:
@@ -259,8 +271,12 @@ async def start_team(team: AgentTeamModel, target: HermesTarget) -> AgentTeamMod
     try:
         body = {"team_id": team.id, "plan": team.plan, "goal": team.goal, "title": team.title,
                 "chat_id": team.chat_id or "", "origin": team_origin(team)}
+        templates = image_templates(team.user_id, limit=200)
         if plan_draws(team.plan):
-            body["image_templates"] = image_templates(team.user_id)
+            body["image_templates"] = templates[:IMAGE_TEMPLATE_LIMIT]
+        picture = conclusion_template(templates)
+        if picture:
+            body["conclusion_template"] = picture
         if team_inputs(team):
             body["inputs"] = team_inputs(team)
         result = await hermes_call(target, "POST", "", json_body=body, timeout=60)

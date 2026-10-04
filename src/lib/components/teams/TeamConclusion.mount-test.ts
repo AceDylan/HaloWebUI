@@ -371,6 +371,29 @@ describe('ConclusionView', () => {
 		expect(card().classList.contains('tm-live')).toBe(true);
 	});
 
+	it('为结果配图: a freshly written result is being drawn on its own', async () => {
+		api.getTeamConclusion.mockResolvedValue({
+			...CONCLUSION,
+			entry: {
+				...CONCLUSION.entry,
+				format: 2,
+				illustration: {
+					status: 'generating',
+					by: 'auto',
+					template: '手绘万能图 · 自动选画风与画幅',
+					step: 'draw',
+					started_at: Math.floor(Date.now() / 1000)
+				}
+			}
+		});
+		await mount(ConclusionView, { teamId: 'team-1', phase: 'completed', variant: 'page' });
+		await until(() => !!target.querySelector('[data-conclusion-illustrate="generating"]'));
+		const text = target.querySelector('[data-conclusion-illustrate]').textContent;
+		expect(text).toContain('结论写好了，自动配图');
+		expect(text).toContain('「手绘万能图 · 自动选画风与画幅」');
+		expect(text).toContain('gpt-image 在画图');
+	});
+
 	it('shows generation in progress and an assembled fallback honestly', async () => {
 		api.getTeamConclusion.mockResolvedValue({
 			...CONCLUSION,

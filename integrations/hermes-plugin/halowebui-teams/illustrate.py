@@ -8,6 +8,11 @@ points); then Hermes' ``image_generate`` (gpt-image through the configured provi
 (``images/result-<n>.png`` + ``.prompt.md``) and the conclusion gets the picture between
 ``<!-- halo:illustration -->`` marks — a rewritten conclusion gets it back. Runs in a background
 thread; ``conclusion.illustration`` in the team record says where it stands.
+
+A conclusion the lead has just written gets its picture on its own (``auto``), in the template
+HaloWebUI handed over when the team started (the owner's 「手绘万能图 · 自动选画风与画幅」); the
+hand-over of the result to its chat waits for it (``WAIT``). HALO_TEAMS_AUTO_ILLUSTRATE=0 leaves it
+to the button.
 """
 
 from __future__ import annotations
@@ -24,6 +29,7 @@ from .common import logger, now, read_team, redact, update_team
 MARK = "<!-- halo:illustration -->"
 MARK_END = "<!-- /halo:illustration -->"
 STALE = 900
+WAIT = 360  # the result's hand-over to its chat waits this long for a picture being drawn
 CONDENSE_SYSTEM = """你要把一份结果提炼成一张图上放的内容。只输出这些内容本身，不要解释、不要代码块：
 标题：不超过 16 个字
 副标题：一句话（可省略）
@@ -186,7 +192,15 @@ def _run(slug: str, template: Optional[dict]) -> None:
             _jobs.pop(slug, None)
 
 
-def start(slug: str, template: Optional[dict] = None) -> dict:
+def clean_template(template: Any) -> Optional[dict]:
+    """A HaloWebUI image template as drawing needs it (name, prompt, canvas), or None."""
+    if not isinstance(template, dict) or not str(template.get("prompt") or "").strip():
+        return None
+    return {"name": redact(template.get("name") or "模板", 60), "prompt": str(template["prompt"])[:6000],
+            "aspect": str(template.get("aspect") or "")[:10], "size": str(template.get("size") or "")[:20]}
+
+
+def start(slug: str, template: Optional[dict] = None, *, by: str = "user") -> dict:
     """Start drawing in the background (one at a time per team)."""
     team = read_team(slug) or {}
     current = ((team.get("conclusion") or {}).get("illustration") or {})
@@ -195,11 +209,8 @@ def start(slug: str, template: Optional[dict] = None) -> dict:
     with _lock:
         if slug in _jobs and _jobs[slug].is_alive():
             return current
-        clean = None
-        if isinstance(template, dict) and str(template.get("prompt") or "").strip():
-            clean = {"name": redact(template.get("name") or "模板", 60), "prompt": str(template["prompt"])[:6000],
-                     "aspect": str(template.get("aspect") or "")[:10], "size": str(template.get("size") or "")[:20]}
-        entry = _set(slug, status="generating", started_at=now(), error="", step="condense",
+        clean = clean_template(template)
+        entry = _set(slug, status="generating", started_at=now(), error="", step="condense", by=by,
                      template=(clean or {}).get("name") or "")
         if os.environ.get("HALO_TEAMS_CONCLUSION_SYNC") == "1":  # tests
             _jobs[slug] = threading.current_thread()
@@ -212,12 +223,34 @@ def start(slug: str, template: Optional[dict] = None) -> dict:
     return ((read_team(slug) or {}).get("conclusion") or {}).get("illustration") or entry
 
 
+def auto(slug: str) -> Optional[dict]:
+    """The lead has just written the conclusion: draw its picture unless it has one (a rewrite keeps
+    the picture of the version before) or one is being drawn. In the template the team was handed
+    at the start (the owner's 「手绘万能图」), else Hermes' hand-drawn infographic."""
+    if os.environ.get("HALO_TEAMS_AUTO_ILLUSTRATE", "1") == "0":
+        return None
+    team = read_team(slug) or {}
+    current = public((team.get("conclusion") or {}).get("illustration")) or {}
+    if current.get("status") == "generating":
+        return None
+    if current.get("status") == "ready" and current.get("path") and team.get("workspace") \
+            and (Path(team["workspace"]) / current["path"]).is_file():
+        return None
+    return start(slug, team.get("illustrate_template"), by="auto")
+
+
+def drawing(entry: Any) -> bool:
+    """A picture for this conclusion entry is being drawn (and not given up on)."""
+    ill = public((entry or {}).get("illustration") if isinstance(entry, dict) else None) or {}
+    return ill.get("status") == "generating" and now() - int(ill.get("started_at") or 0) < WAIT
+
+
 def public(entry: Any) -> Optional[dict]:
     """What HaloWebUI shows of it (a stale 'generating' after a gateway restart reads as failed)."""
     if not isinstance(entry, dict) or not entry.get("status"):
         return None
     out = {k: entry.get(k) for k in ("status", "path", "prompt_path", "template", "started_at", "at", "seconds",
-                                     "error", "step") if entry.get(k) not in (None, "")}
+                                     "error", "step", "by") if entry.get(k) not in (None, "")}
     if out.get("status") == "generating" and now() - int(entry.get("started_at") or 0) > STALE:
         out.update(status="failed", error="配图被中断（网关重启），可以重新配图")
     return out

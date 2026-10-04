@@ -427,6 +427,8 @@ export type ConclusionIllustration = {
 	seconds?: number;
 	error?: string;
 	step?: 'condense' | 'draw' | '';
+	/** 'auto': drawn on its own right after the lead wrote the conclusion. */
+	by?: 'auto' | 'user';
 };
 
 export type LiveMember = TeamPlanMember & {

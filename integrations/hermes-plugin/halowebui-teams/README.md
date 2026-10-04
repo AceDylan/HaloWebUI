@@ -71,6 +71,9 @@ is the Hermes side. It adds no service, port or second task store:
   condenses the result into title + points, gpt-image draws it in the chosen template's style (else
   Hermes' hand-drawn infographic template), the picture goes under the result's title between
   `<!-- halo:illustration -->` marks (kept when the conclusion is rewritten); stage `illustrating`.
+  A freshly written conclusion is drawn on its own (`illustrate.auto`) in the template HaloWebUI
+  hands over at approval (`conclusion_template`: the owner's 「手绘万能图 · 自动选画风与画幅」), and its
+  hand-over to the chat waits for the picture (up to `illustrate.WAIT`).
 * **Files given with the goal** (`teams.copy_inputs`): HaloWebUI hands over the uploads of a team
   (the 协作台 composer's attachments, or a chat message dispatched with 派发方式「协作台」) as host
   paths; the lead plans knowing their names, and at approval they are copied into the workspace's
@@ -117,7 +120,7 @@ HaloWebUI sends `X-Halo-Owner: <user id>`; a team recorded for another owner is 
 | Route | |
 |---|---|
 | `POST /v1/halo-teams/plan` `{goal, feedback?, previous?, team_id?, inputs?: [names]}` | the lead's plan: one `auxiliary.kanban_decomposer` call + deterministic validation (names, executors, references, cycles), one retry with the errors |
-| `POST /v1/halo-teams` `{team_id, plan, goal, title?, chat_id?, image_templates?, inputs?: [{name, path}]}` | create the board and tasks from an approved plan (idempotent per team id) |
+| `POST /v1/halo-teams` `{team_id, plan, goal, title?, chat_id?, image_templates?, conclusion_template?, inputs?: [{name, path}]}` | create the board and tasks from an approved plan (idempotent per team id) |
 | `GET /v1/halo-teams/{id}` | authoritative snapshot: team, lead, members (status), tasks (status, sub_status, parents, attempts, current run) |
 | `GET /v1/halo-teams/{id}/events?after=&limit=` | normalized events after a cursor; each event carries the task status after it, so a replay is a plain fold; `reconcile` lists tasks whose folded history disagrees with the live row |
 | `GET /v1/halo-teams/{id}/tasks/{task}?log=1` | attempts, comments, redacted log tail |
@@ -160,7 +163,8 @@ gateway would otherwise ask a model to split it into new tasks on the team's boa
 Environment knobs: `HALO_TEAMS_BRIDGE=0` (no bridge loop), `HALO_TEAMS_BRIDGE_INTERVAL`
 (8 s), `HALO_TEAMS_RUNNER_MAX` (1 concurrent member per runner kind; old name `HALO_TEAMS_RECLAUDE_MAX`), `HALO_TEAMS_WORKSPACE_ROOT`
 (`/root/work/agent-teams`), `HALO_TEAMS_NATIVE_MAX_RUNTIME` (3600 s per Hermes attempt),
-`HALO_TEAMS_MAX_TOOL_EVENTS` (400 tool events per attempt, then one "truncated" note).
+`HALO_TEAMS_MAX_TOOL_EVENTS` (400 tool events per attempt, then one "truncated" note),
+`HALO_TEAMS_AUTO_ILLUSTRATE=0` (a written conclusion is not drawn on its own; the button still works).
 
 ## Tests
 

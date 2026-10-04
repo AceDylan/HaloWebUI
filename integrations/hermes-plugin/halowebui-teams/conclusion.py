@@ -453,6 +453,13 @@ def generate(slug: str, *, by: str = "auto") -> dict:
 def _run(slug: str, by: str) -> None:
     try:
         entry = generate(slug, by=by)
+        if entry.get("status") == "ready":
+            from . import illustrate
+
+            try:  # its picture is drawn meanwhile (the hand-over to the chat waits for both)
+                illustrate.auto(slug)
+            except Exception:  # noqa: BLE001
+                logger.warning("halowebui-teams: automatic illustration for %s did not start", slug, exc_info=True)
         if entry.get("status") == "ready" and entry.get("source") == "lead":
             from .lead import check_acceptance
 

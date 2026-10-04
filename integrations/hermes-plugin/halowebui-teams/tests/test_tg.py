@@ -163,6 +163,7 @@ def _finish(pkg, team_id, plan_dict, linked):
 
 def test_a_written_conclusion_is_handed_to_halowebui_once(pkg, team_id, plan_dict, linked, monkeypatch):
     import halowebui_teams.bridge as bridge
+    import halowebui_teams.illustrate as illustrate
 
     calls = []
     outcome = {"error": None}
@@ -184,6 +185,16 @@ def test_a_written_conclusion_is_handed_to_halowebui_once(pkg, team_id, plan_dic
     bridge.report_conclusion(slug, pkg.common.read_team(slug))
     assert calls == []
     pkg.common.update_team(slug, lambda rec: rec["conclusion"].update(acceptance={"status": "ready", "verdict": "met"}))
+    # its picture is being drawn: the chat gets the result with it (bounded wait)
+    pkg.common.update_team(slug, lambda rec: rec["conclusion"].update(
+        illustration={"status": "generating", "started_at": pkg.common.now(), "by": "auto"}))
+    bridge.report_conclusion(slug, pkg.common.read_team(slug))
+    assert calls == []
+    pkg.common.update_team(slug, lambda rec: rec["conclusion"].update(
+        illustration={"status": "generating", "started_at": pkg.common.now() - illustrate.WAIT - 1, "by": "auto"}))
+    assert not illustrate.drawing(pkg.common.read_team(slug)["conclusion"])  # given up on: sent without it
+    pkg.common.update_team(slug, lambda rec: rec["conclusion"].update(
+        illustration={"status": "ready", "path": "images/result-1.png", "by": "auto"}))
     # HaloWebUI busy: tried again a minute later, not every tick
     outcome["error"] = (409, "这个对话正在回答别的问题")
     bridge.report_conclusion(slug, pkg.common.read_team(slug))

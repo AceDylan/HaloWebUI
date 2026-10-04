@@ -239,9 +239,11 @@ def _workspace_text(team: dict) -> str:
 
 def create_team(team_id: str, plan: dict, *, owner: str, chat_id: str = "", goal: str = "",
                 title: str = "", origin: Optional[dict] = None, image_templates: Optional[list] = None,
-                inputs: Optional[list] = None) -> dict:
+                inputs: Optional[list] = None, conclusion_template: Optional[dict] = None) -> dict:
     """Create (or return) the board for *team_id* from a validated *plan*; idempotent.
-    ``image_templates``: the owner's HaloWebUI image templates, offered to image members."""
+    ``image_templates``: the owner's HaloWebUI image templates, offered to image members.
+    ``conclusion_template``: the one the result's picture is drawn in once it is written."""
+    from .illustrate import clean_template
     from .plan import task_model, validate_plan
 
     slug = board_slug(team_id)
@@ -287,6 +289,7 @@ def create_team(team_id: str, plan: dict, *, owner: str, chat_id: str = "", goal
             "max_parallel": checked["max_parallel"],
             "effort": checked.get("effort") or "",
             "image_templates": template_names,
+            "illustrate_template": clean_template(conclusion_template),
             "inputs": input_paths,
             "state": "running",
             "created_at": now(),

@@ -222,6 +222,17 @@ describe('ConclusionView', () => {
 		await until(() => nav.goto.mock.calls.length > 0);
 		expect(api.followUpTeamConclusion).toHaveBeenCalledWith('tok', 'team-1');
 		expect(nav.goto).toHaveBeenCalledWith('/c/chat-9');
+
+		// a second opinion: 讨论台 with this conclusion as background and a way back to the team
+		nav.goto.mockReset();
+		(next.querySelector('[data-conclusion-discuss]') as any).click();
+		expect(nav.goto).toHaveBeenCalledWith('/discuss');
+		const entry = JSON.parse(sessionStorage.getItem('halo.handoff')!);
+		expect(entry.to).toBe('discuss');
+		expect(entry.text).toContain('关于「看板调研」的结果');
+		expect(entry.context.length).toBeGreaterThan(20);
+		expect(entry.from).toEqual({ kind: 'team', id: 'team-1', title: '看板调研' });
+		sessionStorage.removeItem('halo.handoff');
 	});
 
 	it('a team started from a chat goes back there; nothing to do while it is rewritten', async () => {

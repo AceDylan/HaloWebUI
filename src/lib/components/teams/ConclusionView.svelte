@@ -497,6 +497,8 @@
 			<ConclusionNext
 				{teamId}
 				{chatId}
+				{title}
+				markdown={data.markdown}
 				{outputs}
 				generatedAt={entry.generated_at}
 				{variant}

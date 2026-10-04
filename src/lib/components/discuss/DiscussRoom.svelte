@@ -22,6 +22,7 @@
 	import { copyToClipboard } from '$lib/utils';
 	import { WEBUI_API_BASE_URL } from '$lib/constants';
 	import { isHermesAgentModel } from '$lib/utils/hermes';
+	import { handOff, HANDOFF_PATH } from '$lib/utils/handoff';
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import MenuLines from '$lib/components/icons/MenuLines.svelte';
 	import { now, timeAgo } from '$lib/components/teams/clock';
@@ -202,6 +203,29 @@
 		if (!last) return;
 		hermesPrompt = hermesHandoffPrompt(last);
 		showHermes = true;
+	};
+	$: teamsEnabled = !!$config?.features?.enable_agent_teams;
+	// 「继续对话」: a new chat with the conclusion in its composer (not sent), and a way back here
+	// in what it says. 「交给协作台」: a team goal with the conclusion as background.
+	const continueInChat = () => {
+		if (!last) return;
+		handOff(typeof sessionStorage === 'undefined' ? null : sessionStorage, {
+			to: 'chat',
+			text: `接着这次多模型讨论聊。\n\n问题：${last.question}\n\n讨论结论：\n${last.conclusion.content}\n\n我想继续问：`,
+			from: { kind: 'discuss', id: chatId, title }
+		});
+		goto(HANDOFF_PATH.chat);
+	};
+	const toTeams = () => {
+		if (!last) return;
+		const sources = (last.research?.sources ?? []).map((s) => `[${s.n}] ${s.title || s.url} ${s.url}`).join('\n');
+		handOff(typeof sessionStorage === 'undefined' ? null : sessionStorage, {
+			to: 'teams',
+			text: `按讨论结论去做：${last.question}`,
+			context: `讨论结论：\n${last.conclusion.content}${sources ? `\n\n资料：\n${sources}` : ''}`,
+			from: { kind: 'discuss', id: chatId, title }
+		});
+		goto(HANDOFF_PATH.teams);
 	};
 	const sendToHermes = () => {
 		if (!hermes || !hermesPrompt.trim()) return;
@@ -462,7 +486,12 @@
 							{/each}
 						{/if}
 
-						<ConclusionCard {ask} />
+						<ConclusionCard
+							{ask}
+							next={ask === last && settled
+								? { chat: continueInChat, team: teamsEnabled ? toTeams : null, hermes: canHandOff ? openHermes : null }
+								: null}
+						/>
 
 						{#if ask.error && ask.status === 'error'}
 							<p class="rounded-xl bg-red-500/5 px-3 py-2 text-xs text-red-700 dark:text-red-300">{ask.error}</p>
@@ -480,7 +509,7 @@
 	{#if discussion}
 		<div class="dc-dock-wrap pointer-events-none absolute inset-x-0 bottom-0 px-3 pb-3 sm:px-6 sm:pb-5" data-discuss-dock>
 			<div class="pointer-events-auto mx-auto flex max-w-3xl flex-col gap-2">
-				{#if settled && (canConclude || canContinue || canHandOff)}
+				{#if settled && (canConclude || canContinue)}
 					<div class="flex flex-wrap justify-center gap-1.5" transition:fade={{ duration: 150 }}>
 						{#if canConclude}
 							<button type="button" class="dc-chip" disabled={busy} on:click={conclude} data-discuss-conclude>
@@ -490,11 +519,6 @@
 						{#if canContinue}
 							<button type="button" class="dc-chip" disabled={busy} on:click={more} data-discuss-continue>
 								再讨论一轮
-							</button>
-						{/if}
-						{#if canHandOff}
-							<button type="button" class="dc-chip" disabled={busy} on:click={openHermes} data-discuss-hermes>
-								交给 Hermes 核查
 							</button>
 						{/if}
 					</div>

@@ -179,7 +179,7 @@
 	import { TAB_ACTIVITY_TITLE_PREFIX, tabActivity } from '$lib/utils/tab-activity';
 	import { MODELS_ERROR_TOAST_ID, describeModelsError, ensureModels } from '$lib/services/models';
 	import { takeLandingPrompt } from '$lib/utils/chat-landing';
-	import { chatHandoff, handOff, HANDOFF_PATH } from '$lib/utils/handoff';
+	import { chatHandoff, handOff, HANDOFF_PATH, takeHandoff } from '$lib/utils/handoff';
 
 	import Banner from '../common/Banner.svelte';
 	import MessageInput from '$lib/components/chat/MessageInput.svelte';
@@ -4002,6 +4002,39 @@
 		);
 		if (imageHandoff) {
 			await attachImageForEditing(imageHandoff.fileId, imageHandoff.name);
+		}
+
+		// 「继续对话」 from 讨论台 / 协作台: the draft is filled in (not sent), files attached.
+		const chatHandoffEntry = takeHandoff(
+			typeof sessionStorage === 'undefined' ? null : sessionStorage,
+			'chat'
+		);
+		if (chatHandoffEntry) {
+			if (chatHandoffEntry.text) prompt = chatHandoffEntry.text;
+			if (chatHandoffEntry.files.length) {
+				files = [
+					...files,
+					...chatHandoffEntry.files.map((f) =>
+						f.type === 'image'
+							? {
+									type: 'image',
+									id: f.id,
+									url: `${WEBUI_API_BASE_URL}/files/${f.id}/content`,
+									name: f.name,
+									status: 'uploaded',
+									itemId: uuidv4()
+								}
+							: {
+									type: 'file',
+									id: f.id,
+									url: `${WEBUI_API_BASE_URL}/files/${f.id}`,
+									name: f.name,
+									status: 'uploaded',
+									itemId: uuidv4()
+								}
+					)
+				];
+			}
 		}
 
 		if (window.location.pathname === '/') {

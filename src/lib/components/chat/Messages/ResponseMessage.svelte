@@ -2376,7 +2376,7 @@
 													{/each}
 												{/if}
 
-												{#if message.done !== false && history?.messages?.[message.parentId]}
+												{#if message?.parentId}
 													<hr class="border-black/5 dark:border-white/5 my-0.5" />
 													<DropdownMenu.Item
 														class={menuItemClass}

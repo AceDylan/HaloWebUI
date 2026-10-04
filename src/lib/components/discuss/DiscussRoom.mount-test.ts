@@ -263,4 +263,38 @@ describe('DiscussRoom', () => {
 		expect(api.askDiscussion.mock.calls[0].slice(1, 3)).toEqual(['chat1', '那备份呢？']);
 		expect(target.textContent).toContain('追问 1');
 	}, 90000);
+	it('carries the conclusion on: into a new chat (not sent) or to a team with it as background', async () => {
+		const ask = runningAsk();
+		Object.assign(ask, {
+			status: 'done',
+			research: { status: 'done', queries: ['q'], sources: [{ n: 1, title: 'PG 文档', url: 'https://www.postgresql.org/docs/', excerpt: '…' }] },
+			turns: [
+				{ id: 'r1-s1', round: 1, seat: 's1', status: 'done', content: '选 Postgres' },
+				{ id: 'r1-s2', round: 1, seat: 's2', status: 'done', content: '同意' }
+			],
+			conclusion: { status: 'done', model: 'm-b', name: 'claude-chat', content: '## 结论\n用 Postgres [1]。' }
+		});
+		api.getDiscussion.mockResolvedValue({ ...discussion(ask), title: '数据库选型' });
+		stores.config.set({ hermes_agent_model_ids: ['hermes-agent'], features: { enable_agent_teams: true } } as any);
+		const target = await mount();
+		await until(() => !!target.querySelector('[data-discuss-next]'));
+		expect(target.querySelector('[data-discuss-next]')!.textContent).toContain('继续对话');
+		expect(target.querySelector('[data-discuss-hermes]')).toBeTruthy();
+
+		(target.querySelector('[data-discuss-to-chat]') as any).click();
+		expect(nav.goto).toHaveBeenLastCalledWith('/');
+		const toChat = JSON.parse(sessionStorage.getItem('halo.handoff')!);
+		expect(toChat.to).toBe('chat');
+		expect(toChat.text).toContain('问题：小团队的内部工具用 Postgres 还是 MongoDB？');
+		expect(toChat.text).toContain('用 Postgres [1]。');
+		expect(toChat.from).toEqual({ kind: 'discuss', id: 'chat1', title: '数据库选型' });
+
+		(target.querySelector('[data-discuss-to-team]') as any).click();
+		expect(nav.goto).toHaveBeenLastCalledWith('/teams');
+		const toTeam = JSON.parse(sessionStorage.getItem('halo.handoff')!);
+		expect(toTeam).toMatchObject({ to: 'teams', text: '按讨论结论去做：小团队的内部工具用 Postgres 还是 MongoDB？' });
+		expect(toTeam.context).toContain('讨论结论：\n## 结论\n用 Postgres [1]。');
+		expect(toTeam.context).toContain('[1] PG 文档 https://www.postgresql.org/docs/');
+		sessionStorage.removeItem('halo.handoff');
+	}, 90000);
 });

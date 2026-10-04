@@ -10,6 +10,8 @@
 	/** The moderator's conclusion of one question: the answer first, then agreements,
 	 *  disagreements, positions and next steps as separate panels. */
 	export let ask: DiscussAsk;
+	/** 「接下来」 under the latest conclusion: carry it into a chat, a team, or Hermes. */
+	export let next: { chat?: () => void; team?: (() => void) | null; hermes?: (() => void) | null } | null = null;
 
 	$: conclusion = ask.conclusion;
 	$: sources = ask.research?.status === 'done' ? ask.research.sources : [];
@@ -143,6 +145,21 @@
 							><span class="tm-num">[{source.n}]</span> {domainOf(source.url)}</a
 						>
 					{/each}
+				</div>
+			{/if}
+
+			{#if next && state === 'done'}
+				<div class="mt-4 flex flex-wrap items-center gap-1.5 border-t border-gray-100 pt-3 dark:border-gray-800/70" data-discuss-next>
+					<span class="mr-0.5 text-[11px] text-gray-400">接下来</span>
+					{#if next.chat}
+						<button type="button" class="dc-chip" on:click={next.chat} data-discuss-to-chat title="新对话里接着聊，结论放进输入框">继续对话</button>
+					{/if}
+					{#if next.team}
+						<button type="button" class="dc-chip" on:click={next.team} data-discuss-to-team title="一支 AI 团队按结论去做">交给协作台</button>
+					{/if}
+					{#if next.hermes}
+						<button type="button" class="dc-chip" on:click={next.hermes} data-discuss-hermes title="Hermes 联网核查结论里的说法">交给 Hermes 核查</button>
+					{/if}
 				</div>
 			{/if}
 

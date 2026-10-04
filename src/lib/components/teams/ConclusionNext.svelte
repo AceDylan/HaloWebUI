@@ -14,6 +14,8 @@
 		type Team
 	} from '$lib/apis/teams';
 	import { elapsed, now } from './clock';
+	import { handOff, HANDOFF_PATH } from '$lib/utils/handoff';
+	import SidebarModeIcon from '$lib/components/layout/Sidebar/SidebarModeIcon.svelte';
 
 	/**
 	 * What to do with a written conclusion: carry on in a chat (the one the team came from, or a
@@ -25,6 +27,9 @@
 	/** The version on screen (its generated_at): saved / posted state is per version. */
 	export let generatedAt: number | undefined = undefined;
 	export let variant: 'panel' | 'page' = 'panel';
+	/** The team's title and the conclusion on screen: what 「让几个模型讨论」 hands to 讨论台. */
+	export let title = '';
+	export let markdown = '';
 	/** 「为结果配图」 as it stands (the conclusion entry's). */
 	export let illustration: ConclusionIllustration | null | undefined = undefined;
 
@@ -85,6 +90,17 @@
 		} finally {
 			opening = false;
 		}
+	};
+
+	// A second opinion on the result: 讨论台 with the conclusion as background, and a way back here.
+	const discuss = () => {
+		handOff(typeof sessionStorage === 'undefined' ? null : sessionStorage, {
+			to: 'discuss',
+			text: `关于「${title || '这次协作'}」的结果：哪些地方站得住，哪些有问题、有风险，或有更好的做法？`,
+			context: markdown,
+			from: { kind: 'team', id: teamId, title }
+		});
+		goto(HANDOFF_PATH.discuss);
 	};
 
 	const save = async () => {
@@ -150,6 +166,25 @@
 				</span>
 			</span>
 		</button>
+
+		{#if markdown}
+			<button
+				type="button"
+				class="tm-card tm-hover flex items-start gap-3 !rounded-xl px-3.5 py-3 text-left"
+				on:click={discuss}
+				data-conclusion-discuss
+			>
+				<span class="icon grid size-8 shrink-0 place-items-center rounded-lg" aria-hidden="true">
+					<SidebarModeIcon mode="discuss" className="size-4" />
+				</span>
+				<span class="min-w-0 flex-1">
+					<span class="block text-sm font-medium text-gray-900 dark:text-gray-100">让几个模型讨论</span>
+					<span class="mt-0.5 block text-xs leading-relaxed text-gray-500 dark:text-gray-400">
+						在讨论台请几个模型挑错、补漏，主持人给结论；这份结果作为背景
+					</span>
+				</span>
+			</button>
+		{/if}
 
 		{#if saved && knowledge}
 			<a

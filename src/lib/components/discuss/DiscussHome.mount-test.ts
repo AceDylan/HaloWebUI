@@ -111,6 +111,9 @@ describe('DiscussHome', () => {
 		box.dispatchEvent(new (globalThis as any).Event('input'));
 		await sleep(20);
 		expect(start.disabled).toBe(false);
+		(target.querySelector('[data-discuss-research-toggle]') as any).click();
+		await sleep(20);
+		expect(target.querySelector('[data-discuss-research-toggle]')!.getAttribute('aria-pressed')).toBe('true');
 		api.createDiscussion.mockResolvedValue({ id: 'new1', asks: [] });
 		target.querySelector('[data-discuss-composer]')!.dispatchEvent(new (globalThis as any).Event('submit', { cancelable: true }));
 		await until(() => nav.goto.mock.calls.length > 0);
@@ -123,10 +126,11 @@ describe('DiscussHome', () => {
 				{ model: 'm-gem', role: '' }
 			],
 			rounds: 3,
-			moderator: 'm-gpt' // a strong writer by default
+			moderator: 'm-gpt', // a strong writer by default
+			research: true
 		});
 		expect(nav.goto).toHaveBeenCalledWith('/discuss/new1');
-		expect(JSON.parse(localStorage.getItem('halo.discuss.last')!).mode).toBe('debate');
+		expect(JSON.parse(localStorage.getItem('halo.discuss.last')!)).toMatchObject({ mode: 'debate', research: true });
 	});
 
 	it('review keeps two rounds; the list shows earlier discussions', async () => {

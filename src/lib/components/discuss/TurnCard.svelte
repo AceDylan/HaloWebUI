@@ -1,17 +1,44 @@
 <script lang="ts">
-	import { afterUpdate, onDestroy, onMount } from 'svelte';
+	import { afterUpdate, createEventDispatcher, onDestroy, onMount } from 'svelte';
 	import { toast } from 'svelte-sonner';
 
-	import type { DiscussSeat, DiscussTurn } from '$lib/apis/discussions';
+	import type { DiscussSeat, DiscussTurn, ResearchSource } from '$lib/apis/discussions';
 	import { copyToClipboard } from '$lib/utils';
 	import ReportMarkdown from '$lib/components/teams/ReportMarkdown.svelte';
 	import SeatAvatar from './SeatAvatar.svelte';
-	import { seconds, tokens, turnStatusText } from './model';
+	import { linkCitations, seconds, tokens, turnStatusText } from './model';
 
 	/** One seat's turn in one round. */
 	export let turn: DiscussTurn;
 	export let seat: DiscussSeat | undefined;
 	export let hue = 226;
+	/** The research notes, to link [n] citations. */
+	export let sources: ResearchSource[] = [];
+	/** Offer 重试 on a failed / stopped turn (only once the question has settled). */
+	export let canRetry = false;
+	export let retrying = false;
+
+	const dispatch = createEventDispatcher<{ retry: string }>();
+
+	// Streaming text repaints at most every 120 ms: five cards re-rendering Markdown on every
+	// socket batch is heavy on phones.
+	let shown = turn.content;
+	let paintTimer: ReturnType<typeof setTimeout> | null = null;
+	const paint = (content: string, streaming: boolean) => {
+		if (!streaming) {
+			if (paintTimer) clearTimeout(paintTimer);
+			paintTimer = null;
+			shown = content;
+			return;
+		}
+		if (paintTimer) return;
+		paintTimer = setTimeout(() => {
+			paintTimer = null;
+			shown = turn.content;
+		}, 120);
+	};
+	$: paint(turn.content, turn.status === 'streaming');
+	$: rendered = linkCitations(shown, sources);
 
 	let body: HTMLDivElement;
 	let expanded = false;
@@ -45,7 +72,10 @@
 		}
 		measure();
 	});
-	onDestroy(() => observer?.disconnect());
+	onDestroy(() => {
+		observer?.disconnect();
+		if (paintTimer) clearTimeout(paintTimer);
+	});
 	$: if (!live && inner) measure();
 
 	const onScroll = () => {
@@ -108,12 +138,22 @@
 			<p class="rounded-lg bg-red-500/5 px-2.5 py-2 text-xs leading-relaxed text-red-700 dark:text-red-300">
 				{turn.error || '这一轮没有发言'}
 			</p>
+			{#if canRetry}
+				<button type="button" class="dc-chip mt-2" disabled={retrying} on:click={() => dispatch('retry', turn.id)} data-discuss-retry={turn.id}
+					>{retrying ? '重试中…' : '重试这位'}</button
+				>
+			{/if}
 		{:else}
-			<ReportMarkdown id="dc-{turn.id}" content={turn.content} />
+			<ReportMarkdown id="dc-{turn.id}" content={rendered} />
 			{#if turn.status === 'stopped'}
 				<p class="mt-1 text-[11px] text-gray-400">（被停止，发言不完整）</p>
 			{:else if turn.status === 'error'}
 				<p class="mt-1 text-[11px] text-red-600 dark:text-red-300">（中途出错：{turn.error}）</p>
+			{/if}
+			{#if canRetry && (turn.status === 'stopped' || turn.status === 'error')}
+				<button type="button" class="dc-chip mt-2" disabled={retrying} on:click={() => dispatch('retry', turn.id)} data-discuss-retry={turn.id}
+					>{retrying ? '重试中…' : '重说这一段'}</button
+				>
 			{/if}
 		{/if}
 		</div>

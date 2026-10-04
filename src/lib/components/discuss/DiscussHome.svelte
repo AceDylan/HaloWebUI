@@ -41,6 +41,7 @@
 	let seats: SeatDraft[] = [];
 	let rounds = 2;
 	let moderator = '';
+	let research = false;
 	let creating = false;
 	let composer: HTMLTextAreaElement;
 	let isMac = false;
@@ -69,6 +70,7 @@
 	$: seatsValid = seats.length >= MIN_SEATS && seats.length <= MAX_SEATS && seats.every((s) => modelById(choices, s.model));
 	$: canStart = !creating && !!question.trim() && seatsValid && !!moderator;
 	$: moderatorChoices = choices;
+	$: webSearchEnabled = $config?.features?.enable_web_search !== false;
 
 	const pickDefaults = () => {
 		if (!choices.length) return;
@@ -94,6 +96,7 @@
 			seats = choices.slice(0, Math.min(3, choices.length)).map((m) => ({ model: modelRef(m), role: '' }));
 		}
 		if (saved?.mode && MODES.some((m) => m.value === saved.mode)) mode = saved.mode;
+		research = saved?.research === true;
 		if (Number.isInteger(saved?.rounds)) rounds = Math.max(1, Math.min(MAX_ROUNDS, saved.rounds));
 		else rounds = modeSpec(mode).rounds;
 		const strong = choices.find((m) => /claude|gpt/i.test(m.name ?? m.id));
@@ -140,10 +143,11 @@
 				mode,
 				seats: seats.map((s) => ({ model: s.model, role: s.role.trim() })),
 				rounds,
-				moderator
+				moderator,
+				research
 			});
 			try {
-				localStorage.setItem(LAST_KEY, JSON.stringify({ mode, seats, rounds, moderator }));
+				localStorage.setItem(LAST_KEY, JSON.stringify({ mode, seats, rounds, moderator, research }));
 			} catch {
 				// storage unavailable: defaults next time
 			}
@@ -316,6 +320,25 @@
 								{/each}
 							</select>
 						</label>
+						{#if webSearchEnabled}
+							<button
+								type="button"
+								class="dc-chip"
+								aria-pressed={research}
+								title="开始前用联网搜索查一次资料，所有参与者看同一份资料并标注引用 [n]（多花约半分钟）"
+								on:click={() => (research = !research)}
+								data-discuss-research-toggle
+							>
+								<svg class="size-3.5" viewBox="0 0 16 16" fill="none" aria-hidden="true"
+									><circle cx="8" cy="8" r="6.2" stroke="currentColor" stroke-width="1.3" /><path
+										d="M1.8 8h12.4M8 1.8c1.8 2 1.8 10.4 0 12.4M8 1.8c-1.8 2-1.8 10.4 0 12.4"
+										stroke="currentColor"
+										stroke-width="1.1"
+									/></svg
+								>
+								联网查资料
+							</button>
+						{/if}
 						<div class="ml-auto flex items-center gap-2">
 							<kbd class="hidden rounded-md px-1.5 py-0.5 font-mono text-[11px] text-gray-400 sm:inline-block">{isMac ? '⌘' : 'Ctrl'} ↵</kbd>
 							<button type="submit" class="tm-btn-primary" disabled={!canStart} data-discuss-start>

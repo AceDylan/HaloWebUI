@@ -45,6 +45,7 @@ class CreateForm(BaseModel):
     seats: list[SeatForm]
     rounds: Optional[int] = None
     moderator: Optional[str] = None
+    research: bool = False
 
 
 class AskForm(BaseModel):
@@ -54,6 +55,10 @@ class AskForm(BaseModel):
 
 class InterjectForm(BaseModel):
     text: str
+
+
+class RetryForm(BaseModel):
+    turn: str
 
 
 def _raise(exc: DiscussError):
@@ -80,7 +85,9 @@ def _own(chat_id: str, user):
 
 def _setup_of(chat) -> dict:
     data = (chat.chat or {}).get(CHAT_KEY) or {}
-    return {key: data.get(key) for key in ("mode", "rounds", "seats", "moderator")}
+    setup = {key: data.get(key) for key in ("mode", "rounds", "seats", "moderator")}
+    setup["research"] = bool(data.get("research"))
+    return setup
 
 
 def _asks_of(chat) -> list[dict]:
@@ -271,7 +278,85 @@ async def _after_done(request: Request, user, chat_id: str, ask: dict) -> None:
         pass
 
 
-def _start(request: Request, user, chat, ask: dict, *, history: list[dict], conclude_only=False, from_round=1):
+def _parse_queries(res: Any) -> list[str]:
+    content = ""
+    if isinstance(res, dict):
+        choices = res.get("choices") or []
+        if choices and isinstance(choices[0], dict):
+            content = str((choices[0].get("message") or {}).get("content") or "")
+    start, end = content.find("{"), content.rfind("}")
+    if start == -1 or end <= start:
+        return []
+    try:
+        queries = json.loads(content[start : end + 1]).get("queries") or []
+    except Exception:
+        return []
+    return [str(q).strip()[:200] for q in queries if str(q or "").strip()]
+
+
+async def _search(request: Request, user, moderator: str, question: str, history: list[dict]) -> dict:
+    """One shared evidence pack for a question: 1-2 queries through the app's own web search."""
+    import asyncio
+
+    from open_webui.routers.retrieval import SearchForm, process_web_search
+    from open_webui.routers.tasks import generate_queries
+
+    if not getattr(request.app.state.config, "ENABLE_WEB_SEARCH", True):
+        raise ValueError("管理员关闭了联网搜索")
+    messages = []
+    for item in history[-2:]:
+        messages += [
+            {"role": "user", "content": item.get("question") or ""},
+            {"role": "assistant", "content": room.conclusion_answer(item.get("conclusion") or "")[:1500]},
+        ]
+    messages.append({"role": "user", "content": question})
+    queries: list[str] = []
+    try:
+        queries = _parse_queries(
+            await generate_queries(
+                request,
+                {"model": moderator, "messages": messages, "prompt": question, "type": "web_search"},
+                user,
+            )
+        )
+    except Exception as exc:
+        log.info("discussion search: query generation failed: %s", exc)
+    queries = queries[:2] or [question[:200]]
+    results = await asyncio.gather(
+        *(process_web_search(request, SearchForm(query=query), user=user) for query in queries),
+        return_exceptions=True,
+    )
+    docs = []
+    errors = []
+    for result in results:
+        if isinstance(result, BaseException):
+            errors.append(str(getattr(result, "detail", None) or result))
+            continue
+        for doc in (result or {}).get("docs") or []:
+            meta = doc.get("metadata") or {}
+            docs.append(
+                {
+                    "url": meta.get("source") or meta.get("url") or "",
+                    "title": meta.get("title") or "",
+                    "content": doc.get("content") or "",
+                }
+            )
+    if not docs and errors:
+        raise ValueError(errors[0][:200])
+    return {"queries": queries, "docs": docs}
+
+
+def _start(
+    request: Request,
+    user,
+    chat,
+    ask: dict,
+    *,
+    history: list[dict],
+    conclude_only=False,
+    from_round=1,
+    retry_turn: Optional[str] = None,
+):
     setup = _setup_of(chat)
     chat_id = chat.id
 
@@ -289,6 +374,9 @@ def _start(request: Request, user, chat, ask: dict, *, history: list[dict], conc
     async def after_done(done_ask: dict):
         await _after_done(request, user, chat_id, done_ask)
 
+    async def search(question: str, past: list[dict]):
+        return await _search(request, user, ask["moderator"]["model"], question, past)
+
     live = room.LiveDiscussion(
         chat_id=chat_id,
         user_id=user.id,
@@ -301,6 +389,8 @@ def _start(request: Request, user, chat, ask: dict, *, history: list[dict], conc
         after_done=after_done,
         conclude_only=conclude_only,
         from_round=from_round,
+        search=search,
+        retry_turn=retry_turn,
     )
     room.start_live(live)
     return live
@@ -383,6 +473,7 @@ async def create_discussion(request: Request, form: CreateForm, user=Depends(get
                 "seats": [seat.model_dump() for seat in form.seats],
                 "rounds": form.rounds,
                 "moderator": form.moderator,
+                "research": form.research,
             },
             models_map,
             ambiguous,
@@ -549,6 +640,23 @@ async def continue_discussion(request: Request, chat_id: str, user=Depends(get_v
     ask["turns"] = [turn for turn in ask.get("turns") or [] if (turn.get("round") or 0) <= last_complete]
     ask.update({"status": "running", "endedAt": None, "error": None, "rounds": last_complete + 1})
     _start(request, user, chat, ask, history=_history(chat, ask["id"]), from_round=last_complete + 1)
+    return _detail(chat_id, user)
+
+
+@router.post("/{chat_id}/retry")
+async def retry_turn(request: Request, chat_id: str, form: RetryForm, user=Depends(get_verified_user)):
+    """Run one seat's failed or stopped turn again, then a fresh conclusion."""
+    chat, ask = _last_settled_ask(chat_id, user)
+    turn = next((t for t in ask.get("turns") or [] if t.get("id") == form.turn), None)
+    if turn is None:
+        raise HTTPException(status_code=404, detail="找不到这段发言")
+    if turn.get("status") not in {"error", "stopped"}:
+        raise HTTPException(status_code=400, detail="这段发言已经完成")
+    _check_capacity(user)
+    await _models(request, user)
+    ask = dict(ask)
+    ask.update({"status": "running", "endedAt": None, "error": None})
+    _start(request, user, chat, ask, history=_history(chat, ask["id"]), retry_turn=form.turn)
     return _detail(chat_id, user)
 
 

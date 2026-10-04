@@ -4,6 +4,8 @@ import type { DiscussAsk } from '$lib/apis/discussions';
 import {
 	applyEvent,
 	conclusionAnswer,
+	domainOf,
+	linkCitations,
 	discussionMarkdown,
 	modelById,
 	modeSpec,
@@ -152,5 +154,28 @@ describe('section separators', () => {
 	it('drops --- lines between sections', () => {
 		const sections = parseSections('## 结论\n好\n\n---\n## 共识\n- a\n***\n');
 		expect(sections.map((s) => s.body)).toEqual(['好', '- a']);
+	});
+});
+
+
+describe('citations', () => {
+	const sources = [
+		{ n: 1, title: 'Postgres "docs"', url: 'https://www.postgresql.org/docs', excerpt: '' },
+		{ n: 2, title: 'Mongo', url: 'https://mongodb.com', excerpt: '' }
+	];
+	it('links note numbers outside code only', () => {
+		const md = '用 Postgres [1]，也可以 [2][1]。代码 `a[1]` 不动：\n```\nx[2]\n```\n[3] 不是资料，[1](http://x) 已是链接';
+		const out = linkCitations(md, sources);
+		expect(out).toContain('Postgres [[1]](https://www.postgresql.org/docs "Postgres \'docs\'")');
+		expect(out).toContain('[[2]](https://mongodb.com "Mongo")[[1]](');
+		expect(out).toContain('`a[1]`');
+		expect(out).toContain('x[2]');
+		expect(out).toContain('[3] 不是资料');
+		expect(out).toContain('[1](http://x)');
+		expect(linkCitations('a [1]', [])).toBe('a [1]');
+	});
+	it('names domains', () => {
+		expect(domainOf('https://www.postgresql.org/docs')).toBe('postgresql.org');
+		expect(domainOf('not a url')).toBe('not a url');
 	});
 });

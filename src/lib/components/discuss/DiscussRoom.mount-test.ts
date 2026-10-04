@@ -13,6 +13,7 @@ const api = vi.hoisted(() => ({
 	stopDiscussion: vi.fn(),
 	concludeDiscussion: vi.fn(),
 	continueDiscussion: vi.fn(),
+	retryDiscussionTurn: vi.fn(),
 	deleteDiscussion: vi.fn()
 }));
 vi.mock('$lib/apis/discussions', () => api);
@@ -148,6 +149,41 @@ describe('DiscussRoom', () => {
 		);
 		await sleep(50);
 		expect(target.querySelector('[data-discuss-turn="r1-s1"]')!.textContent).toContain('Postgres');
+	}, 90000);
+
+	it('shows the web notes, links [n] to them and retries a failed seat', async () => {
+		const ask = runningAsk();
+		const sources = [
+			{ n: 1, title: 'PostgreSQL 文档', url: 'https://www.postgresql.org/docs/', excerpt: '关系型数据库……' },
+			{ n: 2, title: 'MongoDB 手册', url: 'https://mongodb.com/docs', excerpt: '文档数据库……' }
+		];
+		Object.assign(ask, {
+			status: 'done',
+			research: { status: 'done', queries: ['postgres mongodb'], sources },
+			turns: [
+				{ id: 'r1-s1', round: 1, seat: 's1', status: 'done', content: '选 Postgres [1]' },
+				{ id: 'r1-s2', round: 1, seat: 's2', status: 'error', content: '', error: '429 rate limited' }
+			],
+			conclusion: { status: 'done', model: 'm-b', name: 'claude-chat', content: '## 结论\n用 Postgres [1]，不用 Mongo [2]。\n## 共识\n- 要备份' }
+		});
+		api.getDiscussion.mockResolvedValue(discussion(ask));
+		api.retryDiscussionTurn.mockResolvedValue(discussion({ ...ask, status: 'running' }));
+		const target = await mount();
+		await until(() => (target.querySelector('[data-discuss-answer]')?.textContent ?? '').includes('Postgres'));
+		expect(target.querySelector('[data-discuss-research="done"]')!.textContent).toContain('资料 · 2 个来源');
+		expect(target.querySelector('[data-discuss-research="done"]')!.textContent).toContain('postgresql.org');
+		const links = [...target.querySelectorAll('[data-discuss-answer] a')].map((a: any) => [a.textContent.trim(), a.getAttribute('href')]);
+		expect(links).toContainEqual(['[1]', 'https://www.postgresql.org/docs/']);
+		expect(links).toContainEqual(['[2]', 'https://mongodb.com/docs']);
+		await until(() => !!target.querySelector('[data-discuss-turn="r1-s1"] a'));
+		expect(target.querySelector('[data-discuss-turn="r1-s1"] a')!.getAttribute('href')).toBe('https://www.postgresql.org/docs/');
+		expect(target.querySelector('[data-discuss-conclusion-sources]')!.textContent).toContain('mongodb.com');
+		const retry = target.querySelector('[data-discuss-retry="r1-s2"]') as any;
+		expect(retry).toBeTruthy();
+		expect(target.querySelector('[data-discuss-turn="r1-s2"]')!.textContent).toContain('429 rate limited');
+		retry.click();
+		await until(() => api.retryDiscussionTurn.mock.calls.length === 1);
+		expect(api.retryDiscussionTurn.mock.calls[0].slice(1)).toEqual(['chat1', 'r1-s2']);
 	}, 90000);
 
 	it('renders a finished conclusion as an answer plus agreement / disagreement panels', async () => {

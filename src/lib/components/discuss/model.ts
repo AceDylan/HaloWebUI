@@ -1,4 +1,5 @@
 import type {
+	ResearchSource,
 	AskStatus,
 	DiscussAsk,
 	DiscussMode,
@@ -296,3 +297,37 @@ export const modelIcon = (model: ModelLike | undefined) =>
 
 /** The id a seat is sent with. */
 export const modelRef = (model: ModelLike) => model.selection_id || model.id;
+
+// -------------------------------------------------------------------------------------------
+// Research notes
+
+/** "example.com" from a URL (for source chips). */
+export const domainOf = (url: string) => {
+	try {
+		return new URL(url).hostname.replace(/^www\./, '');
+	} catch {
+		return url;
+	}
+};
+
+/**
+ * Turn the [n] citations of the research notes into links ("[[2]](url)"), outside code. Only
+ * numbers that are notes; "[n](...)" and "[n]: ..." are left alone.
+ */
+export const linkCitations = (markdown: string, sources: ResearchSource[] | null | undefined): string => {
+	if (!markdown || !sources?.length) return markdown ?? '';
+	const byN = new Map(sources.map((s) => [s.n, s]));
+	return markdown
+		.split(/(```[\s\S]*?(?:```|$)|`[^`\n]*`)/)
+		.map((part, i) =>
+			i % 2 === 1
+				? part
+				: part.replace(/\[(\d{1,2})\](?![(:\]])/g, (whole, n) => {
+						const source = byN.get(Number(n));
+						if (!source) return whole;
+						const title = (source.title || '').replace(/"/g, "'");
+						return `[[${n}]](${source.url} "${title}")`;
+					})
+		)
+		.join('');
+};

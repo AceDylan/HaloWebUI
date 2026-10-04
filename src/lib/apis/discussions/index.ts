@@ -21,6 +21,19 @@ export type DiscussSetup = {
 	rounds: number;
 	seats: DiscussSeat[];
 	moderator: DiscussModerator;
+	/** Look things up on the web before round 1 (one shared set of notes). */
+	research?: boolean;
+};
+
+export type ResearchSource = { n: number; title: string; url: string; excerpt: string };
+
+export type DiscussResearch = {
+	status: 'waiting' | 'running' | 'done' | 'empty' | 'error' | 'stopped';
+	queries: string[];
+	sources: ResearchSource[];
+	error?: string | null;
+	startedAt?: number | null;
+	endedAt?: number | null;
 };
 
 export type TurnStatus = 'waiting' | 'streaming' | 'done' | 'error' | 'stopped';
@@ -71,6 +84,7 @@ export type DiscussAsk = {
 	interjections: { text: string; afterRound: number; at: number }[];
 	conclusion: DiscussConclusion;
 	previousConclusions: { content: string; endedAt?: number | null }[];
+	research?: DiscussResearch | null;
 	startedAt: number;
 	endedAt?: number | null;
 	usage: DiscussUsage;
@@ -101,6 +115,7 @@ export type DiscussionSummary = {
 	rounds: number;
 	seats: { model: string; name: string; label: string; role: string }[];
 	moderator: DiscussModerator;
+	research?: boolean;
 	status: AskStatus;
 	asks: number;
 	question: string;
@@ -153,6 +168,7 @@ export const createDiscussion = (
 		seats: { model: string; role?: string }[];
 		rounds: number;
 		moderator: string;
+		research?: boolean;
 	}
 ) => request<Discussion>(token, 'POST', '/', form);
 
@@ -173,6 +189,10 @@ export const concludeDiscussion = (token: string, chatId: string) =>
 
 export const continueDiscussion = (token: string, chatId: string) =>
 	request<Discussion>(token, 'POST', `/${id(chatId)}/continue`);
+
+/** Run a seat's failed or stopped turn again (then a fresh conclusion). */
+export const retryDiscussionTurn = (token: string, chatId: string, turn: string) =>
+	request<Discussion>(token, 'POST', `/${id(chatId)}/retry`, { turn });
 
 export const deleteDiscussion = (token: string, chatId: string) =>
 	request<{ ok: boolean }>(token, 'DELETE', `/${id(chatId)}`);

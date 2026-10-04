@@ -97,7 +97,9 @@ def env(monkeypatch):
 
 
 def _create(env, **overrides):
+    research = overrides.pop("research", False)
     form = api.CreateForm(
+        research=research,
         question=overrides.pop("question", "如何选数据库？"),
         mode=overrides.pop("mode", "roundtable"),
         seats=[api.SeatForm(model=m) for m in overrides.pop("seats", ["a", "b"])],
@@ -347,3 +349,81 @@ def test_after_done_falls_back_to_the_question_when_the_title_model_fails(env, m
     title = chats_mod.ChatTable().get_chat_by_id(chat_id).title
     assert title and title != "新讨论" and "Postgres" in title
 
+
+
+def test_research_and_retry_through_the_api(env, monkeypatch):
+    async def fake_search(request, user, moderator, question, history):
+        return {"queries": ["q1"], "docs": [{"url": "https://x.example", "title": "X", "content": "资料正文" * 40}]}
+
+    monkeypatch.setattr(api, "_search", fake_search)
+    env.state["fail"] = {"b"}
+
+    async def scenario():
+        detail = await _create(env, research=True)
+        assert detail["setup"]["research"] is True
+        await _settle(detail["id"])
+        return detail["id"]
+
+    chat_id = asyncio.run(scenario())
+    ask = asyncio.run(api.get_discussion(chat_id, USER))["asks"][0]
+    assert ask["research"]["status"] == "done" and ask["research"]["sources"][0]["url"] == "https://x.example"
+    assert [t["status"] for t in ask["turns"]] == ["done", "error"]
+    assert ask["status"] == "done"
+    with pytest.raises(HTTPException):
+        asyncio.run(api.retry_turn(env.request, chat_id, api.RetryForm(turn="r1-s1"), USER))  # already done
+
+    env.state["fail"] = set()
+    env.calls.clear()
+
+    async def retry():
+        await api.retry_turn(env.request, chat_id, api.RetryForm(turn="r1-s2"), USER)
+        await _settle(chat_id)
+
+    asyncio.run(retry())
+    ask = asyncio.run(api.get_discussion(chat_id, USER))["asks"][0]
+    assert [t["status"] for t in ask["turns"]] == ["done", "done"]
+    assert [model for model, _ in env.calls] == ["b", "c"]  # the seat, then the moderator
+    assert "[1] X — https://x.example" in env.calls[0][1][1]["content"]
+    assert ask["previousConclusions"]
+    listed = asyncio.run(api.list_discussions(USER))
+    assert listed[0]["research"] is True
+
+
+def test_search_builds_one_evidence_pack(env, monkeypatch):
+    from open_webui.routers import retrieval, tasks as tasks_router
+
+    searched = []
+
+    async def fake_queries(request, form, user):
+        assert form["type"] == "web_search" and form["model"] == "c"
+        return {"choices": [{"message": {"content": '{"queries": ["postgres 优缺点", "mongodb 优缺点", "第三个"]}'}}]}
+
+    async def fake_web(request, form, user=None):
+        searched.append(form.query)
+        if form.query.startswith("mongodb"):
+            raise RuntimeError("engine down")
+        return {"docs": [{"content": "正文", "metadata": {"source": "https://p.example", "title": "P"}}]}
+
+    monkeypatch.setattr(tasks_router, "generate_queries", fake_queries)
+    monkeypatch.setattr(retrieval, "process_web_search", fake_web)
+    env.request.app.state.config = SimpleNamespace(ENABLE_WEB_SEARCH=True)
+    out = asyncio.run(api._search(env.request, USER, "c", "选数据库", []))
+    assert searched == ["postgres 优缺点", "mongodb 优缺点"]  # at most two
+    assert out == {"queries": ["postgres 优缺点", "mongodb 优缺点"], "docs": [{"url": "https://p.example", "title": "P", "content": "正文"}]}
+
+    async def broken_queries(request, form, user):
+        raise RuntimeError("no task model")
+
+    async def all_down(request, form, user=None):
+        searched.append(form.query)
+        raise RuntimeError("engine down")
+
+    monkeypatch.setattr(tasks_router, "generate_queries", broken_queries)
+    monkeypatch.setattr(retrieval, "process_web_search", all_down)
+    searched.clear()
+    with pytest.raises(ValueError, match="engine down"):
+        asyncio.run(api._search(env.request, USER, "c", "选数据库", []))
+    assert searched == ["选数据库"]  # the question itself when no queries could be made
+    env.request.app.state.config = SimpleNamespace(ENABLE_WEB_SEARCH=False)
+    with pytest.raises(ValueError, match="关闭"):
+        asyncio.run(api._search(env.request, USER, "c", "选数据库", []))

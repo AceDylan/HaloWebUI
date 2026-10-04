@@ -14,6 +14,7 @@
 		deleteDiscussion,
 		getDiscussion,
 		interjectDiscussion,
+		retryDiscussionTurn,
 		stopDiscussion,
 		type DiscussAsk,
 		type Discussion
@@ -24,6 +25,7 @@
 	import MenuLines from '$lib/components/icons/MenuLines.svelte';
 	import { now, timeAgo } from '$lib/components/teams/clock';
 	import ConclusionCard from './ConclusionCard.svelte';
+	import ResearchPanel from './ResearchPanel.svelte';
 	import SeatAvatar from './SeatAvatar.svelte';
 	import TurnCard from './TurnCard.svelte';
 	import {
@@ -157,6 +159,12 @@
 	};
 
 	const stop = () => run(() => stopDiscussion(localStorage.token, chatId), '已停止');
+	let retrying = '';
+	const retry = async (turnId: string) => {
+		retrying = turnId;
+		await run(() => retryDiscussionTurn(localStorage.token, chatId, turnId));
+		retrying = '';
+	};
 	const conclude = () => run(() => concludeDiscussion(localStorage.token, chatId));
 	const more = async () => {
 		const res = await run(() => continueDiscussion(localStorage.token, chatId));
@@ -358,6 +366,10 @@
 							</div>
 						</header>
 
+						{#if ask.research}
+							<ResearchPanel research={ask.research} />
+						{/if}
+
 						{#each rounds as { round, turns } (round)}
 							{@const doneCount = turns.filter((t) => t.status === 'done').length}
 							<div class="flex flex-col gap-3" data-discuss-round={round}>
@@ -369,7 +381,15 @@
 								<div class="dc-round-grid" style="--dc-cols: {cols(turns.length, width)}">
 									{#each turns as turn (turn.id)}
 										{@const si = seatIndex(ask.seats, turn.seat)}
-										<TurnCard {turn} seat={ask.seats[si]} hue={seatHue(si)} />
+										<TurnCard
+											{turn}
+											seat={ask.seats[si]}
+											hue={seatHue(si)}
+											sources={ask.research?.status === 'done' ? ask.research.sources : []}
+											canRetry={ai === asks.length - 1 && settled}
+											retrying={retrying === turn.id}
+											on:retry={(e) => retry(e.detail)}
+										/>
 									{/each}
 								</div>
 								{#each ask.interjections.filter((x) => x.afterRound === round) as note}

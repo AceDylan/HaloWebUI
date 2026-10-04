@@ -5,13 +5,15 @@
 	import { copyToClipboard } from '$lib/utils';
 	import ReportMarkdown from '$lib/components/teams/ReportMarkdown.svelte';
 	import SeatAvatar from './SeatAvatar.svelte';
-	import { parseSections, sectionKind, seconds, tokens } from './model';
+	import { domainOf, linkCitations, parseSections, sectionKind, seconds, tokens } from './model';
 
 	/** The moderator's conclusion of one question: the answer first, then agreements,
 	 *  disagreements, positions and next steps as separate panels. */
 	export let ask: DiscussAsk;
 
 	$: conclusion = ask.conclusion;
+	$: sources = ask.research?.status === 'done' ? ask.research.sources : [];
+	$: cite = (md: string) => linkCitations(md, sources);
 	$: state = conclusion.status;
 	$: sections = state === 'done' ? parseSections(conclusion.content) : [];
 	$: answer = sections.length ? sections[0] : null;
@@ -90,7 +92,7 @@
 		<div class="px-5 pb-5">
 			{#if state === 'streaming' || !answer}
 				{#if conclusion.content}
-					<ReportMarkdown id="dc-conclusion-{ask.id}" content={conclusion.content} />
+					<ReportMarkdown id="dc-conclusion-{ask.id}" content={cite(conclusion.content)} />
 				{:else}
 					<div class="flex flex-col gap-2 pt-2" style="--dc-hue: 268">
 						<div class="dc-skeleton w-full" />
@@ -103,7 +105,7 @@
 					<h3 class="sr-only">{answer.title}</h3>
 				{/if}
 				<div data-discuss-answer>
-					<ReportMarkdown id="dc-answer-{ask.id}" content={answer.body} />
+					<ReportMarkdown id="dc-answer-{ask.id}" content={cite(answer.body)} />
 				</div>
 
 				{#if pair.length}
@@ -114,7 +116,7 @@
 									<span class="dc-section-mark" aria-hidden="true">{MARK[section.kind]}</span>
 									{section.title}
 								</div>
-								<ReportMarkdown id="dc-{section.kind}-{ask.id}" content={section.body} />
+								<ReportMarkdown id="dc-{section.kind}-{ask.id}" content={cite(section.body)} />
 							</div>
 						{/each}
 					</div>
@@ -125,9 +127,20 @@
 							<span class="dc-section-mark" aria-hidden="true">{MARK[section.kind]}</span>
 							{section.title}
 						</div>
-						<ReportMarkdown id="dc-{section.kind}-{i}-{ask.id}" content={section.body} />
+						<ReportMarkdown id="dc-{section.kind}-{i}-{ask.id}" content={cite(section.body)} />
 					</div>
 				{/each}
+			{/if}
+
+			{#if sources.length && state === 'done'}
+				<div class="mt-4 flex flex-wrap items-center gap-1.5 text-[11px] text-gray-400" data-discuss-conclusion-sources>
+					<span>来源</span>
+					{#each sources as source (source.n)}
+						<a href={source.url} target="_blank" rel="noopener noreferrer" class="dc-chip !py-0.5 max-w-[14rem] truncate" title={source.title}
+							><span class="tm-num">[{source.n}]</span> {domainOf(source.url)}</a
+						>
+					{/each}
+				</div>
 			{/if}
 
 			{#if ask.previousConclusions?.length && state !== 'streaming'}

@@ -51,6 +51,9 @@ MAX_RUNNING_PER_USER = 2
 HISTORY_CONCLUSION_CHARS = 2400
 TRANSCRIPT_TURN_CHARS = 6000
 DELTA_FLUSH_SECONDS = 0.15
+RESEARCH_TIMEOUT_SECONDS = 150
+RESEARCH_MAX_SOURCES = 8
+RESEARCH_EXCERPT_CHARS = 1600
 
 MODES: dict[str, dict] = {
     "roundtable": {
@@ -223,7 +226,13 @@ def normalize_setup(
     moderator_raw = raw.get("moderator") or seats[0]["model"]
     moderator = resolve_seat_model(moderator_raw, models_map, ambiguous, user, excluded)
 
-    return {"mode": mode, "rounds": rounds, "seats": seats, "moderator": moderator}
+    return {
+        "mode": mode,
+        "rounds": rounds,
+        "seats": seats,
+        "moderator": moderator,
+        "research": bool(raw.get("research")),
+    }
 
 
 # ---------------------------------------------------------------------------------------------
@@ -246,6 +255,24 @@ def _history_block(history: list[dict]) -> str:
     if not parts:
         return ""
     return "Earlier in this discussion (for context; the new question is what matters now):\n\n" + "\n\n---\n\n".join(parts)
+
+
+def research_sources(ask: dict) -> list[dict]:
+    research = ask.get("research") or {}
+    return research.get("sources") or [] if research.get("status") == "done" else []
+
+
+def _research_block(ask: dict) -> str:
+    sources = research_sources(ask)
+    if not sources:
+        return ""
+    parts = [
+        "Research notes gathered from the web for this question, shared with every participant. "
+        "Cite them as [n] right after a claim that relies on them. They can be incomplete, outdated or wrong:"
+    ]
+    for source in sources:
+        parts.append(f"[{source['n']}] {source.get('title') or source.get('url')} — {source.get('url')}\n{source.get('excerpt') or ''}")
+    return "\n\n".join(parts)
 
 
 def _interjection_block(interjections: list[dict], before_round: Optional[int] = None) -> str:
@@ -317,7 +344,11 @@ def build_turn_messages(
             "- Be concrete and specific; prefer short paragraphs and bullets. No preamble, no restating the question, no sign-off.",
             "- Round 1: at most about 350 words. Later rounds: at most about 250 words, only what is new.",
             "- Refer to other participants by name. Never write on their behalf.",
-            "- You cannot browse the web; say so when a fact needs checking instead of inventing sources.",
+            (
+                "- Beyond the research notes you cannot browse; cite notes as [n], never invent sources or links."
+                if research_sources(ask)
+                else "- You cannot browse the web; say so when a fact needs checking instead of inventing sources."
+            ),
         ]
     ).strip()
 
@@ -359,7 +390,7 @@ def build_turn_messages(
                 "correct mistakes, add what is missing. If you changed your mind, say so plainly."
             )
 
-    user_parts = [_history_block(history), f"User question:\n{question}"]
+    user_parts = [_history_block(history), f"User question:\n{question}", _research_block(ask)]
     if transcript:
         user_parts.append(f"Discussion so far:\n\n{transcript}")
     if interjections:
@@ -400,12 +431,18 @@ def build_conclusion_messages(*, setup: dict, ask: dict, history: list[dict]) ->
         f"## {headings[3]}\n— one bullet per participant: **name** — their final position in one line, and whether they changed their mind.\n"
         f"## {headings[4]}\n— only if genuinely useful: what the user could verify or do next (bullets). Otherwise omit this section.\n"
         "Do not invent facts that no participant stated; flag claims that need checking."
+        + (
+            " Keep the [n] citations of the research notes next to the claims that rely on them."
+            if research_sources(ask)
+            else ""
+        )
     )
     participants = ", ".join(_seat_title(seat) for seat in seats)
     parts = [
         _history_block(history),
         f"Discussion format: {MODES[mode]['label']}. Participants: {participants}.",
         f"User question:\n{ask.get('question') or ''}",
+        _research_block(ask),
         f"Transcript:\n\n{transcript or '(no participant produced an answer)'}",
     ]
     interjections = _interjection_block(ask.get("interjections") or [])
@@ -595,6 +632,7 @@ def new_ask(*, question: str, setup: dict, user_message_id: str, message_id: str
         "interjections": [],
         "conclusion": {"status": "waiting", "content": "", "model": setup["moderator"]["model"], "name": setup["moderator"]["name"]},
         "previousConclusions": [],
+        "research": {"status": "waiting", "queries": [], "sources": []} if setup.get("research") else None,
         "startedAt": now_ms(),
         "endedAt": None,
         "usage": {},
@@ -626,6 +664,7 @@ def summary_meta(setup: dict, asks: list[dict]) -> dict:
         "rounds": setup["rounds"],
         "seats": [{"model": s["model"], "name": s["name"], "label": s["label"], "role": s.get("role", "")} for s in setup["seats"]],
         "moderator": deepcopy(setup["moderator"]),
+        "research": bool(setup.get("research")),
         "status": last.get("status") or "running",
         "asks": len(asks),
         "question": _clean_text(last.get("question"), 200),
@@ -668,6 +707,10 @@ class LiveDiscussion:
     flusher: Optional[asyncio.Task] = None
     conclude_only: bool = False
     from_round: int = 1
+    # (question, history) -> {"queries": [...], "docs": [{"title", "url", "content"}]}
+    search: Optional[Callable[[str, list[dict]], Awaitable[dict]]] = None
+    # re-run just this turn (a seat that failed), then conclude again
+    retry_turn: Optional[str] = None
 
     # -- events --------------------------------------------------------------------------------
 
@@ -796,10 +839,60 @@ class LiveDiscussion:
             conclusion["thinking"] = False
             await self.flush()
 
+    async def _run_research(self):
+        research = self.ask["research"]
+        research.update({"status": "running", "startedAt": now_ms(), "error": None})
+        await self.send_state()
+        try:
+            if self.search is None:
+                raise ValueError("联网搜索不可用")
+            found = await asyncio.wait_for(self.search(self.ask["question"], self.history), RESEARCH_TIMEOUT_SECONDS)
+            sources, seen = [], set()
+            for doc in (found or {}).get("docs") or []:
+                url = str(doc.get("url") or "").strip()
+                content = re.sub(r"\s+", " ", str(doc.get("content") or "")).strip()
+                if not url or url in seen or len(content) < 80:
+                    continue
+                seen.add(url)
+                sources.append(
+                    {
+                        "n": len(sources) + 1,
+                        "title": _clean_text(doc.get("title") or url, 160),
+                        "url": url,
+                        "excerpt": content[:RESEARCH_EXCERPT_CHARS],
+                    }
+                )
+                if len(sources) >= RESEARCH_MAX_SOURCES:
+                    break
+            research["queries"] = [q for q in (found or {}).get("queries") or [] if q][:4]
+            research["sources"] = sources
+            research["status"] = "done" if sources else "empty"
+        except asyncio.CancelledError:
+            research["status"] = "stopped"
+            raise
+        except asyncio.TimeoutError:
+            research["status"] = "error"
+            research["error"] = f"超过 {RESEARCH_TIMEOUT_SECONDS} 秒没查完，讨论照常进行"
+        except Exception as exc:
+            research["status"] = "error"
+            research["error"] = _short_error(exc)
+        finally:
+            research["endedAt"] = now_ms()
+            await self.send_state()
+
     async def run(self):
         self.flusher = asyncio.create_task(self._flush_loop())
         try:
-            if not self.conclude_only:
+            if self.retry_turn:
+                turn = next(t for t in self.ask["turns"] if t["id"] == self.retry_turn)
+                turn.update({"status": "waiting", "content": "", "error": None, "usage": {}})
+                await self.send_state()
+                await self._run_turn(turn)
+                self.save()
+            elif not self.conclude_only:
+                research = self.ask.get("research")
+                if research and research.get("status") in {"waiting", "stopped"} and self.from_round == 1:
+                    await self._run_research()
                 for round_index in range(self.from_round, int(self.ask["rounds"]) + 1):
                     self.ask["round"] = round_index
                     turns = [

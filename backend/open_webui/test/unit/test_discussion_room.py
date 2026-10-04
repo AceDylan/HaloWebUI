@@ -380,3 +380,78 @@ def test_previews_are_plain_text_without_stray_spaces():
     ask["conclusion"]["content"] = "## 结论\n对多数人而言，**手机 App 是更好的选择**。\n- 看 [文档](http://x) 和 `代码`"
     meta = room.summary_meta(setup, [ask])
     assert meta["preview"] == "对多数人而言，手机 App 是更好的选择。 看 文档 和 代码"
+
+
+# --- research & retry --------------------------------------------------------------------------
+
+
+def test_research_runs_first_and_every_prompt_carries_the_numbered_notes():
+    raw = {"mode": "roundtable", "seats": ["a", "b"], "rounds": 1, "research": True}
+    setup = room.normalize_setup(raw, _models("a", "b"), set(), _user(), _no_exclusion)
+    assert setup["research"] is True
+    live, events, calls, saved = _live(setup, {"a": [["A1"], ["## 结论\n见 [1]"]], "b": [["B1"]]})
+    assert live.ask["research"]["status"] == "waiting"
+    searched = []
+
+    async def search(question, history):
+        searched.append(question)
+        long = "Postgres 是一个开源关系数据库。" * 10
+        return {
+            "queries": ["postgres vs mongodb"],
+            "docs": [
+                {"url": "https://a.example", "title": "A", "content": long},
+                {"url": "https://a.example", "title": "A again", "content": long},
+                {"url": "https://b.example", "title": "B", "content": "too short"},
+                {"url": "https://c.example", "title": "", "content": long},
+            ],
+        }
+
+    live.search = search
+    asyncio.run(live.run())
+    research = live.ask["research"]
+    assert searched == ["如何选数据库？"]
+    assert research["status"] == "done" and research["queries"] == ["postgres vs mongodb"]
+    assert [(s["n"], s["url"]) for s in research["sources"]] == [(1, "https://a.example"), (2, "https://c.example")]
+    assert research["sources"][1]["title"] == "https://c.example"
+    turn_prompt = calls[0][1][1]["content"]
+    assert "[1] A — https://a.example" in turn_prompt and "Cite them as [n]" in turn_prompt
+    assert "Beyond the research notes you cannot browse" in calls[0][1][0]["content"]
+    moderator = calls[-1][1]
+    assert "[2]" in moderator[1]["content"] and "Keep the [n] citations" in moderator[0]["content"]
+    assert live.ask["status"] == "done"
+
+
+def test_a_failed_search_does_not_stop_the_discussion():
+    setup = room.normalize_setup({"seats": ["a", "b"], "rounds": 1, "research": True}, _models("a", "b"), set(), _user(), _no_exclusion)
+    live, events, calls, saved = _live(setup, {"a": [["A1"], ["## 结论\nok"]], "b": [["B1"]]})
+
+    async def search(question, history):
+        raise RuntimeError("smart search down")
+
+    live.search = search
+    asyncio.run(live.run())
+    assert live.ask["research"]["status"] == "error" and "smart search down" in live.ask["research"]["error"]
+    assert "Research notes" not in calls[0][1][1]["content"]
+    assert live.ask["status"] == "done"
+
+
+def test_no_research_unless_asked():
+    setup = _setup(rounds=1)
+    assert setup["research"] is False
+    assert _ask(setup)["research"] is None
+
+
+def test_retry_runs_one_turn_then_concludes_again():
+    setup = _setup(rounds=1)
+    live, events, calls, saved = _live(setup, {"b": [["B 重试成功"]], "a": [["## 结论\n新"]]})
+    _done(live.ask, 1, "s1", "A1")
+    live.ask["turns"].append({"id": "r1-s2", "round": 1, "seat": "s2", "status": "error", "content": "", "error": "429"})
+    live.ask["conclusion"] = {"status": "done", "content": "## 结论\n旧", "model": "a", "name": "a"}
+    live.retry_turn = "r1-s2"
+    asyncio.run(live.run())
+    assert [model for model, _ in calls] == ["b", "a"]
+    turn = live.ask["turns"][1]
+    assert (turn["status"], turn["content"], turn.get("error")) == ("done", "B 重试成功", None)
+    assert live.ask["conclusion"]["content"] == "## 结论\n新"
+    assert live.ask["previousConclusions"][0]["content"] == "## 结论\n旧"
+    assert live.ask["status"] == "done"

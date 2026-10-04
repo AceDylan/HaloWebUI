@@ -195,7 +195,7 @@
 	{#if showMultiModelDiscussionToggle && !discussionDisabled}
 		<a
 			href={discussHref}
-			class="mt-1.5 inline-flex max-w-full items-center gap-1 rounded-full px-2 py-0.5 text-xs text-gray-500 transition hover:bg-gray-500/10 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100"
+			class="mt-1.5 inline-flex max-w-full items-center gap-1 rounded-full bg-white/85 px-2 py-0.5 text-xs text-gray-500 backdrop-blur-sm transition hover:bg-gray-100 hover:text-gray-900 dark:bg-gray-900/70 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-100"
 			title={discussionIssue || '让这几个模型在讨论台里讨论，主持人给出结论'}
 			data-open-discuss
 		>

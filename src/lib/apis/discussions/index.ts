@@ -43,6 +43,9 @@ export type DiscussResearch = {
 
 export type TurnStatus = 'waiting' | 'streaming' | 'done' | 'error' | 'stopped';
 
+/** A call the upstream refused for a passing reason, about to be made again. */
+export type DiscussRetry = { n: number; of: number; reason: string; until: number; error?: string };
+
 export type DiscussUsage = { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
 
 export type DiscussTurn = {
@@ -59,6 +62,7 @@ export type DiscussTurn = {
 	endedAt?: number | null;
 	/** The model rejected the attached images; it spoke from the text only. */
 	imagesDropped?: boolean;
+	retry?: DiscussRetry | null;
 };
 
 export type DiscussConclusion = {
@@ -73,6 +77,9 @@ export type DiscussConclusion = {
 	endedAt?: number | null;
 	/** The moderator rejected the attached images; it concluded from the text only. */
 	imagesDropped?: boolean;
+	retry?: DiscussRetry | null;
+	/** The moderator could not write it; a seat (model / name above) wrote it instead. */
+	standIn?: { for: string; reason: string; error?: string } | null;
 };
 
 export type AskStatus = 'running' | 'concluding' | 'done' | 'stopped' | 'error' | 'interrupted';
@@ -112,6 +119,8 @@ export type Discussion = {
 	setup: DiscussSetup;
 	asks: DiscussAsk[];
 	running: boolean;
+	/** Creating it again returned the discussion already started for this question. */
+	deduplicated?: boolean;
 };
 
 /** A row of the list (the chat's meta.discussion_room summary). */
@@ -183,6 +192,8 @@ export const createDiscussion = (
 		research?: boolean;
 		files?: string[];
 		context?: { text: string; title?: string; chat_id?: string | null } | null;
+		/** One per question: a retry with the same key gets the same discussion back. */
+		client_key?: string;
 	}
 ) => request<Discussion>(token, 'POST', '/', form);
 
@@ -200,6 +211,10 @@ export const stopDiscussion = (token: string, chatId: string) =>
 
 export const concludeDiscussion = (token: string, chatId: string) =>
 	request<Discussion>(token, 'POST', `/${id(chatId)}/conclude`);
+
+/** Pick the last question up where it failed, stopped or was cut off. */
+export const resumeDiscussion = (token: string, chatId: string) =>
+	request<Discussion>(token, 'POST', `/${id(chatId)}/resume`);
 
 export const continueDiscussion = (token: string, chatId: string) =>
 	request<Discussion>(token, 'POST', `/${id(chatId)}/continue`);

@@ -49,6 +49,9 @@ class CreateForm(BaseModel):
     files: list[str] = []
     # the conversation a discussion was started from (text, title, chat_id): background for every seat
     context: Optional[dict] = None
+    # set once per question by the page and sent again when it retries: the same key is the same
+    # discussion, never a second one
+    client_key: Optional[str] = None
 
 
 class AskForm(BaseModel):
@@ -63,6 +66,39 @@ class InterjectForm(BaseModel):
 
 class RetryForm(BaseModel):
     turn: str
+
+
+# Recently created discussions, so one question never becomes two: a retry after a dropped
+# response (same client key), or a second tab / double tap with the same question and seats.
+RECENT_SECONDS = 120
+_recent: dict[str, list[dict]] = {}
+
+
+def _fingerprint(question: str, setup: dict) -> str:
+    seats = ",".join(f"{seat['model']}|{seat.get('role') or ''}" for seat in setup["seats"])
+    return json.dumps([question.strip(), setup["mode"], seats, setup["moderator"]["model"]], ensure_ascii=False)
+
+
+def _recent_duplicate(user, key: Optional[str], fingerprint: str) -> Optional[str]:
+    now = time.time()
+    entries = [e for e in _recent.get(user.id, []) if now - e["at"] < RECENT_SECONDS or e["chat_id"] in LIVE]
+    _recent[user.id] = entries
+    for entry in reversed(entries):
+        same_request = bool(key) and entry["key"] == key
+        if not same_request and entry["fingerprint"] != fingerprint:
+            continue
+        chat = Chats.get_chat_by_id_and_user_id(entry["chat_id"], user.id)
+        if chat is None or not isinstance((chat.chat or {}).get(CHAT_KEY), dict):
+            continue
+        # the same question asked again after the first one failed is a new attempt
+        status = ((chat.meta or {}).get(META_KEY) or {}).get("status")
+        if same_request or chat.id in LIVE or status not in {"error", "stopped", "interrupted"}:
+            return chat.id
+    return None
+
+
+def _remember_created(user, key: Optional[str], fingerprint: str, chat_id: str) -> None:
+    _recent.setdefault(user.id, []).append({"key": key, "fingerprint": fingerprint, "chat_id": chat_id, "at": time.time()})
 
 
 def _raise(exc: DiscussError):
@@ -421,6 +457,7 @@ def _start(
     conclude_only=False,
     from_round=1,
     retry_turn: Optional[str] = None,
+    resume: bool = False,
 ):
     setup = _setup_of(chat)
     chat_id = chat.id
@@ -456,6 +493,7 @@ def _start(
         from_round=from_round,
         search=search,
         retry_turn=retry_turn,
+        resume=resume,
         images=_ask_images(ask, user) if ask.get("files") else [],
     )
     room.start_live(live)
@@ -538,6 +576,11 @@ async def create_discussion(request: Request, form: CreateForm, user=Depends(get
     question = room._clean_text(form.question, room.QUESTION_MAX_CHARS)
     if not question:
         raise HTTPException(status_code=400, detail="先写下要讨论的问题")
+    key = str(form.client_key or "").strip()[:64] or None
+    if key:
+        existing = _recent_duplicate(user, key, "")
+        if existing:
+            return {**_detail(existing, user), "deduplicated": True}
     _check_capacity(user)
     models_map, ambiguous = await _models(request, user)
     try:
@@ -557,6 +600,12 @@ async def create_discussion(request: Request, form: CreateForm, user=Depends(get
         _raise(exc)
 
     files = _load_files(form.files, user)
+    # checked again after the awaits above (no await from here to the insert): two requests that
+    # arrived together cannot both get past it
+    fingerprint = _fingerprint(question, setup)
+    existing = _recent_duplicate(user, key, fingerprint)
+    if existing:
+        return {**_detail(existing, user), "deduplicated": True}
     user_message_id, assistant_message_id = room.new_id(), room.new_id()
     ask = room.new_ask(
         question=question,
@@ -588,6 +637,7 @@ async def create_discussion(request: Request, form: CreateForm, user=Depends(get
     for message_id in (user_message_id, assistant_message_id):
         Chats.upsert_message_to_chat_by_id_and_message_id(chat.id, message_id, messages[message_id])
     Chats.set_chat_meta_value_by_id(chat.id, META_KEY, room.summary_meta(setup, [ask]))
+    _remember_created(user, key, fingerprint, chat.id)
     _start(request, user, chat, ask, history=[])
     return _detail(chat.id, user)
 
@@ -726,6 +776,26 @@ async def continue_discussion(request: Request, chat_id: str, user=Depends(get_v
     ask["turns"] = [turn for turn in ask.get("turns") or [] if (turn.get("round") or 0) <= last_complete]
     ask.update({"status": "running", "endedAt": None, "error": None, "rounds": last_complete + 1})
     _start(request, user, chat, ask, history=_history(chat, ask["id"]), from_round=last_complete + 1)
+    return _detail(chat_id, user)
+
+
+@router.post("/{chat_id}/resume")
+async def resume_discussion(request: Request, chat_id: str, user=Depends(get_verified_user)):
+    """Pick the last question up where it failed, stopped or was cut off: the unfinished turns of
+    the last round reached run again, then the rounds still to come, then the conclusion."""
+    chat, ask = _last_settled_ask(chat_id, user)
+    turns = ask.get("turns") or []
+    finished = (
+        (ask.get("conclusion") or {}).get("status") == "done"
+        and all(turn.get("status") == "done" for turn in turns)
+    )
+    if ask.get("status") == "done" or finished:
+        raise HTTPException(status_code=400, detail="这一问已经完成；可以追问或再讨论一轮")
+    _check_capacity(user)
+    await _models(request, user)
+    ask = dict(ask)
+    ask.update({"status": "running", "endedAt": None, "error": None})
+    _start(request, user, chat, ask, history=_history(chat, ask["id"]), resume=True)
     return _detail(chat_id, user)
 
 

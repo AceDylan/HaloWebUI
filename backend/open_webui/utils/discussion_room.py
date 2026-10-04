@@ -56,6 +56,12 @@ RESEARCH_MAX_SOURCES = 8
 RESEARCH_EXCERPT_CHARS = 1600
 MAX_FILES = 4
 FILE_TEXT_CHARS = 12000
+# A call the upstream refused for a passing reason (rate limit, overload, a dropped connection)
+# is made again after these pauses; a moderator that still fails hands the conclusion to a seat.
+RETRY_DELAYS = (8, 20, 45)
+RETRY_MAX_WAIT = 90
+STAND_IN_RETRY_DELAYS = (10,)
+MAX_STAND_INS = 2
 
 MODES: dict[str, dict] = {
     "roundtable": {
@@ -103,6 +109,14 @@ SECTION_HEADINGS = {
 
 RUNNING_STATUSES = {"running", "concluding"}
 TERMINAL_STATUSES = {"done", "stopped", "error", "interrupted"}
+
+
+class UpstreamError(ValueError):
+    """A model call the upstream answered with an error (its HTTP status when there was one)."""
+
+    def __init__(self, detail: str, status_code: Optional[int] = None):
+        super().__init__(detail)
+        self.status_code = status_code
 
 
 class DiscussError(Exception):
@@ -634,13 +648,13 @@ def _error_text(payload: Any) -> Optional[str]:
     return None
 
 
-async def iterate_completion(response: Any):
+async def iterate_completion(response: Any, status_code: Optional[int] = None):
     """Yield ("content" | "reasoning", text) and ("usage", dict) from a chat completion
     response: an OpenAI-style SSE StreamingResponse, a JSONResponse or a plain dict."""
     if isinstance(response, dict):
         error = _error_text(response)
         if error:
-            raise ValueError(error)
+            raise UpstreamError(error, status_code)
         choices = response.get("choices") or []
         message = (choices[0] or {}).get("message") if choices and isinstance(choices[0], dict) else {}
         content = (message or {}).get("content") or ""
@@ -661,7 +675,10 @@ async def iterate_completion(response: Any):
                 parsed = json.loads(raw.decode("utf-8", errors="replace") or "{}")
             except Exception:
                 parsed = {"detail": raw.decode("utf-8", errors="replace")}
-            async for item in iterate_completion(parsed if isinstance(parsed, dict) else {}):
+            status = getattr(response, "status_code", None)
+            async for item in iterate_completion(
+                parsed if isinstance(parsed, dict) else {}, status if isinstance(status, int) and status >= 400 else None
+            ):
                 yield item
             return
         raise ValueError("模型没有返回内容")
@@ -687,7 +704,7 @@ async def iterate_completion(response: Any):
                 continue
             error = _error_text(payload)
             if error:
-                raise ValueError(error)
+                raise UpstreamError(error)
             usage = _usage_from(payload)
             if usage:
                 yield ("usage", usage)
@@ -821,6 +838,11 @@ class LiveDiscussion:
     retry_turn: Optional[str] = None
     # data URLs of the question's images (round 1 and the moderator get them)
     images: list = field(default_factory=list)
+    # pick up where a question failed, stopped or was cut off: the last round's unfinished turns,
+    # the rounds still to come, then the conclusion
+    resume: bool = False
+    retry_delays: tuple = RETRY_DELAYS
+    stand_in_delays: tuple = STAND_IN_RETRY_DELAYS
 
     # -- events --------------------------------------------------------------------------------
 
@@ -871,6 +893,7 @@ class LiveDiscussion:
         target["startedAt"] = now_ms()
         target["content"] = ""
         target["thinking"] = False
+        target["retry"] = None
         raw = ""
         # with the (empty) content: a second try clears what the first one had streamed
         await self.send("turn", turn=_brief(target, key, with_content=True))
@@ -899,18 +922,41 @@ class LiveDiscussion:
         if not target["content"]:
             raise ValueError("模型返回了空内容")
 
-    async def _speak(self, target: dict, key: str, model: str, build, sends_images: bool):
-        """One streamed call. Many models the app treats as image readers reject pictures: when a
-        call that carried images fails, it is made once more without them (and says so)."""
-        try:
-            await asyncio.wait_for(self._stream_into(target, key, model, build(blind=False)), TURN_TIMEOUT_SECONDS)
-        except (asyncio.CancelledError, asyncio.TimeoutError):
-            raise
-        except Exception:
-            if not sends_images:
+    async def _speak(self, target: dict, key: str, model: str, build, sends_images: bool, delays: Optional[tuple] = None):
+        """One streamed call, made again when it fails for a passing reason (rate limit, overload,
+        a dropped connection) after a visible pause. Many models the app treats as image readers
+        reject pictures: when a call that carried images fails otherwise, it is made once more
+        without them (and says so)."""
+        delays = self.retry_delays if delays is None else delays
+        blind = False
+        tries = 0
+        while True:
+            try:
+                await asyncio.wait_for(self._stream_into(target, key, model, build(blind=blind)), TURN_TIMEOUT_SECONDS)
+                return
+            except (asyncio.CancelledError, asyncio.TimeoutError):
                 raise
-            target["imagesDropped"] = True
-            await asyncio.wait_for(self._stream_into(target, key, model, build(blind=True)), TURN_TIMEOUT_SECONDS)
+            except Exception as exc:
+                reason = transient_reason(exc)
+                if reason and tries < len(delays):
+                    wait = retry_wait(exc, delays[tries])
+                    tries += 1
+                    log.info("discussion %s: %s %s (%s), try %d in %.0fs", self.chat_id, key, model, reason, tries + 1, wait)
+                    target.update(
+                        {
+                            "status": "waiting",
+                            "thinking": False,
+                            "retry": {"n": tries, "of": len(delays), "reason": reason, "until": now_ms() + int(wait * 1000), "error": _short_error(exc)[:160]},
+                        }
+                    )
+                    await self.send("turn", turn=_brief(target, key))
+                    await asyncio.sleep(wait)
+                    continue
+                if sends_images and not blind and not reason:
+                    blind = True
+                    target["imagesDropped"] = True
+                    continue
+                raise
 
     async def _run_turn(self, turn: dict):
         seat = next(s for s in self.setup["seats"] if s["id"] == turn["seat"])
@@ -941,8 +987,24 @@ class LiveDiscussion:
         finally:
             turn["endedAt"] = now_ms()
             turn["thinking"] = False
+            turn["retry"] = None
             await self.flush()
             await self.send("turn", turn=_brief(turn, turn["id"], with_content=True))
+
+    def _stand_ins(self) -> list[dict]:
+        """Seats that could write the conclusion when the moderator cannot: distinct models, the
+        ones that spoke in the last round first."""
+        moderator = self.ask["moderator"]["model"]
+        last_round = max([turn.get("round") or 0 for turn in self.ask.get("turns") or []] or [0])
+        spoke = {t["seat"] for t in self.ask.get("turns") or [] if t.get("round") == last_round and t.get("status") == "done"}
+        seats = sorted(self.setup["seats"], key=lambda seat: seat["id"] not in spoke)
+        out, seen = [], {moderator}
+        for seat in seats:
+            if seat["model"] in seen:
+                continue
+            seen.add(seat["model"])
+            out.append(seat)
+        return out[:MAX_STAND_INS]
 
     async def _run_conclusion(self):
         conclusion = self.ask["conclusion"]
@@ -950,20 +1012,66 @@ class LiveDiscussion:
             self.ask["previousConclusions"].append(
                 {"content": conclusion["content"], "endedAt": conclusion.get("endedAt")}
             )
-        conclusion.update({"status": "waiting", "content": "", "error": None, "usage": {}, "imagesDropped": False})
+        moderator = self.ask["moderator"]
+        conclusion.update(
+            {
+                "status": "waiting",
+                "content": "",
+                "error": None,
+                "usage": {},
+                "imagesDropped": False,
+                "retry": None,
+                "standIn": None,
+                "model": moderator["model"],
+                "name": moderator["name"],
+            }
+        )
         self.ask["status"] = "concluding"
         await self.send_state()
-        moderator = self.ask["moderator"]
 
-        def build(blind: bool):
-            ask = {**self.ask, "moderator": {**moderator, "vision": False}} if blind else self.ask
-            return build_conclusion_messages(
-                setup=self.setup, ask=ask, history=self.history, images=None if blind else self.images
-            )
+        def builder(writer: dict):
+            def build(blind: bool):
+                ask = {**self.ask, "moderator": {**writer, "vision": False} if blind else writer}
+                return build_conclusion_messages(
+                    setup=self.setup, ask=ask, history=self.history, images=None if blind else self.images
+                )
 
-        sends_images = bool(self.images) and moderator.get("vision", True) is not False
+            return build
+
+        def sends_images(writer: dict) -> bool:
+            return bool(self.images) and writer.get("vision", True) is not False
+
         try:
-            await self._speak(conclusion, "conclusion", moderator["model"], build, sends_images)
+            try:
+                await self._speak(conclusion, "conclusion", moderator["model"], builder(moderator), sends_images(moderator))
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                # the moderator cannot write it now: a seat that took part writes it instead
+                failure = exc
+                for seat in self._stand_ins():
+                    writer = {"model": seat["model"], "name": seat["name"], "vision": seat.get("vision", True)}
+                    reason = transient_reason(failure) or ("超时" if isinstance(failure, asyncio.TimeoutError) else "出错")
+                    conclusion.update(
+                        {
+                            "model": writer["model"],
+                            "name": writer["name"],
+                            "imagesDropped": False,
+                            "standIn": {"for": moderator["name"], "reason": reason, "error": _short_error(failure)[:160]},
+                        }
+                    )
+                    log.info("discussion %s: moderator %s failed (%s), %s concludes", self.chat_id, moderator["model"], reason, writer["model"])
+                    try:
+                        await self._speak(
+                            conclusion, "conclusion", writer["model"], builder(writer), sends_images(writer), self.stand_in_delays
+                        )
+                        break
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception as stand_in_exc:
+                        failure = stand_in_exc
+                else:
+                    raise exc
             conclusion["status"] = "done"
         except asyncio.CancelledError:
             conclusion["status"] = "stopped"
@@ -977,6 +1085,7 @@ class LiveDiscussion:
         finally:
             conclusion["endedAt"] = now_ms()
             conclusion["thinking"] = False
+            conclusion["retry"] = None
             await self.flush()
 
     async def _run_research(self):
@@ -1020,6 +1129,26 @@ class LiveDiscussion:
             research["endedAt"] = now_ms()
             await self.send_state()
 
+    async def _resume_round(self):
+        """Run the unfinished turns of the last round reached again; later rounds follow."""
+        started = sorted({turn.get("round") or 0 for turn in self.ask["turns"]})
+        if not started:
+            self.from_round = 1
+            return
+        last = started[-1]
+        redo = [turn for turn in self.ask["turns"] if turn.get("round") == last and turn.get("status") != "done"]
+        self.from_round = last + 1
+        if not redo:
+            return
+        self.ask["round"] = last
+        for turn in redo:
+            turn.update({"status": "waiting", "content": "", "error": None, "usage": {}, "imagesDropped": False, "retry": None})
+        await self.send_state()
+        await asyncio.gather(*(self._run_turn(turn) for turn in redo))
+        self.save()
+        if last == 1 and not any(t["status"] == "done" for t in self.ask["turns"] if t.get("round") == 1):
+            raise ValueError("第一轮所有参与者都失败了")
+
     async def run(self):
         self.flusher = asyncio.create_task(self._flush_loop())
         try:
@@ -1031,8 +1160,10 @@ class LiveDiscussion:
                 self.save()
             elif not self.conclude_only:
                 research = self.ask.get("research")
-                if research and research.get("status") in {"waiting", "stopped"} and self.from_round == 1:
+                if research and research.get("status") in {"waiting", "stopped", "running"} and not self.ask["turns"] and self.from_round == 1:
                     await self._run_research()
+                if self.resume:
+                    await self._resume_round()
                 for round_index in range(self.from_round, int(self.ask["rounds"]) + 1):
                     self.ask["round"] = round_index
                     turns = [
@@ -1089,7 +1220,12 @@ def _brief(target: dict, key: str, with_content: bool = False) -> dict:
         "usage": target.get("usage") or {},
         "error": target.get("error"),
         "imagesDropped": bool(target.get("imagesDropped")),
+        "retry": target.get("retry"),
     }
+    if "standIn" in target:
+        out["standIn"] = target.get("standIn")
+        out["model"] = target.get("model")
+        out["name"] = target.get("name")
     if with_content:
         out["content"] = target.get("content") or ""
     return out
@@ -1098,6 +1234,47 @@ def _brief(target: dict, key: str, with_content: bool = False) -> dict:
 def _short_error(exc: BaseException) -> str:
     text = str(getattr(exc, "detail", None) or exc or exc.__class__.__name__).strip()
     return (text or exc.__class__.__name__)[:300]
+
+
+TRANSIENT_STATUS = {408, 425, 429, 500, 502, 503, 504, 529}
+RATE_LIMIT_RE = re.compile(r"rate.?limit|too many requests|\b429\b|限流|频率", re.I)
+BUSY_RE = re.compile(
+    r"overload|capacity|temporar|unavailable|try again|bad gateway|\b50[0234]\b|internal server error|繁忙",
+    re.I,
+)
+NETWORK_RE = re.compile(
+    r"connect|reset by peer|server disconnected|timed? ?out|timeout|\beof\b|incomplete|broken pipe|end of stream",
+    re.I,
+)
+EMPTY_RE = re.compile(r"空内容|empty")
+PERMANENT_RE = re.compile(r"insufficient_quota|billing|invalid.?api.?key|unauthori[sz]ed|forbidden|not found|context.?length|too long", re.I)
+RETRY_AFTER_RE = re.compile(r"(?:retry|try again)[^0-9]{0,24}(\d+(?:\.\d+)?)\s*(?:s\b|sec|second|秒)", re.I)
+
+
+def transient_reason(exc: BaseException) -> Optional[str]:
+    """Why a failed call is worth making again ("限流", "上游繁忙", ...), or None if it is not."""
+    if isinstance(exc, (asyncio.CancelledError, asyncio.TimeoutError)):
+        return None
+    text = _short_error(exc)
+    status = getattr(exc, "status_code", None) or getattr(exc, "status", None)
+    if PERMANENT_RE.search(text) and not RATE_LIMIT_RE.search(text):
+        return None
+    if status == 429 or RATE_LIMIT_RE.search(text):
+        return "限流"
+    if status in TRANSIENT_STATUS or BUSY_RE.search(text):
+        return "上游繁忙"
+    if NETWORK_RE.search(text) or isinstance(exc, ConnectionError) or type(exc).__module__.split(".")[0] in {"aiohttp", "httpx"}:
+        return "连接中断"
+    if EMPTY_RE.search(text):
+        return "空回复"
+    return None
+
+
+def retry_wait(exc: BaseException, base: float) -> float:
+    """The pause before the next try: the planned one, or longer when the upstream names it."""
+    match = RETRY_AFTER_RE.search(_short_error(exc))
+    asked = float(match.group(1)) + 1 if match else 0
+    return min(max(float(base), asked), RETRY_MAX_WAIT)
 
 
 LIVE: dict[str, LiveDiscussion] = {}

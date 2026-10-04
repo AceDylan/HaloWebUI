@@ -14,6 +14,7 @@
 		deleteDiscussion,
 		getDiscussion,
 		interjectDiscussion,
+		resumeDiscussion,
 		retryDiscussionTurn,
 		stopDiscussion,
 		type DiscussAsk,
@@ -72,6 +73,9 @@
 	$: settled = !!last && !liveNow;
 	$: canConclude = settled && hasSpoken && last?.conclusion?.status !== 'done';
 	$: canContinue = settled && hasSpoken && last?.mode !== 'review';
+	// a question that failed, was stopped or cut off picks up where it was
+	$: canResume = settled && ['error', 'stopped', 'interrupted'].includes(last?.status ?? '');
+	$: resumeLabel = last?.status === 'stopped' ? '从停下的地方继续' : last?.status === 'interrupted' ? '从中断处继续' : '从出错处继续';
 	$: hermes = (($models ?? []) as any[]).find((m) => isHermesAgentModel(m, $config?.hermes_agent_model_ids));
 	$: canHandOff = !!hermes && last?.conclusion?.status === 'done';
 
@@ -175,6 +179,14 @@
 		retrying = '';
 	};
 	const conclude = () => run(() => concludeDiscussion(localStorage.token, chatId));
+	const resume = async () => {
+		const res = await run(() => resumeDiscussion(localStorage.token, chatId));
+		if (res) {
+			follow = true;
+			await tick();
+			scrollToBottom();
+		}
+	};
 	const more = async () => {
 		const res = await run(() => continueDiscussion(localStorage.token, chatId));
 		if (res) {
@@ -491,14 +503,28 @@
 							next={ask === last && settled
 								? { chat: continueInChat, team: teamsEnabled ? toTeams : null, hermes: canHandOff ? openHermes : null }
 								: null}
+							rewrite={ask === last && canConclude ? conclude : null}
+							{busy}
 						/>
 
-						{#if ask.error && ask.status === 'error'}
-							<p class="rounded-xl bg-red-500/5 px-3 py-2 text-xs text-red-700 dark:text-red-300">{ask.error}</p>
-						{:else if ask.status === 'interrupted'}
-							<p class="rounded-xl bg-amber-500/5 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
-								服务重启打断了这次讨论。可以让主持人根据已有发言直接总结，或再讨论一轮。
-							</p>
+						{#if (ask.error && ask.status === 'error') || ask.status === 'interrupted'}
+							<div
+								class="flex flex-wrap items-center gap-2 rounded-xl px-3 py-2 text-xs {ask.status === 'error'
+									? 'bg-red-500/5 text-red-700 dark:text-red-300'
+									: 'bg-amber-500/5 text-amber-700 dark:text-amber-300'}"
+								data-discuss-failure={ask.status}
+							>
+								<p class="min-w-0 flex-1">
+									{ask.status === 'error'
+										? `出错：${ask.error}`
+										: '服务重启打断了这次讨论。'}
+								</p>
+								{#if ask === last && canResume}
+									<button type="button" class="dc-chip shrink-0 !text-current" disabled={busy} on:click={resume} data-discuss-resume-inline>
+										{resumeLabel}
+									</button>
+								{/if}
+							</div>
 						{/if}
 					</section>
 				{/each}
@@ -509,8 +535,13 @@
 	{#if discussion}
 		<div class="dc-dock-wrap pointer-events-none absolute inset-x-0 bottom-0 px-3 pb-3 sm:px-6 sm:pb-5" data-discuss-dock>
 			<div class="pointer-events-auto mx-auto flex max-w-3xl flex-col gap-2">
-				{#if settled && (canConclude || canContinue)}
+				{#if settled && (canResume || canConclude || canContinue)}
 					<div class="flex flex-wrap justify-center gap-1.5" transition:fade={{ duration: 150 }}>
+						{#if canResume}
+							<button type="button" class="dc-chip !text-gray-900 dark:!text-white" disabled={busy} on:click={resume} data-discuss-resume>
+								{resumeLabel}
+							</button>
+						{/if}
 						{#if canConclude}
 							<button type="button" class="dc-chip" disabled={busy} on:click={conclude} data-discuss-conclude>
 								让主持人直接总结

@@ -8,11 +8,14 @@
 	import { config, mobile, models, showSidebar } from '$lib/stores';
 	import {
 		createDiscussion,
+		DiscussApiError,
 		deleteDiscussion,
 		listDiscussions,
+		type Discussion,
 		type DiscussMode,
 		type DiscussionSummary
 	} from '$lib/apis/discussions';
+	import { v4 as uuidv4 } from 'uuid';
 	import { discussionSeatModels } from '$lib/utils/discussion-seats';
 	import { originLabel, takeHandoff, type HandoffOrigin } from '$lib/utils/handoff';
 	import { WEBUI_API_BASE_URL } from '$lib/constants';
@@ -204,22 +207,45 @@
 		composer.style.height = `${Math.min(composer.scrollHeight, 320)}px`;
 	};
 
+	// One key per question as sent: a retry after a lost response gets the same discussion back,
+	// never a second one. A changed question or setup is a new request with a new key.
+	let attempt: { payload: string; key: string } | null = null;
+	const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
 	const start = async () => {
 		if (!canStart) return;
 		creating = true;
+		const form = {
+			question: question.trim(),
+			mode,
+			seats: seats.map((s) => ({ model: s.model, role: s.role.trim() })),
+			rounds,
+			moderator,
+			research,
+			files: attachments.filter((a) => a.id).map((a) => a.id!),
+			context: background
+				? { text: background, title: origin?.title ?? '', chat_id: origin?.kind === 'chat' ? origin.id : null }
+				: null
+		};
+		const payload = JSON.stringify(form);
+		if (attempt?.payload !== payload) {
+			attempt = { payload, key: uuidv4() };
+		}
 		try {
-			const res = await createDiscussion(localStorage.token, {
-				question: question.trim(),
-				mode,
-				seats: seats.map((s) => ({ model: s.model, role: s.role.trim() })),
-				rounds,
-				moderator,
-				research,
-				files: attachments.filter((a) => a.id).map((a) => a.id!),
-				context: background
-					? { text: background, title: origin?.title ?? '', chat_id: origin?.kind === 'chat' ? origin.id : null }
-					: null
-			});
+			const key = attempt.key;
+			// a dropped connection (a phone between networks) is tried again with the same key
+			const send = async (tries: number): Promise<Discussion> => {
+				try {
+					return await createDiscussion(localStorage.token, { ...form, client_key: key });
+				} catch (e: any) {
+					if (e instanceof DiscussApiError || tries >= 2) throw e;
+					await sleep(1500 * (tries + 1));
+					return send(tries + 1);
+				}
+			};
+			const res = await send(0);
+			attempt = null;
+			if (res.deduplicated) toast.info('这个问题刚刚已经开始讨论了，直接打开它');
 			attachments.forEach((a) => a.preview && URL.revokeObjectURL(a.preview));
 			attachments = [];
 			try {
@@ -229,7 +255,7 @@
 			}
 			await goto(`/discuss/${res.id}`);
 		} catch (e: any) {
-			toast.error(e?.message || '没能开始讨论');
+			toast.error(e instanceof DiscussApiError ? e.message || '没能开始讨论' : '网络不稳，没能开始讨论；再点一次不会重复创建');
 		} finally {
 			creating = false;
 		}

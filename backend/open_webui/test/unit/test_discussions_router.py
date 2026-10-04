@@ -91,8 +91,10 @@ def env(monkeypatch):
         app=SimpleNamespace(state=SimpleNamespace(MODELS=MODELS, config=SimpleNamespace())),
     )
     room.LIVE.clear()
+    api._recent.clear()
     yield SimpleNamespace(request=request, calls=calls, events=events, after=after, state=state)
     room.LIVE.clear()
+    api._recent.clear()
     engine.dispose()
 
 
@@ -106,6 +108,7 @@ def _create(env, **overrides):
         rounds=overrides.pop("rounds", 1),
         moderator=overrides.pop("moderator", "c"),
         context=overrides.pop("context", None),
+        client_key=overrides.pop("client_key", None),
     )
     return api.create_discussion(env.request, form, USER)
 
@@ -195,9 +198,9 @@ def test_one_question_at_a_time_and_a_cap_per_user(env):
         with pytest.raises(HTTPException) as busy:
             await api.ask_again(env.request, first["id"], api.AskForm(question="再问"), USER)
         assert busy.value.status_code == 409
-        second = await _create(env)
+        second = await _create(env, question="第二个问题")
         with pytest.raises(HTTPException) as cap:
-            await _create(env)
+            await _create(env, question="第三个问题")
         assert cap.value.status_code == 429
         await api.stop(first["id"], USER)
         await api.stop(second["id"], USER)
@@ -480,3 +483,74 @@ def test_create_keeps_the_conversation_it_was_started_from(env):
     chat_id = asyncio.run(scenario())
     ask = asyncio.run(api.get_discussion(chat_id, USER))["asks"][0]
     assert ask["context"] == {"text": "用户：去哪玩？", "title": "旅行", "chatId": "c-1"}
+
+
+def test_one_question_never_becomes_two_discussions(env):
+    env.state["delay"] = 0.02
+
+    async def scenario():
+        first = await _create(env, client_key="k1")
+        # the response was lost and the page sends the same request again
+        again = await _create(env, client_key="k1")
+        assert again["id"] == first["id"] and again["deduplicated"] is True
+        # a second tab or a double tap: a fresh key, the same question and seats
+        twin = await _create(env, client_key="k2")
+        assert twin["id"] == first["id"] and twin["deduplicated"] is True
+        # another question is another discussion
+        other = await _create(env, question="另一个问题", client_key="k3")
+        assert other["id"] != first["id"] and "deduplicated" not in other
+        await _settle(first["id"])
+        await _settle(other["id"])
+        return first["id"]
+
+    asyncio.run(scenario())
+    assert len(chats_mod.ChatTable().get_chats_with_meta_key_by_user_id("u1", room.META_KEY)) == 2
+
+
+def test_after_a_failure_the_same_question_starts_afresh(env):
+    env.state["fail"] = {"a", "b"}
+
+    async def scenario():
+        first = await _create(env, client_key="k1")
+        await _settle(first["id"])
+        env.state["fail"] = set()
+        second = await _create(env, client_key="k2")
+        await _settle(second["id"])
+        return first, second
+
+    first, second = asyncio.run(scenario())
+    assert second["id"] != first["id"]
+
+
+def test_resume_picks_a_failed_question_up(env):
+    env.state["fail"] = {"c"}
+
+    async def scenario():
+        detail = await _create(env)
+        await _settle(detail["id"])
+        return detail["id"]
+
+    chat_id = asyncio.run(scenario())
+    ask = asyncio.run(api.get_discussion(chat_id, USER))["asks"][0]
+    assert ask["status"] == "done"  # the moderator failed, a seat wrote the conclusion
+    assert ask["conclusion"]["standIn"]["for"] == "c"
+
+    env.state["fail"] = {"a", "b", "c"}
+    with pytest.raises(HTTPException) as finished:
+        asyncio.run(api.resume_discussion(env.request, chat_id, USER))
+    assert finished.value.status_code == 400
+
+    async def broken_then_resumed():
+        detail = await _create(env, question="全挂了怎么办")
+        await _settle(detail["id"])
+        failed = (await api.get_discussion(detail["id"], USER))["asks"][0]
+        assert failed["status"] == "error" and "第一轮" in failed["error"]
+        env.state["fail"] = set()
+        await api.resume_discussion(env.request, detail["id"], USER)
+        await _settle(detail["id"])
+        return detail["id"]
+
+    chat_id = asyncio.run(broken_then_resumed())
+    ask = asyncio.run(api.get_discussion(chat_id, USER))["asks"][0]
+    assert ask["status"] == "done"
+    assert [(t["id"], t["status"]) for t in ask["turns"]] == [("r1-s1", "done"), ("r1-s2", "done")]

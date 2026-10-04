@@ -4,14 +4,18 @@
 	import type { DiscussAsk } from '$lib/apis/discussions';
 	import { copyToClipboard } from '$lib/utils';
 	import ReportMarkdown from '$lib/components/teams/ReportMarkdown.svelte';
+	import { now } from '$lib/components/teams/clock';
 	import SeatAvatar from './SeatAvatar.svelte';
-	import { domainOf, linkCitations, parseSections, sectionKind, seconds, tokens } from './model';
+	import { domainOf, linkCitations, parseSections, retryText, sectionKind, seconds, tokens } from './model';
 
 	/** The moderator's conclusion of one question: the answer first, then agreements,
 	 *  disagreements, positions and next steps as separate panels. */
 	export let ask: DiscussAsk;
 	/** 「接下来」 under the latest conclusion: carry it into a chat, a team, or Hermes. */
 	export let next: { chat?: () => void; team?: (() => void) | null; hermes?: (() => void) | null } | null = null;
+	/** 「重写结论」 on a conclusion that failed (only once the question has settled). */
+	export let rewrite: (() => void) | null = null;
+	export let busy = false;
 
 	$: conclusion = ask.conclusion;
 	$: sources = ask.research?.status === 'done' ? ask.research.sources : [];
@@ -25,6 +29,9 @@
 	$: took = seconds(conclusion.startedAt, conclusion.endedAt);
 	$: total = ask.usage?.total_tokens;
 	$: waiting = state === 'waiting' && ask.status !== 'concluding';
+	// a stand-in seat writes it when the moderator cannot
+	$: writer = conclusion.standIn ? { model: conclusion.model, name: conclusion.name } : ask.moderator;
+	$: retrying = conclusion.retry ? retryText(conclusion.retry, $now) : '';
 	$: ringState = (
 		state === 'streaming' ? (conclusion.thinking && !conclusion.content ? 'thinking' : 'streaming') : state
 	) as 'thinking' | 'streaming' | 'waiting' | 'done' | 'error' | 'stopped';
@@ -57,8 +64,8 @@
 	>
 		<header class="flex items-center gap-2.5 px-5 pt-4 pb-1">
 			<SeatAvatar
-				model={ask.moderator.model}
-				name={ask.moderator.name}
+				model={writer.model}
+				name={writer.name}
 				hue={268}
 				state={ringState}
 				size={24}
@@ -66,8 +73,10 @@
 			<div class="min-w-0 flex-1">
 				<div class="tm-eyebrow">主持人结论</div>
 				<div class="truncate text-xs text-gray-500 dark:text-gray-400">
-					{ask.moderator.name}
-					{#if state === 'streaming'}
+					{writer.name}{conclusion.standIn ? ' 代写' : ''}
+					{#if retrying}
+						· {retrying}
+					{:else if state === 'streaming'}
 						· {conclusion.thinking && !conclusion.content ? '思考中…' : '正在写结论…'}
 					{:else if state === 'done'}
 						{[took !== null ? `用时 ${took}s` : '', total ? `本问共 ${tokens(total)} tokens` : '']
@@ -92,13 +101,21 @@
 		</header>
 
 		<div class="px-5 pb-5">
+			{#if conclusion.standIn}
+				<p class="mb-1.5 text-[11px] text-amber-600 dark:text-amber-300" title={conclusion.standIn.error ?? ''} data-discuss-stand-in>
+					主持人 {conclusion.standIn.for} 暂时写不了（{conclusion.standIn.reason}），由 {conclusion.name} 代写
+				</p>
+			{/if}
 			{#if conclusion.imagesDropped}
 				<p class="mb-1.5 text-[11px] text-amber-600 dark:text-amber-300" data-discuss-images-dropped>主持人没能看图，按文字总结</p>
+			{/if}
+			{#if state === 'error' && rewrite}
+				<button type="button" class="dc-chip mb-2" disabled={busy} on:click={rewrite} data-discuss-rewrite>重写结论</button>
 			{/if}
 			{#if state === 'streaming' || !answer}
 				{#if conclusion.content}
 					<ReportMarkdown id="dc-conclusion-{ask.id}" content={cite(conclusion.content)} />
-				{:else}
+				{:else if state === 'streaming' || state === 'waiting'}
 					<div class="flex flex-col gap-2 pt-2" style="--dc-hue: 268">
 						<div class="dc-skeleton w-full" />
 						<div class="dc-skeleton w-11/12" />

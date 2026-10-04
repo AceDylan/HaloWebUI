@@ -5,6 +5,7 @@
 	import type { DiscussSeat, DiscussTurn, ResearchSource } from '$lib/apis/discussions';
 	import { copyToClipboard } from '$lib/utils';
 	import ReportMarkdown from '$lib/components/teams/ReportMarkdown.svelte';
+	import { now } from '$lib/components/teams/clock';
 	import SeatAvatar from './SeatAvatar.svelte';
 	import { linkCitations, seconds, tokens, turnStatusText } from './model';
 
@@ -49,7 +50,7 @@
 	$: ringState = (
 		turn.status === 'streaming' ? (turn.thinking && !turn.content ? 'thinking' : 'streaming') : turn.status
 	) as any;
-	$: statusText = turnStatusText(turn);
+	$: statusText = turnStatusText(turn, turn.retry ? $now : undefined);
 	$: took = seconds(turn.startedAt, turn.endedAt);
 	$: used = tokens(turn.usage?.completion_tokens ?? turn.usage?.total_tokens);
 	$: showRole = !!seat?.role && !seat.label.includes(seat.role);
@@ -130,6 +131,11 @@
 		<div bind:this={inner}>
 		{#if turn.imagesDropped}
 			<p class="mb-1.5 text-[11px] text-amber-600 dark:text-amber-300" data-discuss-images-dropped>这个模型没能看图，按文字讨论</p>
+		{/if}
+		{#if turn.retry && turn.status === 'waiting'}
+			<p class="mb-1.5 text-[11px] leading-relaxed text-amber-600 dark:text-amber-300" title={turn.retry.error ?? ''} data-discuss-retry-wait={turn.id}>
+				{statusText}，会自动接着说
+			</p>
 		{/if}
 		{#if turn.status === 'waiting' || (turn.status === 'streaming' && !turn.content)}
 			<div class="flex flex-col gap-2 pt-1" style="--dc-hue: {hue}" aria-label={statusText}>

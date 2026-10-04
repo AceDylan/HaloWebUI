@@ -3,6 +3,7 @@ import type {
 	AskStatus,
 	DiscussAsk,
 	DiscussMode,
+	DiscussRetry,
 	DiscussSeat,
 	DiscussTurn,
 	TurnStatus
@@ -178,7 +179,18 @@ export const seconds = (from?: number | null, to?: number | null) =>
 	from && to ? Math.max(0, Math.round((to - from) / 1000)) : null;
 
 /** Short status text of a turn for its header. */
-export const turnStatusText = (turn: { status: TurnStatus; thinking?: boolean; error?: string | null }) => {
+/** "限流，12 秒后重试（1/3）" while a refused call waits to be made again. */
+export const retryText = (retry: DiscussRetry | null | undefined, nowSeconds: number = Date.now() / 1000) => {
+	if (!retry) return '';
+	const left = Math.max(0, Math.ceil(retry.until / 1000 - nowSeconds));
+	return `${retry.reason}，${left ? `${left} 秒后` : '正在'}重试（${retry.n}/${retry.of}）`;
+};
+
+export const turnStatusText = (
+	turn: { status: TurnStatus; thinking?: boolean; error?: string | null; retry?: DiscussRetry | null },
+	nowSeconds?: number
+) => {
+	if (turn.retry && (turn.status === 'waiting' || turn.status === 'streaming')) return retryText(turn.retry, nowSeconds);
 	if (turn.status === 'waiting') return '等待发言';
 	if (turn.status === 'streaming') return turn.thinking ? '思考中' : '发言中';
 	if (turn.status === 'error') return '未能发言';

@@ -14,6 +14,7 @@ const api = vi.hoisted(() => ({
 	concludeDiscussion: vi.fn(),
 	continueDiscussion: vi.fn(),
 	retryDiscussionTurn: vi.fn(),
+	resumeDiscussion: vi.fn(),
 	deleteDiscussion: vi.fn()
 }));
 vi.mock('$lib/apis/discussions', () => api);
@@ -296,5 +297,70 @@ describe('DiscussRoom', () => {
 		expect(toTeam.context).toContain('讨论结论：\n## 结论\n用 Postgres [1]。');
 		expect(toTeam.context).toContain('[1] PG 文档 https://www.postgresql.org/docs/');
 		sessionStorage.removeItem('halo.handoff');
+	}, 90000);
+
+	it('shows a rate-limited call waiting to be made again, a stand-in moderator, and resumes a failed question', async () => {
+		const ask = runningAsk();
+		Object.assign(ask, {
+			turns: [
+				{ id: 'r1-s1', round: 1, seat: 's1', status: 'streaming', content: '' },
+				{ id: 'r1-s2', round: 1, seat: 's2', status: 'streaming', content: '' }
+			]
+		});
+		api.getDiscussion.mockResolvedValue(discussion(ask));
+		const target = await mount();
+		await until(() => target.querySelectorAll('[data-discuss-turn]').length === 2);
+		emit({
+			kind: 'turn',
+			chatId: 'chat1',
+			askId: 'ask1',
+			v: 2,
+			turn: { id: 'r1-s1', status: 'waiting', retry: { n: 1, of: 3, reason: '限流', until: Date.now() + 20000 } }
+		});
+		await until(() => !!target.querySelector('[data-discuss-retry-wait="r1-s1"]'));
+		expect(target.querySelector('[data-discuss-turn="r1-s1"]')!.textContent).toMatch(/限流，\d+ 秒后重试（1\/3）/);
+		app.$destroy();
+		document.body.innerHTML = '';
+
+		// the moderator stayed rate-limited: a seat wrote the conclusion
+		const done = runningAsk();
+		Object.assign(done, {
+			status: 'done',
+			turns: done.turns.map((t) => ({ ...t, status: 'done', content: `${t.seat} 说完了` })),
+			conclusion: {
+				status: 'done',
+				model: 'm-a',
+				name: 'gpt-chat',
+				content: '## 结论\n照常去。',
+				standIn: { for: 'claude-chat', reason: '限流' }
+			}
+		});
+		api.getDiscussion.mockResolvedValue(discussion(done));
+		const second = await mount();
+		await until(() => !!second.querySelector('[data-discuss-stand-in]'));
+		expect(second.querySelector('[data-discuss-stand-in]')!.textContent).toContain('主持人 claude-chat 暂时写不了（限流），由 gpt-chat 代写');
+		expect(second.querySelector('[data-discuss-resume]')).toBeFalsy();
+		app.$destroy();
+		document.body.innerHTML = '';
+
+		// every try failed: the step can be restarted from where it broke
+		const failed = runningAsk();
+		Object.assign(failed, {
+			status: 'error',
+			error: 'exceeded token rate limit',
+			turns: failed.turns.map((t) => ({ ...t, status: 'done', content: `${t.seat} 说完了` })),
+			conclusion: { status: 'error', model: 'm-b', name: 'claude-chat', content: '', error: 'exceeded token rate limit' }
+		});
+		api.getDiscussion.mockResolvedValue(discussion(failed));
+		api.resumeDiscussion.mockResolvedValue(discussion({ ...failed, status: 'concluding' }));
+		const third = await mount();
+		await until(() => !!third.querySelector('[data-discuss-resume]'));
+		expect(third.querySelector('[data-discuss-resume]')!.textContent).toContain('从出错处继续');
+		expect(third.querySelector('[data-discuss-failure="error"]')!.textContent).toContain('exceeded token rate limit');
+		expect(third.querySelector('[data-discuss-rewrite]')).toBeTruthy();
+		expect(third.querySelector('[data-discuss-conclusion="error"] .dc-skeleton')).toBeFalsy();
+		(third.querySelector('[data-discuss-resume-inline]') as any).click();
+		await until(() => api.resumeDiscussion.mock.calls.length === 1);
+		expect(api.resumeDiscussion.mock.calls[0].slice(1)).toEqual(['chat1']);
 	}, 90000);
 });

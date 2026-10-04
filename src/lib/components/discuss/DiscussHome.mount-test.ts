@@ -8,14 +8,22 @@ installDominoDom('http://localhost/discuss');
 const api = vi.hoisted(() => ({
 	listDiscussions: vi.fn(),
 	createDiscussion: vi.fn(),
-	deleteDiscussion: vi.fn()
+	deleteDiscussion: vi.fn(),
+	DiscussApiError: class DiscussApiError extends Error {
+		status: number;
+		constructor(status: number, message: string) {
+			super(message);
+			this.status = status;
+		}
+	}
 }));
 vi.mock('$lib/apis/discussions', () => api);
 const files = vi.hoisted(() => ({ uploadFile: vi.fn() }));
 vi.mock('$lib/apis/files', () => files);
 const nav = vi.hoisted(() => ({ goto: vi.fn(), replaceState: vi.fn() }));
 vi.mock('$app/navigation', () => nav);
-vi.mock('svelte-sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn() } }));
+const toasts = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn() }));
+vi.mock('svelte-sonner', () => ({ toast: toasts }));
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const until = async (check: () => boolean, ms = 30000) => {
@@ -36,7 +44,8 @@ beforeAll(async () => {
 }, 60000);
 
 beforeEach(() => {
-	Object.values(api).forEach((fn: any) => fn.mockReset());
+	[api.listDiscussions, api.createDiscussion, api.deleteDiscussion].forEach((fn: any) => fn.mockReset());
+	Object.values(toasts).forEach((fn: any) => fn.mockReset());
 	files.uploadFile.mockReset();
 	nav.goto.mockReset();
 	localStorage.removeItem('halo.discuss.last');
@@ -132,7 +141,8 @@ describe('DiscussHome', () => {
 			moderator: 'm-gpt', // a strong writer by default
 			research: true,
 			files: [],
-			context: null
+			context: null,
+			client_key: expect.any(String)
 		});
 		expect(nav.goto).toHaveBeenCalledWith('/discuss/new1');
 		expect(JSON.parse(localStorage.getItem('halo.discuss.last')!)).toMatchObject({ mode: 'debate', research: true });
@@ -228,5 +238,48 @@ describe('DiscussHome', () => {
 		(target.querySelector('[data-discuss-context-remove]') as any).click();
 		await sleep(20);
 		expect(target.querySelector('[data-discuss-context]')).toBeFalsy();
+	});
+
+	it('a dropped response is sent again with the same key and never makes a second discussion', async () => {
+		const target = await mount();
+		await until(() => target.querySelectorAll('[data-discuss-seat]').length > 0);
+		const box = target.querySelector('#discuss-question') as any;
+		box.value = '武夷山竹筏漂流体验如何';
+		box.dispatchEvent(new (globalThis as any).Event('input'));
+		await sleep(20);
+		api.createDiscussion
+			.mockRejectedValueOnce(new TypeError('Failed to fetch'))
+			.mockResolvedValueOnce({ id: 'first', asks: [], deduplicated: true });
+		target.querySelector('[data-discuss-composer]')!.dispatchEvent(new (globalThis as any).Event('submit', { cancelable: true }));
+		await until(() => nav.goto.mock.calls.length > 0, 10000);
+		const keys = api.createDiscussion.mock.calls.map((c: any[]) => c[1].client_key);
+		expect(keys).toHaveLength(2);
+		expect(keys[0]).toBeTruthy();
+		expect(keys[1]).toBe(keys[0]);
+		expect(nav.goto).toHaveBeenCalledWith('/discuss/first');
+		expect(toasts.info).toHaveBeenCalled();
+		expect(toasts.error).not.toHaveBeenCalled();
+	});
+
+	it('an error from the server is shown, and asking again after changing the question uses a new key', async () => {
+		const target = await mount();
+		await until(() => target.querySelectorAll('[data-discuss-seat]').length > 0);
+		const box = target.querySelector('#discuss-question') as any;
+		const ask = async (text: string) => {
+			box.value = text;
+			box.dispatchEvent(new (globalThis as any).Event('input'));
+			await sleep(20);
+			target.querySelector('[data-discuss-composer]')!.dispatchEvent(new (globalThis as any).Event('submit', { cancelable: true }));
+		};
+		api.createDiscussion.mockRejectedValueOnce(new api.DiscussApiError(429, '已有 2 个讨论在进行'));
+		await ask('问题一');
+		await until(() => toasts.error.mock.calls.length > 0);
+		expect(toasts.error.mock.calls[0][0]).toContain('已有 2 个讨论');
+		expect(api.createDiscussion).toHaveBeenCalledTimes(1); // not retried
+		api.createDiscussion.mockResolvedValueOnce({ id: 'x', asks: [] });
+		await ask('问题二');
+		await until(() => nav.goto.mock.calls.length > 0);
+		const [first, second] = api.createDiscussion.mock.calls.map((c: any[]) => c[1].client_key);
+		expect(second).not.toBe(first);
 	});
 });

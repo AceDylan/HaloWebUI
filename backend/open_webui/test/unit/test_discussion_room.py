@@ -251,6 +251,8 @@ def _live(setup, replies, *, delay=0.0, persist=None, after_done=None):
         call_model=call_model,
         persist=persist or (lambda ask: saved.append(json.loads(json.dumps(ask)))),
         after_done=after_done,
+        retry_delays=(0, 0, 0),
+        stand_in_delays=(0,),
     )
     return live, events, calls, saved
 
@@ -287,11 +289,11 @@ def test_a_discussion_runs_rounds_in_parallel_then_concludes():
 def test_a_failing_seat_sits_out_and_the_rest_goes_on():
     setup = _setup(rounds=1)  # the moderator is seat a's model: it fails as a seat, then concludes
     live, events, calls, saved = _live(
-        setup, {"a": [RuntimeError("rate limited"), ["## 结论\n只有 b 的观点"]], "b": [["B1"]]}
+        setup, {"a": [RuntimeError("model refused"), ["## 结论\n只有 b 的观点"]], "b": [["B1"]]}
     )
     asyncio.run(live.run())
     statuses = {t["id"]: (t["status"], t.get("error")) for t in live.ask["turns"]}
-    assert statuses["r1-s1"] == ("error", "rate limited")
+    assert statuses["r1-s1"] == ("error", "model refused")
     assert statuses["r1-s2"] == ("done", None)
     assert live.ask["status"] == "done"
 
@@ -454,6 +456,111 @@ def test_retry_runs_one_turn_then_concludes_again():
     assert (turn["status"], turn["content"], turn.get("error")) == ("done", "B 重试成功", None)
     assert live.ask["conclusion"]["content"] == "## 结论\n新"
     assert live.ask["previousConclusions"][0]["content"] == "## 结论\n旧"
+    assert live.ask["status"] == "done"
+
+
+# --- self-repair ---------------------------------------------------------------------------------
+
+
+RATE_LIMIT = "Your requests to gpt-6-astra for gpt-6-astra in eastus2 have exceeded token rate limit."
+
+
+def test_passing_failures_are_told_apart_from_lasting_ones():
+    assert room.transient_reason(ValueError(RATE_LIMIT)) == "限流"
+    assert room.transient_reason(room.UpstreamError("slow down", 429)) == "限流"
+    assert room.transient_reason(RuntimeError("503 Service Unavailable")) == "上游繁忙"
+    assert room.transient_reason(ConnectionResetError("Connection reset by peer")) == "连接中断"
+    assert room.transient_reason(ValueError("模型返回了空内容")) == "空回复"
+    assert room.transient_reason(RuntimeError("model refused")) is None
+    assert room.transient_reason(ValueError("You exceeded your current quota: insufficient_quota")) is None
+    assert room.transient_reason(asyncio.TimeoutError()) is None
+    assert room.retry_wait(ValueError("Please retry after 30 seconds."), 8) == 31
+    assert room.retry_wait(ValueError("Please retry after 600 seconds."), 8) == room.RETRY_MAX_WAIT
+    assert room.retry_wait(ValueError(RATE_LIMIT), 20) == 20
+
+
+def test_a_rate_limited_turn_waits_and_tries_again():
+    setup = _setup(rounds=1, moderator="c")
+    live, events, calls, saved = _live(
+        setup, {"a": [ValueError(RATE_LIMIT), ["A1"]], "b": [["B1"]], "c": [["## 结论\n好"]]}
+    )
+    asyncio.run(live.run())
+    turn = live.ask["turns"][0]
+    assert (turn["status"], turn["content"], turn.get("retry")) == ("done", "A1", None)
+    assert [model for model, _ in calls].count("a") == 2
+    waits = [e["data"]["turn"]["retry"] for e in events if e["data"]["kind"] == "turn" and e["data"]["turn"].get("retry")]
+    assert waits and waits[0]["reason"] == "限流" and waits[0]["n"] == 1 and waits[0]["of"] == 3
+    assert live.ask["status"] == "done"
+
+
+def test_a_turn_gives_up_after_its_retries():
+    setup = _setup(rounds=1, moderator="c")
+    live, events, calls, saved = _live(
+        setup, {"a": [ValueError(RATE_LIMIT)] * 4, "b": [["B1"]], "c": [["## 结论\n好"]]}
+    )
+    asyncio.run(live.run())
+    turn = live.ask["turns"][0]
+    assert turn["status"] == "error" and "rate limit" in turn["error"] and turn.get("retry") is None
+    assert [model for model, _ in calls].count("a") == 4
+    assert live.ask["status"] == "done"  # the rest of the table still reaches a conclusion
+
+
+def test_a_moderator_that_stays_rate_limited_hands_the_conclusion_to_a_seat():
+    setup = _setup(rounds=1, moderator="c")
+    live, events, calls, saved = _live(
+        setup,
+        {"a": [["A1"], ["## 结论\n由 a 代写"]], "b": [["B1"]], "c": [ValueError(RATE_LIMIT)] * 4},
+    )
+    asyncio.run(live.run())
+    conclusion = live.ask["conclusion"]
+    assert live.ask["status"] == "done"
+    assert conclusion["content"] == "## 结论\n由 a 代写"
+    assert (conclusion["model"], conclusion["name"]) == ("a", "a")
+    assert conclusion["standIn"]["for"] == "c" and conclusion["standIn"]["reason"] == "限流"
+    assert [model for model, _ in calls][-5:] == ["c", "c", "c", "c", "a"]
+    # the stand-in writes the moderator's conclusion, with the whole transcript
+    assert calls[-1][1][0]["content"].startswith("You moderated")
+
+
+def test_the_conclusion_errors_only_when_every_writer_fails():
+    setup = _setup(rounds=1, moderator="c")
+    live, events, calls, saved = _live(
+        setup,
+        {"a": [["A1"], RuntimeError("a refused")], "b": [["B1"], RuntimeError("b refused")], "c": [RuntimeError("c refused")]},
+    )
+    asyncio.run(live.run())
+    assert live.ask["status"] == "error" and live.ask["error"] == "c refused"
+    assert live.ask["conclusion"]["status"] == "error"
+
+
+def test_resume_reruns_the_unfinished_round_then_the_rest():
+    setup = _setup(rounds=2, moderator="c")
+    live, events, calls, saved = _live(
+        setup, {"a": [["A1 again"], ["A2"]], "b": [["B2"]], "c": [["## 结论\n续上了"]]}
+    )
+    live.ask["turns"] = [
+        {"id": "r1-s1", "round": 1, "seat": "s1", "status": "error", "content": "", "error": "rate limit"},
+        {"id": "r1-s2", "round": 1, "seat": "s2", "status": "done", "content": "B1"},
+    ]
+    live.ask["status"] = "running"
+    live.resume = True
+    asyncio.run(live.run())
+    assert [(t["id"], t["status"], t["content"]) for t in live.ask["turns"]] == [
+        ("r1-s1", "done", "A1 again"), ("r1-s2", "done", "B1"), ("r2-s1", "done", "A2"), ("r2-s2", "done", "B2"),
+    ]
+    assert [model for model, _ in calls] == ["a", "a", "b", "c"]
+    assert live.ask["status"] == "done" and live.ask["conclusion"]["content"] == "## 结论\n续上了"
+
+
+def test_resume_after_a_failed_conclusion_only_writes_the_conclusion():
+    setup = _setup(rounds=1, moderator="c")
+    live, events, calls, saved = _live(setup, {"c": [["## 结论\n补上"]]})
+    _done(live.ask, 1, "s1", "A1")
+    _done(live.ask, 1, "s2", "B1")
+    live.ask["conclusion"] = {"status": "error", "content": "", "model": "c", "name": "c", "error": RATE_LIMIT}
+    live.resume = True
+    asyncio.run(live.run())
+    assert [model for model, _ in calls] == ["c"]
     assert live.ask["status"] == "done"
 
 

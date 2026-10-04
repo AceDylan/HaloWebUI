@@ -11,9 +11,11 @@ import {
 	modelById,
 	modeSpec,
 	parseSections,
+	retryText,
 	roundsOf,
 	sectionKind,
-	tokens
+	tokens,
+	turnStatusText
 } from './model';
 
 const ask = (over: Partial<DiscussAsk> = {}): DiscussAsk => ({
@@ -209,5 +211,17 @@ describe('hand-off to Hermes and the Markdown copy', () => {
 		expect(text).toContain('讨论时查到的资料（结论里的 [n] 指这些）：\n[1] PostgreSQL 文档 https://www.postgresql.org/docs/\n[2] example.com https://example.com/a');
 		const md = discussionMarkdown('选型', [done(research)]);
 		expect(md).toContain('### 资料\n\n- [1] [PostgreSQL 文档](https://www.postgresql.org/docs/)\n- [2] [example.com](https://example.com/a)');
+	});
+});
+
+describe('retry wait', () => {
+	it('counts down to the next try and takes over the turn status', () => {
+		const retry = { n: 2, of: 3, reason: '限流', until: 120_000 };
+		expect(retryText(retry, 100)).toBe('限流，20 秒后重试（2/3）');
+		expect(retryText(retry, 130)).toBe('限流，正在重试（2/3）');
+		expect(retryText(null)).toBe('');
+		expect(turnStatusText({ status: 'waiting', retry }, 100)).toBe('限流，20 秒后重试（2/3）');
+		expect(turnStatusText({ status: 'waiting', retry: null })).toBe('等待发言');
+		expect(turnStatusText({ status: 'error', retry })).toBe('未能发言');
 	});
 });

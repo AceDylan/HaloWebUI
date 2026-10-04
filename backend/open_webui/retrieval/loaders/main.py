@@ -7,6 +7,7 @@ from os.path import basename
 
 from langchain_core.documents import Document
 
+from open_webui.retrieval.loaders.archive import ArchiveLoader
 from open_webui.retrieval.loaders.datalab_marker import DatalabMarkerLoader
 from open_webui.retrieval.loaders.external_document import ExternalDocumentLoader
 from open_webui.retrieval.loaders.mineru import MinerULoader
@@ -324,13 +325,7 @@ class Loader:
         TextLoader = self._get_text_loader()
 
         if is_archive_file(filename, file_content_type):
-            raise FileUploadDiagnosticError(
-                classify_file_upload_error(
-                    None,
-                    filename=filename,
-                    content_type=file_content_type,
-                )
-            )
+            return ArchiveLoader(file_path, filename)
 
         if (
             self.engine == "external"

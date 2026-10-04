@@ -86,6 +86,10 @@ from open_webui.routers.anthropic import (
 
 from open_webui.utils.presence import schedule_away_webhook
 from open_webui.utils.chat_image_refs import extract_chat_image_file_id
+from open_webui.utils.file_upload_diagnostics import (
+    classify_file_upload_error,
+    keeps_raw_attachment,
+)
 from open_webui.utils.chat_image_prompt import (
     compose_chat_image_prompt,
     get_preset_system_prompt,
@@ -554,6 +558,9 @@ def _get_current_chat_resource_access(file_item: Any, name: str, media_type: str
     if file_type in {"image", "image_url", "input_image"} or media_type.startswith("image/"):
         return "visual_input"
 
+    if _get_file_item_meta(file_item).get("raw_attachment"):
+        return "metadata_only"
+
     if _get_file_item_collection_name(file_item):
         return "retrievable_text"
 
@@ -676,6 +683,11 @@ def _build_current_chat_resources_context(files: Any, prompt: Any) -> str:
         serialized = json.dumps(resource, ensure_ascii=False, sort_keys=True)
         lines.append(html.escape(serialized, quote=False))
     lines.append("</current_chat_resources>")
+    if any(resource["access"] == "metadata_only" for resource in resources):
+        lines.append(
+            'Resources with access "metadata_only" were attached as original files: their '
+            "content was not extracted into this conversation, only name, type and size are known."
+        )
 
     if previews:
         lines.append("<current_chat_resource_previews>")
@@ -3111,7 +3123,7 @@ async def _ensure_requested_chat_file_modes(
             continue
 
         file_obj = Files.get_file_by_id(file_id)
-        if not file_obj:
+        if not file_obj or (file_obj.meta or {}).get("raw_attachment"):
             continue
 
         desired_mode = get_requested_processing_mode_for_file_item(
@@ -3175,12 +3187,26 @@ async def _ensure_requested_chat_file_modes(
                     )
                 )
             else:
-                await run_in_threadpool(
-                    process_file,
-                    request,
-                    ProcessFileForm(file_id=file_id, processing_mode=desired_mode),
-                    user,
-                )
+                try:
+                    await run_in_threadpool(
+                        process_file,
+                        request,
+                        ProcessFileForm(file_id=file_id, processing_mode=desired_mode),
+                        user,
+                    )
+                except Exception as exc:
+                    # An attachment whose format cannot be read as text stays the original
+                    # file; the other attachments of the turn are still prepared.
+                    content_type = (file_obj.meta or {}).get("content_type")
+                    diagnostic = classify_file_upload_error(
+                        exc, filename=file_obj.filename, content_type=content_type
+                    )
+                    if not keeps_raw_attachment(diagnostic, content_type):
+                        raise
+                    log.info(
+                        "Chat attachment %s kept as raw: %s", file_id, diagnostic["code"]
+                    )
+                    Files.update_file_metadata_by_id(file_id, {"raw_attachment": True})
             refreshed = Files.get_file_by_id(file_id)
             if refreshed:
                 file_item["file"] = refreshed.model_dump()

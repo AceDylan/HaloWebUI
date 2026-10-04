@@ -21,6 +21,7 @@
 	import { WEBUI_API_BASE_URL } from '$lib/constants';
 	import HandoffBack from '$lib/components/common/HandoffBack.svelte';
 	import { uploadFile } from '$lib/apis/files';
+	import { isVideoFile, videoContactSheet } from '$lib/utils/video-contact-sheet';
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import UploadProgress from '$lib/components/common/UploadProgress.svelte';
 	import MenuLines from '$lib/components/icons/MenuLines.svelte';
@@ -62,7 +63,16 @@
 	let fileInput: HTMLInputElement;
 	$: uploading = attachments.some((a) => !a.id && !a.error);
 	const attach = async (list: FileList | File[] | null | undefined) => {
-		const files = Array.from(list ?? []);
+		// A video also brings its frames as one picture, for the seats that read images.
+		const files = (
+			await Promise.all(
+				Array.from(list ?? []).map(async (file) =>
+					isVideoFile(file) ? [file, await videoContactSheet(file)] : [file]
+				)
+			)
+		)
+			.flat()
+			.filter((file): file is File => !!file);
 		const room = MAX_FILES - attachments.length;
 		if (files.length > room) toast.info(`最多 ${MAX_FILES} 个附件`);
 		await Promise.all(

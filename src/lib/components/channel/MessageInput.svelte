@@ -475,7 +475,7 @@
 				if (uploadedFile.error) {
 					console.warn('File upload warning:', uploadedFile.error);
 					toast.warning(
-						localizeFileUploadError(uploadedFile.error, $i18n.t.bind($i18n), {
+						localizeFileUploadError(uploadedFile.diagnostic ?? uploadedFile.error, $i18n.t.bind($i18n), {
 							isAdmin: $user?.role === 'admin'
 						})
 					);

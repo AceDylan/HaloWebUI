@@ -580,6 +580,8 @@ def get_sources_from_files(
 
         context = None
         nested_file = file.get("file") if isinstance(file.get("file"), dict) else {}
+        if (nested_file.get("meta") or {}).get("raw_attachment"):
+            continue  # an original file with no text; the chat resources list names it
         requested_mode = normalize_file_processing_mode(
             file.get("processing_mode")
             or nested_file.get("meta", {}).get("processing_mode")

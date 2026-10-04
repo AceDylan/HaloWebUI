@@ -77,6 +77,12 @@ const getDiagnosticKeys = (code: string): Record<string, string | null> | null =
 				message: 'This model does not support archive files. Please extract and upload files individually.',
 				hint: null
 			};
+		case 'stored_as_raw_attachment':
+			return {
+				title: 'Attached as the original file',
+				message: 'Its content could not be extracted as text, so the file was attached as it is.',
+				hint: 'Hermes can open the original file; other models see its name, type and size.'
+			};
 		case 'unsupported_binary_file':
 			return {
 				title: 'Unsupported file type',

@@ -10,6 +10,7 @@
 	import { v4 as uuidv4 } from 'uuid';
 	import { createPicker, getAuthToken } from '$lib/utils/google-drive-picker';
 	import { pickAndDownloadFile } from '$lib/utils/onedrive-file-picker';
+	import { isVideoFile, videoContactSheet } from '$lib/utils/video-contact-sheet';
 
 	import { onMount, tick, getContext, createEventDispatcher, onDestroy, afterUpdate } from 'svelte';
 	const dispatch = createEventDispatcher();
@@ -848,13 +849,14 @@
 
 				if (uploadedFile.error) {
 					console.warn('File upload warning:', uploadedFile.error);
-					toast.warning(
-						localizeFileUploadError(
-							uploadedFile.error,
-							$i18n.t.bind($i18n),
-							getUploadLocalizeOptions()
-						)
+					const notice = localizeFileUploadError(
+						uploadedFile.diagnostic ?? uploadedFile.error,
+						$i18n.t.bind($i18n),
+						getUploadLocalizeOptions()
 					);
+					// Kept as the original file (video, archive …): a note, not a problem.
+					if (uploadedFile.diagnostic?.code === 'stored_as_raw_attachment') toast.info(notice);
+					else toast.warning(notice);
 				}
 
 				fileItem.status = 'uploaded';
@@ -938,6 +940,13 @@
 				}
 
 				await uploadImageFileHandler(file);
+			} else if (isVideoFile(file) && !showHermesOptions && visionCapableModels.length > 0) {
+				// The video goes as the original file; its frames, as one picture, are what the
+				// models that read images can actually look at. (Hermes opens the video itself.)
+				const sheet = videoContactSheet(file);
+				await uploadFileHandler(file);
+				const picture = await sheet;
+				if (picture) await uploadImageFileHandler(picture);
 			} else {
 				await uploadFileHandler(file);
 			}

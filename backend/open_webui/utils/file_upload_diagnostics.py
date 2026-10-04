@@ -151,6 +151,36 @@ def make_unsupported_binary_diagnostic(filename: str | None = None) -> dict[str,
     )
 
 
+# A format the document extractor cannot read is still an attachment: the original file is kept
+# (Hermes opens it by path, a chat model is told it is there) instead of failing the upload.
+_RAW_ATTACHMENT_CODES = {
+    "unsupported_archive",
+    "unsupported_binary_file",
+    "unsupported_text_encoding",
+}
+
+
+def keeps_raw_attachment(diagnostic: dict[str, Any], content_type: str | None) -> bool:
+    media_type = (content_type or "").split(";", 1)[0].strip().lower()
+    return diagnostic.get("code") in _RAW_ATTACHMENT_CODES or media_type.startswith(
+        ("audio/", "video/")
+    )
+
+
+def make_raw_attachment_diagnostic(filename: str | None = None) -> dict[str, Any]:
+    display_name = os.path.basename(filename) if filename else "This file"
+    return make_file_upload_diagnostic(
+        "stored_as_raw_attachment",
+        title="Attached as the original file.",
+        message=(
+            f"{display_name} was attached as the original file; its content could not be "
+            "extracted as text."
+        ),
+        hint="Hermes can open the original file; other models see its name, type and size.",
+        blocking=False,
+    )
+
+
 def _get_embedding_hint(user: Any) -> str:
     if getattr(user, "role", None) == "admin":
         return (

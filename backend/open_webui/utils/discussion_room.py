@@ -344,8 +344,11 @@ def _files_block(ask: dict, *, sees_images: bool, gets_images: bool) -> str:
         if item.get("type") == "image":
             continue
         text = (item.get("text") or "").strip()
+        kind = item.get("content_type") or "unknown type"
         parts.append(
-            f"Attached file «{item.get('name')}»:\n{text}" if text else f"Attached file «{item.get('name')}» (its text could not be read)."
+            f"Attached file «{item.get('name')}»:\n{text}"
+            if text
+            else f"Attached file «{item.get('name')}» ({kind}; its content could not be read as text)."
         )
     images = [item for item in files if item.get("type") == "image"]
     if images:

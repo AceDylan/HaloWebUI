@@ -229,6 +229,10 @@ from open_webui.models.files import FileModel
 from open_webui.routers import files
 from open_webui.utils.auth import get_verified_user
 from open_webui.utils import hermes_agent
+from open_webui.utils.file_upload_diagnostics import (
+    FileUploadDiagnosticError,
+    make_unsupported_binary_diagnostic,
+)
 
 
 @pytest.fixture
@@ -314,14 +318,54 @@ def test_raw_upload_preserves_bytes_and_reaches_hermes(uploads, filename, conten
     assert f'- {filename}: {records[uploaded["id"]].path}' in payload["input"]
 
 
-def test_document_processing_still_rejects_archives(uploads):
+def _processing_fails_with(monkeypatch, records, error):
+    def update_meta(file_id, meta):
+        record = records[file_id]
+        records[file_id] = record.model_copy(update={"meta": {**record.meta, **meta}})
+        return records[file_id]
+
+    def process(*args, **kwargs):
+        raise error
+
+    monkeypatch.setattr(files.Files, "update_file_metadata_by_id", update_meta)
+    monkeypatch.setattr(files, "process_file", process)
+    monkeypatch.setattr(files, "transcribe", process)
+
+
+@pytest.mark.parametrize(
+    "filename,content_type,error",
+    [
+        ("clip.mp4", "video/mp4", FileUploadDiagnosticError(make_unsupported_binary_diagnostic("clip.mp4"))),
+        ("voice.mp3", "audio/mpeg", AttributeError("'NoneType' object has no attribute 'get'")),
+        ("bundle.7z", "application/x-7z-compressed", RuntimeError("no reader")),
+        ("data.custom", "application/octet-stream", RuntimeError("File type not supported")),
+    ],
+)
+def test_unreadable_format_is_kept_as_raw_attachment(uploads, monkeypatch, filename, content_type, error):
     client, records, _ = uploads
-    response = client.post(
-        "/files/", files={"file": ("bundle.zip", b"PK", "application/zip")}
+    client.app.state.config.ALLOWED_FILE_EXTENSIONS = []
+    _processing_fails_with(monkeypatch, records, error)
+    response = client.post("/files/", files={"file": (filename, b"\x00\x01media", content_type)})
+    assert response.status_code == 200
+    uploaded = response.json()
+    assert uploaded["diagnostic"]["code"] == "stored_as_raw_attachment"
+    assert uploaded["diagnostic"]["blocking"] is False
+    assert uploaded["meta"]["raw_attachment"] is True
+    assert records[uploaded["id"]].meta["raw_attachment"] is True
+    assert client.get(f'/files/{uploaded["id"]}/content').content == b"\x00\x01media"
+
+
+def test_real_processing_failure_still_fails_the_upload(uploads, monkeypatch):
+    client, records, _ = uploads
+    cleaned = []
+    monkeypatch.setattr(files, "_cleanup_failed_uploaded_file", lambda *args: cleaned.append(args))
+    _processing_fails_with(
+        monkeypatch, records, RuntimeError("Embedding generation failed: 401 Unauthorized")
     )
+    response = client.post("/files/", files={"file": ("notes.txt", b"hello", "text/plain")})
     assert response.status_code == 400
-    assert response.json()["detail"]["diagnostic"]["code"] == "unsupported_archive"
-    assert not records
+    assert response.json()["detail"]["diagnostic"]["code"] == "embedding_provider_unauthorized"
+    assert cleaned
 
 
 def test_document_processing_still_enforces_allowed_extensions(uploads):

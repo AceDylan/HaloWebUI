@@ -111,6 +111,19 @@ describe('file upload errors', () => {
 		expect(message).toContain('unsupported encoding');
 	});
 
+	it('localizes files kept as the original file as a non-blocking note', () => {
+		const localized = getLocalizedFileUploadDiagnostic(
+			{ diagnostic: { code: 'stored_as_raw_attachment', message: 'server text', blocking: false } },
+			(key) => `t:${key}`
+		);
+		expect(localized).toMatchObject({
+			title: 't:Attached as the original file',
+			message: 't:Its content could not be extracted as text, so the file was attached as it is.',
+			hint: 't:Hermes can open the original file; other models see its name, type and size.',
+			blocking: false
+		});
+	});
+
 	it('builds a single warning message for ignored failed files', () => {
 		const message = buildIgnoredFailedFilesMessage(
 			[{ name: 'a.rar' }, { name: 'b.html' }],

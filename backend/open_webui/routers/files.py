@@ -41,7 +41,8 @@ from open_webui.utils.access_control import has_access
 from open_webui.utils.file_upload_diagnostics import (
     build_file_upload_error_detail,
     classify_file_upload_error,
-    is_archive_file,
+    keeps_raw_attachment,
+    make_raw_attachment_diagnostic,
 )
 from pydantic import BaseModel
 
@@ -180,20 +181,6 @@ def upload_file(
         unsanitized_filename = file.filename
         filename = os.path.basename(unsanitized_filename)
 
-        # Raw attachments are stored for agents (e.g. Hermes) to read by path.
-        # Archive rejection belongs to document extraction, not file storage.
-        if process and is_archive_file(filename, file.content_type):
-            diagnostic = classify_file_upload_error(
-                None,
-                filename=filename,
-                content_type=file.content_type,
-                user=user,
-            )
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=build_file_upload_error_detail(diagnostic),
-            )
-
         file_extension = os.path.splitext(filename)[1]
         file_extension = file_extension[1:].lower() if file_extension else ""
         allowed_extensions = getattr(
@@ -281,14 +268,27 @@ def upload_file(
                         }
                     )
             except Exception as e:
-                log.exception(e)
-                log.error(f"Error processing file: {file_item.id}")
                 diagnostic = classify_file_upload_error(
                     e,
                     filename=name,
                     content_type=file.content_type,
                     user=user,
                 )
+                if keeps_raw_attachment(diagnostic, file.content_type):
+                    log.info(
+                        "Keeping %s (%s) as a raw attachment: %s",
+                        file_item.id,
+                        file.content_type,
+                        diagnostic["code"],
+                    )
+                    diagnostic = make_raw_attachment_diagnostic(name)
+                    file_item = (
+                        Files.update_file_metadata_by_id(id, {"raw_attachment": True})
+                        or file_item
+                    )
+                else:
+                    log.exception(e)
+                    log.error(f"Error processing file: {file_item.id}")
                 if diagnostic.get("blocking", True):
                     _cleanup_failed_uploaded_file(id, file_path)
                     raise HTTPException(

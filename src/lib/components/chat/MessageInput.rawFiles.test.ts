@@ -9,7 +9,7 @@ let sources: Record<string, string> = {};
 
 beforeAll(async () => {
 	for (const [component, names] of [
-		['MessageInput', ['uploadFileHandler', 'inputFilesHandler']],
+		['MessageInput', ['uploadFileHandler', 'uploadImageFileHandler', 'inputFilesHandler']],
 		['Chat', ['uploadGoogleDriveFile']]
 	] as const) {
 		const filename = `src/lib/components/chat/${component}.svelte`;
@@ -41,6 +41,14 @@ const composer = (hermes: boolean) => {
 		uploadFile: vi.fn().mockResolvedValue(uploaded),
 		WEBUI_API_BASE_URL: '/api/v1',
 		IMAGE_INPUT_MIME_TYPES: ['image/png', 'image/jpeg'],
+		visionCapableModels: ['vision-model'],
+		isVideoFile: (file: File) => file.type.startsWith('video/'),
+		videoContactSheet: vi.fn(
+			async () => new File(['jpeg'], 'clip · 画面拼图.jpg', { type: 'image/jpeg' })
+		),
+		buildUploadedImageContentUrl: (id: string) => `/api/v1/files/${id}/content`,
+		revokePreviewUrl: () => {},
+		URL: { createObjectURL: () => 'blob:preview', revokeObjectURL: () => {} },
 		isHeicFile: () => false,
 		setUploadFailure: vi.fn(),
 		setLocalUploadFailure: vi.fn(),
@@ -113,6 +121,29 @@ describe('agent attachment uploads', () => {
 			expect(store.setLocalUploadFailure).not.toHaveBeenCalled();
 		}
 	);
+
+	it('adds a video\'s frames as one picture for models that read images', async () => {
+		const store = composer(false);
+		const video = new File(['video'], 'clip.mp4', { type: 'video/mp4' });
+		await store.inputFilesHandler([video]);
+		expect(store.videoContactSheet).toHaveBeenCalledWith(video);
+		expect(store.uploadFile.mock.calls.map((call: any[]) => [call[1].name, call[2].process])).toEqual([
+			['clip.mp4', true],
+			['clip · 画面拼图.jpg', false]
+		]);
+		expect(store.files.map((f: any) => f.type)).toEqual(['file', 'image']);
+	});
+
+	it.each([
+		['Hermes', true, ['vision-model']],
+		['a text-only model', false, []]
+	])('sends only the video to %s', async (_, hermes, vision) => {
+		const store = composer(hermes as boolean);
+		store.visionCapableModels = vision;
+		await store.inputFilesHandler([new File(['video'], 'clip.mp4', { type: 'video/mp4' })]);
+		expect(store.videoContactSheet).not.toHaveBeenCalled();
+		expect(store.uploadFile).toHaveBeenCalledTimes(1);
+	});
 
 	it('still enforces upload permission', async () => {
 		const store = composer(true);

@@ -513,6 +513,9 @@ async def list_discussions(user=Depends(get_verified_user), archived: bool = Fal
             live = LIVE[row["id"]]
             summary["status"] = live.ask.get("status")
             summary["round"] = live.ask.get("round")
+        elif summary.get("status") in room.RUNNING_STATUSES:
+            # marked running with no live task: a restart cut it off (the room settles it on open)
+            summary["status"] = "interrupted"
         out.append(
             {
                 "id": row["id"],

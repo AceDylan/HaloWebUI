@@ -266,7 +266,11 @@ def test_a_question_cut_off_by_a_restart_reads_as_interrupted(env):
     ask = message[room.MESSAGE_KEY]
     ask["status"] = "running"
     ask["turns"][0]["status"] = "streaming"
-    table.upsert_message_to_chat_by_id_and_message_id(chat_id, ask_id, {room.MESSAGE_KEY: ask})
+    api._persist_ask(chat_id, ask, api._setup_of(table.get_chat_by_id(chat_id)))
+    assert table.get_chat_by_id(chat_id).meta[room.META_KEY]["status"] == "running"
+    # the list (and the sidebar count) does not take it for a live one
+    listed = asyncio.run(api.list_discussions(USER))[0]
+    assert listed["status"] == "interrupted" and listed["running"] is False
     again = asyncio.run(api.get_discussion(chat_id, USER))["asks"][0]
     assert again["status"] == "interrupted"
     assert again["turns"][0]["status"] == "stopped"

@@ -43,7 +43,7 @@
 		loadedOnce = true;
 		try {
 			const items = await listDiscussions(localStorage.token);
-			running.set(new Set(items.filter((d) => d.running || isLive(d.status)).map((d) => d.id)));
+			running.set(new Set(items.filter((d) => d.running).map((d) => d.id)));
 		} catch {
 			// no list: the socket still fills it in
 		}

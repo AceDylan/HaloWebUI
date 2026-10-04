@@ -105,6 +105,7 @@ def _create(env, **overrides):
         seats=[api.SeatForm(model=m) for m in overrides.pop("seats", ["a", "b"])],
         rounds=overrides.pop("rounds", 1),
         moderator=overrides.pop("moderator", "c"),
+        context=overrides.pop("context", None),
     )
     return api.create_discussion(env.request, form, USER)
 
@@ -468,3 +469,14 @@ def test_attachments_are_checked_read_and_passed_on(env, monkeypatch):
     message = chats_mod.ChatTable().get_chat_by_id(chat_id).chat["history"]["messages"][ask["userMessageId"]]
     assert [f["type"] for f in message["files"]] == ["image", "file"]
     assert message["files"][0]["url"] == "/api/v1/files/img/content"
+
+
+def test_create_keeps_the_conversation_it_was_started_from(env):
+    async def scenario():
+        detail = await _create(env, context={"text": "用户：去哪玩？", "title": "旅行", "chat_id": "c-1"})
+        await _settle(detail["id"])
+        return detail["id"]
+
+    chat_id = asyncio.run(scenario())
+    ask = asyncio.run(api.get_discussion(chat_id, USER))["asks"][0]
+    assert ask["context"] == {"text": "用户：去哪玩？", "title": "旅行", "chatId": "c-1"}

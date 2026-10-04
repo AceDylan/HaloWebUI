@@ -13,8 +13,10 @@
 		type DiscussMode,
 		type DiscussionSummary
 	} from '$lib/apis/discussions';
-	import { isHermesAgentModel } from '$lib/utils/hermes';
-	import { isDedicatedImageGenerationModel } from '$lib/utils/model-capabilities';
+	import { discussionSeatModels } from '$lib/utils/discussion-seats';
+	import { originLabel, takeHandoff, type HandoffOrigin } from '$lib/utils/handoff';
+	import { WEBUI_API_BASE_URL } from '$lib/constants';
+	import HandoffBack from '$lib/components/common/HandoffBack.svelte';
 	import { uploadFile } from '$lib/apis/files';
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import UploadProgress from '$lib/components/common/UploadProgress.svelte';
@@ -45,6 +47,10 @@
 	let moderator = '';
 	let research = false;
 	let creating = false;
+	// Handed over from a chat (its model menu, its + menu, a reply): the conversation as background
+	// for every seat, and the way back.
+	let background = '';
+	let origin: HandoffOrigin | null = null;
 	// Files for the question: images (for the models that read images) and documents (their text
 	// goes to every seat). Uploaded as soon as they are picked, with a progress ring.
 	type Attachment = { key: string; name: string; image: boolean; preview?: string; progress: number; id?: string; error?: string };
@@ -101,16 +107,8 @@
 	let showDelete = false;
 	let timer: ReturnType<typeof setInterval> | null = null;
 
-	// Text models that can sit at the table: not Hermes (an agent: minutes per turn, writes its
-	// own memory), not image models, not hidden ones.
-	$: choices = (($models ?? []) as any[]).filter(
-		(m) =>
-			m?.id &&
-			!m?.info?.meta?.hidden &&
-			m?.owned_by !== 'arena' &&
-			!isHermesAgentModel(m, $config?.hermes_agent_model_ids) &&
-			!isDedicatedImageGenerationModel(m.id)
-	);
+	// Text models that can sit at the table (the chat's model menu offers the same ones)
+	$: choices = discussionSeatModels(($models ?? []) as any[], $config?.hermes_agent_model_ids);
 	$: spec = modeSpec(mode);
 	$: if (spec.fixedRounds) rounds = spec.rounds;
 	$: seatsValid = seats.length >= MIN_SEATS && seats.length <= MAX_SEATS && seats.every((s) => modelById(choices, s.model));
@@ -126,6 +124,7 @@
 		} catch {
 			saved = null;
 		}
+		const incoming = takeHandoff(typeof sessionStorage === 'undefined' ? null : sessionStorage, 'discuss');
 		const params = new URLSearchParams(window.location.search);
 		const fromUrl = (params.get('models') || '')
 			.split(',')
@@ -140,6 +139,31 @@
 			seats = savedSeats.slice(0, MAX_SEATS).map((s) => ({ model: s.model, role: String(s.role || '') }));
 		} else {
 			seats = choices.slice(0, Math.min(3, choices.length)).map((m) => ({ model: modelRef(m), role: '' }));
+		}
+		// models ticked in the chat take the first seats (two of them: exactly those)
+		const handed = (incoming?.models ?? [])
+			.map((ref) => modelById(choices, ref))
+			.filter((m): m is NonNullable<typeof m> => !!m)
+			.map((m) => modelRef(m));
+		if (handed.length) {
+			const rest = seats.filter((s) => !handed.includes(s.model));
+			seats = [
+				...handed.slice(0, MAX_SEATS).map((model) => ({ model, role: '' })),
+				...(handed.length >= MIN_SEATS ? [] : rest.slice(0, MIN_SEATS - handed.length))
+			];
+		}
+		if (incoming) {
+			if (incoming.text) question = incoming.text;
+			background = incoming.context;
+			origin = incoming.from;
+			attachments = incoming.files.map((f) => ({
+				key: `handoff-${f.id}`,
+				name: f.name,
+				image: f.type === 'image',
+				preview: f.type === 'image' ? `${WEBUI_API_BASE_URL}/files/${f.id}/content` : undefined,
+				progress: 100,
+				id: f.id
+			}));
 		}
 		if (saved?.mode && MODES.some((m) => m.value === saved.mode)) mode = saved.mode;
 		research = saved?.research === true;
@@ -191,7 +215,10 @@
 				rounds,
 				moderator,
 				research,
-				files: attachments.filter((a) => a.id).map((a) => a.id!)
+				files: attachments.filter((a) => a.id).map((a) => a.id!),
+				context: background
+					? { text: background, title: origin?.title ?? '', chat_id: origin?.kind === 'chat' ? origin.id : null }
+					: null
 			});
 			attachments.forEach((a) => a.preview && URL.revokeObjectURL(a.preview));
 			attachments = [];
@@ -286,6 +313,9 @@
 			>
 		</div>
 		<h1 class="halo-crumb px-1">讨论台</h1>
+		{#if origin}
+			<HandoffBack {origin} />
+		{/if}
 	</nav>
 
 	<div class="tm-scroll flex-1 overflow-y-auto px-4 pb-16">
@@ -300,7 +330,7 @@
 					让几个模型把问题讨论透
 				</h2>
 				<p class="max-w-xl text-sm leading-relaxed text-gray-500 dark:text-gray-400">
-					选两到五个模型，按圆桌、辩论、评审或头脑风暴的方式讨论：同一轮里大家同时发言、能看到彼此的观点，最后由主持人给出结论，并把共识和分歧分开列出来。
+					选两到五个模型，按圆桌、各自回答、辩论、评审或头脑风暴的方式讨论：同一轮里大家同时发言，最后由主持人给出结论，并把共识和分歧分开列出来。在对话的模型菜单里勾选多个模型，也会来到这里。
 				</p>
 			</header>
 
@@ -368,6 +398,25 @@
 							</li>
 						{/each}
 					</ul>
+				{/if}
+
+				{#if background}
+					<div class="px-4 pb-2" data-discuss-context>
+						<span class="dc-chip relative max-w-full !pr-6" title={background.slice(0, 600)}>
+							<svg class="size-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+								><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg
+							>
+							<span class="truncate">带上{origin ? originLabel(origin) : '之前的对话'}作背景</span>
+							<span class="tm-num shrink-0 text-gray-400">{background.length} 字</span>
+							<button
+								type="button"
+								class="absolute right-1 top-1/2 grid size-4 -translate-y-1/2 place-items-center rounded-full text-gray-400 hover:bg-gray-500/15 hover:text-gray-700 dark:hover:text-gray-200"
+								aria-label="不带对话背景"
+								on:click={() => (background = '')}
+								data-discuss-context-remove>×</button
+							>
+						</span>
+					</div>
 				{/if}
 
 				<div class="flex flex-col gap-3 border-t border-gray-100 px-4 pt-3 pb-3 dark:border-gray-800/70">

@@ -56,6 +56,7 @@
 	import Switch from '$lib/components/common/Switch.svelte';
 	import ChatBubbleOval from '$lib/components/icons/ChatBubbleOval.svelte';
 	import { goto } from '$app/navigation';
+	import { tickModel } from '$lib/utils/discussion-seats';
 
 	const i18n: Writable<any> = getContext('i18n');
 	const dispatch = createEventDispatcher();
@@ -85,6 +86,13 @@
 	export let showSetDefaultAction = false;
 	/** When set, the menu offers "add a model to compare" (replaces the old dashed + button). */
 	export let onAddModel: (() => void) | null = null;
+	/**
+	 * Picking several models means a discussion (讨论台). Models this accepts get a tick box; the
+	 * current one starts ticked, and ticking a second hands the ticked models to `onDiscuss`.
+	 * Models it refuses (Hermes, image models) show no box.
+	 */
+	export let discussPickable: ((item: any) => boolean) | null = null;
+	export let onDiscuss: ((values: string[]) => void) | null = null;
 
 	export let items: {
 		label: string;
@@ -117,6 +125,23 @@
 	let tagAutoScrollFrame: number | null = null;
 
 	let show = false;
+	let picked: string[] = [];
+	let pickedFor = false;
+	$: if (show !== pickedFor) {
+		pickedFor = show;
+		picked =
+			show && discussPickable && selectedModel && discussPickable(selectedModel)
+				? [selectedModel.value]
+				: [];
+	}
+	const togglePick = (item: (typeof items)[number]) => {
+		const next = tickModel(picked, item.value);
+		picked = next.picked;
+		if (next.discuss) {
+			show = false;
+			onDiscuss?.(next.discuss);
+		}
+	};
 	let tags: string[] = [];
 	let modelSelectorTagOrder: string[] = [];
 
@@ -1033,6 +1058,7 @@
 						on:click={() => {
 							value = item.value;
 							selectedModelIdx = index;
+							picked = [];
 
 							show = false;
 						}}
@@ -1181,6 +1207,27 @@
 								/>
 							</div>
 
+							{#if onDiscuss && discussPickable?.(item)}
+								{@const ticked = picked.includes(item.value)}
+								<!-- svelte-ignore a11y-click-events-have-key-events -->
+								<div
+									role="checkbox"
+									tabindex="-1"
+									aria-checked={ticked}
+									aria-label="勾选 {item.label}，和其他模型一起讨论"
+									title={ticked ? '已勾选：再勾一个模型就去讨论台' : '勾选多个模型，到讨论台一起讨论'}
+									class="ml-0.5 grid size-[18px] place-items-center rounded-md border transition-colors duration-150 {ticked
+										? 'border-blue-500 bg-blue-500 text-white dark:border-blue-400 dark:bg-blue-500'
+										: 'border-gray-300 text-transparent hover:border-blue-400 dark:border-gray-600 dark:hover:border-blue-400'}"
+									data-halo-model-pick={item.value}
+									on:click|stopPropagation={() => togglePick(item)}
+								>
+									<svg viewBox="0 0 16 16" class="size-3" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+										><path d="m3.5 8.5 3 3 6-7" /></svg
+									>
+								</div>
+							{/if}
+
 							{#if $user?.role === 'admin' && item.model?.info}
 								<a
 									href={getAdminEditHref(item)}
@@ -1313,7 +1360,37 @@
 				{/if}
 			</div>
 
-			{#if onAddModel}
+			{#if onDiscuss}
+				<div
+					class="mx-2 {showTemporaryChatControl ? '' : 'mb-2'}"
+					on:pointerenter={() => {
+						selectedModelIdx = -1;
+					}}
+				>
+					<button
+						type="button"
+						class="flex w-full items-center gap-2.5 rounded-lg py-2 px-3 text-left text-sm font-medium text-gray-700 outline-hidden hover:bg-gray-100 dark:text-gray-100 dark:hover:bg-gray-800"
+						data-halo-model-discuss
+						on:click={() => {
+							const values = picked;
+							picked = [];
+							show = false;
+							onDiscuss?.(values);
+						}}
+					>
+						<svg class="size-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+							><path d="M14 9a2 2 0 0 1-2 2H6l-4 4V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2z" /><path d="M18 9h2a2 2 0 0 1 2 2v11l-4-4h-6a2 2 0 0 1-2-2v-1" /></svg
+						>
+						<span class="min-w-0 flex-1">
+							多模型讨论
+							<span class="block text-xs font-normal text-gray-500 dark:text-gray-400">
+								{picked.length === 1 ? '已勾 1 个，再勾一个就去讨论台' : '勾选两个以上模型，到讨论台一起讨论'}
+							</span>
+						</span>
+						<span class="text-gray-400" aria-hidden="true">→</span>
+					</button>
+				</div>
+			{:else if onAddModel}
 				<div
 					class="flex items-center mx-2 {showTemporaryChatControl ? '' : 'mb-2'}"
 					on:pointerenter={() => {

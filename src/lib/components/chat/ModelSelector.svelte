@@ -1,6 +1,8 @@
 <script lang="ts">
-	import { models, modelsError, modelsStatus, user } from '$lib/stores';
+	import { config, models, modelsError, modelsStatus, user } from '$lib/stores';
 	import { getContext } from 'svelte';
+	import { goto } from '$app/navigation';
+	import { canJoinDiscussion } from '$lib/utils/discussion-seats';
 	import type { Writable } from 'svelte/store';
 	import Selector from './ModelSelector/Selector.svelte';
 	import Tooltip from '../common/Tooltip.svelte';
@@ -16,6 +18,20 @@
 	export let maxDiscussionModels = 5;
 
 	export let showSetDefault = true;
+	/**
+	 * Several models = a discussion: ticking a second model in the menu hands the ticked models
+	 * here (the chat carries the draft and the conversation along); without it, 讨论台 opens with
+	 * the models as seats.
+	 */
+	export let onDiscuss: ((models: string[]) => void) | null = null;
+	const startDiscussion = (picked: string[]) =>
+		onDiscuss
+			? onDiscuss(picked)
+			: goto(`/discuss${picked.length ? `?models=${encodeURIComponent(picked.join(','))}` : ''}`);
+	$: discussPickable =
+		canUseMultipleModels && !disabled
+			? (item: { model?: any }) => canJoinDiscussion(item?.model, $config?.hermes_agent_model_ids)
+			: null;
 
 	$: canUseMultipleModels =
 		$user?.role === 'admin' || ($user?.permissions?.chat?.multiple_models ?? true);
@@ -76,7 +92,7 @@
 	{/if}
 
 	{#if selectedModels.length <= 1}
-		<!-- 单模型：「添加模型对比」收在模型下拉菜单里，顶栏不再常驻虚线 + 按钮。 -->
+		<!-- 单模型：菜单里能参加讨论的模型带勾选框，勾第二个就去讨论台（取代「添加模型对比」）。 -->
 		{#each selectedModels as selectedModel, selectedModelIdx}
 			<div class="flex w-fit max-w-full min-w-0 items-center gap-1.5">
 				<div class="min-w-0 max-w-full overflow-hidden">
@@ -88,11 +104,8 @@
 							showSetDefaultAction={showSetDefault && selectedModelIdx === 0}
 							showTemporaryChatControl={temporaryChatAccess.allowed &&
 								!temporaryChatAccess.enforced}
-							onAddModel={canUseMultipleModels && !disabled
-								? () => {
-										selectedModels = [...selectedModels, ''];
-									}
-								: null}
+							{discussPickable}
+							onDiscuss={discussPickable ? startDiscussion : null}
 							bind:value={selectedModel}
 						/>
 					</div>
@@ -156,39 +169,7 @@
 				</div>
 			{/each}
 
-			{#if canUseMultipleModels}
-				<Tooltip content={$i18n.t('Add Model')}>
-					<button
-						class="inline-flex items-center justify-center
-							size-7 shrink-0 rounded-xl
-							text-gray-400 dark:text-gray-500
-							bg-white dark:bg-gray-900/70
-							border border-dashed border-gray-300 dark:border-gray-600
-							hover:bg-gray-100/80 dark:hover:bg-gray-800/60
-							hover:border-gray-400 dark:hover:border-gray-500
-							hover:text-gray-600 dark:hover:text-gray-300
-							active:scale-[0.92]
-							transition-all duration-150
-							disabled:opacity-40 disabled:pointer-events-none"
-						{disabled}
-						on:click={() => {
-							selectedModels = [...selectedModels, ''];
-						}}
-						aria-label={$i18n.t('Add Model')}
-					>
-						<svg
-							xmlns="http://www.w3.org/2000/svg"
-							fill="none"
-							viewBox="0 0 24 24"
-							stroke-width="2"
-							stroke="currentColor"
-							class="size-3"
-						>
-							<path stroke-linecap="round" stroke-linejoin="round" d="M12 6v12m6-6H6" />
-						</svg>
-					</button>
-				</Tooltip>
-			{/if}
+			<!-- 不再往旧的并排对话里加模型：多个模型一起答问题去讨论台（下面的链接）。 -->
 		</div>
 	{/if}
 
@@ -198,6 +179,11 @@
 			class="mt-1.5 inline-flex max-w-full items-center gap-1 rounded-full bg-white/85 px-2 py-0.5 text-xs text-gray-500 backdrop-blur-sm transition hover:bg-gray-100 hover:text-gray-900 dark:bg-gray-900/70 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-100"
 			title={discussionIssue || '让这几个模型在讨论台里讨论，主持人给出结论'}
 			data-open-discuss
+			on:click={(event) => {
+				if (!onDiscuss || event.metaKey || event.ctrlKey || event.shiftKey) return;
+				event.preventDefault();
+				startDiscussion(selectedModels.filter((model) => `${model ?? ''}`.trim()));
+			}}
 		>
 			<svg class="size-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
 				><path d="M14 9a2 2 0 0 1-2 2H6l-4 4V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2z" /><path d="M18 9h2a2 2 0 0 1 2 2v11l-4-4h-6a2 2 0 0 1-2-2v-1" /></svg

@@ -367,6 +367,20 @@
 									{/each}
 								</div>
 							{/if}
+							{#if ask.context?.text}
+								<details class="dc-context text-xs text-gray-500 dark:text-gray-400" data-discuss-context>
+									<summary class="inline-flex cursor-pointer items-center gap-1 rounded-full hover:text-gray-800 dark:hover:text-gray-200">
+										<svg class="size-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+											><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg
+										>
+										背景：{ask.context.title ? `对话「${ask.context.title}」` : '之前的对话'}
+									</summary>
+									<div class="mt-1.5 max-h-48 overflow-y-auto whitespace-pre-wrap rounded-xl bg-gray-500/5 px-3 py-2 leading-relaxed">{ask.context.text}</div>
+									{#if ask.context.chatId}
+										<a href="/c/{ask.context.chatId}" class="mt-1 inline-block hover:underline" data-discuss-context-link>回到那个对话 →</a>
+									{/if}
+								</details>
+							{/if}
 							<div class="flex flex-wrap gap-1.5">
 								{#each ask.seats as seat, si (seat.id)}
 									{@const speaking = ask.turns.find((t) => t.seat === seat.id && t.status === 'streaming')}

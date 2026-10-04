@@ -131,7 +131,8 @@ describe('DiscussHome', () => {
 			rounds: 3,
 			moderator: 'm-gpt', // a strong writer by default
 			research: true,
-			files: []
+			files: [],
+			context: null
 		});
 		expect(nav.goto).toHaveBeenCalledWith('/discuss/new1');
 		expect(JSON.parse(localStorage.getItem('halo.discuss.last')!)).toMatchObject({ mode: 'debate', research: true });
@@ -179,5 +180,53 @@ describe('DiscussHome', () => {
 		const plus = [...target.querySelectorAll('[data-discuss-rounds] button')].pop() as any;
 		expect(plus.disabled).toBe(true);
 		expect(target.querySelector('[data-discuss-rounds]')!.textContent).toContain('2');
+	});
+	it('takes what a chat handed over: ticked models, the draft, files, the conversation, a way back', async () => {
+		sessionStorage.setItem(
+			'halo.handoff',
+			JSON.stringify({
+				to: 'discuss',
+				text: '预算 3000 去哪？',
+				models: ['m-ds', 'm-claude'],
+				files: [{ id: 'f-1', name: 'plan.txt', type: 'file' }],
+				context: '用户：想周末出去玩\n\n助手：可以去杭州',
+				from: { kind: 'chat', id: 'chat-9', title: '周末出游' },
+				at: Date.now()
+			})
+		);
+		api.createDiscussion.mockResolvedValue({ id: 'new1' });
+		const target = await mount();
+		await until(() => target.querySelectorAll('[data-discuss-seat]').length > 0);
+		const seatText = () => [...target.querySelectorAll('[data-discuss-seat]')].map((el: any) => el.textContent.replace(/\s+/g, ' ').trim());
+		expect(seatText()).toEqual(['deepseek-chat', 'claude-chat']);
+		expect((target.querySelector('#discuss-question') as any).value).toBe('预算 3000 去哪？');
+		expect(target.querySelector('[data-discuss-attachments]')!.textContent).toContain('plan.txt');
+		expect(target.querySelector('[data-discuss-context]')!.textContent).toContain('带上对话「周末出游」作背景');
+		const back = target.querySelector('[data-handoff-back]') as any;
+		expect(back.getAttribute('href')).toBe('/c/chat-9');
+		expect(back.textContent).toContain('返回对话「周末出游」');
+		expect(sessionStorage.getItem('halo.handoff')).toBeNull();
+
+		target.querySelector('[data-discuss-composer]')!.dispatchEvent(new (globalThis as any).Event('submit', { cancelable: true }));
+		await until(() => api.createDiscussion.mock.calls.length > 0);
+		const form = api.createDiscussion.mock.calls[0][1];
+		expect(form.seats.map((s: any) => s.model)).toEqual(['m-ds', 'm-claude']);
+		expect(form.files).toEqual(['f-1']);
+		expect(form.context).toEqual({ text: '用户：想周末出去玩\n\n助手：可以去杭州', title: '周末出游', chat_id: 'chat-9' });
+	});
+
+	it('one ticked model gets a second seat; the background can be left out', async () => {
+		sessionStorage.setItem(
+			'halo.handoff',
+			JSON.stringify({ to: 'discuss', text: '', models: ['m-claude'], files: [], context: '用户：你好', from: null, at: Date.now() })
+		);
+		const target = await mount();
+		await until(() => target.querySelectorAll('[data-discuss-seat]').length > 0);
+		const seats = [...target.querySelectorAll('[data-discuss-seat]')].map((el: any) => el.textContent.trim());
+		expect(seats).toEqual(['claude-chat', 'gpt-chat']);
+		expect(target.querySelector('[data-handoff-back]')).toBeFalsy();
+		(target.querySelector('[data-discuss-context-remove]') as any).click();
+		await sleep(20);
+		expect(target.querySelector('[data-discuss-context]')).toBeFalsy();
 	});
 });

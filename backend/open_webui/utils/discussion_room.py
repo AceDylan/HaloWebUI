@@ -80,6 +80,13 @@ MODES: dict[str, dict] = {
         "summary": "Everyone answers independently, then reviews the other answers anonymously "
         "(labelled A, B, C...) with strengths, errors and a 1-10 score.",
     },
+    "compare": {
+        "label": "各自回答",
+        "rounds": 1,
+        "roles": [],
+        "summary": "Each participant answers once, independently, without seeing the others; the moderator "
+        "then compares the answers and merges the best of them.",
+    },
     "brainstorm": {
         "label": "头脑风暴",
         "rounds": 2,
@@ -225,6 +232,8 @@ def normalize_setup(
 
     if mode == "review":
         rounds = 2
+    elif mode == "compare":
+        rounds = 1
     else:
         try:
             rounds = int(raw.get("rounds") or spec["rounds"])
@@ -264,6 +273,34 @@ def _history_block(history: list[dict]) -> str:
     if not parts:
         return ""
     return "Earlier in this discussion (for context; the new question is what matters now):\n\n" + "\n\n---\n\n".join(parts)
+
+
+CONTEXT_MAX_CHARS = 12000
+
+
+def clean_context(raw: Any) -> Optional[dict]:
+    """Background handed over with a new discussion: the conversation it was started from."""
+    if not isinstance(raw, dict):
+        return None
+    text = _clean_text(raw.get("text"), CONTEXT_MAX_CHARS)
+    if not text:
+        return None
+    chat_id = str(raw.get("chat_id") or raw.get("chatId") or "").strip()
+    return {
+        "text": text,
+        "title": _clean_text(raw.get("title"), 120),
+        "chatId": chat_id if re.fullmatch(r"[A-Za-z0-9-]{1,64}", chat_id) else None,
+    }
+
+
+def _context_block(ask: dict) -> str:
+    context = ask.get("context") or {}
+    text = (context.get("text") or "").strip()
+    if not text:
+        return ""
+    title = context.get("title") or ""
+    head = f"Background: the user's earlier conversation{f' «{title}»' if title else ''}, which led to this question. Use it to understand what they need; answer the question itself."
+    return f"{head}\n\n{text}"
 
 
 def research_sources(ask: dict) -> list[dict]:
@@ -414,6 +451,8 @@ def build_turn_messages(
                 "Review the other answers below (anonymized as A, B, C...). For each: what is right, what is wrong or missing, "
                 "and a score from 1 to 10. Then say which answer is best and what you would now change in your own."
             )
+    elif mode == "compare" and round_index == 1:
+        task = "Give your own complete, independent answer to the question. The others answer separately; you will not see them."
     elif mode == "brainstorm":
         if round_index == 1:
             task = "Generate 5-8 distinct ideas. One line each, with a short reason it could work."
@@ -435,6 +474,7 @@ def build_turn_messages(
     gets_images = bool(images) and sees and round_index == 1
     user_parts = [
         _history_block(history),
+        _context_block(ask),
         f"User question:\n{question}",
         _files_block(ask, sees_images=sees, gets_images=gets_images),
         _research_block(ask),
@@ -470,6 +510,7 @@ def build_conclusion_messages(
         "debate": "your verdict: which side made the stronger case on each point, and the balanced answer to the question",
         "review": "the best possible merged answer (take the strongest parts of each), plus each answer's score as the reviewers gave it",
         "brainstorm": "the most promising ideas ranked, merged where they overlap, each with why and a first step",
+        "compare": "the best answer, merging the strongest parts of each; then say plainly how the answers differ and which is more accurate or complete",
     }[mode]
     lang_rule = "Write in Simplified Chinese." if lang == "zh" else "Write in the language of the user's question."
     system = (
@@ -494,6 +535,7 @@ def build_conclusion_messages(
     parts = [
         _history_block(history),
         f"Discussion format: {MODES[mode]['label']}. Participants: {participants}.",
+        _context_block(ask),
         f"User question:\n{ask.get('question') or ''}",
         _files_block(ask, sees_images=moderator_sees, gets_images=gets_images),
         _research_block(ask),
@@ -675,6 +717,7 @@ def new_ask(
     message_id: str,
     rounds: Optional[int] = None,
     files: Optional[list[dict]] = None,
+    context: Optional[dict] = None,
 ) -> dict:
     total_rounds = setup["rounds"] if rounds is None else max(1, min(int(rounds), MAX_ROUNDS))
     if setup["mode"] == "review":
@@ -697,6 +740,7 @@ def new_ask(
         "previousConclusions": [],
         "research": {"status": "waiting", "queries": [], "sources": []} if setup.get("research") else None,
         "files": files or [],
+        "context": context,
         "startedAt": now_ms(),
         "endedAt": None,
         "usage": {},

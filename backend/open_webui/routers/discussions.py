@@ -47,6 +47,8 @@ class CreateForm(BaseModel):
     moderator: Optional[str] = None
     research: bool = False
     files: list[str] = []
+    # the conversation a discussion was started from (text, title, chat_id): background for every seat
+    context: Optional[dict] = None
 
 
 class AskForm(BaseModel):
@@ -557,7 +559,12 @@ async def create_discussion(request: Request, form: CreateForm, user=Depends(get
     files = _load_files(form.files, user)
     user_message_id, assistant_message_id = room.new_id(), room.new_id()
     ask = room.new_ask(
-        question=question, setup=setup, user_message_id=user_message_id, message_id=assistant_message_id, files=files
+        question=question,
+        setup=setup,
+        user_message_id=user_message_id,
+        message_id=assistant_message_id,
+        files=files,
+        context=room.clean_context(form.context),
     )
     messages = {
         user_message_id: _user_message(user_message_id, question, None, assistant_message_id, ask["moderator"]["model"], files),

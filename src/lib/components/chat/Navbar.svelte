@@ -44,6 +44,8 @@
 	export let multiModelDiscussionEnabled = false;
 	export let maxDiscussionModels = 5;
 	export let showModelSelector = true;
+	/** Ticking several models in the menu: the chat hands its draft and conversation to 讨论台. */
+	export let onDiscuss: ((models: string[]) => void) | null = null;
 
 	let showShareChatModal = false;
 	let showDownloadChatModal = false;
@@ -86,6 +88,7 @@
 							bind:selectedModels
 							bind:multiModelDiscussionEnabled
 							{maxDiscussionModels}
+							{onDiscuss}
 							showSetDefault={!shareEnabled}
 						/>
 					{/if}

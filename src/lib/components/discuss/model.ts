@@ -34,6 +34,15 @@ export const MODES: ModeSpec[] = [
 		roundName: (r) => (r === 1 ? '各自作答' : '互相回应')
 	},
 	{
+		value: 'compare',
+		label: '各自回答',
+		hint: '各答各的、互不可见，主持人对比并合并最好的',
+		rounds: 1,
+		fixedRounds: true,
+		roles: [],
+		roundName: (r) => (r === 1 ? '各自作答' : '互相回应')
+	},
+	{
 		value: 'debate',
 		label: '正反辩论',
 		hint: '分正反方交锋，主持人裁决',

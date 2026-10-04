@@ -2,7 +2,7 @@ import { WEBUI_API_BASE_URL } from '$lib/constants';
 
 /** 讨论台 (multi-model discussion room) API — see backend/open_webui/routers/discussions.py. */
 
-export type DiscussMode = 'roundtable' | 'debate' | 'review' | 'brainstorm';
+export type DiscussMode = 'roundtable' | 'compare' | 'debate' | 'review' | 'brainstorm';
 
 export type DiscussSeat = {
 	id: string;
@@ -27,6 +27,8 @@ export type DiscussSetup = {
 
 /** A file attached to a question (images go to the models that read images, documents to all). */
 export type DiscussFile = { id: string; name: string; type: 'image' | 'file'; content_type?: string; size?: number };
+
+export type DiscussContext = { text: string; title: string; chatId: string | null };
 
 export type ResearchSource = { n: number; title: string; url: string; excerpt: string };
 
@@ -93,6 +95,8 @@ export type DiscussAsk = {
 	previousConclusions: { content: string; endedAt?: number | null }[];
 	research?: DiscussResearch | null;
 	files?: DiscussFile[];
+	/** The conversation the discussion was started from, given to every seat as background. */
+	context?: DiscussContext | null;
 	startedAt: number;
 	endedAt?: number | null;
 	usage: DiscussUsage;
@@ -178,6 +182,7 @@ export const createDiscussion = (
 		moderator: string;
 		research?: boolean;
 		files?: string[];
+		context?: { text: string; title?: string; chat_id?: string | null } | null;
 	}
 ) => request<Discussion>(token, 'POST', '/', form);
 

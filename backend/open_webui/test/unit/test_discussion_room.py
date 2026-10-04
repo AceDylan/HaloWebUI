@@ -527,3 +527,34 @@ def test_a_seat_that_rejects_images_speaks_again_without_them():
     assert isinstance(b_calls[0][1]["content"], list) and isinstance(b_calls[1][1]["content"], str)
     assert "cannot see" in b_calls[1][1]["content"]
     assert live.ask["status"] == "done"
+
+
+def test_compare_is_one_independent_round_and_the_moderator_compares():
+    setup = _setup(mode="compare", rounds=3)
+    assert setup["rounds"] == 1
+    ask = room.new_ask(question="Q", setup=setup, user_message_id="u", message_id="m")
+    assert ask["rounds"] == 1
+    turn = room.build_turn_messages(setup=setup, ask=ask, seat=setup["seats"][0], round_index=1, history=[])
+    assert "will not see them" in turn[1]["content"]
+    conclusion = room.build_conclusion_messages(setup=setup, ask=ask, history=[])
+    assert "how the answers differ" in conclusion[0]["content"]
+
+
+def test_a_discussion_started_from_a_chat_carries_it_as_background():
+    assert room.clean_context(None) is None
+    assert room.clean_context({"text": "   "}) is None
+    context = room.clean_context({"text": "用户：去哪玩？\n助手：杭州", "title": "旅行", "chat_id": "../etc"})
+    assert context == {"text": "用户：去哪玩？\n助手：杭州", "title": "旅行", "chatId": None}
+    assert room.clean_context({"text": "x" * 20000, "chat_id": "c-1"})["chatId"] == "c-1"
+    assert len(room.clean_context({"text": "x" * 20000})["text"]) == room.CONTEXT_MAX_CHARS
+
+    setup = _setup()
+    ask = room.new_ask(question="预算够吗？", setup=setup, user_message_id="u", message_id="m", context=context)
+    turn = room.build_turn_messages(setup=setup, ask=ask, seat=setup["seats"][0], round_index=1, history=[])[1]["content"]
+    assert "earlier conversation «旅行»" in turn and "助手：杭州" in turn
+    assert turn.index("Background") < turn.index("User question")
+    conclusion = room.build_conclusion_messages(setup=setup, ask=ask, history=[])[1]["content"]
+    assert "助手：杭州" in conclusion
+    # without one, nothing is added
+    plain = room.new_ask(question="预算够吗？", setup=setup, user_message_id="u", message_id="m")
+    assert "Background" not in room.build_turn_messages(setup=setup, ask=plain, seat=setup["seats"][0], round_index=1, history=[])[1]["content"]

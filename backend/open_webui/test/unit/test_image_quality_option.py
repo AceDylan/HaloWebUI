@@ -100,3 +100,43 @@ def test_a_rejected_default_background_is_dropped_and_sent_once_more():
     # Other failures and successes are left alone.
     assert run({"prompt": "p", "background": "opaque"}, [500])[0] == 500
     assert len(run({"prompt": "p", "background": "opaque"}, [200])[1]) == 1
+
+
+def test_a_refused_default_background_is_not_sent_again_for_a_while(monkeypatch):
+    import asyncio
+
+    from open_webui.routers import images
+
+    clock = [1000.0]
+    monkeypatch.setattr(images.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(images, "_background_refused_until", {})
+    sent = []
+
+    def run(payload, statuses, route="https://relay/v1/images/generations"):
+        start = len(sent)
+
+        async def send(body):
+            sent.append(dict(body))
+            return {"status": statuses[len(sent) - start - 1]}, {}
+
+        result, _ = asyncio.run(images._send_dropping_default_background(send, payload, route=route))
+        return result["status"], sent[start:]
+
+    opaque = {"model": "gpt-image", "prompt": "p", "background": "opaque"}
+    # The first image finds out (400, then 200 without the field) ...
+    assert run(opaque, [400, 200]) == (200, [opaque, {"model": "gpt-image", "prompt": "p"}])
+    # ... the next ones go out without it straight away, no failed request first.
+    assert run(opaque, [200]) == (200, [{"model": "gpt-image", "prompt": "p"}])
+    # Another endpoint (edits) or model is asked as before; an explicit transparent is always sent.
+    assert run(opaque, [200], route="https://relay/v1/images/edits")[1] == [opaque]
+    assert run({**opaque, "model": "gpt-image-2"}, [200])[1][0]["background"] == "opaque"
+    transparent = {**opaque, "background": "transparent"}
+    assert run(transparent, [200])[1] == [transparent]
+    # After a few hours the field is tried again (the relay may route to a model that takes it).
+    clock[0] += images.BACKGROUND_REFUSAL_TTL_SECONDS + 1
+    assert run(opaque, [200])[1] == [opaque]
+
+    # A retry that fails too says nothing about the field: nothing is remembered.
+    monkeypatch.setattr(images, "_background_refused_until", {})
+    assert run(opaque, [400, 400])[0] == 400
+    assert run(opaque, [200])[1] == [opaque]

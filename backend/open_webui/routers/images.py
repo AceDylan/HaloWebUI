@@ -192,17 +192,37 @@ def _normalize_openai_image_background(value: Any) -> str:
     return "transparent" if str(value or "").strip().lower() == "transparent" else "opaque"
 
 
-async def _send_dropping_default_background(send, payload: dict[str, Any]):
+# How long an endpoint + model that refused the default background is sent none.
+BACKGROUND_REFUSAL_TTL_SECONDS = 6 * 3600
+_background_refused_until: dict[str, float] = {}
+
+
+async def _send_dropping_default_background(send, payload: dict[str, Any], *, route: str = ""):
     """Sends ``payload``; if the upstream rejects it with 400 while it carries the
     default ``background: opaque`` (our choice, not the person's), sends it once
     more without the field. Relays route the bare ``gpt-image`` to models that
     reject the parameter outright ("background is only supported for GPT image
-    models"), and the relay may rewrite that reason into a generic 400."""
+    models"), and the relay may rewrite that reason into a generic 400.
+
+    When that retry goes through, the refusal is remembered for ``route`` (the
+    endpoint URL) and the model for a few hours: the following images go out
+    without the field instead of each failing once first (the relay's log showed
+    every image as a 400 followed by a 200). Afterwards the field is tried again,
+    since the relay sends the alias back to models that take it once its
+    preferred channel recovers."""
+    without = {key: value for key, value in payload.items() if key != "background"}
+    default = payload.get("background") == "opaque"
+    key = f"{route}|{payload.get('model') or ''}"
+    if default and route and _background_refused_until.get(key, 0.0) > time.monotonic():
+        return await send(without)
     result, headers = await send(payload)
-    if result.get("status") == 400 and payload.get("background") == "opaque":
+    if result.get("status") == 400 and default:
         log.info("openai_image_retry_without_background status=400")
-        retry_payload = {key: value for key, value in payload.items() if key != "background"}
-        result, headers = await send(retry_payload)
+        result, headers = await send(without)
+        status = result.get("status")
+        if route and isinstance(status, int) and status < 400:
+            _background_refused_until[key] = time.monotonic() + BACKGROUND_REFUSAL_TTL_SECONDS
+            log.info("openai_image_background_refusal_remembered model=%s", payload.get("model"))
     return result, headers
 
 
@@ -6269,6 +6289,7 @@ async def _generate_via_openai_image_edits_endpoint(
             files=image_files,
         ),
         payload,
+        route=generation_url,
     )
 
     response_status = result.get("status")
@@ -6399,6 +6420,7 @@ async def _generate_via_openai_images_endpoint(
             json_body=body,
         ),
         payload,
+        route=generation_url,
     )
 
     response_status = result.get("status")

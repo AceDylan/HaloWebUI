@@ -3586,7 +3586,9 @@
 
 			// Upload file to server
 			console.log('Uploading file to server...');
-			const uploadedFile = await uploadFile(localStorage.token, file);
+			const uploadedFile = await uploadFile(localStorage.token, file, {
+				process: !showHermesOptions
+			});
 
 			if (!uploadedFile) {
 				throw new Error('Server returned null response for file upload');

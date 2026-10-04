@@ -831,9 +831,11 @@
 		files = [...files, fileItem];
 
 		try {
-			// During the file upload, file content is automatically extracted.
+			// Hermes reads the original file by host path, including archives and
+			// binary media that the document extractor cannot process.
 			const uploadedFile = await uploadFile(localStorage.token, file, {
-				processingMode: fullContext ? 'full_context' : undefined,
+				process: !showHermesOptions,
+				processingMode: !showHermesOptions && fullContext ? 'full_context' : undefined,
 				onProgress: ({ percent }) => setUploadProgress(fileItem, percent)
 			});
 

@@ -180,7 +180,9 @@ def upload_file(
         unsanitized_filename = file.filename
         filename = os.path.basename(unsanitized_filename)
 
-        if is_archive_file(filename, file.content_type):
+        # Raw attachments are stored for agents (e.g. Hermes) to read by path.
+        # Archive rejection belongs to document extraction, not file storage.
+        if process and is_archive_file(filename, file.content_type):
             diagnostic = classify_file_upload_error(
                 None,
                 filename=filename,

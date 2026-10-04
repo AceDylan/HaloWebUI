@@ -216,3 +216,128 @@ def test_cleanup_failed_uploaded_file_removes_collection_record_and_storage(monk
     assert ("collection", "file-file-123") in events
     assert ("record", "file-123") in events
     assert ("storage", "/tmp/file-123_demo.txt") in events
+
+
+# Raw agent attachments must survive upload and be readable by host path.
+from types import SimpleNamespace
+
+import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
+from open_webui.models.files import FileModel
+from open_webui.routers import files
+from open_webui.utils.auth import get_verified_user
+from open_webui.utils import hermes_agent
+
+
+@pytest.fixture
+def uploads(monkeypatch, tmp_path):
+    app = FastAPI()
+    app.state.config = SimpleNamespace(
+        ALLOWED_FILE_EXTENSIONS=["txt"], FILE_PROCESSING_DEFAULT_MODE="retrieval"
+    )
+    owner = SimpleNamespace(id="upload-owner", role="user")
+    app.dependency_overrides[get_verified_user] = lambda: owner
+    app.include_router(files.router, prefix="/files")
+    records = {}
+
+    def store(stream, filename):
+        path = tmp_path / "uploads" / filename
+        path.parent.mkdir(exist_ok=True)
+        data = stream.read()
+        path.write_bytes(data)
+        return len(data), str(path)
+
+    def insert(user_id, form):
+        record = FileModel(
+            **form.model_dump(), user_id=user_id, created_at=1, updated_at=1
+        )
+        records[record.id] = record
+        return record
+
+    monkeypatch.setattr(files.Storage, "upload_file", store)
+    monkeypatch.setattr(files.Storage, "get_file", lambda path: path)
+    monkeypatch.setattr(files.Files, "insert_new_file", insert)
+    monkeypatch.setattr(files.Files, "get_file_by_id", records.get)
+
+    def unexpected_processing(*args, **kwargs):
+        pytest.fail("Raw attachments must not invoke document parsing or transcription")
+
+    monkeypatch.setattr(files, "process_file", unexpected_processing)
+    monkeypatch.setattr(files, "transcribe", unexpected_processing)
+    monkeypatch.setattr(hermes_agent, "DATA_DIR", tmp_path)
+    monkeypatch.setenv("HERMES_AGENT_HOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(hermes_agent, "_HOST_DATA_DIR_CACHE", {})
+    with TestClient(app) as client:
+        yield client, records, owner
+
+
+@pytest.mark.parametrize(
+    "filename,content_type",
+    [
+        ("资料.ZIP", "application/zip"),
+        ("bundle.rar", "application/vnd.rar"),
+        ("bundle.7z", "application/x-7z-compressed"),
+        ("bundle.tar.gz", "application/gzip"),
+        ("clip.mp4", "video/mp4"),
+        ("voice.mp3", "audio/mpeg"),
+        ("report.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
+        ("report.pdf", "application/pdf"),
+        ("data.custom", "application/octet-stream"),
+        ("Dockerfile", "application/octet-stream"),
+    ],
+)
+def test_raw_upload_preserves_bytes_and_reaches_hermes(uploads, filename, content_type):
+    client, records, owner = uploads
+    data = b"\x00\xffagent attachment\x01"
+    response = client.post(
+        "/files/?process=false", files={"file": (filename, data, content_type)}
+    )
+    assert response.status_code == 200
+    uploaded = response.json()
+    assert uploaded["filename"] == filename
+    assert uploaded["meta"]["size"] == len(data)
+    assert uploaded["meta"]["content_type"] == content_type
+    assert not uploaded.get("error")
+    assert not records[uploaded["id"]].data
+    content = client.get(f'/files/{uploaded["id"]}/content')
+    assert content.status_code == 200
+    assert content.content == data
+
+    payload = hermes_agent._build_run_payload(
+        {"messages": [{"role": "user", "content": "读取附件"}]},
+        {"files": [{"type": "file", "id": uploaded["id"], "file": uploaded}]},
+        "hermes-agent",
+        owner,
+    )
+    assert f'- {filename}: {records[uploaded["id"]].path}' in payload["input"]
+
+
+def test_document_processing_still_rejects_archives(uploads):
+    client, records, _ = uploads
+    response = client.post(
+        "/files/", files={"file": ("bundle.zip", b"PK", "application/zip")}
+    )
+    assert response.status_code == 400
+    assert response.json()["detail"]["diagnostic"]["code"] == "unsupported_archive"
+    assert not records
+
+
+def test_document_processing_still_enforces_allowed_extensions(uploads):
+    client, records, _ = uploads
+    response = client.post(
+        "/files/?process=true", files={"file": ("clip.mp4", b"video", "video/mp4")}
+    )
+    assert response.status_code == 400
+    assert not records
+
+
+def test_raw_upload_requires_authentication(uploads):
+    client, records, _ = uploads
+    client.app.dependency_overrides.clear()
+    response = client.post(
+        "/files/?process=false", files={"file": ("bundle.zip", b"PK", "application/zip")}
+    )
+    assert response.status_code in (401, 403)
+    assert not records

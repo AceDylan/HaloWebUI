@@ -25,8 +25,12 @@
 		tools,
 		user as _user,
 		showControls,
-		TTSWorker
+		TTSWorker,
+		chatId,
+		chatTitle
 	} from '$lib/stores';
+	import { goto } from '$app/navigation';
+	import { chatHandoff, handOff, HANDOFF_PATH } from '$lib/utils/handoff';
 
 	import {
 		compressImage,
@@ -167,6 +171,16 @@
 	export let files: any[] = [];
 	export let imageGenerationReferenceFiles: any[] = [];
 	export let onCancelImageGenerationReference: (() => void) | null = null;
+
+	// 「交给…」 in the + menu: the draft, its attachments and (in a chat with messages) the
+	// conversation go to 讨论台 / 协作台 / the image studio, which show a way back here.
+	const handOffDraft = (to: 'discuss' | 'teams' | 'studio') => {
+		handOff(
+			typeof sessionStorage === 'undefined' ? null : sessionStorage,
+			chatHandoff(to, { text: prompt, files, history, chatId: $chatId, title: $chatTitle })
+		);
+		goto(HANDOFF_PATH[to]);
+	};
 	// See ImageGenerationPanel's rememberedConfig.
 	export let rememberedImageConfig: ImageTemplateConfig | null = null;
 
@@ -1797,6 +1811,7 @@
 													console.error('OneDrive Error:', error);
 												}
 											}}
+											onHandoff={handOffDraft}
 											onClose={async () => {
 												await tick();
 
@@ -1808,6 +1823,7 @@
 												class="bg-transparent hover:bg-gray-100 text-gray-800 dark:text-white dark:hover:bg-gray-800 transition rounded-full p-1.5 max-sm:p-2 outline-hidden focus:outline-hidden"
 												type="button"
 												aria-label={$i18n.t('More')}
+												data-halo-input-menu
 											>
 												<svg
 													xmlns="http://www.w3.org/2000/svg"

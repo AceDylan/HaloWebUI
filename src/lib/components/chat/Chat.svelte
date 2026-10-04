@@ -179,7 +179,7 @@
 	import { TAB_ACTIVITY_TITLE_PREFIX, tabActivity } from '$lib/utils/tab-activity';
 	import { MODELS_ERROR_TOAST_ID, describeModelsError, ensureModels } from '$lib/services/models';
 	import { takeLandingPrompt } from '$lib/utils/chat-landing';
-	import { conversationContext, handOff } from '$lib/utils/handoff';
+	import { chatHandoff, handOff, HANDOFF_PATH } from '$lib/utils/handoff';
 
 	import Banner from '../common/Banner.svelte';
 	import MessageInput from '$lib/components/chat/MessageInput.svelte';
@@ -1178,21 +1178,11 @@
 	// seats, the draft as its question, the attachments, and — in a chat that has messages — this
 	// conversation as background, with a way back here. The chat itself is left as it was.
 	const handOffToDiscussion = (seatModels: string[]) => {
-		const hasMessages = !!history?.currentId;
-		handOff(typeof sessionStorage === 'undefined' ? null : sessionStorage, {
-			to: 'discuss',
-			text: prompt,
-			models: seatModels,
-			files: (files ?? [])
-				.filter((f) => f?.status === 'uploaded' && f?.id)
-				.map((f) => ({ id: f.id, name: f.name ?? '', type: f.type === 'image' ? 'image' : 'file' })),
-			context: hasMessages ? conversationContext(history) : '',
-			from:
-				hasMessages && $chatId && $chatId !== 'local'
-					? { kind: 'chat', id: $chatId, title: $chatTitle ?? '' }
-					: null
-		});
-		goto('/discuss');
+		handOff(
+			typeof sessionStorage === 'undefined' ? null : sessionStorage,
+			chatHandoff('discuss', { text: prompt, files, history, chatId: $chatId, title: $chatTitle, models: seatModels })
+		);
+		goto(HANDOFF_PATH.discuss);
 	};
 	let params = {};
 	// The frame and quality a new chat's image generation starts with (the last ones sent).

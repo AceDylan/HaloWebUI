@@ -18,6 +18,7 @@
 		settings,
 		TTSWorker,
 		activeAudioId,
+		chatTitle,
 		user
 	} from '$lib/stores';
 	import {
@@ -88,8 +89,11 @@
 		Lightbulb,
 		Globe,
 		ArrowRight,
-		CircleAlert
+		CircleAlert,
+		MessagesSquare,
+		Users
 	} from 'lucide-svelte';
+	import { handOff, HANDOFF_PATH, replyHandoff } from '$lib/utils/handoff';
 	import { DropdownMenu } from 'bits-ui';
 	import { flyAndScale } from '$lib/utils/transitions';
 	import Dropdown from '$lib/components/common/Dropdown.svelte';
@@ -893,6 +897,17 @@
 	// "More" menu toggles this inline row instead.
 	let showStats = false;
 	let showMoreMenu = false;
+
+	// This reply to 讨论台 / 协作台: its question again, with the conversation up to here as
+	// background and a way back to this chat.
+	const handOffReply = (to: 'discuss' | 'teams') => {
+		showMoreMenu = false;
+		handOff(
+			typeof sessionStorage === 'undefined' ? null : sessionStorage,
+			replyHandoff(to, { history, messageId: message.id, chatId, title: $chatTitle })
+		);
+		goto(HANDOFF_PATH[to]);
+	};
 
 	const toggleStats = async () => {
 		showStats = !showStats;
@@ -2359,6 +2374,28 @@
 															<span>{action.name}</span>
 														</DropdownMenu.Item>
 													{/each}
+												{/if}
+
+												{#if message.done !== false && history?.messages?.[message.parentId]}
+													<hr class="border-black/5 dark:border-white/5 my-0.5" />
+													<DropdownMenu.Item
+														class={menuItemClass}
+														data-halo-reply-handoff="discuss"
+														on:click={() => handOffReply('discuss')}
+													>
+														<MessagesSquare class="w-4 h-4 shrink-0" strokeWidth={1.75} />
+														<span>{tr('让几个模型讨论', 'Discuss with several models')}</span>
+													</DropdownMenu.Item>
+													{#if $config?.features?.enable_agent_teams}
+														<DropdownMenu.Item
+															class={menuItemClass}
+															data-halo-reply-handoff="teams"
+															on:click={() => handOffReply('teams')}
+														>
+															<Users class="w-4 h-4 shrink-0" strokeWidth={1.75} />
+															<span>{tr('交给协作台', 'Hand to a team')}</span>
+														</DropdownMenu.Item>
+													{/if}
 												{/if}
 
 												{#if regenerateModelOptions.length > 0}

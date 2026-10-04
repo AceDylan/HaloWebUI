@@ -21,6 +21,8 @@
 	import StatusChip from './StatusChip.svelte';
 	import TeamAvatar from './TeamAvatar.svelte';
 	import { uploadFile } from '$lib/apis/files';
+	import { goalWithBackground, originLabel, takeHandoff, type HandoffOrigin } from '$lib/utils/handoff';
+	import HandoffBack from '$lib/components/common/HandoffBack.svelte';
 	import { now, timeAgo } from './clock';
 	import { avatarKind, etaSentence, formatEta, PHASE_LABEL, runnerLabel } from './model';
 
@@ -199,6 +201,11 @@
 		}
 	};
 
+	// Handed over from a chat or a discussion: the conversation (or conclusion) as background
+	// written under the goal, and the way back.
+	let background = '';
+	let origin: HandoffOrigin | null = null;
+
 	// Files given with the goal (uploaded first, then handed to the team by id).
 	let attached: { id: string | null; name: string; size: number; error?: string }[] = [];
 	let fileInput: HTMLInputElement;
@@ -233,7 +240,7 @@
 	const detach = (i: number) => (attached = attached.filter((_, j) => j !== i));
 
 	const create = async () => {
-		const text = goal.trim();
+		const text = goal.trim() ? goalWithBackground(goal, background, origin) : '';
 		if (!text || creating || uploading) return;
 		creating = true;
 		try {
@@ -298,6 +305,15 @@
 		const params = new URLSearchParams(window.location.search);
 		chatId = params.get('chat');
 		goal = params.get('goal') ?? '';
+		const incoming = takeHandoff(typeof sessionStorage === 'undefined' ? null : sessionStorage, 'teams');
+		if (incoming) {
+			if (incoming.text) goal = incoming.text;
+			origin = incoming.from;
+			// a team started from a chat belongs to it: its conclusion comes back there
+			if (incoming.from?.kind === 'chat') chatId = incoming.from.id;
+			background = incoming.context;
+			attached = incoming.files.map((f) => ({ id: f.id, name: f.name, size: 0 }));
+		}
 		isMac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent || '');
 		load();
 		loadMeta();
@@ -323,7 +339,9 @@
 			>
 		</div>
 		<h1 class="halo-crumb px-1">协作台</h1>
-		{#if chatId}
+		{#if origin}
+			<HandoffBack {origin} />
+		{:else if chatId}
 			<a
 				href="/c/{chatId}"
 				class="ml-auto rounded-xl px-2.5 py-1 text-xs text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-850"
@@ -396,6 +414,24 @@
 				/>
 				{#if chatId}
 					<div class="px-5 pb-1 text-xs text-sky-700 dark:text-sky-300">会关联到你刚才的对话</div>
+				{/if}
+				{#if background}
+					<div class="px-4 pb-1.5" data-team-context>
+						<span class="pill relative inline-flex max-w-full items-center gap-1.5 rounded-full py-0.5 pr-6 pl-2.5 text-xs" title={background.slice(0, 600)}>
+							<svg class="size-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+								><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg
+							>
+							<span class="truncate">带上{origin ? originLabel(origin) : '之前的对话'}作背景</span>
+							<span class="tm-num shrink-0 text-gray-400">{background.length} 字</span>
+							<button
+								type="button"
+								class="absolute right-1 top-1/2 grid size-4 -translate-y-1/2 place-items-center rounded-full text-gray-400 hover:bg-gray-500/15 hover:text-gray-700 dark:hover:text-gray-200"
+								aria-label="不带背景"
+								on:click={() => (background = '')}
+								data-team-context-remove>×</button
+							>
+						</span>
+					</div>
 				{/if}
 				{#if attached.length}
 					<ul class="flex flex-wrap gap-1.5 px-4 pb-1.5" aria-label="附带的文件" data-team-attachments>

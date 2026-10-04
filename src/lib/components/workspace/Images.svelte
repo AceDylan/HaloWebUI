@@ -88,6 +88,8 @@
 		readStudioRequest,
 		serializeChatImageHandoff
 	} from '$lib/utils/image-handoff';
+	import { takeHandoff, type HandoffOrigin } from '$lib/utils/handoff';
+	import HandoffBack from '$lib/components/common/HandoffBack.svelte';
 	import { goto, replaceState } from '$app/navigation';
 
 	type GeneratedImage = {
@@ -1643,6 +1645,8 @@
 		}
 	};
 
+	let studioOrigin: HandoffOrigin | null = null;
+
 	onMount(async () => {
 		loadWorkspacePrefs();
 		loadActiveTab();
@@ -1671,6 +1675,16 @@
 			} catch {
 				// Router not ready: the reference is already on the workbench.
 			}
+		}
+		// 「交给… 生图工作台」 from a chat's + menu: the draft is the prompt, its images references.
+		const incoming = takeHandoff(typeof sessionStorage === 'undefined' ? null : sessionStorage, 'studio');
+		if (incoming) {
+			for (const f of incoming.files.filter((f) => f.type === 'image')) {
+				addReferenceUrl(`${WEBUI_API_BASE_URL}/files/${f.id}/content`);
+			}
+			if (incoming.text && !prompt.trim()) prompt = incoming.text;
+			studioOrigin = incoming.from;
+			activeTab = 'workbench';
 		}
 		preferencesReady = true;
 
@@ -1729,6 +1743,11 @@
 </svelte:head>
 
 {#if loaded}
+	{#if studioOrigin}
+		<div class="mb-2 flex" data-studio-origin>
+			<HandoffBack origin={studioOrigin} className="-ml-2.5" />
+		</div>
+	{/if}
 	<!-- 标签页导航：一个紧凑的分段切换，窄屏横向滚动，不再把标签挤成竖排字 -->
 	<div class="halo-seg mb-4 flex w-fit max-w-full items-center overflow-x-auto scrollbar-hidden">
 		<button

@@ -1,6 +1,16 @@
 import { describe, expect, it } from 'vitest';
 
-import { conversationContext, handOff, HANDOFF_KEY, originHref, originLabel, takeHandoff } from './handoff';
+import {
+	chatHandoff,
+	conversationContext,
+	goalWithBackground,
+	handOff,
+	HANDOFF_KEY,
+	originHref,
+	originLabel,
+	replyHandoff,
+	takeHandoff
+} from './handoff';
 
 const memory = () => {
 	const data = new Map<string, string>();
@@ -76,5 +86,49 @@ describe('conversationContext', () => {
 	it('keeps the latest turns when it is long', () => {
 		expect(conversationContext(history, 15)).toBe('助手：够了');
 		expect(conversationContext({ currentId: null, messages: {} })).toBe('');
+	});
+});
+
+describe('chatHandoff / replyHandoff / goalWithBackground', () => {
+	const history = {
+		currentId: 'a2',
+		messages: {
+			u1: { id: 'u1', parentId: null, role: 'user', content: '去哪玩？' },
+			a1: { id: 'a1', parentId: 'u1', role: 'assistant', content: '去杭州' },
+			u2: { id: 'u2', parentId: 'a1', role: 'user', content: '预算 3000 够吗？', files: [{ id: 'f9', name: 'p.png', type: 'image' }] },
+			a2: { id: 'a2', parentId: 'u2', role: 'assistant', content: '够了' }
+		}
+	};
+
+	it('a draft from a new chat carries no background and no origin', () => {
+		const h = chatHandoff('teams', { text: '写个周报', files: [{ id: 'f1', name: 'a.txt', type: 'file', status: 'uploaded' }, { id: null, name: 'b', status: 'uploading' }], history: { currentId: null, messages: {} }, chatId: 'c1' });
+		expect(h).toMatchObject({ to: 'teams', text: '写个周报', context: '', from: null });
+		expect(h.files).toEqual([{ id: 'f1', name: 'a.txt', type: 'file' }]);
+	});
+
+	it('a draft in a chat brings the conversation and a way back', () => {
+		const h = chatHandoff('discuss', { text: '再想想', history, chatId: 'c1', title: '出游', models: ['m1', 'm2'] });
+		expect(h.context).toContain('助手：够了');
+		expect(h.from).toEqual({ kind: 'chat', id: 'c1', title: '出游' });
+		expect(h.models).toEqual(['m1', 'm2']);
+	});
+
+	it('a reply goes with its question and the conversation up to it', () => {
+		const h = replyHandoff('discuss', { history, messageId: 'a1', chatId: 'c1', title: '出游' });
+		expect(h.text).toBe('去哪玩？');
+		expect(h.context).toBe('用户：去哪玩？\n\n助手：去杭州');
+		const later = replyHandoff('teams', { history, messageId: 'a2', chatId: 'local' });
+		expect(later.text).toBe('预算 3000 够吗？');
+		expect(later.files).toEqual([{ id: 'f9', name: 'p.png', type: 'image' }]);
+		expect(later.from).toBeNull();
+	});
+
+	it('writes the background under a team goal, within the limit', () => {
+		expect(goalWithBackground('做计划', '', null)).toBe('做计划');
+		const goal = goalWithBackground('做计划', '用户：去哪玩？', { kind: 'chat', id: 'c1', title: '出游' });
+		expect(goal).toBe('做计划\n\n背景（来自对话「出游」）：\n用户：去哪玩？');
+		const long = goalWithBackground('做计划', 'x'.repeat(9000), null, 1000);
+		expect(long.length).toBe(1000);
+		expect(long).toContain('…x');
 	});
 });

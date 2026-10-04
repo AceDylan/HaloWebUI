@@ -22,7 +22,9 @@
 		Sparkles,
 		CircleHelp,
 		Users,
-		Wand2
+		Wand2,
+		MessagesSquare,
+		Image as ImageIcon
 	} from 'lucide-svelte';
 	import GoogleDrive from '$lib/components/icons/GoogleDrive.svelte';
 	import OneDrive from '$lib/components/icons/OneDrive.svelte';
@@ -53,6 +55,12 @@
 	export let onResponseHtmlFormatChange: ((enabled: boolean) => void | Promise<void>) | null = null;
 
 	export let onClose: Function;
+	/** 「交给…」: hands the draft (and the conversation) to 讨论台 / 协作台 / the image studio. */
+	export let onHandoff: ((to: 'discuss' | 'teams' | 'studio') => void) | null = null;
+	$: teamsEnabled = !!$config?.features?.enable_agent_teams;
+	$: studioEnabled =
+		!!$config?.features?.enable_image_generation &&
+		($user?.role === 'admin' || !!$user?.permissions?.features?.image_generation);
 
 	let tools = {};
 	let skills = {};
@@ -549,6 +557,56 @@
 					</span>
 					<div class="line-clamp-1">{$i18n.t('OneDrive')}</div>
 				</DropdownMenu.Item>
+			{/if}
+
+			{#if onHandoff}
+				<hr class="border-black/5 dark:border-white/5 my-1" />
+				<div class="px-3 pt-1 pb-0.5 text-2xs font-medium text-gray-400 dark:text-gray-500">
+					{tr('交给…（带上这句话）', 'Hand to… (with this draft)')}
+				</div>
+				<DropdownMenu.Item
+					class="flex gap-2 items-center px-3 py-2 text-sm font-medium cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl"
+					data-halo-input-handoff="discuss"
+					on:click={() => onHandoff?.('discuss')}
+				>
+					<span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-gray-100 text-gray-600 dark:bg-gray-700/60 dark:text-gray-300">
+						<MessagesSquare class="size-4" strokeWidth={2} />
+					</span>
+					<div class="min-w-0">
+						<div class="truncate">{tr('多模型讨论', 'Multi-model discussion')}</div>
+						<div class="truncate text-xs font-normal text-gray-500 dark:text-gray-400">{tr('几个模型讨论，主持人给结论', 'Several models, one conclusion')}</div>
+					</div>
+				</DropdownMenu.Item>
+				{#if teamsEnabled}
+					<DropdownMenu.Item
+						class="flex gap-2 items-center px-3 py-2 text-sm font-medium cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl"
+						data-halo-input-handoff="teams"
+						on:click={() => onHandoff?.('teams')}
+					>
+						<span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-gray-100 text-gray-600 dark:bg-gray-700/60 dark:text-gray-300">
+							<Users class="size-4" strokeWidth={2} />
+						</span>
+						<div class="min-w-0">
+							<div class="truncate">{tr('协作台', 'Team')}</div>
+							<div class="truncate text-xs font-normal text-gray-500 dark:text-gray-400">{tr('一支 AI 团队拆任务、并行完成', 'A team plans and does it')}</div>
+						</div>
+					</DropdownMenu.Item>
+				{/if}
+				{#if studioEnabled}
+					<DropdownMenu.Item
+						class="flex gap-2 items-center px-3 py-2 text-sm font-medium cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl"
+						data-halo-input-handoff="studio"
+						on:click={() => onHandoff?.('studio')}
+					>
+						<span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-gray-100 text-gray-600 dark:bg-gray-700/60 dark:text-gray-300">
+							<ImageIcon class="size-4" strokeWidth={2} />
+						</span>
+						<div class="min-w-0">
+							<div class="truncate">{tr('生图工作台', 'Image studio')}</div>
+							<div class="truncate text-xs font-normal text-gray-500 dark:text-gray-400">{tr('用这句话当提示词，图片作参考', 'Prompt and reference images')}</div>
+						</div>
+					</DropdownMenu.Item>
+				{/if}
 			{/if}
 		</DropdownMenu.Content>
 	</div>

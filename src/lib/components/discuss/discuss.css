@@ -1,0 +1,344 @@
+/*
+ * 讨论台 visual language, on top of the 协作台 tokens (teams.css: the page carries
+ * `data-teams-ui` too). Scoped by a `dc-` prefix.
+ *
+ * Every seat keeps one hue (--dc-hue) everywhere: its ring, the hairline on its cards, its row in
+ * the positions list. The ring says what the seat is doing — a comet sweeping round it while it
+ * speaks, a slow breath while it thinks, closed when it has spoken, red when it could not. The
+ * moderator's conclusion wears the app's halo spectrum: the one place the colours meet.
+ */
+
+@property --dc-angle {
+	syntax: '<angle>';
+	inherits: false;
+	initial-value: 0deg;
+}
+
+[data-discuss-ui] {
+	--dc-hue: 226;
+	--dc-sat: 85%;
+	--dc-light: 58%;
+}
+:is(.dark [data-discuss-ui]) {
+	--dc-light: 68%;
+}
+
+.dc-seat-color {
+	color: hsl(var(--dc-hue) var(--dc-sat) var(--dc-light));
+}
+
+/* --- avatar ring ------------------------------------------------------------------------------ */
+.dc-ring {
+	position: relative;
+	display: inline-grid;
+	place-items: center;
+	flex: none;
+	border-radius: 9999px;
+	padding: 2px;
+	background: hsl(var(--tm-line-strong));
+}
+.dc-ring > :first-child {
+	border-radius: 9999px;
+	overflow: hidden;
+	background: hsl(var(--tm-surface));
+	box-shadow: 0 0 0 2px hsl(var(--tm-surface));
+}
+.dc-ring[data-state='done'] {
+	background: hsl(var(--dc-hue) var(--dc-sat) var(--dc-light) / 0.9);
+}
+.dc-ring[data-state='error'] {
+	background: hsl(var(--tm-bad));
+}
+.dc-ring[data-state='waiting'],
+.dc-ring[data-state='stopped'] {
+	background: repeating-conic-gradient(hsl(var(--tm-line-strong)) 0 18deg, transparent 18deg 30deg);
+}
+.dc-ring[data-state='streaming'] {
+	background: conic-gradient(
+		from var(--dc-angle),
+		transparent 0deg,
+		hsl(var(--dc-hue) var(--dc-sat) var(--dc-light) / 0.15) 120deg,
+		hsl(var(--dc-hue) var(--dc-sat) var(--dc-light)) 340deg,
+		transparent 360deg
+	);
+	animation: dc-spin 1.4s linear infinite;
+}
+.dc-ring[data-state='thinking'] {
+	background: hsl(var(--dc-hue) var(--dc-sat) var(--dc-light) / 0.5);
+	animation: dc-breathe 1.6s ease-in-out infinite;
+}
+@keyframes dc-spin {
+	to {
+		--dc-angle: 360deg;
+	}
+}
+@keyframes dc-breathe {
+	50% {
+		background: hsl(var(--dc-hue) var(--dc-sat) var(--dc-light) / 0.15);
+	}
+}
+
+/* --- turn card -------------------------------------------------------------------------------- */
+.dc-turn {
+	position: relative;
+	display: flex;
+	flex-direction: column;
+	min-width: 0;
+	border-radius: 1rem;
+	border: 1px solid hsl(var(--tm-line));
+	background: hsl(var(--tm-surface));
+	box-shadow: var(--tm-shadow);
+	overflow: hidden;
+	transition:
+		border-color 0.3s ease,
+		box-shadow 0.3s var(--tm-ease);
+}
+.dc-turn::before {
+	content: '';
+	position: absolute;
+	inset: 0 0 auto 0;
+	height: 2px;
+	background: linear-gradient(
+		90deg,
+		hsl(var(--dc-hue) var(--dc-sat) var(--dc-light) / 0.9),
+		hsl(var(--dc-hue) var(--dc-sat) var(--dc-light) / 0) 70%
+	);
+	opacity: 0.55;
+}
+.dc-turn[data-state='streaming'] {
+	border-color: hsl(var(--dc-hue) var(--dc-sat) var(--dc-light) / 0.35);
+}
+.dc-turn[data-state='streaming']::before {
+	opacity: 1;
+	background: linear-gradient(
+		90deg,
+		transparent,
+		hsl(var(--dc-hue) var(--dc-sat) var(--dc-light)),
+		transparent
+	);
+	background-size: 50% 100%;
+	background-repeat: no-repeat;
+	animation: dc-sweep 1.6s linear infinite;
+}
+@keyframes dc-sweep {
+	from {
+		background-position: -50% 0;
+	}
+	to {
+		background-position: 150% 0;
+	}
+}
+.dc-turn[data-state='error'] {
+	border-color: hsl(var(--tm-bad) / 0.35);
+}
+.dc-turn-body {
+	position: relative;
+	min-height: 3rem;
+	overflow-wrap: anywhere;
+}
+.dc-turn-body[data-clamped='true'] {
+	max-height: 18rem;
+	overflow: hidden;
+	-webkit-mask-image: linear-gradient(to bottom, #000 72%, transparent);
+	mask-image: linear-gradient(to bottom, #000 72%, transparent);
+}
+.dc-turn-body[data-live='true'] {
+	max-height: 22rem;
+	overflow-y: auto;
+	overscroll-behavior: contain;
+	scrollbar-width: thin;
+}
+.dc-turn .markdown-prose {
+	font-size: 0.875rem;
+	line-height: 1.65;
+}
+
+/* skeleton lines while a seat is waiting for its turn */
+.dc-skeleton {
+	height: 0.6rem;
+	border-radius: 9999px;
+	background: linear-gradient(
+		90deg,
+		hsl(var(--tm-line)) 0%,
+		hsl(var(--dc-hue) var(--dc-sat) var(--dc-light) / 0.18) 50%,
+		hsl(var(--tm-line)) 100%
+	);
+	background-size: 200% 100%;
+	animation: dc-shimmer 1.4s linear infinite;
+}
+@keyframes dc-shimmer {
+	from {
+		background-position: 100% 0;
+	}
+	to {
+		background-position: -100% 0;
+	}
+}
+
+/* --- rounds: a grid on wide screens, a swipeable row on phones --------------------------------- */
+.dc-round-grid {
+	display: grid;
+	gap: 0.75rem;
+	grid-template-columns: repeat(var(--dc-cols, 2), minmax(0, 1fr));
+	align-items: start;
+}
+@media (max-width: 767px) {
+	.dc-round-grid {
+		display: flex;
+		gap: 0.625rem;
+		overflow-x: auto;
+		scroll-snap-type: x mandatory;
+		scroll-padding: 0 1rem;
+		margin: 0 -1rem;
+		padding: 0.25rem 1rem 0.5rem;
+		scrollbar-width: none;
+	}
+	.dc-round-grid::-webkit-scrollbar {
+		display: none;
+	}
+	.dc-round-grid > * {
+		flex: 0 0 min(86%, 26rem);
+		scroll-snap-align: start;
+	}
+}
+
+.dc-round-head {
+	display: flex;
+	align-items: center;
+	gap: 0.625rem;
+}
+.dc-round-head::after {
+	content: '';
+	flex: 1;
+	height: 1px;
+	background: linear-gradient(90deg, hsl(var(--tm-line-strong)), transparent);
+}
+
+/* --- conclusion: the halo spectrum ------------------------------------------------------------- */
+.dc-conclusion {
+	position: relative;
+	border-radius: 1.25rem;
+	background: hsl(var(--tm-surface));
+	box-shadow: var(--tm-shadow-lift);
+	isolation: isolate;
+}
+.dc-conclusion::before {
+	content: '';
+	position: absolute;
+	inset: -1px;
+	z-index: -1;
+	border-radius: inherit;
+	padding: 1px;
+	background: linear-gradient(
+		120deg,
+		oklch(0.6 0.215 266 / 0.75),
+		oklch(0.62 0.2 300 / 0.55),
+		oklch(0.78 0.15 70 / 0.5),
+		oklch(0.6 0.215 266 / 0.2)
+	);
+	-webkit-mask:
+		linear-gradient(#000 0 0) content-box,
+		linear-gradient(#000 0 0);
+	-webkit-mask-composite: xor;
+	mask-composite: exclude;
+}
+.dc-conclusion[data-state='streaming']::before {
+	background: conic-gradient(
+		from var(--dc-angle),
+		oklch(0.6 0.215 266 / 0.2),
+		oklch(0.6 0.215 266),
+		oklch(0.62 0.2 300),
+		oklch(0.78 0.15 70),
+		oklch(0.6 0.215 266 / 0.2)
+	);
+	animation: dc-spin 3s linear infinite;
+}
+.dc-conclusion .markdown-prose {
+	font-size: 0.9375rem;
+	line-height: 1.75;
+}
+.dc-section {
+	border-radius: 0.875rem;
+	border: 1px solid hsl(var(--tm-line));
+	background: hsl(var(--tm-surface-2));
+}
+.dc-section .markdown-prose {
+	font-size: 0.875rem;
+	line-height: 1.65;
+}
+.dc-section[data-kind='agree'] .dc-section-mark {
+	color: hsl(var(--tm-ok));
+}
+.dc-section[data-kind='disagree'] .dc-section-mark {
+	color: hsl(var(--tm-warn));
+}
+.dc-section[data-kind='next'] .dc-section-mark {
+	color: hsl(var(--tm-accent));
+}
+
+/* --- question ---------------------------------------------------------------------------------- */
+.dc-question {
+	font-family: 'Mona Sans', var(--font-sans);
+	letter-spacing: -0.012em;
+}
+
+/* --- bottom bar -------------------------------------------------------------------------------- */
+.dc-dock {
+	border-radius: 1.25rem;
+	border: 1px solid hsl(var(--tm-line-strong));
+	background: hsl(var(--tm-surface) / 0.86);
+	backdrop-filter: blur(18px) saturate(1.4);
+	-webkit-backdrop-filter: blur(18px) saturate(1.4);
+	box-shadow: var(--tm-shadow-lift);
+	transition:
+		border-color 0.3s ease,
+		box-shadow 0.3s var(--tm-ease);
+}
+.dc-dock:focus-within {
+	border-color: hsl(var(--tm-accent) / 0.45);
+	box-shadow:
+		0 0 0 4px hsl(var(--tm-accent) / 0.1),
+		var(--tm-shadow-lift);
+}
+
+.dc-chip {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.375rem;
+	border-radius: 9999px;
+	border: 1px solid hsl(var(--tm-line));
+	background: hsl(var(--tm-surface-2));
+	padding: 0.25rem 0.625rem;
+	font-size: 0.75rem;
+	line-height: 1rem;
+	white-space: nowrap;
+	color: hsl(var(--tm-muted));
+	transition:
+		background 0.2s ease,
+		border-color 0.2s ease,
+		color 0.2s ease;
+}
+button.dc-chip:hover:not(:disabled) {
+	border-color: hsl(var(--tm-line-strong));
+	color: hsl(var(--tm-ink));
+}
+button.dc-chip:disabled {
+	opacity: 0.5;
+	cursor: not-allowed;
+}
+.dc-chip[aria-pressed='true'],
+.dc-chip[data-on='true'] {
+	border-color: hsl(var(--tm-accent) / 0.4);
+	background: hsl(var(--tm-accent) / 0.1);
+	color: hsl(var(--tm-accent));
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.dc-ring[data-state='streaming'],
+	.dc-ring[data-state='thinking'],
+	.dc-turn[data-state='streaming']::before,
+	.dc-conclusion[data-state='streaming']::before,
+	.dc-skeleton {
+		animation: none;
+	}
+}

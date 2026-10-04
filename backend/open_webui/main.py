@@ -91,6 +91,7 @@ from open_webui.routers import (
     hermes,
     hub,
     teams,
+    discussions,
     terminal,
     tools,
     users,
@@ -1489,6 +1490,7 @@ app.include_router(terminal.router, prefix="/api/v1/terminal", tags=["terminal"]
 app.include_router(hermes.router, prefix="/api/v1/hermes", tags=["hermes"])
 app.include_router(hub.router, prefix="/api/v1/hub", tags=["hub"])
 app.include_router(teams.router, prefix="/api/v1/teams", tags=["teams"])
+app.include_router(discussions.router, prefix="/api/v1/discussions", tags=["discussions"])
 app.include_router(utils.router, prefix="/api/v1/utils", tags=["utils"])
 
 app.include_router(haloclaw_router, prefix="/api/v1/haloclaw", tags=["haloclaw"])

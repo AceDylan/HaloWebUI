@@ -4,7 +4,6 @@
 	import type { Writable } from 'svelte/store';
 	import Selector from './ModelSelector/Selector.svelte';
 	import Tooltip from '../common/Tooltip.svelte';
-	import Switch from '$lib/components/common/Switch.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import { getModelChatDisplayName } from '$lib/utils/model-display';
 	import { getModelSelectionId, resolveModelSelectionId } from '$lib/utils/model-identity';
@@ -32,9 +31,14 @@
 						count: maxDiscussionModels
 					})
 				: '';
-	$: if ((!canUseMultipleModels || selectedModelCount < 2) && multiModelDiscussionEnabled) {
+	// Discussions moved to their own page (讨论台, /discuss): the old in-chat switch is gone, and a
+	// value restored from an older chat's composer state is turned off rather than silently used.
+	$: if (multiModelDiscussionEnabled) {
 		multiModelDiscussionEnabled = false;
 	}
+	$: discussHref = `/discuss?models=${encodeURIComponent(
+		selectedModels.filter((model) => `${model ?? ''}`.trim()).join(',')
+	)}`;
 
 	// Stable items array: only recomputed when $models reference changes
 	$: selectorItems = $models.map((model) => ({
@@ -188,19 +192,18 @@
 		</div>
 	{/if}
 
-	{#if showMultiModelDiscussionToggle}
-		<div class="mt-2.5 flex max-w-full items-center">
-			<Switch
-				bind:state={multiModelDiscussionEnabled}
-				disabled={discussionDisabled}
-				variant="success"
-				size="md"
-				className="halo-switch-secondary"
-				tooltip={discussionIssue || ''}
-				ariaLabel={$i18n.t('Multi-model discussion')}
+	{#if showMultiModelDiscussionToggle && !discussionDisabled}
+		<a
+			href={discussHref}
+			class="mt-1.5 inline-flex max-w-full items-center gap-1 rounded-full px-2 py-0.5 text-xs text-gray-500 transition hover:bg-gray-500/10 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100"
+			title={discussionIssue || '让这几个模型在讨论台里讨论，主持人给出结论'}
+			data-open-discuss
+		>
+			<svg class="size-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+				><path d="M14 9a2 2 0 0 1-2 2H6l-4 4V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2z" /><path d="M18 9h2a2 2 0 0 1 2 2v11l-4-4h-6a2 2 0 0 1-2-2v-1" /></svg
 			>
-				{$i18n.t('Multi-model discussion')}
-			</Switch>
-		</div>
+			到讨论台讨论
+			<span aria-hidden="true">→</span>
+		</a>
 	{/if}
 </div>

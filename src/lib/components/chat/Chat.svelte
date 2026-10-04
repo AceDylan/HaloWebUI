@@ -4069,6 +4069,12 @@
 
 		if (isStale()) return null;
 
+		// A 讨论台 discussion is a chat too (title, folders, search); it is read in its room.
+		if (loadedChat?.chat?.discussionRoom) {
+			await goto(`/discuss/${targetChatId}`, { replaceState: true });
+			return null;
+		}
+
 		chat = loadedChat;
 		persistedChatSnapshot = loadedChat?.chat ? structuredClone(loadedChat.chat) : null;
 

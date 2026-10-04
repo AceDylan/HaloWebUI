@@ -3,7 +3,7 @@ import json
 import time
 import uuid
 from copy import deepcopy
-from typing import Optional
+from typing import Any, Optional
 
 from open_webui.internal.db import Base, get_db
 from open_webui.models.tags import TagModel, Tag, Tags
@@ -15,7 +15,7 @@ from open_webui.utils.image_generation_options import (
 
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import BigInteger, Boolean, Column, Integer, String, Text, JSON, Index
-from sqlalchemy import or_, func, select, and_, text
+from sqlalchemy import or_, func, select, and_, text, cast
 from sqlalchemy.orm.attributes import flag_modified
 from sqlalchemy.sql import exists
 
@@ -1338,6 +1338,66 @@ class ChatTable:
                 return row[0] if row else None
         except Exception:
             return None
+
+    def set_chat_meta_value_by_id(self, id: str, key: str, value: Any) -> bool:
+        """Set one key of chat.meta (the 讨论台 summary, for instance) without touching
+        updated_at or the other keys."""
+        try:
+            with get_db() as db:
+                chat = db.get(Chat, id)
+                if chat is None:
+                    return False
+                meta = dict(chat.meta) if isinstance(chat.meta, dict) else {}
+                meta[key] = value
+                chat.meta = meta
+                flag_modified(chat, "meta")
+                db.commit()
+                return True
+        except Exception:
+            log.exception("set_chat_meta_value_by_id: %s", id)
+            return False
+
+    def get_chats_with_meta_key_by_user_id(
+        self, user_id: str, key: str, include_archived: bool = False, limit: int = 300
+    ) -> list[dict]:
+        """id / title / dates / folder / meta of the user's chats whose meta has `key`
+        (the 讨论台 list), newest first. The chat JSON itself is not loaded."""
+        try:
+            with get_db() as db:
+                query = db.query(
+                    Chat.id,
+                    Chat.title,
+                    Chat.updated_at,
+                    Chat.created_at,
+                    Chat.folder_id,
+                    Chat.archived,
+                    Chat.meta,
+                ).filter(Chat.user_id == user_id)
+                if not include_archived:
+                    query = query.filter(or_(Chat.archived == False, Chat.archived.is_(None)))  # noqa: E712
+                # a cheap textual pre-filter; the exact check is below
+                query = query.filter(cast(Chat.meta, Text).like(f'%"{key}"%'))
+                rows = query.order_by(Chat.updated_at.desc()).limit(limit).all()
+                out = []
+                for row in rows:
+                    meta = row[6] if isinstance(row[6], dict) else {}
+                    if not isinstance(meta.get(key), dict):
+                        continue
+                    out.append(
+                        {
+                            "id": row[0],
+                            "title": row[1],
+                            "updated_at": row[2],
+                            "created_at": row[3],
+                            "folder_id": row[4],
+                            "archived": bool(row[5]),
+                            "meta": meta,
+                        }
+                    )
+                return out
+        except Exception:
+            log.exception("get_chats_with_meta_key_by_user_id: %s", user_id)
+            return []
 
     def get_chats(self, skip: int = 0, limit: int = 50) -> list[ChatModel]:
         with get_db() as db:

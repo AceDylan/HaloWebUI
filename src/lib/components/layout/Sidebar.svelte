@@ -1028,6 +1028,43 @@
 			</div>
 		{/if}
 
+		{#if expanded}
+			<div class="flex text-gray-700 dark:text-gray-200 px-2">
+				<a
+					class={actionItemClass}
+					href="/discuss"
+					aria-current={$page?.url?.pathname?.startsWith('/discuss') ? 'page' : undefined}
+					on:click={() => {
+						selectedChatId = null;
+						chatId.set('');
+						selectedAssistantScene.set(null);
+
+						if ($mobile) {
+							showSidebar.set(false);
+						}
+					}}
+					draggable="false"
+					data-sidebar-discuss
+				>
+					<svg
+						xmlns="http://www.w3.org/2000/svg"
+						fill="none"
+						viewBox="0 0 24 24"
+						stroke-width="2"
+						stroke="currentColor"
+						stroke-linecap="round"
+						stroke-linejoin="round"
+						class="size-5"
+						aria-hidden="true"
+					>
+						<path d="M14 9a2 2 0 0 1-2 2H6l-4 4V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2z" />
+						<path d="M18 9h2a2 2 0 0 1 2 2v11l-4-4h-6a2 2 0 0 1-2-2v-1" />
+					</svg>
+					<span class="text-sm font-medium whitespace-nowrap">讨论台</span>
+				</a>
+			</div>
+		{/if}
+
 		{#if !expanded}
 			<div class="mt-3 px-2 flex flex-col items-center gap-2 text-gray-700 dark:text-gray-200">
 				<Tooltip content={$i18n.t('New Chat')}>
@@ -1106,6 +1143,35 @@
 						</a>
 					</Tooltip>
 				{/if}
+
+				<Tooltip content="讨论台">
+					<a
+						class={iconButtonClass}
+						href="/discuss"
+						aria-label="讨论台"
+						on:click={() => {
+							selectedChatId = null;
+							chatId.set('');
+							selectedAssistantScene.set(null);
+						}}
+						draggable="false"
+					>
+						<svg
+							xmlns="http://www.w3.org/2000/svg"
+							fill="none"
+							viewBox="0 0 24 24"
+							stroke-width="2"
+							stroke="currentColor"
+							stroke-linecap="round"
+							stroke-linejoin="round"
+							class="size-5"
+							aria-hidden="true"
+						>
+							<path d="M14 9a2 2 0 0 1-2 2H6l-4 4V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2z" />
+							<path d="M18 9h2a2 2 0 0 1 2 2v11l-4-4h-6a2 2 0 0 1-2-2v-1" />
+						</svg>
+					</a>
+				</Tooltip>
 
 				<div class="w-full h-px bg-gray-200/70 dark:bg-gray-800/70 my-1" />
 

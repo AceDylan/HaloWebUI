@@ -29,9 +29,15 @@ def test_quality_normalizes_to_the_gpt_image_tiers_and_drops_auto():
     assert _normalize_openai_image_quality(None) is None
 
 
-def test_background_is_opaque_unless_transparent_is_chosen():
-    # Left at auto, the relay's gpt-image returned fully transparent PNGs.
+def test_background_is_left_out_unless_transparent_is_chosen(monkeypatch):
+    # cch's gpt-image-2.5-sunburst refuses the field: a default opaque made every image fail once.
+    monkeypatch.delenv("HALO_IMAGE_DEFAULT_BACKGROUND", raising=False)
     assert _normalize_openai_image_background(" Transparent ") == "transparent"
+    for value in (None, "", "auto", "opaque", "white", "black"):
+        assert _normalize_openai_image_background(value) is None
+    # A relay with the real gpt-image (left at auto it returned fully transparent PNGs): opaque again.
+    monkeypatch.setenv("HALO_IMAGE_DEFAULT_BACKGROUND", "opaque")
+    assert _normalize_openai_image_background("transparent") == "transparent"
     for value in (None, "", "auto", "opaque", "white", "black"):
         assert _normalize_openai_image_background(value) == "opaque"
 
@@ -73,10 +79,10 @@ def test_quality_travels_through_chat_options_overrides_and_the_form():
     assert "supports_quality" in _CAPABILITY_OVERRIDE_BOOL_FIELDS
 
 
-def test_a_rejected_default_background_is_dropped_and_sent_once_more():
+def test_a_refused_background_is_dropped_and_sent_once_more():
     import asyncio
 
-    from open_webui.routers.images import _send_dropping_default_background
+    from open_webui.routers.images import _send_dropping_refused_background
 
     def run(payload, statuses):
         sent = []
@@ -85,7 +91,7 @@ def test_a_rejected_default_background_is_dropped_and_sent_once_more():
             sent.append(dict(body))
             return {"status": statuses[len(sent) - 1]}, {}
 
-        result, _ = asyncio.run(_send_dropping_default_background(send, payload))
+        result, _ = asyncio.run(_send_dropping_refused_background(send, payload))
         return result["status"], sent
 
     # The relay's sunburst model: "background is only supported for GPT image models".
@@ -93,50 +99,11 @@ def test_a_rejected_default_background_is_dropped_and_sent_once_more():
     assert status == 200
     assert sent == [{"prompt": "p", "background": "opaque"}, {"prompt": "p"}]
 
-    # A transparent background the person asked for is not silently dropped.
-    status, sent = run({"prompt": "p", "background": "transparent"}, [400])
-    assert (status, len(sent)) == (400, 1)
+    # A transparent background the person asked for: an image without it rather than none.
+    status, sent = run({"prompt": "p", "background": "transparent"}, [400, 200])
+    assert status == 200 and sent[1] == {"prompt": "p"}
 
-    # Other failures and successes are left alone.
+    # No field (the default), other failures and successes are left alone.
+    assert len(run({"prompt": "p"}, [400])[1]) == 1
     assert run({"prompt": "p", "background": "opaque"}, [500])[0] == 500
     assert len(run({"prompt": "p", "background": "opaque"}, [200])[1]) == 1
-
-
-def test_a_refused_default_background_is_not_sent_again_for_a_while(monkeypatch):
-    import asyncio
-
-    from open_webui.routers import images
-
-    clock = [1000.0]
-    monkeypatch.setattr(images.time, "monotonic", lambda: clock[0])
-    monkeypatch.setattr(images, "_background_refused_until", {})
-    sent = []
-
-    def run(payload, statuses, route="https://relay/v1/images/generations"):
-        start = len(sent)
-
-        async def send(body):
-            sent.append(dict(body))
-            return {"status": statuses[len(sent) - start - 1]}, {}
-
-        result, _ = asyncio.run(images._send_dropping_default_background(send, payload, route=route))
-        return result["status"], sent[start:]
-
-    opaque = {"model": "gpt-image", "prompt": "p", "background": "opaque"}
-    # The first image finds out (400, then 200 without the field) ...
-    assert run(opaque, [400, 200]) == (200, [opaque, {"model": "gpt-image", "prompt": "p"}])
-    # ... the next ones go out without it straight away, no failed request first.
-    assert run(opaque, [200]) == (200, [{"model": "gpt-image", "prompt": "p"}])
-    # Another endpoint (edits) or model is asked as before; an explicit transparent is always sent.
-    assert run(opaque, [200], route="https://relay/v1/images/edits")[1] == [opaque]
-    assert run({**opaque, "model": "gpt-image-2"}, [200])[1][0]["background"] == "opaque"
-    transparent = {**opaque, "background": "transparent"}
-    assert run(transparent, [200])[1] == [transparent]
-    # After a few hours the field is tried again (the relay may route to a model that takes it).
-    clock[0] += images.BACKGROUND_REFUSAL_TTL_SECONDS + 1
-    assert run(opaque, [200])[1] == [opaque]
-
-    # A retry that fails too says nothing about the field: nothing is remembered.
-    monkeypatch.setattr(images, "_background_refused_until", {})
-    assert run(opaque, [400, 400])[0] == 400
-    assert run(opaque, [200])[1] == [opaque]

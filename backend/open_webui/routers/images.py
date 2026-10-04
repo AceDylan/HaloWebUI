@@ -5,6 +5,7 @@ import io
 import json
 import logging
 import mimetypes
+import os
 import re
 import time
 from typing import Any, Awaitable, Callable, Optional
@@ -184,45 +185,33 @@ OPENAI_IMAGE_ALLOWED_SIZES = {"1024x1024", "1536x1024", "1024x1536"}
 OPENAI_IMAGE_QUALITY_VALUES = ("auto", "low", "medium", "high")
 
 
-def _normalize_openai_image_background(value: Any) -> str:
-    """gpt-image background. Only an explicit ``transparent`` keeps the alpha
-    channel; auto/empty (the default) and the chat panel's white/black go out
-    as ``opaque`` -- left at auto, the relay's gpt-image often returned fully
-    transparent PNGs that are unreadable on dark chat themes."""
-    return "transparent" if str(value or "").strip().lower() == "transparent" else "opaque"
+def _normalize_openai_image_background(value: Any) -> Optional[str]:
+    """gpt-image background. Only an explicit ``transparent`` is sent; auto/empty
+    (the default), the studio's opaque and the chat panel's white/black leave the
+    field out (None) -- the model draws an opaque canvas on its own there. cch routes the bare ``gpt-image`` to gpt-image-2.5-sunburst, which refuses
+    it ("background is only supported for GPT image models"), so a default
+    ``opaque`` made every image fail once before the retry without it.
+    HALO_IMAGE_DEFAULT_BACKGROUND=opaque sends ``opaque`` by default again, for
+    a relay that answers with the real gpt-image (left at auto it often returned
+    fully transparent PNGs that are unreadable on dark chat themes)."""
+    if str(value or "").strip().lower() == "transparent":
+        return "transparent"
+    if os.environ.get("HALO_IMAGE_DEFAULT_BACKGROUND", "").strip().lower() == "opaque":
+        return "opaque"
+    return None
 
 
-# How long an endpoint + model that refused the default background is sent none.
-BACKGROUND_REFUSAL_TTL_SECONDS = 6 * 3600
-_background_refused_until: dict[str, float] = {}
-
-
-async def _send_dropping_default_background(send, payload: dict[str, Any], *, route: str = ""):
-    """Sends ``payload``; if the upstream rejects it with 400 while it carries the
-    default ``background: opaque`` (our choice, not the person's), sends it once
-    more without the field. Relays route the bare ``gpt-image`` to models that
-    reject the parameter outright ("background is only supported for GPT image
-    models"), and the relay may rewrite that reason into a generic 400.
-
-    When that retry goes through, the refusal is remembered for ``route`` (the
-    endpoint URL) and the model for a few hours: the following images go out
-    without the field instead of each failing once first (the relay's log showed
-    every image as a 400 followed by a 200). Afterwards the field is tried again,
-    since the relay sends the alias back to models that take it once its
-    preferred channel recovers."""
-    without = {key: value for key, value in payload.items() if key != "background"}
-    default = payload.get("background") == "opaque"
-    key = f"{route}|{payload.get('model') or ''}"
-    if default and route and _background_refused_until.get(key, 0.0) > time.monotonic():
-        return await send(without)
+async def _send_dropping_refused_background(send, payload: dict[str, Any]):
+    """Sends ``payload``; if the upstream rejects it with 400 while it carries a
+    ``background``, sends it once more without the field (an image without the
+    asked-for canvas rather than none). Relays route the bare ``gpt-image`` to
+    models that reject the parameter outright ("background is only supported for
+    GPT image models"), and the relay may rewrite that reason into a generic 400."""
     result, headers = await send(payload)
-    if result.get("status") == 400 and default:
-        log.info("openai_image_retry_without_background status=400")
-        result, headers = await send(without)
-        status = result.get("status")
-        if route and isinstance(status, int) and status < 400:
-            _background_refused_until[key] = time.monotonic() + BACKGROUND_REFUSAL_TTL_SECONDS
-            log.info("openai_image_background_refusal_remembered model=%s", payload.get("model"))
+    if result.get("status") == 400 and payload.get("background"):
+        log.info("openai_image_retry_without_background background=%s status=400", payload.get("background"))
+        retry_payload = {key: value for key, value in payload.items() if key != "background"}
+        result, headers = await send(retry_payload)
     return result, headers
 
 
@@ -6276,7 +6265,7 @@ async def _generate_via_openai_image_edits_endpoint(
         )
 
     generation_url = _get_openai_images_edit_url(base_url, api_config)
-    result, headers = await _send_dropping_default_background(
+    result, headers = await _send_dropping_refused_background(
         lambda body: _send_openai_image_request_with_key_pool(
             provider="openai",
             source=source,
@@ -6289,7 +6278,6 @@ async def _generate_via_openai_image_edits_endpoint(
             files=image_files,
         ),
         payload,
-        route=generation_url,
     )
 
     response_status = result.get("status")
@@ -6408,7 +6396,7 @@ async def _generate_via_openai_images_endpoint(
         payload["quality"] = quality
 
     generation_url = _get_openai_images_generation_url(base_url, api_config)
-    result, headers = await _send_dropping_default_background(
+    result, headers = await _send_dropping_refused_background(
         lambda body: _send_openai_image_request_with_key_pool(
             provider="openai",
             source=source,
@@ -6420,7 +6408,6 @@ async def _generate_via_openai_images_endpoint(
             json_body=body,
         ),
         payload,
-        route=generation_url,
     )
 
     response_status = result.get("status")

@@ -72,6 +72,7 @@
 	import Tooltip from '../common/Tooltip.svelte';
 	import FileItem from '../common/FileItem.svelte';
 	import Image from '../common/Image.svelte';
+	import UploadProgress from '../common/UploadProgress.svelte';
 	import ModelIcon from '../common/ModelIcon.svelte';
 	import { getModelChatDisplayName } from '$lib/utils/model-display';
 	import { isDedicatedImageGenerationModel } from '$lib/utils/model-capabilities';
@@ -706,6 +707,14 @@
 		toast.error(localizeFileUploadError(error, $i18n.t.bind($i18n), getUploadLocalizeOptions()));
 	};
 
+	// The attachment shows how much has gone out (UploadProgress); 100 = sent, the server
+	// is still storing / reading it. Ignored once the item has finished or been removed.
+	const setUploadProgress = (fileItem: { status: string; progress?: number }, percent: number) => {
+		if (fileItem.status !== 'uploading' || fileItem.progress === percent) return;
+		fileItem.progress = percent;
+		files = files;
+	};
+
 	const uploadImageFileHandler = async (file: File) => {
 		if ($_user?.role !== 'admin' && !($_user?.permissions?.chat?.file_upload ?? true)) {
 			toast.error($i18n.t('You do not have permission to upload files.'));
@@ -722,6 +731,7 @@
 			size: file.size,
 			content_type: file.type,
 			status: 'uploading',
+			progress: 0,
 			error: '',
 			errorTitle: '',
 			errorHint: '',
@@ -740,7 +750,8 @@
 
 		try {
 			const uploadedFile = await uploadFile(localStorage.token, file, {
-				process: false
+				process: false,
+				onProgress: ({ percent }) => setUploadProgress(fileItem, percent)
 			});
 
 			if (uploadedFile) {
@@ -762,6 +773,7 @@
 				fileItem.url = buildUploadedImageContentUrl(uploadedFile.id);
 				revokePreviewUrl(fileItem.preview_url);
 				delete fileItem.preview_url;
+				delete fileItem.progress;
 
 				files = files;
 			} else {
@@ -787,6 +799,7 @@
 			name: file.name,
 			collection_name: '',
 			status: 'uploading',
+			progress: 0,
 			size: file.size,
 			error: '',
 			errorTitle: '',
@@ -806,7 +819,8 @@
 		try {
 			// During the file upload, file content is automatically extracted.
 			const uploadedFile = await uploadFile(localStorage.token, file, {
-				processingMode: fullContext ? 'full_context' : undefined
+				processingMode: fullContext ? 'full_context' : undefined,
+				onProgress: ({ percent }) => setUploadProgress(fileItem, percent)
 			});
 
 			if (uploadedFile) {
@@ -839,6 +853,7 @@
 					delete fileItem.context;
 				}
 				fileItem.url = `${WEBUI_API_BASE_URL}/files/${uploadedFile.id}`;
+				delete fileItem.progress;
 
 				files = files;
 			} else {
@@ -1268,6 +1283,12 @@
 															alt="input"
 															imageClassName=" size-14 rounded-xl object-cover"
 														/>
+														{#if file.status === 'uploading'}
+															<UploadProgress
+																progress={file.progress}
+																className="absolute inset-0 rounded-xl bg-black/50 text-white pointer-events-none"
+															/>
+														{/if}
 														{#if atSelectedModel ? visionCapableModels.length === 0 : selectedModels.length !== visionCapableModels.length}
 															<Tooltip
 																className=" absolute top-1 left-1"

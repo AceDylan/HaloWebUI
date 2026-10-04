@@ -23,6 +23,7 @@
 	import Pencil from '$lib/components/icons/Pencil.svelte';
 	import XMark from '$lib/components/icons/XMark.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
+	import UploadProgress from '$lib/components/common/UploadProgress.svelte';
 	import PhotoSolid from '$lib/components/icons/PhotoSolid.svelte';
 	import Sparkles from '$lib/components/icons/Sparkles.svelte';
 	import { WEBUI_NAME, imageStudioTemplates, user } from '$lib/stores';
@@ -338,10 +339,18 @@
 	// Reference images: with any, the request goes to the model's edit route (gpt-image edits
 	// from them). Uploaded like chat attachments; gallery images can be added as they are.
 	const MAX_REFERENCE_IMAGES = 4;
-	type ReferenceImage = { url: string; preview?: string; uploading?: boolean };
+	// progress: 0–100 while the file goes out (100 = sent, the server is storing it).
+	type ReferenceImage = { url: string; preview?: string; uploading?: boolean; progress?: number };
 	let referenceImages: ReferenceImage[] = [];
 	let referenceInput: HTMLInputElement;
 	$: referenceUploading = referenceImages.some((ref) => ref.uploading);
+	// Why the generate button waits: all uploading references together, in whole percent.
+	$: referenceUploadPercent = (() => {
+		const pending = referenceImages.filter((ref) => ref.uploading);
+		if (pending.length === 0) return null;
+		const sum = pending.reduce((total, ref) => total + (ref.progress ?? 0), 0);
+		return Math.floor(sum / pending.length);
+	})();
 	$: referenceUrls = referenceImages.filter((ref) => !ref.uploading && ref.url).map((ref) => ref.url);
 
 	const addReferenceFiles = async (fileList: Iterable<File> | null | undefined) => {
@@ -352,13 +361,26 @@
 		}
 		await Promise.all(
 			images.slice(0, Math.max(0, room)).map(async (file) => {
-				const ref: ReferenceImage = { url: '', preview: URL.createObjectURL(file), uploading: true };
+				const ref: ReferenceImage = {
+					url: '',
+					preview: URL.createObjectURL(file),
+					uploading: true,
+					progress: 0
+				};
 				referenceImages = [...referenceImages, ref];
 				try {
-					const uploaded = await uploadFile(localStorage.token, file, { process: false });
+					const uploaded = await uploadFile(localStorage.token, file, {
+						process: false,
+						onProgress: ({ percent }) => {
+							if (!ref.uploading || ref.progress === percent) return;
+							ref.progress = percent;
+							referenceImages = referenceImages;
+						}
+					});
 					if (!uploaded?.id) throw new Error('upload failed');
 					ref.url = `${WEBUI_API_BASE_URL}/files/${uploaded.id}/content`;
 					ref.uploading = false;
+					delete ref.progress;
 					referenceImages = referenceImages;
 				} catch (error) {
 					console.warn('Failed to upload reference image', error);
@@ -1864,10 +1886,14 @@
 								<img
 									src={ref.preview ?? ref.url}
 									alt={$i18n.t('Reference image')}
-									class="size-14 rounded-xl object-cover ring-1 ring-gray-200/70 dark:ring-white/10 {ref.uploading
-										? 'opacity-50'
-										: ''}"
+									class="size-14 rounded-xl object-cover ring-1 ring-gray-200/70 dark:ring-white/10"
 								/>
+								{#if ref.uploading}
+									<UploadProgress
+										progress={ref.progress}
+										className="absolute inset-0 rounded-xl bg-black/50 text-white pointer-events-none"
+									/>
+								{/if}
 								<button
 									type="button"
 									class="absolute -right-1.5 -top-1.5 rounded-full bg-gray-900 p-0.5 text-white shadow ring-2 ring-white transition hover:bg-gray-700 dark:bg-gray-100 dark:text-gray-900 dark:ring-gray-900"
@@ -1889,10 +1915,16 @@
 								{$i18n.t('Add reference image')}
 							</button>
 						{/if}
-						<span class="text-xs text-gray-500 dark:text-gray-400">
-							{referenceImages.length
-								? $i18n.t('Generates from these images (edit)')
-								: $i18n.t('Optional · paste or drop a photo here')}
+						<span class="text-xs text-gray-500 dark:text-gray-400 tabular-nums">
+							{referenceUploadPercent !== null
+								? referenceUploadPercent < 100
+									? $i18n.t('Uploading reference images {{percent}}%', {
+											percent: referenceUploadPercent
+										})
+									: $i18n.t('Processing...')
+								: referenceImages.length
+									? $i18n.t('Generates from these images (edit)')
+									: $i18n.t('Optional · paste or drop a photo here')}
 						</span>
 						<input
 							bind:this={referenceInput}

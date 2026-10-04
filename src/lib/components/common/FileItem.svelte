@@ -6,6 +6,7 @@
 	import GarbageBin from '../icons/GarbageBin.svelte';
 	import Spinner from './Spinner.svelte';
 	import Tooltip from './Tooltip.svelte';
+	import UploadProgress from './UploadProgress.svelte';
 
 	const i18n = getContext('i18n');
 	const dispatch = createEventDispatcher();
@@ -39,6 +40,9 @@
 
 	$: failed = item?.status === 'failed';
 	$: uploading = loading || item?.status === 'uploading';
+	// Set by the chat input while the file goes out (0–100; 100 = the server is reading it).
+	$: uploadPercent =
+		uploading && typeof item?.progress === 'number' ? Math.max(0, Math.min(100, item.progress)) : null;
 	$: failureTitle = item?.errorTitle ?? item?.diagnostic?.title ?? $i18n.t('Upload failed');
 	$: failureMessage = item?.error ?? item?.diagnostic?.message ?? '';
 	$: failureHint = item?.errorHint ?? item?.diagnostic?.hint ?? '';
@@ -117,6 +121,8 @@
 						/>
 					</svg>
 				{/if}
+			{:else if uploadPercent !== null}
+				<UploadProgress progress={uploadPercent} ringClassName="size-5" showPercent={false} />
 			{:else}
 				<Spinner />
 			{/if}
@@ -130,7 +136,13 @@
 			</div>
 
 			<div class=" flex justify-between text-gray-500 text-xs line-clamp-1">
-				{#if type === 'file'}
+				{#if uploadPercent !== null}
+					<span class="tabular-nums" data-upload-status>
+						{uploadPercent < 100
+							? $i18n.t('Uploading {{percent}}%', { percent: Math.floor(uploadPercent) })
+							: $i18n.t('Processing...')}
+					</span>
+				{:else if type === 'file'}
 					{$i18n.t('File')}
 				{:else if type === 'doc'}
 					{$i18n.t('Document')}

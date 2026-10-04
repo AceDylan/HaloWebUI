@@ -5,7 +5,7 @@ type ResponseErrorLike = Record<string, unknown> & {
 	data: unknown;
 };
 
-const parseResponseText = (text: string): unknown => {
+export const parseResponseText = (text: string): unknown => {
 	if (!text) {
 		return null;
 	}
@@ -17,7 +17,9 @@ const parseResponseText = (text: string): unknown => {
 	}
 };
 
-const getFallbackDetail = (response: Response) => {
+type ResponseStatus = Pick<Response, 'status' | 'statusText'>;
+
+const getFallbackDetail = (response: ResponseStatus) => {
 	const statusText = response.statusText?.trim();
 	return statusText || `Request failed (${response.status})`;
 };
@@ -55,7 +57,7 @@ export const parseResponsePayload = async (response: Response): Promise<unknown>
 };
 
 export const createResponseError = (
-	response: Response,
+	response: ResponseStatus,
 	payload: unknown
 ): ResponseErrorLike => {
 	const detail = getPayloadDetail(payload, getFallbackDetail(response));

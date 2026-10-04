@@ -319,8 +319,13 @@ export const rememberHubOrigin = (
 };
 
 /** The chat to land on again: /c/<id>, else home. Never a query: `/?q=` would send its prompt once more. */
-export const hubReturnPath = (pathname: unknown): string =>
-	typeof pathname === 'string' && /^\/c\/[A-Za-z0-9-]{1,64}$/.test(pathname) ? pathname : '/';
+export const hubReturnPath = (pathname: unknown): string => {
+	if (typeof pathname !== 'string') return '/';
+	if (/^\/c\/[A-Za-z0-9-]{1,64}$/.test(pathname)) return pathname;
+	// a 讨论台 discussion is a chat: /c/<id> opens its room again
+	const room = pathname.match(/^\/discuss\/([A-Za-z0-9-]{1,64})$/);
+	return room ? `/c/${room[1]}` : '/';
+};
 
 /**
  * Framed by the Hub, asks it to sign this tab in again and come back to

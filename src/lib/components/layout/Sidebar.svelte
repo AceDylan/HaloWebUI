@@ -70,6 +70,7 @@
 	import FolderIcon from '../icons/Folder.svelte';
 	import FolderOpen from '../icons/FolderOpen.svelte';
 	import TeamsBadge from '../teams/TeamsBadge.svelte';
+	import DiscussBadge from '../discuss/DiscussBadge.svelte';
 
 	type SidebarStyle = 'flat' | 'card';
 	type SidebarFolder = {
@@ -1061,6 +1062,7 @@
 						<path d="M18 9h2a2 2 0 0 1 2 2v11l-4-4h-6a2 2 0 0 1-2-2v-1" />
 					</svg>
 					<span class="text-sm font-medium whitespace-nowrap">讨论台</span>
+					<DiscussBadge />
 				</a>
 			</div>
 		{/if}
@@ -1146,7 +1148,7 @@
 
 				<Tooltip content="讨论台">
 					<a
-						class={iconButtonClass}
+						class="{iconButtonClass} relative"
 						href="/discuss"
 						aria-label="讨论台"
 						on:click={() => {
@@ -1170,6 +1172,7 @@
 							<path d="M14 9a2 2 0 0 1-2 2H6l-4 4V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2z" />
 							<path d="M18 9h2a2 2 0 0 1 2 2v11l-4-4h-6a2 2 0 0 1-2-2v-1" />
 						</svg>
+						<DiscussBadge compact />
 					</a>
 				</Tooltip>
 

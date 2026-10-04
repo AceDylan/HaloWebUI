@@ -828,7 +828,8 @@ class LiveDiscussion:
         target["content"] = ""
         target["thinking"] = False
         raw = ""
-        await self.send("turn", turn=_brief(target, key))
+        # with the (empty) content: a second try clears what the first one had streamed
+        await self.send("turn", turn=_brief(target, key, with_content=True))
         response = await self.call_model(model, messages)
         async for kind, text in iterate_completion(response):
             if kind == "usage":
@@ -854,13 +855,35 @@ class LiveDiscussion:
         if not target["content"]:
             raise ValueError("模型返回了空内容")
 
+    async def _speak(self, target: dict, key: str, model: str, build, sends_images: bool):
+        """One streamed call. Many models the app treats as image readers reject pictures: when a
+        call that carried images fails, it is made once more without them (and says so)."""
+        try:
+            await asyncio.wait_for(self._stream_into(target, key, model, build(blind=False)), TURN_TIMEOUT_SECONDS)
+        except (asyncio.CancelledError, asyncio.TimeoutError):
+            raise
+        except Exception:
+            if not sends_images:
+                raise
+            target["imagesDropped"] = True
+            await asyncio.wait_for(self._stream_into(target, key, model, build(blind=True)), TURN_TIMEOUT_SECONDS)
+
     async def _run_turn(self, turn: dict):
         seat = next(s for s in self.setup["seats"] if s["id"] == turn["seat"])
-        messages = build_turn_messages(
-            setup=self.setup, ask=self.ask, seat=seat, round_index=turn["round"], history=self.history, images=self.images
-        )
+
+        def build(blind: bool):
+            return build_turn_messages(
+                setup=self.setup,
+                ask=self.ask,
+                seat={**seat, "vision": False} if blind else seat,
+                round_index=turn["round"],
+                history=self.history,
+                images=None if blind else self.images,
+            )
+
+        sends_images = bool(self.images) and seat.get("vision", True) is not False and turn["round"] == 1
         try:
-            await asyncio.wait_for(self._stream_into(turn, turn["id"], seat["model"], messages), TURN_TIMEOUT_SECONDS)
+            await self._speak(turn, turn["id"], seat["model"], build, sends_images)
             turn["status"] = "done"
         except asyncio.CancelledError:
             turn["status"] = "stopped"
@@ -883,15 +906,20 @@ class LiveDiscussion:
             self.ask["previousConclusions"].append(
                 {"content": conclusion["content"], "endedAt": conclusion.get("endedAt")}
             )
-        conclusion.update({"status": "waiting", "content": "", "error": None, "usage": {}})
+        conclusion.update({"status": "waiting", "content": "", "error": None, "usage": {}, "imagesDropped": False})
         self.ask["status"] = "concluding"
         await self.send_state()
-        messages = build_conclusion_messages(setup=self.setup, ask=self.ask, history=self.history, images=self.images)
-        try:
-            await asyncio.wait_for(
-                self._stream_into(conclusion, "conclusion", self.ask["moderator"]["model"], messages),
-                TURN_TIMEOUT_SECONDS,
+        moderator = self.ask["moderator"]
+
+        def build(blind: bool):
+            ask = {**self.ask, "moderator": {**moderator, "vision": False}} if blind else self.ask
+            return build_conclusion_messages(
+                setup=self.setup, ask=ask, history=self.history, images=None if blind else self.images
             )
+
+        sends_images = bool(self.images) and moderator.get("vision", True) is not False
+        try:
+            await self._speak(conclusion, "conclusion", moderator["model"], build, sends_images)
             conclusion["status"] = "done"
         except asyncio.CancelledError:
             conclusion["status"] = "stopped"
@@ -953,7 +981,7 @@ class LiveDiscussion:
         try:
             if self.retry_turn:
                 turn = next(t for t in self.ask["turns"] if t["id"] == self.retry_turn)
-                turn.update({"status": "waiting", "content": "", "error": None, "usage": {}})
+                turn.update({"status": "waiting", "content": "", "error": None, "usage": {}, "imagesDropped": False})
                 await self.send_state()
                 await self._run_turn(turn)
                 self.save()
@@ -1016,6 +1044,7 @@ def _brief(target: dict, key: str, with_content: bool = False) -> dict:
         "endedAt": target.get("endedAt"),
         "usage": target.get("usage") or {},
         "error": target.get("error"),
+        "imagesDropped": bool(target.get("imagesDropped")),
     }
     if with_content:
         out["content"] = target.get("content") or ""

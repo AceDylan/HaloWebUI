@@ -498,3 +498,32 @@ def test_images_go_to_seeing_seats_in_round_one_and_documents_to_everyone():
     assert isinstance(later[1]["content"], str) and "shown to everyone in round 1" in later[1]["content"]
     conclusion = room.build_conclusion_messages(setup=setup, ask=ask, history=[], images=images)
     assert isinstance(conclusion[1]["content"], list)
+
+
+def test_a_seat_that_rejects_images_speaks_again_without_them():
+    setup = room.normalize_setup({"seats": ["a", "b"], "rounds": 1, "moderator": "a"}, _models("a", "b"), set(), _user(), _no_exclusion)
+    events, calls = [], []
+
+    async def emit(event):
+        events.append(event)
+
+    async def call_model(model, messages):
+        calls.append((model, messages))
+        if isinstance(messages[1]["content"], list) and model == "b":
+            raise RuntimeError("Unsupported content type: image_url")
+        reply = "## 结论\n好" if messages[0]["content"].startswith("You moderated") else f"{model} 看了"
+        return {"choices": [{"message": {"content": reply}}]}
+
+    live = room.LiveDiscussion(
+        chat_id="c-img", user_id="u1", setup=setup,
+        ask=room.new_ask(question="图里是什么？", setup=setup, user_message_id="u", message_id="m", files=[{"id": "f", "name": "x.png", "type": "image"}]),
+        history=[], emit=emit, call_model=call_model, persist=lambda ask: None, images=["data:image/png;base64,AA"],
+    )
+    asyncio.run(live.run())
+    turns = {t["seat"]: t for t in live.ask["turns"]}
+    assert turns["s1"]["status"] == "done" and not turns["s1"].get("imagesDropped")
+    assert turns["s2"]["status"] == "done" and turns["s2"]["imagesDropped"] is True
+    b_calls = [m for model, m in calls if model == "b"]
+    assert isinstance(b_calls[0][1]["content"], list) and isinstance(b_calls[1][1]["content"], str)
+    assert "cannot see" in b_calls[1][1]["content"]
+    assert live.ask["status"] == "done"

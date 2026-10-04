@@ -90,6 +90,9 @@
 		</header>
 
 		<div class="px-5 pb-5">
+			{#if conclusion.imagesDropped}
+				<p class="mb-1.5 text-[11px] text-amber-600 dark:text-amber-300" data-discuss-images-dropped>主持人没能看图，按文字总结</p>
+			{/if}
 			{#if state === 'streaming' || !answer}
 				{#if conclusion.content}
 					<ReportMarkdown id="dc-conclusion-{ask.id}" content={cite(conclusion.content)} />

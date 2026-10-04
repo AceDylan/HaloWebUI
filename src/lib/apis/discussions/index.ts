@@ -55,6 +55,8 @@ export type DiscussTurn = {
 	usage?: DiscussUsage;
 	startedAt?: number | null;
 	endedAt?: number | null;
+	/** The model rejected the attached images; it spoke from the text only. */
+	imagesDropped?: boolean;
 };
 
 export type DiscussConclusion = {
@@ -67,6 +69,8 @@ export type DiscussConclusion = {
 	usage?: DiscussUsage;
 	startedAt?: number | null;
 	endedAt?: number | null;
+	/** The moderator rejected the attached images; it concluded from the text only. */
+	imagesDropped?: boolean;
 };
 
 export type AskStatus = 'running' | 'concluding' | 'done' | 'stopped' | 'error' | 'interrupted';

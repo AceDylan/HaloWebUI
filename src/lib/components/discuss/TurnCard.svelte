@@ -128,6 +128,9 @@
 		on:scroll={onScroll}
 	>
 		<div bind:this={inner}>
+		{#if turn.imagesDropped}
+			<p class="mb-1.5 text-[11px] text-amber-600 dark:text-amber-300" data-discuss-images-dropped>这个模型没能看图，按文字讨论</p>
+		{/if}
 		{#if turn.status === 'waiting' || (turn.status === 'streaming' && !turn.content)}
 			<div class="flex flex-col gap-2 pt-1" style="--dc-hue: {hue}" aria-label={statusText}>
 				<div class="dc-skeleton w-11/12" />

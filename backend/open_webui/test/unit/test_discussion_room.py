@@ -65,7 +65,7 @@ def test_setup_defaults_and_clamps():
     setup = _setup(rounds=99)
     assert setup["mode"] == "roundtable"
     assert setup["rounds"] == room.MAX_ROUNDS
-    assert setup["moderator"] == {"model": "a", "name": "a"}  # first seat by default
+    assert setup["moderator"] == {"model": "a", "name": "a", "vision": True}  # first seat by default
     assert [seat["id"] for seat in setup["seats"]] == ["s1", "s2"]
     assert _setup(mode="nonsense")["mode"] == "roundtable"
     assert _setup(mode="review", rounds=4)["rounds"] == 2  # answer + review, always
@@ -455,3 +455,46 @@ def test_retry_runs_one_turn_then_concludes_again():
     assert live.ask["conclusion"]["content"] == "## 结论\n新"
     assert live.ask["previousConclusions"][0]["content"] == "## 结论\n旧"
     assert live.ask["status"] == "done"
+
+
+# --- attachments --------------------------------------------------------------------------------
+
+
+def test_seats_know_whether_their_model_reads_images():
+    models = {
+        "a": {"id": "a", "name": "a"},
+        "blind": {"id": "blind", "name": "blind", "info": {"meta": {"capabilities": {"vision": False}}}},
+    }
+    setup = room.normalize_setup({"seats": ["a", "blind"], "moderator": "blind"}, models, set(), _user(), _no_exclusion)
+    assert [seat["vision"] for seat in setup["seats"]] == [True, False]
+    assert setup["moderator"]["vision"] is False
+
+
+def test_images_go_to_seeing_seats_in_round_one_and_documents_to_everyone():
+    models = {
+        "a": {"id": "a", "name": "a"},
+        "blind": {"id": "blind", "name": "blind", "info": {"meta": {"capabilities": {"vision": False}}}},
+    }
+    setup = room.normalize_setup({"seats": ["a", "blind"], "rounds": 2, "moderator": "a"}, models, set(), _user(), _no_exclusion)
+    ask = room.new_ask(
+        question="哪张图的配色好？",
+        setup=setup,
+        user_message_id="u",
+        message_id="m",
+        files=[
+            {"id": "f1", "name": "a.png", "type": "image"},
+            {"id": "f2", "name": "方案.docx", "type": "file", "text": "预算 10 万"},
+        ],
+    )
+    images = ["data:image/png;base64,AAA"]
+    seeing = room.build_turn_messages(setup=setup, ask=ask, seat=setup["seats"][0], round_index=1, history=[], images=images)
+    content = seeing[1]["content"]
+    assert isinstance(content, list) and content[1] == {"type": "image_url", "image_url": {"url": images[0]}}
+    assert "Attached file «方案.docx»:\n预算 10 万" in content[0]["text"]
+    assert "included with this message" in content[0]["text"]
+    blind = room.build_turn_messages(setup=setup, ask=ask, seat=setup["seats"][1], round_index=1, history=[], images=images)
+    assert isinstance(blind[1]["content"], str) and "cannot see" in blind[1]["content"]
+    later = room.build_turn_messages(setup=setup, ask=ask, seat=setup["seats"][0], round_index=2, history=[], images=images)
+    assert isinstance(later[1]["content"], str) and "shown to everyone in round 1" in later[1]["content"]
+    conclusion = room.build_conclusion_messages(setup=setup, ask=ask, history=[], images=images)
+    assert isinstance(conclusion[1]["content"], list)

@@ -59,12 +59,14 @@
 		{#if open}
 			<ol class="flex flex-col gap-2 rounded-xl bg-gray-500/5 p-3" transition:slide={{ duration: 180 }} data-discuss-sources>
 				{#each research.sources as source (source.n)}
-					<li class="min-w-0 text-xs leading-relaxed">
-						<a href={source.url} target="_blank" rel="noopener noreferrer" class="font-medium text-gray-800 hover:underline dark:text-gray-100"
-							><span class="tm-num mr-1 text-gray-400">[{source.n}]</span>{source.title}</a
-						>
-						<span class="ml-1 text-gray-400">{domainOf(source.url)}</span>
-						<p class="mt-0.5 line-clamp-2 text-gray-500 dark:text-gray-400">{source.excerpt}</p>
+					<li class="flex min-w-0 flex-col gap-0.5 text-xs leading-relaxed">
+						<div class="min-w-0 truncate">
+							<a href={source.url} target="_blank" rel="noopener noreferrer" class="font-medium text-gray-800 hover:underline dark:text-gray-100"
+								><span class="tm-num mr-1 text-gray-400">[{source.n}]</span>{source.title}</a
+							>
+							<span class="ml-1 text-gray-400">{domainOf(source.url)}</span>
+						</div>
+						<div class="dc-excerpt text-gray-500 dark:text-gray-400">{source.excerpt}</div>
 					</li>
 				{/each}
 			</ol>

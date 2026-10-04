@@ -276,6 +276,16 @@
 	color: hsl(var(--tm-accent));
 }
 
+/* --- research notes ---------------------------------------------------------------------------- */
+.dc-excerpt {
+	display: -webkit-box;
+	-webkit-box-orient: vertical;
+	-webkit-line-clamp: 2;
+	line-clamp: 2;
+	overflow: hidden;
+	overflow-wrap: anywhere;
+}
+
 /* --- question ---------------------------------------------------------------------------------- */
 .dc-question {
 	font-family: 'Mona Sans', var(--font-sans);

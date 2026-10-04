@@ -11,6 +11,8 @@ const api = vi.hoisted(() => ({
 	deleteDiscussion: vi.fn()
 }));
 vi.mock('$lib/apis/discussions', () => api);
+const files = vi.hoisted(() => ({ uploadFile: vi.fn() }));
+vi.mock('$lib/apis/files', () => files);
 const nav = vi.hoisted(() => ({ goto: vi.fn(), replaceState: vi.fn() }));
 vi.mock('$app/navigation', () => nav);
 vi.mock('svelte-sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn() } }));
@@ -35,6 +37,7 @@ beforeAll(async () => {
 
 beforeEach(() => {
 	Object.values(api).forEach((fn: any) => fn.mockReset());
+	files.uploadFile.mockReset();
 	nav.goto.mockReset();
 	localStorage.removeItem('halo.discuss.last');
 	localStorage.token = 't';
@@ -127,10 +130,39 @@ describe('DiscussHome', () => {
 			],
 			rounds: 3,
 			moderator: 'm-gpt', // a strong writer by default
-			research: true
+			research: true,
+			files: []
 		});
 		expect(nav.goto).toHaveBeenCalledWith('/discuss/new1');
 		expect(JSON.parse(localStorage.getItem('halo.discuss.last')!)).toMatchObject({ mode: 'debate', research: true });
+	});
+
+	it('uploads dropped files with a progress ring and sends their ids', async () => {
+		let release: (v: any) => void = () => {};
+		files.uploadFile.mockImplementation((_t: string, file: File, opts: any) => {
+			opts.onProgress?.({ loaded: 40, total: 100, percent: 40 });
+			return new Promise((resolve) => (release = () => resolve({ id: `id-${file.name}` })));
+		});
+		const target = await mount();
+		await until(() => target.querySelectorAll('[data-discuss-seat]').length > 0);
+		const drop = new (globalThis as any).Event('drop', { cancelable: true });
+		drop.dataTransfer = { files: [new File(['计划'], 'plan.txt', { type: 'text/plain' })] };
+		target.querySelector('[data-discuss-composer]')!.dispatchEvent(drop);
+		await until(() => !!target.querySelector('[data-attachment-state="uploading"]'));
+		expect(target.querySelector('[data-discuss-attachments]')!.textContent).toContain('40%');
+		expect(files.uploadFile.mock.calls[0][2].process).toBeUndefined(); // documents are read for their text
+		const box = target.querySelector('#discuss-question') as any;
+		box.value = '评审这个计划';
+		box.dispatchEvent(new (globalThis as any).Event('input'));
+		await sleep(20);
+		expect((target.querySelector('[data-discuss-start]') as any).disabled).toBe(true); // still uploading
+		release(null);
+		await until(() => !!target.querySelector('[data-attachment-state="ready"]'));
+		expect((target.querySelector('[data-discuss-start]') as any).disabled).toBe(false);
+		api.createDiscussion.mockResolvedValue({ id: 'n2', asks: [] });
+		target.querySelector('[data-discuss-composer]')!.dispatchEvent(new (globalThis as any).Event('submit', { cancelable: true }));
+		await until(() => api.createDiscussion.mock.calls.length > 0);
+		expect(api.createDiscussion.mock.calls[0][1].files).toEqual(['id-plan.txt']);
 	});
 
 	it('review keeps two rounds; the list shows earlier discussions', async () => {

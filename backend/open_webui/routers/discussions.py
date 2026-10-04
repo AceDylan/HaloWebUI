@@ -46,11 +46,13 @@ class CreateForm(BaseModel):
     rounds: Optional[int] = None
     moderator: Optional[str] = None
     research: bool = False
+    files: list[str] = []
 
 
 class AskForm(BaseModel):
     question: str
     rounds: Optional[int] = None
+    files: list[str] = []
 
 
 class InterjectForm(BaseModel):
@@ -163,6 +165,67 @@ def _history(chat, before_ask_id: Optional[str] = None) -> list[dict]:
         content = (ask.get("conclusion") or {}).get("content") or ""
         if content:
             out.append({"question": ask.get("question"), "conclusion": content})
+    return out
+
+
+def _load_files(file_ids: list[str], user) -> list[dict]:
+    """The user's own uploaded files for a question: images by reference, documents with their text."""
+    from open_webui.models.files import Files
+
+    out = []
+    for file_id in list(dict.fromkeys(str(f or "").strip() for f in file_ids or []))[: room.MAX_FILES + 1]:
+        if not file_id:
+            continue
+        item = Files.get_file_by_id(file_id)
+        if item is None or (item.user_id != user.id and getattr(user, "role", None) != "admin"):
+            raise HTTPException(status_code=404, detail="附件不存在")
+        meta = item.meta or {}
+        content_type = str(meta.get("content_type") or "")
+        is_image = content_type.startswith("image/")
+        entry = {
+            "id": item.id,
+            "name": str(meta.get("name") or item.filename or "附件")[:200],
+            "type": "image" if is_image else "file",
+            "content_type": content_type,
+            "size": meta.get("size"),
+        }
+        if not is_image:
+            entry["text"] = str((item.data or {}).get("content") or "")[: room.FILE_TEXT_CHARS]
+        out.append(entry)
+    if len(out) > room.MAX_FILES:
+        raise HTTPException(status_code=400, detail=f"最多 {room.MAX_FILES} 个附件")
+    return out
+
+
+def _ask_images(ask: dict, user) -> list[str]:
+    """Data URLs of the question's images (what the providers accept)."""
+    from open_webui.utils.chat_image_refs import build_chat_image_content_url, materialize_image_url_for_openai
+
+    urls = []
+    for item in ask.get("files") or []:
+        if item.get("type") != "image":
+            continue
+        try:
+            url = materialize_image_url_for_openai(
+                build_chat_image_content_url(item["id"]),
+                user_id=user.id,
+                is_admin=getattr(user, "role", None) == "admin",
+            )
+            if isinstance(url, str) and url.startswith("data:"):
+                urls.append(url)
+        except Exception as exc:
+            log.warning("discussion: image %s not readable: %s", item.get("id"), exc)
+    return urls
+
+
+def _message_files(files: list[dict]) -> list[dict]:
+    """The same attachments as the chat view lists them on a user message."""
+    out = []
+    for item in files:
+        if item.get("type") == "image":
+            out.append({"type": "image", "id": item["id"], "name": item["name"], "url": f"/api/v1/files/{item['id']}/content"})
+        else:
+            out.append({"type": "file", "id": item["id"], "name": item["name"], "url": f"/api/v1/files/{item['id']}", "size": item.get("size")})
     return out
 
 
@@ -391,6 +454,7 @@ def _start(
         from_round=from_round,
         search=search,
         retry_turn=retry_turn,
+        images=_ask_images(ask, user) if ask.get("files") else [],
     )
     room.start_live(live)
     return live
@@ -401,8 +465,10 @@ def _check_capacity(user):
         raise HTTPException(status_code=429, detail=f"已有 {room.MAX_RUNNING_PER_USER} 个讨论在进行，等它们结束再开")
 
 
-def _user_message(message_id: str, question: str, parent_id: Optional[str], child_id: str, model: str) -> dict:
-    return {
+def _user_message(
+    message_id: str, question: str, parent_id: Optional[str], child_id: str, model: str, files: Optional[list[dict]] = None
+) -> dict:
+    message = {
         "id": message_id,
         "parentId": parent_id,
         "childrenIds": [child_id],
@@ -411,6 +477,9 @@ def _user_message(message_id: str, question: str, parent_id: Optional[str], chil
         "timestamp": int(time.time()),
         "models": [model],
     }
+    if files:
+        message["files"] = _message_files(files)
+    return message
 
 
 def _assistant_message(message_id: str, parent_id: str, ask: dict) -> dict:
@@ -482,10 +551,13 @@ async def create_discussion(request: Request, form: CreateForm, user=Depends(get
     except DiscussError as exc:
         _raise(exc)
 
+    files = _load_files(form.files, user)
     user_message_id, assistant_message_id = room.new_id(), room.new_id()
-    ask = room.new_ask(question=question, setup=setup, user_message_id=user_message_id, message_id=assistant_message_id)
+    ask = room.new_ask(
+        question=question, setup=setup, user_message_id=user_message_id, message_id=assistant_message_id, files=files
+    )
     messages = {
-        user_message_id: _user_message(user_message_id, question, None, assistant_message_id, ask["moderator"]["model"]),
+        user_message_id: _user_message(user_message_id, question, None, assistant_message_id, ask["moderator"]["model"], files),
         assistant_message_id: _assistant_message(assistant_message_id, user_message_id, ask),
     }
     payload = {
@@ -535,6 +607,7 @@ async def ask_again(request: Request, chat_id: str, form: AskForm, user=Depends(
     except DiscussError as exc:
         _raise(exc)
 
+    files = _load_files(form.files, user)
     data = dict((chat.chat or {}).get(CHAT_KEY) or {})
     previous_id = (data.get("asks") or [None])[-1]
     user_message_id, assistant_message_id = room.new_id(), room.new_id()
@@ -544,6 +617,7 @@ async def ask_again(request: Request, chat_id: str, form: AskForm, user=Depends(
         user_message_id=user_message_id,
         message_id=assistant_message_id,
         rounds=form.rounds,
+        files=files,
     )
     history = _history(chat)
     chat_payload = dict(chat.chat)
@@ -552,7 +626,9 @@ async def ask_again(request: Request, chat_id: str, form: AskForm, user=Depends(
         previous = dict(messages[previous_id])
         previous["childrenIds"] = [*(previous.get("childrenIds") or []), user_message_id]
         messages[previous_id] = previous
-    messages[user_message_id] = _user_message(user_message_id, question, previous_id, assistant_message_id, ask["moderator"]["model"])
+    messages[user_message_id] = _user_message(
+        user_message_id, question, previous_id, assistant_message_id, ask["moderator"]["model"], files
+    )
     messages[assistant_message_id] = _assistant_message(assistant_message_id, user_message_id, ask)
     chat_payload["history"] = {"messages": messages, "currentId": assistant_message_id}
     data["asks"] = [*(data.get("asks") or []), assistant_message_id]

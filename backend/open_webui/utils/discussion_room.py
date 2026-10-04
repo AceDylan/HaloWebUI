@@ -54,6 +54,8 @@ DELTA_FLUSH_SECONDS = 0.15
 RESEARCH_TIMEOUT_SECONDS = 150
 RESEARCH_MAX_SOURCES = 8
 RESEARCH_EXCERPT_CHARS = 1600
+MAX_FILES = 4
+FILE_TEXT_CHARS = 12000
 
 MODES: dict[str, dict] = {
     "roundtable": {
@@ -161,7 +163,14 @@ def resolve_seat_model(
     return {
         "model": _model_selection_id(model, requested_id),
         "name": _model_display_name(model, requested_id),
+        "vision": model_sees_images(model),
     }
+
+
+def model_sees_images(model: dict) -> bool:
+    """The app's rule: a model reads images unless its capabilities say it does not."""
+    capabilities = ((model.get("info") or {}).get("meta") or {}).get("capabilities") or {}
+    return capabilities.get("vision", True) is not False
 
 
 def normalize_setup(
@@ -275,6 +284,37 @@ def _research_block(ask: dict) -> str:
     return "\n\n".join(parts)
 
 
+def _files_block(ask: dict, *, sees_images: bool, gets_images: bool) -> str:
+    files = ask.get("files") or []
+    if not files:
+        return ""
+    parts = []
+    for item in files:
+        if item.get("type") == "image":
+            continue
+        text = (item.get("text") or "").strip()
+        parts.append(
+            f"Attached file «{item.get('name')}»:\n{text}" if text else f"Attached file «{item.get('name')}» (its text could not be read)."
+        )
+    images = [item for item in files if item.get("type") == "image"]
+    if images:
+        if gets_images:
+            parts.append(f"The user attached {len(images)} image(s); they are included with this message.")
+        elif sees_images:
+            parts.append(f"The user attached {len(images)} image(s), shown to everyone in round 1; rely on what was said about them.")
+        else:
+            parts.append(
+                f"The user attached {len(images)} image(s) that you cannot see; rely on what other participants say about them and say so."
+            )
+    return "\n\n".join(parts)
+
+
+def _with_images(text: str, images: Optional[list[str]]) -> Any:
+    if not images:
+        return text
+    return [{"type": "text", "text": text}, *({"type": "image_url", "image_url": {"url": url}} for url in images)]
+
+
 def _interjection_block(interjections: list[dict], before_round: Optional[int] = None) -> str:
     items = [
         item
@@ -323,6 +363,7 @@ def build_turn_messages(
     seat: dict,
     round_index: int,
     history: list[dict],
+    images: Optional[list[str]] = None,
 ) -> list[dict]:
     mode = setup["mode"]
     seats = setup["seats"]
@@ -390,19 +431,29 @@ def build_turn_messages(
                 "correct mistakes, add what is missing. If you changed your mind, say so plainly."
             )
 
-    user_parts = [_history_block(history), f"User question:\n{question}", _research_block(ask)]
+    sees = seat.get("vision", True) is not False
+    gets_images = bool(images) and sees and round_index == 1
+    user_parts = [
+        _history_block(history),
+        f"User question:\n{question}",
+        _files_block(ask, sees_images=sees, gets_images=gets_images),
+        _research_block(ask),
+    ]
     if transcript:
         user_parts.append(f"Discussion so far:\n\n{transcript}")
     if interjections:
         user_parts.append(interjections)
     user_parts.append(f"Your task now: {task}")
+    text = "\n\n".join(part for part in user_parts if part)
     return [
         {"role": "system", "content": system},
-        {"role": "user", "content": "\n\n".join(part for part in user_parts if part)},
+        {"role": "user", "content": _with_images(text, images if gets_images else None)},
     ]
 
 
-def build_conclusion_messages(*, setup: dict, ask: dict, history: list[dict]) -> list[dict]:
+def build_conclusion_messages(
+    *, setup: dict, ask: dict, history: list[dict], images: Optional[list[str]] = None
+) -> list[dict]:
     lang = ask.get("lang") or "zh"
     headings = SECTION_HEADINGS["zh" if lang == "zh" else "en"]
     seats = setup["seats"]
@@ -438,10 +489,13 @@ def build_conclusion_messages(*, setup: dict, ask: dict, history: list[dict]) ->
         )
     )
     participants = ", ".join(_seat_title(seat) for seat in seats)
+    moderator_sees = (ask.get("moderator") or {}).get("vision", True) is not False
+    gets_images = bool(images) and moderator_sees
     parts = [
         _history_block(history),
         f"Discussion format: {MODES[mode]['label']}. Participants: {participants}.",
         f"User question:\n{ask.get('question') or ''}",
+        _files_block(ask, sees_images=moderator_sees, gets_images=gets_images),
         _research_block(ask),
         f"Transcript:\n\n{transcript or '(no participant produced an answer)'}",
     ]
@@ -450,9 +504,10 @@ def build_conclusion_messages(*, setup: dict, ask: dict, history: list[dict]) ->
         parts.append(interjections)
     if failed:
         parts.append("These turns failed or were stopped (not evidence): " + ", ".join(failed))
+    text = "\n\n".join(part for part in parts if part)
     return [
         {"role": "system", "content": system},
-        {"role": "user", "content": "\n\n".join(part for part in parts if part)},
+        {"role": "user", "content": _with_images(text, images if gets_images else None)},
     ]
 
 
@@ -612,7 +667,15 @@ async def iterate_completion(response: Any):
 # State
 
 
-def new_ask(*, question: str, setup: dict, user_message_id: str, message_id: str, rounds: Optional[int] = None) -> dict:
+def new_ask(
+    *,
+    question: str,
+    setup: dict,
+    user_message_id: str,
+    message_id: str,
+    rounds: Optional[int] = None,
+    files: Optional[list[dict]] = None,
+) -> dict:
     total_rounds = setup["rounds"] if rounds is None else max(1, min(int(rounds), MAX_ROUNDS))
     if setup["mode"] == "review":
         total_rounds = 2
@@ -633,6 +696,7 @@ def new_ask(*, question: str, setup: dict, user_message_id: str, message_id: str
         "conclusion": {"status": "waiting", "content": "", "model": setup["moderator"]["model"], "name": setup["moderator"]["name"]},
         "previousConclusions": [],
         "research": {"status": "waiting", "queries": [], "sources": []} if setup.get("research") else None,
+        "files": files or [],
         "startedAt": now_ms(),
         "endedAt": None,
         "usage": {},
@@ -711,6 +775,8 @@ class LiveDiscussion:
     search: Optional[Callable[[str, list[dict]], Awaitable[dict]]] = None
     # re-run just this turn (a seat that failed), then conclude again
     retry_turn: Optional[str] = None
+    # data URLs of the question's images (round 1 and the moderator get them)
+    images: list = field(default_factory=list)
 
     # -- events --------------------------------------------------------------------------------
 
@@ -790,7 +856,9 @@ class LiveDiscussion:
 
     async def _run_turn(self, turn: dict):
         seat = next(s for s in self.setup["seats"] if s["id"] == turn["seat"])
-        messages = build_turn_messages(setup=self.setup, ask=self.ask, seat=seat, round_index=turn["round"], history=self.history)
+        messages = build_turn_messages(
+            setup=self.setup, ask=self.ask, seat=seat, round_index=turn["round"], history=self.history, images=self.images
+        )
         try:
             await asyncio.wait_for(self._stream_into(turn, turn["id"], seat["model"], messages), TURN_TIMEOUT_SECONDS)
             turn["status"] = "done"
@@ -818,7 +886,7 @@ class LiveDiscussion:
         conclusion.update({"status": "waiting", "content": "", "error": None, "usage": {}})
         self.ask["status"] = "concluding"
         await self.send_state()
-        messages = build_conclusion_messages(setup=self.setup, ask=self.ask, history=self.history)
+        messages = build_conclusion_messages(setup=self.setup, ask=self.ask, history=self.history, images=self.images)
         try:
             await asyncio.wait_for(
                 self._stream_into(conclusion, "conclusion", self.ask["moderator"]["model"], messages),

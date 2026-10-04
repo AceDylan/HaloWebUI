@@ -427,3 +427,40 @@ def test_search_builds_one_evidence_pack(env, monkeypatch):
     env.request.app.state.config = SimpleNamespace(ENABLE_WEB_SEARCH=False)
     with pytest.raises(ValueError, match="关闭"):
         asyncio.run(api._search(env.request, USER, "c", "选数据库", []))
+
+
+def test_attachments_are_checked_read_and_passed_on(env, monkeypatch):
+    from open_webui.models import files as files_mod
+    from open_webui.utils import chat_image_refs
+
+    store = {
+        "img": SimpleNamespace(id="img", user_id="u1", filename="cat.png", meta={"content_type": "image/png", "name": "cat.png", "size": 10}, data={}),
+        "doc": SimpleNamespace(id="doc", user_id="u1", filename="plan.txt", meta={"content_type": "text/plain", "name": "plan.txt"}, data={"content": "预算十万" * 5000}),
+        "theirs": SimpleNamespace(id="theirs", user_id="u2", filename="x.txt", meta={}, data={}),
+    }
+    monkeypatch.setattr(files_mod.Files, "get_file_by_id", lambda file_id: store.get(file_id))
+    monkeypatch.setattr(chat_image_refs, "materialize_image_url_for_openai", lambda url, **kw: "data:image/png;base64,QUJD")
+
+    member = SimpleNamespace(id="u1", role="user")
+    with pytest.raises(HTTPException) as other:
+        api._load_files(["theirs"], member)  # someone else's file (an admin may read any file)
+    assert other.value.status_code == 404
+    with pytest.raises(HTTPException):
+        api._load_files(["img", "doc", "a", "b", "c"], USER)
+
+    async def scenario():
+        form = api.CreateForm(question="看看这个方案", seats=[api.SeatForm(model="a"), api.SeatForm(model="b")], rounds=1, moderator="c", files=["img", "doc"])
+        detail = await api.create_discussion(env.request, form, USER)
+        await _settle(detail["id"])
+        return detail["id"]
+
+    chat_id = asyncio.run(scenario())
+    ask = asyncio.run(api.get_discussion(chat_id, USER))["asks"][0]
+    assert [(f["id"], f["type"]) for f in ask["files"]] == [("img", "image"), ("doc", "file")]
+    assert len(ask["files"][1]["text"]) == room.FILE_TEXT_CHARS
+    first = env.calls[0][1][1]["content"]
+    assert isinstance(first, list) and first[1]["image_url"]["url"] == "data:image/png;base64,QUJD"
+    assert "Attached file «plan.txt»" in first[0]["text"]
+    message = chats_mod.ChatTable().get_chat_by_id(chat_id).chat["history"]["messages"][ask["userMessageId"]]
+    assert [f["type"] for f in message["files"]] == ["image", "file"]
+    assert message["files"][0]["url"] == "/api/v1/files/img/content"

@@ -25,6 +25,9 @@ export type DiscussSetup = {
 	research?: boolean;
 };
 
+/** A file attached to a question (images go to the models that read images, documents to all). */
+export type DiscussFile = { id: string; name: string; type: 'image' | 'file'; content_type?: string; size?: number };
+
 export type ResearchSource = { n: number; title: string; url: string; excerpt: string };
 
 export type DiscussResearch = {
@@ -85,6 +88,7 @@ export type DiscussAsk = {
 	conclusion: DiscussConclusion;
 	previousConclusions: { content: string; endedAt?: number | null }[];
 	research?: DiscussResearch | null;
+	files?: DiscussFile[];
 	startedAt: number;
 	endedAt?: number | null;
 	usage: DiscussUsage;
@@ -169,6 +173,7 @@ export const createDiscussion = (
 		rounds: number;
 		moderator: string;
 		research?: boolean;
+		files?: string[];
 	}
 ) => request<Discussion>(token, 'POST', '/', form);
 

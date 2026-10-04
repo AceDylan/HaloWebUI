@@ -20,6 +20,7 @@
 		type Discussion
 	} from '$lib/apis/discussions';
 	import { copyToClipboard } from '$lib/utils';
+	import { WEBUI_API_BASE_URL } from '$lib/constants';
 	import { isHermesAgentModel } from '$lib/utils/hermes';
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import MenuLines from '$lib/components/icons/MenuLines.svelte';
@@ -160,6 +161,12 @@
 
 	const stop = () => run(() => stopDiscussion(localStorage.token, chatId), '已停止');
 	let retrying = '';
+	// Earlier questions show their question and conclusion; their turns fold away until asked for.
+	let openedAsks = new Set<string>();
+	const toggleAsk = (id: string) => {
+		openedAsks.has(id) ? openedAsks.delete(id) : openedAsks.add(id);
+		openedAsks = openedAsks;
+	};
 	const retry = async (turnId: string) => {
 		retrying = turnId;
 		await run(() => retryDiscussionTurn(localStorage.token, chatId, turnId));
@@ -345,6 +352,28 @@
 							<p class="dc-question text-[19px] font-semibold leading-snug whitespace-pre-wrap text-gray-950 sm:text-[22px] dark:text-white" data-discuss-question>
 								{ask.question}
 							</p>
+							{#if ask.files?.length}
+								<div class="flex flex-wrap items-center gap-2" data-discuss-files>
+									{#each ask.files as f (f.id)}
+										{#if f.type === 'image'}
+											<a href="{WEBUI_API_BASE_URL}/files/{f.id}/content" target="_blank" rel="noopener noreferrer" title={f.name}
+												><img
+													src="{WEBUI_API_BASE_URL}/files/{f.id}/content"
+													alt={f.name}
+													loading="lazy"
+													class="size-14 rounded-xl object-cover ring-1 ring-gray-200/70 dark:ring-white/10"
+												/></a
+											>
+										{:else}
+											<a href="{WEBUI_API_BASE_URL}/files/{f.id}/content" target="_blank" rel="noopener noreferrer" class="dc-chip max-w-[16rem]" title={f.name}
+												><svg class="size-3.5 shrink-0" viewBox="0 0 16 16" fill="none" aria-hidden="true"
+													><path d="M4 1.8h5l3 3v9.4H4z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" /><path d="M9 1.8v3h3" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" /></svg
+												><span class="truncate">{f.name}</span></a
+											>
+										{/if}
+									{/each}
+								</div>
+							{/if}
 							<div class="flex flex-wrap gap-1.5">
 								{#each ask.seats as seat, si (seat.id)}
 									{@const speaking = ask.turns.find((t) => t.seat === seat.id && t.status === 'streaming')}
@@ -370,6 +399,19 @@
 							<ResearchPanel research={ask.research} />
 						{/if}
 
+						{#if ai < asks.length - 1 && !openedAsks.has(ask.id)}
+							<button
+								type="button"
+								class="dc-chip w-fit"
+								on:click={() => toggleAsk(ask.id)}
+								data-discuss-unfold={ask.id}
+							>
+								展开 {rounds.length} 轮 · {ask.turns.length} 段发言
+							</button>
+						{:else}
+						{#if ai < asks.length - 1}
+							<button type="button" class="dc-chip w-fit" on:click={() => toggleAsk(ask.id)}>收起发言</button>
+						{/if}
 						{#each rounds as { round, turns } (round)}
 							{@const doneCount = turns.filter((t) => t.status === 'done').length}
 							<div class="flex flex-col gap-3" data-discuss-round={round}>
@@ -401,6 +443,8 @@
 								{/each}
 							</div>
 						{/each}
+
+						{/if}
 
 						{#if ask.status === 'running'}
 							{#each Array.from({ length: Math.max(0, ask.rounds - maxRound) }, (_, k) => maxRound + k + 1) as round}

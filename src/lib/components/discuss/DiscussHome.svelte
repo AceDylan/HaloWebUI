@@ -15,7 +15,9 @@
 	} from '$lib/apis/discussions';
 	import { isHermesAgentModel } from '$lib/utils/hermes';
 	import { isDedicatedImageGenerationModel } from '$lib/utils/model-capabilities';
+	import { uploadFile } from '$lib/apis/files';
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
+	import UploadProgress from '$lib/components/common/UploadProgress.svelte';
 	import MenuLines from '$lib/components/icons/MenuLines.svelte';
 	import { now, timeAgo } from '$lib/components/teams/clock';
 	import SeatAvatar from './SeatAvatar.svelte';
@@ -43,6 +45,50 @@
 	let moderator = '';
 	let research = false;
 	let creating = false;
+	// Files for the question: images (for the models that read images) and documents (their text
+	// goes to every seat). Uploaded as soon as they are picked, with a progress ring.
+	type Attachment = { key: string; name: string; image: boolean; preview?: string; progress: number; id?: string; error?: string };
+	const MAX_FILES = 4;
+	let attachments: Attachment[] = [];
+	let fileInput: HTMLInputElement;
+	$: uploading = attachments.some((a) => !a.id && !a.error);
+	const attach = async (list: FileList | File[] | null | undefined) => {
+		const files = Array.from(list ?? []);
+		const room = MAX_FILES - attachments.length;
+		if (files.length > room) toast.info(`最多 ${MAX_FILES} 个附件`);
+		await Promise.all(
+			files.slice(0, Math.max(0, room)).map(async (file) => {
+				const image = file.type.startsWith('image/');
+				const item: Attachment = {
+					key: `${Date.now()}-${Math.random()}`,
+					name: file.name,
+					image,
+					preview: image ? URL.createObjectURL(file) : undefined,
+					progress: 0
+				};
+				attachments = [...attachments, item];
+				try {
+					const res: any = await uploadFile(localStorage.token, file, {
+						...(image ? { process: false } : {}),
+						onProgress: ({ percent }) => {
+							item.progress = percent;
+							attachments = attachments;
+						}
+					});
+					if (!res?.id) throw new Error('上传失败');
+					item.id = res.id;
+				} catch (e: any) {
+					item.error = typeof e === 'string' ? e : e?.message || '上传失败';
+				}
+				attachments = attachments;
+			})
+		);
+	};
+	const detach = (key: string) => {
+		const item = attachments.find((a) => a.key === key);
+		if (item?.preview) URL.revokeObjectURL(item.preview);
+		attachments = attachments.filter((a) => a.key !== key);
+	};
 	let composer: HTMLTextAreaElement;
 	let isMac = false;
 
@@ -68,7 +114,7 @@
 	$: spec = modeSpec(mode);
 	$: if (spec.fixedRounds) rounds = spec.rounds;
 	$: seatsValid = seats.length >= MIN_SEATS && seats.length <= MAX_SEATS && seats.every((s) => modelById(choices, s.model));
-	$: canStart = !creating && !!question.trim() && seatsValid && !!moderator;
+	$: canStart = !creating && !uploading && !!question.trim() && seatsValid && !!moderator;
 	$: moderatorChoices = choices;
 	$: webSearchEnabled = $config?.features?.enable_web_search !== false;
 
@@ -144,8 +190,11 @@
 				seats: seats.map((s) => ({ model: s.model, role: s.role.trim() })),
 				rounds,
 				moderator,
-				research
+				research,
+				files: attachments.filter((a) => a.id).map((a) => a.id!)
 			});
+			attachments.forEach((a) => a.preview && URL.revokeObjectURL(a.preview));
+			attachments = [];
 			try {
 				localStorage.setItem(LAST_KEY, JSON.stringify({ mode, seats, rounds, moderator, research }));
 			} catch {
@@ -255,7 +304,14 @@
 				</p>
 			</header>
 
-			<form class="tm-rise composer tm-card relative flex flex-col" style="--i:1" on:submit|preventDefault={start} data-discuss-composer>
+			<form
+				class="tm-rise composer tm-card relative flex flex-col"
+				style="--i:1"
+				on:submit|preventDefault={start}
+				on:dragover|preventDefault
+				on:drop|preventDefault={(e) => attach(e.dataTransfer?.files)}
+				data-discuss-composer
+			>
 				<label for="discuss-question" class="sr-only">要讨论的问题</label>
 				<textarea
 					id="discuss-question"
@@ -266,6 +322,13 @@
 					class="tm-scroll w-full resize-none bg-transparent px-5 pt-4 pb-2 text-[15px] leading-relaxed text-gray-900 outline-none placeholder:text-gray-400 dark:text-gray-100 dark:placeholder:text-gray-500"
 					placeholder="写下要讨论的问题，比如：小团队的内部工具，后端用 Postgres 还是 MongoDB？"
 					on:input={resize}
+					on:paste={(e) => {
+						const files = e.clipboardData?.files;
+						if (files?.length) {
+							e.preventDefault();
+							attach(files);
+						}
+					}}
 					on:keydown={(e) => {
 						if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
 							e.preventDefault();
@@ -273,6 +336,39 @@
 						}
 					}}
 				/>
+				{#if attachments.length}
+					<ul class="flex flex-wrap items-center gap-2 px-4 pb-2" aria-label="附件" data-discuss-attachments>
+						{#each attachments as a (a.key)}
+							<li class="relative" data-attachment-state={a.error ? 'failed' : a.id ? 'ready' : 'uploading'}>
+								{#if a.image}
+									<div class="relative size-12 overflow-hidden rounded-xl ring-1 ring-gray-200/70 dark:ring-white/10">
+										<img src={a.preview} alt={a.name} class="size-full object-cover" />
+										{#if !a.id && !a.error}
+											<UploadProgress progress={a.progress} ringClassName="size-8" className="absolute inset-0 bg-black/50 text-white" />
+										{/if}
+									</div>
+								{:else}
+									<span class="dc-chip max-w-[14rem] !pr-6">
+										{#if !a.id && !a.error}
+											<UploadProgress progress={a.progress} ringClassName="size-4" showPercent={false} />
+										{/if}
+										<span class="truncate" title={a.name}>{a.name}</span>
+										{#if !a.id && !a.error}<span class="tm-num shrink-0 text-gray-400">{a.progress < 100 ? `${a.progress}%` : '处理中'}</span>{/if}
+									</span>
+								{/if}
+								{#if a.error}
+									<span class="absolute inset-x-0 -bottom-4 truncate text-[10px] text-red-500" title={a.error}>{a.error}</span>
+								{/if}
+								<button
+									type="button"
+									class="absolute -top-1.5 -right-1.5 grid size-4 place-items-center rounded-full bg-gray-900 text-[10px] text-white ring-2 ring-white dark:bg-gray-100 dark:text-gray-900 dark:ring-gray-900"
+									aria-label="去掉 {a.name}"
+									on:click={() => detach(a.key)}>×</button
+								>
+							</li>
+						{/each}
+					</ul>
+				{/if}
 
 				<div class="flex flex-col gap-3 border-t border-gray-100 px-4 pt-3 pb-3 dark:border-gray-800/70">
 					<div class="tm-scroll tm-fade-x -mx-1 flex items-center gap-1.5 overflow-x-auto px-1" role="radiogroup" aria-label="讨论方式">
@@ -292,8 +388,20 @@
 					</div>
 
 					<SeatPicker bind:seats {choices} mode={spec} />
+					<input bind:this={fileInput} type="file" multiple class="hidden" on:change={(e) => { attach(e.currentTarget.files); e.currentTarget.value = ''; }} data-discuss-file-input />
 
 					<div class="flex flex-wrap items-center gap-2">
+						<button
+							type="button"
+							class="dc-chip"
+							disabled={attachments.length >= MAX_FILES}
+							title="附带文件或图片：文档的文字给每位参与者，图片给能看图的模型（也可以粘贴或拖进来）"
+							on:click={() => fileInput?.click()}
+							data-discuss-attach
+							><svg class="size-3.5" viewBox="0 0 16 16" fill="none" aria-hidden="true"
+								><path d="M10.5 4.5 5.4 9.6a1.6 1.6 0 0 0 2.3 2.3l5.2-5.2a3 3 0 0 0-4.3-4.3L3.4 7.6a4.4 4.4 0 0 0 6.2 6.2l4-4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" /></svg
+							>附件</button
+						>
 						<div class="dc-chip !pr-1 !pl-2.5" data-discuss-rounds>
 							<span>轮数</span>
 							<button

@@ -107,7 +107,7 @@
 				</div>
 
 				{#if pair.length}
-					<div class="mt-4 grid gap-3 {pair.length > 1 ? 'md:grid-cols-2' : ''}">
+					<div class="mt-4 grid items-start gap-3 {pair.length > 1 ? 'md:grid-cols-2' : ''}">
 						{#each pair as section, i (section.title + i)}
 							<div class="dc-section px-4 py-3" data-kind={section.kind}>
 								<div class="mb-1 flex items-center gap-1.5 text-[12.5px] font-semibold text-gray-800 dark:text-gray-100">

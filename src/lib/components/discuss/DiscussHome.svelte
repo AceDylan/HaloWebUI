@@ -308,9 +308,9 @@
 								aria-label="多一轮">+</button
 							>
 						</div>
-						<label class="dc-chip !py-0.5 !pr-1" title="主持人：所有人发言后写结论，列出共识与分歧" data-discuss-moderator>
+						<label class="dc-chip !py-1 !pr-1.5" title="主持人：所有人发言后写结论，列出共识与分歧" data-discuss-moderator>
 							<span>主持人</span>
-							<select bind:value={moderator} class="max-w-[9rem] truncate bg-transparent py-0.5 text-xs text-gray-800 outline-none dark:text-gray-100">
+							<select bind:value={moderator} class="dc-select max-w-[9rem] truncate">
 								{#each moderatorChoices as m (m.id)}
 									<option value={modelRef(m)}>{m.name ?? m.id}</option>
 								{/each}

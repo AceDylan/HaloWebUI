@@ -407,22 +407,22 @@
 	</div>
 
 	{#if discussion}
-		<div class="pointer-events-none absolute inset-x-0 bottom-0 px-3 pb-3 sm:px-6 sm:pb-5" data-discuss-dock>
+		<div class="dc-dock-wrap pointer-events-none absolute inset-x-0 bottom-0 px-3 pb-3 sm:px-6 sm:pb-5" data-discuss-dock>
 			<div class="pointer-events-auto mx-auto flex max-w-3xl flex-col gap-2">
 				{#if settled && (canConclude || canContinue || canHandOff)}
 					<div class="flex flex-wrap justify-center gap-1.5" transition:fade={{ duration: 150 }}>
 						{#if canConclude}
-							<button type="button" class="dc-chip bg-white/80 dark:bg-gray-900/80" disabled={busy} on:click={conclude} data-discuss-conclude>
+							<button type="button" class="dc-chip" disabled={busy} on:click={conclude} data-discuss-conclude>
 								让主持人直接总结
 							</button>
 						{/if}
 						{#if canContinue}
-							<button type="button" class="dc-chip bg-white/80 dark:bg-gray-900/80" disabled={busy} on:click={more} data-discuss-continue>
+							<button type="button" class="dc-chip" disabled={busy} on:click={more} data-discuss-continue>
 								再讨论一轮
 							</button>
 						{/if}
 						{#if canHandOff}
-							<button type="button" class="dc-chip bg-white/80 dark:bg-gray-900/80" disabled={busy} on:click={openHermes} data-discuss-hermes>
+							<button type="button" class="dc-chip" disabled={busy} on:click={openHermes} data-discuss-hermes>
 								交给 Hermes 核查
 							</button>
 						{/if}

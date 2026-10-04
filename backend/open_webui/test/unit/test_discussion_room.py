@@ -366,3 +366,17 @@ def test_summary_meta_previews_the_answer():
     assert meta["status"] == "done" and meta["asks"] == 1
     assert meta["preview"].startswith("用 Postgres")
     assert [seat["name"] for seat in meta["seats"]] == ["a", "b"]
+
+
+def test_sections_drop_the_separators_between_them():
+    content = "## 结论\n用 Postgres。\n\n---\n\n## 共识\n- 要备份\n\n***\n## 分歧\n- 无\n---"
+    sections = room.parse_conclusion_sections(content)
+    assert [s["body"] for s in sections] == ["用 Postgres。", "- 要备份", "- 无"]
+
+
+def test_previews_are_plain_text_without_stray_spaces():
+    setup = _setup()
+    ask = _ask(setup)
+    ask["conclusion"]["content"] = "## 结论\n对多数人而言，**手机 App 是更好的选择**。\n- 看 [文档](http://x) 和 `代码`"
+    meta = room.summary_meta(setup, [ask])
+    assert meta["preview"] == "对多数人而言，手机 App 是更好的选择。 看 文档 和 代码"

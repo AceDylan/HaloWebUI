@@ -147,3 +147,10 @@ describe('helpers', () => {
 		expect(md).toContain('b（怀疑派）');
 	});
 });
+
+describe('section separators', () => {
+	it('drops --- lines between sections', () => {
+		const sections = parseSections('## 结论\n好\n\n---\n## 共识\n- a\n***\n');
+		expect(sections.map((s) => s.body)).toEqual(['好', '- a']);
+	});
+});

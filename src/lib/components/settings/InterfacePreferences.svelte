@@ -2557,27 +2557,22 @@
 												bind:state={displayMultiModelResponsesInTabs}
 											/>
 										</div>
-										<div class="glass-item px-4 py-3">
-											<div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-												<div class="min-w-0">
-													<div class="text-sm font-medium">
-														{$i18n.t('Multi-model discussion rounds')}
-													</div>
-													<div class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
-														{$i18n.t('Choose how many discussion rounds each multi-model question uses')}
-													</div>
+										<a
+											href="/discuss"
+											class="flex items-center justify-between gap-3 glass-item px-4 py-3 transition hover:opacity-90"
+											data-settings-discuss-link
+										>
+											<div class="min-w-0">
+												<div class="text-sm font-medium">{tr('多模型讨论', 'Multi-model discussion')}</div>
+												<div class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+													{tr(
+														'已移到「讨论台」：选模型、方式和轮数，主持人给出结论。',
+														'Moved to the Discussion room: pick models, a format and rounds; a moderator concludes.'
+													)}
 												</div>
-												<select
-													class="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm outline-hidden transition focus:border-gray-300 dark:border-gray-700 dark:bg-gray-900 sm:w-40"
-													value={multiModelDiscussionRounds}
-													on:change={handleMultiModelDiscussionRoundsChange}
-												>
-													{#each [1, 2, 3, 4, 5] as roundCount}
-														<option value={roundCount}>{$i18n.t('{{count}} round(s)', { count: roundCount })}</option>
-													{/each}
-												</select>
 											</div>
-										</div>
+											<span class="shrink-0 text-xs text-gray-500 dark:text-gray-400">{tr('打开', 'Open')} →</span>
+										</a>
 										<div class="flex items-center justify-between glass-item px-4 py-3">
 											<div class="text-sm font-medium">
 												{$i18n.t('Scroll to bottom when switching between branches')}

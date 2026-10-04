@@ -434,8 +434,21 @@ def parse_conclusion_sections(content: str) -> list[dict]:
             current = {"title": "", "body": line + "\n"}
             sections.append(current)
     for section in sections:
-        section["body"] = section["body"].strip()
+        section["body"] = _trim_rules(section["body"])
     return sections
+
+
+RULE_LINE = re.compile(r"^\s*([-*_])(\s*\1){2,}\s*$")
+
+
+def _trim_rules(body: str) -> str:
+    """A section without the --- separators models like to put between sections."""
+    lines = body.strip().splitlines()
+    while lines and (not lines[0].strip() or RULE_LINE.match(lines[0])):
+        lines.pop(0)
+    while lines and (not lines[-1].strip() or RULE_LINE.match(lines[-1])):
+        lines.pop()
+    return "\n".join(lines)
 
 
 def conclusion_answer(content: str) -> str:
@@ -616,9 +629,17 @@ def summary_meta(setup: dict, asks: list[dict]) -> dict:
         "status": last.get("status") or "running",
         "asks": len(asks),
         "question": _clean_text(last.get("question"), 200),
-        "preview": _clean_text(re.sub(r"[#*_`>\-]+", " ", conclusion_answer(conclusion)), 180),
+        "preview": _clean_text(_plain(conclusion_answer(conclusion)), 180),
         "updatedAt": now_ms(),
     }
+
+
+def _plain(markdown: str) -> str:
+    """One line of text from Markdown, for list previews."""
+    text = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", markdown or "")
+    text = re.sub(r"(\*\*|__|\*|`|~~)", "", text)
+    text = re.sub(r"^\s{0,3}(#+|>|[-*+]|\d+\.)\s+", "", text, flags=re.M)
+    return re.sub(r"\s+", " ", text).strip()
 
 
 # ---------------------------------------------------------------------------------------------

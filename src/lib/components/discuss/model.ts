@@ -125,7 +125,17 @@ export const parseSections = (content: string): Section[] => {
 			sections.push(current);
 		}
 	}
-	return sections.map((s) => ({ ...s, body: s.body.trim() }));
+	return sections.map((s) => ({ ...s, body: trimRules(s.body) }));
+};
+
+const RULE_LINE = /^\s*([-*_])(\s*\1){2,}\s*$/;
+
+/** A section without the --- separators models like to put between sections. */
+const trimRules = (body: string) => {
+	const lines = body.trim().split('\n');
+	while (lines.length && (!lines[0].trim() || RULE_LINE.test(lines[0]))) lines.shift();
+	while (lines.length && (!lines[lines.length - 1].trim() || RULE_LINE.test(lines[lines.length - 1]))) lines.pop();
+	return lines.join('\n');
 };
 
 export type SectionKind = 'answer' | 'agree' | 'disagree' | 'positions' | 'next' | 'other';

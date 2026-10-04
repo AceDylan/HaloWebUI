@@ -109,7 +109,7 @@
 				<label class="flex min-w-0 items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400">
 					模型
 					<select
-						class="rounded-lg border border-gray-200/70 bg-transparent px-2 py-1 text-xs text-gray-800 dark:border-gray-700/60 dark:text-gray-100"
+						class="dc-select"
 						value={seats[i].model}
 						on:change={(e) => setModel(i, e.currentTarget.value)}
 					>

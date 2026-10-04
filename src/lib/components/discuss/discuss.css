@@ -283,6 +283,11 @@
 }
 
 /* --- bottom bar -------------------------------------------------------------------------------- */
+/* the content fades out under the dock, so the floating actions never sit on top of text */
+.dc-dock-wrap {
+	padding-top: 2.75rem;
+	background: linear-gradient(to top, var(--tm-page) 58%, transparent);
+}
 .dc-dock {
 	border-radius: 1.25rem;
 	border: 1px solid hsl(var(--tm-line-strong));
@@ -331,6 +336,31 @@ button.dc-chip:disabled {
 	border-color: hsl(var(--tm-accent) / 0.4);
 	background: hsl(var(--tm-accent) / 0.1);
 	color: hsl(var(--tm-accent));
+}
+
+/* compact selects inside chips: no app-wide select box */
+[data-discuss-ui] select.dc-select {
+	appearance: none;
+	-webkit-appearance: none;
+	border: 0;
+	box-shadow: none;
+	background-color: transparent;
+	background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='m3 4.5 3 3 3-3' fill='none' stroke='%23889' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+	background-repeat: no-repeat;
+	background-position: right 0.15rem center;
+	background-size: 0.85em 0.85em;
+	padding: 0.1rem 1.15rem 0.1rem 0.15rem;
+	min-height: 0;
+	height: auto;
+	border-radius: 0.375rem;
+	font-size: 0.75rem;
+	line-height: 1rem;
+	font-weight: 500;
+	color: hsl(var(--tm-ink));
+	outline: none;
+}
+[data-discuss-ui] select.dc-select:focus-visible {
+	box-shadow: 0 0 0 2px hsl(var(--tm-accent) / 0.35);
 }
 
 @media (prefers-reduced-motion: reduce) {

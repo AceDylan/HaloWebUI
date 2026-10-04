@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { afterUpdate, tick } from 'svelte';
+	import { afterUpdate, onDestroy, onMount } from 'svelte';
 	import { toast } from 'svelte-sonner';
 
 	import type { DiscussSeat, DiscussTurn } from '$lib/apis/discussions';
@@ -27,11 +27,26 @@
 	$: used = tokens(turn.usage?.completion_tokens ?? turn.usage?.total_tokens);
 	$: showRole = !!seat?.role && !seat.label.includes(seat.role);
 
+	const LONG_PX = 300;
 	afterUpdate(() => {
-		if (!body) return;
-		if (live && follow) body.scrollTop = body.scrollHeight;
-		if (!live) long = body.scrollHeight > 300 || long;
+		if (body && live && follow) body.scrollTop = body.scrollHeight;
 	});
+	// The Markdown renderer arrives asynchronously, so measure whenever the content's size
+	// changes, not just after this card updates.
+	let inner: HTMLDivElement;
+	let observer: ResizeObserver | null = null;
+	const measure = () => {
+		if (inner && !live) long = inner.scrollHeight > LONG_PX;
+	};
+	onMount(() => {
+		if (typeof ResizeObserver !== 'undefined' && inner) {
+			observer = new ResizeObserver(measure);
+			observer.observe(inner);
+		}
+		measure();
+	});
+	onDestroy(() => observer?.disconnect());
+	$: if (!live && inner) measure();
 
 	const onScroll = () => {
 		if (!live || !body) return;
@@ -42,7 +57,6 @@
 		if (await copyToClipboard(turn.content)) toast.success('已复制这段发言');
 	};
 
-	$: if (!live) tick().then(() => (long = !!body && body.scrollHeight > 300));
 </script>
 
 <article
@@ -83,6 +97,7 @@
 		data-clamped={!live && long && !expanded}
 		on:scroll={onScroll}
 	>
+		<div bind:this={inner}>
 		{#if turn.status === 'waiting' || (turn.status === 'streaming' && !turn.content)}
 			<div class="flex flex-col gap-2 pt-1" style="--dc-hue: {hue}" aria-label={statusText}>
 				<div class="dc-skeleton w-11/12" />
@@ -101,6 +116,7 @@
 				<p class="mt-1 text-[11px] text-red-600 dark:text-red-300">（中途出错：{turn.error}）</p>
 			{/if}
 		{/if}
+		</div>
 	</div>
 
 	{#if turn.status === 'done' && turn.content}

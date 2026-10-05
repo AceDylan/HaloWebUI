@@ -98,12 +98,7 @@ html.halo-scifi .halo-mode-eyebrow::before {
 	height: 6px;
 	background: var(--scifi-cyan);
 	box-shadow: 0 0 8px var(--scifi-cyan);
-	animation: sf-blink 1.6s steps(2, start) infinite;
-}
-@keyframes sf-blink {
-	to {
-		opacity: 0.25;
-	}
+	animation: sf-glow 2.4s ease-in-out infinite;
 }
 html.halo-scifi [data-teams-ui] .tm-eyebrow {
 	font-family: var(--font-mono);
@@ -676,7 +671,7 @@ html.halo-scifi [data-image-studio-wait]::before {
 	color: var(--scifi-cyan);
 	-webkit-text-fill-color: var(--scifi-cyan);
 	text-shadow: 0 0 10px var(--scifi-glow);
-	animation: sf-blink 1.1s steps(2, start) infinite;
+	animation: sf-glow 1.6s ease-in-out infinite;
 }
 
 /* … and what it made develops from a scan line */
@@ -763,12 +758,12 @@ html.halo-scifi.dark [data-halo-mode] [data-scifi-conduit] textarea {
 
 @keyframes sf-materialize {
 	from {
+		opacity: 0.2;
 		clip-path: inset(0 0 100% 0 round 1rem);
-		filter: brightness(1.6);
 	}
 	to {
+		opacity: 1;
 		clip-path: inset(0 0 0 0 round 1rem);
-		filter: none;
 	}
 }
 

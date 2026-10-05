@@ -1,5 +1,7 @@
 import { marked } from 'marked';
 
+import { HTML_VISUAL_KIT_CSS, usesHtmlVisualKit } from './html-visual-kit';
+
 export const HTML_PREVIEW_SANDBOX = 'allow-scripts';
 export const HTML_EXPORT_SANDBOX = 'allow-same-origin';
 export const HTML_PREVIEW_REFERRER_POLICY = 'no-referrer';
@@ -705,8 +707,13 @@ export const buildHtmlArtifactPreview = (
 		return hardenHtmlPreviewDocument(document, options.labels, colorScheme, options.citations);
 	}
 
+	// Kit cards bring their own light and dark palettes; the scheme attribute keeps
+	// the generic dark adaptation off them.
+	const documentOpen = usesHtmlVisualKit(mergedHtml)
+		? `<html lang="zh-CN" data-halo-color-scheme="${colorScheme}"><head>${style}<style data-halo-visual-kit="true">${HTML_VISUAL_KIT_CSS}</style></head>`
+		: `<html lang="en"><head>${style}</head>`;
 	return hardenHtmlPreviewDocument(
-		`<!DOCTYPE html><html lang="en"><head>${style}</head><body>${mergedHtml}</body></html>`,
+		`<!DOCTYPE html>${documentOpen}<body>${mergedHtml}</body></html>`,
 		options.labels,
 		colorScheme,
 		options.citations

@@ -1572,7 +1572,8 @@ def test_agy_html_request_replaces_draft_html_card_with_its_text():
     assert "GPT-6 上线时间查询" in prompt
     assert "会话 ID：c67a323f-1f57-4960-8eca-d7114fe51dc4" in prompt
     # ... but the card's markup is not offered to AGY as code to preserve
-    assert "style=" not in prompt
+    assert "max-width:920px" not in prompt
+    assert "font-size:24px" not in prompt
     assert "&lt;div" not in prompt
     assert "````" not in prompt
 
@@ -1683,3 +1684,118 @@ def test_history_replies_go_back_without_their_visual_cards():
     # The last message (a reply being continued) stays whole.
     assert out[4] == messages[4]
     assert compact_html_cards_in_history(None) is None
+
+
+_GATEWAY = {
+    "api_key": "test-key",
+    "base_url": "https://gateway.test",
+    "model": "gemini-api://models/gemini-chat",
+}
+_KIT_CARD = '<div class="hv" data-theme="terminal"><header class="hv-hero"><h1>结论</h1></header></div>'
+
+
+def test_agy_answer_design_asks_the_gateway_directly_when_configured(monkeypatch):
+    calls = []
+
+    async def _fake_gateway(gateway, prompt, **kwargs):
+        calls.append((gateway, prompt, kwargs))
+        return _KIT_CARD.encode()
+
+    async def _no_cli(*args, **kwargs):
+        raise AssertionError("the AGY CLI must not run in gateway mode")
+
+    monkeypatch.setattr(html_visual_prompt, "_agy_gateway_config", lambda: _GATEWAY)
+    monkeypatch.setattr(html_visual_prompt, "_request_agy_gateway", _fake_gateway)
+    monkeypatch.setattr(html_visual_prompt, "_run_agy_process", _no_cli)
+    monkeypatch.setenv("HALOWEBUI_AGY_COMMAND", "agy")
+    metadata = _metadata()
+
+    designed = asyncio.run(
+        html_visual_prompt.design_html_visual_artifact_with_agy(STRUCTURED_REPORT, metadata)
+    )
+
+    assert len(calls) == 1
+    assert calls[0][0] is _GATEWAY
+    assert "<final_answer>" in calls[0][1]
+    assert calls[0][2]["timeout_seconds"] == 150.0
+    assert designed.endswith(f"````html\n{_KIT_CARD}\n````")
+    assert metadata[html_visual_prompt.HTML_VISUAL_AGY_HTML_METADATA_KEY]["status"] == "success"
+
+
+def test_agy_gateway_http_error_keeps_the_answer(monkeypatch):
+    async def _failing_gateway(*args, **kwargs):
+        raise html_visual_prompt._AgyGatewayHttpError(502)
+
+    monkeypatch.setattr(html_visual_prompt, "_agy_gateway_config", lambda: _GATEWAY)
+    monkeypatch.setattr(html_visual_prompt, "_request_agy_gateway", _failing_gateway)
+    monkeypatch.setenv("HALOWEBUI_AGY_COMMAND", "agy")
+    metadata = _metadata()
+
+    designed = asyncio.run(
+        html_visual_prompt.design_html_visual_artifact_with_agy(STRUCTURED_REPORT, metadata)
+    )
+
+    assert designed == STRUCTURED_REPORT
+    record = metadata[html_visual_prompt.HTML_VISUAL_AGY_HTML_METADATA_KEY]
+    assert (record["status"], record["reason"]) == ("failed", "http_502")
+
+
+def test_agy_html_request_prompt_documents_the_design_kit():
+    prompt = html_visual_prompt._build_agy_html_request_prompt("## 标题\n\n- 一\n- 二")
+
+    assert '<div class="hv" data-theme="THEME">' in prompt
+    for theme in ("aurora", "terminal", "paper", "sunset", "mint", "finance", "ion"):
+        assert f"- {theme}:" in prompt
+    assert "&lt;final_answer" not in prompt
+    assert prompt.rstrip().endswith("</final_answer>")
+
+
+def test_agy_gateway_request_returns_only_the_answer_text():
+    from aiohttp import web
+
+    seen = {}
+
+    async def _generate(request):
+        seen["path"] = request.path
+        seen["key"] = request.headers.get("x-goog-api-key")
+        seen["body"] = await request.json()
+        return web.json_response(
+            {
+                "candidates": [
+                    {
+                        "content": {
+                            "parts": [
+                                {"text": "planning the layout", "thought": True},
+                                {"text": "<div class=\"hv\">"},
+                                {"text": "ok</div>"},
+                            ]
+                        }
+                    }
+                ]
+            }
+        )
+
+    async def _run():
+        app = web.Application()
+        app.router.add_post("/v1beta/models/{name}", _generate)
+        runner = web.AppRunner(app)
+        await runner.setup()
+        site = web.TCPSite(runner, "127.0.0.1", 0)
+        await site.start()
+        port = site._server.sockets[0].getsockname()[1]
+        try:
+            return await html_visual_prompt._request_agy_gateway(
+                {**_GATEWAY, "base_url": f"http://127.0.0.1:{port}/"},
+                "prompt text",
+                output_limit=1024,
+                timeout_seconds=10,
+            )
+        finally:
+            await runner.cleanup()
+
+    output = asyncio.run(_run())
+
+    assert output == b'<div class="hv">ok</div>'
+    assert seen["path"] == "/v1beta/models/gemini-chat:generateContent"
+    assert seen["key"] == "test-key"
+    assert seen["body"]["contents"][0]["parts"][0]["text"] == "prompt text"

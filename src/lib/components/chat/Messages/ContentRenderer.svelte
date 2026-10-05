@@ -40,6 +40,7 @@
 		resolveHaloThemeVars
 	} from '$lib/utils/response-html-format';
 	import { mergeAdjacentReasoningDetails } from '$lib/utils/reasoning-merge';
+	import { withHtmlVisualKitStyles } from '$lib/utils/html-visual-kit';
 	import {
 		buildInlineHtmlArtifactPreview,
 		collectHtmlArtifactCompanionImages,
@@ -627,7 +628,7 @@
 		if (!inlineHtmlArtifactSource) {
 			return;
 		}
-		await copyToClipboard(inlineHtmlArtifactSource);
+		await copyToClipboard(withHtmlVisualKitStyles(inlineHtmlArtifactSource));
 		toast.success($i18n.t('Copied'));
 		copiedInlineHtmlArtifactSource = true;
 		if (copiedInlineHtmlArtifactSourceTimer) {

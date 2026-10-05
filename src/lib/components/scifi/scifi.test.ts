@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { BOOT_KEY, scifiEnabled, shouldBoot, markBooted, WARP_EVENT, warp } from './scifi';
+import { BOOT_EVERY_MS, BOOT_KEY, scifiEnabled, shouldBoot, markBooted, WARP_EVENT, warp } from './scifi';
 
 const storage = () => {
 	const m = new Map<string, string>();
@@ -16,18 +16,20 @@ describe('sci-fi layer switch', () => {
 });
 
 describe('opening titles', () => {
-	it('play once per session, never framed, never with reduced motion', () => {
-		const session = storage();
-		vi.stubGlobal('sessionStorage', session);
+	it('play at most every 6 hours, never framed, never with reduced motion', () => {
+		const local = storage();
+		vi.stubGlobal('localStorage', local);
 		vi.stubGlobal('window', { matchMedia: () => ({ matches: false }) });
-		expect(shouldBoot(true)).toBe(false);
-		expect(shouldBoot(false)).toBe(true);
-		markBooted();
-		expect(session.getItem(BOOT_KEY)).toBe('1');
-		expect(shouldBoot(false)).toBe(false);
-		vi.stubGlobal('sessionStorage', storage());
+		const t0 = 1_000_000_000_000;
+		expect(shouldBoot(true, t0)).toBe(false);
+		expect(shouldBoot(false, t0)).toBe(true);
+		markBooted(t0);
+		expect(local.getItem(BOOT_KEY)).toBe(String(t0));
+		expect(shouldBoot(false, t0 + 60_000)).toBe(false);
+		expect(shouldBoot(false, t0 + BOOT_EVERY_MS)).toBe(true);
+		vi.stubGlobal('localStorage', storage());
 		vi.stubGlobal('window', { matchMedia: () => ({ matches: true }) });
-		expect(shouldBoot(false)).toBe(false);
+		expect(shouldBoot(false, t0)).toBe(false);
 	});
 	it('warp announces itself with its length', () => {
 		const seen: unknown[] = [];

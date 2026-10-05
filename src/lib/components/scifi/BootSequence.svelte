@@ -1,6 +1,6 @@
 <script lang="ts">
 	/**
-	 * Opening titles, once per browser session: the ring draws itself, three status lines type
+	 * Opening titles (at most every 6 hours, scifi.ts shouldBoot): the ring draws itself, three status lines type
 	 * out, then the screen opens like an iris onto the app while the stars jump. About two
 	 * seconds; a click, a tap or any key skips it. Never framed, never with reduced motion
 	 * (scifi.ts shouldBoot). Styles: scifi.css (.halo-boot).

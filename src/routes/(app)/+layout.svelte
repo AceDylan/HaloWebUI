@@ -105,7 +105,7 @@
 	};
 
 	// Sci-fi layer (scifi.css): one class on <html>, the starfield in the panel, the opening
-	// titles once per session once the app is loaded.
+	// titles (at most every 6 hours) once the app is loaded.
 	$: scifiOn = scifiEnabled($settings);
 	$: applyScifi(scifiOn);
 	let booting = false;

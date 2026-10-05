@@ -4,6 +4,7 @@
 	import { Background, BackgroundVariant, Controls, MarkerType, SvelteFlow } from '@xyflow/svelte';
 	import '@xyflow/svelte/dist/style.css';
 
+	import { theme } from '$lib/stores';
 	import BoardCamera from './BoardCamera.svelte';
 	import { prefersReducedMotion } from '$lib/utils/transitions';
 	import FlowEdge from './FlowEdge.svelte';
@@ -129,11 +130,17 @@
 		);
 	}
 
-	const colorMode = 'dark' as const;
+	$: colorMode = $theme?.includes('dark')
+		? 'dark'
+		: $theme === 'system' &&
+			  typeof window !== 'undefined' &&
+			  window.matchMedia('(prefers-color-scheme: dark)').matches
+			? 'dark'
+			: 'light';
 </script>
 
 <div
-	class="board dark tm-card relative w-full overflow-hidden"
+	class="board tm-card relative w-full overflow-hidden"
 	style="height:{height}px"
 	bind:clientWidth={boxWidth}
 	on:pointerdown={() => cameraCancel++}
@@ -179,17 +186,8 @@
 
 <style>
 	.board {
-		color-scheme: dark;
-		--tm-accent: 222 100% 72%;
-		--tm-ink: 228 14% 92%;
-		--tm-muted: 226 12% 72%;
-		--tm-line: 220 30% 90% / 0.09;
-		--tm-line-strong: 220 30% 90% / 0.18;
-		--tm-surface: 226 27% 12%;
-		--tm-surface-2: 226 30% 8%;
-		color: hsl(var(--tm-ink));
 		background: radial-gradient(80% 60% at 50% 0%, hsl(var(--tm-accent) / 0.05), transparent 70%),
-			#0b101b;
+			hsl(var(--tm-surface-2));
 	}
 	.vignette {
 		border-radius: inherit;
@@ -222,7 +220,7 @@
 	}
 	.board :global(.tm-edge-run) {
 		stroke-dasharray: 6 6;
-		animation: none;
+		animation: tm-edge-flow 0.9s linear infinite;
 	}
 	.board :global(.tm-edge-wait) {
 		stroke-dasharray: 4 6;

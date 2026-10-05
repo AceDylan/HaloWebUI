@@ -91,7 +91,6 @@
 	--dur-base: 240ms;
 	--dur-slow: 480ms;
 
-
 	/* Type */
 	--font-display: 'Mona Sans', var(--font-sans);
 }
@@ -2485,19 +2484,6 @@ body:has(#chat-input:focus) .halo-orb__arc {
 		box-shadow: inset 0 0 0 1px oklch(1 0 0 / 0.06);
 	}
 }
-.halo-auth__grid {
-	position: absolute;
-	inset: 0;
-	z-index: -1;
-	background-image:
-		linear-gradient(to right, oklch(1 0 0 / 0.045) 1px, transparent 1px),
-		linear-gradient(to bottom, oklch(1 0 0 / 0.045) 1px, transparent 1px);
-	background-size: 56px 56px;
-	background-position: center center;
-	-webkit-mask-image: radial-gradient(ellipse 60% 55% at 50% 42%, #000 10%, transparent 75%);
-	mask-image: radial-gradient(ellipse 60% 55% at 50% 42%, #000 10%, transparent 75%);
-}
-
 .halo-auth__scene {
 	--s: min(30rem, 62vh, 40vw);
 	position: absolute;
@@ -2513,110 +2499,6 @@ body:has(#chat-input:focus) .halo-orb__arc {
 	.halo-auth__scene {
 		--s: min(15rem, 30dvh);
 		top: 50%;
-	}
-}
-
-.halo-auth__orbit {
-	position: absolute;
-	left: 50%;
-	top: 50%;
-	width: calc(var(--r) * 46%);
-	height: calc(var(--r) * 46%);
-	border-radius: 9999px;
-	border: 1px solid oklch(1 0 0 / 0.07);
-	transform: translate(-50%, -50%);
-}
-.halo-auth__orbit--moving {
-	border-style: dashed;
-	border-color: oklch(1 0 0 / 0.06);
-	animation: halo-orbit 90s linear infinite;
-}
-.halo-auth__planet {
-	position: absolute;
-	left: 50%;
-	top: -3px;
-	width: 6px;
-	height: 6px;
-	margin-left: -3px;
-	border-radius: 9999px;
-	background: var(--halo-solar);
-	box-shadow:
-		0 0 10px 2px color-mix(in oklab, var(--halo-solar) 60%, transparent),
-		0 0 0 4px color-mix(in oklab, var(--halo-solar) 14%, transparent);
-}
-@keyframes halo-orbit {
-	to {
-		transform: translate(-50%, -50%) rotate(360deg);
-	}
-}
-
-.halo-auth__eclipse {
-	position: absolute;
-	left: 27%;
-	top: 27%;
-	width: 46%;
-	height: 46%;
-	border-radius: 9999px;
-	background: radial-gradient(circle at 50% 50%, oklch(0.1 0.012 268) 55%, oklch(0.14 0.02 270) 72%);
-	box-shadow: inset 0 0 40px oklch(0 0 0 / 0.6);
-}
-.halo-auth__bloom {
-	position: absolute;
-	inset: -30%;
-	border-radius: 9999px;
-	background: var(--halo-spectrum);
-	filter: blur(56px);
-	opacity: 0.42;
-	z-index: -1;
-	animation: halo-spin 22s linear infinite;
-}
-.halo-auth__corona {
-	position: absolute;
-	inset: -14%;
-	border-radius: 9999px;
-	background: radial-gradient(
-		circle,
-		transparent 57%,
-		color-mix(in oklab, var(--halo-ion) 22%, transparent) 63%,
-		transparent 72%
-	);
-	z-index: -1;
-}
-.halo-auth__mark {
-	position: absolute;
-	inset: -14%;
-	width: 128%;
-	height: 128%;
-	overflow: visible;
-}
-.halo-auth__track {
-	fill: none;
-	stroke: oklch(1 0 0 / 0.09);
-	stroke-width: 0.5;
-}
-.halo-auth__arc {
-	fill: none;
-	stroke: url(#halo-auth-spectrum);
-	stroke-width: 2.2;
-	stroke-linecap: round;
-	transform-origin: 60px 60px;
-	filter: drop-shadow(0 0 3px color-mix(in oklab, var(--halo-violet) 70%, transparent));
-	animation: halo-arc 26s linear infinite;
-}
-@keyframes halo-arc {
-	to {
-		transform: rotate(360deg);
-	}
-}
-.halo-auth__core {
-	fill: oklch(0.98 0.01 268);
-	transform-origin: 60px 60px;
-	filter: drop-shadow(0 0 4px var(--halo-ion)) drop-shadow(0 0 12px var(--halo-violet));
-	animation: halo-breathe 4.8s var(--ease-in-out) infinite;
-}
-@keyframes halo-breathe {
-	50% {
-		transform: scale(1.18);
 	}
 }
 
@@ -3009,10 +2891,6 @@ body:has(#chat-input:focus) .halo-orb__arc {
 	.halo-presence::after,
 	.halo-spinner,
 	.halo-shimmer,
-	.halo-auth__orbit--moving,
-	.halo-auth__bloom,
-	.halo-auth__arc,
-	.halo-auth__core,
 	.halo-auth__body,
 	.halo-rise,
 	[data-halo-copy-id]::after,

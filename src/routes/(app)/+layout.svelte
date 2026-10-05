@@ -61,6 +61,7 @@
 		if (!('startViewTransition' in document)) return;
 		if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
 		if (navigation.from?.url.pathname === navigation.to?.url.pathname) return;
+		document.documentElement.style.setProperty('--nav-direction', navigation.type === 'popstate' && (navigation.delta ?? 0) < 0 ? '-1' : '1');
 		return new Promise<void>((resolve) => {
 			(document as any).startViewTransition(async () => {
 				resolve();

@@ -55,6 +55,18 @@
 		if (!modalElement || isAttached) return;
 		previouslyFocused = getReturnFocusTarget();
 		document.body.appendChild(modalElement);
+		const panel = modalElement.querySelector<HTMLElement>('.halo-modal');
+		if (
+			panel &&
+			previouslyFocused &&
+			typeof panel.getBoundingClientRect === 'function' &&
+			typeof previouslyFocused.getBoundingClientRect === 'function'
+		) {
+			const origin = previouslyFocused.getBoundingClientRect(),
+				box = panel.getBoundingClientRect();
+			if (box.width && origin.width)
+				panel.style.transformOrigin = `${Math.max(0, Math.min(box.width, origin.left + origin.width / 2 - box.left))}px ${Math.max(0, Math.min(box.height, origin.top + origin.height / 2 - box.top))}px`;
+		}
 		window.addEventListener('keydown', handleKeyDown);
 		lockBodyScroll();
 		isAttached = true;

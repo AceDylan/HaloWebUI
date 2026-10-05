@@ -4,7 +4,8 @@
 	import { Background, BackgroundVariant, Controls, MarkerType, SvelteFlow } from '@xyflow/svelte';
 	import '@xyflow/svelte/dist/style.css';
 
-	import { theme } from '$lib/stores';
+	import BoardCamera from './BoardCamera.svelte';
+	import { prefersReducedMotion } from '$lib/utils/transitions';
 	import FlowEdge from './FlowEdge.svelte';
 	import TaskNode from './TaskNode.svelte';
 	import {
@@ -41,6 +42,8 @@
 	export let selectedTaskId: string | null = null;
 	/** In a replay the timers would lie: hide them. */
 	export let replay = false;
+	export let replayTaskId: string | null = null;
+	let cameraCancel = 0;
 
 	const dispatch = createEventDispatcher();
 	const nodes = writable([]);
@@ -114,7 +117,11 @@
 						source: p,
 						target: t.id,
 						type: 'flow',
-						data: { state: done ? 'done' : running ? 'run' : 'wait', color },
+						data: {
+							state: done ? 'done' : running ? 'run' : 'wait',
+							color,
+							selected: p === selectedTaskId || t.id === selectedTaskId
+						},
 						markerEnd: { type: MarkerType.ArrowClosed, color, width: 14, height: 14 }
 					};
 				})
@@ -122,19 +129,15 @@
 		);
 	}
 
-	$: colorMode = $theme?.includes('dark')
-		? 'dark'
-		: $theme === 'system' &&
-			  typeof window !== 'undefined' &&
-			  window.matchMedia('(prefers-color-scheme: dark)').matches
-			? 'dark'
-			: 'light';
+	const colorMode = 'dark' as const;
 </script>
 
 <div
-	class="board tm-card relative w-full overflow-hidden"
+	class="board dark tm-card relative w-full overflow-hidden"
 	style="height:{height}px"
 	bind:clientWidth={boxWidth}
+	on:pointerdown={() => cameraCancel++}
+	on:wheel={() => cameraCancel++}
 	data-team-board
 	data-direction={direction}
 >
@@ -145,7 +148,7 @@
 			{nodeTypes}
 			{edgeTypes}
 			fitView
-			fitViewOptions={{ padding: 0.06, maxZoom: 1 }}
+			fitViewOptions={{ padding: 0.06, maxZoom: 1, duration: prefersReducedMotion() ? 0 : 560 }}
 			minZoom={0.3}
 			maxZoom={1.5}
 			nodesDraggable={false}
@@ -155,6 +158,12 @@
 			{colorMode}
 			on:paneclick={() => dispatch('select', null)}
 		>
+			<BoardCamera
+				target={selectedTaskId ?? (replay ? replayTaskId : null)}
+				width={boxWidth}
+				{height}
+				cancel={cameraCancel}
+			/>
 			<Controls showLock={false} />
 			<Background
 				variant={BackgroundVariant.Dots}
@@ -170,8 +179,17 @@
 
 <style>
 	.board {
+		color-scheme: dark;
+		--tm-accent: 222 100% 72%;
+		--tm-ink: 228 14% 92%;
+		--tm-muted: 226 12% 72%;
+		--tm-line: 220 30% 90% / 0.09;
+		--tm-line-strong: 220 30% 90% / 0.18;
+		--tm-surface: 226 27% 12%;
+		--tm-surface-2: 226 30% 8%;
+		color: hsl(var(--tm-ink));
 		background: radial-gradient(80% 60% at 50% 0%, hsl(var(--tm-accent) / 0.05), transparent 70%),
-			hsl(var(--tm-surface-2));
+			#0b101b;
 	}
 	.vignette {
 		border-radius: inherit;
@@ -204,7 +222,7 @@
 	}
 	.board :global(.tm-edge-run) {
 		stroke-dasharray: 6 6;
-		animation: tm-edge-flow 0.9s linear infinite;
+		animation: none;
 	}
 	.board :global(.tm-edge-wait) {
 		stroke-dasharray: 4 6;

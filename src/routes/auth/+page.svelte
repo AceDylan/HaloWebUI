@@ -17,6 +17,9 @@
 	import { takeHubTicket } from '$lib/utils/hub-embed';
 	import { safeRedirectPath } from '$lib/utils/safe-redirect';
 
+	import HaloConstellation from '$lib/components/common/HaloConstellation.svelte';
+	import { prefersReducedMotion } from '$lib/utils/transitions';
+
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import OnBoarding from '$lib/components/OnBoarding.svelte';
 
@@ -36,7 +39,7 @@
 	let pointerX = 0;
 	let pointerY = 0;
 	const onStagePointer = (event) => {
-		if (event.pointerType !== 'mouse') return;
+		if (event.pointerType !== 'mouse' || document.hidden || prefersReducedMotion() || !window.matchMedia('(min-width: 1024px) and (pointer: fine)').matches) return;
 		const box = event.currentTarget.getBoundingClientRect();
 		pointerX = Math.max(-1, Math.min(1, ((event.clientX - box.left) / box.width) * 2 - 1));
 		pointerY = Math.max(-1, Math.min(1, ((event.clientY - box.top) / box.height) * 2 - 1));
@@ -70,7 +73,11 @@
 			// Replace, don't push: a sign-in page left behind in the history bounces Back
 			// forward again (signed in → off to the target). Framed by the Bookmark Hub, that
 			// entry sits in the Hub tab's own history, so Back could never leave the Hub.
-			goto(redirectTarget(), { replaceState: true });
+			if (typeof document.startViewTransition === 'function' && !prefersReducedMotion() && !document.hidden) {
+				document.documentElement.classList.add('halo-auth-vt');
+				const transition = document.startViewTransition(() => goto(redirectTarget(), { replaceState: true }));
+				transition.finished.catch(() => {}).finally(() => document.documentElement.classList.remove('halo-auth-vt'));
+			} else goto(redirectTarget(), { replaceState: true });
 		}
 	};
 
@@ -253,30 +260,7 @@
 				pointerY = 0;
 			}}
 		>
-			<div class="halo-auth__grid" aria-hidden="true"></div>
-			<div class="halo-auth__scene" aria-hidden="true">
-				<span class="halo-auth__orbit" style="--r: 1.5"></span>
-				<span class="halo-auth__orbit halo-auth__orbit--moving" style="--r: 2.05"
-					><i class="halo-auth__planet"></i></span
-				>
-				<span class="halo-auth__orbit" style="--r: 2.7"></span>
-				<div class="halo-auth__eclipse">
-					<span class="halo-auth__bloom"></span>
-					<span class="halo-auth__corona"></span>
-					<svg class="halo-auth__mark" viewBox="0 0 120 120">
-						<defs>
-							<linearGradient id="halo-auth-spectrum" x1="0" y1="0" x2="1" y2="1">
-								<stop offset="0" stop-color="var(--halo-ion)" />
-								<stop offset="0.5" stop-color="var(--halo-violet)" />
-								<stop offset="1" stop-color="var(--halo-solar)" />
-							</linearGradient>
-						</defs>
-						<circle class="halo-auth__track" cx="60" cy="60" r="43" />
-						<path class="halo-auth__arc" d="M60 17 A43 43 0 1 1 17 60" />
-						<circle class="halo-auth__core" cx="60" cy="60" r="7" />
-					</svg>
-				</div>
-			</div>
+			<div class="halo-auth__scene" aria-hidden="true"><HaloConstellation /></div>
 			<div class="halo-auth__caption">
 				<div class="halo-auth__eyebrow">
 					<span class="halo-presence" aria-hidden="true"></span>

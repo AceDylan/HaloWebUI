@@ -976,6 +976,7 @@
 								{replay}
 								members={memberViews}
 								selectedTaskId={selectedTask}
+								replayTaskId={replay ? (events[replayIndex ?? 0]?.task_id ?? null) : null}
 								on:select={(e) => selectTask(e.detail)}
 							/>
 							<div

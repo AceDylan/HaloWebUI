@@ -56,6 +56,7 @@
 	import { getNotificationPreview } from '$lib/utils/notification-preview';
 	import {
 		acceptHubTheme,
+		acceptHubEnter,
 		followHubTheme,
 		hubPlacePath,
 		keepHistoryWithHub,
@@ -659,6 +660,7 @@
 
 		// Set yourself as the last active tab when this tab is focused
 		const handleVisibilityChange = () => {
+			document.documentElement.classList.toggle('motion-paused', document.hidden);
 			if (document.visibilityState === 'visible') {
 				isLastActiveTab.set(true); // This tab is now the active tab
 				bc.postMessage('active'); // Notify other tabs that this tab is active
@@ -681,6 +683,10 @@
 		const onHubTheme = (event) => {
 			const next = acceptHubTheme(event, $config?.hub_origin);
 			if (next) followHubTheme(next, normalizeTheme(localStorage.theme));
+			if (acceptHubEnter(event, $config?.hub_origin) && !document.hidden) {
+				const shell = document.querySelector('[data-halo-main]');
+				if (shell) { shell.classList.remove('halo-enter'); void shell.getBoundingClientRect(); shell.classList.add('halo-enter'); }
+			}
 		};
 		window.addEventListener('message', onHubTheme);
 

@@ -182,6 +182,7 @@
 	import { chatHandoff, handOff, HANDOFF_PATH, takeHandoff } from '$lib/utils/handoff';
 
 	import Banner from '../common/Banner.svelte';
+	import { captureFirstMessage } from '$lib/utils/transitions/scene';
 	import MessageInput from '$lib/components/chat/MessageInput.svelte';
 	import MessageQueue from '$lib/components/chat/MessageInput/MessageQueue.svelte';
 	import Messages from '$lib/components/chat/Messages.svelte';
@@ -5593,6 +5594,8 @@
 			prompt = '';
 		}
 
+		const finishFirstMessageMotion = messages.length === 0 && !fromQueue ? captureFirstMessage() : null;
+
 		// Create user message
 		const sentHermesOptions =
 			hermesOptionsOverride !== undefined
@@ -5621,6 +5624,7 @@
 		// Add message to history and Set currentId to messageId
 		history.messages[userMessageId] = userMessage;
 		history.currentId = userMessageId;
+		if (finishFirstMessageMotion) { await tick(); finishFirstMessageMotion(); }
 
 		// Append messageId to childrenIds of parent message
 		if (messages.length !== 0) {

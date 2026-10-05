@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { BaseEdge, getSmoothStepPath, type Position } from '@xyflow/svelte';
+	import { BaseEdge, getBezierPath, type Position } from '@xyflow/svelte';
 
 	/**
 	 * A dependency on the board. Done: a solid line. The parent still working: a dashed line
@@ -13,16 +13,15 @@
 	export let sourcePosition: Position;
 	export let targetPosition: Position;
 	export let markerEnd: string | undefined = undefined;
-	export let data: { state?: 'done' | 'run' | 'wait'; color?: string } = {};
+	export let data: { state?: 'done' | 'run' | 'wait'; color?: string; selected?: boolean } = {};
 
-	$: [path] = getSmoothStepPath({
+	$: [path] = getBezierPath({
 		sourceX,
 		sourceY,
 		targetX,
 		targetY,
 		sourcePosition,
-		targetPosition,
-		borderRadius: 14
+		targetPosition
 	});
 	$: state = data?.state ?? 'wait';
 	$: color = data?.color ?? '#94a3b8';
@@ -33,13 +32,8 @@
 	{path}
 	{markerEnd}
 	class="tm-edge tm-edge-{state}"
-	style="stroke:{color};stroke-width:{state === 'wait' ? 1.5 : 2};"
+	style="stroke:{color};stroke-width:{state === 'wait' ? 1 : 1.5};"
 />
-{#if state === 'run'}
-	<circle r="7" fill={color} opacity="0.18" class="tm-edge-pulse">
-		<animateMotion dur="1.6s" repeatCount="indefinite" {path} />
-	</circle>
-	<circle r="3" fill={color} class="tm-edge-pulse">
-		<animateMotion dur="1.6s" repeatCount="indefinite" {path} />
-	</circle>
+{#if data.selected}
+	<path d={path} fill="none" stroke={color} stroke-width="7" opacity="0.12" class="tm-edge-glow" />
 {/if}

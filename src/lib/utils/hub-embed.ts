@@ -409,7 +409,11 @@ export const postPlaceToHub = (
 	}
 	try {
 		parent.postMessage(
-			{ source: HUB_ACTIVITY_MESSAGE_SOURCE, type: HUB_PLACE_MESSAGE_TYPE, path: hubReturnPath(path) },
+			{
+				source: HUB_ACTIVITY_MESSAGE_SOURCE,
+				type: HUB_PLACE_MESSAGE_TYPE,
+				path: hubReturnPath(path)
+			},
 			hubOrigin
 		);
 		return true;
@@ -474,18 +478,7 @@ export const acceptHubTheme = (
 	win: { parent: unknown } = window,
 	store: SessionStore | null = sessionStore()
 ): HubTheme | null => {
-	if (!isFramed(win) || event.source !== win.parent) {
-		return null;
-	}
-	let origin = typeof hubOrigin === 'string' && PLAIN_ORIGIN.test(hubOrigin) ? hubOrigin : null;
-	try {
-		origin = origin ?? store?.getItem(HUB_ORIGIN_KEY) ?? null;
-	} catch {
-		origin = null;
-	}
-	if (!origin || event.origin !== origin) {
-		return null;
-	}
+	if (!trustedHubMessage(event, hubOrigin, win, store)) return null;
 	const data = event.data as { source?: unknown; type?: unknown; theme?: unknown } | null;
 	if (
 		!data ||
@@ -523,4 +516,40 @@ export const followHubTheme = (
 		.querySelector('meta[name="theme-color"]')
 		?.setAttribute('content', theme === 'dark' ? '#0a0b10' : '#ffffff');
 	return true;
+};
+
+/** Shared parent/origin guard for presentation messages; no authentication or data mutation. */
+export const trustedHubMessage = (
+	event: HubMessageEvent,
+	hubOrigin: unknown,
+	win: { parent: unknown } = window,
+	store: SessionStore | null = sessionStore()
+): boolean => {
+	if (!isFramed(win) || event.source !== win.parent) {
+		return false;
+	}
+	let origin = typeof hubOrigin === 'string' && PLAIN_ORIGIN.test(hubOrigin) ? hubOrigin : null;
+	try {
+		origin = origin ?? store?.getItem(HUB_ORIGIN_KEY) ?? null;
+	} catch {
+		origin = null;
+	}
+	if (!origin || event.origin !== origin) {
+		return false;
+	}
+	return true;
+};
+export const acceptHubEnter = (
+	event: HubMessageEvent,
+	hubOrigin: unknown,
+	win: { parent: unknown } = window,
+	store: SessionStore | null = sessionStore()
+): boolean => {
+	const data = event.data as { source?: unknown; type?: unknown } | null;
+	return Boolean(
+		data &&
+			data.source === 'hub' &&
+			data.type === 'enter' &&
+			trustedHubMessage(event, hubOrigin, win, store)
+	);
 };

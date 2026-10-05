@@ -1,0 +1,777 @@
+/* =====================================================================================
+   Halo sci-fi layer — everything keys off html.halo-scifi (scifi.ts applyScifi), so the
+   switch in Settings → Interface (科幻特效) is the whole rollback. Dark: deep space and
+   neon; light: a holographic lab (white, cyan grid, violet light). Reading surfaces (the
+   messages themselves) stay calm: the show is the shell, the landing and the transitions.
+   ===================================================================================== */
+
+:root {
+	--scifi-cyan: #0891b2;
+	--scifi-violet: #7c3aed;
+	--scifi-magenta: #db2777;
+	--scifi-line: rgb(8 145 178 / 0.16);
+	--scifi-glow: rgb(8 145 178 / 0.22);
+}
+.dark {
+	--scifi-cyan: #5ee7ff;
+	--scifi-violet: #a78bfa;
+	--scifi-magenta: #f472d0;
+	--scifi-line: rgb(94 231 255 / 0.16);
+	--scifi-glow: rgb(94 231 255 / 0.35);
+}
+
+/* ------------------------------------------------------------------ the stage behind it all */
+
+html.halo-scifi [data-halo-frame] {
+	background:
+		radial-gradient(1200px 600px at 0% 0%, rgb(8 145 178 / 0.06), transparent 60%),
+		linear-gradient(var(--frame-bg), var(--frame-bg));
+}
+html.halo-scifi.dark [data-halo-frame] {
+	--frame-bg: #03050b;
+	background:
+		radial-gradient(900px 500px at 0% 0%, rgb(94 231 255 / 0.07), transparent 60%),
+		radial-gradient(700px 500px at 0% 100%, rgb(167 139 250 / 0.07), transparent 60%),
+		#03050b;
+}
+
+html.halo-scifi [data-halo-main] {
+	isolation: isolate;
+	background:
+		radial-gradient(70% 55% at 78% 0%, rgb(124 58 237 / 0.07), transparent 70%),
+		radial-gradient(60% 50% at 10% 100%, rgb(8 145 178 / 0.08), transparent 70%),
+		#f8fafe;
+}
+html.halo-scifi.dark [data-halo-main] {
+	background:
+		radial-gradient(65% 50% at 80% -5%, rgb(139 92 246 / 0.16), transparent 70%),
+		radial-gradient(55% 45% at 5% 105%, rgb(34 211 238 / 0.13), transparent 70%),
+		radial-gradient(40% 35% at 50% 45%, rgb(56 189 248 / 0.05), transparent 70%),
+		#060812;
+}
+@media (min-width: 768px) {
+	html.halo-scifi [data-halo-main] {
+		box-shadow:
+			0 0 0 1px var(--scifi-line),
+			0 0 60px -20px var(--scifi-glow),
+			var(--shadow-md);
+	}
+}
+
+/* starfield, light grid, scanlines: one layer under the content (z-index -1 in the panel) */
+.halo-scifi-bg {
+	position: absolute;
+	inset: 0;
+	z-index: -1;
+	pointer-events: none;
+	overflow: hidden;
+	border-radius: inherit;
+}
+.halo-scifi-bg::before {
+	/* holographic grid, fading out from the edges */
+	content: '';
+	position: absolute;
+	inset: 0;
+	background-image:
+		linear-gradient(to right, var(--scifi-line) 1px, transparent 1px),
+		linear-gradient(to bottom, var(--scifi-line) 1px, transparent 1px);
+	background-size: 64px 64px;
+	opacity: 0.35;
+	-webkit-mask-image: radial-gradient(ellipse 70% 60% at 50% 40%, #000 0%, transparent 80%);
+	mask-image: radial-gradient(ellipse 70% 60% at 50% 40%, #000 0%, transparent 80%);
+}
+html.halo-scifi.dark .halo-scifi-bg::before {
+	opacity: 0.22;
+}
+.halo-scifi-bg::after {
+	/* CRT scanlines: barely there, dark only */
+	content: '';
+	position: absolute;
+	inset: 0;
+	background: repeating-linear-gradient(to bottom, rgb(255 255 255 / 0.018) 0 1px, transparent 1px 3px);
+	opacity: 0;
+}
+html.halo-scifi.dark .halo-scifi-bg::after {
+	opacity: 1;
+}
+
+/* the perspective floor under the landing: a grid running towards you */
+.halo-scifi-floor {
+	position: absolute;
+	left: -50%;
+	right: -50%;
+	bottom: -2%;
+	height: 46%;
+	transform-origin: 50% 100%;
+	transform: perspective(420px) rotateX(64deg);
+	background-image:
+		linear-gradient(to right, var(--scifi-cyan) 1px, transparent 1px),
+		linear-gradient(to bottom, var(--scifi-cyan) 1px, transparent 1px);
+	background-size: 72px 72px;
+	opacity: 0;
+	-webkit-mask-image: linear-gradient(to top, #000 0%, transparent 85%);
+	mask-image: linear-gradient(to top, #000 0%, transparent 85%);
+	animation: scifi-floor 3.2s linear infinite;
+	transition: opacity 600ms ease;
+}
+body:has(.halo-hero) .halo-scifi-floor {
+	opacity: 0.1;
+}
+html.dark body:has(.halo-hero) .halo-scifi-floor {
+	opacity: 0.3;
+}
+@keyframes scifi-floor {
+	to {
+		background-position: 0 72px;
+	}
+}
+/* on a chat the stars dim so the words win */
+body:not(:has(.halo-hero)) .halo-scifi-bg .halo-starfield {
+	opacity: 0.55;
+}
+
+/* ------------------------------------------------------------------ landing: reactor + title */
+
+html.halo-scifi .halo-orb__orbit {
+	display: none;
+}
+html.halo-scifi .halo-orb {
+	--orb-size: 6rem;
+	margin-bottom: 2.4rem;
+}
+html.halo-scifi .halo-orb img {
+	box-shadow:
+		0 0 0 1px var(--scifi-line),
+		0 0 0 6px rgb(94 231 255 / 0.06),
+		0 0 36px var(--scifi-glow) !important;
+}
+
+.halo-reactor,
+.halo-orb > .halo-reactor {
+	position: absolute;
+	left: 50%;
+	top: 50%;
+	width: calc(var(--orb-size) * 4.4);
+	height: calc(var(--orb-size) * 4.4);
+	transform: translate(-50%, -50%);
+	z-index: -3;
+	pointer-events: none;
+	animation: scifi-reactor-in 1.1s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+:root:not(.halo-scifi) .halo-reactor {
+	display: none;
+}
+@keyframes scifi-reactor-in {
+	from {
+		opacity: 0;
+		transform: translate(-50%, -50%) scale(0.6) rotate(-30deg);
+		filter: blur(6px);
+	}
+}
+.halo-reactor__svg,
+.halo-reactor__sweep {
+	-webkit-mask-image: linear-gradient(to bottom, #000 50%, transparent 86%);
+	mask-image: linear-gradient(to bottom, #000 50%, transparent 86%);
+}
+/* SVG pieces turn about the viewBox origin, which is the centre of both drawings */
+.halo-reactor__svg *,
+.halo-boot__ring circle {
+	transform-box: view-box;
+	transform-origin: 0 0;
+}
+.halo-reactor__svg {
+	position: absolute;
+	inset: 0;
+	width: 100%;
+	height: 100%;
+	overflow: visible;
+	fill: none;
+}
+.halo-reactor__ticks {
+	stroke: var(--scifi-cyan);
+	stroke-width: 1;
+	opacity: 0.35;
+	animation: scifi-rot 80s linear infinite;
+}
+.halo-reactor__ticks .major {
+	stroke-width: 1.6;
+	opacity: 1;
+}
+.halo-reactor__dash {
+	stroke: var(--scifi-violet);
+	stroke-width: 1;
+	stroke-dasharray: 2 7;
+	opacity: 0.55;
+	animation: scifi-rot 46s linear infinite reverse;
+}
+.halo-reactor__arcs {
+	stroke: url(#halo-reactor-arc);
+	stroke-width: 3;
+	stroke-linecap: round;
+	filter: drop-shadow(0 0 6px var(--scifi-glow));
+	animation: scifi-rot 14s linear infinite;
+}
+.halo-reactor__inner {
+	stroke: var(--scifi-cyan);
+	stroke-width: 0.8;
+	opacity: 0.4;
+	animation: scifi-pulse 3.6s ease-in-out infinite;
+}
+.halo-reactor__orbit {
+	fill: var(--scifi-cyan);
+	filter: drop-shadow(0 0 4px var(--scifi-cyan));
+	animation: scifi-rot 9s linear infinite;
+}
+.halo-reactor__orbit--slow {
+	fill: var(--scifi-magenta);
+	filter: drop-shadow(0 0 4px var(--scifi-magenta));
+	animation-duration: 24s;
+	animation-direction: reverse;
+}
+.halo-reactor__sweep {
+	position: absolute;
+	inset: 8%;
+	border-radius: 9999px;
+	background: conic-gradient(from 0deg, transparent 0 80%, rgb(94 231 255 / 0.22) 98%, transparent 100%);
+	-webkit-mask-image: radial-gradient(circle, transparent 30%, #000 31%, #000 70%, transparent 71%);
+	mask-image: radial-gradient(circle, transparent 30%, #000 31%, #000 70%, transparent 71%);
+	animation: scifi-rot 4.8s linear infinite;
+}
+html:not(.dark) .halo-reactor__sweep {
+	background: conic-gradient(from 0deg, transparent 0 84%, rgb(8 145 178 / 0.1) 98%, transparent 100%);
+}
+.halo-reactor__hud {
+	position: absolute;
+	font-family: var(--font-mono);
+	font-size: 9.5px;
+	line-height: 1.5;
+	letter-spacing: 0.16em;
+	color: var(--scifi-cyan);
+	opacity: 0.75;
+	white-space: nowrap;
+	text-shadow: 0 0 8px var(--scifi-glow);
+	animation: scifi-hud-in 900ms 500ms steps(6) both;
+}
+.halo-reactor__hud b {
+	font-weight: 700;
+	color: var(--scifi-violet);
+}
+.halo-reactor__hud i {
+	font-style: normal;
+	opacity: 0.75;
+}
+.halo-reactor__hud::before {
+	content: '';
+	position: absolute;
+	width: 14px;
+	height: 14px;
+	border: 1px solid var(--scifi-cyan);
+	opacity: 0.6;
+}
+.halo-reactor__hud--tl {
+	left: 2%;
+	top: 16%;
+	text-align: right;
+	transform: translateX(-100%);
+}
+.halo-reactor__hud--tl::before {
+	right: -20px;
+	top: -6px;
+	border-left: 0;
+	border-bottom: 0;
+}
+.halo-reactor__hud--tr {
+	right: 2%;
+	top: 16%;
+	transform: translateX(100%);
+}
+.halo-reactor__hud--tr::before {
+	left: -20px;
+	top: -6px;
+	border-right: 0;
+	border-bottom: 0;
+}
+.halo-reactor__hud--br {
+	right: 4%;
+	top: 44%;
+	transform: translateX(100%);
+	max-width: 14rem;
+}
+.halo-reactor__hud--br::before {
+	left: -20px;
+	top: -6px;
+	border-right: 0;
+	border-bottom: 0;
+}
+.halo-reactor__hud--br i {
+	display: inline-block;
+	max-width: 12rem;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	vertical-align: bottom;
+}
+@keyframes scifi-hud-in {
+	from {
+		opacity: 0;
+		clip-path: inset(0 100% 0 0);
+	}
+	to {
+		clip-path: inset(0 0 0 0);
+	}
+}
+@media (max-width: 767px), (pointer: coarse) {
+	.halo-reactor__hud {
+		display: none;
+	}
+	.halo-reactor {
+		width: calc(var(--orb-size) * 3.6);
+		height: calc(var(--orb-size) * 3.6);
+	}
+}
+@keyframes scifi-rot {
+	to {
+		transform: rotate(360deg);
+	}
+}
+@keyframes scifi-pulse {
+	50% {
+		opacity: 0.85;
+		transform: scale(1.04);
+	}
+}
+body:has(#chat-input:focus) .halo-reactor__arcs {
+	animation-duration: 5s;
+}
+body:has(#chat-input:focus) .halo-reactor__sweep {
+	animation-duration: 2.2s;
+}
+
+/* greeting: holographic gradient that glitches in */
+html.halo-scifi .halo-greeting {
+	background: linear-gradient(100deg, #0e7490 0%, #1d4ed8 38%, #7c3aed 70%, #be185d 100%);
+	-webkit-background-clip: text;
+	background-clip: text;
+	color: transparent;
+	letter-spacing: -0.02em;
+	animation: scifi-glitch-in 900ms 120ms steps(1) both;
+}
+html.halo-scifi.dark .halo-greeting {
+	background: linear-gradient(100deg, #e0fbff 0%, #5ee7ff 32%, #a78bfa 66%, #f472d0 100%);
+	-webkit-background-clip: text;
+	background-clip: text;
+	filter: drop-shadow(0 0 22px rgb(94 231 255 / 0.28));
+}
+@keyframes scifi-glitch-in {
+	0% {
+		opacity: 0;
+		clip-path: inset(0 0 100% 0);
+	}
+	12% {
+		opacity: 1;
+		clip-path: inset(10% 0 62% 0);
+		transform: translateX(-6px) skewX(-8deg);
+	}
+	24% {
+		clip-path: inset(52% 0 12% 0);
+		transform: translateX(5px);
+	}
+	36% {
+		clip-path: inset(0 0 40% 0);
+		transform: translateX(-2px) skewX(4deg);
+	}
+	48% {
+		clip-path: inset(30% 0 0 0);
+		transform: translateX(3px);
+	}
+	60%,
+	100% {
+		clip-path: inset(0 0 0 0);
+		transform: none;
+	}
+}
+
+/* ------------------------------------------------------------------ the composer: a neon conduit */
+
+html.halo-scifi .halo-composer {
+	border-color: transparent;
+	background-color: rgb(255 255 255 / 0.78);
+	-webkit-backdrop-filter: blur(14px);
+	backdrop-filter: blur(14px);
+	box-shadow:
+		0 0 0 1px var(--scifi-line),
+		0 10px 40px -12px var(--scifi-glow);
+}
+html.halo-scifi.dark .halo-composer {
+	background-color: rgb(10 14 28 / 0.72);
+	box-shadow:
+		0 0 0 1px var(--scifi-line),
+		0 0 50px -14px var(--scifi-glow),
+		inset 0 1px 0 rgb(255 255 255 / 0.05);
+}
+html.halo-scifi .halo-composer:not([data-halo-live])::after {
+	content: '';
+	position: absolute;
+	inset: -1px;
+	border-radius: inherit;
+	padding: 1.2px;
+	pointer-events: none;
+	background: conic-gradient(
+		from var(--halo-angle),
+		transparent 0 40%,
+		var(--scifi-cyan) 58%,
+		var(--scifi-violet) 74%,
+		var(--scifi-magenta) 86%,
+		transparent 100%
+	);
+	-webkit-mask:
+		linear-gradient(#000 0 0) content-box,
+		linear-gradient(#000 0 0);
+	-webkit-mask-composite: xor;
+	mask-composite: exclude;
+	opacity: 0.55;
+	animation: halo-spin 7s linear infinite;
+	transition: opacity 300ms ease;
+}
+html.halo-scifi .halo-composer:focus-within {
+	box-shadow:
+		0 0 0 1px var(--scifi-line),
+		0 0 0 5px rgb(94 231 255 / 0.08),
+		0 0 70px -10px var(--scifi-glow);
+}
+html.halo-scifi .halo-composer:focus-within::after {
+	opacity: 1;
+	animation-duration: 2.8s;
+}
+
+/* ------------------------------------------------------------------ chrome: sidebar, chips, buttons */
+
+html.halo-scifi.dark #sidebar {
+	--sb-row-hover: rgb(94 231 255 / 0.07);
+}
+html.halo-scifi #sidebar a[aria-current='page'],
+html.halo-scifi #sidebar .selected,
+html.halo-scifi #sidebar [data-active='true'] {
+	box-shadow: inset 2px 0 0 var(--scifi-cyan);
+	background-image: linear-gradient(90deg, rgb(94 231 255 / 0.1), transparent 80%);
+}
+html.halo-scifi.dark #sidebar img[alt='logo'],
+html.halo-scifi.dark #sidebar .halo-mark {
+	filter: drop-shadow(0 0 6px var(--scifi-glow));
+}
+html.halo-scifi .halo-chip {
+	color: var(--scifi-cyan);
+	background-color: rgb(94 231 255 / 0.06);
+	box-shadow: inset 0 0 0 1px var(--scifi-line);
+	letter-spacing: 0.08em;
+}
+html.halo-scifi .halo-presence {
+	background: var(--scifi-cyan);
+	box-shadow: 0 0 10px var(--scifi-cyan);
+}
+html.halo-scifi [data-halo-main] button.rounded-full.border:hover,
+html.halo-scifi [data-halo-main] a.rounded-full.border:hover {
+	border-color: var(--scifi-cyan);
+	box-shadow: 0 0 18px -4px var(--scifi-glow);
+}
+
+html.halo-scifi ::selection {
+	background: rgb(94 231 255 / 0.3);
+}
+html.halo-scifi.dark * {
+	scrollbar-color: rgb(94 231 255 / 0.22) transparent;
+}
+
+/* dialogs: a hairline of light and HUD corners */
+html.halo-scifi .halo-modal {
+	box-shadow:
+		0 0 0 1px var(--scifi-line),
+		0 30px 90px -30px var(--scifi-glow),
+		var(--shadow-lg);
+}
+
+/* ------------------------------------------------------------------ page change: a short jump */
+
+html.halo-scifi ::view-transition-old(halo-main) {
+	animation: scifi-jump-out 220ms cubic-bezier(0.4, 0, 1, 1) both;
+}
+html.halo-scifi ::view-transition-new(halo-main) {
+	animation: scifi-jump-in 460ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+@keyframes scifi-jump-out {
+	to {
+		opacity: 0;
+		transform: scale(1.05);
+		filter: blur(8px);
+	}
+}
+@keyframes scifi-jump-in {
+	from {
+		opacity: 0;
+		transform: scale(0.96);
+		filter: blur(10px) brightness(1.4);
+	}
+}
+
+/* ------------------------------------------------------------------ boot sequence */
+
+.halo-boot {
+	position: fixed;
+	inset: 0;
+	z-index: 10000;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	gap: 1.75rem;
+	background:
+		radial-gradient(60% 50% at 50% 45%, rgb(34 211 238 / 0.1), transparent 70%),
+		radial-gradient(50% 40% at 50% 60%, rgb(139 92 246 / 0.12), transparent 70%),
+		#02030a;
+	color: #bff6ff;
+	font-family: var(--font-mono);
+	cursor: pointer;
+	overflow: hidden;
+	animation: scifi-boot-in 300ms ease both;
+}
+@keyframes scifi-boot-in {
+	from {
+		opacity: 0;
+	}
+}
+.halo-boot--leaving {
+	animation: scifi-boot-out 650ms cubic-bezier(0.7, 0, 0.84, 0) both;
+}
+@keyframes scifi-boot-out {
+	to {
+		opacity: 0;
+		transform: scale(1.6);
+		filter: blur(14px) brightness(2);
+	}
+}
+.halo-boot__grid {
+	position: absolute;
+	left: -50%;
+	right: -50%;
+	bottom: -5%;
+	height: 55%;
+	transform-origin: 50% 100%;
+	transform: perspective(380px) rotateX(66deg);
+	background-image:
+		linear-gradient(to right, rgb(94 231 255 / 0.45) 1px, transparent 1px),
+		linear-gradient(to bottom, rgb(94 231 255 / 0.45) 1px, transparent 1px);
+	background-size: 64px 64px;
+	-webkit-mask-image: linear-gradient(to top, #000, transparent 90%);
+	mask-image: linear-gradient(to top, #000, transparent 90%);
+	animation: scifi-floor 0.9s linear infinite;
+	opacity: 0.5;
+}
+.halo-boot__scan {
+	position: absolute;
+	left: 0;
+	right: 0;
+	height: 2px;
+	top: 0;
+	background: linear-gradient(90deg, transparent, #5ee7ff, transparent);
+	box-shadow: 0 0 24px 6px rgb(94 231 255 / 0.4);
+	animation: scifi-scan 1.6s cubic-bezier(0.6, 0, 0.4, 1) both;
+}
+@keyframes scifi-scan {
+	from {
+		transform: translateY(0);
+		opacity: 1;
+	}
+	to {
+		transform: translateY(100vh);
+		opacity: 0;
+	}
+}
+.halo-boot__core {
+	position: relative;
+	display: grid;
+	place-items: center;
+	width: min(13rem, 52vw);
+	aspect-ratio: 1;
+}
+.halo-boot__ring {
+	position: absolute;
+	inset: 0;
+	width: 100%;
+	height: 100%;
+	fill: none;
+	overflow: visible;
+}
+.halo-boot__ring circle {
+	stroke-linecap: round;
+	stroke-dasharray: 100;
+	stroke-dashoffset: 100;
+	animation:
+		scifi-draw 1s cubic-bezier(0.65, 0, 0.35, 1) forwards,
+		scifi-rot 6s linear infinite;
+}
+.halo-boot__ring-a {
+	stroke: #5ee7ff;
+	stroke-width: 1.4;
+	filter: drop-shadow(0 0 6px #5ee7ff);
+}
+.halo-boot__ring-b {
+	stroke: #a78bfa;
+	stroke-width: 2.4;
+	animation-delay: 0.15s, 0s !important;
+	animation-direction: normal, reverse !important;
+	filter: drop-shadow(0 0 8px #a78bfa);
+}
+.halo-boot__ring-c {
+	stroke: #f472d0;
+	stroke-width: 1;
+	stroke-dasharray: 3 4 !important;
+	animation-delay: 0.3s, 0s !important;
+}
+.halo-boot__dot {
+	fill: #e0fbff;
+	stroke: none;
+	stroke-dashoffset: 0 !important;
+	filter: drop-shadow(0 0 10px #5ee7ff) drop-shadow(0 0 22px #a78bfa);
+	animation: scifi-core 1.4s ease-in-out infinite !important;
+}
+@keyframes scifi-draw {
+	to {
+		stroke-dashoffset: 0;
+	}
+}
+@keyframes scifi-core {
+	50% {
+		transform: scale(1.5);
+	}
+}
+.halo-boot__title {
+	position: relative;
+	font-family: var(--font-display);
+	font-size: clamp(2.2rem, 6vw, 3.6rem);
+	font-weight: 700;
+	letter-spacing: 0.6em;
+	padding-left: 0.6em;
+	color: #e0fbff;
+	text-shadow:
+		0 0 18px rgb(94 231 255 / 0.7),
+		0 0 46px rgb(167 139 250 / 0.5);
+	animation: scifi-glitch-in 900ms 450ms steps(1) both;
+}
+.halo-boot__title::before,
+.halo-boot__title::after {
+	content: attr(data-text);
+	position: absolute;
+	inset: 0;
+	padding-left: 0.6em;
+	opacity: 0.7;
+}
+.halo-boot__title::before {
+	color: #f472d0;
+	transform: translate(-3px, 0);
+	clip-path: inset(0 0 55% 0);
+	animation: scifi-rgb 1.2s steps(2) infinite;
+}
+.halo-boot__title::after {
+	color: #5ee7ff;
+	transform: translate(3px, 0);
+	clip-path: inset(55% 0 0 0);
+	animation: scifi-rgb 1.2s steps(2) infinite reverse;
+}
+@keyframes scifi-rgb {
+	50% {
+		transform: translate(0, 0);
+	}
+}
+.halo-boot__lines {
+	display: grid;
+	gap: 0.35rem;
+	font-size: clamp(10px, 2.6vw, 12.5px);
+	letter-spacing: 0.14em;
+	color: rgb(191 246 255 / 0.85);
+}
+.halo-boot__lines p {
+	margin: 0;
+	white-space: nowrap;
+	clip-path: inset(0 100% 0 0);
+	animation: scifi-type 420ms steps(28) forwards;
+	animation-delay: var(--d);
+}
+.halo-boot__lines b {
+	color: #5ee7ff;
+	text-shadow: 0 0 8px #5ee7ff;
+}
+@keyframes scifi-type {
+	to {
+		clip-path: inset(0 0 0 0);
+	}
+}
+.halo-boot__skip {
+	position: absolute;
+	bottom: 1.5rem;
+	font-size: 10px;
+	letter-spacing: 0.3em;
+	color: rgb(191 246 255 / 0.4);
+}
+
+/* ------------------------------------------------------------------ sign-in: the starfield behind the stage */
+
+.halo-auth__stars {
+	position: absolute;
+	inset: 0;
+	z-index: -1;
+	pointer-events: none;
+}
+.halo-auth__stars::after {
+	content: '';
+	position: absolute;
+	inset: 0;
+	background:
+		radial-gradient(55% 45% at 45% 40%, rgb(34 211 238 / 0.14), transparent 70%),
+		radial-gradient(45% 40% at 60% 60%, rgb(139 92 246 / 0.16), transparent 70%);
+}
+
+.halo-auth__scene::before,
+.halo-auth__scene::after {
+	content: '';
+	position: absolute;
+	inset: -6%;
+	border-radius: 9999px;
+	border: 1px dashed rgb(94 231 255 / 0.28);
+	animation: scifi-rot 60s linear infinite;
+	pointer-events: none;
+}
+.halo-auth__scene::after {
+	inset: 6%;
+	border: 2px solid transparent;
+	border-top-color: rgb(167 139 250 / 0.7);
+	border-right-color: rgb(94 231 255 / 0.5);
+	filter: drop-shadow(0 0 8px rgb(94 231 255 / 0.6));
+	animation-duration: 9s;
+	animation-direction: reverse;
+}
+
+/* ------------------------------------------------------------------ calm when asked */
+
+@media (prefers-reduced-motion: reduce) {
+	.halo-scifi-floor,
+	.halo-reactor,
+	.halo-reactor *,
+	html.halo-scifi .halo-greeting,
+	html.halo-scifi .halo-composer::after,
+	.halo-auth__scene::before,
+	.halo-auth__scene::after {
+		animation: none !important;
+	}
+	html.halo-scifi ::view-transition-old(halo-main),
+	html.halo-scifi ::view-transition-new(halo-main) {
+		animation: none !important;
+	}
+}
+@media (max-width: 767px), (pointer: coarse) {
+	html.halo-scifi .halo-composer {
+		-webkit-backdrop-filter: none;
+		backdrop-filter: none;
+	}
+	.halo-scifi-bg::after {
+		display: none;
+	}
+}

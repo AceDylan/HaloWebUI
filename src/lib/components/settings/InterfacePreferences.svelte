@@ -133,6 +133,8 @@
 	let widescreenMode = false;
 	// Collapsed sidebar rail expands as a hover overlay (read by layout/Sidebar.svelte).
 	let sidebarPeekOnHover = true;
+	// Sci-fi layer: starfield, reactor, neon, opening titles (components/scifi, scifi.css).
+	let scifiEffects = true;
 	let chatDirection: 'LTR' | 'RTL' | 'auto' = 'auto';
 	let showUsername = false;
 	let showFeaturedAssistantsOnHome = true;
@@ -273,6 +275,7 @@
 			showUsername: boolean;
 			widescreenMode: boolean;
 			sidebarPeekOnHover: boolean;
+			scifiEffects: boolean;
 			chatDirection: 'LTR' | 'RTL' | 'auto';
 			notificationEnabled: boolean;
 			notificationSound: boolean;
@@ -693,6 +696,7 @@
 			showUsername,
 			widescreenMode,
 			sidebarPeekOnHover,
+			scifiEffects,
 			chatDirection,
 			notificationEnabled,
 			notificationSound,
@@ -777,6 +781,7 @@
 		showUsername = snapshot.showUsername;
 		widescreenMode = snapshot.widescreenMode;
 		sidebarPeekOnHover = snapshot.sidebarPeekOnHover ?? true;
+		scifiEffects = snapshot.scifiEffects ?? true;
 		chatDirection = snapshot.chatDirection;
 		notificationEnabled = snapshot.notificationEnabled;
 		notificationSound = snapshot.notificationSound;
@@ -860,6 +865,7 @@
 		showUsername;
 		widescreenMode;
 		sidebarPeekOnHover;
+		scifiEffects;
 		chatDirection;
 		notificationEnabled;
 		notificationSound;
@@ -1120,7 +1126,8 @@
 				chatDirection,
 				notificationEnabled,
 				notificationSound,
-				sidebarPeekOnHover
+				sidebarPeekOnHover,
+				scifiEffects
 			};
 
 			await saveSettings(payload);
@@ -1418,6 +1425,7 @@
 		chatBubble = $settings?.chatBubble ?? true;
 		widescreenMode = $settings?.widescreenMode ?? false;
 		sidebarPeekOnHover = $settings?.sidebarPeekOnHover ?? true;
+		scifiEffects = $settings?.scifiEffects ?? true;
 		scrollOnBranchChange = $settings?.scrollOnBranchChange ?? true;
 		chatDirection = $settings?.chatDirection ?? 'auto';
 		userLocation = $settings?.userLocation ?? false;
@@ -1874,6 +1882,21 @@
 												</p>
 											</div>
 											<Switch bind:state={sidebarPeekOnHover} />
+										</div>
+									</div>
+
+									<div class="glass-item px-4 py-3">
+										<div class="flex items-start justify-between gap-4">
+											<div class="min-w-0">
+												<div class="text-sm font-medium">{tr('科幻特效', 'Sci-fi effects')}</div>
+												<p class="mt-1 text-xs leading-5 text-gray-500 dark:text-gray-400">
+													{tr(
+														'星空背景、首页全息光环、霓虹输入框、新对话跃迁和每次打开时的开场动画。关掉即回到简洁外观；系统开了「减弱动态效果」时只保留静态画面。',
+														'Starfield backdrop, holographic halo on the home screen, neon composer, a jump on new chats and opening titles once per session. Off returns to the plain look; with reduced motion only still frames remain.'
+													)}
+												</p>
+											</div>
+											<Switch bind:state={scifiEffects} />
 										</div>
 									</div>
 

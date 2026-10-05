@@ -50,6 +50,9 @@
 	import { applyUserSettingsSnapshot } from '$lib/utils/user-settings';
 	import { startHermesActivityPolling, stopHermesActivityPolling } from '$lib/utils/hermes-activity';
 	import { isFramed, requestHubReauth } from '$lib/utils/hub-embed';
+	import StarField from '$lib/components/scifi/StarField.svelte';
+	import BootSequence from '$lib/components/scifi/BootSequence.svelte';
+	import { applyScifi, scifiEnabled, shouldBoot } from '$lib/components/scifi/scifi';
 
 	const i18n = getContext('i18n');
 
@@ -100,6 +103,17 @@
 			document.getElementById('sidebar-new-chat-button')
 		)?.click();
 	};
+
+	// Sci-fi layer (scifi.css): one class on <html>, the starfield in the panel, the opening
+	// titles once per session once the app is loaded.
+	$: scifiOn = scifiEnabled($settings);
+	$: applyScifi(scifiOn);
+	let booting = false;
+	let bootChecked = false;
+	$: if (loaded && scifiOn && !bootChecked) {
+		bootChecked = true;
+		booting = shouldBoot(isFramed());
+	}
 
 	onMount(async () => {
 		if ($user === undefined || $user === null) {
@@ -444,7 +458,17 @@
 
 		<Sidebar />
 
+		{#if booting}
+			<BootSequence name={$user?.name ?? ''} on:done={() => (booting = false)} />
+		{/if}
+
 		<div class="flex-1 min-w-0" data-halo-main>
+			{#if scifiOn}
+				<div class="halo-scifi-bg" aria-hidden="true">
+					<StarField />
+					<div class="halo-scifi-floor"></div>
+				</div>
+			{/if}
 			{#if loaded}
 				<slot />
 			{:else}

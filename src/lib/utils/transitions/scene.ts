@@ -1,4 +1,5 @@
 import { DUR, prefersReducedMotion } from './spring';
+import { warp } from '$lib/components/scifi/scifi';
 
 /** Capture geometry before the first accepted message changes the landing layout. */
 export function captureFirstMessage(): (() => void) | null {
@@ -6,6 +7,7 @@ export function captureFirstMessage(): (() => void) | null {
 	const composer = document.querySelector<HTMLElement>('.halo-composer');
 	if (!composer || typeof composer.animate !== 'function') return null;
 	const from = composer.getBoundingClientRect();
+	warp(700);
 	const hero = document.querySelector<HTMLElement>('.halo-hero');
 	const ghost = hero?.cloneNode(true) as HTMLElement | undefined;
 	if (ghost && hero) {

@@ -18,6 +18,8 @@
 	import { safeRedirectPath } from '$lib/utils/safe-redirect';
 
 	import HaloConstellation from '$lib/components/common/HaloConstellation.svelte';
+	import StarField from '$lib/components/scifi/StarField.svelte';
+	import { warp } from '$lib/components/scifi/scifi';
 	import { prefersReducedMotion } from '$lib/utils/transitions';
 
 	import Spinner from '$lib/components/common/Spinner.svelte';
@@ -73,6 +75,8 @@
 			// Replace, don't push: a sign-in page left behind in the history bounces Back
 			// forward again (signed in → off to the target). Framed by the Bookmark Hub, that
 			// entry sits in the Hub tab's own history, so Back could never leave the Hub.
+			// signed in: the stars jump as the stage pushes through into the app
+			warp(1100);
 			if (typeof document.startViewTransition === 'function' && !prefersReducedMotion() && !document.hidden) {
 				document.documentElement.classList.add('halo-auth-vt');
 				const transition = document.startViewTransition(() => goto(redirectTarget(), { replaceState: true }));
@@ -260,6 +264,7 @@
 				pointerY = 0;
 			}}
 		>
+			<div class="halo-auth__stars" aria-hidden="true"><StarField tone="dark" /></div>
 			<div class="halo-auth__scene" aria-hidden="true"><HaloConstellation /></div>
 			<div class="halo-auth__caption">
 				<div class="halo-auth__eyebrow">

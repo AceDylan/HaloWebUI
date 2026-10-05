@@ -316,6 +316,7 @@ type Settings = {
 	temporaryChatByDefault?: boolean;
 	/** Collapsed sidebar rail expands as an overlay while the pointer rests on it. */
 	sidebarPeekOnHover?: boolean;
+	scifiEffects?: boolean;
 	/** Per-user opt-in: archive chats idle for `days` days (see utils/chat_auto_archive.py). */
 	chatAutoArchive?: { enabled?: boolean; days?: number; testChats?: boolean };
 	newChatInheritsPreviousState?: boolean;

@@ -36,6 +36,8 @@
 	import ModeShortcuts from './ModeShortcuts.svelte';
 	import Suggestions from './Suggestions.svelte';
 	import ModelIcon from '$lib/components/common/ModelIcon.svelte';
+	import HudReactor from '$lib/components/scifi/HudReactor.svelte';
+	import { warp } from '$lib/components/scifi/scifi';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import {
 		getModelBaseName,
@@ -232,6 +234,8 @@
 
 	onMount(() => {
 		featuredIds = getFeaturedAssistantIds();
+		// a new chat arrives with a short jump of the starfield (scifi layer; no-op without it)
+		warp(650);
 	});
 </script>
 
@@ -269,6 +273,7 @@
 						<span class="halo-orb__bloom" aria-hidden="true"></span>
 						<span class="halo-orb__ring" aria-hidden="true"></span>
 						<span class="halo-orb__arc" aria-hidden="true"></span>
+						<HudReactor label={models[selectedModelIdx] ? getModelBaseName(models[selectedModelIdx]) : ''} />
 						<div class="flex -space-x-4">
 							{#each models as model, modelIdx}
 								<Tooltip

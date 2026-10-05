@@ -32,6 +32,7 @@
 	import '../tailwind.css';
 	import '../app.css';
 	import '../halo.css';
+	import '../scifi.css';
 
 	import 'tippy.js/dist/tippy.css';
 

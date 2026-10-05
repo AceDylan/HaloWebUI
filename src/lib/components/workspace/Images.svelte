@@ -12,7 +12,7 @@
 		ImageGenerationRequest,
 		ImageUsageConfig
 	} from '$lib/apis/images';
-	import { uploadFile } from '$lib/apis/files';
+	import { uploadFileReliably } from '$lib/utils/reliable-upload';
 	import { WEBUI_API_BASE_URL } from '$lib/constants';
 	import HaloSelect from '$lib/components/common/HaloSelect.svelte';
 	import ImagePreview from '$lib/components/common/ImagePreview.svelte';
@@ -315,7 +315,8 @@
 				};
 				referenceImages = [...referenceImages, ref];
 				try {
-					const uploaded = await uploadFile(localStorage.token, file, {
+					// Survives the page going to the background; an image uploaded before is not sent again.
+					const { file: uploaded } = await uploadFileReliably(localStorage.token, file, {
 						process: false,
 						onProgress: ({ percent }) => {
 							if (!ref.uploading || ref.progress === percent) return;

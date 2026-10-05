@@ -22,15 +22,21 @@ const postFormWithProgress = (
 	url: string,
 	token: string,
 	body: FormData,
-	onProgress: (progress: UploadProgress) => void
+	onProgress: (progress: UploadProgress) => void,
+	signal?: AbortSignal
 ): Promise<unknown> =>
 	new Promise((resolve, reject) => {
 		const xhr = new XMLHttpRequest();
+		if (signal?.aborted) return reject(new TypeError('Upload aborted'));
+		signal?.addEventListener('abort', () => xhr.abort(), { once: true });
 		let lastPercent = -1;
+		let lastReport = 0;
 		const report = (loaded: number, total: number) => {
 			const percent = Math.min(100, Math.floor((loaded / total) * 100));
-			if (percent === lastPercent) return;
+			// Also once a second within a percent: a slow upload of a big file is still moving.
+			if (percent === lastPercent && Date.now() - lastReport < 1000) return;
 			lastPercent = percent;
+			lastReport = Date.now();
 			onProgress({ loaded, total, percent });
 		};
 
@@ -58,19 +64,21 @@ const postFormWithProgress = (
 		xhr.send(body);
 	});
 
-export const uploadFile = async (
-	token: string,
-	file: File,
-	options: {
-		processingMode?: string;
-		process?: boolean;
-		/** Called as the file goes out, once per whole percent. */
-		onProgress?: (progress: UploadProgress) => void;
-	} = {}
-) => {
+type UploadOptions = {
+	processingMode?: string;
+	process?: boolean;
+	/** Called as the file goes out: each whole percent, and at least once a second while bytes move. */
+	onProgress?: (progress: UploadProgress) => void;
+	/** Record the file's SHA-256 once stored, so getReusableFile can find it later. */
+	reuse?: boolean;
+	signal?: AbortSignal;
+};
+
+// POST /files/. Rejects with the raw error: a response error (with `status` and `detail`)
+// or a TypeError when the request never completed.
+export const sendUpload = (token: string, file: File, options: UploadOptions = {}) => {
 	const data = new FormData();
 	data.append('file', file);
-	let error = null;
 	const query = new URLSearchParams();
 	if (options.processingMode) {
 		query.set('processing_mode', options.processingMode);
@@ -78,32 +86,67 @@ export const uploadFile = async (
 	if (typeof options.process === 'boolean') {
 		query.set('process', String(options.process));
 	}
+	if (options.reuse) {
+		query.set('reuse', 'true');
+	}
 
 	const url = `${WEBUI_API_BASE_URL}/files/${query.toString() ? `?${query}` : ''}`;
-	const request =
-		options.onProgress && typeof XMLHttpRequest !== 'undefined'
-			? postFormWithProgress(url, token, data, options.onProgress)
-			: fetch(url, {
-					method: 'POST',
-					headers: {
-						Accept: 'application/json',
-						authorization: `Bearer ${token}`
-					},
-					body: data
-				}).then(parseJsonResponse);
+	return options.onProgress && typeof XMLHttpRequest !== 'undefined'
+		? postFormWithProgress(url, token, data, options.onProgress, options.signal)
+		: fetch(url, {
+				method: 'POST',
+				headers: {
+					Accept: 'application/json',
+					authorization: `Bearer ${token}`
+				},
+				body: data,
+				signal: options.signal
+			}).then(parseJsonResponse);
+};
 
-	const res = await request
-		.catch((err) => {
-			error = err.detail;
-			console.log(err);
-			return null;
-		});
+export const uploadFile = async (token: string, file: File, options: UploadOptions = {}) => {
+	let error = null;
+
+	const res = await sendUpload(token, file, options).catch((err) => {
+		error = err.detail;
+		console.log(err);
+		return null;
+	});
 
 	if (error) {
 		throw error;
 	}
 
 	return res;
+};
+
+/** The caller's finished earlier upload (`reuse: true`) of the same bytes, stored the
+ * same way; null when there is none or the lookup fails. */
+export const getReusableFile = async (
+	token: string,
+	query: {
+		sha256: string;
+		size: number;
+		name?: string;
+		process?: boolean;
+		processingMode?: string;
+	}
+): Promise<any | null> => {
+	const params = new URLSearchParams({ sha256: query.sha256, size: String(query.size) });
+	if (query.name) params.set('name', query.name);
+	if (typeof query.process === 'boolean') params.set('process', String(query.process));
+	if (query.processingMode) params.set('processing_mode', query.processingMode);
+
+	return fetch(`${WEBUI_API_BASE_URL}/files/reusable?${params}`, {
+		method: 'GET',
+		headers: {
+			Accept: 'application/json',
+			authorization: `Bearer ${token}`
+		}
+	})
+		.then(parseJsonResponse)
+		.then((json: any) => (json?.id ? json : null))
+		.catch(() => null);
 };
 
 export const uploadDir = async (token: string) => {

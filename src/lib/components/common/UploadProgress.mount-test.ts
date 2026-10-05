@@ -92,3 +92,29 @@ describe('FileItem while uploading', () => {
 		expect(target.textContent).toContain('File');
 	});
 });
+
+describe('FileItem after a failed upload', () => {
+	const props = (retryable: boolean) => ({
+		item: { status: 'failed', errorTitle: 'Upload interrupted' },
+		name: 'report.pdf',
+		type: 'file',
+		size: 2048,
+		edit: true,
+		retryable
+	});
+
+	it('is sent again on a click when it can be', async () => {
+		const target = await mount(FileItem, props(true));
+		let retried = 0;
+		app.$on('retry', () => retried++);
+		expect(target.querySelector('[data-upload-retry]')?.textContent).toContain('Tap to retry');
+		(target.querySelector('button') as any).click();
+		expect(retried).toBe(1);
+	});
+
+	it('only says it failed when the file is no longer at hand', async () => {
+		const target = await mount(FileItem, props(false));
+		expect(target.textContent).toContain('Upload interrupted');
+		expect(target.querySelector('[data-upload-retry]')).toBeFalsy();
+	});
+});

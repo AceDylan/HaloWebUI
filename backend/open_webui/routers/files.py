@@ -1,3 +1,4 @@
+import hashlib
 import logging
 import os
 import uuid
@@ -160,6 +161,15 @@ def _user_can_access_file(
     return has_access_to_file(file.id, access_type, user)
 
 
+def _sha256_of_upload(stream) -> str:
+    digest = hashlib.sha256()
+    stream.seek(0)
+    for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+        digest.update(chunk)
+    stream.seek(0)
+    return digest.hexdigest()
+
+
 ############################
 # Upload File
 ############################
@@ -173,6 +183,7 @@ def upload_file(
     file_metadata: dict = {},
     process: bool = Query(True),
     processing_mode: Optional[str] = Query(None),
+    reuse: bool = Query(False),
 ):
     log.info(f"file.content_type: {file.content_type}")
     file_path = None
@@ -204,6 +215,7 @@ def upload_file(
         id = str(uuid.uuid4())
         name = filename
         filename = f"{id}_{filename}"
+        digest = _sha256_of_upload(file.file) if reuse else None
         file_size, file_path = Storage.upload_file(file.file, filename)
         requested_processing_mode = resolve_file_processing_mode_from_config(
             request.app.state.config, processing_mode
@@ -303,6 +315,12 @@ def upload_file(
                         "diagnostic": diagnostic,
                     }
                 )
+
+        if file_item and digest:
+            # Written last: only a finished upload can be found by GET /reusable.
+            Files.update_file_metadata_by_id(
+                id, {"sha256": digest, "upload_process": process}
+            )
 
         if file_item:
             if isinstance(file_item, FileModelResponse):
@@ -404,6 +422,36 @@ async def search_files(
             del file.data["content"]
 
     return matching_files
+
+
+############################
+# Reusable Upload
+############################
+
+
+@router.get("/reusable", response_model=Optional[FileModelResponse])
+async def get_reusable_file(
+    request: Request,
+    sha256: str = Query(..., pattern="^[0-9a-f]{64}$"),
+    size: int = Query(..., ge=0),
+    name: Optional[str] = Query(None),
+    process: bool = Query(True),
+    processing_mode: Optional[str] = Query(None),
+    user=Depends(get_verified_user),
+):
+    """The caller's own earlier upload of the same bytes (POST /?reuse=true), stored
+    the same way, so the client can attach it instead of sending the file again.
+    `null` when there is none."""
+    return Files.get_reusable_upload(
+        user.id,
+        sha256,
+        size,
+        process,
+        resolve_file_processing_mode_from_config(
+            request.app.state.config, processing_mode
+        ),
+        name=os.path.basename(name) if name else None,
+    )
 
 
 ############################

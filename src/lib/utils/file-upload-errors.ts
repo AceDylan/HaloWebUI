@@ -77,6 +77,12 @@ const getDiagnosticKeys = (code: string): Record<string, string | null> | null =
 				message: 'This model does not support archive files. Please extract and upload files individually.',
 				hint: null
 			};
+		case 'upload_interrupted':
+			return {
+				title: 'Upload interrupted',
+				message: 'The connection dropped before the file was sent. Tap retry to send it again.',
+				hint: null
+			};
 		case 'stored_as_raw_attachment':
 			return {
 				title: 'Attached as the original file',

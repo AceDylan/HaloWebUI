@@ -20,7 +20,7 @@ const studio = vi.hoisted(() => ({
 	upsertImageStudioItems: vi.fn()
 }));
 vi.mock('$lib/apis/image-studio', () => studio);
-vi.mock('$lib/apis/files', () => ({ uploadFile: vi.fn() }));
+vi.mock('$lib/utils/reliable-upload', () => ({ uploadFileReliably: vi.fn() }));
 vi.mock('$app/navigation', () => ({ goto: vi.fn(), replaceState: vi.fn() }));
 const toasts = vi.hoisted(() => ({
 	success: vi.fn(),

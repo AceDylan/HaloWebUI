@@ -20,7 +20,7 @@
 	import { originLabel, takeHandoff, type HandoffOrigin } from '$lib/utils/handoff';
 	import { WEBUI_API_BASE_URL } from '$lib/constants';
 	import HandoffBack from '$lib/components/common/HandoffBack.svelte';
-	import { uploadFile } from '$lib/apis/files';
+	import { uploadFileReliably } from '$lib/utils/reliable-upload';
 	import { isVideoFile, videoContactSheet } from '$lib/utils/video-contact-sheet';
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import UploadProgress from '$lib/components/common/UploadProgress.svelte';
@@ -89,7 +89,7 @@
 				};
 				attachments = [...attachments, item];
 				try {
-					const res: any = await uploadFile(localStorage.token, file, {
+					const { file: res } = await uploadFileReliably(localStorage.token, file, {
 						...(image ? { process: false } : {}),
 						onProgress: ({ percent }) => {
 							item.progress = percent;
@@ -99,7 +99,12 @@
 					if (!res?.id) throw new Error('上传失败');
 					item.id = res.id;
 				} catch (e: any) {
-					item.error = typeof e === 'string' ? e : e?.message || '上传失败';
+					item.error =
+						typeof e === 'string'
+							? e
+							: e?.code === 'upload_interrupted'
+								? '网络中断，上传未完成'
+								: (typeof e?.detail === 'string' && e.detail) || e?.message || '上传失败';
 				}
 				attachments = attachments;
 			})

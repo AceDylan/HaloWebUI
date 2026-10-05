@@ -56,7 +56,7 @@
 	} from '$lib/utils/file-upload-errors';
 	import { findModelByIdentity, getModelSelectionId } from '$lib/utils/model-identity';
 	import { transcribeAudio } from '$lib/apis/audio';
-	import { uploadFile } from '$lib/apis/files';
+	import { isUploadCancelled, uploadFileReliably } from '$lib/utils/reliable-upload';
 	import { generateAutoCompletion } from '$lib/apis';
 	import { deleteFileById } from '$lib/apis/files';
 	import { getSessionUser } from '$lib/apis/auths';
@@ -97,6 +97,7 @@
 	import { saveUserSettingsPatch } from '$lib/utils/user-settings';
 
 	import XMark from '../icons/XMark.svelte';
+	import ArrowPath from '../icons/ArrowPath.svelte';
 	import Headphone from '../icons/Headphone.svelte';
 	import GlobeAlt from '../icons/GlobeAlt.svelte';
 	import CommandLine from '../icons/CommandLine.svelte';
@@ -706,18 +707,17 @@
 			blocking: localized.blocking
 		};
 
-		files = files.map((item) =>
-			item?.itemId === tempItemId
-				? {
-						...item,
-						status: 'failed',
-						error: localized.message,
-						errorTitle: localized.title,
-						errorHint: localized.hint,
-						diagnostic
-					}
-				: item
-		);
+		const item = files.find((candidate) => candidate?.itemId === tempItemId);
+		if (!item) return; // removed while it was uploading
+		Object.assign(item, {
+			status: 'failed',
+			error: localized.message,
+			errorTitle: localized.title,
+			errorHint: localized.hint,
+			diagnostic
+		});
+		delete item.progress;
+		files = files;
 
 		toast.error(localizeFileUploadError(error, $i18n.t.bind($i18n), getUploadLocalizeOptions()));
 	};
@@ -728,6 +728,69 @@
 		if (fileItem.status !== 'uploading' || fileItem.progress === percent) return;
 		fileItem.progress = percent;
 		files = files;
+	};
+
+	// Uploads of this composer by itemId: the picked file (for 重试) and the way to stop it.
+	const uploads = new Map<string, { file: File; fullContext?: boolean; controller?: AbortController }>();
+
+	// Sent again after the page was in the background, skipped when the same file was
+	// uploaded before (reliable-upload). Resolves with the stored file, or null when it
+	// failed (the item says why) or was removed.
+	const runUpload = async (
+		fileItem: { itemId: string; status: string; progress?: number; reused?: boolean },
+		options: { process: boolean; processingMode?: string }
+	) => {
+		const entry = uploads.get(fileItem.itemId);
+		if (!entry) return null;
+		const controller = new AbortController();
+		entry.controller = controller;
+		try {
+			const { file: uploadedFile, reused } = await uploadFileReliably(
+				localStorage.token,
+				entry.file,
+				{
+					...options,
+					signal: controller.signal,
+					onProgress: ({ percent }) => setUploadProgress(fileItem, percent),
+					onRetry: () => setUploadProgress(fileItem, 0)
+				}
+			);
+			if (!uploadedFile) {
+				setUploadFailure(fileItem.itemId, new Error($i18n.t('Failed to upload file.')));
+				return null;
+			}
+			uploads.delete(fileItem.itemId);
+			// An earlier upload: removing it here must not delete it from the chats that use it.
+			if (reused) fileItem.reused = true;
+			return uploadedFile;
+		} catch (e) {
+			if (!isUploadCancelled(e)) setUploadFailure(fileItem.itemId, e);
+			return null;
+		} finally {
+			if (entry.controller === controller) delete entry.controller;
+		}
+	};
+
+	// Stops an upload still going on for an item being removed.
+	const releaseUpload = (item) => {
+		uploads.get(item?.itemId)?.controller?.abort();
+		uploads.delete(item?.itemId);
+	};
+
+	const retryUpload = async (item) => {
+		const entry = uploads.get(item?.itemId);
+		if (!entry || item.status !== 'failed') return;
+		Object.assign(item, {
+			status: 'uploading',
+			progress: 0,
+			error: '',
+			errorTitle: '',
+			errorHint: '',
+			diagnostic: null
+		});
+		files = files;
+		if (item.type === 'image') await uploadImage(item);
+		else await uploadDocument(item, entry.fullContext);
 	};
 
 	const uploadImageFileHandler = async (file: File) => {
@@ -762,41 +825,31 @@
 		}
 
 		files = [...files, fileItem];
+		uploads.set(tempItemId, { file });
+		await uploadImage(fileItem);
+	};
 
-		try {
-			const uploadedFile = await uploadFile(localStorage.token, file, {
-				process: false,
-				onProgress: ({ percent }) => setUploadProgress(fileItem, percent)
-			});
+	const uploadImage = async (fileItem) => {
+		const uploadedFile = await runUpload(fileItem, { process: false });
+		if (!uploadedFile) return;
 
-			if (uploadedFile) {
-				if (uploadedFile.error) {
-					toast.warning(
-						localizeFileUploadError(
-							uploadedFile.error,
-							$i18n.t.bind($i18n),
-							getUploadLocalizeOptions()
-						)
-					);
-				}
-
-				fileItem.status = 'uploaded';
-				fileItem.id = uploadedFile.id;
-				fileItem.name = uploadedFile?.meta?.name ?? file.name;
-				fileItem.size = uploadedFile?.meta?.size ?? file.size;
-				fileItem.content_type = uploadedFile?.meta?.content_type ?? file.type;
-				fileItem.url = buildUploadedImageContentUrl(uploadedFile.id);
-				revokePreviewUrl(fileItem.preview_url);
-				delete fileItem.preview_url;
-				delete fileItem.progress;
-
-				files = files;
-			} else {
-				setUploadFailure(tempItemId, new Error($i18n.t('Failed to upload file.')));
-			}
-		} catch (e) {
-			setUploadFailure(tempItemId, e);
+		if (uploadedFile.error) {
+			toast.warning(
+				localizeFileUploadError(uploadedFile.error, $i18n.t.bind($i18n), getUploadLocalizeOptions())
+			);
 		}
+
+		fileItem.status = 'uploaded';
+		fileItem.id = uploadedFile.id;
+		fileItem.name = uploadedFile?.meta?.name ?? fileItem.name;
+		fileItem.size = uploadedFile?.meta?.size ?? fileItem.size;
+		fileItem.content_type = uploadedFile?.meta?.content_type ?? fileItem.content_type;
+		fileItem.url = buildUploadedImageContentUrl(uploadedFile.id);
+		revokePreviewUrl(fileItem.preview_url);
+		delete fileItem.preview_url;
+		delete fileItem.progress;
+
+		files = files;
 	};
 
 	const uploadFileHandler = async (file, fullContext: boolean = false) => {
@@ -830,56 +883,53 @@
 		}
 
 		files = [...files, fileItem];
+		uploads.set(tempItemId, { file, fullContext });
+		await uploadDocument(fileItem, fullContext);
+	};
 
-		try {
-			// Hermes reads the original file by host path, including archives and
-			// binary media that the document extractor cannot process.
-			const uploadedFile = await uploadFile(localStorage.token, file, {
-				process: !showHermesOptions,
-				processingMode: !showHermesOptions && fullContext ? 'full_context' : undefined,
-				onProgress: ({ percent }) => setUploadProgress(fileItem, percent)
-			});
+	const uploadDocument = async (fileItem, fullContext: boolean = false) => {
+		// Hermes reads the original file by host path, including archives and
+		// binary media that the document extractor cannot process.
+		const uploadedFile = await runUpload(fileItem, {
+			process: !showHermesOptions,
+			processingMode: !showHermesOptions && fullContext ? 'full_context' : undefined
+		});
 
-			if (uploadedFile) {
-				console.log('File upload completed:', {
-					id: uploadedFile.id,
-					name: fileItem.name,
-					collection: uploadedFile?.meta?.collection_name
-				});
+		if (!uploadedFile) return;
 
-				if (uploadedFile.error) {
-					console.warn('File upload warning:', uploadedFile.error);
-					const notice = localizeFileUploadError(
-						uploadedFile.diagnostic ?? uploadedFile.error,
-						$i18n.t.bind($i18n),
-						getUploadLocalizeOptions()
-					);
-					// Kept as the original file (video, archive …): a note, not a problem.
-					if (uploadedFile.diagnostic?.code === 'stored_as_raw_attachment') toast.info(notice);
-					else toast.warning(notice);
-				}
+		console.log('File upload completed:', {
+			id: uploadedFile.id,
+			name: fileItem.name,
+			collection: uploadedFile?.meta?.collection_name
+		});
 
-				fileItem.status = 'uploaded';
-				fileItem.file = uploadedFile;
-				fileItem.id = uploadedFile.id;
-				fileItem.collection_name =
-					uploadedFile?.meta?.collection_name || uploadedFile?.collection_name;
-				fileItem.processing_mode = uploadedFile?.meta?.processing_mode;
-				if (uploadedFile?.meta?.processing_mode === 'full_context') {
-					fileItem.context = 'full';
-				} else if (uploadedFile?.meta?.processing_mode !== 'native_file') {
-					delete fileItem.context;
-				}
-				fileItem.url = `${WEBUI_API_BASE_URL}/files/${uploadedFile.id}`;
-				delete fileItem.progress;
-
-				files = files;
-			} else {
-				setUploadFailure(tempItemId, new Error($i18n.t('Failed to upload file.')));
-			}
-		} catch (e) {
-			setUploadFailure(tempItemId, e);
+		if (uploadedFile.error) {
+			console.warn('File upload warning:', uploadedFile.error);
+			const notice = localizeFileUploadError(
+				uploadedFile.diagnostic ?? uploadedFile.error,
+				$i18n.t.bind($i18n),
+				getUploadLocalizeOptions()
+			);
+			// Kept as the original file (video, archive …): a note, not a problem.
+			if (uploadedFile.diagnostic?.code === 'stored_as_raw_attachment') toast.info(notice);
+			else toast.warning(notice);
 		}
+
+		fileItem.status = 'uploaded';
+		fileItem.file = uploadedFile;
+		fileItem.id = uploadedFile.id;
+		fileItem.collection_name =
+			uploadedFile?.meta?.collection_name || uploadedFile?.collection_name;
+		fileItem.processing_mode = uploadedFile?.meta?.processing_mode;
+		if (uploadedFile?.meta?.processing_mode === 'full_context') {
+			fileItem.context = 'full';
+		} else if (uploadedFile?.meta?.processing_mode !== 'native_file') {
+			delete fileItem.context;
+		}
+		fileItem.url = `${WEBUI_API_BASE_URL}/files/${uploadedFile.id}`;
+		delete fileItem.progress;
+
+		files = files;
 	};
 
 	const inputFilesHandler = async (inputFiles) => {
@@ -959,7 +1009,8 @@
 			return;
 		}
 
-		if (file.itemId && file.id && file.type !== 'collection' && !file?.collection) {
+		releaseUpload(file);
+		if (file.itemId && file.id && !file.reused && file.type !== 'collection' && !file?.collection) {
 			try {
 				await deleteFileById(localStorage.token, file.id);
 			} catch (error) {
@@ -1313,6 +1364,19 @@
 																progress={file.progress}
 																className="absolute inset-0 rounded-xl bg-black/50 text-white pointer-events-none"
 															/>
+														{:else if file.status === 'failed'}
+															<button
+																type="button"
+																class="absolute inset-0 flex items-center justify-center rounded-xl bg-red-950/60 text-white disabled:opacity-70"
+																title={[file.errorTitle, file.error].filter(Boolean).join('\n') ||
+																	$i18n.t('Upload failed')}
+																aria-label={$i18n.t('Retry')}
+																data-upload-retry
+																disabled={!uploads.has(file.itemId)}
+																on:click={() => retryUpload(file)}
+															>
+																<ArrowPath className="size-5" strokeWidth="2" />
+															</button>
 														{/if}
 														{#if atSelectedModel ? visionCapableModels.length === 0 : selectedModels.length !== visionCapableModels.length}
 															<Tooltip
@@ -1371,9 +1435,12 @@
 													loading={file.status === 'uploading'}
 													dismissible={true}
 													edit={true}
+													retryable={file.status === 'failed' && uploads.has(file.itemId)}
+													on:retry={() => retryUpload(file)}
 													on:dismiss={async () => {
+														releaseUpload(file);
 														if (file.itemId && file.type !== 'collection' && !file?.collection) {
-															if (file.id) {
+															if (file.id && !file.reused) {
 																// This will handle both file deletion and Chroma cleanup
 																await deleteFileById(localStorage.token, file.id);
 															}

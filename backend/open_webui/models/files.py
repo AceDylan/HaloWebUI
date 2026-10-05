@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 import time
 from typing import Optional
 
@@ -192,6 +193,55 @@ class FilesTable:
                 .order_by(File.created_at.desc(), File.id.desc())
                 .all()
             ]
+
+    def get_reusable_upload(
+        self,
+        user_id: str,
+        sha256: str,
+        size: int,
+        process: bool,
+        processing_mode: Optional[str],
+        name: Optional[str] = None,
+    ) -> Optional[FileModel]:
+        """A finished upload of the same bytes by this user, stored the same way.
+
+        Only uploads that asked to be reusable carry `meta.sha256`, and it is written
+        once the upload (and its processing) has finished, so a half-done or failed
+        upload never matches. A file with the same name is preferred.
+        """
+        with get_db() as db:
+            try:
+                rows = (
+                    db.query(File)
+                    .filter(
+                        File.user_id == user_id,
+                        File.meta["sha256"].as_string() == sha256,
+                    )
+                    .order_by(File.created_at.desc())
+                    .limit(20)
+                    .all()
+                )
+            except Exception as e:
+                log.warning(f"Reusable upload lookup failed: {e}")
+                return None
+
+            matches = []
+            for row in rows:
+                meta = row.meta or {}
+                if (
+                    meta.get("size") != size
+                    or bool(meta.get("upload_process")) != process
+                    or meta.get("processing_mode") != processing_mode
+                ):
+                    continue
+                if row.path and os.path.isabs(row.path) and not os.path.exists(row.path):
+                    continue
+                matches.append(row)
+
+            if not matches:
+                return None
+            named = [row for row in matches if name and row.filename == name]
+            return FileModel.model_validate((named or matches)[0])
 
     def get_file_by_hash_and_user_id(
         self, user_id: str, hash: str

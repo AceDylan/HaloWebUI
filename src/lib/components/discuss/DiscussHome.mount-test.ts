@@ -18,8 +18,8 @@ const api = vi.hoisted(() => ({
 	}
 }));
 vi.mock('$lib/apis/discussions', () => api);
-const files = vi.hoisted(() => ({ uploadFile: vi.fn() }));
-vi.mock('$lib/apis/files', () => files);
+const files = vi.hoisted(() => ({ uploadFileReliably: vi.fn() }));
+vi.mock('$lib/utils/reliable-upload', () => files);
 const nav = vi.hoisted(() => ({ goto: vi.fn(), replaceState: vi.fn() }));
 vi.mock('$app/navigation', () => nav);
 const toasts = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn() }));
@@ -46,7 +46,7 @@ beforeAll(async () => {
 beforeEach(() => {
 	[api.listDiscussions, api.createDiscussion, api.deleteDiscussion].forEach((fn: any) => fn.mockReset());
 	Object.values(toasts).forEach((fn: any) => fn.mockReset());
-	files.uploadFile.mockReset();
+	files.uploadFileReliably.mockReset();
 	nav.goto.mockReset();
 	localStorage.removeItem('halo.discuss.last');
 	localStorage.token = 't';
@@ -150,9 +150,11 @@ describe('DiscussHome', () => {
 
 	it('uploads dropped files with a progress ring and sends their ids', async () => {
 		let release: (v: any) => void = () => {};
-		files.uploadFile.mockImplementation((_t: string, file: File, opts: any) => {
+		files.uploadFileReliably.mockImplementation((_t: string, file: File, opts: any) => {
 			opts.onProgress?.({ loaded: 40, total: 100, percent: 40 });
-			return new Promise((resolve) => (release = () => resolve({ id: `id-${file.name}` })));
+			return new Promise(
+				(resolve) => (release = () => resolve({ file: { id: `id-${file.name}` }, reused: false }))
+			);
 		});
 		const target = await mount();
 		await until(() => target.querySelectorAll('[data-discuss-seat]').length > 0);
@@ -161,7 +163,7 @@ describe('DiscussHome', () => {
 		target.querySelector('[data-discuss-composer]')!.dispatchEvent(drop);
 		await until(() => !!target.querySelector('[data-attachment-state="uploading"]'));
 		expect(target.querySelector('[data-discuss-attachments]')!.textContent).toContain('40%');
-		expect(files.uploadFile.mock.calls[0][2].process).toBeUndefined(); // documents are read for their text
+		expect(files.uploadFileReliably.mock.calls[0][2].process).toBeUndefined(); // documents are read for their text
 		const box = target.querySelector('#discuss-question') as any;
 		box.value = '评审这个计划';
 		box.dispatchEvent(new (globalThis as any).Event('input'));

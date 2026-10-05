@@ -17,6 +17,8 @@
 
 	export let dismissible = false;
 	export let loading = false;
+	/** A failed upload that can be sent again: clicking the item dispatches `retry`. */
+	export let retryable = false;
 
 	export let item = null;
 	export let edit = false;
@@ -66,6 +68,11 @@
 	type="button"
 	on:click={async () => {
 		if (uploading) {
+			return;
+		}
+
+		if (failed && retryable) {
+			dispatch('retry');
 			return;
 		}
 
@@ -157,7 +164,9 @@
 			</div>
 			{#if failed}
 				<div class="mt-1 text-2xs text-red-600 dark:text-red-300 line-clamp-2">
-					{failureTitle}
+					{failureTitle}{#if retryable}
+						<span class="font-medium underline" data-upload-retry> · {$i18n.t('Tap to retry')}</span
+						>{/if}
 				</div>
 			{/if}
 		</div>

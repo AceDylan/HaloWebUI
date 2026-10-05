@@ -9,7 +9,21 @@ let sources: Record<string, string> = {};
 
 beforeAll(async () => {
 	for (const [component, names] of [
-		['MessageInput', ['uploadFileHandler', 'uploadImageFileHandler', 'inputFilesHandler']],
+		[
+			'MessageInput',
+			[
+				'uploads',
+				'runUpload',
+				'releaseUpload',
+				'retryUpload',
+				'uploadFileHandler',
+				'uploadDocument',
+				'uploadImageFileHandler',
+				'uploadImage',
+				'inputFilesHandler',
+				'removeInputFile'
+			]
+		],
 		['Chat', ['uploadGoogleDriveFile']]
 	] as const) {
 		const filename = `src/lib/components/chat/${component}.svelte`;
@@ -39,6 +53,10 @@ const composer = (hermes: boolean) => {
 		localStorage: { token: 'test-token' },
 		token: 'test-token',
 		uploadFile: vi.fn().mockResolvedValue(uploaded),
+		uploadFileReliably: vi.fn().mockResolvedValue({ file: uploaded, reused: false }),
+		isUploadCancelled: () => false,
+		deleteFileById: vi.fn().mockResolvedValue(true),
+		AbortController,
 		WEBUI_API_BASE_URL: '/api/v1',
 		IMAGE_INPUT_MIME_TYPES: ['image/png', 'image/jpeg'],
 		visionCapableModels: ['vision-model'],
@@ -88,10 +106,12 @@ describe('agent attachment uploads', () => {
 		const store = composer(true);
 		const file = new File(['attachment'], name, { type });
 		await store.inputFilesHandler([file]);
-		expect(store.uploadFile).toHaveBeenCalledWith('test-token', file, {
+		expect(store.uploadFileReliably).toHaveBeenCalledWith('test-token', file, {
 			process: false,
 			processingMode: undefined,
-			onProgress: expect.any(Function)
+			signal: expect.any(AbortSignal),
+			onProgress: expect.any(Function),
+			onRetry: expect.any(Function)
 		});
 		expect(store.files[0]).toMatchObject({ id: 'stored-file', name, status: 'uploaded' });
 		expect(store.setUploadFailure).not.toHaveBeenCalled();
@@ -100,7 +120,7 @@ describe('agent attachment uploads', () => {
 	it('keeps normal model extraction and full-context uploads', async () => {
 		const store = composer(false);
 		await store.uploadFileHandler(new File(['text'], 'notes.txt'), true);
-		expect(store.uploadFile.mock.calls[0][2]).toMatchObject({
+		expect(store.uploadFileReliably.mock.calls[0][2]).toMatchObject({
 			process: true,
 			processingMode: 'full_context'
 		});
@@ -127,7 +147,9 @@ describe('agent attachment uploads', () => {
 		const video = new File(['video'], 'clip.mp4', { type: 'video/mp4' });
 		await store.inputFilesHandler([video]);
 		expect(store.videoContactSheet).toHaveBeenCalledWith(video);
-		expect(store.uploadFile.mock.calls.map((call: any[]) => [call[1].name, call[2].process])).toEqual([
+		expect(
+			store.uploadFileReliably.mock.calls.map((call: any[]) => [call[1].name, call[2].process])
+		).toEqual([
 			['clip.mp4', true],
 			['clip · 画面拼图.jpg', false]
 		]);
@@ -142,20 +164,67 @@ describe('agent attachment uploads', () => {
 		store.visionCapableModels = vision;
 		await store.inputFilesHandler([new File(['video'], 'clip.mp4', { type: 'video/mp4' })]);
 		expect(store.videoContactSheet).not.toHaveBeenCalled();
-		expect(store.uploadFile).toHaveBeenCalledTimes(1);
+		expect(store.uploadFileReliably).toHaveBeenCalledTimes(1);
 	});
 
 	it('still enforces upload permission', async () => {
 		const store = composer(true);
 		store.$_user.permissions.chat.file_upload = false;
 		await store.inputFilesHandler([new File(['archive'], 'bundle.zip')]);
-		expect(store.uploadFile).not.toHaveBeenCalled();
+		expect(store.uploadFileReliably).not.toHaveBeenCalled();
 	});
 
 	it('still enforces the configured file size limit', async () => {
 		const store = composer(true);
 		store.$config.file = { max_size: 0 };
 		await store.inputFilesHandler([new File(['archive'], 'bundle.zip')]);
-		expect(store.uploadFile).not.toHaveBeenCalled();
+		expect(store.uploadFileReliably).not.toHaveBeenCalled();
+	});
+
+	it('attaches an earlier upload of the same file and does not delete it when removed', async () => {
+		const store = composer(false);
+		store.uploadFileReliably.mockResolvedValue({ file: { id: 'earlier', meta: {} }, reused: true });
+		await store.inputFilesHandler([new File(['png'], 'a.png', { type: 'image/png' })]);
+		expect(store.files[0]).toMatchObject({ id: 'earlier', status: 'uploaded', reused: true });
+
+		await store.removeInputFile(0);
+		expect(store.files).toHaveLength(0);
+		expect(store.deleteFileById).not.toHaveBeenCalled();
+	});
+
+	it('still deletes a file this composer uploaded when it is removed', async () => {
+		const store = composer(false);
+		await store.inputFilesHandler([new File(['text'], 'notes.txt')]);
+		await store.removeInputFile(0);
+		expect(store.deleteFileById).toHaveBeenCalledWith('test-token', 'stored-file');
+	});
+
+	it('sends a failed upload again on retry', async () => {
+		const store = composer(false);
+		const file = new File(['text'], 'notes.txt');
+		store.uploadFileReliably.mockRejectedValueOnce({ code: 'upload_interrupted' });
+		await store.uploadFileHandler(file, true);
+		expect(store.setUploadFailure).toHaveBeenCalledWith('temp-file', { code: 'upload_interrupted' });
+
+		store.files[0].status = 'failed'; // what setUploadFailure does
+		await store.retryUpload(store.files[0]);
+		expect(store.uploadFileReliably).toHaveBeenCalledTimes(2);
+		expect(store.uploadFileReliably.mock.calls[1][1]).toBe(file);
+		expect(store.uploadFileReliably.mock.calls[1][2]).toMatchObject({ processingMode: 'full_context' });
+		expect(store.files[0]).toMatchObject({ id: 'stored-file', status: 'uploaded' });
+	});
+
+	it('stops an upload when its attachment is removed', async () => {
+		const store = composer(false);
+		let signal: AbortSignal | undefined;
+		store.uploadFileReliably.mockImplementation((_t: string, _f: File, opts: any) => {
+			signal = opts.signal;
+			return new Promise(() => {});
+		});
+		void store.inputFilesHandler([new File(['text'], 'notes.txt')]);
+		await vi.waitFor(() => expect(signal).toBeDefined());
+		await store.removeInputFile(0);
+		expect(signal!.aborted).toBe(true);
+		expect(store.files).toHaveLength(0);
 	});
 });

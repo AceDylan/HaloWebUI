@@ -48,9 +48,11 @@ const pendingRequest = () => {
 	};
 };
 
-// Resolves once the upload has made `count` requests (after hashing the file).
+// Resolves once the upload has made `count` requests (after hashing the file, which takes
+// real time: up to a few seconds on a busy CI machine). performance.now is not faked.
 const sent = async (count = 1) => {
-	for (let i = 0; i < 500 && api.sendUpload.mock.calls.length < count; i++) {
+	const start = performance.now();
+	while (api.sendUpload.mock.calls.length < count && performance.now() - start < 4_000) {
 		await new Promise((resolve) => setImmediate(resolve));
 	}
 	expect(api.sendUpload).toHaveBeenCalledTimes(count);

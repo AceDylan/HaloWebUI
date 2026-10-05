@@ -1995,6 +1995,20 @@ body:has(#chat-input:focus) .halo-orb__arc {
 .dark .modal {
 	background-color: oklch(0.06 0.01 268 / 0.62);
 }
+/* The image viewer stays solid black: see-through, it blurred the whole live page behind
+   the picture, and a phone coming back to the tab flickered while that recomposited. */
+.modal[data-image-preview] {
+	background-color: #000;
+	-webkit-backdrop-filter: none;
+	backdrop-filter: none;
+}
+/* Phones: no full-screen blur behind dialogs either (as the composer in scifi.css). */
+@media (max-width: 767px), (pointer: coarse) {
+	.modal {
+		-webkit-backdrop-filter: none;
+		backdrop-filter: none;
+	}
+}
 .halo-modal {
 	box-shadow:
 		0 0 0 1px var(--surface-border),

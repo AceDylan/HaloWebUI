@@ -554,7 +554,7 @@
 						{/if}
 					</div>
 				{/if}
-				<form class="dc-dock flex items-end gap-2 p-2 pl-4" on:submit|preventDefault={submit}>
+				<form class="dc-dock relative flex items-end gap-2 p-2 pl-4" on:submit|preventDefault={submit} data-scifi-conduit>
 					<textarea
 						bind:this={inputEl}
 						bind:value={input}

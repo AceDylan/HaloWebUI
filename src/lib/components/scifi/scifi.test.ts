@@ -38,3 +38,34 @@ describe('opening titles', () => {
 		expect(seen).toEqual([[WARP_EVENT, { ms: 500 }]]);
 	});
 });
+
+describe('panel spotlight', () => {
+	it('puts the mouse position on the panel under it, mouse only, once a frame', async () => {
+		const { trackSpotlight } = await import('./scifi');
+		const frames: FrameRequestCallback[] = [];
+		vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => frames.push(cb));
+		vi.stubGlobal('cancelAnimationFrame', () => {});
+		let handler: (e: unknown) => void = () => {};
+		const root = {
+			addEventListener: (_: string, h: (e: unknown) => void) => (handler = h),
+			removeEventListener: vi.fn()
+		};
+		const props = new Map<string, string>();
+		const panel = {
+			getBoundingClientRect: () => ({ left: 100, top: 40 }),
+			style: { setProperty: (k: string, v: string) => props.set(k, v) }
+		};
+		const target = { closest: () => panel };
+		const stop = trackSpotlight(root as never);
+		handler({ pointerType: 'touch', target, clientX: 0, clientY: 0 });
+		expect(frames.length).toBe(0);
+		handler({ pointerType: 'mouse', target, clientX: 150, clientY: 60 });
+		handler({ pointerType: 'mouse', target, clientX: 160.4, clientY: 70 });
+		expect(frames.length).toBe(1);
+		frames[0](0);
+		expect(props.get('--sf-x')).toBe('60px');
+		expect(props.get('--sf-y')).toBe('30px');
+		stop();
+		expect(root.removeEventListener).toHaveBeenCalled();
+	});
+});

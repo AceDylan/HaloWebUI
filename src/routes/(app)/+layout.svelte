@@ -52,7 +52,7 @@
 	import { isFramed, requestHubReauth } from '$lib/utils/hub-embed';
 	import StarField from '$lib/components/scifi/StarField.svelte';
 	import BootSequence from '$lib/components/scifi/BootSequence.svelte';
-	import { applyScifi, scifiEnabled, shouldBoot } from '$lib/components/scifi/scifi';
+	import { applyScifi, scifiEnabled, shouldBoot, trackSpotlight } from '$lib/components/scifi/scifi';
 
 	const i18n = getContext('i18n');
 
@@ -108,6 +108,13 @@
 	// titles (at most every 6 hours) once the app is loaded.
 	$: scifiOn = scifiEnabled($settings);
 	$: applyScifi(scifiOn);
+	// mode-page panels: a light that follows the mouse (scifi-modes.css)
+	let stopSpotlight: (() => void) | null = null;
+	const setSpotlight = (on: boolean) => {
+		stopSpotlight?.();
+		stopSpotlight = on && typeof document !== 'undefined' ? trackSpotlight() : null;
+	};
+	$: setSpotlight(scifiOn);
 	let booting = false;
 	let bootChecked = false;
 	$: if (loaded && scifiOn && !bootChecked) {
@@ -363,6 +370,7 @@
 
 	onDestroy(() => {
 		stopHermesActivityPolling();
+		setSpotlight(false);
 	});
 
 	const checkForVersionUpdates = async () => {

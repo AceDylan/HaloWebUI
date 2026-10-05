@@ -1,0 +1,797 @@
+/* =====================================================================================
+   Halo sci-fi layer, part two: the mode pages — 讨论台 (/discuss), 协作台 (/teams) and the
+   生图工作台 (/workspace/images). Same switch as scifi.css (html.halo-scifi), same idea:
+   the shell, the headers and the moments of work carry the show; text stays calm.
+
+   One grammar on all three pages:
+   - header: a HUD eyebrow, the holographic title of the landing (scifi.css) and an emblem
+     from the reactor's family (ModeEmblem.svelte) with live read-outs;
+   - every box you talk to AI in is a neon conduit (scifi.css, [data-scifi-conduit]);
+   - panels are instrument glass: viewfinder corners, a light that follows the mouse
+     (scifi.ts trackSpotlight), and list rows lock on with their corners when hovered;
+   - work in progress is a scan: a seat that is speaking, a task that is running, an image
+     that is rendering; finished output materialises from a scan line;
+   - the one primary action of a page is an energy button.
+   The 讨论台 / 协作台 pages share the tm- tokens (teams.css): retinting those carries most of
+   both pages into the palette; the rest is added on top of named hooks.
+   ===================================================================================== */
+
+@property --sf-k {
+	syntax: '<length>';
+	inherits: false;
+	initial-value: 0px;
+}
+@property --sf-spot {
+	syntax: '<color>';
+	inherits: false;
+	initial-value: transparent;
+}
+
+html.halo-scifi {
+	--sf-ease: cubic-bezier(0.22, 1, 0.36, 1);
+	--sf-corner: rgb(8 145 178 / 0.5);
+	--sf-spot-on: rgb(8 145 178 / 0.07);
+	--sf-fill: #f8fafe;
+}
+html.halo-scifi.dark {
+	--sf-corner: rgb(94 231 255 / 0.6);
+	--sf-spot-on: rgb(94 231 255 / 0.085);
+	--sf-fill: #060812;
+}
+
+/* ------------------------------------------------------------------ tokens: tm- retinted */
+
+html.halo-scifi [data-teams-ui] {
+	--tm-accent: 192 88% 36%;
+	--tm-accent-2: 262 72% 56%;
+	--tm-line: 195 60% 30% / 0.12;
+	--tm-line-strong: 195 60% 30% / 0.2;
+	--tm-surface-2: 200 40% 98%;
+	--tm-shadow-lift:
+		0 2px 6px hsl(200 40% 20% / 0.06), 0 0 0 1px hsl(192 88% 36% / 0.12),
+		0 18px 44px -20px hsl(192 80% 35% / 0.3);
+	--tm-page: #f8fafe;
+}
+html.halo-scifi.dark [data-teams-ui] {
+	--tm-accent: 189 100% 68%;
+	--tm-accent-2: 258 90% 76%;
+	--tm-surface: 230 42% 7.5%;
+	--tm-surface-2: 228 38% 9.5%;
+	--tm-line: 190 90% 75% / 0.1;
+	--tm-line-strong: 190 90% 75% / 0.2;
+	--tm-shadow: 0 1px 0 hsl(190 100% 85% / 0.04) inset, 0 18px 44px -26px hsl(0 0% 0% / 0.9);
+	--tm-shadow-lift:
+		0 1px 0 hsl(190 100% 85% / 0.06) inset, 0 0 0 1px hsl(189 100% 68% / 0.14),
+		0 22px 60px -26px hsl(190 95% 50% / 0.38);
+	--tm-page: #060812;
+}
+
+/* the panel already has the starfield and the grid: the page keeps only a nebula above */
+html.halo-scifi .tm-ambient::after {
+	display: none;
+}
+html.halo-scifi .tm-ambient::before {
+	height: 620px;
+	background:
+		radial-gradient(55% 60% at 50% -10%, hsl(var(--tm-accent) / 0.12), transparent 70%),
+		radial-gradient(35% 45% at 88% 4%, hsl(var(--tm-accent-2) / 0.12), transparent 70%),
+		radial-gradient(30% 40% at 8% 10%, rgb(244 114 208 / 0.05), transparent 70%);
+}
+
+/* ------------------------------------------------------------------ header */
+
+html.halo-scifi .halo-mode-eyebrow {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.55rem;
+	font-family: var(--font-mono);
+	font-size: 10.5px;
+	font-weight: 600;
+	letter-spacing: 0.24em;
+	text-transform: uppercase;
+	color: var(--scifi-cyan);
+	text-shadow: 0 0 10px var(--scifi-glow);
+}
+html.halo-scifi .halo-mode-eyebrow::before {
+	content: '';
+	width: 6px;
+	height: 6px;
+	background: var(--scifi-cyan);
+	box-shadow: 0 0 8px var(--scifi-cyan);
+	animation: sf-blink 1.6s steps(2, start) infinite;
+}
+@keyframes sf-blink {
+	to {
+		opacity: 0.25;
+	}
+}
+html.halo-scifi [data-teams-ui] .tm-eyebrow {
+	font-family: var(--font-mono);
+	letter-spacing: 0.18em;
+	color: hsl(var(--tm-accent) / 0.9);
+}
+
+/* the header is drawn once by a passing scan line (one layer: a faint trail ending in the line) */
+html.halo-scifi .halo-mode-hero::after {
+	content: '';
+	position: absolute;
+	inset: -0.75rem -1rem;
+	z-index: -1;
+	pointer-events: none;
+	background: linear-gradient(
+			to bottom,
+			transparent,
+			rgb(94 231 255 / 0.07) 92%,
+			var(--scifi-cyan) 98.5%,
+			transparent
+		)
+		0 -72px / 100% 72px no-repeat;
+	-webkit-mask-image: linear-gradient(90deg, transparent, #000 15%, #000 85%, transparent);
+	mask-image: linear-gradient(90deg, transparent, #000 15%, #000 85%, transparent);
+	opacity: 0;
+	animation: sf-hero-scan 1.3s 0.15s cubic-bezier(0.5, 0, 0.3, 1) both;
+}
+@keyframes sf-hero-scan {
+	0% {
+		opacity: 1;
+		background-position: 0 -72px;
+	}
+	85% {
+		opacity: 0.9;
+	}
+	100% {
+		opacity: 0;
+		background-position: 0 100%;
+	}
+}
+
+/* the emblem: the reactor's outer halo with the mode drawn inside */
+.halo-emblem {
+	position: absolute;
+	top: -2.25rem;
+	right: -2.5rem;
+	z-index: -1;
+	width: 176px;
+	pointer-events: none;
+	animation: sf-emblem-in 1.1s 0.1s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+[data-studio-hero] .halo-emblem {
+	right: 1rem;
+	top: 0;
+	width: 150px;
+}
+:root:not(.halo-scifi) .halo-emblem {
+	display: none;
+}
+@media (max-width: 1179px) {
+	.halo-emblem {
+		display: none;
+	}
+}
+@keyframes sf-emblem-in {
+	from {
+		opacity: 0;
+		transform: scale(0.7) rotate(-25deg);
+		filter: blur(6px);
+	}
+}
+.halo-emblem__svg {
+	display: block;
+	width: 100%;
+	height: auto;
+	overflow: visible;
+	fill: none;
+}
+.halo-emblem__svg * {
+	transform-box: view-box;
+	transform-origin: 0 0;
+}
+.halo-emblem__ticks {
+	stroke: var(--scifi-cyan);
+	stroke-width: 0.8;
+	opacity: 0.35;
+	animation: scifi-rot 90s linear infinite;
+}
+.halo-emblem__ticks .major {
+	stroke-width: 1.3;
+	opacity: 1;
+}
+.halo-emblem__arcs {
+	stroke-width: 2.4;
+	stroke-linecap: round;
+	filter: drop-shadow(0 0 4px var(--scifi-glow));
+	animation: scifi-rot 16s linear infinite reverse;
+}
+.halo-emblem__ring {
+	stroke: var(--scifi-cyan);
+	stroke-width: 0.8;
+	opacity: 0.35;
+}
+.halo-emblem__ring--dash {
+	stroke-dasharray: 2 5;
+	opacity: 0.55;
+	animation: scifi-rot 40s linear infinite;
+}
+.halo-emblem__flow {
+	stroke: var(--scifi-cyan);
+	stroke-width: 0.8;
+	stroke-dasharray: 3 6;
+	opacity: 0.4;
+	animation: sf-flow 2.4s linear infinite;
+	animation-delay: var(--d, 0s);
+}
+.halo-emblem--discuss .halo-emblem__flow {
+	opacity: 0.22;
+}
+@keyframes sf-flow {
+	to {
+		stroke-dashoffset: -18;
+	}
+}
+.halo-emblem__core {
+	stroke-width: 1.6;
+	stroke-dasharray: 5 3;
+	fill: var(--sf-fill);
+	animation: scifi-rot 12s linear infinite;
+}
+.halo-emblem__dot {
+	fill: var(--scifi-cyan);
+	filter: drop-shadow(0 0 4px var(--scifi-cyan)) drop-shadow(0 0 10px var(--scifi-violet));
+	animation: sf-glow 2.2s ease-in-out infinite;
+}
+@keyframes sf-glow {
+	50% {
+		opacity: 0.45;
+	}
+}
+/* discuss: five seats take turns to speak */
+.halo-emblem__seat {
+	fill: var(--sf-fill);
+	stroke: hsl(var(--h) 90% 66%);
+	stroke-width: 1.4;
+	animation: sf-speak 5.5s ease-in-out infinite;
+	animation-delay: var(--d, 0s);
+}
+@keyframes sf-speak {
+	0%,
+	22%,
+	100% {
+		fill: var(--sf-fill);
+		stroke-width: 1.4;
+		filter: none;
+	}
+	8% {
+		fill: hsl(var(--h) 90% 66% / 0.45);
+		stroke-width: 2.6;
+		filter: drop-shadow(0 0 6px hsl(var(--h) 90% 66%));
+	}
+}
+/* teams: the lead hands work along the graph to the goal */
+.halo-emblem__lead {
+	fill: var(--sf-fill);
+	stroke-width: 1.6;
+}
+.halo-emblem__node {
+	fill: var(--sf-fill);
+	stroke: var(--scifi-cyan);
+	stroke-width: 1.1;
+	animation: sf-node 2.7s ease-in-out infinite;
+	animation-delay: var(--d, 0s);
+}
+@keyframes sf-node {
+	40% {
+		fill: rgb(94 231 255 / 0.28);
+		stroke-width: 1.8;
+		filter: drop-shadow(0 0 6px var(--scifi-cyan));
+	}
+}
+.halo-emblem__goal {
+	fill: var(--sf-fill);
+	stroke: var(--scifi-violet);
+	stroke-width: 1.2;
+	stroke-dasharray: 3 2.4;
+}
+/* images: a lens iris that breathes and a line scanning the frame */
+.halo-emblem__iris {
+	stroke: var(--scifi-cyan);
+	stroke-width: 0.9;
+	opacity: 0.6;
+	animation: sf-iris 7s ease-in-out infinite alternate;
+}
+@keyframes sf-iris {
+	to {
+		transform: rotate(60deg);
+	}
+}
+.halo-emblem__scan {
+	fill: var(--scifi-cyan);
+	opacity: 0.85;
+	filter: drop-shadow(0 0 4px var(--scifi-cyan));
+	animation: sf-lens-scan 2.6s ease-in-out infinite alternate;
+}
+@keyframes sf-lens-scan {
+	from {
+		transform: translateY(-54px);
+	}
+	to {
+		transform: translateY(54px);
+	}
+}
+.halo-emblem__cross {
+	stroke: var(--scifi-magenta);
+	stroke-width: 1;
+	opacity: 0.7;
+}
+.halo-emblem__hud {
+	display: flex;
+	flex-wrap: wrap;
+	justify-content: center;
+	gap: 0.1rem 0.9rem;
+	margin-top: 0.35rem;
+	font-family: var(--font-mono);
+	font-size: 9px;
+	letter-spacing: 0.14em;
+	white-space: nowrap;
+	color: var(--scifi-cyan);
+	opacity: 0.75;
+	text-shadow: 0 0 8px var(--scifi-glow);
+	animation: scifi-hud-in 900ms 600ms steps(6) both;
+}
+.halo-emblem__hud b {
+	font-weight: 700;
+	color: var(--scifi-violet);
+}
+
+/* ------------------------------------------------------------------ instrument glass
+   Plain-coloured panels only (the tinted ones keep their gradient): keep this list in step
+   with SPOT_SELECTOR in scifi.ts. Corners and the light are background layers under the
+   content, so they never cover text and need no pseudo element. */
+
+html.halo-scifi
+	:is(
+		[data-discuss-row],
+		[data-team-row],
+		[data-teams-ui] .tm-card-quiet.tm-hover,
+		.dc-turn,
+		#team-inspector,
+		[data-halo-mode] .glass-item:not(.group)
+	) {
+	--sf-k: 0px;
+	background-image:
+		radial-gradient(280px circle at var(--sf-x, 50%) var(--sf-y, -300px), var(--sf-spot), transparent 70%),
+		linear-gradient(var(--sf-corner) 0 0), linear-gradient(var(--sf-corner) 0 0),
+		linear-gradient(var(--sf-corner) 0 0), linear-gradient(var(--sf-corner) 0 0),
+		linear-gradient(var(--sf-corner) 0 0), linear-gradient(var(--sf-corner) 0 0),
+		linear-gradient(var(--sf-corner) 0 0), linear-gradient(var(--sf-corner) 0 0);
+	background-repeat: no-repeat;
+	background-position:
+		0 0,
+		left 7px top 7px,
+		left 7px top 7px,
+		right 7px top 7px,
+		right 7px top 7px,
+		left 7px bottom 7px,
+		left 7px bottom 7px,
+		right 7px bottom 7px,
+		right 7px bottom 7px;
+	background-size:
+		100% 100%,
+		var(--sf-k) 1px,
+		1px var(--sf-k),
+		var(--sf-k) 1px,
+		1px var(--sf-k),
+		var(--sf-k) 1px,
+		1px var(--sf-k),
+		var(--sf-k) 1px,
+		1px var(--sf-k);
+	transition:
+		--sf-k 0.4s var(--sf-ease),
+		--sf-spot 0.3s ease,
+		transform 0.35s var(--sf-ease),
+		box-shadow 0.35s var(--sf-ease),
+		border-color 0.2s ease,
+		background-color 0.15s ease;
+}
+/* the working panels wear their corners all the time … */
+html.halo-scifi :is(.dc-turn, #team-inspector, [data-halo-mode] .glass-item:not(.group)) {
+	--sf-k: 9px;
+}
+/* … list rows and quick starts lock on when the pointer reaches them */
+html.halo-scifi
+	:is(
+		[data-discuss-row],
+		[data-team-row],
+		[data-teams-ui] .tm-card-quiet.tm-hover,
+		.dc-turn,
+		#team-inspector,
+		[data-halo-mode] .glass-item:not(.group)
+	):hover {
+	--sf-k: 12px;
+	--sf-spot: var(--sf-spot-on);
+}
+html.halo-scifi :is([data-discuss-row], [data-team-row], [data-teams-ui] .tm-card-quiet.tm-hover):hover {
+	border-color: hsl(var(--tm-accent) / 0.35);
+	box-shadow:
+		0 0 0 1px hsl(var(--tm-accent) / 0.12),
+		0 14px 40px -18px hsl(var(--tm-accent) / 0.45);
+}
+html.halo-scifi.dark [data-halo-mode] .glass-item {
+	border-color: rgb(94 231 255 / 0.1);
+	background-color: rgb(9 13 28 / 0.62);
+}
+html.halo-scifi:not(.dark) [data-halo-mode] .glass-item {
+	border-color: rgb(8 145 178 / 0.14);
+	background-color: rgb(255 255 255 / 0.72);
+}
+
+/* the selected tab / filter: lit from below */
+html.halo-scifi
+	:is(
+		[data-teams-ui] .tm-segment > button[aria-selected='true'],
+		[data-teams-ui] .tm-segment > button[aria-checked='true'],
+		[data-halo-mode] .halo-seg > .tab-button.active
+	) {
+	color: var(--scifi-cyan);
+	background: linear-gradient(to top, rgb(94 231 255 / 0.14), transparent 70%);
+	box-shadow:
+		inset 0 -1.5px 0 var(--scifi-cyan),
+		0 6px 18px -10px var(--scifi-glow);
+}
+html.halo-scifi:not(.dark)
+	:is(
+		[data-teams-ui] .tm-segment > button[aria-selected='true'],
+		[data-teams-ui] .tm-segment > button[aria-checked='true'],
+		[data-halo-mode] .halo-seg > .tab-button.active
+	) {
+	background: linear-gradient(to top, rgb(8 145 178 / 0.1), rgb(255 255 255 / 0.9) 70%);
+}
+html.halo-scifi [data-discuss-ui] .dc-chip:is([aria-pressed='true'], [data-on='true']) {
+	box-shadow: 0 0 14px -4px hsl(var(--tm-accent) / 0.6);
+}
+
+/* ------------------------------------------------------------------ the energy button */
+
+html.halo-scifi :is([data-teams-ui] .tm-btn-primary, [data-halo-mode] .workspace-primary-button) {
+	position: relative;
+	overflow: hidden;
+	isolation: isolate;
+	color: #fff;
+	background: linear-gradient(100deg, #0891b2, #4f46e5 55%, #7c3aed);
+	box-shadow:
+		inset 0 1px 0 rgb(255 255 255 / 0.25),
+		0 0 0 1px rgb(8 145 178 / 0.35),
+		0 8px 26px -10px rgb(79 70 229 / 0.65);
+	text-shadow: 0 1px 0 rgb(0 0 0 / 0.15);
+}
+html.halo-scifi.dark :is([data-teams-ui] .tm-btn-primary, [data-halo-mode] .workspace-primary-button) {
+	color: #03111a;
+	background: linear-gradient(100deg, #5ee7ff, #8ea2ff 55%, #c18bff);
+	box-shadow:
+		inset 0 1px 0 rgb(255 255 255 / 0.55),
+		0 0 0 1px rgb(94 231 255 / 0.45),
+		0 0 28px -6px rgb(94 231 255 / 0.55);
+	text-shadow: none;
+}
+html.halo-scifi :is([data-teams-ui] .tm-btn-primary, [data-halo-mode] .workspace-primary-button)::after {
+	content: '';
+	position: absolute;
+	inset: 0;
+	z-index: -1;
+	background: linear-gradient(100deg, transparent 30%, rgb(255 255 255 / 0.6) 50%, transparent 70%);
+	transform: translateX(-120%);
+	transition: transform 0.7s var(--sf-ease);
+}
+html.halo-scifi
+	:is([data-teams-ui] .tm-btn-primary, [data-halo-mode] .workspace-primary-button):hover:not(:disabled)::after {
+	transform: translateX(120%);
+}
+html.halo-scifi
+	:is([data-teams-ui] .tm-btn-primary, [data-halo-mode] .workspace-primary-button):hover:not(:disabled) {
+	box-shadow:
+		inset 0 1px 0 rgb(255 255 255 / 0.5),
+		0 0 0 1px var(--scifi-cyan),
+		0 0 36px -4px var(--scifi-glow);
+}
+html.halo-scifi :is([data-teams-ui] .tm-btn-primary, [data-halo-mode] .workspace-primary-button):disabled {
+	opacity: 0.4;
+	filter: saturate(0.4);
+	box-shadow: none;
+}
+
+/* ------------------------------------------------------------------ work in progress */
+
+/* anything working wears the full spectrum on its sweeping border */
+html.halo-scifi [data-teams-ui] .tm-live::before {
+	background: conic-gradient(
+		from var(--tm-angle),
+		transparent 0turn,
+		transparent 0.55turn,
+		var(--scifi-cyan) 0.75turn,
+		var(--scifi-violet) 0.88turn,
+		var(--scifi-magenta) 0.96turn,
+		transparent 1turn
+	);
+}
+html.halo-scifi [data-teams-ui] .tm-live::after {
+	box-shadow:
+		0 0 0 1px hsl(var(--tm-accent) / 0.2),
+		0 0 44px -12px var(--scifi-glow);
+}
+
+/* 讨论台: the seat speaking is scanned in its own colour */
+html.halo-scifi .dc-turn {
+	animation: sf-materialize 0.7s var(--sf-ease) backwards;
+}
+html.halo-scifi .dc-turn[data-state='streaming'] {
+	box-shadow:
+		0 0 0 1px hsl(var(--dc-hue) var(--dc-sat) var(--dc-light) / 0.3),
+		0 0 40px -14px hsl(var(--dc-hue) var(--dc-sat) var(--dc-light) / 0.6);
+}
+html.halo-scifi .dc-turn[data-state='streaming']::after {
+	content: '';
+	position: absolute;
+	left: 0;
+	right: 0;
+	top: 0;
+	height: 40%;
+	pointer-events: none;
+	background: linear-gradient(
+		to bottom,
+		transparent,
+		hsl(var(--dc-hue) var(--dc-sat) var(--dc-light) / 0.07) 80%,
+		hsl(var(--dc-hue) var(--dc-sat) var(--dc-light) / 0.5) 99%,
+		transparent
+	);
+	animation: sf-band 2.6s linear infinite;
+}
+@keyframes sf-band {
+	from {
+		transform: translateY(-100%);
+	}
+	to {
+		transform: translateY(260%);
+	}
+}
+html.halo-scifi .dc-ring[data-state='streaming'] {
+	filter: drop-shadow(0 0 5px hsl(var(--dc-hue) var(--dc-sat) var(--dc-light) / 0.8));
+}
+html.halo-scifi .dc-round-head {
+	font-family: var(--font-mono);
+	letter-spacing: 0.06em;
+}
+html.halo-scifi .dc-round-head::after {
+	height: 1px;
+	background:
+		linear-gradient(90deg, transparent, rgb(255 255 255 / 0.9), transparent) -30% 0 / 30% 100% no-repeat,
+		linear-gradient(90deg, var(--scifi-cyan), var(--scifi-violet) 35%, transparent);
+	opacity: 0.6;
+	animation: sf-glint 4.5s ease-in-out infinite;
+}
+@keyframes sf-glint {
+	0%,
+	55% {
+		background-position:
+			-30% 0,
+			0 0;
+	}
+	100% {
+		background-position:
+			130% 0,
+			0 0;
+	}
+}
+html.halo-scifi .dc-conclusion {
+	box-shadow:
+		var(--tm-shadow-lift),
+		0 0 90px -34px rgb(167 139 250 / 0.6),
+		0 0 60px -30px var(--scifi-glow);
+}
+
+/* 协作台: tasks on the board glow when reached, burn when running */
+html.halo-scifi [data-teams-ui] .node:hover {
+	box-shadow:
+		0 0 0 1px hsl(var(--tm-accent) / 0.4),
+		0 0 30px -8px var(--scifi-glow);
+}
+html.halo-scifi [data-teams-ui] .node.tm-live {
+	box-shadow: 0 0 36px -10px var(--scifi-glow);
+}
+html.halo-scifi [data-teams-ui] .node.is-selected {
+	box-shadow:
+		0 0 0 2px var(--scifi-cyan),
+		0 0 36px -6px var(--scifi-glow);
+}
+html.halo-scifi [data-teams-ui] .board {
+	box-shadow:
+		inset 0 0 90px -30px var(--scifi-glow),
+		var(--tm-shadow);
+}
+html.halo-scifi [data-completed-banner] {
+	box-shadow:
+		var(--tm-shadow-lift),
+		0 0 70px -30px var(--scifi-glow);
+}
+
+/* 生图: the result frame is a projection chamber while it renders … */
+html.halo-scifi [data-image-studio-results] .shimmer {
+	/* its text shimmer paints the text with the box's background: the chamber needs that
+	   background, so the read-out goes back to plain text */
+	overflow: hidden;
+	-webkit-background-clip: border-box;
+	background-clip: border-box;
+	-webkit-text-fill-color: currentColor;
+	animation: none;
+}
+html.halo-scifi [data-image-studio-results] .shimmer::before {
+	content: '';
+	position: absolute;
+	inset: 0;
+	pointer-events: none;
+	background:
+		repeating-radial-gradient(circle at 50% 50%, transparent 0 26px, rgb(94 231 255 / 0.14) 26px 27px),
+		linear-gradient(to right, var(--scifi-line) 1px, transparent 1px) 0 0 / 28px 28px,
+		linear-gradient(to bottom, var(--scifi-line) 1px, transparent 1px) 0 0 / 28px 28px;
+	-webkit-mask-image: radial-gradient(circle at 50% 50%, #000 20%, transparent 72%);
+	mask-image: radial-gradient(circle at 50% 50%, #000 20%, transparent 72%);
+	animation: sf-chamber 3.2s ease-in-out infinite;
+}
+@keyframes sf-chamber {
+	50% {
+		opacity: 0.55;
+		transform: scale(1.06);
+	}
+}
+html.halo-scifi [data-image-studio-results] .shimmer::after {
+	content: '';
+	position: absolute;
+	left: 0;
+	right: 0;
+	top: 0;
+	height: 40%;
+	pointer-events: none;
+	background: linear-gradient(
+		to bottom,
+		transparent,
+		rgb(94 231 255 / 0.1) 75%,
+		rgb(94 231 255 / 0.65) 98%,
+		rgb(255 255 255 / 0.9) 99%,
+		transparent
+	);
+	animation: sf-band 1.9s cubic-bezier(0.6, 0, 0.4, 1) infinite;
+}
+html.halo-scifi:not(.dark) [data-image-studio-results] .shimmer::after {
+	background: linear-gradient(to bottom, transparent, rgb(8 145 178 / 0.08) 75%, rgb(8 145 178 / 0.55) 99%, transparent);
+}
+html.halo-scifi [data-image-studio-wait] {
+	z-index: 1;
+}
+html.halo-scifi [data-image-studio-wait]::before {
+	content: 'RENDERING';
+	margin-bottom: 0.35rem;
+	padding-left: 0.42em;
+	font-family: var(--font-mono);
+	font-size: 10px;
+	font-weight: 700;
+	letter-spacing: 0.42em;
+	color: var(--scifi-cyan);
+	-webkit-text-fill-color: var(--scifi-cyan);
+	text-shadow: 0 0 10px var(--scifi-glow);
+	animation: sf-blink 1.1s steps(2, start) infinite;
+}
+
+/* … and what it made develops from a scan line */
+html.halo-scifi [data-image-studio-results] .result-card img {
+	animation: sf-develop 1.15s var(--sf-ease) backwards;
+}
+html.halo-scifi [data-image-studio-results] .result-card > div::after {
+	content: '';
+	position: absolute;
+	inset: 0;
+	pointer-events: none;
+	background: linear-gradient(90deg, transparent, var(--scifi-cyan) 20%, #fff 50%, var(--scifi-violet) 80%, transparent)
+		0 0 / 100% 2px no-repeat;
+	filter: drop-shadow(0 0 6px var(--scifi-cyan));
+	animation: sf-develop-line 1.15s var(--sf-ease) both;
+}
+@keyframes sf-develop {
+	from {
+		clip-path: inset(0 0 100% 0);
+		filter: brightness(1.9) saturate(0) blur(3px);
+	}
+	60% {
+		filter: brightness(1.2) saturate(0.8) blur(0);
+	}
+	to {
+		clip-path: inset(0 0 0 0);
+		filter: none;
+	}
+}
+@keyframes sf-develop-line {
+	from {
+		background-position: 0 0;
+		opacity: 1;
+	}
+	90% {
+		opacity: 1;
+	}
+	to {
+		background-position: 0 100%;
+		opacity: 0;
+	}
+}
+html.halo-scifi [data-halo-mode] .glass-item.group:hover {
+	border-color: rgb(94 231 255 / 0.45);
+	box-shadow:
+		0 0 0 1px rgb(94 231 255 / 0.18),
+		0 16px 44px -18px var(--scifi-glow);
+}
+
+/* nothing yet: an empty viewfinder with the lens waiting */
+html.halo-scifi [data-image-studio-results] .workspace-empty-state {
+	border-color: var(--scifi-line);
+	background: radial-gradient(60% 70% at 50% 30%, rgb(94 231 255 / 0.06), transparent 70%);
+}
+html.halo-scifi [data-image-studio-results] .workspace-empty-state > div:first-child {
+	position: relative;
+	border-radius: 9999px;
+	color: var(--scifi-cyan);
+	background: rgb(94 231 255 / 0.06);
+	box-shadow:
+		0 0 0 1px var(--scifi-line),
+		0 0 0 10px rgb(94 231 255 / 0.03),
+		0 0 0 11px var(--scifi-line),
+		0 0 40px -6px var(--scifi-glow);
+}
+html.halo-scifi [data-image-studio-results] .workspace-empty-state > div:first-child::after {
+	content: '';
+	position: absolute;
+	inset: -22px;
+	border-radius: 9999px;
+	border: 1px dashed var(--scifi-cyan);
+	opacity: 0.4;
+	animation: scifi-rot 24s linear infinite;
+}
+
+/* the prompt box inside the studio's conduit sits in the glass, not on top of it */
+html.halo-scifi [data-halo-mode] [data-scifi-conduit] textarea {
+	border-color: var(--scifi-line);
+	background-color: rgb(255 255 255 / 0.6);
+}
+html.halo-scifi.dark [data-halo-mode] [data-scifi-conduit] textarea {
+	background-color: rgb(2 4 12 / 0.45);
+}
+
+@keyframes sf-materialize {
+	from {
+		clip-path: inset(0 0 100% 0 round 1rem);
+		filter: brightness(1.6);
+	}
+	to {
+		clip-path: inset(0 0 0 0 round 1rem);
+		filter: none;
+	}
+}
+
+/* ------------------------------------------------------------------ calm when asked */
+
+@media (prefers-reduced-motion: reduce) {
+	html.halo-scifi .halo-mode-eyebrow::before,
+	html.halo-scifi .halo-mode-hero::after,
+	.halo-emblem,
+	.halo-emblem *,
+	html.halo-scifi .dc-turn,
+	html.halo-scifi .dc-turn::after,
+	html.halo-scifi .dc-round-head::after,
+	html.halo-scifi [data-image-studio-results] .shimmer::before,
+	html.halo-scifi [data-image-studio-results] .shimmer::after,
+	html.halo-scifi [data-image-studio-wait]::before,
+	html.halo-scifi [data-image-studio-results] .result-card img,
+	html.halo-scifi [data-image-studio-results] .result-card > div::after,
+	html.halo-scifi [data-image-studio-results] .workspace-empty-state > div:first-child::after {
+		animation: none !important;
+	}
+	html.halo-scifi .halo-mode-hero::after,
+	html.halo-scifi [data-image-studio-results] .result-card > div::after {
+		display: none;
+	}
+}

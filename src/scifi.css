@@ -346,8 +346,8 @@ body:has(#chat-input:focus) .halo-reactor__sweep {
 	animation-duration: 2.2s;
 }
 
-/* greeting: holographic gradient that glitches in */
-html.halo-scifi .halo-greeting {
+/* greeting (and the mode pages' titles): holographic gradient that glitches in */
+html.halo-scifi :is(.halo-greeting, .halo-mode-title) {
 	background: linear-gradient(100deg, #0e7490 0%, #1d4ed8 38%, #7c3aed 70%, #be185d 100%);
 	-webkit-background-clip: text;
 	background-clip: text;
@@ -355,7 +355,7 @@ html.halo-scifi .halo-greeting {
 	letter-spacing: -0.02em;
 	animation: scifi-glitch-in 900ms 120ms steps(1) both;
 }
-html.halo-scifi.dark .halo-greeting {
+html.halo-scifi.dark :is(.halo-greeting, .halo-mode-title) {
 	background: linear-gradient(100deg, #e0fbff 0%, #5ee7ff 32%, #a78bfa 66%, #f472d0 100%);
 	-webkit-background-clip: text;
 	background-clip: text;
@@ -390,9 +390,10 @@ html.halo-scifi.dark .halo-greeting {
 	}
 }
 
-/* ------------------------------------------------------------------ the composer: a neon conduit */
+/* ------------------------------------------------------------------ the composer: a neon conduit
+   (every box you talk to AI in: the chat composer, and [data-scifi-conduit] on the mode pages) */
 
-html.halo-scifi .halo-composer {
+html.halo-scifi :is(.halo-composer, [data-scifi-conduit]) {
 	border-color: transparent;
 	background-color: rgb(255 255 255 / 0.78);
 	-webkit-backdrop-filter: blur(14px);
@@ -401,14 +402,14 @@ html.halo-scifi .halo-composer {
 		0 0 0 1px var(--scifi-line),
 		0 10px 40px -12px var(--scifi-glow);
 }
-html.halo-scifi.dark .halo-composer {
+html.halo-scifi.dark :is(.halo-composer, [data-scifi-conduit]) {
 	background-color: rgb(10 14 28 / 0.72);
 	box-shadow:
 		0 0 0 1px var(--scifi-line),
 		0 0 50px -14px var(--scifi-glow),
 		inset 0 1px 0 rgb(255 255 255 / 0.05);
 }
-html.halo-scifi .halo-composer:not([data-halo-live])::after {
+html.halo-scifi :is(.halo-composer, [data-scifi-conduit]):not([data-halo-live])::after {
 	content: '';
 	position: absolute;
 	inset: -1px;
@@ -432,13 +433,13 @@ html.halo-scifi .halo-composer:not([data-halo-live])::after {
 	animation: halo-spin 7s linear infinite;
 	transition: opacity 300ms ease;
 }
-html.halo-scifi .halo-composer:focus-within {
+html.halo-scifi :is(.halo-composer, [data-scifi-conduit]):focus-within {
 	box-shadow:
 		0 0 0 1px var(--scifi-line),
 		0 0 0 5px rgb(94 231 255 / 0.08),
 		0 0 70px -10px var(--scifi-glow);
 }
-html.halo-scifi .halo-composer:focus-within::after {
+html.halo-scifi :is(.halo-composer, [data-scifi-conduit]):focus-within::after {
 	opacity: 1;
 	animation-duration: 2.8s;
 }
@@ -755,8 +756,8 @@ html.halo-scifi ::view-transition-new(halo-main) {
 	.halo-scifi-floor,
 	.halo-reactor,
 	.halo-reactor *,
-	html.halo-scifi .halo-greeting,
-	html.halo-scifi .halo-composer::after,
+	html.halo-scifi :is(.halo-greeting, .halo-mode-title),
+	html.halo-scifi :is(.halo-composer, [data-scifi-conduit])::after,
 	.halo-auth__scene::before,
 	.halo-auth__scene::after {
 		animation: none !important;
@@ -767,7 +768,7 @@ html.halo-scifi ::view-transition-new(halo-main) {
 	}
 }
 @media (max-width: 767px), (pointer: coarse) {
-	html.halo-scifi .halo-composer {
+	html.halo-scifi :is(.halo-composer, [data-scifi-conduit]) {
 		-webkit-backdrop-filter: none;
 		backdrop-filter: none;
 	}

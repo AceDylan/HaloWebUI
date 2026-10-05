@@ -43,3 +43,33 @@ export const markBooted = (now = Date.now()) => {
 		/* private mode: it just plays again next time */
 	}
 };
+
+/** Panels on the mode pages that carry a light following the mouse (scifi-modes.css reads
+ *  --sf-x / --sf-y; keep in step with its panel list). Plain-coloured panels only: the tinted
+ *  ones keep their own gradient. One delegated listener for the whole app; mouse only, one
+ *  write a frame. */
+export const SPOT_SELECTOR =
+	'[data-discuss-row], [data-team-row], [data-teams-ui] .tm-card-quiet.tm-hover, .dc-turn, #team-inspector, [data-halo-mode] .glass-item:not(.group)';
+
+export const trackSpotlight = (root: Pick<Document, 'addEventListener' | 'removeEventListener'> = document) => {
+	let frame = 0;
+	let last: PointerEvent | null = null;
+	const paint = () => {
+		frame = 0;
+		const el = (last?.target as Element | null)?.closest?.(SPOT_SELECTOR) as HTMLElement | null;
+		if (!last || !el) return;
+		const r = el.getBoundingClientRect();
+		el.style.setProperty('--sf-x', `${Math.round(last.clientX - r.left)}px`);
+		el.style.setProperty('--sf-y', `${Math.round(last.clientY - r.top)}px`);
+	};
+	const move = (e: PointerEvent) => {
+		if (e.pointerType !== 'mouse') return;
+		last = e;
+		if (!frame) frame = requestAnimationFrame(paint);
+	};
+	root.addEventListener('pointermove', move as EventListener, { passive: true });
+	return () => {
+		root.removeEventListener('pointermove', move as EventListener);
+		if (frame) cancelAnimationFrame(frame);
+	};
+};

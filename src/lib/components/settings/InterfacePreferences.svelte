@@ -1891,8 +1891,8 @@
 												<div class="text-sm font-medium">{tr('科幻特效', 'Sci-fi effects')}</div>
 												<p class="mt-1 text-xs leading-5 text-gray-500 dark:text-gray-400">
 													{tr(
-														'星空背景、首页全息光环、霓虹输入框、新对话跃迁和开场动画（最多每 6 小时一次，点击即跳过）。关掉即回到简洁外观；系统开了「减弱动态效果」时只保留静态画面。',
-														'Starfield backdrop, holographic halo on the home screen, neon composer, a jump on new chats and opening titles (at most every 6 hours, a click skips). Off returns to the plain look; with reduced motion only still frames remain.'
+														'星空背景、首页全息光环、霓虹输入框、新对话跃迁和开场动画（最多每 6 小时一次，点击即跳过）；讨论台、协作台和生图工作台的全息徽记、仪表面板与扫描动效。关掉即回到简洁外观；系统开了「减弱动态效果」时只保留静态画面。',
+														'Starfield backdrop, holographic halo on the home screen, neon composer, a jump on new chats and opening titles (at most every 6 hours, a click skips); holographic emblems, instrument panels and scans on the Discuss, Teams and Image Studio pages. Off returns to the plain look; with reduced motion only still frames remain.'
 													)}
 												</p>
 											</div>

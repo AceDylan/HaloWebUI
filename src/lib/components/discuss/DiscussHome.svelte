@@ -25,6 +25,8 @@
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import UploadProgress from '$lib/components/common/UploadProgress.svelte';
 	import MenuLines from '$lib/components/icons/MenuLines.svelte';
+	import ModeEmblem from '$lib/components/scifi/ModeEmblem.svelte';
+	import { warp } from '$lib/components/scifi/scifi';
 	import { now, timeAgo } from '$lib/components/teams/clock';
 	import SeatAvatar from './SeatAvatar.svelte';
 	import SeatPicker from './SeatPicker.svelte';
@@ -328,6 +330,7 @@
 
 	onMount(() => {
 		isMac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent || '');
+		warp(520);
 		load();
 		timer = setInterval(() => {
 			if (!document.hidden && items.some((d) => isLive(d.status) || d.running)) load();
@@ -356,13 +359,14 @@
 
 	<div class="tm-scroll flex-1 overflow-y-auto px-4 pb-16">
 		<div class="mx-auto flex max-w-3xl flex-col pt-6 sm:pt-14">
-			<header class="tm-rise mb-6 flex flex-col gap-3">
+			<header class="halo-mode-hero tm-rise relative mb-6 flex flex-col gap-3">
+				<ModeEmblem mode="discuss" stats={[{ k: 'SESSIONS', v: items.length }, { k: 'LIVE', v: liveCount }]} />
 				<div class="flex items-center gap-2">
-					<span class="tm-eyebrow">Halo Roundtable</span>
+					<span class="tm-eyebrow halo-mode-eyebrow">Halo Roundtable</span>
 					<span class="h-3 w-px bg-gray-300 dark:bg-gray-700" aria-hidden="true" />
 					<span class="text-xs text-gray-500 dark:text-gray-400">多模型讨论</span>
 				</div>
-				<h2 class="tm-display text-[28px] font-semibold leading-[1.15] text-gray-950 sm:text-[36px] dark:text-white">
+				<h2 class="halo-mode-title tm-display text-[28px] font-semibold leading-[1.15] text-gray-950 sm:text-[36px] dark:text-white">
 					让几个模型把问题讨论透
 				</h2>
 				<p class="max-w-xl text-sm leading-relaxed text-gray-500 dark:text-gray-400">
@@ -377,6 +381,7 @@
 				on:dragover|preventDefault
 				on:drop|preventDefault={(e) => attach(e.dataTransfer?.files)}
 				data-discuss-composer
+				data-scifi-conduit
 			>
 				<label for="discuss-question" class="sr-only">要讨论的问题</label>
 				<textarea

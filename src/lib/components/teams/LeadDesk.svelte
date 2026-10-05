@@ -230,9 +230,10 @@
 	{/if}
 
 	<form
-		class="compose tm-card-quiet flex items-end gap-2 p-1.5 pl-2.5"
+		class="compose tm-card-quiet relative flex items-end gap-2 p-1.5 pl-2.5"
 		on:submit|preventDefault={send}
 		data-lead-compose
+		data-scifi-conduit
 	>
 		<div class="shrink-0 pb-1.5" aria-hidden="true">
 			<TeamAvatar kind="lead" size={22} />

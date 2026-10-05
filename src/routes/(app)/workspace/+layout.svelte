@@ -7,6 +7,7 @@
 
 	import MenuLines from '$lib/components/icons/MenuLines.svelte';
 	import WorkspaceHero from '$lib/components/workspace/shell/WorkspaceHero.svelte';
+	import ModeEmblem from '$lib/components/scifi/ModeEmblem.svelte';
 	import {
 		getActiveWorkspaceTab,
 		getVisibleWorkspaceTabs
@@ -85,16 +86,21 @@
 			</div>
 		</nav>
 
-		<div class="pb-1 px-[18px] flex-1 max-h-full overflow-y-auto" id="workspace-container">
+		<div
+			class="pb-1 px-[18px] flex-1 max-h-full overflow-y-auto"
+			id="workspace-container"
+			data-halo-mode={studio ? 'images' : undefined}
+		>
 			<div class="max-w-6xl mx-auto flex min-h-full flex-col gap-6 pb-4">
 				{#if studio}
-					<header class="flex flex-col gap-2 pt-4 sm:pt-8" data-studio-hero>
+					<header class="halo-mode-hero relative flex flex-col gap-2 pt-4 sm:pt-8" data-studio-hero>
+						<ModeEmblem mode="images" stats={[{ k: 'RENDER', v: 'READY' }]} />
 						<div class="flex items-center gap-2">
-							<span class="text-[11px] font-semibold uppercase tracking-[0.08em] text-gray-500 dark:text-gray-400">Halo Studio</span>
+							<span class="halo-mode-eyebrow text-[11px] font-semibold uppercase tracking-[0.08em] text-gray-500 dark:text-gray-400">Halo Studio</span>
 							<span class="h-3 w-px bg-gray-300 dark:bg-gray-700" aria-hidden="true" />
 							<span class="text-xs text-gray-500 dark:text-gray-400">生图</span>
 						</div>
-						<h2 class="font-display text-[26px] font-semibold leading-[1.15] text-gray-950 sm:text-[32px] dark:text-white">把想法画出来</h2>
+						<h2 class="halo-mode-title font-display text-[26px] font-semibold leading-[1.15] text-gray-950 sm:text-[32px] dark:text-white">把想法画出来</h2>
 						<p class="max-w-2xl text-sm leading-relaxed text-gray-500 dark:text-gray-400">
 							写提示词、加参考图、套风格模板；对话里生成的图也会自动进图库，随时拿回来接着改。
 						</p>

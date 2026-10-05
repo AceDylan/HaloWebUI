@@ -108,6 +108,7 @@
 	} from '$lib/utils/image-handoff';
 	import { takeHandoff, type HandoffOrigin } from '$lib/utils/handoff';
 	import HandoffBack from '$lib/components/common/HandoffBack.svelte';
+	import { warp } from '$lib/components/scifi/scifi';
 	import { goto, replaceState } from '$app/navigation';
 
 	type GeneratedImage = {
@@ -1669,6 +1670,7 @@
 	let studioOrigin: HandoffOrigin | null = null;
 
 	onMount(async () => {
+		warp(520);
 		loadWorkspacePrefs();
 		loadActiveTab();
 		// `/workspace/images?tab=prompts` (linked from the chat composer) wins over
@@ -1903,7 +1905,8 @@
 			<section class="contents lg:flex lg:flex-col lg:gap-4">
 				<!-- svelte-ignore a11y-no-static-element-interactions -->
 				<div
-					class="glass-item order-1 p-4 space-y-3"
+					class="glass-item relative order-1 p-4 space-y-3"
+					data-scifi-conduit
 					on:dragover={(event) => {
 						if (event.dataTransfer?.types?.includes('Files')) event.preventDefault();
 					}}

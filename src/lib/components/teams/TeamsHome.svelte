@@ -17,6 +17,8 @@
 	} from '$lib/apis/teams';
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import MenuLines from '$lib/components/icons/MenuLines.svelte';
+	import ModeEmblem from '$lib/components/scifi/ModeEmblem.svelte';
+	import { warp } from '$lib/components/scifi/scifi';
 	import RunnerStatus from './RunnerStatus.svelte';
 	import StatusChip from './StatusChip.svelte';
 	import TeamAvatar from './TeamAvatar.svelte';
@@ -296,6 +298,7 @@
 	};
 
 	onMount(() => {
+		warp(520);
 		try {
 			autoStart = localStorage.getItem(AUTO_START_KEY) === '1';
 		} catch {
@@ -353,14 +356,15 @@
 	<div class="tm-scroll flex-1 overflow-y-auto px-4 pb-16">
 		<div class="mx-auto flex max-w-3xl flex-col pt-6 sm:pt-14">
 			<!-- hero -->
-			<header class="tm-rise mb-6 flex flex-col gap-3">
+			<header class="halo-mode-hero tm-rise relative mb-6 flex flex-col gap-3">
+				<ModeEmblem mode="teams" stats={[{ k: 'MISSIONS', v: teams.length }, { k: 'ACTIVE', v: activeCount }]} />
 				<div class="flex items-center gap-2">
-					<span class="tm-eyebrow">Halo Teams</span>
+					<span class="tm-eyebrow halo-mode-eyebrow">Halo Teams</span>
 					<span class="h-3 w-px bg-gray-300 dark:bg-gray-700" aria-hidden="true" />
 					<span class="text-xs text-gray-500 dark:text-gray-400">多代理协作</span>
 				</div>
 				<h2
-					class="tm-display text-[28px] font-semibold leading-[1.15] text-gray-950 sm:text-[36px] dark:text-white"
+					class="halo-mode-title tm-display text-[28px] font-semibold leading-[1.15] text-gray-950 sm:text-[36px] dark:text-white"
 				>
 					把目标交给一支 AI 团队
 				</h2>
@@ -387,6 +391,7 @@
 				on:dragover|preventDefault
 				on:drop|preventDefault={(e) => attach(e.dataTransfer?.files ?? null)}
 				data-team-composer
+				data-scifi-conduit
 			>
 				<label for="team-goal" class="sr-only">要协作完成的目标</label>
 				<textarea

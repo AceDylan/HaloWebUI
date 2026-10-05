@@ -5,7 +5,8 @@
 // its connections: the request fails, or hangs at some percent and never moves again. So
 // a failure without an answer from the server, or no progress for STALL_MS while the page
 // is in front, is not the end: once the page is visible and online again the file is
-// sent again (up to MAX_ATTEMPTS times).
+// sent again (up to MAX_ATTEMPTS times). So is a fully sent file whose answer does not come
+// (ANSWER_TIMEOUT_MS), once the lookup below says the server does not have it.
 //
 // The file's SHA-256 is computed first. If this user has already uploaded the same bytes
 // the same way, that file is used and nothing is sent. The same lookup answers "did the
@@ -23,6 +24,10 @@ export const STALL_MS = 30_000;
 export const RESUME_GRACE_MS = 8_000;
 /** How often to ask whether a fully sent file has been stored, while waiting for the answer. */
 export const FINISHED_CHECK_MS = 15_000;
+/** A fully sent file with no answer after this long in front is sent again. Documents are
+ * read (and embedded) by the server before it answers; other files are only stored. */
+export const ANSWER_TIMEOUT_MS = { processed: 5 * 60_000, stored: 60_000 };
+const TICK_MS = 2_000;
 
 const RETRYABLE_STATUSES = new Set([408, 502, 503, 504]);
 
@@ -125,7 +130,8 @@ const waitForPage = (delayMs: number, signal?: AbortSignal) =>
 
 // One request, given up when it stops moving while the page is in front. Once every byte
 // is out, the server's answer is waited for, but if `lookup` finds the stored file first
-// (the answer was lost with the connection), that is the result.
+// (the answer was lost with the connection), that is the result; with no answer after
+// ANSWER_TIMEOUT_MS in front, the request is given up as well.
 const sendOnce = (
 	token: string,
 	file: File,
@@ -137,6 +143,9 @@ const sendOnce = (
 		const { doc } = pageTargets();
 		let lastActivity = Date.now();
 		let sent = false;
+		// Time spent waiting for the answer with the page in front.
+		let answerWait = 0;
+		const answerTimeout = ANSWER_TIMEOUT_MS[options.process === false ? 'stored' : 'processed'];
 		let settled = false;
 		let checking = false;
 
@@ -168,7 +177,8 @@ const sendOnce = (
 
 		const tick = () => {
 			if (!pageInFront()) return clampToGrace();
-			if (!sent && Date.now() - lastActivity > STALL_MS) {
+			if (sent) answerWait += TICK_MS;
+			if (sent ? answerWait > answerTimeout : Date.now() - lastActivity > STALL_MS) {
 				settle(() => {
 					controller.abort();
 					reject(new UploadStalled('Upload stalled'));
@@ -192,7 +202,7 @@ const sendOnce = (
 				})
 			)
 		];
-		const watchdog = setInterval(tick, 2_000);
+		const watchdog = setInterval(tick, TICK_MS);
 
 		if (options.signal?.aborted) {
 			settle(() => reject(new UploadCancelled()));

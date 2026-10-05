@@ -7,6 +7,7 @@ const api = vi.hoisted(() => ({
 vi.mock('$lib/apis/files', () => api);
 
 import {
+	ANSWER_TIMEOUT_MS,
 	MAX_ATTEMPTS,
 	STALL_MS,
 	UPLOAD_INTERRUPTED,
@@ -169,6 +170,34 @@ describe('uploadFileReliably', () => {
 		setVisibility('visible');
 		await expect(upload).resolves.toEqual({ file: { id: 'stored' }, reused: false });
 		expect(first.options.signal.aborted).toBe(true);
+	});
+
+	it('sends a stored-only file again when its answer never comes and the server does not have it', async () => {
+		const first = pendingRequest();
+		const upload = uploadFileReliably('t', file(), { process: false });
+		await sent();
+		first.progress(100);
+		const second = pendingRequest();
+
+		await vi.advanceTimersByTimeAsync(ANSWER_TIMEOUT_MS.stored - 4_000);
+		expect(first.options.signal.aborted).toBe(false);
+		await vi.advanceTimersByTimeAsync(8_000);
+		expect(first.options.signal.aborted).toBe(true);
+		await vi.advanceTimersByTimeAsync(2_000);
+		expect(api.sendUpload).toHaveBeenCalledTimes(2);
+		second.resolve({ id: 'second' });
+		await expect(upload).resolves.toMatchObject({ file: { id: 'second' } });
+	});
+
+	it('gives a document the server is reading much longer before sending it again', async () => {
+		const first = pendingRequest();
+		const upload = uploadFileReliably('t', file(), { process: true });
+		await sent();
+		first.progress(100);
+		await vi.advanceTimersByTimeAsync(ANSWER_TIMEOUT_MS.processed - 4_000);
+		expect(first.options.signal.aborted).toBe(false);
+		first.resolve({ id: 'read' });
+		await expect(upload).resolves.toMatchObject({ file: { id: 'read' } });
 	});
 
 	it('fails at once on an error the server answered with', async () => {

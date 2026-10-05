@@ -4380,6 +4380,7 @@ class GenerateImageForm(BaseModel):
     quality: Optional[str] = None
     image_route_mode: Optional[str] = None
     chat_generation: bool = False
+    client_request_id: Optional[str] = None
 
 
 def load_b64_image_data(b64_str):
@@ -7479,12 +7480,67 @@ async def _generate_gemini_image_with_size_fallback(
     raise RuntimeError("Gemini image generation failed without a captured error")
 
 
+# A phone that locks its screen or switches apps while an image is being made
+# loses the connection (nginx logs 499). Its browser may send the same POST
+# again on its own, and the server finished the first one anyway: one picture
+# from the image studio became two upstream generations. The studio tags each
+# run with ``client_request_id``; a repeat of that id joins the run already
+# going, or takes its result, instead of generating again.
+_IMAGE_RUN_KEEP_SECONDS = 30 * 60
+_image_runs: dict[tuple[str, str], tuple[float, asyncio.Future]] = {}
+
+
+def _image_run_key(user, client_request_id: Optional[str]) -> Optional[tuple[str, str]]:
+    run_id = "".join(
+        ch for ch in str(client_request_id or "") if ch.isalnum() or ch in "-_"
+    )[:80]
+    if not run_id:
+        return None
+    return str(getattr(user, "id", "") or ""), run_id
+
+
+async def _run_image_generation_once(
+    key: tuple[str, str], start: Callable[[], Awaitable[Any]]
+) -> Any:
+    now = time.monotonic()
+    for old_key, (started_at, old_run) in list(_image_runs.items()):
+        if old_run.done() and now - started_at > _IMAGE_RUN_KEEP_SECONDS:
+            _image_runs.pop(old_key, None)
+
+    entry = _image_runs.get(key)
+    if entry is None:
+        run = asyncio.ensure_future(start())
+        # Nobody may be left waiting when it fails: read the error so asyncio
+        # does not log it as never retrieved.
+        run.add_done_callback(lambda done: done.cancelled() or done.exception())
+        _image_runs[key] = (now, run)
+    else:
+        run = entry[1]
+        log.info(
+            "image_generation_joined_existing_run user_id=%s run_id=%s done=%s",
+            key[0],
+            key[1],
+            run.done(),
+        )
+    # A dropped connection cancels this request, not the generation.
+    return await asyncio.shield(run)
+
+
 @router.post("/generations")
 async def image_generations(
     request: Request,
     form_data: GenerateImageForm,
     user=Depends(get_verified_user),
 ):
+    key = _image_run_key(user, form_data.client_request_id)
+    if key is None:
+        return await _image_generations(request, form_data, user)
+    return await _run_image_generation_once(
+        key, lambda: _image_generations(request, form_data, user)
+    )
+
+
+async def _image_generations(request: Request, form_data: GenerateImageForm, user):
     if not _can_use_image_generation(request, user):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,

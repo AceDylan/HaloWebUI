@@ -7,7 +7,11 @@
 		getImageUsageConfig,
 		imageGenerations
 	} from '$lib/apis/images';
-	import type { ImageGenerationModel, ImageUsageConfig } from '$lib/apis/images';
+	import type {
+		ImageGenerationModel,
+		ImageGenerationRequest,
+		ImageUsageConfig
+	} from '$lib/apis/images';
 	import { uploadFile } from '$lib/apis/files';
 	import { WEBUI_API_BASE_URL } from '$lib/constants';
 	import HaloSelect from '$lib/components/common/HaloSelect.svelte';
@@ -87,6 +91,16 @@
 		type ImageStudioMigrationMarker
 	} from '$lib/utils/image-studio-storage';
 	import { downloadImageFile } from '$lib/utils/image-download';
+	import {
+		clearPendingImageRun,
+		isImageRunInFlight,
+		newImageRunId,
+		readPendingImageRun,
+		savePendingImageRun,
+		sendSurvivingDisconnects,
+		trackImageRun,
+		type PendingImageRun
+	} from '$lib/utils/image-studio-run';
 	import {
 		CHAT_IMAGE_HANDOFF_KEY,
 		readStudioRequest,
@@ -1100,28 +1114,18 @@
 		}
 	};
 
-	const buildGalleryImages = (images: GeneratedImage[]): GalleryImage[] => {
-		const now = Date.now();
-		return images.map((img) => ({
-			id: `gallery_${now}_${Math.random().toString(36).substr(2, 9)}`,
-			url: img.url,
-			prompt: lastPrompt,
-			negativePrompt: negativePrompt.trim() || undefined,
-			model: selectedModelLabel,
-			size: activeSizeLabel,
-			createdAt: now
-		}));
+	// The settings a run is recorded with, taken when it starts: a run picked up
+	// again after a reload must not take whatever the form shows by then.
+	type RunRecord = Pick<GenerationHistory, 'prompt' | 'negativePrompt' | 'model' | 'parameters'> & {
+		size: string;
 	};
+	type StudioRun = PendingImageRun<ImageGenerationRequest, RunRecord>;
 
-	const buildHistoryEntry = (
-		status: 'success' | 'failed',
-		images?: string[],
-		error?: string
-	): GenerationHistory => ({
-		id: `history_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+	const snapshotRunRecord = (): RunRecord => ({
 		prompt: lastPrompt,
 		negativePrompt: negativePrompt.trim() || undefined,
 		model: selectedModelLabel,
+		size: activeSizeLabel,
 		parameters: {
 			modelId: selectedModel || undefined,
 			size: usesNativeAspectRatioControls ? undefined : activeSize || undefined,
@@ -1132,7 +1136,33 @@
 			numberOfImages,
 			background,
 			references: referenceUrls.length ? [...referenceUrls] : undefined
-		},
+		}
+	});
+
+	const buildGalleryImages = (record: RunRecord, images: GeneratedImage[]): GalleryImage[] => {
+		const now = Date.now();
+		return images.map((img) => ({
+			id: `gallery_${now}_${Math.random().toString(36).substr(2, 9)}`,
+			url: img.url,
+			prompt: record.prompt,
+			negativePrompt: record.negativePrompt,
+			model: record.model,
+			size: record.size,
+			createdAt: now
+		}));
+	};
+
+	const buildHistoryEntry = (
+		record: RunRecord,
+		status: 'success' | 'failed',
+		images?: string[],
+		error?: string
+	): GenerationHistory => ({
+		id: `history_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+		prompt: record.prompt,
+		negativePrompt: record.negativePrompt,
+		model: record.model,
+		parameters: record.parameters,
 		status,
 		images,
 		error,
@@ -1181,12 +1211,14 @@
 	// Adds the run to the gallery (successful images) and to the history, then
 	// syncs both to the server in a single request.
 	const recordGeneration = (
+		record: RunRecord,
 		status: 'success' | 'failed',
 		images?: GeneratedImage[],
 		error?: string
 	) => {
-		const galleryEntries = images?.length ? buildGalleryImages(images) : [];
+		const galleryEntries = images?.length ? buildGalleryImages(record, images) : [];
 		const historyEntry = buildHistoryEntry(
+			record,
 			status,
 			images?.length ? images.map((img) => img.url) : undefined,
 			error
@@ -1530,18 +1562,13 @@
 			return;
 		}
 
-		loading = true;
-		generatedImages = [];
 		lastPrompt = trimmedPrompt;
-		generationStartedAt = Date.now();
-		elapsedSeconds = 0;
-		stopElapsedTimer();
-		elapsedTimer = setInterval(() => {
-			elapsedSeconds = Math.floor((Date.now() - generationStartedAt) / 1000);
-		}, 1000);
-
-		try {
-			const response = await imageGenerations(localStorage.token, {
+		const runId = newImageRunId();
+		const run: StudioRun = {
+			id: runId,
+			startedAt: Date.now(),
+			payload: {
+				client_request_id: runId,
 				prompt: trimmedPrompt,
 				...(referenceUrls.length
 					? { image_url: referenceUrls[0], image_urls: [...referenceUrls] }
@@ -1566,18 +1593,42 @@
 						? selectedModelMeta.source
 						: undefined,
 				connection_index: selectedModelMeta?.connection_index ?? undefined
-			});
+			},
+			record: snapshotRunRecord()
+		};
+		savePendingImageRun(localStorage, run);
+		await runGeneration(run);
+	};
+
+	// Sends one run and records how it ended. A lost connection is asked again
+	// with the same id (the server joins it to the run already going); a page
+	// reloaded mid-run calls this again from onMount with the saved run.
+	const runGeneration = async (run: StudioRun) => {
+		loading = true;
+		generatedImages = [];
+		lastPrompt = run.record.prompt;
+		generationStartedAt = run.startedAt;
+		elapsedSeconds = Math.floor((Date.now() - generationStartedAt) / 1000);
+		stopElapsedTimer();
+		elapsedTimer = setInterval(() => {
+			elapsedSeconds = Math.floor((Date.now() - generationStartedAt) / 1000);
+		}, 1000);
+
+		try {
+			const response = await trackImageRun(run.id, () =>
+				sendSurvivingDisconnects(() => imageGenerations(localStorage.token, run.payload))
+			);
 
 			if (response?.length) {
 				generatedImages = response;
-				recordGeneration('success', response);
+				recordGeneration(run.record, 'success', response);
 				await tick();
 				resultsSectionElement?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 			} else {
 				toast.error(
 					$i18n.t('Model returned an empty response. Try resending or switching models.')
 				);
-				recordGeneration('failed', undefined, 'Empty response');
+				recordGeneration(run.record, 'failed', undefined, 'Empty response');
 			}
 		} catch (error) {
 			const resolutionDetail = getModelResolutionDetail(error);
@@ -1587,7 +1638,12 @@
 						? 'This image workspace was saved in an older version with only the model name. Multiple connections now share that model. Please reselect the correct image model with its connection suffix.'
 						: 'The saved image model connection is no longer available. Please reselect the correct image model with its connection suffix.'
 				);
-				recordGeneration('failed', undefined, resolutionDetail.message || formatError(error));
+				recordGeneration(
+					run.record,
+					'failed',
+					undefined,
+					resolutionDetail.message || formatError(error)
+				);
 				return;
 			}
 
@@ -1602,8 +1658,9 @@
 			} else {
 				toast.error(formatError(error));
 			}
-			recordGeneration('failed', undefined, formatError(error));
+			recordGeneration(run.record, 'failed', undefined, formatError(error));
 		} finally {
+			clearPendingImageRun(localStorage, run.id);
 			loading = false;
 			stopElapsedTimer();
 		}
@@ -1662,7 +1719,8 @@
 
 		viewState = 'loading';
 		loaded = true;
-		void loadStudioData();
+		// Awaited before a run is picked up, so the loaded list cannot replace its new entries.
+		const studioDataLoading = loadStudioData();
 
 		const usageResult = await getImageUsageConfig(localStorage.token).catch((error) => error);
 
@@ -1692,6 +1750,16 @@
 		}
 
 		viewState = 'ready';
+
+		// Left mid-run (the phone reloaded the page, or it was closed): finish
+		// that run instead of losing the image the server is making for it.
+		const pendingRun = readPendingImageRun<ImageGenerationRequest, RunRecord>(localStorage);
+		if (pendingRun && !loading && !isImageRunInFlight(pendingRun.id)) {
+			await studioDataLoading.catch(() => undefined);
+			activeTab = 'workbench';
+			toast.info($i18n.t('Picking up the image you started generating'));
+			void runGeneration(pendingRun);
+		}
 	});
 
 	onDestroy(() => {

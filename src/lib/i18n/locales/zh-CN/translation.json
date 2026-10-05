@@ -1128,6 +1128,7 @@
 	"Made in a chat": "对话里生成的",
 	"Only images saved here can be sent to a chat": "只有存在这里的图片才能发到对话",
 	"Opened from a chat: the image is a reference": "已从对话打开：这张图作为参考图",
+	"Picking up the image you started generating": "正在接上你刚才开始的生图",
 	"Uploading {{percent}}%": "上传中 {{percent}}%",
 	"Uploading...": "上传中…",
 	"Processing...": "处理中…",

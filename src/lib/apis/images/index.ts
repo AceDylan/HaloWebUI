@@ -20,6 +20,8 @@ export type ImageGenerationRequest = {
 	// Source / reference images (file content URLs): the request becomes an edit.
 	image_url?: string;
 	image_urls?: string[];
+	// The same id sent again joins that run on the server instead of generating twice.
+	client_request_id?: string;
 };
 
 export type ImageUsageConfig = {

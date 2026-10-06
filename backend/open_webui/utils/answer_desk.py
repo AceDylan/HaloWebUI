@@ -103,7 +103,10 @@ def plan_messages(
 ) -> list[dict]:
     rules = [WEB_RULE if web_allowed else 'Web search is off for this question: "web_search" must be false.']
     if chosen:
-        rules.append(f'The user chose "{chosen}" for this question: use it (action "use", or "update" if it clearly lacks what the question needs).')
+        rules.append(
+            f'The user chose "{chosen}" for this question: it answers. Keep it as it is ("use") unless the question is squarely in '
+            'its field and it lacks a reusable capability ("update"); never widen it into another field.'
+        )
     return lib.dispatch_messages(
         [{"key": UNIT_KEY, "question": question}],
         assistants,

@@ -12,11 +12,7 @@ from typing import Any, Optional
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
-from open_webui.models.chats import (
-    ChatForm,
-    Chats,
-    can_auto_generate_chat_title,
-)
+from open_webui.models.chats import ChatForm, Chats
 from open_webui.socket.main import get_event_emitter
 from open_webui.utils.auth import get_verified_user
 from open_webui.utils import discussion_room as room
@@ -274,30 +270,9 @@ def _emitter(user, chat_id: str, message_id: str):
     )
 
 
-def _title_from(res: Any) -> str:
-    if isinstance(res, dict):
-        choices = res.get("choices") or []
-        if len(choices) == 1 and isinstance(choices[0], dict):
-            content = str((choices[0].get("message") or {}).get("content") or "").strip()
-            start, end = content.find("{"), content.rfind("}")
-            if start != -1 and end > start:
-                try:
-                    title = str(json.loads(content[start : end + 1]).get("title") or "").strip()
-                    if title:
-                        return title[:80]
-                except Exception:
-                    pass
-            content = content.strip(" \"'`#*")
-            if content and "\n" not in content and len(content) <= 80:
-                return content
-    return ""
-
-
 async def _after_done(request: Request, user, chat_id: str, ask: dict) -> None:
     """Automatic title and folder, on the same cadence as ordinary chats."""
-    from open_webui.routers.tasks import generate_folder_assignment, generate_title
-    from open_webui.utils.folder_assignment import assign_chat_folder, build_default_deps
-    from open_webui.utils.task import build_fallback_chat_title
+    from open_webui.utils.mode_chats import auto_title_and_folder
 
     chat = Chats.get_chat_by_id_and_user_id(chat_id, user.id)
     if chat is None:
@@ -309,66 +284,17 @@ async def _after_done(request: Request, user, chat_id: str, ask: dict) -> None:
         answer = room.conclusion_answer((item.get("conclusion") or {}).get("content") or "")
         if answer:
             messages.append({"role": "assistant", "content": answer})
-    ask_count = len(asks)
-    moderator = (ask.get("moderator") or {}).get("model") or ""
-    config = request.app.state.config
+    title, folder_id = await auto_title_and_folder(
+        request,
+        user,
+        chat,
+        messages=messages,
+        model_id=(ask.get("moderator") or {}).get("model") or "",
+        message_id=ask["id"],
+        user_message_count=len(asks),
+        label="discussion",
+    )
     emit = _emitter(user, chat_id, ask["id"])
-
-    title = chat.title
-    try:
-        may_title = getattr(config, "ENABLE_TITLE_GENERATION", True) and can_auto_generate_chat_title(
-            chat.title,
-            {"title_generation": Chats.get_chat_title_generation_metadata_by_id(chat_id)},
-            ask_count,
-            ask["id"],
-        )
-    except Exception:
-        may_title = False
-    if may_title:
-        generated = ""
-        try:
-            generated = _title_from(
-                await generate_title(
-                    request,
-                    {"model": moderator, "messages": messages, "chat_id": chat_id},
-                    user,
-                )
-            )
-        except Exception as exc:
-            log.info("discussion %s: title generation failed: %s", chat_id, exc)
-        generated = generated or build_fallback_chat_title(messages)
-        if generated and Chats.update_chat_title_by_id(
-            chat_id,
-            generated,
-            auto_generated=True,
-            last_user_message_count=ask_count,
-            source_message_id=ask["id"],
-        ):
-            title = generated
-
-    folder_id = chat.folder_id
-    if getattr(config, "ENABLE_FOLDER_AUTO_ASSIGNMENT", False):
-
-        async def call_model(payload: dict):
-            return await generate_folder_assignment(request, payload, user)
-
-        try:
-            result = await assign_chat_folder(
-                chat_id=chat_id,
-                user_id=user.id,
-                model_id=moderator,
-                messages=messages,
-                user_message_count=ask_count,
-                message_id=ask["id"],
-                title=title,
-                deps=build_default_deps(call_model),
-            )
-            log.info("discussion %s folder assignment: %s %r", chat_id, result.status, result.folder_name)
-            if result.changed:
-                folder_id = result.folder_id
-        except Exception as exc:
-            log.warning("discussion %s: folder assignment failed: %s", chat_id, exc)
-
     try:
         await emit({"type": "discuss", "data": {"kind": "meta", "chatId": chat_id, "title": title, "folderId": folder_id}})
         await emit({"type": "chat:title", "data": title})

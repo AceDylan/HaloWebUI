@@ -30,6 +30,7 @@ from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Optional
 
 from open_webui.env import BYPASS_MODEL_ACCESS_CONTROL, GLOBAL_LOG_LEVEL, SRC_LOG_LEVELS
+from open_webui.utils.mode_chats import sources_from_docs
 from open_webui.utils.model_identity import resolve_model_from_lookup
 
 log = logging.getLogger(__name__)
@@ -1099,23 +1100,7 @@ class LiveDiscussion:
             if self.search is None:
                 raise ValueError("联网搜索不可用")
             found = await asyncio.wait_for(self.search(self.ask["question"], self.history), RESEARCH_TIMEOUT_SECONDS)
-            sources, seen = [], set()
-            for doc in (found or {}).get("docs") or []:
-                url = str(doc.get("url") or "").strip()
-                content = re.sub(r"\s+", " ", str(doc.get("content") or "")).strip()
-                if not url or url in seen or len(content) < 80:
-                    continue
-                seen.add(url)
-                sources.append(
-                    {
-                        "n": len(sources) + 1,
-                        "title": _clean_text(doc.get("title") or url, 160),
-                        "url": url,
-                        "excerpt": content[:RESEARCH_EXCERPT_CHARS],
-                    }
-                )
-                if len(sources) >= RESEARCH_MAX_SOURCES:
-                    break
+            sources = sources_from_docs(found, RESEARCH_MAX_SOURCES, RESEARCH_EXCERPT_CHARS)
             research["queries"] = [q for q in (found or {}).get("queries") or [] if q][:4]
             research["sources"] = sources
             research["status"] = "done" if sources else "empty"

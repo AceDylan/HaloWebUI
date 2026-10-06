@@ -1746,62 +1746,6 @@ body:has(#chat-input:focus) .halo-orb__arc {
 	color: var(--color-gray-50);
 }
 
-/* Tabs: text with an ink underline for the current one, on a hairline rule. */
-.halo-tabs {
-	display: flex;
-	gap: 0.25rem;
-	margin: 0 -0.25rem;
-	padding: 0 0.25rem;
-	overflow-x: auto;
-	border-bottom: 1px solid var(--surface-border);
-}
-.halo-tab {
-	position: relative;
-	display: inline-flex;
-	flex-shrink: 0;
-	align-items: center;
-	gap: 0.4rem;
-	padding: 0.625rem 0.625rem 0.75rem;
-	white-space: nowrap;
-	font-size: 0.8125rem;
-	font-weight: 500;
-	color: var(--color-gray-500);
-	transition: color var(--dur-fast) ease;
-}
-.halo-tab svg {
-	opacity: 0.75;
-}
-.halo-tab::after {
-	content: '';
-	position: absolute;
-	left: 0.5rem;
-	right: 0.5rem;
-	bottom: -1px;
-	height: 2px;
-	border-radius: 2px 2px 0 0;
-	background: currentColor;
-	transform: scaleX(0);
-	transition: transform var(--dur-base) var(--ease-out-expo);
-}
-.halo-tab:hover {
-	color: var(--color-gray-900);
-}
-.dark .halo-tab:hover {
-	color: var(--color-gray-100);
-}
-.halo-tab[aria-current='page'] {
-	color: var(--color-gray-950);
-}
-.dark .halo-tab[aria-current='page'] {
-	color: var(--color-gray-50);
-}
-.halo-tab[aria-current='page']::after {
-	transform: scaleX(1);
-}
-.halo-tab[aria-current='page'] svg {
-	opacity: 1;
-}
-
 /* ---------------------------------------------------------------- settings surfaces */
 
 /* The head of a settings page sits on the panel like the workspace heads: no card around it,

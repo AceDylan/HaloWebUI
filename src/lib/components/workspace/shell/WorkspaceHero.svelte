@@ -7,43 +7,14 @@
 	const i18n: Writable<any> = getContext('i18n');
 
 	export let activeTab: WorkspaceTabMeta | null = null;
-	export let tabs: WorkspaceTabMeta[] = [];
-	export let pathname = '';
-
-	const swapTabs = (
-		items: WorkspaceTabMeta[],
-		firstKey: WorkspaceTabMeta['key'],
-		secondKey: WorkspaceTabMeta['key']
-	) => {
-		const reordered = [...items];
-		const firstIndex = reordered.findIndex((tab) => tab.key === firstKey);
-		const secondIndex = reordered.findIndex((tab) => tab.key === secondKey);
-
-		if (firstIndex === -1 || secondIndex === -1) return reordered;
-
-		[reordered[firstIndex], reordered[secondIndex]] = [
-			reordered[secondIndex],
-			reordered[firstIndex]
-		];
-
-		return reordered;
-	};
-
-	const swapWorkspaceHeroTabs = (items: WorkspaceTabMeta[]) => {
-		let reordered = swapTabs(items, 'tools', 'images');
-		reordered = swapTabs(reordered, 'images', 'skills');
-		return reordered;
-	};
 
 	const getWorkspaceHeroTabLabel = (tab: WorkspaceTabMeta | null) =>
 		tab ? $i18n.t(tab.labelKey) : '';
-
-	$: heroTabs = swapWorkspaceHeroTabs(tabs);
 </script>
 
 {#if activeTab}
-	<!-- Page title + tab strip, set straight on the panel (no card): the per-page toolbar
-	     (count, search, create) and the list follow below. -->
+	<!-- Page title, set straight on the panel (no card): the per-page toolbar (count, search,
+	     create) and the list follow below. The pages are reached from the sidebar (助手 / 提示词). -->
 	<header class="halo-page-head @container">
 		<div class="flex items-start gap-3.5">
 			<div class="halo-page-icon shrink-0 {activeTab.badgeColor}">
@@ -63,18 +34,5 @@
 				<p class="halo-page-desc">{$i18n.t(activeTab.descKey)}</p>
 			</div>
 		</div>
-		<nav class="halo-tabs scrollbar-none scroll-fade-x-cq" aria-label={$i18n.t('Workspace')}>
-			{#each heroTabs as tab (tab.key)}
-				{@const active = tab.activeMatch.some((prefix) => pathname.startsWith(prefix))}
-				<a class="halo-tab" href={tab.href} aria-current={active ? 'page' : undefined}>
-					<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="size-4">
-						{#each tab.iconPaths as pathD}
-							<path fill-rule="evenodd" d={pathD} clip-rule="evenodd" />
-						{/each}
-					</svg>
-					<span>{getWorkspaceHeroTabLabel(tab)}</span>
-				</a>
-			{/each}
-		</nav>
 	</header>
 {/if}

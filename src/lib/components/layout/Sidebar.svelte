@@ -70,6 +70,7 @@
 	import FolderIcon from '../icons/Folder.svelte';
 	import FolderOpen from '../icons/FolderOpen.svelte';
 	import SidebarModes from './Sidebar/SidebarModes.svelte';
+	import SidebarLibrary from './Sidebar/SidebarLibrary.svelte';
 
 	type SidebarStyle = 'flat' | 'card';
 	type SidebarFolder = {
@@ -284,7 +285,7 @@
 		}
 	};
 
-	// Going to one of the chat's modes (讨论台 / 协作台 / 生图工作台) leaves the open chat.
+	// Going to one of the chat's modes (讨论台 / 协作台 / 生图工作台) or to 助手 / 提示词 leaves the open chat.
 	const leaveChatForMode = () => {
 		selectedChatId = null;
 		chatId.set('');
@@ -963,43 +964,10 @@
 			<SidebarModes onNavigate={leaveChatForMode} />
 		{/if}
 
-		{#if ($user?.role === 'admin' || $user?.permissions?.workspace?.models || $user?.permissions?.workspace?.knowledge || $user?.permissions?.workspace?.prompts || $user?.permissions?.workspace?.tools) && expanded}
-			<div class="flex text-gray-700 dark:text-gray-200 px-2">
-				<a
-					class={actionItemClass}
-					href="/workspace"
-					aria-current={$page?.url?.pathname?.startsWith('/workspace') && !$page?.url?.pathname?.startsWith('/workspace/images') ? 'page' : undefined}
-					on:click={() => {
-						selectedChatId = null;
-						chatId.set('');
-						selectedAssistantScene.set(null);
-
-						if ($mobile) {
-							showSidebar.set(false);
-						}
-					}}
-					draggable="false"
-				>
-					<svg
-						xmlns="http://www.w3.org/2000/svg"
-						fill="none"
-						viewBox="0 0 24 24"
-						stroke-width="2"
-						stroke="currentColor"
-						stroke-linecap="round"
-						stroke-linejoin="round"
-						class="size-5"
-					>
-						<path d="M12 12h.01" />
-						<path d="M16 6V4a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2" />
-						<path d="M22 13a18.15 18.15 0 0 1-20 0" />
-						<rect width="20" height="14" x="2" y="6" rx="2" />
-					</svg>
-					<span class="text-sm font-medium whitespace-nowrap">{$i18n.t('Workspace')}</span>
-				</a>
-			</div>
+		{#if expanded}
+			<!-- 助手 / 提示词: what is left of the workspace once the image studio became a mode -->
+			<SidebarLibrary {actionItemClass} onNavigate={leaveChatForMode} />
 		{/if}
-
 
 		{#if !expanded}
 			<div class="mt-3 px-2 flex flex-col items-center gap-2 text-gray-700 dark:text-gray-200">
@@ -1015,38 +983,8 @@
 					</a>
 				</Tooltip>
 
-				{#if $user?.role === 'admin' || $user?.permissions?.workspace?.models || $user?.permissions?.workspace?.knowledge || $user?.permissions?.workspace?.prompts || $user?.permissions?.workspace?.tools}
-					<Tooltip content={$i18n.t('Workspace')}>
-						<a
-							class={iconButtonClass}
-							href="/workspace"
-							on:click={() => {
-								selectedChatId = null;
-								chatId.set('');
-								selectedAssistantScene.set(null);
-							}}
-							draggable="false"
-						>
-							<svg
-								xmlns="http://www.w3.org/2000/svg"
-								fill="none"
-								viewBox="0 0 24 24"
-								stroke-width="2"
-								stroke="currentColor"
-								stroke-linecap="round"
-								stroke-linejoin="round"
-								class="size-5"
-							>
-								<path d="M12 12h.01" />
-								<path d="M16 6V4a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2" />
-								<path d="M22 13a18.15 18.15 0 0 1-20 0" />
-								<rect width="20" height="14" x="2" y="6" rx="2" />
-							</svg>
-						</a>
-					</Tooltip>
-				{/if}
-
 				<SidebarModes compact {iconButtonClass} onNavigate={leaveChatForMode} />
+				<SidebarLibrary compact {iconButtonClass} onNavigate={leaveChatForMode} />
 
 				<div class="w-full h-px bg-gray-200/70 dark:bg-gray-800/70 my-1" />
 
@@ -1146,7 +1084,7 @@
 
 				<!-- Only shown once an assistant exists: an empty placeholder here pushed
 				     the chat list below the first screen. Assistants are created from
-				     the workspace. -->
+				     助手 (/workspace/models). -->
 				{#if !search && assistantScenes.length > 0}
 					<Folder
 						className="px-2 mt-0.5"

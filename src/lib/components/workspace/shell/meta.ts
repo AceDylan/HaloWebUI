@@ -6,7 +6,6 @@ export type WorkspaceTabKey =
 	| 'tools'
 	| 'functions'
 	| 'skills'
-	| 'images'
 	| 'assistants';
 
 export type WorkspaceTabMeta = {
@@ -18,21 +17,11 @@ export type WorkspaceTabMeta = {
 	iconColor: string;
 	iconPaths: string[];
 	activeMatch: string[];
-	visibleWhen: (params: { user?: any; config?: any }) => boolean;
 };
 
-const WORKSPACE_TAB_ORDER: WorkspaceTabKey[] = [
-	'models',
-	'assistants',
-	'knowledge',
-	'notes',
-	'prompts',
-	'tools',
-	'skills',
-	'functions',
-	'images'
-];
-
+// The pages behind the sidebar's 助手 / 提示词 (and the unused ones that still open by URL: knowledge,
+// notes, tools, skills, functions). There is no tab strip any more: each page shows its own title.
+// The image studio (/workspace/images) is a chat mode with its own header, not one of these.
 export const WORKSPACE_TABS: WorkspaceTabMeta[] = [
 	{
 		key: 'models',
@@ -50,8 +39,7 @@ export const WORKSPACE_TABS: WorkspaceTabMeta[] = [
 			'M5.08228 14.2537C5.07024 14.2722 5.05827 14.2907 5.04638 14.3093C4.08091 15.8189 3.63908 17.6167 3.77471 19.389C3.16667 19.2967 2.5767 19.1481 2.01043 18.9487L1.89547 18.9082C1.68576 18.8343 1.53923 18.6439 1.52159 18.4222L1.51192 18.3007C1.50402 18.2014 1.5 18.1011 1.5 18C1.5 15.9851 3.08905 14.3414 5.08228 14.2537Z',
 			'M20.2256 19.389C20.3612 17.617 19.9196 15.8196 18.9545 14.3102C18.9424 14.2913 18.9303 14.2725 18.9181 14.2537C20.9111 14.3416 22.5 15.9853 22.5 18C22.5 18.1011 22.496 18.2014 22.4881 18.3007L22.4784 18.4222C22.4608 18.6439 22.3142 18.8343 22.1045 18.9082L21.9896 18.9487C21.4234 19.1481 20.8336 19.2966 20.2256 19.389Z'
 		],
-		activeMatch: ['/workspace/models'],
-		visibleWhen: ({ user }) => user?.role === 'admin' || user?.permissions?.workspace?.models
+		activeMatch: ['/workspace/models']
 	},
 	{
 		key: 'knowledge',
@@ -64,8 +52,7 @@ export const WORKSPACE_TABS: WorkspaceTabMeta[] = [
 			'M11.25 4.53286C9.73455 3.56279 7.93246 3 6 3C4.86178 3 3.76756 3.19535 2.75007 3.55499C2.45037 3.66091 2.25 3.94425 2.25 4.26212V18.5121C2.25 18.7556 2.36818 18.9839 2.56696 19.1245C2.76574 19.265 3.02039 19.3004 3.24993 19.2192C4.10911 18.9156 5.03441 18.75 6 18.75C7.99502 18.75 9.82325 19.4573 11.25 20.6357V4.53286Z',
 			'M12.75 20.6357C14.1768 19.4573 16.005 18.75 18 18.75C18.9656 18.75 19.8909 18.9156 20.7501 19.2192C20.9796 19.3004 21.2343 19.265 21.433 19.1245C21.6318 18.9839 21.75 18.7556 21.75 18.5121V4.26212C21.75 3.94425 21.5496 3.66091 21.2499 3.55499C20.2324 3.19535 19.1382 3 18 3C16.0675 3 14.2655 3.56279 12.75 4.53286V20.6357Z'
 		],
-		activeMatch: ['/workspace/knowledge'],
-		visibleWhen: ({ user }) => user?.role === 'admin' || user?.permissions?.workspace?.knowledge
+		activeMatch: ['/workspace/knowledge']
 	},
 	{
 		key: 'prompts',
@@ -79,8 +66,7 @@ export const WORKSPACE_TABS: WorkspaceTabMeta[] = [
 			'M5.625 1.5C4.58947 1.5 3.75 2.33947 3.75 3.375V20.625C3.75 21.6605 4.58947 22.5 5.625 22.5H18.375C19.4105 22.5 20.25 21.6605 20.25 20.625V12.75C20.25 10.6789 18.5711 9 16.5 9H14.625C13.5895 9 12.75 8.16053 12.75 7.125V5.25C12.75 3.17893 11.0711 1.5 9 1.5H5.625ZM7.5 15C7.5 14.5858 7.83579 14.25 8.25 14.25H15.75C16.1642 14.25 16.5 14.5858 16.5 15C16.5 15.4142 16.1642 15.75 15.75 15.75H8.25C7.83579 15.75 7.5 15.4142 7.5 15ZM8.25 17.25C7.83579 17.25 7.5 17.5858 7.5 18C7.5 18.4142 7.83579 18.75 8.25 18.75H12C12.4142 18.75 12.75 18.4142 12.75 18C12.75 17.5858 12.4142 17.25 12 17.25H8.25Z',
 			'M12.9712 1.8159C13.768 2.73648 14.25 3.93695 14.25 5.25V7.125C14.25 7.33211 14.4179 7.5 14.625 7.5H16.5C17.8131 7.5 19.0135 7.98204 19.9341 8.77881C19.0462 5.37988 16.3701 2.70377 12.9712 1.8159Z'
 		],
-		activeMatch: ['/workspace/prompts'],
-		visibleWhen: ({ user }) => user?.role === 'admin' || user?.permissions?.workspace?.prompts
+		activeMatch: ['/workspace/prompts']
 	},
 	{
 		key: 'notes',
@@ -95,8 +81,7 @@ export const WORKSPACE_TABS: WorkspaceTabMeta[] = [
 			'M19.5133 8.19896L15.801 4.48665L7.40019 12.8875C6.78341 13.5043 6.33002 14.265 6.081 15.101L5.28122 17.7859C5.2026 18.0498 5.27494 18.3356 5.46967 18.5303C5.6644 18.725 5.95019 18.7974 6.21412 18.7188L8.89901 17.919C9.73498 17.67 10.4957 17.2166 11.1125 16.5998L19.5133 8.19896Z',
 			'M5.25 5.24999C3.59315 5.24999 2.25 6.59314 2.25 8.24999V18.75C2.25 20.4068 3.59315 21.75 5.25 21.75H15.75C17.4069 21.75 18.75 20.4068 18.75 18.75V13.5C18.75 13.0858 18.4142 12.75 18 12.75C17.5858 12.75 17.25 13.0858 17.25 13.5V18.75C17.25 19.5784 16.5784 20.25 15.75 20.25H5.25C4.42157 20.25 3.75 19.5784 3.75 18.75V8.24999C3.75 7.42156 4.42157 6.74999 5.25 6.74999H10.5C10.9142 6.74999 11.25 6.41421 11.25 5.99999C11.25 5.58578 10.9142 5.24999 10.5 5.24999H5.25Z'
 		],
-		activeMatch: ['/workspace/notes'],
-		visibleWhen: () => true
+		activeMatch: ['/workspace/notes']
 	},
 	{
 		key: 'tools',
@@ -108,8 +93,7 @@ export const WORKSPACE_TABS: WorkspaceTabMeta[] = [
 		iconPaths: [
 			'M12 6.75C12 3.85051 14.3505 1.5 17.25 1.5C17.7791 1.5 18.2913 1.57852 18.7747 1.72505C19.027 1.80151 19.2206 2.00479 19.2847 2.26048C19.3488 2.51618 19.2739 2.78674 19.0875 2.97313L15.7688 6.29183C15.8305 6.76741 16.0438 7.22581 16.409 7.59099C16.7742 7.95617 17.2326 8.16947 17.7082 8.23117L21.0269 4.91247C21.2133 4.72608 21.4838 4.65122 21.7395 4.7153C21.9952 4.77938 22.1985 4.97299 22.275 5.22526C22.4215 5.7087 22.5 6.22086 22.5 6.75C22.5 9.64949 20.1495 12 17.25 12C17.0995 12 16.9503 11.9936 16.8027 11.9812C15.7855 11.8952 14.9338 12.0816 14.4944 12.6151L7.34327 21.2987C6.71684 22.0593 5.78308 22.5 4.79769 22.5C2.97642 22.5 1.5 21.0236 1.5 19.2023C1.5 18.2169 1.94067 17.2832 2.70132 16.6567L11.3849 9.50557C11.9184 9.06623 12.1048 8.21453 12.0188 7.19728C12.0064 7.04968 12 6.9005 12 6.75ZM4.11723 19.125C4.11723 18.7108 4.45302 18.375 4.86723 18.375H4.87473C5.28895 18.375 5.62473 18.7108 5.62473 19.125V19.1325C5.62473 19.5468 5.28895 19.8825 4.87473 19.8825H4.86723C4.45302 19.8825 4.11723 19.5468 4.11723 19.1325V19.125Z'
 		],
-		activeMatch: ['/workspace/tools'],
-		visibleWhen: ({ user }) => user?.role === 'admin' || user?.permissions?.workspace?.tools
+		activeMatch: ['/workspace/tools']
 	},
 	{
 		key: 'functions',
@@ -122,8 +106,7 @@ export const WORKSPACE_TABS: WorkspaceTabMeta[] = [
 		iconPaths: [
 			'M2.25 6C2.25 4.34315 3.59315 3 5.25 3H18.75C20.4069 3 21.75 4.34315 21.75 6V18C21.75 19.6569 20.4069 21 18.75 21H5.25C3.59315 21 2.25 19.6569 2.25 18V6ZM6.21967 6.96967C6.51256 6.67678 6.98744 6.67678 7.28033 6.96967L9.53033 9.21967C9.82322 9.51256 9.82322 9.98744 9.53033 10.2803L7.28033 12.5303C6.98744 12.8232 6.51256 12.8232 6.21967 12.5303C5.92678 12.2374 5.92678 11.7626 6.21967 11.4697L7.93934 9.75L6.21967 8.03033C5.92678 7.73744 5.92678 7.26256 6.21967 6.96967ZM10.5 11.25C10.0858 11.25 9.75 11.5858 9.75 12C9.75 12.4142 10.0858 12.75 10.5 12.75H13.5C13.9142 12.75 14.25 12.4142 14.25 12C14.25 11.5858 13.9142 11.25 13.5 11.25H10.5Z'
 		],
-		activeMatch: ['/workspace/functions'],
-		visibleWhen: ({ user }) => user?.role === 'admin'
+		activeMatch: ['/workspace/functions']
 	},
 	{
 		key: 'skills',
@@ -138,23 +121,7 @@ export const WORKSPACE_TABS: WorkspaceTabMeta[] = [
 			'M18 1.5C18.3442 1.5 18.6441 1.73422 18.7276 2.0681L18.9865 3.10356C19.2216 4.04406 19.9559 4.7784 20.8964 5.01353L21.9319 5.27239C22.2658 5.35586 22.5 5.65585 22.5 6C22.5 6.34415 22.2658 6.64414 21.9319 6.72761L20.8964 6.98647C19.9559 7.2216 19.2216 7.95594 18.9865 8.89644L18.7276 9.9319C18.6441 10.2658 18.3442 10.5 18 10.5C17.6558 10.5 17.3559 10.2658 17.2724 9.9319L17.0135 8.89644C16.7784 7.95594 16.0441 7.2216 15.1036 6.98647L14.0681 6.72761C13.7342 6.64414 13.5 6.34415 13.5 6C13.5 5.65585 13.7342 5.35586 14.0681 5.27239L15.1036 5.01353C16.0441 4.7784 16.7784 4.04406 17.0135 3.10356L17.2724 2.0681C17.3559 1.73422 17.6558 1.5 18 1.5Z',
 			'M16.5 15C16.8228 15 17.1094 15.2066 17.2115 15.5128L17.6058 16.6956C17.7551 17.1435 18.1065 17.4949 18.5544 17.6442L19.7372 18.0385C20.0434 18.1406 20.25 18.4272 20.25 18.75C20.25 19.0728 20.0434 19.3594 19.7372 19.4615L18.5544 19.8558C18.1065 20.0051 17.7551 20.3565 17.6058 20.8044L17.2115 21.9872C17.1094 22.2934 16.8228 22.5 16.5 22.5C16.1772 22.5 15.8906 22.2934 15.7885 21.9872L15.3942 20.8044C15.2449 20.3565 14.8935 20.0051 14.4456 19.8558L13.2628 19.4615C12.9566 19.3594 12.75 19.0728 12.75 18.75C12.75 18.4272 12.9566 18.1406 13.2628 18.0385L14.4456 17.6442C14.8935 17.4949 15.2449 17.1435 15.3942 16.6956L15.7885 15.5128C15.8906 15.2066 16.1772 15 16.5 15Z'
 		],
-		activeMatch: ['/workspace/skills'],
-		visibleWhen: () => true
-	},
-	{
-		key: 'images',
-		href: '/workspace/images',
-		labelKey: 'Images',
-		descKey:
-			'Generate images from an independent image workbench that remembers your recent selections in this browser.',
-		badgeColor: 'bg-sky-50 dark:bg-sky-950/30',
-		iconColor: 'text-sky-500 dark:text-sky-400',
-		iconPaths: [
-			'M1.5 6C1.5 4.75736 2.50736 3.75 3.75 3.75H20.25C21.4926 3.75 22.5 4.75736 22.5 6V18C22.5 19.2426 21.4926 20.25 20.25 20.25H3.75C2.50736 20.25 1.5 19.2426 1.5 18V6ZM3 16.0607V18C3 18.4142 3.33579 18.75 3.75 18.75H20.25C20.6642 18.75 21 18.4142 21 18V16.0607L18.3107 13.3713C17.7249 12.7855 16.7751 12.7855 16.1893 13.3713L15.3107 14.25L16.2803 15.2197C16.5732 15.5126 16.5732 15.9874 16.2803 16.2803C15.9874 16.5732 15.5126 16.5732 15.2197 16.2803L10.0607 11.1213C9.47487 10.5355 8.52513 10.5355 7.93934 11.1213L3 16.0607ZM13.125 8.25C13.125 7.62868 13.6287 7.125 14.25 7.125C14.8713 7.125 15.375 7.62868 15.375 8.25C15.375 8.87132 14.8713 9.375 14.25 9.375C13.6287 9.375 13.125 8.87132 13.125 8.25Z'
-		],
-		activeMatch: ['/workspace/images'],
-		visibleWhen: ({ user }) =>
-			user?.role === 'admin' || user?.permissions?.features?.image_generation
+		activeMatch: ['/workspace/skills']
 	},
 	{
 		key: 'assistants',
@@ -166,42 +133,12 @@ export const WORKSPACE_TABS: WorkspaceTabMeta[] = [
 		iconPaths: [
 			'M12.0003 2.25C9.57113 2.25 7.18302 2.42773 4.84836 2.771C2.87004 3.06188 1.5 4.79455 1.5 6.74064V12.7593C1.5 14.7054 2.87004 16.4381 4.84836 16.729C5.72491 16.8579 6.60901 16.9634 7.5 17.045V21C7.5 21.3033 7.68273 21.5768 7.96299 21.6929C8.24324 21.809 8.56583 21.7448 8.78033 21.5303L12.9638 17.3468C13.0318 17.2788 13.1266 17.2374 13.2302 17.2348C15.2361 17.1851 17.2123 17.0142 19.1516 16.7291C21.1299 16.4382 22.5 14.7056 22.5 12.7595V6.74056C22.5 4.79445 21.1299 3.06177 19.1516 2.77091C16.8171 2.4277 14.4292 2.25 12.0003 2.25ZM8.25 8.625C7.62868 8.625 7.125 9.12868 7.125 9.75C7.125 10.3713 7.62868 10.875 8.25 10.875C8.87132 10.875 9.375 10.3713 9.375 9.75C9.375 9.12868 8.87132 8.625 8.25 8.625ZM10.875 9.75C10.875 9.12868 11.3787 8.625 12 8.625C12.6213 8.625 13.125 9.12868 13.125 9.75C13.125 10.3713 12.6213 10.875 12 10.875C11.3787 10.875 10.875 10.3713 10.875 9.75ZM15.75 8.625C15.1287 8.625 14.625 9.12868 14.625 9.75C14.625 10.3713 15.1287 10.875 15.75 10.875C16.3713 10.875 16.875 10.3713 16.875 9.75C16.875 9.12868 16.3713 8.625 15.75 8.625Z'
 		],
-		activeMatch: ['/workspace/assistants'],
-		// The templates are a tab of 「助手」 (/workspace/models?tab=templates); this tab is left
-		// only for users who cannot open that page.
-		visibleWhen: ({ user }) => !(user?.role === 'admin' || user?.permissions?.workspace?.models)
+		// The templates are a tab of 「助手」 (/workspace/models?tab=templates); this page is left
+		// for users who cannot open that one (the sidebar's 助手 leads here for them).
+		activeMatch: ['/workspace/assistants']
 	}
 ];
 
-// Tabs kept out of the tab strip because they are not used here (no knowledge
-// bases, notes, skills or functions; one tool). The pages still work: open one
-// by URL and its tab shows while it is open. Remove a key from this list to
-// bring the tab back.
-export const HIDDEN_WORKSPACE_TABS: WorkspaceTabKey[] = [
-	'knowledge',
-	'notes',
-	'tools',
-	'skills',
-	'functions'
-];
-
-const isTabOpen = (tab: WorkspaceTabMeta, pathname?: string) =>
-	Boolean(pathname) && tab.activeMatch.some((prefix) => pathname!.startsWith(prefix));
-
-export const getVisibleWorkspaceTabs = (
-	params: { user?: any; config?: any },
-	pathname?: string
-) =>
-	WORKSPACE_TABS.filter(
-		(tab) =>
-			tab.visibleWhen(params) &&
-			(!HIDDEN_WORKSPACE_TABS.includes(tab.key) || isTabOpen(tab, pathname))
-	).sort((a, b) => WORKSPACE_TAB_ORDER.indexOf(a.key) - WORKSPACE_TAB_ORDER.indexOf(b.key));
-
-export const getActiveWorkspaceTab = (
-	pathname: string,
-	tabs: WorkspaceTabMeta[] = WORKSPACE_TABS
-) =>
-	tabs.find((tab) => tab.activeMatch.some((prefix) => pathname.startsWith(prefix))) ??
-	tabs[0] ??
+export const getActiveWorkspaceTab = (pathname: string) =>
+	WORKSPACE_TABS.find((tab) => tab.activeMatch.some((prefix) => pathname.startsWith(prefix))) ??
 	null;

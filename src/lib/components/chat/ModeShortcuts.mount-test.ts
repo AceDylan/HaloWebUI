@@ -1,6 +1,6 @@
 // The chat's modes as one family: the home composer's shortcuts take the draft along, the
-// sidebar shows 讨论 / 协作 / 生图 as one row (and the studio only with image permission), and
-// the chat list marks discussions, team chats and image chats.
+// sidebar shows 讨论 / 协作 / 生图 as one row (and the studio only with image permission) with
+// 助手 / 提示词 under it, and the chat list marks discussions, team chats and image chats.
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { installDominoDom } from '$lib/test-support/domino-dom';
 
@@ -82,5 +82,30 @@ describe('SidebarModes', () => {
 		expect(target.querySelector('[data-sidebar-mode="teams"]')!.getAttribute('aria-current')).toBe('page');
 		expect(target.querySelector('[data-sidebar-discuss]')).toBeTruthy();
 		expect(target.querySelector('[data-sidebar-answer]')).toBeTruthy();
+	});
+});
+
+describe('SidebarLibrary', () => {
+	const links = async () => {
+		const { default: SidebarLibrary } = await import('$lib/components/layout/Sidebar/SidebarLibrary.svelte');
+		const target = await mount(SidebarLibrary);
+		return [...target.querySelectorAll('[data-sidebar-library]')].map((el: any) => [el.textContent.trim(), el.getAttribute('href')]);
+	};
+
+	it('puts 助手 and 提示词 where the workspace was', async () => {
+		expect(await links()).toEqual([
+			['助手', '/workspace/models'],
+			['提示词', '/workspace/prompts']
+		]);
+	});
+
+	it('follows the permissions: templates for users without the assistants page, nothing without any', async () => {
+		stores.user.set({ id: 'u2', role: 'user', permissions: { workspace: { prompts: true } } } as any);
+		expect(await links()).toEqual([
+			['助手', '/workspace/assistants'],
+			['提示词', '/workspace/prompts']
+		]);
+		stores.user.set({ id: 'u3', role: 'user', permissions: { workspace: {} } } as any);
+		expect(await links()).toEqual([]);
 	});
 });

@@ -339,7 +339,7 @@
 									<button type="button" class="dc-chip" disabled={busy} on:click={revert} data-answer-revert>撤销这次升级</button>
 								{/if}
 								{#if assistant.saved && assistant.action !== 'direct'}
-									<a class="dc-chip" href="/workspace/models/edit?id={encodeURIComponent(assistant.id)}" data-answer-edit>在工作空间编辑</a>
+									<a class="dc-chip" href="/workspace/models/edit?id={encodeURIComponent(assistant.id)}" data-answer-edit>在「助手」里编辑</a>
 								{/if}
 							</div>
 							{#if showPrompt && assistant.system}

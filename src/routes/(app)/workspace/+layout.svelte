@@ -1,23 +1,18 @@
 <script lang="ts">
 	import type { Writable } from 'svelte/store';
 	import { onMount, getContext } from 'svelte';
-	import { WEBUI_NAME, config, showSidebar, user, mobile } from '$lib/stores';
+	import { WEBUI_NAME, showSidebar, user, mobile } from '$lib/stores';
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
 
 	import MenuLines from '$lib/components/icons/MenuLines.svelte';
 	import WorkspaceHero from '$lib/components/workspace/shell/WorkspaceHero.svelte';
 	import ModeEmblem from '$lib/components/scifi/ModeEmblem.svelte';
-	import {
-		getActiveWorkspaceTab,
-		getVisibleWorkspaceTabs
-	} from '$lib/components/workspace/shell/meta';
+	import { getActiveWorkspaceTab } from '$lib/components/workspace/shell/meta';
 
 	const i18n: Writable<any> = getContext('i18n');
 
 	let loaded = false;
-	let activeTab = null;
-	let visibleTabs = [];
 
 	onMount(async () => {
 		if ($user?.role !== 'admin') {
@@ -49,15 +44,17 @@
 	});
 
 	// The image studio is one of the chat's modes (sidebar: 讨论 / 协作 / 生图): it gets a mode page's
-	// header, like 讨论台 and 协作台, instead of the workspace's tab strip.
+	// header, like 讨论台 and 协作台, instead of a page title.
 	$: studio = $page.url.pathname.startsWith('/workspace/images');
-	$: visibleTabs = getVisibleWorkspaceTabs({ user: $user, config: $config }, $page.url.pathname);
-	$: activeTab = getActiveWorkspaceTab($page.url.pathname, visibleTabs);
+	// The other pages (助手, 提示词, and the unused ones still open by URL) are reached from the
+	// sidebar: each shows its own name, there is no "workspace" around them any more.
+	$: activeTab = getActiveWorkspaceTab($page.url.pathname);
+	$: pageName = studio ? '生图工作台' : activeTab ? $i18n.t(activeTab.labelKey) : '';
 </script>
 
 <svelte:head>
 	<title>
-		{studio ? '生图工作台' : activeTab ? $i18n.t(activeTab.labelKey) : $i18n.t('Workspace')} | {$WEBUI_NAME}
+		{pageName ? `${pageName} | ` : ''}{$WEBUI_NAME}
 	</title>
 </svelte:head>
 
@@ -81,7 +78,7 @@
 				</div>
 
 				<div class="halo-crumb flex items-center px-1 py-1">
-					{studio ? '生图工作台' : $i18n.t('Workspace')}
+					{pageName}
 				</div>
 			</div>
 		</nav>
@@ -106,7 +103,7 @@
 						</p>
 					</header>
 				{:else}
-					<WorkspaceHero {activeTab} tabs={visibleTabs} pathname={$page.url.pathname} />
+					<WorkspaceHero {activeTab} />
 				{/if}
 				<div data-halo-layer="2" class="flex-1 min-h-0">
 					<slot />

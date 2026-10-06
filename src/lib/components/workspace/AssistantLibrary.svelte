@@ -94,7 +94,7 @@
 		showDetailModal = true;
 	};
 
-	// 添加助手到工作空间（跳转到模型创建页面）
+	// 添加到我的助手（跳转到模型创建页面）
 	const addAssistant = (agent: any, fromModal = false) => {
 		// 构造模型预填数据，跳转到创建页面让用户选择底层 LLM
 		const modelData = {

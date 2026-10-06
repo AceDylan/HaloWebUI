@@ -76,6 +76,13 @@ def tick() -> None:
                 report_conclusion(slug, read_team(slug) or team)
             except Exception:
                 logger.warning("halowebui-teams: conclusion hand-over failed for %s", slug, exc_info=True)
+            if (team.get("project") or {}).get("branch"):
+                try:
+                    from . import projects
+
+                    projects.clean_if_empty(slug, read_team(slug) or team)  # nothing changed: no branch left behind
+                except Exception:
+                    logger.warning("halowebui-teams: empty-branch cleanup failed for %s", slug, exc_info=True)
         except Exception:
             logger.warning("halowebui-teams: bridge tick failed for %s", slug, exc_info=True)
 

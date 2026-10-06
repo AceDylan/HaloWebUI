@@ -513,6 +513,8 @@ export type LiveSnapshot = {
 		conclusion?: ConclusionEntry;
 		/** How many times new work reopened the finished team. */
 		round?: number;
+		/** A project team that changed nothing: its branch was cleaned up, no 变更 to show. */
+		project_cleaned?: boolean;
 		/** The open 对负责人说 request / proposal, and the latest decided ones. */
 		change?: TeamChangeRequest | null;
 		changes_log?: TeamChangeRequest[];
@@ -697,6 +699,8 @@ export type TeamChanges = {
 		merged_sha?: string | null;
 		pushed?: { branch?: number; base?: number } | null;
 		discarded_at?: number | null;
+		/** The team changed nothing, so its branch was cleaned up on its own. */
+		auto_cleaned?: boolean;
 	} | null;
 	available?: boolean;
 	commits?: TeamCommit[];

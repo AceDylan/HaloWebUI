@@ -6,7 +6,8 @@ HEAD, checked out as a linked worktree at the team's usual workspace path: membe
 runners alike) work there and the user's own checkout is never touched. Every finished task is
 committed on that branch (``[T2 · member] title``); the 变更 view lists commits and files. Merging
 into the base branch, pushing, and throwing the branch away are explicit user actions — nothing
-here pushes on its own.
+here pushes on its own. The one exception is a team that finished without changing anything: its
+empty branch is cleaned up (``clean_if_empty``), and new work for it starts a fresh one (``revive``).
 
 Parallel members share the worktree (the plan gives them different files), so a commit holds
 whatever the worktree had when its task finished: the overall diff is exact, the per-task split
@@ -219,8 +220,8 @@ def commit_finished(slug: str, team: dict, done: list[dict]) -> list[str]:
     """Commit the worktree for every newly finished task (bridge loop). Returns the task ids handled."""
     project = team.get("project") or {}
     workspace = team.get("workspace") or ""
-    if not project.get("branch") or not os.path.isdir(workspace):
-        return []
+    if not project.get("branch") or project.get("discarded_at") or not os.path.isdir(workspace):
+        return []  # a discarded team's workspace is a plain directory now: never run git add there
     handled = []
     last = project.get("last_head") or project.get("base_sha")
     owners: dict[str, list] = {}
@@ -274,9 +275,10 @@ def changes(team: dict) -> dict:
     if not project.get("branch"):
         return {"project": None}
     info = {k: project.get(k) for k in ("path", "name", "base_branch", "base_sha", "branch", "merged_at",
-                                         "merged_sha", "pushed", "discarded_at")}
+                                         "merged_sha", "pushed", "discarded_at", "auto_cleaned")}
     if project.get("discarded_at") or not os.path.isdir(workspace):
-        return {"project": info, "commits": [], "files": [], "pending": [], "available": False}
+        return {"project": info, "commits": [], "files": [], "pending": [], "available": False,
+                "merged": bool(project.get("merged_at"))}
     base = project["base_sha"]
     log = git(workspace, "log", "--format=%H%x1f%s%x1f%an%x1f%at", f"{base}..HEAD", "-n", "200").stdout
     commits = []
@@ -296,11 +298,12 @@ def changes(team: dict) -> dict:
     if base_branch:
         counted = git(repo, "rev-list", "--count", f"{project['branch']}..{base_branch}", timeout=20)
         behind = int(counted.stdout.strip() or 0) if counted.returncode == 0 else 0
-    merged = bool(base_branch) and git(repo, "merge-base", "--is-ancestor", project["branch"], base_branch,
-                                       timeout=20).returncode == 0 and bool(commits)
+    # What git says, not a flag: a team that got more work after a merge has something to merge again.
+    merged = bool(base_branch) and bool(commits) and not pending and git(
+        repo, "merge-base", "--is-ancestor", project["branch"], base_branch, timeout=20).returncode == 0
     return {"project": info, "commits": commits, "files": files, "pending": pending[:200], "available": True,
             "added": sum(f["added"] or 0 for f in files), "removed": sum(f["removed"] or 0 for f in files),
-            "base_moved": behind, "merged": merged or bool(project.get("merged_at"))}
+            "base_moved": behind, "merged": merged}
 
 
 def changed_paths(team: dict) -> Optional[list[str]]:
@@ -360,6 +363,10 @@ def merge(slug: str, team: dict) -> dict:
     if current == base_branch:
         if git(repo, "status", "--porcelain", "--untracked-files=no", timeout=20).stdout.strip():
             raise ProjectError(409, f"{repo} 里有未提交的改动，先提交或暂存再合并")
+        in_the_way = _untracked_in_the_way(repo, base_branch, branch)
+        if in_the_way:
+            raise ProjectError(409, f"{repo} 里有 {len(in_the_way)} 个没被 git 跟踪的文件和团队新增的文件同名，合并会覆盖它们："
+                               + "、".join(in_the_way[:8]) + ("…" if len(in_the_way) > 8 else "") + "。先移走或删掉再合并")
         result = git(repo, "merge", "--ff-only", branch)
         how = "fast-forward"
         if result.returncode != 0:
@@ -367,8 +374,11 @@ def merge(slug: str, team: dict) -> dict:
                          "--no-edit", "-m", f"Merge {branch}: {team.get('title') or ''}", branch)
             how = "merge"
             if result.returncode != 0:
+                detail = (result.stdout or result.stderr).strip()[-300:]
+                if git(repo, "rev-parse", "-q", "--verify", "MERGE_HEAD", timeout=10).returncode != 0:
+                    raise ProjectError(409, f"合并没能开始，你的工作区没有变化（{detail}）")
                 git(repo, "merge", "--abort")
-                raise ProjectError(409, f"合并冲突，已撤回（{(result.stdout or result.stderr).strip()[-300:]}）")
+                raise ProjectError(409, f"合并冲突，已撤回（{detail}）")
     else:
         checked_out = git(repo, "worktree", "list", "--porcelain", timeout=10).stdout
         if f"branch refs/heads/{base_branch}\n" in checked_out + "\n":
@@ -382,8 +392,23 @@ def merge(slug: str, team: dict) -> dict:
     sha = git(repo, "rev-parse", base_branch, timeout=10).stdout.strip()
     from .common import update_team
 
-    update_team(slug, lambda rec: rec.setdefault("project", {}).update({"merged_at": now(), "merged_sha": sha}))
+    def apply(rec: dict) -> None:
+        entry = rec.setdefault("project", {})
+        pushed = {k: v for k, v in (entry.get("pushed") or {}).items() if k != "base"}  # this merge is not pushed yet
+        entry.update({"merged_at": now(), "merged_sha": sha, "pushed": pushed or None})
+
+    update_team(slug, apply)
     return {"merged": True, "how": how, "sha": sha, "base_branch": base_branch}
+
+
+def _untracked_in_the_way(repo: str, base_branch: str, branch: str) -> list[str]:
+    """Files the team added that sit untracked in the user's checkout: git refuses such a merge."""
+    added = git(repo, "diff", "-z", "--name-only", "--no-renames", "--diff-filter=A", f"{base_branch}...{branch}",
+                timeout=20).stdout.split("\0")
+    if not any(added):
+        return []
+    untracked = set(git(repo, "ls-files", "-z", "--others", "--exclude-standard", timeout=20).stdout.split("\0"))
+    return [path for path in added if path and path in untracked]
 
 
 def push(slug: str, team: dict, what: str) -> dict:
@@ -408,12 +433,17 @@ def push(slug: str, team: dict, what: str) -> dict:
         raise ProjectError(502, "推送失败：" + (result.stderr or result.stdout).strip()[-300:])
     from .common import update_team
 
-    update_team(slug, lambda rec: rec.setdefault("project", {}).setdefault("pushed", {}).update({what: now()}))
+    def apply(rec: dict) -> None:
+        entry = rec.setdefault("project", {})
+        entry["pushed"] = {**(entry.get("pushed") or {}), what: now()}
+
+    update_team(slug, apply)
     return {"pushed": True, "ref": ref}
 
 
-def discard(slug: str, team: dict) -> dict:
-    """Remove the team's worktree and branch (after the team is over; explicit action)."""
+def discard(slug: str, team: dict, *, auto: bool = False) -> dict:
+    """Remove the team's worktree and branch (after the team is over; explicit action, or ``auto``
+    for a branch with nothing on it, see ``clean_if_empty``)."""
     project = team.get("project") or {}
     repo, branch = project.get("path"), project.get("branch")
     if not repo or not branch:
@@ -440,5 +470,75 @@ def discard(slug: str, team: dict) -> dict:
     git(repo, "branch", "-D", branch, timeout=20)
     from .common import update_team
 
-    update_team(slug, lambda rec: rec.setdefault("project", {}).update({"discarded_at": now()}))
+    update_team(slug, lambda rec: rec.setdefault("project", {}).update({"discarded_at": now(), "auto_cleaned": auto}))
     return {"discarded": True}
+
+
+def clean_if_empty(slug: str, team: dict) -> bool:
+    """A finished team that changed nothing in the project (no commit, no file — not even an ignored
+    one) leaves no branch and worktree behind in the user's repository. Waits for the conclusion and
+    the lead's acceptance; checked once per written conclusion (bridge loop)."""
+    project = team.get("project") or {}
+    entry = team.get("conclusion") or {}
+    workspace = team.get("workspace") or ""
+    if team.get("state") != "completed" or not project.get("branch") or project.get("discarded_at"):
+        return False
+    if entry.get("status") not in ("ready", "failed") or (entry.get("acceptance") or {}).get("status") == "checking":
+        return False
+    if ((entry.get("illustration") or {}).get("status")) == "generating":
+        return False
+    version = entry.get("generated_at") or entry.get("finished_at") or 0
+    if project.get("clean_checked") == version or not os.path.isdir(workspace):
+        return False
+    commits = git(workspace, "rev-list", "--count", f"{project.get('base_sha')}..HEAD", timeout=20)
+    left = git(workspace, "status", "--porcelain", "--ignored", "--", ".", *JUNK, timeout=30)
+    if commits.returncode != 0 or commits.stdout.strip() != "0" or left.returncode != 0 or left.stdout.strip():
+        from .common import update_team
+
+        update_team(slug, lambda rec: rec.setdefault("project", {}).update({"clean_checked": version}))
+        return False
+    discard(slug, team, auto=True)
+    logger.info("halowebui-teams: %s changed nothing in %s, its branch %s was cleaned up", slug,
+                project.get("name"), project.get("branch"))
+    return True
+
+
+def revive(slug: str, team: dict) -> None:
+    """New work for a team whose empty branch was cleaned up: the branch again, from the base
+    branch as it is now, checked out at the team's workspace (its .halo kept)."""
+    project = team.get("project") or {}
+    if not project.get("auto_cleaned") or not project.get("discarded_at"):
+        return
+    import shutil
+    import tempfile
+
+    repo, branch, workspace = project.get("path") or "", project.get("branch") or "", team.get("workspace") or ""
+    top = toplevel(repo)
+    if top is None or not branch or not workspace:
+        raise ProjectError(409, f"{repo} 已经不是可以协作的 git 仓库，不能再在里面追加工作")
+    base_sha = git(top, "rev-parse", project.get("base_branch") or project.get("base_sha") or "HEAD",
+                   timeout=10, check=True).stdout.strip()
+    if git(top, "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}", timeout=10).returncode == 0:
+        raise ProjectError(409, f"分支 {branch} 已经存在，不能重建团队分支")
+    entries = os.listdir(workspace) if os.path.isdir(workspace) else []
+    if set(entries) - {".halo"}:
+        raise ProjectError(409, f"{workspace} 里有别的文件，不能重建团队分支")
+    saved = None
+    if ".halo" in entries:
+        saved = Path(tempfile.mkdtemp(prefix="halo-keep-")) / ".halo"
+        shutil.move(str(Path(workspace) / ".halo"), saved)
+    try:
+        if os.path.isdir(workspace):
+            os.rmdir(workspace)
+        git(top, "worktree", "add", "-b", branch, workspace, base_sha, check=True)
+    finally:
+        if saved is not None:
+            Path(workspace).mkdir(parents=True, exist_ok=True)
+            shutil.move(str(saved), Path(workspace) / ".halo")
+            shutil.rmtree(saved.parent, ignore_errors=True)
+    from .common import update_team
+
+    update_team(slug, lambda rec: rec.setdefault("project", {}).update({
+        "discarded_at": None, "auto_cleaned": False, "clean_checked": None, "base_sha": base_sha, "last_head": base_sha,
+        "task_commits": {}, "merged_at": None, "merged_sha": None, "pushed": None}))
+    logger.info("halowebui-teams: %s got new work, branch %s again from %s", slug, branch, base_sha[:10])

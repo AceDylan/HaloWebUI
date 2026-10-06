@@ -140,6 +140,22 @@ describe('ChangesView', () => {
 		expect(api.pushTeamChanges).not.toHaveBeenCalled();
 	});
 
+	it('explains a branch that was cleaned up because the team changed nothing', async () => {
+		api.getTeamChanges.mockResolvedValue({
+			project: { ...CHANGES.project, discarded_at: 1790900500, auto_cleaned: true },
+			available: false,
+			commits: [],
+			files: [],
+			pending: [],
+			merged: false
+		});
+		await mount({ teamId: 'team-3', phase: 'completed' });
+		expect(target.querySelector('[data-changes-discarded]').textContent).toContain('没有改动，分支已自动清理');
+		expect(target.textContent).toContain('重新开一个分支');
+		expect(target.querySelector('[data-changes-merge]')).toBeFalsy();
+		expect(target.querySelector('[data-changes-discard]')).toBeFalsy();
+	});
+
 	it('says so when the team did not work on a project', async () => {
 		api.getTeamChanges.mockResolvedValue({ project: null });
 		await mount({ teamId: 'team-2', phase: 'completed' });

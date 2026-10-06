@@ -210,3 +210,151 @@ def test_discard_waits_for_the_conclusion(pkg, team_id, plan_dict, repo):
     assert "写结论" in err.value.message
     projects.discard(slug, pkg.common.read_team(slug))
     assert os.path.isdir(pkg.common.read_team(slug)["workspace"])  # still there (empty) for the record
+
+
+def _complete(pkg, slug, **conclusion):
+    pkg.common.update_team(slug, lambda rec: rec.update({
+        "state": "completed", "conclusion": {"status": "ready", "generated_at": 100, **conclusion}}))
+
+
+def test_more_work_after_a_merge_can_be_merged_and_pushed_again(pkg, team_id, plan_dict, repo):
+    import halowebui_teams.bridge as bridge
+    import halowebui_teams.projects as projects
+
+    first = _create(pkg, team_id, plan_dict, repo)
+    slug = pkg.common.board_slug(team_id)
+    ws = pkg.common.read_team(slug)["workspace"]
+    _finish(pkg, slug, first["tasks"]["T1"], lambda: open(os.path.join(ws, "api.md"), "w").write("接口\n"))
+    bridge._commit_finished(slug, pkg.common.read_team(slug))
+    projects.merge(slug, pkg.common.read_team(slug))
+    projects.push(slug, pkg.common.read_team(slug), "base")
+    assert projects.changes(pkg.common.read_team(slug))["merged"] is True
+
+    # the lead added work after the merge (a plan change reopened the team): one more commit
+    _finish(pkg, slug, first["tasks"]["T2"], lambda: open(os.path.join(ws, "app.py"), "w").write("print('v2')\n"))
+    bridge._commit_finished(slug, pkg.common.read_team(slug))
+    assert projects.changes(pkg.common.read_team(slug))["merged"] is False  # not hidden behind the old merge
+    projects.merge(slug, pkg.common.read_team(slug))
+    data = projects.changes(pkg.common.read_team(slug))
+    assert data["merged"] is True and (repo / "app.py").read_text() == "print('v2')\n"
+    assert "base" not in (data["project"]["pushed"] or {})  # the new merge can be pushed again
+    projects.discard(slug, pkg.common.read_team(slug))
+    assert projects.changes(pkg.common.read_team(slug))["merged"] is True  # still told after the branch is gone
+
+
+def test_merge_names_untracked_files_it_would_overwrite(pkg, team_id, plan_dict, repo):
+    import halowebui_teams.projects as projects
+
+    first = _create(pkg, team_id, plan_dict, repo)
+    slug = pkg.common.board_slug(team_id)
+    ws = pkg.common.read_team(slug)["workspace"]
+
+    def work():
+        os.makedirs(os.path.join(ws, "docs"), exist_ok=True)
+        open(os.path.join(ws, "docs", "new.txt"), "w").write("team\n")
+
+    _finish(pkg, slug, first["tasks"]["T1"], work)
+    (repo / "docs").mkdir()
+    (repo / "docs" / "new.txt").write_text("mine\n")  # the user's own, never added to git
+    with pytest.raises(projects.ProjectError) as err:
+        projects.merge(slug, pkg.common.read_team(slug))
+    assert "没被 git 跟踪" in err.value.message and "docs/new.txt" in err.value.message
+    assert (repo / "docs" / "new.txt").read_text() == "mine\n"
+    (repo / "docs" / "new.txt").unlink()
+    assert projects.merge(slug, pkg.common.read_team(slug))["merged"] is True
+
+
+def test_a_team_that_changed_nothing_leaves_no_branch_and_gets_it_back_for_new_work(pkg, team_id, plan_dict, repo):
+    import halowebui_teams.lead as lead
+    import halowebui_teams.projects as projects
+
+    _create(pkg, team_id, plan_dict, repo)
+    slug = pkg.common.board_slug(team_id)
+    ws = pkg.common.read_team(slug)["workspace"]
+    os.makedirs(os.path.join(ws, ".halo", "images"), exist_ok=True)
+    open(os.path.join(ws, ".halo", "conclusion.md"), "w").write("结论")
+    open(os.path.join(ws, ".halo", "images", "result-1.png"), "wb").write(b"\x89PNG")  # the conclusion's picture
+
+    pkg.common.update_team(slug, lambda rec: rec.update({"state": "completed", "conclusion": {
+        "status": "ready", "generated_at": 100, "acceptance": {"status": "checking"}}}))
+    assert projects.clean_if_empty(slug, pkg.common.read_team(slug)) is False  # the lead is still checking
+    _complete(pkg, slug)
+    assert projects.clean_if_empty(slug, pkg.common.read_team(slug)) is True
+    team = pkg.common.read_team(slug)
+    assert team["project"]["auto_cleaned"] is True and not _git(repo, "branch", "--list", f"halo/{slug}")
+    assert open(os.path.join(ws, ".halo", "conclusion.md")).read() == "结论"
+    assert pkg.teams.snapshot(team_id)["team"]["project_cleaned"] is True
+    assert projects.commit_finished(slug, team, [{"id": "t", "key": "T9"}]) == []  # no git add in a plain directory
+    lead._check_open(team)  # the lead can still be asked for more
+
+    (repo / "app.py").write_text("print('v1.1')\n")
+    _git(repo, "commit", "-qam", "meanwhile on main")
+    projects.revive(slug, team)
+    team = pkg.common.read_team(slug)
+    assert _git(ws, "rev-parse", "--abbrev-ref", "HEAD") == f"halo/{slug}"
+    assert team["project"]["base_sha"] == _git(repo, "rev-parse", "main")  # from main as it is now
+    assert team["project"]["auto_cleaned"] is False and not team["project"]["discarded_at"]
+    assert os.path.isfile(os.path.join(ws, ".halo", "images", "result-1.png"))
+    assert projects.changes(team)["available"] is True and projects.changes(team)["files"] == []
+
+
+def test_a_team_with_changes_or_leftovers_keeps_its_branch(pkg, team_id, plan_dict, repo):
+    import halowebui_teams.projects as projects
+
+    _create(pkg, team_id, plan_dict, repo)
+    slug = pkg.common.board_slug(team_id)
+    ws = pkg.common.read_team(slug)["workspace"]
+    (repo / ".gitignore").write_text("out/\n")
+    os.makedirs(os.path.join(ws, "out"), exist_ok=True)
+    open(os.path.join(ws, "out", "report.md"), "w").write("被忽略但有用")
+    _complete(pkg, slug)
+    open(os.path.join(ws, ".gitignore"), "w").write("out/\n")
+    _git(ws, "add", ".gitignore")
+    _git(ws, "-c", "user.email=m@x", "-c", "user.name=m", "commit", "-qm", "ignore out")
+    assert projects.clean_if_empty(slug, pkg.common.read_team(slug)) is False
+    assert _git(repo, "branch", "--list", f"halo/{slug}")
+    assert pkg.common.read_team(slug)["project"]["clean_checked"] == 100  # not looked at again for this version
+    _git(ws, "reset", "-q", "--hard", "HEAD~1")
+    _complete(pkg, slug, generated_at=200)
+    assert projects.clean_if_empty(slug, pkg.common.read_team(slug)) is False  # out/ is untracked now: kept
+    assert _git(repo, "branch", "--list", f"halo/{slug}")
+
+
+def test_a_question_about_a_project_ends_without_a_branch_and_more_work_brings_it_back(pkg, team_id, plan_dict, repo,
+                                                                                       monkeypatch, tmp_path):
+    """The real case: 「X 在我的 myapp 里适合吗」 picks the project, the members only read it."""
+    import json
+
+    import halowebui_teams.illustrate as illustrate
+    import halowebui_teams.lead as lead
+    import halowebui_teams.projects as projects
+    from test_lead import Lead
+
+    fake = Lead()
+    monkeypatch.setattr(pkg.plan, "call_model", fake)
+    first = _create(pkg, team_id, plan_dict, repo)
+    slug = pkg.common.board_slug(team_id)
+    ws = pkg.common.read_team(slug)["workspace"]
+    for key in ("T1", "T2", "T3"):
+        _finish(pkg, slug, first["tasks"][key])
+    assert pkg.teams.snapshot(team_id, "u1")["team"]["phase"] == "completed"  # conclusion + acceptance (sync)
+
+    drawn = tmp_path / "drawn.png"
+    drawn.write_bytes(b"\x89PNG\r\n\x1a\n" + b"9" * 32)
+    monkeypatch.setattr(illustrate, "generate_image", lambda args: json.dumps({"success": True, "image": str(drawn)}))
+    entry = illustrate.start(slug, None)
+    assert entry["path"] == ".halo/images/result-1.png"  # the picture is the team's, not a change to the project
+    assert projects.changes(pkg.common.read_team(slug))["files"] == []
+
+    assert projects.clean_if_empty(slug, pkg.common.read_team(slug)) is True
+    assert not _git(repo, "branch", "--list", "halo/*") and str(ws) not in _git(repo, "worktree", "list")
+    assert os.path.isfile(os.path.join(ws, ".halo", "images", "result-1.png"))
+
+    fake.change.append({"reply": "那就接进来", "add_tasks": [
+        {"key": "N1", "title": "接入", "description": "在 app.py 里接入", "member": "reviewer", "depends_on": []}]})
+    change = lead.request_change(team_id, "那就接进 myapp 吧", owner="u1", actor="Ace")
+    assert lead.apply_change(team_id, change["id"], owner="u1")["reopened"] is True
+    team = pkg.common.read_team(slug)
+    assert team["state"] == "running" and team["project"]["auto_cleaned"] is False
+    assert _git(ws, "rev-parse", "--abbrev-ref", "HEAD") == f"halo/{slug}"
+    assert pkg.teams.snapshot(team_id, "u1")["team"]["project_cleaned"] is False

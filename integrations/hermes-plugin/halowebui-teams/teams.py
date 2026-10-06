@@ -611,6 +611,8 @@ def snapshot(team_id: str, owner: Optional[str] = None) -> dict:
             "conclusion": _conclusion_brief(team),
             "round": int(team.get("round") or 0),
             "stage": stage_data,
+            # a project team that changed nothing: its branch is gone, there are no changes to show
+            "project_cleaned": bool((team.get("project") or {}).get("auto_cleaned")),
             **_lead_state(team),
         },
         "members": members,

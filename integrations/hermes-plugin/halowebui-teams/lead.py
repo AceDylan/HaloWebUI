@@ -310,7 +310,8 @@ def _check_open(team: dict) -> None:
 
     if team.get("state") == "stopped":
         raise TeamError(409, "协作任务已停止，不能再调整")
-    if (team.get("project") or {}).get("discarded_at"):
+    project = team.get("project") or {}
+    if project.get("discarded_at") and not project.get("auto_cleaned"):  # an empty, cleaned-up one comes back
         raise TeamError(409, "团队分支已经放弃，不能再追加工作")
 
 
@@ -617,6 +618,14 @@ def apply_change(team_id: str, change_id: str, *, owner: Optional[str] = None, a
                 skipped.append(f"{item['key']} 已经{STATE_WORD.get(sub, sub or '变了')}")
         if skipped:
             raise TeamError(409, "计划在这期间变了：" + "；".join(skipped) + "。再对负责人说一次，让它按现在的状态重新提")
+        if (team.get("project") or {}).get("auto_cleaned"):
+            from . import projects
+
+            try:  # the team changed nothing before and its branch was cleaned up: it gets it back
+                projects.revive(slug, team)
+            except projects.ProjectError as exc:
+                raise TeamError(exc.status, "没能重建团队分支：" + exc.message) from None
+            team = read_team(slug) or team
         new_members = [dict(m) for m in proposal.get("add_members") or []]
         if new_members:
             assign_runners(new_members)

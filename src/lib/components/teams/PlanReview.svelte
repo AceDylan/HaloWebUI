@@ -211,7 +211,8 @@
 				<p class="text-xs leading-relaxed text-gray-500 dark:text-gray-400">
 					批准后团队从 <span class="font-mono">{plan.project.branch || 'HEAD'}</span>
 					{plan.project.head ? `（${plan.project.head}）` : ''}开一个自己的分支，在独立的 worktree
-					里改，不碰你正在用的工作区；每个任务完成自动提交。结束后在「变更」里看差异，合并、推送都由你来点。{#if plan.project.dirty}<span
+					里改，不碰你正在用的工作区；每个任务完成自动提交。结束后在「变更」里看差异，合并、推送都由你来点。{#if plan.project.auto}
+						只是提问、做分析也可以留在项目里（成员能读到代码）；团队结束时如果没有改动任何文件，分支会自动清理。{/if}{#if plan.project.dirty}<span
 							class="text-amber-700 dark:text-amber-300"
 						>
 							你的工作区现在有未提交的改动：不影响团队，合并前需要先提交。</span

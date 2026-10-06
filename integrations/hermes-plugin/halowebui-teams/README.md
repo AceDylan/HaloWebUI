@@ -96,7 +96,12 @@ is the Hermes side. It adds no service, port or second task store:
   every finished task is committed there (`[T2 · member] title`), the conclusion lists the
   changed files and the change set, and merge into the base branch / push / discard are explicit
   user actions (`/changes/*`). Nothing pushes on its own; a merge needs a clean checkout of the
-  base branch (fast-forward, else a merge commit, a conflict is aborted and reported).
+  base branch (fast-forward, else a merge commit, a conflict is aborted and reported; untracked
+  files the merge would overwrite are named up front). "Merged" is what git says, so new work after
+  a merge can be merged and pushed again. A team that finished without changing anything (no
+  commit, no file, not even an ignored one) has its branch and worktree cleaned up by the bridge
+  loop once the conclusion and acceptance are done; new work for it starts the branch again from
+  the base branch's tip. The conclusion's picture goes to `.halo/images/` in a worktree.
 * **Telegram** (`tg.py`, `notify.py`, `link.py`): `/team <目标>` starts a team from Telegram
   (HaloWebUI creates and plans it through its `/api/v1/teams/hermes/*` routes; the plan card comes
   back with 批准 / 取消 buttons, a reply re-plans), `/team` lists recent teams; the bridge loop sends

@@ -80,8 +80,11 @@
 	let selectedMember: string | null = null;
 	let mobileTab: 'tasks' | 'members' | 'feed' | 'conclusion' | 'changes' = 'tasks';
 	let asideTab: 'feed' | 'conclusion' | 'changes' = 'feed';
-	// A team working on a git project has a 变更 tab (its branch, commits, diff, merge / push).
-	$: projectTeam = !!team?.plan?.project;
+	// A team working on a git project has a 变更 tab (its branch, commits, diff, merge / push) —
+	// unless it changed nothing and its branch was cleaned up.
+	$: projectTeam = !!team?.plan?.project && !live?.team.project_cleaned;
+	$: if (!projectTeam && asideTab === 'changes') asideTab = 'feed';
+	$: if (!projectTeam && mobileTab === 'changes') mobileTab = 'tasks';
 	let asideTouched = false;
 	let busy = false;
 	let showStop = false;

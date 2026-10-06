@@ -88,10 +88,10 @@ def _as_dict(value: Any) -> dict:
     return {}
 
 
-def keep_image(workspace: str, key: str, args: Any, result: Any, *, who: str = "") -> str:
+def keep_image(workspace: str, key: str, args: Any, result: Any, *, who: str = "", folder: str = IMAGES_DIR) -> str:
     """Copy a generated image (``image_generate``'s result) out of Hermes' media cache into
-    ``<workspace>/images/<key>-<n>.<ext>`` with its prompt next to it (``.prompt.md``). Returns the
-    path relative to the workspace, or "" when there is nothing to keep."""
+    ``<workspace>/<folder>/<key>-<n>.<ext>`` (``images/`` by default) with its prompt next to it
+    (``.prompt.md``). Returns the path relative to the workspace, or "" when there is nothing to keep."""
     data = _as_dict(result)
     source = str(data.get("image") or data.get("path") or "")
     if data.get("success") is False or not source or source.startswith(("http://", "https://", "data:")):
@@ -101,7 +101,8 @@ def keep_image(workspace: str, key: str, args: Any, result: Any, *, who: str = "
         return ""
     if not workspace or not Path(workspace).is_dir():
         return ""
-    folder = Path(workspace) / IMAGES_DIR
+    rel_folder = folder
+    folder = Path(workspace) / rel_folder
     folder.mkdir(parents=True, exist_ok=True)
     n = 1
     while any((folder / f"{key}-{n}{ext}").exists() for ext in IMAGE_SUFFIXES):
@@ -118,7 +119,7 @@ def keep_image(workspace: str, key: str, args: Any, result: Any, *, who: str = "
     dest.with_suffix(".prompt.md").write_text(
         f"# {dest.name} 的生图提示词\n\n" + "\n".join(facts) + "\n\n## 提示词\n\n````\n"
         + redact(prompt, 20000, one_line=False) + "\n````\n", encoding="utf-8")
-    return f"{IMAGES_DIR}/{dest.name}"
+    return f"{rel_folder}/{dest.name}"
 
 
 def save_image(board: str, task: str, args: Any, result: Any) -> str:

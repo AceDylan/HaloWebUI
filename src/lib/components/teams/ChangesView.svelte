@@ -153,10 +153,16 @@
 				{#if project.discarded_at}
 					<span
 						class="rounded-full bg-gray-100 px-2 py-0.5 text-[11px] text-gray-500 dark:bg-gray-800"
-						>分支已删除</span
+						data-changes-discarded>{project.auto_cleaned ? '没有改动，分支已自动清理' : '分支已删除'}</span
 					>
 				{/if}
 			</div>
+			{#if project.auto_cleaned}
+				<p class="text-xs text-gray-500">
+					团队没有改动项目里的任何文件，团队分支和 worktree 已经自动删掉；结论保留。再对负责人追加工作，会从
+					{project.base_branch || '原来的提交'} 重新开一个分支。
+				</p>
+			{/if}
 			{#if data.available}
 				<div
 					class="tm-num flex flex-wrap items-baseline gap-x-4 gap-y-1 text-sm"

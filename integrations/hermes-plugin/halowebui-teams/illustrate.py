@@ -171,7 +171,10 @@ def _run(slug: str, template: Optional[dict]) -> None:
         _set(slug, step="draw", template=template_name)
         raw = generate_image(args)
         data = hooks._as_dict(raw)
-        rel = hooks.keep_image(team.get("workspace") or "", "result", args, data, who=f"结论配图（模板：{template_name}）")
+        # In a project's worktree the picture is the team's own, not a change to the project: .halo/images
+        folder = ".halo/images" if (team.get("project") or {}).get("branch") else hooks.IMAGES_DIR
+        rel = hooks.keep_image(team.get("workspace") or "", "result", args, data, who=f"结论配图（模板：{template_name}）",
+                               folder=folder)
         if not rel:
             error = data.get("error") or data.get("message") or "生图没有返回图片"
             _set(slug, status="failed", error=redact(f"生图失败：{error}", 300), at=now())

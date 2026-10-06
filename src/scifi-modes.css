@@ -1,5 +1,5 @@
 /* =====================================================================================
-   Halo sci-fi layer, part two: the mode pages — 讨论台 (/discuss), 协作台 (/teams) and the
+   Halo sci-fi layer, part two: the mode pages — 精答 (/answer), 讨论台 (/discuss), 协作台 (/teams) and the
    生图工作台 (/workspace/images). Same switch as scifi.css (html.halo-scifi), same idea:
    the shell, the headers and the moments of work carry the show; text stays calm.
 
@@ -261,6 +261,34 @@ html.halo-scifi .halo-mode-hero::after {
 		filter: drop-shadow(0 0 6px hsl(var(--h) 90% 66%));
 	}
 }
+/* answer: a beam sweeps the ring of assistants, the one it reaches lights up */
+.halo-emblem__beam {
+	stroke-width: 2;
+	stroke-linecap: round;
+	filter: drop-shadow(0 0 4px var(--scifi-cyan));
+	animation: scifi-rot 6s linear infinite;
+}
+.halo-emblem__pick {
+	fill: var(--sf-fill);
+	stroke: hsl(var(--h) 90% 66% / 0.7);
+	stroke-width: 1.2;
+	animation: sf-pick 6s ease-in-out infinite;
+	animation-delay: var(--d, 0s);
+}
+@keyframes sf-pick {
+	0%,
+	20%,
+	100% {
+		fill: var(--sf-fill);
+		stroke-width: 1.2;
+		filter: none;
+	}
+	4% {
+		fill: hsl(var(--h) 90% 66% / 0.5);
+		stroke-width: 2.4;
+		filter: drop-shadow(0 0 7px hsl(var(--h) 90% 66%));
+	}
+}
 /* teams: the lead hands work along the graph to the goal */
 .halo-emblem__lead {
 	fill: var(--sf-fill);
@@ -345,6 +373,7 @@ html.halo-scifi .halo-mode-hero::after {
 html.halo-scifi
 	:is(
 		[data-discuss-row],
+		[data-answer-row],
 		[data-team-row],
 		[data-teams-ui] .tm-card-quiet.tm-hover,
 		.dc-turn,
@@ -395,6 +424,7 @@ html.halo-scifi :is(.dc-turn, #team-inspector, [data-halo-mode] .glass-item:not(
 html.halo-scifi
 	:is(
 		[data-discuss-row],
+		[data-answer-row],
 		[data-team-row],
 		[data-teams-ui] .tm-card-quiet.tm-hover,
 		.dc-turn,
@@ -404,7 +434,7 @@ html.halo-scifi
 	--sf-k: 12px;
 	--sf-spot: var(--sf-spot-on);
 }
-html.halo-scifi :is([data-discuss-row], [data-team-row], [data-teams-ui] .tm-card-quiet.tm-hover):hover {
+html.halo-scifi :is([data-discuss-row], [data-answer-row], [data-team-row], [data-teams-ui] .tm-card-quiet.tm-hover):hover {
 	border-color: hsl(var(--tm-accent) / 0.35);
 	box-shadow:
 		0 0 0 1px hsl(var(--tm-accent) / 0.12),

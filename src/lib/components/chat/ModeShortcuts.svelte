@@ -9,6 +9,7 @@
 	export let files: any[] = [];
 
 	$: modes = [
+		{ to: 'answer' as const, icon: 'answer', label: '精答', title: '按问题挑最合适的助手来答', show: true },
 		{ to: 'discuss' as const, icon: 'discuss', label: '多模型讨论', title: '几个模型讨论，主持人给结论', show: true },
 		{
 			to: 'teams' as const,
@@ -28,7 +29,7 @@
 		}
 	].filter((m) => m.show);
 
-	const go = (to: 'discuss' | 'teams' | 'studio') => {
+	const go = (to: 'answer' | 'discuss' | 'teams' | 'studio') => {
 		handOff(typeof sessionStorage === 'undefined' ? null : sessionStorage, chatHandoff(to, { text: prompt, files }));
 		goto(HANDOFF_PATH[to]);
 	};

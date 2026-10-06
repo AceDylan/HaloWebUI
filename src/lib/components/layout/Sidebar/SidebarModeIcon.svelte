@@ -1,10 +1,14 @@
 <script lang="ts">
-	/** Icons of the chat's modes (讨论 / 协作 / 生图), the same everywhere they appear. */
-	export let mode: 'discuss' | 'teams' | 'studio' | string;
+	/** Icons of the chat's modes (精答 / 讨论 / 协作 / 生图), the same everywhere they appear. */
+	export let mode: 'answer' | 'discuss' | 'teams' | 'studio' | string;
 	export let className = 'size-5';
 </script>
 
-{#if mode === 'discuss'}
+{#if mode === 'answer'}
+	<svg class={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+		><circle cx="11" cy="13" r="8" /><circle cx="11" cy="13" r="3.5" /><path d="m11 13 9-9" /><path d="M16.5 4H20v3.5" /></svg
+	>
+{:else if mode === 'discuss'}
 	<svg class={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
 		><path d="M14 9a2 2 0 0 1-2 2H6l-4 4V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2z" /><path d="M18 9h2a2 2 0 0 1 2 2v11l-4-4h-6a2 2 0 0 1-2-2v-1" /></svg
 	>

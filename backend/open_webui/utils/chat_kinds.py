@@ -1,6 +1,6 @@
-"""What kind of work a chat in the sidebar list is: a 讨论台 discussion, a chat a 协作台 team
-works for, or a chat that made images. The list marks them so the chat, its discussions, its
-teams and its images read as one list (instead of four separate places)."""
+"""What kind of work a chat in the sidebar list is: a 讨论台 discussion, a 精答 answer, a chat a
+协作台 team works for, or a chat that made images. The list marks them so the chat and its modes
+read as one list (instead of separate places)."""
 
 import logging
 from typing import Iterable
@@ -16,8 +16,9 @@ IMAGE_SCAN_LIMIT = 800
 
 
 def chat_kinds(user_id: str, chat_ids: Iterable[str]) -> dict[str, str]:
-    """``{chat_id: 'discuss' | 'team' | 'image'}`` for the given chats (others are plain chats).
-    A discussion wins over a team, a team over images. Never raises: no marks on failure."""
+    """``{chat_id: 'discuss' | 'answer' | 'team' | 'image'}`` for the given chats (others are plain
+    chats). A discussion wins over an answer, an answer over a team, a team over images. Never
+    raises: no marks on failure."""
     ids = [chat_id for chat_id in dict.fromkeys(chat_ids) if chat_id]
     if not ids:
         return {}
@@ -51,6 +52,16 @@ def chat_kinds(user_id: str, chat_ids: Iterable[str]) -> dict[str, str]:
             ):
                 if chat_id:
                     kinds[chat_id] = "team"
+            for (chat_id,) in (
+                db.query(Chat.id)
+                .filter(
+                    Chat.user_id == user_id,
+                    Chat.id.in_(ids),
+                    cast(Chat.meta, String).like('%"answer_desk"%'),
+                )
+                .all()
+            ):
+                kinds[chat_id] = "answer"
             for (chat_id,) in (
                 db.query(Chat.id)
                 .filter(

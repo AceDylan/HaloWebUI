@@ -1,10 +1,10 @@
-// Carrying work between the chat and its modes — 讨论台 (/discuss), 协作台 (/teams), the image
-// studio and back to a chat — so nobody types the question twice. The page handing off writes one
+// Carrying work between the chat and its modes — 精答 (/answer), 讨论台 (/discuss), 协作台 (/teams),
+// the image studio and back to a chat — so nobody types the question twice. The page handing off writes one
 // entry to sessionStorage and navigates; the page it goes to takes it once (it is removed either
 // way) and shows where it came from with a way back. Only file ids already on this server travel.
 
-export type HandoffTarget = 'discuss' | 'teams' | 'chat' | 'studio';
-export type HandoffOriginKind = 'chat' | 'discuss' | 'team' | 'studio';
+export type HandoffTarget = 'answer' | 'discuss' | 'teams' | 'chat' | 'studio';
+export type HandoffOriginKind = 'chat' | 'answer' | 'discuss' | 'team' | 'studio';
 
 /** Where the work came from: shown as 「来自对话「标题」」 with a link back. */
 export type HandoffOrigin = { kind: HandoffOriginKind; id: string; title: string };
@@ -30,8 +30,8 @@ export const HANDOFF_CONTEXT_MAX = 12000;
 const MAX_FILES = 4;
 const MAX_MODELS = 5;
 const ID = /^[A-Za-z0-9_-]{1,128}$/;
-const TARGETS: HandoffTarget[] = ['discuss', 'teams', 'chat', 'studio'];
-const KINDS: HandoffOriginKind[] = ['chat', 'discuss', 'team', 'studio'];
+const TARGETS: HandoffTarget[] = ['answer', 'discuss', 'teams', 'chat', 'studio'];
+const KINDS: HandoffOriginKind[] = ['chat', 'answer', 'discuss', 'team', 'studio'];
 
 type Store = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
 
@@ -107,6 +107,7 @@ export const takeHandoff = (
 
 const KIND_LABEL: Record<HandoffOriginKind, string> = {
 	chat: '对话',
+	answer: '精答',
 	discuss: '讨论',
 	team: '协作',
 	studio: '生图工作台'
@@ -120,11 +121,13 @@ export const originLabel = (from: HandoffOrigin): string =>
 export const originHref = (from: HandoffOrigin): string =>
 	from.kind === 'discuss'
 		? `/discuss/${from.id}`
-		: from.kind === 'team'
-			? `/teams/${from.id}`
-			: from.kind === 'studio'
-				? '/workspace/images?tab=workbench'
-				: `/c/${from.id}`;
+		: from.kind === 'answer'
+			? `/answer/${from.id}`
+			: from.kind === 'team'
+				? `/teams/${from.id}`
+				: from.kind === 'studio'
+					? '/workspace/images?tab=workbench'
+					: `/c/${from.id}`;
 
 type HistoryMessage = { id?: string; parentId?: string | null; role?: string; content?: unknown; model?: string };
 type ChatHistory = { currentId?: string | null; messages?: Record<string, HistoryMessage> };
@@ -176,6 +179,7 @@ export const conversationContext = (history: ChatHistory | null | undefined, max
 
 /** Where each kind of handoff goes. */
 export const HANDOFF_PATH: Record<HandoffTarget, string> = {
+	answer: '/answer',
 	discuss: '/discuss',
 	teams: '/teams',
 	chat: '/',

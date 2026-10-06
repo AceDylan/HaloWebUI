@@ -175,8 +175,8 @@
 	export let onCancelImageGenerationReference: (() => void) | null = null;
 
 	// 「交给…」 in the + menu: the draft, its attachments and (in a chat with messages) the
-	// conversation go to 讨论台 / 协作台 / the image studio, which show a way back here.
-	const handOffDraft = (to: 'discuss' | 'teams' | 'studio') => {
+	// conversation go to 精答 / 讨论台 / 协作台 / the image studio, which show a way back here.
+	const handOffDraft = (to: 'answer' | 'discuss' | 'teams' | 'studio') => {
 		handOff(
 			typeof sessionStorage === 'undefined' ? null : sessionStorage,
 			chatHandoff(to, { text: prompt, files, history, chatId: $chatId, title: $chatTitle })

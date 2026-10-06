@@ -7,7 +7,7 @@
 	import SidebarModeIcon from './SidebarModeIcon.svelte';
 
 	/**
-	 * The chat's modes, next to 新对话: 讨论 (讨论台), 协作 (协作台), 生图 (the image studio). One row of
+	 * The chat's modes, next to 新对话: 精答, 讨论 (讨论台), 协作 (协作台), 生图 (the image studio). One row of
 	 * equal tiles in the open sidebar, a column of icons in the collapsed one.
 	 */
 	export let compact = false;
@@ -19,6 +19,14 @@
 		!!$config?.features?.enable_image_generation &&
 		($user?.role === 'admin' || !!$user?.permissions?.features?.image_generation);
 	$: modes = [
+		{
+			key: 'answer',
+			href: '/answer',
+			label: '精答',
+			title: '精答：按问题挑选、升级或新建最合适的助手来回答',
+			active: path.startsWith('/answer'),
+			show: true
+		},
 		{
 			key: 'discuss',
 			href: '/discuss',
@@ -79,6 +87,7 @@
 				draggable="false"
 				on:click={onNavigate}
 				data-sidebar-mode={mode.key}
+				data-sidebar-answer={mode.key === 'answer' ? '' : undefined}
 				data-sidebar-discuss={mode.key === 'discuss' ? '' : undefined}
 				data-sidebar-teams={mode.key === 'teams' ? '' : undefined}
 				data-sidebar-studio={mode.key === 'studio' ? '' : undefined}

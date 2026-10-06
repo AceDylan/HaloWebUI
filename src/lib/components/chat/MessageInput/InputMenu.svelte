@@ -28,6 +28,7 @@
 	} from 'lucide-svelte';
 	import GoogleDrive from '$lib/components/icons/GoogleDrive.svelte';
 	import OneDrive from '$lib/components/icons/OneDrive.svelte';
+	import SidebarModeIcon from '$lib/components/layout/Sidebar/SidebarModeIcon.svelte';
 
 	const i18n = getContext('i18n');
 	const tr = (zh: string, en: string, options: Record<string, any> = {}) =>
@@ -56,7 +57,7 @@
 
 	export let onClose: Function;
 	/** 「交给…」: hands the draft (and the conversation) to 讨论台 / 协作台 / the image studio. */
-	export let onHandoff: ((to: 'discuss' | 'teams' | 'studio') => void) | null = null;
+	export let onHandoff: ((to: 'answer' | 'discuss' | 'teams' | 'studio') => void) | null = null;
 	$: teamsEnabled = !!$config?.features?.enable_agent_teams;
 	$: studioEnabled =
 		!!$config?.features?.enable_image_generation &&
@@ -564,6 +565,19 @@
 				<div class="px-3 pt-1 pb-0.5 text-2xs font-medium text-gray-400 dark:text-gray-500">
 					{tr('交给…（带上这句话）', 'Hand to… (with this draft)')}
 				</div>
+				<DropdownMenu.Item
+					class="flex gap-2 items-center px-3 py-2 text-sm font-medium cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl"
+					data-halo-input-handoff="answer"
+					on:click={() => onHandoff?.('answer')}
+				>
+					<span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-gray-100 text-gray-600 dark:bg-gray-700/60 dark:text-gray-300">
+						<SidebarModeIcon mode="answer" className="size-4" />
+					</span>
+					<div class="min-w-0">
+						<div class="truncate">{tr('精答', 'Precise answer')}</div>
+						<div class="truncate text-xs font-normal text-gray-500 dark:text-gray-400">{tr('按问题挑最合适的助手来答', 'The right assistant answers')}</div>
+					</div>
+				</DropdownMenu.Item>
 				<DropdownMenu.Item
 					class="flex gap-2 items-center px-3 py-2 text-sm font-medium cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl"
 					data-halo-input-handoff="discuss"

@@ -287,6 +287,8 @@ describe('requestHubReauth', () => {
 		expect(hubReturnPath('/workspace')).toBe('/');
 		// a 讨论台 room comes back through its chat address (which opens the room)
 		expect(hubReturnPath('/discuss/0b5e-42')).toBe('/c/0b5e-42');
+		expect(hubReturnPath('/answer/0b5e-42')).toBe('/c/0b5e-42');
+		expect(hubReturnPath('/answer')).toBe('/');
 		expect(hubReturnPath('/discuss')).toBe('/');
 		expect(hubReturnPath('/discuss/../x')).toBe('/');
 		expect(hubReturnPath(undefined)).toBe('/');

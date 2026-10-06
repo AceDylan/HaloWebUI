@@ -132,3 +132,22 @@ describe('chatHandoff / replyHandoff / goalWithBackground', () => {
 		expect(long).toContain('…x');
 	});
 });
+
+describe('精答', () => {
+	it('takes a draft with its conversation, and an answer hands on with a way back to it', () => {
+		const store = memory();
+		const history = {
+			currentId: 'b',
+			messages: { a: { id: 'a', parentId: null, role: 'user', content: '我在北京租房' }, b: { id: 'b', parentId: 'a', role: 'assistant', content: '好的' } }
+		};
+		expect(handOff(store, chatHandoff('answer', { text: '押金多久退？', history, chatId: 'c-1', title: '租房' }), 1000)).toBe(true);
+		expect(takeHandoff(store, 'discuss', 1000)).toBeNull();
+		const taken = takeHandoff(store, 'answer', 1000)!;
+		expect(taken.text).toBe('押金多久退？');
+		expect(taken.context).toContain('我在北京租房');
+		expect(taken.from).toEqual({ kind: 'chat', id: 'c-1', title: '租房' });
+		const from = { kind: 'answer' as const, id: 'r-1', title: '押金' };
+		expect(originHref(from)).toBe('/answer/r-1');
+		expect(originLabel(from)).toBe('精答「押金」');
+	});
+});

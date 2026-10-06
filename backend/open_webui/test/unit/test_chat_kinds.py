@@ -69,3 +69,15 @@ def test_no_marks_when_the_lookup_fails(monkeypatch):
 
     monkeypatch.setattr(mod, "get_db", broken)
     assert mod.chat_kinds("u1", ["a"]) == {}
+
+
+def test_marks_answer_desk_chats_below_discussions(monkeypatch):
+    session = _db(monkeypatch)
+    with session() as db:
+        _chat(db, "ask", meta={"answer_desk": {"status": "done"}})
+        _chat(db, "ask_team", meta={"answer_desk": {}})
+        _chat(db, "odd", meta={"answer_desk": {}, "discussion_room": {}})
+        db.add(AgentTeam(id="t1", user_id="u1", chat_id="ask_team", title="t", goal="g", status="done", phase="done", created_at=1, updated_at=1))
+        db.commit()
+
+    assert mod.chat_kinds("u1", ["ask", "ask_team", "odd"]) == {"ask": "answer", "ask_team": "answer", "odd": "discuss"}

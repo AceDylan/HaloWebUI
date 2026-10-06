@@ -1,0 +1,209 @@
+/*
+ * 精答工作台 visual language, on top of the 协作台 and 讨论台 ones (teams.css, discuss.css: the
+ * page carries `data-teams-ui` and `data-discuss-ui` too). Scoped by an `ad-` prefix.
+ *
+ * Signature: the relay. A question passes along a short line of steps — 理解问题 → 助手 →
+ * 查资料 → 作答 — and the step at work wears the halo's sweep while the line behind it fills in.
+ * The assistant is introduced on its own card (kept, upgraded or new) before it speaks; the
+ * answer then wears the discussion conclusion's halo frame (.dc-conclusion).
+ */
+
+[data-answer-ui] {
+	--ad-new: var(--tm-violet);
+	--ad-up: var(--tm-accent-2);
+}
+
+/* --- the relay -------------------------------------------------------------------------------- */
+.ad-pipe {
+	display: grid;
+	grid-template-columns: repeat(var(--ad-steps, 3), minmax(0, 1fr));
+}
+.ad-step {
+	position: relative;
+	display: flex;
+	min-width: 0;
+	flex-direction: column;
+	gap: 0.4rem;
+	padding-right: 0.75rem;
+}
+.ad-step::after {
+	content: '';
+	position: absolute;
+	top: calc(0.625rem - 1px);
+	left: 1.75rem;
+	right: 0.5rem;
+	height: 2px;
+	border-radius: 2px;
+	background: hsl(var(--tm-line-strong));
+	transition: background 0.5s var(--tm-ease);
+}
+.ad-step:last-child::after {
+	display: none;
+}
+.ad-step[data-state='done']::after {
+	background: linear-gradient(90deg, hsl(var(--tm-accent) / 0.75), hsl(var(--tm-accent-2) / 0.55));
+}
+.ad-step[data-state='active']::after {
+	background: linear-gradient(
+		90deg,
+		hsl(var(--tm-accent) / 0.1) 0%,
+		hsl(var(--tm-accent) / 0.8) 30%,
+		hsl(var(--tm-accent) / 0.1) 60%
+	);
+	background-size: 220% 100%;
+	animation: ad-relay 1.6s linear infinite;
+}
+@keyframes ad-relay {
+	from {
+		background-position: 110% 0;
+	}
+	to {
+		background-position: -110% 0;
+	}
+}
+.ad-dot {
+	position: relative;
+	z-index: 1;
+	display: grid;
+	width: 1.25rem;
+	height: 1.25rem;
+	flex: none;
+	place-items: center;
+	border-radius: 9999px;
+	background: hsl(var(--tm-surface));
+	box-shadow: inset 0 0 0 1.5px hsl(var(--tm-line-strong));
+	color: hsl(var(--tm-muted));
+	transition:
+		background 0.35s var(--tm-ease),
+		box-shadow 0.35s var(--tm-ease);
+}
+.ad-step[data-state='done'] .ad-dot {
+	background: hsl(var(--tm-accent));
+	box-shadow: 0 0 0 3px hsl(var(--tm-accent) / 0.12);
+	color: #fff;
+	animation: ad-pop 0.45s var(--tm-ease);
+}
+@keyframes ad-pop {
+	from {
+		transform: scale(0.6);
+	}
+}
+.ad-step[data-state='active'] .ad-dot {
+	box-shadow: inset 0 0 0 1.5px hsl(var(--tm-accent) / 0.35);
+	color: hsl(var(--tm-accent));
+}
+.ad-step[data-state='active'] .ad-dot::before {
+	content: '';
+	position: absolute;
+	inset: -3px;
+	border-radius: inherit;
+	background: conic-gradient(from var(--dc-angle), transparent 0deg, hsl(var(--tm-accent) / 0.15) 120deg, hsl(var(--tm-accent)) 340deg, transparent 360deg);
+	-webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 1.5px));
+	mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 1.5px));
+	animation: dc-spin 1.2s linear infinite;
+}
+.ad-step[data-state='error'] .ad-dot {
+	background: hsl(var(--tm-bad));
+	box-shadow: none;
+	color: #fff;
+}
+.ad-step:is([data-state='stopped'], [data-state='skipped']) .ad-dot {
+	box-shadow: inset 0 0 0 1.5px hsl(var(--tm-line-strong));
+	background: repeating-conic-gradient(hsl(var(--tm-line-strong)) 0 18deg, hsl(var(--tm-surface)) 18deg 30deg);
+}
+.ad-step:is([data-state='waiting'], [data-state='skipped']) .ad-step-label {
+	color: hsl(var(--tm-muted));
+}
+
+/* --- the assistant ------------------------------------------------------------------------------ */
+.ad-assistant {
+	position: relative;
+	overflow: hidden;
+	border-radius: 1.125rem;
+	border: 1px solid hsl(var(--tm-line));
+	background: hsl(var(--tm-surface));
+	box-shadow: var(--tm-shadow);
+	animation: ad-arrive 0.6s var(--tm-ease) both;
+}
+.ad-assistant::before {
+	content: '';
+	position: absolute;
+	inset: 0 auto 0 0;
+	width: 3px;
+	background: hsl(var(--ad-tone, var(--tm-line-strong)));
+}
+.ad-assistant[data-action='create'] {
+	--ad-tone: var(--ad-new);
+}
+.ad-assistant[data-action='update'] {
+	--ad-tone: var(--ad-up);
+}
+.ad-assistant[data-action='use'] {
+	--ad-tone: var(--tm-accent);
+}
+.ad-assistant[data-action='temporary'] {
+	--ad-tone: var(--tm-warn);
+}
+@keyframes ad-arrive {
+	from {
+		opacity: 0;
+		transform: translateY(8px) scale(0.985);
+		filter: blur(3px);
+	}
+}
+.ad-badge {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.25rem;
+	border-radius: 9999px;
+	padding: 0.1rem 0.5rem;
+	font-size: 11px;
+	font-weight: 600;
+	color: hsl(var(--ad-tone, var(--tm-muted)));
+	background: hsl(var(--ad-tone, var(--tm-muted)) / 0.1);
+}
+.ad-avatar {
+	display: inline-grid;
+	flex: none;
+	place-items: center;
+	overflow: hidden;
+	border-radius: 9999px;
+	background: hsl(var(--ad-hue, 226) 72% 90%);
+	line-height: 1;
+}
+:is(.dark [data-answer-ui]) .ad-avatar {
+	background: hsl(var(--ad-hue, 226) 40% 22%);
+}
+.ad-prompt {
+	max-height: 18rem;
+	overflow-y: auto;
+	white-space: pre-wrap;
+	border-radius: 0.875rem;
+	border: 1px solid hsl(var(--tm-line));
+	background: hsl(var(--tm-surface-2));
+	padding: 0.75rem 0.9rem;
+	font-size: 12.5px;
+	line-height: 1.7;
+}
+
+/* --- library strip on the home page --------------------------------------------------------- */
+.ad-lib-chip {
+	display: inline-flex;
+	max-width: 15rem;
+	align-items: center;
+	gap: 0.45rem;
+	border-radius: 9999px;
+	border: 1px solid hsl(var(--tm-line));
+	background: hsl(var(--tm-surface));
+	padding: 0.2rem 0.7rem 0.2rem 0.25rem;
+	font-size: 12px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.ad-step[data-state='active']::after,
+	.ad-step[data-state='active'] .ad-dot::before,
+	.ad-assistant,
+	.ad-step[data-state='done'] .ad-dot {
+		animation: none;
+	}
+}

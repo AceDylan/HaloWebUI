@@ -52,11 +52,14 @@ describe('ModeShortcuts', () => {
 			files: [{ id: 'f1', name: 'dog.png', type: 'image', status: 'uploaded' }]
 		});
 		expect(target.textContent).toContain('把这句话交给');
-		expect(target.querySelectorAll('[data-halo-mode-shortcut]').length).toBe(3);
+		expect(target.querySelectorAll('[data-halo-mode-shortcut]').length).toBe(4);
 		(target.querySelector('[data-halo-mode-shortcut="studio"]') as any).click();
 		expect(nav.goto).toHaveBeenCalledWith('/workspace/images?tab=workbench');
 		const entry = JSON.parse(sessionStorage.getItem('halo.handoff')!);
 		expect(entry).toMatchObject({ to: 'studio', text: '画一只柴犬', files: [{ id: 'f1', name: 'dog.png', type: 'image' }], from: null });
+		(target.querySelector('[data-halo-mode-shortcut="answer"]') as any).click();
+		expect(nav.goto).toHaveBeenLastCalledWith('/answer');
+		expect(JSON.parse(sessionStorage.getItem('halo.handoff')!)).toMatchObject({ to: 'answer', text: '画一只柴犬' });
 	});
 
 	it('offers only what the account may use', async () => {
@@ -64,19 +67,20 @@ describe('ModeShortcuts', () => {
 		stores.user.set({ id: 'u2', role: 'user', permissions: { features: { image_generation: false } } } as any);
 		const { default: ModeShortcuts } = await import('./ModeShortcuts.svelte');
 		const target = await mount(ModeShortcuts, { prompt: '' });
-		expect([...target.querySelectorAll('[data-halo-mode-shortcut]')].map((el: any) => el.getAttribute('data-halo-mode-shortcut'))).toEqual(['discuss']);
+		expect([...target.querySelectorAll('[data-halo-mode-shortcut]')].map((el: any) => el.getAttribute('data-halo-mode-shortcut'))).toEqual(['answer', 'discuss']);
 		expect(target.textContent).toContain('也可以');
 	});
 });
 
 describe('SidebarModes', () => {
-	it('is one row of 讨论 / 协作 / 生图 with the current page marked', async () => {
+	it('is one row of 精答 / 讨论 / 协作 / 生图 with the current page marked', async () => {
 		const { default: SidebarModes } = await import('$lib/components/layout/Sidebar/SidebarModes.svelte');
 		const target = await mount(SidebarModes);
 		const tiles = [...target.querySelectorAll('[data-sidebar-mode]')];
-		expect(tiles.map((el: any) => el.textContent.trim())).toEqual(['讨论', '协作', '生图']);
-		expect(tiles.map((el: any) => el.getAttribute('href'))).toEqual(['/discuss', '/teams', '/workspace/images?tab=workbench']);
+		expect(tiles.map((el: any) => el.textContent.trim())).toEqual(['精答', '讨论', '协作', '生图']);
+		expect(tiles.map((el: any) => el.getAttribute('href'))).toEqual(['/answer', '/discuss', '/teams', '/workspace/images?tab=workbench']);
 		expect(target.querySelector('[data-sidebar-mode="teams"]')!.getAttribute('aria-current')).toBe('page');
 		expect(target.querySelector('[data-sidebar-discuss]')).toBeTruthy();
+		expect(target.querySelector('[data-sidebar-answer]')).toBeTruthy();
 	});
 });

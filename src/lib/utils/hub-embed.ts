@@ -322,8 +322,8 @@ export const rememberHubOrigin = (
 export const hubReturnPath = (pathname: unknown): string => {
 	if (typeof pathname !== 'string') return '/';
 	if (/^\/c\/[A-Za-z0-9-]{1,64}$/.test(pathname)) return pathname;
-	// a 讨论台 discussion is a chat: /c/<id> opens its room again
-	const room = pathname.match(/^\/discuss\/([A-Za-z0-9-]{1,64})$/);
+	// a 讨论台 discussion and a 精答 are chats: /c/<id> opens the room (or the answer) again
+	const room = pathname.match(/^\/(?:discuss|answer)\/([A-Za-z0-9-]{1,64})$/);
 	return room ? `/c/${room[1]}` : '/';
 };
 

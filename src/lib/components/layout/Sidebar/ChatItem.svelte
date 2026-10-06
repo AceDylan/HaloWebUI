@@ -55,10 +55,11 @@
 	export let folderDotClass: string | null = null;
 	/** Search results include archived chats; they carry this mark. */
 	export let archived = false;
-	/** What kind of work this chat is (utils/chat_kinds.py): 'discuss' | 'team' | 'image'. */
+	/** What kind of work this chat is (utils/chat_kinds.py): 'discuss' | 'answer' | 'team' | 'image'. */
 	export let kind: string | null = null;
-	const KIND_LABEL: Record<string, string> = { discuss: '讨论', team: '协作', image: '生图' };
+	const KIND_LABEL: Record<string, string> = { discuss: '讨论', answer: '精答', team: '协作', image: '生图' };
 	const KIND_TITLE: Record<string, string> = {
+		answer: '精答：由挑选出的助手回答，可以接着追问',
 		discuss: '讨论台里的多模型讨论',
 		team: '有协作台任务在为这个对话工作',
 		image: '这个对话里生成过图片'

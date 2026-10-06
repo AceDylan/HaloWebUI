@@ -1,21 +1,26 @@
 <script lang="ts">
 	/**
-	 * The holographic emblem in the header of each mode page (讨论台 / 协作台 / 生图工作台).
-	 * All three share the reactor's outer halo — a tick ring and arc segments turning against
-	 * each other — so they read as one family; inside each draws what the mode does: a council
-	 * of seats taking turns to speak, a lead handing work along a small graph, a lens iris with
-	 * a scan line. HUD read-outs underneath (clock + the page's own figures). Pure decoration
+	 * The holographic emblem in the header of each mode page (精答 / 讨论台 / 协作台 / 生图工作台).
+	 * All four share the reactor's outer halo — a tick ring and arc segments turning against
+	 * each other — so they read as one family; inside each draws what the mode does: a beam
+	 * sweeping a ring of assistants and lighting the one it picks, a council of seats taking turns
+	 * to speak, a lead handing work along a small graph, a lens iris with a scan line. HUD read-outs underneath (clock + the page's own figures). Pure decoration
 	 * (aria-hidden); shown only with the sci-fi layer on. Styles: scifi-modes.css (.halo-emblem).
 	 */
 	import { onMount } from 'svelte';
 
-	export let mode: 'discuss' | 'teams' | 'images';
+	export let mode: 'answer' | 'discuss' | 'teams' | 'images';
 	export let stats: { k: string; v: string | number }[] = [];
 
 	const TICKS = Array.from({ length: 72 }, (_, i) => i);
 	const SEATS = Array.from({ length: 5 }, (_, i) => {
 		const a = ((-90 + i * 72) * Math.PI) / 180;
 		return { x: Math.round(Math.cos(a) * 58 * 10) / 10, y: Math.round(Math.sin(a) * 58 * 10) / 10 };
+	});
+	// 精答: six assistants on a ring, a beam visiting each in turn (one a second, clockwise)
+	const PICKS = Array.from({ length: 6 }, (_, i) => {
+		const a = ((-90 + i * 60) * Math.PI) / 180;
+		return { x: Math.round(Math.cos(a) * 56 * 10) / 10, y: Math.round(Math.sin(a) * 56 * 10) / 10 };
 	});
 	const CHORDS = SEATS.flatMap((s, i) => SEATS.slice(i + 1).map((t) => [s, t]));
 	const WORKERS = [-44, 0, 44];
@@ -64,7 +69,17 @@
 			<circle r="84" pathLength="100" stroke-dasharray="11 89" stroke-dashoffset="-66" />
 		</g>
 
-		{#if mode === 'discuss'}
+		{#if mode === 'answer'}
+			<circle class="halo-emblem__ring halo-emblem__ring--dash" r="56" />
+			<g class="halo-emblem__beam">
+				<line x1="0" y1="-12" x2="0" y2="-48" stroke="url(#{arcId})" />
+			</g>
+			{#each PICKS as p, i}
+				<circle class="halo-emblem__pick" cx={p.x} cy={p.y} r="6.5" style="--d:{i}s; --h:{[188, 226, 262, 300, 38, 160][i]}" />
+			{/each}
+			<circle class="halo-emblem__core" r="11" stroke="url(#{arcId})" />
+			<circle class="halo-emblem__dot" r="3.2" />
+		{:else if mode === 'discuss'}
 			<circle class="halo-emblem__ring" r="58" />
 			{#each CHORDS as [s, t], i}
 				<line class="halo-emblem__flow" x1={s.x} y1={s.y} x2={t.x} y2={t.y} style="--d:{i * 0.37}s" />

@@ -4141,6 +4141,13 @@
 			await goto(`/discuss/${targetChatId}`, { replaceState: true });
 			return null;
 		}
+		// A 精答 is an ordinary chat once answered; while its first answer is still being made it
+		// is followed on the answer desk.
+		const answerDesk = loadedChat?.chat?.answerDesk;
+		if (answerDesk?.messageId && loadedChat?.chat?.history?.messages?.[answerDesk.messageId]?.done === false) {
+			await goto(`/answer/${targetChatId}`, { replaceState: true });
+			return null;
+		}
 
 		chat = loadedChat;
 		persistedChatSnapshot = loadedChat?.chat ? structuredClone(loadedChat.chat) : null;

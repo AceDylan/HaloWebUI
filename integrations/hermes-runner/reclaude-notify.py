@@ -52,7 +52,7 @@ import time
 import urllib.error
 import urllib.request
 
-SCRIPT_VERSION = "2026-10-03.3"
+SCRIPT_VERSION = "2026-10-06.1"
 CONFIG_FILE = "/root/.hermes/reclaude-runner.env"
 REQUIRED_CONFIG_KEYS = ("HALOWEBUI_NOTIFY_URL", "HALOWEBUI_NOTIFY_TOKEN")
 STATE_DB = "/root/.hermes/state.db"
@@ -926,6 +926,16 @@ def deliver_direct(args, record, save, platform, chat_id, session_id, agent_sess
             save()
             return 0
         record["error"] = result.get("error", "")
+        if result.get("uncertain"):
+            # The request reached the platform and only its reply timed out: the message is
+            # most likely in the chat already, and a resend would post it a second time.
+            record["uncertain"] = True
+            record["attempts"] = attempt
+            log(f"attempt {attempt}: {platform} reply timed out after the request went out "
+                f"({record['error'][:200]}); not resending, it most likely arrived "
+                f"(session record: {result.get('mirror_target', '?')} mirrored={result.get('mirrored')})")
+            save()
+            return 0
         log(f"attempt {attempt}: {platform} delivery failed: {record['error'][:200]}"
             f"{' (will retry)' if attempt < RETRY_ATTEMPTS else ''}")
         if attempt >= RETRY_ATTEMPTS:

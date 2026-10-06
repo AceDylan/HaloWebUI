@@ -79,6 +79,8 @@ def classify(run_dir):
         return "delivered", record
     if record.get("failed"):
         return "delivery-failed", record
+    if record.get("uncertain"):
+        return "delivery-uncertain", record
     return "skipped-by-design" if skipped else "unknown", record
 
 

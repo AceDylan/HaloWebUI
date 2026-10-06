@@ -1,4 +1,5 @@
 import { WEBUI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
+import type { AssistantChoice } from '$lib/apis/assistant-library';
 
 /** 协作台 (agent teams) API — see backend/open_webui/routers/teams.py. */
 
@@ -8,13 +9,54 @@ export type TeamExecutor = 'hermes' | 'reclaude' | 'cchclaude' | 'anyclaude' | '
 /** What a member's work is, which decides the runner it starts on (see the plugin's runners.py). */
 export type TaskKind = 'code' | 'ui' | 'complex' | 'research' | 'writing' | 'image';
 
-/** A HaloWebUI assistant template the lead staffed a member with (src/lib/data/agents-zh.json). */
+/** The assistant the lead staffed a member with: one of the user's (助手库, `model:<id>`), a
+ * built-in template (`builtin:<id>`, src/lib/data/agents-zh.json), or one it proposes to create.
+ * Plans from before the library carry only {id, name, emoji, kind, description} of a template. */
 export type AssistantRef = {
 	id: string;
 	name: string;
 	emoji?: string;
 	kind?: TaskKind;
 	description?: string;
+	/** `model:<id>` / `builtin:<id>`; empty for a new one. */
+	ref?: string;
+	domain?: string;
+	/** What approval will do: use / template as it is, update (a new version), create (saved),
+	 * temporary (this team only). */
+	action?: 'use' | 'template' | 'update' | 'create' | 'temporary';
+	/** The lead's one sentence on why it fits. */
+	reason?: string;
+	/** Why it is not quite what the lead asked for (limits, permissions, an existing namesake). */
+	note?: string;
+	/** Key into the plan's assistant_proposals (update / create / temporary). */
+	proposal?: string;
+	/** The library version the lead read (or, once started, the version the member works with). */
+	version?: number | null;
+};
+
+/** An upgrade or a new assistant the lead proposes — recorded only; written at approval. */
+export type AssistantProposal = {
+	key: string;
+	action: 'update' | 'create' | 'temporary';
+	/** The assistant an upgrade rewrites (`model:<id>`). */
+	ref?: string;
+	name: string;
+	emoji?: string;
+	domain?: string;
+	description?: string;
+	/** The complete new system prompt. */
+	system_prompt: string;
+	/** One line: what it can do now. */
+	change?: string;
+	from?: string;
+	version?: number | null;
+};
+
+/** What approval did with each member's assistant (`team:<id>` is the run in the library). */
+export type AssistantsApplied = {
+	run_ref: string;
+	at: number;
+	members: Record<string, AssistantChoice>;
 };
 
 export type TeamPlanMember = {
@@ -25,6 +67,10 @@ export type TeamPlanMember = {
 	focus?: string;
 	kind?: TaskKind;
 	assistant?: AssistantRef | null;
+	/** The user asked for this assistant (「用于协作」). */
+	assistant_preferred?: boolean;
+	/** Live members: why the planned assistant is not used (it was gone at approval). */
+	assistant_note?: string;
 	/** auto = picked by task kind; goal = named in the goal; user = changed by the user. */
 	executor_source?: 'auto' | 'goal' | 'user';
 	/** The kind's default runner. */
@@ -89,6 +135,12 @@ export type TeamPlan = {
 	estimate?: StageEta | null;
 	/** quick: the lead read the goal as one simple question / fact check — one member answers it directly. */
 	effort?: 'quick';
+	/** Upgrades and new assistants the lead proposes (written only when the plan is approved). */
+	assistant_proposals?: AssistantProposal[];
+	/** may_write false: upgrades and new assistants are for this team only. */
+	assistant_library?: { may_write: boolean };
+	/** Once approved: what was used, upgraded or created per member. */
+	assistants_applied?: AssistantsApplied | null;
 };
 
 export type TeamStatus =
@@ -212,6 +264,8 @@ export type Team = {
 	stage?: StageBrief;
 	/** Names of the files given with the goal (in the workspace's inputs/ once it starts). */
 	inputs?: string[];
+	/** 「用于协作」: assistants the user asked a member to use (model:<id> / builtin:<id>). */
+	preferred_assistants?: string[];
 };
 
 export type SubStatus =
@@ -594,7 +648,8 @@ export const createTeam = (
 	leadModel?: string | null,
 	project?: string | null,
 	autoStart = false,
-	files: string[] = []
+	files: string[] = [],
+	assistants: string[] = []
 ) =>
 	request<Team>(token, 'POST', '/', {
 		goal,
@@ -602,7 +657,8 @@ export const createTeam = (
 		lead_model: leadModel || null,
 		project: project || null,
 		auto_start: autoStart,
-		...(files.length ? { files } : {})
+		...(files.length ? { files } : {}),
+		...(assistants.length ? { assistants } : {})
 	});
 
 export const getTeam = (token: string, teamId: string) =>
@@ -737,6 +793,10 @@ export const teamFilePath = (teamId: string, path: string) =>
 /** A workspace file as a full URL for <img src> / <a href>. */
 export const teamFileUrl = (teamId: string, path: string) =>
 	`${WEBUI_BASE_URL}${teamFilePath(teamId, path)}`;
+
+/** After 「撤销升级」 (undoAssistantRun with `team:<id>`): record on the team that it was undone. */
+export const markTeamAssistantReverted = (token: string, teamId: string, assistantId: string) =>
+	request<Team>(token, 'POST', `/${id(teamId)}/assistants/reverted`, { id: assistantId });
 
 export const approveTeam = (token: string, teamId: string) =>
 	request<Team>(token, 'POST', `/${id(teamId)}/approve`);

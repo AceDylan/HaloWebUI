@@ -6,11 +6,19 @@ the event history. Every Hermes call sends ``X-Halo-Owner`` and Hermes refuses t
 for another owner, so ownership is checked on both sides.
 
 ENABLE_AGENT_TEAMS=false turns the whole feature off (routes answer 404, the UI hides it).
+
+助手库: a plan request carries a shortlist of the user's assistants; the lead records per member
+which one it uses, upgrades or would create (``plan.assistant_proposals``) and writes nothing.
+Approval (``start_team``, the one way in) carries those decisions out once
+(``assistant_library.carry_out``), keeps the result on the plan (``assistants_applied``) before
+Hermes is called — a retried start reuses it — and sends each member's assistant to Hermes as a
+snapshot (name, version, full system prompt) for its task bodies.
 """
 
 import asyncio
 import logging
 import os
+import re
 import time
 from typing import Any, Optional
 
@@ -160,14 +168,19 @@ def _keep(task: "asyncio.Task") -> None:
     task.add_done_callback(_background.discard)
 
 
-async def _plan_job(team: AgentTeamModel, target: HermesTarget, feedback: str, previous: Optional[dict]) -> None:
+async def _plan_job(team: AgentTeamModel, target: HermesTarget, feedback: str, previous: Optional[dict],
+                    access: Optional["AssistantAccess"] = None) -> None:
     try:
-        body = await hermes_call(target, "POST", "/plan", json_body={
+        request_body = {
             "goal": team.goal, "team_id": team.id, "feedback": feedback, "previous": previous,
             "lead_model": (team.meta or {}).get("lead_model") or "",
             "project": (team.meta or {}).get("project") or "",
             "inputs": [i["name"] for i in team_inputs(team)],
-        }, timeout=PLAN_TIMEOUT_SECONDS)
+        }
+        library = await plan_library(team, access) if access is not None else None
+        if library is not None:
+            request_body["library"] = library
+        body = await hermes_call(target, "POST", "/plan", json_body=request_body, timeout=PLAN_TIMEOUT_SECONDS)
         ok = isinstance(body, dict) and body.get("ok") and isinstance(body.get("plan"), dict)
         if ok:
             plan = body["plan"]
@@ -175,7 +188,7 @@ async def _plan_job(team: AgentTeamModel, target: HermesTarget, feedback: str, p
                                         plan=plan, error=None, title=(plan.get("title") or team.title)[:60])
             if updated is not None and (team.meta or {}).get("auto_start") and auto_startable(plan):
                 try:  # 「计划好直接开始」: no approval step
-                    updated = await start_team(updated, target)
+                    updated = await start_team(updated, target, access)
                 except TeamsError as exc:
                     log.info("teams: auto-start of %s did not go through (%s)", team.id, exc.detail)
                     updated = AgentTeams.get(team.id, team.user_id) or updated
@@ -259,18 +272,36 @@ def plan_draws(plan: Optional[dict]) -> bool:
     return any(isinstance(m, dict) and m.get("kind") == "image" for m in (plan or {}).get("members") or [])
 
 
-async def start_team(team: AgentTeamModel, target: HermesTarget) -> AgentTeamModel:
+async def start_team(team: AgentTeamModel, target: HermesTarget,
+                     access: Optional["AssistantAccess"] = None) -> AgentTeamModel:
     """Hand the plan to Hermes: the board and its tasks are created and the members start.
-    The approve button, Telegram's 批准 and 「计划好直接开始」 all go through here."""
+    The approve button, Telegram's 批准 and 「计划好直接开始」 all go through here, and so does
+    the only write to the assistant library a team makes (``access``: the user's library; None =
+    the plan's assistants are not looked at — Hermes uses its template catalog as before)."""
     if not team.plan:
         raise TeamsError(409, "还没有可批准的计划")
     starting = AgentTeams.update(team.id, team.user_id, expect_status=("plan_ready", "start_failed"),
                                  status="starting", error=None)
     if starting is None:
         raise TeamsError(409, "这个计划已经批准过或状态已变化")
+    team = starting
     try:
-        body = {"team_id": team.id, "plan": team.plan, "goal": team.goal, "title": team.title,
+        plan = dict(team.plan or {})
+        snapshots = None
+        if access is not None and plan_has_assistants(plan):
+            applied = plan.get("assistants_applied") if isinstance(plan.get("assistants_applied"), dict) else None
+            if applied is None:  # the first start: carry the decisions out, once
+                applied = await apply_assistants(team, plan, access)
+                plan["assistants_applied"] = applied
+                stored = AgentTeams.update(team.id, team.user_id, expect_status=("starting",), plan=plan)
+                if stored is None:
+                    log.warning("teams: the assistants applied for %s could not be recorded", team.id)
+            snapshots = member_snapshots(applied)
+        sent = {k: v for k, v in plan.items() if k != "assistants_applied"}
+        body = {"team_id": team.id, "plan": sent, "goal": team.goal, "title": team.title,
                 "chat_id": team.chat_id or "", "origin": team_origin(team)}
+        if snapshots:
+            body["member_assistants"] = snapshots
         templates = image_templates(team.user_id, limit=200)
         if plan_draws(team.plan):
             body["image_templates"] = templates[:IMAGE_TEMPLATE_LIMIT]
@@ -289,13 +320,264 @@ async def start_team(team: AgentTeamModel, target: HermesTarget) -> AgentTeamMod
     return updated or team
 
 
-def start_planning(team: AgentTeamModel, target: HermesTarget, feedback: str = "", previous: Optional[dict] = None) -> None:
-    _keep(asyncio.create_task(_plan_job(team, target, feedback, previous)))
+def start_planning(team: AgentTeamModel, target: HermesTarget, feedback: str = "", previous: Optional[dict] = None,
+                   access: Optional["AssistantAccess"] = None) -> None:
+    _keep(asyncio.create_task(_plan_job(team, target, feedback, previous, access)))
 
 
 def default_title(goal: str) -> str:
     first = " ".join(goal.split())
     return (first[:28] + "…") if len(first) > 28 else first or "协作任务"
+
+
+# --- 助手库 (the user's assistants) -------------------------------------------------------------
+
+PREFERRED_MAX = 3
+
+
+class AssistantAccess:
+    """The user's assistant library, read through the request that started the step (planning
+    and auto-start run after the response, as 精答 does with its run)."""
+
+    def __init__(self, request, user):
+        self.request = request
+        self.user = user
+
+    def may_write(self) -> bool:
+        """Whether the user may save assistants (same rule as 精答: admin or workspace.models)."""
+        from open_webui.utils.access_control import has_permission
+
+        if getattr(self.user, "role", None) == "admin":
+            return True
+        return has_permission(self.user.id, "workspace.models", self.request.app.state.config.USER_PERMISSIONS)
+
+    async def library(self) -> dict:
+        """{assistants, bases, default_base, may_write} — fresh from the model list."""
+        from open_webui.utils import assistant_library as lib
+        from open_webui.utils.models import get_all_models
+
+        await get_all_models(self.request, user=self.user)
+        models_map = getattr(self.request.state, "MODELS", None) or {}
+        assistants, bases = lib.library(models_map, self.user)
+        strong = next((b for b in bases if re.search(r"claude|gpt", b["name"], re.I)), bases[0] if bases else None)
+        return {"assistants": assistants, "bases": bases, "default_base": strong["id"] if strong else "",
+                "may_write": self.may_write()}
+
+
+def preferred_refs(value: Any) -> list[str]:
+    """「用于协作」: assistant refs the user asked a team to use (model:<id> / builtin:<id>)."""
+    out = []
+    for ref in value if isinstance(value, list) else []:
+        ref = str(ref or "").strip()[:220]
+        if ref.startswith(("model:", "builtin:")) and len(ref) > len("model:") and ref not in out:
+            out.append(ref)
+    return out[:PREFERRED_MAX]
+
+
+def _compact(entry: dict) -> dict:
+    from open_webui.utils import assistant_library as lib
+
+    prompt = str(entry.get("prompt") or "")
+    excerpt = prompt[: lib.PROMPT_EXCERPT_CHARS] + ("…" if len(prompt) > lib.PROMPT_EXCERPT_CHARS else "")
+    out = {"ref": entry["ref"], "name": entry.get("name") or "", "emoji": entry.get("emoji") or "",
+           "description": entry.get("description") or "", "prompt": excerpt}
+    if entry["ref"].startswith("model:"):
+        out.update(domain=entry.get("domain") or "", editable=bool(entry.get("editable")), version=entry.get("version"))
+    return out
+
+
+async def plan_library(team: AgentTeamModel, access: "AssistantAccess") -> Optional[dict]:
+    """The shortlist of the user's library sent with a plan request; None when it cannot be read
+    (the lead then plans with the template catalog only)."""
+    from open_webui.utils import assistant_library as lib
+
+    try:
+        ctx = await access.library()
+    except Exception:  # noqa: BLE001 — a plan without the library beats no plan
+        log.warning("teams: could not read the assistant library for %s", team.id, exc_info=True)
+        return None
+    wanted = preferred_refs((team.meta or {}).get("assistants"))
+    refs = {a["ref"] for a in ctx["assistants"]}
+    preferred = [r for r in wanted if r in refs or (r.startswith("builtin:") and lib.builtin_by_ref(r))]
+    assistants, templates = lib.shortlist(team.goal, ctx["assistants"], favorites=lib.favorites_of(access.user),
+                                          must=preferred)
+    return {
+        "may_write": ctx["may_write"],
+        "assistants": [_compact(a) for a in assistants],
+        "templates": [_compact(t) for t in templates],
+        "preferred": preferred,
+        "max_create": lib.MAX_CREATE_PER_RUN,
+        "max_update": lib.MAX_UPDATE_PER_RUN,
+    }
+
+
+def _member_assistant(member: dict) -> Optional[dict]:
+    assistant = member.get("assistant")
+    if not isinstance(assistant, dict):
+        return None
+    out = dict(assistant)
+    # a plan from before the library: {id, name, ...} of a 「协作」 template
+    out.setdefault("action", "template")
+    if not out.get("ref") and out.get("id") and out["action"] == "template":
+        out["ref"] = f"builtin:{out['id']}"
+    return out
+
+
+def plan_has_assistants(plan: Optional[dict]) -> bool:
+    return any(isinstance(m, dict) and _member_assistant(m) for m in (plan or {}).get("members") or [])
+
+
+def _gone(member: dict, assistant: dict) -> dict:
+    name = assistant.get("name") or assistant.get("ref") or "这个助手"
+    return {"action": "generic", "saved": False, "reason": "", "change": "", "name": assistant.get("name") or "",
+            "ref": assistant.get("ref") or "", "emoji": assistant.get("emoji") or "",
+            "note": f"「{name}」已不在助手库（删除或归档），按角色「{member.get('role') or member.get('name')}」执行"}
+
+
+async def apply_assistants(team: AgentTeamModel, plan: dict, access: "AssistantAccess") -> dict:
+    """Carry out the plan's assistant decisions for the user (the only writes a team makes to the
+    library): {run_ref, at, members: {member name: choice}} — a choice as
+    ``assistant_library.carry_out`` returns it, or ``generic`` with a note when the assistant is
+    gone. Members whose template HaloWebUI does not have are left to Hermes' own catalog."""
+    from open_webui.utils import assistant_library as lib
+
+    try:
+        ctx = await access.library()
+    except Exception as exc:  # noqa: BLE001
+        log.warning("teams: could not read the assistant library to start %s", team.id, exc_info=True)
+        raise TeamsError(502, f"读取助手库失败：{type(exc).__name__}") from exc
+    assistants, bases, default_base = ctx["assistants"], ctx["bases"], ctx["default_base"]
+    may_write = ctx["may_write"]
+    proposals = {p.get("key"): p for p in plan.get("assistant_proposals") or [] if isinstance(p, dict)}
+    by_ref = {a["ref"]: a for a in assistants}
+    units, raw, templates = [], [], []
+    temporary: dict[str, dict] = {}
+    fallback: dict[str, dict] = {}
+    pending: dict[str, dict] = {}  # member → its proposal (a create the dispatcher rules dropped)
+
+    for member in plan.get("members") or []:
+        if not isinstance(member, dict) or not member.get("name"):
+            continue
+        assistant = _member_assistant(member)
+        if assistant is None:
+            continue
+        name, action, ref = member["name"], assistant["action"], str(assistant.get("ref") or "")
+        reason = str(assistant.get("reason") or "")
+        if action == "template":
+            template = lib.builtin_by_ref(ref)
+            if template is None:
+                continue  # not in HaloWebUI's copy: Hermes looks it up itself
+            templates.append(template)
+            units.append({"key": name})
+            raw.append({"key": name, "action": "use", "ref": ref, "reason": reason})
+            continue
+        target = by_ref.get(ref) if ref.startswith("model:") else None
+        if ref.startswith("model:") and target is None:
+            fallback[name] = _gone(member, assistant)  # deleted, archived or no longer shared
+            continue
+        if action == "use":
+            units.append({"key": name})
+            raw.append({"key": name, "action": "use", "ref": ref, "reason": reason})
+            continue
+        proposal = proposals.get(assistant.get("proposal"))
+        if proposal is None:
+            if target is not None:
+                units.append({"key": name})
+                raw.append({"key": name, "action": "use", "ref": ref, "reason": reason})
+            continue
+        spec_raw = {k: proposal.get(k) for k in ("name", "emoji", "domain", "description", "system_prompt", "from")}
+        if action == "temporary":
+            spec = lib.spec_of(spec_raw, bases, default_base)
+            if target is not None:
+                spec.update(name=target["name"], emoji=target.get("emoji") or spec["emoji"], base=target.get("base") or spec["base"])
+            temporary[name] = {"action": "temporary", "target": target, "template": None, "spec": spec, "reason": reason,
+                               "change": str(proposal.get("change") or ""), "note": str(assistant.get("note") or "")}
+            continue
+        units.append({"key": name})
+        raw.append({"key": name, "action": action, "ref": ref if action == "update" else "", "reason": reason,
+                    "change": str(proposal.get("change") or ""), "assistant": spec_raw})
+        pending[name] = proposal
+
+    decisions = lib.normalize_decisions({"units": raw}, units, assistants, templates, bases, default_base=default_base,
+                                        may_write=may_write)
+    for name, decision in decisions.items():
+        proposal = pending.get(name)
+        # an upgrade is written over the version the lead read, not over a later edit (CAS → this run only)
+        if decision["action"] == "update" and proposal and isinstance(proposal.get("version"), int) and decision["target"]:
+            decision["target"] = {**decision["target"], "version": proposal["version"]}
+    for unit in units:
+        name = unit["key"]
+        if name in decisions:
+            continue
+        member = next(m for m in plan["members"] if isinstance(m, dict) and m.get("name") == name)
+        proposal = pending.get(name)
+        if proposal is not None:  # e.g. no base model to save it on: still this run's role
+            spec = lib.spec_of({k: proposal.get(k) for k in ("name", "emoji", "domain", "description", "system_prompt")},
+                               bases, default_base)
+            temporary[name] = {"action": "temporary", "target": None, "template": None, "spec": spec, "reason": "",
+                               "change": str(proposal.get("change") or ""), "note": "没能保存这个助手，本次临时使用"}
+        else:
+            fallback[name] = _gone(member, _member_assistant(member) or {})
+    try:
+        choices = lib.carry_out(access.user, {**decisions, **temporary}, source="team", run_ref=f"team:{team.id}",
+                                question=team.goal, may_write=may_write)
+    except Exception as exc:  # noqa: BLE001 — carry_out answers its own refusals; this is the database
+        log.exception("teams: writing the assistants of %s failed", team.id)
+        raise TeamsError(500, f"写入助手库失败：{type(exc).__name__}") from exc
+    return {"run_ref": f"team:{team.id}", "at": int(time.time()), "members": {**fallback, **choices}}
+
+
+SNAPSHOT_KEYS = ("action", "ref", "id", "name", "emoji", "version", "system", "description")
+
+
+def member_snapshots(applied: Optional[dict]) -> dict:
+    """What Hermes gets per member at start: the assistant as applied (full system prompt), or
+    ``generic`` (the plain role) with why."""
+    out = {}
+    for name, choice in ((applied or {}).get("members") or {}).items():
+        if not isinstance(choice, dict):
+            continue
+        if choice.get("action") == "generic":
+            out[name] = {"action": "generic", "note": choice.get("note") or ""}
+        else:
+            out[name] = {k: choice.get(k) for k in SNAPSHOT_KEYS}
+    return out
+
+
+def public_assistants_applied(applied: Any) -> Optional[dict]:
+    """The applied choices as the page sees them: the system prompt only of an upgrade (to view
+    it and undo it), never the version before."""
+    if not isinstance(applied, dict):
+        return None
+    members = {}
+    for name, choice in (applied.get("members") or {}).items():
+        if not isinstance(choice, dict):
+            continue
+        shown = {k: v for k, v in choice.items() if k not in ("system", "before")}
+        shown["hasSystem"] = bool(choice.get("system"))
+        if choice.get("action") == "update":
+            shown["system"] = choice.get("system") or ""
+        members[name] = shown
+    return {"run_ref": applied.get("run_ref"), "at": applied.get("at"), "members": members}
+
+
+def mark_reverted(team: AgentTeamModel, assistant_id: str) -> Optional[AgentTeamModel]:
+    """Record on the team that its upgrade of ``assistant_id`` was undone (every member that used it)."""
+    plan = dict(team.plan or {})
+    applied = plan.get("assistants_applied") if isinstance(plan.get("assistants_applied"), dict) else None
+    if not applied:
+        return None
+    members = {}
+    hit = False
+    for name, choice in (applied.get("members") or {}).items():
+        if isinstance(choice, dict) and choice.get("action") == "update" and choice.get("id") == assistant_id:
+            choice = {**choice, "reverted": True}
+            hit = True
+        members[name] = choice
+    if not hit:
+        return None
+    plan["assistants_applied"] = {**applied, "members": members}
+    return AgentTeams.update(team.id, team.user_id, plan=plan)
 
 
 # --- reconciliation ---------------------------------------------------------------------------
@@ -463,6 +745,9 @@ def public_team(team: AgentTeamModel, *, with_plan: bool = True) -> dict:
     data = team.model_dump()
     data.pop("user_id", None)
     meta = data.pop("meta", None) or {}
+    if isinstance(data.get("plan"), dict) and "assistants_applied" in data["plan"]:
+        data["plan"] = {**data["plan"], "assistants_applied": public_assistants_applied(data["plan"]["assistants_applied"])}
+    data["preferred_assistants"] = preferred_refs(meta.get("assistants"))
     data["lead_model"] = meta.get("lead_model")
     data["auto_start"] = bool(meta.get("auto_start"))
     plan = data.get("plan") or {}

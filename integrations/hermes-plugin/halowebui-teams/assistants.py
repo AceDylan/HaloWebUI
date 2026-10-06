@@ -9,6 +9,9 @@ a custom role.
 
 The file is found next to this plugin (the plugin directory is a symlink into the HaloWebUI
 checkout) or at ``HALO_TEAMS_ASSISTANTS_FILE``; without it the lead simply has no catalog.
+
+The user's own assistants (HaloWebUI's 助手库) come with each plan request instead — this process
+cannot read HaloWebUI's model table; see ``library.py``.
 """
 
 from __future__ import annotations
@@ -23,7 +26,7 @@ from .common import logger
 
 COLLAB_GROUP = "协作"
 PROMPT_LIMIT = 1800
-_cache: dict[str, Any] = {"path": None, "mtime": None, "items": []}
+_cache: dict[str, Any] = {"path": None, "mtime": None, "items": [], "all": [], "by_id": {}}
 
 # Chat-style template lines that make no sense as a team member's role.
 _CHAT_ONLY = re.compile(
@@ -52,38 +55,62 @@ def clean_prompt(text: str) -> str:
     return value
 
 
-def catalog() -> list[dict]:
-    """The 「协作」 templates: [{id, name, emoji, description, kind, prompt}] (cached by mtime)."""
+def _load() -> None:
+    """Read the template file once per change (by mtime): every template, and the 「协作」 ones."""
     from .runners import normalize_kind
 
     path = templates_file()
     if path is None:
-        return []
+        _cache.update(path=None, mtime=None, items=[], all=[], by_id={})
+        return
     try:
         mtime = path.stat().st_mtime
     except OSError:
-        return []
+        _cache.update(path=None, mtime=None, items=[], all=[], by_id={})
+        return
     if _cache["path"] == str(path) and _cache["mtime"] == mtime:
-        return _cache["items"]
+        return
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         logger.warning("halowebui-teams: assistant templates %s unreadable", path)
-        return []
-    items = []
+        _cache.update(path=None, mtime=None, items=[], all=[], by_id={})
+        return
+    items, every = [], []
     for entry in raw if isinstance(raw, list) else []:
-        if not isinstance(entry, dict) or COLLAB_GROUP not in (entry.get("group") or []):
+        if not isinstance(entry, dict) or not entry.get("id"):
             continue
-        items.append({
+        collab = COLLAB_GROUP in (entry.get("group") or [])
+        item = {
             "id": str(entry.get("id")),
             "name": str(entry.get("name") or "").strip(),
             "emoji": str(entry.get("emoji") or "").strip(),
             "description": re.sub(r"\s+", " ", str(entry.get("description") or "")).strip()[:120],
-            "kind": normalize_kind(entry.get("team_kind")) or "code",
+            # only the 「协作」 templates carry a team_kind; another template's kind comes from the member
+            "kind": normalize_kind(entry.get("team_kind")) or ("code" if collab else ""),
             "prompt": clean_prompt(entry.get("prompt") or ""),
-        })
-    _cache.update(path=str(path), mtime=mtime, items=items)
-    return items
+        }
+        every.append(item)
+        if collab:
+            items.append(item)
+    _cache.update(path=str(path), mtime=mtime, items=items, all=every, by_id={t["id"]: t for t in every})
+
+
+def catalog() -> list[dict]:
+    """The 「协作」 templates: [{id, name, emoji, description, kind, prompt}] (cached by mtime)."""
+    _load()
+    return _cache["items"]
+
+
+def template(ref: Any) -> Optional[dict]:
+    """Any built-in template (not only 「协作」) by ``builtin:<id>`` or its bare id."""
+    key = str(ref or "").strip()
+    if key.startswith("builtin:"):
+        key = key[len("builtin:"):]
+    if not key:
+        return None
+    _load()
+    return _cache["by_id"].get(key)
 
 
 def by_id(template_id: Any) -> Optional[dict]:
@@ -107,10 +134,14 @@ def by_name(name: Any) -> Optional[dict]:
 
 
 def resolve(value: Any) -> Optional[dict]:
-    """A template from what the lead wrote: its id, its name, or {"id": ..}."""
+    """A template from what the lead wrote: its id, ``builtin:<id>``, its name, or {"id": ..}. The
+    「协作」 catalog first, then any built-in template by id."""
     if isinstance(value, dict):
-        return by_id(value.get("id")) or by_name(value.get("name"))
-    return by_id(value) or by_name(value)
+        return resolve(value.get("ref") or value.get("id")) or by_name(value.get("name"))
+    key = str(value or "").strip()
+    if key.startswith("builtin:"):
+        key = key[len("builtin:"):]
+    return by_id(key) or by_name(key) or template(key)
 
 
 def catalog_text() -> str:
@@ -122,5 +153,5 @@ def catalog_text() -> str:
 def public(item: Optional[dict]) -> Optional[dict]:
     if not item:
         return None
-    return {"id": item["id"], "name": item["name"], "emoji": item["emoji"], "kind": item["kind"],
-            "description": item["description"]}
+    return {"id": item["id"], "ref": f"builtin:{item['id']}", "name": item["name"], "emoji": item["emoji"],
+            "kind": item["kind"], "description": item["description"]}

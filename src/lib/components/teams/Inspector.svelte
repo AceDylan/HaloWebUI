@@ -4,14 +4,18 @@
 
 	import {
 		getTeamTask,
+		markTeamAssistantReverted,
 		retryTeamTask,
 		sendTeamMessage,
 		taskDiagnosis,
+		type AssistantsApplied,
 		type LiveTask,
 		type TaskDetail,
 		type TeamEvent
 	} from '$lib/apis/teams';
 	import { teamFilePath } from '$lib/apis/teams';
+	import { undoAssistantRun } from '$lib/apis/assistant-library';
+	import AssistantChoiceTag from './AssistantChoiceTag.svelte';
 	import ReportMarkdown from './ReportMarkdown.svelte';
 	import RunnerBadge from './RunnerBadge.svelte';
 	import StatusChip from './StatusChip.svelte';
@@ -82,7 +86,15 @@
 		focus?: string;
 		status?: string;
 		kind?: string;
-		assistant?: { id: string; name: string; emoji?: string; description?: string } | null;
+		assistant?: {
+			id: string;
+			name: string;
+			emoji?: string;
+			description?: string;
+			action?: string;
+			version?: number | null;
+		} | null;
+		assistant_note?: string;
 		recommended?: string;
 		executor_source?: string;
 		runner?: string | null;
@@ -97,6 +109,8 @@
 	export let teamStopped = false;
 	/** Bumped by the parent when new events arrive for the shown task, to refresh the detail. */
 	export let refreshKey = 0;
+	/** What approval did with each member's assistant (the team's plan.assistants_applied). */
+	export let assistantsApplied: AssistantsApplied | null = null;
 
 	const dispatch = createEventDispatcher();
 	let detail: TaskDetail | null = null;
@@ -310,6 +324,26 @@
 			toast.error(`${error?.message ?? error}`);
 		} finally {
 			retrying = false;
+		}
+	};
+
+	// The member's assistant as approval applied it; an upgrade this team made can be undone.
+	$: choice = member ? (assistantsApplied?.members?.[member.name] ?? null) : null;
+	let undoing = false;
+	let showSystem = false;
+	$: if (memberName) showSystem = false;
+	const undoUpgrade = async () => {
+		if (!choice?.id || undoing) return;
+		undoing = true;
+		try {
+			await undoAssistantRun(localStorage.token, choice.id, `team:${teamId}`, choice.system ?? '');
+			const team = await markTeamAssistantReverted(localStorage.token, teamId, choice.id);
+			dispatch('team', team);
+			toast.success(`已撤销对「${choice.name ?? '助手'}」的升级（这个团队仍按升级后的设定执行）`);
+		} catch (error) {
+			toast.error(`${error?.message ?? error}`);
+		} finally {
+			undoing = false;
 		}
 	};
 </script>
@@ -721,14 +755,67 @@
 			class="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1.5 rounded-xl border tm-hairline px-3 py-2 text-xs"
 			data-member-profile
 		>
-			<dt class="text-gray-500">助手模板</dt>
-			<dd class="min-w-0 text-gray-800 dark:text-gray-200">
+			<dt class="text-gray-500">助手</dt>
+			<dd class="flex min-w-0 flex-col gap-1 text-gray-800 dark:text-gray-200" data-member-assistant>
 				{#if member.assistant}
-					<span title={member.assistant.description ?? ''}
-						>{member.assistant.emoji ?? ''} {member.assistant.name}</span
-					>
+					<span class="flex min-w-0 flex-wrap items-center gap-1.5">
+						<span class="min-w-0 truncate" title={member.assistant.description ?? ''}
+							>{member.assistant.emoji ?? ''} {member.assistant.name}</span
+						>
+						{#if member.assistant.version && member.assistant.action !== 'template'}
+							<span class="tm-num text-[11px] text-gray-400">第 {member.assistant.version} 版</span>
+						{/if}
+						<AssistantChoiceTag action={choice?.action ?? member.assistant.action} />
+						{#if choice?.reverted}
+							<span class="text-[11px] text-gray-400">已撤销升级</span>
+						{/if}
+					</span>
+				{:else if choice?.action === 'generic' || member.assistant_note}
+					<span class="flex flex-wrap items-center gap-1.5">
+						<AssistantChoiceTag action="generic" />
+						<span class="text-[11px] text-amber-700 dark:text-amber-300"
+							>{choice?.note || member.assistant_note}</span
+						>
+					</span>
 				{:else}
-					<span class="text-gray-500">自定义角色（没有合适的模板）</span>
+					<span class="text-gray-500">自定义角色（没有合适的助手）</span>
+				{/if}
+				{#if member.assistant && (choice?.reason || choice?.note)}
+					<span class="text-[11px] leading-relaxed text-gray-500"
+						>{choice?.reason ?? ''}{#if choice?.note}<span class="text-amber-700 dark:text-amber-300"
+								>{choice?.reason ? ' · ' : ''}{choice?.note}</span
+							>{/if}</span
+					>
+				{/if}
+				{#if choice?.action === 'update'}
+					<span class="flex flex-wrap items-center gap-2 text-[11px]">
+						{#if choice.change}<span class="text-violet-700 dark:text-violet-300"
+								>这次升级：{choice.change}</span
+							>{/if}
+						{#if choice.system}
+							<button
+								type="button"
+								class="text-sky-700 hover:underline dark:text-sky-300"
+								aria-expanded={showSystem}
+								on:click={() => (showSystem = !showSystem)}
+								>{showSystem ? '收起设定' : '查看升级后的设定'}</button
+							>
+						{/if}
+						{#if !choice.reverted && !replay}
+							<button
+								type="button"
+								class="text-gray-500 hover:text-red-600 disabled:opacity-50"
+								disabled={undoing}
+								on:click={undoUpgrade}
+								title="把助手库里的这个助手恢复到升级前的版本；正在执行的任务不受影响"
+								data-assistant-undo>{undoing ? '撤销中…' : '撤销升级'}</button
+							>
+						{/if}
+					</span>
+					{#if showSystem && choice.system}
+						<pre
+							class="tm-scroll max-h-48 overflow-y-auto whitespace-pre-wrap break-words rounded-lg border tm-hairline px-2 py-1.5 font-sans text-[11px] leading-relaxed text-gray-600 dark:text-gray-300">{choice.system}</pre>
+					{/if}
 				{/if}
 			</dd>
 			<dt class="text-gray-500">执行来源</dt>

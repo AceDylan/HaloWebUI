@@ -15,7 +15,7 @@ import json
 import re
 from typing import Any, Callable, Optional
 
-from . import assistants, runners
+from . import assistants, library as library_mod, runners
 from .common import EXECUTORS, LEAD_NAME, logger, redact
 
 LEAD_TASK = "halo_team_lead"  # auxiliary.halo_team_lead in config.yaml overrides the lead's model
@@ -35,23 +35,23 @@ SYSTEM_PROMPT = """你是一个多代理团队的负责人（team-lead）。用�
   "summary": "一两句话说明你打算怎么分工",
   "effort": "quick（只有快答才写这个键，见下）",
   "members": [
-    {"name": "backend-dev", "role": "后端开发", "assistant": "17", "kind": "code", "model": "模型名", "focus": "负责什么"}
+    {"name": "backend-dev", "role": "后端开发", {member_assistant}, "kind": "code", "model": "模型名", "focus": "负责什么"}
   ],
   "tasks": [
     {"key": "T1", "title": "任务名", "description": "完整、可独立执行的任务说明", "member": "backend-dev", "depends_on": []}
-  ]
+  ]{assistant_json}
 }
 
 成员：
 - 人数跟着目标的分量走：一个简单问题或一次事实查询 1 个成员就够（不要评审）；一般的调研 / 写作 / 小功能 2 到 3 个；大的改动 3 到 4 个；最多 6 个。不要为了凑人数拆出没必要的角色。name 用小写英文和连字符（如 backend-dev、frontend-dev、qa-engineer、reviewer），role 用中文。
-- assistant：优先从下面的「助手模板」里选最贴切的一个，填它的编号；同一个模板可以给多个成员。确实没有合适的模板时填 null，并在 role / focus 里写清这个角色做什么。
+{assistant_rules}
 - kind：这个成员的任务类型，决定由哪种执行器（runner）来做：
 {kinds}
 - 只有用户在目标里明确点名用某个执行器做某部分时，那个成员才加 "executor"：{executors} 之一；否则不要写 executor，系统会按 kind 自动选择并检查可用性。
 - model：这个成员由 Hermes 执行时用哪个模型（kind 默认走 Hermes 的成员一定用它；其他成员在 runner 不可用、退回 Hermes 时用它）。按这个成员的活从下面挑最合适的一个；用户在目标里点名了模型就用点名的；拿不准就用默认：
 {models}
 
-助手模板（编号：名称（类型）— 说明）：
+{library}助手模板（编号：名称（类型）— 说明）：
 {catalog}
 
 快答：
@@ -74,19 +74,34 @@ USER_TEMPLATE = """协作目标：
 {project}{extra}"""
 
 
-def system_prompt() -> str:
+TEMPLATE_RULE = ("- assistant：优先从下面的「助手模板」里选最贴切的一个，填它的编号；同一个模板可以给多个成员。"
+                 "确实没有合适的模板时填 null，并在 role / focus 里写清这个角色做什么。")
+
+
+def system_prompt(library: Optional[dict] = None) -> str:
+    """The lead's instructions. ``library``: the user's assistants HaloWebUI sent (library.usable)."""
     kinds = "\n".join(f"  - \"{k}\"：{v['label']}（{v['hint']}）" for k, v in runners.KINDS.items())
     catalog = assistants.catalog_text() or "（没有可用的助手模板，assistant 一律填 null）"
     executors = " / ".join(f'"{n}"' for n in EXECUTORS)
     models = "\n".join(f"  - \"{m['model']}\"{'（默认）' if m['default'] else ''}" + (f"：{m['hint']}" if m["hint"] else "")
                        for m in hermes_models()) or "  （Hermes 没有可选的模型，不写 model）"
-    # str.replace, not format: the prompt's JSON example has braces of its own.
-    return (SYSTEM_PROMPT.replace("{kinds}", kinds).replace("{catalog}", catalog).replace("{executors}", executors)
-            .replace("{models}", models))
+    if library is not None:
+        parts = library_mod.prompt_parts(library)
+        rules, member_json, top_json = parts["rules"], parts["member_json"], parts["top_json"]
+        shelf = ("你的助手库（ref：名称（领域）— 说明｜可升级 = 可以写升级）：\n" + parts["library"] + "\n\n"
+                 + ("其他可用的内置模板（ref：名称 — 说明）：\n" + parts["templates"] + "\n\n" if parts["templates"] else ""))
+    else:
+        rules, member_json, top_json, shelf = TEMPLATE_RULE, '"assistant": "17"', "", ""
+    # str.replace, not format: the prompt's JSON example has braces of its own. The user's own
+    # text (assistant names and prompts) goes in last, so a brace in it is never a placeholder.
+    return (SYSTEM_PROMPT.replace("{member_assistant}", member_json).replace("{assistant_json}", top_json)
+            .replace("{kinds}", kinds).replace("{catalog}", catalog).replace("{executors}", executors)
+            .replace("{models}", models).replace("{assistant_rules}", rules).replace("{library}", shelf))
 
 
 def build_messages(goal: str, workspace: str, feedback: str = "", previous: Optional[dict] = None,
-                   project: Optional[dict] = None, inputs: Optional[list] = None) -> list:
+                   project: Optional[dict] = None, inputs: Optional[list] = None,
+                   library: Optional[dict] = None) -> list:
     extra = ""
     if inputs:
         from .teams import inputs_dir, safe_input_name
@@ -106,7 +121,7 @@ def build_messages(goal: str, workspace: str, feedback: str = "", previous: Opti
         project_text = ("\n在项目里做（团队分支，工作目录是它的一个 worktree）：\n"
                         + (projects.context_text(project["path"]) or project["path"]) + "\n")
     user = USER_TEMPLATE.format(goal=goal.strip()[:6000], workspace=workspace, project=project_text, extra=extra)
-    return [{"role": "system", "content": system_prompt()}, {"role": "user", "content": user}]
+    return [{"role": "system", "content": system_prompt(library)}, {"role": "user", "content": user}]
 
 
 def _plan_for_lead(plan: dict) -> dict:
@@ -114,7 +129,9 @@ def _plan_for_lead(plan: dict) -> dict:
     members = []
     for m in plan.get("members") or []:
         entry = {k: m.get(k) for k in ("name", "role", "kind", "focus") if m.get(k)}
-        entry["assistant"] = (m.get("assistant") or {}).get("id") if isinstance(m.get("assistant"), dict) else m.get("assistant")
+        entry["assistant"] = library_mod.lead_value(m.get("assistant"))
+        if isinstance(m.get("assistant"), dict) and m["assistant"].get("reason"):
+            entry["assistant_reason"] = m["assistant"]["reason"]
         if m.get("executor_source") in ("goal", "user") and m.get("executor"):
             entry["executor"] = m["executor"]
         if m.get("model_source") == "user" and m.get("model"):
@@ -123,7 +140,8 @@ def _plan_for_lead(plan: dict) -> dict:
     return {"title": plan.get("title"), "summary": plan.get("summary"),
             **({"effort": plan["effort"]} if plan.get("effort") else {}), "members": members,
             "tasks": [{k: t.get(k) for k in ("key", "title", "description", "member", "depends_on")}
-                      for t in plan.get("tasks") or []]}
+                      for t in plan.get("tasks") or []],
+            **library_mod.for_lead(plan)}
 
 
 def extract_json(raw: str) -> Optional[dict]:
@@ -381,9 +399,14 @@ def assign_runners(members: list[dict], availability: Optional[dict] = None) -> 
 
 
 def validate_plan(raw: Any, *, parallel_cap: int = DEFAULT_PARALLEL_CAP,
-                  availability: Optional[dict] = None, check_runners: bool = True) -> tuple[Optional[dict], list[str]]:
+                  availability: Optional[dict] = None, check_runners: bool = True,
+                  library: Optional[dict] = None) -> tuple[Optional[dict], list[str]]:
     """Normalize a proposed plan. Returns ``(plan, [])`` or ``(None, errors)`` (Chinese, user-facing).
-    ``check_runners=False`` skips the runner assignment (no availability probe)."""
+    ``check_runners=False`` skips the runner assignment (no availability probe).
+
+    ``library`` (library.usable): the lead's fresh answer may name the user's assistants, upgrades
+    and new ones (recorded, never written here). Without it the member assistants a stored plan
+    already decided are kept as they are, and template ids are looked up as before."""
     errors: list[str] = []
     if not isinstance(raw, dict):
         return None, ["计划不是一个 JSON 对象"]
@@ -403,6 +426,7 @@ def validate_plan(raw: Any, *, parallel_cap: int = DEFAULT_PARALLEL_CAP,
     members: list[dict] = []
     names: set[str] = set()
     models = configured_models()
+    choices = library_mod.Choices(raw, library) if library is not None else None
     for index, entry in enumerate(members_in[:MAX_MEMBERS], 1):
         if not isinstance(entry, dict):
             errors.append(f"第 {index} 个成员格式不对")
@@ -423,21 +447,31 @@ def validate_plan(raw: Any, *, parallel_cap: int = DEFAULT_PARALLEL_CAP,
             # The lead only writes an executor when the goal named one; a plan stored before
             # sources existed keeps exactly the runners the user reviewed.
             source = "goal" if executor else "auto"
-        template = assistants.resolve(entry.get("assistant"))
-        role = _clean_text(entry.get("role"), 40) or (template["name"] if template else name)
+        stored = library_mod.stored_member(entry.get("assistant")) if choices is None else None
+        if choices is not None:
+            chosen, template = choices.member(entry.get("assistant"), entry.get("assistant_reason"))
+        elif stored is not None:
+            chosen, template = stored, None
+        else:
+            template = assistants.resolve(entry.get("assistant"))
+            chosen = {**assistants.public(template), "action": "template"} if template else None
+        role = _clean_text(entry.get("role"), 40) or (chosen["name"] if chosen else name)
         focus = _clean_text(entry.get("focus"), 300)
-        kind = runners.normalize_kind(entry.get("kind")) or (template["kind"] if template else "") or infer_kind(role, focus)
+        kind = (runners.normalize_kind(entry.get("kind")) or (template["kind"] if template else "")
+                or (runners.normalize_kind(chosen.get("kind")) if chosen else "") or infer_kind(role, focus))
         names.add(name)
         members.append({
             "name": name,
             "role": role,
             "focus": focus,
             "kind": kind,
-            "assistant": assistants.public(template),
+            "assistant": chosen,
             "executor": executor or "",
             "executor_source": source,
             **member_model(entry, models),
         })
+        if entry.get("assistant_preferred") and chosen:
+            members[-1]["assistant_preferred"] = True
 
     tasks: list[dict] = []
     keys: set[str] = set()
@@ -494,6 +528,10 @@ def validate_plan(raw: Any, *, parallel_cap: int = DEFAULT_PARALLEL_CAP,
 
     used = {t["member"] for t in tasks}
     members = [m for m in members if m["name"] in used]
+    if choices is not None:
+        proposals = choices.finish(members, tasks)
+    else:
+        proposals = library_mod.stored_proposals(raw.get("assistant_proposals"), members)
     for m in members:
         # A member without an explicit kind is classified by what it is asked to do.
         if not m["kind"]:
@@ -523,6 +561,12 @@ def validate_plan(raw: Any, *, parallel_cap: int = DEFAULT_PARALLEL_CAP,
     }
     if effort:
         plan["effort"] = effort
+    if proposals:
+        plan["assistant_proposals"] = proposals
+    if library is not None:
+        plan["assistant_library"] = {"may_write": library["may_write"]}
+    elif isinstance(raw.get("assistant_library"), dict):
+        plan["assistant_library"] = {"may_write": bool(raw["assistant_library"].get("may_write"))}
     if isinstance(raw.get("lead_model"), dict):
         plan["lead_model"] = raw["lead_model"]
     if isinstance(raw.get("project"), dict) and raw["project"].get("path"):
@@ -618,16 +662,19 @@ def resolve_project(goal: str, choice: str) -> Optional[dict]:
 
 def propose_plan(goal: str, workspace: str, *, feedback: str = "", previous: Optional[dict] = None,
                  parallel_cap: int = DEFAULT_PARALLEL_CAP, timeout: int = 150, lead_model: str = "",
-                 project: Optional[dict] = None, team_id: str = "", inputs: Optional[list] = None) -> dict:
+                 project: Optional[dict] = None, team_id: str = "", inputs: Optional[list] = None,
+                 library: Optional[dict] = None) -> dict:
     """Ask the lead model for a plan, then validate it. One retry when the reply is not usable.
-    Each step is visible to HaloWebUI while it runs (``progress.planning``)."""
+    Each step is visible to HaloWebUI while it runs (``progress.planning``). ``library``: the
+    user's assistants as HaloWebUI sent them (see library.py)."""
+    library = library_mod.usable(library)
     from . import progress
 
     if project and project.get("path"):
         workspace = project["path"] + "（团队分支的 worktree，批准时创建）"
     progress.planning_step(team_id, "prepare", "读目标，整理可选的成员模板、执行来源和模型" + (
         f"；在项目 {project.get('name') or project['path']} 里做" if project and project.get("path") else ""))
-    messages = build_messages(goal, workspace, feedback, previous, project, inputs)
+    messages = build_messages(goal, workspace, feedback, previous, project, inputs, library)
     last_errors: list[str] = []
     for attempt in range(2):
         def on_route(route: dict, failures: list, attempt: int = attempt) -> None:
@@ -653,7 +700,7 @@ def propose_plan(goal: str, workspace: str, *, feedback: str = "", previous: Opt
             parsed.setdefault("lead", {})
             if isinstance(parsed["lead"], dict):
                 parsed["lead"]["model"] = used.get("model")
-            plan, last_errors = validate_plan(parsed, parallel_cap=parallel_cap)
+            plan, last_errors = validate_plan(parsed, parallel_cap=parallel_cap, library=library)
             if plan is not None:
                 estimate = progress.estimate_plan(plan)
                 if estimate:

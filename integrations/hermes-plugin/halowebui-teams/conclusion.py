@@ -224,7 +224,7 @@ def _deliverables(team: dict, files: list[dict], rows: list[dict]) -> list[tuple
 
 def _messages(team: dict, rows: list[dict], files: list[dict], texts: list[tuple[str, str]]) -> list:
     members = "\n".join(
-        f"- {m.get('name')}（{m.get('role')}{'，助手模板「' + m['assistant']['name'] + '」' if isinstance(m.get('assistant'), dict) else ''}）"
+        f"- {m.get('name')}（{m.get('role')}{'，助手「' + m['assistant']['name'] + '」' if isinstance(m.get('assistant'), dict) else ''}）"
         for m in team.get("members") or [])
     from .lead import later_requests
 

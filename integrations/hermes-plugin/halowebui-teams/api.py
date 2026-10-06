@@ -4,9 +4,11 @@ HaloWebUI keeps who owns which team; it sends the owner as ``X-Halo-Owner`` and 
 refuses a team whose recorded owner differs (404), so a bug on the HaloWebUI side cannot read
 or drive another user's team through this API either.
 
-  POST /v1/halo-teams/plan                         {goal, feedback?, previous?, team_id?}
+  POST /v1/halo-teams/plan                         {goal, feedback?, previous?, team_id?, library?}
+                                                    library: the user's assistants (see library.py)
   POST /v1/halo-teams                              {team_id, plan, goal, title?, chat_id?, image_templates?,
-                                                    conclusion_template?}
+                                                    conclusion_template?, member_assistants?}
+                                                    member_assistants: {member: assistant snapshot}
   GET  /v1/halo-teams/{team_id}                    snapshot
   GET  /v1/halo-teams/{team_id}/events?after=&limit=
   GET  /v1/halo-teams/{team_id}/tasks/{task_id}?log=1
@@ -120,6 +122,7 @@ async def _plan(request):
             plan_mod.propose_plan, goal, workspace, feedback=str(data.get("feedback") or ""), previous=previous,
             lead_model=lead_model, project=project, team_id=plan_key,
             inputs=[str(n)[:120] for n in data.get("inputs") or [] if n][:20] if isinstance(data.get("inputs"), list) else None,
+            library=data.get("library") if isinstance(data.get("library"), dict) else None,
         )
     finally:
         progress.planning_done(plan_key)
@@ -155,6 +158,7 @@ async def _create(request):
         image_templates=data.get("image_templates") if isinstance(data.get("image_templates"), list) else None,
         inputs=data.get("inputs") if isinstance(data.get("inputs"), list) else None,
         conclusion_template=data.get("conclusion_template") if isinstance(data.get("conclusion_template"), dict) else None,
+        member_assistants=data.get("member_assistants") if isinstance(data.get("member_assistants"), dict) else None,
     )
     return _json_response(result, status=201 if result.get("created") else 200)
 

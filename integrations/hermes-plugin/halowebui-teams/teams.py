@@ -87,13 +87,57 @@ def default_workspace(slug: str) -> str:
     return str(WORKSPACE_ROOT / slug)
 
 
+def _role_text(member: dict) -> str:
+    """The member's assistant as its role: the snapshot HaloWebUI froze at approval (any library
+    assistant or template, at the version it had then), else — a plan from before snapshots, or a
+    member the lead added later — the 「协作」 template by id."""
+    assistant = member.get("assistant") if isinstance(member.get("assistant"), dict) else None
+    if "assistant_prompt" in member:
+        prompt = str(member.get("assistant_prompt") or "")
+        if not prompt or not assistant:
+            return ""
+        kind = "助手模板" if assistant.get("action") == "template" else "助手"
+        version = f"，第 {assistant['version']} 版" if assistant.get("version") and assistant.get("action") != "template" else ""
+        return (f"你的角色设定（来自 HaloWebUI {kind}「{assistant.get('name') or ''}」{version}，团队里你负责的部分以下面的任务为准）：\n"
+                f"{prompt}\n\n")
+    template = assistants.resolve(assistant.get("ref") or assistant.get("id")) if assistant else None
+    if template and template.get("prompt"):
+        return (f"你的角色设定（来自 HaloWebUI 助手模板「{template['name']}」，团队里你负责的部分以下面的任务为准）：\n"
+                f"{template['prompt']}\n\n")
+    return ""
+
+
+def apply_member_assistants(members: list[dict], snapshots: Optional[dict]) -> None:
+    """HaloWebUI's snapshot of each member's assistant (frozen at approval) onto the members, in
+    place: ``{name: {action, ref, id, name, emoji, version, system, description} | {action:
+    "generic", note}}``. The prompt is cleaned and cut like a template's; ``generic`` = no
+    assistant (the one in the plan is gone), the plain role."""
+    if not isinstance(snapshots, dict):
+        return
+    for m in members:
+        snap = snapshots.get(m["name"])
+        if not isinstance(snap, dict):
+            continue
+        if snap.get("action") == "generic" or not str(snap.get("system") or "").strip():
+            m["assistant"] = None
+            m["assistant_prompt"] = ""
+            if snap.get("note"):
+                m["assistant_note"] = redact(snap.get("note"), 200)
+            continue
+        version = snap.get("version") if isinstance(snap.get("version"), int) else None
+        m["assistant"] = {
+            "ref": str(snap.get("ref") or "")[:220], "id": str(snap.get("id") or "")[:200],
+            "name": redact(snap.get("name"), 60), "emoji": redact(snap.get("emoji"), 8),
+            "description": redact(snap.get("description"), 160), "action": str(snap.get("action") or "")[:20],
+            **({"version": version} if version else {}),
+            **({"kind": m["assistant"]["kind"]} if isinstance(m.get("assistant"), dict) and m["assistant"].get("kind") else {}),
+        }
+        m["assistant_prompt"] = assistants.clean_prompt(snap.get("system"))
+
+
 def _task_body(team: dict, task: dict, member: dict) -> str:
     deps = "、".join(task["depends_on"]) or "无"
-    template = assistants.by_id((member.get("assistant") or {}).get("id")) if isinstance(member.get("assistant"), dict) else None
-    role = ""
-    if template and template.get("prompt"):
-        role = (f"你的角色设定（来自 HaloWebUI 助手模板「{template['name']}」，团队里你负责的部分以下面的任务为准）：\n"
-                f"{template['prompt']}\n\n")
+    role = _role_text(member)
     return (
         f"你是协作团队「{team['title']}」的成员 {member['name']}（{member['role']}）。"
         f"负责人是 {LEAD_NAME}，团队里还有：{'、'.join(m['name'] + '（' + m['role'] + '）' for m in team['members'] if m['name'] != member['name']) or '无'}。\n\n"
@@ -239,10 +283,13 @@ def _workspace_text(team: dict) -> str:
 
 def create_team(team_id: str, plan: dict, *, owner: str, chat_id: str = "", goal: str = "",
                 title: str = "", origin: Optional[dict] = None, image_templates: Optional[list] = None,
-                inputs: Optional[list] = None, conclusion_template: Optional[dict] = None) -> dict:
+                inputs: Optional[list] = None, conclusion_template: Optional[dict] = None,
+                member_assistants: Optional[dict] = None) -> dict:
     """Create (or return) the board for *team_id* from a validated *plan*; idempotent.
     ``image_templates``: the owner's HaloWebUI image templates, offered to image members.
-    ``conclusion_template``: the one the result's picture is drawn in once it is written."""
+    ``conclusion_template``: the one the result's picture is drawn in once it is written.
+    ``member_assistants``: each member's assistant as HaloWebUI froze it at approval (see
+    apply_member_assistants); the task bodies use these prompts."""
     from .illustrate import clean_template
     from .plan import task_model, validate_plan
 
@@ -256,6 +303,7 @@ def create_team(team_id: str, plan: dict, *, owner: str, chat_id: str = "", goal
         checked, errors = validate_plan(plan)
         if checked is None:
             raise TeamError(400, "计划没有通过检查：" + "；".join(errors))
+        apply_member_assistants(checked["members"], member_assistants)
         workspace = default_workspace(slug)
         project = None
         if isinstance(checked.get("project"), dict) and checked["project"].get("path"):
@@ -537,7 +585,9 @@ def snapshot(team_id: str, owner: Optional[str] = None) -> dict:
     members = []
     for m in team.get("members") or []:
         mine = [t for t in tasks_out if t["member"] == m["name"]]
-        members.append({**m, "status": member_status(mine), "task_ids": [t["id"] for t in mine],
+        # the frozen prompt stays on Hermes (HaloWebUI keeps its own copy of the choice)
+        members.append({**{k: v for k, v in m.items() if k != "assistant_prompt"},
+                        "status": member_status(mine), "task_ids": [t["id"] for t in mine],
                         "current_task": next((t["id"] for t in mine if t["status"] == "running"), None)})
     return {
         "team": {

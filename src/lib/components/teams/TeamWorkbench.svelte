@@ -848,6 +848,8 @@
 								teamStopped={stopped}
 								workspace={live?.team.workspace ?? null}
 								{refreshKey}
+								assistantsApplied={team?.plan?.assistants_applied ?? null}
+								on:team={(e) => (team = e.detail)}
 								on:close={() => {
 									selectedTask = null;
 									selectedMember = null;
@@ -1017,6 +1019,8 @@
 										teamStopped={stopped}
 										workspace={live?.team.workspace ?? null}
 										{refreshKey}
+										assistantsApplied={team?.plan?.assistants_applied ?? null}
+										on:team={(e) => (team = e.detail)}
 										on:close={() => {
 											selectedTask = null;
 											selectedMember = null;

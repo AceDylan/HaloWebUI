@@ -5,6 +5,7 @@ Runs against a throwaway SQLite database; the app's Alembic migrations create th
 (which also exercises the new agent_team revision)."""
 
 import asyncio
+import json
 import os
 import sys
 import tempfile
@@ -87,7 +88,7 @@ def hermes(monkeypatch):
     monkeypatch.setattr(teams_router, "hermes_call", fake.call)
     monkeypatch.setattr(teams_utils, "hermes_call", fake.call)
     planned = []
-    monkeypatch.setattr(teams_router, "start_planning", lambda team, target, feedback="", previous=None:
+    monkeypatch.setattr(teams_router, "start_planning", lambda team, target, feedback="", previous=None, access=None:
                         planned.append((team.id, feedback, previous)))
     fake.planned = planned
     return fake
@@ -943,7 +944,7 @@ def test_a_chat_message_becomes_a_team_with_what_was_said_before(hermes, monkeyp
 
     monkeypatch.setattr("open_webui.socket.main.get_event_emitter", lambda metadata: emitter)
     monkeypatch.setattr("open_webui.tasks.create_task", lambda coro, id=None, owner_id=None: (jobs.append(coro) or "task-1", None))
-    monkeypatch.setattr(dispatch, "start_planning", lambda team, target: planned.append(team))
+    monkeypatch.setattr(dispatch, "start_planning", lambda team, target, access=None: planned.append(team))
     monkeypatch.setattr(dispatch, "hermes_target", teams_router.hermes_target)
     monkeypatch.setattr(dispatch.Chats, "upsert_message_to_chat_by_id_and_message_id",
                         lambda chat_id, message_id, fields: saved.append((chat_id, message_id, fields)))
@@ -1049,3 +1050,279 @@ def test_a_big_workspace_file_comes_through_whole():
 
     data, headers = asyncio.run(run())
     assert len(data) == len(body) and data == body and headers["Content-Type"] == "image/png"
+
+
+# --- 助手库: the lead records assistant decisions, approval writes them once -----------------------
+
+ASSISTANT_PROMPT = "你是一位资深的数据可视化分析师。先澄清目标和读者，再选图表类型、核对数据口径，最后自查数字和单位。" * 3
+UPGRADED_PROMPT = ASSISTANT_PROMPT + "新增：每张图都写明数据来源和统计口径，数字和单位逐一核对。"
+NEW_PROMPT = "你是报告撰稿人。先列提纲，再按结论先行写成报告，引用数据注明来源，最后通读自查错别字和逻辑。" * 2
+
+
+def _library_row(model_id, name, prompt, user_id="u1", version=1):
+    from open_webui.models.models import ModelForm, ModelMeta, ModelParams, Models
+
+    Models.delete_model_by_id(model_id)
+    return Models.insert_new_model(
+        ModelForm(id=model_id, base_model_id="gpt-4o", name=name,
+                  meta=ModelMeta(description=f"{name}的说明", assistant={"source": "manual", "domain": "数据", "version": version}),
+                  params=ModelParams(system=prompt), access_control={}, is_active=True),
+        user_id,
+    )
+
+
+class FakeAccess:
+    """The user's library as AssistantAccess would read it, straight from the model table."""
+
+    def __init__(self, user_id="u1", may_write=True, ids=("asst-viz",)):
+        self.user = _User(user_id)
+        self.writable = may_write
+        self.ids = list(ids)
+        self.loads = 0
+
+    def may_write(self):
+        return self.writable
+
+    async def library(self):
+        from open_webui.models.models import Models
+        from open_webui.utils import assistant_library as lib
+
+        self.loads += 1
+        assistants = []
+        for model_id in self.ids:
+            row = Models.get_model_by_id(model_id)
+            if row is None or not row.is_active or lib.lib_meta(row.meta)["archived"]:
+                continue
+            assistants.append(lib.model_entry({"id": row.id, "name": row.name, "info": row.model_dump()}, self.user))
+        bases = [{"id": "gpt-4o", "name": "gpt-4o"}]
+        return {"assistants": assistants, "bases": bases, "default_base": "gpt-4o", "may_write": self.writable}
+
+
+LIB_PLAN = {
+    "title": "季度报告",
+    "members": [
+        {"name": "analyst", "role": "数据分析", "executor": "hermes",
+         "assistant": {"ref": "model:asst-viz", "id": "asst-viz", "name": "图表分析师", "action": "update",
+                       "proposal": "model:asst-viz", "version": 1, "reason": "做图表的老手"}},
+        {"name": "charter", "role": "作图", "executor": "hermes",
+         "assistant": {"ref": "model:asst-viz", "id": "asst-viz", "name": "图表分析师", "action": "update",
+                       "proposal": "model:asst-viz", "version": 1}},
+        {"name": "writer", "role": "撰写", "executor": "hermes",
+         "assistant": {"ref": "", "id": "", "name": "报告撰稿人", "emoji": "📝", "action": "create", "proposal": "new:A1"}},
+        {"name": "reviewer", "role": "评审", "executor": "hermes",
+         "assistant": {"id": "18", "name": "测试工程师", "emoji": "🧪", "kind": "code"}},  # a plan from before the library
+    ],
+    "tasks": [
+        {"key": "T1", "title": "分析", "member": "analyst", "depends_on": []},
+        {"key": "T2", "title": "作图", "member": "charter", "depends_on": ["T1"]},
+        {"key": "T3", "title": "撰写", "member": "writer", "depends_on": ["T2"]},
+        {"key": "T4", "title": "评审", "member": "reviewer", "depends_on": ["T3"]},
+    ],
+    "assistant_proposals": [
+        {"key": "model:asst-viz", "action": "update", "ref": "model:asst-viz", "name": "图表分析师",
+         "system_prompt": UPGRADED_PROMPT, "change": "会注明数据口径", "version": 1},
+        {"key": "new:A1", "action": "create", "name": "报告撰稿人", "emoji": "📝", "domain": "写作",
+         "description": "把分析写成报告", "system_prompt": NEW_PROMPT, "change": ""},
+    ],
+    "assistant_library": {"may_write": True},
+    "executors": ["hermes"],
+}
+
+
+@pytest.fixture
+def library_writes(monkeypatch):
+    """Every write the assistant library makes, counted (the real ones still happen)."""
+    from open_webui.utils import assistant_library as lib
+
+    calls = []
+    real_create, real_upgrade = lib.create_assistant, lib.upgrade_assistant
+
+    def create(user, spec, **kw):
+        calls.append(("create", spec["name"], kw.get("run_ref")))
+        return real_create(user, spec, **kw)
+
+    def upgrade(user, model_id, spec, **kw):
+        calls.append(("update", model_id, kw.get("run_ref")))
+        return real_upgrade(user, model_id, spec, **kw)
+
+    monkeypatch.setattr(lib, "create_assistant", create)
+    monkeypatch.setattr(lib, "upgrade_assistant", upgrade)
+    return calls
+
+
+def test_the_plan_request_carries_the_users_library_and_preferred_assistant(hermes):
+    _library_row("asst-viz", "图表分析师", ASSISTANT_PROMPT + "x" * 400)
+    client = _client("u1")
+    created = client.post("/api/v1/teams/", json={"goal": "做一份季度数据图表报告",
+                                                  "assistants": ["model:asst-viz", "bogus", "builtin:590"]}).json()
+    assert created["preferred_assistants"] == ["model:asst-viz", "builtin:590"]
+    team = AgentTeams.get(created["id"], "u1")
+    target = teams_utils.HermesTarget("http://hermes", {}, "u1")
+    hermes.responses[("POST", "/plan")] = {"ok": True, "plan": PLAN}
+    asyncio.run(teams_utils._plan_job(team, target, "", None, FakeAccess()))
+    body = next(c for c in hermes.calls if c[2] == "/plan")[3]
+    library = body["library"]
+    assert library["may_write"] is True and library["max_create"] == 2 and library["max_update"] == 2
+    entry = next(a for a in library["assistants"] if a["ref"] == "model:asst-viz")
+    assert entry["name"] == "图表分析师" and entry["editable"] is True and entry["version"] == 1
+    assert entry["domain"] == "数据" and len(entry["prompt"]) <= 301 and entry["prompt"].endswith("…")
+    assert "system" not in entry and "base" not in entry
+    assert library["preferred"] == ["model:asst-viz", "builtin:590"]
+    assert any(t["ref"] == "builtin:590" for t in library["templates"])
+    # a library that cannot be read leaves it out; the plan still goes ahead
+    class Broken(FakeAccess):
+        async def library(self):
+            raise RuntimeError("no models")
+
+    hermes.calls.clear()
+    team2 = AgentTeams.get(client.post("/api/v1/teams/", json={"goal": "另一个"}).json()["id"], "u1")
+    asyncio.run(teams_utils._plan_job(team2, target, "", None, Broken()))
+    assert "library" not in next(c for c in hermes.calls if c[2] == "/plan")[3]
+    assert AgentTeams.get(team2.id, "u1").status == "plan_ready"
+
+
+def test_drafts_replans_and_cancels_write_nothing(hermes, library_writes):
+    _library_row("asst-viz", "图表分析师", ASSISTANT_PROMPT)
+    client = _client("u1")
+    team = AgentTeams.get(client.post("/api/v1/teams/", json={"goal": "季度报告"}).json()["id"], "u1")
+    target = teams_utils.HermesTarget("http://hermes", {}, "u1")
+    hermes.responses[("POST", "/plan")] = {"ok": True, "plan": LIB_PLAN}
+    asyncio.run(teams_utils._plan_job(team, target, "", None, FakeAccess()))
+    row = AgentTeams.get(team.id, "u1")
+    assert row.status == "plan_ready" and row.plan["assistant_proposals"][0]["system_prompt"] == UPGRADED_PROMPT
+    shown = client.get(f"/api/v1/teams/{team.id}").json()["team"]["plan"]
+    assert shown["members"][0]["assistant"]["action"] == "update" and shown["assistant_proposals"][1]["name"] == "报告撰稿人"
+    assert client.post(f"/api/v1/teams/{team.id}/replan", json={"feedback": "换个人"}).status_code == 200
+    AgentTeams.update(team.id, "u1", status="plan_ready", plan=LIB_PLAN)
+    assert client.post(f"/api/v1/teams/{team.id}/cancel").status_code == 200
+    assert client.delete(f"/api/v1/teams/{team.id}").status_code == 200
+    assert library_writes == []
+    from open_webui.models.models import Models
+    assert Models.get_model_by_id("asst-viz").params.model_dump()["system"] == ASSISTANT_PROMPT
+
+
+def test_approval_writes_once_and_a_retried_start_reuses_it(hermes, library_writes, monkeypatch):
+    from open_webui.models.models import Models
+    from open_webui.utils import assistant_library as lib
+
+    _library_row("asst-viz", "图表分析师", ASSISTANT_PROMPT)
+    access = FakeAccess()
+    monkeypatch.setattr(teams_router, "AssistantAccess", lambda request, user: access)
+    client = _client("u1")
+    team_id = _ready_team(client, hermes)
+    AgentTeams.update(team_id, "u1", plan=LIB_PLAN)
+    hermes.fail[("POST", "")] = (502, "Hermes 不可用")
+    assert client.post(f"/api/v1/teams/{team_id}/approve").status_code == 502
+    row = AgentTeams.get(team_id, "u1")
+    assert row.status == "start_failed"
+    applied = row.plan["assistants_applied"]
+    assert applied["run_ref"] == f"team:{team_id}"
+    members = applied["members"]
+    # one upgrade shared by two members (one new version), one new assistant, the old template plan
+    assert [c[0] for c in library_writes] == ["update", "create"]
+    assert all(c[2] == f"team:{team_id}" for c in library_writes)
+    assert members["analyst"]["action"] == members["charter"]["action"] == "update"
+    assert members["analyst"]["version"] == 2 and members["analyst"]["system"] == UPGRADED_PROMPT
+    assert members["analyst"]["before"]["system"] == ASSISTANT_PROMPT
+    assert members["writer"]["action"] == "create" and members["writer"]["saved"] is True
+    new_row = Models.get_model_by_id(members["writer"]["id"])
+    assert new_row.meta.model_dump()["hidden"] is True and lib.lib_meta(new_row.meta)["source"] == "team"
+    assert members["reviewer"]["action"] == "template" and members["reviewer"]["ref"] == "builtin:18"
+    assert lib.lib_meta(Models.get_model_by_id("asst-viz").meta)["version"] == 2
+
+    # approve again after the failed start: the same choices, nothing written again
+    del hermes.fail[("POST", "")]
+    hermes.responses[("POST", "")] = {"board": "halo-lib", "created": True, "tasks": {}}
+    resp = client.post(f"/api/v1/teams/{team_id}/approve")
+    assert resp.status_code == 200 and resp.json()["status"] == "running"
+    assert len(library_writes) == 2
+    assert lib.lib_meta(Models.get_model_by_id("asst-viz").meta)["version"] == 2
+    body = [c for c in hermes.calls if c[1] == "POST" and c[2] == ""][-1][3]
+    snaps = body["member_assistants"]
+    assert snaps["analyst"]["system"] == UPGRADED_PROMPT and snaps["analyst"]["version"] == 2
+    assert snaps["charter"]["id"] == "asst-viz" and snaps["writer"]["system"] == NEW_PROMPT
+    assert snaps["reviewer"]["action"] == "template" and len(snaps["reviewer"]["system"]) > 20
+    assert "assistants_applied" not in body["plan"] and "before" not in snaps["analyst"]
+    # the page sees the choices; the prompt only of the upgrade (to undo it), never the old one
+    shown = resp.json()["plan"]["assistants_applied"]["members"]
+    assert shown["analyst"]["system"] == UPGRADED_PROMPT and "before" not in shown["analyst"]
+    assert "system" not in shown["writer"] and shown["writer"]["hasSystem"] is True
+
+    # 「撤销升级」: the library undoes it, the team records it
+    assert client.post(f"/api/v1/teams/{team_id}/assistants/reverted", json={"id": "asst-viz"}).status_code == 409
+    lib.undo_run(_User("u1"), "asst-viz", f"team:{team_id}", after_system=UPGRADED_PROMPT)
+    resp = client.post(f"/api/v1/teams/{team_id}/assistants/reverted", json={"id": "asst-viz"})
+    assert resp.status_code == 200
+    shown = resp.json()["plan"]["assistants_applied"]["members"]
+    assert shown["analyst"]["reverted"] is True and shown["charter"]["reverted"] is True
+    assert Models.get_model_by_id("asst-viz").params.model_dump()["system"] == ASSISTANT_PROMPT
+    assert _client("u2").post(f"/api/v1/teams/{team_id}/assistants/reverted", json={"id": "asst-viz"}).status_code == 404
+
+
+def test_an_assistant_gone_by_approval_leaves_the_plain_role(hermes, library_writes, monkeypatch):
+    from open_webui.models.models import Models
+
+    Models.delete_model_by_id("asst-viz")
+    monkeypatch.setattr(teams_router, "AssistantAccess", lambda request, user: FakeAccess())
+    client = _client("u1")
+    team_id = _ready_team(client, hermes)
+    plan = json.loads(json.dumps(LIB_PLAN))
+    plan["members"][1]["assistant"] = {"ref": "model:asst-viz", "id": "asst-viz", "name": "图表分析师", "action": "use"}
+    AgentTeams.update(team_id, "u1", plan=plan)
+    hermes.responses[("POST", "")] = {"board": "halo-gone", "created": True, "tasks": {}}
+    resp = client.post(f"/api/v1/teams/{team_id}/approve")
+    assert resp.status_code == 200, resp.text
+    members = resp.json()["plan"]["assistants_applied"]["members"]
+    for name, role in (("analyst", "数据分析"), ("charter", "作图")):
+        assert members[name]["action"] == "generic" and "不在助手库" in members[name]["note"] and role in members[name]["note"]
+    assert [c[0] for c in library_writes] == ["create"]  # the upgrade had nothing left to upgrade
+    snaps = [c for c in hermes.calls if c[1] == "POST" and c[2] == ""][-1][3]["member_assistants"]
+    assert snaps["analyst"] == {"action": "generic", "note": members["analyst"]["note"]}
+
+
+def test_an_assistant_edited_after_planning_is_not_overwritten(hermes, library_writes, monkeypatch):
+    from open_webui.models.models import Models
+    from open_webui.utils import assistant_library as lib
+
+    _library_row("asst-viz", "图表分析师", "用户后来手动改过的设定" * 10, version=2)  # the plan read version 1
+    monkeypatch.setattr(teams_router, "AssistantAccess", lambda request, user: FakeAccess())
+    client = _client("u1")
+    team_id = _ready_team(client, hermes)
+    AgentTeams.update(team_id, "u1", plan=LIB_PLAN)
+    hermes.responses[("POST", "")] = {"board": "halo-cas", "created": True, "tasks": {}}
+    members = client.post(f"/api/v1/teams/{team_id}/approve").json()["plan"]["assistants_applied"]["members"]
+    assert members["analyst"]["action"] == "temporary" and "刚被改过" in members["analyst"]["note"]
+    assert Models.get_model_by_id("asst-viz").params.model_dump()["system"].startswith("用户后来手动改过")
+    assert lib.lib_meta(Models.get_model_by_id("asst-viz").meta)["version"] == 2
+
+
+def test_without_the_right_to_save_everything_is_for_this_run_only(hermes, library_writes, monkeypatch):
+    _library_row("asst-viz", "图表分析师", ASSISTANT_PROMPT)
+    monkeypatch.setattr(teams_router, "AssistantAccess", lambda request, user: FakeAccess(may_write=False))
+    client = _client("u1")
+    team_id = _ready_team(client, hermes)
+    AgentTeams.update(team_id, "u1", plan=LIB_PLAN)
+    hermes.responses[("POST", "")] = {"board": "halo-ro", "created": True, "tasks": {}}
+    members = client.post(f"/api/v1/teams/{team_id}/approve").json()["plan"]["assistants_applied"]["members"]
+    assert {members[n]["action"] for n in ("analyst", "charter", "writer")} == {"temporary"}
+    assert library_writes == []
+    snaps = [c for c in hermes.calls if c[1] == "POST" and c[2] == ""][-1][3]["member_assistants"]
+    assert snaps["analyst"]["system"] == UPGRADED_PROMPT and snaps["writer"]["system"] == NEW_PROMPT
+
+
+def test_edit_plan_keeps_the_assistant_decisions(hermes):
+    client = _client("u1")
+    team_id = _ready_team(client, hermes)
+    applied = {"run_ref": f"team:{team_id}", "at": 1, "members": {}}
+    AgentTeams.update(team_id, "u1", status="start_failed", plan={**LIB_PLAN, "assistants_applied": applied})
+    # an older Hermes echoes the plan without the assistant fields
+    echoed = {**PLAN, "members": [{k: v for k, v in m.items() if k != "assistant"} for m in LIB_PLAN["members"]],
+              "tasks": LIB_PLAN["tasks"]}
+    hermes.responses[("POST", "/plan/resolve")] = {"ok": True, "plan": echoed}
+    resp = client.put(f"/api/v1/teams/{team_id}/plan", json={"members": [{"name": "writer", "executor": "codex"}]})
+    assert resp.status_code == 200
+    sent = next(c for c in hermes.calls if c[2] == "/plan/resolve")[3]["plan"]
+    assert "assistants_applied" not in sent
+    stored = AgentTeams.get(team_id, "u1").plan
+    assert stored["assistants_applied"] == applied and stored["assistant_proposals"] == LIB_PLAN["assistant_proposals"]
+    assert stored["members"][0]["assistant"]["proposal"] == "model:asst-viz"

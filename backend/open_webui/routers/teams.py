@@ -19,6 +19,7 @@ from open_webui.models.chats import Chats
 from open_webui.models.users import Users
 from open_webui.utils.agent_teams import (
     ENABLE_AGENT_TEAMS,
+    AssistantAccess,
     FEEDBACK_MAX_CHARS,
     GOAL_MAX_CHARS,
     TeamsError,
@@ -30,7 +31,9 @@ from open_webui.utils.agent_teams import (
     hermes_target,
     image_templates,
     input_files,
+    mark_reverted,
     planning_progress,
+    preferred_refs,
     public_team,
     reconcile,
     stage_brief,
@@ -73,6 +76,9 @@ class CreateTeamForm(BaseModel):
     auto_start: bool = False
     # Files uploaded for the team (their ids, /api/v1/files): copied into its workspace's inputs/.
     files: list[str] = Field(default_factory=list, max_length=INPUT_FILES_MAX)
+    # 「用于协作」 from the assistant library: assistants (model:<id> / builtin:<id>) at least one
+    # member must use; the lead staffs them, the plan check assigns them if it did not.
+    assistants: list[str] = Field(default_factory=list, max_length=3)
 
 
 class ReplanForm(BaseModel):
@@ -214,15 +220,18 @@ async def create_team(request: Request, form: CreateTeamForm, user=Depends(get_v
     if form.files and len(inputs) < len(set(form.files)):
         raise HTTPException(status_code=404, detail="有附件找不到（没上传成功，或不是你的文件）")
     return public_team(_start(user, goal, target, chat_id=chat_id, lead_model=form.lead_model, project=form.project,
-                              auto_start=form.auto_start, inputs=inputs))
+                              auto_start=form.auto_start, inputs=inputs, assistants=preferred_refs(form.assistants),
+                              access=AssistantAccess(request, user)))
 
 
 def _start(user, goal: str, target, *, chat_id: Optional[str] = None, lead_model: Optional[str] = None,
            origin: Optional[dict] = None, project: Optional[str] = None, auto_start: bool = False,
-           inputs: Optional[list] = None):
+           inputs: Optional[list] = None, assistants: Optional[list] = None, access=None):
     meta: dict = {}
     if inputs:
         meta["inputs"] = inputs
+    if assistants:
+        meta["assistants"] = assistants
     if auto_start:
         meta["auto_start"] = True
     if (lead_model or "").strip():
@@ -232,7 +241,7 @@ def _start(user, goal: str, target, *, chat_id: Optional[str] = None, lead_model
     if origin:
         meta["origin"] = origin
     team = AgentTeams.insert(user.id, goal, chat_id, default_title(goal), meta=meta or None)
-    start_planning(team, target)
+    start_planning(team, target, access=access)
     return team
 
 
@@ -263,10 +272,12 @@ async def replan(request: Request, team_id: str, form: ReplanForm, user=Depends(
         target = await hermes_target(request, user)
     except TeamsError as exc:
         _raise(exc)
-    return public_team(_replan(team, user, target, form.feedback, form.project))
+    return public_team(_replan(team, user, target, form.feedback, form.project, access=AssistantAccess(request, user)))
 
 
-def _replan(team, user, target, feedback: str, project: Optional[str] = None):
+def _replan(team, user, target, feedback: str, project: Optional[str] = None, access=None):
+    """A new plan from the lead. Like the first one it only records assistant decisions; nothing
+    is written to the library until the plan is approved."""
     previous = team.plan
     fields: dict = {}
     if project is not None:  # the user picked another place to work: the next plan uses it
@@ -275,7 +286,7 @@ def _replan(team, user, target, feedback: str, project: Optional[str] = None):
                                 status="planning", error=None, **fields)
     if updated is None:
         raise HTTPException(status_code=409, detail="现在不能重新规划（计划已批准或正在规划）")
-    start_planning(updated, target, feedback.strip(), previous)
+    start_planning(updated, target, feedback.strip(), previous, access=access)
     return updated
 
 
@@ -309,11 +320,22 @@ async def edit_plan(request: Request, team_id: str, form: PlanEditForm, user=Dep
     resolved = None
     try:
         target = await hermes_target(request, user)
-        resolved = await hermes_call(target, "POST", "/plan/resolve", json_body={"plan": plan}, timeout=40)
+        sent = {k: v for k, v in plan.items() if k != "assistants_applied"}
+        resolved = await hermes_call(target, "POST", "/plan/resolve", json_body={"plan": sent}, timeout=40)
     except TeamsError as exc:
         log.info("teams: plan resolve unavailable (%s); keeping the edit as is", exc.detail)
     if isinstance(resolved, dict) and isinstance(resolved.get("plan"), dict):
-        plan = resolved["plan"]
+        fresh = resolved["plan"]
+        # what only HaloWebUI keeps (the assistants a failed start already applied) and what an older
+        # Hermes may not echo back (the recorded assistant decisions)
+        for key in ("assistants_applied", "assistant_proposals", "assistant_library"):
+            if key in plan and key not in fresh:
+                fresh[key] = plan[key]
+        mine = {m.get("name"): m for m in plan["members"]}
+        for member in fresh.get("members") or []:
+            if isinstance(member, dict) and "assistant" not in member and member.get("name") in mine:
+                member["assistant"] = mine[member["name"]].get("assistant")
+        plan = fresh
     else:  # Hermes is checked again at approval; until then show the choice as the runner
         for member in plan["members"]:
             member["runner"] = member.get("executor")
@@ -334,14 +356,37 @@ async def approve(request: Request, team_id: str, user=Depends(get_verified_user
         target = await hermes_target(request, user)
     except TeamsError as exc:
         _raise(exc)
-    return public_team(await _approve(team, user, target))
+    return public_team(await _approve(team, user, target, AssistantAccess(request, user)))
 
 
-async def _approve(team, user, target):
+async def _approve(team, user, target, access=None):
     try:
-        return await start_team(team, target)
+        return await start_team(team, target, access)
     except TeamsError as exc:
         _raise(exc)
+
+
+class RevertedForm(BaseModel):
+    id: str = Field(min_length=1, max_length=200)
+
+
+@router.post("/{team_id}/assistants/reverted", dependencies=[Depends(_enabled)])
+async def assistant_reverted(team_id: str, form: RevertedForm, user=Depends(get_verified_user)):
+    """After 「撤销升级」 (POST /api/v1/assistant-library/undo with run_ref team:<id>): record it on
+    the team, once the library shows the undo of this team's upgrade as the assistant's last change."""
+    from open_webui.models.models import Models
+    from open_webui.utils import assistant_library as lib
+
+    team = _own(team_id, user)
+    row = Models.get_model_by_id(form.id)
+    revisions = lib.lib_meta(row.meta)["revisions"] if row is not None else []
+    last = revisions[-1] if revisions else {}
+    if last.get("source") != "undo" or last.get("runRef") != f"team:{team.id}":
+        raise HTTPException(status_code=409, detail="这次升级还没有撤销")
+    updated = mark_reverted(team, form.id)
+    if updated is None:
+        raise HTTPException(status_code=404, detail="这个协作任务没有升级过这个助手")
+    return public_team(updated)
 
 
 @router.post("/{team_id}/cancel", dependencies=[Depends(_enabled)])
@@ -722,7 +767,8 @@ async def hermes_create(request: Request, form: HermesCreateForm, caller=Depends
     goal = form.goal.strip()
     if not goal:
         raise HTTPException(status_code=400, detail="请写下要协作完成的目标")
-    return public_team(_start(user, goal, target, origin=_clean_origin(form.origin), auto_start=form.auto_start))
+    return public_team(_start(user, goal, target, origin=_clean_origin(form.origin), auto_start=form.auto_start,
+                              access=AssistantAccess(request, user)))
 
 
 @router.get("/hermes/teams/{team_id}")
@@ -775,7 +821,7 @@ async def hermes_knowledge(request: Request, team_id: str, caller=Depends(_herme
 @router.post("/hermes/teams/{team_id}/approve")
 async def hermes_approve(request: Request, team_id: str, caller=Depends(_hermes_caller)):
     user, target = caller
-    return public_team(await _approve(_own(team_id, user), user, target))
+    return public_team(await _approve(_own(team_id, user), user, target, AssistantAccess(request, user)))
 
 
 @router.post("/hermes/teams/{team_id}/cancel")
@@ -787,4 +833,5 @@ async def hermes_cancel(request: Request, team_id: str, caller=Depends(_hermes_c
 @router.post("/hermes/teams/{team_id}/replan")
 async def hermes_replan(request: Request, team_id: str, form: ReplanForm, caller=Depends(_hermes_caller)):
     user, target = caller
-    return public_team(_replan(_own(team_id, user), user, target, form.feedback, form.project))
+    return public_team(_replan(_own(team_id, user), user, target, form.feedback, form.project,
+                               access=AssistantAccess(request, user)))

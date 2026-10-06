@@ -2,16 +2,17 @@
 	import { createEventDispatcher } from 'svelte';
 
 	import type { HermesModel, Team, TeamExecutor, TeamPlanMember, TeamsMeta } from '$lib/apis/teams';
+	import AssistantChoiceTag from './AssistantChoiceTag.svelte';
 	import RunnerStatus from './RunnerStatus.svelte';
 	import StatusChip from './StatusChip.svelte';
 	import TeamAvatar from './TeamAvatar.svelte';
 	import { avatarKind, EXECUTOR_OPTIONS, KIND_LABEL, memberRunner, runnerLabel } from './model';
 
 	/**
-	 * The lead's plan, shown before anything runs: who does what (each member is a HaloWebUI
-	 * assistant template with a task kind), which runner each member starts on and what will
-	 * actually run it now, and the dependent tasks. Approve, change runners, ask for a new plan,
-	 * or cancel.
+	 * The lead's plan, shown before anything runs: who does what (each member's assistant — one
+	 * of the user's, a template, an upgrade or a new one, written to the library only on approval —
+	 * and its task kind), which runner each member starts on and what will actually run it now,
+	 * and the dependent tasks. Approve, change runners, ask for a new plan, or cancel.
 	 */
 	export let team: Team;
 	export let busy = false;
@@ -54,6 +55,14 @@
 	$: blocked = (plan?.members ?? []).filter((m) => memberRunner(m).actual === null).length;
 	$: lead = plan?.lead_model;
 	$: memberCount = plan?.members.length ?? 0;
+	// 助手库: what the lead proposes to write, and (after a failed start) what was already applied
+	$: proposals = new Map((plan?.assistant_proposals ?? []).map((p) => [p.key, p]));
+	$: applied = plan?.assistants_applied?.members ?? null;
+	$: writes = applied ? [] : (plan?.assistant_proposals ?? []).filter((p) => p.action !== 'temporary');
+	$: updates = writes.filter((p) => p.action === 'update').length;
+	$: creates = writes.filter((p) => p.action === 'create').length;
+	$: mayWrite = plan?.assistant_library?.may_write ?? true;
+	let openPrompt: string | null = null;
 
 	const optionLabel = (name: string) => {
 		const info = runnersBy.get(name as TeamExecutor);
@@ -257,6 +266,20 @@
 
 		<section>
 			<h3 class="tm-eyebrow mb-3">成员分工</h3>
+			{#if writes.length || (!mayWrite && plan.assistant_proposals?.length)}
+				<p class="mb-3 text-xs leading-relaxed text-gray-500" data-assistant-writes>
+					{#if writes.length}
+						批准后才写入助手库：{[
+							updates ? `升级 ${updates} 个` : '',
+							creates ? `新建 ${creates} 个（默认不在模型菜单里显示）` : ''
+						]
+							.filter(Boolean)
+							.join('、')}；重新规划或取消不会写入。
+					{:else}
+						你没有保存助手的权限：负责人设计的设定只在这次协作里用。
+					{/if}
+				</p>
+			{/if}
 			<ul class="grid gap-3 md:grid-cols-2">
 				<li class="lead tm-card flex items-center gap-3 self-start px-3.5 py-3 md:col-span-2">
 					<TeamAvatar kind="lead" size={38} />
@@ -289,18 +312,24 @@
 										>{member.role}</span
 									>
 								</div>
-								<div class="mt-1 flex flex-wrap gap-1.5 text-[11px]">
+								<div class="mt-1 flex flex-wrap items-center gap-1.5 text-[11px]">
 									{#if member.assistant}
 										<span
 											class="inline-flex max-w-full items-center gap-1 rounded-md bg-orange-500/10 px-1.5 py-0.5 text-orange-800 ring-1 ring-inset ring-orange-500/20 dark:text-orange-200"
 											title={member.assistant.description
-												? `助手模板：${member.assistant.description}`
-												: '助手模板'}
-											data-assistant={member.assistant.id}
-											><span aria-hidden="true">{member.assistant.emoji}</span><span
+												? `助手：${member.assistant.description}`
+												: '助手'}
+											data-assistant={member.assistant.id ||
+												member.assistant.ref ||
+												member.assistant.proposal ||
+												member.assistant.name}
+											><span aria-hidden="true">{member.assistant.emoji ?? ''}</span><span
 												class="truncate">{member.assistant.name}</span
 											></span
 										>
+										<AssistantChoiceTag
+											action={applied?.[member.name]?.action ?? member.assistant.action}
+										/>
 									{:else}
 										<span
 											class="rounded-md bg-gray-500/10 px-1.5 py-0.5 text-gray-500"
@@ -322,6 +351,43 @@
 									>
 										{member.focus}
 									</div>
+								{/if}
+								{#if member.assistant}
+									{@const a = member.assistant}
+									{@const note = applied?.[member.name]?.note || a.note}
+									{@const proposal = a.proposal ? proposals.get(a.proposal) : undefined}
+									{#if a.reason || note || proposal}
+										<div class="mt-1 text-[11px] leading-relaxed text-gray-500" data-assistant-why>
+											{#if a.reason}<span>{a.reason}</span>{/if}
+											{#if note}<span class="text-amber-700 dark:text-amber-300">{note}</span>{/if}
+											{#if proposal}
+												<button
+													type="button"
+													class="text-sky-700 hover:underline dark:text-sky-300"
+													aria-expanded={openPrompt === member.name}
+													on:click={() =>
+														(openPrompt = openPrompt === member.name ? null : member.name)}
+													data-assistant-prompt-toggle
+													>{openPrompt === member.name
+														? '收起设定'
+														: proposal.ref
+															? '查看升级后的设定'
+															: '查看设定'}</button
+												>
+											{/if}
+										</div>
+										{#if proposal && openPrompt === member.name}
+											<div class="prompt-box mt-1.5 rounded-lg px-2.5 py-2" data-assistant-prompt>
+												{#if proposal.change}
+													<div class="mb-1 text-[11px] text-violet-700 dark:text-violet-300">
+														{proposal.ref ? '这次升级' : '能做什么'}：{proposal.change}
+													</div>
+												{/if}
+												<pre
+													class="tm-scroll max-h-48 overflow-y-auto whitespace-pre-wrap break-words font-sans text-[11px] leading-relaxed text-gray-600 dark:text-gray-300">{proposal.system_prompt}</pre>
+											</div>
+										{/if}
+									{/if}
 								{/if}
 							</div>
 						</div>
@@ -604,7 +670,8 @@
 		background: radial-gradient(120% 160% at 0% 0%, hsl(250 90% 65% / 0.1), transparent 55%),
 			hsl(var(--tm-surface));
 	}
-	.runner-box {
+	.runner-box,
+	.prompt-box {
 		background: hsl(var(--tm-surface-2));
 		border: 1px solid hsl(var(--tm-line));
 	}

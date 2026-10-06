@@ -23,6 +23,7 @@
 	import StatusChip from './StatusChip.svelte';
 	import TeamAvatar from './TeamAvatar.svelte';
 	import { uploadFile } from '$lib/apis/files';
+	import { listLibrary } from '$lib/apis/assistant-library';
 	import { goalWithBackground, originLabel, takeHandoff, type HandoffOrigin } from '$lib/utils/handoff';
 	import HandoffBack from '$lib/components/common/HandoffBack.svelte';
 	import { now, timeAgo } from './clock';
@@ -241,6 +242,38 @@
 	};
 	const detach = (i: number) => (attached = attached.filter((_, j) => j !== i));
 
+	// 「用于协作」 from the assistant library (/teams?assistant=<ref>): the lead staffs at least one
+	// member with it. The name comes from the library (model:<id>) or the templates (builtin:<id>).
+	let preferred: { ref: string; name: string; emoji: string } | null = null;
+	const loadPreferred = async (ref: string) => {
+		if (!/^(model|builtin):.+/.test(ref)) return;
+		preferred = { ref, name: '', emoji: '' };
+		let found: { name: string; emoji: string } | null = null;
+		try {
+			if (ref.startsWith('builtin:')) {
+				const { default: agents } = await import('$lib/data/agents-zh.json');
+				const id = ref.slice('builtin:'.length);
+				const hit = (agents as { id: string | number; name: string; emoji?: string }[]).find(
+					(a) => String(a.id) === id
+				);
+				if (hit) found = { name: hit.name, emoji: hit.emoji ?? '' };
+			} else {
+				const hit = (await listLibrary(localStorage.token)).assistants.find((a) => a.ref === ref);
+				if (hit) found = { name: hit.name, emoji: hit.emoji ?? '' };
+			}
+		} catch {
+			// the library could not be read now: keep the pick, the server checks it
+			found = { name: ref.replace(/^(model|builtin):/, ''), emoji: '' };
+		}
+		if (preferred?.ref !== ref) return; // removed (or replaced) meanwhile
+		if (found) {
+			preferred = { ref, ...found };
+		} else {
+			preferred = null;
+			toast.error('找不到要指定的助手（可能已删除或归档）');
+		}
+	};
+
 	const create = async () => {
 		const text = goal.trim() ? goalWithBackground(goal, background, origin) : '';
 		if (!text || creating || uploading) return;
@@ -253,7 +286,8 @@
 				leadModel || null,
 				project,
 				autoStart,
-				attached.filter((f) => f.id).map((f) => f.id as string)
+				attached.filter((f) => f.id).map((f) => f.id as string),
+				preferred ? [preferred.ref] : []
 			);
 			goto(`/teams/${team.id}`);
 		} catch (e) {
@@ -308,6 +342,8 @@
 		const params = new URLSearchParams(window.location.search);
 		chatId = params.get('chat');
 		goal = params.get('goal') ?? '';
+		const assistantRef = params.get('assistant');
+		if (assistantRef) loadPreferred(assistantRef);
 		const incoming = takeHandoff(typeof sessionStorage === 'undefined' ? null : sessionStorage, 'teams');
 		if (incoming) {
 			if (incoming.text) goal = incoming.text;
@@ -434,6 +470,24 @@
 								aria-label="不带背景"
 								on:click={() => (background = '')}
 								data-team-context-remove>×</button
+							>
+						</span>
+					</div>
+				{/if}
+				{#if preferred}
+					<div class="px-4 pb-1.5" data-team-assistant={preferred.ref}>
+						<span
+							class="pill relative inline-flex max-w-full items-center gap-1.5 rounded-full py-0.5 pr-6 pl-2.5 text-xs"
+							title="负责人会安排至少一位成员用这个助手"
+						>
+							<span class="shrink-0" aria-hidden="true">{preferred.emoji || '✦'}</span>
+							<span class="truncate">指定成员助手：{preferred.name || '读取中…'}</span>
+							<button
+								type="button"
+								class="absolute right-1 top-1/2 grid size-4 -translate-y-1/2 place-items-center rounded-full text-gray-400 hover:bg-gray-500/15 hover:text-gray-700 dark:hover:text-gray-200"
+								aria-label="不指定助手"
+								on:click={() => (preferred = null)}
+								data-team-assistant-remove>×</button
 							>
 						</span>
 					</div>

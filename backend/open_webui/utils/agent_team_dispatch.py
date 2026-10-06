@@ -17,6 +17,7 @@ from open_webui.models.chats import Chats
 from open_webui.utils.agent_teams import (
     ENABLE_AGENT_TEAMS,
     GOAL_MAX_CHARS,
+    AssistantAccess,
     TeamsError,
     default_title,
     hermes_target,
@@ -111,7 +112,7 @@ async def run_team_dispatch(request, form_data: dict, user, metadata: dict, mode
                 if inputs:
                     meta["inputs"] = inputs
                 team = AgentTeams.insert(user.id, goal or "处理附带的文件", chat_id, title, meta=meta)
-                start_planning(team, target)
+                start_planning(team, target, access=AssistantAccess(request, user))
             except TeamsError as exc:
                 error = exc.detail
             except Exception as exc:  # noqa: BLE001

@@ -190,6 +190,7 @@
 	import ChatControls from './ChatControls.svelte';
 	import EventConfirmDialog from '../common/ConfirmDialog.svelte';
 	import BackgroundRunnerBanner from './BackgroundRunnerBanner.svelte';
+	import AssistantVersionNotice from './AssistantVersionNotice.svelte';
 	import Placeholder from './Placeholder.svelte';
 	import NotificationToast from '../NotificationToast.svelte';
 	import Spinner from '../common/Spinner.svelte';
@@ -7255,6 +7256,7 @@
 						<!-- Clear of the iPhone home indicator when the page runs edge to edge. -->
 						<div class="pb-[max(1rem,env(safe-area-inset-bottom))]">
 							<BackgroundRunnerBanner />
+							<AssistantVersionNotice chatId={$chatId} />
 							<MessageQueue
 								queue={currentChatQueue}
 								onEdit={editQueuedMessage}
@@ -7289,6 +7291,7 @@
 								bind:reasoningEffort
 								bind:maxThinkingTokens
 								{activeAssistant}
+								onActivateAssistant={activateAssistant}
 								onDeactivateAssistant={deactivateAssistant}
 								imageGenerationReferenceFiles={activeImageGenerationReferenceFiles}
 								onCancelImageGenerationReference={dismissImageGenerationReference}

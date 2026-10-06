@@ -11,7 +11,7 @@
 	import { goto } from '$app/navigation';
 	const i18n = getContext('i18n');
 
-	import { WEBUI_NAME, user } from '$lib/stores';
+	import { WEBUI_NAME, user, settings } from '$lib/stores';
 	import {
 		createNewModel,
 		deleteModelById,
@@ -42,6 +42,29 @@
 	import ArrowUpTray from '$lib/components/icons/ArrowUpTray.svelte';
 	import ArrowDownTray from '$lib/components/icons/ArrowDownTray.svelte';
 	import { cloneSettingsSnapshot } from '$lib/utils/settings-dirty';
+	import { archiveAssistant, sourceLabel } from '$lib/apis/assistant-library';
+	import {
+		assistantArchived,
+		assistantSource,
+		assistantSourceKind,
+		assistantVersion,
+		modelRef,
+		rowMeta,
+		startChatHref,
+		workbenchHref,
+		type WorkbenchTarget
+	} from '$lib/utils/assistant-library';
+	import {
+		normalizeFavoriteRefs,
+		sortFavoritesFirst,
+		toggleFavorite
+	} from '$lib/utils/assistant-favorites';
+	import { translateWithDefault } from '$lib/i18n';
+	import AssistantVersionsModal from './AssistantVersionsModal.svelte';
+	import Star from '../icons/Star.svelte';
+
+	const tr = (zh: string, en: string, options: Record<string, any> = {}) =>
+		translateWithDefault($i18n, zh, en, options);
 
 	let shiftKey = false;
 
@@ -59,6 +82,16 @@
 
 	let group_ids = [];
 	let visibilityFilter = 'all'; // 'all' | 'public' | 'private'
+	// Who made it: all | manual | answer | team | discuss | builtin (see utils/assistant-library)
+	let sourceFilter = 'all';
+	// Archived assistants are inactive rows the list API still returns; kept out unless asked.
+	let showArchived = false;
+
+	let showVersions = false;
+	let versionsModelId: string | null = null;
+
+	$: favoriteRefs = normalizeFavoriteRefs($settings?.assistantFavorites);
+	$: archivedCount = (models ?? []).filter((m) => assistantArchived(rowMeta(m))).length;
 
 	const canWriteModel = (model) => {
 		if ($user?.role === 'admin') return true;
@@ -91,7 +124,8 @@
 	};
 
 	$: if (models) {
-		filteredModels = models.filter((m) => {
+		const matched = models.filter((m) => {
+			const meta = rowMeta(m);
 			const matchesSearch =
 				searchValue === '' ||
 				getModelChatDisplayName(m).toLowerCase().includes(searchValue.toLowerCase());
@@ -101,8 +135,12 @@
 				(visibilityFilter === 'public' && m.access_control == null) ||
 				(visibilityFilter === 'private' && m.access_control != null);
 
-			return matchesSearch && matchesVisibility;
+			const matchesSource = sourceFilter === 'all' || assistantSourceKind(meta) === sourceFilter;
+			const matchesArchive = showArchived || !assistantArchived(meta);
+
+			return matchesSearch && matchesVisibility && matchesSource && matchesArchive;
 		});
+		filteredModels = sortFavoritesFirst(matched, (m) => modelRef(m.id), favoriteRefs);
 	}
 
 	let searchValue = '';
@@ -162,17 +200,67 @@
 
 		console.log(info);
 
-		const res = await updateModelById(localStorage.token, info.id, info);
+		const res = await updateModelById(localStorage.token, info.id, info).catch((e) => {
+			toast.error(`${e}`);
+			return null;
+		});
 
 		if (res) {
 			toast.success(
-				$i18n.t(`Model {{name}} is now {{status}}`, {
-					name: info.id,
-					status: info.meta.hidden ? 'hidden' : 'visible'
-				})
+				info.meta.hidden
+					? tr('「{{name}}」已在模型菜单中隐藏（工作台仍可选用）', '{{name}} is hidden from the model menus (workbenches can still pick it)', { name: info.name })
+					: tr('「{{name}}」已在模型菜单中显示', '{{name}} is shown in the model menus', { name: info.name })
 			);
 			await refreshWorkspaceModelList();
 		}
+	};
+
+	/** Show / hide every listed assistant in the model menus. */
+	const setAllHidden = async (hidden: boolean) => {
+		let count = 0;
+		for (const model of filteredModels) {
+			const info = getModelFormPayload(model);
+			if (Boolean(info?.meta?.hidden) !== hidden) {
+				info.meta = { ...info.meta, hidden };
+				const res = await updateModelById(localStorage.token, info.id, info).catch(() => null);
+				if (res) count++;
+			}
+		}
+		if (count > 0) {
+			toast.success(
+				hidden
+					? tr('已在模型菜单中隐藏 {{count}} 个助手', '{{count}} assistants hidden from the model menus', { count })
+					: tr('已在模型菜单中显示 {{count}} 个助手', '{{count}} assistants shown in the model menus', { count })
+			);
+			await refreshWorkspaceModelList();
+		}
+	};
+
+	const toggleFavoriteHandler = async (model) => {
+		try {
+			await toggleFavorite(modelRef(model.id));
+		} catch (e) {
+			toast.error(tr('收藏没有保存：{{error}}', 'Favourite not saved: {{error}}', { error: `${(e as any)?.message ?? e}` }));
+		}
+	};
+
+	const archiveHandler = async (model) => {
+		const archived = !assistantArchived(rowMeta(model));
+		try {
+			await archiveAssistant(localStorage.token, model.id, archived);
+			toast.success(
+				archived
+					? tr('「{{name}}」已归档', '{{name}} archived', { name: model.name })
+					: tr('「{{name}}」已恢复', '{{name}} restored', { name: model.name })
+			);
+			await refreshWorkspaceModelList();
+		} catch (e) {
+			toast.error(`${(e as any)?.message ?? e}`);
+		}
+	};
+
+	const useInHandler = (model, target: WorkbenchTarget) => {
+		goto(workbenchHref(target, modelRef(model.id)));
 	};
 
 	const downloadModels = async (models) => {
@@ -231,6 +319,12 @@
 </svelte:head>
 
 {#if loaded}
+	<AssistantVersionsModal
+		bind:show={showVersions}
+		modelId={versionsModelId}
+		onRestored={refreshWorkspaceModelList}
+	/>
+
 	<ModelDeleteConfirmDialog
 		bind:show={showModelDeleteConfirm}
 		on:confirm={() => {
@@ -265,25 +359,41 @@
 							className="w-fit max-w-full text-xs"
 						/>
 
+						<HaloSelect
+							bind:value={sourceFilter}
+							options={[
+								{ value: 'all', label: tr('全部来源', 'All sources') },
+								{ value: 'manual', label: sourceLabel('manual') },
+								{ value: 'answer', label: sourceLabel('answer') },
+								{ value: 'team', label: sourceLabel('team') },
+								{ value: 'discuss', label: sourceLabel('discuss') },
+								{ value: 'builtin', label: sourceLabel('builtin:') }
+							]}
+							className="w-fit max-w-full text-xs"
+						/>
+
+						{#if archivedCount > 0 || showArchived}
+							<button
+								type="button"
+								class="workspace-icon-button px-3 py-2 text-xs {showArchived
+									? '!bg-gray-900/[0.06] dark:!bg-white/[0.1]'
+									: ''}"
+								aria-pressed={showArchived}
+								data-show-archived
+								on:click={() => (showArchived = !showArchived)}
+							>
+								{tr('显示已归档', 'Show archived')}
+								<span class="tabular-nums text-gray-400">{archivedCount}</span>
+							</button>
+						{/if}
+
 						{#if $user?.role === 'admin' && filteredModels.length > 0}
-							<Tooltip content={$i18n.t('Show All')}>
+							<Tooltip content={tr('全部在模型菜单中显示', 'Show all in the model menus')}>
 								<button
 									class="workspace-icon-button px-3 py-2"
-									on:click={async () => {
-										let count = 0;
-										for (const model of filteredModels) {
-											if (model.info?.meta?.hidden) {
-												const info = getModelFormPayload(model);
-												info.meta = { ...info.meta, hidden: false };
-												await updateModelById(localStorage.token, info.id, info);
-												count++;
-											}
-										}
-										if (count > 0) {
-											toast.success($i18n.t('{{count}} models shown', { count }));
-											await refreshWorkspaceModelList();
-										}
-									}}
+									aria-label={tr('全部在模型菜单中显示', 'Show all in the model menus')}
+									data-show-all
+									on:click={() => setAllHidden(false)}
 								>
 									<svg
 										xmlns="http://www.w3.org/2000/svg"
@@ -307,24 +417,12 @@
 								</button>
 							</Tooltip>
 
-							<Tooltip content={$i18n.t('Hide All')}>
+							<Tooltip content={tr('全部在模型菜单中隐藏（工作台仍可选用）', 'Hide all from the model menus (workbenches can still pick them)')}>
 								<button
 									class="workspace-icon-button px-3 py-2"
-									on:click={async () => {
-										let count = 0;
-										for (const model of filteredModels) {
-											const info = getModelFormPayload(model);
-											if (!info?.meta?.hidden) {
-												info.meta = { ...info.meta, hidden: true };
-												await updateModelById(localStorage.token, info.id, info);
-												count++;
-											}
-										}
-										if (count > 0) {
-											toast.success($i18n.t('{{count}} models hidden', { count }));
-											await refreshWorkspaceModelList();
-										}
-									}}
+									aria-label={tr('全部在模型菜单中隐藏', 'Hide all from the model menus')}
+									data-hide-all
+									on:click={() => setAllHidden(true)}
 								>
 									<svg
 										xmlns="http://www.w3.org/2000/svg"
@@ -403,7 +501,10 @@
 
 			{#if filteredModels.length > 0}
 			<div class="grid gap-3 lg:grid-cols-2 xl:grid-cols-3" id="model-list">
-		{#each filteredModels as model}
+		{#each filteredModels as model (model.id)}
+			{@const meta = rowMeta(model)}
+			{@const archived = assistantArchived(meta)}
+			{@const favorite = favoriteRefs.includes(modelRef(model.id))}
 			<div
 				class="glass-item flex flex-col cursor-pointer w-full px-4 py-3 transition"
 				id="model-item-{model.id}"
@@ -457,6 +558,20 @@
 									</div>
 								</div>
 
+								<div class="mt-1.5 flex flex-wrap items-center gap-1" data-assistant-badges>
+									<span class="halo-chip" data-source={assistantSourceKind(meta)}>{sourceLabel(assistantSource(meta))}</span>
+									<span class="halo-chip tabular-nums">v{assistantVersion(meta)}</span>
+									{#if meta.hidden}
+										<span
+											class="halo-chip"
+											data-hidden-badge
+											title={tr('不出现在模型菜单里；精答、协作台、讨论台仍可选用', 'Not in the model menus; the workbenches can still pick it')}
+										>{tr('菜单中隐藏', 'Hidden in menus')}</span>
+									{/if}
+									{#if archived}
+										<span class="halo-chip" data-archived-badge>{tr('已归档', 'Archived')}</span>
+									{/if}
+								</div>
 							</div>
 						</a>
 					</div>
@@ -483,6 +598,20 @@
 					</div>
 
 					<div class="flex flex-row gap-0.5 items-center">
+						<Tooltip content={favorite ? tr('取消收藏', 'Unfavourite') : tr('收藏（显示在首页精选助手）', 'Favourite (shown on the home page)')}>
+							<button
+								class="self-center w-fit text-sm p-2 rounded-xl hover:bg-black/5 dark:hover:bg-white/5 {favorite
+									? 'text-amber-500 dark:text-amber-400'
+									: 'text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-200'}"
+								type="button"
+								aria-pressed={favorite}
+								aria-label={favorite ? tr('取消收藏', 'Unfavourite') : tr('收藏', 'Favourite')}
+								data-favorite={model.id}
+								on:click={() => toggleFavoriteHandler(model)}
+							>
+								<Star className="size-4 {favorite ? 'fill-current' : ''}" strokeWidth="1.8" />
+							</button>
+						</Tooltip>
 						{#if shiftKey}
 							<Tooltip content={$i18n.t('Delete')}>
 								<button
@@ -534,6 +663,16 @@
 								hideHandler={() => {
 									hideModelHandler(model);
 								}}
+								hidden={Boolean(meta.hidden)}
+								{archived}
+								canWrite={canWriteModel(model)}
+								startChatHandler={() => goto(startChatHref(model.id))}
+								useInHandler={(target) => useInHandler(model, target)}
+								versionsHandler={() => {
+									versionsModelId = model.id;
+									showVersions = true;
+								}}
+								archiveHandler={() => archiveHandler(model)}
 								deleteHandler={() => {
 									selectedModel = model;
 									showModelDeleteConfirm = true;
@@ -548,7 +687,7 @@
 								</button>
 							</ModelMenu>
 
-							<div class="ml-1">
+							<div class="ml-1 {archived ? 'hidden' : ''}">
 								<Tooltip content={model.is_active ? $i18n.t('Enabled') : $i18n.t('Disabled')}>
 									<Switch
 										bind:state={model.is_active}

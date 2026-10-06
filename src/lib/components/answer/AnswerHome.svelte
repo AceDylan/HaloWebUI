@@ -27,6 +27,7 @@
 	import { warp } from '$lib/components/scifi/scifi';
 	import { now, timeAgo } from '$lib/components/teams/clock';
 	import { modelById, modelRef } from '$lib/components/discuss/model';
+	import { searchTemplates, sourceLabel } from '$lib/apis/assistant-library';
 	import AssistantAvatar from './AssistantAvatar.svelte';
 	import { ACTION_LABEL, isLive, QUICK, STATUS_LABEL } from './model';
 
@@ -51,6 +52,8 @@
 	let pendingDelete: AnswerSummary | null = null;
 	let showDelete = false;
 	let showAllAssistants = false;
+	// 「用于精答」 / a tap on the library: this assistant answers (the dispatcher only decides the rest)
+	let chosen: { ref: string; name: string } | null = null;
 	let timer: ReturnType<typeof setInterval> | null = null;
 
 	// the dispatcher: any text model the discussion room would seat (not Hermes, not image models)
@@ -85,7 +88,12 @@
 		const params = new URLSearchParams(window.location.search);
 		const q = params.get('q');
 		if (q && !question) question = q.slice(0, 8000);
-		if (params.has('q')) {
+		const picked = (params.get('assistant') || '').trim();
+		if (/^(model|builtin):/.test(picked)) {
+			chosen = { ref: picked, name: library.find((a) => a.ref === picked)?.name ?? '' };
+			nameChosen();
+		}
+		if (params.has('q') || params.has('assistant')) {
 			try {
 				replaceState('/answer', {});
 			} catch {
@@ -99,6 +107,23 @@
 		defaultsPicked = true;
 		pickDefaults();
 	}
+
+	const nameChosen = async () => {
+		if (!chosen || chosen.name) return;
+		const ref = chosen.ref;
+		let name = library.find((a) => a.ref === ref)?.name ?? '';
+		if (!name && ref.startsWith('builtin:')) {
+			try {
+				name = (await searchTemplates(localStorage.token, { refs: [ref] }))[0]?.name ?? '';
+			} catch {
+				name = '';
+			}
+		}
+		if (chosen?.ref === ref) chosen = { ref, name: name || ref };
+	};
+	const choose = (a: LibraryAssistant) => {
+		chosen = chosen?.ref === a.ref ? null : { ref: a.ref, name: a.name };
+	};
 
 	const resize = () => {
 		if (!composer) return;
@@ -117,6 +142,7 @@
 			question: question.trim(),
 			planner,
 			research: webSearchEnabled && research,
+			assistant: chosen?.ref ?? null,
 			context: background
 				? { text: background, title: origin?.title ?? '', chat_id: origin?.kind === 'chat' ? origin.id : null }
 				: null
@@ -172,6 +198,7 @@
 			const res = await listAnswerAssistants(localStorage.token);
 			library = res.assistants;
 			mayCreate = res.may_create;
+			if (chosen && !chosen.name) nameChosen();
 		} catch {
 			// the strip is a hint; the desk works without it
 		}
@@ -293,6 +320,19 @@
 							{/each}
 						</select>
 					</label>
+					{#if chosen}
+						<span class="dc-chip !py-1 !pr-1" title="这位助手来回答；需要时调度会先给它升级" data-answer-chosen={chosen.ref}>
+							<span>指定助手</span>
+							<b class="max-w-[8rem] truncate font-medium text-gray-800 dark:text-gray-100">{chosen.name || '…'}</b>
+							<button
+								type="button"
+								class="grid size-5 place-items-center rounded-full hover:bg-gray-500/10"
+								aria-label="不指定助手"
+								on:click={() => (chosen = null)}
+								data-answer-chosen-remove>×</button
+							>
+						</span>
+					{/if}
 					{#if webSearchEnabled}
 						<button
 							type="button"
@@ -329,7 +369,7 @@
 			</form>
 			<p class="mt-2 px-1 text-[11px] leading-relaxed text-gray-400 dark:text-gray-500">
 				{mayCreate
-					? '新建和升级的助手会保存到工作空间「助手」里（标签「精答」），之后在对话的模型菜单里也能直接选；升级前的设定会留着，可以一键撤销。'
+					? '新建和升级的助手会保存到工作空间「助手」里（标签「精答」）；新建的默认不出现在模型菜单，讨论台、协作台也能自动选到它。每次升级都留版本，可以撤销。点下面的助手可以指定由它回答。'
 					: '你没有新建助手的权限：没有合适的助手时，会临时按问题组一个助手回答，但不会保存。'}
 			</p>
 
@@ -342,11 +382,18 @@
 				{#if library.length}
 					<div class="flex flex-wrap gap-1.5">
 						{#each shownAssistants as a (a.id)}
-							<span class="ad-lib-chip" title="{a.name}{a.description ? `：${a.description}` : ''} · {a.baseName}" data-answer-library-item={a.id}>
+							<button
+								type="button"
+								class="ad-lib-chip"
+								aria-pressed={chosen?.ref === a.ref}
+								title="{a.name}{a.description ? `：${a.description}` : ''} · {a.baseName}{a.hidden ? ' · 不在模型菜单' : ''}（点一下指定由它回答）"
+								on:click={() => choose(a)}
+								data-answer-library-item={a.id}
+							>
 								<AssistantAvatar id={a.id} name={a.name} emoji={a.emoji} size={20} />
 								<span class="truncate text-gray-800 dark:text-gray-100">{a.name}</span>
-								{#if a.byDesk}<span class="shrink-0 text-[10px] text-gray-400">精答</span>{/if}
-							</span>
+								{#if a.source && a.source !== 'manual'}<span class="shrink-0 text-[10px] text-gray-400">{sourceLabel(a.source)}</span>{/if}
+							</button>
 						{/each}
 						{#if library.length > 10}
 							<button type="button" class="dc-chip" on:click={() => (showAllAssistants = !showAllAssistants)}

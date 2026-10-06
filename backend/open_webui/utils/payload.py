@@ -333,9 +333,17 @@ def normalize_openai_compatible_reasoning_controls(
 
 # inplace function: form_data is modified
 def apply_model_system_prompt_to_body(
-    params: dict, form_data: dict, metadata: Optional[dict] = None, user=None
+    params: dict, form_data: dict, metadata: Optional[dict] = None, user=None, model_info=None
 ) -> dict:
     system = params.get("system", None)
+    if model_info is not None and metadata:
+        # a chat keeps the version of an assistant it started with (utils/assistant_library.py)
+        from open_webui.utils.assistant_library import pinned_system
+
+        owner = getattr(user, "id", None) or metadata.get("user_id")
+        pinned = pinned_system(metadata.get("chat_id"), model_info, owner) if owner else None
+        if pinned is not None:
+            system = pinned
     if not system:
         return form_data
 

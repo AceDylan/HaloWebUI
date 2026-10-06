@@ -93,6 +93,7 @@ from open_webui.routers import (
     teams,
     discussions,
     answers,
+    assistant_library,
     terminal,
     tools,
     users,
@@ -1493,6 +1494,7 @@ app.include_router(hub.router, prefix="/api/v1/hub", tags=["hub"])
 app.include_router(teams.router, prefix="/api/v1/teams", tags=["teams"])
 app.include_router(discussions.router, prefix="/api/v1/discussions", tags=["discussions"])
 app.include_router(answers.router, prefix="/api/v1/answers", tags=["answers"])
+app.include_router(assistant_library.router, prefix="/api/v1/assistant-library", tags=["assistant-library"])
 app.include_router(utils.router, prefix="/api/v1/utils", tags=["utils"])
 
 app.include_router(haloclaw_router, prefix="/api/v1/haloclaw", tags=["haloclaw"])

@@ -197,6 +197,15 @@
 	background: hsl(var(--tm-surface));
 	padding: 0.2rem 0.7rem 0.2rem 0.25rem;
 	font-size: 12px;
+	cursor: pointer;
+	transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.ad-lib-chip:hover {
+	border-color: hsl(var(--tm-line-strong, var(--tm-line)));
+}
+.ad-lib-chip[aria-pressed='true'] {
+	border-color: hsl(var(--tm-accent, 226 80% 60%) / 0.7);
+	box-shadow: 0 0 0 2px hsl(var(--tm-accent, 226 80% 60%) / 0.15);
 }
 
 @media (prefers-reduced-motion: reduce) {

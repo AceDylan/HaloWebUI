@@ -16,6 +16,7 @@ export const isLive = (status: AnswerStatus | string | null | undefined) =>
 
 export const ACTION_LABEL: Record<AssistantAction, string> = {
 	use: '选用',
+	template: '选用模板',
 	update: '升级',
 	create: '新建',
 	temporary: '临时',
@@ -30,6 +31,8 @@ export const actionSentence = (action: AssistantAction | undefined, name: string
 			? `升级了「${name}」`
 			: action === 'temporary'
 				? `临时组了一个「${name}」`
+				: action === 'template'
+					? `选用了内置模板「${name}」`
 				: action === 'direct'
 					? `由 ${name} 直接回答`
 					: `选用了「${name}」`;

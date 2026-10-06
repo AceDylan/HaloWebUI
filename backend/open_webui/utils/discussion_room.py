@@ -45,6 +45,10 @@ MAX_SEATS = 5
 MAX_ROUNDS = 4
 QUESTION_MAX_CHARS = 8000
 ROLE_MAX_CHARS = 40
+# a seat's duty in this discussion (run-only; what its assistant brings is in the assistant)
+DUTY_MAX_CHARS = 120
+MATCH_TIMEOUT_SECONDS = 150
+ASSIST_MODES = ("auto", "pick", "generic")
 INTERJECTION_MAX_CHARS = 1000
 MAX_INTERJECTIONS = 8
 TURN_TIMEOUT_SECONDS = 300
@@ -210,6 +214,7 @@ def normalize_setup(
         mode = "roundtable"
     spec = MODES[mode]
 
+    auto_match = bool(raw.get("autoMatch") or raw.get("auto_match"))
     raw_seats = raw.get("seats")
     if not isinstance(raw_seats, list):
         raise DiscussError(400, "席位必须是列表")
@@ -221,7 +226,8 @@ def normalize_setup(
             continue
         resolved = resolve_seat_model(item.get("model"), models_map, ambiguous, user, excluded)
         role = _clean_text(item.get("role"), ROLE_MAX_CHARS)
-        seats.append({"id": f"s{index + 1}", **resolved, "role": role})
+        seat = {"id": f"s{index + 1}", **resolved, "role": role, **_seat_assist(item, resolved, models_map, ambiguous, auto_match)}
+        seats.append(seat)
     if len(seats) < MIN_SEATS:
         raise DiscussError(400, f"至少要 {MIN_SEATS} 个席位")
     if len(seats) > MAX_SEATS:
@@ -257,7 +263,7 @@ def normalize_setup(
         rounds = max(1, min(rounds, MAX_ROUNDS))
 
     moderator_raw = raw.get("moderator") or seats[0]["model"]
-    moderator = resolve_seat_model(moderator_raw, models_map, ambiguous, user, excluded)
+    moderator = neutral_moderator(resolve_seat_model(moderator_raw, models_map, ambiguous, user, excluded), models_map, ambiguous, user, excluded)
 
     return {
         "mode": mode,
@@ -265,15 +271,72 @@ def normalize_setup(
         "seats": seats,
         "moderator": moderator,
         "research": bool(raw.get("research")),
+        "autoMatch": auto_match,
     }
+
+
+def _assistant_base(model_id: str, models_map: dict, ambiguous: set) -> Optional[str]:
+    """The base model under a workspace assistant, or None when ``model_id`` is not one."""
+    model = resolve_model_from_lookup(models_map, ambiguous, model_id)
+    info = (model or {}).get("info") or {}
+    return str(info.get("base_model_id") or "") or None
+
+
+def _seat_assist(item: dict, resolved: dict, models_map: dict, ambiguous: set, auto_match: bool) -> dict:
+    """Where a seat's assistant comes from: matched automatically for each question (auto), the
+    one the user picked (pick: a library ``model:<id>`` or a ``builtin:<id>`` template), or none
+    (generic: the seat's role only). A seat whose model is itself an assistant keeps that one."""
+    duty = _clean_text(item.get("duty"), DUTY_MAX_CHARS)
+    if _assistant_base(resolved["model"], models_map, ambiguous):
+        return {"assist": "self", "duty": duty}
+    ref = _clean_text(item.get("assistant"), 200)
+    mode = str(item.get("assist") or "").strip()
+    if ref.startswith(("model:", "builtin:")) and mode in ("", "pick"):
+        return {"assist": "pick", "assistant": ref, "duty": duty}
+    if mode not in ASSIST_MODES or mode == "pick":
+        mode = "auto" if auto_match else "generic"
+    return {"assist": mode, "duty": duty}
+
+
+def neutral_moderator(moderator: dict, models_map: dict, ambiguous: set, user: Any, excluded=None) -> dict:
+    """The moderator summarizes neutrally: an assistant chosen as moderator writes through its base
+    model, without the assistant's persona."""
+    base = _assistant_base(moderator["model"], models_map, ambiguous)
+    if not base:
+        return moderator
+    try:
+        resolved = resolve_seat_model(base, models_map, ambiguous, user, excluded or _default_is_excluded)
+    except DiscussError:
+        return moderator
+    return {**resolved, "persona": moderator["name"]}
+
+
+def needs_matching(seats: list[dict]) -> bool:
+    return any(seat.get("assist") in ("auto", "pick") for seat in seats)
+
+
+def seat_choice(ask: dict, seat_id: str) -> Optional[dict]:
+    """The assistant a seat uses in this question (a snapshot), if any."""
+    seat = next((s for s in ask.get("seats") or [] if s.get("id") == seat_id), None)
+    choice = (seat or {}).get("assistant_choice")
+    return choice if isinstance(choice, dict) and choice.get("action") not in (None, "generic") else None
+
+
+def seat_duty(ask: dict, seat: dict) -> str:
+    asked = next((s for s in ask.get("seats") or [] if s.get("id") == seat.get("id")), None) or {}
+    return asked.get("duty") or seat.get("duty") or ""
 
 
 # ---------------------------------------------------------------------------------------------
 # Prompts
 
 
-def _seat_title(seat: dict) -> str:
-    return f"{seat['label']}（{seat['role']}）" if seat.get("role") and seat["role"] not in seat["label"] else seat["label"]
+def _seat_title(seat: dict, ask: Optional[dict] = None) -> str:
+    title = f"{seat['label']}（{seat['role']}）" if seat.get("role") and seat["role"] not in seat["label"] else seat["label"]
+    choice = seat_choice(ask, seat["id"]) if ask else None
+    if choice and choice.get("name"):
+        title += f" [{choice['name']}]"
+    return title
 
 
 def _history_block(history: list[dict]) -> str:
@@ -423,16 +486,29 @@ def build_turn_messages(
     mode = setup["mode"]
     seats = setup["seats"]
     total_rounds = int(ask.get("rounds") or setup["rounds"])
-    others = ", ".join(_seat_title(other) for other in seats if other["id"] != seat["id"])
+    titled = None if mode == "review" else ask
+    others = ", ".join(_seat_title(other, titled) for other in seats if other["id"] != seat["id"])
     lang_rule = (
         "Write in Simplified Chinese." if ask.get("lang") == "zh" else "Write in the language of the user's question."
     )
+    choice = seat_choice(ask, seat["id"])
+    duty = seat_duty(ask, seat)
     identity = f'You are "{seat["label"]}"'
     if seat.get("role"):
         identity += f", playing the role: {seat['role']}"
+    profile = []
+    if choice and choice.get("system"):
+        profile.append(
+            f"Your specialist profile for this discussion is above ({choice.get('name') or 'assistant'}): bring that expertise."
+        )
+    if duty:
+        profile.append(f"Your duty in this discussion: {duty}")
+    if mode == "debate" and seat.get("role"):
+        profile.append(f"Your side ({seat['role']}) is set for this discussion and comes before any view your profile suggests.")
     system = "\n".join(
         [
             f"{identity}. You are one of {len(seats)} AI participants in a structured discussion that a moderator will summarize for the user.",
+            *profile,
             f"Other participants: {others}." if others else "",
             f"Format: {MODES[mode]['label']} — {MODES[mode]['summary']}",
             "Rules:",
@@ -503,6 +579,9 @@ def build_turn_messages(
         user_parts.append(interjections)
     user_parts.append(f"Your task now: {task}")
     text = "\n\n".join(part for part in user_parts if part)
+    if choice and choice.get("system"):
+        # the assistant's full settings first, then how this discussion works
+        system = f"{choice['system']}\n\n---\n\n{system}"
     return [
         {"role": "system", "content": system},
         {"role": "user", "content": _with_images(text, images if gets_images else None)},
@@ -547,7 +626,7 @@ def build_conclusion_messages(
             else ""
         )
     )
-    participants = ", ".join(_seat_title(seat) for seat in seats)
+    participants = ", ".join(_seat_title(seat, ask) for seat in seats)
     moderator_sees = (ask.get("moderator") or {}).get("vision", True) is not False
     gets_images = bool(images) and moderator_sees
     parts = [
@@ -753,6 +832,8 @@ def new_ask(
         "rounds": total_rounds,
         "seats": deepcopy(setup["seats"]),
         "moderator": deepcopy(setup["moderator"]),
+        # each seat's assistant for this question, chosen when it starts (see LiveDiscussion._run_match)
+        "matching": {"status": "waiting"} if needs_matching(setup["seats"]) else None,
         "status": "running",
         "round": 0,
         "turns": [],
@@ -791,7 +872,16 @@ def summary_meta(setup: dict, asks: list[dict]) -> dict:
         "v": 1,
         "mode": setup["mode"],
         "rounds": setup["rounds"],
-        "seats": [{"model": s["model"], "name": s["name"], "label": s["label"], "role": s.get("role", "")} for s in setup["seats"]],
+        "seats": [
+            {
+                "model": s["model"],
+                "name": s["name"],
+                "label": s["label"],
+                "role": s.get("role", ""),
+                "assistant": (seat_choice(last, s["id"]) or {}).get("name") or "",
+            }
+            for s in setup["seats"]
+        ],
         "moderator": deepcopy(setup["moderator"]),
         "research": bool(setup.get("research")),
         "status": last.get("status") or "running",
@@ -847,6 +937,9 @@ class LiveDiscussion:
     resume: bool = False
     retry_delays: tuple = RETRY_DELAYS
     stand_in_delays: tuple = STAND_IN_RETRY_DELAYS
+    # (ask) -> {"choices": {seat id: choice}, "duties": {seat id: duty}, "error": str|None}: the
+    # assistants of the question's seats (writes to the library happen in there, once)
+    match: Optional[Callable[[dict], Awaitable[dict]]] = None
 
     # -- events --------------------------------------------------------------------------------
 
@@ -1092,6 +1185,34 @@ class LiveDiscussion:
             conclusion["retry"] = None
             await self.flush()
 
+    async def _run_match(self):
+        matching = self.ask["matching"]
+        matching.update({"status": "running", "startedAt": now_ms(), "error": None})
+        await self.send_state()
+        try:
+            result = await asyncio.wait_for(self.match(self.ask), MATCH_TIMEOUT_SECONDS)
+            choices = (result or {}).get("choices") or {}
+            duties = (result or {}).get("duties") or {}
+            for seat in self.ask["seats"]:
+                if seat["id"] in choices:
+                    seat["assistant_choice"] = choices[seat["id"]]
+                if duties.get(seat["id"]) and not seat.get("duty"):
+                    seat["duty"] = _clean_text(duties[seat["id"]], DUTY_MAX_CHARS)
+            matching["status"] = "error" if (result or {}).get("error") else "done"
+            matching["error"] = (result or {}).get("error")
+        except asyncio.CancelledError:
+            matching["status"] = "stopped"
+            raise
+        except asyncio.TimeoutError:
+            matching.update({"status": "error", "error": f"超过 {MATCH_TIMEOUT_SECONDS} 秒没匹配完，用各自的角色讨论"})
+        except Exception as exc:
+            log.warning("discussion %s: matching failed: %s", self.chat_id, exc)
+            matching.update({"status": "error", "error": f"匹配助手失败（{_short_error(exc)[:120]}），用各自的角色讨论"})
+        finally:
+            matching["endedAt"] = now_ms()
+            self.save()
+            await self.send_state()
+
     async def _run_research(self):
         research = self.ask["research"]
         research.update({"status": "running", "startedAt": now_ms(), "error": None})
@@ -1147,6 +1268,14 @@ class LiveDiscussion:
                 await self._run_turn(turn)
                 self.save()
             elif not self.conclude_only:
+                matching = self.ask.get("matching")
+                if (
+                    self.match is not None
+                    and matching
+                    and matching.get("status") in {"waiting", "running", "stopped"}
+                    and not self.ask["turns"]
+                ):
+                    await self._run_match()
                 research = self.ask.get("research")
                 if research and research.get("status") in {"waiting", "stopped", "running"} and not self.ask["turns"] and self.from_round == 1:
                     await self._run_research()

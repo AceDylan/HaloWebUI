@@ -21,6 +21,7 @@ from open_webui.models import chats as chats_mod  # noqa: E402
 from open_webui.models import models as models_mod  # noqa: E402
 from open_webui.routers import answers as api  # noqa: E402
 from open_webui.utils import answer_desk as desk  # noqa: E402
+from open_webui.utils import assistant_library as assistant_lib  # noqa: E402
 from open_webui.utils import chat as chat_utils  # noqa: E402
 from open_webui.utils import models as models_utils  # noqa: E402
 
@@ -36,11 +37,19 @@ LAWYER_PROMPT = "你是一名合同审查律师。先确认合同类型与用户
 
 
 def _assistant(id, name, system="你是一名严谨的专家，回答要具体。" * 3, editable=True, base="conn.gpt-chat", description=""):
-    return {"id": id, "name": name, "description": description, "emoji": "", "prompt": system, "base": base, "editable": editable, "byDesk": False, "updatedAt": 1}
+    return {"ref": f"model:{id}", "id": id, "name": name, "description": description, "domain": "", "emoji": "", "prompt": system, "base": base, "editable": editable, "owned": True, "hidden": False, "source": "manual", "version": 1, "updatedAt": 1}
 
 
 BASE_LIST = [{"id": "conn.gpt-chat", "name": "gpt-chat"}, {"id": "conn.deepseek-chat", "name": "deepseek-chat"}]
 OPTS = {"default_base": "conn.gpt-chat", "may_create": True, "web_allowed": True}
+
+
+def _plan(raw, lib, templates=(), **kw):
+    return desk.normalize_plan(raw, lib, list(templates), BASE_LIST, **{**OPTS, **kw})
+
+
+def _is_plan(messages):
+    return messages[0]["role"] == "system" and "You staff work in HaloWebUI" in messages[0]["content"]
 
 
 # ---------------------------------------------------------------------------------------------
@@ -49,46 +58,66 @@ OPTS = {"default_base": "conn.gpt-chat", "may_create": True, "web_allowed": True
 
 def test_use_keeps_an_existing_assistant():
     lib = [_assistant("a1", "合同审查")]
-    plan = desk.normalize_plan({"action": "use", "assistant_id": "a1", "reason": "合同问题", "web_search": False}, lib, BASE_LIST, **OPTS)
-    assert plan["action"] == "use" and plan["target"]["id"] == "a1" and plan["webSearch"] is False
+    plan = _plan({"action": "use", "assistant_id": "a1", "reason": "合同问题", "web_search": False}, lib)
+    assert plan["action"] == "use" and plan["decision"]["target"]["id"] == "a1" and plan["webSearch"] is False
+    # the shared shape: one unit keyed "q"
+    plan = _plan({"units": [{"key": "q", "action": "use", "ref": "model:a1"}], "web_search": True}, lib)
+    assert plan["decision"]["target"]["id"] == "a1" and plan["webSearch"] is True
 
 
 def test_use_accepts_an_assistant_named_instead_of_its_id():
     lib = [_assistant("a1", "合同审查")]
-    plan = desk.normalize_plan({"action": "use", "assistant_id": "合同审查"}, lib, BASE_LIST, **OPTS)
-    assert plan["target"]["id"] == "a1"
+    plan = _plan({"action": "use", "assistant_id": "合同审查"}, lib)
+    assert plan["decision"]["target"]["id"] == "a1"
 
 
-def test_update_of_an_assistant_the_user_cannot_edit_becomes_use():
+def test_update_of_an_assistant_the_user_cannot_edit_is_a_one_off_upgrade():
     lib = [_assistant("a1", "合同审查", editable=False)]
     raw = {"action": "update", "assistant_id": "a1", "assistant": {"system_prompt": LAWYER_PROMPT}}
-    plan = desk.normalize_plan(raw, lib, BASE_LIST, **OPTS)
-    assert plan["action"] == "use" and "没有修改" in plan["note"]
+    plan = _plan(raw, lib)
+    assert plan["action"] == "temporary" and "没有修改" in plan["note"]
+    assert plan["decision"]["spec"]["system"] == LAWYER_PROMPT and plan["decision"]["spec"]["name"] == "合同审查"
 
 
 def test_update_without_a_new_prompt_becomes_use():
     lib = [_assistant("a1", "合同审查")]
-    plan = desk.normalize_plan({"action": "update", "assistant_id": "a1", "assistant": {"system_prompt": "短"}}, lib, BASE_LIST, **OPTS)
+    plan = _plan({"action": "update", "assistant_id": "a1", "assistant": {"system_prompt": "短"}}, lib)
     assert plan["action"] == "use"
 
 
 def test_create_picks_the_base_by_name_and_reuses_a_same_named_assistant():
     raw = {"action": "create", "assistant": {"name": "合同审查", "emoji": "⚖️", "system_prompt": LAWYER_PROMPT, "base_model": "deepseek-chat"}}
-    plan = desk.normalize_plan(raw, [], BASE_LIST, **OPTS)
-    assert plan["action"] == "create" and plan["spec"]["base"] == "conn.deepseek-chat" and plan["spec"]["emoji"] == "⚖️"
-    same = desk.normalize_plan(raw, [_assistant("a1", "合同审查")], BASE_LIST, **OPTS)
-    assert same["action"] == "use" and same["target"]["id"] == "a1"
-    unknown_base = desk.normalize_plan({**raw, "assistant": {**raw["assistant"], "base_model": "nope"}}, [], BASE_LIST, **OPTS)
-    assert unknown_base["spec"]["base"] == "conn.gpt-chat"
+    plan = _plan(raw, [])
+    assert plan["action"] == "create" and plan["decision"]["spec"]["base"] == "conn.deepseek-chat" and plan["decision"]["spec"]["emoji"] == "⚖️"
+    same = _plan(raw, [_assistant("a1", "合同审查")])
+    assert same["action"] == "use" and same["decision"]["target"]["id"] == "a1"
+    unknown_base = _plan({**raw, "assistant": {**raw["assistant"], "base_model": "nope"}}, [])
+    assert unknown_base["decision"]["spec"]["base"] == "conn.gpt-chat"
+    # no right to save: written for this run only
+    assert _plan(raw, [], may_create=False)["action"] == "temporary"
+
+
+def test_a_builtin_template_is_used_as_it_is_and_upgraded_into_a_new_assistant():
+    template = {"ref": "builtin:9", "id": "9", "name": "律师", "emoji": "⚖️", "description": "法律", "groups": [], "prompt": "你是律师。" * 10}
+    used = _plan({"action": "use", "assistant_id": "builtin:9"}, [], [template])
+    assert used["action"] == "template" and used["decision"]["template"]["id"] == "9"
+    grown = _plan({"action": "update", "assistant_id": "builtin:9", "assistant": {"system_prompt": LAWYER_PROMPT}}, [], [template])
+    assert grown["action"] == "create" and grown["decision"]["spec"]["from"] == "builtin:9" and grown["decision"]["spec"]["name"] == "律师"
+
+
+def test_a_chosen_assistant_is_kept_whatever_the_dispatcher_says():
+    lib = [_assistant("a1", "合同审查"), _assistant("a2", "写作")]
+    plan = _plan({"action": "use", "assistant_id": "a2", "web_search": True}, lib, chosen="model:a1")
+    assert plan["decision"]["target"]["id"] == "a1" and plan["webSearch"] is True
 
 
 def test_web_search_only_when_allowed_and_bad_plans_raise():
     lib = [_assistant("a1", "通用")]
-    plan = desk.normalize_plan({"action": "use", "assistant_id": "a1", "web_search": True}, lib, BASE_LIST, **{**OPTS, "web_allowed": False})
+    plan = _plan({"action": "use", "assistant_id": "a1", "web_search": True}, lib, web_allowed=False)
     assert plan["webSearch"] is False
     for raw in ({"action": "dance"}, {"action": "use", "assistant_id": "missing"}, {"action": "create", "assistant": {"name": "x"}}):
         with pytest.raises(ValueError):
-            desk.normalize_plan(raw, lib, BASE_LIST, **OPTS)
+            _plan(raw, lib)
     with pytest.raises(ValueError):
         desk.parse_json_object("没有 JSON")
     assert desk.parse_json_object('<think>x</think>好的：{"action": "use"}')["action"] == "use"
@@ -96,27 +125,35 @@ def test_web_search_only_when_allowed_and_bad_plans_raise():
 
 def test_plan_messages_show_the_library_and_the_limits():
     lib = [_assistant("a1", "合同审查", system="x" * 900)]
-    messages = desk.plan_messages("帮我看合同", lib, BASE_LIST, default_base="conn.gpt-chat", may_create=False, web_allowed=False)
+    messages = desk.plan_messages("帮我看合同", lib, [], BASE_LIST, default_base="conn.gpt-chat", may_create=False, web_allowed=False)
+    assert _is_plan(messages)
     body = messages[1]["content"]
     payload = json.loads(body[: body.index("\n\n")])
-    assert payload["library"][0]["system_prompt"].endswith("…") and len(payload["library"][0]["system_prompt"]) == desk.PROMPT_EXCERPT_CHARS + 1
+    assert payload["units"] == [{"key": "q", "question": "帮我看合同"}]
+    entry = payload["library"][0]
+    assert entry["ref"] == "model:a1" and entry["system_prompt"].endswith("…") and len(entry["system_prompt"]) == assistant_lib.PROMPT_EXCERPT_CHARS + 1
     assert payload["base_models"] == ["gpt-chat", "deepseek-chat"] and payload["default_base_model"] == "gpt-chat"
-    assert "may not create" in body and "web_search must be false" in body
+    assert "may not save" in body and '"web_search" must be false' in body
 
 
-def test_library_splits_assistants_from_bases_and_leaves_out_agents_and_image_models():
+def test_library_keeps_hidden_assistants_and_leaves_out_hidden_bases_agents_and_image_models():
     models_map = {
         **BASES,
         "alias-of-gpt": BASES["conn.gpt-chat"],
-        "a1": {"id": "a1", "name": "合同审查", "info": {"base_model_id": "conn.gpt-chat", "user_id": "u1", "meta": {"description": "看合同"}, "params": {"system": "s"}}},
+        "a1": {"id": "a1", "name": "合同审查", "info": {"base_model_id": "conn.gpt-chat", "user_id": "u1", "meta": {"description": "看合同", "hidden": True}, "params": {"system": "s"}}},
         "a2": {"id": "a2", "name": "代理", "info": {"base_model_id": "conn.hermes-agent", "user_id": "u1", "meta": {}, "params": {}}},
+        "a3": {"id": "a3", "name": "收起的", "info": {"base_model_id": "conn.gpt-chat", "user_id": "u1", "meta": {"assistant": {"archived": True}}, "params": {}}},
+        "a4": {"id": "a4", "name": "别人的私有", "info": {"base_model_id": "conn.gpt-chat", "user_id": "u9", "access_control": {}, "meta": {}, "params": {}}},
+        "a5": {"id": "a5", "name": "公开的", "info": {"base_model_id": "conn.gpt-chat", "user_id": "u9", "access_control": None, "meta": {}, "params": {}}},
         "hidden": {"id": "hidden", "name": "h", "info": {"meta": {"hidden": True}}},
     }
-    assistants, bases = desk.library(models_map, USER)
-    assert [a["id"] for a in assistants] == ["a1"] and assistants[0]["editable"] is True
+    assistants, bases = desk.lib.library(models_map, USER)
+    assert sorted(a["id"] for a in assistants) == ["a1", "a5"]
+    a1 = next(a for a in assistants if a["id"] == "a1")
+    assert a1["editable"] is True and a1["hidden"] is True and a1["ref"] == "model:a1"
     assert [b["name"] for b in bases] == ["gpt-chat", "deepseek-chat"]
     other = SimpleNamespace(id="u2", role="user")
-    assert desk.library(models_map, other)[0][0]["editable"] is False
+    assert all(a["editable"] is False for a in desk.lib.library(models_map, other)[0])
 
 
 # ---------------------------------------------------------------------------------------------
@@ -162,7 +199,7 @@ def env(monkeypatch):
     async def fake_completion(request, payload, user, bypass_filter=False):
         model, messages = payload["model"], payload["messages"]
         calls.append((model, messages))
-        if messages[0]["role"] == "system" and messages[0]["content"] == desk.PLAN_SYSTEM:
+        if _is_plan(messages):
             if state["plan_fail"]:
                 return _Stream("我不想给 JSON")
             return _Stream(json.dumps(state["plan"], ensure_ascii=False))
@@ -240,6 +277,11 @@ def test_a_new_assistant_is_created_and_answers_in_an_ordinary_chat(env):
     row = rows[0]
     assert row.name == "合同审查" and row.base_model_id == "conn.deepseek-chat" and row.params.system == LAWYER_PROMPT
     assert row.access_control == {} and row.meta.tags == [{"name": "精答"}]
+    # made by a workbench: hidden from the model menus, version 1, source 精答
+    assert row.meta.model_dump()["hidden"] is True
+    assert row.meta.model_dump()["assistant"]["version"] == 1 and row.meta.model_dump()["assistant"]["source"] == "answer"
+    # the chat keeps the version it started with
+    assert chats_mod.ChatTable().get_chat_by_id(chat_id).meta["assistant_pins"][row.id]["version"] == 1
     assert row.meta.profile_image_url.startswith("data:image/svg+xml")
     # the planner was the dispatcher, the new assistant answered (by its id: the app adds its prompt)
     assert env.calls[0][0] == "conn.gpt-chat" and env.calls[1][0] == row.id
@@ -287,15 +329,18 @@ def test_an_upgrade_keeps_the_old_prompt_and_can_be_undone(env):
     chat_id = asyncio.run(second())
     row = models_mod.Models.get_model_by_id(row.id)
     assert row.params.system == upgraded
-    revisions = row.meta.model_dump()["answer_desk"]["revisions"]
-    assert revisions[-1]["system"] == LAWYER_PROMPT and revisions[-1]["chatId"] == chat_id
+    record = row.meta.model_dump()["assistant"]
+    assert record["version"] == 2
+    assert record["revisions"][-1]["system"] == LAWYER_PROMPT and record["revisions"][-1]["runRef"] == f"answer:{chat_id}"
     run = asyncio.run(api.get_answer(chat_id, USER))["run"]
     assert run["assistant"]["action"] == "update" and run["assistant"]["system"] == upgraded and "before" not in run["assistant"]
 
     detail = asyncio.run(api.revert_upgrade(env.request, chat_id, USER))
     assert detail["run"]["assistant"]["reverted"] is True
     row = models_mod.Models.get_model_by_id(row.id)
-    assert row.params.system == LAWYER_PROMPT and row.meta.model_dump()["answer_desk"]["revisions"] == []
+    record = row.meta.model_dump()["assistant"]
+    assert row.params.system == LAWYER_PROMPT and record["version"] == 3 and record["revisions"][-1]["source"] == "undo"
+    assert chats_mod.ChatTable().get_chat_by_id(chat_id).meta["assistant_pins"][row.id]["version"] == 3
     with pytest.raises(HTTPException) as again:
         asyncio.run(api.revert_upgrade(env.request, chat_id, USER))
     assert again.value.status_code == 400
@@ -341,7 +386,7 @@ def test_a_user_who_may_not_keep_assistants_gets_a_one_off_one(env, monkeypatch)
     # the base model answers with the assistant's prompt given as the system message
     assert env.calls[-1][0] == "conn.deepseek-chat"
     assert env.calls[-1][1][0] == {"role": "system", "content": LAWYER_PROMPT}
-    assert "may not create" in env.calls[0][1][1]["content"]
+    assert "may not save" in env.calls[0][1][1]["content"]
     chat = chats_mod.ChatTable().get_chat_by_id(chat_id)
     assert chat.chat["models"] == ["conn.gpt-chat"]  # not switched to a model that is not saved
 
@@ -389,7 +434,7 @@ def test_web_research_feeds_numbered_sources_and_the_chat_lists_them(env, monkey
         return detail["id"]
 
     run = asyncio.run(api.get_answer(asyncio.run(no_web()), USER))["run"]
-    assert run["research"] is None and "web_search must be false" in env.calls[0][1][1]["content"]
+    assert run["research"] is None and '"web_search" must be false' in env.calls[0][1][1]["content"]
 
 
 def test_stop_then_retry_answers_again_with_the_same_assistant(env):
@@ -405,10 +450,10 @@ def test_stop_then_retry_answers_again_with_the_same_assistant(env):
         stopped = await api.stop_answer(detail["id"], USER)
         assert stopped["run"]["status"] == "stopped" and stopped["run"]["answer"]["status"] == "stopped"
         env.state["delay"] = 0.0
-        planner_calls = sum(1 for _, m in env.calls if m[0]["content"] == desk.PLAN_SYSTEM)
+        planner_calls = sum(1 for _, m in env.calls if _is_plan(m))
         await api.retry_answer(env.request, detail["id"], USER)
         await _settle(detail["id"])
-        assert sum(1 for _, m in env.calls if m[0]["content"] == desk.PLAN_SYSTEM) == planner_calls  # not dispatched again
+        assert sum(1 for _, m in env.calls if _is_plan(m)) == planner_calls  # not dispatched again
         return detail["id"]
 
     chat_id = asyncio.run(scenario())
@@ -426,7 +471,7 @@ def test_an_error_is_reported_and_a_restart_reads_as_interrupted(env):
         original = chat_utils.generate_chat_completion
 
         async def broken(request, payload, user, bypass_filter=False):
-            if payload["messages"][0].get("content") == desk.PLAN_SYSTEM:
+            if _is_plan(payload["messages"]):
                 return await original(request, payload, user)
             raise RuntimeError("invalid api key")
 

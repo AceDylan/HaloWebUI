@@ -64,6 +64,7 @@
 	import { WEBUI_BASE_URL, WEBUI_API_BASE_URL, PASTED_TEXT_CHARACTER_LIMIT } from '$lib/constants';
 
 	import InputMenu from './MessageInput/InputMenu.svelte';
+	import AssistantPickerModal from './AssistantPickerModal.svelte';
 	import FilesOverlay from './MessageInput/FilesOverlay.svelte';
 	import Commands from './MessageInput/Commands.svelte';
 	import QuickCommands from './MessageInput/QuickCommands.svelte';
@@ -155,6 +156,10 @@
 	export let selectedModels: [''];
 	export let activeAssistant: ChatAssistantSnapshot | null = null;
 	export let onDeactivateAssistant: (() => void) | null = null;
+	/** Puts a picked assistant's prompt on the chat (Chat.svelte's activateAssistant); the + menu
+	 * offers 「选择助手」 only when it is given. */
+	export let onActivateAssistant: ((assistant: ChatAssistantSnapshot) => void) | null = null;
+	let showAssistantPicker = false;
 
 	let selectedModelIds = [];
 	$: selectedModelIds =
@@ -1890,6 +1895,7 @@
 												}
 											}}
 											onHandoff={handOffDraft}
+											onSelectAssistant={onActivateAssistant ? () => (showAssistantPicker = true) : null}
 											onClose={async () => {
 												await tick();
 
@@ -2258,4 +2264,12 @@
 			</div>
 		</div>
 	</div>
+{/if}
+
+{#if onActivateAssistant}
+	<AssistantPickerModal
+		bind:show={showAssistantPicker}
+		mode="activate"
+		on:select={(e) => onActivateAssistant?.(e.detail)}
+	/>
 {/if}

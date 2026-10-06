@@ -1,4 +1,5 @@
 import { WEBUI_API_BASE_URL } from '$lib/constants';
+import type { AssistantChoice } from '$lib/apis/assistant-library';
 
 /** 讨论台 (multi-model discussion room) API — see backend/open_webui/routers/discussions.py. */
 
@@ -12,9 +13,21 @@ export type DiscussSeat = {
 	/** The model name, or "name·role" / "name #2" when two seats share a model. */
 	label: string;
 	role: string;
+	/** Where the seat's assistant comes from: matched to each question, picked by the user, none
+	 * (the role only), or the seat's model is itself an assistant. */
+	assist?: SeatAssist;
+	/** The picked assistant (`model:<id>` / `builtin:<id>`). */
+	assistant?: string;
+	/** What the seat covers in this discussion. */
+	duty?: string;
+	/** In an ask: the assistant the seat used for that question (a snapshot). */
+	assistant_choice?: AssistantChoice | null;
 };
 
-export type DiscussModerator = { model: string; name: string };
+export type SeatAssist = 'auto' | 'pick' | 'generic' | 'self';
+
+/** `persona`: the moderator was picked as an assistant; it writes through its base model, neutral. */
+export type DiscussModerator = { model: string; name: string; persona?: string };
 
 export type DiscussSetup = {
 	mode: DiscussMode;
@@ -23,6 +36,16 @@ export type DiscussSetup = {
 	moderator: DiscussModerator;
 	/** Look things up on the web before round 1 (one shared set of notes). */
 	research?: boolean;
+	/** 自动匹配助手 */
+	autoMatch?: boolean;
+};
+
+/** Matching the seats' assistants when a question starts. */
+export type DiscussMatching = {
+	status: 'waiting' | 'running' | 'done' | 'error' | 'stopped';
+	error?: string | null;
+	startedAt?: number | null;
+	endedAt?: number | null;
 };
 
 /** A file attached to a question (images go to the models that read images, documents to all). */
@@ -94,6 +117,7 @@ export type DiscussAsk = {
 	rounds: number;
 	seats: DiscussSeat[];
 	moderator: DiscussModerator;
+	matching?: DiscussMatching | null;
 	status: AskStatus;
 	round: number;
 	turns: DiscussTurn[];
@@ -134,7 +158,7 @@ export type DiscussionSummary = {
 	running: boolean;
 	mode: DiscussMode;
 	rounds: number;
-	seats: { model: string; name: string; label: string; role: string }[];
+	seats: { model: string; name: string; label: string; role: string; assistant?: string }[];
 	moderator: DiscussModerator;
 	research?: boolean;
 	status: AskStatus;
@@ -186,7 +210,7 @@ export const createDiscussion = (
 	form: {
 		question: string;
 		mode: DiscussMode;
-		seats: { model: string; role?: string }[];
+		seats: { model: string; role?: string; assist?: SeatAssist; assistant?: string; duty?: string }[];
 		rounds: number;
 		moderator: string;
 		research?: boolean;
@@ -194,6 +218,8 @@ export const createDiscussion = (
 		context?: { text: string; title?: string; chat_id?: string | null } | null;
 		/** One per question: a retry with the same key gets the same discussion back. */
 		client_key?: string;
+		/** 自动匹配助手: seats without their own choice get an assistant matched to each question. */
+		auto_match?: boolean;
 	}
 ) => request<Discussion>(token, 'POST', '/', form);
 
@@ -222,6 +248,10 @@ export const continueDiscussion = (token: string, chatId: string) =>
 /** Run a seat's failed or stopped turn again (then a fresh conclusion). */
 export const retryDiscussionTurn = (token: string, chatId: string, turn: string) =>
 	request<Discussion>(token, 'POST', `/${id(chatId)}/retry`, { turn });
+
+/** Undo the upgrade the last question made to a seat's assistant. */
+export const undoSeatAssistant = (token: string, chatId: string, seat: string) =>
+	request<Discussion>(token, 'POST', `/${id(chatId)}/undo-assistant`, { seat });
 
 export const deleteDiscussion = (token: string, chatId: string) =>
 	request<{ ok: boolean }>(token, 'DELETE', `/${id(chatId)}`);

@@ -15,6 +15,7 @@
 		type DiscussMode,
 		type DiscussionSummary
 	} from '$lib/apis/discussions';
+	import { listLibrary, searchTemplates, type LibraryEntry } from '$lib/apis/assistant-library';
 	import { v4 as uuidv4 } from 'uuid';
 	import { discussionSeatModels } from '$lib/utils/discussion-seats';
 	import { originLabel, takeHandoff, type HandoffOrigin } from '$lib/utils/handoff';
@@ -52,6 +53,9 @@
 	let rounds = 2;
 	let moderator = '';
 	let research = false;
+	// 自动匹配助手: each question gets each seat a fitting assistant (on by default)
+	let autoMatch = true;
+	let library: LibraryEntry[] = [];
 	let creating = false;
 	// Handed over from a chat (its model menu, its + menu, a reply): the conversation as background
 	// for every seat, and the way back.
@@ -156,7 +160,13 @@
 		if (fromUrl.length >= MIN_SEATS) {
 			seats = fromUrl.slice(0, MAX_SEATS).map((ref) => ({ model: modelRef(modelById(choices, ref)!), role: '' }));
 		} else if (savedSeats.length >= MIN_SEATS) {
-			seats = savedSeats.slice(0, MAX_SEATS).map((s) => ({ model: s.model, role: String(s.role || '') }));
+			seats = savedSeats.slice(0, MAX_SEATS).map((s) => ({
+				model: s.model,
+				role: String(s.role || ''),
+				...(s.assist === 'pick' || s.assist === 'generic' || s.assist === 'auto' ? { assist: s.assist } : {}),
+				...(s.assist === 'pick' && s.assistant ? { assistant: s.assistant, assistantName: s.assistantName } : {}),
+				...(s.duty ? { duty: String(s.duty).slice(0, 120) } : {})
+			}));
 		} else {
 			seats = choices.slice(0, Math.min(3, choices.length)).map((m) => ({ model: modelRef(m), role: '' }));
 		}
@@ -187,6 +197,13 @@
 		}
 		if (saved?.mode && MODES.some((m) => m.value === saved.mode)) mode = saved.mode;
 		research = saved?.research === true;
+		autoMatch = saved?.autoMatch !== false;
+		// 「用于讨论」 from the assistant library: the first seat speaks with that assistant
+		const picked = (params.get('assistant') || '').trim();
+		if (/^(model|builtin):/.test(picked) && seats.length) {
+			seats = seats.map((s, i) => (i === 0 ? { ...s, assist: 'pick', assistant: picked, assistantName: undefined } : s));
+			resolveNames();
+		}
 		if (Number.isInteger(saved?.rounds)) rounds = Math.max(1, Math.min(MAX_ROUNDS, saved.rounds));
 		else rounds = modeSpec(mode).rounds;
 		const strong = choices.find((m) => /claude|gpt/i.test(m.name ?? m.id));
@@ -199,7 +216,7 @@
 		const q = params.get('q');
 		if (q && !question) question = q.slice(0, 8000);
 		// read once: a reload or a later visit starts from the saved setup, not these
-		if (params.has('q') || params.has('models')) {
+		if (params.has('q') || params.has('models') || params.has('assistant')) {
 			try {
 				replaceState('/discuss', {});
 			} catch {
@@ -207,6 +224,30 @@
 			}
 		}
 	};
+	/** Names of picked assistants the page does not know yet (a link from the library, a saved setup). */
+	const resolveNames = async () => {
+		const missing = seats.filter((s) => s.assist === 'pick' && s.assistant && !s.assistantName).map((s) => s.assistant!);
+		if (!missing.length) return;
+		const names = new Map(library.map((a) => [a.ref, a.name]));
+		const templates = missing.filter((ref) => ref.startsWith('builtin:'));
+		if (templates.length) {
+			try {
+				for (const t of await searchTemplates(localStorage.token, { refs: templates })) names.set(t.ref, t.name);
+			} catch {
+				// shown by its reference
+			}
+		}
+		seats = seats.map((s) => (s.assist === 'pick' && s.assistant && !s.assistantName && names.has(s.assistant) ? { ...s, assistantName: names.get(s.assistant) } : s));
+	};
+	const loadLibrary = async () => {
+		try {
+			library = (await listLibrary(localStorage.token)).assistants;
+		} catch {
+			library = [];
+		}
+		resolveNames();
+	};
+
 	let defaultsPicked = false;
 	$: if (!defaultsPicked && choices.length) {
 		defaultsPicked = true;
@@ -235,7 +276,13 @@
 		const form = {
 			question: question.trim(),
 			mode,
-			seats: seats.map((s) => ({ model: s.model, role: s.role.trim() })),
+			seats: seats.map((s) => ({
+				model: s.model,
+				role: s.role.trim(),
+				...(s.assist === 'pick' && s.assistant ? { assist: 'pick' as const, assistant: s.assistant } : s.assist === 'generic' ? { assist: 'generic' as const } : {}),
+				...(s.duty?.trim() ? { duty: s.duty.trim() } : {})
+			})),
+			auto_match: autoMatch,
 			rounds,
 			moderator,
 			research,
@@ -266,7 +313,7 @@
 			attachments.forEach((a) => a.preview && URL.revokeObjectURL(a.preview));
 			attachments = [];
 			try {
-				localStorage.setItem(LAST_KEY, JSON.stringify({ mode, seats, rounds, moderator, research }));
+				localStorage.setItem(LAST_KEY, JSON.stringify({ mode, seats, rounds, moderator, research, autoMatch }));
 			} catch {
 				// storage unavailable: defaults next time
 			}
@@ -337,6 +384,7 @@
 		isMac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent || '');
 		warp(520);
 		load();
+		loadLibrary();
 		timer = setInterval(() => {
 			if (!document.hidden && items.some((d) => isLive(d.status) || d.running)) load();
 		}, 4000);
@@ -482,7 +530,7 @@
 						<span class="hidden shrink-0 pl-1 text-[11px] text-gray-400 sm:inline dark:text-gray-500">{spec.hint}</span>
 					</div>
 
-					<SeatPicker bind:seats {choices} mode={spec} />
+					<SeatPicker bind:seats {choices} mode={spec} {autoMatch} {library} />
 					<input bind:this={fileInput} type="file" multiple class="hidden" on:change={(e) => { attach(e.currentTarget.files); e.currentTarget.value = ''; }} data-discuss-file-input />
 
 					<div class="flex flex-wrap items-center gap-2">
@@ -523,6 +571,24 @@
 								{/each}
 							</select>
 						</label>
+						<button
+							type="button"
+							class="dc-chip"
+							aria-pressed={autoMatch}
+							title="开始时按问题、讨论方式和席位职责，为每个模型匹配一个助手（用它的完整设定发言，模型不变）；指定了助手的席位保持不变"
+							on:click={() => (autoMatch = !autoMatch)}
+							data-discuss-automatch-toggle
+						>
+							<svg class="size-3.5" viewBox="0 0 16 16" fill="none" aria-hidden="true"
+								><circle cx="8" cy="5.5" r="2.6" stroke="currentColor" stroke-width="1.3" /><path
+									d="M3 13.5c.6-2.6 2.6-4 5-4s4.4 1.4 5 4"
+									stroke="currentColor"
+									stroke-width="1.3"
+									stroke-linecap="round"
+								/></svg
+							>
+							自动匹配助手
+						</button>
 						{#if webSearchEnabled}
 							<button
 								type="button"

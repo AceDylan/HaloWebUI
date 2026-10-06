@@ -74,7 +74,17 @@ export const modeSpec = (mode: string | null | undefined): ModeSpec =>
 	MODES.find((m) => m.value === mode) ?? MODES[0];
 
 /** A seat of a discussion not started yet. */
-export type SeatDraft = { model: string; role: string };
+/** A seat of a discussion not started yet. `assist`: matched to each question (auto, the default
+ * when 自动匹配 is on), the one picked (pick: `assistant` is `model:<id>` / `builtin:<id>`), or the
+ * role only (generic). */
+export type SeatDraft = {
+	model: string;
+	role: string;
+	assist?: 'auto' | 'pick' | 'generic';
+	assistant?: string;
+	assistantName?: string;
+	duty?: string;
+};
 
 export const MIN_SEATS = 2;
 export const MAX_SEATS = 5;

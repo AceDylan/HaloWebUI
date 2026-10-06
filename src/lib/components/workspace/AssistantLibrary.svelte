@@ -1,8 +1,18 @@
 <script lang="ts">
 	import { onMount, getContext } from 'svelte';
 	import { goto } from '$app/navigation';
+	import { toast } from 'svelte-sonner';
 
-	import { WEBUI_NAME } from '$lib/stores';
+	import { WEBUI_NAME, settings } from '$lib/stores';
+	import { translateWithDefault } from '$lib/i18n';
+	import { builtinRef, workbenchHref, type WorkbenchTarget } from '$lib/utils/assistant-library';
+	import {
+		ensureFavoriteRefs,
+		normalizeFavoriteRefs,
+		sortFavoritesFirst,
+		toggleFavorite
+	} from '$lib/utils/assistant-favorites';
+	import Star from '../icons/Star.svelte';
 
 	import Search from '../icons/Search.svelte';
 	import Plus from '../icons/Plus.svelte';
@@ -17,6 +27,14 @@
 	} from '$lib/utils/chat-assistants';
 
 	const i18n = getContext('i18n');
+	const tr = (zh: string, en: string, options: Record<string, any> = {}) =>
+		translateWithDefault($i18n, zh, en, options);
+
+	// Starred templates (`builtin:<id>`) share the favourites with the user's assistants; the
+	// home page's 精选助手 shows the first few.
+	const FAVORITES_GROUP = '__favorites';
+	$: favoriteRefs = normalizeFavoriteRefs($settings?.assistantFavorites);
+	$: favoriteCount = agentsData.filter((agent: any) => favoriteRefs.includes(builtinRef(agent.id))).length;
 
 	let loaded = false;
 	let searchValue = '';
@@ -39,14 +57,36 @@
 		.map(([name, count]) => ({ name, count }));
 
 	// 过滤助手
-	$: filteredAgents = agentsData.filter((agent: any) => {
-		const matchesSearch =
-			searchValue === '' ||
-			agent.name.toLowerCase().includes(searchValue.toLowerCase()) ||
-			(agent.description || '').toLowerCase().includes(searchValue.toLowerCase());
-		const matchesGroup = selectedGroup === '' || (agent.group || []).includes(selectedGroup);
-		return matchesSearch && matchesGroup;
-	});
+	$: filteredAgents = sortFavoritesFirst(
+		agentsData.filter((agent: any) => {
+			const matchesSearch =
+				searchValue === '' ||
+				agent.name.toLowerCase().includes(searchValue.toLowerCase()) ||
+				(agent.description || '').toLowerCase().includes(searchValue.toLowerCase());
+			const matchesGroup =
+				selectedGroup === '' ||
+				(selectedGroup === FAVORITES_GROUP
+					? favoriteRefs.includes(builtinRef(agent.id))
+					: (agent.group || []).includes(selectedGroup));
+			return matchesSearch && matchesGroup;
+		}),
+		(agent: any) => builtinRef(agent.id),
+		favoriteRefs
+	);
+
+	const toggleFavoriteHandler = async (agent: any) => {
+		try {
+			await toggleFavorite(builtinRef(agent.id));
+		} catch (e) {
+			toast.error(tr('收藏没有保存：{{error}}', 'Favourite not saved: {{error}}', { error: `${(e as any)?.message ?? e}` }));
+		}
+	};
+
+	/** 「用于精答 / 协作 / 讨论」: the workbench opens with this template picked. */
+	const useIn = (agent: any, target: WorkbenchTarget, fromModal = false) => {
+		if (fromModal) showDetailModal = false;
+		goto(workbenchHref(target, builtinRef(agent.id)));
+	};
 
 	// 打开助手详情
 	const openDetail = (agent: any) => {
@@ -63,7 +103,9 @@
 			meta: {
 				profile_image_url: null,
 				description: agent.description || '',
-				suggestion_prompts: null
+				suggestion_prompts: null,
+				// The library records where it came from (and its emoji).
+				assistant: { source: builtinRef(agent.id), emoji: agent.emoji || '' }
 			},
 			params: {
 				system: agent.prompt
@@ -99,6 +141,8 @@
 
 	onMount(() => {
 		loaded = true;
+		// The first visit moves the old featured list into the server favourites.
+		void ensureFavoriteRefs();
 	});
 </script>
 
@@ -124,6 +168,18 @@
 					<span class="truncate">{$i18n.t('All')}</span>
 					<span class="halo-cat-count">{agentsData.length}</span>
 				</button>
+
+				{#if favoriteCount > 0}
+					<button
+						class="halo-cat-row"
+						aria-current={selectedGroup === FAVORITES_GROUP ? 'true' : undefined}
+						data-favorites-group
+						on:click={() => (selectedGroup = FAVORITES_GROUP)}
+					>
+						<span class="truncate">{tr('已收藏', 'Favourites')}</span>
+						<span class="halo-cat-count">{favoriteCount}</span>
+					</button>
+				{/if}
 
 				{#each groups as group}
 					<button
@@ -157,7 +213,7 @@
 				<div class="flex items-center justify-between">
 					<div class="flex items-center gap-2">
 						<span class="font-display text-base font-semibold text-gray-900 dark:text-gray-100">
-							{selectedGroup || $i18n.t('All')}
+							{selectedGroup === FAVORITES_GROUP ? tr('已收藏', 'Favourites') : selectedGroup || $i18n.t('All')}
 						</span>
 						<span class="text-sm text-gray-400">{filteredAgents.length}</span>
 					</div>
@@ -186,18 +242,28 @@
 								</div>
 							</div>
 
-							<div
-								class="absolute top-2 right-2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition"
-							>
+							<div class="absolute top-2 right-2 flex items-center gap-1">
 								<button
-									class="p-1.5 rounded-lg bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 transition"
+									class="p-1.5 rounded-lg transition {favoriteRefs.includes(builtinRef(agent.id))
+										? 'text-amber-500 dark:text-amber-400'
+										: 'opacity-0 group-hover:opacity-100 focus-visible:opacity-100 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700'}"
+									on:click|stopPropagation={() => toggleFavoriteHandler(agent)}
+									aria-pressed={favoriteRefs.includes(builtinRef(agent.id))}
+									aria-label={favoriteRefs.includes(builtinRef(agent.id)) ? tr('取消收藏', 'Unfavourite') : tr('收藏', 'Favourite')}
+									title={favoriteRefs.includes(builtinRef(agent.id)) ? tr('取消收藏', 'Unfavourite') : tr('收藏（显示在首页精选助手）', 'Favourite (shown on the home page)')}
+									data-favorite={agent.id}
+								>
+									<Star className="size-4 {favoriteRefs.includes(builtinRef(agent.id)) ? 'fill-current' : ''}" strokeWidth="1.8" />
+								</button>
+								<button
+									class="p-1.5 rounded-lg bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 transition opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
 									on:click|stopPropagation={() => startChat(agent)}
 									title={$i18n.t('Start Chat')}
 								>
 									<ChatBubbleOval className="size-4" strokeWidth="2.3" />
 								</button>
 								<button
-									class="p-1.5 rounded-lg bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 transition"
+									class="p-1.5 rounded-lg bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 transition opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
 									on:click|stopPropagation={() => addAssistant(agent)}
 									title={$i18n.t('Add to workspace')}
 								>
@@ -238,6 +304,9 @@
 <AssistantDetailModal
 	bind:show={showDetailModal}
 	agent={selectedAgent}
+	favorite={selectedAgent ? favoriteRefs.includes(builtinRef(selectedAgent.id)) : false}
 	on:startChat={(e) => startChat(e.detail, true)}
 	on:add={(e) => addAssistant(e.detail, true)}
+	on:favorite={(e) => toggleFavoriteHandler(e.detail)}
+	on:useIn={(e) => useIn(e.detail.agent, e.detail.target, true)}
 />

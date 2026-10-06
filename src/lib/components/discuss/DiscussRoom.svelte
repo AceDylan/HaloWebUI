@@ -17,6 +17,7 @@
 		resumeDiscussion,
 		retryDiscussionTurn,
 		stopDiscussion,
+		undoSeatAssistant,
 		type DiscussAsk,
 		type Discussion
 	} from '$lib/apis/discussions';
@@ -29,6 +30,7 @@
 	import { now, timeAgo } from '$lib/components/teams/clock';
 	import ConclusionCard from './ConclusionCard.svelte';
 	import ResearchPanel from './ResearchPanel.svelte';
+	import SeatAssistants from './SeatAssistants.svelte';
 	import SeatAvatar from './SeatAvatar.svelte';
 	import TurnCard from './TurnCard.svelte';
 	import {
@@ -179,6 +181,8 @@
 		retrying = '';
 	};
 	const conclude = () => run(() => concludeDiscussion(localStorage.token, chatId));
+	const undoAssistant = (seat: string) =>
+		run(() => undoSeatAssistant(localStorage.token, chatId, seat), '已撤销这次升级，助手恢复到之前的设定');
 	const resume = async () => {
 		const res = await run(() => resumeDiscussion(localStorage.token, chatId));
 		if (res) {
@@ -433,9 +437,13 @@
 										{#if seat.role && !seat.label.includes(seat.role)}
 											<span style="color: hsl({seatHue(si)} 70% 52%)">{seat.role}</span>
 										{/if}
+										{#if seat.assistant_choice?.name && seat.assistant_choice.action !== 'generic'}
+											<span class="text-gray-500 dark:text-gray-400">· {seat.assistant_choice.name}</span>
+										{/if}
 									</span>
 								{/each}
 							</div>
+							<SeatAssistants {ask} undoable={ai === asks.length - 1 && !liveNow} {busy} on:undo={(e) => undoAssistant(e.detail)} />
 						</header>
 
 						{#if ask.research}

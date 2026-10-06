@@ -24,6 +24,7 @@
 		Users,
 		Wand2,
 		MessagesSquare,
+		Bot,
 		Image as ImageIcon
 	} from 'lucide-svelte';
 	import GoogleDrive from '$lib/components/icons/GoogleDrive.svelte';
@@ -58,6 +59,9 @@
 	export let onClose: Function;
 	/** 「交给…」: hands the draft (and the conversation) to 讨论台 / 协作台 / the image studio. */
 	export let onHandoff: ((to: 'answer' | 'discuss' | 'teams' | 'studio') => void) | null = null;
+	/** 「选择助手」: opens the assistant picker (the user's assistants and the templates); the pick
+	 * puts its prompt on the current model. Left out when not given. */
+	export let onSelectAssistant: (() => void) | null = null;
 	$: teamsEnabled = !!$config?.features?.enable_agent_teams;
 	$: studioEnabled =
 		!!$config?.features?.enable_image_generation &&
@@ -503,6 +507,26 @@
 				{/if}
 
 				<hr class="border-black/5 dark:border-white/5 my-1" />
+			{/if}
+
+			{#if onSelectAssistant}
+				<DropdownMenu.Item
+					class="flex gap-2 items-center px-3 py-2 text-sm font-medium cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl"
+					data-halo-input-assistant
+					on:click={() => onSelectAssistant?.()}
+				>
+					<span
+						class="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-gray-100 text-gray-600 dark:bg-gray-700/60 dark:text-gray-300"
+					>
+						<Bot class="size-4" strokeWidth={2} />
+					</span>
+					<div class="min-w-0">
+						<div class="truncate">{tr('选择助手', 'Choose assistant')}</div>
+						<div class="truncate text-xs font-normal text-gray-500 dark:text-gray-400">
+							{tr('在当前模型上套用助手的设定', "Its prompt on the current model")}
+						</div>
+					</div>
+				</DropdownMenu.Item>
 			{/if}
 
 			<Tooltip

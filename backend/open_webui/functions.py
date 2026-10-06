@@ -443,7 +443,7 @@ async def generate_function_chat_completion(
 
         params = model_info.params.model_dump()
         form_data = apply_model_params_to_body_openai(params, form_data)
-        form_data = apply_model_system_prompt_to_body(params, form_data, metadata, user)
+        form_data = apply_model_system_prompt_to_body(params, form_data, metadata, user, model_info=model_info)
 
     runtime_model_id = resolve_function_model_runtime_id(form_data.get("model"), models)
     if runtime_model_id:

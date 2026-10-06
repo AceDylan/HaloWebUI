@@ -20,16 +20,22 @@
 	} from '$lib/stores';
 	import { sanitizeResponseContent, extractCurlyBraceWords } from '$lib/utils';
 	import { WEBUI_BASE_URL } from '$lib/constants';
-	import agentsData from '$lib/data/agents-zh.json';
 	import {
 		type ChatAssistantSnapshot,
-		FEATURED_ASSISTANT_IDS,
-		getFeaturedAssistantIds,
-		setFeaturedAssistantIds,
-		resetFeaturedAssistantIds,
 		MAX_FEATURED_ASSISTANTS,
+		findBuiltinAssistant,
+		libraryEntryToSnapshot,
+		readLegacyFeaturedAssistantIds,
 		toChatAssistantSnapshot
 	} from '$lib/utils/chat-assistants';
+	import {
+		defaultFavoriteRefs,
+		ensureFavoriteRefs,
+		migrateFavoriteRefs,
+		normalizeFavoriteRefs,
+		saveFavoriteRefs
+	} from '$lib/utils/assistant-favorites';
+	import { listLibrary } from '$lib/apis/assistant-library';
 	import { translateWithDefault } from '$lib/i18n';
 	import { EMPTY_HERMES_RUN_OPTIONS, type HermesRunOptions } from '$lib/utils/hermes';
 
@@ -112,22 +118,56 @@
 	let models = [];
 	let editMode = false;
 	let showPickerModal = false;
-	let featuredIds = [...FEATURED_ASSISTANT_IDS];
 	let dragSourceIdx: number | null = null;
 	let dropTargetIdx: number | null = null;
 	let isMobileSortingMode = false;
-	let featuredAssistants: ChatAssistantSnapshot[] = [];
 	const tr = (key: string, defaultValue: string, options: Record<string, any> = {}) =>
 		translateWithDefault($i18n, key, defaultValue, options);
 
 	$: isMobileSortingMode = $mobile;
-	$: featuredAssistants = featuredIds
-		.map((id) =>
-			toChatAssistantSnapshot(
-				agentsData.find((agent) => agent.id === id) as Record<string, unknown> | undefined
-			)
-		)
-		.filter(Boolean) as ChatAssistantSnapshot[];
+
+	// 精选助手 = the first favourites (server settings, `model:<id>` / `builtin:<id>`). Until the
+	// old browser list has been moved over, show what the move will save.
+	const seededRefs = migrateFavoriteRefs(undefined, readLegacyFeaturedAssistantIds()).refs;
+	$: favoriteRefs = Array.isArray($settings?.assistantFavorites)
+		? normalizeFavoriteRefs($settings.assistantFavorites)
+		: seededRefs;
+
+	// The user's assistants come from the library (their prompts); a pick adds its own.
+	let modelSnapshots: Record<string, ChatAssistantSnapshot> = {};
+	let libraryState: 'idle' | 'loading' | 'loaded' = 'idle';
+	const loadLibrary = async () => {
+		libraryState = 'loading';
+		try {
+			const res = await listLibrary(localStorage.token);
+			const next: Record<string, ChatAssistantSnapshot> = {};
+			for (const entry of res?.assistants ?? []) {
+				const snapshot = libraryEntryToSnapshot(entry);
+				if (snapshot) next[entry.ref] = snapshot;
+			}
+			modelSnapshots = next;
+		} catch {
+			// Without the library the user's favourites are left out; templates still show.
+		} finally {
+			libraryState = 'loaded';
+		}
+	};
+	$: if (libraryState === 'idle' && favoriteRefs.some((ref) => ref.startsWith('model:'))) {
+		void loadLibrary();
+	}
+
+	const resolveFavorite = (ref: string, snapshots: Record<string, ChatAssistantSnapshot>) =>
+		ref.startsWith('builtin:')
+			? toChatAssistantSnapshot(findBuiltinAssistant(ref))
+			: (snapshots[ref] ?? null);
+
+	type FeaturedItem = { ref: string; assistant: ChatAssistantSnapshot };
+	let featuredItems: FeaturedItem[] = [];
+	$: featuredItems = favoriteRefs
+		.map((ref) => ({ ref, assistant: resolveFavorite(ref, modelSnapshots) }))
+		.filter((item): item is FeaturedItem => Boolean(item.assistant))
+		.slice(0, MAX_FEATURED_ASSISTANTS);
+	$: featuredRefs = featuredItems.map((item) => item.ref);
 
 	const selectSuggestionPrompt = async (p) => {
 		let text = p;
@@ -176,26 +216,44 @@
 
 	$: models = selectedModels.map((id) => findModelByIdentity($_models, id));
 
-	const persistFeaturedIds = (nextIds: string[]) => {
-		featuredIds = nextIds;
+	const persistFavorites = async (nextRefs: string[]) => {
 		dragSourceIdx = null;
 		dropTargetIdx = null;
-		setFeaturedAssistantIds(nextIds);
+		try {
+			await saveFavoriteRefs(nextRefs);
+		} catch (error) {
+			toast.error(
+				tr('精选助手没有保存：{{error}}', 'Featured assistants not saved: {{error}}', {
+					error: `${(error as any)?.message ?? error}`
+				})
+			);
+		}
 	};
 
-	const removeFeaturedAssistant = (assistantId: string) => {
-		persistFeaturedIds(featuredIds.filter((id) => id !== assistantId));
+	/** The shown ones in a new order; favourites past the shown ones stay behind them. */
+	const persistFeaturedOrder = (nextShown: string[]) =>
+		persistFavorites([...nextShown, ...favoriteRefs.filter((ref) => !nextShown.includes(ref))]);
+
+	// Removing from the home list is unfavouriting.
+	const removeFeaturedAssistant = (ref: string) => {
+		persistFavorites(favoriteRefs.filter((r) => r !== ref));
+	};
+
+	const addFeaturedAssistant = (ref: string) => {
+		if (favoriteRefs.includes(ref)) return;
+		// Right after the shown ones, so it shows even when hidden favourites follow.
+		persistFeaturedOrder([...featuredRefs, ref]);
 	};
 
 	const moveFeaturedAssistant = (index: number, direction: -1 | 1) => {
 		const nextIndex = index + direction;
-		if (nextIndex < 0 || nextIndex >= featuredIds.length) {
+		if (nextIndex < 0 || nextIndex >= featuredRefs.length) {
 			return;
 		}
 
-		const nextIds = [...featuredIds];
-		[nextIds[index], nextIds[nextIndex]] = [nextIds[nextIndex], nextIds[index]];
-		persistFeaturedIds(nextIds);
+		const nextRefs = [...featuredRefs];
+		[nextRefs[index], nextRefs[nextIndex]] = [nextRefs[nextIndex], nextRefs[index]];
+		persistFeaturedOrder(nextRefs);
 	};
 
 	const handleDragStart = (index: number) => {
@@ -212,28 +270,32 @@
 			dragSourceIdx === null ||
 			dragSourceIdx === index ||
 			dragSourceIdx < 0 ||
-			dragSourceIdx >= featuredIds.length
+			dragSourceIdx >= featuredRefs.length
 		) {
 			dragSourceIdx = null;
 			dropTargetIdx = null;
 			return;
 		}
 
-		const nextIds = [...featuredIds];
-		const [moved] = nextIds.splice(dragSourceIdx, 1);
-		nextIds.splice(index, 0, moved);
-		persistFeaturedIds(nextIds);
+		const nextRefs = [...featuredRefs];
+		const [moved] = nextRefs.splice(dragSourceIdx, 1);
+		nextRefs.splice(index, 0, moved);
+		persistFeaturedOrder(nextRefs);
 		dragSourceIdx = null;
 		dropTargetIdx = null;
 	};
 
+	// The default templates again; starred own assistants stay favourites, after them.
 	const handleResetFeaturedAssistants = () => {
-		resetFeaturedAssistantIds();
-		featuredIds = getFeaturedAssistantIds();
+		persistFavorites([
+			...defaultFavoriteRefs(),
+			...favoriteRefs.filter((ref) => ref.startsWith('model:'))
+		]);
 	};
 
 	onMount(() => {
-		featuredIds = getFeaturedAssistantIds();
+		// Moves the old browser list to the server the first time.
+		void ensureFavoriteRefs();
 		// a new chat arrives with a short jump of the starfield (scifi layer; no-op without it)
 		warp(650);
 	});
@@ -393,6 +455,7 @@
 					bind:hermesOptions
 					{onChange}
 					{onDeactivateAssistant}
+					{onActivateAssistant}
 					{toolServers}
 					{transparentBackground}
 					{stopResponse}
@@ -438,7 +501,7 @@
 					</button>
 				</div>
 				<div class="mt-2 grid grid-cols-1 gap-2 @md:grid-cols-2 @xl:grid-cols-3">
-					{#each featuredAssistants as assistant, index}
+					{#each featuredItems as { ref, assistant }, index (ref)}
 						<div
 							class="group relative rounded-2xl border bg-gray-50/90 px-3 py-3 text-left transition dark:bg-gray-900/50 {editMode
 								? dropTargetIdx === index && !isMobileSortingMode
@@ -447,7 +510,7 @@
 								: 'border-transparent hover:border-primary-200/70 hover:bg-primary-50/70 dark:hover:border-primary-700/50 dark:hover:bg-primary-950/20'}"
 							draggable={editMode && !isMobileSortingMode}
 							on:dragstart={(e) => {
-								e.dataTransfer?.setData('text/plain', assistant.id);
+								e.dataTransfer?.setData('text/plain', ref);
 								if (e.dataTransfer) {
 									e.dataTransfer.effectAllowed = 'move';
 								}
@@ -486,7 +549,7 @@
 										<button
 											class="rounded-full bg-white/90 p-1 text-gray-500 shadow-sm transition hover:bg-white hover:text-gray-700 dark:bg-gray-800/90 dark:hover:bg-gray-800 dark:hover:text-gray-200"
 											on:click={() => moveFeaturedAssistant(index, 1)}
-											disabled={index === featuredAssistants.length - 1}
+											disabled={index === featuredItems.length - 1}
 											aria-label={$i18n.t('Move Right')}
 										>
 											<ArrowRight className="size-3.5" strokeWidth="2.2" />
@@ -494,7 +557,7 @@
 									{/if}
 									<button
 										class="rounded-full bg-white/90 p-1 text-gray-500 shadow-sm transition hover:bg-white hover:text-red-600 dark:bg-gray-800/90 dark:hover:bg-gray-800 dark:hover:text-red-400"
-										on:click={() => removeFeaturedAssistant(assistant.id)}
+										on:click={() => removeFeaturedAssistant(ref)}
 										aria-label={$i18n.t('Remove Assistant')}
 									>
 										<XMark className="size-3.5" strokeWidth="2.4" />
@@ -526,7 +589,7 @@
 						</div>
 					{/each}
 
-					{#if editMode && featuredIds.length < MAX_FEATURED_ASSISTANTS}
+					{#if editMode && featuredItems.length < MAX_FEATURED_ASSISTANTS}
 						<button
 							class="flex min-h-[104px] items-center justify-center rounded-2xl border border-dashed border-gray-300/80 bg-transparent text-gray-400 transition hover:border-primary-300 hover:text-primary-500 dark:border-gray-700/80 dark:text-gray-500 dark:hover:border-primary-700 dark:hover:text-primary-400"
 							on:click={() => {
@@ -545,7 +608,7 @@
 					{/if}
 				</div>
 
-				{#if !editMode && featuredAssistants.length === 0}
+				{#if !editMode && featuredItems.length === 0}
 					<div class="mt-2 rounded-2xl border border-dashed border-gray-200/80 px-4 py-8 text-center text-sm text-gray-400 dark:border-gray-700/70 dark:text-gray-500">
 						{tr(
 							'暂无精选助手，点击右上角“管理”即可添加',
@@ -602,13 +665,16 @@
 
 <AssistantPickerModal
 	bind:show={showPickerModal}
-	excludeIds={featuredIds}
+	excludeIds={favoriteRefs}
 	on:select={(e) => {
-		const assistant = e.detail;
-		if (!assistant || featuredIds.includes(assistant.id)) {
+		const picked = e.detail;
+		if (!picked?.ref) {
 			return;
 		}
-
-		persistFeaturedIds([...featuredIds, assistant.id]);
+		if (picked.ref.startsWith('model:')) {
+			const snapshot = toChatAssistantSnapshot({ ...picked, id: picked.ref });
+			if (snapshot) modelSnapshots = { ...modelSnapshots, [picked.ref]: snapshot };
+		}
+		addFeaturedAssistant(picked.ref);
 	}}
 />

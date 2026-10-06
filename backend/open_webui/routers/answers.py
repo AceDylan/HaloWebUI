@@ -16,7 +16,8 @@ from open_webui.models.chats import ChatForm, Chats
 from open_webui.socket.main import get_event_emitter
 from open_webui.utils.auth import get_verified_user
 from open_webui.utils import answer_desk as desk
-from open_webui.utils.answer_desk import CHAT_KEY, LIVE, MESSAGE_KEY, META_KEY, AnswerError
+from open_webui.utils import assistant_library as lib
+from open_webui.utils.answer_desk import CHAT_KEY, LIVE, MESSAGE_KEY, META_KEY
 from open_webui.utils.discussion_room import clean_context
 
 log = logging.getLogger(__name__)
@@ -37,6 +38,8 @@ class CreateForm(BaseModel):
     context: Optional[dict] = None
     # set once per question by the page and sent again when it retries
     client_key: Optional[str] = None
+    # 「用于精答」 from the assistant library: this assistant answers (model:<id> / builtin:<id>)
+    assistant: Optional[str] = None
 
 
 # Recently created runs, so a retry after a dropped response (same key) or a double tap (same
@@ -59,10 +62,6 @@ def _recent_duplicate(user, key: Optional[str], question: str) -> Optional[str]:
         if same_request or chat.id in LIVE or status not in {"error", "stopped", "interrupted"}:
             return chat.id
     return None
-
-
-def _raise(exc: AnswerError):
-    raise HTTPException(status_code=exc.status_code, detail=exc.detail)
 
 
 async def _models(request: Request, user, refresh: bool = False) -> tuple[dict, set]:
@@ -211,7 +210,7 @@ def _resolve_planner(requested: Optional[str], models_map: dict, ambiguous: set,
             return resolve_seat_model(requested, models_map, ambiguous, user)
         except DiscussError as exc:
             raise HTTPException(status_code=exc.status_code, detail=exc.detail)
-    _, bases = desk.library(models_map, user)
+    _, bases = lib.library(models_map, user)
     if not bases:
         raise HTTPException(status_code=400, detail="没有可用的文本模型")
     strong = next((b for b in bases if re.search(r"claude|gpt", b["name"], re.I)), bases[0])
@@ -236,63 +235,54 @@ def _start(request: Request, user, chat, run: dict) -> desk.LiveAnswer:
 
     async def route(current: dict) -> tuple[dict, dict]:
         models_map, _ = await _models(request, user, refresh=True)
-        assistants, bases = desk.library(models_map, user)
+        assistants, bases = lib.library(models_map, user)
         planner = current["planner"]["model"]
         default_base = planner if any(b["id"] == planner for b in bases) else (bases[0]["id"] if bases else "")
-        options = {"default_base": default_base, "may_create": may_write, "web_allowed": bool(current.get("webAllowed"))}
-        messages = desk.plan_messages(question, assistants, bases, background=(current.get("context") or {}).get("text") or "", **options)
+        background = (current.get("context") or {}).get("text") or ""
+        chosen = str(current.get("chosen") or "")
+        short_assistants, templates = lib.shortlist(
+            f"{question}\n{background[:500]}", assistants, favorites=lib.favorites_of(user), must=[chosen] if chosen else []
+        )
+        web_allowed = bool(current.get("webAllowed"))
+        messages = desk.plan_messages(
+            question, short_assistants, templates, bases, default_base=default_base, may_create=may_write, web_allowed=web_allowed, background=background, chosen=chosen
+        )
         text = ""
         async for kind, part in desk.iterate_completion(await call_model(planner, messages)):
             if kind == "content":
                 text += part
-        plan = desk.normalize_plan(desk.parse_json_object(text), assistants, bases, **options)
-        return plan_public(plan), await carry_out(plan, bases)
-
-    def plan_public(plan: dict) -> dict:
-        return {k: plan[k] for k in ("action", "reason", "change", "webSearch", "note")}
-
-    async def carry_out(plan: dict, bases: list[dict]) -> dict:
-        action, target, spec = plan["action"], plan["target"], plan["spec"]
-        if action == "use":
-            return {
-                "id": target["id"],
-                "name": target["name"],
-                "emoji": target["emoji"],
-                "description": target["description"],
-                "action": "use",
-                "saved": True,
-                "base": target["base"],
-                "baseName": desk.base_name(bases, target["base"]),
-            }
-        if action == "update":
-            row, before = desk.update_assistant(user, target["id"], spec, chat_id=chat_id, change=plan["change"])
+        plan = desk.normalize_plan(
+            desk.parse_json_object(text), assistants, templates, bases, default_base=default_base, may_create=may_write, web_allowed=web_allowed, chosen=chosen
+        )
+        decision = plan.pop("decision")
+        choice = lib.carry_out(user, {"q": decision}, source="answer", run_ref=f"answer:{chat_id}", question=question, may_write=may_write)["q"]
+        if choice.get("saved"):
             await _models(request, user, refresh=True)
-            return {
-                "id": row.id,
-                "name": row.name,
-                "emoji": target["emoji"],
-                "description": (row.meta.description or ""),
-                "action": "update",
-                "saved": True,
-                "base": row.base_model_id,
-                "baseName": desk.base_name(bases, row.base_model_id or ""),
-                "system": spec["system"],
-                "before": before,
-            }
-        common = {
-            "name": spec["name"],
-            "emoji": spec["emoji"],
-            "description": spec["description"],
-            "base": spec["base"],
-            "baseName": desk.base_name(bases, spec["base"]),
-            "system": spec["system"],
+        return plan, assistant_of(choice, bases, default_base)
+
+    def assistant_of(choice: dict, bases: list[dict], default_base: str) -> dict:
+        """The run's assistant: a library one answers by its id; a template or a one-off one is
+        its system prompt on a base model."""
+        base = choice.get("base") or default_base
+        assistant = {
+            "id": choice["id"] if choice.get("saved") else base,
+            "ref": choice.get("ref") or "",
+            "name": choice.get("name") or "",
+            "emoji": choice.get("emoji") or "",
+            "description": choice.get("description") or "",
+            "action": choice["action"],
+            "saved": bool(choice.get("saved")),
+            "base": base,
+            "baseName": lib.base_name(bases, base),
+            "version": choice.get("version"),
+            "system": choice.get("system") or "",
+            "note": choice.get("note") or "",
         }
-        if not may_write:
-            # not allowed to keep it: answer once with the assistant it would have been
-            return {**common, "id": spec["base"], "action": "temporary", "saved": False}
-        row = desk.create_assistant(user, spec, chat_id=chat_id, question=question)
-        await _models(request, user, refresh=True)
-        return {**common, "id": row.id, "action": "create", "saved": True}
+        if choice.get("before"):
+            assistant["before"] = choice["before"]
+        if assistant["saved"]:
+            lib.pin_chat(chat_id, assistant["id"], choice)
+        return assistant
 
     async def search(text: str):
         # the discussion room's evidence pack: 1-2 queries through the app's own web search
@@ -332,9 +322,10 @@ def _check_capacity(user):
 async def list_assistants(request: Request, user=Depends(get_verified_user)):
     """The library the dispatcher picks from (what the page shows), and whether it may grow."""
     models_map, _ = await _models(request, user)
-    assistants, bases = desk.library(models_map, user)
+    assistants, bases = lib.library(models_map, user)
+    keys = ("id", "ref", "name", "description", "domain", "emoji", "base", "editable", "hidden", "source", "version")
     return {
-        "assistants": [{**desk.public_assistant(a), "baseName": desk.base_name(bases, a["base"])} for a in assistants],
+        "assistants": [{**{k: a.get(k) for k in keys}, "baseName": lib.base_name(bases, a["base"])} for a in assistants],
         "may_create": _may_write_library(request, user),
     }
 
@@ -392,6 +383,9 @@ async def create_answer(request: Request, form: CreateForm, user=Depends(get_ver
         web_allowed=web_allowed,
         context=clean_context(form.context),
     )
+    chosen = str(form.assistant or "").strip()[:200]
+    if chosen.startswith(("model:", "builtin:")):
+        run["chosen"] = chosen
     messages = {
         user_message_id: {
             "id": user_message_id,
@@ -484,9 +478,14 @@ async def revert_upgrade(request: Request, chat_id: str, user=Depends(get_verifi
     if assistant.get("action") != "update" or assistant.get("reverted"):
         raise HTTPException(status_code=400, detail="这次没有升级助手")
     try:
-        desk.revert_assistant(user, assistant["id"], chat_id=chat_id, after_system=assistant.get("system") or "")
-    except AnswerError as exc:
-        _raise(exc)
+        row = lib.undo_run(user, assistant["id"], f"answer:{chat_id}", after_system=assistant.get("system") or "")
+    except lib.LibraryError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail)
+    lib.pin_chat(
+        chat_id,
+        row.id,
+        {"version": lib.lib_meta(row.meta)["version"], "system": row.params.model_dump().get("system") or "", "name": row.name, "base": row.base_model_id},
+    )
     run = dict(run)
     run["assistant"] = {**assistant, "reverted": True}
     _persist(chat_id, run)

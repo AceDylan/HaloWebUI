@@ -231,6 +231,8 @@ COPY --chown=$UID:$GID --from=frontend-build /app/package.json /app/package.json
 
 # copy backend files
 COPY --chown=$UID:$GID ./backend .
+# the built-in assistant templates, for the workbenches' dispatcher (utils/assistant_library.py)
+COPY --chown=$UID:$GID ./src/lib/data/agents-zh.json ./open_webui/assistant_templates.json
 
 # sync frontend static assets into backend static folder
 COPY --chown=$UID:$GID --from=frontend-build /app/backend/open_webui/static /app/backend/open_webui/static

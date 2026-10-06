@@ -5,10 +5,11 @@ import type { DiscussContext, DiscussResearch, DiscussRetry, DiscussUsage } from
 
 export type AnswerStatus = 'routing' | 'researching' | 'answering' | 'done' | 'stopped' | 'error' | 'interrupted';
 
-/** How the dispatcher got an assistant: kept one, upgraded one, made one; `temporary` = made one
- * for this question only (the user may not keep assistants), `direct` = the dispatcher failed and
+/** How the dispatcher got an assistant: kept one, upgraded one, made one; `template` = a built-in
+ * template as it is; `temporary` = made one for this question only (the user may not keep
+ * assistants, or may not edit the one it would upgrade), `direct` = the dispatcher failed and
  * answered itself. */
-export type AssistantAction = 'use' | 'update' | 'create' | 'temporary' | 'direct';
+export type AssistantAction = 'use' | 'template' | 'update' | 'create' | 'temporary' | 'direct';
 
 export type AnswerAssistant = {
 	id: string;
@@ -23,6 +24,11 @@ export type AnswerAssistant = {
 	system?: string;
 	/** The upgrade was undone. */
 	reverted?: boolean;
+	/** model:<id> / builtin:<id> */
+	ref?: string;
+	/** The version it answered with. */
+	version?: number | null;
+	note?: string;
 };
 
 export type AnswerPlan = {
@@ -100,14 +106,19 @@ export type AnswerSummary = {
 
 export type LibraryAssistant = {
 	id: string;
+	ref: string;
 	name: string;
 	description: string;
+	domain?: string;
 	emoji: string;
 	base: string;
 	baseName: string;
 	editable: boolean;
-	/** Made (or last upgraded) by 精答. */
-	byDesk: boolean;
+	/** Kept out of the model menus (精答 still picks it). */
+	hidden?: boolean;
+	/** Who made it: manual / answer / team / discuss / builtin:<id>. */
+	source?: string;
+	version?: number;
 };
 
 export class AnswerApiError extends Error {
@@ -158,6 +169,8 @@ export const createAnswer = (
 		research?: boolean;
 		context?: { text: string; title: string; chat_id: string | null } | null;
 		client_key?: string;
+		/** 「用于精答」: this assistant answers (model:<id> / builtin:<id>). */
+		assistant?: string | null;
 	}
 ) => request<AnswerDetail>(token, 'POST', '/', form);
 

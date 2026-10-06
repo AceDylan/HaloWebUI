@@ -184,7 +184,9 @@ async def update_model_by_id(
         public_permission_key="sharing.public_models",
     )
 
-    model = Models.update_model_by_id(id, form_data)
+    from open_webui.utils.assistant_library import note_manual_edit
+
+    model = Models.update_model_by_id(id, note_manual_edit(model, form_data))
     return model
 
 

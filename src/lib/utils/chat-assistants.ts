@@ -9,6 +9,8 @@ export type ChatAssistantSnapshot = {
 };
 
 export const PENDING_ASSISTANT_STORAGE_KEY = 'pendingAssistant';
+// Where the home page kept its featured template ids before favourites moved to the server
+// (utils/assistant-favorites.ts); read once for the migration.
 export const FEATURED_STORAGE_KEY = 'featuredAssistantIds';
 export const MAX_FEATURED_ASSISTANTS = 6;
 
@@ -81,48 +83,23 @@ const normalizeFeaturedAssistantIds = (value: unknown): string[] => {
 	return normalized;
 };
 
-export const getFeaturedAssistantIds = (): string[] => {
+/** The featured ids this browser stored before favourites moved to the server, or null when it
+ * never stored any (then the defaults apply). Read once, for the migration. */
+export const readLegacyFeaturedAssistantIds = (): string[] | null => {
 	if (typeof localStorage === 'undefined') {
-		return [...FEATURED_ASSISTANT_IDS];
+		return null;
 	}
 
 	try {
-		const scopedKey = buildFeaturedStorageKey();
-		const rawValue = localStorage.getItem(scopedKey) ?? localStorage.getItem(FEATURED_STORAGE_KEY);
+		const rawValue =
+			localStorage.getItem(buildFeaturedStorageKey()) ?? localStorage.getItem(FEATURED_STORAGE_KEY);
 		if (!rawValue) {
-			return [...FEATURED_ASSISTANT_IDS];
+			return null;
 		}
-
-		const parsed = JSON.parse(rawValue);
-		const normalized = normalizeFeaturedAssistantIds(parsed);
-
-		if (scopedKey !== FEATURED_STORAGE_KEY) {
-			localStorage.setItem(scopedKey, JSON.stringify(normalized));
-			localStorage.removeItem(FEATURED_STORAGE_KEY);
-		}
-
-		return normalized;
+		return normalizeFeaturedAssistantIds(JSON.parse(rawValue));
 	} catch {
-		return [...FEATURED_ASSISTANT_IDS];
+		return null;
 	}
-};
-
-export const setFeaturedAssistantIds = (ids: string[]): void => {
-	if (typeof localStorage === 'undefined') {
-		return;
-	}
-
-	const normalized = normalizeFeaturedAssistantIds(ids);
-	localStorage.setItem(buildFeaturedStorageKey(), JSON.stringify(normalized));
-};
-
-export const resetFeaturedAssistantIds = (): void => {
-	if (typeof localStorage === 'undefined') {
-		return;
-	}
-
-	localStorage.removeItem(buildFeaturedStorageKey());
-	localStorage.removeItem(FEATURED_STORAGE_KEY);
 };
 
 export const toChatAssistantSnapshot = (
@@ -147,4 +124,32 @@ export const toChatAssistantSnapshot = (
 		prompt,
 		description: normalizeString(value.description)
 	};
+};
+
+/** A built-in template by id (`'15'` or `'builtin:15'`). */
+export const findBuiltinAssistant = (id: string): Record<string, unknown> | null => {
+	const key = String(id ?? '').replace(/^builtin:/, '');
+	return (
+		((agentsData as Array<Record<string, unknown>>).find((agent) => agent.id === key) as
+			| Record<string, unknown>
+			| undefined) ?? null
+	);
+};
+
+/** A user assistant from the library (GET /api/v1/assistant-library) as a chat assistant: its
+ * prompt goes on the chat's current model like a template's. */
+export const libraryEntryToSnapshot = (
+	entry: { ref?: string; id?: string; name?: string; emoji?: string; prompt?: string; description?: string } | null | undefined
+): ChatAssistantSnapshot | null => {
+	if (!entry) {
+		return null;
+	}
+
+	return toChatAssistantSnapshot({
+		id: entry.ref ?? (entry.id ? `model:${entry.id}` : null),
+		name: entry.name,
+		emoji: entry.emoji || '🤖',
+		prompt: entry.prompt,
+		description: entry.description
+	});
 };

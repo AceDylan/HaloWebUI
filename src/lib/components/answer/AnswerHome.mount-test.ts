@@ -58,7 +58,7 @@ beforeEach(() => {
 	]);
 	stores.config.set({ hermes_agent_model_ids: ['hermes-agent'], features: { enable_web_search: true } } as any);
 	api.listAnswerAssistants.mockResolvedValue({
-		assistants: [{ id: 'answer-1', name: '合同审查', description: '逐条找合同风险', emoji: '⚖️', base: 'm-ds', baseName: 'deepseek-chat', editable: true, byDesk: true }],
+		assistants: [{ id: 'answer-1', name: '合同审查', description: '逐条找合同风险', emoji: '⚖️', base: 'm-ds', baseName: 'deepseek-chat', editable: true, ref: 'model:answer-1', source: 'answer', hidden: true }],
 		may_create: true
 	});
 	api.listAnswers.mockResolvedValue([
@@ -121,7 +121,7 @@ describe('AnswerHome', () => {
 		await until(() => nav.goto.mock.calls.length === 1);
 		expect(nav.goto.mock.calls[0][0]).toBe('/answer/new1');
 		const form = api.createAnswer.mock.calls[0][1];
-		expect(form).toMatchObject({ question: '劳动合同的竞业限制合理吗？', planner: 'm-claude', research: true, context: null });
+		expect(form).toMatchObject({ question: '劳动合同的竞业限制合理吗？', planner: 'm-claude', research: true, context: null, assistant: null });
 		expect(form.client_key).toBeTruthy();
 		expect(JSON.parse(localStorage.getItem('halo.answer.last')!)).toEqual({ planner: 'm-claude', research: true });
 	});
@@ -139,5 +139,19 @@ describe('AnswerHome', () => {
 		submit(target);
 		await until(() => api.createAnswer.mock.calls.length === 1);
 		expect(api.createAnswer.mock.calls[0][1].context).toEqual({ text: '用户：我在北京租房', title: '租房', chat_id: 'c-1' });
+	});
+	it('a tap on a library assistant makes it the one that answers', async () => {
+		api.createAnswer.mockResolvedValueOnce({ id: 'new3', run: null });
+		const target = await mount();
+		await until(() => !!target.querySelector('[data-answer-library-item="answer-1"]'));
+		(target.querySelector('[data-answer-library-item="answer-1"]') as any).click();
+		await until(() => !!target.querySelector('[data-answer-chosen]'));
+		expect(target.querySelector('[data-answer-chosen]')!.textContent).toContain('合同审查');
+		const input = target.querySelector('[data-answer-input]') as any;
+		input.value = '帮我看看这份合同';
+		input.dispatchEvent(new (globalThis as any).Event('input'));
+		submit(target);
+		await until(() => api.createAnswer.mock.calls.length === 1);
+		expect(api.createAnswer.mock.calls[0][1].assistant).toBe('model:answer-1');
 	});
 });

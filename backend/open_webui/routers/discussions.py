@@ -14,6 +14,7 @@ from pydantic import BaseModel
 
 from open_webui.models.chats import ChatForm, Chats
 from open_webui.socket.main import get_event_emitter
+from open_webui.utils.access_control import has_permission
 from open_webui.utils.auth import get_verified_user
 from open_webui.utils import discussion_room as room
 from open_webui.utils.discussion_room import (
@@ -33,6 +34,12 @@ DEFAULT_TITLE = "新讨论"
 class SeatForm(BaseModel):
     model: str
     role: Optional[str] = ""
+    # auto: an assistant matched to the question · pick: the one in `assistant` · generic: the role only
+    assist: Optional[str] = None
+    # model:<id> or builtin:<id> (pick)
+    assistant: Optional[str] = None
+    # what this seat does in this discussion
+    duty: Optional[str] = ""
 
 
 class CreateForm(BaseModel):
@@ -48,6 +55,8 @@ class CreateForm(BaseModel):
     # set once per question by the page and sent again when it retries: the same key is the same
     # discussion, never a second one
     client_key: Optional[str] = None
+    # 自动匹配助手: seats without a choice of their own get an assistant matched to each question
+    auto_match: bool = False
 
 
 class AskForm(BaseModel):
@@ -64,6 +73,10 @@ class RetryForm(BaseModel):
     turn: str
 
 
+class UndoAssistantForm(BaseModel):
+    seat: str
+
+
 # Recently created discussions, so one question never becomes two: a retry after a dropped
 # response (same client key), or a second tab / double tap with the same question and seats.
 RECENT_SECONDS = 120
@@ -71,7 +84,9 @@ _recent: dict[str, list[dict]] = {}
 
 
 def _fingerprint(question: str, setup: dict) -> str:
-    seats = ",".join(f"{seat['model']}|{seat.get('role') or ''}" for seat in setup["seats"])
+    seats = ",".join(
+        f"{seat['model']}|{seat.get('role') or ''}|{seat.get('assist') or ''}|{seat.get('assistant') or ''}" for seat in setup["seats"]
+    )
     return json.dumps([question.strip(), setup["mode"], seats, setup["moderator"]["model"]], ensure_ascii=False)
 
 
@@ -123,6 +138,7 @@ def _setup_of(chat) -> dict:
     data = (chat.chat or {}).get(CHAT_KEY) or {}
     setup = {key: data.get(key) for key in ("mode", "rounds", "seats", "moderator")}
     setup["research"] = bool(data.get("research"))
+    setup["autoMatch"] = bool(data.get("autoMatch"))
     return setup
 
 
@@ -373,6 +389,133 @@ async def _search(request: Request, user, moderator: str, question: str, history
     return {"queries": queries, "docs": docs}
 
 
+# How each format staffs its seats (the shared library's rules apply on top).
+MODE_MATCH_RULES = {
+    "roundtable": "Roundtable: give the seats complementary specialists (different angles on the question); avoid two seats with the same assistant unless the question needs it.",
+    "brainstorm": "Brainstorm: give the seats complementary specialists from different fields, so the ideas differ.",
+    "debate": "Debate: the specialist brings expertise in the question's field; the side (正方 / 反方) in a unit's role is this debate's stance and never goes into an assistant. A unit whose role is 评审 (or a judge) gets a neutral reviewer / judge specialist and no side.",
+    "review": "Review: staff the seats by review duty (the proposal itself, its risks, how to verify it, ...).",
+    "compare": "Compare: give EVERY unit the same assistant (the best one for the question): the comparison is between the models.",
+}
+
+
+def _unit_of(seat: dict, last_choice: Optional[dict]) -> dict:
+    unit = {"key": seat["id"], "model": seat["name"]}
+    if seat.get("role"):
+        unit["role"] = seat["role"]
+    if seat.get("duty"):
+        unit["duty"] = seat["duty"]
+    if last_choice and last_choice.get("name"):
+        unit["last_time"] = last_choice["name"]
+    return unit
+
+
+def _picked(ref: str, assistants: list[dict]) -> Optional[dict]:
+    """A seat's own choice as a decision (no dispatcher, nothing written)."""
+    from open_webui.utils import assistant_library as lib
+
+    target = next((a for a in assistants if a["ref"] == ref), None)
+    if target is not None:
+        return {"action": "use", "target": target, "template": None, "spec": {}, "reason": "你指定的助手", "change": "", "note": ""}
+    template = lib.builtin_by_ref(ref) if ref.startswith("builtin:") else None
+    if template is not None:
+        return {"action": "template", "target": None, "template": template, "spec": {"base": ""}, "reason": "你指定的模板", "change": "", "note": ""}
+    return None
+
+
+async def _match(request: Request, user, chat_id: str, ask: dict, call_model) -> dict:
+    """Each seat's assistant for this question: picked ones as they are, the automatic ones from
+    one dispatcher call for all of them (writes to the library once, by the shared rules)."""
+    from open_webui.utils import assistant_library as lib
+    from open_webui.utils.models import get_all_models
+
+    await get_all_models(request, user=user)
+    models_map = getattr(request.state, "MODELS", None) or {}
+    assistants, bases = lib.library(models_map, user)
+    may_write = user.role == "admin" or has_permission(user.id, "workspace.models", request.app.state.config.USER_PERMISSIONS)
+    seats = ask.get("seats") or []
+    mode = ask.get("mode") or "roundtable"
+    decisions: dict[str, dict] = {}
+    notes: dict[str, str] = {}
+    auto = []
+    for seat in seats:
+        if seat.get("assist") == "pick":
+            decision = _picked(str(seat.get("assistant") or ""), assistants)
+            if decision is None:
+                notes[seat["id"]] = "指定的助手已不可用，用通用角色"
+            else:
+                decisions[seat["id"]] = decision
+        elif seat.get("assist") == "auto":
+            auto.append(seat)
+
+    error = None
+    duties: dict[str, str] = {}
+    if auto:
+        previous = _last_choices(chat_id, user, ask["id"])
+        units = [_unit_of(seat, previous.get(seat["id"])) for seat in auto]
+        question = ask.get("question") or ""
+        context = (ask.get("context") or {}).get("text") or ""
+        roles = " ".join(f"{s.get('role') or ''} {s.get('duty') or ''}" for s in auto)
+        short_assistants, templates = lib.shortlist(f"{question}\n{roles}\n{context[:500]}", assistants, favorites=lib.favorites_of(user))
+        moderator = (ask.get("moderator") or {}).get("model") or auto[0]["model"]
+        default_base = moderator if any(b["id"] == moderator for b in bases) else (bases[0]["id"] if bases else "")
+        options = {"default_base": default_base, "may_write": may_write}
+        messages = lib.dispatch_messages(
+            units,
+            short_assistants,
+            templates,
+            bases,
+            lang_hint="Chinese" if room.detect_lang(question) == "zh" else "the question's language",
+            task=f"讨论台 discussion ({room.MODES.get(mode, {}).get('label', mode)}) on the question below: staff each seat (unit) with an assistant. The seat keeps its model; the assistant gives it a specialist profile.\nQuestion: {question}",
+            allow_generic=True,
+            rules=[
+                MODE_MATCH_RULES.get(mode, ""),
+                'For each unit also give "duty": one short sentence in the user\'s language, what this seat should cover in this discussion (keep the unit\'s own duty if it has one).',
+                "A unit with \"last_time\" had that assistant for the previous question of this discussion: keep it if it still fits.",
+            ],
+            background=context,
+            **options,
+        )
+        try:
+            text = ""
+            async for kind, part in room.iterate_completion(await call_model(moderator, messages)):
+                if kind == "content":
+                    text += part
+            raw = lib.parse_json_object(text)
+            auto_decisions = lib.normalize_decisions(raw, units, assistants, templates, bases, allow_generic=True, **options)
+            if mode == "compare" and auto_decisions:
+                # one assistant for every seat: the comparison is between the models
+                first = next(d for d in (auto_decisions.get(u["key"]) for u in units) if d)
+                auto_decisions = {u["key"]: first for u in units}
+            decisions.update(auto_decisions)
+            for item in raw.get("units") or []:
+                if isinstance(item, dict) and item.get("key") and item.get("duty"):
+                    duties[str(item["key"])] = str(item["duty"])
+            for seat in auto:
+                if seat["id"] not in decisions:
+                    notes[seat["id"]] = "没匹配到合适的助手，用通用角色"
+        except Exception as exc:
+            log.info("discussion %s: dispatcher failed: %s", chat_id, exc)
+            error = f"匹配助手失败（{room._short_error(exc)[:120]}），自动席位用通用角色"
+
+    choices = lib.carry_out(
+        user, decisions, source="discuss", run_ref=f"discuss:{chat_id}:{ask['id']}", question=ask.get("question") or "", may_write=may_write
+    )
+    for seat_id, note in notes.items():
+        choices.setdefault(seat_id, {"action": "generic", "saved": False, "note": note})
+    return {"choices": choices, "duties": duties, "error": error}
+
+
+def _last_choices(chat_id: str, user, current_ask_id: str) -> dict:
+    chat = Chats.get_chat_by_id_and_user_id(chat_id, user.id)
+    if chat is None:
+        return {}
+    asks = [a for a in _asks_of(chat) if a.get("id") != current_ask_id]
+    if not asks:
+        return {}
+    return {seat["id"]: room.seat_choice(asks[-1], seat["id"]) for seat in asks[-1].get("seats") or [] if room.seat_choice(asks[-1], seat["id"])}
+
+
 def _start(
     request: Request,
     user,
@@ -405,6 +548,9 @@ def _start(
     async def search(question: str, past: list[dict]):
         return await _search(request, user, ask["moderator"]["model"], question, past)
 
+    async def match(current: dict) -> dict:
+        return await _match(request, user, chat_id, current, call_model)
+
     live = room.LiveDiscussion(
         chat_id=chat_id,
         user_id=user.id,
@@ -421,6 +567,7 @@ def _start(
         retry_turn=retry_turn,
         resume=resume,
         images=_ask_images(ask, user) if ask.get("files") else [],
+        match=match,
     )
     room.start_live(live)
     return live
@@ -517,6 +664,7 @@ async def create_discussion(request: Request, form: CreateForm, user=Depends(get
                 "rounds": form.rounds,
                 "moderator": form.moderator,
                 "research": form.research,
+                "autoMatch": form.auto_match,
             },
             models_map,
             ambiguous,
@@ -739,6 +887,31 @@ async def retry_turn(request: Request, chat_id: str, form: RetryForm, user=Depen
     ask = dict(ask)
     ask.update({"status": "running", "endedAt": None, "error": None})
     _start(request, user, chat, ask, history=_history(chat, ask["id"]), retry_turn=form.turn)
+    return _detail(chat_id, user)
+
+
+@router.post("/{chat_id}/undo-assistant")
+async def undo_assistant(chat_id: str, form: UndoAssistantForm, user=Depends(get_verified_user)):
+    """Undo the upgrade the last question made to a seat's assistant (if nothing changed it since)."""
+    from open_webui.utils import assistant_library as lib
+
+    chat, ask = _last_settled_ask(chat_id, user)
+    seat = next((s for s in ask.get("seats") or [] if s.get("id") == form.seat), None)
+    choice = (seat or {}).get("assistant_choice") or {}
+    if choice.get("action") != "update" or choice.get("reverted"):
+        raise HTTPException(status_code=400, detail="这个席位这次没有升级助手")
+    try:
+        lib.undo_run(user, choice["id"], f"discuss:{chat_id}:{ask['id']}", after_system=choice.get("system") or "")
+    except lib.LibraryError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail)
+    ask = dict(ask)
+    ask["seats"] = [
+        {**s, "assistant_choice": {**(s.get("assistant_choice") or {}), "reverted": True}}
+        if (s.get("assistant_choice") or {}).get("id") == choice["id"] and (s.get("assistant_choice") or {}).get("action") == "update"
+        else s
+        for s in ask.get("seats") or []
+    ]
+    _persist_ask(chat_id, ask, _setup_of(chat))
     return _detail(chat_id, user)
 
 

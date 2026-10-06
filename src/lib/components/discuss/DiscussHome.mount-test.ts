@@ -18,6 +18,11 @@ const api = vi.hoisted(() => ({
 	}
 }));
 vi.mock('$lib/apis/discussions', () => api);
+const library = vi.hoisted(() => ({
+	listLibrary: vi.fn(),
+	searchTemplates: vi.fn()
+}));
+vi.mock('$lib/apis/assistant-library', () => library);
 const files = vi.hoisted(() => ({ uploadFileReliably: vi.fn() }));
 vi.mock('$lib/utils/reliable-upload', () => files);
 const nav = vi.hoisted(() => ({ goto: vi.fn(), replaceState: vi.fn() }));
@@ -45,6 +50,12 @@ beforeAll(async () => {
 
 beforeEach(() => {
 	[api.listDiscussions, api.createDiscussion, api.deleteDiscussion].forEach((fn: any) => fn.mockReset());
+	library.listLibrary.mockReset().mockResolvedValue({
+		assistants: [{ ref: 'model:a1', id: 'a1', name: '软件架构师', domain: '架构', description: '架构取舍', emoji: '🏗', hidden: true }],
+		may_write: true,
+		favorites: []
+	});
+	library.searchTemplates.mockReset().mockResolvedValue([]);
 	Object.values(toasts).forEach((fn: any) => fn.mockReset());
 	files.uploadFileReliably.mockReset();
 	nav.goto.mockReset();
@@ -101,7 +112,7 @@ describe('DiscussHome', () => {
 	it('seats text models only, starts a debate with sides, and opens its room', async () => {
 		const target = await mount();
 		await until(() => target.querySelectorAll('[data-discuss-seat]').length > 0);
-		const seatText = () => [...target.querySelectorAll('[data-discuss-seat]')].map((el: any) => el.textContent.replace(/\s+/g, ' ').trim());
+		const seatText = () => [...target.querySelectorAll('[data-discuss-seat]')].map((el: any) => el.textContent.replace(/\s+/g, ' ').replace(' · 自动匹配', '').trim());
 		expect(seatText()).toEqual(['gpt-chat', 'deepseek-chat', 'gemini-chat']);
 
 		(target.querySelector('[data-discuss-add-seat]') as any).click();
@@ -142,6 +153,7 @@ describe('DiscussHome', () => {
 			research: true,
 			files: [],
 			context: null,
+			auto_match: true,
 			client_key: expect.any(String)
 		});
 		expect(nav.goto).toHaveBeenCalledWith('/discuss/new1');
@@ -209,7 +221,7 @@ describe('DiscussHome', () => {
 		api.createDiscussion.mockResolvedValue({ id: 'new1' });
 		const target = await mount();
 		await until(() => target.querySelectorAll('[data-discuss-seat]').length > 0);
-		const seatText = () => [...target.querySelectorAll('[data-discuss-seat]')].map((el: any) => el.textContent.replace(/\s+/g, ' ').trim());
+		const seatText = () => [...target.querySelectorAll('[data-discuss-seat]')].map((el: any) => el.textContent.replace(/\s+/g, ' ').replace(' · 自动匹配', '').trim());
 		expect(seatText()).toEqual(['deepseek-chat', 'claude-chat']);
 		expect((target.querySelector('#discuss-question') as any).value).toBe('预算 3000 去哪？');
 		expect(target.querySelector('[data-discuss-attachments]')!.textContent).toContain('plan.txt');
@@ -234,7 +246,7 @@ describe('DiscussHome', () => {
 		);
 		const target = await mount();
 		await until(() => target.querySelectorAll('[data-discuss-seat]').length > 0);
-		const seats = [...target.querySelectorAll('[data-discuss-seat]')].map((el: any) => el.textContent.trim());
+		const seats = [...target.querySelectorAll('[data-discuss-seat]')].map((el: any) => el.textContent.replace(/\s*· 自动匹配/, '').trim());
 		expect(seats).toEqual(['claude-chat', 'gpt-chat']);
 		expect(target.querySelector('[data-handoff-back]')).toBeFalsy();
 		(target.querySelector('[data-discuss-context-remove]') as any).click();
@@ -283,5 +295,35 @@ describe('DiscussHome', () => {
 		await until(() => nav.goto.mock.calls.length > 0);
 		const [first, second] = api.createDiscussion.mock.calls.map((c: any[]) => c[1].client_key);
 		expect(second).not.toBe(first);
+	});
+	it('a seat can be given a picked assistant and a duty; 自动匹配 can be turned off', async () => {
+		const target = await mount();
+		await until(() => target.querySelectorAll('[data-discuss-seat]').length > 0);
+		expect(target.querySelector('[data-discuss-automatch-toggle]')!.getAttribute('aria-pressed')).toBe('true');
+		(target.querySelector('[data-discuss-seat="0"]') as any).click();
+		await until(() => !!target.querySelector('[data-discuss-seat-editor]'));
+		(target.querySelector('[data-discuss-assist="pick"]') as any).click();
+		await until(() => !!target.querySelector('[data-discuss-assist-option="model:a1"]'));
+		(target.querySelector('[data-discuss-assist-option="model:a1"]') as any).click();
+		await sleep(20);
+		const duty = target.querySelector('[data-discuss-seat-duty]') as any;
+		duty.value = '分析架构收益';
+		duty.dispatchEvent(new (globalThis as any).Event('input'));
+		await sleep(20);
+		expect(target.querySelector('[data-discuss-seat="0"]')!.textContent).toContain('软件架构师');
+		(target.querySelector('[data-discuss-automatch-toggle]') as any).click();
+		await sleep(20);
+		const box = target.querySelector('#discuss-question') as any;
+		box.value = '要不要迁移到微服务？';
+		box.dispatchEvent(new (globalThis as any).Event('input'));
+		await sleep(20);
+		api.createDiscussion.mockResolvedValue({ id: 'n2', asks: [] });
+		target.querySelector('[data-discuss-composer]')!.dispatchEvent(new (globalThis as any).Event('submit', { cancelable: true }));
+		await until(() => nav.goto.mock.calls.length > 0);
+		const form = api.createDiscussion.mock.calls[0][1];
+		expect(form.auto_match).toBe(false);
+		expect(form.seats[0]).toEqual({ model: 'm-gpt', role: '', assist: 'pick', assistant: 'model:a1', duty: '分析架构收益' });
+		expect(form.seats[1]).toEqual({ model: 'm-ds', role: '' });
+		expect(JSON.parse(localStorage.getItem('halo.discuss.last')!)).toMatchObject({ autoMatch: false });
 	});
 });

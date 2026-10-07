@@ -1,5 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { guardViewTransition, VIEW_TRANSITION_MAX_MS, VIEW_TRANSITION_SETTLE_MS } from './index';
+import {
+	guardViewTransition,
+	VIEW_TRANSITION_MAX_MS,
+	VIEW_TRANSITION_SETTLE_MS,
+	VIEW_TRANSITION_STALL_MS
+} from './index';
 
 const fakeTransition = () => {
 	let ready!: () => void;
@@ -45,6 +50,33 @@ describe('guardViewTransition', () => {
 		await vi.advanceTimersByTimeAsync(VIEW_TRANSITION_MAX_MS);
 		expect(onGiveUp).toHaveBeenCalledTimes(1);
 		expect(transition.skipTransition).toHaveBeenCalledTimes(1);
+	});
+
+	it('skips at once when the animations never advance', async () => {
+		vi.stubGlobal('document', {
+			getAnimations: () => [{ currentTime: 0, effect: { pseudoElement: '::view-transition-new(halo-main)' } }]
+		});
+		const { transition, ready } = fakeTransition();
+		guardViewTransition(transition);
+		ready();
+		await vi.advanceTimersByTimeAsync(VIEW_TRANSITION_STALL_MS);
+		expect(transition.skipTransition).toHaveBeenCalledTimes(1);
+		vi.unstubAllGlobals();
+	});
+
+	it('waits for animations that are moving', async () => {
+		let time = 0;
+		vi.stubGlobal('document', {
+			getAnimations: () => [{ currentTime: (time += 120), effect: { pseudoElement: '::view-transition-new(halo-main)' } }]
+		});
+		const { transition, ready } = fakeTransition();
+		guardViewTransition(transition);
+		ready();
+		await vi.advanceTimersByTimeAsync(VIEW_TRANSITION_STALL_MS);
+		expect(transition.skipTransition).not.toHaveBeenCalled();
+		await vi.advanceTimersByTimeAsync(VIEW_TRANSITION_SETTLE_MS);
+		expect(transition.skipTransition).toHaveBeenCalledTimes(1);
+		vi.unstubAllGlobals();
 	});
 
 	it('says so in the console when it has to skip', async () => {

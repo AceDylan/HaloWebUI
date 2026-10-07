@@ -34,6 +34,7 @@
 	import '../halo.css';
 	import '../scifi.css';
 	import '../scifi-modes.css';
+	import '../scifi-cinema.css';
 
 	import 'tippy.js/dist/tippy.css';
 

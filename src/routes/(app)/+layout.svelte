@@ -52,7 +52,14 @@
 	import { isFramed, requestHubReauth } from '$lib/utils/hub-embed';
 	import StarField from '$lib/components/scifi/StarField.svelte';
 	import BootSequence from '$lib/components/scifi/BootSequence.svelte';
-	import { applyScifi, scifiEnabled, shouldBoot, trackSpotlight } from '$lib/components/scifi/scifi';
+	import {
+		applyScifi,
+		isSectionJump,
+		scifiEnabled,
+		shouldBoot,
+		trackSpotlight,
+		warp
+	} from '$lib/components/scifi/scifi';
 
 	const i18n = getContext('i18n');
 
@@ -61,6 +68,9 @@
 	// motion skip it; browsers without the API just navigate.
 	onNavigate((navigation) => {
 		if (navigation.willUnload || typeof document === 'undefined') return;
+		// another part of the app: the stars jump while the panel changes (StarField ignores
+		// it under reduced motion)
+		if (scifiOn && isSectionJump(navigation.from?.url.pathname, navigation.to?.url.pathname)) warp(560);
 		if (!('startViewTransition' in document)) return;
 		if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
 		if (navigation.from?.url.pathname === navigation.to?.url.pathname) return;
@@ -473,8 +483,10 @@
 		<div class="flex-1 min-w-0" data-halo-main>
 			{#if scifiOn}
 				<div class="halo-scifi-bg" aria-hidden="true">
+					<div class="halo-scifi-nebula"></div>
 					<StarField />
 					<div class="halo-scifi-floor"></div>
+					<div class="halo-scifi-vignette"></div>
 				</div>
 			{/if}
 			{#if loaded}

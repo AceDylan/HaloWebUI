@@ -570,6 +570,7 @@
 					{#if message.content !== ''}
 						<div class="flex {($settings?.chatBubble ?? true) ? 'justify-end pb-1' : 'w-full'}">
 							<div
+								data-halo-user-bubble={($settings?.chatBubble ?? true) ? '' : undefined}
 								class={($settings?.chatBubble ?? true)
 									? `max-w-[75%] px-4 py-2.5 rounded-2xl ${
 											message.files ? 'rounded-tr-lg' : 'rounded-br-lg'

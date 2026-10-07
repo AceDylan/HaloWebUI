@@ -21,6 +21,13 @@ export const warp = (ms = 900) => {
 	window.dispatchEvent(new CustomEvent(WARP_EVENT, { detail: { ms } }));
 };
 
+/** Moving to another part of the app (chat → settings, 讨论台 → 协作台 …) is a jump: the
+ *  stars streak. Moving within one part (chat to chat, settings tab to tab) is not. */
+export const sectionOf = (pathname: string): string => pathname.split('/')[1] ?? '';
+
+export const isSectionJump = (from: string | undefined, to: string | undefined): boolean =>
+	from !== undefined && to !== undefined && sectionOf(from) !== sectionOf(to);
+
 /** Opening titles at most once every 6 hours (new tabs and the phone app would otherwise
  *  replay them every time), never inside the Hub frame, never with reduced motion. */
 export const BOOT_EVERY_MS = 6 * 60 * 60 * 1000;

@@ -1,0 +1,637 @@
+/* =====================================================================================
+   Halo sci-fi layer, part three: the cinema pass. Same switch as scifi.css and
+   scifi-modes.css (html.halo-scifi), and nothing here redraws the star-core look: it turns
+   the existing stage up.
+   - every page: a drifting nebula behind the stars, a lens vignette with a little film grain,
+     the perspective floor faintly under every page, light running along the panel's edge;
+   - the landing: an anamorphic flare through the reactor's core, shock rings, a brighter
+     bloom; the holographic titles keep flowing after they sweep in;
+   - the plain pages (settings, workspace, admin) get the holographic title, a HUD badge and
+     instrument-glass corners on their sections;
+   - the chat: the reply's avatar and code blocks catch the light, your own bubble is lit
+     glass; reading text itself never moves;
+   - a deeper jump between pages (the stars streak too: scifi.ts isSectionJump).
+   The heavy pieces are dark only. Phones drop the costly ones; reduced motion stops
+   everything that moves (end of the file).
+   ===================================================================================== */
+
+/* ------------------------------------------------------------------ the stage */
+
+.halo-scifi-nebula,
+.halo-scifi-vignette {
+	position: absolute;
+	inset: 0;
+	pointer-events: none;
+}
+.halo-scifi-nebula {
+	inset: -20%;
+	opacity: 0.35;
+	background:
+		radial-gradient(36% 28% at 72% 20%, rgb(167 139 250 / 0.24), transparent 70%),
+		radial-gradient(32% 26% at 24% 76%, rgb(34 211 238 / 0.2), transparent 70%),
+		radial-gradient(22% 18% at 58% 60%, rgb(244 114 208 / 0.12), transparent 70%);
+	animation: cine-nebula 46s ease-in-out infinite alternate;
+	will-change: transform;
+}
+html.dark .halo-scifi-nebula {
+	opacity: 1;
+}
+html.dark body:not(:has(.halo-hero)) .halo-scifi-nebula {
+	opacity: 0.7;
+}
+@keyframes cine-nebula {
+	from {
+		transform: translate3d(-3%, -2%, 0) rotate(-4deg) scale(1);
+	}
+	to {
+		transform: translate3d(3%, 2%, 0) rotate(5deg) scale(1.12);
+	}
+}
+
+/* the lens: darker corners, a letterbox shade top and bottom, a horizon glow on the landing */
+.halo-scifi-vignette {
+	display: none;
+}
+html.dark .halo-scifi-vignette {
+	display: block;
+	background:
+		radial-gradient(120% 95% at 50% 45%, transparent 55%, rgb(0 0 6 / 0.55) 100%),
+		linear-gradient(to bottom, rgb(0 0 8 / 0.32), transparent 12%, transparent 88%, rgb(0 0 8 / 0.38));
+}
+html.dark body:has(.halo-hero) .halo-scifi-vignette {
+	background:
+		radial-gradient(55% 16% at 50% 100%, rgb(94 231 255 / 0.16), transparent 70%),
+		radial-gradient(120% 95% at 50% 45%, transparent 55%, rgb(0 0 6 / 0.55) 100%),
+		linear-gradient(to bottom, rgb(0 0 8 / 0.32), transparent 12%, transparent 88%, rgb(0 0 8 / 0.38));
+}
+/* film grain: one still noise tile, never animated (moving grain reads as flicker) */
+html.dark .halo-scifi-vignette::after {
+	content: '';
+	position: absolute;
+	inset: 0;
+	opacity: 0.05;
+	background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+/* the floor runs under every page in the dark, faintly away from the landing */
+html.dark body:not(:has(.halo-hero)) .halo-scifi-floor {
+	opacity: 0.09;
+}
+html.dark body:has(.halo-hero) .halo-scifi-floor {
+	opacity: 0.38;
+}
+
+/* light runs along the panel's top and bottom edges (transform only: no repaint) */
+@media (min-width: 768px) and (pointer: fine) {
+	html.halo-scifi.dark [data-halo-main]::before,
+	html.halo-scifi.dark [data-halo-main]::after {
+		content: '';
+		position: absolute;
+		left: 0;
+		z-index: 70;
+		width: 34%;
+		height: 1px;
+		pointer-events: none;
+		background: linear-gradient(90deg, transparent, var(--scifi-cyan) 45%, #fff 50%, var(--scifi-violet) 60%, transparent);
+		box-shadow: 0 0 12px 1px rgb(94 231 255 / 0.35);
+		opacity: 0.7;
+		animation: cine-edge 11s linear infinite;
+	}
+	html.halo-scifi.dark [data-halo-main]::before {
+		top: 0;
+	}
+	html.halo-scifi.dark [data-halo-main]::after {
+		bottom: 0;
+		animation-direction: reverse;
+		animation-delay: -5.5s;
+		opacity: 0.45;
+	}
+}
+@keyframes cine-edge {
+	from {
+		transform: translateX(-100%);
+	}
+	to {
+		transform: translateX(300%);
+	}
+}
+
+/* ------------------------------------------------------------------ the landing: the core flares */
+
+html.halo-scifi.dark .halo-orb__bloom {
+	opacity: 0.48;
+}
+/* anamorphic flare: a thin horizontal line through the core, and the haze around it */
+html.halo-scifi.dark .halo-orb::before,
+html.halo-scifi.dark .halo-orb::after {
+	content: '';
+	position: absolute;
+	left: 50%;
+	top: 50%;
+	z-index: -1;
+	pointer-events: none;
+	transform: translate(-50%, -50%);
+	animation: cine-flare 5.5s ease-in-out infinite;
+}
+html.halo-scifi.dark .halo-orb::after {
+	width: calc(var(--orb-size) * 9);
+	height: 2px;
+	background: linear-gradient(
+		90deg,
+		transparent 8%,
+		rgb(94 231 255 / 0.35) 34%,
+		rgb(224 251 255 / 0.95) 50%,
+		rgb(167 139 250 / 0.35) 66%,
+		transparent 92%
+	);
+	box-shadow: 0 0 16px 1px rgb(94 231 255 / 0.35);
+}
+html.halo-scifi.dark .halo-orb::before {
+	width: calc(var(--orb-size) * 6);
+	height: 28px;
+	border-radius: 9999px;
+	background: radial-gradient(closest-side, rgb(94 231 255 / 0.22), transparent);
+	filter: blur(6px);
+}
+/* the agent read-out steps below the flare so the line never crosses its text */
+html.halo-scifi.dark .halo-reactor__hud--br {
+	top: 57%;
+}
+@keyframes cine-flare {
+	0%,
+	100% {
+		opacity: 0.6;
+		transform: translate(-50%, -50%) scaleX(0.86);
+	}
+	50% {
+		opacity: 1;
+		transform: translate(-50%, -50%) scaleX(1.06);
+	}
+}
+
+/* shock rings: the core sends a ring out every few seconds */
+html.halo-scifi .halo-reactor::before,
+html.halo-scifi .halo-reactor::after {
+	content: '';
+	position: absolute;
+	left: 50%;
+	top: 50%;
+	width: 30%;
+	height: 30%;
+	border-radius: 9999px;
+	border: 1px solid var(--scifi-cyan);
+	box-shadow:
+		0 0 18px var(--scifi-glow),
+		inset 0 0 18px var(--scifi-glow);
+	opacity: 0;
+	pointer-events: none;
+	-webkit-mask-image: linear-gradient(to bottom, #000 45%, transparent 80%);
+	mask-image: linear-gradient(to bottom, #000 45%, transparent 80%);
+	animation: cine-shock 6.4s cubic-bezier(0.2, 0.6, 0.3, 1) infinite;
+}
+html.halo-scifi .halo-reactor::after {
+	border-color: var(--scifi-violet);
+	animation-delay: 3.2s;
+}
+html.halo-scifi:not(.dark) .halo-reactor::before,
+html.halo-scifi:not(.dark) .halo-reactor::after {
+	box-shadow: none;
+}
+@keyframes cine-shock {
+	0% {
+		opacity: 0;
+		transform: translate(-50%, -50%) scale(0.7);
+	}
+	8% {
+		opacity: 0.7;
+	}
+	100% {
+		opacity: 0;
+		transform: translate(-50%, -50%) scale(2.9);
+	}
+}
+html.halo-scifi.dark .halo-reactor__arcs {
+	filter: drop-shadow(0 0 7px var(--scifi-glow)) drop-shadow(0 0 18px rgb(167 139 250 / 0.35));
+}
+html.halo-scifi.dark .halo-reactor__orbit {
+	filter: drop-shadow(0 0 4px var(--scifi-cyan)) drop-shadow(0 0 12px var(--scifi-cyan));
+}
+
+/* ------------------------------------------------------------------ holographic titles
+   The landing greeting and the mode titles keep their sweep-in (scifi.css) and then the
+   colour keeps flowing slowly through them. The plain pages' titles join them. */
+
+html.halo-scifi :is(.halo-page-title, .halo-settings-title, .halo-subpage-title) {
+	background: linear-gradient(100deg, #0e7490 0%, #1d4ed8 38%, #7c3aed 70%, #be185d 100%);
+	-webkit-background-clip: text;
+	background-clip: text;
+	color: transparent;
+	animation: scifi-holo-in 900ms 80ms cubic-bezier(0.16, 1, 0.3, 1) backwards;
+}
+html.halo-scifi.dark
+	:is(.halo-greeting, .halo-mode-title, .halo-page-title, .halo-settings-title, .halo-subpage-title) {
+	background: linear-gradient(100deg, #e0fbff 0%, #5ee7ff 22%, #a78bfa 46%, #f472d0 62%, #5ee7ff 82%, #e0fbff 100%)
+		0 0 / 220% 100%;
+	-webkit-background-clip: text;
+	background-clip: text;
+	color: transparent;
+	filter: drop-shadow(0 0 22px rgb(94 231 255 / 0.3));
+	animation:
+		scifi-holo-in 900ms 120ms cubic-bezier(0.16, 1, 0.3, 1) backwards,
+		cine-holo-flow 14s 1.1s ease-in-out infinite alternate;
+}
+html.halo-scifi.dark :is(.halo-page-title, .halo-settings-title, .halo-subpage-title) {
+	filter: drop-shadow(0 0 14px rgb(94 231 255 / 0.22));
+}
+@keyframes cine-holo-flow {
+	to {
+		background-position: 100% 0;
+	}
+}
+
+/* page icons and section badges: HUD instruments with a turning range ring */
+html.halo-scifi :is(.halo-page-icon, .halo-settings-head .glass-icon-badge:not([class*='bg-red-'])) {
+	position: relative;
+	background-color: rgb(8 145 178 / 0.07);
+	box-shadow:
+		inset 0 0 0 1px rgb(8 145 178 / 0.28),
+		0 0 0 4px rgb(8 145 178 / 0.04);
+}
+html.halo-scifi :is(.halo-page-icon, .halo-settings-head .glass-icon-badge:not([class*='bg-red-'])) svg {
+	color: var(--scifi-cyan);
+}
+html.halo-scifi.dark :is(.halo-page-icon, .halo-settings-head .glass-icon-badge:not([class*='bg-red-'])) {
+	background-color: rgb(94 231 255 / 0.08);
+	box-shadow:
+		inset 0 0 0 1px rgb(94 231 255 / 0.32),
+		0 0 0 4px rgb(94 231 255 / 0.04),
+		0 0 26px -4px var(--scifi-glow);
+}
+html.halo-scifi.dark :is(.halo-page-icon, .halo-settings-head .glass-icon-badge:not([class*='bg-red-'])) svg {
+	filter: drop-shadow(0 0 5px var(--scifi-cyan));
+}
+html.halo-scifi :is(.halo-page-icon, .halo-settings-head .glass-icon-badge:not([class*='bg-red-']))::after {
+	content: '';
+	position: absolute;
+	inset: -6px;
+	border-radius: 9999px;
+	border: 1px dashed var(--scifi-cyan);
+	opacity: 0.35;
+	pointer-events: none;
+	animation: scifi-rot 22s linear infinite;
+}
+
+/* ------------------------------------------------------------------ instrument glass sections
+   Background layers only (corner brackets and a lit top edge), so nothing covers the
+   controls and nothing needs a positioned box. Sections being edited keep their own pulse. */
+
+html.halo-scifi.dark
+	:is(.glass-section:not(.halo-settings-head):not(.glass-section-dirty), .workspace-section) {
+	background-image:
+		linear-gradient(90deg, transparent 6%, rgb(94 231 255 / 0.45) 30%, rgb(167 139 250 / 0.3) 60%, transparent 90%),
+		linear-gradient(var(--sf-corner) 0 0),
+		linear-gradient(var(--sf-corner) 0 0),
+		linear-gradient(var(--sf-corner) 0 0),
+		linear-gradient(var(--sf-corner) 0 0);
+	background-repeat: no-repeat;
+	background-position:
+		0 0,
+		left 8px top 8px,
+		left 8px top 8px,
+		right 8px bottom 8px,
+		right 8px bottom 8px;
+	background-size:
+		100% 1px,
+		10px 1px,
+		1px 10px,
+		10px 1px,
+		1px 10px;
+	box-shadow:
+		inset 0 1px 0 rgb(255 255 255 / 0.035),
+		0 0 0 1px rgb(94 231 255 / 0.05),
+		0 28px 70px -48px rgb(94 231 255 / 0.4);
+}
+
+/* cards you can open lock on with light */
+html.halo-scifi.dark :is(a, button, .cursor-pointer).glass-item:not(.glass-section .glass-item):hover {
+	border-color: rgb(94 231 255 / 0.4);
+	box-shadow:
+		0 0 0 1px rgb(94 231 255 / 0.14),
+		0 18px 46px -20px var(--scifi-glow),
+		inset 0 1px 0 rgb(255 255 255 / 0.05);
+}
+
+/* ------------------------------------------------------------------ sidebar */
+
+html.halo-scifi .halo-mode-tile {
+	transition:
+		background-color 0.2s ease,
+		color 0.2s ease,
+		box-shadow 0.3s var(--sf-ease),
+		transform 0.3s var(--sf-ease);
+}
+html.halo-scifi .halo-mode-tile:hover {
+	transform: translateY(-1px);
+}
+html.halo-scifi.dark .halo-mode-tile:hover svg {
+	color: var(--scifi-cyan);
+	filter: drop-shadow(0 0 6px var(--scifi-cyan));
+}
+/* (#sidebar: above scifi.css's current-page bar, which is for list rows) */
+html.halo-scifi.dark #sidebar .halo-mode-tile.is-active {
+	color: #e0fbff;
+	background: linear-gradient(to top, rgb(94 231 255 / 0.16), rgb(94 231 255 / 0.03) 75%);
+	box-shadow:
+		inset 0 0 0 1px rgb(94 231 255 / 0.3),
+		inset 0 -2px 0 var(--scifi-cyan),
+		0 8px 24px -12px var(--scifi-glow);
+}
+html.halo-scifi.dark #sidebar .halo-mode-tile.is-active svg {
+	color: var(--scifi-cyan);
+	filter: drop-shadow(0 0 6px var(--scifi-cyan));
+}
+html.halo-scifi.dark :is(#sidebar a[aria-current='page']:not(.halo-mode-tile), .halo-nav-row[aria-current='page']) {
+	box-shadow:
+		inset 2px 0 0 var(--scifi-cyan),
+		-6px 0 16px -8px var(--scifi-cyan);
+}
+html.halo-scifi.dark .halo-new-chat:hover {
+	box-shadow:
+		0 0 0 1px rgb(94 231 255 / 0.35),
+		0 0 26px -6px var(--scifi-glow),
+		inset 0 1px 0 rgb(255 255 255 / 0.06);
+}
+
+/* ------------------------------------------------------------------ the chat */
+
+/* the composer burns a little brighter in the dark */
+html.halo-scifi.dark :is(.halo-composer, [data-scifi-conduit]) {
+	box-shadow:
+		0 0 0 1px var(--scifi-line),
+		0 0 70px -14px var(--scifi-glow),
+		0 30px 80px -40px rgb(167 139 250 / 0.45),
+		inset 0 1px 0 rgb(255 255 255 / 0.06);
+}
+html.halo-scifi.dark :is(.halo-composer, [data-scifi-conduit]):not([data-halo-live])::after {
+	opacity: 0.75;
+}
+html.halo-scifi.dark :is(.halo-composer, [data-scifi-conduit]):focus-within {
+	box-shadow:
+		0 0 0 1px rgb(94 231 255 / 0.3),
+		0 0 0 6px rgb(94 231 255 / 0.07),
+		0 0 90px -10px var(--scifi-glow),
+		0 30px 90px -40px rgb(167 139 250 / 0.55);
+}
+
+/* the reply's avatar: a lit ring; while it writes, the light breathes outwards */
+html.halo-scifi.dark .halo-avatar::before {
+	opacity: 0.7;
+}
+html.halo-scifi.dark .halo-avatar {
+	box-shadow: 0 0 16px -3px var(--scifi-glow);
+}
+html.halo-scifi.dark .halo-avatar[data-halo-live] {
+	animation: cine-avatar 1.8s ease-in-out infinite;
+}
+@keyframes cine-avatar {
+	50% {
+		box-shadow:
+			0 0 26px 2px var(--scifi-glow),
+			0 0 50px -6px rgb(167 139 250 / 0.55);
+	}
+}
+
+/* your own words: lit glass */
+html.halo-scifi.dark [data-halo-user-bubble] {
+	background-image: linear-gradient(135deg, rgb(94 231 255 / 0.07), rgb(167 139 250 / 0.07));
+	box-shadow:
+		inset 0 0 0 1px rgb(94 231 255 / 0.14),
+		inset 0 1px 0 rgb(255 255 255 / 0.05),
+		0 14px 40px -24px var(--scifi-glow);
+}
+
+/* the rendered reply cards (an iframe each) float in the light */
+html.halo-scifi.dark [data-halo-inline-html-preview] > iframe {
+	box-shadow:
+		0 0 0 1px rgb(94 231 255 / 0.1),
+		0 30px 80px -50px rgb(94 231 255 / 0.45);
+}
+
+/* code blocks: a terminal with a lit top edge (the colours stay those of halo.css) */
+html.halo-scifi.dark [data-halo-block='code'] {
+	box-shadow:
+		0 0 0 1px rgb(94 231 255 / 0.12),
+		0 24px 60px -36px rgb(94 231 255 / 0.4),
+		inset 0 1px 0 rgb(94 231 255 / 0.18) !important;
+}
+html.halo-scifi.dark [data-halo-block='code'] > div:first-child {
+	background-image: linear-gradient(90deg, rgb(94 231 255 / 0.08), transparent 65%);
+	border-bottom-color: rgb(94 231 255 / 0.12);
+}
+
+/* ------------------------------------------------------------------ dialogs and menus */
+
+html.halo-scifi.dark .halo-modal {
+	background-image:
+		linear-gradient(90deg, transparent 8%, rgb(94 231 255 / 0.5) 35%, rgb(167 139 250 / 0.4) 65%, transparent 92%),
+		linear-gradient(var(--sf-corner) 0 0),
+		linear-gradient(var(--sf-corner) 0 0),
+		linear-gradient(var(--sf-corner) 0 0),
+		linear-gradient(var(--sf-corner) 0 0);
+	background-repeat: no-repeat;
+	background-position:
+		0 0,
+		left 10px top 10px,
+		left 10px top 10px,
+		right 10px bottom 10px,
+		right 10px bottom 10px;
+	background-size:
+		100% 1px,
+		12px 1px,
+		1px 12px,
+		12px 1px,
+		1px 12px;
+	box-shadow:
+		0 0 0 1px rgb(94 231 255 / 0.16),
+		0 0 80px -24px var(--scifi-glow),
+		0 40px 120px -40px rgb(167 139 250 / 0.4),
+		var(--shadow-lg);
+}
+html.halo-scifi.dark :is([data-menu-content], [data-menu-sub-content]) {
+	box-shadow:
+		0 0 0 1px rgb(94 231 255 / 0.14),
+		0 0 40px -14px var(--scifi-glow),
+		var(--shadow-lg);
+}
+
+/* ------------------------------------------------------------------ page change: a deeper jump
+   The old page flares out, the new one opens from a slit of light. Desktop dark only: light
+   keeps the short jump of scifi.css, phones keep halo.css's slide. */
+
+@media (pointer: fine) {
+	html.halo-scifi.dark::view-transition-old(halo-main) {
+		animation: cine-jump-out 240ms cubic-bezier(0.4, 0, 1, 1) both;
+	}
+	html.halo-scifi.dark::view-transition-new(halo-main) {
+		animation: cine-jump-in 560ms cubic-bezier(0.16, 1, 0.3, 1) both;
+	}
+}
+@keyframes cine-jump-out {
+	to {
+		opacity: 0;
+		transform: scale(1.07);
+		filter: blur(10px) brightness(1.8);
+	}
+}
+@keyframes cine-jump-in {
+	from {
+		opacity: 0;
+		clip-path: inset(47% 0 47% 0 round 18px);
+		transform: scale(0.97);
+		filter: brightness(2.2) saturate(1.6) blur(4px);
+	}
+	45% {
+		opacity: 1;
+		clip-path: inset(0 0 0 0 round 18px);
+		filter: brightness(1.25) saturate(1.15) blur(0);
+	}
+	to {
+		opacity: 1;
+		clip-path: inset(0 0 0 0 round 18px);
+		transform: none;
+		filter: none;
+	}
+}
+
+/* ------------------------------------------------------------------ sign-in stage
+   The stage is always night, whatever the theme, so this is not keyed to .dark. */
+
+.halo-auth__stage::before {
+	/* anamorphic flare across the constellation's heart */
+	content: '';
+	position: absolute;
+	left: 50%;
+	top: 42%;
+	z-index: 0;
+	width: min(52rem, 110%);
+	height: 2px;
+	pointer-events: none;
+	background: linear-gradient(
+		90deg,
+		transparent 6%,
+		rgb(94 231 255 / 0.3) 32%,
+		rgb(224 251 255 / 0.9) 50%,
+		rgb(167 139 250 / 0.3) 68%,
+		transparent 94%
+	);
+	box-shadow: 0 0 18px 1px rgb(94 231 255 / 0.3);
+	transform: translate(-50%, -50%);
+	animation: cine-flare 6s ease-in-out infinite;
+}
+.halo-auth__stage::after {
+	/* a scan passes over the stage now and then */
+	content: '';
+	position: absolute;
+	left: 0;
+	right: 0;
+	top: 0;
+	z-index: 0;
+	height: 18%;
+	pointer-events: none;
+	background: linear-gradient(
+		to bottom,
+		transparent,
+		rgb(94 231 255 / 0.02) 70%,
+		rgb(94 231 255 / 0.08) 96%,
+		rgb(224 251 255 / 0.55) 99.4%,
+		transparent
+	);
+	transform: translateY(-100%);
+	opacity: 0;
+	animation: cine-stage-scan 7.5s cubic-bezier(0.5, 0, 0.3, 1) 1.2s infinite;
+}
+@keyframes cine-stage-scan {
+	0% {
+		transform: translateY(-100%);
+		opacity: 1;
+	}
+	35% {
+		transform: translateY(560%);
+		opacity: 0.9;
+	}
+	36%,
+	100% {
+		transform: translateY(560%);
+		opacity: 0;
+	}
+}
+.halo-auth__caption {
+	z-index: 1;
+}
+.halo-auth__headline {
+	width: fit-content;
+	background: linear-gradient(100deg, #f5feff 0%, #bff6ff 30%, #5ee7ff 55%, #a78bfa 80%, #f472d0 100%);
+	-webkit-background-clip: text;
+	background-clip: text;
+	color: transparent;
+	filter: drop-shadow(0 0 24px rgb(94 231 255 / 0.25));
+}
+.dark .halo-auth__panel button[type='submit']:not(:disabled):hover {
+	box-shadow:
+		0 0 0 1px rgb(94 231 255 / 0.5),
+		0 0 32px -6px rgb(94 231 255 / 0.55);
+}
+
+/* ------------------------------------------------------------------ phones: keep it light */
+
+@media (max-width: 767px), (pointer: coarse) {
+	.halo-scifi-nebula {
+		animation: none;
+		will-change: auto;
+	}
+	html.dark .halo-scifi-vignette::after,
+	html.halo-scifi .halo-reactor::after {
+		display: none;
+	}
+	html.halo-scifi.dark .halo-reactor__arcs {
+		filter: drop-shadow(0 0 6px var(--scifi-glow));
+	}
+	html.halo-scifi.dark .halo-orb::after {
+		width: calc(var(--orb-size) * 5);
+	}
+	html.halo-scifi.dark .halo-orb::before {
+		display: none;
+	}
+}
+
+/* ------------------------------------------------------------------ calm when asked */
+
+@media (prefers-reduced-motion: reduce) {
+	.halo-scifi-nebula,
+	html.halo-scifi.dark [data-halo-main]::before,
+	html.halo-scifi.dark [data-halo-main]::after,
+	html.halo-scifi.dark .halo-orb::before,
+	html.halo-scifi.dark .halo-orb::after,
+	html.halo-scifi :is(.halo-page-title, .halo-settings-title, .halo-subpage-title),
+	html.halo-scifi.dark
+		:is(.halo-greeting, .halo-mode-title, .halo-page-title, .halo-settings-title, .halo-subpage-title),
+	html.halo-scifi :is(.halo-page-icon, .halo-settings-head .glass-icon-badge)::after,
+	html.halo-scifi.dark .halo-avatar[data-halo-live],
+	.halo-auth__stage::before {
+		animation: none !important;
+	}
+	html.halo-scifi.dark [data-halo-main]::before,
+	html.halo-scifi.dark [data-halo-main]::after,
+	html.halo-scifi .halo-reactor::before,
+	html.halo-scifi .halo-reactor::after,
+	.halo-auth__stage::after {
+		display: none;
+	}
+	html.halo-scifi .halo-mode-tile:hover {
+		transform: none;
+	}
+	html.halo-scifi.dark::view-transition-old(halo-main),
+	html.halo-scifi.dark::view-transition-new(halo-main) {
+		animation: none !important;
+	}
+}

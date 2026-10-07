@@ -1,9 +1,11 @@
 <script lang="ts">
 	/**
 	 * Deep-space backdrop (Halo sci-fi layer): three depths of stars drifting towards the
-	 * viewer, a little twinkle, a few pixels of pointer parallax on desktop. A `halo:warp`
-	 * window event turns the drift into a jump for a moment (stars streak). Hidden tabs stop
-	 * drawing; reduced motion gets one still frame. Decoration only: aria-hidden, no input.
+	 * viewer, a little twinkle, a few pixels of pointer parallax on desktop. In the dark a few
+	 * near stars flare into four-point spikes and now and then a meteor crosses. A `halo:warp`
+	 * window event turns the drift into a jump for a moment (stars streak, speed ramps up and
+	 * down, the centre flashes). Hidden tabs stop drawing; reduced motion gets one still frame.
+	 * Decoration only: aria-hidden, no input.
 	 */
 	import { onMount } from 'svelte';
 	import { WARP_EVENT } from './scifi';
@@ -23,13 +25,17 @@
 		const phone = !fine.matches;
 		const TINTS = ['#ffffff', '#bfe9ff', '#9fd8ff', '#d7c8ff', '#ffe6c4'];
 
-		type Star = { x: number; y: number; z: number; pz: number; tint: string; ph: number };
+		type Star = { x: number; y: number; z: number; pz: number; tint: string; ph: number; flare: boolean };
+		type Meteor = { x: number; y: number; vx: number; vy: number; age: number; life: number };
 		let stars: Star[] = [];
+		let meteors: Meteor[] = [];
+		let nextMeteor = 0;
 		let w = 0,
 			h = 0,
 			ratio = 1;
 		let frame = 0,
 			last = 0,
+			warpFrom = 0,
 			warpUntil = 0,
 			skip = false;
 		let px = 0,
@@ -43,8 +49,24 @@
 			z: far ? 1 : 0.15 + Math.random() * 0.85,
 			pz: 1,
 			tint: TINTS[(Math.random() * TINTS.length) | 0],
-			ph: Math.random() * Math.PI * 2
+			ph: Math.random() * Math.PI * 2,
+			flare: Math.random() < 0.035
 		});
+
+		// a meteor enters from the top or a side and crosses about a third of the view
+		const launch = (): Meteor => {
+			const fromLeft = Math.random() < 0.5;
+			const angle = (fromLeft ? 0.35 : Math.PI - 0.35) + (Math.random() - 0.5) * 0.4;
+			const v = Math.max(w, h) * (0.9 + Math.random() * 0.5);
+			return {
+				x: fromLeft ? Math.random() * w * 0.5 : w * (0.5 + Math.random() * 0.5),
+				y: Math.random() * h * 0.35,
+				vx: Math.cos(angle) * v,
+				vy: Math.sin(angle) * v,
+				age: 0,
+				life: 0.7 + Math.random() * 0.5
+			};
+		};
 
 		const resize = () => {
 			w = canvas.clientWidth;
@@ -53,7 +75,7 @@
 			canvas.width = Math.max(1, w * ratio);
 			canvas.height = Math.max(1, h * ratio);
 			ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
-			const n = Math.round(Math.min(phone ? 110 : 260, Math.max(60, (w * h) / 5200)));
+			const n = Math.round(Math.min(phone ? 130 : 320, Math.max(70, (w * h) / 4300)));
 			while (stars.length < n) stars.push(spawn());
 			stars.length = n;
 			if (!frame) draw(performance.now(), 0);
@@ -63,7 +85,9 @@
 
 		const draw = (now: number, dt: number) => {
 			const warp = now < warpUntil;
-			const speed = warp ? 1.35 : 0.035;
+			// the jump eases in and out instead of switching on and off
+			const k = warp ? Math.sin(Math.PI * Math.min(1, (now - warpFrom) / (warpUntil - warpFrom))) : 0;
+			const speed = 0.035 + 1.6 * k;
 			const cx = w / 2 + px,
 				cy = h / 2 + py;
 			const scale = Math.max(w, h) * 0.55;
@@ -87,6 +111,19 @@
 				}
 				const near = 1 - s.z;
 				const twinkle = warp ? 1 : 0.7 + 0.3 * Math.sin(now / 620 + s.ph);
+				if (s.flare && isDark && !warp && near > 0.45) {
+					// a near bright star wears diffraction spikes that breathe with its twinkle
+					const len = (4 + near * near * 14) * twinkle * (phone ? 0.7 : 1);
+					ctx.globalAlpha = 0.55 * near * twinkle * intensity;
+					ctx.strokeStyle = s.tint;
+					ctx.lineWidth = 0.6;
+					ctx.beginPath();
+					ctx.moveTo(x - len, y);
+					ctx.lineTo(x + len, y);
+					ctx.moveTo(x, y - len * 0.7);
+					ctx.lineTo(x, y + len * 0.7);
+					ctx.stroke();
+				}
 				const alpha = Math.min(1, (0.15 + near * 0.95) * twinkle) * intensity;
 				const size = 0.35 + near * near * (phone ? 1.6 : 2.1);
 				ctx.globalAlpha = isDark ? alpha : alpha * 0.32;
@@ -106,6 +143,44 @@
 					ctx.arc(x, y, size, 0, Math.PI * 2);
 					ctx.fill();
 				}
+			}
+			if (isDark && k > 0.05) {
+				// the jump flashes at the vanishing point
+				const r = Math.max(w, h) * (0.12 + 0.25 * k);
+				const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+				g.addColorStop(0, `rgba(224, 251, 255, ${0.28 * k * intensity})`);
+				g.addColorStop(0.4, `rgba(94, 231, 255, ${0.1 * k * intensity})`);
+				g.addColorStop(1, 'rgba(94, 231, 255, 0)');
+				ctx.globalAlpha = 1;
+				ctx.fillStyle = g;
+				ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
+			}
+			if (isDark && dt > 0) {
+				if (!nextMeteor) nextMeteor = now + 2500 + Math.random() * 4000;
+				if (now > nextMeteor && meteors.length < 2) {
+					meteors.push(launch());
+					nextMeteor = now + 4000 + Math.random() * 7000;
+				}
+				for (const m of meteors) {
+					m.age += dt;
+					m.x += m.vx * dt;
+					m.y += m.vy * dt;
+					const t = m.age / m.life;
+					const a = Math.sin(Math.PI * Math.min(1, t)) * intensity;
+					const tail = 0.16;
+					const g = ctx.createLinearGradient(m.x, m.y, m.x - m.vx * tail, m.y - m.vy * tail);
+					g.addColorStop(0, `rgba(224, 251, 255, ${0.95 * a})`);
+					g.addColorStop(0.25, `rgba(94, 231, 255, ${0.45 * a})`);
+					g.addColorStop(1, 'rgba(167, 139, 250, 0)');
+					ctx.globalAlpha = 1;
+					ctx.strokeStyle = g;
+					ctx.lineWidth = phone ? 1.1 : 1.4;
+					ctx.beginPath();
+					ctx.moveTo(m.x, m.y);
+					ctx.lineTo(m.x - m.vx * tail, m.y - m.vy * tail);
+					ctx.stroke();
+				}
+				meteors = meteors.filter((m) => m.age < m.life);
 			}
 			ctx.globalAlpha = 1;
 		};
@@ -145,7 +220,11 @@
 		};
 		const onWarp = (e: Event) => {
 			if (reduced.matches) return;
-			warpUntil = performance.now() + ((e as CustomEvent).detail?.ms ?? 900);
+			const now = performance.now();
+			const ms = (e as CustomEvent).detail?.ms ?? 900;
+			// a jump that arrives during another one extends it instead of restarting the ramp
+			if (now >= warpUntil) warpFrom = now;
+			warpUntil = Math.max(warpUntil, now + ms);
 			start();
 		};
 		const onVisibility = () => (document.hidden ? stop() : start());

@@ -506,13 +506,17 @@ html.halo-scifi .halo-modal {
 		var(--shadow-lg);
 }
 
-/* ------------------------------------------------------------------ page change: a short jump */
+/* ------------------------------------------------------------------ page change: a short jump
+   The transition pseudo-elements hang off <html> itself (no space before ::view-transition-*).
+   Desktop only: phones keep halo.css's light slide, a blurred full-page snapshot costs them. */
 
-html.halo-scifi ::view-transition-old(halo-main) {
-	animation: scifi-jump-out 220ms cubic-bezier(0.4, 0, 1, 1) both;
-}
-html.halo-scifi ::view-transition-new(halo-main) {
-	animation: scifi-jump-in 460ms cubic-bezier(0.16, 1, 0.3, 1) both;
+@media (pointer: fine) {
+	html.halo-scifi::view-transition-old(halo-main) {
+		animation: scifi-jump-out 220ms cubic-bezier(0.4, 0, 1, 1) both;
+	}
+	html.halo-scifi::view-transition-new(halo-main) {
+		animation: scifi-jump-in 460ms cubic-bezier(0.16, 1, 0.3, 1) both;
+	}
 }
 @keyframes scifi-jump-out {
 	to {
@@ -778,8 +782,8 @@ html.halo-scifi ::view-transition-new(halo-main) {
 	.halo-auth__scene::after {
 		animation: none !important;
 	}
-	html.halo-scifi ::view-transition-old(halo-main),
-	html.halo-scifi ::view-transition-new(halo-main) {
+	html.halo-scifi::view-transition-old(halo-main),
+	html.halo-scifi::view-transition-new(halo-main) {
 		animation: none !important;
 	}
 }

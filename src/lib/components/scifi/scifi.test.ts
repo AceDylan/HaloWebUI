@@ -1,5 +1,14 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { BOOT_EVERY_MS, BOOT_KEY, scifiEnabled, shouldBoot, markBooted, WARP_EVENT, warp } from './scifi';
+import {
+	BOOT_EVERY_MS,
+	BOOT_KEY,
+	isSectionJump,
+	scifiEnabled,
+	shouldBoot,
+	markBooted,
+	WARP_EVENT,
+	warp
+} from './scifi';
 
 const storage = () => {
 	const m = new Map<string, string>();
@@ -36,6 +45,17 @@ describe('opening titles', () => {
 		vi.stubGlobal('window', { dispatchEvent: (e: CustomEvent) => seen.push([e.type, e.detail]) });
 		warp(500);
 		expect(seen).toEqual([[WARP_EVENT, { ms: 500 }]]);
+	});
+});
+
+describe('page jumps', () => {
+	it('streak the stars between parts of the app, not within one', () => {
+		expect(isSectionJump('/', '/settings/interface')).toBe(true);
+		expect(isSectionJump('/discuss', '/teams')).toBe(true);
+		expect(isSectionJump('/', '/c/abc')).toBe(true);
+		expect(isSectionJump('/c/abc', '/c/def')).toBe(false);
+		expect(isSectionJump('/settings/interface', '/settings/account')).toBe(false);
+		expect(isSectionJump(undefined, '/teams')).toBe(false);
 	});
 });
 

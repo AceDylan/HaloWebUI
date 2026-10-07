@@ -14,6 +14,8 @@
 	export let teamId: string;
 
 	let team: Team | null = null;
+	// Set by ConclusionView: the reading column is beside a table of contents only when there is one.
+	let tocVisible = false;
 	let live: LiveSnapshot | null = null;
 	let error = '';
 
@@ -72,7 +74,7 @@
 		{:else}
 			<div class="mx-auto w-full max-w-6xl pt-4 sm:pt-8">
 				{#if team}
-					<div class="mb-6 sm:mb-8 lg:ml-[15rem]">
+					<div class="mb-6 sm:mb-8 {tocVisible ? 'lg:ml-[15rem]' : ''}">
 						<div class="text-xs text-gray-500">
 							协作任务 · {PHASE_LABEL[phase] ?? phase}{total
 								? ` · ${done}/${total} 个任务完成`
@@ -125,6 +127,7 @@
 				<ConclusionView
 					{teamId}
 					variant="page"
+					bind:tocVisible
 					title={team?.title ?? ''}
 					{phase}
 					brief={live?.team.conclusion}

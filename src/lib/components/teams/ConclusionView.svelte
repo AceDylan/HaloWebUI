@@ -31,6 +31,8 @@
 	export let teamId: string;
 	export let title = '';
 	export let variant: 'panel' | 'page' = 'panel';
+	/** Whether the page shows the table of contents (and so indents what sits beside it). */
+	export let tocVisible = false;
 	/** Team phase (running / attention / paused / stopped / completed) and the snapshot's brief. */
 	export let phase = 'running';
 	export let brief: ConclusionEntry | undefined = undefined;
@@ -181,6 +183,9 @@
 	};
 	$: buildToc(headings);
 	$: tocMin = toc.length ? Math.min(...toc.map((h) => h.depth)) : 1;
+	// The reading column only shares the page with a table of contents when there is one; without
+	// it the grid would still reserve the first (13rem) column and squeeze the report into it.
+	$: tocVisible = variant === 'page' && toc.length > 2;
 
 	const jump = (id: string) => {
 		activeHeading = id;
@@ -436,8 +441,14 @@
 		{/if}
 
 		{#if prepared}
-			<div class={variant === 'page' ? 'grid gap-8 pt-6 lg:grid-cols-[13rem_minmax(0,1fr)]' : ''}>
-				{#if variant === 'page' && toc.length > 2}
+			<div
+				class={variant === 'page'
+					? tocVisible
+						? 'grid gap-8 pt-6 lg:grid-cols-[13rem_minmax(0,1fr)]'
+						: 'pt-6'
+					: ''}
+			>
+				{#if tocVisible}
 					<nav class="hidden lg:block" aria-label="结论目录">
 						<div class="sticky top-4 max-h-[calc(100dvh-6rem)] overflow-y-auto pr-2">
 							<div class="mb-2 text-[11px] font-medium uppercase tracking-wider text-gray-400">
@@ -462,7 +473,7 @@
 					</nav>
 				{/if}
 				<div class="min-w-0">
-					{#if variant === 'page' && toc.length > 2}
+					{#if tocVisible}
 						<details class="tm-card-quiet mb-4 px-3 py-2 text-sm lg:hidden">
 							<summary
 								class="cursor-pointer select-none text-xs font-medium text-gray-600 dark:text-gray-300"
@@ -512,7 +523,7 @@
 
 		{#if fileList.length}
 			<section
-				class="mt-8 {variant === 'page' ? 'lg:ml-[15rem]' : ''}"
+				class="mt-8 {tocVisible ? 'lg:ml-[15rem]' : ''}"
 				aria-label="产出文件"
 				data-conclusion-files
 			>
@@ -584,7 +595,7 @@
 
 		{#if data?.tasks.length}
 			<section
-				class="mt-8 {variant === 'page' ? 'lg:ml-[15rem]' : ''}"
+				class="mt-8 {tocVisible ? 'lg:ml-[15rem]' : ''}"
 				aria-label="各任务的原始结果"
 				data-conclusion-tasks
 			>

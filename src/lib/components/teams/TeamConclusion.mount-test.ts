@@ -180,6 +180,40 @@ describe('ConclusionView', () => {
 		expect(details[0].textContent).toContain('"tools"');
 	});
 
+	it('a short report takes the whole width; the side column is only for a real table of contents', async () => {
+		// A report with one section: no TOC, so the reading column must not be squeezed into the
+		// grid's first (13rem) column — that put the whole text in a narrow strip on the left.
+		api.getTeamConclusion.mockResolvedValue({
+			...CONCLUSION,
+			markdown: '# 为什么高海拔地区水的沸点更低\n\n空气稀薄，气压低，水在更低的温度就沸腾。'
+		});
+		await mount(ConclusionView, {
+			teamId: 'team-2',
+			title: '水沸点',
+			phase: 'completed',
+			variant: 'page'
+		});
+		await until(() => !!target.querySelector('[data-team-report] h1'));
+		const short = target.querySelector('[data-team-report]').closest('.grid');
+		expect(short).toBeFalsy();
+		expect(target.querySelector('nav[aria-label="结论目录"]')).toBeFalsy();
+		app?.$destroy();
+		target?.remove();
+
+		api.getTeamConclusion.mockResolvedValue(CONCLUSION);
+		await mount(ConclusionView, {
+			teamId: 'team-1',
+			title: '看板调研',
+			phase: 'completed',
+			variant: 'page'
+		});
+		await until(() => !!target.querySelector('nav[aria-label="结论目录"]'));
+		const withToc = target.querySelector('[data-team-report]').closest('.grid');
+		expect(withToc).toBeTruthy();
+		expect(withToc.className).toContain('lg:grid-cols-[13rem_minmax(0,1fr)]');
+		expect(target.querySelector('[data-team-report]').closest('.min-w-0')).toBeTruthy();
+	});
+
 	it('接下来: ask about it in a chat, or keep it in the knowledge base (per version)', async () => {
 		api.getTeamConclusion.mockResolvedValue(CONCLUSION);
 		api.followUpTeamConclusion.mockResolvedValue({

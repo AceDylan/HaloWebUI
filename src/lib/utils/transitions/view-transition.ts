@@ -32,6 +32,9 @@ export const guardViewTransition = <T extends ViewTransitionLike>(
 	const giveUp = () => {
 		if (over) return;
 		end();
+		// A transition that did not end on its own is a bug worth seeing in the console: the page
+		// change, the sign-in hand-off and the theme reveal all rely on this ending.
+		console.warn('[halo] view transition did not finish; skipped so the page shows');
 		onGiveUp?.();
 		try {
 			transition.skipTransition();

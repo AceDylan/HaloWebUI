@@ -47,6 +47,16 @@ describe('guardViewTransition', () => {
 		expect(transition.skipTransition).toHaveBeenCalledTimes(1);
 	});
 
+	it('says so in the console when it has to skip', async () => {
+		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+		const { transition, ready } = fakeTransition();
+		guardViewTransition(transition);
+		ready();
+		await vi.advanceTimersByTimeAsync(VIEW_TRANSITION_SETTLE_MS);
+		expect(warn).toHaveBeenCalledTimes(1);
+		warn.mockRestore();
+	});
+
 	it('does not throw when the transition is already over', async () => {
 		const { transition, ready } = fakeTransition();
 		transition.skipTransition.mockImplementation(() => {

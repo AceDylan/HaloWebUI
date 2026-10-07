@@ -4113,11 +4113,23 @@
 		}
 	};
 
+	// The request is seen inside this component's reactive update. initNewChat clears
+	// history before its first await, so started right there it ran after `$: hasMessages`
+	// had already been worked out for that update: a new chat opened from a chat kept the
+	// old chat's hasMessages and showed the plain chat greeting instead of the home page.
+	const startRequestedNewChat = async (fresh: boolean) => {
+		const loadToken = activeChatLoadToken;
+		await tick();
+		// A chat opened in the meantime wins over the new chat.
+		if (loadToken !== activeChatLoadToken) return;
+		await initNewChat({ fresh });
+	};
+
 	$: if ($newChatRequest && $newChatRequest.id !== lastHandledNewChatRequestId) {
 		const request = $newChatRequest;
 		lastHandledNewChatRequestId = request.id;
 		newChatRequest.set(null);
-		void initNewChat({ fresh: request.fresh ?? false });
+		void startRequestedNewChat(request.fresh ?? false);
 	}
 
 	const initializeFreshChat = async (requestKey: string) => {

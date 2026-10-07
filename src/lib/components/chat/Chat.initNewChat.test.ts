@@ -164,7 +164,7 @@ const page = (href: string, overrides: Record<string, any> = {}) => {
 		};
 	}
 	chatId.subscribe(onChatIdCleared);
-	return { store, location, chatId, runs: () => store.initNewChat.mock.calls.length };
+	return { store, location, chatId, build, runs: () => store.initNewChat.mock.calls.length };
 };
 
 const HUB_LANDING = `https://halo.example/?q=${encodeURIComponent('你能做什么')}&models=${encodeURIComponent(GPT_CHAT.id)}`;
@@ -251,5 +251,45 @@ describe('starting a new chat while one is open', () => {
 
 		chatId.set('');
 		await vi.waitFor(() => expect(runs()).toBe(before + 1));
+	});
+});
+
+describe('a new-chat request (the sidebar\'s or navbar\'s "New chat")', () => {
+	// The request is noticed inside the component's reactive update; initNewChat clearing
+	// history right there came after `$: hasMessages`, so a chat's page kept showing the plain
+	// chat greeting instead of the home page.
+	const deferTick = (store: Record<string, any>) => {
+		let release!: () => void;
+		store.tick = vi.fn(() => new Promise<void>((resolve) => (release = resolve)));
+		return () => release();
+	};
+
+	it('starts the new chat only after the update that noticed it', async () => {
+		const { store, build, runs } = page('https://halo.example/');
+		await vi.waitFor(() => expect(store.getUserSettings).toHaveBeenCalledTimes(1));
+		const before = runs();
+		const release = deferTick(store);
+
+		const started = build('startRequestedNewChat')(false);
+		expect(runs()).toBe(before);
+
+		release();
+		await started;
+		expect(runs()).toBe(before + 1);
+		expect(store.history).toEqual({ messages: {}, currentId: null });
+	});
+
+	it('gives way to a chat opened before it could start', async () => {
+		const { store, build, runs } = page('https://halo.example/');
+		await vi.waitFor(() => expect(store.getUserSettings).toHaveBeenCalledTimes(1));
+		const before = runs();
+		const release = deferTick(store);
+
+		const started = build('startRequestedNewChat')(false);
+		store.activeChatLoadToken += 1; // requestChatLoad for the chat clicked next
+		release();
+		await started;
+
+		expect(runs()).toBe(before);
 	});
 });

@@ -3720,7 +3720,10 @@
 		// 作废所有在途的对话加载:在 /c/X 上开新对话时,浅路由不改 chatIdProp(仍为 X),
 		// 旧的 loadChat(X) 若仍在 await 中,其内部 isStale() 会因 token 变化而中止写状态,
 		// 避免慢加载完成后把 X 的内容覆盖到刚打开的新对话上。
-		activeChatLoadToken++;
+		const initializationToken = ++activeChatLoadToken;
+		const initialChatIdProp = chatIdProp;
+		const isStale = () =>
+			initializationToken !== activeChatLoadToken || initialChatIdProp !== chatIdProp;
 		loading = false;
 		freshChatActive = fresh;
 		composerStateSyncReady = false;
@@ -3748,6 +3751,7 @@
 					if (modelSelectorButton) {
 						modelSelectorButton.click();
 						await tick();
+						if (isStale()) return;
 
 						const modelSelectorInput = document.getElementById('model-search-input');
 						if (modelSelectorInput) {
@@ -3822,10 +3826,12 @@
 		// Only what was queued in an unsaved new chat goes; other chats keep theirs.
 		messageQueue = messageQueue.filter((item) => item.chatId);
 
-		await showControls.set(false);
-		await showCallOverlay.set(false);
-		await showOverview.set(false);
-		await showArtifacts.set(false);
+		// Store setters are synchronous. Yielding between them let a navigation
+		// load its history before this older initialization resumed and erased it.
+		showControls.set(false);
+		showCallOverlay.set(false);
+		showOverview.set(false);
+		showArtifacts.set(false);
 
 		if (landing.pathname.includes('/c/')) {
 			// 用 SvelteKit 的 replaceState 走浅路由:它维护 history 里的路由索引,
@@ -3848,11 +3854,11 @@
 
 		clearingChatIdForNewChat = true;
 		try {
-			await chatId.set('');
+			chatId.set('');
 		} finally {
 			clearingChatIdForNewChat = false;
 		}
-		await chatTitle.set('');
+		chatTitle.set('');
 
 		history = {
 			messages: {},
@@ -3975,10 +3981,13 @@
 			replaceState(landingPrompt.path, $page.state);
 			if ($models.length === 0) {
 				await ensureModels(localStorage.token, { reason: 'chat-url-prompt' }).catch(() => {});
+				if (isStale()) return;
 				await tick(); // modelsMap / selectedModels 的响应式更新排在下一拍
+				if (isStale()) return;
 			}
 			prompt = landingPrompt.prompt;
 			await tick();
+			if (isStale()) return;
 			submitPrompt(prompt);
 		}
 
@@ -3993,6 +4002,8 @@
 		}
 
 		const userSettings = await getUserSettings(localStorage.token);
+		// A new load, another new-chat request or unmount owns the state now.
+		if (isStale()) return;
 
 		if (userSettings) {
 			applyUserSettingsSnapshot(userSettings, get(settings) ?? {});
@@ -4035,6 +4046,7 @@
 				selectedModels = [getModelRequestId(imageModel)];
 			}
 			await attachImageForEditing(imageHandoff.fileId, imageHandoff.name);
+			if (isStale()) return;
 		}
 
 		// 「继续对话」 from 讨论台 / 协作台: the draft is filled in (not sent), files attached.
@@ -4107,6 +4119,17 @@
 		void initNewChat({ fresh: request.fresh ?? false });
 	}
 
+	const initializeFreshChat = async (requestKey: string) => {
+		const loadToken = activeChatLoadToken;
+		await tick();
+		if (
+			loadToken !== activeChatLoadToken || chatIdProp || $page.url.toString() !== requestKey
+		) {
+			return;
+		}
+		await initNewChat({ fresh: true });
+	};
+
 	$: {
 		const freshChatRequested =
 			!chatIdProp &&
@@ -4116,10 +4139,7 @@
 
 		if (freshChatRequested && requestKey !== lastFreshChatRequest) {
 			lastFreshChatRequest = requestKey;
-			(async () => {
-				await tick();
-				await initNewChat({ fresh: true });
-			})();
+			void initializeFreshChat(requestKey);
 		} else if (!freshChatRequested) {
 			lastFreshChatRequest = '';
 		}

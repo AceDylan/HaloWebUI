@@ -72,6 +72,15 @@
 		// another part of the app: the stars jump while the panel changes (StarField ignores
 		// it under reduced motion)
 		if (scifiOn && isSectionJump(navigation.from?.url.pathname, navigation.to?.url.pathname)) warp(560);
+		// Chat history loads after navigation. Keep these pages live instead of
+		// capturing an empty/loading composer in a snapshot over the new messages.
+		const isChatPage = (pathname: string | undefined) =>
+			pathname === '/' || pathname?.startsWith('/c/');
+		if (isChatPage(navigation.from?.url.pathname) || isChatPage(navigation.to?.url.pathname)) {
+			// A rapid click can arrive while a previous page's snapshot still covers the panel.
+			(document as any).activeViewTransition?.skipTransition();
+			return;
+		}
 		if (!('startViewTransition' in document)) return;
 		if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
 		if (navigation.from?.url.pathname === navigation.to?.url.pathname) return;

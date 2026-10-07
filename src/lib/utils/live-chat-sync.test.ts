@@ -242,6 +242,46 @@ describe('background sync lifecycle', () => {
 		sync.dispose();
 	});
 
+	it.each(['navigation', 'unmount'])(
+		'ignores an old missing-chat error after %s',
+		async (change) => {
+			vi.useFakeTimers();
+			let key = 'chat-A';
+			let reject!: (error: unknown) => void;
+			const onError = vi.fn();
+			const sync = createChatSync({
+				getKey: () => key,
+				read: () => new Promise((_resolve, fail) => (reject = fail)),
+				apply: vi.fn(),
+				onError
+			});
+			sync.request();
+			await vi.advanceTimersByTimeAsync(100);
+			if (change === 'navigation') key = 'chat-B';
+			else sync.dispose();
+			reject("We could not find what you're looking for :/");
+			await vi.advanceTimersByTimeAsync(100);
+			expect(onError).not.toHaveBeenCalled();
+			sync.dispose();
+		}
+	);
+
+	it('reports a missing chat while the same chat is still open', async () => {
+		vi.useFakeTimers();
+		const error = "We could not find what you're looking for :/";
+		const onError = vi.fn();
+		const sync = createChatSync({
+			getKey: () => 'chat-A',
+			read: vi.fn().mockRejectedValue(error),
+			apply: vi.fn(),
+			onError
+		});
+		sync.request();
+		await vi.advanceTimersByTimeAsync(100);
+		expect(onError).toHaveBeenCalledWith(error);
+		sync.dispose();
+	});
+
 	it('does not apply an in-flight response after unmount', async () => {
 		vi.useFakeTimers();
 		let resolve: (value: string) => void = () => {};

@@ -30,6 +30,10 @@ const fixture = (overrides: Record<string, any> = {}) => {
 		document: { getElementById: () => null },
 		console: { error: vi.fn() },
 		$temporaryChatEnabled: false,
+		$settings: {},
+		$selectedAssistantScene: null,
+		$page: { url: new URL('https://halo.example/c/target'), state: {} },
+		window: { location: new URL('https://halo.example/c/target') },
 		$models: [{ id: 'model' }],
 		modelsMap: new Map(),
 		history: { messages: {}, currentId: null },
@@ -49,6 +53,19 @@ const fixture = (overrides: Record<string, any> = {}) => {
 		persistChatSessionState: vi.fn(),
 		liveChatSync: { requestMissed: vi.fn() },
 		clearingChatIdForNewChat: false,
+		messageQueue: [],
+		showControls: { set: vi.fn() },
+		showCallOverlay: { set: vi.fn() },
+		showOverview: { set: vi.fn() },
+		showArtifacts: { set: vi.fn() },
+		getTemporaryChatNavigationPath: () => '/',
+		syncTemporaryChatState: () => ({ enabled: false }),
+		takeLandingPrompt: () => null,
+		getUserSettings: vi.fn(async () => null),
+		get: () => ({}),
+		settings: { set: vi.fn() },
+		applyUserSettingsSnapshot: vi.fn(),
+		takeChatImageHandoff: vi.fn(),
 		...overrides
 	};
 	state.chatId = {
@@ -100,6 +117,47 @@ const history = {
 };
 
 describe('opening a chat from another mode', () => {
+	it('keeps the opened chat when an earlier new-chat initialization resumes', async () => {
+		const { state, build } = fixture({ chatIdProp: '', $chatId: '' });
+		state.getChatById.mockResolvedValue({
+			id: 'target',
+			chat: { title: 'Existing', models: ['model'], history }
+		});
+		state.loadChat = build('loadChat');
+		const reset = build('initNewChat')();
+		state.chatIdProp = 'target';
+		build('requestChatLoad')('target');
+		await reset;
+		await vi.waitFor(() => expect(state.loading).toBe(false));
+		expect(state.history).toEqual(history);
+		expect(state.$chatId).toBe('target');
+		expect(state.chat?.id).toBe('target');
+	});
+
+	it.each(['navigation', 'unmount', 'new chat'])(
+		'discards new-chat settings that arrive after %s',
+		async (change) => {
+			let finish!: (value: any) => void;
+			const { state, build } = fixture({
+				chatIdProp: '',
+				$chatId: '',
+				getUserSettings: vi.fn(() => new Promise((resolve) => (finish = resolve)))
+			});
+			const reset = build('initNewChat')();
+			await vi.waitFor(() => expect(state.getUserSettings).toHaveBeenCalledTimes(1));
+			if (change === 'navigation') state.chatIdProp = state.$chatId = 'target';
+			else state.activeChatLoadToken++;
+			state.history = structuredClone(history);
+			state.composerStateSyncReady = false;
+			finish({ ui: { models: ['old-model'] } });
+			await reset;
+			expect(state.history).toEqual(history);
+			expect(state.composerStateSyncReady).toBe(false);
+			expect(state.applyUserSettingsSnapshot).not.toHaveBeenCalled();
+			expect(state.takeChatImageHandoff).not.toHaveBeenCalled();
+		}
+	);
+
 	it.each(['answerDesk', 'team'])(
 		'loads the existing %s history before allowing composer saves',
 		async (kind) => {
@@ -190,4 +248,31 @@ describe('opening a chat from another mode', () => {
 			expect(state.initNewChat).not.toHaveBeenCalled();
 		}
 	);
+
+	it.each(['route', 'load', 'unmount', 'url'])(
+		'ignores a queued fresh-chat initialization after %s changes',
+		async (change) => {
+			let finish!: () => void;
+			const url = new URL('https://halo.example/?fresh-chat=true');
+			const { state, build } = fixture({
+				chatIdProp: '',
+				$page: { url },
+				tick: () => new Promise<void>((resolve) => (finish = resolve))
+			});
+			const reset = build('initializeFreshChat')(url.toString());
+			if (change === 'route') state.chatIdProp = 'target';
+			else if (change === 'url') state.$page.url = new URL('https://halo.example/teams');
+			else state.activeChatLoadToken++;
+			finish();
+			await reset;
+			expect(state.initNewChat).not.toHaveBeenCalled();
+		}
+	);
+
+	it('initializes a fresh chat while the requested home page is still active', async () => {
+		const url = new URL('https://halo.example/?fresh-chat=true');
+		const { state, build } = fixture({ chatIdProp: '', $page: { url } });
+		await build('initializeFreshChat')(url.toString());
+		expect(state.initNewChat).toHaveBeenCalledWith({ fresh: true });
+	});
 });

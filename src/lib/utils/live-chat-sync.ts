@@ -134,7 +134,9 @@ export const createChatSync = <T>(options: {
 			const value = await options.read(abort.signal);
 			if (!disposed && key === options.getKey()) options.apply(value);
 		} catch (error) {
-			options.onError?.(error);
+			// A missing old chat must not clear the ID or navigate away from the
+			// chat opened since this request started (or after unmount).
+			if (!disposed && key === options.getKey()) options.onError?.(error);
 		} finally {
 			clearTimeout(timeout);
 			abort = undefined;

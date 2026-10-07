@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { getContext, onDestroy, onMount, tick } from 'svelte';
+	import { afterUpdate, getContext, onDestroy, onMount, tick } from 'svelte';
 	import { toast } from 'svelte-sonner';
 
 	import {
@@ -109,6 +109,7 @@
 	import { takeHandoff, type HandoffOrigin } from '$lib/utils/handoff';
 	import HandoffBack from '$lib/components/common/HandoffBack.svelte';
 	import { warp } from '$lib/components/scifi/scifi';
+	import { clearModeDraft, setModeDraft } from '$lib/components/scifi/mode-relay';
 	import { goto, replaceState } from '$app/navigation';
 
 	type GeneratedImage = {
@@ -1669,6 +1670,18 @@
 	};
 
 	let studioOrigin: HandoffOrigin | null = null;
+	// the dock (workspace layout) takes the prompt, and the reference images that are files on
+	// this server, to another mode
+	const REFERENCE_FILE = /\/files\/([A-Za-z0-9_-]{1,128})\/content$/;
+	afterUpdate(() =>
+		setModeDraft('studio', prompt, {
+			from: studioOrigin,
+			files: referenceImages
+				.map((ref) => ref.url?.match(REFERENCE_FILE)?.[1])
+				.filter((id): id is string => !!id)
+				.map((id) => ({ id, name: 'reference', type: 'image' as const }))
+		})
+	);
 
 	onMount(async () => {
 		warp(520);
@@ -1770,6 +1783,7 @@
 			clearTimeout(imageModelSearchTimer);
 		}
 		stopElapsedTimer();
+		clearModeDraft('studio');
 	});
 </script>
 

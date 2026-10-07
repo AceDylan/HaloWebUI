@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onDestroy, onMount, tick } from 'svelte';
+	import { afterUpdate, onDestroy, onMount, tick } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { slide } from 'svelte/transition';
 	import { toast } from 'svelte-sonner';
@@ -18,6 +18,9 @@
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import MenuLines from '$lib/components/icons/MenuLines.svelte';
 	import ModeEmblem from '$lib/components/scifi/ModeEmblem.svelte';
+	import ModeDock from '$lib/components/scifi/ModeDock.svelte';
+	import ModeFlow from '$lib/components/scifi/ModeFlow.svelte';
+	import { clearModeDraft, setModeDraft } from '$lib/components/scifi/mode-relay';
 	import { warp } from '$lib/components/scifi/scifi';
 	import RunnerStatus from './RunnerStatus.svelte';
 	import StatusChip from './StatusChip.svelte';
@@ -213,6 +216,14 @@
 	let attached: { id: string | null; name: string; size: number; error?: string }[] = [];
 	let fileInput: HTMLInputElement;
 	$: uploading = attached.some((f) => !f.id && !f.error);
+	// the dock takes the goal, its uploaded files and its background to another mode
+	afterUpdate(() =>
+		setModeDraft('teams', goal, {
+			context: background,
+			from: origin,
+			files: attached.filter((f) => f.id).map((f) => ({ id: f.id!, name: f.name, type: 'file' as const }))
+		})
+	);
 	const ATTACH_MAX = 20;
 	const ATTACH_MAX_BYTES = 50 * 1024 * 1024;
 
@@ -361,6 +372,7 @@
 	});
 	onDestroy(() => {
 		if (refreshTimer) clearInterval(refreshTimer);
+		clearModeDraft('teams');
 	});
 </script>
 
@@ -369,7 +381,7 @@
 	data-teams-home
 	data-teams-ui
 >
-	<nav class="flex items-center gap-2 px-3 pt-2 pb-1">
+	<nav class="flex flex-wrap items-center gap-2 px-3 pt-2 pb-1">
 		<div class="{$mobile ? '' : 'hidden'} flex flex-none items-center">
 			<button
 				class="rounded-xl p-1.5 hover:bg-gray-100 dark:hover:bg-gray-850"
@@ -377,7 +389,8 @@
 				aria-label="切换侧栏"><MenuLines /></button
 			>
 		</div>
-		<h1 class="halo-crumb px-1">协作台</h1>
+		<h1 class="sr-only">协作台</h1>
+		<ModeDock current="teams" />
 		{#if origin}
 			<HandoffBack {origin} />
 		{:else if chatId}
@@ -404,7 +417,8 @@
 				>
 					把目标交给一支 AI 团队
 				</h2>
-				<p class="max-w-xl text-sm leading-relaxed text-gray-500 dark:text-gray-400">
+				<ModeFlow label="协作怎么进行" steps={['写下目标', '负责人拆计划', '你批准', '成员并行执行', '交付完整结果']} />
+				<p class="hidden max-w-xl text-sm leading-relaxed text-gray-500 sm:block dark:text-gray-400">
 					负责人拆分任务、为每位成员挑选最合适的代理并按依赖并行推进；你批准计划后才开工，结束时交付完整结果——完整的答案、文档和图片。在对话的「+」菜单、回答的「⋯」或讨论结论下，也能直接交给协作台。
 				</p>
 				<p

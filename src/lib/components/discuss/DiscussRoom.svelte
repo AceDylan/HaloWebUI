@@ -6,7 +6,7 @@
 
 	import '$lib/components/teams/teams.css';
 	import './discuss.css';
-	import { chatId as currentChatId, config, mobile, models, showSidebar, socket, WEBUI_NAME } from '$lib/stores';
+	import { chatId as currentChatId, config, mobile, models, showSidebar, socket, user, WEBUI_NAME } from '$lib/stores';
 	import {
 		askDiscussion,
 		concludeDiscussion,
@@ -242,6 +242,31 @@
 			from: { kind: 'discuss', id: chatId, title }
 		});
 		goto(HANDOFF_PATH.teams);
+	};
+	$: studioAllowed =
+		!!$config?.features?.enable_image_generation &&
+		($user?.role === 'admin' || !!($user as any)?.permissions?.features?.image_generation);
+	// 「交给精答深挖」: the question again, answered by the best-suited assistant with the
+	// conclusion as background. 「画成图」: the image studio with the conclusion as its brief.
+	const toAnswer = () => {
+		if (!last) return;
+		handOff(typeof sessionStorage === 'undefined' ? null : sessionStorage, {
+			to: 'answer',
+			text: last.question,
+			context: `多模型讨论的结论：\n${last.conclusion.content}`,
+			from: { kind: 'discuss', id: chatId, title }
+		});
+		goto(HANDOFF_PATH.answer);
+	};
+	const toStudio = () => {
+		if (!last) return;
+		const gist = last.conclusion.content.replace(/\s+/g, ' ').trim().slice(0, 600);
+		handOff(typeof sessionStorage === 'undefined' ? null : sessionStorage, {
+			to: 'studio',
+			text: `一张清晰的信息图，讲清「${title || last.question}」的结论：${gist}`,
+			from: { kind: 'discuss', id: chatId, title }
+		});
+		goto(HANDOFF_PATH.studio);
 	};
 	const sendToHermes = () => {
 		if (!hermes || !hermesPrompt.trim()) return;
@@ -509,7 +534,13 @@
 						<ConclusionCard
 							{ask}
 							next={ask === last && settled
-								? { chat: continueInChat, team: teamsEnabled ? toTeams : null, hermes: canHandOff ? openHermes : null }
+								? {
+										chat: continueInChat,
+										answer: toAnswer,
+										team: teamsEnabled ? toTeams : null,
+										studio: studioAllowed ? toStudio : null,
+										hermes: canHandOff ? openHermes : null
+									}
 								: null}
 							rewrite={ask === last && canConclude ? conclude : null}
 							{busy}

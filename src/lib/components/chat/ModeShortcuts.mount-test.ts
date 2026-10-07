@@ -14,6 +14,7 @@ vi.mock('$app/stores', async () => {
 });
 vi.mock('$lib/apis/discussions', () => ({ listDiscussions: vi.fn(async () => []) }));
 vi.mock('$lib/apis/teams', () => ({ listTeams: vi.fn(async () => ({ teams: [] })) }));
+vi.mock('$lib/apis/answers', () => ({ listAnswers: vi.fn(async () => []) }));
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 let stores: any;

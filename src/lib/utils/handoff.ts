@@ -3,6 +3,8 @@
 // entry to sessionStorage and navigates; the page it goes to takes it once (it is removed either
 // way) and shows where it came from with a way back. Only file ids already on this server travel.
 
+import { writable } from 'svelte/store';
+
 export type HandoffTarget = 'answer' | 'discuss' | 'teams' | 'chat' | 'studio';
 export type HandoffOriginKind = 'chat' | 'answer' | 'discuss' | 'team' | 'studio';
 
@@ -64,6 +66,10 @@ const normalize = (value: any, now: number): Handoff | null => {
 	};
 };
 
+/** The last piece of work handed on, for the flash of light that marks it (RelayFlash.svelte). */
+export type Relay = { to: HandoffTarget; chars: number; files: number; context: boolean; at: number };
+export const relay = writable<Relay | null>(null);
+
 /** Leaves work for the page at `to`. Returns whether it was stored. */
 export const handOff = (
 	storage: Store | null | undefined,
@@ -74,10 +80,17 @@ export const handOff = (
 	if (!storage || !value) return false;
 	try {
 		storage.setItem(HANDOFF_KEY, JSON.stringify(value));
-		return true;
 	} catch {
 		return false;
 	}
+	relay.set({
+		to: value.to,
+		chars: value.text.length,
+		files: value.files.length,
+		context: !!value.context,
+		at: now
+	});
+	return true;
 };
 
 /** Takes the work left for `to` (once). An entry for another page stays where it is. */

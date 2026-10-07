@@ -2642,6 +2642,14 @@ body:has(#chat-input:focus) .halo-orb__arc {
 		opacity: 0;
 	}
 }
+/* the flash of a relay between modes (RelayFlash.svelte) plays on above the page change, live */
+::view-transition-group(halo-relay),
+::view-transition-new(halo-relay) {
+	animation: none;
+}
+::view-transition-old(halo-relay) {
+	display: none;
+}
 @keyframes halo-vt-in {
 	from {
 		opacity: 0;

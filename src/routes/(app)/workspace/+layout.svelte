@@ -8,6 +8,8 @@
 	import MenuLines from '$lib/components/icons/MenuLines.svelte';
 	import WorkspaceHero from '$lib/components/workspace/shell/WorkspaceHero.svelte';
 	import ModeEmblem from '$lib/components/scifi/ModeEmblem.svelte';
+	import ModeDock from '$lib/components/scifi/ModeDock.svelte';
+	import ModeFlow from '$lib/components/scifi/ModeFlow.svelte';
 	import { getActiveWorkspaceTab } from '$lib/components/workspace/shell/meta';
 
 	const i18n: Writable<any> = getContext('i18n');
@@ -61,7 +63,7 @@
 {#if loaded}
 	<div class="relative flex flex-col w-full h-screen max-h-[100dvh] max-w-full">
 		<nav data-halo-layer="0" class="px-2.5 pt-1 md:backdrop-blur-xl drag-region">
-			<div class="flex items-center gap-1">
+			<div class="flex items-center gap-1 {studio ? 'pt-1' : ''}">
 				<div class="{$mobile ? '' : 'hidden'} self-center flex flex-none items-center">
 					<button
 						id="sidebar-toggle-button"
@@ -77,9 +79,15 @@
 					</button>
 				</div>
 
-				<div class="halo-crumb flex items-center px-1 py-1">
-					{pageName}
-				</div>
+				{#if studio}
+					<!-- 生图 is one of the chat's modes: the same dock as 精答 / 讨论台 / 协作台 -->
+					<h1 class="sr-only">{pageName}</h1>
+					<ModeDock current="studio" />
+				{:else}
+					<div class="halo-crumb flex items-center px-1 py-1">
+						{pageName}
+					</div>
+				{/if}
 			</div>
 		</nav>
 
@@ -98,7 +106,8 @@
 							<span class="text-xs text-gray-500 dark:text-gray-400">生图</span>
 						</div>
 						<h2 class="halo-mode-title font-display text-[26px] font-semibold leading-[1.15] text-gray-950 sm:text-[32px] dark:text-white">把想法画出来</h2>
-						<p class="max-w-2xl text-sm leading-relaxed text-gray-500 dark:text-gray-400">
+						<ModeFlow label="生图怎么进行" steps={['写提示词', '加参考图 · 套模板', '渲染', '进图库，随时再改']} />
+						<p class="hidden max-w-2xl text-sm leading-relaxed text-gray-500 sm:block dark:text-gray-400">
 							写提示词、加参考图、套风格模板；对话里生成的图也会自动进图库，随时拿回来接着改。
 						</p>
 					</header>

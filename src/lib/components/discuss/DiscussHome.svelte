@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onDestroy, onMount, tick } from 'svelte';
+	import { afterUpdate, onDestroy, onMount, tick } from 'svelte';
 	import { goto, replaceState } from '$app/navigation';
 	import { toast } from 'svelte-sonner';
 
@@ -27,6 +27,9 @@
 	import UploadProgress from '$lib/components/common/UploadProgress.svelte';
 	import MenuLines from '$lib/components/icons/MenuLines.svelte';
 	import ModeEmblem from '$lib/components/scifi/ModeEmblem.svelte';
+	import ModeDock from '$lib/components/scifi/ModeDock.svelte';
+	import ModeFlow from '$lib/components/scifi/ModeFlow.svelte';
+	import { clearModeDraft, setModeDraft } from '$lib/components/scifi/mode-relay';
 	import { warp } from '$lib/components/scifi/scifi';
 	import { now, timeAgo } from '$lib/components/teams/clock';
 	import SeatAvatar from './SeatAvatar.svelte';
@@ -68,6 +71,16 @@
 	let attachments: Attachment[] = [];
 	let fileInput: HTMLInputElement;
 	$: uploading = attachments.some((a) => !a.id && !a.error);
+	// the dock takes the question, its uploaded files and its background to another mode
+	afterUpdate(() =>
+		setModeDraft('discuss', question, {
+			context: background,
+			from: origin,
+			files: attachments
+				.filter((a) => a.id)
+				.map((a) => ({ id: a.id!, name: a.name, type: a.image ? ('image' as const) : ('file' as const) }))
+		})
+	);
 	const attach = async (list: FileList | File[] | null | undefined) => {
 		// A video also brings its frames as one picture, for the seats that read images.
 		const files = (
@@ -392,11 +405,12 @@
 	});
 	onDestroy(() => {
 		if (timer) clearInterval(timer);
+		clearModeDraft('discuss');
 	});
 </script>
 
 <div class="tm-ambient relative flex h-screen max-h-[100dvh] w-full flex-col" data-teams-ui data-discuss-ui data-discuss-home>
-	<nav class="flex items-center gap-2 px-3 pt-2 pb-1">
+	<nav class="flex flex-wrap items-center gap-2 px-3 pt-2 pb-1">
 		<div class="{$mobile ? '' : 'hidden'} flex flex-none items-center">
 			<button
 				class="rounded-xl p-1.5 hover:bg-gray-100 dark:hover:bg-gray-850"
@@ -404,7 +418,8 @@
 				aria-label="切换侧栏"><MenuLines /></button
 			>
 		</div>
-		<h1 class="halo-crumb px-1">讨论台</h1>
+		<h1 class="sr-only">讨论台</h1>
+		<ModeDock current="discuss" />
 		{#if origin}
 			<HandoffBack {origin} />
 		{/if}
@@ -422,7 +437,8 @@
 				<h2 class="halo-mode-title tm-display text-[28px] font-semibold leading-[1.15] text-gray-950 sm:text-[36px] dark:text-white">
 					让几个模型把问题讨论透
 				</h2>
-				<p class="max-w-xl text-sm leading-relaxed text-gray-500 dark:text-gray-400">
+				<ModeFlow label="讨论怎么进行" steps={['选 2–5 个席位', '同一轮各自发言', '互相补充、交锋', '主持人给结论']} />
+				<p class="hidden max-w-xl text-sm leading-relaxed text-gray-500 sm:block dark:text-gray-400">
 					选两到五个模型，按圆桌、各自回答、辩论、评审或头脑风暴的方式讨论：同一轮里大家同时发言，最后由主持人给出结论，并把共识和分歧分开列出来。在对话的模型菜单里勾选多个模型，也会来到这里。
 				</p>
 			</header>

@@ -52,6 +52,7 @@
 	import { isFramed, requestHubReauth } from '$lib/utils/hub-embed';
 	import StarField from '$lib/components/scifi/StarField.svelte';
 	import BootSequence from '$lib/components/scifi/BootSequence.svelte';
+	import RelayFlash from '$lib/components/scifi/RelayFlash.svelte';
 	import {
 		applyScifi,
 		isSectionJump,
@@ -500,6 +501,8 @@
 		{#if booting}
 			<BootSequence name={$user?.name ?? ''} on:done={() => (booting = false)} />
 		{/if}
+		<!-- work handed from one mode to another crosses the screen (handOff → RelayFlash) -->
+		<RelayFlash />
 
 		<div class="flex-1 min-w-0" data-halo-main>
 			{#if scifiOn}

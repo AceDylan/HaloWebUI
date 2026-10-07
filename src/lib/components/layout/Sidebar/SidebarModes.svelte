@@ -4,6 +4,7 @@
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import TeamsBadge from '$lib/components/teams/TeamsBadge.svelte';
 	import DiscussBadge from '$lib/components/discuss/DiscussBadge.svelte';
+	import AnswerBadge from '$lib/components/answer/AnswerBadge.svelte';
 	import SidebarModeIcon from './SidebarModeIcon.svelte';
 
 	/**
@@ -67,7 +68,7 @@
 				data-sidebar-mode={mode.key}
 			>
 				<SidebarModeIcon mode={mode.key} />
-				{#if mode.key === 'teams'}<TeamsBadge compact />{:else if mode.key === 'discuss'}<DiscussBadge compact />{/if}
+				{#if mode.key === 'teams'}<TeamsBadge compact />{:else if mode.key === 'discuss'}<DiscussBadge compact />{:else if mode.key === 'answer'}<AnswerBadge compact />{/if}
 			</a>
 		</Tooltip>
 	{/each}
@@ -94,7 +95,7 @@
 			>
 				<SidebarModeIcon mode={mode.key} className="size-[18px]" />
 				<span class="truncate">{mode.label}</span>
-				{#if mode.key === 'teams'}<TeamsBadge compact />{:else if mode.key === 'discuss'}<DiscussBadge compact />{/if}
+				{#if mode.key === 'teams'}<TeamsBadge compact />{:else if mode.key === 'discuss'}<DiscussBadge compact />{:else if mode.key === 'answer'}<AnswerBadge compact />{/if}
 			</a>
 		{/each}
 	</div>

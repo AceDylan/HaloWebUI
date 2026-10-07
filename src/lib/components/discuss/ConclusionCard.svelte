@@ -12,7 +12,13 @@
 	 *  disagreements, positions and next steps as separate panels. */
 	export let ask: DiscussAsk;
 	/** 「接下来」 under the latest conclusion: carry it into a chat, a team, or Hermes. */
-	export let next: { chat?: () => void; team?: (() => void) | null; hermes?: (() => void) | null } | null = null;
+	export let next: {
+		chat?: () => void;
+		answer?: (() => void) | null;
+		team?: (() => void) | null;
+		studio?: (() => void) | null;
+		hermes?: (() => void) | null;
+	} | null = null;
 	/** 「重写结论」 on a conclusion that failed (only once the question has settled). */
 	export let rewrite: (() => void) | null = null;
 	export let busy = false;
@@ -171,8 +177,14 @@
 					{#if next.chat}
 						<button type="button" class="dc-chip" on:click={next.chat} data-discuss-to-chat title="新对话里接着聊，结论放进输入框">继续对话</button>
 					{/if}
+					{#if next.answer}
+						<button type="button" class="dc-chip" on:click={next.answer} data-discuss-to-answer title="最合适的助手带着结论把这个问题答细">交给精答深挖</button>
+					{/if}
 					{#if next.team}
 						<button type="button" class="dc-chip" on:click={next.team} data-discuss-to-team title="一支 AI 团队按结论去做">交给协作台</button>
+					{/if}
+					{#if next.studio}
+						<button type="button" class="dc-chip" on:click={next.studio} data-discuss-to-studio title="生图工作台：把结论画成一张图">画成图</button>
 					{/if}
 					{#if next.hermes}
 						<button type="button" class="dc-chip" on:click={next.hermes} data-discuss-hermes title="Hermes 联网核查结论里的说法">交给 Hermes 核查</button>

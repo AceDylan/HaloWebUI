@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { get } from 'svelte/store';
 
 import {
 	chatHandoff,
@@ -8,6 +9,7 @@ import {
 	HANDOFF_KEY,
 	originHref,
 	originLabel,
+	relay,
 	replyHandoff,
 	takeHandoff
 } from './handoff';
@@ -149,5 +151,22 @@ describe('精答', () => {
 		const from = { kind: 'answer' as const, id: 'r-1', title: '押金' };
 		expect(originHref(from)).toBe('/answer/r-1');
 		expect(originLabel(from)).toBe('精答「押金」');
+	});
+});
+
+describe('relay', () => {
+	it('marks each handoff stored, with what it carries, for the flash of light', () => {
+		relay.set(null);
+		const store = memory();
+		handOff(store, { to: 'teams', text: '调研看板工具', context: '讨论结论：…', files: [{ id: 'f1', name: 'a.pdf', type: 'file' }] }, 5000);
+		expect(get(relay)).toEqual({ to: 'teams', chars: 6, files: 1, context: true, at: 5000 });
+	});
+
+	it('stays quiet when nothing was stored', () => {
+		relay.set(null);
+		expect(handOff(null, { to: 'answer', text: 'x' })).toBe(false);
+		const full = { getItem: () => null, setItem: () => { throw new Error('quota'); }, removeItem: () => {} };
+		expect(handOff(full, { to: 'answer', text: 'x' })).toBe(false);
+		expect(get(relay)).toBeNull();
 	});
 });

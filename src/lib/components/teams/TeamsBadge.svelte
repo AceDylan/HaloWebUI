@@ -14,6 +14,7 @@
 	import { APP_NAME, WEBUI_BASE_URL } from '$lib/constants';
 	import { isLastActiveTab, settings } from '$lib/stores';
 	import NotificationToast from '$lib/components/NotificationToast.svelte';
+	import { setModeLive } from '$lib/components/scifi/mode-relay';
 
 	/**
 	 * Sidebar hint for the 协作台 entry: how many of your teams are at work right now (a live
@@ -43,6 +44,9 @@
 		'running:completed': '全部任务完成，负责人在写结论',
 		'running:attention': '有任务需要你处理'
 	};
+
+	// the mode dock on the other pages shows the same count
+	$: setModeLive('teams', active);
 
 	const announce = (team: Team, state: string) => {
 		const text = NEWS[state];

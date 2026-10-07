@@ -7,7 +7,7 @@
 	import '$lib/components/teams/teams.css';
 	import '$lib/components/discuss/discuss.css';
 	import './answer.css';
-	import { chatId as currentChatId, config, mobile, models, showSidebar, socket, WEBUI_NAME } from '$lib/stores';
+	import { chatId as currentChatId, config, mobile, models, showSidebar, socket, user, WEBUI_NAME } from '$lib/stores';
 	import {
 		deleteAnswer,
 		getAnswer,
@@ -58,6 +58,9 @@
 	$: canRetry = !!run && !liveNow && run.status !== 'done';
 	$: canRevert = !!assistant && assistant.action === 'update' && !assistant.reverted && !liveNow;
 	$: teamsEnabled = !!$config?.features?.enable_agent_teams;
+	$: studioAllowed =
+		!!$config?.features?.enable_image_generation &&
+		($user?.role === 'admin' || !!($user as any)?.permissions?.features?.image_generation);
 	$: knownAssistant = assistant?.saved ? modelById($models as any[], assistant.id) : undefined;
 
 	// A new or upgraded assistant is not in the app's model list yet: fetch it once, so the chat
@@ -150,12 +153,18 @@
 	};
 
 	// 「接下来」: follow up in the chat (it is one), or hand the answer to the other modes
-	const toMode = (to: 'discuss' | 'teams') => {
+	const toMode = (to: 'discuss' | 'teams' | 'studio') => {
 		if (!run) return;
+		const gist = (run.answer.content ?? '').replace(/\s+/g, ' ').trim().slice(0, 600);
 		handOff(typeof sessionStorage === 'undefined' ? null : sessionStorage, {
 			to,
-			text: to === 'discuss' ? run.question : `按这个回答去做：${run.question}`,
-			context: answerContext(run),
+			text:
+				to === 'discuss'
+					? run.question
+					: to === 'teams'
+						? `按这个回答去做：${run.question}`
+						: `一张清晰的说明图，讲清「${title || run.question}」：${gist}`,
+			context: to === 'studio' ? '' : answerContext(run),
 			from: { kind: 'answer', id: chatId, title }
 		});
 		goto(HANDOFF_PATH[to]);
@@ -440,6 +449,9 @@
 					>
 					{#if teamsEnabled}
 						<button type="button" class="dc-chip" on:click={() => toMode('teams')} title="交给协作台按这个回答去做" data-answer-to-teams>交给协作台</button>
+					{/if}
+					{#if studioAllowed}
+						<button type="button" class="dc-chip" on:click={() => toMode('studio')} title="生图工作台：为这个回答画一张说明图" data-answer-to-studio>画一张图</button>
 					{/if}
 					<a class="dc-chip" href="/answer" data-answer-new>再问一个</a>
 				{/if}

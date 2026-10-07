@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onDestroy, onMount, tick } from 'svelte';
+	import { afterUpdate, onDestroy, onMount, tick } from 'svelte';
 	import { goto, replaceState } from '$app/navigation';
 	import { toast } from 'svelte-sonner';
 	import { v4 as uuidv4 } from 'uuid';
@@ -24,6 +24,9 @@
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import MenuLines from '$lib/components/icons/MenuLines.svelte';
 	import ModeEmblem from '$lib/components/scifi/ModeEmblem.svelte';
+	import ModeDock from '$lib/components/scifi/ModeDock.svelte';
+	import ModeFlow from '$lib/components/scifi/ModeFlow.svelte';
+	import { clearModeDraft, setModeDraft } from '$lib/components/scifi/mode-relay';
 	import { warp } from '$lib/components/scifi/scifi';
 	import { now, timeAgo } from '$lib/components/teams/clock';
 	import { modelById, modelRef } from '$lib/components/discuss/model';
@@ -68,6 +71,8 @@
 		(d) => !needle || `${d.title}\n${d.question}\n${d.preview}\n${d.assistant?.name ?? ''}`.toLowerCase().includes(needle)
 	);
 	$: liveCount = items.filter((d) => isLive(d.status) || d.running).length;
+	// the dock takes the question (and the conversation it came with) to another mode
+	afterUpdate(() => setModeDraft('answer', question, { context: background, from: origin }));
 
 	const pickDefaults = () => {
 		let saved: any = null;
@@ -233,11 +238,12 @@
 	});
 	onDestroy(() => {
 		if (timer) clearInterval(timer);
+		clearModeDraft('answer');
 	});
 </script>
 
 <div class="tm-ambient relative flex h-screen max-h-[100dvh] w-full flex-col" data-teams-ui data-discuss-ui data-answer-ui data-answer-home>
-	<nav class="flex items-center gap-2 px-3 pt-2 pb-1">
+	<nav class="flex flex-wrap items-center gap-2 px-3 pt-2 pb-1">
 		<div class="{$mobile ? '' : 'hidden'} flex flex-none items-center">
 			<button
 				class="rounded-xl p-1.5 hover:bg-gray-100 dark:hover:bg-gray-850"
@@ -245,7 +251,8 @@
 				aria-label="切换侧栏"><MenuLines /></button
 			>
 		</div>
-		<h1 class="halo-crumb px-1">精答</h1>
+		<h1 class="sr-only">精答</h1>
+		<ModeDock current="answer" />
 		{#if origin}
 			<HandoffBack {origin} />
 		{/if}
@@ -263,7 +270,8 @@
 				<h2 class="halo-mode-title tm-display text-[28px] font-semibold leading-[1.15] text-gray-950 sm:text-[36px] dark:text-white">
 					每个问题，交给最合适的助手
 				</h2>
-				<p class="max-w-xl text-sm leading-relaxed text-gray-500 dark:text-gray-400">
+				<ModeFlow label="精答怎么答" steps={['读你的助手库', '选用 · 升级 · 新建', '按需联网查资料', '作答，成为一个对话']} />
+				<p class="hidden max-w-xl text-sm leading-relaxed text-gray-500 sm:block dark:text-gray-400">
 					先读一遍你的助手库：有合适的就直接用；领域对但缺本事的，就把它升级一下；都不合适，就按这类问题新建一位专家。需要最新信息时先联网查资料，再由选中的助手作答。答完它就是一个普通对话，自动起标题、归进合适的分组，可以接着追问。
 				</p>
 			</header>

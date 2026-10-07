@@ -192,11 +192,13 @@
 		background-color: #f3f4f6;
 	}
 
+	/* The portrait's skin is the backdrop showing through, so inverting it yields a photo
+	   negative (dark face, white hair). Keep ink-on-paper in dark mode on a muted warm disc. */
 	:global(html.dark) .model-icon--portrait {
-		background-color: #27272a;
+		background-color: #d6d3d1;
 	}
 
 	:global(html.dark) .model-icon--portrait .model-icon__img {
-		filter: invert(0.84) sepia(0.16);
+		filter: invert(0.12);
 	}
 </style>

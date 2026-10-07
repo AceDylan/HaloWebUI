@@ -63,9 +63,7 @@
 		'TITLE_GENERATION_PROMPT_TEMPLATE',
 		'TAGS_GENERATION_PROMPT_TEMPLATE',
 		'QUERY_GENERATION_PROMPT_TEMPLATE',
-		'IMAGE_PROMPT_GENERATION_PROMPT_TEMPLATE',
-		'TOOLS_FUNCTION_CALLING_PROMPT_TEMPLATE',
-		'CODE_INTERPRETER_PROMPT_TEMPLATE'
+		'TOOLS_FUNCTION_CALLING_PROMPT_TEMPLATE'
 	] as const;
 
 	// Keep toggles owned by their dedicated settings page instead of resaving them here.
@@ -303,22 +301,6 @@
 							</div>
 						</div>
 
-						<!-- Image Prompt Generation -->
-						<div class="glass-item p-4">
-							<div class="text-sm font-medium mb-3">{$i18n.t('Image Prompt Generation')}</div>
-							<div>
-								<div class="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5">
-									{$i18n.t('Image Prompt Generation Prompt')}
-								</div>
-								<Textarea
-									bind:value={taskConfig.IMAGE_PROMPT_GENERATION_PROMPT_TEMPLATE}
-									placeholder={$i18n.t(
-										'Leave empty to use the default prompt, or enter a custom prompt'
-									)}
-								/>
-							</div>
-						</div>
-
 						<!-- Tools Function Calling -->
 						<div class="glass-item p-4">
 							<div class="text-sm font-medium mb-3">{$i18n.t('Tools Function Calling')}</div>
@@ -334,23 +316,6 @@
 								/>
 							</div>
 						</div>
-
-						<!-- Code Interpreter Prompt -->
-						<div class="glass-item p-4">
-							<div class="text-sm font-medium mb-3">{$i18n.t('Code Interpreter')}</div>
-							<div>
-								<div class="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5">
-									{$i18n.t('Code Interpreter Prompt')}
-								</div>
-								<Textarea
-									bind:value={taskConfig.CODE_INTERPRETER_PROMPT_TEMPLATE}
-									placeholder={$i18n.t(
-										'Leave empty to use the default prompt, or enter a custom prompt'
-									)}
-								/>
-							</div>
-						</div>
-
 					</div>
 				</div>
 				{/if}

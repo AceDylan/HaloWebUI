@@ -2128,19 +2128,20 @@ QUERY_GENERATION_PROMPT_TEMPLATE = PersistentConfig(
 )
 
 DEFAULT_QUERY_GENERATION_PROMPT_TEMPLATE = """### Task:
-Analyze the chat history to determine the necessity of generating search queries, in the given language. By default, **prioritize generating 1-3 broad and relevant search queries** unless it is absolutely certain that no additional information is required. The aim is to retrieve comprehensive, updated, and valuable information even with minimal uncertainty. If no search is unequivocally needed, return an empty list.
+Write search queries for the user's latest message, using the chat history only to understand what that message refers to. By default **generate 1-3 queries**; return an empty list only when it is certain that searching cannot help.
 
 ### Guidelines:
 - Respond **EXCLUSIVELY** with a JSON object. Any form of extra commentary, explanation, or additional text is strictly prohibited.
-- When generating search queries, respond in the format: { "queries": ["query1", "query2"] }, ensuring each query is distinct, concise, and relevant to the topic.
+- Search for what the latest user message asks. When it is a short follow-up (e.g. "国内呢", "what about the price?"), combine it with the earlier user messages into a complete, standalone query.
+- Do not turn names, numbers or claims from earlier assistant replies into queries unless the latest user message asks about them; those replies may be wrong, and chasing them drifts the search off topic.
+- Write queries as search-engine keywords (subject + key qualifiers), not as questions or chat phrasing such as "是什么意思" or "结束了吗".
+- Each query must cover a different angle; never repeat a query with the words reordered.
+- Write queries in the language of the user's message. Add an English query only when the subject is mainly documented in English (e.g. software projects, APIs).
+- For time-sensitive questions (today, latest, news, prices, schedules, results), anchor the queries to the actual date. Today's date is: {{CURRENT_DATE}}.
 - If and only if it is entirely certain that no useful results can be retrieved by a search, return: { "queries": [] }.
-- Err on the side of suggesting search queries if there is **any chance** they might provide useful or updated information.
-- Be concise and focused on composing high-quality search queries, avoiding unnecessary elaboration, commentary, or assumptions.
-- Today's date is: {{CURRENT_DATE}}.
-- Always prioritize providing actionable and broad queries that maximize informational coverage.
 
 ### Output:
-Strictly return in JSON format: 
+Strictly return in JSON format:
 {
   "queries": ["query1", "query2"]
 }
@@ -2149,6 +2150,9 @@ Strictly return in JSON format:
 <chat_history>
 {{MESSAGES:END:6}}
 </chat_history>
+
+### Latest User Message:
+{{prompt:middletruncate:2000}}
 """
 
 ENABLE_AUTOCOMPLETE_GENERATION = PersistentConfig(

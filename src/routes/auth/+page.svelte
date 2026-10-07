@@ -20,7 +20,7 @@
 	import HaloConstellation from '$lib/components/common/HaloConstellation.svelte';
 	import StarField from '$lib/components/scifi/StarField.svelte';
 	import { warp } from '$lib/components/scifi/scifi';
-	import { prefersReducedMotion } from '$lib/utils/transitions';
+	import { guardViewTransition, prefersReducedMotion } from '$lib/utils/transitions';
 
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import OnBoarding from '$lib/components/OnBoarding.svelte';
@@ -79,7 +79,9 @@
 			warp(1100);
 			if (typeof document.startViewTransition === 'function' && !prefersReducedMotion() && !document.hidden) {
 				document.documentElement.classList.add('halo-auth-vt');
-				const transition = document.startViewTransition(() => goto(redirectTarget(), { replaceState: true }));
+				const transition = guardViewTransition(
+					document.startViewTransition(() => goto(redirectTarget(), { replaceState: true }))
+				);
 				transition.finished.catch(() => {}).finally(() => document.documentElement.classList.remove('halo-auth-vt'));
 			} else goto(redirectTarget(), { replaceState: true });
 		}

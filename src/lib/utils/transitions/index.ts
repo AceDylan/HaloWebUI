@@ -2,6 +2,7 @@ import type { TransitionConfig } from 'svelte/transition';
 import { DUR, exitEase, prefersReducedMotion, springSmooth } from './spring';
 
 export * from './spring';
+export * from './view-transition';
 
 type FlyAndScaleParams = {
 	y?: number;

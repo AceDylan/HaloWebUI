@@ -60,6 +60,7 @@
 		trackSpotlight,
 		warp
 	} from '$lib/components/scifi/scifi';
+	import { guardViewTransition } from '$lib/utils/transitions';
 
 	const i18n = getContext('i18n');
 
@@ -76,10 +77,12 @@
 		if (navigation.from?.url.pathname === navigation.to?.url.pathname) return;
 		document.documentElement.style.setProperty('--nav-direction', navigation.type === 'popstate' && (navigation.delta ?? 0) < 0 ? '-1' : '1');
 		return new Promise<void>((resolve) => {
-			(document as any).startViewTransition(async () => {
+			const transition = (document as any).startViewTransition(async () => {
 				resolve();
 				await navigation.complete;
 			});
+			// never left showing the old page over the new one (see guardViewTransition)
+			guardViewTransition(transition, { onGiveUp: resolve });
 		});
 	});
 

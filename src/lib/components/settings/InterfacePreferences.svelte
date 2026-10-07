@@ -53,6 +53,7 @@
 	import ChatTransitionPreview from '$lib/components/settings/ChatTransitionPreview.svelte';
 	import { cloneSettingsSnapshot, isSettingsSnapshotEqual } from '$lib/utils/settings-dirty';
 	import { systemPrefersDark } from '$lib/utils/hub-embed';
+	import { guardViewTransition } from '$lib/utils/transitions';
 	import {
 		DEFAULT_CHAT_TRANSITION_MODE,
 		DEFAULT_HIGHLIGHTER_THEME,
@@ -484,8 +485,8 @@
 			root.style.setProperty('--halo-reveal-x', `${x}px`);
 			root.style.setProperty('--halo-reveal-y', `${y}px`);
 			root.classList.add('halo-theme-vt');
-			const transition = (document as any).startViewTransition(swapClasses);
-			transition.finished.finally(() => root.classList.remove('halo-theme-vt'));
+			const transition = guardViewTransition((document as any).startViewTransition(swapClasses));
+			transition.finished.catch(() => {}).finally(() => root.classList.remove('halo-theme-vt'));
 		} else {
 			swapClasses();
 		}

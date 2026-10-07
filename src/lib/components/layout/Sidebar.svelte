@@ -804,18 +804,18 @@
 	aria-label={$i18n.t('Chat sidebar')}
 	class="h-screen max-h-[100dvh] min-h-screen select-none
 		{$isApp ? `ml-[4.5rem] md:ml-0 ` : ''}
-		shrink-0 {$mobile ? 'bg-gray-50' : 'bg-gray-50/80'} backdrop-blur-xl border-r border-gray-200/50 dark:border-white/[0.08] text-gray-900 dark:text-gray-200
+		shrink-0 {$mobile ? 'bg-gray-50' : 'bg-gray-50/80 backdrop-blur-xl'} border-r border-gray-200/50 dark:border-white/[0.08] text-gray-900 dark:text-gray-200
 		text-sm fixed md:relative z-50 top-0 left-0 {peek
 		? 'overflow-visible'
-		: 'overflow-hidden'} transform-gpu transition-[width,max-width,transform] duration-300 ease-in-out
+		: 'overflow-hidden'} transform-gpu transition-[width,max-width,transform,visibility] duration-300 ease-in-out
 		will-change-transform {!$mobile
 		? $showSidebar
 			? 'w-[260px] max-w-[260px] translate-x-0'
 			: 'w-[60px] max-w-[60px] translate-x-0'
 		: $showSidebar
 			? 'w-[260px] max-w-[260px] translate-x-0'
-			: 'w-[0px] -translate-x-[260px]'}"
-	style="will-change: width, transform;"
+			: 'w-[260px] max-w-[260px] -translate-x-full invisible'}"
+	style="will-change: {$mobile ? 'transform' : 'width, transform'};"
 	data-state={$showSidebar ? 'expanded' : peek ? 'peek' : $mobile ? 'hidden' : 'collapsed'}
 	data-halo-drawer={$mobile ? 'true' : undefined}
 	data-style={sidebarStyle}

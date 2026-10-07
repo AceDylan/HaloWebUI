@@ -602,6 +602,42 @@ html.halo-scifi.dark :is([data-menu-content], [data-menu-sub-content]) {
 	html.halo-scifi.dark .halo-orb::before {
 		display: none;
 	}
+
+	/* Chrome on Android flickered under the effects that repaint a big or filtered layer every
+	   frame. On phones the stage keeps its look and its motion, but everything that moves
+	   either turns on the compositor (a transform) or holds still:
+	   - the floor holds still (a 3D-tilted, masked layer whose background was running);
+	   - the titles sweep in once and keep their colours, without the glow filter or the flow;
+	   - the conduit's light ring stands (it was a conic gradient re-drawn every frame);
+	   - the reactor turns without its glow filters;
+	   - the orb's arc turns as a whole (it is round: same picture, no repaint); the bloom
+	     and the ring had nothing to show for their animation anyway. */
+	.halo-scifi-floor {
+		animation: none;
+	}
+	html.halo-scifi
+		:is(.halo-greeting, .halo-mode-title, .halo-page-title, .halo-settings-title, .halo-subpage-title),
+	html.halo-scifi.dark
+		:is(.halo-greeting, .halo-mode-title, .halo-page-title, .halo-settings-title, .halo-subpage-title) {
+		filter: none;
+		animation: scifi-holo-in 900ms 120ms cubic-bezier(0.16, 1, 0.3, 1) backwards;
+	}
+	html.halo-scifi :is(.halo-composer, [data-scifi-conduit]):not([data-halo-live])::after,
+	html.halo-scifi :is(.halo-composer, [data-scifi-conduit]):focus-within::after {
+		animation: none;
+	}
+	html.halo-scifi :is(.halo-reactor__arcs, .halo-reactor__orbit, .halo-emblem__arcs, .halo-emblem__dot),
+	html.halo-scifi.dark :is(.halo-reactor__arcs, .halo-reactor__orbit) {
+		filter: none;
+	}
+	.halo-orb__bloom,
+	.halo-orb__ring {
+		animation: none;
+	}
+	.halo-orb__arc,
+	body:has(#chat-input:focus) .halo-orb__arc {
+		animation: scifi-rot 6s linear infinite;
+	}
 }
 
 /* ------------------------------------------------------------------ calm when asked */

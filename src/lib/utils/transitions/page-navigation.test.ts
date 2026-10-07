@@ -19,7 +19,8 @@ const navigate = (
 	from: string,
 	to: string,
 	type = 'link',
-	activeViewTransition?: { skipTransition: () => void }
+	activeViewTransition?: { skipTransition: () => void },
+	media: (query: string) => boolean = () => false
 ) => {
 	const transition = {
 		ready: Promise.resolve(),
@@ -37,7 +38,7 @@ const navigate = (
 			activeViewTransition,
 			documentElement: { style: { setProperty: vi.fn() } }
 		},
-		window: { matchMedia: () => ({ matches: false }) },
+		window: { matchMedia: (query: string) => ({ matches: media(query) }) },
 		scifiOn: false,
 		guardViewTransition
 	};
@@ -100,5 +101,14 @@ describe('chat page navigation', () => {
 		expect(guardViewTransition).toHaveBeenCalledWith(transition, {
 			onGiveUp: expect.any(Function)
 		});
+	});
+
+	it('takes no snapshot on a phone: the panel is the whole screen there', () => {
+		const active = { skipTransition: vi.fn() };
+		const phone = (query: string) => query.includes('max-width: 767px') && query.includes('pointer: coarse');
+		const { startViewTransition, result } = navigate('/teams', '/discuss', 'link', active, phone);
+		expect(startViewTransition).not.toHaveBeenCalled();
+		expect(active.skipTransition).toHaveBeenCalledTimes(1);
+		expect(result).toBeUndefined();
 	});
 });

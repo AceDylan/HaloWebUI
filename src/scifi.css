@@ -740,6 +740,8 @@ html.halo-scifi .halo-modal {
 	inset: 0;
 	z-index: -1;
 	pointer-events: none;
+	/* on a phone the starfield keeps its tallest size (StarField.svelte): clip what is below */
+	overflow: hidden;
 }
 .halo-auth__stars::after {
 	content: '';

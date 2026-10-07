@@ -60,7 +60,7 @@
 
 {#if loaded}
 	<div class="relative flex flex-col w-full h-screen max-h-[100dvh] max-w-full">
-		<nav data-halo-layer="0" class="px-2.5 pt-1 backdrop-blur-xl drag-region">
+		<nav data-halo-layer="0" class="px-2.5 pt-1 md:backdrop-blur-xl drag-region">
 			<div class="flex items-center gap-1">
 				<div class="{$mobile ? '' : 'hidden'} self-center flex flex-none items-center">
 					<button

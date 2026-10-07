@@ -83,6 +83,15 @@
 		}
 		if (!('startViewTransition' in document)) return;
 		if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+		// Phones and tablets: no snapshot. There the panel is the whole screen, so the
+		// cross-fade dipped the entire page, and the sidebar drawer closing on the same tap was
+		// frozen mid-slide in the snapshot and then jumped away: Chrome on Android showed it
+		// as the page flickering. The pages bring their own entrance (tm-rise, halo-rise).
+		// (The same "phones" as the CSS: scifi.css, scifi-cinema.css.)
+		if (window.matchMedia('(max-width: 767px), (pointer: coarse)').matches) {
+			(document as any).activeViewTransition?.skipTransition();
+			return;
+		}
 		if (navigation.from?.url.pathname === navigation.to?.url.pathname) return;
 		document.documentElement.style.setProperty('--nav-direction', navigation.type === 'popstate' && (navigation.delta ?? 0) < 0 ? '-1' : '1');
 		return new Promise<void>((resolve) => {

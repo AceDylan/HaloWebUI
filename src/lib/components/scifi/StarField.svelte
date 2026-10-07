@@ -68,17 +68,35 @@
 			};
 		};
 
+		// Giving a canvas a new size wipes it. On a phone the address bar sliding in and out
+		// changes the height all the time, and every wipe showed as the stars blinking off for a
+		// frame or two (the loop only draws every other frame there). So on a phone the canvas
+		// only grows — a shorter view leaves its bottom rows under the clip of the layer it sits
+		// in — and whenever it is resized it is drawn again at once.
+		const host = (canvas.parentElement ?? canvas) as HTMLElement;
+		let bw = 0,
+			bh = 0;
 		const resize = () => {
-			w = canvas.clientWidth;
-			h = canvas.clientHeight;
-			ratio = Math.min(window.devicePixelRatio || 1, phone ? 1.5 : 2);
-			canvas.width = Math.max(1, w * ratio);
-			canvas.height = Math.max(1, h * ratio);
-			ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+			w = host.clientWidth;
+			h = host.clientHeight;
+			const nextW = phone ? Math.max(bw, w) : w;
+			const nextH = phone ? Math.max(bh, h) : h;
+			const changed = nextW !== bw || nextH !== bh;
+			if (changed) {
+				bw = nextW;
+				bh = nextH;
+				ratio = Math.min(window.devicePixelRatio || 1, phone ? 1.5 : 2);
+				canvas.style.width = `${bw}px`;
+				canvas.style.height = `${bh}px`;
+				canvas.width = Math.max(1, Math.round(bw * ratio));
+				canvas.height = Math.max(1, Math.round(bh * ratio));
+				ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+			}
 			const n = Math.round(Math.min(phone ? 130 : 320, Math.max(70, (w * h) / 4300)));
 			while (stars.length < n) stars.push(spawn());
 			stars.length = n;
-			if (!frame) draw(performance.now(), 0);
+			// draw now: the loop's next frame may be one it skips
+			if (changed || !frame) draw(performance.now(), 0);
 		};
 
 		const dark = () => tone === 'dark' || document.documentElement.classList.contains('dark');
@@ -92,7 +110,7 @@
 				cy = h / 2 + py;
 			const scale = Math.max(w, h) * 0.55;
 			const isDark = dark();
-			ctx.clearRect(0, 0, w, h);
+			ctx.clearRect(0, 0, bw, bh);
 			ctx.lineCap = 'round';
 			for (const s of stars) {
 				s.pz = s.z;
@@ -230,7 +248,7 @@
 		const onVisibility = () => (document.hidden ? stop() : start());
 
 		const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(resize) : null;
-		ro?.observe(canvas);
+		ro?.observe(host);
 		resize();
 		start();
 		window.addEventListener('pointermove', onPointer, { passive: true });

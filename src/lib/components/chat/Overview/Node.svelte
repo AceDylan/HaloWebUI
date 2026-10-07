@@ -94,15 +94,7 @@
 						<div class="min-w-0 shrink text-xs text-black dark:text-white font-medium line-clamp-1">
 							{getModelChatDisplayName(data?.model) || data?.message?.model || 'Assistant'}
 						</div>
-						{#if preview.status}
-							<div
-								class="min-w-0 flex-1 truncate text-[10px] leading-4 text-gray-500 dark:text-gray-400"
-							>
-								{preview.status}
-							</div>
-						{:else}
-							<div class="flex-1"></div>
-						{/if}
+						<div class="flex-1"></div>
 
 						<button
 							class={data?.message?.favorite ? '' : 'invisible group-hover:visible'}
@@ -132,8 +124,13 @@
 			</div>
 		{/if}
 	</Tooltip>
-	{#if preview.tags.length > 0}
+	{#if preview.status || preview.tags.length > 0}
 		<div class="pointer-events-none absolute bottom-2.5 left-11 right-4 flex gap-1 overflow-hidden">
+			{#if preview.status}
+				<span class="min-w-0 truncate text-[10px] leading-4 text-gray-500 dark:text-gray-400">
+					{preview.status}
+				</span>
+			{/if}
 			{#each preview.tags as tag}
 				<span
 					class="shrink-0 rounded-full bg-gray-100 px-1.5 text-[10px] leading-4 text-gray-500 dark:bg-gray-800/80 dark:text-gray-400"

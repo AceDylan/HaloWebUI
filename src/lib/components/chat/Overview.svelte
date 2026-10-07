@@ -194,7 +194,8 @@
 				await tick();
 				const focusId = highlightedMessageId ?? history?.currentId ?? null;
 				if (focusId) {
-					await fitView({ nodes: [{ id: focusId }] });
+					// Centre the focused message at reading size; fitting one node alone zooms far in.
+					await fitView({ nodes: [{ id: focusId }], maxZoom: 1 });
 				}
 			}
 		});

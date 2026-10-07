@@ -123,6 +123,7 @@
 		resolveModelBuiltinWebSearchState
 	} from '$lib/utils/model-web-search-preference';
 	import { applyUserSettingsSnapshot } from '$lib/utils/user-settings';
+	import { hasRenderableChatHistory } from '$lib/utils/chat-history-state';
 	import {
 		buildWebSearchModeOptions,
 		resolveConfiguredDefaultWebSearchMode
@@ -1091,7 +1092,7 @@
 
 	// J-3-01: Reactive flag to avoid calling createMessagesList just for emptiness check in template
 	let hasMessages = false;
-	$: hasMessages = history.currentId !== null;
+	$: hasMessages = hasRenderableChatHistory(history);
 	$: {
 		const messageIds = new Set(Object.keys(history?.messages ?? {}));
 		const nextItems = selectionThreads.items.filter((thread) =>

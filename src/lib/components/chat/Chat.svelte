@@ -2208,7 +2208,7 @@
 			return;
 		}
 		persistChatSessionState(id);
-		if (!id || $temporaryChatEnabled) {
+		if (!id || $temporaryChatEnabled || chat?.id !== id) {
 			return;
 		}
 
@@ -2624,6 +2624,23 @@
 	const requestChatLoad = (targetChatId: string) => {
 		lastRequestedChatIdProp = targetChatId;
 		const loadToken = ++activeChatLoadToken;
+		const failed = async () => {
+			if (loadToken !== activeChatLoadToken || targetChatId !== chatIdProp) return;
+			// The home page initializes only when the shared ID is empty. Keeping a
+			// failed ID here leaves an empty composer saving to a missing chat (401).
+			composerStateSyncReady = false;
+			webSearchSelectionSyncReady = false;
+			composerStatePersister.cancel(targetChatId);
+			chat = null;
+			persistedChatSnapshot = null;
+			if ($chatId === targetChatId) chatId.set('');
+			toast.error(
+				$i18n.t(
+					'This chat could not be opened. It may have been deleted, or the server could not be reached.'
+				)
+			);
+			await goto('/');
+		};
 
 		(async () => {
 			loading = true;
@@ -2661,14 +2678,7 @@
 				// 立即用同一 id 重跑，接口快速失败时陷入重复请求与重复提示；到首页后 chatIdProp 为空，
 				// 守卫自然复位，再点该对话即可重试。
 				if (!loaded) {
-					if (targetChatId === chatIdProp) {
-						toast.error(
-							$i18n.t(
-								'This chat could not be opened. It may have been deleted, or the server could not be reached.'
-							)
-						);
-					}
-					await goto('/');
+					await failed();
 					return;
 				}
 
@@ -2691,6 +2701,7 @@
 				loading = false;
 				liveChatSync.requestMissed();
 				await tick();
+				if (loadToken !== activeChatLoadToken || targetChatId !== chatIdProp) return;
 				scrollToBottomImmediately();
 				const chatInput = document.getElementById('chat-input');
 				chatInput?.focus();
@@ -2698,15 +2709,8 @@
 				webSearchSelectionSyncReady = true;
 				initializeReasoningSelectionTracking();
 			} catch (error) {
-				// 加载过程抛异常：若本次仍是最新请求，复位 loading，避免视图永久卡在 loading。
-				// 此处不回滚 lastRequestedChatIdProp —— 否则响应式块会立即用相同 id 重跑，
-				// 持续异常时会陷入无限重载循环；需切换到其它对话方可重新尝试。
-				if (loadToken === activeChatLoadToken) {
-					loading = false;
-					composerStateSyncReady = true;
-					webSearchSelectionSyncReady = true;
-				}
 				console.error('[Chat] Failed to load chat', targetChatId, error);
+				await failed();
 			}
 		})();
 	};
@@ -3304,10 +3308,15 @@
 	// $chatId 被清空(侧栏删掉/归档当前对话、进入助手场景、Channel 页……)时开一个新对话。
 	// 订阅时会立刻拿到当前值,所以首次挂载在 / 上也是从这里进入 initNewChat。
 	const onChatIdCleared = async (value: string) => {
-		if (value || clearingChatIdForNewChat) {
+		if (chatIdProp || value || clearingChatIdForNewChat) {
 			return;
 		}
+		const loadToken = activeChatLoadToken;
 		await tick(); // Wait for DOM updates
+		// A previous page's queued reset must not erase the chat being opened.
+		if (
+			chatIdProp || $chatId || clearingChatIdForNewChat || loadToken !== activeChatLoadToken
+		) return;
 		await initNewChat();
 	};
 
@@ -3423,6 +3432,7 @@
 
 	onDestroy(() => {
 		activeChatLoadToken++;
+		composerStateSyncReady = false;
 		liveChatSync.dispose();
 		cleanupLiveChatSync?.();
 		chatIdUnsubscriber?.();

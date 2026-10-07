@@ -119,6 +119,7 @@ const page = (href: string, overrides: Record<string, any> = {}) => {
 		submitPrompt: vi.fn(),
 		tick: vi.fn(async () => undefined),
 		clearingChatIdForNewChat: false,
+		chatIdProp: '',
 		activeChatLoadToken: 0,
 		loading: false,
 		freshChatActive: false,
@@ -133,6 +134,7 @@ const page = (href: string, overrides: Record<string, any> = {}) => {
 		selectedSkillIds: [],
 		...overrides
 	};
+	Object.defineProperty(store, '$chatId', { get: () => chatId.value });
 	const stubs: Record<string, any> = {};
 	const context = new Proxy(store, {
 		has: (target, key) => typeof key === 'string' && (key in target || !(key in globalThis)),

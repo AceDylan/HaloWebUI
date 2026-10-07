@@ -28,8 +28,8 @@ export type ComposerStatePersister = {
 	schedule: (chatId: string | null | undefined, payload: unknown) => void;
 	/** Send a scheduled save now (e.g. before the component goes away). */
 	flush: () => Promise<void>;
-	/** Drop a scheduled save without sending it. */
-	cancel: () => void;
+	/** Drop a scheduled save, optionally only when it belongs to this chat. */
+	cancel: (chatId?: string) => void;
 	/** Settles once every save sent so far has finished. */
 	idle: () => Promise<void>;
 };
@@ -86,8 +86,8 @@ export const createComposerStatePersister = ({
 		return send(chatId, payload, signature);
 	};
 
-	const cancel = () => {
-		if (pending) {
+	const cancel = (chatId?: string) => {
+		if (pending && (chatId === undefined || pending.chatId === chatId)) {
 			clearTimeout(pending.timer);
 			pending = null;
 		}

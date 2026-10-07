@@ -111,4 +111,17 @@ describe('composer state persister', () => {
 		await vi.advanceTimersByTimeAsync(1000);
 		expect(save).not.toHaveBeenCalled();
 	});
+
+	it('cancels a failed chat without dropping a change in the chat being left', async () => {
+		const { save, persister } = setup();
+		persister.schedule('previous-chat', state('halo', 'user'));
+		persister.cancel('missing-chat');
+		await persister.flush();
+		expect(save).toHaveBeenCalledWith('previous-chat', state('halo', 'user'));
+
+		persister.schedule('missing-chat', state('off'));
+		persister.cancel('missing-chat');
+		await persister.flush();
+		expect(save).toHaveBeenCalledTimes(1);
+	});
 });

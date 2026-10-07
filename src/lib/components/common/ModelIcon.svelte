@@ -51,6 +51,7 @@
 	$: filename = src ? getModelIconFilename(src) : null;
 	$: connFilename = src ? getConnAvatarFilename(src) : null;
 	$: isMonochromeModelIcon = !!filename && DARK_MODE_INVERT_ICONS.has(filename);
+	$: isPortraitModelIcon = filename === 'noushermes.svg';
 	$: isMonochromeConnAvatar = !!connFilename && DARK_MODE_INVERT_CONN_AVATARS.has(connFilename);
 	$: isDefaultFavicon = !!src && src.split('#')[0].split('?')[0].endsWith('/static/favicon.png');
 	$: shouldInvertInDark = isMonochromeModelIcon || isMonochromeConnAvatar || isDefaultFavicon;
@@ -63,7 +64,8 @@
 		'ai21.svg': 1.0,
 		'ibm.svg': 1.0,
 		'inception.svg': 1.0,
-		'noushermes.svg': 1.0,
+		// Leave room for the portrait's hair and shoulders inside circular avatars.
+		'noushermes.svg': 0.82,
 		'grok.svg': 1.0,
 		'flux.svg': 1.0,
 		'xiaomimimo.svg': 1.0,
@@ -93,7 +95,9 @@
 		class="model-icon {shouldInvertInDark ? 'model-icon--invert' : ''} {isMonochromeModelIcon ||
 		isMonochromeConnAvatar
 			? 'model-icon--mono'
-			: ''} {bare ? 'model-icon--bare' : ''} {className}"
+			: ''} {isPortraitModelIcon ? 'model-icon--portrait' : ''} {bare
+			? 'model-icon--bare'
+			: ''} {className}"
 	>
 		<img
 			class="model-icon__img model-icon__img--{loaded ? 'loaded' : 'loading'} {fitClass}"
@@ -145,9 +149,7 @@
 
 	.model-icon--bare {
 		background-color: transparent;
-		box-shadow:
-			var(--tw-ring-offset-shadow, 0 0 #0000),
-			var(--tw-ring-shadow, 0 0 #0000),
+		box-shadow: var(--tw-ring-offset-shadow, 0 0 #0000), var(--tw-ring-shadow, 0 0 #0000),
 			var(--tw-shadow, 0 0 #0000);
 	}
 
@@ -177,13 +179,24 @@
 
 	:global(html.dark) .model-icon--bare {
 		background-color: transparent;
-		box-shadow:
-			var(--tw-ring-offset-shadow, 0 0 #0000),
-			var(--tw-ring-shadow, 0 0 #0000),
+		box-shadow: var(--tw-ring-offset-shadow, 0 0 #0000), var(--tw-ring-shadow, 0 0 #0000),
 			var(--tw-shadow, 0 0 #0000);
 	}
 
 	:global(html.dark) .model-icon::after {
 		box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12);
+	}
+
+	/* A detailed portrait needs a quiet backdrop even in otherwise bare chat avatars. */
+	.model-icon--portrait {
+		background-color: #f3f4f6;
+	}
+
+	:global(html.dark) .model-icon--portrait {
+		background-color: #27272a;
+	}
+
+	:global(html.dark) .model-icon--portrait .model-icon__img {
+		filter: invert(0.84) sepia(0.16);
 	}
 </style>

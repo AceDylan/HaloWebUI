@@ -7,6 +7,7 @@
 	import Heart from '$lib/components/icons/Heart.svelte';
 	import { getModelChatDisplayName } from '$lib/utils/model-display';
 	import { getRenderableMessageError } from '$lib/utils/chat-message-errors';
+	import { getOverviewPreview } from '$lib/utils/overview-preview';
 
 	type $$Props = NodeProps;
 	export let data: $$Props['data'];
@@ -25,10 +26,11 @@
 		renderableMessageErrorRecord
 			? `${renderableMessageErrorRecord.content ?? ''}`
 			: '';
+	$: preview = getOverviewPreview(data?.message?.content, data?.message?.files);
 </script>
 
 <div
-	class={`group relative w-60 h-20 overflow-hidden rounded-2xl border px-4 py-3 transition-all duration-200 ${
+	class={`group relative w-72 h-[6.5rem] overflow-hidden rounded-2xl border px-4 py-3 transition-all duration-200 ${
 		selected
 			? 'border-sky-300 bg-sky-50/95 ring-2 ring-sky-200/80 shadow-[0_14px_30px_-18px_rgba(14,165,233,0.75)] dark:border-sky-400/80 dark:bg-sky-950/45 dark:ring-sky-400/30'
 			: isOnCurrentPath
@@ -46,9 +48,10 @@
 		}`}
 	></div>
 	<Tooltip
-		content={renderableMessageErrorContent || data?.message?.content}
-		class="w-full"
+		content={renderableMessageErrorContent || preview.detail}
+		className="flex w-full"
 		allowHTML={false}
+		tippyOptions={{ maxWidth: 360 }}
 	>
 		{#if data.message.role === 'user'}
 			<div class="flex w-full">
@@ -58,7 +61,7 @@
 						className={'size-5 -translate-y-[1px]'}
 					/>
 				</div>
-				<div class="ml-2">
+				<div class="ml-2 min-w-0 flex-1">
 					<div class=" flex justify-between items-center">
 						<div class="text-xs text-black dark:text-white font-medium line-clamp-1">
 							{data?.user?.name ?? 'User'}
@@ -68,7 +71,9 @@
 					{#if renderableMessageErrorContent}
 						<div class="text-red-500 line-clamp-2 text-xs mt-0.5">{renderableMessageErrorContent}</div>
 					{:else}
-						<div class="text-gray-500 line-clamp-2 text-xs mt-0.5">{data.message.content}</div>
+						<div class="text-gray-500 dark:text-gray-400 line-clamp-2 text-xs leading-4 mt-0.5 break-words">
+							{preview.text}
+						</div>
 					{/if}
 				</div>
 			</div>
@@ -84,11 +89,20 @@
 					/>
 				</div>
 
-				<div class="ml-2">
-					<div class=" flex justify-between items-center">
-						<div class="text-xs text-black dark:text-white font-medium line-clamp-1">
+				<div class="ml-2 min-w-0 flex-1">
+					<div class="flex items-center gap-1.5">
+						<div class="min-w-0 shrink text-xs text-black dark:text-white font-medium line-clamp-1">
 							{getModelChatDisplayName(data?.model) || data?.message?.model || 'Assistant'}
 						</div>
+						{#if preview.status}
+							<div
+								class="min-w-0 flex-1 truncate text-[10px] leading-4 text-gray-500 dark:text-gray-400"
+							>
+								{preview.status}
+							</div>
+						{:else}
+							<div class="flex-1"></div>
+						{/if}
 
 						<button
 							class={data?.message?.favorite ? '' : 'invisible group-hover:visible'}
@@ -110,12 +124,25 @@
 							{renderableMessageErrorContent}
 						</div>
 					{:else}
-						<div class="text-gray-500 line-clamp-2 text-xs mt-0.5">{data.message.content}</div>
+						<div class="text-gray-500 dark:text-gray-400 line-clamp-2 text-xs leading-4 mt-0.5 break-words">
+							{preview.text}
+						</div>
 					{/if}
 				</div>
 			</div>
 		{/if}
 	</Tooltip>
+	{#if preview.tags.length > 0}
+		<div class="pointer-events-none absolute bottom-2.5 left-11 right-4 flex gap-1 overflow-hidden">
+			{#each preview.tags as tag}
+				<span
+					class="shrink-0 rounded-full bg-gray-100 px-1.5 text-[10px] leading-4 text-gray-500 dark:bg-gray-800/80 dark:text-gray-400"
+				>
+					{tag}
+				</span>
+			{/each}
+		</div>
+	{/if}
 	<Handle
 		type="target"
 		position={Position.Top}

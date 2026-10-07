@@ -48,16 +48,10 @@
 		const nodeList = [];
 		const edgeList = [];
 		const levelOffset = 150; // Vertical spacing between layers
-		const siblingOffset = 250; // Horizontal spacing between nodes at the same layer
+		const siblingOffset = 320; // Horizontal spacing between nodes at the same layer (nodes are 288px wide)
 
 		// Map to keep track of node positions at each level
 		let positionMap = new Map();
-
-		// Helper function to truncate labels
-		function createLabel(content) {
-			const maxLength = 100;
-			return content.length > maxLength ? content.substr(0, maxLength) + '...' : content;
-		}
 
 		// Create nodes and map children to ensure alignment in width
 		let layerWidths = {}; // Track widths of each layer

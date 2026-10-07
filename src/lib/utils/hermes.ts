@@ -447,6 +447,11 @@ const NOTICE_STATUS: Record<string, { icon: string; label: string }> = {
 // The runner's own first report line: "⏳ reclaude 运行 <id> · 额度用完，暂停中，约 04:31 自动接着跑（不用管）".
 const REPORT_HEADLINE_RE = /^\s*(\S+)\s+(\S+)\s+运行\s+(\S+)\s+·\s+(.+?)\s*$/;
 
+/** The run id in a runner report's first line ("✅ reclaude 运行 <id> · 已完成"), or null. */
+export const getRunReportRunId = (content: unknown): string | null =>
+	(typeof content === 'string' ? content : '').split('\n', 1)[0].match(REPORT_HEADLINE_RE)?.[3] ??
+	null;
+
 /**
  * "✅ reclaude 已完成" for the notice line. With the report under it, the
  * runner's own headline wins: it knows more than the status word (a run parked

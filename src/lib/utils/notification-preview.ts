@@ -6,12 +6,13 @@
  * glancing at a toast wants the answer, so: drop all of that and show the
  * start of the last paragraph that has words in it.
  */
-const DETAILS_RE = /<details\b[^>]*>[\s\S]*?<\/details\s*>/gi;
-const SELF_CLOSING_TOOL_RE = /<tool_calls\b[^>]*\/?>/gi;
-const FENCE_RE = /(^|\n)(`{3,}|~{3,})[^\n]*\n[\s\S]*?\n\2[ \t]*(?=\n|$)/g;
-const TAG_RE = /<[^>]+>/g;
+export const DETAILS_RE = /<details\b[^>]*>[\s\S]*?<\/details\s*>/gi;
+export const SELF_CLOSING_TOOL_RE = /<tool_calls\b[^>]*\/?>/gi;
+/** A fenced code block; group 3 is its info string, group 4 its body. */
+export const FENCE_RE = /(^|\n)(`{3,}|~{3,})([^\n]*)\n([\s\S]*?)\n\2[ \t]*(?=\n|$)/g;
+export const TAG_RE = /<[^>]+>/g;
 
-const toPlainLine = (paragraph: string) =>
+export const toPlainLine = (paragraph: string) =>
 	paragraph
 		.split('\n')
 		.map((line) =>
@@ -25,6 +26,10 @@ const toPlainLine = (paragraph: string) =>
 		.filter(Boolean)
 		.join(' ');
 
+// Guidance quotes ("🧭 …") and the undelivered marker are not the answer.
+export const isAnswerLine = (line: string) =>
+	Boolean(line) && !line.startsWith('🧭') && !line.startsWith('⚠️ 未送达');
+
 export const getNotificationPreview = (content: unknown, maxChars = 200): string => {
 	let text = String(content ?? '');
 	text = text.replace(DETAILS_RE, '\n').replace(SELF_CLOSING_TOOL_RE, '\n');
@@ -33,8 +38,7 @@ export const getNotificationPreview = (content: unknown, maxChars = 200): string
 	const paragraphs = text
 		.split(/\n\s*\n/)
 		.map(toPlainLine)
-		// Guidance quotes ("🧭 …") and the undelivered marker are not the answer.
-		.filter((line) => line && !line.startsWith('🧭') && !line.startsWith('⚠️ 未送达'));
+		.filter(isAnswerLine);
 	const last = paragraphs[paragraphs.length - 1] ?? '';
 	return last.length > maxChars ? `${last.slice(0, maxChars - 1).trimEnd()}…` : last;
 };

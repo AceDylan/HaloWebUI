@@ -1,6 +1,7 @@
 // 精答 home: the dispatcher picks among text models (not Hermes, not image models, not the
 // assistants themselves), the library strip, starting a run (once per question), the list.
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { tick } from 'svelte';
 import { installDominoDom } from '$lib/test-support/domino-dom';
 
 installDominoDom('http://localhost/answer');
@@ -143,6 +144,7 @@ describe('AnswerHome', () => {
 		await until(() => !!target.querySelector('[data-answer-row="r1"]'));
 		const options = [...target.querySelectorAll('[data-answer-planner] option')].map((o: any) => o.textContent.trim());
 		expect(options).toEqual(['deepseek-chat', 'claude-chat']);
+		expect((target.querySelector('[data-answer-start]') as HTMLButtonElement).disabled).toBe(true);
 		await until(() => !!target.querySelector('[data-answer-library-item="answer-1"]'));
 		expect(target.querySelector('[data-answer-library-item="answer-1"]')!.textContent).toContain('合同审查');
 		const row = target.querySelector('[data-answer-row="r1"]')!.textContent!.replace(/\s+/g, ' ');
@@ -159,6 +161,8 @@ describe('AnswerHome', () => {
 		const input = target.querySelector('[data-answer-input]') as any;
 		input.value = '劳动合同的竞业限制合理吗？';
 		input.dispatchEvent(new (globalThis as any).Event('input'));
+		await tick();
+		expect((target.querySelector('[data-answer-start]') as HTMLButtonElement).disabled).toBe(false);
 		submit(target);
 		await until(() => nav.goto.mock.calls.length === 1);
 		expect(nav.goto.mock.calls[0][0]).toBe('/answer/new1');
@@ -177,11 +181,35 @@ describe('AnswerHome', () => {
 		const target = await mount();
 		await until(() => !!target.querySelector('[data-answer-context]'));
 		expect((target.querySelector('[data-answer-input]') as any).value).toBe('押金多久退？');
+		expect((target.querySelector('[data-answer-start]') as HTMLButtonElement).disabled).toBe(false);
 		expect(target.querySelector('[data-answer-context]')!.textContent).toContain('对话「租房」');
 		submit(target);
 		await until(() => api.createAnswer.mock.calls.length === 1);
 		expect(api.createAnswer.mock.calls[0][1].context).toEqual({ text: '用户：我在北京租房', title: '租房', chat_id: 'c-1' });
 	});
+
+	it('enables a handed-over draft when text models arrive after mounting', async () => {
+		stores.models.set([]);
+		sessionStorage.setItem(
+			'halo.handoff',
+			JSON.stringify({ to: 'answer', text: '押金多久退？', models: [], files: [], context: '', from: null, at: Date.now() })
+		);
+		api.createAnswer.mockResolvedValue({ id: 'new-delayed', run: null });
+		const target = await mount();
+		await tick();
+		const button = target.querySelector('[data-answer-start]') as HTMLButtonElement;
+		expect(button.disabled).toBe(true);
+		expect((target.querySelector('[data-answer-input]') as HTMLTextAreaElement).value).toBe('');
+
+		stores.models.set([{ id: 'f.claude-chat', name: 'claude-chat', selection_id: 'm-claude' }]);
+		await tick();
+		expect((target.querySelector('[data-answer-input]') as HTMLTextAreaElement).value).toBe('押金多久退？');
+		expect(button.disabled).toBe(false);
+		submit(target);
+		await until(() => api.createAnswer.mock.calls.length === 1);
+		expect(api.createAnswer.mock.calls[0][1]).toMatchObject({ question: '押金多久退？', planner: 'm-claude' });
+	});
+
 	it('a tap on a library assistant makes it the one that answers', async () => {
 		api.createAnswer.mockResolvedValueOnce({ id: 'new3', run: null });
 		const target = await mount();

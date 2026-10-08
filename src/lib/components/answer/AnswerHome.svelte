@@ -73,7 +73,6 @@
 	$: choices = discussionSeatModels(($models ?? []) as any[], $config?.hermes_agent_model_ids).filter(
 		(m: any) => !m?.info?.base_model_id
 	);
-	$: canStart = !creating && !!question.trim() && !!planner;
 	$: webSearchEnabled = $config?.features?.enable_web_search !== false;
 	$: shownAssistants = showAllAssistants ? library : library.slice(0, 10);
 	$: shown = items;
@@ -410,7 +409,7 @@
 					{/if}
 					<div class="ml-auto flex items-center gap-2">
 						<kbd class="hidden rounded-md px-1.5 py-0.5 font-mono text-[11px] text-gray-400 sm:inline-block">{isMac ? '⌘' : 'Ctrl'} ↵</kbd>
-						<button type="submit" class="tm-btn-primary" disabled={!canStart} data-answer-start>
+						<button type="submit" class="tm-btn-primary" disabled={creating || !question.trim() || !planner} data-answer-start>
 							{#if creating}
 								<span class="size-3.5 animate-spin rounded-full border-2 border-current border-r-transparent" aria-hidden="true" />开始中…
 							{:else}

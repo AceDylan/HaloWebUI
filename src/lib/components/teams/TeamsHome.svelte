@@ -13,6 +13,7 @@
 		getTeamsMeta,
 		listTeams,
 		type Team,
+		type TeamPage,
 		type TeamsMeta
 	} from '$lib/apis/teams';
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
@@ -29,6 +30,8 @@
 	import { listLibrary } from '$lib/apis/assistant-library';
 	import { goalWithBackground, originLabel, takeHandoff, type HandoffOrigin } from '$lib/utils/handoff';
 	import HandoffBack from '$lib/components/common/HandoffBack.svelte';
+	import LoadMore from '$lib/components/common/LoadMore.svelte';
+	import { appendPage, cursorAfter, mergeHead } from '$lib/utils/paged';
 	import { now, timeAgo } from './clock';
 	import { avatarKind, etaSentence, formatEta, PHASE_LABEL, runnerLabel } from './model';
 
@@ -46,7 +49,17 @@
 	]);
 
 	/** Your collaboration tasks (only yours) and a box to start a new one. */
+	// the history a page at a time (newest first); filters, their counts and the search on the server
+	const PAGE = 30;
 	let teams: Team[] = [];
+	let more = false;
+	let loadingMore = false;
+	let serverCounts: TeamPage['counts'] = null;
+	let searched = '';
+	let filtered: typeof filter = 'all';
+	let searchTimer: ReturnType<typeof setTimeout> | null = null;
+	// the teams of the chat this page was opened from (a handful, read on their own)
+	let chatTeams: Team[] = [];
 	let loaded = false;
 	let error = '';
 	let goal = '';
@@ -85,7 +98,6 @@
 	$: runners = meta?.registry?.runners ?? [];
 	$: runnersUp = runners.filter((r) => r.available).length;
 
-	$: chatTeams = chatId ? teams.filter((t) => t.chat_id === chatId) : [];
 
 	const statusOf = (t: Team) => (t.status === 'running' ? (t.phase ?? 'running') : t.status);
 	const chipOf = (s: string) =>
@@ -117,15 +129,9 @@
 		{ value: 'done', label: '已完成' },
 		{ value: 'ended', label: '已结束' }
 	];
-	$: counts = teams.reduce((acc, t) => ({ ...acc, [bucketOf(t)]: (acc[bucketOf(t)] ?? 0) + 1 }), {
-		all: teams.length
-	} as Record<string, number>);
-	$: needle = query.trim().toLowerCase();
-	$: shown = teams.filter(
-		(t) =>
-			(filter === 'all' || bucketOf(t) === filter) &&
-			(!needle || `${t.title}\n${t.goal}`.toLowerCase().includes(needle))
-	);
+	$: counts = (serverCounts ?? { all: teams.length }) as Record<string, number>;
+	// a team that moved to another filter leaves this one at the next refresh
+	$: shown = teams;
 	$: activeCount = counts.active ?? 0;
 	// A team that just finished is still moving while the lead writes and checks its result.
 	$: settling = teams.some(
@@ -172,9 +178,67 @@
 		composer.style.height = `${Math.min(composer.scrollHeight, 320)}px`;
 	};
 
-	const load = async () => {
+	const keyOf = (t: Team): [number, string] => [t.updated_at, t.id];
+	const bucketParam = (f: typeof filter) => (f === 'all' ? null : f);
+	const loadChatTeams = async () => {
+		if (!chatId) return;
 		try {
-			teams = (await listTeams(localStorage.token)).teams;
+			chatTeams = (await listTeams(localStorage.token, { chatId })).teams;
+		} catch {
+			// the panel is a shortcut; the list below has them too
+		}
+	};
+	const loadMore = async () => {
+		const last = teams[teams.length - 1];
+		if (loadingMore || !more || !last) return;
+		loadingMore = true;
+		const q = searched;
+		const f = filtered;
+		try {
+			const page = await listTeams(localStorage.token, {
+				limit: PAGE,
+				q,
+				bucket: bucketParam(f),
+				before: cursorAfter(keyOf(last))
+			});
+			if (q !== searched || f !== filtered) return;
+			teams = appendPage(teams, page.teams, (t) => t.id);
+			more = !!page.next;
+		} catch (e) {
+			toast.error(`${(e as Error)?.message ?? e}`);
+		} finally {
+			loadingMore = false;
+		}
+	};
+	// a filter at once, a search a moment after typing: both over the whole history
+	$: if (filter !== filtered) {
+		filtered = filter;
+		load(true);
+	}
+	$: if (query.trim() !== searched) {
+		if (searchTimer) clearTimeout(searchTimer);
+		const wanted = query.trim();
+		searchTimer = setTimeout(() => {
+			searched = wanted;
+			load(true);
+		}, 300);
+	}
+
+	// the first page: afresh (a new filter or search), or folded into the pages already read
+	const load = async (afresh = false) => {
+		const q = searched;
+		const f = filtered;
+		void loadChatTeams();
+		try {
+			const page = await listTeams(localStorage.token, { limit: PAGE, q, bucket: bucketParam(f) });
+			if (q !== searched || f !== filtered) return;
+			if (afresh || !loaded) {
+				teams = page.teams;
+				more = !!page.next;
+			} else {
+				({ items: teams, more } = mergeHead(teams, page.teams, !!page.next, more, (t) => t.id, keyOf));
+			}
+			if (page.counts) serverCounts = page.counts;
 			error = '';
 		} catch (e) {
 			error = `${e?.message ?? e}`;
@@ -328,6 +392,11 @@
 		try {
 			await deleteTeam(localStorage.token, team.id);
 			teams = teams.filter((t) => t.id !== team.id);
+			chatTeams = chatTeams.filter((t) => t.id !== team.id);
+			if (serverCounts) {
+				const b = bucketOf(team);
+				serverCounts = { ...serverCounts, all: Math.max(0, serverCounts.all - 1), [b]: Math.max(0, serverCounts[b] - 1) };
+			}
 			toast.success('已删除');
 		} catch (e) {
 			toast.error(`${e?.message ?? e}`);
@@ -374,6 +443,7 @@
 	});
 	onDestroy(() => {
 		if (refreshTimer) clearInterval(refreshTimer);
+		if (searchTimer) clearTimeout(searchTimer);
 		clearModeDraft('teams');
 	});
 </script>
@@ -408,7 +478,7 @@
 		<div class="mx-auto flex max-w-3xl flex-col pt-6 sm:pt-14">
 			<!-- hero -->
 			<header class="halo-mode-hero tm-rise relative mb-6 flex flex-col gap-3">
-				<ModeEmblem mode="teams" stats={[{ k: 'MISSIONS', v: teams.length }, { k: 'ACTIVE', v: activeCount }]} />
+				<ModeEmblem mode="teams" stats={[{ k: 'MISSIONS', v: counts.all ?? teams.length }, { k: 'ACTIVE', v: activeCount }]} />
 				<div class="flex items-center gap-2">
 					<span class="tm-eyebrow halo-mode-eyebrow">Halo Teams</span>
 					<span class="h-3 w-px bg-gray-300 dark:bg-gray-700" aria-hidden="true" />
@@ -808,8 +878,8 @@
 					<h3 class="tm-display text-base font-semibold text-gray-900 dark:text-gray-100">
 						我的协作
 					</h3>
-					{#if teams.length}
-						<span class="tm-num text-xs text-gray-400">{teams.length}</span>
+					{#if counts.all}
+						<span class="tm-num text-xs text-gray-400">{counts.all}</span>
 					{/if}
 					<label class="search ml-auto flex min-w-0 items-center gap-1.5 rounded-xl px-2.5 py-1.5">
 						<svg
@@ -833,7 +903,7 @@
 						/>
 					</label>
 				</div>
-				{#if teams.length}
+				{#if counts.all}
 					<div class="tm-scroll tm-fade-x mb-3 overflow-x-auto pb-1">
 						<div class="tm-segment" role="tablist" aria-label="按状态筛选">
 							{#each FILTERS as f}
@@ -861,7 +931,7 @@
 					</ul>
 				{:else if error}
 					<div class="text-sm text-red-600" role="alert">{error}</div>
-				{:else if teams.length === 0}
+				{:else if !counts.all && !searched}
 					<div class="tm-card-quiet flex flex-col gap-4 px-5 py-6" data-teams-empty>
 						<div class="text-sm font-medium text-gray-800 dark:text-gray-100">
 							还没有协作任务 · 三步走完一次
@@ -1099,6 +1169,7 @@
 							</li>
 						{/each}
 					</ul>
+					<LoadMore {more} loading={loadingMore} onMore={loadMore} total={null} shown={teams.length} />
 				{/if}
 			</section>
 		</div>

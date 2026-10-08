@@ -44,7 +44,8 @@
 		if (loadedOnce || typeof localStorage === 'undefined' || !localStorage.token) return;
 		loadedOnce = true;
 		try {
-			const items = await listAnswers(localStorage.token);
+			// the runs being answered only (from memory on the server), never the whole history
+			const { items } = await listAnswers(localStorage.token, { status: 'live' });
 			running.set(new Set(items.filter((d) => isLive(d.status) || d.running).map((d) => d.id)));
 		} catch {
 			// no list: the socket still fills it in

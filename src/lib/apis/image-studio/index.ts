@@ -26,6 +26,27 @@ export const getImageStudioItems = async (
 	return Array.isArray(res) ? res : [];
 };
 
+/**
+ * One page of the gallery or the history, newest first (`next`: pass it as `before` for the page
+ * after, null at the end). `q` searches the prompt, model and tags; `favorites` keeps the starred.
+ */
+export const getImageStudioItemPage = async (
+	token: string,
+	kind: 'gallery' | 'history',
+	opts: { limit?: number; before?: string | null; q?: string; favorites?: boolean } = {}
+): Promise<{ items: ImageStudioServerItem[]; next: string | null }> => {
+	const params = new URLSearchParams({ kind });
+	if (opts.limit) params.set('limit', String(opts.limit));
+	if (opts.before) params.set('before', opts.before);
+	if (opts.q?.trim()) params.set('q', opts.q.trim());
+	if (opts.favorites) params.set('favorites', 'true');
+	const res = await fetch(`${IMAGE_STUDIO_API_BASE_URL}/items/page?${params}`, {
+		method: 'GET',
+		headers: headers(token)
+	}).then(parseJsonResponse<{ items: ImageStudioServerItem[]; next: string | null }>);
+	return { items: Array.isArray(res?.items) ? res.items : [], next: res?.next ?? null };
+};
+
 export const upsertImageStudioItems = async (
 	token: string,
 	items: ImageStudioItemForm[]

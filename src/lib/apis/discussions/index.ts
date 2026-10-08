@@ -1,5 +1,6 @@
 import { WEBUI_API_BASE_URL } from '$lib/constants';
 import type { AssistantChoice } from '$lib/apis/assistant-library';
+import { pageQuery, type PageQuery } from '$lib/apis/paging';
 
 /** 讨论台 (multi-model discussion room) API — see backend/open_webui/routers/discussions.py. */
 
@@ -210,8 +211,16 @@ const request = async <T>(token: string, method: string, path: string, body?: un
 
 const id = (value: string) => encodeURIComponent(value);
 
-export const listDiscussions = (token: string, archived = false) =>
-	request<DiscussionSummary[]>(token, 'GET', archived ? '/?archived=true' : '/');
+/** One page of the discussions, newest first (the same paging as the 精答 list). */
+export type DiscussionPage = {
+	items: DiscussionSummary[];
+	next: string | null;
+	total: number | null;
+	live: number;
+};
+
+export const listDiscussions = (token: string, opts: PageQuery = {}) =>
+	request<DiscussionPage>(token, 'GET', pageQuery(opts));
 
 export const createDiscussion = (
 	token: string,

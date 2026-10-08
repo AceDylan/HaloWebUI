@@ -61,22 +61,27 @@ beforeEach(() => {
 		assistants: [{ id: 'answer-1', name: '合同审查', description: '逐条找合同风险', emoji: '⚖️', base: 'm-ds', baseName: 'deepseek-chat', editable: true, ref: 'model:answer-1', source: 'answer', hidden: true }],
 		may_create: true
 	});
-	api.listAnswers.mockResolvedValue([
-		{
-			id: 'r1',
-			title: '押金条款风险',
-			updated_at: Math.floor(Date.now() / 1000) - 60,
-			created_at: 1,
-			folder_id: null,
-			archived: false,
-			running: false,
-			status: 'done',
-			question: '押金条款有什么风险？',
-			preview: '退还期限要写清',
-			assistant: { id: 'answer-1', name: '合同审查', emoji: '⚖️', action: 'create' },
-			research: true
-		}
-	]);
+	api.listAnswers.mockResolvedValue({
+		items: [
+			{
+				id: 'r1',
+				title: '押金条款风险',
+				updated_at: Math.floor(Date.now() / 1000) - 60,
+				created_at: 1,
+				folder_id: null,
+				archived: false,
+				running: false,
+				status: 'done',
+				question: '押金条款有什么风险？',
+				preview: '退还期限要写清',
+				assistant: { id: 'answer-1', name: '合同审查', emoji: '⚖️', action: 'create' },
+				research: true
+			}
+		],
+		next: null,
+		total: null,
+		live: 0
+	});
 });
 
 afterEach(() => {
@@ -96,6 +101,43 @@ const submit = (target: any) =>
 	target.querySelector('[data-answer-composer]').dispatchEvent(new (globalThis as any).Event('submit', { cancelable: true }));
 
 describe('AnswerHome', () => {
+	it('reads the history a page at a time and searches it on the server', async () => {
+		const run = (id: string, at: number) => ({
+			id,
+			title: `问题 ${id}`,
+			updated_at: at,
+			created_at: 1,
+			folder_id: null,
+			archived: false,
+			running: false,
+			status: 'done',
+			question: `问题 ${id}`,
+			preview: '',
+			assistant: null
+		});
+		api.listAnswers.mockImplementation(async (_token: string, opts: any) =>
+			opts?.q
+				? { items: [run('found', 50)], next: null, total: 1, live: 0 }
+				: opts?.before
+					? { items: [run('old', 10)], next: null, total: null, live: 0 }
+					: { items: [run('new', 100), run('mid', 90)], next: '90:mid', total: 3, live: 0 }
+		);
+		const target = await mount();
+		await until(() => !!target.querySelector('[data-answer-row="mid"]'));
+		expect(api.listAnswers.mock.calls[0][1]).toMatchObject({ limit: 30, q: '' });
+		(target.querySelector('[data-load-more-button]') as any).click();
+		await until(() => !!target.querySelector('[data-answer-row="old"]'));
+		expect(api.listAnswers.mock.calls.at(-1)[1]).toMatchObject({ before: '90:mid' });
+		expect(target.querySelector('[data-load-more]')).toBeFalsy();
+
+		const search = target.querySelector('input[type="search"]') as any;
+		search.value = '押金';
+		search.dispatchEvent(new (globalThis as any).Event('input'));
+		await until(() => !!target.querySelector('[data-answer-row="found"]'));
+		expect(api.listAnswers.mock.calls.at(-1)[1]).toMatchObject({ q: '押金' });
+		expect(target.querySelector('[data-answer-row="old"]')).toBeFalsy();
+	});
+
 	it('offers text models as the dispatcher, shows the library and the runs', async () => {
 		const target = await mount();
 		await until(() => !!target.querySelector('[data-answer-row="r1"]'));

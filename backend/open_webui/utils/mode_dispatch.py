@@ -42,6 +42,9 @@ RETRY_SECONDS = 15
 RETRY_LIMIT = 40
 
 _background: set = set()
+# run chat id → the socket of the tab the message was sent from (in memory: only a hint for the
+# away push, so a tab whose socket is not registered still counts as someone looking)
+_sessions: dict[str, str] = {}
 
 
 class ReportError(Exception):
@@ -132,6 +135,8 @@ async def run_mode_dispatch(request, form_data: dict, user, metadata: dict, mode
             except Exception as exc:  # noqa: BLE001
                 log.exception("mode dispatch (%s) failed", kind)
                 error = type(exc).__name__
+        if run_chat_id and metadata.get("session_id"):
+            _sessions[run_chat_id] = str(metadata["session_id"])
         content = card_text(kind, error=error, files=len(files))
         fields: dict = {"content": content, "done": True, "completedAt": int(time.time()), "model": model_id}
         if run_chat_id:
@@ -234,12 +239,14 @@ async def report_back(request, kind: str, chat_id: str, run: dict, *, quiet: boo
             quiet=quiet,
             design=False,
             max_chars=REPORT_POST_MAX_CHARS,
+            session_id=_sessions.get(chat_id),
         )
     except HermesNotifyError as exc:
         if exc.status_code == 409:
             raise ReportError(409, "这个对话正在回答别的问题，等它答完再试") from exc
         raise ReportError(exc.status_code if exc.status_code in (404, 422) else 502,
                           f"没能放进对话：{exc.detail}") from exc
+    _sessions.pop(chat_id, None)
     return {"chat_id": origin_id, "posted": not result.get("duplicate"), "duplicate": bool(result.get("duplicate"))}
 
 

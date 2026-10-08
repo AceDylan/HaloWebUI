@@ -335,29 +335,83 @@ async def list_assistants(request: Request, user=Depends(get_verified_user)):
     }
 
 
+PAGE_SIZE = 30
+PAGE_MAX = 100
+
+
+def parse_cursor(value: Optional[str]) -> Optional[tuple[int, str]]:
+    """``"<updated_at>:<id>"`` of the last row of the page before (None: the first page)."""
+    at, _, last_id = str(value or "").partition(":")
+    try:
+        return (int(at), last_id) if last_id else None
+    except ValueError:
+        return None
+
+
+def cursor_of(row: dict) -> str:
+    return f"{int(row.get('updated_at') or 0)}:{row['id']}"
+
+
+def _summary(row: dict) -> dict:
+    summary = dict(row["meta"].get(META_KEY) or {})
+    if row["id"] in LIVE:
+        summary["status"] = LIVE[row["id"]].run.get("status")
+    elif summary.get("status") in desk.RUNNING_STATUSES:
+        summary["status"] = "interrupted"
+    return {
+        "id": row["id"],
+        "title": row["title"],
+        "updated_at": row["updated_at"],
+        "created_at": row["created_at"],
+        "folder_id": row["folder_id"],
+        "archived": row["archived"],
+        "running": row["id"] in LIVE,
+        **summary,
+    }
+
+
 @router.get("/")
-async def list_answers(user=Depends(get_verified_user), archived: bool = False):
-    rows = Chats.get_chats_with_meta_key_by_user_id(user.id, META_KEY, include_archived=archived)
-    out = []
-    for row in rows:
-        summary = dict(row["meta"].get(META_KEY) or {})
-        if row["id"] in LIVE:
-            summary["status"] = LIVE[row["id"]].run.get("status")
-        elif summary.get("status") in desk.RUNNING_STATUSES:
-            summary["status"] = "interrupted"
-        out.append(
-            {
-                "id": row["id"],
-                "title": row["title"],
-                "updated_at": row["updated_at"],
-                "created_at": row["created_at"],
-                "folder_id": row["folder_id"],
-                "archived": row["archived"],
-                "running": row["id"] in LIVE,
-                **summary,
-            }
+async def list_answers(
+    user=Depends(get_verified_user),
+    archived: bool = False,
+    limit: int = PAGE_SIZE,
+    before: Optional[str] = None,
+    q: Optional[str] = None,
+    status: Optional[str] = None,
+    count: bool = True,
+):
+    """A page of the user's runs, newest first: ``{items, next, total, live}``. ``next`` is the
+    cursor for the page after (``before``), null at the end; ``q`` searches the title, question,
+    answer preview and assistant; ``status`` ``live`` (the runs being answered, from memory: no scan
+    of the history, what the sidebar badge reads) or ``ended``. ``total`` comes with the first page
+    (``count=false``: not even then — a refresh of the first page while a run goes)."""
+    limit = max(1, min(int(limit), PAGE_MAX))
+    mine = [chat_id for chat_id, live in LIVE.items() if live.user_id == user.id]
+    if status == "live":
+        rows, more = Chats.page_chats_with_meta_key(
+            user.id, META_KEY, limit=PAGE_MAX, query=q, include_archived=archived, ids=mine
+        ) if mine else ([], False)
+    else:
+        rows, more = Chats.page_chats_with_meta_key(
+            user.id,
+            META_KEY,
+            limit=limit,
+            before=parse_cursor(before),
+            query=q,
+            include_archived=archived,
+            exclude_ids=set(mine) if status == "ended" else None,
         )
-    return out
+    total = None
+    if not before and count:
+        total = len(rows) if status == "live" else Chats.count_chats_with_meta_key(
+            user.id, META_KEY, query=q, include_archived=archived
+        ) - (len(mine) if status == "ended" else 0)
+    return {
+        "items": [_summary(row) for row in rows],
+        "next": cursor_of(rows[-1]) if more and rows and status != "live" else None,
+        "total": max(0, total) if total is not None else None,
+        "live": len(mine),
+    }
 
 
 async def _prepare(request: Request, user, planner_ref: Optional[str], research: bool) -> tuple[dict, bool]:

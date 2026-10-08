@@ -622,32 +622,73 @@ def _assistant_message(message_id: str, parent_id: str, ask: dict) -> dict:
 ############################
 
 
+PAGE_SIZE = 30
+PAGE_MAX = 100
+
+
+def _summary(row: dict) -> dict:
+    summary = dict(row["meta"].get(META_KEY) or {})
+    if row["id"] in LIVE:
+        live = LIVE[row["id"]]
+        summary["status"] = live.ask.get("status")
+        summary["round"] = live.ask.get("round")
+    elif summary.get("status") in room.RUNNING_STATUSES:
+        # marked running with no live task: a restart cut it off (the room settles it on open)
+        summary["status"] = "interrupted"
+    return {
+        "id": row["id"],
+        "title": row["title"],
+        "updated_at": row["updated_at"],
+        "created_at": row["created_at"],
+        "folder_id": row["folder_id"],
+        "archived": row["archived"],
+        "running": row["id"] in LIVE,
+        **summary,
+    }
+
+
 @router.get("/")
-async def list_discussions(user=Depends(get_verified_user), archived: bool = False):
-    rows = Chats.get_chats_with_meta_key_by_user_id(user.id, META_KEY, include_archived=archived)
-    out = []
-    for row in rows:
-        summary = dict(row["meta"].get(META_KEY) or {})
-        if row["id"] in LIVE:
-            live = LIVE[row["id"]]
-            summary["status"] = live.ask.get("status")
-            summary["round"] = live.ask.get("round")
-        elif summary.get("status") in room.RUNNING_STATUSES:
-            # marked running with no live task: a restart cut it off (the room settles it on open)
-            summary["status"] = "interrupted"
-        out.append(
-            {
-                "id": row["id"],
-                "title": row["title"],
-                "updated_at": row["updated_at"],
-                "created_at": row["created_at"],
-                "folder_id": row["folder_id"],
-                "archived": row["archived"],
-                "running": row["id"] in LIVE,
-                **summary,
-            }
+async def list_discussions(
+    user=Depends(get_verified_user),
+    archived: bool = False,
+    limit: int = PAGE_SIZE,
+    before: Optional[str] = None,
+    q: Optional[str] = None,
+    status: Optional[str] = None,
+    count: bool = True,
+):
+    """A page of the user's discussions, newest first: ``{items, next, total, live}`` (the same
+    paging as the 精答 list: ``before`` = the ``next`` of the page before, ``q`` searches, ``status``
+    ``live`` — from memory, what the sidebar badge reads — or ``ended``)."""
+    from open_webui.routers.answers import cursor_of, parse_cursor
+
+    limit = max(1, min(int(limit), PAGE_MAX))
+    mine = [chat_id for chat_id, live in LIVE.items() if live.user_id == user.id]
+    if status == "live":
+        rows, more = Chats.page_chats_with_meta_key(
+            user.id, META_KEY, limit=PAGE_MAX, query=q, include_archived=archived, ids=mine
+        ) if mine else ([], False)
+    else:
+        rows, more = Chats.page_chats_with_meta_key(
+            user.id,
+            META_KEY,
+            limit=limit,
+            before=parse_cursor(before),
+            query=q,
+            include_archived=archived,
+            exclude_ids=set(mine) if status == "ended" else None,
         )
-    return out
+    total = None
+    if not before and count:
+        total = len(rows) if status == "live" else Chats.count_chats_with_meta_key(
+            user.id, META_KEY, query=q, include_archived=archived
+        ) - (len(mine) if status == "ended" else 0)
+    return {
+        "items": [_summary(row) for row in rows],
+        "next": cursor_of(rows[-1]) if more and rows and status != "live" else None,
+        "total": max(0, total) if total is not None else None,
+        "live": len(mine),
+    }
 
 
 def _open(

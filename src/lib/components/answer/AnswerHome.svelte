@@ -21,6 +21,8 @@
 	import { discussionSeatModels } from '$lib/utils/discussion-seats';
 	import { originLabel, takeHandoff, type HandoffOrigin } from '$lib/utils/handoff';
 	import HandoffBack from '$lib/components/common/HandoffBack.svelte';
+	import LoadMore from '$lib/components/common/LoadMore.svelte';
+	import { appendPage, cursorAfter, mergeHead } from '$lib/utils/paged';
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import MenuLines from '$lib/components/icons/MenuLines.svelte';
 	import ModeEmblem from '$lib/components/scifi/ModeEmblem.svelte';
@@ -46,7 +48,15 @@
 	let composer: HTMLTextAreaElement;
 	let isMac = false;
 
+	// the history a page at a time (newest first); the search and the live count come from the server
+	const PAGE = 30;
 	let items: AnswerSummary[] = [];
+	let more = false;
+	let loadingMore = false;
+	let total: number | null = null;
+	let liveTotal = 0;
+	let searched = '';
+	let searchTimer: ReturnType<typeof setTimeout> | null = null;
 	let library: LibraryAssistant[] = [];
 	let mayCreate = true;
 	let loaded = false;
@@ -66,11 +76,18 @@
 	$: canStart = !creating && !!question.trim() && !!planner;
 	$: webSearchEnabled = $config?.features?.enable_web_search !== false;
 	$: shownAssistants = showAllAssistants ? library : library.slice(0, 10);
-	$: needle = query.trim().toLowerCase();
-	$: shown = items.filter(
-		(d) => !needle || `${d.title}\n${d.question}\n${d.preview}\n${d.assistant?.name ?? ''}`.toLowerCase().includes(needle)
-	);
-	$: liveCount = items.filter((d) => isLive(d.status) || d.running).length;
+	$: shown = items;
+	$: liveCount = Math.max(liveTotal, items.filter((d) => isLive(d.status) || d.running).length);
+	const keyOf = (d: AnswerSummary): [number, string] => [d.updated_at, d.id];
+	// searched on the server (the whole history, not just the pages read), a moment after typing
+	$: if (query.trim() !== searched) {
+		if (searchTimer) clearTimeout(searchTimer);
+		const wanted = query.trim();
+		searchTimer = setTimeout(() => {
+			searched = wanted;
+			load(true);
+		}, 300);
+	}
 	// the dock takes the question (and the conversation it came with) to another mode
 	afterUpdate(() => setModeDraft('answer', question, { context: background, from: origin }));
 
@@ -188,14 +205,42 @@
 		composer?.focus();
 	};
 
-	const load = async () => {
+	// the first page: afresh (a new search), or folded into the pages already read (a live refresh)
+	const load = async (afresh = false) => {
+		const q = searched;
 		try {
-			items = await listAnswers(localStorage.token);
+			const fresh = afresh || !loaded;
+			const page = await listAnswers(localStorage.token, { limit: PAGE, q, ...(fresh ? {} : { count: false }) });
+			if (q !== searched) return; // a newer search went out meanwhile
+			if (fresh) {
+				items = page.items;
+				more = !!page.next;
+			} else {
+				({ items, more } = mergeHead(items, page.items, !!page.next, more, (d) => d.id, keyOf));
+			}
+			if (page.total !== null) total = page.total;
+			liveTotal = page.live ?? 0;
 			loadError = '';
 		} catch (e: any) {
 			loadError = e?.message || '加载失败';
 		} finally {
 			loaded = true;
+		}
+	};
+	const loadMore = async () => {
+		const last = items[items.length - 1];
+		if (loadingMore || !more || !last) return;
+		loadingMore = true;
+		const q = searched;
+		try {
+			const page = await listAnswers(localStorage.token, { limit: PAGE, q, before: cursorAfter(keyOf(last)) });
+			if (q !== searched) return;
+			items = appendPage(items, page.items, (d) => d.id);
+			more = !!page.next;
+		} catch (e: any) {
+			toast.error(e?.message || '加载失败');
+		} finally {
+			loadingMore = false;
 		}
 	};
 	const loadLibrary = async () => {
@@ -220,6 +265,7 @@
 		try {
 			await deleteAnswer(localStorage.token, d.id);
 			items = items.filter((x) => x.id !== d.id);
+			if (total !== null) total = Math.max(0, total - 1);
 			toast.success('已删除');
 		} catch (e: any) {
 			toast.error(e?.message || '删除失败');
@@ -231,13 +277,15 @@
 		warp(520);
 		load();
 		loadLibrary();
+		// while anything is being answered, the first page again (never every page read)
 		timer = setInterval(() => {
-			if (!document.hidden && items.some((d) => isLive(d.status) || d.running)) load();
+			if (!document.hidden && liveCount > 0) load();
 		}, 4000);
 		tick().then(resize);
 	});
 	onDestroy(() => {
 		if (timer) clearInterval(timer);
+		if (searchTimer) clearTimeout(searchTimer);
 		clearModeDraft('answer');
 	});
 </script>
@@ -261,7 +309,7 @@
 	<div class="tm-scroll flex-1 overflow-y-auto px-4 pb-16">
 		<div class="mx-auto flex max-w-3xl flex-col pt-6 sm:pt-14">
 			<header class="halo-mode-hero tm-rise relative mb-6 flex flex-col gap-3">
-				<ModeEmblem mode="answer" stats={[{ k: 'ASSISTANTS', v: library.length }, { k: 'ANSWERS', v: items.length }]} />
+				<ModeEmblem mode="answer" stats={[{ k: 'ASSISTANTS', v: library.length }, { k: 'ANSWERS', v: total ?? items.length }]} />
 				<div class="flex items-center gap-2">
 					<span class="tm-eyebrow halo-mode-eyebrow">Halo Precision</span>
 					<span class="h-3 w-px bg-gray-300 dark:bg-gray-700" aria-hidden="true" />
@@ -438,7 +486,7 @@
 			<section class="tm-rise mt-10" style="--i:4" aria-label="我的精答">
 				<div class="mb-3 flex flex-wrap items-center gap-3">
 					<h3 class="tm-display text-lg font-semibold text-gray-900 dark:text-gray-50">我的精答</h3>
-					<span class="tm-num text-sm text-gray-400">{items.length}</span>
+					<span class="tm-num text-sm text-gray-400">{total ?? items.length}</span>
 					{#if liveCount}<span class="rounded-full bg-blue-500/10 px-2 py-0.5 text-[11px] text-blue-600 dark:text-blue-300">{liveCount} 个进行中</span>{/if}
 					<input
 						type="search"
@@ -458,7 +506,7 @@
 					<p class="text-sm text-red-600 dark:text-red-300">{loadError}</p>
 				{:else if !shown.length}
 					<div class="flex flex-col items-center gap-2 py-12 text-center text-sm text-gray-400 dark:text-gray-500">
-						{items.length ? '没有符合条件的精答' : '还没有精答。写下一个问题试试。'}
+						{searched ? '没有符合条件的精答' : '还没有精答。写下一个问题试试。'}
 					</div>
 				{:else}
 					<ul class="flex flex-col gap-2" data-answer-list>
@@ -503,6 +551,7 @@
 							</li>
 						{/each}
 					</ul>
+					<LoadMore {more} loading={loadingMore} onMore={loadMore} {total} shown={items.length} />
 				{/if}
 			</section>
 		</div>

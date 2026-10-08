@@ -50,10 +50,15 @@ describe('DiscussBadge', () => {
 			off: (name: string, fn: any) => (handlers[name] = (handlers[name] ?? []).filter((f) => f !== fn))
 		});
 		localStorage.token = 't';
-		api.listDiscussions.mockResolvedValue([
-			{ id: 'c1', running: true, status: 'running' },
-			{ id: 'c2', running: false, status: 'done' }
-		]);
+		api.listDiscussions.mockResolvedValue({
+			items: [
+				{ id: 'c1', running: true, status: 'running' },
+				{ id: 'c2', running: false, status: 'done' }
+			],
+			next: null,
+			total: null,
+			live: 0
+		});
 
 		const wide = mount({});
 		const narrow = mount({ compact: true });
@@ -61,6 +66,8 @@ describe('DiscussBadge', () => {
 		expect(wide.querySelector('[data-discuss-badge]')!.textContent!.trim()).toBe('1');
 		expect(narrow.querySelector('[data-discuss-badge]')).toBeTruthy();
 		expect(api.listDiscussions).toHaveBeenCalledTimes(1);
+		// the discussions under way only, never the whole history
+		expect(api.listDiscussions.mock.calls[0][1]).toEqual({ status: 'live' });
 
 		// another discussion starts; a delta (no status) changes nothing; other chat events are ignored
 		emit('c3', { kind: 'state', ask: { status: 'running' } });

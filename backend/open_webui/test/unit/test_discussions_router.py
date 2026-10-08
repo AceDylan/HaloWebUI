@@ -148,10 +148,10 @@ def test_create_runs_to_a_conclusion_and_is_listed(env):
     assert chat.meta["title_generation"]["auto_generated"] is True
     assert env.after == [(chat_id, ask["id"], "done")]
 
-    listed = asyncio.run(api.list_discussions(USER))
+    listed = asyncio.run(api.list_discussions(USER))["items"]
     assert [item["id"] for item in listed] == [chat_id]
     assert listed[0]["status"] == "done" and listed[0]["mode"] == "roundtable"
-    assert asyncio.run(api.list_discussions(OTHER)) == []
+    assert asyncio.run(api.list_discussions(OTHER))["items"] == []
     with pytest.raises(HTTPException) as other:
         asyncio.run(api.get_discussion(chat_id, OTHER))
     assert other.value.status_code == 404
@@ -273,7 +273,7 @@ def test_a_question_cut_off_by_a_restart_reads_as_interrupted(env):
     api._persist_ask(chat_id, ask, api._setup_of(table.get_chat_by_id(chat_id)))
     assert table.get_chat_by_id(chat_id).meta[room.META_KEY]["status"] == "running"
     # the list (and the sidebar count) does not take it for a live one
-    listed = asyncio.run(api.list_discussions(USER))[0]
+    listed = asyncio.run(api.list_discussions(USER))["items"][0]
     assert listed["status"] == "interrupted" and listed["running"] is False
     again = asyncio.run(api.get_discussion(chat_id, USER))["asks"][0]
     assert again["status"] == "interrupted"
@@ -393,7 +393,7 @@ def test_research_and_retry_through_the_api(env, monkeypatch):
     assert [model for model, _ in env.calls] == ["b", "c"]  # the seat, then the moderator
     assert "[1] X — https://x.example" in env.calls[0][1][1]["content"]
     assert ask["previousConclusions"]
-    listed = asyncio.run(api.list_discussions(USER))
+    listed = asyncio.run(api.list_discussions(USER))["items"]
     assert listed[0]["research"] is True
 
 
@@ -738,3 +738,33 @@ def test_a_dispatched_discussion_without_a_last_table_seats_different_families()
     assert setup["moderator"]["model"] == "gpt-chat" and setup["autoMatch"] is True
     assert {s["assist"] for s in setup["seats"]} == {"auto"}
     assert lib.library(models, USER)[1]  # sanity: these are text models the library offers
+
+
+def test_the_list_comes_a_page_at_a_time_with_search_and_the_live_filter(env):
+    ids = [_discuss_first(env, question=q) for q in ("选数据库", "选框架", "选云厂商", "选编辑器", "选显示器")]
+
+    first = asyncio.run(api.list_discussions(USER, limit=2))
+    assert first["total"] == 5 and first["next"] and first["live"] == 0
+    second = asyncio.run(api.list_discussions(USER, limit=2, before=first["next"]))
+    third = asyncio.run(api.list_discussions(USER, limit=2, before=second["next"]))
+    assert third["next"] is None and second["total"] is None
+    paged = [d["id"] for d in first["items"] + second["items"] + third["items"]]
+    assert sorted(paged) == sorted(ids) and len(set(paged)) == 5
+
+    # the question is in the chat's summary as \uXXXX escapes: found either way
+    found = asyncio.run(api.list_discussions(USER, q="云厂商"))
+    assert [d["id"] for d in found["items"]] == [ids[2]] and found["total"] == 1
+    assert asyncio.run(api.list_discussions(USER, q="100%_"))["items"] == []
+
+    env.state["delay"] = 0.05
+
+    async def live_one():
+        detail = await _create(env, question="正在讨论的问题")
+        live = await api.list_discussions(USER, status="live")
+        ended = await api.list_discussions(USER, status="ended")
+        await api.stop(detail["id"], USER)
+        return detail["id"], live, ended
+
+    live_id, live, ended = asyncio.run(live_one())
+    assert [d["id"] for d in live["items"]] == [live_id] and live["live"] == 1
+    assert live_id not in [d["id"] for d in ended["items"]] and ended["total"] == 5

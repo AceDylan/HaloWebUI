@@ -151,12 +151,41 @@ LIST_REFRESH_SECONDS = 4
 RECENT_FINISH_SECONDS = 600
 
 
+PAGE_SIZE = 30
+# the sidebar badge follows teams at work, waiting, or changed within this long
+CURRENT_SECONDS = 2 * 3600
+
+
 @router.get("/", dependencies=[Depends(_enabled)])
-async def list_teams(request: Request, chat_id: Optional[str] = None, user=Depends(get_verified_user)):
-    teams, snaps = await _fresh_list(request, user, chat_id)
+async def list_teams(request: Request, chat_id: Optional[str] = None, limit: int = PAGE_SIZE,
+                     before: Optional[str] = None, q: Optional[str] = None, bucket: Optional[str] = None,
+                     scope: Optional[str] = None, user=Depends(get_verified_user)):
+    """The user's teams: ``{teams, next, total, counts}``.
+
+    - a page of the history, newest first (``before`` = the ``next`` of the page before, null at
+      the end), in one filter of the list (``bucket``: active / review / done / ended) and matching
+      ``q``; the first page brings how many there are under each filter (``counts``);
+    - ``chat_id``: the teams of one chat (a handful);
+    - ``scope=current``: what the sidebar badge follows (at work, waiting, changed in the last two
+      hours) — never the whole history, however long it gets.
+    """
+    from open_webui.routers.answers import cursor_of, parse_cursor
+
     if not chat_id:  # every team is in the chat history: earlier ones get their chat now
-        teams = await team_chats.backfill(request, user, teams)
-    return {"teams": _with_stages(teams, snaps)}
+        await team_chats.backfill_missing(request, user)
+    if chat_id or scope == "current":
+        teams, snaps = await _fresh_list(request, user, chat_id, current=scope == "current")
+        return {"teams": _with_stages(teams, snaps), "next": None, "total": len(teams), "counts": None}
+    page, more = AgentTeams.page_for_user(user.id, limit=max(1, min(int(limit), 100)), before=parse_cursor(before),
+                                          query=q, bucket=bucket)
+    teams, snaps = await _fresh_list(request, user, teams=page)
+    counts = AgentTeams.counts_for_user(user.id, query=q) if not before else None
+    return {
+        "teams": _with_stages(teams, snaps),
+        "next": cursor_of({"id": page[-1].id, "updated_at": page[-1].updated_at}) if more and page else None,
+        "total": (counts or {}).get(bucket if bucket in counts else "all") if counts else None,
+        "counts": counts,
+    }
 
 
 def _with_stages(teams: list, snaps: dict) -> list[dict]:
@@ -176,9 +205,13 @@ def _recently_finished(team, now: int) -> bool:
             and now - int(team.finished_at or 0) < RECENT_FINISH_SECONDS)
 
 
-async def _fresh_list(request: Request, user, chat_id: Optional[str] = None, target=None):
-    """(teams, {team id: live snapshot}) — the user's teams, those at work read from Hermes once."""
-    teams = AgentTeams.list_for_user(user.id, chat_id=chat_id)
+async def _fresh_list(request: Request, user, chat_id: Optional[str] = None, target=None, *,
+                      current: bool = False, teams: Optional[list] = None):
+    """(teams, {team id: live snapshot}) — the user's teams (``teams``: those of one page;
+    ``current``: what the sidebar follows), those at work read from Hermes once."""
+    if teams is None:
+        teams = (AgentTeams.list_current_for_user(user.id, int(time.time()) - CURRENT_SECONDS) if current
+                 else AgentTeams.list_for_user(user.id, chat_id=chat_id))
     snaps: dict = {}
     # Teams still at work are read from Hermes once here, so the list shows where they are now
     # (phase, tasks done, stage, estimate) without opening each one; so are teams that just finished

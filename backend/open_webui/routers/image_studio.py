@@ -1,7 +1,7 @@
 """Per-user storage API for the workspace image studio (templates, gallery, history)."""
 
 import logging
-from typing import Optional
+from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from open_webui.constants import ERROR_MESSAGES
@@ -84,6 +84,42 @@ async def get_image_studio_items(
     except Exception as exc:
         log.warning("Failed to record image studio migration state: %s", exc)
     return items
+
+
+class ImageStudioItemPage(BaseModel):
+    items: list[ImageStudioItemModel]
+    # the cursor of the page after (pass it as ``before``), null at the end
+    next: Optional[str] = None
+
+
+@router.get("/items/page", response_model=ImageStudioItemPage)
+async def get_image_studio_item_page(
+    kind: Literal["gallery", "history"],
+    limit: int = Query(default=60, ge=1, le=200),
+    before: Optional[str] = None,
+    q: Optional[str] = None,
+    favorites: bool = False,
+    user=Depends(get_verified_user),
+):
+    """One page of the gallery or the history, newest first: the studio shows the first pages and
+    reads on as you scroll, however many pictures have piled up. ``q`` searches the prompt, model
+    and tags; ``favorites`` keeps the starred pictures."""
+    at, _, last_id = str(before or "").partition(":")
+    try:
+        cursor = (int(at), last_id) if last_id else None
+    except ValueError:
+        cursor = None
+    items, more = ImageStudioItems.page_items(
+        user.id, kind, limit=limit, before=cursor, query=q, favorites=favorites
+    )
+    try:
+        ImageStudioMigrations.close_if_account_has_data(user.id)
+    except Exception as exc:
+        log.warning("Failed to record image studio migration state: %s", exc)
+    return {
+        "items": items,
+        "next": f"{items[-1].created_at}:{items[-1].id}" if more and items else None,
+    }
 
 
 @router.post("/items/upsert", response_model=list[ImageStudioItemModel])

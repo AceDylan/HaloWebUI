@@ -384,6 +384,7 @@
 	"Discussion uses the first {{count}} selected models": "讨论将使用前 {{count}} 个已选模型",
 	"Discussing": "讨论中",
 	"Elapsed": "耗时",
+	"Failed to load": "加载失败",
 	"Failed to load models": "模型加载失败",
 	"Loading models...": "正在加载模型...",
 	"Multi-model discussion": "多模型讨论",

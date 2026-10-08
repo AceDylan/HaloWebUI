@@ -101,3 +101,33 @@ describe('TeamsHome handoff', () => {
 		expect(api.createTeam.mock.calls[0][2]).toBeNull();
 	});
 });
+
+describe('TeamsHome list', () => {
+	it('reads one filter of the whole history from the server, with the counts it sends', async () => {
+		const team = (id: string, status: string, phase: string | null = null) => ({
+			id,
+			title: `任务 ${id}`,
+			goal: '目标',
+			status,
+			phase,
+			chat_id: null,
+			created_at: 1,
+			updated_at: 1700000000,
+			finished_at: null,
+			deletable: true
+		});
+		api.listTeams.mockImplementation(async (_token: string, opts: any) =>
+			opts?.bucket === 'done'
+				? { teams: [team('d1', 'running', 'completed')], next: null, total: 1, counts: { all: 40, active: 3, review: 1, done: 30, ended: 6 } }
+				: { teams: [team('a1', 'running', 'running')], next: '1700000000:a1', total: 40, counts: { all: 40, active: 3, review: 1, done: 30, ended: 6 } }
+		);
+		const target = await mount();
+		await until(() => !!target.querySelector('[data-filter="done"]'));
+		expect(api.listTeams.mock.calls[0][1]).toMatchObject({ limit: 30, bucket: null });
+		expect(target.querySelector('[data-filter="done"]')!.textContent).toContain('30');
+		expect(target.querySelector('[data-load-more]')).toBeTruthy();
+		(target.querySelector('[data-filter="done"]') as any).click();
+		await until(() => api.listTeams.mock.calls.some((call: any[]) => call[1]?.bucket === 'done'));
+		await until(() => !target.querySelector('[data-load-more]'));
+	});
+});

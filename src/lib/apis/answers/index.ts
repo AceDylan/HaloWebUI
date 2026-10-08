@@ -1,4 +1,5 @@
 import { WEBUI_API_BASE_URL } from '$lib/constants';
+import { pageQuery, type PageQuery } from '$lib/apis/paging';
 import type {
 	DiscussContext,
 	DiscussResearch,
@@ -164,8 +165,18 @@ const request = async <T>(token: string, method: string, path: string, body?: un
 
 const id = (value: string) => encodeURIComponent(value);
 
-export const listAnswers = (token: string, archived = false) =>
-	request<AnswerSummary[]>(token, 'GET', archived ? '/?archived=true' : '/');
+/** One page of the runs, newest first; `next` reads the page after (`before`), null at the end. */
+export type AnswerPage = {
+	items: AnswerSummary[];
+	next: string | null;
+	/** How many there are (with the first page). */
+	total: number | null;
+	/** How many are being answered now. */
+	live: number;
+};
+
+export const listAnswers = (token: string, opts: PageQuery = {}) =>
+	request<AnswerPage>(token, 'GET', pageQuery(opts));
 
 export const listAnswerAssistants = (token: string) =>
 	request<{ assistants: LibraryAssistant[]; may_create: boolean }>(token, 'GET', '/assistants');

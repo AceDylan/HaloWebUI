@@ -302,7 +302,7 @@ def test_a_new_assistant_is_created_and_answers_in_an_ordinary_chat(env):
     kinds = [e["data"]["kind"] for e in env.events if e["type"] == "answer"]
     assert "delta" in kinds and kinds[-1] == "end"
 
-    listed = asyncio.run(api.list_answers(USER))
+    listed = asyncio.run(api.list_answers(USER))["items"]
     assert listed[0]["id"] == chat_id and listed[0]["assistant"]["name"] == "合同审查"
     library = asyncio.run(api.list_assistants(env.request, USER))
     assert library["may_create"] is True and library["assistants"][0]["name"] == "合同审查"
@@ -496,7 +496,7 @@ def test_an_error_is_reported_and_a_restart_reads_as_interrupted(env):
     stored["answer"] = {**stored["answer"], "status": "streaming", "startedAt": 1}
     chats_mod.Chats.upsert_message_to_chat_by_id_and_message_id(chat_id, message_id, {"answer_desk": stored})
     chats_mod.Chats.set_chat_meta_value_by_id(chat_id, "answer_desk", {"status": "answering"})
-    assert asyncio.run(api.list_answers(USER))[0]["status"] == "interrupted"
+    assert asyncio.run(api.list_answers(USER))["items"][0]["status"] == "interrupted"
     run = asyncio.run(api.get_answer(chat_id, USER))["run"]
     assert run["status"] == "interrupted" and run["answer"]["status"] == "stopped"
 
@@ -584,7 +584,8 @@ def test_a_chat_message_becomes_a_run_and_its_answer_comes_back(env, monkeypatch
     }
 
     async def scenario():
-        await mode_dispatch.run_mode_dispatch(env.request, form, USER, {"chat_id": origin, "message_id": "r1"}, "hermes-agent", "answer")
+        metadata = {"chat_id": origin, "message_id": "r1", "session_id": "sid-1"}
+        await mode_dispatch.run_mode_dispatch(env.request, form, USER, metadata, "hermes-agent", "answer")
         await jobs[0]
         reply = chats_mod.ChatTable().get_chat_by_id(origin).chat["history"]["messages"]["r1"]
         await _settle(reply["mode_dispatch"]["chat_id"])
@@ -611,6 +612,8 @@ def test_a_chat_message_becomes_a_run_and_its_answer_comes_back(env, monkeypatch
     assert out == {"chat_id": origin, "posted": True, "duplicate": False}
     sent = posted[0]
     assert sent["chat_id"] == origin and sent["source"] == "answer" and sent["quiet"] is True
+    # the tab it was sent from counts as someone looking: no away push while it is open
+    assert sent["session_id"] == "sid-1" and run_chat_id not in mode_dispatch._sessions
     assert sent["notice"].startswith("[精答结果] 「押金多久退？」由「⚖️合同审查」回答，下面是它的回答。")
     assert sent["run_id"] == f"answer:{run_chat_id}:{run['id']}"
     assert sent["content"].endswith("的回答：要点一。")
@@ -646,3 +649,26 @@ def test_a_dispatch_without_words_or_in_a_temporary_chat_says_why(env, monkeypat
     temporary = asyncio.run(go("local", {"messages": [{"role": "user", "content": "问题"}]}))
     assert "临时对话" in temporary["content"]
     assert mode_dispatch.message_file_ids({"files": [*pictures, {"type": "file", "id": "f-2"}, {"type": "file", "file": {"id": "f-2"}}]}) == ["f-1", "f-2"]
+
+
+def test_the_list_comes_a_page_at_a_time_and_searches_the_whole_history(env):
+    env.state["plan"] = CREATE_PLAN
+
+    async def scenario():
+        out = []
+        for q in ("押金多久退", "合同怎么签", "房租能不能涨"):
+            detail = await _ask(env, question=q)
+            await _settle(detail["id"])
+            out.append(detail["id"])
+        return out
+
+    ids = asyncio.run(scenario())
+    first = asyncio.run(api.list_answers(USER, limit=2))
+    rest = asyncio.run(api.list_answers(USER, limit=2, before=first["next"]))
+    assert first["total"] == 3 and rest["next"] is None
+    # a refresh of the first page while a run goes does not count the history again
+    assert asyncio.run(api.list_answers(USER, limit=2, count=False))["total"] is None
+    assert sorted(d["id"] for d in first["items"] + rest["items"]) == sorted(ids)
+    found = asyncio.run(api.list_answers(USER, q="房租"))
+    assert [d["id"] for d in found["items"]] == [ids[2]]
+    assert asyncio.run(api.list_answers(USER, status="live"))["items"] == []

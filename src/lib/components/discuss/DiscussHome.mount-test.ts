@@ -70,28 +70,33 @@ beforeEach(() => {
 		{ id: 'f.claude-chat', name: 'claude-chat', selection_id: 'm-claude' }
 	]);
 	stores.config.set({ hermes_agent_model_ids: ['hermes-agent'] } as any);
-	api.listDiscussions.mockResolvedValue([
-		{
-			id: 'd1',
-			title: '数据库选型',
-			updated_at: Math.floor(Date.now() / 1000) - 60,
-			created_at: 1,
-			folder_id: null,
-			archived: false,
-			running: false,
-			mode: 'debate',
-			rounds: 3,
-			seats: [
-				{ model: 'm-gpt', name: 'gpt-chat', label: 'gpt-chat', role: '正方' },
-				{ model: 'm-ds', name: 'deepseek-chat', label: 'deepseek-chat', role: '反方' }
-			],
-			moderator: { model: 'm-claude', name: 'claude-chat' },
-			status: 'done',
-			asks: 2,
-			question: '用哪个？',
-			preview: '用 Postgres'
-		}
-	]);
+	api.listDiscussions.mockResolvedValue({
+		items: [
+			{
+				id: 'd1',
+				title: '数据库选型',
+				updated_at: Math.floor(Date.now() / 1000) - 60,
+				created_at: 1,
+				folder_id: null,
+				archived: false,
+				running: false,
+				mode: 'debate',
+				rounds: 3,
+				seats: [
+					{ model: 'm-gpt', name: 'gpt-chat', label: 'gpt-chat', role: '正方' },
+					{ model: 'm-ds', name: 'deepseek-chat', label: 'deepseek-chat', role: '反方' }
+				],
+				moderator: { model: 'm-claude', name: 'claude-chat' },
+				status: 'done',
+				asks: 2,
+				question: '用哪个？',
+				preview: '用 Postgres'
+			}
+		],
+		next: null,
+		total: null,
+		live: 0
+	});
 });
 
 afterEach(() => {

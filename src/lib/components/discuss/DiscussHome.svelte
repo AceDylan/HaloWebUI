@@ -21,6 +21,8 @@
 	import { originLabel, takeHandoff, type HandoffOrigin } from '$lib/utils/handoff';
 	import { WEBUI_API_BASE_URL } from '$lib/constants';
 	import HandoffBack from '$lib/components/common/HandoffBack.svelte';
+	import LoadMore from '$lib/components/common/LoadMore.svelte';
+	import { appendPage, cursorAfter, mergeHead } from '$lib/utils/paged';
 	import { uploadFileReliably } from '$lib/utils/reliable-upload';
 	import { isVideoFile, videoContactSheet } from '$lib/utils/video-contact-sheet';
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
@@ -135,7 +137,16 @@
 	let composer: HTMLTextAreaElement;
 	let isMac = false;
 
+	// the history a page at a time (newest first); filter, search and the live count on the server
+	const PAGE = 30;
 	let items: DiscussionSummary[] = [];
+	let more = false;
+	let loadingMore = false;
+	let total: number | null = null;
+	let liveTotal = 0;
+	let searched = '';
+	let filtered: 'all' | 'live' | 'ended' = 'all';
+	let searchTimer: ReturnType<typeof setTimeout> | null = null;
 	let loaded = false;
 	let loadError = '';
 	let filter: 'all' | 'live' | 'ended' = 'all';
@@ -352,9 +363,29 @@
 		composer?.focus();
 	};
 
-	const load = async () => {
+	const keyOf = (d: DiscussionSummary): [number, string] => [d.updated_at, d.id];
+	const statusOf = (f: typeof filter) => (f === 'all' ? undefined : f);
+	// the first page: afresh (a new filter or search), or folded into the pages already read
+	const load = async (afresh = false) => {
+		const q = searched;
+		const f = filtered;
 		try {
-			items = await listDiscussions(localStorage.token);
+			const fresh = afresh || !loaded;
+			const page = await listDiscussions(localStorage.token, {
+				limit: PAGE,
+				q,
+				status: statusOf(f),
+				...(fresh ? {} : { count: false })
+			});
+			if (q !== searched || f !== filtered) return; // a newer one went out meanwhile
+			if (fresh) {
+				items = page.items;
+				more = !!page.next;
+			} else {
+				({ items, more } = mergeHead(items, page.items, !!page.next, more, (d) => d.id, keyOf));
+			}
+			if (page.total !== null) total = page.total;
+			liveTotal = page.live ?? 0;
 			loadError = '';
 		} catch (e: any) {
 			loadError = e?.message || '加载失败';
@@ -362,19 +393,50 @@
 			loaded = true;
 		}
 	};
+	const loadMore = async () => {
+		const last = items[items.length - 1];
+		if (loadingMore || !more || !last) return;
+		loadingMore = true;
+		const q = searched;
+		const f = filtered;
+		try {
+			const page = await listDiscussions(localStorage.token, {
+				limit: PAGE,
+				q,
+				status: statusOf(f),
+				before: cursorAfter(keyOf(last))
+			});
+			if (q !== searched || f !== filtered) return;
+			items = appendPage(items, page.items, (d) => d.id);
+			more = !!page.next;
+		} catch (e: any) {
+			toast.error(e?.message || '加载失败');
+		} finally {
+			loadingMore = false;
+		}
+	};
+	// a filter at once, a search a moment after typing: both over the whole history
+	$: if (filter !== filtered) {
+		filtered = filter;
+		load(true);
+	}
+	$: if (query.trim() !== searched) {
+		if (searchTimer) clearTimeout(searchTimer);
+		const wanted = query.trim();
+		searchTimer = setTimeout(() => {
+			searched = wanted;
+			load(true);
+		}, 300);
+	}
 
 	const FILTERS = [
 		{ value: 'all', label: '全部' },
 		{ value: 'live', label: '进行中' },
 		{ value: 'ended', label: '已结束' }
 	] as const;
-	$: needle = query.trim().toLowerCase();
-	$: shown = items.filter(
-		(d) =>
-			(filter === 'all' || (filter === 'live' ? isLive(d.status) || d.running : !(isLive(d.status) || d.running))) &&
-			(!needle || `${d.title}\n${d.question}\n${d.preview}`.toLowerCase().includes(needle))
-	);
-	$: liveCount = items.filter((d) => isLive(d.status) || d.running).length;
+	// a run that ended while the 进行中 filter is on leaves it at the next refresh
+	$: shown = items;
+	$: liveCount = Math.max(liveTotal, items.filter((d) => isLive(d.status) || d.running).length);
 
 	const askDelete = (d: DiscussionSummary) => {
 		pendingDelete = d;
@@ -387,6 +449,7 @@
 		try {
 			await deleteDiscussion(localStorage.token, d.id);
 			items = items.filter((x) => x.id !== d.id);
+			if (total !== null) total = Math.max(0, total - 1);
 			toast.success('已删除');
 		} catch (e: any) {
 			toast.error(e?.message || '删除失败');
@@ -398,13 +461,15 @@
 		warp(520);
 		load();
 		loadLibrary();
+		// while anything is under way, the first page again (never every page read)
 		timer = setInterval(() => {
-			if (!document.hidden && items.some((d) => isLive(d.status) || d.running)) load();
+			if (!document.hidden && liveCount > 0) load();
 		}, 4000);
 		tick().then(resize);
 	});
 	onDestroy(() => {
 		if (timer) clearInterval(timer);
+		if (searchTimer) clearTimeout(searchTimer);
 		clearModeDraft('discuss');
 	});
 </script>
@@ -428,7 +493,7 @@
 	<div class="tm-scroll flex-1 overflow-y-auto px-4 pb-16">
 		<div class="mx-auto flex max-w-3xl flex-col pt-6 sm:pt-14">
 			<header class="halo-mode-hero tm-rise relative mb-6 flex flex-col gap-3">
-				<ModeEmblem mode="discuss" stats={[{ k: 'SESSIONS', v: items.length }, { k: 'LIVE', v: liveCount }]} />
+				<ModeEmblem mode="discuss" stats={[{ k: 'SESSIONS', v: total ?? items.length }, { k: 'LIVE', v: liveCount }]} />
 				<div class="flex items-center gap-2">
 					<span class="tm-eyebrow halo-mode-eyebrow">Halo Roundtable</span>
 					<span class="h-3 w-px bg-gray-300 dark:bg-gray-700" aria-hidden="true" />
@@ -666,7 +731,7 @@
 			<section class="tm-rise mt-10" style="--i:3" aria-label="我的讨论">
 				<div class="mb-3 flex flex-wrap items-center gap-3">
 					<h3 class="tm-display text-lg font-semibold text-gray-900 dark:text-gray-50">我的讨论</h3>
-					<span class="tm-num text-sm text-gray-400">{items.length}</span>
+					<span class="tm-num text-sm text-gray-400">{total ?? items.length}</span>
 					<input
 						type="search"
 						bind:value={query}
@@ -692,7 +757,7 @@
 					<p class="text-sm text-red-600 dark:text-red-300">{loadError}</p>
 				{:else if !shown.length}
 					<div class="flex flex-col items-center gap-2 py-12 text-center text-sm text-gray-400 dark:text-gray-500">
-						{items.length ? '没有符合条件的讨论' : '还没有讨论。写下一个问题，让几个模型一起想。'}
+						{searched || filtered !== 'all' ? '没有符合条件的讨论' : '还没有讨论。写下一个问题，让几个模型一起想。'}
 					</div>
 				{:else}
 					<ul class="flex flex-col gap-2" data-discuss-list>
@@ -740,6 +805,7 @@
 							</li>
 						{/each}
 					</ul>
+					<LoadMore {more} loading={loadingMore} onMore={loadMore} {total} shown={items.length} />
 				{/if}
 			</section>
 		</div>

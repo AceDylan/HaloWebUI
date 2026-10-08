@@ -69,6 +69,7 @@
 	import {
 		clearImageStudioItems,
 		deleteImageStudioItem,
+		getImageStudioItemPage,
 		getImageStudioItems,
 		importLegacyImageStudioItems,
 		upsertImageStudioItems,
@@ -108,6 +109,7 @@
 	} from '$lib/utils/image-handoff';
 	import { takeHandoff, type HandoffOrigin } from '$lib/utils/handoff';
 	import HandoffBack from '$lib/components/common/HandoffBack.svelte';
+	import LoadMore from '$lib/components/common/LoadMore.svelte';
 	import { warp } from '$lib/components/scifi/scifi';
 	import { clearModeDraft, setModeDraft } from '$lib/components/scifi/mode-relay';
 	import { goto, replaceState } from '$app/navigation';
@@ -253,13 +255,22 @@
 	const idleTagChipClass =
 		'border-gray-200 bg-white text-gray-600 hover:bg-gray-100 dark:border-gray-700 dark:bg-gray-900/60 dark:text-gray-300 dark:hover:bg-gray-800';
 
-	// 图库相关
+	// 图库相关 — a page at a time, newest first; the search and 收藏 are read from the server, so
+	// they cover every picture, not only the pages scrolled to.
+	const GALLERY_PAGE = 48;
+	const HISTORY_PAGE = 30;
 	let galleryImages: GalleryImage[] = [];
 	let gallerySearchQuery = '';
 	let gallerySortBy = 'recent';
+	let galleryNext: string | null = null;
+	let galleryLoadingMore = false;
+	let galleryAsked = { q: '', favorites: false };
+	let gallerySearchTimer: ReturnType<typeof setTimeout> | null = null;
 
-	// 历史记录相关
+	// 历史记录相关 (a page at a time too)
 	let generationHistory: GenerationHistory[] = [];
+	let historyNext: string | null = null;
+	let historyLoadingMore = false;
 
 	let generatedImages: GeneratedImage[] = [];
 	let lastPrompt = '';
@@ -834,10 +845,89 @@
 		}
 	};
 
+	const galleryOf = (rows: unknown[]) => partitionImageStudioItems(rows).gallery;
+	const historyOf = (rows: unknown[]) => partitionImageStudioItems(rows).history;
+	const galleryQuery = () => ({ q: gallerySearchQuery.trim(), favorites: gallerySortBy === 'favorites' });
+
+	// The gallery's first page again for a new search or 收藏, a moment after typing.
+	const reloadGallery = async () => {
+		const asked = galleryQuery();
+		galleryAsked = asked;
+		try {
+			const page = await getImageStudioItemPage(localStorage.token, 'gallery', {
+				limit: GALLERY_PAGE,
+				...asked
+			});
+			if (galleryAsked !== asked) return; // a newer search went out meanwhile
+			galleryImages = galleryOf(page.items);
+			galleryNext = page.next;
+		} catch (error) {
+			console.warn('Failed to search the gallery', error);
+		}
+	};
+	$: if (studioDataLoaded) {
+		const wanted = { q: gallerySearchQuery.trim(), favorites: gallerySortBy === 'favorites' };
+		if (wanted.q !== galleryAsked.q || wanted.favorites !== galleryAsked.favorites) {
+			if (gallerySearchTimer) clearTimeout(gallerySearchTimer);
+			gallerySearchTimer = setTimeout(reloadGallery, wanted.favorites !== galleryAsked.favorites ? 0 : 300);
+		}
+	}
+	const loadMoreGallery = async () => {
+		if (galleryLoadingMore || !galleryNext) return;
+		galleryLoadingMore = true;
+		const asked = galleryAsked;
+		try {
+			const page = await getImageStudioItemPage(localStorage.token, 'gallery', {
+				limit: GALLERY_PAGE,
+				before: galleryNext,
+				...asked
+			});
+			if (galleryAsked !== asked) return;
+			const seen = new Set(galleryImages.map((image) => image.id));
+			galleryImages = [...galleryImages, ...galleryOf(page.items).filter((image) => !seen.has(image.id))];
+			galleryNext = page.next;
+		} catch (error) {
+			console.warn('Failed to load more of the gallery', error);
+			toast.error($i18n.t('Failed to load'));
+		} finally {
+			galleryLoadingMore = false;
+		}
+	};
+	const loadMoreHistory = async () => {
+		if (historyLoadingMore || !historyNext) return;
+		historyLoadingMore = true;
+		try {
+			const page = await getImageStudioItemPage(localStorage.token, 'history', {
+				limit: HISTORY_PAGE,
+				before: historyNext
+			});
+			const seen = new Set(generationHistory.map((item) => item.id));
+			generationHistory = [
+				...generationHistory,
+				...historyOf(page.items).filter((item) => !seen.has(item.id))
+			];
+			historyNext = page.next;
+		} catch (error) {
+			console.warn('Failed to load more of the history', error);
+			toast.error($i18n.t('Failed to load'));
+		} finally {
+			historyLoadingMore = false;
+		}
+	};
+
+	// Templates whole (a short list the chat composer reads too); the gallery and the history a
+	// page at a time — they grow with every picture.
 	const loadStudioData = async () => {
 		let server: ImageStudioData;
 		try {
-			server = partitionImageStudioItems(await getImageStudioItems(localStorage.token));
+			const [templates, gallery, history] = await Promise.all([
+				getImageStudioItems(localStorage.token, 'template'),
+				getImageStudioItemPage(localStorage.token, 'gallery', { limit: GALLERY_PAGE }),
+				getImageStudioItemPage(localStorage.token, 'history', { limit: HISTORY_PAGE })
+			]);
+			server = partitionImageStudioItems([...templates, ...gallery.items, ...history.items]);
+			galleryNext = gallery.next;
+			historyNext = history.next;
 		} catch (error) {
 			console.warn('Failed to load image studio data', error);
 			// Keep the page usable with whatever this browser still holds.
@@ -1269,6 +1359,7 @@
 		try {
 			await clearImageStudioItems(localStorage.token, 'history');
 			generationHistory = [];
+			historyNext = null;
 			toast.success($i18n.t('History cleared'));
 		} catch (error) {
 			console.warn('Failed to clear history', error);
@@ -1782,6 +1873,7 @@
 		if (imageModelSearchTimer) {
 			clearTimeout(imageModelSearchTimer);
 		}
+		if (gallerySearchTimer) clearTimeout(gallerySearchTimer);
 		stopElapsedTimer();
 		clearModeDraft('studio');
 	});
@@ -2857,6 +2949,12 @@
 							</div>
 						{/each}
 					</div>
+					<LoadMore
+						more={!!galleryNext}
+						loading={galleryLoadingMore}
+						onMore={loadMoreGallery}
+						shown={galleryImages.length}
+					/>
 				{:else}
 					<div class="workspace-empty-state">
 						<div
@@ -3008,6 +3106,12 @@
 							</div>
 						{/each}
 					</div>
+					<LoadMore
+						more={!!historyNext}
+						loading={historyLoadingMore}
+						onMore={loadMoreHistory}
+						shown={generationHistory.length}
+					/>
 				{:else}
 					<div class="workspace-empty-state">
 						<div

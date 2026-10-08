@@ -639,8 +639,43 @@ const request = async <T>(
 
 const id = (value: string) => encodeURIComponent(value);
 
-export const listTeams = (token: string, chatId?: string | null) =>
-	request<{ teams: Team[] }>(token, 'GET', chatId ? `/?chat_id=${id(chatId)}` : '/');
+/** The 协作台 list's filters. */
+export type TeamBucket = 'active' | 'review' | 'done' | 'ended';
+
+/**
+ * The user's teams. A page of the history, newest first (`before` = the `next` of the page before,
+ * null at the end), in one filter and matching `q`; the first page brings `counts` per filter.
+ * `chatId`: the teams of one chat. `scope: 'current'`: what the sidebar badge follows (at work,
+ * waiting, or changed in the last two hours), never the whole history.
+ */
+export type TeamPage = {
+	teams: Team[];
+	next: string | null;
+	total: number | null;
+	counts: (Record<TeamBucket, number> & { all: number }) | null;
+};
+
+export const listTeams = (
+	token: string,
+	opts: {
+		chatId?: string | null;
+		limit?: number;
+		before?: string | null;
+		q?: string;
+		bucket?: TeamBucket | null;
+		scope?: 'current';
+	} = {}
+) => {
+	const params = new URLSearchParams();
+	if (opts.chatId) params.set('chat_id', opts.chatId);
+	if (opts.limit) params.set('limit', String(opts.limit));
+	if (opts.before) params.set('before', opts.before);
+	if (opts.q?.trim()) params.set('q', opts.q.trim());
+	if (opts.bucket) params.set('bucket', opts.bucket);
+	if (opts.scope) params.set('scope', opts.scope);
+	const query = params.toString();
+	return request<TeamPage>(token, 'GET', query ? `/?${query}` : '/');
+};
 
 /** ``project``: a repository path, "none" for a fresh directory, empty = the one the goal names. */
 export const createTeam = (

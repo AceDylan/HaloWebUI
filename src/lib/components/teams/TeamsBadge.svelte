@@ -77,7 +77,8 @@
 		if (stopped || destroyed || typeof localStorage === 'undefined' || !localStorage.token) return;
 		if (document.visibilityState === 'hidden') return schedule();
 		try {
-			const { teams } = await listTeams(localStorage.token);
+			// teams at work, waiting, or changed lately: never the whole history
+			const { teams } = await listTeams(localStorage.token, { scope: 'current' });
 			active = teams.filter(isActive).length;
 			review = teams.filter((t) => t.status === 'plan_ready').length;
 			// each team's chat in the history shows what the team is doing

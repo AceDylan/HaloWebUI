@@ -19,6 +19,11 @@ from sqlalchemy import or_, func, select, and_, text, cast
 from sqlalchemy.orm.attributes import flag_modified
 from sqlalchemy.sql import exists
 
+
+def _like_escape(value: str) -> str:
+    """``value`` as a literal inside a LIKE pattern (escape character: backslash)."""
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
 ####################
 # Chat DB Schema
 ####################
@@ -1379,6 +1384,113 @@ class ChatTable:
         except Exception:
             log.exception("set_chat_meta_value_by_id: %s", id)
             return False
+
+    def _meta_key_query(
+        self, db, user_id: str, key: str, *, include_archived: bool, query: Optional[str], ids: Optional[list[str]]
+    ):
+        """The user's chats whose meta mentions ``key`` (a cheap textual pre-filter; callers check
+        it exactly), optionally only ``ids``, and matching ``query`` in the title or the meta (the
+        summary a mode keeps there: question, preview, assistant)."""
+        meta_text = cast(Chat.meta, Text)
+        q = db.query(
+            Chat.id,
+            Chat.title,
+            Chat.updated_at,
+            Chat.created_at,
+            Chat.folder_id,
+            Chat.archived,
+            Chat.meta,
+        ).filter(Chat.user_id == user_id)
+        if not include_archived:
+            q = q.filter(or_(Chat.archived == False, Chat.archived.is_(None)))  # noqa: E712
+        q = q.filter(meta_text.like(f'%"{key}"%'))
+        if ids is not None:
+            q = q.filter(Chat.id.in_(ids or [""]))
+        needle = (query or "").strip()[:200]
+        if needle:
+            # the JSON column keeps non-ASCII as \uXXXX escapes: match both spellings
+            forms = {needle, json.dumps(needle)[1:-1]}
+            q = q.filter(
+                or_(
+                    Chat.title.ilike(f"%{_like_escape(needle)}%", escape="\\"),
+                    *(meta_text.ilike(f"%{_like_escape(form)}%", escape="\\") for form in forms),
+                )
+            )
+        return q
+
+    def page_chats_with_meta_key(
+        self,
+        user_id: str,
+        key: str,
+        *,
+        limit: int = 30,
+        before: Optional[tuple[int, str]] = None,
+        query: Optional[str] = None,
+        include_archived: bool = False,
+        ids: Optional[list[str]] = None,
+        exclude_ids: Optional[set] = None,
+    ) -> tuple[list[dict], bool]:
+        """One page of the chats a mode keeps (精答, 讨论台: ``meta[key]``), newest first —
+        by ``updated_at``, then id — after ``before`` (the last row of the page before). Returns
+        (rows, whether more follow). Only rows are read, never the chat JSON, and only as many as
+        the page needs, however long the history is."""
+        limit = max(1, min(int(limit), 200))
+        batch = max(limit + 1, 50)
+        out: list[dict] = []
+        cursor = before
+        try:
+            while True:
+                with get_db() as db:
+                    q = self._meta_key_query(
+                        db, user_id, key, include_archived=include_archived, query=query, ids=ids
+                    )
+                    if cursor is not None:
+                        at, last_id = cursor
+                        q = q.filter(
+                            or_(Chat.updated_at < at, and_(Chat.updated_at == at, Chat.id < last_id))
+                        )
+                    rows = q.order_by(Chat.updated_at.desc(), Chat.id.desc()).limit(batch).all()
+                for row in rows:
+                    meta = row[6] if isinstance(row[6], dict) else {}
+                    if not isinstance(meta.get(key), dict) or (exclude_ids and row[0] in exclude_ids):
+                        continue
+                    out.append(
+                        {
+                            "id": row[0],
+                            "title": row[1],
+                            "updated_at": row[2],
+                            "created_at": row[3],
+                            "folder_id": row[4],
+                            "archived": bool(row[5]),
+                            "meta": meta,
+                        }
+                    )
+                    if len(out) > limit:
+                        return out[:limit], True
+                if len(rows) < batch:
+                    return out, False
+                cursor = (rows[-1][2], rows[-1][0])
+        except Exception:
+            log.exception("page_chats_with_meta_key: %s", user_id)
+            return out[:limit], False
+
+    def count_chats_with_meta_key(
+        self, user_id: str, key: str, *, query: Optional[str] = None, include_archived: bool = False
+    ) -> int:
+        """How many chats a mode keeps for the user (the textual pre-filter: close enough for a
+        count shown next to the list)."""
+        try:
+            with get_db() as db:
+                return (
+                    self._meta_key_query(
+                        db, user_id, key, include_archived=include_archived, query=query, ids=None
+                    )
+                    .order_by(None)
+                    .count()
+                )
+        except Exception:
+            log.exception("count_chats_with_meta_key: %s", user_id)
+            return 0
 
     def get_chats_with_meta_key_by_user_id(
         self, user_id: str, key: str, include_archived: bool = False, limit: int = 300

@@ -43,7 +43,8 @@
 		if (loadedOnce || typeof localStorage === 'undefined' || !localStorage.token) return;
 		loadedOnce = true;
 		try {
-			const items = await listDiscussions(localStorage.token);
+			// the discussions under way only (from memory on the server), never the whole history
+			const { items } = await listDiscussions(localStorage.token, { status: 'live' });
 			running.set(new Set(items.filter((d) => d.running).map((d) => d.id)));
 		} catch {
 			// no list: the socket still fills it in

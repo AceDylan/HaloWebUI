@@ -12,11 +12,31 @@ from typing import Optional
 
 from open_webui.internal.db import Base, get_db
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy import JSON, BigInteger, Column, Index, String, Text
+from sqlalchemy import JSON, BigInteger, Column, Index, String, Text, and_, func, not_, or_
 
 # planning → plan_ready | plan_failed → (approve) starting → running | start_failed; cancelled
 TEAM_STATUSES = ("planning", "plan_ready", "plan_failed", "starting", "start_failed", "running", "cancelled")
 TEAM_LIST_LIMIT = 100
+
+# The 协作台 list's filters (TeamsHome bucketOf): 进行中 / 待批准 / 已完成 / 已结束.
+TEAM_BUCKETS = ("active", "review", "done", "ended")
+_ENDED_STATUSES = ("cancelled", "plan_failed", "start_failed", "stopped")
+
+
+def bucket_of(status: Optional[str], phase: Optional[str]) -> str:
+    """Which filter of the list a team is under (a running team by its board's phase)."""
+    state = (phase or "running") if status == "running" else (status or "")
+    if state == "plan_ready":
+        return "review"
+    if state == "completed":
+        return "done"
+    if state in _ENDED_STATUSES:
+        return "ended"
+    return "active"
+
+
+def _like_escape(value: str) -> str:
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
 class AgentTeam(Base):
@@ -65,6 +85,27 @@ class AgentTeamModel(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+def _bucket_condition(bucket: str):
+    """bucket_of as SQL."""
+    phase = func.coalesce(AgentTeam.phase, "")
+    running = AgentTeam.status == "running"
+    review = AgentTeam.status == "plan_ready"
+    done = or_(AgentTeam.status == "completed", and_(running, phase == "completed"))
+    ended = or_(AgentTeam.status.in_(_ENDED_STATUSES), and_(running, phase == "stopped"))
+    if bucket == "review":
+        return review
+    if bucket == "done":
+        return done
+    if bucket == "ended":
+        return ended
+    return not_(or_(review, done, ended))
+
+
+def _search_condition(query: str):
+    needle = f"%{_like_escape(query.strip()[:200])}%"
+    return or_(AgentTeam.title.ilike(needle, escape="\\"), AgentTeam.goal.ilike(needle, escape="\\"))
+
+
 class AgentTeamsTable:
     def insert(self, user_id: str, goal: str, chat_id: Optional[str], title: str,
                meta: Optional[dict] = None) -> AgentTeamModel:
@@ -98,6 +139,58 @@ class AgentTeamsTable:
             if chat_id:
                 query = query.filter(AgentTeam.chat_id == chat_id)
             rows = query.order_by(AgentTeam.updated_at.desc()).limit(max(1, min(limit, TEAM_LIST_LIMIT))).all()
+            return [AgentTeamModel.model_validate(row) for row in rows]
+
+    def page_for_user(self, user_id: str, *, limit: int = 30, before: Optional[tuple[int, str]] = None,
+                      query: Optional[str] = None, bucket: Optional[str] = None
+                      ) -> tuple[list[AgentTeamModel], bool]:
+        """One page of the user's teams, newest first (``updated_at``, then id), after ``before``
+        (the last row of the page before), in one filter of the list and matching ``query`` in the
+        title or the goal. Returns (teams, whether more follow)."""
+        limit = max(1, min(int(limit), TEAM_LIST_LIMIT))
+        with get_db() as db:
+            q = db.query(AgentTeam).filter(AgentTeam.user_id == user_id)
+            if bucket in TEAM_BUCKETS:
+                q = q.filter(_bucket_condition(bucket))
+            if (query or "").strip():
+                q = q.filter(_search_condition(query))
+            if before is not None:
+                at, last_id = before
+                q = q.filter(or_(AgentTeam.updated_at < at, and_(AgentTeam.updated_at == at, AgentTeam.id < last_id)))
+            rows = q.order_by(AgentTeam.updated_at.desc(), AgentTeam.id.desc()).limit(limit + 1).all()
+            return [AgentTeamModel.model_validate(row) for row in rows[:limit]], len(rows) > limit
+
+    def counts_for_user(self, user_id: str, query: Optional[str] = None) -> dict[str, int]:
+        """How many of the user's teams are under each filter (and in all), in one grouped read."""
+        counts = {"all": 0, **{bucket: 0 for bucket in TEAM_BUCKETS}}
+        with get_db() as db:
+            q = db.query(AgentTeam.status, AgentTeam.phase, func.count(AgentTeam.id)).filter(
+                AgentTeam.user_id == user_id)
+            if (query or "").strip():
+                q = q.filter(_search_condition(query))
+            for status, phase, n in q.group_by(AgentTeam.status, AgentTeam.phase).all():
+                counts[bucket_of(status, phase)] += int(n)
+                counts["all"] += int(n)
+        return counts
+
+    def list_current_for_user(self, user_id: str, since: int, limit: int = TEAM_LIST_LIMIT) -> list[AgentTeamModel]:
+        """The teams the sidebar badge follows: those at work or waiting for approval, and any that
+        changed since ``since`` (so it sees a team finish or fail) — never the whole history."""
+        with get_db() as db:
+            rows = (db.query(AgentTeam)
+                    .filter(AgentTeam.user_id == user_id)
+                    .filter(or_(_bucket_condition("active"), _bucket_condition("review"), AgentTeam.updated_at >= since))
+                    .order_by(AgentTeam.updated_at.desc(), AgentTeam.id.desc())
+                    .limit(max(1, min(limit, TEAM_LIST_LIMIT))).all())
+            return [AgentTeamModel.model_validate(row) for row in rows]
+
+    def list_without_chat(self, user_id: str, limit: int, exclude: Optional[set] = None) -> list[AgentTeamModel]:
+        """Teams from before teams had chats (no ``chat_id``), newest first."""
+        with get_db() as db:
+            q = db.query(AgentTeam).filter(AgentTeam.user_id == user_id, AgentTeam.chat_id.is_(None))
+            if exclude:
+                q = q.filter(AgentTeam.id.notin_(list(exclude)))
+            rows = q.order_by(AgentTeam.updated_at.desc()).limit(max(1, limit)).all()
             return [AgentTeamModel.model_validate(row) for row in rows]
 
     def update(self, team_id: str, user_id: str, *, expect_status: Optional[tuple] = None,

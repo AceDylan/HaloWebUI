@@ -307,6 +307,14 @@ async def backfill(request, user, teams: list[AgentTeamModel]) -> list[AgentTeam
     return [t.model_copy(update={"chat_id": made[t.id]}) if t.id in made else t for t in teams]
 
 
+async def backfill_missing(request, user) -> None:
+    """backfill for the user's teams that still have no chat, whichever page of the list is read
+    (one small indexed read when there are none)."""
+    missing = AgentTeams.list_without_chat(user.id, BACKFILL_LIMIT, exclude=_backfill_tried)
+    if missing:
+        await backfill(request, user, missing)
+
+
 async def follow_title(team_before: AgentTeamModel, team_after: Optional[AgentTeamModel]) -> None:
     """The lead named the team in its plan: the team's chat takes the name, unless the chat was
     renamed meanwhile (it still carries the old name) or is a chat of its own (another title)."""

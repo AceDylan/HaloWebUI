@@ -15,6 +15,7 @@ vi.mock('$lib/apis/images', () => images);
 const studio = vi.hoisted(() => ({
 	clearImageStudioItems: vi.fn(),
 	deleteImageStudioItem: vi.fn(),
+	getImageStudioItemPage: vi.fn(),
 	getImageStudioItems: vi.fn(),
 	importLegacyImageStudioItems: vi.fn(),
 	upsertImageStudioItems: vi.fn()
@@ -74,6 +75,7 @@ beforeEach(() => {
 		}
 	]);
 	studio.getImageStudioItems.mockResolvedValue([]);
+	studio.getImageStudioItemPage.mockResolvedValue({ items: [], next: null });
 	studio.upsertImageStudioItems.mockResolvedValue([]);
 });
 

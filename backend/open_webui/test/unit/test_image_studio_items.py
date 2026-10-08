@@ -235,3 +235,38 @@ def test_history_is_trimmed_to_the_newest_entries():
     assert len(items) == IMAGE_STUDIO_HISTORY_LIMIT
     assert items[0]["id"] == "history_new"
     assert ImageStudioItems.delete_items_by_user_id(user_id) is True
+
+
+def test_the_gallery_comes_a_page_at_a_time_with_search_and_favorites():
+    client = _client("pager")
+    items = []
+    for n in range(7):
+        items.append({
+            "id": f"g{n}",
+            "kind": "gallery",
+            "data": {"id": f"g{n}", "url": f"/f/{n}.png", "prompt": "一只猫" if n % 2 else "a dog",
+                     "model": "gpt-image", "tags": ["宠物"] if n == 4 else [], "favorite": n in (1, 5),
+                     "createdAt": 1_800_000_000_000 + n * 1000},
+        })
+    assert client.post("/api/v1/image-studio/items/upsert", json={"items": items}).status_code == 200
+
+    first = client.get("/api/v1/image-studio/items/page?kind=gallery&limit=3").json()
+    assert [i["id"] for i in first["items"]] == ["g6", "g5", "g4"] and first["next"]
+    second = client.get(f"/api/v1/image-studio/items/page?kind=gallery&limit=3&before={first['next']}").json()
+    third = client.get(f"/api/v1/image-studio/items/page?kind=gallery&limit=3&before={second['next']}").json()
+    assert [i["id"] for i in second["items"] + third["items"]] == ["g3", "g2", "g1", "g0"]
+    assert third["next"] is None
+
+    cats = client.get("/api/v1/image-studio/items/page", params={"kind": "gallery", "q": "猫"}).json()
+    assert [i["id"] for i in cats["items"]] == ["g5", "g3", "g1"]
+    tagged = client.get("/api/v1/image-studio/items/page", params={"kind": "gallery", "q": "宠物"}).json()
+    assert [i["id"] for i in tagged["items"]] == ["g4"]
+    # the url and other fields are not searched: "png" is in every url, in no prompt
+    assert client.get("/api/v1/image-studio/items/page", params={"kind": "gallery", "q": "png"}).json()["items"] == []
+    starred = client.get("/api/v1/image-studio/items/page?kind=gallery&favorites=true&limit=1").json()
+    assert [i["id"] for i in starred["items"]] == ["g5"] and starred["next"]
+    rest = client.get(f"/api/v1/image-studio/items/page?kind=gallery&favorites=true&before={starred['next']}").json()
+    assert [i["id"] for i in rest["items"]] == ["g1"] and rest["next"] is None
+    # someone else's gallery is not theirs to page through
+    assert _client("other").get("/api/v1/image-studio/items/page?kind=gallery").json()["items"] == []
+    assert client.get("/api/v1/image-studio/items/page?kind=template").status_code == 422

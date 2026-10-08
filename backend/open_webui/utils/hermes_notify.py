@@ -417,6 +417,7 @@ async def show_notification_report(
     push: bool = True,
     design: bool = True,
     max_chars: int = NOTIFICATION_CONTENT_MAX_CHARS,
+    session_id: Optional[str] = None,
 ) -> dict[str, Any]:
     """mode=display: show a finished background run's report as the reply, no model turn.
 
@@ -430,6 +431,8 @@ async def show_notification_report(
     ``push=False``: no away push (the sender already told the person elsewhere, e.g. a team's
     Telegram notice). ``design=False``: no HTML design pass (a team's conclusion has its own page).
     ``max_chars``: in-process callers with longer content (a team's complete result).
+    ``session_id``: the socket of the tab the work was started from, so the away push also counts
+    that tab as someone looking (presence.has_live_tab) — not only the registered sockets.
     """
     content = (content or "").strip()
     notice = (notice or "").strip() or DEFAULT_REPORT_NOTICE
@@ -491,6 +494,8 @@ async def show_notification_report(
             "html_visual_surface": HTML_VISUAL_WEB_SURFACE,
         },
     }
+    if session_id:
+        metadata["session_id"] = session_id
     emitter = get_event_emitter(metadata, update_db=False)
     try:
         await emitter(

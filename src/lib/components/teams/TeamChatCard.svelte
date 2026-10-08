@@ -5,7 +5,13 @@
 
 	import './teams.css';
 	import { chatId as currentChatId } from '$lib/stores';
-	import { followUpTeamConclusion, getTeam, type Team, type TeamStage } from '$lib/apis/teams';
+	import {
+		followUpTeamConclusion,
+		getTeam,
+		getTeamEvents,
+		type Team,
+		type TeamStage
+	} from '$lib/apis/teams';
 	import StageRail from './StageRail.svelte';
 	import StatusChip from './StatusChip.svelte';
 	import TeamAvatar from './TeamAvatar.svelte';
@@ -38,6 +44,40 @@
 	let destroyed = false;
 	let lastSeen = '';
 	let unchanged = 0;
+
+	// Hermes tells Telegram about a running team (a member's question, a failed task, the result)
+	// unless the team is in front of the user. The workbench says so while it is open; so does this
+	// card while its chat is on screen: the result comes back right here, a push would only repeat
+	// it. Every 12 s (Hermes' window is 25 s), until a quarter of an hour after the team finished
+	// (its done notice waits for the result and the lead's check).
+	const WATCH_MS = 12000;
+	const WATCH_AFTER_FINISH_MS = 15 * 60 * 1000;
+	let watchTimer: ReturnType<typeof setTimeout> | null = null;
+	let watchSeq = 0;
+	let settledSeenAt = 0;
+	$: if (settled && !settledSeenAt) settledSeenAt = Date.now();
+	// nothing left for Hermes to announce: gone, ended before it ran, or finished long enough ago
+	const watchOver = () => {
+		if (destroyed || gone) return true;
+		if (!settled) return false;
+		if (team?.status !== 'running') return true;
+		const finished = team.finished_at ? team.finished_at * 1000 : settledSeenAt;
+		return Date.now() - finished >= WATCH_AFTER_FINISH_MS;
+	};
+	const watch = async () => {
+		if (watchTimer) clearTimeout(watchTimer);
+		if (watchOver()) return;
+		// a team on the board only (planning has nothing Hermes would announce)
+		if (document.visibilityState !== 'hidden' && team?.status === 'running') {
+			try {
+				const page = await getTeamEvents(localStorage.token, teamId, watchSeq, 1, true);
+				watchSeq = Math.max(watchSeq, page.latest_seq ?? 0, page.next_after ?? 0);
+			} catch {
+				// best effort: at worst Telegram hears about it as before
+			}
+		}
+		if (!watchOver()) watchTimer = setTimeout(watch, WATCH_MS);
+	};
 
 	$: key = stage?.key ?? '';
 	$: settled = gone || SETTLED.has(key) || (team?.status === 'running' && team.phase === 'stopped');
@@ -146,19 +186,22 @@
 	};
 
 	const onVisibility = () => {
-		if (document.visibilityState === 'visible' && !settled) {
+		if (document.visibilityState !== 'visible') return;
+		if (!settled) {
 			unchanged = 0;
 			load();
 		}
+		void watch();
 	};
 
 	onMount(() => {
-		load();
+		load().then(() => watch());
 		document.addEventListener('visibilitychange', onVisibility);
 	});
 	onDestroy(() => {
 		destroyed = true;
 		if (timer) clearTimeout(timer);
+		if (watchTimer) clearTimeout(watchTimer);
 		if (typeof document !== 'undefined')
 			document.removeEventListener('visibilitychange', onVisibility);
 	});

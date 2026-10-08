@@ -203,3 +203,44 @@ def test_two_reads_at_once_write_one_chat(env):
     first, second = asyncio.run(both())
     assert len(Chats.get_chat_title_id_list_by_user_id("tc-7", include_folders=True)) == 1
     assert AgentTeams.get(old.id, "tc-7").chat_id in (first[0].chat_id, second[0].chat_id)
+
+
+def test_the_team_list_comes_a_page_at_a_time_with_server_filters_and_counts(env):
+    from open_webui.internal.db import get_db as _db
+    from open_webui.models.agent_teams import AgentTeam
+
+    user = "tc-page"
+    made = []
+    for n, (status, phase) in enumerate([("plan_ready", None), ("running", "running"), ("running", "completed"),
+                                         ("running", "completed"), ("plan_failed", None), ("running", "stopped"),
+                                         ("planning", None)]):
+        team = AgentTeams.insert(user, f"目标 {n}：{'看板' if n % 2 else '周报'}", None, f"任务 {n}")
+        with _db() as db:
+            db.query(AgentTeam).filter_by(id=team.id).update(
+                {"status": status, "phase": phase, "updated_at": 1_700_000_000 + n, "chat_id": f"chat-{n}"})
+            db.commit()
+        made.append(team.id)
+    client = _client(user)
+
+    first = client.get("/api/v1/teams/?limit=3").json()
+    assert [t["id"] for t in first["teams"]] == made[::-1][:3]  # newest first
+    assert first["next"] and first["counts"] == {"all": 7, "active": 2, "review": 1, "done": 2, "ended": 2}
+    second = client.get(f"/api/v1/teams/?limit=3&before={first['next']}").json()
+    third = client.get(f"/api/v1/teams/?limit=3&before={second['next']}").json()
+    assert third["next"] is None and second["counts"] is None  # counts come with the first page
+    assert [t["id"] for t in first["teams"] + second["teams"] + third["teams"]] == made[::-1]
+
+    done = client.get("/api/v1/teams/?bucket=done").json()
+    assert {t["id"] for t in done["teams"]} == {made[2], made[3]} and done["total"] == 2
+    ended = client.get("/api/v1/teams/?bucket=ended").json()
+    assert {t["id"] for t in ended["teams"]} == {made[4], made[5]}
+    searched = client.get("/api/v1/teams/", params={"q": "看板"}).json()
+    assert {t["id"] for t in searched["teams"]} == {made[1], made[3], made[5]} and searched["counts"]["all"] == 3
+
+    # the sidebar badge: at work or waiting, plus what changed lately — not the whole history
+    with _db() as db:
+        db.query(AgentTeam).filter(AgentTeam.id.in_([made[2], made[4]])).update(
+            {"updated_at": int(time.time())}, synchronize_session=False)
+        db.commit()
+    current = client.get("/api/v1/teams/?scope=current").json()
+    assert {t["id"] for t in current["teams"]} == {made[0], made[1], made[6], made[2], made[4]}

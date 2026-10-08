@@ -13,7 +13,7 @@ from typing import Literal, Optional
 
 from open_webui.internal.db import Base, get_db
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import JSON, BigInteger, Column, Index, Integer, String
+from sqlalchemy import JSON, BigInteger, Column, Index, Integer, String, Text, and_, cast, or_
 from sqlalchemy.exc import IntegrityError
 
 ImageStudioKind = Literal["template", "gallery", "history"]
@@ -101,6 +101,17 @@ class ImageStudioMigrationModel(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+def _like_escape(value: str) -> str:
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+def _matches(data: dict, needle: str) -> bool:
+    """The gallery's search: the prompt, the model or a tag contains ``needle`` (lower case)."""
+    tags = data.get("tags") if isinstance(data.get("tags"), list) else []
+    fields = [data.get("prompt"), data.get("model"), *tags]
+    return any(needle in str(value or "").lower() for value in fields)
+
+
 def image_studio_item_size(data: dict) -> int:
     return len(json.dumps(data, ensure_ascii=False).encode("utf-8"))
 
@@ -171,6 +182,61 @@ class ImageStudioItemsTable:
             if limit:
                 query = query.limit(limit)
             return [ImageStudioItemModel.model_validate(item) for item in query.all()]
+
+    def page_items(
+        self,
+        user_id: str,
+        kind: str,
+        *,
+        limit: int = 60,
+        before: Optional[tuple[int, str]] = None,
+        query: Optional[str] = None,
+        favorites: bool = False,
+    ) -> tuple[list[ImageStudioItemModel], bool]:
+        """One page of the user's gallery / history, newest first (``created_at``, then id),
+        after ``before`` (the last item of the page before); ``query`` matches the prompt, the
+        model or a tag, ``favorites`` keeps the starred pictures only. Returns (items, whether
+        more follow). The database narrows by text first; the exact match is checked here."""
+        limit = max(1, min(int(limit), IMAGE_STUDIO_MAX_ITEMS_PER_REQUEST))
+        needle = (query or "").strip().lower()[:200]
+        batch = max(limit + 1, 100)
+        out: list[ImageStudioItemModel] = []
+        cursor = before
+        while True:
+            with get_db() as db:
+                q = db.query(ImageStudioItem).filter_by(user_id=user_id, kind=kind)
+                data_text = cast(ImageStudioItem.data, Text)
+                if needle:
+                    # the JSON column keeps non-ASCII as \uXXXX escapes: match both spellings
+                    forms = {needle, json.dumps(needle)[1:-1]}
+                    q = q.filter(or_(*(data_text.ilike(f"%{_like_escape(f)}%", escape="\\") for f in forms)))
+                if favorites:
+                    q = q.filter(data_text.like('%"favorite"%'))
+                if cursor is not None:
+                    at, last_id = cursor
+                    q = q.filter(
+                        or_(
+                            ImageStudioItem.created_at < at,
+                            and_(ImageStudioItem.created_at == at, ImageStudioItem.id < last_id),
+                        )
+                    )
+                rows = (
+                    q.order_by(ImageStudioItem.created_at.desc(), ImageStudioItem.id.desc())
+                    .limit(batch)
+                    .all()
+                )
+                models = [ImageStudioItemModel.model_validate(row) for row in rows]
+            for item in models:
+                if favorites and item.data.get("favorite") is not True:
+                    continue
+                if needle and not _matches(item.data, needle):
+                    continue
+                out.append(item)
+                if len(out) > limit:
+                    return out[:limit], True
+            if len(rows) < batch:
+                return out, False
+            cursor = (models[-1].created_at, models[-1].id)
 
     def upsert_items(
         self, user_id: str, forms: list[ImageStudioItemForm]

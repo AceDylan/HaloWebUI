@@ -5,7 +5,11 @@ import { installDominoDom } from '$lib/test-support/domino-dom';
 
 installDominoDom('http://localhost/');
 
-const api = vi.hoisted(() => ({ getTeam: vi.fn(), followUpTeamConclusion: vi.fn() }));
+const api = vi.hoisted(() => ({
+	getTeam: vi.fn(),
+	followUpTeamConclusion: vi.fn(),
+	getTeamEvents: vi.fn(async () => ({ events: [], next_after: 7, has_more: false, latest_seq: 7, reconcile: [] }))
+}));
 vi.mock('$lib/apis/teams', () => api);
 const nav = vi.hoisted(() => ({ goto: vi.fn() }));
 vi.mock('$app/navigation', () => nav);
@@ -279,6 +283,33 @@ describe('TeamChatCard (派发方式「协作台」 in a chat)', () => {
 		expect(api.followUpTeamConclusion.mock.calls[0].slice(1)).toEqual(['team-d']);
 		// posted into the team's own chat, which is not the one on screen: go there
 		expect(nav.goto).toHaveBeenCalledWith('/c/chat-elsewhere');
+	});
+
+	it('on screen, the card tells Hermes the team is being watched (no Telegram notice for it)', async () => {
+		api.getTeamEvents.mockClear();
+		api.getTeam.mockResolvedValue({
+			team: { id: 'team-w', title: '周报', status: 'running', phase: 'running', member_count: 1, task_count: 2 },
+			live: {},
+			stage: { key: 'running', label: '执行中', at: nowTs(), steps: steps(2) }
+		});
+		await card({ teamId: 'team-w' });
+		const end = Date.now() + 5000;
+		while (!api.getTeamEvents.mock.calls.length && Date.now() < end) await sleep(10);
+		// visible=true: Hermes' "the page is in front of the user"; one event at most, from the start
+		expect(api.getTeamEvents.mock.calls[0].slice(1)).toEqual(['team-w', 0, 1, true]);
+		app.$destroy();
+		app = null;
+		target.remove();
+
+		// finished an hour ago: nothing left to announce, nothing to say
+		api.getTeamEvents.mockClear();
+		api.getTeam.mockResolvedValue({
+			...doneTeam,
+			team: { ...doneTeam.team, id: 'team-old', finished_at: nowTs() - 3600 }
+		});
+		await card({ teamId: 'team-old', history: { messages: {} } });
+		await sleep(80);
+		expect(api.getTeamEvents).not.toHaveBeenCalled();
 	});
 
 	it('a team deleted on the 协作台 leaves a quiet line, and the card stops asking', async () => {

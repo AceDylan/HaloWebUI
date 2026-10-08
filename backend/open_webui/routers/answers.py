@@ -228,7 +228,7 @@ def _start(request: Request, user, chat, run: dict) -> desk.LiveAnswer:
     question = run["question"]
     may_write = _may_write_library(request, user)
 
-    async def call_model(model_id: str, messages: list[dict]):
+    async def call_model(model_id: str, messages: list[dict], browse: bool = False):
         from open_webui.utils.chat import generate_chat_completion
 
         payload = {
@@ -237,6 +237,9 @@ def _start(request: Request, user, chat, run: dict) -> desk.LiveAnswer:
             "stream": True,
             "metadata": {"chat_id": chat_id, "message_id": run["id"], "task": "answer_desk"},
         }
+        if browse:
+            # offered, not forced: the assistant searches when the notes miss something
+            payload["native_web_search"] = True
         return await generate_chat_completion(request, payload, user)
 
     async def route(current: dict) -> tuple[dict, dict]:
@@ -291,10 +294,15 @@ def _start(request: Request, user, chat, run: dict) -> desk.LiveAnswer:
         return assistant
 
     async def search(text: str):
-        # the discussion room's evidence pack: 1-2 queries through the app's own web search
+        # the discussion room's evidence pack: the app's own web search, with a second look
         from open_webui.routers import discussions
 
         return await discussions._search(request, user, run["planner"]["model"], text, [])
+
+    async def can_browse(model_id: str) -> bool:
+        from open_webui.utils.mode_chats import native_search_models
+
+        return model_id in await native_search_models(request, user, [model_id])
 
     async def after_done(done: dict):
         await _after_done(request, user, chat_id, done)
@@ -309,6 +317,7 @@ def _start(request: Request, user, chat, run: dict) -> desk.LiveAnswer:
         persist=lambda current: _persist(chat_id, current),
         after_done=after_done,
         search=search,
+        can_browse=can_browse,
     )
     desk.start_live(live)
     return live

@@ -140,24 +140,178 @@ async def auto_folder(
     return folder_id
 
 
-def sources_from_docs(found: Optional[dict], limit: int, excerpt_chars: int) -> list[dict]:
+_WORD_RE = re.compile(r"[a-z0-9][a-z0-9.+#_-]*")
+_CJK_RUN_RE = re.compile(r"[\u3400-\u9fff]+")
+# characters too common to say what a passage is about (a bigram holding one is not a term)
+_CJK_FILLER = set("的了吗呢吧啊么是在和与及或也都就还有个这那哪什怎么为")
+_EN_STOP = {
+    "the", "and", "for", "with", "what", "which", "how", "why", "who", "when", "where", "does", "is", "are",
+    "was", "were", "of", "to", "in", "on", "vs", "or", "an", "be", "it", "its", "this", "that", "do",
+}
+_SENTENCE_RE = re.compile(r"[^\n。！？；!?]*(?:[。！？；!?]+|\n+|$)")
+PASSAGE_CHARS = 180
+LEAD_CHARS = 200
+_IMAGE_RE = re.compile(r"!\s*\[[^\]]*\]\([^)]*\)")
+_LINK_RE = re.compile(r"\[([^\]]*)\]\((?:https?:)?//[^)]*\)")
+
+
+def _readable(text: str) -> str:
+    """Page text without what reads as noise to a model: images, and the addresses of links
+    (their words stay)."""
+    return _LINK_RE.sub(r"\1", _IMAGE_RE.sub("", str(text or "")))
+
+
+def search_terms(*texts: str) -> dict[str, int]:
+    """What a question and its search queries are about, as weighted terms: English words and
+    numbers (2), Chinese character pairs (1)."""
+    terms: dict[str, int] = {}
+    for text in texts:
+        lowered = str(text or "").lower()
+        for word in _WORD_RE.findall(lowered):
+            word = word.strip(".-_")
+            if len(word) >= 2 and word not in _EN_STOP:
+                terms[word] = 2
+        for run in _CJK_RUN_RE.findall(lowered):
+            for i in range(len(run) - 1):
+                pair = run[i : i + 2]
+                if not (_CJK_FILLER & set(pair)):
+                    terms.setdefault(pair, 1)
+    return terms
+
+
+def _passages(text: str) -> list[str]:
+    """The page cut into passages of about PASSAGE_CHARS at sentence ends (one long sentence is
+    one passage)."""
+    out, current = [], ""
+    for sentence in _SENTENCE_RE.findall(text):
+        sentence = re.sub(r"\s+", " ", sentence).strip()
+        if not sentence:
+            continue
+        if current and len(current) + len(sentence) > PASSAGE_CHARS:
+            out.append(current)
+            current = ""
+        current = f"{current} {sentence}".strip() if current else sentence
+    if current:
+        out.append(current)
+    return out
+
+
+def relevant_excerpt(text: str, terms: dict[str, int], budget: int) -> str:
+    """The parts of a page that bear on the question, within ``budget`` characters: the page's
+    lead (title, date, what it is) when it is about the question, the passages with the most
+    question terms and the text around them, kept in page
+    order and joined with " … " where text was left out. A page that fits is kept whole; one
+    without any question term is cut from the top. Images and link addresses are left out."""
+    text = _readable(text)
+    flat = re.sub(r"\s+", " ", text).strip()
+    if len(flat) <= budget:
+        return flat
+    passages = _passages(text)
+    if not passages or not terms:
+        return flat[:budget]
+
+    def score(passage: str) -> float:
+        lowered = passage.lower()
+        weight = sum(w for term, w in terms.items() if term in lowered)
+        return weight / (1 + len(passage) / 600)
+
+    scored = sorted(((score(p), i) for i, p in enumerate(passages[1:], start=1)), key=lambda x: (-x[0], x[1]))
+    if not scored or scored[0][0] <= 0:
+        return flat[:budget]
+    # the lead (title, date, what the page is) when it is about the question, not a menu
+    picked = {0} if score(passages[0]) > 0 else set()
+    used = min(len(passages[0]), LEAD_CHARS) if picked else 0
+    for value, index in scored:
+        if value <= 0:
+            break
+        size = len(passages[index]) + 3
+        if used + size > budget:
+            continue
+        picked.add(index)
+        used += size
+    # room left: the text right after (then before) each picked passage, for context
+    for step in (1, -1):
+        for index in sorted(picked):
+            near = index + step
+            if 0 < near < len(passages) and near not in picked and used + len(passages[near]) + 3 <= budget:
+                picked.add(near)
+                used += len(passages[near]) + 3
+    parts, previous = ([] if 0 in picked else ["… "]), None
+    for index in sorted(picked):
+        passage = passages[index][:LEAD_CHARS] if index == 0 else passages[index]
+        if previous is not None:
+            parts.append(" " if index == previous + 1 else " … ")
+        parts.append(passage)
+        previous = index
+    if previous is not None and previous < len(passages) - 1:
+        parts.append(" …")
+    return "".join(parts)[: budget + 2]
+
+
+def sources_from_docs(
+    found: Optional[dict],
+    limit: int,
+    excerpt_chars: int,
+    *,
+    question: str = "",
+    existing: Optional[list[dict]] = None,
+) -> list[dict]:
     """Web search results as numbered sources ``{n, title, url, excerpt}``: one per page, pages
-    with next to no text left out."""
-    sources, seen = [], set()
+    with next to no text left out. The excerpt is the part of the page about ``question`` and the
+    search queries (see relevant_excerpt). With ``existing`` sources, the new ones skip their pages
+    and are numbered after them."""
+    existing = existing or []
+    sources, seen = [], {str(s.get("url") or "") for s in existing}
+    terms = search_terms(question, *((found or {}).get("queries") or []))
     for doc in (found or {}).get("docs") or []:
         url = str(doc.get("url") or "").strip()
-        content = re.sub(r"\s+", " ", str(doc.get("content") or "")).strip()
+        raw = str(doc.get("content") or "")
+        content = re.sub(r"\s+", " ", raw).strip()
         if not url or url in seen or len(content) < 80:
             continue
         seen.add(url)
         sources.append(
             {
-                "n": len(sources) + 1,
+                "n": len(existing) + len(sources) + 1,
                 "title": str(doc.get("title") or url).replace("\r\n", "\n").strip()[:160],
                 "url": url,
-                "excerpt": content[:excerpt_chars],
+                "excerpt": relevant_excerpt(raw, terms, excerpt_chars),
             }
         )
         if len(sources) >= limit:
             break
     return sources
+
+
+async def native_search_models(request, user, model_ids) -> set:
+    """The models among ``model_ids`` that may search the web themselves (native web search) in
+    讨论台 / 精答: the admin allows it and the model's connection is known to support it (set up
+    for it, or the official API) — not merely worth a try, so a proxy that would choke on the tool
+    is never sent it. The search is offered, not forced: the model looks things up when the
+    notes miss something."""
+    from open_webui.utils.model_identity import resolve_model_from_lookup
+
+    config = getattr(getattr(getattr(request, "app", None), "state", None), "config", None)
+    if not getattr(config, "ENABLE_NATIVE_WEB_SEARCH", False):
+        return set()
+    from open_webui.utils.middleware import _resolve_native_web_search_support
+    from open_webui.utils.models import get_all_models
+
+    models = getattr(request.state, "MODELS", None) or {}
+    if not models:
+        await get_all_models(request, user=user)
+        models = getattr(request.state, "MODELS", None) or {}
+    ambiguous = getattr(request.state, "MODELS_AMBIGUOUS", set()) or set()
+    out = set()
+    for model_id in {m for m in model_ids if m}:
+        model = resolve_model_from_lookup(models, ambiguous, model_id)
+        if not model:
+            continue
+        try:
+            support = _resolve_native_web_search_support(request, user, model, model_id)
+        except Exception as exc:
+            log.info("native web search support of %s unknown: %s", model_id, exc)
+            continue
+        if support.get("supported") is True:
+            out.add(model_id)
+    return out

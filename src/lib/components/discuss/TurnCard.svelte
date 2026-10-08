@@ -154,6 +154,19 @@
 			{/if}
 		{:else}
 			<ReportMarkdown id="dc-{turn.id}" content={rendered} />
+			{#if turn.lookup?.query}
+				<p class="mt-1.5 text-[11px] text-gray-400 dark:text-gray-500" data-discuss-turn-lookup={turn.lookup.status ?? 'waiting'}>
+					申请补查：{turn.lookup.query}{turn.lookup.status === 'done'
+						? ` · 新增 ${turn.lookup.added ?? 0} 个来源`
+						: turn.lookup.status === 'running'
+							? ' · 查找中…'
+							: turn.lookup.status === 'skipped'
+								? ' · 本轮补查已满'
+								: turn.lookup.status === 'empty'
+									? ' · 没有新资料'
+									: ''}
+				</p>
+			{/if}
 			{#if turn.status === 'stopped'}
 				<p class="mt-1 text-[11px] text-gray-400">（被停止，发言不完整）</p>
 			{:else if turn.status === 'error'}

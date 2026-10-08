@@ -74,7 +74,9 @@ export const stagesOf = (run: AnswerRun): Stage[] => {
 		const state: StageState = research
 			? research.status === 'done' || research.status === 'empty'
 				? 'done'
-				: research.status === 'error'
+				: research.status === 'skipped'
+					? 'skipped'
+					: research.status === 'error'
 					? 'error'
 					: research.status === 'stopped'
 						? 'stopped'
@@ -86,7 +88,7 @@ export const stagesOf = (run: AnswerRun): Stage[] => {
 			key: 'research',
 			label: '联网查资料',
 			state,
-			note: research?.status === 'done' ? `${research.sources.length} 个来源` : research?.status === 'empty' ? '没查到' : research?.status === 'error' ? '没查成' : ''
+			note: research?.status === 'done' ? `${research.sources.length} 个来源` : research?.status === 'empty' ? '没查到' : research?.status === 'error' ? '没查成' : research?.status === 'skipped' ? '不需要' : ''
 		});
 	}
 	const answer = run.answer;

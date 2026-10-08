@@ -160,9 +160,14 @@ describe('DiscussRoom', () => {
 		];
 		Object.assign(ask, {
 			status: 'done',
-			research: { status: 'done', queries: ['postgres mongodb'], sources },
+			research: {
+				status: 'done',
+				queries: ['postgres mongodb'],
+				sources,
+				lookups: [{ round: 1, queries: ['mongodb 文档'], status: 'done', added: 1 }]
+			},
 			turns: [
-				{ id: 'r1-s1', round: 1, seat: 's1', status: 'done', content: '选 Postgres [1]' },
+				{ id: 'r1-s1', round: 1, seat: 's1', status: 'done', content: '选 Postgres [1]', lookup: { query: 'mongodb 文档', status: 'done', added: 1 } },
 				{ id: 'r1-s2', round: 1, seat: 's2', status: 'error', content: '', error: '429 rate limited' }
 			],
 			conclusion: { status: 'done', model: 'm-b', name: 'claude-chat', content: '## 结论\n用 Postgres [1]，不用 Mongo [2]。\n## 共识\n- 要备份' }
@@ -173,6 +178,10 @@ describe('DiscussRoom', () => {
 		await until(() => (target.querySelector('[data-discuss-answer]')?.textContent ?? '').includes('Postgres'));
 		expect(target.querySelector('[data-discuss-research="done"]')!.textContent).toContain('资料 · 2 个来源');
 		expect(target.querySelector('[data-discuss-research="done"]')!.textContent).toContain('postgresql.org');
+		// a seat's 补查 between rounds: on the notes and on its turn
+		expect(target.querySelector('[data-discuss-lookup="done"]')!.textContent).toContain('第 1 轮后补查');
+		expect(target.querySelector('[data-discuss-lookup="done"]')!.textContent).toContain('新增 1 个来源');
+		expect(target.querySelector('[data-discuss-turn-lookup="done"]')!.textContent).toContain('申请补查：mongodb 文档');
 		const links = [...target.querySelectorAll('[data-discuss-answer] a')].map((a: any) => [a.textContent.trim(), a.getAttribute('href')]);
 		expect(links).toContainEqual(['[1]', 'https://www.postgresql.org/docs/']);
 		expect(links).toContainEqual(['[2]', 'https://mongodb.com/docs']);

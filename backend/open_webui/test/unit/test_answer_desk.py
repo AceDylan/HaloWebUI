@@ -437,6 +437,31 @@ def test_web_research_feeds_numbered_sources_and_the_chat_lists_them(env, monkey
     assert run["research"] is None and '"web_search" must be false' in env.calls[0][1][1]["content"]
 
 
+def test_a_question_nothing_can_be_looked_up_for_is_answered_without_notes(env, monkeypatch):
+    from open_webui.routers import discussions
+
+    async def fake_search(request, user, moderator, question, history):
+        return {"queries": [], "docs": [], "skipped": True}
+
+    monkeypatch.setattr(discussions, "_search", fake_search)
+    env.state["plan"] = {**CREATE_PLAN, "web_search": True}
+
+    async def scenario():
+        detail = await _ask(env, question="写一首春天的诗")
+        await _settle(detail["id"])
+        return detail["id"]
+
+    run = asyncio.run(api.get_answer(asyncio.run(scenario()), USER))["run"]
+    assert run["status"] == "done" and run["research"]["status"] == "skipped" and run["research"]["sources"] == []
+    assert "Notes gathered from the web" not in env.calls[-1][1][-1]["content"]
+
+
+def test_answer_messages_offer_the_models_own_search():
+    run = {"question": "PG 18 什么时候发布", "assistant": {"saved": True}, "research": {"sources": [{"n": 1, "url": "https://a", "title": "A", "excerpt": "e"}]}}
+    assert "search the web yourself" not in desk.answer_messages(run)[-1]["content"]
+    assert "the notes miss something" in desk.answer_messages(run, browse=True)[-1]["content"]
+
+
 def test_stop_then_retry_answers_again_with_the_same_assistant(env):
     env.state["plan"] = CREATE_PLAN
     env.state["delay"] = 0.05

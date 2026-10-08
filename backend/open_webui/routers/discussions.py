@@ -328,7 +328,9 @@ async def _after_done(request: Request, user, chat_id: str, ask: dict) -> None:
         mode_dispatch.report_back_later(request, "discuss", chat_id, ask)
 
 
-def _parse_queries(res: Any) -> list[str]:
+def _parse_queries(res: Any) -> Optional[list[str]]:
+    """The queries in a query-writer response; ``[]`` when it says nothing needs looking up,
+    None when there is no usable answer."""
     content = ""
     if isinstance(res, dict):
         choices = res.get("choices") or []
@@ -336,48 +338,35 @@ def _parse_queries(res: Any) -> list[str]:
             content = str((choices[0].get("message") or {}).get("content") or "")
     start, end = content.find("{"), content.rfind("}")
     if start == -1 or end <= start:
-        return []
+        return None
     try:
-        queries = json.loads(content[start : end + 1]).get("queries") or []
+        queries = json.loads(content[start : end + 1]).get("queries")
     except Exception:
-        return []
-    return [str(q).strip()[:200] for q in queries if str(q or "").strip()]
+        return None
+    if not isinstance(queries, list):
+        return None
+    # a leading dash would reach the search CLI as an option
+    cleaned = [str(q or "").strip().lstrip("-").strip()[:200] for q in queries]
+    return [q for q in cleaned if q]
 
 
-async def _search(request: Request, user, moderator: str, question: str, history: list[dict]) -> dict:
-    """One shared evidence pack for a question: 1-2 queries through the app's own web search."""
+SEARCH_QUERIES = 3
+FOLLOWUP_QUERIES = 2
+FOLLOWUP_NOTE_CHARS = 500
+
+
+async def _run_queries(request: Request, user, queries: list[str]) -> tuple[list[dict], list[str]]:
+    """The pages the app's own web search finds for the queries (run together), and the errors of
+    the ones that failed."""
     import asyncio
 
     from open_webui.routers.retrieval import SearchForm, process_web_search
-    from open_webui.routers.tasks import generate_queries
 
-    if not getattr(request.app.state.config, "ENABLE_WEB_SEARCH", True):
-        raise ValueError("管理员关闭了联网搜索")
-    messages = []
-    for item in history[-2:]:
-        messages += [
-            {"role": "user", "content": item.get("question") or ""},
-            {"role": "assistant", "content": room.conclusion_answer(item.get("conclusion") or "")[:1500]},
-        ]
-    messages.append({"role": "user", "content": question})
-    queries: list[str] = []
-    try:
-        queries = _parse_queries(
-            await generate_queries(
-                request,
-                {"model": moderator, "messages": messages, "prompt": question, "type": "web_search"},
-                user,
-            )
-        )
-    except Exception as exc:
-        log.info("discussion search: query generation failed: %s", exc)
-    queries = queries[:2] or [question[:200]]
     results = await asyncio.gather(
         *(process_web_search(request, SearchForm(query=query), user=user) for query in queries),
         return_exceptions=True,
     )
-    docs = []
-    errors = []
+    docs, errors = [], []
     for result in results:
         if isinstance(result, BaseException):
             errors.append(str(getattr(result, "detail", None) or result))
@@ -391,6 +380,82 @@ async def _search(request: Request, user, moderator: str, question: str, history
                     "content": doc.get("content") or "",
                 }
             )
+    return docs, errors
+
+
+async def _followup_queries(request: Request, user, moderator: str, question: str, asked: list[str], docs: list[dict]) -> list[str]:
+    """A second look: the queries for what the notes found so far still miss (none when they
+    cover the question)."""
+    from open_webui.routers.tasks import generate_followup_queries
+    from open_webui.utils.mode_chats import relevant_excerpt, search_terms
+
+    terms = search_terms(question, *asked)
+    seen, notes = set(), []
+    for doc in docs:
+        url = doc.get("url") or ""
+        if not url or url in seen:
+            continue
+        seen.add(url)
+        notes.append(f"[{len(notes) + 1}] {doc.get('title') or url} — {url}\n{relevant_excerpt(doc.get('content') or '', terms, FOLLOWUP_NOTE_CHARS)}")
+        if len(notes) >= 10:
+            break
+    res = await generate_followup_queries(
+        request,
+        {"model": moderator, "question": question, "asked": asked, "notes": "\n\n".join(notes) or "(nothing found)"},
+        user,
+    )
+    known = {q.lower() for q in asked}
+    return [q for q in (_parse_queries(res) or []) if q.lower() not in known][:FOLLOWUP_QUERIES]
+
+
+async def _search(request: Request, user, moderator: str, question: str, history: list[dict]) -> dict:
+    """One shared evidence pack for a question: up to three queries through the app's own web
+    search, then a second look for what those pages miss (up to two more queries). When the query
+    writer says nothing can be looked up, ``{"skipped": True}`` and no search."""
+    from open_webui.routers.tasks import generate_queries
+
+    if not getattr(request.app.state.config, "ENABLE_WEB_SEARCH", True):
+        raise ValueError("管理员关闭了联网搜索")
+    messages = []
+    for item in history[-2:]:
+        messages += [
+            {"role": "user", "content": item.get("question") or ""},
+            {"role": "assistant", "content": room.conclusion_answer(item.get("conclusion") or "")[:1500]},
+        ]
+    messages.append({"role": "user", "content": question})
+    queries: Optional[list[str]] = None
+    try:
+        queries = _parse_queries(
+            await generate_queries(
+                request,
+                {"model": moderator, "messages": messages, "prompt": question, "type": "web_search"},
+                user,
+            )
+        )
+    except Exception as exc:
+        log.info("discussion search: query generation failed: %s", exc)
+    if queries == []:
+        return {"queries": [], "docs": [], "skipped": True}
+    queries = (queries or [question[:200]])[:SEARCH_QUERIES]
+    docs, errors = await _run_queries(request, user, queries)
+    more: list[str] = []
+    try:
+        more = await _followup_queries(request, user, moderator, question, queries, docs)
+    except Exception as exc:
+        log.info("discussion search: follow-up queries failed: %s", exc)
+    if more:
+        extra_docs, extra_errors = await _run_queries(request, user, more)
+        docs += extra_docs
+        errors += extra_errors
+        queries = queries + more
+    if not docs and errors:
+        raise ValueError(errors[0][:200])
+    return {"queries": queries, "docs": docs}
+
+
+async def _lookup(request: Request, user, queries: list[str]) -> dict:
+    """The seats' own follow-up searches (补查) between rounds."""
+    docs, errors = await _run_queries(request, user, queries)
     if not docs and errors:
         raise ValueError(errors[0][:200])
     return {"queries": queries, "docs": docs}
@@ -538,7 +603,7 @@ def _start(
     setup = _setup_of(chat)
     chat_id = chat.id
 
-    async def call_model(model_id: str, messages: list[dict]):
+    async def call_model(model_id: str, messages: list[dict], browse: bool = False):
         from open_webui.utils.chat import generate_chat_completion
 
         payload = {
@@ -547,6 +612,9 @@ def _start(
             "stream": True,
             "metadata": {"chat_id": chat_id, "message_id": ask["id"], "task": "discussion_room"},
         }
+        if browse:
+            # offered, not forced: the seat searches when the notes miss something
+            payload["native_web_search"] = True
         return await generate_chat_completion(request, payload, user)
 
     async def after_done(done_ask: dict):
@@ -557,6 +625,14 @@ def _start(
 
     async def match(current: dict) -> dict:
         return await _match(request, user, chat_id, current, call_model)
+
+    async def lookup(queries: list[str]) -> dict:
+        return await _lookup(request, user, queries)
+
+    async def browsers(current: dict) -> set:
+        from open_webui.utils.mode_chats import native_search_models
+
+        return await native_search_models(request, user, [seat["model"] for seat in current.get("seats") or []])
 
     live = room.LiveDiscussion(
         chat_id=chat_id,
@@ -575,6 +651,8 @@ def _start(
         resume=resume,
         images=_ask_images(ask, user) if ask.get("files") else [],
         match=match,
+        lookup=lookup,
+        browsers=browsers,
     )
     room.start_live(live)
     return live

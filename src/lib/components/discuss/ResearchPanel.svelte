@@ -73,11 +73,35 @@
 		{/if}
 	{:else}
 		<p class="text-xs text-gray-400 dark:text-gray-500">
-			{research.status === 'empty'
+			{research.status === 'skipped'
+				? '判断这个问题不需要联网查资料。'
+				: research.status === 'empty'
 				? '联网没有找到可用的资料，讨论照常进行。'
 				: research.status === 'stopped'
 					? '查资料被停止。'
 					: `联网查资料失败：${research.error || '未知原因'}。讨论照常进行。`}
 		</p>
 	{/if}
+	{#each research.lookups ?? [] as lookup (lookup.round)}
+		<p class="flex flex-wrap items-center gap-1.5 text-[11px] text-gray-400 dark:text-gray-500" data-discuss-lookup={lookup.status}>
+			{#if lookup.status === 'running'}
+				<span class="size-2.5 shrink-0 animate-spin rounded-full border-2 border-current border-r-transparent" aria-hidden="true" />
+			{/if}
+			<span>第 {lookup.round} 轮后补查</span>
+			{#each lookup.queries as q}
+				<span class="dc-chip !py-0.5">{q}</span>
+			{/each}
+			<span
+				>{lookup.status === 'running'
+					? '查找中…'
+					: lookup.status === 'done'
+						? `新增 ${lookup.added} 个来源`
+						: lookup.status === 'empty'
+							? '没有新资料'
+							: lookup.status === 'stopped'
+								? '已停止'
+								: `失败：${lookup.error || '未知原因'}`}</span
+			>
+		</p>
+	{/each}
 </div>

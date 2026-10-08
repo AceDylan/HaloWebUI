@@ -519,6 +519,67 @@ async def generate_queries(
         )
 
 
+FOLLOWUP_QUERY_PROMPT = """### Task:
+Notes were gathered from the web to answer the question below. Find the key facts the question needs that the notes do not cover, or cover only with outdated, vague or conflicting information, and write search queries for those gaps only.
+
+### Guidelines:
+- Respond **EXCLUSIVELY** with a JSON object, no other text.
+- At most 2 queries; each one targets one specific missing fact (a name, number, date, the latest status, an official source).
+- Never repeat or merely reorder a query that was already run.
+- Write queries as search-engine keywords in the language the subject is best documented in.
+- For time-sensitive facts, anchor the query to the actual date. Today's date is: {date}.
+- If the notes already cover what the question needs, return: { "queries": [] }.
+
+### Output:
+{ "queries": ["query1"] }
+
+### Question:
+{question}
+
+### Queries already run:
+{asked}
+
+### Notes:
+{notes}
+"""
+
+
+async def generate_followup_queries(request: Request, form_data: dict, user) -> dict:
+    """Search queries for what the web notes gathered for a question still miss (讨论台 / 精答
+    look a second time). ``form_data``: model (the chat model whose task model writes them),
+    question, asked (queries already run), notes (the notes as text). Not an endpoint."""
+    import datetime
+
+    models = await _get_request_models(request, user)
+    model_id = _resolve_task_model_id(request, models, form_data["model"])
+    task_model_id = get_task_model_id(
+        model_id,
+        request.app.state.config.TASK_MODEL,
+        request.app.state.config.TASK_MODEL_EXTERNAL,
+        models,
+        _get_ambiguous_model_aliases(request),
+    )
+    values = {
+        "date": datetime.date.today().isoformat(),
+        "question": str(form_data.get("question") or "")[:2000],
+        "asked": "\n".join(f"- {q}" for q in form_data.get("asked") or []) or "(none)",
+        "notes": str(form_data.get("notes") or "")[:12000],
+    }
+    # one pass, so text in the notes that looks like a placeholder stays as it is
+    content = re.sub(r"\{(date|question|asked|notes)\}", lambda m: values[m.group(1)], FOLLOWUP_QUERY_PROMPT)
+    payload = {
+        "model": task_model_id,
+        "messages": [{"role": "user", "content": content}],
+        "stream": False,
+        "metadata": {
+            **(request.state.metadata if hasattr(request.state, "metadata") else {}),
+            "task": str(TASKS.QUERY_GENERATION),
+            "chat_id": form_data.get("chat_id", None),
+        },
+    }
+    return await generate_chat_completion(request, form_data=payload, user=user)
+
+
 @router.post("/auto/completions")
 async def generate_autocompletion(
     request: Request, form_data: dict, user=Depends(get_verified_user)

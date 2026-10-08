@@ -58,7 +58,14 @@ TRANSCRIPT_TURN_CHARS = 6000
 DELTA_FLUSH_SECONDS = 0.15
 RESEARCH_TIMEOUT_SECONDS = 150
 RESEARCH_MAX_SOURCES = 8
-RESEARCH_EXCERPT_CHARS = 1600
+RESEARCH_EXCERPT_CHARS = 2800
+# a seat may ask once per question for one more search (补查: its last line) before the next
+# round; the moderator runs up to LOOKUPS_PER_ROUND of them and adds what they find to the notes
+LOOKUPS_PER_ROUND = 3
+LOOKUP_MAX_SOURCES = 6
+LOOKUP_TIMEOUT_SECONDS = 90
+RESEARCH_TOTAL_SOURCES = 14
+LOOKUP_RE = re.compile(r"(?:^|\n)[ \t>*_-]*(?:补查|lookup)[*_]*\s*[:：][*_]*\s*(.+?)[ \t*_]*\s*$", re.I)
 MAX_FILES = 4
 FILE_TEXT_CHARS = 12000
 # A call the upstream refused for a passing reason (rate limit, overload, a dropped connection)
@@ -399,6 +406,28 @@ def _research_block(ask: dict) -> str:
     return "\n\n".join(parts)
 
 
+def take_lookup(content: str) -> tuple[str, Optional[str]]:
+    """A turn's 补查 line (its last line) taken off its text: ``(text, query)``, query None when
+    there is none."""
+    match = LOOKUP_RE.search((content or "").rstrip())
+    if not match:
+        return content, None
+    # a leading dash would reach the search CLI as an option
+    query = match.group(1).strip().strip("`\"'「」“”").strip().lstrip("-").strip()[:200]
+    text = content[: match.start()].rstrip()
+    if not query or not text:
+        return content, None
+    return text, query
+
+
+def may_lookup(ask: dict, seat_id: str, round_index: int) -> bool:
+    """Whether a seat may still ask for a 补查 in this round: the question is researched, another
+    round follows, and the seat has not asked before."""
+    if not ask.get("research") or round_index >= int(ask.get("rounds") or 0):
+        return False
+    return not any(t.get("lookup") for t in ask.get("turns") or [] if t.get("seat") == seat_id and t.get("round") != round_index)
+
+
 def _files_block(ask: dict, *, sees_images: bool, gets_images: bool) -> str:
     files = ask.get("files") or []
     if not files:
@@ -482,7 +511,9 @@ def build_turn_messages(
     round_index: int,
     history: list[dict],
     images: Optional[list[str]] = None,
+    browse: bool = False,
 ) -> list[dict]:
+    """``browse``: the seat's model searches the web itself (native web search) during the turn."""
     mode = setup["mode"]
     seats = setup["seats"]
     total_rounds = int(ask.get("rounds") or setup["rounds"])
@@ -517,9 +548,19 @@ def build_turn_messages(
             "- Round 1: at most about 350 words. Later rounds: at most about 250 words, only what is new.",
             "- Refer to other participants by name. Never write on their behalf.",
             (
-                "- Beyond the research notes you cannot browse; cite notes as [n], never invent sources or links."
+                "- You can search the web yourself when the research notes miss something you need; cite notes as [n] "
+                "and pages you found yourself as markdown links. Never invent sources or links."
+                if browse
+                else "- Beyond the research notes you cannot browse; cite notes as [n], never invent sources or links."
                 if research_sources(ask)
                 else "- You cannot browse the web; say so when a fact needs checking instead of inventing sources."
+            ),
+            (
+                f"- If a fact you need is missing from the research notes, end your turn with one last line "
+                f"`{'补查' if ask.get('lang') == 'zh' else 'Lookup'}: <search keywords>` (once in this discussion). "
+                "It is searched before the next round and the results join the notes for everyone."
+                if may_lookup(ask, seat["id"], round_index)
+                else ""
             ),
         ]
     ).strip()
@@ -946,6 +987,12 @@ class LiveDiscussion:
     # (ask) -> {"choices": {seat id: choice}, "duties": {seat id: duty}, "error": str|None}: the
     # assistants of the question's seats (writes to the library happen in there, once)
     match: Optional[Callable[[dict], Awaitable[dict]]] = None
+    # (queries) -> {"queries": [...], "docs": [...]}: the seats' 补查 between rounds
+    lookup: Optional[Callable[[list[str]], Awaitable[dict]]] = None
+    # the seat models that search the web themselves (native web search) in their turns, found
+    # when the run starts by ``browsers(ask)`` (a researched question only)
+    browse: set = field(default_factory=set)
+    browsers: Optional[Callable[[dict], Awaitable[set]]] = None
 
     # -- events --------------------------------------------------------------------------------
 
@@ -991,7 +1038,7 @@ class LiveDiscussion:
 
     # -- one streamed model call ---------------------------------------------------------------
 
-    async def _stream_into(self, target: dict, key: str, model: str, messages: list[dict]):
+    async def _stream_into(self, target: dict, key: str, model: str, messages: list[dict], browse: bool = False):
         target["status"] = "streaming"
         target["startedAt"] = now_ms()
         target["content"] = ""
@@ -1000,7 +1047,7 @@ class LiveDiscussion:
         raw = ""
         # with the (empty) content: a second try clears what the first one had streamed
         await self.send("turn", turn=_brief(target, key, with_content=True))
-        response = await self.call_model(model, messages)
+        response = await (self.call_model(model, messages, browse=True) if browse else self.call_model(model, messages))
         async for kind, text in iterate_completion(response):
             if kind == "usage":
                 target["usage"] = text
@@ -1025,7 +1072,9 @@ class LiveDiscussion:
         if not target["content"]:
             raise ValueError("模型返回了空内容")
 
-    async def _speak(self, target: dict, key: str, model: str, build, sends_images: bool, delays: Optional[tuple] = None):
+    async def _speak(
+        self, target: dict, key: str, model: str, build, sends_images: bool, delays: Optional[tuple] = None, browse: bool = False
+    ):
         """One streamed call, made again when it fails for a passing reason (rate limit, overload,
         a dropped connection) after a visible pause. Many models the app treats as image readers
         reject pictures: when a call that carried images fails otherwise, it is made once more
@@ -1035,7 +1084,7 @@ class LiveDiscussion:
         tries = 0
         while True:
             try:
-                await asyncio.wait_for(self._stream_into(target, key, model, build(blind=blind)), TURN_TIMEOUT_SECONDS)
+                await asyncio.wait_for(self._stream_into(target, key, model, build(blind=blind), browse=browse), TURN_TIMEOUT_SECONDS)
                 return
             except (asyncio.CancelledError, asyncio.TimeoutError):
                 raise
@@ -1072,12 +1121,20 @@ class LiveDiscussion:
                 round_index=turn["round"],
                 history=self.history,
                 images=None if blind else self.images,
+                browse=seat["model"] in self.browse,
             )
 
         sends_images = bool(self.images) and seat.get("vision", True) is not False and turn["round"] == 1
         try:
-            await self._speak(turn, turn["id"], seat["model"], build, sends_images)
+            allowed = may_lookup(self.ask, seat["id"], turn["round"])
+            await self._speak(turn, turn["id"], seat["model"], build, sends_images, browse=seat["model"] in self.browse)
             turn["status"] = "done"
+            text, query = take_lookup(turn["content"])
+            turn.pop("lookup", None)
+            if query:
+                turn["content"] = text
+                if allowed:
+                    turn["lookup"] = {"query": query}
         except asyncio.CancelledError:
             turn["status"] = "stopped"
             raise
@@ -1227,10 +1284,10 @@ class LiveDiscussion:
             if self.search is None:
                 raise ValueError("联网搜索不可用")
             found = await asyncio.wait_for(self.search(self.ask["question"], self.history), RESEARCH_TIMEOUT_SECONDS)
-            sources = sources_from_docs(found, RESEARCH_MAX_SOURCES, RESEARCH_EXCERPT_CHARS)
-            research["queries"] = [q for q in (found or {}).get("queries") or [] if q][:4]
+            sources = sources_from_docs(found, RESEARCH_MAX_SOURCES, RESEARCH_EXCERPT_CHARS, question=self.ask["question"])
+            research["queries"] = [q for q in (found or {}).get("queries") or [] if q][:6]
             research["sources"] = sources
-            research["status"] = "done" if sources else "empty"
+            research["status"] = "skipped" if (found or {}).get("skipped") else "done" if sources else "empty"
         except asyncio.CancelledError:
             research["status"] = "stopped"
             raise
@@ -1242,6 +1299,60 @@ class LiveDiscussion:
             research["error"] = _short_error(exc)
         finally:
             research["endedAt"] = now_ms()
+            await self.send_state()
+
+    async def _run_lookups(self, round_index: int):
+        """The 补查 the seats asked for in this round, searched together; what they find joins
+        the notes (numbered after the ones there) before the next round."""
+        research = self.ask.get("research")
+        turns = [
+            t
+            for t in self.ask["turns"]
+            if t.get("round") == round_index and t.get("status") == "done" and (t.get("lookup") or {}).get("query") and not t["lookup"].get("status")
+        ]
+        if not research or not turns or self.lookup is None:
+            return
+        queries: list[str] = []
+        for turn in turns:
+            query = turn["lookup"]["query"]
+            if query.lower() not in {q.lower() for q in queries} and len(queries) >= LOOKUPS_PER_ROUND:
+                turn["lookup"]["status"] = "skipped"
+                continue
+            if query.lower() not in {q.lower() for q in queries}:
+                queries.append(query)
+        entry = {"round": round_index, "queries": queries, "status": "running", "added": 0, "startedAt": now_ms(), "endedAt": None, "error": None}
+        research.setdefault("lookups", []).append(entry)
+        asking = [t for t in turns if t["lookup"].get("status") != "skipped"]
+        for turn in asking:
+            turn["lookup"]["status"] = "running"
+        await self.send_state()
+        try:
+            found = await asyncio.wait_for(self.lookup(queries), LOOKUP_TIMEOUT_SECONDS)
+            existing = research.get("sources") or []
+            room_left = min(LOOKUP_MAX_SOURCES, RESEARCH_TOTAL_SOURCES - len(existing))
+            added = (
+                sources_from_docs(found, room_left, RESEARCH_EXCERPT_CHARS, question=self.ask["question"], existing=existing)
+                if room_left > 0
+                else []
+            )
+            if added:
+                research["sources"] = existing + added
+                research["status"] = "done"
+                research["error"] = None
+            entry.update({"status": "done" if added else "empty", "added": len(added)})
+        except asyncio.CancelledError:
+            entry["status"] = "stopped"
+            raise
+        except asyncio.TimeoutError:
+            entry.update({"status": "error", "error": f"超过 {LOOKUP_TIMEOUT_SECONDS} 秒没查完"})
+        except Exception as exc:
+            entry.update({"status": "error", "error": _short_error(exc)[:200]})
+        finally:
+            entry["endedAt"] = now_ms()
+            for turn in asking:
+                turn["lookup"]["status"] = entry["status"]
+                turn["lookup"]["added"] = entry["added"]
+            self.save()
             await self.send_state()
 
     async def _resume_round(self):
@@ -1263,10 +1374,20 @@ class LiveDiscussion:
         self.save()
         if last == 1 and not any(t["status"] == "done" for t in self.ask["turns"] if t.get("round") == 1):
             raise ValueError("第一轮所有参与者都失败了")
+        await self._run_lookups(last)
+
+    async def _find_browsers(self):
+        if self.browsers is None or not self.ask.get("research"):
+            return
+        try:
+            self.browse = set(await self.browsers(self.ask) or ())
+        except Exception as exc:
+            log.info("discussion %s: native web search check failed: %s", self.chat_id, exc)
 
     async def run(self):
         self.flusher = asyncio.create_task(self._flush_loop())
         try:
+            await self._find_browsers()
             if self.retry_turn:
                 turn = next(t for t in self.ask["turns"] if t["id"] == self.retry_turn)
                 turn.update({"status": "waiting", "content": "", "error": None, "usage": {}, "imagesDropped": False})
@@ -1299,6 +1420,7 @@ class LiveDiscussion:
                     self.save()
                     if round_index == 1 and not any(t["status"] == "done" for t in turns):
                         raise ValueError("第一轮所有参与者都失败了")
+                    await self._run_lookups(round_index)
             await self._run_conclusion()
             if self.ask["conclusion"]["status"] == "done":
                 self.ask["status"] = "done"
@@ -1349,6 +1471,8 @@ def _brief(target: dict, key: str, with_content: bool = False) -> dict:
         out["standIn"] = target.get("standIn")
         out["model"] = target.get("model")
         out["name"] = target.get("name")
+    if target.get("lookup"):
+        out["lookup"] = target["lookup"]
     if with_content:
         out["content"] = target.get("content") or ""
     return out

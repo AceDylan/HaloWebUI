@@ -166,7 +166,8 @@ def _task_body(team: dict, task: dict, member: dict) -> str:
 # 开播了吗 and 如何戒烟 members each ran 8–11 minutes of thorough research; Hermes answers such a
 # question directly in about 3.
 QUICK_TEXT = ("这是一个快答任务：目标只是一个简单问题或一次事实查询，用户在等答案。"
-              "用最少的步骤查清——通常一两次 smart-search research --budget quick 就够，必要时打开一两个来源核对——"
+              "用最少的步骤查清：常识类一两次 smart-search research --budget quick 就够；"
+              "时效性、数字、人物/作品近况这类容易查错的事实用 --budget standard，并打开一两个来源核对——"
               "几分钟内交付。result 直接写答案和依据（来源链接、核查时间），不必另写文件；"
               "不要扩写成长篇指南，也不要走完整的引用整理流程。\n\n")
 

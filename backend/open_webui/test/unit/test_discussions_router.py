@@ -400,24 +400,52 @@ def test_research_and_retry_through_the_api(env, monkeypatch):
 def test_search_builds_one_evidence_pack(env, monkeypatch):
     from open_webui.routers import retrieval, tasks as tasks_router
 
-    searched = []
+    searched, followups = [], []
 
     async def fake_queries(request, form, user):
         assert form["type"] == "web_search" and form["model"] == "c"
-        return {"choices": [{"message": {"content": '{"queries": ["postgres 优缺点", "mongodb 优缺点", "第三个"]}'}}]}
+        return {"choices": [{"message": {"content": '{"queries": ["postgres 优缺点", "mongodb 优缺点", "第三个", "第四个"]}'}}]}
+
+    async def fake_followup(request, form, user):
+        followups.append(form)
+        # an already-run query is dropped, the new ones are run
+        return {"choices": [{"message": {"content": '{"queries": ["第三个", "postgres 18 发布日期", "x", "y"]}'}}]}
 
     async def fake_web(request, form, user=None):
         searched.append(form.query)
         if form.query.startswith("mongodb"):
             raise RuntimeError("engine down")
-        return {"docs": [{"content": "正文", "metadata": {"source": "https://p.example", "title": "P"}}]}
+        return {"docs": [{"content": "正文", "metadata": {"source": f"https://{len(searched)}.example", "title": "P"}}]}
 
     monkeypatch.setattr(tasks_router, "generate_queries", fake_queries)
+    monkeypatch.setattr(tasks_router, "generate_followup_queries", fake_followup)
     monkeypatch.setattr(retrieval, "process_web_search", fake_web)
     env.request.app.state.config = SimpleNamespace(ENABLE_WEB_SEARCH=True)
     out = asyncio.run(api._search(env.request, USER, "c", "选数据库", []))
-    assert searched == ["postgres 优缺点", "mongodb 优缺点"]  # at most two
-    assert out == {"queries": ["postgres 优缺点", "mongodb 优缺点"], "docs": [{"url": "https://p.example", "title": "P", "content": "正文"}]}
+    assert searched[:3] == ["postgres 优缺点", "mongodb 优缺点", "第三个"]  # at most three
+    assert searched[3:] == ["postgres 18 发布日期", "x"]  # then at most two for what is missing
+    assert out["queries"] == ["postgres 优缺点", "mongodb 优缺点", "第三个", "postgres 18 发布日期", "x"]
+    assert [d["url"] for d in out["docs"]] == ["https://1.example", "https://3.example", "https://4.example", "https://5.example"]
+    assert followups[0]["question"] == "选数据库" and followups[0]["asked"] == ["postgres 优缺点", "mongodb 优缺点", "第三个"]
+    assert "[1] P — https://1.example" in followups[0]["notes"]
+
+    # the follow-up finds nothing missing (or fails): only the first pass
+    async def nothing_missing(request, form, user):
+        return {"choices": [{"message": {"content": '{"queries": []}'}}]}
+
+    monkeypatch.setattr(tasks_router, "generate_followup_queries", nothing_missing)
+    searched.clear()
+    asyncio.run(api._search(env.request, USER, "c", "选数据库", []))
+    assert searched == ["postgres 优缺点", "mongodb 优缺点", "第三个"]
+
+    # the query writer says a search cannot help: no search at all
+    async def no_queries(request, form, user):
+        return {"choices": [{"message": {"content": '{"queries": []}'}}]}
+
+    monkeypatch.setattr(tasks_router, "generate_queries", no_queries)
+    searched.clear()
+    assert asyncio.run(api._search(env.request, USER, "c", "写一首春天的诗", [])) == {"queries": [], "docs": [], "skipped": True}
+    assert searched == []
 
     async def broken_queries(request, form, user):
         raise RuntimeError("no task model")
@@ -427,6 +455,7 @@ def test_search_builds_one_evidence_pack(env, monkeypatch):
         raise RuntimeError("engine down")
 
     monkeypatch.setattr(tasks_router, "generate_queries", broken_queries)
+    monkeypatch.setattr(tasks_router, "generate_followup_queries", broken_queries)
     monkeypatch.setattr(retrieval, "process_web_search", all_down)
     searched.clear()
     with pytest.raises(ValueError, match="engine down"):
@@ -435,6 +464,21 @@ def test_search_builds_one_evidence_pack(env, monkeypatch):
     env.request.app.state.config = SimpleNamespace(ENABLE_WEB_SEARCH=False)
     with pytest.raises(ValueError, match="关闭"):
         asyncio.run(api._search(env.request, USER, "c", "选数据库", []))
+
+
+def test_lookup_runs_the_seats_queries(env, monkeypatch):
+    from open_webui.routers import retrieval
+
+    async def fake_web(request, form, user=None):
+        if form.query == "bad":
+            raise RuntimeError("engine down")
+        return {"docs": [{"content": "正文", "metadata": {"source": "https://l.example", "title": "L"}}]}
+
+    monkeypatch.setattr(retrieval, "process_web_search", fake_web)
+    out = asyncio.run(api._lookup(env.request, USER, ["q1", "bad"]))
+    assert out == {"queries": ["q1", "bad"], "docs": [{"url": "https://l.example", "title": "L", "content": "正文"}]}
+    with pytest.raises(ValueError, match="engine down"):
+        asyncio.run(api._lookup(env.request, USER, ["bad"]))
 
 
 def test_attachments_are_checked_read_and_passed_on(env, monkeypatch):

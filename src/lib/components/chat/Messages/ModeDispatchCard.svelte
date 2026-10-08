@@ -200,7 +200,7 @@
 			return { ...step, state: 'pending' };
 		});
 	};
-	const partDone = (s: string | undefined) => s === 'done' || s === 'empty' || s === 'error';
+	const partDone = (s: string | undefined) => s === 'done' || s === 'empty' || s === 'error' || s === 'skipped';
 	$: answerSteps = ((): Step[] => {
 		if (!run) return [];
 		const steps: Step[] = [
@@ -220,7 +220,7 @@
 					: run.status === 'researching'
 						? 'active'
 						: 'pending',
-				note: sources ? `${sources} 个来源` : run.research?.status === 'empty' ? '没查到' : ''
+				note: sources ? `${sources} 个来源` : run.research?.status === 'empty' ? '没查到' : run.research?.status === 'skipped' ? '不需要' : ''
 			});
 		}
 		steps.push({

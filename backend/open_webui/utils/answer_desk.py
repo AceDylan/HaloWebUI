@@ -54,7 +54,7 @@ PLAN_TIMEOUT_SECONDS = 120
 ANSWER_TIMEOUT_SECONDS = 300
 RESEARCH_TIMEOUT_SECONDS = 150
 RESEARCH_MAX_SOURCES = 8
-RESEARCH_EXCERPT_CHARS = 1600
+RESEARCH_EXCERPT_CHARS = 2800
 DELTA_FLUSH_SECONDS = 0.12
 RETRY_DELAYS = (8, 20, 45)
 
@@ -265,9 +265,10 @@ def research_block(sources: list[dict]) -> str:
     return "\n\n".join(parts)
 
 
-def answer_messages(run: dict) -> list[dict]:
+def answer_messages(run: dict, browse: bool = False) -> list[dict]:
     """What the assistant is sent. A saved assistant brings its own system prompt (applied by the
-    app when it is called by its id); a temporary one or the dispatcher's fallback gets it here."""
+    app when it is called by its id); a temporary one or the dispatcher's fallback gets it here.
+    ``browse``: the model can search the web itself (native web search) while answering."""
     assistant = run.get("assistant") or {}
     messages = []
     if not assistant.get("saved") and assistant.get("system"):
@@ -283,6 +284,11 @@ def answer_messages(run: dict) -> list[dict]:
     sources = (run.get("research") or {}).get("sources") or []
     if sources:
         content = f"{content}\n\n---\n{research_block(sources)}"
+    if browse:
+        content += (
+            "\n\n---\nYou can also search the web yourself when "
+            + ("the notes miss something you need; cite those pages as markdown links." if sources else "the question needs current facts; cite the pages as markdown links.")
+        )
     messages.append({"role": "user", "content": content})
     return messages
 
@@ -318,6 +324,9 @@ class LiveAnswer:
     after_done: Optional[Callable[[dict], Awaitable[None]]] = None
     # (question) -> {"queries": [...], "docs": [...]}
     search: Optional[Callable[[str], Awaitable[dict]]] = None
+    # (model id) -> whether it searches the web itself (native web search) when the plan looks things up
+    can_browse: Optional[Callable[[str], Awaitable[bool]]] = None
+    browse: bool = False
     task: Optional[asyncio.Task] = None
     pending: Optional[dict] = None
     version: int = 0
@@ -395,9 +404,9 @@ class LiveAnswer:
             if self.search is None:
                 raise ValueError("联网搜索不可用")
             found = await asyncio.wait_for(self.search(run["question"]), RESEARCH_TIMEOUT_SECONDS)
-            research["queries"] = [q for q in (found or {}).get("queries") or [] if q][:4]
-            research["sources"] = sources_from_docs(found, RESEARCH_MAX_SOURCES, RESEARCH_EXCERPT_CHARS)
-            research["status"] = "done" if research["sources"] else "empty"
+            research["queries"] = [q for q in (found or {}).get("queries") or [] if q][:6]
+            research["sources"] = sources_from_docs(found, RESEARCH_MAX_SOURCES, RESEARCH_EXCERPT_CHARS, question=run["question"])
+            research["status"] = "skipped" if (found or {}).get("skipped") else "done" if research["sources"] else "empty"
         except asyncio.CancelledError:
             research["status"] = "stopped"
             raise
@@ -414,7 +423,9 @@ class LiveAnswer:
         answer.update({"status": "streaming", "startedAt": now_ms(), "content": "", "thinking": False, "retry": None, "error": None})
         await self.send_state()
         raw = ""
-        response = await self.call_model(self.run["assistant"]["id"], answer_messages(self.run))
+        model = self.run["assistant"]["id"]
+        messages = answer_messages(self.run, browse=self.browse)
+        response = await (self.call_model(model, messages, browse=True) if self.browse else self.call_model(model, messages))
         async for kind, text in iterate_completion(response):
             if kind == "usage":
                 answer["usage"] = text
@@ -442,6 +453,11 @@ class LiveAnswer:
         run = self.run
         run["status"] = "answering"
         answer = run["answer"]
+        if self.can_browse is not None and (run.get("plan") or {}).get("webSearch"):
+            try:
+                self.browse = bool(await self.can_browse(run["assistant"]["id"]))
+            except Exception as exc:
+                log.info("answer %s: native web search check failed: %s", self.chat_id, exc)
         tries = 0
         while True:
             try:
@@ -476,7 +492,7 @@ class LiveAnswer:
         try:
             if not run.get("assistant"):
                 await self._route()
-            if (run.get("plan") or {}).get("webSearch") and (run.get("research") or {}).get("status") != "done":
+            if (run.get("plan") or {}).get("webSearch") and (run.get("research") or {}).get("status") not in {"done", "skipped"}:
                 await self._research()
             await self._answer()
             run["status"] = "done"

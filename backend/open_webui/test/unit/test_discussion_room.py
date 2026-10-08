@@ -665,3 +665,132 @@ def test_a_discussion_started_from_a_chat_carries_it_as_background():
     # without one, nothing is added
     plain = room.new_ask(question="预算够吗？", setup=setup, user_message_id="u", message_id="m")
     assert "Background" not in room.build_turn_messages(setup=setup, ask=plain, seat=setup["seats"][0], round_index=1, history=[])[1]["content"]
+
+
+def test_take_lookup_only_reads_a_last_line():
+    assert room.take_lookup("观点一\n\n补查：postgres 18 发布日期") == ("观点一", "postgres 18 发布日期")
+    assert room.take_lookup("Point\n**Lookup:** `pg 18 release date`") == ("Point", "pg 18 release date")
+    assert room.take_lookup("我们需要补查：这个说法") == ("我们需要补查：这个说法", None)  # not its own line
+    assert room.take_lookup("补查：只有这一行") == ("补查：只有这一行", None)  # nothing would be left
+    assert room.take_lookup("补查：开头\n后面还有话") == ("补查：开头\n后面还有话", None)  # not the last line
+    assert room.take_lookup("观点\n补查：--budget deep") == ("观点", "budget deep")  # never a CLI option
+
+
+def _research_setup(rounds=2):
+    raw = {"mode": "roundtable", "seats": ["a", "b"], "rounds": rounds, "research": True, "moderator": "c"}
+    return room.normalize_setup(raw, _models("a", "b", "c"), set(), _user(), _no_exclusion)
+
+
+def _one_page_search(url="https://a.example"):
+    async def search(question, history):
+        return {"queries": ["postgres"], "docs": [{"url": url, "title": "A", "content": "Postgres 是一个开源关系数据库。" * 10}]}
+
+    return search
+
+
+def test_a_seat_asks_one_lookup_and_the_notes_grow_before_the_next_round():
+    setup = _research_setup(rounds=3)
+    live, events, calls, saved = _live(
+        setup,
+        {
+            "a": [["A1\n\n补查：postgres 18 发布日期"], ["A2\n补查：再查一次"], ["A3"]],
+            "b": [["B1\n补查：postgres 18 发布日期"], ["B2"], ["B3"]],
+            "c": [["## 结论\n见 [2]"]],
+        },
+    )
+    live.search = _one_page_search()
+    looked = []
+
+    async def lookup(queries):
+        looked.append(list(queries))
+        return {"queries": queries, "docs": [
+            {"url": "https://a.example", "title": "A dup", "content": "x" * 200},  # already a note
+            {"url": "https://pg.example", "title": "PG 18", "content": "PostgreSQL 18 发布于 2025 年 9 月。" * 6},
+        ]}
+
+    live.lookup = lookup
+    asyncio.run(live.run())
+    ask = live.ask
+    turns = {t["id"]: t for t in ask["turns"]}
+    # both seats were offered the 补查 in round 1; both asked the same thing: searched once
+    assert "补查: <search keywords>" in calls[0][1][0]["content"] and "补查: <search keywords>" in calls[1][1][0]["content"]
+    assert looked == [["postgres 18 发布日期"]]
+    assert turns["r1-s1"]["content"] == "A1" and turns["r1-s1"]["lookup"] == {"query": "postgres 18 发布日期", "status": "done", "added": 1}
+    assert turns["r1-s2"]["lookup"]["status"] == "done"
+    # seat a already used its 补查: not offered again, its second request is dropped (and taken off the text)
+    round2_a = next(m for model, m in calls[2:] if model == "a")
+    assert "<search keywords>" not in round2_a[0]["content"]
+    assert turns["r2-s1"]["content"] == "A2" and "lookup" not in turns["r2-s1"]
+    # the new page joins the notes as [2] for round 2 and the conclusion
+    research = ask["research"]
+    assert [(s["n"], s["url"]) for s in research["sources"]] == [(1, "https://a.example"), (2, "https://pg.example")]
+    assert research["lookups"][0]["round"] == 1 and research["lookups"][0]["added"] == 1
+    assert "[2] PG 18 — https://pg.example" in round2_a[1]["content"]
+    assert "[2] PG 18" in calls[-1][1][1]["content"]
+    # the last round offers no 补查
+    round3 = [m for model, m in calls if model in {"a", "b"}][-2:]
+    assert all("<search keywords>" not in m[0]["content"] for m in round3)
+    assert ask["status"] == "done"
+
+
+def test_a_failed_lookup_leaves_the_discussion_going():
+    setup = _research_setup(rounds=2)
+    live, events, calls, saved = _live(setup, {"a": [["A1\n补查：x"], ["A2"]], "b": [["B1"], ["B2"]], "c": [["## 结论\nok"]]})
+    live.search = _one_page_search()
+
+    async def lookup(queries):
+        raise RuntimeError("engine down")
+
+    live.lookup = lookup
+    asyncio.run(live.run())
+    assert live.ask["research"]["lookups"][0]["status"] == "error" and "engine down" in live.ask["research"]["lookups"][0]["error"]
+    assert len(live.ask["research"]["sources"]) == 1 and live.ask["status"] == "done"
+
+
+def test_a_skipped_search_tells_the_seats_they_cannot_browse():
+    setup = _research_setup(rounds=1)
+    live, events, calls, saved = _live(setup, {"a": [["A1"]], "b": [["B1"]], "c": [["## 结论\nok"]]})
+
+    async def search(question, history):
+        return {"queries": [], "docs": [], "skipped": True}
+
+    live.search = search
+    asyncio.run(live.run())
+    assert live.ask["research"]["status"] == "skipped"
+    assert "You cannot browse the web" in calls[0][1][0]["content"]
+
+
+def test_seats_whose_model_searches_itself_are_offered_it():
+    setup = _research_setup(rounds=1)
+    live, events, calls, saved = _live(setup, {"a": [["A1"]], "b": [["B1"]], "c": [["## 结论\nok"]]})
+    live.search = _one_page_search()
+    plain = live.call_model
+    browsed = []
+
+    async def call_model(model, messages, browse=False):
+        browsed.append((model, browse))
+        return await plain(model, messages)
+
+    async def browsers(ask):
+        return {"a"}
+
+    live.call_model = call_model
+    live.browsers = browsers
+    asyncio.run(live.run())
+    assert sorted(browsed) == [("a", True), ("b", False), ("c", False)]  # never the conclusion
+    by_model = {model: m for model, m in calls}
+    assert "You can search the web yourself" in by_model["a"][0]["content"]
+    assert "Beyond the research notes you cannot browse" in by_model["b"][0]["content"]
+
+    # no research for the question: nobody searches
+    plain_setup = _setup(rounds=1, moderator="c")
+    live, events, calls, saved = _live(plain_setup, {"a": [["A1"]], "b": [["B1"]], "c": [["## 结论\nok"]]})
+    asked = []
+
+    async def browsers_never(ask):
+        asked.append(ask)
+        return {"a"}
+
+    live.browsers = browsers_never
+    asyncio.run(live.run())
+    assert asked == [] and live.browse == set()

@@ -62,10 +62,22 @@ export type ReportBack = { chat_id: string; posted: boolean; duplicate: boolean 
 
 export type ResearchSource = { n: number; title: string; url: string; excerpt: string };
 
+/** One round's 补查: the searches the seats asked for, run before the next round. */
+export type ResearchLookup = {
+	round: number;
+	queries: string[];
+	status: 'running' | 'done' | 'empty' | 'error' | 'stopped';
+	/** sources it added to the notes */
+	added: number;
+	error?: string | null;
+};
+
 export type DiscussResearch = {
-	status: 'waiting' | 'running' | 'done' | 'empty' | 'error' | 'stopped';
+	/** skipped: the query writer found nothing a search could help with */
+	status: 'waiting' | 'running' | 'done' | 'empty' | 'error' | 'stopped' | 'skipped';
 	queries: string[];
 	sources: ResearchSource[];
+	lookups?: ResearchLookup[];
 	error?: string | null;
 	startedAt?: number | null;
 	endedAt?: number | null;
@@ -93,6 +105,8 @@ export type DiscussTurn = {
 	/** The model rejected the attached images; it spoke from the text only. */
 	imagesDropped?: boolean;
 	retry?: DiscussRetry | null;
+	/** the one more search (补查) this seat asked for before the next round */
+	lookup?: { query: string; status?: ResearchLookup['status'] | 'skipped'; added?: number } | null;
 };
 
 export type DiscussConclusion = {

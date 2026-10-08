@@ -332,6 +332,10 @@ async def get_session_user_chat_list(
     """The sidebar list. ``include_folders`` also returns the chats that sit
     in a folder (each row carries ``folder_id``) for the "all chats" view;
     the default keeps the classic ungrouped-only list."""
+    from open_webui.utils.mode_dispatch import backfill
+
+    # 精答 / 讨论 runs sent from a chat before those were marked leave the list (once per user)
+    backfill(user.id)
     if page is not None:
         limit = 60
         skip = (page - 1) * limit
@@ -685,7 +689,7 @@ async def get_chat_list_by_assistant_id(
 
 @router.get("/pinned", response_model=list[ChatResponse])
 async def get_user_pinned_chats(user=Depends(get_verified_user)):
-    return _chat_response_list(Chats.get_pinned_chats_by_user_id(user.id))
+    return with_kinds(user.id, _chat_response_list(Chats.get_pinned_chats_by_user_id(user.id)))
 
 
 ############################

@@ -39,10 +39,12 @@ async def auto_title_and_folder(
     message_id: str,
     user_message_count: int,
     label: str = "chat",
+    folder: bool = True,
 ) -> tuple[str, Optional[str]]:
     """Title and folder on the same cadence as ordinary chats; returns (title, folder_id) as they
     are afterwards. Never raises: a failed title falls back to the question, a failed folder
-    assignment leaves the chat where it is."""
+    assignment leaves the chat where it is. ``folder=False``: the title only (a run sent from a
+    chat: that chat is the one in the history and in a folder)."""
     from open_webui.models.chats import Chats, can_auto_generate_chat_title
     from open_webui.routers.tasks import generate_title
     from open_webui.utils.task import build_fallback_chat_title
@@ -77,6 +79,8 @@ async def auto_title_and_folder(
         ):
             title = generated
 
+    if not folder:
+        return title, chat.folder_id
     folder_id = await auto_folder(
         request,
         user,

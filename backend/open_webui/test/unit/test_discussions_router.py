@@ -645,6 +645,20 @@ def test_a_chat_message_becomes_a_discussion_at_the_users_last_table(env, monkey
     assert emitted[0]["type"] == "chat:completion" and emitted[0]["data"]["mode_dispatch"]["chat_id"] == run_chat_id
     # the chat is named after its question (no model turn ran to name it)
     assert chats_mod.ChatTable().get_chat_by_id(origin).title == "该用 Postgres 还是 SQLite？"
+    # and the sidebar reads its list again: the new name, the 讨论 mark
+    assert emitted[1] == {"type": "chat:title", "data": "该用 Postgres 还是 SQLite？"}
+
+    # one conversation in the history, as for a 协作台 team: the chat it was sent from, marked;
+    # the discussion's own chat is on the 讨论台 page (and not found by the history's search)
+    table = chats_mod.ChatTable()
+    assert table.get_chat_by_id(run_chat_id).meta["dispatched_from"] == origin
+    assert table.get_chat_by_id(origin).meta["mode_dispatch"] == ["discuss"]
+    listed = [c.id for c in table.get_chat_title_id_list_by_user_id(USER.id, include_folders=True)]
+    assert origin in listed and run_chat_id not in listed
+    found = [c.id for c in table.get_chats_by_user_id_and_search_text(USER.id, "postgres")]
+    assert origin in found and run_chat_id not in found
+    page = asyncio.run(api.list_discussions(USER))
+    assert run_chat_id in [row["id"] for row in page["items"]]
 
     detail = asyncio.run(api.get_discussion(run_chat_id, USER))
     ask = detail["asks"][0]

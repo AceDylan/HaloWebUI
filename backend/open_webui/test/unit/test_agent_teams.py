@@ -972,6 +972,8 @@ def test_a_chat_message_becomes_a_team_with_what_was_said_before(hermes, monkeyp
     event = emitted[0]
     assert event["type"] == "chat:completion" and event["data"]["team_dispatch"] == {"team_id": team.id}
     assert event["data"]["title"] == team.title
+    # the sidebar reads its list again: the chat's new name and its 协作 mark
+    assert emitted[1] == {"type": "chat:title", "data": team.title}
 
     # no Hermes connection: the reply says so, no team
     async def no_target(request, user):

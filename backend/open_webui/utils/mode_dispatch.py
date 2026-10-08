@@ -4,10 +4,13 @@ way, and the result comes back into the chat.
 The chat's Hermes 派发方式 「精答」 / 「讨论」 (``hermes_options.dispatch`` ``"answer"`` /
 ``"discuss"``) lands here instead of a Hermes run, as 「协作台」 lands in agent_team_dispatch:
 
-- the message becomes a 精答 run / a 讨论台 discussion in a chat of its own (it is in the history
-  with its mark, as one started on its page): the conversation before the message is its
+- the message becomes a 精答 run / a 讨论台 discussion in a chat of its own (listed on the 精答 /
+  讨论台 page, as one started there): the conversation before the message is its
   background (the dispatcher and every seat read it), the message's files go on the discussion's
   table (精答 reads text only);
+- the history lists this chat for it, marked 精答 / 讨论 (``meta.mode_dispatch`` here, the run's
+  chat carries ``meta.dispatched_from`` and is listed on its own page only), as a 协作台 team's
+  chat stands for the team;
 - this chat's reply finishes at once (no model turn) and carries ``mode_dispatch: {kind,
   chat_id}``, which the page shows as a live card (ModeDispatchCard);
 - once the answer / the conclusion is written it comes back into this chat as a finished reply
@@ -21,7 +24,7 @@ import re
 import time
 from typing import Any, Optional
 
-from open_webui.models.chats import Chats
+from open_webui.models.chats import DISPATCHED_FROM_META_KEY, Chats
 
 log = logging.getLogger(__name__)
 
@@ -30,6 +33,12 @@ MODES: dict[str, dict] = {
     "discuss": {"label": "讨论", "page": "/discuss", "notice": "[讨论结论]"},
 }
 DEFAULT_TITLES = {"", "New Chat", "新对话", "新聊天"}
+# chat.meta of a chat that handed messages over: the kinds (["answer", "discuss"]), for its mark
+# in the history (utils/chat_kinds.py)
+CHAT_META_KEY = "mode_dispatch"
+# what a run's chat keeps of the run, per kind (the message key holding the run, with ``origin``)
+RUN_KEYS = {"answer": "answer_desk", "discuss": "discussion_room"}
+BACKFILL_LIMIT = 200
 # what the run reads of the conversation before the message
 CONTEXT_TURNS = 10
 CONTEXT_TURN_CHARS = 2000
@@ -42,6 +51,7 @@ RETRY_SECONDS = 15
 RETRY_LIMIT = 40
 
 _background: set = set()
+_backfilled: set[str] = set()
 # run chat id → the socket of the tab the message was sent from (in memory: only a hint for the
 # away push, so a tab whose socket is not registered still counts as someone looking)
 _sessions: dict[str, str] = {}
@@ -77,6 +87,57 @@ def message_file_ids(metadata: dict) -> list[str]:
         if file_id and file_id not in out:
             out.append(file_id)
     return out
+
+
+def mark_chat(chat_id: str, kind: str) -> None:
+    """The chat handed a message to ``kind``: the history marks it so (it stands for the run)."""
+    chat = Chats.get_chat_by_id(chat_id)
+    if chat is None:
+        return
+    handed = (chat.meta or {}).get(CHAT_META_KEY)
+    handed = [k for k in handed if k in MODES] if isinstance(handed, list) else []
+    if kind not in handed:
+        Chats.set_chat_meta_value_by_id(chat_id, CHAT_META_KEY, [*handed, kind])
+
+
+def _origin_of(chat_json: Any) -> tuple[Optional[str], Optional[str]]:
+    """(kind, the chat it was sent from) of a run's chat, from the run kept on its messages."""
+    history = chat_json.get("history") if isinstance(chat_json, dict) else None
+    messages = history.get("messages") if isinstance(history, dict) else None
+    for message in messages.values() if isinstance(messages, dict) else []:
+        if not isinstance(message, dict):
+            continue
+        for kind, key in RUN_KEYS.items():
+            run = message.get(key)
+            origin = run.get("origin") if isinstance(run, dict) else None
+            if isinstance(origin, dict) and origin.get("chatId"):
+                return kind, str(origin["chatId"])
+    return None, None
+
+
+def backfill(user_id: str) -> int:
+    """Runs sent from a chat before their chats were marked (they showed in the history next to
+    the chat they came from): marked now, once per user and process. Returns how many."""
+    if user_id in _backfilled:
+        return 0
+    _backfilled.add(user_id)
+    found: list[tuple[str, str, str]] = []
+    try:
+        rows = Chats.get_unmarked_runs_with_origin(user_id, list(RUN_KEYS.values()), limit=BACKFILL_LIMIT)
+        for chat_id, chat_json in rows:
+            kind, origin_id = _origin_of(chat_json)
+            # a run whose chat is gone stays in the history: nothing else stands for it there
+            if kind and origin_id and origin_id != chat_id and Chats.get_chat_by_id_and_user_id(origin_id, user_id):
+                found.append((chat_id, kind, origin_id))
+        for chat_id, kind, origin_id in found:
+            Chats.set_chat_meta_value_by_id(chat_id, DISPATCHED_FROM_META_KEY, origin_id)
+            mark_chat(origin_id, kind)
+    except Exception:  # noqa: BLE001 — the list reads as before
+        log.exception("mode dispatch: marking earlier runs of %s failed", user_id)
+        return 0
+    if found:
+        log.info("mode dispatch: marked %d earlier runs of %s", len(found), user_id)
+    return len(found)
 
 
 def card_text(kind: str, *, error: Optional[str] = None, files: int = 0) -> str:
@@ -135,6 +196,11 @@ async def run_mode_dispatch(request, form_data: dict, user, metadata: dict, mode
             except Exception as exc:  # noqa: BLE001
                 log.exception("mode dispatch (%s) failed", kind)
                 error = type(exc).__name__
+        if run_chat_id:
+            try:
+                mark_chat(chat_id, kind)
+            except Exception:  # noqa: BLE001
+                log.warning("mode dispatch: could not mark the chat", exc_info=True)
         if run_chat_id and metadata.get("session_id"):
             _sessions[run_chat_id] = str(metadata["session_id"])
         content = card_text(kind, error=error, files=len(files))
@@ -157,6 +223,9 @@ async def run_mode_dispatch(request, form_data: dict, user, metadata: dict, mode
                 pass
         try:
             await emitter({"type": "chat:completion", "data": data})
+            if data.get("title"):
+                # the sidebar reads its list again: the chat's new name and its 精答 / 讨论 mark
+                await emitter({"type": "chat:title", "data": data["title"]})
         except Exception:  # noqa: BLE001
             log.debug("mode dispatch: reply emit failed", exc_info=True)
         if run_chat_id:

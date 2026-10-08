@@ -600,6 +600,15 @@ def test_a_chat_message_becomes_a_run_and_its_answer_comes_back(env, monkeypatch
     assert run["origin"] == {"chatId": origin, "messageId": "r1"}
     assert run["context"] == {"text": "用户：我在北京租房\n\nHermes：好的", "title": "租房", "chatId": origin}
     assert env.after == [(run_chat_id, "done")]
+    # one conversation in the history, as for a 协作台 team: the chat it was sent from, marked 精答
+    # (the sidebar is told to read its list again); the run's own chat is on the 精答 page
+    assert emitted[1] == {"type": "chat:title", "data": "租房"}
+    table = chats_mod.ChatTable()
+    assert table.get_chat_by_id(run_chat_id).meta["dispatched_from"] == origin
+    assert table.get_chat_by_id(origin).meta["mode_dispatch"] == ["answer"]
+    listed = [c.id for c in table.get_chat_title_id_list_by_user_id("u1", include_folders=True)]
+    assert origin in listed and run_chat_id not in listed
+    assert run_chat_id in [row["id"] for row in asyncio.run(api.list_answers(USER))["items"]]
 
     posted = []
 
@@ -624,6 +633,38 @@ def test_a_chat_message_becomes_a_run_and_its_answer_comes_back(env, monkeypatch
     with pytest.raises(HTTPException) as refused:
         asyncio.run(api.report_back(env.request, own["id"], USER))
     assert refused.value.status_code == 400
+
+
+def test_runs_sent_from_a_chat_before_the_mark_leave_the_history_once(env):
+    from open_webui.utils import mode_dispatch
+
+    table = chats_mod.ChatTable()
+
+    def chat(meta=None, messages=None):
+        payload = {"title": "t", "history": {"messages": messages or {}, "currentId": None}}
+        return table.insert_new_chat("u1", chats_mod.ChatForm(chat=payload), meta=meta).id
+
+    origin = chat()
+    talk = chat()
+    answer = chat({"answer_desk": {"v": 1}}, {"a": {"id": "a", "answer_desk": {"origin": {"chatId": origin, "messageId": "r1"}}}})
+    room = chat({"discussion_room": {"v": 1}}, {"b": {"id": "b", "discussion_room": {"origin": {"chatId": talk, "messageId": "r2"}}}})
+    own = chat({"answer_desk": {"v": 1}}, {"c": {"id": "c", "answer_desk": {"question": "q"}}})
+    orphan = chat({"answer_desk": {"v": 1}}, {"d": {"id": "d", "answer_desk": {"origin": {"chatId": "gone", "messageId": "r"}}}})
+    mode_dispatch._backfilled.discard("u1")
+
+    assert mode_dispatch.backfill("u1") == 2
+    assert mode_dispatch.backfill("u1") == 0  # once per user and process
+    assert table.get_chat_by_id(answer).meta["dispatched_from"] == origin
+    assert table.get_chat_by_id(room).meta["dispatched_from"] == talk
+    assert table.get_chat_by_id(origin).meta["mode_dispatch"] == ["answer"]
+    assert table.get_chat_by_id(talk).meta["mode_dispatch"] == ["discuss"]
+    # a run asked on its page, or whose chat is gone, stays in the history
+    listed = {c.id for c in table.get_chat_title_id_list_by_user_id("u1", include_folders=True)}
+    assert listed == {origin, talk, own, orphan}
+    mode_dispatch.mark_chat(origin, "discuss")
+    mode_dispatch.mark_chat(origin, "discuss")
+    assert table.get_chat_by_id(origin).meta["mode_dispatch"] == ["answer", "discuss"]
+    mode_dispatch._backfilled.discard("u1")
 
 
 def test_a_dispatch_without_words_or_in_a_temporary_chat_says_why(env, monkeypatch):

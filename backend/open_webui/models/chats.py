@@ -37,7 +37,21 @@ FOLDER_ASSIGNMENT_META_KEY = "folder_assignment"
 # "restored_at": ts}`` — written by the inactivity sweep so its archives can be
 # told apart from manual ones (and undone without touching those).
 AUTO_ARCHIVE_META_KEY = "auto_archive"
+# ``chat.meta.dispatched_from``: the chat a 精答 run / a discussion was sent from (派发方式「精答」
+# /「讨论」, utils/mode_dispatch.py). That chat stands for it in the sidebar's history, as a 协作台
+# team's chat does; the run's own chat is listed on the 精答 / 讨论台 pages only.
+DISPATCHED_FROM_META_KEY = "dispatched_from"
 DEFAULT_CHAT_TITLE = "New Chat"
+
+
+def _not_dispatched(query):
+    """Leave out the chats of runs sent from another chat (DISPATCHED_FROM_META_KEY)."""
+    return query.filter(
+        or_(
+            Chat.meta.is_(None),
+            ~cast(Chat.meta, Text).like(f'%"{DISPATCHED_FROM_META_KEY}"%'),
+        )
+    )
 
 
 def get_title_generation_metadata(meta: Optional[dict]) -> dict:
@@ -274,6 +288,8 @@ class ChatResponse(BaseModel):
     meta: dict = {}
     folder_id: Optional[str] = None
     assistant_id: Optional[str] = None
+    # the sidebar's mark, where a list of whole chats feeds it (pinned): see ChatTitleIdResponse
+    kind: Optional[str] = None
 
 
 class ChatTitleIdResponse(BaseModel):
@@ -283,7 +299,8 @@ class ChatTitleIdResponse(BaseModel):
     created_at: int
     folder_id: Optional[str] = None
     assistant_id: Optional[str] = None
-    # 'discuss' | 'team' | 'image' for the sidebar's marks (utils/chat_kinds.py); None = a plain chat
+    # 'discuss' | 'answer' | 'team' | 'image' | 'answer_dispatch' | 'discuss_dispatch' for the
+    # sidebar's marks (utils/chat_kinds.py); None = a plain chat
     kind: Optional[str] = None
 
 
@@ -1226,7 +1243,7 @@ class ChatTable:
         limit: Optional[int] = None,
     ) -> list[ChatTitleIdResponse]:
         with get_db() as db:
-            query = db.query(Chat).filter_by(user_id=user_id)
+            query = _not_dispatched(db.query(Chat).filter_by(user_id=user_id))
 
             if not include_folders:
                 query = query.filter_by(folder_id=None)
@@ -1418,6 +1435,31 @@ class ChatTable:
             )
         return q
 
+    def get_unmarked_runs_with_origin(
+        self, user_id: str, keys: list[str], *, limit: int = 200
+    ) -> list[tuple[str, dict]]:
+        """(id, chat JSON) of the user's chats a mode keeps (``meta`` has one of ``keys``: 精答,
+        讨论台) whose run names a chat it was sent from (``"origin"``) but that carry no
+        DISPATCHED_FROM_META_KEY yet: runs sent from a chat before the mark existed."""
+        try:
+            with get_db() as db:
+                meta_text = cast(Chat.meta, Text)
+                rows = (
+                    db.query(Chat.id, Chat.chat)
+                    .filter(
+                        Chat.user_id == user_id,
+                        or_(*(meta_text.like(f'%"{key}"%') for key in keys)),
+                        ~meta_text.like(f'%"{DISPATCHED_FROM_META_KEY}"%'),
+                        cast(Chat.chat, Text).like('%"origin"%'),
+                    )
+                    .limit(limit)
+                    .all()
+                )
+                return [(row[0], row[1] if isinstance(row[1], dict) else {}) for row in rows]
+        except Exception:
+            log.exception("get_unmarked_runs_with_origin: %s", user_id)
+            return []
+
     def page_chats_with_meta_key(
         self,
         user_id: str,
@@ -1602,7 +1644,8 @@ class ChatTable:
         search_text = " ".join(search_text_words)
 
         with get_db() as db:
-            query = db.query(Chat).filter(Chat.user_id == user_id)
+            # a run sent from a chat is found in that chat (its result is posted there)
+            query = _not_dispatched(db.query(Chat).filter(Chat.user_id == user_id))
 
             if not include_archived:
                 query = query.filter(Chat.archived == False)
@@ -1739,7 +1782,7 @@ class ChatTable:
         limit: Optional[int] = None,
     ) -> list[ChatModel]:
         with get_db() as db:
-            query = db.query(Chat).filter_by(folder_id=folder_id, user_id=user_id)
+            query = _not_dispatched(db.query(Chat).filter_by(folder_id=folder_id, user_id=user_id))
             query = query.filter(or_(Chat.pinned == False, Chat.pinned == None))
             query = query.filter_by(archived=False)
 

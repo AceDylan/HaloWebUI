@@ -14,6 +14,7 @@ from open_webui.models.folders import (
     Folders,
 )
 from open_webui.models.chats import Chats
+from open_webui.utils.chat_kinds import chat_kinds
 
 from open_webui.config import UPLOAD_DIR
 from open_webui.env import SRC_LOG_LEVELS
@@ -43,6 +44,14 @@ router = APIRouter()
 @router.get("/", response_model=list[FolderModel])
 async def get_folders(user=Depends(get_verified_user)):
     folders = Folders.get_folders_by_user_id(user.id)
+    chats_by_folder = {
+        folder.id: Chats.get_chats_by_folder_id_and_user_id(folder.id, user.id)
+        for folder in folders
+    }
+    # the sidebar marks a chat in a folder as it does in the list (精答, 讨论, 协作, 生图)
+    kinds = chat_kinds(
+        user.id, [chat.id for chats in chats_by_folder.values() for chat in chats]
+    )
 
     return [
         {
@@ -54,10 +63,9 @@ async def get_folders(user=Depends(get_verified_user)):
                         "id": chat.id,
                         "folder_id": chat.folder_id,
                         "assistant_id": chat.assistant_id,
+                        "kind": kinds.get(chat.id),
                     }
-                    for chat in Chats.get_chats_by_folder_id_and_user_id(
-                        folder.id, user.id
-                    )
+                    for chat in chats_by_folder[folder.id]
                 ]
             },
         }

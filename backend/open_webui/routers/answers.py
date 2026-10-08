@@ -12,7 +12,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
-from open_webui.models.chats import ChatForm, Chats
+from open_webui.models.chats import DISPATCHED_FROM_META_KEY, ChatForm, Chats
 from open_webui.socket.main import get_event_emitter
 from open_webui.utils.auth import get_verified_user
 from open_webui.utils import answer_desk as desk
@@ -191,6 +191,7 @@ async def _after_done(request: Request, user, chat_id: str, run: dict) -> None:
         message_id=run["id"],
         user_message_count=1,
         label="answer",
+        folder=DISPATCHED_FROM_META_KEY not in (chat.meta or {}),
     )
     emit = _emitter(user, chat_id, run["id"])
     try:
@@ -480,7 +481,9 @@ def _open(
         "timestamp": desk.now_ms(),
         CHAT_KEY: {"v": 1, "messageId": message_id},
     }
-    chat = Chats.insert_new_chat(user.id, ChatForm(chat=payload, title_auto_generated=True))
+    # sent from a chat: that chat stands for it in the history (utils/mode_dispatch.py)
+    meta = {DISPATCHED_FROM_META_KEY: origin["chatId"]} if origin and origin.get("chatId") else None
+    chat = Chats.insert_new_chat(user.id, ChatForm(chat=payload, title_auto_generated=True), meta=meta)
     if chat is None:
         raise HTTPException(status_code=500, detail="创建精答失败")
     for mid in (user_message_id, message_id):

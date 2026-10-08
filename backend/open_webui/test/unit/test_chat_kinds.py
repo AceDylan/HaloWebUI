@@ -81,3 +81,24 @@ def test_marks_answer_desk_chats_below_discussions(monkeypatch):
         db.commit()
 
     assert mod.chat_kinds("u1", ["ask", "ask_team", "odd"]) == {"ask": "answer", "ask_team": "answer", "odd": "discuss"}
+
+
+def test_marks_a_chat_that_handed_a_message_to_answer_or_discuss(monkeypatch):
+    # 派发方式「精答」/「讨论」: the chat it was sent from stands for the run in the history
+    session = _db(monkeypatch)
+    with session() as db:
+        _chat(db, "asked", meta={"mode_dispatch": ["answer"]})
+        _chat(db, "talked", meta={"mode_dispatch": ["answer", "discuss"]})
+        _chat(db, "teamed", meta={"mode_dispatch": ["discuss"]})
+        _chat(db, "pics", meta={"mode_dispatch": ["answer"]})
+        _chat(db, "odd", meta={"mode_dispatch": "answer"})
+        db.add(AgentTeam(id="t1", user_id="u1", chat_id="teamed", title="t", goal="g", status="done", phase="done", created_at=1, updated_at=1))
+        db.add(ImageStudioItem(id="gallery_chat_r1_0", user_id="u1", kind="gallery", data={"chatId": "pics"}, created_at=1, updated_at=1))
+        db.commit()
+
+    assert mod.chat_kinds("u1", ["asked", "talked", "teamed", "pics", "odd"]) == {
+        "asked": "answer_dispatch",
+        "talked": "discuss_dispatch",
+        "teamed": "team",
+        "pics": "answer_dispatch",
+    }

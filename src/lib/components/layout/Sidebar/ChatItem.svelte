@@ -58,18 +58,31 @@
 	export let folderDotClass: string | null = null;
 	/** Search results include archived chats; they carry this mark. */
 	export let archived = false;
-	/** What kind of work this chat is (utils/chat_kinds.py): 'discuss' | 'answer' | 'team' | 'image'. */
+	/**
+	 * What kind of work this chat is (utils/chat_kinds.py): 'discuss' | 'answer' | 'team' | 'image',
+	 * or 'answer_dispatch' | 'discuss_dispatch' — an ordinary chat that handed a message to 精答 /
+	 * 讨论 (it stands for the run in the history, as a team's chat does, and opens as a chat).
+	 */
 	export let kind: string | null = null;
 	// A search hit: the words around the match, bolded, and the message to open at.
 	export let snippet: string | null = null;
 	export let searchText = '';
 	export let matchMessageId: string | null = null;
-	const KIND_LABEL: Record<string, string> = { discuss: '讨论', answer: '精答', team: '协作', image: '生图' };
+	const KIND_LABEL: Record<string, string> = {
+		discuss: '讨论',
+		answer: '精答',
+		team: '协作',
+		image: '生图',
+		answer_dispatch: '精答',
+		discuss_dispatch: '讨论'
+	};
 	const KIND_TITLE: Record<string, string> = {
 		answer: '精答：由挑选出的助手回答，可以接着追问',
 		discuss: '讨论台里的多模型讨论',
 		team: '协作台任务的对话：目标、团队进度和发回的结果',
-		image: '这个对话里生成过图片'
+		image: '这个对话里生成过图片',
+		answer_dispatch: '交给精答的对话：精答的进度和发回的回答',
+		discuss_dispatch: '交给讨论台的对话：讨论的进度和发回的结论'
 	};
 	export let folderOptions: Array<{
 		id: string;

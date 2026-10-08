@@ -147,6 +147,9 @@ async def run_team_dispatch(request, form_data: dict, user, metadata: dict, mode
             data["title"] = title
         try:
             await emitter({"type": "chat:completion", "data": data})
+            if title:
+                # the sidebar reads its list again: the chat's new name and its 协作 mark
+                await emitter({"type": "chat:title", "data": title})
         except Exception:  # noqa: BLE001
             log.debug("teams: dispatch reply emit failed", exc_info=True)
         if team is not None:

@@ -162,6 +162,16 @@ export const showChangelog = writable(false);
 export const showControls = writable(false);
 export const showOverview = writable(false);
 export const overviewFocusedMessageId: Writable<string | null> = writable(null);
+// Open a chat at one message (a search hit, a bookmark): set before navigating;
+// Chat.svelte scrolls to it once that chat is on screen, then clears it.
+export const pendingMessageReveal: Writable<{ chatId: string; messageId: string } | null> =
+	writable(null);
+// 收藏: the kept replies of the chat on screen (the marks on its replies).
+export const chatBookmarkIds: Writable<{ chatId: string; ids: Set<string> }> = writable({
+	chatId: '',
+	ids: new Set()
+});
+export const showBookmarks = writable(false);
 export const showArtifacts = writable(false);
 export const showCallOverlay = writable(false);
 export const artifactAutoOpenDismissedMessageId: Writable<string | null> = writable(null);

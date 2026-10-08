@@ -61,6 +61,8 @@
 		toolServers,
 		activeChatIds,
 		overviewFocusedMessageId,
+		pendingMessageReveal,
+		chatBookmarkIds,
 		newChatRequest,
 		selectedAssistantScene
 	} from '$lib/stores';
@@ -158,9 +160,16 @@
 		generateQueries,
 		chatAction,
 		generateMoACompletion,
-		stopTask
+		stopTask,
+		createChatHandoff
 	} from '$lib/apis';
+	import {
+		computeContextUsage,
+		resolveContextWindow,
+		type ContextUsage
+	} from '$lib/utils/context-usage';
 	import { getTools } from '$lib/apis/tools';
+	import { getChatBookmarkIds } from '$lib/apis/bookmarks';
 	import { getSkills } from '$lib/apis/skills';
 	import { HermesSteerError, steerHermesRun } from '$lib/apis/hermes';
 	import {
@@ -192,6 +201,7 @@
 	import EventConfirmDialog from '../common/ConfirmDialog.svelte';
 	import BackgroundRunnerBanner from './BackgroundRunnerBanner.svelte';
 	import AssistantVersionNotice from './AssistantVersionNotice.svelte';
+	import ContextHandoffNotice from './ContextHandoffNotice.svelte';
 	import Placeholder from './Placeholder.svelte';
 	import NotificationToast from '../NotificationToast.svelte';
 	import Spinner from '../common/Spinner.svelte';
@@ -1250,6 +1260,76 @@
 		selectedModels?.[0],
 		$config?.hermes_agent_model_ids
 	);
+	// 收藏: which replies of the chat on screen are kept (the marks on them).
+	let bookmarkIdsFor: string | null = null;
+	const loadChatBookmarkIds = async (id: string) => {
+		bookmarkIdsFor = id;
+		chatBookmarkIds.set({ chatId: id, ids: new Set() });
+		if (!id || id.startsWith('local')) return;
+		const ids = await getChatBookmarkIds(localStorage.token, id).catch(() => [] as string[]);
+		if (bookmarkIdsFor === id) chatBookmarkIds.set({ chatId: id, ids: new Set(ids ?? []) });
+	};
+	$: if (($chatId ?? '') !== bookmarkIdsFor) void loadChatBookmarkIds($chatId ?? '');
+
+	// How full the context is (the ring by the send button) and 总结后在新对话继续.
+	// Counted again when the message on screen changes or finishes, not on every
+	// streamed chunk. Hermes keeps its own context; an image model has none to fill.
+	let contextUsage: ContextUsage | null = null;
+	let contextUsageKey = '';
+	let handingOff = false;
+	$: {
+		const currentMessage = history?.currentId ? history.messages?.[history.currentId] : null;
+		const modelId = selectedModels?.[0] ?? '';
+		const key = `${$chatId}|${history?.currentId ?? ''}|${currentMessage?.done ?? ''}|${modelId}|${modelsMap.size}`;
+		if (key !== contextUsageKey) {
+			contextUsageKey = key;
+			const model = modelId ? getModelById(modelId) : null;
+			if (!$chatId || !currentMessage || showHermesOptions || isDedicatedImageGenerationChatModel(model)) {
+				contextUsage = null;
+			} else {
+				const contextWindow = resolveContextWindow(model as Record<string, any> | null);
+				contextUsage = computeContextUsage(history, contextWindow.tokens, contextWindow.source);
+			}
+		}
+	}
+	$: canHandoff = Boolean(
+		contextUsage && $chatId && $chatId !== 'local' && !$temporaryChatEnabled && selectedModels?.[0]
+	);
+
+	const continueInNewChat = async () => {
+		const sourceChatId = $chatId;
+		const modelId = selectedModels?.[0];
+		if (handingOff || !canHandoff || !sourceChatId || !modelId) return;
+		handingOff = true;
+		try {
+			const created = await createChatHandoff(
+				localStorage.token,
+				sourceChatId,
+				modelId,
+				contextUsage?.window ?? null
+			);
+			chatListRefreshTarget.set({
+				id: created.id,
+				title: created.title,
+				updated_at: created.updated_at,
+				created_at: created.created_at,
+				assistant_id: created.assistant_id ?? null,
+				folder_id: created.folder_id ?? null
+			});
+			chatListRefreshRevision.update((value) => value + 1);
+			await goto(`/c/${created.id}`);
+			toast.success(
+				created.omitted > 0
+					? `已在新对话继续（最早的 ${created.omitted} 条消息太长没放进摘要）`
+					: '已在新对话继续'
+			);
+		} catch (error) {
+			toast.error(typeof error === 'string' && error ? error : '总结失败，请稍后再试');
+		} finally {
+			handingOff = false;
+		}
+	};
+
 	// "接着上次": the chat ends on a runner's report, so a message left on
 	// "直接" goes back to that run's session instead of to hermes' model.
 	$: hermesContinuation = showHermesOptions ? findHermesContinuation(history) : null;
@@ -2937,6 +3017,94 @@
 		await tick();
 		saveChatHandler(_chatId, history);
 	};
+
+	// A search hit or a bookmark opens the chat at its message ($pendingMessageReveal,
+	// set before navigating). The branch on screen is kept when the message is on it;
+	// otherwise the chat switches to the newest branch through that message.
+	let revealMessageId: string | null = null;
+	let revealMessageChatId = '';
+	let revealingMessage = false;
+	let revealFlashTimer: ReturnType<typeof setTimeout> | null = null;
+
+	const isOnBranchOnScreen = (messageId: string) => {
+		const seen = new Set<string>();
+		let id = history?.currentId ?? null;
+		while (id && !seen.has(id)) {
+			if (id === messageId) return true;
+			seen.add(id);
+			id = history.messages?.[id]?.parentId ?? null;
+		}
+		return false;
+	};
+
+	const flashMessage = (element: HTMLElement) => {
+		document
+			.querySelectorAll('.halo-message-flash')
+			.forEach((node) => node.classList.remove('halo-message-flash'));
+		element.classList.add('halo-message-flash');
+		if (revealFlashTimer) clearTimeout(revealFlashTimer);
+		revealFlashTimer = setTimeout(() => {
+			element.classList.remove('halo-message-flash');
+			revealFlashTimer = null;
+		}, 2200);
+	};
+
+	const revealPendingMessage = async () => {
+		const target = $pendingMessageReveal;
+		if (!target || revealingMessage || loading || target.chatId !== $chatId) return;
+		pendingMessageReveal.set(null);
+		if (!history?.messages?.[target.messageId]) return;
+
+		revealingMessage = true;
+		const _chatId = $chatId;
+		try {
+			if (!isOnBranchOnScreen(target.messageId)) {
+				let leafId = target.messageId;
+				let childrenIds = history.messages[leafId]?.childrenIds ?? [];
+				while (childrenIds.length > 0 && history.messages[childrenIds.at(-1)]) {
+					leafId = childrenIds.at(-1);
+					childrenIds = history.messages[leafId]?.childrenIds ?? [];
+				}
+				history.currentId = leafId;
+				history = history;
+				saveChatHandler(_chatId, history);
+			}
+			// Messages renders only the last few messages until scrolled up; this widens it.
+			revealMessageId = target.messageId;
+			revealMessageChatId = _chatId;
+			await tick();
+			// After the load's own scroll to the bottom has run.
+			await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+			if ($chatId !== _chatId) return;
+
+			const scrollToTarget = () => {
+				const element = document.getElementById(`message-${target.messageId}`);
+				if (!element) return null;
+				cancelPendingAutoScrollFrames();
+				userHasScrolled = true;
+				autoScroll = false;
+				element.scrollIntoView({ block: 'center' });
+				return element;
+			};
+			const element = scrollToTarget();
+			if (element) {
+				flashMessage(element);
+				// Messages above it may still be laying out (deferred rendering); settle once more.
+				setTimeout(() => {
+					if ($chatId === _chatId && !autoScroll) scrollToTarget();
+				}, 320);
+			}
+		} finally {
+			revealingMessage = false;
+		}
+	};
+
+	$: if ($pendingMessageReveal && $pendingMessageReveal.chatId === $chatId && !loading) {
+		void revealPendingMessage();
+	}
+	$: if (revealMessageId && revealMessageChatId !== $chatId) {
+		revealMessageId = null;
+	}
 
 	const applyDiscussionEvent = (message: any, data: any) => {
 		if (!message || !data || typeof data !== 'object') {
@@ -7290,6 +7458,7 @@
 									initialMessagesCount={chatIdProp ? 6 : 20}
 									messagesLoadStep={chatIdProp ? 6 : 20}
 									deferOffscreenRendering={Boolean(chatIdProp)}
+									{revealMessageId}
 									bottomPadding={files.length > 0}
 								/>
 								<div bind:this={scrollSentinel} class="h-px w-full shrink-0" />
@@ -7300,6 +7469,12 @@
 						<div class="pb-[max(1rem,env(safe-area-inset-bottom))]">
 							<BackgroundRunnerBanner />
 							<AssistantVersionNotice chatId={$chatId} />
+							<ContextHandoffNotice
+								chatId={$chatId}
+								usage={contextUsage}
+								{handingOff}
+								onHandoff={continueInNewChat}
+							/>
 							<MessageQueue
 								queue={currentChatQueue}
 								onEdit={editQueuedMessage}
@@ -7351,6 +7526,10 @@
 								runStartedAt={history?.currentId
 									? (history.messages?.[history.currentId]?.timestamp ?? null)
 									: null}
+								{contextUsage}
+								{canHandoff}
+								{handingOff}
+								onHandoff={continueInNewChat}
 								onChange={handleMessageInputChange}
 								on:upload={async (e) => {
 									const { type, data } = e.detail;

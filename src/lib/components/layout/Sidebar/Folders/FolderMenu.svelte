@@ -7,9 +7,12 @@
 	import GarbageBin from '$lib/components/icons/GarbageBin.svelte';
 	import Pencil from '$lib/components/icons/Pencil.svelte';
 	import Download from '$lib/components/icons/Download.svelte';
+	import Document from '$lib/components/icons/Document.svelte';
+	import { translateWithDefault } from '$lib/i18n';
 	import { flyAndScale } from '$lib/utils/transitions';
 
 	const i18n = getContext('i18n');
+	const tr = (key: string, defaultValue: string) => translateWithDefault($i18n, key, defaultValue);
 	const dispatch = createEventDispatcher();
 
 	let show = false;
@@ -43,6 +46,16 @@
 			>
 				<Pencil strokeWidth="2" />
 				<div class="flex items-center">{$i18n.t('Rename')}</div>
+			</DropdownMenu.Item>
+
+			<DropdownMenu.Item
+				class="flex gap-2 items-center px-3 py-2 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-md"
+				on:click={() => {
+					dispatch('instructions');
+				}}
+			>
+				<Document strokeWidth="2" />
+				<div class="flex items-center">{tr('分组指令', 'Instructions')}</div>
 			</DropdownMenu.Item>
 
 			<DropdownMenu.Item

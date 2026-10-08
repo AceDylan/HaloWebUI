@@ -27,8 +27,10 @@
 		tags,
 		hermesActiveRuns,
 		hermesUnreadChatIds,
-		activeChatIds
+		activeChatIds,
+		pendingMessageReveal
 	} from '$lib/stores';
+	import { snippetParts } from '$lib/utils/search-snippet';
 
 	import { teamChatStates } from '$lib/components/teams/live';
 	import ChatMenu from './ChatMenu.svelte';
@@ -58,6 +60,10 @@
 	export let archived = false;
 	/** What kind of work this chat is (utils/chat_kinds.py): 'discuss' | 'answer' | 'team' | 'image'. */
 	export let kind: string | null = null;
+	// A search hit: the words around the match, bolded, and the message to open at.
+	export let snippet: string | null = null;
+	export let searchText = '';
+	export let matchMessageId: string | null = null;
 	const KIND_LABEL: Record<string, string> = { discuss: '讨论', answer: '精答', team: '协作', image: '生图' };
 	const KIND_TITLE: Record<string, string> = {
 		answer: '精答：由挑选出的助手回答，可以接着追问',
@@ -130,6 +136,8 @@
 		: 'text-left self-center overflow-hidden w-full h-[20px]';
 
 	$: menuOffsetClass = isFolderVariant ? 'top-[4px]' : 'top-[6px]';
+	$: snippetPieces = snippet ? snippetParts(snippet, searchText) : [];
+	$: snippetLayoutClass = snippetPieces.length > 0 ? 'flex-col' : '';
 
 	let mouseOver = false;
 
@@ -277,10 +285,13 @@
 		</div>
 	{:else}
 		<a
-			class="{itemShellClass} {itemStateClass} whitespace-nowrap text-ellipsis"
+			class="{itemShellClass} {itemStateClass} whitespace-nowrap text-ellipsis {snippetLayoutClass}"
 			href={kind === 'discuss' ? `/discuss/${id}` : `/c/${id}`}
 			on:click={() => {
 				dispatch('select');
+				pendingMessageReveal.set(
+					matchMessageId && kind !== 'discuss' ? { chatId: id, messageId: matchMessageId } : null
+				);
 
 				if ($selectedAssistantScene && $selectedAssistantScene.id !== assistantId) {
 					selectedAssistantScene.set(null);
@@ -388,6 +399,17 @@
 					</div>
 				{/if}
 			</div>
+			{#if snippetPieces.length > 0}
+				<div
+					class="mt-0.5 line-clamp-2 whitespace-normal break-words pr-6 text-xs font-normal leading-[1.35] text-gray-500 dark:text-gray-400"
+					data-halo-search-snippet
+				>
+					{#each snippetPieces as piece}{#if piece.match}<mark
+								class="rounded-sm bg-amber-200/70 px-px text-gray-900 dark:bg-amber-400/30 dark:text-amber-100"
+								>{piece.text}</mark
+							>{:else}{piece.text}{/if}{/each}
+				</div>
+			{/if}
 		</a>
 	{/if}
 

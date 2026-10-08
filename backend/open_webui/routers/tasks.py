@@ -743,3 +743,104 @@ async def generate_moa_response(
             status_code=status.HTTP_400_BAD_REQUEST,
             content={"detail": str(e)},
         )
+
+
+class ChatHandoffForm(BaseModel):
+    chat_id: str
+    # The model on screen (selection id); it writes the summary.
+    model: str
+    # Its context window as the composer counts it, to decide how much fits.
+    context_tokens: Optional[int] = None
+
+
+@router.post("/handoff")
+async def create_chat_handoff(
+    request: Request, form_data: ChatHandoffForm, user=Depends(get_verified_user)
+):
+    """总结后在新对话继续 (utils/chat_handoff.py): summarize the branch on
+    screen with the chat's model and open a new chat that starts from it."""
+    from open_webui.models.chats import ChatImportForm, Chats
+    from open_webui.utils.chat_handoff import (
+        branch_messages,
+        build_handoff_chat,
+        build_transcript,
+        handoff_request_messages,
+    )
+    from open_webui.utils.folder_assignment import parse_completion_text
+    from open_webui.utils.hermes_agent import is_hermes_agent_model
+
+    chat = Chats.get_chat_by_id_and_user_id(form_data.chat_id, user.id)
+    if not chat or not isinstance(chat.chat, dict):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Chat not found")
+
+    transcript, omitted = build_transcript(
+        branch_messages(chat.chat), form_data.context_tokens
+    )
+    if not transcript.strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="这段对话还没有可以总结的内容"
+        )
+
+    models = await _get_request_models(request, user)
+    model_id = _resolve_task_model_id(request, models, form_data.model)
+    # An agent run or an image model cannot write the summary; the task model can.
+    if is_hermes_agent_model(models.get(model_id) or model_id) or is_dedicated_image_generation_model(
+        models.get(model_id)
+    ):
+        model_id = get_task_model_id(
+            model_id,
+            request.app.state.config.TASK_MODEL,
+            request.app.state.config.TASK_MODEL_EXTERNAL,
+            models,
+            _get_ambiguous_model_aliases(request),
+        )
+        if is_hermes_agent_model(models.get(model_id) or model_id) or is_dedicated_image_generation_model(
+            models.get(model_id)
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="当前模型不能写摘要，请在管理设置里配置一个文本任务模型",
+            )
+
+    payload = {
+        "model": model_id,
+        "messages": handoff_request_messages(transcript, omitted),
+        "stream": False,
+        "metadata": {
+            "task": str(TASKS.CHAT_HANDOFF),
+            "chat_id": chat.id,
+        },
+    }
+    try:
+        res = await generate_chat_completion(request, form_data=payload, user=user)
+    except Exception as e:
+        log.warning(f"chat handoff summary failed for chat {chat.id}: {e}")
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="写摘要失败，请稍后再试")
+
+    summary = parse_completion_text(res if isinstance(res, dict) else None)
+    if not summary:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="模型没有返回摘要")
+
+    meta = chat.meta if isinstance(chat.meta, dict) else {}
+    new_chat = Chats.import_chat(
+        user.id,
+        ChatImportForm(
+            chat=build_handoff_chat(chat.chat, chat.id, summary, model_id),
+            meta={"tags": list(meta.get("tags") or [])},
+            pinned=False,
+            folder_id=chat.folder_id,
+            assistant_id=chat.assistant_id,
+        ),
+    )
+    if not new_chat:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="新对话没有建成")
+
+    return {
+        "id": new_chat.id,
+        "title": new_chat.title,
+        "folder_id": new_chat.folder_id,
+        "assistant_id": new_chat.assistant_id,
+        "created_at": new_chat.created_at,
+        "updated_at": new_chat.updated_at,
+        "omitted": omitted,
+    }

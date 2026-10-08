@@ -5,7 +5,15 @@
 	import { goto } from '$app/navigation';
 	import ArchiveBox from '$lib/components/icons/ArchiveBox.svelte';
 	import CommandLine from '$lib/components/icons/CommandLine.svelte';
-	import { activeUserIds, USAGE_POOL, mobile, showSidebar, user } from '$lib/stores';
+	import {
+		activeUserIds,
+		USAGE_POOL,
+		mobile,
+		showBookmarks,
+		showSidebar,
+		user
+	} from '$lib/stores';
+	import { Bookmark as BookmarkIcon } from 'lucide-svelte';
 	import { fade } from 'svelte/transition';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import { userSignOut } from '$lib/apis/auths';
@@ -105,6 +113,25 @@
 					<ArchiveBox className="size-5" strokeWidth="1.5" />
 				</div>
 				<div class=" self-center truncate">{$i18n.t('Archived Chats')}</div>
+			</button>
+
+			<!-- 收藏: the dialog lives in the sidebar, which every page under (app) mounts. -->
+			<button
+				class="flex rounded-md py-2 px-3 w-full hover:bg-gray-50 dark:hover:bg-gray-800 transition"
+				data-halo-user-menu-item="bookmarks"
+				on:click={() => {
+					showBookmarks.set(true);
+					show = false;
+
+					if ($mobile) {
+						showSidebar.set(false);
+					}
+				}}
+			>
+				<div class=" self-center mr-3">
+					<BookmarkIcon class="size-5" strokeWidth={1.5} />
+				</div>
+				<div class=" self-center truncate">收藏</div>
 			</button>
 
 			<!-- Continuing a Telegram / QQ / CLI session here is rare: it lives in

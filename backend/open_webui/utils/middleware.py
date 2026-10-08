@@ -154,6 +154,7 @@ from open_webui.utils.task import (
     rag_template,
     tools_function_calling_generation_template,
 )
+from open_webui.utils.folder_instructions import apply_folder_instructions_to_body
 from open_webui.utils.misc import (
     deep_update,
     get_message_list,
@@ -5317,6 +5318,9 @@ async def process_chat_payload(request, form_data, user, metadata, model, tasks=
     # Earlier replies without their visual cards (the markup repeats the answer, four times
     # its length): the model reads what was said, not how it was laid out.
     form_data["messages"] = compact_html_cards_in_history(form_data.get("messages"))
+    # The folder's instructions (分组指令); image models take a prompt, not a setting.
+    if not is_dedicated_image_generation_model(model):
+        form_data = apply_folder_instructions_to_body(form_data, metadata, user.id)
     if log.isEnabledFor(logging.DEBUG):
         log.debug(
             "process_chat_payload summary=%s",

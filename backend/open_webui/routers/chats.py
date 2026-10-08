@@ -8,6 +8,7 @@ from typing import Literal, Optional
 
 from open_webui.socket.main import get_event_emitter
 from open_webui.utils.chat_kinds import with_kinds
+from open_webui.utils.chat_search import find_search_match
 from open_webui.models.chats import (
     ChatForm,
     ChatComposerStateForm,
@@ -582,15 +583,19 @@ async def search_user_chats(
     # Archived chats are searched too: auto-archive moves most of the history
     # there, and a search that skips it cannot find last month's conversation.
     # A search with no results never deletes the tag it was filtering on.
-    return with_kinds(
-        user.id,
-        [
-            ChatSearchResultResponse(**chat.model_dump())
-            for chat in Chats.get_chats_by_user_id_and_search_text(
-                user.id, text, include_archived=True, skip=skip, limit=limit
-            )
-        ],
-    )
+    # Each row says which message matched, so the list can show the words in
+    # context and open the chat at that message.
+    results = []
+    for chat in Chats.get_chats_by_user_id_and_search_text(
+        user.id, text, include_archived=True, skip=skip, limit=limit
+    ):
+        row = ChatSearchResultResponse(**chat.model_dump())
+        match = find_search_match(chat.chat, text)
+        if match:
+            row.message_id = match["message_id"]
+            row.snippet = match["snippet"]
+        results.append(row)
+    return with_kinds(user.id, results)
 
 
 ############################

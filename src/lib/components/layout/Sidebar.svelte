@@ -16,6 +16,7 @@
 		showSidebar,
 		mobile,
 		showArchivedChats,
+		showBookmarks,
 		selectedAssistantScene,
 		pinnedChats,
 		scrollPaginationEnabled,
@@ -50,6 +51,7 @@
 	import ArchivedChatsModal from './Sidebar/ArchivedChatsModal.svelte';
 	import HermesSessionsModal from './Sidebar/HermesSessionsModal.svelte';
 	import ChatHistoryModal from './Sidebar/ChatHistoryModal.svelte';
+	import BookmarksModal from './Sidebar/BookmarksModal.svelte';
 	import UserMenu from './Sidebar/UserMenu.svelte';
 	import ChatItem from './Sidebar/ChatItem.svelte';
 	import Spinner from '../common/Spinner.svelte';
@@ -764,6 +766,8 @@
 
 <ChatHistoryModal bind:show={showChatHistoryModal} />
 
+<BookmarksModal bind:show={$showBookmarks} />
+
 <ChannelModal
 	bind:show={showCreateChannel}
 	onSubmit={async ({ name, access_control }) => {
@@ -1302,6 +1306,9 @@
 										folderName={folderNameOf(chat.folder_id)}
 										folderDotClass={folderDotOf(chat.folder_id)}
 										archived={chat.archived === true}
+										snippet={search ? (chat.snippet ?? null) : null}
+										searchText={search}
+										matchMessageId={search ? (chat.message_id ?? null) : null}
 										assistantId={chat.assistant_id ?? $selectedAssistantScene?.id ?? null}
 										{folderOptions}
 										{shiftKey}

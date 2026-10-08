@@ -19,11 +19,16 @@
 	import Collapsible from '../../common/Collapsible.svelte';
 	import ChatItem from './ChatItem.svelte';
 	import FolderMenu from './Folders/FolderMenu.svelte';
+	import FolderInstructionsModal from './Folders/FolderInstructionsModal.svelte';
+	import Document from '$lib/components/icons/Document.svelte';
+	import Tooltip from '$lib/components/common/Tooltip.svelte';
+	import { translateWithDefault } from '$lib/i18n';
 	import DeleteConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 
 	const { saveAs } = fileSaver;
 	const i18n = getContext('i18n');
 	const dispatch = createEventDispatcher();
+	const tr = (key, defaultValue) => translateWithDefault($i18n, key, defaultValue);
 
 	export let open = false;
 	export let folders;
@@ -37,6 +42,7 @@
 	let edit = false;
 	let name = '';
 	let showDeleteConfirm = false;
+	let showInstructions = false;
 	let isExpandedUpdateTimeout;
 	// The expanded state the server has. Only a change the person made is
 	// saved; restoring the stored state on load used to POST it back for every
@@ -70,6 +76,7 @@
 
 	$: folder = folders[folderId] ?? {};
 	$: folderIcon = folder?.meta?.icon || '';
+	$: hasInstructions = Boolean((folder?.system_prompt ?? '').trim());
 	$: chatCount = getFolderChatCount(folders, folderId);
 	$: hasActiveChat = folderContainsChat(folders, folderId, $chatId);
 	$: folderColor = getFolderColor(folderId, folders);
@@ -203,6 +210,18 @@
 	</div>
 </DeleteConfirmDialog>
 
+<FolderInstructionsModal
+	bind:show={showInstructions}
+	{folderId}
+	folderName={folder.name ?? ''}
+	systemPrompt={folder.system_prompt ?? null}
+	on:save={(e) => {
+		if (folders[folderId]) {
+			folders[folderId].system_prompt = e.detail.systemPrompt;
+		}
+	}}
+/>
+
 <div bind:this={folderElement} class="relative {className}">
 	<Collapsible
 		bind:open
@@ -273,6 +292,27 @@
 					{/if}
 				</div>
 
+				{#if hasInstructions}
+					<Tooltip content={tr('有分组指令', 'Has instructions')}>
+						<button
+							type="button"
+							class="flex size-5 shrink-0 items-center justify-center rounded-md {hasActiveChat
+								? 'text-[var(--sidebar-active-fg)]'
+								: 'text-gray-400 dark:text-gray-500'}"
+							aria-label={tr('分组指令', 'Instructions')}
+							on:pointerup={(e) => {
+								e.stopPropagation();
+							}}
+							on:click={(e) => {
+								e.stopPropagation();
+								showInstructions = true;
+							}}
+						>
+							<Document className="size-3.5" strokeWidth="2" />
+						</button>
+					</Tooltip>
+				{/if}
+
 				{#if chatCount > 0}
 					<span
 						class="flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full px-1.5 text-2xs font-medium tabular-nums {hasActiveChat
@@ -301,6 +341,9 @@
 						}}
 						on:export={() => {
 							exportHandler();
+						}}
+						on:instructions={() => {
+							showInstructions = true;
 						}}
 					>
 						<button

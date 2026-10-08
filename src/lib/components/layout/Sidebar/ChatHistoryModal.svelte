@@ -8,7 +8,8 @@
 	import { goto } from '$app/navigation';
 
 	import { getChatList, getChatListBySearchText } from '$lib/apis/chats';
-	import { folders as folderStore } from '$lib/stores';
+	import { folders as folderStore, pendingMessageReveal } from '$lib/stores';
+	import { snippetParts } from '$lib/utils/search-snippet';
 
 	import Modal from '$lib/components/common/Modal.svelte';
 	import Loader from '$lib/components/common/Loader.svelte';
@@ -73,9 +74,13 @@
 		}, 500);
 	};
 
-	const openChat = async (id: string) => {
+	const openChat = async (chat: Record<string, any>) => {
 		show = false;
-		await goto(`/c/${id}`);
+		// A search hit opens at the message the words were found in.
+		pendingMessageReveal.set(
+			searchValue.trim() && chat.message_id ? { chatId: chat.id, messageId: chat.message_id } : null
+		);
+		await goto(`/c/${chat.id}`);
 	};
 
 	$: if (show) {
@@ -155,11 +160,24 @@
 								href="/c/{chat.id}"
 								draggable="false"
 								on:click|preventDefault={() => {
-									void openChat(chat.id);
+									void openChat(chat);
 								}}
 							>
-								<div class="line-clamp-1 flex-1 text-left text-gray-800 dark:text-gray-100">
-									{chat.title}
+								<div class="min-w-0 flex-1 text-left">
+									<div class="line-clamp-1 text-gray-800 dark:text-gray-100">
+										{chat.title}
+									</div>
+									{#if searchValue.trim() && chat.snippet}
+										<div
+											class="mt-0.5 line-clamp-2 break-words text-xs leading-[1.4] text-gray-500 dark:text-gray-400"
+											data-halo-search-snippet
+										>
+											{#each snippetParts(chat.snippet, searchValue) as piece}{#if piece.match}<mark
+														class="rounded-sm bg-amber-200/70 px-px text-gray-900 dark:bg-amber-400/30 dark:text-amber-100"
+														>{piece.text}</mark
+													>{:else}{piece.text}{/if}{/each}
+										</div>
+									{/if}
 								</div>
 								{#if folderNameOf(chat.folder_id)}
 									<span

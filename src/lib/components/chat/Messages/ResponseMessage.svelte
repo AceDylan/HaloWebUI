@@ -19,8 +19,11 @@
 		TTSWorker,
 		activeAudioId,
 		chatTitle,
-		user
+		user,
+		chatBookmarkIds,
+		temporaryChatEnabled
 	} from '$lib/stores';
+	import { addBookmark, removeBookmarkByMessage } from '$lib/apis/bookmarks';
 	import {
 		describeHermesReply,
 		describeTeamNotice,
@@ -93,7 +96,8 @@
 		ArrowRight,
 		CircleAlert,
 		MessagesSquare,
-		Users
+		Users,
+		Bookmark as BookmarkIcon
 	} from 'lucide-svelte';
 	import { handOff, HANDOFF_PATH, replyHandoff } from '$lib/utils/handoff';
 	import { DropdownMenu } from 'bits-ui';
@@ -920,6 +924,45 @@
 		document
 			.getElementById(`message-stats-${message.id}`)
 			?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+	};
+
+	// 收藏: keep this reply (the 收藏 list in the user menu opens it again).
+	$: bookmarkable = Boolean(
+		chatId && !chatId.startsWith('local') && !$temporaryChatEnabled && !readOnly
+	);
+	$: bookmarked =
+		$chatBookmarkIds.chatId === chatId && $chatBookmarkIds.ids.has(message?.id ?? '');
+	let bookmarkBusy = false;
+
+	const setBookmarked = (value: boolean) => {
+		chatBookmarkIds.update((state) => {
+			if (state.chatId !== chatId) return state;
+			const ids = new Set(state.ids);
+			if (value) ids.add(message.id);
+			else ids.delete(message.id);
+			return { chatId, ids };
+		});
+	};
+
+	const toggleBookmark = async () => {
+		if (bookmarkBusy || !bookmarkable || !message?.id) return;
+		const next = !bookmarked;
+		bookmarkBusy = true;
+		setBookmarked(next);
+		try {
+			if (next) {
+				await addBookmark(localStorage.token, chatId, message.id);
+				toast.success('已收藏，在用户菜单的「收藏」里找到它');
+			} else {
+				await removeBookmarkByMessage(localStorage.token, chatId, message.id);
+				toast.success('已取消收藏');
+			}
+		} catch (error) {
+			setBookmarked(!next);
+			toast.error(typeof error === 'string' && error ? error : '收藏没有成功，请稍后再试');
+		} finally {
+			bookmarkBusy = false;
+		}
 	};
 
 	// 36px touch targets (were 28px); the icons and the bar keep their look.
@@ -2251,6 +2294,18 @@
 									<Copy class="w-4 h-4" strokeWidth={2} />
 								</button>
 
+								{#if bookmarked}
+									<button
+										type="button"
+										class="{mobileActionButtonClass} text-amber-500 dark:text-amber-400"
+										aria-label="取消收藏"
+										data-halo-bookmarked
+										on:click={toggleBookmark}
+									>
+										<BookmarkIcon class="w-4 h-4" strokeWidth={2} fill="currentColor" />
+									</button>
+								{/if}
+
 								{#if !readOnly}
 									<button
 										type="button"
@@ -2326,6 +2381,25 @@
 												>
 													<GitBranchPlus class="w-4 h-4 shrink-0" strokeWidth={1.75} />
 													<span>{branchTooltip}</span>
+												</DropdownMenu.Item>
+											{/if}
+
+											{#if bookmarkable}
+												<DropdownMenu.Item
+													class="{menuItemClass} {bookmarkBusy ? 'opacity-50' : ''}"
+													disabled={bookmarkBusy}
+													data-halo-bookmark-toggle
+													on:click={() => {
+														showMoreMenu = false;
+														toggleBookmark();
+													}}
+												>
+													<BookmarkIcon
+														class="w-4 h-4 shrink-0"
+														strokeWidth={1.75}
+														fill={bookmarked ? 'currentColor' : 'none'}
+													/>
+													<span>{bookmarked ? '取消收藏' : '收藏'}</span>
 												</DropdownMenu.Item>
 											{/if}
 
@@ -2576,6 +2650,20 @@
 										</button>
 									</Tooltip>
 
+									{#if bookmarked}
+										<Tooltip content="取消收藏" placement="bottom">
+											<button
+												type="button"
+												aria-label="取消收藏"
+												class="p-1.5 text-amber-500 hover:bg-black/5 dark:text-amber-400 dark:hover:bg-white/5 rounded-xl transition-all duration-200 hover:scale-110 active:scale-95"
+												data-halo-bookmarked
+												on:click={toggleBookmark}
+											>
+												<BookmarkIcon class="w-4 h-4" strokeWidth={2} fill="currentColor" />
+											</button>
+										</Tooltip>
+									{/if}
+
 									{#if !readOnly}
 										{#if $settings?.regenerateMenu ?? true}
 											<Dropdown
@@ -2822,6 +2910,25 @@
 													>
 														<GitBranchPlus class="w-4 h-4 shrink-0" strokeWidth={1.75} />
 														<span>{branchTooltip}</span>
+													</DropdownMenu.Item>
+												{/if}
+
+												{#if bookmarkable}
+													<DropdownMenu.Item
+														class="{menuItemClass} {bookmarkBusy ? 'opacity-50' : ''}"
+														disabled={bookmarkBusy}
+														data-halo-bookmark-toggle
+														on:click={() => {
+															showMoreMenu = false;
+															toggleBookmark();
+														}}
+													>
+														<BookmarkIcon
+															class="w-4 h-4 shrink-0"
+															strokeWidth={1.75}
+															fill={bookmarked ? 'currentColor' : 'none'}
+														/>
+														<span>{bookmarked ? '取消收藏' : '收藏'}</span>
 													</DropdownMenu.Item>
 												{/if}
 

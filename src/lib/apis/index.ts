@@ -445,6 +445,52 @@ export const generateTitle = async (
 	return res?.choices[0]?.message?.content.replace(/["']/g, '') ?? 'New Chat';
 };
 
+export type ChatHandoff = {
+	id: string;
+	title: string;
+	folder_id: string | null;
+	assistant_id: string | null;
+	created_at: number;
+	updated_at: number;
+	// Older messages that did not fit in what the model read.
+	omitted: number;
+};
+
+// 总结后在新对话继续: the chat's model summarizes it and a new chat starts from that.
+export const createChatHandoff = async (
+	token: string,
+	chatId: string,
+	model: string,
+	contextTokens: number | null
+): Promise<ChatHandoff> => {
+	let error = null;
+
+	const res = await fetch(`${WEBUI_BASE_URL}/api/v1/tasks/handoff`, {
+		method: 'POST',
+		headers: {
+			Accept: 'application/json',
+			'Content-Type': 'application/json',
+			Authorization: `Bearer ${token}`
+		},
+		body: JSON.stringify({
+			chat_id: chatId,
+			model,
+			...(contextTokens ? { context_tokens: contextTokens } : {})
+		})
+	})
+		.then((response) => parseJsonResponse<ChatHandoff>(response))
+		.catch((err) => {
+			error = err?.detail ?? err;
+			return null;
+		});
+
+	if (error || !res?.id) {
+		throw error || 'Failed to continue in a new chat';
+	}
+
+	return res;
+};
+
 export const generateTags = async (
 	token: string = '',
 	model: string,

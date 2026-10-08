@@ -56,6 +56,9 @@
 	export let initialMessagesCount = 20;
 	export let messagesLoadStep = 20;
 	export let deferOffscreenRendering = false;
+	// A message the chat is opening at (search hit, bookmark): rendered even when
+	// it is further up than the messages shown so far.
+	export let revealMessageId: string | null = null;
 
 	export let bottomPadding = false;
 	export let autoScroll;
@@ -69,6 +72,19 @@
 		if (messageWindowKey !== lastMessageWindowKey) {
 			lastMessageWindowKey = messageWindowKey;
 			messagesCount = initialMessagesCount;
+		}
+	}
+
+	$: if (revealMessageId && !showAllMessages && history?.messages?.[revealMessageId]) {
+		let depth = 0;
+		let message = history.currentId ? history.messages[history.currentId] : null;
+		while (message && message.id !== revealMessageId) {
+			depth += 1;
+			message = message.parentId !== null ? history.messages[message.parentId] : null;
+		}
+		// One more above it, so it does not sit flush against the "load more" edge.
+		if (message && depth + 2 > messagesCount) {
+			messagesCount = depth + 2;
 		}
 	}
 

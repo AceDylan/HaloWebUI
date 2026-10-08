@@ -286,6 +286,10 @@ class ChatSearchResultResponse(ChatTitleIdResponse):
     # Sidebar search also finds archived chats (auto-archive moves most of the
     # history there); the flag lets the list mark them.
     archived: bool = False
+    # The message the words were found in and a few words around them
+    # (utils/chat_search.py); None for a title-only or tag-only match.
+    message_id: Optional[str] = None
+    snippet: Optional[str] = None
 
 
 ####################

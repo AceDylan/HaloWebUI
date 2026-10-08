@@ -67,7 +67,11 @@ jobs:
             open_webui/test/unit/test_chat_search_archived.py \
             open_webui/test/unit/test_archived_chat_paging.py \
             open_webui/test/unit/test_chat_branch_files.py \
-            open_webui/test/unit/test_file_upload_diagnostics.py
+            open_webui/test/unit/test_file_upload_diagnostics.py \
+            open_webui/test/unit/test_folder_instructions.py \
+            open_webui/test/unit/test_chat_search_snippet.py \
+            open_webui/test/unit/test_chat_handoff.py \
+            open_webui/test/unit/test_message_bookmarks.py
 
   build:
     needs: [frontend-test, backend-test]

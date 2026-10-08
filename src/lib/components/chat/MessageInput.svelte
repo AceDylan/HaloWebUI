@@ -76,6 +76,8 @@
 
 	import { getSuggestionRenderer } from '../common/RichTextInput/suggestions';
 	import Tooltip from '../common/Tooltip.svelte';
+	import ContextUsageRing from './MessageInput/ContextUsageRing.svelte';
+	import { CONTEXT_WARN_RATIO, type ContextUsage } from '$lib/utils/context-usage';
 	import FileItem from '../common/FileItem.svelte';
 	import Image from '../common/Image.svelte';
 	import UploadProgress from '../common/UploadProgress.svelte';
@@ -126,6 +128,11 @@
 	// first press (or Esc) arms the stop button, the second one stops.
 	export let stopConfirmAfterSeconds: number | null = null;
 	export let runStartedAt: number | null = null;
+	// How full the chat's context is (null hides the ring) and 总结后在新对话继续.
+	export let contextUsage: ContextUsage | null = null;
+	export let canHandoff = false;
+	export let handingOff = false;
+	export let onHandoff: () => void = () => {};
 	let stopArmed = false;
 	let stopArmTimer: ReturnType<typeof setTimeout> | null = null;
 	const requestStop = () => {
@@ -2124,6 +2131,17 @@
 											</div>
 
 									<div class="self-end flex space-x-1 mr-1 shrink-0">
+										<!-- Phones have little room here: the ring shows once it is worth a look. -->
+										{#if contextUsage && (!$mobile || contextUsage.ratio >= CONTEXT_WARN_RATIO)}
+											<div class="flex items-center self-center">
+												<ContextUsageRing
+													usage={contextUsage}
+													{canHandoff}
+													{handingOff}
+													{onHandoff}
+												/>
+											</div>
+										{/if}
 										{#if isResponding}
 											<!-- Wider apart on phones: steer and stop sat 4px apart. -->
 											<div class=" flex items-center gap-1 max-sm:gap-3">

@@ -4,7 +4,7 @@ import shutil
 import uuid
 from pathlib import Path
 from typing import Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 import mimetypes
 
 
@@ -268,7 +268,8 @@ async def update_folder_icon_by_id(
 
 
 class FolderSystemPromptForm(BaseModel):
-    system_prompt: Optional[str] = None
+    # 分组指令: read before every reply in the folder (utils/folder_instructions.py)
+    system_prompt: Optional[str] = Field(default=None, max_length=20_000)
 
 
 @router.post("/{id}/update/system-prompt")

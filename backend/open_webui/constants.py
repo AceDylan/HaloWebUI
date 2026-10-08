@@ -120,3 +120,4 @@ class TASKS(str, Enum):
     MOA_RESPONSE_GENERATION = "moa_response_generation"
     FOLLOW_UP_GENERATION = "follow_up_generation"
     FOLDER_ASSIGNMENT = "folder_assignment"
+    CHAT_HANDOFF = "chat_handoff"

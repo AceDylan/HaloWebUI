@@ -391,6 +391,27 @@ body {
 	}
 }
 
+/* A message opened from a search hit or a bookmark: a short tint, then gone. */
+.halo-message-flash {
+	border-radius: 0.75rem;
+	animation: halo-message-flash 2.2s ease-out;
+}
+@keyframes halo-message-flash {
+	0%, 35% {
+		background-color: rgb(251 191 36 / 0.16);
+		box-shadow: 0 0 0 6px rgb(251 191 36 / 0.16);
+	}
+	100% {
+		background-color: transparent;
+		box-shadow: 0 0 0 6px transparent;
+	}
+}
+@media (prefers-reduced-motion: reduce) {
+	.halo-message-flash {
+		animation-duration: 0.8s;
+	}
+}
+
 /* Chat Controls: one-shot acknowledge flash on param change */
 .controls-ack {
 	animation: controls-ack 0.6s ease-out;

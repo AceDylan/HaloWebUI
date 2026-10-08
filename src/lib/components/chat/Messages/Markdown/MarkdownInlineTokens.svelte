@@ -12,6 +12,7 @@
 	import { config } from '$lib/stores';
 	import { copyToClipboard, unescapeHtml } from '$lib/utils';
 	import { splitVaultNotePaths, vaultNotePath } from '$lib/utils/hub-embed';
+	import { inAppPath } from '$lib/utils/app-links';
 	import { getDataUrlDownloadName, rewriteDataUrlDownloadLinks } from '$lib/utils/download-links';
 	import KatexHtml from './KatexHtml.svelte';
 
@@ -69,6 +70,12 @@
 	const resolveDownloadName = (href: string, label: string = '') =>
 		getDataUrlDownloadName(href, label);
 
+	// A page of this app (a team's result page, a discussion, a chat) opens in place.
+	const resolveAppPath = (href: string | null, download: string | null) =>
+		href && !download
+			? inAppPath(href, typeof location === 'undefined' ? null : location.origin)
+			: null;
+
 	// Absolute paths of the Hub's vault notes become links (see VaultNoteLink).
 	$: vaultRoot = $config?.hub_origin ? $config?.hub_vault_root : undefined;
 
@@ -119,6 +126,7 @@
 		{@const notePath = inLink ? null : vaultNotePath(token.href ?? '', vaultRoot)}
 		{@const href = notePath ? null : resolveLinkHref(token.href ?? '')}
 		{@const download = href ? resolveDownloadName(href, token.text ?? '') : null}
+		{@const appPath = resolveAppPath(href, download)}
 		{#if notePath}
 			<VaultNoteLink path={notePath}
 				>{#if token.tokens}<svelte:self
@@ -132,11 +140,12 @@
 			>
 		{:else if href && token.tokens}
 			<a
-				{href}
-				target={download ? undefined : '_blank'}
+				href={appPath ?? href}
+				target={download || appPath ? undefined : '_blank'}
 				download={download ?? undefined}
-				rel="noopener noreferrer nofollow"
+				rel={appPath ? undefined : 'noopener noreferrer nofollow'}
 				title={token.title}
+				data-halo-app-link={appPath ? '' : undefined}
 			>
 				<svelte:self
 					id={`${id}-a`}
@@ -158,11 +167,12 @@
 			/>
 		{:else if href}
 			<a
-				{href}
-				target={download ? undefined : '_blank'}
+				href={appPath ?? href}
+				target={download || appPath ? undefined : '_blank'}
 				download={download ?? undefined}
-				rel="noopener noreferrer nofollow"
-				title={token.title}>{toText(token.text)}</a
+				rel={appPath ? undefined : 'noopener noreferrer nofollow'}
+				title={token.title}
+				data-halo-app-link={appPath ? '' : undefined}>{toText(token.text)}</a
 			>
 		{:else}
 			{toText(token.text)}

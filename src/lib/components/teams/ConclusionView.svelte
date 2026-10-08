@@ -60,6 +60,10 @@
 	let openResults = new Set<string>();
 	let observer: IntersectionObserver | null = null;
 	let lastBrief = '';
+	// 「产出文件」/「过程记录」 from the chat land on that part of the page (…/conclusion#files).
+	const SECTIONS = new Set(['files', 'process']);
+	let processOpen = false;
+	let pendingSection = '';
 
 	$: status = data?.status ?? 'none';
 	$: entry = data?.entry ?? {};
@@ -192,11 +196,40 @@
 		document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 	};
 
-	onMount(load);
+	/** Bring a part of the page into view: 'files' (产出文件) or 'process' (过程记录, opened). */
+	export const reveal = (section: string) => {
+		if (!SECTIONS.has(section)) return;
+		pendingSection = section;
+	};
+	const showSection = async (section: string) => {
+		pendingSection = '';
+		if (section === 'process') processOpen = true;
+		await tick();
+		const el = document.getElementById(section);
+		if (el) {
+			el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+		} else {
+			toast.info(section === 'files' ? '这个协作任务没有产出文件' : '还没有任务记录');
+		}
+	};
+	// once the conclusion is on screen (the sections are part of it)
+	$: if (pendingSection && data && !loading) showSection(pendingSection);
+
+	const followHash = () => {
+		if (variant !== 'page' || typeof location === 'undefined') return;
+		reveal(decodeURIComponent(location.hash.replace(/^#/, '')));
+	};
+
+	onMount(() => {
+		load();
+		followHash();
+		window.addEventListener('hashchange', followHash);
+	});
 	onDestroy(() => {
 		destroyed = true;
 		if (timer) clearTimeout(timer);
 		observer?.disconnect();
+		if (typeof window !== 'undefined') window.removeEventListener('hashchange', followHash);
 	});
 </script>
 
@@ -523,7 +556,8 @@
 
 		{#if fileList.length}
 			<section
-				class="mt-8 {tocVisible ? 'lg:ml-[15rem]' : ''}"
+				id={variant === 'page' ? 'files' : undefined}
+				class="mt-8 scroll-mt-4 {tocVisible ? 'lg:ml-[15rem]' : ''}"
 				aria-label="产出文件"
 				data-conclusion-files
 			>
@@ -595,11 +629,12 @@
 
 		{#if data?.tasks.length}
 			<section
-				class="mt-8 {tocVisible ? 'lg:ml-[15rem]' : ''}"
+				id={variant === 'page' ? 'process' : undefined}
+				class="mt-8 scroll-mt-4 {tocVisible ? 'lg:ml-[15rem]' : ''}"
 				aria-label="各任务的原始结果"
 				data-conclusion-tasks
 			>
-				<details class="process">
+				<details class="process" bind:open={processOpen}>
 					<summary
 						class="tm-eyebrow flex cursor-pointer select-none list-none items-center gap-1.5 [&::-webkit-details-marker]:hidden"
 						data-conclusion-process

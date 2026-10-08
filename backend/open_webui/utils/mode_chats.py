@@ -44,8 +44,7 @@ async def auto_title_and_folder(
     are afterwards. Never raises: a failed title falls back to the question, a failed folder
     assignment leaves the chat where it is."""
     from open_webui.models.chats import Chats, can_auto_generate_chat_title
-    from open_webui.routers.tasks import generate_folder_assignment, generate_title
-    from open_webui.utils.folder_assignment import assign_chat_folder, build_default_deps
+    from open_webui.routers.tasks import generate_title
     from open_webui.utils.task import build_fallback_chat_title
 
     chat_id = chat.id
@@ -78,29 +77,63 @@ async def auto_title_and_folder(
         ):
             title = generated
 
-    folder_id = chat.folder_id
-    if getattr(config, "ENABLE_FOLDER_AUTO_ASSIGNMENT", False):
-
-        async def call_model(payload: dict):
-            return await generate_folder_assignment(request, payload, user)
-
-        try:
-            result = await assign_chat_folder(
-                chat_id=chat_id,
-                user_id=user.id,
-                model_id=model_id,
-                messages=messages,
-                user_message_count=user_message_count,
-                message_id=message_id,
-                title=title,
-                deps=build_default_deps(call_model),
-            )
-            log.info("%s %s folder assignment: %s %r", label, chat_id, result.status, result.folder_name)
-            if result.changed:
-                folder_id = result.folder_id
-        except Exception as exc:
-            log.warning("%s %s: folder assignment failed: %s", label, chat_id, exc)
+    folder_id = await auto_folder(
+        request,
+        user,
+        chat,
+        messages=messages,
+        model_id=model_id,
+        message_id=message_id,
+        user_message_count=user_message_count,
+        title=title,
+        label=label,
+    )
     return title, folder_id
+
+
+async def auto_folder(
+    request,
+    user,
+    chat,
+    *,
+    messages: list[dict],
+    model_id: str,
+    message_id: str,
+    user_message_count: int,
+    title: Optional[str],
+    label: str = "chat",
+) -> Optional[str]:
+    """The folder an ordinary chat would be sorted into at this point (the same milestones and
+    rules); returns the chat's folder id afterwards. Never raises: a failed assignment leaves the
+    chat where it is."""
+    from open_webui.routers.tasks import generate_folder_assignment
+    from open_webui.utils.folder_assignment import assign_chat_folder, build_default_deps
+
+    folder_id = chat.folder_id
+    config = getattr(getattr(getattr(request, "app", None), "state", None), "config", None)
+    if not getattr(config, "ENABLE_FOLDER_AUTO_ASSIGNMENT", False):
+        return folder_id
+
+    async def call_model(payload: dict):
+        return await generate_folder_assignment(request, payload, user)
+
+    try:
+        result = await assign_chat_folder(
+            chat_id=chat.id,
+            user_id=user.id,
+            model_id=model_id,
+            messages=messages,
+            user_message_count=user_message_count,
+            message_id=message_id,
+            title=title,
+            deps=build_default_deps(call_model),
+        )
+        log.info("%s %s folder assignment: %s %r", label, chat.id, result.status, result.folder_name)
+        if result.changed:
+            folder_id = result.folder_id
+    except Exception as exc:
+        log.warning("%s %s: folder assignment failed: %s", label, chat.id, exc)
+    return folder_id
 
 
 def sources_from_docs(found: Optional[dict], limit: int, excerpt_chars: int) -> list[dict]:

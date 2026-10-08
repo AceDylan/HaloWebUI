@@ -112,3 +112,24 @@ describe('note paths in a reply', () => {
 		expect(await mount(`${ROOT}/项目/a.md`)).toHaveLength(0);
 	});
 });
+
+describe('links to this app in a reply', () => {
+	it('open in place; websites and files still open in a new tab', async () => {
+		config.set({});
+		const links = await mount(
+			'在协作台看：[结果页](/teams/t1/conclusion) · [产出文件](/teams/t1/conclusion#files) · [网站](https://example.com/x) · [文件](/api/v1/teams/t1/files/a.md)'
+		);
+		const seen = links.map((a) => [
+			a.textContent.trim(),
+			a.getAttribute('target'),
+			a.getAttribute('rel')
+		]);
+		expect(seen).toEqual([
+			['结果页', null, null],
+			['产出文件', null, null],
+			['网站', '_blank', 'noopener noreferrer nofollow'],
+			['文件', '_blank', 'noopener noreferrer nofollow']
+		]);
+		expect(links[1].getAttribute('href')).toBe('/teams/t1/conclusion#files');
+	});
+});

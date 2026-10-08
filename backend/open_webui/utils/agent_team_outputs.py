@@ -120,7 +120,9 @@ def chat_content(team: AgentTeamModel, conclusion: dict) -> str:
     tail = ["---", *_acceptance_lines(conclusion.get("entry") or {})]
     if len(tail) > 1:
         tail.append("")
-    tail.append(f"[在协作台看结果页、产出文件和过程记录](/teams/{team.id}/conclusion)")
+    # The page shows this line as buttons that open each part in place (TeamResultBar).
+    page = f"/teams/{team.id}/conclusion"
+    tail.append(f"在协作台看：[结果页]({page}) · [产出文件]({page}#files) · [过程记录]({page}#process)")
     return markdown + "\n\n" + "\n".join(tail)
 
 

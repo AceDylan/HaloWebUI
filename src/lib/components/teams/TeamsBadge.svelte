@@ -15,6 +15,7 @@
 	import { isLastActiveTab, settings } from '$lib/stores';
 	import NotificationToast from '$lib/components/NotificationToast.svelte';
 	import { setModeLive } from '$lib/components/scifi/mode-relay';
+	import { chatStatesOf, teamChatStates } from './live';
 
 	/**
 	 * Sidebar hint for the 协作台 entry: how many of your teams are at work right now (a live
@@ -79,6 +80,8 @@
 			const { teams } = await listTeams(localStorage.token);
 			active = teams.filter(isActive).length;
 			review = teams.filter((t) => t.status === 'plan_ready').length;
+			// each team's chat in the history shows what the team is doing
+			teamChatStates.set(chatStatesOf(teams));
 			for (const t of teams) {
 				const state = stateOf(t);
 				const before = seen.get(t.id);

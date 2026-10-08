@@ -186,6 +186,9 @@ async def _plan_job(team: AgentTeamModel, target: HermesTarget, feedback: str, p
             plan = body["plan"]
             updated = AgentTeams.update(team.id, team.user_id, expect_status=("planning",), status="plan_ready",
                                         plan=plan, error=None, title=(plan.get("title") or team.title)[:60])
+            from open_webui.utils.team_chats import follow_title
+
+            await follow_title(team, updated)  # the team's chat takes the lead's name for it
             if updated is not None and (team.meta or {}).get("auto_start") and auto_startable(plan):
                 try:  # 「计划好直接开始」: no approval step
                     updated = await start_team(updated, target, access)

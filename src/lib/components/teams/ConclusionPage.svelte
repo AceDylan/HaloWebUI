@@ -1,8 +1,8 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onDestroy, onMount } from 'svelte';
 
 	import './teams.css';
-	import { mobile, showSidebar } from '$lib/stores';
+	import { chatId as currentChatId, mobile, showSidebar } from '$lib/stores';
 	import { getTeam, type LiveSnapshot, type Team } from '$lib/apis/teams';
 	import MenuLines from '$lib/components/icons/MenuLines.svelte';
 	import ConclusionView from './ConclusionView.svelte';
@@ -18,6 +18,12 @@
 	let tocVisible = false;
 	let live: LiveSnapshot | null = null;
 	let error = '';
+	let view: ConclusionView;
+	// the parts of the page the chat links to (…/conclusion#files, #process)
+	const PARTS = [
+		{ key: 'files', label: '产出文件' },
+		{ key: 'process', label: '过程记录' }
+	];
 
 	$: phase = live?.team.phase ?? team?.phase ?? 'running';
 	$: done = live?.tasks.filter((t) => t.status === 'done').length ?? 0;
@@ -33,9 +39,14 @@
 			const data = await getTeam(localStorage.token, teamId);
 			team = data.team;
 			live = data.live;
+			// the team's chat is the one lit in the history while its result is read
+			if (team?.chat_id) currentChatId.set(team.chat_id);
 		} catch (e) {
 			error = `${(e as Error)?.message ?? e}`;
 		}
+	});
+	onDestroy(() => {
+		if (team?.chat_id && $currentChatId === team.chat_id) currentChatId.set('');
 	});
 </script>
 
@@ -64,6 +75,14 @@
 		>
 		<span class="text-gray-300 dark:text-gray-700">/</span>
 		<h1 class="shrink-0 text-sm font-semibold text-gray-900 dark:text-gray-100">结论</h1>
+		{#if team?.chat_id}
+			<a
+				href="/c/{team.chat_id}"
+				class="ml-auto shrink-0 rounded-xl px-2.5 py-1 text-xs text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-850"
+				title="这个协作任务的对话：目标、进度卡片和发回的结果，可以接着追问"
+				data-conclusion-chat>← 回到对话</a
+			>
+		{/if}
 	</nav>
 	<div class="tm-scroll flex-1 overflow-y-auto px-4 pb-16 sm:px-6">
 		{#if error}
@@ -122,9 +141,23 @@
 								>
 							{/if}
 						</div>
+						<div class="mt-4 flex flex-wrap items-center gap-1.5" data-conclusion-parts>
+							{#each PARTS as part (part.key)}
+								<a
+									href="#{part.key}"
+									class="tm-btn-ghost"
+									on:click={() => view?.reveal(part.key)}
+									data-conclusion-part={part.key}>{part.label} ↓</a
+								>
+							{/each}
+							<a href="/teams/{teamId}" class="tm-btn-ghost" data-conclusion-team
+								>成员与任务板</a
+							>
+						</div>
 					</div>
 				{/if}
 				<ConclusionView
+					bind:this={view}
 					{teamId}
 					variant="page"
 					bind:tocVisible

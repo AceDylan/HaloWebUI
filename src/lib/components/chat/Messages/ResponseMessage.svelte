@@ -23,9 +23,11 @@
 	} from '$lib/stores';
 	import {
 		describeHermesReply,
+		describeTeamNotice,
 		isHermesAgentModelId,
 		parseHermesRunNotice,
-		splitRunReport
+		splitRunReport,
+		splitTeamReport
 	} from '$lib/utils/hermes';
 	import { synthesizeOpenAISpeech } from '$lib/apis/audio';
 	// [REACTION_FEATURE] Commented out - reaction feature disabled for now
@@ -104,6 +106,7 @@
 	import CodeExecutions from './CodeExecutions.svelte';
 	import ContentRenderer from './ContentRenderer.svelte';
 	import TeamChatCard from '$lib/components/teams/TeamChatCard.svelte';
+	import TeamResultBar from '$lib/components/teams/TeamResultBar.svelte';
 	import MessageOutline from './MessageOutline.svelte';
 	import ThinkingIndicator from './ThinkingIndicator.svelte';
 	import GenerationElapsed from './GenerationElapsed.svelte';
@@ -1367,10 +1370,17 @@
 	// A runner's report under its notice line: the line above already says who finished and
 	// how (its 详情 has the model, cost and turns), so the runner's two header lines are not
 	// shown again. Copy and edit still use the whole content.
-	$: reportNotice = parseHermesRunNotice(history.messages?.[message?.parentId ?? '']);
-	$: renderedContent =
-		(reportNotice && splitRunReport(message?.content, reportNotice.runId)?.body) ||
-		message?.content;
+	$: parentMessage = history.messages?.[(message as any)?.parentId ?? ''];
+	$: reportNotice = parseHermesRunNotice(parentMessage);
+	// A 协作台 team's result: its link line becomes the buttons under it (TeamResultBar).
+	$: teamResultId = reportNotice
+		? (describeTeamNotice(reportNotice, parentMessage?.content)?.teamId ?? null)
+		: null;
+	$: teamReport = teamResultId ? splitTeamReport(message?.content, teamResultId) : null;
+	$: renderedContent = teamReport
+		? teamReport.body
+		: (reportNotice && splitRunReport(message?.content, reportNotice.runId)?.body) ||
+			message?.content;
 </script>
 
 <DeleteConfirmDialog
@@ -2105,7 +2115,10 @@
 										{/if}
 
 										{#if teamDispatchId}
-											<TeamChatCard teamId={teamDispatchId} />
+											<TeamChatCard teamId={teamDispatchId} {history} />
+										{/if}
+										{#if teamResultId && message?.done !== false}
+											<TeamResultBar teamId={teamResultId} />
 										{/if}
 
 										{#if showContinuationIndicator}

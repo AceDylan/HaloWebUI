@@ -143,6 +143,18 @@ async def run_team_dispatch(request, form_data: dict, user, metadata: dict, mode
             await emitter({"type": "chat:completion", "data": data})
         except Exception:  # noqa: BLE001
             log.debug("teams: dispatch reply emit failed", exc_info=True)
+        if team is not None:
+            # no model turn ran, so nothing sorted the chat into a folder (对话分组): as an ordinary
+            # chat would be at this turn
+            from open_webui.utils.team_chats import sort_into_folder
+
+            asks = [m for m in (form_data.get("messages") or []) if isinstance(m, dict) and m.get("role") == "user"]
+            try:
+                await sort_into_folder(request, user, chat_id, model_id=model_id,
+                                       messages=[{"role": "user", "content": ask or team.title}],
+                                       message_id=message_id, user_message_count=max(1, len(asks)))
+            except Exception:  # noqa: BLE001
+                log.debug("teams: dispatch folder assignment failed", exc_info=True)
 
     task_id, _ = create_task(handler(), id=chat_id, owner_id=user.id)
     return {"status": True, "task_id": task_id}

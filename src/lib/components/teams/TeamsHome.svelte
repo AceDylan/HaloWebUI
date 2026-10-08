@@ -5,7 +5,7 @@
 	import { toast } from 'svelte-sonner';
 
 	import './teams.css';
-	import { mobile, showSidebar } from '$lib/stores';
+	import { chatListRefreshRevision, mobile, showSidebar } from '$lib/stores';
 	import {
 		checkRunners,
 		createTeam,
@@ -300,6 +300,8 @@
 				attached.filter((f) => f.id).map((f) => f.id as string),
 				preferred ? [preferred.ref] : []
 			);
+			// its chat is in the history from now on (the socket says so too; this covers a lost event)
+			chatListRefreshRevision.update((n) => n + 1);
 			goto(`/teams/${team.id}`);
 		} catch (e) {
 			toast.error(`${e?.message ?? e}`);
@@ -1018,7 +1020,7 @@
 									<StatusChip status={chipOf(s)} label={PHASE_LABEL[s] ?? s} />
 								</span>
 								<span
-									class="actions relative z-10 flex shrink-0 items-center justify-end gap-0.5 sm:w-[5.75rem]"
+									class="actions relative z-10 flex shrink-0 items-center justify-end gap-0.5 sm:w-[7.5rem]"
 								>
 									{#if s === 'completed' || s === 'stopped'}
 										<a
@@ -1037,6 +1039,23 @@
 													stroke="currentColor"
 													stroke-width="1.4"
 													stroke-linecap="round"
+												/></svg
+											></a
+										>
+									{/if}
+									{#if team.chat_id}
+										<a
+											href="/c/{team.chat_id}"
+											class="icon-btn"
+											title="在对话中看：目标、进度和发回的结果，可以接着追问"
+											aria-label="打开「{team.title}」的对话"
+											data-team-chat-link
+											><svg class="size-4" viewBox="0 0 16 16" fill="none" aria-hidden="true"
+												><path
+													d="M2.75 4.25a1.5 1.5 0 0 1 1.5-1.5h7.5a1.5 1.5 0 0 1 1.5 1.5v5a1.5 1.5 0 0 1-1.5 1.5H7l-2.75 2.5v-2.5h0a1.5 1.5 0 0 1-1.5-1.5v-5Z"
+													stroke="currentColor"
+													stroke-width="1.3"
+													stroke-linejoin="round"
 												/></svg
 											></a
 										>

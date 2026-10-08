@@ -30,6 +30,7 @@
 		activeChatIds
 	} from '$lib/stores';
 
+	import { teamChatStates } from '$lib/components/teams/live';
 	import ChatMenu from './ChatMenu.svelte';
 	import DeleteConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import ShareChatModal from '$lib/components/chat/ShareChatModal.svelte';
@@ -61,7 +62,7 @@
 	const KIND_TITLE: Record<string, string> = {
 		answer: '精答：由挑选出的助手回答，可以接着追问',
 		discuss: '讨论台里的多模型讨论',
-		team: '有协作台任务在为这个对话工作',
+		team: '协作台任务的对话：目标、团队进度和发回的结果',
 		image: '这个对话里生成过图片'
 	};
 	export let folderOptions: Array<{
@@ -73,6 +74,9 @@
 
 	export let selected = false;
 	export let shiftKey = false;
+
+	// A 协作台 team working for this chat (or waiting for you): marked like a running Hermes run.
+	$: teamState = $teamChatStates.get(id) ?? null;
 
 	$: isFolderVariant = variant === 'folder';
 
@@ -347,6 +351,27 @@
 					</div>
 				{:else if $activeChatIds.has(id) || $hermesActiveRuns.some((run) => run.chat_id === id)}
 					<div class="flex-shrink-0 self-center ml-1" data-halo-chat-state="running">
+						<span class="relative flex h-2 w-2">
+							<span
+								class="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"
+							></span>
+							<span class="relative inline-flex rounded-full h-2 w-2 bg-blue-500"></span>
+						</span>
+					</div>
+				{:else if teamState === 'review' || teamState === 'attention'}
+					<div
+						class="flex-shrink-0 self-center ml-1"
+						title={teamState === 'review' ? '协作任务的计划等你批准' : '协作任务有事需要你处理'}
+						data-halo-chat-state="team-{teamState}"
+					>
+						<span class="relative inline-flex rounded-full h-2 w-2 bg-violet-500"></span>
+					</div>
+				{:else if teamState === 'running'}
+					<div
+						class="flex-shrink-0 self-center ml-1"
+						title="协作任务进行中"
+						data-halo-chat-state="team-running"
+					>
 						<span class="relative flex h-2 w-2">
 							<span
 								class="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"

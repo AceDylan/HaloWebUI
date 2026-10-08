@@ -180,6 +180,26 @@ describe('ConclusionView', () => {
 		expect(details[0].textContent).toContain('"tools"');
 	});
 
+	it('「产出文件」/「过程记录」 from the chat land on that part of the page, the record opened', async () => {
+		api.getTeamConclusion.mockResolvedValue(CONCLUSION);
+		await mount(ConclusionView, { teamId: 'team-1', phase: 'completed', variant: 'page' });
+		await until(() => !!target.querySelector('#process'));
+		const process = target.querySelector('#process details.process');
+		expect(process.open).toBeFalsy();
+		const seen: string[] = [];
+		for (const id of ['files', 'process']) {
+			target.querySelector(`#${id}`).scrollIntoView = () => seen.push(id);
+		}
+		app.reveal('process');
+		await until(() => seen.includes('process'));
+		expect(process.open).toBe(true);
+		app.reveal('files');
+		await until(() => seen.includes('files'));
+		app.reveal('nonsense');
+		await sleep(10);
+		expect(seen).toEqual(['process', 'files']);
+	});
+
 	it('a short report takes the whole width; the side column is only for a real table of contents', async () => {
 		// A report with one section: no TOC, so the reading column must not be squeezed into the
 		// grid's first (13rem) column — that put the whole text in a narrow strip on the left.

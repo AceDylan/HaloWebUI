@@ -42,6 +42,7 @@ from open_webui.utils.agent_teams import (
     start_team,
 )
 from open_webui.utils.agent_team_outputs import concluded, follow_up, save_to_knowledge
+from open_webui.utils import team_chats
 from open_webui.utils.auth import get_verified_user
 
 log = logging.getLogger(__name__)
@@ -152,7 +153,10 @@ RECENT_FINISH_SECONDS = 600
 
 @router.get("/", dependencies=[Depends(_enabled)])
 async def list_teams(request: Request, chat_id: Optional[str] = None, user=Depends(get_verified_user)):
-    return {"teams": _with_stages(*await _fresh_list(request, user, chat_id))}
+    teams, snaps = await _fresh_list(request, user, chat_id)
+    if not chat_id:  # every team is in the chat history: earlier ones get their chat now
+        teams = await team_chats.backfill(request, user, teams)
+    return {"teams": _with_stages(teams, snaps)}
 
 
 def _with_stages(teams: list, snaps: dict) -> list[dict]:
@@ -219,14 +223,15 @@ async def create_team(request: Request, form: CreateTeamForm, user=Depends(get_v
     inputs = input_files(form.files, user)
     if form.files and len(inputs) < len(set(form.files)):
         raise HTTPException(status_code=404, detail="有附件找不到（没上传成功，或不是你的文件）")
-    return public_team(_start(user, goal, target, chat_id=chat_id, lead_model=form.lead_model, project=form.project,
-                              auto_start=form.auto_start, inputs=inputs, assistants=preferred_refs(form.assistants),
-                              access=AssistantAccess(request, user)))
+    return public_team(await _start(request, user, goal, target, chat_id=chat_id, lead_model=form.lead_model,
+                                    project=form.project, auto_start=form.auto_start, inputs=inputs,
+                                    assistants=preferred_refs(form.assistants), access=AssistantAccess(request, user)))
 
 
-def _start(user, goal: str, target, *, chat_id: Optional[str] = None, lead_model: Optional[str] = None,
-           origin: Optional[dict] = None, project: Optional[str] = None, auto_start: bool = False,
-           inputs: Optional[list] = None, assistants: Optional[list] = None, access=None):
+async def _start(request: Request, user, goal: str, target, *, chat_id: Optional[str] = None,
+                 lead_model: Optional[str] = None, origin: Optional[dict] = None, project: Optional[str] = None,
+                 auto_start: bool = False, inputs: Optional[list] = None, assistants: Optional[list] = None,
+                 access=None):
     meta: dict = {}
     if inputs:
         meta["inputs"] = inputs
@@ -241,6 +246,8 @@ def _start(user, goal: str, target, *, chat_id: Optional[str] = None, lead_model
     if origin:
         meta["origin"] = origin
     team = AgentTeams.insert(user.id, goal, chat_id, default_title(goal), meta=meta or None)
+    # in the chat history from the start: its own chat, or the card in the chat it came from
+    team = await team_chats.attach(request, user, team)
     start_planning(team, target, access=access)
     return team
 
@@ -261,8 +268,10 @@ async def get_team(request: Request, team_id: str, user=Depends(get_verified_use
         except TeamsError:
             planning = None
     team, snap, live_error = await reconcile(team, target)
-    return {"team": public_team(team), "live": snap, "live_error": live_error,
-            "stage": stage_of(team, snap, planning)}
+    data = public_team(team)
+    if team.chat_id and Chats.get_chat_by_id_and_user_id(team.chat_id, user.id) is None:
+        data["chat_id"] = None  # the chat was deleted: no way back to it
+    return {"team": data, "live": snap, "live_error": live_error, "stage": stage_of(team, snap, planning)}
 
 
 @router.post("/{team_id}/replan", dependencies=[Depends(_enabled)])
@@ -767,8 +776,8 @@ async def hermes_create(request: Request, form: HermesCreateForm, caller=Depends
     goal = form.goal.strip()
     if not goal:
         raise HTTPException(status_code=400, detail="请写下要协作完成的目标")
-    return public_team(_start(user, goal, target, origin=_clean_origin(form.origin), auto_start=form.auto_start,
-                              access=AssistantAccess(request, user)))
+    return public_team(await _start(request, user, goal, target, origin=_clean_origin(form.origin),
+                                    auto_start=form.auto_start, access=AssistantAccess(request, user)))
 
 
 @router.get("/hermes/teams/{team_id}")

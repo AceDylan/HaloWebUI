@@ -435,6 +435,27 @@ export const describeTeamNotice = (
 	};
 };
 
+/**
+ * A team's result as the chat shows it: its last line — the way to the result page, its files and
+ * its record ("在协作台看：[结果页](/teams/<id>/conclusion) · …", or the older single link) — is
+ * shown as buttons that open each part in place (TeamResultBar), so it is taken off the text, and
+ * so is the rule above it when nothing else (the lead's acceptance) sits under the rule. null when
+ * the content does not end with that line.
+ */
+export const splitTeamReport = (content: unknown, teamId: string): { body: string } | null => {
+	const text = typeof content === 'string' ? content.replace(/\s+$/, '') : '';
+	if (!teamId || !text) return null;
+	const lines = text.split('\n');
+	const last = lines[lines.length - 1] ?? '';
+	if (!/\]\(\/teams\/[^)\s]+\/conclusion[^)\s]*\)/.test(last) || !last.includes(`/teams/${teamId}/conclusion`)) {
+		return null;
+	}
+	const rest = lines.slice(0, -1);
+	while (rest.length && !rest[rest.length - 1].trim()) rest.pop();
+	if (rest.length && /^\s*(-{3,}|\*{3,}|_{3,})\s*$/.test(rest[rest.length - 1])) rest.pop();
+	return { body: rest.join('\n').replace(/\s+$/, '') };
+};
+
 const NOTICE_STATUS: Record<string, { icon: string; label: string }> = {
 	success: { icon: '✅', label: '已完成' },
 	question: { icon: '❓', label: '等你决定' },

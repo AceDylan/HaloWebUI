@@ -4,7 +4,7 @@
 	import { toast } from 'svelte-sonner';
 
 	import './teams.css';
-	import { mobile, showSidebar, WEBUI_NAME } from '$lib/stores';
+	import { chatId as currentChatId, mobile, showSidebar, WEBUI_NAME } from '$lib/stores';
 	import {
 		approveTeam,
 		cancelTeam,
@@ -300,6 +300,13 @@
 		if (document.visibilityState === 'visible') schedule(0);
 	};
 
+	// The team's chat is the one lit in the history while the team is on screen.
+	let litChat = '';
+	$: if (team?.chat_id && team.chat_id !== litChat) {
+		litChat = team.chat_id;
+		currentChatId.set(team.chat_id);
+	}
+
 	onMount(() => {
 		poll();
 		document.addEventListener('visibilitychange', onVisibility);
@@ -309,6 +316,7 @@
 		if (timer) clearTimeout(timer);
 		if (typeof document !== 'undefined')
 			document.removeEventListener('visibilitychange', onVisibility);
+		if (litChat && $currentChatId === litChat) currentChatId.set('');
 	});
 
 	// --- actions -------------------------------------------------------------------------------
@@ -509,7 +517,20 @@
 				>
 			{/if}
 			{#if team?.chat_id}
-				<a href="/c/{team.chat_id}" class="tm-btn-ghost hidden sm:inline-flex">返回对话</a>
+				<a
+					href="/c/{team.chat_id}"
+					class="tm-btn-ghost"
+					title="这个协作任务的对话：目标、进度卡片和发回的结果，可以接着追问"
+					data-team-chat-link
+					><svg class="size-3.5" viewBox="0 0 16 16" fill="none" aria-hidden="true"
+						><path
+							d="M2.75 4.25a1.5 1.5 0 0 1 1.5-1.5h7.5a1.5 1.5 0 0 1 1.5 1.5v5a1.5 1.5 0 0 1-1.5 1.5H7l-2.75 2.5v-2.5h0a1.5 1.5 0 0 1-1.5-1.5v-5Z"
+							stroke="currentColor"
+							stroke-width="1.3"
+							stroke-linejoin="round"
+						/></svg
+					><span class="max-sm:sr-only">对话</span></a
+				>
 			{/if}
 			{#if running && !finished && !replay}
 				{#if phase === 'paused'}

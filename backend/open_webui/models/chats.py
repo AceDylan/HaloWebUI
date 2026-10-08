@@ -483,10 +483,25 @@ class ChatTable:
             }
         )
 
-    def insert_new_chat(self, user_id: str, form_data: ChatForm) -> Optional[ChatModel]:
+    def insert_new_chat(
+        self,
+        user_id: str,
+        form_data: ChatForm,
+        *,
+        meta: Optional[dict] = None,
+        created_at: Optional[int] = None,
+        updated_at: Optional[int] = None,
+    ) -> Optional[ChatModel]:
+        """``meta``: extra keys for chat.meta. ``created_at`` / ``updated_at``: a chat written for
+        something that happened earlier (a 协作台 team from before teams had chats) takes its
+        place in the history instead of the top."""
         with get_db() as db:
-            now = self._next_user_chat_timestamp(db, user_id)
-            meta = {}
+            now = (
+                int(created_at)
+                if created_at
+                else self._next_user_chat_timestamp(db, user_id)
+            )
+            meta = dict(meta or {})
             if form_data.title_auto_generated is not None:
                 meta[TITLE_GENERATION_META_KEY] = {
                     "auto_generated": form_data.title_auto_generated,
@@ -500,6 +515,8 @@ class ChatTable:
                 assistant_id=form_data.assistant_id,
                 now=now,
             )
+            if updated_at and int(updated_at) > now:
+                result.updated_at = int(updated_at)
             db.add(result)
             db.commit()
             db.refresh(result)

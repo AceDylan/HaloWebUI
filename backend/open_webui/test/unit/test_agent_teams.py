@@ -634,6 +634,10 @@ def test_the_conclusion_goes_into_the_chat_the_team_came_from(hermes, monkeypatc
     assert "![原样](raw.png)" in content  # code blocks stay as written
     assert "负责人验收：部分达成" in content and "**补图**：缺月度图" in content
     assert f"(/teams/{team_id}/conclusion)" in content
+    # the way to the page, its files and its record: one line the chat shows as buttons
+    assert content.rstrip().splitlines()[-1] == (
+        f"在协作台看：[结果页](/teams/{team_id}/conclusion) · [产出文件](/teams/{team_id}/conclusion#files)"
+        f" · [过程记录](/teams/{team_id}/conclusion#process)")
     assert "/root/work/agent-teams/halo-x" in call["notice"] and "计算器设计" in call["notice"]
     team = client.get(f"/api/v1/teams/{team_id}").json()["team"]
     assert team["outputs"]["chat_posted"] == {"generated_at": 1700000123}

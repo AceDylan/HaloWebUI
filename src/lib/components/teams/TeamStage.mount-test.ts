@@ -5,8 +5,10 @@ import { installDominoDom } from '$lib/test-support/domino-dom';
 
 installDominoDom('http://localhost/');
 
-const api = vi.hoisted(() => ({ getTeam: vi.fn() }));
+const api = vi.hoisted(() => ({ getTeam: vi.fn(), followUpTeamConclusion: vi.fn() }));
 vi.mock('$lib/apis/teams', () => api);
+const nav = vi.hoisted(() => ({ goto: vi.fn() }));
+vi.mock('$app/navigation', () => nav);
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const nowTs = () => Math.floor(Date.now() / 1000);
@@ -182,5 +184,110 @@ describe('TeamChatCard (派发方式「协作台」 in a chat)', () => {
 		expect(target.querySelector('[data-team-chat-open]').getAttribute('href')).toBe('/teams/team-c');
 		expect(text('[data-stage-now]')).toContain('gpt-chat');
 		expect(api.getTeam.mock.calls[0].slice(1)).toEqual(['team-c']);
+	});
+
+	const card = async (props: { teamId: string; history?: { messages: Record<string, any> } }) => {
+		const { default: TeamChatCard } = await import('./TeamChatCard.svelte');
+		target = document.createElement('div');
+		document.body.appendChild(target);
+		(globalThis as any).localStorage.token = 'tok';
+		app = new TeamChatCard({ target, props });
+		const end = Date.now() + 15000;
+		while (target.querySelector('[data-team-chat-state="loading"]')) {
+			if (Date.now() > end) throw new Error('timed out');
+			await sleep(20);
+		}
+	};
+	const doneTeam = {
+		team: {
+			id: 'team-d',
+			title: '看板调研',
+			status: 'running',
+			phase: 'completed',
+			member_count: 2,
+			task_count: 3,
+			roster: [
+				{ name: 'researcher', role: '调研' },
+				{ name: 'writer', role: '写作' }
+			],
+			inputs: ['需求.pdf']
+		},
+		live: {},
+		stage: { key: 'done', label: '已完成', at: nowTs(), steps: steps(5) }
+	};
+
+	it('done, with the result in this chat: one click down to it, the rest on the 协作台', async () => {
+		api.getTeam.mockResolvedValue(doneTeam);
+		const history = {
+			messages: {
+				n1: {
+					id: 'n1',
+					role: 'user',
+					timestamp: 1,
+					childrenIds: ['r1'],
+					hermes_notice: { source: 'team', run_id: 'team:team-d:100' }
+				},
+				n2: {
+					id: 'n2',
+					role: 'user',
+					timestamp: 2,
+					childrenIds: ['r2'],
+					hermes_notice: { source: 'team', run_id: 'team:team-d:200' }
+				},
+				other: {
+					id: 'other',
+					role: 'user',
+					timestamp: 3,
+					childrenIds: ['r3'],
+					hermes_notice: { source: 'team', run_id: 'team:another:300' }
+				}
+			}
+		};
+		await card({ teamId: 'team-d', history });
+		const el = target.querySelector('[data-team-chat-card]');
+		expect(el.getAttribute('data-team-chat-state')).toBe('done');
+		expect(el.textContent).toContain('负责人 + 2 位成员');
+		expect(el.textContent).toContain('附带 1 个文件');
+		expect(target.querySelector('[data-team-chat-bring]')).toBeFalsy();
+		const scrolled: string[] = [];
+		const reply = document.createElement('div');
+		reply.id = 'message-r2'; // the newest version of the result
+		(reply as any).scrollIntoView = () => scrolled.push(reply.id);
+		document.body.appendChild(reply);
+		target.querySelector('[data-team-chat-jump]').click();
+		expect(scrolled).toEqual(['message-r2']);
+		reply.remove();
+		const links = [...target.querySelectorAll('[data-team-result-link]')].map((a: any) => [
+			a.getAttribute('data-team-result-link'),
+			a.getAttribute('href'),
+			a.getAttribute('target')
+		]);
+		expect(links).toEqual([
+			['page', '/teams/team-d/conclusion', null],
+			['files', '/teams/team-d/conclusion#files', null],
+			['process', '/teams/team-d/conclusion#process', null]
+		]);
+	});
+
+	it('done, with the result not in this chat yet: brings it here', async () => {
+		api.getTeam.mockResolvedValue(doneTeam);
+		api.followUpTeamConclusion.mockResolvedValue({ chat_id: 'chat-elsewhere', created: false, posted: true });
+		await card({ teamId: 'team-d', history: { messages: {} } });
+		target.querySelector('[data-team-chat-bring]').click();
+		const end = Date.now() + 5000;
+		while (!nav.goto.mock.calls.length && Date.now() < end) await sleep(10);
+		expect(api.followUpTeamConclusion.mock.calls[0].slice(1)).toEqual(['team-d']);
+		// posted into the team's own chat, which is not the one on screen: go there
+		expect(nav.goto).toHaveBeenCalledWith('/c/chat-elsewhere');
+	});
+
+	it('a team deleted on the 协作台 leaves a quiet line, and the card stops asking', async () => {
+		api.getTeam.mockReset();
+		api.getTeam.mockRejectedValue(Object.assign(new Error('协作任务不存在'), { status: 404 }));
+		await card({ teamId: 'team-x' });
+		expect(target.querySelector('[data-team-chat-card]').getAttribute('data-team-chat-state')).toBe('gone');
+		expect(text('[data-team-chat-gone]')).toContain('已经在协作台删除');
+		expect(target.querySelector('[data-team-chat-open]')).toBeFalsy();
+		expect(api.getTeam).toHaveBeenCalledTimes(1);
 	});
 });

@@ -18,6 +18,7 @@ import {
 	parseHermesRunNotice,
 	reportDurationSeconds,
 	splitRunReport,
+	splitTeamReport,
 	describeReportFigures
 } from './hermes';
 
@@ -383,6 +384,21 @@ describe('接着上次: a follow-up goes back to the run whose report ends the c
 		});
 		const runner = parseHermesRunNotice(chat().messages.notice)!;
 		expect(describeTeamNotice(runner, chat().messages.notice.content)).toBeNull();
+	});
+
+	it("a team's result loses its link line (the chat shows it as buttons)", () => {
+		const page = '/teams/abc-123/conclusion';
+		const now = `# 报告\n\n正文\n\n---\n在协作台看：[结果页](${page}) · [产出文件](${page}#files) · [过程记录](${page}#process)`;
+		expect(splitTeamReport(now, 'abc-123')).toEqual({ body: '# 报告\n\n正文' });
+		// the older single link, under the lead's acceptance: the acceptance stays with its rule
+		const older = `正文\n\n---\n> 🎯 负责人验收：目标已达成\n\n[在协作台看结果页、产出文件和过程记录](${page})\n`;
+		expect(splitTeamReport(older, 'abc-123')).toEqual({
+			body: '正文\n\n---\n> 🎯 负责人验收：目标已达成'
+		});
+		// another team's page, or no link at the end: as written
+		expect(splitTeamReport(now, 'other')).toBeNull();
+		expect(splitTeamReport('正文\n\n[结果页](/teams/abc-123/conclusion)\n\n还有一段', 'abc-123')).toBeNull();
+		expect(splitTeamReport('', 'abc-123')).toBeNull();
 	});
 
 	it('goes back to a cchclaude run like any other', () => {

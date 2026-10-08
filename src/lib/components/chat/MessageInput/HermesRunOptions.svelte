@@ -384,11 +384,9 @@
 			</label>
 			<div class="mt-1 text-2xs text-gray-400 dark:text-gray-500" data-halo-hermes-model-note>
 				{#if isModeDispatch(current.dispatch)}
-					这条消息交给{DISPATCHES.find((item) => item.value === current.dispatch)?.label}，不经过
-					Hermes 的模型；之后的消息照常用它
+					这条消息交给{DISPATCHES.find((item) => item.value === current.dispatch)?.label}，不经过 Hermes 的模型；之后的消息照常用它
 				{:else}
-					只管 Hermes 自己这一轮；派发给 reclaude/cchclaude/anyclaude/officlaude/codex/agy
-					时它们用自己的模型
+					只管 Hermes 自己这一轮；派发给 reclaude/cchclaude/anyclaude/officlaude/codex/agy 时它们用自己的模型
 				{/if}
 			</div>
 			{#if loadingModels}

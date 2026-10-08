@@ -87,9 +87,10 @@
 	let panel: HTMLDivElement;
 	// The composer sits under the message list's stacking context (the list
 	// covered a panel positioned inside it): the panel lives on <body>, placed
-	// above the button.
+	// next to the button.
 	let panelStyle = '';
 	const PANEL_WIDTH = 288;
+	const GAP = 8;
 
 	const portal = (node: HTMLElement) => {
 		document.body.appendChild(node);
@@ -103,12 +104,32 @@
 	const placePanel = () => {
 		if (!button || typeof window === 'undefined') return;
 		const rect = button.getBoundingClientRect();
+		// What is on screen: on a phone the keyboard and the browser bars take part of the window.
+		const view = window.visualViewport;
+		const viewTop = view?.offsetTop ?? 0;
+		const viewLeft = view?.offsetLeft ?? 0;
+		const viewWidth = view?.width ?? window.innerWidth;
+		const viewHeight = view?.height ?? window.innerHeight;
 		// On a phone the dispatch choices need the width: at 288px "reclaude" broke
 		// mid-word into "reclaud / e". The choices sit three to a row.
-		const width = window.innerWidth < 640 ? window.innerWidth - 16 : PANEL_WIDTH;
-		const left = Math.max(8, Math.min(rect.left, window.innerWidth - width - 8));
+		const width = viewWidth < 640 ? viewWidth - GAP * 2 : PANEL_WIDTH;
+		const left = Math.max(
+			viewLeft + GAP,
+			Math.min(rect.left, viewLeft + viewWidth - width - GAP)
+		);
+		// Above the button unless it only fits below (a new chat's composer mid-screen), and never
+		// taller than the room on that side: on a phone the panel always opened upward and its top,
+		// the 派发给谁 choices, went past the top of the screen. What does not fit scrolls.
+		const above = rect.top - viewTop - GAP * 2;
+		const below = viewTop + viewHeight - rect.bottom - GAP * 2;
+		const needed = panel?.scrollHeight ?? 0;
+		const up = above >= needed || above >= below;
+		const place = up
+			? `top: ${Math.round(rect.top - GAP)}px; transform: translateY(-100%);`
+			: `top: ${Math.round(rect.bottom + GAP)}px;`;
 		panelStyle =
-			`position: fixed; left: ${Math.round(left)}px; bottom: ${Math.round(window.innerHeight - rect.top + 8)}px; ` +
+			`position: fixed; left: ${Math.round(left)}px; ${place} ` +
+			`max-height: ${Math.max(0, Math.round(up ? above : below))}px; ` +
 			`width: ${Math.round(width)}px; z-index: 9999;`;
 	};
 	let modelOptions: HermesModelOptions | null = null;
@@ -192,11 +213,25 @@
 			button?.focus();
 		}
 	};
-	// Keyboard users land in the panel, on the current choice.
+	// Placed again once drawn (its height picks the side), then keyboard users land in the
+	// panel, on the current choice.
 	const focusCurrentChoice = async () => {
 		await tick();
+		placePanel();
 		const selected = panel?.querySelector<HTMLElement>('[role="radio"][aria-checked="true"]');
 		selected?.focus();
+	};
+	// The phone keyboard opening or closing moves the button without resizing the window.
+	const listenViewport = (on: boolean) => {
+		const view = window.visualViewport;
+		if (!view) return;
+		if (on) {
+			view.addEventListener('resize', placePanel);
+			view.addEventListener('scroll', placePanel);
+		} else {
+			view.removeEventListener('resize', placePanel);
+			view.removeEventListener('scroll', placePanel);
+		}
 	};
 	$: if (typeof window !== 'undefined') {
 		if (open) {
@@ -204,12 +239,14 @@
 			window.addEventListener('pointerdown', onWindowPointer, true);
 			window.addEventListener('keydown', onWindowKey, true);
 			window.addEventListener('resize', placePanel);
+			listenViewport(true);
 			void loadModels();
 			void focusCurrentChoice();
 		} else {
 			window.removeEventListener('pointerdown', onWindowPointer, true);
 			window.removeEventListener('keydown', onWindowKey, true);
 			window.removeEventListener('resize', placePanel);
+			listenViewport(false);
 		}
 	}
 	onDestroy(() => {
@@ -217,6 +254,7 @@
 		window.removeEventListener('pointerdown', onWindowPointer, true);
 		window.removeEventListener('keydown', onWindowKey, true);
 		window.removeEventListener('resize', placePanel);
+		listenViewport(false);
 	});
 </script>
 

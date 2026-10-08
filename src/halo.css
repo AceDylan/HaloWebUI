@@ -1201,6 +1201,9 @@ body:has(#chat-input:focus) .halo-orb__arc {
    the work in a second line; the picked one is outlined in ion blue, not filled solid (the one
    solid accent stays for primary actions). */
 .halo-dispatch {
+	/* HermesRunOptions caps its height to the room on screen; the rest scrolls inside it. */
+	overflow-y: auto;
+	overscroll-behavior: contain;
 	background-color: var(--surface-overlay, var(--surface-base));
 	box-shadow:
 		inset 0 0 0 1px var(--surface-border-strong),

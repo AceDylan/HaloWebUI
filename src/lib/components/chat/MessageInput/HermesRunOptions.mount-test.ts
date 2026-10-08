@@ -24,7 +24,11 @@ let app: any;
 let target: any;
 let api: any;
 
-const mount = async (options: Record<string, string> = {}, continuation: any = null) => {
+const mount = async (
+	options: Record<string, string> = {},
+	continuation: any = null,
+	buttonRect: { top: number; left: number; bottom: number } | null = null
+) => {
 	const { writable } = await import('svelte/store');
 	const i18n = writable({ t: (key: string) => key });
 	const { default: HermesRunOptions } = await import('./HermesRunOptions.svelte');
@@ -35,7 +39,16 @@ const mount = async (options: Record<string, string> = {}, continuation: any = n
 		props: { options: { dispatch: '', model: '', provider: '', ...options }, continuation },
 		context: new Map<string, any>([['i18n', i18n]])
 	});
-	(target.querySelector('button') as any).click();
+	const button = target.querySelector('button') as any;
+	if (buttonRect) {
+		button.getBoundingClientRect = () => ({
+			...buttonRect,
+			right: buttonRect.left + 90,
+			width: 90,
+			height: buttonRect.bottom - buttonRect.top
+		});
+	}
+	button.click();
 	return waitFor(
 		() =>
 			document.body.querySelectorAll('[data-halo-hermes-model] option').length > 1 &&
@@ -234,6 +247,61 @@ describe('HermesRunOptions', () => {
 			(panel.querySelector('[data-halo-hermes-dispatch="direct"]') as any).getAttribute('aria-checked')
 		).toBe('true');
 		expect(Boolean(target.querySelector('[data-halo-hermes-options-summary]'))).toBe(false);
+	});
+
+	describe('placement', () => {
+		const win = window as any;
+		const saved = { innerWidth: win.innerWidth, innerHeight: win.innerHeight };
+		// The panel's full height (domino has no layout).
+		const proto = Object.getPrototypeOf(document.createElement('div'));
+		beforeEach(() => {
+			Object.defineProperty(proto, 'scrollHeight', {
+				configurable: true,
+				get() {
+					return this.hasAttribute('data-halo-hermes-options-panel') ? 520 : 0;
+				}
+			});
+		});
+		afterEach(() => {
+			delete proto.scrollHeight;
+			delete win.visualViewport;
+			Object.assign(win, saved);
+		});
+		const styleOf = (panel: any) => panel.getAttribute('style') as string;
+
+		it('on a phone with the keyboard up, opens above the button no taller than the room there', async () => {
+			Object.assign(win, { innerWidth: 390, innerHeight: 800 });
+			win.visualViewport = {
+				offsetTop: 0,
+				offsetLeft: 0,
+				width: 390,
+				height: 360,
+				addEventListener: () => {},
+				removeEventListener: () => {}
+			};
+			const style = styleOf(await mount({}, null, { top: 300, left: 60, bottom: 332 }));
+			expect(style).toContain('top: 292px; transform: translateY(-100%);');
+			expect(style).toContain('max-height: 284px;');
+			expect(style).toContain('width: 374px;');
+			expect(style).toContain('left: 8px;');
+		});
+
+		it('opens below a composer in the middle of a phone screen (a new chat)', async () => {
+			Object.assign(win, { innerWidth: 390, innerHeight: 800 });
+			const style = styleOf(await mount({}, null, { top: 260, left: 60, bottom: 292 }));
+			expect(style).toContain('top: 300px;');
+			expect(style).not.toContain('translateY');
+			expect(style).toContain('max-height: 492px;');
+		});
+
+		it('on a wide screen with room above, opens above at its own width', async () => {
+			Object.assign(win, { innerWidth: 1280, innerHeight: 800 });
+			const style = styleOf(await mount({}, null, { top: 700, left: 400, bottom: 732 }));
+			expect(style).toContain('top: 692px; transform: translateY(-100%);');
+			expect(style).toContain('max-height: 684px;');
+			expect(style).toContain('width: 288px;');
+			expect(style).toContain('left: 400px;');
+		});
 	});
 
 	it('keeps showing a model picked earlier that the list no longer offers', async () => {

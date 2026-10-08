@@ -39,7 +39,7 @@ from open_webui.utils.discussion_room import (
     transient_reason,
 )
 from open_webui.utils import assistant_library as lib
-from open_webui.utils.mode_chats import sources_from_docs
+from open_webui.utils.mode_chats import native_search_failed, sources_from_docs
 
 log = logging.getLogger(__name__)
 log.setLevel(SRC_LOG_LEVELS.get("MAIN", GLOBAL_LOG_LEVEL))
@@ -468,6 +468,13 @@ class LiveAnswer:
             except asyncio.TimeoutError:
                 raise ValueError(f"超过 {ANSWER_TIMEOUT_SECONDS} 秒没答完")
             except Exception as exc:
+                if self.browse:
+                    # the model's own web search is what failed: answer again without it
+                    log.info("answer %s: failed with native web search (%s), again without", self.chat_id, _short_error(exc)[:120])
+                    self.browse = False
+                    native_search_failed(run["assistant"]["id"])
+                    self.pending = None
+                    continue
                 reason = transient_reason(exc)
                 if not reason or tries >= len(self.retry_delays):
                     raise

@@ -30,7 +30,7 @@ from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Optional
 
 from open_webui.env import BYPASS_MODEL_ACCESS_CONTROL, GLOBAL_LOG_LEVEL, SRC_LOG_LEVELS
-from open_webui.utils.mode_chats import sources_from_docs
+from open_webui.utils.mode_chats import native_search_failed, sources_from_docs
 from open_webui.utils.model_identity import resolve_model_from_lookup
 
 log = logging.getLogger(__name__)
@@ -1089,6 +1089,14 @@ class LiveDiscussion:
             except (asyncio.CancelledError, asyncio.TimeoutError):
                 raise
             except Exception as exc:
+                if browse:
+                    # the model's own web search is what failed (a relay without it for this
+                    # model): say it again without, and stop offering it to this model for a while
+                    log.info("discussion %s: %s %s failed with native web search (%s), again without", self.chat_id, key, model, _short_error(exc)[:120])
+                    browse = False
+                    self.browse.discard(model)
+                    native_search_failed(model)
+                    continue
                 reason = transient_reason(exc)
                 if reason and tries < len(delays):
                     wait = retry_wait(exc, delays[tries])

@@ -283,17 +283,35 @@ def sources_from_docs(
     return sources
 
 
+# models whose native web search call failed lately (model id -> when): not offered it again for
+# a while (e.g. a relay that has no Responses API for that model answers 503)
+NATIVE_SEARCH_FAILED: dict = {}
+NATIVE_SEARCH_RETRY_SECONDS = 6 * 3600
+
+
+def native_search_failed(model_id: str) -> None:
+    """A call made with native web search failed: answer without it, and stop offering it to
+    this model for NATIVE_SEARCH_RETRY_SECONDS."""
+    import time
+
+    NATIVE_SEARCH_FAILED[model_id] = time.time()
+
+
 async def native_search_models(request, user, model_ids) -> set:
     """The models among ``model_ids`` that may search the web themselves (native web search) in
-    讨论台 / 精答: the admin allows it and the model's connection is known to support it (set up
-    for it, or the official API) — not merely worth a try, so a proxy that would choke on the tool
-    is never sent it. The search is offered, not forced: the model looks things up when the
-    notes miss something."""
+    讨论台 / 精答: the admin allows it and the model's connection supports it or may (a relay with
+    renamed models is "unknown" yet often works), except Hermes and the models whose native call
+    failed lately. A call that fails with it is made again without it (see native_search_failed).
+    The search is offered, not forced: the model looks things up when the notes miss something.
+    Ordinary chats keep their own rule (only a supported connection goes native in 智能联网)."""
+    import time
+
     from open_webui.utils.model_identity import resolve_model_from_lookup
 
     config = getattr(getattr(getattr(request, "app", None), "state", None), "config", None)
     if not getattr(config, "ENABLE_NATIVE_WEB_SEARCH", False):
         return set()
+    from open_webui.utils.hermes_agent import is_hermes_agent_model
     from open_webui.utils.middleware import _resolve_native_web_search_support
     from open_webui.utils.models import get_all_models
 
@@ -302,16 +320,19 @@ async def native_search_models(request, user, model_ids) -> set:
         await get_all_models(request, user=user)
         models = getattr(request.state, "MODELS", None) or {}
     ambiguous = getattr(request.state, "MODELS_AMBIGUOUS", set()) or set()
+    now = time.time()
     out = set()
     for model_id in {m for m in model_ids if m}:
+        if now - NATIVE_SEARCH_FAILED.get(model_id, 0) < NATIVE_SEARCH_RETRY_SECONDS:
+            continue
         model = resolve_model_from_lookup(models, ambiguous, model_id)
-        if not model:
+        if not model or is_hermes_agent_model(model) or is_hermes_agent_model(model_id):
             continue
         try:
             support = _resolve_native_web_search_support(request, user, model, model_id)
         except Exception as exc:
             log.info("native web search support of %s unknown: %s", model_id, exc)
             continue
-        if support.get("supported") is True:
+        if support.get("supported") is True or support.get("can_attempt") is True:
             out.add(model_id)
     return out

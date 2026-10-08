@@ -794,3 +794,34 @@ def test_seats_whose_model_searches_itself_are_offered_it():
     live.browsers = browsers_never
     asyncio.run(live.run())
     assert asked == [] and live.browse == set()
+
+
+def test_a_seat_whose_own_search_fails_speaks_again_without_it():
+    from open_webui.utils import mode_chats
+
+    mode_chats.NATIVE_SEARCH_FAILED.clear()
+    setup = _research_setup(rounds=2)
+    live, events, calls, saved = _live(setup, {"a": [["A1"], ["A2"]], "b": [["B1"], ["B2"]], "c": [["## 结论\nok"]]})
+    live.search = _one_page_search()
+    plain = live.call_model
+    browsed = []
+
+    async def call_model(model, messages, browse=False):
+        browsed.append((model, browse))
+        if browse:
+            raise RuntimeError("Responses API upstream error (503)")
+        return await plain(model, messages)
+
+    async def browsers(ask):
+        return {"a"}
+
+    live.call_model = call_model
+    live.browsers = browsers
+    asyncio.run(live.run())
+    turns = {t["id"]: t for t in live.ask["turns"]}
+    assert turns["r1-s1"]["status"] == "done" and turns["r1-s1"]["content"] == "A1"
+    # tried once with it, then without, and not offered again in round 2
+    assert [b for m, b in browsed if m == "a"] == [True, False, False]
+    assert "a" in mode_chats.NATIVE_SEARCH_FAILED and live.browse == set()
+    assert live.ask["status"] == "done"
+    mode_chats.NATIVE_SEARCH_FAILED.clear()

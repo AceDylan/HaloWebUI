@@ -456,6 +456,45 @@ def test_a_question_nothing_can_be_looked_up_for_is_answered_without_notes(env, 
     assert "Notes gathered from the web" not in env.calls[-1][1][-1]["content"]
 
 
+def test_an_answer_whose_own_search_fails_is_made_again_without_it(env, monkeypatch):
+    from open_webui.routers import discussions
+    from open_webui.utils import chat as chat_utils, mode_chats
+
+    mode_chats.NATIVE_SEARCH_FAILED.clear()
+
+    async def fake_search(request, user, moderator, question, history):
+        return {"queries": ["q"], "docs": [{"url": "https://a.example", "title": "A", "content": "资料" * 60}]}
+
+    async def every_model_browses(request, user, model_ids):
+        return set(model_ids)
+
+    monkeypatch.setattr(discussions, "_search", fake_search)
+    monkeypatch.setattr(mode_chats, "native_search_models", every_model_browses)
+    plain = chat_utils.generate_chat_completion
+    native = []
+
+    async def no_relay_search(request, payload, user, bypass_filter=False):
+        native.append(bool(payload.get("native_web_search")))
+        if payload.get("native_web_search"):
+            raise RuntimeError("Responses API upstream error (503)")
+        return await plain(request, payload, user)
+
+    monkeypatch.setattr(chat_utils, "generate_chat_completion", no_relay_search)
+    env.state["plan"] = {**CREATE_PLAN, "web_search": True}
+
+    async def scenario():
+        detail = await _ask(env)
+        await _settle(detail["id"])
+        return detail["id"]
+
+    run = asyncio.run(api.get_answer(asyncio.run(scenario()), USER))["run"]
+    assert run["status"] == "done" and run["answer"]["status"] == "done"
+    assert native[-2:] == [True, False]  # with its own search, then without
+    assert run["assistant"]["id"] in mode_chats.NATIVE_SEARCH_FAILED
+    assert "search the web yourself" not in env.calls[-1][1][-1]["content"]
+    mode_chats.NATIVE_SEARCH_FAILED.clear()
+
+
 def test_answer_messages_offer_the_models_own_search():
     run = {"question": "PG 18 什么时候发布", "assistant": {"saved": True}, "research": {"sources": [{"n": 1, "url": "https://a", "title": "A", "excerpt": "e"}]}}
     assert "search the web yourself" not in desk.answer_messages(run)[-1]["content"]

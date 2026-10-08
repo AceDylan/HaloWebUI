@@ -542,6 +542,35 @@ describe('RunnerBadge and RunnerStatus', () => {
 		).click();
 		expect(checks.length).toBe(1);
 	});
+
+	it('status panel also lists the runners off the fallback chain', async () => {
+		const { default: RunnerStatus } = await import('./RunnerStatus.svelte');
+		const names = ['reclaude', 'cchclaude', 'anyclaude', 'codex', 'agy', 'hermes'];
+		const runner = (name: string) => ({
+			name,
+			label: name,
+			engine: 'Claude Code',
+			note: '',
+			native: name === 'hermes',
+			quota_wait: false,
+			available: true,
+			state: 'ok',
+			reason: '可用',
+			checked_at: 1790900000,
+			layers: []
+		});
+		const registry = {
+			order: names,
+			kinds: [],
+			cache_seconds: 120,
+			runners: [...names, 'officlaude'].map(runner)
+		};
+		await mount(RunnerStatus, { registry });
+		const chips = Array.from(target.querySelectorAll('[data-runner-chip]')) as any[];
+		expect(chips.map((c) => c.getAttribute('data-runner-chip'))).toEqual([...names, 'officlaude']);
+		expect(chips[6].textContent).toContain('官方 Claude');
+		expect(target.textContent).toContain('仅点名');
+	});
 });
 
 describe('PlanReview (runners)', () => {

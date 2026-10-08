@@ -3,12 +3,13 @@
 	import { slide } from 'svelte/transition';
 
 	import type { RunnerInfo, TeamsMeta } from '$lib/apis/teams';
-	import { formatStamp, runnerLabel } from './model';
+	import { formatStamp, offChainRunners, runnerLabel } from './model';
 
 	/**
 	 * The execution sources and whether each one can take work right now. A runner that is down
 	 * says at which layer (installed → executable → account / quota → network → recent run) and
-	 * why; the chain order is the fallback order.
+	 * why; the chain order is the fallback order. Runners off the chain (only used when picked by
+	 * name) follow it, after a gap.
 	 */
 	export let registry: TeamsMeta['registry'] | null = null;
 	export let checking = false;
@@ -29,6 +30,8 @@
 
 	$: runners = registry?.runners ?? [];
 	$: order = registry?.order ?? [];
+	$: chain = order.length ? order : runners.map((r) => r.name);
+	$: offChain = offChainRunners(order, runners);
 	$: checkedAt = Math.max(0, ...runners.map((r) => r.checked_at || 0));
 	$: down = runners.filter((r) => !r.available).length;
 
@@ -75,9 +78,12 @@
 		<p class="px-4 pt-1 text-xs text-red-600 dark:text-red-400" role="alert">{error}</p>
 	{/if}
 	<ol class="flex flex-wrap items-center gap-y-2 px-4 pb-3.5 pt-3" aria-label="兜底顺序">
-		{#each order.length ? order : runners.map((r) => r.name) as name, index}
+		{#each [...chain, ...offChain.map((r) => r.name)] as name, index}
 			{@const r = runners.find((x) => x.name === name)}
 			{#if r}
+				{#if index === chain.length}
+					<li class="ml-3 mr-1.5 text-[11px] text-gray-400" aria-hidden="true">仅点名</li>
+				{/if}
 				<li class="flex items-center">
 					<button
 						type="button"
@@ -103,7 +109,7 @@
 						<span class="hidden truncate text-gray-400 sm:inline">{r.engine}</span>
 						<span class="sr-only">{r.available ? '可用' : `不可用：${r.reason}`}</span>
 					</button>
-					{#if index < (order.length || runners.length) - 1}
+					{#if index < chain.length - 1}
 						<span class="link mx-1 h-px w-3 sm:w-4" aria-hidden="true" />
 					{/if}
 				</li>

@@ -6,7 +6,14 @@
 	import RunnerStatus from './RunnerStatus.svelte';
 	import StatusChip from './StatusChip.svelte';
 	import TeamAvatar from './TeamAvatar.svelte';
-	import { avatarKind, EXECUTOR_OPTIONS, KIND_LABEL, memberRunner, runnerLabel } from './model';
+	import {
+		avatarKind,
+		EXECUTOR_OPTIONS,
+		KIND_LABEL,
+		memberRunner,
+		offChainRunners,
+		runnerLabel
+	} from './model';
 
 	/**
 	 * The lead's plan, shown before anything runs: who does what (each member's assistant — one
@@ -47,6 +54,8 @@
 	$: editable = team.status === 'plan_ready' || team.status === 'start_failed';
 	$: runnersBy = new Map((registry?.runners ?? []).map((r) => [r.name, r]));
 	$: order = registry?.order?.length ? registry.order : EXECUTOR_OPTIONS.map((o) => o.value);
+	// a member can also be given a runner that is off the fallback chain (picked by name only)
+	$: choices = [...order, ...offChainRunners(order, registry?.runners ?? []).map((r) => r.name)];
 	$: kindLabel = (kind?: string) =>
 		registry?.kinds.find((k) => k.value === kind)?.label ?? KIND_LABEL[kind ?? ''] ?? '';
 	$: actuals = (plan?.members ?? []).map((m) => memberRunner(m).actual).filter(Boolean) as string[];
@@ -67,7 +76,9 @@
 	const optionLabel = (name: string) => {
 		const info = runnersBy.get(name as TeamExecutor);
 		const base =
-			name === 'hermes' ? 'Hermes 代理' : `${name}${info?.engine ? ` · ${info.engine}` : ''}`;
+			name === 'hermes'
+				? 'Hermes 代理'
+				: `${runnerLabel(name)}${info?.engine ? ` · ${info.engine}` : ''}`;
 		return info && !info.available ? `${base}（不可用）` : base;
 	};
 
@@ -414,7 +425,7 @@
 											source: 'user'
 										})}
 								>
-									{#each order as name}
+									{#each choices as name}
 										<option value={name}
 											>{optionLabel(name)}{member.recommended === name ? ' · 推荐' : ''}</option
 										>

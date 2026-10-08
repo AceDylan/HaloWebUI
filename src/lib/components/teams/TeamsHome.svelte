@@ -689,7 +689,7 @@
 							data-runner-summary
 						>
 							<span class="flex -space-x-0.5" aria-hidden="true">
-								{#each runners.slice(0, 6) as r}
+								{#each runners as r}
 									<span
 										class="size-1.5 rounded-full ring-2 ring-white dark:ring-gray-900 {r.available
 											? 'bg-emerald-500'

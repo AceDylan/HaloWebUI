@@ -755,6 +755,13 @@ export const formatStamp = (ts: number | null | undefined) => {
 export const runnerLabel = (name: string | null | undefined) =>
 	name === 'hermes' ? 'Hermes' : name === 'officlaude' ? '官方 Claude' : (name ?? '');
 
+/**
+ * The runners off the fallback chain ("officlaude" is only used when picked by name): registry
+ * runners the chain does not list, so a panel can show every runner, not just the chain.
+ */
+export const offChainRunners = <T extends { name: string }>(order: string[], runners: T[]): T[] =>
+	order.length ? runners.filter((r) => !order.includes(r.name)) : [];
+
 // --- stage: what happens now and how long it may still take --------------------------------------
 
 export const STAGE_STEPS: {

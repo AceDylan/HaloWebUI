@@ -53,6 +53,13 @@ cchclaude / anyclaude / Codex 独占运行器；cchclaude、anyclaude 就是 rec
 - **其他情况**（非 `--detach` 的 Telegram、QQ、CLI）：主动跳过，交给 gateway 的后台进程通知。
 - `RUNNER_DIRECT_DELIVERY=0`：两条新路径都关掉，回到旧行为。
 
+官方 Claude（`officlaude`）也使用同一通知链路。每次任务和同会话续跑结束后，
+Hermes runner 的 `officlaude-quota.py` 会把实时 5 小时/每周已用百分比和北京时间重置时间
+写入 `result.md`。通知器识别「官方 Claude 额度」页脚，Telegram 与 HaloWebUI 都将它保留在
+报告最后一行，长报告截断、需要用户回答或运行失败时也保留；查询失败明确显示「无法获取」。
+额度查询使用只读接口，不调用模型，也不自行刷新登录凭据。查询脚本和 runner 接入由
+Hermes 的 `local/hermes-home/MANIFEST.tsv` 管理，本目录维护通知器副本。
+
 ## 配置文件是**分层**的
 
 `--config-file` 可重复，按顺序**逐键分层**，先出现的文件赢：

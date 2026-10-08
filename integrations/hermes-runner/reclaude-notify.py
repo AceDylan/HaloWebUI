@@ -52,7 +52,7 @@ import time
 import urllib.error
 import urllib.request
 
-SCRIPT_VERSION = "2026-10-08.1"
+SCRIPT_VERSION = "2026-10-08.2"
 CONFIG_FILE = "/root/.hermes/reclaude-runner.env"
 REQUIRED_CONFIG_KEYS = ("HALOWEBUI_NOTIFY_URL", "HALOWEBUI_NOTIFY_TOKEN")
 STATE_DB = "/root/.hermes/state.db"
@@ -399,15 +399,18 @@ def recorded_origin(meta, session_id="", platform="", db_path=STATE_DB):
 
 
 QUOTA_FOOTER_MARKER = "reclaude 额度"
+QUOTA_FOOTER_MARKERS = (QUOTA_FOOTER_MARKER, "官方 Claude 额度")
 
 
-def has_quota_footer(result_path, marker=QUOTA_FOOTER_MARKER):
+def has_quota_footer(result_path, marker=None):
     """result.md 末尾是否带着 runner 写入的实时额度页脚。"""
     try:
         with open(result_path, "rb") as handle:
             handle.seek(0, os.SEEK_END)
             handle.seek(max(0, handle.tell() - 2000))
-            return marker in handle.read().decode("utf-8", "replace")
+            text = handle.read().decode("utf-8", "replace")
+            markers = (marker,) if marker is not None else QUOTA_FOOTER_MARKERS
+            return any(item in text for item in markers)
     except OSError:
         return False
 
@@ -440,7 +443,7 @@ def build_prompt(
         )
     if has_quota_footer(result_path):
         lines.append(
-            "result.md 末尾有一行 reclaude 实时额度（剩余额度 / 下次重置时间），"
+            "result.md 末尾有一行实时额度（用量或余额 / 重置时间），"
             "请把它一字不改地放在你回复的最后一行；如果那行写的是无法获取，也照实说，不要用旧数值代替。"
         )
     lines.append(f"不要重新执行原任务，不要启动新的 {agent} 运行。")
@@ -710,9 +713,9 @@ def build_digest(run_id, status, run_dir, session_id, agent="reclaude", chat=Fal
     footer = ""
     if body:
         head, _, last = body.rpartition("\n")
-        if QUOTA_FOOTER_MARKER in last:
+        if any(marker in last for marker in QUOTA_FOOTER_MARKERS):
             body, footer = head.rstrip(), last.strip()
-            # reclaude-quota.py puts a rule above its line; without the line it dangles.
+            # The quota helpers put a rule above their line; without the line it dangles.
             body = re.sub(r"\n+-{3,}\s*$", "", body).rstrip()
     if len(body) > max_chars:
         rest = len(body) - max_chars

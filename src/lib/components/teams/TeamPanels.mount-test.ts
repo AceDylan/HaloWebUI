@@ -237,6 +237,7 @@ describe('PlanReview', () => {
 			'reclaude',
 			'cchclaude',
 			'anyclaude',
+			'officlaude',
 			'codex',
 			'agy'
 		]);

@@ -3,7 +3,7 @@
 
 	import { runnerLabel } from './model';
 
-	/** Who does the work: "codex", or "cchclaude → anyclaude" when it fell back (with why). */
+	/** Uses display names (官方 Claude) while data-runner retains officlaude. Who does the work: "codex", or "cchclaude → anyclaude" when it fell back (with why). */
 	export let chosen: string | null | undefined = null;
 	export let actual: string | null | undefined;
 	export let reason = '';

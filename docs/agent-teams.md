@@ -55,7 +55,7 @@ HaloWebUI 里的多代理协作：一位负责人（team-lead）拆分工，几�
 - **任务事实源 = Hermes Kanban**。每个协作任务一个看板 `halo-<id 前 16 位>`（`~/.hermes/kanban/boards/`）：任务、依赖、执行尝试、评论、事件都在 Kanban 自己的表里。派发器（网关内置）真正检查依赖：前置没完成的任务不会被领取。
 - **归属与审批 = HaloWebUI `agent_team` 表**：谁发起、哪个对话、批准前的计划、对应的看板。所有接口按用户隔离（管理员也只看自己的）。
 - **Hermes 插件 `halowebui-teams`**（本仓库 `integrations/hermes-plugin/halowebui-teams/`，见其 README）：`/v1/halo-teams` 接口（计划、建看板、快照、事件、详情、补充说明、暂停/恢复/停止、重试），worker 内的钩子（成员工具调用、原生子代理、说明送达），reclaude 执行桥接。
-- **执行来源**：Hermes 成员由 Kanban 派发器以 `default` profile 启动（成员身份记在看板元数据里）；runner 成员（reclaude、cchclaude、anyclaude、codex、agy）由插件桥接直接调用对应的 `<名字>-run.sh`（额度等待、提问、续跑、停止都按 runner 自己的语义映射），这些 run 不发聊天通知、不被 autopilot-supervisor 接管。runner 是一张数据表（插件 `runners.py`），角色是助手模板（`assistants.py` 读 `src/lib/data/agents-zh.json` 里「协作」分组和 `team_kind`），两者独立。
+- **执行来源**：Hermes 成员由 Kanban 派发器以 `default` profile 启动（成员身份记在看板元数据里）；runner 成员（reclaude、cchclaude、anyclaude、officlaude〔官方 Claude〕、codex、agy）由插件桥接直接调用对应的 `<名字>-run.sh`（额度等待、提问、续跑、停止都按 runner 自己的语义映射），这些 run 不发聊天通知、不被 autopilot-supervisor 接管。runner 是一张数据表（插件 `runners.py`），角色是助手模板（`assistants.py` 读 `src/lib/data/agents-zh.json` 里「协作」分组和 `team_kind`），两者独立。
 - **可用性与兜底**：每个 runner 分层检测——已配置 → 已安装（脚本 + 命令）→ 可执行（`--version`）→ 账号 / 额度（reclaude 拼车额度预检、cch/any 中转的模型列表、`codex login status`、agy 登录令牌）→ 网络可达 → 最近运行没有因额度 / 登录 / 地区 / 网络 / 命令缺失失败（30 分钟内）。结果缓存 120 秒。改派发生在四个时机：批准时、启动前、运行中（runner 因上述原因失败，或额度等待超过 20 分钟）、重试时；任务本身做错了不改派。每次改派记在任务的 trail 上并写进通讯记录。
 - **结论**：插件 `conclusion.py`，团队完成后后台生成，存 `<工作目录>/.halo/conclusion.md`；工作目录文件经 `/api/v1/teams/<id>/files/<路径>` 读取（只限该团队工作目录、按用户隔离，HTML 按纯文本返回）。
 - **实时**：页面可见时每 2.5 秒按游标增量拉事件，隐藏时 30 秒；断线自动退避重试、恢复后补齐；完成后停止轮询。事件带「事件后的任务状态」，回放就是按顺序折叠；历史与当前状态不一致时页面会明确说明。
@@ -80,3 +80,5 @@ HaloWebUI 里的多代理协作：一位负责人（team-lead）拆分工，几�
 
 - HaloWebUI：`docker tag dylanha009/halowebui:rollback-pre-teams dylanha009/halowebui:custom && cd /root/halowebui && docker compose up -d`（`agent_team` 表留着无害）。
 - Hermes：`plugins.enabled` 去掉 `halowebui-teams`，删掉 `config.yaml` 末尾的 `kanban:` 段（备份 `/root/backups/halo-teams-20261002/config.yaml.before`），`hermes gateway restart`。团队看板留在磁盘上，不影响其他用途。
+
+成员执行来源可显式选择「官方 Claude」（officlaude，官网订阅 OAuth），角色不受限制。它不进入任何自动回退链，既不自动推荐也不自动接替其它来源；认证/订阅额度失败保留失败供用户处理后重试，不自动等待。

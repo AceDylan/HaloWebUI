@@ -185,3 +185,5 @@ They run real Kanban operations against a throwaway `HERMES_KANBAN_HOME` and a f
 Drop the name from `plugins.enabled` and restart the gateway. Team boards stay on disk
 (`~/.hermes/kanban/boards/halo-*`) and are skipped by nothing else; `hermes kanban boards rm`
 archives one.
+
+显式成员来源新增官方 Claude（officlaude）：官网订阅 OAuth、只读 auth status 探测、不自动等待额度；不进入默认或覆盖配置中的自动回退顺序。

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
 	EMPTY_HERMES_RUN_OPTIONS,
 	getUpstreamModelId,
+	getRunReportRunId,
 	hermesRunOptionsForRequest,
 	isHermesAgentModel,
 	isHermesAgentModelId,
@@ -132,7 +133,12 @@ describe('hermes run options', () => {
 		expect(normalizeHermesRunOptions({ dispatch: 'cchclaude' }).dispatch).toBe('cchclaude');
 		expect(
 			normalizeHermesRunOptions({ dispatch: 'cchclaude', continue_run: '20260928-031629-59f293d2' })
-		).toEqual({ dispatch: 'cchclaude', model: '', provider: '', continue_run: '20260928-031629-59f293d2' });
+		).toEqual({
+			dispatch: 'cchclaude',
+			model: '',
+			provider: '',
+			continue_run: '20260928-031629-59f293d2'
+		});
 		expect(normalizeHermesRunOptions({ dispatch: 'claude' }).dispatch).toBe('');
 	});
 
@@ -140,9 +146,36 @@ describe('hermes run options', () => {
 		expect(normalizeHermesRunOptions({ dispatch: 'anyclaude' }).dispatch).toBe('anyclaude');
 		expect(
 			normalizeHermesRunOptions({ dispatch: 'anyclaude', continue_run: '20260930-112556-677bec3c' })
-		).toEqual({ dispatch: 'anyclaude', model: '', provider: '', continue_run: '20260930-112556-677bec3c' });
-		expect(hermesRunOptionsForRequest({ ...EMPTY_HERMES_RUN_OPTIONS, dispatch: 'anyclaude' })).toEqual({
+		).toEqual({
+			dispatch: 'anyclaude',
+			model: '',
+			provider: '',
+			continue_run: '20260930-112556-677bec3c'
+		});
+		expect(
+			hermesRunOptionsForRequest({ ...EMPTY_HERMES_RUN_OPTIONS, dispatch: 'anyclaude' })
+		).toEqual({
 			dispatch: 'anyclaude'
+		});
+	});
+
+	it('knows officlaude as a runner of its own', () => {
+		expect(normalizeHermesRunOptions({ dispatch: 'officlaude' }).dispatch).toBe('officlaude');
+		expect(
+			normalizeHermesRunOptions({
+				dispatch: 'officlaude',
+				continue_run: '20260930-112556-677bec3c'
+			})
+		).toEqual({
+			dispatch: 'officlaude',
+			model: '',
+			provider: '',
+			continue_run: '20260930-112556-677bec3c'
+		});
+		expect(
+			hermesRunOptionsForRequest({ ...EMPTY_HERMES_RUN_OPTIONS, dispatch: 'officlaude' })
+		).toEqual({
+			dispatch: 'officlaude'
 		});
 	});
 
@@ -179,14 +212,20 @@ describe('hermes run options', () => {
 	});
 
 	it('a command typed into the message wins over 精答 / 讨论 / 协作台: it goes to Hermes', () => {
-		const run = { runner: 'reclaude' as const, runId: '20260927-005655-f2dd355f', status: 'success' };
+		const run = {
+			runner: 'reclaude' as const,
+			runId: '20260927-005655-f2dd355f',
+			status: 'success'
+		};
 		for (const dispatch of ['answer', 'discuss', 'team'] as const) {
 			const options = { ...EMPTY_HERMES_RUN_OPTIONS, dispatch };
 			expect(hermesOptionsForMessage(options, null, '租房押金多久退').dispatch).toBe(dispatch);
 			expect(hermesOptionsForMessage(options, run, '租房押金多久退').dispatch).toBe(dispatch);
 			expect(hermesOptionsForMessage(options, null, '/reclaude 修登录').dispatch).toBe('');
 			// a path is not a command
-			expect(hermesOptionsForMessage(options, null, '/root/app/x.txt 是什么').dispatch).toBe(dispatch);
+			expect(hermesOptionsForMessage(options, null, '/root/app/x.txt 是什么').dispatch).toBe(
+				dispatch
+			);
 		}
 	});
 
@@ -197,7 +236,9 @@ describe('hermes run options', () => {
 			title: expect.stringContaining('答完发回这个对话'),
 			fallback: false
 		});
-		expect(describeHermesReply(null, { dispatch: 'discuss', model: 'gpt-chat' })?.label).toBe('讨论');
+		expect(describeHermesReply(null, { dispatch: 'discuss', model: 'gpt-chat' })?.label).toBe(
+			'讨论'
+		);
 		const team = describeHermesReply(null, { dispatch: 'team', model: 'gpt-chat' });
 		expect(team?.label).toBe('协作台');
 		expect(team?.title).not.toContain('runner');
@@ -205,15 +246,17 @@ describe('hermes run options', () => {
 
 	it('sends nothing when every choice is the default', () => {
 		expect(hermesRunOptionsForRequest(EMPTY_HERMES_RUN_OPTIONS)).toBeNull();
-		expect(
-			hermesRunOptionsForRequest({ ...EMPTY_HERMES_RUN_OPTIONS, dispatch: 'codex' })
-		).toEqual({ dispatch: 'codex' });
+		expect(hermesRunOptionsForRequest({ ...EMPTY_HERMES_RUN_OPTIONS, dispatch: 'codex' })).toEqual({
+			dispatch: 'codex'
+		});
 	});
 });
 
 describe('per-message hermes options', () => {
 	it('keeps the model for the chat but never a dispatch', () => {
-		expect(hermesOptionsToKeep({ dispatch: 'reclaude', model: 'claude-chat', provider: 'p' })).toEqual({
+		expect(
+			hermesOptionsToKeep({ dispatch: 'reclaude', model: 'claude-chat', provider: 'p' })
+		).toEqual({
 			dispatch: '',
 			model: 'claude-chat',
 			provider: 'p'
@@ -259,6 +302,12 @@ describe('describeHermesReply', () => {
 	it('labels an anyclaude reply with its own name', () => {
 		expect(describeHermesReply({ dispatch: 'anyclaude', progress_check: true }, null)?.label).toBe(
 			'anyclaude · 进度'
+		);
+	});
+
+	it('labels an officlaude reply with its own name', () => {
+		expect(describeHermesReply({ dispatch: 'officlaude', progress_check: true }, null)?.label).toBe(
+			'官方 Claude · 进度'
 		);
 	});
 
@@ -309,15 +358,22 @@ describe('runner completion notices', () => {
 		});
 		expect(describeHermesRunNotice(notice!)).toBe('✅ reclaude 已完成');
 		expect(
-			describeHermesRunNotice(parseHermesRunNotice({ role: 'user', content: content.replace('success', 'question') })!)
+			describeHermesRunNotice(
+				parseHermesRunNotice({ role: 'user', content: content.replace('success', 'question') })!
+			)
 		).toBe('❓ reclaude 等你决定');
 		expect(
-			describeHermesRunNotice(parseHermesRunNotice({ role: 'user', content: content.replace('success', 'stopped') })!)
+			describeHermesRunNotice(
+				parseHermesRunNotice({ role: 'user', content: content.replace('success', 'stopped') })!
+			)
 		).toBe('⏹️ reclaude 已停止');
 	});
 
 	it('takes the runner report headline over the status word', () => {
-		const notice = parseHermesRunNotice({ role: 'user', content: content.replace('success', 'error') })!;
+		const notice = parseHermesRunNotice({
+			role: 'user',
+			content: content.replace('success', 'error')
+		})!;
 		expect(describeHermesRunNotice(notice)).toBe('❌ reclaude 没有正常完成（error）');
 		expect(
 			describeHermesRunNotice(
@@ -327,17 +383,25 @@ describe('runner completion notices', () => {
 		).toBe('⏳ reclaude 额度用完，暂停中，约 04:31 自动接着跑');
 		// Another run's report, or no runner headline at all: the status word.
 		expect(
-			describeHermesRunNotice(notice, '⏳ reclaude 运行 20260926-000000-00000000 · 额度用完，暂停中')
+			describeHermesRunNotice(
+				notice,
+				'⏳ reclaude 运行 20260926-000000-00000000 · 额度用完，暂停中'
+			)
 		).toBe('❌ reclaude 没有正常完成（error）');
-		expect(describeHermesRunNotice(notice, '<div>card</div>')).toBe('❌ reclaude 没有正常完成（error）');
+		expect(describeHermesRunNotice(notice, '<div>card</div>')).toBe(
+			'❌ reclaude 没有正常完成（error）'
+		);
 	});
 
-	it('leaves the person\'s own messages alone', () => {
+	it("leaves the person's own messages alone", () => {
 		expect(parseHermesRunNotice({ role: 'user', content: '后台任务完成通知是什么？' })).toBeNull();
 		expect(parseHermesRunNotice({ role: 'assistant', content })).toBeNull();
 		expect(
-			parseHermesRunNotice({ role: 'user', content: 'x', hermes_notice: { source: 'codex-runner' } })
-				?.agent
+			parseHermesRunNotice({
+				role: 'user',
+				content: 'x',
+				hermes_notice: { source: 'codex-runner' }
+			})?.agent
 		).toBe('codex-runner');
 	});
 
@@ -354,10 +418,30 @@ describe('runner completion notices', () => {
 			describeReportFigures('claude-opus-5-5[1m] · Claude 会话 c6fe25fb · $4.18 · 52 轮 · 20m47s')
 		).toBe('claude-opus-5-5 · $4.18 · 52 轮 · 用时 20 分 47 秒');
 		expect(
-			describeReportFigures('claude-opus-5-5 · Claude 会话 b0f4 · 自动续跑 1 次 · 共 $48.92 · 388 轮 · 2h00m00s')
+			describeReportFigures(
+				'claude-opus-5-5 · Claude 会话 b0f4 · 自动续跑 1 次 · 共 $48.92 · 388 轮 · 2h00m00s'
+			)
 		).toBe('claude-opus-5-5 · 自动续跑 1 次 · 共 $48.92 · 388 轮 · 用时 2 小时');
 		expect(describeReportFigures('AGY conversation e8721069 · 1 轮')).toBe('1 轮');
 		expect(describeReportFigures('codex thread t · 1h2m')).toBe('用时 1 小时 2 分');
+	});
+
+	it('parses the official report display name while keeping the runner id', () => {
+		const runId = '20261008-101500-0badcafe';
+		const headline = `✅ 官方 Claude 运行 ${runId} · 已完成`;
+		const report = `${headline}\nClaude 会话 s · 3 轮\n\n正文`;
+		expect(getRunReportRunId(report)).toBe(runId);
+		expect(splitRunReport(report, runId)).toEqual({
+			headline,
+			details: 'Claude 会话 s · 3 轮',
+			body: '正文'
+		});
+		const notice = parseHermesRunNotice({
+			role: 'user',
+			content: `[后台任务完成通知] officlaude 运行 ${runId} 已结束，状态：success，Claude 会话：s。`
+		})!;
+		expect(describeHermesRunNotice(notice, report)).toBe('✅ 官方 Claude 已完成');
+		expect(describeHermesRunNotice(notice)).toBe('✅ 官方 Claude 已完成');
 	});
 
 	it('splits the runner header off its report for the page', () => {
@@ -385,8 +469,19 @@ describe('接着上次: a follow-up goes back to the run whose report ends the c
 	const chat = (extra: Record<string, any> = {}, status = 'success') => ({
 		currentId: 'report',
 		messages: {
-			ask: { id: 'ask', role: 'user', content: '如何破局呢', hermesOptions: { dispatch: 'reclaude' } },
-			launch: { id: 'launch', parentId: 'ask', role: 'assistant', done: true, content: 'reclaude 已启动' },
+			ask: {
+				id: 'ask',
+				role: 'user',
+				content: '如何破局呢',
+				hermesOptions: { dispatch: 'reclaude' }
+			},
+			launch: {
+				id: 'launch',
+				parentId: 'ask',
+				role: 'assistant',
+				done: true,
+				content: 'reclaude 已启动'
+			},
 			notice: {
 				id: 'notice',
 				parentId: 'launch',
@@ -400,7 +495,11 @@ describe('接着上次: a follow-up goes back to the run whose report ends the c
 	});
 
 	it('finds the run from the report at the end of the chat', () => {
-		expect(findHermesContinuation(chat())).toEqual({ runner: 'reclaude', runId, status: 'success' });
+		expect(findHermesContinuation(chat())).toEqual({
+			runner: 'reclaude',
+			runId,
+			status: 'success'
+		});
 		expect(findHermesContinuation(chat({}, 'question'))?.status).toBe('question');
 		// A run stopped from the banner: the next message takes it up with new instructions.
 		expect(findHermesContinuation(chat({}, 'stopped'))?.status).toBe('stopped');
@@ -413,7 +512,11 @@ describe('接着上次: a follow-up goes back to the run whose report ends the c
 		const stored = chat();
 		stored.messages.notice.content = '通知';
 		stored.messages.notice.hermes_notice = { source: 'codex-runner', run_id: `${runId}-a1` };
-		expect(findHermesContinuation(stored)).toEqual({ runner: 'codex', runId: `${runId}-a1`, status: '' });
+		expect(findHermesContinuation(stored)).toEqual({
+			runner: 'codex',
+			runId: `${runId}-a1`,
+			status: ''
+		});
 	});
 
 	it('a team conclusion posted into the chat is not a run to go back to', () => {
@@ -472,7 +575,9 @@ describe('接着上次: a follow-up goes back to the run whose report ends the c
 		});
 		// another team's page, or no link at the end: as written
 		expect(splitTeamReport(now, 'other')).toBeNull();
-		expect(splitTeamReport('正文\n\n[结果页](/teams/abc-123/conclusion)\n\n还有一段', 'abc-123')).toBeNull();
+		expect(
+			splitTeamReport('正文\n\n[结果页](/teams/abc-123/conclusion)\n\n还有一段', 'abc-123')
+		).toBeNull();
 		expect(splitTeamReport('', 'abc-123')).toBeNull();
 	});
 
@@ -480,7 +585,11 @@ describe('接着上次: a follow-up goes back to the run whose report ends the c
 		const stored = chat();
 		stored.messages.notice.content = `[后台任务完成通知] cchclaude 运行 ${runId} 已结束，状态：question，Claude 会话：s-1。`;
 		stored.messages.notice.hermes_notice = { source: 'cchclaude-runner', run_id: runId };
-		expect(findHermesContinuation(stored)).toEqual({ runner: 'cchclaude', runId, status: 'question' });
+		expect(findHermesContinuation(stored)).toEqual({
+			runner: 'cchclaude',
+			runId,
+			status: 'question'
+		});
 	});
 
 	it('goes back to an anyclaude run like any other', () => {
@@ -488,6 +597,17 @@ describe('接着上次: a follow-up goes back to the run whose report ends the c
 		stored.messages.notice.content = `[后台任务完成通知] anyclaude 运行 ${runId} 已结束，状态：error，Claude 会话：s-1。`;
 		stored.messages.notice.hermes_notice = { source: 'anyclaude-runner', run_id: runId };
 		expect(findHermesContinuation(stored)).toEqual({ runner: 'anyclaude', runId, status: 'error' });
+	});
+
+	it('goes back to an officlaude run like any other', () => {
+		const stored = chat();
+		stored.messages.notice.content = `[后台任务完成通知] officlaude 运行 ${runId} 已结束，状态：error，Claude 会话：s-1。`;
+		stored.messages.notice.hermes_notice = { source: 'officlaude-runner', run_id: runId };
+		expect(findHermesContinuation(stored)).toEqual({
+			runner: 'officlaude',
+			runId,
+			status: 'error'
+		});
 	});
 
 	it('finds nothing once anything else ends the chat', () => {
@@ -520,14 +640,18 @@ describe('接着上次: a follow-up goes back to the run whose report ends the c
 			continue_run: runId
 		});
 		// "直接" picked on purpose: hermes answers.
-		expect(hermesOptionsForMessage({ ...panel, dispatch: 'hermes' }, continuation, 'x')).toEqual(panel);
+		expect(hermesOptionsForMessage({ ...panel, dispatch: 'hermes' }, continuation, 'x')).toEqual(
+			panel
+		);
 		// A runner picked: a new task, as before.
 		expect(hermesOptionsForMessage({ ...panel, dispatch: 'codex' }, continuation, 'x')).toEqual({
 			...panel,
 			dispatch: 'codex'
 		});
 		// A typed command wins; no report at the end: hermes, as before.
-		expect(hermesOptionsForMessage(panel, continuation, '/codex 新任务').continue_run).toBeUndefined();
+		expect(
+			hermesOptionsForMessage(panel, continuation, '/codex 新任务').continue_run
+		).toBeUndefined();
 		expect(hermesOptionsForMessage(panel, null, 'x')).toEqual(panel);
 	});
 
@@ -547,7 +671,9 @@ describe('接着上次: a follow-up goes back to the run whose report ends the c
 			model: '',
 			provider: ''
 		});
-		expect(normalizeHermesRunOptions({ dispatch: '', continue_run: runId }).continue_run).toBeUndefined();
+		expect(
+			normalizeHermesRunOptions({ dispatch: '', continue_run: runId }).continue_run
+		).toBeUndefined();
 		// Taken back into the input: the panel goes back to following the chat.
 		expect(hermesDispatchToRestore(sent)).toBe('');
 		expect(hermesDispatchToRestore({ dispatch: 'agy' })).toBe('agy');
@@ -555,7 +681,13 @@ describe('接着上次: a follow-up goes back to the run whose report ends the c
 
 	it('labels the reply with the run it went back to', () => {
 		const continued = describeHermesReply(
-			{ active: false, dispatch: 'reclaude', fast_dispatch: true, runner_run_id: `${runId}-a1`, continued_from: runId },
+			{
+				active: false,
+				dispatch: 'reclaude',
+				fast_dispatch: true,
+				runner_run_id: `${runId}-a1`,
+				continued_from: runId
+			},
 			{ dispatch: 'reclaude', model: '', provider: '', continue_run: runId }
 		);
 		expect(continued?.label).toBe('reclaude · 接着上次');

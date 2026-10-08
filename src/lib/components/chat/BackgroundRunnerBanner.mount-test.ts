@@ -7,7 +7,12 @@ import { installDominoDom } from '$lib/test-support/domino-dom';
 installDominoDom('http://localhost/');
 
 const api = vi.hoisted(() => ({ stopHermesBackgroundRunner: vi.fn() }));
-const toast = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn() }));
+const toast = vi.hoisted(() => ({
+	success: vi.fn(),
+	error: vi.fn(),
+	info: vi.fn(),
+	warning: vi.fn()
+}));
 vi.mock('$lib/apis/hermes', () => api);
 vi.mock('svelte-sonner', () => ({ toast }));
 
@@ -53,6 +58,26 @@ afterEach(() => {
 });
 
 describe('BackgroundRunnerBanner', () => {
+	it('labels the official runner and stops its run with the same id', async () => {
+		const stores = await mount();
+		stores.hermesBackgroundRuns.set([{ ...RUN, agent: 'officlaude' }]);
+		await sleep(10);
+		expect(
+			target
+				.querySelector('[data-halo-background-runner]')
+				.getAttribute('data-halo-background-runner')
+		).toBe('officlaude');
+		expect(target.textContent).toContain('官方 Claude');
+		expect(button().getAttribute('aria-label')).toBe('停止 官方 Claude');
+		api.stopHermesBackgroundRunner.mockResolvedValue({ stopped: true, report_shown: true });
+		button().click();
+		await sleep(10);
+		button().click();
+		await sleep(20);
+		expect(api.stopHermesBackgroundRunner).toHaveBeenCalledWith('tok', RUN.run_id);
+		expect(toast.success.mock.calls[0][0]).toContain('已停止 官方 Claude');
+	});
+
 	it('stops the runner on the second press and drops the banner', async () => {
 		const stores = await mount();
 		api.stopHermesBackgroundRunner.mockResolvedValue({ stopped: true, report_shown: true });
@@ -74,7 +99,11 @@ describe('BackgroundRunnerBanner', () => {
 
 	it('does not promise a follow-up for a run stopped before it had a session', async () => {
 		await mount();
-		api.stopHermesBackgroundRunner.mockResolvedValue({ stopped: true, report_shown: true, resumable: false });
+		api.stopHermesBackgroundRunner.mockResolvedValue({
+			stopped: true,
+			report_shown: true,
+			resumable: false
+		});
 		button().click();
 		await sleep(10);
 		button().click();

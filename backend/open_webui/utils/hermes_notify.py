@@ -550,7 +550,7 @@ async def show_notification_report(
 
 # A runner report's first line ("✅ agy 运行 <id> · 已完成") and, when present, its details
 # line ("AGY conversation e87… · 1 轮" / "claude-opus · Claude 会话 … · $1.12 · 26 轮 · 4m08s").
-_REPORT_HEADLINE_RE = re.compile(r"^\S+\s+\S+\s+运行\s+\S+\s+·\s+\S")
+_REPORT_HEADLINE_RE = re.compile(r"^\S+\s+(?:官方\s+Claude|\S+)\s+运行\s+\S+\s+·\s+\S")
 _REPORT_BODY_START_RE = re.compile(r"^(#|[-*>]|```|<)")
 
 

@@ -357,6 +357,9 @@ def test_split_report_header_keeps_the_runner_lines_out_of_the_card():
         "## 做到哪了",
     )
     assert hermes_notify.split_report_header("✅ 报告") == ("", "✅ 报告")
+    official = "✅ 官方 Claude 运行 official-run · 已完成\nClaude 会话 s · 3 轮\n\n正文"
+    assert hermes_notify.split_report_header(official) == (
+        "✅ 官方 Claude 运行 official-run · 已完成\nClaude 会话 s · 3 轮", "正文")
 
 
 def test_the_design_pass_gets_the_report_body_and_keeps_the_header_outside(monkeypatch):

@@ -75,3 +75,5 @@ passed`, and `hermes plugins show halowebui-run-guard` should say
 until the restart.
 
 To turn it off, remove the line and restart the gateway.
+
+官方 Claude（officlaude-run.sh）的 run/answer 启动同样防止单回合重复派发。

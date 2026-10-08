@@ -13,7 +13,7 @@
 
 	const i18n: any = getContext('i18n');
 
-	// How the next hermes run starts. "派发方式" puts /reclaude, /cchclaude, /anyclaude, /codex or /agy
+	// How the next hermes run starts. "派发方式" puts /reclaude, /cchclaude, /anyclaude, /officlaude, /codex or /agy
 	// in front of the next message only (left on, every later "进度怎么样？"
 	// started another run), or hands it to 精答 / 讨论台 / 协作台 instead of a run (the result
 	// comes back into the chat); right after a runner's report the next message
@@ -55,6 +55,12 @@
 			label: 'anyclaude',
 			sub: 'Claude · 免费较慢',
 			hint: '交给 Claude Code（anyrouter 免费服务，较慢，失败会自动重试）在后台独占执行'
+		},
+		{
+			value: 'officlaude',
+			label: '官方 Claude',
+			sub: 'Claude · 官网订阅',
+			hint: '交给官方 Claude（claude.ai 订阅 OAuth 账号）在后台独占执行；需本人登录，额度用尽后手动续跑'
 		},
 		{ value: 'codex', label: 'codex', sub: 'OpenAI Codex', hint: '交给 Codex 在后台独占执行' },
 		{ value: 'agy', label: 'agy', sub: 'Gemini · 快', hint: '交给 AGY 在后台独占执行' }
@@ -113,10 +119,7 @@
 		// On a phone the dispatch choices need the width: at 288px "reclaude" broke
 		// mid-word into "reclaud / e". The choices sit three to a row.
 		const width = viewWidth < 640 ? viewWidth - GAP * 2 : PANEL_WIDTH;
-		const left = Math.max(
-			viewLeft + GAP,
-			Math.min(rect.left, viewLeft + viewWidth - width - GAP)
-		);
+		const left = Math.max(viewLeft + GAP, Math.min(rect.left, viewLeft + viewWidth - width - GAP));
 		// Above the button unless it only fits below (a new chat's composer mid-screen), and never
 		// taller than the room on that side: on a phone the panel always opened upward and its top,
 		// the 派发给谁 choices, went past the top of the screen. What does not fit scrolls.
@@ -137,12 +140,14 @@
 	let loadingModels = false;
 
 	$: current = normalizeHermesRunOptions(options);
+	$: continuationLabel =
+		DISPATCHES.find((item) => item.value === continuation?.runner)?.label ?? continuation?.runner;
 	$: continuing = Boolean(continuation) && current.dispatch === '';
 	$: direct = current.dispatch === 'hermes' || (!continuation && current.dispatch === '');
 	// On the button: what differs from the default ("直接" only when it
 	// overrides going back to the run).
 	$: dispatchLabel = continuing
-		? `接着 ${continuation?.runner}`
+		? `接着 ${continuationLabel}`
 		: direct
 			? current.dispatch === 'hermes' && continuation
 				? '直接'
@@ -150,7 +155,7 @@
 			: (DISPATCHES.find((item) => item.value === current.dispatch)?.label ?? '');
 	$: summary = [dispatchLabel, current.model ? current.model : ''].filter(Boolean).join(' · ');
 	$: dispatchHint = continuing
-		? `${continuation?.status === 'question' ? `${continuation?.runner} 在等你决定：回答` : '消息'}交回 ${continuation?.runner} 运行 ${continuation?.runId} 的原会话继续，它记得之前读过、做过的。只对下一条消息生效；选「直接」改由 Hermes 回答`
+		? `${continuation?.status === 'question' ? `${continuationLabel} 在等你决定：回答` : '消息'}交回 ${continuationLabel} 运行 ${continuation?.runId} 的原会话继续，它记得之前读过、做过的。只对下一条消息生效；选「直接」改由 Hermes 回答`
 		: direct
 			? continuation
 				? 'Hermes 自己回答，不交回上次的任务'
@@ -296,14 +301,16 @@
 						type="button"
 						role="radio"
 						aria-checked={continuing}
-						title="交回 {continuation.runner} 运行 {continuation.runId} 的原会话"
+						title="交回 {continuationLabel} 运行 {continuation.runId} 的原会话"
 						data-halo-hermes-dispatch="continue"
 						class="halo-dispatch__choice col-span-3 {continuing ? 'is-on' : ''}"
 						on:click={() => update({ dispatch: '' })}
 					>
-						<span class="halo-dispatch__name">接着上次 · {continuation.runner}</span>
+						<span class="halo-dispatch__name">接着上次 · {continuationLabel}</span>
 						<span class="halo-dispatch__sub"
-							>{continuation.status === 'question' ? '它在等你决定，回到同一个会话' : '回到同一个会话，之前读过、做过的都在'}</span
+							>{continuation.status === 'question'
+								? '它在等你决定，回到同一个会话'
+								: '回到同一个会话，之前读过、做过的都在'}</span
 						>
 					</button>
 				{/if}
@@ -341,7 +348,10 @@
 					</button>
 				{/each}
 			</div>
-			<div class="mt-2 text-2xs leading-relaxed text-gray-500 dark:text-gray-400" data-halo-hermes-dispatch-hint>
+			<div
+				class="mt-2 text-2xs leading-relaxed text-gray-500 dark:text-gray-400"
+				data-halo-hermes-dispatch-hint
+			>
 				{dispatchHint}
 			</div>
 
@@ -374,10 +384,11 @@
 			</label>
 			<div class="mt-1 text-2xs text-gray-400 dark:text-gray-500" data-halo-hermes-model-note>
 				{#if isModeDispatch(current.dispatch)}
-					这条消息交给{DISPATCHES.find((item) => item.value === current.dispatch)?.label}，不经过 Hermes
-					的模型；之后的消息照常用它
+					这条消息交给{DISPATCHES.find((item) => item.value === current.dispatch)?.label}，不经过
+					Hermes 的模型；之后的消息照常用它
 				{:else}
-					只管 Hermes 自己这一轮；派发给 reclaude/cchclaude/anyclaude/codex/agy 时它们用自己的模型
+					只管 Hermes 自己这一轮；派发给 reclaude/cchclaude/anyclaude/officlaude/codex/agy
+					时它们用自己的模型
 				{/if}
 			</div>
 			{#if loadingModels}

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """runner-progress.py — report a detached runner's progress to the HaloWebUI chat that launched it.
 
-A runner started from HaloWebUI with `--detach` (reclaude, codex, agy) works for many
+A runner started from HaloWebUI with `--detach` (reclaude, cchclaude, anyclaude, officlaude, codex, agy) works for many
 minutes after the hermes turn that launched it has ended; until its report arrives the
 chat knows nothing, and asking hermes "查看进度" cost a two-minute model turn. This
 reporter is started next to the runner by runner-detach.py (HaloWebUI launches only). It

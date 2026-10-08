@@ -129,23 +129,24 @@ def test_cchclaude_dispatch_goes_to_its_own_runner():
     )
 
 
-def test_anyclaude_dispatch_goes_to_its_own_runner():
+@pytest.mark.parametrize("runner", ["anyclaude", "officlaude"])
+def test_named_claude_dispatch_goes_to_its_own_runner(runner):
     payload = hermes_agent._build_run_payload(
         {
             "messages": [{"role": "user", "content": "修复登录页"}],
-            "hermes_options": {"dispatch": "anyclaude"},
+            "hermes_options": {"dispatch": runner},
         },
         {"chat_id": "chat-1"},
         "hermes-agent",
     )
-    assert payload["input"] == "/anyclaude 修复登录页"
-    assert payload["dispatch"] == {"runner": "anyclaude"}
+    assert payload["input"] == f"/{runner} 修复登录页"
+    assert payload["dispatch"] == {"runner": runner}
     typed = hermes_agent._build_run_payload(
-        {"messages": [{"role": "user", "content": "/anyclaude 进度"}]}, {"chat_id": "c"}, "hermes-agent"
+        {"messages": [{"role": "user", "content": f"/{runner} 进度"}]}, {"chat_id": "c"}, "hermes-agent"
     )
-    assert typed["dispatch"] == {"runner": "anyclaude"}
+    assert typed["dispatch"] == {"runner": runner}
     assert hermes_agent._RUNNER_LAUNCH_RE.search(
-        "/root/.hermes/scripts/anyclaude-run.sh answer 20260930-112556-677bec3c --detach --task-file /tmp/t.md"
+        f"/root/.hermes/scripts/{runner}-run.sh answer 20260930-112556-677bec3c --detach --task-file /tmp/t.md"
     )
 
 

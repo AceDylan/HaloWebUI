@@ -174,7 +174,7 @@ def test_edit_plan_executors_only_before_approval(hermes):
     assert resp.status_code == 200
     plan = resp.json()["plan"]
     assert [m["executor"] for m in plan["members"]] == ["hermes", "reclaude"] and plan["executors"] == ["hermes", "reclaude"]
-    for runner in ("cchclaude", "anyclaude", "codex", "agy"):
+    for runner in ("cchclaude", "anyclaude", "officlaude", "codex", "agy"):
         resp = client.put(f"/api/v1/teams/{team_id}/plan", json={"members": [{"name": "reviewer", "executor": runner}]})
         assert resp.status_code == 200 and resp.json()["plan"]["executors"] == sorted(["hermes", runner])
     bad = client.put(f"/api/v1/teams/{team_id}/plan", json={"members": [{"name": "reviewer", "executor": "gpt"}]})

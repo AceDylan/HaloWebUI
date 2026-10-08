@@ -28,7 +28,7 @@ META_KEY = "halowebui_team"
 TEAM_EVENT_TASK = "_team"
 # The external runners in ~/.hermes/scripts that a member can be run by (same run-directory
 # protocol: meta.json / progress.log / result.*, QUESTION: + answer in the same session).
-RUNNER_EXECUTORS = ("reclaude", "cchclaude", "anyclaude", "codex", "agy")
+RUNNER_EXECUTORS = ("reclaude", "cchclaude", "anyclaude", "officlaude", "codex", "agy")
 EXECUTORS = ("hermes", *RUNNER_EXECUTORS)
 # Kanban assignee per executor. "default" is the Hermes profile the gateway's dispatcher
 # spawns; a runner name is not a profile, so the dispatcher leaves it to an external claimer

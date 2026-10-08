@@ -1,6 +1,6 @@
 # 派发给谁：精答 · 讨论 · 协作台
 
-Hermes 对话里输入框旁的「Hermes」按钮打开「派发给谁」。上面两排是**谁来做**：直接（Hermes 自己）、reclaude、cchclaude、anyclaude、codex、agy；下面一排是**换一种方式问**：精答、讨论、协作台——这条消息不走 Hermes，交给对应的模式，结果发回这个对话。
+Hermes 对话里输入框旁的「Hermes」按钮打开「派发给谁」。上面几排是**谁来做**：直接（Hermes 自己）、reclaude、cchclaude、anyclaude、官方 Claude（officlaude）、codex、agy；下面一排是**换一种方式问**：精答、讨论、协作台——这条消息不走 Hermes，交给对应的模式，结果发回这个对话。
 
 都只对下一条消息生效，发出后回到「直接」；消息自己以 `/命令` 开头时以消息为准，交给 Hermes（对 runner 一直如此，现在对精答、讨论、协作台也一样）。选了这三种时，「Hermes 用的模型」那一行会写明这条消息不经过 Hermes 的模型。
 
@@ -58,3 +58,5 @@ Hermes 对话里输入框旁的「Hermes」按钮打开「派发给谁」。上�
 - 后端：`utils/hermes_agent.py` 的 `_mode_dispatch`（`team` → `agent_team_dispatch.run_team_dispatch`，`answer` / `discuss` → `utils/mode_dispatch.run_mode_dispatch`）；`routers/answers.py` 的 `open_for_chat`、`routers/discussions.py` 的 `open_for_chat` / `dispatch_setup`；两边的 `_after_done` 在有 `origin` 时调用 `mode_dispatch.report_back_later`。对话前文的切分和协作台共用 `agent_team_dispatch.split_conversation`。
 - 前端：`MessageInput/HermesRunOptions.svelte`（弹窗）、`utils/hermes.ts`（`isModeDispatch`、`describeModeNotice`、`/命令` 规则、回复头部）、`Messages/ModeDispatchCard.svelte`、`Messages/HermesRunNotice.svelte`、`Chat.svelte`（`mode_dispatch` 事件）。
 - 测试：`test_answer_desk.py`、`test_discussions_router.py`、`test_chat_kinds.py`、`test_hermes_agent_payload.py`、`hermes.test.ts`、`HermesRunOptions.mount-test.ts`、`ModeDispatchCard.mount-test.ts`。
+
+新增「官方 Claude」（officlaude）：仅用户点名或手动选择时，通过 /officlaude 使用 claude.ai 订阅 OAuth；默认路由和回退链不变。未登录或额度用尽不自动重试/等待，用户处理后用 answer 继续。快速派发同时发送 dispatch.runner=officlaude 和 /officlaude 开头的正文。

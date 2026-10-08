@@ -539,12 +539,16 @@ export const EXECUTOR_OPTIONS: { value: TeamExecutor; label: string }[] = [
 	{ value: 'reclaude', label: 'reclaude · Claude' },
 	{ value: 'cchclaude', label: 'cchclaude · Claude' },
 	{ value: 'anyclaude', label: 'anyclaude · 慢' },
+	{ value: 'officlaude', label: '官方 Claude' },
 	{ value: 'codex', label: 'codex' },
 	{ value: 'agy', label: 'agy' }
 ];
 
 export const EXECUTOR_LABEL: Record<string, string> = Object.fromEntries(
-	EXECUTOR_OPTIONS.map((o) => [o.value, o.value === 'hermes' ? o.label : o.value])
+	EXECUTOR_OPTIONS.map((o) => [
+		o.value,
+		o.value === 'hermes' || o.value === 'officlaude' ? o.label : o.value
+	])
 );
 
 /** A member run by an external runner: it cannot take notes mid-run and is stopped through the runner. */
@@ -749,11 +753,14 @@ export const formatStamp = (ts: number | null | undefined) => {
 
 /** A runner's display name ("Hermes" for the native agent, the command name otherwise). */
 export const runnerLabel = (name: string | null | undefined) =>
-	name === 'hermes' ? 'Hermes' : (name ?? '');
+	name === 'hermes' ? 'Hermes' : name === 'officlaude' ? '官方 Claude' : (name ?? '');
 
 // --- stage: what happens now and how long it may still take --------------------------------------
 
-export const STAGE_STEPS: { key: 'plan' | 'approve' | 'run' | 'conclude' | 'check'; label: string }[] = [
+export const STAGE_STEPS: {
+	key: 'plan' | 'approve' | 'run' | 'conclude' | 'check';
+	label: string;
+}[] = [
 	{ key: 'plan', label: '计划' },
 	{ key: 'approve', label: '批准' },
 	{ key: 'run', label: '执行' },
@@ -812,6 +819,7 @@ export const etaSentence = (
 	const left = etaLeft(eta, at, nowTs);
 	if (!left) return '';
 	if (left.high <= 0) return '比平时久一些，应该快好了';
-	if (left.overtime && left.low <= 0) return `比平时久一些，可能还要 ${formatEta(0, left.high).replace('约 ', '')}`;
+	if (left.overtime && left.low <= 0)
+		return `比平时久一些，可能还要 ${formatEta(0, left.high).replace('约 ', '')}`;
 	return `预计还要${formatEta(left.low, left.high)}`;
 };

@@ -1,9 +1,9 @@
 """External runners as team members: the executor bridge for tasks assigned to a runner
-(``reclaude``, ``cchclaude``, ``anyclaude``, ``codex``, ``agy``).
+(``reclaude``, ``cchclaude``, ``anyclaude``, ``officlaude``, ``codex``, ``agy``).
 
 The Kanban dispatcher leaves such tasks alone (a runner name is not a Hermes profile), so this
 bridge claims them like any external worker would and drives the existing runner script
-(``reclaude-run.sh``, ``cchclaude-run.sh``, ``anyclaude-run.sh``, ``codex-run.sh``,
+(``reclaude-run.sh``, ``cchclaude-run.sh``, ``anyclaude-run.sh``, ``officlaude-run.sh``, ``codex-run.sh``,
 ``agy-run.sh``) — no Hermes agent sits in between waiting for it. All of them share the run
 directory protocol (meta.json / progress.log / result.json + result.md, QUESTION: and
 ``answer`` in the same session); only reclaude-run.sh and its two siblings park a run for a

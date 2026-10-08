@@ -9,6 +9,13 @@ const opts = {
 };
 
 describe('prepareReport', () => {
+	it('keeps official Claude as the explicit member runner', () => {
+		expect(memberRunner({ executor: 'officlaude', runner: 'officlaude' })).toMatchObject({
+			chosen: 'officlaude',
+			actual: 'officlaude'
+		});
+	});
+
 	it('keeps ordinary Markdown and rewrites workspace links and images', () => {
 		const md =
 			'# 结论\n\n见 [报告](report.md) 和 ![首页](./shots/home.png "首页")，官网 [x](https://a.b/c)。';

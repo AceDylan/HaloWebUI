@@ -52,7 +52,7 @@ import time
 import urllib.error
 import urllib.request
 
-SCRIPT_VERSION = "2026-10-06.1"
+SCRIPT_VERSION = "2026-10-08.1"
 CONFIG_FILE = "/root/.hermes/reclaude-runner.env"
 REQUIRED_CONFIG_KEYS = ("HALOWEBUI_NOTIFY_URL", "HALOWEBUI_NOTIFY_TOKEN")
 STATE_DB = "/root/.hermes/state.db"
@@ -99,7 +99,7 @@ STATUS_LABELS = {
     "quota_blocked": ("⛔", "没有启动"),
     "timeout": ("⏱", "超时"),
 }
-SESSION_LABELS = {"reclaude": "Claude 会话", "cchclaude": "Claude 会话", "anyclaude": "Claude 会话",
+SESSION_LABELS = {"reclaude": "Claude 会话", "cchclaude": "Claude 会话", "anyclaude": "Claude 会话", "officlaude": "Claude 会话",
                   "codex": "codex thread", "agy": "AGY conversation"}
 
 
@@ -263,7 +263,7 @@ def find_origin(
     try:
         origins = set()
         banner = re.compile(
-            r"(?:^|\n)==== (?:codex|reclaude|cchclaude|anyclaude) run "
+            r"(?:^|\n)==== (?:codex|reclaude|cchclaude|anyclaude|officlaude) run "
             + re.escape(run_id)
             + r" (?:started|finished)(?::|\s)"
         )
@@ -698,7 +698,7 @@ def build_digest(run_id, status, run_dir, session_id, agent="reclaude", chat=Fal
         details.append(f"自动续跑 {figures['segments'] - 1} 次")
         amounts[0] = "共 " + amounts[0]
     details += amounts
-    lines = [f"{icon} {agent} 运行 {run_id} · {label}"]
+    lines = [f"{icon} {'官方 Claude' if agent == 'officlaude' else agent} 运行 {run_id} · {label}"]
     if details:
         lines.append(" · ".join(details))
 
@@ -960,7 +960,7 @@ def main():
     parser.add_argument(
         "--agent",
         default="reclaude",
-        help="agent label used in the notice text (reclaude, cchclaude, anyclaude, codex, agy)",
+        help="agent label used in the notice text (reclaude, cchclaude, anyclaude, officlaude, codex, agy)",
     )
     parser.add_argument(
         "--runner-name",

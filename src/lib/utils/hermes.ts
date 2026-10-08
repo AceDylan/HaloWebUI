@@ -123,7 +123,7 @@ export type HermesApprovalRequest = {
 
 /**
  * Per-chat choices for how a hermes run starts (the composer's "Hermes 选项"):
- * `dispatch` puts /reclaude, /cchclaude, /anyclaude, /codex or /agy in front of the message; `model`
+ * `dispatch` puts /reclaude, /cchclaude, /anyclaude, /officlaude, /codex or /agy in front of the message; `model`
  * (+ `provider`) overrides hermes' configured default for this chat. Empty
  * strings mean "hermes decides". The thinking level is HaloWebUI's (see
  * _inherited_reasoning_effort in the backend), not a hermes option.
@@ -140,6 +140,7 @@ export type HermesRunOptions = {
 		| 'reclaude'
 		| 'cchclaude'
 		| 'anyclaude'
+		| 'officlaude'
 		| 'codex'
 		| 'agy'
 		| 'answer'
@@ -158,8 +159,15 @@ export const EMPTY_HERMES_RUN_OPTIONS: HermesRunOptions = {
 };
 
 // cchclaude: the reclaude runner driving Claude Code through the user's own cch hub;
-// anyclaude: the same on anyrouter (free and slow).
-const HERMES_RUNNERS = new Set(['reclaude', 'cchclaude', 'anyclaude', 'codex', 'agy']);
+// anyclaude: the same on anyrouter (free and slow); officlaude: official claude.ai subscription OAuth.
+const HERMES_RUNNERS = new Set([
+	'reclaude',
+	'cchclaude',
+	'anyclaude',
+	'officlaude',
+	'codex',
+	'agy'
+]);
 // The message goes to another mode instead of a Hermes run: 'answer' a 精答 run, 'discuss' a
 // 讨论台 discussion (mode_dispatch in the backend), 'team' a 协作台 team (agent_team_dispatch).
 // The result comes back into the chat.
@@ -176,7 +184,8 @@ const SLASH_COMMAND_RE = /^\s*\/[A-Za-z][\w-]*(?:\s|$)/;
 
 export const normalizeHermesRunOptions = (value: unknown): HermesRunOptions => {
 	const record = value && typeof value === 'object' ? (value as Record<string, unknown>) : {};
-	const text = (key: string) => (typeof record[key] === 'string' ? (record[key] as string).trim() : '');
+	const text = (key: string) =>
+		typeof record[key] === 'string' ? (record[key] as string).trim() : '';
 	const dispatch = text('dispatch');
 	const model = text('model').slice(0, 200);
 	const continueRun = text('continue_run');
@@ -209,7 +218,7 @@ export const hermesRunOptionsForRequest = (
  * its report, and for a run that never started.
  */
 export type HermesContinuation = {
-	runner: 'reclaude' | 'cchclaude' | 'anyclaude' | 'codex' | 'agy';
+	runner: 'reclaude' | 'cchclaude' | 'anyclaude' | 'officlaude' | 'codex' | 'agy';
 	runId: string;
 	status: string;
 };
@@ -314,6 +323,7 @@ const DISPATCH_LABELS: Record<string, string> = {
 	reclaude: 'reclaude',
 	cchclaude: 'cchclaude',
 	anyclaude: 'anyclaude',
+	officlaude: '官方 Claude',
 	codex: 'codex',
 	agy: 'agy',
 	answer: '精答',
@@ -368,7 +378,11 @@ export const describeHermesReply = (
 		lines.push(`没能直接交回 ${dispatch} 运行 ${askedToContinue}，由 Hermes 处理`);
 	} else if (isModeDispatch(dispatch)) {
 		// The model picked for Hermes did not take part: no model in the label, no runner line.
-		return { label: DISPATCH_LABELS[dispatch], title: MODE_DISPATCH_LINES[dispatch], fallback: false };
+		return {
+			label: DISPATCH_LABELS[dispatch],
+			title: MODE_DISPATCH_LINES[dispatch],
+			fallback: false
+		};
 	} else if (dispatch) {
 		parts.push(DISPATCH_LABELS[dispatch] ?? dispatch);
 		lines.push(
@@ -418,11 +432,16 @@ export type HermesRunNotice = {
 const RUN_NOTICE_RE =
 	/^\s*\[后台任务完成通知\]\s*(\S+)\s+运行\s+(\S+)\s+已结束，状态：([^，。\s]+)(?:，([^：\n]+)：([^。\n]+))?/;
 
-export const parseHermesRunNotice = (message: {
-	role?: string;
-	content?: unknown;
-	hermes_notice?: unknown;
-} | null | undefined): HermesRunNotice | null => {
+export const parseHermesRunNotice = (
+	message:
+		| {
+				role?: string;
+				content?: unknown;
+				hermes_notice?: unknown;
+		  }
+		| null
+		| undefined
+): HermesRunNotice | null => {
 	if (!message || message.role !== 'user') return null;
 	const content = typeof message.content === 'string' ? message.content : '';
 	const match = content.match(RUN_NOTICE_RE);
@@ -506,7 +525,10 @@ export const splitTeamReport = (content: unknown, teamId: string): { body: strin
 	if (!teamId || !text) return null;
 	const lines = text.split('\n');
 	const last = lines[lines.length - 1] ?? '';
-	if (!/\]\(\/teams\/[^)\s]+\/conclusion[^)\s]*\)/.test(last) || !last.includes(`/teams/${teamId}/conclusion`)) {
+	if (
+		!/\]\(\/teams\/[^)\s]+\/conclusion[^)\s]*\)/.test(last) ||
+		!last.includes(`/teams/${teamId}/conclusion`)
+	) {
 		return null;
 	}
 	const rest = lines.slice(0, -1);
@@ -525,7 +547,7 @@ const NOTICE_STATUS: Record<string, { icon: string; label: string }> = {
 };
 
 // The runner's own first report line: "⏳ reclaude 运行 <id> · 额度用完，暂停中，约 04:31 自动接着跑（不用管）".
-const REPORT_HEADLINE_RE = /^\s*(\S+)\s+(\S+)\s+运行\s+(\S+)\s+·\s+(.+?)\s*$/;
+const REPORT_HEADLINE_RE = /^\s*(\S+)\s+(官方\s+Claude|\S+)\s+运行\s+(\S+)\s+·\s+(.+?)\s*$/;
 
 /** The run id in a runner report's first line ("✅ reclaude 运行 <id> · 已完成"), or null. */
 export const getRunReportRunId = (content: unknown): string | null =>
@@ -538,7 +560,9 @@ export const getRunReportRunId = (content: unknown): string | null =>
  * until the quota resets ends as "error" but resumes by itself).
  */
 export const describeHermesRunNotice = (notice: HermesRunNotice, report?: unknown): string => {
-	const headline = (typeof report === 'string' ? report : '').split('\n', 1)[0].match(REPORT_HEADLINE_RE);
+	const headline = (typeof report === 'string' ? report : '')
+		.split('\n', 1)[0]
+		.match(REPORT_HEADLINE_RE);
 	if (headline && headline[3] === notice.runId) {
 		// "（不用管）" and the like are asides for the full report, not the pill.
 		const label = headline[4].replace(/（[^（）]*）$/, '').trim();
@@ -548,7 +572,7 @@ export const describeHermesRunNotice = (notice: HermesRunNotice, report?: unknow
 		icon: notice.status ? '❌' : '📋',
 		label: notice.status ? `没有正常完成（${notice.status}）` : '已结束'
 	};
-	return `${status.icon} ${notice.agent} ${status.label}`;
+	return `${status.icon} ${notice.agent === 'officlaude' ? '官方 Claude' : notice.agent} ${status.label}`;
 };
 
 /**

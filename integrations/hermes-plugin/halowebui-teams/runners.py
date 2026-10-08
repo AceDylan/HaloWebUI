@@ -90,6 +90,8 @@ SPECS: tuple[RunnerSpec, ...] = (
     RunnerSpec("anyclaude", "anyclaude", "Claude Code", "Claude Code（anyrouter 免费服务）：慢，适合不急的代码任务",
                script="anyclaude-run.sh", command="anyclaude", probe="claude_settings",
                settings="/root/.claude/settings-any.json", max_turns=True, quota_wait=True),
+    RunnerSpec("officlaude", "官方 Claude", "Claude Code", "官网 claude.ai 订阅 OAuth 账号；仅点名使用，认证/额度失败后手动续跑",
+               script="officlaude-run.sh", command="officlaude", probe="claude_official", max_turns=True),
     RunnerSpec("codex", "codex", "Codex", "OpenAI Codex CLI：代码任务的另一条线，额度用完即失败",
                script="codex-run.sh", command="codex", probe="codex_login"),
     RunnerSpec("agy", "agy", "Antigravity", "Antigravity CLI：前端 / UI / UX / 视觉设计的首选；没有工具记录",
@@ -148,6 +150,7 @@ _FAIL_PATTERNS: tuple[tuple[str, re.Pattern], ...] = (
 )
 # reclaude-run.sh classifies its own failures (reclaude-guard.py classify).
 _RECLAUDE_FAIL_KIND = {
+    "auth_required": "auth", "official_limit": "quota",
     "quota_window": "quota", "quota_reset": "quota", "model_limit": "quota",
     "device_unbound": "auth", "account_unavailable": "auth", "session_rebound": "auth",
     "upstream_transient": "network", "upstream_failed": "network",
@@ -178,7 +181,7 @@ def overrides() -> dict:
 def fallback_order() -> tuple[str, ...]:
     order = overrides().get("order")
     if isinstance(order, list):
-        names = [n for n in order if n in BY_NAME]
+        names = [n for n in order if n in BY_NAME and n != "officlaude"]
         if names:
             # Hermes always ends the chain: it is the executor that never needs another account.
             return tuple(n for n in names if n != "hermes") + ("hermes",)
@@ -187,7 +190,7 @@ def fallback_order() -> tuple[str, ...]:
 
 def kind_default(kind: str) -> str:
     custom = overrides().get("kinds")
-    if isinstance(custom, dict) and custom.get(kind) in BY_NAME:
+    if isinstance(custom, dict) and custom.get(kind) in BY_NAME and custom.get(kind) != "officlaude":
         return custom[kind]
     return KINDS.get(kind, KINDS[DEFAULT_KIND])["default"]
 
@@ -205,6 +208,8 @@ def normalize_kind(kind: Any) -> str:
 
 def chain_from(start: str) -> list[str]:
     """``start`` and every runner after it in the fallback order (Hermes last)."""
+    if start == "officlaude":
+        return ["officlaude"]
     order = list(fallback_order())
     if start not in order:
         return ["hermes"] if start != "hermes" else ["hermes"]
@@ -292,6 +297,16 @@ def _probe_account(spec: RunnerSpec) -> tuple[str, str, Optional[str]]:
             "User-Agent": "halowebui-teams/runner-check"})
         host = re.sub(r"^https?://", "", base).split("/")[0]
         return state, f"{host}：{detail}", None
+    if spec.probe == "claude_official":
+        # The wrapper selects ~/.claude-official; auth status is a read-only local probe.
+        rc, out = _run([_which("officlaude") or "officlaude", "auth", "status", "--json"])
+        try:
+            auth = json.loads(out)
+        except (ValueError, TypeError):
+            return "account", "官方 Claude 登录状态无法确认；请在服务器终端运行 officlaude 并输入 /login", None
+        if rc == 0 and isinstance(auth, dict) and auth.get("loggedIn") and auth.get("authMethod") == "claude.ai":
+            return "ok", "官方 Claude 已登录（claude.ai 订阅 OAuth）；实际请求以 runner 结果为准", None
+        return "account", "官方 Claude 未登录或登录已失效：在服务器终端运行 officlaude，输入 /login 完成浏览器授权", None
     if spec.probe == "codex_login":
         rc, out = _run([_which("codex") or "codex", "login", "status"])
         if rc == 0:

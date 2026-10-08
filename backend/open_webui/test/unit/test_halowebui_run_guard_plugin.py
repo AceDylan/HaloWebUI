@@ -400,6 +400,7 @@ def test_nothing_is_guarded_without_a_turn_id():
         "/root/.hermes/scripts/agy-run.sh run --detach --cwd /root --task-file /tmp/t.md",
         "/root/.hermes/scripts/cchclaude-run.sh run --detach --cwd /root --task-file /tmp/t.md",
         "/root/.hermes/scripts/anyclaude-run.sh run --detach --cwd /root --task-file /tmp/t.md",
+        "/root/.hermes/scripts/officlaude-run.sh run --detach --cwd /root --task-file /tmp/t.md",
         "bash -lc '/root/.hermes/scripts/reclaude-run.sh answer 20260926-200514-5f8303dd --task more'",
     ],
 )

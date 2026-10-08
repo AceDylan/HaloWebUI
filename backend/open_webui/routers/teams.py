@@ -92,7 +92,7 @@ class MemberExecutor(BaseModel):
     name: str = Field(max_length=40)
     # Hermes members, or one of the runners the Hermes teams plugin can drive (see its runners.py).
     # None: the runner stays as it is (only the model changes).
-    executor: Optional[Literal["hermes", "reclaude", "cchclaude", "anyclaude", "codex", "agy"]] = None
+    executor: Optional[Literal["hermes", "reclaude", "cchclaude", "anyclaude", "officlaude", "codex", "agy"]] = None
     # "user": the user picked this runner (the automatic choice never overrides it; it still falls
     # back when the runner is down). "auto": back to the runner the member's task kind defaults to.
     source: Literal["user", "auto"] = "user"

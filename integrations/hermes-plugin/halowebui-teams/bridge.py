@@ -4,7 +4,7 @@ Every few seconds, for each team board that is running (not paused/stopped):
 * nudges the Kanban dispatcher for that board, so a task whose dependencies just finished
   starts within seconds instead of at the gateway's next 60 s tick (same settings, same
   per-board lock as the gateway's own tick);
-* drives tasks assigned to an external runner — reclaude, cchclaude, anyclaude, codex, agy (see
+* drives tasks assigned to an external runner — reclaude, cchclaude, anyclaude, officlaude, codex, agy (see
   ``reclaude.py``): claim, launch, follow, finish;
 * has the lead diagnose a task that failed or got blocked (see ``lead.py``);
 * sends the team's Telegram notices (a member asks, a task fails, the team finished; see

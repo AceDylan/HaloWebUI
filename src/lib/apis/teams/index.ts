@@ -4,7 +4,14 @@ import type { AssistantChoice } from '$lib/apis/assistant-library';
 /** 协作台 (agent teams) API — see backend/open_webui/routers/teams.py. */
 
 /** A Hermes agent, or one of the runners Hermes drives (each brings its own model and account). */
-export type TeamExecutor = 'hermes' | 'reclaude' | 'cchclaude' | 'anyclaude' | 'codex' | 'agy';
+export type TeamExecutor =
+	| 'hermes'
+	| 'reclaude'
+	| 'cchclaude'
+	| 'anyclaude'
+	| 'officlaude'
+	| 'codex'
+	| 'agy';
 
 /** What a member's work is, which decides the runner it starts on (see the plugin's runners.py). */
 export type TaskKind = 'code' | 'ui' | 'complex' | 'research' | 'writing' | 'image';
@@ -200,7 +207,10 @@ export type TeamStage = {
 	eta?: StageEta | null;
 	/** plan ready: about how long the plan takes once approved */
 	after_approval?: StageEta | null;
-	steps?: { key: 'plan' | 'approve' | 'run' | 'conclude' | 'check'; state: 'done' | 'active' | 'pending' }[];
+	steps?: {
+		key: 'plan' | 'approve' | 'run' | 'conclude' | 'check';
+		state: 'done' | 'active' | 'pending';
+	}[];
 	running?: StageRunningLine[];
 	done?: number;
 	total?: number;
@@ -699,11 +709,12 @@ export const createTeam = (
 	});
 
 export const getTeam = (token: string, teamId: string) =>
-	request<{ team: Team; live: LiveSnapshot | null; live_error: string | null; stage?: TeamStage | null }>(
-		token,
-		'GET',
-		`/${id(teamId)}`
-	);
+	request<{
+		team: Team;
+		live: LiveSnapshot | null;
+		live_error: string | null;
+		stage?: TeamStage | null;
+	}>(token, 'GET', `/${id(teamId)}`);
 
 /** ``project``: undefined keeps the plan's place; "" or "none" = a fresh directory; a path = that repository. */
 export const replanTeam = (token: string, teamId: string, feedback: string, project?: string) =>

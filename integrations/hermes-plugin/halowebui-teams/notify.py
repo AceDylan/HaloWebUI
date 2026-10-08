@@ -119,7 +119,7 @@ def duration(seconds: Any) -> str:
     return f"{minutes // 60} 小时 {minutes % 60} 分钟" if minutes % 60 else f"{minutes // 60} 小时"
 
 
-RUNNER_LABEL = {"hermes": "Hermes", "reclaude": "reclaude", "cchclaude": "cchclaude", "anyclaude": "anyclaude",
+RUNNER_LABEL = {"hermes": "Hermes", "reclaude": "reclaude", "cchclaude": "cchclaude", "anyclaude": "anyclaude", "officlaude": "官方 Claude",
                 "codex": "codex", "agy": "agy"}
 
 

@@ -437,3 +437,39 @@ def test_failure_line_is_the_readable_part(pkg):
             'AGY_ERROR: {"short_error":"FAILED_PRECONDITION"}')
     assert pkg.runners.failure_line(text) == "FAILED_PRECONDITION (code 400): User location is not supported for the API use."
     assert pkg.runners.failure_line('{"x": 1}\n\n') == ""
+
+
+def test_official_claude_is_explicit_only_even_with_order_overrides(pkg, availability, override):
+    r = pkg.runners
+    spec = r.BY_NAME["officlaude"]
+    assert spec.label == "官方 Claude" and spec.max_turns and not spec.quota_wait
+    assert r.chain_from("officlaude") == ["officlaude"]
+    assert r.select("officlaude")["executor"] == "officlaude"
+    availability.down["officlaude"] = "未登录"
+    assert r.select("officlaude")["executor"] is None
+    assert r.select_after("officlaude", "officlaude")["executor"] is None
+    for name in r.DEFAULT_ORDER:
+        assert "officlaude" not in r.chain_from(name)
+    override({"order": ["reclaude", "officlaude", "codex"], "kinds": {"code": "officlaude"}})
+    assert r.fallback_order() == ("reclaude", "codex", "hermes")
+    assert r.kind_default("code") == "cchclaude"
+    assert r.classify_failure("", "auth_required") == "auth"
+    assert r.classify_failure("", "official_limit") == "quota"
+
+
+@pytest.mark.parametrize("response,rc,expected", [
+    ({"loggedIn": True, "authMethod": "claude.ai"}, 0, "ok"),
+    ({"loggedIn": False, "authMethod": "none"}, 1, "account"),
+    ({"loggedIn": True, "authMethod": "api_key"}, 0, "account"),
+])
+def test_official_account_probe_is_read_only_oauth_status(pkg, monkeypatch, response, rc, expected):
+    calls = []
+    monkeypatch.setattr(pkg.runners, "_which", lambda name: "/stub/" + name)
+    def run(argv, **kwargs):
+        calls.append(argv)
+        return rc, json.dumps(response)
+    monkeypatch.setattr(pkg.runners, "_run", run)
+    state, detail, reset = pkg.runners._probe_account(pkg.runners.BY_NAME["officlaude"])
+    assert state == expected and reset is None
+    assert calls == [["/stub/officlaude", "auth", "status", "--json"]]
+    assert "官方 Claude" in detail

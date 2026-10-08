@@ -456,17 +456,18 @@ def test_a_cchclaude_run_is_stopped_through_its_own_runner(monkeypatch):
     assert shown[0]["source"] == "cchclaude-runner"
 
 
-def test_an_anyclaude_run_is_stopped_through_its_own_runner(monkeypatch):
+@pytest.mark.parametrize("runner", ["anyclaude", "officlaude"])
+def test_a_named_claude_run_is_stopped_through_its_own_runner(monkeypatch, runner):
     sessions, progress, rid, posts, shown = _stop_world(
         monkeypatch,
-        (200, {"stopped": True, "notice": "[后台任务完成通知] anyclaude 运行 x 已结束，状态：stopped，Claude 会话：s。",
+        (200, {"stopped": True, "notice": f"[后台任务完成通知] {runner} 运行 x 已结束，状态：stopped，Claude 会话：s。",
                "report": "⏹️ 已停止"}),
     )
-    progress._PROGRESS[rid]["agent"] = "anyclaude"
+    progress._PROGRESS[rid]["agent"] = runner
     result = asyncio.run(sessions.stop_background_runner(None, SimpleNamespace(id="u1"), rid))
     assert result["stopped"] is True
-    assert posts == [(f"http://hermes.test/v1/runners/anyclaude/{rid}/stop", {"session_id": "chat-1"})]
-    assert shown[0]["source"] == "anyclaude-runner"
+    assert posts == [(f"http://hermes.test/v1/runners/{runner}/{rid}/stop", {"session_id": "chat-1"})]
+    assert shown[0]["source"] == f"{runner}-runner"
 
 
 def test_only_the_owner_stops_a_runner(monkeypatch):

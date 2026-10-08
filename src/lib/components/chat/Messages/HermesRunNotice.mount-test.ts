@@ -14,11 +14,13 @@ afterEach(() => {
 });
 
 describe('HermesRunNotice', () => {
-	it('shows status and duration, with the ids behind 详情', async () => {
+	it.each([
+		['reclaude', 'reclaude'],
+		['officlaude', '官方 Claude']
+	])('shows %s status and duration, with the ids behind 详情', async (agent, label) => {
 		const { default: HermesRunNotice } = await import('./HermesRunNotice.svelte');
 		const { parseHermesRunNotice } = await import('$lib/utils/hermes');
-		const content =
-			'[后台任务完成通知] reclaude 运行 20260926-1 已结束，状态：success，Claude 会话：f111-2222。';
+		const content = `[后台任务完成通知] ${agent} 运行 20260926-1 已结束，状态：success，Claude 会话：f111-2222。`;
 		target = document.createElement('div');
 		document.body.appendChild(target);
 		app = new HermesRunNotice({
@@ -26,11 +28,11 @@ describe('HermesRunNotice', () => {
 			props: {
 				notice: parseHermesRunNotice({ role: 'user', content }),
 				content,
-				report: '✅ reclaude 运行 20260926-1 · 已完成\nClaude 会话 f111-2222 · 12 轮 · 1m55s\n\n正文'
+				report: `✅ ${label} 运行 20260926-1 · 已完成\nClaude 会话 f111-2222 · 12 轮 · 1m55s\n\n正文`
 			}
 		});
 		const button: any = target.querySelector('[data-halo-hermes-run-notice] button');
-		expect(button.textContent).toContain('✅ reclaude 已完成 · 1 分 55 秒');
+		expect(button.textContent).toContain(`✅ ${label} 已完成 · 1 分 55 秒`);
 		expect(target.textContent).not.toContain('f111-2222');
 		button.click();
 		await new Promise((resolve) => setTimeout(resolve, 0));
@@ -39,8 +41,8 @@ describe('HermesRunNotice', () => {
 		expect(details.textContent).toContain('Claude 会话');
 		expect(details.textContent).toContain('f111-2222');
 		// The report's own figures line moves here: the page hides the runner's header.
-		expect(
-			details.querySelector('[data-halo-hermes-run-notice-figures]')?.textContent
-		).toContain('12 轮 · 用时 1 分 55 秒');
+		expect(details.querySelector('[data-halo-hermes-run-notice-figures]')?.textContent).toContain(
+			'12 轮 · 用时 1 分 55 秒'
+		);
 	});
 });

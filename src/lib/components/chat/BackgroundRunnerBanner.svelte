@@ -28,6 +28,8 @@
 	let armTimer: ReturnType<typeof setTimeout> | null = null;
 	let stopping: string | null = null;
 
+	const runnerLabel = (agent: string) => (agent === 'officlaude' ? '官方 Claude' : agent);
+
 	const stop = async (run: { run_id: string; agent: string }) => {
 		if (stopping) return;
 		if (armed !== run.run_id) {
@@ -43,11 +45,11 @@
 			hermesBackgroundRuns.update((runs) => runs.filter((item) => item.run_id !== run.run_id));
 			toast.success(
 				result.report_shown && result.resumable !== false
-					? `已停止 ${run.agent}，直接回复就能让它按新说明接着做`
-					: `已停止 ${run.agent}`
+					? `已停止 ${runnerLabel(run.agent)}，直接回复就能让它按新说明接着做`
+					: `已停止 ${runnerLabel(run.agent)}`
 			);
 		} catch (error) {
-			toast.error(`没能停止 ${run.agent}：${error}`);
+			toast.error(`没能停止 ${runnerLabel(run.agent)}：${error}`);
 		} finally {
 			stopping = null;
 		}
@@ -83,10 +85,11 @@
 		<span class="halo-runner__ring" aria-hidden="true"><span></span></span>
 		<div class="min-w-0 flex-1">
 			<div class="flex min-w-0 items-baseline gap-1.5 tabular-nums">
-				<span class="halo-runner__name font-display shrink-0">{run.agent}</span>
+				<span class="halo-runner__name font-display shrink-0">{runnerLabel(run.agent)}</span>
 				<span class="truncate text-gray-500 dark:text-gray-400"
-					>{describeBackgroundRun(run, now).split(' · ').slice(1).join(' · ') ||
-						'刚开始'}<span class="max-sm:hidden">{' · '}后台进行中，做完报告发到这里</span></span
+					>{describeBackgroundRun(run, now).split(' · ').slice(1).join(' · ') || '刚开始'}<span
+						class="max-sm:hidden">{' · '}后台进行中，做完报告发到这里</span
+					></span
 				>
 			</div>
 			{#if quiet}
@@ -113,7 +116,9 @@
 			class:is-armed={armed === run.run_id}
 			disabled={stopping === run.run_id}
 			data-halo-background-runner-stop={run.run_id}
-			aria-label={armed === run.run_id ? `确认停止 ${run.agent}` : `停止 ${run.agent}`}
+			aria-label={armed === run.run_id
+				? `确认停止 ${runnerLabel(run.agent)}`
+				: `停止 ${runnerLabel(run.agent)}`}
 			on:click={() => stop(run)}
 		>
 			{stopping === run.run_id ? '停止中…' : armed === run.run_id ? '确认停止' : '停止'}

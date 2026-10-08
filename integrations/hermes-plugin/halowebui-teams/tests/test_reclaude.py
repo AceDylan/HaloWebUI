@@ -276,7 +276,7 @@ def _runner_team(pkg, s, members):
 
 
 def test_every_runner_is_a_valid_executor_and_not_spawned_by_the_dispatcher(pkg):
-    for name in ("reclaude", "cchclaude", "anyclaude", "codex", "agy"):
+    for name in ("reclaude", "cchclaude", "anyclaude", "officlaude", "codex", "agy"):
         plan, errors = pkg.plan.validate_plan({"members": [{"name": "mm", "role": "r", "executor": name}],
                                                "tasks": [{"key": "T1", "title": "x", "member": "mm"}]})
         assert not errors and plan["members"][0]["executor"] == name

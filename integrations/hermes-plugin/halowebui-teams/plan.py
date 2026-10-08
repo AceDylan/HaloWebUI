@@ -48,6 +48,7 @@ SYSTEM_PROMPT = """你是一个多代理团队的负责人（team-lead）。用�
 - kind：这个成员的任务类型，决定由哪种执行器（runner）来做：
 {kinds}
 - 只有用户在目标里明确点名用某个执行器做某部分时，那个成员才加 "executor"：{executors} 之一；否则不要写 executor，系统会按 kind 自动选择并检查可用性。
+- 用户写「官方 claude」「用官网 claude」「官方账号跑」或 officlaude 时，明确点名的成员用 executor="officlaude"（官方 Claude），不参与自动选择或回退。
 - model：这个成员由 Hermes 执行时用哪个模型（kind 默认走 Hermes 的成员一定用它；其他成员在 runner 不可用、退回 Hermes 时用它）。按这个成员的活从下面挑最合适的一个；用户在目标里点名了模型就用点名的；拿不准就用默认：
 {models}
 

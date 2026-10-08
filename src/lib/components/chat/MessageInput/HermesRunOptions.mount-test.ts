@@ -82,7 +82,12 @@ describe('HermesRunOptions', () => {
 			provider: 'custom:relay',
 			providers: [
 				{ slug: 'custom:relay', name: 'relay', current: true, models: ['gpt-chat'] },
-				{ slug: 'custom:claude-chat', name: 'claude-chat', current: false, models: ['claude-chat'] },
+				{
+					slug: 'custom:claude-chat',
+					name: 'claude-chat',
+					current: false,
+					models: ['claude-chat']
+				},
 				{
 					slug: 'custom:deepseek-chat',
 					name: 'deepseek-chat',
@@ -113,7 +118,12 @@ describe('HermesRunOptions', () => {
 			provider: 'custom:relay',
 			providers: [
 				{ slug: 'custom:relay', name: 'relay', current: true, models: ['gpt-chat'] },
-				{ slug: 'custom:deepseek-chat', name: 'deepseek', current: false, models: ['deepseek-chat'] }
+				{
+					slug: 'custom:deepseek-chat',
+					name: 'deepseek',
+					current: false,
+					models: ['deepseek-chat']
+				}
 			],
 			reasoning_effort: 'high'
 		});
@@ -139,7 +149,9 @@ describe('HermesRunOptions', () => {
 		const hint = panel.querySelector('[data-halo-hermes-dispatch-hint]');
 		expect(hint.textContent).toContain('交给 Codex 在后台独占执行');
 		expect(hint.textContent).toContain('只对下一条消息生效');
-		expect(panel.textContent).toContain('派发给 reclaude/cchclaude/anyclaude/codex/agy 时它们用自己的模型');
+		expect(panel.textContent).toContain(
+			'派发给 reclaude/cchclaude/anyclaude/officlaude/codex/agy 时它们用自己的模型'
+		);
 	});
 
 	it('offers cchclaude next to reclaude, three choices to a row', async () => {
@@ -152,6 +164,7 @@ describe('HermesRunOptions', () => {
 			'reclaude',
 			'cchclaude',
 			'anyclaude',
+			'officlaude',
 			'codex',
 			'agy',
 			'answer',
@@ -164,9 +177,9 @@ describe('HermesRunOptions', () => {
 			'交给 Claude Code（自己的 cch 中转）在后台独占执行'
 		);
 		expect(panel.querySelector('[role="radiogroup"]').className).toContain('grid-cols-3');
-		expect((target.querySelector('[data-halo-hermes-options-summary]') as any)?.textContent).toContain(
-			'cchclaude'
-		);
+		expect(
+			(target.querySelector('[data-halo-hermes-options-summary]') as any)?.textContent
+		).toContain('cchclaude');
 	});
 
 	it('offers 精答, 讨论 and 协作台 on a row of their own: asked another way, the result comes back', async () => {
@@ -176,7 +189,9 @@ describe('HermesRunOptions', () => {
 		const hint = () => panel.querySelector('[data-halo-hermes-dispatch-hint]').textContent;
 		const summary = () =>
 			(target.querySelector('[data-halo-hermes-options-summary]') as any)?.textContent ?? '';
-		expect(panel.querySelector('[data-halo-hermes-modes-label]').textContent).toContain('换一种方式问');
+		expect(panel.querySelector('[data-halo-hermes-modes-label]').textContent).toContain(
+			'换一种方式问'
+		);
 		expect(choice('team').getAttribute('aria-checked')).toBe('true');
 		expect(choice('team').className).not.toContain('col-span-3');
 		expect(choice('team').textContent).toContain('协作台');
@@ -203,7 +218,22 @@ describe('HermesRunOptions', () => {
 		choice('direct').click();
 		await waitFor(() => choice('direct').getAttribute('aria-checked') === 'true', 'back to 直接');
 		expect(panel.querySelector('[data-halo-hermes-model-note]').textContent).toContain(
-			'派发给 reclaude/cchclaude/anyclaude/codex/agy 时它们用自己的模型'
+			'派发给 reclaude/cchclaude/anyclaude/officlaude/codex/agy 时它们用自己的模型'
+		);
+	});
+
+	it('selects official Claude with its own runner id', async () => {
+		const panel: any = await mount();
+		const official = panel.querySelector('[data-halo-hermes-dispatch="officlaude"]') as any;
+		expect(official.textContent).toContain('官方 Claude');
+		official.click();
+		await sleep(5);
+		expect(official.getAttribute('aria-checked')).toBe('true');
+		expect(target.querySelector('[data-halo-hermes-options-summary]').textContent).toContain(
+			'官方 Claude'
+		);
+		expect(panel.querySelector('[data-halo-hermes-dispatch-hint]').textContent).toContain(
+			'claude.ai'
 		);
 	});
 
@@ -214,8 +244,21 @@ describe('HermesRunOptions', () => {
 		expect(panel.querySelector('[data-halo-hermes-dispatch-hint]').textContent).toContain(
 			'交给 Claude Code（anyrouter 免费服务，较慢，失败会自动重试）在后台独占执行'
 		);
-		expect((target.querySelector('[data-halo-hermes-options-summary]') as any)?.textContent).toContain(
-			'anyclaude'
+		expect(
+			(target.querySelector('[data-halo-hermes-options-summary]') as any)?.textContent
+		).toContain('anyclaude');
+	});
+
+	it('continues the official account using its Chinese display name', async () => {
+		const panel: any = await mount(
+			{},
+			{ runner: 'officlaude', runId: '20261008-010000-abcdef12', status: 'error' }
+		);
+		expect(panel.querySelector('[data-halo-hermes-dispatch="continue"]').textContent).toContain(
+			'官方 Claude'
+		);
+		expect(panel.querySelector('[data-halo-hermes-dispatch-hint]').textContent).toContain(
+			'交回 官方 Claude'
 		);
 	});
 
@@ -237,14 +280,19 @@ describe('HermesRunOptions', () => {
 		expect(summary()).toContain('直接');
 		expect(hint()).toContain('Hermes 自己回答');
 		choice('continue').click();
-		await waitFor(() => choice('continue').getAttribute('aria-checked') === 'true', 'back to the run');
+		await waitFor(
+			() => choice('continue').getAttribute('aria-checked') === 'true',
+			'back to the run'
+		);
 	});
 
 	it('without a report to go back to, "直接" is the default and nothing is added', async () => {
 		const panel: any = await mount();
 		expect(Boolean(panel.querySelector('[data-halo-hermes-dispatch="continue"]'))).toBe(false);
 		expect(
-			(panel.querySelector('[data-halo-hermes-dispatch="direct"]') as any).getAttribute('aria-checked')
+			(panel.querySelector('[data-halo-hermes-dispatch="direct"]') as any).getAttribute(
+				'aria-checked'
+			)
 		).toBe('true');
 		expect(Boolean(target.querySelector('[data-halo-hermes-options-summary]'))).toBe(false);
 	});

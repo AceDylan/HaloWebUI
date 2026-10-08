@@ -148,3 +148,5 @@ HTTP 客户端），不改写 `notify.json` / `meta.json` / `result.md`，只在
 | `attempts` / `busy_attempts` | 放弃时才写：一共试了多少次、其中多少次是会话忙（409） |
 
 `<run_dir>/notify.log` 是同一次执行的完整日志。
+
+官方 Claude（officlaude）通过 officlaude-run.sh 使用官网订阅 OAuth，7200 秒、250 轮；无拼车额度预检/页脚，认证和订阅限额不自动等待/重试。通知脚本版本 2026-10-08.1；本次镜像与 Hermes 仓库的待安装副本逐字节一致，用户审核安装后才与宿主运行副本一致。

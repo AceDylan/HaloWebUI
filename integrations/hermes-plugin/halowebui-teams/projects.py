@@ -85,7 +85,7 @@ def toplevel(path: str) -> Optional[str]:
 
 def _recent_run_dirs(limit: int = 60) -> list[str]:
     """Directories recent runner runs worked in (newest first)."""
-    roots = [Path(_home()) / ".hermes" / f"{name}-runs" for name in ("reclaude", "cchclaude", "anyclaude", "codex")]
+    roots = [Path(_home()) / ".hermes" / f"{name}-runs" for name in ("reclaude", "cchclaude", "anyclaude", "officlaude", "codex")]
     metas = []
     for root in roots:
         try:

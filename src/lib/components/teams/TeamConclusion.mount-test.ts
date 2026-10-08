@@ -474,6 +474,15 @@ describe('ConclusionView', () => {
 });
 
 describe('RunnerBadge and RunnerStatus', () => {
+	it('badge labels the official account and keeps its runner id', async () => {
+		const { default: RunnerBadge } = await import('./RunnerBadge.svelte');
+		await mount(RunnerBadge, { chosen: 'officlaude', actual: 'officlaude' });
+		const badge = target.querySelector('[data-runner]');
+		expect(badge.textContent).toContain('官方 Claude');
+		expect(badge.getAttribute('data-runner')).toBe('officlaude');
+		expect(badge.getAttribute('title')).toContain('由 官方 Claude 执行');
+	});
+
 	it('badge shows a fallback as chosen → actual', async () => {
 		const { default: RunnerBadge } = await import('./RunnerBadge.svelte');
 		await mount(RunnerBadge, { chosen: 'cchclaude', actual: 'anyclaude', reason: '中转 502' });

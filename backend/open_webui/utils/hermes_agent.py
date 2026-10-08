@@ -936,6 +936,7 @@ HERMES_DISPATCH_COMMANDS = {
     "reclaude": "/reclaude",
     "cchclaude": "/cchclaude",
     "anyclaude": "/anyclaude",
+    "officlaude": "/officlaude",
     "codex": "/codex",
     "agy": "/agy",
 }
@@ -987,7 +988,7 @@ def _inherited_reasoning_effort(form_data) -> str | None:
 # "/model". "/root/app/x.txt" is a path, not a command.
 _SLASH_COMMAND_RE = re.compile(r"^/[A-Za-z][\w-]*(?:\s|$)")
 _RUNNER_COMMAND_RE = re.compile(
-    r"^/(reclaude|cchclaude|anyclaude|codex|agy)(?:\s|$)", re.IGNORECASE
+    r"^/(reclaude|cchclaude|anyclaude|officlaude|codex|agy)(?:\s|$)", re.IGNORECASE
 )
 
 
@@ -1030,7 +1031,7 @@ def _run_input_text(run_input) -> str:
 
 
 def _dispatch_runner(run_input) -> str | None:
-    """"reclaude" / "cchclaude" / "anyclaude" / "codex" / "agy" when the input launches that runner."""
+    """"reclaude" / "cchclaude" / "anyclaude" / "officlaude" / "codex" / "agy" when the input launches that runner."""
     match = _RUNNER_COMMAND_RE.match(_run_input_text(run_input).lstrip())
     return match.group(1).lower() if match else None
 
@@ -1961,9 +1962,9 @@ def _runtime_from_event(event) -> dict:
 
 
 # The launch command of a background runner (reclaude-run.sh run|answer,
-# cchclaude-run.sh, anyclaude-run.sh, codex-run.sh, agy-run.sh), as the terminal call's preview shows it.
+# cchclaude-run.sh, anyclaude-run.sh, officlaude-run.sh, codex-run.sh, agy-run.sh), as the terminal call's preview shows it.
 _RUNNER_LAUNCH_RE = re.compile(
-    r"(?:reclaude|cchclaude|anyclaude|codex|agy)-run\.sh\s+(?:run|answer)\b|runner-detach\.py"
+    r"(?:reclaude|cchclaude|anyclaude|officlaude|codex|agy)-run\.sh\s+(?:run|answer)\b|runner-detach\.py"
 )
 
 

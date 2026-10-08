@@ -10,6 +10,7 @@
 	import { buildPdfExportMessages, buildPdfFileName } from '$lib/utils/chat-pdf-document';
 	import { downloadChatAsPDF } from '$lib/apis/utils';
 	import { getErrorDetail } from '$lib/apis/response';
+	import { chatHandoff, handOff } from '$lib/utils/handoff';
 
 	import {
 		showOverview,
@@ -256,6 +257,16 @@ code{font-size:0.9em;}</style></head><body><h1>${title}</h1>`;
 					id="chat-agent-teams-button"
 					on:click={() => {
 						onClose();
+						// the conversation goes along as the team's background, like the composer's 「+」 handoff
+						handOff(
+							typeof sessionStorage === 'undefined' ? null : sessionStorage,
+							chatHandoff('teams', {
+								text: '',
+								history: chat.chat?.history,
+								chatId: chat.id,
+								title: chat.chat?.title
+							})
+						);
 						goto(`/teams?chat=${encodeURIComponent(chat.id)}`);
 					}}
 				>

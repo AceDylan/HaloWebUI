@@ -270,382 +270,390 @@
 	</Tooltip>
 
 	<div slot="content">
+		<!-- fitViewport: no taller than the room on screen (on a phone the menu opened upward past
+		     the top of the screen); the list scrolls inside. Not the menu itself: the web search
+		     submenu is placed inside it and would be clipped. The width is set, not w-full, as
+		     fitViewport also sets a max-width. -->
 		<DropdownMenu.Content
-			class="w-full max-w-[min(320px,calc(100vw-1rem))] rounded-xl px-1 py-1 border border-gray-300/30 dark:border-gray-700/50 z-50 bg-white dark:bg-gray-850 dark:text-white shadow-sm"
+			class="flex w-[min(320px,calc(100vw-1rem))] flex-col rounded-xl px-1 py-1 border border-gray-300/30 dark:border-gray-700/50 z-50 bg-white dark:bg-gray-850 dark:text-white shadow-sm"
 			sideOffset={10}
 			alignOffset={-8}
 			side="top"
 			align="start"
+			fitViewport
 			transition={flyAndScale}
 		>
-			{#if Object.keys(tools).length > 0}
-				<div class="  max-h-28 overflow-y-auto scrollbar-hidden">
-					{#each Object.keys(tools) as toolId}
-						<button
-							type="button"
-							class="flex w-full justify-between gap-2 items-center px-3 py-2 text-sm font-medium cursor-pointer rounded-xl"
-							on:click={() => {
-								toggleToolEnabled(toolId);
-							}}
-						>
-							<div class="flex gap-2 items-center min-w-0 flex-1">
-								<div class="relative shrink-0">
-									<span
-										class="flex h-6 w-6 items-center justify-center rounded-md bg-gray-100 text-gray-600 dark:bg-gray-700/60 dark:text-gray-300"
-									>
-										<Wrench class="size-4" strokeWidth={2} />
-									</span>
-									{#if tools[toolId]?.source === 'shared'}
+			<div class="min-h-0 overflow-y-auto overscroll-contain" data-halo-input-menu-list>
+				{#if Object.keys(tools).length > 0}
+					<div class="  max-h-28 overflow-y-auto scrollbar-hidden">
+						{#each Object.keys(tools) as toolId}
+							<button
+								type="button"
+								class="flex w-full justify-between gap-2 items-center px-3 py-2 text-sm font-medium cursor-pointer rounded-xl"
+								on:click={() => {
+									toggleToolEnabled(toolId);
+								}}
+							>
+								<div class="flex gap-2 items-center min-w-0 flex-1">
+									<div class="relative shrink-0">
 										<span
-											class="absolute -top-0.5 -right-0.5 flex h-3 w-3 items-center justify-center rounded-full bg-emerald-500 dark:bg-emerald-400"
+											class="flex h-6 w-6 items-center justify-center rounded-md bg-gray-100 text-gray-600 dark:bg-gray-700/60 dark:text-gray-300"
 										>
-											<Users class="size-2 text-white" strokeWidth={2.5} />
+											<Wrench class="size-4" strokeWidth={2} />
 										</span>
-									{/if}
-								</div>
-								<Tooltip
-									content={tools[toolId]?.description +
-										(tools[toolId]?.source === 'shared' && tools[toolId]?.ownerName
-											? '\n\n管理员：' + tools[toolId].ownerName
-											: '')}
-									placement="top-start"
-									className="min-w-0"
-								>
-									<!-- Two lines rather than an ellipsis: "WebObsidian Vault (read-only)"
-									     is wider than the menu. -->
-									<div class="line-clamp-2 break-words text-left leading-snug" data-halo-tool-name>
-										{tools[toolId].name}
-									</div>
-								</Tooltip>
-							</div>
-
-							<div class=" shrink-0" on:click|stopPropagation>
-								<Switch
-									state={tools[toolId].enabled}
-									ariaLabel={tools[toolId].name}
-									on:change={async (e) => {
-										toggleToolEnabled(toolId, e.detail);
-									}}
-								/>
-							</div>
-						</button>
-					{/each}
-				</div>
-
-				<hr class="border-black/5 dark:border-white/5 my-1" />
-			{/if}
-
-			{#if Object.keys(skills).length > 0}
-				<div class="max-h-28 overflow-y-auto scrollbar-hidden">
-					{#each Object.keys(skills) as skillId}
-						<button
-							type="button"
-							class="flex w-full justify-between gap-2 items-center px-3 py-2 text-sm font-medium cursor-pointer rounded-xl"
-							on:click={() => {
-								toggleSkillEnabled(skillId);
-							}}
-						>
-							<div class="flex gap-2 items-center min-w-0 flex-1">
-								<div class="relative shrink-0">
-									<span
-										class="flex h-6 w-6 items-center justify-center rounded-md bg-amber-50 text-amber-600 dark:bg-amber-950/40 dark:text-amber-300"
-									>
-										<Sparkles class="size-4" strokeWidth={2} />
-									</span>
-									{#if skills[skillId]?.source === 'shared'}
-										<span
-											class="absolute -top-0.5 -right-0.5 flex h-3 w-3 items-center justify-center rounded-full bg-emerald-500 dark:bg-emerald-400"
-										>
-											<Users class="size-2 text-white" strokeWidth={2.5} />
-										</span>
-									{/if}
-								</div>
-								<Tooltip
-									content={skills[skillId]?.description ?? ''}
-									placement="top-start"
-									className="truncate"
-								>
-									<div class="min-w-0">
-										<div class="truncate">{skills[skillId].name}</div>
-										{#if skills[skillId]?.meta?.runtime?.mode === 'runnable' || skills[skillId]?.meta?.auto_enabled}
-											<div
-												class="mt-0.5 flex gap-1 text-2xs font-medium text-gray-500 dark:text-gray-400"
+										{#if tools[toolId]?.source === 'shared'}
+											<span
+												class="absolute -top-0.5 -right-0.5 flex h-3 w-3 items-center justify-center rounded-full bg-emerald-500 dark:bg-emerald-400"
 											>
-												{#if skills[skillId]?.meta?.runtime?.mode === 'runnable'}
-													<span>{$i18n.t('Runnable')}</span>
-												{/if}
-												{#if skills[skillId]?.meta?.auto_enabled}
-													<span>{$i18n.t('Auto')}</span>
-												{/if}
-											</div>
+												<Users class="size-2 text-white" strokeWidth={2.5} />
+											</span>
 										{/if}
 									</div>
-								</Tooltip>
-							</div>
+									<Tooltip
+										content={tools[toolId]?.description +
+											(tools[toolId]?.source === 'shared' && tools[toolId]?.ownerName
+												? '\n\n管理员：' + tools[toolId].ownerName
+												: '')}
+										placement="top-start"
+										className="min-w-0"
+									>
+										<!-- Two lines rather than an ellipsis: "WebObsidian Vault (read-only)"
+										     is wider than the menu. -->
+										<div class="line-clamp-2 break-words text-left leading-snug" data-halo-tool-name>
+											{tools[toolId].name}
+										</div>
+									</Tooltip>
+								</div>
 
-							<div class="shrink-0" on:click|stopPropagation>
-								<Switch
-									state={skills[skillId].enabled}
-									on:change={async (e) => {
-										toggleSkillEnabled(skillId, e.detail);
-									}}
-								/>
-							</div>
-						</button>
-					{/each}
-				</div>
+								<div class=" shrink-0" on:click|stopPropagation>
+									<Switch
+										state={tools[toolId].enabled}
+										ariaLabel={tools[toolId].name}
+										on:change={async (e) => {
+											toggleToolEnabled(toolId, e.detail);
+										}}
+									/>
+								</div>
+							</button>
+						{/each}
+					</div>
 
-				<hr class="border-black/5 dark:border-white/5 my-1" />
-			{/if}
+					<hr class="border-black/5 dark:border-white/5 my-1" />
+				{/if}
 
-			{#if webSearchFeatureEnabled || $config?.features?.enable_image_generation || $config?.features?.enable_code_interpreter}
-				{#if webSearchFeatureEnabled && webSearchModeOptions.some((option) => option.value !== 'off') && ($user?.role === 'admin' || $user?.permissions?.features?.web_search)}
-					<DropdownMenu.Sub>
-						<DropdownMenu.SubTrigger
+				{#if Object.keys(skills).length > 0}
+					<div class="max-h-28 overflow-y-auto scrollbar-hidden">
+						{#each Object.keys(skills) as skillId}
+							<button
+								type="button"
+								class="flex w-full justify-between gap-2 items-center px-3 py-2 text-sm font-medium cursor-pointer rounded-xl"
+								on:click={() => {
+									toggleSkillEnabled(skillId);
+								}}
+							>
+								<div class="flex gap-2 items-center min-w-0 flex-1">
+									<div class="relative shrink-0">
+										<span
+											class="flex h-6 w-6 items-center justify-center rounded-md bg-amber-50 text-amber-600 dark:bg-amber-950/40 dark:text-amber-300"
+										>
+											<Sparkles class="size-4" strokeWidth={2} />
+										</span>
+										{#if skills[skillId]?.source === 'shared'}
+											<span
+												class="absolute -top-0.5 -right-0.5 flex h-3 w-3 items-center justify-center rounded-full bg-emerald-500 dark:bg-emerald-400"
+											>
+												<Users class="size-2 text-white" strokeWidth={2.5} />
+											</span>
+										{/if}
+									</div>
+									<Tooltip
+										content={skills[skillId]?.description ?? ''}
+										placement="top-start"
+										className="truncate"
+									>
+										<div class="min-w-0">
+											<div class="truncate">{skills[skillId].name}</div>
+											{#if skills[skillId]?.meta?.runtime?.mode === 'runnable' || skills[skillId]?.meta?.auto_enabled}
+												<div
+													class="mt-0.5 flex gap-1 text-2xs font-medium text-gray-500 dark:text-gray-400"
+												>
+													{#if skills[skillId]?.meta?.runtime?.mode === 'runnable'}
+														<span>{$i18n.t('Runnable')}</span>
+													{/if}
+													{#if skills[skillId]?.meta?.auto_enabled}
+														<span>{$i18n.t('Auto')}</span>
+													{/if}
+												</div>
+											{/if}
+										</div>
+									</Tooltip>
+								</div>
+
+								<div class="shrink-0" on:click|stopPropagation>
+									<Switch
+										state={skills[skillId].enabled}
+										on:change={async (e) => {
+											toggleSkillEnabled(skillId, e.detail);
+										}}
+									/>
+								</div>
+							</button>
+						{/each}
+					</div>
+
+					<hr class="border-black/5 dark:border-white/5 my-1" />
+				{/if}
+
+				{#if webSearchFeatureEnabled || $config?.features?.enable_image_generation || $config?.features?.enable_code_interpreter}
+					{#if webSearchFeatureEnabled && webSearchModeOptions.some((option) => option.value !== 'off') && ($user?.role === 'admin' || $user?.permissions?.features?.web_search)}
+						<DropdownMenu.Sub>
+							<DropdownMenu.SubTrigger
+								class="flex w-full justify-between gap-2 items-center px-3 py-2 text-sm font-medium cursor-pointer rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800"
+							>
+								<div class="flex gap-2 items-center min-w-0">
+									<span
+										class="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-gray-100 text-gray-600 dark:bg-gray-700/60 dark:text-gray-300"
+									>
+										<Globe class="size-4" strokeWidth={2} />
+									</span>
+									<div class="truncate">{$i18n.t('Web Search')}</div>
+								</div>
+								<div class="shrink-0 text-xs text-gray-500 dark:text-gray-400">
+									{currentWebSearchModeLabel}
+								</div>
+							</DropdownMenu.SubTrigger>
+							<DropdownMenu.SubContent
+								overlap
+								class="w-full min-w-[260px] overflow-y-auto overscroll-contain rounded-xl px-1 py-1 border border-gray-300/30 dark:border-gray-700/50 z-50 bg-white dark:bg-gray-850 dark:text-white shadow-sm"
+								sideOffset={8}
+								fitViewport
+								transition={flyAndScale}
+							>
+								{#each webSearchModeOptions as option}
+									<DropdownMenu.Item
+										disabled={option.disabled}
+										class="flex w-full justify-between gap-3 items-center px-3 py-2 text-sm font-medium cursor-pointer rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800 data-[disabled]:opacity-45 data-[disabled]:cursor-not-allowed"
+										on:click={() => {
+											if (option.disabled) {
+												return;
+											}
+											webSearchMode = option.value;
+											onWebSearchModeChange?.(option.value);
+											show = false;
+										}}
+									>
+										<div class="min-w-0 flex-1 flex items-center gap-2">
+											<div class="truncate">{option.label}</div>
+											{#if option.badge}
+												<span
+													class="shrink-0 rounded-full bg-gray-100 px-1.5 py-0.5 text-2xs font-medium text-gray-500 dark:bg-gray-800 dark:text-gray-400"
+												>
+													{option.badge}
+												</span>
+											{/if}
+											{#if option.description}
+												<span on:click|stopPropagation>
+													<Tooltip content={option.description} placement="top">
+														<CircleHelp class={helpIconClass} strokeWidth={1.9} />
+													</Tooltip>
+												</span>
+											{/if}
+										</div>
+										{#if webSearchMode === option.value}
+											<div class="shrink-0 text-xs text-blue-500 dark:text-blue-400">✓</div>
+										{/if}
+									</DropdownMenu.Item>
+								{/each}
+							</DropdownMenu.SubContent>
+						</DropdownMenu.Sub>
+					{/if}
+
+					{#if $config?.features?.enable_image_generation && ($user?.role === 'admin' || $user?.permissions?.features?.image_generation)}
+						<button
+							type="button"
 							class="flex w-full justify-between gap-2 items-center px-3 py-2 text-sm font-medium cursor-pointer rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800"
+							on:click={() => {
+								imageGenerationEnabled = !imageGenerationEnabled;
+								show = false;
+							}}
 						>
 							<div class="flex gap-2 items-center min-w-0">
 								<span
 									class="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-gray-100 text-gray-600 dark:bg-gray-700/60 dark:text-gray-300"
 								>
-									<Globe class="size-4" strokeWidth={2} />
+									<Wand2 class="size-4" strokeWidth={2} />
 								</span>
-								<div class="truncate">{$i18n.t('Web Search')}</div>
+								<div class="truncate">{tr('图片生成', 'Image Generation')}</div>
 							</div>
 							<div class="shrink-0 text-xs text-gray-500 dark:text-gray-400">
-								{currentWebSearchModeLabel}
+								{imageGenerationEnabled ? tr('已开启', 'On') : tr('未开启', 'Off')}
 							</div>
-						</DropdownMenu.SubTrigger>
-						<DropdownMenu.SubContent
-							overlap
-							class="w-full min-w-[260px] rounded-xl px-1 py-1 border border-gray-300/30 dark:border-gray-700/50 z-50 bg-white dark:bg-gray-850 dark:text-white shadow-sm"
-							sideOffset={8}
-							transition={flyAndScale}
+						</button>
+					{/if}
+
+					{#if $config?.features?.enable_code_interpreter && ($user?.role === 'admin' || $user?.permissions?.features?.code_interpreter)}
+						<button
+							type="button"
+							class="flex w-full justify-between gap-2 items-center px-3 py-2 text-sm font-medium cursor-pointer rounded-xl"
+							on:click={() => {
+								codeInterpreterEnabled = !codeInterpreterEnabled;
+							}}
 						>
-							{#each webSearchModeOptions as option}
-								<DropdownMenu.Item
-									disabled={option.disabled}
-									class="flex w-full justify-between gap-3 items-center px-3 py-2 text-sm font-medium cursor-pointer rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800 data-[disabled]:opacity-45 data-[disabled]:cursor-not-allowed"
-									on:click={() => {
-										if (option.disabled) {
-											return;
-										}
-										webSearchMode = option.value;
-										onWebSearchModeChange?.(option.value);
-										show = false;
-									}}
+							<div class="flex gap-2 items-center">
+								<span
+									class="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-gray-100 text-gray-600 dark:bg-gray-700/60 dark:text-gray-300"
 								>
-									<div class="min-w-0 flex-1 flex items-center gap-2">
-										<div class="truncate">{option.label}</div>
-										{#if option.badge}
-											<span
-												class="shrink-0 rounded-full bg-gray-100 px-1.5 py-0.5 text-2xs font-medium text-gray-500 dark:bg-gray-800 dark:text-gray-400"
-											>
-												{option.badge}
-											</span>
-										{/if}
-										{#if option.description}
-											<span on:click|stopPropagation>
-												<Tooltip content={option.description} placement="top">
-													<CircleHelp class={helpIconClass} strokeWidth={1.9} />
-												</Tooltip>
-											</span>
-										{/if}
-									</div>
-									{#if webSearchMode === option.value}
-										<div class="shrink-0 text-xs text-blue-500 dark:text-blue-400">✓</div>
-									{/if}
-								</DropdownMenu.Item>
-							{/each}
-						</DropdownMenu.SubContent>
-					</DropdownMenu.Sub>
+									<Terminal class="size-4" strokeWidth={2} />
+								</span>
+								<div class="truncate">{$i18n.t('Code Interpreter')}</div>
+							</div>
+							<div class="shrink-0" on:click|stopPropagation>
+								<Switch bind:state={codeInterpreterEnabled} />
+							</div>
+						</button>
+					{/if}
+
+					<hr class="border-black/5 dark:border-white/5 my-1" />
 				{/if}
 
-				{#if $config?.features?.enable_image_generation && ($user?.role === 'admin' || $user?.permissions?.features?.image_generation)}
-					<button
-						type="button"
-						class="flex w-full justify-between gap-2 items-center px-3 py-2 text-sm font-medium cursor-pointer rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800"
-						on:click={() => {
-							imageGenerationEnabled = !imageGenerationEnabled;
-							show = false;
-						}}
-					>
-						<div class="flex gap-2 items-center min-w-0">
-							<span
-								class="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-gray-100 text-gray-600 dark:bg-gray-700/60 dark:text-gray-300"
-							>
-								<Wand2 class="size-4" strokeWidth={2} />
-							</span>
-							<div class="truncate">{tr('图片生成', 'Image Generation')}</div>
-						</div>
-						<div class="shrink-0 text-xs text-gray-500 dark:text-gray-400">
-							{imageGenerationEnabled ? tr('已开启', 'On') : tr('未开启', 'Off')}
-						</div>
-					</button>
-				{/if}
-
-				{#if $config?.features?.enable_code_interpreter && ($user?.role === 'admin' || $user?.permissions?.features?.code_interpreter)}
-					<button
-						type="button"
-						class="flex w-full justify-between gap-2 items-center px-3 py-2 text-sm font-medium cursor-pointer rounded-xl"
-						on:click={() => {
-							codeInterpreterEnabled = !codeInterpreterEnabled;
-						}}
-					>
-						<div class="flex gap-2 items-center">
-							<span
-								class="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-gray-100 text-gray-600 dark:bg-gray-700/60 dark:text-gray-300"
-							>
-								<Terminal class="size-4" strokeWidth={2} />
-							</span>
-							<div class="truncate">{$i18n.t('Code Interpreter')}</div>
-						</div>
-						<div class="shrink-0" on:click|stopPropagation>
-							<Switch bind:state={codeInterpreterEnabled} />
-						</div>
-					</button>
-				{/if}
-
-				<hr class="border-black/5 dark:border-white/5 my-1" />
-			{/if}
-
-			{#if onSelectAssistant}
-				<DropdownMenu.Item
-					class="flex gap-2 items-center px-3 py-2 text-sm font-medium cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl"
-					data-halo-input-assistant
-					on:click={() => onSelectAssistant?.()}
-				>
-					<span
-						class="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-gray-100 text-gray-600 dark:bg-gray-700/60 dark:text-gray-300"
-					>
-						<Bot class="size-4" strokeWidth={2} />
-					</span>
-					<div class="min-w-0">
-						<div class="truncate">{tr('选择助手', 'Choose assistant')}</div>
-						<div class="truncate text-xs font-normal text-gray-500 dark:text-gray-400">
-							{tr('在当前模型上套用助手的设定', "Its prompt on the current model")}
-						</div>
-					</div>
-				</DropdownMenu.Item>
-			{/if}
-
-			<Tooltip
-				content={!fileUploadEnabled ? $i18n.t('You do not have permission to upload files') : ''}
-				className="w-full"
-			>
-				<DropdownMenu.Item
-					class="flex gap-2 items-center px-3 py-2 text-sm font-medium cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl {!fileUploadEnabled
-						? 'opacity-50'
-						: ''}"
-					on:click={() => {
-						if (fileUploadEnabled) {
-							uploadFilesHandler();
-						}
-					}}
-				>
-					<span
-						class="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-gray-100 text-gray-600 dark:bg-gray-700/60 dark:text-gray-300"
-					>
-						<FileUp class="size-4" strokeWidth={2} />
-					</span>
-					<div class="line-clamp-1">{$i18n.t('Upload Files')}</div>
-				</DropdownMenu.Item>
-			</Tooltip>
-
-			{#if $config?.features?.enable_google_drive_integration}
-				<DropdownMenu.Item
-					class="flex gap-2 items-center px-3 py-2 text-sm font-medium cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl"
-					on:click={() => {
-						uploadGoogleDriveHandler();
-					}}
-				>
-					<span
-						class="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-gray-100 text-gray-600 dark:bg-gray-700/60 dark:text-gray-300"
-					>
-						<GoogleDrive className="size-4" />
-					</span>
-					<div class="line-clamp-1">{$i18n.t('Google Drive')}</div>
-				</DropdownMenu.Item>
-			{/if}
-
-			{#if $config?.features?.enable_onedrive_integration}
-				<DropdownMenu.Item
-					class="flex gap-2 items-center px-3 py-2 text-sm font-medium cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl"
-					on:click={() => {
-						uploadOneDriveHandler();
-					}}
-				>
-					<span
-						class="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-gray-100 text-gray-600 dark:bg-gray-700/60 dark:text-gray-300"
-					>
-						<OneDrive className="size-4" />
-					</span>
-					<div class="line-clamp-1">{$i18n.t('OneDrive')}</div>
-				</DropdownMenu.Item>
-			{/if}
-
-			{#if onHandoff}
-				<hr class="border-black/5 dark:border-white/5 my-1" />
-				<div class="px-3 pt-1 pb-0.5 text-2xs font-medium text-gray-400 dark:text-gray-500">
-					{tr('交给…（带上这句话）', 'Hand to… (with this draft)')}
-				</div>
-				<DropdownMenu.Item
-					class="flex gap-2 items-center px-3 py-2 text-sm font-medium cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl"
-					data-halo-input-handoff="answer"
-					on:click={() => onHandoff?.('answer')}
-				>
-					<span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-gray-100 text-gray-600 dark:bg-gray-700/60 dark:text-gray-300">
-						<SidebarModeIcon mode="answer" className="size-4" />
-					</span>
-					<div class="min-w-0">
-						<div class="truncate">{tr('精答', 'Precise answer')}</div>
-						<div class="truncate text-xs font-normal text-gray-500 dark:text-gray-400">{tr('按问题挑最合适的助手来答', 'The right assistant answers')}</div>
-					</div>
-				</DropdownMenu.Item>
-				<DropdownMenu.Item
-					class="flex gap-2 items-center px-3 py-2 text-sm font-medium cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl"
-					data-halo-input-handoff="discuss"
-					on:click={() => onHandoff?.('discuss')}
-				>
-					<span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-gray-100 text-gray-600 dark:bg-gray-700/60 dark:text-gray-300">
-						<MessagesSquare class="size-4" strokeWidth={2} />
-					</span>
-					<div class="min-w-0">
-						<div class="truncate">{tr('多模型讨论', 'Multi-model discussion')}</div>
-						<div class="truncate text-xs font-normal text-gray-500 dark:text-gray-400">{tr('几个模型讨论，主持人给结论', 'Several models, one conclusion')}</div>
-					</div>
-				</DropdownMenu.Item>
-				{#if teamsEnabled}
+				{#if onSelectAssistant}
 					<DropdownMenu.Item
 						class="flex gap-2 items-center px-3 py-2 text-sm font-medium cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl"
-						data-halo-input-handoff="teams"
-						on:click={() => onHandoff?.('teams')}
+						data-halo-input-assistant
+						on:click={() => onSelectAssistant?.()}
 					>
-						<span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-gray-100 text-gray-600 dark:bg-gray-700/60 dark:text-gray-300">
-							<Users class="size-4" strokeWidth={2} />
+						<span
+							class="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-gray-100 text-gray-600 dark:bg-gray-700/60 dark:text-gray-300"
+						>
+							<Bot class="size-4" strokeWidth={2} />
 						</span>
 						<div class="min-w-0">
-							<div class="truncate">{tr('协作台', 'Team')}</div>
-							<div class="truncate text-xs font-normal text-gray-500 dark:text-gray-400">{tr('一支 AI 团队拆任务、并行完成', 'A team plans and does it')}</div>
+							<div class="truncate">{tr('选择助手', 'Choose assistant')}</div>
+							<div class="truncate text-xs font-normal text-gray-500 dark:text-gray-400">
+								{tr('在当前模型上套用助手的设定', "Its prompt on the current model")}
+							</div>
 						</div>
 					</DropdownMenu.Item>
 				{/if}
-				{#if studioEnabled}
+
+				<Tooltip
+					content={!fileUploadEnabled ? $i18n.t('You do not have permission to upload files') : ''}
+					className="w-full"
+				>
+					<DropdownMenu.Item
+						class="flex gap-2 items-center px-3 py-2 text-sm font-medium cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl {!fileUploadEnabled
+							? 'opacity-50'
+							: ''}"
+						on:click={() => {
+							if (fileUploadEnabled) {
+								uploadFilesHandler();
+							}
+						}}
+					>
+						<span
+							class="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-gray-100 text-gray-600 dark:bg-gray-700/60 dark:text-gray-300"
+						>
+							<FileUp class="size-4" strokeWidth={2} />
+						</span>
+						<div class="line-clamp-1">{$i18n.t('Upload Files')}</div>
+					</DropdownMenu.Item>
+				</Tooltip>
+
+				{#if $config?.features?.enable_google_drive_integration}
 					<DropdownMenu.Item
 						class="flex gap-2 items-center px-3 py-2 text-sm font-medium cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl"
-						data-halo-input-handoff="studio"
-						on:click={() => onHandoff?.('studio')}
+						on:click={() => {
+							uploadGoogleDriveHandler();
+						}}
 					>
-						<span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-gray-100 text-gray-600 dark:bg-gray-700/60 dark:text-gray-300">
-							<ImageIcon class="size-4" strokeWidth={2} />
+						<span
+							class="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-gray-100 text-gray-600 dark:bg-gray-700/60 dark:text-gray-300"
+						>
+							<GoogleDrive className="size-4" />
 						</span>
-						<div class="min-w-0">
-							<div class="truncate">{tr('生图工作台', 'Image studio')}</div>
-							<div class="truncate text-xs font-normal text-gray-500 dark:text-gray-400">{tr('用这句话当提示词，图片作参考', 'Prompt and reference images')}</div>
-						</div>
+						<div class="line-clamp-1">{$i18n.t('Google Drive')}</div>
 					</DropdownMenu.Item>
 				{/if}
-			{/if}
+
+				{#if $config?.features?.enable_onedrive_integration}
+					<DropdownMenu.Item
+						class="flex gap-2 items-center px-3 py-2 text-sm font-medium cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl"
+						on:click={() => {
+							uploadOneDriveHandler();
+						}}
+					>
+						<span
+							class="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-gray-100 text-gray-600 dark:bg-gray-700/60 dark:text-gray-300"
+						>
+							<OneDrive className="size-4" />
+						</span>
+						<div class="line-clamp-1">{$i18n.t('OneDrive')}</div>
+					</DropdownMenu.Item>
+				{/if}
+
+				{#if onHandoff}
+					<hr class="border-black/5 dark:border-white/5 my-1" />
+					<div class="px-3 pt-1 pb-0.5 text-2xs font-medium text-gray-400 dark:text-gray-500">
+						{tr('交给…（带上这句话）', 'Hand to… (with this draft)')}
+					</div>
+					<DropdownMenu.Item
+						class="flex gap-2 items-center px-3 py-2 text-sm font-medium cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl"
+						data-halo-input-handoff="answer"
+						on:click={() => onHandoff?.('answer')}
+					>
+						<span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-gray-100 text-gray-600 dark:bg-gray-700/60 dark:text-gray-300">
+							<SidebarModeIcon mode="answer" className="size-4" />
+						</span>
+						<div class="min-w-0">
+							<div class="truncate">{tr('精答', 'Precise answer')}</div>
+							<div class="truncate text-xs font-normal text-gray-500 dark:text-gray-400">{tr('按问题挑最合适的助手来答', 'The right assistant answers')}</div>
+						</div>
+					</DropdownMenu.Item>
+					<DropdownMenu.Item
+						class="flex gap-2 items-center px-3 py-2 text-sm font-medium cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl"
+						data-halo-input-handoff="discuss"
+						on:click={() => onHandoff?.('discuss')}
+					>
+						<span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-gray-100 text-gray-600 dark:bg-gray-700/60 dark:text-gray-300">
+							<MessagesSquare class="size-4" strokeWidth={2} />
+						</span>
+						<div class="min-w-0">
+							<div class="truncate">{tr('多模型讨论', 'Multi-model discussion')}</div>
+							<div class="truncate text-xs font-normal text-gray-500 dark:text-gray-400">{tr('几个模型讨论，主持人给结论', 'Several models, one conclusion')}</div>
+						</div>
+					</DropdownMenu.Item>
+					{#if teamsEnabled}
+						<DropdownMenu.Item
+							class="flex gap-2 items-center px-3 py-2 text-sm font-medium cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl"
+							data-halo-input-handoff="teams"
+							on:click={() => onHandoff?.('teams')}
+						>
+							<span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-gray-100 text-gray-600 dark:bg-gray-700/60 dark:text-gray-300">
+								<Users class="size-4" strokeWidth={2} />
+							</span>
+							<div class="min-w-0">
+								<div class="truncate">{tr('协作台', 'Team')}</div>
+								<div class="truncate text-xs font-normal text-gray-500 dark:text-gray-400">{tr('一支 AI 团队拆任务、并行完成', 'A team plans and does it')}</div>
+							</div>
+						</DropdownMenu.Item>
+					{/if}
+					{#if studioEnabled}
+						<DropdownMenu.Item
+							class="flex gap-2 items-center px-3 py-2 text-sm font-medium cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl"
+							data-halo-input-handoff="studio"
+							on:click={() => onHandoff?.('studio')}
+						>
+							<span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-gray-100 text-gray-600 dark:bg-gray-700/60 dark:text-gray-300">
+								<ImageIcon class="size-4" strokeWidth={2} />
+							</span>
+							<div class="min-w-0">
+								<div class="truncate">{tr('生图工作台', 'Image studio')}</div>
+								<div class="truncate text-xs font-normal text-gray-500 dark:text-gray-400">{tr('用这句话当提示词，图片作参考', 'Prompt and reference images')}</div>
+							</div>
+						</DropdownMenu.Item>
+					{/if}
+				{/if}
+			</div>
 		</DropdownMenu.Content>
 	</div>
 </Dropdown>

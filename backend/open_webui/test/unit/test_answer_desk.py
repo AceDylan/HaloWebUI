@@ -538,3 +538,111 @@ def test_a_question_from_a_chat_brings_the_conversation_as_background(env):
     assert '"background": "用户：我在北京租房' in plan_payload
     asked = env.calls[-1][1][-1]["content"]
     assert asked.startswith("Background: the user's earlier conversation「租房」") and asked.endswith("Question: 押金多久退？")
+
+
+# --- 派发方式「精答」: a chat message becomes a run, its answer comes back ------------------------
+
+
+def test_a_chat_message_becomes_a_run_and_its_answer_comes_back(env, monkeypatch):
+    from open_webui import tasks
+    from open_webui.utils import hermes_notify, mode_dispatch, team_chats
+
+    env.state["plan"] = CREATE_PLAN
+    messages = {
+        "q0": {"id": "q0", "parentId": None, "childrenIds": ["r0"], "role": "user", "content": "我在北京租房"},
+        "r0": {"id": "r0", "parentId": "q0", "childrenIds": ["q1"], "role": "assistant", "content": "好的", "model": "hermes-agent", "done": True},
+        "q1": {"id": "q1", "parentId": "r0", "childrenIds": ["r1"], "role": "user", "content": "押金多久退？"},
+        "r1": {"id": "r1", "parentId": "q1", "childrenIds": [], "role": "assistant", "content": "", "model": "hermes-agent", "done": False},
+    }
+    origin = chats_mod.ChatTable().insert_new_chat(
+        "u1", chats_mod.ChatForm(chat={"title": "租房", "models": ["hermes-agent"], "history": {"messages": messages, "currentId": "r1"}})
+    ).id
+    jobs, emitted = [], []
+    real_create_task = tasks.create_task
+
+    def create_task(coro, id=None, **kwargs):
+        if id != origin:  # the run's own task runs as usual
+            return real_create_task(coro, id=id, **kwargs)
+        jobs.append(coro)
+        return "task-1", None
+
+    async def emitter(event):
+        emitted.append(event)
+
+    async def no_folder(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr("open_webui.socket.main.get_event_emitter", lambda metadata: emitter)
+    monkeypatch.setattr(tasks, "create_task", create_task)
+    monkeypatch.setattr(team_chats, "sort_into_folder", no_folder)
+    form = {
+        "messages": [
+            {"role": "user", "content": "我在北京租房"},
+            {"role": "assistant", "content": "好的"},
+            {"role": "user", "content": [{"type": "text", "text": "押金多久退？"}]},
+        ]
+    }
+
+    async def scenario():
+        await mode_dispatch.run_mode_dispatch(env.request, form, USER, {"chat_id": origin, "message_id": "r1"}, "hermes-agent", "answer")
+        await jobs[0]
+        reply = chats_mod.ChatTable().get_chat_by_id(origin).chat["history"]["messages"]["r1"]
+        await _settle(reply["mode_dispatch"]["chat_id"])
+        return reply
+
+    reply = asyncio.run(scenario())
+    run_chat_id = reply["mode_dispatch"]["chat_id"]
+    assert reply["done"] is True and reply["mode_dispatch"]["kind"] == "answer" and "已交给精答" in reply["content"]
+    assert chats_mod.ChatTable().get_chat_by_id(origin).title == "租房"  # a named chat keeps its name
+    run = asyncio.run(api.get_answer(run_chat_id, USER))["run"]
+    assert run["question"] == "押金多久退？" and run["status"] == "done"
+    assert run["origin"] == {"chatId": origin, "messageId": "r1"}
+    assert run["context"] == {"text": "用户：我在北京租房\n\nHermes：好的", "title": "租房", "chatId": origin}
+    assert env.after == [(run_chat_id, "done")]
+
+    posted = []
+
+    async def show(request, **kwargs):
+        posted.append(kwargs)
+        return {"status": True}
+
+    monkeypatch.setattr(hermes_notify, "show_notification_report", show)
+    out = asyncio.run(api.report_back(env.request, run_chat_id, USER))
+    assert out == {"chat_id": origin, "posted": True, "duplicate": False}
+    sent = posted[0]
+    assert sent["chat_id"] == origin and sent["source"] == "answer" and sent["quiet"] is True
+    assert sent["notice"].startswith("[精答结果] 「押金多久退？」由「⚖️合同审查」回答，下面是它的回答。")
+    assert sent["run_id"] == f"answer:{run_chat_id}:{run['id']}"
+    assert sent["content"].endswith("的回答：要点一。")
+
+    # a run asked on its own page has nowhere to go back to
+    own = asyncio.run(_ask(env, question="另一个问题"))
+    asyncio.run(_settle(own["id"]))
+    with pytest.raises(HTTPException) as refused:
+        asyncio.run(api.report_back(env.request, own["id"], USER))
+    assert refused.value.status_code == 400
+
+
+def test_a_dispatch_without_words_or_in_a_temporary_chat_says_why(env, monkeypatch):
+    from open_webui import tasks
+    from open_webui.utils import mode_dispatch
+
+    jobs, saved = [], []
+    monkeypatch.setattr("open_webui.socket.main.get_event_emitter", lambda metadata: (lambda event: asyncio.sleep(0)))
+    monkeypatch.setattr(tasks, "create_task", lambda coro, id=None, **kw: (jobs.append(coro) or "t", None))
+    monkeypatch.setattr(mode_dispatch.Chats, "upsert_message_to_chat_by_id_and_message_id",
+                        lambda chat_id, message_id, fields: saved.append(fields))
+
+    async def go(chat_id, form, files=None):
+        meta = {"chat_id": chat_id, "message_id": "m", **({"files": files} if files else {})}
+        await mode_dispatch.run_mode_dispatch(env.request, form, USER, meta, "hermes-agent", "answer")
+        await jobs[-1]
+        return saved[-1]
+
+    pictures = [{"type": "image", "url": "/api/v1/files/f-1/content"}]
+    only_files = asyncio.run(go("c-1", {"messages": [{"role": "user", "content": ""}]}, pictures))
+    assert only_files["content"] == "没能交给精答：精答要一个写出来的问题，光有附件不够" and only_files["error"]
+    assert "mode_dispatch" not in only_files
+    temporary = asyncio.run(go("local", {"messages": [{"role": "user", "content": "问题"}]}))
+    assert "临时对话" in temporary["content"]
+    assert mode_dispatch.message_file_ids({"files": [*pictures, {"type": "file", "id": "f-2"}, {"type": "file", "file": {"id": "f-2"}}]}) == ["f-1", "f-2"]

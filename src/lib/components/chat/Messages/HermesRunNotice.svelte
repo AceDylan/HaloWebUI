@@ -1,6 +1,7 @@
 <script lang="ts">
 	import {
 		describeHermesRunNotice,
+		describeModeNotice,
 		describeTeamNotice,
 		reportDurationSeconds,
 		splitRunReport,
@@ -26,9 +27,13 @@
 	$: reportDetails = describeReportFigures(splitRunReport(report, notice.runId)?.details ?? '');
 	// A 协作台 team's conclusion: posted by the team, not a runner.
 	$: team = describeTeamNotice(notice, content);
+	// A 精答 answer / a discussion's conclusion sent back to the chat it was dispatched from.
+	$: mode = team ? null : describeModeNotice(notice, content);
 	$: headline = team
 		? team.headline
-		: [describeHermesRunNotice(notice, report), duration].filter(Boolean).join(' · ');
+		: mode
+			? mode.headline
+			: [describeHermesRunNotice(notice, report), duration].filter(Boolean).join(' · ');
 </script>
 
 <div class="flex w-full flex-col items-center py-1" data-halo-hermes-run-notice>
@@ -38,7 +43,9 @@
 		aria-expanded={open}
 		title={team
 			? '协作任务的结论（由协作台发来，不是你发的消息）'
-			: '后台任务完成通知（由 runner 发送，不是你发的消息）'}
+			: mode
+				? `${mode.label}的结果（发回这个对话，不是你发的消息）`
+				: '后台任务完成通知（由 runner 发送，不是你发的消息）'}
 		on:click={() => {
 			open = !open;
 		}}
@@ -51,7 +58,16 @@
 			class="mt-1.5 max-w-full rounded-xl border border-gray-100 bg-gray-50 px-3 py-2 text-2xs text-gray-500 dark:border-gray-800 dark:bg-gray-900 dark:text-gray-400"
 			data-halo-hermes-run-notice-details
 		>
-			{#if team}
+			{#if mode}
+				<div class="whitespace-pre-wrap break-all">{content}</div>
+				{#if mode.href}
+					<a
+						class="mt-1 inline-block text-sky-700 underline underline-offset-2 dark:text-sky-300"
+						href={mode.href}
+						data-halo-mode-notice-link>在{mode.label}打开 →</a
+					>
+				{/if}
+			{:else if team}
 				<div class="whitespace-pre-wrap break-all">{content}</div>
 				{#if team.teamId}
 					<a
@@ -68,12 +84,12 @@
 					<div class="break-all">运行编号：<span class="font-mono">{notice.runId}</span></div>
 				{/if}
 			{/if}
-			{#if !team && notice.sessionId}
+			{#if !team && !mode && notice.sessionId}
 				<div class="break-all">
 					{notice.sessionLabel || '会话'}：<span class="font-mono">{notice.sessionId}</span>
 				</div>
 			{/if}
-			{#if !team && !notice.runId && !notice.sessionId}
+			{#if !team && !mode && !notice.runId && !notice.sessionId}
 				<div class="whitespace-pre-wrap break-all">{content}</div>
 			{/if}
 		</div>

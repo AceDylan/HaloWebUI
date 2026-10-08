@@ -564,3 +564,41 @@ def test_the_team_dispatch_starts_a_team_instead_of_a_hermes_run(monkeypatch):
     assert calls == [({"dispatch": "team"}, "chat-7", "hermes-agent")]
     # every other dispatch is untouched: a runner still goes through _hermes_run_options
     assert hermes_agent._hermes_run_options({"hermes_options": {"dispatch": "team"}}) == {}
+
+
+def test_answer_and_discuss_dispatches_go_to_their_mode_and_a_typed_command_wins(monkeypatch):
+    from open_webui.utils import mode_dispatch
+
+    calls = []
+
+    async def fake_mode(request, form_data, user, metadata, model_id, kind):
+        calls.append((kind, metadata["chat_id"]))
+        return {"status": True, "task_id": f"{kind}-task"}
+
+    monkeypatch.setattr(
+        hermes_agent,
+        "_resolve_hermes_connection",
+        lambda *_args: ("http://hermes.test/v1", "", "hermes-agent"),
+    )
+    monkeypatch.setattr(mode_dispatch, "run_mode_dispatch", fake_mode)
+    metadata = {"session_id": "s", "chat_id": "chat-8", "message_id": "m-8"}
+    for kind in ("answer", "discuss"):
+        form_data = {"model": "hermes-agent", "messages": [{"role": "user", "content": "x"}],
+                     "hermes_options": {"dispatch": kind}}
+        out = asyncio.run(hermes_agent.run_hermes_agent(None, form_data, SimpleNamespace(id="u", role="user"), metadata,
+                                                        {"id": "hermes-agent"}, []))
+        assert out == {"status": True, "task_id": f"{kind}-task"}
+    assert calls == [("answer", "chat-8"), ("discuss", "chat-8")]
+
+    def mode(text, dispatch):
+        return hermes_agent._mode_dispatch({"messages": [{"role": "user", "content": text}],
+                                            "hermes_options": {"dispatch": dispatch}})
+
+    assert mode("租房押金多久退", "team") == "team"
+    assert mode([{"type": "text", "text": "比较一下"}], "DISCUSS") == "discuss"
+    # typed by hand, a command goes to Hermes as written (the rule a runner dispatch has)
+    assert mode("/reclaude 修一下登录", "team") is None
+    assert mode("  /model", "answer") is None
+    assert mode("/root/app/x.txt 是什么", "answer") == "answer"  # a path, not a command
+    assert mode("x", "reclaude") is None and mode("x", "") is None
+    assert hermes_agent._hermes_run_options({"hermes_options": {"dispatch": "answer"}}) == {}

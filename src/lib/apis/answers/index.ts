@@ -1,5 +1,12 @@
 import { WEBUI_API_BASE_URL } from '$lib/constants';
-import type { DiscussContext, DiscussResearch, DiscussRetry, DiscussUsage } from '$lib/apis/discussions';
+import type {
+	DiscussContext,
+	DiscussResearch,
+	DiscussRetry,
+	DiscussUsage,
+	DispatchOrigin,
+	ReportBack
+} from '$lib/apis/discussions';
 
 /** 精答工作台 (answer desk) API — see backend/open_webui/routers/answers.py. */
 
@@ -64,6 +71,8 @@ export type AnswerRun = {
 	webAllowed: boolean;
 	/** The conversation it was asked from, given to the dispatcher and the assistant as background. */
 	context?: DiscussContext | null;
+	/** Sent from a chat (派发方式「精答」): the answer goes back to that chat when it is done. */
+	origin?: DispatchOrigin | null;
 	plan: AnswerPlan;
 	assistant: AnswerAssistant | null;
 	research: DiscussResearch | null;
@@ -182,5 +191,9 @@ export const retryAnswer = (token: string, chatId: string) => request<AnswerDeta
 
 export const revertAnswerUpgrade = (token: string, chatId: string) =>
 	request<AnswerDetail>(token, 'POST', `/${id(chatId)}/revert`);
+
+/** 「把结果放进这个对话」: the answer of a run sent from a chat, into that chat now. */
+export const reportBackAnswer = (token: string, chatId: string) =>
+	request<ReportBack>(token, 'POST', `/${id(chatId)}/report-back`);
 
 export const deleteAnswer = (token: string, chatId: string) => request<{ ok: boolean }>(token, 'DELETE', `/${id(chatId)}`);

@@ -199,6 +199,11 @@ async def _after_done(request: Request, user, chat_id: str, run: dict) -> None:
         await emit({"type": "chat:completion", "data": {"done": True, "title": title, "content": answer[:400], "answer_desk": True}})
     except Exception:
         pass
+    if run.get("origin"):
+        # 派发方式「精答」: the answer goes back into the chat it was asked in
+        from open_webui.utils import mode_dispatch
+
+        mode_dispatch.report_back_later(request, "answer", chat_id, run)
 
 
 def _resolve_planner(requested: Optional[str], models_map: dict, ambiguous: set, user) -> dict:
@@ -355,25 +360,27 @@ async def list_answers(user=Depends(get_verified_user), archived: bool = False):
     return out
 
 
-@router.post("/")
-async def create_answer(request: Request, form: CreateForm, user=Depends(get_verified_user)):
-    question = desk.clean_text(form.question, desk.QUESTION_MAX_CHARS)
-    if not question:
-        raise HTTPException(status_code=400, detail="先写下要问的问题")
-    key = str(form.client_key or "").strip()[:64] or None
-    if key:
-        existing = _recent_duplicate(user, key, "")
-        if existing:
-            return {**_detail(existing, user), "deduplicated": True}
+async def _prepare(request: Request, user, planner_ref: Optional[str], research: bool) -> tuple[dict, bool]:
+    """Room for one more run, the dispatcher's model and whether it may look things up."""
     _check_capacity(user)
     models_map, ambiguous = await _models(request, user)
-    planner = _resolve_planner(form.planner, models_map, ambiguous, user)
-    web_allowed = bool(form.research) and bool(getattr(request.app.state.config, "ENABLE_WEB_SEARCH", True))
-    # checked again after the awaits above (none from here to the insert)
-    existing = _recent_duplicate(user, key, question)
-    if existing:
-        return {**_detail(existing, user), "deduplicated": True}
+    planner = _resolve_planner(planner_ref, models_map, ambiguous, user)
+    web_allowed = bool(research) and bool(getattr(request.app.state.config, "ENABLE_WEB_SEARCH", True))
+    return planner, web_allowed
 
+
+def _open(
+    request: Request,
+    user,
+    *,
+    question: str,
+    planner: dict,
+    web_allowed: bool,
+    context: Optional[dict] = None,
+    chosen: str = "",
+    origin: Optional[dict] = None,
+):
+    """The run's chat (the question and the reply it streams into), written and started."""
     user_message_id, message_id = desk.new_id(), desk.new_id()
     run = desk.new_run(
         question=question,
@@ -381,9 +388,9 @@ async def create_answer(request: Request, form: CreateForm, user=Depends(get_ver
         user_message_id=user_message_id,
         message_id=message_id,
         web_allowed=web_allowed,
-        context=clean_context(form.context),
+        context=context,
+        origin=origin,
     )
-    chosen = str(form.assistant or "").strip()[:200]
     if chosen.startswith(("model:", "builtin:")):
         run["chosen"] = chosen
     messages = {
@@ -425,8 +432,49 @@ async def create_answer(request: Request, form: CreateForm, user=Depends(get_ver
     for mid in (user_message_id, message_id):
         Chats.upsert_message_to_chat_by_id_and_message_id(chat.id, mid, messages[mid])
     Chats.set_chat_meta_value_by_id(chat.id, META_KEY, desk.summary_meta(run))
-    _recent.setdefault(user.id, []).append({"key": key, "question": question, "chat_id": chat.id, "at": time.time()})
     _start(request, user, chat, run)
+    return chat
+
+
+async def open_for_chat(request: Request, user, *, question: str, context: Optional[dict], origin: dict) -> str:
+    """派发方式「精答」 (utils/mode_dispatch.py): a chat's message as a new run, the conversation
+    before it as background; the answer goes back to ``origin`` when it is done. Returns the run's
+    chat id; raises HTTPException as the route does."""
+    question = desk.clean_text(question, desk.QUESTION_MAX_CHARS)
+    if not question:
+        raise HTTPException(status_code=400, detail="先写下要问的问题")
+    planner, web_allowed = await _prepare(request, user, None, True)
+    return _open(
+        request, user, question=question, planner=planner, web_allowed=web_allowed, context=clean_context(context), origin=origin
+    ).id
+
+
+@router.post("/")
+async def create_answer(request: Request, form: CreateForm, user=Depends(get_verified_user)):
+    question = desk.clean_text(form.question, desk.QUESTION_MAX_CHARS)
+    if not question:
+        raise HTTPException(status_code=400, detail="先写下要问的问题")
+    key = str(form.client_key or "").strip()[:64] or None
+    if key:
+        existing = _recent_duplicate(user, key, "")
+        if existing:
+            return {**_detail(existing, user), "deduplicated": True}
+    planner, web_allowed = await _prepare(request, user, form.planner, form.research)
+    # checked again after the awaits above (none from here to the insert)
+    existing = _recent_duplicate(user, key, question)
+    if existing:
+        return {**_detail(existing, user), "deduplicated": True}
+
+    chat = _open(
+        request,
+        user,
+        question=question,
+        planner=planner,
+        web_allowed=web_allowed,
+        context=clean_context(form.context),
+        chosen=str(form.assistant or "").strip()[:200],
+    )
+    _recent.setdefault(user.id, []).append({"key": key, "question": question, "chat_id": chat.id, "at": time.time()})
     return _detail(chat.id, user)
 
 
@@ -490,6 +538,24 @@ async def revert_upgrade(request: Request, chat_id: str, user=Depends(get_verifi
     run["assistant"] = {**assistant, "reverted": True}
     _persist(chat_id, run)
     return _detail(chat_id, user)
+
+
+@router.post("/{chat_id}/report-back")
+async def report_back(request: Request, chat_id: str, user=Depends(get_verified_user)):
+    """「把结果放进这个对话」: the answer of a run dispatched from a chat, into that chat now (it
+    goes there by itself when the run ends; this is for when that did not happen)."""
+    from open_webui.utils import mode_dispatch
+
+    chat = _own(chat_id, user)
+    run = _stored_run(chat)
+    if not run or not run.get("origin"):
+        raise HTTPException(status_code=400, detail="这条精答不是从对话里派发的")
+    if chat_id in LIVE or run.get("status") != "done":
+        raise HTTPException(status_code=409, detail="还没答完")
+    try:
+        return await mode_dispatch.report_back(request, "answer", chat_id, run, quiet=True)
+    except mode_dispatch.ReportError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail)
 
 
 @router.delete("/{chat_id}")

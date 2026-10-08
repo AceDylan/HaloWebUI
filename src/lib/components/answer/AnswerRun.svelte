@@ -278,6 +278,10 @@
 								<a href="/c/{run.context.chatId}" class="mt-1 inline-block hover:underline">回到那个对话 →</a>
 							{/if}
 						</details>
+					{:else if run.origin?.chatId}
+						<a href="/c/{run.origin.chatId}" class="dc-context text-xs text-gray-500 hover:underline dark:text-gray-400" data-answer-origin
+							>从对话里交来的，答完会发回去 · 回到那个对话 →</a
+						>
 					{/if}
 				</header>
 

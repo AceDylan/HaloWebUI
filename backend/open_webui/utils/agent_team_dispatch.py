@@ -10,7 +10,7 @@ reply carries ``team_dispatch: {team_id}`` for the card.
 
 import logging
 import time
-from typing import Any, Optional
+from typing import Any
 
 from open_webui.models.agent_teams import AgentTeams
 from open_webui.models.chats import Chats
@@ -23,6 +23,7 @@ from open_webui.utils.agent_teams import (
     hermes_target,
     start_planning,
 )
+from open_webui.utils.team_chats import card_text
 
 log = logging.getLogger(__name__)
 
@@ -42,28 +43,38 @@ def _text(content: Any) -> str:
     return ""
 
 
-def goal_from(messages: Any) -> tuple[str, str]:
-    """(goal, the user's own words) from the request's messages: the last user message, then what
-    was said before it (newest last), so the team knows the conversation it came from."""
+def split_conversation(
+    messages: Any, *, turns: int = CONTEXT_MESSAGES, each: int = CONTEXT_MESSAGE_CHARS, total: int = CONTEXT_CHARS
+) -> tuple[str, list[str]]:
+    """(the user's own words in the last user message, what was said before it): the earlier turns
+    as 「用户：」 / 「Hermes：」 lines, oldest first — the newest ``turns`` of them, each cut at
+    ``each`` characters, ``total`` at most. ("", []) when there is no user message."""
     rows = [m for m in (messages or []) if isinstance(m, dict) and m.get("role") in ("user", "assistant")]
     ask_index = next((i for i in range(len(rows) - 1, -1, -1) if rows[i].get("role") == "user"), None)
     if ask_index is None:
-        return "", ""
+        return "", []
     ask = _text(rows[ask_index].get("content"))
     lines: list[str] = []
     used = 0
-    for row in reversed(rows[max(0, ask_index - CONTEXT_MESSAGES):ask_index]):
+    for row in reversed(rows[max(0, ask_index - turns):ask_index]):
         text = _text(row.get("content"))
         if not text:
             continue
-        text = text[:CONTEXT_MESSAGE_CHARS] + ("…" if len(text) > CONTEXT_MESSAGE_CHARS else "")
-        if used + len(text) > CONTEXT_CHARS:
+        text = text[:each] + ("…" if len(text) > each else "")
+        if used + len(text) > total:
             break
         used += len(text)
         lines.append(("用户：" if row.get("role") == "user" else "Hermes：") + text)
+    return ask, list(reversed(lines))
+
+
+def goal_from(messages: Any) -> tuple[str, str]:
+    """(goal, the user's own words) from the request's messages: the last user message, then what
+    was said before it (newest last), so the team knows the conversation it came from."""
+    ask, lines = split_conversation(messages)
     goal = ask
     if lines:
-        goal += "\n\n（这是在对话里交给协作台的；对话里之前说的，供参考）\n" + "\n\n".join(reversed(lines))
+        goal += "\n\n（这是在对话里交给协作台的；对话里之前说的，供参考）\n" + "\n\n".join(lines)
     return goal[:GOAL_MAX_CHARS], ask
 
 
@@ -78,19 +89,11 @@ def attachments(metadata: dict, user) -> list[dict]:
         return []
 
 
-def card_text(title: str, *, inputs: int = 0, error: Optional[str] = None) -> str:
-    """The reply's words (what Hermes reads on the next turn, and what shows without the card)."""
-    if error:
-        return f"没能交给协作台：{error}"
-    files = f"，附带的 {inputs} 个文件会放进团队的工作目录" if inputs else ""
-    return (f"🤝 已交给协作台「{title}」：负责人在制定计划，计划好就直接开始{files}。"
-            "进度在下面的卡片里实时更新，做完后完整结果会发回这个对话。")
-
-
 async def run_team_dispatch(request, form_data: dict, user, metadata: dict, model_id: str) -> dict:
     """The chat's message → a team. Finishes the reply at once (no model turn)."""
     from open_webui.socket.main import get_event_emitter
     from open_webui.tasks import create_task
+    from open_webui.utils.hermes_agent import is_temporary_chat_id
 
     chat_id, message_id = metadata["chat_id"], metadata["message_id"]
     emitter = get_event_emitter(metadata)
@@ -102,6 +105,8 @@ async def run_team_dispatch(request, form_data: dict, user, metadata: dict, mode
         error = None
         if not ENABLE_AGENT_TEAMS:
             error = "协作台没有开启"
+        elif is_temporary_chat_id(chat_id):
+            error = "临时对话不保存，结果没处发回；关掉临时对话再试"
         elif not ask and not inputs:
             error = "消息是空的"
         else:
@@ -118,7 +123,8 @@ async def run_team_dispatch(request, form_data: dict, user, metadata: dict, mode
             except Exception as exc:  # noqa: BLE001
                 log.exception("teams: chat dispatch failed")
                 error = f"{type(exc).__name__}"
-        content = card_text(team.title if team else "", inputs=len(inputs), error=error)
+        # the same words as a team's card anywhere else (team_chats.card_text)
+        content = card_text(team) if team is not None else f"没能交给协作台：{error}"
         fields: dict = {"content": content, "done": True, "completedAt": int(time.time()), "model": model_id}
         if team is not None:
             fields["team_dispatch"] = {"team_id": team.id}

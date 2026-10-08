@@ -110,6 +110,7 @@
 	import CodeExecutions from './CodeExecutions.svelte';
 	import ContentRenderer from './ContentRenderer.svelte';
 	import TeamChatCard from '$lib/components/teams/TeamChatCard.svelte';
+	import ModeDispatchCard from './ModeDispatchCard.svelte';
 	import TeamResultBar from '$lib/components/teams/TeamResultBar.svelte';
 	import MessageOutline from './MessageOutline.svelte';
 	import ThinkingIndicator from './ThinkingIndicator.svelte';
@@ -1410,6 +1411,13 @@
 	});
 	// 派发方式「协作台」: this reply is a team's live card.
 	$: teamDispatchId = ((message as any)?.team_dispatch?.team_id as string | undefined) ?? null;
+	// 派发方式「精答」/「讨论」: this reply is the run's live card.
+	$: modeDispatch = (() => {
+		const value = (message as any)?.mode_dispatch;
+		return value && (value.kind === 'answer' || value.kind === 'discuss') && typeof value.chat_id === 'string'
+			? { kind: value.kind as 'answer' | 'discuss', chatId: value.chat_id as string }
+			: null;
+	})();
 	// A runner's report under its notice line: the line above already says who finished and
 	// how (its 详情 has the model, cost and turns), so the runner's two header lines are not
 	// shown again. Copy and edit still use the whole content.
@@ -2159,6 +2167,9 @@
 
 										{#if teamDispatchId}
 											<TeamChatCard teamId={teamDispatchId} {history} />
+										{/if}
+										{#if modeDispatch}
+											<ModeDispatchCard kind={modeDispatch.kind} chatId={modeDispatch.chatId} {history} />
 										{/if}
 										{#if teamResultId && message?.done !== false}
 											<TeamResultBar teamId={teamResultId} />

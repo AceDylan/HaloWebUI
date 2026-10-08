@@ -6,6 +6,7 @@ driven here, deleted like any chat. Every route is per user.
 
 import json
 import logging
+import re
 import time
 from typing import Any, Optional
 
@@ -319,6 +320,11 @@ async def _after_done(request: Request, user, chat_id: str, ask: dict) -> None:
         await emit({"type": "chat:completion", "data": {"done": True, "title": title, "content": answer[:400], "discussion_room": True}})
     except Exception:
         pass
+    if ask.get("origin"):
+        # 派发方式「讨论」: the conclusion goes back into the chat the question was asked in
+        from open_webui.utils import mode_dispatch
+
+        mode_dispatch.report_back_later(request, "discuss", chat_id, ask)
 
 
 def _parse_queries(res: Any) -> list[str]:
@@ -644,6 +650,139 @@ async def list_discussions(user=Depends(get_verified_user), archived: bool = Fal
     return out
 
 
+def _open(
+    request: Request,
+    user,
+    *,
+    question: str,
+    setup: dict,
+    files: list[dict],
+    context: Optional[dict] = None,
+    origin: Optional[dict] = None,
+):
+    """The discussion's chat (the question and the reply the room writes into), written and started."""
+    user_message_id, assistant_message_id = room.new_id(), room.new_id()
+    ask = room.new_ask(
+        question=question,
+        setup=setup,
+        user_message_id=user_message_id,
+        message_id=assistant_message_id,
+        files=files,
+        context=context,
+        origin=origin,
+    )
+    messages = {
+        user_message_id: _user_message(user_message_id, question, None, assistant_message_id, ask["moderator"]["model"], files),
+        assistant_message_id: _assistant_message(assistant_message_id, user_message_id, ask),
+    }
+    payload = {
+        "title": DEFAULT_TITLE,
+        "models": [seat["model"] for seat in setup["seats"]],
+        "params": {},
+        "history": {"messages": messages, "currentId": assistant_message_id},
+        "tags": [],
+        "timestamp": room.now_ms(),
+        CHAT_KEY: {"v": 1, **setup, "asks": [assistant_message_id]},
+    }
+    chat = Chats.insert_new_chat(
+        user.id, ChatForm(chat=payload, title_auto_generated=True)
+    )
+    if chat is None:
+        raise HTTPException(status_code=500, detail="创建讨论失败")
+    # write both messages through the normal path too (it also fills the message table)
+    for message_id in (user_message_id, assistant_message_id):
+        Chats.upsert_message_to_chat_by_id_and_message_id(chat.id, message_id, messages[message_id])
+    Chats.set_chat_meta_value_by_id(chat.id, META_KEY, room.summary_meta(setup, [ask]))
+    _start(request, user, chat, ask, history=[])
+    return chat
+
+
+# Model families, so a table set without the user gets different voices, not three of a kind.
+_FAMILY_RE = re.compile(
+    r"claude|gpt|o\d|gemini|deepseek|qwen|glm|kimi|moonshot|grok|llama|mistral|doubao|minimax|hunyuan|ernie|yi-", re.I
+)
+
+
+def _family(base: dict) -> str:
+    match = _FAMILY_RE.search(f"{base.get('name') or ''} {base.get('id') or ''}")
+    return match.group(0).lower() if match else str(base.get("id") or "")
+
+
+def dispatch_setup(user, models_map: dict, ambiguous: set) -> dict:
+    """The table for a discussion started from a chat (派发方式「讨论」), where nobody picks
+    seats: the one the user's latest discussion had (as the page restores it), while its models
+    are still there; otherwise three text models of different families with a strong moderator,
+    assistants matched to the question."""
+    from open_webui.utils import assistant_library as lib
+
+    for row in Chats.get_chats_with_meta_key_by_user_id(user.id, META_KEY, limit=3):
+        chat = Chats.get_chat_by_id_and_user_id(row["id"], user.id)
+        data = ((chat.chat if chat else None) or {}).get(CHAT_KEY) if chat else None
+        if not isinstance(data, dict) or not data.get("seats"):
+            continue
+        raw = {
+            "mode": data.get("mode"),
+            "rounds": data.get("rounds"),
+            "seats": [
+                {k: seat.get(k) for k in ("model", "role", "assist", "assistant", "duty") if seat.get(k)}
+                for seat in data.get("seats") or []
+                if isinstance(seat, dict)
+            ],
+            "moderator": (data.get("moderator") or {}).get("model"),
+            "research": data.get("research"),
+            "autoMatch": data.get("autoMatch", True),
+        }
+        try:
+            return room.normalize_setup(raw, models_map, ambiguous, user)
+        except DiscussError:
+            break  # its models are gone: the defaults below
+    _, bases = lib.library(models_map, user)
+    picked: list[dict] = []
+    families: set[str] = set()
+    for base in bases:
+        if _family(base) not in families:
+            families.add(_family(base))
+            picked.append(base)
+    picked += [b for b in bases if b not in picked]
+    picked = picked[:3]
+    if len(picked) < room.MIN_SEATS:
+        raise HTTPException(status_code=400, detail=f"能参加讨论的文本模型不到 {room.MIN_SEATS} 个")
+    strong = next((b for b in bases if re.search(r"claude|gpt", b["name"], re.I)), picked[0])
+    try:
+        return room.normalize_setup(
+            {"mode": "roundtable", "seats": [{"model": b["id"]} for b in picked], "moderator": strong["id"], "autoMatch": True},
+            models_map,
+            ambiguous,
+            user,
+        )
+    except DiscussError as exc:
+        _raise(exc)
+
+
+async def open_for_chat(
+    request: Request, user, *, question: str, context: Optional[dict], origin: dict, files: Optional[list[str]] = None
+) -> str:
+    """派发方式「讨论」 (utils/mode_dispatch.py): a chat's message as a new discussion at the
+    user's usual table (dispatch_setup), the conversation before it as background, the message's
+    files on the table; the conclusion goes back to ``origin`` when it is written. Returns the
+    discussion's chat id; raises HTTPException as the route does."""
+    question = room._clean_text(question, room.QUESTION_MAX_CHARS)
+    if not question:
+        raise HTTPException(status_code=400, detail="先写下要讨论的问题")
+    _check_capacity(user)
+    models_map, ambiguous = await _models(request, user)
+    setup = dispatch_setup(user, models_map, ambiguous)
+    loaded = []
+    for file_id in (files or [])[: room.MAX_FILES]:
+        try:
+            loaded += _load_files([file_id], user)
+        except HTTPException:
+            continue  # a file that is gone: the discussion goes ahead without it
+    return _open(
+        request, user, question=question, setup=setup, files=loaded, context=room.clean_context(context), origin=origin
+    ).id
+
+
 @router.post("/")
 async def create_discussion(request: Request, form: CreateForm, user=Depends(get_verified_user)):
     question = room._clean_text(form.question, room.QUESTION_MAX_CHARS)
@@ -680,39 +819,8 @@ async def create_discussion(request: Request, form: CreateForm, user=Depends(get
     existing = _recent_duplicate(user, key, fingerprint)
     if existing:
         return {**_detail(existing, user), "deduplicated": True}
-    user_message_id, assistant_message_id = room.new_id(), room.new_id()
-    ask = room.new_ask(
-        question=question,
-        setup=setup,
-        user_message_id=user_message_id,
-        message_id=assistant_message_id,
-        files=files,
-        context=room.clean_context(form.context),
-    )
-    messages = {
-        user_message_id: _user_message(user_message_id, question, None, assistant_message_id, ask["moderator"]["model"], files),
-        assistant_message_id: _assistant_message(assistant_message_id, user_message_id, ask),
-    }
-    payload = {
-        "title": DEFAULT_TITLE,
-        "models": [seat["model"] for seat in setup["seats"]],
-        "params": {},
-        "history": {"messages": messages, "currentId": assistant_message_id},
-        "tags": [],
-        "timestamp": room.now_ms(),
-        CHAT_KEY: {"v": 1, **setup, "asks": [assistant_message_id]},
-    }
-    chat = Chats.insert_new_chat(
-        user.id, ChatForm(chat=payload, title_auto_generated=True)
-    )
-    if chat is None:
-        raise HTTPException(status_code=500, detail="创建讨论失败")
-    # write both messages through the normal path too (it also fills the message table)
-    for message_id in (user_message_id, assistant_message_id):
-        Chats.upsert_message_to_chat_by_id_and_message_id(chat.id, message_id, messages[message_id])
-    Chats.set_chat_meta_value_by_id(chat.id, META_KEY, room.summary_meta(setup, [ask]))
+    chat = _open(request, user, question=question, setup=setup, files=files, context=room.clean_context(form.context))
     _remember_created(user, key, fingerprint, chat.id)
-    _start(request, user, chat, ask, history=[])
     return _detail(chat.id, user)
 
 
@@ -913,6 +1021,26 @@ async def undo_assistant(chat_id: str, form: UndoAssistantForm, user=Depends(get
     ]
     _persist_ask(chat_id, ask, _setup_of(chat))
     return _detail(chat_id, user)
+
+
+@router.post("/{chat_id}/report-back")
+async def report_back(request: Request, chat_id: str, user=Depends(get_verified_user)):
+    """「把结论放进这个对话」: the conclusion of a discussion dispatched from a chat, into that chat
+    now (it goes there by itself when written; this is for when that did not happen)."""
+    from open_webui.utils import mode_dispatch
+
+    chat = _own(chat_id, user)
+    ask = next((a for a in _asks_of(chat) if a.get("origin")), None)
+    if ask is None:
+        raise HTTPException(status_code=400, detail="这个讨论不是从对话里派发的")
+    if chat_id in LIVE and (LIVE[chat_id].ask.get("id") == ask.get("id")):
+        raise HTTPException(status_code=409, detail="讨论还在进行")
+    if ask.get("status") != "done" or not ((ask.get("conclusion") or {}).get("content") or "").strip():
+        raise HTTPException(status_code=409, detail="还没有结论（停下的讨论可以先在讨论台点「让主持人直接总结」）")
+    try:
+        return await mode_dispatch.report_back(request, "discuss", chat_id, ask, quiet=True)
+    except mode_dispatch.ReportError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail)
 
 
 @router.delete("/{chat_id}")

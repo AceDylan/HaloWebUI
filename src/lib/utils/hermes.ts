@@ -134,7 +134,17 @@ export type HermesApprovalRequest = {
  * what that resolved to: a runner plus `continue_run` for a follow-up.
  */
 export type HermesRunOptions = {
-	dispatch: '' | 'hermes' | 'reclaude' | 'cchclaude' | 'anyclaude' | 'codex' | 'agy' | 'team';
+	dispatch:
+		| ''
+		| 'hermes'
+		| 'reclaude'
+		| 'cchclaude'
+		| 'anyclaude'
+		| 'codex'
+		| 'agy'
+		| 'answer'
+		| 'discuss'
+		| 'team';
 	model: string;
 	provider: string;
 	/** The run a sent follow-up went back to (its session resumed, not a new task). */
@@ -150,8 +160,15 @@ export const EMPTY_HERMES_RUN_OPTIONS: HermesRunOptions = {
 // cchclaude: the reclaude runner driving Claude Code through the user's own cch hub;
 // anyclaude: the same on anyrouter (free and slow).
 const HERMES_RUNNERS = new Set(['reclaude', 'cchclaude', 'anyclaude', 'codex', 'agy']);
-// 'team': the message becomes a 协作台 team (agent_team_dispatch in the backend), no Hermes run.
-const HERMES_DISPATCHES = new Set([...HERMES_RUNNERS, 'hermes', 'team']);
+// The message goes to another mode instead of a Hermes run: 'answer' a 精答 run, 'discuss' a
+// 讨论台 discussion (mode_dispatch in the backend), 'team' a 协作台 team (agent_team_dispatch).
+// The result comes back into the chat.
+const MODE_DISPATCHES = new Set(['answer', 'discuss', 'team']);
+const HERMES_DISPATCHES = new Set([...HERMES_RUNNERS, ...MODE_DISPATCHES, 'hermes']);
+
+/** True for a dispatch that hands the message to 精答 / 讨论台 / 协作台 (no Hermes run). */
+export const isModeDispatch = (dispatch: unknown): dispatch is 'answer' | 'discuss' | 'team' =>
+	MODE_DISPATCHES.has(String(dispatch ?? ''));
 // A run id as the runners name them: "20260927-005655-f2dd355f", an answer round "…-a1".
 const RUNNER_RUN_ID_RE = /^\d{8}-\d{6}-[0-9a-f]{6,32}(?:-a\d+)*$/;
 // "/reclaude …", "/model": a typed command wins over the panel ("/root/x" is a path).
@@ -236,6 +253,11 @@ export const hermesOptionsForMessage = (
 ): HermesRunOptions => {
 	const { continue_run: _stale, ...picked } = normalizeHermesRunOptions(options);
 	if (picked.dispatch === 'hermes') return { ...picked, dispatch: '' };
+	// A command typed into the message wins over 精答 / 讨论 / 协作台 too: it goes to Hermes as
+	// typed (as it wins over a runner, which the backend then does not put in front).
+	if (isModeDispatch(picked.dispatch) && SLASH_COMMAND_RE.test(String(prompt ?? ''))) {
+		return { ...picked, dispatch: '' };
+	}
 	if (!picked.dispatch && continuation && !SLASH_COMMAND_RE.test(String(prompt ?? ''))) {
 		return { ...picked, dispatch: continuation.runner, continue_run: continuation.runId };
 	}
@@ -294,7 +316,16 @@ const DISPATCH_LABELS: Record<string, string> = {
 	anyclaude: 'anyclaude',
 	codex: 'codex',
 	agy: 'agy',
+	answer: '精答',
+	discuss: '讨论',
 	team: '协作台'
+};
+
+// What a reply handed to another mode says it was (no Hermes model took part).
+const MODE_DISPATCH_LINES: Record<string, string> = {
+	answer: '交给精答：调度器挑最合适的助手来回答，答完发回这个对话（没有经过 Hermes 的模型）',
+	discuss: '交给讨论台：几个模型讨论，主持人写的结论发回这个对话（没有经过 Hermes 的模型）',
+	team: '交给协作台的团队：负责人做计划、成员分工执行，结果会发回这个对话（没有经过模型）'
 };
 
 /**
@@ -335,9 +366,9 @@ export const describeHermesReply = (
 		// the runner to get this and should know it did not.
 		parts.push(`未交回 ${DISPATCH_LABELS[dispatch] ?? dispatch}`);
 		lines.push(`没能直接交回 ${dispatch} 运行 ${askedToContinue}，由 Hermes 处理`);
-	} else if (dispatch === 'team') {
-		parts.push('协作台');
-		lines.push('交给协作台的团队：负责人做计划、成员分工执行，结果会发回这个对话（没有经过模型）');
+	} else if (isModeDispatch(dispatch)) {
+		// The model picked for Hermes did not take part: no model in the label, no runner line.
+		return { label: DISPATCH_LABELS[dispatch], title: MODE_DISPATCH_LINES[dispatch], fallback: false };
 	} else if (dispatch) {
 		parts.push(DISPATCH_LABELS[dispatch] ?? dispatch);
 		lines.push(
@@ -432,6 +463,34 @@ export const describeTeamNotice = (
 	return {
 		headline: match ? `🤝 协作任务「${match[1]}」${match[2]} · 负责人的结论` : '🤝 协作任务的结论',
 		teamId
+	};
+};
+
+/**
+ * A 精答 answer or a 讨论台 conclusion posted back into the chat it was dispatched from
+ * ("[精答结果] 「问题」由「助手」回答…"; run id "answer:<chat id>:<message id>" /
+ * "discuss:<chat id>:<message id>"): the line reads as the mode's, and links to its page.
+ */
+export const describeModeNotice = (
+	notice: HermesRunNotice,
+	content: unknown
+): { kind: 'answer' | 'discuss'; headline: string; href: string; label: string } | null => {
+	if (notice.agent !== 'answer' && notice.agent !== 'discuss') return null;
+	const kind = notice.agent;
+	const text = typeof content === 'string' ? content : '';
+	const chatId = notice.runId.match(/^(?:answer|discuss):([^:]+):/)?.[1] ?? '';
+	const question = text.match(/「(.+?)」/)?.[1] ?? '';
+	const by = text.match(/由「(.+?)」回答/)?.[1] ?? '';
+	const format = text.match(/：\d+ 个模型(.+?)（/)?.[1] ?? '讨论';
+	const subject = question ? `「${question}」` : '';
+	return {
+		kind,
+		headline:
+			kind === 'answer'
+				? `🎯 精答${subject}${by ? ` · ${by} 的回答` : ' 的回答'}`
+				: `💬 ${format}${subject} · 主持人的结论`,
+		href: chatId ? `/${kind}/${chatId}` : '',
+		label: kind === 'answer' ? '精答' : '讨论台'
 	};
 };
 

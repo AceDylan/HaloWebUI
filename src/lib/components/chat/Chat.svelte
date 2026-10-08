@@ -5432,7 +5432,8 @@
 			files,
 			discussion,
 			hermes_run,
-			team_dispatch
+			team_dispatch,
+			mode_dispatch
 		} = data;
 		if (isResponseStopped(message) || stoppedResponseMessageIds.has(message?.id)) {
 			if (done) {
@@ -5515,6 +5516,16 @@
 		if (team_dispatch && typeof team_dispatch === 'object' && team_dispatch.team_id) {
 			// 派发方式「协作台」: this reply is a team's card (TeamChatCard), not a Hermes answer.
 			message.team_dispatch = { team_id: String(team_dispatch.team_id) };
+		}
+
+		if (
+			mode_dispatch &&
+			typeof mode_dispatch === 'object' &&
+			(mode_dispatch.kind === 'answer' || mode_dispatch.kind === 'discuss') &&
+			mode_dispatch.chat_id
+		) {
+			// 派发方式「精答」/「讨论」: this reply is the run's card (ModeDispatchCard).
+			message.mode_dispatch = { kind: mode_dispatch.kind, chat_id: String(mode_dispatch.chat_id) };
 		}
 
 		commitHistoryMessage(message);

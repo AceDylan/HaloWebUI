@@ -53,6 +53,12 @@ export type DiscussFile = { id: string; name: string; type: 'image' | 'file'; co
 
 export type DiscussContext = { text: string; title: string; chatId: string | null };
 
+/** The chat a 精答 run / a discussion was sent from (派发方式「精答」/「讨论」) and its card reply. */
+export type DispatchOrigin = { chatId: string; messageId: string };
+
+/** The result put into the chat it was sent from (`posted` false: it was there already). */
+export type ReportBack = { chat_id: string; posted: boolean; duplicate: boolean };
+
 export type ResearchSource = { n: number; title: string; url: string; excerpt: string };
 
 export type DiscussResearch = {
@@ -128,6 +134,8 @@ export type DiscussAsk = {
 	files?: DiscussFile[];
 	/** The conversation the discussion was started from, given to every seat as background. */
 	context?: DiscussContext | null;
+	/** Sent from a chat (派发方式「讨论」): the conclusion goes back to that chat. */
+	origin?: DispatchOrigin | null;
 	startedAt: number;
 	endedAt?: number | null;
 	usage: DiscussUsage;
@@ -252,6 +260,10 @@ export const retryDiscussionTurn = (token: string, chatId: string, turn: string)
 /** Undo the upgrade the last question made to a seat's assistant. */
 export const undoSeatAssistant = (token: string, chatId: string, seat: string) =>
 	request<Discussion>(token, 'POST', `/${id(chatId)}/undo-assistant`, { seat });
+
+/** 「把结论放进这个对话」: the conclusion of a discussion sent from a chat, into that chat now. */
+export const reportBackDiscussion = (token: string, chatId: string) =>
+	request<ReportBack>(token, 'POST', `/${id(chatId)}/report-back`);
 
 export const deleteDiscussion = (token: string, chatId: string) =>
 	request<{ ok: boolean }>(token, 'DELETE', `/${id(chatId)}`);

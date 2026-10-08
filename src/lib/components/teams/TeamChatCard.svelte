@@ -21,7 +21,10 @@
 	/** The chat around the card: whether the team's result is already in it, and where. */
 	export let history: { messages?: Record<string, any> } | null = null;
 
+	// Every 5 s while something moves; a team can work for an hour, so a stage that stays the
+	// same is read less often (10 s after a minute, 20 s after five), and again at 5 s once it moves.
 	const POLL_MS = 5000;
+	const POLL_SLOW_MS = [10000, 20000];
 	const POLL_HIDDEN_MS = 30000;
 	const SETTLED = new Set(['done', 'stopped', 'plan_failed', 'start_failed', 'cancelled']);
 	const ENDED = new Set(['stopped', 'plan_failed', 'start_failed', 'cancelled']);
@@ -33,6 +36,8 @@
 	let bringing = false;
 	let timer: ReturnType<typeof setTimeout> | null = null;
 	let destroyed = false;
+	let lastSeen = '';
+	let unchanged = 0;
 
 	$: key = stage?.key ?? '';
 	$: settled = gone || SETTLED.has(key) || (team?.status === 'running' && team.phase === 'stopped');
@@ -109,6 +114,19 @@
 			team = data.team;
 			stage = data.stage ?? stage;
 			error = '';
+			// what the card shows, not the clock fields (at, eta) that differ on every read
+			const seen = JSON.stringify([
+				team?.status,
+				team?.phase,
+				team?.task_count,
+				stage?.key,
+				stage?.now,
+				stage?.steps,
+				stage?.done,
+				stage?.task
+			]);
+			unchanged = seen === lastSeen ? unchanged + 1 : 0;
+			lastSeen = seen;
 		} catch (e) {
 			if ((e as any)?.status === 404) {
 				gone = true; // deleted on the 协作台: nothing more to read
@@ -123,11 +141,15 @@
 		if (timer) clearTimeout(timer);
 		if (destroyed || settled) return;
 		const hidden = typeof document !== 'undefined' && document.visibilityState === 'hidden';
-		timer = setTimeout(load, hidden ? POLL_HIDDEN_MS : POLL_MS);
+		const visible = unchanged >= 36 ? POLL_SLOW_MS[1] : unchanged >= 12 ? POLL_SLOW_MS[0] : POLL_MS;
+		timer = setTimeout(load, hidden ? POLL_HIDDEN_MS : visible);
 	};
 
 	const onVisibility = () => {
-		if (document.visibilityState === 'visible' && !settled) load();
+		if (document.visibilityState === 'visible' && !settled) {
+			unchanged = 0;
+			load();
+		}
 	};
 
 	onMount(() => {

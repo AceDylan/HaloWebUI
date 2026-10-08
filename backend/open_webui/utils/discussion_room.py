@@ -818,11 +818,14 @@ def new_ask(
     rounds: Optional[int] = None,
     files: Optional[list[dict]] = None,
     context: Optional[dict] = None,
+    origin: Optional[dict] = None,
 ) -> dict:
+    """``origin``: the chat whose message started this discussion (派发方式「讨论」,
+    utils/mode_dispatch.py): ``{"chatId", "messageId"}`` — the conclusion goes back there."""
     total_rounds = setup["rounds"] if rounds is None else max(1, min(int(rounds), MAX_ROUNDS))
     if setup["mode"] == "review":
         total_rounds = 2
-    return {
+    ask = {
         "v": 1,
         "id": message_id,
         "userMessageId": user_message_id,
@@ -848,6 +851,9 @@ def new_ask(
         "usage": {},
         "error": None,
     }
+    if origin:
+        ask["origin"] = deepcopy(origin)
+    return ask
 
 
 def ask_usage(ask: dict) -> dict:

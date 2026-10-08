@@ -995,6 +995,25 @@ def _starts_with_command(text) -> bool:
     return bool(_SLASH_COMMAND_RE.match(str(text or "").lstrip()))
 
 
+# The 派发方式 that hand the message to another mode instead of a Hermes run.
+HERMES_MODE_DISPATCHES = ("team", "answer", "discuss")
+
+
+def _mode_dispatch(form_data) -> str | None:
+    """"team" / "answer" / "discuss" when the composer hands this message to 协作台 / 精答 /
+    讨论台. A message that starts with a command of its own goes to Hermes as typed (the same
+    rule as a runner dispatch: typed by hand, it wins over the composer setting)."""
+    raw = form_data.get("hermes_options") if isinstance(form_data, dict) else None
+    dispatch = str(raw.get("dispatch") or "").strip().lower() if isinstance(raw, dict) else ""
+    if dispatch not in HERMES_MODE_DISPATCHES:
+        return None
+    messages = form_data.get("messages") or []
+    last = next((m for m in reversed(messages) if isinstance(m, dict) and m.get("role") == "user"), None)
+    if last is not None and _starts_with_command(_run_input_text([last])):
+        return None
+    return dispatch
+
+
 def _run_input_text(run_input) -> str:
     """The first text of a run input (a string or a one-message array)."""
     if isinstance(run_input, str):
@@ -1980,12 +1999,17 @@ async def run_hermes_agent(request, form_data, user, metadata, model, events, ta
     if not base_url:
         return None
 
-    raw_options = form_data.get("hermes_options") if isinstance(form_data, dict) else None
-    if isinstance(raw_options, dict) and str(raw_options.get("dispatch") or "").strip().lower() == "team":
+    mode = _mode_dispatch(form_data)
+    if mode == "team":
         # 派发方式「协作台」: the message becomes a 协作台 team, no Hermes run.
         from open_webui.utils.agent_team_dispatch import run_team_dispatch
 
         return await run_team_dispatch(request, form_data, user, metadata, model_id)
+    if mode:
+        # 派发方式「精答」/「讨论」: the message is asked there, the result comes back here.
+        from open_webui.utils.mode_dispatch import run_mode_dispatch
+
+        return await run_mode_dispatch(request, form_data, user, metadata, model_id, mode)
 
     event_emitter = get_event_emitter(metadata)
     event_caller = get_event_call(metadata)

@@ -445,6 +445,10 @@
 										<a href="/c/{ask.context.chatId}" class="mt-1 inline-block hover:underline" data-discuss-context-link>回到那个对话 →</a>
 									{/if}
 								</details>
+							{:else if ask.origin?.chatId}
+								<a href="/c/{ask.origin.chatId}" class="dc-context text-xs text-gray-500 hover:underline dark:text-gray-400" data-discuss-origin
+									>从对话里交来的，结论会发回去 · 回到那个对话 →</a
+								>
 							{/if}
 							<div class="flex flex-wrap gap-1.5">
 								{#each ask.seats as seat, si (seat.id)}

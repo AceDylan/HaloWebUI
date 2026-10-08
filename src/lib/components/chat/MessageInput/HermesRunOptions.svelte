@@ -5,6 +5,7 @@
 	import { user } from '$lib/stores';
 	import {
 		EMPTY_HERMES_RUN_OPTIONS,
+		isModeDispatch,
 		normalizeHermesRunOptions,
 		type HermesContinuation,
 		type HermesRunOptions
@@ -14,7 +15,8 @@
 
 	// How the next hermes run starts. "派发方式" puts /reclaude, /cchclaude, /anyclaude, /codex or /agy
 	// in front of the next message only (left on, every later "进度怎么样？"
-	// started another run); right after a runner's report the next message
+	// started another run), or hands it to 精答 / 讨论台 / 协作台 instead of a run (the result
+	// comes back into the chat); right after a runner's report the next message
 	// goes back to that run unless "直接" is picked; the model overrides
 	// hermes' configured default for this chat. The thinking level is HaloWebUI's: hermes'
 	// halowebui-reasoning-sync plugin applies the admin default, and the
@@ -27,8 +29,9 @@
 	export let continuation: HermesContinuation | null = null;
 
 	// label + a few words on each choice (sub) so the grid says who does the work without
-	// hovering; hint is the full sentence under the grid for the one picked.
-	const DISPATCHES: {
+	// hovering; hint is the full sentence under the grid for the one picked. The runners do the
+	// message in Hermes' place; the modes ask it another way and send the result back here.
+	const RUNNERS: {
 		value: HermesRunOptions['dispatch'];
 		label: string;
 		sub: string;
@@ -54,14 +57,29 @@
 			hint: '交给 Claude Code（anyrouter 免费服务，较慢，失败会自动重试）在后台独占执行'
 		},
 		{ value: 'codex', label: 'codex', sub: 'OpenAI Codex', hint: '交给 Codex 在后台独占执行' },
-		{ value: 'agy', label: 'agy', sub: 'Gemini · 快', hint: '交给 AGY 在后台独占执行' },
+		{ value: 'agy', label: 'agy', sub: 'Gemini · 快', hint: '交给 AGY 在后台独占执行' }
+	];
+	const MODES: typeof RUNNERS = [
+		{
+			value: 'answer',
+			label: '精答',
+			sub: '挑最合适的助手答',
+			hint: '交给精答：调度器从助手库挑最合适的助手（没有就现写一个）来回答，对话前文作背景，答完发回这里'
+		},
+		{
+			value: 'discuss',
+			label: '讨论',
+			sub: '几个模型讨论',
+			hint: '交给讨论台：几个模型按你上次的设置讨论（附件放上讨论桌），主持人写的结论发回这里'
+		},
 		{
 			value: 'team',
 			label: '协作台',
-			sub: '一支团队：拆任务、并行、含生图',
+			sub: '团队分工做',
 			hint: '交给一支团队：负责人拆任务、成员并行（含生图），进度在对话里实时显示，完整结果发回这里'
 		}
 	];
+	const DISPATCHES = [...RUNNERS, ...MODES];
 
 	let open = false;
 	let root: HTMLDivElement;
@@ -86,7 +104,7 @@
 		if (!button || typeof window === 'undefined') return;
 		const rect = button.getBoundingClientRect();
 		// On a phone the dispatch choices need the width: at 288px "reclaude" broke
-		// mid-word into "reclaud / e". Six choices sit three to a row.
+		// mid-word into "reclaud / e". The choices sit three to a row.
 		const width = window.innerWidth < 640 ? window.innerWidth - 16 : PANEL_WIDTH;
 		const left = Math.max(8, Math.min(rect.left, window.innerWidth - width - 8));
 		panelStyle =
@@ -116,7 +134,7 @@
 			? continuation
 				? 'Hermes 自己回答，不交回上次的任务'
 				: '消息直接交给 Hermes'
-			: `${DISPATCHES.find((item) => item.value === current.dispatch)?.hint ?? ''}。只对下一条消息生效，发送后回到「直接」；消息自己以 /命令 开头时以消息为准`;
+			: `${DISPATCHES.find((item) => item.value === current.dispatch)?.hint ?? ''}。只对下一条消息生效，发送后回到「直接」；消息自己以 /命令 开头时以消息为准，交给 Hermes`;
 	$: modelValue = current.model ? `${current.provider}\u0000${current.model}` : '';
 	// The configured models (one per hermes provider entry), without the
 	// default, which "默认" already stands for.
@@ -251,7 +269,7 @@
 						>
 					</button>
 				{/if}
-				{#each DISPATCHES as item}
+				{#each RUNNERS as item}
 					{@const checked = item.value ? current.dispatch === item.value : direct}
 					<button
 						type="button"
@@ -259,10 +277,26 @@
 						aria-checked={checked}
 						title={item.hint}
 						data-halo-hermes-dispatch={item.value || 'direct'}
-						class="halo-dispatch__choice {item.value === 'team' ? 'col-span-3' : ''} {checked
-							? 'is-on'
-							: ''}"
+						class="halo-dispatch__choice {checked ? 'is-on' : ''}"
 						on:click={() => update({ dispatch: item.value || (continuation ? 'hermes' : '') })}
+					>
+						<span class="halo-dispatch__name">{item.label}</span>
+						<span class="halo-dispatch__sub">{item.sub}</span>
+					</button>
+				{/each}
+				<div class="halo-dispatch__label col-span-3 mt-1.5" data-halo-hermes-modes-label>
+					换一种方式问 · 结果发回这里
+				</div>
+				{#each MODES as item}
+					{@const checked = current.dispatch === item.value}
+					<button
+						type="button"
+						role="radio"
+						aria-checked={checked}
+						title={item.hint}
+						data-halo-hermes-dispatch={item.value}
+						class="halo-dispatch__choice {checked ? 'is-on' : ''}"
+						on:click={() => update({ dispatch: item.value })}
 					>
 						<span class="halo-dispatch__name">{item.label}</span>
 						<span class="halo-dispatch__sub">{item.sub}</span>
@@ -300,8 +334,13 @@
 					{/each}
 				</select>
 			</label>
-			<div class="mt-1 text-2xs text-gray-400 dark:text-gray-500">
-				只管 Hermes 自己这一轮；派发给 reclaude/cchclaude/anyclaude/codex/agy 时它们用自己的模型
+			<div class="mt-1 text-2xs text-gray-400 dark:text-gray-500" data-halo-hermes-model-note>
+				{#if isModeDispatch(current.dispatch)}
+					这条消息交给{DISPATCHES.find((item) => item.value === current.dispatch)?.label}，不经过 Hermes
+					的模型；之后的消息照常用它
+				{:else}
+					只管 Hermes 自己这一轮；派发给 reclaude/cchclaude/anyclaude/codex/agy 时它们用自己的模型
+				{/if}
 			</div>
 			{#if loadingModels}
 				<div class="mt-1 text-2xs text-gray-400">正在读取 Hermes 的模型列表…</div>

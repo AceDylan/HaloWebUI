@@ -192,9 +192,18 @@ def parse_json_object(text: str) -> dict:
 
 
 def new_run(
-    *, question: str, planner: dict, user_message_id: str, message_id: str, web_allowed: bool, context: Optional[dict] = None
+    *,
+    question: str,
+    planner: dict,
+    user_message_id: str,
+    message_id: str,
+    web_allowed: bool,
+    context: Optional[dict] = None,
+    origin: Optional[dict] = None,
 ) -> dict:
-    return {
+    """``origin``: the chat whose message became this run (派发方式「精答」, utils/mode_dispatch.py):
+    ``{"chatId", "messageId"}`` — the answer goes back there when it is done."""
+    run = {
         "v": 1,
         "id": message_id,
         "userMessageId": user_message_id,
@@ -212,6 +221,9 @@ def new_run(
         "endedAt": None,
         "error": None,
     }
+    if origin:
+        run["origin"] = deepcopy(origin)
+    return run
 
 
 def public_run(run: dict) -> dict:

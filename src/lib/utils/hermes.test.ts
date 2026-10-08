@@ -9,7 +9,9 @@ import {
 	normalizeHermesRunOptions,
 	describeHermesReply,
 	describeHermesRunNotice,
+	describeModeNotice,
 	describeTeamNotice,
+	isModeDispatch,
 	findHermesContinuation,
 	hermesDispatchToRestore,
 	hermesOptionsForMessage,
@@ -156,6 +158,49 @@ describe('hermes run options', () => {
 		const reply = describeHermesReply(null, { dispatch: 'team' });
 		expect(reply?.label).toContain('协作台');
 		expect(reply?.title).toContain('结果会发回这个对话');
+	});
+
+	it('knows 精答 and 讨论 as dispatches to another mode, like 协作台', () => {
+		for (const dispatch of ['answer', 'discuss', 'team'] as const) {
+			expect(isModeDispatch(dispatch)).toBe(true);
+			expect(normalizeHermesRunOptions({ dispatch }).dispatch).toBe(dispatch);
+			expect(
+				normalizeHermesRunOptions({ dispatch, continue_run: '20260930-112556-677bec3c' })
+			).toEqual({ dispatch, model: '', provider: '' });
+			expect(hermesOptionsToKeep({ dispatch, model: 'gpt-chat' })).toEqual({
+				dispatch: '',
+				model: 'gpt-chat',
+				provider: ''
+			});
+			expect(hermesDispatchToRestore({ dispatch })).toBe(dispatch);
+		}
+		expect(isModeDispatch('reclaude')).toBe(false);
+		expect(isModeDispatch('')).toBe(false);
+	});
+
+	it('a command typed into the message wins over 精答 / 讨论 / 协作台: it goes to Hermes', () => {
+		const run = { runner: 'reclaude' as const, runId: '20260927-005655-f2dd355f', status: 'success' };
+		for (const dispatch of ['answer', 'discuss', 'team'] as const) {
+			const options = { ...EMPTY_HERMES_RUN_OPTIONS, dispatch };
+			expect(hermesOptionsForMessage(options, null, '租房押金多久退').dispatch).toBe(dispatch);
+			expect(hermesOptionsForMessage(options, run, '租房押金多久退').dispatch).toBe(dispatch);
+			expect(hermesOptionsForMessage(options, null, '/reclaude 修登录').dispatch).toBe('');
+			// a path is not a command
+			expect(hermesOptionsForMessage(options, null, '/root/app/x.txt 是什么').dispatch).toBe(dispatch);
+		}
+	});
+
+	it('a reply handed to another mode names the mode, never the model picked for Hermes', () => {
+		const answer = describeHermesReply(null, { dispatch: 'answer', model: 'gpt-chat' });
+		expect(answer).toEqual({
+			label: '精答',
+			title: expect.stringContaining('答完发回这个对话'),
+			fallback: false
+		});
+		expect(describeHermesReply(null, { dispatch: 'discuss', model: 'gpt-chat' })?.label).toBe('讨论');
+		const team = describeHermesReply(null, { dispatch: 'team', model: 'gpt-chat' });
+		expect(team?.label).toBe('协作台');
+		expect(team?.title).not.toContain('runner');
 	});
 
 	it('sends nothing when every choice is the default', () => {
@@ -384,6 +429,36 @@ describe('接着上次: a follow-up goes back to the run whose report ends the c
 		});
 		const runner = parseHermesRunNotice(chat().messages.notice)!;
 		expect(describeTeamNotice(runner, chat().messages.notice.content)).toBeNull();
+	});
+
+	it('a 精答 answer or a discussion conclusion sent back to the chat reads as the mode, links to it', () => {
+		const stored = chat();
+		stored.messages.notice.content =
+			'[精答结果] 「押金多久退？」由「⚖️合同审查」回答，下面是它的回答。精答：/answer/run-1';
+		stored.messages.notice.hermes_notice = { source: 'answer', run_id: 'answer:run-1:m-9' };
+		expect(findHermesContinuation(stored)).toBeNull();
+		const notice = parseHermesRunNotice(stored.messages.notice)!;
+		expect(describeTeamNotice(notice, stored.messages.notice.content)).toBeNull();
+		expect(describeModeNotice(notice, stored.messages.notice.content)).toEqual({
+			kind: 'answer',
+			headline: '🎯 精答「押金多久退？」 · ⚖️合同审查 的回答',
+			href: '/answer/run-1',
+			label: '精答'
+		});
+		const discussed = {
+			role: 'user',
+			content:
+				'[讨论结论] 「该用哪个库？」：3 个模型圆桌讨论（a、b、c），下面是 c 整理的结论。讨论台：/discuss/room-2',
+			hermes_notice: { source: 'discuss', run_id: 'discuss:room-2:m-3' }
+		};
+		expect(describeModeNotice(parseHermesRunNotice(discussed)!, discussed.content)).toEqual({
+			kind: 'discuss',
+			headline: '💬 圆桌讨论「该用哪个库？」 · 主持人的结论',
+			href: '/discuss/room-2',
+			label: '讨论台'
+		});
+		const runner = parseHermesRunNotice(chat().messages.notice)!;
+		expect(describeModeNotice(runner, chat().messages.notice.content)).toBeNull();
 	});
 
 	it("a team's result loses its link line (the chat shows it as buttons)", () => {

@@ -134,7 +134,17 @@ describe('HermesRunOptions', () => {
 		const choices = Array.from(panel.querySelectorAll('[data-halo-hermes-dispatch]')).map(
 			(el: any) => el.getAttribute('data-halo-hermes-dispatch')
 		);
-		expect(choices).toEqual(['direct', 'reclaude', 'cchclaude', 'anyclaude', 'codex', 'agy', 'team']);
+		expect(choices).toEqual([
+			'direct',
+			'reclaude',
+			'cchclaude',
+			'anyclaude',
+			'codex',
+			'agy',
+			'answer',
+			'discuss',
+			'team'
+		]);
 		const cch = panel.querySelector('[data-halo-hermes-dispatch="cchclaude"]') as any;
 		expect(cch.getAttribute('aria-checked')).toBe('true');
 		expect(panel.querySelector('[data-halo-hermes-dispatch-hint]').textContent).toContain(
@@ -146,14 +156,41 @@ describe('HermesRunOptions', () => {
 		);
 	});
 
-	it('offers 协作台: the message goes to a team, on a row of its own', async () => {
+	it('offers 精答, 讨论 and 协作台 on a row of their own: asked another way, the result comes back', async () => {
 		const panel: any = await mount({ dispatch: 'team' });
-		const team = panel.querySelector('[data-halo-hermes-dispatch="team"]') as any;
-		expect(team.getAttribute('aria-checked')).toBe('true');
-		expect(team.className).toContain('col-span-3');
-		expect(team.textContent).toContain('协作台');
-		expect(panel.querySelector('[data-halo-hermes-dispatch-hint]').textContent).toContain(
-			'完整结果发回这里'
+		const choice = (name: string) =>
+			panel.querySelector(`[data-halo-hermes-dispatch="${name}"]`) as any;
+		const hint = () => panel.querySelector('[data-halo-hermes-dispatch-hint]').textContent;
+		const summary = () =>
+			(target.querySelector('[data-halo-hermes-options-summary]') as any)?.textContent ?? '';
+		expect(panel.querySelector('[data-halo-hermes-modes-label]').textContent).toContain('换一种方式问');
+		expect(choice('team').getAttribute('aria-checked')).toBe('true');
+		expect(choice('team').className).not.toContain('col-span-3');
+		expect(choice('team').textContent).toContain('协作台');
+		expect(hint()).toContain('完整结果发回这里');
+		// the model picked for Hermes does not take part in this message
+		expect(panel.querySelector('[data-halo-hermes-model-note]').textContent).toContain(
+			'这条消息交给协作台，不经过 Hermes'
+		);
+
+		choice('answer').click();
+		await waitFor(() => choice('answer').getAttribute('aria-checked') === 'true', '精答 picked');
+		expect(choice('team').getAttribute('aria-checked')).toBe('false');
+		expect(choice('answer').textContent).toContain('精答');
+		expect(hint()).toContain('调度器从助手库挑最合适的助手');
+		expect(hint()).toContain('答完发回这里');
+		expect(hint()).toContain('消息自己以 /命令 开头时以消息为准');
+		expect(summary()).toContain('精答');
+
+		choice('discuss').click();
+		await waitFor(() => choice('discuss').getAttribute('aria-checked') === 'true', '讨论 picked');
+		expect(hint()).toContain('几个模型按你上次的设置讨论');
+		expect(summary()).toContain('讨论');
+
+		choice('direct').click();
+		await waitFor(() => choice('direct').getAttribute('aria-checked') === 'true', 'back to 直接');
+		expect(panel.querySelector('[data-halo-hermes-model-note]').textContent).toContain(
+			'派发给 reclaude/cchclaude/anyclaude/codex/agy 时它们用自己的模型'
 		);
 	});
 

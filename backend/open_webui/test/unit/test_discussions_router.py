@@ -554,3 +554,187 @@ def test_resume_picks_a_failed_question_up(env):
     ask = asyncio.run(api.get_discussion(chat_id, USER))["asks"][0]
     assert ask["status"] == "done"
     assert [(t["id"], t["status"]) for t in ask["turns"]] == [("r1-s1", "done"), ("r1-s2", "done")]
+
+
+# --- 派发方式「讨论」: a chat message becomes a discussion, its conclusion comes back -------------
+
+
+def _discuss_first(env, **kwargs) -> str:
+    async def scenario():
+        detail = await _create(env, **kwargs)
+        await _settle(detail["id"])
+        return detail["id"]
+
+    return asyncio.run(scenario())
+
+
+def _origin_chat(title="新对话"):
+    """A Hermes chat as the page leaves it on send: the message and the reply to fill."""
+    messages = {
+        "q0": {"id": "q0", "parentId": None, "childrenIds": ["r0"], "role": "user", "content": "我们要做一个记账 App"},
+        "r0": {"id": "r0", "parentId": "q0", "childrenIds": ["q1"], "role": "assistant", "content": "好的，先定数据存储。", "model": "hermes-agent", "done": True},
+        "q1": {"id": "q1", "parentId": "r0", "childrenIds": ["r1"], "role": "user", "content": "该用 Postgres 还是 SQLite？"},
+        "r1": {"id": "r1", "parentId": "q1", "childrenIds": [], "role": "assistant", "content": "", "model": "hermes-agent", "done": False},
+    }
+    chat = chats_mod.ChatTable().insert_new_chat(
+        "u1", chats_mod.ChatForm(chat={"title": title, "models": ["hermes-agent"], "history": {"messages": messages, "currentId": "r1"}})
+    )
+    return chat.id
+
+
+def _dispatch_form():
+    return {
+        "messages": [
+            {"role": "system", "content": "你是 Hermes"},
+            {"role": "user", "content": "我们要做一个记账 App"},
+            {"role": "assistant", "content": "好的，先定数据存储。"},
+            {"role": "user", "content": "该用 Postgres 还是 SQLite？"},
+        ],
+        "hermes_options": {"dispatch": "discuss"},
+    }
+
+
+def _run_dispatch(env, monkeypatch, chat_id, metadata_extra=None):
+    from open_webui.utils import mode_dispatch, team_chats
+
+    jobs, emitted = [], []
+
+    async def emitter(event):
+        emitted.append(event)
+
+    async def no_folder(*args, **kwargs):
+        return None
+
+    from open_webui import tasks
+
+    real_create_task = tasks.create_task
+
+    def create_task(coro, id=None, **kwargs):
+        if id != chat_id:  # the discussion's own task runs as usual
+            return real_create_task(coro, id=id, **kwargs)
+        jobs.append(coro)
+        return "task-1", None
+
+    monkeypatch.setattr("open_webui.socket.main.get_event_emitter", lambda metadata: emitter)
+    monkeypatch.setattr(tasks, "create_task", create_task)
+    monkeypatch.setattr(team_chats, "sort_into_folder", no_folder)
+    metadata = {"chat_id": chat_id, "message_id": "r1", **(metadata_extra or {})}
+
+    async def scenario():
+        out = await mode_dispatch.run_mode_dispatch(env.request, _dispatch_form(), USER, metadata, "hermes-agent", "discuss")
+        assert out == {"status": True, "task_id": "task-1"}
+        await jobs[0]
+        reply = chats_mod.ChatTable().get_chat_by_id(chat_id).chat["history"]["messages"]["r1"]
+        run_chat_id = (reply.get("mode_dispatch") or {}).get("chat_id")
+        if run_chat_id:
+            await _settle(run_chat_id)
+        return reply, run_chat_id
+
+    reply, run_chat_id = asyncio.run(scenario())
+    return reply, run_chat_id, emitted
+
+
+def test_a_chat_message_becomes_a_discussion_at_the_users_last_table(env, monkeypatch):
+    # the user's last discussion: b and a, c presiding
+    _discuss_first(env, question="上次的问题", seats=["b", "a"], moderator="c")
+    origin = _origin_chat()
+    reply, run_chat_id, emitted = _run_dispatch(env, monkeypatch, origin)
+
+    assert reply["done"] is True and reply["mode_dispatch"] == {"kind": "discuss", "chat_id": run_chat_id}
+    assert "已交给讨论台" in reply["content"] and "error" not in reply
+    assert emitted[0]["type"] == "chat:completion" and emitted[0]["data"]["mode_dispatch"]["chat_id"] == run_chat_id
+    # the chat is named after its question (no model turn ran to name it)
+    assert chats_mod.ChatTable().get_chat_by_id(origin).title == "该用 Postgres 还是 SQLite？"
+
+    detail = asyncio.run(api.get_discussion(run_chat_id, USER))
+    ask = detail["asks"][0]
+    assert ask["question"] == "该用 Postgres 还是 SQLite？" and ask["status"] == "done"
+    assert [s["model"] for s in detail["setup"]["seats"]] == ["b", "a"]  # the same table as last time
+    assert detail["setup"]["moderator"]["model"] == "c"
+    assert ask["origin"] == {"chatId": origin, "messageId": "r1"}
+    assert ask["context"]["chatId"] == origin
+    assert "用户：我们要做一个记账 App" in ask["context"]["text"] and "Hermes：好的，先定数据存储。" in ask["context"]["text"]
+    assert "该用 Postgres" not in ask["context"]["text"]  # the question itself is not background
+
+
+def test_the_conclusion_goes_back_into_the_chat_once(env, monkeypatch):
+    from open_webui.utils import hermes_notify, mode_dispatch
+
+    _discuss_first(env, question="上次的问题")
+    origin = _origin_chat()
+    _, run_chat_id, _ = _run_dispatch(env, monkeypatch, origin)
+    ask = asyncio.run(api.get_discussion(run_chat_id, USER))["asks"][0]
+
+    notice, content, run_id = mode_dispatch.report_of("discuss", run_chat_id, ask)
+    assert notice.startswith("[讨论结论] 「该用 Postgres 还是 SQLite？」：2 个模型圆桌讨论（a、b）")
+    assert f"/discuss/{run_chat_id}" in notice
+    assert content.startswith("## 结论\n用 Postgres") and run_id == f"discuss:{run_chat_id}:{ask['id']}"
+
+    posted = []
+    busy = {"left": 1}
+
+    async def show(request, **kwargs):
+        if busy["left"]:
+            busy["left"] -= 1
+            raise hermes_notify.HermesNotifyError(409, "chat is busy")
+        posted.append(kwargs)
+        return {"status": True}
+
+    monkeypatch.setattr(hermes_notify, "show_notification_report", show)
+    monkeypatch.setattr(mode_dispatch, "RETRY_SECONDS", 0)
+
+    async def later():
+        mode_dispatch.report_back_later(env.request, "discuss", run_chat_id, ask)
+        await asyncio.gather(*list(mode_dispatch._background))
+
+    asyncio.run(later())  # busy once, then posted
+    assert len(posted) == 1
+    sent = posted[0]
+    assert sent["chat_id"] == origin and sent["source"] == "discuss" and sent["run_id"] == run_id
+    assert sent["notice"] == notice and sent["content"] == content and sent["design"] is False
+
+    # 「把结论放进这个对话」 by hand: the route, quietly
+    out = asyncio.run(api.report_back(env.request, run_chat_id, USER))
+    assert out["chat_id"] == origin and posted[-1]["quiet"] is True
+    # someone else's discussion, or one not dispatched from a chat: refused
+    with pytest.raises(HTTPException):
+        asyncio.run(api.report_back(env.request, run_chat_id, OTHER))
+    plain = _discuss_first(env, question="自己开的讨论", seats=["a", "c"])
+    with pytest.raises(HTTPException) as not_dispatched:
+        asyncio.run(api.report_back(env.request, plain, USER))
+    assert not_dispatched.value.status_code == 400
+
+
+def test_after_done_sends_a_dispatched_conclusion_back(env, monkeypatch):
+    from open_webui.utils import mode_chats, mode_dispatch
+
+    sent = []
+
+    async def no_title(*args, **kwargs):
+        return "标题", None
+
+    monkeypatch.setattr(mode_chats, "auto_title_and_folder", no_title)
+    monkeypatch.setattr(mode_dispatch, "report_back_later", lambda request, kind, chat_id, run: sent.append((kind, chat_id, run["id"])))
+    detail = asyncio.run(_create(env))
+    asyncio.run(_settle(detail["id"]))
+    ask = asyncio.run(api.get_discussion(detail["id"], USER))["asks"][0]
+    asyncio.run(ORIGINAL_AFTER_DONE(env.request, USER, detail["id"], ask))
+    assert sent == []  # started on its page: nothing to send back
+    asyncio.run(ORIGINAL_AFTER_DONE(env.request, USER, detail["id"], {**ask, "origin": {"chatId": "c-1", "messageId": "m"}}))
+    assert sent == [("discuss", detail["id"], ask["id"])]
+
+
+def test_a_dispatched_discussion_without_a_last_table_seats_different_families():
+    from open_webui.utils import assistant_library as lib
+
+    models = {m: {"id": m, "name": m} for m in ("gpt-chat", "gpt-mini", "claude-chat", "deepseek-chat", "hermes-agent")}
+    original = chats_mod.Chats.get_chats_with_meta_key_by_user_id
+    chats_mod.Chats.get_chats_with_meta_key_by_user_id = lambda *a, **k: []
+    try:
+        setup = api.dispatch_setup(USER, models, set())
+    finally:
+        chats_mod.Chats.get_chats_with_meta_key_by_user_id = original
+    assert [s["model"] for s in setup["seats"]] == ["gpt-chat", "claude-chat", "deepseek-chat"]
+    assert setup["moderator"]["model"] == "gpt-chat" and setup["autoMatch"] is True
+    assert {s["assist"] for s in setup["seats"]} == {"auto"}
+    assert lib.library(models, USER)[1]  # sanity: these are text models the library offers

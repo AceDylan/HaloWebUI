@@ -5812,7 +5812,10 @@
 		}
 
 		const _files = validFiles.map((file) => normalizeInputFileForMessage(file));
-		chatFiles.push(..._files.filter((item) => ['doc', 'file', 'collection'].includes(item.type)));
+		// vault_note: an Obsidian note picked with # (its text rides along like a document)
+		chatFiles.push(
+			..._files.filter((item) => ['doc', 'file', 'collection', 'vault_note'].includes(item.type))
+		);
 		chatFiles = chatFiles.filter(
 			// Remove duplicates
 			(item, index, array) =>

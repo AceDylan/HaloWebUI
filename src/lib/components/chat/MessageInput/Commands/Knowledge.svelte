@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { getContext, onDestroy, onMount, tick } from 'svelte';
-	import { folders } from '$lib/stores';
+	import { folders, user } from '$lib/stores';
+	import { getVaultNote, searchVaultNotes, vaultNoteAttachment } from '$lib/apis/vault';
 	import { getFolders } from '$lib/apis/folders';
 	import { searchKnowledgeBases, searchKnowledgeFiles } from '$lib/apis/knowledge';
 	import { getNoteById, getNotes } from '$lib/apis/notes';
@@ -29,6 +30,7 @@
 	let knowledgeItems = [];
 	let fileItems = [];
 	let noteItems = [];
+	let vaultItems = [];
 	let searchDebounceTimer: ReturnType<typeof setTimeout>;
 
 	const decodeString = (str: string) => {
@@ -39,7 +41,7 @@
 		}
 	};
 
-	$: items = [...folderItems, ...knowledgeItems, ...fileItems, ...noteItems];
+	$: items = [...vaultItems, ...folderItems, ...knowledgeItems, ...fileItems, ...noteItems];
 	$: filteredItems = [
 		...(query.startsWith('http')
 			? isYoutubeUrl(query)
@@ -67,6 +69,17 @@
 
 	const selectKnowledgeItem = async (item) => {
 		if (!item) {
+			return;
+		}
+
+		if (item.type === 'vault_note') {
+			// Obsidian: the note's text goes along as context; hermes is also told its path.
+			try {
+				const note = await getVaultNote(localStorage.token, item.path);
+				onSelect({ type: 'knowledge', data: vaultNoteAttachment(note) });
+			} catch (e) {
+				toast.error(`没能读取笔记：${e}`);
+			}
 			return;
 		}
 
@@ -126,6 +139,7 @@
 	};
 
 	const getItems = () => {
+		getVaultItems();
 		getFolderItems();
 		getKnowledgeItems();
 		getKnowledgeFileItems();
@@ -162,6 +176,24 @@
 				description: item.collection ? item.collection.name : ''
 			}));
 		}
+	};
+
+	// The Obsidian vault (admins: it is the owner's notes). Off when it is not mounted.
+	let vaultSeq = 0;
+	const getVaultItems = async () => {
+		if ($user?.role !== 'admin') return;
+		const seq = ++vaultSeq;
+		const res = await searchVaultNotes(localStorage.token, query).catch(() => null);
+		if (seq !== vaultSeq) return;
+		vaultItems = res?.enabled
+			? res.notes.map((note) => ({
+					id: `vault:${note.path}`,
+					name: note.title,
+					path: note.path,
+					description: note.snippet || note.folder,
+					type: 'vault_note'
+				}))
+			: [];
 	};
 
 	const getNoteItems = async () => {
@@ -209,6 +241,8 @@
 					{$i18n.t('Files')}
 				{:else if item?.type === 'note'}
 					{$i18n.t('Notes')}
+				{:else if item?.type === 'vault_note'}
+					Obsidian 笔记
 				{/if}
 			</div>
 		{/if}
@@ -234,14 +268,16 @@
 								? $i18n.t('Collection')
 								: item?.type === 'note'
 									? $i18n.t('Note')
-									: $i18n.t('Folder')}
+									: item?.type === 'vault_note'
+										? item.path
+										: $i18n.t('Folder')}
 						placement="top"
 					>
 						{#if item?.type === 'collection'}
 							<Database className="size-4" />
 						{:else if item?.type === 'folder'}
 							<Folder className="size-4" />
-						{:else if item?.type === 'note'}
+						{:else if item?.type === 'note' || item?.type === 'vault_note'}
 							<Bookmark className="size-4" />
 						{:else}
 							<DocumentPage className="size-4" />
@@ -251,6 +287,9 @@
 					<Tooltip content={decodeString(item?.name)} placement="top-start">
 						<div class="line-clamp-1 flex-1">{decodeString(item?.name)}</div>
 					</Tooltip>
+					{#if item?.type === 'vault_note' && item.description}
+						<span class="line-clamp-1 min-w-0 text-xs text-gray-400" data-vault-note-hint>{item.description}</span>
+					{/if}
 				</div>
 			</button>
 		{/if}

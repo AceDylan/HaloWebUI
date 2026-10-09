@@ -1205,12 +1205,39 @@ def _image_parts_as_host_paths(run_input, user):
     return (f"{text}\n\n" if text else "") + "\n".join(lines), len(pictures)
 
 
-def _attachment_note(paths: list[tuple[str, str]]) -> str:
-    if not paths:
-        return ""
-    lines = ["[附件原文件] 以下文件已上传到 HaloWebUI，上面只放了检索摘录；需要完整内容时直接读取本机路径："]
-    lines.extend(f"- {name}: {path}" for name, path in paths)
-    return "\n".join(lines)
+def _attachment_note(paths: list[tuple[str, str]], notes: list[tuple[str, str]] = ()) -> str:
+    blocks = []
+    if paths:
+        lines = ["[附件原文件] 以下文件已上传到 HaloWebUI，上面只放了检索摘录；需要完整内容时直接读取本机路径："]
+        lines.extend(f"- {name}: {path}" for name, path in paths)
+        blocks.append("\n".join(lines))
+    if notes:
+        lines = ["[Obsidian 笔记] 上面附了这些笔记的正文（太长时只附前一部分），原文件在本机："]
+        lines.extend(f"- {name}: {path}" for name, path in notes)
+        blocks.append("\n".join(lines))
+    return "\n\n".join(blocks)
+
+
+def _vault_note_host_paths(metadata) -> list[tuple[str, str]]:
+    """(title, host path) of the Obsidian notes attached to this turn (# in the composer)."""
+    files = metadata.get("files") if isinstance(metadata, dict) else None
+    if not isinstance(files, list):
+        return []
+    from open_webui.utils.hub_embed import vault_root
+
+    root = vault_root()
+    if not root:
+        return []
+    found = []
+    for item in files:
+        if not isinstance(item, dict) or item.get("type") != "vault_note":
+            continue
+        rel = str(item.get("path") or "")
+        parts = rel.split("/")
+        if not rel.endswith(".md") or rel.startswith("/") or any(p in ("", ".", "..") for p in parts):
+            continue
+        found.append((str(item.get("name") or parts[-1]), f"{root}/{rel}"))
+    return found
 
 
 def _build_run_payload(form_data, metadata, upstream_model_id, user=None):
@@ -1303,7 +1330,8 @@ def _build_run_payload(form_data, metadata, upstream_model_id, user=None):
             if as_text is not None:
                 run_input = as_text[0]
         run_input = _append_run_input_text(
-            run_input, _attachment_note(_attachment_host_paths(metadata, user))
+            run_input,
+            _attachment_note(_attachment_host_paths(metadata, user), _vault_note_host_paths(metadata)),
         )
         if options.get("dispatch") and not continue_run:
             run_input = _prefix_run_input(

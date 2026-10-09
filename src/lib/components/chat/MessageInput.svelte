@@ -1446,7 +1446,7 @@
 													size={file?.size}
 													loading={file.status === 'uploading'}
 													dismissible={true}
-													edit={true}
+													edit={file.type !== 'vault_note'}
 													retryable={file.status === 'failed' && uploads.has(file.itemId)}
 													on:retry={() => retryUpload(file)}
 													on:dismiss={async () => {
@@ -1903,6 +1903,12 @@
 											}}
 											onHandoff={handOffDraft}
 											onSelectAssistant={onActivateAssistant ? () => (showAssistantPicker = true) : null}
+											onReferenceNote={$_user?.role === 'admin'
+												? () => {
+														// a # at the end lists the notes (Commands → Knowledge)
+														prompt = `${prompt}${prompt && !/\s$/.test(prompt) ? ' ' : ''}#`;
+													}
+												: null}
 											onClose={async () => {
 												await tick();
 

@@ -99,6 +99,7 @@ from open_webui.routers import (
     tools,
     users,
     utils,
+    vault,
 )
 
 from open_webui.haloclaw.router import router as haloclaw_router
@@ -1493,6 +1494,7 @@ app.include_router(analytics.router, prefix="/api/v1/analytics", tags=["analytic
 app.include_router(terminal.router, prefix="/api/v1/terminal", tags=["terminal"])
 app.include_router(hermes.router, prefix="/api/v1/hermes", tags=["hermes"])
 app.include_router(hub.router, prefix="/api/v1/hub", tags=["hub"])
+app.include_router(vault.router, prefix="/api/v1/vault", tags=["vault"])
 app.include_router(teams.router, prefix="/api/v1/teams", tags=["teams"])
 app.include_router(discussions.router, prefix="/api/v1/discussions", tags=["discussions"])
 app.include_router(answers.router, prefix="/api/v1/answers", tags=["answers"])

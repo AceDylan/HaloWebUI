@@ -25,6 +25,7 @@
 		Wand2,
 		MessagesSquare,
 		Bot,
+		NotebookPen,
 		Image as ImageIcon
 	} from 'lucide-svelte';
 	import GoogleDrive from '$lib/components/icons/GoogleDrive.svelte';
@@ -62,6 +63,8 @@
 	/** 「选择助手」: opens the assistant picker (the user's assistants and the templates); the pick
 	 * puts its prompt on the current model. Left out when not given. */
 	export let onSelectAssistant: (() => void) | null = null;
+	/** 引用笔记: starts a # in the input, which lists the Obsidian notes (admins). */
+	export let onReferenceNote: (() => void) | null = null;
 	$: teamsEnabled = !!$config?.features?.enable_agent_teams;
 	$: studioEnabled =
 		!!$config?.features?.enable_image_generation &&
@@ -558,6 +561,26 @@
 						<div class="line-clamp-1">{$i18n.t('Upload Files')}</div>
 					</DropdownMenu.Item>
 				</Tooltip>
+
+				{#if onReferenceNote}
+					<DropdownMenu.Item
+						class="flex gap-2 items-center px-3 py-2 text-sm font-medium cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl"
+						data-halo-input-note
+						on:click={() => onReferenceNote?.()}
+					>
+						<span
+							class="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-gray-100 text-gray-600 dark:bg-gray-700/60 dark:text-gray-300"
+						>
+							<NotebookPen class="size-4" strokeWidth={2} />
+						</span>
+						<div class="min-w-0">
+							<div class="truncate">{tr('引用笔记', 'Reference a note')}</div>
+							<div class="truncate text-xs font-normal text-gray-500 dark:text-gray-400">
+								{tr('从 Obsidian 笔记库挑一篇带上（也可以直接输入 #）', 'From the Obsidian vault (or type #)')}
+							</div>
+						</div>
+					</DropdownMenu.Item>
+				{/if}
 
 				{#if $config?.features?.enable_google_drive_integration}
 					<DropdownMenu.Item

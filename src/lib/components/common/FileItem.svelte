@@ -155,6 +155,8 @@
 					{$i18n.t('Document')}
 				{:else if type === 'collection'}
 					{$i18n.t('Collection')}
+				{:else if type === 'vault_note'}
+					Obsidian 笔记
 				{:else}
 					<span class=" capitalize line-clamp-1">{type}</span>
 				{/if}

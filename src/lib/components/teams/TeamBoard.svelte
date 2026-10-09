@@ -4,7 +4,7 @@
 	import { Background, BackgroundVariant, Controls, MarkerType, SvelteFlow } from '@xyflow/svelte';
 	import '@xyflow/svelte/dist/style.css';
 
-	import { theme } from '$lib/stores';
+	import { isDarkMode } from '$lib/utils/dark-mode';
 	import BoardCamera from './BoardCamera.svelte';
 	import { prefersReducedMotion } from '$lib/utils/transitions';
 	import FlowEdge from './FlowEdge.svelte';
@@ -130,13 +130,9 @@
 		);
 	}
 
-	$: colorMode = $theme?.includes('dark')
-		? 'dark'
-		: $theme === 'system' &&
-			  typeof window !== 'undefined' &&
-			  window.matchMedia('(prefers-color-scheme: dark)').matches
-			? 'dark'
-			: 'light';
+	// What the page renders (<html class="dark">), which also follows the Hub's theme
+	// when framed; the theme setting alone misses that.
+	$: colorMode = $isDarkMode ? 'dark' : 'light';
 </script>
 
 <div

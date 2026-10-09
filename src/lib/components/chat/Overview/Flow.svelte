@@ -3,7 +3,7 @@
 
 	const dispatch = createEventDispatcher();
 
-	import { theme } from '$lib/stores';
+	import { isDarkMode } from '$lib/utils/dark-mode';
 	import { Background, Controls, SvelteFlow, BackgroundVariant } from '@xyflow/svelte';
 
 	export let nodes;
@@ -17,13 +17,8 @@
 	{edges}
 	fitView
 	minZoom={0.001}
-	colorMode={$theme.includes('dark')
-		? 'dark'
-		: $theme === 'system'
-			? window.matchMedia('(prefers-color-scheme: dark)').matches
-				? 'dark'
-				: 'light'
-			: 'light'}
+	proOptions={{ hideAttribution: true }}
+	colorMode={$isDarkMode ? 'dark' : 'light'}
 	nodesConnectable={false}
 	nodesDraggable={false}
 	on:nodeclick={(e) => dispatch('nodeclick', e.detail)}

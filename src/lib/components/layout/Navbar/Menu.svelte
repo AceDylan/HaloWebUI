@@ -1,15 +1,7 @@
 <script lang="ts">
-	import { toast } from 'svelte-sonner';
 	import { DropdownMenu } from 'bits-ui';
 	import { getContext } from 'svelte';
 
-	import fileSaver from 'file-saver';
-	const { saveAs } = fileSaver;
-
-	import { copyToClipboard, createMessagesList } from '$lib/utils';
-	import { buildPdfExportMessages, buildPdfFileName } from '$lib/utils/chat-pdf-document';
-	import { downloadChatAsPDF } from '$lib/apis/utils';
-	import { getErrorDetail } from '$lib/apis/response';
 	import { chatHandoff, handOff } from '$lib/utils/handoff';
 
 	import {
@@ -27,10 +19,8 @@
 	import Dropdown from '$lib/components/common/Dropdown.svelte';
 	import Tags from '$lib/components/chat/Tags.svelte';
 	import Map from '$lib/components/icons/Map.svelte';
-	import Clipboard from '$lib/components/icons/Clipboard.svelte';
 	import AdjustmentsHorizontal from '$lib/components/icons/AdjustmentsHorizontal.svelte';
 	import Cube from '$lib/components/icons/Cube.svelte';
-	import { getChatById } from '$lib/apis/chats';
 
 	const i18n = getContext('i18n');
 
@@ -42,103 +32,6 @@
 
 	export let chat;
 	export let onClose: Function = () => {};
-
-	const getChatAsText = async () => {
-		const history = chat.chat.history;
-		const messages = createMessagesList(history, history.currentId);
-		const chatText = messages.reduce((a, message, i, arr) => {
-			return `${a}### ${message.role.toUpperCase()}\n${message.content}\n\n`;
-		}, '');
-
-		return chatText.trim();
-	};
-
-	const downloadTxt = async () => {
-		const chatText = await getChatAsText();
-
-		let blob = new Blob([chatText], {
-			type: 'text/plain'
-		});
-
-		saveAs(blob, `chat-${chat.chat.title}.txt`);
-	};
-
-	const resolveChatForPdfExport = async () => {
-		if (chat?.chat?.history) {
-			return chat;
-		}
-
-		if (chat?.id && !String(chat.id).startsWith('local') && !$temporaryChatEnabled) {
-			return await getChatById(localStorage.token, chat.id);
-		}
-
-		return chat;
-	};
-
-	const downloadPdf = async () => {
-		const targetChat = await resolveChatForPdfExport();
-		if (!targetChat?.chat?.history) {
-			toast.error($i18n.t('Failed to export PDF'));
-			return;
-		}
-
-		try {
-			const messages = buildPdfExportMessages(targetChat);
-			const blob = await downloadChatAsPDF(
-				localStorage.token,
-				targetChat?.chat?.title ?? 'chat',
-				messages
-			);
-
-			if (!blob) {
-				throw new Error('Failed to export PDF');
-			}
-
-			saveAs(blob, buildPdfFileName(targetChat?.chat?.title));
-		} catch (error) {
-			console.error('Error generating PDF', error);
-			toast.error(getErrorDetail(error, $i18n.t('Failed to export PDF')));
-		}
-	};
-
-	const downloadJSONExport = async () => {
-		if (chat.id) {
-			let chatObj = null;
-
-			if (chat.id === 'local' || $temporaryChatEnabled) {
-				chatObj = chat;
-			} else {
-				chatObj = await getChatById(localStorage.token, chat.id);
-			}
-
-			let blob = new Blob([JSON.stringify([chatObj])], {
-				type: 'application/json'
-			});
-			saveAs(blob, `chat-export-${Date.now()}.json`);
-		}
-	};
-
-	const downloadHTML = async () => {
-		const title = chat?.chat?.title ?? 'Chat';
-		let html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${title}</title><style>
-body{font-family:system-ui,-apple-system,sans-serif;max-width:800px;margin:0 auto;padding:2rem;background:#fff;color:#222;}
-.msg{margin:1.5rem 0;padding:1rem;border-radius:8px;}
-.user{background:#f0f0f0;}.assistant{background:#e8f4fd;}
-.role{font-weight:600;margin-bottom:0.5rem;text-transform:capitalize;}
-details[type="reasoning"]{background:#fffbe6;border:1px solid #e8d44d;border-radius:6px;padding:0.5rem;margin:0.5rem 0;}
-summary{cursor:pointer;font-weight:500;color:#856404;}
-pre{background:#f4f4f4;padding:0.5rem;border-radius:4px;overflow-x:auto;}
-code{font-size:0.9em;}</style></head><body><h1>${title}</h1>`;
-
-		for (const msg of messages) {
-			const role = msg.role;
-			html += `<div class="msg ${role}"><div class="role">${role}</div><div>${msg.content}</div></div>`;
-		}
-
-		html += '</body></html>';
-		const blob = new Blob([html], { type: 'text/html' });
-		saveAs(blob, `${title.replace(/[^a-zA-Z0-9]/g, '_')}-${Date.now()}.html`);
-	};
 </script>
 
 <Dropdown
@@ -274,87 +167,6 @@ code{font-size:0.9em;}</style></head><body><h1>${title}</h1>`;
 					<div class="flex items-center">协作任务</div>
 				</DropdownMenu.Item>
 			{/if}
-
-			<DropdownMenu.Sub>
-				<DropdownMenu.SubTrigger
-					class="flex gap-2 items-center px-3 py-2 text-sm  cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-md"
-				>
-					<svg
-						xmlns="http://www.w3.org/2000/svg"
-						fill="none"
-						viewBox="0 0 24 24"
-						stroke-width="1.5"
-						stroke="currentColor"
-						class="size-4"
-					>
-						<path
-							stroke-linecap="round"
-							stroke-linejoin="round"
-							d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3"
-						/>
-					</svg>
-
-					<div class="flex items-center">{$i18n.t('Download')}</div>
-				</DropdownMenu.SubTrigger>
-				<DropdownMenu.SubContent
-					overlap
-					class="w-full rounded-xl px-1 py-1.5 z-50 bg-white dark:bg-gray-850 dark:text-white shadow-lg"
-					transition={flyAndScale}
-					sideOffset={8}
-				>
-					<DropdownMenu.Item
-						class="flex gap-2 items-center px-3 py-2 text-sm  cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-md"
-						on:click={() => {
-							downloadJSONExport();
-						}}
-					>
-						<div class="flex items-center line-clamp-1">{$i18n.t('Export chat (.json)')}</div>
-					</DropdownMenu.Item>
-					<DropdownMenu.Item
-						class="flex gap-2 items-center px-3 py-2 text-sm  cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-md"
-						on:click={() => {
-							downloadTxt();
-						}}
-					>
-						<div class="flex items-center line-clamp-1">{$i18n.t('Plain text (.txt)')}</div>
-					</DropdownMenu.Item>
-
-					<DropdownMenu.Item
-						class="flex gap-2 items-center px-3 py-2 text-sm  cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-md"
-						on:click={() => {
-							downloadPdf();
-						}}
-					>
-						<div class="flex items-center line-clamp-1">{$i18n.t('PDF document (.pdf)')}</div>
-					</DropdownMenu.Item>
-
-					<DropdownMenu.Item
-						class="flex gap-2 items-center px-3 py-2 text-sm  cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-md"
-						on:click={() => {
-							downloadHTML();
-						}}
-					>
-						<div class="flex items-center line-clamp-1">{$i18n.t('HTML document (.html)')}</div>
-					</DropdownMenu.Item>
-				</DropdownMenu.SubContent>
-			</DropdownMenu.Sub>
-
-			<DropdownMenu.Item
-				class="flex gap-2 items-center px-3 py-2 text-sm  cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-md"
-				id="chat-copy-button"
-				on:click={async () => {
-					const res = await copyToClipboard(await getChatAsText()).catch((e) => {
-						console.error(e);
-					});
-
-					if (res) {
-						toast.success($i18n.t('Copied to clipboard'));
-					}
-				}}
-			>
-				<Clipboard className=" size-4" strokeWidth="1.5" />
-				<div class="flex items-center">{$i18n.t('Copy')}</div>
-			</DropdownMenu.Item>
 
 			{#if !$temporaryChatEnabled}
 				<hr class="border-gray-100 dark:border-gray-850 my-0.5" />

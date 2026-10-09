@@ -32,8 +32,10 @@
 		isInlineHtmlPreviewCopyMessage,
 		isInlineHtmlPreviewImageMessage,
 		HTML_PREVIEW_REFERRER_POLICY,
-		HTML_PREVIEW_SANDBOX
+		HTML_PREVIEW_SANDBOX,
+		type HtmlPreviewColorScheme
 	} from '$lib/utils/html-preview';
+	import { isDarkMode } from '$lib/utils/dark-mode';
 	import {
 		captureHtmlPreviewPng,
 		downloadBlob,
@@ -46,12 +48,19 @@
 	let messages: any[] = [];
 
 	type PreviewContent = { type: 'iframe' | 'svg'; content: string; messageId: string };
-	type CachedMessageContents = { source: string; previews: PreviewContent[] };
+	type CachedMessageContents = {
+		source: string;
+		colorScheme: HtmlPreviewColorScheme;
+		previews: PreviewContent[];
+	};
 
 	const MAX_ARTIFACT_VERSIONS = 50;
 
 	let contents: PreviewContent[] = [];
 	let selectedContentIdx = 0;
+	// HTML previews follow the app theme like the inline answer cards do.
+	let previewColorScheme: HtmlPreviewColorScheme = 'light';
+	let builtColorScheme: HtmlPreviewColorScheme | null = null;
 
 	let copied = false;
 	let exportingImage = false;
@@ -117,13 +126,14 @@
 	const buildMessageContents = (message: any): PreviewContent[] => {
 		const messageId = String(message.id ?? '');
 		const source = String(message.content ?? '');
+		const colorScheme = previewColorScheme;
 		const cached = messageContentsCache.get(messageId);
-		if (cached?.source === source) {
+		if (cached?.source === source && cached.colorScheme === colorScheme) {
 			return cached.previews;
 		}
 
 		const previews: PreviewContent[] = [];
-		const htmlPreview = buildHtmlArtifactPreview(source);
+		const htmlPreview = buildHtmlArtifactPreview(source, { colorScheme });
 		if (htmlPreview) {
 			previews.push({ type: 'iframe', content: htmlPreview, messageId });
 			if (hasSameOriginPreviewImages(htmlPreview)) {
@@ -132,7 +142,7 @@
 		}
 		previews.push(...extractSvgContents(stripThinkingBlocks(source), messageId));
 
-		messageContentsCache.set(messageId, { source, previews });
+		messageContentsCache.set(messageId, { source, colorScheme, previews });
 		return previews;
 	};
 
@@ -152,15 +162,20 @@
 		}, 300);
 	};
 
-	$: if (history) {
-		messages = createMessagesList(history, history.currentId);
+	$: previewColorScheme = $isDarkMode ? 'dark' : 'light';
+
+	const refreshContents = (currentHistory: any, _colorScheme: HtmlPreviewColorScheme) => {
+		messages = currentHistory ? createMessagesList(currentHistory, currentHistory.currentId) : [];
 		scheduleGetContents();
-	} else {
-		messages = [];
-		scheduleGetContents();
-	}
+	};
+
+	$: refreshContents(history, previewColorScheme);
 
 	const getContents = () => {
+		// A theme switch only re-renders the same versions: keep the one on screen.
+		const themeOnly = builtColorScheme !== null && builtColorScheme !== previewColorScheme;
+		const previousLength = contents.length;
+		builtColorScheme = previewColorScheme;
 		const nextContents: PreviewContent[] = [];
 		const activeMessageIds = new Set<string>();
 
@@ -178,6 +193,10 @@
 		}
 
 		contents = nextContents.slice(-MAX_ARTIFACT_VERSIONS);
+
+		if (themeOnly && contents.length === previousLength && contents.length > 0) {
+			return;
+		}
 
 		if (contents.length === 0) {
 			// Defer store mutations out of the reactive block to avoid re-trigger loops
@@ -249,7 +268,7 @@
 
 		exportingImage = true;
 		try {
-			const pngBlob = await captureHtmlPreviewPng(iframeElement);
+			const pngBlob = await captureHtmlPreviewPng(iframeElement, { keepTheme: true });
 			if (!alive) return;
 			downloadBlob(pngBlob, `halo-html-artifact-${Date.now()}.png`);
 			toast.success($i18n.t('Exported PNG'));

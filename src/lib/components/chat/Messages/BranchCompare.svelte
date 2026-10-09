@@ -27,7 +27,7 @@
 
 	const branches = branchAnswers(history, messageId);
 	const allAnswers = chatAnswers(history);
-	const shown = currentPath(history);
+	const onShownBranch = currentPath(history);
 	// Only this question's versions when it has several, else every answer in the chat.
 	let includeAll = branches.length < 2;
 	let leftId = '';
@@ -52,13 +52,16 @@
 		value: a.message.id,
 		label: `${includeAll ? '' : '版本 '}${index + 1} · ${modelName(a.message)}`,
 		description: samePrompt ? undefined : excerpt(a.prompt?.content as string),
-		badge: shown.has(a.message.id) ? '当前' : undefined
+		badge: isShown(a.message.id) ? '当前' : undefined
 	}));
 	$: picked = {
 		left: answers.find((a) => a.message.id === leftId),
 		right: answers.find((a) => a.message.id === rightId)
 	} as Record<Side, BranchAnswer | undefined>;
-	$: promptsDiffer = picked.left?.prompt?.id !== picked.right?.prompt?.id;
+	// 当前 / 两边不同 tell versions of one question apart; across the whole chat every answer
+	// on the shown path is "current" and every question differs, so they say nothing there.
+	$: isShown = (id: string) => !includeAll && onShownBranch.has(id);
+	$: promptsDiffer = !includeAll && picked.left?.prompt?.id !== picked.right?.prompt?.id;
 
 	const setScope = (all: boolean) => {
 		if (all === includeAll) return;
@@ -149,7 +152,7 @@
 								on:change={(e) => choose(side, e.detail.value)}
 							/>
 						</div>
-						{#if answer && shown.has(answer.message.id)}
+						{#if answer && isShown(answer.message.id)}
 							<span class="halo-chip shrink-0" title="对话里正显示这个版本">当前</span>
 						{/if}
 					</div>

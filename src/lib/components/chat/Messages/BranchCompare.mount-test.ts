@@ -88,6 +88,9 @@ describe('branch comparison dialog', () => {
 		all.click();
 		await sleep();
 		expect(all.getAttribute('aria-pressed')).toBe('true');
+		// across the whole chat 当前 / 两边不同 would mark nearly everything, so they are dropped
+		expect(document.querySelector('[data-halo-compare-side] .halo-chip[title]')).toBeFalsy();
+		expect(document.body.textContent).not.toContain('两边不同');
 		(document.querySelector('[aria-label="关闭"]') as HTMLButtonElement).click();
 		await sleep();
 		expect(document.querySelector('[data-halo-branch-comparison]')).toBeFalsy();

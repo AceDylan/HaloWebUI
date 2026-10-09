@@ -301,7 +301,7 @@
 			</div>
 			{#if showDailyTable}
 				<div class="{card} mt-3 max-h-64 overflow-auto">
-					<table class="w-full text-sm">
+					<table class="w-full whitespace-nowrap text-sm">
 						<thead class="sticky top-0 bg-gray-50/95 dark:bg-gray-850/95">
 							<tr>
 								<th class="{th} text-left">日期</th>
@@ -325,7 +325,7 @@
 			{/if}
 		</section>
 
-		<div class="grid gap-4 lg:grid-cols-2">
+		<div class="space-y-4">
 			{#each groups as group}
 				<section class="{card} overflow-hidden">
 					<h3
@@ -334,7 +334,7 @@
 						{group.title}
 					</h3>
 					<div class="overflow-x-auto">
-						<table class="w-full text-sm">
+						<table class="w-full whitespace-nowrap text-sm">
 							<thead class="bg-gray-50/80 dark:bg-gray-850/50">
 								<tr>
 									<th class="{th} text-left">名称</th>

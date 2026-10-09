@@ -6,6 +6,7 @@
 	dayjs.extend(localizedFormat);
 
 	import { goto } from '$app/navigation';
+	import { CHAT_KIND_LABEL, CHAT_KIND_TITLE, chatHref } from '$lib/utils/chat-kind';
 
 	import { getChatList, getChatListBySearchText } from '$lib/apis/chats';
 	import { folders as folderStore, pendingMessageReveal } from '$lib/stores';
@@ -78,9 +79,11 @@
 		show = false;
 		// A search hit opens at the message the words were found in.
 		pendingMessageReveal.set(
-			searchValue.trim() && chat.message_id ? { chatId: chat.id, messageId: chat.message_id } : null
+			searchValue.trim() && chat.message_id && chat.kind !== 'discuss'
+				? { chatId: chat.id, messageId: chat.message_id }
+				: null
 		);
-		await goto(`/c/${chat.id}`);
+		await goto(chatHref(chat.id, chat.kind));
 	};
 
 	$: if (show) {
@@ -157,7 +160,7 @@
 						{#each chats as chat}
 							<a
 								class="flex items-center justify-between gap-3 rounded-xl px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-850 transition"
-								href="/c/{chat.id}"
+								href={chatHref(chat.id, chat.kind)}
 								draggable="false"
 								on:click|preventDefault={() => {
 									void openChat(chat);
@@ -179,6 +182,15 @@
 										</div>
 									{/if}
 								</div>
+								{#if chat.kind && CHAT_KIND_LABEL[chat.kind]}
+									<span
+										class="shrink-0 rounded px-1 py-0.5 text-2xs leading-none text-gray-500 ring-1 ring-inset ring-gray-200 dark:text-gray-400 dark:ring-gray-700"
+										title={CHAT_KIND_TITLE[chat.kind]}
+										data-halo-chat-kind={chat.kind}
+									>
+										{CHAT_KIND_LABEL[chat.kind]}
+									</span>
+								{/if}
 								{#if folderNameOf(chat.folder_id)}
 									<span
 										class="max-w-[8rem] shrink-0 truncate rounded-md bg-gray-200/70 px-1.5 py-0.5 text-[10px] leading-none text-gray-500 dark:bg-gray-800/80 dark:text-gray-400"

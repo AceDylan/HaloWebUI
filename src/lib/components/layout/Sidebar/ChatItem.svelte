@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { CHAT_KIND_LABEL, CHAT_KIND_TITLE, chatHref } from '$lib/utils/chat-kind';
 	import { toast } from 'svelte-sonner';
 	import { goto } from '$app/navigation';
 	import { getContext, createEventDispatcher, tick } from 'svelte';
@@ -68,22 +69,8 @@
 	export let snippet: string | null = null;
 	export let searchText = '';
 	export let matchMessageId: string | null = null;
-	const KIND_LABEL: Record<string, string> = {
-		discuss: '讨论',
-		answer: '精答',
-		team: '协作',
-		image: '生图',
-		answer_dispatch: '精答',
-		discuss_dispatch: '讨论'
-	};
-	const KIND_TITLE: Record<string, string> = {
-		answer: '精答：由挑选出的助手回答，可以接着追问',
-		discuss: '讨论台里的多模型讨论',
-		team: '协作台任务的对话：目标、团队进度和发回的结果',
-		image: '这个对话里生成过图片',
-		answer_dispatch: '交给精答的对话：精答的进度和发回的回答',
-		discuss_dispatch: '交给讨论台的对话：讨论的进度和发回的结论'
-	};
+	const KIND_LABEL = CHAT_KIND_LABEL;
+	const KIND_TITLE = CHAT_KIND_TITLE;
 	export let folderOptions: Array<{
 		id: string;
 		name: string;
@@ -299,7 +286,7 @@
 	{:else}
 		<a
 			class="{itemShellClass} {itemStateClass} whitespace-nowrap text-ellipsis {snippetLayoutClass}"
-			href={kind === 'discuss' ? `/discuss/${id}` : `/c/${id}`}
+			href={chatHref(id, kind)}
 			on:click={() => {
 				dispatch('select');
 				pendingMessageReveal.set(

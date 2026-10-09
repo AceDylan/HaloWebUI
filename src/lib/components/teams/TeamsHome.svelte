@@ -26,7 +26,8 @@
 	import RunnerStatus from './RunnerStatus.svelte';
 	import StatusChip from './StatusChip.svelte';
 	import TeamAvatar from './TeamAvatar.svelte';
-	import { uploadFile } from '$lib/apis/files';
+	import { uploadErrorText, uploadFileReliably } from '$lib/utils/reliable-upload';
+	import UploadProgress from '$lib/components/common/UploadProgress.svelte';
 	import { listLibrary } from '$lib/apis/assistant-library';
 	import { goalWithBackground, originLabel, takeHandoff, type HandoffOrigin } from '$lib/utils/handoff';
 	import HandoffBack from '$lib/components/common/HandoffBack.svelte';
@@ -277,7 +278,7 @@
 	let origin: HandoffOrigin | null = null;
 
 	// Files given with the goal (uploaded first, then handed to the team by id).
-	let attached: { id: string | null; name: string; size: number; error?: string }[] = [];
+	let attached: { id: string | null; name: string; size: number; progress?: number; error?: string }[] = [];
 	let fileInput: HTMLInputElement;
 	$: uploading = attached.some((f) => !f.id && !f.error);
 	// the dock takes the goal, its uploaded files and its background to another mode
@@ -301,15 +302,23 @@
 				toast.error(`「${file.name}」超过 50 MB`);
 				continue;
 			}
-			const entry = { id: null as string | null, name: file.name, size: file.size };
+			// Same upload as the chat's: a progress ring, resumes after a dropped connection,
+			// and a file uploaded before is reused instead of sent again.
+			const entry: (typeof attached)[number] = { id: null, name: file.name, size: file.size, progress: 0 };
 			attached = [...attached, entry];
 			try {
-				const res = await uploadFile(localStorage.token, file, { process: false });
+				const { file: res } = await uploadFileReliably(localStorage.token, file, {
+					process: false,
+					onProgress: ({ percent }) => {
+						entry.progress = percent;
+						attached = attached;
+					}
+				});
 				entry.id = res?.id ?? null;
 				if (!entry.id) throw new Error('上传没有返回文件');
 			} catch (e) {
-				(entry as any).error = `${(e as any)?.message ?? e}`;
-				toast.error(`「${file.name}」上传失败`);
+				entry.error = uploadErrorText(e);
+				toast.error(`「${file.name}」上传失败：${entry.error}`);
 			}
 			attached = [...attached];
 		}
@@ -588,12 +597,14 @@
 								data-attachment-state={f.error ? 'failed' : f.id ? 'ready' : 'uploading'}
 							>
 								{#if !f.id && !f.error}
-									<span
-										class="size-3 shrink-0 animate-spin rounded-full border-2 border-current border-r-transparent"
-										aria-hidden="true"
-									/>
+									<UploadProgress progress={f.progress} ringClassName="size-3.5" showPercent={false} />
 								{/if}
 								<span class="min-w-0 truncate" title={f.error ?? f.name}>{f.name}</span>
+								{#if !f.id && !f.error}
+									<span class="tm-num shrink-0 text-gray-400" data-attachment-progress
+										>{(f.progress ?? 0) < 100 ? `${f.progress ?? 0}%` : '处理中'}</span
+									>
+								{/if}
 								<button
 									type="button"
 									class="grid size-4 shrink-0 place-items-center rounded-full text-gray-400 hover:bg-gray-500/10 hover:text-gray-700 dark:hover:text-gray-200"

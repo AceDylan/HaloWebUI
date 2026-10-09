@@ -23,7 +23,10 @@ const library = vi.hoisted(() => ({
 	searchTemplates: vi.fn()
 }));
 vi.mock('$lib/apis/assistant-library', () => library);
-const files = vi.hoisted(() => ({ uploadFileReliably: vi.fn() }));
+const files = vi.hoisted(() => ({
+	uploadFileReliably: vi.fn(),
+	uploadErrorText: (e: any) => (typeof e === 'string' ? e : e?.message || '上传失败')
+}));
 vi.mock('$lib/utils/reliable-upload', () => files);
 const nav = vi.hoisted(() => ({ goto: vi.fn(), replaceState: vi.fn() }));
 vi.mock('$app/navigation', () => nav);

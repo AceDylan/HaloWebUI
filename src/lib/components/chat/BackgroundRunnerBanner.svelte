@@ -1,16 +1,21 @@
 <script lang="ts">
 	import { onDestroy, onMount } from 'svelte';
-	import { toast } from 'svelte-sonner';
 
-	import { stopHermesBackgroundRunner } from '$lib/apis/hermes';
 	import { chatId, hermesBackgroundRuns } from '$lib/stores';
 	import { describeBackgroundRun } from '$lib/utils/run-activity';
+	import { backgroundRunnerLabel as runnerLabel, createRunStopper } from '$lib/utils/runner-stop';
 
 	// A reclaude / codex / agy runner this chat launched is still working: say
 	// where it is, from its own progress reports, so nobody has to spend a
 	// two-minute hermes turn asking "查看进度".
 	let now = Date.now() / 1000;
 	let clock: ReturnType<typeof setInterval> | null = null;
+
+	// First press arms the button ("确认停止"), a second one within 5 s stops it.
+	let armed: string | null = null;
+	let stopping: string | null = null;
+	const stopper = createRunStopper((state) => ({ armed, stopping } = state));
+	const stop = stopper.press;
 
 	onMount(() => {
 		clock = setInterval(() => {
@@ -19,41 +24,8 @@
 	});
 	onDestroy(() => {
 		if (clock) clearInterval(clock);
-		if (armTimer) clearTimeout(armTimer);
+		stopper.dispose();
 	});
-
-	// Stopping ends a task that may have been running for an hour: the first
-	// press only arms the button ("确认停止"), a second one within 5 s stops it.
-	let armed: string | null = null;
-	let armTimer: ReturnType<typeof setTimeout> | null = null;
-	let stopping: string | null = null;
-
-	const runnerLabel = (agent: string) => (agent === 'officlaude' ? '官方 Claude' : agent);
-
-	const stop = async (run: { run_id: string; agent: string }) => {
-		if (stopping) return;
-		if (armed !== run.run_id) {
-			armed = run.run_id;
-			if (armTimer) clearTimeout(armTimer);
-			armTimer = setTimeout(() => (armed = null), 5000);
-			return;
-		}
-		armed = null;
-		stopping = run.run_id;
-		try {
-			const result = await stopHermesBackgroundRunner(localStorage.token, run.run_id);
-			hermesBackgroundRuns.update((runs) => runs.filter((item) => item.run_id !== run.run_id));
-			toast.success(
-				result.report_shown && result.resumable !== false
-					? `已停止 ${runnerLabel(run.agent)}，直接回复就能让它按新说明接着做`
-					: `已停止 ${runnerLabel(run.agent)}`
-			);
-		} catch (error) {
-			toast.error(`没能停止 ${runnerLabel(run.agent)}：${error}`);
-		} finally {
-			stopping = null;
-		}
-	};
 
 	$: runs = $hermesBackgroundRuns.filter((run) => run.chat_id === $chatId);
 

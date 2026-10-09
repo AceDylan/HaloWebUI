@@ -23,7 +23,7 @@
 	import HandoffBack from '$lib/components/common/HandoffBack.svelte';
 	import LoadMore from '$lib/components/common/LoadMore.svelte';
 	import { appendPage, cursorAfter, mergeHead } from '$lib/utils/paged';
-	import { uploadFileReliably } from '$lib/utils/reliable-upload';
+	import { uploadErrorText, uploadFileReliably } from '$lib/utils/reliable-upload';
 	import { isVideoFile, videoContactSheet } from '$lib/utils/video-contact-sheet';
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import UploadProgress from '$lib/components/common/UploadProgress.svelte';
@@ -118,12 +118,7 @@
 					if (!res?.id) throw new Error('上传失败');
 					item.id = res.id;
 				} catch (e: any) {
-					item.error =
-						typeof e === 'string'
-							? e
-							: e?.code === 'upload_interrupted'
-								? '网络中断，上传未完成'
-								: (typeof e?.detail === 'string' && e.detail) || e?.message || '上传失败';
+					item.error = uploadErrorText(e);
 				}
 				attachments = attachments;
 			})

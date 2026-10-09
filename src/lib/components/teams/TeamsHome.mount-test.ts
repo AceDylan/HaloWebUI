@@ -13,7 +13,11 @@ const api = vi.hoisted(() => ({
 	listTeams: vi.fn()
 }));
 vi.mock('$lib/apis/teams', () => api);
-vi.mock('$lib/apis/files', () => ({ uploadFile: vi.fn() }));
+const upload = vi.hoisted(() => ({
+	uploadFileReliably: vi.fn(),
+	uploadErrorText: (e: any) => (typeof e === 'string' ? e : e?.message || '上传失败')
+}));
+vi.mock('$lib/utils/reliable-upload', () => upload);
 const nav = vi.hoisted(() => ({ goto: vi.fn(), replaceState: vi.fn() }));
 vi.mock('$app/navigation', () => nav);
 vi.mock('svelte-sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn() } }));
@@ -129,5 +133,43 @@ describe('TeamsHome list', () => {
 		(target.querySelector('[data-filter="done"]') as any).click();
 		await until(() => api.listTeams.mock.calls.some((call: any[]) => call[1]?.bucket === 'done'));
 		await until(() => !target.querySelector('[data-load-more]'));
+	});
+});
+
+describe('TeamsHome attachments', () => {
+	it('shows how far a file has got, then marks it ready', async () => {
+		let finish: (v: any) => void = () => {};
+		upload.uploadFileReliably.mockImplementation((_t: string, _f: File, opts: any) => {
+			opts.onProgress({ percent: 40 });
+			return new Promise((resolve) => (finish = resolve));
+		});
+		const target = await mount();
+		await until(() => !!target.querySelector('[data-team-file-input]'));
+		const input = target.querySelector('[data-team-file-input]') as any;
+		const file = { name: 'plan.pdf', size: 1000, type: 'application/pdf' };
+		Object.defineProperty(input, 'files', { value: [file], configurable: true });
+		input.dispatchEvent(new (window as any).Event('change'));
+		await until(() => !!target.querySelector('[data-attachment-progress]'));
+		expect(target.querySelector('[data-attachment-progress]')!.textContent).toBe('40%');
+		expect(upload.uploadFileReliably.mock.calls[0][2].process).toBe(false);
+		finish({ file: { id: 'f-1' }, reused: false });
+		await until(() => !!target.querySelector('[data-attachment-state="ready"]'));
+		expect(target.querySelectorAll('[data-attachment-progress]').length).toBe(0);
+	});
+
+	it('names the reason when an upload fails', async () => {
+		upload.uploadFileReliably.mockRejectedValue('网络中断，上传未完成');
+		const target = await mount();
+		await until(() => !!target.querySelector('[data-team-file-input]'));
+		const input = target.querySelector('[data-team-file-input]') as any;
+		Object.defineProperty(input, 'files', {
+			value: [{ name: 'a.txt', size: 10, type: 'text/plain' }],
+			configurable: true
+		});
+		input.dispatchEvent(new (window as any).Event('change'));
+		await until(() => !!target.querySelector('[data-attachment-state="failed"]'));
+		expect(
+			target.querySelector('[data-attachment-state="failed"] [title]')!.getAttribute('title')
+		).toBe('网络中断，上传未完成');
 	});
 });

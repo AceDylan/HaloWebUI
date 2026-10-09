@@ -225,6 +225,14 @@ const sendOnce = (
 		);
 	});
 
+/** One line for an attachment chip whose upload failed (讨论台 / 协作台). */
+export const uploadErrorText = (e: any): string =>
+	typeof e === 'string'
+		? e
+		: e?.code === 'upload_interrupted'
+			? '网络中断，上传未完成'
+			: (typeof e?.detail === 'string' && e.detail) || e?.message || '上传失败';
+
 export const uploadFileReliably = async (
 	token: string,
 	file: File,

@@ -9,6 +9,7 @@
 		showSidebar
 	} from '$lib/stores';
 	import { describeBackgroundRun } from '$lib/utils/run-activity';
+	import { createRunStopper } from '$lib/utils/runner-stop';
 	import { formatToolDuration } from '$lib/utils/tool-call-preview';
 	import Folder from '../../common/Folder.svelte';
 	import Tooltip from '../../common/Tooltip.svelte';
@@ -48,8 +49,15 @@
 		}, 1000);
 	});
 
+	// A background runner can be stopped from here without opening its chat;
+	// same two-press confirm as the chat's banner.
+	let armed: string | null = null;
+	let stopping: string | null = null;
+	const stopper = createRunStopper((state) => ({ armed, stopping } = state));
+
 	onDestroy(() => {
 		if (clockTimer) clearInterval(clockTimer);
+		stopper.dispose();
 	});
 </script>
 
@@ -150,38 +158,57 @@
 				</a>
 			{/each}
 			{#each background as run (run.run_id)}
-				<a
-					class="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm hover:bg-gray-100 dark:hover:bg-gray-900 {run.chat_id ===
-					$chatId
-						? 'bg-gray-100 dark:bg-gray-900'
-						: ''}"
-					href="/c/{run.chat_id}"
-					title={run.last_activity
-						? `${describeBackgroundRun(run, now)} · ${run.last_activity}`
-						: describeBackgroundRun(run, now)}
-					data-halo-hermes-run-state="background"
-					on:click={() => {
-						if ($mobile) {
-							showSidebar.set(false);
-						}
-					}}
-				>
-					<span class="relative flex h-2 w-2 shrink-0">
-						<span
-							class="absolute inline-flex h-full w-full animate-ping rounded-full bg-blue-400 opacity-60"
-						></span>
-						<span class="relative inline-flex h-2 w-2 rounded-full bg-blue-500"></span>
-					</span>
-					<span class="min-w-0 flex-1 truncate">{run.title ?? $i18n.t('New Chat')}</span>
-					<span class="shrink-0 rounded bg-blue-50 px-1 py-0.5 text-2xs font-medium text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
-						{run.agent}
-					</span>
-					{#if run.started_at}
-						<span class="shrink-0 font-mono text-xs tabular-nums text-gray-500">
-							{elapsed(run.started_at)}
+				<div class="group relative flex w-full items-center" data-halo-hermes-background-row>
+					<a
+						class="flex min-w-0 flex-1 items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm hover:bg-gray-100 dark:hover:bg-gray-900 {run.chat_id ===
+						$chatId
+							? 'bg-gray-100 dark:bg-gray-900'
+							: ''}"
+						href="/c/{run.chat_id}"
+						title={run.last_activity
+							? `${describeBackgroundRun(run, now)} · ${run.last_activity}`
+							: describeBackgroundRun(run, now)}
+						data-halo-hermes-run-state="background"
+						on:click={() => {
+							if ($mobile) {
+								showSidebar.set(false);
+							}
+						}}
+					>
+						<span class="relative flex h-2 w-2 shrink-0">
+							<span
+								class="absolute inline-flex h-full w-full animate-ping rounded-full bg-blue-400 opacity-60"
+							></span>
+							<span class="relative inline-flex h-2 w-2 rounded-full bg-blue-500"></span>
 						</span>
-					{/if}
-				</a>
+						<span class="min-w-0 flex-1 truncate">{run.title ?? $i18n.t('New Chat')}</span>
+						<span class="shrink-0 rounded bg-blue-50 px-1 py-0.5 text-2xs font-medium text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
+							{run.agent}
+						</span>
+						{#if run.started_at}
+							<span class="shrink-0 font-mono text-xs tabular-nums text-gray-500">
+								{elapsed(run.started_at)}
+							</span>
+						{/if}
+					</a>
+					<button
+						type="button"
+						class="ml-0.5 shrink-0 rounded-md px-1.5 text-2xs font-medium transition max-md:min-h-8 md:py-1 disabled:opacity-60 {armed ===
+						run.run_id
+							? 'bg-red-50 text-red-600 dark:bg-red-950/40 dark:text-red-400'
+							: 'text-gray-400 hover:bg-gray-100 hover:text-red-600 dark:hover:bg-gray-900 dark:hover:text-red-400'} {$mobile ||
+						armed === run.run_id ||
+						stopping === run.run_id
+							? ''
+							: 'opacity-0 group-hover:opacity-100 focus-visible:opacity-100'}"
+						disabled={stopping === run.run_id}
+						data-halo-hermes-background-stop={run.run_id}
+						aria-label={armed === run.run_id ? `确认停止 ${run.agent}` : `停止 ${run.agent}`}
+						on:click|stopPropagation={() => stopper.press(run)}
+					>
+						{stopping === run.run_id ? '停止中…' : armed === run.run_id ? '确认停止' : '停止'}
+					</button>
+				</div>
 			{/each}
 		</div>
 	</Folder>

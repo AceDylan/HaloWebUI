@@ -57,12 +57,23 @@ const dayKey = (ts: number) => {
 export const summarizeRuns = (runs: RunnerRun[], days: number, now = Date.now() / 1000) => {
 	const total = emptyGroup('all');
 	runs.forEach((run) => add(total, run));
-	// every local day of the window, oldest first, zero where nothing ran
+	// The API uses a rolling N * 24-hour window. Keep its first partial calendar
+	// day too, otherwise the daily chart silently drops runs counted in the total.
 	const daily: (RunnerGroup & { day: string })[] = [];
 	const byDay = new Map(groupBy(runs, (run) => dayKey(run.started_at)).map((g) => [g.key, g]));
-	for (let i = days - 1; i >= 0; i -= 1) {
-		const date = new Date(now * 1000);
-		date.setDate(date.getDate() - i);
+	const start = new Date(now * 1000);
+	start.setHours(0, 0, 0, 0);
+	start.setDate(start.getDate() - days + 1);
+	for (const run of runs) {
+		const date = new Date(run.started_at * 1000);
+		date.setHours(0, 0, 0, 0);
+		if (date < start) start.setTime(date.getTime());
+	}
+	for (
+		const date = new Date(start);
+		date.getTime() <= now * 1000;
+		date.setDate(date.getDate() + 1)
+	) {
 		const day = dayKey(date.getTime() / 1000);
 		daily.push({ ...(byDay.get(day) ?? emptyGroup(day)), day });
 	}

@@ -23,6 +23,17 @@ const run = (patch: object) => ({
 });
 
 describe('summarizeRuns', () => {
+	it('keeps the first partial day of the rolling window so daily costs match the total', () => {
+		const stats = summarizeRuns(
+			[run({ started_at: now - 7 * 86400 + 3600, cost_usd: 104.78 }), run({ cost_usd: 2 })] as any,
+			7,
+			now
+		);
+		expect(stats.daily[0]).toMatchObject({ day: '2026-10-02', runs: 1, cost: 104.78 });
+		expect(stats.daily).toHaveLength(8);
+		expect(stats.daily.reduce((sum, day) => sum + day.cost, 0)).toBeCloseTo(stats.total.cost);
+		expect(stats.daily.reduce((sum, day) => sum + day.runs, 0)).toBe(stats.total.runs);
+	});
 	it('sums per runner, per project and per day, with every day of the window', () => {
 		const runs = [
 			run({}),

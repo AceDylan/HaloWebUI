@@ -131,3 +131,50 @@ def test_hermes_errors_keep_their_meaning(monkeypatch, answer, status, words):
     with pytest.raises(HermesSessionsError) as e:
         asyncio.run(hermes_jobs.job_outputs(None, USER, JOB["id"]))
     assert e.value.status_code == status and words in e.value.detail
+
+
+class _GetSession(_Session):
+    def get(self, url, **kwargs):
+        self.calls.append(("GET", url, None, kwargs.get("params")))
+        return _Response(*self.answer)
+
+
+def test_runner_stats_clamps_days_and_keeps_rows(monkeypatch):
+    calls = []
+
+    async def resolve(request, user, model_id=None):
+        return {"id": "hermes-agent"}
+
+    monkeypatch.setattr(hermes_jobs, "resolve_hermes_model", resolve)
+    monkeypatch.setattr(hermes_jobs, "_connection", lambda *_a: ("http://hermes.test", {}))
+    monkeypatch.setattr(
+        hermes_jobs.aiohttp,
+        "ClientSession",
+        lambda **_kw: _GetSession((200, {"days": 90, "runs": [{"run_id": "r1"}, "junk"]}), calls),
+    )
+    out = asyncio.run(hermes_jobs.runner_stats(None, USER, 365))
+    assert out == {"days": 90, "runs": [{"run_id": "r1"}]}
+    assert calls == [("GET", "http://hermes.test/v1/runners/stats", None, {"days": "90"})]
+
+    monkeypatch.setattr(
+        hermes_jobs.aiohttp, "ClientSession", lambda **_kw: _GetSession((404, {}), calls)
+    )
+    with pytest.raises(HermesSessionsError) as e:
+        asyncio.run(hermes_jobs.runner_stats(None, USER, 7))
+    assert e.value.status_code == 501
+
+
+def test_runner_stats_preserves_quota_and_rejects_malformed_data(monkeypatch):
+    calls = _world(monkeypatch, (200, {}))
+    quota = {"available": True, "windows": [{"utilization": 95}]}
+    monkeypatch.setattr(
+        hermes_jobs.aiohttp, "ClientSession",
+        lambda **_kw: _GetSession((200, {"days": 7, "runs": [], "quota": quota}), calls),
+    )
+    assert asyncio.run(hermes_jobs.runner_stats(None, USER, 7))["quota"] == quota
+    monkeypatch.setattr(
+        hermes_jobs.aiohttp, "ClientSession", lambda **_kw: _GetSession((200, []), calls)
+    )
+    with pytest.raises(HermesSessionsError) as e:
+        asyncio.run(hermes_jobs.runner_stats(None, USER, 7))
+    assert e.value.status_code == 502

@@ -21,6 +21,34 @@ def test_hermes_router_exposes_every_endpoint():
     assert ("POST", "/chats/{chat_id}/read") in routes
 
 
+def test_runner_stats_requires_admin_and_validates_the_window(monkeypatch):
+    from types import SimpleNamespace
+
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from open_webui.utils.auth import get_current_user
+
+    app = FastAPI()
+    app.include_router(hermes_router.router)
+    account = SimpleNamespace(id="u1", role="user")
+    app.dependency_overrides[get_current_user] = lambda: account
+    calls = []
+
+    async def stats(request, user, days):
+        calls.append(days)
+        return {"days": days, "runs": []}
+
+    monkeypatch.setattr(hermes_router.hermes_jobs, "runner_stats", stats)
+    with TestClient(app) as client:
+        assert client.get("/runner-stats?days=7").status_code == 401
+        assert calls == []
+        account.role = "admin"
+        assert client.get("/runner-stats?days=7").json() == {"days": 7, "runs": []}
+        assert client.get("/runner-stats?days=0").status_code == 422
+        assert client.get("/runner-stats?days=91").status_code == 422
+        assert calls == [7]
+
+
 def test_notification_display_mode_shows_the_report_and_prompt_mode_starts_a_turn(monkeypatch):
     import asyncio
     from types import SimpleNamespace

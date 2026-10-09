@@ -23,6 +23,10 @@ services:
       # Models listed here go through hermes /v1/runs (SSE) so tool calls and
       # approval dialogs show up natively in the chat UI.
       HERMES_AGENT_MODEL_IDS: "hermes-agent"
+      # Composer note references: read-only container path plus the corresponding
+      # host path passed to Hermes when continuing work with the attached note.
+      HALO_VAULT_DIR: "/opt/vault"
+      HUB_VAULT_ROOT: "/root/Documents/Obsidian Vault"
       # One approval dialog waits up to 5 min for your click (matches hermes
       # approvals.gateway_timeout=300 default; integration auto-denies at 240s).
       WEBSOCKET_EVENT_CALLER_TIMEOUT: "300"
@@ -45,6 +49,7 @@ services:
       SMART_SEARCH_CLI: "/opt/host-smart-search/smart-search/npm/bin/smart-search.js"
     volumes:
       - open-webui:/app/backend/data
+      - /root/Documents/Obsidian Vault:/opt/vault:ro
       - /root/.local/bin:/opt/host-agy/bin:ro
       - /root/.gemini/antigravity-cli:/opt/host-agy/antigravity-cli:ro
       # Host smart-search: the npm scope dir (not the package dir, so a

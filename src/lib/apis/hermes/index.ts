@@ -231,10 +231,10 @@ export const getHermesActivity = async (token: string): Promise<HermesActivity> 
 
 /** Opening a chat clears the unread mark its finished hermes run left. */
 export const markHermesChatRead = async (token: string, chatId: string): Promise<void> => {
-	const res = await fetch(
-		`${WEBUI_API_BASE_URL}/hermes/chats/${encodeURIComponent(chatId)}/read`,
-		{ method: 'POST', headers: jsonHeaders(token) }
-	);
+	const res = await fetch(`${WEBUI_API_BASE_URL}/hermes/chats/${encodeURIComponent(chatId)}/read`, {
+		method: 'POST',
+		headers: jsonHeaders(token)
+	});
 	if (!res.ok) {
 		throw await detailOf(res);
 	}
@@ -371,13 +371,20 @@ export const listHermesJobs = async (token: string) =>
 export const createHermesJob = async (token: string, fields: HermesJobFields) =>
 	(await jobsCall<{ job: HermesJob }>(token, 'POST', '', fields)).job;
 
-export const updateHermesJob = async (token: string, id: string, fields: Partial<HermesJobFields>) =>
-	(await jobsCall<{ job: HermesJob }>(token, 'PATCH', `/${encodeURIComponent(id)}`, fields)).job;
+export const updateHermesJob = async (
+	token: string,
+	id: string,
+	fields: Partial<HermesJobFields>
+) => (await jobsCall<{ job: HermesJob }>(token, 'PATCH', `/${encodeURIComponent(id)}`, fields)).job;
 
 export const deleteHermesJob = async (token: string, id: string) =>
 	jobsCall<{ status: boolean }>(token, 'DELETE', `/${encodeURIComponent(id)}`);
 
-export const hermesJobAction = async (token: string, id: string, action: 'pause' | 'resume' | 'run') =>
+export const hermesJobAction = async (
+	token: string,
+	id: string,
+	action: 'pause' | 'resume' | 'run'
+) =>
 	(await jobsCall<{ job: HermesJob }>(token, 'POST', `/${encodeURIComponent(id)}/${action}`)).job;
 
 export const getHermesJobOutputs = async (token: string, id: string, limit = 3) =>
@@ -388,3 +395,40 @@ export const getHermesJobOutputs = async (token: string, id: string, limit = 3) 
 			`/${encodeURIComponent(id)}/outputs?limit=${limit}`
 		)
 	).outputs;
+
+// ---- 后台任务 usage (admin only) ----
+
+export type RunnerRun = {
+	run_id: string;
+	agent: string;
+	status: string;
+	failure_kind: string;
+	started_at: number;
+	ended_at: number | null;
+	duration_s: number | null;
+	/** what the runner reported, at API prices (a subscription or relay is not billed this way) */
+	cost_usd: number | null;
+	turns: number | null;
+	tool_calls: number | null;
+	model: string;
+	cwd: string;
+	project: string;
+	origin: string;
+	parent_run: string;
+	title: string;
+};
+
+export type RunnerQuota = {
+	available: boolean;
+	checked_at: number;
+	notice?: string;
+	windows: { key: string; label: string; utilization: number; resets_at: string | null }[];
+};
+
+export const getRunnerStats = async (token: string, days = 30) =>
+	(await fetch(`${WEBUI_API_BASE_URL}/hermes/runner-stats?days=${days}`, {
+		headers: jsonHeaders(token)
+	}).then(async (res) => {
+		if (!res.ok) throw await detailOf(res);
+		return res.json();
+	})) as { days: number; runs: RunnerRun[]; quota?: RunnerQuota };

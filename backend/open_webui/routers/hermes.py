@@ -13,6 +13,9 @@ codex / agy) that one of the user's chats launched (hermes
 GET/POST/PATCH/DELETE /api/v1/hermes/jobs[/{id}[/pause|resume|run|outputs]] — hermes 定时任务
 (cron jobs), admin only: a job runs on the hermes host with its tools.
 
+GET /api/v1/hermes/runner-stats?days= — background runner runs with cost / time / turns
+(admin only), for the usage page's 后台任务 tab.
+
 GET /api/v1/hermes/sessions — hermes sessions from another surface (Telegram,
 QQ, CLI); POST /api/v1/hermes/sessions/{id}/import turns one into a chat whose
 id is the hermes session id, so the chat continues that session.
@@ -404,5 +407,18 @@ async def hermes_job_outputs(
 ):
     try:
         return {"outputs": await hermes_jobs.job_outputs(request, user, job_id, limit)}
+    except HermesSessionsError as e:
+        raise _job_error(e)
+
+
+@router.get("/runner-stats")
+async def hermes_runner_stats(
+    request: Request,
+    days: int = Query(30, ge=1, le=hermes_jobs.RUNNER_STATS_MAX_DAYS),
+    user=Depends(get_admin_user),
+):
+    """Background runner runs of the last ``days`` days: cost, time, turns, project."""
+    try:
+        return await hermes_jobs.runner_stats(request, user, days)
     except HermesSessionsError as e:
         raise _job_error(e)

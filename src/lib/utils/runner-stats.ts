@@ -1,0 +1,93 @@
+// 数据分析 → 后台任务: the runner runs Hermes reports (GET /v1/runners/stats), summed up —
+// overall, per runner, per project and per day.
+
+import type { RunnerRun } from '$lib/apis/hermes';
+
+export type RunnerGroup = {
+	key: string;
+	runs: number;
+	ok: number;
+	failed: number;
+	/** runs that stopped because the subscription's quota ran out */
+	quota: number;
+	cost: number;
+	seconds: number;
+	turns: number;
+};
+
+const FAILED = new Set(['error', 'failed', 'timeout', 'max_turns', 'killed']);
+const OK = new Set(['success', 'done', 'completed']);
+
+const emptyGroup = (key: string): RunnerGroup => ({
+	key,
+	runs: 0,
+	ok: 0,
+	failed: 0,
+	quota: 0,
+	cost: 0,
+	seconds: 0,
+	turns: 0
+});
+
+const add = (group: RunnerGroup, run: RunnerRun) => {
+	group.runs += 1;
+	if (OK.has(run.status)) group.ok += 1;
+	else if (FAILED.has(run.status)) group.failed += 1;
+	if (['quota_reset', 'quota', 'official_limit'].includes(run.failure_kind)) group.quota += 1;
+	group.cost += run.cost_usd ?? 0;
+	group.seconds += run.duration_s ?? 0;
+	group.turns += run.turns ?? 0;
+};
+
+const groupBy = (runs: RunnerRun[], keyOf: (run: RunnerRun) => string) => {
+	const groups = new Map<string, RunnerGroup>();
+	for (const run of runs) {
+		const key = keyOf(run);
+		if (!groups.has(key)) groups.set(key, emptyGroup(key));
+		add(groups.get(key)!, run);
+	}
+	return [...groups.values()].sort((a, b) => b.cost - a.cost || b.runs - a.runs);
+};
+
+const dayKey = (ts: number) => {
+	const d = new Date(ts * 1000);
+	return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+
+export const summarizeRuns = (runs: RunnerRun[], days: number, now = Date.now() / 1000) => {
+	const total = emptyGroup('all');
+	runs.forEach((run) => add(total, run));
+	// every local day of the window, oldest first, zero where nothing ran
+	const daily: (RunnerGroup & { day: string })[] = [];
+	const byDay = new Map(groupBy(runs, (run) => dayKey(run.started_at)).map((g) => [g.key, g]));
+	for (let i = days - 1; i >= 0; i -= 1) {
+		const date = new Date(now * 1000);
+		date.setDate(date.getDate() - i);
+		const day = dayKey(date.getTime() / 1000);
+		daily.push({ ...(byDay.get(day) ?? emptyGroup(day)), day });
+	}
+	return {
+		total,
+		byRunner: groupBy(runs, (run) => run.agent),
+		byProject: groupBy(runs, (run) => run.project || '（不在项目里）'),
+		daily
+	};
+};
+
+export const formatUsd = (value: number) =>
+	value >= 100
+		? `$${Math.round(value)}`
+		: value >= 1
+			? `$${value.toFixed(1)}`
+			: `$${value.toFixed(2)}`;
+
+export const formatHours = (seconds: number) => {
+	if (seconds < 60) return `${Math.round(seconds)} 秒`;
+	if (seconds < 3600) return `${Math.round(seconds / 60)} 分钟`;
+	const hours = seconds / 3600;
+	return `${hours >= 10 ? Math.round(hours) : hours.toFixed(1)} 小时`;
+};
+
+export const RUNNER_LABEL: Record<string, string> = {
+	officlaude: '官方 Claude'
+};

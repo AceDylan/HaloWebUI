@@ -11,6 +11,7 @@
 	} from '$lib/apis/analytics';
 	import { getUsers } from '$lib/apis/users';
 	import { toast } from 'svelte-sonner';
+	import RunnerUsage from './RunnerUsage.svelte';
 
 	import ChatBubbleOvalEllipsis from '../icons/ChatBubbleOvalEllipsis.svelte';
 	import Bolt from '../icons/Bolt.svelte';
@@ -41,6 +42,12 @@
 		{ label: string; description: string; badgeColor: string; iconColor: string }
 	> = {};
 	$: tabMeta = {
+		runners: {
+			label: tr('后台任务', 'Background tasks'),
+			description: tr('查看后台任务的费用、耗时、轮数和订阅额度。', 'Inspect runner cost, duration, turns and subscription limits.'),
+			badgeColor: 'bg-gray-100 dark:bg-gray-800',
+			iconColor: 'text-gray-600 dark:text-gray-400'
+		},
 		overview: {
 			label: tr('总览', 'Overview'),
 			description: tr('查看消息量、Token 用量和活跃度概览。', 'View message volume, token usage, and activity at a glance.'),
@@ -79,7 +86,7 @@
 	};
 
 	let days = 30;
-	let activeTab: 'overview' | 'models' | 'users' = 'overview';
+	let activeTab: 'overview' | 'models' | 'users' | 'runners' = 'overview';
 	let modelStats: any[] = [];
 	let userStats: any[] = [];
 	let dailyStats: any[] = [];
@@ -411,7 +418,7 @@
 						<!-- Icon badge + title + description -->
 						<div class="flex items-start gap-3">
 							<div class="glass-icon-badge {activeTabMeta.badgeColor}">
-								{#if activeTab === 'overview'}
+								{#if activeTab === 'overview' || activeTab === 'runners'}
 									<ChartBar className="size-[18px] {activeTabMeta.iconColor}" />
 								{:else if activeTab === 'models'}
 									<Cube className="size-[18px] {activeTabMeta.iconColor}" />
@@ -430,7 +437,7 @@
 											{ value: '7', label: `7 ${$i18n.t('days')}` },
 											{ value: '30', label: `30 ${$i18n.t('days')}` },
 											{ value: '90', label: `90 ${$i18n.t('days')}` },
-											{ value: '365', label: `365 ${$i18n.t('days')}` }
+											...(activeTab === 'runners' ? [] : [{ value: '365', label: `365 ${$i18n.t('days')}` }])
 										]}
 										on:change={handleDaysChange}
 									/>
@@ -444,6 +451,9 @@
 
 					<!-- Tab pill bar -->
 					<div class="halo-seg inline-flex max-w-full flex-wrap items-center gap-1.5 self-start rounded-xl bg-gray-100/70 p-1 shadow-[inset_0_1px_0_rgba(255,255,255,0.65)] dark:bg-gray-850/80 dark:shadow-none @[64rem]:flex-nowrap @[64rem]:shrink-0">
+						<button type="button" class={`flex shrink-0 items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-all ${activeTab === 'runners' ? 'bg-white text-gray-900 shadow-sm dark:bg-gray-800 dark:text-white' : 'text-gray-500 hover:bg-white/50 dark:text-gray-400 dark:hover:bg-gray-800/50'}`} on:click={() => { exitSelectionMode(); if (days > 90) { days = 90; void loadData(90); } activeTab = 'runners'; }}>
+							<Bolt className="size-4" /><span>{tr('后台任务', 'Background tasks')}</span>
+						</button>
 						<button type="button" class={`flex shrink-0 items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-all ${activeTab === 'overview' ? 'bg-white text-gray-900 shadow-[0_1px_3px_rgba(15,23,42,0.08)] dark:bg-gray-800 dark:text-white' : 'text-gray-500 hover:bg-white/50 hover:text-gray-800 dark:text-gray-400 dark:hover:bg-gray-800/50 dark:hover:text-gray-200'}`} on:click={() => { exitSelectionMode(); activeTab = 'overview'; }}>
 							<ChartBar className="size-4" />
 							<span>{tr('总览', 'Overview')}</span>
@@ -462,7 +472,9 @@
 		</section>
 
 		<!-- ===== OVERVIEW TAB ===== -->
-		{#if activeTab === 'overview'}
+		{#if activeTab === 'runners'}
+			<RunnerUsage {days} />
+		{:else if activeTab === 'overview'}
 			<div class="grid grid-cols-2 md:grid-cols-4 gap-3">
 				{#each [
 					{ icon: ChatBubbleOvalEllipsis, value: formatNumber(totalMessages), label: $i18n.t('Total Messages') },

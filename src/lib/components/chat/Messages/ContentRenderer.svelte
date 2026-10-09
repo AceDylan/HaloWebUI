@@ -137,6 +137,7 @@
 	export let streaming = false;
 	export let isLastMessage = false;
 	export let forceExpand = false;
+	export let autoOpenArtifacts = true;
 
 	export let onSourceClick = () => {};
 	export let onTaskClick = () => {};
@@ -1238,6 +1239,7 @@
 					const autoOpenKey = artifactType ? `${id}:${artifactType}:${content}` : null;
 
 					if (
+						autoOpenArtifacts &&
 						!streaming &&
 						$chatId &&
 						!autoOpenDismissed &&

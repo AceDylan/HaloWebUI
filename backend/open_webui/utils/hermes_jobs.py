@@ -111,7 +111,7 @@ async def _jobs_call(
                 if resp.status == 501:
                     raise HermesSessionsError(501, "Hermes 没有启用定时任务模块")
                 raise HermesSessionsError(502, f"Hermes 返回 {resp.status}：{message or '未知错误'}")
-    except aiohttp.ClientError as e:
+    except (aiohttp.ClientError, TimeoutError) as e:
         raise HermesSessionsError(502, f"连不上 Hermes：{e}")
 
 
@@ -147,3 +147,41 @@ async def job_outputs(request, user, job_id: str, limit: int = 3) -> list[dict]:
         request, user, "GET", f"/{validate_job_id(job_id)}/outputs", params={"limit": str(limit)}
     )
     return [item for item in body.get("outputs") or [] if isinstance(item, dict)]
+
+
+RUNNER_STATS_MAX_DAYS = 90
+
+
+async def runner_stats(request, user, days: int = 30) -> dict:
+    """Every background runner run of the last ``days`` days with its reported cost, duration,
+    turns and project (hermes GET /v1/runners/stats), for the 后台任务 tab of the usage page."""
+    days = max(1, min(int(days), RUNNER_STATS_MAX_DAYS))
+    model = await resolve_hermes_model(request, user, None)
+    root, headers = _connection(request, user, model)
+    timeout = aiohttp.ClientTimeout(total=JOBS_TIMEOUT_SECONDS)
+    try:
+        async with aiohttp.ClientSession(trust_env=True, timeout=timeout) as session:
+            async with session.get(
+                f"{root}/v1/runners/stats",
+                params={"days": str(days)},
+                headers=headers,
+                ssl=AIOHTTP_CLIENT_SESSION_SSL,
+            ) as resp:
+                try:
+                    body = await resp.json(content_type=None)
+                except Exception:
+                    body = {}
+                if resp.status == 404:
+                    raise HermesSessionsError(501, "这个 Hermes 还不支持后台任务统计，更新 Hermes 并重启网关后再试")
+                if resp.status >= 400:
+                    message = _hermes_error_message(body) or f"HTTP {resp.status}"
+                    raise HermesSessionsError(502, f"Hermes 返回 {resp.status}：{message}")
+    except (aiohttp.ClientError, TimeoutError) as e:
+        raise HermesSessionsError(502, f"连不上 Hermes：{e}")
+    if not isinstance(body, dict) or not isinstance(body.get("runs"), list):
+        raise HermesSessionsError(502, "Hermes 后台任务统计返回格式异常")
+    runs = [row for row in body["runs"] if isinstance(row, dict)]
+    out = {"days": body.get("days") or days, "runs": runs}
+    if isinstance(body.get("quota"), dict):
+        out["quota"] = body["quota"]
+    return out

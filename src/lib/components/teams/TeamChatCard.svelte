@@ -10,8 +10,10 @@
 		getTeam,
 		getTeamEvents,
 		type Team,
+		type TeamChangeRequest,
 		type TeamStage
 	} from '$lib/apis/teams';
+	import LeadDesk from './LeadDesk.svelte';
 	import StageRail from './StageRail.svelte';
 	import StatusChip from './StatusChip.svelte';
 	import TeamAvatar from './TeamAvatar.svelte';
@@ -44,6 +46,20 @@
 	let destroyed = false;
 	let lastSeen = '';
 	let unchanged = 0;
+
+	// 对负责人说, right here: the same desk as the 协作台 page (an answer, or a plan change to
+	// apply), while the team is on the board — also after it finished (new work reopens it).
+	let leadChange: TeamChangeRequest | null = null;
+	let livePhase = '';
+	let liveStopped = false;
+	let leadOpen = false;
+	const OPEN_CHANGE = new Set(['thinking', 'ready', 'answered', 'failed']);
+	$: canTalk = !gone && team?.status === 'running' && !!livePhase && livePhase !== 'stopped' && !liveStopped;
+	$: showLead = canTalk && (leadOpen || OPEN_CHANGE.has(leadChange?.status ?? ''));
+	const leadChanged = () => {
+		unchanged = 0;
+		void load();
+	};
 
 	// Hermes tells Telegram about a running team (a member's question, a failed task, the result)
 	// unless the team is in front of the user. The workbench says so while it is open; so does this
@@ -153,6 +169,9 @@
 			const data = await getTeam(localStorage.token, teamId);
 			team = data.team;
 			stage = data.stage ?? stage;
+			leadChange = data.live?.team?.change ?? null;
+			livePhase = data.live?.team?.phase ?? '';
+			liveStopped = data.live?.team?.state === 'stopped';
 			error = '';
 			// what the card shows, not the clock fields (at, eta) that differ on every read
 			const seen = JSON.stringify([
@@ -163,7 +182,8 @@
 				stage?.now,
 				stage?.steps,
 				stage?.done,
-				stage?.task
+				stage?.task,
+				leadChange?.status
 			]);
 			unchanged = seen === lastSeen ? unchanged + 1 : 0;
 			lastSeen = seen;
@@ -179,7 +199,8 @@
 
 	const schedule = () => {
 		if (timer) clearTimeout(timer);
-		if (destroyed || settled) return;
+		// a settled team still answers 对负责人说: read on until the lead has
+		if (destroyed || (settled && leadChange?.status !== 'thinking')) return;
 		const hidden = typeof document !== 'undefined' && document.visibilityState === 'hidden';
 		const visible = unchanged >= 36 ? POLL_SLOW_MS[1] : unchanged >= 12 ? POLL_SLOW_MS[0] : POLL_MS;
 		timer = setTimeout(load, hidden ? POLL_HIDDEN_MS : visible);
@@ -301,6 +322,18 @@
 			<div class="text-xs text-amber-700 dark:text-amber-300">读不到团队的进度：{error}</div>
 		{:else}
 			<div class="tm-card-quiet h-16 animate-pulse" aria-busy="true" />
+		{/if}
+		{#if showLead}
+			<LeadDesk {teamId} change={leadChange} phase={livePhase} on:changed={leadChanged} />
+		{:else if canTalk}
+			<button
+				type="button"
+				class="self-start text-xs font-medium text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100"
+				on:click={() => (leadOpen = true)}
+				data-team-chat-talk
+			>
+				{livePhase === 'completed' ? '还要补什么？对负责人说 →' : '追加或调整？对负责人说 →'}
+			</button>
 		{/if}
 	{/if}
 </div>

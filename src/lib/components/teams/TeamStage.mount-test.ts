@@ -8,6 +8,8 @@ installDominoDom('http://localhost/');
 const api = vi.hoisted(() => ({
 	getTeam: vi.fn(),
 	followUpTeamConclusion: vi.fn(),
+	adjustTeam: vi.fn(),
+	decideTeamChange: vi.fn(),
 	getTeamEvents: vi.fn(async () => ({ events: [], next_after: 7, has_more: false, latest_seq: 7, reconcile: [] }))
 }));
 vi.mock('$lib/apis/teams', () => api);
@@ -202,6 +204,68 @@ describe('TeamChatCard (派发方式「协作台」 in a chat)', () => {
 			await sleep(20);
 		}
 	};
+	it('talks to the lead from the chat while the team works', async () => {
+		const running = (change: any = null) => ({
+			team: { id: 'team-r', title: '迁移数据库', status: 'running', phase: 'running', member_count: 2, task_count: 4 },
+			live: { team: { phase: 'running', state: 'running', change } },
+			stage: { key: 'running', label: '团队执行', now: '2/4 个任务完成', at: nowTs(), steps: steps(2) }
+		});
+		api.getTeam.mockResolvedValue(running());
+		api.adjustTeam.mockResolvedValue({ id: 'ch1', status: 'thinking', text: '再加一个回滚演练', requested_at: 1 });
+		await card({ teamId: 'team-r' });
+		expect(target.querySelectorAll('[data-lead-desk]').length).toBe(0);
+		(target.querySelector('[data-team-chat-talk]') as any).click();
+		await sleep(10);
+		const box = target.querySelector('[data-lead-desk] textarea') as any;
+		box.value = '再加一个回滚演练';
+		box.dispatchEvent(new (window as any).Event('input'));
+		api.getTeam.mockResolvedValue(
+			running({ id: 'ch1', status: 'thinking', text: '再加一个回滚演练', requested_at: 1 })
+		);
+		const enter = new (window as any).Event('keydown') as any;
+		enter.key = 'Enter';
+		box.dispatchEvent(enter);
+		const end = Date.now() + 8000;
+		while (!target.querySelector('[data-lead-proposal]')) {
+			if (Date.now() > end) throw new Error('timed out');
+			await sleep(20);
+		}
+		expect(api.adjustTeam).toHaveBeenCalledWith('tok', 'team-r', '再加一个回滚演练');
+		expect(target.querySelector('[data-lead-proposal]').getAttribute('data-change-status')).toBe('thinking');
+	});
+
+	it('shows the lead’s open answer without being asked, and no desk once the team stopped', async () => {
+		api.getTeam.mockResolvedValue({
+			team: { id: 'team-s', title: '周报', status: 'running', phase: 'completed', member_count: 1, task_count: 1 },
+			live: {
+				team: {
+					phase: 'completed',
+					state: 'running',
+					change: {
+						id: 'ch2',
+						status: 'answered',
+						text: '结论里的数字对吗',
+						requested_at: 1,
+						proposal: { reply: '核对过，数字来自 3 号任务的输出。', add_members: [], add_tasks: [], edit_tasks: [], cancel_tasks: [] }
+					}
+				}
+			},
+			stage: { key: 'done', label: '已完成', at: nowTs(), steps: steps(5) }
+		});
+		await card({ teamId: 'team-s' });
+		expect(target.querySelector('[data-lead-reply]').textContent).toContain('核对过');
+		app.$destroy();
+		target.remove();
+		api.getTeam.mockResolvedValue({
+			team: { id: 'team-t', title: '周报', status: 'running', phase: 'stopped', member_count: 1, task_count: 1 },
+			live: { team: { phase: 'stopped', state: 'stopped', change: null } },
+			stage: { key: 'stopped', label: '已停止', at: nowTs(), steps: steps(2) }
+		});
+		await card({ teamId: 'team-t' });
+		expect(target.querySelectorAll('[data-team-chat-talk]').length).toBe(0);
+		expect(target.querySelectorAll('[data-lead-desk]').length).toBe(0);
+	});
+
 	const doneTeam = {
 		team: {
 			id: 'team-d',

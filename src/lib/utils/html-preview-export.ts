@@ -96,6 +96,47 @@ const documentBackground = (frameDocument: Document) => {
 	return '#ffffff';
 };
 
+const CSS_COLOR = /(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch|color)\([^()]*\)|#[0-9a-f]{3,8}\b/i;
+
+// Two things html2canvas draws differently from the browser, each of which
+// turned parts of a card into solid colour bars:
+// - `background-clip: text` is painted as an ordinary background, so gradient
+//   headings and figures (the visual kit's .hv-grad, .hv-stat > b) hid their
+//   text. Such text is drawn in the gradient's first colour instead.
+// - an inline element that wraps (a long `code` path in a sentence) gets its
+//   background and border painted over its whole bounding box, covering the
+//   text around it. Those lose their background; the layout stays the same.
+const prepareForCanvas = (frameDocument: Document) => {
+	const view = frameDocument.defaultView;
+	if (!view) return;
+	for (const element of Array.from(frameDocument.querySelectorAll<HTMLElement>('body *'))) {
+		const style = view.getComputedStyle(element);
+		const clip = `${style.backgroundClip} ${style.getPropertyValue('-webkit-background-clip')}`;
+		if (/\btext\b/.test(clip)) {
+			const fill = style.getPropertyValue('-webkit-text-fill-color');
+			const color =
+				style.backgroundImage.match(CSS_COLOR)?.[0] ||
+				(isTransparent(fill) ? '' : fill) ||
+				(isTransparent(style.color) ? '' : style.color) ||
+				(element.parentElement ? view.getComputedStyle(element.parentElement).color : '') ||
+				'#111827';
+			element.style.setProperty('background', 'none', 'important');
+			element.style.setProperty('color', color, 'important');
+			element.style.setProperty('-webkit-text-fill-color', color, 'important');
+			continue;
+		}
+		if (
+			style.display === 'inline' &&
+			(!isTransparent(style.backgroundColor) || style.backgroundImage !== 'none') &&
+			element.getClientRects().length > 1
+		) {
+			element.style.setProperty('background', 'none', 'important');
+			element.style.setProperty('border-color', 'transparent', 'important');
+			element.style.setProperty('box-shadow', 'none', 'important');
+		}
+	}
+};
+
 export const renderHtmlSnapshotPng = async (
 	snapshot: string,
 	rawWidth: unknown,
@@ -133,6 +174,7 @@ export const renderHtmlSnapshotPng = async (
 			throw new Error('Export document is unavailable');
 		}
 		await frameDocument.fonts?.ready.catch(() => undefined);
+		prepareForCanvas(frameDocument);
 		const { default: html2canvas } = await import('html2canvas-pro');
 		const canvas = await html2canvas(frameDocument.documentElement, {
 			allowTaint: false,

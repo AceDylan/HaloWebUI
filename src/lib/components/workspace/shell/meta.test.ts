@@ -8,6 +8,7 @@ describe('getActiveWorkspaceTab', () => {
 		expect(getActiveWorkspaceTab('/workspace/prompts/edit')?.key).toBe('prompts');
 		expect(getActiveWorkspaceTab('/workspace/assistants')?.key).toBe('assistants');
 		expect(getActiveWorkspaceTab('/workspace/tools/edit')?.key).toBe('tools');
+		expect(getActiveWorkspaceTab('/workspace/schedules')?.key).toBe('schedules');
 	});
 
 	it('leaves the image studio to its own header', () => {

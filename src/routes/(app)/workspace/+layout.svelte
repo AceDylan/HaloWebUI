@@ -32,7 +32,10 @@
 				goto('/');
 			} else if ($page.url.pathname.includes('/tools') && !$user?.permissions?.workspace?.tools) {
 				goto('/');
-			} else if ($page.url.pathname.includes('/functions')) {
+			} else if (
+				$page.url.pathname.includes('/functions') ||
+				$page.url.pathname.includes('/schedules')
+			) {
 				goto('/');
 			} else if (
 				$page.url.pathname.includes('/images') &&

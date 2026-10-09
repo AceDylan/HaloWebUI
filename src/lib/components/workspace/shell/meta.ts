@@ -6,7 +6,8 @@ export type WorkspaceTabKey =
 	| 'tools'
 	| 'functions'
 	| 'skills'
-	| 'assistants';
+	| 'assistants'
+	| 'schedules';
 
 export type WorkspaceTabMeta = {
 	key: WorkspaceTabKey;
@@ -136,6 +137,19 @@ export const WORKSPACE_TABS: WorkspaceTabMeta[] = [
 		// The templates are a tab of 「助手」 (/workspace/models?tab=templates); this page is left
 		// for users who cannot open that one (the sidebar's 助手 leads here for them).
 		activeMatch: ['/workspace/assistants']
+	},
+	{
+		// Hermes cron jobs (admin only): the sidebar's 定时.
+		key: 'schedules',
+		href: '/workspace/schedules',
+		labelKey: '定时任务',
+		descKey: 'Hermes 按时间自动去做的事：看下次什么时候运行、上次结果如何，随时立即运行、暂停或修改。',
+		badgeColor: 'bg-sky-50 dark:bg-sky-950/30',
+		iconColor: 'text-sky-500 dark:text-sky-400',
+		iconPaths: [
+			'M12 2.25c-5.385 0-9.75 4.365-9.75 9.75s4.365 9.75 9.75 9.75 9.75-4.365 9.75-9.75S17.385 2.25 12 2.25ZM12.75 6a.75.75 0 0 0-1.5 0v6c0 .414.336.75.75.75h4.5a.75.75 0 0 0 0-1.5h-3.75V6Z'
+		],
+		activeMatch: ['/workspace/schedules']
 	}
 ];
 

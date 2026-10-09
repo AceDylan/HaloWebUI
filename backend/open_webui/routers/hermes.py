@@ -10,6 +10,9 @@ POST /api/v1/hermes/runners/{run_id}/stop — stop a background runner (reclaude
 codex / agy) that one of the user's chats launched (hermes
 ``POST /v1/runners/{runner}/{run_id}/stop``).
 
+GET/POST/PATCH/DELETE /api/v1/hermes/jobs[/{id}[/pause|resume|run|outputs]] — hermes 定时任务
+(cron jobs), admin only: a job runs on the hermes host with its tools.
+
 GET /api/v1/hermes/sessions — hermes sessions from another surface (Telegram,
 QQ, CLI); POST /api/v1/hermes/sessions/{id}/import turns one into a chat whose
 id is the hermes session id, so the chat continues that session.
@@ -36,7 +39,7 @@ from pydantic import BaseModel, Field
 
 from open_webui.env import SRC_LOG_LEVELS
 from open_webui.models.users import Users
-from open_webui.utils.auth import get_verified_user
+from open_webui.utils.auth import get_admin_user, get_verified_user
 from open_webui.utils.hermes_agent import (
     STEER_TEXT_MAX_CHARS,
     HermesSteerError,
@@ -54,6 +57,7 @@ from open_webui.utils.hermes_sessions import (
     stop_background_runner,
     validate_session_id,
 )
+from open_webui.utils import hermes_jobs
 from open_webui.utils.hermes_unread import list_unread_chat_ids, mark_read
 from open_webui.utils.hermes_runner_progress import (
     clear_runner_progress,
@@ -316,3 +320,89 @@ async def test_notification_webhook(
         {"action": "test", "message": "webhook test", "title": name, "url": "", "user": user.name},
     )
     return {"status": bool(delivered)}
+
+
+class HermesJobForm(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    schedule: str = Field(min_length=1, max_length=200)
+    prompt: str = Field(default="", max_length=5000)
+    deliver: str = Field(default="local", max_length=200)
+    repeat: Optional[int] = Field(default=None, ge=1, le=10000)
+
+
+class HermesJobUpdateForm(BaseModel):
+    name: Optional[str] = Field(default=None, min_length=1, max_length=200)
+    schedule: Optional[str] = Field(default=None, min_length=1, max_length=200)
+    prompt: Optional[str] = Field(default=None, max_length=5000)
+    deliver: Optional[str] = Field(default=None, max_length=200)
+
+
+def _job_error(e: HermesSessionsError):
+    return HTTPException(status_code=e.status_code, detail=e.detail)
+
+
+@router.get("/jobs")
+async def list_hermes_jobs(request: Request, user=Depends(get_admin_user)):
+    try:
+        return {"jobs": await hermes_jobs.list_jobs(request, user)}
+    except HermesSessionsError as e:
+        raise _job_error(e)
+
+
+@router.post("/jobs")
+async def create_hermes_job(request: Request, form_data: HermesJobForm, user=Depends(get_admin_user)):
+    fields = form_data.model_dump(exclude_none=True)
+    fields["name"] = fields["name"].strip()
+    fields["schedule"] = fields["schedule"].strip()
+    try:
+        return {"job": await hermes_jobs.create_job(request, user, fields)}
+    except HermesSessionsError as e:
+        raise _job_error(e)
+
+
+@router.patch("/jobs/{job_id}")
+async def update_hermes_job(
+    request: Request, job_id: str, form_data: HermesJobUpdateForm, user=Depends(get_admin_user)
+):
+    fields = form_data.model_dump(exclude_none=True)
+    if not fields:
+        raise HTTPException(status_code=400, detail="nothing to change")
+    try:
+        return {"job": await hermes_jobs.update_job(request, user, job_id, fields)}
+    except HermesSessionsError as e:
+        raise _job_error(e)
+
+
+@router.delete("/jobs/{job_id}")
+async def delete_hermes_job(request: Request, job_id: str, user=Depends(get_admin_user)):
+    try:
+        await hermes_jobs.delete_job(request, user, job_id)
+    except HermesSessionsError as e:
+        raise _job_error(e)
+    return {"status": True}
+
+
+@router.post("/jobs/{job_id}/{action}")
+async def hermes_job_action(
+    request: Request,
+    job_id: str,
+    action: Literal["pause", "resume", "run"],
+    user=Depends(get_admin_user),
+):
+    try:
+        return {"job": await hermes_jobs.job_action(request, user, job_id, action)}
+    except HermesSessionsError as e:
+        raise _job_error(e)
+
+
+@router.get("/jobs/{job_id}/outputs")
+async def hermes_job_outputs(
+    request: Request,
+    job_id: str,
+    limit: int = Query(3, ge=1, le=hermes_jobs.OUTPUTS_LIMIT_MAX),
+    user=Depends(get_admin_user),
+):
+    try:
+        return {"outputs": await hermes_jobs.job_outputs(request, user, job_id, limit)}
+    except HermesSessionsError as e:
+        raise _job_error(e)

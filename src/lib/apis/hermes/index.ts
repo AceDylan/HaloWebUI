@@ -293,3 +293,98 @@ export const getHermesModelOptions = async (token: string): Promise<HermesModelO
 	}
 	return res.json();
 };
+
+// ---- 定时任务 (hermes cron jobs; admin only) ----
+
+export type HermesJobSchedule = {
+	kind: 'cron' | 'interval' | 'once' | string;
+	expr?: string;
+	minutes?: number;
+	run_at?: string;
+	display?: string;
+};
+
+export type HermesJob = {
+	id: string;
+	name: string;
+	prompt: string;
+	/** A script job runs this file under ~/.hermes/scripts without a model turn (no_agent). */
+	script: string | null;
+	no_agent: boolean;
+	skills: string[] | null;
+	schedule: HermesJobSchedule;
+	schedule_display: string | null;
+	repeat: { times: number | null; completed: number } | null;
+	enabled: boolean;
+	/** scheduled | paused | running | completed */
+	state: string;
+	paused_reason: string | null;
+	created_at: string | null;
+	next_run_at: string | null;
+	last_run_at: string | null;
+	/** ok | error | null (never ran) */
+	last_status: string | null;
+	last_error: string | null;
+	last_delivery_error: string | null;
+	/** local | telegram:<chat> | origin … */
+	deliver: string;
+	failure_streak: number | null;
+	latest_execution: {
+		status: string | null;
+		started_at: string | null;
+		finished_at: string | null;
+		error: string | null;
+		delivery_outcome: string | null;
+	} | null;
+};
+
+export type HermesJobOutput = { name: string; size: number; content: string; truncated: boolean };
+
+export type HermesJobFields = {
+	name: string;
+	schedule: string;
+	prompt?: string;
+	deliver?: string;
+	repeat?: number;
+};
+
+const jobsCall = async <T>(
+	token: string,
+	method: string,
+	path = '',
+	body?: unknown
+): Promise<T> => {
+	const res = await fetch(`${WEBUI_API_BASE_URL}/hermes/jobs${path}`, {
+		method,
+		headers: jsonHeaders(token),
+		...(body === undefined ? {} : { body: JSON.stringify(body) })
+	});
+	if (!res.ok) {
+		throw await detailOf(res);
+	}
+	return res.json();
+};
+
+export const listHermesJobs = async (token: string) =>
+	(await jobsCall<{ jobs: HermesJob[] }>(token, 'GET')).jobs;
+
+export const createHermesJob = async (token: string, fields: HermesJobFields) =>
+	(await jobsCall<{ job: HermesJob }>(token, 'POST', '', fields)).job;
+
+export const updateHermesJob = async (token: string, id: string, fields: Partial<HermesJobFields>) =>
+	(await jobsCall<{ job: HermesJob }>(token, 'PATCH', `/${encodeURIComponent(id)}`, fields)).job;
+
+export const deleteHermesJob = async (token: string, id: string) =>
+	jobsCall<{ status: boolean }>(token, 'DELETE', `/${encodeURIComponent(id)}`);
+
+export const hermesJobAction = async (token: string, id: string, action: 'pause' | 'resume' | 'run') =>
+	(await jobsCall<{ job: HermesJob }>(token, 'POST', `/${encodeURIComponent(id)}/${action}`)).job;
+
+export const getHermesJobOutputs = async (token: string, id: string, limit = 3) =>
+	(
+		await jobsCall<{ outputs: HermesJobOutput[] }>(
+			token,
+			'GET',
+			`/${encodeURIComponent(id)}/outputs?limit=${limit}`
+		)
+	).outputs;

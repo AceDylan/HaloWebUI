@@ -703,6 +703,16 @@ describe('html-preview dark colour scheme', () => {
 		expect(exported).not.toContain('data-halo-artifact-dark-styles="true"');
 	});
 
+	it('keeps the dark palette in an export only when asked to (copy as image)', () => {
+		const exported = hardenHtmlArtifactExportDocument(
+			buildHtmlArtifactPreview(source, { colorScheme: 'dark' }),
+			{ keepTheme: true }
+		);
+		expect(exported).not.toContain('<script');
+		expect(exported).toContain('data-halo-artifact-dark-styles="true"');
+		expect(exported).toContain(HTML_EXPORT_CSP);
+	});
+
 	it('threads the scheme through the inline preview builder', () => {
 		const options = { enabled: true, streaming: false } as const;
 		expect(buildInlineHtmlArtifactPreview(source, { ...options })).not.toContain(

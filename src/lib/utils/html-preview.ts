@@ -224,17 +224,40 @@ const PREVIEW_SNAPSHOT_BRIDGE = `<script data-halo-html-preview-snapshot="true">
 		event.stopImmediatePropagation();
 		try {
 			const clone = document.documentElement.cloneNode(true);
-			clone.querySelectorAll('script,noscript').forEach((node) => node.remove());
-			// Exports keep the author's palette: undo the dark-mode adaptation layer.
-			clone.querySelectorAll('style[data-halo-artifact-dark-styles]').forEach((node) => node.remove());
-			clone.querySelectorAll('[data-halo-dark-adapted]').forEach((node) => {
-				const original = node.getAttribute('data-halo-orig-style');
-				if (original) node.setAttribute('style', original);
-				else node.removeAttribute('style');
-				node.removeAttribute('data-halo-dark-adapted');
-				node.removeAttribute('data-halo-orig-style');
+			// A cloned canvas is blank: carry its pixels over as an image.
+			const canvases = document.querySelectorAll('canvas');
+			clone.querySelectorAll('canvas').forEach((node, index) => {
+				const source = canvases[index];
+				if (!source) return;
+				try {
+					const image = document.createElement('img');
+					image.src = source.toDataURL('image/png');
+					for (const name of ['class', 'style', 'width', 'height']) {
+						const value = node.getAttribute(name);
+						if (value !== null) image.setAttribute(name, value);
+					}
+					const rect = source.getBoundingClientRect();
+					if (rect.width > 0 && rect.height > 0) {
+						image.style.width = rect.width + 'px';
+						image.style.height = rect.height + 'px';
+					}
+					node.replaceWith(image);
+				} catch (error) {}
 			});
-			clone.removeAttribute('data-halo-theme');
+			clone.querySelectorAll('script,noscript').forEach((node) => node.remove());
+			// Exports keep the author's palette unless the host asks for what the
+			// reader sees: then the dark-mode adaptation layer stays.
+			if (!message.keepTheme) {
+				clone.querySelectorAll('style[data-halo-artifact-dark-styles]').forEach((node) => node.remove());
+				clone.querySelectorAll('[data-halo-dark-adapted]').forEach((node) => {
+					const original = node.getAttribute('data-halo-orig-style');
+					if (original) node.setAttribute('style', original);
+					else node.removeAttribute('style');
+					node.removeAttribute('data-halo-dark-adapted');
+					node.removeAttribute('data-halo-orig-style');
+				});
+				clone.removeAttribute('data-halo-theme');
+			}
 			const html = '<!DOCTYPE html>' + clone.outerHTML;
 			if (html.length > ${HTML_ARTIFACT_EXPORT_MAX_SNAPSHOT_CHARS}) {
 				throw new Error('HTML preview is too large to export safely');
@@ -549,8 +572,12 @@ export const hardenHtmlPreviewDocument = (
 	citations: string[] = []
 ): string => hardenHtmlDocument(html, buildPreviewPolicyMeta(labels, colorScheme, citations));
 
-export const hardenHtmlArtifactExportDocument = (html: unknown): string => {
-	const source = stripDarkArtifactStyles(stripInjectedPreviewPolicies(html))
+export const hardenHtmlArtifactExportDocument = (
+	html: unknown,
+	{ keepTheme = false }: { keepTheme?: boolean } = {}
+): string => {
+	const stripped = stripInjectedPreviewPolicies(html);
+	const source = (keepTheme ? stripped : stripDarkArtifactStyles(stripped))
 		.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '')
 		.replace(/<noscript\b[^>]*>[\s\S]*?<\/noscript>/gi, '')
 		.replace(/<base\b[^>]*>/gi, '')

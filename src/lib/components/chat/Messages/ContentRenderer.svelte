@@ -19,7 +19,7 @@
 	import { isDarkMode } from '$lib/utils/dark-mode';
 	import { toast } from 'svelte-sonner';
 	import { DropdownMenu } from 'bits-ui';
-	import { Copy, FileText, Palette } from 'lucide-svelte';
+	import { Copy, FileText, ImageDown, Image as ImageIcon, Palette } from 'lucide-svelte';
 	import Dropdown from '$lib/components/common/Dropdown.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import EllipsisHorizontal from '$lib/components/icons/EllipsisHorizontal.svelte';
@@ -64,6 +64,12 @@
 		inlineSameOriginPreviewImages
 	} from '$lib/utils/html-preview-images';
 	import ImagePreview from '$lib/components/common/ImagePreview.svelte';
+	import {
+		captureHtmlPreviewPng,
+		copyPngToClipboard,
+		htmlPreviewExportErrorMessage,
+		HtmlPreviewExportTimeoutError
+	} from '$lib/utils/html-preview-export';
 	import { openNoteInHub } from '$lib/utils/hub-embed';
 	import {
 		createEmptySelectionThreads,
@@ -175,6 +181,12 @@
 	let inlineHtmlPreviewColorsMessageId: string | null = null;
 	let inlineHtmlPreviewColorScheme: HtmlPreviewColorScheme = 'light';
 	let showInlineHtmlPreviewMenu = false;
+	// "Copy as image" / "Save as image": the card as the reader sees it, as a PNG.
+	let inlineHtmlImageBusy = false;
+	let inlineHtmlImageBlob: Blob | null = null;
+	let inlineHtmlImageUrl = '';
+	let inlineHtmlImageAlt = '';
+	let showInlineHtmlImage = false;
 	const INLINE_HTML_PREVIEW_MENU_ITEM_CLASS =
 		'flex items-center gap-3 px-3 py-2.5 text-sm rounded-xl cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800';
 	let pendingSelection: PendingSelection | null = null;
@@ -640,6 +652,104 @@
 		}, 1600);
 	};
 
+	const inlineHtmlImageName = () => {
+		const source = inlineHtmlArtifactSource ?? '';
+		const heading =
+			source.match(/<title\b[^>]*>([\s\S]*?)<\/title>/i)?.[1] ??
+			source.match(/<h1\b[^>]*>([\s\S]*?)<\/h1>/i)?.[1] ??
+			'';
+		const text = new DOMParser().parseFromString(heading, 'text/html').body.textContent ?? '';
+		return text.replace(/\s+/g, ' ').trim() || 'HTML';
+	};
+
+	const showInlineHtmlImageError = (error: unknown) => {
+		toast.error(
+			error instanceof HtmlPreviewExportTimeoutError
+				? $i18n.t('PNG export timed out')
+				: htmlPreviewExportErrorMessage(error) || $i18n.t('Failed to export PNG')
+		);
+	};
+
+	const setInlineHtmlImage = (blob: Blob) => {
+		if (inlineHtmlImageUrl) URL.revokeObjectURL(inlineHtmlImageUrl);
+		inlineHtmlImageBlob = blob;
+		inlineHtmlImageUrl = URL.createObjectURL(blob);
+		inlineHtmlImageAlt = inlineHtmlImageName();
+	};
+
+	const captureInlineHtmlImage = async () => {
+		if (!inlineHtmlPreviewFrame) {
+			throw new Error($i18n.t('No HTML preview is available to export.'));
+		}
+		const pending = toast.loading($i18n.t('Generating image...'));
+		try {
+			const blob = await captureHtmlPreviewPng(inlineHtmlPreviewFrame, { keepTheme: true });
+			setInlineHtmlImage(blob);
+			return blob;
+		} finally {
+			toast.dismiss(pending);
+		}
+	};
+
+	const copyInlineHtmlImageBlob = (png: Promise<Blob>) =>
+		copyPngToClipboard(png).then(() => {
+			toast.success($i18n.t('Copied image'));
+		});
+
+	// Must stay synchronous up to copyPngToClipboard: the clipboard write has to
+	// start inside the click (see copyPngToClipboard).
+	const copyInlineHtmlAsImage = () => {
+		if (inlineHtmlImageBusy) return;
+		inlineHtmlImageBusy = true;
+		const png = captureInlineHtmlImage();
+		const copied = copyInlineHtmlImageBlob(png);
+		void png
+			.then(
+				() =>
+					copied.catch(() => {
+						// No image clipboard here (or permission refused): show the picture,
+						// which can still be downloaded or long-pressed.
+						toast.info($i18n.t('Copying images is not supported here; showing the image instead'));
+						showInlineHtmlImage = true;
+					}),
+				(error) => {
+					copied.catch(() => undefined);
+					showInlineHtmlImageError(error);
+				}
+			)
+			.finally(() => {
+				inlineHtmlImageBusy = false;
+			});
+	};
+
+	const openInlineHtmlAsImage = async () => {
+		if (inlineHtmlImageBusy) return;
+		inlineHtmlImageBusy = true;
+		try {
+			await captureInlineHtmlImage();
+			showInlineHtmlImage = true;
+		} catch (error) {
+			showInlineHtmlImageError(error);
+		} finally {
+			inlineHtmlImageBusy = false;
+		}
+	};
+
+	$: inlineHtmlImageActions = inlineHtmlImageBlob
+		? [
+				{
+					id: 'copy-image',
+					label: $i18n.t('Copy image'),
+					run: () => {
+						if (!inlineHtmlImageBlob) return;
+						copyInlineHtmlImageBlob(Promise.resolve(inlineHtmlImageBlob)).catch((error) =>
+							toast.error(htmlPreviewExportErrorMessage(error) || $i18n.t('Failed to copy image'))
+						);
+					}
+				}
+			]
+		: [];
+
 	const handleInlineHtmlPreviewMessage = (event: MessageEvent) => {
 		if (!inlineHtmlPreviewFrame || event.source !== inlineHtmlPreviewFrame.contentWindow) {
 			return;
@@ -1063,6 +1173,7 @@
 
 	onDestroy(() => {
 		window.removeEventListener('message', handleInlineHtmlPreviewMessage);
+		if (inlineHtmlImageUrl) URL.revokeObjectURL(inlineHtmlImageUrl);
 		if (copiedInlineHtmlArtifactSourceTimer) {
 			clearTimeout(copiedInlineHtmlArtifactSourceTimer);
 		}
@@ -1245,6 +1356,30 @@
 								{/if}
 								<DropdownMenu.Item
 									class={INLINE_HTML_PREVIEW_MENU_ITEM_CLASS}
+									data-halo-inline-html-copy-image-item="true"
+									disabled={inlineHtmlImageBusy}
+									on:click={() => {
+										showInlineHtmlPreviewMenu = false;
+										copyInlineHtmlAsImage();
+									}}
+								>
+									<ImageIcon class="size-4 shrink-0" strokeWidth={1.75} />
+									<span>{$i18n.t('Copy as image')}</span>
+								</DropdownMenu.Item>
+								<DropdownMenu.Item
+									class={INLINE_HTML_PREVIEW_MENU_ITEM_CLASS}
+									data-halo-inline-html-save-image-item="true"
+									disabled={inlineHtmlImageBusy}
+									on:click={() => {
+										showInlineHtmlPreviewMenu = false;
+										void openInlineHtmlAsImage();
+									}}
+								>
+									<ImageDown class="size-4 shrink-0" strokeWidth={1.75} />
+									<span>{$i18n.t('Save as image')}</span>
+								</DropdownMenu.Item>
+								<DropdownMenu.Item
+									class={INLINE_HTML_PREVIEW_MENU_ITEM_CLASS}
 									data-halo-inline-html-original-text-item="true"
 									on:click={() => {
 										showInlineHtmlPreviewMenu = false;
@@ -1377,6 +1512,12 @@
 {/if}
 
 <ImagePreview bind:show={showImagePreview} src={imagePreviewSrc} alt={imagePreviewAlt} />
+<ImagePreview
+	bind:show={showInlineHtmlImage}
+	src={inlineHtmlImageUrl}
+	alt={inlineHtmlImageAlt}
+	actions={inlineHtmlImageActions}
+/>
 
 <style>
 	:global(.message-outline-anchor) {

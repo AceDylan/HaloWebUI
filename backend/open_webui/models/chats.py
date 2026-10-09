@@ -1362,7 +1362,15 @@ class ChatTable:
                 chat = db.query(Chat).filter_by(share_id=id).first()
 
                 if chat:
-                    return self.get_chat_by_id(chat.id)
+                    # The snapshot taken when the link was made (or last
+                    # updated), not the live chat: messages sent after sharing
+                    # stay private, as the share dialog promises.
+                    snapshot = (
+                        db.query(Chat)
+                        .filter_by(id=id, user_id=f"shared-{chat.id}")
+                        .first()
+                    )
+                    return ChatModel.model_validate(snapshot) if snapshot else None
                 else:
                     return None
         except Exception:

@@ -27,6 +27,7 @@
 
 	import { executeToolServer, getBackendConfig } from '$lib/apis';
 	import { getSessionUser } from '$lib/apis/auths';
+	import { isPublicSharePath } from '$lib/utils/public-share';
 	import { APP_NAME } from '$lib/constants';
 
 	import '../tailwind.css';
@@ -745,13 +746,15 @@
 				const currentUrl = `${window.location.pathname}${window.location.search}`;
 				const encodedUrl = encodeURIComponent(currentUrl);
 				const onAuthPage = $page.url.pathname === '/auth';
+				// A shared-chat link is readable signed out: no sign-in redirect there.
+				const signInOptional = onAuthPage || isPublicSharePath(window.location.pathname);
 
 				if (localStorage.token) {
 					// Get Session User Info
 					const sessionUser = await getSessionUser(localStorage.token).catch((error) => {
 						// The sign-in page is already where an expired session leads; saying so
 						// there is noise (and, framed by the Hub, reads as if its ticket failed).
-						if (!onAuthPage) {
+						if (!signInOptional) {
 							toast.error(formatError(error));
 						}
 						return null;
@@ -781,19 +784,19 @@
 						localStorage.removeItem('token');
 						// Framed by the Bookmark Hub (it signed this tab in before): it signs us in
 						// again and reopens this chat, replacing the sign-in page shown meanwhile.
-						if (!onAuthPage) requestHubReauth(null, window.location.pathname);
+						if (!signInOptional) requestHubReauth(null, window.location.pathname);
 						// Same rule as without a token: already on /auth, stay. Navigating
 						// drops the URL fragment, and with it an OAuth token or the Bookmark
 						// Hub's single-use ticket — which is how a stale token left behind by
 						// an expired Hub session made the first framed sign-in fail.
-						if (!onAuthPage) {
+						if (!signInOptional) {
 							await goto(`/auth?redirect=${encodedUrl}`, { replaceState: true });
 						}
 					}
 				} else {
 					// Don't redirect if we're already on the auth page
 					// Needed because we pass in tokens from OAuth logins via URL fragments
-					if (!onAuthPage) {
+					if (!signInOptional) {
 						await goto(`/auth?redirect=${encodedUrl}`, { replaceState: true });
 					}
 				}

@@ -735,6 +735,15 @@ export const getChatByShareId = async (token: string, share_id: string) => {
 	return res;
 };
 
+// A shared link opened without signing in: the conversation only, no session needed.
+export const getPublicSharedChat = async (share_id: string) => {
+	const res = await fetch(
+		`${WEBUI_API_BASE_URL}/chats/public/share/${encodeURIComponent(share_id)}`,
+		{ method: 'GET', headers: { Accept: 'application/json' } }
+	);
+	return parseJsonResponse(res);
+};
+
 export const getChatPinnedStatusById = async (token: string, id: string) => {
 	let error = null;
 

@@ -1308,6 +1308,8 @@
 	"Message rating should be enabled to use this feature": "要使用此功能，应先启用回复评价功能",
 	"Messages per minute per user": "每用户每分钟消息数",
 	"Messages you send after creating your link won't be shared. Users with the URL will be able to view the shared chat.": "创建链接后发送的消息不会被共享。具有 URL 的用户将能够查看共享对话。",
+	"Messages you send after creating your link won't be shared. Anyone with the link can read this chat without signing in, and nothing else.": "创建链接后发送的消息不会被分享。拿到链接的人无需登录即可查看这段对话，看不到你的其他内容。",
+	"This shared link is invalid or has been removed.": "分享链接无效或已被取消。",
 	"Markdown Header": "Markdown 标题",
 	"Min Chunk Size": "最小分块大小",
 	"Min P": "Min P",

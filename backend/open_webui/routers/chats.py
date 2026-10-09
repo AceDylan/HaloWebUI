@@ -3,6 +3,7 @@ import logging
 import time
 import uuid
 from copy import deepcopy
+from pathlib import Path
 from typing import Literal, Optional
 
 
@@ -32,6 +33,7 @@ from open_webui.constants import ERROR_MESSAGES
 from open_webui.env import SRC_LOG_LEVELS, FOLDER_MAX_ITEM_COUNT
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.concurrency import run_in_threadpool
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 
@@ -45,6 +47,13 @@ from open_webui.utils.chat_auto_archive import (
     archive_inactive_chats,
     restore_auto_archived_chats,
 )
+from open_webui.utils.public_share import (
+    build_public_shared_chat,
+    is_public_share_image_type,
+)
+from open_webui.models.files import Files
+from open_webui.models.users import Users
+from open_webui.storage.provider import Storage
 from open_webui.tasks import list_task_ids_by_chat_id, stop_task
 
 log = logging.getLogger(__name__)
@@ -861,6 +870,79 @@ async def get_shared_chat_by_id(share_id: str, user=Depends(get_verified_user)):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail=ERROR_MESSAGES.NOT_FOUND
         )
+
+
+############################
+# Public shared chat (no sign-in)
+############################
+
+
+def _public_shared_chat(share_id: str):
+    """The share snapshot behind a link, its public view, the file ids that view
+    references and the owner's id — or 404 when the link was never made or has
+    been deleted."""
+    snapshot = Chats.get_chat_by_share_id(share_id)
+    if not snapshot or not str(snapshot.user_id).startswith("shared-"):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND
+        )
+    original = Chats.get_chat_by_id(str(snapshot.user_id)[len("shared-") :])
+    if not original:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND
+        )
+    payload, file_ids = build_public_shared_chat(
+        normalize_chat_payload(snapshot.chat), snapshot.id
+    )
+    return snapshot, payload, file_ids, original.user_id
+
+
+@router.get("/public/share/{share_id}")
+async def get_public_shared_chat(share_id: str):
+    snapshot, payload, _file_ids, owner_id = await run_in_threadpool(
+        _public_shared_chat, share_id
+    )
+    owner = Users.get_user_by_id(owner_id)
+    return {
+        "id": snapshot.id,
+        "title": snapshot.title,
+        "chat": payload,
+        "user": {"name": owner.name if owner else ""},
+        "updated_at": snapshot.updated_at,
+    }
+
+
+@router.get("/public/share/{share_id}/files/{file_id}")
+@router.get("/public/share/{share_id}/files/{file_id}/content")
+async def get_public_shared_chat_file(share_id: str, file_id: str):
+    """Images the shared conversation shows: only files the snapshot references,
+    owned by the person who shared it, and bitmap images (never SVG/HTML)."""
+    _snapshot, _payload, file_ids, owner_id = await run_in_threadpool(
+        _public_shared_chat, share_id
+    )
+    file = Files.get_file_by_id(file_id) if file_id.lower() in file_ids else None
+    content_type = ((file.meta or {}).get("content_type") if file else None) or ""
+    if not file or file.user_id != owner_id or not is_public_share_image_type(content_type):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND
+        )
+    try:
+        file_path = Path(Storage.get_file(file.path))
+    except Exception:
+        file_path = None
+    if not file_path or not file_path.is_file():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND
+        )
+    return FileResponse(
+        file_path,
+        media_type=content_type.split(";", 1)[0].strip().lower(),
+        headers={
+            "Content-Disposition": "inline",
+            "X-Content-Type-Options": "nosniff",
+            "Cache-Control": "private, max-age=300",
+        },
+    )
 
 
 ############################

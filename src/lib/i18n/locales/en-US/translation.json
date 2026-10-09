@@ -945,6 +945,8 @@
 	"Merge Responses": "",
 	"Message rating should be enabled to use this feature": "",
 	"Messages you send after creating your link won't be shared. Users with the URL will be able to view the shared chat.": "",
+	"Messages you send after creating your link won't be shared. Anyone with the link can read this chat without signing in, and nothing else.": "",
+	"This shared link is invalid or has been removed.": "",
 	"Min P": "",
 	"Mirostat": "",
 	"Mirostat Eta": "",

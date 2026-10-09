@@ -5,10 +5,10 @@
 
 	import dayjs from 'dayjs';
 
-	import { settings, settingsRevision, chatId, WEBUI_NAME } from '$lib/stores';
+	import { settings, settingsRevision, chatId, WEBUI_NAME, user as sessionUser } from '$lib/stores';
 	import { convertMessagesToHistory, createMessagesList } from '$lib/utils';
 
-	import { getChatByShareId, cloneSharedChatById } from '$lib/apis/chats';
+	import { getChatByShareId, cloneSharedChatById, getPublicSharedChat } from '$lib/apis/chats';
 
 	import Messages from '$lib/components/chat/Messages.svelte';
 	import Navbar from '$lib/components/layout/Navbar.svelte';
@@ -23,6 +23,9 @@
 	dayjs.extend(localizedFormat);
 
 	let loaded = false;
+	// Signed out, the link shows this one conversation; a dead link says so
+	// instead of bouncing to the sign-in page.
+	let notFound = false;
 
 	let autoScroll = true;
 	let processing = '';
@@ -51,8 +54,10 @@
 			if (await loadSharedChat()) {
 				await tick();
 				loaded = true;
-			} else {
+			} else if ($sessionUser) {
 				await goto('/');
+			} else {
+				notFound = true;
 			}
 		})();
 	}
@@ -61,7 +66,44 @@
 	// Web functions
 	//////////////////////////
 
+	const showChat = async (chatContent) => {
+		if (!chatContent) return null;
+
+		selectedModels =
+			(chatContent?.models ?? undefined) !== undefined
+				? chatContent.models
+				: [chatContent.models ?? ''];
+		history =
+			(chatContent?.history ?? undefined) !== undefined
+				? chatContent.history
+				: convertMessagesToHistory(chatContent.messages);
+		title = chatContent.title;
+
+		autoScroll = true;
+		await tick();
+
+		if (messages.length > 0) {
+			history.messages[messages.at(-1).id].done = true;
+		}
+		await tick();
+
+		return true;
+	};
+
+	const loadPublicSharedChat = async () => {
+		settings.set({});
+		settingsRevision.set(0);
+		await chatId.set($page.params.id);
+		chat = await getPublicSharedChat($page.params.id).catch(() => null);
+		if (!chat) return null;
+
+		user = { name: chat.user?.name ?? '', profile_image_url: '/user.png' };
+		return showChat(chat.chat);
+	};
+
 	const loadSharedChat = async () => {
+		if (!$sessionUser) return loadPublicSharedChat();
+
 		const userSettings = await getUserSettings(localStorage.token).catch((error) => {
 			console.error(error);
 			return null;
@@ -87,33 +129,7 @@
 				return null;
 			});
 
-			const chatContent = chat.chat;
-
-			if (chatContent) {
-				console.log(chatContent);
-
-				selectedModels =
-					(chatContent?.models ?? undefined) !== undefined
-						? chatContent.models
-						: [chatContent.models ?? ''];
-				history =
-					(chatContent?.history ?? undefined) !== undefined
-						? chatContent.history
-						: convertMessagesToHistory(chatContent.messages);
-				title = chatContent.title;
-
-				autoScroll = true;
-				await tick();
-
-				if (messages.length > 0) {
-					history.messages[messages.at(-1).id].done = true;
-				}
-				await tick();
-
-				return true;
-			} else {
-				return null;
-			}
+			return showChat(chat.chat);
 		}
 	};
 
@@ -184,18 +200,27 @@
 				</div>
 			</div>
 
-			<div
-				class="absolute bottom-0 right-0 left-0 flex justify-center w-full bg-linear-to-b from-transparent to-white dark:to-gray-900"
-			>
-				<div class="pb-5">
-					<button
-						class="px-4 py-2 text-sm font-medium bg-black hover:bg-gray-900 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 transition rounded-full"
-						on:click={cloneSharedChat}
-					>
-						{$i18n.t('Clone Chat')}
-					</button>
+			{#if $sessionUser}
+				<div
+					class="absolute bottom-0 right-0 left-0 flex justify-center w-full bg-linear-to-b from-transparent to-white dark:to-gray-900"
+				>
+					<div class="pb-5">
+						<button
+							class="px-4 py-2 text-sm font-medium bg-black hover:bg-gray-900 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 transition rounded-full"
+							on:click={cloneSharedChat}
+						>
+							{$i18n.t('Clone Chat')}
+						</button>
+					</div>
 				</div>
-			</div>
+			{/if}
 		</div>
+	</div>
+{:else if notFound}
+	<div
+		class="h-screen max-h-[100dvh] w-full flex items-center justify-center px-6 text-center text-sm text-gray-500 dark:text-gray-400 bg-white dark:bg-gray-900"
+		data-shared-chat-not-found
+	>
+		{$i18n.t('This shared link is invalid or has been removed.')}
 	</div>
 {/if}

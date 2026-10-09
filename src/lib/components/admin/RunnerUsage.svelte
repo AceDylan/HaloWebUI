@@ -41,7 +41,7 @@
 	const card =
 		'rounded-2xl border border-gray-100/90 bg-white/70 shadow-sm shadow-gray-900/[0.04] dark:border-gray-800/70 dark:bg-gray-900/60 dark:shadow-black/30';
 	const th =
-		'px-4 py-2.5 text-2xs font-medium uppercase tracking-wider text-gray-400 dark:text-gray-500';
+		'whitespace-nowrap px-4 py-2.5 text-2xs font-medium uppercase tracking-wider text-gray-400 dark:text-gray-500';
 	const pagerButton =
 		'flex items-center gap-1 rounded-lg border border-gray-200/50 px-2.5 py-1.5 text-gray-600 transition-colors hover:bg-gray-50 disabled:pointer-events-none disabled:opacity-40 dark:border-white/[0.06] dark:text-gray-300 dark:hover:bg-white/[0.03]';
 

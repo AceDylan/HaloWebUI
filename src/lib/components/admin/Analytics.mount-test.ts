@@ -1,7 +1,7 @@
 // Mounts the admin analytics page. Stats are keyed by the selection id the
 // chat stored ("modelref::…"), while $models ids are "<conn>.<model>"; the
 // models tab must still name each model and not flag live ones as deleted.
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { installDominoDom } from '$lib/test-support/domino-dom';
 
 installDominoDom('http://localhost/');
@@ -56,6 +56,11 @@ afterEach(() => {
 	app = null;
 });
 
+let Analytics: any;
+beforeAll(async () => {
+	Analytics = (await import('./Analytics.svelte')).default;
+}, 120_000);
+
 describe('Analytics', () => {
 	it('names models by their selection id and keeps idle days as bars', async () => {
 		(globalThis as any).localStorage.token = 'tok';
@@ -75,7 +80,6 @@ describe('Analytics', () => {
 		] as any);
 
 		const i18n = writable({ language: 'zh-CN', t: (key: string) => key });
-		const { default: Analytics } = await import('./Analytics.svelte');
 		target = document.createElement('div');
 		document.body.appendChild(target);
 		app = new Analytics({ target, context: new Map<string, any>([['i18n', i18n]]) });

@@ -14,7 +14,6 @@
 	import MultiResponseMessages from './MultiResponseMessages.svelte';
 	import ResponseMessage from './ResponseMessage.svelte';
 	import UserMessage from './UserMessage.svelte';
-	import BranchCompare from './BranchCompare.svelte';
 
 	export let chatId;
 	export let idx = 0;
@@ -137,9 +136,6 @@
 				{readOnly}
 				{forceExpandContent}
 			/>
-		{/if}
-		{#if !runNotice}
-			<BranchCompare {history} {messageId} />
 		{/if}
 	{/if}
 </div>

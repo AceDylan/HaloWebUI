@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { installDominoDom } from '$lib/test-support/domino-dom';
 
 installDominoDom('http://localhost/');
@@ -23,10 +23,13 @@ const run = (agent = 'officlaude') => ({
 	parent_run: '',
 	title: '继续修改'
 });
+let Component: any;
 let app: any;
 let target: any;
+beforeAll(async () => {
+	Component = (await import('./RunnerUsage.svelte')).default;
+}, 120_000);
 const mount = async () => {
-	const { default: Component } = await import('./RunnerUsage.svelte');
 	target = document.createElement('div');
 	document.body.appendChild(target);
 	app = new Component({ target, props: { days: 7 } });
@@ -43,7 +46,11 @@ describe('runner usage page', () => {
 	it('shows per-run metrics, quota warnings and a daily table; changing days reloads', async () => {
 		api.getRunnerStats.mockImplementation(async (_token: string, days: number) => ({
 			days,
-			runs: [run(), { ...run('agy'), run_id: 'r2', cost_usd: null, failure_kind: '' }],
+			runs: [
+				run(),
+				{ ...run('agy'), run_id: 'r2', cost_usd: null, failure_kind: '', status: 'question' },
+				{ ...run('reclaude'), run_id: 'r3', failure_kind: 'quota_window' }
+			],
 			quota: {
 				available: true,
 				checked_at: Date.now() / 1000,
@@ -54,7 +61,11 @@ describe('runner usage page', () => {
 		expect(target.textContent).toContain('订阅实际账单另计');
 		expect(target.querySelector('[role="alert"]').textContent).toContain('额度即将用完');
 		expect(target.querySelector('[data-halo-runner-rows]').textContent).toContain('$2.0');
-		expect(target.textContent).toContain('1/2 次任务提供了费用');
+		expect(target.textContent).toContain('2/3 次任务提供了费用');
+		const rows = target.querySelector('[data-halo-runner-rows]').textContent;
+		expect(rows).toContain('等你回答');
+		// quota_window (reclaude's rolling window) counts as a quota stop too
+		expect(rows.match(/额度中断/g)).toHaveLength(2);
 		const button = Array.from(target.querySelectorAll('button')).find(
 			(b: any) => b.textContent === '查看每日明细'
 		) as any;

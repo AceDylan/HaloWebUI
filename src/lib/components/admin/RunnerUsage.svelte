@@ -1,7 +1,25 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
+	import {
+		ListChecks,
+		CircleDollarSign,
+		Timer,
+		Repeat2,
+		RefreshCw,
+		ChevronLeft,
+		ChevronRight
+	} from 'lucide-svelte';
 	import { getRunnerStats, type RunnerRun, type RunnerQuota } from '$lib/apis/hermes';
-	import { summarizeRuns, formatUsd, formatHours, RUNNER_LABEL } from '$lib/utils/runner-stats';
+	import HaloSelect from '$lib/components/common/HaloSelect.svelte';
+	import {
+		summarizeRuns,
+		formatUsd,
+		formatHours,
+		runnerName,
+		isFailed,
+		isQuotaStop,
+		STATUS_LABEL
+	} from '$lib/utils/runner-stats';
 
 	export let days = 30;
 	let loadedDays = 0;
@@ -9,30 +27,40 @@
 	let quota: RunnerQuota | undefined;
 	let loading = true;
 	let error = '';
-	let runner = '';
-	let project = '';
+	const ALL = '__all';
+	let runner = ALL;
+	let project = ALL;
 	let page = 0;
 	let showDailyTable = false;
+	let hoveredDay: number | null = null;
 	let requestId = 0;
 	let mounted = false;
 	const pageSize = 25;
-	const labels: Record<string, string> = {
-		success: '完成',
-		done: '完成',
-		completed: '完成',
-		error: '失败',
-		failed: '失败',
-		timeout: '超时',
-		max_turns: '轮数上限',
-		killed: '已终止',
-		stopped: '已停止',
-		running: '运行中',
-		queued: '排队中',
-		quota_blocked: '额度不足'
+
+	// Same surfaces as the 总览 tab, so the two tabs read as one page.
+	const card =
+		'rounded-2xl border border-gray-100/90 bg-white/70 shadow-sm shadow-gray-900/[0.04] dark:border-gray-800/70 dark:bg-gray-900/60 dark:shadow-black/30';
+	const th =
+		'px-4 py-2.5 text-2xs font-medium uppercase tracking-wider text-gray-400 dark:text-gray-500';
+	const pagerButton =
+		'flex items-center gap-1 rounded-lg border border-gray-200/50 px-2.5 py-1.5 text-gray-600 transition-colors hover:bg-gray-50 disabled:pointer-events-none disabled:opacity-40 dark:border-white/[0.06] dark:text-gray-300 dark:hover:bg-white/[0.03]';
+
+	const pad = (n: number) => String(n).padStart(2, '0');
+	/** 今天 23:40 / 10-14 22:00 */
+	const shortTime = (date: Date) => {
+		const time = `${pad(date.getHours())}:${pad(date.getMinutes())}`;
+		return date.toDateString() === new Date().toDateString()
+			? `今天 ${time}`
+			: `${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${time}`;
 	};
-	const runnerName = (key: string) => RUNNER_LABEL[key] ?? key;
-	const dateTime = (ts: number) => new Date(ts * 1000).toLocaleString();
-	const resetTime = (value: string | null) => (value ? new Date(value).toLocaleString() : '未知');
+	const runTime = (ts: number) => shortTime(new Date(ts * 1000));
+	const resetTime = (value: string | null) => (value ? shortTime(new Date(value)) : '时间未知');
+	const quotaTone = (pct: number) =>
+		pct >= 100
+			? 'bg-red-500 dark:bg-red-400'
+			: pct >= 90
+				? 'bg-amber-400 dark:bg-amber-500'
+				: 'bg-gray-800 dark:bg-gray-200';
 
 	const load = async (windowDays = days) => {
 		const id = ++requestId;
@@ -60,184 +88,374 @@
 	});
 	$: if (mounted && days) load(days);
 	$: filtered = runs.filter(
-		(run) => (!runner || run.agent === runner) && (!project || run.project === project)
+		(run) =>
+			(runner === ALL || run.agent === runner) && (project === ALL || run.project === project)
 	);
 	$: summary = summarizeRuns(filtered, loadedDays || Math.min(days, 90));
 	$: maxCost = Math.max(...summary.daily.map((day) => day.cost), 0.01);
 	$: reportedCost = filtered.filter((run) => run.cost_usd !== null).length;
 	$: pages = Math.max(1, Math.ceil(filtered.length / pageSize));
 	$: visible = filtered.slice(page * pageSize, (page + 1) * pageSize);
-	$: runnerOptions = [...new Set(runs.map((run) => run.agent))].sort();
-	$: projectOptions = [...new Set(runs.map((run) => run.project).filter(Boolean))].sort();
+	$: runnerOptions = [
+		{ value: ALL, label: '全部执行器' },
+		...[...new Set(runs.map((run) => run.agent))]
+			.sort()
+			.map((key) => ({ value: key, label: runnerName(key) }))
+	];
+	$: projectOptions = [
+		{ value: ALL, label: '全部项目' },
+		...[...new Set(runs.map((run) => run.project).filter(Boolean))]
+			.sort()
+			.map((name) => ({ value: name, label: name }))
+	];
+	$: cards = [
+		{ icon: ListChecks, value: summary.total.runs, label: '任务数' },
+		{ icon: CircleDollarSign, value: formatUsd(summary.total.cost), label: 'API 折算费用' },
+		{ icon: Timer, value: formatHours(summary.total.seconds), label: '累计耗时' },
+		{ icon: Repeat2, value: summary.total.turns, label: '累计轮数' }
+	];
+	$: groups = [
+		{ title: '按执行器', rows: summary.byRunner, name: runnerName },
+		{ title: '按项目', rows: summary.byProject, name: (key: string) => key }
+	];
+	$: hovered = hoveredDay === null ? null : summary.daily[hoveredDay];
 </script>
 
 <div class="space-y-5" data-halo-runner-usage>
-	<div class="flex flex-wrap items-center gap-3 text-sm">
-		<label
-			>执行器
-			<select
-				class="ml-2 rounded-lg bg-gray-100 p-2 dark:bg-gray-850"
-				bind:value={runner}
-				on:change={() => (page = 0)}
-			>
-				<option value="">全部</option>
-				{#each runnerOptions as key}<option value={key}>{runnerName(key)}</option>{/each}
-			</select>
-		</label>
-		<label
-			>项目
-			<select
-				class="ml-2 rounded-lg bg-gray-100 p-2 dark:bg-gray-850"
-				bind:value={project}
-				on:change={() => (page = 0)}
-			>
-				<option value="">全部</option>
-				{#each projectOptions as name}<option value={name}>{name}</option>{/each}
-			</select>
-		</label>
+	<div class="flex flex-wrap items-center gap-2">
+		<HaloSelect
+			value={runner}
+			options={runnerOptions}
+			className="h-9"
+			on:change={(e) => {
+				runner = e.detail.value;
+				page = 0;
+			}}
+		/>
+		<HaloSelect
+			value={project}
+			options={projectOptions}
+			className="h-9"
+			on:change={(e) => {
+				project = e.detail.value;
+				page = 0;
+			}}
+		/>
 		<button
-			class="ml-auto rounded-lg px-3 py-2 hover:bg-gray-100 dark:hover:bg-gray-800"
+			type="button"
+			class="halo-icon-btn ml-auto"
+			aria-label="刷新"
+			title="刷新"
 			disabled={loading}
-			on:click={() => load()}>刷新</button
+			on:click={() => load()}
 		>
+			<RefreshCw class="size-4 {loading ? 'animate-spin' : ''}" strokeWidth={2} />
+		</button>
 	</div>
+
 	{#if quota?.available}
-		<div
-			class="rounded-xl border border-gray-200 p-3 text-sm dark:border-gray-700"
-			data-halo-runner-quota
-		>
-			<div class="font-medium">官方 Claude 订阅额度</div>
-			{#each quota.windows as window}
-				<p class="mt-1" role={window.utilization >= 90 ? 'alert' : undefined}>
-					{#if window.utilization >= 90}<span aria-hidden="true">⚠ </span>{/if}
-					{window.label}已用 {Math.round(window.utilization)}% · {resetTime(window.resets_at)} 重置
-					{#if window.utilization >= 100}
-						· 额度已用完{:else if window.utilization >= 90}
-						· 额度即将用完{/if}
-				</p>
-			{/each}
-			<p class="mt-1 text-xs text-gray-500">查询于 {dateTime(quota.checked_at)}</p>
-		</div>
+		<section class="{card} p-4" data-halo-runner-quota>
+			<div class="flex items-baseline justify-between gap-3">
+				<h3 class="text-[13px] font-medium text-gray-500 dark:text-gray-400">官方 Claude 订阅额度</h3>
+				<span class="text-2xs tabular-nums text-gray-400 dark:text-gray-500"
+					>查询于 {runTime(quota.checked_at)}</span
+				>
+			</div>
+			<div class="mt-3 grid gap-4 sm:grid-cols-2">
+				{#each quota.windows as window}
+					{@const pct = Math.round(window.utilization)}
+					<div role={pct >= 90 ? 'alert' : undefined}>
+						<div class="flex items-baseline justify-between text-sm">
+							<span class="text-gray-700 dark:text-gray-200">{window.label}</span>
+							<span
+								class="font-display font-semibold tabular-nums {pct >= 100
+									? 'text-red-600 dark:text-red-400'
+									: 'text-gray-900 dark:text-gray-100'}">{pct}%</span
+							>
+						</div>
+						<div class="mt-1.5 h-1.5 overflow-hidden rounded-full bg-gray-100 dark:bg-zinc-800">
+							<div
+								class="h-full rounded-full transition-all duration-300 {quotaTone(pct)}"
+								style="width: {Math.min(pct, 100)}%"
+							></div>
+						</div>
+						<div class="mt-1 text-xs text-gray-400 dark:text-gray-500">
+							{resetTime(window.resets_at)} 重置{#if pct >= 100}<span
+									class="text-red-600 dark:text-red-400"> · 额度已用完</span
+								>{:else if pct >= 90}<span class="text-amber-600 dark:text-amber-400">
+									· 额度即将用完</span
+								>{/if}
+						</div>
+					</div>
+				{/each}
+			</div>
+		</section>
 	{:else if !loading && !error}
-		<p class="text-xs text-gray-500">{quota?.notice || '当前执行器未提供实时订阅额度。'}</p>
+		<p class="text-xs text-gray-400 dark:text-gray-500">
+			{quota?.notice || '当前执行器未提供实时订阅额度。'}
+		</p>
 	{/if}
-	{#if loading}
-		<p class="py-8 text-center text-sm text-gray-500" role="status">正在读取后台任务…</p>
+
+	{#if loading && runs.length === 0}
+		<p class="py-10 text-center text-sm text-gray-400" role="status">正在读取后台任务…</p>
 	{:else if error}
-		<div class="rounded-xl border border-gray-200 p-4 text-sm dark:border-gray-700" role="alert">
-			读取失败：{error}。请刷新重试。
+		<div
+			class="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700 dark:bg-red-950/30 dark:text-red-300"
+			role="alert"
+		>
+			读取失败：{error}。点右上角刷新重试。
 		</div>
 	{:else if filtered.length === 0}
-		<p class="py-8 text-center text-sm text-gray-500">这段时间没有符合条件的后台任务。</p>
+		<div class="{card} py-10 text-center text-sm text-gray-400 dark:text-gray-500">
+			这段时间没有符合条件的后台任务。
+		</div>
 	{:else}
 		<div class="grid grid-cols-2 gap-3 md:grid-cols-4">
-			{#each [{ label: '任务数', value: summary.total.runs }, { label: 'API 折算费用', value: formatUsd(summary.total.cost) }, { label: '累计耗时', value: formatHours(summary.total.seconds) }, { label: '累计轮数', value: summary.total.turns }] as card}
+			{#each cards as item}
 				<div
-					class="rounded-2xl border border-gray-100 bg-white/70 p-4 dark:border-gray-800 dark:bg-gray-900/60"
+					class="{card} min-h-[102px] p-4 transition-all duration-200 hover:border-gray-300/60 dark:hover:border-white/10"
 				>
-					<div class="text-2xl font-semibold tabular-nums">{card.value}</div>
-					<div class="mt-1 text-xs text-gray-500">{card.label}</div>
+					<div class="glass-icon-badge mb-3 !h-9 !w-9">
+						<svelte:component this={item.icon} class="size-[18px]" strokeWidth={1.75} />
+					</div>
+					<div
+						class="font-display text-2xl font-semibold tracking-tight tabular-nums text-gray-900 dark:text-gray-100"
+					>
+						{item.value}
+					</div>
+					<div class="mt-0.5 text-[13px] text-gray-400 dark:text-gray-500">{item.label}</div>
 				</div>
 			{/each}
 		</div>
-		<p class="text-xs text-gray-500">
-			最近 {loadedDays} 天的已保留记录 · 完成 {summary.total.ok}，失败 {summary.total
-				.failed}，额度中断 {summary.total.quota}。费用是执行器自报的 API
-			价格折算值，订阅实际账单另计；{reportedCost}/{filtered.length} 次任务提供了费用，缺失值不参与合计。
+		<p class="text-xs leading-relaxed text-gray-400 dark:text-gray-500">
+			最近 {loadedDays} 天 · 完成 {summary.total.ok} · 失败
+			<span class={summary.total.failed ? 'text-red-600 dark:text-red-400' : ''}
+				>{summary.total.failed}</span
+			>
+			· 额度中断 {summary.total.quota}。费用是执行器自报的 API 价格折算值，订阅实际账单另计；{`${reportedCost}/${filtered.length} 次任务提供了费用`}，缺失值不参与合计。
 		</p>
+
 		<section aria-label="每日 API 折算费用">
-			<div class="mb-3 flex items-center justify-between text-sm">
-				<h3 class="font-medium">每日 API 折算费用（USD）</h3>
-				<button class="text-xs underline" on:click={() => (showDailyTable = !showDailyTable)}
+			<div class="mb-3 flex items-center justify-between">
+				<h3 class="text-[13px] font-medium text-gray-500 dark:text-gray-400">每日 API 折算费用</h3>
+				<button
+					type="button"
+					class="text-xs text-gray-400 transition-colors hover:text-gray-700 dark:text-gray-500 dark:hover:text-gray-200"
+					on:click={() => (showDailyTable = !showDailyTable)}
 					>{showDailyTable ? '隐藏每日明细' : '查看每日明细'}</button
 				>
 			</div>
-			<div
-				class="relative flex h-36 items-end gap-px rounded-xl border border-gray-200 p-3 dark:border-gray-700"
-			>
-				<span class="absolute right-2 top-1 text-xs text-gray-500">{formatUsd(maxCost)}</span>
-				{#each summary.daily as day}
+			<div class="relative">
+				<div
+					class="{card} relative flex h-36 items-end {summary.daily.length > 45
+						? 'gap-px'
+						: 'gap-1'} p-3 pb-1"
+				>
+					<!-- Scale: the tallest bar and half of it, so heights read as dollars. -->
+					<div class="pointer-events-none absolute inset-x-3 bottom-1 top-3 z-[1]" aria-hidden="true">
+						<div class="absolute inset-x-0 top-0 border-t border-dashed border-gray-200 dark:border-gray-700/80">
+							<span
+								class="absolute -top-[7px] right-0 bg-white/90 pl-1 text-2xs leading-none tabular-nums text-gray-400 dark:bg-gray-900/90 dark:text-gray-500"
+								>{formatUsd(maxCost)}</span
+							>
+						</div>
+						<div class="absolute inset-x-0 top-1/2 border-t border-dashed border-gray-100 dark:border-gray-800">
+							<span
+								class="absolute -top-[7px] right-0 bg-white/90 pl-1 text-2xs leading-none tabular-nums text-gray-400 dark:bg-gray-900/90 dark:text-gray-500"
+								>{formatUsd(maxCost / 2)}</span
+							>
+						</div>
+					</div>
+					{#each summary.daily as day, idx}
+						<div
+							class="relative min-h-[2px] flex-1 cursor-default rounded-t transition-all duration-200 {day.runs
+								? 'bg-blue-300 hover:bg-blue-500 dark:bg-blue-500/70 dark:hover:bg-blue-400'
+								: 'bg-gray-100 dark:bg-gray-800'}"
+							style="height: {(day.cost / maxCost) * 100}%"
+							role="img"
+							aria-label={`${day.day}：${formatUsd(day.cost)}，${day.runs} 次任务`}
+							on:mouseenter={() => (hoveredDay = idx)}
+							on:mouseleave={() => (hoveredDay = null)}
+						></div>
+					{/each}
+				</div>
+				{#if hovered && hoveredDay !== null}
 					<div
-						class="flex-1 rounded-t bg-gray-600 dark:bg-gray-400"
-						style="height: {(day.cost / maxCost) * 100}%"
-						role="img"
-						aria-label={`${day.day}：${formatUsd(day.cost)}，${day.runs} 次任务`}
-						title={`${day.day}：${formatUsd(day.cost)}，${day.runs} 次任务`}
-					></div>
-				{/each}
+						class="pointer-events-none absolute -top-12 z-10 whitespace-nowrap rounded-lg bg-zinc-900 px-3 py-1.5 text-xs text-white shadow-lg dark:bg-zinc-100 dark:text-zinc-900"
+						style="left: {((hoveredDay + 0.5) / summary.daily.length) * 100}%; transform: translateX({hoveredDay <
+						summary.daily.length * 0.15
+							? '-15%'
+							: hoveredDay > summary.daily.length * 0.85
+								? '-85%'
+								: '-50%'})"
+					>
+						<div class="font-medium">{hovered.day}</div>
+						<div class="text-zinc-300 dark:text-zinc-600">
+							{formatUsd(hovered.cost)} · {hovered.runs} 次 · {formatHours(hovered.seconds)}
+						</div>
+					</div>
+				{/if}
 			</div>
-			<div class="mt-1 flex justify-between text-xs text-gray-500">
+			<div class="mt-1 flex justify-between px-3 text-xs text-gray-400">
 				<span>{summary.daily[0]?.day}</span><span>{summary.daily.at(-1)?.day}</span>
 			</div>
 			{#if showDailyTable}
-				<div class="mt-3 max-h-64 overflow-auto text-sm">
-					<table class="w-full text-left">
-						<thead><tr><th>日期</th><th>任务数</th><th>折算费用</th><th>耗时</th></tr></thead><tbody
-						>
-							{#each summary.daily as day}<tr
-									><td>{day.day}</td><td>{day.runs}</td><td>{formatUsd(day.cost)}</td><td
-										>{formatHours(day.seconds)}</td
-									></tr
-								>{/each}
+				<div class="{card} mt-3 max-h-64 overflow-auto">
+					<table class="w-full text-sm">
+						<thead class="sticky top-0 bg-gray-50/95 dark:bg-gray-850/95">
+							<tr>
+								<th class="{th} text-left">日期</th>
+								<th class="{th} text-right">任务</th>
+								<th class="{th} text-right">折算费用</th>
+								<th class="{th} text-right">耗时</th>
+							</tr>
+						</thead>
+						<tbody>
+							{#each [...summary.daily].reverse() as day}
+								<tr class="border-t border-gray-100 tabular-nums dark:border-white/[0.06]">
+									<td class="px-4 py-2 text-gray-700 dark:text-gray-300">{day.day}</td>
+									<td class="px-4 py-2 text-right">{day.runs}</td>
+									<td class="px-4 py-2 text-right">{formatUsd(day.cost)}</td>
+									<td class="px-4 py-2 text-right text-gray-500">{formatHours(day.seconds)}</td>
+								</tr>
+							{/each}
 						</tbody>
 					</table>
 				</div>
 			{/if}
 		</section>
-		{#each [{ title: '按执行器', rows: summary.byRunner }, { title: '按项目', rows: summary.byProject }] as group}
-			<section class="overflow-x-auto">
-				<h3 class="mb-2 text-sm font-medium">{group.title}</h3>
-				<table class="w-full text-left text-sm">
-					<thead class="text-xs text-gray-500"
-						><tr
-							><th class="py-2">名称</th><th>任务数</th><th>折算费用</th><th>耗时</th><th>轮数</th
-							><th>失败 / 额度中断</th></tr
-						></thead
+
+		<div class="grid gap-4 lg:grid-cols-2">
+			{#each groups as group}
+				<section class="{card} overflow-hidden">
+					<h3
+						class="border-b border-gray-100 px-4 py-3 text-[13px] font-medium text-gray-500 dark:border-white/[0.06] dark:text-gray-400"
 					>
-					<tbody
-						>{#each group.rows as row}<tr class="border-t border-gray-100 dark:border-gray-800"
-								><td class="py-2">{group.title === '按执行器' ? runnerName(row.key) : row.key}</td
-								><td>{row.runs}</td><td>{formatUsd(row.cost)}</td><td>{formatHours(row.seconds)}</td
-								><td>{row.turns}</td><td>{row.failed} / {row.quota}</td></tr
-							>{/each}</tbody
-					>
-				</table>
-			</section>
-		{/each}
-		<section class="overflow-x-auto">
-			<h3 class="mb-2 text-sm font-medium">每次运行</h3>
-			<table class="w-full text-left text-sm" data-halo-runner-rows>
-				<thead class="text-xs text-gray-500"
-					><tr
-						><th class="py-2">任务 / 项目</th><th>执行器</th><th>状态</th><th>折算费用</th><th
-							>耗时</th
-						><th>轮数</th></tr
-					></thead
-				>
-				<tbody
-					>{#each visible as run}<tr class="border-t border-gray-100 dark:border-gray-800">
-							<td class="max-w-xs py-3 pr-3"
-								><div class="truncate" title={run.title}>{run.title || run.run_id}</div>
-								<div class="text-xs text-gray-500">
-									{run.project || '（不在项目里）'} · {dateTime(run.started_at)}
-								</div></td
-							>
-							<td>{runnerName(run.agent)}</td><td
-								>{labels[run.status] ??
-									run.status}{#if ['quota_reset', 'quota', 'official_limit'].includes(run.failure_kind)}
-									· 额度中断{/if}</td
-							>
-							<td>{run.cost_usd === null ? '—' : formatUsd(run.cost_usd)}</td><td
-								>{run.duration_s === null ? '—' : formatHours(run.duration_s)}</td
-							><td>{run.turns ?? '—'}</td>
-						</tr>{/each}</tbody
-				>
-			</table>
-			<div class="mt-3 flex items-center justify-end gap-3 text-xs">
-				<button disabled={page === 0} on:click={() => (page -= 1)}>上一页</button><span
-					>{page + 1} / {pages}</span
-				><button disabled={page + 1 >= pages} on:click={() => (page += 1)}>下一页</button>
+						{group.title}
+					</h3>
+					<div class="overflow-x-auto">
+						<table class="w-full text-sm">
+							<thead class="bg-gray-50/80 dark:bg-gray-850/50">
+								<tr>
+									<th class="{th} text-left">名称</th>
+									<th class="{th} text-right">任务</th>
+									<th class="{th} text-right">折算费用</th>
+									<th class="{th} text-right">耗时</th>
+									<th class="{th} text-right">轮数</th>
+									<th class="{th} text-right">失败 / 额度</th>
+								</tr>
+							</thead>
+							<tbody>
+								{#each group.rows as row}
+									<tr class="border-t border-gray-100 tabular-nums dark:border-white/[0.06]">
+										<td class="max-w-[12rem] px-4 py-2.5">
+											<div class="truncate font-medium text-gray-800 dark:text-gray-200" title={row.key}>
+												{group.name(row.key)}
+											</div>
+											<!-- share of the filtered cost -->
+											<div class="mt-1 h-1 overflow-hidden rounded-full bg-gray-100 dark:bg-zinc-800">
+												<div
+													class="h-full rounded-full bg-gray-800 dark:bg-gray-300"
+													style="width: {summary.total.cost ? (row.cost / summary.total.cost) * 100 : 0}%"
+												></div>
+											</div>
+										</td>
+										<td class="px-4 py-2.5 text-right">{row.runs}</td>
+										<td class="px-4 py-2.5 text-right">{formatUsd(row.cost)}</td>
+										<td class="whitespace-nowrap px-4 py-2.5 text-right text-gray-500">
+											{formatHours(row.seconds)}
+										</td>
+										<td class="px-4 py-2.5 text-right text-gray-500">{row.turns}</td>
+										<td class="px-4 py-2.5 text-right">
+											<span class={row.failed ? 'text-red-600 dark:text-red-400' : 'text-gray-400'}
+												>{row.failed}</span
+											><span class="text-gray-400"> / {row.quota}</span>
+										</td>
+									</tr>
+								{/each}
+							</tbody>
+						</table>
+					</div>
+				</section>
+			{/each}
+		</div>
+
+		<section class="{card} overflow-hidden">
+			<div
+				class="flex items-center justify-between border-b border-gray-100 px-4 py-3 dark:border-white/[0.06]"
+			>
+				<h3 class="text-[13px] font-medium text-gray-500 dark:text-gray-400">每次运行</h3>
+				<span class="workspace-count-pill !py-0.5 !text-xs">{filtered.length}</span>
 			</div>
+			<div class="overflow-x-auto">
+				<table class="w-full text-sm" data-halo-runner-rows>
+					<thead class="bg-gray-50/80 dark:bg-gray-850/50">
+						<tr>
+							<th class="{th} text-left">任务</th>
+							<th class="{th} text-left">执行器</th>
+							<th class="{th} text-left">状态</th>
+							<th class="{th} text-right">折算费用</th>
+							<th class="{th} hidden text-right sm:table-cell">耗时</th>
+							<th class="{th} hidden text-right sm:table-cell">轮数</th>
+						</tr>
+					</thead>
+					<tbody>
+						{#each visible as run (run.agent + run.run_id)}
+							<tr
+								class="border-t border-gray-100 transition-colors hover:bg-gray-50/60 dark:border-white/[0.06] dark:hover:bg-white/[0.02]"
+							>
+								<td class="max-w-xs px-4 py-2.5">
+									<div class="truncate text-gray-800 dark:text-gray-200" title={run.title}>
+										{run.title || run.run_id}
+									</div>
+									<div class="mt-0.5 truncate text-xs text-gray-400 dark:text-gray-500">
+										{run.project || '（不在项目里）'} · {runTime(run.started_at)}
+									</div>
+								</td>
+								<td class="whitespace-nowrap px-4 py-2.5">
+									<span class="halo-chip">{runnerName(run.agent)}</span>
+								</td>
+								<td
+									class="whitespace-nowrap px-4 py-2.5 {isFailed(run) || isQuotaStop(run)
+										? 'text-red-600 dark:text-red-400'
+										: 'text-gray-600 dark:text-gray-300'}"
+								>
+									{STATUS_LABEL[run.status] ?? run.status}{#if isQuotaStop(run)} · 额度中断{/if}
+								</td>
+								<td class="px-4 py-2.5 text-right tabular-nums">
+									{run.cost_usd === null ? '—' : formatUsd(run.cost_usd)}
+								</td>
+								<td
+									class="hidden whitespace-nowrap px-4 py-2.5 text-right tabular-nums text-gray-500 sm:table-cell"
+								>
+									{run.duration_s === null ? '—' : formatHours(run.duration_s)}
+								</td>
+								<td class="hidden px-4 py-2.5 text-right tabular-nums text-gray-500 sm:table-cell">
+									{run.turns ?? '—'}
+								</td>
+							</tr>
+						{/each}
+					</tbody>
+				</table>
+			</div>
+			{#if pages > 1}
+				<div
+					class="flex items-center justify-end gap-2 border-t border-gray-100 px-4 py-2.5 text-xs dark:border-white/[0.06]"
+				>
+					<button type="button" class={pagerButton} disabled={page === 0} on:click={() => (page -= 1)}>
+						<ChevronLeft class="size-3.5" strokeWidth={2.25} />上一页
+					</button>
+					<span class="tabular-nums text-gray-500">{page + 1} / {pages}</span>
+					<button
+						type="button"
+						class={pagerButton}
+						disabled={page + 1 >= pages}
+						on:click={() => (page += 1)}
+					>
+						下一页<ChevronRight class="size-3.5" strokeWidth={2.25} />
+					</button>
+				</div>
+			{/if}
 		</section>
 	{/if}
 </div>

@@ -57,3 +57,14 @@ export const comparisonPair = (answers: BranchAnswer[], messageId: string): [str
 		answers.find((a) => a.message.id !== current?.message.id)?.message.id ?? ''
 	];
 };
+
+/** Ids on the branch the chat shows now (currentId up to the root), for the 当前 mark. */
+export const currentPath = (history: CompareHistory): Set<string> => {
+	const path = new Set<string>();
+	let id = history?.currentId ?? null;
+	while (id && !path.has(id)) {
+		path.add(id);
+		id = history.messages?.[id]?.parentId ?? null;
+	}
+	return path;
+};

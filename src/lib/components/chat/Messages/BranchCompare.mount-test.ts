@@ -67,31 +67,28 @@ describe('branch comparison dialog', () => {
 		document.body.appendChild(target);
 		app = new Component({
 			target,
-			props: { history, messageId: 'a2' },
+			props: { history, messageId: 'a2', show: true },
 			context: new Map([['i18n', writable({ t: (key: string) => key })]])
 		});
-		target.querySelector('[data-halo-branch-compare]').click();
 		await sleep(100);
 		const left = document.querySelector('[data-halo-compare-side="left"]')!;
 		const right = document.querySelector('[data-halo-compare-side="right"]')!;
 		expect(left.textContent).toContain('编辑后的问题');
 		expect(left.querySelector('strong')?.textContent?.trim()).toBe('新回答');
+		// a2 is on the shown branch, a1 is not; the two answer different questions
+		expect(left.querySelector('.halo-chip')?.textContent).toBe('当前');
+		expect(left.textContent).toContain('问题 · 两边不同');
 		expect(right.textContent).toContain('原问题');
 		expect(right.querySelector('strong')?.textContent?.trim()).toBe('原回答');
+		expect(right.textContent).not.toContain('当前');
 		expect(get(showArtifacts)).toBe(false);
-		const scope = Array.from(document.querySelectorAll('button')).find(
-			(b) => b.textContent === '对比此对话的其他回答'
-		)!;
-		scope.click();
+		const all = document.querySelector('[data-compare-scope="all"]') as HTMLButtonElement;
+		expect(all.textContent).toContain('3');
+		expect(all.getAttribute('aria-pressed')).toBe('false');
+		all.click();
 		await sleep();
-		expect(
-			document.querySelector('[data-halo-compare-side="left"] select')?.querySelectorAll('option')
-				.length
-		).toBe(3);
-		const close = Array.from(document.querySelectorAll('button')).find(
-			(b) => b.textContent === '关闭'
-		)!;
-		close.click();
+		expect(all.getAttribute('aria-pressed')).toBe('true');
+		(document.querySelector('[aria-label="关闭"]') as HTMLButtonElement).click();
 		await sleep();
 		expect(document.querySelector('[data-halo-branch-comparison]')).toBeFalsy();
 		expect(JSON.stringify(history)).toBe(before);

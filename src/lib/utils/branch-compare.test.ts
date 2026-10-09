@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { branchAnswers, chatAnswers, comparisonPair, type CompareHistory } from './branch-compare';
+import {
+	branchAnswers,
+	chatAnswers,
+	comparisonPair,
+	currentPath,
+	type CompareHistory
+} from './branch-compare';
 
 const history = (): CompareHistory => ({
 	currentId: 'a3',
@@ -68,5 +74,13 @@ describe('branch comparison', () => {
 		h.messages.u4 = { id: 'u4', role: 'user', parentId: 'a1', childrenIds: ['a5', 'a5', 'a2'] };
 		h.messages.a5 = { id: 'a5', role: 'assistant', parentId: 'u4', content: '编辑后续问题的回答' };
 		expect(branchAnswers(h, 'u4').map((a) => a.message.id)).toEqual(['a4', 'a5']);
+	});
+
+	it('marks the shown branch from currentId up to the root', () => {
+		expect([...currentPath(history())]).toEqual(['a3', 'u2']);
+		const h = history();
+		h.currentId = 'a4';
+		expect([...currentPath(h)]).toEqual(['a4', 'u3', 'a1', 'u1']);
+		expect(currentPath({ messages: {} }).size).toBe(0);
 	});
 });

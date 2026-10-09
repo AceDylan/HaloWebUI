@@ -18,6 +18,7 @@
 	import Cube from '../icons/Cube.svelte';
 	import UsersSolid from '../icons/UsersSolid.svelte';
 	import ChartBar from '../icons/ChartBar.svelte';
+	import CommandLine from '../icons/CommandLine.svelte';
 	import { getModelChatDisplayName } from '$lib/utils/model-display';
 	import { buildModelIdentityLookup, parseModelSelectionId } from '$lib/utils/model-identity';
 	import { ensureModels } from '$lib/services/models';
@@ -418,8 +419,10 @@
 						<!-- Icon badge + title + description -->
 						<div class="flex items-start gap-3">
 							<div class="glass-icon-badge {activeTabMeta.badgeColor}">
-								{#if activeTab === 'overview' || activeTab === 'runners'}
+								{#if activeTab === 'overview'}
 									<ChartBar className="size-[18px] {activeTabMeta.iconColor}" />
+								{:else if activeTab === 'runners'}
+									<CommandLine className="size-[18px] {activeTabMeta.iconColor}" />
 								{:else if activeTab === 'models'}
 									<Cube className="size-[18px] {activeTabMeta.iconColor}" />
 								{:else}
@@ -451,9 +454,6 @@
 
 					<!-- Tab pill bar -->
 					<div class="halo-seg inline-flex max-w-full flex-wrap items-center gap-1.5 self-start rounded-xl bg-gray-100/70 p-1 shadow-[inset_0_1px_0_rgba(255,255,255,0.65)] dark:bg-gray-850/80 dark:shadow-none @[64rem]:flex-nowrap @[64rem]:shrink-0">
-						<button type="button" class={`flex shrink-0 items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-all ${activeTab === 'runners' ? 'bg-white text-gray-900 shadow-sm dark:bg-gray-800 dark:text-white' : 'text-gray-500 hover:bg-white/50 dark:text-gray-400 dark:hover:bg-gray-800/50'}`} on:click={() => { exitSelectionMode(); if (days > 90) { days = 90; void loadData(90); } activeTab = 'runners'; }}>
-							<Bolt className="size-4" /><span>{tr('后台任务', 'Background tasks')}</span>
-						</button>
 						<button type="button" class={`flex shrink-0 items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-all ${activeTab === 'overview' ? 'bg-white text-gray-900 shadow-[0_1px_3px_rgba(15,23,42,0.08)] dark:bg-gray-800 dark:text-white' : 'text-gray-500 hover:bg-white/50 hover:text-gray-800 dark:text-gray-400 dark:hover:bg-gray-800/50 dark:hover:text-gray-200'}`} on:click={() => { exitSelectionMode(); activeTab = 'overview'; }}>
 							<ChartBar className="size-4" />
 							<span>{tr('总览', 'Overview')}</span>
@@ -465,6 +465,10 @@
 						<button type="button" class={`flex shrink-0 items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-all ${activeTab === 'users' ? 'bg-white text-gray-900 shadow-[0_1px_3px_rgba(15,23,42,0.08)] dark:bg-gray-800 dark:text-white' : 'text-gray-500 hover:bg-white/50 hover:text-gray-800 dark:text-gray-400 dark:hover:bg-gray-800/50 dark:hover:text-gray-200'}`} on:click={() => { exitSelectionMode(); activeTab = 'users'; }}>
 							<UsersSolid className="size-4" />
 							<span>{tr('用户', 'Users')}</span>
+						</button>
+						<button type="button" class={`flex shrink-0 items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-all ${activeTab === 'runners' ? 'bg-white text-gray-900 shadow-[0_1px_3px_rgba(15,23,42,0.08)] dark:bg-gray-800 dark:text-white' : 'text-gray-500 hover:bg-white/50 hover:text-gray-800 dark:text-gray-400 dark:hover:bg-gray-800/50 dark:hover:text-gray-200'}`} on:click={() => { exitSelectionMode(); if (days > 90) { days = 90; void loadData(90); } activeTab = 'runners'; }}>
+							<CommandLine className="size-4" />
+							<span>{tr('后台任务', 'Background tasks')}</span>
 						</button>
 					</div>
 				</div>

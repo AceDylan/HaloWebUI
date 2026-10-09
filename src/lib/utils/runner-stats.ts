@@ -17,6 +17,28 @@ export type RunnerGroup = {
 
 const FAILED = new Set(['error', 'failed', 'timeout', 'max_turns', 'killed']);
 const OK = new Set(['success', 'done', 'completed']);
+const QUOTA_STOPS = new Set(['quota_reset', 'quota_window', 'quota', 'official_limit']);
+
+/** the run stopped because a subscription's quota ran out */
+export const isQuotaStop = (run: RunnerRun) => QUOTA_STOPS.has(run.failure_kind);
+export const isFailed = (run: RunnerRun) => FAILED.has(run.status);
+
+export const STATUS_LABEL: Record<string, string> = {
+	success: '完成',
+	done: '完成',
+	completed: '完成',
+	error: '失败',
+	failed: '失败',
+	timeout: '超时',
+	max_turns: '轮数上限',
+	killed: '已终止',
+	stopped: '已停止',
+	interrupted: '已中断',
+	question: '等你回答',
+	running: '运行中',
+	queued: '排队中',
+	quota_blocked: '额度不足'
+};
 
 const emptyGroup = (key: string): RunnerGroup => ({
 	key,
@@ -33,7 +55,7 @@ const add = (group: RunnerGroup, run: RunnerRun) => {
 	group.runs += 1;
 	if (OK.has(run.status)) group.ok += 1;
 	else if (FAILED.has(run.status)) group.failed += 1;
-	if (['quota_reset', 'quota', 'official_limit'].includes(run.failure_kind)) group.quota += 1;
+	if (isQuotaStop(run)) group.quota += 1;
 	group.cost += run.cost_usd ?? 0;
 	group.seconds += run.duration_s ?? 0;
 	group.turns += run.turns ?? 0;
@@ -102,3 +124,4 @@ export const formatHours = (seconds: number) => {
 export const RUNNER_LABEL: Record<string, string> = {
 	officlaude: '官方 Claude'
 };
+export const runnerName = (key: string) => RUNNER_LABEL[key] ?? key;

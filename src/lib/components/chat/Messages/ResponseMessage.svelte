@@ -97,8 +97,11 @@
 		CircleAlert,
 		MessagesSquare,
 		Users,
-		Bookmark as BookmarkIcon
+		Bookmark as BookmarkIcon,
+		Columns2
 	} from 'lucide-svelte';
+	import BranchCompare from './BranchCompare.svelte';
+	import { branchAnswers, chatAnswers } from '$lib/utils/branch-compare';
 	import { handOff, HANDOFF_PATH, replyHandoff } from '$lib/utils/handoff';
 	import { DropdownMenu } from 'bits-ui';
 	import { flyAndScale } from '$lib/utils/transitions';
@@ -905,6 +908,11 @@
 	// "More" menu toggles this inline row instead.
 	let showStats = false;
 	let showMoreMenu = false;
+	// 并排对比: inline when this question has several versions (re-answers or edited
+	// questions), from 更多 whenever the chat has another answer to set it against.
+	let showCompare = false;
+	$: versionCount = message?.done ? branchAnswers(history, message.id).length : 0;
+	$: canCompare = versionCount > 1 || (showMoreMenu && chatAnswers(history).length > 1);
 
 	// This reply to 讨论台 / 协作台: its question again, with the conversation up to here as
 	// background and a way back to this chat.
@@ -1433,6 +1441,10 @@
 		: (reportNotice && splitRunReport(message?.content, reportNotice.runId)?.body) ||
 			message?.content;
 </script>
+
+{#if showCompare}
+	<BranchCompare bind:show={showCompare} {history} messageId={message.id} />
+{/if}
 
 <DeleteConfirmDialog
 	bind:show={showDeleteConfirm}
@@ -2279,6 +2291,17 @@
 									</div>
 									<div class="w-px h-4 bg-gray-300/40 dark:bg-gray-600/40 mx-0.5 self-center"></div>
 								{/if}
+								{#if versionCount > 1}
+									<button
+										type="button"
+										class={mobileActionButtonClass}
+										aria-label="并排对比"
+										data-halo-branch-compare
+										on:click={() => (showCompare = true)}
+									>
+										<Columns2 class="size-4" strokeWidth={2} />
+									</button>
+								{/if}
 
 								<!-- Auto playback (Chat.svelte) clicks this, same as the desktop bar. -->
 								<button
@@ -2392,6 +2415,20 @@
 												>
 													<GitBranchPlus class="w-4 h-4 shrink-0" strokeWidth={1.75} />
 													<span>{branchTooltip}</span>
+												</DropdownMenu.Item>
+											{/if}
+
+											{#if canCompare}
+												<DropdownMenu.Item
+													class={menuItemClass}
+													data-halo-compare-menu
+													on:click={() => {
+														showMoreMenu = false;
+														showCompare = true;
+													}}
+												>
+													<Columns2 class="w-4 h-4 shrink-0" strokeWidth={1.75} />
+													<span>并排对比</span>
 												</DropdownMenu.Item>
 											{/if}
 
@@ -2633,6 +2670,21 @@
 
 								{#if message.done}
 									<!-- Copy and regenerate stay inline; the rest folds into "More", as on the phone. -->
+									{#if versionCount > 1}
+										<Tooltip content={`并排对比 ${versionCount} 个版本`} placement="bottom">
+											<button
+												type="button"
+												aria-label="并排对比"
+												class="{isLastMessage
+													? 'visible'
+													: 'invisible group-hover:visible'} p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-xl dark:hover:text-white hover:text-black transition-all duration-200 hover:scale-110 active:scale-95"
+												data-halo-branch-compare
+												on:click={() => (showCompare = true)}
+											>
+												<Columns2 class="w-4 h-4" strokeWidth={2} />
+											</button>
+										</Tooltip>
+									{/if}
 									<!-- Auto playback (Chat.svelte) clicks this; read aloud itself is in "More". -->
 									<button
 										id="speak-button-{message.id}"
@@ -2921,6 +2973,20 @@
 													>
 														<GitBranchPlus class="w-4 h-4 shrink-0" strokeWidth={1.75} />
 														<span>{branchTooltip}</span>
+													</DropdownMenu.Item>
+												{/if}
+
+												{#if canCompare}
+													<DropdownMenu.Item
+														class={menuItemClass}
+														data-halo-compare-menu
+														on:click={() => {
+															showMoreMenu = false;
+															showCompare = true;
+														}}
+													>
+														<Columns2 class="w-4 h-4 shrink-0" strokeWidth={1.75} />
+														<span>并排对比</span>
 													</DropdownMenu.Item>
 												{/if}
 

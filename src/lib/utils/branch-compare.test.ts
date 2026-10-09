@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { branchAnswers, comparisonPair, type CompareHistory } from './branch-compare';
+import { branchAnswers, chatAnswers, comparisonPair, type CompareHistory } from './branch-compare';
 
 const history = (): CompareHistory => ({
 	currentId: 'a3',
@@ -40,6 +40,26 @@ describe('branch comparison', () => {
 		expect(comparisonPair(answers, 'u2')).toEqual(['a3', 'a1']);
 		expect(JSON.stringify(h)).toBe(before);
 	});
+	it('offers returned precision answers and discussion conclusions from other turns', () => {
+		const h = history();
+		h.messages.notice = {
+			id: 'notice',
+			role: 'user',
+			parentId: 'a4',
+			content: '精答结果通知',
+			childrenIds: ['result']
+		};
+		h.messages.result = {
+			id: 'result',
+			role: 'assistant',
+			parentId: 'notice',
+			content: '精答结论'
+		};
+		const candidates = chatAnswers(h);
+		expect(candidates.find((a) => a.message.id === 'result')?.prompt?.content).toBe('精答结果通知');
+		expect(candidates.find((a) => a.message.id === 'a3')?.message.content).toBe('讨论结果');
+	});
+
 	it('limits later-turn comparisons to sibling questions and tolerates missing branches', () => {
 		const h = history();
 		expect(branchAnswers(h, 'a4').map((a) => a.message.id)).toEqual(['a4']);

@@ -32,6 +32,7 @@ beforeAll(async () => {
 beforeEach(async () => {
 	nav.goto.mockReset();
 	chatsApi.getChatListBySearchText.mockReset();
+	chatsApi.getChatListBySearchText.mockResolvedValue([]);
 	(globalThis as any).localStorage.token = 'tok';
 	stores.config.set({ features: { enable_agent_teams: true } });
 	stores.user.set({ id: 'u1', role: 'admin' });
@@ -121,5 +122,33 @@ describe('CommandPalette', () => {
 	it('closes on Escape', async () => {
 		await key('Escape');
 		expect(target.querySelectorAll('[data-command-palette]').length).toBe(0);
+	});
+
+	it('cancels a pending search when closed or destroyed', async () => {
+		await type('收藏');
+		await key('Escape');
+		await sleep(250);
+		expect(chatsApi.getChatListBySearchText).not.toHaveBeenCalled();
+		stores.showCommandPalette.set(true);
+		await until(() => !!target.querySelector('[data-command-palette-input]'));
+		await type('另一条查询');
+		app.$destroy();
+		app = null;
+		await sleep(250);
+		expect(chatsApi.getChatListBySearchText).not.toHaveBeenCalled();
+	});
+
+	it('ignores an old search response after closing and reopening', async () => {
+		let finish: (value: any) => void = () => {};
+		chatsApi.getChatListBySearchText.mockImplementationOnce(() => new Promise((resolve) => finish = resolve));
+		await type('旧查询');
+		await until(() => chatsApi.getChatListBySearchText.mock.calls.length > 0);
+		await key('Escape');
+		stores.showCommandPalette.set(true);
+		await until(() => !!target.querySelector('[data-command-palette-input]'));
+		finish([{ id: 'stale', title: '旧查询结果' }]);
+		await sleep(30);
+		expect(ids()).not.toContain('chat:stale');
+		expect(ids()).toContain('chat:c1');
 	});
 });

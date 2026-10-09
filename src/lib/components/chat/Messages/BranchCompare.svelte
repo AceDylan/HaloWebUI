@@ -1,7 +1,12 @@
 <script lang="ts">
 	import Modal from '$lib/components/common/Modal.svelte';
 	import ContentRenderer from './ContentRenderer.svelte';
-	import { branchAnswers, comparisonPair, type CompareHistory } from '$lib/utils/branch-compare';
+	import {
+		branchAnswers,
+		chatAnswers,
+		comparisonPair,
+		type CompareHistory
+	} from '$lib/utils/branch-compare';
 	import { models } from '$lib/stores';
 	import { buildModelIdentityLookup } from '$lib/utils/model-identity';
 	import { getModelChatDisplayName } from '$lib/utils/model-display';
@@ -11,7 +16,10 @@
 	let show = false;
 	let leftId = '';
 	let rightId = '';
-	$: answers = branchAnswers(history, messageId);
+	let includeAll = false;
+	$: branches = branchAnswers(history, messageId);
+	$: allAnswers = chatAnswers(history);
+	$: answers = includeAll ? allAnswers : branches;
 	let columns: { side: 'left' | 'right'; id: string }[] = [];
 	$: columns = [
 		{ side: 'left', id: leftId },
@@ -25,8 +33,13 @@
 		return model ? getModelChatDisplayName(model) : message.modelName || message.model || '回答';
 	};
 	const open = () => {
-		[leftId, rightId] = comparisonPair(answers, messageId);
+		includeAll = branches.length < 2;
+		[leftId, rightId] = comparisonPair(includeAll ? allAnswers : branches, messageId);
 		show = true;
+	};
+	const toggleScope = () => {
+		includeAll = !includeAll;
+		[leftId, rightId] = comparisonPair(includeAll ? allAnswers : branches, messageId);
 	};
 	const choose = (side: 'left' | 'right', id: string) => {
 		if (side === 'left') {
@@ -39,7 +52,7 @@
 	};
 </script>
 
-{#if answers.length > 1}
+{#if branches.length > 1 || (history.messages[messageId]?.role === 'assistant' && allAnswers.length > 1)}
 	<button
 		type="button"
 		class="mt-1 self-end rounded-lg px-2 py-1 text-xs text-gray-500 hover:bg-black/5 dark:hover:bg-white/5"
@@ -58,6 +71,13 @@
 					on:click={() => (show = false)}>关闭</button
 				>
 			</div>
+			{#if branches.length > 1 && allAnswers.length > branches.length}
+				<button class="mb-3 text-xs text-gray-500 underline" on:click={toggleScope}
+					>{includeAll ? '只看本问题的分支' : '对比此对话的其他回答'}</button
+				>
+			{:else if includeAll}
+				<p class="mb-3 text-xs text-gray-500">选择此对话中的两条回答，也可以比较精答与讨论结论。</p>
+			{/if}
 			<div class="grid gap-4 md:grid-cols-2">
 				{#each columns as column}
 					{@const answer = answers.find((a) => a.message.id === column.id)}

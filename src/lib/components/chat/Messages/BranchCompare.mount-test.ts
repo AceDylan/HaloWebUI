@@ -45,7 +45,21 @@ describe('branch comparison dialog', () => {
 					childrenIds: ['a2'],
 					content: '编辑后的问题'
 				},
-				a2: { id: 'a2', role: 'assistant', parentId: 'u2', content: '**新回答**', done: true }
+				a2: { id: 'a2', role: 'assistant', parentId: 'u2', content: '**新回答**', done: true },
+				notice: {
+					id: 'notice',
+					role: 'user',
+					parentId: 'a2',
+					childrenIds: ['result'],
+					content: '精答结果通知'
+				},
+				result: {
+					id: 'result',
+					role: 'assistant',
+					parentId: 'notice',
+					content: '精答结论',
+					done: true
+				}
 			}
 		};
 		const before = JSON.stringify(history);
@@ -65,6 +79,15 @@ describe('branch comparison dialog', () => {
 		expect(right.textContent).toContain('原问题');
 		expect(right.querySelector('strong')?.textContent?.trim()).toBe('原回答');
 		expect(get(showArtifacts)).toBe(false);
+		const scope = Array.from(document.querySelectorAll('button')).find(
+			(b) => b.textContent === '对比此对话的其他回答'
+		)!;
+		scope.click();
+		await sleep();
+		expect(
+			document.querySelector('[data-halo-compare-side="left"] select')?.querySelectorAll('option')
+				.length
+		).toBe(3);
 		const close = Array.from(document.querySelectorAll('button')).find(
 			(b) => b.textContent === '关闭'
 		)!;

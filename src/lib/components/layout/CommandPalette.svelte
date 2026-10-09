@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { tick } from 'svelte';
+	import { tick, onDestroy } from 'svelte';
 	import { goto } from '$app/navigation';
 
 	import { getChatListBySearchText } from '$lib/apis/chats';
@@ -46,18 +46,25 @@
 		input?.focus();
 	};
 
-	const search = (text: string) => {
+	const cancelSearch = () => {
+		searchSeq += 1;
 		if (searchTimer) clearTimeout(searchTimer);
+		searchTimer = null;
+	};
+	onDestroy(cancelSearch);
+	const search = (text: string, visible: boolean) => {
+		cancelSearch();
 		hits = null;
 		const q = text.trim();
-		if (!q) return;
-		const seq = ++searchSeq;
+		if (!visible || !q) return;
+		const seq = searchSeq;
 		searchTimer = setTimeout(async () => {
+			searchTimer = null;
 			const found = await getChatListBySearchText(localStorage.token, q, 1).catch(() => null);
 			if (seq === searchSeq && Array.isArray(found)) hits = found;
 		}, 200);
 	};
-	$: search(query);
+	$: search(query, $showCommandPalette);
 
 	$: items = paletteItems({
 		query,

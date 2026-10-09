@@ -15,6 +15,11 @@ export type CompareMessage = {
 export type CompareHistory = { messages: Record<string, CompareMessage>; currentId?: string };
 export type BranchAnswer = { message: CompareMessage; prompt: CompareMessage | undefined };
 
+export const chatAnswers = (history: CompareHistory): BranchAnswer[] =>
+	Object.values(history?.messages ?? {})
+		.filter((message) => message.role === 'assistant' && !!message.content?.trim())
+		.map((message) => ({ message, prompt: history.messages[message.parentId ?? ''] }));
+
 export const branchAnswers = (history: CompareHistory, messageId: string): BranchAnswer[] => {
 	const messages = history?.messages ?? {};
 	const selected = messages[messageId];

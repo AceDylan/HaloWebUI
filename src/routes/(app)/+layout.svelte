@@ -38,11 +38,12 @@
 		showChangelog,
 		temporaryChatEnabled,
 		toolServers,
-		showSidebar
+		showCommandPalette
 	} from '$lib/stores';
 
 	import Sidebar from '$lib/components/layout/Sidebar.svelte';
 	import ChangelogModal from '$lib/components/ChangelogModal.svelte';
+	import CommandPalette from '$lib/components/layout/CommandPalette.svelte';
 	import AccountPending from '$lib/components/layout/Overlay/AccountPending.svelte';
 	import UpdateInfoToast from '$lib/components/layout/UpdateInfoToast.svelte';
 	import { get } from 'svelte/store';
@@ -235,7 +236,8 @@
 				}
 
 				// Check if Ctrl + K (⌘K on macOS, where Ctrl+K deletes to the end of the line)
-				// is pressed: search chats. Code editors keep their own Ctrl+K.
+				// is pressed: the command palette (chats, pages, models). Code editors keep
+				// their own Ctrl+K.
 				const isMacPlatform = /mac/i.test(navigator.platform ?? '');
 				if (
 					(isMacPlatform ? event.metaKey : event.ctrlKey) &&
@@ -245,9 +247,7 @@
 					!(event.target instanceof Element && event.target.closest('.cm-editor, .monaco-editor'))
 				) {
 					event.preventDefault();
-					showSidebar.set(true);
-					await tick();
-					document.querySelector<HTMLInputElement>('#chat-search input')?.focus();
+					showCommandPalette.update((open) => !open);
 				}
 
 				// Check if Ctrl + Shift + ; is pressed
@@ -422,6 +422,7 @@
 </script>
 
 <ChangelogModal bind:show={$showChangelog} />
+<CommandPalette />
 
 {#if version && compareVersion(version.latest, version.current) && ($settings?.showUpdateToast ?? true)}
 	<div class=" absolute bottom-8 right-8 z-50" in:fade={{ duration: 100 }}>

@@ -6,6 +6,7 @@
 	import DiscussBadge from '$lib/components/discuss/DiscussBadge.svelte';
 	import AnswerBadge from '$lib/components/answer/AnswerBadge.svelte';
 	import SidebarModeIcon from './SidebarModeIcon.svelte';
+	import { isAt, modeDestinations } from '$lib/utils/destinations';
 
 	/**
 	 * The chat's modes, next to 新对话: 精答, 讨论 (讨论台), 协作 (协作台), 生图 (the image studio). One row of
@@ -16,43 +17,7 @@
 	export let onNavigate: () => void = () => {};
 
 	$: path = $page?.url?.pathname ?? '';
-	$: studioAllowed =
-		!!$config?.features?.enable_image_generation &&
-		($user?.role === 'admin' || !!$user?.permissions?.features?.image_generation);
-	$: modes = [
-		{
-			key: 'answer',
-			href: '/answer',
-			label: '精答',
-			title: '精答：按问题挑选、升级或新建最合适的助手来回答',
-			active: path.startsWith('/answer'),
-			show: true
-		},
-		{
-			key: 'discuss',
-			href: '/discuss',
-			label: '讨论',
-			title: '讨论台：几个模型讨论，主持人给结论',
-			active: path.startsWith('/discuss'),
-			show: true
-		},
-		{
-			key: 'teams',
-			href: '/teams',
-			label: '协作',
-			title: '协作台：一支 AI 团队拆任务、并行完成',
-			active: path.startsWith('/teams'),
-			show: !!$config?.features?.enable_agent_teams
-		},
-		{
-			key: 'studio',
-			href: '/workspace/images?tab=workbench',
-			label: '生图',
-			title: '生图工作台：提示词、参考图、图库',
-			active: path.startsWith('/workspace/images'),
-			show: studioAllowed
-		}
-	].filter((m) => m.show);
+	$: modes = modeDestinations($config, $user).map((mode) => ({ ...mode, active: isAt(mode, path) }));
 </script>
 
 {#if compact}

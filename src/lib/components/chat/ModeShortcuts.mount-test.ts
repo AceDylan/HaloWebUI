@@ -93,10 +93,11 @@ describe('SidebarLibrary', () => {
 		return [...target.querySelectorAll('[data-sidebar-library]')].map((el: any) => [el.textContent.trim(), el.getAttribute('href')]);
 	};
 
-	it('puts 助手 and 提示词 where the workspace was', async () => {
+	it('puts 助手 and 提示词 where the workspace was, and 定时 for admins', async () => {
 		expect(await links()).toEqual([
 			['助手', '/workspace/models'],
-			['提示词', '/workspace/prompts']
+			['提示词', '/workspace/prompts'],
+			['定时', '/workspace/schedules']
 		]);
 	});
 

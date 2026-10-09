@@ -13,7 +13,7 @@
 	// keep the two lists in step.
 	const shortcutColumns: Shortcut[][] = [
 		[
-			{ label: 'Search Chats', keys: ['Ctrl/⌘', 'K'] },
+			{ label: '命令面板：搜对话、去页面、换模型', keys: ['Ctrl/⌘', 'K'] },
 			{ label: 'Open new chat', keys: ['Ctrl/⌘', 'Shift', 'O'] },
 			{ label: 'Focus chat input', keys: ['Shift', 'Esc'] },
 			{ label: 'Copy last code block', keys: ['Ctrl/⌘', 'Shift', ';'] },

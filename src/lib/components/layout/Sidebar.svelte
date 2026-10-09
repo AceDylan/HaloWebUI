@@ -17,6 +17,7 @@
 		mobile,
 		showArchivedChats,
 		showBookmarks,
+		showCommandPalette,
 		selectedAssistantScene,
 		pinnedChats,
 		scrollPaginationEnabled,
@@ -1004,17 +1005,16 @@
 					</button>
 				</Tooltip>
 
-				<Tooltip content={$i18n.t('Search')}>
+				<Tooltip content="搜索（Ctrl/⌘ K）">
 					<button
 						class={iconButtonClass}
-						on:click={async () => {
+						on:click={() => {
 							clearPeekTimer();
 							peek = false;
-							showSidebar.set(true);
-							await tick();
-							document.querySelector('#chat-search input')?.focus();
+							showCommandPalette.set(true);
 						}}
 						aria-label={$i18n.t('Search')}
+						data-sidebar-command-palette
 					>
 						<Search className="size-5" strokeWidth="2" />
 					</button>

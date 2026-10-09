@@ -3,11 +3,13 @@
 	import { user } from '$lib/stores';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import SidebarModeIcon from './SidebarModeIcon.svelte';
+	import { isAt, libraryDestinations } from '$lib/utils/destinations';
 
 	/**
 	 * What used to be the workspace, now that the image studio is a mode of its own: 助手 (my
-	 * assistants | built-in templates) and 提示词, side by side under the modes in the open sidebar,
-	 * two icons in the collapsed one. Users without the assistants page get the templates.
+	 * assistants | built-in templates), 提示词 and (admins) 定时 — Hermes' scheduled jobs — side by
+	 * side under the modes in the open sidebar, icons in the collapsed one. Users without the
+	 * assistants page get the templates.
 	 */
 	export let compact = false;
 	export let actionItemClass = '';
@@ -15,26 +17,7 @@
 	export let onNavigate: () => void = () => {};
 
 	$: path = $page?.url?.pathname ?? '';
-	$: perms = $user?.permissions?.workspace ?? {};
-	$: admin = $user?.role === 'admin';
-	$: links = [
-		{
-			key: 'assistants',
-			href: admin || perms.models ? '/workspace/models' : '/workspace/assistants',
-			label: '助手',
-			title: '助手：我的助手和内置模板，精答、讨论台、协作台都从这里挑',
-			active: path.startsWith('/workspace/models') || path.startsWith('/workspace/assistants'),
-			show: admin || perms.models || perms.knowledge || perms.prompts || perms.tools
-		},
-		{
-			key: 'prompts',
-			href: '/workspace/prompts',
-			label: '提示词',
-			title: '提示词：输入框里用 / 调出的常用提示词',
-			active: path.startsWith('/workspace/prompts'),
-			show: admin || perms.prompts
-		}
-	].filter((link) => link.show);
+	$: links = libraryDestinations($user).map((link) => ({ ...link, active: isAt(link, path) }));
 </script>
 
 {#if compact}

@@ -172,6 +172,8 @@ export const chatBookmarkIds: Writable<{ chatId: string; ids: Set<string> }> = w
 	ids: new Set()
 });
 export const showBookmarks = writable(false);
+// ⌘K / Ctrl+K: places, chats and models in one search (layout/CommandPalette.svelte)
+export const showCommandPalette = writable(false);
 export const showArtifacts = writable(false);
 export const showCallOverlay = writable(false);
 export const artifactAutoOpenDismissedMessageId: Writable<string | null> = writable(null);

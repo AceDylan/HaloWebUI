@@ -39,6 +39,19 @@ export type DiscussSetup = {
 	research?: boolean;
 	/** 自动匹配助手 */
 	autoMatch?: boolean;
+	/** 主持人安排: the moderator set the table (format, rounds, seats) for the first question. */
+	smart?: boolean;
+};
+
+/** 主持人安排: the moderator choosing the format, the rounds and the seats before a question starts. */
+export type DiscussPlanning = {
+	status: 'waiting' | 'running' | 'done' | 'error' | 'stopped';
+	/** Why this format, this many rounds and these seats (one sentence). */
+	reason?: string;
+	/** The plan could not be used: what happened and that the default table sits instead. */
+	error?: string | null;
+	startedAt?: number | null;
+	endedAt?: number | null;
 };
 
 /** Matching the seats' assistants when a question starts. */
@@ -138,6 +151,7 @@ export type DiscussAsk = {
 	rounds: number;
 	seats: DiscussSeat[];
 	moderator: DiscussModerator;
+	planning?: DiscussPlanning | null;
 	matching?: DiscussMatching | null;
 	status: AskStatus;
 	round: number;
@@ -251,6 +265,8 @@ export const createDiscussion = (
 		client_key?: string;
 		/** 自动匹配助手: seats without their own choice get an assistant matched to each question. */
 		auto_match?: boolean;
+		/** 主持人安排: no seats; the moderator chooses the format, rounds and seats. */
+		smart?: boolean;
 	}
 ) => request<Discussion>(token, 'POST', '/', form);
 

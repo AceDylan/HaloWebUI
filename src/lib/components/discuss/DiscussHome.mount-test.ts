@@ -62,7 +62,8 @@ beforeEach(() => {
 	Object.values(toasts).forEach((fn: any) => fn.mockReset());
 	files.uploadFileReliably.mockReset();
 	nav.goto.mockReset();
-	localStorage.removeItem('halo.discuss.last');
+	// these tests set the table themselves (自己安排); 主持人安排 has its own test
+	localStorage.setItem('halo.discuss.last', JSON.stringify({ smart: false }));
 	localStorage.token = 't';
 	stores.models.set([
 		{ id: 'a.gpt-chat', name: 'gpt-chat', selection_id: 'm-gpt' },
@@ -117,6 +118,37 @@ const mount = async () => {
 };
 
 describe('DiscussHome', () => {
+	it('by default the moderator sets the table: only the question, the moderator and the extras to pick', async () => {
+		localStorage.removeItem('halo.discuss.last');
+		const target = await mount();
+		await until(() => !!target.querySelector('[data-discuss-planner]'));
+		await sleep(20);
+		expect(target.querySelector('[data-discuss-smart="on"]')!.getAttribute('aria-checked')).toBe('true');
+		expect(target.querySelector('[data-discuss-smart-hint]')).toBeTruthy();
+		expect(target.querySelector('[data-discuss-seat]')).toBeFalsy();
+		expect(target.querySelector('[data-discuss-mode]')).toBeFalsy();
+		expect(target.querySelector('[data-discuss-rounds]')).toBeFalsy();
+		expect(target.querySelector('[data-discuss-automatch-toggle]')).toBeFalsy();
+		expect(target.querySelector('[data-discuss-moderator]')).toBeTruthy();
+
+		const box = target.querySelector('#discuss-question') as any;
+		box.value = '小团队的内部工具用 Postgres 还是 MongoDB？';
+		box.dispatchEvent(new (globalThis as any).Event('input'));
+		await sleep(20);
+		api.createDiscussion.mockResolvedValue({ id: 'new1', asks: [] });
+		target.querySelector('[data-discuss-composer]')!.dispatchEvent(new (globalThis as any).Event('submit', { cancelable: true }));
+		await until(() => nav.goto.mock.calls.length > 0);
+		const form = api.createDiscussion.mock.calls[0][1];
+		expect(form).toMatchObject({ question: '小团队的内部工具用 Postgres 还是 MongoDB？', smart: true, seats: [], auto_match: true, moderator: 'm-gpt' });
+		expect(JSON.parse(localStorage.getItem('halo.discuss.last')!)).toMatchObject({ smart: true });
+
+		// 自己安排 brings the seats, formats and rounds back
+		(target.querySelector('[data-discuss-smart="off"]') as any).click();
+		await until(() => target.querySelectorAll('[data-discuss-seat]').length > 0);
+		expect(target.querySelector('[data-discuss-rounds]')).toBeTruthy();
+		expect(target.querySelector('[data-discuss-smart-hint]')).toBeFalsy();
+	});
+
 	it('seats text models only, starts a debate with sides, and opens its room', async () => {
 		const target = await mount();
 		await until(() => target.querySelectorAll('[data-discuss-seat]').length > 0);
@@ -151,6 +183,7 @@ describe('DiscussHome', () => {
 		expect(api.createDiscussion.mock.calls[0][1]).toEqual({
 			question: 'AI 会让初级程序员成长变慢吗？',
 			mode: 'debate',
+			smart: false,
 			seats: [
 				{ model: 'm-gpt', role: '' },
 				{ model: 'm-ds', role: '' },
@@ -214,6 +247,7 @@ describe('DiscussHome', () => {
 		expect(target.querySelector('[data-discuss-rounds]')!.textContent).toContain('2');
 	});
 	it('takes what a chat handed over: ticked models, the draft, files, the conversation, a way back', async () => {
+		localStorage.removeItem('halo.discuss.last'); // ticked models mean the user set the table
 		sessionStorage.setItem(
 			'halo.handoff',
 			JSON.stringify({
@@ -242,6 +276,7 @@ describe('DiscussHome', () => {
 		target.querySelector('[data-discuss-composer]')!.dispatchEvent(new (globalThis as any).Event('submit', { cancelable: true }));
 		await until(() => api.createDiscussion.mock.calls.length > 0);
 		const form = api.createDiscussion.mock.calls[0][1];
+		expect(form.smart).toBe(false);
 		expect(form.seats.map((s: any) => s.model)).toEqual(['m-ds', 'm-claude']);
 		expect(form.files).toEqual(['f-1']);
 		expect(form.context).toEqual({ text: '用户：想周末出去玩\n\n助手：可以去杭州', title: '周末出游', chat_id: 'chat-9' });

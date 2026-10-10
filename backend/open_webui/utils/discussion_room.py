@@ -48,6 +48,9 @@ ROLE_MAX_CHARS = 40
 # a seat's duty in this discussion (run-only; what its assistant brings is in the assistant)
 DUTY_MAX_CHARS = 120
 MATCH_TIMEOUT_SECONDS = 150
+# 主持人安排: the moderator reads the question and staffs the discussion (format, rounds, seats)
+PLAN_TIMEOUT_SECONDS = 90
+PLAN_POOL_MAX = 40
 ASSIST_MODES = ("auto", "pick", "generic")
 INTERJECTION_MAX_CHARS = 1000
 MAX_INTERJECTIONS = 8
@@ -213,7 +216,8 @@ def normalize_setup(
     user: Any,
     excluded: Callable[[dict], Optional[str]] = _default_is_excluded,
 ) -> dict:
-    """Validate the seats / mode / rounds / moderator of a discussion."""
+    """Validate the seats / mode / rounds / moderator of a discussion. ``smart`` (主持人安排): the
+    moderator staffs it when the first question starts, so there may be no seats yet."""
     if not isinstance(raw, dict):
         raise DiscussError(400, "设置无效")
     mode = str(raw.get("mode") or "roundtable")
@@ -221,8 +225,10 @@ def normalize_setup(
         mode = "roundtable"
     spec = MODES[mode]
 
-    auto_match = bool(raw.get("autoMatch") or raw.get("auto_match"))
-    raw_seats = raw.get("seats")
+    smart = bool(raw.get("smart"))
+    # the moderator's seats always get assistants matched to the question
+    auto_match = smart or bool(raw.get("autoMatch") or raw.get("auto_match"))
+    raw_seats = raw.get("seats") if raw.get("seats") is not None or not smart else []
     if not isinstance(raw_seats, list):
         raise DiscussError(400, "席位必须是列表")
     seats = []
@@ -235,7 +241,7 @@ def normalize_setup(
         role = _clean_text(item.get("role"), ROLE_MAX_CHARS)
         seat = {"id": f"s{index + 1}", **resolved, "role": role, **_seat_assist(item, resolved, models_map, ambiguous, auto_match)}
         seats.append(seat)
-    if len(seats) < MIN_SEATS:
+    if len(seats) < MIN_SEATS and not (smart and not seats):
         raise DiscussError(400, f"至少要 {MIN_SEATS} 个席位")
     if len(seats) > MAX_SEATS:
         raise DiscussError(400, f"最多 {MAX_SEATS} 个席位")
@@ -269,7 +275,9 @@ def normalize_setup(
             rounds = spec["rounds"]
         rounds = max(1, min(rounds, MAX_ROUNDS))
 
-    moderator_raw = raw.get("moderator") or seats[0]["model"]
+    moderator_raw = raw.get("moderator") or (seats[0]["model"] if seats else "")
+    if not moderator_raw:
+        raise DiscussError(400, "主持人安排需要先选主持人")
     moderator = neutral_moderator(resolve_seat_model(moderator_raw, models_map, ambiguous, user, excluded), models_map, ambiguous, user, excluded)
 
     return {
@@ -279,6 +287,7 @@ def normalize_setup(
         "moderator": moderator,
         "research": bool(raw.get("research")),
         "autoMatch": auto_match,
+        "smart": smart,
     }
 
 
@@ -691,6 +700,103 @@ def build_conclusion_messages(
     ]
 
 
+# 主持人安排: what each format is for, as the moderator weighs it
+PLAN_MODE_GUIDE = {
+    "roundtable": "open questions and decisions with trade-offs that gain from several angles (the default)",
+    "compare": "questions with a best answer (facts, how-to, code, writing): independent answers merged; always 1 round",
+    "debate": "a yes/no or A-vs-B choice, or a contested claim: seats argue assigned sides (roles 正方 / 反方, optionally 评审)",
+    "review": "the user gives a plan, text or code to evaluate: answer, then anonymous peer review; always 2 rounds",
+    "brainstorm": "generating many ideas, names or options, then picking the best",
+}
+
+
+def build_plan_messages(*, ask: dict, pool: list[dict], history: list[dict]) -> list[dict]:
+    """The moderator staffs the discussion: format, rounds, and 2–5 seats (model, role, duty)
+    from ``pool`` (``[{"id", "name", "vision"}]``)."""
+    lang_rule = "Simplified Chinese" if (ask.get("lang") or "zh") == "zh" else "the language of the user's question"
+    images = sum(1 for item in ask.get("files") or [] if item.get("type") == "image")
+    documents = [item.get("name") for item in ask.get("files") or [] if item.get("type") != "image"]
+    system = (
+        "You are the moderator of a multi-model discussion (讨论台). Before it starts you set it up for the user's "
+        "question: choose the format, the number of rounds and the participants (seats) from the available models, "
+        "and give each seat a role and a duty. Reply with one JSON object only, no prose:\n"
+        '{"mode": "<format key>", "rounds": <1-4>, "seats": [{"model": "<model id>", "role": "<short role>", '
+        '"duty": "<one sentence>"}], "reason": "<one sentence>"}\n\n'
+        "Formats:\n"
+        + "\n".join(f"- {key} ({MODES[key]['label']}): {guide}" for key, guide in PLAN_MODE_GUIDE.items())
+        + "\n\nRules:\n"
+        f"- {MIN_SEATS}–{MAX_SEATS} seats. Use as many as the question has genuinely distinct angles: 2–3 for a simple or "
+        "narrow question, 4–5 only for broad, high-stakes or many-sided ones. Every seat costs one model call per round.\n"
+        f"- Rounds 1–{MAX_ROUNDS}: 1 when independent answers are enough, 2 for most questions, 3 for debates and "
+        "contested questions, 4 only for hard, many-sided ones. compare is always 1, review always 2.\n"
+        "- Prefer models of different families (different voices beat three of a kind) and stronger models for hard "
+        "reasoning, code or maths. The same model may take two seats only with clearly different roles (e.g. a debate).\n"
+        + ("- The question has images: only pick models with \"vision\": true.\n" if images else "")
+        + "- role: 2–8 Chinese characters (or 1–3 words), the seat's angle or side, e.g. 架构师, 风险审查, 用户视角, 正方.\n"
+        "- duty: one short sentence, what this seat must cover in this discussion.\n"
+        f"- role, duty and reason in {lang_rule}. reason: why this format, this many rounds and these seats, in one sentence.\n"
+        '- "model" is copied exactly from the "id" of the list.'
+    )
+    context = ((ask.get("context") or {}).get("text") or "").strip()
+    attached = ([f"{images} image(s)"] if images else []) + ([f"files {', '.join(documents)}"] if documents else [])
+    parts = [
+        _history_block(history),
+        f"Background conversation (excerpt):\n{context[:1500]}" if context else "",
+        f"User question:\n{ask.get('question') or ''}",
+        "Attached: " + "; ".join(attached) if attached else "",
+        "Available models:\n" + json.dumps(pool, ensure_ascii=False),
+    ]
+    return [
+        {"role": "system", "content": system},
+        {"role": "user", "content": "\n\n".join(part for part in parts if part)},
+    ]
+
+
+def _pool_model(pool: list[dict], wanted: Any) -> Optional[dict]:
+    key = str(wanted or "").strip().lower()
+    if not key:
+        return None
+    for entry in pool:
+        if key in (entry["id"].lower(), entry["name"].lower()):
+            return entry
+    # "deepseek" for "conn.deepseek" / "modelref::conn::deepseek"; a longer fragment of a name
+    for entry in pool:
+        if re.split(r"::|\.", entry["id"].lower())[-1] == key:
+            return entry
+    if len(key) >= 4:
+        return next((entry for entry in pool if key in entry["name"].lower() or key in entry["id"].lower()), None)
+    return None
+
+
+def plan_from(raw: Any, pool: list[dict]) -> dict:
+    """The moderator's JSON as a setup draft: ``{"mode", "rounds", "seats": [{"model", "role",
+    "duty"}], "reason"}`` with models from ``pool`` only. Raises ValueError when fewer than
+    MIN_SEATS seats remain."""
+    raw = raw if isinstance(raw, dict) else {}
+    mode = str(raw.get("mode") or "").strip().lower()
+    if mode not in MODES:
+        mode = "roundtable"
+    try:
+        rounds = max(1, min(int(raw.get("rounds") or MODES[mode]["rounds"]), MAX_ROUNDS))
+    except (TypeError, ValueError):
+        rounds = MODES[mode]["rounds"]
+    seats = []
+    for item in raw.get("seats") or []:
+        if not isinstance(item, dict) or len(seats) >= MAX_SEATS:
+            continue
+        entry = _pool_model(pool, item.get("model"))
+        if entry is None:
+            continue
+        role = _clean_text(item.get("role"), ROLE_MAX_CHARS)
+        # one model twice only with different roles
+        if any(s["model"] == entry["id"] and s["role"] == role for s in seats):
+            continue
+        seats.append({"model": entry["id"], "role": role, "duty": _clean_text(item.get("duty"), DUTY_MAX_CHARS)})
+    if len(seats) < MIN_SEATS:
+        raise ValueError(f"主持人的安排里能用的模型不到 {MIN_SEATS} 个")
+    return {"mode": mode, "rounds": rounds, "seats": seats, "reason": _clean_text(raw.get("reason"), 300)}
+
+
 def parse_conclusion_sections(content: str) -> list[dict]:
     """Split a conclusion into its ``## `` sections (the UI does the same)."""
     sections: list[dict] = []
@@ -876,6 +982,8 @@ def new_ask(
         "rounds": total_rounds,
         "seats": deepcopy(setup["seats"]),
         "moderator": deepcopy(setup["moderator"]),
+        # 主持人安排: the moderator staffs the table before anything else (LiveDiscussion._run_plan)
+        "planning": {"status": "waiting"} if setup.get("smart") and not setup["seats"] else None,
         # each seat's assistant for this question, chosen when it starts (see LiveDiscussion._run_match)
         "matching": {"status": "waiting"} if needs_matching(setup["seats"]) else None,
         "status": "running",
@@ -993,6 +1101,11 @@ class LiveDiscussion:
     # when the run starts by ``browsers(ask)`` (a researched question only)
     browse: set = field(default_factory=set)
     browsers: Optional[Callable[[dict], Awaitable[set]]] = None
+    # 主持人安排: (ask) -> {"setup": a normalized setup, "reason": str, "error": str|None}: the
+    # moderator's table for the question (never raises for a bad answer: a default table instead)
+    plan: Optional[Callable[[dict], Awaitable[dict]]] = None
+    # writes the planned table to the chat, so later questions sit at it
+    persist_setup: Optional[Callable[[dict], None]] = None
 
     # -- events --------------------------------------------------------------------------------
 
@@ -1256,6 +1369,35 @@ class LiveDiscussion:
             conclusion["retry"] = None
             await self.flush()
 
+    async def _run_plan(self):
+        planning = self.ask["planning"]
+        planning.update({"status": "running", "startedAt": now_ms(), "error": None})
+        await self.send_state()
+        try:
+            if self.plan is None:
+                raise ValueError("主持人安排不可用")
+            result = await self.plan(self.ask)
+            setup = result["setup"]
+            for key in ("mode", "rounds", "seats"):
+                self.setup[key] = deepcopy(setup[key])
+            self.ask.update({"mode": setup["mode"], "rounds": setup["rounds"], "seats": deepcopy(setup["seats"])})
+            self.ask["matching"] = {"status": "waiting"} if needs_matching(setup["seats"]) else None
+            planning.update(
+                {"status": "error" if result.get("error") else "done", "reason": result.get("reason") or "", "error": result.get("error")}
+            )
+            if self.persist_setup is not None:
+                self.persist_setup(self.setup)
+        except asyncio.CancelledError:
+            planning["status"] = "stopped"
+            raise
+        except Exception as exc:
+            planning.update({"status": "error", "error": f"主持人没能安排席位（{_short_error(exc)[:120]}）"})
+            raise ValueError(planning["error"]) from exc
+        finally:
+            planning["endedAt"] = now_ms()
+            self.save()
+            await self.send_state()
+
     async def _run_match(self):
         matching = self.ask["matching"]
         matching.update({"status": "running", "startedAt": now_ms(), "error": None})
@@ -1395,14 +1537,31 @@ class LiveDiscussion:
     async def run(self):
         self.flusher = asyncio.create_task(self._flush_loop())
         try:
-            await self._find_browsers()
             if self.retry_turn:
+                await self._find_browsers()
                 turn = next(t for t in self.ask["turns"] if t["id"] == self.retry_turn)
                 turn.update({"status": "waiting", "content": "", "error": None, "usage": {}, "imagesDropped": False})
                 await self.send_state()
                 await self._run_turn(turn)
                 self.save()
             elif not self.conclude_only:
+                research = self.ask.get("research")
+                fresh_research = bool(
+                    research and research.get("status") in {"waiting", "stopped", "running"} and not self.ask["turns"] and self.from_round == 1
+                )
+                planning = self.ask.get("planning")
+                if planning and (planning.get("status") in {"waiting", "running", "stopped"} or not self.setup["seats"]) and not self.ask["turns"]:
+                    # the notes do not depend on who sits at the table: looked up meanwhile
+                    researching = asyncio.ensure_future(self._run_research()) if fresh_research else None
+                    try:
+                        await self._run_plan()
+                    except BaseException:
+                        if researching is not None:
+                            researching.cancel()
+                            await asyncio.gather(researching, return_exceptions=True)
+                        raise
+                    if researching is not None:
+                        await researching
                 matching = self.ask.get("matching")
                 if (
                     self.match is not None
@@ -1411,9 +1570,9 @@ class LiveDiscussion:
                     and not self.ask["turns"]
                 ):
                     await self._run_match()
-                research = self.ask.get("research")
                 if research and research.get("status") in {"waiting", "stopped", "running"} and not self.ask["turns"] and self.from_round == 1:
                     await self._run_research()
+                await self._find_browsers()
                 if self.resume:
                     await self._resume_round()
                 for round_index in range(self.from_round, int(self.ask["rounds"]) + 1):

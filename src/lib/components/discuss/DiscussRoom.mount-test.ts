@@ -152,6 +152,39 @@ describe('DiscussRoom', () => {
 		expect(target.querySelector('[data-discuss-turn="r1-s1"]')!.textContent).toContain('Postgres');
 	}, 90000);
 
+	it('主持人安排: shows the moderator setting the table, then its format, rounds, seats and why', async () => {
+		const planning = { ...runningAsk(), mode: 'roundtable', seats: [], turns: [], round: 0, planning: { status: 'running' } };
+		api.getDiscussion.mockResolvedValue({ ...discussion(planning), setup: { ...discussion(planning).setup, seats: [], smart: true } });
+		const target = await mount();
+		await until(() => !!target.querySelector('[data-discuss-planning]'));
+		expect(target.querySelector('[data-discuss-planning]')!.textContent).toContain('正在读题');
+		expect(target.querySelectorAll('[data-discuss-seat-chip]')).toHaveLength(0);
+		expect(target.querySelectorAll('.dc-round-head')).toHaveLength(0); // no rounds before there is a table
+
+		const planned = {
+			...runningAsk(),
+			mode: 'debate',
+			rounds: 3,
+			turns: [],
+			round: 0,
+			seats: [
+				{ ...seats[0], role: '正方', duty: '论证收益' },
+				{ ...seats[1], role: '反方', duty: '论证代价' }
+			],
+			planning: { status: 'done', reason: '二选一的决策，正反交锋三轮' },
+			matching: { status: 'running' }
+		};
+		emit({ kind: 'state', chatId: 'chat1', askId: 'ask1', v: 2, ask: planned });
+		await until(() => !!target.querySelector('[data-discuss-plan]'));
+		expect(target.querySelector('[data-discuss-planning]')).toBeFalsy();
+		const plan = target.querySelector('[data-discuss-plan]')!.textContent!.replace(/\s+/g, ' ');
+		expect(plan).toContain('正反辩论 · 2 位 · 3 轮');
+		expect(plan).toContain('二选一的决策，正反交锋三轮');
+		expect(target.querySelector('[data-discuss-seat-chip="s1"]')!.textContent).toContain('正方');
+		expect(target.querySelector('[data-discuss-seat-assistant="s2"]')!.textContent).toContain('本次职责：论证代价');
+		expect(target.querySelector('[data-discuss-matching]')).toBeTruthy();
+	}, 90000);
+
 	it('shows the web notes, links [n] to them and retries a failed seat', async () => {
 		const ask = runningAsk();
 		const sources = [

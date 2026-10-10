@@ -4,6 +4,7 @@ A discussion is one of the user's chats (see utils/discussion_room.py): created,
 driven here, deleted like any chat. Every route is per user.
 """
 
+import asyncio
 import json
 import logging
 import re
@@ -46,7 +47,7 @@ class SeatForm(BaseModel):
 class CreateForm(BaseModel):
     question: str
     mode: Optional[str] = "roundtable"
-    seats: list[SeatForm]
+    seats: list[SeatForm] = []
     rounds: Optional[int] = None
     moderator: Optional[str] = None
     research: bool = False
@@ -58,6 +59,8 @@ class CreateForm(BaseModel):
     client_key: Optional[str] = None
     # 自动匹配助手: seats without a choice of their own get an assistant matched to each question
     auto_match: bool = False
+    # 主持人安排: no seats, mode or rounds from the page; the moderator chooses them for the question
+    smart: bool = False
 
 
 class AskForm(BaseModel):
@@ -140,6 +143,7 @@ def _setup_of(chat) -> dict:
     setup = {key: data.get(key) for key in ("mode", "rounds", "seats", "moderator")}
     setup["research"] = bool(data.get("research"))
     setup["autoMatch"] = bool(data.get("autoMatch"))
+    setup["smart"] = bool(data.get("smart"))
     return setup
 
 
@@ -206,6 +210,19 @@ def _persist_ask(chat_id: str, ask: dict, setup: dict) -> None:
     chat = Chats.get_chat_by_id(chat_id)
     if chat is not None:
         Chats.set_chat_meta_value_by_id(chat_id, META_KEY, room.summary_meta(setup, _asks_of(chat)))
+
+
+def _persist_setup(chat_id: str, setup: dict) -> None:
+    """The table the moderator set (主持人安排) written to the chat: later questions sit at it."""
+    chat = Chats.get_chat_by_id(chat_id)
+    if chat is None:
+        return
+    payload = dict(chat.chat or {})
+    data = dict(payload.get(CHAT_KEY) or {})
+    data.update({key: setup[key] for key in ("mode", "rounds", "seats")})
+    payload[CHAT_KEY] = data
+    payload["models"] = [seat["model"] for seat in setup["seats"]]
+    Chats.update_chat_by_id(chat_id, payload, update_title=False)
 
 
 def _history(chat, before_ask_id: Optional[str] = None) -> list[dict]:
@@ -578,6 +595,57 @@ async def _match(request: Request, user, chat_id: str, ask: dict, call_model) ->
     return {"choices": choices, "duties": duties, "error": error}
 
 
+async def _plan(request: Request, user, ask: dict, call_model, history: list[dict]) -> dict:
+    """主持人安排: the moderator reads the question and sets the table (format, rounds, seats with
+    role and duty) from the text models the user may use. A failed or unusable answer gives the
+    default table (three models of different families, roundtable, two rounds) and says so."""
+    from open_webui.utils import assistant_library as lib
+
+    models_map, ambiguous = await _models(request, user)
+    _, bases = lib.library(models_map, user)
+    pool = []
+    for base in bases:
+        try:
+            seat = room.resolve_seat_model(base["id"], models_map, ambiguous, user)
+        except DiscussError:
+            continue
+        pool.append({"id": seat["model"], "name": seat["name"], "vision": seat["vision"]})
+        if len(pool) >= room.PLAN_POOL_MAX:
+            break
+    moderator = ask["moderator"]["model"]
+    error = None
+    try:
+        messages = room.build_plan_messages(ask=ask, pool=pool, history=history)
+
+        async def answer() -> str:
+            text = ""
+            async for kind, part in room.iterate_completion(await call_model(moderator, messages)):
+                if kind == "content":
+                    text += part
+            return text
+
+        draft = room.plan_from(lib.parse_json_object(await asyncio.wait_for(answer(), room.PLAN_TIMEOUT_SECONDS)), pool)
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
+        reason = "超时" if isinstance(exc, asyncio.TimeoutError) else room._short_error(exc)[:120]
+        log.info("discussion %s: planning failed: %s", ask.get("id"), reason)
+        error = f"主持人没能安排（{reason}），用默认阵容"
+        draft = {
+            "mode": "roundtable",
+            "rounds": 2,
+            "seats": [{"model": entry["id"]} for entry in _diverse(pool, 3)],
+            "reason": "不同家族的模型圆桌讨论两轮",
+        }
+    setup = room.normalize_setup(
+        {"mode": draft["mode"], "rounds": draft["rounds"], "seats": draft["seats"], "moderator": moderator, "smart": True},
+        models_map,
+        ambiguous,
+        user,
+    )
+    return {"setup": setup, "reason": draft["reason"], "error": error}
+
+
 def _last_choices(chat_id: str, user, current_ask_id: str) -> dict:
     chat = Chats.get_chat_by_id_and_user_id(chat_id, user.id)
     if chat is None:
@@ -629,6 +697,9 @@ def _start(
     async def lookup(queries: list[str]) -> dict:
         return await _lookup(request, user, queries)
 
+    async def plan(current: dict) -> dict:
+        return await _plan(request, user, current, call_model, history)
+
     async def browsers(current: dict) -> set:
         from open_webui.utils.mode_chats import native_search_models
 
@@ -653,6 +724,8 @@ def _start(
         match=match,
         lookup=lookup,
         browsers=browsers,
+        plan=plan,
+        persist_setup=lambda planned: _persist_setup(chat_id, planned),
     )
     room.start_live(live)
     return live
@@ -797,7 +870,8 @@ def _open(
     }
     payload = {
         "title": DEFAULT_TITLE,
-        "models": [seat["model"] for seat in setup["seats"]],
+        # 主持人安排: the moderator until it has set the table
+        "models": [seat["model"] for seat in setup["seats"]] or [setup["moderator"]["model"]],
         "params": {},
         "history": {"messages": messages, "currentId": assistant_message_id},
         "tags": [],
@@ -830,18 +904,42 @@ def _family(base: dict) -> str:
     return match.group(0).lower() if match else str(base.get("id") or "")
 
 
+def _diverse(bases: list[dict], count: int) -> list[dict]:
+    """``count`` models, one per family first."""
+    picked: list[dict] = []
+    families: set[str] = set()
+    for base in bases:
+        if _family(base) not in families:
+            families.add(_family(base))
+            picked.append(base)
+    picked += [b for b in bases if b not in picked]
+    return picked[:count]
+
+
 def dispatch_setup(user, models_map: dict, ambiguous: set) -> dict:
     """The table for a discussion started from a chat (派发方式「讨论」), where nobody picks
     seats: the one the user's latest discussion had (as the page restores it), while its models
-    are still there; otherwise three text models of different families with a strong moderator,
-    assistants matched to the question."""
+    are still there; when that one was set by its moderator (主持人安排), or there is none, the
+    moderator sets this one too."""
     from open_webui.utils import assistant_library as lib
 
+    _, bases = lib.library(models_map, user)
+    strong = next((b for b in bases if re.search(r"claude|gpt", b["name"], re.I)), bases[0] if bases else None)
     for row in Chats.get_chats_with_meta_key_by_user_id(user.id, META_KEY, limit=3):
         chat = Chats.get_chat_by_id_and_user_id(row["id"], user.id)
         data = ((chat.chat if chat else None) or {}).get(CHAT_KEY) if chat else None
         if not isinstance(data, dict) or not data.get("seats"):
             continue
+        if data.get("smart"):
+            try:
+                return room.normalize_setup(
+                    {"smart": True, "moderator": (data.get("moderator") or {}).get("model"), "research": data.get("research")},
+                    models_map,
+                    ambiguous,
+                    user,
+                )
+            except DiscussError:
+                break
         raw = {
             "mode": data.get("mode"),
             "rounds": data.get("rounds"),
@@ -857,26 +955,11 @@ def dispatch_setup(user, models_map: dict, ambiguous: set) -> dict:
         try:
             return room.normalize_setup(raw, models_map, ambiguous, user)
         except DiscussError:
-            break  # its models are gone: the defaults below
-    _, bases = lib.library(models_map, user)
-    picked: list[dict] = []
-    families: set[str] = set()
-    for base in bases:
-        if _family(base) not in families:
-            families.add(_family(base))
-            picked.append(base)
-    picked += [b for b in bases if b not in picked]
-    picked = picked[:3]
-    if len(picked) < room.MIN_SEATS:
+            break  # its models are gone: the moderator sets a new table
+    if len(bases) < room.MIN_SEATS:
         raise HTTPException(status_code=400, detail=f"能参加讨论的文本模型不到 {room.MIN_SEATS} 个")
-    strong = next((b for b in bases if re.search(r"claude|gpt", b["name"], re.I)), picked[0])
     try:
-        return room.normalize_setup(
-            {"mode": "roundtable", "seats": [{"model": b["id"]} for b in picked], "moderator": strong["id"], "autoMatch": True},
-            models_map,
-            ambiguous,
-            user,
-        )
+        return room.normalize_setup({"smart": True, "moderator": strong["id"]}, models_map, ambiguous, user)
     except DiscussError as exc:
         _raise(exc)
 
@@ -926,6 +1009,7 @@ async def create_discussion(request: Request, form: CreateForm, user=Depends(get
                 "moderator": form.moderator,
                 "research": form.research,
                 "autoMatch": form.auto_match,
+                "smart": form.smart,
             },
             models_map,
             ambiguous,
@@ -1062,6 +1146,8 @@ async def conclude_now(request: Request, chat_id: str, user=Depends(get_verified
 async def continue_discussion(request: Request, chat_id: str, user=Depends(get_verified_user)):
     """One more round on the last question, then a fresh conclusion."""
     chat, ask = _last_settled_ask(chat_id, user)
+    if not ask.get("seats"):
+        raise HTTPException(status_code=400, detail="主持人还没安排好席位；点「从停下的地方继续」")
     if ask.get("mode") == "review":
         raise HTTPException(status_code=400, detail="独立评审固定两轮；可以追问")
     done_rounds = max([turn.get("round") or 0 for turn in ask.get("turns") or []] or [0])

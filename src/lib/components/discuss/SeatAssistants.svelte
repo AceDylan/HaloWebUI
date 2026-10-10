@@ -4,10 +4,11 @@
 
 	import { choiceLabel } from '$lib/apis/assistant-library';
 	import type { DiscussAsk } from '$lib/apis/discussions';
-	import { seatHue } from './model';
+	import { modeSpec, seatHue } from './model';
 
-	/** Which assistant each seat of one question speaks with: matched (with why), picked, or none;
-	 * its settings on request, and the undo of an upgrade this question made. */
+	/** How one question's table was set (主持人安排: the moderator's format, rounds and seats, and
+	 * why), which assistant each seat speaks with: matched (with why), picked, or none; its
+	 * settings on request, and the undo of an upgrade this question made. */
 	export let ask: DiscussAsk;
 	/** Undo is offered on the last question only (the backend undoes that one). */
 	export let undoable = false;
@@ -16,14 +17,36 @@
 	const dispatch = createEventDispatcher<{ undo: string }>();
 	let open: string | null = null;
 
+	$: planning = ask.planning ?? null;
+	$: planned = !!planning && (planning.status === 'done' || planning.status === 'error') && ask.seats.length > 0;
 	$: matching = ask.matching ?? null;
 	$: rows = ask.seats
 		.map((seat, si) => ({ seat, si, choice: seat.assistant_choice ?? null }))
 		.filter((r) => r.choice || r.seat.duty);
 </script>
 
-{#if matching || rows.length}
+{#if planning || matching || rows.length}
 	<div class="flex flex-col gap-1.5" data-discuss-assistants>
+		{#if planning?.status === 'waiting' || planning?.status === 'running'}
+			<div class="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400" data-discuss-planning>
+				<span class="size-3 animate-spin rounded-full border-2 border-current border-r-transparent" aria-hidden="true" />
+				主持人 {ask.moderator.name} 正在读题，安排讨论方式、轮数和参与模型…
+			</div>
+		{:else if planning?.status === 'stopped'}
+			<div class="text-xs text-gray-500 dark:text-gray-400" data-discuss-planning>主持人还没安排好就停下了</div>
+		{/if}
+		{#if planning?.status === 'error' && planning.error}
+			<div class="text-xs text-amber-600 dark:text-amber-400" data-discuss-planning-error>{planning.error}</div>
+		{/if}
+		{#if planned}
+			<div class="rounded-xl bg-gray-500/5 px-3 py-2 text-xs" data-discuss-plan>
+				<span class="font-medium text-gray-800 dark:text-gray-100">主持人的安排</span>
+				<span class="text-gray-500 dark:text-gray-400">· {modeSpec(ask.mode).label} · {ask.seats.length} 位 · {ask.rounds} 轮</span>
+				{#if planning?.reason}
+					<div class="mt-0.5 text-gray-600 dark:text-gray-300">{planning.reason}</div>
+				{/if}
+			</div>
+		{/if}
 		{#if matching?.status === 'waiting' || matching?.status === 'running'}
 			<div class="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400" data-discuss-matching>
 				<span class="size-3 animate-spin rounded-full border-2 border-current border-r-transparent" aria-hidden="true" />

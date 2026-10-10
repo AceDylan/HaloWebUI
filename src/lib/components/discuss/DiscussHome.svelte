@@ -58,6 +58,9 @@
 	let rounds = 2;
 	let moderator = '';
 	let research = false;
+	// 主持人安排 (the default): the moderator reads the question and chooses the format, the rounds,
+	// the seats and their roles; off, the user sets the table
+	let smart = true;
 	// 自动匹配助手: each question gets each seat a fitting assistant (on by default)
 	let autoMatch = true;
 	let library: LibraryEntry[] = [];
@@ -155,7 +158,7 @@
 	$: spec = modeSpec(mode);
 	$: if (spec.fixedRounds) rounds = spec.rounds;
 	$: seatsValid = seats.length >= MIN_SEATS && seats.length <= MAX_SEATS && seats.every((s) => modelById(choices, s.model));
-	$: canStart = !creating && !uploading && !!question.trim() && seatsValid && !!moderator;
+	$: canStart = !creating && !uploading && !!question.trim() && (smart || seatsValid) && !!moderator;
 	$: moderatorChoices = choices;
 	$: webSearchEnabled = $config?.features?.enable_web_search !== false;
 
@@ -217,9 +220,12 @@
 		if (saved?.mode && MODES.some((m) => m.value === saved.mode)) mode = saved.mode;
 		research = saved?.research === true;
 		autoMatch = saved?.autoMatch !== false;
+		// models ticked in a chat or named in the link: the user has chosen the table
+		smart = saved?.smart !== false && !handed.length && fromUrl.length < MIN_SEATS;
 		// 「用于讨论」 from the assistant library: the first seat speaks with that assistant
 		const picked = (params.get('assistant') || '').trim();
 		if (/^(model|builtin):/.test(picked) && seats.length) {
+			smart = false;
 			seats = seats.map((s, i) => (i === 0 ? { ...s, assist: 'pick', assistant: picked, assistantName: undefined } : s));
 			resolveNames();
 		}
@@ -295,13 +301,16 @@
 		const form = {
 			question: question.trim(),
 			mode,
-			seats: seats.map((s) => ({
-				model: s.model,
-				role: s.role.trim(),
-				...(s.assist === 'pick' && s.assistant ? { assist: 'pick' as const, assistant: s.assistant } : s.assist === 'generic' ? { assist: 'generic' as const } : {}),
-				...(s.duty?.trim() ? { duty: s.duty.trim() } : {})
-			})),
-			auto_match: autoMatch,
+			smart,
+			seats: smart
+				? []
+				: seats.map((s) => ({
+						model: s.model,
+						role: s.role.trim(),
+						...(s.assist === 'pick' && s.assistant ? { assist: 'pick' as const, assistant: s.assistant } : s.assist === 'generic' ? { assist: 'generic' as const } : {}),
+						...(s.duty?.trim() ? { duty: s.duty.trim() } : {})
+					})),
+			auto_match: smart || autoMatch,
 			rounds,
 			moderator,
 			research,
@@ -332,7 +341,7 @@
 			attachments.forEach((a) => a.preview && URL.revokeObjectURL(a.preview));
 			attachments = [];
 			try {
-				localStorage.setItem(LAST_KEY, JSON.stringify({ mode, seats, rounds, moderator, research, autoMatch }));
+				localStorage.setItem(LAST_KEY, JSON.stringify({ mode, seats, rounds, moderator, research, autoMatch, smart }));
 			} catch {
 				// storage unavailable: defaults next time
 			}
@@ -497,9 +506,14 @@
 				<h2 class="halo-mode-title tm-display text-[28px] font-semibold leading-[1.15] text-gray-950 sm:text-[36px] dark:text-white">
 					让几个模型把问题讨论透
 				</h2>
-				<ModeFlow label="讨论怎么进行" steps={['选 2–5 个席位', '同一轮各自发言', '互相补充、交锋', '主持人给结论']} />
+				<ModeFlow
+					label="讨论怎么进行"
+					steps={smart
+						? ['主持人读题', '安排方式、轮数与席位', '各自发言、互相交锋', '主持人给结论']
+						: ['选 2–5 个席位', '同一轮各自发言', '互相补充、交锋', '主持人给结论']}
+				/>
 				<p class="hidden max-w-xl text-sm leading-relaxed text-gray-500 sm:block dark:text-gray-400">
-					选两到五个模型，按圆桌、各自回答、辩论、评审或头脑风暴的方式讨论：同一轮里大家同时发言，最后由主持人给出结论，并把共识和分歧分开列出来。在对话的模型菜单里勾选多个模型，也会来到这里。
+					写下问题，主持人会先读题，像协作台的负责人一样安排：用圆桌、各自回答、辩论、评审还是头脑风暴，讨论几轮，请哪几个模型（2–5 位），各自担任什么角色、配什么助手。同一轮里大家同时发言，最后由主持人给出结论，并把共识和分歧分开列出来。也可以切到「自己安排」手动选。
 				</p>
 			</header>
 
@@ -590,6 +604,22 @@
 				{/if}
 
 				<div class="flex flex-col gap-3 border-t border-gray-100 px-4 pt-3 pb-3 dark:border-gray-800/70">
+					<div class="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+						<div class="tm-segment w-fit" role="radiogroup" aria-label="谁来安排讨论" data-discuss-planner>
+							<button type="button" role="radio" aria-checked={smart} on:click={() => (smart = true)} data-discuss-smart="on"
+								>主持人安排</button
+							>
+							<button type="button" role="radio" aria-checked={!smart} on:click={() => (smart = false)} data-discuss-smart="off"
+								>自己安排</button
+							>
+						</div>
+						{#if smart}
+							<span class="text-[11.5px] leading-snug text-gray-500 dark:text-gray-400" data-discuss-smart-hint
+								>主持人读完问题再定讨论方式、轮数、参与模型和各自的角色与助手</span
+							>
+						{/if}
+					</div>
+					{#if !smart}
 					<div class="tm-scroll tm-fade-x -mx-1 flex items-center gap-1.5 overflow-x-auto px-1" role="radiogroup" aria-label="讨论方式">
 						{#each MODES as m}
 							<button
@@ -607,6 +637,7 @@
 					</div>
 
 					<SeatPicker bind:seats {choices} mode={spec} {autoMatch} {library} />
+					{/if}
 					<input bind:this={fileInput} type="file" multiple class="hidden" on:change={(e) => { attach(e.currentTarget.files); e.currentTarget.value = ''; }} data-discuss-file-input />
 
 					<div class="flex flex-wrap items-center gap-2">
@@ -621,6 +652,7 @@
 								><path d="M10.5 4.5 5.4 9.6a1.6 1.6 0 0 0 2.3 2.3l5.2-5.2a3 3 0 0 0-4.3-4.3L3.4 7.6a4.4 4.4 0 0 0 6.2 6.2l4-4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" /></svg
 							>附件</button
 						>
+						{#if !smart}
 						<div class="dc-chip !pr-1 !pl-2.5" data-discuss-rounds>
 							<span>轮数</span>
 							<button
@@ -639,7 +671,12 @@
 								aria-label="多一轮">+</button
 							>
 						</div>
-						<label class="dc-chip !py-1 !pr-1.5" title="主持人：所有人发言后写结论，列出共识与分歧" data-discuss-moderator>
+						{/if}
+						<label
+							class="dc-chip !py-1 !pr-1.5"
+							title={smart ? '主持人：先读问题安排讨论方式、轮数和席位，所有人发言后写结论' : '主持人：所有人发言后写结论，列出共识与分歧'}
+							data-discuss-moderator
+						>
 							<span>主持人</span>
 							<select bind:value={moderator} class="dc-select max-w-[9rem] truncate">
 								{#each moderatorChoices as m (m.id)}
@@ -647,6 +684,7 @@
 								{/each}
 							</select>
 						</label>
+						{#if !smart}
 						<button
 							type="button"
 							class="dc-chip"
@@ -665,6 +703,7 @@
 							>
 							自动匹配助手
 						</button>
+						{/if}
 						{#if webSearchEnabled}
 							<button
 								type="button"
@@ -701,7 +740,12 @@
 				</div>
 			</form>
 			<p class="mt-2 px-1 text-[11px] leading-relaxed text-gray-400 dark:text-gray-500">
-				每轮每位参与者调用一次模型，最后主持人再调用一次（{seats.length} 位 × {rounds} 轮 + 1 = 约 {seats.length * rounds + 1} 次）。Hermes 不参加讨论——它是要跑工具的代理；讨论结束后可以把结论「交给 Hermes」去核查或执行。
+				{#if smart}
+					主持人先安排一次、为席位配助手一次，之后每轮每位参与者调用一次模型，最后主持人再总结一次（席位与轮数由主持人按问题定：简单问题 2–3 位 1–2 轮，复杂问题最多 5 位 4 轮）。
+				{:else}
+					每轮每位参与者调用一次模型，最后主持人再调用一次（{seats.length} 位 × {rounds} 轮 + 1 = 约 {seats.length * rounds + 1} 次）。
+				{/if}
+				Hermes 不参加讨论——它是要跑工具的代理；讨论结束后可以把结论「交给 Hermes」去核查或执行。
 			</p>
 
 			<section class="tm-rise mt-6" style="--i:2" aria-label="快速开始">

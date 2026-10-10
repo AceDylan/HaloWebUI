@@ -275,7 +275,9 @@
 	};
 
 	const newWithSeats = () => {
-		const refs = (discussion?.setup?.seats ?? []).map((s) => s.model).join(',');
+		// a table its moderator set is the last question's until the page reloads
+		const seats = discussion?.setup?.seats?.length ? discussion.setup.seats : (asks[asks.length - 1]?.seats ?? []);
+		const refs = seats.map((s) => s.model).join(',');
 		goto(`/discuss?models=${encodeURIComponent(refs)}`);
 	};
 
@@ -401,7 +403,7 @@
 							<div class="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-gray-400 dark:text-gray-500">
 								<span class="tm-eyebrow">{ai === 0 ? '问题' : `追问 ${ai}`}</span>
 								<span aria-hidden="true">·</span>
-								<span>{spec.label}</span>
+								<span>{ask.planning && !ask.seats.length ? '主持人安排中' : spec.label}</span>
 								<span aria-hidden="true">·</span>
 								<span>主持人 {ask.moderator.name}</span>
 								<span aria-hidden="true">·</span>
@@ -526,7 +528,7 @@
 
 						{/if}
 
-						{#if ask.status === 'running'}
+						{#if ask.status === 'running' && ask.seats.length}
 							{#each Array.from({ length: Math.max(0, ask.rounds - maxRound) }, (_, k) => maxRound + k + 1) as round}
 								<div class="dc-round-head opacity-50">
 									<span class="tm-eyebrow">第 {round} 轮</span>

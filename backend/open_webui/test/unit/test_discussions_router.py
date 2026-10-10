@@ -782,7 +782,7 @@ def test_after_done_sends_a_dispatched_conclusion_back(env, monkeypatch):
     assert sent == [("discuss", detail["id"], ask["id"])]
 
 
-def test_a_dispatched_discussion_without_a_last_table_seats_different_families():
+def test_a_dispatched_discussion_without_a_last_table_is_set_by_its_moderator():
     from open_webui.utils import assistant_library as lib
 
     models = {m: {"id": m, "name": m} for m in ("gpt-chat", "gpt-mini", "claude-chat", "deepseek-chat", "hermes-agent")}
@@ -792,10 +792,10 @@ def test_a_dispatched_discussion_without_a_last_table_seats_different_families()
         setup = api.dispatch_setup(USER, models, set())
     finally:
         chats_mod.Chats.get_chats_with_meta_key_by_user_id = original
-    assert [s["model"] for s in setup["seats"]] == ["gpt-chat", "claude-chat", "deepseek-chat"]
-    assert setup["moderator"]["model"] == "gpt-chat" and setup["autoMatch"] is True
-    assert {s["assist"] for s in setup["seats"]} == {"auto"}
-    assert lib.library(models, USER)[1]  # sanity: these are text models the library offers
+    assert setup["smart"] is True and setup["seats"] == [] and setup["autoMatch"] is True
+    assert setup["moderator"]["model"] == "gpt-chat"
+    # the default table (when the moderator's plan is unusable): one model per family first
+    assert [b["id"] for b in api._diverse(lib.library(models, USER)[1], 3)] == ["gpt-chat", "claude-chat", "deepseek-chat"]
 
 
 def test_the_list_comes_a_page_at_a_time_with_search_and_the_live_filter(env):

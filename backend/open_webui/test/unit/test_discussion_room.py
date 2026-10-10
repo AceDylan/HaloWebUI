@@ -48,6 +48,48 @@ def test_setup_needs_two_seats_and_at_most_five():
         _setup(seats=("a", "b", "c", "a", "b", "c"))
 
 
+def test_a_smart_setup_waits_for_its_moderator_to_seat_the_table():
+    setup = room.normalize_setup({"smart": True, "moderator": "c"}, _models("a", "b", "c"), set(), _user(), _no_exclusion)
+    assert setup["seats"] == [] and setup["smart"] is True and setup["autoMatch"] is True
+    ask = room.new_ask(question="选数据库", setup=setup, user_message_id="u", message_id="m")
+    assert ask["planning"] == {"status": "waiting"} and ask["matching"] is None
+    with pytest.raises(room.DiscussError):
+        room.normalize_setup({"smart": True}, _models("a", "b"), set(), _user(), _no_exclusion)  # no moderator
+    # a manual table never plans
+    assert room.new_ask(question="q", setup=_setup(), user_message_id="u", message_id="m")["planning"] is None
+
+
+def test_the_moderators_plan_keeps_known_models_and_sane_numbers():
+    pool = [{"id": "conn.gpt-chat", "name": "GPT Chat", "vision": True}, {"id": "conn.deepseek", "name": "DeepSeek", "vision": False}]
+    plan = room.plan_from(
+        {
+            "mode": "debate",
+            "rounds": 9,
+            "seats": [
+                {"model": "conn.gpt-chat", "role": "正方", "duty": "论证收益"},
+                {"model": "deepseek", "role": "反方"},
+                {"model": "GPT Chat", "role": "正方"},  # the same model and role again
+                {"model": "llama-404", "role": "评审"},  # not offered
+            ],
+            "reason": "二选一",
+        },
+        pool,
+    )
+    assert plan["mode"] == "debate" and plan["rounds"] == room.MAX_ROUNDS and plan["reason"] == "二选一"
+    assert [(s["model"], s["role"]) for s in plan["seats"]] == [("conn.gpt-chat", "正方"), ("conn.deepseek", "反方")]
+    assert room.plan_from({"mode": "nonsense", "seats": plan["seats"]}, pool)["mode"] == "roundtable"
+    with pytest.raises(ValueError):
+        room.plan_from({"seats": [{"model": "conn.gpt-chat"}]}, pool)
+
+
+def test_the_planning_prompt_lists_the_formats_and_the_models():
+    setup = room.normalize_setup({"smart": True, "moderator": "c"}, _models("a", "b", "c"), set(), _user(), _no_exclusion)
+    ask = room.new_ask(question="选数据库", setup=setup, user_message_id="u", message_id="m", files=[{"id": "f", "name": "x.png", "type": "image"}])
+    system, user = (m["content"] for m in room.build_plan_messages(ask=ask, pool=[{"id": "a", "name": "A", "vision": True}], history=[]))
+    assert all(key in system for key in room.MODES) and "vision" in system
+    assert "选数据库" in user and '"id": "a"' in user and "1 image(s)" in user
+
+
 def test_setup_rejects_excluded_models_with_their_reason():
     def excluded(model):
         return "Hermes 不参加讨论" if model["id"] == "hermes" else None

@@ -251,12 +251,15 @@ class _Stream:
 
 @pytest.fixture
 def env(db, monkeypatch):
-    calls, state = [], {"plan": {}, "plan_fail": False}
+    calls, state = [], {"plan": {}, "plan_fail": False, "staff": {}}
 
     async def fake_completion(request, payload, user, bypass_filter=False):
         model, messages = payload["model"], payload["messages"]
         calls.append((model, messages))
         system = messages[0]["content"]
+        if system.startswith("You are the moderator of a multi-model discussion"):
+            staff = state["staff"]
+            return _Stream(staff if isinstance(staff, str) else json.dumps(staff, ensure_ascii=False))
         if "You staff work in HaloWebUI" in system:
             if state["plan_fail"]:
                 return _Stream("不给 JSON")
@@ -365,6 +368,72 @@ def test_auto_seats_are_matched_once_and_speak_with_the_full_settings(env):
     asyncio.run(follow_up())
     assert len(_plan_calls(env)) == 2 and len(_assistants()) == 2
     assert '"last_time"' in _plan_calls(env)[-1][1][1]["content"]
+
+
+def _staff_calls(env):
+    return [c for c in env.calls if c[1][0]["content"].startswith("You are the moderator of a multi-model discussion")]
+
+
+def _smart(env, **kw):
+    return api.create_discussion(env.request, api.CreateForm(question="是否将现有系统迁移到微服务", smart=True, moderator="c", **kw), USER)
+
+
+def test_the_moderator_sets_the_table_and_the_seats_then_get_their_assistants(env):
+    env.state["staff"] = {
+        "mode": "debate",
+        "rounds": 3,
+        "seats": [
+            {"model": "a", "role": "正方", "duty": "论证迁移的收益"},
+            {"model": "B", "role": "反方", "duty": "论证迁移的代价"},
+            {"model": "not-a-model", "role": "评审"},
+        ],
+        "reason": "这是二选一的决策，正反交锋三轮最能暴露代价",
+    }
+    env.state["plan"] = {"units": [{"key": "s1", "action": "create", "assistant": _spec("软件架构师")}, {"key": "s2", "action": "generic"}]}
+
+    async def scenario():
+        detail = await _smart(env)
+        assert detail["asks"][0]["planning"]["status"] in ("waiting", "running") and detail["asks"][0]["seats"] == []
+        await _settle(detail["id"])
+        return detail["id"]
+
+    chat_id = asyncio.run(scenario())
+    detail = asyncio.run(api.get_discussion(chat_id, USER))
+    ask = detail["asks"][-1]
+    assert ask["status"] == "done" and ask["mode"] == "debate" and ask["rounds"] == 3
+    assert ask["planning"]["status"] == "done" and ask["planning"]["reason"].startswith("这是二选一")
+    assert [(s["model"], s["role"], s["duty"]) for s in ask["seats"]] == [("a", "正方", "论证迁移的收益"), ("b", "反方", "论证迁移的代价")]
+    assert ask["matching"]["status"] == "done" and ask["seats"][0]["assistant_choice"]["name"] == "软件架构师"
+    assert len([t for t in ask["turns"] if t["status"] == "done"]) == 6
+    # the moderator was asked first, with the models it may pick (never Hermes or the like)
+    staff = _staff_calls(env)
+    assert len(staff) == 1 and staff[0][0] == "c" and env.calls.index(staff[0]) == 0
+    assert '"id": "a"' in staff[0][1][1]["content"]
+    # the table is the chat's from now on: a follow-up sits at it without a new plan
+    assert detail["setup"]["smart"] is True and detail["setup"]["mode"] == "debate"
+    assert [s["model"] for s in detail["setup"]["seats"]] == ["a", "b"]
+    assert chats_mod.Chats.get_chat_by_id(chat_id).chat["models"] == ["a", "b"]
+
+    async def follow_up():
+        await api.ask_again(env.request, chat_id, api.AskForm(question="迁移节奏怎么定"), USER)
+        await _settle(chat_id)
+
+    asyncio.run(follow_up())
+    last = asyncio.run(api.get_discussion(chat_id, USER))["asks"][-1]
+    assert last["status"] == "done" and not last.get("planning") and len(_staff_calls(env)) == 1
+
+
+def test_a_plan_that_cannot_be_used_falls_back_to_the_default_table(env):
+    env.state["staff"] = "我觉得可以这样安排：两个人讨论"
+
+    async def scenario():
+        detail = await _smart(env)
+        await _settle(detail["id"])
+        return detail["id"]
+
+    ask = asyncio.run(api.get_discussion(asyncio.run(scenario()), USER))["asks"][-1]
+    assert ask["status"] == "done" and ask["planning"]["status"] == "error" and "默认阵容" in ask["planning"]["error"]
+    assert ask["mode"] == "roundtable" and ask["rounds"] == 2 and len(ask["seats"]) == 3
 
 
 def test_compare_gives_every_seat_the_same_assistant(env):

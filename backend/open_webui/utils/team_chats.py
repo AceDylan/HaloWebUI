@@ -55,7 +55,13 @@ def card_text(team: AgentTeamModel, *, backfill: bool = False) -> str:
         return f"🤝 已交给协作台「{title}」。进度、结果页和产出文件都在下面的卡片里。"
     inputs = len((team.meta or {}).get("inputs") or [])
     files = f"，附带的 {inputs} 个文件会放进团队的工作目录" if inputs else ""
-    start = "计划好就直接开始" if (team.meta or {}).get("auto_start") else "计划好后等你批准再开始"
+    meta = team.meta or {}
+    if meta.get("repeat_of"):  # 再来一次 / 定时: the plan is the earlier run's, nothing to plan
+        how = "定时" if meta.get("schedule_id") else "再来一次"
+        start = "直接开始" if meta.get("auto_start") else "等你批准后开始"
+        return (f"🤝 协作台「{title}」{how}：用上次的目标和成员，{start}{files}。"
+                "进度在下面的卡片里实时更新，做完后完整结果会发回这个对话。")
+    start = "计划好就直接开始" if meta.get("auto_start") else "计划好后等你批准再开始"
     return (f"🤝 已交给协作台「{title}」：负责人在制定计划，{start}{files}。"
             "进度在下面的卡片里实时更新，做完后完整结果会发回这个对话。")
 

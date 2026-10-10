@@ -188,3 +188,14 @@ def test_a_schedule_whose_team_is_gone_turns_itself_off(hermes):
     assert asyncio.run(team_repeat.run_due_schedules(app=None, now=2000)) == 0
     left = AgentTeamSchedules.get_for_team(source.id, "u1")
     assert left.enabled is False and "已删除" in left.last_error
+
+
+def test_a_repeat_chat_says_it_reuses_the_plan():
+    team = AgentTeams.insert("u1", "目标", None, "每周新闻汇总", meta={"repeat_of": "x", "schedule_id": "s", "auto_start": True})
+    assert team_chats.card_text(team) == (
+        "🤝 协作台「每周新闻汇总」定时：用上次的目标和成员，直接开始。"
+        "进度在下面的卡片里实时更新，做完后完整结果会发回这个对话。")
+    again = AgentTeams.insert("u1", "目标", None, "新闻", meta={"repeat_of": "x"})
+    assert "再来一次" in team_chats.card_text(again) and "等你批准后开始" in team_chats.card_text(again)
+    fresh = AgentTeams.insert("u1", "目标", None, "新闻")
+    assert "负责人在制定计划" in team_chats.card_text(fresh)

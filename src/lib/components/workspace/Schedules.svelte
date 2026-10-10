@@ -165,13 +165,26 @@
 	$: ended = (jobs ?? []).filter(isEnded);
 	const isFailed = (job: HermesJob) => job.last_status === 'error' || !!job.last_delivery_error;
 	// The one job the page leads with: whichever runs next.
-	$: upcoming = active
-		.filter((job) => job.next_run_at && !isPaused(job))
-		.sort((a, b) => Date.parse(a.next_run_at!) - Date.parse(b.next_run_at!))[0];
+	// 协作台定时 count too: in the shape the hero reads (times as ISO, no hermes schedule).
+	const iso = (seconds: number | null) => (seconds ? new Date(seconds * 1000).toISOString() : null);
+	$: teamUpcoming = teamSchedules
+		.filter((item) => item.enabled && item.next_run_at)
+		.map((item) => ({
+			name: `协作台 · ${item.team.title}`,
+			next_run_at: iso(item.next_run_at),
+			last_run_at: iso(item.last_run_at),
+			schedule: null
+		}));
+	$: upcoming = [...active.filter((job) => job.next_run_at && !isPaused(job)), ...teamUpcoming].sort(
+		(a, b) => Date.parse(a.next_run_at!) - Date.parse(b.next_run_at!)
+	)[0];
 	$: countdown = upcoming ? countdownParts(upcoming.next_run_at, now) : [];
 	$: stats = [
-		{ label: '进行中', value: active.filter((job) => !isPaused(job)).length },
-		{ label: '已暂停', value: active.filter(isPaused).length },
+		{ label: '进行中', value: active.filter((job) => !isPaused(job)).length + teamUpcoming.length },
+		{
+			label: '已暂停',
+			value: active.filter(isPaused).length + teamSchedules.filter((item) => !item.enabled).length
+		},
 		{ label: '上次失败', value: active.filter(isFailed).length, alert: true }
 	];
 

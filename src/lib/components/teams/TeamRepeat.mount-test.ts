@@ -155,6 +155,8 @@ describe('定时任务 page: 协作台定时', () => {
 		expect(card.textContent).toContain('每周一 09:00');
 		expect(card.textContent).toContain('已完成');
 		expect(card.querySelector('[data-team-schedule-edit]').getAttribute('href')).toBe('/teams/t1?schedule=1');
+		// no hermes job is queued: the team's schedule leads the page
+		expect(q('[data-schedule-next-up]').textContent).toContain('协作台 · 每周新闻汇总');
 		card.querySelector('[data-team-schedule-run]').click();
 		await until(() => teams.repeatTeam.mock.calls.length === 1);
 		expect(teams.repeatTeam).toHaveBeenCalledWith('tok', 't1', true);

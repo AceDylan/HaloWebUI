@@ -442,7 +442,7 @@
 							{/if}
 							{#if ['daily', 'weekdays', 'weekly', 'monthly'].includes(draft.form.frequency)}
 								<input
-									class="halo-input w-auto tabular-nums"
+									class="halo-input !w-36 tabular-nums"
 									type="time"
 									bind:value={draft.form.time}
 									aria-label="几点"
@@ -628,7 +628,7 @@
 							</dd>
 						</div>
 						{#if failed && (job.last_error || job.last_delivery_error)}
-							<div>
+							<div class="is-wide">
 								<dt>原因</dt>
 								<dd
 									class="line-clamp-2 text-red-600 dark:text-red-400"
@@ -639,7 +639,7 @@
 							</div>
 						{/if}
 						{#if isPaused(job) && job.paused_reason}
-							<div>
+							<div class="is-wide">
 								<dt>暂停</dt>
 								<dd>{job.paused_reason}</dd>
 							</div>
@@ -1002,8 +1002,8 @@
 	}
 	.sch-meta {
 		display: grid;
-		grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
-		gap: 0.375rem 1rem;
+		grid-template-columns: repeat(auto-fit, minmax(8.5rem, 1fr));
+		gap: 0.5rem 1rem;
 		padding: 0.625rem 0.75rem;
 		border-radius: 0.75rem;
 		background: oklch(0.3 0.02 268 / 0.035);
@@ -1013,12 +1013,14 @@
 		background: oklch(1 0 0 / 0.03);
 	}
 	.sch-meta > div {
-		display: flex;
 		min-width: 0;
-		gap: 0.5rem;
+	}
+	.sch-meta > .is-wide {
+		grid-column: 1 / -1;
 	}
 	.sch-meta dt {
-		flex-shrink: 0;
+		margin-bottom: 0.125rem;
+		font-size: 0.6875rem;
 		color: var(--sch-muted);
 	}
 	.sch-meta dd {
@@ -1082,6 +1084,7 @@
 		border-color: color-mix(in oklab, var(--sch-accent) 30%, var(--surface-border));
 	}
 	.sch-label {
+		display: block;
 		font-size: 0.75rem;
 		font-weight: 500;
 		color: var(--sch-muted);
@@ -1196,6 +1199,13 @@
 		}
 		.sch-dial-main {
 			font-size: 0.8125rem;
+		}
+		/* keep the row on one line: words only, the bin stays an icon */
+		.sch-action {
+			padding: 0 0.5rem;
+		}
+		.sch-action:not(.is-danger) :global(svg) {
+			display: none;
 		}
 	}
 	@media (prefers-reduced-motion: reduce) {

@@ -378,7 +378,9 @@ async def list_files(user=Depends(get_verified_user), content: bool = Query(True
 
     if not content:
         for file in files:
-            del file.data["content"]
+            # Not every file has extracted text (images, raw attachments, data=None).
+            if file.data:
+                file.data.pop("content", None)
 
     return files
 

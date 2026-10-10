@@ -753,6 +753,9 @@ def public_team(team: AgentTeamModel, *, with_plan: bool = True) -> dict:
     data["preferred_assistants"] = preferred_refs(meta.get("assistants"))
     data["lead_model"] = meta.get("lead_model")
     data["auto_start"] = bool(meta.get("auto_start"))
+    # 再来一次 / 定时: the team this one repeats, and whether a schedule started it
+    data["repeat_of"] = meta.get("repeat_of")
+    data["scheduled"] = bool(meta.get("schedule_id"))
     plan = data.get("plan") or {}
     data["member_count"] = len(plan.get("members") or [])
     data["task_count"] = len(plan.get("tasks") or [])

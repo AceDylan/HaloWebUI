@@ -13,6 +13,15 @@
 		type HermesJob,
 		type HermesJobOutput
 	} from '$lib/apis/hermes';
+	import {
+		deleteTeamSchedule,
+		listTeamSchedules,
+		repeatTeam,
+		setTeamSchedule,
+		type TeamScheduleListItem
+	} from '$lib/apis/teams';
+	import { config } from '$lib/stores';
+	import { scheduleWhen } from '$lib/components/teams/repeat';
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import HaloSelect from '$lib/components/common/HaloSelect.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
@@ -58,6 +67,7 @@
 	let saving = false;
 
 	const load = async () => {
+		void loadTeamSchedules();
 		try {
 			jobs = await listHermesJobs(localStorage.token);
 			loadError = '';
@@ -66,6 +76,66 @@
 			jobs = jobs ?? [];
 		}
 	};
+
+	// 协作台定时: teams that run again on their own (set on a team's page, 「再来一次」→ 定时).
+	let teamSchedules: TeamScheduleListItem[] = [];
+	let teamBusy: Record<string, string> = {};
+	let removingTeam: TeamScheduleListItem | null = null;
+	let showRemoveTeam = false;
+	const loadTeamSchedules = async () => {
+		if (!$config?.features?.enable_agent_teams) return;
+		try {
+			teamSchedules = (await listTeamSchedules(localStorage.token)).schedules;
+		} catch {
+			// the Hermes jobs above still show; this list comes back with the next refresh
+		}
+	};
+	const teamAct = async (item: TeamScheduleListItem, key: string, fn: () => Promise<unknown>, ok: string) => {
+		teamBusy = { ...teamBusy, [item.team_id]: key };
+		try {
+			await fn();
+			toast.success(ok);
+			await loadTeamSchedules();
+		} catch (e) {
+			toast.error(`${(e as Error)?.message ?? e}`);
+		} finally {
+			teamBusy = { ...teamBusy, [item.team_id]: '' };
+		}
+	};
+	const runTeamNow = (item: TeamScheduleListItem) =>
+		teamAct(item, 'run', () => repeatTeam(localStorage.token, item.team_id, true), `已开始「${item.team.title}」`);
+	const toggleTeam = (item: TeamScheduleListItem) =>
+		teamAct(
+			item,
+			'toggle',
+			() =>
+				setTeamSchedule(localStorage.token, item.team_id, {
+					freq: item.freq,
+					time: item.time,
+					weekday: item.weekday,
+					day: item.day,
+					tz: item.tz,
+					enabled: !item.enabled
+				}),
+			item.enabled ? '定时已暂停' : '定时已恢复'
+		);
+	const removeTeam = () => {
+		const item = removingTeam;
+		removingTeam = null;
+		if (item) void teamAct(item, 'remove', () => deleteTeamSchedule(localStorage.token, item.team_id), '已取消定时');
+	};
+	const LAST_STATE: Record<string, string> = {
+		completed: '已完成',
+		running: '进行中',
+		attention: '需要处理',
+		paused: '已暂停',
+		stopped: '已停止',
+		plan_ready: '等你批准',
+		start_failed: '启动失败',
+		cancelled: '已取消'
+	};
+	const lastState = (last: TeamScheduleListItem['last_team']) =>
+		last ? (LAST_STATE[last.status === 'running' ? (last.phase ?? 'running') : last.status] ?? '') : '';
 
 	let timer: ReturnType<typeof setInterval> | null = null;
 	let clock: ReturnType<typeof setInterval> | null = null;
@@ -279,6 +349,14 @@
 	message={deleting ? `「${deleting.name}」不会再运行，已保存的产出也不再显示。` : ''}
 	on:confirm={remove}
 	on:cancel={() => (deleting = null)}
+/>
+
+<ConfirmDialog
+	bind:show={showRemoveTeam}
+	title="取消这个协作的定时？"
+	message={removingTeam ? `「${removingTeam.team.title}」不会再自动运行；协作本身和以前跑出的结果都还在。` : ''}
+	on:confirm={removeTeam}
+	on:cancel={() => (removingTeam = null)}
 />
 
 <div class="sch space-y-4" data-halo-schedules>
@@ -738,6 +816,103 @@
 				{showEnded ? '隐藏已结束的' : `显示已结束的 ${ended.length} 个`}
 			</button>
 		{/if}
+	{/if}
+
+	{#if teamSchedules.length}
+		<section class="space-y-3" data-team-schedules>
+			<div class="sch-eyebrow">协作台定时</div>
+			<div class="grid gap-3 lg:grid-cols-2">
+				{#each teamSchedules as item (item.team_id)}
+					{@const state = item.enabled ? 'scheduled' : 'paused'}
+					<article class="sch-panel sch-card" class:is-failed={!!item.last_error} data-team-schedule={item.team_id}>
+						<div class="flex items-start gap-2">
+							<a
+								href="/teams/{item.team_id}"
+								class="line-clamp-2 min-w-0 flex-1 font-semibold text-gray-900 hover:underline dark:text-gray-100"
+								title={item.team.goal}>{item.team.title}</a
+							>
+							<span class="sch-state" data-tone={state}>
+								<span class="sch-state-dot"></span>
+								{item.enabled ? '等待中' : '已暂停'}
+							</span>
+						</div>
+						<div class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+							{item.label} · 到时再来一次（同样的目标和成员，直接开始）
+						</div>
+						<dl class="sch-meta">
+							{#if item.enabled && item.next_run_at}
+								<div>
+									<dt>下次</dt>
+									<dd class="tabular-nums">{scheduleWhen(item.next_run_at)}</dd>
+								</div>
+							{/if}
+							<div>
+								<dt>上次</dt>
+								<dd class="tabular-nums">
+									{#if item.last_run_at}
+										{scheduleWhen(item.last_run_at)}
+										{#if item.last_team}
+											· <a class="hover:underline" href="/teams/{item.last_team.id}">{lastState(item.last_team) || '查看'}</a>
+										{/if}
+									{:else}
+										<span class="text-gray-400">还没运行过</span>
+									{/if}
+								</dd>
+							</div>
+							{#if item.last_error}
+								<div class="is-wide">
+									<dt>提示</dt>
+									<dd class="line-clamp-2 text-red-600 dark:text-red-400" title={item.last_error}>{item.last_error}</dd>
+								</div>
+							{/if}
+						</dl>
+						<div class="sch-actions">
+							<button
+								type="button"
+								class="sch-action is-primary"
+								disabled={!!teamBusy[item.team_id]}
+								on:click={() => runTeamNow(item)}
+								data-team-schedule-run
+							>
+								<Play class="size-3.5" strokeWidth={2.25} />
+								<span>{teamBusy[item.team_id] === 'run' ? '启动中…' : '立即运行'}</span>
+							</button>
+							<button
+								type="button"
+								class="sch-action"
+								disabled={!!teamBusy[item.team_id]}
+								on:click={() => toggleTeam(item)}
+								data-team-schedule-toggle
+							>
+								<svelte:component this={item.enabled ? Pause : Play} class="size-3.5" strokeWidth={2.25} />
+								<span>{item.enabled ? '暂停' : '恢复'}</span>
+							</button>
+							<a class="sch-action" href="/teams/{item.team_id}?schedule=1" data-team-schedule-edit>
+								<Pencil class="size-3.5" strokeWidth={2.25} />
+								<span>修改</span>
+							</a>
+							<button
+								type="button"
+								class="sch-action is-danger ml-auto"
+								aria-label="取消定时"
+								title="取消定时"
+								on:click={() => {
+									removingTeam = item;
+									showRemoveTeam = true;
+								}}
+								data-team-schedule-remove
+							>
+								<Trash2 class="size-3.5" strokeWidth={2.25} />
+							</button>
+						</div>
+					</article>
+				{/each}
+			</div>
+		</section>
+	{:else if $config?.features?.enable_agent_teams && jobs !== null}
+		<p class="text-xs text-gray-400" data-team-schedules-hint>
+			协作台的协作也能定时：打开一个协作，点右上角「再来一次」→ 定时。
+		</p>
 	{/if}
 </div>
 

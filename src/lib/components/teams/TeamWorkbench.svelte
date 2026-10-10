@@ -39,6 +39,7 @@
 	import TeamProgress from './TeamProgress.svelte';
 	import StageRail from './StageRail.svelte';
 	import TeamAvatar from './TeamAvatar.svelte';
+	import TeamRepeat from './TeamRepeat.svelte';
 	import { elapsed, now } from './clock';
 	import {
 		countStates,
@@ -515,6 +516,9 @@
 						/></svg
 					>结论</a
 				>
+			{/if}
+			{#if team?.plan?.members?.length && team.status !== 'planning' && !replay}
+				{#key team.id}<TeamRepeat {team} />{/key}
 			{/if}
 			{#if team?.chat_id}
 				<a

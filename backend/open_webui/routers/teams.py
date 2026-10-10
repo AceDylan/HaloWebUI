@@ -9,6 +9,7 @@ import asyncio
 import hmac
 import logging
 import time
+from types import SimpleNamespace
 from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -49,6 +50,8 @@ from open_webui.utils.agent_team_outputs import (
     snapshot_illustration,
 )
 from open_webui.utils import team_chats
+from open_webui.models.agent_team_schedules import AgentTeamSchedules
+from open_webui.utils import team_repeat
 from open_webui.utils.auth import get_verified_user
 from open_webui.utils.hermes_image_gallery import HermesImageForm, store_image
 
@@ -129,6 +132,22 @@ class RunnerCheckForm(BaseModel):
     names: list[str] = Field(default_factory=list, max_length=12)
 
 
+class RepeatForm(BaseModel):
+    # 「直接开始」: start as soon as it is made (when every member can run now); else wait for approval.
+    auto_start: bool = False
+
+
+class ScheduleForm(BaseModel):
+    freq: Literal["daily", "weekly", "monthly"]
+    time: str = Field(min_length=5, max_length=5)
+    # weekly: 0 = Monday … 6 = Sunday; monthly: 1-28
+    weekday: Optional[int] = Field(default=None, ge=0, le=6)
+    day: Optional[int] = Field(default=None, ge=1, le=28)
+    # the browser's IANA time zone; the occurrences are wall-clock times there
+    tz: str = Field(default=team_repeat.DEFAULT_TZ, max_length=64)
+    enabled: bool = True
+
+
 @router.get("/meta", dependencies=[Depends(_enabled)])
 async def meta(request: Request, user=Depends(get_verified_user)):
     """The lead's model (Hermes' default), runners with availability, task kinds, assistant templates."""
@@ -151,6 +170,24 @@ async def check_runners(request: Request, form: RunnerCheckForm, user=Depends(ge
         return await hermes_call(target, "POST", "/runners/check", json_body={"names": form.names}, timeout=40)
     except TeamsError as exc:
         _raise(exc)
+
+
+@router.get("/schedules", dependencies=[Depends(_enabled)])
+async def list_schedules(user=Depends(get_verified_user)):
+    """The user's 协作台定时 (for the 定时任务 page): each with its team and its last run."""
+    out = []
+    for schedule in AgentTeamSchedules.list_for_user(user.id):
+        team = AgentTeams.get(schedule.team_id, user.id)
+        if team is None:
+            continue
+        last = AgentTeams.get(schedule.last_team_id, user.id) if schedule.last_team_id else None
+        out.append({
+            **team_repeat.public_schedule(schedule),
+            "team": {"id": team.id, "title": team.title, "goal": team.goal[:300]},
+            "last_team": {"id": last.id, "title": last.title, "status": last.status, "phase": last.phase,
+                          "chat_id": last.chat_id} if last else None,
+        })
+    return {"schedules": out}
 
 
 LIST_REFRESH_LIMIT = 6
@@ -461,7 +498,48 @@ async def delete_team(team_id: str, user=Depends(get_verified_user)):
     if not deletable(team):
         raise HTTPException(status_code=409, detail="正在执行的协作任务要先停止才能删除")
     AgentTeams.delete(team.id, user.id)
+    AgentTeamSchedules.delete_for_team(team.id, user.id)
     return {"ok": True, "id": team.id}
+
+
+@router.post("/{team_id}/repeat", dependencies=[Depends(_enabled)])
+async def repeat(request: Request, team_id: str, form: RepeatForm, user=Depends(get_verified_user)):
+    """再来一次: a new team with this one's goal, plan and settings (no new planning)."""
+    source = _own(team_id, user)
+    try:
+        team = await team_repeat.repeat_team(request, user, source, auto_start=form.auto_start)
+    except TeamsError as exc:
+        _raise(exc)
+    return public_team(team)
+
+
+@router.get("/{team_id}/schedule", dependencies=[Depends(_enabled)])
+async def get_schedule(team_id: str, user=Depends(get_verified_user)):
+    team = _own(team_id, user)
+    return {"schedule": team_repeat.public_schedule(AgentTeamSchedules.get_for_team(team.id, user.id)),
+            "repeatable": team_repeat.repeatable(team)}
+
+
+@router.put("/{team_id}/schedule", dependencies=[Depends(_enabled)])
+async def set_schedule(team_id: str, form: ScheduleForm, user=Depends(get_verified_user)):
+    """定时: run this team again (直接开始) every day / week / month at a time."""
+    team = _own(team_id, user)
+    if not team_repeat.repeatable(team):
+        raise HTTPException(status_code=409, detail="这个协作还没有计划，不能定时")
+    try:
+        fields = team_repeat.validate_schedule(form.freq, form.time, form.weekday, form.day, form.tz)
+    except TeamsError as exc:
+        _raise(exc)
+    next_at = team_repeat.next_run_at(SimpleNamespace(**fields), time.time()) if form.enabled else None
+    schedule = AgentTeamSchedules.upsert(user.id, team.id, **fields, enabled=form.enabled, next_run_at=next_at,
+                                         last_error=None)
+    return {"schedule": team_repeat.public_schedule(schedule)}
+
+
+@router.delete("/{team_id}/schedule", dependencies=[Depends(_enabled)])
+async def delete_schedule(team_id: str, user=Depends(get_verified_user)):
+    team = _own(team_id, user)
+    return {"ok": AgentTeamSchedules.delete_for_team(team.id, user.id)}
 
 
 async def _running_target(request: Request, team_id: str, user):

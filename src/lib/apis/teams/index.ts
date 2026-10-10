@@ -276,6 +276,44 @@ export type Team = {
 	inputs?: string[];
 	/** 「用于协作」: assistants the user asked a member to use (model:<id> / builtin:<id>). */
 	preferred_assistants?: string[];
+	/** 再来一次: the team this one repeats (its goal and plan, no new planning). */
+	repeat_of?: string | null;
+	/** Started by a 定时 of the team it repeats. */
+	scheduled?: boolean;
+};
+
+/** 协作台定时: the team runs again (直接开始) every day / week / month at a time. */
+export type TeamScheduleFreq = 'daily' | 'weekly' | 'monthly';
+export type TeamSchedule = {
+	team_id: string;
+	freq: TeamScheduleFreq;
+	/** "HH:MM" in ``tz`` */
+	time: string;
+	/** weekly: 0 = Monday … 6 = Sunday */
+	weekday: number | null;
+	/** monthly: 1-28 */
+	day: number | null;
+	tz: string;
+	enabled: boolean;
+	/** seconds */
+	next_run_at: number | null;
+	last_run_at: number | null;
+	last_team_id: string | null;
+	last_error: string | null;
+	/** 每天 09:00 / 每周一 09:00 / 每月 1 号 09:00 */
+	label: string;
+};
+export type TeamScheduleInput = {
+	freq: TeamScheduleFreq;
+	time: string;
+	weekday?: number | null;
+	day?: number | null;
+	tz?: string;
+	enabled?: boolean;
+};
+export type TeamScheduleListItem = TeamSchedule & {
+	team: { id: string; title: string; goal: string };
+	last_team: { id: string; title: string; status: TeamStatus; phase: string | null; chat_id: string | null } | null;
 };
 
 export type SubStatus =
@@ -853,6 +891,34 @@ export const approveTeam = (token: string, teamId: string) =>
 
 export const cancelTeam = (token: string, teamId: string) =>
 	request<Team>(token, 'POST', `/${id(teamId)}/cancel`);
+
+/** 再来一次: a new team with this one's goal, plan and settings; ``autoStart`` = 直接开始. */
+export const repeatTeam = (token: string, teamId: string, autoStart = false) =>
+	request<Team>(token, 'POST', `/${id(teamId)}/repeat`, { auto_start: autoStart });
+
+export const getTeamSchedule = (token: string, teamId: string) =>
+	request<{ schedule: TeamSchedule | null; repeatable: boolean }>(token, 'GET', `/${id(teamId)}/schedule`);
+
+/** The browser's time zone: the schedule's times are wall-clock times there. */
+export const browserTimeZone = () => {
+	try {
+		return Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Shanghai';
+	} catch {
+		return 'Asia/Shanghai';
+	}
+};
+
+export const setTeamSchedule = (token: string, teamId: string, input: TeamScheduleInput) =>
+	request<{ schedule: TeamSchedule }>(token, 'PUT', `/${id(teamId)}/schedule`, {
+		tz: browserTimeZone(),
+		...input
+	});
+
+export const deleteTeamSchedule = (token: string, teamId: string) =>
+	request<{ ok: boolean }>(token, 'DELETE', `/${id(teamId)}/schedule`);
+
+export const listTeamSchedules = (token: string) =>
+	request<{ schedules: TeamScheduleListItem[] }>(token, 'GET', '/schedules');
 
 /** Remove a team nothing runs in from your list (its workspace files stay on Hermes). */
 export const deleteTeam = (token: string, teamId: string) =>

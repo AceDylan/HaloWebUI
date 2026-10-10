@@ -673,6 +673,11 @@ async def lifespan(app: FastAPI):
 
     asyncio.create_task(periodic_chat_auto_archive())
 
+    # 协作台定时: teams that run again every day / week / month (no-op without schedules).
+    from open_webui.utils.team_repeat import periodic_team_schedules
+
+    asyncio.create_task(periodic_team_schedules(app))
+
     # HaloClaw: start messaging gateway adapters
     from open_webui.haloclaw.lifecycle import startup_haloclaw, shutdown_haloclaw
 

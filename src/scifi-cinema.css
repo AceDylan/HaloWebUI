@@ -250,8 +250,12 @@ html.halo-scifi.dark :is(.halo-page-title, .halo-settings-title, .halo-subpage-t
 }
 
 /* page icons and section badges: HUD instruments with a turning range ring */
+html.halo-scifi .glass-section.halo-settings-head {
+	padding-top: 0.75rem;
+}
 html.halo-scifi :is(.halo-page-icon, .halo-settings-head .glass-icon-badge:not([class*='bg-red-'])) {
 	position: relative;
+	margin-left: 6px;
 	background-color: rgb(8 145 178 / 0.07);
 	box-shadow:
 		inset 0 0 0 1px rgb(8 145 178 / 0.28),

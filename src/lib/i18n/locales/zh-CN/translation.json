@@ -2596,6 +2596,7 @@
 	"HaloWebUI could not resolve the connection behind this model.": "HaloWebUI 无法解析这个模型背后的连接。",
 	"Model-native web search is available for this model.": "这个模型可用模型原生联网搜索。",
 	"Native web search availability for this model is currently unknown.": "这个模型的原生联网可用性当前未知。",
+	"Can try: the model name is not a known official one (relays often rename models). Native mode, 讨论台 and 精答 try its built-in search first and switch to HaloWebUI search if it fails; Smart mode keeps using HaloWebUI search.": "可尝试：模型名不是已知的官方型号（中转站常改名），无法预先确认。「原生」联网模式、讨论台和精答会先试它自带的联网，失败就自动改用 HaloWebUI 搜索；「智能」联网仍用 HaloWebUI 搜索。",
 	"Model-native web search is unavailable for this model.": "这个模型当前不可用原生联网搜索。",
 	"Current model does not support built-in web search. Auto will use HaloWebUI instead.": "当前模型不支持内置联网搜索，自动模式将改用 HaloWebUI。",
 	"No web search route is available for the current selection.": "当前选择没有可用的联网路径。",

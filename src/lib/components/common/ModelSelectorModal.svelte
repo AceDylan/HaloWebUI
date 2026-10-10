@@ -291,7 +291,7 @@
 				return 'size-3.5 text-blue-500';
 			}
 			if (support.status === 'unknown') {
-				return 'size-3.5 text-amber-500';
+				return support.can_attempt === false ? 'size-3.5 text-amber-500' : 'size-3.5 text-blue-300';
 			}
 			return 'size-3.5 text-gray-400';
 		};

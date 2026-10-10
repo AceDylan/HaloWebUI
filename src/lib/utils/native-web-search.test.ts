@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 
 import {
 	buildWebSearchModeOptions,
+	describeNativeWebSearchSupport,
+	getNativeWebSearchSupport,
 	getSmartWebSearchRouteLabel,
 	resolveConfiguredDefaultWebSearchMode
 } from './native-web-search';
@@ -283,5 +285,31 @@ describe('native web search mode options', () => {
 				false
 			)
 		).toBe('off');
+	});
+});
+
+describe('native web search support description', () => {
+	it('tells a renamed relay model it can still be tried', () => {
+		const support = getNativeWebSearchSupport({
+			id: 'gpt-chat',
+			owned_by: 'openai',
+			native_web_search_support: {
+				status: 'unknown',
+				reason: 'model_rule_unknown',
+				can_attempt: true
+			}
+		});
+
+		expect(describeNativeWebSearchSupport(t, support)).toMatch(/^Can try:/);
+	});
+
+	it('keeps plain unknown when the model cannot be tried', () => {
+		expect(
+			describeNativeWebSearchSupport(t, {
+				status: 'unknown',
+				reason: 'model_rule_unknown',
+				can_attempt: false
+			})
+		).toBe('Native web search availability for this model is currently unknown.');
 	});
 });

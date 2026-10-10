@@ -294,7 +294,13 @@ export function describeNativeWebSearchSupport(
 		return t('Model-native web search is available for this model.');
 	}
 	if (support?.status === 'unknown') {
-		return t('Native web search availability for this model is currently unknown.');
+		// Relays rename models (gpt-chat, claude-chat ...), so the name rules cannot
+		// vouch for them; the model is still tried and falls back on failure.
+		return support.can_attempt === false
+			? t('Native web search availability for this model is currently unknown.')
+			: t(
+					'Can try: the model name is not a known official one (relays often rename models). Native mode, 讨论台 and 精答 try its built-in search first and switch to HaloWebUI search if it fails; Smart mode keeps using HaloWebUI search.'
+				);
 	}
 	return t('Model-native web search is unavailable for this model.');
 }

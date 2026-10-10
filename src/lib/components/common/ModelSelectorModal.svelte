@@ -62,6 +62,7 @@
 	type AvailableModel = {
 		id: string;
 		name?: string;
+		owned_by?: string;
 		native_web_search_supported?: boolean;
 		native_web_search_support?: NativeWebSearchSupport;
 	};
@@ -284,6 +285,10 @@
 
 		const getNativeWebSearchTooltip = (model: AvailableModel) =>
 			describeNativeWebSearchSupport((key, options) => $i18n.t(key, options), getNativeWebSearchSupport(model));
+
+		// Hand-added models get no support info from the server, so judge them by the
+		// same native search rules (the provider decides which rule set applies).
+		$: customModelProvider = gemini ? 'gemini' : anthropic ? 'anthropic' : ollama || grok ? '' : 'openai';
 
 		const getNativeWebSearchIconClass = (model: AvailableModel) => {
 			const support = getNativeWebSearchSupport(model);
@@ -665,7 +670,13 @@
 										<Wrench className="size-3.5 text-orange-500" />
 									</Tooltip>
 								{/if}
-								{#if caps.webSearch}
+								{#if customModelProvider}
+									{#if getNativeWebSearchSupport({ id: modelId, owned_by: customModelProvider }).status !== 'unsupported'}
+										<Tooltip content={getNativeWebSearchTooltip({ id: modelId, owned_by: customModelProvider })}>
+											<GlobeAlt className={getNativeWebSearchIconClass({ id: modelId, owned_by: customModelProvider })} />
+										</Tooltip>
+									{/if}
+								{:else if caps.webSearch}
 									<Tooltip content={$i18n.t('Web Search')}>
 										<GlobeAlt className="size-3.5 text-blue-500" />
 									</Tooltip>

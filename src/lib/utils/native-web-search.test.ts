@@ -313,3 +313,15 @@ describe('native web search support description', () => {
 		).toBe('Native web search availability for this model is currently unknown.');
 	});
 });
+
+describe('native web search support for hand-added models', () => {
+	it('judges a model with no server info by the provider rules', () => {
+		const status = (id: string, owned_by: string) => getNativeWebSearchSupport({ id, owned_by });
+
+		expect(status('gpt-chat', 'openai')).toMatchObject({ status: 'unknown', can_attempt: true });
+		expect(status('claude-chat', 'anthropic')).toMatchObject({ status: 'unknown', can_attempt: true });
+		expect(status('gemini-chat', 'gemini')).toMatchObject({ status: 'unknown', can_attempt: true });
+		expect(status('deepseek-chat', 'openai').status).toBe('unsupported');
+		expect(status('gpt-image', 'openai').status).toBe('unsupported');
+	});
+});

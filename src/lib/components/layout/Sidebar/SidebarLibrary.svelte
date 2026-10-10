@@ -44,7 +44,7 @@
 	>
 		{#each links as link (link.key)}
 			<a
-				class="{actionItemClass} min-w-0"
+				class="{actionItemClass} halo-library-chip min-w-0"
 				href={link.href}
 				title={link.title}
 				aria-current={link.active ? 'page' : undefined}
@@ -53,8 +53,24 @@
 				data-sidebar-library={link.key}
 			>
 				<SidebarModeIcon mode={link.key} />
-				<span class="truncate text-sm font-medium">{link.label}</span>
+				<span class="truncate">{link.label}</span>
 			</a>
 		{/each}
 	</div>
 {/if}
+
+<style>
+	/* Three to a row in a ~240px sidebar: the full-width row's padding, gap and 18px icon left
+	   「提示词」 room for one character, so the chips centre a smaller icon and drop the slack. */
+	.halo-library-chip {
+		justify-content: center;
+		gap: 0.375rem;
+		padding: 0.4375rem 0.375rem;
+		font-size: 0.8125rem;
+		font-weight: 500;
+	}
+	.halo-library-chip :global(svg) {
+		width: 1rem;
+		height: 1rem;
+	}
+</style>

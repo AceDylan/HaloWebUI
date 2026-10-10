@@ -183,6 +183,7 @@ describe('DiscussRoom', () => {
 		expect(target.querySelector('[data-discuss-seat-chip="s1"]')!.textContent).toContain('正方');
 		expect(target.querySelector('[data-discuss-seat-assistant="s2"]')!.textContent).toContain('本次职责：论证代价');
 		expect(target.querySelector('[data-discuss-matching]')).toBeTruthy();
+		expect(target.querySelector('[data-discuss-seat-assistant="s1"]')!.textContent).not.toContain('通用角色'); // not yet matched
 	}, 90000);
 
 	it('shows the web notes, links [n] to them and retries a failed seat', async () => {

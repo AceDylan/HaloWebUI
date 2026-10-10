@@ -64,6 +64,8 @@
 						<span class="rounded-full bg-gray-500/10 px-1.5 py-px text-[10px] text-gray-500 dark:text-gray-400" data-discuss-choice-action
 							>{choiceLabel(choice.action)}{choice.version ? ` · v${choice.version}` : ''}{choice.reverted ? ' · 已撤销' : ''}</span
 						>
+					{:else if matching?.status === 'waiting' || matching?.status === 'running'}
+						<span class="text-gray-400 dark:text-gray-500">{seat.role || '匹配助手中'}</span>
 					{:else}
 						<span class="text-gray-500 dark:text-gray-400">通用角色</span>
 					{/if}

@@ -7598,6 +7598,7 @@
 								{showHermesOptions}
 								bind:hermesOptions
 								{activeAssistant}
+								onSelectModel={(selectionId) => (selectedModels = [selectionId])}
 								onActivateAssistant={activateAssistant}
 								onDeactivateAssistant={deactivateAssistant}
 								transparentBackground={$settings?.backgroundImageUrl ?? false}

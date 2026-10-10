@@ -772,6 +772,74 @@ html.halo-scifi .halo-modal {
 	animation-direction: reverse;
 }
 
+/* ------------------------------------------------------------------ landing: model deck
+   The cards under the greeting become instrument panels: hairline cyan edges, mono labels,
+   and on the chosen one a cyan→violet→magenta ring with two HUD corner marks. */
+
+html.halo-scifi .halo-deck__card {
+	border-radius: 0.875rem;
+	background: rgb(255 255 255 / 0.7);
+	box-shadow:
+		inset 0 0 0 1px rgb(8 145 178 / 0.18),
+		0 1px 2px rgb(8 145 178 / 0.06);
+}
+html.halo-scifi.dark .halo-deck__card {
+	background: rgb(6 9 20 / 0.55);
+	box-shadow:
+		inset 0 0 0 1px rgb(94 231 255 / 0.14),
+		inset 0 1px 0 rgb(255 255 255 / 0.04);
+}
+html.halo-scifi .halo-deck__card:hover {
+	box-shadow:
+		inset 0 0 0 1px var(--scifi-cyan),
+		0 0 22px -6px var(--scifi-glow);
+}
+html.halo-scifi .halo-deck__card.is-selected {
+	--corner: var(--scifi-cyan);
+	background:
+		linear-gradient(var(--corner), var(--corner)) top 7px left 7px / 9px 1.5px no-repeat,
+		linear-gradient(var(--corner), var(--corner)) top 7px left 7px / 1.5px 9px no-repeat,
+		linear-gradient(var(--corner), var(--corner)) bottom 7px right 7px / 9px 1.5px no-repeat,
+		linear-gradient(var(--corner), var(--corner)) bottom 7px right 7px / 1.5px 9px no-repeat,
+		rgb(255 255 255 / 0.92);
+	box-shadow:
+		0 0 28px -8px var(--scifi-glow),
+		0 16px 32px -20px var(--scifi-violet);
+}
+html.halo-scifi.dark .halo-deck__card.is-selected {
+	background:
+		linear-gradient(var(--corner), var(--corner)) top 7px left 7px / 9px 1.5px no-repeat,
+		linear-gradient(var(--corner), var(--corner)) top 7px left 7px / 1.5px 9px no-repeat,
+		linear-gradient(var(--corner), var(--corner)) bottom 7px right 7px / 9px 1.5px no-repeat,
+		linear-gradient(var(--corner), var(--corner)) bottom 7px right 7px / 1.5px 9px no-repeat,
+		radial-gradient(120% 90% at 50% 0%, rgb(94 231 255 / 0.12), transparent 70%),
+		rgb(6 9 20 / 0.78);
+}
+html.halo-scifi .halo-deck__card.is-selected::before {
+	background: conic-gradient(
+		from var(--halo-angle, 0deg),
+		var(--scifi-cyan),
+		var(--scifi-violet) 35%,
+		var(--scifi-magenta) 55%,
+		var(--scifi-cyan) 80%,
+		var(--scifi-cyan)
+	);
+}
+html.halo-scifi .halo-deck__card.is-selected .halo-deck__icon {
+	box-shadow:
+		0 0 0 2px transparent,
+		0 0 0 3px var(--scifi-cyan),
+		0 0 18px var(--scifi-glow);
+}
+html.halo-scifi .halo-deck__kind {
+	font-family: var(--font-mono);
+	font-size: 10px;
+	letter-spacing: 0.08em;
+}
+html.halo-scifi .halo-deck__card.is-selected .halo-deck__kind {
+	color: var(--scifi-cyan);
+}
+
 /* ------------------------------------------------------------------ calm when asked */
 
 @media (prefers-reduced-motion: reduce) {
@@ -790,7 +858,7 @@ html.halo-scifi .halo-modal {
 	}
 }
 @media (max-width: 767px), (pointer: coarse) {
-	html.halo-scifi :is(.halo-composer, [data-scifi-conduit]) {
+	html.halo-scifi :is(.halo-composer, [data-scifi-conduit], .halo-deck__card) {
 		-webkit-backdrop-filter: none;
 		backdrop-filter: none;
 	}

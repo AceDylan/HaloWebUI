@@ -4,7 +4,8 @@
 	import { marked } from 'marked';
 
 	import { onMount, getContext, tick, createEventDispatcher } from 'svelte';
-	import { blur, fade } from 'svelte/transition';
+	import { blur, fade, scale } from 'svelte/transition';
+	import { cubicOut } from 'svelte/easing';
 
 	const dispatch = createEventDispatcher();
 
@@ -57,6 +58,7 @@
 	import AssistantPickerModal from './AssistantPickerModal.svelte';
 	import AssistantSceneTitle from './Placeholder/AssistantSceneTitle.svelte';
 	import AssistantScenePlaceholder from './Placeholder/AssistantScenePlaceholder.svelte';
+	import ModelDeck from './Placeholder/ModelDeck.svelte';
 	import Pencil from '$lib/components/icons/Pencil.svelte';
 	import Check from '$lib/components/icons/Check.svelte';
 	import XMark from '$lib/components/icons/XMark.svelte';
@@ -87,6 +89,8 @@
 
 	export let atSelectedModel: Model | undefined;
 	export let selectedModels: [''];
+	/** Picks the new chat's model from the landing page's cards; without it there are no cards. */
+	export let onSelectModel: ((selectionId: string) => void) | null = null;
 	export let activeAssistant: ChatAssistantSnapshot | null = null;
 	export let onActivateAssistant: ((assistant: ChatAssistantSnapshot) => void) | null = null;
 	export let onDeactivateAssistant: (() => void) | null = null;
@@ -116,6 +120,8 @@
 	export let toolServers = [];
 
 	let models = [];
+	// The cards name the chosen model themselves; the plain name line is for one they don't show.
+	let deckShowsSelected = false;
 	let editMode = false;
 	let showPickerModal = false;
 	let dragSourceIdx: number | null = null;
@@ -328,7 +334,7 @@
 			{:else}
 				<!-- The assistant sits inside its halo: the ring brightens and the light runs
 				     faster while the prompt box has focus (halo.css, .halo-orb). -->
-				<div class="halo-hero">
+				<div class="halo-hero w-full">
 					<div class="halo-orb halo-rise" style="--i: 0" data-halo-orb>
 						<span class="halo-orb__orbit" style="--r: 2.1" aria-hidden="true"></span>
 						<span class="halo-orb__orbit halo-orb__orbit--far" style="--r: 3.3" aria-hidden="true"></span>
@@ -336,7 +342,8 @@
 						<span class="halo-orb__ring" aria-hidden="true"></span>
 						<span class="halo-orb__arc" aria-hidden="true"></span>
 						<HudReactor label={models[selectedModelIdx] ? getModelBaseName(models[selectedModelIdx]) : ''} />
-						<div class="flex -space-x-4">
+						{#key models.map((model) => model?.id).join(',')}
+						<div class="flex -space-x-4" in:scale={{ start: 0.86, duration: 420, easing: cubicOut }}>
 							{#each models as model, modelIdx}
 								<Tooltip
 									content={(models[modelIdx]?.info?.meta?.tags ?? [])
@@ -361,12 +368,16 @@
 								</Tooltip>
 							{/each}
 						</div>
+						{/key}
 					</div>
 
 					<h1 class="halo-greeting halo-rise line-clamp-2 px-4" style="--i: 1">
 						{$i18n.t(greetingKey, { name: $user?.name })}
 					</h1>
-					{#if models[selectedModelIdx]?.name}
+					{#if onSelectModel}
+						<ModelDeck selected={models[selectedModelIdx] ?? null} onSelect={onSelectModel} bind:shows={deckShowsSelected} />
+					{/if}
+					{#if models[selectedModelIdx]?.name && !deckShowsSelected}
 						<div
 							class="halo-rise mt-2.5 flex min-w-0 max-w-full items-center justify-center gap-2 px-4 text-[13px] text-gray-500 dark:text-gray-400"
 							style="--i: 2"

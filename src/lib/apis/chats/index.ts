@@ -1,6 +1,7 @@
 import { WEBUI_API_BASE_URL } from '$lib/constants';
 import { getTimeRange } from '$lib/utils';
 import { parseJsonResponse } from '../response';
+import { fetchRidingRestart } from '$lib/apis/restart-retry';
 
 export const createNewChat = async (
 	token: string,
@@ -617,7 +618,7 @@ export const getChatById = async (
 ) => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/chats/${id}`, {
+	const res = await fetchRidingRestart(`${WEBUI_API_BASE_URL}/chats/${id}`, {
 		method: 'GET',
 		cache: 'no-store',
 		signal: options.signal,
@@ -652,7 +653,7 @@ export const getChatContextById = async (
 ) => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/chats/${id}/context`, {
+	const res = await fetchRidingRestart(`${WEBUI_API_BASE_URL}/chats/${id}/context`, {
 		method: 'GET',
 		cache: 'no-store',
 		signal: options.signal,

@@ -226,7 +226,13 @@ ENABLE_FORWARD_USER_INFO_HEADERS = (
 # WEBUI_BUILD_HASH
 ####################################
 
-WEBUI_BUILD_HASH = os.environ.get("WEBUI_BUILD_HASH", "dev-build")
+# The image sets WEBUI_BUILD_VERSION (the commit the CI built); the frontend bundle
+# carries the same value, so an open tab can tell the server was redeployed.
+WEBUI_BUILD_HASH = (
+    os.environ.get("WEBUI_BUILD_HASH")
+    or os.environ.get("WEBUI_BUILD_VERSION")
+    or "dev-build"
+)
 
 ####################################
 # DATA/FRONTEND BUILD DIR

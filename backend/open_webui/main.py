@@ -2463,6 +2463,7 @@ async def update_webhook_url(form_data: UrlForm, user=Depends(get_admin_user)):
 async def get_app_version():
     return {
         "version": VERSION,
+        "build": WEBUI_BUILD_HASH,
     }
 
 

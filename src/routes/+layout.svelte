@@ -40,6 +40,7 @@
 	import 'tippy.js/dist/tippy.css';
 
 	import { WEBUI_BASE_URL, WEBUI_HOSTNAME } from '$lib/constants';
+	import { checkForNewBuild } from '$lib/utils/build-update';
 	import i18n, { initI18n, getLanguages, changeLanguage } from '$lib/i18n';
 	import { bestMatchingLanguage } from '$lib/utils';
 	import {
@@ -142,7 +143,17 @@
 		if (socketConnectedOnce || Date.now() - socketSetupAt > FIRST_CONNECT_GRACE_MS) {
 			chatListRefreshRevision.update((value) => value + 1);
 		}
+		// A deploy always drops the socket: after a reconnect, offer the new build.
+		if (socketConnectedOnce) void checkForNewBuild(announceNewBuild);
 		socketConnectedOnce = true;
+	};
+
+	const announceNewBuild = () => {
+		toast.info('HaloWebUI 已更新，刷新后可用新版本', {
+			id: 'halo-new-build',
+			duration: Infinity,
+			action: { label: '刷新', onClick: () => window.location.reload() }
+		});
 	};
 
 	const handleSocketReconnectAttempt = (attempt) => {

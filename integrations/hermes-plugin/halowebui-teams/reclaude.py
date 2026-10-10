@@ -97,7 +97,9 @@ RUNNERS = {
 assert tuple(RUNNERS) == RUNNER_EXECUTORS
 _ASSIGNEES_SQL = "(" + ",".join("'%s'" % name for name in RUNNERS) + ")"
 _RUN_ID_RE = re.compile(r"^[0-9]{8}-[0-9]{6}-[0-9a-f]{8}(-a[0-9]+)*$")
-_PROGRESS_TOOL_RE = re.compile(r"^(\d\d:\d\d:\d\d) \[tool#(\d+)\] ([^:]{1,60}):\s?(.*)$")
+# "Name: detail" (reclaude, codex) or just the name (agy never echoes parameters; codex's bare
+# "mcp server.tool").
+_PROGRESS_TOOL_RE = re.compile(r"^(\d\d:\d\d:\d\d) \[tool#(\d+)\] ([^:]{1,60}?)(?::\s?(.*))?$")
 _launcher = {"fn": None}  # tests replace the systemd launch
 
 

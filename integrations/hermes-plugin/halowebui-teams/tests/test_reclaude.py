@@ -296,13 +296,14 @@ def test_codex_member_runs_through_codex_run_sh_and_completes(pkg, setup):
     meta = run_meta("T1")
     run_id = meta["runner_run_id"]
     assert meta["runner"] == "codex" and os.path.isdir(os.path.join(codex.runs_root, run_id))
-    s.fake.progress(run_id, ["20:37:03 [tool#1] shell: /bin/bash -lc pwd"], _root=str(codex.runs_root))
+    s.fake.progress(run_id, ["20:37:03 [tool#1] shell: /bin/bash -lc pwd", "20:37:04 [tool#2] mcp fs.read"],
+                    _root=str(codex.runs_root))
     s.fake.write(run_id, status="success", _root=str(codex.runs_root))
     s.fake.result(run_id, "写好了 coder.md", _root=str(codex.runs_root))
     tick()
     assert task("T1").status == "done" and "coder.md" in (task("T1").result or "")
     tl = pkg.teams.timeline(team_id, "u1")
-    assert [e["data"]["name"] for e in tl["events"] if e["type"] == "tool"] == ["shell"]
+    assert [e["data"]["name"] for e in tl["events"] if e["type"] == "tool"] == ["shell", "mcp fs.read"]
     assert any(e["type"] == "runner" and e["data"]["runner"] == "codex" for e in tl["events"])
     detail = pkg.teams.task_detail(team_id, tasks["T1"], owner="u1", log=True)
     assert detail["log"]["source"] == f"codex {run_id}" and "[tool#1] shell" in detail["log"]["text"]
@@ -317,6 +318,12 @@ def test_agy_question_is_answered_with_a_fixed_run_id_and_its_response_is_the_ha
     argv = s.fake.calls[-1]
     assert argv[0] == agy.script and "--max-turns" not in argv
     run_id = run_meta("T1")["runner_run_id"]
+    # agy writes the tool's name only, never its parameters.
+    s.fake.progress(run_id, [f"==== agy run {run_id} started ====", "[gateway] model=gemini-chat",
+                             "12:57:56 [tool#1] 运行命令", "12:58:03 [tool#2] 读文件"], _root=root)
+    tick()
+    tools = [e for e in pkg.teams.timeline(team_id, "u1")["events"] if e["type"] == "tool"]
+    assert [(t["data"]["name"], t["text"]) for t in tools] == [("运行命令", ""), ("读文件", "")]
     s.fake.write(run_id, status="question", _root=root)
     s.fake.result(run_id, "QUESTION: 用蓝色还是绿色？", _root=root, key="response")
     tick()

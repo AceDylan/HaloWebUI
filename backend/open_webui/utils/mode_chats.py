@@ -284,17 +284,48 @@ def sources_from_docs(
 
 
 # models whose native web search call failed lately (model id -> when): not offered it again for
-# a while (e.g. a relay that has no Responses API for that model answers 503)
+# a while (e.g. a relay that has no Responses API for that model answers 503). Kept in DATA_DIR,
+# so a restart or a deploy does not make every such model fail once more.
 NATIVE_SEARCH_FAILED: dict = {}
-NATIVE_SEARCH_RETRY_SECONDS = 6 * 3600
+NATIVE_SEARCH_RETRY_SECONDS = 7 * 24 * 3600
+NATIVE_SEARCH_FAILED_FILE = "native_search_failed.json"
+_native_failed_loaded = False
+
+
+def _native_failed_path():
+    from open_webui.env import DATA_DIR
+
+    return DATA_DIR / "cache" / NATIVE_SEARCH_FAILED_FILE
+
+
+def _load_native_failed() -> None:
+    global _native_failed_loaded
+    if _native_failed_loaded:
+        return
+    _native_failed_loaded = True
+    try:
+        saved = json.loads(_native_failed_path().read_text(encoding="utf-8"))
+    except Exception:
+        return
+    if isinstance(saved, dict):
+        for model_id, at in saved.items():
+            if isinstance(at, (int, float)):
+                NATIVE_SEARCH_FAILED.setdefault(str(model_id), float(at))
 
 
 def native_search_failed(model_id: str) -> None:
     """A call made with native web search failed: answer without it, and stop offering it to
-    this model for NATIVE_SEARCH_RETRY_SECONDS."""
+    this model for NATIVE_SEARCH_RETRY_SECONDS (across restarts)."""
     import time
 
+    _load_native_failed()
     NATIVE_SEARCH_FAILED[model_id] = time.time()
+    try:
+        path = _native_failed_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(NATIVE_SEARCH_FAILED), encoding="utf-8")
+    except Exception as exc:
+        log.info("could not keep the native web search failures: %s", exc)
 
 
 async def native_search_models(request, user, model_ids) -> set:
@@ -320,6 +351,7 @@ async def native_search_models(request, user, model_ids) -> set:
         await get_all_models(request, user=user)
         models = getattr(request.state, "MODELS", None) or {}
     ambiguous = getattr(request.state, "MODELS_AMBIGUOUS", set()) or set()
+    _load_native_failed()
     now = time.time()
     out = set()
     for model_id in {m for m in model_ids if m}:

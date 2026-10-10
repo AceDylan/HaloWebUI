@@ -482,7 +482,11 @@ def parse_json_object(text: str) -> dict:
     try:
         value = json.loads(text[start : end + 1])
     except Exception as exc:
-        raise ValueError(f"调度模型的 JSON 无法解析：{exc}") from exc
+        # the object, then something else with braces after it (a card the reply got appended)
+        try:
+            value, _ = json.JSONDecoder().raw_decode(text[start:])
+        except Exception:
+            raise ValueError(f"调度模型的 JSON 无法解析：{exc}") from exc
     if not isinstance(value, dict):
         raise ValueError("调度模型的回答不是 JSON 对象")
     return value

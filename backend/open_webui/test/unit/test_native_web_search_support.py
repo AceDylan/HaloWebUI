@@ -43,6 +43,28 @@ def test_openai_model_rule_distinguishes_supported_unknown_and_denied_models():
     assert unknown["status"] == NATIVE_WEB_SEARCH_STATUS_UNKNOWN
 
 
+def test_open_model_families_on_compatible_relays_never_try_native_search():
+    # deepseek-chat on an OpenAI-compatible relay has no Responses API: trying it first failed
+    # every time before falling back to chat completions
+    for model_id in ("deepseek-chat", "deepseek-reasoner", "qwen-max", "glm-4.6", "kimi-k2", "llama-3.3-70b"):
+        rule = resolve_model_native_web_search_rule("openai", model_id=model_id, model_name=model_id)
+        assert rule["status"] == NATIVE_WEB_SEARCH_STATUS_UNSUPPORTED, model_id
+    support = resolve_effective_native_web_search_support(
+        build_native_web_search_support("openai", url="https://relay.example.com/v1", api_config={}),
+        provider="openai",
+        model_id="deepseek-chat",
+        model_name="deepseek-chat",
+    )
+    assert support["can_attempt"] is False
+    relay_gpt = resolve_effective_native_web_search_support(
+        build_native_web_search_support("openai", url="https://relay.example.com/v1", api_config={}),
+        provider="openai",
+        model_id="gpt-chat",
+        model_name="gpt-chat",
+    )
+    assert relay_gpt["can_attempt"] is True
+
+
 def test_effective_support_is_model_specific_on_same_connection():
     connection_support = build_native_web_search_support(
         "openai",

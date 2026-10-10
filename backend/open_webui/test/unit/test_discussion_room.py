@@ -82,6 +82,27 @@ def test_the_moderators_plan_keeps_known_models_and_sane_numbers():
         room.plan_from({"seats": [{"model": "conn.gpt-chat"}]}, pool)
 
 
+def test_a_plan_with_a_long_id_copied_wrong_still_finds_its_models():
+    # 10-10: gpt-chat answered "modelref::deepseek::…" for "modelref::openai::…::deepseek-chat";
+    # the seat was dropped and the default table sat instead. The prompt now shows short ids.
+    from open_webui.utils import assistant_library as lib
+
+    pool = [
+        {"id": "gpt-chat", "name": "gpt-chat", "vision": True, "ref": "modelref::openai::personal::id:13c104eb::gpt-chat"},
+        {"id": "deepseek-chat", "name": "deepseek-chat", "vision": True, "ref": "modelref::openai::personal::id:c153e2d2::deepseek-chat"},
+    ]
+    reply = (
+        '{"mode":"compare","rounds":1,"seats":[{"model":"modelref::openai::personal::id:13c104eb::gpt-chat","role":"设定解答"},'
+        '{"model":"modelref::deepseek::personal::id:c153e2d2::deepseek-chat","role":"原著核对"}],"reason":"窄问题"}\n\n'
+        '````html\n<div class="hv"><style>.a{color:red}</style></div>\n````'
+    )
+    plan = room.plan_from(lib.parse_json_object(reply), pool)
+    assert [s["model"] for s in plan["seats"]] == [pool[0]["ref"], pool[1]["ref"]]
+    assert room.plan_from({"seats": [{"model": "gpt-chat"}, {"model": "deepseek-chat"}]}, pool)["seats"][1]["model"] == pool[1]["ref"]
+    user = room.build_plan_messages(ask={"question": "q", "files": []}, pool=pool, history=[])[1]["content"]
+    assert '"id": "deepseek-chat"' in user and "modelref::" not in user
+
+
 def test_the_planning_prompt_lists_the_formats_and_the_models():
     setup = room.normalize_setup({"smart": True, "moderator": "c"}, _models("a", "b", "c"), set(), _user(), _no_exclusion)
     ask = room.new_ask(question="选数据库", setup=setup, user_message_id="u", message_id="m", files=[{"id": "f", "name": "x.png", "type": "image"}])
@@ -836,6 +857,22 @@ def test_seats_whose_model_searches_itself_are_offered_it():
     live.browsers = browsers_never
     asyncio.run(live.run())
     assert asked == [] and live.browse == set()
+
+
+def test_a_failed_native_search_is_remembered_across_restarts(tmp_path, monkeypatch):
+    from open_webui.utils import mode_chats
+
+    path = tmp_path / "cache" / "native_search_failed.json"
+    monkeypatch.setattr(mode_chats, "_native_failed_path", lambda: path)
+    monkeypatch.setattr(mode_chats, "NATIVE_SEARCH_FAILED", {})
+    monkeypatch.setattr(mode_chats, "_native_failed_loaded", False)
+    mode_chats.native_search_failed("relay.some-model")
+    assert path.exists()
+    # a new process: nothing in memory until the file is read
+    monkeypatch.setattr(mode_chats, "NATIVE_SEARCH_FAILED", {})
+    monkeypatch.setattr(mode_chats, "_native_failed_loaded", False)
+    mode_chats._load_native_failed()
+    assert "relay.some-model" in mode_chats.NATIVE_SEARCH_FAILED
 
 
 def test_a_seat_whose_own_search_fails_speaks_again_without_it():

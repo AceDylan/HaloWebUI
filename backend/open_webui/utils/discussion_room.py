@@ -712,7 +712,8 @@ PLAN_MODE_GUIDE = {
 
 def build_plan_messages(*, ask: dict, pool: list[dict], history: list[dict]) -> list[dict]:
     """The moderator staffs the discussion: format, rounds, and 2–5 seats (model, role, duty)
-    from ``pool`` (``[{"id", "name", "vision"}]``)."""
+    from ``pool`` (``[{"id", "name", "vision", "ref"?}]``; the model sees the short ``id`` only,
+    long selection ids got copied wrong)."""
     lang_rule = "Simplified Chinese" if (ask.get("lang") or "zh") == "zh" else "the language of the user's question"
     images = sum(1 for item in ask.get("files") or [] if item.get("type") == "image")
     documents = [item.get("name") for item in ask.get("files") or [] if item.get("type") != "image"]
@@ -744,7 +745,7 @@ def build_plan_messages(*, ask: dict, pool: list[dict], history: list[dict]) -> 
         f"Background conversation (excerpt):\n{context[:1500]}" if context else "",
         f"User question:\n{ask.get('question') or ''}",
         "Attached: " + "; ".join(attached) if attached else "",
-        "Available models:\n" + json.dumps(pool, ensure_ascii=False),
+        "Available models:\n" + json.dumps([{"id": e["id"], "vision": e["vision"]} for e in pool], ensure_ascii=False),
     ]
     return [
         {"role": "system", "content": system},
@@ -752,16 +753,21 @@ def build_plan_messages(*, ask: dict, pool: list[dict], history: list[dict]) -> 
     ]
 
 
+def _last_part(value: str) -> str:
+    return re.split(r"::|\.|/", value.lower())[-1]
+
+
 def _pool_model(pool: list[dict], wanted: Any) -> Optional[dict]:
     key = str(wanted or "").strip().lower()
     if not key:
         return None
     for entry in pool:
-        if key in (entry["id"].lower(), entry["name"].lower()):
+        if key in (entry["id"].lower(), entry["name"].lower(), str(entry.get("ref") or "").lower()):
             return entry
-    # "deepseek" for "conn.deepseek" / "modelref::conn::deepseek"; a longer fragment of a name
+    # "deepseek-chat" for "conn.deepseek-chat" / "modelref::conn::deepseek-chat", and a long id
+    # copied with a wrong middle part
     for entry in pool:
-        if re.split(r"::|\.", entry["id"].lower())[-1] == key:
+        if _last_part(key) in (_last_part(entry["id"]), _last_part(str(entry.get("ref") or entry["id"]))):
             return entry
     if len(key) >= 4:
         return next((entry for entry in pool if key in entry["name"].lower() or key in entry["id"].lower()), None)
@@ -789,9 +795,9 @@ def plan_from(raw: Any, pool: list[dict]) -> dict:
             continue
         role = _clean_text(item.get("role"), ROLE_MAX_CHARS)
         # one model twice only with different roles
-        if any(s["model"] == entry["id"] and s["role"] == role for s in seats):
+        if any(s["model"] == (entry.get("ref") or entry["id"]) and s["role"] == role for s in seats):
             continue
-        seats.append({"model": entry["id"], "role": role, "duty": _clean_text(item.get("duty"), DUTY_MAX_CHARS)})
+        seats.append({"model": entry.get("ref") or entry["id"], "role": role, "duty": _clean_text(item.get("duty"), DUTY_MAX_CHARS)})
     if len(seats) < MIN_SEATS:
         raise ValueError(f"主持人的安排里能用的模型不到 {MIN_SEATS} 个")
     return {"mode": mode, "rounds": rounds, "seats": seats, "reason": _clean_text(raw.get("reason"), 300)}

@@ -37,6 +37,11 @@
 			],
 			"deny": [
 				{
+					"type": "regex",
+					"value": "deepseek|qwen|qwq|chatglm|glm-|kimi|moonshot|doubao|minimax|abab|hunyuan|ernie|llama|mistral|mixtral",
+					"reason": "model_rule_deny_no_native_search_family"
+				},
+				{
 					"type": "contains",
 					"value": "gpt-4.1-nano",
 					"reason": "model_rule_deny_openai_nano"

@@ -603,13 +603,20 @@ async def _plan(request: Request, user, ask: dict, call_model, history: list[dic
 
     models_map, ambiguous = await _models(request, user)
     _, bases = lib.library(models_map, user)
+    # the moderator picks by a short id (the model's name, numbered when two share it): long
+    # selection ids get copied wrong
     pool = []
     for base in bases:
         try:
             seat = room.resolve_seat_model(base["id"], models_map, ambiguous, user)
         except DiscussError:
             continue
-        pool.append({"id": seat["model"], "name": seat["name"], "vision": seat["vision"]})
+        short = seat["name"]
+        taken = {entry["id"] for entry in pool}
+        n = 2
+        while short in taken:
+            short, n = f"{seat['name']} #{n}", n + 1
+        pool.append({"id": short, "name": seat["name"], "vision": seat["vision"], "ref": seat["model"]})
         if len(pool) >= room.PLAN_POOL_MAX:
             break
     moderator = ask["moderator"]["model"]
@@ -634,7 +641,7 @@ async def _plan(request: Request, user, ask: dict, call_model, history: list[dic
         draft = {
             "mode": "roundtable",
             "rounds": 2,
-            "seats": [{"model": entry["id"]} for entry in _diverse(pool, 3)],
+            "seats": [{"model": entry["ref"]} for entry in _diverse(pool, 3)],
             "reason": "不同家族的模型圆桌讨论两轮",
         }
     setup = room.normalize_setup(

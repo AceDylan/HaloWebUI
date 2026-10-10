@@ -41,8 +41,11 @@ Always exits 0; never affects the runner's own exit code. Stdlib only.
 """
 import argparse
 import datetime
+import fcntl
+import importlib.util
 import json
 import os
+from pathlib import Path
 import re
 import shlex
 import sqlite3
@@ -52,7 +55,12 @@ import time
 import urllib.error
 import urllib.request
 
-SCRIPT_VERSION = "2026-10-08.2"
+_fallback_spec = importlib.util.spec_from_file_location(
+    "runner_fallback", os.path.join(os.path.dirname(__file__), "runner_fallback.py"))
+runner_fallback = importlib.util.module_from_spec(_fallback_spec)
+_fallback_spec.loader.exec_module(runner_fallback)
+
+SCRIPT_VERSION = "2026-10-10.1"
 CONFIG_FILE = "/root/.hermes/reclaude-runner.env"
 REQUIRED_CONFIG_KEYS = ("HALOWEBUI_NOTIFY_URL", "HALOWEBUI_NOTIFY_TOKEN")
 STATE_DB = "/root/.hermes/state.db"
@@ -431,11 +439,11 @@ def build_prompt(
     ]
     if status == "question":
         lines.append(
-            f"这次结束是因为它需要我做决定：请把 QUESTION 块原样转给我并等待我的回答；我回答后用 {answer_command} 续跑。"
+            f"这次结束是因为它需要我做决定：请把 QUESTION 块原样转给我并等待我的回答；我回答后用 {answer_command} {run_id} 续跑。"
         )
     elif status == "max_turns":
         lines.append(
-            f"这次结束是因为达到了轮数上限：请说明进展，并问我是否用 {answer_command} 继续。"
+            f"这次结束是因为达到了轮数上限：请说明进展，并问我是否用 {answer_command} {run_id} 继续。"
         )
     elif status != "success":
         lines.append(
@@ -1015,13 +1023,47 @@ def main():
     )
     args = parser.parse_args()
 
+    if args.dry_run:
+        return notify(args)
+    with open(os.path.join(args.run_dir, "notify.lock"), "a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        receipt_dir = args.run_dir
+        if os.environ.get("RUNNER_SUPPRESS_NOTIFY") == "1":
+            return 0
+        # Continuation precedes origin/config/display/dedupe checks.
+        if args.agent == "reclaude":
+            outcome = runner_fallback.continue_run(args.run_dir)
+            if outcome.get("state") == "finished":
+                args.run_id = outcome["target_run_id"]
+                args.run_dir = outcome["target_dir"]
+                args.status = outcome["codex_status"]
+                args.agent = "codex"
+                args.runner_name = "codex-runner"
+                args.answer_command = "codex-run.sh answer"
+                args.tool_marker = "codex-run.sh"
+            elif outcome.get("state") == "launching":
+                log("Codex continuation outcome pending; final report deferred")
+                return 0
+        previous = read_meta_notification(receipt_dir)
+        if previous.get("delivered_at") and previous.get("run_id") == args.run_id:
+            log("notification already delivered; duplicate skipped")
+            return 0
+        args.receipt_dir = receipt_dir
+        return notify(args)
+
+
+def read_meta_notification(run_dir):
+    return runner_fallback.read(Path(run_dir) / "notify.json")
+
+
+def notify(args):
     record = {
         "run_id": args.run_id,
         "status": args.status,
         "agent": args.agent,
         "attempted": False,
     }
-    record_path = os.path.join(args.run_dir, "notify.json")
+    record_path = os.path.join(getattr(args, "receipt_dir", args.run_dir), "notify.json")
 
     def save():
         if args.dry_run:

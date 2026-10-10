@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatHours, formatUsd, summarizeRuns } from './runner-stats';
+import { formatHours, formatTokens, formatUsd, summarizeRuns, tokensTitle } from './runner-stats';
 
 const now = new Date(2026, 9, 9, 20, 0, 0).getTime() / 1000;
 const run = (patch: object) => ({
@@ -58,6 +58,26 @@ describe('summarizeRuns', () => {
 		expect(s.daily.at(-1)).toMatchObject({ day: '2026-10-09', runs: 3, cost: 2 });
 		expect(s.daily.at(-3)).toMatchObject({ day: '2026-10-07', runs: 1, cost: 1 });
 		expect(s.daily[0]).toMatchObject({ day: '2026-10-03', runs: 0, cost: 0 });
+	});
+
+	it('counts estimated costs and tokens (codex / agy report tokens, Hermes prices them)', () => {
+		const tokens = { input: 1000, cached: 20000, output: 500 };
+		const s = summarizeRuns(
+			[
+				run({}),
+				run({ agent: 'codex', cost_usd: 0.5, cost_estimated: true, tokens }),
+				run({ agent: 'codex', cost_usd: 0.25, cost_estimated: true, tokens })
+			] as any,
+			1,
+			now
+		);
+		expect(s.total).toMatchObject({ cost: 2.75, estimated: 2, tokens: 43000 });
+		expect(s.byRunner.find((g) => g.key === 'codex')).toMatchObject({ estimated: 2, cost: 0.75 });
+		expect(s.byRunner.find((g) => g.key === 'reclaude')).toMatchObject({ estimated: 0, tokens: 0 });
+		expect(formatTokens(43000)).toBe('4.3 万');
+		expect(formatTokens(256_000)).toBe('26 万');
+		expect(formatTokens(170_000_000)).toBe('1.7 亿');
+		expect(tokensTitle({ tokens } as any)).toContain('缓存 2.0 万');
 	});
 
 	it('formats money and time', () => {

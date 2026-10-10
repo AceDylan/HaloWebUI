@@ -406,8 +406,12 @@ export type RunnerRun = {
 	started_at: number;
 	ended_at: number | null;
 	duration_s: number | null;
-	/** what the runner reported, at API prices (a subscription or relay is not billed this way) */
+	/** what the runner reported, at API prices (a subscription or relay is not billed this way);
+	 * codex / agy report none, so Hermes estimates theirs from tokens (cost_estimated) */
 	cost_usd: number | null;
+	cost_estimated?: boolean;
+	/** this run's own tokens (a resumed run without its predecessor's) */
+	tokens?: { input: number; cached: number; output: number } | null;
 	turns: number | null;
 	tool_calls: number | null;
 	model: string;

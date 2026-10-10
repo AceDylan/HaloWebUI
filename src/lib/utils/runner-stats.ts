@@ -11,6 +11,9 @@ export type RunnerGroup = {
 	/** runs that stopped because the subscription's quota ran out */
 	quota: number;
 	cost: number;
+	/** runs whose cost Hermes estimated from tokens (codex / agy) */
+	estimated: number;
+	tokens: number;
 	seconds: number;
 	turns: number;
 };
@@ -40,6 +43,9 @@ export const STATUS_LABEL: Record<string, string> = {
 	quota_blocked: '额度不足'
 };
 
+export const runTokens = (run: RunnerRun) =>
+	run.tokens ? run.tokens.input + run.tokens.cached + run.tokens.output : 0;
+
 const emptyGroup = (key: string): RunnerGroup => ({
 	key,
 	runs: 0,
@@ -47,6 +53,8 @@ const emptyGroup = (key: string): RunnerGroup => ({
 	failed: 0,
 	quota: 0,
 	cost: 0,
+	estimated: 0,
+	tokens: 0,
 	seconds: 0,
 	turns: 0
 });
@@ -57,6 +65,8 @@ const add = (group: RunnerGroup, run: RunnerRun) => {
 	else if (FAILED.has(run.status)) group.failed += 1;
 	if (isQuotaStop(run)) group.quota += 1;
 	group.cost += run.cost_usd ?? 0;
+	if (run.cost_estimated) group.estimated += 1;
+	group.tokens += runTokens(run);
 	group.seconds += run.duration_s ?? 0;
 	group.turns += run.turns ?? 0;
 };
@@ -113,6 +123,20 @@ export const formatUsd = (value: number) =>
 		: value >= 1
 			? `$${value.toFixed(1)}`
 			: `$${value.toFixed(2)}`;
+
+/** 8.2 万 / 1.7 亿 */
+export const formatTokens = (value: number) =>
+	value >= 1e8
+		? `${(value / 1e8).toFixed(value >= 1e9 ? 0 : 1)} 亿`
+		: value >= 1e4
+			? `${(value / 1e4).toFixed(value >= 1e5 ? 0 : 1)} 万`
+			: `${Math.round(value)}`;
+
+/** how a run's estimated cost was worked out, for the cost cell's tooltip */
+export const tokensTitle = (run: RunnerRun) =>
+	run.tokens
+		? `按 token × 中转单价估算：输入 ${formatTokens(run.tokens.input)} · 缓存 ${formatTokens(run.tokens.cached)} · 输出 ${formatTokens(run.tokens.output)}`
+		: '';
 
 export const formatHours = (seconds: number) => {
 	if (seconds < 60) return `${Math.round(seconds)} 秒`;

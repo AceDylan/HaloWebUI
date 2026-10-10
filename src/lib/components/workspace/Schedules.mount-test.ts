@@ -113,14 +113,7 @@ const mount = async () => {
 };
 const card = (id: string) => target.querySelector(`[data-schedule-job="${id}"]`) as any;
 const setValue = (el: any, value: string) => {
-	if (el.tagName === 'SELECT') {
-		// domino has no select.value: pick the option, as a click would
-		for (const option of Array.from(el.querySelectorAll('option')) as any[]) {
-			option.selected = option.getAttribute('value') === value || option.__value === value;
-		}
-	} else {
-		el.value = value;
-	}
+	el.value = value;
 	el.dispatchEvent(new (window as any).Event('input'));
 	el.dispatchEvent(new (window as any).Event('change'));
 };
@@ -128,6 +121,11 @@ const setValue = (el: any, value: string) => {
 describe('Schedules', () => {
 	it('lists running jobs with their time in words, ended ones folded away', async () => {
 		await mount();
+		// The next run leads the page; the paused job is not counted as in progress.
+		expect(target.querySelector('[data-schedule-next-up]').textContent).toContain('每周更新 CLI');
+		expect(target.querySelector('[data-schedule-countdown]').textContent).toMatch(/\d+天/);
+		expect(card('c5a0e24a8ec9').querySelector('.sch-dial-main').textContent).toBe('07:00');
+		expect(card('aaaaaaaaaaaa').querySelector('.sch-dial-main').textContent).toBe('2');
 		expect(target.querySelectorAll('[data-schedule-job]').length).toBe(2);
 		expect(card('c5a0e24a8ec9').textContent).toContain('每周一 07:00');
 		expect(card('c5a0e24a8ec9').textContent).toContain('weekly-cli-updates.sh');
@@ -162,7 +160,7 @@ describe('Schedules', () => {
 		await until(() => !!target.querySelector('[data-schedule-form]'));
 		setValue(target.querySelector('[data-schedule-name]'), '  工作日早报 ');
 		setValue(target.querySelector('[data-schedule-prompt]'), '汇总 AI 新闻');
-		setValue(target.querySelector('[data-schedule-frequency]'), 'weekdays');
+		target.querySelector('[data-schedule-frequency] [data-value="weekdays"]').click();
 		await sleep(10);
 		setValue(target.querySelector('[data-schedule-time]'), '08:30');
 		await sleep(10);
@@ -186,10 +184,9 @@ describe('Schedules', () => {
 		card('c5a0e24a8ec9').querySelector('[data-schedule-edit]').click();
 		await until(() => !!target.querySelector('[data-schedule-form]'));
 		expect(target.querySelectorAll('[data-schedule-prompt]').length).toBe(0);
-		const picked = Array.from(
-			target.querySelectorAll('[data-schedule-frequency] option')
-		).find((o: any) => o.selected) as any;
+		const picked = target.querySelector('[data-schedule-frequency] [aria-pressed="true"]');
 		expect(picked.textContent.trim()).toBe('每周');
+		expect(target.querySelector('[data-schedule-weekday] [aria-pressed="true"]').textContent.trim()).toBe('一');
 		setValue(target.querySelector('[data-schedule-time]'), '06:00');
 		await sleep(10);
 		(target.querySelector('[data-schedule-form]') as any).dispatchEvent(

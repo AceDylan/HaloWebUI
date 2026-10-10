@@ -15,6 +15,8 @@
 		summarizeRuns,
 		formatUsd,
 		formatHours,
+		formatTokens,
+		tokensTitle,
 		runnerName,
 		isFailed,
 		isQuotaStop,
@@ -232,7 +234,7 @@
 			<span class={summary.total.failed ? 'text-red-600 dark:text-red-400' : ''}
 				>{summary.total.failed}</span
 			>
-			· 额度中断 {summary.total.quota}。费用是执行器自报的 API 价格折算值，订阅实际账单另计；{`${reportedCost}/${filtered.length} 次任务提供了费用`}，缺失值不参与合计。
+			· 额度中断 {summary.total.quota}。费用是执行器自报的 API 价格折算值，订阅实际账单另计；codex / agy 不报费用，按 token × 中转单价估算，标「≈」{#if summary.total.estimated}（{summary.total.estimated} 次，共 {formatTokens(summary.total.tokens)} token）{/if}；{`${reportedCost}/${filtered.length} 次任务提供了费用`}，缺失值不参与合计。
 		</p>
 
 		<section aria-label="每日 API 折算费用">
@@ -340,6 +342,7 @@
 									<th class="{th} text-left">名称</th>
 									<th class="{th} text-right">任务</th>
 									<th class="{th} text-right">折算费用</th>
+									<th class="{th} text-right">Token</th>
 									<th class="{th} text-right">耗时</th>
 									<th class="{th} text-right">轮数</th>
 									<th class="{th} text-right">失败 / 额度</th>
@@ -361,7 +364,15 @@
 											</div>
 										</td>
 										<td class="px-4 py-2.5 text-right">{row.runs}</td>
-										<td class="px-4 py-2.5 text-right">{formatUsd(row.cost)}</td>
+										<td
+											class="px-4 py-2.5 text-right"
+											title={row.estimated ? `其中 ${row.estimated} 次按 token 估算` : undefined}
+										>
+											{row.estimated ? '≈' : ''}{formatUsd(row.cost)}
+										</td>
+										<td class="px-4 py-2.5 text-right text-gray-500">
+											{row.tokens ? formatTokens(row.tokens) : '—'}
+										</td>
 										<td class="whitespace-nowrap px-4 py-2.5 text-right text-gray-500">
 											{formatHours(row.seconds)}
 										</td>
@@ -422,8 +433,14 @@
 								>
 									{STATUS_LABEL[run.status] ?? run.status}{#if isQuotaStop(run)} · 额度中断{/if}
 								</td>
-								<td class="px-4 py-2.5 text-right tabular-nums">
-									{run.cost_usd === null ? '—' : formatUsd(run.cost_usd)}
+								<td
+									class="px-4 py-2.5 text-right tabular-nums"
+									title={run.cost_estimated ? tokensTitle(run) : undefined}
+									data-halo-runner-cost-estimated={run.cost_estimated ? '' : undefined}
+								>
+									{run.cost_usd === null
+										? '—'
+										: `${run.cost_estimated ? '≈' : ''}${formatUsd(run.cost_usd)}`}
 								</td>
 								<td
 									class="hidden whitespace-nowrap px-4 py-2.5 text-right tabular-nums text-gray-500 sm:table-cell"

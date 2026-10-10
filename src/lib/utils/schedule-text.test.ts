@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
 	buildSchedule,
+	countdownParts,
 	cronText,
+	cycleProgress,
 	defaultScheduleForm,
 	deliverText,
+	dialText,
 	scheduleFormOf,
 	scheduleText
 } from './schedule-text';
@@ -82,5 +85,40 @@ describe('deliverText', () => {
 		expect(deliverText('telegram:5231')).toBe('发到 Telegram');
 		expect(deliverText('local')).toBe('只保存在 Hermes');
 		expect(deliverText('origin')).toBe('发回创建它的会话');
+	});
+});
+
+describe('dials and countdown', () => {
+	it('reads a job time as a dial', () => {
+		expect(dialText('每周一 07:00')).toEqual({ main: '07:00', sub: '每周一' });
+		expect(dialText('工作日 08:30')).toEqual({ main: '08:30', sub: '工作日' });
+		expect(dialText('一次 · 10 月 12 日 08:00')).toEqual({ main: '08:00', sub: '10 月 12 日' });
+		expect(dialText('每 2 小时')).toEqual({ main: '2', sub: '小时一次' });
+		expect(dialText('每小时')).toEqual({ main: '1', sub: '小时一次' });
+		expect(dialText('每 30 分钟')).toEqual({ main: '30', sub: '分钟一次' });
+		expect(dialText('every monday 9am').main).toBe('∗');
+	});
+
+	it('measures the way from the last run to the next', () => {
+		const now = Date.parse('2026-10-10T08:00:00+08:00');
+		const job = (next: string | null, last: string | null, schedule: any = { kind: 'cron', expr: '0 7 * * 1' }) => ({
+			next_run_at: next,
+			last_run_at: last,
+			schedule
+		});
+		expect(cycleProgress(job('2026-10-12T07:00:00+08:00', '2026-10-05T07:00:00+08:00'), now)).toBeCloseTo(
+			(7 * 24 - 47) / (7 * 24)
+		);
+		expect(cycleProgress(job('2026-10-10T09:00:00+08:00', null, { kind: 'interval', minutes: 120 }), now)).toBeCloseTo(0.5);
+		expect(cycleProgress(job('2026-10-10T09:00:00+08:00', null), now)).toBe(0);
+		expect(cycleProgress(job(null, '2026-10-05T07:00:00+08:00'), now)).toBeNull();
+	});
+
+	it('counts down in the two largest units', () => {
+		const now = Date.parse('2026-10-10T08:00:00+08:00');
+		expect(countdownParts('2026-10-12T07:00:00+08:00', now)).toEqual([['1', '天'], ['23', '小时']]);
+		expect(countdownParts('2026-10-10T08:05:30+08:00', now)).toEqual([['5', '分'], ['30', '秒']]);
+		expect(countdownParts('2026-10-10T07:00:00+08:00', now)).toEqual([]);
+		expect(countdownParts(null, now)).toEqual([]);
 	});
 });

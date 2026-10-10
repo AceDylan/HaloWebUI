@@ -195,3 +195,60 @@ export const deliverText = (deliver: string | null | undefined) => {
 	const names: Record<string, string> = { telegram: 'Telegram', qqbot: 'QQ', discord: 'Discord', slack: 'Slack' };
 	return `发到 ${names[platform] ?? platform}`;
 };
+
+// ---- the page's dials and countdown ----
+
+/** A job's time for its dial: "07:00" over "每周一", "2" over "小时一次". */
+export const dialText = (text: string): { main: string; sub: string } => {
+	const at = text.match(/\d{1,2}:\d{2}/);
+	if (at) {
+		const sub = text
+			.replace(at[0], '')
+			.replace(/^一次 · /, '')
+			.replace(/\s+/g, ' ')
+			.trim();
+		return { main: at[0], sub };
+	}
+	const every = text.match(/^每\s*(\d+)?\s*(分钟|小时|天)/);
+	if (every) return { main: every[1] ?? '1', sub: `${every[2]}一次` };
+	return { main: '∗', sub: text.slice(0, 8) };
+};
+
+const toMs = (iso: string | null | undefined) => {
+	const ms = iso ? new Date(iso).getTime() : NaN;
+	return Number.isNaN(ms) ? null : ms;
+};
+
+/** How far a job is from its last run to its next one, 0–1; null when there is no next run. */
+export const cycleProgress = (
+	job: { next_run_at: string | null; last_run_at: string | null; schedule: ScheduleLike },
+	now = Date.now()
+): number | null => {
+	const next = toMs(job.next_run_at);
+	if (next === null) return null;
+	const last = toMs(job.last_run_at);
+	const period =
+		job.schedule?.kind === 'interval' && job.schedule.minutes
+			? job.schedule.minutes * 60_000
+			: last !== null && next > last
+				? next - last
+				: null;
+	if (!period) return 0;
+	return Math.min(1, Math.max(0, 1 - (next - now) / period));
+};
+
+/** The time left until *iso* in its two largest units: [["2", "天"], ["23", "小时"]]. */
+export const countdownParts = (iso: string | null | undefined, now = Date.now()) => {
+	const at = toMs(iso);
+	if (at === null) return [];
+	const left = Math.max(0, Math.floor((at - now) / 1000));
+	const units: [number, string][] = [
+		[Math.floor(left / 86400), '天'],
+		[Math.floor((left % 86400) / 3600), '小时'],
+		[Math.floor((left % 3600) / 60), '分'],
+		[left % 60, '秒']
+	];
+	const first = units.findIndex(([n]) => n > 0);
+	if (first === -1) return [];
+	return units.slice(first, first + 2).map(([n, unit]) => [String(n), unit] as [string, string]);
+};

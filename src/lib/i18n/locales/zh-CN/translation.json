@@ -1127,6 +1127,8 @@
 	"Send to chat": "发到对话",
 	"Open the chat": "打开对话",
 	"Made in a chat": "对话里生成的",
+	"Open the team": "打开协作",
+	"Picture of a team result": "协作结论配图",
 	"Only images saved here can be sent to a chat": "只有存在这里的图片才能发到对话",
 	"Opened from a chat: the image is a reference": "已从对话打开：这张图作为参考图",
 	"Picking up the image you started generating": "正在接上你刚才开始的生图",

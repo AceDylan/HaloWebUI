@@ -41,7 +41,13 @@ from open_webui.utils.agent_teams import (
     start_planning,
     start_team,
 )
-from open_webui.utils.agent_team_outputs import concluded, follow_up, save_to_knowledge
+from open_webui.utils.agent_team_outputs import (
+    concluded,
+    follow_up,
+    illustration_to_gallery,
+    save_to_knowledge,
+    snapshot_illustration,
+)
 from open_webui.utils import team_chats
 from open_webui.utils.auth import get_verified_user
 
@@ -836,15 +842,27 @@ class ConcludedForm(BaseModel):
 
 @router.post("/hermes/teams/{team_id}/concluded")
 async def hermes_concluded(request: Request, team_id: str, form: ConcludedForm, caller=Depends(_hermes_caller)):
-    """The lead has written the team's conclusion: it goes into the chat the team came from."""
+    """The lead has written the team's conclusion: it goes into the chat the team came from (and
+    its picture, if drawn, into the image studio gallery)."""
     user, target = caller
-    team, _snap, _err = await reconcile(_own(team_id, user), target)
+    team, snap, _err = await reconcile(_own(team_id, user), target)
     if team.status != "running":
         return {"posted": False, "reason": "not running"}
+    await illustration_to_gallery(request, team, target, snapshot_illustration(snap))
     try:
         return await concluded(request, team, target, telegram=form.telegram)
     except TeamsError as exc:
         _raise(exc)
+
+
+@router.post("/hermes/teams/{team_id}/illustrated")
+async def hermes_illustrated(request: Request, team_id: str, caller=Depends(_hermes_caller)):
+    """The result's picture is drawn: a copy goes into the owner's image studio gallery."""
+    user, target = caller
+    team, snap, _err = await reconcile(_own(team_id, user), target)
+    if team.status != "running":
+        return {"added": False, "reason": "not running"}
+    return await illustration_to_gallery(request, team, target, snapshot_illustration(snap))
 
 
 @router.post("/hermes/teams/{team_id}/knowledge")

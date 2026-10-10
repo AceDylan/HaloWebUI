@@ -140,6 +140,9 @@ def test_the_result_gets_a_picture_in_the_users_template_style(pkg, team_id, pla
 
     monkeypatch.setattr(pkg.plan, "call_model", condense)
     monkeypatch.setattr(illustrate, "generate_image", draw)
+    handed = []
+    monkeypatch.setattr(__import__("halowebui_teams.link").link, "configured", lambda: True)
+    monkeypatch.setattr(__import__("halowebui_teams.link").link, "illustrated", lambda owner, tid: handed.append((owner, tid)) or {})
     with __import__("pytest").raises(ValueError):
         illustrate.start("halo-nothing")  # no conclusion yet
     entry = illustrate.start(slug, {"name": "知识卡片 · 小红书封面", "prompt": "做成竖版知识卡片。\n\n内容：", "aspect": "2:3"})
@@ -153,6 +156,7 @@ def test_the_result_gets_a_picture_in_the_users_template_style(pkg, team_id, pla
     # under the title and its one-line summary, before the body
     assert md.index("> 先定戒烟日。") < md.index("![科学戒烟行动指南](images/result-1.png)") < md.index("## 一、准备")
     assert "[提示词](images/result-1.prompt.md)" in md and md.count(illustrate.MARK) == 1
+    assert handed == [("u1", team_id)]  # HaloWebUI puts the picture in the owner's image studio gallery
     brief = pkg.teams.snapshot(team_id, "u1")["team"]["conclusion"]
     assert brief["illustration"]["status"] == "ready" and brief["illustration"]["path"] == "images/result-1.png"
     # drawing again replaces the picture in place; a rewritten conclusion keeps the latest picture
@@ -172,8 +176,11 @@ def test_a_picture_that_could_not_be_drawn_says_why(pkg, team_id, plan_dict, mon
     slug = _concluded_team(pkg, team_id, plan_dict, monkeypatch)
     monkeypatch.setattr(pkg.plan, "call_model", lambda *a, **k: ("标题：x\n要点：y", "", {"model": "gpt-chat"}))
     monkeypatch.setattr(illustrate, "generate_image", lambda args: json.dumps({"success": False, "error": "429 rate limit"}))
+    handed = []
+    monkeypatch.setattr(__import__("halowebui_teams.link").link, "configured", lambda: True)
+    monkeypatch.setattr(__import__("halowebui_teams.link").link, "illustrated", lambda owner, tid: handed.append(tid) or {})
     entry = illustrate.start(slug, None)
-    assert entry["status"] == "failed" and "429" in entry["error"]
+    assert entry["status"] == "failed" and "429" in entry["error"] and handed == []
     md = (Path(pkg.common.read_team(slug)["workspace"]) / ".halo" / "conclusion.md").read_text(encoding="utf-8")
     assert illustrate.MARK not in md
 

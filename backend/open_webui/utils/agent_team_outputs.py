@@ -8,8 +8,11 @@
   conclusion as its first reply (and is the team's chat from then on).
 - 「存入知识库」: the conclusion as a Markdown file in the user's own 「协作结论」 knowledge base,
   replacing the version saved before for the same team.
+- The result's picture (结论配图), once drawn, is copied into the user's image studio gallery
+  (Hermes calls back when it is ready, and the hand-over to the chat checks again).
 """
 
+import asyncio
 import io
 import logging
 import re
@@ -21,6 +24,7 @@ from open_webui.models.agent_teams import AgentTeamModel, AgentTeams
 from open_webui.models.chats import ChatForm, Chats
 from open_webui.utils import agent_teams
 from open_webui.utils.agent_teams import HermesTarget, TeamsError
+from open_webui.utils.image_studio_record import record_in_studio, team_image_studio_item
 
 log = logging.getLogger(__name__)
 
@@ -37,6 +41,8 @@ _LINK_RE = re.compile(r'(!?\[[^\]]*\]\()(\s*<?[^)\s>]+>?)((?:\s+"[^"]*")?\))')
 _SCHEME_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9+.-]*:")
 _IMAGE_RE = re.compile(r"\.(png|jpe?g|gif|webp|svg|bmp|avif)$", re.IGNORECASE)
 _UNSAFE_NAME_RE = re.compile(r'[\\/:*?"<>|\x00-\x1f]+')
+_PROMPT_BLOCK_RE = re.compile(r"^## 提示词\s*\n+(`{3,})\n(.*?)\n\1", re.MULTILINE | re.DOTALL)
+_gallery_locks: dict[str, asyncio.Lock] = {}
 
 
 def run_id(team_id: str, generated_at: Any) -> str:
@@ -371,3 +377,68 @@ async def save_to_knowledge(request, user, team: AgentTeamModel, target: HermesT
                                   "generated_at": generated_at, "at": int(time.time())})
     return {**result, "duplicate": False, "generated_at": generated_at}
 
+
+
+# --- into the image studio gallery -----------------------------------------------------------------
+
+def snapshot_illustration(snap: Any) -> Optional[dict]:
+    """The result's picture as the live snapshot shows it (``team.conclusion.illustration``)."""
+    live = snap.get("team") if isinstance(snap, dict) else None
+    conclusion = (live or {}).get("conclusion") if isinstance(live, dict) else None
+    illustration = conclusion.get("illustration") if isinstance(conclusion, dict) else None
+    return illustration if isinstance(illustration, dict) else None
+
+
+async def _illustration_prompt(target: HermesTarget, team: AgentTeamModel, illustration: dict) -> str:
+    """The prompt gpt-image was given (kept next to the picture), else a line naming the picture."""
+    fallback = f"协作结论配图（{illustration.get('template') or '模板'}）：{team.title or '协作任务'}"
+    prompt_path = str(illustration.get("prompt_path") or "")
+    if not prompt_path:
+        return fallback
+    try:
+        data, _headers = await agent_teams.hermes_file(target, f"/{team.id}/files/{quote(prompt_path)}", timeout=20)
+    except TeamsError:
+        return fallback
+    match = _PROMPT_BLOCK_RE.search(data.decode("utf-8", errors="replace"))
+    return match.group(2).strip() if match and match.group(2).strip() else fallback
+
+
+async def illustration_to_gallery(request, team: AgentTeamModel, target: HermesTarget,
+                                  illustration: Optional[dict]) -> dict:
+    """The result's picture into the owner's image studio gallery, once per drawn picture: the
+    image is copied into HaloWebUI's own files, so it stays when the team is deleted. Best effort."""
+    from open_webui.models.users import Users
+    from open_webui.routers.images import upload_image
+
+    illustration = illustration or {}
+    path = str(illustration.get("path") or "")
+    if illustration.get("status") != "ready" or not path or not _IMAGE_RE.search(path):
+        return {"added": False, "reason": "no picture"}
+    key = f"{path}@{illustration.get('at') or 0}"
+    lock = _gallery_locks.setdefault(team.id, asyncio.Lock())
+    async with lock:
+        fresh = AgentTeams.get(team.id, team.user_id) or team
+        if (fresh.meta or {}).get("gallery_image") == key:
+            return {"added": False, "reason": "already"}
+        user = Users.get_user_by_id(team.user_id)
+        if user is None:
+            return {"added": False, "reason": "no user"}
+        try:
+            data, headers = await agent_teams.hermes_file(target, f"/{team.id}/files/{quote(path)}")
+            content_type = str(headers.get("Content-Type") or "").split(";")[0].strip().lower()
+            if not content_type.startswith("image/") or content_type == "image/svg+xml":
+                return {"added": False, "reason": "not an image"}
+            prompt = await _illustration_prompt(target, team, illustration)
+            url = await asyncio.to_thread(upload_image, request, {"agent_team": team.id, "path": path},
+                                          data, content_type, user)
+        except Exception as exc:  # noqa: BLE001 — the picture is still in the team's workspace
+            log.warning("teams: picture of team %s did not reach the image studio: %s", team.id, exc)
+            return {"added": False, "reason": "copy failed"}
+        at = int(illustration.get("at") or time.time())
+        form = team_image_studio_item(team_id=team.id, picture_id=key, url=url, prompt=prompt,
+                                      model="gpt-image", created_at_ms=at * 1000)
+        if not record_in_studio(team.user_id, [form]):
+            return {"added": False, "reason": "gallery write failed"}
+        _set_meta(fresh, "gallery_image", key)
+        log.info("teams: picture of team %s added to the image studio gallery", team.id)
+        return {"added": True, "url": url}

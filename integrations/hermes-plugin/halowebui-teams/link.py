@@ -187,6 +187,11 @@ def concluded(owner: str, team_id: str, *, telegram: bool) -> dict:
     return call("POST", f"/teams/{team_id}/concluded", owner, {"telegram": bool(telegram)}, timeout=60)
 
 
+def illustrated(owner: str, team_id: str) -> dict:
+    """The result's picture is drawn: HaloWebUI adds it to the owner's image studio gallery."""
+    return call("POST", f"/teams/{team_id}/illustrated", owner, {}, timeout=60)
+
+
 def save_knowledge(owner: str, team_id: str) -> dict:
     """「存入知识库」: the conclusion into the owner's 「协作结论」 knowledge base in HaloWebUI."""
     return call("POST", f"/teams/{team_id}/knowledge", owner, {}, timeout=180)

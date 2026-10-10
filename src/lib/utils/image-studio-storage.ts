@@ -31,8 +31,10 @@ export type GalleryImage = {
 	createdAt: number;
 	favorite?: boolean;
 	tags?: string[];
-	// Made in this chat (written by the server, see utils/image_studio_record.py).
+	// Made in this chat / for this team's result (written by the server, see
+	// utils/image_studio_record.py).
 	chatId?: string;
+	teamId?: string;
 };
 
 export type GenerationHistory = {
@@ -135,6 +137,8 @@ export const normalizeGalleryImages = (raw: unknown, now: number = Date.now()): 
 		if (tags.length) image.tags = tags;
 		const chatId = asText(item.chatId);
 		if (chatId) image.chatId = chatId;
+		const teamId = asText(item.teamId);
+		if (teamId) image.teamId = teamId;
 		images.push(image);
 	}
 	return images;

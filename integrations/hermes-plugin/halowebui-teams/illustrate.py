@@ -7,7 +7,8 @@ points); then Hermes' ``image_generate`` (gpt-image through the configured provi
 + content. The image and its prompt are kept in the workspace like a member's
 (``images/result-<n>.png`` + ``.prompt.md``) and the conclusion gets the picture between
 ``<!-- halo:illustration -->`` marks — a rewritten conclusion gets it back. Runs in a background
-thread; ``conclusion.illustration`` in the team record says where it stands.
+thread; ``conclusion.illustration`` in the team record says where it stands. A finished picture is
+also handed to HaloWebUI, which keeps it in the owner's image studio gallery.
 
 A conclusion the lead has just written gets its picture on its own (``auto``), in the template
 HaloWebUI handed over when the team started (the owner's 「手绘万能图 · 自动选画风与画幅」); the
@@ -145,6 +146,19 @@ def _set(slug: str, **fields: Any) -> dict:
     return ((update_team(slug, mutate).get("conclusion") or {}).get("illustration") or {})
 
 
+def _to_gallery(team: dict) -> None:
+    """HaloWebUI copies the new picture into the owner's image studio gallery (best effort: the
+    hand-over of the result to its chat does it too)."""
+    from . import link
+
+    if not team.get("owner") or not team.get("team_id") or not link.configured():
+        return
+    try:
+        link.illustrated(team["owner"], team["team_id"])
+    except link.HaloError as exc:
+        logger.info("halowebui-teams: HaloWebUI did not take the picture of %s (%s)", team.get("team_id"), exc.message)
+
+
 def _run(slug: str, template: Optional[dict]) -> None:
     from . import hooks
     from .conclusion import conclusion_path
@@ -187,6 +201,7 @@ def _run(slug: str, template: Optional[dict]) -> None:
         tmp = path.with_suffix(".tmp")
         tmp.write_text(place(fresh, block_for(entry)), encoding="utf-8")
         os.replace(tmp, path)
+        _to_gallery(team)
     except Exception as exc:  # noqa: BLE001
         logger.warning("halowebui-teams: illustration for %s failed", slug, exc_info=True)
         _set(slug, status="failed", error=f"配图出错：{type(exc).__name__}", at=now())

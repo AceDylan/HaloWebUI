@@ -601,6 +601,55 @@ def _finished_team(client, hermes, user_id="u1", chat_id=None):
     return team_id
 
 
+def test_the_result_picture_lands_in_the_image_studio_gallery_once(hermes, monkeypatch):
+    from open_webui.models.image_studio import ImageStudioItems
+    from open_webui.routers import images as images_router
+
+    fetched, stored = [], []
+
+    async def fake_file(target, path, *, timeout=60):
+        fetched.append(path)
+        if path.endswith(".prompt.md"):
+            return ("# result-1.png 的生图提示词\n\n- 模型：gpt-image\n\n## 提示词\n\n````\n画一张手绘信息图\n内容：计算器\n````\n"
+                    .encode()), {"Content-Type": "text/plain; charset=utf-8"}
+        return b"\x89PNG fake", {"Content-Type": "image/png"}
+
+    def fake_upload(request, metadata, data, content_type, user):
+        stored.append((metadata, data, content_type, user.id))
+        return f"/api/v1/files/f{len(stored)}/content"
+
+    monkeypatch.setattr(teams_utils, "hermes_file", fake_file)
+    monkeypatch.setattr(images_router, "upload_image", fake_upload)
+    client = _client("u1")
+    team_id = _finished_team(client, hermes)
+    picture = {"status": "ready", "path": "images/result-1.png", "prompt_path": "images/result-1.prompt.md",
+               "template": "手绘万能图", "at": 1700000200}
+    hermes.responses[("GET", team_id)] = {"team": {"phase": "completed", "conclusion": {"illustration": picture}},
+                                          "tasks": []}
+    bare = _hermes_client(monkeypatch)
+    h = {"X-Hermes-Key": "k", "X-Halo-Owner": "u1"}
+    out = bare.post(f"/api/v1/teams/hermes/teams/{team_id}/illustrated", headers=h, json={})
+    assert out.status_code == 200 and out.json() == {"added": True, "url": "/api/v1/files/f1/content"}
+    assert stored == [({"agent_team": team_id, "path": "images/result-1.png"}, b"\x89PNG fake", "image/png", "u1")]
+    (item,) = [i for i in ImageStudioItems.get_items_by_user_id("u1", "gallery") if i.data.get("teamId") == team_id]
+    assert item.data["url"] == "/api/v1/files/f1/content" and item.data["createdAt"] == 1700000200000
+    assert item.data["prompt"] == "画一张手绘信息图\n内容：计算器" and item.data["model"] == "gpt-image"
+    assert not ImageStudioItems.get_items_by_user_id("u1", "history")  # the history is the workbench's own
+    # told again (the hand-over to the chat checks too): no second copy
+    assert bare.post(f"/api/v1/teams/hermes/teams/{team_id}/illustrated", headers=h, json={}).json()["added"] is False
+    assert bare.post(f"/api/v1/teams/hermes/teams/{team_id}/concluded", headers=h, json={}).json()["posted"] is False
+    assert len(stored) == 1
+    # a new picture for the same team is added next to the first
+    hermes.responses[("GET", team_id)]["team"]["conclusion"]["illustration"] = {**picture, "path": "images/result-2.png",
+                                                                               "at": 1700000300}
+    assert bare.post(f"/api/v1/teams/hermes/teams/{team_id}/illustrated", headers=h, json={}).json()["added"] is True
+    assert len([i for i in ImageStudioItems.get_items_by_user_id("u1", "gallery") if i.data.get("teamId") == team_id]) == 2
+    # nothing drawn yet / drawing: nothing to add
+    hermes.responses[("GET", team_id)]["team"]["conclusion"]["illustration"] = {"status": "generating"}
+    assert bare.post(f"/api/v1/teams/hermes/teams/{team_id}/illustrated", headers=h, json={}).json() == {
+        "added": False, "reason": "no picture"}
+
+
 def test_the_conclusion_goes_into_the_chat_the_team_came_from(hermes, monkeypatch):
     from open_webui.utils import hermes_notify
 

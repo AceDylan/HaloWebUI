@@ -67,6 +67,7 @@ describe('image-studio-storage', () => {
 					favorite: true
 				},
 				{ id: 'b', url: '/img/b', favorite: 'yes', tags: ['x', '', 3] },
+				{ id: 't', url: '/img/t', createdAt: 7, teamId: 'team-1', chatId: '' },
 				{ id: '', url: '/img/c' },
 				{ id: 'd' },
 				'junk',
@@ -76,7 +77,8 @@ describe('image-studio-storage', () => {
 		);
 		expect(images).toEqual([
 			{ id: 'a', url: '/img/a', prompt: 'p', model: 'm', size: 's', createdAt: 5, favorite: true },
-			{ id: 'b', url: '/img/b', prompt: '', model: '', size: '', createdAt: 99, tags: ['x', '3'] }
+			{ id: 'b', url: '/img/b', prompt: '', model: '', size: '', createdAt: 99, tags: ['x', '3'] },
+			{ id: 't', url: '/img/t', prompt: '', model: '', size: '', createdAt: 7, teamId: 'team-1' }
 		]);
 	});
 

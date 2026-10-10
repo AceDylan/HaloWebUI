@@ -2931,6 +2931,15 @@
 												>
 													{$i18n.t('Open the chat')}
 												</a>
+											{:else if image.teamId}
+												<a
+													href={`/teams/${encodeURIComponent(image.teamId)}/conclusion`}
+													class="truncate rounded-full px-1.5 py-0.5 text-gray-500 underline-offset-2 hover:text-gray-800 hover:underline dark:hover:text-gray-200"
+													title={$i18n.t('Picture of a team result')}
+													data-image-gallery-team
+												>
+													{$i18n.t('Open the team')}
+												</a>
 											{/if}
 										</span>
 										<button
@@ -3045,17 +3054,6 @@
 											{#if historyDuration(item)}
 												<span>•</span>
 												<span class="tabular-nums">{historyDuration(item)}</span>
-											{/if}
-											{#if item.parameters?.origin === 'chat' && item.parameters?.chatId}
-												<span>•</span>
-												<a
-													href={`/c/${encodeURIComponent(item.parameters.chatId)}`}
-													class="underline-offset-2 hover:text-gray-800 hover:underline dark:hover:text-gray-200"
-													title={$i18n.t('Made in a chat')}
-													data-image-history-chat
-												>
-													{$i18n.t('Open the chat')}
-												</a>
 											{/if}
 											<span class="ml-auto flex items-center gap-0.5">
 												<button

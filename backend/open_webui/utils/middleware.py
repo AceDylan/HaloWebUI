@@ -4793,7 +4793,7 @@ async def _build_chat_image_generation_local_response(
         )
     negative_prompt = ""
 
-    # Every image made here also lands in the image studio's gallery and history.
+    # Every image made here also lands in the image studio's gallery.
     def record_studio_images(images: list[Any]) -> None:
         metadata = extra_params.get("__metadata__") or {}
         record_chat_images_in_studio(
@@ -4803,8 +4803,6 @@ async def _build_chat_image_generation_local_response(
             prompt=str(user_message or ""),
             options=image_generation_options,
             images=images,
-            source_urls=source_image_urls,
-            started_at_ms=started_at_ms,
             completed_at_ms=int(time.time() * 1000),
         )
 
@@ -4889,7 +4887,6 @@ async def _build_chat_image_generation_local_response(
                 "open_webui_image_generation_partial_callback",
                 emit_partial_image_generation_file,
             )
-        started_at_ms = int(time.time() * 1000)
         try:
             images = await image_generations(
                 request=request,

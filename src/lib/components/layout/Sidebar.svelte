@@ -1032,7 +1032,14 @@
 					</button>
 				</Tooltip>
 
-				<ActiveHermesRuns compact buttonClass={iconButtonClass} />
+				<ActiveHermesRuns
+					compact
+					buttonClass={iconButtonClass}
+					onOpen={() => {
+						clearPeekTimer();
+						peek = false;
+					}}
+				/>
 			</div>
 		{/if}
 

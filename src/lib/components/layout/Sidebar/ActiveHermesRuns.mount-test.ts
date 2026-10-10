@@ -100,3 +100,48 @@ describe('ActiveHermesRuns background row', () => {
 		expect(button().textContent.trim()).toBe('停止');
 	});
 });
+
+describe('ActiveHermesRuns collapsed rail', () => {
+	it('opens a popup instead of the sidebar, and a row closes it', async () => {
+		const stores = await import('$lib/stores');
+		const { get } = await import('svelte/store');
+		stores.showSidebar.set(false);
+		stores.chatId.set('another-chat');
+		stores.chats.set([{ id: 'chat-done', title: '整理周报' }] as any);
+		stores.hermesActiveRuns.set([]);
+		stores.hermesBackgroundRuns.set([{ ...RUN }]);
+		stores.hermesUnreadChatIds.set(new Set(['chat-done']));
+		const { default: Runs } = await import('./ActiveHermesRuns.svelte');
+		target = document.createElement('div');
+		document.body.appendChild(target);
+		const onOpen = vi.fn();
+		const i18n = writable({ t: (s: string) => s });
+		app = new Runs({
+			target,
+			props: { compact: true, onOpen },
+			context: new Map<string, any>([['i18n', i18n]])
+		});
+		await sleep(10);
+		const popup = () => document.body.querySelector('[data-halo-hermes-runs-popup]') as any;
+		expect(popup()).toBeFalsy();
+
+		(target.querySelector('[data-halo-hermes-runs-rail]') as any).click();
+		await sleep(20);
+		expect(onOpen).toHaveBeenCalledTimes(1);
+		expect(get(stores.showSidebar)).toBe(false);
+		expect(popup()).toBeTruthy();
+		// The modal is portaled to <body>, outside the rail.
+		expect(target.contains(popup())).toBe(false);
+		const background = popup().querySelector('[data-halo-hermes-run-state="background"]');
+		expect(background.getAttribute('href')).toBe('/c/chat-9');
+		const unread = popup().querySelector('[data-halo-hermes-run-state="unread"]');
+		expect(unread.getAttribute('href')).toBe('/c/chat-done');
+		expect(unread.textContent).toContain('整理周报');
+
+		background.addEventListener('click', (e: any) => e.preventDefault());
+		background.click();
+		await sleep(400);
+		expect(popup()).toBeFalsy();
+		expect(get(stores.showSidebar)).toBe(false);
+	});
+});

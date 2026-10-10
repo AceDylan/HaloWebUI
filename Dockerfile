@@ -233,6 +233,9 @@ COPY --chown=$UID:$GID --from=frontend-build /app/package.json /app/package.json
 COPY --chown=$UID:$GID ./backend .
 # the built-in assistant templates, for the workbenches' dispatcher (utils/assistant_library.py)
 COPY --chown=$UID:$GID ./src/lib/data/agents-zh.json ./open_webui/assistant_templates.json
+# the native web search model rules the frontend bundles; the backend reads the same file
+# (utils/native_web_search.py, NATIVE_WEB_SEARCH_RULES_PATH)
+COPY --chown=$UID:$GID ./src/lib/data/native-web-search-rules.json /app/src/lib/data/native-web-search-rules.json
 
 # sync frontend static assets into backend static folder
 COPY --chown=$UID:$GID --from=frontend-build /app/backend/open_webui/static /app/backend/open_webui/static

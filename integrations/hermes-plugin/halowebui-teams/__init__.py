@@ -6,7 +6,9 @@ from typing import Any
 
 
 def register(ctx: Any) -> None:
-    from . import api, hooks, tg
+    from . import api, hooks, tg, gallery
+
+    ctx.register_hook("image_generated", gallery.on_image_generated)
 
     ctx.register_hook("post_tool_call", hooks.on_post_tool_call)
     ctx.register_hook("subagent_start", hooks.on_subagent_start)

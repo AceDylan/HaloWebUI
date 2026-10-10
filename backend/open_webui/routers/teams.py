@@ -50,6 +50,7 @@ from open_webui.utils.agent_team_outputs import (
 )
 from open_webui.utils import team_chats
 from open_webui.utils.auth import get_verified_user
+from open_webui.utils.hermes_image_gallery import HermesImageForm, store_image
 
 log = logging.getLogger(__name__)
 router = APIRouter()
@@ -770,6 +771,10 @@ class HermesCreateForm(BaseModel):
 
 async def _hermes_caller(request: Request):
     _enabled()
+    return await _authenticated_hermes_caller(request)
+
+
+async def _authenticated_hermes_caller(request: Request):
     key = (request.headers.get("X-Hermes-Key") or "").strip()
     owner = (request.headers.get("X-Halo-Owner") or "").strip()
     denied = HTTPException(status_code=401, detail="unauthorized")
@@ -793,6 +798,46 @@ async def _hermes_caller(request: Request):
         _hermes_auth_cache.pop(owner, None)
         raise denied
     return user, target
+
+
+_image_import_locks = [asyncio.Lock() for _ in range(32)]
+
+
+@router.post("/hermes/images")
+async def import_hermes_image(request: Request, form: HermesImageForm, caller=Depends(_authenticated_hermes_caller)):
+    user, target = caller
+    chat_id = ""
+    team_id = ""
+    # API sessions use HaloWebUI chat ids. Resolve ownership from the saved chat,
+    # never trust an arbitrary owner id supplied in an image's metadata.
+    chat = None
+    if form.platform == "api_server":
+        for candidate in (form.chat_id, form.session_id):
+            if candidate:
+                chat = Chats.get_chat_by_id(candidate)
+                if chat is not None:
+                    break
+    if chat is not None:
+        if chat.user_id != user.id:
+            owner = Users.get_user_by_id(chat.user_id)
+            if owner is None:
+                raise HTTPException(403, "Image owner unavailable")
+            try:
+                owner_target = await hermes_target(request, owner)
+            except TeamsError:
+                raise HTTPException(403, "Image owner unavailable") from None
+            if not hmac.compare_digest(owner_target.headers.get("Authorization", "").encode(),
+                                       target.headers.get("Authorization", "").encode()):
+                raise HTTPException(403, "Image belongs to another Hermes connection")
+            user = owner
+        chat_id = chat.id
+    if form.team_id:
+        team = AgentTeams.get(form.team_id, user.id)
+        # A deleted team must not strand a successfully generated image. Only
+        # attach navigation when this caller still owns the referenced team.
+        team_id = team.id if team else ""
+    async with _image_import_locks[int(form.event_id[:2], 16) % len(_image_import_locks)]:
+        return await asyncio.to_thread(store_image, form, user.id, chat_id=chat_id, team_id=team_id)
 
 
 def _clean_origin(origin: dict) -> Optional[dict]:

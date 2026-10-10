@@ -3,6 +3,7 @@ version: "0.1.0"
 description: "HaloWebUI agent teams: one Kanban board per collaboration task, an HTTP API for HaloWebUI's 协作台 (plan, create, snapshot, events, messages, pause/stop/retry), member tool/subagent/delivery events from inside Kanban workers, and the reclaude executor bridge."
 author: HaloWebUI
 provides_hooks:
+  - image_generated
   - pre_gateway_dispatch
   - post_tool_call
   - subagent_start

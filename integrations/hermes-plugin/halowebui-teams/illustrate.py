@@ -160,7 +160,7 @@ def _to_gallery(team: dict) -> None:
 
 
 def _run(slug: str, template: Optional[dict]) -> None:
-    from . import hooks
+    from . import hooks, gallery
     from .conclusion import conclusion_path
     from .plan import call_model
 
@@ -183,7 +183,8 @@ def _run(slug: str, template: Optional[dict]) -> None:
         prompt, template_name = build_prompt(template, content)
         args = {"prompt": prompt, "aspect_ratio": aspect_of(template), "workflow_action": "generate"}
         _set(slug, step="draw", template=template_name)
-        raw = generate_image(args)
+        with gallery.owned_by(team.get("owner", ""), team.get("team_id", "")):
+            raw = generate_image(args)
         data = hooks._as_dict(raw)
         # In a project's worktree the picture is the team's own, not a change to the project: .halo/images
         folder = ".halo/images" if (team.get("project") or {}).get("branch") else hooks.IMAGES_DIR
@@ -196,7 +197,7 @@ def _run(slug: str, template: Optional[dict]) -> None:
         title = next((line[2:].strip() for line in markdown.split("\n") if line.startswith("# ")), "") or team.get("title")
         entry = _set(slug, status="ready", path=rel, prompt_path=rel.rsplit(".", 1)[0] + ".prompt.md",
                      template=template_name, title=redact(title, 60), seconds=round(time.time() - started, 1),
-                     at=now(), error="", step="")
+                     at=now(), error="", step="", gallery_queued=gallery.is_queued(data))
         fresh = path.read_text(encoding="utf-8") if path.exists() else markdown  # rewritten meanwhile?
         tmp = path.with_suffix(".tmp")
         tmp.write_text(place(fresh, block_for(entry)), encoding="utf-8")
@@ -268,8 +269,7 @@ def public(entry: Any) -> Optional[dict]:
     if not isinstance(entry, dict) or not entry.get("status"):
         return None
     out = {k: entry.get(k) for k in ("status", "path", "prompt_path", "template", "started_at", "at", "seconds",
-                                     "error", "step", "by") if entry.get(k) not in (None, "")}
+                                     "error", "step", "by", "gallery_queued") if entry.get(k) not in (None, "")}
     if out.get("status") == "generating" and now() - int(entry.get("started_at") or 0) > STALE:
         out.update(status="failed", error="配图被中断（网关重启），可以重新配图")
     return out
-

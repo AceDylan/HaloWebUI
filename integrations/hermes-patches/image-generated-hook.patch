@@ -1,0 +1,33 @@
+diff --git a/agent/image_gen_provider.py b/agent/image_gen_provider.py
+index 4b49e899c0..62c89df7bb 100644
+--- a/agent/image_gen_provider.py
++++ b/agent/image_gen_provider.py
+@@ -112,6 +112,14 @@ def success_response(
+     }
+     for k, v in (extra or {}).items():
+         payload.setdefault(k, v)
++    try:
++        from hermes_cli.plugins import invoke_hook
++
++        invoke_hook("image_generated", result=dict(payload))
++    except Exception:
++        import logging
++
++        logging.getLogger(__name__).warning("Image completion observer failed", exc_info=True)
+     return payload
+ 
+ 
+diff --git a/hermes_cli/plugins.py b/hermes_cli/plugins.py
+index c28439dfbf..f20f4b0e6b 100644
+--- a/hermes_cli/plugins.py
++++ b/hermes_cli/plugins.py
+@@ -105,6 +105,9 @@ def _install_plugin_debug_handler(force: bool = False) -> None:
+ _install_plugin_debug_handler()
+ 
+ VALID_HOOKS: Set[str] = {
++    # Provider-level completion observer, including calls outside tool dispatch.
++    # Kwargs: result (successful image result dict); return values are ignored.
++    "image_generated",
+     "pre_tool_call", "post_tool_call", "transform_terminal_output", "transform_tool_result",
+     # transform_llm_output: return a replacement string (first non-None wins) or None.
+     "transform_llm_output", "pre_llm_call", "post_llm_call",

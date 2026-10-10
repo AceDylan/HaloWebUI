@@ -44,6 +44,12 @@ def _has_ready_native(slug: str) -> bool:
 
 def tick() -> None:
     from .teams import nudge_dispatch
+    from . import gallery
+
+    try:
+        gallery.flush()
+    except Exception as exc:
+        logger.warning("image gallery queue flush failed (%s)", type(exc).__name__)
 
     for slug in team_boards():
         try:

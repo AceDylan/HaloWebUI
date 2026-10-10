@@ -411,6 +411,10 @@ async def illustration_to_gallery(request, team: AgentTeamModel, target: HermesT
     from open_webui.routers.images import upload_image
 
     illustration = illustration or {}
+    if illustration.get("gallery_queued") is True:
+        # The provider observer owns durable delivery (including retries). The
+        # legacy result-picture callback must not create a second gallery row.
+        return {"added": False, "reason": "hermes image queue"}
     path = str(illustration.get("path") or "")
     if illustration.get("status") != "ready" or not path or not _IMAGE_RE.search(path):
         return {"added": False, "reason": "no picture"}

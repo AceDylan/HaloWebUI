@@ -1124,9 +1124,13 @@
 
 						<!-- ===== Integrations Tab ===== -->
 						{#if selectedTab === 'integrations'}
-							<div class="glass-item p-4">
-								<Knowledge bind:selectedKnowledge={knowledge} collections={$knowledgeCollections} />
-							</div>
+							<!-- Knowledge bases have no page to make them in any more: the block only shows
+								 when one exists or this assistant still has one attached. -->
+							{#if knowledge?.length || $knowledgeCollections?.length}
+								<div class="glass-item p-4">
+									<Knowledge bind:selectedKnowledge={knowledge} collections={$knowledgeCollections} />
+								</div>
+							{/if}
 
 							<div class="glass-item p-4">
 								<ToolsSelector bind:selectedToolIds={toolIds} tools={$tools} />

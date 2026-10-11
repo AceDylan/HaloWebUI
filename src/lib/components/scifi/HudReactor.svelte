@@ -5,23 +5,11 @@
 	 * small HUD read-outs (clock, link state, the model). Pure decoration (aria-hidden); it sits
 	 * behind the avatar and fades out towards the greeting. Styles: scifi.css (.halo-reactor).
 	 */
-	import { onMount } from 'svelte';
+	import { hudClock } from './clock';
 
 	export let label = '';
 
 	const TICKS = Array.from({ length: 120 }, (_, i) => i);
-	let clock = '';
-	const tick = () => {
-		const d = new Date();
-		clock = [d.getHours(), d.getMinutes(), d.getSeconds()]
-			.map((n) => String(n).padStart(2, '0'))
-			.join(':');
-	};
-	onMount(() => {
-		tick();
-		const id = setInterval(() => !document.hidden && tick(), 1000);
-		return () => clearInterval(id);
-	});
 </script>
 
 <div class="halo-reactor" aria-hidden="true">
@@ -61,7 +49,7 @@
 			<circle cx="-166" cy="0" r="2" />
 		</g>
 	</svg>
-	<div class="halo-reactor__hud halo-reactor__hud--tl"><b>SYS</b> ONLINE<br /><i>T+ {clock}</i></div>
+	<div class="halo-reactor__hud halo-reactor__hud--tl"><b>SYS</b> ONLINE<br /><i>T+ {$hudClock}</i></div>
 	<div class="halo-reactor__hud halo-reactor__hud--tr"><b>LINK</b> STABLE<br /><i>NEURAL · 100%</i></div>
 	{#if label}
 		<div class="halo-reactor__hud halo-reactor__hud--br"><b>AGENT</b><br /><i>{label}</i></div>

@@ -1,29 +1,38 @@
 <script lang="ts">
 	/**
-	 * The landing page's models as an orbit: the agent (Hermes) is the core in the middle and the
-	 * other models ride an ellipse around it as holographic nodes, each tied to the core by a link.
-	 * One tap picks the model for the new chat (the menu top left stays the full list). The chosen
-	 * node lights up and its link carries a current; on a change a light runs along the orbit from
-	 * the old node to the new one and the core sends out a ring. The greeting goes in the slot.
-	 * Geometry: utils/model-orbit.ts. Styles: halo-orbit.css (the core reuses halo.css's .halo-orb).
+	 * The landing page's models as an orbit: the chosen model is the core in the middle (inside
+	 * the halo and the reactor), the others ride an ellipse round it as holographic nodes, each
+	 * tied to the core by a link. One tap picks the model for the new chat (the menu top left
+	 * stays the full list) and the two trade places on screen: the picked node locks on, flies
+	 * an arc into the core on a beam while the stars jump, the core flashes and rings out, and
+	 * the old core flies back out to the empty seat. The greeting goes in the slot.
+	 * Geometry and seating: utils/model-orbit.ts. Styles: halo-orbit.css (the core's rings are
+	 * halo.css's .halo-orb and scifi.css's reactor).
 	 */
+	import { tick } from 'svelte';
 	import { config, models as _models, settings } from '$lib/stores';
 	import ModelIcon from '$lib/components/common/ModelIcon.svelte';
 	import HudReactor from '$lib/components/scifi/HudReactor.svelte';
 	import Photo from '$lib/components/icons/Photo.svelte';
+	import { hudClock } from '$lib/components/scifi/clock';
+	import { warp } from '$lib/components/scifi/scifi';
 	import { getModelBaseName, getModelConnectionName } from '$lib/utils/model-display';
 	import { getModelSelectionId } from '$lib/utils/model-identity';
 	import { modelDeck, modelDeckKind, type DeckKind } from '$lib/utils/model-deck';
 	import {
 		isMonoIcon,
 		orbitAccent,
-		orbitArc,
+		orbitBend,
 		orbitFrame,
 		orbitGreetingWidth,
 		orbitLabelSide,
 		orbitLink,
+		orbitOrder,
 		orbitPoint,
-		orbitSlots
+		orbitSlots,
+		seatModels,
+		type OrbitFrame,
+		type OrbitSeating
 	} from '$lib/utils/model-orbit';
 
 	/** The model the new chat will use (resolved), or null. */
@@ -33,6 +42,7 @@
 	export let shows = false;
 
 	const KIND_LABEL: Record<DeckKind, string> = { agent: '智能体', image: '生图', chat: '对话' };
+	const KIND_CODE: Record<DeckKind, string> = { agent: 'AGENT', image: 'IMAGE', chat: 'CHAT' };
 	// a few motes drifting over the stage: [left %, top %, delay s]
 	const MOTES = [
 		[14, 22, 0],
@@ -41,8 +51,12 @@
 		[63, 84, 0.8],
 		[76, 18, 2.4],
 		[88, 58, 4],
-		[52, 46, 5.2]
+		[52, 46, 5.2],
+		[8, 52, 2.9],
+		[94, 30, 1.2]
 	];
+	// the swap: the picked node flies in, the old core flies out (ms)
+	const FLIGHT_MS = 900;
 
 	$: cards = modelDeck($_models, $settings?.pinnedModels).map((model) => {
 		const name = getModelBaseName(model);
@@ -59,53 +73,149 @@
 			mono: isMonoIcon(icon)
 		};
 	});
-	// the agent is the core; without one, the first model is
-	$: hubIndex = Math.max(0, cards.findIndex((card) => card.kind === 'agent'));
-	$: hub = cards[hubIndex];
-	$: satellites = cards.filter((_, index) => index !== hubIndex);
+	$: byId = new Map(cards.map((card) => [card.id, card]));
+	// the agent is the core when the chosen model is not on the orbit
+	$: hubId = (cards.find((card) => card.kind === 'agent') ?? cards[0])?.id ?? '';
 
 	$: selectedId = selected ? getModelSelectionId(selected) : '';
 	$: shows = cards.some((card) => card.id === selectedId);
+	$: target = shows ? selectedId : hubId;
 
 	// The stage's size drives the layout; until it is measured it lays out for a laptop, unseen.
 	let w = 0;
 	let h = 0;
-	$: frame = orbitFrame(w || 860, h || 480, satellites.length);
-	$: slots = orbitSlots(satellites.length);
-	$: nodes = satellites.map((card, index) => {
-		const angle = slots[index];
-		const at = orbitPoint(frame, angle);
-		return {
-			...card,
-			index,
-			angle,
-			x: at.x,
-			y: at.y,
-			side: orbitLabelSide(angle, frame.compact),
-			link: orbitLink(frame, at)
-		};
-	});
+	$: frame = orbitFrame(w || 860, h || 480, Math.max(0, cards.length - 1));
+	$: slots = orbitSlots(Math.max(0, cards.length - 1));
 	$: greetingWidth = orbitGreetingWidth(frame, slots);
-	$: chosen = nodes.find((node) => node.id === selectedId) ?? null;
+
+	let seating: OrbitSeating = { core: '', ring: [] };
+	// reseat() changes `seating` inside a function, which Svelte does not see as a dependency:
+	// it has to run before the statements below that read `seating` (source order decides)
+	$: reseat(
+		cards.map((card) => card.id),
+		target
+	);
+	$: core = byId.get(seating.core) ?? null;
+	$: links = seating.ring.map((id, k) => {
+		const at = orbitPoint(frame, slots[k]);
+		return { id, k, accent: byId.get(id)?.accent ?? 'plain', x: at.x, y: at.y, d: orbitLink(frame, at) };
+	});
+
+	/** Where a model sits now: centre and scale (the core is bigger); `depth` sizes the sphere
+	 *  alone (the far side of the orbit a little smaller), so the labels keep their places. */
+	// frame and angles are passed in (not closed over) so the template re-places on a resize
+	const place = (id: string, seats: OrbitSeating, f: OrbitFrame, angles: number[]) => {
+		if (id === seats.core) {
+			return { x: f.cx, y: f.coreY, scale: f.core / f.node, depth: 1, side: 'right' as const };
+		}
+		const angle = angles[seats.ring.indexOf(id)] ?? 0;
+		const at = orbitPoint(f, angle);
+		const depth = Math.sin((angle * Math.PI) / 180);
+		return { ...at, scale: 1, depth: 1 + depth * 0.06, side: orbitLabelSide(angle, f.compact) };
+	};
+	const transformOf = (p: { x: number; y: number; scale: number }, f: OrbitFrame) =>
+		`translate(${p.x - f.node / 2}px, ${p.y - f.node / 2}px) scale(${p.scale})`;
+
+	const reducedMotion = () =>
+		typeof window !== 'undefined' && !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+
+	let seatEls: Record<string, HTMLElement> = {};
+	// bumps once per swap: replays the beams, the flash and the rings, re-types the read-outs
+	let surge = 0;
+	let swapSlot = -1;
+
+	const fly = (el: HTMLElement | undefined, from: any, to: any, bend: number, role: string) => {
+		if (!el || typeof el.animate !== 'function') return;
+		const mid = orbitBend(from, to, bend);
+		const midScale = (from.scale + to.scale) / 2;
+		const lift = role === 'is-arriving' ? 1.18 : 0.82;
+		el.classList.add('is-flying', role);
+		const run = el.animate(
+			[
+				{ transform: transformOf(from, frame), filter: 'brightness(1)' },
+				{ transform: transformOf({ ...from, scale: from.scale * lift }, frame), filter: 'brightness(1.7)', offset: 0.2 },
+				{ transform: transformOf({ ...mid, scale: midScale }, frame), filter: 'brightness(1.9) blur(1.2px)', offset: 0.62 },
+				{ transform: transformOf(to, frame), filter: 'brightness(1)' }
+			],
+			{ duration: FLIGHT_MS, easing: 'cubic-bezier(0.65, 0, 0.25, 1)' }
+		);
+		const done = () => el.classList.remove('is-flying', role);
+		run.onfinish = done;
+		run.oncancel = done;
+	};
+
+	const reseat = async (ids: string[], want: string) => {
+		const next = seatModels(ids, want, seating, hubId);
+		if (next === seating) return;
+		const prev = seating;
+		// a swap: only the old core and the new one changed seats
+		const swapped =
+			!!prev.core &&
+			next.core !== prev.core &&
+			next.ring.length === prev.ring.length &&
+			next.ring.every((id, k) => id === prev.ring[k] || (id === prev.core && prev.ring[k] === next.core));
+		const motion = swapped && w > 0 && !reducedMotion();
+		const from = motion
+			? { in: place(next.core, prev, frame, slots), out: place(prev.core, prev, frame, slots) }
+			: null;
+		seating = next;
+		if (!swapped) return;
+		swapSlot = next.ring.indexOf(prev.core);
+		surge += 1;
+		if (!from) return;
+		warp(700);
+		await tick();
+		fly(seatEls[next.core], from.in, place(next.core, next, frame, slots), 0.22, 'is-arriving');
+		fly(seatEls[prev.core], from.out, place(prev.core, next, frame, slots), -0.22, 'is-leaving');
+	};
 
 	// Pointer or keyboard on a node: its link brightens and the core answers.
 	let hot = '';
 
-	// A change of model: a light runs from the old node to the new one and the core rings once.
-	let lastId = '';
-	let surge = 0;
-	let comet = '';
-	$: if (w && selectedId !== lastId) {
-		if (lastId) {
-			const from = nodes.find((node) => node.id === lastId);
-			comet = from && chosen ? orbitArc(frame, from.angle, chosen.angle) : '';
-			surge += 1;
-		}
-		lastId = selectedId;
-	}
-
 	const pick = (id: string) => {
 		if (id !== selectedId) onSelect(id);
+	};
+
+	// Arrow keys walk round the orbit (core first, then clockwise from the upper left).
+	const onKeydown = (event: KeyboardEvent) => {
+		const step = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[event.key];
+		if (!step && event.key !== 'Home') return;
+		const order = [seating.core, ...orbitOrder(slots).map((k) => seating.ring[k])];
+		const at = order.findIndex((id) => seatEls[id]?.contains(document.activeElement));
+		const next = event.key === 'Home' ? 0 : (Math.max(0, at) + (at < 0 ? 0 : (step ?? 0)) + order.length) % order.length;
+		seatEls[order[next]]?.querySelector('button')?.focus();
+		event.preventDefault();
+	};
+
+	// The core's name decodes itself when it changes (a few frames of glyph noise).
+	const GLYPHS = '▚▞▙▟░▒▓<>/\\|=+*#01';
+	const decode = (node: HTMLElement, text: string) => {
+		let raf = 0;
+		node.textContent = text;
+		return {
+			update(next: string) {
+				if (next === text) return;
+				text = next;
+				if (typeof requestAnimationFrame !== 'function' || reducedMotion()) {
+					node.textContent = next;
+					return;
+				}
+				const start = performance.now();
+				const frameStep = (now: number) => {
+					const p = Math.min(1, (now - start) / 620);
+					const shown = Math.floor(p * next.length);
+					node.textContent =
+						next.slice(0, shown) +
+						[...next.slice(shown)].map(() => GLYPHS[(Math.random() * GLYPHS.length) | 0]).join('');
+					if (p < 1) raf = requestAnimationFrame(frameStep);
+				};
+				cancelAnimationFrame(raf);
+				raf = requestAnimationFrame(frameStep);
+			},
+			destroy() {
+				if (typeof cancelAnimationFrame === 'function') cancelAnimationFrame(raf);
+			}
+		};
 	};
 </script>
 
@@ -114,20 +224,22 @@
 		class="halo-orbit"
 		class:is-compact={frame.compact}
 		class:is-measured={w > 0}
-		class:is-hub-on={hub?.id === selectedId}
 		data-hot={hot ? '' : undefined}
 		style="--node: {frame.node}px"
 		bind:clientWidth={w}
 		bind:clientHeight={h}
-		role="group"
+		role="toolbar"
 		aria-label="选择模型"
+		tabindex="-1"
+		on:keydown={onKeydown}
 		data-halo-model-orbit
 	>
 		<svg class="halo-orbit__map" viewBox="0 0 {frame.w} {frame.h}" aria-hidden="true">
 			<defs>
-				<linearGradient id="halo-orbit-ring" x1="0" y1="0" x2="1" y2="0">
-					<stop offset="0" stop-color="var(--scifi-cyan)" />
-					<stop offset="0.5" stop-color="var(--scifi-violet)" />
+				<!-- the far side of the ring is dimmer than the near side -->
+				<linearGradient id="halo-orbit-ring" x1="0" y1="0" x2="0" y2="1">
+					<stop offset="0" stop-color="var(--scifi-violet)" stop-opacity="0.35" />
+					<stop offset="0.55" stop-color="var(--scifi-cyan)" stop-opacity="0.7" />
 					<stop offset="1" stop-color="var(--scifi-cyan)" />
 				</linearGradient>
 			</defs>
@@ -147,26 +259,26 @@
 				ry={frame.ry}
 				pathLength="100"
 			/>
-			{#each nodes as node (node.id)}
-				<g
-					class="halo-orbit__link"
-					class:is-on={node.id === selectedId}
-					class:is-hot={node.id === hot}
-					data-accent={node.accent}
-				>
-					<path class="halo-orbit__wire" d={node.link} />
-					<path class="halo-orbit__flow" d={node.link} pathLength="100" />
-					<circle class="halo-orbit__dock" cx={node.x} cy={node.y} r={frame.node / 2 + 7} />
+			{#each links as link (link.k)}
+				<g class="halo-orbit__link" class:is-hot={link.id === hot} data-accent={link.accent}>
+					<path class="halo-orbit__wire" d={link.d} />
+					<path class="halo-orbit__flow" d={link.d} pathLength="100" style="animation-delay: -{link.k * 0.7}s" />
+					<circle class="halo-orbit__dock" cx={link.x} cy={link.y} r={frame.node / 2 + 7} />
 				</g>
 			{/each}
 			{#key surge}
-				{#if surge}
-					{#if comet}
-						<path class="halo-orbit__comet" d={comet} pathLength="100" />
-					{/if}
-					{#if chosen}
-						<path class="halo-orbit__surge" data-accent={chosen.accent} d={chosen.link} pathLength="100" />
-					{/if}
+				{#if surge && links[swapSlot]}
+					<!-- the picked model rides in on a beam, the old core rides out on the same link -->
+					<path class="halo-orbit__beam-in" data-accent={core?.accent} d={links[swapSlot].d} pathLength="100" />
+					<path class="halo-orbit__surge" data-accent={links[swapSlot].accent} d={links[swapSlot].d} pathLength="100" />
+					<ellipse
+						class="halo-orbit__charge"
+						cx={frame.cx}
+						cy={frame.cy}
+						rx={frame.rx}
+						ry={frame.ry}
+						pathLength="100"
+					/>
 				{/if}
 			{/key}
 		</svg>
@@ -177,37 +289,57 @@
 			{/each}
 		</div>
 
-		{#if hub}
-			<div class="halo-orbit__hub" style="top: {frame.coreY - frame.core / 2}px">
-				<div class="halo-orb halo-rise" style="--i: 0; --orb-size: {frame.core}px" data-halo-orb>
-					<span class="halo-orb__bloom" aria-hidden="true"></span>
-					<span class="halo-orb__ring" aria-hidden="true"></span>
-					<span class="halo-orb__arc" aria-hidden="true"></span>
-					<HudReactor />
-					<span class="halo-orbit__echo" aria-hidden="true"></span>
-					{#key surge}
-						{#if surge}
-							<span class="halo-orbit__wave" aria-hidden="true"></span>
-						{/if}
-					{/key}
-					<button
-						type="button"
-						class="halo-orbit__core"
-						aria-pressed={hub.id === selectedId}
-						aria-label="{hub.name} · {KIND_LABEL[hub.kind]}"
-						title={hub.connection ? `${hub.name} · ${hub.connection}` : hub.name}
-						data-halo-model-card={hub.id}
-						on:click={() => pick(hub.id)}
-					>
-						<ModelIcon src={hub.icon} alt="" className="size-full rounded-full" />
-					</button>
+		<!-- HUD read-outs in the stage's corners -->
+		<div class="halo-orbit__hud halo-orbit__hud--tl" aria-hidden="true">
+			<b>SYS</b> ONLINE<br /><i>T+ {$hudClock}</i>
+		</div>
+		<div class="halo-orbit__hud halo-orbit__hud--tr" aria-hidden="true">
+			<b>LINK</b> STABLE<br /><i>NODES {String(cards.length).padStart(2, '0')} · SYNC 100%</i>
+		</div>
+		{#key seating.core}
+			{#if core}
+				<div class="halo-orbit__hud halo-orbit__hud--bl" aria-hidden="true">
+					<b>CORE</b> {KIND_CODE[core.kind]}<br /><i>{core.name}</i>
 				</div>
+				<div class="halo-orbit__hud halo-orbit__hud--br" aria-hidden="true">
+					<b>ROUTE</b> {core.connection || 'LOCAL'}<br /><i>LOCKED · {surge ? 'RELAY' : 'IDLE'}</i>
+				</div>
+			{/if}
+		{/key}
+
+		<!-- the core's rings stay in the middle; the models fly in and out of them -->
+		<div class="halo-orbit__reactor" style="top: {frame.coreY - frame.core / 2}px">
+			<div class="halo-orb halo-rise" style="--i: 0; --orb-size: {frame.core}px" data-halo-orb>
+				{#key seating.core}
+					<span class="halo-orbit__corelight" data-accent={core?.accent} aria-hidden="true"></span>
+				{/key}
+				<span class="halo-orb__bloom" aria-hidden="true"></span>
+				<span class="halo-orb__ring" aria-hidden="true"></span>
+				<span class="halo-orb__arc" aria-hidden="true"></span>
+				<HudReactor />
+				<span class="halo-orbit__echo" aria-hidden="true"></span>
+				{#key surge}
+					{#if surge}
+						<span class="halo-orbit__wave" aria-hidden="true"></span>
+						<span class="halo-orbit__flash" data-accent={core?.accent} aria-hidden="true"></span>
+					{/if}
+				{/key}
+			</div>
+		</div>
+		{#key surge}
+			{#if surge}
+				<span class="halo-orbit__flare" style="top: {frame.coreY}px" aria-hidden="true"></span>
+			{/if}
+		{/key}
+
+		{#if core}
+			<div class="halo-orbit__caption" style="top: {frame.coreY + frame.core / 2}px">
 				<div class="halo-orbit__core-tag halo-rise" style="--i: 1" aria-hidden="true">
-					<span class="halo-orbit__name">{hub.name}</span>
+					<span class="halo-orbit__name" data-name={core.name} use:decode={core.name}></span>
 					<span class="halo-orbit__meta">
-						<span class="halo-orbit__kind">{KIND_LABEL[hub.kind]}</span>
-						{#if hub.connection}
-							<span class="halo-chip halo-orbit__conn">{hub.connection}</span>
+						<span class="halo-orbit__kind">{KIND_LABEL[core.kind]}</span>
+						{#if core.connection}
+							<span class="halo-chip halo-orbit__conn">{core.connection}</span>
 						{/if}
 					</span>
 				</div>
@@ -217,52 +349,63 @@
 			</div>
 		{/if}
 
-		{#each nodes as node (node.id)}
-			{@const on = node.id === selectedId}
-			<button
-				type="button"
-				class="halo-orbit__node"
-				class:is-on={on}
-				data-accent={node.accent}
-				data-side={node.side}
-				style="left: {node.x}px; top: {node.y}px; --d: {node.index}"
-				aria-pressed={on}
-				aria-label="{node.name} · {KIND_LABEL[node.kind]}"
-				title={node.connection ? `${node.name} · ${node.connection}` : node.name}
-				data-halo-model-card={node.id}
-				on:click={() => pick(node.id)}
-				on:pointerenter={() => (hot = node.id)}
-				on:pointerleave={() => (hot = '')}
-				on:focus={() => (hot = node.id)}
-				on:blur={() => (hot = '')}
+		{#each cards as card, index (card.id)}
+			{@const seat = place(card.id, seating, frame, slots)}
+			{@const isCore = card.id === seating.core}
+			{@const on = card.id === selectedId}
+			<div
+				class="halo-orbit__seat"
+				class:is-core={isCore}
+				class:is-back={!isCore && seat.y < frame.cy}
+				data-accent={card.accent}
+				data-side={seat.side}
+				style="transform: {transformOf(seat, frame)}; --d: {index}; --depth: {seat.depth}"
+				bind:this={seatEls[card.id]}
 			>
-				<span class="halo-orbit__body">
-					<span class="halo-orbit__float">
-						<span class="halo-orbit__pad" aria-hidden="true"></span>
-						<span class="halo-orbit__glow" aria-hidden="true"></span>
-						<span class="halo-orbit__spin" aria-hidden="true"></span>
-						<span class="halo-orbit__sphere">
-							{#if node.mono}
-								<span class="halo-orbit__glyph" style:--glyph={`url("${node.icon}")`}></span>
-							{:else}
-								<ModelIcon src={node.icon} alt="" bare className="halo-orbit__icon rounded-full" />
+				<button
+					type="button"
+					class="halo-orbit__node"
+					class:is-on={on}
+					aria-pressed={on}
+					aria-label="{card.name} · {KIND_LABEL[card.kind]}"
+					title={card.connection ? `${card.name} · ${card.connection}` : card.name}
+					data-halo-model-card={card.id}
+					on:click={() => pick(card.id)}
+					on:pointerenter={() => (hot = isCore ? '' : card.id)}
+					on:pointerleave={() => (hot = '')}
+					on:focus={() => (hot = isCore ? '' : card.id)}
+					on:blur={() => (hot = '')}
+				>
+					<span class="halo-orbit__body">
+						<span class="halo-orbit__float">
+							<span class="halo-orbit__pad" aria-hidden="true"></span>
+							<span class="halo-orbit__beam" aria-hidden="true"></span>
+							<span class="halo-orbit__glow" aria-hidden="true"></span>
+							<span class="halo-orbit__spin" aria-hidden="true"></span>
+							<span class="halo-orbit__sphere">
+								{#if card.mono}
+									<span class="halo-orbit__glyph" style:--glyph={`url("${card.icon}")`}></span>
+								{:else}
+									<ModelIcon src={card.icon} alt="" bare className="halo-orbit__icon rounded-full" />
+								{/if}
+								<span class="halo-orbit__scan" aria-hidden="true"></span>
+							</span>
+							{#if card.kind === 'image'}
+								<span class="halo-orbit__badge" aria-hidden="true"><Photo className="size-full" /></span>
 							{/if}
 						</span>
-						{#if node.kind === 'image'}
-							<span class="halo-orbit__badge" aria-hidden="true"><Photo className="size-full" /></span>
-						{/if}
 					</span>
-				</span>
-				<span class="halo-orbit__tag" aria-hidden="true">
-					<span class="halo-orbit__name">{node.name}</span>
-					<span class="halo-orbit__meta">
-						<span class="halo-orbit__kind">{KIND_LABEL[node.kind]}</span>
-						{#if node.connection}
-							<span class="halo-chip halo-orbit__conn">{node.connection}</span>
-						{/if}
+					<span class="halo-orbit__tag" aria-hidden="true">
+						<span class="halo-orbit__name">{card.name}</span>
+						<span class="halo-orbit__meta">
+							<span class="halo-orbit__kind">{KIND_LABEL[card.kind]}</span>
+							{#if card.connection}
+								<span class="halo-chip halo-orbit__conn">{card.connection}</span>
+							{/if}
+						</span>
 					</span>
-				</span>
-			</button>
+				</button>
+			</div>
 		{/each}
 	</div>
 {/if}

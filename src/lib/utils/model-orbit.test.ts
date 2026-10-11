@@ -3,13 +3,15 @@ import { describe, expect, it } from 'vitest';
 import {
 	isMonoIcon,
 	orbitAccent,
-	orbitArc,
+	orbitBend,
 	orbitFrame,
 	orbitGreetingWidth,
 	orbitLabelSide,
 	orbitLink,
+	orbitOrder,
 	orbitPoint,
-	orbitSlots
+	orbitSlots,
+	seatModels
 } from './model-orbit';
 
 describe('orbitAccent', () => {
@@ -27,6 +29,8 @@ describe('orbitAccent', () => {
 describe('isMonoIcon', () => {
 	it('knows the one-colour model icons', () => {
 		expect(isMonoIcon('/static/model-icons/openai.svg')).toBe(true);
+		// a portrait stays a picture
+		expect(isMonoIcon('/static/model-icons/noushermes.svg')).toBe(false);
 		expect(isMonoIcon('/static/model-icons/gemini-color.svg?v=2')).toBe(false);
 		expect(isMonoIcon('data:image/png;base64,AAAA')).toBe(false);
 		expect(isMonoIcon(null)).toBe(false);
@@ -97,16 +101,61 @@ describe('orbit layout', () => {
 		for (const angle of angles) expect(Math.sin((angle * Math.PI) / 180)).toBeGreaterThan(-0.95);
 	});
 
-	it('draws links from the core edge and arcs the short way round', () => {
+	it('draws links from the core edge to the node', () => {
 		const to = orbitPoint(wide, -145);
 		expect(orbitLink(wide, to)).toMatch(/^M[\d.]+ [\d.]+Q[\d.-]+ [\d.-]+ [\d.]+ [\d.]+$/);
-		// upper left → lower left goes anticlockwise (sweep 0), not round the right
-		expect(orbitArc(wide, -145, 155)).toMatch(/ 0 0 0 /);
-		expect(orbitArc(wide, 155, -145)).toMatch(/ 0 0 1 /);
+	});
+
+	it('walks the slots clockwise from the upper left', () => {
+		// slots: UL, UR, LL, R, bottom → UL, UR, R, bottom, LL
+		expect(orbitOrder(orbitSlots(5))).toEqual([0, 1, 3, 4, 2]);
+	});
+
+	it('bends a flight off the straight line, to either side', () => {
+		const a = { x: 0, y: 0 };
+		const b = { x: 100, y: 0 };
+		expect(orbitBend(a, b, 0.2)).toEqual({ x: 50, y: 20 });
+		expect(orbitBend(a, b, -0.2)).toEqual({ x: 50, y: -20 });
 	});
 
 	it('narrows the greeting between the lower nodes only when there are some', () => {
 		expect(orbitGreetingWidth(wide, orbitSlots(5))).toBeLessThan(wide.w);
 		expect(orbitGreetingWidth(wide, orbitSlots(2))).toBe(wide.w - 16);
+	});
+});
+
+describe('seatModels', () => {
+	const ids = ['hermes', 'gpt-chat', 'deepseek', 'gpt-image', 'gemini', 'claude'];
+
+	it('seats the target in the core and deals the rest in deck order', () => {
+		expect(seatModels(ids, 'hermes', null)).toEqual({
+			core: 'hermes',
+			ring: ['gpt-chat', 'deepseek', 'gpt-image', 'gemini', 'claude']
+		});
+		expect(seatModels(ids, 'gone', null).core).toBe('hermes');
+		// opened with gemini chosen: the home seating with gemini swapped in
+		expect(seatModels(ids, 'gemini', null, 'hermes')).toEqual({
+			core: 'gemini',
+			ring: ['gpt-chat', 'deepseek', 'gpt-image', 'hermes', 'claude']
+		});
+		expect(seatModels([], 'hermes', null)).toEqual({ core: '', ring: [] });
+	});
+
+	it('swaps the picked model with the core and leaves the others where they are', () => {
+		const first = seatModels(ids, 'hermes', null);
+		const second = seatModels(ids, 'gemini', first);
+		expect(second).toEqual({ core: 'gemini', ring: ['gpt-chat', 'deepseek', 'gpt-image', 'hermes', 'claude'] });
+		const third = seatModels(ids, 'gpt-chat', second);
+		expect(third).toEqual({ core: 'gpt-chat', ring: ['gemini', 'deepseek', 'gpt-image', 'hermes', 'claude'] });
+		// nothing to do: the same seating comes back
+		expect(seatModels(ids, 'gpt-chat', third)).toBe(third);
+	});
+
+	it('deals afresh when the models change', () => {
+		const first = seatModels(ids, 'gemini', seatModels(ids, 'hermes', null));
+		expect(seatModels([...ids, 'qwen'], 'gemini', first, 'hermes')).toEqual({
+			core: 'gemini',
+			ring: ['gpt-chat', 'deepseek', 'gpt-image', 'hermes', 'claude', 'qwen']
+		});
 	});
 });

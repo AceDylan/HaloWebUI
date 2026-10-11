@@ -20,10 +20,18 @@ export const orbitAccent = (name: string, kind: DeckKind): OrbitAccent => {
 	return 'plain';
 };
 
+// One-colour, but a drawn portrait (Hermes): as a flat glyph it would turn into a silhouette.
+const PORTRAIT_ICONS = new Set(['noushermes.svg']);
+
 /** One-colour icons (OpenAI's knot…) are drawn as a glyph in the node's own colours instead. */
 export const isMonoIcon = (src: string | null | undefined): boolean => {
 	const file = (src ?? '').split(/[?#]/)[0].split('/').at(-1) ?? '';
-	return !!file && (src ?? '').includes('/static/model-icons/') && DARK_MODE_INVERT_ICONS.has(file);
+	return (
+		!!file &&
+		(src ?? '').includes('/static/model-icons/') &&
+		DARK_MODE_INVERT_ICONS.has(file) &&
+		!PORTRAIT_ICONS.has(file)
+	);
 };
 
 /** Below this stage width the labels go under the nodes and everything is smaller. */
@@ -114,19 +122,58 @@ export const orbitLink = (frame: OrbitFrame, to: { x: number; y: number }): stri
 	return `M${round(start.x)} ${round(start.y)}Q${round(mid.x)} ${round(mid.y)} ${round(end.x)} ${round(end.y)}`;
 };
 
-/** The short way along the ellipse from one angle to another (for the light that travels). */
-export const orbitArc = (frame: OrbitFrame, from: number, to: number): string => {
-	let delta = (((to - from) % 360) + 540) % 360 - 180;
-	if (delta === -180) delta = 180;
-	const a = orbitPoint(frame, from);
-	const b = orbitPoint(frame, from + delta);
-	return `M${round(a.x)} ${round(a.y)}A${round(frame.rx)} ${round(frame.ry)} 0 0 ${delta > 0 ? 1 : 0} ${round(b.x)} ${round(b.y)}`;
-};
-
 /** How wide the greeting may run at the height of the lower nodes without touching them. */
 export const orbitGreetingWidth = (frame: OrbitFrame, angles: number[]): number => {
 	const sides = angles
 		.filter((a) => Math.sin(rad(a)) > 0.2 && Math.abs(Math.cos(rad(a))) > 0.5)
 		.map((a) => Math.abs(frame.rx * Math.cos(rad(a))) - frame.node / 2 - 14);
 	return Math.round(sides.length ? Math.max(120, Math.min(...sides) * 2) : frame.w - 16);
+};
+
+/** Who sits where: the core (the chosen model) and the ring, slot by slot. */
+export type OrbitSeating = { core: string; ring: string[] };
+
+/**
+ * The seating for `ids` with `target` in the core. When only the core changes, the new core's
+ * seat goes to the old core (a swap, so the other models stay put). A fresh deal starts from the
+ * home seating (`home` in the core, the rest in deck order) and swaps the target in, so a page
+ * opened with a model already chosen looks the way the swap left it.
+ */
+export const seatModels = (
+	ids: string[],
+	target: string,
+	prev: OrbitSeating | null,
+	home: string = ids[0]
+): OrbitSeating => {
+	if (!ids.length) return { core: '', ring: [] };
+	const core = ids.includes(target) ? target : ids[0];
+	const seated = prev ? [prev.core, ...prev.ring] : [];
+	const sameModels =
+		!!prev?.core && seated.length === ids.length && ids.every((id) => seated.includes(id));
+	const base: OrbitSeating = sameModels
+		? prev!
+		: (() => {
+				const centre = ids.includes(home) ? home : ids[0];
+				return { core: centre, ring: ids.filter((id) => id !== centre) };
+			})();
+	if (base.core === core) return base;
+	return { core, ring: base.ring.map((id) => (id === core ? base.core : id)) };
+};
+
+/** Slot indices clockwise from the left (upper left first): the arrow keys' order. */
+export const orbitOrder = (angles: number[]): number[] =>
+	angles
+		.map((angle, index) => ({ index, key: (((angle - 180) % 360) + 720) % 360 }))
+		.sort((a, b) => a.key - b.key)
+		.map((slot) => slot.index);
+
+/** A point off the straight line from `a` to `b`, so a model flies an arc, not a rail. */
+export const orbitBend = (
+	a: { x: number; y: number },
+	b: { x: number; y: number },
+	bend: number
+) => {
+	const dx = b.x - a.x;
+	const dy = b.y - a.y;
+	return { x: (a.x + b.x) / 2 - dy * bend, y: (a.y + b.y) / 2 + dx * bend };
 };

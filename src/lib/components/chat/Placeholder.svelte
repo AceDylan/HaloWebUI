@@ -52,13 +52,14 @@
 		getModelConnectionName
 	} from '$lib/utils/model-display';
 	import { findModelByIdentity } from '$lib/utils/model-identity';
+	import { modelDeck } from '$lib/utils/model-deck';
 	import type { WebSearchMode, WebSearchModeSource } from '$lib/utils/web-search-mode';
 	import EyeSlash from '$lib/components/icons/EyeSlash.svelte';
 	import MessageInput from './MessageInput.svelte';
 	import AssistantPickerModal from './AssistantPickerModal.svelte';
 	import AssistantSceneTitle from './Placeholder/AssistantSceneTitle.svelte';
 	import AssistantScenePlaceholder from './Placeholder/AssistantScenePlaceholder.svelte';
-	import ModelDeck from './Placeholder/ModelDeck.svelte';
+	import ModelOrbit from './Placeholder/ModelOrbit.svelte';
 	import Pencil from '$lib/components/icons/Pencil.svelte';
 	import Check from '$lib/components/icons/Check.svelte';
 	import XMark from '$lib/components/icons/XMark.svelte';
@@ -120,8 +121,10 @@
 	export let toolServers = [];
 
 	let models = [];
-	// The cards name the chosen model themselves; the plain name line is for one they don't show.
-	let deckShowsSelected = false;
+	// The orbit names the chosen model itself; the plain name line is for one it doesn't show.
+	let orbitShowsSelected = false;
+	$: hasOrbit = !!onSelectModel && modelDeck($_models, $settings?.pinnedModels).length > 0;
+	$: greeting = $i18n.t(greetingKey, { name: $user?.name });
 	let editMode = false;
 	let showPickerModal = false;
 	let dragSourceIdx: number | null = null;
@@ -333,8 +336,14 @@
 				/>
 			{:else}
 				<!-- The assistant sits inside its halo: the ring brightens and the light runs
-				     faster while the prompt box has focus (halo.css, .halo-orb). -->
+				     faster while the prompt box has focus (halo.css, .halo-orb). With models to
+				     pick from, the halo is the core of an orbit and the models ride round it. -->
 				<div class="halo-hero w-full">
+					{#if hasOrbit}
+					<ModelOrbit selected={models[selectedModelIdx] ?? null} onSelect={(id) => onSelectModel?.(id)} bind:shows={orbitShowsSelected}>
+						<h1 class="halo-greeting halo-rise line-clamp-2 px-2" style="--i: 2">{greeting}</h1>
+					</ModelOrbit>
+					{:else}
 					<div class="halo-orb halo-rise" style="--i: 0" data-halo-orb>
 						<span class="halo-orb__orbit" style="--r: 2.1" aria-hidden="true"></span>
 						<span class="halo-orb__orbit halo-orb__orbit--far" style="--r: 3.3" aria-hidden="true"></span>
@@ -371,13 +380,9 @@
 						{/key}
 					</div>
 
-					<h1 class="halo-greeting halo-rise line-clamp-2 px-4" style="--i: 1">
-						{$i18n.t(greetingKey, { name: $user?.name })}
-					</h1>
-					{#if onSelectModel}
-						<ModelDeck selected={models[selectedModelIdx] ?? null} onSelect={onSelectModel} bind:shows={deckShowsSelected} />
+					<h1 class="halo-greeting halo-rise line-clamp-2 px-4" style="--i: 1">{greeting}</h1>
 					{/if}
-					{#if models[selectedModelIdx]?.name && !deckShowsSelected}
+					{#if models[selectedModelIdx]?.name && !(hasOrbit && orbitShowsSelected)}
 						<div
 							class="halo-rise mt-2.5 flex min-w-0 max-w-full items-center justify-center gap-2 px-4 text-[13px] text-gray-500 dark:text-gray-400"
 							style="--i: 2"

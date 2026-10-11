@@ -50,7 +50,7 @@
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import { applyUserSettingsSnapshot } from '$lib/utils/user-settings';
 	import { startHermesActivityPolling, stopHermesActivityPolling } from '$lib/utils/hermes-activity';
-	import { isFramed, requestHubReauth } from '$lib/utils/hub-embed';
+	import { isFramed, postReadyToHub, requestHubReauth } from '$lib/utils/hub-embed';
 	import StarField from '$lib/components/scifi/StarField.svelte';
 	import BootSequence from '$lib/components/scifi/BootSequence.svelte';
 	import RelayFlash from '$lib/components/scifi/RelayFlash.svelte';
@@ -380,6 +380,8 @@
 		}
 
 		loaded = true;
+		// Framed by the Bookmark Hub: its entry animation holds over the frame until the app is here.
+		if ($user) postReadyToHub($config?.hub_origin);
 		if ($user && ['user', 'admin'].includes($user?.role)) {
 			// hermes activity for the sidebar, the chat banner and the tab title;
 			// page-level so it does not stop when the sidebar list unmounts.

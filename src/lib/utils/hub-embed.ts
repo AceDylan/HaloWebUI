@@ -423,6 +423,49 @@ export const postPlaceToHub = (
 };
 
 // ---------------------------------------------------------------------------
+// Signed in and on screen.
+//
+// The Hub opens this frame at /auth#hub_ticket=…, so the frame's load event
+// fires on the sign-in page; the trade and the app's code come after it, and the
+// move to the app is in-page (no second load). The Hub keeps its entry
+// animation over the frame until it hears one of these:
+//   ready              the app's shell is on screen with a signed-in user;
+//   auth/signing-in    a ticket is being traded (keep waiting for ready);
+//   auth/form          the sign-in form is what there is to see (no ticket,
+//                      or the ticket was refused) — open up and show it.
+
+export const HUB_READY_MESSAGE_TYPE = 'ready';
+export const HUB_AUTH_MESSAGE_TYPE = 'auth';
+export type HubAuthState = 'signing-in' | 'form';
+
+const postToHub = (message: object, hubOrigin: unknown, win: FrameWindow): boolean => {
+	if (typeof hubOrigin !== 'string' || !PLAIN_ORIGIN.test(hubOrigin)) {
+		return false;
+	}
+	const parent = win.parent;
+	if (!parent || parent === (win as unknown)) {
+		return false;
+	}
+	try {
+		parent.postMessage({ source: HUB_ACTIVITY_MESSAGE_SOURCE, ...message }, hubOrigin);
+		return true;
+	} catch {
+		return false;
+	}
+};
+
+export const postReadyToHub = (
+	hubOrigin: unknown,
+	win: FrameWindow = window as unknown as FrameWindow
+): boolean => postToHub({ type: HUB_READY_MESSAGE_TYPE }, hubOrigin, win);
+
+export const postAuthStateToHub = (
+	state: HubAuthState,
+	hubOrigin: unknown,
+	win: FrameWindow = window as unknown as FrameWindow
+): boolean => postToHub({ type: HUB_AUTH_MESSAGE_TYPE, state }, hubOrigin, win);
+
+// ---------------------------------------------------------------------------
 // The Hub's dark / light.
 //
 // The Hub keeps its own theme (dark unless changed), while this app follows the

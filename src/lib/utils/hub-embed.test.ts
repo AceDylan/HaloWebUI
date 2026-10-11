@@ -15,7 +15,9 @@ import {
 	openNoteInHub,
 	parseHubTicket,
 	postActivityToHub,
+	postAuthStateToHub,
 	postPlaceToHub,
+	postReadyToHub,
 	rememberHubOrigin,
 	requestHubReauth,
 	splitVaultNotePaths,
@@ -328,6 +330,35 @@ describe('requestHubReauth', () => {
 			{ source: 'halowebui', type: 'reauth', path: '/c/x' },
 			HUB
 		);
+	});
+});
+
+describe('postReadyToHub / postAuthStateToHub', () => {
+	it('tells only the Hub, and only when framed', () => {
+		const parent = { postMessage: vi.fn() };
+		expect(postReadyToHub(HUB, { parent })).toBe(true);
+		expect(parent.postMessage).toHaveBeenLastCalledWith(
+			{ source: 'halowebui', type: 'ready' },
+			HUB
+		);
+		expect(postAuthStateToHub('signing-in', HUB, { parent })).toBe(true);
+		expect(parent.postMessage).toHaveBeenLastCalledWith(
+			{ source: 'halowebui', type: 'auth', state: 'signing-in' },
+			HUB
+		);
+		expect(postAuthStateToHub('form', HUB, { parent })).toBe(true);
+		expect(parent.postMessage).toHaveBeenLastCalledWith(
+			{ source: 'halowebui', type: 'auth', state: 'form' },
+			HUB
+		);
+
+		const top: any = { postMessage: vi.fn() };
+		top.parent = top;
+		expect(postReadyToHub(HUB, top)).toBe(false);
+		expect(postReadyToHub('*', { parent })).toBe(false);
+		expect(postAuthStateToHub('form', undefined, { parent })).toBe(false);
+		expect(top.postMessage).not.toHaveBeenCalled();
+		expect(parent.postMessage).toHaveBeenCalledTimes(3);
 	});
 });
 

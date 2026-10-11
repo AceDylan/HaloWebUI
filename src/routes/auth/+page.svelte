@@ -14,7 +14,7 @@
 
 	import { generateInitialsImage, canvasPixelTest } from '$lib/utils';
 	import { localizeCommonError } from '$lib/utils/common-errors';
-	import { takeHubTicket } from '$lib/utils/hub-embed';
+	import { postAuthStateToHub, takeHubTicket } from '$lib/utils/hub-embed';
 	import { safeRedirectPath } from '$lib/utils/safe-redirect';
 
 	import HaloConstellation from '$lib/components/common/HaloConstellation.svelte';
@@ -223,13 +223,21 @@
 
 		loaded = true;
 		setLogoImage();
+		// Framed by the Bookmark Hub: tell its entry animation whether to keep waiting
+		// (a ticket is being traded) or to open up on this form.
+		const autoSignIn =
+			($config?.features.auth_trusted_header ?? false) || $config?.features.auth === false;
+		if ($user === undefined) {
+			postAuthStateToHub(hubSigningIn || autoSignIn ? 'signing-in' : 'form', $config?.hub_origin);
+		}
 
 		if (hubSigningIn) {
 			// Refused: the form below takes over, with a note saying why.
 			hubSigningIn = await signInWithHubTicket(hubTicket);
+			if (!hubSigningIn) postAuthStateToHub('form', $config?.hub_origin);
 		}
 
-		if (($config?.features.auth_trusted_header ?? false) || $config?.features.auth === false) {
+		if (autoSignIn) {
 			await signInHandler();
 		} else {
 			onboarding = $config?.onboarding ?? false;

@@ -1,6 +1,7 @@
 import { marked } from 'marked';
 
 import { HTML_VISUAL_KIT_CSS, usesHtmlVisualKit } from './html-visual-kit';
+import { renderHtmlVisualDiagrams } from './html-visual-diagrams';
 
 export const HTML_PREVIEW_SANDBOX = 'allow-scripts';
 export const HTML_EXPORT_SANDBOX = 'allow-same-origin';
@@ -735,12 +736,14 @@ export const buildHtmlArtifactPreview = (
 	}
 
 	// Kit cards bring their own light and dark palettes; the scheme attribute keeps
-	// the generic dark adaptation off them.
-	const documentOpen = usesHtmlVisualKit(mergedHtml)
+	// the generic dark adaptation off them. Their diagram blocks become SVG here.
+	const kit = usesHtmlVisualKit(mergedHtml);
+	const documentOpen = kit
 		? `<html lang="zh-CN" data-halo-color-scheme="${colorScheme}"><head>${style}<style data-halo-visual-kit="true">${HTML_VISUAL_KIT_CSS}</style></head>`
 		: `<html lang="en"><head>${style}</head>`;
+	const body = kit ? renderHtmlVisualDiagrams(mergedHtml) : mergedHtml;
 	return hardenHtmlPreviewDocument(
-		`<!DOCTYPE html>${documentOpen}<body>${mergedHtml}</body></html>`,
+		`<!DOCTYPE html>${documentOpen}<body>${body}</body></html>`,
 		options.labels,
 		colorScheme,
 		options.citations

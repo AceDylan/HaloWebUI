@@ -1748,6 +1748,25 @@ def test_agy_html_request_prompt_documents_the_design_kit():
         assert f"- {theme}:" in prompt
     assert "&lt;final_answer" not in prompt
     assert prompt.rstrip().endswith("</final_answer>")
+    # Diagrams are written as relations; .format() leaves single braces.
+    assert '<pre class="hv-dia" data-kind="flow LR">' in prompt
+    assert "网关 -> {已登录?}" in prompt
+    assert "MUST contain at least one diagram" in prompt
+
+
+def test_kit_card_with_diagram_blocks_passes_the_fragment_check():
+    card = (
+        '<div class="hv" data-theme="aurora"><header class="hv-hero"><h1>链路</h1></header>'
+        '<pre class="hv-dia" data-kind="flow LR">用户 -> 网关: HTTPS\n网关 -> {已登录?}\n'
+        "{已登录?} --> [(数据库)]: 否 &amp; 重试</pre>"
+        '<pre class="hv-dia" data-kind="sequence num">A -> B: 请求\n== 阶段 ==\nB --> A: a &lt; b</pre>'
+        "</div>"
+    )
+
+    fragment, error = html_visual_prompt._extract_agy_html_fragment(card.encode())
+
+    assert error is None
+    assert fragment == card
 
 
 def test_agy_gateway_request_returns_only_the_answer_text():

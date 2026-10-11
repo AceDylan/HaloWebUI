@@ -6,8 +6,13 @@
 // documented to the designer in backend html_visual_prompt.py
 // (HTML_VISUAL_AGY_HTML_REQUEST_PROMPT); keep both in step.
 //
+// Diagrams: `<pre class="hv-dia">` blocks are drawn as SVG by html-visual-diagrams.ts;
+// their colours are the .hv-dia rules below.
+//
 // Dark mode: the frame's <html> carries data-halo-color-scheme, which tells the
 // generic dark-adaptation bridge to leave kit cards alone.
+
+import { renderHtmlVisualDiagrams } from './html-visual-diagrams';
 
 export const HTML_VISUAL_KIT_THEMES = [
 	'ion',
@@ -119,6 +124,68 @@ html,body{margin:0;padding:0}
 .hv-code>.hv-code-h::before{content:"";width:10px;height:10px;border-radius:50%;background:#ff5f57;box-shadow:16px 0 0 #febc2e,32px 0 0 #28c840;margin-right:40px}
 .hv-code>pre{border:0;border-radius:0}
 .hv-foot{font-size:12.5px;color:var(--muted);padding-top:12px;border-top:1px dashed var(--line)}
+.hv-dia{--dia-stroke:color-mix(in oklab,var(--a) 45%,var(--ink2));--dia-fill:color-mix(in oklab,var(--a) 13%,var(--surface));margin:0;padding:16px 12px;border-radius:var(--radius);background:var(--surface);border:1px solid var(--line);overflow-x:auto;text-align:center}
+.hv-dia .am-diagram{margin:0}
+.hv-dia svg{display:inline-block;max-width:100%;height:auto;font-family:var(--font);vertical-align:top}
+.hv-dia text{fill:var(--ink);font-size:13px}
+.hv-dia .am-node-shape{fill:var(--surface);stroke:var(--dia-stroke);stroke-width:1.4}
+.hv-dia .am-node--hi .am-node-shape{fill:var(--dia-fill);stroke:var(--a);stroke-width:1.8}
+.hv-dia .am-node--hi text{fill:var(--a);font-weight:650}
+.hv-dia .am-node--db .am-node-shape,.hv-dia .am-node--diamond .am-node-shape{fill:color-mix(in oklab,var(--a2) 7%,var(--surface))}
+.hv-dia .am-edge{fill:none;stroke:var(--muted);stroke-width:1.3}
+.hv-dia .am-edge--dashed{stroke-dasharray:5 4}
+.hv-dia .am-arrow{fill:var(--muted)}
+.hv-dia .am-edge-label rect{fill:var(--surface)}
+.hv-dia .am-edge-label text{fill:var(--a);font-size:11.5px}
+.hv-dia .am-cluster{fill:var(--panel);stroke:var(--line);stroke-width:1;stroke-dasharray:4 3}
+.hv-dia .am-cluster-label{fill:var(--muted);font:11px var(--mono)}
+.hv-dia .am-lifeline{stroke:var(--muted);stroke-width:1;stroke-dasharray:4 4}
+.hv-dia .am-actor{fill:var(--dia-fill);stroke:var(--dia-stroke);stroke-width:1.4}
+.hv-dia .am-note{fill:color-mix(in oklab,var(--warn) 12%,var(--surface));stroke:var(--warn);stroke-width:1}
+.hv-dia .am-step{fill:var(--muted);font:10px var(--mono)}
+.hv-dia [data-delta="added"]{--d:var(--ok)}.hv-dia [data-delta="removed"]{--d:var(--risk)}.hv-dia [data-delta="changed"]{--d:var(--warn)}
+.hv-dia .am-node[data-delta] .am-node-shape,.hv-dia .am-cluster[data-delta]{stroke:var(--d)}
+.hv-dia .am-node[data-delta]>text,.hv-dia .am-cluster-label[data-delta],.hv-dia [data-delta]>.am-edge-label text{fill:var(--d)}
+.hv-dia [data-delta]>.am-edge{stroke:var(--d)}
+.hv-dia .am-arrow--added{fill:var(--ok)}.hv-dia .am-arrow--removed{fill:var(--risk)}
+.hv-dia g[data-delta="removed"]:not(.am-delta-badge){opacity:.55}
+.hv-dia .am-node[data-delta="removed"]>text,.hv-dia [data-delta="removed"]>.am-edge-label text{text-decoration:line-through}
+.hv-dia .am-delta-badge circle{fill:var(--d);stroke:var(--surface);stroke-width:1.5}
+.hv-dia .am-delta-badge text{fill:var(--surface);font:700 11px var(--font);text-decoration:none}
+.hv-dia .am-delta-bar{display:flex;flex-wrap:wrap;justify-content:center;gap:4px 14px;margin-top:10px;font:12px/1.3 var(--mono)}
+.hv-dia .am-delta-count--added{color:var(--ok)}.hv-dia .am-delta-count--removed{color:var(--risk)}.hv-dia .am-delta-count--changed{color:var(--warn)}
+.hv-dia .am-delta-switch{display:none}
+.hv-dia .am-tree{font-size:14px;text-align:start}
+.hv-dia .am-tree-root{display:flex;justify-content:center;position:relative;padding-bottom:18px}
+.hv-dia .am-tree-root::after{content:"";position:absolute;bottom:0;left:50%;height:18px;border-left:1.5px solid var(--dia-stroke)}
+.hv-dia .am-tree-root--solo{padding-bottom:12px}.hv-dia .am-tree-root--solo::after{display:none}
+.hv-dia .am-tree-box{position:relative;border:1.5px solid var(--dia-stroke);background:var(--surface);padding:7px 14px;text-align:center;border-radius:10px;font-weight:650;color:var(--ink)}
+.hv-dia .am-tree-box small{display:block;font-weight:400;color:var(--muted);font-size:12px}
+.hv-dia .am-tree-box--root{background:var(--dia-fill);border-color:var(--a);font-size:15px;padding:8px 28px}
+.hv-dia .am-tree-box--hi{border-color:var(--a);color:var(--a)}
+.hv-dia .am-tree-cols{display:grid;grid-template-columns:repeat(var(--n,1),minmax(0,1fr))}
+.hv-dia .am-tree-col{position:relative;padding:18px 6px 0;min-width:0}
+.hv-dia .am-tree-col::before{content:"";position:absolute;top:0;left:0;right:0;border-top:1.5px solid var(--dia-stroke)}
+.hv-dia .am-tree-col:first-child::before{left:50%}.hv-dia .am-tree-col:last-child::before{right:50%}
+.hv-dia .am-tree-col:only-child::before{display:none}
+.hv-dia .am-tree-col::after{content:"";position:absolute;top:0;left:50%;height:18px;border-left:1.5px solid var(--dia-stroke)}
+.hv-dia .am-tree-list,.hv-dia .am-tree-list ul{list-style:none;margin:0;padding:0}
+.hv-dia .am-tree-col>.am-tree-list{margin:8px 0 0 14px}
+.hv-dia .am-tree-list ul{margin-left:16px}
+.hv-dia .am-tree-list li{position:relative;margin:0;padding:3px 0 3px 18px}
+.hv-dia .am-tree-list li::before{content:"";position:absolute;left:0;top:.95em;width:12px;border-top:1px solid var(--muted)}
+.hv-dia .am-tree-list li::after{content:"";position:absolute;left:0;top:0;bottom:0;border-left:1px solid var(--muted)}
+.hv-dia .am-tree-list li:last-child::after{bottom:auto;height:.95em}
+.hv-dia .am-tree-sub{display:block;font-size:12.5px;color:var(--muted)}
+.hv-dia .am-tree-hi>.am-tree-label{color:var(--a);font-weight:650}
+.hv-dia .am-tree-tag{font:11px var(--mono);color:var(--muted);margin-right:4px}
+.hv-dia .am-tree .am-delta-badge{display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;border-radius:50%;background:var(--d);color:var(--surface);font:700 11px/1 var(--mono);margin-right:6px;vertical-align:1px}
+.hv-dia .am-tree-box>.am-delta-badge{position:absolute;top:-8px;right:-8px;margin:0}
+.hv-dia .am-tree-box[data-delta]{border-color:var(--d)}
+.hv-dia .am-tree-list li[data-delta]>.am-tree-label{color:var(--d)}
+.hv-dia .am-tree-list li[data-delta="removed"]>.am-tree-label,.hv-dia .am-tree-box[data-delta="removed"]{text-decoration:line-through;opacity:.6}
+.hv-dia-narrow{display:none}
+.hv pre.hv-dia-src{background:var(--panel);color:var(--ink2);border:1px dashed var(--line)}
 
 .hv[data-theme="aurora"]{--a:#22d3ee;--a2:#a855f7;--hero-ink:#eef2ff;--hero-line:#26304d;--hero-bg:radial-gradient(70% 120% at 10% 0%,rgba(34,211,238,.32),transparent 60%),radial-gradient(60% 110% at 95% 10%,rgba(168,85,247,.38),transparent 60%),radial-gradient(80% 80% at 50% 120%,rgba(59,130,246,.3),transparent 70%),#0a0f1f}
 .hv[data-theme="aurora"] .hv-hero .hv-eyebrow{color:#67e8f9}
@@ -162,12 +229,14 @@ html[data-halo-color-scheme="dark"] .hv[data-theme="finance"]{--a:#facc15;--a2:#
 html[data-halo-color-scheme="dark"] .hv pre,html[data-halo-color-scheme="dark"] .hv-code{background:#0b0d12;border-color:#232733}
 html[data-halo-color-scheme="dark"] .hv-card{box-shadow:none}
 html[data-halo-color-scheme="dark"] .hv-steps>li::before{color:#0b0d12}
-@media (max-width:560px){.hv{padding:14px 10px 18px;font-size:14.5px}.hv h1{font-size:23px}.hv-hero{padding:20px 18px}.hv-bar{grid-template-columns:1fr auto}.hv-bar>span{grid-column:1/-1}.hv-bar::after{grid-column:1;grid-row:2}.hv-bar>b{grid-row:2;grid-column:2}}
+@media (max-width:560px){.hv-dia-wide{display:none}.hv-dia-narrow{display:block}.hv-dia .am-tree-cols{grid-template-columns:minmax(0,1fr)}.hv-dia .am-tree-col::before,.hv-dia .am-tree-col::after{display:none}.hv{padding:14px 10px 18px;font-size:14.5px}.hv h1{font-size:23px}.hv-hero{padding:20px 18px}.hv-bar{grid-template-columns:1fr auto}.hv-bar>span{grid-column:1/-1}.hv-bar::after{grid-column:1;grid-row:2}.hv-bar>b{grid-row:2;grid-column:2}}
 @media (prefers-reduced-motion:reduce){.hv-card{transition:none}.hv-card:hover{transform:none}}
 `
 	.trim()
 	.replace(/\n+/g, '');
 
-/** Copied card source keeps its look outside the preview frame (light palette). */
+/** Copied card source keeps its look outside the preview frame (light palette), diagrams drawn. */
 export const withHtmlVisualKitStyles = (html: string): string =>
-	usesHtmlVisualKit(html) ? `<style>${HTML_VISUAL_KIT_CSS}</style>\n${html}` : html;
+	usesHtmlVisualKit(html)
+		? `<style>${HTML_VISUAL_KIT_CSS}</style>\n${renderHtmlVisualDiagrams(html)}`
+		: html;

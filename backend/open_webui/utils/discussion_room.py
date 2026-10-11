@@ -835,6 +835,13 @@ def _trim_rules(body: str) -> str:
     return "\n".join(lines)
 
 
+def stored_content(ask: dict) -> str:
+    """The conclusion as the chat keeps it: with its picture (结论配图) on top."""
+    from open_webui.utils.mode_illustrate import with_picture
+
+    return with_picture(((ask.get("conclusion") or {}).get("content") or "").strip(), ask.get("illustration"))
+
+
 def conclusion_answer(content: str) -> str:
     """The first section (结论) of a conclusion, for previews and history."""
     sections = parse_conclusion_sections(content)
@@ -1541,6 +1548,7 @@ class LiveDiscussion:
             log.info("discussion %s: native web search check failed: %s", self.chat_id, exc)
 
     async def run(self):
+        self.ask.pop("illustration", None)  # a new conclusion gets its own picture once it is done
         self.flusher = asyncio.create_task(self._flush_loop())
         try:
             if self.retry_turn:

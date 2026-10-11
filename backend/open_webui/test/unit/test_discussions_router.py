@@ -773,12 +773,19 @@ def test_after_done_sends_a_dispatched_conclusion_back(env, monkeypatch):
 
     monkeypatch.setattr(mode_chats, "auto_title_and_folder", no_title)
     monkeypatch.setattr(mode_dispatch, "report_back_later", lambda request, kind, chat_id, run: sent.append((kind, chat_id, run["id"])))
+    from open_webui.utils import mode_illustrate
+
+    async def after_done(ask):
+        # the report back waits for the picture, in a job of its own
+        await ORIGINAL_AFTER_DONE(env.request, USER, detail["id"], ask)
+        await mode_illustrate.settle()
+
     detail = asyncio.run(_create(env))
     asyncio.run(_settle(detail["id"]))
     ask = asyncio.run(api.get_discussion(detail["id"], USER))["asks"][0]
-    asyncio.run(ORIGINAL_AFTER_DONE(env.request, USER, detail["id"], ask))
+    asyncio.run(after_done(ask))
     assert sent == []  # started on its page: nothing to send back
-    asyncio.run(ORIGINAL_AFTER_DONE(env.request, USER, detail["id"], {**ask, "origin": {"chatId": "c-1", "messageId": "m"}}))
+    asyncio.run(after_done({**ask, "origin": {"chatId": "c-1", "messageId": "m"}}))
     assert sent == [("discuss", detail["id"], ask["id"])]
 
 
@@ -826,3 +833,111 @@ def test_the_list_comes_a_page_at_a_time_with_search_and_the_live_filter(env):
     live_id, live, ended = asyncio.run(live_one())
     assert [d["id"] for d in live["items"]] == [live_id] and live["live"] == 1
     assert live_id not in [d["id"] for d in ended["items"]] and ended["total"] == 5
+
+
+def _fake_drawing(monkeypatch, *, fail=False):
+    """结论配图 without a model or gpt-image: what was condensed, drawn and put in the gallery."""
+    from open_webui.utils import image_studio_record, mode_illustrate
+
+    seen = {"condense": [], "draw": [], "gallery": []}
+
+    async def condense(request, user, model_id, text, metadata):
+        seen["condense"].append((model_id, text, metadata["task"]))
+        return "标题：选数据库\n要点：\n- 用 Postgres"
+
+    async def draw(request, user, template, content):
+        seen["draw"].append((template, content))
+        if fail:
+            raise mode_illustrate.IllustrateError("生图没有返回图片")
+        return {"url": "/api/v1/files/pic-1/content", "model": "gpt-image", "template": template["name"], "prompt": template["prompt"] + content, "size": "1536x1024"}
+
+    monkeypatch.setattr(mode_illustrate, "may_illustrate", lambda request, user: True)
+    monkeypatch.setattr(mode_illustrate, "picture_template", lambda user_id: {"name": "手绘万能图", "prompt": "画：", "model": "m", "size": "1536x1024", "aspect": "3:2"})
+    monkeypatch.setattr(mode_illustrate, "condense", condense)
+    monkeypatch.setattr(mode_illustrate, "draw", draw)
+    monkeypatch.setattr(image_studio_record, "record_chat_images_in_studio", lambda user_id, **kw: seen["gallery"].append((user_id, kw)))
+    return seen
+
+
+def test_a_finished_conclusion_gets_its_picture_in_the_chat_and_the_gallery(env, monkeypatch):
+    from open_webui.utils import mode_chats, mode_dispatch, mode_illustrate
+
+    async def no_title(*args, **kwargs):
+        return "标题", None
+
+    sent = []
+    monkeypatch.setattr(mode_chats, "auto_title_and_folder", no_title)
+    monkeypatch.setattr(mode_dispatch, "report_back_later", lambda request, kind, chat_id, run: sent.append(room.stored_content(run)))
+    seen = _fake_drawing(monkeypatch)
+    detail = {"id": _discuss_first(env)}
+    ask = asyncio.run(api.get_discussion(detail["id"], USER))["asks"][0]
+    assert ask["status"] == "done"
+    assert "illustration" not in ask
+
+    async def after_done():
+        await ORIGINAL_AFTER_DONE(env.request, USER, detail["id"], {**ask, "origin": {"chatId": "c-1", "messageId": "m"}})
+        await mode_illustrate.settle()
+
+    env.events.clear()
+    asyncio.run(after_done())
+    assert seen["condense"] == [("c", "## 结论\n用 Postgres。\n## 共识\n- 要备份", "discussion_room_illustration")]
+    assert seen["draw"][0][0]["name"] == "手绘万能图"
+    user_id, kw = seen["gallery"][0]
+    assert user_id == "u1" and kw["chat_id"] == detail["id"] and kw["message_id"] == ask["id"]
+    assert kw["images"] == [{"url": "/api/v1/files/pic-1/content"}] and kw["options"]["model"] == "gpt-image"
+
+    stored = asyncio.run(api.get_discussion(detail["id"], USER))["asks"][0]
+    assert stored["illustration"]["status"] == "ready" and stored["illustration"]["url"] == "/api/v1/files/pic-1/content"
+    assert stored["conclusion"]["content"].startswith("## 结论")  # the room's own text stays as written
+    message = chats_mod.ChatTable().get_chat_by_id(detail["id"]).chat["history"]["messages"][ask["id"]]
+    assert message["content"].startswith("![配图](/api/v1/files/pic-1/content)\n\n## 结论")
+    # the page saw it being drawn, then the picture
+    states = [e["data"]["ask"]["illustration"]["status"] for e in env.events if e["type"] == "discuss" and e["data"]["kind"] == "state"]
+    assert states[0] == "generating" and states[-1] == "ready"
+    # the report back to the chat of origin waited for it
+    assert sent and sent[0].startswith("![配图](/api/v1/files/pic-1/content)")
+
+
+def test_a_picture_that_fails_leaves_the_conclusion_as_it_was(env, monkeypatch):
+    from open_webui.utils import mode_chats, mode_illustrate
+
+    async def no_title(*args, **kwargs):
+        return "标题", None
+
+    monkeypatch.setattr(mode_chats, "auto_title_and_folder", no_title)
+    seen = _fake_drawing(monkeypatch, fail=True)
+    detail = {"id": _discuss_first(env)}
+    ask = asyncio.run(api.get_discussion(detail["id"], USER))["asks"][0]
+    assert ask["status"] == "done"
+
+    async def after_done():
+        await ORIGINAL_AFTER_DONE(env.request, USER, detail["id"], ask)
+        await mode_illustrate.settle()
+
+    asyncio.run(after_done())
+    stored = asyncio.run(api.get_discussion(detail["id"], USER))["asks"][0]
+    assert stored["illustration"]["status"] == "failed" and "生图没有返回图片" in stored["illustration"]["error"]
+    assert seen["gallery"] == []
+    message = chats_mod.ChatTable().get_chat_by_id(detail["id"]).chat["history"]["messages"][ask["id"]]
+    assert message["content"].startswith("## 结论")
+
+
+def test_no_picture_when_image_generation_is_not_allowed(env, monkeypatch):
+    from open_webui.utils import mode_chats, mode_illustrate
+
+    async def no_title(*args, **kwargs):
+        return "标题", None
+
+    monkeypatch.setattr(mode_chats, "auto_title_and_folder", no_title)
+    seen = _fake_drawing(monkeypatch)
+    monkeypatch.setattr(mode_illustrate, "may_illustrate", lambda request, user: False)
+    detail = {"id": _discuss_first(env)}
+    ask = asyncio.run(api.get_discussion(detail["id"], USER))["asks"][0]
+    assert ask["status"] == "done"
+
+    async def after_done():
+        await ORIGINAL_AFTER_DONE(env.request, USER, detail["id"], ask)
+        await mode_illustrate.settle()
+
+    asyncio.run(after_done())
+    assert seen["condense"] == [] and "illustration" not in asyncio.run(api.get_discussion(detail["id"], USER))["asks"][0]

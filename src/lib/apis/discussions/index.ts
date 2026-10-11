@@ -85,6 +85,19 @@ export type ResearchLookup = {
 	error?: string | null;
 };
 
+/** 结论配图: the picture drawn for a finished conclusion / answer (utils/mode_illustrate.py). */
+export type ModeIllustration = {
+	status: 'generating' | 'ready' | 'failed';
+	step?: 'condense' | 'draw' | '';
+	template?: string;
+	url?: string;
+	model?: string;
+	error?: string;
+	startedAt?: number;
+	endedAt?: number;
+	seconds?: number;
+};
+
 export type DiscussResearch = {
 	/** skipped: the query writer found nothing a search could help with */
 	status: 'waiting' | 'running' | 'done' | 'empty' | 'error' | 'stopped' | 'skipped';
@@ -169,6 +182,7 @@ export type DiscussAsk = {
 	endedAt?: number | null;
 	usage: DiscussUsage;
 	error?: string | null;
+	illustration?: ModeIllustration | null;
 };
 
 export type Discussion = {

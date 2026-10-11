@@ -5,6 +5,7 @@
 	import { copyToClipboard } from '$lib/utils';
 	import ReportMarkdown from '$lib/components/teams/ReportMarkdown.svelte';
 	import { now } from '$lib/components/teams/clock';
+	import ConclusionPicture from './ConclusionPicture.svelte';
 	import SeatAvatar from './SeatAvatar.svelte';
 	import { domainOf, linkCitations, parseSections, retryText, sectionKind, seconds, tokens } from './model';
 
@@ -132,6 +133,7 @@
 				{#if answer.title}
 					<h3 class="sr-only">{answer.title}</h3>
 				{/if}
+				<ConclusionPicture illustration={ask.illustration} alt={ask.question.slice(0, 40)} />
 				<div data-discuss-answer>
 					<ReportMarkdown id="dc-answer-{ask.id}" content={cite(answer.body)} />
 				</div>

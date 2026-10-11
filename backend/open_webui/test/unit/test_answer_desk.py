@@ -26,6 +26,7 @@ from open_webui.utils import chat as chat_utils  # noqa: E402
 from open_webui.utils import models as models_utils  # noqa: E402
 
 USER = SimpleNamespace(id="u1", role="admin")
+ORIGINAL_AFTER_DONE = api._after_done
 BASES = {
     "conn.gpt-chat": {"id": "conn.gpt-chat", "name": "gpt-chat"},
     "conn.deepseek-chat": {"id": "conn.deepseek-chat", "name": "deepseek-chat"},
@@ -777,3 +778,46 @@ def test_the_list_comes_a_page_at_a_time_and_searches_the_whole_history(env):
     found = asyncio.run(api.list_answers(USER, q="房租"))
     assert [d["id"] for d in found["items"]] == [ids[2]]
     assert asyncio.run(api.list_answers(USER, status="live"))["items"] == []
+
+
+def test_a_finished_answer_gets_its_picture_in_the_chat_and_the_gallery(env, monkeypatch):
+    from open_webui.utils import image_studio_record, mode_chats, mode_dispatch, mode_illustrate
+
+    async def no_title(*args, **kwargs):
+        return "标题", None
+
+    async def condense(request, user, model_id, text, metadata):
+        drawn.append((model_id, text, metadata["task"]))
+        return "标题：合同"
+
+    async def draw(request, user, template, content):
+        return {"url": "/api/v1/files/pic-2/content", "model": "gpt-image", "template": "手绘万能图", "prompt": "画：" + content, "size": "1536x1024"}
+
+    drawn, gallery, sent = [], [], []
+    monkeypatch.setattr(mode_chats, "auto_title_and_folder", no_title)
+    monkeypatch.setattr(mode_illustrate, "may_illustrate", lambda request, user: True)
+    monkeypatch.setattr(mode_illustrate, "picture_template", lambda user_id: None)
+    monkeypatch.setattr(mode_illustrate, "condense", condense)
+    monkeypatch.setattr(mode_illustrate, "draw", draw)
+    monkeypatch.setattr(image_studio_record, "record_chat_images_in_studio", lambda user_id, **kw: gallery.append(kw))
+    monkeypatch.setattr(mode_dispatch, "report_back_later", lambda request, kind, chat_id, run: sent.append(desk.stored_content(run)))
+    env.state["plan"] = {"action": "direct", "reason": "直接答", "web_search": False}
+
+    async def scenario():
+        detail = await _ask(env, planner="conn.gpt-chat")
+        await _settle(detail["id"])
+        run = desk.public_run((await api.get_answer(detail["id"], USER))["run"])
+        await ORIGINAL_AFTER_DONE(env.request, USER, detail["id"], {**run, "origin": {"chatId": "c-1", "messageId": "m"}})
+        await mode_illustrate.settle()
+        return detail["id"], run
+
+    chat_id, run = asyncio.run(scenario())
+    assert drawn == [("conn.gpt-chat", run["answer"]["content"], "answer_desk_illustration")]
+    assert gallery[0]["chat_id"] == chat_id and gallery[0]["message_id"] == run["id"]
+    stored = asyncio.run(api.get_answer(chat_id, USER))["run"]
+    assert stored["illustration"]["status"] == "ready" and stored["answer"]["content"] == run["answer"]["content"]
+    message = chats_mod.ChatTable().get_chat_by_id(chat_id).chat["history"]["messages"][run["id"]]
+    assert message["content"] == f"![配图](/api/v1/files/pic-2/content)\n\n{run['answer']['content']}"
+    assert sent == [message["content"]]
+    states = [e["data"]["run"]["illustration"]["status"] for e in env.events if e["type"] == "answer" and e["data"]["kind"] == "state" and "illustration" in e["data"]["run"]]
+    assert states[0] == "generating" and states[-1] == "ready"

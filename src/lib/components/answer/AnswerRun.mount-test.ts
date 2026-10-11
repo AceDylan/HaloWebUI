@@ -171,6 +171,37 @@ describe('AnswerRun', () => {
 		expect(handed.from).toEqual({ kind: 'answer', id: 'chat1', title: '新精答' });
 	}, 90000);
 
+	it('a finished answer shows its picture being drawn, then the picture (结论配图)', async () => {
+		const done = created({
+			status: 'done',
+			answer: { status: 'done', content: '押金要约定退还期限。', startedAt: 1000, endedAt: 9000 }
+		});
+		api.getAnswer.mockResolvedValue(detail(done, { running: false }));
+		const target = await mount();
+		await until(() => text(target, '[data-answer-body]').includes('退还期限'));
+		expect(target.querySelector('[data-mode-picture]')).toBeFalsy();
+
+		emit({ kind: 'state', chatId: 'chat1', runId: 'm1', run: { ...done, illustration: { status: 'generating', step: 'draw', template: '手绘万能图', startedAt: Date.now() } } });
+		await until(() => !!target.querySelector('[data-mode-picture="generating"]'));
+		expect(text(target, '[data-mode-picture]')).toContain('「手绘万能图」· 在画图');
+
+		emit({
+			kind: 'state',
+			chatId: 'chat1',
+			runId: 'm1',
+			run: { ...done, illustration: { status: 'ready', url: '/api/v1/files/p1/content', model: 'gpt-image', template: '手绘万能图', startedAt: 1 } }
+		});
+		await until(() => !!target.querySelector('[data-mode-picture="ready"]'));
+		expect(target.querySelector('[data-mode-picture] img')!.getAttribute('src')).toBe('/api/v1/files/p1/content');
+		expect(text(target, '[data-mode-picture]')).toContain('配图：手绘万能图 · gpt-image · 已存进生图图库');
+		// the answer itself stays as written
+		expect(text(target, '[data-answer-body]')).toContain('押金要约定退还期限');
+
+		emit({ kind: 'state', chatId: 'chat1', runId: 'm1', run: { ...done, illustration: { status: 'failed', error: '生图没有返回图片' } } });
+		await until(() => !!target.querySelector('[data-mode-picture="failed"]'));
+		expect(text(target, '[data-mode-picture]')).toContain('配图没画成：生图没有返回图片');
+	}, 90000);
+
 	it('a failed answer offers to answer again with the same assistant', async () => {
 		const failed = created({ status: 'error', error: '429 rate limited', answer: { status: 'error', content: '', startedAt: 1, error: '429 rate limited' } });
 		api.getAnswer.mockResolvedValue(detail(failed, { running: false }));

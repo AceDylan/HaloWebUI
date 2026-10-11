@@ -294,8 +294,11 @@ def answer_messages(run: dict, browse: bool = False) -> list[dict]:
 
 
 def stored_content(run: dict) -> str:
-    """The answer as the chat keeps it: with its sources listed, since the chat view has no panel."""
-    content = ((run.get("answer") or {}).get("content") or "").strip()
+    """The answer as the chat keeps it: with its picture (结论配图) and its sources listed, since
+    the chat view has no panel."""
+    from open_webui.utils.mode_illustrate import with_picture
+
+    content = with_picture(((run.get("answer") or {}).get("content") or "").strip(), run.get("illustration"))
     sources = (run.get("research") or {}).get("sources") or []
     if content and sources:
         lines = [f"{s['n']}. [{s.get('title') or s['url']}]({s['url']})" for s in sources]
@@ -495,6 +498,7 @@ class LiveAnswer:
 
     async def run_all(self):
         run = self.run
+        run.pop("illustration", None)  # a new answer gets its own picture once it is done
         flusher = asyncio.create_task(self._flush_loop())
         try:
             if not run.get("assistant"):

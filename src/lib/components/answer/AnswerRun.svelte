@@ -25,6 +25,7 @@
 	import ReportMarkdown from '$lib/components/teams/ReportMarkdown.svelte';
 	import { now, timeAgo } from '$lib/components/teams/clock';
 	import ResearchPanel from '$lib/components/discuss/ResearchPanel.svelte';
+	import ConclusionPicture from '$lib/components/discuss/ConclusionPicture.svelte';
 	import { linkCitations, modelById, retryText, seconds, tokens } from '$lib/components/discuss/model';
 	import AssistantAvatar from './AssistantAvatar.svelte';
 	import { ACTION_LABEL, actionSentence, answerContext, applyEvent, isLive, stagesOf, STATUS_LABEL, type AnswerEvent } from './model';
@@ -399,6 +400,9 @@
 						</header>
 						<div class="px-5 pb-5" data-answer-body>
 							{#if answer?.content}
+								{#if answerState === 'done'}
+									<ConclusionPicture illustration={run.illustration} alt={title} />
+								{/if}
 								<ReportMarkdown id="ad-answer-{run.id}" content={linkCitations(answer.content, sources)} />
 							{:else if liveNow}
 								<div class="flex flex-col gap-2 pt-2" style="--dc-hue: 226">

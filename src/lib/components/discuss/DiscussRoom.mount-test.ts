@@ -242,7 +242,8 @@ describe('DiscussRoom', () => {
 				content: '## 结论\n用 **Postgres**。\n## 共识\n- 要备份\n## 分歧\n- 是否需要 JSONB\n## 各方立场\n- **gpt-chat** — 支持',
 				startedAt: 1,
 				endedAt: 9001
-			}
+			},
+			illustration: { status: 'ready', url: '/api/v1/files/p1/content', model: 'gpt-image', template: '手绘万能图', startedAt: 1 }
 		});
 		api.getDiscussion.mockResolvedValue({ ...discussion(ask), title: '数据库选型' });
 		const target = await mount();
@@ -250,6 +251,9 @@ describe('DiscussRoom', () => {
 		expect(target.querySelector('[data-discuss-title]')!.textContent).toBe('数据库选型');
 		const kinds = [...target.querySelectorAll('.dc-section')].map((el: any) => el.getAttribute('data-kind'));
 		expect(kinds).toEqual(['agree', 'disagree', 'positions']);
+		// 结论配图 above the answer, the conclusion's text untouched
+		expect(target.querySelector('[data-discuss-conclusion] [data-mode-picture="ready"] img')!.getAttribute('src')).toBe('/api/v1/files/p1/content');
+		expect(target.querySelector('[data-discuss-answer] img')).toBeFalsy();
 		expect(target.querySelector('[data-discuss-turn="r1-s1"]')!.textContent).toContain('12s · 1.2k tokens');
 		expect(target.querySelector('[data-discuss-input]')!.getAttribute('placeholder')).toContain('追问');
 		expect(target.querySelector('[data-discuss-continue]')).toBeTruthy();

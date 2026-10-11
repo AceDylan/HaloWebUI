@@ -200,11 +200,48 @@ async def _after_done(request: Request, user, chat_id: str, run: dict) -> None:
         await emit({"type": "chat:completion", "data": {"done": True, "title": title, "content": answer[:400], "answer_desk": True}})
     except Exception:
         pass
+    from open_webui.utils.mode_illustrate import later
+
+    later(_illustrate_and_report(request, user, chat_id, run, answer))
+
+
+async def _illustrate_and_report(request: Request, user, chat_id: str, run: dict, answer: str) -> None:
+    # 结论配图 first: the answer goes back to its chat of origin with its picture
+    await _illustrate(request, user, chat_id, run, answer)
     if run.get("origin"):
         # 派发方式「精答」: the answer goes back into the chat it was asked in
         from open_webui.utils import mode_dispatch
 
         mode_dispatch.report_back_later(request, "answer", chat_id, run)
+
+
+async def _illustrate(request: Request, user, chat_id: str, run: dict, answer: str) -> None:
+    """The finished answer's picture (utils/mode_illustrate.py): kept on the run, in the chat's
+    message and in the image studio gallery; the page is told as it moves."""
+    from open_webui.utils.mode_illustrate import illustrate
+
+    emit = _emitter(user, chat_id, run["id"])
+
+    async def on_change(entry: dict) -> None:
+        chat = Chats.get_chat_by_id_and_user_id(chat_id, user.id)
+        stored = _stored_run(chat) if chat is not None else None
+        if chat_id in LIVE or not stored or stored.get("id") != run["id"] or stored.get("status") != "done":
+            return  # deleted or asked again meanwhile
+        stored["illustration"] = entry
+        run["illustration"] = entry
+        _persist(chat_id, stored)
+        await emit({"type": "answer", "data": {"kind": "state", "chatId": chat_id, "runId": run["id"], "run": desk.public_run(stored)}})
+
+    await illustrate(
+        request,
+        user,
+        chat_id=chat_id,
+        message_id=run["id"],
+        text=answer,
+        model_id=run["planner"]["model"],
+        task="answer_desk_illustration",
+        on_change=on_change,
+    )
 
 
 def _resolve_planner(requested: Optional[str], models_map: dict, ambiguous: set, user) -> dict:

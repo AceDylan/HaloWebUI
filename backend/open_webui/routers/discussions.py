@@ -197,10 +197,9 @@ def _detail(chat_id: str, user) -> dict:
 
 
 def _persist_ask(chat_id: str, ask: dict, setup: dict) -> None:
-    conclusion = ask.get("conclusion") or {}
     terminal = ask.get("status") in room.TERMINAL_STATUSES
     update = {
-        "content": conclusion.get("content") or "",
+        "content": room.stored_content(ask),
         "done": terminal,
         MESSAGE_KEY: room.public_ask(ask),
     }
@@ -338,11 +337,50 @@ async def _after_done(request: Request, user, chat_id: str, ask: dict) -> None:
         await emit({"type": "chat:completion", "data": {"done": True, "title": title, "content": answer[:400], "discussion_room": True}})
     except Exception:
         pass
+    from open_webui.utils.mode_illustrate import later
+
+    later(_illustrate_and_report(request, user, chat_id, ask))
+
+
+async def _illustrate_and_report(request: Request, user, chat_id: str, ask: dict) -> None:
+    # 结论配图 first: the conclusion goes back to its chat of origin with its picture
+    await _illustrate(request, user, chat_id, ask)
     if ask.get("origin"):
         # 派发方式「讨论」: the conclusion goes back into the chat the question was asked in
         from open_webui.utils import mode_dispatch
 
         mode_dispatch.report_back_later(request, "discuss", chat_id, ask)
+
+
+async def _illustrate(request: Request, user, chat_id: str, ask: dict) -> None:
+    """The finished conclusion's picture (utils/mode_illustrate.py): kept on the ask, in the
+    chat's message and in the image studio gallery; the room is told as it moves."""
+    from open_webui.utils.mode_illustrate import illustrate
+
+    emit = _emitter(user, chat_id, ask["id"])
+
+    async def on_change(entry: dict) -> None:
+        chat = Chats.get_chat_by_id_and_user_id(chat_id, user.id)
+        messages = (((chat.chat or {}).get("history") or {}).get("messages") or {}) if chat is not None else {}
+        stored = (messages.get(ask["id"]) or {}).get(MESSAGE_KEY)
+        live = LIVE.get(chat_id)
+        if not isinstance(stored, dict) or stored.get("status") != "done" or (live and live.ask.get("id") == ask["id"]):
+            return  # deleted or taken up again meanwhile
+        stored["illustration"] = entry
+        ask["illustration"] = entry
+        _persist_ask(chat_id, stored, _setup_of(chat))
+        await emit({"type": "discuss", "data": {"kind": "state", "chatId": chat_id, "askId": ask["id"], "ask": room.public_ask(stored)}})
+
+    await illustrate(
+        request,
+        user,
+        chat_id=chat_id,
+        message_id=ask["id"],
+        text=(ask.get("conclusion") or {}).get("content") or "",
+        model_id=(ask.get("conclusion") or {}).get("model") or (ask.get("moderator") or {}).get("model") or "",
+        task="discussion_room_illustration",
+        on_change=on_change,
+    )
 
 
 def _parse_queries(res: Any) -> Optional[list[str]]:

@@ -276,7 +276,7 @@ def report_of(kind: str, chat_id: str, run: dict) -> tuple[str, str, str]:
         moderator = ((run.get("conclusion") or {}).get("name") or (run.get("moderator") or {}).get("name") or "主持人")
         notice = (f"{MODES[kind]['notice']} 「{question}」：{len(seats)} 个模型{mode}（{'、'.join(seats)}），"
                   f"下面是 {moderator} 整理的结论。讨论台：/discuss/{chat_id}")
-        content = ((run.get("conclusion") or {}).get("content") or "").strip()
+        content = room.stored_content(run)
         content += _sources_tail(room.research_sources(run))
     content = content.strip()
     if len(content) > REPORT_CONTENT_MAX_CHARS:

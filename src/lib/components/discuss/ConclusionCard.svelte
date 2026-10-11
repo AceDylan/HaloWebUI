@@ -7,7 +7,7 @@
 	import { now } from '$lib/components/teams/clock';
 	import ConclusionPicture from './ConclusionPicture.svelte';
 	import SeatAvatar from './SeatAvatar.svelte';
-	import { domainOf, linkCitations, parseSections, retryText, sectionKind, seconds, tokens } from './model';
+	import { domainOf, linkCitations, parseSections, pictureState, retryText, sectionKind, seconds, tokens } from './model';
 
 	/** The moderator's conclusion of one question: the answer first, then agreements,
 	 *  disagreements, positions and next steps as separate panels. */
@@ -36,6 +36,7 @@
 	$: took = seconds(conclusion.startedAt, conclusion.endedAt);
 	$: total = ask.usage?.total_tokens;
 	$: waiting = state === 'waiting' && ask.status !== 'concluding';
+	$: drawing = state === 'done' && pictureState(ask.illustration, $now) === 'generating';
 	// a stand-in seat writes it when the moderator cannot
 	$: writer = conclusion.standIn ? { model: conclusion.model, name: conclusion.name } : ask.moderator;
 	$: retrying = conclusion.retry ? retryText(conclusion.retry, $now) : '';
@@ -86,7 +87,7 @@
 					{:else if state === 'streaming'}
 						· {conclusion.thinking && !conclusion.content ? '思考中…' : '正在写结论…'}
 					{:else if state === 'done'}
-						{[took !== null ? `用时 ${took}s` : '', total ? `本问共 ${tokens(total)} tokens` : '']
+						{[took !== null ? `用时 ${took}s` : '', total ? `本问共 ${tokens(total)} tokens` : '', drawing ? '正在配图…' : '']
 							.filter(Boolean)
 							.map((s) => ` · ${s}`)
 							.join('')}
@@ -120,6 +121,9 @@
 				<button type="button" class="dc-chip mb-2" disabled={busy} on:click={rewrite} data-discuss-rewrite>重写结论</button>
 			{/if}
 			{#if state === 'streaming' || !answer}
+				{#if state === 'done'}
+					<ConclusionPicture illustration={ask.illustration} alt={ask.question.slice(0, 40)} />
+				{/if}
 				{#if conclusion.content}
 					<ReportMarkdown id="dc-conclusion-{ask.id}" content={cite(conclusion.content)} />
 				{:else if state === 'streaming' || state === 'waiting'}

@@ -1,5 +1,6 @@
 // 精答工作台: labels, the stages a run goes through, and live socket events applied to a run.
 import type { AnswerPart, AnswerRun, AnswerStatus, AssistantAction } from '$lib/apis/answers';
+import { pictureElapsed, pictureState, pictureStep } from '$lib/components/discuss/model';
 
 export const STATUS_LABEL: Record<AnswerStatus, string> = {
 	routing: '挑选助手',
@@ -38,7 +39,7 @@ export const actionSentence = (action: AssistantAction | undefined, name: string
 					: `选用了「${name}」`;
 
 export type StageState = 'waiting' | 'active' | 'done' | 'error' | 'stopped' | 'skipped';
-export type Stage = { key: 'route' | 'assistant' | 'research' | 'answer'; label: string; state: StageState; note: string };
+export type Stage = { key: 'route' | 'assistant' | 'research' | 'answer' | 'picture'; label: string; state: StageState; note: string };
 
 const partState = (status: string | undefined, started: boolean): StageState =>
 	status === 'done'
@@ -51,8 +52,12 @@ const partState = (status: string | undefined, started: boolean): StageState =>
 					? 'active'
 					: 'waiting';
 
-/** The steps of a run as the page shows them: 理解问题 → 助手 → (查资料) → 作答. */
-export const stagesOf = (run: AnswerRun): Stage[] => {
+/** A finished answer whose picture (结论配图) is still being drawn: not quite done yet. */
+export const isDrawing = (run: AnswerRun | null | undefined, nowSeconds?: number) =>
+	run?.status === 'done' && pictureState(run.illustration, nowSeconds) === 'generating';
+
+/** The steps of a run as the page shows them: 理解问题 → 助手 → (查资料) → 作答 → (配图). */
+export const stagesOf = (run: AnswerRun, nowSeconds: number = Date.now() / 1000): Stage[] => {
 	const ended = !isLive(run.status);
 	const plan = run.plan ?? { status: 'running' };
 	const assistant = run.assistant;
@@ -99,6 +104,23 @@ export const stagesOf = (run: AnswerRun): Stage[] => {
 		state: answerState === 'waiting' && ended ? 'skipped' : answerState,
 		note: answer?.retry ? `${answer.retry.reason}，稍后重试` : answer?.thinking && !answer.content ? '思考中' : ''
 	});
+	const picture = run.status === 'done' ? pictureState(run.illustration, nowSeconds) : null;
+	if (picture) {
+		const spent = pictureElapsed(run.illustration, nowSeconds);
+		stages.push({
+			key: 'picture',
+			label: '配图',
+			state: picture === 'generating' ? 'active' : picture === 'ready' ? 'done' : 'error',
+			note:
+				picture === 'generating'
+					? `${pictureStep(run.illustration)}${spent ? ` · ${spent}s` : ''}`
+					: picture === 'failed'
+						? '没画成'
+						: run.illustration?.seconds
+							? `${Math.round(run.illustration.seconds)}s`
+							: ''
+		});
+	}
 	return stages;
 };
 

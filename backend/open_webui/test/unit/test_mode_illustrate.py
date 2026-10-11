@@ -105,3 +105,17 @@ def test_a_condensed_reply_drops_its_thinking(monkeypatch):
 
     monkeypatch.setattr(chat_utils, "generate_chat_completion", fake)
     assert asyncio.run(mi.condense(None, None, "m", "长文", {})) == "标题：X"
+
+
+def test_a_list_row_knows_whether_the_picture_is_still_being_drawn():
+    from open_webui.utils import answer_desk, discussion_room
+
+    assert mi.picture_summary(None) is None
+    assert mi.picture_summary({}) is None
+    drawing = {"status": "generating", "startedAt": 5, "step": "draw", "template": "手绘万能图"}
+    assert mi.picture_summary(drawing) == {"status": "generating", "startedAt": 5}
+    assert answer_desk.summary_meta({"status": "done", "illustration": drawing})["picture"] == {"status": "generating", "startedAt": 5}
+    setup = {"mode": "roundtable", "rounds": 2, "seats": [], "moderator": {"model": "m", "name": "m"}}
+    ask = {"status": "done", "illustration": {"status": "ready", "url": "/x", "startedAt": 7}}
+    assert discussion_room.summary_meta(setup, [ask])["picture"] == {"status": "ready", "startedAt": 7}
+    assert discussion_room.summary_meta(setup, [{"status": "done"}])["picture"] is None

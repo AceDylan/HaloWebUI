@@ -1,19 +1,20 @@
 <script lang="ts">
 	import type { ModeIllustration } from '$lib/apis/discussions';
+	import { WEBUI_BASE_URL } from '$lib/constants';
+	import ImagePreview from '$lib/components/common/ImagePreview.svelte';
 	import { now } from '$lib/components/teams/clock';
+	import { pictureElapsed, pictureError, pictureState, pictureStep } from './model';
 
 	/** 结论配图 of a finished answer (精答) or conclusion (讨论台): drawn on its own once the text is
 	 *  done, in the owner's 「手绘万能图」 template, and kept in the image studio gallery too. */
 	export let illustration: ModeIllustration | null | undefined;
 	export let alt = '配图';
 
-	// a picture still "being drawn" long after the server's own limit was cut off by a restart
-	const STALE_SECONDS = 8 * 60;
+	let showPreview = false;
 
-	$: started = Math.floor((illustration?.startedAt ?? 0) / 1000);
-	$: status = illustration?.status === 'generating' && started && $now - started > STALE_SECONDS ? 'failed' : illustration?.status;
-	$: error = status === 'failed' && illustration?.status === 'generating' ? '配图被中断（服务重启）' : illustration?.error;
-	$: elapsed = started ? Math.max(0, $now - started) : 0;
+	$: status = pictureState(illustration, $now);
+	$: elapsed = pictureElapsed(illustration, $now);
+	$: src = illustration?.url?.startsWith('/') ? `${WEBUI_BASE_URL}${illustration.url}` : (illustration?.url ?? '');
 </script>
 
 {#if status === 'generating'}
@@ -29,7 +30,7 @@
 		<div class="min-w-0 flex-1 text-xs text-gray-500 dark:text-gray-400">
 			<span class="tm-shimmer text-[13px] font-medium text-gray-800 dark:text-gray-100">正在配图</span>
 			<span>
-				· {illustration?.template ? `「${illustration.template}」· ` : ''}{illustration?.step === 'draw' ? '在画图' : '在提炼图上的要点'}{elapsed
+				· {illustration?.template ? `「${illustration.template}」· ` : ''}{pictureStep(illustration)}{elapsed
 					? ` · 已 ${elapsed}s`
 					: ''}
 			</span>
@@ -37,9 +38,16 @@
 	</div>
 {:else if status === 'ready' && illustration?.url}
 	<figure class="dc-picture mb-4" data-mode-picture="ready">
-		<a href={illustration.url} target="_blank" rel="noopener noreferrer" class="block overflow-hidden rounded-xl bg-gray-500/5" title="看大图">
-			<img src={illustration.url} {alt} class="w-full object-contain" loading="lazy" />
-		</a>
+		<!-- a preview in place (the file link itself is a download) -->
+		<button
+			type="button"
+			class="block w-full cursor-zoom-in overflow-hidden rounded-xl bg-gray-500/5"
+			title="看大图"
+			on:click={() => (showPreview = true)}
+			data-mode-picture-open
+		>
+			<img {src} {alt} class="w-full object-contain" loading="lazy" draggable="false" />
+		</button>
 		<figcaption class="mt-1.5 text-[11px] text-gray-400 dark:text-gray-500">
 			配图：{illustration.template ?? '模板'}{illustration.model ? ` · ${illustration.model}` : ''} · 已存进<a
 				href="/workspace/images?tab=gallery"
@@ -48,5 +56,11 @@
 		</figcaption>
 	</figure>
 {:else if status === 'failed'}
-	<p class="mb-2 text-[11px] text-gray-400 dark:text-gray-500" title={error ?? ''} data-mode-picture="failed">配图没画成：{error || '生图出错'}</p>
+	<p class="mb-2 text-[11px] text-gray-400 dark:text-gray-500" title={pictureError(illustration, $now)} data-mode-picture="failed">
+		配图没画成：{pictureError(illustration, $now)}
+	</p>
+{/if}
+
+{#if status === 'ready' && src}
+	<ImagePreview bind:show={showPreview} {src} {alt} />
 {/if}

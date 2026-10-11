@@ -127,6 +127,48 @@ describe('ModeDispatchCard', () => {
 		expect(text('[data-mode-dispatch-clock]')).toBe('用时 42s');
 	});
 
+	it('精答 written, its picture still being drawn: a 配图 step, then on its way with the picture', async () => {
+		const written = { status: 'done', endedAt: Date.now() - 30000, answer: { status: 'done', content: '30 天' } };
+		const responses = [
+			{
+				id: 'run-3',
+				run: run({
+					...written,
+					illustration: { status: 'generating', step: 'draw', template: '手绘万能图', startedAt: Date.now() - 12000 }
+				})
+			},
+			{
+				id: 'run-3',
+				run: run({
+					...written,
+					illustration: { status: 'ready', url: '/api/v1/files/p1/content', startedAt: Date.now() - 12000, endedAt: Date.now() }
+				})
+			}
+		];
+		answers.getAnswer.mockImplementation(async () => responses.shift() ?? responses[0]);
+		await mount({ kind: 'answer', chatId: 'run-3', history: { messages: {} } });
+		await until(() => !!target.querySelector('[data-step="picture"]'), 'the picture step');
+		const steps = () =>
+			[...target.querySelectorAll('[data-step]')].map(
+				(li: any) => `${li.getAttribute('data-step')}:${li.getAttribute('data-state')}`
+			);
+		// not finished yet: a halo, 配图中, and the report waits for the picture
+		expect(steps()).toEqual(['pick:done', 'answer:done', 'picture:active', 'report:pending']);
+		expect(text('[data-mode-dispatch-stage-label]')).toBe('配图中');
+		expect(text('[data-mode-dispatch-line]')).toContain('正在配图 · 「手绘万能图」· 在画图');
+		expect(text('[data-mode-dispatch-clock]')).toMatch(/^配图已用 1\ds$/);
+		expect(target.querySelector('[data-mode-dispatch-stage]').className).toContain('tm-live');
+		expect(target.querySelector('[data-mode-dispatch-drawing]')).toBeTruthy();
+		expect(target.querySelector('[data-mode-dispatch-bring]')).toBeFalsy();
+		expect(text('[data-mode-dispatch-card] .shrink-0')).toContain('配图中');
+
+		// drawn: on its way into the chat, counted from the picture (the text ended 30s ago)
+		await until(() => steps().includes('picture:done'), 'the picture drawn');
+		expect(steps()).toEqual(['pick:done', 'answer:done', 'picture:done', 'report:active']);
+		expect(text('[data-mode-dispatch-stage-label]')).toBe('发回中');
+		expect(text('[data-mode-dispatch-done]')).toContain('正在发回这个对话');
+	}, 30000);
+
 	it('精答 that never arrived: one click puts it into the chat', async () => {
 		answers.getAnswer.mockResolvedValue({
 			id: 'run-2',

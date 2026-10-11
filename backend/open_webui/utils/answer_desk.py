@@ -40,6 +40,7 @@ from open_webui.utils.discussion_room import (
 )
 from open_webui.utils import assistant_library as lib
 from open_webui.utils.mode_chats import native_search_failed, sources_from_docs
+from open_webui.utils.mode_illustrate import picture_summary
 
 log = logging.getLogger(__name__)
 log.setLevel(SRC_LOG_LEVELS.get("MAIN", GLOBAL_LOG_LEVEL))
@@ -251,6 +252,7 @@ def summary_meta(run: dict) -> dict:
         "preview": clean_text(_plain((run.get("answer") or {}).get("content") or ""), 180),
         "assistant": {k: assistant.get(k) for k in ("id", "name", "emoji", "action")} if assistant else None,
         "research": bool((run.get("research") or {}).get("sources")),
+        "picture": picture_summary(run.get("illustration")),
         "updatedAt": now_ms(),
     }
 

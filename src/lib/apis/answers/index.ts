@@ -115,6 +115,8 @@ export type AnswerSummary = {
 	preview: string;
 	assistant: { id: string; name: string; emoji?: string; action: AssistantAction } | null;
 	research?: boolean;
+	/** 结论配图 of the answer: whether it is still being drawn. */
+	picture?: Pick<ModeIllustration, 'status' | 'startedAt'> | null;
 };
 
 export type LibraryAssistant = {

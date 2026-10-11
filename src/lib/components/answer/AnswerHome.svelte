@@ -34,6 +34,7 @@
 	import { modelById, modelRef } from '$lib/components/discuss/model';
 	import { searchTemplates, sourceLabel } from '$lib/apis/assistant-library';
 	import AssistantAvatar from './AssistantAvatar.svelte';
+	import { pictureState } from '$lib/components/discuss/model';
 	import { ACTION_LABEL, isLive, QUICK, STATUS_LABEL } from './model';
 
 	const LAST_KEY = 'halo.answer.last';
@@ -77,6 +78,8 @@
 	$: shownAssistants = showAllAssistants ? library : library.slice(0, 10);
 	$: shown = items;
 	$: liveCount = Math.max(liveTotal, items.filter((d) => isLive(d.status) || d.running).length);
+	// answered, the picture still being drawn: the list keeps refreshing until it is in
+	$: drawingCount = items.filter((d) => d.status === 'done' && pictureState(d.picture, $now) === 'generating').length;
 	const keyOf = (d: AnswerSummary): [number, string] => [d.updated_at, d.id];
 	// searched on the server (the whole history, not just the pages read), a moment after typing
 	$: if (query.trim() !== searched) {
@@ -278,7 +281,7 @@
 		loadLibrary();
 		// while anything is being answered, the first page again (never every page read)
 		timer = setInterval(() => {
-			if (!document.hidden && liveCount > 0) load();
+			if (!document.hidden && (liveCount > 0 || drawingCount > 0)) load();
 		}, 4000);
 		tick().then(resize);
 	});
@@ -511,6 +514,7 @@
 					<ul class="flex flex-col gap-2" data-answer-list>
 						{#each shown as d (d.id)}
 							{@const live = isLive(d.status) || d.running}
+							{@const drawing = !live && d.status === 'done' && pictureState(d.picture, $now) === 'generating'}
 							<li class="group tm-card tm-hover relative flex items-center gap-3 px-4 py-3" data-answer-row={d.id}>
 								<AssistantAvatar
 									id={d.assistant?.id ?? ''}
@@ -532,11 +536,12 @@
 									</div>
 								</a>
 								<span
-									class="relative shrink-0 rounded-full px-2 py-0.5 text-[11px] {live
+									class="relative shrink-0 rounded-full px-2 py-0.5 text-[11px] {live || drawing
 										? 'bg-blue-500/10 text-blue-600 dark:text-blue-300'
 										: d.status === 'error'
 											? 'bg-red-500/10 text-red-600 dark:text-red-300'
-											: 'bg-gray-500/10 text-gray-500 dark:text-gray-400'}">{STATUS_LABEL[d.status] ?? d.status}</span
+											: 'bg-gray-500/10 text-gray-500 dark:text-gray-400'}"
+									data-answer-row-status={drawing ? 'drawing' : d.status}>{drawing ? '配图中' : (STATUS_LABEL[d.status] ?? d.status)}</span
 								>
 								<button
 									type="button"

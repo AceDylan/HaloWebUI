@@ -11,7 +11,7 @@
 	import { listDiscussions } from '$lib/apis/discussions';
 	import { socket } from '$lib/stores';
 	import { setModeLive } from '$lib/components/scifi/mode-relay';
-	import { isLive } from './model';
+	import { isLive, pictureState } from './model';
 
 	/** Sidebar hint for 讨论台: how many discussions are under way, live from the socket. */
 	export let compact = false;
@@ -23,7 +23,12 @@
 		const id = event.chat_id;
 		if (!id) return;
 		const live =
-			data.kind === 'state' ? isLive(data.ask?.status) : data.kind === 'end' ? false : null;
+			data.kind === 'state'
+				? isLive(data.ask?.status) ||
+					(data.ask?.status === 'done' && pictureState(data.ask?.illustration) === 'generating')
+				: data.kind === 'end'
+					? false
+					: null;
 		if (live === null) return;
 		running.update((set) => {
 			const next = new Set(set);

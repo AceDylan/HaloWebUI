@@ -14,6 +14,9 @@
 	import { actionSentence, STATUS_LABEL as ANSWER_STATUS } from '$lib/components/answer/model';
 	import {
 		modeSpec,
+		pictureElapsed,
+		pictureState,
+		pictureStep,
 		seatHue,
 		turnStatusText,
 		STATUS_LABEL as DISCUSS_STATUS
@@ -53,10 +56,17 @@
 	$: href = `/${kind}/${chatId}`;
 	$: status = (kind === 'answer' ? run?.status : ask?.status) ?? '';
 	$: live = ['routing', 'researching', 'answering', 'running', 'concluding'].includes(status);
-	$: settled = gone || (!!status && !live);
 	$: done = status === 'done';
+	// 结论配图: once the text is written its picture is drawn, and the result comes back with it
+	$: picture = done ? (kind === 'answer' ? run?.illustration : ask?.illustration) : null;
+	$: pictureNow = pictureState(picture, $now);
+	$: drawing = pictureNow === 'generating';
+	// still moving (polled): working, or written with its picture being drawn
+	$: settled = gone || (!!status && !live && !drawing);
 	$: ended = settled && !done && !gone;
-	$: chip = done
+	$: chip = drawing
+		? 'running'
+		: done
 		? 'done'
 		: live
 			? 'running'
@@ -65,8 +75,9 @@
 				: status
 					? 'failed'
 					: 'running';
-	$: chipLabel =
-		(kind === 'answer'
+	$: chipLabel = drawing
+		? '配图中'
+		: (kind === 'answer'
 			? ANSWER_STATUS[status as keyof typeof ANSWER_STATUS]
 			: DISCUSS_STATUS[status as keyof typeof DISCUSS_STATUS]) ?? label;
 	$: question = (kind === 'answer' ? run?.question : ask?.question) ?? '';
@@ -145,7 +156,10 @@
 					: '';
 	$: failure = (kind === 'answer' ? run?.error : ask?.error) ?? '';
 	// stopped or failed: why, in place of what it was doing
-	$: nowLine = ended ? failure || chipLabel : kind === 'answer' ? answerLine : discussLine;
+	$: pictureLine = drawing
+		? `正在配图 · ${picture?.template ? `「${picture.template}」· ` : ''}${pictureStep(picture)}，画好后连图一起发回`
+		: '';
+	$: nowLine = ended ? failure || chipLabel : drawing ? pictureLine : kind === 'answer' ? answerLine : discussLine;
 
 	// what the header says under the question
 	$: facts = (
@@ -184,7 +198,9 @@
 		return null;
 	};
 	$: resultId = findResult(history, `${kind}:${chatId}:`);
-	$: arriving = done && !resultId && endedAt > 0 && clock - endedAt < ARRIVING_MS;
+	// the report back follows the picture (or follows the text when none is drawn)
+	$: reportFrom = picture?.endedAt || endedAt;
+	$: arriving = done && !drawing && !resultId && reportFrom > 0 && clock - reportFrom < ARRIVING_MS;
 
 	// The steps, ending with the result back in this chat. A run that stopped or failed marks the
 	// step it stopped at.
@@ -270,18 +286,39 @@
 		});
 		return steps;
 	})();
+	$: pictureStepItem = pictureNow
+		? [
+				{
+					key: 'picture',
+					label: '配图',
+					state: (drawing ? 'active' : pictureNow === 'failed' ? 'failed' : 'done') as StepState,
+					note: pictureNow === 'failed' ? '没画成，只发回文字' : ''
+				}
+			]
+		: [];
 	$: steps = [
 		...settle(kind === 'answer' ? answerSteps : discussSteps, ended),
+		...pictureStepItem,
 		{
 			key: 'report',
 			label: '发回对话',
-			state: (resultId ? 'done' : done ? 'active' : 'pending') as StepState
+			state: (resultId ? 'done' : done && !drawing ? 'active' : 'pending') as StepState
 		}
 	];
 	$: activeStep = steps.find((s) => s.state === 'active' || s.state === 'failed') ?? null;
-	$: tone = live ? 'moving' : done ? (resultId ? 'done' : 'arriving') : 'ended';
-	$: stageLabel = done ? (resultId ? '已发回' : arriving ? '发回中' : '已写好') : ended ? chipLabel : activeStep?.label ?? chipLabel;
-	$: spent = live && startedAt ? $now - startedAt / 1000 : null;
+	$: tone = live || drawing ? 'moving' : done ? (resultId ? 'done' : 'arriving') : 'ended';
+	$: stageLabel = drawing
+		? '配图中'
+		: done
+			? resultId
+				? '已发回'
+				: arriving
+					? '发回中'
+					: '已写好'
+			: ended
+				? chipLabel
+				: (activeStep?.label ?? chipLabel);
+	$: spent = drawing ? pictureElapsed(picture, $now) : live && startedAt ? $now - startedAt / 1000 : null;
 	$: took = !live && startedAt && endedAt && endedAt > startedAt ? (endedAt - startedAt) / 1000 : null;
 
 	const jump = () => {
@@ -440,7 +477,7 @@
 
 		{#if status}
 			<section
-				class="md-stage tm-card px-4 py-3 {live ? 'tm-live' : ''}"
+				class="md-stage tm-card px-4 py-3 {live || drawing ? 'tm-live' : ''}"
 				data-tone={tone}
 				data-mode-dispatch-stage
 				aria-label="{label}的进度"
@@ -498,13 +535,13 @@
 						class="min-w-0 flex-1 basis-48 break-words text-sm text-gray-800 dark:text-gray-100"
 						data-mode-dispatch-line
 					>
-						<span class={live ? 'tm-shimmer' : ''}>{nowLine}</span>
+						<span class={live || drawing ? 'tm-shimmer' : ''}>{nowLine}</span>
 					</p>
 					{#if spent !== null || took !== null}
 						<span
 							class="tm-num shrink-0 text-xs text-gray-500 dark:text-gray-400"
 							data-mode-dispatch-clock
-							>{spent !== null ? `已用 ${elapsed(spent)}` : `用时 ${elapsed(took ?? 0)}`}</span
+							>{spent !== null ? `${drawing ? '配图' : ''}已用 ${elapsed(spent)}` : `用时 ${elapsed(took ?? 0)}`}</span
 						>
 					{/if}
 				</div>
@@ -570,7 +607,11 @@
 						<span class="font-medium text-gray-900 dark:text-gray-100"
 							>{kind === 'answer' ? '回答已写好' : '结论已写好'}</span
 						>
-						{#if resultId}
+						{#if drawing}
+							<span class="min-w-0 flex-1 tm-shimmer" data-mode-dispatch-drawing
+								>还在配图，画好后连图一起发回这个对话…</span
+							>
+						{:else if resultId}
 							<span class="min-w-0 flex-1">已发回这个对话，可以接着追问。</span>
 							<button
 								type="button"

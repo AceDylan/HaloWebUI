@@ -217,6 +217,8 @@ export type DiscussionSummary = {
 	question: string;
 	preview: string;
 	round?: number;
+	/** 结论配图 of the last conclusion: whether it is still being drawn. */
+	picture?: Pick<ModeIllustration, 'status' | 'startedAt'> | null;
 };
 
 export class DiscussApiError extends Error {

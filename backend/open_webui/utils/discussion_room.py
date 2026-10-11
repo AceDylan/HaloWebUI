@@ -31,6 +31,7 @@ from typing import Any, Awaitable, Callable, Optional
 
 from open_webui.env import BYPASS_MODEL_ACCESS_CONTROL, GLOBAL_LOG_LEVEL, SRC_LOG_LEVELS
 from open_webui.utils.mode_chats import native_search_failed, sources_from_docs
+from open_webui.utils.mode_illustrate import picture_summary
 from open_webui.utils.model_identity import resolve_model_from_lookup
 
 log = logging.getLogger(__name__)
@@ -1056,6 +1057,7 @@ def summary_meta(setup: dict, asks: list[dict]) -> dict:
         "asks": len(asks),
         "question": _clean_text(last.get("question"), 200),
         "preview": _clean_text(_plain(conclusion_answer(conclusion)), 180),
+        "picture": picture_summary(last.get("illustration")),
         "updatedAt": now_ms(),
     }
 

@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
 import type { AnswerRun } from '$lib/apis/answers';
-import { actionSentence, answerContext, applyEvent, isLive, stagesOf } from './model';
+import { actionSentence, answerContext, applyEvent, isDrawing, isLive, stagesOf } from './model';
+import { pictureError, pictureState, PICTURE_STALE_SECONDS } from '$lib/components/discuss/model';
 
 const run = (over: Partial<AnswerRun> = {}): AnswerRun => ({
 	id: 'm1',
@@ -105,5 +106,29 @@ describe('texts', () => {
 			answer: { status: 'done', content: '要写清退还期限 [1]' }
 		});
 		expect(answerContext(done)).toBe('问题：押金条款有什么风险？\n\n「合同审查」的回答：\n要写清退还期限 [1]\n\n资料：\n[1] 押金规定 https://law.example');
+	});
+});
+
+describe('结论配图 in the steps', () => {
+	const answered = (illustration: AnswerRun['illustration']) =>
+		run({ status: 'done', plan: { status: 'done' }, answer: { status: 'done', content: '答' }, illustration });
+
+	it('adds 配图 once answered: active while drawn, then done or failed', () => {
+		const now = 1_000_000;
+		const drawing = answered({ status: 'generating', step: 'draw', startedAt: (now - 20) * 1000 });
+		expect(isDrawing(drawing, now)).toBe(true);
+		expect(stagesOf(drawing, now).at(-1)).toEqual({ key: 'picture', label: '配图', state: 'active', note: '在画图 · 20s' });
+		expect(stagesOf(answered({ status: 'ready', url: '/x', seconds: 41.6 }), now).at(-1)).toMatchObject({ state: 'done', note: '42s' });
+		expect(stagesOf(answered({ status: 'failed', error: 'x' }), now).at(-1)).toMatchObject({ state: 'error', note: '没画成' });
+		expect(stagesOf(answered(null), now).map((s) => s.key)).not.toContain('picture');
+	});
+
+	it('reads a picture cut off by a restart as failed, not drawn forever', () => {
+		const now = 1_000_000;
+		const stale = answered({ status: 'generating', startedAt: (now - PICTURE_STALE_SECONDS - 1) * 1000 });
+		expect(pictureState(stale.illustration, now)).toBe('failed');
+		expect(pictureError(stale.illustration, now)).toBe('配图被中断（服务重启）');
+		expect(isDrawing(stale, now)).toBe(false);
+		expect(stagesOf(stale, now).at(-1)).toMatchObject({ key: 'picture', state: 'error' });
 	});
 });

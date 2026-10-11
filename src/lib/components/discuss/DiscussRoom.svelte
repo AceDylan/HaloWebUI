@@ -40,6 +40,7 @@
 		isLive,
 		modelRef,
 		modeSpec,
+		pictureState,
 		roundsOf,
 		seatHue,
 		seatIndex,
@@ -71,6 +72,8 @@
 	$: last = asks[asks.length - 1] ?? null;
 	$: liveNow = !!last && isLive(last.status);
 	$: concluding = last?.status === 'concluding';
+	// concluded, the picture still being drawn (结论配图): not quite finished yet
+	$: drawing = last?.status === 'done' && pictureState(last.illustration, $now) === 'generating';
 	$: hasSpoken = !!last?.turns?.some((t) => t.status === 'done');
 	$: settled = !!last && !liveNow;
 	$: canConclude = settled && hasSpoken && last?.conclusion?.status !== 'done';
@@ -335,12 +338,12 @@
 		<span class="min-w-0 truncate text-sm font-medium text-gray-800 dark:text-gray-100" data-discuss-title>{title}</span>
 		{#if last}
 			<span
-				class="ml-1 shrink-0 rounded-full px-2 py-0.5 text-[11px] {liveNow
+				class="ml-1 shrink-0 rounded-full px-2 py-0.5 text-[11px] {liveNow || drawing
 					? 'bg-blue-500/10 text-blue-600 dark:text-blue-300'
 					: last.status === 'error'
 						? 'bg-red-500/10 text-red-600 dark:text-red-300'
 						: 'bg-gray-500/10 text-gray-500 dark:text-gray-400'}"
-				data-discuss-status={last.status}>{STATUS_LABEL[last.status] ?? last.status}</span
+				data-discuss-status={drawing ? 'drawing' : last.status}>{drawing ? '已有结论 · 配图中' : (STATUS_LABEL[last.status] ?? last.status)}</span
 			>
 		{/if}
 		<div class="relative ml-auto shrink-0">

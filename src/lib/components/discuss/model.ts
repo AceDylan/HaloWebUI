@@ -6,6 +6,7 @@ import type {
 	DiscussRetry,
 	DiscussSeat,
 	DiscussTurn,
+	ModeIllustration,
 	TurnStatus
 } from '$lib/apis/discussions';
 
@@ -184,6 +185,36 @@ export const tokens = (n: number | undefined | null) => {
 	if (!n) return '';
 	return n >= 1000 ? `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}k` : `${n}`;
 };
+
+// --- 结论配图: the picture a finished answer / conclusion gets after its text -------------------
+
+// a picture still "being drawn" long after the server's own limit (7 min) was cut off by a restart
+export const PICTURE_STALE_SECONDS = 8 * 60;
+
+/** Where the picture stands now; one cut off by a restart reads as failed. null: none is drawn. */
+export const pictureState = (
+	picture: Pick<ModeIllustration, 'status' | 'startedAt'> | null | undefined,
+	nowSeconds: number = Date.now() / 1000
+): ModeIllustration['status'] | null => {
+	if (!picture?.status) return null;
+	const started = (picture.startedAt ?? 0) / 1000;
+	if (picture.status === 'generating' && started && nowSeconds - started > PICTURE_STALE_SECONDS) return 'failed';
+	return picture.status;
+};
+
+/** Why it was not drawn. */
+export const pictureError = (picture: ModeIllustration | null | undefined, nowSeconds?: number) =>
+	picture?.status === 'generating' && pictureState(picture, nowSeconds) === 'failed'
+		? '配图被中断（服务重启）'
+		: picture?.error || '生图出错';
+
+/** What drawing is at: 「在提炼图上的要点」 / 「在画图」. */
+export const pictureStep = (picture: ModeIllustration | null | undefined) =>
+	picture?.step === 'draw' ? '在画图' : '在提炼图上的要点';
+
+/** Seconds since drawing began. */
+export const pictureElapsed = (picture: ModeIllustration | null | undefined, nowSeconds: number) =>
+	picture?.startedAt ? Math.max(0, Math.floor(nowSeconds - picture.startedAt / 1000)) : 0;
 
 export const seconds = (from?: number | null, to?: number | null) =>
 	from && to ? Math.max(0, Math.round((to - from) / 1000)) : null;

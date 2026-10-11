@@ -12,6 +12,7 @@
 	import { socket } from '$lib/stores';
 	import { setModeLive } from '$lib/components/scifi/mode-relay';
 	import { isLive } from './model';
+	import { pictureState } from '$lib/components/discuss/model';
 
 	/** Sidebar hint for 精答: how many answers are being worked on, live from the socket. */
 	export let compact = false;
@@ -23,7 +24,12 @@
 		const id = event.chat_id;
 		if (!id) return;
 		const live =
-			data.kind === 'state' ? isLive(data.run?.status) : data.kind === 'end' ? false : null;
+			data.kind === 'state'
+				? isLive(data.run?.status) ||
+					(data.run?.status === 'done' && pictureState(data.run?.illustration) === 'generating')
+				: data.kind === 'end'
+					? false
+					: null;
 		if (live === null) return;
 		running.update((set) => {
 			if (set.has(id) === live) return set;

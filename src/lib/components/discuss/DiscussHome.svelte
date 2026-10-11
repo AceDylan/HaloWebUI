@@ -45,6 +45,7 @@
 		modeSpec,
 		modelById,
 		modelRef,
+		pictureState,
 		seatHue,
 		STATUS_LABEL,
 		type SeatDraft
@@ -441,6 +442,8 @@
 	// a run that ended while the 进行中 filter is on leaves it at the next refresh
 	$: shown = items;
 	$: liveCount = Math.max(liveTotal, items.filter((d) => isLive(d.status) || d.running).length);
+	// concluded, the picture still being drawn: the list keeps refreshing until it is in
+	$: drawingCount = items.filter((d) => d.status === 'done' && pictureState(d.picture, $now) === 'generating').length;
 
 	const askDelete = (d: DiscussionSummary) => {
 		pendingDelete = d;
@@ -467,7 +470,7 @@
 		loadLibrary();
 		// while anything is under way, the first page again (never every page read)
 		timer = setInterval(() => {
-			if (!document.hidden && liveCount > 0) load();
+			if (!document.hidden && (liveCount > 0 || drawingCount > 0)) load();
 		}, 4000);
 		tick().then(resize);
 	});
@@ -802,6 +805,7 @@
 					<ul class="flex flex-col gap-2" data-discuss-list>
 						{#each shown as d (d.id)}
 							{@const live = isLive(d.status) || d.running}
+							{@const drawing = !live && d.status === 'done' && pictureState(d.picture, $now) === 'generating'}
 							<li class="group tm-card tm-hover relative flex items-center gap-3 px-4 py-3" data-discuss-row={d.id}>
 								<div class="flex shrink-0 -space-x-2">
 									{#each (d.seats ?? []).slice(0, 4) as seat, i}
@@ -825,12 +829,13 @@
 									</div>
 								</a>
 								<span
-									class="relative shrink-0 rounded-full px-2 py-0.5 text-[11px] {live
+									class="relative shrink-0 rounded-full px-2 py-0.5 text-[11px] {live || drawing
 										? 'bg-blue-500/10 text-blue-600 dark:text-blue-300'
 										: d.status === 'error'
 											? 'bg-red-500/10 text-red-600 dark:text-red-300'
 											: 'bg-gray-500/10 text-gray-500 dark:text-gray-400'}"
-									>{live ? (d.status === 'concluding' ? '总结中' : '讨论中') : STATUS_LABEL[d.status] ?? d.status}</span
+									data-discuss-row-status={drawing ? 'drawing' : d.status}
+									>{live ? (d.status === 'concluding' ? '总结中' : '讨论中') : drawing ? '配图中' : STATUS_LABEL[d.status] ?? d.status}</span
 								>
 								<button
 									type="button"

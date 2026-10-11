@@ -184,6 +184,11 @@ describe('AnswerRun', () => {
 		emit({ kind: 'state', chatId: 'chat1', runId: 'm1', run: { ...done, illustration: { status: 'generating', step: 'draw', template: '手绘万能图', startedAt: Date.now() } } });
 		await until(() => !!target.querySelector('[data-mode-picture="generating"]'));
 		expect(text(target, '[data-mode-picture]')).toContain('「手绘万能图」· 在画图');
+		// answered but not finished: the header and the steps say a picture is being drawn
+		expect(target.querySelector('[data-answer-status]')!.getAttribute('data-answer-status')).toBe('drawing');
+		expect(text(target, '[data-answer-status]').trim()).toBe('已答完 · 配图中');
+		expect(target.querySelector('[data-answer-stage="picture"]')!.getAttribute('data-state')).toBe('active');
+		expect(text(target, '[data-answer-answer]')).toContain('正在配图…');
 
 		emit({
 			kind: 'state',
@@ -194,6 +199,12 @@ describe('AnswerRun', () => {
 		await until(() => !!target.querySelector('[data-mode-picture="ready"]'));
 		expect(target.querySelector('[data-mode-picture] img')!.getAttribute('src')).toBe('/api/v1/files/p1/content');
 		expect(text(target, '[data-mode-picture]')).toContain('配图：手绘万能图 · gpt-image · 已存进生图图库');
+		expect(text(target, '[data-answer-status]').trim()).toBe('已答完');
+		expect(target.querySelector('[data-answer-stage="picture"]')!.getAttribute('data-state')).toBe('done');
+		// a click previews it in place (the file link itself would download it)
+		(target.querySelector('[data-mode-picture-open]') as any).click();
+		await until(() => !!document.querySelector('.modal img'));
+		expect(document.querySelector('.modal img')!.getAttribute('src')).toBe('/api/v1/files/p1/content');
 		// the answer itself stays as written
 		expect(text(target, '[data-answer-body]')).toContain('押金要约定退还期限');
 

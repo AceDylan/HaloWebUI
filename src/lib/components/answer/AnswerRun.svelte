@@ -28,7 +28,7 @@
 	import ConclusionPicture from '$lib/components/discuss/ConclusionPicture.svelte';
 	import { linkCitations, modelById, retryText, seconds, tokens } from '$lib/components/discuss/model';
 	import AssistantAvatar from './AssistantAvatar.svelte';
-	import { ACTION_LABEL, actionSentence, answerContext, applyEvent, isLive, stagesOf, STATUS_LABEL, type AnswerEvent } from './model';
+	import { ACTION_LABEL, actionSentence, answerContext, applyEvent, isDrawing, isLive, stagesOf, STATUS_LABEL, type AnswerEvent } from './model';
 
 	/** One 精答: the dispatcher picking (or writing) an assistant, then its answer, streaming. */
 	export let chatId: string;
@@ -47,7 +47,9 @@
 
 	$: title = detail?.title ?? '精答';
 	$: liveNow = !!run && isLive(run.status);
-	$: stages = run ? stagesOf(run) : [];
+	$: stages = run ? stagesOf(run, $now) : [];
+	// answered, the picture still being drawn (结论配图): not quite finished yet
+	$: drawing = isDrawing(run, $now);
 	$: assistant = run?.assistant ?? null;
 	$: answer = run?.answer ?? null;
 	$: sources = run?.research?.status === 'done' ? run.research.sources : [];
@@ -203,12 +205,12 @@
 		<span class="min-w-0 truncate text-sm font-medium text-gray-800 dark:text-gray-100" data-answer-title>{title}</span>
 		{#if run}
 			<span
-				class="ml-1 shrink-0 rounded-full px-2 py-0.5 text-[11px] {liveNow
+				class="ml-1 shrink-0 rounded-full px-2 py-0.5 text-[11px] {liveNow || drawing
 					? 'bg-blue-500/10 text-blue-600 dark:text-blue-300'
 					: run.status === 'error'
 						? 'bg-red-500/10 text-red-600 dark:text-red-300'
 						: 'bg-gray-500/10 text-gray-500 dark:text-gray-400'}"
-				data-answer-status={run.status}>{STATUS_LABEL[run.status] ?? run.status}</span
+				data-answer-status={drawing ? 'drawing' : run.status}>{drawing ? '已答完 · 配图中' : (STATUS_LABEL[run.status] ?? run.status)}</span
 			>
 		{/if}
 		<div class="relative ml-auto shrink-0">
@@ -383,7 +385,7 @@
 									{:else if answerState === 'waiting' && liveNow}
 										· {run.status === 'researching' ? '等资料查完' : '准备中'}
 									{:else if answerState === 'done'}
-										{[took !== null ? `用时 ${took}s` : '', answer?.usage?.total_tokens ? `${tokens(answer.usage.total_tokens)} tokens` : '']
+										{[took !== null ? `用时 ${took}s` : '', answer?.usage?.total_tokens ? `${tokens(answer.usage.total_tokens)} tokens` : '', drawing ? '正在配图…' : '']
 											.filter(Boolean)
 											.map((s) => ` · ${s}`)
 											.join('')}

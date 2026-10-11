@@ -254,6 +254,11 @@ describe('DiscussRoom', () => {
 		// 结论配图 above the answer, the conclusion's text untouched
 		expect(target.querySelector('[data-discuss-conclusion] [data-mode-picture="ready"] img')!.getAttribute('src')).toBe('/api/v1/files/p1/content');
 		expect(target.querySelector('[data-discuss-answer] img')).toBeFalsy();
+		// a click previews it in place (the file link itself would download it)
+		(target.querySelector('[data-mode-picture-open]') as any).click();
+		await until(() => !!document.querySelector('.modal img'));
+		expect(document.querySelector('.modal img')!.getAttribute('src')).toBe('/api/v1/files/p1/content');
+		expect(target.querySelector('[data-discuss-status]')!.getAttribute('data-discuss-status')).toBe('done');
 		expect(target.querySelector('[data-discuss-turn="r1-s1"]')!.textContent).toContain('12s · 1.2k tokens');
 		expect(target.querySelector('[data-discuss-input]')!.getAttribute('placeholder')).toContain('追问');
 		expect(target.querySelector('[data-discuss-continue]')).toBeTruthy();
@@ -268,6 +273,23 @@ describe('DiscussRoom', () => {
 		const url = nav.goto.mock.calls[0][0] as string;
 		expect(url.startsWith('/?models=m-h&q=')).toBe(true);
 		expect(decodeURIComponent(url.split('&q=')[1])).toContain('用 **Postgres**');
+	}, 90000);
+
+	it('a conclusion whose picture is still being drawn says so in the header and on the card', async () => {
+		const ask = runningAsk();
+		Object.assign(ask, {
+			status: 'done',
+			turns: ask.turns.map((t) => ({ ...t, status: 'done', content: `${t.seat} 说完了`, startedAt: 1000, endedAt: 13000 })),
+			conclusion: { status: 'done', model: 'm-b', name: 'claude-chat', content: '## 结论\n用 **Postgres**。', startedAt: 1, endedAt: 9001 },
+			illustration: { status: 'generating', step: 'condense', template: '手绘万能图', startedAt: Date.now() - 5000 }
+		});
+		api.getDiscussion.mockResolvedValue({ ...discussion(ask), title: '数据库选型' });
+		const target = await mount();
+		await until(() => !!target.querySelector('[data-mode-picture="generating"]'));
+		expect(target.querySelector('[data-discuss-status]')!.getAttribute('data-discuss-status')).toBe('drawing');
+		expect((target.querySelector('[data-discuss-status]')!.textContent ?? '').trim()).toBe('已有结论 · 配图中');
+		expect(target.querySelector('[data-discuss-conclusion]')!.textContent).toContain('正在配图…');
+		expect(target.querySelector('[data-mode-picture]')!.textContent).toContain('在提炼图上的要点');
 	}, 90000);
 
 	it('interjects while running, stops, and asks a follow-up when settled', async () => {

@@ -258,6 +258,13 @@ async def settle() -> None:
         await asyncio.gather(*list(_background), return_exceptions=True)
 
 
+def picture_summary(illustration: Optional[dict]) -> Optional[dict]:
+    """What a list row keeps of the picture: whether it is still being drawn (结论配图中)."""
+    if not isinstance(illustration, dict) or not illustration.get("status"):
+        return None
+    return {"status": illustration["status"], "startedAt": illustration.get("startedAt")}
+
+
 def with_picture(markdown: str, illustration: Optional[dict], title: str = "配图") -> str:
     """*markdown* with its ready picture under its leading ``# title`` (on top when it has none),
     the way the chat view and a report back show it."""

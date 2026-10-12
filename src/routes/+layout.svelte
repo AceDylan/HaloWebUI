@@ -63,6 +63,8 @@
 	import {
 		acceptHubTheme,
 		acceptHubEnter,
+		acceptHubBeacon,
+		answerHubBeacon,
 		followHubTheme,
 		hubPlacePath,
 		keepHistoryWithHub,
@@ -703,6 +705,9 @@
 				const shell = document.querySelector('[data-halo-main]');
 				if (shell) { shell.classList.remove('halo-enter'); void shell.getBoundingClientRect(); shell.classList.add('halo-enter'); }
 			}
+			// The Hub flies its ring of light onto our new chat's orb (see hub-embed).
+			const beaconAsk = acceptHubBeacon(event, $config?.hub_origin);
+			if (beaconAsk) answerHubBeacon(beaconAsk);
 		};
 		window.addEventListener('message', onHubTheme);
 

@@ -4,7 +4,10 @@ import { readFileSync } from 'node:fs';
 
 import {
 	HUB_REAUTH_GUARD_MS,
+	acceptHubBeacon,
 	acceptHubTheme,
+	answerHubBeacon,
+	findHubBeacon,
 	followHubTheme,
 	hubTheme,
 	hubNoteUrl,
@@ -533,5 +536,69 @@ describe('app.html boot script and the Hub theme', () => {
 		expect(top.classes).toEqual(['dark']);
 		expect(top.replaced).toEqual([]);
 		expect(boot({ hash: '#hub_theme=purple', deviceDark: true }).classes).toEqual(['dark']);
+	});
+});
+
+describe("the Hub's question: where is the orb", () => {
+	const parent = {};
+	const framed = { parent };
+	const store = { getItem: () => null, setItem: () => {} };
+	const ask = (data: unknown, origin = HUB, source: unknown = parent) =>
+		acceptHubBeacon({ source, origin, data }, HUB, framed, store);
+	const view = { innerWidth: 1000, innerHeight: 800 };
+	const orbAt = (left: number, top: number, size: number, animations: any[] = []) => ({
+		getBoundingClientRect: () => ({ left, top, width: size, height: size, right: left + size, bottom: top + size }),
+		getAnimations: () => animations
+	});
+	const docWith = (orb: unknown) => ({ querySelector: (sel: string) => (sel === '[data-halo-orb]' ? orb : null) }) as any;
+
+	it('is taken only from the Hub, our parent, with an id', () => {
+		expect(ask({ source: 'hub', type: 'beacon', id: 3, wait: 900 })).toEqual({ id: 3, wait: 900, origin: HUB });
+		expect(ask({ source: 'hub', type: 'beacon', id: 4 })).toEqual({ id: 4, wait: 0, origin: HUB });
+		expect(ask({ source: 'hub', type: 'beacon', id: 5, wait: 1e9 })?.wait).toBe(1500);
+		expect(ask({ source: 'hub', type: 'beacon', id: 3 }, 'https://evil.example')).toBeNull();
+		expect(ask({ source: 'hub', type: 'beacon', id: 3 }, HUB, {})).toBeNull();
+		expect(ask({ source: 'hub', type: 'beacon', id: '3' })).toBeNull();
+		expect(ask({ source: 'hub', type: 'enter', id: 3 })).toBeNull();
+		expect(ask(null)).toBeNull();
+	});
+
+	it('names the orb on screen by centre and radius, and nothing off screen', () => {
+		expect(findHubBeacon(docWith(orbAt(456, 200, 88)), view)).toEqual({ x: 500, y: 244, r: 44 });
+		expect(findHubBeacon(docWith(null), view)).toBeNull();
+		expect(findHubBeacon(docWith(orbAt(456, -200, 88)), view)).toBeNull();
+		expect(findHubBeacon(docWith(orbAt(456, 900, 88)), view)).toBeNull();
+		expect(findHubBeacon(docWith(orbAt(0, 0, 0)), view)).toBeNull();
+	});
+
+	it('answers to the Hub only, with the orb or none', async () => {
+		const win = { parent: { postMessage: vi.fn() } };
+		const found = await answerHubBeacon({ id: 7, wait: 0, origin: HUB }, () => true, docWith(orbAt(456, 200, 88)), view, win);
+		expect(found).toEqual({ x: 500, y: 244, r: 44 });
+		expect(win.parent.postMessage).toHaveBeenLastCalledWith({ source: 'halowebui', type: 'beacon', id: 7, x: 500, y: 244, r: 44 }, HUB);
+		await answerHubBeacon({ id: 8, wait: 0, origin: HUB }, () => true, docWith(null), view, win);
+		expect(win.parent.postMessage).toHaveBeenLastCalledWith({ source: 'halowebui', type: 'beacon', id: 8, none: true }, HUB);
+	});
+
+	it('waits for the new chat to draw its orb, but not on an open chat', async () => {
+		const win = { parent: { postMessage: vi.fn() } };
+		let orb: unknown = null;
+		setTimeout(() => (orb = orbAt(456, 200, 88)), 120);
+		const doc = { querySelector: () => orb } as any;
+		expect(await answerHubBeacon({ id: 1, wait: 1000, origin: HUB }, () => true, doc, view, win)).toEqual({ x: 500, y: 244, r: 44 });
+		const t0 = Date.now();
+		expect(await answerHubBeacon({ id: 2, wait: 1000, origin: HUB }, () => false, docWith(null), view, win)).toBeNull();
+		expect(Date.now() - t0).toBeLessThan(100);
+	});
+
+	it('measures an orb still rising in once it has settled', async () => {
+		const win = { parent: { postMessage: vi.fn() } };
+		let top = 210;
+		let settle = () => {};
+		const rise = { finished: new Promise<void>((r) => (settle = r)), effect: { getComputedTiming: () => ({ endTime: 720 }) } };
+		const forever = { finished: new Promise(() => {}), effect: { getComputedTiming: () => ({ endTime: Infinity }) } };
+		const orb = { ...orbAt(456, 0, 88, [rise, forever]), getBoundingClientRect: () => ({ left: 456, top, width: 88, height: 88, right: 544, bottom: top + 88 }) };
+		setTimeout(() => { top = 200; settle(); }, 60);
+		expect(await answerHubBeacon({ id: 1, wait: 1000, origin: HUB }, () => true, docWith(orb), view, win)).toEqual({ x: 500, y: 244, r: 44 });
 	});
 });

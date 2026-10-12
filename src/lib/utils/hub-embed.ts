@@ -596,3 +596,114 @@ export const acceptHubEnter = (
 			trustedHubMessage(event, hubOrigin, win, store)
 	);
 };
+
+// ---------------------------------------------------------------------------
+// Where the new chat's orb is.
+//
+// Going between its library and this tab, the Hub darkens the screen down to a
+// single ring of light and flies it from the library's clock onto the orb in the
+// middle of our new chat page, which then lights up the screen (and back the
+// other way). So it asks the frame where that orb is:
+// {source:'hub', type:'beacon', id, wait}. We answer with its centre and radius
+// in this frame's pixels, or `none` when no orb is on screen (a chat is open).
+// Asked right after `ready`, the new chat page may not have drawn the orb yet:
+// on '/' we wait for it (and for its rise-in) up to `wait` ms.
+
+export const HUB_BEACON_MESSAGE_TYPE = 'beacon';
+export type HubBeacon = { x: number; y: number; r: number };
+const BEACON_WAIT_MAX = 1500;
+
+/** The question's id, how long the Hub waits and its origin, when `event` asks where the orb is; else null. */
+export const acceptHubBeacon = (
+	event: HubMessageEvent,
+	hubOrigin: unknown,
+	win: { parent: unknown } = window,
+	store: SessionStore | null = sessionStore()
+): { id: number; wait: number; origin: string } | null => {
+	const data = event.data as {
+		source?: unknown;
+		type?: unknown;
+		id?: unknown;
+		wait?: unknown;
+	} | null;
+	if (
+		!data ||
+		typeof data !== 'object' ||
+		data.source !== HUB_THEME_MESSAGE_SOURCE ||
+		data.type !== HUB_BEACON_MESSAGE_TYPE ||
+		!Number.isSafeInteger(data.id) ||
+		!trustedHubMessage(event, hubOrigin, win, store)
+	) {
+		return null;
+	}
+	const wait =
+		typeof data.wait === 'number' && Number.isFinite(data.wait)
+			? Math.min(Math.max(data.wait, 0), BEACON_WAIT_MAX)
+			: 0;
+	return { id: data.id as number, wait, origin: event.origin };
+};
+
+type BeaconDoc = Pick<Document, 'querySelector'>;
+type BeaconView = { innerWidth: number; innerHeight: number };
+
+/** The orb on screen: centre and radius in this frame's pixels; null when none is in view. */
+export const findHubBeacon = (
+	doc: BeaconDoc = document,
+	view: BeaconView = window
+): HubBeacon | null => {
+	const orb = doc.querySelector('[data-halo-orb]');
+	if (!orb) return null;
+	const b = orb.getBoundingClientRect();
+	if (
+		!b.width ||
+		b.bottom <= 0 ||
+		b.right <= 0 ||
+		b.top >= view.innerHeight ||
+		b.left >= view.innerWidth
+	) {
+		return null;
+	}
+	return {
+		x: Math.round(b.left + b.width / 2),
+		y: Math.round(b.top + b.height / 2),
+		r: Math.round(b.width / 2)
+	};
+};
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Answers the Hub's question `id` (see acceptHubBeacon). Returns the orb that
+ * was reported, or null when `none` was.
+ */
+export const answerHubBeacon = async (
+	ask: { id: number; wait: number; origin: string },
+	onNewChat: () => boolean = () => window.location.pathname === '/',
+	doc: BeaconDoc = document,
+	view: BeaconView = window,
+	win: FrameWindow = window as unknown as FrameWindow
+): Promise<HubBeacon | null> => {
+	const until = Date.now() + ask.wait;
+	let orb = doc.querySelector('[data-halo-orb]');
+	while (!orb && onNewChat() && Date.now() < until) {
+		await sleep(50);
+		orb = doc.querySelector('[data-halo-orb]');
+	}
+	// measured mid rise-in it would sit a few pixels low
+	const rising = (orb?.getAnimations?.() ?? []).filter(
+		(a) => a.effect?.getComputedTiming().endTime !== Infinity
+	);
+	if (rising.length && Date.now() < until) {
+		await Promise.race([
+			Promise.allSettled(rising.map((a) => a.finished)),
+			sleep(until - Date.now())
+		]);
+	}
+	const beacon = findHubBeacon(doc, view);
+	postToHub(
+		{ type: HUB_BEACON_MESSAGE_TYPE, id: ask.id, ...(beacon ?? { none: true }) },
+		ask.origin,
+		win
+	);
+	return beacon;
+};

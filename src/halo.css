@@ -2899,7 +2899,10 @@ body:has(#chat-input:focus) .halo-orb__arc {
 ::view-transition-new(halo-main) { animation: halo-camera-page var(--dur-std) var(--spring-smooth) both; }
 ::view-transition-old(halo-main) { animation: halo-vt-out var(--dur-exit) ease-out both; }
 @keyframes halo-camera-page { from { opacity: 0; transform: translateX(calc(var(--nav-direction, 1) * 8px)) scale(.985); } to { opacity: 1; transform: none; } }
-.halo-enter > :first-child, [data-studio-hero], .halo-crumb { animation: halo-panel-enter var(--dur-std) var(--spring-smooth) both; }
+/* backwards, not both: the end state is the panel as it is, and a fill that outlives the animation keeps the whole
+   main panel on its own compositor layer for good — on a foldable's inner screen that layer, added just as the Hub's
+   ring lands, is what pushed the tab past the GPU budget and made tiles blink out. */
+.halo-enter > :first-child, [data-studio-hero], .halo-crumb { animation: halo-panel-enter var(--dur-std) var(--spring-smooth) backwards; }
 [data-studio-hero] { animation-delay: var(--stagger); }
 @keyframes halo-panel-enter { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 [data-team-inspector] { animation: halo-inspector-enter var(--dur-std) var(--spring-smooth) both; }

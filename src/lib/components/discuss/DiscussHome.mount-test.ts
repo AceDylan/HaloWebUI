@@ -282,6 +282,19 @@ describe('DiscussHome', () => {
 		expect(form.context).toEqual({ text: '用户：想周末出去玩\n\n助手：可以去杭州', title: '周末出游', chat_id: 'chat-9' });
 	});
 
+	it('a question handed over for 主持人安排 can be started without editing it first', async () => {
+		localStorage.removeItem('halo.discuss.last');
+		sessionStorage.setItem(
+			'halo.handoff',
+			JSON.stringify({ to: 'discuss', text: '周末去哪？', models: [], files: [], context: '用户：想出去玩', from: null, at: Date.now() })
+		);
+		const target = await mount();
+		await until(() => !!target.querySelector('[data-discuss-planner]'));
+		await sleep(20);
+		expect((target.querySelector('#discuss-question') as any).value).toBe('周末去哪？');
+		expect(target.querySelector('[data-discuss-start]')!.hasAttribute('disabled')).toBe(false);
+	});
+
 	it('one ticked model gets a second seat; the background can be left out', async () => {
 		sessionStorage.setItem(
 			'halo.handoff',

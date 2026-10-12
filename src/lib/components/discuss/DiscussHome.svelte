@@ -156,6 +156,14 @@
 
 	// Text models that can sit at the table (the chat's model menu offers the same ones)
 	$: choices = discussionSeatModels(($models ?? []) as any[], $config?.hermes_agent_model_ids);
+	// Picked here, before the values below: pickDefaults sets the question, seats, mode and moderator
+	// inside this update, and a `$:` placed after them would leave them worked out from the empty
+	// setup (a question handed over from a chat kept 开始讨论 greyed out until the text was edited).
+	let defaultsPicked = false;
+	$: if (!defaultsPicked && choices.length) {
+		defaultsPicked = true;
+		pickDefaults();
+	}
 	$: spec = modeSpec(mode);
 	$: if (spec.fixedRounds) rounds = spec.rounds;
 	$: seatsValid = seats.length >= MIN_SEATS && seats.length <= MAX_SEATS && seats.every((s) => modelById(choices, s.model));
@@ -273,12 +281,6 @@
 		}
 		resolveNames();
 	};
-
-	let defaultsPicked = false;
-	$: if (!defaultsPicked && choices.length) {
-		defaultsPicked = true;
-		pickDefaults();
-	}
 
 	const setMode = (value: DiscussMode) => {
 		mode = value;

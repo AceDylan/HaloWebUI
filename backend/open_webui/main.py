@@ -2324,7 +2324,10 @@ async def get_app_config(request: Request):
             "default_reasoning_effort": HALOCLAW_DEFAULT_REASONING_EFFORT.value,
             "default_max_thinking_tokens": HALOCLAW_DEFAULT_MAX_THINKING_TOKENS.value,
         }
-    hub_origin = hub_embed.hub_origin() if user is not None else None
+    # Public: it is already in every response's frame-ancestors header, and the
+    # framed sign-in page needs it to tell the Hub a ticket is being traded
+    # (otherwise the Hub's entry animation opens up on the sign-in page).
+    hub_origin = hub_embed.hub_origin()
     hub_vault_root = hub_embed.vault_root() if user is not None else None
 
     return {
@@ -2336,6 +2339,9 @@ async def get_app_config(request: Request):
         # Upstream ids of the models that run through hermes's /v1/runs, so the
         # composer knows when the reply on screen is a steerable hermes run.
         "hermes_agent_model_ids": list(HERMES_AGENT_MODEL_IDS),
+        # The Bookmark Hub that may frame this page: a framed page tells it (and
+        # only it) how signing in goes, when a reply is running or has finished.
+        **({"hub_origin": hub_origin} if hub_origin else {}),
         "oauth": {
             "providers": {
                 name: config.get("name", name)
@@ -2424,11 +2430,6 @@ async def get_app_config(request: Request):
                 },
                 "onedrive": {"client_id": ONEDRIVE_CLIENT_ID.value},
                 "license_metadata": app.state.LICENSE_METADATA,
-                # The Bookmark Hub that may frame this page: a framed page tells
-                # it (and only it) when a reply is running or has finished, so
-                # the Hub can mark its "AI 聊天" tab. Already public in the
-                # frame-ancestors header.
-                **({"hub_origin": hub_origin} if hub_origin else {}),
                 # Where the Hub's notes live on the host: replies name the notes
                 # they write by that path, and such a path opens the note there.
                 **({"hub_vault_root": hub_vault_root} if hub_vault_root else {}),

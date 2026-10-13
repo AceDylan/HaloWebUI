@@ -4,6 +4,7 @@ A run is one of the user's chats (see utils/answer_desk.py): created, listed and
 deleted like any chat. Every route is per user.
 """
 
+import asyncio
 import logging
 import re
 import time
@@ -561,7 +562,7 @@ async def open_for_chat(request: Request, user, *, question: str, context: Optio
     question = desk.clean_text(question, desk.QUESTION_MAX_CHARS)
     if not question:
         raise HTTPException(status_code=400, detail="先写下要问的问题")
-    loaded = _load_files(files or [], user)
+    loaded = await asyncio.to_thread(_load_files, files or [], user)
     planner, web_allowed = await _prepare(request, user, None, True)
     return _open(
         request, user, question=question, planner=planner, web_allowed=web_allowed, context=clean_context(context), origin=origin, files=loaded
@@ -578,7 +579,7 @@ async def create_answer(request: Request, form: CreateForm, user=Depends(get_ver
         existing = _recent_duplicate(user, key, "")
         if existing:
             return {**_detail(existing, user), "deduplicated": True}
-    files = _load_files(form.files, user)
+    files = await asyncio.to_thread(_load_files, form.files, user)
     file_ids = [f["id"] for f in files]
     planner, web_allowed = await _prepare(request, user, form.planner, form.research)
     # checked again after the awaits above (none from here to the insert)

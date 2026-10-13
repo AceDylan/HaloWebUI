@@ -258,10 +258,42 @@ def _load_files(file_ids: list[str], user) -> list[dict]:
         }
         if not is_image:
             entry["text"] = str((item.data or {}).get("content") or "")[: room.FILE_TEXT_CHARS]
+            if not entry["text"] and getattr(item, "path", None):
+                entry["text"] = _read_raw_document(item)
         out.append(entry)
     if len(out) > room.MAX_FILES:
         raise HTTPException(status_code=400, detail=f"最多 {room.MAX_FILES} 个附件")
     return out
+
+
+def _read_raw_document(item) -> str:
+    """Hermes uploads use process=false: extract locally, without a vector index.
+
+    Keep existing cached text when present. Unsupported or unreadable files retain
+    the explicit content-unavailable notice in the model's attachment block.
+    """
+    from pathlib import Path
+
+    from open_webui.retrieval.loaders.main import Loader
+    from open_webui.storage.provider import Storage
+
+    try:
+        path = Storage.get_file(item.path)
+        # Bound extra work when handing a raw upload to a text model.
+        if Path(path).stat().st_size > 20 * 1024 * 1024:
+            return ""
+        docs = Loader(engine="").load(item.filename, (item.meta or {}).get("content_type") or "", path)
+        parts, remaining = [], room.FILE_TEXT_CHARS
+        for doc in docs:
+            text = str(doc.page_content or "")[:remaining]
+            parts.append(text)
+            remaining -= len(text) + 2
+            if remaining <= 0:
+                break
+        return "\n\n".join(parts)[:room.FILE_TEXT_CHARS]
+    except Exception as exc:
+        log.warning("dispatch: document %s could not be extracted (%s)", item.id, type(exc).__name__)
+        return ""
 
 
 def _ask_images(ask: dict, user) -> list[str]:
@@ -1025,7 +1057,7 @@ async def open_for_chat(
     loaded = []
     for file_id in (files or [])[: room.MAX_FILES]:
         try:
-            loaded += _load_files([file_id], user)
+            loaded += await asyncio.to_thread(_load_files, [file_id], user)
         except HTTPException:
             continue  # a file that is gone: the discussion goes ahead without it
     return _open(
@@ -1063,7 +1095,7 @@ async def create_discussion(request: Request, form: CreateForm, user=Depends(get
     except DiscussError as exc:
         _raise(exc)
 
-    files = _load_files(form.files, user)
+    files = await asyncio.to_thread(_load_files, form.files, user)
     # checked again after the awaits above (no await from here to the insert): two requests that
     # arrived together cannot both get past it
     fingerprint = _fingerprint(question, setup)
@@ -1100,7 +1132,7 @@ async def ask_again(request: Request, chat_id: str, form: AskForm, user=Depends(
     except DiscussError as exc:
         _raise(exc)
 
-    files = _load_files(form.files, user)
+    files = await asyncio.to_thread(_load_files, form.files, user)
     data = dict((chat.chat or {}).get(CHAT_KEY) or {})
     previous_id = (data.get("asks") or [None])[-1]
     user_message_id, assistant_message_id = room.new_id(), room.new_id()

@@ -19,11 +19,11 @@ The chat's Hermes 派发方式 「精答」 / 「讨论」 (``hermes_options.dis
 
 import asyncio
 import logging
-import re
 import time
 from typing import Any, Optional
 
 from open_webui.models.chats import DISPATCHED_FROM_META_KEY, Chats
+from open_webui.utils.dispatch_files import conversation_file_ids, message_file_ids as message_file_ids
 
 log = logging.getLogger(__name__)
 
@@ -69,23 +69,6 @@ def conversation_of(messages: Any) -> tuple[str, str]:
 
     ask, lines = split_conversation(messages, turns=CONTEXT_TURNS, each=CONTEXT_TURN_CHARS, total=CONTEXT_CHARS)
     return ask, "\n\n".join(lines)
-
-
-def message_file_ids(metadata: dict) -> list[str]:
-    """The ids of the files (pictures too) attached to this message."""
-    out: list[str] = []
-    for item in (metadata or {}).get("files") or []:
-        if not isinstance(item, dict) or item.get("type") not in (None, "file", "image"):
-            continue
-        file_info = item.get("file") if isinstance(item.get("file"), dict) else {}
-        file_id = str(item.get("id") or file_info.get("id") or "").strip()
-        if not file_id:
-            # a picture in the chat is referenced by its content url
-            match = re.search(r"/files/([A-Za-z0-9_-]{1,128})/content", str(item.get("url") or ""))
-            file_id = match.group(1) if match else ""
-        if file_id and file_id not in out:
-            out.append(file_id)
-    return out
 
 
 def mark_chat(chat_id: str, kind: str) -> None:
@@ -165,7 +148,7 @@ async def run_mode_dispatch(request, form_data: dict, user, metadata: dict, mode
     chat_id, message_id = metadata["chat_id"], metadata["message_id"]
     emitter = get_event_emitter(metadata)
     ask, background = conversation_of(form_data.get("messages"))
-    files = message_file_ids(metadata)
+    files = conversation_file_ids(metadata, form_data.get("messages"))
     label = MODES[kind]["label"]
 
     async def handler():

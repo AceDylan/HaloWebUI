@@ -24,6 +24,7 @@ from open_webui.utils.agent_teams import (
     start_planning,
 )
 from open_webui.utils.team_chats import card_text
+from open_webui.utils.dispatch_files import conversation_file_ids
 
 log = logging.getLogger(__name__)
 
@@ -98,7 +99,8 @@ async def run_team_dispatch(request, form_data: dict, user, metadata: dict, mode
     chat_id, message_id = metadata["chat_id"], metadata["message_id"]
     emitter = get_event_emitter(metadata)
     goal, ask = goal_from(form_data.get("messages"))
-    inputs = attachments(metadata, user)
+    file_ids = conversation_file_ids(metadata, form_data.get("messages"))
+    inputs = attachments({**metadata, "files": [{"type": "file", "id": id} for id in file_ids]}, user)
 
     async def handler():
         team = None

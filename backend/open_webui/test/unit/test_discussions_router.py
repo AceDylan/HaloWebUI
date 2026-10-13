@@ -481,7 +481,8 @@ def test_lookup_runs_the_seats_queries(env, monkeypatch):
         asyncio.run(api._lookup(env.request, USER, ["bad"]))
 
 
-def test_attachments_are_checked_read_and_passed_on(env, monkeypatch):
+@pytest.mark.parametrize("raw", [False, True])
+def test_attachments_are_checked_read_and_passed_on(env, monkeypatch, tmp_path, raw):
     from open_webui.models import files as files_mod
     from open_webui.utils import chat_image_refs
 
@@ -490,6 +491,11 @@ def test_attachments_are_checked_read_and_passed_on(env, monkeypatch):
         "doc": SimpleNamespace(id="doc", user_id="u1", filename="plan.txt", meta={"content_type": "text/plain", "name": "plan.txt"}, data={"content": "预算十万" * 5000}),
         "theirs": SimpleNamespace(id="theirs", user_id="u2", filename="x.txt", meta={}, data={}),
     }
+    if raw:
+        path = tmp_path / "plan.txt"
+        path.write_text(store["doc"].data["content"], encoding="utf-8")
+        store["doc"].data = {}
+        store["doc"].path = str(path)
     monkeypatch.setattr(files_mod.Files, "get_file_by_id", lambda file_id: store.get(file_id))
     monkeypatch.setattr(chat_image_refs, "materialize_image_url_for_openai", lambda url, **kw: "data:image/png;base64,QUJD")
 
@@ -713,6 +719,27 @@ def test_a_chat_message_becomes_a_discussion_at_the_users_last_table(env, monkey
     assert ask["context"]["chatId"] == origin
     assert "用户：我们要做一个记账 App" in ask["context"]["text"] and "Hermes：好的，先定数据存储。" in ask["context"]["text"]
     assert "该用 Postgres" not in ask["context"]["text"]  # the question itself is not background
+
+
+def test_dispatch_reads_image_from_earlier_user_turn(env, monkeypatch):
+    from open_webui.models.files import Files
+    from open_webui.utils import chat_image_refs
+
+    image = SimpleNamespace(id="photo", user_id=USER.id, filename="photo.png",
+                            meta={"content_type": "image/png"}, data={})
+    monkeypatch.setattr(Files, "get_file_by_id", lambda id: image if id == "photo" else None)
+    monkeypatch.setattr(chat_image_refs, "materialize_image_url_for_openai",
+                        lambda *a, **kw: "data:image/png;base64,QUJD")
+    form = _dispatch_form()
+    form["messages"][1]["content"] = [
+        {"type": "text", "text": "我们要做一个记账 App"},
+        {"type": "image_url", "image_url": {"url": "openwebui-file://photo"}},
+    ]
+    monkeypatch.setattr(sys.modules[__name__], "_dispatch_form", lambda: form)
+    _, chat_id, _ = _run_dispatch(env, monkeypatch, _origin_chat())
+    ask = asyncio.run(api.get_discussion(chat_id, USER))["asks"][0]
+    assert [f["id"] for f in ask["files"]] == ["photo"]
+    assert any("data:image/png;base64,QUJD" in str(messages) for _, messages in env.calls)
 
 
 def test_the_conclusion_goes_back_into_the_chat_once(env, monkeypatch):

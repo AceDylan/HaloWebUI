@@ -608,11 +608,17 @@ def test_a_question_from_a_chat_brings_the_conversation_as_background(env):
 # --- 派发方式「精答」: a chat message becomes a run, its answer comes back ------------------------
 
 
-def test_a_chat_message_becomes_a_run_and_its_answer_comes_back(env, monkeypatch, attachments):
+@pytest.mark.parametrize("raw", [False, True])
+def test_a_chat_message_becomes_a_run_and_its_answer_comes_back(env, monkeypatch, attachments, tmp_path, raw):
     from open_webui import tasks
     from open_webui.utils import hermes_notify, mode_dispatch, team_chats
 
     env.state["plan"] = CREATE_PLAN
+    if raw:
+        path = tmp_path / "contract.txt"
+        path.write_text("押金七日内退还", encoding="utf-8")
+        attachments["doc"].data = {}
+        attachments["doc"].path = str(path)
     messages = {
         "q0": {"id": "q0", "parentId": None, "childrenIds": ["r0"], "role": "user", "content": "我在北京租房"},
         "r0": {"id": "r0", "parentId": "q0", "childrenIds": ["q1"], "role": "assistant", "content": "好的", "model": "hermes-agent", "done": True},
@@ -642,7 +648,8 @@ def test_a_chat_message_becomes_a_run_and_its_answer_comes_back(env, monkeypatch
     monkeypatch.setattr(team_chats, "sort_into_folder", no_folder)
     form = {
         "messages": [
-            {"role": "user", "content": "我在北京租房"},
+            {"role": "user", "content": [{"type": "text", "text": "我在北京租房"},
+                {"type": "image_url", "image_url": {"url": "openwebui-file://image"}}]},
             {"role": "assistant", "content": "好的"},
             {"role": "user", "content": [{"type": "text", "text": "押金多久退？"}]},
         ]
@@ -662,7 +669,9 @@ def test_a_chat_message_becomes_a_run_and_its_answer_comes_back(env, monkeypatch
     assert chats_mod.ChatTable().get_chat_by_id(origin).title == "租房"  # a named chat keeps its name
     run = asyncio.run(api.get_answer(run_chat_id, USER))["run"]
     assert run["question"] == "押金多久退？" and run["status"] == "done"
-    assert [f["id"] for f in run["files"]] == ["doc"]
+    assert [f["id"] for f in run["files"]] == ["doc", "image"]
+    assert all("押金七日内退还" in str(messages[-1]["content"]) for _, messages in env.calls)
+    assert all(messages[-1]["content"][1]["image_url"]["url"].startswith("data:image/png") for _, messages in env.calls)
     assert "文件会一起交给助手" in reply["content"]
     assert run["origin"] == {"chatId": origin, "messageId": "r1"}
     assert run["context"] == {"text": "用户：我在北京租房\n\nHermes：好的", "title": "租房", "chatId": origin}

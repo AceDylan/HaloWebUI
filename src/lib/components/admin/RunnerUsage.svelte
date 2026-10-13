@@ -95,7 +95,7 @@
 	);
 	$: summary = summarizeRuns(filtered, loadedDays || Math.min(days, 90));
 	$: maxCost = Math.max(...summary.daily.map((day) => day.cost), 0.01);
-	$: reportedCost = filtered.filter((run) => run.cost_usd !== null).length;
+	$: reportedCost = filtered.filter((run) => run.cost_usd !== null && !run.cost_estimated).length;
 	$: pages = Math.max(1, Math.ceil(filtered.length / pageSize));
 	$: visible = filtered.slice(page * pageSize, (page + 1) * pageSize);
 	$: runnerOptions = [
@@ -112,7 +112,7 @@
 	];
 	$: cards = [
 		{ icon: ListChecks, value: summary.total.runs, label: '任务数' },
-		{ icon: CircleDollarSign, value: formatUsd(summary.total.cost), label: 'API 折算费用' },
+		{ icon: CircleDollarSign, value: formatUsd(summary.total.cost), label: '已记录 API 折算费用' },
 		{ icon: Timer, value: formatHours(summary.total.seconds), label: '累计耗时' },
 		{ icon: Repeat2, value: summary.total.turns, label: '累计轮数' }
 	];
@@ -158,7 +158,9 @@
 	{#if quota?.available}
 		<section class="{card} p-4" data-halo-runner-quota>
 			<div class="flex items-baseline justify-between gap-3">
-				<h3 class="text-[13px] font-medium text-gray-500 dark:text-gray-400">官方 Claude 订阅额度</h3>
+				<h3 class="text-[13px] font-medium text-gray-500 dark:text-gray-400">
+					官方 Claude 订阅额度
+				</h3>
 				<span class="text-2xs tabular-nums text-gray-400 dark:text-gray-500"
 					>查询于 {runTime(quota.checked_at)}</span
 				>
@@ -183,7 +185,9 @@
 						</div>
 						<div class="mt-1 text-xs text-gray-400 dark:text-gray-500">
 							{resetTime(window.resets_at)} 重置{#if pct >= 100}<span
-									class="text-red-600 dark:text-red-400"> · 额度已用完</span
+									class="text-red-600 dark:text-red-400"
+								>
+									· 额度已用完</span
 								>{:else if pct >= 90}<span class="text-amber-600 dark:text-amber-400">
 									· 额度即将用完</span
 								>{/if}
@@ -234,7 +238,13 @@
 			<span class={summary.total.failed ? 'text-red-600 dark:text-red-400' : ''}
 				>{summary.total.failed}</span
 			>
-			· 额度中断 {summary.total.quota}。费用是执行器自报的 API 价格折算值，订阅实际账单另计；codex / agy 不报费用，按 token × 中转单价估算，标「≈」{#if summary.total.estimated}（{summary.total.estimated} 次，共 {formatTokens(summary.total.tokens)} token）{/if}；{`${reportedCost}/${filtered.length} 次任务提供了费用`}，缺失值不参与合计。
+			· 额度中断 {summary.total.quota}。订阅实际账单另计；上报费用 {formatUsd(
+				summary.total.reportedCost
+			)}（{reportedCost} 次），按实际模型及价目表估算 {formatUsd(
+				summary.total.estimatedCost
+			)}（{summary.total.estimated} 次，标「≈」）。
+			{#if summary.total.partial}其中 {summary.total.partial} 次仅有部分费用。{/if}
+			{summary.total.missing} 次费用缺失，未计入合计，不能视为免费。历史用量按当前价目表折算。
 		</p>
 
 		<section aria-label="每日 API 折算费用">
@@ -254,14 +264,21 @@
 						: 'gap-1'} p-3 pb-1"
 				>
 					<!-- Scale: the tallest bar and half of it, so heights read as dollars. -->
-					<div class="pointer-events-none absolute inset-x-3 bottom-1 top-3 z-[1]" aria-hidden="true">
-						<div class="absolute inset-x-0 top-0 border-t border-dashed border-gray-200 dark:border-gray-700/80">
+					<div
+						class="pointer-events-none absolute inset-x-3 bottom-1 top-3 z-[1]"
+						aria-hidden="true"
+					>
+						<div
+							class="absolute inset-x-0 top-0 border-t border-dashed border-gray-200 dark:border-gray-700/80"
+						>
 							<span
 								class="absolute -top-[7px] right-0 bg-white/90 pl-1 text-2xs leading-none tabular-nums text-gray-400 dark:bg-gray-900/90 dark:text-gray-500"
 								>{formatUsd(maxCost)}</span
 							>
 						</div>
-						<div class="absolute inset-x-0 top-1/2 border-t border-dashed border-gray-100 dark:border-gray-800">
+						<div
+							class="absolute inset-x-0 top-1/2 border-t border-dashed border-gray-100 dark:border-gray-800"
+						>
 							<span
 								class="absolute -top-[7px] right-0 bg-white/90 pl-1 text-2xs leading-none tabular-nums text-gray-400 dark:bg-gray-900/90 dark:text-gray-500"
 								>{formatUsd(maxCost / 2)}</span
@@ -284,8 +301,8 @@
 				{#if hovered && hoveredDay !== null}
 					<div
 						class="pointer-events-none absolute -top-12 z-10 whitespace-nowrap rounded-lg bg-zinc-900 px-3 py-1.5 text-xs text-white shadow-lg dark:bg-zinc-100 dark:text-zinc-900"
-						style="left: {((hoveredDay + 0.5) / summary.daily.length) * 100}%; transform: translateX({hoveredDay <
-						summary.daily.length * 0.15
+						style="left: {((hoveredDay + 0.5) / summary.daily.length) *
+							100}%; transform: translateX({hoveredDay < summary.daily.length * 0.15
 							? '-15%'
 							: hoveredDay > summary.daily.length * 0.85
 								? '-85%'
@@ -352,14 +369,21 @@
 								{#each group.rows as row}
 									<tr class="border-t border-gray-100 tabular-nums dark:border-white/[0.06]">
 										<td class="max-w-[12rem] px-4 py-2.5">
-											<div class="truncate font-medium text-gray-800 dark:text-gray-200" title={row.key}>
+											<div
+												class="truncate font-medium text-gray-800 dark:text-gray-200"
+												title={row.key}
+											>
 												{group.name(row.key)}
 											</div>
 											<!-- share of the filtered cost -->
-											<div class="mt-1 h-1 overflow-hidden rounded-full bg-gray-100 dark:bg-zinc-800">
+											<div
+												class="mt-1 h-1 overflow-hidden rounded-full bg-gray-100 dark:bg-zinc-800"
+											>
 												<div
 													class="h-full rounded-full bg-gray-800 dark:bg-gray-300"
-													style="width: {summary.total.cost ? (row.cost / summary.total.cost) * 100 : 0}%"
+													style="width: {summary.total.cost
+														? (row.cost / summary.total.cost) * 100
+														: 0}%"
 												></div>
 											</div>
 										</td>
@@ -420,7 +444,8 @@
 										{run.title || run.run_id}
 									</div>
 									<div class="mt-0.5 truncate text-xs text-gray-400 dark:text-gray-500">
-										{run.project || '（不在项目里）'} · {runTime(run.started_at)}
+										{run.project || '（不在项目里）'} · {runTime(run.started_at)} · {run.model ||
+											'模型未知'}
 									</div>
 								</td>
 								<td class="whitespace-nowrap px-4 py-2.5">
@@ -431,16 +456,22 @@
 										? 'text-red-600 dark:text-red-400'
 										: 'text-gray-600 dark:text-gray-300'}"
 								>
-									{STATUS_LABEL[run.status] ?? run.status}{#if isQuotaStop(run)} · 额度中断{/if}
+									{STATUS_LABEL[run.status] ?? run.status}{#if isQuotaStop(run)}
+										· 额度中断{/if}
 								</td>
 								<td
 									class="px-4 py-2.5 text-right tabular-nums"
-									title={run.cost_estimated ? tokensTitle(run) : undefined}
+									title={tokensTitle(run) || undefined}
 									data-halo-runner-cost-estimated={run.cost_estimated ? '' : undefined}
 								>
 									{run.cost_usd === null
 										? '—'
 										: `${run.cost_estimated ? '≈' : ''}${formatUsd(run.cost_usd)}`}
+									{#if run.cost_usd === null}<span class="block text-2xs text-gray-400"
+											>费用缺失</span
+										>{:else if run.cost_partial}<span class="block text-2xs text-amber-600"
+											>部分费用</span
+										>{/if}
 								</td>
 								<td
 									class="hidden whitespace-nowrap px-4 py-2.5 text-right tabular-nums text-gray-500 sm:table-cell"
@@ -459,7 +490,12 @@
 				<div
 					class="flex items-center justify-end gap-2 border-t border-gray-100 px-4 py-2.5 text-xs dark:border-white/[0.06]"
 				>
-					<button type="button" class={pagerButton} disabled={page === 0} on:click={() => (page -= 1)}>
+					<button
+						type="button"
+						class={pagerButton}
+						disabled={page === 0}
+						on:click={() => (page -= 1)}
+					>
 						<ChevronLeft class="size-3.5" strokeWidth={2.25} />上一页
 					</button>
 					<span class="tabular-nums text-gray-500">{page + 1} / {pages}</span>

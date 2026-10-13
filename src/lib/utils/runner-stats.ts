@@ -11,7 +11,11 @@ export type RunnerGroup = {
 	/** runs that stopped because the subscription's quota ran out */
 	quota: number;
 	cost: number;
-	/** runs whose cost Hermes estimated from tokens (codex / agy) */
+	reportedCost: number;
+	estimatedCost: number;
+	missing: number;
+	partial: number;
+	/** Runs with a cost estimated from recorded usage, including interrupted work. */
 	estimated: number;
 	tokens: number;
 	seconds: number;
@@ -44,7 +48,13 @@ export const STATUS_LABEL: Record<string, string> = {
 };
 
 export const runTokens = (run: RunnerRun) =>
-	run.tokens ? run.tokens.input + run.tokens.cached + run.tokens.output : 0;
+	run.tokens
+		? run.tokens.input +
+			run.tokens.cached +
+			run.tokens.output +
+			(run.tokens.cache_write ?? 0) +
+			(run.tokens.cache_write_1h ?? 0)
+		: 0;
 
 const emptyGroup = (key: string): RunnerGroup => ({
 	key,
@@ -53,6 +63,10 @@ const emptyGroup = (key: string): RunnerGroup => ({
 	failed: 0,
 	quota: 0,
 	cost: 0,
+	reportedCost: 0,
+	estimatedCost: 0,
+	missing: 0,
+	partial: 0,
 	estimated: 0,
 	tokens: 0,
 	seconds: 0,
@@ -65,6 +79,10 @@ const add = (group: RunnerGroup, run: RunnerRun) => {
 	else if (FAILED.has(run.status)) group.failed += 1;
 	if (isQuotaStop(run)) group.quota += 1;
 	group.cost += run.cost_usd ?? 0;
+	if (run.cost_usd == null) group.missing += 1;
+	else if (run.cost_estimated) group.estimatedCost += run.cost_usd;
+	else group.reportedCost += run.cost_usd;
+	if (run.cost_partial && run.cost_usd != null) group.partial += 1;
 	if (run.cost_estimated) group.estimated += 1;
 	group.tokens += runTokens(run);
 	group.seconds += run.duration_s ?? 0;
@@ -117,12 +135,7 @@ export const summarizeRuns = (runs: RunnerRun[], days: number, now = Date.now() 
 	};
 };
 
-export const formatUsd = (value: number) =>
-	value >= 100
-		? `$${Math.round(value)}`
-		: value >= 1
-			? `$${value.toFixed(1)}`
-			: `$${value.toFixed(2)}`;
+export const formatUsd = (value: number) => `$${value.toFixed(2)}`;
 
 /** 8.2 万 / 1.7 亿 */
 export const formatTokens = (value: number) =>
@@ -134,9 +147,18 @@ export const formatTokens = (value: number) =>
 
 /** how a run's estimated cost was worked out, for the cost cell's tooltip */
 export const tokensTitle = (run: RunnerRun) =>
-	run.tokens
-		? `按 token × 中转单价估算：输入 ${formatTokens(run.tokens.input)} · 缓存 ${formatTokens(run.tokens.cached)} · 输出 ${formatTokens(run.tokens.output)}`
-		: '';
+	[
+		run.model ? `模型：${run.model}` : '',
+		run.cost_estimated && run.tokens
+			? `按实际模型 × 价目表估算：输入 ${formatTokens(run.tokens.input)} · 缓存 ${formatTokens(run.tokens.cached)} · 输出 ${formatTokens(run.tokens.output)}`
+			: '',
+		run.cost_estimated && run.pricing_updated_at
+			? `价目表更新于 ${run.pricing_updated_at.slice(0, 10)}，历史用量按此价目表折算`
+			: '',
+		run.cost_notice || (run.cost_partial ? '部分费用：仅包含已记录用量' : '')
+	]
+		.filter(Boolean)
+		.join('；');
 
 export const formatHours = (seconds: number) => {
 	if (seconds < 60) return `${Math.round(seconds)} 秒`;

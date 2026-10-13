@@ -37,7 +37,14 @@ describe('summarizeRuns', () => {
 	it('sums per runner, per project and per day, with every day of the window', () => {
 		const runs = [
 			run({}),
-			run({ agent: 'codex', cost_usd: 0, status: 'error', project: '', duration_s: 300 }),
+			run({
+				agent: 'codex',
+				cost_usd: 0,
+				status: 'error',
+				project: '',
+				duration_s: 300,
+				cost_partial: true
+			}),
 			run({
 				status: 'error',
 				failure_kind: 'quota_reset',
@@ -47,7 +54,18 @@ describe('summarizeRuns', () => {
 			run({ agent: 'agy', cost_usd: null, duration_s: null, turns: null, status: 'running' })
 		];
 		const s = summarizeRuns(runs as any, 7, now);
-		expect(s.total).toMatchObject({ runs: 4, ok: 1, failed: 2, quota: 1, cost: 3, seconds: 1500 });
+		expect(s.total).toMatchObject({
+			runs: 4,
+			ok: 1,
+			failed: 2,
+			quota: 1,
+			cost: 3,
+			reportedCost: 3,
+			estimatedCost: 0,
+			missing: 1,
+			partial: 1,
+			seconds: 1500
+		});
 		expect(s.byRunner.map((g) => [g.key, g.runs, g.cost])).toEqual([
 			['reclaude', 2, 3],
 			['codex', 1, 0],
@@ -71,18 +89,24 @@ describe('summarizeRuns', () => {
 			1,
 			now
 		);
-		expect(s.total).toMatchObject({ cost: 2.75, estimated: 2, tokens: 43000 });
+		expect(s.total).toMatchObject({
+			cost: 2.75,
+			reportedCost: 2,
+			estimatedCost: 0.75,
+			estimated: 2,
+			tokens: 43000
+		});
 		expect(s.byRunner.find((g) => g.key === 'codex')).toMatchObject({ estimated: 2, cost: 0.75 });
 		expect(s.byRunner.find((g) => g.key === 'reclaude')).toMatchObject({ estimated: 0, tokens: 0 });
 		expect(formatTokens(43000)).toBe('4.3 万');
 		expect(formatTokens(256_000)).toBe('26 万');
 		expect(formatTokens(170_000_000)).toBe('1.7 亿');
-		expect(tokensTitle({ tokens } as any)).toContain('缓存 2.0 万');
+		expect(tokensTitle({ tokens, cost_estimated: true } as any)).toContain('缓存 2.0 万');
 	});
 
 	it('formats money and time', () => {
-		expect(formatUsd(533.66)).toBe('$534');
-		expect(formatUsd(2.19)).toBe('$2.2');
+		expect(formatUsd(533.66)).toBe('$533.66');
+		expect(formatUsd(2.19)).toBe('$2.19');
 		expect(formatUsd(0.04)).toBe('$0.04');
 		expect(formatHours(45)).toBe('45 秒');
 		expect(formatHours(1800)).toBe('30 分钟');

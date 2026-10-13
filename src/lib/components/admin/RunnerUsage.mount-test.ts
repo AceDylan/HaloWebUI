@@ -57,6 +57,8 @@ describe('runner usage page', () => {
 					failure_kind: '',
 					cost_usd: 3.58,
 					cost_estimated: true,
+					cost_partial: true,
+					model: 'sample-model',
 					tokens: { input: 271279, cached: 1257472, output: 6724 }
 				}
 			],
@@ -69,13 +71,15 @@ describe('runner usage page', () => {
 		await mount();
 		expect(target.textContent).toContain('订阅实际账单另计');
 		expect(target.querySelector('[role="alert"]').textContent).toContain('额度即将用完');
-		expect(target.querySelector('[data-halo-runner-rows]').textContent).toContain('$2.0');
-		expect(target.textContent).toContain('3/4 次任务提供了费用');
+		expect(target.querySelector('[data-halo-runner-rows]').textContent).toContain('$2.00');
+		expect(target.textContent).toContain('1 次费用缺失');
 		// codex reports tokens only: Hermes' estimate is marked ≈ and explains itself
 		const estimated = target.querySelector('[data-halo-runner-cost-estimated]');
-		expect(estimated.textContent.trim()).toBe('≈$3.6');
+		expect(estimated.textContent).toContain('≈$3.58');
+		expect(estimated.textContent).toContain('部分费用');
 		expect(estimated.getAttribute('title')).toContain('缓存 126 万');
-		expect(target.textContent).toContain('1 次，共 154 万 token');
+		expect(target.textContent).toContain('按实际模型及价目表估算 $3.58');
+		expect(target.textContent).toContain('部分费用');
 		const rows = target.querySelector('[data-halo-runner-rows]').textContent;
 		expect(rows).toContain('等你回答');
 		// quota_window (reclaude's rolling window) counts as a quota stop too

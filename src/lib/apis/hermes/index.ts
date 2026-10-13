@@ -410,8 +410,18 @@ export type RunnerRun = {
 	 * codex / agy report none, so Hermes estimates theirs from tokens (cost_estimated) */
 	cost_usd: number | null;
 	cost_estimated?: boolean;
+	cost_partial?: boolean;
+	cost_source?: string;
+	cost_notice?: string;
+	pricing_updated_at?: string;
 	/** this run's own tokens (a resumed run without its predecessor's) */
-	tokens?: { input: number; cached: number; output: number } | null;
+	tokens?: {
+		input: number;
+		cached: number;
+		output: number;
+		cache_write?: number;
+		cache_write_1h?: number;
+	} | null;
 	turns: number | null;
 	tool_calls: number | null;
 	model: string;

@@ -201,6 +201,7 @@ def new_run(
     web_allowed: bool,
     context: Optional[dict] = None,
     origin: Optional[dict] = None,
+    files: Optional[list[dict]] = None,
 ) -> dict:
     """``origin``: the chat whose message became this run (派发方式「精答」, utils/mode_dispatch.py):
     ``{"chatId", "messageId"}`` — the answer goes back there when it is done."""
@@ -214,6 +215,7 @@ def new_run(
         "planner": deepcopy(planner),
         "webAllowed": web_allowed,
         "context": context,
+        "files": deepcopy(files or []),
         "plan": {"status": "running", "startedAt": now_ms(), "endedAt": None},
         "assistant": None,
         "research": None,
@@ -229,6 +231,8 @@ def new_run(
 
 def public_run(run: dict) -> dict:
     out = deepcopy(run)
+    for item in out.get("files") or []:
+        item.pop("text", None)
     assistant = out.get("assistant")
     if isinstance(assistant, dict):
         # what was written into the assistant, for 「看看它的设定」; the old prompt stays private
@@ -265,6 +269,28 @@ def research_block(sources: list[dict]) -> str:
     for source in sources:
         parts.append(f"[{source['n']}] {source.get('title') or source.get('url')} — {source.get('url')}\n{source.get('excerpt') or ''}")
     return "\n\n".join(parts)
+
+
+def with_attachments(messages: list[dict], files: list[dict], images: list[str]) -> list[dict]:
+    """Send the same bounded document text and image payloads to dispatcher and answerer.
+    Only references/text are stored; image data is materialized for this run, never persisted.
+    """
+    from open_webui.utils.discussion_room import _files_block, _with_images
+
+    documents = _files_block({"files": [f for f in files if f.get("type") != "image"]}, sees_images=False, gets_images=False)
+    image_count = sum(f.get("type") == "image" for f in files)
+    notes = [documents] if documents else []
+    if image_count:
+        notes.append(
+            f"The user attached {image_count} image(s); {len(images)} are included with this message. "
+            "If any image is unavailable, say so and do not invent its contents. Prefer an assistant whose base model supports vision."
+        )
+    out = deepcopy(messages)
+    for message in reversed(out):
+        if message.get("role") == "user":
+            message["content"] = _with_images(message["content"] + "\n\n---\nAttachments (user-provided reference material):\n" + "\n\n".join(notes), images)
+            break
+    return out
 
 
 def answer_messages(run: dict, browse: bool = False) -> list[dict]:

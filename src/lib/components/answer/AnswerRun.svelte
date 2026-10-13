@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { WEBUI_API_BASE_URL } from '$lib/constants';
 	import { onDestroy, onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { fade, fly, slide } from 'svelte/transition';
@@ -8,15 +9,7 @@
 	import '$lib/components/discuss/discuss.css';
 	import './answer.css';
 	import { chatId as currentChatId, config, mobile, models, showSidebar, socket, user, WEBUI_NAME } from '$lib/stores';
-	import {
-		deleteAnswer,
-		getAnswer,
-		retryAnswer,
-		revertAnswerUpgrade,
-		stopAnswer,
-		type AnswerDetail,
-		type AnswerRun
-	} from '$lib/apis/answers';
+	import { deleteAnswer, getAnswer, retryAnswer, revertAnswerUpgrade, stopAnswer, type AnswerDetail, type AnswerRun } from '$lib/apis/answers';
 	import { refreshModels } from '$lib/services/models';
 	import { copyToClipboard } from '$lib/utils';
 	import { handOff, HANDOFF_PATH } from '$lib/utils/handoff';
@@ -53,17 +46,19 @@
 	$: assistant = run?.assistant ?? null;
 	$: answer = run?.answer ?? null;
 	$: sources = run?.research?.status === 'done' ? run.research.sources : [];
-	$: answerState = (
-		answer?.status === 'streaming' ? (answer.thinking && !answer.content ? 'thinking' : 'streaming') : answer?.status ?? 'waiting'
-	) as 'thinking' | 'streaming' | 'waiting' | 'done' | 'error' | 'stopped';
+	$: answerState = (answer?.status === 'streaming' ? (answer.thinking && !answer.content ? 'thinking' : 'streaming') : (answer?.status ?? 'waiting')) as
+		| 'thinking'
+		| 'streaming'
+		| 'waiting'
+		| 'done'
+		| 'error'
+		| 'stopped';
 	$: took = seconds(answer?.startedAt, answer?.endedAt);
 	$: retrying = answer?.retry ? retryText(answer.retry, $now) : '';
 	$: canRetry = !!run && !liveNow && run.status !== 'done';
 	$: canRevert = !!assistant && assistant.action === 'update' && !assistant.reverted && !liveNow;
 	$: teamsEnabled = !!$config?.features?.enable_agent_teams;
-	$: studioAllowed =
-		!!$config?.features?.enable_image_generation &&
-		($user?.role === 'admin' || !!($user as any)?.permissions?.features?.image_generation);
+	$: studioAllowed = !!$config?.features?.enable_image_generation && ($user?.role === 'admin' || !!($user as any)?.permissions?.features?.image_generation);
 	$: knownAssistant = assistant?.saved ? modelById($models as any[], assistant.id) : undefined;
 
 	// A new or upgraded assistant is not in the app's model list yet: fetch it once, so the chat
@@ -162,11 +157,7 @@
 		handOff(typeof sessionStorage === 'undefined' ? null : sessionStorage, {
 			to,
 			text:
-				to === 'discuss'
-					? run.question
-					: to === 'teams'
-						? `按这个回答去做：${run.question}`
-						: `一张清晰的说明图，讲清「${title || run.question}」：${gist}`,
+				to === 'discuss' ? run.question : to === 'teams' ? `按这个回答去做：${run.question}` : `一张清晰的说明图，讲清「${title || run.question}」：${gist}`,
 			context: to === 'studio' ? '' : answerContext(run),
 			from: { kind: 'answer', id: chatId, title }
 		});
@@ -228,8 +219,12 @@
 				<!-- svelte-ignore a11y-click-events-have-key-events a11y-no-static-element-interactions -->
 				<div class="fixed inset-0 z-30" on:click={() => (showMenu = false)} />
 				<div class="tm-card absolute right-0 z-40 mt-1 flex w-44 flex-col p-1 text-sm" transition:fly={{ y: -4, duration: 140 }} role="menu">
-					<button type="button" role="menuitem" class="rounded-lg px-3 py-2 text-left hover:bg-gray-500/10 disabled:opacity-40" disabled={!run?.answer.content} on:click={copyAnswer}
-						>复制回答</button
+					<button
+						type="button"
+						role="menuitem"
+						class="rounded-lg px-3 py-2 text-left hover:bg-gray-500/10 disabled:opacity-40"
+						disabled={!run?.answer.content}
+						on:click={copyAnswer}>复制回答</button
 					>
 					<a role="menuitem" class="rounded-lg px-3 py-2 text-left hover:bg-gray-500/10" href="/c/{chatId}">在对话里打开</a>
 					<button
@@ -286,6 +281,33 @@
 							>从对话里交来的，答完会发回去 · 回到那个对话 →</a
 						>
 					{/if}
+					{#if run.files?.length}
+						<div class="flex flex-wrap items-center gap-2" data-answer-files>
+							{#each run.files as f (f.id)}
+								{#if f.type === 'image'}
+									<a href="{WEBUI_API_BASE_URL}/files/{f.id}/content" target="_blank" rel="noopener noreferrer" title={f.name}
+										><img
+											src="{WEBUI_API_BASE_URL}/files/{f.id}/content"
+											alt={f.name}
+											loading="lazy"
+											class="size-14 rounded-xl object-cover ring-1 ring-gray-200/70 dark:ring-white/10"
+										/></a
+									>
+								{:else}
+									<a href="{WEBUI_API_BASE_URL}/files/{f.id}/content" target="_blank" rel="noopener noreferrer" class="dc-chip max-w-[16rem]" title={f.name}
+										><svg class="size-3.5 shrink-0" viewBox="0 0 16 16" fill="none" aria-hidden="true"
+											><path d="M4 1.8h5l3 3v9.4H4z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" /><path
+												d="M9 1.8v3h3"
+												stroke="currentColor"
+												stroke-width="1.2"
+												stroke-linejoin="round"
+											/></svg
+										><span class="truncate">{f.name}</span></a
+									>
+								{/if}
+							{/each}
+						</div>
+					{/if}
 				</header>
 
 				<ol class="ad-pipe tm-rise" style="--i:1; --ad-steps: {stages.length}" aria-label="进度" data-answer-stages>
@@ -293,7 +315,9 @@
 						<li class="ad-step" data-state={s.state} data-answer-stage={s.key}>
 							<span class="ad-dot" aria-hidden="true">
 								{#if s.state === 'done'}
-									<svg class="size-3" viewBox="0 0 16 16" fill="none"><path d="m3.5 8.5 3 3 6-7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" /></svg>
+									<svg class="size-3" viewBox="0 0 16 16" fill="none"
+										><path d="m3.5 8.5 3 3 6-7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" /></svg
+									>
 								{:else if s.state === 'error'}
 									<span class="text-[11px] font-bold">!</span>
 								{:else if s.state === 'active'}
@@ -311,7 +335,13 @@
 				{#if assistant}
 					<section class="ad-assistant flex flex-col gap-3 p-4 pl-5" data-action={assistant.action} data-answer-assistant={assistant.action}>
 						<div class="flex items-start gap-3">
-							<AssistantAvatar id={assistant.id} name={assistant.name} emoji={assistant.emoji ?? ''} size={36} state={answerState === 'done' ? 'done' : liveNow ? 'streaming' : 'idle'} />
+							<AssistantAvatar
+								id={assistant.id}
+								name={assistant.name}
+								emoji={assistant.emoji ?? ''}
+								size={36}
+								state={answerState === 'done' ? 'done' : liveNow ? 'streaming' : 'idle'}
+							/>
 							<div class="min-w-0 flex-1">
 								<div class="flex flex-wrap items-center gap-2">
 									<span class="text-[15px] font-semibold text-gray-900 dark:text-white" data-answer-assistant-name>{assistant.name}</span>
@@ -370,7 +400,13 @@
 				{/if}
 
 				{#if assistant || answer?.content}
-					<section class="dc-conclusion" data-state={answerState} aria-busy={answerState === 'streaming'} data-answer-answer={answerState} in:fade={{ duration: 200 }}>
+					<section
+						class="dc-conclusion"
+						data-state={answerState}
+						aria-busy={answerState === 'streaming'}
+						data-answer-answer={answerState}
+						in:fade={{ duration: 200 }}
+					>
 						<header class="flex items-center gap-2.5 px-5 pt-4 pb-1">
 							<div class="min-w-0 flex-1">
 								<div class="tm-eyebrow">回答</div>
@@ -385,7 +421,11 @@
 									{:else if answerState === 'waiting' && liveNow}
 										· {run.status === 'researching' ? '等资料查完' : '准备中'}
 									{:else if answerState === 'done'}
-										{[took !== null ? `用时 ${took}s` : '', answer?.usage?.total_tokens ? `${tokens(answer.usage.total_tokens)} tokens` : '', drawing ? '正在配图…' : '']
+										{[
+											took !== null ? `用时 ${took}s` : '',
+											answer?.usage?.total_tokens ? `${tokens(answer.usage.total_tokens)} tokens` : '',
+											drawing ? '正在配图…' : ''
+										]
 											.filter(Boolean)
 											.map((s) => ` · ${s}`)
 											.join('')}
@@ -461,7 +501,9 @@
 						<button type="button" class="dc-chip" on:click={() => toMode('teams')} title="交给协作台按这个回答去做" data-answer-to-teams>交给协作台</button>
 					{/if}
 					{#if studioAllowed}
-						<button type="button" class="dc-chip" on:click={() => toMode('studio')} title="生图工作台：为这个回答画一张说明图" data-answer-to-studio>画一张图</button>
+						<button type="button" class="dc-chip" on:click={() => toMode('studio')} title="生图工作台：为这个回答画一张说明图" data-answer-to-studio
+							>画一张图</button
+						>
 					{/if}
 					<a class="dc-chip" href="/answer" data-answer-new>再问一个</a>
 				{/if}

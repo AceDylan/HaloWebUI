@@ -51,11 +51,31 @@ const created = (over: any = {}) => ({
 	...routing(),
 	status: 'answering',
 	plan: { status: 'done', action: 'create', reason: '合同问题需要律师视角', change: '能逐条审查合同风险', webSearch: false, note: '' },
-	assistant: { id: 'answer-1', name: '合同审查', emoji: '⚖️', description: '逐条找合同风险', action: 'create', saved: true, baseName: 'deepseek-chat', system: '你是一名合同审查律师。' },
+	assistant: {
+		id: 'answer-1',
+		name: '合同审查',
+		emoji: '⚖️',
+		description: '逐条找合同风险',
+		action: 'create',
+		saved: true,
+		baseName: 'deepseek-chat',
+		system: '你是一名合同审查律师。'
+	},
 	answer: { status: 'streaming', content: '', startedAt: Date.now() },
 	...over
 });
-const detail = (run: any, over: any = {}) => ({ id: 'chat1', title: '新精答', folder_id: null, updated_at: 1, created_at: 1, run, running: true, followups: 0, messageId: 'm1', ...over });
+const detail = (run: any, over: any = {}) => ({
+	id: 'chat1',
+	title: '新精答',
+	folder_id: null,
+	updated_at: 1,
+	created_at: 1,
+	run,
+	running: true,
+	followups: 0,
+	messageId: 'm1',
+	...over
+});
 
 let Run: any;
 let app: any;
@@ -67,7 +87,8 @@ const fakeSocket = () => ({
 	on: (name: string, fn: any) => (handlers[name] = [...(handlers[name] ?? []), fn]),
 	off: (name: string, fn: any) => (handlers[name] = (handlers[name] ?? []).filter((f) => f !== fn))
 });
-const emit = (data: any, chat = 'chat1') => (handlers['chat-events'] ?? []).forEach((fn) => fn({ chat_id: chat, message_id: 'm1', data: { type: 'answer', data } }));
+const emit = (data: any, chat = 'chat1') =>
+	(handlers['chat-events'] ?? []).forEach((fn) => fn({ chat_id: chat, message_id: 'm1', data: { type: 'answer', data } }));
 const text = (target: any, sel: string) => (target.querySelector(sel)?.textContent ?? '').replace(/\s+/g, ' ');
 
 beforeAll(async () => {
@@ -105,6 +126,24 @@ const mount = async () => {
 };
 
 describe('AnswerRun', () => {
+	it('shows the attachments kept with the question', async () => {
+		api.getAnswer.mockResolvedValue(
+			detail(
+				created({
+					files: [
+						{ id: 'doc', name: '合同.txt', type: 'file' },
+						{ id: 'pic', name: '截图.png', type: 'image' }
+					]
+				})
+			)
+		);
+		const target = await mount();
+		await until(() => !!target.querySelector('[data-answer-files]'));
+		expect(text(target, '[data-answer-files]')).toContain('合同.txt');
+		expect(target.querySelector('[data-answer-files] img')!.getAttribute('src')).toContain('/files/pic/content');
+		expect(target.querySelector('[data-answer-files] a')!.getAttribute('href')).toContain('/files/doc/content');
+	});
+
 	it('shows the dispatcher at work, then the new assistant, then streams its answer', async () => {
 		api.getAnswer.mockResolvedValue(detail(routing()));
 		const target = await mount();
@@ -181,7 +220,12 @@ describe('AnswerRun', () => {
 		await until(() => text(target, '[data-answer-body]').includes('退还期限'));
 		expect(target.querySelector('[data-mode-picture]')).toBeFalsy();
 
-		emit({ kind: 'state', chatId: 'chat1', runId: 'm1', run: { ...done, illustration: { status: 'generating', step: 'draw', template: '手绘万能图', startedAt: Date.now() } } });
+		emit({
+			kind: 'state',
+			chatId: 'chat1',
+			runId: 'm1',
+			run: { ...done, illustration: { status: 'generating', step: 'draw', template: '手绘万能图', startedAt: Date.now() } }
+		});
 		await until(() => !!target.querySelector('[data-mode-picture="generating"]'));
 		expect(text(target, '[data-mode-picture]')).toContain('「手绘万能图」· 在画图');
 		// answered but not finished: the header and the steps say a picture is being drawn

@@ -7,6 +7,10 @@
 	import '$lib/components/teams/teams.css';
 	import '$lib/components/discuss/discuss.css';
 	import './answer.css';
+	import { WEBUI_API_BASE_URL } from '$lib/constants';
+	import { uploadErrorText, uploadFileReliably } from '$lib/utils/reliable-upload';
+	import { isVideoFile, videoContactSheet } from '$lib/utils/video-contact-sheet';
+	import UploadProgress from '$lib/components/common/UploadProgress.svelte';
 	import { config, mobile, models, showSidebar } from '$lib/stores';
 	import {
 		AnswerApiError,
@@ -46,6 +50,68 @@
 	let origin: HandoffOrigin | null = null;
 	// Handed over from a chat: the conversation as background, and the way back.
 	let background = '';
+	type Attachment = { key: string; name: string; image: boolean; preview?: string; progress: number; id?: string; error?: string };
+	const MAX_FILES = 4;
+	let attachments: Attachment[] = [];
+	let fileInput: HTMLInputElement;
+	let preparing = 0;
+	$: uploading = preparing > 0 || attachments.some((a) => !a.id && !a.error);
+	// the dock takes the question, its uploaded files and its background to another mode
+	afterUpdate(() =>
+		setModeDraft('answer', question, {
+			context: background,
+			from: origin,
+			files: attachments.filter((a) => a.id).map((a) => ({ id: a.id!, name: a.name, type: a.image ? ('image' as const) : ('file' as const) }))
+		})
+	);
+	const attach = async (list: FileList | File[] | null | undefined) => {
+		if (creating) return;
+		preparing += 1;
+		try {
+			// A video also brings its frames as one picture, for models that read images.
+			const files = (await Promise.all(Array.from(list ?? []).map(async (file) => (isVideoFile(file) ? [file, await videoContactSheet(file)] : [file]))))
+				.flat()
+				.filter((file): file is File => !!file);
+			const room = MAX_FILES - attachments.length;
+			if (files.length > room) toast.info(`最多 ${MAX_FILES} 个附件`);
+			await Promise.all(
+				files.slice(0, Math.max(0, room)).map(async (file) => {
+					const image = file.type.startsWith('image/');
+					const item: Attachment = {
+						key: `${Date.now()}-${Math.random()}`,
+						name: file.name,
+						image,
+						preview: image ? URL.createObjectURL(file) : undefined,
+						progress: 0
+					};
+					attachments = [...attachments, item];
+					try {
+						const { file: res } = await uploadFileReliably(localStorage.token, file, {
+							...(image ? { process: false } : {}),
+							onProgress: ({ percent }) => {
+								item.progress = percent;
+								attachments = attachments;
+							}
+						});
+						if (!res?.id) throw new Error('上传失败');
+						item.id = res.id;
+					} catch (e: any) {
+						item.error = uploadErrorText(e);
+					}
+					attachments = attachments;
+				})
+			);
+		} catch (e: any) {
+			toast.error(uploadErrorText(e));
+		} finally {
+			preparing -= 1;
+		}
+	};
+	const detach = (key: string) => {
+		const item = attachments.find((a) => a.key === key);
+		if (item?.preview?.startsWith('blob:')) URL.revokeObjectURL(item.preview);
+		attachments = attachments.filter((a) => a.key !== key);
+	};
 	let composer: HTMLTextAreaElement;
 	let isMac = false;
 
@@ -71,9 +137,7 @@
 	let timer: ReturnType<typeof setInterval> | null = null;
 
 	// the dispatcher: any text model the discussion room would seat (not Hermes, not image models)
-	$: choices = discussionSeatModels(($models ?? []) as any[], $config?.hermes_agent_model_ids).filter(
-		(m: any) => !m?.info?.base_model_id
-	);
+	$: choices = discussionSeatModels(($models ?? []) as any[], $config?.hermes_agent_model_ids).filter((m: any) => !m?.info?.base_model_id);
 	$: webSearchEnabled = $config?.features?.enable_web_search !== false;
 	$: shownAssistants = showAllAssistants ? library : library.slice(0, 10);
 	$: shown = items;
@@ -90,8 +154,6 @@
 			load(true);
 		}, 300);
 	}
-	// the dock takes the question (and the conversation it came with) to another mode
-	afterUpdate(() => setModeDraft('answer', question, { context: background, from: origin }));
 
 	const pickDefaults = () => {
 		let saved: any = null;
@@ -108,6 +170,14 @@
 			question = incoming.text;
 			background = incoming.context;
 			origin = incoming.from;
+			attachments = incoming.files.slice(0, MAX_FILES).map((f) => ({
+				key: `handoff-${f.id}`,
+				name: f.name,
+				image: f.type === 'image',
+				preview: f.type === 'image' ? `${WEBUI_API_BASE_URL}/files/${f.id}/content` : undefined,
+				progress: 100,
+				id: f.id
+			}));
 		}
 		const params = new URLSearchParams(window.location.search);
 		const q = params.get('q');
@@ -160,16 +230,15 @@
 	const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 	const start = async () => {
-		if (creating || !question.trim() || !planner) return;
+		if (creating || uploading || attachments.some((a) => a.error) || !question.trim() || !planner) return;
 		creating = true;
 		const form = {
 			question: question.trim(),
+			files: attachments.filter((a) => a.id).map((a) => a.id!),
 			planner,
 			research: webSearchEnabled && research,
 			assistant: chosen?.ref ?? null,
-			context: background
-				? { text: background, title: origin?.title ?? '', chat_id: origin?.kind === 'chat' ? origin.id : null }
-				: null
+			context: background ? { text: background, title: origin?.title ?? '', chat_id: origin?.kind === 'chat' ? origin.id : null } : null
 		};
 		const payload = JSON.stringify(form);
 		if (attempt?.payload !== payload) attempt = { payload, key: uuidv4() };
@@ -288,6 +357,7 @@
 	onDestroy(() => {
 		if (timer) clearInterval(timer);
 		if (searchTimer) clearTimeout(searchTimer);
+		for (const a of attachments) if (a.preview?.startsWith('blob:')) URL.revokeObjectURL(a.preview);
 		clearModeDraft('answer');
 	});
 </script>
@@ -295,10 +365,8 @@
 <div class="tm-ambient relative flex h-screen max-h-[100dvh] w-full flex-col" data-teams-ui data-discuss-ui data-answer-ui data-answer-home>
 	<nav class="flex flex-wrap items-center gap-2 px-3 pt-2 pb-1">
 		<div class="{$mobile ? '' : 'hidden'} flex flex-none items-center">
-			<button
-				class="rounded-xl p-1.5 hover:bg-gray-100 dark:hover:bg-gray-850"
-				on:click={() => showSidebar.set(!$showSidebar)}
-				aria-label="切换侧栏"><MenuLines /></button
+			<button class="rounded-xl p-1.5 hover:bg-gray-100 dark:hover:bg-gray-850" on:click={() => showSidebar.set(!$showSidebar)} aria-label="切换侧栏"
+				><MenuLines /></button
 			>
 		</div>
 		<h1 class="sr-only">精答</h1>
@@ -311,7 +379,13 @@
 	<div class="tm-scroll flex-1 overflow-y-auto px-4 pb-16">
 		<div class="mx-auto flex max-w-3xl flex-col pt-6 sm:pt-14">
 			<header class="halo-mode-hero tm-rise relative mb-6 flex flex-col gap-3">
-				<ModeEmblem mode="answer" stats={[{ k: 'ASSISTANTS', v: library.length }, { k: 'ANSWERS', v: total ?? items.length }]} />
+				<ModeEmblem
+					mode="answer"
+					stats={[
+						{ k: 'ASSISTANTS', v: library.length },
+						{ k: 'ANSWERS', v: total ?? items.length }
+					]}
+				/>
 				<div class="flex items-center gap-2">
 					<span class="tm-eyebrow halo-mode-eyebrow">Halo Precision</span>
 					<span class="h-3 w-px bg-gray-300 dark:bg-gray-700" aria-hidden="true" />
@@ -330,6 +404,8 @@
 				class="tm-rise composer tm-card relative flex flex-col"
 				style="--i:1"
 				on:submit|preventDefault={start}
+				on:dragover|preventDefault
+				on:drop|preventDefault={(e) => attach(e.dataTransfer?.files)}
 				data-answer-composer
 				data-scifi-conduit
 			>
@@ -343,6 +419,12 @@
 					class="tm-scroll w-full resize-none bg-transparent px-5 pt-4 pb-2 text-[15px] leading-relaxed text-gray-900 outline-none placeholder:text-gray-400 dark:text-gray-100 dark:placeholder:text-gray-500"
 					placeholder="问任何问题，比如：租房合同里这条押金条款对我有什么风险？"
 					on:input={resize}
+					on:paste={(e) => {
+						if (e.clipboardData?.files.length) {
+							e.preventDefault();
+							attach(e.clipboardData.files);
+						}
+					}}
 					on:keydown={(e) => {
 						if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
 							e.preventDefault();
@@ -351,11 +433,52 @@
 					}}
 					data-answer-input
 				/>
+				{#if attachments.length}
+					<ul class="flex flex-wrap items-center gap-2 px-4 pb-2" aria-label="附件" data-answer-attachments>
+						{#each attachments as a (a.key)}
+							<li class="relative" data-attachment-state={a.error ? 'failed' : a.id ? 'ready' : 'uploading'}>
+								{#if a.image}
+									<div class="relative size-12 overflow-hidden rounded-xl ring-1 ring-gray-200/70 dark:ring-white/10">
+										<img src={a.preview} alt={a.name} class="size-full object-cover" />
+										{#if !a.id && !a.error}
+											<UploadProgress progress={a.progress} ringClassName="size-8" className="absolute inset-0 bg-black/50 text-white" />
+										{/if}
+									</div>
+								{:else}
+									<span class="dc-chip max-w-[14rem] !pr-6">
+										{#if !a.id && !a.error}
+											<UploadProgress progress={a.progress} ringClassName="size-4" showPercent={false} />
+										{/if}
+										<span class="truncate" title={a.name}>{a.name}</span>
+										{#if !a.id && !a.error}<span class="tm-num shrink-0 text-gray-400">{a.progress < 100 ? `${a.progress}%` : '处理中'}</span>{/if}
+									</span>
+								{/if}
+								{#if a.error}
+									<span class="absolute inset-x-0 -bottom-4 truncate text-[10px] text-red-500" title={a.error}>{a.error}</span>
+								{/if}
+								<button
+									type="button"
+									class="absolute -top-1.5 -right-1.5 grid size-4 place-items-center rounded-full bg-gray-900 text-[10px] text-white ring-2 ring-white dark:bg-gray-100 dark:text-gray-900 dark:ring-gray-900"
+									aria-label="去掉 {a.name}"
+									on:click={() => detach(a.key)}>×</button
+								>
+							</li>
+						{/each}
+					</ul>
+				{/if}
+
 				{#if background}
 					<div class="px-4 pb-2" data-answer-context>
 						<span class="dc-chip relative max-w-full !pr-6" title={background.slice(0, 600)}>
-							<svg class="size-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
-								><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg
+							<svg
+								class="size-3.5 shrink-0"
+								viewBox="0 0 24 24"
+								fill="none"
+								stroke="currentColor"
+								stroke-width="2"
+								stroke-linecap="round"
+								stroke-linejoin="round"
+								aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg
 							>
 							<span class="truncate">带上{origin ? originLabel(origin) : '之前的对话'}作背景</span>
 							<span class="tm-num shrink-0 text-gray-400">{background.length} 字</span>
@@ -370,6 +493,26 @@
 					</div>
 				{/if}
 				<div class="flex flex-wrap items-center gap-2 border-t border-gray-100 px-4 pt-3 pb-3 dark:border-gray-800/70">
+					<input
+						bind:this={fileInput}
+						type="file"
+						multiple
+						class="hidden"
+						disabled={creating}
+						on:change={(e) => {
+							attach(e.currentTarget.files);
+							e.currentTarget.value = '';
+						}}
+						data-answer-file-input
+					/>
+					<button
+						type="button"
+						class="dc-chip"
+						disabled={creating || attachments.length >= MAX_FILES}
+						title="附带文件或图片，也可以粘贴或拖进来（最多 4 个）"
+						on:click={() => fileInput?.click()}
+						data-answer-attach>附件</button
+					>
 					<label class="dc-chip !py-1 !pr-1.5" title="由谁读助手库、挑选或编写助手" data-answer-planner>
 						<span>调度</span>
 						<select bind:value={planner} class="dc-select max-w-[9rem] truncate">
@@ -412,7 +555,12 @@
 					{/if}
 					<div class="ml-auto flex items-center gap-2">
 						<kbd class="hidden rounded-md px-1.5 py-0.5 font-mono text-[11px] text-gray-400 sm:inline-block">{isMac ? '⌘' : 'Ctrl'} ↵</kbd>
-						<button type="submit" class="tm-btn-primary" disabled={creating || !question.trim() || !planner} data-answer-start>
+						<button
+							type="submit"
+							class="tm-btn-primary"
+							disabled={creating || uploading || attachments.some((a) => a.error) || !question.trim() || !planner}
+							data-answer-start
+						>
 							{#if creating}
 								<span class="size-3.5 animate-spin rounded-full border-2 border-current border-r-transparent" aria-hidden="true" />开始中…
 							{:else}
@@ -549,7 +697,13 @@
 									aria-label="删除「{d.title}」"
 									on:click={() => askDelete(d)}
 									><svg class="size-3.5" viewBox="0 0 16 16" fill="none" aria-hidden="true"
-										><path d="M3 4.5h10M6.5 4.5V3h3v1.5M5 4.5l.5 8.5h5l.5-8.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" /></svg
+										><path
+											d="M3 4.5h10M6.5 4.5V3h3v1.5M5 4.5l.5 8.5h5l.5-8.5"
+											stroke="currentColor"
+											stroke-width="1.3"
+											stroke-linecap="round"
+											stroke-linejoin="round"
+										/></svg
 									></button
 								>
 							</li>

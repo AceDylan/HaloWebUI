@@ -2,6 +2,7 @@ import { WEBUI_API_BASE_URL } from '$lib/constants';
 import { pageQuery, type PageQuery } from '$lib/apis/paging';
 import type {
 	DiscussContext,
+	DiscussFile,
 	DiscussResearch,
 	DiscussRetry,
 	DiscussUsage,
@@ -67,6 +68,7 @@ export type AnswerRun = {
 	id: string;
 	userMessageId: string;
 	question: string;
+	files?: DiscussFile[];
 	lang: 'zh' | 'en';
 	status: AnswerStatus;
 	planner: { model: string; name: string };
@@ -180,16 +182,15 @@ export type AnswerPage = {
 	live: number;
 };
 
-export const listAnswers = (token: string, opts: PageQuery = {}) =>
-	request<AnswerPage>(token, 'GET', pageQuery(opts));
+export const listAnswers = (token: string, opts: PageQuery = {}) => request<AnswerPage>(token, 'GET', pageQuery(opts));
 
-export const listAnswerAssistants = (token: string) =>
-	request<{ assistants: LibraryAssistant[]; may_create: boolean }>(token, 'GET', '/assistants');
+export const listAnswerAssistants = (token: string) => request<{ assistants: LibraryAssistant[]; may_create: boolean }>(token, 'GET', '/assistants');
 
 export const createAnswer = (
 	token: string,
 	form: {
 		question: string;
+		files?: string[];
 		planner?: string | null;
 		research?: boolean;
 		context?: { text: string; title: string; chat_id: string | null } | null;
@@ -205,11 +206,9 @@ export const stopAnswer = (token: string, chatId: string) => request<AnswerDetai
 
 export const retryAnswer = (token: string, chatId: string) => request<AnswerDetail>(token, 'POST', `/${id(chatId)}/retry`);
 
-export const revertAnswerUpgrade = (token: string, chatId: string) =>
-	request<AnswerDetail>(token, 'POST', `/${id(chatId)}/revert`);
+export const revertAnswerUpgrade = (token: string, chatId: string) => request<AnswerDetail>(token, 'POST', `/${id(chatId)}/revert`);
 
 /** 「把结果放进这个对话」: the answer of a run sent from a chat, into that chat now. */
-export const reportBackAnswer = (token: string, chatId: string) =>
-	request<ReportBack>(token, 'POST', `/${id(chatId)}/report-back`);
+export const reportBackAnswer = (token: string, chatId: string) => request<ReportBack>(token, 'POST', `/${id(chatId)}/report-back`);
 
 export const deleteAnswer = (token: string, chatId: string) => request<{ ok: boolean }>(token, 'DELETE', `/${id(chatId)}`);

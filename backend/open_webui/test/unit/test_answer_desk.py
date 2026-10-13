@@ -608,7 +608,7 @@ def test_a_question_from_a_chat_brings_the_conversation_as_background(env):
 # --- 派发方式「精答」: a chat message becomes a run, its answer comes back ------------------------
 
 
-def test_a_chat_message_becomes_a_run_and_its_answer_comes_back(env, monkeypatch):
+def test_a_chat_message_becomes_a_run_and_its_answer_comes_back(env, monkeypatch, attachments):
     from open_webui import tasks
     from open_webui.utils import hermes_notify, mode_dispatch, team_chats
 
@@ -649,7 +649,7 @@ def test_a_chat_message_becomes_a_run_and_its_answer_comes_back(env, monkeypatch
     }
 
     async def scenario():
-        metadata = {"chat_id": origin, "message_id": "r1", "session_id": "sid-1"}
+        metadata = {"chat_id": origin, "message_id": "r1", "session_id": "sid-1", "files": [{"id": "doc", "type": "file"}]}
         await mode_dispatch.run_mode_dispatch(env.request, form, USER, metadata, "hermes-agent", "answer")
         await jobs[0]
         reply = chats_mod.ChatTable().get_chat_by_id(origin).chat["history"]["messages"]["r1"]
@@ -662,6 +662,8 @@ def test_a_chat_message_becomes_a_run_and_its_answer_comes_back(env, monkeypatch
     assert chats_mod.ChatTable().get_chat_by_id(origin).title == "租房"  # a named chat keeps its name
     run = asyncio.run(api.get_answer(run_chat_id, USER))["run"]
     assert run["question"] == "押金多久退？" and run["status"] == "done"
+    assert [f["id"] for f in run["files"]] == ["doc"]
+    assert "文件会一起交给助手" in reply["content"]
     assert run["origin"] == {"chatId": origin, "messageId": "r1"}
     assert run["context"] == {"text": "用户：我在北京租房\n\nHermes：好的", "title": "租房", "chatId": origin}
     assert env.after == [(run_chat_id, "done")]
@@ -821,3 +823,98 @@ def test_a_finished_answer_gets_its_picture_in_the_chat_and_the_gallery(env, mon
     assert sent == [message["content"]]
     states = [e["data"]["run"]["illustration"]["status"] for e in env.events if e["type"] == "answer" and e["data"]["kind"] == "state" and "illustration" in e["data"]["run"]]
     assert states[0] == "generating" and states[-1] == "ready"
+
+
+@pytest.fixture
+def attachments(monkeypatch):
+    from open_webui.models.files import Files
+    from open_webui.utils import chat_image_refs
+
+    files = {
+        'doc': SimpleNamespace(id='doc', user_id=USER.id, filename='contract.txt', meta={'content_type': 'text/plain'}, data={'content': '押金七日内退还'}),
+        'image': SimpleNamespace(id='image', user_id=USER.id, filename='photo.png', meta={'content_type': 'image/png'}, data={}),
+        'other': SimpleNamespace(id='other', user_id='someone-else', filename='private.txt', meta={}, data={}),
+    }
+    monkeypatch.setattr(Files, 'get_file_by_id', lambda id: files.get(id))
+    monkeypatch.setattr(chat_image_refs, 'materialize_image_url_for_openai', lambda *a, **kw: 'data:image/png;base64,dGVzdA==')
+    return files
+
+
+def test_attachments_reach_dispatcher_answer_chat_and_retry(env, attachments, monkeypatch):
+    monkeypatch.setattr(api, "_may_write_library", lambda *_: False)
+    env.state['plan'] = CREATE_PLAN
+    env.state['fail'] = {'conn.deepseek-chat'}
+
+    async def scenario():
+        first = await _ask(env, files=['doc', 'image'])
+        await _settle(first['id'])
+        assert (await api.get_answer(first['id'], USER))['run']['status'] == 'error'
+        env.state['fail'].clear()
+        await api.retry_answer(env.request, first['id'], USER)
+        await _settle(first['id'])
+        return first['id']
+
+    chat_id = asyncio.run(scenario())
+    assert len(env.calls) >= 3
+    for _, messages in env.calls:
+        content = messages[-1]['content']
+        assert isinstance(content, list)
+        assert '押金七日内退还' in content[0]['text']
+        assert content[1] == {'type': 'image_url', 'image_url': {'url': 'data:image/png;base64,dGVzdA=='}}
+    detail = asyncio.run(api.get_answer(chat_id, USER))
+    assert detail['run']['status'] == 'done'
+    assert [f['id'] for f in detail['run']['files']] == ['doc', 'image']
+    assert all('text' not in f for f in detail['run']['files'])
+    chat = chats_mod.Chats.get_chat_by_id(chat_id).chat
+    question = chat['history']['messages'][detail['run']['userMessageId']]
+    assert [f['type'] for f in question['files']] == ['file', 'image']
+    assert question['files'][1]['url'] == '/api/v1/files/image/content'
+    assert 'data:image' not in json.dumps(chat)
+
+
+def test_different_attachments_do_not_deduplicate_but_identical_ones_do(env, attachments):
+    async def scenario():
+        first = await _ask(env, files=['doc'])
+        await _settle(first['id'])
+        same = await _ask(env, files=['doc', 'doc'])
+        second = await _ask(env, files=['image'])
+        await _settle(second['id'])
+        return first, same, second
+
+    first, same, second = asyncio.run(scenario())
+    assert first['id'] == same['id'] and same['deduplicated']
+    assert second['id'] != first['id']
+
+
+def test_unavailable_or_private_attachments_refused_before_start(env, attachments):
+    user = SimpleNamespace(id=USER.id, role='user')
+    for ids in (['missing'], ['other']):
+        with pytest.raises(HTTPException) as exc:
+            asyncio.run(api.create_answer(env.request, api.CreateForm(question='查看附件', files=ids), user))
+        assert exc.value.status_code == 404
+    assert not env.calls
+
+
+def test_chat_dispatch_keeps_files(env, attachments):
+    async def scenario():
+        chat_id = await api.open_for_chat(env.request, USER, question='查看附件', context=None, origin={'chatId': 'origin', 'messageId': 'reply'}, files=['doc', 'image'])
+        await _settle(chat_id)
+        return await api.get_answer(chat_id, USER)
+
+    detail = asyncio.run(scenario())
+    assert [f['id'] for f in detail['run']['files']] == ['doc', 'image']
+    assert detail['run']['origin']['chatId'] == 'origin'
+
+
+def test_text_only_model_gets_document_and_explicit_image_limitation(env, attachments, monkeypatch):
+    monkeypatch.setitem(BASES['conn.deepseek-chat'], 'info', {'meta': {'capabilities': {'vision': False}}})
+    env.state['plan'] = CREATE_PLAN
+
+    async def scenario():
+        first = await _ask(env, files=['doc', 'image'])
+        await _settle(first['id'])
+
+    asyncio.run(scenario())
+    content = env.calls[-1][1][-1]['content']
+    assert isinstance(content, str)
+    assert '押金七日内退还' in content and '0 are included' in content

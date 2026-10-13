@@ -6,8 +6,7 @@ The chat's Hermes 派发方式 「精答」 / 「讨论」 (``hermes_options.dis
 
 - the message becomes a 精答 run / a 讨论台 discussion in a chat of its own (listed on the 精答 /
   讨论台 page, as one started there): the conversation before the message is its
-  background (the dispatcher and every seat read it), the message's files go on the discussion's
-  table (精答 reads text only);
+  background (the dispatcher and every seat read it), the message's files are passed to both 精答 and the discussion;
 - the history lists this chat for it, marked 精答 / 讨论 (``meta.mode_dispatch`` here, the run's
   chat carries ``meta.dispatched_from`` and is listed on its own page only), as a 协作台 team's
   chat stands for the team;
@@ -146,7 +145,7 @@ def card_text(kind: str, *, error: Optional[str] = None, files: int = 0) -> str:
     if error:
         return f"没能交给{label}：{error}"
     if kind == "answer":
-        extra = f"（附带的 {files} 个文件精答读不到，要连文件一起，用讨论或协作台）" if files else ""
+        extra = f"，附带的 {files} 个文件会一起交给助手" if files else ""
         return (f"🎯 已交给精答：调度器在挑最合适的助手来回答{extra}。"
                 "进度在下面的卡片里，答完后回答会发回这个对话。")
     extra = f"，附带的 {files} 个文件会放上讨论桌" if files else ""
@@ -184,7 +183,7 @@ async def run_mode_dispatch(request, form_data: dict, user, metadata: dict, mode
                 if kind == "answer":
                     from open_webui.routers import answers
 
-                    run_chat_id = await answers.open_for_chat(request, user, question=ask, context=context, origin=origin)
+                    run_chat_id = await answers.open_for_chat(request, user, question=ask, context=context, origin=origin, files=files)
                 else:
                     from open_webui.routers import discussions
 

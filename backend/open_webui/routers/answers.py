@@ -18,7 +18,8 @@ from open_webui.utils.auth import get_verified_user
 from open_webui.utils import answer_desk as desk
 from open_webui.utils import assistant_library as lib
 from open_webui.utils.answer_desk import CHAT_KEY, LIVE, MESSAGE_KEY, META_KEY
-from open_webui.utils.discussion_room import clean_context
+from open_webui.utils.discussion_room import clean_context, model_sees_images
+from open_webui.routers.discussions import _load_files, _ask_images, _message_files
 
 log = logging.getLogger(__name__)
 router = APIRouter()
@@ -29,6 +30,7 @@ RECENT_SECONDS = 120
 
 class CreateForm(BaseModel):
     question: str
+    files: list[str] = []
     # the model that picks (and writes) the assistant; the strongest text model by default
     planner: Optional[str] = None
     # may the dispatcher look things up on the web (it decides whether the question needs it)
@@ -47,13 +49,13 @@ class CreateForm(BaseModel):
 _recent: dict[str, list[dict]] = {}
 
 
-def _recent_duplicate(user, key: Optional[str], question: str) -> Optional[str]:
+def _recent_duplicate(user, key: Optional[str], question: str, files: Optional[list[str]] = None) -> Optional[str]:
     now = time.time()
     entries = [e for e in _recent.get(user.id, []) if now - e["at"] < RECENT_SECONDS or e["chat_id"] in LIVE]
     _recent[user.id] = entries
     for entry in reversed(entries):
         same_request = bool(key) and entry["key"] == key
-        if not same_request and entry["question"] != question:
+        if not same_request and (entry["question"] != question or sorted(set(entry.get("files") or [])) != sorted(set(files or []))):
             continue
         chat = Chats.get_chat_by_id_and_user_id(entry["chat_id"], user.id)
         if chat is None or not isinstance((chat.chat or {}).get(CHAT_KEY), dict):
@@ -264,10 +266,17 @@ def _start(request: Request, user, chat, run: dict) -> desk.LiveAnswer:
     chat_id = chat.id
     question = run["question"]
     may_write = _may_write_library(request, user)
+    images = _ask_images(run, user) if run.get("files") else []
 
     async def call_model(model_id: str, messages: list[dict], browse: bool = False):
         from open_webui.utils.chat import generate_chat_completion
 
+        if run.get("files"):
+            models_map, _ = await _models(request, user)
+            model = models_map.get(model_id) or {}
+            base = (model.get("info") or {}).get("base_model_id")
+            sees_images = model_sees_images(model) and model_sees_images(models_map.get(base) or {})
+            messages = desk.with_attachments(messages, run["files"], images if sees_images else [])
         payload = {
             "model": model_id,
             "messages": messages,
@@ -285,6 +294,9 @@ def _start(request: Request, user, chat, run: dict) -> desk.LiveAnswer:
         planner = current["planner"]["model"]
         default_base = planner if any(b["id"] == planner for b in bases) else (bases[0]["id"] if bases else "")
         background = (current.get("context") or {}).get("text") or ""
+        if any(f.get("type") == "image" for f in current.get("files") or []):
+            vision_bases = [b["name"] for b in bases if model_sees_images(models_map.get(b["id"]) or {})]
+            background += "\nThe question includes images. Prefer an assistant using one of these image-capable base models: " + ", ".join(vision_bases)
         chosen = str(current.get("chosen") or "")
         short_assistants, templates = lib.shortlist(
             f"{question}\n{background[:500]}", assistants, favorites=lib.favorites_of(user), must=[chosen] if chosen else []
@@ -480,6 +492,7 @@ def _open(
     context: Optional[dict] = None,
     chosen: str = "",
     origin: Optional[dict] = None,
+    files: Optional[list[dict]] = None,
 ):
     """The run's chat (the question and the reply it streams into), written and started."""
     user_message_id, message_id = desk.new_id(), desk.new_id()
@@ -491,6 +504,7 @@ def _open(
         web_allowed=web_allowed,
         context=context,
         origin=origin,
+        files=files,
     )
     if chosen.startswith(("model:", "builtin:")):
         run["chosen"] = chosen
@@ -501,6 +515,7 @@ def _open(
             "childrenIds": [message_id],
             "role": "user",
             "content": question,
+            "files": _message_files(files or []),
             "timestamp": int(time.time()),
             "models": [planner["model"]],
         },
@@ -539,16 +554,17 @@ def _open(
     return chat
 
 
-async def open_for_chat(request: Request, user, *, question: str, context: Optional[dict], origin: dict) -> str:
+async def open_for_chat(request: Request, user, *, question: str, context: Optional[dict], origin: dict, files: Optional[list[str]] = None) -> str:
     """派发方式「精答」 (utils/mode_dispatch.py): a chat's message as a new run, the conversation
     before it as background; the answer goes back to ``origin`` when it is done. Returns the run's
     chat id; raises HTTPException as the route does."""
     question = desk.clean_text(question, desk.QUESTION_MAX_CHARS)
     if not question:
         raise HTTPException(status_code=400, detail="先写下要问的问题")
+    loaded = _load_files(files or [], user)
     planner, web_allowed = await _prepare(request, user, None, True)
     return _open(
-        request, user, question=question, planner=planner, web_allowed=web_allowed, context=clean_context(context), origin=origin
+        request, user, question=question, planner=planner, web_allowed=web_allowed, context=clean_context(context), origin=origin, files=loaded
     ).id
 
 
@@ -562,9 +578,11 @@ async def create_answer(request: Request, form: CreateForm, user=Depends(get_ver
         existing = _recent_duplicate(user, key, "")
         if existing:
             return {**_detail(existing, user), "deduplicated": True}
+    files = _load_files(form.files, user)
+    file_ids = [f["id"] for f in files]
     planner, web_allowed = await _prepare(request, user, form.planner, form.research)
     # checked again after the awaits above (none from here to the insert)
-    existing = _recent_duplicate(user, key, question)
+    existing = _recent_duplicate(user, key, question, file_ids)
     if existing:
         return {**_detail(existing, user), "deduplicated": True}
 
@@ -576,8 +594,9 @@ async def create_answer(request: Request, form: CreateForm, user=Depends(get_ver
         web_allowed=web_allowed,
         context=clean_context(form.context),
         chosen=str(form.assistant or "").strip()[:200],
+        files=files,
     )
-    _recent.setdefault(user.id, []).append({"key": key, "question": question, "chat_id": chat.id, "at": time.time()})
+    _recent.setdefault(user.id, []).append({"key": key, "question": question, "files": file_ids, "chat_id": chat.id, "at": time.time()})
     return _detail(chat.id, user)
 
 

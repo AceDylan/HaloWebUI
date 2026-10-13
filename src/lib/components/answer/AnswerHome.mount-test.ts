@@ -20,6 +20,8 @@ const api = vi.hoisted(() => ({
 	}
 }));
 vi.mock('$lib/apis/answers', () => api);
+const files = vi.hoisted(() => ({ uploadFileReliably: vi.fn(), uploadErrorText: (e: any) => e.message }));
+vi.mock('$lib/utils/reliable-upload', () => files);
 const nav = vi.hoisted(() => ({ goto: vi.fn(), replaceState: vi.fn() }));
 vi.mock('$app/navigation', () => nav);
 const toasts = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn() }));
@@ -47,6 +49,7 @@ beforeEach(() => {
 	[api.listAnswers, api.listAnswerAssistants, api.createAnswer, api.deleteAnswer].forEach((fn: any) => fn.mockReset());
 	Object.values(toasts).forEach((fn: any) => fn.mockReset());
 	nav.goto.mockReset();
+	files.uploadFileReliably.mockReset();
 	localStorage.removeItem('halo.answer.last');
 	sessionStorage.removeItem('halo.handoff');
 	localStorage.token = 't';
@@ -59,7 +62,20 @@ beforeEach(() => {
 	]);
 	stores.config.set({ hermes_agent_model_ids: ['hermes-agent'], features: { enable_web_search: true } } as any);
 	api.listAnswerAssistants.mockResolvedValue({
-		assistants: [{ id: 'answer-1', name: '合同审查', description: '逐条找合同风险', emoji: '⚖️', base: 'm-ds', baseName: 'deepseek-chat', editable: true, ref: 'model:answer-1', source: 'answer', hidden: true }],
+		assistants: [
+			{
+				id: 'answer-1',
+				name: '合同审查',
+				description: '逐条找合同风险',
+				emoji: '⚖️',
+				base: 'm-ds',
+				baseName: 'deepseek-chat',
+				editable: true,
+				ref: 'model:answer-1',
+				source: 'answer',
+				hidden: true
+			}
+		],
 		may_create: true
 	});
 	api.listAnswers.mockResolvedValue({
@@ -98,8 +114,7 @@ const mount = async () => {
 	app = new Home({ target, context: new Map([['i18n', writable({ t: (s: string) => s })]]) });
 	return target;
 };
-const submit = (target: any) =>
-	target.querySelector('[data-answer-composer]').dispatchEvent(new (globalThis as any).Event('submit', { cancelable: true }));
+const submit = (target: any) => target.querySelector('[data-answer-composer]').dispatchEvent(new (globalThis as any).Event('submit', { cancelable: true }));
 
 describe('AnswerHome', () => {
 	it('reads the history a page at a time and searches it on the server', async () => {
@@ -139,6 +154,52 @@ describe('AnswerHome', () => {
 		expect(target.querySelector('[data-answer-row="old"]')).toBeFalsy();
 	});
 
+	it('uploads dropped files with a progress ring and sends their ids', async () => {
+		let release: (v: any) => void = () => {};
+		files.uploadFileReliably.mockImplementation((_t: string, file: File, opts: any) => {
+			opts.onProgress?.({ loaded: 40, total: 100, percent: 40 });
+			return new Promise((resolve) => (release = () => resolve({ file: { id: `id-${file.name}` }, reused: false })));
+		});
+		const target = await mount();
+		await until(() => !!target.querySelector('[data-answer-input]'));
+		const drop = new (globalThis as any).Event('drop', { cancelable: true });
+		drop.dataTransfer = { files: [new File(['计划'], 'plan.txt', { type: 'text/plain' })] };
+		target.querySelector('[data-answer-composer]')!.dispatchEvent(drop);
+		await until(() => !!target.querySelector('[data-attachment-state="uploading"]'));
+		expect(target.querySelector('[data-answer-attachments]')!.textContent).toContain('40%');
+		expect(files.uploadFileReliably.mock.calls[0][2].process).toBeUndefined(); // documents are read for their text
+		const box = target.querySelector('#answer-question') as any;
+		box.value = '评审这个计划';
+		box.dispatchEvent(new (globalThis as any).Event('input'));
+		await sleep(20);
+		expect((target.querySelector('[data-answer-start]') as any).disabled).toBe(true); // still uploading
+		release(null);
+		await until(() => !!target.querySelector('[data-attachment-state="ready"]'));
+		expect((target.querySelector('[data-answer-start]') as any).disabled).toBe(false);
+		api.createAnswer.mockResolvedValue({ id: 'n2', asks: [] });
+		target.querySelector('[data-answer-composer]')!.dispatchEvent(new (globalThis as any).Event('submit', { cancelable: true }));
+		await until(() => api.createAnswer.mock.calls.length > 0);
+		expect(api.createAnswer.mock.calls[0][1].files).toEqual(['id-plan.txt']);
+	});
+
+	it('blocks submission after upload failure until the failed attachment is removed', async () => {
+		files.uploadFileReliably.mockRejectedValue(new Error('上传失败'));
+		const target = await mount();
+		const input = target.querySelector('[data-answer-input]') as any;
+		input.value = '查看附件';
+		input.dispatchEvent(new (globalThis as any).Event('input'));
+		const paste = new (globalThis as any).Event('paste', { cancelable: true });
+		paste.clipboardData = { files: [new File(['text'], 'bad.txt', { type: 'text/plain' })] };
+		input.dispatchEvent(paste);
+		await until(() => !!target.querySelector('[data-attachment-state="failed"]'));
+		expect((target.querySelector('[data-answer-start]') as any).disabled).toBe(true);
+		submit(target);
+		await tick();
+		expect(api.createAnswer).not.toHaveBeenCalled();
+		(target.querySelector('[aria-label="去掉 bad.txt"]') as any).click();
+		await tick();
+		expect((target.querySelector('[data-answer-start]') as any).disabled).toBe(false);
+	});
 	it('offers text models as the dispatcher, shows the library and the runs', async () => {
 		const target = await mount();
 		await until(() => !!target.querySelector('[data-answer-row="r1"]'));
@@ -175,7 +236,15 @@ describe('AnswerHome', () => {
 	it('a draft handed over from a chat brings its conversation, which can be dropped', async () => {
 		sessionStorage.setItem(
 			'halo.handoff',
-			JSON.stringify({ to: 'answer', text: '押金多久退？', models: [], files: [], context: '用户：我在北京租房', from: { kind: 'chat', id: 'c-1', title: '租房' }, at: Date.now() })
+			JSON.stringify({
+				to: 'answer',
+				text: '押金多久退？',
+				models: [],
+				files: [{ id: 'contract', name: 'contract.txt', type: 'file' }],
+				context: '用户：我在北京租房',
+				from: { kind: 'chat', id: 'c-1', title: '租房' },
+				at: Date.now()
+			})
 		);
 		api.createAnswer.mockResolvedValue({ id: 'new2', run: null });
 		const target = await mount();
@@ -185,6 +254,7 @@ describe('AnswerHome', () => {
 		expect(target.querySelector('[data-answer-context]')!.textContent).toContain('对话「租房」');
 		submit(target);
 		await until(() => api.createAnswer.mock.calls.length === 1);
+		expect(api.createAnswer.mock.calls[0][1].files).toEqual(['contract']);
 		expect(api.createAnswer.mock.calls[0][1].context).toEqual({ text: '用户：我在北京租房', title: '租房', chat_id: 'c-1' });
 	});
 

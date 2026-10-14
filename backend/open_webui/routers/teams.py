@@ -308,7 +308,7 @@ async def create_team(request: Request, form: CreateTeamForm, user=Depends(get_v
 async def _start(request: Request, user, goal: str, target, *, chat_id: Optional[str] = None,
                  lead_model: Optional[str] = None, origin: Optional[dict] = None, project: Optional[str] = None,
                  auto_start: bool = False, inputs: Optional[list] = None, assistants: Optional[list] = None,
-                 access=None):
+                 access=None, on_created=None):
     meta: dict = {}
     if inputs:
         meta["inputs"] = inputs
@@ -323,6 +323,8 @@ async def _start(request: Request, user, goal: str, target, *, chat_id: Optional
     if origin:
         meta["origin"] = origin
     team = AgentTeams.insert(user.id, goal, chat_id, default_title(goal), meta=meta or None)
+    if on_created:
+        on_created(team.id)
     # in the chat history from the start: its own chat, or the card in the chat it came from
     team = await team_chats.attach(request, user, team)
     start_planning(team, target, access=access)

@@ -19,6 +19,7 @@
 	$: stations = (
 		[
 			{ key: 'chat', label: '对话', hint: '和一个模型直接聊', show: true },
+			{ key: 'auto', label: '自动', hint: '按问题选择精答、讨论或协作', show: true },
 			{ key: 'answer', label: '精答', hint: '按问题挑最合适的助手来答', show: true },
 			{ key: 'discuss', label: '讨论', hint: '几个模型讨论，主持人给结论', show: true },
 			{

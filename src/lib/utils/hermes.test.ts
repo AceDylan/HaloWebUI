@@ -194,7 +194,7 @@ describe('hermes run options', () => {
 	});
 
 	it('knows 精答 and 讨论 as dispatches to another mode, like 协作台', () => {
-		for (const dispatch of ['answer', 'discuss', 'team'] as const) {
+		for (const dispatch of ['auto', 'answer', 'discuss', 'team'] as const) {
 			expect(isModeDispatch(dispatch)).toBe(true);
 			expect(normalizeHermesRunOptions({ dispatch }).dispatch).toBe(dispatch);
 			expect(
@@ -217,7 +217,7 @@ describe('hermes run options', () => {
 			runId: '20260927-005655-f2dd355f',
 			status: 'success'
 		};
-		for (const dispatch of ['answer', 'discuss', 'team'] as const) {
+		for (const dispatch of ['auto', 'answer', 'discuss', 'team'] as const) {
 			const options = { ...EMPTY_HERMES_RUN_OPTIONS, dispatch };
 			expect(hermesOptionsForMessage(options, null, '租房押金多久退').dispatch).toBe(dispatch);
 			expect(hermesOptionsForMessage(options, run, '租房押金多久退').dispatch).toBe(dispatch);

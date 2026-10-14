@@ -11,6 +11,8 @@ export type Destination = {
 	match: string[];
 };
 
+export const autoDestination: Destination = { key: 'auto', href: '/auto', label: '自动分流工作台', title: '自动分流工作台：按问题选择精答、讨论或协作', match: ['/auto'] };
+
 type UserLike = { role?: string; permissions?: any } | null | undefined;
 type ConfigLike = { features?: Record<string, any> } | null | undefined;
 

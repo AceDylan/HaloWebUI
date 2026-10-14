@@ -143,6 +143,7 @@ export type HermesRunOptions = {
 		| 'officlaude'
 		| 'codex'
 		| 'agy'
+		| 'auto'
 		| 'answer'
 		| 'discuss'
 		| 'team';
@@ -171,11 +172,11 @@ const HERMES_RUNNERS = new Set([
 // The message goes to another mode instead of a Hermes run: 'answer' a 精答 run, 'discuss' a
 // 讨论台 discussion (mode_dispatch in the backend), 'team' a 协作台 team (agent_team_dispatch).
 // The result comes back into the chat.
-const MODE_DISPATCHES = new Set(['answer', 'discuss', 'team']);
+const MODE_DISPATCHES = new Set(['auto', 'answer', 'discuss', 'team']);
 const HERMES_DISPATCHES = new Set([...HERMES_RUNNERS, ...MODE_DISPATCHES, 'hermes']);
 
 /** True for a dispatch that hands the message to 精答 / 讨论台 / 协作台 (no Hermes run). */
-export const isModeDispatch = (dispatch: unknown): dispatch is 'answer' | 'discuss' | 'team' =>
+export const isModeDispatch = (dispatch: unknown): dispatch is 'auto' | 'answer' | 'discuss' | 'team' =>
 	MODE_DISPATCHES.has(String(dispatch ?? ''));
 // A run id as the runners name them: "20260927-005655-f2dd355f", an answer round "…-a1".
 const RUNNER_RUN_ID_RE = /^\d{8}-\d{6}-[0-9a-f]{6,32}(?:-a\d+)*$/;
@@ -326,6 +327,7 @@ const DISPATCH_LABELS: Record<string, string> = {
 	officlaude: '官方 Claude',
 	codex: 'codex',
 	agy: 'agy',
+	auto: '自动分流',
 	answer: '精答',
 	discuss: '讨论',
 	team: '协作台'
@@ -333,6 +335,7 @@ const DISPATCH_LABELS: Record<string, string> = {
 
 // What a reply handed to another mode says it was (no Hermes model took part).
 const MODE_DISPATCH_LINES: Record<string, string> = {
+	auto: '自动选择精答、讨论或协作台；协作先出计划，结果发回这个对话',
 	answer: '交给精答：调度器挑最合适的助手来回答，答完发回这个对话（没有经过 Hermes 的模型）',
 	discuss: '交给讨论台：几个模型讨论，主持人写的结论发回这个对话（没有经过 Hermes 的模型）',
 	team: '交给协作台的团队：负责人做计划、成员分工执行，结果会发回这个对话（没有经过模型）'

@@ -7,7 +7,7 @@
 import { get, writable } from 'svelte/store';
 import type { HandoffFile, HandoffOrigin } from '$lib/utils/handoff';
 
-export type ModeKey = 'chat' | 'answer' | 'discuss' | 'teams' | 'studio';
+export type ModeKey = 'auto' | 'chat' | 'answer' | 'discuss' | 'teams' | 'studio';
 
 /** What the page on screen is writing: switching mode in the dock takes it along. */
 export type ModeDraft = {
@@ -60,6 +60,7 @@ export const carries = (draft: ModeDraft | null | undefined): boolean =>
 
 /** Work under way in each mode (filled by the sidebar's badges, which already follow it). */
 export const modeLive = writable<Record<ModeKey, number>>({
+	auto: 0,
 	chat: 0,
 	answer: 0,
 	discuss: 0,
@@ -72,6 +73,7 @@ export const setModeLive = (mode: ModeKey, count: number) =>
 
 /** The names the dock and the relay flash use. */
 export const MODE_LABEL: Record<ModeKey, string> = {
+	auto: '自动分流工作台',
 	chat: '对话',
 	answer: '精答',
 	discuss: '讨论台',

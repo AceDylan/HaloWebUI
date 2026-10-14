@@ -7,7 +7,9 @@
 	export let className = 'size-5';
 </script>
 
-{#if mode === 'chat'}
+{#if mode === 'auto'}
+	<svg class={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12h5m0 0 5-7h6M9 12h11M9 12l5 7h6"/><circle cx="3" cy="12" r="1.5"/><path d="m18 3 2 2-2 2m0 3 2 2-2 2m0 3 2 2-2 2"/></svg>
+{:else if mode === 'chat'}
 	<svg class={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
 		><path d="M21 12a8.5 8.5 0 0 1-12.6 7.45L3 21l1.55-5.4A8.5 8.5 0 1 1 21 12z" /><path d="M8.5 12h.01M12 12h.01M15.5 12h.01" /></svg
 	>

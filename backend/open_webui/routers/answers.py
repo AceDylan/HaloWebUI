@@ -494,6 +494,7 @@ def _open(
     chosen: str = "",
     origin: Optional[dict] = None,
     files: Optional[list[dict]] = None,
+    on_created=None,
 ):
     """The run's chat (the question and the reply it streams into), written and started."""
     user_message_id, message_id = desk.new_id(), desk.new_id()
@@ -548,6 +549,8 @@ def _open(
     chat = Chats.insert_new_chat(user.id, ChatForm(chat=payload, title_auto_generated=True), meta=meta)
     if chat is None:
         raise HTTPException(status_code=500, detail="创建精答失败")
+    if on_created:
+        on_created(chat.id)
     for mid in (user_message_id, message_id):
         Chats.upsert_message_to_chat_by_id_and_message_id(chat.id, mid, messages[mid])
     Chats.set_chat_meta_value_by_id(chat.id, META_KEY, desk.summary_meta(run))

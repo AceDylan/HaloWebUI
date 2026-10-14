@@ -17,7 +17,7 @@
 	} from '$lib/stores';
 	import { CHAT_KIND_LABEL } from '$lib/utils/chat-kind';
 	import { paletteItems, type PaletteChat, type PaletteItem } from '$lib/utils/command-palette';
-	import { libraryDestinations, modeDestinations } from '$lib/utils/destinations';
+	import { autoDestination, libraryDestinations, modeDestinations } from '$lib/utils/destinations';
 	import { snippetParts } from '$lib/utils/search-snippet';
 	import SidebarModeIcon from './Sidebar/SidebarModeIcon.svelte';
 
@@ -68,7 +68,7 @@
 
 	$: items = paletteItems({
 		query,
-		destinations: [...modeDestinations($config, $user), ...libraryDestinations($user)],
+		destinations: [autoDestination, ...modeDestinations($config, $user), ...libraryDestinations($user)],
 		admin: $user?.role === 'admin',
 		recent: Array.isArray($chats) ? ($chats as PaletteChat[]) : [],
 		hits,

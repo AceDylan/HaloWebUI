@@ -5,7 +5,7 @@
 
 import { writable } from 'svelte/store';
 
-export type HandoffTarget = 'answer' | 'discuss' | 'teams' | 'chat' | 'studio';
+export type HandoffTarget = 'auto' | 'answer' | 'discuss' | 'teams' | 'chat' | 'studio';
 export type HandoffOriginKind = 'chat' | 'answer' | 'discuss' | 'team' | 'studio';
 
 /** Where the work came from: shown as 「来自对话「标题」」 with a link back. */
@@ -32,7 +32,7 @@ export const HANDOFF_CONTEXT_MAX = 12000;
 const MAX_FILES = 4;
 const MAX_MODELS = 5;
 const ID = /^[A-Za-z0-9_-]{1,128}$/;
-const TARGETS: HandoffTarget[] = ['answer', 'discuss', 'teams', 'chat', 'studio'];
+const TARGETS: HandoffTarget[] = ['auto', 'answer', 'discuss', 'teams', 'chat', 'studio'];
 const KINDS: HandoffOriginKind[] = ['chat', 'answer', 'discuss', 'team', 'studio'];
 
 type Store = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
@@ -192,6 +192,7 @@ export const conversationContext = (history: ChatHistory | null | undefined, max
 
 /** Where each kind of handoff goes. */
 export const HANDOFF_PATH: Record<HandoffTarget, string> = {
+	auto: '/auto',
 	answer: '/answer',
 	discuss: '/discuss',
 	teams: '/teams',

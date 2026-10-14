@@ -114,6 +114,7 @@
 	import ContentRenderer from './ContentRenderer.svelte';
 	import TeamChatCard from '$lib/components/teams/TeamChatCard.svelte';
 	import ModeDispatchCard from './ModeDispatchCard.svelte';
+	import AutoDispatchCard from '$lib/components/auto/AutoDispatchCard.svelte';
 	import TeamResultBar from '$lib/components/teams/TeamResultBar.svelte';
 	import MessageOutline from './MessageOutline.svelte';
 	import ThinkingIndicator from './ThinkingIndicator.svelte';
@@ -1418,6 +1419,7 @@
 		setupButtonsScroll();
 	});
 	// 派发方式「协作台」: this reply is a team's live card.
+	$: autoRouteId = (message as any)?.auto_route?.id as string | undefined;
 	$: teamDispatchId = ((message as any)?.team_dispatch?.team_id as string | undefined) ?? null;
 	// 派发方式「精答」/「讨论」: this reply is the run's live card.
 	$: modeDispatch = (() => {
@@ -2177,6 +2179,9 @@
 											/>
 										{/if}
 
+										{#if autoRouteId}
+											<AutoDispatchCard id={autoRouteId} {history} />
+										{/if}
 										{#if teamDispatchId}
 											<TeamChatCard teamId={teamDispatchId} {history} />
 										{/if}

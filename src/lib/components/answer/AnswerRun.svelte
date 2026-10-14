@@ -1,4 +1,5 @@
 <script lang="ts">
+	import AutoRouteNotice from '$lib/components/auto/AutoRouteNotice.svelte';
 	import { WEBUI_API_BASE_URL } from '$lib/constants';
 	import { onDestroy, onMount } from 'svelte';
 	import { goto } from '$app/navigation';
@@ -255,6 +256,7 @@
 					<div class="tm-card h-40 animate-pulse opacity-60" />
 				</div>
 			{:else}
+				<AutoRouteNotice mode="answer" targetId={chatId} />
 				<header class="tm-rise flex flex-col gap-3">
 					<div class="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-gray-400 dark:text-gray-500">
 						<span class="tm-eyebrow">问题</span>

@@ -94,6 +94,7 @@ from open_webui.routers import (
     teams,
     discussions,
     answers,
+    auto,
     assistant_library,
     terminal,
     tools,
@@ -1503,6 +1504,7 @@ app.include_router(vault.router, prefix="/api/v1/vault", tags=["vault"])
 app.include_router(teams.router, prefix="/api/v1/teams", tags=["teams"])
 app.include_router(discussions.router, prefix="/api/v1/discussions", tags=["discussions"])
 app.include_router(answers.router, prefix="/api/v1/answers", tags=["answers"])
+app.include_router(auto.router, prefix="/api/v1/auto", tags=["auto"])
 app.include_router(assistant_library.router, prefix="/api/v1/assistant-library", tags=["assistant-library"])
 app.include_router(utils.router, prefix="/api/v1/utils", tags=["utils"])
 

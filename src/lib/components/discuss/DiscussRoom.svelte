@@ -1,4 +1,5 @@
 <script lang="ts">
+	import AutoRouteNotice from '$lib/components/auto/AutoRouteNotice.svelte';
 	import { afterUpdate, onDestroy, onMount, tick } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { fade, fly } from 'svelte/transition';
@@ -397,6 +398,7 @@
 					</div>
 				</div>
 			{:else}
+				<AutoRouteNotice mode="discuss" targetId={chatId} />
 				{#each asks as ask, ai (ask.id)}
 					{@const spec = modeSpec(ask.mode)}
 					{@const rounds = roundsOf(ask)}

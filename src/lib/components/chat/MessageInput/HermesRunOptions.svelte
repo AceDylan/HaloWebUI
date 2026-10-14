@@ -66,6 +66,7 @@
 		{ value: 'agy', label: 'agy', sub: 'Gemini · 快', hint: '交给 AGY 在后台独占执行' }
 	];
 	const MODES: typeof RUNNERS = [
+		{ value: 'auto', label: '自动分流', sub: '按问题选择处理方式', hint: '自动选择精答、讨论或协作台；协作先出计划，结果发回这里' },
 		{
 			value: 'answer',
 			label: '精答',
@@ -340,7 +341,7 @@
 						aria-checked={checked}
 						title={item.hint}
 						data-halo-hermes-dispatch={item.value}
-						class="halo-dispatch__choice {checked ? 'is-on' : ''}"
+						class="halo-dispatch__choice {item.value === 'auto' ? 'col-span-3' : ''} {checked ? 'is-on' : ''}"
 						on:click={() => update({ dispatch: item.value })}
 					>
 						<span class="halo-dispatch__name">{item.label}</span>

@@ -73,6 +73,7 @@
 	import FolderIcon from '../icons/Folder.svelte';
 	import FolderOpen from '../icons/FolderOpen.svelte';
 	import SidebarModes from './Sidebar/SidebarModes.svelte';
+	import AutoWorkbenchLink from './Sidebar/AutoWorkbenchLink.svelte';
 	import SidebarLibrary from './Sidebar/SidebarLibrary.svelte';
 
 	type SidebarStyle = 'flat' | 'card';
@@ -966,6 +967,7 @@
 				</a>
 			</div>
 			<!-- 对话的几种模式：讨论 / 协作 / 生图，和新对话放在一起 -->
+			<AutoWorkbenchLink buttonClass={actionItemClass} onNavigate={leaveChatForMode} />
 			<SidebarModes onNavigate={leaveChatForMode} />
 		{/if}
 
@@ -988,6 +990,7 @@
 					</a>
 				</Tooltip>
 
+				<AutoWorkbenchLink compact buttonClass={iconButtonClass} onNavigate={leaveChatForMode} />
 				<SidebarModes compact {iconButtonClass} onNavigate={leaveChatForMode} />
 				<SidebarLibrary compact {iconButtonClass} onNavigate={leaveChatForMode} />
 

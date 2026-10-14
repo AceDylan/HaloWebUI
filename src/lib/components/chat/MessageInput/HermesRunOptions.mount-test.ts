@@ -167,6 +167,7 @@ describe('HermesRunOptions', () => {
 			'officlaude',
 			'codex',
 			'agy',
+			'auto',
 			'answer',
 			'discuss',
 			'team'

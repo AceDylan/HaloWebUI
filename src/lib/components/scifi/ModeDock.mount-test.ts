@@ -56,6 +56,7 @@ describe('ModeDock', () => {
 		const stations = [...target.querySelectorAll('[data-halo-dock-station]')];
 		expect(stations.map((el: any) => el.getAttribute('data-halo-dock-station'))).toEqual([
 			'chat',
+			'auto',
 			'answer',
 			'discuss',
 			'teams',
@@ -86,7 +87,7 @@ describe('ModeDock', () => {
 			[...target.querySelectorAll('[data-halo-dock-station]')].map((el: any) =>
 				el.getAttribute('data-halo-dock-station')
 			)
-		).toEqual(['chat', 'answer', 'discuss']);
+		).toEqual(['chat', 'auto', 'answer', 'discuss']);
 	});
 
 	it('with nothing written is a plain link: no handoff', async () => {

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import AutoRouteNotice from '$lib/components/auto/AutoRouteNotice.svelte';
 	import { getContext, onDestroy, onMount, tick } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { toast } from 'svelte-sonner';
@@ -575,6 +576,7 @@
 	</nav>
 
 	<div class="tm-scroll min-h-0 flex-1 overflow-y-auto px-3 pb-6 sm:px-4">
+		<div class="mx-auto max-w-4xl"><AutoRouteNotice mode="team" targetId={teamId} /></div>
 		{#if loadError && !team}
 			<div class="mx-auto mt-16 max-w-md text-center text-sm text-gray-500">
 				{loadError}

@@ -12,6 +12,7 @@
 	const SHOW_MS = 1500;
 
 	const modeOfPath = (pathname: string): ModeKey => {
+		if (pathname.startsWith('/auto')) return 'auto';
 		const section = sectionOf(pathname);
 		if (section === 'answer' || section === 'discuss' || section === 'teams') return section;
 		if (section === 'workspace') return 'studio';

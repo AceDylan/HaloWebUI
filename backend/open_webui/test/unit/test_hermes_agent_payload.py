@@ -595,6 +595,8 @@ def test_answer_and_discuss_dispatches_go_to_their_mode_and_a_typed_command_wins
                                             "hermes_options": {"dispatch": dispatch}})
 
     assert mode("租房押金多久退", "team") == "team"
+    assert mode("解释一下", "auto") == "auto"
+    assert mode("/codex 修复问题", "auto") is None
     assert mode([{"type": "text", "text": "比较一下"}], "DISCUSS") == "discuss"
     # typed by hand, a command goes to Hermes as written (the rule a runner dispatch has)
     assert mode("/reclaude 修一下登录", "team") is None

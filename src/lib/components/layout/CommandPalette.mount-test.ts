@@ -78,7 +78,7 @@ const ids = () =>
 
 describe('CommandPalette', () => {
 	it('lists the places and recent chats, and Enter opens the one picked', async () => {
-		expect(ids().slice(0, 3)).toEqual(['go:new', 'go:answer', 'go:discuss']);
+		expect(ids().slice(0, 3)).toEqual(['go:new', 'go:auto', 'go:answer']);
 		expect(ids()).toContain('go:schedules');
 		expect(ids()).toContain('chat:d1');
 		await key('ArrowUp'); // wraps to the last item: the oldest recent chat

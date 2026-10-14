@@ -929,6 +929,7 @@ def _open(
     files: list[dict],
     context: Optional[dict] = None,
     origin: Optional[dict] = None,
+    on_created=None,
 ):
     """The discussion's chat (the question and the reply the room writes into), written and started."""
     user_message_id, assistant_message_id = room.new_id(), room.new_id()
@@ -962,6 +963,8 @@ def _open(
     )
     if chat is None:
         raise HTTPException(status_code=500, detail="创建讨论失败")
+    if on_created:
+        on_created(chat.id)
     # write both messages through the normal path too (it also fills the message table)
     for message_id in (user_message_id, assistant_message_id):
         Chats.upsert_message_to_chat_by_id_and_message_id(chat.id, message_id, messages[message_id])

@@ -5433,6 +5433,7 @@
 			discussion,
 			hermes_run,
 			team_dispatch,
+			auto_route,
 			mode_dispatch
 		} = data;
 		if (isResponseStopped(message) || stoppedResponseMessageIds.has(message?.id)) {
@@ -5513,6 +5514,9 @@
 			message.hermesRun = { ...(message.hermesRun ?? {}), ...hermes_run };
 		}
 
+		if (auto_route && typeof auto_route.id === 'string') {
+			message.auto_route = { id: auto_route.id };
+		}
 		if (team_dispatch && typeof team_dispatch === 'object' && team_dispatch.team_id) {
 			// 派发方式「协作台」: this reply is a team's card (TeamChatCard), not a Hermes answer.
 			message.team_dispatch = { team_id: String(team_dispatch.team_id) };

@@ -997,7 +997,7 @@ def _starts_with_command(text) -> bool:
 
 
 # The 派发方式 that hand the message to another mode instead of a Hermes run.
-HERMES_MODE_DISPATCHES = ("team", "answer", "discuss")
+HERMES_MODE_DISPATCHES = ("auto", "team", "answer", "discuss")
 
 
 def _mode_dispatch(form_data) -> str | None:
@@ -2029,6 +2029,10 @@ async def run_hermes_agent(request, form_data, user, metadata, model, events, ta
         return None
 
     mode = _mode_dispatch(form_data)
+    if mode == "auto":
+        from open_webui.utils.auto_dispatch import run_auto_dispatch
+
+        return await run_auto_dispatch(request, form_data, user, metadata, model_id)
     if mode == "team":
         # 派发方式「协作台」: the message becomes a 协作台 team, no Hermes run.
         from open_webui.utils.agent_team_dispatch import run_team_dispatch

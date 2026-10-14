@@ -1,6 +1,7 @@
 // 协作台 stage rail, mounted in a DOM: every stage says where the team is (计划 → 批准 → 执行 →
 // 整理结果 → 验收), what is happening right now, how long it has taken and about how long is left.
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { get } from 'svelte/store';
 import { installDominoDom } from '$lib/test-support/domino-dom';
 
 installDominoDom('http://localhost/');
@@ -150,6 +151,20 @@ describe('StageRail', () => {
 });
 
 describe('TeamChatCard (派发方式「协作台」 in a chat)', () => {
+	let stores: typeof import('$lib/stores');
+
+	beforeEach(async () => {
+		stores = await import('$lib/stores');
+		stores.chatId.set('chat-1');
+		stores.pendingMessageReveal.set(null);
+		nav.goto.mockClear();
+	});
+
+	afterEach(() => {
+		stores.chatId.set('');
+		stores.pendingMessageReveal.set(null);
+	});
+
 	it('shows the team’s stage live, then where its result is', async () => {
 		const at = nowTs();
 		const responses = [
@@ -302,6 +317,7 @@ describe('TeamChatCard (派发方式「协作台」 in a chat)', () => {
 					childrenIds: ['r2'],
 					hermes_notice: { source: 'team', run_id: 'team:team-d:200' }
 				},
+				r2: { id: 'r2', role: 'assistant', parentId: 'n2', content: '最新协作结论' },
 				other: {
 					id: 'other',
 					role: 'user',
@@ -317,14 +333,11 @@ describe('TeamChatCard (派发方式「协作台」 in a chat)', () => {
 		expect(el.textContent).toContain('负责人 + 2 位成员');
 		expect(el.textContent).toContain('附带 1 个文件');
 		expect(target.querySelector('[data-team-chat-bring]')).toBeFalsy();
-		const scrolled: string[] = [];
-		const reply = document.createElement('div');
-		reply.id = 'message-r2'; // the newest version of the result
-		(reply as any).scrollIntoView = () => scrolled.push(reply.id);
-		document.body.appendChild(reply);
+		// The reply may be outside the rendered window or on another branch. Ask the
+		// chat to reveal the newest result through its shared navigation boundary.
 		target.querySelector('[data-team-chat-jump]').click();
-		expect(scrolled).toEqual(['message-r2']);
-		reply.remove();
+		expect(get(stores.pendingMessageReveal)).toEqual({ chatId: 'chat-1', messageId: 'r2' });
+		expect(nav.goto).not.toHaveBeenCalled();
 		const links = [...target.querySelectorAll('[data-team-result-link]')].map((a: any) => [
 			a.getAttribute('data-team-result-link'),
 			a.getAttribute('href'),
@@ -335,6 +348,36 @@ describe('TeamChatCard (派发方式「协作台」 in a chat)', () => {
 			['files', '/teams/team-d/conclusion#files', null],
 			['process', '/teams/team-d/conclusion#process', null]
 		]);
+	});
+
+	it.each([true, false])('done, with a server-reported result (loaded in history: %s)', async (loaded) => {
+		api.getTeam.mockResolvedValue({
+			...doneTeam,
+			team: {
+				...doneTeam.team,
+				outputs: { chat_posted: { message_id: 'r-new' } }
+			}
+		});
+		const messages: Record<string, any> = {
+			n1: {
+				id: 'n1',
+				role: 'user',
+				childrenIds: ['r-old'],
+				hermes_notice: { source: 'team', run_id: 'team:team-d:100' }
+			},
+			'r-old': { id: 'r-old', role: 'assistant', parentId: 'n1', content: '旧结论' }
+		};
+		if (loaded) messages['r-new'] = { id: 'r-new', role: 'assistant', content: '最新协作结论' };
+		await card({ teamId: 'team-d', history: { messages } });
+		expect(target.querySelector('[data-team-chat-bring]')).toBeFalsy();
+		target.querySelector('[data-team-chat-jump]').click();
+		if (loaded) {
+			expect(get(stores.pendingMessageReveal)).toEqual({ chatId: 'chat-1', messageId: 'r-new' });
+			expect(nav.goto).not.toHaveBeenCalled();
+		} else {
+			expect(get(stores.pendingMessageReveal)).toBeNull();
+			expect(nav.goto).toHaveBeenCalledWith('/teams/team-d/conclusion');
+		}
 	});
 
 	it('done, with the result not in this chat yet: brings it here', async () => {

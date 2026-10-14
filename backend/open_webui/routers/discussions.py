@@ -337,12 +337,26 @@ def _emitter(user, chat_id: str, message_id: str):
 
 
 async def _after_done(request: Request, user, chat_id: str, ask: dict) -> None:
-    """Automatic title and folder, on the same cadence as ordinary chats."""
-    from open_webui.utils.mode_chats import auto_title_and_folder
+    from open_webui.utils import mode_illustrate
 
     chat = Chats.get_chat_by_id_and_user_id(chat_id, user.id)
     if chat is None:
         return
+    # 运行中 keeps the discussion from now until its conclusion's picture is drawn
+    held = mode_illustrate.hold(request, user, chat_id, {
+        "kind": "discuss", "title": ask.get("question"), "started_at": (ask.get("startedAt") or 0) / 1000 or None})
+    try:
+        title = await _name(request, user, chat_id, chat, ask)
+    except BaseException:
+        mode_illustrate.release(chat_id, held)
+        raise
+    mode_illustrate.later(_illustrate_and_report(request, user, chat_id, ask, title, held))
+
+
+async def _name(request: Request, user, chat_id: str, chat, ask: dict) -> str:
+    """Automatic title and folder, on the same cadence as ordinary chats."""
+    from open_webui.utils.mode_chats import auto_title_and_folder
+
     asks = _asks_of(chat)
     messages = []
     for item in asks:
@@ -367,15 +381,14 @@ async def _after_done(request: Request, user, chat_id: str, ask: dict) -> None:
         await emit({"type": "chat:title", "data": title})
     except Exception:
         pass
-    from open_webui.utils.mode_illustrate import later
-
-    later(_illustrate_and_report(request, user, chat_id, ask, title))
+    return title
 
 
-async def _illustrate_and_report(request: Request, user, chat_id: str, ask: dict, title: str) -> None:
+async def _illustrate_and_report(request: Request, user, chat_id: str, ask: dict, title: str,
+                                 held: Optional[dict]) -> None:
     # 结论配图 is the conclusion's last step: it is "done" (back in its chat of origin, or the app's
     # "reply ready" toast) once its picture is there
-    await _illustrate(request, user, chat_id, ask)
+    await _illustrate(request, user, chat_id, ask, held)
     if ask.get("origin"):
         # 派发方式「讨论」: the conclusion goes back into the chat the question was asked in
         from open_webui.utils import mode_dispatch
@@ -392,7 +405,7 @@ async def _illustrate_and_report(request: Request, user, chat_id: str, ask: dict
         pass
 
 
-async def _illustrate(request: Request, user, chat_id: str, ask: dict) -> None:
+async def _illustrate(request: Request, user, chat_id: str, ask: dict, held: Optional[dict] = None) -> None:
     """The finished conclusion's picture (utils/mode_illustrate.py): kept on the ask, in the
     chat's message and in the image studio gallery; the room is told as it moves."""
     from open_webui.utils.mode_illustrate import illustrate
@@ -420,7 +433,7 @@ async def _illustrate(request: Request, user, chat_id: str, ask: dict) -> None:
         model_id=(ask.get("conclusion") or {}).get("model") or (ask.get("moderator") or {}).get("model") or "",
         task="discussion_room_illustration",
         on_change=on_change,
-        activity={"kind": "discuss", "title": ask.get("question"), "started_at": (ask.get("startedAt") or 0) / 1000 or None},
+        held=held,
     )
 
 

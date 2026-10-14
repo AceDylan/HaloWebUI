@@ -180,21 +180,34 @@ async def illustrate(
     model_id: str,
     task: str,
     on_change: OnChange,
-    activity: Optional[dict] = None,
+    held: Optional[dict] = None,
 ) -> Optional[dict]:
     """Draw the picture for a finished answer / conclusion. ``on_change`` gets the illustration
-    entry as it moves (generating, then ready or failed). ``activity``: how 运行中 lists the work
-    meanwhile ({kind, title, started_at}). Never raises; None when no picture is drawn for this
-    user at all."""
-    if not text.strip() or not may_illustrate(request, user):
-        return None
-    row = {**(activity or {}), "user_id": user.id}
-    DRAWING[chat_id] = row
+    entry as it moves (generating, then ready or failed). ``held``: the work's 运行中 row from
+    ``hold``, let go once the picture is there (or none is drawn). Never raises; None when no
+    picture is drawn for this user at all."""
     try:
+        if not text.strip() or not may_illustrate(request, user):
+            return None
         return await _illustrate(request, user, chat_id, message_id, text, model_id, task, on_change)
     finally:
-        if DRAWING.get(chat_id) is row:
-            DRAWING.pop(chat_id, None)
+        release(chat_id, held)
+
+
+def hold(request, user, chat_id: str, activity: dict) -> Optional[dict]:
+    """Keep a just-finished answer / conclusion in 运行中 ({kind, title, started_at}) until its
+    picture is drawn: from the moment its text is done, so it does not drop out while it is named.
+    None when no picture will be drawn. Hand the row to ``illustrate`` (or ``release`` it)."""
+    if not may_illustrate(request, user):
+        return None
+    row = {**activity, "user_id": user.id}
+    DRAWING[chat_id] = row
+    return row
+
+
+def release(chat_id: str, row: Optional[dict]) -> None:
+    if row is not None and DRAWING.get(chat_id) is row:
+        DRAWING.pop(chat_id, None)
 
 
 async def _illustrate(request, user, chat_id, message_id, text, model_id, task, on_change) -> dict:

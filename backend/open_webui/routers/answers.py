@@ -179,11 +179,26 @@ def _emitter(user, chat_id: str, message_id: str):
 
 
 async def _after_done(request: Request, user, chat_id: str, run: dict) -> None:
-    from open_webui.utils.mode_chats import auto_title_and_folder
+    from open_webui.utils import mode_illustrate
 
     chat = Chats.get_chat_by_id_and_user_id(chat_id, user.id)
     if chat is None:
         return
+    # 运行中 keeps the answer from now until its picture is drawn
+    held = mode_illustrate.hold(request, user, chat_id, {
+        "kind": "answer", "title": run.get("question"), "started_at": (run.get("startedAt") or 0) / 1000 or None})
+    try:
+        title = await _name(request, user, chat_id, chat, run)
+    except BaseException:
+        mode_illustrate.release(chat_id, held)
+        raise
+    mode_illustrate.later(_illustrate_and_report(request, user, chat_id, run, title, held))
+
+
+async def _name(request: Request, user, chat_id: str, chat, run: dict) -> str:
+    """Automatic title and folder, on the same cadence as ordinary chats."""
+    from open_webui.utils.mode_chats import auto_title_and_folder
+
     answer = (run.get("answer") or {}).get("content") or ""
     messages = [{"role": "user", "content": run["question"]}, {"role": "assistant", "content": answer}]
     title, folder_id = await auto_title_and_folder(
@@ -203,15 +218,15 @@ async def _after_done(request: Request, user, chat_id: str, run: dict) -> None:
         await emit({"type": "chat:title", "data": title})
     except Exception:
         pass
-    from open_webui.utils.mode_illustrate import later
-
-    later(_illustrate_and_report(request, user, chat_id, run, answer, title))
+    return title
 
 
-async def _illustrate_and_report(request: Request, user, chat_id: str, run: dict, answer: str, title: str) -> None:
+async def _illustrate_and_report(request: Request, user, chat_id: str, run: dict, title: str,
+                                 held: Optional[dict]) -> None:
     # 结论配图 is the answer's last step: it is "done" (back in its chat of origin, or the app's
     # "reply ready" toast) once its picture is there
-    await _illustrate(request, user, chat_id, run, answer)
+    answer = (run.get("answer") or {}).get("content") or ""
+    await _illustrate(request, user, chat_id, run, answer, held)
     if run.get("origin"):
         # 派发方式「精答」: the answer goes back into the chat it was asked in
         from open_webui.utils import mode_dispatch
@@ -226,7 +241,7 @@ async def _illustrate_and_report(request: Request, user, chat_id: str, run: dict
         pass
 
 
-async def _illustrate(request: Request, user, chat_id: str, run: dict, answer: str) -> None:
+async def _illustrate(request: Request, user, chat_id: str, run: dict, answer: str, held: Optional[dict] = None) -> None:
     """The finished answer's picture (utils/mode_illustrate.py): kept on the run, in the chat's
     message and in the image studio gallery; the page is told as it moves."""
     from open_webui.utils.mode_illustrate import illustrate
@@ -252,7 +267,7 @@ async def _illustrate(request: Request, user, chat_id: str, run: dict, answer: s
         model_id=run["planner"]["model"],
         task="answer_desk_illustration",
         on_change=on_change,
-        activity={"kind": "answer", "title": run.get("question"), "started_at": (run.get("startedAt") or 0) / 1000 or None},
+        held=held,
     )
 
 

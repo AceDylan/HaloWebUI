@@ -839,10 +839,13 @@ def test_an_answer_is_done_once_its_picture_is_there(env, monkeypatch):
     and the "reply ready" notice goes out after it."""
     from open_webui.utils import image_studio_record, mode_chats, mode_illustrate, work_activity
 
+    seen = []
+
     async def no_title(*args, **kwargs):
+        naming.append([row["note"] for row in work_activity._desks(USER.id)])
         return "押金", None
 
-    seen = []
+    naming = []
 
     async def condense(request, user, model_id, text, metadata):
         seen.append([row for row in work_activity._desks(USER.id)])
@@ -870,6 +873,8 @@ def test_an_answer_is_done_once_its_picture_is_there(env, monkeypatch):
 
     chat_id, run = asyncio.run(scenario())
     rows, before = seen
+    # no gap while the finished answer is named
+    assert naming == [["配图中"]]
     assert rows == [{"kind": "answer", "id": chat_id, "chat_id": chat_id, "href": f"/answer/{chat_id}",
                      "title": " ".join(run["question"].split())[:80], "started_at": run["startedAt"] / 1000,
                      "state": "running", "note": "配图中"}]

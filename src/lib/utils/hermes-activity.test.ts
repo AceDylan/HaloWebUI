@@ -88,6 +88,9 @@ describe('other modes at work', () => {
 		expect(get(workActivity)).toHaveLength(2);
 		applyHermesChatEvent({ chat_id: 'c1', data: { type: 'chat:completion', data: { done: true } } });
 		expect(get(workActivity).map((row) => row.kind)).toEqual(['answer']);
+		// a 精答 is done (its picture drawn) when its own "reply ready" comes
+		applyHermesChatEvent({ chat_id: 'c1', data: { type: 'chat:completion', data: { done: true, answer_desk: true } } });
+		expect(get(workActivity)).toEqual([]);
 	});
 });
 

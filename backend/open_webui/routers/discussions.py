@@ -365,25 +365,31 @@ async def _after_done(request: Request, user, chat_id: str, ask: dict) -> None:
     try:
         await emit({"type": "discuss", "data": {"kind": "meta", "chatId": chat_id, "title": title, "folderId": folder_id}})
         await emit({"type": "chat:title", "data": title})
-        # the app's "reply ready" toast, for when the room is not on screen
-        answer = room.conclusion_answer((ask.get("conclusion") or {}).get("content") or "")
-        if not ask.get("origin"):
-            await emit({"type": "chat:completion", "data": {"done": True, "title": title, "content": answer[:400], "discussion_room": True}})
     except Exception:
         pass
     from open_webui.utils.mode_illustrate import later
 
-    later(_illustrate_and_report(request, user, chat_id, ask))
+    later(_illustrate_and_report(request, user, chat_id, ask, title))
 
 
-async def _illustrate_and_report(request: Request, user, chat_id: str, ask: dict) -> None:
-    # 结论配图 first: the conclusion goes back to its chat of origin with its picture
+async def _illustrate_and_report(request: Request, user, chat_id: str, ask: dict, title: str) -> None:
+    # 结论配图 is the conclusion's last step: it is "done" (back in its chat of origin, or the app's
+    # "reply ready" toast) once its picture is there
     await _illustrate(request, user, chat_id, ask)
     if ask.get("origin"):
         # 派发方式「讨论」: the conclusion goes back into the chat the question was asked in
         from open_webui.utils import mode_dispatch
 
         mode_dispatch.report_back_later(request, "discuss", chat_id, ask)
+        return
+    # the app's "reply ready" toast, for when the room is not on screen
+    answer = room.conclusion_answer((ask.get("conclusion") or {}).get("content") or "")
+    try:
+        await _emitter(user, chat_id, ask["id"])(
+            {"type": "chat:completion", "data": {"done": True, "title": title, "content": answer[:400], "discussion_room": True}}
+        )
+    except Exception:
+        pass
 
 
 async def _illustrate(request: Request, user, chat_id: str, ask: dict) -> None:
@@ -414,6 +420,7 @@ async def _illustrate(request: Request, user, chat_id: str, ask: dict) -> None:
         model_id=(ask.get("conclusion") or {}).get("model") or (ask.get("moderator") or {}).get("model") or "",
         task="discussion_room_illustration",
         on_change=on_change,
+        activity={"kind": "discuss", "title": ask.get("question"), "started_at": (ask.get("startedAt") or 0) / 1000 or None},
     )
 
 

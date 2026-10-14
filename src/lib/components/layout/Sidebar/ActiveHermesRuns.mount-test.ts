@@ -121,6 +121,22 @@ describe('ActiveHermesRuns other modes', () => {
 		expect(rows[2].textContent).toContain('等你批准');
 		stores.workActivity.set([]);
 	});
+
+	it('keeps counting while it is shown, and says a finished answer is getting its picture', async () => {
+		const stores = await import('$lib/stores');
+		stores.workActivity.set([
+			{ kind: 'answer', id: 'a1', chat_id: 'a1', title: '押金多久退？', href: '/answer/a1', started_at: Date.now() / 1000 - 5, state: 'running', note: '配图中' }
+		]);
+		await mount();
+		const row = () => target.querySelector('[data-halo-work-row="answer"]') as any;
+		const clock = () => row().querySelector('.tabular-nums').textContent.trim();
+		expect(row().textContent).toContain('精答 · 配图中');
+		const first = clock();
+		// nothing in the stores changes: only the component's own clock moves the time on
+		await sleep(2100);
+		expect(clock()).not.toBe(first);
+		stores.workActivity.set([]);
+	});
 });
 
 describe('ActiveHermesRuns collapsed rail', () => {

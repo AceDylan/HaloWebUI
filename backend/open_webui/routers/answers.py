@@ -201,23 +201,29 @@ async def _after_done(request: Request, user, chat_id: str, run: dict) -> None:
     try:
         await emit({"type": "answer", "data": {"kind": "meta", "chatId": chat_id, "title": title, "folderId": folder_id}})
         await emit({"type": "chat:title", "data": title})
-        if not run.get("origin"):
-            await emit({"type": "chat:completion", "data": {"done": True, "title": title, "content": answer[:400], "answer_desk": True}})
     except Exception:
         pass
     from open_webui.utils.mode_illustrate import later
 
-    later(_illustrate_and_report(request, user, chat_id, run, answer))
+    later(_illustrate_and_report(request, user, chat_id, run, answer, title))
 
 
-async def _illustrate_and_report(request: Request, user, chat_id: str, run: dict, answer: str) -> None:
-    # 结论配图 first: the answer goes back to its chat of origin with its picture
+async def _illustrate_and_report(request: Request, user, chat_id: str, run: dict, answer: str, title: str) -> None:
+    # 结论配图 is the answer's last step: it is "done" (back in its chat of origin, or the app's
+    # "reply ready" toast) once its picture is there
     await _illustrate(request, user, chat_id, run, answer)
     if run.get("origin"):
         # 派发方式「精答」: the answer goes back into the chat it was asked in
         from open_webui.utils import mode_dispatch
 
         mode_dispatch.report_back_later(request, "answer", chat_id, run)
+        return
+    try:
+        await _emitter(user, chat_id, run["id"])(
+            {"type": "chat:completion", "data": {"done": True, "title": title, "content": answer[:400], "answer_desk": True}}
+        )
+    except Exception:
+        pass
 
 
 async def _illustrate(request: Request, user, chat_id: str, run: dict, answer: str) -> None:
@@ -246,6 +252,7 @@ async def _illustrate(request: Request, user, chat_id: str, run: dict, answer: s
         model_id=run["planner"]["model"],
         task="answer_desk_illustration",
         on_change=on_change,
+        activity={"kind": "answer", "title": run.get("question"), "started_at": (run.get("startedAt") or 0) / 1000 or None},
     )
 
 

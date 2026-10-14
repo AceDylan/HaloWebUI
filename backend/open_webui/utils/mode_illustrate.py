@@ -8,8 +8,9 @@ The picture is a file of the owner's like any generated image; it goes into the 
 gallery (linked back to the chat) and into the chat's message under the answer's title.
 
 The run keeps where it stands as ``illustration`` ({status: generating|ready|failed, url, ...});
-the caller stores it and tells the page. HALO_MODES_AUTO_ILLUSTRATE=0 turns it off; so does image
-generation being off or not allowed for the user (then nothing is shown at all).
+the caller stores it and tells the page. The picture is the work's last step: while it is drawn the
+work stays in 运行中 (``DRAWING``), and its "done" notice goes out once the picture is there.
+HALO_MODES_AUTO_ILLUSTRATE=0 turns it off; so does image generation being off or not allowed for the user (then nothing is shown at all).
 """
 
 import asyncio
@@ -40,6 +41,8 @@ _THINK_RE = re.compile(r"<think>.*?</think>\s*", re.S)
 
 OnChange = Callable[[dict], Awaitable[None]]
 _background: set = set()
+# chat id -> the 运行中 row of a finished answer / conclusion whose picture is being drawn
+DRAWING: dict[str, dict] = {}
 
 
 class IllustrateError(Exception):
@@ -177,12 +180,24 @@ async def illustrate(
     model_id: str,
     task: str,
     on_change: OnChange,
+    activity: Optional[dict] = None,
 ) -> Optional[dict]:
     """Draw the picture for a finished answer / conclusion. ``on_change`` gets the illustration
-    entry as it moves (generating, then ready or failed). Never raises; None when no picture is
-    drawn for this user at all."""
+    entry as it moves (generating, then ready or failed). ``activity``: how 运行中 lists the work
+    meanwhile ({kind, title, started_at}). Never raises; None when no picture is drawn for this
+    user at all."""
     if not text.strip() or not may_illustrate(request, user):
         return None
+    row = {**(activity or {}), "user_id": user.id}
+    DRAWING[chat_id] = row
+    try:
+        return await _illustrate(request, user, chat_id, message_id, text, model_id, task, on_change)
+    finally:
+        if DRAWING.get(chat_id) is row:
+            DRAWING.pop(chat_id, None)
+
+
+async def _illustrate(request, user, chat_id, message_id, text, model_id, task, on_change) -> dict:
     template = picture_template(user.id)
     started = now_ms()
     entry: dict = {"status": "generating", "startedAt": started, "template": (template or {}).get("name") or FALLBACK_NAME}

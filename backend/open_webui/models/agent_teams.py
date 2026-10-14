@@ -194,6 +194,17 @@ class AgentTeamsTable:
                     .limit(max(1, limit)).all())
             return [AgentTeamModel.model_validate(row) for row in rows]
 
+    def list_finishing_for_user(self, user_id: str, since: int, limit: int = 10) -> list[AgentTeamModel]:
+        """Teams whose members finished after ``since`` and whose result is not settled yet (being
+        written, checked or drawn): 运行中 keeps them until it is."""
+        with get_db() as db:
+            rows = (db.query(AgentTeam)
+                    .filter(AgentTeam.user_id == user_id, AgentTeam.status == "running",
+                            AgentTeam.phase == "completed", AgentTeam.finished_at >= since)
+                    .order_by(AgentTeam.finished_at.desc())
+                    .limit(max(1, limit)).all())
+            return [AgentTeamModel.model_validate(row) for row in rows if not (row.meta or {}).get("settled")]
+
     def list_without_chat(self, user_id: str, limit: int, exclude: Optional[set] = None) -> list[AgentTeamModel]:
         """Teams from before teams had chats (no ``chat_id``), newest first."""
         with get_db() as db:

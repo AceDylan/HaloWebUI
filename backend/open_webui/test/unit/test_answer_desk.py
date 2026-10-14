@@ -834,6 +834,55 @@ def test_a_finished_answer_gets_its_picture_in_the_chat_and_the_gallery(env, mon
     assert states[0] == "generating" and states[-1] == "ready"
 
 
+def test_an_answer_is_done_once_its_picture_is_there(env, monkeypatch):
+    """The picture is the answer's last step: 运行中 keeps the answer meanwhile, on its own clock,
+    and the "reply ready" notice goes out after it."""
+    from open_webui.utils import image_studio_record, mode_chats, mode_illustrate, work_activity
+
+    async def no_title(*args, **kwargs):
+        return "押金", None
+
+    seen = []
+
+    async def condense(request, user, model_id, text, metadata):
+        seen.append([row for row in work_activity._desks(USER.id)])
+        seen.append([e["type"] for e in env.events])
+        return "标题：押金"
+
+    async def draw(request, user, template, content):
+        return {"url": "/api/v1/files/pic-3/content", "model": "gpt-image", "template": "手绘万能图", "prompt": content, "size": "auto"}
+
+    monkeypatch.setattr(mode_chats, "auto_title_and_folder", no_title)
+    monkeypatch.setattr(mode_illustrate, "may_illustrate", lambda request, user: True)
+    monkeypatch.setattr(mode_illustrate, "picture_template", lambda user_id: None)
+    monkeypatch.setattr(mode_illustrate, "condense", condense)
+    monkeypatch.setattr(mode_illustrate, "draw", draw)
+    monkeypatch.setattr(image_studio_record, "record_chat_images_in_studio", lambda user_id, **kw: None)
+    env.state["plan"] = {"action": "direct", "reason": "直接答", "web_search": False}
+
+    async def scenario():
+        detail = await _ask(env)
+        await _settle(detail["id"])
+        run = desk.public_run((await api.get_answer(detail["id"], USER))["run"])
+        await ORIGINAL_AFTER_DONE(env.request, USER, detail["id"], run)
+        await mode_illustrate.settle()
+        return detail["id"], run
+
+    chat_id, run = asyncio.run(scenario())
+    rows, before = seen
+    assert rows == [{"kind": "answer", "id": chat_id, "chat_id": chat_id, "href": f"/answer/{chat_id}",
+                     "title": " ".join(run["question"].split())[:80], "started_at": run["startedAt"] / 1000,
+                     "state": "running", "note": "配图中"}]
+    assert "chat:completion" not in before
+    assert mode_illustrate.DRAWING == {} and work_activity._desks(USER.id) == []
+    types = [e["type"] for e in env.events]
+    done = types.index("chat:completion")
+    ready = max(i for i, e in enumerate(env.events) if e["type"] == "answer" and e["data"]["kind"] == "state"
+                and (e["data"]["run"].get("illustration") or {}).get("status") == "ready")
+    assert done > ready
+    assert env.events[done]["data"] == {"done": True, "title": "押金", "content": run["answer"]["content"][:400], "answer_desk": True}
+
+
 @pytest.fixture
 def attachments(monkeypatch):
     from open_webui.models.files import Files

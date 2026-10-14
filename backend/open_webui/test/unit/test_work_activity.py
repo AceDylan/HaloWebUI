@@ -34,6 +34,7 @@ def test_every_mode_at_work_is_listed_once(monkeypatch):
                         approved_at=now - 45, created_at=now - 100),
     ]
     monkeypatch.setattr(agent_teams.AgentTeams, "list_working_for_user", lambda user_id, limit: teams)
+    monkeypatch.setattr(agent_teams.AgentTeams, "list_finishing_for_user", lambda user_id, since, limit: [])
     monkeypatch.setattr(auto_routes.AutoRoutes, "active_for_user", lambda user_id, since: [
         {"id": "r1", "created_at": now - 5, "data": {"input": {"question": "解释\n报错"}, "origin": None}},
     ])
@@ -124,3 +125,51 @@ def test_placeholder_titles_give_way_to_the_question(monkeypatch):
 
     monkeypatch.setattr(db_module, "get_db", fake_db)
     assert work_activity._titles({"a1", "c1", "c2"}) == {"c1": "周报"}
+
+
+def test_work_whose_last_step_is_still_going_stays_listed(monkeypatch):
+    """A finished 精答 / 讨论 whose picture is being drawn, a team whose result is being written,
+    checked or drawn: still at work, on the clock they started on."""
+    from open_webui.utils import mode_illustrate
+
+    now = 1_000_000.0
+    monkeypatch.setattr(tasks, "task_metadata", {})
+    monkeypatch.setattr(answer_desk, "LIVE", {
+        "a2": SimpleNamespace(user_id="u1", run={"question": "又问了一次", "startedAt": now * 1000}),
+    })
+    monkeypatch.setattr(discussion_room, "LIVE", {})
+    monkeypatch.setattr(mode_illustrate, "DRAWING", {
+        "a1": {"kind": "answer", "title": "押金\n多久退", "started_at": now - 90, "user_id": "u1"},
+        "d1": {"kind": "discuss", "title": "选哪个库", "started_at": now - 200, "user_id": "u1"},
+        "a2": {"kind": "answer", "title": "上一次", "started_at": now - 300, "user_id": "u1"},
+        "x1": {"kind": "answer", "title": "别人的", "started_at": now, "user_id": "u2"},
+    })
+    monkeypatch.setattr(agent_teams.AgentTeams, "list_working_for_user", lambda user_id, limit: [])
+    finishing = [SimpleNamespace(id="team-9", chat_id="chat-9", title="调研", status="running", phase="completed",
+                                 approved_at=now - 500, created_at=now - 600)]
+    monkeypatch.setattr(agent_teams.AgentTeams, "list_finishing_for_user", lambda user_id, since, limit: finishing)
+    monkeypatch.setattr(auto_routes.AutoRoutes, "active_for_user", lambda user_id, since: [])
+    monkeypatch.setattr(images, "active_image_runs", lambda user_id: [])
+    monkeypatch.setattr(work_activity, "_titles", lambda ids: {})
+
+    by = {row["id"]: row for row in work_activity.list_work("u1", set())}
+    assert sorted(by) == ["a1", "a2", "d1", "team-9"]
+    assert by["a1"] == {"kind": "answer", "id": "a1", "chat_id": "a1", "href": "/answer/a1", "title": "押金 多久退",
+                        "started_at": now - 90, "state": "running", "note": "配图中"}
+    assert by["d1"]["href"] == "/discuss/d1" and by["d1"]["note"] == "配图中"
+    # asked again while the last picture is drawn: the new run is what is at work
+    assert by["a2"]["title"] == "又问了一次" and "note" not in by["a2"]
+    assert by["team-9"]["note"] == "收尾中" and by["team-9"]["started_at"] == now - 500
+
+
+def test_finishing_teams_are_those_not_settled_yet():
+    import time as _time
+    from open_webui.models.agent_teams import AgentTeams
+
+    now = int(_time.time())
+    for name, finished, meta in (("fresh", now - 30, {}), ("settled", now - 30, {"settled": True}),
+                                 ("old", now - 5000, {})):
+        team = AgentTeams.insert("u-finishing", name, None, name)
+        AgentTeams.update(team.id, "u-finishing", status="running", phase="completed", finished_at=finished, meta=meta)
+    found = AgentTeams.list_finishing_for_user("u-finishing", now - 600)
+    assert [team.title for team in found] == ["fresh"]

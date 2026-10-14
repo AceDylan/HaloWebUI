@@ -178,11 +178,10 @@ export const applyHermesChatEvent = (event: ChatEvent | null | undefined) => {
 	if (!type || !eventChatId) return;
 
 	if (type === 'chat:completion' && data?.done && !data?.hermes_run) {
-		// an ordinary reply finished: off 运行中 now, not at the next poll
+		// an ordinary reply (or a 精答 / 讨论, picture and all) finished: off 运行中 now, not at the next poll
+		const kinds = data.answer_desk ? ['answer'] : data.discussion_room ? ['discuss'] : ['chat', 'image'];
 		workActivity.update((rows) => {
-			const next = rows.filter(
-				(row) => !(row.chat_id === eventChatId && (row.kind === 'chat' || row.kind === 'image'))
-			);
+			const next = rows.filter((row) => !(row.chat_id === eventChatId && kinds.includes(row.kind)));
 			return next.length === rows.length ? rows : next;
 		});
 		return;

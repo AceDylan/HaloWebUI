@@ -52,14 +52,16 @@
 		team: '协作',
 		auto: '自动分流'
 	};
-	const workCurrent = (row: { chat_id: string | null; id: string }) =>
+	$: workCurrent = (row: { chat_id: string | null; id: string }) =>
 		!!$chatId && (row.chat_id === $chatId || row.id === $chatId);
 	$: unread = showUnread
 		? [...$hermesUnreadChatIds].map((id) => ({ id, title: knownTitles.get(id) ?? null }))
 		: [];
 
-	// Same words as every other duration: "45 秒", "12 分 3 秒".
-	const elapsed = (startedAt: number) =>
+	// Same words as every other duration: "45 秒", "12 分 3 秒". Reactive on `now`, so every
+	// `{elapsed(…)}` in the markup ticks with the clock (a plain function would only be re-read
+	// when its row changes, and an open popup would show the time it was opened at).
+	$: elapsed = (startedAt: number) =>
 		formatToolDuration(Math.max(0, Math.floor(now - startedAt)));
 
 	onMount(() => {
@@ -208,7 +210,9 @@
 				? 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300'
 				: 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300'}"
 		>
-			{row.state === 'waiting' && row.note ? row.note : WORK_LABEL[row.kind] ?? row.kind}
+			{row.state === 'waiting' && row.note
+				? row.note
+				: `${WORK_LABEL[row.kind] ?? row.kind}${row.note ? ` · ${row.note}` : ''}`}
 		</span>
 		{#if row.state !== 'waiting'}
 			<span class="shrink-0 font-mono text-xs tabular-nums text-gray-500">

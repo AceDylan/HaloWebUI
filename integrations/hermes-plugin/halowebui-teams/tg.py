@@ -110,8 +110,31 @@ async def asend(chat_id: Any, text: str, buttons: Optional[list] = None, *, thre
     return int(message.message_id)
 
 
-def send(chat_id: Any, text: str, buttons: Optional[list] = None, *, thread_id: Any = None) -> Optional[int]:
-    """``asend`` from a worker thread (bridge loop, API handlers run in threads)."""
+async def asend_photo(chat_id: Any, path: Path, caption: str = "", *, thread_id: Any = None,
+                      reply_to: Any = None) -> Optional[int]:
+    """A picture (a file on disk) on the gateway loop; the message id, or None when it failed."""
+    app = _state.get("app")
+    if app is None:
+        return None
+    kwargs: dict = {"chat_id": _chat(chat_id), "caption": caption or None, "parse_mode": "HTML"}
+    if thread_id:
+        kwargs["message_thread_id"] = int(thread_id)
+    if reply_to:
+        from telegram import ReplyParameters
+
+        kwargs["reply_parameters"] = ReplyParameters(message_id=int(reply_to), allow_sending_without_reply=True)
+    try:
+        with open(path, "rb") as photo:
+            message = await app.bot.send_photo(photo=photo, **kwargs)
+    except Exception as exc:  # noqa: BLE001 — a notice must never break the caller
+        logger.warning("halowebui-teams: Telegram photo failed: %s", type(exc).__name__)
+        return None
+    return int(message.message_id)
+
+
+def _from_thread(make) -> Optional[int]:
+    """Run the coroutine ``make()`` returns on the gateway loop from a worker thread (bridge
+    loop, API handlers run in threads) and wait for its message id."""
     loop = _state.get("loop")
     if not ready():
         return None
@@ -121,12 +144,23 @@ def send(chat_id: Any, text: str, buttons: Optional[list] = None, *, thread_id: 
         running = None
     if running is loop:  # pragma: no cover — misuse: waiting here would deadlock the loop
         raise RuntimeError("telegram.send called on the gateway loop; use asend")
-    future = asyncio.run_coroutine_threadsafe(asend(chat_id, text, buttons, thread_id=thread_id), loop)
+    future = asyncio.run_coroutine_threadsafe(make(), loop)
     try:
         return future.result(timeout=SEND_TIMEOUT)
     except Exception:  # noqa: BLE001
         future.cancel()
         return None
+
+
+def send(chat_id: Any, text: str, buttons: Optional[list] = None, *, thread_id: Any = None) -> Optional[int]:
+    """``asend`` from a worker thread."""
+    return _from_thread(lambda: asend(chat_id, text, buttons, thread_id=thread_id))
+
+
+def send_photo(chat_id: Any, path: Path, caption: str = "", *, thread_id: Any = None,
+               reply_to: Any = None) -> Optional[int]:
+    """``asend_photo`` from a worker thread."""
+    return _from_thread(lambda: asend_photo(chat_id, path, caption, thread_id=thread_id, reply_to=reply_to))
 
 
 # --- which message is which ----------------------------------------------------------------------

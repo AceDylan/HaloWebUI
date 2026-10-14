@@ -20,6 +20,7 @@ import html
 import re
 import threading
 import time
+from pathlib import Path
 from typing import Any, Optional
 
 from . import link
@@ -368,26 +369,43 @@ def pending(team: dict, snap: dict) -> list[tuple[str, str, Optional[dict]]]:
         else:
             out.append((f"fail:{task['id']}:{attempt}", "fail", task))
     if (snap.get("team") or {}).get("phase") == "completed":
+        from . import illustrate
+
         entry = team.get("conclusion") or {}
         waited = now() - int(team.get("completed_at") or now())
         checking = ((entry.get("acceptance") or {}).get("status") == "checking"
                     and now() - int((entry.get("acceptance") or {}).get("started_at") or 0) < ACCEPTANCE_WAIT)
-        if (entry.get("status") in ("ready", "failed") and not checking) or waited >= DONE_WAIT:
+        # the picture is the result's last step: the notice goes out with it (bounded by illustrate.WAIT)
+        if (entry.get("status") in ("ready", "failed") and not checking and not illustrate.drawing(entry)) \
+                or waited >= DONE_WAIT:
             rounds = int(team.get("round") or 0)
             out.append(("done" if not rounds else f"done:{rounds}", "done", None))
     return out
 
 
 def _conclusion_markdown(team: dict) -> str:
-    from . import conclusion
+    """The result's text for the done notice (its picture goes as a picture of its own)."""
+    from . import conclusion, illustrate
 
     if (team.get("conclusion") or {}).get("status") != "ready":
         return ""
     path = conclusion.conclusion_path(team)
     try:
-        return path.read_text(encoding="utf-8", errors="replace") if path is not None and path.exists() else ""
+        text = path.read_text(encoding="utf-8", errors="replace") if path is not None and path.exists() else ""
     except OSError:
         return ""
+    return illustrate.strip(text) if picture_of(team) else text
+
+
+def picture_of(team: dict) -> Optional[Path]:
+    """The result's drawn picture in the team's workspace, if there is one."""
+    entry = (team.get("conclusion") or {}).get("illustration") or {}
+    workspace = team.get("workspace") or ""
+    if entry.get("status") != "ready" or not entry.get("path") or not workspace:
+        return None
+    root = Path(workspace).resolve()
+    path = (root / entry["path"]).resolve()
+    return path if path.is_relative_to(root) and path.is_file() else None
 
 
 def _remember(slug: str, keys: list[str]) -> None:
@@ -443,6 +461,10 @@ def tick_board(slug: str, team: dict) -> None:
             "team": team["team_id"], "kind": kind, "task": (task or {}).get("id"), "owner": team.get("owner"),
             "member": (task or {}).get("member")})
         sent.append(key)
+        picture = picture_of(team) if kind == "done" else None
+        if picture is not None:  # under the notice it belongs to; best effort
+            telegram.send_photo(target["chat_id"], picture, f"🖼 结果配图 · {esc(clip(team.get('title'), 60))}",
+                                thread_id=target.get("thread_id"), reply_to=message_id)
     if sent:
         _remember(slug, sent)
 

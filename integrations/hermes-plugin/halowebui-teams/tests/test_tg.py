@@ -44,8 +44,13 @@ def linked(tmp_path, monkeypatch):
         sent.append({"chat": str(chat_id), "text": text, "buttons": buttons or [], "reply_to": reply_to})
         return 2000 + len(sent)
 
+    def fake_send_photo(chat_id, path, caption="", *, thread_id=None, reply_to=None):
+        sent.append({"chat": str(chat_id), "photo": str(path), "text": caption, "buttons": [], "reply_to": reply_to})
+        return 1000 + len(sent)
+
     monkeypatch.setattr(telegram, "ready", lambda: True)
     monkeypatch.setattr(telegram, "send", fake_send)
+    monkeypatch.setattr(telegram, "send_photo", fake_send_photo)
     monkeypatch.setattr(telegram, "asend", fake_asend)
     notify._seen.clear()
     return SimpleNamespace(link=link, notify=notify, telegram=telegram, sent=sent, cfg=cfg)
@@ -134,6 +139,57 @@ def test_done_notice_carries_the_conclusion(pkg, team_id, plan_dict, linked):
     assert "3/3 个任务" in done[0]["text"]
     assert any(b.endswith(f"/teams/{team_id}/conclusion") for b in _buttons(done[0]))
     assert f"cb:kb:{team_id}" in _buttons(done[0])  # 存入知识库
+
+
+def test_done_notice_waits_for_the_picture_and_brings_it(pkg, team_id, plan_dict, linked):
+    """The picture is the result's last step: 「完成」 goes out once it is drawn, with it."""
+    from pathlib import Path
+
+    import halowebui_teams.illustrate as illustrate
+
+    first = _create(pkg, team_id, plan_dict)
+    _tick(pkg, team_id, linked)
+    slug = pkg.common.board_slug(team_id)
+    kb = _kb()
+    with pkg.common.board_conn(slug) as conn:
+        for key in ("T1", "T2"):
+            kb.claim_task(conn, first["tasks"][key], claimer="w")
+            kb.complete_task(conn, first["tasks"][key], result="ok", summary="ok")
+        kb.recompute_ready(conn)
+        kb.claim_task(conn, first["tasks"]["T3"], claimer="w")
+        kb.complete_task(conn, first["tasks"]["T3"], result="评审通过", summary="评审通过")
+    pkg.teams.snapshot(team_id)  # completes; the conclusion is written synchronously in tests
+    pkg.common.update_team(slug, lambda rec: rec["conclusion"].update(
+        illustration={"status": "generating", "started_at": pkg.common.now(), "by": "auto"}))
+    _tick(pkg, team_id, linked)
+    _tick(pkg, team_id, linked)
+    assert not [m for m in linked.sent if m["text"].startswith("✅")]  # still drawing: not done yet
+
+    team = pkg.common.read_team(slug)
+    picture = Path(team["workspace"]) / "images" / "result-1.png"
+    picture.parent.mkdir(parents=True, exist_ok=True)
+    picture.write_bytes(b"\x89PNG fake")
+    entry = {"status": "ready", "path": "images/result-1.png", "prompt_path": "images/result-1.prompt.md",
+             "template": "手绘万能图", "title": "结果", "by": "auto"}
+    conclusion_file = pkg.conclusion.conclusion_path(team)
+    conclusion_file.write_text(illustrate.place(conclusion_file.read_text(encoding="utf-8"), illustrate.block_for(entry)),
+                               encoding="utf-8")
+    pkg.common.update_team(slug, lambda rec: rec["conclusion"].update(illustration=entry))
+    _tick(pkg, team_id, linked)
+    done = [i for i, m in enumerate(linked.sent) if m["text"].startswith("✅")]
+    assert len(done) == 1
+    text, photo = linked.sent[done[0]], linked.sent[done[0] + 1]
+    assert "[图：" not in text["text"] and "提示词" not in text["text"]  # the picture comes as a picture
+    assert photo["photo"] == str(picture.resolve()) and photo["reply_to"] == 1000 + done[0] + 1
+    _tick(pkg, team_id, linked)
+    assert len([m for m in linked.sent if "photo" in m]) == 1
+
+
+def test_a_picture_outside_the_workspace_is_not_sent(linked):
+    assert linked.notify.picture_of({"workspace": "/tmp", "conclusion": {"illustration": {
+        "status": "ready", "path": "../etc/passwd"}}}) is None
+    assert linked.notify.picture_of({"workspace": "/tmp", "conclusion": {"illustration": {
+        "status": "generating", "path": "x.png"}}}) is None
 
 
 def test_done_notice_time_runs_until_the_answer_is_checked(linked):

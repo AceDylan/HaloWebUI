@@ -14,7 +14,7 @@ from open_webui.models.auto_routes import AutoRoutes
 from open_webui.models.chats import Chats
 from open_webui.models.files import Files
 from open_webui.utils.auth import get_verified_user
-from open_webui.utils.auto_routing import PATHS, normalize_selection, selection_messages, preferred_routing_model
+from open_webui.utils.auto_routing import LABELS, PATHS, normalize_selection, selection_messages, preferred_routing_model
 
 router = APIRouter()
 log = logging.getLogger(__name__)
@@ -56,7 +56,8 @@ def public(row, user, targets=None):
         "error": data.get("error", ""), "created_at": row["created_at"],
         "href": PATHS[mode] + target if mode in PATHS and target else None,
         "auto_start": bool(data.get("auto_start")), "target_status": None,
-        "title": data["input"]["question"][:80], "routing_model": data.get("routing_model")}
+        "title": data["input"]["question"][:80], "routing_model": data.get("routing_model"),
+        "origin_chat_id": (data.get("origin") or {}).get("chatId")}
     if targets is not None:
         info = targets.get((mode, target)) if target else None
         if target:
@@ -77,6 +78,29 @@ def public(row, user, targets=None):
             result["title"] = chat.title if chat.title != "New Chat" else result["title"]
         result["target_status"] = (chat.meta or {}).get(key, {}).get("status") if chat else "deleted"
     return result
+
+
+# What the chat's reply said before a mode was chosen (older replies keep it until their card opens).
+_PENDING_REPLY = "已交给自动分流工作台：正在选择处理方式，结果会发回这个对话。"
+
+
+def _chosen_reply(mode, reason):
+    """The chat reply once a mode is chosen: who handles it and why (what Hermes reads next turn)."""
+    reason = str(reason or "").strip().rstrip("。.")
+    return (f"🔀 自动分流交给了{LABELS.get(mode, mode)}" + (f"：{reason}" if reason else "") +
+            "。进度在下面的卡片里，结果会发回这个对话。")
+
+
+def _settle_reply(origin, mode, reason, *, only_if=None):
+    if not (origin or {}).get("chatId") or not origin.get("messageId") or mode not in LABELS:
+        return
+    if only_if is not None:
+        chat = Chats.get_chat_by_id(origin["chatId"])
+        message = (((chat.chat or {}).get("history") or {}).get("messages") or {}).get(origin["messageId"]) if chat else None
+        if not message or message.get("content") != only_if:
+            return
+    Chats.upsert_message_to_chat_by_id_and_message_id(origin["chatId"], origin["messageId"],
+        {"content": _chosen_reply(mode, reason)}, set_current=False)
 
 
 def _files(ids, user):
@@ -203,6 +227,10 @@ async def dispatch(request, user, row, form, decision, models, ambiguous, bases,
     AutoRoutes.update(row["id"], user.id, status="dispatched")
     if origin:
         Chats.set_chat_meta_value_by_id(origin["chatId"], "auto_route", {"id": row["id"], "mode": mode})
+        try:
+            _settle_reply(origin, mode, decision.get("reason"))
+        except Exception:  # the card shows the choice either way
+            log.debug("auto: could not update the chat reply", exc_info=True)
         from open_webui.utils.team_chats import emit_chat_event
         await emit_chat_event(user.id, origin["chatId"], "chat:title", Chats.get_chat_title_by_id(origin["chatId"]))
 
@@ -309,6 +337,11 @@ async def detail(id: str, user=Depends(get_verified_user), request: Request = No
     row = _own(id, user)
     # Repair older chat dispatches on opening their card; never scan all chat histories.
     origin = row["data"].get("origin") or {}
+    if row["status"] == "dispatched" and origin.get("chatId"):
+        try:  # an older reply still saying "正在选择处理方式"
+            _settle_reply(origin, row.get("mode"), row["data"].get("reason"), only_if=_PENDING_REPLY)
+        except Exception:
+            log.debug("auto: could not settle an older reply", exc_info=True)
     if request and origin.get("chatId"):
         chat = Chats.get_chat_by_id_and_user_id(origin["chatId"], user.id)
         if chat and not (chat.meta or {}).get("auto_route"):
@@ -350,7 +383,7 @@ async def retry(request: Request, id: str, form: RetryForm, user=Depends(get_ver
     if origin.get("chatId") and origin.get("messageId"):
         # the chat's card follows the new receipt (also after a reload)
         Chats.upsert_message_to_chat_by_id_and_message_id(origin["chatId"], origin["messageId"],
-            {"auto_route": {"id": created["id"]}})
+            {"auto_route": {"id": created["id"]}}, set_current=False)
     return created
 
 

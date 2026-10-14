@@ -23,6 +23,7 @@
 	import MenuLines from '$lib/components/icons/MenuLines.svelte';
 	import HandoffBack from '$lib/components/common/HandoffBack.svelte';
 	import '$lib/components/teams/teams.css';
+	import '$lib/components/discuss/discuss.css';
 
 	type Attachment = {
 		key: string;
@@ -274,6 +275,7 @@
 <div
 	class="tm-ambient relative flex h-screen max-h-[100dvh] w-full flex-col"
 	data-teams-ui
+	data-discuss-ui
 	data-auto-home
 >
 	<nav class="flex flex-wrap items-center gap-2 px-3 pt-2 pb-1">
@@ -319,11 +321,11 @@
 				<textarea
 					aria-label="问题或任务"
 					maxlength="8000"
-					rows="6"
+					rows="5"
 					bind:value={question}
 					disabled={busy}
-					class="w-full resize-y rounded-t-2xl bg-transparent p-5 text-base outline-none"
-					placeholder="你想了解什么，或希望完成什么？"
+					class="w-full resize-none rounded-t-2xl bg-transparent px-5 pt-5 pb-3 text-base leading-relaxed outline-none"
+					placeholder="你想了解什么，或希望完成什么？附件可以粘贴或拖进来"
 					on:paste={(e) => {
 						if (e.clipboardData?.files.length) {
 							e.preventDefault();
@@ -337,24 +339,34 @@
 						}
 					}}
 				/>
-				{#if attachments.length}<div class="flex flex-wrap gap-2 px-5 pb-3">
-						{#each attachments as file (file.key)}<div
-								class="max-w-full rounded-lg bg-gray-100 px-3 py-2 text-xs dark:bg-gray-800"
+				{#if attachments.length}<ul
+						class="flex list-none flex-wrap gap-2 px-5 pb-3"
+						aria-label="附件"
+						data-auto-attachments
+					>
+						{#each attachments as file (file.key)}<li
+								class="dc-chip relative max-w-[16rem] !pr-1 {file.error
+									? '!border-red-300 !text-red-600 dark:!border-red-500/40 dark:!text-red-400'
+									: ''}"
+								title={file.error || file.name}
 							>
-								<span class="break-all">{file.name}</span>
-								{file.error || (!file.id ? `${file.progress}%` : '')}
+								<span class="truncate">{file.name}</span>
+								{#if file.error}<span class="shrink-0">· 上传失败</span>
+								{:else if !file.id}<span class="tm-num shrink-0 text-gray-400"
+										>{file.progress < 100 ? `${file.progress}%` : '处理中'}</span
+									>{/if}
 								<button
 									type="button"
-									class="ml-2"
+									class="grid size-5 shrink-0 place-items-center rounded-full hover:bg-gray-500/15 disabled:opacity-40"
 									aria-label={`移除 ${file.name}`}
 									disabled={busy || (!file.id && !file.error)}
 									on:click={() => (attachments = attachments.filter((f) => f.key !== file.key))}
 									>×</button
 								>
-							</div>{/each}
-					</div>{/if}
+							</li>{/each}
+					</ul>{/if}
 				<div
-					class="flex flex-wrap items-center gap-3 border-t border-gray-100 p-4 dark:border-gray-800"
+					class="flex flex-wrap items-center gap-2 border-t border-gray-100 px-4 py-3 dark:border-gray-800/70"
 				>
 					<input
 						type="file"
@@ -368,94 +380,146 @@
 					/>
 					<button
 						type="button"
-						class="rounded-lg bg-gray-100 px-3 py-2 text-sm dark:bg-gray-800"
+						class="dc-chip"
+						title="附带文件或图片，也可以粘贴或拖进来（最多 4 个）"
 						disabled={busy || uploading || attachments.length >= 4}
-						on:click={() => fileInput.click()}>附件</button
+						on:click={() => fileInput.click()}
+						>附件{attachments.length ? ` ${attachments.length}/4` : ''}</button
 					>
-					<label class="text-sm"
-						>处理方式 <select
+					<label class="dc-chip !py-1 !pr-1.5" title="自动选择，或直接指定交给谁"
+						><span>交给</span><select
 							aria-label="处理方式"
 							bind:value={mode}
 							disabled={busy}
-							class="rounded-lg border-0 bg-gray-100 text-sm dark:bg-gray-800"
+							class="dc-select"
 						>
 							<option value="auto">自动选择</option><option value="answer">精答</option><option
 								value="discuss">讨论</option
 							>{#if teamsEnabled}<option value="team">协作台</option>{/if}
 						</select></label
 					>
-					<button
-						type="submit"
-						class="tm-btn-primary ml-auto"
-						disabled={busy || uploading || failedUpload || !question.trim()}
-						>{busy ? '正在处理…' : '开始处理'}</button
-					>
+					{#if webEnabled}<button
+							type="button"
+							class="dc-chip"
+							aria-pressed={research}
+							title="需要最新信息时先查资料；关掉则只凭模型自己的知识，协作任务也会带上不联网的要求"
+							disabled={busy}
+							on:click={() => (research = !research)}>按需联网</button
+						>{/if}
+					<div class="ml-auto flex items-center gap-2">
+						<kbd
+							class="hidden rounded-md px-1.5 py-0.5 font-mono text-[11px] text-gray-400 sm:inline-block"
+							>Ctrl ↵</kbd
+						>
+						<button
+							type="submit"
+							class="tm-btn-primary"
+							disabled={busy || uploading || failedUpload || !question.trim()}
+							>{busy ? '正在处理…' : '开始处理'}</button
+						>
+					</div>
 				</div>
 			</form>
-			<details class="mt-4 text-sm text-gray-600 dark:text-gray-400">
-				<summary class="cursor-pointer">处理偏好与背景{context ? ' · 已带入背景' : ''}</summary>
-				<div class="mt-3 flex flex-wrap items-center gap-4">
-					<label
-						>讨论预算 <select
-							aria-label="讨论预算"
-							bind:value={preference}
-							disabled={busy}
-							class="rounded-lg border-0 bg-gray-100 text-sm dark:bg-gray-800"
-							><option value="standard">标准 · 最多 3 个席位</option><option value="economy"
-								>精简 · 2 个席位</option
-							></select
-						></label
+			<details class="auto-more group mt-3 text-sm text-gray-600 dark:text-gray-400" data-auto-more>
+				<summary
+					class="inline-flex cursor-pointer select-none items-center gap-1.5 rounded-lg px-1 py-1 text-xs font-medium text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200"
+				>
+					<svg
+						class="size-3 transition-transform group-open:rotate-90"
+						viewBox="0 0 12 12"
+						fill="none"
+						aria-hidden="true"
+						><path
+							d="m4.5 3 3 3-3 3"
+							stroke="currentColor"
+							stroke-width="1.5"
+							stroke-linecap="round"
+							stroke-linejoin="round"
+						/></svg
 					>
-					{#if webEnabled}<label class="flex items-center gap-2"
-							><input type="checkbox" bind:checked={research} disabled={busy} />按需联网</label
-						>{/if}
-					{#if teamsEnabled}<label class="flex items-center gap-2"
-							><input
-								type="checkbox"
-								bind:checked={autoStart}
+					更多设置：讨论席位、协作启动、补充背景{context ? ' · 已带入背景' : ''}
+				</summary>
+				<div class="tm-card-quiet mt-2 flex flex-col gap-3 p-4">
+					<div class="flex flex-wrap items-center gap-2">
+						<label class="dc-chip !py-1 !pr-1.5"
+							><span>讨论席位</span><select
+								aria-label="讨论预算"
+								bind:value={preference}
 								disabled={busy}
-							/>协作计划后直接开始</label
-						>{/if}
+								class="dc-select"
+								><option value="standard">标准 · 最多 3 个</option><option value="economy"
+									>精简 · 2 个</option
+								></select
+							></label
+						>
+						{#if teamsEnabled}<button
+								type="button"
+								class="dc-chip"
+								aria-pressed={autoStart}
+								title="协作计划出来后不等批准直接开始（每位成员都有可用执行者时）"
+								disabled={busy}
+								on:click={() => (autoStart = !autoStart)}>协作计划后直接开始</button
+							>{/if}
+					</div>
+					<p class="text-xs leading-5 text-gray-500 dark:text-gray-400">
+						讨论进行一轮并汇总结论；协作默认先出计划，等你批准再开始。「只分析、不执行」等要求优先于自动选择。
+					</p>
+					<textarea
+						aria-label="背景信息"
+						bind:value={context}
+						disabled={busy}
+						maxlength="12000"
+						rows="3"
+						placeholder="可选：补充背景、约束和已有结论"
+						class="w-full resize-y rounded-xl border border-gray-200 bg-transparent p-3 text-sm outline-none transition focus:border-sky-400 dark:border-gray-700"
+					/>
 				</div>
-				<p class="mt-2 text-xs leading-5">
-					讨论先进行一轮并汇总结论；协作默认先出计划。“只分析、不执行”等要求优先。关闭联网时，协作任务也会带上禁止联网的要求。
-				</p>
-				<textarea
-					aria-label="背景信息"
-					bind:value={context}
-					disabled={busy}
-					maxlength="12000"
-					rows="3"
-					placeholder="可选：补充背景、约束和已有结论"
-					class="mt-3 w-full rounded-xl border border-gray-200 bg-transparent p-3 dark:border-gray-700"
-				/>
 			</details>
 			{#if error}<p role="alert" class="mt-4 text-sm text-red-500">{error}</p>{/if}
-			{#if active}<section class="tm-card mt-6 p-5" aria-live="polite" data-auto-active>
-					<div class="flex flex-wrap justify-between gap-2">
-						<strong
+			{#if active}<section
+					class="tm-card mt-6 p-5 {routePending(active) ? 'tm-live' : ''}"
+					aria-live="polite"
+					data-auto-active
+				>
+					<div class="flex flex-wrap items-center justify-between gap-2">
+						<strong class="text-sm font-semibold text-gray-900 dark:text-gray-100"
 							>{active.mode ? `自动分流 → ${MODE_LABEL[active.mode]}` : '正在选择处理方式'}</strong
-						><span class="text-sm">{routeStatus(active)}</span>
+						><span
+							class="rounded-full px-2 py-0.5 text-xs {active.status === 'error' ||
+							active.status === 'interrupted'
+								? 'bg-red-500/10 text-red-600 dark:text-red-400'
+								: 'bg-gray-500/10 text-gray-600 dark:text-gray-300'}">{routeStatus(active)}</span
+						>
 					</div>
-					<p class="mt-2 text-sm text-gray-500">
+					<p
+						class="mt-2 text-sm leading-relaxed text-gray-600 dark:text-gray-300 {routePending(
+							active
+						) && !active.reason
+							? 'tm-shimmer'
+							: ''}"
+					>
 						{active.reason || '正在理解你的目标，选择合适的处理方式…'}
 					</p>
 					{#if active.error}<p class="mt-2 text-sm text-red-500">{active.error}</p>{/if}
-					<div class="mt-4 flex gap-4 text-sm">
+					<div class="mt-4 flex flex-wrap items-center gap-2">
 						{#if active.href && active.target_status !== 'deleted'}<a
 								href={active.href}
-								class="text-cyan-600 dark:text-cyan-300 underline"
-								>打开{active.mode ? MODE_LABEL[active.mode] : '任务'}</a
+								class="tm-btn-primary !px-3 !py-1.5 !text-xs"
+								>打开{active.mode ? MODE_LABEL[active.mode] : '任务'} →</a
 							>{/if}
-						{#if active.status === 'routing'}<button on:click={cancel}>取消分流</button>{/if}
-						{#if !routePending(active)}<button on:click={reset}>开始另一次分流</button>{/if}
+						{#if active.status === 'routing'}<button class="tm-btn-ghost !text-xs" on:click={cancel}
+								>取消分流</button
+							>{/if}
+						{#if !routePending(active)}<button class="tm-btn-ghost !text-xs" on:click={reset}
+								>开始另一次分流</button
+							>{/if}
 					</div>
 				</section>{/if}
 			<section class="mt-10 pb-8">
 				<div class="flex items-center justify-between">
 					<h2 class="text-base font-semibold">最近处理</h2>
 					<button
-						class="text-sm text-gray-500"
+						class="rounded-lg px-2 py-1 text-xs text-gray-500 hover:bg-gray-500/10 hover:text-gray-800 disabled:opacity-50 dark:hover:text-gray-200"
 						disabled={loading}
 						on:click={() => loadHistory(0, true)}>刷新</button
 					>
@@ -512,10 +576,20 @@
 									>{row.reason || row.question}</span
 								></span
 							>
-							<span class="text-xs text-gray-500"
-								>{row.mode ? `自动 → ${MODE_LABEL[row.mode]}` : '自动分流'}</span
+							<span
+								class="shrink-0 rounded-full bg-cyan-500/10 px-2 py-0.5 text-[11px] font-medium text-cyan-700 dark:text-cyan-300"
+								>{row.mode ? MODE_LABEL[row.mode] : '分流中'}</span
 							>
-							<span class="text-xs text-gray-400">{routeStatus(row)}</span>
+							<span
+								class="min-w-[4rem] shrink-0 text-right text-xs {[
+									'error',
+									'interrupted',
+									'failed',
+									'plan_failed'
+								].includes(row.status === 'dispatched' ? (row.target_status ?? '') : row.status)
+									? 'text-red-500'
+									: 'text-gray-400'}">{routeStatus(row)}</span
+							>
 						</a>{/each}
 				</div>
 				{#if pageIndex > 0 || more}
@@ -535,3 +609,13 @@
 		</div>
 	</div>
 </div>
+
+<style>
+	/* the disclosure draws its own chevron */
+	.auto-more > summary {
+		list-style: none;
+	}
+	.auto-more > summary::-webkit-details-marker {
+		display: none;
+	}
+</style>

@@ -38,7 +38,8 @@ async def run_auto_dispatch(request, form_data, user, metadata, model_id):
             schedule_chat_metadata(request, user, chat_id, model_id=model_id,
                 messages=[{"role": "user", "content": ask}], message_id=message_id,
                 user_message_count=max(1, len(asks)))
-            fields.update(content="已交给自动分流工作台：正在选择处理方式，结果会发回这个对话。",
+            fields.update(content="🔀 已交给自动分流：按目标在精答、讨论和协作台里选一个来处理。"
+                                  "选择依据和进度在下面的卡片里，结果会发回这个对话。",
                           auto_route={"id": row["id"]})
         except Exception as exc:
             detail = exc.detail if isinstance(exc, HTTPException) else "请稍后再试"

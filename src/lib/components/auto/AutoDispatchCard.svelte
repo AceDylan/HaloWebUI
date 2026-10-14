@@ -44,6 +44,8 @@
 	const MODES: AutoMode[] = ['answer', 'discuss', 'team'];
 	let retrying = '';
 	$: canRetry = !!row && RETRYABLE.has(row.status);
+	$: failed = !!row && (row.status === 'error' || row.status === 'interrupted');
+	$: pending = !row || routePending(row);
 	async function retry(mode: 'auto' | AutoMode) {
 		if (retrying) return;
 		retrying = mode;
@@ -81,7 +83,7 @@
 	data-auto-dispatch
 	aria-live="polite"
 >
-	<div class="tm-card overflow-hidden">
+	<div class="tm-card overflow-hidden {pending ? 'tm-live' : ''}">
 		<div class="flex items-center gap-3 px-4 py-3">
 			<span
 				class="grid size-10 shrink-0 place-items-center rounded-xl bg-cyan-500/10 text-cyan-700 dark:text-cyan-300"
@@ -103,30 +105,40 @@
 			</span>
 			<div class="min-w-0 flex-1">
 				<div class="flex flex-wrap items-center gap-2">
-					<strong class="text-sm font-semibold"
-						>自动{row?.mode ? ` · ${MODE_LABEL[row.mode]}` : '分流'}</strong
-					><span class="rounded-full bg-gray-500/10 px-2 py-0.5 text-xs text-gray-500"
+					<strong class="text-sm font-semibold text-gray-900 dark:text-gray-100"
+						>自动分流{row?.mode ? ` → ${MODE_LABEL[row.mode]}` : ''}</strong
+					><span
+						class="rounded-full px-2 py-0.5 text-xs {failed
+							? 'bg-red-500/10 text-red-600 dark:text-red-400'
+							: 'bg-gray-500/10 text-gray-500 dark:text-gray-400'}"
 						>{row
 							? row.status === 'dispatched'
-								? '已选择处理方式'
+								? `已交给${row.mode ? MODE_LABEL[row.mode] : '工作台'}`
 								: routeStatus(row)
 							: '正在连接'}</span
 					>
 				</div>
-				<p class="mt-1 text-xs leading-5 text-gray-500">
+				<p
+					class="mt-1 text-xs leading-5 text-gray-500 dark:text-gray-400 {!row?.reason && pending
+						? 'tm-shimmer'
+						: ''}"
+				>
 					{row?.reason || '正在理解目标、附件和约束，选择合适的处理方式…'}
 				</p>
+				{#if row?.routing_model}<p
+						class="mt-0.5 truncate text-[11px] text-gray-400"
+						title={routingModelName}
+						data-auto-routing-model
+					>
+						由 {routingModelName} 判断
+					</p>{/if}
 			</div>
-			<a href={`/auto?request=${encodeURIComponent(id)}`} class="tm-btn-ghost shrink-0"
-				>分流详情 ↗</a
+			<a
+				href={`/auto?request=${encodeURIComponent(id)}`}
+				class="tm-btn-ghost shrink-0 !text-xs"
+				title="在自动分流工作台查看这次分流">分流记录 ↗</a
 			>
 		</div>
-		{#if row?.routing_model}<div
-				class="truncate border-t border-gray-500/10 px-4 py-2 text-xs text-gray-500"
-				title={routingModelName}
-			>
-				主控模型 · {routingModelName}
-			</div>{/if}
 		{#if error || row?.error}<p role="alert" class="px-4 pb-3 text-xs text-red-500">
 				{error || row?.error}
 			</p>{/if}

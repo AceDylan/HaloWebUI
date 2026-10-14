@@ -5,6 +5,8 @@ export type AutoRoute = {
 	id: string;
 	title?: string;
 	routing_model?: string | null;
+	/** The chat it was dispatched from (the result goes back there). */
+	origin_chat_id?: string | null;
 	question: string;
 	status: 'routing' | 'dispatching' | 'dispatched' | 'error' | 'cancelled' | 'interrupted';
 	mode: AutoMode | null;
@@ -89,10 +91,15 @@ export const routeStatus = (row: AutoRoute) => {
 	const names: Record<string, string> = {
 		done: '已完成',
 		completed: '已完成',
-		plan_ready: '等待启动',
+		plan_ready: '等你批准',
 		planning: '正在规划',
 		plan_failed: '规划失败',
+		starting: '正在启动',
+		start_failed: '启动失败',
+		attention: '需要处理',
+		paused: '已暂停',
 		running: '进行中',
+		concluding: '正在写结论',
 		answering: '正在作答',
 		researching: '正在查资料',
 		routing: '正在匹配助手',

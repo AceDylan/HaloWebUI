@@ -17,6 +17,8 @@ from typing import Optional
 log = logging.getLogger(__name__)
 
 TEAM_LIMIT = 10
+# titles a chat has before it is named: the row shows the question instead
+PLACEHOLDER_TITLES = {"New Chat", "新对话", "新聊天", "新精答", "新讨论"}
 AUTO_STALE_SECONDS = 600  # the receipt's own interruption window (routers/auto.py)
 
 
@@ -29,7 +31,7 @@ def _titles(chat_ids: set[str]) -> dict[str, str]:
 
     with get_db() as db:
         found = db.query(Chat.id, Chat.title).filter(Chat.id.in_(list(chat_ids))).all()
-    return {id: title for id, title in found if title and title != "New Chat"}
+    return {id: title for id, title in found if title and title not in PLACEHOLDER_TITLES}
 
 
 def _chat_replies(user_id: str, skip: set[str]) -> list[dict]:

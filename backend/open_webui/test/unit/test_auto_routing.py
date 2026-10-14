@@ -350,7 +350,7 @@ def test_only_the_users_own_words_in_the_background_constrain():
 def test_failed_request_is_routed_again_from_its_card(env, monkeypatch):
     posted = []
     monkeypatch.setattr(api.Chats, "upsert_message_to_chat_by_id_and_message_id",
-                        lambda chat_id, message_id, fields: posted.append((chat_id, message_id, fields)))
+                        lambda chat_id, message_id, fields, **kw: posted.append((chat_id, message_id, fields, kw)))
     async def failing(*args):
         raise HTTPException(503, "暂时不可用")
     async def ok(request, user, form, file_info):
@@ -374,10 +374,29 @@ def test_failed_request_is_routed_again_from_its_card(env, monkeypatch):
         await settle(again["id"])
         stored = records.AutoRoutes.get(again["id"], USER.id)
         assert stored["data"]["origin"] == origin and stored["data"]["input"]["mode"] == "discuss"
-        assert posted == [("chat-1", "reply-1", {"auto_route": {"id": again["id"]}})]
+        # the card follows the new receipt without moving the chat's current message
+        assert posted[0] == ("chat-1", "reply-1", {"auto_route": {"id": again["id"]}}, {"set_current": False})
         # a second press joins the retry instead of routing a third time
         assert (await api.retry(env, first["id"], api.RetryForm(), USER))["id"] == again["id"]
         with pytest.raises(HTTPException) as err:
             await api.retry(env, again["id"], api.RetryForm(), USER)
         assert err.value.status_code == 409
     asyncio.run(run())
+
+
+def test_the_chat_reply_says_what_was_chosen(monkeypatch):
+    posted = []
+    monkeypatch.setattr(api.Chats, "upsert_message_to_chat_by_id_and_message_id",
+                        lambda chat_id, message_id, fields, **kw: posted.append((chat_id, message_id, fields, kw)))
+    origin = {"chatId": "chat-1", "messageId": "reply-1"}
+    api._settle_reply(origin, "team", "需要改仓库并运行测试。")
+    assert posted == [("chat-1", "reply-1", {"content": "🔀 自动分流交给了协作台：需要改仓库并运行测试。进度在下面的卡片里，结果会发回这个对话。"},
+                       {"set_current": False})]
+    # an older reply is corrected only while it still says the pending text
+    chat = lambda content: SimpleNamespace(chat={"history": {"messages": {"reply-1": {"content": content}}}})
+    monkeypatch.setattr(api.Chats, "get_chat_by_id", lambda id: chat("用户改过的内容"))
+    api._settle_reply(origin, "answer", "", only_if=api._PENDING_REPLY)
+    assert len(posted) == 1
+    monkeypatch.setattr(api.Chats, "get_chat_by_id", lambda id: chat(api._PENDING_REPLY))
+    api._settle_reply(origin, "answer", "", only_if=api._PENDING_REPLY)
+    assert posted[1][2] == {"content": "🔀 自动分流交给了精答。进度在下面的卡片里，结果会发回这个对话。"}

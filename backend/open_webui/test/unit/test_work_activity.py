@@ -106,3 +106,21 @@ def test_tasks_record_their_kind_and_start(monkeypatch):
 
     meta = asyncio.run(run())
     assert meta["kind"] == "image" and meta["owner_id"] == "u1" and meta["started_at"] > 0
+
+
+def test_placeholder_titles_give_way_to_the_question(monkeypatch):
+    from contextlib import contextmanager
+    from open_webui.internal import db as db_module
+
+    class Query:
+        def filter(self, *a):
+            return self
+        def all(self):
+            return [("a1", "新精答"), ("c1", "周报"), ("c2", "New Chat")]
+
+    @contextmanager
+    def fake_db():
+        yield SimpleNamespace(query=lambda *cols: Query())
+
+    monkeypatch.setattr(db_module, "get_db", fake_db)
+    assert work_activity._titles({"a1", "c1", "c2"}) == {"c1": "周报"}

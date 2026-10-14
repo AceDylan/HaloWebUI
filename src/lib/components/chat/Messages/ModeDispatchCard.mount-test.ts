@@ -7,11 +7,22 @@ import { installDominoDom } from '$lib/test-support/domino-dom';
 installDominoDom('http://localhost/');
 vi.mock('$app/navigation', () => ({ goto: vi.fn() }));
 
-const answers = vi.hoisted(() => ({ getAnswer: vi.fn(), reportBackAnswer: vi.fn() }));
+const answers = vi.hoisted(() => ({
+	getAnswer: vi.fn(),
+	reportBackAnswer: vi.fn(),
+	retryAnswer: vi.fn(),
+	stopAnswer: vi.fn()
+}));
 vi.mock('$lib/apis/answers', () => answers);
-const discussions = vi.hoisted(() => ({ getDiscussion: vi.fn(), reportBackDiscussion: vi.fn() }));
+const discussions = vi.hoisted(() => ({
+	getDiscussion: vi.fn(),
+	reportBackDiscussion: vi.fn(),
+	resumeDiscussion: vi.fn(),
+	stopDiscussion: vi.fn(),
+	concludeDiscussion: vi.fn()
+}));
 vi.mock('$lib/apis/discussions', () => discussions);
-vi.mock('svelte-sonner', () => ({ toast: { info: vi.fn(), error: vi.fn() } }));
+vi.mock('svelte-sonner', () => ({ toast: { info: vi.fn(), error: vi.fn(), success: vi.fn() } }));
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const until = async (check: () => boolean, label: string) => {
@@ -187,7 +198,8 @@ describe('ModeDispatchCard', () => {
 		expect(answers.reportBackAnswer.mock.calls[0].slice(1)).toEqual(['run-2']);
 	});
 
-	it('精答 that stopped: the step it stopped at, why, and the way to retry it', async () => {
+	it('精答 that stopped: the step it stopped at, why, and picks it up again in place', async () => {
+		answers.retryAnswer.mockResolvedValue({});
 		answers.getAnswer.mockResolvedValue({
 			id: 'run-3',
 			run: run({
@@ -208,10 +220,28 @@ describe('ModeDispatchCard', () => {
 		).toEqual(['pick:done', 'research:done', 'answer:failed', 'report:pending']);
 		expect(text('[data-mode-dispatch-line]')).toBe('上游超时');
 		expect(text('[data-mode-dispatch-stage-label]')).toBe('出错');
-		expect(text('[data-mode-dispatch-failure]')).toContain('到精答页可以从停下的地方接着来');
-		expect(text('[data-mode-dispatch-open]')).toBe('去重试');
+		expect(text('[data-mode-dispatch-failure]')).toContain('结果照样发回这个对话');
+		expect(text('[data-mode-dispatch-open]')).toBe('打开精答 ↗');
 		expect(text('[data-mode-dispatch-facts]')).toBe('精答 · ⚖️合同审查 · 1 个来源');
 		expect(target.querySelector('[data-mode-dispatch-done]')).toBeFalsy();
+		expect(target.querySelector('[data-mode-dispatch-conclude]')).toBeFalsy();
+		target.querySelector('[data-mode-dispatch-resume]').click();
+		await until(() => answers.retryAnswer.mock.calls.length === 1, 'retry in place');
+		expect(answers.retryAnswer.mock.calls[0].slice(1)).toEqual(['run-3']);
+	});
+
+	it('精答 at work stops from the card', async () => {
+		answers.stopAnswer.mockResolvedValue({});
+		answers.getAnswer.mockResolvedValue({
+			id: 'run-4',
+			run: run({ status: 'answering', answer: { status: 'streaming', content: '先看合同' } })
+		});
+		await mount({ kind: 'answer', chatId: 'run-4', history: { messages: {} } });
+		await until(() => !!target.querySelector('[data-mode-dispatch-stop]'), 'the stop button');
+		expect(text('[data-mode-dispatch-open]')).toBe('在精答看 ↗');
+		target.querySelector('[data-mode-dispatch-stop]').click();
+		await until(() => answers.stopAnswer.mock.calls.length === 1, 'stop');
+		expect(answers.stopAnswer.mock.calls[0].slice(1)).toEqual(['run-4']);
 	});
 
 	it('讨论: the table, the round and who speaks; deleted on its page, a quiet line', async () => {
@@ -273,6 +303,41 @@ describe('ModeDispatchCard', () => {
 		await mount({ kind: 'discuss', chatId: 'room-1', history: { messages: {} } });
 		await until(() => state() === 'gone', 'gone');
 		expect(text('[data-mode-dispatch-gone]')).toContain('这个讨论已经删除了');
+	});
+
+	it('讨论 that stopped: resumes or concludes from the card, unless the room moved on', async () => {
+		const seats = [{ id: 's1', model: 'a', name: 'a', label: 'a', role: '' }];
+		const stopped = {
+			id: 'm-1',
+			question: '该用哪个库？',
+			mode: 'roundtable',
+			rounds: 2,
+			round: 1,
+			status: 'stopped',
+			seats,
+			turns: [{ id: 'r1-s1', round: 1, seat: 's1', status: 'done', content: 'x' }],
+			conclusion: { status: 'waiting', content: '', model: 'c', name: 'c' },
+			origin: { chatId: 'chat-1', messageId: 'r1' }
+		};
+		discussions.getDiscussion.mockResolvedValue({ id: 'room-2', asks: [stopped] });
+		discussions.concludeDiscussion.mockResolvedValue({});
+		await mount({ kind: 'discuss', chatId: 'room-2', history: { messages: {} } });
+		await until(() => state() === 'stopped', 'the stopped discussion');
+		expect(target.querySelector('[data-mode-dispatch-resume]')).toBeTruthy();
+		target.querySelector('[data-mode-dispatch-conclude]').click();
+		await until(() => discussions.concludeDiscussion.mock.calls.length === 1, 'conclude');
+		expect(discussions.concludeDiscussion.mock.calls[0].slice(1)).toEqual(['room-2']);
+		app.$destroy();
+		target.remove();
+
+		discussions.getDiscussion.mockResolvedValue({
+			id: 'room-2',
+			asks: [stopped, { ...stopped, id: 'm-2', question: '那性能呢？', origin: undefined }]
+		});
+		await mount({ kind: 'discuss', chatId: 'room-2', history: { messages: {} } });
+		await until(() => state() === 'stopped', 'the stopped discussion');
+		expect(target.querySelector('[data-mode-dispatch-resume]')).toBeFalsy();
+		expect(text('[data-mode-dispatch-failure]')).toContain('到讨论台接着处理');
 	});
 });
 

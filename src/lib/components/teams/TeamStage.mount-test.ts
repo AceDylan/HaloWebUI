@@ -11,6 +11,13 @@ const api = vi.hoisted(() => ({
 	followUpTeamConclusion: vi.fn(),
 	adjustTeam: vi.fn(),
 	decideTeamChange: vi.fn(),
+	approveTeam: vi.fn(),
+	cancelTeam: vi.fn(),
+	controlTeam: vi.fn(),
+	replanTeam: vi.fn(),
+	retryTeamTask: vi.fn(),
+	sendTeamMessage: vi.fn(),
+	taskDiagnosis: vi.fn(),
 	getTeamEvents: vi.fn(async () => ({ events: [], next_after: 7, has_more: false, latest_seq: 7, reconcile: [] }))
 }));
 vi.mock('$lib/apis/teams', () => api);
@@ -417,6 +424,97 @@ describe('TeamChatCard (派发方式「协作台」 in a chat)', () => {
 		await card({ teamId: 'team-old', history: { messages: {} } });
 		await sleep(80);
 		expect(api.getTeamEvents).not.toHaveBeenCalled();
+	});
+
+	it('approves the plan right in the chat, or asks the lead for another', async () => {
+		const ready = {
+			team: {
+				id: 'team-p',
+				title: '重构登录',
+				status: 'plan_ready',
+				member_count: 2,
+				task_count: 3,
+				plan: {
+					title: '重构登录',
+					summary: '先梳理现有登录流程，再拆成两个成员并行改造',
+					members: [
+						{ name: 'coder', role: '开发', executor: 'codex', runner: 'codex' },
+						{ name: 'tester', role: '测试', executor: 'hermes', runner: null }
+					],
+					tasks: [
+						{ key: 'T1', title: '梳理', description: '', member: 'coder', depends_on: [] },
+						{ key: 'T2', title: '改造', description: '', member: 'coder', depends_on: ['T1'] },
+						{ key: 'T3', title: '测试', description: '', member: 'tester', depends_on: ['T2'] }
+					]
+				}
+			},
+			live: null,
+			stage: { key: 'approval', label: '等你批准', now: '计划好了', at: nowTs(), steps: steps(1) }
+		};
+		api.getTeam.mockResolvedValue(ready);
+		api.approveTeam.mockResolvedValue({});
+		api.replanTeam.mockResolvedValue({});
+		await card({ teamId: 'team-p' });
+		const plan = target.querySelector('[data-team-chat-plan]');
+		expect(plan.textContent).toContain('先梳理现有登录流程');
+		expect(plan.textContent).toContain('2 位成员 · 3 个任务');
+		expect(target.querySelector('[data-team-chat-plan-blocked]').textContent).toContain('1 位成员');
+		expect(text('[data-team-chat-open]')).toBe('细看计划 ↗');
+		(target.querySelector('[data-team-chat-replan-toggle]') as any).click();
+		await sleep(10);
+		const box = target.querySelector('[data-team-chat-replan-text]') as any;
+		box.value = '测试交给 codex';
+		box.dispatchEvent(new (window as any).Event('input'));
+		(target.querySelector('[data-team-chat-replan]') as any).click();
+		await sleep(20);
+		expect(api.replanTeam).toHaveBeenCalledWith('tok', 'team-p', '测试交给 codex');
+		(target.querySelector('[data-team-chat-approve]') as any).click();
+		await sleep(20);
+		expect(api.approveTeam).toHaveBeenCalledWith('tok', 'team-p');
+		expect(nav.goto).not.toHaveBeenCalled();
+	});
+
+	it('answers a member and retries a failed task without leaving the chat', async () => {
+		const task = (over: Record<string, unknown>) => ({
+			id: 't1', key: 'T1', seq: 1, title: '确认接口', member: 'coder', executor: 'codex',
+			status: 'running', sub_status: 'waiting_user', parents: [], children: [], created_at: 1,
+			started_at: 1, completed_at: null, attempts: 1, current_run: null, result: '',
+			block_reason: '要不要保留旧接口？', consecutive_failures: 0, ...over
+		});
+		api.getTeam.mockResolvedValue({
+			team: { id: 'team-a', title: '迁移', status: 'running', phase: 'attention', member_count: 2, task_count: 2 },
+			live: {
+				team: { phase: 'attention', state: 'running', change: null },
+				tasks: [
+					task({}),
+					task({ id: 't2', key: 'T2', title: '跑测试', member: 'tester', sub_status: 'failed', block_reason: '' })
+				]
+			},
+			stage: { key: 'attention', label: '需要你处理', now: 'coder 在等你回答', at: nowTs(), steps: steps(2) }
+		});
+		api.sendTeamMessage.mockResolvedValue({ comment_id: 1, delivery: 'live', expect: '' });
+		api.retryTeamTask.mockResolvedValue({ retried: true });
+		await card({ teamId: 'team-a' });
+		expect(target.querySelectorAll('[data-team-chat-need]').length).toBe(2);
+		expect(target.querySelector('[data-team-chat-need="waiting_user"]').textContent).toContain('要不要保留旧接口？');
+		const box = target.querySelector('[data-team-chat-reply-text="t1"]') as any;
+		box.value = '保留，标记废弃';
+		box.dispatchEvent(new (window as any).Event('input'));
+		await sleep(5);
+		(target.querySelector('[data-team-chat-reply="t1"]') as any).click();
+		await sleep(20);
+		expect(api.sendTeamMessage).toHaveBeenCalledWith('tok', 'team-a', 't1', '保留，标记废弃');
+		(target.querySelector('[data-team-chat-retry="t2"]') as any).click();
+		await sleep(20);
+		expect(api.retryTeamTask).toHaveBeenCalledWith('tok', 'team-a', 't2');
+		// stopping takes a second press
+		api.controlTeam.mockResolvedValue({ state: 'stopped', changed: true });
+		(target.querySelector('[data-team-chat-stop]') as any).click();
+		await sleep(10);
+		expect(api.controlTeam).not.toHaveBeenCalled();
+		(target.querySelector('[data-team-chat-stop]') as any).click();
+		await sleep(20);
+		expect(api.controlTeam).toHaveBeenCalledWith('tok', 'team-a', 'stop');
 	});
 
 	it('a team deleted on the 协作台 leaves a quiet line, and the card stops asking', async () => {

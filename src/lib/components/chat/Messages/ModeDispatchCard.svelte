@@ -7,8 +7,21 @@
 	import '$lib/components/teams/teams.css';
 	import '$lib/components/discuss/discuss.css';
 	import '$lib/components/answer/answer.css';
-	import { getAnswer, reportBackAnswer, type AnswerRun } from '$lib/apis/answers';
-	import { getDiscussion, reportBackDiscussion, type DiscussAsk } from '$lib/apis/discussions';
+	import {
+		getAnswer,
+		reportBackAnswer,
+		retryAnswer,
+		stopAnswer,
+		type AnswerRun
+	} from '$lib/apis/answers';
+	import {
+		concludeDiscussion,
+		getDiscussion,
+		reportBackDiscussion,
+		resumeDiscussion,
+		stopDiscussion,
+		type DiscussAsk
+	} from '$lib/apis/discussions';
 	import StatusChip from '$lib/components/teams/StatusChip.svelte';
 	import { elapsed, now } from '$lib/components/teams/clock';
 	import AssistantAvatar from '$lib/components/answer/AssistantAvatar.svelte';
@@ -29,7 +42,7 @@
 	 * answers or sits at the table, then one card with the steps (a halo on it while it works),
 	 * what is happening right now and for how long — the answer as it streams, who is speaking —
 	 * and once the answer / the conclusion is written, the way to it in this chat (it comes back
-	 * as its own reply).
+	 * as its own reply). Stopping it, and picking it up again where it stopped, happen right here.
 	 */
 	export let kind: 'answer' | 'discuss';
 	/** The run's own chat (/answer/<id>, /discuss/<id>). */
@@ -51,6 +64,10 @@
 	let error = '';
 	let gone = false;
 	let bringing = false;
+	// 停止 / 从停下的地方继续 / 用已有发言写结论, without leaving the chat
+	let acting: '' | 'stop' | 'resume' | 'conclude' = '';
+	// a later question asked in the room itself: resume would pick that one up, not this one
+	let lastAsk = true;
 	let timer: ReturnType<typeof setTimeout> | null = null;
 	let destroyed = false;
 	let clock = Date.now();
@@ -349,6 +366,24 @@
 		}
 	};
 
+	$: spoke = (ask?.turns ?? []).some((t) => t.status === 'done');
+	$: canResume = ended && (kind === 'answer' || lastAsk);
+	const act = async (what: 'stop' | 'resume' | 'conclude') => {
+		if (acting) return;
+		acting = what;
+		try {
+			const token = localStorage.token;
+			if (what === 'stop') await (kind === 'answer' ? stopAnswer : stopDiscussion)(token, chatId);
+			else if (what === 'conclude') await concludeDiscussion(token, chatId);
+			else await (kind === 'answer' ? retryAnswer : resumeDiscussion)(token, chatId);
+			if (what !== 'stop') toast.success('已接着开始，结果照样发回这个对话');
+			await load();
+		} catch (e) {
+			toast.error(`${(e as Error)?.message ?? e}`);
+		} finally {
+			acting = '';
+		}
+	};
 	const load = async () => {
 		try {
 			if (kind === 'answer') {
@@ -360,6 +395,7 @@
 				report = detail.report ?? null;
 				// the question sent from this chat (later questions are asked in the room itself)
 				ask = detail.asks.find((a) => a.origin) ?? detail.asks[0] ?? null;
+				lastAsk = !ask || detail.asks[detail.asks.length - 1]?.id === ask.id;
 			}
 			error = '';
 		} catch (e) {
@@ -474,12 +510,8 @@
 					<span class="truncate">{facts.join(' · ')}</span>
 				</div>
 			</div>
-			<a
-				{href}
-				class="{ended
-					? 'tm-btn-primary !gap-1 !px-2.5 !py-1 !text-xs'
-					: 'tm-btn-ghost !text-xs'} shrink-0"
-				data-mode-dispatch-open>{live ? '去看看' : ended ? '去重试' : `打开${label}`}</a
+			<a {href} class="tm-btn-ghost shrink-0 !text-xs" data-mode-dispatch-open
+				>{live ? `在${label}看` : `打开${label}`} ↗</a
 			>
 		</div>
 
@@ -601,10 +633,46 @@
 					</ul>
 				{/if}
 
+				{#if live && !drawing}
+					<div class="mt-2 flex justify-end">
+						<button
+							type="button"
+							class="rounded-lg px-1 text-[11px] text-gray-400 transition hover:text-red-600 disabled:opacity-60 dark:hover:text-red-400"
+							disabled={!!acting}
+							on:click={() => act('stop')}
+							data-mode-dispatch-stop>{acting === 'stop' ? '停止中…' : '停止'}</button
+						>
+					</div>
+				{/if}
 				{#if ended}
-					<p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400" data-mode-dispatch-failure>
-						到{kind === 'answer' ? '精答页' : '讨论台'}可以从停下的地方接着来，结果照样发回这个对话。
-					</p>
+					<div
+						class="mt-2 flex flex-wrap items-center gap-2 text-xs text-gray-500 dark:text-gray-400"
+						data-mode-dispatch-failure
+					>
+						{#if canResume}
+							<button
+								type="button"
+								class="tm-btn-primary !px-2.5 !py-1 !text-xs"
+								disabled={!!acting}
+								on:click={() => act('resume')}
+								data-mode-dispatch-resume
+								>{acting === 'resume' ? '处理中…' : '从停下的地方继续'}</button
+							>
+							{#if kind === 'discuss' && spoke}
+								<button
+									type="button"
+									class="tm-btn-ghost !text-xs"
+									disabled={!!acting}
+									on:click={() => act('conclude')}
+									data-mode-dispatch-conclude
+									>{acting === 'conclude' ? '处理中…' : '用已有发言写结论'}</button
+								>
+							{/if}
+							<span class="min-w-0 flex-1">结果照样发回这个对话。</span>
+						{:else}
+							<span>讨论台里后来又问了别的问题，到讨论台接着处理。</span>
+						{/if}
+					</div>
 				{/if}
 
 				{#if done}

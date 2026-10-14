@@ -9,6 +9,7 @@
 		followUpTeamConclusion,
 		getTeam,
 		getTeamEvents,
+		type LiveSnapshot,
 		type Team,
 		type TeamChangeRequest,
 		type TeamStage
@@ -16,14 +17,16 @@
 	import LeadDesk from './LeadDesk.svelte';
 	import StageRail from './StageRail.svelte';
 	import StatusChip from './StatusChip.svelte';
+	import TeamChatActions from './TeamChatActions.svelte';
 	import TeamAvatar from './TeamAvatar.svelte';
 	import TeamResultBar from './TeamResultBar.svelte';
 	import { avatarKind, PHASE_LABEL } from './model';
 
 	/**
 	 * A 协作台 team in its chat: who is on it and where it is, live — the same stage rail as the
-	 * 协作台 page — with the way there (to approve, to step in, to watch), and once the result is
-	 * written, the way to it: in this chat (it comes back as its own reply) and on the 协作台.
+	 * 协作台 page. What the team needs from the user is done right here (approve the plan, answer
+	 * a member, retry, stop: TeamChatActions) — the 协作台 is one click away for the details — and
+	 * once the result is written, the way to it: in this chat (it comes back as its own reply).
 	 */
 	export let teamId: string;
 	/** The chat around the card: whether the team's result is already in it, and where. */
@@ -38,6 +41,7 @@
 	const ENDED = new Set(['stopped', 'plan_failed', 'start_failed', 'cancelled']);
 
 	let team: Team | null = null;
+	let live: LiveSnapshot | null = null;
 	let stage: TeamStage | null = null;
 	let error = '';
 	let gone = false;
@@ -109,14 +113,8 @@
 						: 'running';
 	$: chipLabel =
 		key === 'done' ? '已完成' : (stage?.label ?? PHASE_LABEL[team?.status ?? ''] ?? '协作台');
-	$: action =
-		key === 'approval'
-			? '去批准'
-			: key === 'attention'
-				? '去处理'
-				: ['plan_failed', 'start_failed'].includes(key)
-					? '去看看'
-					: '打开协作台';
+	// the decisions are made in the card; the 协作台 link is for the details
+	$: action = key === 'approval' ? '细看计划' : '在协作台看';
 	$: roster = team?.roster ?? [];
 	$: facts = [
 		team?.member_count ? `负责人 + ${team.member_count} 位成员` : '负责人在组队',
@@ -168,6 +166,7 @@
 		try {
 			const data = await getTeam(localStorage.token, teamId);
 			team = data.team;
+			live = data.live ?? null;
 			stage = data.stage ?? stage;
 			leadChange = data.live?.team?.change ?? null;
 			livePhase = data.live?.team?.phase ?? '';
@@ -279,12 +278,8 @@
 					<span class="truncate">协作台 · {facts.join(' · ')}</span>
 				</div>
 			</div>
-			<a
-				href="/teams/{teamId}"
-				class="{key === 'approval' || key === 'attention'
-					? 'tm-btn-primary !gap-1 !px-2.5 !py-1 !text-xs'
-					: 'tm-btn-ghost !text-xs'} shrink-0"
-				data-team-chat-open>{action}</a
+			<a href="/teams/{teamId}" class="tm-btn-ghost shrink-0 !text-xs" data-team-chat-open
+				>{action} ↗</a
 			>
 		</div>
 		{#if key === 'done'}
@@ -323,6 +318,9 @@
 			<div class="text-xs text-amber-700 dark:text-amber-300">读不到团队的进度：{error}</div>
 		{:else}
 			<div class="tm-card-quiet h-16 animate-pulse" aria-busy="true" />
+		{/if}
+		{#if team && key !== 'done'}
+			<TeamChatActions {teamId} {team} {live} stageKey={key} on:changed={leadChanged} />
 		{/if}
 		{#if showLead}
 			<LeadDesk {teamId} change={leadChange} phase={livePhase} on:changed={leadChanged} />

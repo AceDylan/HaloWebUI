@@ -1,5 +1,8 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
+	import { models } from '$lib/stores';
+	import { getModelBaseName } from '$lib/utils/model-display';
+	import { findModelByIdentity, parseModelSelectionId } from '$lib/utils/model-identity';
 	import '$lib/components/teams/teams.css';
 	import {
 		getAutoRoute,
@@ -14,6 +17,12 @@
 	export let id: string;
 	export let history: any = null;
 	let row: AutoRoute | null = null;
+	$: routingModel = findModelByIdentity($models ?? [], row?.routing_model);
+	$: routingModelName =
+		getModelBaseName(routingModel) ||
+		parseModelSelectionId(row?.routing_model)?.modelId ||
+		row?.routing_model ||
+		'';
 	let error = '';
 	let timer: ReturnType<typeof setTimeout> | undefined;
 	let destroyed = false;
@@ -91,9 +100,10 @@
 			>
 		</div>
 		{#if row?.routing_model}<div
-				class="border-t border-gray-500/10 px-4 py-2 text-xs text-gray-500"
+				class="truncate border-t border-gray-500/10 px-4 py-2 text-xs text-gray-500"
+				title={routingModelName}
 			>
-				主控模型 · {row.routing_model}
+				主控模型 · {routingModelName}
 			</div>{/if}
 		{#if error || row?.error}<p role="alert" class="px-4 pb-3 text-xs text-red-500">
 				{error || row?.error}

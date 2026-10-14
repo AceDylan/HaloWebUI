@@ -665,7 +665,7 @@ def _run_dispatch(env, monkeypatch, chat_id, metadata_extra=None):
         jobs.append(coro)
         return "task-1", None
 
-    monkeypatch.setattr("open_webui.socket.main.get_event_emitter", lambda metadata: emitter)
+    monkeypatch.setattr("open_webui.socket.main.get_event_emitter", lambda metadata, **kwargs: emitter)
     monkeypatch.setattr(tasks, "create_task", create_task)
     monkeypatch.setattr(team_chats, "sort_into_folder", no_folder)
     metadata = {"chat_id": chat_id, "message_id": "r1", **(metadata_extra or {})}
@@ -678,6 +678,9 @@ def _run_dispatch(env, monkeypatch, chat_id, metadata_extra=None):
         run_chat_id = (reply.get("mode_dispatch") or {}).get("chat_id")
         if run_chat_id:
             await _settle(run_chat_id)
+        from open_webui.utils.mode_chats import _metadata_tasks
+        if _metadata_tasks:
+            await asyncio.gather(*list(_metadata_tasks))
         return reply, run_chat_id
 
     reply, run_chat_id = asyncio.run(scenario())
@@ -685,6 +688,10 @@ def _run_dispatch(env, monkeypatch, chat_id, metadata_extra=None):
 
 
 def test_a_chat_message_becomes_a_discussion_at_the_users_last_table(env, monkeypatch):
+    from open_webui.routers import tasks
+    async def title(*args):
+        return {"choices": [{"message": {"content": '{"title":"数据库选择建议"}'}}]}
+    monkeypatch.setattr(tasks, "generate_title", title)
     # the user's last discussion: b and a, c presiding
     _discuss_first(env, question="上次的问题", seats=["b", "a"], moderator="c")
     origin = _origin_chat()
@@ -694,9 +701,9 @@ def test_a_chat_message_becomes_a_discussion_at_the_users_last_table(env, monkey
     assert "已交给讨论台" in reply["content"] and "error" not in reply
     assert emitted[0]["type"] == "chat:completion" and emitted[0]["data"]["mode_dispatch"]["chat_id"] == run_chat_id
     # the chat is named after its question (no model turn ran to name it)
-    assert chats_mod.ChatTable().get_chat_by_id(origin).title == "该用 Postgres 还是 SQLite？"
+    assert chats_mod.ChatTable().get_chat_by_id(origin).title == "数据库选择建议"
     # and the sidebar reads its list again: the new name, the 讨论 mark
-    assert emitted[1] == {"type": "chat:title", "data": "该用 Postgres 还是 SQLite？"}
+    assert {"type": "chat:title", "data": "数据库选择建议"} in emitted
 
     # one conversation in the history, as for a 协作台 team: the chat it was sent from, marked;
     # the discussion's own chat is on the 讨论台 page (and not found by the history's search)
@@ -812,8 +819,11 @@ def test_after_done_sends_a_dispatched_conclusion_back(env, monkeypatch):
     ask = asyncio.run(api.get_discussion(detail["id"], USER))["asks"][0]
     asyncio.run(after_done(ask))
     assert sent == []  # started on its page: nothing to send back
+    assert any(e["type"] == "chat:completion" for e in env.events)
+    env.events.clear()
     asyncio.run(after_done({**ask, "origin": {"chatId": "c-1", "messageId": "m"}}))
     assert sent == [("discuss", detail["id"], ask["id"])]
+    assert not any(e["type"] == "chat:completion" for e in env.events)
 
 
 def test_a_dispatched_discussion_without_a_last_table_is_set_by_its_moderator():

@@ -270,3 +270,40 @@ def test_the_gallery_comes_a_page_at_a_time_with_search_and_favorites():
     # someone else's gallery is not theirs to page through
     assert _client("other").get("/api/v1/image-studio/items/page?kind=gallery").json()["items"] == []
     assert client.get("/api/v1/image-studio/items/page?kind=template").status_code == 422
+
+
+def test_title_updates_keep_favorites_and_never_resurrect_deleted_rows():
+    forms = [ImageStudioItemForm(id="title-gallery", kind="gallery", data={"prompt": "夕阳", "favorite": True}),
+             ImageStudioItemForm(id="title-history", kind="history", data={"prompt": "夕阳"})]
+    ImageStudioItems.upsert_items("title-user", forms)
+    ImageStudioItems.upsert_items("other-title-user", forms)
+    ImageStudioItems.delete_item_by_id_and_user_id("title-history", "title-user")
+    updated = ImageStudioItems.title_items("title-user", [f.id for f in forms], title="海边夕照", prompt="夕阳")
+    assert len(updated) == 1 and updated[0].data == {"prompt": "夕阳", "favorite": True, "title": "海边夕照"}
+    assert not ImageStudioItems.title_items("title-user", ["title-history"])
+    assert all("title" not in r.data for r in ImageStudioItems.title_items("other-title-user", [f.id for f in forms]))
+
+
+def test_image_title_endpoint_reuses_chat_title_service_once_per_generation(monkeypatch):
+    from types import SimpleNamespace
+    from open_webui.routers import tasks
+    client = _client("smart-image-user")
+    client.app.state.config = SimpleNamespace(ENABLE_TITLE_GENERATION=True)
+    calls = []
+
+    async def generate(request, form, user):
+        calls.append(form)
+        return {"choices": [{"message": {"content": '{"title":"海边夕照"}'}}]}
+
+    monkeypatch.setattr(tasks, "generate_title", generate)
+    forms = [ImageStudioItemForm(id="smart-gallery", kind="gallery", data={"prompt": "夕阳", "favorite": True}),
+             ImageStudioItemForm(id="smart-history", kind="history", data={"prompt": "夕阳", "parameters": {"modelId": "image-model"}})]
+    ImageStudioItems.upsert_items("smart-image-user", forms)
+    response = client.post("/api/v1/image-studio/items/title", json={"ids": [f.id for f in forms]})
+    assert response.status_code == 200 and response.json()["title"] == "海边夕照"
+    assert len(ImageStudioItems.page_items("smart-image-user", "gallery", query="海边夕照")[0]) == 1
+    assert len(calls) == 1 and calls[0]["require_external_task_model"] is True
+    assert calls[0]["model"] == "image-model"
+    assert all(r.data["prompt"] == "夕阳" and r.data["title"] == "海边夕照"
+               for r in ImageStudioItems.title_items("smart-image-user", [f.id for f in forms]))
+    assert _client("another-user").post("/api/v1/image-studio/items/title", json={"ids": [f.id for f in forms]}).status_code == 404

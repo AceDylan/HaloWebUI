@@ -9,7 +9,7 @@
 	 */
 	import { onMount } from 'svelte';
 
-	export let mode: 'answer' | 'discuss' | 'teams' | 'images';
+	export let mode: 'auto' | 'answer' | 'discuss' | 'teams' | 'images';
 	export let stats: { k: string; v: string | number }[] = [];
 
 	const TICKS = Array.from({ length: 72 }, (_, i) => i);
@@ -69,7 +69,7 @@
 			<circle r="84" pathLength="100" stroke-dasharray="11 89" stroke-dashoffset="-66" />
 		</g>
 
-		{#if mode === 'answer'}
+		{#if mode === 'answer' || mode === 'auto'}
 			<circle class="halo-emblem__ring halo-emblem__ring--dash" r="56" />
 			<g class="halo-emblem__beam">
 				<line x1="0" y1="-12" x2="0" y2="-48" stroke="url(#{arcId})" />

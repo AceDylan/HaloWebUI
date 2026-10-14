@@ -3,7 +3,7 @@
 import time
 import uuid
 
-from sqlalchemy import JSON, BigInteger, Column, Index, String, UniqueConstraint
+from sqlalchemy import JSON, BigInteger, Column, Index, String, UniqueConstraint, and_, or_
 from sqlalchemy.exc import IntegrityError
 
 from open_webui.internal.db import Base, get_db
@@ -60,10 +60,19 @@ class AutoRoutesTable:
         with get_db() as db:
             return _dict(db.query(AutoRoute).filter_by(user_id=user_id, mode=mode, target_id=target_id).first())
 
-    def page(self, user_id, offset=0, limit=30):
+    def page(self, user_id, offset=0, limit=30, *, before=None, query="", mode=None):
         with get_db() as db:
-            rows = db.query(AutoRoute).filter_by(user_id=user_id).order_by(
-                AutoRoute.created_at.desc(), AutoRoute.id.desc()).offset(offset).limit(limit).all()
+            stmt = db.query(AutoRoute).filter_by(user_id=user_id)
+            if before:
+                stamp, id = before
+                stmt = stmt.filter(or_(AutoRoute.created_at < stamp,
+                    and_(AutoRoute.created_at == stamp, AutoRoute.id < id)))
+            if mode:
+                stmt = stmt.filter(AutoRoute.mode == mode)
+            if query.strip():
+                text = query.strip().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+                stmt = stmt.filter(AutoRoute.data["input"]["question"].as_string().ilike(f"%{text}%", escape="\\"))
+            rows = stmt.order_by(AutoRoute.created_at.desc(), AutoRoute.id.desc()).offset(0 if before else offset).limit(limit).all()
             return [_dict(row) for row in rows]
 
     def count_active(self, user_id):

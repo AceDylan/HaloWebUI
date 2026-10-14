@@ -89,6 +89,7 @@ export type AnswerRun = {
 };
 
 export type AnswerDetail = {
+	report?: { run_id: string; message_id?: string; chat_id: string } | null;
 	id: string;
 	title: string;
 	folder_id: string | null;

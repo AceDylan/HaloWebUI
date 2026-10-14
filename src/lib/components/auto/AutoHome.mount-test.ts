@@ -141,3 +141,32 @@ describe('automatic workbench', () => {
 		expect(nav.goto).not.toHaveBeenCalled();
 	});
 });
+
+it('uses fixed cursor pages and applies server-side search without retaining old rows', async () => {
+	api.listAutoRoutes.mockResolvedValueOnce({
+		items: [row({ id: 'first', title: '第一页标题' })],
+		more: true,
+		next: '1:first'
+	});
+	await mount();
+	expect(target.textContent).toContain('第一页标题');
+	api.listAutoRoutes.mockResolvedValueOnce({
+		items: [row({ id: 'second', title: '第二页标题' })],
+		more: false,
+		next: null
+	});
+	Array.from(target.querySelectorAll('button'))
+		.find((b) => b.textContent === '下一页')!
+		.click();
+	await until(() => !!target.textContent?.includes('第二页标题'));
+	expect(target.textContent).not.toContain('第一页标题');
+	expect(api.listAutoRoutes.mock.calls.at(-1)?.[1].before).toBe('1:first');
+	const input = target.querySelector('[aria-label="搜索处理记录"]') as HTMLInputElement;
+	input.value = '数据库';
+	input.dispatchEvent(new Event('input', { bubbles: true }));
+	await tick();
+	api.listAutoRoutes.mockResolvedValueOnce({ items: [], more: false, next: null });
+	input.closest('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+	await until(() => api.listAutoRoutes.mock.calls.at(-1)?.[1].q === '数据库');
+	expect(api.listAutoRoutes.mock.calls.at(-1)?.[1].before).toBeNull();
+});

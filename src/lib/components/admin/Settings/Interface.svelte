@@ -262,6 +262,7 @@
 						<!-- Title Generation -->
 						<div class="glass-item p-4">
 							<div class="text-sm font-medium mb-3">{$i18n.t('Title Generation')}</div>
+							<p class="mb-3 text-xs leading-5 text-gray-500 dark:text-gray-400">统一用于对话、自动分流、精答、多模型讨论、协作台和生图记录；手动修改的对话标题会保留。</p>
 							<div>
 								<div class="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5">{$i18n.t('Title Generation Prompt')}</div>
 								<Textarea

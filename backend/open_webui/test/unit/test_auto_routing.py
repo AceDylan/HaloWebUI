@@ -63,7 +63,7 @@ def env(monkeypatch, tmp_path):
         with session() as s:
             yield s
     monkeypatch.setattr(records, 'get_db', db)
-    monkeypatch.setattr(api.Chats, 'get_chat_by_id_and_user_id', lambda *args: SimpleNamespace(meta={}))
+    monkeypatch.setattr(api.Chats, 'get_chat_by_id_and_user_id', lambda *args: SimpleNamespace(meta={}, title="New Chat"))
     request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(config=SimpleNamespace(ENABLE_WEB_SEARCH=True))))
     yield request
     engine.dispose()
@@ -269,3 +269,62 @@ def test_chat_auto_dispatch_bypasses_normal_hermes_run(monkeypatch):
         {'session_id': 's', 'chat_id': 'c1', 'message_id': 'm1'}, {'id': 'hermes-agent'}, []))
     assert result['task_id'] == 'auto-task'
     assert seen == [(form['messages'], 'c1')]
+
+
+@pytest.mark.parametrize("raw", [None, [], "team", 12, True, {"mode": []}, {"mode": {}}])
+def test_non_object_decisions_are_rejected(raw):
+    with pytest.raises(ValueError):
+        normalize_selection(raw, question="实现功能")
+
+
+def test_preferred_router_uses_accessible_gpt_chat_with_scoped_identity():
+    from open_webui.utils.auto_routing import preferred_routing_model
+    bases = [{"id": "claude", "name": "Claude"}, {"id": "scoped", "name": "自定义名称"}]
+    models = {"scoped": {"model_id": "gpt-chat"}, "private": {"id": "gpt-chat"}}
+    assert preferred_routing_model(bases, models) == "scoped"
+    assert preferred_routing_model(bases[:1], models) is None
+
+
+def test_cursor_pages_are_bounded_stable_and_search_is_literal(env):
+    for i in range(65):
+        row, _ = records.AutoRoutes.create(USER.id, str(i), str(i),
+            {"input": {"question": f"问题 {i} 100%"}})
+        records.AutoRoutes.update(row["id"], USER.id, status="dispatched", mode="answer")
+    records.AutoRoutes.create(OTHER.id, "other", "other", {"input": {"question": "other"}})
+    first = records.AutoRoutes.page(USER.id, limit=30)
+    cursor = (first[-1]["created_at"], first[-1]["id"])
+    records.AutoRoutes.create(USER.id, "new", "new", {"input": {"question": "new"}})
+    second = records.AutoRoutes.page(USER.id, limit=30, before=cursor)
+    assert len(first) == len(second) == 30
+    assert not {r["id"] for r in first} & {r["id"] for r in second}
+    assert len(records.AutoRoutes.page(USER.id, limit=100, query="100%", mode="answer")) == 65
+    assert records.AutoRoutes.page(USER.id, query="100_") == []
+    assert records.AutoRoutes.page(USER.id, mode="team") == []
+
+
+def test_history_returns_cursor_and_bounded_question(env):
+    for i in range(3):
+        records.AutoRoutes.create(USER.id, str(i), str(i), {"input": {"question": "长" * 8000}})
+    first = asyncio.run(api.history(offset=0, limit=2, before=None, q="", mode=None, user=USER))
+    assert len(first["items"]) == 2 and first["more"] and first["next"]
+    assert all(len(r["question"]) == 300 for r in first["items"])
+    second = asyncio.run(api.history(offset=0, limit=2, before=first["next"], q="", mode=None, user=USER))
+    assert len(second["items"]) == 1 and second["next"] is None
+    with pytest.raises(HTTPException) as error:
+        asyncio.run(api.history(offset=0, limit=2, before="bad", q="", mode=None, user=USER))
+    assert error.value.status_code == 400
+
+
+def test_opening_legacy_auto_card_repairs_metadata_once(env, monkeypatch):
+    from open_webui.utils import mode_chats
+    chat = SimpleNamespace(id="origin", title="New Chat", meta={}, chat={"models": ["hermes-agent"], "history": {"messages": {}}})
+    monkeypatch.setattr(api.Chats, "get_chat_by_id_and_user_id", lambda *args: chat)
+    monkeypatch.setattr(api.Chats, "set_chat_meta_value_by_id", lambda id, key, value: chat.meta.update({key: value}))
+    jobs = []
+    monkeypatch.setattr(mode_chats, "schedule_chat_metadata", lambda *args, **kwargs: jobs.append((args, kwargs)))
+    row, _ = records.AutoRoutes.create(USER.id, "legacy", "hash", {"input": {"question": "比较数据库"}, "origin": {"chatId": "origin", "messageId": "reply"}})
+    records.AutoRoutes.update(row["id"], USER.id, mode="discuss", status="dispatched")
+    asyncio.run(api.detail(row["id"], USER, env))
+    asyncio.run(api.detail(row["id"], USER, env))
+    assert chat.meta["auto_route"] == {"id": row["id"], "mode": "discuss"}
+    assert len(jobs) == 1 and jobs[0][1]["message_id"] == "reply"

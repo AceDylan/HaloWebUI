@@ -97,7 +97,7 @@ def can_auto_generate_chat_title(
     # An explicit manual-title marker wins even if the user chose "New Chat".
     if auto_generated is False:
         return False
-    if auto_generated is not True and str(title or "").strip() != DEFAULT_CHAT_TITLE:
+    if auto_generated is not True and str(title or "").strip() not in {DEFAULT_CHAT_TITLE, "", "新对话", "新聊天"}:
         return False
 
     last_message_id = title_generation.get("last_message_id")

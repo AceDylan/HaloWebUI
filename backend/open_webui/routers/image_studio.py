@@ -1,9 +1,10 @@
 """Per-user storage API for the workspace image studio (templates, gallery, history)."""
 
+import asyncio
 import logging
 from typing import Literal, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from open_webui.constants import ERROR_MESSAGES
 from open_webui.env import SRC_LOG_LEVELS
 from open_webui.models.image_studio import (
@@ -143,6 +144,34 @@ async def upsert_image_studio_items(
             status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=ERROR_MESSAGES.DEFAULT("Error saving image studio items"),
         )
+
+
+class ImageTitleForm(BaseModel):
+    ids: list[str] = Field(min_length=1, max_length=20)
+
+
+@router.post("/items/title")
+async def title_image_items(request: Request, form: ImageTitleForm, user=Depends(get_verified_user)):
+    from open_webui.routers.tasks import generate_title
+    from open_webui.utils.mode_chats import title_from
+    rows = ImageStudioItems.title_items(user.id, form.ids)
+    if not rows:
+        raise HTTPException(404, "生图记录不存在")
+    source = next((r for r in rows if r.kind == "history"), rows[0])
+    prompt = str(source.data.get("prompt") or "")
+    title = " ".join(prompt.split())[:80] or "生图"
+    if getattr(request.app.state.config, "ENABLE_TITLE_GENERATION", True):
+        try:
+            model = (source.data.get("parameters") or {}).get("modelId") or source.data.get("model") or ""
+            result = await asyncio.wait_for(generate_title(request, {
+                "model": model, "messages": [{"role": "user", "content": prompt[:8000]}],
+                "require_external_task_model": True,
+            }, user), timeout=25)
+            title = title_from(result) or title
+        except Exception:
+            log.info("image studio title generation unavailable")
+    updated = ImageStudioItems.title_items(user.id, form.ids, title=title, prompt=prompt)
+    return {"title": title, "ids": [row.id for row in updated]}
 
 
 @router.delete("/items/{item_id}", response_model=bool)

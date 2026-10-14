@@ -31,7 +31,6 @@ log = logging.getLogger(__name__)
 CONTEXT_MESSAGES = 6          # earlier turns the team sees
 CONTEXT_MESSAGE_CHARS = 1200  # of each
 CONTEXT_CHARS = 4000          # of all of them together
-DEFAULT_TITLES = {"", "New Chat", "新对话", "新聊天"}
 
 
 def _text(content: Any) -> str:
@@ -140,8 +139,6 @@ async def run_team_dispatch(request, form_data: dict, user, metadata: dict, mode
         title = None
         if team is not None:
             try:  # a new chat is named after its team
-                if (Chats.get_chat_title_by_id(chat_id) or "").strip() in DEFAULT_TITLES:
-                    Chats.update_chat_title_by_id(chat_id, team.title)
                 title = Chats.get_chat_title_by_id(chat_id)
             except Exception:  # noqa: BLE001
                 title = None
@@ -157,15 +154,12 @@ async def run_team_dispatch(request, form_data: dict, user, metadata: dict, mode
         if team is not None:
             # no model turn ran, so nothing sorted the chat into a folder (对话分组): as an ordinary
             # chat would be at this turn
-            from open_webui.utils.team_chats import sort_into_folder
+            from open_webui.utils.mode_chats import schedule_chat_metadata
 
             asks = [m for m in (form_data.get("messages") or []) if isinstance(m, dict) and m.get("role") == "user"]
-            try:
-                await sort_into_folder(request, user, chat_id, model_id=model_id,
-                                       messages=[{"role": "user", "content": ask or team.title}],
-                                       message_id=message_id, user_message_count=max(1, len(asks)))
-            except Exception:  # noqa: BLE001
-                log.debug("teams: dispatch folder assignment failed", exc_info=True)
+            schedule_chat_metadata(request, user, chat_id, model_id=model_id,
+                messages=[{"role": "user", "content": ask}], message_id=message_id,
+                user_message_count=max(1, len(asks)))
 
     task_id, _ = create_task(handler(), id=chat_id, owner_id=user.id)
     return {"status": True, "task_id": task_id}

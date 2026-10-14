@@ -108,7 +108,7 @@ def _like_escape(value: str) -> str:
 def _matches(data: dict, needle: str) -> bool:
     """The gallery's search: the prompt, the model or a tag contains ``needle`` (lower case)."""
     tags = data.get("tags") if isinstance(data.get("tags"), list) else []
-    fields = [data.get("prompt"), data.get("model"), *tags]
+    fields = [data.get("title"), data.get("prompt"), data.get("model"), *tags]
     return any(needle in str(value or "").lower() for value in fields)
 
 
@@ -252,6 +252,19 @@ class ImageStudioItemsTable:
             for item in rows:
                 db.refresh(item)
             return [ImageStudioItemModel.model_validate(item) for item in rows]
+
+    def title_items(self, user_id: str, ids: list[str], *, title=None, prompt=None):
+        """Read bounded owned items, or update just their title without resurrecting deletes."""
+        with get_db() as db:
+            query = db.query(ImageStudioItem).filter(ImageStudioItem.user_id == user_id,
+                ImageStudioItem.id.in_(ids), ImageStudioItem.kind.in_(("gallery", "history")))
+            rows = query.with_for_update().all() if title is not None else query.all()
+            if title is not None:
+                rows = [row for row in rows if (row.data or {}).get("prompt") == prompt]
+                for row in rows:
+                    row.data = {**row.data, "title": title}
+                db.commit()
+            return [ImageStudioItemModel.model_validate(row) for row in rows]
 
     def trim_items(self, user_id: str, kind: str, keep: int) -> list[str]:
         """Delete everything but the newest ``keep`` items of ``kind``; returns deleted ids."""

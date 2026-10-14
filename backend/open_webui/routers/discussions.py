@@ -188,6 +188,7 @@ def _detail(chat_id: str, user) -> dict:
         "id": chat.id,
         "title": chat.title,
         "folder_id": chat.folder_id,
+        "report": (chat.meta or {}).get("dispatch_report"),
         "updated_at": chat.updated_at,
         "created_at": chat.created_at,
         "setup": _setup_of(chat),
@@ -366,7 +367,8 @@ async def _after_done(request: Request, user, chat_id: str, ask: dict) -> None:
         await emit({"type": "chat:title", "data": title})
         # the app's "reply ready" toast, for when the room is not on screen
         answer = room.conclusion_answer((ask.get("conclusion") or {}).get("content") or "")
-        await emit({"type": "chat:completion", "data": {"done": True, "title": title, "content": answer[:400], "discussion_room": True}})
+        if not ask.get("origin"):
+            await emit({"type": "chat:completion", "data": {"done": True, "title": title, "content": answer[:400], "discussion_room": True}})
     except Exception:
         pass
     from open_webui.utils.mode_illustrate import later

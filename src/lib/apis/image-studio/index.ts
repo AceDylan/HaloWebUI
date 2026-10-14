@@ -117,3 +117,9 @@ export const importLegacyImageStudioItems = async (
 		migration: res?.migration ?? null
 	};
 };
+
+/** Uses the same smart title generator as chats, through the configured text task model. */
+export const titleImageStudioItems = async (token: string, ids: string[]) =>
+    fetch(`${IMAGE_STUDIO_API_BASE_URL}/items/title`, {
+        method: 'POST', headers: headers(token, true), body: JSON.stringify({ ids })
+    }).then(parseJsonResponse<{ title: string; ids: string[] }>);

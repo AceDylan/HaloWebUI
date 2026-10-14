@@ -44,8 +44,10 @@ def selection_messages(question, context, files, *, teams_available):
 
 
 def normalize_selection(raw, *, question, context="", teams_available=False, discussion_available=False):
+    if not isinstance(raw, dict):
+        raise ValueError("invalid route response")
     mode = raw.get("mode")
-    if mode not in MODES:
+    if not isinstance(mode, str) or mode not in MODES:
         raise ValueError("invalid route")
     reason = str(raw.get("reason") or "按问题选择处理方式")[:240]
     execution = raw.get("execution_requested") is True and not analysis_only(question, context)
@@ -54,3 +56,13 @@ def normalize_selection(raw, *, question, context="", teams_available=False, dis
     if mode == "discuss" and not discussion_available:
         mode, reason = "answer", "可用讨论模型不足，改由精答处理"
     return {"mode": mode, "reason": reason, "execution_requested": execution}
+
+
+def preferred_routing_model(bases, models):
+    """Pick the user's available gpt-chat, including connection-scoped model IDs."""
+    for base in bases:
+        model = models.get(base["id"], {})
+        values = (base.get("name"), model.get("id"), base["id"], model.get("model_id"), model.get("original_id"))
+        if any(str(v or "").lower().split("/")[-1] == "gpt-chat" for v in values):
+            return base["id"]
+    return None

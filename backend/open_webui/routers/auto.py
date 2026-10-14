@@ -14,7 +14,7 @@ from open_webui.models.auto_routes import AutoRoutes
 from open_webui.models.chats import Chats
 from open_webui.models.files import Files
 from open_webui.utils.auth import get_verified_user
-from open_webui.utils.auto_routing import PATHS, normalize_selection, selection_messages
+from open_webui.utils.auto_routing import PATHS, normalize_selection, selection_messages, preferred_routing_model
 
 router = APIRouter()
 log = logging.getLogger(__name__)
@@ -36,6 +36,11 @@ def _own(id, user):
     row = AutoRoutes.get(id, user.id)
     if row is None:
         raise HTTPException(404, "这条分流记录不存在")
+    return _settle(row, user)
+
+
+def _settle(row, user):
+    id = row["id"]
     # A crashed process must never silently repeat an uncertain dispatch.
     if row["status"] in ("routing", "dispatching") and row["updated_at"] < time.time() - 600:
         row = AutoRoutes.update(id, user.id, expect=(row["status"],), status="interrupted",
@@ -43,23 +48,33 @@ def _own(id, user):
     return row
 
 
-def public(row, user):
+def public(row, user, targets=None):
     data = row["data"]
     mode, target = row.get("mode"), row.get("target_id")
     result = {"id": row["id"], "question": data["input"]["question"], "status": row["status"],
         "mode": mode, "target_id": target, "reason": data.get("reason", ""),
         "error": data.get("error", ""), "created_at": row["created_at"],
         "href": PATHS[mode] + target if mode in PATHS and target else None,
-        "auto_start": bool(data.get("auto_start")), "target_status": None}
+        "auto_start": bool(data.get("auto_start")), "target_status": None,
+        "title": data["input"]["question"][:80], "routing_model": data.get("routing_model")}
+    if targets is not None:
+        info = targets.get((mode, target)) if target else None
+        if target:
+            result.update(info or {"target_status": "deleted"})
+        return result
     if target and mode == "team":
         from open_webui.models.agent_teams import AgentTeams
         team = AgentTeams.get(target, user.id)
         result["target_status"] = team.status if team else "deleted"
+        if team:
+            result["title"] = team.title or result["title"]
         if team and team.phase:
             result["target_status"] = team.phase
     elif target and mode in ("answer", "discuss"):
         chat = Chats.get_chat_by_id_and_user_id(target, user.id)
         key = "answer_desk" if mode == "answer" else "discussion_room"
+        if chat:
+            result["title"] = chat.title if chat.title != "New Chat" else result["title"]
         result["target_status"] = (chat.meta or {}).get(key, {}).get("status") if chat else "deleted"
     return result
 
@@ -83,9 +98,10 @@ async def select(request, user, form, file_info):
 
     models, ambiguous = await answers._models(request, user)
     _, bases = lib.library(models, user)
-    planner = answers._resolve_planner(None, models, ambiguous, user)
+    preferred = preferred_routing_model(bases, models)
+    planner = answers._resolve_planner(preferred, models, ambiguous, user)
     from open_webui.utils.task import get_task_model_id
-    routing_model = get_task_model_id(planner["model"], "",
+    routing_model = preferred or get_task_model_id(planner["model"], "",
         getattr(request.app.state.config, "TASK_MODEL_EXTERNAL", ""), models, ambiguous)
     if not any(base["id"] == routing_model for base in bases):
         routing_model = planner["model"]
@@ -109,7 +125,7 @@ async def select(request, user, form, file_info):
         except Exception:
             log.info("automatic selection unavailable; using answer")
             raw = {"mode": "answer", "reason": "自动判断暂不可用，已按默认方式交给精答"}
-    if raw.get("mode") == "team" and teams_available:
+    if isinstance(raw, dict) and raw.get("mode") == "team" and teams_available:
         try:
             await hermes_target(request, user)
         except TeamsError:
@@ -122,6 +138,7 @@ async def select(request, user, form, file_info):
     # An explicit manual choice should explain an unavailable capability rather than change mode.
     if form.mode != "auto" and decision["mode"] != form.mode:
         raise HTTPException(400, decision["reason"] + "；可改选精答")
+    decision["routing_model"] = routing_model if form.mode == "auto" else None
     return decision, models, ambiguous, bases, planner
 
 
@@ -184,6 +201,10 @@ async def dispatch(request, user, row, form, decision, models, ambiguous, bases,
             from open_webui.utils.mode_dispatch import mark_chat
             mark_chat(origin["chatId"], mode)
     AutoRoutes.update(row["id"], user.id, status="dispatched")
+    if origin:
+        Chats.set_chat_meta_value_by_id(origin["chatId"], "auto_route", {"id": row["id"], "mode": mode})
+        from open_webui.utils.team_chats import emit_chat_event
+        await emit_chat_event(user.id, origin["chatId"], "chat:title", Chats.get_chat_title_by_id(origin["chatId"]))
 
 
 async def _run(request, user, row, form, file_info):
@@ -231,10 +252,50 @@ async def create(request: Request, form: CreateForm, user=Depends(get_verified_u
     return await start(request, user, form)
 
 
+def _target_summaries(rows, user):
+    # Read only list metadata, never whole chat transcripts, in two bounded queries.
+    from open_webui.internal.db import get_db
+    from open_webui.models.chats import Chat
+    from open_webui.models.agent_teams import AgentTeam
+    ids = [r["target_id"] for r in rows if r.get("target_id")]
+    result = {}
+    if not ids:
+        return result
+    with get_db() as db:
+        for id, title, meta in db.query(Chat.id, Chat.title, Chat.meta).filter(Chat.user_id == user.id, Chat.id.in_(ids)):
+            for mode, key in (("answer", "answer_desk"), ("discuss", "discussion_room")):
+                info = {"target_status": (meta or {}).get(key, {}).get("status")}
+                if title and title != "New Chat":
+                    info["title"] = title
+                result[(mode, id)] = info
+        for id, title, status, phase in db.query(AgentTeam.id, AgentTeam.title, AgentTeam.status, AgentTeam.phase).filter(
+                AgentTeam.user_id == user.id, AgentTeam.id.in_(ids)):
+            result[("team", id)] = {"title": title, "target_status": phase or status}
+    return result
+
+
 @router.get("/")
-async def history(offset: int = Query(0, ge=0), limit: int = Query(30, ge=1, le=50), user=Depends(get_verified_user)):
-    rows = AutoRoutes.page(user.id, offset, limit + 1)
-    return {"items": [public(_own(row["id"], user), user) for row in rows[:limit]], "more": len(rows) > limit}
+async def history(offset: int = Query(0, ge=0), limit: int = Query(30, ge=1, le=50),
+                  before: Optional[str] = None, q: str = Query("", max_length=200),
+                  mode: Optional[Literal["answer", "discuss", "team"]] = None,
+                  user=Depends(get_verified_user)):
+    cursor = None
+    if before:
+        try:
+            stamp, id = before.split(":", 1)
+            cursor = (int(stamp), id)
+            if not id:
+                raise ValueError()
+        except ValueError:
+            raise HTTPException(400, "历史游标无效，请刷新后重试")
+    rows = AutoRoutes.page(user.id, offset, limit + 1, before=cursor, query=q, mode=mode)
+    page = [_settle(row, user) for row in rows[:limit]]
+    targets = _target_summaries(page, user)
+    items = [public(row, user, targets) for row in page]
+    for item in items:
+        item["question"] = item["question"][:300]
+    return {"items": items, "more": len(rows) > limit,
+            "next": f"{page[-1]['created_at']}:{page[-1]['id']}" if len(rows) > limit and page else None}
 
 
 @router.get("/target/{mode}/{target_id}")
@@ -244,8 +305,22 @@ async def target_route(mode: Literal["answer", "discuss", "team"], target_id: st
 
 
 @router.get("/{id}")
-async def detail(id: str, user=Depends(get_verified_user)):
-    return public(_own(id, user), user)
+async def detail(id: str, user=Depends(get_verified_user), request: Request = None):
+    row = _own(id, user)
+    # Repair older chat dispatches on opening their card; never scan all chat histories.
+    origin = row["data"].get("origin") or {}
+    if request and origin.get("chatId"):
+        chat = Chats.get_chat_by_id_and_user_id(origin["chatId"], user.id)
+        if chat and not (chat.meta or {}).get("auto_route"):
+            Chats.set_chat_meta_value_by_id(chat.id, "auto_route", {"id": row["id"], "mode": row.get("mode")})
+            from open_webui.utils.mode_chats import schedule_chat_metadata
+            history = (chat.chat or {}).get("history") or {}
+            messages = list((history.get("messages") or {}).values())
+            count = sum(1 for m in messages if m.get("role") == "user" and not m.get("hermes_notice"))
+            schedule_chat_metadata(request, user, chat.id, model_id=((chat.chat or {}).get("models") or ["hermes-agent"])[0],
+                messages=[{"role": "user", "content": row["data"]["input"]["question"]}],
+                message_id=origin.get("messageId"), user_message_count=max(1, count))
+    return public(row, user)
 
 
 @router.post("/{id}/cancel")

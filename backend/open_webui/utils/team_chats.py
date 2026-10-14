@@ -151,7 +151,7 @@ def new_team_chat(team: AgentTeamModel, model_info: dict, *,
     }
     chat = Chats.insert_new_chat(
         team.user_id,
-        ChatForm(chat=payload, title_auto_generated=False),
+        ChatForm(chat=payload, title_auto_generated=True),
         meta={CHAT_META_KEY: {"team_id": team.id}},
         created_at=at,
         updated_at=int(team.finished_at or team.updated_at or 0) if backfill else None,
@@ -275,7 +275,10 @@ async def attach(request, user, team: AgentTeamModel) -> AgentTeamModel:
             return AgentTeams.get(team.id, user.id) or team
         chat_id, message_id = made
         await emit_chat_event(user.id, chat_id, "chat:title", team.title)
-        _sort_later(request, user, [(chat_id, info["model"], ask_of(team.goal), message_id)])
+        from open_webui.utils.mode_chats import schedule_chat_metadata
+        schedule_chat_metadata(request, user, chat_id, model_id=info["model"],
+            messages=[{"role": "user", "content": ask_of(team.goal)}],
+            message_id=message_id, team_id=team.id)
         return AgentTeams.get(team.id, user.id) or team
     except Exception:  # noqa: BLE001 — the team runs without its chat rather than not at all
         log.exception("teams: could not give team %s its chat", team.id)

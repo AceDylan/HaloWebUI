@@ -268,7 +268,7 @@ export type Team = {
 	 *  in the user's 「协作结论」 knowledge base. */
 	outputs?: {
 		knowledge: { id: string; generated_at: number } | null;
-		chat_posted: { generated_at: number } | null;
+		chat_posted: { generated_at: number; message_id?: string } | null;
 	};
 	/** list only: the stage of a team at work (and of one that just finished) */
 	stage?: StageBrief;

@@ -90,6 +90,11 @@ def chat_kinds(user_id: str, chat_ids: Iterable[str]) -> dict[str, str]:
                 .all()
             ):
                 kinds[chat_id] = "discuss"
+            for chat_id, meta in db.query(Chat.id, Chat.meta).filter(Chat.user_id == user_id, Chat.id.in_(ids)):
+                route = (meta or {}).get("auto_route")
+                if isinstance(route, dict):
+                    mode = route.get("mode")
+                    kinds[chat_id] = f"auto_{mode}" if mode in ("answer", "discuss", "team") else "auto"
     except Exception:
         log.exception("chat kinds")
         return {}

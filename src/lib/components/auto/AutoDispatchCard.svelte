@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
+	import '$lib/components/teams/teams.css';
 	import {
 		getAutoRoute,
 		cancelAutoRoute,
@@ -22,6 +23,7 @@
 			error = '';
 		} catch (e: any) {
 			error = e.message || '读取失败';
+			if (e.status === 404) return;
 		}
 		if (!destroyed && (!row || routePending(row)))
 			timer = setTimeout(load, document.hidden ? 15000 : 2500);
@@ -42,26 +44,73 @@
 	});
 </script>
 
-<div class="my-3 rounded-xl border border-cyan-500/20 p-4 text-sm" data-auto-dispatch>
-	<div class="flex flex-wrap justify-between gap-2">
-		<strong>自动分流{row?.mode ? ` → ${MODE_LABEL[row.mode]}` : ''}</strong>
-		<a href={`/auto?request=${encodeURIComponent(id)}`} class="text-cyan-600 dark:text-cyan-300"
-			>查看记录</a
-		>
+<section
+	class="not-prose my-3 flex max-w-2xl flex-col gap-3"
+	data-teams-ui
+	data-auto-dispatch
+	aria-live="polite"
+>
+	<div class="tm-card overflow-hidden">
+		<div class="flex items-center gap-3 px-4 py-3">
+			<span
+				class="grid size-10 shrink-0 place-items-center rounded-xl bg-cyan-500/10 text-cyan-700 dark:text-cyan-300"
+				aria-hidden="true"
+			>
+				<svg
+					width="22"
+					height="22"
+					viewBox="0 0 24 24"
+					fill="none"
+					stroke="currentColor"
+					stroke-width="1.7"
+					stroke-linecap="round"
+					stroke-linejoin="round"
+					><path d="M5 12h5m0 0 5-6h4m-9 6 5 6h4" /><circle cx="4" cy="12" r="2" /><path
+						d="m17 4 3 2-3 2m0 8 3 2-3 2"
+					/></svg
+				>
+			</span>
+			<div class="min-w-0 flex-1">
+				<div class="flex flex-wrap items-center gap-2">
+					<strong class="text-sm font-semibold"
+						>自动{row?.mode ? ` · ${MODE_LABEL[row.mode]}` : '分流'}</strong
+					><span class="rounded-full bg-gray-500/10 px-2 py-0.5 text-xs text-gray-500"
+						>{row
+							? row.status === 'dispatched'
+								? '已选择处理方式'
+								: routeStatus(row)
+							: '正在连接'}</span
+					>
+				</div>
+				<p class="mt-1 text-xs leading-5 text-gray-500">
+					{row?.reason || '正在理解目标、附件和约束，选择合适的处理方式…'}
+				</p>
+			</div>
+			<a href={`/auto?request=${encodeURIComponent(id)}`} class="tm-btn-ghost shrink-0"
+				>分流详情 ↗</a
+			>
+		</div>
+		{#if row?.routing_model}<div
+				class="border-t border-gray-500/10 px-4 py-2 text-xs text-gray-500"
+			>
+				主控模型 · {row.routing_model}
+			</div>{/if}
+		{#if error || row?.error}<p role="alert" class="px-4 pb-3 text-xs text-red-500">
+				{error || row?.error}
+			</p>{/if}
+		{#if row?.status === 'routing'}<div class="px-4 pb-3">
+				<button class="tm-btn-ghost" on:click={cancel}>取消分流</button>
+			</div>{/if}
+		{#if row?.target_status === 'deleted'}<p class="px-4 pb-3 text-xs text-gray-500">
+				目标任务已删除，分流依据仍保留在记录中。
+			</p>{/if}
 	</div>
-	<p class="mt-2 text-gray-500">{row ? row.reason || routeStatus(row) : '正在读取分流进度…'}</p>
-	{#if error || row?.error}<p class="mt-2 text-red-500">{error || row?.error}</p>{/if}
-	{#if row?.status === 'routing'}<button class="mt-2 underline" on:click={cancel}>取消分流</button
-		>{/if}
-	{#if row?.status === 'cancelled' || row?.status === 'interrupted'}<p class="mt-2">
-			{routeStatus(row)}
-		</p>{/if}
-</div>
-{#if row?.target_id && row.target_status !== 'deleted'}
-	{#if row.mode === 'team'}<TeamChatCard teamId={row.target_id} {history} />
-	{:else if row.mode === 'answer' || row.mode === 'discuss'}<ModeDispatchCard
-			kind={row.mode}
-			chatId={row.target_id}
-			{history}
-		/>{/if}
-{/if}
+	{#if row?.target_id && row.target_status !== 'deleted'}
+		{#if row.mode === 'team'}<TeamChatCard teamId={row.target_id} {history} />
+		{:else if row.mode === 'answer' || row.mode === 'discuss'}<ModeDispatchCard
+				kind={row.mode}
+				chatId={row.target_id}
+				{history}
+			/>{/if}
+	{/if}
+</section>

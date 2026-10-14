@@ -1,6 +1,7 @@
 """What the chat's modes that write their own chats (讨论台, 精答) share: the automatic title and
 folder an ordinary chat gets, and the numbered web sources their models cite as [n]."""
 
+import asyncio
 import json
 import logging
 import re
@@ -79,6 +80,7 @@ async def auto_title_and_folder(
         ):
             title = generated
 
+    title = Chats.get_chat_title_by_id(chat_id) or title
     if not folder:
         return title, chat.folder_id
     folder_id = await auto_folder(
@@ -368,3 +370,48 @@ async def native_search_models(request, user, model_ids) -> set:
         if support.get("supported") is True or support.get("can_attempt") is True:
             out.add(model_id)
     return out
+
+
+_metadata_tasks: set = set()
+
+
+def schedule_chat_metadata(request, user, chat_id, *, messages, model_id, message_id,
+                           user_message_count=1, team_id=None):
+    """Name and group non-model turns using the ordinary smart-generation settings.
+
+    Runs independently of dispatch/completion, with manual-title and branch guards.
+    """
+    async def run():
+        from open_webui.models.chats import Chats
+        from open_webui.utils.team_chats import emit_chat_event
+        chat = Chats.get_chat_by_id_and_user_id(chat_id, user.id)
+        if chat is None:
+            return
+        try:
+            if chat.title in ("New Chat", "新对话", "新聊天", "") and not getattr(request.app.state.config, "ENABLE_TITLE_GENERATION", True):
+                from open_webui.utils.task import build_fallback_chat_title
+                Chats.update_chat_title_by_id(chat_id, build_fallback_chat_title(messages),
+                    auto_generated=True, last_user_message_count=user_message_count,
+                    source_message_id=message_id)
+                chat = Chats.get_chat_by_id_and_user_id(chat_id, user.id)
+                if chat is None:
+                    return
+            title, _ = await asyncio.wait_for(auto_title_and_folder(
+                request, user, chat, messages=messages, model_id=model_id,
+                message_id=message_id, user_message_count=user_message_count,
+            ), timeout=60)
+        except Exception:
+            from open_webui.utils.task import build_fallback_chat_title
+            log.info("workbench metadata unavailable for %s", chat_id)
+            Chats.update_chat_title_by_id(chat_id, build_fallback_chat_title(messages),
+                auto_generated=True, last_user_message_count=user_message_count, source_message_id=message_id)
+            title = Chats.get_chat_title_by_id(chat_id)
+        if team_id:
+            from open_webui.models.agent_teams import AgentTeams
+            team = AgentTeams.get(team_id, user.id)
+            if team and team.title == chat.title and title and title != chat.title:
+                AgentTeams.update(team_id, user.id, title=title)
+        await emit_chat_event(user.id, chat_id, "chat:title", title)
+    task = asyncio.create_task(run())
+    _metadata_tasks.add(task)
+    task.add_done_callback(_metadata_tasks.discard)

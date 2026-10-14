@@ -70,6 +70,7 @@
 		clearImageStudioItems,
 		deleteImageStudioItem,
 		getImageStudioItemPage,
+		titleImageStudioItems,
 		getImageStudioItems,
 		importLegacyImageStudioItems,
 		upsertImageStudioItems,
@@ -730,6 +731,7 @@
 		const query = gallerySearchQuery.toLowerCase();
 		return (
 			img.prompt.toLowerCase().includes(query) ||
+			(img.title ?? '').toLowerCase().includes(query) ||
 			img.model.toLowerCase().includes(query) ||
 			img.tags?.some((tag) => tag.toLowerCase().includes(query))
 		);
@@ -1318,10 +1320,18 @@
 		);
 		galleryImages = [...galleryEntries, ...galleryImages];
 		generationHistory = [historyEntry, ...generationHistory].slice(0, IMAGE_STUDIO_HISTORY_LIMIT);
-		void persistStudioItems([
-			...toImageStudioItemForms('gallery', galleryEntries),
-			...toImageStudioItemForms('history', [historyEntry])
-		]);
+        void persistStudioItems([
+            ...toImageStudioItemForms('gallery', galleryEntries),
+            ...toImageStudioItemForms('history', [historyEntry])
+        ]).then(async (saved) => {
+            if (!saved || status !== 'success') return;
+            try {
+                const result = await titleImageStudioItems(localStorage.token, [historyEntry.id, ...galleryEntries.map((img) => img.id)]);
+                const ids = new Set(result.ids);
+                galleryImages = galleryImages.map((img) => ids.has(img.id) ? { ...img, title: result.title } : img);
+                generationHistory = generationHistory.map((item) => ids.has(item.id) ? { ...item, title: result.title } : item);
+            } catch { /* The image and prompt are already saved; naming is best effort. */ }
+        });
 	};
 
 	const toggleFavorite = async (id: string) => {
@@ -2871,7 +2881,7 @@
 								<div class="relative overflow-hidden rounded-lg bg-gray-100 dark:bg-gray-950">
 									<img
 										src={image.url}
-										alt={image.prompt}
+										alt={image.title || image.prompt}
 										class="w-full h-48 object-cover transition duration-500 group-hover:scale-[1.02] cursor-pointer"
 										loading="lazy"
 										on:click={() => {
@@ -2917,7 +2927,7 @@
 								</div>
 								<div class="p-2">
 									<div class="text-xs text-gray-600 dark:text-gray-400 line-clamp-2">
-										{image.prompt}
+										{image.title || image.prompt}
 									</div>
 									<div class="mt-1 flex items-center justify-between gap-2 text-xs text-gray-500 dark:text-gray-500">
 										<span class="flex min-w-0 items-center gap-1.5">
@@ -3043,7 +3053,7 @@
 
 									<div class="min-w-0 flex-1">
 										<div class="text-sm text-gray-900 dark:text-gray-100 line-clamp-2">
-											{item.prompt}
+											{item.title || item.prompt}
 										</div>
 										<div
 											class="flex flex-wrap items-center gap-x-2 gap-y-1 mt-1 text-xs text-gray-500 dark:text-gray-400"

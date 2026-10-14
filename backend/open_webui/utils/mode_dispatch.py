@@ -142,7 +142,6 @@ async def run_mode_dispatch(request, form_data: dict, user, metadata: dict, mode
 
     from open_webui.socket.main import get_event_emitter
     from open_webui.tasks import create_task
-    from open_webui.utils.agent_teams import default_title
     from open_webui.utils.hermes_agent import is_temporary_chat_id
 
     chat_id, message_id = metadata["chat_id"], metadata["message_id"]
@@ -198,8 +197,6 @@ async def run_mode_dispatch(request, form_data: dict, user, metadata: dict, mode
         data = dict(fields)
         if run_chat_id:
             try:  # a new chat is named after its question (no model turn ran to name it)
-                if (Chats.get_chat_title_by_id(chat_id) or "").strip() in DEFAULT_TITLES:
-                    Chats.update_chat_title_by_id(chat_id, default_title(ask))
                 data["title"] = Chats.get_chat_title_by_id(chat_id)
             except Exception:  # noqa: BLE001
                 pass
@@ -212,15 +209,12 @@ async def run_mode_dispatch(request, form_data: dict, user, metadata: dict, mode
             log.debug("mode dispatch: reply emit failed", exc_info=True)
         if run_chat_id:
             # and into a folder (对话分组), as an ordinary chat is at this turn
-            from open_webui.utils.team_chats import sort_into_folder
+            from open_webui.utils.mode_chats import schedule_chat_metadata
 
             asks = [m for m in (form_data.get("messages") or []) if isinstance(m, dict) and m.get("role") == "user"]
-            try:
-                await sort_into_folder(request, user, chat_id, model_id=model_id,
-                                       messages=[{"role": "user", "content": ask}],
-                                       message_id=message_id, user_message_count=max(1, len(asks)))
-            except Exception:  # noqa: BLE001
-                log.debug("mode dispatch: folder assignment failed", exc_info=True)
+            schedule_chat_metadata(request, user, chat_id, model_id=model_id,
+                messages=[{"role": "user", "content": ask}], message_id=message_id,
+                user_message_count=max(1, len(asks)))
 
     task_id, _ = create_task(handler(), id=chat_id, owner_id=user.id)
     return {"status": True, "task_id": task_id}
@@ -297,8 +291,10 @@ async def report_back(request, kind: str, chat_id: str, run: dict, *, quiet: boo
             raise ReportError(409, "这个对话正在回答别的问题，等它答完再试") from exc
         raise ReportError(exc.status_code if exc.status_code in (404, 422) else 502,
                           f"没能放进对话：{exc.detail}") from exc
+    Chats.set_chat_meta_value_by_id(chat_id, "dispatch_report", {
+        "run_id": run.get("id"), "message_id": result.get("assistant_message_id"), "chat_id": origin_id})
     _sessions.pop(chat_id, None)
-    return {"chat_id": origin_id, "posted": not result.get("duplicate"), "duplicate": bool(result.get("duplicate"))}
+    return {**({"message_id": result["assistant_message_id"]} if result.get("assistant_message_id") else {}), "chat_id": origin_id, "posted": not result.get("duplicate"), "duplicate": bool(result.get("duplicate"))}
 
 
 def report_back_later(request, kind: str, chat_id: str, run: dict) -> None:

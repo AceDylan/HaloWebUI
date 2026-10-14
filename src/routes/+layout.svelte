@@ -228,6 +228,8 @@
 	};
 
 	const shouldShowChatCompletionNotification = (event, data) => {
+        // Dispatch acknowledgements are live cards, not completed answers.
+        if (data?.auto_route || data?.mode_dispatch || data?.team_dispatch) return false;
 		const now = Date.now();
 		for (const [key, timestamp] of notifiedChatCompletions) {
 			if (now - timestamp > CHAT_COMPLETION_NOTIFICATION_TTL) {

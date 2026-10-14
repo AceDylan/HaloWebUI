@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { installDominoDom } from '$lib/test-support/domino-dom';
 
 installDominoDom('http://localhost/');
+vi.mock('$app/navigation', () => ({ goto: vi.fn() }));
 
 const answers = vi.hoisted(() => ({ getAnswer: vi.fn(), reportBackAnswer: vi.fn() }));
 vi.mock('$lib/apis/answers', () => answers);
@@ -105,7 +106,7 @@ describe('ModeDispatchCard', () => {
 
 		await until(() => state() === 'done', 'the answer written');
 		// just finished: on its way into the chat
-		expect(text('[data-mode-dispatch-done]')).toContain('正在发回这个对话');
+		expect(text('[data-mode-dispatch-done]')).toContain('结果已生成，正在同步到对话');
 		app.$set({
 			history: {
 				messages: {
@@ -166,7 +167,7 @@ describe('ModeDispatchCard', () => {
 		await until(() => steps().includes('picture:done'), 'the picture drawn');
 		expect(steps()).toEqual(['pick:done', 'answer:done', 'picture:done', 'report:active']);
 		expect(text('[data-mode-dispatch-stage-label]')).toBe('发回中');
-		expect(text('[data-mode-dispatch-done]')).toContain('正在发回这个对话');
+		expect(text('[data-mode-dispatch-done]')).toContain('结果已生成，正在同步到对话');
 	}, 30000);
 
 	it('精答 that never arrived: one click puts it into the chat', async () => {
@@ -273,4 +274,14 @@ describe('ModeDispatchCard', () => {
 		await until(() => state() === 'gone', 'gone');
 		expect(text('[data-mode-dispatch-gone]')).toContain('这个讨论已经删除了');
 	});
+});
+
+
+it('shows a persisted delivery receipt even before local history has synchronized', async () => {
+    answers.getAnswer.mockResolvedValue({ run: run({ status: 'done', endedAt: Date.now() - 60000 }),
+        report: { run_id: 'm-1', message_id: 'delivered-reply', chat_id: 'chat-1' } });
+    await mount({ kind: 'answer', chatId: 'run-1', history: { messages: {} } });
+    await until(() => !!target.querySelector('[data-mode-dispatch-jump]'), 'delivery receipt');
+    expect(target.querySelector('[data-mode-dispatch-bring]')).toBeFalsy();
+    expect(target.textContent).toContain('已发回');
 });

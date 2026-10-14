@@ -2,6 +2,10 @@
 // where it opens: a 讨论台 discussion opens in 讨论台, everything else as a chat.
 
 export const CHAT_KIND_LABEL: Record<string, string> = {
+	auto: '自动',
+	auto_answer: '自动 · 精答',
+	auto_discuss: '自动 · 讨论',
+	auto_team: '自动 · 协作',
 	discuss: '讨论',
 	answer: '精答',
 	team: '协作',
@@ -11,6 +15,10 @@ export const CHAT_KIND_LABEL: Record<string, string> = {
 };
 
 export const CHAT_KIND_TITLE: Record<string, string> = {
+	auto: '自动选择处理方式',
+	auto_answer: '自动分流至精答',
+	auto_discuss: '自动分流至多模型讨论',
+	auto_team: '自动分流至协作台',
 	answer: '精答：由挑选出的助手回答，可以接着追问',
 	discuss: '讨论台里的多模型讨论',
 	team: '协作台任务的对话：目标、团队进度和发回的结果',

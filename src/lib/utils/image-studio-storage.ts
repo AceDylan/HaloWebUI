@@ -22,6 +22,7 @@ export const IMAGE_STUDIO_HISTORY_LIMIT = 200;
 export const IMAGE_STUDIO_MIGRATION_MARKER_KEY = 'workspace:image-studio:server-migration:v1';
 
 export type GalleryImage = {
+	title?: string;
 	id: string;
 	url: string;
 	prompt: string;
@@ -38,6 +39,7 @@ export type GalleryImage = {
 };
 
 export type GenerationHistory = {
+	title?: string;
 	id: string;
 	prompt: string;
 	negativePrompt?: string;
@@ -130,6 +132,7 @@ export const normalizeGalleryImages = (raw: unknown, now: number = Date.now()): 
 			size: asText(item.size),
 			createdAt: asTimestamp(item.createdAt, now)
 		};
+		if (asText(item.title)) image.title = asText(item.title);
 		const negativePrompt = asText(item.negativePrompt);
 		if (negativePrompt) image.negativePrompt = negativePrompt;
 		if (item.favorite === true) image.favorite = true;
@@ -168,6 +171,7 @@ export const normalizeGenerationHistory = (
 			status: item.status === 'success' ? 'success' : 'failed',
 			createdAt
 		};
+		if (asText(item.title)) record.title = asText(item.title);
 		const negativePrompt = asText(item.negativePrompt);
 		if (negativePrompt) record.negativePrompt = negativePrompt;
 		const images = asStringList(item.images);

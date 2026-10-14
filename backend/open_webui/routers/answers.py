@@ -136,6 +136,7 @@ def _detail(chat_id: str, user) -> dict:
         "id": chat.id,
         "title": chat.title,
         "folder_id": chat.folder_id,
+        "report": (chat.meta or {}).get("dispatch_report"),
         "updated_at": chat.updated_at,
         "created_at": chat.created_at,
         "run": _run_of(chat),
@@ -200,7 +201,8 @@ async def _after_done(request: Request, user, chat_id: str, run: dict) -> None:
     try:
         await emit({"type": "answer", "data": {"kind": "meta", "chatId": chat_id, "title": title, "folderId": folder_id}})
         await emit({"type": "chat:title", "data": title})
-        await emit({"type": "chat:completion", "data": {"done": True, "title": title, "content": answer[:400], "answer_desk": True}})
+        if not run.get("origin"):
+            await emit({"type": "chat:completion", "data": {"done": True, "title": title, "content": answer[:400], "answer_desk": True}})
     except Exception:
         pass
     from open_webui.utils.mode_illustrate import later

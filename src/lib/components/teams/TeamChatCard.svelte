@@ -4,7 +4,7 @@
 	import { toast } from 'svelte-sonner';
 
 	import './teams.css';
-	import { chatId as currentChatId } from '$lib/stores';
+	import { chatId as currentChatId, pendingMessageReveal } from '$lib/stores';
 	import {
 		followUpTeamConclusion,
 		getTeam,
@@ -140,15 +140,15 @@
 		}
 		return found?.id ?? null;
 	};
-	$: resultId = findResult(history, teamId);
+	$: resultId = team?.outputs?.chat_posted?.message_id || findResult(history, teamId);
 
 	const jump = () => {
-		document
-			.getElementById(`message-${resultId}`)
-			?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-	};
-
-	// 「把结果放进这个对话」: a team that finished before its chat existed, or whose result did not
+        if (resultId && $currentChatId) {
+            if (history?.messages?.[resultId]) pendingMessageReveal.set({ chatId: $currentChatId, messageId: resultId });
+            else goto(`/teams/${teamId}/conclusion`);
+        }
+    };
+	// 「重新同步结果」: a team that finished before its chat existed, or whose result did not
 	// make it in (the chat was busy).
 	const bring = async () => {
 		if (bringing) return;
@@ -200,7 +200,8 @@
 	const schedule = () => {
 		if (timer) clearTimeout(timer);
 		// a settled team still answers 对负责人说: read on until the lead has
-		if (destroyed || (settled && leadChange?.status !== 'thinking')) return;
+		if (destroyed || (settled && leadChange?.status !== 'thinking' &&
+			(key !== 'done' || resultId || Date.now() - settledSeenAt > 10 * 60 * 1000))) return;
 		const hidden = typeof document !== 'undefined' && document.visibilityState === 'hidden';
 		const visible = unchanged >= 36 ? POLL_SLOW_MS[1] : unchanged >= 12 ? POLL_SLOW_MS[0] : POLL_MS;
 		timer = setTimeout(load, hidden ? POLL_HIDDEN_MS : visible);
@@ -301,13 +302,13 @@
 							data-team-chat-jump>看结果 ↓</button
 						>
 					{:else}
-						<span class="min-w-0 flex-1">还没放进这个对话。</span>
+						<span class="min-w-0 flex-1">结果已生成，正在等待同步到对话。</span>
 						<button
 							type="button"
 							class="shrink-0 font-medium text-sky-700 hover:underline disabled:opacity-60 dark:text-sky-300"
 							disabled={bringing}
 							on:click={bring}
-							data-team-chat-bring>{bringing ? '正在放进来…' : '把结果放进这个对话'}</button
+							data-team-chat-bring>{bringing ? '正在同步…' : '重新同步结果'}</button
 						>
 					{/if}
 				</div>

@@ -3,6 +3,8 @@ import { WEBUI_API_BASE_URL } from '$lib/constants';
 export type AutoMode = 'answer' | 'discuss' | 'team';
 export type AutoRoute = {
 	id: string;
+	title?: string;
+	routing_model?: string | null;
 	question: string;
 	status: 'routing' | 'dispatching' | 'dispatched' | 'error' | 'cancelled' | 'interrupted';
 	mode: AutoMode | null;
@@ -51,8 +53,16 @@ export const createAutoRoute = (token: string, input: AutoInput) =>
 	call<AutoRoute>(token, '', input);
 export const getAutoRoute = (token: string, id: string) =>
 	call<AutoRoute>(token, encodeURIComponent(id));
-export const listAutoRoutes = (token: string, offset = 0) =>
-	call<{ items: AutoRoute[]; more: boolean }>(token, `?offset=${offset}`);
+export const listAutoRoutes = (
+	token: string,
+	opts: { before?: string | null; q?: string; mode?: string } = {}
+) => {
+	const params = new URLSearchParams({ limit: '30' });
+	if (opts.before) params.set('before', opts.before);
+	if (opts.q?.trim()) params.set('q', opts.q.trim());
+	if (opts.mode) params.set('mode', opts.mode);
+	return call<{ items: AutoRoute[]; more: boolean; next: string | null }>(token, `?${params}`);
+};
 export const cancelAutoRoute = (token: string, id: string) =>
 	call<AutoRoute>(token, `${encodeURIComponent(id)}/cancel`, {});
 export const targetAutoRoute = (token: string, mode: AutoMode, id: string) =>

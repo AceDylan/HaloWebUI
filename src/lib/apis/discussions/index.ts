@@ -71,7 +71,7 @@ export type DiscussContext = { text: string; title: string; chatId: string | nul
 export type DispatchOrigin = { chatId: string; messageId: string };
 
 /** The result put into the chat it was sent from (`posted` false: it was there already). */
-export type ReportBack = { chat_id: string; posted: boolean; duplicate: boolean };
+export type ReportBack = { message_id?: string; chat_id: string; posted: boolean; duplicate: boolean };
 
 export type ResearchSource = { n: number; title: string; url: string; excerpt: string };
 
@@ -186,6 +186,7 @@ export type DiscussAsk = {
 };
 
 export type Discussion = {
+	report?: { run_id: string; message_id?: string; chat_id: string } | null;
 	id: string;
 	title: string;
 	folder_id: string | null;

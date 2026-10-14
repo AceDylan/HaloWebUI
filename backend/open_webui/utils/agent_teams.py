@@ -771,7 +771,7 @@ def public_team(team: AgentTeamModel, *, with_plan: bool = True) -> dict:
     posted = meta.get("chat_posted") if isinstance(meta.get("chat_posted"), dict) else None
     data["outputs"] = {
         "knowledge": {"id": knowledge.get("id"), "generated_at": knowledge.get("generated_at")} if knowledge else None,
-        "chat_posted": {"generated_at": posted.get("generated_at")} if posted else None,
+        "chat_posted": {"generated_at": posted.get("generated_at"), **({"message_id": posted["message_id"]} if posted.get("message_id") else {})} if posted else None,
     }
     # Who is on the team, for the list's avatar stack (names and roles only).
     data["roster"] = [

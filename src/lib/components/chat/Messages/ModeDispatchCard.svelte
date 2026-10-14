@@ -1,6 +1,8 @@
 <script lang="ts">
+	import { goto } from '$app/navigation';
 	import { onDestroy, onMount } from 'svelte';
 	import { toast } from 'svelte-sonner';
+	import { chatId as currentChatId, pendingMessageReveal } from '$lib/stores';
 
 	import '$lib/components/teams/teams.css';
 	import '$lib/components/discuss/discuss.css';
@@ -45,6 +47,7 @@
 
 	let run: AnswerRun | null = null;
 	let ask: DiscussAsk | null = null;
+	let report: { run_id: string; message_id?: string } | null = null;
 	let error = '';
 	let gone = false;
 	let bringing = false;
@@ -197,7 +200,8 @@
 		}
 		return null;
 	};
-	$: resultId = findResult(history, `${kind}:${chatId}:`);
+	$: resultId = findResult(history, `${kind}:${chatId}:${(kind === 'answer' ? run?.id : ask?.id) ?? ''}`)
+		|| (report?.run_id === (kind === 'answer' ? run?.id : ask?.id) ? report?.message_id : null);
 	// the report back follows the picture (or follows the text when none is drawn)
 	$: reportFrom = picture?.endedAt || endedAt;
 	$: arriving = done && !drawing && !resultId && reportFrom > 0 && clock - reportFrom < ARRIVING_MS;
@@ -322,12 +326,12 @@
 	$: took = !live && startedAt && endedAt && endedAt > startedAt ? (endedAt - startedAt) / 1000 : null;
 
 	const jump = () => {
-		document
-			.getElementById(`message-${resultId}`)
-			?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-	};
-
-	// 「把结果放进这个对话」: it did not make it in by itself (the chat stayed busy, a restart).
+        if (resultId && $currentChatId) {
+            if (history?.messages?.[resultId]) pendingMessageReveal.set({ chatId: $currentChatId, messageId: resultId });
+            else goto(href);
+        }
+    };
+	// 「重新同步结果」: it did not make it in by itself (the chat stayed busy, a restart).
 	const bring = async () => {
 		if (bringing) return;
 		bringing = true;
@@ -336,7 +340,8 @@
 				localStorage.token,
 				chatId
 			);
-			if (!out.posted) toast.info('结果已经在这个对话里了');
+			if (out.message_id) report = { run_id: (kind === 'answer' ? run?.id : ask?.id) ?? '', message_id: out.message_id };
+			await load();
 		} catch (e) {
 			toast.error(`${(e as Error)?.message ?? e}`);
 		} finally {
@@ -347,9 +352,12 @@
 	const load = async () => {
 		try {
 			if (kind === 'answer') {
-				run = (await getAnswer(localStorage.token, chatId)).run;
+				const detail = await getAnswer(localStorage.token, chatId);
+				run = detail.run;
+				report = detail.report ?? null;
 			} else {
 				const detail = await getDiscussion(localStorage.token, chatId);
+				report = detail.report ?? null;
 				// the question sent from this chat (later questions are asked in the room itself)
 				ask = detail.asks.find((a) => a.origin) ?? detail.asks[0] ?? null;
 			}
@@ -369,9 +377,9 @@
 		clock = Date.now();
 		if (destroyed || gone) return;
 		// settled: once more while the result is on its way, so 「正在发回」 turns into the button
-		if (settled && !arriving) return;
+		if (settled && (resultId || !done || !reportFrom || clock - reportFrom > 10 * 60 * 1000)) return;
 		const hidden = typeof document !== 'undefined' && document.visibilityState === 'hidden';
-		timer = setTimeout(settled ? () => schedule() : load, hidden ? POLL_HIDDEN_MS : POLL_MS[kind]);
+		timer = setTimeout(load, hidden ? POLL_HIDDEN_MS : settled ? 5000 : POLL_MS[kind]);
 	};
 
 	// back on this tab: read again while it works, and after it stopped (it may have been
@@ -621,17 +629,17 @@
 							>
 						{:else if arriving}
 							<span class="min-w-0 flex-1 tm-shimmer" data-mode-dispatch-arriving
-								>正在发回这个对话…</span
+								>结果已生成，正在同步到对话…</span
 							>
 						{:else}
-							<span class="min-w-0 flex-1">还没放进这个对话。</span>
+							<span class="min-w-0 flex-1">结果已生成，正在等待同步到对话。</span>
 							<button
 								type="button"
 								class="shrink-0 font-medium text-sky-700 hover:underline disabled:opacity-60 dark:text-sky-300"
 								disabled={bringing}
 								on:click={bring}
 								data-mode-dispatch-bring
-								>{bringing ? '正在放进来…' : '把结果放进这个对话'}</button
+								>{bringing ? '正在同步…' : '重新同步结果'}</button
 							>
 						{/if}
 					</div>

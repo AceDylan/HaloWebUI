@@ -102,3 +102,13 @@ def test_marks_a_chat_that_handed_a_message_to_answer_or_discuss(monkeypatch):
         "teamed": "team",
         "pics": "answer_dispatch",
     }
+
+
+def test_auto_mark_keeps_both_route_and_actual_mode(monkeypatch):
+    session = _db(monkeypatch)
+    with session() as db:
+        for mode in ("answer", "discuss", "team", None):
+            _chat(db, str(mode), meta={"auto_route": {"mode": mode}, "mode_dispatch": ["answer"]})
+        db.commit()
+    assert mod.chat_kinds("u1", ["answer", "discuss", "team", "None"]) == {
+        "answer": "auto_answer", "discuss": "auto_discuss", "team": "auto_team", "None": "auto"}

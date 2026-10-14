@@ -73,7 +73,9 @@ def env(monkeypatch):
 
 
 def _client(user_id: str) -> TestClient:
+    from types import SimpleNamespace
     app = FastAPI()
+    app.state.config = SimpleNamespace(ENABLE_TITLE_GENERATION=False, ENABLE_FOLDER_AUTO_ASSIGNMENT=False)
     app.include_router(teams_router.router, prefix="/api/v1/teams")
     app.dependency_overrides[get_verified_user] = lambda: _User(user_id)
     return TestClient(app)

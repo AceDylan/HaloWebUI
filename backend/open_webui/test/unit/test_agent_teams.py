@@ -990,6 +990,9 @@ def test_a_chat_message_becomes_a_team_with_what_was_said_before(hermes, monkeyp
     assert dispatch.goal_from([{"role": "assistant", "content": "x"}]) == ("", "")
 
     emitted, saved, titles, planned = [], [], {"chat-9": "新对话"}, []
+    from open_webui.utils import mode_chats
+    metadata_jobs = []
+    monkeypatch.setattr(mode_chats, "schedule_chat_metadata", lambda *args, **kwargs: metadata_jobs.append((args, kwargs)))
     jobs = []
 
     async def emitter(event):
@@ -1017,12 +1020,13 @@ def test_a_chat_message_becomes_a_team_with_what_was_said_before(hermes, monkeyp
     assert (chat_id, message_id) == ("chat-9", "m-2") and fields["done"] is True
     assert fields["team_dispatch"] == {"team_id": team.id} and "已交给协作台" in fields["content"]
     assert "附带的 1 个文件" in fields["content"]
-    assert titles["chat-9"] == team.title  # a new chat is named after its team
+    assert metadata_jobs[0][1]["messages"] == [{"role": "user", "content": ask}]
+    assert metadata_jobs[0][1]["user_message_count"] == 2
     event = emitted[0]
     assert event["type"] == "chat:completion" and event["data"]["team_dispatch"] == {"team_id": team.id}
-    assert event["data"]["title"] == team.title
+    assert event["data"]["title"] == "新对话"  # smart naming runs independently after dispatch
     # the sidebar reads its list again: the chat's new name and its 协作 mark
-    assert emitted[1] == {"type": "chat:title", "data": team.title}
+    assert emitted[1] == {"type": "chat:title", "data": "新对话"}
 
     # no Hermes connection: the reply says so, no team
     async def no_target(request, user):

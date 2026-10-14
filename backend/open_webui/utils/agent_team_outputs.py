@@ -203,7 +203,7 @@ async def post_to_chat(request, team: AgentTeamModel, conclusion: dict, *, quiet
         )
     except HermesNotifyError as exc:
         raise _notify_error(exc) from exc
-    _set_meta(team, "chat_posted", {"generated_at": generated_at, "at": int(time.time())})
+    _set_meta(team, "chat_posted", {"generated_at": generated_at, "at": int(time.time()), "message_id": result.get("assistant_message_id")})
     return result
 
 

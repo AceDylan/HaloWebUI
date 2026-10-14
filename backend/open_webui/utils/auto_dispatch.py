@@ -30,6 +30,14 @@ async def run_auto_dispatch(request, form_data, user, metadata, model_id):
             row = await start(request, user, CreateForm(question=ask, context=background,
                 files=files, client_key=f"chat:{chat_id}:{message_id}"),
                 origin={"chatId": chat_id, "messageId": message_id})
+            Chats.set_chat_meta_value_by_id(chat_id, "auto_route", {"id": row["id"], "mode": row.get("mode")})
+            from open_webui.utils.mode_chats import schedule_chat_metadata
+            from open_webui.utils.team_chats import emit_chat_event
+            await emit_chat_event(user.id, chat_id, "chat:title", Chats.get_chat_title_by_id(chat_id))
+            asks = [m for m in (form_data.get("messages") or []) if isinstance(m, dict) and m.get("role") == "user"]
+            schedule_chat_metadata(request, user, chat_id, model_id=model_id,
+                messages=[{"role": "user", "content": ask}], message_id=message_id,
+                user_message_count=max(1, len(asks)))
             fields.update(content="已交给自动分流工作台：正在选择处理方式，结果会发回这个对话。",
                           auto_route={"id": row["id"]})
         except Exception as exc:

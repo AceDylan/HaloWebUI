@@ -1,5 +1,6 @@
 # tasks.py
 import asyncio
+import time
 from typing import Any, Dict
 from uuid import uuid4
 
@@ -23,10 +24,12 @@ def cleanup_task(task_id: str, id=None):
             chat_tasks.pop(id, None)
 
 
-def create_task(coroutine, id=None, *, blocks_completion: bool = True, owner_id=None):
+def create_task(coroutine, id=None, *, blocks_completion: bool = True, owner_id=None, kind=None):
     """
     Create a new asyncio task and add it to the global task dictionary.
     `owner_id` is the user whose request it serves (see task_owner_id).
+    `kind` says what runs (None: a chat reply; "image", "hermes", "answer", "discuss",
+    "dispatch"), so 运行中 can list the chats replying right now (utils/work_activity.py).
     """
     task_id = str(uuid4())  # Generate a unique ID for the task
     task = asyncio.create_task(coroutine)  # Create the task
@@ -38,6 +41,8 @@ def create_task(coroutine, id=None, *, blocks_completion: bool = True, owner_id=
         "chat_id": id,
         "blocks_completion": blocks_completion,
         "owner_id": owner_id,
+        "kind": kind,
+        "started_at": time.time(),
     }
 
     # If an ID is provided, associate the task with that ID

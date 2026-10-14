@@ -184,6 +184,16 @@ class AgentTeamsTable:
                     .limit(max(1, min(limit, TEAM_LIST_LIMIT))).all())
             return [AgentTeamModel.model_validate(row) for row in rows]
 
+    def list_working_for_user(self, user_id: str, limit: int = 10) -> list[AgentTeamModel]:
+        """The teams 运行中 lists: planning, waiting for approval or at work (not finished)."""
+        with get_db() as db:
+            rows = (db.query(AgentTeam)
+                    .filter(AgentTeam.user_id == user_id)
+                    .filter(or_(_bucket_condition("active"), _bucket_condition("review")))
+                    .order_by(AgentTeam.updated_at.desc(), AgentTeam.id.desc())
+                    .limit(max(1, limit)).all())
+            return [AgentTeamModel.model_validate(row) for row in rows]
+
     def list_without_chat(self, user_id: str, limit: int, exclude: Optional[set] = None) -> list[AgentTeamModel]:
         """Teams from before teams had chats (no ``chat_id``), newest first."""
         with get_db() as db:

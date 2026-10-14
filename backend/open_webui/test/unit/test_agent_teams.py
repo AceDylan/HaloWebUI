@@ -999,7 +999,7 @@ def test_a_chat_message_becomes_a_team_with_what_was_said_before(hermes, monkeyp
         emitted.append(event)
 
     monkeypatch.setattr("open_webui.socket.main.get_event_emitter", lambda metadata: emitter)
-    monkeypatch.setattr("open_webui.tasks.create_task", lambda coro, id=None, owner_id=None: (jobs.append(coro) or "task-1", None))
+    monkeypatch.setattr("open_webui.tasks.create_task", lambda coro, id=None, owner_id=None, **kw: (jobs.append(coro) or "task-1", None))
     monkeypatch.setattr(dispatch, "start_planning", lambda team, target, access=None: planned.append(team))
     monkeypatch.setattr(dispatch, "hermes_target", teams_router.hermes_target)
     monkeypatch.setattr(dispatch.Chats, "upsert_message_to_chat_by_id_and_message_id",

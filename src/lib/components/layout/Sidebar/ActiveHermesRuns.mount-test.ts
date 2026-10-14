@@ -101,6 +101,28 @@ describe('ActiveHermesRuns background row', () => {
 	});
 });
 
+describe('ActiveHermesRuns other modes', () => {
+	it('lists every mode at work with its mark, a team waiting for you in amber', async () => {
+		const stores = await import('$lib/stores');
+		stores.workActivity.set([
+			{ kind: 'chat', id: 'c1', chat_id: 'c1', title: '周报', href: '/c/c1', started_at: Date.now() / 1000 - 5, state: 'running' },
+			{ kind: 'answer', id: 'a1', chat_id: 'a1', title: '押金多久退？', href: '/answer/a1', started_at: Date.now() / 1000 - 9, state: 'running' },
+			{ kind: 'team', id: 't1', chat_id: 'c2', title: '重构登录', href: '/teams/t1', started_at: Date.now() / 1000, state: 'waiting', note: '等你批准' }
+		]);
+		await mount();
+		const rows = [...target.querySelectorAll('[data-halo-work-row]')] as any[];
+		expect(rows.map((row) => [row.getAttribute('data-halo-work-row'), row.getAttribute('href')])).toEqual([
+			['chat', '/c/c1'],
+			['answer', '/answer/a1'],
+			['team', '/teams/t1']
+		]);
+		expect(rows[1].textContent).toContain('精答');
+		expect(rows[2].getAttribute('data-halo-hermes-run-state')).toBe('approval');
+		expect(rows[2].textContent).toContain('等你批准');
+		stores.workActivity.set([]);
+	});
+});
+
 describe('ActiveHermesRuns collapsed rail', () => {
 	it('opens a popup instead of the sidebar, and a row closes it', async () => {
 		const stores = await import('$lib/stores');

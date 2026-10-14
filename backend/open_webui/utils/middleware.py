@@ -4665,6 +4665,7 @@ async def chat_image_generation_handler(
             image_generation_task(),
             id=__metadata__["chat_id"],
             owner_id=getattr(user, "id", None),
+            kind="image",
         )
         try:
             Chats.upsert_message_to_chat_by_id_and_message_id(

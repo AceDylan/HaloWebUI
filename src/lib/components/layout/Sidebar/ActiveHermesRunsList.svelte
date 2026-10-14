@@ -7,7 +7,8 @@
 		hermesBackgroundRuns,
 		hermesUnreadChatIds,
 		mobile,
-		pinnedChats
+		pinnedChats,
+		workActivity
 	} from '$lib/stores';
 	import { describeBackgroundRun } from '$lib/utils/run-activity';
 	import { createRunStopper } from '$lib/utils/runner-stop';
@@ -40,6 +41,19 @@
 	$: knownTitles = new Map(
 		[...($pinnedChats ?? []), ...($chats ?? [])].map((chat: any) => [chat.id, chat.title])
 	);
+	// Every other mode at work (a chat replying, 精答, 讨论台, 协作台, 自动分流, 生图), each row
+	// marked with its mode; amber when it waits for you (a plan to approve, a member's question).
+	$: work = $workActivity;
+	const WORK_LABEL: Record<string, string> = {
+		chat: '对话',
+		image: '生图',
+		answer: '精答',
+		discuss: '讨论',
+		team: '协作',
+		auto: '自动分流'
+	};
+	const workCurrent = (row: { chat_id: string | null; id: string }) =>
+		!!$chatId && (row.chat_id === $chatId || row.id === $chatId);
 	$: unread = showUnread
 		? [...$hermesUnreadChatIds].map((id) => ({ id, title: knownTitles.get(id) ?? null }))
 		: [];
@@ -161,6 +175,47 @@
 			{stopping === run.run_id ? '停止中…' : armed === run.run_id ? '确认停止' : '停止'}
 		</button>
 	</div>
+{/each}
+{#each work as row (`${row.kind}:${row.id}`)}
+	<a
+		class="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm hover:bg-gray-100 dark:hover:bg-gray-900 {workCurrent(
+			row
+		)
+			? 'bg-gray-100 dark:bg-gray-900'
+			: ''}"
+		href={row.href}
+		title={row.note ? `${row.note} · ${row.title ?? ''}` : (row.title ?? '')}
+		data-halo-work-row={row.kind}
+		data-halo-hermes-run-state={row.state === 'waiting' ? 'approval' : 'running'}
+		on:click={onNavigate}
+	>
+		<span class="relative flex h-2 w-2 shrink-0">
+			<span
+				class="absolute inline-flex h-full w-full animate-ping rounded-full opacity-60 {row.state ===
+				'waiting'
+					? 'bg-amber-400'
+					: 'bg-blue-400'}"
+			></span>
+			<span
+				class="relative inline-flex h-2 w-2 rounded-full {row.state === 'waiting'
+					? 'bg-amber-500'
+					: 'bg-blue-500'}"
+			></span>
+		</span>
+		<span class="min-w-0 flex-1 truncate">{row.title ?? WORK_LABEL[row.kind] ?? ''}</span>
+		<span
+			class="shrink-0 rounded px-1 py-0.5 text-2xs font-medium {row.state === 'waiting'
+				? 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300'
+				: 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300'}"
+		>
+			{row.state === 'waiting' && row.note ? row.note : WORK_LABEL[row.kind] ?? row.kind}
+		</span>
+		{#if row.state !== 'waiting'}
+			<span class="shrink-0 font-mono text-xs tabular-nums text-gray-500">
+				{elapsed(row.started_at)}
+			</span>
+		{/if}
+	</a>
 {/each}
 {#each unread as chat (chat.id)}
 	<a

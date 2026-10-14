@@ -195,10 +195,23 @@ export type HermesBackgroundRun = {
 	title?: string | null;
 };
 
+/** Work at a mode other than Hermes (routers/hermes.py → utils/work_activity.py). */
+export type WorkActivityItem = {
+	kind: 'chat' | 'image' | 'answer' | 'discuss' | 'team' | 'auto';
+	id: string;
+	chat_id: string | null;
+	title: string | null;
+	href: string;
+	started_at: number;
+	state: 'running' | 'waiting';
+	note?: string | null;
+};
+
 export type HermesActivity = {
 	runs: HermesActiveRun[];
 	unread: string[];
 	background: HermesBackgroundRun[];
+	work: WorkActivityItem[];
 };
 
 /** The sign-in behind the token is gone (a framed Hub session lasts 12h). */
@@ -225,7 +238,8 @@ export const getHermesActivity = async (token: string): Promise<HermesActivity> 
 	return {
 		runs: Array.isArray(data?.runs) ? data.runs : [],
 		unread: Array.isArray(data?.unread) ? data.unread : [],
-		background: Array.isArray(data?.background) ? data.background : []
+		background: Array.isArray(data?.background) ? data.background : [],
+		work: Array.isArray(data?.work) ? data.work : []
 	};
 };
 

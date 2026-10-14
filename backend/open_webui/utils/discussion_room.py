@@ -1718,7 +1718,7 @@ def start_live(live: LiveDiscussion) -> LiveDiscussion:
     from open_webui.tasks import create_task
 
     LIVE[live.chat_id] = live
-    task_id, task = create_task(live.run(), id=live.chat_id, owner_id=live.user_id)
+    task_id, task = create_task(live.run(), id=live.chat_id, owner_id=live.user_id, kind="discuss")
     live.task = task
     return live
 

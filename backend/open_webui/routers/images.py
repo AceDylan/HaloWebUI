@@ -7488,6 +7488,17 @@ async def _generate_gemini_image_with_size_fallback(
 # going, or takes its result, instead of generating again.
 _IMAGE_RUN_KEEP_SECONDS = 30 * 60
 _image_runs: dict[tuple[str, str], tuple[float, asyncio.Future]] = {}
+# what 运行中 shows of a studio run while it is being made: {"prompt", "started_at"}
+_image_run_info: dict[tuple[str, str], dict] = {}
+
+
+def active_image_runs(user_id: str) -> list[dict]:
+    """The user's image-studio generations still being made (this process)."""
+    return [
+        {"id": key[1], **_image_run_info.get(key, {})}
+        for key, (_, run) in list(_image_runs.items())
+        if key[0] == user_id and not run.done()
+    ]
 
 
 def _image_run_key(user, client_request_id: Optional[str]) -> Optional[tuple[str, str]]:
@@ -7500,12 +7511,13 @@ def _image_run_key(user, client_request_id: Optional[str]) -> Optional[tuple[str
 
 
 async def _run_image_generation_once(
-    key: tuple[str, str], start: Callable[[], Awaitable[Any]]
+    key: tuple[str, str], start: Callable[[], Awaitable[Any]], info: Optional[dict] = None
 ) -> Any:
     now = time.monotonic()
     for old_key, (started_at, old_run) in list(_image_runs.items()):
         if old_run.done() and now - started_at > _IMAGE_RUN_KEEP_SECONDS:
             _image_runs.pop(old_key, None)
+            _image_run_info.pop(old_key, None)
 
     entry = _image_runs.get(key)
     if entry is None:
@@ -7514,6 +7526,8 @@ async def _run_image_generation_once(
         # does not log it as never retrieved.
         run.add_done_callback(lambda done: done.cancelled() or done.exception())
         _image_runs[key] = (now, run)
+        if info:
+            _image_run_info[key] = {**info, "started_at": time.time()}
     else:
         run = entry[1]
         log.info(
@@ -7536,7 +7550,9 @@ async def image_generations(
     if key is None:
         return await _image_generations(request, form_data, user)
     return await _run_image_generation_once(
-        key, lambda: _image_generations(request, form_data, user)
+        key,
+        lambda: _image_generations(request, form_data, user),
+        {"prompt": " ".join(str(form_data.prompt or "").split())[:80]},
     )
 
 

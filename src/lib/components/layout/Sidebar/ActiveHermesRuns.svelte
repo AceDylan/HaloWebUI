@@ -5,7 +5,8 @@
 		hermesBackgroundRuns,
 		hermesUnreadChatIds,
 		mobile,
-		showSidebar
+		showSidebar,
+		workActivity
 	} from '$lib/stores';
 	import Folder from '../../common/Folder.svelte';
 	import Modal from '../../common/Modal.svelte';
@@ -28,8 +29,10 @@
 	let showPopup = false;
 
 	$: unreadCount = $hermesUnreadChatIds.size;
-	$: approvalCount = $hermesActiveRuns.filter((run) => run.awaiting_approval).length;
-	$: runningCount = $hermesActiveRuns.length + $hermesBackgroundRuns.length;
+	$: approvalCount =
+		$hermesActiveRuns.filter((run) => run.awaiting_approval).length +
+		$workActivity.filter((row) => row.state === 'waiting').length;
+	$: runningCount = $hermesActiveRuns.length + $hermesBackgroundRuns.length + $workActivity.length;
 	// Nothing left to show (the last run finished and was opened elsewhere).
 	$: if (showPopup && runningCount === 0 && unreadCount === 0) {
 		showPopup = false;

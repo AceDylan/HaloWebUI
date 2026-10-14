@@ -49,6 +49,7 @@ from open_webui.utils.hermes_agent import (
     list_active_runs,
     steer_active_run,
 )
+from open_webui.utils.work_activity import list_work
 from open_webui.utils.hermes_sessions import (
     LIST_LIMIT_DEFAULT,
     LIST_LIMIT_MAX,
@@ -184,11 +185,14 @@ async def steer_hermes_run(form_data: HermesSteerForm, user=Depends(get_verified
 async def get_active_hermes_runs(user=Depends(get_verified_user)):
     """Runs executing now, plus the chats whose run finished and has not been
     opened since — one poll feeds both sidebar indicators."""
+    runs = list_active_runs(user.id)
     return {
-        "runs": list_active_runs(user.id),
+        "runs": runs,
         "unread": list_unread_chat_ids(user.id),
         # Background runners (reclaude / codex / agy) started from a chat.
         "background": list_runner_progress(user.id),
+        # Everything else at work: chat replies, 精答, 讨论台, 协作台, 自动分流, 生图.
+        "work": list_work(user.id, {run["chat_id"] for run in runs}),
     }
 
 

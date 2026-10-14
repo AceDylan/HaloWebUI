@@ -6,7 +6,13 @@ import {
 	markHermesChatRead,
 	type HermesActiveRun
 } from '$lib/apis/hermes';
-import { chatId, hermesActiveRuns, hermesBackgroundRuns, hermesUnreadChatIds } from '$lib/stores';
+import {
+	chatId,
+	hermesActiveRuns,
+	hermesBackgroundRuns,
+	hermesUnreadChatIds,
+	workActivity
+} from '$lib/stores';
 
 /**
  * The one poll of the signed-in user's hermes activity (runs executing, the
@@ -57,6 +63,7 @@ const clearStores = () => {
 	hermesActiveRuns.set([]);
 	hermesBackgroundRuns.set([]);
 	hermesUnreadChatIds.set(new Set());
+	workActivity.set([]);
 };
 
 const fetchOnce = async () => {
@@ -75,6 +82,7 @@ const fetchOnce = async () => {
 	if (!running) return;
 	hermesActiveRuns.set(activity.runs);
 	hermesBackgroundRuns.set(activity.background);
+	workActivity.set(activity.work ?? []);
 	const unread = new Set(activity.unread);
 	// The chat on screen is read by definition; clear it server-side too. Not
 	// from a hidden tab: nobody is looking, and marking it read there took the
@@ -168,6 +176,17 @@ export const applyHermesChatEvent = (event: ChatEvent | null | undefined) => {
 	const data = event?.data?.data ?? null;
 	const eventChatId = event?.chat_id ?? '';
 	if (!type || !eventChatId) return;
+
+	if (type === 'chat:completion' && data?.done && !data?.hermes_run) {
+		// an ordinary reply finished: off 运行中 now, not at the next poll
+		workActivity.update((rows) => {
+			const next = rows.filter(
+				(row) => !(row.chat_id === eventChatId && (row.kind === 'chat' || row.kind === 'image'))
+			);
+			return next.length === rows.length ? rows : next;
+		});
+		return;
+	}
 
 	if (type === 'chat:completion') {
 		const run = data?.hermes_run;

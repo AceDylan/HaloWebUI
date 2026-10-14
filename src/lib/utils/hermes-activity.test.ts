@@ -8,7 +8,7 @@ vi.mock('$lib/apis/hermes', () => ({
 }));
 
 import { getHermesActivity, markHermesChatRead } from '$lib/apis/hermes';
-import { chatId, hermesActiveRuns, hermesUnreadChatIds } from '$lib/stores';
+import { chatId, hermesActiveRuns, hermesUnreadChatIds, workActivity } from '$lib/stores';
 import {
 	__resetHermesActivityForTests,
 	applyHermesChatEvent,
@@ -56,6 +56,40 @@ const stubPage = (visibilityState: 'visible' | 'hidden') => {
 		}
 	};
 };
+
+describe('other modes at work', () => {
+	const work = (over: Record<string, unknown> = {}) => ({
+		kind: 'chat' as const,
+		id: 'c1',
+		chat_id: 'c1',
+		title: '周报',
+		href: '/c/c1',
+		started_at: 1,
+		state: 'running' as const,
+		...over
+	});
+
+	it('come with the poll', async () => {
+		stubPage('visible');
+		vi.mocked(getHermesActivity).mockResolvedValue({
+			runs: [],
+			background: [],
+			unread: [],
+			work: [work(), work({ kind: 'team', id: 't1', chat_id: null, state: 'waiting', note: '等你批准' })]
+		});
+		startHermesActivityPolling();
+		await refreshHermesActivity();
+		expect(get(workActivity).map((row) => `${row.kind}:${row.id}`)).toEqual(['chat:c1', 'team:t1']);
+	});
+
+	it('a chat reply leaves the list the moment it is done; other modes wait for the poll', () => {
+		workActivity.set([work(), work({ kind: 'answer', id: 'a1', chat_id: 'c1', href: '/answer/a1' })]);
+		applyHermesChatEvent({ chat_id: 'c1', data: { type: 'chat:completion', data: { content: 'x' } } });
+		expect(get(workActivity)).toHaveLength(2);
+		applyHermesChatEvent({ chat_id: 'c1', data: { type: 'chat:completion', data: { done: true } } });
+		expect(get(workActivity).map((row) => row.kind)).toEqual(['answer']);
+	});
+});
 
 describe('applyHermesChatEvent', () => {
 	it('drops a run the moment its reply ends and marks the chat unread when not on screen', () => {

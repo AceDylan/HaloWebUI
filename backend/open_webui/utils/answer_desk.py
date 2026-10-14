@@ -587,7 +587,7 @@ def start_live(live: LiveAnswer) -> LiveAnswer:
     from open_webui.tasks import create_task
 
     LIVE[live.chat_id] = live
-    _, task = create_task(live.run_all(), id=f"answer-{live.chat_id}", owner_id=live.user_id)
+    _, task = create_task(live.run_all(), id=f"answer-{live.chat_id}", owner_id=live.user_id, kind="answer")
     live.task = task
     return live
 

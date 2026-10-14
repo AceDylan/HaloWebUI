@@ -81,6 +81,14 @@ class AutoRoutesTable:
                 AutoRoute.status.in_(("routing", "dispatching")),
                 AutoRoute.updated_at > int(time.time()) - 600).count()
 
+    def active_for_user(self, user_id, since, limit=10):
+        """Requests still choosing a mode or creating their task, updated after ``since``."""
+        with get_db() as db:
+            rows = (db.query(AutoRoute).filter(AutoRoute.user_id == user_id,
+                    AutoRoute.status.in_(("routing", "dispatching")), AutoRoute.updated_at > since)
+                    .order_by(AutoRoute.created_at.desc()).limit(limit).all())
+            return [_dict(row) for row in rows]
+
     def update(self, id, user_id, *, expect=None, **fields):
         with get_db() as db:
             query = db.query(AutoRoute).filter_by(id=id, user_id=user_id)

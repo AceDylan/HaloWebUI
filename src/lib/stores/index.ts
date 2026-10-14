@@ -90,6 +90,20 @@ export const hermesBackgroundRuns: Writable<
 		title?: string | null;
 	}[]
 > = writable([]);
+// Everything else at work for the user (same poll): a chat writing its reply or
+// drawing, 精答, 讨论台, 协作台, 自动分流, the image studio. 运行中 lists them.
+export const workActivity: Writable<
+	{
+		kind: 'chat' | 'image' | 'answer' | 'discuss' | 'team' | 'auto';
+		id: string;
+		chat_id: string | null;
+		title: string | null;
+		href: string;
+		started_at: number;
+		state: 'running' | 'waiting';
+		note?: string | null;
+	}[]
+> = writable([]);
 // The signed-in user's hermes runs executing right now (sidebar poll); the
 // composer reads it to know a reply is steerable or blocked on an approval.
 export const hermesActiveRuns: Writable<

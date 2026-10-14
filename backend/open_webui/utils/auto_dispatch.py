@@ -46,5 +46,5 @@ async def run_auto_dispatch(request, form_data, user, metadata, model_id):
         Chats.upsert_message_to_chat_by_id_and_message_id(chat_id, message_id, fields)
         await emitter({"type": "chat:completion", "data": fields})
 
-    task_id, _ = create_task(handler(), id=chat_id, owner_id=user.id)
+    task_id, _ = create_task(handler(), id=chat_id, owner_id=user.id, kind="dispatch")
     return {"status": True, "task_id": task_id}

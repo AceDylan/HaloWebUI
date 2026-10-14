@@ -84,6 +84,7 @@
 		normalizeSelectionThreads,
 		type PersistedSelectionThreads
 	} from '$lib/utils/selection-threads';
+	import { refreshHermesActivitySoon } from '$lib/utils/hermes-activity';
 	import { sourcesHistoryNote } from '$lib/utils/citations';
 	import { getModelChatDisplayName } from '$lib/utils/model-display';
 	import { createComposerStatePersister } from '$lib/utils/composer-state-persist';
@@ -6610,6 +6611,8 @@
 				} else if (res.task_id) {
 					taskIds = [res.task_id];
 				}
+				// 运行中 lists the reply (and whatever it was handed to) without waiting for the poll
+				if (res.task_id) refreshHermesActivitySoon(1200);
 			}
 		}
 

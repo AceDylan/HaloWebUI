@@ -161,5 +161,5 @@ async def run_team_dispatch(request, form_data: dict, user, metadata: dict, mode
                 messages=[{"role": "user", "content": ask}], message_id=message_id,
                 user_message_count=max(1, len(asks)))
 
-    task_id, _ = create_task(handler(), id=chat_id, owner_id=user.id)
+    task_id, _ = create_task(handler(), id=chat_id, owner_id=user.id, kind="dispatch")
     return {"status": True, "task_id": task_id}

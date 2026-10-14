@@ -2819,7 +2819,7 @@ async def run_hermes_agent(request, form_data, user, metadata, model, events, ta
             _cancel_pending_flush()
             _unregister_run(metadata["chat_id"], run_id)
 
-    task_id, _ = create_task(_run_handler(), id=metadata["chat_id"], owner_id=user.id)
+    task_id, _ = create_task(_run_handler(), id=metadata["chat_id"], owner_id=user.id, kind="hermes")
     return {"status": True, "task_id": task_id}
 
 
@@ -3072,7 +3072,7 @@ def resume_inflight_runs(app) -> int:
             _forget_inflight(chat_id, None)
             continue
         try:
-            create_task(_recover_inflight_run(app, chat_id, record), id=chat_id)
+            create_task(_recover_inflight_run(app, chat_id, record), id=chat_id, kind="hermes")
             resumed += 1
         except Exception as e:
             log.warning(f"hermes run recovery for chat {chat_id} failed to start: {e}")

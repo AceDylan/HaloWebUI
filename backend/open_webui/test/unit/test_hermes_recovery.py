@@ -710,7 +710,7 @@ def test_a_restart_finishes_the_reply_it_left_behind(monkeypatch):
     monkeypatch.setattr(hermes_agent, "_api_key_for_base_url", lambda *_args: "")
     monkeypatch.setattr(hermes_agent.aiohttp, "ClientSession", hermes.session)
     monkeypatch.setattr(hermes_agent, "create_task",
-                        lambda coroutine, id=None: created.append((id, coroutine)) or ("t", None))
+                        lambda coroutine, id=None, **_kw: created.append((id, coroutine)) or ("t", None))
 
     seen = []
     original_wait = hermes_agent._await_run_outcome

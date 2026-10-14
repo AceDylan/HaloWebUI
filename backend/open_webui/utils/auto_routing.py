@@ -6,20 +6,42 @@ import re
 MODES = {"answer", "discuss", "team"}
 LABELS = {"answer": "精答", "discuss": "讨论", "team": "协作台"}
 PATHS = {"answer": "/answer/", "discuss": "/discuss/", "team": "/teams/"}
+# Constraints that forbid doing the work at all. Forbidding one action ("不要部署", "不要修改数据库",
+# "don't deploy") is a constraint on the work, passed along with it, not a request for analysis only.
+_END = r"(?=$|[，。,.；;！!？?、\s）)])"
 READ_ONLY = re.compile(
     r"只(?:做)?(?:分析|讨论|解释|评估|规划|看)|仅(?:分析|讨论|评估|规划)|"
-    r"不(?:要)?(?:实际)?(?:操作|执行|修改|改动|部署|动手)|先.{0,6}(?:分析|出方案|做计划)|"
-    r"(?:analysis|read)[ -]only|do not (?:execute|modify|deploy)|don't (?:execute|modify|deploy)", re.I)
+    r"不(?:要|用|必)?(?:实际)?(?:操作|执行|动手)" + _END + "|"
+    r"不(?:要|用|必)?(?:实际)?(?:修改|改动|改)(?:任何(?:东西|文件|代码)?|代码|文件|仓库)?" + _END + "|"
+    r"(?:analysis|read)[ -]only|do(?: not|n't) (?:execute|modify|change) (?:anything|any files|the code)|"
+    r"do(?: not|n't) (?:execute|modify|change)" + _END, re.I)
+# "先分析/先出方案" asks for a plan first; "先分析原因再修复" still asks for the work after it.
+PLAN_FIRST = re.compile(r"先.{0,6}(?:分析|出方案|做计划)")
+THEN_DO = re.compile(r"(?:再|然后|之后|接着|随后).{0,12}(?:实现|修改|执行|修复|改|部署|提交|处理|运行)")
+NEW_EXECUTION = re.compile(
+    r"(?:现在|开始|按(?:上述|上面|方案|你)|帮我|请|直接).{0,20}(?:实现|修改|执行|修复|部署)|"
+    r"(?:now|please)\s+(?:implement|execute|fix|deploy)", re.I)
+
+
+def _forbids_work(text):
+    return bool(READ_ONLY.search(text) or (PLAN_FIRST.search(text) and not THEN_DO.search(text)))
+
+
+def _user_words(context):
+    """The user's own turns in a chat background (「用户：」 lines); the assistant saying "我先分析一下"
+    is not the user's constraint. Background without speaker lines (typed on /auto) is the user's."""
+    blocks = re.split(r"\n\s*\n", context or "")
+    if not any(re.match(r"(?:用户|Hermes|助手)：", b.strip()) for b in blocks):
+        return context or ""
+    return "\n".join(b for b in blocks if b.strip().startswith("用户："))
 
 
 def analysis_only(question, context=""):
-    if READ_ONLY.search(question):
+    if _forbids_work(question):
         return True
     # A later explicit implementation request can supersede an earlier analysis-only turn.
     # Vague follow-ups ("继续") do not grant execution permission.
-    new_execution = re.search(r"(?:现在|开始|按(?:上述|上面|方案|你)|帮我|请|直接).{0,20}(?:实现|修改|执行|修复|部署)|"
-                              r"(?:now|please)\s+(?:implement|execute|fix|deploy)", question, re.I)
-    return bool(READ_ONLY.search(context)) and not bool(new_execution)
+    return _forbids_work(_user_words(context)) and not NEW_EXECUTION.search(question)
 
 
 def selection_messages(question, context, files, *, teams_available):

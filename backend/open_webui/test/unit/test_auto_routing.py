@@ -328,3 +328,56 @@ def test_opening_legacy_auto_card_repairs_metadata_once(env, monkeypatch):
     asyncio.run(api.detail(row["id"], USER, env))
     assert chat.meta["auto_route"] == {"id": row["id"], "mode": "discuss"}
     assert len(jobs) == 1 and jobs[0][1]["message_id"] == "reply"
+
+
+@pytest.mark.parametrize("question", [
+    "请修复这个函数并运行测试，不要部署",
+    "修复登录 bug，不要修改数据库",
+    "先分析原因再修复并提交",
+    "don't deploy, just fix the test",
+    "不改变接口的前提下重构这个模块",
+])
+def test_forbidding_one_action_is_a_constraint_not_analysis_only(question):
+    decision = choice("team", question)
+    assert decision["mode"] == "team" and decision["execution_requested"]
+
+
+def test_only_the_users_own_words_in_the_background_constrain():
+    assert choice("team", "继续", context="用户：帮我修复登录\n\nHermes：我先分析一下原因")["mode"] == "team"
+    assert choice("team", "继续", context="用户：只分析，不要动手\n\nHermes：好的")["mode"] == "answer"
+
+
+def test_failed_request_is_routed_again_from_its_card(env, monkeypatch):
+    posted = []
+    monkeypatch.setattr(api.Chats, "upsert_message_to_chat_by_id_and_message_id",
+                        lambda chat_id, message_id, fields: posted.append((chat_id, message_id, fields)))
+    async def failing(*args):
+        raise HTTPException(503, "暂时不可用")
+    async def ok(request, user, form, file_info):
+        return ({"mode": form.mode if form.mode != "auto" else "answer", "reason": "重试",
+                 "execution_requested": False}, {}, set(), [], {})
+    async def dispatch(request, user, row, *args):
+        records.AutoRoutes.update(row["id"], user.id, status="dispatched", target_id="answer-2")
+    monkeypatch.setattr(api, "dispatch", dispatch)
+    async def run():
+        monkeypatch.setattr(api, "select", failing)
+        origin = {"chatId": "chat-1", "messageId": "reply-1"}
+        first = await api.start(env, USER, api.CreateForm(question="解释报错", client_key="c1"), origin=origin)
+        await settle(first["id"])
+        assert api._own(first["id"], USER)["status"] == "error"
+        with pytest.raises(HTTPException) as err:
+            await api.retry(env, first["id"], api.RetryForm(), OTHER)
+        assert err.value.status_code == 404
+        monkeypatch.setattr(api, "select", ok)
+        again = await api.retry(env, first["id"], api.RetryForm(mode="discuss"), USER)
+        assert again["id"] != first["id"]
+        await settle(again["id"])
+        stored = records.AutoRoutes.get(again["id"], USER.id)
+        assert stored["data"]["origin"] == origin and stored["data"]["input"]["mode"] == "discuss"
+        assert posted == [("chat-1", "reply-1", {"auto_route": {"id": again["id"]}})]
+        # a second press joins the retry instead of routing a third time
+        assert (await api.retry(env, first["id"], api.RetryForm(), USER))["id"] == again["id"]
+        with pytest.raises(HTTPException) as err:
+            await api.retry(env, again["id"], api.RetryForm(), USER)
+        assert err.value.status_code == 409
+    asyncio.run(run())

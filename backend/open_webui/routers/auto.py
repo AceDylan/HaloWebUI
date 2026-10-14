@@ -323,6 +323,37 @@ async def detail(id: str, user=Depends(get_verified_user), request: Request = No
     return public(row, user)
 
 
+class RetryForm(BaseModel):
+    mode: Literal["auto", "answer", "discuss", "team"] = "auto"
+
+
+RETRYABLE = ("error", "interrupted", "cancelled")
+
+
+@router.post("/{id}/retry")
+async def retry(request: Request, id: str, form: RetryForm, user=Depends(get_verified_user)):
+    """Route a failed, interrupted or cancelled request again (optionally in a chosen mode), from
+    the card where it failed: same input and chat of origin, a new receipt. Two presses of the
+    same retry share one receipt (the key is derived from this one)."""
+    row = _own(id, user)
+    if row["status"] not in RETRYABLE:
+        raise HTTPException(409, "这次分流没有失败，不需要重试")
+    data = row["data"]
+    previous = AutoRoutes.get(data["retried_as"], user.id) if data.get("retried_as") else None
+    if previous and previous["status"] not in RETRYABLE:
+        return public(_own(previous["id"], user), user)  # retried already: that one is under way
+    attempt = int(data.get("retries") or 0) + 1
+    inputs = {**data["input"], "mode": form.mode, "client_key": f"retry:{id}:{attempt}"}
+    created = await start(request, user, CreateForm(**inputs), origin=data.get("origin"))
+    AutoRoutes.update(id, user.id, data={**data, "retries": attempt, "retried_as": created["id"]})
+    origin = data.get("origin") or {}
+    if origin.get("chatId") and origin.get("messageId"):
+        # the chat's card follows the new receipt (also after a reload)
+        Chats.upsert_message_to_chat_by_id_and_message_id(origin["chatId"], origin["messageId"],
+            {"auto_route": {"id": created["id"]}})
+    return created
+
+
 @router.post("/{id}/cancel")
 async def cancel(id: str, user=Depends(get_verified_user)):
     _own(id, user)

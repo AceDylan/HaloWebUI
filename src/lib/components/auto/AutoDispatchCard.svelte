@@ -7,9 +7,11 @@
 	import {
 		getAutoRoute,
 		cancelAutoRoute,
+		retryAutoRoute,
 		routePending,
 		routeStatus,
 		MODE_LABEL,
+		type AutoMode,
 		type AutoRoute
 	} from '$lib/apis/auto';
 	import ModeDispatchCard from '$lib/components/chat/Messages/ModeDispatchCard.svelte';
@@ -36,6 +38,26 @@
 		}
 		if (!destroyed && (!row || routePending(row)))
 			timer = setTimeout(load, document.hidden ? 15000 : 2500);
+	}
+	// failed, interrupted or cancelled: route it again here, automatically or in a chosen mode
+	const RETRYABLE = new Set(['error', 'interrupted', 'cancelled']);
+	const MODES: AutoMode[] = ['answer', 'discuss', 'team'];
+	let retrying = '';
+	$: canRetry = !!row && RETRYABLE.has(row.status);
+	async function retry(mode: 'auto' | AutoMode) {
+		if (retrying) return;
+		retrying = mode;
+		try {
+			row = await retryAutoRoute(localStorage.token, id, mode);
+			id = row.id;
+			error = '';
+			clearTimeout(timer);
+			if (routePending(row)) timer = setTimeout(load, 2500);
+		} catch (e: any) {
+			error = e.message || '重试失败';
+		} finally {
+			retrying = '';
+		}
 	}
 	async function cancel() {
 		try {
@@ -110,6 +132,25 @@
 			</p>{/if}
 		{#if row?.status === 'routing'}<div class="px-4 pb-3">
 				<button class="tm-btn-ghost" on:click={cancel}>取消分流</button>
+			</div>{/if}
+		{#if canRetry}<div class="flex flex-wrap items-center gap-2 px-4 pb-3" data-auto-retry>
+				<button
+					type="button"
+					class="tm-btn-primary !px-2.5 !py-1 !text-xs"
+					disabled={!!retrying}
+					on:click={() => retry('auto')}
+					data-auto-retry-mode="auto">{retrying === 'auto' ? '分流中…' : '重新分流'}</button
+				>
+				<span class="text-xs text-gray-500">或直接交给</span>
+				{#each MODES as mode}
+					<button
+						type="button"
+						class="tm-btn-ghost !text-xs"
+						disabled={!!retrying}
+						on:click={() => retry(mode)}
+						data-auto-retry-mode={mode}>{MODE_LABEL[mode]}</button
+					>
+				{/each}
 			</div>{/if}
 		{#if row?.target_status === 'deleted'}<p class="px-4 pb-3 text-xs text-gray-500">
 				目标任务已删除，分流依据仍保留在记录中。

@@ -65,6 +65,9 @@ export const listAutoRoutes = (
 };
 export const cancelAutoRoute = (token: string, id: string) =>
 	call<AutoRoute>(token, `${encodeURIComponent(id)}/cancel`, {});
+/** Route a failed / interrupted / cancelled request again (the chat's card follows the new one). */
+export const retryAutoRoute = (token: string, id: string, mode: 'auto' | AutoMode = 'auto') =>
+	call<AutoRoute>(token, `${encodeURIComponent(id)}/retry`, { mode });
 export const targetAutoRoute = (token: string, mode: AutoMode, id: string) =>
 	call<AutoRoute | null>(token, `target/${mode}/${encodeURIComponent(id)}`);
 export const MODE_LABEL: Record<AutoMode, string> = {

@@ -104,10 +104,12 @@ def schedule_away_webhook(
     event_data: dict,
     grace_seconds: Optional[float] = None,
     log_tag: str = "chat",
+    media: Optional[list] = None,
 ) -> Optional[asyncio.Task]:
     """Post *message* to the user's notification webhook unless a tab is, or
     within the grace window becomes, connected.
 
+    *media*: files a Telegram webhook gets after the message (see post_webhook).
     Returns the background task, or None when the user has no webhook. Must be
     called from a running event loop; it never raises for delivery problems.
     """
@@ -129,7 +131,7 @@ def schedule_away_webhook(
                 )
                 return
             await asyncio.to_thread(
-                post_webhook, name, webhook_url, message, event_data
+                post_webhook, name, webhook_url, message, event_data, media
             )
         except Exception as e:
             log.warning(f"{log_tag} webhook failed: {e}")

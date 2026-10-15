@@ -1840,7 +1840,11 @@ def html_cards_as_text(content: str) -> str:
 
 
 def _build_agy_html_request_prompt(content: str) -> str:
-    answer = _NON_ARTIFACT_DETAILS_RE.sub("", content)
+    from open_webui.utils.hermes_media import strip_media_players
+
+    # The card's sandbox cannot load a video or audio file: the chat shows the
+    # player next to the card, the designer only sees the file's link.
+    answer = _NON_ARTIFACT_DETAILS_RE.sub("", strip_media_players(content))
     answer = _THINKING_BLOCK_RE.sub("", answer)
     answer = _fenced_html_artifacts_as_text(answer)
     answer = _remove_rejected_preview_artifact_source(answer).strip()

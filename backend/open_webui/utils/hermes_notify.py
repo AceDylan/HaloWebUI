@@ -467,6 +467,7 @@ async def show_notification_report(
     model_info = find_chat_model(chat_dict)
     if not model_info:
         raise HermesNotifyError(422, "chat has no assistant model to continue with")
+    content = await _show_report_media(request, user, chat_id, content)
 
     user_message_id, assistant_message_id = append_report_turn(
         chat_dict,
@@ -546,6 +547,30 @@ async def show_notification_report(
         "user_message_id": user_message_id,
         "assistant_message_id": assistant_message_id,
     }
+
+
+async def _show_report_media(request, user, chat_id: str, content: str) -> str:
+    """The files a report hands over (``MEDIA:<path>``: the video, picture or document the
+    run made) fetched from Hermes and shown in place; see hermes_media. The report stays
+    as written when Hermes cannot be reached."""
+    if "MEDIA:" not in content:
+        return content
+    from open_webui.utils.hermes_agent import _store_generated_file
+    from open_webui.utils.hermes_media import hermes_media_url, localize_media_tags
+    from open_webui.utils.hermes_sessions import _connection, resolve_hermes_model
+
+    try:
+        model = await resolve_hermes_model(request, user)
+        api_root, headers = _connection(request, user, model)
+    except Exception as e:
+        log.warning(f"hermes report media skipped for chat {chat_id}: {e}")
+        return content
+    metadata = {"chat_id": chat_id}
+
+    def _store(name, handle, content_type):
+        return _store_generated_file(request, user, metadata, name, handle, content_type)
+
+    return await localize_media_tags(content, hermes_media_url(api_root), headers, _store)
 
 
 # A runner report's first line ("✅ agy 运行 <id> · 已完成") and, when present, its details

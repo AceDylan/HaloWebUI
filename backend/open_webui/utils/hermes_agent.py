@@ -58,6 +58,13 @@ from open_webui.socket.main import (
 )
 from open_webui.tasks import create_task, set_current_task_blocks_completion
 from open_webui.utils.chat_image_refs import materialize_openai_image_message_refs
+from open_webui.utils.hermes_media import (
+    hermes_media_url,
+    localize_media_tags,
+    media_markdown,
+    push_media,
+    strip_media_players,
+)
 from open_webui.utils.hermes_unread import mark_unread
 from open_webui.utils.html_visual_prompt import (
     _FENCED_HTML_BLOCK_RE,
@@ -843,7 +850,7 @@ _BLANK_RUN_RE = re.compile(r"\n{3,}")
 def _webhook_summary(content: str) -> str:
     """The answer as it should read on a phone, not as it renders in the chat."""
     text = _DETAILS_BLOCK_RE.sub("", str(content or ""))
-    text = html_cards_as_text(text)
+    text = strip_media_players(html_cards_as_text(text))
     text = _BLANK_RUN_RE.sub("\n\n", text).strip()
     if len(text) > WEBHOOK_CONTENT_MAX_CHARS:
         text = text[:WEBHOOK_CONTENT_MAX_CHARS].rstrip() + "\u2026"
@@ -884,6 +891,7 @@ def _schedule_completion_webhook(request, user, metadata, title, content):
                 "url": chat_url,
             },
             log_tag="hermes completion",
+            media=push_media(content, user.id),
         )
     except Exception as e:
         log.warning(f"hermes completion webhook failed: {e}")
@@ -1874,8 +1882,9 @@ _DATA_URL_FILE_RE = re.compile(
 )
 
 
-def _store_generated_file(request, user, metadata, name: str, data: bytes, content_type: str) -> str:
-    """Save bytes hermes produced as one of the user's files; returns its URL."""
+def _store_generated_file(request, user, metadata, name: str, data, content_type: str) -> str:
+    """Save what hermes produced (bytes, or a file object at offset 0) as one of the
+    user's files; returns its URL."""
     import io
     import uuid
 
@@ -1884,7 +1893,8 @@ def _store_generated_file(request, user, metadata, name: str, data: bytes, conte
 
     name = os.path.basename(str(name or "").strip()) or "file"
     file_id = str(uuid.uuid4())
-    size, path = Storage.upload_file(io.BytesIO(data), f"{file_id}_{name}")
+    stream = data if hasattr(data, "read") else io.BytesIO(data)
+    size, path = Storage.upload_file(stream, f"{file_id}_{name}")
     Files.insert_new_file(
         user.id,
         FileForm(
@@ -1921,7 +1931,7 @@ def _store_data_url_files(request, user, metadata, text: str) -> str:
             data = base64.b64decode(re.sub(r"\s+", "", payload), validate=True)
             name = label or f"hermes-file{mimetypes_guess(content_type)}"
             url = _store_generated_file(request, user, metadata, name, data, content_type)
-            return f"[{label or name}]({url})"
+            return media_markdown(label or name, url, content_type)
         except (binascii.Error, ValueError) as e:
             log.warning(f"hermes media file decode failed: {e}")
         except Exception as e:
@@ -1929,6 +1939,20 @@ def _store_data_url_files(request, user, metadata, text: str) -> str:
         return f"`{label or '文件'}`（文件未能保存）"
 
     return _DATA_URL_FILE_RE.sub(_repl, text)
+
+
+async def _store_media_tags(request, user, metadata, text: str, base_url, headers) -> str:
+    """Fetch the files of MEDIA tags still in *text* (over the 5MB hermes inlines, or a
+    hermes without the data-URL patch) and show them in place; see hermes_media."""
+    if not text or "MEDIA:" not in text or not base_url:
+        return text
+
+    def _store(name, handle, content_type):
+        return _store_generated_file(request, user, metadata, name, handle, content_type)
+
+    return await localize_media_tags(
+        text, hermes_media_url(base_url), headers or {}, _store
+    )
 
 
 def mimetypes_guess(content_type: str) -> str:
@@ -2281,7 +2305,7 @@ async def run_hermes_agent(request, form_data, user, metadata, model, events, ta
                 blocks.append({"type": "text", "content": ""})
             return blocks[-1]
 
-        def _apply_final_output(output, recovered=False):
+        async def _apply_final_output(output, recovered=False):
             # Hermes resolves MEDIA:<path> image tags into markdown images
             # only in the final output; the delta stream carried the raw tag
             # text. Swap the streamed text for the resolved output so the
@@ -2290,6 +2314,7 @@ async def run_hermes_agent(request, form_data, user, metadata, model, events, ta
                 return
             output = _store_data_url_images(request, user, metadata, output)
             output = _store_data_url_files(request, user, metadata, output)
+            output = await _store_media_tags(request, user, metadata, output, base_url, headers)
             if recovered:
                 # The stream broke off: the answer may be missing entirely or
                 # only its first part arrived (the text after the last tool).
@@ -2308,8 +2333,8 @@ async def run_hermes_agent(request, form_data, user, metadata, model, events, ta
             for block in reversed(blocks):
                 if block["type"] == "text" and str(block.get("content", "")).strip():
                     # The streamed text still has the raw MEDIA:<path>; the
-                    # output links the image or the stored file instead.
-                    if "MEDIA:" in block["content"] and "](" in output:
+                    # output shows the image or the stored file instead.
+                    if "MEDIA:" in block["content"] and output != block["content"]:
                         block["content"] = output
                     return
             blocks.append({"type": "text", "content": output})
@@ -2504,7 +2529,7 @@ async def run_hermes_agent(request, form_data, user, metadata, model, events, ta
                     action="hermes_recovering",
                 )
             if status == "completed":
-                _apply_final_output(outcome.get("output") or "", recovered=True)
+                await _apply_final_output(outcome.get("output") or "", recovered=True)
                 await _finalize(
                     usage=outcome.get("usage"),
                     successful=True,
@@ -2521,7 +2546,7 @@ async def run_hermes_agent(request, form_data, user, metadata, model, events, ta
                     base_url, headers, metadata["chat_id"], run_started_at
                 )
                 if answer:
-                    _apply_final_output(answer, recovered=True)
+                    await _apply_final_output(answer, recovered=True)
                     await _finalize(successful=True)
                 else:
                     await _finalize(error=RECOVERY_MESSAGES["lost"])
@@ -2757,7 +2782,7 @@ async def run_hermes_agent(request, form_data, user, metadata, model, events, ta
                                 pass
                             elif event_type == "run.completed":
                                 runtime.update(_runtime_from_event(event))
-                                _apply_final_output(event.get("output") or "")
+                                await _apply_final_output(event.get("output") or "")
                                 await _finalize(
                                     usage=event.get("usage"),
                                     successful=True,
@@ -3000,6 +3025,7 @@ async def _recover_inflight_run(app, chat_id: str, record: dict) -> None:
         try:
             output = _store_data_url_images(request, user, metadata, output)
             output = _store_data_url_files(request, user, metadata, output)
+            output = await _store_media_tags(request, user, metadata, output, base_url, headers)
         except Exception as e:
             log.warning(f"hermes recovered output media failed: {e}")
         content = _merge_recovered_output(content, output)

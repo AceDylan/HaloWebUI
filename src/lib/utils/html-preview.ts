@@ -1168,18 +1168,49 @@ export const splitHtmlArtifactContent = (
 	};
 };
 
-export type HtmlArtifactCompanionImage = { src: string; alt: string };
+/**
+ * Something the Markdown around the HTML shows that preview mode would hide: a
+ * picture (`src`/`alt`), or — with `markdown` — a player, an HTML page's preview
+ * or a file link a Hermes reply carries (backend hermes_media.media_markdown).
+ */
+export type HtmlArtifactCompanionImage = { src: string; alt: string; markdown?: string };
 
 const MARKDOWN_IMAGE_RE = /!\[([^\]]*)\]\(\s*(<[^>]+>|[^)\s]+)(?:\s+["'][^"']*["'])?\s*\)/g;
 const HTML_IMAGE_TAG_RE = /<img\b[^>]*?\ssrc\s*=\s*(?:"([^"]*)"|'([^']*)')[^>]*>/gi;
 const HTML_IMAGE_ALT_RE = /\salt\s*=\s*(?:"([^"]*)"|'([^']*)')/i;
 
+// A video or audio player with its link line, an HTML file's preview with its
+// link line, or a link to a stored file. The card's sandbox can play none of
+// them, so they always show next to it.
+const MEDIA_PLAYER_RE =
+	/<div><(video|audio) src="(\/api\/v1\/files\/[^"]+)"[^>]*><\/\1><\/div>(?:\s*\[[^\]\n]*\]\(\2\))?/g;
+const FILE_PREVIEW_RE =
+	/<iframe src="(\/api\/v1\/files\/[^"]+)\/html"><\/iframe>(?:\s*\[[^\]\n]*\]\(\1\))?/g;
+const FILE_LINK_RE = /(?<!!)\[([^\]\n]+)\]\((\/api\/v1\/files\/[A-Za-z0-9_.-]+\/content)\)/g;
+
 const collectImagesFromMarkdown = (text: string): HtmlArtifactCompanionImage[] => {
-	const images: HtmlArtifactCompanionImage[] = [];
+	const found: { index: number; item: HtmlArtifactCompanionImage }[] = [];
+	const players = new Set<string>();
+	for (const match of text.matchAll(MEDIA_PLAYER_RE)) {
+		players.add(match[2]);
+		found.push({ index: match.index ?? 0, item: { src: match[2], alt: '', markdown: match[0] } });
+	}
+	for (const match of text.matchAll(FILE_PREVIEW_RE)) {
+		players.add(match[1]);
+		found.push({ index: match.index ?? 0, item: { src: match[1], alt: '', markdown: match[0] } });
+	}
+	for (const match of text.matchAll(FILE_LINK_RE)) {
+		if (!players.has(match[2])) {
+			found.push({
+				index: match.index ?? 0,
+				item: { src: match[2], alt: match[1], markdown: match[0] }
+			});
+		}
+	}
 	for (const match of text.matchAll(MARKDOWN_IMAGE_RE)) {
 		const src = match[2].replace(/^<|>$/g, '').trim();
 		if (src) {
-			images.push({ src, alt: match[1].trim() });
+			found.push({ index: match.index ?? 0, item: { src, alt: match[1].trim() } });
 		}
 	}
 	for (const match of text.matchAll(HTML_IMAGE_TAG_RE)) {
@@ -1188,9 +1219,12 @@ const collectImagesFromMarkdown = (text: string): HtmlArtifactCompanionImage[] =
 			continue;
 		}
 		const alt = HTML_IMAGE_ALT_RE.exec(match[0]);
-		images.push({ src, alt: (alt?.[1] ?? alt?.[2] ?? '').trim() });
+		found.push({
+			index: match.index ?? 0,
+			item: { src, alt: (alt?.[1] ?? alt?.[2] ?? '').trim() }
+		});
 	}
-	return images;
+	return found.sort((a, b) => a.index - b.index).map(({ item }) => item);
 };
 
 /**
@@ -1209,7 +1243,15 @@ export const collectHtmlArtifactCompanionImages = (
 	// Only an actual <img> in the (rendered) HTML counts as "already shown";
 	// the URL appearing as plain text in the HTML does not display anything.
 	const seen = new Set<string>(collectHtmlImageSources(renderMarkdownImagesInsideHtml(split.source)));
+	const shownMedia = new Set<string>();
 	const keep = (image: HtmlArtifactCompanionImage) => {
+		if (image.markdown) {
+			if (shownMedia.has(image.src)) {
+				return false;
+			}
+			shownMedia.add(image.src);
+			return true;
+		}
 		if (!/^(?:https?:\/\/|\/|data:image\/)/i.test(image.src)) {
 			return false;
 		}
@@ -1226,7 +1268,11 @@ export const collectHtmlArtifactCompanionImages = (
 };
 
 export const companionImagesToMarkdown = (images: HtmlArtifactCompanionImage[]): string =>
-	images.map((image) => `![${image.alt.replace(/[\[\]]/g, ' ')}](${image.src})`).join('\n\n');
+	images
+		.map(
+			(image) => image.markdown ?? `![${image.alt.replace(/[\[\]]/g, ' ')}](${image.src})`
+		)
+		.join('\n\n');
 
 const MARKDOWN_IMAGE_IN_HTML_TEXT_RE =
 	/!\[([^\]\n]*)\]\(\s*(\/api\/v1\/files\/[^)\s]+|\/cache\/[^)\s]+|https?:\/\/[^)\s]+|data:image\/[^)\s]+)\s*\)/g;

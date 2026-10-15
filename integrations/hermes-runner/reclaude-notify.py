@@ -60,7 +60,7 @@ _fallback_spec = importlib.util.spec_from_file_location(
 runner_fallback = importlib.util.module_from_spec(_fallback_spec)
 _fallback_spec.loader.exec_module(runner_fallback)
 
-SCRIPT_VERSION = "2026-10-10.1"
+SCRIPT_VERSION = "2026-10-15.1"
 CONFIG_FILE = "/root/.hermes/reclaude-runner.env"
 REQUIRED_CONFIG_KEYS = ("HALOWEBUI_NOTIFY_URL", "HALOWEBUI_NOTIFY_TOKEN")
 STATE_DB = "/root/.hermes/state.db"
@@ -666,6 +666,54 @@ def report_figures(run_dir):
     return total
 
 
+# A file the report hands over: ``MEDIA:<path>`` on its own line (the runner protocol asks
+# for it). Telegram gets it as an attachment (runner-deliver.py), HaloWebUI fetches it from
+# Hermes and shows it in place (a video plays, a picture shows).
+MEDIA_TAG_RE = re.compile(r"MEDIA:\s*[`\"']?(/[^\s`\"']+)")
+# A report that only names the file ("视频保存在 `/root/output/x.mp4`") left it unseen in
+# both places. A bare path counts too, but only to a video, audio clip or picture this run
+# made: an older file the report merely mentions stays text.
+PRODUCED_MEDIA_RE = re.compile(
+    r"(?<![\w/:.])(/(?:[^\s`'\"<>()\[\]|*]+/)*[^\s`'\"<>()\[\]|*/]+"
+    r"\.(?:mp4|m4v|mov|webm|mkv|avi|mp3|m4a|wav|ogg|oga|opus|flac|aac|png|jpe?g|gif|webp))(?![A-Za-z0-9_.])",
+    re.IGNORECASE)
+PRODUCED_MEDIA_MAX = 6
+
+
+def _run_started_at(run_dir):
+    """When the task began: the first round's task.md (a resumed run "<id>-a1" is the same
+    task, and the file it reports may come from an earlier round)."""
+    name = os.path.basename(os.path.normpath(run_dir))
+    first = re.match(r"\d{8}-\d{6}-[0-9a-f]+", name)
+    for directory in ([os.path.join(os.path.dirname(os.path.normpath(run_dir)), first.group(0))]
+                      if first else []) + [run_dir]:
+        try:
+            return os.path.getmtime(os.path.join(directory, "task.md"))
+        except OSError:
+            continue
+    return None
+
+
+def media_lines(body, shown, run_dir):
+    """``MEDIA:`` lines to add under the report shown as *shown* (*body* cut short): tags the
+    cut dropped, and the media files this run made that *body* names without a tag."""
+    tagged = list(dict.fromkeys(MEDIA_TAG_RE.findall(body)))
+    kept = set(MEDIA_TAG_RE.findall(shown))
+    paths = [path for path in tagged if path not in kept]
+    started = _run_started_at(run_dir)
+    produced = []
+    if started is not None:
+        for path in dict.fromkeys(PRODUCED_MEDIA_RE.findall(body)):
+            if path in tagged or len(produced) >= PRODUCED_MEDIA_MAX:
+                continue
+            try:
+                if os.path.isfile(path) and os.path.getmtime(path) >= started - 60:
+                    produced.append(path)
+            except OSError:
+                continue
+    return [f"MEDIA:{path}" for path in paths + produced]
+
+
 def build_digest(run_id, status, run_dir, session_id, agent="reclaude", chat=False,
                  max_chars=DIGEST_MAX_CHARS):
     """The report as the user reads it: a status line, result.md, and what to do next.
@@ -725,11 +773,15 @@ def build_digest(run_id, status, run_dir, session_id, agent="reclaude", chat=Fal
             body, footer = head.rstrip(), last.strip()
             # The quota helpers put a rule above their line; without the line it dangles.
             body = re.sub(r"\n+-{3,}\s*$", "", body).rstrip()
+    full_body = body
     if len(body) > max_chars:
         rest = len(body) - max_chars
         body = (body[:max_chars].rstrip()
                 + f"\n\n…（后面还有约 {rest} 字，完整结果在 {result_path}，需要时让 Hermes 读取）")
     lines += ["", body or f"（没有 result.md：{result_path}）"]
+    attachments = media_lines(full_body, body, run_dir)
+    if attachments:
+        lines += ["", *attachments]
 
     # Telegram: the gateway hands a plain reply to this report straight back to the run
     # (runner_dispatch.awaited_report, up to an hour; the command works after that too).

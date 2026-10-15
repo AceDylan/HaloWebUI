@@ -1,4 +1,5 @@
 import asyncio
+import io
 import html
 import itertools
 import json
@@ -1169,3 +1170,38 @@ def test_a_dispatched_message_hands_its_pictures_over_by_host_path(monkeypatch, 
     # A picture that is not a HaloWebUI file (a pasted data URL) keeps the multimodal input.
     message["content"][1]["image_url"]["url"] = "data:image/png;base64,AAAA"
     assert isinstance(build({"dispatch": "anyclaude"})["input"], list)
+
+
+def test_a_video_hermes_inlines_plays_in_the_reply(monkeypatch):
+    monkeypatch.setattr(
+        hermes_agent, "_store_generated_file", lambda *a: "/api/v1/files/v1/content"
+    )
+    result = hermes_agent._store_data_url_files(
+        None, None, {}, "[clip.mp4](data:video/mp4;base64,AAAA)"
+    )
+    assert '<div><video src="/api/v1/files/v1/content"' in result
+    assert "[clip.mp4](/api/v1/files/v1/content)" in result
+
+
+def test_a_tag_over_the_inline_cap_is_fetched_from_hermes(monkeypatch):
+    stored = []
+
+    def store(request, user, metadata, name, data, content_type):
+        stored.append((name, data.read(), content_type))
+        return "/api/v1/files/big/content"
+
+    async def fetch(media_url, headers, path):
+        assert media_url == "http://hermes:8642/v1/media"
+        assert headers.get("Authorization") == "Bearer k"
+        return io.BytesIO(b"movie"), "video/mp4", None
+
+    monkeypatch.setattr(hermes_agent, "_store_generated_file", store)
+    monkeypatch.setattr("open_webui.utils.hermes_media._fetch_from_hermes", fetch)
+    result = asyncio.run(
+        hermes_agent._store_media_tags(
+            None, None, {}, "做好了 MEDIA:/root/out/长征.mp4", "http://hermes:8642/v1",
+            {"Authorization": "Bearer k"},
+        )
+    )
+    assert stored == [("长征.mp4", b"movie", "video/mp4")]
+    assert '<video src="/api/v1/files/big/content"' in result and "MEDIA:" not in result

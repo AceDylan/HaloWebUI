@@ -70,3 +70,51 @@ def test_other_targets_keep_the_default_payload():
         )
 
     assert post.call_args.kwargs["json"]["content"].endswith("... (truncated)")
+
+
+def test_telegram_push_attaches_what_the_run_made(tmp_path):
+    video = tmp_path / "长征.mp4"
+    video.write_bytes(b"v" * 10)
+    big = tmp_path / "big.mp4"
+    big.write_bytes(b"")
+    media = [
+        {"path": str(video), "name": "长征.mp4", "content_type": "video/mp4"},
+        {"path": str(tmp_path / "gone.png"), "name": "gone.png", "content_type": "image/png"},
+        {"path": str(big), "name": "big.mp4", "content_type": "video/mp4"},
+    ]
+    sent = []
+
+    def post(url, **kwargs):
+        if "files" in kwargs:
+            field, (name, handle, content_type) = next(iter(kwargs["files"].items()))
+            sent.append((url, field, name, handle.read(), content_type, kwargs["data"]))
+        return _post_ok()
+
+    with patch.object(webhook, "TELEGRAM_UPLOAD_MAX_BYTES", 5), patch.object(
+        webhook.requests, "post", side_effect=post
+    ):
+        video.write_bytes(b"v" * 5)
+        big.write_bytes(b"b" * 6)
+        ok = webhook.post_webhook(
+            "HaloWebUI",
+            "https://api.telegram.org/bot123:ABC/sendMessage?chat_id=9&message_thread_id=7",
+            "done",
+            {},
+            media,
+        )
+
+    assert ok is True
+    assert sent == [
+        (
+            "https://api.telegram.org/bot123:ABC/sendVideo",
+            "video",
+            "长征.mp4",
+            b"v" * 5,
+            "video/mp4",
+            {"chat_id": "9", "message_thread_id": "7"},
+        )
+    ]
+    assert webhook._telegram_media_method("image/png", 100) == ("sendPhoto", "photo")
+    assert webhook._telegram_media_method("image/png", 11 * 1024 * 1024) == ("sendDocument", "document")
+    assert webhook._telegram_media_method("audio/mpeg", 1) == ("sendAudio", "audio")
+    assert webhook._telegram_media_method("application/pdf", 1) == ("sendDocument", "document")

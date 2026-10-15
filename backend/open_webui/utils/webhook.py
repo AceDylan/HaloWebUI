@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 from urllib.parse import parse_qsl, urlparse, urlunparse
 
 import requests
@@ -11,6 +12,9 @@ log.setLevel(SRC_LOG_LEVELS["WEBHOOK"])
 
 # Telegram rejects sendMessage bodies longer than this.
 TELEGRAM_MESSAGE_MAX_CHARS = 4096
+# Bot API upload limits: any file 50MB, a photo 10MB (bigger pictures go as documents).
+TELEGRAM_UPLOAD_MAX_BYTES = 50 * 1024 * 1024
+TELEGRAM_PHOTO_MAX_BYTES = 10 * 1024 * 1024
 
 
 def _telegram_target(url: str):
@@ -28,7 +32,57 @@ def _telegram_target(url: str):
     return post_url, query.get("chat_id"), query.get("message_thread_id")
 
 
-def post_webhook(name: str, url: str, message: str, event_data: dict) -> bool:
+def _telegram_media_method(content_type: str, size: int) -> tuple[str, str]:
+    content_type = (content_type or "").lower()
+    if content_type.startswith("video/"):
+        return "sendVideo", "video"
+    if content_type.startswith("audio/"):
+        return "sendAudio", "audio"
+    if (
+        content_type in ("image/png", "image/jpeg", "image/webp")
+        and size <= TELEGRAM_PHOTO_MAX_BYTES
+    ):
+        return "sendPhoto", "photo"
+    return "sendDocument", "document"
+
+
+def _send_telegram_media(post_url: str, chat_id, thread_id, media: list) -> None:
+    """Attach files after a Telegram push (sendVideo / sendAudio / sendPhoto /
+    sendDocument). A file that is gone, too big or refused is skipped; the
+    message already points at the chat. Never logs the URL: it carries the token."""
+    api_base = post_url.rsplit("/", 1)[0]
+    for item in media or []:
+        path = item.get("path") or ""
+        try:
+            size = os.path.getsize(path)
+        except OSError:
+            continue
+        if size > TELEGRAM_UPLOAD_MAX_BYTES:
+            log.info(f"post_webhook: {item.get('name')} is over Telegram's 50MB, not attached")
+            continue
+        method, field = _telegram_media_method(item.get("content_type", ""), size)
+        data = {"chat_id": chat_id}
+        if thread_id:
+            data["message_thread_id"] = thread_id
+        try:
+            with open(path, "rb") as handle:
+                response = requests.post(
+                    f"{api_base}/{method}",
+                    data=data,
+                    files={field: (item.get("name") or "file", handle, item.get("content_type") or None)},
+                    timeout=300,
+                )
+            if not response.ok:
+                log.warning(f"post_webhook: Telegram {method} failed with HTTP {response.status_code}")
+        except Exception as e:
+            log.warning(f"post_webhook: Telegram {method} failed: {type(e).__name__}")
+
+
+def post_webhook(
+    name: str, url: str, message: str, event_data: dict, media: list | None = None
+) -> bool:
+    """*media* (``{"path", "name", "content_type"}``, Telegram only): files sent after
+    the message, e.g. the video a Hermes run made."""
     try:
         log.debug(f"post_webhook: {url}, {message}, {event_data}")
         payload = {}
@@ -98,6 +152,8 @@ def post_webhook(name: str, url: str, message: str, event_data: dict) -> bool:
         r = requests.post(url, json=payload)
         r.raise_for_status()
         log.debug(f"r.text: {r.text}")
+        if telegram is not None and media:
+            _send_telegram_media(url, payload["chat_id"], payload.get("message_thread_id"), media)
         return True
     except Exception as e:
         log.exception(e)

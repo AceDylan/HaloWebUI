@@ -111,7 +111,7 @@ def test_away_user_gets_the_webhook_after_the_grace(monkeypatch):
     _presence(monkeypatch)
     run, posts = _schedule(monkeypatch)
     assert asyncio.run(run()) is not None
-    assert posts == [("HaloWebUI", TELEGRAM, "m", {"action": "chat"})]
+    assert posts == [("HaloWebUI", TELEGRAM, "m", {"action": "chat"}, None)]
 
 
 def test_connected_tab_suppresses_the_webhook(monkeypatch):

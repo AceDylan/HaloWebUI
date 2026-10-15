@@ -566,7 +566,7 @@
 						dispatch('code', value);
 					}}
 				/>
-			{:else if html && html.includes('<video')}
+			{:else if html && (html.includes('<video') || html.includes('<audio'))}
 				{@html html}
 			{:else if iframeSrc}
 				<iframe

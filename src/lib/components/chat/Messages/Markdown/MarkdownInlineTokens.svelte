@@ -105,7 +105,7 @@
 		)}
 		{#if isSvgMarkupToken}
 			<span class="font-mono whitespace-pre-wrap break-all">{tokenText}</span>
-		{:else if html && html.includes('<video')}
+		{:else if html && (html.includes('<video') || html.includes('<audio'))}
 			{@html html}
 		{:else if iframeSrc}
 			<iframe

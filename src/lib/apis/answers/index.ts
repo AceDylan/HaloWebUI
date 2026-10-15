@@ -7,6 +7,7 @@ import type {
 	DiscussRetry,
 	DiscussUsage,
 	DispatchOrigin,
+	ModeCard,
 	ModeIllustration,
 	ReportBack
 } from '$lib/apis/discussions';
@@ -86,6 +87,8 @@ export type AnswerRun = {
 	error?: string | null;
 	/** 结论配图, drawn once the answer is done. */
 	illustration?: ModeIllustration | null;
+	/** 结论卡片, designed once the answer is done. */
+	card?: ModeCard | null;
 };
 
 export type AnswerDetail = {

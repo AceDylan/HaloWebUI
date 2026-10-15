@@ -180,6 +180,13 @@ class _Stream:
 
 @pytest.fixture
 def env(monkeypatch):
+    # 结论卡片 (utils/mode_card.py) is AGY's: never designed for real here
+    from open_webui.utils import mode_card
+
+    async def _no_card(text):
+        return {"status": "skipped"}
+
+    monkeypatch.setattr(mode_card, "design", _no_card)
     engine = create_engine("sqlite:///:memory:")
     chats_mod.Chat.__table__.create(engine)
     models_mod.Model.__table__.create(engine)
@@ -981,3 +988,63 @@ def test_text_only_model_gets_document_and_explicit_image_limitation(env, attach
     content = env.calls[-1][1][-1]['content']
     assert isinstance(content, str)
     assert '押金七日内退还' in content and '0 are included' in content
+
+
+def test_a_finished_answer_gets_its_card_after_the_text_and_is_done_after_both(env, monkeypatch):
+    """结论卡片 next to 结论配图: the chat keeps picture, text, card; the report back carries the
+    card; the "reply ready" notice waits for both."""
+    from open_webui.utils import image_studio_record, mode_card, mode_chats, mode_dispatch, mode_illustrate
+
+    html = '<section class="hv"><h1 class="hv-title">合同</h1></section>'
+    designed = []
+
+    async def no_title(*args, **kwargs):
+        return "合同", None
+
+    async def condense(request, user, model_id, text, metadata):
+        return "标题：合同"
+
+    async def draw(request, user, template, content):
+        return {"url": "/api/v1/files/pic-4/content", "model": "gpt-image", "template": "手绘万能图", "prompt": content, "size": "auto"}
+
+    async def design(text):
+        designed.append(text)
+        return {"status": "ready", "html": html}
+
+    sent = []
+    monkeypatch.setattr(mode_chats, "auto_title_and_folder", no_title)
+    monkeypatch.setattr(mode_illustrate, "may_illustrate", lambda request, user: True)
+    monkeypatch.setattr(mode_illustrate, "picture_template", lambda user_id: None)
+    monkeypatch.setattr(mode_illustrate, "condense", condense)
+    monkeypatch.setattr(mode_illustrate, "draw", draw)
+    monkeypatch.setattr(mode_card, "design", design)
+    monkeypatch.setattr(image_studio_record, "record_chat_images_in_studio", lambda user_id, **kw: None)
+    monkeypatch.setattr(mode_dispatch, "report_back_later", lambda request, kind, chat_id, run: sent.append(mode_dispatch.report_of(kind, chat_id, run)[1]))
+    env.state["plan"] = {"action": "direct", "reason": "直接答", "web_search": False}
+
+    async def scenario(origin):
+        detail = await _ask(env)
+        await _settle(detail["id"])
+        run = desk.public_run((await api.get_answer(detail["id"], USER))["run"])
+        await ORIGINAL_AFTER_DONE(env.request, USER, detail["id"], {**run, **({"origin": origin} if origin else {})})
+        await mode_illustrate.settle()
+        return detail["id"], run
+
+    chat_id, run = asyncio.run(scenario(None))
+    fence = f"````html\n{html}\n````"
+    assert designed == [run["answer"]["content"]]
+    stored = asyncio.run(api.get_answer(chat_id, USER))["run"]
+    assert stored["card"]["status"] == "ready" and stored["illustration"]["status"] == "ready"
+    message = chats_mod.ChatTable().get_chat_by_id(chat_id).chat["history"]["messages"][run["id"]]
+    assert message["content"] == f"![配图](/api/v1/files/pic-4/content)\n\n{run['answer']['content']}\n\n{fence}"
+    cards = [e["data"]["run"]["card"]["status"] for e in env.events
+             if e["type"] == "answer" and e["data"]["kind"] == "state" and e["data"]["run"].get("card")]
+    assert cards[0] == "designing" and cards[-1] == "ready"
+    types = [e["type"] for e in env.events]
+    ready = max(i for i, e in enumerate(env.events) if e["type"] == "answer" and e["data"]["kind"] == "state"
+                and (e["data"]["run"].get("card") or {}).get("status") == "ready")
+    assert types.index("chat:completion") > ready
+
+    # sent from a chat: what goes back there has the card too
+    asyncio.run(scenario({"chatId": "c-1", "messageId": "m"}))
+    assert sent and sent[0].endswith(fence)

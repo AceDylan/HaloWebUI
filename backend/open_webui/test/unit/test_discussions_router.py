@@ -46,6 +46,13 @@ class _Stream:
 
 @pytest.fixture
 def env(monkeypatch):
+    # 结论卡片 (utils/mode_card.py) is AGY's: never designed for real here
+    from open_webui.utils import mode_card
+
+    async def _no_card(text):
+        return {"status": "skipped"}
+
+    monkeypatch.setattr(mode_card, "design", _no_card)
     engine = create_engine("sqlite:///:memory:")
     chats_mod.Chat.__table__.create(engine)
     session = sessionmaker(bind=engine)

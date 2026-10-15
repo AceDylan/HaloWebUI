@@ -24,6 +24,7 @@ from typing import Any, Optional
 
 from open_webui.models.chats import DISPATCHED_FROM_META_KEY, Chats
 from open_webui.utils.dispatch_files import conversation_file_ids, message_file_ids as message_file_ids
+from open_webui.utils.mode_card import block
 
 log = logging.getLogger(__name__)
 
@@ -227,7 +228,7 @@ def _quote(text: Any, limit: int = 60) -> str:
     return line[:limit] + ("…" if len(line) > limit else "")
 
 
-def _sources_tail(sources: list[dict]) -> str:
+def sources_tail(sources: list[dict]) -> str:
     lines = [f"{s['n']}. [{s.get('title') or s['url']}]({s['url']})" for s in sources if s.get("url")]
     return "\n\n---\n**资料来源**\n\n" + "\n".join(lines) if lines else ""
 
@@ -243,7 +244,7 @@ def report_of(kind: str, chat_id: str, run: dict) -> tuple[str, str, str]:
         name = f"{assistant.get('emoji') or ''}{assistant.get('name') or '助手'}".strip()
         web = "（查了网上的资料）" if (run.get("research") or {}).get("sources") else ""
         notice = f"{MODES[kind]['notice']} 「{question}」由「{name}」回答{web}，下面是它的回答。精答：/answer/{chat_id}"
-        content = desk.stored_content(run)
+        content = desk.stored_content({**run, "card": None})
     else:
         from open_webui.utils import discussion_room as room
 
@@ -252,11 +253,14 @@ def report_of(kind: str, chat_id: str, run: dict) -> tuple[str, str, str]:
         moderator = ((run.get("conclusion") or {}).get("name") or (run.get("moderator") or {}).get("name") or "主持人")
         notice = (f"{MODES[kind]['notice']} 「{question}」：{len(seats)} 个模型{mode}（{'、'.join(seats)}），"
                   f"下面是 {moderator} 整理的结论。讨论台：/discuss/{chat_id}")
-        content = room.stored_content(run)
-        content += _sources_tail(room.research_sources(run))
+        content = room.stored_content({**run, "card": None}, tail=sources_tail(room.research_sources(run)))
     content = content.strip()
     if len(content) > REPORT_CONTENT_MAX_CHARS:
         content = content[:REPORT_CONTENT_MAX_CHARS].rstrip() + f"\n\n…（太长了，后面的部分请到{MODES[kind]['label']}页看）"
+    # its card (结论卡片) whole after the text, as long as the reply still fits
+    card = block(run.get("card"))
+    if card and content and len(content) + len(card) + 2 <= REPORT_POST_MAX_CHARS:
+        content = f"{content}\n\n{card}"
     return notice[:900], content, f"{kind}:{chat_id}:{run.get('id') or ''}"[:128]
 
 

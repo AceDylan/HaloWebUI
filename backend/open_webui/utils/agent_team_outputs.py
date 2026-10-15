@@ -22,7 +22,7 @@ from urllib.parse import quote, unquote
 
 from open_webui.models.agent_teams import AgentTeamModel, AgentTeams
 from open_webui.models.chats import ChatForm, Chats
-from open_webui.utils import agent_teams
+from open_webui.utils import agent_teams, mode_card
 from open_webui.utils.agent_teams import HermesTarget, TeamsError
 from open_webui.utils.image_studio_record import record_in_studio, team_image_studio_item
 
@@ -35,6 +35,8 @@ KNOWLEDGE_DESCRIPTION = "协作台各团队的结论报告（在结论页点「�
 CHAT_CONTENT_MAX_CHARS = 60000
 CHAT_POST_MAX_CHARS = CHAT_CONTENT_MAX_CHARS + 4000
 NOTICE_SOURCE = "team"
+# team.meta: the conclusion's card (结论卡片) for one written version ({generated_at, status, html})
+CARD_META_KEY = "result_card"
 
 _FENCE_RE = re.compile(r"^\s*(`{3,}|~{3,})")
 _LINK_RE = re.compile(r'(!?\[[^\]]*\]\()(\s*<?[^)\s>]+>?)((?:\s+"[^"]*")?\))')
@@ -117,19 +119,49 @@ def _acceptance_lines(entry: dict) -> list[str]:
     return lines
 
 
-def chat_content(team: AgentTeamModel, conclusion: dict) -> str:
-    """The conclusion as a chat reply: the report, the lead's acceptance, where the rest is."""
+def _report_markdown(team: AgentTeamModel, conclusion: dict) -> str:
     markdown = chat_links(team.id, conclusion.get("markdown") or "", conclusion.get("workspace") or "",
                           [f.get("path") for f in conclusion.get("files") or [] if isinstance(f, dict)]).strip()
     if len(markdown) > CHAT_CONTENT_MAX_CHARS:
         markdown = markdown[:CHAT_CONTENT_MAX_CHARS].rstrip() + "\n\n…（结果较长，后面的部分请在协作台看）"
+    return markdown
+
+
+def chat_content(team: AgentTeamModel, conclusion: dict, card: Optional[dict] = None) -> str:
+    """The conclusion as a chat reply: the report, its card (结论卡片) when it fits, the lead's
+    acceptance, where the rest is (last: the page shows that line as buttons)."""
+    markdown = _report_markdown(team, conclusion)
     tail = ["---", *_acceptance_lines(conclusion.get("entry") or {})]
     if len(tail) > 1:
         tail.append("")
     # The page shows this line as buttons that open each part in place (TeamResultBar).
     page = f"/teams/{team.id}/conclusion"
     tail.append(f"在协作台看：[结果页]({page}) · [产出文件]({page}#files) · [过程记录]({page}#process)")
+    fence = mode_card.block(card)
+    if fence and len(markdown) + len(fence) + 2 <= CHAT_CONTENT_MAX_CHARS:
+        markdown = f"{markdown}\n\n{fence}"
     return markdown + "\n\n" + "\n".join(tail)
+
+
+def card_source(team: AgentTeamModel, conclusion: dict) -> str:
+    """What the result's card is designed from: the report and the lead's acceptance."""
+    lines = _acceptance_lines(conclusion.get("entry") or {})
+    return _report_markdown(team, conclusion) + ("\n\n" + "\n".join(lines) if lines else "")
+
+
+def card_of(team: AgentTeamModel, generated_at: int) -> Optional[dict]:
+    """The card of this written version of the conclusion, if one was made."""
+    card = (team.meta or {}).get(CARD_META_KEY)
+    return card if isinstance(card, dict) and card.get("generated_at") == generated_at else None
+
+
+def conclusion_with_card(team: AgentTeamModel, conclusion: Any) -> Any:
+    """The conclusion as the result page reads it: with the card of its version (``card``)."""
+    if isinstance(conclusion, dict) and conclusion.get("status") == "ready":
+        card = card_of(team, _generated_at(conclusion))
+        if card:
+            conclusion = {**conclusion, "card": card}
+    return conclusion
 
 
 def notice_text(team: AgentTeamModel, conclusion: dict) -> str:
@@ -188,11 +220,12 @@ async def post_to_chat(request, team: AgentTeamModel, conclusion: dict, *, quiet
     if not markdown:
         raise TeamsError(409, "还没有结论")
     generated_at = _generated_at(conclusion)
+    card = card_of(AgentTeams.get(team.id, team.user_id) or team, generated_at)
     try:
         result = await show_notification_report(
             request,
             chat_id=team.chat_id,
-            content=chat_content(team, conclusion),
+            content=chat_content(team, conclusion, card),
             notice=notice_text(team, conclusion),
             source=NOTICE_SOURCE,
             run_id=run_id(team.id, generated_at),
@@ -204,7 +237,39 @@ async def post_to_chat(request, team: AgentTeamModel, conclusion: dict, *, quiet
     except HermesNotifyError as exc:
         raise _notify_error(exc) from exc
     _set_meta(team, "chat_posted", {"generated_at": generated_at, "at": int(time.time()), "message_id": result.get("assistant_message_id")})
+    if card is None and not result.get("duplicate") and result.get("assistant_message_id"):
+        mode_card.later(_card_into_chat(team, conclusion, team.chat_id, result["assistant_message_id"]))
     return result
+
+
+async def _card_into_chat(team: AgentTeamModel, conclusion: dict, chat_id: str, message_id: str) -> None:
+    """The posted conclusion's card (utils/mode_card.py): designed after the post (the lead's
+    hand-over does not wait for it), kept on the team for this version, then put into the reply."""
+    from open_webui.socket.main import get_event_emitter
+
+    generated_at = _generated_at(conclusion)
+
+    async def on_change(entry: dict) -> None:
+        _set_meta(team, CARD_META_KEY, {**entry, "generated_at": generated_at})
+
+    card = await mode_card.make(card_source(team, conclusion), on_change)
+    if not card or card.get("status") != "ready":
+        return
+    chat = Chats.get_chat_by_id(chat_id)
+    messages = (((chat.chat or {}).get("history") or {}).get("messages") or {}) if chat is not None else {}
+    message = messages.get(message_id) or {}
+    notice = (messages.get(message.get("parentId") or "") or {}).get("hermes_notice") or {}
+    if not message.get("content") or notice.get("run_id") != run_id(team.id, generated_at):
+        return  # the reply is gone (deleted, or the chat with it)
+    content = chat_content(team, conclusion, card)
+    Chats.upsert_message_to_chat_by_id_and_message_id(
+        chat_id, message_id, {"content": content}, guard_stopped=True, set_current=False
+    )
+    emit = get_event_emitter({"user_id": team.user_id, "chat_id": chat_id, "message_id": message_id}, update_db=False)
+    try:
+        await emit({"type": "chat:completion", "data": {"content": content}})
+    except Exception:  # noqa: BLE001 — saved; the chat shows it on next open
+        log.debug("teams: card update event for %s failed", team.id, exc_info=True)
 
 
 async def concluded(request, team: AgentTeamModel, target: HermesTarget, *, telegram: bool = False) -> dict:
@@ -279,7 +344,8 @@ async def follow_up(request, user, team: AgentTeamModel, target: HermesTarget) -
         raise TeamsError(403, "你的账号没有可用的 Hermes 模型，开不了追问对话") from exc
     generated_at = _generated_at(conclusion)
     chat_id = _new_chat(user.id, (team.title or "协作任务")[:60], model, notice_text(team, conclusion),
-                        chat_content(team, conclusion), source=NOTICE_SOURCE, run=run_id(team.id, generated_at))
+                        chat_content(team, conclusion, card_of(AgentTeams.get(team.id, team.user_id) or team, generated_at)),
+                        source=NOTICE_SOURCE, run=run_id(team.id, generated_at))
     fresh = AgentTeams.get(team.id, team.user_id) or team
     AgentTeams.update(team.id, team.user_id, chat_id=chat_id,
                       meta={**(fresh.meta or {}), "chat_posted": {"generated_at": generated_at, "at": int(time.time())}})

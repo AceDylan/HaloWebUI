@@ -386,9 +386,14 @@ async def _name(request: Request, user, chat_id: str, chat, ask: dict) -> str:
 
 async def _illustrate_and_report(request: Request, user, chat_id: str, ask: dict, title: str,
                                  held: Optional[dict]) -> None:
-    # 结论配图 is the conclusion's last step: it is "done" (back in its chat of origin, or the app's
-    # "reply ready" toast) once its picture is there
-    await _illustrate(request, user, chat_id, ask, held)
+    # 结论配图 and 结论卡片 are the conclusion's last steps, side by side: it is "done" (back in its
+    # chat of origin, or the app's "reply ready" toast) once both are there
+    from open_webui.utils import mode_illustrate
+
+    try:
+        await asyncio.gather(_illustrate(request, user, chat_id, ask), _card(user, chat_id, ask), return_exceptions=True)
+    finally:
+        mode_illustrate.release(chat_id, held)
     if ask.get("origin"):
         # 派发方式「讨论」: the conclusion goes back into the chat the question was asked in
         from open_webui.utils import mode_dispatch
@@ -405,24 +410,30 @@ async def _illustrate_and_report(request: Request, user, chat_id: str, ask: dict
         pass
 
 
+async def _keep(user, chat_id: str, ask: dict, key: str, entry: dict) -> None:
+    """Where a finishing step (``illustration``, ``card``) stands: kept on the ask and in the
+    chat's message, and told to the room."""
+    chat = Chats.get_chat_by_id_and_user_id(chat_id, user.id)
+    messages = (((chat.chat or {}).get("history") or {}).get("messages") or {}) if chat is not None else {}
+    stored = (messages.get(ask["id"]) or {}).get(MESSAGE_KEY)
+    live = LIVE.get(chat_id)
+    if not isinstance(stored, dict) or stored.get("status") != "done" or (live and live.ask.get("id") == ask["id"]):
+        return  # deleted or taken up again meanwhile
+    stored[key] = entry
+    ask[key] = entry
+    _persist_ask(chat_id, stored, _setup_of(chat))
+    await _emitter(user, chat_id, ask["id"])(
+        {"type": "discuss", "data": {"kind": "state", "chatId": chat_id, "askId": ask["id"], "ask": room.public_ask(stored)}}
+    )
+
+
 async def _illustrate(request: Request, user, chat_id: str, ask: dict, held: Optional[dict] = None) -> None:
     """The finished conclusion's picture (utils/mode_illustrate.py): kept on the ask, in the
     chat's message and in the image studio gallery; the room is told as it moves."""
     from open_webui.utils.mode_illustrate import illustrate
 
-    emit = _emitter(user, chat_id, ask["id"])
-
     async def on_change(entry: dict) -> None:
-        chat = Chats.get_chat_by_id_and_user_id(chat_id, user.id)
-        messages = (((chat.chat or {}).get("history") or {}).get("messages") or {}) if chat is not None else {}
-        stored = (messages.get(ask["id"]) or {}).get(MESSAGE_KEY)
-        live = LIVE.get(chat_id)
-        if not isinstance(stored, dict) or stored.get("status") != "done" or (live and live.ask.get("id") == ask["id"]):
-            return  # deleted or taken up again meanwhile
-        stored["illustration"] = entry
-        ask["illustration"] = entry
-        _persist_ask(chat_id, stored, _setup_of(chat))
-        await emit({"type": "discuss", "data": {"kind": "state", "chatId": chat_id, "askId": ask["id"], "ask": room.public_ask(stored)}})
+        await _keep(user, chat_id, ask, "illustration", entry)
 
     await illustrate(
         request,
@@ -435,6 +446,19 @@ async def _illustrate(request: Request, user, chat_id: str, ask: dict, held: Opt
         on_change=on_change,
         held=held,
     )
+
+
+async def _card(user, chat_id: str, ask: dict) -> None:
+    """The finished conclusion's HTML card (utils/mode_card.py), kept like its picture. Designed
+    from the conclusion with its sources listed, as it goes back into a chat."""
+    from open_webui.utils import mode_card
+    from open_webui.utils.mode_dispatch import sources_tail
+
+    async def on_change(entry: dict) -> None:
+        await _keep(user, chat_id, ask, "card", entry)
+
+    text = ((ask.get("conclusion") or {}).get("content") or "").strip()
+    await mode_card.make(text + sources_tail(room.research_sources(ask)) if text else "", on_change)
 
 
 def _parse_queries(res: Any) -> Optional[list[str]]:

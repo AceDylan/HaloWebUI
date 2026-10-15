@@ -61,9 +61,9 @@ from open_webui.utils.chat_image_refs import materialize_openai_image_message_re
 from open_webui.utils.hermes_unread import mark_unread
 from open_webui.utils.html_visual_prompt import (
     _FENCED_HTML_BLOCK_RE,
-    _fenced_html_artifacts_as_text,
     append_html_visual_fallback,
     design_html_visual_artifact_with_agy,
+    html_cards_as_text,
 )
 from open_webui.utils.model_identity import parse_selection_id
 from open_webui.utils.presence import (
@@ -843,7 +843,7 @@ _BLANK_RUN_RE = re.compile(r"\n{3,}")
 def _webhook_summary(content: str) -> str:
     """The answer as it should read on a phone, not as it renders in the chat."""
     text = _DETAILS_BLOCK_RE.sub("", str(content or ""))
-    text = _fenced_html_artifacts_as_text(text)
+    text = html_cards_as_text(text)
     text = _BLANK_RUN_RE.sub("\n\n", text).strip()
     if len(text) > WEBHOOK_CONTENT_MAX_CHARS:
         text = text[:WEBHOOK_CONTENT_MAX_CHARS].rstrip() + "\u2026"

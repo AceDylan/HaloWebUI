@@ -5,9 +5,21 @@
 	import { copyToClipboard } from '$lib/utils';
 	import ReportMarkdown from '$lib/components/teams/ReportMarkdown.svelte';
 	import { now } from '$lib/components/teams/clock';
+	import ConclusionBody from './ConclusionBody.svelte';
 	import ConclusionPicture from './ConclusionPicture.svelte';
 	import SeatAvatar from './SeatAvatar.svelte';
-	import { domainOf, linkCitations, parseSections, pictureState, retryText, sectionKind, seconds, tokens } from './model';
+	import {
+		cardDesigning,
+		cardHtml,
+		domainOf,
+		linkCitations,
+		parseSections,
+		pictureState,
+		retryText,
+		sectionKind,
+		seconds,
+		tokens
+	} from './model';
 
 	/** The moderator's conclusion of one question: the answer first, then agreements,
 	 *  disagreements, positions and next steps as separate panels. */
@@ -37,6 +49,9 @@
 	$: total = ask.usage?.total_tokens;
 	$: waiting = state === 'waiting' && ask.status !== 'concluding';
 	$: drawing = state === 'done' && pictureState(ask.illustration, $now) === 'generating';
+	// 结论卡片: once designed it stands for the whole conclusion (「显示原文」 has the sections' text)
+	$: carded = state === 'done' && Boolean(cardHtml(ask.card));
+	$: designing = state === 'done' && cardDesigning(ask.card, $now);
 	// a stand-in seat writes it when the moderator cannot
 	$: writer = conclusion.standIn ? { model: conclusion.model, name: conclusion.name } : ask.moderator;
 	$: retrying = conclusion.retry ? retryText(conclusion.retry, $now) : '';
@@ -87,7 +102,7 @@
 					{:else if state === 'streaming'}
 						· {conclusion.thinking && !conclusion.content ? '思考中…' : '正在写结论…'}
 					{:else if state === 'done'}
-						{[took !== null ? `用时 ${took}s` : '', total ? `本问共 ${tokens(total)} tokens` : '', drawing ? '正在配图…' : '']
+						{[took !== null ? `用时 ${took}s` : '', total ? `本问共 ${tokens(total)} tokens` : '', drawing ? '正在配图…' : '', designing ? '正在排版卡片…' : '']
 							.filter(Boolean)
 							.map((s) => ` · ${s}`)
 							.join('')}
@@ -120,7 +135,10 @@
 			{#if state === 'error' && rewrite}
 				<button type="button" class="dc-chip mb-2" disabled={busy} on:click={rewrite} data-discuss-rewrite>重写结论</button>
 			{/if}
-			{#if state === 'streaming' || !answer}
+			{#if carded}
+				<ConclusionPicture illustration={ask.illustration} alt={ask.question.slice(0, 40)} />
+				<ConclusionBody id="dc-conclusion-{ask.id}" content={cite(conclusion.content)} card={ask.card} />
+			{:else if state === 'streaming' || !answer}
 				{#if state === 'done'}
 					<ConclusionPicture illustration={ask.illustration} alt={ask.question.slice(0, 40)} />
 				{/if}

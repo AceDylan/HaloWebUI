@@ -16,6 +16,8 @@
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import { copyToClipboard } from '$lib/utils';
 	import type { HeadingItem } from '$lib/utils/headings';
+	import ConclusionBody from '$lib/components/discuss/ConclusionBody.svelte';
+	import { cardDesigning, cardHtml } from '$lib/components/discuss/model';
 	import ConclusionNext from './ConclusionNext.svelte';
 	import ReportMarkdown from './ReportMarkdown.svelte';
 	import RunnerBadge from './RunnerBadge.svelte';
@@ -100,7 +102,12 @@
 		if (timer) clearTimeout(timer);
 		if (
 			destroyed ||
-			!(data?.status === 'generating' || writing || data?.entry?.illustration?.status === 'generating')
+			!(
+				data?.status === 'generating' ||
+				writing ||
+				data?.entry?.illustration?.status === 'generating' ||
+				cardDesigning(data?.card)
+			)
 		)
 			return;
 		timer = setTimeout(load, POLL_MS);
@@ -524,6 +531,17 @@
 								{/each}
 							</ol>
 						</details>
+					{/if}
+					{#if !generating && cardHtml(data?.card)}
+						<!-- 结论卡片: the result at a glance, the full report below -->
+						<div class="mb-6" data-team-card>
+							<ConclusionBody
+								id={`team-card-${teamId.slice(0, 8)}`}
+								content=""
+								card={data?.card}
+								withText={false}
+							/>
+						</div>
 					{/if}
 					<article class="{generating ? 'opacity-60' : ''} transition-opacity" data-team-report>
 						<ReportMarkdown

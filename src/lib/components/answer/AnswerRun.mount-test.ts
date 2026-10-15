@@ -271,4 +271,30 @@ describe('AnswerRun', () => {
 		await until(() => !!target.querySelector('[data-answer-stop]'));
 		expect(target.querySelector('[data-answer-failure]')).toBeFalsy();
 	}, 90000);
+
+	it('shows a finished answer as its card once designed, the text until then', async () => {
+		const done = (card: any) =>
+			detail(
+				created({
+					status: 'done',
+					answer: { status: 'done', content: '## 押金\n\n- 写清退还期限\n- 约定扣款情形', startedAt: 1000, endedAt: 9000 },
+					card
+				}),
+				{ running: false }
+			);
+		api.getAnswer.mockResolvedValue(done({ status: 'designing', startedAt: Date.now() }));
+		const target = await mount();
+		await until(() => text(target, '[data-answer-body]').includes('写清退还期限'));
+		expect(target.querySelector('[data-conclusion-card]')).toBeFalsy();
+		expect(target.textContent).toContain('正在排版卡片');
+		emit({
+			kind: 'state',
+			chatId: 'chat1',
+			runId: 'm1',
+			v: 9,
+			run: done({ status: 'ready', html: '<section class="hv"><h1 class="hv-title">押金风险</h1></section>' }).run
+		});
+		await until(() => !!target.querySelector('[data-conclusion-card] [data-halo-inline-html-preview]'));
+		expect(target.textContent).not.toContain('正在排版卡片');
+	}, 90000);
 });

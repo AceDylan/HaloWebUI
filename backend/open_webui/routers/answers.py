@@ -223,10 +223,17 @@ async def _name(request: Request, user, chat_id: str, chat, run: dict) -> str:
 
 async def _illustrate_and_report(request: Request, user, chat_id: str, run: dict, title: str,
                                  held: Optional[dict]) -> None:
-    # 结论配图 is the answer's last step: it is "done" (back in its chat of origin, or the app's
-    # "reply ready" toast) once its picture is there
+    # 结论配图 and 结论卡片 are the answer's last steps, side by side: it is "done" (back in its chat
+    # of origin, or the app's "reply ready" toast) once both are there
+    from open_webui.utils import mode_illustrate
+
     answer = (run.get("answer") or {}).get("content") or ""
-    await _illustrate(request, user, chat_id, run, answer, held)
+    try:
+        await asyncio.gather(
+            _illustrate(request, user, chat_id, run, answer), _card(user, chat_id, run), return_exceptions=True
+        )
+    finally:
+        mode_illustrate.release(chat_id, held)
     if run.get("origin"):
         # 派发方式「精答」: the answer goes back into the chat it was asked in
         from open_webui.utils import mode_dispatch
@@ -241,22 +248,28 @@ async def _illustrate_and_report(request: Request, user, chat_id: str, run: dict
         pass
 
 
+async def _keep(user, chat_id: str, run: dict, key: str, entry: dict) -> None:
+    """Where a finishing step (``illustration``, ``card``) stands: kept on the run and in the
+    chat's message, and told to the page."""
+    chat = Chats.get_chat_by_id_and_user_id(chat_id, user.id)
+    stored = _stored_run(chat) if chat is not None else None
+    if chat_id in LIVE or not stored or stored.get("id") != run["id"] or stored.get("status") != "done":
+        return  # deleted or asked again meanwhile
+    stored[key] = entry
+    run[key] = entry
+    _persist(chat_id, stored)
+    await _emitter(user, chat_id, run["id"])(
+        {"type": "answer", "data": {"kind": "state", "chatId": chat_id, "runId": run["id"], "run": desk.public_run(stored)}}
+    )
+
+
 async def _illustrate(request: Request, user, chat_id: str, run: dict, answer: str, held: Optional[dict] = None) -> None:
     """The finished answer's picture (utils/mode_illustrate.py): kept on the run, in the chat's
     message and in the image studio gallery; the page is told as it moves."""
     from open_webui.utils.mode_illustrate import illustrate
 
-    emit = _emitter(user, chat_id, run["id"])
-
     async def on_change(entry: dict) -> None:
-        chat = Chats.get_chat_by_id_and_user_id(chat_id, user.id)
-        stored = _stored_run(chat) if chat is not None else None
-        if chat_id in LIVE or not stored or stored.get("id") != run["id"] or stored.get("status") != "done":
-            return  # deleted or asked again meanwhile
-        stored["illustration"] = entry
-        run["illustration"] = entry
-        _persist(chat_id, stored)
-        await emit({"type": "answer", "data": {"kind": "state", "chatId": chat_id, "runId": run["id"], "run": desk.public_run(stored)}})
+        await _keep(user, chat_id, run, "illustration", entry)
 
     await illustrate(
         request,
@@ -269,6 +282,16 @@ async def _illustrate(request: Request, user, chat_id: str, run: dict, answer: s
         on_change=on_change,
         held=held,
     )
+
+
+async def _card(user, chat_id: str, run: dict) -> None:
+    """The finished answer's HTML card (utils/mode_card.py), kept like its picture."""
+    from open_webui.utils import mode_card
+
+    async def on_change(entry: dict) -> None:
+        await _keep(user, chat_id, run, "card", entry)
+
+    await mode_card.make(desk.card_source(run), on_change)
 
 
 def _resolve_planner(requested: Optional[str], models_map: dict, ambiguous: set, user) -> dict:

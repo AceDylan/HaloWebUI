@@ -2,6 +2,9 @@ import { describe, expect, it } from 'vitest';
 
 import type { DiscussAsk } from '$lib/apis/discussions';
 import {
+	cardDesigning,
+	cardHtml,
+	withCard,
 	applyEvent,
 	conclusionAnswer,
 	domainOf,
@@ -223,5 +226,22 @@ describe('retry wait', () => {
 		expect(turnStatusText({ status: 'waiting', retry }, 100)).toBe('限流，20 秒后重试（2/3）');
 		expect(turnStatusText({ status: 'waiting', retry: null })).toBe('等待发言');
 		expect(turnStatusText({ status: 'error', retry })).toBe('未能发言');
+	});
+});
+
+describe('结论卡片', () => {
+	it('is designing until AGY could no longer be at it, and shows only once ready', () => {
+		expect(cardDesigning({ status: 'designing', startedAt: 100_000 }, 200)).toBe(true);
+		expect(cardDesigning({ status: 'designing', startedAt: 100_000 }, 100 + 7 * 60)).toBe(false);
+		expect(cardDesigning({ status: 'ready' })).toBe(false);
+		expect(cardDesigning(null)).toBe(false);
+		expect(cardHtml({ status: 'ready', html: '<section></section>' })).toBe('<section></section>');
+		expect(cardHtml({ status: 'ready', html: ' ' })).toBe('');
+		expect(cardHtml({ status: 'failed', html: '<section></section>' })).toBe('');
+	});
+
+	it('goes after the text the way a chat reply carries it', () => {
+		expect(withCard('正文\n', '<p>x</p>')).toBe('正文\n\n````html\n<p>x</p>\n````');
+		expect(withCard('正文', '')).toBe('正文');
 	});
 });

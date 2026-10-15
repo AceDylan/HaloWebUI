@@ -79,6 +79,13 @@ class FakeHermes:
 
 @pytest.fixture
 def hermes(monkeypatch):
+    # 结论卡片 (utils/mode_card.py) is AGY's: never designed for real here
+    from open_webui.utils import mode_card
+
+    async def _no_card(text):
+        return {"status": "skipped"}
+
+    monkeypatch.setattr(mode_card, "design", _no_card)
     fake = FakeHermes()
 
     async def target(request, user):
@@ -1385,3 +1392,57 @@ def test_edit_plan_keeps_the_assistant_decisions(hermes):
     stored = AgentTeams.get(team_id, "u1").plan
     assert stored["assistants_applied"] == applied and stored["assistant_proposals"] == LIB_PLAN["assistant_proposals"]
     assert stored["members"][0]["assistant"]["proposal"] == "model:asst-viz"
+
+
+def test_the_results_card_goes_into_its_posted_reply_and_onto_the_result_page(hermes, monkeypatch):
+    """结论卡片: designed after the conclusion is posted, put into that reply before the line the
+    page shows as buttons, kept for this version (the result page shows it)."""
+    import asyncio
+
+    from open_webui.models.chats import Chats
+    from open_webui.socket import main as socket_main
+    from open_webui.utils import agent_team_outputs as outputs
+    from open_webui.utils import hermes_notify, hermes_sessions, mode_card
+
+    html = '<section class="hv"><h1 class="hv-title">计算器</h1></section>'
+    designed, emitted = [], []
+
+    async def design(text):
+        designed.append(text)
+        return {"status": "ready", "html": html}
+
+    async def model(request, user, model_id=None):
+        return {"id": "conn.hermes-agent", "selection_id": "conn.hermes-agent", "name": "Hermes"}
+
+    def emitter(metadata, update_db=True):
+        async def emit(event):
+            emitted.append((metadata["message_id"], event))
+        return emit
+
+    monkeypatch.setattr(mode_card, "design", design)
+    monkeypatch.setattr(hermes_sessions, "resolve_hermes_model", model)
+    monkeypatch.setattr(hermes_notify.Users, "get_user_by_id", lambda uid: _User(uid))
+    monkeypatch.setattr(socket_main, "get_event_emitter", emitter)
+    client = _client("u1")
+    team_id = _finished_team(client, hermes)
+    chat_id = client.post(f"/api/v1/teams/{team_id}/conclusion/chat").json()["chat_id"]
+    history = Chats.get_chat_by_id(chat_id).chat["history"]
+    reply_id = history["currentId"]
+    assert "````" not in history["messages"][reply_id]["content"]
+
+    team = AgentTeams.get(team_id, "u1")
+    asyncio.run(outputs._card_into_chat(team, CONCLUSION, chat_id, reply_id))
+    # designed from the report and the lead's acceptance, not the link line
+    assert "负责人验收" in designed[0] and "在协作台看" not in designed[0]
+    content = Chats.get_chat_by_id(chat_id).chat["history"]["messages"][reply_id]["content"]
+    fence = f"````html\n{html}\n````"
+    assert fence in content and content.index(fence) < content.index("负责人验收")
+    assert content.rstrip().splitlines()[-1].startswith("在协作台看：")
+    assert [(m, e) for m, e in emitted if e["type"] == "chat:completion"] == [
+        (reply_id, {"type": "chat:completion", "data": {"content": content}})]
+    card = AgentTeams.get(team_id, "u1").meta[outputs.CARD_META_KEY]
+    assert card["status"] == "ready" and card["generated_at"] == 1700000123
+    assert client.get(f"/api/v1/teams/{team_id}/conclusion").json()["card"]["html"] == html
+    # a reply that is gone gets nothing
+    asyncio.run(outputs._card_into_chat(team, CONCLUSION, chat_id, "missing"))
+    assert "missing" not in Chats.get_chat_by_id(chat_id).chat["history"]["messages"]

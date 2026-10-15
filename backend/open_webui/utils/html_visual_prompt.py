@@ -1830,6 +1830,15 @@ def compact_html_cards_in_history(messages: Any) -> Any:
     return compacted
 
 
+def html_cards_as_text(content: str) -> str:
+    """The answer as plain text reads it (a push): the text around its visual card(s), or the
+    cards' visible text when they are nearly all there is."""
+    outside = _FENCED_HTML_BLOCK_RE.sub("", content or "").strip()
+    if len(outside) >= _CARD_ONLY_TEXT_CHARS:
+        return outside
+    return _fenced_html_artifacts_as_text(content or "")
+
+
 def _build_agy_html_request_prompt(content: str) -> str:
     answer = _NON_ARTIFACT_DETAILS_RE.sub("", content)
     answer = _THINKING_BLOCK_RE.sub("", answer)

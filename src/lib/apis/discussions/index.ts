@@ -98,6 +98,15 @@ export type ModeIllustration = {
 	seconds?: number;
 };
 
+/** 结论卡片: the HTML card designed for a finished conclusion / answer (utils/mode_card.py). */
+export type ModeCard = {
+	status: 'designing' | 'ready' | 'failed' | 'skipped';
+	html?: string;
+	reason?: string;
+	startedAt?: number;
+	endedAt?: number;
+};
+
 export type DiscussResearch = {
 	/** skipped: the query writer found nothing a search could help with */
 	status: 'waiting' | 'running' | 'done' | 'empty' | 'error' | 'stopped' | 'skipped';
@@ -183,6 +192,7 @@ export type DiscussAsk = {
 	usage: DiscussUsage;
 	error?: string | null;
 	illustration?: ModeIllustration | null;
+	card?: ModeCard | null;
 };
 
 export type Discussion = {

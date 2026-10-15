@@ -1,5 +1,6 @@
 import { WEBUI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
 import type { AssistantChoice } from '$lib/apis/assistant-library';
+import type { ModeCard } from '$lib/apis/discussions';
 
 /** 协作台 (agent teams) API — see backend/open_webui/routers/teams.py. */
 
@@ -480,6 +481,8 @@ export type TeamConclusion = {
 	}[];
 	files: WorkspaceFile[];
 	workspace?: string;
+	/** 结论卡片 of this written version (utils/mode_card.py), once it is designed. */
+	card?: ModeCard | null;
 };
 
 export type RunnerLayer = { layer: string; ok: boolean; detail: string };

@@ -6,6 +6,7 @@ import type {
 	DiscussRetry,
 	DiscussSeat,
 	DiscussTurn,
+	ModeCard,
 	ModeIllustration,
 	TurnStatus
 } from '$lib/apis/discussions';
@@ -201,6 +202,25 @@ export const pictureState = (
 	if (picture.status === 'generating' && started && nowSeconds - started > PICTURE_STALE_SECONDS) return 'failed';
 	return picture.status;
 };
+
+/** 结论卡片 being designed takes at most AGY's timeout (5 min); one older was cut off by a restart. */
+export const CARD_STALE_SECONDS = 6 * 60;
+
+/** Whether the card is still being designed. */
+export const cardDesigning = (
+	card: Pick<ModeCard, 'status' | 'startedAt'> | null | undefined,
+	nowSeconds: number = Date.now() / 1000
+): boolean =>
+	card?.status === 'designing' &&
+	!(card.startedAt && nowSeconds - card.startedAt / 1000 > CARD_STALE_SECONDS);
+
+/** The card's HTML once it is ready, else ''. */
+export const cardHtml = (card: ModeCard | null | undefined): string =>
+	card?.status === 'ready' && card.html?.trim() ? card.html : '';
+
+/** A text and its card as a chat reply carries them: the card's fenced html block after the text. */
+export const withCard = (text: string, html: string): string =>
+	html ? `${(text ?? '').trim()}\n\n\`\`\`\`html\n${html}\n\`\`\`\`` : text;
 
 /** Why it was not drawn. */
 export const pictureError = (picture: ModeIllustration | null | undefined, nowSeconds?: number) =>

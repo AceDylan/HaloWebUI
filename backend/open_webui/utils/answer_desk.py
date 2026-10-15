@@ -323,7 +323,8 @@ def answer_messages(run: dict, browse: bool = False) -> list[dict]:
 
 def stored_content(run: dict) -> str:
     """The answer as the chat keeps it: with its picture (结论配图) and its sources listed, since
-    the chat view has no panel."""
+    the chat view has no panel, then its card (结论卡片)."""
+    from open_webui.utils.mode_card import with_card
     from open_webui.utils.mode_illustrate import with_picture
 
     content = with_picture(((run.get("answer") or {}).get("content") or "").strip(), run.get("illustration"))
@@ -331,7 +332,12 @@ def stored_content(run: dict) -> str:
     if content and sources:
         lines = [f"{s['n']}. [{s.get('title') or s['url']}]({s['url']})" for s in sources]
         content += "\n\n---\n**资料来源**\n\n" + "\n".join(lines)
-    return content
+    return with_card(content, run.get("card"))
+
+
+def card_source(run: dict) -> str:
+    """What the answer's card is designed from: the answer and its sources, no picture."""
+    return stored_content({**run, "illustration": None, "card": None})
 
 
 # ---------------------------------------------------------------------------------------------
@@ -526,7 +532,8 @@ class LiveAnswer:
 
     async def run_all(self):
         run = self.run
-        run.pop("illustration", None)  # a new answer gets its own picture once it is done
+        run.pop("illustration", None)  # a new answer gets its own picture and card once it is done
+        run.pop("card", None)
         flusher = asyncio.create_task(self._flush_loop())
         try:
             if not run.get("assistant"):

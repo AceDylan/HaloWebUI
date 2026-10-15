@@ -16,11 +16,11 @@
 	import { handOff, HANDOFF_PATH } from '$lib/utils/handoff';
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import MenuLines from '$lib/components/icons/MenuLines.svelte';
-	import ReportMarkdown from '$lib/components/teams/ReportMarkdown.svelte';
 	import { now, timeAgo } from '$lib/components/teams/clock';
 	import ResearchPanel from '$lib/components/discuss/ResearchPanel.svelte';
 	import ConclusionPicture from '$lib/components/discuss/ConclusionPicture.svelte';
-	import { linkCitations, modelById, retryText, seconds, tokens } from '$lib/components/discuss/model';
+	import ConclusionBody from '$lib/components/discuss/ConclusionBody.svelte';
+	import { cardDesigning, linkCitations, modelById, retryText, seconds, tokens } from '$lib/components/discuss/model';
 	import AssistantAvatar from './AssistantAvatar.svelte';
 	import { ACTION_LABEL, actionSentence, answerContext, applyEvent, isDrawing, isLive, stagesOf, STATUS_LABEL, type AnswerEvent } from './model';
 
@@ -426,7 +426,8 @@
 										{[
 											took !== null ? `用时 ${took}s` : '',
 											answer?.usage?.total_tokens ? `${tokens(answer.usage.total_tokens)} tokens` : '',
-											drawing ? '正在配图…' : ''
+											drawing ? '正在配图…' : '',
+											cardDesigning(run.card, $now) ? '正在排版卡片…' : ''
 										]
 											.filter(Boolean)
 											.map((s) => ` · ${s}`)
@@ -447,7 +448,11 @@
 								{#if answerState === 'done'}
 									<ConclusionPicture illustration={run.illustration} alt={title} />
 								{/if}
-								<ReportMarkdown id="ad-answer-{run.id}" content={linkCitations(answer.content, sources)} />
+								<ConclusionBody
+									id="ad-answer-{run.id}"
+									content={linkCitations(answer.content, sources)}
+									card={answerState === 'done' ? run.card : null}
+								/>
 							{:else if liveNow}
 								<div class="flex flex-col gap-2 pt-2" style="--dc-hue: 226">
 									<div class="dc-skeleton w-full" />

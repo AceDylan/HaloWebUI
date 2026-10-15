@@ -44,6 +44,7 @@ from open_webui.utils.agent_teams import (
 )
 from open_webui.utils.agent_team_outputs import (
     concluded,
+    conclusion_with_card,
     follow_up,
     illustration_to_gallery,
     save_to_knowledge,
@@ -624,7 +625,7 @@ async def get_conclusion(request: Request, team_id: str, user=Depends(get_verifi
         return {"status": "none", "markdown": "", "tasks": [], "files": [], "entry": {}}
     try:
         target = await hermes_target(request, user)
-        return await hermes_call(target, "GET", f"/{team.id}/conclusion", timeout=40)
+        return conclusion_with_card(team, await hermes_call(target, "GET", f"/{team.id}/conclusion", timeout=40))
     except TeamsError as exc:
         _raise(exc)
 

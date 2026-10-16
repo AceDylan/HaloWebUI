@@ -66,6 +66,7 @@ from open_webui.routers import (
     audio,
     images,
     image_studio,
+    video_studio,
     ollama,
     openai,
     gemini,
@@ -1469,6 +1470,9 @@ app.include_router(tasks.router, prefix="/api/v1/tasks", tags=["tasks"])
 app.include_router(images.router, prefix="/api/v1/images", tags=["images"])
 app.include_router(
     image_studio.router, prefix="/api/v1/image-studio", tags=["image-studio"]
+)
+app.include_router(
+    video_studio.router, prefix="/api/v1/video-studio", tags=["video-studio"]
 )
 
 app.include_router(audio.router, prefix="/api/v1/audio", tags=["audio"])

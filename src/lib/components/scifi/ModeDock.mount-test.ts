@@ -22,7 +22,7 @@ beforeEach(() => {
 	nav.goto.mockReset();
 	sessionStorage.removeItem('halo.handoff');
 	relay.modeDraft.set(null);
-	relay.modeLive.set({ chat: 0, answer: 0, discuss: 0, teams: 0, studio: 0 });
+	relay.modeLive.set({ chat: 0, answer: 0, discuss: 0, teams: 0, studio: 0, video: 0 } as any);
 	stores.config.set({
 		features: { enable_agent_teams: true, enable_image_generation: true }
 	} as any);
@@ -60,7 +60,8 @@ describe('ModeDock', () => {
 			'answer',
 			'discuss',
 			'teams',
-			'studio'
+			'studio',
+			'video'
 		]);
 		expect(
 			target.querySelector('[aria-current="page"]')?.getAttribute('data-halo-dock-station')
@@ -87,7 +88,7 @@ describe('ModeDock', () => {
 			[...target.querySelectorAll('[data-halo-dock-station]')].map((el: any) =>
 				el.getAttribute('data-halo-dock-station')
 			)
-		).toEqual(['chat', 'auto', 'answer', 'discuss']);
+		).toEqual(['chat', 'auto', 'answer', 'discuss', 'video']);
 	});
 
 	it('with nothing written is a plain link: no handoff', async () => {

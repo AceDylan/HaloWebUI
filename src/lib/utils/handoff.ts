@@ -1,11 +1,11 @@
 // Carrying work between the chat and its modes — 精答 (/answer), 讨论台 (/discuss), 协作台 (/teams),
-// the image studio and back to a chat — so nobody types the question twice. The page handing off writes one
+// the image and video studios and back to a chat — so nobody types the question twice. The page handing off writes one
 // entry to sessionStorage and navigates; the page it goes to takes it once (it is removed either
 // way) and shows where it came from with a way back. Only file ids already on this server travel.
 
 import { writable } from 'svelte/store';
 
-export type HandoffTarget = 'auto' | 'answer' | 'discuss' | 'teams' | 'chat' | 'studio';
+export type HandoffTarget = 'auto' | 'answer' | 'discuss' | 'teams' | 'chat' | 'studio' | 'video';
 export type HandoffOriginKind = 'chat' | 'answer' | 'discuss' | 'team' | 'studio';
 
 /** Where the work came from: shown as 「来自对话「标题」」 with a link back. */
@@ -22,6 +22,8 @@ export type Handoff = {
 	/** Background the next step should know: an earlier conversation, a conclusion. */
 	context: string;
 	from: HandoffOrigin | null;
+	/** A chat sends the text at once instead of filling it in (the video studio's 开始制作). */
+	send: boolean;
 	at: number;
 };
 
@@ -29,10 +31,10 @@ export const HANDOFF_KEY = 'halo.handoff';
 const TTL_MS = 5 * 60 * 1000;
 export const HANDOFF_TEXT_MAX = 8000;
 export const HANDOFF_CONTEXT_MAX = 12000;
-const MAX_FILES = 4;
+const MAX_FILES = 8;
 const MAX_MODELS = 5;
 const ID = /^[A-Za-z0-9_-]{1,128}$/;
-const TARGETS: HandoffTarget[] = ['auto', 'answer', 'discuss', 'teams', 'chat', 'studio'];
+const TARGETS: HandoffTarget[] = ['auto', 'answer', 'discuss', 'teams', 'chat', 'studio', 'video'];
 const KINDS: HandoffOriginKind[] = ['chat', 'answer', 'discuss', 'team', 'studio'];
 
 type Store = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
@@ -62,6 +64,7 @@ const normalize = (value: any, now: number): Handoff | null => {
 		files,
 		context: clean(value.context, HANDOFF_CONTEXT_MAX),
 		from,
+		send: value.send === true,
 		at
 	};
 };
@@ -197,7 +200,8 @@ export const HANDOFF_PATH: Record<HandoffTarget, string> = {
 	discuss: '/discuss',
 	teams: '/teams',
 	chat: '/',
-	studio: '/workspace/images?tab=workbench'
+	studio: '/workspace/images?tab=workbench',
+	video: '/workspace/videos'
 };
 
 type ComposerFile = { id?: string | null; name?: string; type?: string; status?: string };

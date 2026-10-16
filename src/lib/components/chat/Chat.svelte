@@ -4222,12 +4222,25 @@
 		// 「继续对话」 from 讨论台 / 协作台: the draft is filled in (not sent), files attached.
 		// No itemId on them: they belong to the discussion or team, so taking one out
 		// of the message box must not delete it (see chatImageFileFromHandoff).
+		// The video studio's 开始制作 names the model (Hermes) and asks for the brief to go out
+		// at once (`send`), like ?q= above: it waits for the model list the same way.
 		const chatHandoffEntry = takeHandoff(
 			typeof sessionStorage === 'undefined' ? null : sessionStorage,
 			'chat'
 		);
 		if (chatHandoffEntry) {
-			if (chatHandoffEntry.text) void applyHandedDraft(chatHandoffEntry.text);
+			const handedModel = chatHandoffEntry.models[0] ?? '';
+			if (handedModel) {
+				if ($models.length === 0) {
+					await ensureModels(localStorage.token, { reason: 'chat-handoff' }).catch(() => {});
+					if (isStale()) return;
+				}
+				const handed = resolveAvailableChatModelSelectionValues($models, [handedModel]);
+				if (handed.values[0]) selectedModels = [handed.values[0]];
+				await tick();
+				if (isStale()) return;
+			}
+			if (chatHandoffEntry.text && !chatHandoffEntry.send) void applyHandedDraft(chatHandoffEntry.text);
 			if (chatHandoffEntry.files.length) {
 				files = [
 					...files,
@@ -4249,6 +4262,12 @@
 								}
 					)
 				];
+			}
+			if (chatHandoffEntry.send && chatHandoffEntry.text) {
+				prompt = chatHandoffEntry.text;
+				await tick();
+				if (isStale()) return;
+				submitPrompt(prompt);
 			}
 		}
 

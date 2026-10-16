@@ -1,5 +1,5 @@
 // The places the sidebar leads to besides the chat list — the chat's modes (精答 / 讨论 / 协作 /
-// 生图) and the libraries (助手 / 提示词 / 定时) — with who may see them. The sidebar rows and the
+// 生图 / 视频) and the libraries (助手 / 提示词 / 定时) — with who may see them. The sidebar rows and the
 // ⌘K command palette both list these, so a page added here shows up in both.
 
 export type Destination = {
@@ -53,6 +53,14 @@ export const modeDestinations = (config: ConfigLike, user: UserLike): Destinatio
 			title: '生图工作台：提示词、参考图、图库',
 			match: ['/workspace/images'],
 			show: studio
+		},
+		{
+			key: 'video',
+			href: '/workspace/videos',
+			label: '视频',
+			title: '视频工作台：交给 Hermes 或 runner 制作视频，视频库收着它们做过的视频',
+			match: ['/workspace/videos'],
+			show: true
 		}
 	]
 		.filter((d) => d.show)

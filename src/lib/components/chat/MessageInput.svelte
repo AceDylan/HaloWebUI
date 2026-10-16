@@ -188,7 +188,7 @@
 
 	// 「交给…」 in the + menu: the draft, its attachments and (in a chat with messages) the
 	// conversation go to 精答 / 讨论台 / 协作台 / the image studio, which show a way back here.
-	const handOffDraft = (to: 'answer' | 'discuss' | 'teams' | 'studio') => {
+	const handOffDraft = (to: 'answer' | 'discuss' | 'teams' | 'studio' | 'video') => {
 		handOff(
 			typeof sessionStorage === 'undefined' ? null : sessionStorage,
 			chatHandoff(to, { text: prompt, files, history, chatId: $chatId, title: $chatTitle })

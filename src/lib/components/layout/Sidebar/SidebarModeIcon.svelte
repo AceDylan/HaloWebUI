@@ -1,9 +1,9 @@
 <script lang="ts">
 	/**
-	 * Icons of the chat and its modes (对话 / 精答 / 讨论 / 协作 / 生图) and of the libraries next to
+	 * Icons of the chat and its modes (对话 / 精答 / 讨论 / 协作 / 生图 / 视频) and of the libraries next to
 	 * them (助手 / 提示词), the same everywhere they appear.
 	 */
-	export let mode: 'chat' | 'answer' | 'discuss' | 'teams' | 'studio' | 'assistants' | 'prompts' | 'schedules' | string;
+	export let mode: 'chat' | 'answer' | 'discuss' | 'teams' | 'studio' | 'video' | 'assistants' | 'prompts' | 'schedules' | string;
 	export let className = 'size-5';
 </script>
 
@@ -24,6 +24,10 @@
 {:else if mode === 'teams'}
 	<svg class={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
 		><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M22 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" /></svg
+	>
+{:else if mode === 'video'}
+	<svg class={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+		><rect x="2" y="5" width="15" height="14" rx="2" /><path d="m17 10 5-3v10l-5-3" /><path d="m8 9.5 4 2.5-4 2.5z" /></svg
 	>
 {:else if mode === 'assistants'}
 	<svg class={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"

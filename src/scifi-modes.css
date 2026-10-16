@@ -314,6 +314,27 @@ html.halo-scifi .halo-mode-hero::after {
 	stroke-width: 1.2;
 	stroke-dasharray: 3 2.4;
 }
+/* videos: a film reel turning, its sprocket holes lighting one after another, a play mark */
+.halo-emblem__reel {
+	animation: sf-reel 14s linear infinite;
+}
+@keyframes sf-reel {
+	to {
+		transform: rotate(360deg);
+	}
+}
+.halo-emblem__sprocket {
+	fill: var(--sf-fill);
+	stroke: var(--scifi-cyan);
+	stroke-width: 1.1;
+	animation: sf-node 2.8s ease-in-out infinite;
+	animation-delay: var(--d, 0s);
+}
+.halo-emblem__play {
+	fill: var(--scifi-cyan);
+	opacity: 0.9;
+	filter: drop-shadow(0 0 5px var(--scifi-cyan));
+}
 /* images: a lens iris that breathes and a line scanning the frame */
 .halo-emblem__iris {
 	stroke: var(--scifi-cyan);

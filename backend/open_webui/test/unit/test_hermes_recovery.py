@@ -1165,8 +1165,14 @@ def test_a_dispatched_message_hands_its_pictures_over_by_host_path(monkeypatch, 
     assert payload["input"].startswith("/anyclaude 看看这个图里的编排界面\n\n[附件原文件] 消息里附带的图片在本机")
     assert "- 截图.png: /srv/halo-data/uploads/i1_image.png" in payload["input"]
     assert payload["dispatch"]["runner"] == "anyclaude"
-    # Hermes itself (no dispatch) still sees the picture.
-    assert isinstance(build({})["input"], list)
+    # Hermes itself (no dispatch) still sees the picture, and is told where the file is
+    # (the video studio's reference pictures are material to cut, not only to look at).
+    direct = build({})["input"]
+    assert isinstance(direct, list)
+    parts = direct[-1]["content"]
+    assert [part["type"] for part in parts] == ["text", "image_url", "text"]
+    assert parts[-1]["text"].startswith("[附件原图] 消息里的图片在本机的路径")
+    assert "- 截图.png: /srv/halo-data/uploads/i1_image.png" in parts[-1]["text"]
     # A picture that is not a HaloWebUI file (a pasted data URL) keeps the multimodal input.
     message["content"][1]["image_url"]["url"] = "data:image/png;base64,AAAA"
     assert isinstance(build({"dispatch": "anyclaude"})["input"], list)

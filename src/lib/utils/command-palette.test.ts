@@ -22,7 +22,7 @@ describe('paletteItems', () => {
 	it('lists every place and the recent chats before anything is typed', () => {
 		const items = paletteItems({ ...base, query: '' });
 		const labels = items.filter((i) => i.section === '跳转').map((i) => i.label);
-		expect(labels).toEqual(['新对话', '精答', '讨论', '协作', '助手', '提示词', '定时', '收藏', '已归档的对话', '设置', '管理后台']);
+		expect(labels).toEqual(['新对话', '精答', '讨论', '协作', '视频', '助手', '提示词', '定时', '收藏', '已归档的对话', '设置', '管理后台']);
 		expect(items.filter((i) => i.section === '对话').map((i) => i.href)).toEqual(['/c/c1', '/discuss/d1']);
 		expect(items.some((i) => i.section === '用模型开新对话')).toBe(false);
 	});

@@ -48,13 +48,21 @@
 		loaded = true;
 	});
 
-	// The image studio is one of the chat's modes (sidebar: 讨论 / 协作 / 生图): it gets a mode page's
-	// header, like 讨论台 and 协作台, instead of a page title.
+	// The image and video studios are chat modes (sidebar: 讨论 / 协作 / 生图 / 视频): they get a mode
+	// page's header, like 讨论台 and 协作台, instead of a page title.
 	$: studio = $page.url.pathname.startsWith('/workspace/images');
+	$: videoStudio = $page.url.pathname.startsWith('/workspace/videos');
+	$: modePage = studio || videoStudio;
 	// The other pages (助手, 提示词, and the unused ones still open by URL) are reached from the
 	// sidebar: each shows its own name, there is no "workspace" around them any more.
 	$: activeTab = getActiveWorkspaceTab($page.url.pathname);
-	$: pageName = studio ? '生图工作台' : activeTab ? $i18n.t(activeTab.labelKey) : '';
+	$: pageName = studio
+		? '生图工作台'
+		: videoStudio
+			? '视频工作台'
+			: activeTab
+				? $i18n.t(activeTab.labelKey)
+				: '';
 </script>
 
 <svelte:head>
@@ -66,7 +74,7 @@
 {#if loaded}
 	<div class="relative flex flex-col w-full h-screen max-h-[100dvh] max-w-full">
 		<nav data-halo-layer="0" class="px-2.5 pt-1 md:backdrop-blur-xl drag-region">
-			<div class="flex items-center gap-1 {studio ? 'pt-1' : ''}">
+			<div class="flex items-center gap-1 {modePage ? 'pt-1' : ''}">
 				<div class="{$mobile ? '' : 'hidden'} self-center flex flex-none items-center">
 					<button
 						id="sidebar-toggle-button"
@@ -82,10 +90,10 @@
 					</button>
 				</div>
 
-				{#if studio}
-					<!-- 生图 is one of the chat's modes: the same dock as 精答 / 讨论台 / 协作台 -->
+				{#if modePage}
+					<!-- 生图 / 视频 are chat modes: the same dock as 精答 / 讨论台 / 协作台 -->
 					<h1 class="sr-only">{pageName}</h1>
-					<ModeDock current="studio" />
+					<ModeDock current={studio ? 'studio' : 'video'} />
 				{:else}
 					<div class="halo-crumb flex items-center px-1 py-1">
 						{pageName}
@@ -97,7 +105,7 @@
 		<div
 			class="pb-1 px-[18px] flex-1 max-h-full overflow-y-auto"
 			id="workspace-container"
-			data-halo-mode={studio ? 'images' : undefined}
+			data-halo-mode={studio ? 'images' : videoStudio ? 'videos' : undefined}
 		>
 			<div class="max-w-6xl mx-auto flex min-h-full flex-col gap-6 pb-4">
 				{#if studio}
@@ -112,6 +120,20 @@
 						<ModeFlow label="生图怎么进行" steps={['写提示词', '加参考图 · 套模板', '渲染', '进图库，随时再改']} />
 						<p class="hidden max-w-2xl text-sm leading-relaxed text-gray-500 sm:block dark:text-gray-400">
 							写提示词、加参考图、套风格模板；对话里生成的图也会自动进图库，随时拿回来接着改。
+						</p>
+					</header>
+				{:else if videoStudio}
+					<header class="halo-mode-hero relative flex flex-col gap-2 pt-4 sm:pt-8" data-studio-hero data-video-hero>
+						<ModeEmblem mode="videos" stats={[{ k: 'REEL', v: 'READY' }]} />
+						<div class="flex items-center gap-2">
+							<span class="halo-mode-eyebrow text-[11px] font-semibold uppercase tracking-[0.08em] text-gray-500 dark:text-gray-400">Halo Studio</span>
+							<span class="h-3 w-px bg-gray-300 dark:bg-gray-700" aria-hidden="true" />
+							<span class="text-xs text-gray-500 dark:text-gray-400">视频</span>
+						</div>
+						<h2 class="halo-mode-title font-display text-[26px] font-semibold leading-[1.15] text-gray-950 sm:text-[32px] dark:text-white">把想法做成片</h2>
+						<ModeFlow label="视频怎么做" steps={['写想法 · 加素材', '选做法和执行者', 'Hermes / runner 制作', '进视频库，随时回看']} />
+						<p class="hidden max-w-2xl text-sm leading-relaxed text-gray-500 sm:block dark:text-gray-400">
+							写下想要的视频、附上图片或素材，交给 Hermes 或 runner 用代码做成片：动态图形、画面运镜、配音字幕。对话和 runner 交付的视频都会自动进视频库。
 						</p>
 					</header>
 				{:else}

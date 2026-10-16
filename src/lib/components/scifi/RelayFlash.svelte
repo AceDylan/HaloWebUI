@@ -15,6 +15,7 @@
 		if (pathname.startsWith('/auto')) return 'auto';
 		const section = sectionOf(pathname);
 		if (section === 'answer' || section === 'discuss' || section === 'teams') return section;
+		if (pathname.startsWith('/workspace/videos')) return 'video';
 		if (section === 'workspace') return 'studio';
 		return 'chat';
 	};

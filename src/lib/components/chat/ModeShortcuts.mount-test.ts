@@ -53,7 +53,7 @@ describe('ModeShortcuts', () => {
 			files: [{ id: 'f1', name: 'dog.png', type: 'image', status: 'uploaded' }]
 		});
 		expect(target.textContent).toContain('把这句话交给');
-		expect(target.querySelectorAll('[data-halo-mode-shortcut]').length).toBe(4);
+		expect(target.querySelectorAll('[data-halo-mode-shortcut]').length).toBe(5);
 		(target.querySelector('[data-halo-mode-shortcut="studio"]') as any).click();
 		expect(nav.goto).toHaveBeenCalledWith('/workspace/images?tab=workbench');
 		const entry = JSON.parse(sessionStorage.getItem('halo.handoff')!);
@@ -68,18 +68,18 @@ describe('ModeShortcuts', () => {
 		stores.user.set({ id: 'u2', role: 'user', permissions: { features: { image_generation: false } } } as any);
 		const { default: ModeShortcuts } = await import('./ModeShortcuts.svelte');
 		const target = await mount(ModeShortcuts, { prompt: '' });
-		expect([...target.querySelectorAll('[data-halo-mode-shortcut]')].map((el: any) => el.getAttribute('data-halo-mode-shortcut'))).toEqual(['answer', 'discuss']);
+		expect([...target.querySelectorAll('[data-halo-mode-shortcut]')].map((el: any) => el.getAttribute('data-halo-mode-shortcut'))).toEqual(['answer', 'discuss', 'video']);
 		expect(target.textContent).toContain('也可以');
 	});
 });
 
 describe('SidebarModes', () => {
-	it('is one row of 精答 / 讨论 / 协作 / 生图 with the current page marked', async () => {
+	it('is one row of 精答 / 讨论 / 协作 / 生图 / 视频 with the current page marked', async () => {
 		const { default: SidebarModes } = await import('$lib/components/layout/Sidebar/SidebarModes.svelte');
 		const target = await mount(SidebarModes);
 		const tiles = [...target.querySelectorAll('[data-sidebar-mode]')];
-		expect(tiles.map((el: any) => el.textContent.trim())).toEqual(['精答', '讨论', '协作', '生图']);
-		expect(tiles.map((el: any) => el.getAttribute('href'))).toEqual(['/answer', '/discuss', '/teams', '/workspace/images?tab=workbench']);
+		expect(tiles.map((el: any) => el.textContent.trim())).toEqual(['精答', '讨论', '协作', '生图', '视频']);
+		expect(tiles.map((el: any) => el.getAttribute('href'))).toEqual(['/answer', '/discuss', '/teams', '/workspace/images?tab=workbench', '/workspace/videos']);
 		expect(target.querySelector('[data-sidebar-mode="teams"]')!.getAttribute('aria-current')).toBe('page');
 		expect(target.querySelector('[data-sidebar-discuss]')).toBeTruthy();
 		expect(target.querySelector('[data-sidebar-answer]')).toBeTruthy();

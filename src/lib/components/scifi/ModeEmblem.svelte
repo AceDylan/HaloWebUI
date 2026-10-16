@@ -1,15 +1,15 @@
 <script lang="ts">
 	/**
-	 * The holographic emblem in the header of each mode page (精答 / 讨论台 / 协作台 / 生图工作台).
+	 * The holographic emblem in the header of each mode page (精答 / 讨论台 / 协作台 / 生图工作台 / 视频工作台).
 	 * All four share the reactor's outer halo — a tick ring and arc segments turning against
 	 * each other — so they read as one family; inside each draws what the mode does: a beam
 	 * sweeping a ring of assistants and lighting the one it picks, a council of seats taking turns
-	 * to speak, a lead handing work along a small graph, a lens iris with a scan line. HUD read-outs underneath (clock + the page's own figures). Pure decoration
+	 * to speak, a lead handing work along a small graph, a lens iris with a scan line, a film reel turning round a play mark. HUD read-outs underneath (clock + the page's own figures). Pure decoration
 	 * (aria-hidden); shown only with the sci-fi layer on. Styles: scifi-modes.css (.halo-emblem).
 	 */
 	import { onMount } from 'svelte';
 
-	export let mode: 'auto' | 'answer' | 'discuss' | 'teams' | 'images';
+	export let mode: 'auto' | 'answer' | 'discuss' | 'teams' | 'images' | 'videos';
 	export let stats: { k: string; v: string | number }[] = [];
 
 	const TICKS = Array.from({ length: 72 }, (_, i) => i);
@@ -30,6 +30,8 @@
 	};
 	// six iris blades: chords across the lens, each turned 60° from the last
 	const BLADES = Array.from({ length: 6 }, (_, i) => [...at(i * 60, 40), ...at(i * 60 + 130, 40)]);
+	// 视频: eight sprocket holes of a reel
+	const SPROCKETS = Array.from({ length: 8 }, (_, i) => at(i * 45, 42));
 	const arcId = `halo-emblem-arc-${mode}`;
 	const lensId = `halo-emblem-lens-${mode}`;
 
@@ -100,6 +102,16 @@
 			{/each}
 			<rect class="halo-emblem__goal" x="47" y="-9" width="18" height="18" rx="9" />
 			<circle class="halo-emblem__dot" cx="56" cy="0" r="3" />
+		{:else if mode === 'videos'}
+			<circle class="halo-emblem__ring" r="62" />
+			<g class="halo-emblem__reel">
+				<circle class="halo-emblem__ring halo-emblem__ring--dash" r="54" />
+				{#each SPROCKETS as [x, y], i}
+					<circle class="halo-emblem__sprocket" cx={x} cy={y} r="7" style="--d:{i * 0.35}s" />
+				{/each}
+			</g>
+			<circle class="halo-emblem__core" r="20" stroke="url(#{arcId})" />
+			<path class="halo-emblem__play" d="M-6 -9 L10 0 L-6 9 Z" />
 		{:else}
 			<circle class="halo-emblem__ring" r="64" />
 			<circle class="halo-emblem__ring halo-emblem__ring--dash" r="50" />

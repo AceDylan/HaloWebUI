@@ -16,8 +16,9 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import JSON, BigInteger, Column, Index, Integer, String, Text, and_, cast, or_
 from sqlalchemy.exc import IntegrityError
 
-ImageStudioKind = Literal["template", "gallery", "history"]
-IMAGE_STUDIO_KINDS: tuple[str, ...] = ("template", "gallery", "history")
+# "video": the video library (utils/video_library.py), which shares this table and its paging.
+ImageStudioKind = Literal["template", "gallery", "history", "video"]
+IMAGE_STUDIO_KINDS: tuple[str, ...] = ("template", "gallery", "history", "video")
 
 # Newest history rows kept per user; older ones are trimmed on write.
 IMAGE_STUDIO_HISTORY_LIMIT = 200
@@ -106,9 +107,10 @@ def _like_escape(value: str) -> str:
 
 
 def _matches(data: dict, needle: str) -> bool:
-    """The gallery's search: the prompt, the model or a tag contains ``needle`` (lower case)."""
+    """The gallery's search: the title, prompt, model, file name or a tag contains ``needle``
+    (lower case)."""
     tags = data.get("tags") if isinstance(data.get("tags"), list) else []
-    fields = [data.get("title"), data.get("prompt"), data.get("model"), *tags]
+    fields = [data.get("title"), data.get("prompt"), data.get("model"), data.get("name"), *tags]
     return any(needle in str(value or "").lower() for value in fields)
 
 

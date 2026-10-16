@@ -1,5 +1,5 @@
 /**
- * The chat and its modes — 精答, 讨论台, 协作台, 生图工作台 — as one system: a dock on every mode page
+ * The chat and its modes — 精答, 讨论台, 协作台, 生图工作台, 视频工作台 — as one system: a dock on every mode page
  * (ModeDock.svelte) that switches between them and carries what you were writing along, a live
  * count of the work under way in each, and a flash of light when work is relayed from one to
  * another (RelayFlash.svelte, fed by handOff in $lib/utils/handoff).
@@ -7,7 +7,7 @@
 import { get, writable } from 'svelte/store';
 import type { HandoffFile, HandoffOrigin } from '$lib/utils/handoff';
 
-export type ModeKey = 'auto' | 'chat' | 'answer' | 'discuss' | 'teams' | 'studio';
+export type ModeKey = 'auto' | 'chat' | 'answer' | 'discuss' | 'teams' | 'studio' | 'video';
 
 /** What the page on screen is writing: switching mode in the dock takes it along. */
 export type ModeDraft = {
@@ -65,7 +65,8 @@ export const modeLive = writable<Record<ModeKey, number>>({
 	answer: 0,
 	discuss: 0,
 	teams: 0,
-	studio: 0
+	studio: 0,
+	video: 0
 });
 
 export const setModeLive = (mode: ModeKey, count: number) =>
@@ -78,5 +79,6 @@ export const MODE_LABEL: Record<ModeKey, string> = {
 	answer: '精答',
 	discuss: '讨论台',
 	teams: '协作台',
-	studio: '生图工作台'
+	studio: '生图工作台',
+	video: '视频工作台'
 };

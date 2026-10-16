@@ -62,6 +62,7 @@ from open_webui.utils.hermes_media import (
     has_media,
     hermes_media_url,
     localize_media_tags,
+    media_kind,
     media_markdown,
     push_media,
     strip_media_players,
@@ -1163,14 +1164,9 @@ def _attachment_host_paths(metadata, user, images: bool = False) -> list[tuple[s
     return found
 
 
-def _image_parts_as_host_paths(run_input, user):
-    """A run input with pictures, as text for a runner: (text with a note listing the
-    pictures' paths on this host, number of pictures), or None when it has no pictures or
-    one of them is not a HaloWebUI file this user may read (a pasted data URL).
-
-    hermes' fast dispatch takes text only: with a picture attached, a /reclaude message
-    went through a model turn instead (135 s to start, 2026-10-01). The runners read
-    images from disk (Claude Code's Read, codex, agy), so they get the paths."""
+def _picture_host_paths(run_input, user):
+    """(texts, [(name, host path)]) of a run input's pictures, or None when it has no
+    pictures or one of them is not a HaloWebUI file this user may read (a pasted data URL)."""
     if not (isinstance(run_input, list) and run_input and isinstance(run_input[-1], dict)):
         return None
     content = run_input[-1].get("content")
@@ -1206,12 +1202,36 @@ def _image_parts_as_host_paths(run_input, user):
         meta = record.meta if isinstance(record.meta, dict) else {}
         name = str(meta.get("name") or record.filename or os.path.basename(record.path))
         pictures.append((name, host_dir + str(record.path)[len(data_dir):]))
-    if not pictures:
+    return (texts, pictures) if pictures else None
+
+
+def _image_parts_as_host_paths(run_input, user):
+    """A run input with pictures, as text for a runner: (text with a note listing the
+    pictures' paths on this host, number of pictures), or None when it has no pictures or
+    one of them is not a HaloWebUI file this user may read (a pasted data URL).
+
+    hermes' fast dispatch takes text only: with a picture attached, a /reclaude message
+    went through a model turn instead (135 s to start, 2026-10-01). The runners read
+    images from disk (Claude Code's Read, codex, agy), so they get the paths."""
+    found = _picture_host_paths(run_input, user)
+    if found is None:
         return None
+    texts, pictures = found
     lines = ["[附件原文件] 消息里附带的图片在本机，直接打开这些路径查看："]
     lines.extend(f"- {name}: {path}" for name, path in pictures)
     text = "\n".join(part for part in texts if part.strip()).strip()
     return (f"{text}\n\n" if text else "") + "\n".join(lines), len(pictures)
+
+
+def _picture_paths_note(run_input, user) -> str:
+    """For Hermes itself (it still sees the pictures): where they are on this host, so a
+    tool can use the file (a picture as video material, a batch to convert)."""
+    found = _picture_host_paths(run_input, user)
+    if found is None:
+        return ""
+    lines = ["[附件原图] 消息里的图片在本机的路径（需要拿文件来用时直接读取）："]
+    lines.extend(f"- {name}: {path}" for name, path in found[1])
+    return "\n".join(lines)
 
 
 def _attachment_note(paths: list[tuple[str, str]], notes: list[tuple[str, str]] = ()) -> str:
@@ -1338,6 +1358,8 @@ def _build_run_payload(form_data, metadata, upstream_model_id, user=None):
             as_text = _image_parts_as_host_paths(run_input, user)
             if as_text is not None:
                 run_input = as_text[0]
+        else:
+            run_input = _append_run_input_text(run_input, _picture_paths_note(run_input, user))
         run_input = _append_run_input_text(
             run_input,
             _attachment_note(_attachment_host_paths(metadata, user), _vault_note_host_paths(metadata)),
@@ -1885,7 +1907,8 @@ _DATA_URL_FILE_RE = re.compile(
 
 def _store_generated_file(request, user, metadata, name: str, data, content_type: str) -> str:
     """Save what hermes produced (bytes, or a file object at offset 0) as one of the
-    user's files; returns its URL."""
+    user's files; returns its URL. A video also goes into the user's video library
+    (``metadata["media_origin"]``: "runner" for a runner's report)."""
     import io
     import uuid
 
@@ -1896,6 +1919,7 @@ def _store_generated_file(request, user, metadata, name: str, data, content_type
     file_id = str(uuid.uuid4())
     stream = data if hasattr(data, "read") else io.BytesIO(data)
     size, path = Storage.upload_file(stream, f"{file_id}_{name}")
+    origin = metadata.get("media_origin") or "hermes"
     Files.insert_new_file(
         user.id,
         FileForm(
@@ -1906,10 +1930,26 @@ def _store_generated_file(request, user, metadata, name: str, data, content_type
                 "name": name,
                 "content_type": content_type,
                 "size": size,
-                "data": {"source": "hermes-agent", "chat_id": metadata.get("chat_id")},
+                "data": {
+                    "source": "hermes-agent",
+                    "chat_id": metadata.get("chat_id"),
+                    "origin": origin,
+                },
             },
         ),
     )
+    if media_kind(content_type, name) == "video":
+        from open_webui.utils.video_library import record_video
+
+        record_video(
+            user.id,
+            file_id=file_id,
+            name=name,
+            size=size,
+            content_type=content_type,
+            chat_id=metadata.get("chat_id"),
+            origin=origin,
+        )
     return f"/api/v1/files/{file_id}/content"
 
 

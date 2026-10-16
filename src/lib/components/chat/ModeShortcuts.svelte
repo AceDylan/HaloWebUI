@@ -26,10 +26,11 @@
 			show:
 				!!$config?.features?.enable_image_generation &&
 				($user?.role === 'admin' || !!$user?.permissions?.features?.image_generation)
-		}
+		},
+		{ to: 'video' as const, icon: 'video', label: '做成视频', title: '交给 Hermes 或 runner 做视频', show: true }
 	].filter((m) => m.show);
 
-	const go = (to: 'answer' | 'discuss' | 'teams' | 'studio') => {
+	const go = (to: 'answer' | 'discuss' | 'teams' | 'studio' | 'video') => {
 		handOff(typeof sessionStorage === 'undefined' ? null : sessionStorage, chatHandoff(to, { text: prompt, files }));
 		goto(HANDOFF_PATH[to]);
 	};

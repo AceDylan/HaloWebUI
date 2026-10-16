@@ -26,7 +26,8 @@
 		MessagesSquare,
 		Bot,
 		NotebookPen,
-		Image as ImageIcon
+		Image as ImageIcon,
+		Clapperboard
 	} from 'lucide-svelte';
 	import GoogleDrive from '$lib/components/icons/GoogleDrive.svelte';
 	import OneDrive from '$lib/components/icons/OneDrive.svelte';
@@ -59,7 +60,7 @@
 
 	export let onClose: Function;
 	/** 「交给…」: hands the draft (and the conversation) to 讨论台 / 协作台 / the image studio. */
-	export let onHandoff: ((to: 'answer' | 'discuss' | 'teams' | 'studio') => void) | null = null;
+	export let onHandoff: ((to: 'answer' | 'discuss' | 'teams' | 'studio' | 'video') => void) | null = null;
 	/** 「选择助手」: opens the assistant picker (the user's assistants and the templates); the pick
 	 * puts its prompt on the current model. Left out when not given. */
 	export let onSelectAssistant: (() => void) | null = null;
@@ -675,6 +676,19 @@
 							</div>
 						</DropdownMenu.Item>
 					{/if}
+					<DropdownMenu.Item
+						class="flex gap-2 items-center px-3 py-2 text-sm font-medium cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl"
+						data-halo-input-handoff="video"
+						on:click={() => onHandoff?.('video')}
+					>
+						<span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-gray-100 text-gray-600 dark:bg-gray-700/60 dark:text-gray-300">
+							<Clapperboard class="size-4" strokeWidth={2} />
+						</span>
+						<div class="min-w-0">
+							<div class="truncate">{tr('视频工作台', 'Video studio')}</div>
+							<div class="truncate text-xs font-normal text-gray-500 dark:text-gray-400">{tr('交给 Hermes 或 runner 做成视频', 'Hermes or a runner makes the video')}</div>
+						</div>
+					</DropdownMenu.Item>
 				{/if}
 			</div>
 		</DropdownMenu.Content>

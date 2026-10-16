@@ -33,7 +33,8 @@
 				label: '生图',
 				hint: '提示词、参考图、图库',
 				show: studioAllowed || current === 'studio'
-			}
+			},
+			{ key: 'video', label: '视频', hint: 'Hermes 或 runner 做视频、视频库', show: true }
 		] as { key: ModeKey; label: string; hint: string; show: boolean }[]
 	).filter((s) => s.show);
 

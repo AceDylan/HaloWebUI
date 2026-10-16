@@ -565,7 +565,7 @@ async def _show_report_media(request, user, chat_id: str, content: str) -> str:
     except Exception as e:
         log.warning(f"hermes report media skipped for chat {chat_id}: {e}")
         return content
-    metadata = {"chat_id": chat_id}
+    metadata = {"chat_id": chat_id, "media_origin": "runner"}
 
     def _store(name, handle, content_type):
         return _store_generated_file(request, user, metadata, name, handle, content_type)

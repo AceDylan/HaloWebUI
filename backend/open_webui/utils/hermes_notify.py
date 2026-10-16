@@ -467,7 +467,10 @@ async def show_notification_report(
     model_info = find_chat_model(chat_dict)
     if not model_info:
         raise HermesNotifyError(422, "chat has no assistant model to continue with")
-    content = await _show_report_media(request, user, chat_id, content)
+    content = await _show_report_media(
+        request, user, chat_id, content,
+        run={"run_id": run_id, "runner": source, "platform": "api_server"} if run_id else None,
+    )
 
     user_message_id, assistant_message_id = append_report_turn(
         chat_dict,
@@ -549,7 +552,7 @@ async def show_notification_report(
     }
 
 
-async def _show_report_media(request, user, chat_id: str, content: str) -> str:
+async def _show_report_media(request, user, chat_id: str, content: str, run: Optional[dict] = None) -> str:
     """The files a report hands over (``MEDIA:<path>``: the video, picture or document the
     run made) fetched from Hermes and shown in place; see hermes_media. The report stays
     as written when Hermes cannot be reached."""
@@ -565,7 +568,7 @@ async def _show_report_media(request, user, chat_id: str, content: str) -> str:
     except Exception as e:
         log.warning(f"hermes report media skipped for chat {chat_id}: {e}")
         return content
-    metadata = {"chat_id": chat_id, "media_origin": "runner"}
+    metadata = {"chat_id": chat_id, "media_origin": "runner", "video_run": run}
 
     def _store(name, handle, content_type):
         return _store_generated_file(request, user, metadata, name, handle, content_type)

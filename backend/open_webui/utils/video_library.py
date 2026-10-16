@@ -14,6 +14,7 @@ same file again, so the id comes from the file's name and size.
 import hashlib
 import logging
 import os
+import re
 import time
 from typing import Optional
 
@@ -31,6 +32,20 @@ def video_item_id(name: str, size: int) -> str:
     return f"video_{digest[:24]}"
 
 
+def _run_fields(run: Optional[dict]) -> dict:
+    """Which background run made it (a runner's report): ``runId``, ``runner``, ``platform``
+    (where the run was started: ``telegram``, ``api_server`` …), ``runTitle`` (its task)."""
+    if not isinstance(run, dict):
+        return {}
+    fields = {
+        "runId": str(run.get("run_id") or "").strip()[:64],
+        "runner": re.sub(r"-runner$", "", str(run.get("runner") or "").strip().lower())[:32],
+        "platform": str(run.get("platform") or "").strip()[:32],
+        "runTitle": " ".join(str(run.get("title") or "").split())[:120],
+    }
+    return {key: value for key, value in fields.items() if value}
+
+
 def video_form(
     *,
     file_id: str,
@@ -40,6 +55,7 @@ def video_form(
     chat_id: Optional[str] = None,
     origin: str = "hermes",
     created_at_ms: Optional[int] = None,
+    run: Optional[dict] = None,
 ) -> ImageStudioItemForm:
     name = os.path.basename(str(name or "").strip()) or "video.mp4"
     item_id = video_item_id(name, size)
@@ -53,6 +69,7 @@ def video_form(
         "contentType": content_type or "video/mp4",
         "origin": origin if origin in VIDEO_ORIGINS else "hermes",
         "createdAt": int(created_at_ms or time.time() * 1000),
+        **_run_fields(run),
     }
     chat_id = str(chat_id or "").strip()
     if chat_id and not chat_id.startswith("local:"):
@@ -70,3 +87,69 @@ def record_video(user_id: str, **kwargs) -> bool:
     except Exception as e:  # noqa: BLE001 — the video is already in the chat
         log.warning("Could not add a video to the video library: %s", e)
         return False
+
+
+VIDEO_EXTENSIONS = (".mp4", ".m4v", ".mov", ".webm", ".mkv")
+RUN_VIDEOS_MAX = 6
+
+
+def filed_run_videos(user_id: str, run_id: str) -> set[str]:
+    """Names of the videos of this run already in the library (a repeated notify is a no-op)."""
+    if not run_id:
+        return set()
+    rows = ImageStudioItems.get_items_by_user_id(user_id, kind=VIDEO_KIND)
+    return {str(row.data.get("name") or "") for row in rows if row.data.get("runId") == run_id}
+
+
+async def import_run_videos(request, user, *, paths: list[str], run: dict, fetch=None) -> dict:
+    """Files the videos a background run made into *user*'s library when its report never
+    reached a HaloWebUI chat (a run started from Telegram): each path is fetched from Hermes
+    (GET /v1/media, as a report's MEDIA tag is) and stored as one of the user's files.
+    Returns ``{"stored": [...], "skipped": [...], "failed": [{"path", "reason"}]}``.
+    *fetch(path)* replaces the Hermes fetch in tests."""
+    from open_webui.utils.hermes_agent import _store_generated_file
+    from open_webui.utils.hermes_media import _fetch_from_hermes, hermes_media_url, media_kind
+
+    out = {"stored": [], "skipped": [], "failed": []}
+    wanted = []
+    for path in paths:
+        path = str(path or "").strip()
+        if path.startswith("/") and path.lower().endswith(VIDEO_EXTENSIONS) and path not in wanted:
+            wanted.append(path)
+    already = filed_run_videos(user.id, str(run.get("run_id") or ""))
+    out["skipped"] = [p for p in wanted if os.path.basename(p) in already]
+    wanted = [p for p in wanted if p not in out["skipped"]]
+    if not wanted:
+        return out
+    if fetch is None:
+        from open_webui.utils.hermes_sessions import _connection, resolve_hermes_model
+
+        model = await resolve_hermes_model(request, user)
+        api_root, headers = _connection(request, user, model)
+        media_url = hermes_media_url(api_root)
+
+        async def fetch(path):
+            return await _fetch_from_hermes(media_url, headers, path)
+
+    metadata = {"chat_id": None, "media_origin": "runner", "video_run": run}
+    for path in wanted[:RUN_VIDEOS_MAX]:
+        name = os.path.basename(path)
+        try:
+            handle, content_type, problem = await fetch(path)
+        except Exception as e:  # noqa: BLE001
+            handle, content_type, problem = None, None, f"取回出错：{e}"
+        if handle is None:
+            out["failed"].append({"path": path, "reason": problem or "取不回"})
+            continue
+        try:
+            if media_kind(content_type or "", name) != "video":
+                out["failed"].append({"path": path, "reason": f"不是视频（{content_type}）"})
+                continue
+            _store_generated_file(request, user, metadata, name, handle, content_type or "video/mp4")
+            out["stored"].append(path)
+        except Exception as e:  # noqa: BLE001
+            log.warning("Could not store run video %s: %s", name, e)
+            out["failed"].append({"path": path, "reason": "保存失败"})
+        finally:
+            handle.close()
+    return out

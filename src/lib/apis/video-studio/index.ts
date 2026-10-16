@@ -18,6 +18,12 @@ export type LibraryVideo = {
 	/** The chat it came in, while that chat is still there. */
 	chatId?: string;
 	chatTitle?: string;
+	/** The background run that made it (a runner's report): its id, runner, where it was
+	 * started (telegram, api_server) and its task. */
+	runId?: string;
+	runner?: string;
+	platform?: string;
+	runTitle?: string;
 };
 
 const headers = (token: string) => ({ Accept: 'application/json', authorization: `Bearer ${token}` });

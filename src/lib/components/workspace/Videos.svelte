@@ -241,7 +241,14 @@
 		}
 	};
 
-	const videoTitle = (video: LibraryVideo) => video.chatTitle || video.title || video.name;
+	const videoTitle = (video: LibraryVideo) => video.chatTitle || video.runTitle || video.title || video.name;
+	// Who made it: the runner's name for a run (codex, officlaude …), Hermes for its own reply.
+	const makerLabel = (video: LibraryVideo) =>
+		video.origin === 'runner' ? video.runner || 'runner' : 'Hermes';
+	const PLATFORM_LABEL: Record<string, string> = { telegram: 'Telegram', api_server: 'HaloWebUI' };
+	// A run started elsewhere (Telegram) has no chat here: where it was asked for, and which run.
+	const runSource = (video: LibraryVideo) =>
+		video.chatId || !video.runId ? '' : PLATFORM_LABEL[video.platform ?? ''] ?? video.platform ?? '';
 	const dateLabel = (ms: number) => {
 		const d = new Date(ms);
 		return Number.isNaN(d.getTime()) ? '' : d.toLocaleString(undefined, { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
@@ -598,7 +605,7 @@
 								<span class="grid size-10 place-items-center rounded-full bg-white/90 text-gray-900 shadow-lg transition group-hover:scale-105">▶</span>
 							</span>
 							<span class="absolute left-2 top-2 rounded-full bg-black/55 px-2 py-0.5 text-[10.5px] font-medium text-white backdrop-blur">
-								{video.origin === 'runner' ? 'runner' : 'Hermes'}
+								{makerLabel(video)}
 							</span>
 						</button>
 						<div class="space-y-1 p-2">
@@ -608,6 +615,8 @@
 								<span class="flex shrink-0 items-center gap-0.5">
 									{#if video.chatId}
 										<a href="/c/{encodeURIComponent(video.chatId)}" class="rounded-full px-2 py-0.5 hover:bg-gray-100 hover:text-gray-800 dark:hover:bg-gray-800 dark:hover:text-gray-200" title="打开做这个视频的对话" data-video-chat>对话</a>
+									{:else if runSource(video)}
+										<span class="rounded-full px-2 py-0.5" title="在 {runSource(video)} 发起的 {video.runner ?? ''} 运行 {video.runId}" data-video-run={video.runId}>{runSource(video)}</span>
 									{/if}
 									<a href={video.url} download={video.name} class="rounded-lg p-1 hover:bg-gray-100 hover:text-gray-800 dark:hover:bg-gray-800 dark:hover:text-gray-200" aria-label="下载" title="下载 {video.name}">
 										<ArrowDownTray className="size-3.5" />
@@ -653,7 +662,7 @@
 			<!-- svelte-ignore a11y-media-has-caption -->
 			<video src={playing.url} controls autoplay playsinline class="max-h-[70vh] w-full rounded-xl bg-black" />
 			<div class="flex flex-wrap items-center justify-between gap-2 px-1 text-xs text-gray-500">
-				<span>{playing.name}{playing.size ? ` · ${formatFileSize(playing.size)}` : ''} · {dateLabel(playing.createdAt)}</span>
+				<span>{playing.name}{playing.size ? ` · ${formatFileSize(playing.size)}` : ''} · {dateLabel(playing.createdAt)}{playing.runId ? ` · ${makerLabel(playing)} 运行 ${playing.runId}` : ''}{runSource(playing) ? `（${runSource(playing)} 发起）` : ''}</span>
 				<span class="flex items-center gap-2">
 					{#if playing.chatId}
 						<a class="workspace-secondary-button text-xs" href="/c/{encodeURIComponent(playing.chatId)}">打开对话</a>

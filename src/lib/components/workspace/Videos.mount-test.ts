@@ -141,4 +141,21 @@ describe('Videos', () => {
 		expect(api.deleteLibraryVideo).toHaveBeenCalledWith(expect.anything(), 'video_2');
 		expect(cards()).toEqual(['video_3', 'video_1']);
 	});
+
+	it('shows a video from a run started on Telegram by its task, runner and platform', async () => {
+		api.getVideoPage.mockResolvedValue({
+			items: [video(7, { origin: 'runner', runner: 'codex', platform: 'telegram', runId: '20261015-224655-9fe3765e', runTitle: '生成一段视频，讲述长征', name: '长征_山河记得.mp4' })],
+			next: null
+		});
+		const target = await mount();
+		target.querySelector('[data-video-tab="library"]').click();
+		await sleep(20);
+		const card = target.querySelector('[data-video-card="video_7"]');
+		expect(card.textContent).toContain('生成一段视频，讲述长征');
+		expect(card.textContent).toContain('codex');
+		expect(card.querySelector('[data-video-chat]')).toBeFalsy();
+		const source = card.querySelector('[data-video-run]');
+		expect(source.textContent.trim()).toBe('Telegram');
+		expect(source.getAttribute('title')).toContain('20261015-224655-9fe3765e');
+	});
 });

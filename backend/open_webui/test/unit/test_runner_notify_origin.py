@@ -528,3 +528,66 @@ def test_the_quota_footer_still_ends_the_report(tmp_path):
     digest = notify.build_digest("r1", "success", str(tmp_path), "sid-1")
     assert digest.splitlines()[-1] == footer
     assert "# reclaude run" not in digest
+
+
+def _video_run(tmp_path, report, made_video=True):
+    run_dir = tmp_path / "20261015-224655-9fe3765e"
+    run_dir.mkdir()
+    (run_dir / "task.md").write_text("/codex 生成一段视频，讲述长征\n\nHermes 附加上下文\n", encoding="utf-8")
+    video = tmp_path / "长征.mp4"
+    if made_video:
+        video.write_bytes(b"v")
+    old = tmp_path / "旧片.mp4"
+    old.write_bytes(b"o")
+    os.utime(old, (time.time() - 86400, time.time() - 86400))
+    os.utime(run_dir / "task.md", (time.time() - 60, time.time() - 60))
+    (run_dir / "result.md").write_text(report.format(video=video, old=old), encoding="utf-8")
+    return run_dir, str(video)
+
+
+def test_a_telegram_run_files_its_videos_in_the_video_library(tmp_path, monkeypatch):
+    # The 长征 run (2026-10-15) named its video bare and reported only to Telegram: the
+    # library never got it. Videos it made go to HaloWebUI after the report; an older video
+    # the report merely mentions does not.
+    run_dir, video = _video_run(tmp_path, "做好了：`{video}`\n参考了以前的 {old}\n")
+    config = tmp_path / "notify.env"
+    config.write_text("HALOWEBUI_NOTIFY_URL=http://127.0.0.1:3000/api/v1/hermes/notifications\n"
+                      "HALOWEBUI_NOTIFY_TOKEN=t0k\n", encoding="utf-8")
+    posted = []
+    monkeypatch.setattr(notify, "post_notification",
+                        lambda url, token, payload, user_agent="", timeout=None:
+                        posted.append((url, token, payload, timeout)) or (200, '{"stored": 1}'))
+    args = type("A", (), {"run_dir": str(run_dir), "run_id": "20261015-224655-9fe3765e", "agent": "codex",
+                          "runner_name": "codex-runner", "config_file": [str(config)]})()
+    record, saved = {}, []
+    notify.file_run_videos(args, record, lambda: saved.append(dict(record)), "telegram")
+    assert posted == [("http://127.0.0.1:3000/api/v1/video-studio/runner-videos", "t0k",
+                       {"run_id": "20261015-224655-9fe3765e", "runner": "codex", "platform": "telegram",
+                        "title": "生成一段视频，讲述长征", "paths": [video]},
+                       notify.VIDEO_FILING_TIMEOUT_SECONDS)]
+    assert record["videos"]["http_status"] == 200 and saved
+
+
+def test_video_filing_never_costs_the_report(tmp_path, monkeypatch):
+    run_dir, video = _video_run(tmp_path, "MEDIA:{video}\n")
+    config = tmp_path / "notify.env"
+    config.write_text("HALOWEBUI_NOTIFY_URL=http://h:3000/api/v1/hermes/notifications\nHALOWEBUI_NOTIFY_TOKEN=t\n",
+                      encoding="utf-8")
+
+    def gone(*a, **k):
+        raise urllib.error.HTTPError("u", 404, "Not Found", {}, None)
+
+    monkeypatch.setattr(notify, "post_notification", gone)
+    args = type("A", (), {"run_dir": str(run_dir), "run_id": "r1", "agent": "codex",
+                          "runner_name": "codex-runner", "config_file": [str(config)]})()
+    record = {}
+    notify.file_run_videos(args, record, lambda: None, "telegram")  # an older HaloWebUI: no raise
+    assert record["videos"] == {"http_status": 404}
+    # no video made: nothing posted, nothing recorded
+    other = tmp_path / "other"
+    other.mkdir()
+    empty_dir, _ = _video_run(other, "没有视频", made_video=False)
+    args.run_dir = str(empty_dir)
+    record = {}
+    notify.file_run_videos(args, record, lambda: None, "telegram")
+    assert "videos" not in record

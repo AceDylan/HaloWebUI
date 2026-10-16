@@ -60,7 +60,7 @@ _fallback_spec = importlib.util.spec_from_file_location(
 runner_fallback = importlib.util.module_from_spec(_fallback_spec)
 _fallback_spec.loader.exec_module(runner_fallback)
 
-SCRIPT_VERSION = "2026-10-15.1"
+SCRIPT_VERSION = "2026-10-16.1"
 CONFIG_FILE = "/root/.hermes/reclaude-runner.env"
 REQUIRED_CONFIG_KEYS = ("HALOWEBUI_NOTIFY_URL", "HALOWEBUI_NOTIFY_TOKEN")
 STATE_DB = "/root/.hermes/state.db"
@@ -931,7 +931,7 @@ def deliver_to_chat(platform, chat_id, session_id, run_dir, digest, notice):
     return result
 
 
-def post_notification(url, token, payload, user_agent="reclaude-runner/1.0"):
+def post_notification(url, token, payload, user_agent="reclaude-runner/1.0", timeout=None):
     data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
     request = urllib.request.Request(
         url,
@@ -943,8 +943,81 @@ def post_notification(url, token, payload, user_agent="reclaude-runner/1.0"):
             "User-Agent": user_agent,
         },
     )
-    with urllib.request.urlopen(request, timeout=HTTP_TIMEOUT_SECONDS) as response:
+    with urllib.request.urlopen(request, timeout=timeout or HTTP_TIMEOUT_SECONDS) as response:
         return response.status, response.read().decode("utf-8", "replace")[:500]
+
+
+# A run started from Telegram reports there only, so HaloWebUI's 视频库 never saw its videos.
+# After the report went out they are posted to HaloWebUI, which fetches each from Hermes
+# (GET /v1/media) like a report's MEDIA tag. Best effort: it never holds the report back.
+VIDEO_FILE_RE = re.compile(r"\.(?:mp4|m4v|mov|webm|mkv)$", re.IGNORECASE)
+VIDEO_FILING_PATH = "/api/v1/video-studio/runner-videos"
+# HaloWebUI fetches up to 200 MB a video from Hermes before it answers.
+VIDEO_FILING_TIMEOUT_SECONDS = 300
+
+
+def run_videos(run_dir):
+    """The videos this run handed over: its report's MEDIA tags and the video files it made
+    that the report names (the same rule as the MEDIA lines added under a report)."""
+    body = _read_text(os.path.join(run_dir, "result.md"))
+    paths = [line[len("MEDIA:"):] for line in media_lines(body, "", run_dir)]
+    return [path for path in paths if VIDEO_FILE_RE.search(path) and os.path.isfile(path)]
+
+
+def run_title(run_dir):
+    """The task's first line (the person's request), without a leading /command."""
+    for line in _read_text(os.path.join(run_dir, "task.md")).splitlines():
+        line = re.sub(r"^/[A-Za-z][\w-]*\s+", "", line.strip())
+        if line:
+            return line[:200]
+    return ""
+
+
+def video_filing_url(config):
+    """HALOWEBUI_VIDEO_URL, or the notification URL's server with the video library's path."""
+    url = config.get("HALOWEBUI_VIDEO_URL", "").strip()
+    if url:
+        return url
+    notify_url = config.get("HALOWEBUI_NOTIFY_URL", "").strip()
+    match = re.match(r"(https?://[^/]+)", notify_url)
+    return f"{match.group(1)}{VIDEO_FILING_PATH}" if match else ""
+
+
+def file_run_videos(args, record, save, platform):
+    """Posts the run's videos to HaloWebUI's 视频库; records the outcome under "videos"."""
+    try:
+        paths = run_videos(args.run_dir)
+        if not paths:
+            return
+        config, _ = load_config(args.config_file)
+        url = video_filing_url(config)
+        token = config.get("HALOWEBUI_NOTIFY_TOKEN", "").strip()
+        if not url or not token:
+            record["videos"] = {"paths": paths, "skipped": "notify not configured"}
+            return
+        payload = {
+            "run_id": args.run_id,
+            "runner": args.agent,
+            "platform": platform,
+            "title": run_title(args.run_dir),
+            "paths": paths,
+        }
+        status, body = post_notification(
+            url, token, payload, user_agent=f"{args.runner_name}/1.0",
+            timeout=VIDEO_FILING_TIMEOUT_SECONDS,
+        )
+        record["videos"] = {"paths": paths, "http_status": status, "response": body[:300]}
+        log(f"filed {len(paths)} video(s) in HaloWebUI's video library: HTTP {status} {body[:160]}")
+    except urllib.error.HTTPError as exc:
+        # 404: a HaloWebUI from before the video library; nothing else to do.
+        record["videos"] = {"http_status": exc.code}
+        log(f"video library filing: HTTP {exc.code}")
+    except Exception as exc:  # never let the library cost the report
+        record["videos"] = {"error": str(exc)[:200]}
+        log(f"video library filing failed: {exc}")
+    finally:
+        if "videos" in record:
+            save()
 
 
 def deliver_direct(args, record, save, platform, chat_id, session_id, agent_session):
@@ -1180,12 +1253,15 @@ def notify(args):
                 log(f"notify skipped: {record['skipped']}")
                 save()
                 return 0
-            return deliver_direct(args, record, save, source, chat_id, session_id, agent_session)
+            result = deliver_direct(args, record, save, source, chat_id, session_id, agent_session)
+            file_run_videos(args, record, save, source)
+            return result
         record["skipped"] = f"origin is {source}; gateway delivers"
         log(
             f"notify skipped: origin session {session_id} came from {source}; the gateway delivers there"
         )
         save()
+        file_run_videos(args, record, save, source)
         return 0
 
     config, config_sources = load_config(args.config_file)

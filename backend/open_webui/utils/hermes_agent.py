@@ -1908,7 +1908,8 @@ _DATA_URL_FILE_RE = re.compile(
 def _store_generated_file(request, user, metadata, name: str, data, content_type: str) -> str:
     """Save what hermes produced (bytes, or a file object at offset 0) as one of the
     user's files; returns its URL. A video also goes into the user's video library
-    (``metadata["media_origin"]``: "runner" for a runner's report)."""
+    (``metadata["media_origin"]``: "runner" for a runner's report, ``metadata["video_run"]``:
+    which run made it)."""
     import io
     import uuid
 
@@ -1949,6 +1950,7 @@ def _store_generated_file(request, user, metadata, name: str, data, content_type
             content_type=content_type,
             chat_id=metadata.get("chat_id"),
             origin=origin,
+            run=metadata.get("video_run"),
         )
     return f"/api/v1/files/{file_id}/content"
 

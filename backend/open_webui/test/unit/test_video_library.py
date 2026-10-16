@@ -112,3 +112,69 @@ def test_hermes_files_record_videos_but_not_other_files(monkeypatch):
     assert len(rows) == 1
     assert rows[0].data["url"] == url
     assert rows[0].data["origin"] == "runner" and rows[0].data["chatId"] == "chat-d"
+
+
+def test_a_telegram_run_files_its_videos_once_with_where_they_came_from(monkeypatch):
+    import asyncio
+
+    from open_webui.storage.provider import Storage
+    from open_webui.utils.video_library import import_run_videos
+
+    monkeypatch.setattr(Storage, "upload_file", lambda stream, name: (len(stream.read()), f"/tmp/{name}"))
+    fetched = []
+
+    async def fetch(path):
+        fetched.append(path)
+        if path.endswith("gone.mp4"):
+            return None, None, "文件不存在或不允许读取"
+        return io.BytesIO(b"v" * 7), "video/mp4", None
+
+    user = _User("vid-tg")
+    run = {"run_id": "20261015-224655-9fe3765e", "runner": "codex-runner", "platform": "telegram",
+           "title": "生成一段视频，讲述长征"}
+    paths = ["/root/output/长征.mp4", "/root/output/gone.mp4", "/root/output/cover.png", "relative.mp4"]
+    out = asyncio.run(import_run_videos(None, user, paths=paths, run=run, fetch=fetch))
+    assert out["stored"] == ["/root/output/长征.mp4"]
+    assert out["failed"] == [{"path": "/root/output/gone.mp4", "reason": "文件不存在或不允许读取"}]
+    # pictures and relative paths are never asked for
+    assert fetched == ["/root/output/长征.mp4", "/root/output/gone.mp4"]
+    rows = ImageStudioItems.get_items_by_user_id("vid-tg", kind="video")
+    assert len(rows) == 1
+    data = rows[0].data
+    assert data["origin"] == "runner" and "chatId" not in data
+    assert (data["runId"], data["runner"], data["platform"], data["runTitle"]) == (
+        "20261015-224655-9fe3765e", "codex", "telegram", "生成一段视频，讲述长征")
+    # the notifier posting again does not fetch or store the same video twice
+    again = asyncio.run(import_run_videos(None, user, paths=paths[:1], run=run, fetch=fetch))
+    assert again == {"stored": [], "skipped": ["/root/output/长征.mp4"], "failed": []}
+    assert len(fetched) == 2
+
+
+def test_the_runner_videos_endpoint_needs_the_notification_token(monkeypatch):
+    from open_webui.routers import video_studio as router_module
+
+    calls = []
+
+    async def fake_import(request, user, *, paths, run):
+        calls.append((user.id, paths, run))
+        return {"stored": paths, "skipped": [], "failed": []}
+
+    monkeypatch.setattr(router_module, "import_run_videos", fake_import)
+    monkeypatch.setattr(router_module.Users, "get_first_user", lambda: _User("vid-owner"))
+    app = FastAPI()
+    app.include_router(video_studio.router, prefix="/api/v1/video-studio")
+    client = TestClient(app)
+    body = {"run_id": "20261016-221115-37da9b06", "runner": "officlaude", "platform": "telegram",
+            "title": "帮我生成一个讲述halowebui的视频", "paths": ["/root/work/halo-video/out/a.mp4"]}
+    monkeypatch.delenv("HERMES_AGENT_NOTIFY_TOKEN", raising=False)
+    assert client.post("/api/v1/video-studio/runner-videos", json=body).status_code == 503
+    monkeypatch.setenv("HERMES_AGENT_NOTIFY_TOKEN", "notify-secret")
+    assert client.post("/api/v1/video-studio/runner-videos", json=body,
+                       headers={"Authorization": "Bearer wrong"}).status_code == 401
+    assert client.post("/api/v1/video-studio/runner-videos", json={**body, "run_id": "../x"},
+                       headers={"Authorization": "Bearer notify-secret"}).status_code == 422
+    res = client.post("/api/v1/video-studio/runner-videos", json=body,
+                      headers={"Authorization": "Bearer notify-secret"})
+    assert res.status_code == 200 and res.json()["stored"] == body["paths"]
+    assert calls == [("vid-owner", body["paths"], {"run_id": body["run_id"], "runner": "officlaude",
+                                                    "platform": "telegram", "title": body["title"]})]

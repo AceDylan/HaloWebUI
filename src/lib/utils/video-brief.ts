@@ -142,8 +142,15 @@ export const buildVideoBrief = (opts: VideoBriefOptions): string => {
 			.map(([kind, n]) => `${n} 个${ATTACHMENT_KIND[kind] ?? '文件'}`)
 			.join('、');
 		lines.push(
-			`- 参考附件：${counts}（${attachments.map((a) => a.name).join('、')}），随消息附上，原文件路径见消息末尾；先看完再动手，能用作素材的就用上`
+			`- 参考附件：${counts}（${attachments.map((a) => a.name).join('、')}），随消息附上，原文件路径见消息末尾；先看完再动手，是素材还是风格参考以上面的描述为准`
 		);
+		if (opts.recipe !== 'footage' && attachments.some((a) => a.kind === 'video')) {
+			// A video handed over as "做成这样" (a downloaded short with its watermark) must not
+			// end up cut into the result; with 素材剪辑 the attached footage is the material.
+			lines.push(
+				'- 附件里的视频：描述没说要剪进成片时，只当风格参考——抽帧看构图、配色、字体、节奏和转场，用自己做的画面重现这种风格，不要直接使用原片画面、水印或角色形象'
+			);
+		}
 	}
 	lines.push(
 		'',

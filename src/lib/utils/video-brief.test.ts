@@ -47,6 +47,12 @@ describe('buildVideoBrief', () => {
 		expect(brief).toContain('配音：不要配音');
 		expect(brief).toContain('字幕：不要字幕');
 		expect(brief).toContain('参考附件：1 个视频、2 个图片（a.mp4、b.png、c.png）');
+		// 素材剪辑: the attached video is what gets cut
+		expect(brief).not.toContain('只当风格参考');
+		// otherwise a video attached as 「做成这样」 is a style reference unless the idea says to cut it in
+		const styled = buildVideoBrief({ ...base, attachments: [{ name: 'ref.mp4', kind: 'video' }] });
+		expect(styled).toContain('只当风格参考');
+		expect(buildVideoBrief({ ...base, attachments: [{ name: 'b.png', kind: 'image' }] })).not.toContain('只当风格参考');
 	});
 });
 

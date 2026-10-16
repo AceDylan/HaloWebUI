@@ -361,6 +361,44 @@ Closes #
 	});
 });
 
+describe('renderResponseHtmlFormat: files Hermes made', () => {
+	const video = '/api/v1/files/7807b3bf-983b-48d9-a15b-ff4001a08f99/content';
+
+	it('keeps a video or audio player a player, under its name link', () => {
+		const html = renderResponseHtmlFormat(
+			[
+				'视频在这里：',
+				`[电脑.mp4](${video})`,
+				'',
+				`<div><video src="${video}" controls preload="metadata" playsinline style="max-width:100%"></video></div>`,
+				'',
+				'<div><audio src="/api/v1/files/a1b2c3d4/content" controls preload="metadata" style="width:100%"></audio></div>'
+			].join('\n')
+		);
+
+		expect(html).toContain(`<video src="${video}" controls preload="metadata" playsinline`);
+		expect(html).toContain('<audio src="/api/v1/files/a1b2c3d4/content" controls');
+		expect(html).toContain(`href="${video}"`);
+		expect(html).not.toContain('&lt;video');
+		expect(html).not.toContain('&lt;div&gt;');
+	});
+
+	it('drops an HTML page preview line instead of showing its markup, and escapes anything else', () => {
+		const html = renderResponseHtmlFormat(
+			[
+				'[page.html](/api/v1/files/h1h1h1h1/content)',
+				'<iframe src="/api/v1/files/h1h1h1h1/content/html"></iframe>',
+				'<div><video src="https://evil.example/x.mp4" onerror="alert(1)"></video></div>'
+			].join('\n')
+		);
+
+		expect(html).toContain('href="/api/v1/files/h1h1h1h1/content"');
+		expect(html).not.toContain('iframe');
+		expect(html).not.toContain('<video');
+		expect(html).toContain('&lt;video');
+	});
+});
+
 describe('response-html-format theme variables', () => {
 	it('styles the fragment through theme variables instead of literal colors', () => {
 		const html = renderResponseHtmlFormat('# Report\n\nSummary text\n\n```ts\nconst a = 1;\n```');

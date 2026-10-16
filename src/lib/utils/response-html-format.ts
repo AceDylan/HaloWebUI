@@ -33,6 +33,7 @@ type ParsedBlock =
 	| { type: 'code'; lang: string; text: string }
 	| { type: 'table'; headers: string[]; rows: string[][] }
 	| { type: 'divider' }
+	| { type: 'media'; tag: 'video' | 'audio'; src: string }
 	| ActivityBlock
 	| { type: 'activity-group'; items: ActivityBlock[] };
 
@@ -191,6 +192,14 @@ const SENSITIVE_KEYS =
 	/^(password|secret|token|api[_-]?key|auth|credential|private[_-]?key|access[_-]?token)$/i;
 
 const isDivider = (line: string) => /^\s*(?:-{3,}|\*{3,}|_{3,})\s*$/.test(line);
+
+// The player or HTML-page preview the backend writes for a file Hermes made
+// (hermes_media.media_markdown, one line each). A player is rebuilt as a player; a
+// preview's frame cannot load in the formatted view, its name link above stays.
+const MEDIA_PLAYER_LINE_RE =
+	/^\s*<div><(video|audio) src="(\/api\/v1\/files\/[A-Za-z0-9-]+\/content)"[^>]*><\/\1><\/div>\s*$/;
+const FILE_PREVIEW_LINE_RE = /^\s*<iframe src="\/api\/v1\/files\/[A-Za-z0-9-]+\/content\/html"><\/iframe>\s*$/;
+const isMediaLine = (line: string) => MEDIA_PLAYER_LINE_RE.test(line) || FILE_PREVIEW_LINE_RE.test(line);
 const structuredDetailsOpenPattern = /<details\b[^>]*>/i;
 
 const decodeHtml = (value: unknown) => decode(String(value ?? ''));
@@ -485,6 +494,7 @@ const parseBlocks = (content: string): ParsedBlock[] => {
 				!line.trim() ||
 				isFence(line) ||
 				isDivider(line) ||
+				isMediaLine(line) ||
 				isStructuredDetailsStart(line) ||
 				isHeading(line) ||
 				isQuote(line) ||
@@ -540,6 +550,15 @@ const parseBlocks = (content: string): ParsedBlock[] => {
 
 		if (isDivider(line)) {
 			blocks.push({ type: 'divider' });
+			i += 1;
+			continue;
+		}
+
+		if (isMediaLine(line)) {
+			const player = MEDIA_PLAYER_LINE_RE.exec(line);
+			if (player) {
+				blocks.push({ type: 'media', tag: player[1] as 'video' | 'audio', src: player[2] });
+			}
 			i += 1;
 			continue;
 		}
@@ -1323,6 +1342,15 @@ const renderBlock = (block: ParsedBlock, blockId: string) => {
 					background: `linear-gradient(90deg, transparent, ${THEME.borderSubtle}, transparent)`
 				})
 			)}">`;
+
+		case 'media':
+			return `<div data-halo-block="media"><${block.tag} src="${escapeAttribute(block.src)}" controls preload="metadata"${
+				block.tag === 'video' ? ' playsinline' : ''
+			} style="${escapeAttribute(
+				block.tag === 'video'
+					? toStyle({ 'max-width': '100%', 'max-height': '70vh', 'border-radius': '12px', background: '#000' })
+					: toStyle({ width: '100%', 'max-width': '520px' })
+			)}"></${block.tag}></div>`;
 
 		case 'activity':
 			return renderActivityBlock(block);

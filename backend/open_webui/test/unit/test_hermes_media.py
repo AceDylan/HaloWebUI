@@ -98,3 +98,44 @@ def test_the_card_merge_keeps_the_players():
     assert "<script" not in hvp._merge_agy_html_artifact("<script>x()</script>\n\n文字", "<div>c</div>")
     # A reply that is only a video is brief: no card around a player.
     assert hvp.is_brief_plain_reply("视频：" + md("v.mp4", "/api/v1/files/v1/content", "video/mp4"))
+
+
+def test_a_line_that_only_names_a_video_plays_it_too():
+    text = (
+        "已生成《电脑是如何出现的》。\n\n视频文件：\n"
+        "/root/.hermes/workspaces/remotion/out/电脑是如何出现的.mp4\n\n"
+        "封面 `/root/out/cover.png`\n`/root/out/封面.png`\n"
+        "脚本在 /root/out/script.mp4 旁边。\n/root/out/notes.txt\n/root/gone.mp4\n\n"
+        "```\n/root/out/example.mp4\n```"
+    )
+    result, stored, fetched = _localize(
+        text,
+        {
+            "/root/.hermes/workspaces/remotion/out/电脑是如何出现的.mp4": b"mp4",
+            "/root/out/封面.png": b"png",
+        },
+    )
+    # Only whole lines that are a media path, outside code blocks.
+    assert fetched == [
+        "/root/.hermes/workspaces/remotion/out/电脑是如何出现的.mp4",
+        "/root/out/封面.png",
+        "/root/gone.mp4",
+    ]
+    assert '<div><video src="/api/v1/files/f1/content"' in result
+    assert "[电脑是如何出现的.mp4](/api/v1/files/f1/content)" in result
+    assert "![封面.png](/api/v1/files/f2/content)" in result
+    assert "`/root/out/封面.png`" not in result
+    assert "封面 `/root/out/cover.png`" in result  # named inside a sentence: text
+    assert "\n/root/gone.mp4\n" in result  # Hermes would not hand it out: as written
+    assert "没能取回" not in result
+    assert "/root/out/notes.txt" in result and "/root/out/example.mp4" in result
+    assert hermes_media.has_media("视频：\n/root/a.mp4") is True
+    assert hermes_media.has_media("在 /root/a.mp4 里") is False
+
+
+def test_a_tagged_path_also_named_bare_shows_once_and_keeps_its_failure_note():
+    text = "MEDIA:/root/out/v.mp4\n\n/root/out/v.mp4\n\nMEDIA:/root/gone.mp3\n/root/gone.mp3"
+    result, stored, fetched = _localize(text, {"/root/out/v.mp4": b"mp4"})
+    assert fetched == ["/root/out/v.mp4", "/root/gone.mp3"]
+    assert len(stored) == 1
+    assert result.count("（没能取回：") == 2  # the tagged path's note shows wherever it is named

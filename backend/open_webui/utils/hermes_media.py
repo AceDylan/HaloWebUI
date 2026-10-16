@@ -31,6 +31,14 @@ MEDIA_TAGS_MAX = 12
 _MEDIA_TAG_RE = re.compile(
     r"`?MEDIA:[ \t]*(?:`([^`\n]+)`|\"([^\"\n]+)\"|'([^'\n]+)'|(/[^\s`\"'<>]+))`?"
 )
+# A line that is only the path of a video, audio clip or picture (optionally in backticks)
+# counts as a tag too: a model that hands over "视频文件：\n/root/…/x.mp4" means to show it.
+# Unlike a tag, a bare path Hermes will not hand out stays as written.
+_BARE_MEDIA_LINE_RE = re.compile(
+    r"^[ \t]*(`?)(/[^\s`\"'<>]+\.(?:mp4|m4v|mov|webm|mkv|mp3|m4a|wav|ogg|oga|opus|flac|aac"
+    r"|png|jpe?g|gif|webp))\1[ \t]*$",
+    re.IGNORECASE | re.MULTILINE,
+)
 _TRAILING_PUNCTUATION = ".,;:!?)]}。，；：！？）」』、"
 _FENCE_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})", re.MULTILINE)
 
@@ -98,12 +106,29 @@ def _fenced_spans(text: str) -> list[tuple[int, int]]:
 
 def media_tag_paths(text: str) -> list[str]:
     """Absolute paths of the MEDIA tags outside code blocks, in order, once each."""
-    return list(dict.fromkeys(path for _, _, path in _media_tags(text)))
+    return list(dict.fromkeys(path for _, _, path, _ in _media_tags(text)))
+
+
+def has_media(text: str) -> bool:
+    """Whether *text* may hand over a file: a MEDIA tag or a line that is only a media path."""
+    return bool(text) and ("MEDIA:" in text or bool(_BARE_MEDIA_LINE_RE.search(text)))
 
 
 def _media_tags(text: str):
-    spans = _fenced_spans(text)
-    for match in _MEDIA_TAG_RE.finditer(text or ""):
+    """(start, end, path, bare) of each tag and bare media-path line outside code blocks."""
+    spans = _fenced_spans(text or "")
+    found = list(_tagged(text or "", spans))
+    for match in _BARE_MEDIA_LINE_RE.finditer(text or ""):
+        if any(start <= match.start() < end for start, end in spans):
+            continue
+        if any(start <= match.start() < end for start, end, _, _ in found):
+            continue
+        found.append((match.start(2) - len(match.group(1)), match.end(), match.group(2), True))
+    return sorted(found)
+
+
+def _tagged(text: str, spans):
+    for match in _MEDIA_TAG_RE.finditer(text):
         if any(start <= match.start() < end for start, end in spans):
             continue
         path = next(group for group in match.groups() if group is not None).strip()
@@ -115,7 +140,7 @@ def _media_tags(text: str):
                 end = match.start(4) + len(stripped)
             path = stripped
         if path.startswith("/"):
-            yield match.start(), end, path
+            yield match.start(), end, path, False
 
 
 Store = Callable[[str, object, str], str]
@@ -133,22 +158,24 @@ async def localize_media_tags(
     *media_url* is Hermes' ``…/v1/media``; *store(name, fileobj, content_type)* saves the
     bytes and returns the file's URL. A file Hermes will not hand out (gone, too big,
     refused) stays named: ``path``（没能取回：reason）. *fetch* replaces the HTTP fetch in tests."""
-    if not text or "MEDIA:" not in text:
+    if not has_media(text):
         return text
-    tags = list(_media_tags(text))
+    tags = _media_tags(text)
     if not tags:
         return text
     shown: dict[str, str] = {}
+    # A path only ever named bare stays as written when Hermes will not hand it out.
+    tagged = {path for _, _, path, bare in tags if not bare}
 
     async def _fetch(path: str):
         if fetch is not None:
             return await fetch(path)
         return await _fetch_from_hermes(media_url, headers, path)
 
-    for path in dict.fromkeys(path for _, _, path in tags):
+    for path in dict.fromkeys(path for _, _, path, _ in tags):
         name = os.path.basename(path) or "file"
         if len(shown) >= MEDIA_TAGS_MAX:
-            shown[path] = f"`{path}`"
+            shown[path] = f"`{path}`" if path in tagged else None
             continue
         try:
             fetched = await _fetch(path)
@@ -157,7 +184,7 @@ async def localize_media_tags(
             fetched = (None, None, "取回出错")
         handle, content_type, problem = fetched
         if handle is None:
-            shown[path] = f"`{path}`（没能取回：{problem}）"
+            shown[path] = f"`{path}`（没能取回：{problem}）" if path in tagged else None
             continue
         try:
             content_type = content_type or mimetypes.guess_type(name)[0] or "application/octet-stream"
@@ -170,7 +197,9 @@ async def localize_media_tags(
             handle.close()
 
     parts, last = [], 0
-    for start, end, path in tags:
+    for start, end, path, _ in tags:
+        if shown[path] is None:
+            continue  # a bare path that stays as written
         parts.append(text[last:start])
         parts.append(shown[path])
         nxt = text[end : end + 1]

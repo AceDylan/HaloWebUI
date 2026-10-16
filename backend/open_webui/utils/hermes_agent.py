@@ -59,6 +59,7 @@ from open_webui.socket.main import (
 from open_webui.tasks import create_task, set_current_task_blocks_completion
 from open_webui.utils.chat_image_refs import materialize_openai_image_message_refs
 from open_webui.utils.hermes_media import (
+    has_media,
     hermes_media_url,
     localize_media_tags,
     media_markdown,
@@ -1943,8 +1944,9 @@ def _store_data_url_files(request, user, metadata, text: str) -> str:
 
 async def _store_media_tags(request, user, metadata, text: str, base_url, headers) -> str:
     """Fetch the files of MEDIA tags still in *text* (over the 5MB hermes inlines, or a
-    hermes without the data-URL patch) and show them in place; see hermes_media."""
-    if not text or "MEDIA:" not in text or not base_url:
+    hermes without the data-URL patch) and of lines that only name a media file, and show
+    them in place; see hermes_media."""
+    if not has_media(text) or not base_url:
         return text
 
     def _store(name, handle, content_type):

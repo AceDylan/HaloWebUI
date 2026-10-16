@@ -40,7 +40,9 @@ def test_a_video_plays_where_the_report_named_it():
     assert "[长征.mp4](/api/v1/files/f1/content)" in result
     assert "![cover.png](/api/v1/files/f2/content)" in result
     assert result.count("<video") == 2  # named twice, stored once
-    assert "/api/v1/files/f1/content)。" in result  # the full stop stays
+    assert "</video></div>\n\n。" not in result  # no full stop alone under the player
+    assert "![cover.png](/api/v1/files/f2/content)\n" in result
+    assert result.index("[长征.mp4](/api/v1/files/f1/content)") < result.index('<div><video src="/api/v1/files/f1')
     assert "`/root/gone.mp3`（没能取回：文件不存在或不允许读取）" in result
     assert "MEDIA:/root/example.mp4" in result  # an example in a code block is left alone
     assert "\n\n\n" not in result

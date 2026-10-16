@@ -1179,25 +1179,25 @@ const MARKDOWN_IMAGE_RE = /!\[([^\]]*)\]\(\s*(<[^>]+>|[^)\s]+)(?:\s+["'][^"']*["
 const HTML_IMAGE_TAG_RE = /<img\b[^>]*?\ssrc\s*=\s*(?:"([^"]*)"|'([^']*)')[^>]*>/gi;
 const HTML_IMAGE_ALT_RE = /\salt\s*=\s*(?:"([^"]*)"|'([^']*)')/i;
 
-// A video or audio player with its link line, an HTML file's preview with its
-// link line, or a link to a stored file. The card's sandbox can play none of
+// A video or audio player under its name line, an HTML file's preview under its
+// name line, or a link to a stored file. The card's sandbox can play none of
 // them, so they always show next to it.
 const MEDIA_PLAYER_RE =
-	/<div><(video|audio) src="(\/api\/v1\/files\/[^"]+)"[^>]*><\/\1><\/div>(?:\s*\[[^\]\n]*\]\(\2\))?/g;
+	/(?:\[[^\]\n]*\]\((\/api\/v1\/files\/[^)\s]+)\)\s*)?<div><(video|audio) src="(\/api\/v1\/files\/[^"]+)"[^>]*><\/\2><\/div>/g;
 const FILE_PREVIEW_RE =
-	/<iframe src="(\/api\/v1\/files\/[^"]+)\/html"><\/iframe>(?:\s*\[[^\]\n]*\]\(\1\))?/g;
+	/(?:\[[^\]\n]*\]\((\/api\/v1\/files\/[^)\s]+)\)\s*)?<iframe src="(\/api\/v1\/files\/[^"]+)\/html"><\/iframe>/g;
 const FILE_LINK_RE = /(?<!!)\[([^\]\n]+)\]\((\/api\/v1\/files\/[A-Za-z0-9_.-]+\/content)\)/g;
 
 const collectImagesFromMarkdown = (text: string): HtmlArtifactCompanionImage[] => {
 	const found: { index: number; item: HtmlArtifactCompanionImage }[] = [];
 	const players = new Set<string>();
 	for (const match of text.matchAll(MEDIA_PLAYER_RE)) {
-		players.add(match[2]);
-		found.push({ index: match.index ?? 0, item: { src: match[2], alt: '', markdown: match[0] } });
+		players.add(match[3]);
+		found.push({ index: match.index ?? 0, item: { src: match[3], alt: '', markdown: match[0] } });
 	}
 	for (const match of text.matchAll(FILE_PREVIEW_RE)) {
-		players.add(match[1]);
-		found.push({ index: match.index ?? 0, item: { src: match[1], alt: '', markdown: match[0] } });
+		players.add(match[2]);
+		found.push({ index: match.index ?? 0, item: { src: match[2], alt: '', markdown: match[0] } });
 	}
 	for (const match of text.matchAll(FILE_LINK_RE)) {
 		if (!players.has(match[2])) {

@@ -657,8 +657,8 @@ window.done = true;
 	it('keeps a video, an html preview and a file link next to the card, in order', () => {
 		// A Hermes reply or runner report with what it made (backend hermes_media.media_markdown).
 		const video =
-			'<div><video src="/api/v1/files/v1/content" controls preload="metadata" playsinline style="max-width:100%"></video></div>\n\n[长征.mp4](/api/v1/files/v1/content)';
-		const page = '<iframe src="/api/v1/files/h1/content/html"></iframe>\n\n[page.html](/api/v1/files/h1/content)';
+			'[长征.mp4](/api/v1/files/v1/content)\n\n<div><video src="/api/v1/files/v1/content" controls preload="metadata" playsinline style="max-width:100%"></video></div>';
+		const page = '[page.html](/api/v1/files/h1/content)\n\n<iframe src="/api/v1/files/h1/content/html"></iframe>';
 		const content =
 			`视频做好了。\n\n${video}\n\n![封面](/api/v1/files/c1/content)\n\n${page}\n\n` +
 			'[report.pdf](/api/v1/files/p1/content)\n\n```html\n<section><video src="/api/v1/files/v1/content"></video></section>\n```';

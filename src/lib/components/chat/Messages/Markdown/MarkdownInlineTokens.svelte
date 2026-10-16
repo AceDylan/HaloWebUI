@@ -115,7 +115,7 @@
 				frameborder="0"
 				sandbox={HTML_PREVIEW_SANDBOX}
 				referrerpolicy={HTML_PREVIEW_REFERRER_POLICY}
-				class="min-h-80 rounded-lg border border-gray-100 dark:border-gray-800"
+				class="min-h-80 rounded-lg border border-gray-100 bg-white dark:border-gray-800"
 			></iframe>
 		{:else if tokenText.includes(`<source_id`)}
 			<Source {id} {token} onClick={onSourceClick} />
@@ -246,7 +246,7 @@
 				frameborder="0"
 				sandbox={HTML_PREVIEW_SANDBOX}
 				referrerpolicy={HTML_PREVIEW_REFERRER_POLICY}
-				class="min-h-80 rounded-lg border border-gray-100 dark:border-gray-800"
+				class="min-h-80 rounded-lg border border-gray-100 bg-white dark:border-gray-800"
 			></iframe>
 		{/if}
 	{:else if token.type === 'citation'}

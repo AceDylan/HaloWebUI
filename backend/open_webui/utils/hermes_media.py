@@ -59,24 +59,25 @@ def _label(name: str) -> str:
 
 
 def media_markdown(name: str, url: str, content_type: str) -> str:
-    """How a stored file shows in a reply. Players and previews are HTML blocks wrapped in
-    a div (a lone ``<video>`` line is not an HTML block to Markdown) set off by blank lines."""
+    """How a stored file shows in a reply: its name (a download link) above the player or
+    preview. Players are HTML blocks wrapped in a div (a lone ``<video>`` line is not an
+    HTML block to Markdown), set off by blank lines."""
     label = _label(name)
     kind = media_kind(content_type, name)
     if kind == "image":
         return f"![{label}]({url})"
     if kind == "video":
         return (
-            f'\n\n<div><video src="{url}" controls preload="metadata" playsinline '
-            f'style="{_VIDEO_STYLE}"></video></div>\n\n[{label}]({url})'
+            f'\n\n[{label}]({url})\n\n<div><video src="{url}" controls preload="metadata" '
+            f'playsinline style="{_VIDEO_STYLE}"></video></div>\n\n'
         )
     if kind == "audio":
         return (
-            f'\n\n<div><audio src="{url}" controls preload="metadata" '
-            f'style="{_AUDIO_STYLE}"></audio></div>\n\n[{label}]({url})'
+            f'\n\n[{label}]({url})\n\n<div><audio src="{url}" controls preload="metadata" '
+            f'style="{_AUDIO_STYLE}"></audio></div>\n\n'
         )
     if kind == "html" and url.endswith("/content"):
-        return f'\n\n<iframe src="{url}/html"></iframe>\n\n[{label}]({url})'
+        return f'\n\n[{label}]({url})\n\n<iframe src="{url}/html"></iframe>\n\n'
     return f"[{label}]({url})"
 
 
@@ -172,6 +173,9 @@ async def localize_media_tags(
     for start, end, path in tags:
         parts.append(text[last:start])
         parts.append(shown[path])
+        nxt = text[end : end + 1]
+        if nxt and nxt in _TRAILING_PUNCTUATION and shown[path].endswith("\n\n"):
+            end += 1  # "MEDIA:/x.mp4。": the full stop would sit alone under the player
         last = end
     parts.append(text[last:])
     return re.sub(r"\n{3,}", "\n\n", "".join(parts))

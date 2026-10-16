@@ -24,6 +24,8 @@ import time
 from html.parser import HTMLParser
 from typing import Any
 
+from open_webui.utils.hermes_media import MEDIA_PLAYER_RE, strip_media_players
+
 HTML_VISUAL_FEATURE_KEY = "html_visual_artifacts"
 HTML_VISUAL_SURFACE_KEY = "html_visual_surface"
 HTML_VISUAL_PROMPT_MARKER = "HALOWEBUI_HTML_VISUAL_ARTIFACT_MODE"
@@ -1422,7 +1424,10 @@ def _protect_non_artifact_details(value: str) -> tuple[str, list[str]]:
         protected_details.append(match.group(0))
         return token
 
-    return _NON_ARTIFACT_DETAILS_RE.sub(protect_detail, value), protected_details
+    value = _NON_ARTIFACT_DETAILS_RE.sub(protect_detail, value)
+    # A Hermes file's player or preview (hermes_media) is part of the answer, not
+    # page source to move into the card: the card's sandbox could not play it.
+    return MEDIA_PLAYER_RE.sub(protect_detail, value), protected_details
 
 
 def _restore_non_artifact_details(value: str, protected_details: list[str]) -> str:
@@ -1533,7 +1538,7 @@ def has_html_visual_artifact(content: Any) -> bool:
     candidate = _THINKING_BLOCK_RE.sub("", content)
     candidate = _NON_ARTIFACT_DETAILS_RE.sub("", candidate)
     blocks, _, _ = _scan_top_level_markdown_fences(candidate)
-    outside_source = _NON_ARTIFACT_DETAILS_RE.sub("", content)
+    outside_source = MEDIA_PLAYER_RE.sub("", _NON_ARTIFACT_DETAILS_RE.sub("", content))
     _, outside, _ = _scan_top_level_markdown_fences(outside_source)
     preview_blocks = _preview_artifact_fences(blocks)
     raw_tag_present = bool(_RAW_HTML_TAG_SOURCE_START_RE.search(outside))
@@ -1571,7 +1576,7 @@ def is_brief_plain_reply(content: Any) -> bool:
         return False
     visible = _NON_ARTIFACT_DETAILS_RE.sub("", content)
     visible = _THINKING_BLOCK_RE.sub("", visible)
-    visible = _BRIEF_REPLY_IMAGE_RE.sub("", visible).strip()
+    visible = MEDIA_PLAYER_RE.sub("", _BRIEF_REPLY_IMAGE_RE.sub("", visible)).strip()
     if _BRIEF_REPLY_STRUCTURE_RE.search(visible) or _RAW_HTML_TAG_SOURCE_START_RE.search(
         visible
     ):
@@ -1840,8 +1845,6 @@ def html_cards_as_text(content: str) -> str:
 
 
 def _build_agy_html_request_prompt(content: str) -> str:
-    from open_webui.utils.hermes_media import strip_media_players
-
     # The card's sandbox cannot load a video or audio file: the chat shows the
     # player next to the card, the designer only sees the file's link.
     answer = _NON_ARTIFACT_DETAILS_RE.sub("", strip_media_players(content))

@@ -17,12 +17,8 @@ import tempfile
 from typing import Awaitable, Callable, Optional
 from urllib.parse import quote
 
-import aiohttp
-
-from open_webui.env import AIOHTTP_CLIENT_SESSION_SSL, SRC_LOG_LEVELS
-
+# Standard library only at import time: html_visual_prompt uses the patterns below.
 log = logging.getLogger(__name__)
-log.setLevel(SRC_LOG_LEVELS["MAIN"])
 
 # Same cap as Hermes' GET /v1/media.
 MEDIA_FETCH_MAX_BYTES = 200 * 1024 * 1024
@@ -183,6 +179,10 @@ async def localize_media_tags(
 
 async def _fetch_from_hermes(media_url: str, headers: dict, path: str):
     """(file object at offset 0, content type, None) or (None, None, why)."""
+    import aiohttp
+
+    from open_webui.env import AIOHTTP_CLIENT_SESSION_SSL
+
     timeout = aiohttp.ClientTimeout(total=MEDIA_FETCH_TIMEOUT_SECONDS)
     url = f"{media_url}?path={quote(path, safe='/')}"
     async with aiohttp.ClientSession(trust_env=True, timeout=timeout) as session:
@@ -214,10 +214,12 @@ def hermes_media_url(base_url: str) -> str:
     return f"{base}/media" if base.endswith("/v1") else f"{base}/v1/media"
 
 
-_PLAYER_RE = re.compile(
-    r'\n*<div><(video|audio) src="[^"]*"[^>]*></\1></div>\n*'
-    r'|\n*<iframe src="/api/v1/files/[^"]+/content/html"></iframe>\n*'
+# The players and previews media_markdown writes, exactly.
+MEDIA_PLAYER_RE = re.compile(
+    r'<div><(video|audio) src="/api/v1/files/[^"]+"[^>]*></\1></div>'
+    r'|<iframe src="/api/v1/files/[^"]+/content/html"></iframe>'
 )
+_PLAYER_RE = re.compile(rf"\n*(?:{MEDIA_PLAYER_RE.pattern})\n*")
 
 
 def strip_media_players(text: str) -> str:

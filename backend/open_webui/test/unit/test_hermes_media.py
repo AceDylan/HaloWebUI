@@ -71,3 +71,28 @@ def test_text_without_tags_is_left_as_is():
     for text in ("", "plain", "MEDIA: relative/x.mp4"):
         result, stored, _ = _localize(text, {})
         assert result == text and stored == []
+
+
+def test_the_card_merge_keeps_the_players():
+    # 2026-10-16 live: the design pass stripped the players as raw HTML, leaving the links.
+    from open_webui.utils import html_visual_prompt as hvp
+
+    md = hermes_media.media_markdown
+    content = (
+        "## 视频做好了\n\n- 91 秒\n"
+        + md("v.mp4", "/api/v1/files/v1/content", "video/mp4")
+        + "\n\n"
+        + md("a.mp3", "/api/v1/files/a1/content", "audio/mpeg")
+        + "\n\n"
+        + md("p.html", "/api/v1/files/h1/content", "text/html")
+    )
+    merged = hvp._merge_agy_html_artifact(content, '<div class="hv"><h1>卡片</h1></div>')
+    assert merged.count("<div><video src=") == 1
+    assert merged.count("<div><audio src=") == 1
+    assert '<iframe src="/api/v1/files/h1/content/html"></iframe>' in merged
+    assert merged.rstrip().endswith("````")
+    assert hvp.has_html_visual_artifact(merged)
+    # A raw page outside a fence is still stripped.
+    assert "<script" not in hvp._merge_agy_html_artifact("<script>x()</script>\n\n文字", "<div>c</div>")
+    # A reply that is only a video is brief: no card around a player.
+    assert hvp.is_brief_plain_reply("视频：" + md("v.mp4", "/api/v1/files/v1/content", "video/mp4"))

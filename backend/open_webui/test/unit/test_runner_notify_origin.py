@@ -21,6 +21,13 @@ notify = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(notify)
 
 
+@pytest.fixture(autouse=True)
+def no_runner_continuation(monkeypatch):
+    # Continuation belongs to the host runner, not notification tests. Never launch a
+    # real coding agent, and keep these tests runnable without host-only scripts.
+    monkeypatch.setattr(notify, "_continue_run", lambda run_dir: {})
+
+
 @pytest.fixture
 def state(tmp_path):
     path = tmp_path / "state.db"
@@ -543,6 +550,57 @@ def _video_run(tmp_path, report, made_video=True):
     os.utime(run_dir / "task.md", (time.time() - 60, time.time() - 60))
     (run_dir / "result.md").write_text(report.format(video=video, old=old), encoding="utf-8")
     return run_dir, str(video)
+
+
+@pytest.mark.parametrize("agent", ["agy", "codex", "reclaude", "cchclaude", "anyclaude", "officlaude"])
+@pytest.mark.parametrize("max_chars", [80, notify.HALOWEBUI_DIGEST_MAX_CHARS])
+def test_explicit_delivery_excludes_render_intermediates_for_every_runner(tmp_path, agent, max_chars):
+    run_dir, video = _video_run(tmp_path, "")
+    silent = tmp_path / "silent.mp4"
+    preview = tmp_path / "preview.png"
+    silent.write_bytes(b"silent")
+    preview.write_bytes(b"preview")
+    body = (
+        f"Render output: {silent}\nPreview: {preview}\n"
+        + "Rendering frames...\n" * 20
+        + f"\n成片：\nMEDIA:{video}\n"
+    )
+    (run_dir / "result.md").write_text(body, encoding="utf-8")
+
+    digest = notify.build_digest("r1", "success", str(run_dir), "session", agent=agent,
+                                 max_chars=max_chars)
+    # Both a full web report and a truncated Telegram report hand over only the final.
+    assert notify.MEDIA_TAG_RE.findall(digest) == [video]
+    # Telegram's separate library filing follows the same explicit delivery list.
+    assert notify.run_videos(str(run_dir)) == [video]
+
+
+def test_multiple_explicit_deliverables_are_preserved_including_missing_files(tmp_path):
+    run_dir, video = _video_run(tmp_path, "")
+    second = tmp_path / "second.mp4"
+    second.write_bytes(b"second")
+    missing = tmp_path / "missing.mp4"
+    body = f"MEDIA:{video}\nMEDIA:{second}\nMEDIA:{missing}\nMEDIA:{video}"
+    (run_dir / "result.md").write_text(body, encoding="utf-8")
+    assert notify.media_lines(body, f"MEDIA:{video}", str(run_dir)) == [
+        f"MEDIA:{second}", f"MEDIA:{missing}"
+    ]
+    assert notify.run_videos(str(run_dir)) == [video, str(second)]
+
+
+def test_explicit_nonvideo_delivery_does_not_file_mentioned_video(tmp_path):
+    run_dir, video = _video_run(tmp_path, "中间文件：{video}\nMEDIA:/output/report.pdf")
+    assert notify.run_videos(str(run_dir)) == []
+
+
+def test_fenced_example_is_not_an_explicit_delivery_or_a_fallback_file(tmp_path):
+    run_dir, video = _video_run(tmp_path, "")
+    example = tmp_path / "example.mp4"
+    example.write_bytes(b"example")
+    body = f"```text\nMEDIA:{example}\n```\n视频保存在 `{video}`"
+    (run_dir / "result.md").write_text(body, encoding="utf-8")
+    assert notify.media_lines(body, body, str(run_dir)) == [f"MEDIA:{video}"]
+    assert notify.run_videos(str(run_dir)) == [video]
 
 
 def test_a_telegram_run_files_its_videos_in_the_video_library(tmp_path, monkeypatch):

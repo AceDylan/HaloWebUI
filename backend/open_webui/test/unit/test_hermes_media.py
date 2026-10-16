@@ -139,3 +139,38 @@ def test_a_tagged_path_also_named_bare_shows_once_and_keeps_its_failure_note():
     assert fetched == ["/root/out/v.mp4", "/root/gone.mp3"]
     assert len(stored) == 1
     assert result.count("（没能取回：") == 2  # the tagged path's note shows wherever it is named
+
+
+def test_explicit_delivery_does_not_fetch_or_store_bare_intermediate_files():
+    text = (
+        "渲染日志：\n/root/out/silent.mp4\n/root/out/narration.wav\n"
+        "`/root/out/preview.png`\n\n成片：\nMEDIA:/root/out/final.mp4\n"
+        "MEDIA:/root/out/cover.png"
+    )
+    result, stored, fetched = _localize(text, {
+        "/root/out/silent.mp4": b"silent", "/root/out/final.mp4": b"final",
+        "/root/out/narration.wav": b"audio", "/root/out/preview.png": b"preview",
+        "/root/out/cover.png": b"cover",
+    })
+    assert fetched == ["/root/out/final.mp4", "/root/out/cover.png"]
+    assert [name for name, _, _ in stored] == ["final.mp4", "cover.png"]
+    assert result.count("<video") == 1
+    assert "/root/out/silent.mp4" in result  # remains diagnostic text
+
+
+def test_missing_explicit_final_does_not_fall_back_to_silent_video():
+    result, stored, fetched = _localize(
+        "/root/out/silent.mp4\nMEDIA:/root/out/final.mp4",
+        {"/root/out/silent.mp4": b"silent"},
+    )
+    assert fetched == ["/root/out/final.mp4"]
+    assert stored == [] and "没能取回" in result and "<video" not in result
+
+
+def test_example_media_tag_in_code_does_not_disable_bare_delivery():
+    result, stored, fetched = _localize(
+        "```\nMEDIA:/example.mp4\n```\n/root/out/final.mp4",
+        {"/root/out/final.mp4": b"final"},
+    )
+    assert fetched == ["/root/out/final.mp4"]
+    assert len(stored) == 1 and result.count("<video") == 1

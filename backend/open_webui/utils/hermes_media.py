@@ -118,7 +118,13 @@ def _media_tags(text: str):
     """(start, end, path, bare) of each tag and bare media-path line outside code blocks."""
     spans = _fenced_spans(text or "")
     found = list(_tagged(text or "", spans))
+    explicit = {path for _, _, path, _ in found}
     for match in _BARE_MEDIA_LINE_RE.finditer(text or ""):
+        # MEDIA tags define the delivery list. A render log's bare intermediate path
+        # must not be fetched, stored in the library or rendered as another player.
+        # Repeated mentions of explicitly delivered files retain their usual rendering.
+        if explicit and match.group(2) not in explicit:
+            continue
         if any(start <= match.start() < end for start, end in spans):
             continue
         if any(start <= match.start() < end for start, end, _, _ in found):

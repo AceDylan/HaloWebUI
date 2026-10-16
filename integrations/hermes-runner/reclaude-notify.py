@@ -55,12 +55,7 @@ import time
 import urllib.error
 import urllib.request
 
-_fallback_spec = importlib.util.spec_from_file_location(
-    "runner_fallback", os.path.join(os.path.dirname(__file__), "runner_fallback.py"))
-runner_fallback = importlib.util.module_from_spec(_fallback_spec)
-_fallback_spec.loader.exec_module(runner_fallback)
-
-SCRIPT_VERSION = "2026-10-16.1"
+SCRIPT_VERSION = "2026-10-17.1"
 CONFIG_FILE = "/root/.hermes/reclaude-runner.env"
 REQUIRED_CONFIG_KEYS = ("HALOWEBUI_NOTIFY_URL", "HALOWEBUI_NOTIFY_TOKEN")
 STATE_DB = "/root/.hermes/state.db"
@@ -680,6 +675,23 @@ PRODUCED_MEDIA_RE = re.compile(
 PRODUCED_MEDIA_MAX = 6
 
 
+def _media_text(body):
+    """Ignore fenced examples and command output when discovering delivered files."""
+    lines, fence = [], ""
+    for line in body.splitlines(keepends=True):
+        match = re.match(r"^ {0,3}(`{3,}|~{3,})", line)
+        if match:
+            marker = match.group(1)
+            if not fence:
+                fence = marker
+            elif marker[0] == fence[0] and len(marker) >= len(fence):
+                fence = ""
+            lines.append("\n")
+        else:
+            lines.append("\n" if fence else line)
+    return "".join(lines)
+
+
 def _run_started_at(run_dir):
     """When the task began: the first round's task.md (a resumed run "<id>-a1" is the same
     task, and the file it reports may come from an earlier round)."""
@@ -696,10 +708,17 @@ def _run_started_at(run_dir):
 
 def media_lines(body, shown, run_dir):
     """``MEDIA:`` lines to add under the report shown as *shown* (*body* cut short): tags the
-    cut dropped, and the media files this run made that *body* names without a tag."""
+    cut dropped, or, only without explicit tags, media files named by the report.
+
+    An explicit delivery list is authoritative. Render logs can name silent intermediate
+    videos, narration tracks and preview frames; they must not become extra attachments.
+    Decide from the full report, even when the delivery tags were cut from *shown*."""
+    body, shown = _media_text(body), _media_text(shown)
     tagged = list(dict.fromkeys(MEDIA_TAG_RE.findall(body)))
     kept = set(MEDIA_TAG_RE.findall(shown))
     paths = [path for path in tagged if path not in kept]
+    if tagged:
+        return [f"MEDIA:{path}" for path in paths]
     started = _run_started_at(run_dir)
     produced = []
     if started is not None:
@@ -1157,7 +1176,7 @@ def main():
             return 0
         # Continuation precedes origin/config/display/dedupe checks.
         if args.agent == "reclaude":
-            outcome = runner_fallback.continue_run(args.run_dir)
+            outcome = _continue_run(args.run_dir)
             if outcome.get("state") == "finished":
                 args.run_id = outcome["target_run_id"]
                 args.run_dir = outcome["target_dir"]
@@ -1177,8 +1196,19 @@ def main():
         return notify(args)
 
 
+def _continue_run(run_dir):
+    # This host-only helper is needed for reclaude continuation, not for importing the
+    # notifier's report/media helpers or inspecting its version in a clean checkout.
+    spec = importlib.util.spec_from_file_location(
+        "runner_fallback", os.path.join(os.path.dirname(__file__), "runner_fallback.py"))
+    runner_fallback = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(runner_fallback)
+    return runner_fallback.continue_run(run_dir)
+
+
 def read_meta_notification(run_dir):
-    return runner_fallback.read(Path(run_dir) / "notify.json")
+    path = Path(run_dir) / "notify.json"
+    return json.loads(path.read_text()) if path.exists() else {}
 
 
 def notify(args):

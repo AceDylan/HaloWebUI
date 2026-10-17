@@ -71,7 +71,9 @@ jobs:
             open_webui/test/unit/test_folder_instructions.py \
             open_webui/test/unit/test_chat_search_snippet.py \
             open_webui/test/unit/test_chat_handoff.py \
-            open_webui/test/unit/test_message_bookmarks.py
+            open_webui/test/unit/test_message_bookmarks.py \
+            open_webui/test/unit/test_hermes_media.py \
+            open_webui/test/unit/test_runner_notify_origin.py
 
   build:
     needs: [frontend-test, backend-test]

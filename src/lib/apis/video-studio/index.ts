@@ -53,3 +53,15 @@ export const deleteLibraryVideo = async (token: string, id: string): Promise<boo
 		method: 'DELETE',
 		headers: headers(token)
 	}).then(parseJsonResponse<boolean>);
+
+/** An MP3 the user uploaded before: background music the workbench can pick again. */
+export type MusicFile = { id: string; name: string; size: number; createdAt: number };
+
+/** The user's own MP3 uploads, newest first. */
+export const getMusicFiles = async (token: string, limit = 12): Promise<MusicFile[]> => {
+	const res = await fetch(`${VIDEO_STUDIO_API_BASE_URL}/music?limit=${limit}`, {
+		method: 'GET',
+		headers: headers(token)
+	}).then(parseJsonResponse<MusicFile[]>);
+	return Array.isArray(res) ? res.filter((m) => m?.id) : [];
+};

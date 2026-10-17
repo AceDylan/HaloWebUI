@@ -178,3 +178,28 @@ def test_the_runner_videos_endpoint_needs_the_notification_token(monkeypatch):
     assert res.status_code == 200 and res.json()["stored"] == body["paths"]
     assert calls == [("vid-owner", body["paths"], {"run_id": body["run_id"], "runner": "officlaude",
                                                     "platform": "telegram", "title": body["title"]})]
+
+
+def _add_file(file_id: str, user_id: str, name: str, size: int, created_at: int, path: str | None = "/data/x"):
+    from open_webui.models.files import File
+
+    with get_db() as db:
+        db.add(File(id=file_id, user_id=user_id, filename=name, path=path,
+                    meta={"name": name, "size": size, "content_type": "audio/mpeg"},
+                    created_at=created_at, updated_at=created_at))
+        db.commit()
+
+
+def test_the_workbench_lists_only_the_users_own_mp3_uploads_newest_first():
+    _add_file("mus-1", "mus-ann", "旧歌.mp3", 100, 10)
+    _add_file("mus-2", "mus-ann", "新歌.MP3", 200, 30)
+    _add_file("mus-3", "mus-ann", "新歌.MP3", 200, 20)  # the same song uploaded again: listed once
+    _add_file("mus-4", "mus-ann", "notes.pdf", 300, 40)
+    _add_file("mus-5", "mus-ann", "lost.mp3", 300, 50, path=None)
+    _add_file("mus-6", "mus-bob", "bob.mp3", 400, 60)
+    listed = _client("mus-ann").get("/api/v1/video-studio/music").json()
+    assert [m["id"] for m in listed] == ["mus-2", "mus-1"]
+    assert listed[0] == {"id": "mus-2", "name": "新歌.MP3", "size": 200, "createdAt": 30_000}
+    assert [m["id"] for m in _client("mus-ann").get("/api/v1/video-studio/music?limit=1").json()] == ["mus-2"]
+    assert _client("mus-ann").get("/api/v1/video-studio/music?limit=500").status_code == 422
+    assert [m["id"] for m in _client("mus-bob").get("/api/v1/video-studio/music").json()] == ["mus-6"]

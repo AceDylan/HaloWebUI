@@ -8,6 +8,9 @@ runner does the making), so there is nothing to generate here.
 A runner started from Telegram reports there and never reaches a HaloWebUI chat: its notifier
 (integrations/hermes-runner/reclaude-notify.py) posts the run's videos to ``/runner-videos``
 with the notification token, and they are filed in the Hermes owner's library.
+
+The workbench's 背景音乐 is an MP3 the user uploads (an ordinary file upload, not processed)
+or picks again from their earlier ones: ``/music`` lists those.
 """
 
 import logging
@@ -18,6 +21,7 @@ from pydantic import BaseModel, Field
 
 from open_webui.internal.db import get_db
 from open_webui.models.chats import Chat
+from open_webui.models.files import File
 from open_webui.models.image_studio import ImageStudioItemModel, ImageStudioItems
 from open_webui.models.users import Users
 from open_webui.utils.auth import get_verified_user
@@ -87,6 +91,39 @@ async def get_video_page(
         "items": shown,
         "next": f"{items[-1].created_at}:{items[-1].id}" if more and items else None,
     }
+
+
+class MusicFile(BaseModel):
+    id: str
+    name: str
+    size: int = 0
+    createdAt: int = 0
+
+
+@router.get("/music", response_model=list[MusicFile])
+async def get_music(limit: int = Query(default=12, ge=1, le=50), user=Depends(get_verified_user)):
+    """The user's own MP3 uploads, newest first (an admin too sees only theirs): the music the
+    workbench can pick again. The same name and size uploaded twice is listed once."""
+    with get_db() as db:
+        rows = (
+            db.query(File.id, File.filename, File.meta, File.created_at)
+            .filter(File.user_id == user.id, File.path.isnot(None), File.filename.ilike("%.mp3"))
+            .order_by(File.created_at.desc(), File.id.desc())
+            .limit(limit * 3)
+            .all()
+        )
+    music, seen = [], set()
+    for row in rows:
+        meta = row.meta if isinstance(row.meta, dict) else {}
+        name = str(meta.get("name") or row.filename)
+        size = int(meta.get("size") or 0)
+        if (name, size) in seen:
+            continue
+        seen.add((name, size))
+        music.append(MusicFile(id=row.id, name=name, size=size, createdAt=int(row.created_at or 0) * 1000))
+        if len(music) >= limit:
+            break
+    return music
 
 
 @router.delete("/items/{item_id}", response_model=bool)

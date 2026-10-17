@@ -11,10 +11,44 @@ vi.mock('$app/stores', async () => {
 	const { writable } = await import('svelte/store');
 	return { page: writable({ url: new URL('http://localhost/workspace/videos') }), navigating: writable(null), updated: { subscribe: writable(false).subscribe } };
 });
-const api = vi.hoisted(() => ({ getVideoPage: vi.fn(), deleteLibraryVideo: vi.fn(async () => true) }));
+const api = vi.hoisted(() => ({
+	getVideoPage: vi.fn(),
+	deleteLibraryVideo: vi.fn(async () => true),
+	getMusicFiles: vi.fn(async () => [] as any[])
+}));
 vi.mock('$lib/apis/video-studio', () => api);
+const upload = vi.hoisted(() => ({ uploadFileReliably: vi.fn() }));
+vi.mock('$lib/utils/reliable-upload', () => upload);
+const toasts = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn(), info: vi.fn() }));
 vi.mock('$lib/services/models', () => ({ ensureModels: vi.fn(async () => {}) }));
-vi.mock('svelte-sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() } }));
+vi.mock('svelte-sonner', () => ({ toast: toasts }));
+
+// The browser reads the music's length from its metadata; this one says 163.6 s (2:43), or
+// fails to decode a file whose URL says so.
+class FakeAudio {
+	duration = NaN;
+	preload = '';
+	onloadedmetadata: (() => void) | null = null;
+	onerror: (() => void) | null = null;
+	set src(value: string) {
+		setTimeout(() => {
+			if (value.includes('broken')) this.onerror?.();
+			else {
+				this.duration = 163.6;
+				this.onloadedmetadata?.();
+			}
+		}, 1);
+	}
+	removeAttribute() {}
+}
+
+const dropOn = async (el: any, file: File) => {
+	const event: any = new Event('drop');
+	event.dataTransfer = { files: [file], types: ['Files'] };
+	el.dispatchEvent(event);
+	await sleep(40);
+};
+const mp3 = (name = '夏日.mp3', bytes = [0x49, 0x44, 0x33, 4, 0, 0]) => new File([new Uint8Array(bytes)], name, { type: 'audio/mpeg' });
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 let stores: any;
@@ -41,6 +75,13 @@ beforeEach(() => {
 	nav.goto.mockReset();
 	api.getVideoPage.mockReset();
 	api.deleteLibraryVideo.mockClear();
+	api.getMusicFiles.mockReset();
+	api.getMusicFiles.mockResolvedValue([]);
+	upload.uploadFileReliably.mockReset();
+	Object.values(toasts).forEach((fn) => fn.mockClear());
+	(globalThis as any).Audio = FakeAudio;
+	(globalThis as any).URL.createObjectURL ??= () => 'blob:local';
+	(globalThis as any).URL.revokeObjectURL ??= () => {};
 	sessionStorage.removeItem('halo.handoff');
 	localStorage.removeItem('halo.videoStudio.settings');
 	localStorage.token = 'token';
@@ -95,6 +136,79 @@ describe('Videos', () => {
 		expect(entry.text).toContain('用 30 秒讲讲番茄工作法');
 		// the choices are remembered for next time
 		expect(JSON.parse(localStorage.getItem('halo.videoStudio.settings')!)).toMatchObject({ maker: 'codex', recipe: 'story' });
+	});
+
+	it('makes the video to the MP3 the user uploads, and sends that music with the brief', async () => {
+		api.getVideoPage.mockResolvedValue({ items: [], next: null });
+		upload.uploadFileReliably.mockResolvedValue({ file: { id: 'm9' } });
+		const target = await mount();
+		await typeIdea(target, '用这首歌做旅行回顾');
+		await dropOn(target.querySelector('[data-video-music]'), mp3());
+		expect(upload.uploadFileReliably).toHaveBeenCalledTimes(1);
+		expect(upload.uploadFileReliably.mock.calls[0][2]).toMatchObject({ process: false });
+		expect(target.querySelector('[data-video-music-picked]').getAttribute('data-video-music-picked')).toBe('m9');
+		expect(target.querySelector('[data-video-music-picked]').textContent).toContain('2:43');
+		expect(target.querySelector('[data-video-music-player]')).toBeTruthy();
+		const brief = () => target.querySelector('[data-video-brief] pre').textContent;
+		// the music decides the length: as long as the music by default
+		expect(brief()).toContain('时长：跟背景音乐一样长（2:43）');
+		expect(brief()).toContain('音乐文件：夏日.mp3（2:43）');
+		expect(brief()).toContain('--check-music');
+		expect(target.querySelector('[data-video-status]').textContent).toContain('跟音乐 2:43 · 配乐已定');
+		// a length chip cuts the music to it; 「跟音乐一样长」 goes back
+		target.querySelector('[data-video-length="60"]').click();
+		await sleep(10);
+		expect(brief()).toContain('"music_fit": "trim", "seconds": 60');
+		expect(target.querySelector('[data-video-music-fit="trim"]').textContent).toContain('1 分钟');
+		target.querySelector('[data-video-music-fit="full"]').click();
+		await sleep(10);
+		expect(brief()).toContain('"music_fit": "full"');
+		target.querySelector('[data-video-workbench]').dispatchEvent(new Event('submit'));
+		await sleep(10);
+		const entry = JSON.parse(sessionStorage.getItem('halo.handoff')!);
+		expect(entry.files).toEqual([{ id: 'm9', name: '夏日.mp3', type: 'file' }]);
+		expect(entry.text).toContain('## 背景音乐');
+		expect(entry.text).not.toContain('参考附件');
+		expect(JSON.parse(localStorage.getItem('halo.videoStudio.settings')!)).toMatchObject({ musicFit: 'full' });
+	});
+
+	it('refuses background music that is not a playable MP3, and waits for an upload', async () => {
+		api.getVideoPage.mockResolvedValue({ items: [], next: null });
+		const target = await mount();
+		const area = target.querySelector('[data-video-music]');
+		await dropOn(area, new File([new Uint8Array([1, 2, 3])], 'song.wav', { type: 'audio/wav' }));
+		await dropOn(area, mp3('fake.mp3', [0x3c, 0x68, 0x74, 0x6d]));
+		expect(toasts.error.mock.calls.map((c) => c[0])).toEqual(['背景音乐只支持 MP3 文件', '文件内容不是 MP3']);
+		(globalThis as any).URL.createObjectURL = () => 'blob:broken';
+		await dropOn(area, mp3('坏的.mp3'));
+		expect(toasts.error).toHaveBeenLastCalledWith('「坏的.mp3」放不出来，换一个 MP3 试试');
+		expect(upload.uploadFileReliably).not.toHaveBeenCalled();
+		expect(target.querySelector('[data-video-music-picked]')).toBeFalsy();
+		(globalThis as any).URL.createObjectURL = () => 'blob:local';
+		// while it uploads the video cannot start
+		upload.uploadFileReliably.mockReturnValue(new Promise(() => {}));
+		await typeIdea(target, '做个片头');
+		await dropOn(area, mp3());
+		expect(target.querySelector('[data-video-start]').disabled).toBe(true);
+		expect(target.querySelector('[data-video-blocked]').textContent).toContain('背景音乐还在上传');
+		target.querySelector('[data-video-music-remove]').click();
+		await sleep(10);
+		expect(target.querySelector('[data-video-start]').disabled).toBe(false);
+	});
+
+	it('picks music uploaded before, and takes it out again', async () => {
+		api.getVideoPage.mockResolvedValue({ items: [], next: null });
+		api.getMusicFiles.mockResolvedValue([{ id: 'm1', name: 'old.mp3', size: 1024, createdAt: 1 }]);
+		const target = await mount();
+		await typeIdea(target, '做个片头');
+		target.querySelector('[data-video-music-pick="m1"]').click();
+		await sleep(20);
+		expect(target.querySelector('[data-video-music-player]').getAttribute('src')).toBe('/api/v1/files/m1/content');
+		expect(target.querySelector('[data-video-brief] pre').textContent).toContain('音乐文件：old.mp3（2:43）');
+		target.querySelector('[data-video-music-remove]').click();
+		await sleep(10);
+		expect(target.querySelector('[data-video-brief] pre').textContent).not.toContain('背景音乐');
+		expect(target.querySelector('[data-video-music-pick="m1"]')).toBeTruthy();
 	});
 
 	it('says why it cannot start without a Hermes model', async () => {

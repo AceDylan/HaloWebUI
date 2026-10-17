@@ -6,6 +6,10 @@
 	 * front) makes the video with its video-studio skill and hands it over as MEDIA. Every video a
 	 * reply or a runner's report hands over lands in the library (backend utils/video_library.py),
 	 * which comes a page at a time and loads each player only when it scrolls into view.
+	 *
+	 * 背景音乐: the user's own MP3 (uploaded here or picked again from their earlier uploads) is
+	 * decided before the video: the brief has the maker plan to its length and beats and prove
+	 * the finished file plays it (video-brief.ts).
 	 */
 	import { afterUpdate, onDestroy, onMount } from 'svelte';
 	import { toast } from 'svelte-sonner';
@@ -14,7 +18,13 @@
 	import { config, models } from '$lib/stores';
 	import { WEBUI_API_BASE_URL } from '$lib/constants';
 	import { ensureModels } from '$lib/services/models';
-	import { deleteLibraryVideo, getVideoPage, type LibraryVideo } from '$lib/apis/video-studio';
+	import {
+		deleteLibraryVideo,
+		getMusicFiles,
+		getVideoPage,
+		type LibraryVideo,
+		type MusicFile
+	} from '$lib/apis/video-studio';
 	import { uploadFileReliably } from '$lib/utils/reliable-upload';
 	import { isHermesAgentModel } from '$lib/utils/hermes';
 	import { getModelSelectionId } from '$lib/utils/model-identity';
@@ -26,8 +36,12 @@
 		VIDEO_MAKERS,
 		VIDEO_RECIPES,
 		VIDEO_VOICES,
+		MUSIC_MAX_SECONDS,
 		attachmentKind,
 		buildVideoBrief,
+		clockLabel,
+		musicFileProblem,
+		musicSetsLength,
 		normalizeVideoSettings,
 		type VideoSettings
 	} from '$lib/utils/video-brief';
@@ -66,15 +80,44 @@
 	};
 	let attachments: Attachment[] = [];
 
+	// ---- background music: the user's MP3, chosen before the video is made ----------------------
+	type Music = {
+		id: string;
+		name: string;
+		size: number;
+		seconds: number | null;
+		url: string;
+		uploading?: boolean;
+		progress?: number;
+	};
+	let music: Music | null = null;
+	let musicInput: HTMLInputElement;
+	let recentMusic: MusicFile[] = [];
+	// a newer pick wins over an older upload or length reading still going
+	let musicPick = 0;
+	const fileUrl = (id: string) => `${WEBUI_API_BASE_URL}/files/${encodeURIComponent(id)}/content`;
+
 	$: hermes = (($models ?? []) as any[]).find((m) => isHermesAgentModel(m, $config?.hermes_agent_model_ids)) ?? null;
 	let modelsChecked = false;
 	$: uploading = attachments.some((a) => a.uploading);
-	$: ready = attachments.filter((a) => !a.uploading && a.id);
-	$: brief = buildVideoBrief({
+	$: musicReady = music && !music.uploading && music.id ? music : null;
+	// the music is listed as music, not again as an attachment (a file handed over from a chat)
+	$: ready = attachments.filter((a) => !a.uploading && a.id && a.id !== musicReady?.id);
+	$: musicTooLong = !!music?.seconds && music.seconds > MUSIC_MAX_SECONDS;
+	$: followsMusic = musicSetsLength(music, settings.musicFit);
+	$: briefOptions = {
 		...settings,
-		idea: idea.trim() || '（在左边写下想要的视频）',
-		attachments: ready.map((a) => ({ name: a.name, kind: a.kind }))
-	});
+		attachments: ready.map((a) => ({ name: a.name, kind: a.kind })),
+		music: musicReady ? { name: musicReady.name, seconds: musicReady.seconds } : null
+	};
+	$: brief = buildVideoBrief({ ...briefOptions, idea: idea.trim() || '（在左边写下想要的视频）' });
+	$: sentFiles = [
+		...ready.map((a) => ({ id: a.id, name: a.name, type: a.kind === 'image' ? 'image' : 'file' })),
+		...(musicReady ? [{ id: musicReady.id, name: musicReady.name, type: 'file' }] : [])
+	];
+	$: lengthSummary = followsMusic
+		? `跟音乐${music?.seconds ? ` ${clockLabel(music.seconds)}` : ''}`
+		: `约 ${settings.seconds} 秒`;
 	$: recipe = VIDEO_RECIPES.find((r) => r.key === settings.recipe) ?? VIDEO_RECIPES[0];
 	$: maker = VIDEO_MAKERS.find((m) => m.key === settings.maker) ?? VIDEO_MAKERS[0];
 	$: blocked = !hermes
@@ -83,7 +126,9 @@
 			: '正在读取模型…'
 		: uploading
 			? '附件还在上传'
-			: !idea.trim()
+			: music?.uploading
+				? '背景音乐还在上传'
+				: !idea.trim()
 				? '先写下想要的视频'
 				: '';
 
@@ -138,6 +183,100 @@
 		);
 	};
 
+	/** Whether the browser can play *src*, and its length when it says. */
+	const readAudio = (src: string, ms = 15_000): Promise<{ playable: boolean; seconds: number | null }> =>
+		new Promise((resolve) => {
+			if (typeof Audio === 'undefined') return resolve({ playable: true, seconds: null });
+			const audio = new Audio();
+			const done = (playable: boolean) => {
+				clearTimeout(timer);
+				const seconds = playable && Number.isFinite(audio.duration) && audio.duration > 0 ? audio.duration : null;
+				audio.removeAttribute('src');
+				resolve({ playable, seconds });
+			};
+			const timer = setTimeout(() => done(false), ms);
+			audio.preload = 'metadata';
+			audio.onloadedmetadata = () => done(true);
+			audio.onerror = () => done(false);
+			audio.src = src;
+		});
+
+	const dropMusic = () => {
+		musicPick += 1;
+		if (music?.url.startsWith('blob:')) URL.revokeObjectURL(music.url);
+		music = null;
+	};
+
+	/** A new MP3 from the computer: checked (MP3 by name, type and first bytes, ≤ 50 MB, plays in
+	 * the browser), then uploaded as is for Hermes to read on the host. */
+	const uploadMusic = async (file: File | null | undefined) => {
+		if (!file) return;
+		const head = new Uint8Array(await file.slice(0, 4).arrayBuffer().catch(() => new ArrayBuffer(0)));
+		const problem = musicFileProblem(file, head);
+		if (problem) {
+			toast.error(problem);
+			return;
+		}
+		const local = URL.createObjectURL(file);
+		const { playable, seconds } = await readAudio(local);
+		if (!playable) {
+			URL.revokeObjectURL(local);
+			toast.error(`「${file.name}」放不出来，换一个 MP3 试试`);
+			return;
+		}
+		dropMusic();
+		const pick = musicPick;
+		const item: Music = { id: '', name: file.name, size: file.size, seconds, url: local, uploading: true, progress: 0 };
+		music = item;
+		try {
+			const { file: stored } = await uploadFileReliably(localStorage.token, file, {
+				process: false,
+				onProgress: ({ percent }) => {
+					if (pick !== musicPick || item.progress === percent) return;
+					item.progress = percent;
+					music = item;
+				}
+			});
+			if (!stored?.id) throw new Error('upload failed');
+			if (pick !== musicPick) return; // removed or replaced meanwhile
+			item.id = stored.id;
+			item.uploading = false;
+			delete item.progress;
+			music = item;
+			recentMusic = [
+				{ id: stored.id, name: file.name, size: file.size, createdAt: Date.now() },
+				...recentMusic.filter((m) => m.id !== stored.id)
+			];
+		} catch (error) {
+			console.warn('video studio music upload failed', error);
+			if (pick !== musicPick) return;
+			dropMusic();
+			toast.error(`「${file.name}」上传失败`);
+		}
+	};
+
+	/** An MP3 uploaded before. */
+	const pickMusic = async (picked: MusicFile) => {
+		dropMusic();
+		const pick = musicPick;
+		const item: Music = { id: picked.id, name: picked.name, size: picked.size, seconds: null, url: fileUrl(picked.id) };
+		music = item;
+		const { playable, seconds } = await readAudio(item.url);
+		if (pick !== musicPick) return;
+		if (!playable) {
+			music = null;
+			toast.error(`「${picked.name}」读不出来，换一首或重新上传`);
+			return;
+		}
+		item.seconds = seconds;
+		music = item;
+	};
+
+	const setLength = (seconds: number) => {
+		// with music, a length means: cut the music to it
+		settings = { ...settings, seconds, ...(music ? { musicFit: 'trim' as const } : {}) };
+	};
+
 	const removeAttachment = (item: Attachment) => {
 		if (item.preview) URL.revokeObjectURL(item.preview);
 		// The file stays on the server: it may have come from a chat (a handoff), and an upload
@@ -150,13 +289,9 @@
 		saveSettings();
 		const stored = handOff(typeof sessionStorage === 'undefined' ? null : sessionStorage, {
 			to: 'chat',
-			text: buildVideoBrief({
-				...settings,
-				idea,
-				attachments: ready.map((a) => ({ name: a.name, kind: a.kind }))
-			}),
+			text: buildVideoBrief({ ...briefOptions, idea }),
 			models: [getModelSelectionId(hermes)],
-			files: ready.map((a) => ({ id: a.id, name: a.name, type: a.kind === 'image' ? 'image' : 'file' })),
+			files: sentFiles,
 			from: origin,
 			send: true
 		});
@@ -307,21 +442,22 @@
 		}
 
 		void loadFirst();
+		getMusicFiles(localStorage.token)
+			.then((list) => (recentMusic = list))
+			.catch((error) => console.warn('earlier music unavailable', error));
 		if (($models ?? []).length === 0) await ensureModels(localStorage.token, { reason: 'video-studio' }).catch(() => {});
 		modelsChecked = true;
 		if (tab === 'workbench') ideaBox?.focus();
 	});
 
 	afterUpdate(() =>
-		setModeDraft('video', idea, {
-			from: origin,
-			files: ready.map((a) => ({ id: a.id, name: a.name, type: a.kind === 'image' ? 'image' : 'file' }))
-		})
+		setModeDraft('video', idea, { from: origin, files: sentFiles })
 	);
 	onDestroy(() => {
 		clearModeDraft('video');
 		if (searchTimer) clearTimeout(searchTimer);
 		attachments.forEach((a) => a.preview?.startsWith('blob:') && URL.revokeObjectURL(a.preview));
+		if (music?.url.startsWith('blob:')) URL.revokeObjectURL(music.url);
 	});
 
 	const chip =
@@ -433,7 +569,7 @@
 						</button>
 					{/if}
 					<span class="text-xs text-gray-500 dark:text-gray-400">
-						{uploading ? '上传中…' : attachments.length ? '执行者会先看这些再动手' : '可选 · 图片、视频素材、配乐、脚本文档，可粘贴或拖进来'}
+						{uploading ? '上传中…' : attachments.length ? '执行者会先看这些再动手' : '可选 · 图片、视频素材、脚本文档，可粘贴或拖进来（背景音乐在下面单独选）'}
 					</span>
 					<input
 						bind:this={fileInput}
@@ -448,15 +584,112 @@
 					/>
 				</div>
 
-				<div class="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between">
-					<span class="text-xs text-gray-500 dark:text-gray-400" data-video-blocked={blocked || undefined}>
-						{blocked || `交给 ${maker.label} · ${recipe.label} · 约 ${settings.seconds} 秒，在新对话里制作`}
-					</span>
-					<button type="submit" class="workspace-primary-button w-full sm:w-auto sm:min-w-32" disabled={!!blocked} title={blocked} data-video-start>
-						<SidebarModeIcon mode="video" className="size-4" />
-						<span>开始制作</span>
-					</button>
+			</div>
+
+			<!-- svelte-ignore a11y-no-static-element-interactions -->
+			<div
+				class="glass-item p-4 space-y-3"
+				data-video-music
+				on:dragover={(event) => {
+					if (event.dataTransfer?.types?.includes('Files')) event.preventDefault();
+				}}
+				on:drop={(event) => {
+					if (!event.dataTransfer?.files?.length) return;
+					event.preventDefault();
+					void uploadMusic(event.dataTransfer.files[0]);
+				}}
+			>
+				<div class="flex items-start justify-between gap-2">
+					<div class="min-w-0">
+						<div class="text-sm font-semibold text-gray-900 dark:text-gray-100">背景音乐</div>
+						<div class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">可选 · 你先定音乐，视频跟着它的长度和节拍做</div>
+					</div>
+					{#if music}
+						<span class="flex shrink-0 items-center gap-1">
+							<button type="button" class="h-8 rounded-full px-2.5 text-xs text-gray-500 transition hover:bg-gray-100 hover:text-gray-800 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-200" on:click={() => musicInput?.click()} data-video-music-replace>更换</button>
+							<button type="button" class="h-8 rounded-full px-2.5 text-xs text-gray-500 transition hover:bg-gray-100 hover:text-red-600 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-red-400" on:click={dropMusic} data-video-music-remove>移除</button>
+						</span>
+					{/if}
 				</div>
+
+				{#if music}
+					<div class="flex items-center gap-3 rounded-xl bg-gray-50 p-2.5 ring-1 ring-gray-200/70 dark:bg-gray-900/60 dark:ring-white/10" data-video-music-picked={music.id || 'uploading'}>
+						<span class="relative grid size-10 shrink-0 place-items-center rounded-lg bg-gray-900 text-white dark:bg-white dark:text-gray-900" aria-hidden="true">
+							<svg class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13" /><circle cx="6" cy="18" r="3" /><circle cx="18" cy="16" r="3" /></svg>
+							{#if music.uploading}
+								<UploadProgress progress={music.progress} className="absolute inset-0 rounded-lg bg-black/55 text-white pointer-events-none" ringClassName="size-8" />
+							{/if}
+						</span>
+						<div class="min-w-0 flex-1">
+							<div class="truncate text-sm font-medium text-gray-800 dark:text-gray-100" title={music.name}>{music.name}</div>
+							<div class="text-xs text-gray-500 dark:text-gray-400">
+								{music.seconds ? clockLabel(music.seconds) : '读取时长…'}{music.size ? ` · ${formatFileSize(music.size)}` : ''}{music.uploading ? ' · 上传中' : ''}
+							</div>
+						</div>
+					</div>
+					<!-- svelte-ignore a11y-media-has-caption -->
+					<audio src={music.url} controls preload="metadata" class="h-9 w-full" data-video-music-player />
+					<div class="flex flex-wrap gap-1.5">
+						<button type="button" class={followsMusic ? chipOn : chip} disabled={musicTooLong} on:click={() => (settings = { ...settings, musicFit: 'full' })} data-video-music-fit="full">
+							跟音乐一样长{music.seconds ? `（${clockLabel(music.seconds)}）` : ''}
+						</button>
+						<button type="button" class={!followsMusic ? chipOn : chip} on:click={() => (settings = { ...settings, musicFit: 'trim' })} data-video-music-fit="trim">
+							截取到 {settings.seconds >= 60 ? `${settings.seconds / 60} 分钟` : `${settings.seconds} 秒`}
+						</button>
+					</div>
+					<p class="text-xs leading-relaxed text-gray-500 dark:text-gray-400" data-video-music-hint>
+						{musicTooLong
+							? `音乐超过 ${MUSIC_MAX_SECONDS / 60} 分钟，按右边选的时长从开头截取`
+							: followsMusic
+								? '成片和这首音乐一样长，转场卡在节拍上；交付前核验成片里确实是这首音乐'
+								: `成片约 ${settings.seconds} 秒，音乐从开头截取、结尾淡出${music.seconds && music.seconds < settings.seconds ? '；音乐比视频短，会循环' : ''}`}
+					</p>
+				{:else}
+					<div class="flex flex-wrap items-center gap-2">
+						<button
+							type="button"
+							class="inline-flex items-center gap-1.5 rounded-full border border-dashed border-gray-300 px-3 py-1.5 text-xs text-gray-600 transition hover:border-gray-400 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+							on:click={() => musicInput?.click()}
+							data-video-music-upload
+						>
+							<span aria-hidden="true">＋</span> 上传 MP3
+						</button>
+						<span class="text-xs text-gray-500 dark:text-gray-400">MP3，最大 50 MB，可拖进来</span>
+					</div>
+					{#if recentMusic.length}
+						<div class="space-y-1.5" data-video-music-recent>
+							<div class="text-xs font-medium text-gray-500 dark:text-gray-400">用以前上传的</div>
+							<div class="flex flex-wrap gap-1.5">
+								{#each recentMusic.slice(0, 6) as m (m.id)}
+									<button type="button" class="{chip} max-w-[14rem] truncate" title={m.name} on:click={() => pickMusic(m)} data-video-music-pick={m.id}>♪ {m.name}</button>
+								{/each}
+							</div>
+						</div>
+					{/if}
+				{/if}
+				<input
+					bind:this={musicInput}
+					type="file"
+					accept=".mp3,audio/mpeg"
+					hidden
+					on:change={(event) => {
+						const input = event.currentTarget;
+						void uploadMusic(input.files?.[0]);
+						input.value = '';
+					}}
+					data-video-music-input
+				/>
+			</div>
+
+			<!-- after the music: the music is decided before the video is started -->
+			<div class="flex flex-col-reverse gap-2 px-1 sm:flex-row sm:items-center sm:justify-between">
+				<span class="text-xs text-gray-500 dark:text-gray-400" data-video-status data-video-blocked={blocked || undefined}>
+					{blocked || `交给 ${maker.label} · ${recipe.label} · ${lengthSummary}${musicReady ? ' · 配乐已定' : ''}，在新对话里制作`}
+				</span>
+				<button type="submit" class="workspace-primary-button w-full sm:w-auto sm:min-w-32" disabled={!!blocked} title={blocked} data-video-start>
+					<SidebarModeIcon mode="video" className="size-4" />
+					<span>开始制作</span>
+				</button>
 			</div>
 
 			{#if videos.length}
@@ -519,10 +752,12 @@
 						</div>
 					</div>
 					<div class="space-y-1.5">
-						<div class="text-xs font-medium text-gray-500 dark:text-gray-400">时长</div>
+						<div class="text-xs font-medium text-gray-500 dark:text-gray-400">
+							时长{followsMusic ? ` · 跟背景音乐${music?.seconds ? `（${clockLabel(music.seconds)}）` : ''}` : ''}
+						</div>
 						<div class="flex flex-wrap gap-1.5">
 							{#each VIDEO_LENGTHS as s}
-								<button type="button" class={settings.seconds === s ? chipOn : chip} on:click={() => (settings = { ...settings, seconds: s })} data-video-length={s}>
+								<button type="button" class={settings.seconds === s && !followsMusic ? chipOn : chip} on:click={() => setLength(s)} data-video-length={s}>
 									{s >= 60 ? `${s / 60} 分钟` : `${s} 秒`}
 								</button>
 							{/each}

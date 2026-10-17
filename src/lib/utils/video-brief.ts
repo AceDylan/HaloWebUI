@@ -2,11 +2,17 @@
 // written as one brief for Hermes or a runner. The making happens in a chat (Hermes' video-studio
 // skill: Remotion, pictures + camera moves, narration, subtitles); the finished file comes back
 // as `MEDIA:` and lands in the video library.
+//
+// 背景音乐: the user picks the MP3 first and the video is made to it — as long as the music (or
+// cut to the chosen length), scene changes on its beats, and the skill's film.py proves the
+// finished file plays that track (--check-music) before it is handed over.
 
 export type VideoRecipeKey = 'explainer' | 'story' | 'footage' | 'data' | 'free';
 export type VideoFrameKey = '16:9' | '9:16' | '1:1';
 /** '' is Hermes itself; the rest are runners, started by the command in front of the brief. */
 export type VideoMaker = '' | 'codex' | 'reclaude' | 'cchclaude' | 'officlaude' | 'anyclaude' | 'agy';
+/** With background music: the video as long as the music, or the music cut to the chosen length. */
+export type VideoMusicFit = 'full' | 'trim';
 
 export const VIDEO_RECIPES: { key: VideoRecipeKey; label: string; sub: string; hint: string }[] = [
 	{
@@ -63,6 +69,15 @@ export const VIDEO_MAKERS: { key: VideoMaker; label: string; sub: string }[] = [
 ];
 
 export const VIDEO_SKILL_PATH = '/root/.hermes/skills/creative/video-studio/SKILL.md';
+export const VIDEO_FILM_SCRIPT = '/root/.hermes/skills/creative/video-studio/scripts/film.py';
+
+/** The longest video and so the longest music it can follow (the length settings' own limit). */
+export const MUSIC_MAX_SECONDS = 600;
+export const MUSIC_MAX_BYTES = 50 * 1024 * 1024;
+const MP3_TYPES = ['', 'audio/mpeg', 'audio/mp3', 'audio/mpeg3', 'audio/x-mpeg-3', 'audio/x-mp3'];
+
+/** The background music the brief names: its file name and length (null: not known yet). */
+export type VideoMusic = { name: string; seconds: number | null };
 
 export type VideoBriefOptions = {
 	idea: string;
@@ -72,10 +87,12 @@ export type VideoBriefOptions = {
 	voice: string;
 	subtitles: boolean;
 	maker: VideoMaker;
+	musicFit: VideoMusicFit;
 	attachments?: { name: string; kind: 'image' | 'video' | 'audio' | 'file' }[];
+	music?: VideoMusic | null;
 };
 
-export type VideoSettings = Omit<VideoBriefOptions, 'idea' | 'attachments'>;
+export type VideoSettings = Omit<VideoBriefOptions, 'idea' | 'attachments' | 'music'>;
 
 export const DEFAULT_VIDEO_SETTINGS: VideoSettings = {
 	recipe: 'explainer',
@@ -83,7 +100,8 @@ export const DEFAULT_VIDEO_SETTINGS: VideoSettings = {
 	seconds: 30,
 	voice: 'zh-CN-YunxiNeural',
 	subtitles: true,
-	maker: ''
+	maker: '',
+	musicFit: 'full'
 };
 
 const pick = <T extends string>(value: unknown, allowed: readonly T[], fallback: T): T =>
@@ -99,9 +117,42 @@ export const normalizeVideoSettings = (value: unknown): VideoSettings => {
 		seconds: Number.isFinite(seconds) && seconds >= 5 && seconds <= 600 ? Math.round(seconds) : DEFAULT_VIDEO_SETTINGS.seconds,
 		voice: pick(raw.voice, VIDEO_VOICES.map((v) => v.key), DEFAULT_VIDEO_SETTINGS.voice),
 		subtitles: typeof raw.subtitles === 'boolean' ? raw.subtitles : DEFAULT_VIDEO_SETTINGS.subtitles,
-		maker: pick(raw.maker, VIDEO_MAKERS.map((m) => m.key), DEFAULT_VIDEO_SETTINGS.maker)
+		maker: pick(raw.maker, VIDEO_MAKERS.map((m) => m.key), DEFAULT_VIDEO_SETTINGS.maker),
+		musicFit: pick(raw.musicFit, ['full', 'trim'] as const, DEFAULT_VIDEO_SETTINGS.musicFit)
 	};
 };
+
+/** Why *file* cannot be the background music ('' when it can): an MP3 by name and type, not
+ * empty, not over 50 MB. Its first bytes (*head*, when read) must look like MP3 too. */
+export const musicFileProblem = (file: { name: string; type: string; size: number }, head?: Uint8Array): string => {
+	if (!/\.mp3$/i.test(file.name || '') || !MP3_TYPES.includes((file.type || '').toLowerCase())) {
+		return '背景音乐只支持 MP3 文件';
+	}
+	if (!file.size) return '这个 MP3 是空的';
+	if (file.size > MUSIC_MAX_BYTES) return `背景音乐不能超过 ${MUSIC_MAX_BYTES / 1024 / 1024} MB`;
+	if (head && head.length >= 3 && !isMp3Head(head)) return '文件内容不是 MP3';
+	return '';
+};
+
+/** An ID3 tag or an MPEG audio frame (11 sync bits) at the start. */
+export const isMp3Head = (head: Uint8Array): boolean =>
+	(head[0] === 0x49 && head[1] === 0x44 && head[2] === 0x33) || (head[0] === 0xff && (head[1] & 0xe0) === 0xe0);
+
+/** m:ss for a music length, as an audio player shows it (whole seconds, rounded down). */
+export const clockLabel = (seconds: number) => {
+	const s = Math.max(0, Math.floor(seconds));
+	return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+};
+
+/** A file name as plain text inside one line of the brief: it cannot add lines or headings, nor
+ * a `MEDIA:` tag that an echoing reply would hand over as a file. */
+const plainName = (name: string) =>
+	(name || '')
+		.replace(/[\u0000-\u001f\u007f]+/g, ' ')
+		.replace(/\s+/g, ' ')
+		.replace(/MEDIA:/gi, 'MEDIA：')
+		.trim()
+		.slice(0, 120) || '未命名';
 
 const ATTACHMENT_KIND: Record<string, string> = { image: '图片', video: '视频', audio: '音频', file: '文件' };
 
@@ -116,12 +167,19 @@ export const attachmentKind = (type: string, name = ''): 'image' | 'video' | 'au
 const lengthLabel = (seconds: number) =>
 	seconds >= 60 && seconds % 60 === 0 ? `${seconds / 60} 分钟` : `${seconds} 秒`;
 
+/** The video follows the music's length: chosen, and the music not longer than a video can be. */
+export const musicSetsLength = (music: VideoMusic | null | undefined, fit: VideoMusicFit) =>
+	!!music && fit === 'full' && (music.seconds == null || music.seconds <= MUSIC_MAX_SECONDS);
+
 /** The message the chat sends: the runner's command in front, then the brief. */
 export const buildVideoBrief = (opts: VideoBriefOptions): string => {
 	const recipe = VIDEO_RECIPES.find((r) => r.key === opts.recipe) ?? VIDEO_RECIPES[0];
 	const frame = VIDEO_FRAMES.find((f) => f.key === opts.frame) ?? VIDEO_FRAMES[0];
 	const voice = VIDEO_VOICES.find((v) => v.key === opts.voice);
 	const attachments = opts.attachments ?? [];
+	const music = opts.music ?? null;
+	const fullLength = musicSetsLength(music, opts.musicFit);
+	const musicClock = music?.seconds ? clockLabel(music.seconds) : '';
 	const lines = [
 		'请制作一个视频（来自 HaloWebUI 视频工作台）。',
 		'',
@@ -131,7 +189,9 @@ export const buildVideoBrief = (opts: VideoBriefOptions): string => {
 		'## 要求',
 		`- 做法：${recipe.label}（${recipe.hint}）`,
 		`- 画幅：${frame.label} ${frame.key}（${frame.size}，30fps）`,
-		`- 时长：约 ${lengthLabel(opts.seconds)}`,
+		fullLength
+			? `- 时长：跟背景音乐一样长${musicClock ? `（${musicClock}）` : ''}`
+			: `- 时长：约 ${lengthLabel(opts.seconds)}`,
 		`- 配音：${voice && voice.key ? `中文配音，${voice.label}（edge-tts ${voice.key}）` : '不要配音'}`,
 		`- 字幕：${opts.subtitles ? '烧录中文字幕' : '不要字幕'}`
 	];
@@ -142,7 +202,7 @@ export const buildVideoBrief = (opts: VideoBriefOptions): string => {
 			.map(([kind, n]) => `${n} 个${ATTACHMENT_KIND[kind] ?? '文件'}`)
 			.join('、');
 		lines.push(
-			`- 参考附件：${counts}（${attachments.map((a) => a.name).join('、')}），随消息附上，原文件路径见消息末尾；先看完再动手，是素材还是风格参考以上面的描述为准`
+			`- 参考附件：${counts}（${attachments.map((a) => plainName(a.name)).join('、')}），随消息附上，原文件路径见消息末尾；先看完再动手，是素材还是风格参考以上面的描述为准`
 		);
 		if (opts.recipe !== 'footage' && attachments.some((a) => a.kind === 'video')) {
 			// A video handed over as "做成这样" (a downloaded short with its watermark) must not
@@ -151,6 +211,20 @@ export const buildVideoBrief = (opts: VideoBriefOptions): string => {
 				'- 附件里的视频：描述没说要剪进成片时，只当风格参考——抽帧看构图、配色、字体、节奏和转场，用自己做的画面重现这种风格，不要直接使用原片画面、水印或角色形象'
 			);
 		}
+	}
+	if (music) {
+		const loops = !fullLength && music.seconds != null && music.seconds < opts.seconds;
+		lines.push(
+			'',
+			'## 背景音乐（用户指定：先定音乐，再按音乐做视频）',
+			`- 音乐文件：${plainName(music.name)}${musicClock ? `（${musicClock}）` : ''}，随消息附上，原文件路径见消息末尾的附件原文件；这是成片唯一的背景音乐，不要换、不要另加配乐或合成音`,
+			fullLength
+				? '- 长度：视频和这首音乐一样长（film.py 用 "music_fit": "full"），旁白要放得进音乐的长度'
+				: `- 长度：视频约 ${lengthLabel(opts.seconds)}，音乐从开头截取、结尾淡出（film.py 用 "music_fit": "trim", "seconds": ${opts.seconds}）${loops ? '；音乐比视频短，会循环播放' : ''}`,
+			`- 先听音乐再分镜：python3 ${VIDEO_FILM_SCRIPT} --music-info <音乐路径>，得到时长、节拍（beats）、每秒能量和高潮位置；转场卡在节拍上，最有冲击力的画面放在高潮，结尾落在音乐结尾`,
+			'- 用 film.py 出片（"music" 写这首音乐的路径；Remotion 画面用 --picture 交给它混音）：音乐从 0 秒开始，有配音时自动压低',
+			`- 交付前核验：python3 ${VIDEO_FILM_SCRIPT} --check-music <成片.mp4> <音乐路径>，必须输出 "music_found": true，否则修好再交付`
+		);
 	}
 	lines.push(
 		'',

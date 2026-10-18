@@ -849,6 +849,38 @@ def test_a_dispatched_discussion_without_a_last_table_is_set_by_its_moderator():
     assert [b["id"] for b in api._diverse(lib.library(models, USER)[1], 3)] == ["gpt-chat", "claude-chat", "deepseek-chat"]
 
 
+def test_moderator_receives_new_models_profiles_and_selects_their_real_refs(env):
+    aliases = ["grok-chat", "glm-chat", "kimi-chat"]
+    models = {}
+    for alias in aliases:
+        ref = f"modelref::openai::personal::id:test::{alias}"
+        models[ref] = {"id": ref, "selection_id": ref, "name": alias, "info": {"meta": {
+            "description": f"{alias} 的资料说明",
+            "capabilities": {"vision": False},
+            "discussion_profile": {"version": f"{alias}-tested-version", "strengths": ["中文摘要"],
+                                   "limitations": ["联网未验证"], "vision": True},
+            "private_value": "must-not-leak"}}}
+    env.request.state.MODELS = models
+
+    async def call_model(moderator, messages):
+        candidates = json.loads(messages[1]["content"].split("Available models:\n")[1])
+        assert [m["id"] for m in candidates] == aliases
+        for candidate in candidates:
+            assert candidate["profile"]["version"] == f"{candidate['id']}-tested-version"
+            assert candidate["profile"]["description"] == f"{candidate['id']} 的资料说明"
+            assert candidate["profile"]["strengths"] == ["中文摘要"]
+            assert candidate["vision"] is False
+        assert "must-not-leak" not in str(messages) and "modelref::" not in messages[1]["content"]
+        return _Stream(json.dumps({"mode": "roundtable", "rounds": 2,
+            "seats": [{"model": alias, "role": "评审"} for alias in aliases], "reason": "不同家族独立复核"}))
+
+    result = asyncio.run(api._plan(env.request, USER, {
+        "question": "请评审中文方案", "moderator": {"model": next(iter(models))}, "files": []
+    }, call_model, []))
+    assert result["error"] is None
+    assert [s["model"] for s in result["setup"]["seats"]] == list(models)
+
+
 def test_the_list_comes_a_page_at_a_time_with_search_and_the_live_filter(env):
     ids = [_discuss_first(env, question=q) for q in ("选数据库", "选框架", "选云厂商", "选编辑器", "选显示器")]
 

@@ -19,6 +19,8 @@ from open_webui.socket.main import get_event_emitter
 from open_webui.utils.access_control import has_permission
 from open_webui.utils.auth import get_verified_user
 from open_webui.utils import discussion_room as room
+from open_webui.utils.discussion_profiles import planning_profile
+from open_webui.utils.model_identity import resolve_model_from_lookup
 from open_webui.utils.discussion_room import (
     CHAT_KEY,
     LIVE,
@@ -732,7 +734,9 @@ async def _plan(request: Request, user, ask: dict, call_model, history: list[dic
         n = 2
         while short in taken:
             short, n = f"{seat['name']} #{n}", n + 1
-        pool.append({"id": short, "name": seat["name"], "vision": seat["vision"], "ref": seat["model"]})
+        model = resolve_model_from_lookup(models_map, ambiguous, base["id"]) or {}
+        pool.append({"id": short, "name": seat["name"], "vision": seat["vision"], "ref": seat["model"],
+                     "profile": planning_profile(model)})
         if len(pool) >= room.PLAN_POOL_MAX:
             break
     moderator = ask["moderator"]["model"]

@@ -143,31 +143,45 @@ const prepJob = (extra: Record<string, unknown> = {}) => ({
 });
 
 describe('Videos 提示词增强', () => {
-	it('enhances the request before it goes out: the enhanced text, the user\'s words, the facts and their sources', async () => {
+	it('starts the enhancement and sends the brief at once: the chat waits for it, not this page', async () => {
 		localStorage.setItem('halo.videoStudio.prep', JSON.stringify({ enhance: true, research: true, deeper: true }));
 		api.getVideoPage.mockResolvedValue({ items: [], next: null });
-		prepApi.startStudioPrep.mockResolvedValue(prepJob());
+		const id = 'a'.repeat(32);
+		prepApi.startStudioPrep.mockResolvedValue(prepJob({ id, status: 'running', result: null }));
 		const target = await mount();
 		await typeIdea(target, '用 30 秒讲讲番茄工作法');
-		expect(target.querySelector('[data-video-status]').textContent).toContain('先增强需求');
+		expect(target.querySelector('[data-video-status]').textContent).toContain('先增强需求再制作');
 		target.querySelector('[data-video-workbench]').dispatchEvent(new Event('submit'));
 		await sleep(30);
-		expect(prepApi.startStudioPrep).toHaveBeenCalledTimes(1);
 		const form = prepApi.startStudioPrep.mock.calls[0][1];
 		expect(form).toMatchObject({ kind: 'video', idea: '用 30 秒讲讲番茄工作法', research: true, deeper: true });
 		expect(form.settings).toContain('做法：讲解动画');
 		expect(form.settings).toContain('时长：约 30 秒');
+		// no waiting here: nobody polls the job, the chat opens at once
+		expect(prepApi.getStudioPrep).not.toHaveBeenCalled();
 		expect(nav.goto).toHaveBeenCalledWith('/');
+		const text = JSON.parse(sessionStorage.getItem('halo.handoff')!).text;
+		expect(text).toContain(`## 想要的视频\n用 30 秒讲讲番茄工作法\n\n（制作前准备：HaloWebUI 正在增强需求，编号 ${id}）`);
+		expect(text).toContain('MEDIA:」紧跟成片');
+	});
+
+	it('sends an enhancement read first as it is, with the user\'s words, the facts and their sources', async () => {
+		api.getVideoPage.mockResolvedValue({ items: [], next: null });
+		prepApi.startStudioPrep.mockResolvedValue(prepJob());
+		const target = await mount();
+		await typeIdea(target, '用 30 秒讲讲番茄工作法');
+		target.querySelector('[data-video-enhance]').click();
+		await sleep(30);
+		target.querySelector('[data-video-workbench]').dispatchEvent(new Event('submit'));
+		await sleep(30);
 		const text = JSON.parse(sessionStorage.getItem('halo.handoff')!).text;
 		expect(text).toContain('## 想要的视频\n增强后的需求');
 		expect(text).toContain('## 用户原话');
-		expect(text).toContain('用 30 秒讲讲番茄工作法');
 		expect(text).toContain('## 资料与依据');
 		expect(text).toContain('Francesco Cirillo');
 		expect(text).toContain('精答结论：HaloWebUI /answer/c1');
 		expect(text).toContain('1. 番茄工作法 - 百科 https://example.com/pomodoro');
-		expect(text).toContain('MEDIA:」紧跟成片');
-		expect(target.querySelector('[data-video-idea]').value).toContain('增强后的需求');
+		expect(text).not.toContain('制作前准备');
 	});
 
 	it('goes on from the words as written when the enhancement fails', async () => {

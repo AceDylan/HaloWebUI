@@ -2076,6 +2076,33 @@ def _launched_runner(blocks, runtime) -> bool:
     )
 
 
+async def _studio_prep_brief(run_payload: dict, metadata: dict, user, emit_status) -> dict:
+    """A video studio brief sent with its 提示词增强 still going (utils/studio_prep.py): waits for
+    it here, its steps as the reply's status, then the payload with the result in the brief (and
+    the chat's copy of the message too). Anything else: the payload as it was."""
+    from open_webui.utils import studio_prep
+
+    prep_id = studio_prep.prep_job_in(run_payload.get("input"))
+    if not prep_id:
+        return run_payload
+    job = studio_prep.get_job(prep_id, user.id)
+    if job is not None:
+        job = await studio_prep.wait_for(job, lambda line: emit_status(line, False, action="studio_prep"))
+    result = job.result if job is not None and job.status == "done" else None
+    await emit_status(studio_prep.outcome_line(job), True, action="studio_prep")
+    try:
+        reply = Chats.get_message_by_id_and_message_id(metadata["chat_id"], metadata["message_id"]) or {}
+        asked = Chats.get_message_by_id_and_message_id(metadata["chat_id"], reply.get("parentId") or "") or {}
+        if reply.get("parentId") and studio_prep.prep_job_in(asked.get("content")):
+            Chats.upsert_message_to_chat_by_id_and_message_id(
+                metadata["chat_id"], reply["parentId"],
+                {"content": studio_prep.fill_brief(asked.get("content"), result)}, set_current=False,
+            )
+    except Exception:  # noqa: BLE001 — only the chat's copy
+        log.warning("studio prep: could not store the enhanced brief", exc_info=True)
+    return {**run_payload, "input": studio_prep.fill_brief(run_payload.get("input"), result)}
+
+
 async def run_hermes_agent(request, form_data, user, metadata, model, events, tasks=None):
     """
     Execute the chat via hermes's runs API, streaming results over the chat
@@ -2306,6 +2333,7 @@ async def run_hermes_agent(request, form_data, user, metadata, model, events, ta
     )
 
     async def _run_handler():
+        nonlocal run_payload
         blocks = []
         run_id = None
         finalized = False
@@ -2634,6 +2662,9 @@ async def run_hermes_agent(request, form_data, user, metadata, model, events, ta
             for event in events or []:
                 await _emit_completion(event)
                 upsert_response_message({**event})
+
+            # 视频工作台「开始制作」: the brief's enhancement finishes here first
+            run_payload = await _studio_prep_brief(run_payload, metadata, user, _emit_status)
 
             timeout = aiohttp.ClientTimeout(total=None, connect=30, sock_read=120)
             start_headers = {

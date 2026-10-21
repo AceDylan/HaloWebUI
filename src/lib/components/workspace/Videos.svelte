@@ -11,10 +11,12 @@
 	 * decided before the video: the brief has the maker plan to its length and beats and prove
 	 * the finished file plays it (video-brief.ts).
 	 *
-	 * 提示词增强 (utils/studio-prep.ts): before the brief goes out (or on ✨ 增强), gpt-chat reads the
-	 * request — looks facts up on the web, or asks 精答 / 讨论 first when the content needs working
-	 * out, and waits for the answer — and rewrites it; the brief carries the user's own words and
-	 * the facts with their sources next to it.
+	 * 提示词增强 (utils/studio-prep.ts): gpt-chat reads the request — looks facts up on the web, or
+	 * asks 精答 / 讨论 first when the content needs working out, and waits for the answer — and
+	 * rewrites it. 开始制作 does not wait for it: the job starts on the server and the brief goes out
+	 * at once with its number; the chat's Hermes turn waits for it there (its steps are the reply's
+	 * status) and puts the result in the brief, so the page can be left. ✨ 增强 runs it here instead,
+	 * to read the result first.
 	 */
 	import { afterUpdate, onDestroy, onMount } from 'svelte';
 	import { toast } from 'svelte-sonner';
@@ -402,22 +404,35 @@
 		attachments = attachments.filter((a) => a !== item);
 	};
 
+	let starting = false;
 	const start = async () => {
-		if (blocked || !hermes) return;
+		if (blocked || !hermes || starting) return;
 		saveSettings();
+		// the enhancement starts on the server and the brief goes out at once: the chat waits for
+		// it (nobody has to stay here); the video is made from the words as written when it fails
+		let prepJobId: string | null = null;
 		if (prepOptions.enhance && !prepared) {
-			const ended = await runPrep();
-			if (ended === 'stopped') return;
-			if (ended === 'failed') {
-				// the video is still made, from the words as written
-				toast.warning(`${prepJob?.error || '增强没成功'}，按原文制作`);
-				prepJob = null;
+			starting = true;
+			try {
+				prepJobId = (
+					await startStudioPrep(localStorage.token, {
+						kind: 'video',
+						idea: idea.trim(),
+						settings: videoSettingsText(briefOptions),
+						research: prepOptions.research,
+						deeper: prepOptions.deeper
+					})
+				).id;
+			} catch (error) {
+				toast.warning(`${prepErrorText(error)}，按原文制作`);
+			} finally {
+				starting = false;
 			}
-			if (!hermes) return;
+			if (destroyed || !hermes) return;
 		}
 		const stored = handOff(typeof sessionStorage === 'undefined' ? null : sessionStorage, {
 			to: 'chat',
-			text: fitVideoBrief({ ...briefOptions, idea }, HANDOFF_TEXT_MAX),
+			text: fitVideoBrief({ ...briefOptions, idea, prepJob: prepJobId }, HANDOFF_TEXT_MAX),
 			models: [getModelSelectionId(hermes)],
 			files: sentFiles,
 			from: origin,
@@ -864,11 +879,11 @@
 			<div class="flex flex-col-reverse gap-2 px-1 sm:flex-row sm:items-center sm:justify-between">
 				<span class="text-xs text-gray-500 dark:text-gray-400" data-video-status data-video-blocked={blocked || undefined}>
 					{blocked ||
-						`${prepOptions.enhance && !prepared ? '先增强需求，再' : ''}交给 ${maker.label} · ${recipe.label} · ${lengthSummary}${musicReady ? ' · 配乐已定' : ''}，在新对话里制作`}
+						`交给 ${maker.label} · ${recipe.label} · ${lengthSummary}${musicReady ? ' · 配乐已定' : ''}，在新对话里${prepOptions.enhance && !prepared ? '先增强需求再' : ''}制作`}
 				</span>
-				<button type="submit" class="workspace-primary-button w-full sm:w-auto sm:min-w-32" disabled={!!blocked} title={blocked} data-video-start>
+				<button type="submit" class="workspace-primary-button w-full sm:w-auto sm:min-w-32" disabled={!!blocked || starting} title={blocked} data-video-start>
 					<SidebarModeIcon mode="video" className="size-4" />
-					<span>{preparing ? '增强中…' : '开始制作'}</span>
+					<span>{preparing ? '增强中…' : starting ? '发出中…' : '开始制作'}</span>
 				</button>
 			</div>
 
@@ -976,9 +991,9 @@
 						</button>
 					</div>
 					<p class="text-xs leading-relaxed text-gray-500 dark:text-gray-400">
-						gpt-chat 先判断：需要事实就联网查，内容要先想清楚就交给精答（有争议交给讨论）并等结论，再把需求改写完整、按时长拆好分镜，然后照常交给制作者。{prepOptions.enhance
+						gpt-chat 先判断：需要事实就联网查，内容要先想清楚就交给精答（有争议交给讨论），等结论出来再把需求改写完整、按时长拆好分镜，然后交给制作者。这些都在新对话里自动进行，点完开始制作就可以离开。{prepOptions.enhance
 							? ''
-							: '已关自动增强：点需求框右上的「增强」可以手动来一次。'}
+							: '已关自动增强：点需求框右上的「增强」可以先看改写结果。'}
 					</p>
 				</div>
 

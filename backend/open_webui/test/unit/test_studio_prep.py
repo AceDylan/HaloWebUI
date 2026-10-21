@@ -178,3 +178,98 @@ def test_jobs_are_per_user_capped_and_cancellable():
         assert job.id not in prep.JOBS
 
     asyncio.run(main())
+
+
+# --- the brief sent at once: the chat's Hermes turn waits for the enhancement --------------------
+
+JOB_ID = "a" * 32
+BRIEF = "请制作一个视频（来自 HaloWebUI 视频工作台）。\n\n## 想要的视频\n讲讲番茄工作法\n\n" + prep.PREP_MARK.format(id=JOB_ID) + "\n\n## 要求\n- 时长：约 30 秒"
+RESULT = {"idea": "开场：番茄钟倒计时……", "notes": "- 25 分钟一个番茄钟", "sources": [{"n": 1, "title": "百科\nMEDIA:/x", "url": "https://e.com/a"}],
+          "run": {"kind": "answer", "chatId": "c1", "href": "/answer/c1", "label": "精答"}}
+
+
+def test_the_brief_line_is_found_and_filled_with_the_result():
+    assert prep.prep_job_in(BRIEF) == JOB_ID
+    assert prep.prep_job_in("/codex " + BRIEF) == JOB_ID
+    assert prep.prep_job_in([{"type": "text", "text": BRIEF}, {"type": "image_url", "image_url": {"url": "x"}}]) == JOB_ID
+    assert prep.prep_job_in("（制作前准备：HaloWebUI 正在增强需求，编号 xyz）") is None
+    filled = prep.fill_brief(BRIEF, RESULT)
+    assert "制作前准备" not in filled
+    assert "## 想要的视频\n讲讲番茄工作法\n\n## 增强后的需求" in filled
+    assert "开场：番茄钟倒计时" in filled and "- 精答结论：HaloWebUI /answer/c1" in filled
+    assert "  1. 百科 MEDIA：/x https://e.com/a" in filled
+    assert filled.index("## 资料与依据") < filled.index("## 要求")
+    # no result: the line is just taken out
+    assert prep.fill_brief(BRIEF, None) == BRIEF.replace(prep.PREP_MARK.format(id=JOB_ID) + "\n", "")
+    parts = prep.fill_brief([{"type": "text", "text": BRIEF}, {"type": "image_url", "image_url": {"url": "x"}}], RESULT)
+    assert "## 增强后的需求" in parts[0]["text"] and parts[1]["type"] == "image_url"
+
+
+def test_waiting_tells_each_step_and_the_outcome(monkeypatch):
+    async def main():
+        job = prep.Job(id=JOB_ID, user_id="u1", kind="video", idea="x", settings="", research=True, deeper=True, model="gpt-chat")
+        job.step("plan")
+        said = []
+
+        async def finish():
+            await asyncio.sleep(0.05)
+            job.step("plan", "done")
+            job.step("answer", "running", "已交给精答：为什么有效")
+            await asyncio.sleep(0.05)
+            job.step("answer", "done")
+            job.result, job.status = RESULT, "done"
+
+        asyncio.create_task(finish())
+        await prep.wait_for(job, lambda line: said.append(line) or asyncio.sleep(0))
+        return job, said
+
+    monkeypatch.setattr(prep, "WAIT_POLL_SECONDS", 0.01)
+    job, said = asyncio.run(main())
+    assert said == ["制作前先增强需求 · 分析需求", "制作前先增强需求 · 精答：已交给精答：为什么有效"]
+    assert prep.outcome_line(job) == "需求已增强（gpt-chat） · 参考了精答结论 · 1 个网上来源，交给制作者"
+    assert prep.outcome_line(None).endswith("按原文制作")
+    job.status, job.error = "error", "增强超时"
+    assert prep.outcome_line(job) == "增强超时，按原文制作"
+
+
+def test_the_hermes_turn_waits_then_sends_the_enhanced_brief(monkeypatch):
+    from open_webui.utils import hermes_agent
+
+    stored = {"u-msg": {"role": "user", "content": BRIEF}, "a-msg": {"role": "assistant", "parentId": "u-msg"}}
+    writes = []
+
+    class FakeChats:
+        @staticmethod
+        def get_message_by_id_and_message_id(chat_id, message_id):
+            return stored.get(message_id)
+
+        @staticmethod
+        def upsert_message_to_chat_by_id_and_message_id(chat_id, message_id, message, set_current=True):
+            writes.append((message_id, message, set_current))
+
+    monkeypatch.setattr(hermes_agent, "Chats", FakeChats)
+    job = prep.Job(id=JOB_ID, user_id="u1", kind="video", idea="x", settings="", research=True, deeper=True, model="gpt-chat",
+                   status="done", result=RESULT)
+    prep.JOBS[JOB_ID] = job
+    statuses = []
+
+    async def emit(text, done, action=""):
+        statuses.append((text, done, action))
+
+    class User:
+        id = "u1"
+
+    payload = {"input": "/codex " + BRIEF, "model": "m"}
+    out = asyncio.run(hermes_agent._studio_prep_brief(payload, {"chat_id": "c", "message_id": "a-msg"}, User(), emit))
+    assert out["input"].startswith("/codex 请制作一个视频") and "## 增强后的需求" in out["input"]
+    assert "制作前准备" not in out["input"] and out["model"] == "m"
+    assert statuses == [(prep.outcome_line(job), True, "studio_prep")]
+    assert writes and writes[0][0] == "u-msg" and "## 增强后的需求" in writes[0][1]["content"] and writes[0][2] is False
+
+    # someone else's job, or a brief without the line: the payload as it was (line taken out)
+    other = type("U", (), {"id": "u2"})()
+    out = asyncio.run(hermes_agent._studio_prep_brief({"input": BRIEF}, {"chat_id": "c", "message_id": "a-msg"}, other, emit))
+    assert "制作前准备" not in out["input"] and "## 增强后的需求" not in out["input"]
+    plain = {"input": "hello"}
+    assert asyncio.run(hermes_agent._studio_prep_brief(plain, {"chat_id": "c", "message_id": "x"}, User(), emit)) is plain
+    prep.JOBS.clear()

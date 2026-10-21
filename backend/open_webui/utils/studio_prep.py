@@ -400,3 +400,100 @@ def cancel_job(job: Job) -> bool:
         return False
     task.cancel()
     return True
+
+
+# --- the video brief: enhanced on the chat's Hermes turn ------------------------------------------
+# 开始制作 starts the job and sends the brief at once with this line in it: the chat's Hermes turn
+# (hermes_agent.run_hermes_agent) waits for the job — on the server, so nobody has to stay on the
+# studio page — shows its steps as the reply's status, and puts the result in place of the line
+# before the brief reaches Hermes or the runner.
+PREP_MARK = "（制作前准备：HaloWebUI 正在增强需求，编号 {id}）"
+PREP_MARK_RE = re.compile(r"^（制作前准备：HaloWebUI 正在增强需求，编号 ([0-9a-f]{32})）[ \t]*\n?", re.M)
+WAIT_POLL_SECONDS = 1.0
+TEXT_PARTS = ("text", "input_text")
+
+
+def _text_of(content: Any) -> str:
+    if isinstance(content, list):
+        return "\n".join(str(part.get("text") or "") for part in content if isinstance(part, dict) and part.get("type") in TEXT_PARTS)
+    return str(content or "")
+
+
+def prep_job_in(content: Any) -> Optional[str]:
+    """The job id a brief waits for, or None."""
+    found = PREP_MARK_RE.search(_text_of(content))
+    return found.group(1) if found else None
+
+
+def brief_sections(result: Optional[dict]) -> str:
+    """What the enhancement adds to the brief (src/lib/utils/video-brief.ts writes the same for an
+    enhancement done on the page): the enhanced request, the key facts and their sources."""
+    if not result or not result.get("idea"):
+        return ""
+    lines = ["## 增强后的需求（gpt-chat 据上面的原话整理：按它制作，两者冲突时以原话为准）", result["idea"].strip()]
+    sources = [s for s in result.get("sources") or [] if re.match(r"https?://", str(s.get("url") or ""), re.I)]
+    run = result.get("run")
+    if (result.get("notes") or "").strip() or sources or run:
+        lines += ["", "## 资料与依据（制作前已查好：事实和数字以此为准，不要编造）"]
+        if (result.get("notes") or "").strip():
+            lines.append(result["notes"].strip())
+        if run:
+            lines.append(f"- {run['label']}结论：HaloWebUI {run['href']}（完整内容在那里）")
+        if sources:
+            lines.append("- 来源：")
+            for i, s in enumerate(sources, 1):
+                title = " ".join(str(s.get("title") or "").split()).replace("MEDIA:", "MEDIA：")[:120] or s["url"]
+                url = "".join(str(s["url"]).split())
+                lines.append(f"  {i}. {title} {url}")
+    return "\n".join(lines) + "\n"
+
+
+def fill_brief(content: Any, result: Optional[dict]) -> Any:
+    """The brief with the job's line replaced by its result (or just taken out without one)."""
+    sections = brief_sections(result)
+
+    def fill(text: str) -> str:
+        return PREP_MARK_RE.sub(lambda _m: sections, text, count=1)
+
+    if isinstance(content, list):
+        return [{**part, "text": fill(str(part.get("text") or ""))} if isinstance(part, dict) and part.get("type") in TEXT_PARTS else part
+                for part in content]
+    return fill(str(content or ""))
+
+
+def status_line(job: Job) -> str:
+    """The reply's status while the job runs: its current step."""
+    step = next((s for s in reversed(job.steps) if s["status"] == "running"), None) or (job.steps[-1] if job.steps else None)
+    if step is None:
+        return "制作前先增强需求…"
+    detail = f"：{step['detail']}" if step.get("detail") else ""
+    return f"制作前先增强需求 · {step['label']}{detail}"[:200]
+
+
+def outcome_line(job: Optional[Job]) -> str:
+    if job is None:
+        return "增强任务已不在（服务重启过），按原文制作"
+    if job.status != "done" or not job.result:
+        return f"{job.error or '增强没成功'}，按原文制作"
+    parts = [f"需求已增强（{job.model or 'gpt-chat'}）"]
+    if job.result.get("run"):
+        parts.append(f"参考了{job.result['run']['label']}结论")
+    if job.result.get("sources"):
+        parts.append(f"{len(job.result['sources'])} 个网上来源")
+    return " · ".join(parts) + "，交给制作者"
+
+
+async def wait_for(job: Job, on_status: Callable[[str], Awaitable[Any]]) -> Job:
+    """Waits for the job, telling each new status line. Cancelled (the reply stopped): the job too."""
+    said = ""
+    try:
+        while job.status == "running":
+            line = status_line(job)
+            if line != said:
+                said = line
+                await on_status(line)
+            await asyncio.sleep(WAIT_POLL_SECONDS)
+    except asyncio.CancelledError:
+        cancel_job(job)
+        raise
+    return job

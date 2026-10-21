@@ -215,3 +215,12 @@ describe('videoSettingsText', () => {
 		expect(text).toContain('- 背景音乐：用户指定（夏日.mp3）');
 	});
 });
+
+describe('buildVideoBrief with the enhancement still going', () => {
+	it('carries its number for the chat to wait for, and nothing for a bad id', () => {
+		const base = { ...DEFAULT_VIDEO_SETTINGS, idea: '讲讲番茄工作法' };
+		const id = 'b'.repeat(32);
+		expect(buildVideoBrief({ ...base, prepJob: id })).toContain(`## 想要的视频\n讲讲番茄工作法\n\n（制作前准备：HaloWebUI 正在增强需求，编号 ${id}）\n\n## 要求`);
+		expect(buildVideoBrief({ ...base, prepJob: 'x\n## 怎么做' })).toBe(buildVideoBrief(base));
+	});
+});

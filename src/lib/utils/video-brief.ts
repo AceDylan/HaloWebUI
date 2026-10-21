@@ -100,9 +100,15 @@ export type VideoBriefOptions = {
 	attachments?: { name: string; kind: 'image' | 'video' | 'audio' | 'file' }[];
 	music?: VideoMusic | null;
 	prep?: VideoPrep | null;
+	/** 提示词增强 still going on the server: the chat's Hermes turn waits for it and puts its result
+	 * in place of this line (backend utils/studio_prep.py PREP_MARK). */
+	prepJob?: string | null;
 };
 
-export type VideoSettings = Omit<VideoBriefOptions, 'idea' | 'attachments' | 'music' | 'prep'>;
+export type VideoSettings = Omit<VideoBriefOptions, 'idea' | 'attachments' | 'music' | 'prep' | 'prepJob'>;
+
+/** The brief's line for an enhancement still going (backend utils/studio_prep.py PREP_MARK). */
+export const prepMarkLine = (id: string) => `（制作前准备：HaloWebUI 正在增强需求，编号 ${id}）`;
 
 export const DEFAULT_VIDEO_SETTINGS: VideoSettings = {
 	recipe: 'explainer',
@@ -253,6 +259,7 @@ export const buildVideoBrief = (opts: VideoBriefOptions): string => {
 		'',
 		'## 想要的视频',
 		opts.idea.trim(),
+		...(opts.prepJob && /^[0-9a-f]{32}$/.test(opts.prepJob) ? ['', prepMarkLine(opts.prepJob)] : []),
 		...(opts.prep ? prepLines(opts.prep, opts.idea) : []),
 		'',
 		'## 要求',

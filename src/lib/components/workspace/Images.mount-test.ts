@@ -30,6 +30,8 @@ const toasts = vi.hoisted(() => ({
 	warning: vi.fn()
 }));
 vi.mock('svelte-sonner', () => ({ toast: toasts }));
+const prepApi = vi.hoisted(() => ({ startStudioPrep: vi.fn(), getStudioPrep: vi.fn(), cancelStudioPrep: vi.fn() }));
+vi.mock('$lib/apis/studio-prep', () => prepApi);
 
 const PENDING_KEY = 'workspace:image-studio:pending-run:v1';
 
@@ -55,6 +57,7 @@ beforeEach(() => {
 	Object.values(images).forEach((fn: any) => fn.mockReset());
 	Object.values(studio).forEach((fn: any) => fn.mockReset());
 	Object.values(toasts).forEach((fn: any) => fn.mockReset());
+	Object.values(prepApi).forEach((fn: any) => fn.mockReset());
 	localStorage.clear();
 	localStorage.token = 't';
 	// Nothing left to migrate from this browser.
@@ -183,5 +186,55 @@ describe('Image studio run that outlives the page', () => {
 		await sleep(200);
 		expect(images.imageGenerations).not.toHaveBeenCalled();
 		expect(localStorage.getItem(PENDING_KEY)).toBeNull();
+	});
+});
+
+describe('Image studio 提示词增强', () => {
+	it('「增强」 rewrites the prompt with gpt-chat (no 精答 / 讨论 for one picture), with a way back', async () => {
+		prepApi.startStudioPrep.mockResolvedValue({
+			id: 'job1',
+			kind: 'image',
+			status: 'done',
+			idea: '故宫雪景',
+			steps: [],
+			run: null,
+			result: {
+				idea: '冬日清晨的故宫太和殿广场，大雪初霁，红墙金瓦覆着薄雪，低角度广角构图，柔和晨光',
+				notes: '- 太和殿为重檐庑殿顶',
+				sources: [{ n: 1, title: '太和殿', url: 'https://example.com/taihe' }]
+			},
+			error: '',
+			model: 'gpt-chat',
+			createdAt: 1
+		});
+		const target: any = await mount();
+		await until(() => !!target.querySelector('textarea'));
+		const box = target.querySelector('textarea');
+		box.value = '故宫雪景';
+		box.dispatchEvent(new Event('input'));
+		await sleep(20);
+		target.querySelector('[data-image-studio-enhance]').click();
+		await until(() => box.value.includes('太和殿广场'));
+		const form = prepApi.startStudioPrep.mock.calls[0][1];
+		expect(form).toMatchObject({ kind: 'image', idea: '故宫雪景', research: true, deeper: false });
+		expect(target.querySelector('[data-studio-prep="done"]').textContent).toContain('1 个网上来源');
+		expect(images.imageGenerations).not.toHaveBeenCalled();
+		target.querySelector('[data-studio-prep-undo]').click();
+		await sleep(20);
+		expect(box.value).toBe('故宫雪景');
+	});
+
+	it('says why the enhancement could not start', async () => {
+		prepApi.startStudioPrep.mockRejectedValue({ detail: '已有 2 个增强在进行，等它们完成再试' });
+		const target: any = await mount();
+		await until(() => !!target.querySelector('textarea'));
+		const box = target.querySelector('textarea');
+		box.value = '猫';
+		box.dispatchEvent(new Event('input'));
+		await sleep(20);
+		target.querySelector('[data-image-studio-enhance]').click();
+		await sleep(30);
+		expect(toasts.error).toHaveBeenCalledWith('已有 2 个增强在进行，等它们完成再试');
+		expect(box.value).toBe('猫');
 	});
 });

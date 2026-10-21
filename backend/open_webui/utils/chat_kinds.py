@@ -1,6 +1,7 @@
 """What kind of work a chat in the sidebar list is: a 讨论台 discussion, a 精答 answer, a chat a
 协作台 team works for, a chat that handed a message to 精答 / 讨论 (派发方式, utils/mode_dispatch.py:
-the chat stands for the run in the history, as a team's chat does), or a chat that made images.
+the chat stands for the run in the history, as a team's chat does), a video chat (sent from the
+video studio, or one a video came back in), or a chat that made images.
 The list marks them so the chat and its modes read as one list (instead of separate places)."""
 
 import logging
@@ -18,9 +19,9 @@ IMAGE_SCAN_LIMIT = 800
 
 def chat_kinds(user_id: str, chat_ids: Iterable[str]) -> dict[str, str]:
     """``{chat_id: 'discuss' | 'answer' | 'team' | 'discuss_dispatch' | 'answer_dispatch' |
-    'image'}`` for the given chats (others are plain chats). A discussion wins over an answer, an
-    answer over a team, a team over a message handed to 讨论 / 精答 (讨论 first), that over images.
-    Never raises: no marks on failure."""
+    'video' | 'image'}`` for the given chats (others are plain chats). A discussion wins over an
+    answer, an answer over a team, a team over a message handed to 讨论 / 精答 (讨论 first), that
+    over a video, a video over images. Never raises: no marks on failure."""
     ids = [chat_id for chat_id in dict.fromkeys(chat_ids) if chat_id]
     if not ids:
         return {}
@@ -28,6 +29,7 @@ def chat_kinds(user_id: str, chat_ids: Iterable[str]) -> dict[str, str]:
     from open_webui.models.chats import Chat
     from open_webui.models.image_studio import ImageStudioItem
     from open_webui.utils.mode_dispatch import CHAT_META_KEY as DISPATCH_META_KEY
+    from open_webui.utils.video_library import CHAT_META_KEY as VIDEO_META_KEY, VIDEO_KIND
 
     wanted = set(ids)
     kinds: dict[str, str] = {}
@@ -48,6 +50,27 @@ def chat_kinds(user_id: str, chat_ids: Iterable[str]) -> dict[str, str]:
                 chat_id = (data or {}).get("chatId") if isinstance(data, dict) else None
                 if chat_id in wanted:
                     kinds[chat_id] = "image"
+            # a video came back in it (the video library), or it was sent from the video studio
+            for (data,) in (
+                db.query(ImageStudioItem.data)
+                .filter(ImageStudioItem.user_id == user_id, ImageStudioItem.kind == VIDEO_KIND)
+                .order_by(ImageStudioItem.created_at.desc())
+                .limit(IMAGE_SCAN_LIMIT)
+                .all()
+            ):
+                chat_id = (data or {}).get("chatId") if isinstance(data, dict) else None
+                if chat_id in wanted:
+                    kinds[chat_id] = "video"
+            for (chat_id,) in (
+                db.query(Chat.id)
+                .filter(
+                    Chat.user_id == user_id,
+                    Chat.id.in_(ids),
+                    cast(Chat.meta, String).like(f'%"{VIDEO_META_KEY}"%'),
+                )
+                .all()
+            ):
+                kinds[chat_id] = "video"
             for chat_id, meta in (
                 db.query(Chat.id, Chat.meta)
                 .filter(

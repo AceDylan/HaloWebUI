@@ -2112,6 +2112,16 @@ async def run_hermes_agent(request, form_data, user, metadata, model, events, ta
 
         return await run_mode_dispatch(request, form_data, user, metadata, model_id, mode)
 
+    from open_webui.utils.video_library import mark_video_chat
+
+    if mark_video_chat(metadata["chat_id"], form_data.get("messages")):
+        # the sidebar reads its list again: the chat's 视频 mark
+        from open_webui.utils.team_chats import emit_chat_event
+
+        title = Chats.get_chat_title_by_id(metadata["chat_id"])
+        if title:
+            await emit_chat_event(user.id, metadata["chat_id"], "chat:title", title)
+
     event_emitter = get_event_emitter(metadata)
     event_caller = get_event_call(metadata)
 

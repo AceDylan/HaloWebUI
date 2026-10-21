@@ -60,7 +60,7 @@
 	/** Search results include archived chats; they carry this mark. */
 	export let archived = false;
 	/**
-	 * What kind of work this chat is (utils/chat_kinds.py): 'discuss' | 'answer' | 'team' | 'image',
+	 * What kind of work this chat is (utils/chat_kinds.py): 'discuss' | 'answer' | 'team' | 'video' | 'image',
 	 * or 'answer_dispatch' | 'discuss_dispatch' — an ordinary chat that handed a message to 精答 /
 	 * 讨论 (it stands for the run in the history, as a team's chat does, and opens as a chat).
 	 */

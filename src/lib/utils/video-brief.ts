@@ -79,6 +79,15 @@ const MP3_TYPES = ['', 'audio/mpeg', 'audio/mp3', 'audio/mpeg3', 'audio/x-mpeg-3
 /** The background music the brief names: its file name and length (null: not known yet). */
 export type VideoMusic = { name: string; seconds: number | null };
 
+/** What 提示词增强 brought (utils/studio-prep.ts): the request as the user wrote it, the key facts
+ * from the web or the 精答 / 讨论 it asked first, and where they come from. */
+export type VideoPrep = {
+	original: string;
+	notes: string;
+	sources: { title: string; url: string }[];
+	run?: { label: string; href: string } | null;
+};
+
 export type VideoBriefOptions = {
 	idea: string;
 	recipe: VideoRecipeKey;
@@ -90,9 +99,10 @@ export type VideoBriefOptions = {
 	musicFit: VideoMusicFit;
 	attachments?: { name: string; kind: 'image' | 'video' | 'audio' | 'file' }[];
 	music?: VideoMusic | null;
+	prep?: VideoPrep | null;
 };
 
-export type VideoSettings = Omit<VideoBriefOptions, 'idea' | 'attachments' | 'music'>;
+export type VideoSettings = Omit<VideoBriefOptions, 'idea' | 'attachments' | 'music' | 'prep'>;
 
 export const DEFAULT_VIDEO_SETTINGS: VideoSettings = {
 	recipe: 'explainer',
@@ -171,11 +181,69 @@ const lengthLabel = (seconds: number) =>
 export const musicSetsLength = (music: VideoMusic | null | undefined, fit: VideoMusicFit) =>
 	!!music && fit === 'full' && (music.seconds == null || music.seconds <= MUSIC_MAX_SECONDS);
 
-/** The message the chat sends: the runner's command in front, then the brief. */
-export const buildVideoBrief = (opts: VideoBriefOptions): string => {
+const attachmentCounts = (attachments: NonNullable<VideoBriefOptions['attachments']>) =>
+	Object.entries(
+		attachments.reduce<Record<string, number>>((acc, a) => ({ ...acc, [a.kind]: (acc[a.kind] ?? 0) + 1 }), {})
+	)
+		.map(([kind, n]) => `${n} 个${ATTACHMENT_KIND[kind] ?? '文件'}`)
+		.join('、');
+
+/** The decided settings as the brief words them (做法, 画幅, 时长, 配音, 字幕), one per line. */
+const requirementLines = (opts: Omit<VideoBriefOptions, 'idea'>) => {
 	const recipe = VIDEO_RECIPES.find((r) => r.key === opts.recipe) ?? VIDEO_RECIPES[0];
 	const frame = VIDEO_FRAMES.find((f) => f.key === opts.frame) ?? VIDEO_FRAMES[0];
 	const voice = VIDEO_VOICES.find((v) => v.key === opts.voice);
+	const music = opts.music ?? null;
+	const musicClock = music?.seconds ? clockLabel(music.seconds) : '';
+	return [
+		`- 做法：${recipe.label}（${recipe.hint}）`,
+		`- 画幅：${frame.label} ${frame.key}（${frame.size}，30fps）`,
+		musicSetsLength(music, opts.musicFit)
+			? `- 时长：跟背景音乐一样长${musicClock ? `（${musicClock}）` : ''}`
+			: `- 时长：约 ${lengthLabel(opts.seconds)}`,
+		`- 配音：${voice && voice.key ? `中文配音，${voice.label}（edge-tts ${voice.key}）` : '不要配音'}`,
+		`- 字幕：${opts.subtitles ? '烧录中文字幕' : '不要字幕'}`
+	];
+};
+
+/** The settings for 提示词增强 to size the content to (it never changes them). */
+export const videoSettingsText = (opts: Omit<VideoBriefOptions, 'idea'>): string => {
+	const lines = requirementLines(opts);
+	const attachments = opts.attachments ?? [];
+	if (attachments.length) lines.push(`- 参考附件：${attachmentCounts(attachments)}（${attachments.map((a) => plainName(a.name)).join('、')}）`);
+	if (opts.music) lines.push(`- 背景音乐：用户指定（${plainName(opts.music.name)}），视频按音乐的节拍和长度做`);
+	return lines.join('\n');
+};
+
+const PREP_ORIGINAL_MAX = 1500;
+
+/** The brief's part from 提示词增强: the user's own words, the key facts and their sources. */
+const prepLines = (prep: VideoPrep, idea: string): string[] => {
+	const lines: string[] = [];
+	const original = prep.original.trim();
+	if (original && original !== idea.trim()) {
+		lines.push(
+			'',
+			'## 用户原话（上面是据此增强的需求；两者冲突时以原话为准）',
+			original.length > PREP_ORIGINAL_MAX ? `${original.slice(0, PREP_ORIGINAL_MAX)}…` : original
+		);
+	}
+	const sources = prep.sources.filter((s) => /^https?:\/\//i.test(s.url));
+	if (prep.notes.trim() || sources.length || prep.run) {
+		lines.push('', '## 资料与依据（制作前已查好：事实和数字以此为准，不要编造）');
+		if (prep.notes.trim()) lines.push(prep.notes.trim());
+		if (prep.run) lines.push(`- ${prep.run.label}结论：HaloWebUI ${prep.run.href}（完整内容在那里）`);
+		if (sources.length) {
+			lines.push('- 来源：');
+			sources.forEach((s, i) => lines.push(`  ${i + 1}. ${plainName(s.title)} ${s.url.replace(/\s/g, '')}`));
+		}
+	}
+	return lines;
+};
+
+/** The message the chat sends: the runner's command in front, then the brief. */
+export const buildVideoBrief = (opts: VideoBriefOptions): string => {
+	const recipe = VIDEO_RECIPES.find((r) => r.key === opts.recipe) ?? VIDEO_RECIPES[0];
 	const attachments = opts.attachments ?? [];
 	const music = opts.music ?? null;
 	const fullLength = musicSetsLength(music, opts.musicFit);
@@ -185,22 +253,13 @@ export const buildVideoBrief = (opts: VideoBriefOptions): string => {
 		'',
 		'## 想要的视频',
 		opts.idea.trim(),
+		...(opts.prep ? prepLines(opts.prep, opts.idea) : []),
 		'',
 		'## 要求',
-		`- 做法：${recipe.label}（${recipe.hint}）`,
-		`- 画幅：${frame.label} ${frame.key}（${frame.size}，30fps）`,
-		fullLength
-			? `- 时长：跟背景音乐一样长${musicClock ? `（${musicClock}）` : ''}`
-			: `- 时长：约 ${lengthLabel(opts.seconds)}`,
-		`- 配音：${voice && voice.key ? `中文配音，${voice.label}（edge-tts ${voice.key}）` : '不要配音'}`,
-		`- 字幕：${opts.subtitles ? '烧录中文字幕' : '不要字幕'}`
+		...requirementLines(opts)
 	];
 	if (attachments.length) {
-		const counts = Object.entries(
-			attachments.reduce<Record<string, number>>((acc, a) => ({ ...acc, [a.kind]: (acc[a.kind] ?? 0) + 1 }), {})
-		)
-			.map(([kind, n]) => `${n} 个${ATTACHMENT_KIND[kind] ?? '文件'}`)
-			.join('、');
+		const counts = attachmentCounts(attachments);
 		lines.push(
 			`- 参考附件：${counts}（${attachments.map((a) => plainName(a.name)).join('、')}），随消息附上，原文件路径见消息末尾；先看完再动手，是素材还是风格参考以上面的描述为准`
 		);
@@ -234,4 +293,19 @@ export const buildVideoBrief = (opts: VideoBriefOptions): string => {
 	);
 	const brief = lines.join('\n');
 	return opts.maker ? `/${opts.maker} ${brief}` : brief;
+};
+
+/** The brief within *max* characters (a handoff carries at most that much): the enhancement's
+ * parts give way first — the user's original words, then the notes cut short, then all of it —
+ * so the requirements and the delivery line always arrive whole. */
+export const fitVideoBrief = (opts: VideoBriefOptions, max: number): string => {
+	const prep = opts.prep;
+	const tries: (VideoPrep | null | undefined)[] = prep
+		? [prep, { ...prep, original: '' }, { ...prep, original: '', notes: prep.notes.slice(0, 400) }, { ...prep, original: '', notes: '', sources: prep.sources.slice(0, 3) }, null]
+		: [prep];
+	for (const attempt of tries) {
+		const brief = buildVideoBrief({ ...opts, prep: attempt });
+		if (brief.length <= max) return brief;
+	}
+	return buildVideoBrief({ ...opts, prep: null });
 };

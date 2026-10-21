@@ -112,3 +112,20 @@ def test_auto_mark_keeps_both_route_and_actual_mode(monkeypatch):
         db.commit()
     assert mod.chat_kinds("u1", ["answer", "discuss", "team", "None"]) == {
         "answer": "auto_answer", "discuss": "auto_discuss", "team": "auto_team", "None": "auto"}
+
+
+def test_marks_video_chats_from_the_studio_or_the_library(monkeypatch):
+    session = _db(monkeypatch)
+    with session() as db:
+        _chat(db, "brief", meta={"video_studio": True})
+        _chat(db, "made")
+        _chat(db, "both")
+        _chat(db, "handed", meta={"video_studio": True, "mode_dispatch": ["answer"]})
+        db.add(ImageStudioItem(id="video_1", user_id="u1", kind="video", data={"chatId": "made"}, created_at=1, updated_at=1))
+        db.add(ImageStudioItem(id="video_2", user_id="u2", kind="video", data={"chatId": "brief"}, created_at=1, updated_at=1))
+        db.add(ImageStudioItem(id="gallery_chat_r1_0", user_id="u1", kind="gallery", data={"chatId": "both"}, created_at=1, updated_at=1))
+        db.add(ImageStudioItem(id="video_3", user_id="u1", kind="video", data={"chatId": "both"}, created_at=1, updated_at=1))
+        db.commit()
+
+    assert mod.chat_kinds("u1", ["brief", "made", "both", "handed"]) == {
+        "brief": "video", "made": "video", "both": "video", "handed": "answer_dispatch"}

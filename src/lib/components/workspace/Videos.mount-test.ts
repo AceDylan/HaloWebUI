@@ -19,7 +19,9 @@ const api = vi.hoisted(() => ({
 vi.mock('$lib/apis/video-studio', () => api);
 const upload = vi.hoisted(() => ({ uploadFileReliably: vi.fn() }));
 vi.mock('$lib/utils/reliable-upload', () => upload);
-const toasts = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn(), info: vi.fn() }));
+const prepApi = vi.hoisted(() => ({ startStudioPrep: vi.fn(), getStudioPrep: vi.fn(), cancelStudioPrep: vi.fn(async () => ({})) }));
+vi.mock('$lib/apis/studio-prep', () => prepApi);
+const toasts = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn() }));
 vi.mock('$lib/services/models', () => ({ ensureModels: vi.fn(async () => {}) }));
 vi.mock('svelte-sonner', () => ({ toast: toasts }));
 
@@ -84,6 +86,12 @@ beforeEach(() => {
 	(globalThis as any).URL.revokeObjectURL ??= () => {};
 	sessionStorage.removeItem('halo.handoff');
 	localStorage.removeItem('halo.videoStudio.settings');
+	// 提示词增强 off unless a test turns it on (it is on by default)
+	localStorage.setItem('halo.videoStudio.prep', JSON.stringify({ enhance: false, research: true, deeper: true }));
+	sessionStorage.removeItem('halo.videoStudio.prepJob');
+	prepApi.startStudioPrep.mockReset();
+	prepApi.getStudioPrep.mockReset();
+	prepApi.cancelStudioPrep.mockClear();
 	localStorage.token = 'token';
 	stores.config.set({ features: {}, hermes_agent_model_ids: ['hermes-agent'] } as any);
 	stores.user.set({ id: 'u1', role: 'admin' } as any);
@@ -114,6 +122,108 @@ const typeIdea = async (target: any, text: string) => {
 	box.dispatchEvent(new Event('input'));
 	await sleep(10);
 };
+
+const prepJob = (extra: Record<string, unknown> = {}) => ({
+	id: 'job1',
+	kind: 'video',
+	status: 'done',
+	idea: '用 30 秒讲讲番茄工作法',
+	steps: [],
+	run: null,
+	result: {
+		idea: '增强后的需求：开场一个番茄钟倒计时……',
+		notes: '- 番茄工作法由 Francesco Cirillo 在 1980 年代末提出',
+		sources: [{ n: 1, title: '番茄工作法 - 百科', url: 'https://example.com/pomodoro' }],
+		run: { kind: 'answer', chatId: 'c1', href: '/answer/c1', label: '精答' }
+	},
+	error: '',
+	model: 'gpt-chat',
+	createdAt: 1,
+	...extra
+});
+
+describe('Videos 提示词增强', () => {
+	it('enhances the request before it goes out: the enhanced text, the user\'s words, the facts and their sources', async () => {
+		localStorage.setItem('halo.videoStudio.prep', JSON.stringify({ enhance: true, research: true, deeper: true }));
+		api.getVideoPage.mockResolvedValue({ items: [], next: null });
+		prepApi.startStudioPrep.mockResolvedValue(prepJob());
+		const target = await mount();
+		await typeIdea(target, '用 30 秒讲讲番茄工作法');
+		expect(target.querySelector('[data-video-status]').textContent).toContain('先增强需求');
+		target.querySelector('[data-video-workbench]').dispatchEvent(new Event('submit'));
+		await sleep(30);
+		expect(prepApi.startStudioPrep).toHaveBeenCalledTimes(1);
+		const form = prepApi.startStudioPrep.mock.calls[0][1];
+		expect(form).toMatchObject({ kind: 'video', idea: '用 30 秒讲讲番茄工作法', research: true, deeper: true });
+		expect(form.settings).toContain('做法：讲解动画');
+		expect(form.settings).toContain('时长：约 30 秒');
+		expect(nav.goto).toHaveBeenCalledWith('/');
+		const text = JSON.parse(sessionStorage.getItem('halo.handoff')!).text;
+		expect(text).toContain('## 想要的视频\n增强后的需求');
+		expect(text).toContain('## 用户原话');
+		expect(text).toContain('用 30 秒讲讲番茄工作法');
+		expect(text).toContain('## 资料与依据');
+		expect(text).toContain('Francesco Cirillo');
+		expect(text).toContain('精答结论：HaloWebUI /answer/c1');
+		expect(text).toContain('1. 番茄工作法 - 百科 https://example.com/pomodoro');
+		expect(text).toContain('MEDIA:」紧跟成片');
+		expect(target.querySelector('[data-video-idea]').value).toContain('增强后的需求');
+	});
+
+	it('goes on from the words as written when the enhancement fails', async () => {
+		localStorage.setItem('halo.videoStudio.prep', JSON.stringify({ enhance: true, research: false, deeper: false }));
+		api.getVideoPage.mockResolvedValue({ items: [], next: null });
+		prepApi.startStudioPrep.mockRejectedValue({ detail: '没有可用来增强的文本模型' });
+		const target = await mount();
+		await typeIdea(target, '做个片头');
+		target.querySelector('[data-video-workbench]').dispatchEvent(new Event('submit'));
+		await sleep(30);
+		expect(prepApi.startStudioPrep.mock.calls[0][1]).toMatchObject({ research: false, deeper: false });
+		expect(toasts.warning).toHaveBeenCalledWith('没有可用来增强的文本模型，按原文制作');
+		const text = JSON.parse(sessionStorage.getItem('halo.handoff')!).text;
+		expect(text).toContain('## 想要的视频\n做个片头');
+		expect(text).not.toContain('## 用户原话');
+	});
+
+	it('「增强」 puts the enhanced text in the box to read first, with a way back', async () => {
+		api.getVideoPage.mockResolvedValue({ items: [], next: null });
+		prepApi.startStudioPrep.mockResolvedValue(prepJob({ status: 'running', result: null, steps: [{ key: 'plan', label: '分析需求', status: 'running' }] }));
+		prepApi.getStudioPrep.mockResolvedValue(prepJob());
+		const target = await mount();
+		await typeIdea(target, '用 30 秒讲讲番茄工作法');
+		target.querySelector('[data-video-enhance]').click();
+		await sleep(30);
+		expect(target.querySelector('[data-studio-prep="running"]')).toBeTruthy();
+		expect(target.querySelector('[data-studio-prep-step="plan"]').textContent).toContain('分析需求');
+		expect(target.querySelector('[data-video-start]').disabled).toBe(true);
+		await sleep(1700);
+		expect(target.querySelector('[data-video-idea]').value).toContain('增强后的需求');
+		expect(target.querySelector('[data-studio-prep="done"]').textContent).toContain('参考了精答结论');
+		expect(nav.goto).not.toHaveBeenCalled();
+		// 开始制作 now sends it as it is: no second enhancement
+		target.querySelector('[data-video-workbench]').dispatchEvent(new Event('submit'));
+		await sleep(30);
+		expect(prepApi.startStudioPrep).toHaveBeenCalledTimes(1);
+		expect(JSON.parse(sessionStorage.getItem('halo.handoff')!).text).toContain('增强后的需求');
+	}, 10000);
+
+	it('undoes the enhancement, and remembers what it may do', async () => {
+		api.getVideoPage.mockResolvedValue({ items: [], next: null });
+		prepApi.startStudioPrep.mockResolvedValue(prepJob());
+		const target = await mount();
+		await typeIdea(target, '用 30 秒讲讲番茄工作法');
+		target.querySelector('[data-video-enhance]').click();
+		await sleep(30);
+		target.querySelector('[data-studio-prep-undo]').click();
+		await sleep(10);
+		expect(target.querySelector('[data-video-idea]').value).toBe('用 30 秒讲讲番茄工作法');
+		expect(target.querySelector('[data-studio-prep]')).toBeFalsy();
+		target.querySelector('[data-video-prep="deeper"]').click();
+		target.querySelector('[data-video-prep="enhance"]').click();
+		await sleep(10);
+		expect(JSON.parse(localStorage.getItem('halo.videoStudio.prep')!)).toEqual({ enhance: true, research: true, deeper: false });
+	});
+});
 
 describe('Videos', () => {
 	it('sends the brief to a new Hermes chat, with a runner in front when one is picked', async () => {

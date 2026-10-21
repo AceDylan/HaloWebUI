@@ -28,7 +28,7 @@ from open_webui.models.chats import Chat  # noqa: E402
 from open_webui.models.image_studio import ImageStudioItems  # noqa: E402
 from open_webui.routers import video_studio  # noqa: E402
 from open_webui.utils.auth import get_verified_user  # noqa: E402
-from open_webui.utils.video_library import record_video, video_item_id  # noqa: E402
+from open_webui.utils.video_library import is_video_brief, mark_video_chat, record_video, video_item_id  # noqa: E402
 
 
 class _User:
@@ -203,3 +203,24 @@ def test_the_workbench_lists_only_the_users_own_mp3_uploads_newest_first():
     assert [m["id"] for m in _client("mus-ann").get("/api/v1/video-studio/music?limit=1").json()] == ["mus-2"]
     assert _client("mus-ann").get("/api/v1/video-studio/music?limit=500").status_code == 422
     assert [m["id"] for m in _client("mus-bob").get("/api/v1/video-studio/music").json()] == ["mus-6"]
+
+
+def test_a_chat_sent_from_the_video_studio_is_marked_once():
+    from open_webui.models.chats import Chats
+
+    head = "请制作一个视频（来自 HaloWebUI 视频工作台）。\n\n## 想要的视频\n片头"
+    assert is_video_brief(head)
+    assert is_video_brief("/codex " + head)
+    assert is_video_brief([{"type": "text", "text": head}])
+    assert not is_video_brief("帮我请制作一个视频（来自 HaloWebUI 视频工作台）")
+    assert not is_video_brief("/codex 做个片头")
+
+    _add_chat("vid-chat", "vid-cat", "New Chat")
+    _add_chat("plain-chat", "vid-cat", "New Chat")
+    earlier = [{"role": "user", "content": head}, {"role": "assistant", "content": "好"}]
+    assert not mark_video_chat("plain-chat", earlier + [{"role": "user", "content": "再快一点"}])
+    assert mark_video_chat("vid-chat", [{"role": "user", "content": "/reclaude " + head}])
+    assert not mark_video_chat("vid-chat", [{"role": "user", "content": head}])  # already marked
+    assert not mark_video_chat("missing", [{"role": "user", "content": head}])
+    assert Chats.get_chat_by_id("vid-chat").meta.get("video_studio") is True
+    assert "video_studio" not in (Chats.get_chat_by_id("plain-chat").meta or {})

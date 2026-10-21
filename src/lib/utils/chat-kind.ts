@@ -10,6 +10,7 @@ export const CHAT_KIND_LABEL: Record<string, string> = {
 	answer: '精答',
 	team: '协作',
 	image: '生图',
+	video: '视频',
 	answer_dispatch: '精答',
 	discuss_dispatch: '讨论'
 };
@@ -23,6 +24,7 @@ export const CHAT_KIND_TITLE: Record<string, string> = {
 	discuss: '讨论台里的多模型讨论',
 	team: '协作台任务的对话：目标、团队进度和发回的结果',
 	image: '这个对话里生成过图片',
+	video: '视频工作台发起的对话，或交付过视频的对话',
 	answer_dispatch: '交给精答的对话：精答的进度和发回的回答',
 	discuss_dispatch: '交给讨论台的对话：讨论的进度和发回的结论'
 };

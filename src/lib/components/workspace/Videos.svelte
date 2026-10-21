@@ -10,6 +10,11 @@
 	 * 背景音乐: the user's own MP3 (uploaded here or picked again from their earlier uploads) is
 	 * decided before the video: the brief has the maker plan to its length and beats and prove
 	 * the finished file plays it (video-brief.ts).
+	 *
+	 * 提示词增强 (utils/studio-prep.ts): before the brief goes out (or on ✨ 增强), gpt-chat reads the
+	 * request — looks facts up on the web, or asks 精答 / 讨论 first when the content needs working
+	 * out, and waits for the answer — and rewrites it; the brief carries the user's own words and
+	 * the facts with their sources next to it.
 	 */
 	import { afterUpdate, onDestroy, onMount } from 'svelte';
 	import { toast } from 'svelte-sonner';
@@ -29,7 +34,15 @@
 	import { isHermesAgentModel } from '$lib/utils/hermes';
 	import { getModelSelectionId } from '$lib/utils/model-identity';
 	import { formatFileSize } from '$lib/utils';
-	import { handOff, takeHandoff, type HandoffOrigin } from '$lib/utils/handoff';
+	import { HANDOFF_TEXT_MAX, handOff, takeHandoff, type HandoffOrigin } from '$lib/utils/handoff';
+	import {
+		cancelStudioPrep,
+		getStudioPrep,
+		startStudioPrep,
+		type StudioPrepJob,
+		type StudioPrepResult
+	} from '$lib/apis/studio-prep';
+	import { normalizePrepOptions, prepErrorText, waitForPrep, type PrepOptions } from '$lib/utils/studio-prep';
 	import {
 		VIDEO_FRAMES,
 		VIDEO_LENGTHS,
@@ -38,11 +51,12 @@
 		VIDEO_VOICES,
 		MUSIC_MAX_SECONDS,
 		attachmentKind,
-		buildVideoBrief,
 		clockLabel,
+		fitVideoBrief,
 		musicFileProblem,
 		musicSetsLength,
 		normalizeVideoSettings,
+		videoSettingsText,
 		type VideoSettings
 	} from '$lib/utils/video-brief';
 	import { clearModeDraft, setModeDraft } from '$lib/components/scifi/mode-relay';
@@ -50,12 +64,17 @@
 	import LoadMore from '$lib/components/common/LoadMore.svelte';
 	import Modal from '$lib/components/common/Modal.svelte';
 	import UploadProgress from '$lib/components/common/UploadProgress.svelte';
+	import StudioPrepPanel from '$lib/components/common/StudioPrepPanel.svelte';
+	import Sparkles from '$lib/components/icons/Sparkles.svelte';
 	import SidebarModeIcon from '$lib/components/layout/Sidebar/SidebarModeIcon.svelte';
 	import GarbageBin from '$lib/components/icons/GarbageBin.svelte';
 	import ArrowDownTray from '$lib/components/icons/ArrowDownTray.svelte';
 	import XMark from '$lib/components/icons/XMark.svelte';
 
 	const SETTINGS_KEY = 'halo.videoStudio.settings';
+	const PREP_KEY = 'halo.videoStudio.prep';
+	// the enhancement going on in this tab, read again after a visit elsewhere
+	const PREP_JOB_KEY = 'halo.videoStudio.prepJob';
 	const MAX_ATTACHMENTS = 8;
 	const PAGE = 24;
 
@@ -93,6 +112,15 @@
 	let music: Music | null = null;
 	let musicInput: HTMLInputElement;
 	let recentMusic: MusicFile[] = [];
+
+	// ---- 提示词增强 ------------------------------------------------------------------------------
+	let prepOptions: PrepOptions = normalizePrepOptions(null);
+	let prepJob: StudioPrepJob | null = null;
+	// the last enhancement while its text is in the box: what it brought, the words before it
+	let prepared: { result: StudioPrepResult; original: string; model: string } | null = null;
+	let destroyed = false;
+	$: preparing = prepJob?.status === 'running';
+	$: if (prepared && !idea.trim()) prepared = null;
 	// a newer pick wins over an older upload or length reading still going
 	let musicPick = 0;
 	const fileUrl = (id: string) => `${WEBUI_API_BASE_URL}/files/${encodeURIComponent(id)}/content`;
@@ -108,9 +136,17 @@
 	$: briefOptions = {
 		...settings,
 		attachments: ready.map((a) => ({ name: a.name, kind: a.kind })),
-		music: musicReady ? { name: musicReady.name, seconds: musicReady.seconds } : null
+		music: musicReady ? { name: musicReady.name, seconds: musicReady.seconds } : null,
+		prep: prepared
+			? {
+					original: prepared.original,
+					notes: prepared.result.notes,
+					sources: prepared.result.sources,
+					run: prepared.result.run ?? null
+				}
+			: null
 	};
-	$: brief = buildVideoBrief({ ...briefOptions, idea: idea.trim() || '（在左边写下想要的视频）' });
+	$: brief = fitVideoBrief({ ...briefOptions, idea: idea.trim() || '（在左边写下想要的视频）' }, HANDOFF_TEXT_MAX);
 	$: sentFiles = [
 		...ready.map((a) => ({ id: a.id, name: a.name, type: a.kind === 'image' ? 'image' : 'file' })),
 		...(musicReady ? [{ id: musicReady.id, name: musicReady.name, type: 'file' }] : [])
@@ -124,6 +160,8 @@
 		? modelsChecked
 			? '没有可用的 Hermes 模型：视频由 Hermes 或 runner 制作'
 			: '正在读取模型…'
+		: preparing
+			? '正在增强需求…'
 		: uploading
 			? '附件还在上传'
 			: music?.uploading
@@ -138,6 +176,86 @@
 		} catch {
 			/* private mode: the choices just are not remembered */
 		}
+	};
+
+	const setPrepOption = (patch: Partial<PrepOptions>) => {
+		prepOptions = { ...prepOptions, ...patch };
+		try {
+			localStorage.setItem(PREP_KEY, JSON.stringify(prepOptions));
+		} catch {
+			/* not remembered */
+		}
+	};
+
+	const rememberJob = (id: string | null, original = '') => {
+		try {
+			if (id) sessionStorage.setItem(PREP_JOB_KEY, JSON.stringify({ id, original }));
+			else sessionStorage.removeItem(PREP_JOB_KEY);
+		} catch {
+			/* not resumed after a visit elsewhere */
+		}
+	};
+
+	/** The job read until it ends; its text into the box when it is done. Returns how it ended
+	 * ('stopped': cancelled here, or the page went away). */
+	const followPrep = async (job: StudioPrepJob, original: string): Promise<'done' | 'failed' | 'stopped'> => {
+		prepJob = job;
+		const ended = await waitForPrep(localStorage.token, job, {
+			onUpdate: (current) => {
+				if (prepJob?.id === job.id) prepJob = current;
+			},
+			stopped: () => destroyed || prepJob?.id !== job.id
+		});
+		if (destroyed) return 'stopped';
+		rememberJob(null);
+		if (prepJob?.id !== job.id || ended.status === 'cancelled') return 'stopped';
+		if (ended.status === 'done' && ended.result) {
+			prepared = { result: ended.result, original, model: ended.model };
+			idea = ended.result.idea;
+			prepJob = null;
+			return 'done';
+		}
+		prepJob = ended;
+		return 'failed';
+	};
+
+	const runPrep = async (): Promise<'done' | 'failed' | 'stopped'> => {
+		const original = idea.trim();
+		let job: StudioPrepJob;
+		try {
+			job = await startStudioPrep(localStorage.token, {
+				kind: 'video',
+				idea: original,
+				settings: videoSettingsText(briefOptions),
+				research: prepOptions.research,
+				deeper: prepOptions.deeper
+			});
+		} catch (error) {
+			prepJob = { id: '', kind: 'video', status: 'error', idea: original, steps: [], run: null, result: null, error: prepErrorText(error), model: '', createdAt: Date.now() };
+			return 'failed';
+		}
+		rememberJob(job.id, original);
+		return followPrep(job, original);
+	};
+
+	/** ✨ 增强: the enhanced request into the box, to read and change before 开始制作. */
+	const enhance = async () => {
+		if (preparing || !idea.trim()) return;
+		if ((await runPrep()) === 'failed' && prepJob?.error) toast.error(prepJob.error);
+	};
+
+	const cancelPrep = () => {
+		const job = prepJob;
+		prepJob = null;
+		rememberJob(null);
+		if (job?.id) void cancelStudioPrep(localStorage.token, job.id).catch(() => {});
+	};
+
+	const undoPrep = () => {
+		if (!prepared) return;
+		idea = prepared.original;
+		prepared = null;
+		ideaBox?.focus();
 	};
 
 	const addFiles = async (list: Iterable<File> | null | undefined) => {
@@ -284,12 +402,22 @@
 		attachments = attachments.filter((a) => a !== item);
 	};
 
-	const start = () => {
+	const start = async () => {
 		if (blocked || !hermes) return;
 		saveSettings();
+		if (prepOptions.enhance && !prepared) {
+			const ended = await runPrep();
+			if (ended === 'stopped') return;
+			if (ended === 'failed') {
+				// the video is still made, from the words as written
+				toast.warning(`${prepJob?.error || '增强没成功'}，按原文制作`);
+				prepJob = null;
+			}
+			if (!hermes) return;
+		}
 		const stored = handOff(typeof sessionStorage === 'undefined' ? null : sessionStorage, {
 			to: 'chat',
-			text: buildVideoBrief({ ...briefOptions, idea }),
+			text: fitVideoBrief({ ...briefOptions, idea }, HANDOFF_TEXT_MAX),
 			models: [getModelSelectionId(hermes)],
 			files: sentFiles,
 			from: origin,
@@ -423,6 +551,11 @@
 		} catch {
 			settings = normalizeVideoSettings(null);
 		}
+		try {
+			prepOptions = normalizePrepOptions(JSON.parse(localStorage.getItem(PREP_KEY) ?? 'null'));
+		} catch {
+			prepOptions = normalizePrepOptions(null);
+		}
 		if (new URL(window.location.href).searchParams.get('tab') === 'library') tab = 'library';
 
 		// Work handed over from a chat or another mode (the dock, 「交给…」): the draft is the idea,
@@ -439,6 +572,10 @@
 				kind: f.type === 'image' ? 'image' : attachmentKind('', f.name),
 				preview: f.type === 'image' ? `${WEBUI_API_BASE_URL}/files/${f.id}/content` : undefined
 			}));
+		} else {
+			// an enhancement started here before a visit elsewhere: its result comes into the box
+			// (the video is not started by itself: the attachments did not stay)
+			void resumePrep();
 		}
 
 		void loadFirst();
@@ -450,10 +587,28 @@
 		if (tab === 'workbench') ideaBox?.focus();
 	});
 
+	const resumePrep = async () => {
+		let saved: { id?: string; original?: string } | null = null;
+		try {
+			saved = JSON.parse(sessionStorage.getItem(PREP_JOB_KEY) ?? 'null');
+		} catch {
+			saved = null;
+		}
+		if (!saved?.id) return;
+		try {
+			const job = await getStudioPrep(localStorage.token, saved.id);
+			if (!idea.trim()) idea = saved.original || job.idea;
+			await followPrep(job, saved.original || job.idea);
+		} catch {
+			rememberJob(null);
+		}
+	};
+
 	afterUpdate(() =>
 		setModeDraft('video', idea, { from: origin, files: sentFiles })
 	);
 	onDestroy(() => {
+		destroyed = true;
 		clearModeDraft('video');
 		if (searchTimer) clearTimeout(searchTimer);
 		attachments.forEach((a) => a.preview?.startsWith('blob:') && URL.revokeObjectURL(a.preview));
@@ -508,19 +663,35 @@
 				<div class="flex items-center justify-between gap-2">
 					<div class="text-sm font-semibold text-gray-900 dark:text-gray-100">想要什么样的视频</div>
 					{#if idea.trim()}
-						<button
-							type="button"
-							class="h-8 shrink-0 rounded-full px-2.5 text-xs text-gray-500 transition hover:bg-gray-100 hover:text-gray-800 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-200"
-							on:click={() => {
-								idea = '';
-								ideaBox?.focus();
-							}}>清空</button
-						>
+						<span class="flex shrink-0 items-center gap-1">
+							<button
+								type="button"
+								class="inline-flex h-8 items-center gap-1 rounded-full px-2.5 text-xs text-gray-600 transition hover:bg-gray-100 hover:text-gray-900 disabled:opacity-50 dark:text-gray-300 dark:hover:bg-gray-800 dark:hover:text-white"
+								disabled={preparing}
+								title="用 gpt-chat 把需求写完整（需要时先联网查资料、先交给精答或讨论），改写后的需求放回这里"
+								on:click={enhance}
+								data-video-enhance
+							>
+								<Sparkles className="size-3.5" strokeWidth="2" />
+								<span>{prepared ? '再增强' : '增强'}</span>
+							</button>
+							<button
+								type="button"
+								class="h-8 rounded-full px-2.5 text-xs text-gray-500 transition hover:bg-gray-100 hover:text-gray-800 disabled:opacity-50 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-200"
+								disabled={preparing}
+								on:click={() => {
+									idea = '';
+									prepared = null;
+									ideaBox?.focus();
+								}}>清空</button
+							>
+						</span>
 					{/if}
 				</div>
 				<textarea
 					bind:this={ideaBox}
 					bind:value={idea}
+					readonly={preparing}
 					rows="7"
 					on:keydown={onKeydown}
 					on:paste={(event) => {
@@ -532,6 +703,14 @@
 					placeholder="主题、给谁看、想传达什么、喜欢的风格……例如：用 60 秒讲清楚 HTTPS 是怎么保护网页的，深色科技风，适合发朋友圈"
 					class="min-h-[9rem] max-h-[60vh] w-full resize-y rounded-xl border border-gray-200/60 bg-white/85 p-3 text-base leading-6 text-gray-900 outline-none placeholder:text-gray-400 sm:text-sm dark:border-gray-700/50 dark:bg-gray-900/70 dark:text-gray-100 dark:placeholder:text-gray-500"
 					data-video-idea
+				/>
+
+				<StudioPrepPanel
+					job={prepJob}
+					result={prepared?.result ?? null}
+					model={prepared?.model ?? ''}
+					onCancel={cancelPrep}
+					onUndo={undoPrep}
 				/>
 
 				<div class="flex flex-wrap items-center gap-2" data-video-attachments>
@@ -684,11 +863,12 @@
 			<!-- after the music: the music is decided before the video is started -->
 			<div class="flex flex-col-reverse gap-2 px-1 sm:flex-row sm:items-center sm:justify-between">
 				<span class="text-xs text-gray-500 dark:text-gray-400" data-video-status data-video-blocked={blocked || undefined}>
-					{blocked || `交给 ${maker.label} · ${recipe.label} · ${lengthSummary}${musicReady ? ' · 配乐已定' : ''}，在新对话里制作`}
+					{blocked ||
+						`${prepOptions.enhance && !prepared ? '先增强需求，再' : ''}交给 ${maker.label} · ${recipe.label} · ${lengthSummary}${musicReady ? ' · 配乐已定' : ''}，在新对话里制作`}
 				</span>
 				<button type="submit" class="workspace-primary-button w-full sm:w-auto sm:min-w-32" disabled={!!blocked} title={blocked} data-video-start>
 					<SidebarModeIcon mode="video" className="size-4" />
-					<span>开始制作</span>
+					<span>{preparing ? '增强中…' : '开始制作'}</span>
 				</button>
 			</div>
 
@@ -780,6 +960,26 @@
 							<button type="button" class={!settings.subtitles ? chipOn : chip} on:click={() => (settings = { ...settings, subtitles: false })}>不要字幕</button>
 						</div>
 					</div>
+				</div>
+
+				<div class="space-y-2" data-video-prep-options>
+					<div class="text-xs font-medium text-gray-500 dark:text-gray-400">提示词增强</div>
+					<div class="flex flex-wrap gap-1.5">
+						<button type="button" class={prepOptions.enhance ? chipOn : chip} aria-pressed={prepOptions.enhance} on:click={() => setPrepOption({ enhance: !prepOptions.enhance })} data-video-prep="enhance">
+							开始前自动增强
+						</button>
+						<button type="button" class={prepOptions.research ? chipOn : chip} aria-pressed={prepOptions.research} on:click={() => setPrepOption({ research: !prepOptions.research })} data-video-prep="research">
+							联网搜索
+						</button>
+						<button type="button" class={prepOptions.deeper ? chipOn : chip} aria-pressed={prepOptions.deeper} on:click={() => setPrepOption({ deeper: !prepOptions.deeper })} data-video-prep="deeper">
+							需要时先精答 / 讨论
+						</button>
+					</div>
+					<p class="text-xs leading-relaxed text-gray-500 dark:text-gray-400">
+						gpt-chat 先判断：需要事实就联网查，内容要先想清楚就交给精答（有争议交给讨论）并等结论，再把需求改写完整、按时长拆好分镜，然后照常交给制作者。{prepOptions.enhance
+							? ''
+							: '已关自动增强：点需求框右上的「增强」可以手动来一次。'}
+					</p>
 				</div>
 
 				<div class="space-y-2">

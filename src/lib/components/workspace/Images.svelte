@@ -109,7 +109,15 @@
 		serializeChatImageHandoff
 	} from '$lib/utils/image-handoff';
 	import { takeHandoff, type HandoffOrigin } from '$lib/utils/handoff';
+	import {
+		cancelStudioPrep,
+		startStudioPrep,
+		type StudioPrepJob,
+		type StudioPrepResult
+	} from '$lib/apis/studio-prep';
+	import { prepErrorText, waitForPrep } from '$lib/utils/studio-prep';
 	import HandoffBack from '$lib/components/common/HandoffBack.svelte';
+	import StudioPrepPanel from '$lib/components/common/StudioPrepPanel.svelte';
 	import LoadMore from '$lib/components/common/LoadMore.svelte';
 	import { warp } from '$lib/components/scifi/scifi';
 	import { clearModeDraft, setModeDraft } from '$lib/components/scifi/mode-relay';
@@ -203,6 +211,15 @@
 	let steps = 0;
 	let canSubmit = false;
 	let blockedReason: string | null = null;
+
+	// 提示词增强 (utils/studio-prep.ts): on 增强 only — gpt-chat rewrites the prompt, looking real
+	// things up on the web first when the picture needs them to be right (no 精答 / 讨论 for one
+	// picture). The text goes into the box to read before 生成.
+	let prepJob: StudioPrepJob | null = null;
+	let prepared: { result: StudioPrepResult; original: string; model: string } | null = null;
+	let prepDestroyed = false;
+	$: preparing = prepJob?.status === 'running';
+	$: if (prepared && !prompt.trim()) prepared = null;
 	let workspaceNoModels = false;
 	let learnedConstraints: Record<string, LearnedImageConstraint> = {};
 
@@ -678,6 +695,7 @@
 
 	$: canSubmit =
 		!loading &&
+		!preparing &&
 		viewState === 'ready' &&
 		imageModels.length > 0 &&
 		Boolean(selectedModel) &&
@@ -1056,6 +1074,7 @@
 	// template's prompt (see composeTemplatePrompt), and the caret goes to the end to go on writing.
 	const loadTemplate = async (template: ImageGenerationTemplate) => {
 		const config = template.config;
+		prepared = null;
 		prompt = composeTemplatePrompt(prompt, loadedTemplate?.config.prompt, config.prompt);
 		loadedTemplateId = template.id;
 		templateName = template.name;
@@ -1879,7 +1898,57 @@
 		}
 	});
 
+	const enhancePrompt = async () => {
+		const original = prompt.trim();
+		if (preparing || !original) return;
+		const settings = [
+			selectedModelMeta?.name || selectedModelRawId ? `- 模型：${selectedModelMeta?.name || selectedModelRawId}` : '',
+			activeSize ? `- 尺寸：${activeSize}` : '',
+			referenceImages.length ? `- 参考图：${referenceImages.length} 张（在参考图上修改）` : '',
+			loadedTemplate ? `- 用了模板：${loadedTemplate.name}` : ''
+		]
+			.filter(Boolean)
+			.join('\n');
+		let job: StudioPrepJob;
+		try {
+			job = await startStudioPrep(localStorage.token, { kind: 'image', idea: original, settings, research: true, deeper: false });
+		} catch (error) {
+			toast.error(prepErrorText(error));
+			return;
+		}
+		prepJob = job;
+		const ended = await waitForPrep(localStorage.token, job, {
+			onUpdate: (current) => {
+				if (prepJob?.id === job.id) prepJob = current;
+			},
+			stopped: () => prepDestroyed || prepJob?.id !== job.id
+		});
+		if (prepDestroyed || prepJob?.id !== job.id || ended.status === 'cancelled') return;
+		if (ended.status === 'done' && ended.result) {
+			prepared = { result: ended.result, original, model: ended.model };
+			prompt = ended.result.idea;
+			prepJob = null;
+		} else {
+			prepJob = ended;
+			toast.error(ended.error || '增强没成功');
+		}
+	};
+
+	const cancelPrompt = () => {
+		const job = prepJob;
+		prepJob = null;
+		if (job?.id) void cancelStudioPrep(localStorage.token, job.id).catch(() => {});
+	};
+
+	const undoPrompt = () => {
+		if (!prepared) return;
+		prompt = prepared.original;
+		prepared = null;
+		promptTextarea?.focus();
+	};
+
 	onDestroy(() => {
+		prepDestroyed = true;
 		if (imageModelSearchTimer) {
 			clearTimeout(imageModelSearchTimer);
 		}
@@ -2039,7 +2108,19 @@
 							{#if prompt.trim()}
 								<button
 									type="button"
-									class="h-8 shrink-0 rounded-full px-2.5 text-xs text-gray-500 transition hover:bg-gray-100 hover:text-gray-800 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-200"
+									class="inline-flex h-8 shrink-0 items-center gap-1 rounded-full px-2.5 text-xs text-gray-600 transition hover:bg-gray-100 hover:text-gray-900 disabled:opacity-50 dark:text-gray-300 dark:hover:bg-gray-800 dark:hover:text-white"
+									disabled={preparing}
+									title="用 gpt-chat 把提示词写完整（构图、光线、风格、细节）；画真实的东西时先联网查准，改写后放回这里"
+									data-image-studio-enhance
+									on:click={enhancePrompt}
+								>
+									<Sparkles className="size-3.5" strokeWidth="2" />
+									<span>{prepared ? '再增强' : '增强'}</span>
+								</button>
+								<button
+									type="button"
+									class="h-8 shrink-0 rounded-full px-2.5 text-xs text-gray-500 transition hover:bg-gray-100 hover:text-gray-800 disabled:opacity-50 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-200"
+									disabled={preparing}
 									data-image-studio-clear-prompt
 									on:click={() => {
 										prompt = '';
@@ -2085,12 +2166,21 @@
 						bind:this={promptTextarea}
 						rows="7"
 						bind:value={prompt}
+						readonly={preparing}
 						on:keydown={handleComposerKeydown}
 						on:paste={handlePromptPaste}
 						placeholder={savedTemplates.length > 0
 							? $i18n.t('Pick a template above, then write what to draw…')
 							: $i18n.t('Describe the image you want to generate...')}
 						class="min-h-[9rem] max-h-[60vh] w-full resize-y rounded-xl border border-gray-200/60 bg-white/85 p-3 text-base leading-6 text-gray-900 outline-none placeholder:text-gray-400 sm:text-sm dark:border-gray-700/50 dark:bg-gray-900/70 dark:text-gray-100 dark:placeholder:text-gray-500"
+					/>
+
+					<StudioPrepPanel
+						job={prepJob}
+						result={prepared?.result ?? null}
+						model={prepared?.model ?? ''}
+						onCancel={cancelPrompt}
+						onUndo={undoPrompt}
 					/>
 
 					<div class="flex flex-wrap items-center gap-2" data-image-studio-references>

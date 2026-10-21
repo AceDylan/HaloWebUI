@@ -89,6 +89,39 @@ def record_video(user_id: str, **kwargs) -> bool:
         return False
 
 
+# The video studio's brief (src/lib/utils/video-brief.ts) starts with this line, after a runner's
+# command when a runner makes it: the chat it went out in is a video chat from its first turn
+# (the history marks it 视频, utils/chat_kinds.py), before any video comes back.
+VIDEO_BRIEF_HEAD = "请制作一个视频（来自 HaloWebUI 视频工作台）"
+CHAT_META_KEY = "video_studio"
+_COMMAND = re.compile(r"^/[A-Za-z][\w-]*\s+")
+
+
+def is_video_brief(text) -> bool:
+    if isinstance(text, list):
+        text = "".join(str(part.get("text") or "") for part in text if isinstance(part, dict))
+    return _COMMAND.sub("", str(text or "").lstrip(), count=1).startswith(VIDEO_BRIEF_HEAD)
+
+
+def mark_video_chat(chat_id: str, messages) -> bool:
+    """Marks the chat when its newest message is a video studio brief. Returns whether it was
+    marked now (False: not a brief, already marked, or no such chat)."""
+    from open_webui.models.chats import Chats
+
+    last = next((m for m in reversed(messages or []) if isinstance(m, dict) and m.get("role") == "user"), None)
+    if not chat_id or last is None or not is_video_brief(last.get("content")):
+        return False
+    try:
+        chat = Chats.get_chat_by_id(chat_id)
+        if chat is None or (chat.meta or {}).get(CHAT_META_KEY):
+            return False
+        Chats.set_chat_meta_value_by_id(chat_id, CHAT_META_KEY, True)
+        return True
+    except Exception:  # noqa: BLE001 — only the history's mark
+        log.warning("Could not mark a video chat", exc_info=True)
+        return False
+
+
 VIDEO_EXTENSIONS = (".mp4", ".m4v", ".mov", ".webm", ".mkv")
 RUN_VIDEOS_MAX = 6
 

@@ -1,13 +1,22 @@
 /* =====================================================================================
    The landing page's model orbit (Placeholder/ModelOrbit.svelte; geometry and seating in
    utils/model-orbit.ts). The chosen model is the core, inside halo.css's .halo-orb rings and
-   scifi.css's reactor; the others ride an ellipse round it as holographic nodes: a glass
-   sphere on a projector platform, a turning ring, a HUD label, and a link to the core.
+   scifi.css's reactor; evenly spaced nodes circle the entire ellipse in 90 seconds, with
+   centred labels below their spheres. Hover, focus and swaps pause the orbit; reduced motion
+   fixes its initial angles. The greeting sits below the stage in the original height budget.
    Picking a node swaps it with the core: it locks on, flies an arc in on a beam (the stars
    jump), the core flashes, rings out and a flare crosses the stage, the old core flies out.
-   Idle motion is quiet: nodes hover and breathe, light runs round the orbit and down the
-   links, motes drift. Phones get all of it, without the glow filters.
+   Nodes hover and breathe, light runs round the orbit and down the links, motes drift.
+   HUD read-outs size to their content, with shorter mobile copy. Decorative reactor rings
+   sit behind the seats; their size is independent of the core's collision clearance.
+   Phones keep the motion without the glow filters.
    ===================================================================================== */
+
+.halo-orbit-layout {
+	width: 100%;
+	max-width: 64rem;
+	margin: 0 auto;
+}
 
 .halo-orbit {
 	/* glass, plates and ink (dark); the light theme swaps these below */
@@ -18,7 +27,8 @@
 	position: relative;
 	width: 100%;
 	max-width: 64rem;
-	height: clamp(22rem, 100dvh - 22rem, 31rem);
+	/* The greeting uses the remaining 3rem, keeping the input at its previous height. */
+	height: clamp(19rem, 100dvh - 25rem, 28rem);
 	margin: 0 auto;
 	outline: none;
 	/* laid out for a guessed size until the stage has been measured */
@@ -28,7 +38,7 @@
 	visibility: visible;
 }
 .halo-orbit.is-compact {
-	height: clamp(20rem, 100dvh - 22rem, 28rem);
+	height: clamp(17rem, 100dvh - 25rem, 25rem);
 }
 html:not(.dark) .halo-orbit {
 	--orbit-glass: radial-gradient(circle at 50% 30%, #ffffff 0%, color-mix(in oklab, var(--a1) 14%, #eef3ff) 78%);
@@ -267,12 +277,15 @@ html:not(.dark) .halo-orbit [data-accent='claude'] {
 
 .halo-orbit__hud {
 	position: absolute;
+	box-sizing: border-box;
+	padding-inline: 8px;
 	font-family: var(--font-mono);
 	font-size: 9.5px;
 	line-height: 1.55;
 	letter-spacing: 0.16em;
 	color: var(--scifi-cyan);
 	opacity: 0.72;
+	width: max-content;
 	white-space: nowrap;
 	text-shadow: 0 0 8px var(--scifi-glow);
 	pointer-events: none;
@@ -284,9 +297,6 @@ html:not(.dark) .halo-orbit [data-accent='claude'] {
 }
 .halo-orbit__hud i {
 	display: inline-block;
-	max-width: 14rem;
-	overflow: hidden;
-	text-overflow: ellipsis;
 	vertical-align: bottom;
 	font-style: normal;
 	opacity: 0.8;
@@ -295,7 +305,7 @@ html:not(.dark) .halo-orbit [data-accent='claude'] {
 .halo-orbit__hud::before {
 	content: '';
 	position: absolute;
-	top: -6px;
+	top: 0;
 	width: 12px;
 	height: 12px;
 	border: 1px solid var(--scifi-cyan);
@@ -316,18 +326,20 @@ html:not(.dark) .halo-orbit [data-accent='claude'] {
 }
 .halo-orbit__hud--bl,
 .halo-orbit__hud--br {
-	bottom: 0.25rem;
+	/* Full read-outs stay tight to the corners, clear of passing labels. */
+	bottom: 0;
+	letter-spacing: 0.08em;
 	animation-delay: 80ms;
 }
 .halo-orbit__hud--tl::before,
 .halo-orbit__hud--bl::before {
-	left: -16px;
+	left: 0;
 	border-right: 0;
 	border-bottom: 0;
 }
 .halo-orbit__hud--tr::before,
 .halo-orbit__hud--br::before {
-	right: -16px;
+	right: 0;
 	border-left: 0;
 	border-bottom: 0;
 }
@@ -342,6 +354,10 @@ html:not(.dark) .halo-orbit [data-accent='claude'] {
 .halo-orbit.is-compact .halo-orbit__hud--tr,
 .halo-orbit.is-compact .halo-orbit__hud--br {
 	right: 0.875rem;
+}
+/* Shorten the copy rather than clipping it into the upper node's path. */
+.halo-orbit.is-compact .halo-orbit__hud-detail {
+	display: none;
 }
 /* on phones the bottom corners belong to the lower labels */
 .halo-orbit.is-compact :is(.halo-orbit__hud--bl, .halo-orbit__hud--br) {
@@ -362,8 +378,15 @@ html:not(.dark) .halo-orbit [data-accent='claude'] {
 	margin-bottom: 0;
 }
 .halo-orbit .halo-orb > .halo-reactor {
-	width: calc(var(--orb-size) * 3.5);
-	height: calc(var(--orb-size) * 3.5);
+	/* Pure decoration: expand behind the seats without changing collision geometry. */
+	width: calc(var(--orb-size) * 2.6);
+	height: calc(var(--orb-size) * 2.6);
+	z-index: -3;
+	pointer-events: none;
+}
+.halo-orbit.is-compact .halo-orb > .halo-reactor {
+	width: calc(var(--orb-size) * 2.3);
+	height: calc(var(--orb-size) * 2.3);
 }
 /* the reactor's own read-outs would stand where the upper nodes are (the stage has its own) */
 .halo-orbit .halo-reactor__hud {
@@ -515,7 +538,7 @@ html:not(.dark) .halo-orbit__flash {
 		transform: scaleX(1);
 	}
 }
-/* under the core: its name (it decodes itself on a swap), kind and connection, the greeting */
+/* The core keeps a compact name/type tag; the greeting has its own row below the stage. */
 .halo-orbit__caption {
 	position: absolute;
 	left: 50%;
@@ -525,31 +548,46 @@ html:not(.dark) .halo-orbit__flash {
 	align-items: center;
 	width: max-content;
 	max-width: 100%;
-	padding-top: 0.875rem;
+	padding-top: calc(8px * var(--unit));
 	transform: translateX(-50%);
 }
 .halo-orbit__core-tag {
 	display: flex;
 	flex-direction: column;
 	align-items: center;
-	gap: 0.25rem;
+	gap: calc(2px * var(--unit));
+	width: var(--core-tag-width);
+	height: var(--core-tag-height);
+	overflow: hidden;
 }
 .halo-orbit__core-tag .halo-orbit__name {
 	font-family: var(--font-mono);
-	font-size: 0.9375rem;
+	font-size: calc(14px * var(--unit));
 	letter-spacing: 0.02em;
 }
 .halo-orbit__core-tag .halo-orbit__kind {
 	color: var(--scifi-cyan);
 }
 .halo-orbit__greeting {
-	margin-top: 0.625rem;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	height: 3rem;
+	min-width: 0;
+	text-align: center;
 }
 /* a step under the plain landing's greeting: in the orbit the core carries the weight */
-.halo-orbit .halo-greeting {
+.halo-orbit-layout .halo-greeting {
+	display: block;
+	max-width: 100%;
+	margin: 0;
+	overflow: hidden;
+	white-space: nowrap;
+	text-wrap: nowrap;
+	text-overflow: ellipsis;
 	font-size: clamp(1.625rem, 1rem + 1.4vw, 2.25rem);
 }
-.halo-orbit.is-compact .halo-greeting {
+.halo-orbit-layout.is-compact .halo-greeting {
 	font-size: 1.5rem;
 }
 
@@ -563,6 +601,8 @@ html:not(.dark) .halo-orbit__flash {
 	width: var(--node);
 	height: var(--node);
 	transform-origin: 50% 50%;
+	/* Positions come from rAF; a transform transition would trail behind the links. */
+	transition: none;
 }
 .halo-orbit__seat.is-core {
 	z-index: 3;
@@ -605,9 +645,7 @@ html:not(.dark) .halo-orbit__flash {
 .halo-orbit__body {
 	inset: 0;
 	transform: scale(var(--depth, 1));
-	transition:
-		transform 240ms var(--ease-out-expo),
-		filter 240ms ease;
+	transition: filter 240ms ease;
 }
 .halo-orbit__node:is(:hover, :focus-visible) .halo-orbit__body {
 	transform: scale(calc(var(--depth, 1) * 1.07));
@@ -856,10 +894,10 @@ html:not(.dark) .halo-orbit__badge {
 }
 @keyframes orbit-float {
 	from {
-		transform: translateY(3px);
+		transform: translateY(calc(3px * var(--unit)));
 	}
 	to {
-		transform: translateY(-4px);
+		transform: translateY(calc(-4px * var(--unit)));
 	}
 }
 @keyframes orbit-breathe {
@@ -917,18 +955,25 @@ html:not(.dark) .halo-orbit__badge {
 
 .halo-orbit__tag {
 	position: absolute;
-	top: 50%;
+	top: calc(100% + var(--label-gap));
+	left: 50%;
 	display: flex;
 	flex-direction: column;
-	gap: 0.25rem;
-	padding: 0.4375rem 0.75rem 0.5rem;
+	align-items: center;
+	justify-content: center;
+	gap: calc(2px * var(--unit));
+	width: var(--label-width);
+	height: var(--label-height);
+	box-sizing: border-box;
+	padding: calc(2px * var(--unit)) calc(5px * var(--unit));
 	border-radius: 0.4375rem;
 	border: 1px solid color-mix(in oklab, var(--a1) 28%, transparent);
 	background: var(--orbit-plate);
 	box-shadow: 0 10px 28px -16px var(--a1);
 	-webkit-backdrop-filter: blur(8px);
 	backdrop-filter: blur(8px);
-	text-align: left;
+	transform: translateX(-50%);
+	text-align: center;
 	white-space: nowrap;
 	opacity: 0.88;
 	transition:
@@ -940,67 +985,16 @@ html:not(.dark) .halo-orbit__badge {
 .is-flying .halo-orbit__tag {
 	opacity: 0;
 }
-.halo-orbit__seat[data-side='left'] .halo-orbit__tag {
-	right: calc(100% + 1.125rem);
-	transform: translateY(-50%);
-}
-.halo-orbit__seat[data-side='right'] .halo-orbit__tag {
-	left: calc(100% + 1.125rem);
-	transform: translateY(-50%);
-}
-.halo-orbit__seat[data-side='below'] .halo-orbit__tag {
-	top: calc(100% + 0.875rem);
-	left: 50%;
-	align-items: center;
-	padding: 0.3125rem 0.5rem 0.375rem;
-	transform: translateX(-50%);
-	text-align: center;
-}
-/* the leader from the label to its node, with a dot where it meets the label */
-.halo-orbit__tag::before,
-.halo-orbit__tag::after {
+/* A short vertical leader stays fixed while the node crosses either side of the orbit. */
+.halo-orbit__tag::before {
 	content: '';
 	position: absolute;
-	pointer-events: none;
-}
-.halo-orbit__tag::before {
-	top: 50%;
-	width: 1.125rem;
-	height: 1px;
-	background: linear-gradient(90deg, color-mix(in oklab, var(--a1) 70%, transparent), transparent);
-}
-.halo-orbit__tag::after {
-	top: calc(50% - 2.5px);
-	width: 5px;
-	height: 5px;
-	border-radius: 9999px;
-	background: var(--a1);
-	box-shadow: 0 0 6px var(--a1);
-}
-[data-side='left'] .halo-orbit__tag::before {
-	left: 100%;
-}
-[data-side='left'] .halo-orbit__tag::after {
-	right: -3px;
-}
-[data-side='right'] .halo-orbit__tag::before {
-	right: 100%;
-	transform: scaleX(-1);
-}
-[data-side='right'] .halo-orbit__tag::after {
-	left: -3px;
-}
-[data-side='below'] .halo-orbit__tag::before {
-	top: auto;
 	bottom: 100%;
 	left: 50%;
 	width: 1px;
-	height: 0.625rem;
+	height: var(--label-gap);
+	pointer-events: none;
 	background: linear-gradient(0deg, color-mix(in oklab, var(--a1) 70%, transparent), transparent);
-}
-[data-side='below'] .halo-orbit__tag::after {
-	top: -3px;
-	left: calc(50% - 2.5px);
 }
 .halo-orbit__node:is(:hover, :focus-visible) .halo-orbit__tag {
 	border-color: var(--a1);
@@ -1010,8 +1004,14 @@ html:not(.dark) .halo-orbit__badge {
 	opacity: 1;
 }
 .halo-orbit__name {
+	display: block;
+	max-width: 100%;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
 	font-family: var(--font-display);
-	font-size: 0.875rem;
+	font-size: calc(12px * var(--unit));
 	font-weight: 600;
 	letter-spacing: -0.005em;
 	line-height: 1.2;
@@ -1020,8 +1020,12 @@ html:not(.dark) .halo-orbit__badge {
 .halo-orbit__meta {
 	display: flex;
 	align-items: center;
-	gap: 0.375rem;
-	font-size: 0.6875rem;
+	justify-content: center;
+	gap: calc(4px * var(--unit));
+	max-width: 100%;
+	min-width: 0;
+	overflow: hidden;
+	font-size: calc(10px * var(--unit));
 	line-height: 1;
 	color: var(--orbit-sub);
 }
@@ -1031,31 +1035,34 @@ html:not(.dark) .halo-orbit__badge {
 }
 .halo-orbit__conn {
 	padding: 0.0625rem 0.3125rem;
-	font-size: 0.5625rem;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-size: calc(9px * var(--unit));
+	line-height: 1;
 	color: var(--scifi-cyan);
 	background: color-mix(in oklab, var(--scifi-cyan) 10%, transparent);
 	box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--scifi-cyan) 30%, transparent);
 }
+.halo-orbit.is-compact .halo-orbit__tag {
+	padding-block: calc(1px * var(--unit));
+}
 .halo-orbit.is-compact .halo-orbit__name {
-	font-size: 0.75rem;
+	font-size: calc(10px * var(--unit));
 }
 .halo-orbit.is-compact .halo-orbit__core-tag .halo-orbit__name {
-	font-size: 0.8125rem;
+	font-size: calc(12px * var(--unit));
 }
 .halo-orbit.is-compact .halo-orbit__seat .halo-orbit__conn {
 	display: none;
 }
 .halo-orbit.is-compact .halo-orbit__meta {
-	font-size: 0.625rem;
+	font-size: calc(9px * var(--unit));
 }
 .halo-orbit.is-compact .halo-orbit__float::before {
 	inset: -9px;
 }
-/* the bottom node's label steps down, clear of the lower right node's */
-.halo-orbit.is-compact .halo-orbit__seat[data-side='right'] .halo-orbit__tag {
-	top: 78%;
-}
-
 /* ---------------------------------------------------------------- phones
    All the motion stays; what goes are the glow filters and the frosted labels, which make
    Chrome on Android re-render big layers every frame. */

@@ -1,3 +1,4 @@
+// Full-ring geometry: sample every five degrees to cover moving nodes and their labels.
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -5,8 +6,6 @@ import {
 	orbitAccent,
 	orbitBend,
 	orbitFrame,
-	orbitGreetingWidth,
-	orbitLabelSide,
 	orbitLink,
 	orbitOrder,
 	orbitPoint,
@@ -48,67 +47,81 @@ describe('orbit layout', () => {
 		expect(phone.core).toBeLessThan(wide.core);
 	});
 
-	it('puts five models upper left, upper right, lower left, right and bottom', () => {
-		const at = orbitSlots(5).map((angle) => orbitPoint(wide, angle));
-		const [ul, ur, ll, r, bottom] = at;
-		expect(ul.x).toBeLessThan(wide.cx);
-		expect(ul.y).toBeLessThan(wide.cy);
-		expect(ur.x).toBeGreaterThan(wide.cx);
-		expect(ur.y).toBeLessThan(wide.cy);
-		expect(ll.x).toBeLessThan(wide.cx);
-		expect(ll.y).toBeGreaterThan(wide.cy);
-		expect(r.x).toBeGreaterThan(wide.cx);
-		expect(r.y).toBeGreaterThan(wide.cy);
-		expect(Math.round(bottom.x)).toBe(wide.cx);
-		expect(bottom.y).toBeGreaterThan(Math.max(ll.y, r.y));
+	it('spaces every count evenly around the whole core, starting directly above it', () => {
+		expect(orbitSlots(0)).toEqual([]);
+		for (const count of [1, 2, 4, 5, 6, 7, 9]) {
+			const angles = orbitSlots(count);
+			expect(angles).toHaveLength(count);
+			expect(angles[0]).toBe(-90);
+			angles.forEach((angle, i) => expect(angle).toBeCloseTo(-90 + (360 / count) * i));
+			const top = orbitPoint(wide, angles[0]);
+			expect(top.x).toBeCloseTo(wide.cx);
+			expect(top.y).toBeLessThan(wide.cy);
+		}
+		expect(wide.coreY).toBe(wide.cy);
+		expect(phone.coreY).toBe(phone.cy);
 	});
 
-	it('keeps every node and wide label inside the stage', () => {
-		for (const [w, h] of [[992, 496], [358, 448], [760, 448], [852, 448], [1024, 496]]) {
-			for (const count of [1, 2, 3, 4, 5, 6, 7]) {
-				const frame = orbitFrame(w, h, count);
-				for (const angle of orbitSlots(count)) {
-					const p = orbitPoint(frame, angle);
-					const side = orbitLabelSide(angle, frame.compact);
-					const reach = frame.node / 2 + (frame.compact || side === 'right' ? 0 : 172);
-					expect(p.x - reach).toBeGreaterThanOrEqual(0);
-					expect(p.y + frame.node / 2).toBeLessThanOrEqual(frame.h);
+	const overlaps = (a: number[], b: number[]) =>
+		a[0] < b[2] && a[2] > b[0] && a[1] < b[3] && a[3] > b[1];
+
+	it.each([
+		[1100, 440],
+		[390, 400],
+		[358, 400],
+		[760, 400],
+		[992, 448],
+		[358, 272]
+	])(
+		'keeps spheres and labels separated and inside a %ix%i stage throughout a revolution',
+		(w, h) => {
+			for (let count = 4; count <= 7; count++) {
+				const f = orbitFrame(w, h, count);
+				// Include maximum depth, hover enlargement and the floating sphere's travel.
+				const sphere = f.node * 0.57 + 5 * f.unit;
+				const halfWidth = Math.max(f.labelWidth / 2, sphere);
+				const bottom = f.node / 2 + f.labelGap + f.labelHeight;
+				const halo = f.core / 2 + f.coreHalo;
+				const core = [f.cx - halo, f.cy - halo, f.cx + halo, f.cy + halo];
+				const tag = [
+					f.cx - halo,
+					f.cy + f.core / 2 + 8 * f.unit,
+					f.cx + halo,
+					f.cy + f.core / 2 + 8 * f.unit + f.coreTagHeight
+				];
+				for (let spin = 0; spin <= 360; spin += 5) {
+					const bounds = orbitSlots(count).map((angle) => {
+						const p = orbitPoint(f, angle + spin);
+						return [p.x - halfWidth, p.y - sphere, p.x + halfWidth, p.y + bottom];
+					});
+					const context = `${w}x${h}, n=${count}, spin=${spin}`;
+					bounds.forEach((box, i) => {
+						expect(box[0], context).toBeGreaterThanOrEqual(0);
+						expect(box[1], context).toBeGreaterThanOrEqual(0);
+						expect(box[2], context).toBeLessThanOrEqual(w);
+						expect(box[3], context).toBeLessThanOrEqual(h);
+						expect(overlaps(box, core), `${context}, core vs ${i}`).toBe(false);
+						expect(overlaps(box, tag), `${context}, core tag vs ${i}`).toBe(false);
+						bounds
+							.slice(i + 1)
+							.forEach((other, j) =>
+								expect(overlaps(box, other), `${context}, ${i} vs ${i + j + 1}`).toBe(false)
+							);
+					});
 				}
 			}
 		}
-	});
-
-	it('labels stand outward on wide stages, under the nodes on compact ones', () => {
-		expect(orbitSlots(5).map((a) => orbitLabelSide(a, false))).toEqual([
-			'left',
-			'right',
-			'left',
-			'right',
-			'right'
-		]);
-		expect(orbitSlots(5).map((a) => orbitLabelSide(a, true))).toEqual([
-			'below',
-			'below',
-			'below',
-			'below',
-			'right'
-		]);
-	});
-
-	it('spreads more models than the table knows without using the top', () => {
-		const angles = orbitSlots(9);
-		expect(angles).toHaveLength(9);
-		for (const angle of angles) expect(Math.sin((angle * Math.PI) / 180)).toBeGreaterThan(-0.95);
-	});
+	);
 
 	it('draws links from the core edge to the node', () => {
 		const to = orbitPoint(wide, -145);
 		expect(orbitLink(wide, to)).toMatch(/^M[\d.]+ [\d.]+Q[\d.-]+ [\d.-]+ [\d.]+ [\d.]+$/);
 	});
 
-	it('walks the slots clockwise from the upper left', () => {
-		// slots: UL, UR, LL, R, bottom → UL, UR, R, bottom, LL
-		expect(orbitOrder(orbitSlots(5))).toEqual([0, 1, 3, 4, 2]);
+	it('walks clockwise from the top using the current rotated angles', () => {
+		expect(orbitOrder(orbitSlots(5))).toEqual([0, 1, 2, 3, 4]);
+		expect(orbitOrder(orbitSlots(5).map((angle) => angle + 90))).toEqual([4, 0, 1, 2, 3]);
+		expect(orbitOrder([-450, 0, 450, 180])).toEqual([0, 1, 2, 3]);
 	});
 
 	it('bends a flight off the straight line, to either side', () => {
@@ -116,11 +129,6 @@ describe('orbit layout', () => {
 		const b = { x: 100, y: 0 };
 		expect(orbitBend(a, b, 0.2)).toEqual({ x: 50, y: 20 });
 		expect(orbitBend(a, b, -0.2)).toEqual({ x: 50, y: -20 });
-	});
-
-	it('narrows the greeting between the lower nodes only when there are some', () => {
-		expect(orbitGreetingWidth(wide, orbitSlots(5))).toBeLessThan(wide.w);
-		expect(orbitGreetingWidth(wide, orbitSlots(2))).toBe(wide.w - 16);
 	});
 });
 
@@ -144,9 +152,15 @@ describe('seatModels', () => {
 	it('swaps the picked model with the core and leaves the others where they are', () => {
 		const first = seatModels(ids, 'hermes', null);
 		const second = seatModels(ids, 'gemini', first);
-		expect(second).toEqual({ core: 'gemini', ring: ['gpt-chat', 'deepseek', 'gpt-image', 'hermes', 'claude'] });
+		expect(second).toEqual({
+			core: 'gemini',
+			ring: ['gpt-chat', 'deepseek', 'gpt-image', 'hermes', 'claude']
+		});
 		const third = seatModels(ids, 'gpt-chat', second);
-		expect(third).toEqual({ core: 'gpt-chat', ring: ['gemini', 'deepseek', 'gpt-image', 'hermes', 'claude'] });
+		expect(third).toEqual({
+			core: 'gpt-chat',
+			ring: ['gemini', 'deepseek', 'gpt-image', 'hermes', 'claude']
+		});
 		// nothing to do: the same seating comes back
 		expect(seatModels(ids, 'gpt-chat', third)).toBe(third);
 	});

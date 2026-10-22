@@ -1,7 +1,7 @@
-// The new-chat landing page's model orbit (Placeholder/ModelOrbit.svelte): the agent is the core
-// in the middle and the other models ride an ellipse around it. Pure geometry and naming, so the
-// layout can be tested without a browser. Angles are degrees on the ellipse: 0 is right, 90 is
-// straight down (screen y grows downward).
+// The new-chat landing page's model orbit: a centred core and evenly spaced nodes circling
+// clockwise on a full ellipse. Labels stay below each node; the greeting lives outside the
+// stage. Pure geometry and seating, shared with ModelOrbit.svelte and its layout tests.
+// Angles are degrees: -90 is up, 0 is right, 90 is down (screen y grows downward).
 
 import { DARK_MODE_INVERT_ICONS } from './model-icons.manifest';
 import type { DeckKind } from './model-deck';
@@ -34,7 +34,7 @@ export const isMonoIcon = (src: string | null | undefined): boolean => {
 	);
 };
 
-/** Below this stage width the labels go under the nodes and everything is smaller. */
+/** Below this stage width the nodes and their labels use the smaller size budget. */
 export const ORBIT_COMPACT_BELOW = 760;
 
 export type OrbitFrame = {
@@ -48,27 +48,20 @@ export type OrbitFrame = {
 	/** Diameters of the core's avatar and of a node, px. */
 	core: number;
 	node: number;
+	/** Shared CSS budgets, scaled down together on short or narrow stages. */
+	unit: number;
+	labelWidth: number;
+	labelHeight: number;
+	labelGap: number;
+	coreHalo: number;
+	coreTagHeight: number;
 	/** Height of the core's centre. */
 	coreY: number;
 };
 
-// The top of the ellipse stays clear for the core. With five: upper left, upper right,
-// lower left, right, bottom.
-const SLOTS: Record<number, number[]> = {
-	0: [],
-	1: [-35],
-	2: [-145, -35],
-	3: [-145, -35, 90],
-	4: [-145, -35, 155, 25],
-	5: [-145, -35, 155, 25, 90],
-	6: [-150, -30, 165, 15, 125, 55],
-	7: [-150, -30, 165, 15, 125, 55, 90]
-};
-
+/** Full ring, starting at twelve o'clock and proceeding clockwise. */
 export const orbitSlots = (count: number): number[] =>
-	SLOTS[count] ??
-	// more than the deck ever deals: spread from upper right round the bottom to upper left
-	Array.from({ length: count }, (_, i) => -40 + (260 / (count - 1)) * i);
+	Array.from({ length: count }, (_, i) => -90 + (360 / count) * i);
 
 const rad = (deg: number) => (deg * Math.PI) / 180;
 
@@ -77,33 +70,41 @@ export const orbitPoint = (frame: OrbitFrame, angle: number) => ({
 	y: frame.cy + frame.ry * Math.sin(rad(angle))
 });
 
-// Room a node's label needs beside it on wide stages (gap + label), px.
-const LABEL_ROOM = 172;
-
-/** The stage's frame for `count` nodes (their outermost slot decides the room the labels need). */
+/** Reserve the whole label at the bottom, even when a node passes six o'clock. */
 export const orbitFrame = (w: number, h: number, count = 5): OrbitFrame => {
 	const compact = w < ORBIT_COMPACT_BELOW;
-	const reach = Math.max(0.5, ...orbitSlots(count).map((a) => Math.abs(Math.cos(rad(a)))));
-	const node = compact ? 48 : 68;
-	const core = compact ? 80 : 112;
+	const unit = Math.min(1, w / (compact ? 390 : 760), h / (compact ? 400 : 440));
+	const node = (compact ? 40 : 56) * unit;
+	const core = (compact ? 64 : 88) * unit;
+	// Denser rings shorten labels instead of moving seats as they revolve.
+	const labelWidth =
+		Math.min(compact ? 84 : 132, (compact ? 504 : 812) / Math.max(6, count)) * unit;
+	const labelHeight = (compact ? 28 : 34) * unit;
+	const labelGap = 10 * unit;
+	const coreHalo = 14 * unit;
+	const coreTagHeight = (compact ? 28 : 34) * unit;
 	const cx = w / 2;
 	const cy = h / 2;
-	// Wide: the outer nodes' labels stand beside them, so the ellipse leaves them that room.
-	const rx = compact
-		? Math.min(w * 0.4, cx - 52)
-		: Math.min(w * 0.4, (cx - node / 2 - LABEL_ROOM) / reach);
-	// The bottom node and its platform stay inside the stage.
-	const ry = cy - node / 2 - 18;
-	return { compact, w, h, cx, cy, rx, ry, core, node, coreY: cy - ry * (compact ? 0.32 : 0.3) };
-};
-
-/** Where a node's label stands: beside it, outward (wide), or under it (compact). */
-export const orbitLabelSide = (angle: number, compact: boolean): 'left' | 'right' | 'below' => {
-	const cos = Math.cos(rad(angle));
-	const bottom = Math.abs(cos) < 0.25 && Math.sin(rad(angle)) > 0;
-	if (bottom) return 'right';
-	if (compact) return 'below';
-	return cos < 0 ? 'left' : 'right';
+	const rx = Math.min(w * 0.42, cx - Math.max(labelWidth / 2, node * 0.84) - 8 * unit);
+	const ry = cy - node / 2 - labelGap - labelHeight - 8 * unit;
+	return {
+		compact,
+		w,
+		h,
+		cx,
+		cy,
+		rx,
+		ry,
+		core,
+		node,
+		coreY: cy,
+		unit,
+		labelWidth,
+		labelHeight,
+		labelGap,
+		coreHalo,
+		coreTagHeight
+	};
 };
 
 const round = (n: number) => Math.round(n * 10) / 10;
@@ -114,20 +115,15 @@ export const orbitLink = (frame: OrbitFrame, to: { x: number; y: number }): stri
 	const dy = to.y - frame.coreY;
 	const len = Math.hypot(dx, dy) || 1;
 	const [ux, uy] = [dx / len, dy / len];
-	const start = { x: frame.cx + ux * (frame.core / 2 + 14), y: frame.coreY + uy * (frame.core / 2 + 14) };
+	const start = {
+		x: frame.cx + ux * (frame.core / 2 + 14),
+		y: frame.coreY + uy * (frame.core / 2 + 14)
+	};
 	const end = { x: to.x - ux * (frame.node / 2 + 8), y: to.y - uy * (frame.node / 2 + 8) };
 	// bow away from the vertical axis, so the links fan out like spokes of a wheel
 	const bow = len * 0.12 * (ux < 0 ? -1 : 1);
 	const mid = { x: (start.x + end.x) / 2 + uy * bow * -1, y: (start.y + end.y) / 2 + ux * bow };
 	return `M${round(start.x)} ${round(start.y)}Q${round(mid.x)} ${round(mid.y)} ${round(end.x)} ${round(end.y)}`;
-};
-
-/** How wide the greeting may run at the height of the lower nodes without touching them. */
-export const orbitGreetingWidth = (frame: OrbitFrame, angles: number[]): number => {
-	const sides = angles
-		.filter((a) => Math.sin(rad(a)) > 0.2 && Math.abs(Math.cos(rad(a))) > 0.5)
-		.map((a) => Math.abs(frame.rx * Math.cos(rad(a))) - frame.node / 2 - 14);
-	return Math.round(sides.length ? Math.max(120, Math.min(...sides) * 2) : frame.w - 16);
 };
 
 /** Who sits where: the core (the chosen model) and the ring, slot by slot. */
@@ -160,10 +156,10 @@ export const seatModels = (
 	return { core, ring: base.ring.map((id) => (id === core ? base.core : id)) };
 };
 
-/** Slot indices clockwise from the left (upper left first): the arrow keys' order. */
+/** Slot indices clockwise from twelve o'clock at their current angles. */
 export const orbitOrder = (angles: number[]): number[] =>
 	angles
-		.map((angle, index) => ({ index, key: (((angle - 180) % 360) + 720) % 360 }))
+		.map((angle, index) => ({ index, key: (((angle + 90) % 360) + 360) % 360 }))
 		.sort((a, b) => a.key - b.key)
 		.map((slot) => slot.index);
 

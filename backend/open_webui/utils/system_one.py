@@ -38,7 +38,7 @@ _ID_RE = re.compile(r"[^a-z0-9_]+")
 PLANNER_SYSTEM = """你把用户的话变成 Jev 判断模型（TypeSafe System One）的请求。Jev 不写文字，只对「材料」(state) 回答一组互相独立的判断题，每题是下面三种之一：
 - choice：从几个互斥选项里选一个。criteria 是 {选项键: 英文描述}，2–12 个；选项可能覆盖不全时加 other。
 - score：在有序等级上的位置。criteria 是 2–10 条英文等级描述，从低到高，每条描述一种具体情形，不要只写「中等」这类程度词。
-- noul：是/否题，返回「是」的概率。criteria 可省略，或用一句英文说明什么情况算「是」。
+- noul：是/否题，返回「是」的概率。criteria 通常省略；界限微妙时写 {"true": "英文：什么算是", "false": "英文：什么算否"}。
 
 规则：
 1. state 是要判断的材料：原样照抄用户给的内容，不改写、不总结掉事实；材料在对话前文里就从前文取。材料有几部分时用 JSON 对象分字段。
@@ -134,20 +134,17 @@ def conversation(messages: Any) -> tuple[str, str]:
 
 
 def _json_object(text: str) -> Optional[dict]:
-    text = (text or "").strip()
-    fenced = re.search(r"```(?:json)?\s*(\{.*\})\s*```", text, re.S)
-    if fenced:
-        text = fenced.group(1)
-    elif not text.startswith("{"):
-        start, end = text.find("{"), text.rfind("}")
-        if start < 0 or end <= start:
-            return None
-        text = text[start : end + 1]
-    try:
-        value = json.loads(text)
-    except (ValueError, TypeError):
-        return None
-    return value if isinstance(value, dict) else None
+    """The first JSON object in a reply (fenced or not; whatever follows it is ignored)."""
+    text = text or ""
+    fenced = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.S)
+    for start in ([fenced.start(1)] if fenced else []) + [m.start() for m in re.finditer(r"\{", text)][:20]:
+        try:
+            value, _ = json.JSONDecoder().raw_decode(text, start)
+        except ValueError:
+            continue
+        if isinstance(value, dict):
+            return value
+    return None
 
 
 def direct_request(ask: str, background: str, model: str) -> Optional[Plan]:
@@ -195,8 +192,8 @@ def _question(raw: Any) -> Optional[tuple[dict, dict]]:
         question["criteria"] = levels
         names = [_str(v, 80) for v in labels] if isinstance(labels, list) else []
         display["labels"] = names if len(names) == len(levels) else []
-    elif _str(criteria):
-        question["criteria"] = _str(criteria)
+    elif isinstance(criteria, dict) and _str(criteria.get("true")) and _str(criteria.get("false")):
+        question["criteria"] = {"true": _str(criteria["true"]), "false": _str(criteria["false"])}
     return question, display
 
 

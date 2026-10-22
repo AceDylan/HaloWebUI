@@ -59,7 +59,10 @@ PLANNER_REPLY = """```json
              "criteria": {"billing": "Payments", "account": "Login"}, "labels": {"billing": "账单", "account": "账号"}},
   "urgency": {"type": "score", "title": "多急", "instructions": "How urgent?",
               "criteria": ["Can wait", "This week", "Today"], "labels": ["不急", "本周", "今天"]},
-  "refund": {"type": "noul", "title": "要求退款吗", "instructions": "Does the customer ask for a refund?"},
+  "refund": {"type": "noul", "title": "要求退款吗", "instructions": "Does the customer ask for a refund?",
+             "criteria": "a bare string is not a valid noul criteria"},
+  "spam": {"type": "noul", "title": "是广告吗", "instructions": "Is it spam?",
+           "criteria": {"true": "Unsolicited promotion", "false": "A real customer message"}},
   "bad": {"type": "choice", "instructions": "One option only", "criteria": {"x": "only"}},
   "worse": {"type": "essay", "instructions": "Write"}
  }}
@@ -68,7 +71,9 @@ PLANNER_REPLY = """```json
 
 def test_plan_keeps_valid_questions_and_strips_display_fields():
     plan = s1.plan_from(PLANNER_REPLY, "jev-latest", "", "ask")
-    assert list(plan.body["questions"]) == ["queue", "urgency", "refund"]
+    assert list(plan.body["questions"]) == ["queue", "urgency", "refund", "spam"]
+    assert plan.body["questions"]["refund"] == {"type": "noul", "instructions": "Does the customer ask for a refund?"}
+    assert plan.body["questions"]["spam"]["criteria"] == {"true": "Unsolicited promotion", "false": "A real customer message"}
     assert plan.body["questions"]["queue"] == {
         "type": "choice",
         "instructions": "Which queue?",
@@ -77,6 +82,11 @@ def test_plan_keeps_valid_questions_and_strips_display_fields():
     assert "labels" not in plan.body["questions"]["urgency"] and "title" not in plan.body["questions"]["refund"]
     assert plan.display["urgency"] == {"title": "多急", "labels": ["不急", "本周", "今天"]}
     assert plan.body["state"] == "I was charged twice, refund today."
+
+
+def test_plan_ignores_what_follows_the_json():
+    plan = s1.plan_from('{"state": "x", "questions": {"q": {"type": "noul", "instructions": "Is it?"}}}\n\n```html\n<div>{card}</div>\n```', "jev-latest", "", "")
+    assert list(plan.body["questions"]) == ["q"]
 
 
 def test_plan_without_questions_falls_back_to_the_message_as_state():
@@ -133,7 +143,7 @@ def test_judge_plans_then_posts_and_reports_status():
         )
     )
     assert "工单：我被扣了两次款" in seen["planner"][1]["content"]
-    assert seen["body"]["model"] == "jev-latest" and len(seen["body"]["questions"]) == 3
+    assert seen["body"]["model"] == "jev-latest" and len(seen["body"]["questions"]) == 4
     assert usage == {"input_tokens": 357, "output_tokens": 55}
     assert statuses[0] == ("gpt-chat 正在把消息拆成判断题", False)
     assert statuses[-1] == ("Jev 已判断 3 道题", True)

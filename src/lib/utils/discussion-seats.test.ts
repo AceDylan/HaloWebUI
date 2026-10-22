@@ -10,11 +10,13 @@ const models = [
 	{ id: 'b.deepseek-chat', name: 'deepseek-chat' },
 	{ id: 'x.secret', name: 'secret', info: { meta: { hidden: true } } },
 	{ id: 'arena-model', owned_by: 'arena' },
-	{ id: 'c.qwen-vl-vision', name: 'vision reader' }
+	{ id: 'c.qwen-vl-vision', name: 'vision reader' },
+	{ id: '94dae559.jev-latest', name: 'jev-latest' },
+	{ id: 'judge', name: '判断助手', info: { base_model_id: '94dae559.jev-latest' } }
 ];
 
 describe('canJoinDiscussion', () => {
-	it('keeps text models and leaves out Hermes, image, hidden and arena models', () => {
+	it('keeps text models and leaves out Hermes, image, Jev, hidden and arena models', () => {
 		expect(discussionSeatModels(models, hermesIds).map((m) => m.id)).toEqual([
 			'a.gpt-chat',
 			'b.deepseek-chat',

@@ -147,6 +147,8 @@ def test_library_keeps_hidden_assistants_and_leaves_out_hidden_bases_agents_and_
         "a4": {"id": "a4", "name": "别人的私有", "info": {"base_model_id": "conn.gpt-chat", "user_id": "u9", "access_control": {}, "meta": {}, "params": {}}},
         "a5": {"id": "a5", "name": "公开的", "info": {"base_model_id": "conn.gpt-chat", "user_id": "u9", "access_control": None, "meta": {}, "params": {}}},
         "hidden": {"id": "hidden", "name": "h", "info": {"meta": {"hidden": True}}},
+        "94dae559.jev-latest": {"id": "94dae559.jev-latest", "name": "jev-latest"},
+        "a6": {"id": "a6", "name": "判断助手", "info": {"base_model_id": "94dae559.jev-latest", "user_id": "u1", "meta": {}, "params": {}}},
     }
     assistants, bases = desk.lib.library(models_map, USER)
     assert sorted(a["id"] for a in assistants) == ["a1", "a5"]

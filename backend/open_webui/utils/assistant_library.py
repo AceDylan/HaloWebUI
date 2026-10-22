@@ -223,6 +223,7 @@ def source_kind(source: str) -> str:
 
 def _is_agent_or_image(model: dict) -> bool:
     from open_webui.utils.hermes_agent import is_hermes_agent_model
+    from open_webui.utils.system_one import is_system_one_entry
     from open_webui.utils.task import is_dedicated_image_generation_model
 
     info = model.get("info") or {}
@@ -232,6 +233,7 @@ def _is_agent_or_image(model: dict) -> bool:
         or is_hermes_agent_model(model)
         or (bool(base) and is_hermes_agent_model(base))
         or is_dedicated_image_generation_model(model)
+        or is_system_one_entry(model)
     )
 
 

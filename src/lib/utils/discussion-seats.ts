@@ -1,7 +1,7 @@
 // Which models can take a seat in a 讨论台 discussion. One rule for every place that offers it:
 // the discussion page's seat picker and the chat's model menu (its tick boxes start a discussion).
 import { isHermesAgentModel } from '$lib/utils/hermes';
-import { isDedicatedImageGenerationModel } from '$lib/utils/model-capabilities';
+import { isDedicatedImageGenerationModel, isJudgeOnlyModel } from '$lib/utils/model-capabilities';
 
 type SeatModel = {
 	id?: string;
@@ -11,7 +11,7 @@ type SeatModel = {
 };
 
 /** Text models only: not Hermes (an agent: minutes per turn, writes its own memory), not image
- * models, not hidden or arena entries. */
+ * models, not Jev (it judges, it does not write), not hidden or arena entries. */
 export const canJoinDiscussion = (
 	model: SeatModel | null | undefined,
 	hermesModelIds?: readonly string[] | null
@@ -20,7 +20,9 @@ export const canJoinDiscussion = (
 	!model?.info?.meta?.hidden &&
 	model?.owned_by !== 'arena' &&
 	!isHermesAgentModel(model as any, hermesModelIds) &&
-	!isDedicatedImageGenerationModel(String(model.id));
+	!isDedicatedImageGenerationModel(String(model.id)) &&
+	!isJudgeOnlyModel(model.id) &&
+	!isJudgeOnlyModel((model as any).info?.base_model_id);
 
 export const discussionSeatModels = <T extends SeatModel>(
 	models: T[] | null | undefined,

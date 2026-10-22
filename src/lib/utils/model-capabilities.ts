@@ -238,6 +238,11 @@ function inferImageGen(id: string): boolean {
 	return imageGenPatterns.some((p) => id.includes(p));
 }
 
+/** Jev (TypeSafe System One): answers typed judgment questions, never writes text. Matches
+ * jev-latest, 94dae559.jev-latest, modelref::…::jev-latest, typesafe/jev-1.14 — not jevons-*. */
+export const isJudgeOnlyModel = (modelId: unknown): boolean =>
+	/(?:^|[/.:])jev(?:$|[-_.:@])/i.test(`${modelId ?? ''}`);
+
 export function isDedicatedImageGenerationModel(modelId: string): boolean {
 	const id = modelId.toLowerCase().split('/').pop() ?? modelId.toLowerCase();
 

@@ -17,6 +17,19 @@ def test_detects_jev_models_and_systemone_connections():
     assert s1.is_system_one_model("gpt-chat", "https://api.example.com/v1/systemone/")
     assert not s1.is_system_one_model("jevons-7b")
     assert not s1.is_system_one_model("gpt-chat", "https://api.example.com/v1")
+    assert s1.is_system_one_model("94dae559.jev-latest")
+    assert s1.is_system_one_model("modelref::openai::personal::id:94dae559::jev-latest")
+
+
+def test_jev_entries_are_kept_out_of_workbenches_and_discussions():
+    from open_webui.utils.discussion_room import _default_is_excluded
+
+    jev = {"id": "94dae559.jev-latest", "name": "jev-latest"}
+    preset = {"id": "judge", "name": "判断助手", "info": {"base_model_id": "94dae559.jev-latest"}}
+    assert s1.is_system_one_entry(jev) and s1.is_system_one_entry(preset)
+    assert not s1.is_system_one_entry({"id": "conn.gpt-chat", "info": {"base_model_id": "conn.gpt-chat"}})
+    assert "Jev" in (_default_is_excluded(jev) or "") and "Jev" in (_default_is_excluded(preset) or "")
+    assert _default_is_excluded({"id": "conn.deepseek-chat", "name": "deepseek-chat"}) is None
 
 
 @pytest.mark.parametrize(

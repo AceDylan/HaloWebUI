@@ -32,7 +32,8 @@ CONTEXT_MAX_CHARS = 6000
 STATE_MAX_CHARS = 60000
 REQUEST_TIMEOUT = 60
 
-_MODEL_RE = re.compile(r"^jev(?:$|[-_.:@])", re.I)
+# jev-latest, also behind a connection prefix (94dae559.jev-latest) or a modelref (…::jev-latest)
+_MODEL_RE = re.compile(r"(?:^|[/.:])jev(?:$|[-_.:@])", re.I)
 _ID_RE = re.compile(r"[^a-z0-9_]+")
 
 PLANNER_SYSTEM = """你把用户的话变成 Jev 判断模型（TypeSafe System One）的请求。Jev 不写文字，只对「材料」(state) 回答一组互相独立的判断题，每题是下面三种之一：
@@ -81,8 +82,17 @@ class Plan:
 
 def is_system_one_model(model_id: Optional[str], url: str = "") -> bool:
     """A Jev model id (``jev-latest``, ``jev-1.14`` …), or any model on a ``/systemone`` connection."""
-    name = str(model_id or "").rsplit("/", 1)[-1]
-    return bool(_MODEL_RE.match(name)) or (url or "").rstrip("/").endswith("/systemone")
+    return bool(_MODEL_RE.search(str(model_id or ""))) or (url or "").rstrip("/").endswith("/systemone")
+
+
+def is_system_one_entry(model: Any) -> bool:
+    """A models-map entry (or an assistant built on one) that is Jev: it judges, it does not write,
+    so no workbench (讨论 seats, 精答, 协作, 自动分流, 拟题) may pick it."""
+    if not isinstance(model, dict):
+        return is_system_one_model(model)
+    info = model.get("info") or {}
+    ids = (model.get("id"), model.get("original_id"), model.get("model_id"), info.get("base_model_id"))
+    return any(is_system_one_model(i) for i in ids if i)
 
 
 def system_one_url(url: str) -> str:
@@ -437,7 +447,7 @@ async def chat_completion(request, user, *, form_data: dict, model: str, url: st
 
     metadata = metadata if isinstance(metadata, dict) else {}
     planner_id, planner_name = await prep_model(request, user)
-    if is_system_one_model(planner_id):
+    if is_system_one_entry(planner_id):
         raise HTTPException(status_code=400, detail="Jev 需要一个文字模型来拟判断题，但没有找到可用的文字模型")
 
     if metadata.get("task"):  # title / tags / follow-ups: a text model's job

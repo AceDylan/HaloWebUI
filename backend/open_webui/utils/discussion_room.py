@@ -165,12 +165,15 @@ def _model_selection_id(model: dict, fallback: str) -> str:
 
 def _default_is_excluded(model: dict) -> Optional[str]:
     from open_webui.utils.hermes_agent import is_hermes_agent_model
+    from open_webui.utils.system_one import is_system_one_entry
     from open_webui.utils.task import is_dedicated_image_generation_model
 
     if is_hermes_agent_model(model):
         return "Hermes 不参加讨论（它是要跑工具的代理，一轮要几分钟）；讨论结束后可以「交给 Hermes」"
     if is_dedicated_image_generation_model(model):
         return "生图模型不能参加讨论"
+    if is_system_one_entry(model):
+        return "Jev 是判断模型（只给分类、评分和概率，不写文字），不能参加讨论"
     return None
 
 

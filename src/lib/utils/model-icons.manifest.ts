@@ -74,6 +74,7 @@ export const MODEL_ICON_FILES = [
 	"ibm.svg",
 	"inception.svg",
 	"inclusion-ling.png",
+	"jev-color.png",
 	"kimi-color.png",
 	"kling-color.svg",
 	"kolors-color.svg",

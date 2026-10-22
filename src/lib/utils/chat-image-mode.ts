@@ -20,7 +20,7 @@ const bareModelId = (candidate: unknown): string => {
 
 // The ids a chat model may be known by: its own, and the base model a
 // workspace preset wraps.
-const chatModelIdCandidates = (model: ChatModelLike | null | undefined): string[] =>
+export const chatModelIdCandidates = (model: ChatModelLike | null | undefined): string[] =>
 	model && typeof model === 'object'
 		? [
 				getModelCleanId(model),

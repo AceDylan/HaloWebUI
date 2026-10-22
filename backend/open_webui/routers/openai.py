@@ -92,6 +92,7 @@ from open_webui.utils.codex_emulation import (
     build_codex_request_context,
     is_codex_emulation_target,
 )
+from open_webui.utils import system_one
 
 
 log = logging.getLogger(__name__)
@@ -2976,6 +2977,27 @@ async def generate_chat_completion(
     )
     key_attempt_idx = 0
     current_key_attempt = key_attempts[key_attempt_idx]
+
+    # Jev (TypeSafe System One) judges typed questions instead of writing text: gpt-chat drafts
+    # the questions, /systemone answers them, the answers come back as a table.
+    if system_one.is_system_one_model(payload.get("model"), url):
+        return await system_one.chat_completion(
+            request,
+            user,
+            form_data=form_data,
+            model=payload["model"],
+            url=url,
+            headers=_build_upstream_headers(
+                url,
+                current_key_attempt.key,
+                api_config,
+                user=user,
+                model_id=payload["model"],
+                ua_config=get_user_agent_config(request),
+            ),
+            metadata=metadata,
+        )
+
     native_retry_metadata = metadata if isinstance(metadata, dict) else {}
     native_cache_retry_detail = "Native file input cache was invalidated; retrying upload."
 

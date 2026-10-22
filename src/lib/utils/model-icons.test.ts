@@ -39,6 +39,14 @@ describe('resolveModelIcon', () => {
 		expect(result).toBe('/static/model-icons/whisper-1.png');
 	});
 
+	it('Jev (TypeSafe) models get the TypeSafe mark, prefixed or versioned', () => {
+		const icon = '/static/model-icons/jev-color.png';
+		expect(resolveModelIcon({ id: '94dae559.jev-latest', name: 'jev-latest' } as any)).toBe(icon);
+		expect(resolveModelIcon({ id: 'jev-1.14.0' } as any)).toBe(icon);
+		expect(resolveModelIcon({ id: 'typesafe/jev-preview' } as any)).toBe(icon);
+		expect(resolveModelIcon({ id: 'jevons-paradox' } as any)).not.toBe(icon);
+	});
+
 	it('gpt-4o-2024-05-13 fallback to gpt-4o', () => {
 		const result = resolveModelIcon({ id: 'openai/gpt-4o-2024-05-13' } as any);
 		expect(result).toBe('/static/model-icons/gpt-4o.png');

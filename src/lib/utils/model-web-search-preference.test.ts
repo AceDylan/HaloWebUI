@@ -165,4 +165,11 @@ describe('model builtin web search preference', () => {
 			})
 		).toBe(true);
 	});
+
+	it('keeps Jev judging models off web search, prefixed or not', () => {
+		const jev = { id: 'modelref::openai::personal::id:94dae559::jev-latest', model_id: 'jev-latest' };
+		expect(getModelWebSearchPreference(jev)).toBe(false);
+		expect(getModelWebSearchPreference({ id: '94dae559.jev-latest' })).toBe(false);
+		expect(getModelWebSearchPreference({ id: 'jevons-7b' })).toBe(null);
+	});
 });

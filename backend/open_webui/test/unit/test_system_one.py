@@ -110,11 +110,12 @@ def test_render_answers_as_a_table_with_chinese_names():
     plan = s1.plan_from(PLANNER_REPLY, "jev-latest", "", "ask")
     text = s1.render(plan, JEV_RESPONSE)
     assert "**Jev 判断结果**（jev-1.14.0）" in text
-    assert "| 交给哪个组 | 账单（billing） | 100% |" in text
-    assert "| 多急 | 今天（1.70 / 2） | 55% |" in text
-    assert "| 要求退款吗 | 是（是的概率 98%） | — |" in text
+    assert "| 交给哪个组 | 账单（billing） · 把握 100% |" in text
+    assert "| 多急 | 今天（1.70 / 2） · 把握 55% |" in text
+    assert "| 要求退款吗 | 是（是的概率 98%） |" in text
     assert "- 多急：今天 80% · 不急 10% · 本周 10%" in text
     assert '"instructions": "Which queue?"' in text and "labels" not in text.split("```json")[1]
+    assert "<details>" not in text and "<sub>" not in text
 
 
 def test_judge_plans_then_posts_and_reports_status():
@@ -176,7 +177,7 @@ def test_judge_skips_the_planner_for_a_request_json():
 
     msg = '{"state": "hi", "questions": {"q": {"type": "noul", "instructions": "Is this spam?"}}}'
     content, _ = run(s1.judge([{"role": "user", "content": msg}], "jev-latest", ask_planner=planner, post=post, status=status, planner_name="gpt-chat"))
-    assert "| Is this spam? | 否（是的概率 10%） | — |" in content
+    assert "| Is this spam? | 否（是的概率 10%） |" in content
 
 
 def _events(chunks):

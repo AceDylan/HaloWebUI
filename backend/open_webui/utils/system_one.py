@@ -305,16 +305,18 @@ def render(plan: Plan, response: dict) -> str:
     questions = plan.body.get("questions") or {}
     rows = [_row(qid, questions.get(qid) or {}, a, plan.display.get(qid) or {}) for qid, a in answers.items() if isinstance(a, dict)]
     model = response.get("model") or plan.body.get("model")
-    lines = [f"**Jev 判断结果**（{model}）", "", "| 判断 | 结论 | 把握 |", "| --- | --- | --- |"]
-    lines += [f"| {_cell(t)} | {_cell(v)} | {_cell(c)} |" for t, v, c, _ in rows]
+    lines = [f"**Jev 判断结果**（{model}）", "", "| 判断 | 结论 |", "| --- | --- |"]
+    # 把握 rides in the verdict cell: a third column wraps "100%" on a phone
+    lines += [f"| {_cell(t)} | {_cell(v if c == '—' else f'{v} · 把握 {c}')} |" for t, v, c, _ in rows]
     spread = [f"- {t}：{d}" for t, _, _, d in rows if d]
     if spread:
         lines += ["", "各选项概率：", *spread]
     usage = response.get("usage") or {}
     if usage.get("input_tokens") is not None:
-        lines += ["", f"<sub>输入 {usage.get('input_tokens')} tokens · 「把握」是 Jev 自带的置信度，越低越该人工复核</sub>"]
+        lines += ["", f"*输入 {usage.get('input_tokens')} tokens；「把握」是 Jev 自带的置信度，越低越该人工复核。*"]
+    # plain Markdown only: the reply card shows raw HTML (<details>, <sub>) as text
     request_json = json.dumps(plan.body, ensure_ascii=False, indent=2)
-    lines += ["", "<details>", "<summary>发给 Jev 的请求（可改了直接发回来再判断）</summary>", "", "```json", request_json, "```", "</details>"]
+    lines += ["", "发给 Jev 的请求（改了直接发回来就按它再判断）：", "", "```json", request_json, "```"]
     return "\n".join(lines)
 
 

@@ -102,10 +102,24 @@ def test_plan_ignores_what_follows_the_json():
     assert list(plan.body["questions"]) == ["q"]
 
 
-def test_plan_without_questions_falls_back_to_the_message_as_state():
-    plan = s1.plan_from('{"questions": {}, "note": "请给出要判断的内容"}', "jev-latest", "", "你好")
-    assert plan.body["questions"] == {} and plan.note == "请给出要判断的内容" and plan.body["state"] == "你好"
-    assert s1.plan_from("not json", "jev-latest", "", "x").body["questions"] == {}
+def test_plan_without_questions_says_why_for_the_retry():
+    plan = s1.plan_from('{"questions": {"bad": {"type": "choice", "instructions": "x", "criteria": {"a": "only"}}}}', "jev-latest", "", "你好")
+    assert plan.body["questions"] == {} and plan.body["state"] == "你好"
+    assert plan.problems == ("bad：choice 至少要 2 个选项",)
+    assert s1.plan_from("not json", "jev-latest", "", "x").problems == ("回复里没有 JSON 对象",)
+    assert s1.plan_from('{"questions": {}}', "jev-latest", "", "x").problems == ("questions 是空的",)
+
+
+def test_plan_state_question_is_the_users_own_words():
+    reply = '{"state": {"question": "对话前文：（无） 这次的消息：1+1是2吗", "material": "x"}, "questions": {"q": {"type": "noul", "instructions": "Is it?"}}}'
+    assert s1.plan_from(reply, "jev-latest", "", "1+1是2吗").body["state"] == {"question": "1+1是2吗", "material": "x"}
+
+
+def test_fallback_plan_is_one_yes_no_question_on_the_message():
+    plan = s1.fallback_plan("1+1 是 2 吗", "用户：前文", "jev-latest")
+    assert plan.body["state"] == {"question": "1+1 是 2 吗", "context": "用户：前文"}
+    assert list(plan.body["questions"]) == ["answer"] and plan.body["questions"]["answer"]["type"] == "noul"
+    assert plan.display["answer"]["title"] == "1+1 是 2 吗"
 
 
 JEV_RESPONSE = {
@@ -119,17 +133,34 @@ JEV_RESPONSE = {
 }
 
 
-def test_render_answers_as_a_table_with_chinese_names():
+def test_render_shows_only_the_conclusions():
     plan = s1.plan_from(PLANNER_REPLY, "jev-latest", "", "ask")
     text = s1.render(plan, JEV_RESPONSE)
-    assert "**Jev 判断结果**（jev-1.14.0）" in text
-    assert "| 交给哪个组 | 账单（billing） · 把握 100% |" in text
-    assert "| 多急 | 今天（1.70 / 2） · 把握 55% |" in text
-    assert "| 要求退款吗 | 是（是的概率 98%） |" in text
-    assert "- 多急：今天 80% · 不急 10% · 本周 10%" in text
-    assert '"instructions": "Which queue?"' in text and "labels" not in text.split("```json")[1]
+    assert text.startswith("### Jev 的判断\n")
+    assert "| 交给哪个组 | 账单 · 把握 100% |" in text
+    assert "| 多急 | 今天 · 把握 55% |" in text
+    assert "| 要求退款吗 | 是（98%） |" in text
+    # split votes only where Jev is split; a lone 100% says nothing the table doesn't
+    assert "- 多急：今天 80% · 不急 10% · 本周 10%" in text and "- 交给哪个组" not in text
+    assert "把握不到 60%" in text
+    assert "```" not in text and "`" not in text and '"instructions"' not in text and "tokens" not in text
     assert "<details>" not in text and "<sub>" not in text
-    assert "注：输入 357 tokens；" in text and "*输入" not in text
+
+
+def test_render_is_structured_markdown_so_no_escaped_fallback_card():
+    from open_webui.utils.html_visual_prompt import append_html_visual_fallback, is_structured_markdown_reply
+
+    text = s1.render(s1.plan_from(PLANNER_REPLY, "jev-latest", "", "ask"), JEV_RESPONSE)
+    assert is_structured_markdown_reply(text) and is_structured_markdown_reply(s1.HELP)
+    meta = {"server_surface": "halowebui-web"}
+    assert "HALOWEBUI_HTML_VISUAL_SAFE_FALLBACK" not in append_html_visual_fallback(text, meta)
+
+
+def test_render_strips_backticks_and_names_noul_sides():
+    plan = s1.Plan(body={"questions": {"q": {"type": "noul", "instructions": "Is `ticket.text` spam?"}}}, display={})
+    text = s1.render(plan, {"answers": {"q": {"type": "noul", "noul": 0.1}}})
+    assert "| Is ticket.text spam? | 否（90%） |" in text and "`" not in text
+    assert "拿不准（是的概率 50%）" in s1.render(plan, {"answers": {"q": {"type": "noul", "noul": 0.5}}})
 
 
 def test_judge_plans_then_posts_and_reports_status():
@@ -165,18 +196,67 @@ def test_judge_plans_then_posts_and_reports_status():
     assert "| 交给哪个组 |" in content
 
 
-def test_judge_without_judgeable_content_explains_instead_of_calling_jev():
-    async def planner(messages):
-        return '{"questions": {}, "note": "没有看到要判断的内容。"}'
-
-    async def post(body):
-        raise AssertionError("Jev must not be called")
-
+def _quiet(*_):
     async def status(text, done):
         pass
 
-    content, usage = run(s1.judge([{"role": "user", "content": "你好"}], "jev-latest", ask_planner=planner, post=post, status=status, planner_name="gpt-chat"))
-    assert content.startswith("没有看到要判断的内容。") and "Jev 是判断模型" in content and usage == {}
+    return status
+
+
+def test_judge_replans_with_the_reason_then_falls_back_to_a_yes_no_question():
+    calls = []
+
+    async def planner(messages):
+        calls.append(messages)
+        return '{"questions": {}}'
+
+    async def post(body):
+        calls.append(body)
+        return {"model": "jev-1.14.0", "answers": {"answer": {"type": "noul", "noul": 0.97}}}
+
+    content, _ = run(s1.judge([{"role": "user", "content": "1+1是2吗"}], "jev-latest", ask_planner=planner, post=post, status=_quiet(), planner_name="gpt-chat"))
+    assert len(calls) == 3  # two plans, then the fallback goes to Jev
+    assert calls[1][-1]["role"] == "user" and "questions 是空的" in calls[1][-1]["content"] and calls[1][-2]["role"] == "assistant"
+    assert calls[2]["state"]["question"] == "1+1是2吗"
+    assert "| 1+1是2吗 | 是（97%） |" in content
+
+
+def test_judge_replans_when_jev_rejects_the_request():
+    plans = []
+    posts = []
+
+    async def planner(messages):
+        plans.append(messages)
+        return '{"state": {"m": "x"}, "questions": {"q": {"type": "noul", "title": "是吗", "instructions": "Is it?"}}}'
+
+    async def post(body):
+        posts.append(body)
+        if len(posts) == 1:
+            raise s1.SystemOneError("Jev 返回 HTTP 422：criteria invalid", 422)
+        return {"answers": {"q": {"type": "noul", "noul": 0.9}}}
+
+    content, _ = run(s1.judge([{"role": "user", "content": "x"}], "jev-latest", ask_planner=planner, post=post, status=_quiet(), planner_name="gpt-chat"))
+    assert len(plans) == 2 and "Jev 拒绝了上一版请求：Jev 返回 HTTP 422" in plans[1][-1]["content"]
+    assert "| 是吗 | 是（90%） |" in content
+
+
+def test_judge_does_not_replan_on_an_auth_error():
+    async def planner(messages):
+        return '{"questions": {"q": {"type": "noul", "instructions": "Is it?"}}}'
+
+    async def post(body):
+        raise s1.SystemOneError("Jev 返回 HTTP 401：bad key", 401)
+
+    with pytest.raises(s1.SystemOneError):
+        run(s1.judge([{"role": "user", "content": "x"}], "jev-latest", ask_planner=planner, post=post, status=_quiet(), planner_name="gpt-chat"))
+
+
+def test_judge_without_a_message_explains_jev():
+    async def never(_):
+        raise AssertionError("nothing to plan or judge")
+
+    content, usage = run(s1.judge([{"role": "user", "content": " "}], "jev-latest", ask_planner=never, post=never, status=_quiet(), planner_name="gpt-chat"))
+    assert content == s1.HELP and usage == {} and "`" not in s1.HELP
 
 
 def test_judge_skips_the_planner_for_a_request_json():
@@ -191,7 +271,7 @@ def test_judge_skips_the_planner_for_a_request_json():
 
     msg = '{"state": "hi", "questions": {"q": {"type": "noul", "instructions": "Is this spam?"}}}'
     content, _ = run(s1.judge([{"role": "user", "content": msg}], "jev-latest", ask_planner=planner, post=post, status=status, planner_name="gpt-chat"))
-    assert "| Is this spam? | 否（是的概率 10%） |" in content
+    assert "| Is this spam? | 否（90%） |" in content
 
 
 def _events(chunks):

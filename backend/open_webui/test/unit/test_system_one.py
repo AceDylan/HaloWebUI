@@ -129,6 +129,7 @@ def test_render_answers_as_a_table_with_chinese_names():
     assert "- 多急：今天 80% · 不急 10% · 本周 10%" in text
     assert '"instructions": "Which queue?"' in text and "labels" not in text.split("```json")[1]
     assert "<details>" not in text and "<sub>" not in text
+    assert "注：输入 357 tokens；" in text and "*输入" not in text
 
 
 def test_judge_plans_then_posts_and_reports_status():

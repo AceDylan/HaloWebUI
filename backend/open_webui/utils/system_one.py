@@ -323,7 +323,8 @@ def render(plan: Plan, response: dict) -> str:
         lines += ["", "各选项概率：", *spread]
     usage = response.get("usage") or {}
     if usage.get("input_tokens") is not None:
-        lines += ["", f"*输入 {usage.get('input_tokens')} tokens；「把握」是 Jev 自带的置信度，越低越该人工复核。*"]
+        # no *italics*: next to CJK punctuation the renderer shows the asterisks
+        lines += ["", f"注：输入 {usage.get('input_tokens')} tokens；「把握」是 Jev 自带的置信度，越低越该人工复核。"]
     # plain Markdown only: the reply card shows raw HTML (<details>, <sub>) as text
     request_json = json.dumps(plan.body, ensure_ascii=False, indent=2)
     lines += ["", "发给 Jev 的请求（改了直接发回来就按它再判断）：", "", "```json", request_json, "```"]

@@ -131,4 +131,29 @@ describe('ModelOrbit', () => {
 		expect(target.querySelector('[data-halo-model-orbit]')).toBeFalsy();
 		expect(app.$$.ctx[app.$$.props.shows]).toBe(false);
 	});
+
+	it('shows as many models as 设置 › 首页模型数量 asks, shrinking a ring of more than seven', async () => {
+		const many = Array.from({ length: 14 }, (_, i) => model(`m-${String(i).padStart(2, '0')}`));
+		stores.models.set(many);
+		stores.settings.set({ modelOrbitCount: 3 });
+		const { target } = mount({ selected: many[0], onSelect: () => {} });
+		await Promise.resolve();
+		const seats = () => target.querySelectorAll('.halo-orbit__seat').length;
+		const dense = () => target.querySelector('[data-halo-model-orbit]').classList.contains('is-dense');
+		expect(seats()).toBe(3);
+		expect(dense()).toBe(false);
+
+		stores.settings.set({ modelOrbitCount: 11 });
+		await Promise.resolve();
+		expect(seats()).toBe(11);
+		expect(dense()).toBe(true);
+
+		// out of range falls back inside 2–12
+		stores.settings.set({ modelOrbitCount: 99 });
+		await Promise.resolve();
+		expect(seats()).toBe(12);
+		stores.settings.set({});
+		await Promise.resolve();
+		expect(seats()).toBe(8);
+	});
 });

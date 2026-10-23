@@ -314,6 +314,8 @@ type Settings = {
 	highContrastMode?: boolean;
 	showChatTitleInTab?: boolean;
 	showFeaturedAssistantsOnHome?: boolean;
+	/** Models on the new-chat orbit, core included (utils/model-deck modelDeckSize). */
+	modelOrbitCount?: number;
 	notificationEnabled?: boolean;
 	notificationSound?: boolean;
 	notificationSoundAlways?: boolean;

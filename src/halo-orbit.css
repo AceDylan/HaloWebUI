@@ -1063,6 +1063,17 @@ html:not(.dark) .halo-orbit__badge {
 .halo-orbit.is-compact .halo-orbit__float::before {
 	inset: -9px;
 }
+/* More than seven on the ring (设置 › 首页模型数量): the seats shrink with --unit; the label keeps
+   just the name, at a size that still reads. */
+.halo-orbit.is-dense .halo-orbit__seat .halo-orbit__meta {
+	display: none;
+}
+.halo-orbit.is-dense .halo-orbit__seat .halo-orbit__name {
+	font-size: max(8.5px, calc(12px * var(--unit)));
+}
+.halo-orbit.is-dense.is-compact .halo-orbit__seat .halo-orbit__name {
+	font-size: max(8.5px, calc(10px * var(--unit)));
+}
 /* ---------------------------------------------------------------- phones
    All the motion stays; what goes are the glow filters and the frosted labels, which make
    Chrome on Android re-render big layers every frame. */

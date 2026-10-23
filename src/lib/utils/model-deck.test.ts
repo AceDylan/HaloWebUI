@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { modelDeck, modelDeckKind } from './model-deck';
+import { MODEL_DECK_MAX, modelDeck, modelDeckKind, modelDeckSize } from './model-deck';
 
 const model = (name: string, extra: Record<string, any> = {}) => ({
 	id: `c1.${name}`,
@@ -46,6 +46,19 @@ describe('modelDeck', () => {
 	it('has nothing to offer with one model or none', () => {
 		expect(modelDeck([model('gpt-chat')])).toEqual([]);
 		expect(modelDeck(undefined)).toEqual([]);
+	});
+});
+
+describe('modelDeckSize', () => {
+	it('defaults to eight and keeps the setting within 2–12', () => {
+		expect(MODEL_DECK_MAX).toBe(8);
+		for (const unset of [undefined, null, '', 'abc', NaN]) expect(modelDeckSize(unset)).toBe(8);
+		expect(modelDeckSize(5)).toBe(5);
+		expect(modelDeckSize('10')).toBe(10);
+		expect(modelDeckSize(6.6)).toBe(7);
+		expect(modelDeckSize(1)).toBe(2);
+		expect(modelDeckSize(0)).toBe(2);
+		expect(modelDeckSize(40)).toBe(12);
 	});
 });
 

@@ -20,7 +20,7 @@
 	import { warp } from '$lib/components/scifi/scifi';
 	import { getModelBaseName, getModelConnectionName } from '$lib/utils/model-display';
 	import { getModelSelectionId } from '$lib/utils/model-identity';
-	import { modelDeck, modelDeckKind, type DeckKind } from '$lib/utils/model-deck';
+	import { modelDeck, modelDeckKind, modelDeckSize, type DeckKind } from '$lib/utils/model-deck';
 	import {
 		isMonoIcon,
 		orbitAccent,
@@ -58,7 +58,11 @@
 	// the swap: the picked node flies in, the old core flies out (ms)
 	const FLIGHT_MS = 900;
 
-	$: cards = modelDeck($_models, $settings?.pinnedModels).map((model) => {
+	$: cards = modelDeck(
+		$_models,
+		$settings?.pinnedModels,
+		modelDeckSize($settings?.modelOrbitCount)
+	).map((model) => {
 		const name = getModelBaseName(model);
 		const kind = modelDeckKind(model, $config?.hermes_agent_model_ids);
 		const icon =
@@ -283,6 +287,7 @@
 			class="halo-orbit"
 			class:is-compact={frame.compact}
 			class:is-measured={w > 0 && h > 0}
+			class:is-dense={frame.ringUnit < frame.unit}
 			data-hot={hot ? '' : undefined}
 			style="--node: {frame.node}px; --unit: {frame.unit}; --label-width: {frame.labelWidth}px; --label-height: {frame.labelHeight}px; --label-gap: {frame.labelGap}px; --core-halo: {frame.coreHalo}px; --core-tag-height: {frame.coreTagHeight}px; --core-tag-width: {frame.core + 2 * frame.coreHalo}px"
 			bind:clientWidth={w}
@@ -414,7 +419,7 @@
 					class:is-core={isCore}
 					class:is-back={!isCore && seat.y < frame.cy}
 					data-accent={card.accent}
-					style="transform: {transformOf(seat, frame)}; --d: {index}; --depth: {seat.depth}"
+					style="transform: {transformOf(seat, frame)}; --d: {index}; --depth: {seat.depth}; --unit: {frame.ringUnit}"
 					bind:this={seatEls[card.id]}
 				>
 					<button

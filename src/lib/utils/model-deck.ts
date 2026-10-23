@@ -14,6 +14,17 @@ export type DeckKind = 'agent' | 'image' | 'chat';
 
 /** More than this and the menu is the better place; the deck shows the first ones. */
 export const MODEL_DECK_MAX = 8;
+/** What 设置 › 界面 › 首页模型数量 accepts (settings.modelOrbitCount): the core plus the ring. */
+export const MODEL_DECK_MIN = 2;
+export const MODEL_DECK_LIMIT = 12;
+
+export const modelDeckSize = (value: unknown): number => {
+	const size = Math.round(Number(value));
+	if (value === null || value === undefined || value === '' || !Number.isFinite(size)) {
+		return MODEL_DECK_MAX;
+	}
+	return Math.min(MODEL_DECK_LIMIT, Math.max(MODEL_DECK_MIN, size));
+};
 
 /** Visible models in menu order with the pinned ones first; none when there is nothing to pick. */
 export const modelDeck = <T extends DeckModel>(

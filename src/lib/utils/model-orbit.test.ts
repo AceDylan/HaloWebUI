@@ -12,6 +12,7 @@ import {
 	orbitSlots,
 	seatModels
 } from './model-orbit';
+import { MODEL_DECK_LIMIT } from './model-deck';
 
 describe('orbitAccent', () => {
 	it('gives every model of the landing page its colour family', () => {
@@ -39,6 +40,14 @@ describe('isMonoIcon', () => {
 describe('orbit layout', () => {
 	const wide = orbitFrame(992, 496);
 	const phone = orbitFrame(358, 448);
+
+	it('shrinks the nodes, not the core, when more than seven share the ring', () => {
+		expect(orbitFrame(992, 496, 7).ringUnit).toBe(wide.unit);
+		const dense = orbitFrame(992, 496, 11);
+		expect(dense.ringUnit).toBeCloseTo((wide.unit * 7) / 11);
+		expect(dense.node).toBeLessThan(wide.node);
+		expect(dense.core).toBe(wide.core);
+	});
 
 	it('switches to the compact layout on narrow stages', () => {
 		expect(wide.compact).toBe(false);
@@ -75,7 +84,8 @@ describe('orbit layout', () => {
 	])(
 		'keeps spheres and labels separated and inside a %ix%i stage throughout a revolution',
 		(w, h) => {
-			for (let count = 4; count <= 7; count++) {
+			// up to the 设置 limit: twelve models, eleven on the ring
+			for (let count = 1; count <= MODEL_DECK_LIMIT - 1; count++) {
 				const f = orbitFrame(w, h, count);
 				// Include maximum depth, hover enlargement and the floating sphere's travel.
 				const sphere = f.node * 0.57 + 5 * f.unit;

@@ -55,6 +55,12 @@
 	import { systemPrefersDark } from '$lib/utils/hub-embed';
 	import { guardViewTransition } from '$lib/utils/transitions';
 	import {
+		MODEL_DECK_LIMIT,
+		MODEL_DECK_MAX,
+		MODEL_DECK_MIN,
+		modelDeckSize
+	} from '$lib/utils/model-deck';
+	import {
 		DEFAULT_CHAT_TRANSITION_MODE,
 		DEFAULT_HIGHLIGHTER_THEME,
 		DEFAULT_MERMAID_THEME,
@@ -139,6 +145,8 @@
 	let chatDirection: 'LTR' | 'RTL' | 'auto' = 'auto';
 	let showUsername = false;
 	let showFeaturedAssistantsOnHome = true;
+	// New-chat orbit: models shown, core included (Placeholder/ModelOrbit.svelte).
+	let modelOrbitCount = MODEL_DECK_MAX;
 	let notificationSound = true;
 	let showChatTitleInTab = true;
 	let textScale: number | null = null;
@@ -271,6 +279,7 @@
 			defaultModelId: string;
 			showChatTitleInTab: boolean;
 			showFeaturedAssistantsOnHome: boolean;
+			modelOrbitCount: number;
 			landingPageMode: string;
 			chatBubble: boolean;
 			showUsername: boolean;
@@ -692,6 +701,7 @@
 			defaultModelId: resolveDefaultModelId(defaultModelId),
 			showChatTitleInTab,
 			showFeaturedAssistantsOnHome,
+			modelOrbitCount: modelDeckSize(modelOrbitCount),
 			landingPageMode,
 			chatBubble,
 			showUsername,
@@ -777,6 +787,7 @@
 		defaultModelId = resolveDefaultModelId(snapshot.defaultModelId);
 		showChatTitleInTab = snapshot.showChatTitleInTab;
 		showFeaturedAssistantsOnHome = snapshot.showFeaturedAssistantsOnHome;
+		modelOrbitCount = modelDeckSize(snapshot.modelOrbitCount);
 		landingPageMode = snapshot.landingPageMode;
 		chatBubble = snapshot.chatBubble;
 		showUsername = snapshot.showUsername;
@@ -861,6 +872,7 @@
 		defaultModelId;
 		showChatTitleInTab;
 		showFeaturedAssistantsOnHome;
+		modelOrbitCount;
 		landingPageMode;
 		chatBubble;
 		showUsername;
@@ -1120,6 +1132,7 @@
 				models: resolvedDefaultModelId ? [resolvedDefaultModelId] : [],
 				showChatTitleInTab,
 				showFeaturedAssistantsOnHome,
+				modelOrbitCount: modelDeckSize(modelOrbitCount),
 				landingPageMode,
 				chatBubble,
 				showUsername,
@@ -1395,6 +1408,7 @@
 
 		showUsername = $settings?.showUsername ?? false;
 		showFeaturedAssistantsOnHome = $settings?.showFeaturedAssistantsOnHome ?? true;
+		modelOrbitCount = modelDeckSize($settings?.modelOrbitCount);
 
 		showEmojiInCall = $settings?.showEmojiInCall ?? false;
 		voiceInterruption = $settings?.voiceInterruption ?? false;
@@ -1837,6 +1851,32 @@
 										<Switch
 											bind:state={showFeaturedAssistantsOnHome}
 										/>
+									</div>
+
+									<div class="glass-item px-4 py-3">
+										<div class="flex items-center justify-between gap-4">
+											<div class="min-w-0">
+												<label for="model-orbit-count" class="text-sm font-medium">
+													{tr('首页模型数量', 'Models on the home page')}
+												</label>
+												<p class="mt-1 text-xs leading-5 text-gray-500 dark:text-gray-400">
+													{tr(
+														`新对话页轨道上显示几个模型（含中间 1 个），${MODEL_DECK_MIN}–${MODEL_DECK_LIMIT}，默认 ${MODEL_DECK_MAX}。置顶的模型排在前面；超过 8 个时节点和名字会缩小，只显示模型名。其余模型在左上角菜单里选。`,
+														`How many models the orbit on a new chat shows, the centre one included: ${MODEL_DECK_MIN}–${MODEL_DECK_LIMIT}, ${MODEL_DECK_MAX} by default. Pinned models come first; above 8 the nodes and labels shrink and show only the name. The rest stay in the model menu.`
+													)}
+												</p>
+											</div>
+											<input
+												id="model-orbit-count"
+												bind:value={modelOrbitCount}
+												on:change={() => (modelOrbitCount = modelDeckSize(modelOrbitCount))}
+												type="number"
+												min={MODEL_DECK_MIN}
+												max={MODEL_DECK_LIMIT}
+												step="1"
+												class="w-20 shrink-0 dark:bg-gray-850 rounded-lg px-3 py-2 text-sm bg-gray-50 outline-none border border-gray-200 dark:border-gray-700 text-center"
+											/>
+										</div>
 									</div>
 
 									<div class="flex items-center justify-between glass-item px-4 py-3">

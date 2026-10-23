@@ -36,6 +36,8 @@ export const isMonoIcon = (src: string | null | undefined): boolean => {
 
 /** Below this stage width the nodes and their labels use the smaller size budget. */
 export const ORBIT_COMPACT_BELOW = 760;
+/** Seats on the ring at full size; denser rings scale down. */
+const ORBIT_RING_ROOMY = 7;
 
 export type OrbitFrame = {
 	compact: boolean;
@@ -50,6 +52,8 @@ export type OrbitFrame = {
 	node: number;
 	/** Shared CSS budgets, scaled down together on short or narrow stages. */
 	unit: number;
+	/** The same for the ring's nodes, smaller still when more than seven share it. */
+	ringUnit: number;
 	labelWidth: number;
 	labelHeight: number;
 	labelGap: number;
@@ -74,13 +78,15 @@ export const orbitPoint = (frame: OrbitFrame, angle: number) => ({
 export const orbitFrame = (w: number, h: number, count = 5): OrbitFrame => {
 	const compact = w < ORBIT_COMPACT_BELOW;
 	const unit = Math.min(1, w / (compact ? 390 : 760), h / (compact ? 400 : 440));
-	const node = (compact ? 40 : 56) * unit;
+	// Seven seats fill the ring; more shrink their spheres and labels so they still pass each other.
+	const ringUnit = unit * Math.min(1, ORBIT_RING_ROOMY / Math.max(1, count));
+	const node = (compact ? 40 : 56) * ringUnit;
 	const core = (compact ? 64 : 88) * unit;
 	// Denser rings shorten labels instead of moving seats as they revolve.
 	const labelWidth =
 		Math.min(compact ? 84 : 132, (compact ? 504 : 812) / Math.max(6, count)) * unit;
-	const labelHeight = (compact ? 28 : 34) * unit;
-	const labelGap = 10 * unit;
+	const labelHeight = (compact ? 28 : 34) * ringUnit;
+	const labelGap = 10 * ringUnit;
 	const coreHalo = 14 * unit;
 	const coreTagHeight = (compact ? 28 : 34) * unit;
 	const cx = w / 2;
@@ -99,6 +105,7 @@ export const orbitFrame = (w: number, h: number, count = 5): OrbitFrame => {
 		node,
 		coreY: cy,
 		unit,
+		ringUnit,
 		labelWidth,
 		labelHeight,
 		labelGap,

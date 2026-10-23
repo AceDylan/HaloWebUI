@@ -625,7 +625,7 @@ describe('Videos 制作任务', () => {
 		expect(target.querySelector('[data-video-tasks]')).toBeFalsy();
 	});
 
-	it('lists earlier tasks, plays a finished video and stops one at work', async () => {
+	it('folds finished tasks by default, expands their videos and stops one at work', async () => {
 		api.getVideoPage.mockResolvedValue({ items: [], next: null });
 		api.getVideoTasks.mockResolvedValue([
 			videoTask({ chatId: 'run1', id: 'run1', maker: 'codex', state: 'background', now: 'codex 在渲染', runner: { runId: 'r1', agent: 'codex', step: 12, startedAt: Math.floor(Date.now() / 1000) - 600 } }),
@@ -638,6 +638,14 @@ describe('Videos 制作任务', () => {
 		expect(background.querySelector('[data-step="make"]').textContent).toContain('codex 制作');
 		expect(background.querySelector('[data-step="make"]').getAttribute('data-state')).toBe('active');
 		expect(background.querySelector('[data-video-task-facts]').textContent).toContain('codex 第 12 步');
+		expect(target.querySelector('[data-video-task="ok1"]')).toBeFalsy();
+		expect(target.querySelector('[data-video-task-player]')).toBeFalsy();
+		const historyToggle = target.querySelector('[data-video-task-history-toggle]');
+		expect(historyToggle.getAttribute('aria-expanded')).toBe('false');
+		expect(historyToggle.textContent).toContain('（1）');
+		historyToggle.click();
+		await sleep(10);
+		expect(historyToggle.getAttribute('aria-expanded')).toBe('true');
 		const done = target.querySelector('[data-video-task="ok1"]');
 		expect(done.querySelector('[data-video-task-player="video_7"]').getAttribute('src')).toContain('/api/v1/files/f7/content');
 		expect(done.querySelector('[data-step="video"]').getAttribute('data-state')).toBe('done');
@@ -648,6 +656,11 @@ describe('Videos 制作任务', () => {
 		const stopped = target.querySelector('[data-video-task="run1"]');
 		expect(stopped.getAttribute('data-video-task-state')).toBe('stopped');
 		expect(stopped.querySelector('[data-step="make"]').getAttribute('data-state')).toBe('failed');
+		expect(historyToggle.textContent).toContain('（2）');
+		historyToggle.click();
+		await sleep(10);
+		expect(target.querySelector('[data-video-task="ok1"]')).toBeFalsy();
+		expect(target.querySelector('[data-video-task="run1"]')).toBeFalsy();
 	});
 
 	it('the chat\'s card leads back to the workbench and does not play the video again', async () => {

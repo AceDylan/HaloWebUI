@@ -506,6 +506,12 @@
 	let stoppingTask = '';
 	// ?task=<chat id>: the chat's card led here; that task is shown with a ring
 	let focusTask = '';
+	let showTaskHistory = false;
+	// Keep work that needs attention visible; finished tasks remain available on demand.
+	$: historyTasks = tasks.filter(
+		(t) => (t.state === 'done' || t.state === 'stopped') && t.chatId !== focusTask
+	);
+	$: visibleTasks = tasks.filter((t) => !historyTasks.includes(t));
 
 	const watchTasks = () => {
 		if (tasksTimer) clearTimeout(tasksTimer);
@@ -1018,7 +1024,7 @@
 						<div class="text-sm font-semibold text-gray-900 dark:text-gray-100">制作任务</div>
 						<span class="text-xs text-gray-500 dark:text-gray-400">可以离开这页，做好后自动进视频库</span>
 					</div>
-					{#each tasks as task (task.chatId)}
+					{#each visibleTasks as task (task.chatId)}
 						<VideoTaskCard
 							{task}
 							where="studio"
@@ -1027,6 +1033,29 @@
 							on:stop={(event) => stopTask(event.detail)}
 						/>
 					{/each}
+					{#if historyTasks.length}
+						<div class="flex flex-wrap items-center justify-between gap-2">
+							<button
+								type="button"
+								class="rounded-lg py-1 text-xs text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100"
+								aria-expanded={showTaskHistory}
+								aria-controls="video-task-history"
+								on:click={() => (showTaskHistory = !showTaskHistory)}
+								data-video-task-history-toggle
+							>
+								{showTaskHistory ? '收起' : '展开'}已完成 / 已停止任务（{historyTasks.length}）
+								<span aria-hidden="true">{showTaskHistory ? '▴' : '▾'}</span>
+							</button>
+							<button type="button" class="text-xs text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200" on:click={() => setTab('library')}>去视频库 →</button>
+						</div>
+						<div id="video-task-history" class="space-y-3" hidden={!showTaskHistory}>
+							{#if showTaskHistory}
+								{#each historyTasks as task (task.chatId)}
+									<VideoTaskCard {task} where="studio" />
+								{/each}
+							{/if}
+						</div>
+					{/if}
 				</div>
 			{/if}
 

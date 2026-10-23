@@ -34,6 +34,11 @@ LIST_LIMIT = 8
 VIDEO_SCAN_LIMIT = 300
 TITLE_MAX_CHARS = 40
 NOW_MAX_CHARS = 140
+# 开始制作 once per click: a phone that loses the response (nginx 499) has the browser send the
+# same POST again while the first goes on — both used to become tasks. A click's key (the
+# workbench sends one) maps to its chat for this long; the server runs one worker process.
+CLIENT_KEY_TTL = 30 * 60
+_STARTED: dict[tuple[str, str], tuple[float, "asyncio.Future[Optional[str]]"]] = {}
 
 # what a reply's status says while nothing specific is going on (i18n keys, model requests)
 _QUIET_STATUS = {"model_request", "web_search", "hermes_start_retry"}
@@ -91,8 +96,37 @@ def _html_mode(user) -> str:
 
 
 async def start_task(request, user, *, brief: str, idea: str = "", files: Optional[list[dict]] = None,
-                     maker: str = "") -> dict:
-    """A new chat with the brief and its files, its Hermes turn started. Returns the task."""
+                     maker: str = "", client_key: str = "") -> dict:
+    """A new chat with the brief and its files, its Hermes turn started. Returns the task.
+
+    The same *client_key* again (a resent request) waits for the first and returns its task."""
+    if not client_key:
+        return await _start_task(request, user, brief=brief, idea=idea, files=files, maker=maker)
+    now = time.time()
+    for key in [k for k, (at, _) in _STARTED.items() if now - at > CLIENT_KEY_TTL]:
+        _STARTED.pop(key, None)
+    key = (user.id, client_key)
+    held = _STARTED.get(key)
+    if held is not None:
+        chat_id = await asyncio.shield(held[1])
+        chat = Chats.get_chat_by_id_and_user_id(chat_id, user.id) if chat_id else None
+        task = task_of(chat, user.id) if chat else None
+        if task is not None:
+            return task
+        # the first did not get as far as its chat: this one is a fresh start
+    started: "asyncio.Future[Optional[str]]" = asyncio.get_running_loop().create_future()
+    _STARTED[key] = (now, started)
+    try:
+        return await _start_task(request, user, brief=brief, idea=idea, files=files, maker=maker,
+                                 created=lambda chat_id: started.done() or started.set_result(chat_id))
+    finally:
+        if not started.done():
+            started.set_result(None)
+            _STARTED.pop(key, None)
+
+
+async def _start_task(request, user, *, brief: str, idea: str, files: Optional[list[dict]], maker: str,
+                      created=None) -> dict:
     from open_webui.main import chat_completion
     from open_webui.utils.hermes_notify import append_follow_up_turn
     from open_webui.utils.hermes_sessions import HermesSessionsError, resolve_hermes_model
@@ -139,6 +173,8 @@ async def start_task(request, user, *, brief: str, idea: str = "", files: Option
     if chat is None:
         raise VideoTaskError(500, "对话没能建立，请稍后再试")
     _dual_write(chat.id, user.id, [messages[user_id], messages[reply_id]])
+    if created is not None:
+        created(chat.id)  # a resent request returns this chat from now on
 
     images = [f for f in attached if f["type"] == "image"]
     content: Any = brief

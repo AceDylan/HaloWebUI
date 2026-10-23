@@ -179,6 +179,8 @@ class StartTaskForm(BaseModel):
     idea: str = Field(default="", max_length=video_tasks.BRIEF_MAX_CHARS)
     files: list[TaskFile] = Field(default_factory=list, max_length=video_tasks.FILES_MAX)
     maker: str = Field(default="", max_length=32)
+    # one per click of 开始制作: the same key again is the same request resent
+    client_key: str = Field(default="", max_length=64, pattern=r"^[A-Za-z0-9_-]*$")
 
 
 def _task_error(exc: video_tasks.VideoTaskError) -> HTTPException:
@@ -191,7 +193,7 @@ async def start_video_task(request: Request, form: StartTaskForm, user=Depends(g
     try:
         return await video_tasks.start_task(
             request, user, brief=form.brief, idea=form.idea,
-            files=[f.model_dump() for f in form.files], maker=form.maker,
+            files=[f.model_dump() for f in form.files], maker=form.maker, client_key=form.client_key,
         )
     except video_tasks.VideoTaskError as exc:
         raise _task_error(exc)

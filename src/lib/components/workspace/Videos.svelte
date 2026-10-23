@@ -443,6 +443,8 @@
 		saveSettings();
 		// Capture one request: edits while the start call is in flight belong to the next video.
 		const snapshot = { ...briefOptions, idea };
+		// this click's key: a resend of its request (a phone losing the response) is the same task
+		const clickKey = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 		const snapshotFiles = sentFiles;
 		const needsPrep = prepOptions.enhance && (!prepared || prepStale);
 		const requestIdea = videoPrepIdea(idea, snapshot.prep);
@@ -477,7 +479,8 @@
 				brief: fitVideoBrief({ ...snapshot, prepJob: prepJobId }, HANDOFF_TEXT_MAX),
 				idea: (snapshot.prep?.original || snapshot.idea).trim(),
 				files: snapshotFiles,
-				maker: snapshot.maker
+				maker: snapshot.maker,
+				client_key: clickKey
 			});
 			if (destroyed) return;
 			tasks = [task, ...tasks.filter((t) => t.chatId !== task.chatId)];

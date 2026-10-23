@@ -98,13 +98,29 @@ const jsonHeaders = (token: string) => ({ ...headers(token), 'Content-Type': 'ap
 /** 开始制作: a new Hermes chat with the brief and its files, started on the server. */
 export const startVideoTask = async (
 	token: string,
-	form: { brief: string; idea: string; files: { id: string; name: string; type: string }[]; maker: string }
-): Promise<VideoTask> =>
-	fetch(`${VIDEO_STUDIO_API_BASE_URL}/tasks`, {
-		method: 'POST',
-		headers: jsonHeaders(token),
-		body: JSON.stringify(form)
-	}).then(parseJsonResponse<VideoTask>);
+	form: {
+		brief: string;
+		idea: string;
+		files: { id: string; name: string; type: string }[];
+		maker: string;
+		/** one per click: the server returns the same task for the same key (a resent request) */
+		client_key: string;
+	}
+): Promise<VideoTask> => {
+	const send = () =>
+		fetch(`${VIDEO_STUDIO_API_BASE_URL}/tasks`, {
+			method: 'POST',
+			headers: jsonHeaders(token),
+			body: JSON.stringify(form)
+		});
+	// A phone may lose the response while the server goes on: ask once more with the same key,
+	// which gives back the task already started instead of a second one.
+	const res = await send().catch(async () => {
+		await new Promise((resolve) => setTimeout(resolve, 1500));
+		return send();
+	});
+	return parseJsonResponse<VideoTask>(res);
+};
 
 /** The newest tasks, newest first. */
 export const getVideoTasks = async (token: string, limit = 8): Promise<VideoTask[]> => {

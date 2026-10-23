@@ -172,6 +172,56 @@ def test_a_runner_command_in_front_is_still_a_brief(hermes):
     assert hermes[0]["messages"][0]["content"].startswith("/codex ")
 
 
+def test_a_resent_start_is_the_same_task(hermes, monkeypatch):
+    """A phone loses the response and the browser sends the click again (nginx 499 then 200)."""
+    slow = asyncio.Event()
+    record = sys.modules["open_webui.main"].chat_completion
+
+    async def chat_completion(request, form_data, user):
+        await slow.wait()  # the first request is still starting Hermes when the resend arrives
+        return await record(request, form_data, user)
+
+    monkeypatch.setitem(sys.modules, "open_webui.main", types.SimpleNamespace(chat_completion=chat_completion))
+    monkeypatch.setattr(video_tasks, "_STARTED", {})
+
+    async def run():
+        user = _User("vt-dup")
+        start = lambda key: video_tasks.start_task(None, user, brief=BRIEF, idea="番茄", client_key=key)
+        first = asyncio.create_task(start("click-1"))
+        await asyncio.sleep(0.05)
+        resent = asyncio.create_task(start("click-1"))
+        await asyncio.sleep(0.05)
+        slow.set()
+        a, b = await first, await resent
+        again = await start("click-1")  # later still: the same task
+        other = await start("click-2")  # another click is another video
+        for chat_id in {a["chatId"], other["chatId"]}:
+            for task_id in list_task_ids_by_chat_id(chat_id):
+                await stop_task(task_id)
+        return a, b, again, other
+
+    a, b, again, other = asyncio.run(run())
+    assert a["chatId"] == b["chatId"] == again["chatId"]
+    assert other["chatId"] != a["chatId"]
+    assert len(hermes) == 2  # Hermes started once per click
+    assert len([t for t in video_tasks.list_tasks("vt-dup") if t["chatId"] == a["chatId"]]) == 1
+
+
+def test_a_start_that_failed_does_not_hold_its_key(hermes, monkeypatch):
+    monkeypatch.setattr(video_tasks, "_STARTED", {})
+    with pytest.raises(video_tasks.VideoTaskError):
+        asyncio.run(video_tasks.start_task(None, _User("vt-dup2"), brief="不是需求", client_key="k"))
+
+    async def run():
+        task = await video_tasks.start_task(None, _User("vt-dup2"), brief=BRIEF, client_key="k")
+        for task_id in list_task_ids_by_chat_id(task["chatId"]):
+            await stop_task(task_id)
+        return task
+
+    assert asyncio.run(run())["state"] == "running"
+    assert video_tasks._STARTED[("vt-dup2", "k")][1].result()
+
+
 # ---- reading ----------------------------------------------------------------------------------
 
 

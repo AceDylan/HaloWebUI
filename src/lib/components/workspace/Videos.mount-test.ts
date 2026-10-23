@@ -652,6 +652,14 @@ describe('Videos 制作任务', () => {
 		// the box is free for the next video; the settings stay
 		expect(target.querySelector('[data-video-idea]').value).toBe('');
 		expect(toasts.success).toHaveBeenCalled();
+		// each click carries its own key: a resend of one request is not a second video
+		const first = sent().client_key;
+		expect(first).toMatch(/^[A-Za-z0-9_-]{8,64}$/);
+		await typeIdea(target, '再做一个');
+		target.querySelector('[data-video-workbench]').dispatchEvent(new Event('submit'));
+		await sleep(30);
+		expect(api.startVideoTask).toHaveBeenCalledTimes(2);
+		expect(sent().client_key).not.toBe(first);
 	});
 
 	it('says why it could not start, and keeps the words', async () => {

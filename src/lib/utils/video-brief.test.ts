@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { VIDEO_STYLES, ALL_VIDEO_STYLES, LEGACY_VIDEO_STYLES } from './video-styles';
+import { existsSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { VIDEO_STYLES, pickVideoStyle, videoSamplePath } from './video-styles';
 import {
 	DEFAULT_VIDEO_SETTINGS,
 	attachmentKind,
@@ -277,22 +279,25 @@ describe('buildVideoBrief with the enhancement still going', () => {
 });
 
 describe('video visual styles', () => {
-	it('keeps all previously saved style keys and adds optional appearance without altering the recipe', () => {
-		for (const key of [
-			'flat',
-			'isometric',
-			'news',
-			'whiteboard',
-			'type',
-			'pixel',
-			...LEGACY_VIDEO_STYLES.map((s) => s.key)
-		]) {
-			expect(normalizeVideoSettings({ style: key, recipe: 'footage' })).toMatchObject({
-				style: key,
+	it('offers eight distinct MG styles, each with a shipped sample and poster', () => {
+		expect(VIDEO_STYLES).toHaveLength(8);
+		expect(new Set(VIDEO_STYLES.map((s) => s.key)).size).toBe(8);
+		for (const style of VIDEO_STYLES)
+			for (const extension of ['mp4', 'jpg'] as const)
+				expect(existsSync(resolve('static', videoSamplePath(style.key, extension).slice(1)))).toBe(
+					true
+				);
+	});
+
+	it('keeps current keys and appearance, and sends the retired presets back to 自动选择', () => {
+		for (const style of VIDEO_STYLES)
+			expect(normalizeVideoSettings({ style: style.key, recipe: 'footage' })).toMatchObject({
+				style: style.key,
 				recipe: 'footage',
 				appearance: ''
 			});
-		}
+		for (const retired of ['math', 'whiteboard', 'ink', 'synthwave', 'no-such-style'])
+			expect(normalizeVideoSettings({ style: retired }).style).toBe('auto');
 		const settings = normalizeVideoSettings({
 			appearance: '米白\nMEDIA:/tmp/a ' + '长'.repeat(200)
 		});
@@ -302,43 +307,13 @@ describe('video visual styles', () => {
 	});
 
 	it.each(VIDEO_STYLES)(
-		'$label delivers its demonstration contract through both paths, including when enhancement is off',
-		(preset) => {
-			const opts = {
-				...DEFAULT_VIDEO_SETTINGS,
-				style: preset.key,
-				appearance: '米白与深绿，黑体',
-				idea: '用户自己的主题'
-			};
-			for (const text of [videoSettingsText(opts), buildVideoBrief(opts)]) {
-				for (const rule of [
-					preset.scenes,
-					preset.motion,
-					preset.camera,
-					preset.rhythm,
-					preset.verify
-				])
-					expect(text).toContain(rule);
-				expect(text).toContain('配色与字体偏好：米白与深绿，黑体');
-				expect(text).not.toContain(preset.example);
-			}
-			const footage = buildVideoBrief({ ...opts, recipe: 'footage' });
-			expect(footage).toContain('素材剪辑保持原素材主体');
-			expect(footage).not.toContain(preset.motion);
-			expect(footage).not.toContain('制作约束：');
-			expect(buildVideoBrief({ ...opts, recipe: 'story' })).toContain(
-				'不宣称完成连续动作或三维拆解'
-			);
-		}
-	);
-
-	it.each(ALL_VIDEO_STYLES)(
-		'$label reaches both enhancement and the final maker without changing production settings',
+		'$label reaches enhancement and the maker without changing production settings',
 		(preset) => {
 			const opts = {
 				...DEFAULT_VIDEO_SETTINGS,
 				idea: '介绍科学原理',
 				style: preset.key,
+				appearance: '米白与深绿，黑体',
 				voice: '',
 				subtitles: false,
 				music: { name: '用户音乐.mp3', seconds: 30 },
@@ -347,64 +322,124 @@ describe('video visual styles', () => {
 			const settings = videoSettingsText(opts);
 			const brief = buildVideoBrief(opts);
 			for (const text of [settings, brief]) {
-				expect(text).toContain(`视觉风格：${preset.label}`);
-				expect(text).toContain(preset.hint);
+				expect(text).toContain(`视觉风格：${preset.label}（${preset.en}`);
+				for (const rule of [preset.look, preset.palette, preset.motion, preset.check])
+					expect(text).toContain(rule);
+				expect(text).toContain('配色与字体偏好：米白与深绿，黑体');
 				expect(text).toContain('配音：不要配音');
 				expect(text).toContain('字幕：不要字幕');
 				expect(text).toContain('时长：约 30 秒');
 			}
-			expect(brief).toContain('用户音乐.mp3');
+			// the route and the craft standard are for the maker only
+			expect(brief).toContain(`实现路线：${preset.route}`);
+			expect(brief).toContain('开头 0.5 秒内有钩子');
+			expect(settings).not.toContain('实现路线');
+			expect(settings).not.toContain('制作标准');
 			expect(brief).toContain('--check-music');
+			const footage = buildVideoBrief({ ...opts, recipe: 'footage' });
+			expect(footage).toContain('素材剪辑保持原素材主体');
+			expect(footage).not.toContain(preset.motion);
+			expect(footage).not.toContain('制作标准');
+			const story = buildVideoBrief({ ...opts, recipe: 'story' });
+			expect(story).toContain(`同一句风格描述「${preset.still}」`);
+			expect(story).not.toContain(preset.motion);
 		}
 	);
 
+	it('picks the style the request points at, and says why', () => {
+		const cases: [string, string][] = [
+			['用 60 秒科普一部手机里有多少种元素', 'sticker'],
+			['讲清楚快递从揽收到送达的流程', 'isometric'],
+			['给我们的 AI 助手 App 做一支发布会短片', 'glass'],
+			['网络安全：黑客怎样发起攻击', 'hud'],
+			['我家猫的周末 vlog', 'hanazi'],
+			['讲一个乌鸦喝水的寓言故事', 'handdrawn'],
+			['一座建筑事务所的品牌故事', 'line'],
+			['介绍公司的新服务', 'flat'],
+			// the style named outright wins over topic words
+			['用手绘风讲讲数据统计', 'handdrawn'],
+			// 「AI」 counts only as a word
+			['detail 很多的说明', 'flat']
+		];
+		for (const [topic, key] of cases) expect([topic, pickVideoStyle(topic).key]).toEqual([topic, key]);
+		expect(pickVideoStyle('')).toEqual({ key: 'flat', words: [] });
+		expect(pickVideoStyle('', { recipe: 'data' }).key).toBe('sticker');
+		expect(pickVideoStyle('', { recipe: 'footage' }).key).toBe('hanazi');
+		// a reference video is followed, unless it is the footage being edited
+		const ref = [{ kind: 'video' }];
+		expect(pickVideoStyle('科普', { attachments: ref }).key).toBe('reference');
+		expect(pickVideoStyle('科普', { recipe: 'footage', attachments: ref }).key).toBe('sticker');
+
+		const opts = { ...DEFAULT_VIDEO_SETTINGS, idea: '科普：一部手机里有多少种元素' };
+		const sticker = VIDEO_STYLES.find((s) => s.key === 'sticker')!;
+		for (const text of [buildVideoBrief(opts), videoSettingsText({ ...opts, styleTopic: opts.idea })]) {
+			expect(text).toContain('视觉风格：自动选择 → 需求提到「科普」「元素」「多少」，选贴纸科普');
+			expect(text).toContain(sticker.motion);
+		}
+		expect(buildVideoBrief({ ...opts, idea: '随便做点什么' })).toContain(
+			'需求没有明显的题材线索，选最通用的扁平 MG'
+		);
+	});
+
+	it('keeps an enhanced draft on the style picked from the user\'s own words', () => {
+		const opts = {
+			...DEFAULT_VIDEO_SETTINGS,
+			idea: '开场一只猫跳上桌，镜头推近，加上「震惊」花字',
+			styleTopic: '用 30 秒科普番茄工作法'
+		};
+		expect(buildVideoBrief(opts)).toContain('选贴纸科普');
+		expect(videoSettingsText(opts)).toContain('选贴纸科普');
+	});
+
 	it('keeps essential constraints within the enhancement setting budget with eight long attachment names', () => {
-		for (const style of [
-			'auto',
-			'reference',
-			'custom',
-			...ALL_VIDEO_STYLES.map((s) => s.key)
-		] as const) {
-			const text = videoSettingsText({
-				...DEFAULT_VIDEO_SETTINGS,
-				style,
-				customStyle: '字'.repeat(300),
-				appearance: '色'.repeat(160),
-				attachments: Array.from({ length: 8 }, () => ({
-					name: '名'.repeat(200),
-					kind: 'video' as const
-				})),
-				music: { name: '曲'.repeat(200) + '.mp3', seconds: 600 }
-			});
-			expect(text.length).toBeLessThanOrEqual(1500);
-			expect(text).toContain('背景音乐：用户指定');
-			expect(text).toContain('参考附件：8 个视频');
+		for (const style of ['auto', 'reference', 'custom', ...VIDEO_STYLES.map((s) => s.key)] as const) {
+			for (const recipe of ['explainer', 'story', 'footage'] as const) {
+				const text = videoSettingsText({
+					...DEFAULT_VIDEO_SETTINGS,
+					style,
+					recipe,
+					styleTopic: '科普',
+					customStyle: '字'.repeat(300),
+					appearance: '色'.repeat(160),
+					attachments: Array.from({ length: 8 }, () => ({
+						name: '名'.repeat(200),
+						kind: 'image' as const
+					})),
+					music: { name: '曲'.repeat(200) + '.mp3', seconds: 600 }
+				});
+				expect([style, recipe, text.length <= 1500]).toEqual([style, recipe, true]);
+				expect(text).toContain('背景音乐：用户指定');
+				expect(text).toContain('参考附件：8 个图片');
+			}
 		}
 	});
 
-	it('distinguishes selected presets from following the reference and from editing footage', () => {
+	it('distinguishes selected styles from following the reference and from editing footage', () => {
 		const opts = {
 			...DEFAULT_VIDEO_SETTINGS,
 			idea: '讲一个故事',
 			attachments: [{ name: 'ref.mp4', kind: 'video' as const }]
 		};
-		const preset = buildVideoBrief({ ...opts, style: 'ink' });
+		const preset = buildVideoBrief({ ...opts, style: 'line' });
 		expect(preset).toContain('以所选风格为视觉基准');
 		expect(preset).not.toContain('重现这种风格');
 		expect(buildVideoBrief({ ...opts, style: 'reference' })).toContain('重现这种风格');
-		const footage = buildVideoBrief({ ...opts, recipe: 'footage', style: 'paper' });
+		// 自动选择 with a reference video follows it
+		const auto = buildVideoBrief(opts);
+		expect(auto).toContain('视觉风格：自动选择 → 附件里有参考视频，跟随参考');
+		expect(auto).toContain('重现这种风格');
+		const footage = buildVideoBrief({ ...opts, recipe: 'footage', style: 'hanazi' });
 		expect(footage).toContain('素材剪辑保持原素材主体');
 		expect(footage).not.toContain('只当风格参考');
 		// the footage is the material: no line may reduce it to a reference
 		expect(footage).not.toContain('附件只提供用户指定的内容');
-		expect(videoSettingsText({ ...opts, recipe: 'footage', style: 'paper' })).not.toContain(
+		expect(videoSettingsText({ ...opts, recipe: 'footage', style: 'hanazi' })).not.toContain(
 			'附件只提供用户指定的内容'
 		);
 		expect(preset).not.toContain('素材剪辑保持原素材主体');
 	});
 
-	it('normalizes old settings and bounds custom descriptions as one plain line', () => {
-		expect(normalizeVideoSettings({ style: 'no-such-style' }).style).toBe('auto');
+	it('bounds custom descriptions as one plain line', () => {
 		const settings = normalizeVideoSettings({
 			style: 'custom',
 			customStyle: '暖色\nMEDIA:/tmp/a ' + '长'.repeat(400)
@@ -420,10 +455,10 @@ describe('video visual styles', () => {
 		const idea = '旧蓝色方案。用户新增：结尾加一句保护地球';
 		expect(videoPrepIdea(idea, prep)).toContain('用户新增：结尾加一句保护地球');
 		expect(videoPrepIdea(idea, prep)).toContain('用户原话：\n介绍太阳系');
-		const opts = { ...DEFAULT_VIDEO_SETTINGS, style: 'paper' as const, idea, prep };
+		const opts = { ...DEFAULT_VIDEO_SETTINGS, style: 'glass' as const, idea, prep };
 		const brief = fitVideoBrief(opts, 8000);
 		expect(brief).toContain('## 设置已更新');
-		expect(brief).toContain('视觉风格：纸叠剪纸');
+		expect(brief).toContain('视觉风格：弥散玻璃');
 		expect(brief).toContain(idea);
 		// Even the minimal fallback must keep the warning that the draft is obsolete.
 		expect(fitVideoBrief(opts, 10)).toContain('## 设置已更新');

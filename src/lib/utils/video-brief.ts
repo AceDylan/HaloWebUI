@@ -123,11 +123,13 @@ export type VideoBriefOptions = {
 	/** 提示词增强 still going on the server: the chat's Hermes turn waits for it and puts its result
 	 * in place of this line (backend utils/studio_prep.py PREP_MARK). */
 	prepJob?: string | null;
+	/** What 自动选择 reads to pick a style: the user's own words (the idea before enhancement). */
+	styleTopic?: string;
 };
 
 export type VideoSettings = Omit<
 	VideoBriefOptions,
-	'idea' | 'attachments' | 'music' | 'prep' | 'prepJob'
+	'idea' | 'attachments' | 'music' | 'prep' | 'prepJob' | 'styleTopic'
 >;
 
 /** The brief's line for an enhancement still going (backend utils/studio_prep.py PREP_MARK). */
@@ -276,8 +278,8 @@ const requirementLines = (opts: Omit<VideoBriefOptions, 'idea'>) => {
 /** The settings for 提示词增强 to size the content to (it never changes them). */
 export const videoSettingsText = (opts: Omit<VideoBriefOptions, 'idea'>): string => {
 	const lines = requirementLines(opts);
-	lines.push(...videoStyleLines(opts.style, opts.customStyle, opts.recipe, opts.appearance));
 	const attachments = opts.attachments ?? [];
+	lines.push(...videoStyleLines({ ...opts, topic: opts.styleTopic ?? '' }));
 	if (opts.music)
 		lines.push(`- 背景音乐：用户指定（${plainName(opts.music.name)}），视频按音乐的节拍和长度做`);
 	// The server accepts 1500 characters. Bound names after the essential constraints.
@@ -342,7 +344,7 @@ export const buildVideoBrief = (opts: VideoBriefOptions): string => {
 		'',
 		'## 要求',
 		...requirementLines(opts),
-		...videoStyleLines(opts.style, opts.customStyle, opts.recipe, opts.appearance)
+		...videoStyleLines({ ...opts, topic: opts.styleTopic ?? opts.idea }, true)
 	];
 	if (attachments.length) {
 		const counts = attachmentCounts(attachments);

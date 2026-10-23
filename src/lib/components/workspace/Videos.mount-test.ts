@@ -434,21 +434,29 @@ describe('Videos', () => {
 });
 
 describe('Videos style presets', () => {
-	it('loads only the selected sample and includes appearance changes in the preparation snapshot', async () => {
+	it('shows the auto pick, loads only the shown sample and keeps the pick after enhancement', async () => {
 		localStorage.setItem('halo.videoStudio.prep', JSON.stringify({ enhance: true, research: false, deeper: false }));
 		api.getVideoPage.mockResolvedValue({ items: [], next: null });
 		prepApi.startStudioPrep.mockResolvedValueOnce(prepJob());
 		const target = await mount();
-		expect(target.querySelector('[data-video-style-sample]')).toBeFalsy();
-		target.querySelector('[data-video-style="math"]').click();
-		await sleep(10);
-		const sample = target.querySelector('[data-video-style-sample]');
-		expect(sample.getAttribute('src')).toBe('/video-presets/v1/math.mp4');
+		expect(target.querySelectorAll('[data-video-style-grid] img').length).toBe(8);
+		let sample = target.querySelector('[data-video-style-sample]');
+		expect(sample.getAttribute('src')).toBe('/video-presets/v2/flat.mp4');
 		expect(sample.getAttribute('preload')).toBe('none');
 		expect(sample.hasAttribute('autoplay')).toBe(false);
-		await typeIdea(target, '解释圆的面积');
+		expect(target.querySelectorAll('[data-video-style-sample]').length).toBe(1);
+		await typeIdea(target, '科普：一部手机里有多少种元素');
+		expect(target.querySelector('[data-video-style-auto]').getAttribute('data-video-style')).toBe('sticker');
+		expect(target.querySelector('[data-video-auto-pick]').textContent).toContain('贴纸科普');
+		sample = target.querySelector('[data-video-style-sample]');
+		expect(sample.getAttribute('src')).toBe('/video-presets/v2/sticker.mp4');
 		target.querySelector('[data-video-enhance]').click();
 		await sleep(30);
+		expect(prepApi.startStudioPrep.mock.calls[0][1].settings).toContain('选贴纸科普');
+		// the enhanced words do not move the pick, so the result is not stale
+		expect(target.querySelector('[data-video-idea]').value).toContain('增强后的需求');
+		expect(target.querySelector('[data-video-style-auto]').getAttribute('data-video-style')).toBe('sticker');
+		expect(target.querySelector('[data-video-prep-stale]')).toBeFalsy();
 		const appearance = target.querySelector('[data-video-appearance]');
 		appearance.value = '米白与深绿，黑体';
 		appearance.dispatchEvent(new Event('input'));
@@ -458,28 +466,31 @@ describe('Videos style presets', () => {
 		target.querySelector('[data-video-workbench]').dispatchEvent(new Event('submit'));
 		await sleep(20);
 		const form = prepApi.startStudioPrep.mock.calls[1][1];
-		expect(form.settings).toContain('主体动作：用代码计算点、线、面和变换');
+		expect(form.settings).toContain('关键技法：一张超大画布一镜到底');
 		expect(form.settings).toContain('配色与字体偏好：米白与深绿，黑体');
+		expect(sent().text).toContain('实现路线：Remotion 大画布容器');
 		expect(sent().text).toContain('配色与字体偏好：米白与深绿，黑体');
 		expect(JSON.parse(localStorage.getItem('halo.videoStudio.settings')!).appearance).toBe('米白与深绿，黑体');
 	});
 
-	it('shows fifteen demonstration samples, preserves legacy selections and sends them with enhancement off', async () => {
+	it('a picked card is kept, sent with enhancement off and restored on the next visit', async () => {
 		api.getVideoPage.mockResolvedValue({ items: [], next: null });
+		localStorage.setItem('halo.videoStudio.settings', JSON.stringify({ style: 'ink' }));
 		const target = await mount();
-		expect(target.querySelectorAll('[data-video-style-grid] img').length).toBe(15);
-		target.querySelector('[data-video-more-styles]').click();
+		// a retired preset comes back as 自动选择
+		expect(target.querySelector('[data-video-style="auto"]').getAttribute('aria-pressed')).toBe('true');
+		target.querySelector('[data-video-style="hanazi"]').click();
 		await sleep(10);
-		expect(target.querySelectorAll('[data-video-legacy-styles] svg').length).toBe(10);
-		target.querySelector('[data-video-style="ink"]').click();
+		expect(target.querySelector('[data-video-style-auto]')).toBeFalsy();
+		expect(target.querySelector('[data-video-style-sample]').getAttribute('src')).toBe('/video-presets/v2/hanazi.mp4');
 		await typeIdea(target, '介绍黄山');
 		target.querySelector('[data-video-workbench]').dispatchEvent(new Event('submit'));
 		await sleep(10);
 		expect(prepApi.startStudioPrep).not.toHaveBeenCalled();
-		expect(sent().text).toContain('视觉风格：水墨山水');
-		expect(JSON.parse(localStorage.getItem('halo.videoStudio.settings')!).style).toBe('ink');
+		expect(sent().text).toContain('视觉风格：综艺花字（Variety Show Captions');
+		expect(JSON.parse(localStorage.getItem('halo.videoStudio.settings')!).style).toBe('hanazi');
 		const restored = await mount();
-		expect(restored.querySelector('[data-video-style="ink"]').getAttribute('aria-pressed')).toBe('true');
+		expect(restored.querySelector('[data-video-style="hanazi"]').getAttribute('aria-pressed')).toBe('true');
 	});
 
 	it('re-enhances after a style change while retaining edited text and original requirements', async () => {
@@ -492,7 +503,7 @@ describe('Videos style presets', () => {
 		target.querySelector('[data-video-enhance]').click();
 		await sleep(30);
 		await typeIdea(target, '增强后的需求：开场倒计时。手动补充：结尾留五秒总结。');
-		target.querySelector('[data-video-style="whiteboard"]').click();
+		target.querySelector('[data-video-style="handdrawn"]').click();
 		await sleep(10);
 		expect(target.querySelector('[data-video-prep-stale]').textContent).toContain('文字修改已保留');
 		prepApi.startStudioPrep.mockResolvedValueOnce(prepJob({ id: 'b'.repeat(32), status: 'running', result: null }));
@@ -500,11 +511,11 @@ describe('Videos style presets', () => {
 		await sleep(20);
 		expect(prepApi.startStudioPrep).toHaveBeenCalledTimes(2);
 		const form = prepApi.startStudioPrep.mock.calls[1][1];
-		expect(form.settings).toContain('视觉风格：白板手绘');
+		expect(form.settings).toContain('视觉风格：手绘逐帧');
 		expect(form.idea).toContain('手动补充：结尾留五秒总结');
 		expect(form.idea).toContain('用户原话：\n介绍番茄工作法');
 		const text = sent().text;
-		expect(text).toContain('视觉风格：白板手绘');
+		expect(text).toContain('视觉风格：手绘逐帧');
 		expect(text).toContain('## 设置已更新');
 		expect(text).toContain('b'.repeat(32));
 	});
@@ -520,13 +531,13 @@ describe('Videos style presets', () => {
 		target.querySelector('[data-video-maker="codex"]').click();
 		await sleep(10);
 		expect(target.querySelector('[data-video-prep-stale]')).toBeFalsy();
-		target.querySelector('[data-video-style="type"]').click();
+		target.querySelector('[data-video-style="hud"]').click();
 		await sleep(10);
 		prepApi.startStudioPrep.mockRejectedValueOnce({ detail: '服务不可用' });
 		target.querySelector('[data-video-workbench]').dispatchEvent(new Event('submit'));
 		await sleep(20);
 		const text = sent().text;
-		expect(text).toContain('视觉风格：卡点金句');
+		expect(text).toContain('视觉风格：科幻 HUD');
 		expect(text).toContain('旧增强补充的风格、节奏不得覆盖当前设置');
 		expect(text.startsWith('/codex ')).toBe(true);
 	});

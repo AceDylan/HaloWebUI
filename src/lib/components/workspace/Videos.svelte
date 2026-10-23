@@ -71,6 +71,7 @@
 		type VideoSettings
 	} from '$lib/utils/video-brief';
 	import { clearModeDraft, setModeDraft } from '$lib/components/scifi/mode-relay';
+	import { pickVideoStyle } from '$lib/utils/video-styles';
 	import VideoStylePicker from './VideoStylePicker.svelte';
 	import VideoTaskCard from './VideoTaskCard.svelte';
 	import HandoffBack from '$lib/components/common/HandoffBack.svelte';
@@ -150,8 +151,11 @@
 	$: prepSettings = {
 		...settings,
 		attachments: ready.map((a) => ({ name: a.name, kind: a.kind })),
-		music: musicReady ? { name: musicReady.name, seconds: musicReady.seconds } : null
+		music: musicReady ? { name: musicReady.name, seconds: musicReady.seconds } : null,
+		// 自动选择 reads the user's own words, so an enhanced draft keeps the style it was made for
+		styleTopic: prepared?.original || idea
 	};
+	$: stylePick = pickVideoStyle(prepSettings.styleTopic, prepSettings);
 	$: prepFingerprint = JSON.stringify([videoSettingsText(prepSettings), ready.map((a) => a.id), musicReady?.id]);
 	$: prepStale = !!prepared && prepared.fingerprint !== prepFingerprint;
 	$: hasReference = ready.some((a) => a.kind === 'image' || a.kind === 'video');
@@ -1115,6 +1119,7 @@
 					onAppearance={(appearance) => (settings = { ...settings, appearance })}
 					disabled={preparing || starting}
 					{hasReference}
+					pick={stylePick}
 					onChange={(style, customStyle) => (settings = { ...settings, style, customStyle })}
 				/>
 

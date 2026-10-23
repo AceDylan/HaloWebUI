@@ -1,57 +1,33 @@
 <script lang="ts">
-	import type { VIDEO_STYLES } from '$lib/utils/video-styles';
-	export let preset: (typeof VIDEO_STYLES)[number];
+	import type { LEGACY_VIDEO_STYLES } from '$lib/utils/video-styles';
+	export let preset: (typeof LEGACY_VIDEO_STYLES)[number];
 	$: [bg, ink, accent] = preset.colors;
 </script>
 
 <!-- Small vector mood boards, not promises of a rendered frame. No assets or render jobs. -->
 <svg viewBox="0 0 160 80" class="block w-full rounded-lg" aria-hidden="true">
 	<rect width="160" height="80" rx="8" fill={bg} />
-	{#if preset.key === 'news'}
-		<path d="M25 18v44h112" fill="none" stroke={ink} opacity=".4" />
-		{#each [22, 34, 45, 30] as h, i}<rect
-				x={38 + i * 23}
-				y={61 - h}
-				width="14"
-				height={h}
-				rx="2"
-				fill={i === 2 ? accent : ink}
-			/>{/each}
-	{:else if preset.key === 'product'}
+	{#if preset.key === 'product'}
 		<rect x="22" y="13" width="116" height="55" rx="5" fill="white" stroke={ink} />
 		<path d="M23 25h114M47 25v42" stroke={ink} opacity=".3" />
 		<rect x="57" y="34" width="28" height="23" rx="3" fill={ink} opacity=".2" />
 		<path d="M94 37h30M94 45h23M94 53h15" stroke={ink} stroke-width="3" />
 		<path d="m106 48 3 17 4-6 7-2Z" fill={accent} />
-	{:else if preset.key === 'isometric'}
-		{#each [0, 1, 2] as i}<g transform={`translate(${38 + i * 30} ${29 + (i % 2) * 12})`}>
-				<path d="m0 0 22-12L44 0 22 12Z" fill={accent} /><path
-					d="M0 0v19l22 12V12Z"
-					fill={ink}
-				/><path d="m22 12 22-12v19L22 31Z" fill={ink} opacity=".6" />
-			</g>{/each}
-	{:else if preset.key === 'whiteboard' || preset.key === 'line'}
+	{:else if preset.key === 'line'}
 		<path
-			d={preset.key === 'line'
-				? 'M18 57c25 0 12-36 31-36s-5 43 21 36 0-44 25-36 10 37 47 30'
-				: 'M22 24h37v30H22Zm48 15h25m-7-7 8 7-8 7m16-19h32v27h-32Z'}
+			d="M18 57c25 0 12-36 31-36s-5 43 21 36 0-44 25-36 10 37 47 30"
 			fill="none"
 			stroke={ink}
 			stroke-width="2.5"
 			stroke-linecap="round"
 		/>
 		<path d="M25 65h47" stroke={accent} stroke-width="4" />
-	{:else if preset.key === 'type' || preset.key === 'ascii'}
-		<text
-			x="18"
-			y="37"
-			font-family={preset.key === 'ascii' ? 'monospace' : 'sans-serif'}
-			font-size={preset.key === 'ascii' ? 16 : 28}
-			font-weight="800"
-			fill={ink}>{preset.key === 'ascii' ? '{ . : # : . }' : 'MAKE'}</text
+	{:else if preset.key === 'ascii'}
+		<text x="18" y="37" font-family="monospace" font-size="16" font-weight="800" fill={ink}
+			>{'{ . : # : . }'}</text
 		>
 		<text x="48" y="63" font-family="monospace" font-size="20" font-weight="700" fill={accent}
-			>{preset.key === 'ascii' ? '01 / 10' : 'IT MOVE'}</text
+			>01 / 10</text
 		>
 	{:else if preset.key === 'ink' || preset.key === 'paper'}
 		<circle cx="121" cy="22" r="9" fill={accent} />
@@ -75,15 +51,6 @@
 			font-size="15"
 			fill={bg}>CHAPTER I</text
 		>
-	{:else if preset.key === 'pixel'}
-		<path d="M12 65h136M26 54h24v10H26Zm65-15h24v10H91Zm-28 6V30h9V20h13v10h9v15H63Z" fill={ink} />
-		<rect x="111" y="20" width="9" height="9" fill={accent} /><rect
-			x="70"
-			y="31"
-			width="5"
-			height="5"
-			fill={bg}
-		/>
 	{:else if preset.key === 'hud' || preset.key === 'blueprint'}
 		{#each [20, 40, 60] as y}<path d={`M12 ${y}h136`} stroke={ink} opacity=".15" />{/each}
 		{#each [20, 40, 60, 80, 100, 120, 140] as x}<path

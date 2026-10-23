@@ -1,46 +1,13 @@
-/** Visual direction only: recipes, duration and sound remain independent choices. */
-export const VIDEO_STYLES = [
-	{
-		key: 'flat',
-		label: '扁平 MG 动画',
-		sub: '清晰图形 · 轻快讲解',
-		colors: ['#f1f5ff', '#315bea', '#ffb84d'],
-		hint: '浅底蓝橙配色，无衬线标题，扁平图形分层构图；图形逐步展开、平滑位移，以形状匹配转场，字幕清晰克制。'
-	},
-	{
-		key: 'isometric',
-		label: '等轴 2.5D',
-		sub: '立体层次 · 系统关系',
-		colors: ['#edf7f4', '#207968', '#e6b352'],
-		hint: '青绿与米白配色，简洁无衬线字，等轴投影与统一光向；模块分层升起、路径流动、平移转场，用二维层次表现空间，不承诺完整三维仿真。'
-	},
-	{
-		key: 'news',
-		label: '数据新闻',
-		sub: '图表叙事 · 结论突出',
-		colors: ['#f5f2eb', '#222d45', '#de5938'],
-		hint: '米白底、深蓝文字、橙红重点，网格排版与大数字；图表按叙事逐步绘制、切换时保留坐标参照，字幕简洁；标明来源，不编造数据。'
-	},
+import { VIDEO_PRESENTATIONS } from './video-presentations';
+
+// Original appearance-only presets remain selectable and keep their stored keys.
+export const LEGACY_VIDEO_STYLES = [
 	{
 		key: 'product',
 		label: '产品界面演示',
 		sub: '界面特写 · 功能引导',
 		colors: ['#f3f5fa', '#5e65d8', '#53b5c5'],
 		hint: '浅灰与品牌色，大留白、简洁无衬线字，真实界面作为主体；局部缩放、光标引导、平滑推移转场，字幕不遮挡操作；缺少界面素材时明确用示意稿。'
-	},
-	{
-		key: 'whiteboard',
-		label: '白板手绘',
-		sub: '线条推演 · 逐步理解',
-		colors: ['#fffdf5', '#303c47', '#edaa47'],
-		hint: '白底黑线与少量黄色重点，清晰手写感标题；线条逐笔显现、箭头串联思路、擦除转场，字幕用易读正文字体，不依赖真实手部素材。'
-	},
-	{
-		key: 'type',
-		label: '动态排版',
-		sub: '文字节奏 · 关键词聚焦',
-		colors: ['#191923', '#f4f1e8', '#d3ee62'],
-		hint: '黑白高对比与荧光黄点缀，粗体标题和大留白；词组分批入场、字重与尺度变化、文字遮罩转场，保证阅读停留，避免整屏持续抖动。'
 	},
 	{
 		key: 'bauhaus',
@@ -78,13 +45,6 @@ export const VIDEO_STYLES = [
 		hint: '黑白或棕褐色、适量颗粒和暗角，衬线标题、胶片构图；轻微帧抖动、叠化与光圈转场。默片仅指视觉风格，不关闭用户选定的声音；字卡服从字幕设置。'
 	},
 	{
-		key: 'pixel',
-		label: '像素游戏',
-		sub: '像素场景 · 闯关趣味',
-		colors: ['#222345', '#72dab3', '#e6b55d'],
-		hint: '深蓝底、薄荷绿与金黄，像素图形和有限色板；按像素网格移动、逐格切换场景，中文使用清晰字体，保持像素边缘，不添加未授权游戏角色。'
-	},
-	{
 		key: 'blueprint',
 		label: '工程蓝图',
 		sub: '结构拆解 · 技术标注',
@@ -114,38 +74,73 @@ export const VIDEO_STYLES = [
 	}
 ] as const;
 
-export type VideoStyleKey = 'auto' | 'reference' | 'custom' | (typeof VIDEO_STYLES)[number]['key'];
+export const VIDEO_STYLES = VIDEO_PRESENTATIONS;
+export const ALL_VIDEO_STYLES = [...VIDEO_STYLES, ...LEGACY_VIDEO_STYLES] as const;
+export type VideoStyleKey =
+	| 'auto'
+	| 'reference'
+	| 'custom'
+	| (typeof ALL_VIDEO_STYLES)[number]['key'];
 export const VIDEO_STYLE_CUSTOM_MAX = 300;
+export const VIDEO_APPEARANCE_MAX = 160;
 export const normalizeVideoStyle = (value: unknown): VideoStyleKey =>
-	value === 'reference' || value === 'custom' || VIDEO_STYLES.some((s) => s.key === value)
+	value === 'reference' || value === 'custom' || ALL_VIDEO_STYLES.some((s) => s.key === value)
 		? (value as VideoStyleKey)
 		: 'auto';
-export const cleanCustomStyle = (value: unknown): string =>
+const cleanLine = (value: unknown, max: number): string =>
 	typeof value === 'string'
 		? value
 				.replace(/[\u0000-\u001f\u007f]+/g, ' ')
 				.replace(/MEDIA:/gi, 'MEDIA：')
 				.trim()
-				.slice(0, VIDEO_STYLE_CUSTOM_MAX)
+				.slice(0, max)
 		: '';
+export const cleanCustomStyle = (value: unknown) => cleanLine(value, VIDEO_STYLE_CUSTOM_MAX);
+export const cleanVideoAppearance = (value: unknown) => cleanLine(value, VIDEO_APPEARANCE_MAX);
 
-export const videoStyleLines = (style: VideoStyleKey = 'auto', custom = '', recipe = ''): string[] => {
-	const preset = VIDEO_STYLES.find((s) => s.key === style);
+export const videoStyleLines = (
+	style: VideoStyleKey = 'auto',
+	custom = '',
+	recipe = '',
+	appearance = ''
+): string[] => {
+	const preset = ALL_VIDEO_STYLES.find((s) => s.key === style);
 	const direction = preset
 		? `${preset.label}。${preset.hint}`
 		: style === 'reference'
-			? '跟随参考：制作前读取用户指定的参考图片或视频，提取配色、构图、字体与运动；有多个参考时按用户指定的主参考，未指定则选最贴合主题的一份并说明。'
+			? '跟随参考：制作前读取参考图片或视频，提取场景结构、主体动作、镜头、节奏及外观。合集须按用户指定的片段；未指定则选最贴合主题的一类并说明，不混合全部示例。'
 			: style === 'custom'
-				? `自定义。${cleanCustomStyle(custom) || '根据用户描述确定视觉方向。'}`
-				: '自动选择：优先用户明确的视觉描述；有风格参考时沿用参考，否则按主题选择一套统一视觉。';
-	return [
-		`- 视觉风格：${direction}`,
-		'- 风格优先级：用户明确的视觉要求优先；所选风格约束增强补充的视觉细节。做法、画幅、时长、配音、字幕与配乐设置不因风格改变；关闭字幕时不生成旁白字幕或花字，用户明确要求的标题、图表标签可保留。',
-		// 素材剪辑: the attached footage is the material, so it is never reduced to a reference.
+				? `自定义。${cleanCustomStyle(custom) || '根据用户描述确定讲解形式。'}`
+				: `自动选择：用户明确要求优先，有参考先分析参考；否则从${VIDEO_STYLES.map((s) => s.label).join('、')}中选适合主题的一类，写明选择及演示过程。`;
+	const lines = [`- 视觉风格：${direction}`];
+	if (preset && 'scenes' in preset && recipe !== 'footage') {
+		lines.push(
+			`- 分镜结构：${preset.scenes}`,
+			`- 主体动作：${preset.motion}`,
+			`- 镜头规则：${preset.camera}`,
+			`- 节奏规则：${preset.rhythm}`,
+			`- 验收重点：${preset.verify}`
+		);
+		if (recipe === 'story')
+			lines.push(
+				'- 图文成片只用关键画面与运镜表达上述结构，不宣称完成连续动作或三维拆解；需要完整动态演示时说明应选讲解动画。'
+			);
+		else
+			lines.push(
+				'- 制作约束：把上述过程做成可见的状态变化，不能只做标题、图标入场或整页淡入；先验证关键动作样片再完整渲染。'
+			);
+	}
+	if (cleanVideoAppearance(appearance))
+		lines.push(
+			`- 配色与字体偏好：${cleanVideoAppearance(appearance)}（只调整外观，不替换上述讲解结构与动作）`
+		);
+	lines.push(
+		'- 风格优先级：用户明确的视觉要求优先；所选形式约束增强补充的分镜、动作与镜头。做法、画幅、时长、配音、字幕与配乐设置不因风格改变；关闭字幕时不生成旁白字幕或花字，用户明确要求的标题、图表标签可保留。',
 		recipe === 'footage'
-			? '- 素材剪辑保持原素材主体，风格用于排版、调色与转场，不默认重绘实拍。参考作品的水印和角色不直接复用。'
+			? '- 素材剪辑保持原素材主体，只借用所选形式的叙事顺序、排版与转场，不要求重绘或重演素材。参考作品的水印和角色不直接复用。'
 			: style !== 'auto' && style !== 'reference'
 				? '- 参考处理：以所选风格为视觉基准；附件只提供用户指定的内容、构图或动作参考，不自动覆盖风格。参考作品的水印和角色不直接复用。'
 				: '- 参考作品的水印和角色不直接复用。'
-	];
+	);
+	return lines;
 };

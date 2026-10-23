@@ -1107,7 +1107,16 @@
 					<p class="text-xs leading-relaxed text-gray-500 dark:text-gray-400">{recipe.hint}</p>
 				</div>
 
-				<VideoStylePicker value={settings.style} custom={settings.customStyle} disabled={preparing || starting} {hasReference} onChange={(style, customStyle) => (settings = { ...settings, style, customStyle })} />
+				<VideoStylePicker
+					value={settings.style}
+					custom={settings.customStyle}
+					appearance={settings.appearance}
+					recipe={settings.recipe}
+					onAppearance={(appearance) => (settings = { ...settings, appearance })}
+					disabled={preparing || starting}
+					{hasReference}
+					onChange={(style, customStyle) => (settings = { ...settings, style, customStyle })}
+				/>
 
 				<div class="grid gap-4 sm:grid-cols-2">
 					<div class="space-y-1.5">

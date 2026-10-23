@@ -7,12 +7,25 @@
 // cut to the chosen length), scene changes on its beats, and the skill's film.py proves the
 // finished file plays that track (--check-music) before it is handed over.
 
-import { cleanCustomStyle, normalizeVideoStyle, videoStyleLines, type VideoStyleKey } from './video-styles';
+import {
+	cleanVideoAppearance,
+	cleanCustomStyle,
+	normalizeVideoStyle,
+	videoStyleLines,
+	type VideoStyleKey
+} from './video-styles';
 
 export type VideoRecipeKey = 'explainer' | 'story' | 'footage' | 'data' | 'free';
 export type VideoFrameKey = '16:9' | '9:16' | '1:1';
 /** '' is Hermes itself; the rest are runners, started by the command in front of the brief. */
-export type VideoMaker = '' | 'codex' | 'reclaude' | 'cchclaude' | 'officlaude' | 'anyclaude' | 'agy';
+export type VideoMaker =
+	| ''
+	| 'codex'
+	| 'reclaude'
+	| 'cchclaude'
+	| 'officlaude'
+	| 'anyclaude'
+	| 'agy';
 /** With background music: the video as long as the music, or the music cut to the chosen length. */
 export type VideoMusicFit = 'full' | 'trim';
 
@@ -96,6 +109,7 @@ export type VideoBriefOptions = {
 	idea: string;
 	style: VideoStyleKey;
 	customStyle: string;
+	appearance: string;
 	recipe: VideoRecipeKey;
 	frame: VideoFrameKey;
 	seconds: number;
@@ -111,7 +125,10 @@ export type VideoBriefOptions = {
 	prepJob?: string | null;
 };
 
-export type VideoSettings = Omit<VideoBriefOptions, 'idea' | 'attachments' | 'music' | 'prep' | 'prepJob'>;
+export type VideoSettings = Omit<
+	VideoBriefOptions,
+	'idea' | 'attachments' | 'music' | 'prep' | 'prepJob'
+>;
 
 /** The brief's line for an enhancement still going (backend utils/studio_prep.py PREP_MARK). */
 export const prepMarkLine = (id: string) => `（制作前准备：HaloWebUI 正在增强需求，编号 ${id}）`;
@@ -119,6 +136,7 @@ export const prepMarkLine = (id: string) => `（制作前准备：HaloWebUI 正�
 export const DEFAULT_VIDEO_SETTINGS: VideoSettings = {
 	style: 'auto',
 	customStyle: '',
+	appearance: '',
 	recipe: 'explainer',
 	frame: '16:9',
 	seconds: 30,
@@ -138,19 +156,43 @@ export const normalizeVideoSettings = (value: unknown): VideoSettings => {
 	return {
 		style: normalizeVideoStyle(raw.style),
 		customStyle: cleanCustomStyle(raw.customStyle),
-		recipe: pick(raw.recipe, VIDEO_RECIPES.map((r) => r.key), DEFAULT_VIDEO_SETTINGS.recipe),
-		frame: pick(raw.frame, VIDEO_FRAMES.map((f) => f.key), DEFAULT_VIDEO_SETTINGS.frame),
-		seconds: Number.isFinite(seconds) && seconds >= 5 && seconds <= 600 ? Math.round(seconds) : DEFAULT_VIDEO_SETTINGS.seconds,
-		voice: pick(raw.voice, VIDEO_VOICES.map((v) => v.key), DEFAULT_VIDEO_SETTINGS.voice),
-		subtitles: typeof raw.subtitles === 'boolean' ? raw.subtitles : DEFAULT_VIDEO_SETTINGS.subtitles,
-		maker: pick(raw.maker, VIDEO_MAKERS.map((m) => m.key), DEFAULT_VIDEO_SETTINGS.maker),
+		appearance: cleanVideoAppearance(raw.appearance),
+		recipe: pick(
+			raw.recipe,
+			VIDEO_RECIPES.map((r) => r.key),
+			DEFAULT_VIDEO_SETTINGS.recipe
+		),
+		frame: pick(
+			raw.frame,
+			VIDEO_FRAMES.map((f) => f.key),
+			DEFAULT_VIDEO_SETTINGS.frame
+		),
+		seconds:
+			Number.isFinite(seconds) && seconds >= 5 && seconds <= 600
+				? Math.round(seconds)
+				: DEFAULT_VIDEO_SETTINGS.seconds,
+		voice: pick(
+			raw.voice,
+			VIDEO_VOICES.map((v) => v.key),
+			DEFAULT_VIDEO_SETTINGS.voice
+		),
+		subtitles:
+			typeof raw.subtitles === 'boolean' ? raw.subtitles : DEFAULT_VIDEO_SETTINGS.subtitles,
+		maker: pick(
+			raw.maker,
+			VIDEO_MAKERS.map((m) => m.key),
+			DEFAULT_VIDEO_SETTINGS.maker
+		),
 		musicFit: pick(raw.musicFit, ['full', 'trim'] as const, DEFAULT_VIDEO_SETTINGS.musicFit)
 	};
 };
 
 /** Why *file* cannot be the background music ('' when it can): an MP3 by name and type, not
  * empty, not over 50 MB. Its first bytes (*head*, when read) must look like MP3 too. */
-export const musicFileProblem = (file: { name: string; type: string; size: number }, head?: Uint8Array): string => {
+export const musicFileProblem = (
+	file: { name: string; type: string; size: number },
+	head?: Uint8Array
+): string => {
 	if (!/\.mp3$/i.test(file.name || '') || !MP3_TYPES.includes((file.type || '').toLowerCase())) {
 		return '背景音乐只支持 MP3 文件';
 	}
@@ -162,7 +204,8 @@ export const musicFileProblem = (file: { name: string; type: string; size: numbe
 
 /** An ID3 tag or an MPEG audio frame (11 sync bits) at the start. */
 export const isMp3Head = (head: Uint8Array): boolean =>
-	(head[0] === 0x49 && head[1] === 0x44 && head[2] === 0x33) || (head[0] === 0xff && (head[1] & 0xe0) === 0xe0);
+	(head[0] === 0x49 && head[1] === 0x44 && head[2] === 0x33) ||
+	(head[0] === 0xff && (head[1] & 0xe0) === 0xe0);
 
 /** m:ss for a music length, as an audio player shows it (whole seconds, rounded down). */
 export const clockLabel = (seconds: number) => {
@@ -180,7 +223,12 @@ const plainName = (name: string) =>
 		.trim()
 		.slice(0, 120) || '未命名';
 
-const ATTACHMENT_KIND: Record<string, string> = { image: '图片', video: '视频', audio: '音频', file: '文件' };
+const ATTACHMENT_KIND: Record<string, string> = {
+	image: '图片',
+	video: '视频',
+	audio: '音频',
+	file: '文件'
+};
 
 export const attachmentKind = (type: string, name = ''): 'image' | 'video' | 'audio' | 'file' => {
 	const t = (type || '').toLowerCase();
@@ -199,7 +247,10 @@ export const musicSetsLength = (music: VideoMusic | null | undefined, fit: Video
 
 const attachmentCounts = (attachments: NonNullable<VideoBriefOptions['attachments']>) =>
 	Object.entries(
-		attachments.reduce<Record<string, number>>((acc, a) => ({ ...acc, [a.kind]: (acc[a.kind] ?? 0) + 1 }), {})
+		attachments.reduce<Record<string, number>>(
+			(acc, a) => ({ ...acc, [a.kind]: (acc[a.kind] ?? 0) + 1 }),
+			{}
+		)
 	)
 		.map(([kind, n]) => `${n} 个${ATTACHMENT_KIND[kind] ?? '文件'}`)
 		.join('、');
@@ -225,11 +276,15 @@ const requirementLines = (opts: Omit<VideoBriefOptions, 'idea'>) => {
 /** The settings for 提示词增强 to size the content to (it never changes them). */
 export const videoSettingsText = (opts: Omit<VideoBriefOptions, 'idea'>): string => {
 	const lines = requirementLines(opts);
-	lines.push(...videoStyleLines(opts.style, opts.customStyle, opts.recipe));
+	lines.push(...videoStyleLines(opts.style, opts.customStyle, opts.recipe, opts.appearance));
 	const attachments = opts.attachments ?? [];
-	if (opts.music) lines.push(`- 背景音乐：用户指定（${plainName(opts.music.name)}），视频按音乐的节拍和长度做`);
+	if (opts.music)
+		lines.push(`- 背景音乐：用户指定（${plainName(opts.music.name)}），视频按音乐的节拍和长度做`);
 	// The server accepts 1500 characters. Bound names after the essential constraints.
-	if (attachments.length) lines.push(`- 参考附件：${attachmentCounts(attachments)}（${attachments.map((a) => plainName(a.name).slice(0, 24)).join('、')}）`);
+	if (attachments.length)
+		lines.push(
+			`- 参考附件：${attachmentCounts(attachments)}（${attachments.map((a) => plainName(a.name).slice(0, 24)).join('、')}）`
+		);
 	return lines.join('\n');
 };
 
@@ -238,7 +293,12 @@ const PREP_ORIGINAL_MAX = 1500;
 /** The brief's part from 提示词增强: the user's own words, the key facts and their sources. */
 const prepLines = (prep: VideoPrep, idea: string): string[] => {
 	const lines: string[] = [];
-	if (prep.stale) lines.push('', '## 设置已更新', '“待更新的增强草稿”段基于旧设置；如有“增强后的需求”段，以该段为更新结果。保留内容与用户文字修改，按下方当前制作设置协调分镜和视觉；旧增强补充的风格、节奏不得覆盖当前设置。用户原话中明确的视觉要求仍优先于预设。');
+	if (prep.stale)
+		lines.push(
+			'',
+			'## 设置已更新',
+			'“待更新的增强草稿”段基于旧设置；如有“增强后的需求”段，以该段为更新结果。保留内容与用户文字修改，按下方当前制作设置协调分镜和视觉；旧增强补充的风格、节奏不得覆盖当前设置。用户原话中明确的视觉要求仍优先于预设。'
+		);
 	const original = prep.original.trim();
 	if (original && original !== idea.trim()) {
 		lines.push(
@@ -251,10 +311,13 @@ const prepLines = (prep: VideoPrep, idea: string): string[] => {
 	if (prep.notes.trim() || sources.length || prep.run) {
 		lines.push('', '## 资料与依据（制作前已查好：事实和数字以此为准，不要编造）');
 		if (prep.notes.trim()) lines.push(prep.notes.trim());
-		if (prep.run) lines.push(`- ${prep.run.label}结论：HaloWebUI ${prep.run.href}（完整内容在那里）`);
+		if (prep.run)
+			lines.push(`- ${prep.run.label}结论：HaloWebUI ${prep.run.href}（完整内容在那里）`);
 		if (sources.length) {
 			lines.push('- 来源：');
-			sources.forEach((s, i) => lines.push(`  ${i + 1}. ${plainName(s.title)} ${s.url.replace(/\s/g, '')}`));
+			sources.forEach((s, i) =>
+				lines.push(`  ${i + 1}. ${plainName(s.title)} ${s.url.replace(/\s/g, '')}`)
+			);
 		}
 	}
 	return lines;
@@ -272,12 +335,14 @@ export const buildVideoBrief = (opts: VideoBriefOptions): string => {
 		'',
 		opts.prep?.stale ? '## 待更新的增强草稿（旧视觉与节奏须按当前设置调整）' : '## 想要的视频',
 		opts.idea.trim(),
-		...(opts.prepJob && /^[0-9a-f]{32}$/.test(opts.prepJob) ? ['', prepMarkLine(opts.prepJob)] : []),
+		...(opts.prepJob && /^[0-9a-f]{32}$/.test(opts.prepJob)
+			? ['', prepMarkLine(opts.prepJob)]
+			: []),
 		...(opts.prep ? prepLines(opts.prep, opts.idea) : []),
 		'',
 		'## 要求',
 		...requirementLines(opts),
-		...videoStyleLines(opts.style, opts.customStyle, opts.recipe)
+		...videoStyleLines(opts.style, opts.customStyle, opts.recipe, opts.appearance)
 	];
 	if (attachments.length) {
 		const counts = attachmentCounts(attachments);
@@ -325,7 +390,13 @@ export const fitVideoBrief = (opts: VideoBriefOptions, max: number): string => {
 	const prep = opts.prep;
 	const minimal = prep?.stale ? { ...prep, original: '', notes: '', sources: [], run: null } : null;
 	const tries: (VideoPrep | null | undefined)[] = prep
-		? [prep, { ...prep, original: '' }, { ...prep, original: '', notes: prep.notes.slice(0, 400) }, { ...prep, original: '', notes: '', sources: prep.sources.slice(0, 3) }, minimal]
+		? [
+				prep,
+				{ ...prep, original: '' },
+				{ ...prep, original: '', notes: prep.notes.slice(0, 400) },
+				{ ...prep, original: '', notes: '', sources: prep.sources.slice(0, 3) },
+				minimal
+			]
 		: [prep];
 	for (const attempt of tries) {
 		const brief = buildVideoBrief({ ...opts, prep: attempt });

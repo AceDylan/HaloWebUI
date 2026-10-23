@@ -434,13 +434,43 @@ describe('Videos', () => {
 });
 
 describe('Videos style presets', () => {
-	it('shows six previews initially, remembers a preset and sends it even with enhancement off', async () => {
+	it('loads only the selected sample and includes appearance changes in the preparation snapshot', async () => {
+		localStorage.setItem('halo.videoStudio.prep', JSON.stringify({ enhance: true, research: false, deeper: false }));
+		api.getVideoPage.mockResolvedValue({ items: [], next: null });
+		prepApi.startStudioPrep.mockResolvedValueOnce(prepJob());
+		const target = await mount();
+		expect(target.querySelector('[data-video-style-sample]')).toBeFalsy();
+		target.querySelector('[data-video-style="math"]').click();
+		await sleep(10);
+		const sample = target.querySelector('[data-video-style-sample]');
+		expect(sample.getAttribute('src')).toBe('/video-presets/v1/math.mp4');
+		expect(sample.getAttribute('preload')).toBe('none');
+		expect(sample.hasAttribute('autoplay')).toBe(false);
+		await typeIdea(target, '解释圆的面积');
+		target.querySelector('[data-video-enhance]').click();
+		await sleep(30);
+		const appearance = target.querySelector('[data-video-appearance]');
+		appearance.value = '米白与深绿，黑体';
+		appearance.dispatchEvent(new Event('input'));
+		await sleep(10);
+		expect(target.querySelector('[data-video-prep-stale]')).toBeTruthy();
+		prepApi.startStudioPrep.mockResolvedValueOnce(prepJob({ id: 'b'.repeat(32), status: 'running', result: null }));
+		target.querySelector('[data-video-workbench]').dispatchEvent(new Event('submit'));
+		await sleep(20);
+		const form = prepApi.startStudioPrep.mock.calls[1][1];
+		expect(form.settings).toContain('主体动作：用代码计算点、线、面和变换');
+		expect(form.settings).toContain('配色与字体偏好：米白与深绿，黑体');
+		expect(sent().text).toContain('配色与字体偏好：米白与深绿，黑体');
+		expect(JSON.parse(localStorage.getItem('halo.videoStudio.settings')!).appearance).toBe('米白与深绿，黑体');
+	});
+
+	it('shows fifteen demonstration samples, preserves legacy selections and sends them with enhancement off', async () => {
 		api.getVideoPage.mockResolvedValue({ items: [], next: null });
 		const target = await mount();
-		expect(target.querySelectorAll('[data-video-style-grid] svg').length).toBe(6);
+		expect(target.querySelectorAll('[data-video-style-grid] img').length).toBe(15);
 		target.querySelector('[data-video-more-styles]').click();
 		await sleep(10);
-		expect(target.querySelectorAll('[data-video-style-grid] svg').length).toBe(16);
+		expect(target.querySelectorAll('[data-video-legacy-styles] svg').length).toBe(10);
 		target.querySelector('[data-video-style="ink"]').click();
 		await typeIdea(target, '介绍黄山');
 		target.querySelector('[data-video-workbench]').dispatchEvent(new Event('submit'));
@@ -496,7 +526,7 @@ describe('Videos style presets', () => {
 		target.querySelector('[data-video-workbench]').dispatchEvent(new Event('submit'));
 		await sleep(20);
 		const text = sent().text;
-		expect(text).toContain('视觉风格：动态排版');
+		expect(text).toContain('视觉风格：卡点金句');
 		expect(text).toContain('旧增强补充的风格、节奏不得覆盖当前设置');
 		expect(text.startsWith('/codex ')).toBe(true);
 	});

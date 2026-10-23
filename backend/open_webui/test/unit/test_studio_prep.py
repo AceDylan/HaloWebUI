@@ -375,7 +375,12 @@ def test_the_hermes_turn_waits_then_sends_the_enhanced_brief(monkeypatch):
 def test_video_style_survives_planning_enhancement_and_background_fill():
     model = Model(enhanced={"idea": "白板线条逐步绘制太阳系", "notes": "", "sources": []})
     job = _job(idea="介绍太阳系")
-    job.settings = "- 视觉风格：白板手绘\n- 配音：不要配音\n- 字幕：不要字幕\n- 时长：约 30 秒"
+    job.settings = (
+        "- 视觉风格：白板手绘\n- 分镜结构：提出问题 → 尝试 → 图解 → 规律\n"
+        "- 主体动作：人物行为与图表同步\n- 镜头规则：固定白板逐步扩展\n"
+        "- 节奏规则：每一步完成后停留\n- 验收重点：动作与图表一致\n"
+        "- 配色与字体偏好：米白与深绿，黑体\n- 配音：不要配音\n- 字幕：不要字幕\n- 时长：约 30 秒"
+    )
     _run(job, prep.Tools(ask=model, model_name="gpt-chat"))
     assert job.status == "done"
     assert all(job.settings in messages[1]["content"] for messages in model.calls)

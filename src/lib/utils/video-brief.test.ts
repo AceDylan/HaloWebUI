@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { VIDEO_STYLES } from './video-styles';
+import { VIDEO_STYLES, ALL_VIDEO_STYLES, LEGACY_VIDEO_STYLES } from './video-styles';
 import {
 	DEFAULT_VIDEO_SETTINGS,
 	attachmentKind,
@@ -59,7 +59,9 @@ describe('buildVideoBrief', () => {
 		// otherwise a video attached as 「做成这样」 is a style reference unless the idea says to cut it in
 		const styled = buildVideoBrief({ ...base, attachments: [{ name: 'ref.mp4', kind: 'video' }] });
 		expect(styled).toContain('只当风格参考');
-		expect(buildVideoBrief({ ...base, attachments: [{ name: 'b.png', kind: 'image' }] })).not.toContain('只当风格参考');
+		expect(
+			buildVideoBrief({ ...base, attachments: [{ name: 'b.png', kind: 'image' }] })
+		).not.toContain('只当风格参考');
 	});
 });
 
@@ -93,10 +95,20 @@ describe('buildVideoBrief with background music', () => {
 		expect(cut).toContain('时长：约 30 秒');
 		expect(cut).toContain('"music_fit": "trim", "seconds": 30');
 		expect(cut).not.toContain('循环');
-		const loops = buildVideoBrief({ ...base, music: { name: 'jingle.mp3', seconds: 12 }, musicFit: 'trim', seconds: 60 });
+		const loops = buildVideoBrief({
+			...base,
+			music: { name: 'jingle.mp3', seconds: 12 },
+			musicFit: 'trim',
+			seconds: 60
+		});
 		expect(loops).toContain('音乐比视频短，会循环播放');
 		// music longer than a video can be is cut even when "as long as the music" was chosen
-		const long = buildVideoBrief({ ...base, music: { name: 'mix.mp3', seconds: 3600 }, musicFit: 'full', seconds: 90 });
+		const long = buildVideoBrief({
+			...base,
+			music: { name: 'mix.mp3', seconds: 3600 },
+			musicFit: 'full',
+			seconds: 90
+		});
 		expect(long).toContain('时长：约 90 秒');
 		expect(long).toContain('"music_fit": "trim", "seconds": 90');
 	});
@@ -120,10 +132,14 @@ describe('musicFileProblem', () => {
 	it('takes an MP3 up to 50 MB whose first bytes are MP3', () => {
 		expect(musicFileProblem(mp3)).toBe('');
 		expect(musicFileProblem(mp3, new Uint8Array([0x49, 0x44, 0x33, 4]))).toBe('');
-		expect(musicFileProblem({ ...mp3, name: 'BGM.MP3', type: '' }, new Uint8Array([0xff, 0xfb, 0x90, 0]))).toBe('');
+		expect(
+			musicFileProblem({ ...mp3, name: 'BGM.MP3', type: '' }, new Uint8Array([0xff, 0xfb, 0x90, 0]))
+		).toBe('');
 	});
 	it('refuses anything else', () => {
-		expect(musicFileProblem({ ...mp3, name: 'bgm.wav', type: 'audio/wav' })).toContain('只支持 MP3');
+		expect(musicFileProblem({ ...mp3, name: 'bgm.wav', type: 'audio/wav' })).toContain(
+			'只支持 MP3'
+		);
 		expect(musicFileProblem({ ...mp3, type: 'video/mp4' })).toContain('只支持 MP3');
 		expect(musicFileProblem({ ...mp3, size: 0 })).toContain('空的');
 		expect(musicFileProblem({ ...mp3, size: 51 * 1024 * 1024 })).toContain('50 MB');
@@ -140,11 +156,37 @@ describe('normalizeVideoSettings', () => {
 	it('keeps what is valid and falls back for the rest', () => {
 		expect(normalizeVideoSettings(null)).toEqual(DEFAULT_VIDEO_SETTINGS);
 		expect(
-			normalizeVideoSettings({ recipe: 'data', frame: '1:1', seconds: 90, voice: '', subtitles: false, maker: 'agy' })
-		).toEqual({ style: 'auto', customStyle: '', recipe: 'data', frame: '1:1', seconds: 90, voice: '', subtitles: false, maker: 'agy', musicFit: 'full' });
+			normalizeVideoSettings({
+				recipe: 'data',
+				frame: '1:1',
+				seconds: 90,
+				voice: '',
+				subtitles: false,
+				maker: 'agy'
+			})
+		).toEqual({
+			style: 'auto',
+			customStyle: '',
+			appearance: '',
+			recipe: 'data',
+			frame: '1:1',
+			seconds: 90,
+			voice: '',
+			subtitles: false,
+			maker: 'agy',
+			musicFit: 'full'
+		});
 		expect(normalizeVideoSettings({ musicFit: 'trim' }).musicFit).toBe('trim');
 		expect(
-			normalizeVideoSettings({ recipe: 'x', frame: '4:5', seconds: 9999, voice: 'nope', subtitles: 'yes', maker: 'rm', musicFit: 'loop' })
+			normalizeVideoSettings({
+				recipe: 'x',
+				frame: '4:5',
+				seconds: 9999,
+				voice: 'nope',
+				subtitles: 'yes',
+				maker: 'rm',
+				musicFit: 'loop'
+			})
 		).toEqual(DEFAULT_VIDEO_SETTINGS);
 	});
 });
@@ -172,7 +214,7 @@ describe('buildVideoBrief after 提示词增强', () => {
 		run: { label: '精答', href: '/answer/c1' }
 	};
 
-	it('carries the user\'s own words, the facts and their sources next to the enhanced request', () => {
+	it("carries the user's own words, the facts and their sources next to the enhanced request", () => {
 		const brief = buildVideoBrief({ ...base, prep });
 		const lines = brief.split('\n');
 		expect(brief.indexOf('## 想要的视频')).toBeLessThan(brief.indexOf('## 用户原话'));
@@ -186,7 +228,10 @@ describe('buildVideoBrief after 提示词增强', () => {
 	});
 
 	it('leaves the original out when it is the same text, and the section out without facts', () => {
-		const brief = buildVideoBrief({ ...base, prep: { original: base.idea, notes: '', sources: [] } });
+		const brief = buildVideoBrief({
+			...base,
+			prep: { original: base.idea, notes: '', sources: [] }
+		});
 		expect(brief).not.toContain('## 用户原话');
 		expect(brief).not.toContain('## 资料与依据');
 	});
@@ -199,7 +244,9 @@ describe('buildVideoBrief after 提示词增强', () => {
 		expect(fitted).not.toContain('## 用户原话');
 		expect(fitted).toContain('## 资料与依据');
 		expect(fitted).toContain('## 怎么做');
-		expect(fitVideoBrief({ ...base, prep: long }, 10)).toBe(buildVideoBrief({ ...base, prep: null }));
+		expect(fitVideoBrief({ ...base, prep: long }, 10)).toBe(
+			buildVideoBrief({ ...base, prep: null })
+		);
 		expect(fitVideoBrief({ ...base, prep: long }, 100000)).toBe(full);
 	});
 });
@@ -222,34 +269,113 @@ describe('buildVideoBrief with the enhancement still going', () => {
 	it('carries its number for the chat to wait for, and nothing for a bad id', () => {
 		const base = { ...DEFAULT_VIDEO_SETTINGS, idea: '讲讲番茄工作法' };
 		const id = 'b'.repeat(32);
-		expect(buildVideoBrief({ ...base, prepJob: id })).toContain(`## 想要的视频\n讲讲番茄工作法\n\n（制作前准备：HaloWebUI 正在增强需求，编号 ${id}）\n\n## 要求`);
+		expect(buildVideoBrief({ ...base, prepJob: id })).toContain(
+			`## 想要的视频\n讲讲番茄工作法\n\n（制作前准备：HaloWebUI 正在增强需求，编号 ${id}）\n\n## 要求`
+		);
 		expect(buildVideoBrief({ ...base, prepJob: 'x\n## 怎么做' })).toBe(buildVideoBrief(base));
 	});
 });
 
-
 describe('video visual styles', () => {
-	it.each(VIDEO_STYLES)('$label reaches both enhancement and the final maker without changing production settings', (preset) => {
-		const opts = { ...DEFAULT_VIDEO_SETTINGS, idea: '介绍科学原理', style: preset.key, voice: '', subtitles: false,
-			music: { name: '用户音乐.mp3', seconds: 30 }, musicFit: 'trim' as const };
-		const settings = videoSettingsText(opts);
-		const brief = buildVideoBrief(opts);
-		for (const text of [settings, brief]) {
-			expect(text).toContain(`视觉风格：${preset.label}`);
-			expect(text).toContain(preset.hint);
-			expect(text).toContain('配音：不要配音');
-			expect(text).toContain('字幕：不要字幕');
-			expect(text).toContain('时长：约 30 秒');
+	it('keeps all previously saved style keys and adds optional appearance without altering the recipe', () => {
+		for (const key of [
+			'flat',
+			'isometric',
+			'news',
+			'whiteboard',
+			'type',
+			'pixel',
+			...LEGACY_VIDEO_STYLES.map((s) => s.key)
+		]) {
+			expect(normalizeVideoSettings({ style: key, recipe: 'footage' })).toMatchObject({
+				style: key,
+				recipe: 'footage',
+				appearance: ''
+			});
 		}
-		expect(brief).toContain('用户音乐.mp3');
-		expect(brief).toContain('--check-music');
+		const settings = normalizeVideoSettings({
+			appearance: '米白\nMEDIA:/tmp/a ' + '长'.repeat(200)
+		});
+		expect(settings.appearance).toHaveLength(160);
+		expect(settings.appearance).not.toContain('\n');
+		expect(settings.appearance).toContain('MEDIA：');
 	});
 
+	it.each(VIDEO_STYLES)(
+		'$label delivers its demonstration contract through both paths, including when enhancement is off',
+		(preset) => {
+			const opts = {
+				...DEFAULT_VIDEO_SETTINGS,
+				style: preset.key,
+				appearance: '米白与深绿，黑体',
+				idea: '用户自己的主题'
+			};
+			for (const text of [videoSettingsText(opts), buildVideoBrief(opts)]) {
+				for (const rule of [
+					preset.scenes,
+					preset.motion,
+					preset.camera,
+					preset.rhythm,
+					preset.verify
+				])
+					expect(text).toContain(rule);
+				expect(text).toContain('配色与字体偏好：米白与深绿，黑体');
+				expect(text).not.toContain(preset.example);
+			}
+			const footage = buildVideoBrief({ ...opts, recipe: 'footage' });
+			expect(footage).toContain('素材剪辑保持原素材主体');
+			expect(footage).not.toContain(preset.motion);
+			expect(footage).not.toContain('制作约束：');
+			expect(buildVideoBrief({ ...opts, recipe: 'story' })).toContain(
+				'不宣称完成连续动作或三维拆解'
+			);
+		}
+	);
+
+	it.each(ALL_VIDEO_STYLES)(
+		'$label reaches both enhancement and the final maker without changing production settings',
+		(preset) => {
+			const opts = {
+				...DEFAULT_VIDEO_SETTINGS,
+				idea: '介绍科学原理',
+				style: preset.key,
+				voice: '',
+				subtitles: false,
+				music: { name: '用户音乐.mp3', seconds: 30 },
+				musicFit: 'trim' as const
+			};
+			const settings = videoSettingsText(opts);
+			const brief = buildVideoBrief(opts);
+			for (const text of [settings, brief]) {
+				expect(text).toContain(`视觉风格：${preset.label}`);
+				expect(text).toContain(preset.hint);
+				expect(text).toContain('配音：不要配音');
+				expect(text).toContain('字幕：不要字幕');
+				expect(text).toContain('时长：约 30 秒');
+			}
+			expect(brief).toContain('用户音乐.mp3');
+			expect(brief).toContain('--check-music');
+		}
+	);
+
 	it('keeps essential constraints within the enhancement setting budget with eight long attachment names', () => {
-		for (const style of ['custom', ...VIDEO_STYLES.map((s) => s.key)] as const) {
-			const text = videoSettingsText({ ...DEFAULT_VIDEO_SETTINGS, style, customStyle: '字'.repeat(300),
-				attachments: Array.from({ length: 8 }, () => ({ name: '名'.repeat(200), kind: 'video' as const })),
-				music: { name: '曲'.repeat(200) + '.mp3', seconds: 600 } });
+		for (const style of [
+			'auto',
+			'reference',
+			'custom',
+			...ALL_VIDEO_STYLES.map((s) => s.key)
+		] as const) {
+			const text = videoSettingsText({
+				...DEFAULT_VIDEO_SETTINGS,
+				style,
+				customStyle: '字'.repeat(300),
+				appearance: '色'.repeat(160),
+				attachments: Array.from({ length: 8 }, () => ({
+					name: '名'.repeat(200),
+					kind: 'video' as const
+				})),
+				music: { name: '曲'.repeat(200) + '.mp3', seconds: 600 }
+			});
 			expect(text.length).toBeLessThanOrEqual(1500);
 			expect(text).toContain('背景音乐：用户指定');
 			expect(text).toContain('参考附件：8 个视频');
@@ -257,7 +383,11 @@ describe('video visual styles', () => {
 	});
 
 	it('distinguishes selected presets from following the reference and from editing footage', () => {
-		const opts = { ...DEFAULT_VIDEO_SETTINGS, idea: '讲一个故事', attachments: [{ name: 'ref.mp4', kind: 'video' as const }] };
+		const opts = {
+			...DEFAULT_VIDEO_SETTINGS,
+			idea: '讲一个故事',
+			attachments: [{ name: 'ref.mp4', kind: 'video' as const }]
+		};
 		const preset = buildVideoBrief({ ...opts, style: 'ink' });
 		expect(preset).toContain('以所选风格为视觉基准');
 		expect(preset).not.toContain('重现这种风格');
@@ -267,13 +397,18 @@ describe('video visual styles', () => {
 		expect(footage).not.toContain('只当风格参考');
 		// the footage is the material: no line may reduce it to a reference
 		expect(footage).not.toContain('附件只提供用户指定的内容');
-		expect(videoSettingsText({ ...opts, recipe: 'footage', style: 'paper' })).not.toContain('附件只提供用户指定的内容');
+		expect(videoSettingsText({ ...opts, recipe: 'footage', style: 'paper' })).not.toContain(
+			'附件只提供用户指定的内容'
+		);
 		expect(preset).not.toContain('素材剪辑保持原素材主体');
 	});
 
 	it('normalizes old settings and bounds custom descriptions as one plain line', () => {
 		expect(normalizeVideoSettings({ style: 'no-such-style' }).style).toBe('auto');
-		const settings = normalizeVideoSettings({ style: 'custom', customStyle: '暖色\nMEDIA:/tmp/a ' + '长'.repeat(400) });
+		const settings = normalizeVideoSettings({
+			style: 'custom',
+			customStyle: '暖色\nMEDIA:/tmp/a ' + '长'.repeat(400)
+		});
 		expect(settings.customStyle.length).toBe(300);
 		expect(settings.customStyle).not.toContain('\n');
 		expect(settings.customStyle).toContain('MEDIA：');

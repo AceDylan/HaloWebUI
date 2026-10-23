@@ -14,6 +14,10 @@ Before a request is made, gpt-chat (the user's own, else the strongest text mode
 
 The studio then carries on as before (the video brief goes to Hermes, the image is generated)
 with the enhanced text. A job lives in memory for an hour; the 精答 / 讨论 it started stays.
+
+With a 辅助决策模型 (utils/decision_model.py) set, the video's two choices of 分析需求 — the web
+or not, 精答 / 讨论 first or not — are its; gpt-chat still writes the texts (the question, what
+to search) and decides as before when the decision fails.
 """
 
 from __future__ import annotations
@@ -80,7 +84,8 @@ def _bool(value: Any) -> bool:
 # --- 1. 分析需求 --------------------------------------------------------------------------------
 
 
-def plan_messages(kind: str, idea: str, settings: str, *, research: bool, deeper: bool) -> list[dict]:
+def plan_messages(kind: str, idea: str, settings: str, *, research: bool, deeper: bool, texts: bool = False) -> list[dict]:
+    """``texts``: a 辅助决策模型 makes the choices, so the question is written whatever this plan picks."""
     asks = []
     if research:
         asks.append(
@@ -97,8 +102,9 @@ def plan_messages(kind: str, idea: str, settings: str, *, research: bool, deeper
             "perspectives or a balanced conclusion (pros and cons, debates, choosing between options); "
             '"none" when the user already wrote the content, or it is a story, mood piece, montage, music video or an edit '
             "of their footage, or simple enough for the maker to write directly. Prefer none: pick answer / discuss only "
-            "when the video would be wrong or shallow without it. With answer / discuss, \"question\" is the self-contained "
-            "question (in the user's language) whose answer is the content the video presents."
+            "when the video would be wrong or shallow without it. "
+            + ('Always write "question"' if texts else 'With answer / discuss, "question" is')
+            + " the self-contained question (in the user's language) whose answer is the content the video presents."
         )
     keys = ['"research": bool' if research else None, '"deeper": "none" | "answer" | "discuss"' if deeper else None]
     keys += ['"question": ""' if deeper else None, '"search": "what to look up, one line"' if research else None]
@@ -112,7 +118,7 @@ def plan_messages(kind: str, idea: str, settings: str, *, research: bool, deeper
     return [{"role": "system", "content": system}, {"role": "user", "content": user}]
 
 
-def normalize_plan(raw: Any, *, research: bool, deeper: bool) -> dict:
+def normalize_plan(raw: Any, *, research: bool, deeper: bool, texts: bool = False) -> dict:
     raw = raw if isinstance(raw, dict) else {}
     mode = str(raw.get("deeper") or "none").strip().lower() if deeper else "none"
     question = clean(raw.get("question"), 1500)
@@ -121,10 +127,61 @@ def normalize_plan(raw: Any, *, research: bool, deeper: bool) -> dict:
     return {
         "research": research and _bool(raw.get("research")),
         "deeper": mode,
-        "question": question if mode != "none" else "",
+        "question": question if mode != "none" or (texts and deeper) else "",
         "search": clean(raw.get("search"), 300),
         "reason": clean(raw.get("reason"), 200),
     }
+
+
+# 辅助决策 (utils/decision_model.py): the plan's two choices as typed questions. Going to 精答 / 讨论
+# takes minutes, so those options say so (a judge otherwise picks them for everything).
+DECISION_DEEPER = {
+    "none": "The maker writes the content directly: the user already wrote it, or it is a story, mood piece, montage, "
+    "music video or an edit of their footage, or simple enough to write from common knowledge. The default when unsure.",
+    "answer": "Slow (minutes): an expert answer first works out content that has to be right (an explanation, analysis, "
+    "tutorial or plan the video presents). Only when the video would be wrong or shallow without it.",
+    "discuss": "Slowest (up to half an hour): several models first discuss a contested, opinion-based or predictive topic "
+    "the video should present from several sides or with a balanced conclusion. Only then.",
+}
+
+
+def decision_request(kind: str, idea: str, settings: str, *, research: bool, deeper: bool) -> tuple[dict, dict]:
+    """(state, questions) for the decision model: only the choices the user left open."""
+    from open_webui.utils import decision_model as dm
+
+    questions: dict = {}
+    if research:
+        questions["research"] = dm.noul(
+            "`request` is a user's request to `studio`, with the `settings` already decided. Does making it well need "
+            "facts that are current, specific or checkable on the web (news, data, statistics, product specs, prices, "
+            "recent events, a real person's / place's / brand's actual details, technical accuracy)? No for fiction, "
+            "moods, abstract or everyday scenes, a request whose own text already gives the content, or anything the "
+            "maker can write from common knowledge."
+        )
+    if deeper:
+        questions["deeper"] = dm.choice(
+            "`request` is a user's request to `studio`, with the `settings` already decided. Before it is enhanced and "
+            "made, should its content first be worked out elsewhere?",
+            DECISION_DEEPER,
+        )
+    return {"studio": WHAT[kind], "request": idea, "settings": settings}, questions
+
+
+def decided_plan(plan: dict, answers: dict, idea: str) -> dict:
+    """The plan with the decision's choices; the question falls back to the request itself."""
+    out = dict(plan)
+    if "research" in answers:
+        out["research"] = answers["research"]["noul"] >= 0.5
+    if "deeper" in answers:
+        out["deeper"] = answers["deeper"]["choice"]
+    out["question"] = (out["question"] or clean(idea, 1500)) if out["deeper"] != "none" else ""
+    return out
+
+
+def _said(plan: dict) -> str:
+    if plan["deeper"] != "none":
+        return f"先交给{DEEPER[plan['deeper']]['label']}"
+    return "需要联网查资料" if plan["research"] else ""
 
 
 # --- 3. 增强 ------------------------------------------------------------------------------------
@@ -216,6 +273,9 @@ class Tools:
     # (kind, chat id) -> None while it runs, else {"status", "content", "sources"}
     deeper_result: Optional[Callable[[str, str], Awaitable[Optional[dict]]]] = None
     model_name: str = ""
+    # the user's 辅助决策模型 (decision_model.decide bound to the request): (run) -> (result, trace);
+    # None when none is set — the plan is then gpt-chat's alone
+    decide: Optional[Callable[[Callable], Awaitable[tuple[Any, Optional[dict]]]]] = None
 
 
 @dataclass
@@ -303,6 +363,40 @@ async def _deeper(job: Job, tools: Tools, mode: str, question: str) -> str:
     return ""
 
 
+async def _drafted(job: Job, tools: Tools) -> Optional[dict]:
+    """gpt-chat's plan, or None when it failed."""
+    from open_webui.utils.assistant_library import parse_json_object
+
+    texts = tools.decide is not None
+    try:
+        text = await asyncio.wait_for(
+            tools.ask(plan_messages(job.kind, job.idea, job.settings, research=job.research, deeper=job.deeper, texts=texts)),
+            PLAN_TIMEOUT_SECONDS,
+        )
+        return normalize_plan(parse_json_object(text), research=job.research, deeper=job.deeper, texts=texts)
+    except Exception as exc:  # noqa: BLE001 — enhanced without looking anything up
+        log.info("studio prep %s: plan failed: %s", job.id, type(exc).__name__)
+        return None
+
+
+async def _decided(job: Job, tools: Tools) -> tuple[Optional[dict], Optional[dict]]:
+    """({answers, reason} of the 辅助决策模型, its trace); (None, None) without one, (None, trace) when it failed."""
+    if tools.decide is None:
+        return None, None
+
+    async def run(decider):
+        state, questions = decision_request(job.kind, job.idea, job.settings, research=job.research, deeper=job.deeper)
+        answers, reason = await decider.judge(state, questions)
+        if not reason and "deeper" in answers and answers["deeper"].get("confidence") is not None:
+            reason = f"把握 {answers['deeper']['confidence'] * 100:.0f}%"
+        summary = {"research": answers["research"]["noul"] >= 0.5} if "research" in answers else {}
+        if "deeper" in answers:
+            summary["deeper"] = answers["deeper"]["choice"]
+        return {"answers": answers, "reason": reason}, summary
+
+    return await tools.decide(run)
+
+
 async def run_job(job: Job, tools: Tools) -> None:
     from open_webui.utils.assistant_library import parse_json_object
     from open_webui.utils.mode_chats import sources_from_docs
@@ -313,22 +407,20 @@ async def run_job(job: Job, tools: Tools) -> None:
         plan = {"research": False, "deeper": "none", "question": "", "search": "", "reason": ""}
         if job.research or job.deeper:
             job.step("plan")
-            try:
-                text = await asyncio.wait_for(
-                    tools.ask(plan_messages(job.kind, job.idea, job.settings, research=job.research, deeper=job.deeper)),
-                    PLAN_TIMEOUT_SECONDS,
-                )
-                plan = normalize_plan(parse_json_object(text), research=job.research, deeper=job.deeper)
-            except Exception as exc:  # noqa: BLE001 — enhanced without looking anything up
-                log.info("studio prep %s: plan failed: %s", job.id, type(exc).__name__)
+            drafted, (decided, trace) = await asyncio.gather(_drafted(job, tools), _decided(job, tools))
+            if drafted is None and decided is None:
                 job.step("plan", "error", "分析没成功，直接增强")
             else:
-                said = []
-                if plan["deeper"] != "none":
-                    said.append(f"先交给{DEEPER[plan['deeper']]['label']}")
-                elif plan["research"]:
-                    said.append("需要联网查资料")
-                job.step("plan", "done", "；".join(said + [plan["reason"]] if plan["reason"] else said) or "不需要额外资料")
+                plan = decided_plan(drafted or plan, decided["answers"] if decided else {}, job.idea)
+                reason = decided["reason"] if decided else plan["reason"]
+                detail = "；".join(part for part in (_said(plan), reason) if part) or "不需要额外资料"
+                if trace and trace["used"]:
+                    detail = f"辅助决策 {trace['name']}：{detail}"
+                elif trace:
+                    detail += f"（辅助决策没用上：{trace.get('reason') or '调用失败'}，按原来的方式判断）"
+                job.step("plan", "done", detail)
+            if trace:
+                plan = {**plan, "decider": trace}
             job.plan = plan
 
         if plan["deeper"] != "none" and tools.open_deeper and tools.deeper_result:

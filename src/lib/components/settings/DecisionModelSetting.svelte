@@ -66,7 +66,7 @@
 		<div class="space-y-1">
 			<div class="text-sm font-medium">辅助决策模型</div>
 			<div class="text-xs leading-5 text-gray-500 dark:text-gray-400">
-				自动分流、精答、讨论、协作里仍为「自动」的选择（处理方式、助手、模型、轮次、执行器）先交给它判断；你手动指定的不变，它失败时自动回退原来的逻辑。正文回答、成员执行和总结仍由各自的模型完成。
+				自动分流、精答、讨论、协作、视频工作台里仍为「自动」的选择（处理方式、助手、模型、轮次、执行器、制作前是否联网或先交给精答/讨论）先交给它判断；你手动指定的不变，它失败时自动回退原来的逻辑。正文回答、成员执行、总结和需求改写仍由各自的模型完成。
 			</div>
 		</div>
 		<div class="flex w-full min-w-0 items-center gap-2 self-start sm:w-auto sm:shrink-0">

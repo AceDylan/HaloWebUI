@@ -123,6 +123,97 @@ def test_a_failed_discussion_still_ends_in_an_enhancement(monkeypatch):
     assert "run" not in job.result
 
 
+# --- 辅助决策模型 (utils/decision_model.py) ------------------------------------------------------
+
+
+def _judge(monkeypatch, answers=None, error=None):
+    """A configured text decision model answering ``answers`` (or failing with ``error``); returns
+    its requests and the ``decide`` the router binds."""
+    from types import SimpleNamespace
+
+    from open_webui.utils import decision_model as dm
+
+    user = SimpleNamespace(id="u1", role="admin", settings=None)
+    monkeypatch.setattr(dm, "current", lambda u: "conn.judge")
+    monkeypatch.setattr(dm, "lookup", lambda *a: {"id": "conn.judge", "name": "judge", "kind": "text", "connection": ""})
+    seen = []
+
+    async def call(self, payload):
+        seen.append(json.loads(payload["messages"][1]["content"]))
+        if error:
+            raise error
+        return {"choices": [{"message": {"content": json.dumps({"answers": answers, "reason": "要讲对原理"})}}]}
+
+    monkeypatch.setattr(dm.Decider, "_call", call)
+    return seen, lambda run: dm.decide(SimpleNamespace(), user, "video", run, models_map={})
+
+
+def test_the_decision_model_makes_the_choices_and_gpt_chat_writes_the_question(monkeypatch):
+    monkeypatch.setattr(prep, "DEEPER_POLL_SECONDS", 0)
+    model = Model(plan={"research": False, "deeper": "none", "question": "番茄工作法为什么有效？", "reason": "简单"})
+    seen, decide = _judge(monkeypatch, {"research": {"noul": 0.8}, "deeper": {"choice": "answer", "probabilities": {"answer": 0.7}}})
+    opened = []
+
+    async def open_deeper(kind, question, context):
+        opened.append((kind, question))
+        return "c1"
+
+    async def deeper_result(kind, chat_id):
+        return {"status": "done", "content": "结论：专注 25 分钟。"}
+
+    job = _run(_job(), prep.Tools(ask=model, open_deeper=open_deeper, deeper_result=deeper_result, decide=decide))
+    # gpt-chat is told to write the question whatever it picks; the judge gets only the open choices
+    assert 'Always write "question"' in model.calls[0][0]["content"]
+    assert set(seen[0]["questions"]) == {"research", "deeper"} and seen[0]["state"]["request"] == "讲讲番茄工作法"
+    assert opened == [("answer", "番茄工作法为什么有效？")]
+    assert job.plan["deeper"] == "answer" and job.plan["research"] is True
+    assert job.plan["decider"]["used"] is True and job.plan["decider"]["module"] == "video"
+    assert job.plan["decider"]["result"] == {"research": True, "deeper": "answer"}
+    assert job.steps[0]["detail"] == "辅助决策 judge：先交给精答；要讲对原理"
+    assert job.status == "done"
+
+
+def test_a_failed_decision_leaves_gpt_chats_plan(monkeypatch):
+    model = Model(plan={"research": False, "deeper": "none", "question": "q", "reason": "不需要"})
+    _, decide = _judge(monkeypatch, error=RuntimeError("down"))
+    job = _run(_job(), prep.Tools(ask=model, decide=decide))
+    assert job.plan["deeper"] == "none" and job.plan["question"] == "" and job.plan["decider"]["fallback"] is True
+    assert "辅助决策没用上" in job.steps[0]["detail"] and job.steps[0]["status"] == "done"
+    assert job.status == "done"
+
+
+def test_the_decision_stands_without_gpt_chats_plan(monkeypatch):
+    monkeypatch.setattr(prep, "DEEPER_POLL_SECONDS", 0)
+
+    class NoPlan(Model):
+        async def __call__(self, messages):
+            if messages[0]["content"].startswith("You prepare"):
+                raise RuntimeError("plan down")
+            return await super().__call__(messages)
+
+    _, decide = _judge(monkeypatch, {"research": {"noul": 0.1}, "deeper": {"choice": "discuss"}})
+    opened = []
+
+    async def open_deeper(kind, question, context):
+        opened.append((kind, question))
+        return "d1"
+
+    async def deeper_result(kind, chat_id):
+        return {"status": "done", "content": "结论"}
+
+    job = _run(_job(), prep.Tools(ask=NoPlan(), open_deeper=open_deeper, deeper_result=deeper_result, decide=decide))
+    assert opened == [("discuss", "讲讲番茄工作法")]  # the request itself is the question
+    assert job.status == "done"
+
+
+def test_without_a_decision_model_the_plan_prompt_is_unchanged():
+    messages = prep.plan_messages("video", "猫", "", research=True, deeper=True)
+    assert 'With answer / discuss, "question" is' in messages[0]["content"]
+    assert prep.normalize_plan({"deeper": "none", "question": "q"}, research=True, deeper=True)["question"] == ""
+    state, questions = prep.decision_request("video", "猫", "", research=False, deeper=True)
+    assert list(questions) == ["deeper"] and set(questions["deeper"]["criteria"]) == {"none", "answer", "discuss"}
+
+
 def test_images_never_go_to_answer_or_discuss():
     plan = prep.normalize_plan({"deeper": "answer", "question": "q", "research": True}, research=True, deeper=False)
     assert plan["deeper"] == "none" and plan["research"] is True

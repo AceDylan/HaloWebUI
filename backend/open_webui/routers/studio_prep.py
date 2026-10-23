@@ -42,7 +42,8 @@ async def prep_model(request: Request, user) -> tuple[str, str]:
     return planner["model"], planner.get("name") or planner["model"]
 
 
-def _tools(request: Request, user, model_id: str, model_name: str) -> prep.Tools:
+def _tools(request: Request, user, model_id: str, model_name: str, kind: str) -> prep.Tools:
+    from open_webui.utils import decision_model as dm
     from open_webui.utils.chat import generate_chat_completion
     from open_webui.utils.discussion_room import iterate_completion
 
@@ -68,7 +69,13 @@ def _tools(request: Request, user, model_id: str, model_name: str) -> prep.Tools
     async def deeper_result(kind: str, chat_id: str) -> Optional[dict]:
         return run_result(kind, chat_id, user.id)
 
-    return prep.Tools(ask=ask, search=search, open_deeper=open_deeper, deeper_result=deeper_result, model_name=model_name)
+    async def decide(run):
+        return await dm.decide(request, user, "video", run, timeout=45)
+
+    # 视频工作台's choices (web / 精答 / 讨论 first) go to the user's 辅助决策模型 when one is set
+    assisted = kind == "video" and bool(dm.current(user))
+    return prep.Tools(ask=ask, search=search, open_deeper=open_deeper, deeper_result=deeper_result, model_name=model_name,
+                      decide=decide if assisted else None)
 
 
 def run_result(kind: str, chat_id: str, user_id: str) -> Optional[dict]:
@@ -131,7 +138,7 @@ async def start(request: Request, form: StartForm, user=Depends(get_verified_use
         settings=form.settings,
         research=research,
         deeper=form.deeper,
-        tools=_tools(request, user, model_id, model_name),
+        tools=_tools(request, user, model_id, model_name, form.kind),
     )
     return job.public()
 

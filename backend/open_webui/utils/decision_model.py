@@ -1,5 +1,5 @@
 """辅助决策模型: one model, chosen per user, that makes the automatic choices of 自动分流, 精答,
-讨论 and 协作 (mode, assistant, model, rounds, executor …).
+讨论, 协作 and 视频工作台 (mode, assistant, model, rounds, executor, web / 精答 / 讨论 first …).
 
 Every choice is asked in one protocol, Jev's (TypeSafe System One): the material as ``state``
 and typed questions — ``choice`` (one of a few keyed options), ``score`` (a level on an ordered
@@ -44,7 +44,7 @@ MAX_OPTIONS = 12
 STATE_MAX_CHARS = 20000
 REASON_MAX_CHARS = 200
 
-MODULE_LABELS = {"auto": "自动分流", "answer": "精答", "discuss": "讨论", "team": "协作"}
+MODULE_LABELS = {"auto": "自动分流", "answer": "精答", "discuss": "讨论", "team": "协作", "video": "视频工作台"}
 
 # a decision never asks for another one (the model's own request must not route into the modules)
 _deciding: contextvars.ContextVar[bool] = contextvars.ContextVar("halo_deciding", default=False)

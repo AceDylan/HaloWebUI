@@ -1,5 +1,6 @@
-// 视频工作台: the brief goes to a new Hermes chat and is sent at once (a runner by its command in
-// front); the library comes a page at a time, links back to the chat and takes a video out.
+// 视频工作台: the brief starts a new Hermes chat on the server (a runner by its command in front)
+// and the workbench follows the task; the library comes a page at a time, links back to the chat
+// and takes a video out.
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { installDominoDom } from '$lib/test-support/domino-dom';
 
@@ -14,7 +15,12 @@ vi.mock('$app/stores', async () => {
 const api = vi.hoisted(() => ({
 	getVideoPage: vi.fn(),
 	deleteLibraryVideo: vi.fn(async () => true),
-	getMusicFiles: vi.fn(async () => [] as any[])
+	getMusicFiles: vi.fn(async () => [] as any[]),
+	startVideoTask: vi.fn(),
+	getVideoTasks: vi.fn(async () => [] as any[]),
+	getVideoTask: vi.fn(),
+	stopVideoTask: vi.fn(),
+	videoTaskLive: (task: any) => task?.state === 'running' || task?.state === 'background'
 }));
 vi.mock('$lib/apis/video-studio', () => api);
 const upload = vi.hoisted(() => ({ uploadFileReliably: vi.fn() }));
@@ -53,6 +59,29 @@ const dropOn = async (el: any, file: File) => {
 const mp3 = (name = '夏日.mp3', bytes = [0x49, 0x44, 0x33, 4, 0, 0]) => new File([new Uint8Array(bytes)], name, { type: 'audio/mpeg' });
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+// what 开始制作 sent to the server: the brief as `text`, with the files, the maker and the words
+const sent = () => {
+	const form = api.startVideoTask.mock.calls.at(-1)[1];
+	return { ...form, text: form.brief };
+};
+const videoTask = (extra: Record<string, unknown> = {}) => ({
+	id: 'chat-v1',
+	chatId: 'chat-v1',
+	messageId: 'm2',
+	title: '番茄工作法',
+	maker: 'Hermes',
+	state: 'running',
+	now: '在执行 terminal：python3 film.py board.json',
+	prep: null,
+	steps: 3,
+	startedAt: Math.floor(Date.now() / 1000) - 75,
+	endedAt: null,
+	videos: [],
+	runner: null,
+	error: '',
+	endedIn: null,
+	...extra
+});
 let stores: any;
 const apps: any[] = [];
 
@@ -75,6 +104,12 @@ beforeAll(async () => {
 
 beforeEach(() => {
 	nav.goto.mockReset();
+	api.startVideoTask.mockReset();
+	api.startVideoTask.mockImplementation(async () => videoTask());
+	api.getVideoTasks.mockReset();
+	api.getVideoTasks.mockResolvedValue([]);
+	api.getVideoTask.mockReset();
+	api.stopVideoTask.mockReset();
 	api.getVideoPage.mockReset();
 	api.deleteLibraryVideo.mockClear();
 	api.getMusicFiles.mockReset();
@@ -157,10 +192,10 @@ describe('Videos 提示词增强', () => {
 		expect(form).toMatchObject({ kind: 'video', idea: '用 30 秒讲讲番茄工作法', research: true, deeper: true });
 		expect(form.settings).toContain('做法：讲解动画');
 		expect(form.settings).toContain('时长：约 30 秒');
-		// no waiting here: nobody polls the job, the chat opens at once
+		// no waiting here: nobody polls the job, the task starts at once
 		expect(prepApi.getStudioPrep).not.toHaveBeenCalled();
-		expect(nav.goto).toHaveBeenCalledWith('/');
-		const text = JSON.parse(sessionStorage.getItem('halo.handoff')!).text;
+		expect(api.startVideoTask).toHaveBeenCalledTimes(1);
+		const text = sent().text;
 		expect(text).toContain(`## 想要的视频\n用 30 秒讲讲番茄工作法\n\n（制作前准备：HaloWebUI 正在增强需求，编号 ${id}）`);
 		expect(text).toContain('MEDIA:」紧跟成片');
 	});
@@ -174,7 +209,7 @@ describe('Videos 提示词增强', () => {
 		await sleep(30);
 		target.querySelector('[data-video-workbench]').dispatchEvent(new Event('submit'));
 		await sleep(30);
-		const text = JSON.parse(sessionStorage.getItem('halo.handoff')!).text;
+		const text = sent().text;
 		expect(text).toContain('## 想要的视频\n增强后的需求');
 		expect(text).toContain('## 用户原话');
 		expect(text).toContain('## 资料与依据');
@@ -194,7 +229,7 @@ describe('Videos 提示词增强', () => {
 		await sleep(30);
 		expect(prepApi.startStudioPrep.mock.calls[0][1]).toMatchObject({ research: false, deeper: false });
 		expect(toasts.warning).toHaveBeenCalledWith('没有可用来增强的文本模型，按原文制作');
-		const text = JSON.parse(sessionStorage.getItem('halo.handoff')!).text;
+		const text = sent().text;
 		expect(text).toContain('## 想要的视频\n做个片头');
 		expect(text).not.toContain('## 用户原话');
 	});
@@ -213,12 +248,12 @@ describe('Videos 提示词增强', () => {
 		await sleep(1700);
 		expect(target.querySelector('[data-video-idea]').value).toContain('增强后的需求');
 		expect(target.querySelector('[data-studio-prep="done"]').textContent).toContain('参考了精答结论');
-		expect(nav.goto).not.toHaveBeenCalled();
+		expect(api.startVideoTask).not.toHaveBeenCalled();
 		// 开始制作 now sends it as it is: no second enhancement
 		target.querySelector('[data-video-workbench]').dispatchEvent(new Event('submit'));
 		await sleep(30);
 		expect(prepApi.startStudioPrep).toHaveBeenCalledTimes(1);
-		expect(JSON.parse(sessionStorage.getItem('halo.handoff')!).text).toContain('增强后的需求');
+		expect(sent().text).toContain('增强后的需求');
 	}, 10000);
 
 	it('undoes the enhancement, and remembers what it may do', async () => {
@@ -240,7 +275,7 @@ describe('Videos 提示词增强', () => {
 });
 
 describe('Videos', () => {
-	it('sends the brief to a new Hermes chat, with a runner in front when one is picked', async () => {
+	it('starts the brief in a new Hermes chat from here, with a runner in front when one is picked', async () => {
 		api.getVideoPage.mockResolvedValue({ items: [], next: null });
 		const target = await mount();
 		const start = target.querySelector('[data-video-start]');
@@ -253,9 +288,9 @@ describe('Videos', () => {
 		expect(target.querySelector('[data-video-brief] pre').textContent).toContain('做法：图文成片');
 		target.querySelector('[data-video-workbench]').dispatchEvent(new Event('submit'));
 		await sleep(10);
-		expect(nav.goto).toHaveBeenCalledWith('/');
-		const entry = JSON.parse(sessionStorage.getItem('halo.handoff')!);
-		expect(entry).toMatchObject({ to: 'chat', models: ['hermes.hermes-agent'], send: true, files: [] });
+		expect(api.startVideoTask).toHaveBeenCalledTimes(1);
+		const entry = sent();
+		expect(entry).toMatchObject({ maker: 'codex', idea: '用 30 秒讲讲番茄工作法', files: [] });
 		expect(entry.text.startsWith('/codex 请制作一个视频')).toBe(true);
 		expect(entry.text).toContain('用 30 秒讲讲番茄工作法');
 		// the choices are remembered for next time
@@ -289,7 +324,7 @@ describe('Videos', () => {
 		expect(brief()).toContain('"music_fit": "full"');
 		target.querySelector('[data-video-workbench]').dispatchEvent(new Event('submit'));
 		await sleep(10);
-		const entry = JSON.parse(sessionStorage.getItem('halo.handoff')!);
+		const entry = sent();
 		expect(entry.files).toEqual([{ id: 'm9', name: '夏日.mp3', type: 'file' }]);
 		expect(entry.text).toContain('## 背景音乐');
 		expect(entry.text).not.toContain('参考附件');
@@ -411,7 +446,7 @@ describe('Videos style presets', () => {
 		target.querySelector('[data-video-workbench]').dispatchEvent(new Event('submit'));
 		await sleep(10);
 		expect(prepApi.startStudioPrep).not.toHaveBeenCalled();
-		expect(JSON.parse(sessionStorage.getItem('halo.handoff')!).text).toContain('视觉风格：水墨山水');
+		expect(sent().text).toContain('视觉风格：水墨山水');
 		expect(JSON.parse(localStorage.getItem('halo.videoStudio.settings')!).style).toBe('ink');
 		const restored = await mount();
 		expect(restored.querySelector('[data-video-style="ink"]').getAttribute('aria-pressed')).toBe('true');
@@ -438,7 +473,7 @@ describe('Videos style presets', () => {
 		expect(form.settings).toContain('视觉风格：白板手绘');
 		expect(form.idea).toContain('手动补充：结尾留五秒总结');
 		expect(form.idea).toContain('用户原话：\n介绍番茄工作法');
-		const text = JSON.parse(sessionStorage.getItem('halo.handoff')!).text;
+		const text = sent().text;
 		expect(text).toContain('视觉风格：白板手绘');
 		expect(text).toContain('## 设置已更新');
 		expect(text).toContain('b'.repeat(32));
@@ -460,7 +495,7 @@ describe('Videos style presets', () => {
 		prepApi.startStudioPrep.mockRejectedValueOnce({ detail: '服务不可用' });
 		target.querySelector('[data-video-workbench]').dispatchEvent(new Event('submit'));
 		await sleep(20);
-		const text = JSON.parse(sessionStorage.getItem('halo.handoff')!).text;
+		const text = sent().text;
 		expect(text).toContain('视觉风格：动态排版');
 		expect(text).toContain('旧增强补充的风格、节奏不得覆盖当前设置');
 		expect(text.startsWith('/codex ')).toBe(true);
@@ -474,7 +509,7 @@ describe('Videos style presets', () => {
 		await sleep(10);
 		expect(target.querySelector('[data-video-start]').disabled).toBe(true);
 		target.querySelector('[data-video-workbench]').dispatchEvent(new Event('submit'));
-		expect(nav.goto).not.toHaveBeenCalled();
+		expect(api.startVideoTask).not.toHaveBeenCalled();
 		target.querySelector('[data-video-style="custom"]').click();
 		await sleep(10);
 		expect(target.querySelector('[data-video-start]').disabled).toBe(true);
@@ -485,7 +520,7 @@ describe('Videos style presets', () => {
 		expect(target.querySelector('[data-video-start]').disabled).toBe(false);
 		target.querySelector('[data-video-workbench]').dispatchEvent(new Event('submit'));
 		await sleep(10);
-		expect(JSON.parse(sessionStorage.getItem('halo.handoff')!).text).toContain('自定义。暖色绘本、缓慢运镜');
+		expect(sent().text).toContain('自定义。暖色绘本、缓慢运镜');
 	});
 
 	it('uses one settings snapshot while background enhancement is being started', async () => {
@@ -501,7 +536,7 @@ describe('Videos style presets', () => {
 		await typeIdea(target, '下一条视频的需求');
 		resolve(prepJob({ id: 'c'.repeat(32), status: 'running', result: null }));
 		await sleep(20);
-		const text = JSON.parse(sessionStorage.getItem('halo.handoff')!).text;
+		const text = sent().text;
 		expect(text).toContain('时长：约 30 秒');
 		expect(text).toContain('介绍工作法');
 		expect(text).not.toContain('下一条视频的需求');
@@ -525,7 +560,7 @@ describe('Videos style edge cases', () => {
 		target.querySelector('[data-video-workbench]').dispatchEvent(new Event('submit'));
 		await sleep(10);
 		expect(prepApi.startStudioPrep).toHaveBeenCalledTimes(1);
-		const handoff = JSON.parse(sessionStorage.getItem('halo.handoff')!);
+		const handoff = sent();
 		expect(handoff.files).toContainEqual({ id: 'ref1', name: 'ref.mp4', type: 'file' });
 		expect(handoff.text).toContain('视觉风格：跟随参考');
 		expect(handoff.text).toContain('## 设置已更新');
@@ -554,7 +589,81 @@ describe('Videos style edge cases', () => {
 		await typeIdea(target, '长'.repeat(8000));
 		expect(target.querySelector('[data-video-start]').disabled).toBe(true);
 		target.querySelector('[data-video-workbench]').dispatchEvent(new Event('submit'));
-		expect(nav.goto).not.toHaveBeenCalled();
+		expect(api.startVideoTask).not.toHaveBeenCalled();
 		expect(target.querySelector('[data-video-status]').textContent).toContain('请精简');
+	});
+});
+
+describe('Videos 制作任务', () => {
+	it('stays on the workbench: the task is followed here and leads to its chat', async () => {
+		api.getVideoPage.mockResolvedValue({ items: [], next: null });
+		const target = await mount();
+		await typeIdea(target, '用 30 秒讲讲番茄工作法');
+		target.querySelector('[data-video-workbench]').dispatchEvent(new Event('submit'));
+		await sleep(30);
+		expect(nav.goto).not.toHaveBeenCalled();
+		const card = target.querySelector('[data-video-task="chat-v1"]');
+		expect(card.getAttribute('data-video-task-state')).toBe('running');
+		expect(card.querySelector('[data-video-task-chat]').getAttribute('href')).toBe('/c/chat-v1');
+		expect(card.querySelector('[data-video-task-now]').textContent).toContain('film.py');
+		expect(card.querySelector('[data-step="make"]').getAttribute('data-state')).toBe('active');
+		expect(card.querySelector('[data-video-task-clock]').textContent).toContain('已用 1m');
+		// the box is free for the next video; the settings stay
+		expect(target.querySelector('[data-video-idea]').value).toBe('');
+		expect(toasts.success).toHaveBeenCalled();
+	});
+
+	it('says why it could not start, and keeps the words', async () => {
+		api.getVideoPage.mockResolvedValue({ items: [], next: null });
+		api.startVideoTask.mockRejectedValue({ detail: '没有可用的 Hermes 模型' });
+		const target = await mount();
+		await typeIdea(target, '做个片头');
+		target.querySelector('[data-video-workbench]').dispatchEvent(new Event('submit'));
+		await sleep(30);
+		expect(toasts.error).toHaveBeenCalledWith('没能开始制作：没有可用的 Hermes 模型');
+		expect(target.querySelector('[data-video-idea]').value).toBe('做个片头');
+		expect(target.querySelector('[data-video-tasks]')).toBeFalsy();
+	});
+
+	it('lists earlier tasks, plays a finished video and stops one at work', async () => {
+		api.getVideoPage.mockResolvedValue({ items: [], next: null });
+		api.getVideoTasks.mockResolvedValue([
+			videoTask({ chatId: 'run1', id: 'run1', maker: 'codex', state: 'background', now: 'codex 在渲染', runner: { runId: 'r1', agent: 'codex', step: 12, startedAt: Math.floor(Date.now() / 1000) - 600 } }),
+			videoTask({ chatId: 'ok1', id: 'ok1', state: 'done', now: '成片 1 个，已进视频库', endedAt: Math.floor(Date.now() / 1000), videos: [video(7)] })
+		]);
+		api.stopVideoTask.mockResolvedValue(videoTask({ chatId: 'run1', id: 'run1', maker: 'codex', state: 'stopped', now: '已停止', endedIn: 'runner' }));
+		const target = await mount();
+		await sleep(20);
+		const background = target.querySelector('[data-video-task="run1"]');
+		expect(background.querySelector('[data-step="make"]').textContent).toContain('codex 制作');
+		expect(background.querySelector('[data-step="make"]').getAttribute('data-state')).toBe('active');
+		expect(background.querySelector('[data-video-task-facts]').textContent).toContain('codex 第 12 步');
+		const done = target.querySelector('[data-video-task="ok1"]');
+		expect(done.querySelector('[data-video-task-player="video_7"]').getAttribute('src')).toContain('/api/v1/files/f7/content');
+		expect(done.querySelector('[data-step="video"]').getAttribute('data-state')).toBe('done');
+		expect(done.querySelector('[data-video-task-stop]')).toBeFalsy();
+		background.querySelector('[data-video-task-stop]').click();
+		await sleep(20);
+		expect(api.stopVideoTask).toHaveBeenCalledWith('token', 'run1');
+		const stopped = target.querySelector('[data-video-task="run1"]');
+		expect(stopped.getAttribute('data-video-task-state')).toBe('stopped');
+		expect(stopped.querySelector('[data-step="make"]').getAttribute('data-state')).toBe('failed');
+	});
+
+	it('the chat\'s card leads back to the workbench and does not play the video again', async () => {
+		const { writable } = await import('svelte/store');
+		const { default: Card } = await import('./VideoTaskCard.svelte');
+		const target = document.createElement('div');
+		document.body.appendChild(target);
+		apps.push(new Card({
+			target,
+			props: { task: videoTask({ state: 'done', videos: [video(3)], prep: 'done' }), where: 'chat' },
+			context: new Map([['i18n', writable({ t: (s: string) => s })]])
+		}));
+		await sleep(10);
+		expect(target.querySelector('[data-video-task-studio]').getAttribute('href')).toBe('/workspace/videos?task=chat-v1');
+		expect(target.querySelector('[data-step="prep"]').getAttribute('data-state')).toBe('done');
+		expect(target.querySelector('[data-video-task-player]')).toBeFalsy();
+		expect(target.querySelector('[data-video-task-videos]').textContent).toContain('clip-3.mp4');
 	});
 });

@@ -2,8 +2,11 @@
 
 Rows are written by utils/video_library.py when a reply or a report hands a video over;
 this lists them a page at a time (newest first, the same cursor as the image gallery) and
-takes one out of the library. The workbench itself starts its work in a chat (Hermes or a
-runner does the making), so there is nothing to generate here.
+takes one out of the library.
+
+The workbench starts its work here (``/tasks``, utils/video_tasks.py): a new Hermes chat with
+the brief, its turn started on the server, so the workbench stays and follows the task while
+the chat shows the same task as a card. Hermes or a runner does the making.
 
 A runner started from Telegram reports there and never reaches a HaloWebUI chat: its notifier
 (integrations/hermes-runner/reclaude-notify.py) posts the run's videos to ``/runner-videos``
@@ -27,6 +30,7 @@ from open_webui.models.users import Users
 from open_webui.utils.auth import get_verified_user
 from open_webui.utils.hermes_notify import notify_token_configured, verify_notify_token
 from open_webui.utils.video_library import RUN_VIDEOS_MAX, VIDEO_KIND, import_run_videos
+from open_webui.utils import video_tasks
 
 log = logging.getLogger(__name__)
 
@@ -161,3 +165,59 @@ async def file_runner_videos(request: Request, form: RunnerVideosForm):
         form.run_id, len(result["stored"]), len(result["skipped"]), len(result["failed"]),
     )
     return result
+
+
+class TaskFile(BaseModel):
+    id: str = Field(min_length=1, max_length=128)
+    name: str = Field(default="", max_length=300)
+    type: str = Field(default="file", pattern=r"^(image|file)$")
+
+
+class StartTaskForm(BaseModel):
+    brief: str = Field(min_length=1, max_length=video_tasks.BRIEF_MAX_CHARS)
+    # the user's own words: the task's first name, until the chat is named
+    idea: str = Field(default="", max_length=video_tasks.BRIEF_MAX_CHARS)
+    files: list[TaskFile] = Field(default_factory=list, max_length=video_tasks.FILES_MAX)
+    maker: str = Field(default="", max_length=32)
+
+
+def _task_error(exc: video_tasks.VideoTaskError) -> HTTPException:
+    return HTTPException(exc.status_code, exc.detail)
+
+
+@router.post("/tasks")
+async def start_video_task(request: Request, form: StartTaskForm, user=Depends(get_verified_user)):
+    """开始制作: a new Hermes chat with the brief, its turn started here. Returns the task."""
+    try:
+        return await video_tasks.start_task(
+            request, user, brief=form.brief, idea=form.idea,
+            files=[f.model_dump() for f in form.files], maker=form.maker,
+        )
+    except video_tasks.VideoTaskError as exc:
+        raise _task_error(exc)
+
+
+@router.get("/tasks")
+async def list_video_tasks(limit: int = Query(default=video_tasks.LIST_LIMIT, ge=1, le=30),
+                           user=Depends(get_verified_user)):
+    """The newest tasks, newest first, each as it stands now."""
+    return video_tasks.list_tasks(user.id, limit)
+
+
+@router.get("/tasks/{chat_id}")
+async def get_video_task(chat_id: str, user=Depends(get_verified_user)):
+    task = video_tasks.get_task(user.id, chat_id) if len(chat_id) <= 128 else None
+    if task is None:
+        raise HTTPException(404, "这个视频任务不存在")
+    return task
+
+
+@router.post("/tasks/{chat_id}/stop")
+async def stop_video_task(request: Request, chat_id: str, user=Depends(get_verified_user)):
+    """Stops the Hermes turn still working on it, or the runner it handed the work to."""
+    if len(chat_id) > 128:
+        raise HTTPException(404, "这个视频任务不存在")
+    try:
+        return await video_tasks.stop(request, user, chat_id)
+    except video_tasks.VideoTaskError as exc:
+        raise _task_error(exc)

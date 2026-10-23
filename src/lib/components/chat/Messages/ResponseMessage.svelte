@@ -114,6 +114,7 @@
 	import ContentRenderer from './ContentRenderer.svelte';
 	import TeamChatCard from '$lib/components/teams/TeamChatCard.svelte';
 	import ModeDispatchCard from './ModeDispatchCard.svelte';
+	import VideoTaskChatCard from './VideoTaskChatCard.svelte';
 	import AutoDispatchCard from '$lib/components/auto/AutoDispatchCard.svelte';
 	import TeamResultBar from '$lib/components/teams/TeamResultBar.svelte';
 	import MessageOutline from './MessageOutline.svelte';
@@ -1428,6 +1429,8 @@
 			? { kind: value.kind as 'answer' | 'discuss', chatId: value.chat_id as string }
 			: null;
 	})();
+	// 视频工作台: this reply is making the video the workbench started (its card on top).
+	$: videoTask = (message as any)?.video_task === true && !!chatId;
 	// A runner's report under its notice line: the line above already says who finished and
 	// how (its 详情 has the model, cost and turns), so the runner's two header lines are not
 	// shown again. Copy and edit still use the whole content.
@@ -2064,6 +2067,9 @@
 									>
 										{#if hasVisibleDiscussion}
 											<DiscussionPanel discussion={message.discussion} />
+										{/if}
+										{#if videoTask}
+											<VideoTaskChatCard {chatId} />
 										{/if}
 
 										{#if showImageGenerationPlaceholder}

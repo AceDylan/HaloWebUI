@@ -22,7 +22,8 @@ export type Handoff = {
 	/** Background the next step should know: an earlier conversation, a conclusion. */
 	context: string;
 	from: HandoffOrigin | null;
-	/** A chat sends the text at once instead of filling it in (the video studio's 开始制作). */
+	/** A chat sends the text at once instead of filling it in (the video studio used to start its
+	 * videos this way; it now starts them on the server, backend utils/video_tasks.py). */
 	send: boolean;
 	at: number;
 };

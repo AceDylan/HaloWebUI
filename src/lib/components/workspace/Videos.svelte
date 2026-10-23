@@ -1,11 +1,14 @@
 <script lang="ts">
 	/**
 	 * 视频工作台 (/workspace/videos). The workbench writes a brief — what you want, how it should be
-	 * made (做法), frame, length, narration, subtitles, reference files — and hands it to a new chat
-	 * with Hermes, sent at once: Hermes itself or a runner (codex, reclaude …, by the command in
-	 * front) makes the video with its video-studio skill and hands it over as MEDIA. Every video a
-	 * reply or a runner's report hands over lands in the library (backend utils/video_library.py),
-	 * which comes a page at a time and loads each player only when it scrolls into view.
+	 * made (做法), frame, length, narration, subtitles, reference files — and starts it from here
+	 * (backend utils/video_tasks.py): the server opens a new Hermes chat with the brief and starts
+	 * its turn, Hermes itself or a runner (codex, reclaude …, by the command in front) makes the
+	 * video with its video-studio skill and hands it over as MEDIA. The workbench stays: its 制作任务
+	 * list follows each video to the end (and plays it) and leads to the chat, which shows the same
+	 * task as a card on its reply (?task=<chat id> leads back here). Every video a reply or a
+	 * runner's report hands over lands in the library (backend utils/video_library.py), which
+	 * comes a page at a time and loads each player only when it scrolls into view.
 	 *
 	 * 背景音乐: the user's own MP3 (uploaded here or picked again from their earlier uploads) is
 	 * decided before the video: the brief has the maker plan to its length and beats and prove
@@ -18,9 +21,9 @@
 	 * status) and puts the result in the brief, so the page can be left. ✨ 增强 runs it here instead,
 	 * to read the result first.
 	 */
-	import { afterUpdate, onDestroy, onMount } from 'svelte';
+	import { afterUpdate, onDestroy, onMount, tick } from 'svelte';
 	import { toast } from 'svelte-sonner';
-	import { goto, replaceState } from '$app/navigation';
+	import { replaceState } from '$app/navigation';
 
 	import { config, models } from '$lib/stores';
 	import { WEBUI_API_BASE_URL } from '$lib/constants';
@@ -29,14 +32,19 @@
 		deleteLibraryVideo,
 		getMusicFiles,
 		getVideoPage,
+		getVideoTask,
+		getVideoTasks,
+		startVideoTask,
+		stopVideoTask,
+		videoTaskLive,
 		type LibraryVideo,
-		type MusicFile
+		type MusicFile,
+		type VideoTask
 	} from '$lib/apis/video-studio';
 	import { uploadFileReliably } from '$lib/utils/reliable-upload';
 	import { isHermesAgentModel } from '$lib/utils/hermes';
-	import { getModelSelectionId } from '$lib/utils/model-identity';
 	import { formatFileSize } from '$lib/utils';
-	import { HANDOFF_TEXT_MAX, handOff, takeHandoff, type HandoffOrigin } from '$lib/utils/handoff';
+	import { HANDOFF_TEXT_MAX, takeHandoff, type HandoffOrigin } from '$lib/utils/handoff';
 	import {
 		cancelStudioPrep,
 		getStudioPrep,
@@ -64,6 +72,7 @@
 	} from '$lib/utils/video-brief';
 	import { clearModeDraft, setModeDraft } from '$lib/components/scifi/mode-relay';
 	import VideoStylePicker from './VideoStylePicker.svelte';
+	import VideoTaskCard from './VideoTaskCard.svelte';
 	import HandoffBack from '$lib/components/common/HandoffBack.svelte';
 	import LoadMore from '$lib/components/common/LoadMore.svelte';
 	import Modal from '$lib/components/common/Modal.svelte';
@@ -437,41 +446,112 @@
 		if (fitVideoBrief({ ...snapshot, prepJob: needsPrep ? 'a'.repeat(32) : null }, HANDOFF_TEXT_MAX).length > HANDOFF_TEXT_MAX) {
 			toast.error('需求较长，请精简后再制作'); return;
 		}
-		// the enhancement starts on the server and the brief goes out at once: the chat waits for
-		// it (nobody has to stay here); the video is made from the words as written when it fails
-		let prepJobId: string | null = null;
-		if (needsPrep) {
-			starting = true;
-			try {
-				prepJobId = (
-					await startStudioPrep(localStorage.token, {
-						kind: 'video',
-						idea: requestIdea,
-						settings: videoSettingsText(snapshot),
-						research: prepOptions.research,
-						deeper: prepOptions.deeper
-					})
-				).id;
-			} catch (error) {
-				toast.warning(`${prepErrorText(error)}，按原文制作`);
-			} finally {
-				starting = false;
+		starting = true;
+		try {
+			// the enhancement starts on the server and the brief goes out at once: the chat's turn
+			// waits for it (nobody has to stay here); the video is made from the words as written
+			// when it fails
+			let prepJobId: string | null = null;
+			if (needsPrep) {
+				try {
+					prepJobId = (
+						await startStudioPrep(localStorage.token, {
+							kind: 'video',
+							idea: requestIdea,
+							settings: videoSettingsText(snapshot),
+							research: prepOptions.research,
+							deeper: prepOptions.deeper
+						})
+					).id;
+				} catch (error) {
+					toast.warning(`${prepErrorText(error)}，按原文制作`);
+				}
 			}
-			if (destroyed || !hermes) return;
+			// the chat is written and its Hermes turn started on the server: the video is followed
+			// here (制作任务) and in the chat alike
+			const task = await startVideoTask(localStorage.token, {
+				brief: fitVideoBrief({ ...snapshot, prepJob: prepJobId }, HANDOFF_TEXT_MAX),
+				idea: (snapshot.prep?.original || snapshot.idea).trim(),
+				files: snapshotFiles,
+				maker: snapshot.maker
+			});
+			if (destroyed) return;
+			tasks = [task, ...tasks.filter((t) => t.chatId !== task.chatId)];
+			watchTasks();
+			// what was started is in the list now: the box is free for the next video (the
+			// settings and the music stay)
+			if (idea === snapshot.idea) {
+				idea = '';
+				prepared = null;
+			}
+			const sentIds = new Set(snapshotFiles.map((f) => f.id));
+			attachments.forEach((a) => sentIds.has(a.id) && a.preview?.startsWith('blob:') && URL.revokeObjectURL(a.preview));
+			attachments = attachments.filter((a) => !sentIds.has(a.id));
+			toast.success('已开始制作：进度在「制作任务」里，也可以打开对话看');
+			await tick();
+			document
+				.querySelector(`[data-video-task="${task.chatId}"]`)
+				?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' });
+		} catch (error) {
+			toast.error(`没能开始制作：${(error as any)?.detail ?? (error as Error)?.message ?? error}`);
+		} finally {
+			starting = false;
 		}
-		const stored = handOff(typeof sessionStorage === 'undefined' ? null : sessionStorage, {
-			to: 'chat',
-			text: fitVideoBrief({ ...snapshot, prepJob: prepJobId }, HANDOFF_TEXT_MAX),
-			models: [getModelSelectionId(hermes)],
-			files: snapshotFiles,
-			from: origin,
-			send: true
-		});
-		if (!stored) {
-			toast.error('浏览器不让暂存这次的需求，没法带到对话里');
-			return;
+	};
+
+	// ---- 制作任务: the videos started here, followed to the end -----------------------------------
+	const TASKS_SHOWN = 6;
+	let tasks: VideoTask[] = [];
+	let tasksTimer: ReturnType<typeof setTimeout> | null = null;
+	let stoppingTask = '';
+	// ?task=<chat id>: the chat's card led here; that task is shown with a ring
+	let focusTask = '';
+
+	const watchTasks = () => {
+		if (tasksTimer) clearTimeout(tasksTimer);
+		tasksTimer = null;
+		if (destroyed || !tasks.some(videoTaskLive)) return;
+		const hidden = typeof document !== 'undefined' && document.visibilityState === 'hidden';
+		const quiet = !tasks.some((t) => t.state === 'running'); // only runners at work: slower
+		tasksTimer = setTimeout(loadTasks, hidden ? 30000 : quiet ? 10000 : 3000);
+	};
+
+	const loadTasks = async () => {
+		try {
+			const list = await getVideoTasks(localStorage.token, TASKS_SHOWN);
+			// the task the chat led to stays in view even when it is older than the list
+			const focused =
+				focusTask && !list.some((t) => t.chatId === focusTask)
+					? await getVideoTask(localStorage.token, focusTask).catch(() => null)
+					: null;
+			if (destroyed) return;
+			const finished = list.filter((t) => t.state === 'done' && tasks.some((o) => o.chatId === t.chatId && o.state !== 'done'));
+			tasks = focused ? [...list, focused] : list;
+			// a video that just came in belongs in the library too
+			if (finished.length && libraryLoaded) void loadFirst();
+		} catch (error) {
+			console.warn('video tasks unavailable', error);
 		}
-		goto('/');
+		watchTasks();
+	};
+
+	const stopTask = async (task: VideoTask) => {
+		if (stoppingTask) return;
+		stoppingTask = task.chatId;
+		try {
+			const stopped = await stopVideoTask(localStorage.token, task.chatId);
+			tasks = tasks.map((t) => (t.chatId === stopped.chatId ? stopped : t));
+		} catch (error) {
+			toast.error(`${(error as any)?.detail ?? (error as Error)?.message ?? error}`);
+		} finally {
+			stoppingTask = '';
+		}
+		watchTasks();
+	};
+
+	// back on this tab: read again while anything is still being made
+	const onVisibility = () => {
+		if (document.visibilityState === 'visible' && tasks.some(videoTaskLive)) void loadTasks();
 	};
 
 	const onKeydown = (event: KeyboardEvent) => {
@@ -600,7 +680,16 @@
 		} catch {
 			prepOptions = normalizePrepOptions(null);
 		}
-		if (new URL(window.location.href).searchParams.get('tab') === 'library') tab = 'library';
+		const landing = new URL(window.location.href).searchParams;
+		if (landing.get('tab') === 'library') tab = 'library';
+		const asked = landing.get('task') ?? '';
+		focusTask = /^[\w-]{1,128}$/.test(asked) ? asked : '';
+		document.addEventListener('visibilitychange', onVisibility);
+		void loadTasks().then(async () => {
+			if (!focusTask || destroyed) return;
+			await tick();
+			document.querySelector(`[data-video-task="${focusTask}"]`)?.scrollIntoView?.({ block: 'center' });
+		});
 
 		// Work handed over from a chat or another mode (the dock, 「交给…」): the draft is the idea,
 		// its files the attachments, its conversation background the brief keeps.
@@ -654,6 +743,8 @@
 	);
 	onDestroy(() => {
 		destroyed = true;
+		if (tasksTimer) clearTimeout(tasksTimer);
+		if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', onVisibility);
 		clearModeDraft('video');
 		if (searchTimer) clearTimeout(searchTimer);
 		attachments.forEach((a) => a.preview?.startsWith('blob:') && URL.revokeObjectURL(a.preview));
@@ -913,13 +1004,31 @@
 			<div class="flex flex-col-reverse gap-2 px-1 sm:flex-row sm:items-center sm:justify-between">
 				<span class="text-xs text-gray-500 dark:text-gray-400" data-video-status data-video-blocked={blocked || undefined}>
 					{blocked ||
-						`交给 ${maker.label} · ${recipe.label} · ${lengthSummary}${musicReady ? ' · 配乐已定' : ''}，在新对话里${prepOptions.enhance && (!prepared || prepStale) ? '先增强需求再' : ''}制作`}
+						`交给 ${maker.label} · ${recipe.label} · ${lengthSummary}${musicReady ? ' · 配乐已定' : ''}，在这里${prepOptions.enhance && (!prepared || prepStale) ? '先增强需求再' : ''}制作，同时记成一个对话`}
 				</span>
 				<button type="submit" class="workspace-primary-button w-full sm:w-auto sm:min-w-32" disabled={!!blocked || starting} title={blocked} data-video-start>
 					<SidebarModeIcon mode="video" className="size-4" />
 					<span>{preparing ? '增强中…' : starting ? '发出中…' : '开始制作'}</span>
 				</button>
 			</div>
+
+			{#if tasks.length}
+				<div class="glass-item p-4 space-y-3" data-video-tasks>
+					<div class="flex items-center justify-between gap-2">
+						<div class="text-sm font-semibold text-gray-900 dark:text-gray-100">制作任务</div>
+						<span class="text-xs text-gray-500 dark:text-gray-400">可以离开这页，做好后自动进视频库</span>
+					</div>
+					{#each tasks as task (task.chatId)}
+						<VideoTaskCard
+							{task}
+							where="studio"
+							stopping={stoppingTask === task.chatId}
+							highlight={task.chatId === focusTask}
+							on:stop={(event) => stopTask(event.detail)}
+						/>
+					{/each}
+				</div>
+			{/if}
 
 			{#if videos.length}
 				<div class="glass-item p-4 space-y-3" data-video-recent>

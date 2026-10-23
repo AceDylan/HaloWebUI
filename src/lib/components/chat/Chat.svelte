@@ -4222,8 +4222,8 @@
 		// 「继续对话」 from 讨论台 / 协作台: the draft is filled in (not sent), files attached.
 		// No itemId on them: they belong to the discussion or team, so taking one out
 		// of the message box must not delete it (see chatImageFileFromHandoff).
-		// The video studio's 开始制作 names the model (Hermes) and asks for the brief to go out
-		// at once (`send`), like ?q= above: it waits for the model list the same way.
+		// A handoff that names the model and asks for the text to go out at once (`send`), like
+		// ?q= above, waits for the model list the same way.
 		const chatHandoffEntry = takeHandoff(
 			typeof sessionStorage === 'undefined' ? null : sessionStorage,
 			'chat'

@@ -217,7 +217,10 @@ def decision_request(
         for index, entry in enumerate(templates[:DECISION_TEMPLATES], 1):
             keys["assistant"][f"t{index}"] = entry["ref"]
             options[f"t{index}"] = _candidate_text(entry) + " (template)"
-        options[NEW_KEY] = "None of these fits the question well: a new specialist should be designed (or one upgraded)."
+        options[NEW_KEY] = (
+            "None of the assistants above can answer this question at all, so a new specialist must be designed first "
+            "(slow; choose this only when every listed assistant is clearly outside the question's field)."
+        )
         questions["assistant"] = dm.choice(
             "Which assistant should answer `question` (see `background`)? Pick the one whose field fits the question best.", options
         )

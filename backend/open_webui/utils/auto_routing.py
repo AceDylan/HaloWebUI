@@ -112,7 +112,9 @@ def decision_request(question, context, files, *, teams_available, discussion_av
         {m: DECISION_MODES[m] for m in modes})}
     if "team" in modes:
         questions["execution"] = dm.noul(
-            "Does the user clearly ask for the work to be DONE now (not hypothetically, not quoted text, not only analysis or a plan)?")
+            "Does the user ask for a task to be carried out with tools now — changing or creating files or code, running "
+            "commands, processing the attachments, producing a deliverable — rather than for an answer, an explanation, "
+            "advice or a plan? Hypotheticals and quoted text are no.")
     state = {"question": question, "context": context or "", "attachments": files or []}
     return state, questions
 

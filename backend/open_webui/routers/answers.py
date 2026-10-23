@@ -354,6 +354,8 @@ def _start(request: Request, user, chat, run: dict) -> desk.LiveAnswer:
             raw, assistants, templates, bases, default_base=default_base, may_create=may_write, web_allowed=web_allowed, chosen=chosen
         )
 
+        from open_webui.utils import decision_model as dm
+
         async def assisted(decider):
             # 辅助决策模型: assistant, answering model and web search as typed questions; the
             # dispatcher's own checks (normalize_plan) apply to the answer as to its own
@@ -362,14 +364,13 @@ def _start(request: Request, user, chat, run: dict) -> desk.LiveAnswer:
             )
             answers, reason = await decider.judge(state, questions)
             raw = desk.raw_from_answers(answers, keys, reason or f"{decider.name} 的判断", chosen=chosen, default_base=default_base)
-            summary = {k: a.get("choice", a.get("noul")) for k, a in answers.items()}
+            web = "web_search" in answers and dm.yes(answers["web_search"])
+            summary = {"base": keys["base"].get((answers.get("base") or {}).get("choice")), "web_search": web if "web_search" in answers else None}
             if raw is None:  # "new": the dispatcher designs it; the web decision stays
-                return {"new": True, "web": "web_search" in answers and answers["web_search"]["noul"] >= 0.5}, {**summary, "assistant": "new → 调度模型设计"}
+                return {"new": True, "web": web}, {**summary, "assistant": "new → 调度模型设计"}
             plan = normalize(raw)
             ref = (plan["decision"].get("target") or plan["decision"].get("template") or {}).get("ref")
-            return plan, {**summary, "assistant_ref": ref, "base": plan["decision"]["spec"].get("base")}
-
-        from open_webui.utils import decision_model as dm
+            return plan, {**summary, "assistant": ref}
 
         plan, trace = await dm.decide(request, user, "answer", assisted, models_map=models_map, timeout=45)
         web_decided = None

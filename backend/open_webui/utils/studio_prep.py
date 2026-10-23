@@ -412,8 +412,10 @@ async def run_job(job: Job, tools: Tools) -> None:
                 job.step("plan", "error", "分析没成功，直接增强")
             else:
                 plan = decided_plan(drafted or plan, decided["answers"] if decided else {}, job.idea)
+                # Jev gives no reason, only how sure it is: then the choice itself is said
+                said = _said(plan) or ("不需要额外资料" if decided else "")
                 reason = decided["reason"] if decided else plan["reason"]
-                detail = "；".join(part for part in (_said(plan), reason) if part) or "不需要额外资料"
+                detail = "；".join(part for part in (said, reason) if part) or "不需要额外资料"
                 if trace and trace["used"]:
                     detail = f"辅助决策 {trace['name']}：{detail}"
                 elif trace:

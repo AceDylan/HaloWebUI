@@ -173,6 +173,12 @@ def test_the_decision_model_makes_the_choices_and_gpt_chat_writes_the_question(m
     assert job.status == "done"
 
 
+def test_a_decision_for_nothing_extra_says_so(monkeypatch):
+    _, decide = _judge(monkeypatch, {"research": {"noul": 0.1}, "deeper": {"choice": "none"}})
+    job = _run(_job(), prep.Tools(ask=Model(), decide=decide))
+    assert job.steps[0]["detail"] == "辅助决策 judge：不需要额外资料；要讲对原理"
+
+
 def test_a_failed_decision_leaves_gpt_chats_plan(monkeypatch):
     model = Model(plan={"research": False, "deeper": "none", "question": "q", "reason": "不需要"})
     _, decide = _judge(monkeypatch, error=RuntimeError("down"))

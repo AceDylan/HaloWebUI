@@ -32,7 +32,7 @@ const RUN = {
 let app: any;
 let target: any;
 
-const mount = async () => {
+const mount = async (compact = false) => {
 	const stores = await import('$lib/stores');
 	stores.chatId.set('another-chat');
 	stores.hermesActiveRuns.set([]);
@@ -41,7 +41,7 @@ const mount = async () => {
 	target = document.createElement('div');
 	document.body.appendChild(target);
 	const i18n = writable({ t: (s: string) => s });
-	app = new Runs({ target, context: new Map<string, any>([['i18n', i18n]]) });
+	app = new Runs({ target, props: { compact }, context: new Map<string, any>([['i18n', i18n]]) });
 	await sleep(10);
 	return stores;
 };
@@ -52,11 +52,79 @@ beforeAll(async () => {
 	await import('./ActiveHermesRuns.svelte');
 }, 120_000);
 
-beforeEach(() => {
+beforeEach(async () => {
+	const stores = await import('$lib/stores');
+	stores.workActivity.set([]);
+	stores.hermesUnreadChatIds.set(new Set());
 	(globalThis as any).localStorage.token = 'tok';
 	api.stopHermesBackgroundRunner.mockReset();
 	toast.success.mockReset();
 	toast.error.mockReset();
+});
+
+describe('ActiveHermesRuns one row per conversation', () => {
+	const video = {
+		kind: 'video' as const, id: RUN.chat_id, chat_id: RUN.chat_id, title: '视频方案',
+		href: `/c/${RUN.chat_id}`, started_at: RUN.started_at, state: 'running' as const, note: '增强需求中'
+	};
+	const turn = {
+		chat_id: RUN.chat_id, run_id: 'hermes-turn', message_id: 'reply', title: '视频方案',
+		started_at: RUN.started_at, steers: 0
+	};
+
+	it('shows the video preparation title, label and chat link before Hermes registers', async () => {
+		const stores = await mount();
+		stores.hermesBackgroundRuns.set([]);
+		stores.workActivity.set([video]);
+		await sleep(10);
+		const row = target.querySelector('[data-halo-work-row="video"]');
+		expect(row.getAttribute('href')).toBe(video.href);
+		expect(row.textContent).toContain('视频方案');
+		expect(row.textContent).toContain('视频 · 增强需求中');
+	});
+
+	it('switches one sidebar row from runner to approval and back on socket events', async () => {
+		const stores = await mount();
+		const { applyHermesChatEvent } = await import('$lib/utils/hermes-activity');
+		stores.workActivity.set([video]);
+		stores.hermesActiveRuns.set([turn]);
+		await sleep(10);
+		const rows = () => target.querySelectorAll('[data-halo-hermes-run-state]');
+		expect(rows().length).toBe(1);
+		expect(rows()[0].getAttribute('data-halo-hermes-run-state')).toBe('background');
+		expect(button().getAttribute('data-halo-hermes-background-stop')).toBe(RUN.run_id);
+		applyHermesChatEvent({
+			chat_id: RUN.chat_id,
+			data: { type: 'hermes:approval', data: { request_id: 'q1', run_id: turn.run_id } }
+		});
+		await sleep(10);
+		expect(rows().length).toBe(1);
+		expect(rows()[0].textContent).toContain('Waiting for your approval');
+		applyHermesChatEvent({
+			chat_id: RUN.chat_id,
+			data: { type: 'hermes:approval:resolved', data: { request_id: 'q1' } }
+		});
+		await sleep(10);
+		expect(rows().length).toBe(1);
+		expect(button().getAttribute('data-halo-hermes-background-stop')).toBe(RUN.run_id);
+	});
+
+	it('counts and displays the same unique chat in the collapsed popup, including unread', async () => {
+		const stores = await mount(true);
+		stores.workActivity.set([video]);
+		stores.hermesActiveRuns.set([turn]);
+		stores.hermesUnreadChatIds.set(new Set([RUN.chat_id]));
+		await sleep(10);
+		const rail = target.querySelector('[data-halo-hermes-runs-rail]');
+		expect(rail.textContent.trim()).toBe('1');
+		rail.click();
+		await sleep(20);
+		const popup = document.querySelector('[data-halo-hermes-runs-popup]');
+		expect(popup.querySelectorAll('[data-halo-hermes-run-state]').length).toBe(1);
+		expect(popup.querySelector('[data-halo-hermes-background-stop]').getAttribute('data-halo-hermes-background-stop'))
+			.toBe(RUN.run_id);
+		expect(popup.querySelector('[data-halo-hermes-run-state="unread"]')).toBeFalsy();
+	});
 });
 
 afterEach(() => {

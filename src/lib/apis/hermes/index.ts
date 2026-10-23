@@ -195,9 +195,9 @@ export type HermesBackgroundRun = {
 	title?: string | null;
 };
 
-/** Work at a mode other than Hermes (routers/hermes.py → utils/work_activity.py). */
+/** Other work, including Hermes before registration and video tasks between reports. */
 export type WorkActivityItem = {
-	kind: 'chat' | 'image' | 'answer' | 'discuss' | 'team' | 'auto';
+	kind: 'chat' | 'image' | 'video' | 'answer' | 'discuss' | 'team' | 'auto';
 	id: string;
 	chat_id: string | null;
 	title: string | null;

@@ -338,22 +338,22 @@ def get_task(user_id: str, chat_id: str) -> Optional[dict]:
     return task_of(chat, user_id) if chat is not None else None
 
 
-def list_tasks(user_id: str, limit: int = LIST_LIMIT) -> list[dict]:
-    """The user's newest tasks, newest first."""
+def list_tasks(user_id: str, limit: int = LIST_LIMIT, since: Optional[int] = None) -> list[dict]:
+    """The user's newest tasks (started at or after ``since``), newest first."""
     from sqlalchemy import String, cast
 
     from open_webui.internal.db import get_db
     from open_webui.models.chats import Chat, ChatModel
 
     with get_db() as db:
-        rows = (
-            db.query(Chat)
-            .filter(Chat.user_id == user_id, cast(Chat.meta, String).like(f'%"{TASK_META_KEY}"%'))
-            .order_by(Chat.created_at.desc())
-            .limit(max(1, min(int(limit), 30)))
-            .all()
-        )
+        query = db.query(Chat).filter(Chat.user_id == user_id,
+                                      cast(Chat.meta, String).like(f'%"{TASK_META_KEY}"%'))
+        if since is not None:
+            query = query.filter(Chat.created_at >= since)
+        rows = query.order_by(Chat.created_at.desc()).limit(max(1, min(int(limit), 30))).all()
         chats = [ChatModel.model_validate(row) for row in rows]
+    if not chats:
+        return []
     videos = _videos_by_chat(user_id)
     return [task for task in (task_of(chat, user_id, videos) for chat in chats) if task]
 

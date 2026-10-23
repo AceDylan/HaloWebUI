@@ -243,6 +243,85 @@ def test_an_ordinary_chat_is_not_a_task():
     assert video_tasks.get_task("vt-gus", chat.id) is None
 
 
+def test_running_sidebar_covers_preparation_and_expired_runner_progress(monkeypatch):
+    from open_webui.utils import hermes_runner_progress, work_activity
+
+    for name in ("_desks", "_teams", "_routes", "_studio"):
+        monkeypatch.setattr(work_activity, name, lambda user_id: [])
+    monkeypatch.setattr(hermes_runner_progress, "_PROGRESS", {})
+    user_id = "vt-sidebar"
+    chat = _task_chat(user_id, {"done": False}, meta={"maker": "codex"},
+                      asked=f"{BRIEF}\n（制作前准备：HaloWebUI 正在增强需求，编号 {'b' * 32}）")
+
+    def rows():
+        return work_activity.list_work(user_id, set())
+
+    async def run():
+        task_id, _ = create_task(asyncio.sleep(60), id=chat.id, owner_id=user_id, kind="hermes")
+        try:
+            [row] = rows()
+            assert row["kind"] == "video" and row["note"] == "增强需求中"
+            assert row["title"] == chat.title and row["href"] == f"/c/{chat.id}"
+            assert row["started_at"] == chat.meta[video_tasks.TASK_META_KEY]["startedAt"]
+            assert work_activity.list_work("vt-sidebar-other", set()) == []
+            Chats.upsert_message_to_chat_by_id_and_message_id(chat.id, "r1", {
+                "statusHistory": [
+                    {"action": "studio_prep", "description": "分析需求", "done": False},
+                    {"action": "studio_prep", "description": "补全镜头", "done": False},
+                ],
+            }, set_current=False)
+            assert rows()[0]["note"] == "增强需求中"
+            Chats.upsert_message_to_chat_by_id_and_message_id(chat.id, "r1", {
+                "statusHistory": [{"action": "studio_prep", "description": "需求已增强", "done": True}],
+            }, set_current=False)
+            assert rows()[0]["note"] == "制作中"
+            Chats.upsert_message_to_chat_by_id_and_message_id(chat.id, "r1", {
+                "done": True, "hermes_run": {"active": False, "fast_dispatch": True,
+                                            "dispatch": "codex", "runner_run_id": "sidebar-run"},
+            }, set_current=False)
+        finally:
+            await stop_task(task_id)
+
+    asyncio.run(run())
+    # No report yet, then a report older than the progress retention window.
+    assert rows()[0]["note"] == "后台制作中"
+    record_runner_progress(chat_id=chat.id, run_id="sidebar-run", agent="codex",
+                           now=time.time() - hermes_runner_progress.PROGRESS_STALE_SECONDS - 1)
+    assert hermes_runner_progress.list_runner_progress(user_id) == []
+    assert rows()[0]["note"] == "后台制作中"
+    Chats.upsert_message_to_chat_by_id_and_message_id(chat.id, "notice", {
+        "id": "notice", "role": "user", "timestamp": int(time.time()),
+        "hermes_notice": {"run_id": "sidebar-run"},
+    }, set_current=False)
+    assert rows() == []
+
+
+def test_running_sidebar_excludes_ended_or_deleted_video_tasks(monkeypatch):
+    from open_webui.utils import work_activity
+
+    user_id = "vt-sidebar-ended"
+    _task_chat(user_id, {"done": True, "error": {"content": "启动失败"}})
+    _task_chat(user_id, {"done": True, "hermes_run": {"fast_dispatch": True}},
+               meta={"maker": "codex", "stoppedAt": int(time.time())})
+    _task_chat(user_id, {"done": False})  # interrupted, no live task
+    _task_chat(user_id, {"done": True})  # finished Hermes turn
+    deleted = _task_chat(user_id, {"done": True, "hermes_run": {"fast_dispatch": True}})
+    Chats.delete_chat_by_id(deleted.id)
+    assert work_activity._video_studio(user_id) == []
+
+
+def test_running_sidebar_forgets_a_runner_that_never_reported_back(monkeypatch):
+    from open_webui.utils import work_activity
+
+    user_id = "vt-sidebar-old"
+    chat = _task_chat(user_id, {"done": True, "hermes_run": {"fast_dispatch": True, "runner_run_id": "lost"}},
+                      meta={"maker": "codex"})
+    assert [row["note"] for row in work_activity._video_studio(user_id)] == ["后台制作中"]
+    monkeypatch.setattr(work_activity, "VIDEO_WINDOW_SECONDS", 0)
+    monkeypatch.setattr(work_activity.time, "time", lambda: chat.created_at + 1)
+    assert work_activity._video_studio(user_id) == []
+
+
 # ---- the API ----------------------------------------------------------------------------------
 
 

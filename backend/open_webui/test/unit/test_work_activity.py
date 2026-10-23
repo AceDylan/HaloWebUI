@@ -2,10 +2,17 @@
 import asyncio
 from types import SimpleNamespace
 
+import pytest
+
 from open_webui import tasks
 from open_webui.models import agent_teams, auto_routes
 from open_webui.routers import images
 from open_webui.utils import answer_desk, discussion_room, work_activity
+
+
+@pytest.fixture(autouse=True)
+def no_video_tasks(monkeypatch):
+    monkeypatch.setattr(work_activity, "_video_studio", lambda user_id: [])
 
 
 def test_every_mode_at_work_is_listed_once(monkeypatch):
@@ -107,6 +114,52 @@ def test_tasks_record_their_kind_and_start(monkeypatch):
 
     meta = asyncio.run(run())
     assert meta["kind"] == "image" and meta["owner_id"] == "u1" and meta["started_at"] > 0
+
+
+@pytest.mark.parametrize("ending", ["done", "cancelled", "failed"])
+def test_hermes_before_registration_is_visible_until_its_task_ends(monkeypatch, ending):
+    for name in ("_desks", "_teams", "_routes", "_studio"):
+        monkeypatch.setattr(work_activity, name, lambda user_id: [])
+    monkeypatch.setattr(work_activity, "_titles", lambda ids: {"pending": "视频方案"})
+
+    async def run():
+        gate = asyncio.Event()
+
+        async def pending():
+            await gate.wait()
+            if ending == "failed":
+                raise RuntimeError("start failed")
+
+        task_id, task = tasks.create_task(pending(), id="pending", owner_id="u1", kind="hermes")
+        rows = work_activity.list_work("u1", set())
+        assert len(rows) == 1
+        assert rows[0]["title"] == "视频方案" and rows[0]["href"] == "/c/pending"
+        assert rows[0]["state"] == "running"
+        assert work_activity.list_work("u2", set()) == []
+        # Once registered, the real Hermes row takes over.
+        assert work_activity.list_work("u1", {"pending"}) == []
+        if ending == "cancelled":
+            await tasks.stop_task(task_id)
+        else:
+            gate.set()
+            if ending == "failed":
+                with pytest.raises(RuntimeError, match="start failed"):
+                    await task
+            else:
+                await task
+        await asyncio.sleep(0)
+        assert work_activity.list_work("u1", set()) == []
+
+    asyncio.run(run())
+
+
+def test_hermes_fallback_excludes_temporary_and_nonblocking_tasks(monkeypatch):
+    monkeypatch.setattr(tasks, "task_metadata", {
+        "temp": {"chat_id": "local", "owner_id": "u1", "kind": "hermes"},
+        "post": {"chat_id": "c1", "owner_id": "u1", "kind": "hermes", "blocks_completion": False},
+        "other": {"chat_id": "c2", "owner_id": "u2", "kind": "hermes"},
+    })
+    assert work_activity._chat_replies("u1", set()) == []
 
 
 def test_placeholder_titles_give_way_to_the_question(monkeypatch):

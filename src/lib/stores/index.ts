@@ -94,7 +94,7 @@ export const hermesBackgroundRuns: Writable<
 // drawing, 精答, 讨论台, 协作台, 自动分流, the image studio. 运行中 lists them.
 export const workActivity: Writable<
 	{
-		kind: 'chat' | 'image' | 'answer' | 'discuss' | 'team' | 'auto';
+		kind: 'chat' | 'image' | 'video' | 'answer' | 'discuss' | 'team' | 'auto';
 		id: string;
 		chat_id: string | null;
 		title: string | null;

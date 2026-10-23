@@ -1,10 +1,11 @@
-import { get } from 'svelte/store';
+import { derived, get } from 'svelte/store';
 
 import {
 	getHermesActivity,
 	HermesSessionExpiredError,
 	markHermesChatRead,
-	type HermesActiveRun
+	type HermesActiveRun,
+	type HermesActivity
 } from '$lib/apis/hermes';
 import {
 	chatId,
@@ -13,6 +14,49 @@ import {
 	hermesUnreadChatIds,
 	workActivity
 } from '$lib/stores';
+
+/**
+ * One sidebar row per chat: approvals (Hermes, then other work), runner,
+ * Hermes turn, other work, unread. Within a source, the newest entry wins.
+ * Keep the source stores intact: approvals, steering and runner stops need them.
+ */
+export const selectHermesActivityRows = (activity: HermesActivity): HermesActivity => {
+	const seen = new Set<string>();
+	const claim = (key: string) => {
+		if (seen.has(key)) return false;
+		seen.add(key);
+		return true;
+	};
+	const runs = [...activity.runs].sort((a, b) => b.started_at - a.started_at);
+	const work = [...activity.work].sort((a, b) => b.started_at - a.started_at);
+	const claimWork = (row: HermesActivity['work'][number]) =>
+		claim(row.chat_id ? `chat:${row.chat_id}` : `work:${row.kind}:${row.id}`);
+	const selectedRuns = runs.filter((run) => run.awaiting_approval && claim(`chat:${run.chat_id}`));
+	const selectedWork = work.filter((row) => row.state === 'waiting' && claimWork(row));
+	const background = [...activity.background]
+		.sort((a, b) => b.updated_at - a.updated_at || (b.started_at ?? 0) - (a.started_at ?? 0))
+		.filter((run) => claim(`chat:${run.chat_id}`));
+	selectedRuns.push(...runs.filter((run) => !run.awaiting_approval && claim(`chat:${run.chat_id}`)));
+	selectedWork.push(...work.filter((row) => row.state !== 'waiting' && claimWork(row)));
+	// Selection does not reorder unrelated rows supplied by the server.
+	const inSourceOrder = <T>(source: T[], selected: T[]) => {
+		const remaining = new Set(selected);
+		return source.filter((row) => remaining.delete(row));
+	};
+	return {
+		runs: inSourceOrder(activity.runs, selectedRuns),
+		background: inSourceOrder(activity.background, background),
+		work: inSourceOrder(activity.work, selectedWork),
+		unread: activity.unread.filter((id) => claim(`chat:${id}`))
+	};
+};
+
+// Shared by the expanded list, collapsed popup and their counts, including socket updates.
+export const hermesActivityRows = derived(
+	[hermesActiveRuns, hermesBackgroundRuns, workActivity, hermesUnreadChatIds],
+	([runs, background, work, unread]) =>
+		selectHermesActivityRows({ runs, background, work, unread: [...unread] })
+);
 
 /**
  * The one poll of the signed-in user's hermes activity (runs executing, the

@@ -8,11 +8,13 @@ vi.mock('$lib/apis/hermes', () => ({
 }));
 
 import { getHermesActivity, markHermesChatRead } from '$lib/apis/hermes';
-import { chatId, hermesActiveRuns, hermesUnreadChatIds, workActivity } from '$lib/stores';
+import { chatId, hermesActiveRuns, hermesBackgroundRuns, hermesUnreadChatIds, workActivity } from '$lib/stores';
 import {
 	__resetHermesActivityForTests,
 	applyHermesChatEvent,
+	hermesActivityRows,
 	refreshHermesActivity,
+	selectHermesActivityRows,
 	startHermesActivityPolling
 } from './hermes-activity';
 
@@ -29,8 +31,91 @@ const run = (chat: string, extra: Record<string, unknown> = {}) => ({
 beforeEach(() => {
 	__resetHermesActivityForTests();
 	hermesActiveRuns.set([]);
+	hermesBackgroundRuns.set([]);
+	workActivity.set([]);
 	hermesUnreadChatIds.set(new Set());
 	chatId.set('');
+});
+
+describe('one running row per chat', () => {
+	const background = (chat: string, updated = 10) => ({
+		chat_id: chat,
+		run_id: `runner-${chat}-${updated}`,
+		agent: 'codex',
+		status: 'running',
+		started_at: 2,
+		updated_at: updated,
+		step: 3,
+		last_activity: '渲染中',
+		title: '视频任务'
+	});
+	const work = (chat: string | null, kind: 'video' | 'chat' | 'team' = 'video', id = chat ?? kind) => ({
+		kind, id, chat_id: chat, title: '视频任务', href: `/c/${chat}`, started_at: 1,
+		state: 'running' as const
+	});
+
+	it('selects the latest runner over Hermes, work and unread without changing the sources', () => {
+		const activity = {
+			runs: [run('a'), run('b')],
+			background: [background('a'), background('a', 20)],
+			work: [work('a'), work('b'), work('c')],
+			unread: ['a', 'b', 'c', 'd', 'd']
+		};
+		const before = structuredClone(activity);
+		const selected = selectHermesActivityRows(activity);
+		expect(selected.runs).toEqual([activity.runs[1]]);
+		expect(selected.background).toEqual([activity.background[1]]);
+		expect(selected.work).toEqual([activity.work[2]]);
+		expect(selected.unread).toEqual(['d']);
+		expect(activity).toEqual(before);
+	});
+
+	it('keeps approvals ahead of newer runs and runners, and unrelated work without a chat', () => {
+		const approval = run('a', { awaiting_approval: true, approval: { request_id: 'q1' } });
+		const waiting = { ...work('b', 'team'), state: 'waiting' as const };
+		const selected = selectHermesActivityRows({
+			runs: [run('a', { started_at: 30 }), approval, run('c'), run('c', { started_at: 20 })],
+			background: [background('a'), background('b')],
+			work: [work('a'), work('b'), waiting, work(null, 'team'), work(null, 'video'), work(null, 'video')],
+			unread: ['a', 'b']
+		});
+		expect(selected.runs).toEqual([approval, run('c', { started_at: 20 })]);
+		expect(selected.background).toEqual([]);
+		expect(selected.work).toEqual([waiting, work(null, 'team'), work(null, 'video')]);
+		expect(selected.unread).toEqual([]);
+	});
+
+	it('handles local approval insertion and resolution while keeping runner stop data', () => {
+		const runner = background('a');
+		hermesBackgroundRuns.set([runner]);
+		workActivity.set([work('a')]);
+		hermesUnreadChatIds.set(new Set(['a']));
+		expect(get(hermesActivityRows).background).toEqual([runner]);
+		const event = {
+			chat_id: 'a', message_id: 'm-a',
+			data: { type: 'hermes:approval', data: { request_id: 'q1', run_id: 'run-a', command: 'render' } }
+		};
+		applyHermesChatEvent(event);
+		applyHermesChatEvent(event);
+		expect(get(hermesActiveRuns)).toHaveLength(1);
+		expect(get(hermesActivityRows).runs[0].approval?.request_id).toBe('q1');
+		expect(get(hermesActivityRows).background).toEqual([]);
+		expect(get(hermesActivityRows).work).toEqual([]);
+		expect(get(hermesActivityRows).unread).toEqual([]);
+		expect(get(hermesBackgroundRuns)).toEqual([runner]);
+		applyHermesChatEvent({
+			chat_id: 'a', data: { type: 'hermes:approval:resolved', data: { request_id: 'q1' } }
+		});
+		expect(get(hermesActivityRows).runs).toEqual([]);
+		expect(get(hermesActivityRows).background[0].run_id).toBe(runner.run_id);
+		expect(get(hermesActiveRuns)).toHaveLength(1);
+		// Progress expiry reveals the pending video task after the Hermes turn ends.
+		applyHermesChatEvent({
+			chat_id: 'a', data: { type: 'chat:completion', data: { hermes_run: { active: false } } }
+		});
+		hermesBackgroundRuns.set([]);
+		expect(get(hermesActivityRows).work).toEqual([work('a')]);
+	});
 });
 
 afterEach(() => {

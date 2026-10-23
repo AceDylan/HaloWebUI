@@ -1,15 +1,7 @@
 <script lang="ts">
 	import { onMount, onDestroy, getContext } from 'svelte';
-	import {
-		chatId,
-		chats,
-		hermesActiveRuns,
-		hermesBackgroundRuns,
-		hermesUnreadChatIds,
-		mobile,
-		pinnedChats,
-		workActivity
-	} from '$lib/stores';
+	import { chatId, chats, mobile, pinnedChats } from '$lib/stores';
+	import { hermesActivityRows } from '$lib/utils/hermes-activity';
 	import { describeBackgroundRun } from '$lib/utils/run-activity';
 	import { createRunStopper } from '$lib/utils/runner-stop';
 	import { formatToolDuration } from '$lib/utils/tool-call-preview';
@@ -32,10 +24,10 @@
 	let now = Date.now() / 1000;
 	let clockTimer: ReturnType<typeof setInterval> | null = null;
 
-	$: runs = $hermesActiveRuns;
+	$: runs = $hermesActivityRows.runs;
 	// reclaude / codex / agy runs a chat launched, as their reporters last
 	// described them (the launching hermes turn is over by then).
-	$: background = $hermesBackgroundRuns;
+	$: background = $hermesActivityRows.background;
 	// Titles come from the chat lists already loaded; unread chats are recent,
 	// so they are almost always on the first page.
 	$: knownTitles = new Map(
@@ -43,10 +35,11 @@
 	);
 	// Every other mode at work (a chat replying, 精答, 讨论台, 协作台, 自动分流, 生图), each row
 	// marked with its mode; amber when it waits for you (a plan to approve, a member's question).
-	$: work = $workActivity;
+	$: work = $hermesActivityRows.work;
 	const WORK_LABEL: Record<string, string> = {
 		chat: '对话',
 		image: '生图',
+		video: '视频',
 		answer: '精答',
 		discuss: '讨论',
 		team: '协作',
@@ -55,7 +48,7 @@
 	$: workCurrent = (row: { chat_id: string | null; id: string }) =>
 		!!$chatId && (row.chat_id === $chatId || row.id === $chatId);
 	$: unread = showUnread
-		? [...$hermesUnreadChatIds].map((id) => ({ id, title: knownTitles.get(id) ?? null }))
+		? $hermesActivityRows.unread.map((id) => ({ id, title: knownTitles.get(id) ?? null }))
 		: [];
 
 	// Same words as every other duration: "45 秒", "12 分 3 秒". Reactive on `now`, so every

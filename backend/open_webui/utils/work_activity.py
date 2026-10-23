@@ -1,10 +1,9 @@
 """运行中 beyond Hermes: what else is working for the user right now, one row per piece of work.
 
 Hermes runs and background runners keep their own rows (``list_active_runs`` /
-``list_runner_progress``); this adds an ordinary chat writing its reply (or drawing a picture),
-精答, 讨论台, 协作台, 自动分流 choosing a mode, and the image studio making pictures, so the sidebar
-answers "what is still going" for every mode. Everything here is read from memory or one bounded
-query: it runs on the sidebar's 10 s poll.
+``list_runner_progress``); this also covers Hermes before registration and video tasks between
+runner reports, alongside ordinary replies, 精答, 讨论台, 协作台, 自动分流 and the image studio.
+Everything here is read from memory or bounded queries: it runs on the sidebar's 10 s poll.
 
 Row: ``{kind, id, title, href, started_at, state}`` — ``state`` is ``running``, or ``waiting``
 when the work waits for the user (a team's plan to approve, a member's question).
@@ -17,6 +16,10 @@ from typing import Optional
 log = logging.getLogger(__name__)
 
 TEAM_LIMIT = 10
+VIDEO_LIMIT = 8  # the video workbench's own list
+# the longest a runner may make a video (reclaude-run.sh: anyclaude's --timeout); a task older
+# than that whose runner never reported back is not still running
+VIDEO_WINDOW_SECONDS = 4 * 3600
 TEAM_FINISHING_SECONDS = 600  # routers/teams.py RECENT_FINISH_SECONDS: how long a result may take to settle
 # titles a chat has before it is named: the row shows the question instead
 PLACEHOLDER_TITLES = {"New Chat", "新对话", "新聊天", "新精答", "新讨论"}
@@ -45,7 +48,7 @@ def _chat_replies(user_id: str, skip: set[str]) -> list[dict]:
         if meta.get("owner_id") != user_id or not chat_id or chat_id == "local" or chat_id in skip:
             continue
         # follow-up work after the reply (titles, tags) does not keep a chat "running"
-        if not meta.get("blocks_completion", True) or meta.get("kind") not in (None, "image"):
+        if not meta.get("blocks_completion", True) or meta.get("kind") not in (None, "image", "hermes"):
             continue
         started = float(meta.get("started_at") or time.time())
         kind = "image" if meta.get("kind") == "image" else "chat"
@@ -130,10 +133,24 @@ def _studio(user_id: str) -> list[dict]:
             for run in active_image_runs(user_id)]
 
 
+def _video_studio(user_id: str) -> list[dict]:
+    """Video tasks as the workbench reads them: the brief waiting for its 提示词增强, and a runner
+    between progress reports (a restart forgets the reports until the next one comes)."""
+    from open_webui.utils.video_tasks import list_tasks
+
+    return [{"kind": "video", "id": task["chatId"], "chat_id": task["chatId"],
+             "href": f"/c/{task['chatId']}", "title": task["title"],
+             "started_at": task["startedAt"], "state": "running",
+             "note": "后台制作中" if task["state"] == "background" else
+                     ("增强需求中" if task["prep"] == "running" else "制作中")}
+            for task in list_tasks(user_id, limit=VIDEO_LIMIT, since=int(time.time()) - VIDEO_WINDOW_SECONDS)
+            if task["state"] in ("running", "background")]
+
+
 def list_work(user_id: str, hermes_chat_ids: set[str]) -> list[dict]:
     """Everything above, oldest first. ``hermes_chat_ids``: chats the Hermes rows already show."""
     rows: list[dict] = []
-    for part in (_desks, _teams, _routes, _studio):
+    for part in (_desks, _teams, _routes, _studio, _video_studio):
         try:
             rows.extend(part(user_id))
         except Exception:

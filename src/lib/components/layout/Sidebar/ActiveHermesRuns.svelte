@@ -1,13 +1,7 @@
 <script lang="ts">
 	import { getContext } from 'svelte';
-	import {
-		hermesActiveRuns,
-		hermesBackgroundRuns,
-		hermesUnreadChatIds,
-		mobile,
-		showSidebar,
-		workActivity
-	} from '$lib/stores';
+	import { mobile, showSidebar } from '$lib/stores';
+	import { hermesActivityRows } from '$lib/utils/hermes-activity';
 	import Folder from '../../common/Folder.svelte';
 	import Modal from '../../common/Modal.svelte';
 	import Tooltip from '../../common/Tooltip.svelte';
@@ -28,11 +22,14 @@
 
 	let showPopup = false;
 
-	$: unreadCount = $hermesUnreadChatIds.size;
+	$: unreadCount = $hermesActivityRows.unread.length;
 	$: approvalCount =
-		$hermesActiveRuns.filter((run) => run.awaiting_approval).length +
-		$workActivity.filter((row) => row.state === 'waiting').length;
-	$: runningCount = $hermesActiveRuns.length + $hermesBackgroundRuns.length + $workActivity.length;
+		$hermesActivityRows.runs.filter((run) => run.awaiting_approval).length +
+		$hermesActivityRows.work.filter((row) => row.state === 'waiting').length;
+	$: runningCount =
+		$hermesActivityRows.runs.length +
+		$hermesActivityRows.background.length +
+		$hermesActivityRows.work.length;
 	// Nothing left to show (the last run finished and was opened elsewhere).
 	$: if (showPopup && runningCount === 0 && unreadCount === 0) {
 		showPopup = false;

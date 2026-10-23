@@ -225,7 +225,7 @@ const requirementLines = (opts: Omit<VideoBriefOptions, 'idea'>) => {
 /** The settings for 提示词增强 to size the content to (it never changes them). */
 export const videoSettingsText = (opts: Omit<VideoBriefOptions, 'idea'>): string => {
 	const lines = requirementLines(opts);
-	lines.push(...videoStyleLines(opts.style, opts.customStyle));
+	lines.push(...videoStyleLines(opts.style, opts.customStyle, opts.recipe));
 	const attachments = opts.attachments ?? [];
 	if (opts.music) lines.push(`- 背景音乐：用户指定（${plainName(opts.music.name)}），视频按音乐的节拍和长度做`);
 	// The server accepts 1500 characters. Bound names after the essential constraints.
@@ -277,7 +277,7 @@ export const buildVideoBrief = (opts: VideoBriefOptions): string => {
 		'',
 		'## 要求',
 		...requirementLines(opts),
-		...videoStyleLines(opts.style, opts.customStyle)
+		...videoStyleLines(opts.style, opts.customStyle, opts.recipe)
 	];
 	if (attachments.length) {
 		const counts = attachmentCounts(attachments);

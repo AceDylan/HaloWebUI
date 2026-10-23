@@ -129,7 +129,7 @@ export const cleanCustomStyle = (value: unknown): string =>
 				.slice(0, VIDEO_STYLE_CUSTOM_MAX)
 		: '';
 
-export const videoStyleLines = (style: VideoStyleKey = 'auto', custom = ''): string[] => {
+export const videoStyleLines = (style: VideoStyleKey = 'auto', custom = '', recipe = ''): string[] => {
 	const preset = VIDEO_STYLES.find((s) => s.key === style);
 	const direction = preset
 		? `${preset.label}。${preset.hint}`
@@ -141,11 +141,11 @@ export const videoStyleLines = (style: VideoStyleKey = 'auto', custom = ''): str
 	return [
 		`- 视觉风格：${direction}`,
 		'- 风格优先级：用户明确的视觉要求优先；所选风格约束增强补充的视觉细节。做法、画幅、时长、配音、字幕与配乐设置不因风格改变；关闭字幕时不生成旁白字幕或花字，用户明确要求的标题、图表标签可保留。',
-		...(style !== 'auto' && style !== 'reference'
-			? [
-					'- 参考处理：以所选风格为视觉基准；附件只提供用户指定的内容、构图或动作参考，不自动覆盖风格。'
-				]
-			: []),
-		'- 素材剪辑保持原素材主体，风格用于排版、调色与转场，不默认重绘实拍。参考作品的水印和角色不直接复用。'
+		// 素材剪辑: the attached footage is the material, so it is never reduced to a reference.
+		recipe === 'footage'
+			? '- 素材剪辑保持原素材主体，风格用于排版、调色与转场，不默认重绘实拍。参考作品的水印和角色不直接复用。'
+			: style !== 'auto' && style !== 'reference'
+				? '- 参考处理：以所选风格为视觉基准；附件只提供用户指定的内容、构图或动作参考，不自动覆盖风格。参考作品的水印和角色不直接复用。'
+				: '- 参考作品的水印和角色不直接复用。'
 	];
 };

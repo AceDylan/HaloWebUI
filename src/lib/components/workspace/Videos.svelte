@@ -642,7 +642,8 @@
 		try {
 			const job = await getStudioPrep(localStorage.token, saved.id);
 			if (!idea.trim()) idea = saved.original || job.idea;
-			await followPrep(job, saved.original || job.idea, saved.fingerprint || '');
+			// a job saved without its settings snapshot is taken as made for the settings on screen
+			await followPrep(job, saved.original || job.idea, saved.fingerprint || prepFingerprint);
 		} catch {
 			rememberJob(null);
 		}

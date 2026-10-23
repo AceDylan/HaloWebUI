@@ -265,6 +265,10 @@ describe('video visual styles', () => {
 		const footage = buildVideoBrief({ ...opts, recipe: 'footage', style: 'paper' });
 		expect(footage).toContain('素材剪辑保持原素材主体');
 		expect(footage).not.toContain('只当风格参考');
+		// the footage is the material: no line may reduce it to a reference
+		expect(footage).not.toContain('附件只提供用户指定的内容');
+		expect(videoSettingsText({ ...opts, recipe: 'footage', style: 'paper' })).not.toContain('附件只提供用户指定的内容');
+		expect(preset).not.toContain('素材剪辑保持原素材主体');
 	});
 
 	it('normalizes old settings and bounds custom descriptions as one plain line', () => {

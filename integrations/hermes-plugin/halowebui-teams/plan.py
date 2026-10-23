@@ -25,7 +25,8 @@ DEFAULT_PARALLEL_CAP = 2
 _NAME_RE = re.compile(r"^[a-z][a-z0-9-]{1,30}$")
 _KEY_RE = re.compile(r"^[A-Za-z0-9_-]{1,12}$")
 _FENCE_RE = re.compile(r"```(?:json)?\s*(.*?)```", re.S)
-EXECUTOR_SOURCES = ("auto", "goal", "user")
+# "decision": HaloWebUI's 辅助决策模型 picked it (plan/decide); like "goal", the chain starts there
+EXECUTOR_SOURCES = ("auto", "goal", "user", "decision")
 
 SYSTEM_PROMPT = """你是一个多代理团队的负责人（team-lead）。用户给你一个协作目标，你要把它拆成：团队成员（角色）和带依赖关系的任务计划。
 
@@ -207,7 +208,7 @@ MODEL_HINTS = {
     "gemini-chat": "长上下文、读大量资料、多模态",
     "deepseek-chat": "快而省：简单查询、整理格式、小改动",
 }
-MODEL_SOURCES = ("lead", "default", "user")
+MODEL_SOURCES = ("lead", "default", "user", "decision")
 
 
 def hermes_models(cfg: Optional[dict] = None) -> list[dict]:
@@ -383,7 +384,7 @@ def assign_runners(members: list[dict], availability: Optional[dict] = None) -> 
     for m in members:
         source = m.get("executor_source") if m.get("executor_source") in EXECUTOR_SOURCES else "auto"
         default = runners.kind_default(m["kind"])
-        start = m.get("executor") if source in ("goal", "user") and m.get("executor") in EXECUTORS else default
+        start = m.get("executor") if source in ("goal", "user", "decision") and m.get("executor") in EXECUTORS else default
         if m["kind"] == "image":  # gpt-image is a Hermes tool: no runner can draw for this member
             start, source = "hermes", "auto"
         m.update(executor_source=source, recommended=default, executor=start)
@@ -570,6 +571,8 @@ def validate_plan(raw: Any, *, parallel_cap: int = DEFAULT_PARALLEL_CAP,
         plan["assistant_library"] = {"may_write": bool(raw["assistant_library"].get("may_write"))}
     if isinstance(raw.get("lead_model"), dict):
         plan["lead_model"] = raw["lead_model"]
+    if isinstance(raw.get("decider"), dict):
+        plan["decider"] = raw["decider"]
     if isinstance(raw.get("project"), dict) and raw["project"].get("path"):
         plan["project"] = {k: raw["project"].get(k) for k in ("path", "name", "branch", "head", "dirty", "auto")
                            if raw["project"].get(k) not in (None, "")}
@@ -712,3 +715,50 @@ def propose_plan(goal: str, workspace: str, *, feedback: str = "", previous: Opt
             {"role": "user", "content": "这个计划不能用：" + "；".join(last_errors) + "。请改正后只输出 JSON。"},
         ]
     return {"ok": False, "error": "负责人给出的计划两次都没通过检查：" + "；".join(last_errors)}
+
+
+# --- HaloWebUI's 辅助决策模型 ---------------------------------------------------------------------
+# The lead writes the plan (roles, tasks, new assistants: text); a decision model HaloWebUI's user
+# chose may then pick each member's executor, model and assistant from what is offered here. The
+# picks come back through apply_decision and the plan is validated again like any other.
+
+def decision_options() -> dict:
+    """What a member may be given: Hermes' models and the executors with their availability now."""
+    availability = runners.check()
+    return {
+        "models": hermes_models(),
+        "executors": [{"name": name, "label": runners.BY_NAME[name].label, "note": runners.BY_NAME[name].note,
+                       "available": bool((availability.get(name) or {}).get("available")) or runners.BY_NAME[name].native,
+                       "reason": (availability.get(name) or {}).get("reason") or ""}
+                      for name in EXECUTORS if name in runners.BY_NAME],
+        "kinds": {k: runners.kind_default(k) for k in runners.KINDS},
+    }
+
+
+def apply_decision(plan: dict, picks: Any, library: Optional[dict] = None,
+                   availability: Optional[dict] = None) -> tuple[Optional[dict], list[str]]:
+    """The plan with the decision's picks — ``{member: {executor?, model?, assistant?}}`` — for
+    what is still automatic: an executor the goal or the user named, a model the user picked, an
+    assistant the user preferred and an image member's executor stay. Then validated again."""
+    if not isinstance(plan, dict) or not isinstance(picks, dict):
+        return None, ["决策结果格式不对"]
+    plan = json.loads(json.dumps(plan))
+    names = {m["model"] for m in configured_models()}
+    usable = library_mod.usable(library) if library is not None else None
+    for member in plan.get("members") or []:
+        pick = picks.get(member.get("name")) if isinstance(member, dict) else None
+        if not isinstance(pick, dict):
+            continue
+        executor = str(pick.get("executor") or "")
+        if (executor in EXECUTORS and member.get("kind") != "image"
+                and member.get("executor_source") not in ("goal", "user")):
+            member.update(executor=executor, executor_source="decision")
+        model = str(pick.get("model") or "")
+        if model in names and member.get("model_source") != "user":
+            member.update(model=model, model_source="decision")
+        ref = str(pick.get("assistant") or "")
+        if ref and usable is not None and not member.get("assistant_preferred"):
+            chosen = library_mod.choice_for(usable, ref, str(pick.get("reason") or ""))
+            if chosen is not None:
+                member["assistant"] = chosen
+    return validate_plan(plan, availability=availability)

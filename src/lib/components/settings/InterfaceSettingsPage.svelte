@@ -4,6 +4,7 @@
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
 	import InterfacePreferences from '$lib/components/settings/InterfacePreferences.svelte';
+	import DecisionModelSetting from '$lib/components/settings/DecisionModelSetting.svelte';
 	import AdminInterface from '$lib/components/admin/Settings/Interface.svelte';
 	import InlineDirtyActions from '$lib/components/admin/Settings/InlineDirtyActions.svelte';
 	import { user } from '$lib/stores';
@@ -167,6 +168,12 @@
 					}}
 				/>
 			</section>
+			{#if selectedTab === 'chat'}
+				<!-- saved on its own (server side, per user): outside the section's save/reset -->
+				<section class="glass-section p-5">
+					<DecisionModelSetting />
+				</section>
+			{/if}
 		{:else if isAdmin}
 			<section class="p-5 space-y-3 transition-all duration-300 {tasksDirty ? 'glass-section glass-section-dirty' : 'glass-section'}">
 				<AdminInterface

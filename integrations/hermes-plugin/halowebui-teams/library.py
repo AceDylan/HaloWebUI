@@ -189,6 +189,29 @@ def _template_choice(template: dict, reason: str = "", note: str = "") -> dict:
     return out
 
 
+def _use_choice(target: dict, reason: str = "", note: str = "") -> dict:
+    out = {"ref": target["ref"], "id": target["id"], "name": target["name"], "emoji": target["emoji"],
+           "description": target["description"], "domain": target["domain"], "version": target["version"],
+           "action": "use"}
+    if reason:
+        out["reason"] = reason
+    if note:
+        out["note"] = note
+    return out
+
+
+def choice_for(library: dict, ref: str, reason: str = "") -> Optional[dict]:
+    """A member's assistant for a ref picked from the library HaloWebUI sent (a 辅助决策 pick):
+    one of the user's assistants as it is, or a template; None for anything else."""
+    reason = _text(reason, REASON_MAX)
+    if not ref.startswith("builtin:"):
+        target = _library_entry(library, ref)
+        if target is not None:
+            return _use_choice(target, reason)
+    template = _template_entry(library, ref)
+    return _template_choice(template, reason) if template is not None else None
+
+
 class Choices:
     """One plan's assistant decisions while the validator reads the members."""
 
@@ -293,14 +316,7 @@ class Choices:
         return None, None
 
     def _use(self, target: dict, reason: str, note: str = "") -> dict:
-        out = {"ref": target["ref"], "id": target["id"], "name": target["name"], "emoji": target["emoji"],
-               "description": target["description"], "domain": target["domain"], "version": target["version"],
-               "action": "use"}
-        if reason:
-            out["reason"] = reason
-        if note:
-            out["note"] = note
-        return out
+        return _use_choice(target, reason, note)
 
     def _proposed(self, proposal: dict, reason: str, target: Optional[dict] = None) -> dict:
         out = {"ref": proposal.get("ref") or "", "id": target["id"] if target else "", "name": proposal["name"],

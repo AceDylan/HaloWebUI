@@ -179,6 +179,88 @@ def normalize_plan(
     }
 
 
+# 辅助决策 (utils/decision_model.py): the dispatcher's choices as typed questions over the shortlist.
+# "new" (none fits: design or upgrade one) goes to the dispatcher, which writes the assistant.
+NEW_KEY = "new"
+DECISION_ASSISTANTS = 7
+DECISION_TEMPLATES = 4
+
+
+def _candidate_text(entry: dict) -> str:
+    about = entry.get("description") or entry.get("domain") or clean_text(entry.get("prompt"), 160)
+    return clean_text(f"{entry.get('name') or entry.get('ref')} — {about}", 300)
+
+
+def decision_request(
+    question: str,
+    assistants: list[dict],
+    templates: list[dict],
+    bases: list[dict],
+    *,
+    default_base: str,
+    web_allowed: bool,
+    background: str = "",
+    chosen: str = "",
+) -> tuple[dict, dict, dict]:
+    """(state, questions, keys) for the decision model: which assistant (unless the user chose
+    one), which model answers when it is a template or a new one, and whether to search the web.
+    ``keys`` maps option keys back to refs and base ids."""
+    from open_webui.utils import decision_model as dm
+
+    keys: dict = {"assistant": {}, "base": {}}
+    questions: dict = {}
+    options: dict = {}
+    if not chosen:
+        for index, entry in enumerate(assistants[:DECISION_ASSISTANTS], 1):
+            keys["assistant"][f"a{index}"] = entry["ref"]
+            options[f"a{index}"] = _candidate_text(entry)
+        for index, entry in enumerate(templates[:DECISION_TEMPLATES], 1):
+            keys["assistant"][f"t{index}"] = entry["ref"]
+            options[f"t{index}"] = _candidate_text(entry) + " (template)"
+        options[NEW_KEY] = "None of these fits the question well: a new specialist should be designed (or one upgraded)."
+        questions["assistant"] = dm.choice(
+            "Which assistant should answer `question` (see `background`)? Pick the one whose field fits the question best.", options
+        )
+    pool = [b for b in bases if b["id"] == default_base] + [b for b in bases if b["id"] != default_base]
+    for index, base in enumerate(pool[: dm.MAX_OPTIONS], 1):
+        keys["base"][f"m{index}"] = base["id"]
+    if len(keys["base"]) >= 2:
+        questions["base"] = dm.choice(
+            "Which model should write the answer to `question` when the assistant is a template or a new one?",
+            {k: _base_label(bases, ref) for k, ref in keys["base"].items()},
+        )
+    if web_allowed:
+        questions["web_search"] = dm.noul(
+            "Does a good answer to `question` need current or real-world facts that may have changed (news, prices, releases, "
+            "versions, schedules, recent events, specific products or people)? No for reasoning, writing, coding, maths, "
+            "explanations of stable knowledge or anything personal."
+        )
+    state = {"question": question, "background": clean_text(background, 1500)}
+    if options:
+        state["assistants"] = options
+    return state, questions, keys
+
+
+def _base_label(bases: list[dict], ref: str) -> str:
+    """A base's name; with its id when two connections offer models of the same name."""
+    name = lib.base_name(bases, ref)
+    return f"{name} ({ref})" if sum(1 for b in bases if b["name"] == name) > 1 else name
+
+
+def raw_from_answers(answers: dict, keys: dict, reason: str, *, chosen: str = "", default_base: str = "") -> Optional[dict]:
+    """The decision as the dispatcher's JSON (normalize_plan checks it); None when it chose "new"."""
+    from open_webui.utils import decision_model as dm
+
+    pick = answers["assistant"]["choice"] if "assistant" in answers else None
+    if pick == NEW_KEY:
+        return None
+    ref = chosen or keys["assistant"][pick]
+    base = keys["base"][answers["base"]["choice"]] if "base" in answers else default_base
+    raw = {"units": [{"key": UNIT_KEY, "action": "use", "ref": ref, "assistant": {"base_model": base}, "reason": reason}]}
+    raw["web_search"] = "web_search" in answers and dm.yes(answers["web_search"])
+    return raw
+
+
 def _is_chosen(decision: dict, chosen: str) -> bool:
     target, template = decision.get("target"), decision.get("template")
     return bool((target and target["ref"] == chosen) or (template and template["ref"] == chosen))

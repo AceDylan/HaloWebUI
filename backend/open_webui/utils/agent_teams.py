@@ -180,10 +180,22 @@ async def _plan_job(team: AgentTeamModel, target: HermesTarget, feedback: str, p
         library = await plan_library(team, access) if access is not None else None
         if library is not None:
             request_body["library"] = library
+        assisted = _decision_model_set(access)
+        if assisted:
+            request_body["decision_options"] = True  # what the 辅助决策模型 may pick from
         body = await hermes_call(target, "POST", "/plan", json_body=request_body, timeout=PLAN_TIMEOUT_SECONDS)
         ok = isinstance(body, dict) and body.get("ok") and isinstance(body.get("plan"), dict)
         if ok:
             plan = body["plan"]
+            if assisted:
+                from open_webui.utils.team_decision import assist
+
+                # executors, models and assistants still automatic: the user's decision model
+                # (validated again by Hermes); the lead's plan as it is when it fails
+                try:
+                    plan = await assist(access.request, access.user, target, team, plan, body.get("options"), library)
+                except Exception:  # noqa: BLE001 — never lose the lead's plan to the decision step
+                    log.warning("teams: decision step for %s failed; keeping the lead's plan", team.id, exc_info=True)
             updated = AgentTeams.update(team.id, team.user_id, expect_status=("planning",), status="plan_ready",
                                         plan=plan, error=None, title=(plan.get("title") or team.title)[:60])
             from open_webui.utils.team_chats import follow_title
@@ -208,6 +220,19 @@ async def _plan_job(team: AgentTeamModel, target: HermesTarget, feedback: str, p
                                     error=f"规划出错：{type(exc).__name__}")
     if updated is not None and team_origin(updated):
         await _tell_origin(updated, target)
+
+
+def _decision_model_set(access: Optional["AssistantAccess"]) -> bool:
+    """Whether the user has a 辅助决策模型 (none: planning exactly as before)."""
+    from open_webui.utils import decision_model as dm
+
+    user = getattr(access, "user", None)
+    if user is None or getattr(access, "request", None) is None:
+        return False
+    try:
+        return bool(dm.current(user))
+    except Exception:  # noqa: BLE001
+        return False
 
 
 async def _tell_origin(team: AgentTeamModel, target: HermesTarget) -> None:

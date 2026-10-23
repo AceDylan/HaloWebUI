@@ -656,10 +656,10 @@ async def _match(request: Request, user, chat_id: str, ask: dict, call_model) ->
             auto.append(seat)
 
     error = None
+    trace = None
     duties: dict[str, str] = {}
     if auto:
         previous = _last_choices(chat_id, user, ask["id"])
-        units = [_unit_of(seat, previous.get(seat["id"])) for seat in auto]
         question = ask.get("question") or ""
         context = (ask.get("context") or {}).get("text") or ""
         roles = " ".join(f"{s.get('role') or ''} {s.get('duty') or ''}" for s in auto)
@@ -667,6 +667,28 @@ async def _match(request: Request, user, chat_id: str, ask: dict, call_model) ->
         moderator = (ask.get("moderator") or {}).get("model") or auto[0]["model"]
         default_base = moderator if any(b["id"] == moderator for b in bases) else (bases[0]["id"] if bases else "")
         options = {"default_base": default_base, "may_write": may_write}
+        from open_webui.utils import decision_model as dm
+
+        async def assisted(decider):
+            # 辅助决策模型: each automatic seat's assistant from the shortlist; "new" seats go on
+            # to the dispatcher below, which writes assistants
+            last = {sid: (c or {}).get("name") for sid, c in previous.items()}
+            state, questions, keys = room.match_decision_request(ask=ask, seats=auto, assistants=short_assistants, templates=templates, last=last)
+            answers, reason = await decider.judge(state, questions)
+            raw, new = room.match_from_decision(answers, keys, auto, reason or f"{decider.name} 的判断")
+            found = lib.normalize_decisions(raw, [{"key": u["key"]} for u in raw["units"]], assistants, templates, bases, allow_generic=True, **options)
+            if len(found) < len(raw["units"]):
+                raise dm.DecisionError("决策选中的助手没有通过检查")
+            summary = {key: (d.get("target") or d.get("template") or {}).get("name") or d["action"] for key, d in found.items()}
+            return (found, new), {**summary, **{key: "new → 主持人设计" for key in new}}
+
+        decided, trace = await dm.decide(request, user, "discuss", assisted, timeout=45)
+        if decided is not None:
+            found, new = decided
+            decisions.update(found)
+            auto = [seat for seat in auto if seat["id"] in new]
+        units = [_unit_of(seat, previous.get(seat["id"])) for seat in auto]
+    if auto:
         messages = lib.dispatch_messages(
             units,
             short_assistants,
@@ -689,12 +711,7 @@ async def _match(request: Request, user, chat_id: str, ask: dict, call_model) ->
                 if kind == "content":
                     text += part
             raw = lib.parse_json_object(text)
-            auto_decisions = lib.normalize_decisions(raw, units, assistants, templates, bases, allow_generic=True, **options)
-            if mode == "compare" and auto_decisions:
-                # one assistant for every seat: the comparison is between the models
-                first = next(d for d in (auto_decisions.get(u["key"]) for u in units) if d)
-                auto_decisions = {u["key"]: first for u in units}
-            decisions.update(auto_decisions)
+            decisions.update(lib.normalize_decisions(raw, units, assistants, templates, bases, allow_generic=True, **options))
             for item in raw.get("units") or []:
                 if isinstance(item, dict) and item.get("key") and item.get("duty"):
                     duties[str(item["key"])] = str(item["duty"])
@@ -705,12 +722,17 @@ async def _match(request: Request, user, chat_id: str, ask: dict, call_model) ->
             log.info("discussion %s: dispatcher failed: %s", chat_id, exc)
             error = f"匹配助手失败（{room._short_error(exc)[:120]}），自动席位用通用角色"
 
+    automatic = [seat["id"] for seat in seats if seat.get("assist") == "auto"]
+    first = next((decisions[key] for key in automatic if decisions.get(key)), None)
+    if mode == "compare" and first:
+        # one assistant for every automatic seat: the comparison is between the models
+        decisions.update({key: first for key in automatic})
     choices = lib.carry_out(
         user, decisions, source="discuss", run_ref=f"discuss:{chat_id}:{ask['id']}", question=ask.get("question") or "", may_write=may_write
     )
     for seat_id, note in notes.items():
         choices.setdefault(seat_id, {"action": "generic", "saved": False, "note": note})
-    return {"choices": choices, "duties": duties, "error": error}
+    return {"choices": choices, "duties": duties, "error": error, "decider": trace}
 
 
 async def _plan(request: Request, user, ask: dict, call_model, history: list[dict]) -> dict:
@@ -764,13 +786,35 @@ async def _plan(request: Request, user, ask: dict, call_model, history: list[dic
             "seats": [{"model": entry["ref"]} for entry in _diverse(pool, 3)],
             "reason": "不同家族的模型圆桌讨论两轮",
         }
+
+    async def assisted(decider):
+        # 辅助决策模型: format, rounds and each seat's model; the roles and duties are the draft's
+        state, questions, keys = room.plan_decision_request(ask=ask, pool=pool, draft=draft)
+        answers, reason = await decider.judge(state, questions)
+        decided = room.plan_from_decision(answers, keys, draft, pool, reason or f"{decider.name} 安排")
+        checked = room.normalize_setup(
+            {"mode": decided["mode"], "rounds": decided["rounds"], "seats": decided["seats"], "moderator": moderator, "smart": True},
+            models_map,
+            ambiguous,
+            user,
+        )
+        return (checked, decided["reason"]), {
+            "mode": decided["mode"], "rounds": decided["rounds"], "seats": [seat["name"] for seat in checked["seats"]]
+        }
+
+    from open_webui.utils import decision_model as dm
+
+    decided, trace = await dm.decide(request, user, "discuss", assisted, models_map=models_map, ambiguous=ambiguous, timeout=45)
+    if decided is not None:
+        setup, reason = decided
+        return {"setup": setup, "reason": reason, "error": None, "decider": trace}
     setup = room.normalize_setup(
         {"mode": draft["mode"], "rounds": draft["rounds"], "seats": draft["seats"], "moderator": moderator, "smart": True},
         models_map,
         ambiguous,
         user,
     )
-    return {"setup": setup, "reason": draft["reason"], "error": error}
+    return {"setup": setup, "reason": draft["reason"], "error": error, "decider": trace}
 
 
 def _last_choices(chat_id: str, user, current_ask_id: str) -> dict:

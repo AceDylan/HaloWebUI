@@ -262,6 +262,13 @@
 						<span class="tm-eyebrow">问题</span>
 						<span aria-hidden="true">·</span>
 						<span>调度 {run.planner.name}</span>
+						{#if run.plan?.decider}
+							<span aria-hidden="true">·</span>
+							<span data-decision-note data-fallback={run.plan.decider.fallback ? 'true' : 'false'}
+								title={run.plan.decider.fallback ? `没用上：${run.plan.decider.reason ?? ''}` : ''}
+								>辅助决策 {run.plan.decider.name}{run.plan.decider.fallback ? '（未采用）' : ''}</span
+							>
+						{/if}
 						<span aria-hidden="true">·</span>
 						<span>{timeAgo(Math.floor(run.startedAt / 1000), $now)}</span>
 					</div>

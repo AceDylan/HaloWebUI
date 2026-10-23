@@ -38,6 +38,8 @@ LABEL_MAX_CHARS = 200
 CONTEXT_MAX_CHARS = 6000
 STATE_MAX_CHARS = 60000
 REQUEST_TIMEOUT = 60
+# metadata key of a 辅助决策 request (utils/decision_model.REQUEST_KEY): sent to /systemone as it is
+DECISION_REQUEST_KEY = "systemone_request"
 
 # jev-latest, also behind a connection prefix (94dae559.jev-latest) or a modelref (…::jev-latest)
 _MODEL_RE = re.compile(r"(?:^|[/.:])jev(?:$|[-_.:@])", re.I)
@@ -528,6 +530,16 @@ async def chat_completion(request, user, *, form_data: dict, model: str, url: st
     from open_webui.utils.discussion_room import iterate_completion
 
     metadata = metadata if isinstance(metadata, dict) else {}
+    native = metadata.get(DECISION_REQUEST_KEY)
+    if isinstance(native, dict):
+        # 辅助决策 (utils/decision_model.py): its own typed questions go as they are and the raw
+        # answers come back — no drafting, no gpt-chat stand-in for the task, no Markdown
+        try:
+            response = await post_system_one(system_one_url(url), headers, {**native, "model": model})
+        except SystemOneError as exc:
+            raise HTTPException(status_code=exc.status if 400 <= exc.status < 600 else 502, detail="Jev 判断失败")
+        return {"object": "systemone.response", "model": model, "answers": response["answers"], "usage": response.get("usage") or {}}
+
     planner_id, planner_name = await prep_model(request, user)
     if is_system_one_entry(planner_id):
         raise HTTPException(status_code=400, detail="Jev 需要一个文字模型来拟判断题，但没有找到可用的文字模型")

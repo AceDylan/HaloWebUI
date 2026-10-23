@@ -1,4 +1,5 @@
 import { WEBUI_API_BASE_URL } from '$lib/constants';
+import type { DecisionTrace } from '$lib/apis/decision-model';
 import { pageQuery, type PageQuery } from '$lib/apis/paging';
 import type {
 	DiscussContext,
@@ -52,6 +53,8 @@ export type AnswerPlan = {
 	error?: string | null;
 	startedAt?: number | null;
 	endedAt?: number | null;
+	/** 辅助决策模型: which model chose, what, and whether it fell back. */
+	decider?: DecisionTrace | null;
 };
 
 export type AnswerPart = {

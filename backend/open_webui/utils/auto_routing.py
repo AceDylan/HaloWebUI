@@ -88,3 +88,40 @@ def preferred_routing_model(bases, models):
         if any(str(v or "").lower().split("/")[-1] == "gpt-chat" for v in values):
             return base["id"]
     return None
+
+
+# 辅助决策 (utils/decision_model.py): the same choice as typed questions over the modes available
+DECISION_MODES = {
+    "answer": "One assistant answers directly: explanations, writing, stable facts, ordinary research, code examples, "
+    "and any request for analysis or advice only. The default when unsure.",
+    "discuss": "Several models discuss it: materially different viewpoints, trade-offs, adversarial review, comparing "
+    "uncertain alternatives. Complexity or needing current information alone is not enough.",
+    "team": "A team of agents does the work with tools: inspecting or modifying a repository, processing files, "
+    "multi-step deliverables — only when the user asks for the work to be done, not advice about doing it.",
+}
+
+
+def decision_request(question, context, files, *, teams_available, discussion_available):
+    """(state, questions) for the decision model: which mode, and whether the user asks to DO the work."""
+    from open_webui.utils import decision_model as dm
+
+    modes = ["answer"] + (["discuss"] if discussion_available else []) + (["team"] if teams_available else [])
+    questions = {"mode": dm.choice(
+        "`question` is a user's request to HaloWebUI (with `context` and `attachments`). Which work mode should handle it? "
+        "Respect a mode the user names explicitly and every constraint the user states.",
+        {m: DECISION_MODES[m] for m in modes})}
+    if "team" in modes:
+        questions["execution"] = dm.noul(
+            "Does the user clearly ask for the work to be DONE now (not hypothetically, not quoted text, not only analysis or a plan)?")
+    state = {"question": question, "context": context or "", "attachments": files or []}
+    return state, questions
+
+
+def selection_from_answers(answers, reason, model_name):
+    """The decision's answers as the classifier's raw selection (normalize_selection checks it)."""
+    mode = answers["mode"]["choice"]
+    if not reason:
+        confidence = answers["mode"].get("confidence")
+        reason = f"{model_name} 判断交给{LABELS[mode]}" + (f"（把握 {confidence * 100:.0f}%）" if confidence is not None else "")
+    execution = "execution" in answers and answers["execution"]["noul"] >= 0.5
+    return {"mode": mode, "reason": reason, "execution_requested": execution}

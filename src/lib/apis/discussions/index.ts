@@ -1,4 +1,5 @@
 import { WEBUI_API_BASE_URL } from '$lib/constants';
+import type { DecisionTrace } from '$lib/apis/decision-model';
 import type { AssistantChoice } from '$lib/apis/assistant-library';
 import { pageQuery, type PageQuery } from '$lib/apis/paging';
 
@@ -52,6 +53,8 @@ export type DiscussPlanning = {
 	error?: string | null;
 	startedAt?: number | null;
 	endedAt?: number | null;
+	/** 辅助决策模型: which model set the table, or why the moderator's plan stands. */
+	decider?: DecisionTrace | null;
 };
 
 /** Matching the seats' assistants when a question starts. */
@@ -60,6 +63,7 @@ export type DiscussMatching = {
 	error?: string | null;
 	startedAt?: number | null;
 	endedAt?: number | null;
+	decider?: DecisionTrace | null;
 };
 
 /** A file attached to a question (images go to the models that read images, documents to all). */

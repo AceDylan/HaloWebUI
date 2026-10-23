@@ -1,4 +1,5 @@
 <script lang="ts">
+	import DecisionNote from '$lib/components/common/DecisionNote.svelte';
 	import { createEventDispatcher } from 'svelte';
 	import { slide } from 'svelte/transition';
 
@@ -45,7 +46,11 @@
 				{#if planning?.reason}
 					<div class="mt-0.5 text-gray-600 dark:text-gray-300">{planning.reason}</div>
 				{/if}
+				<DecisionNote trace={planning?.decider} />
 			</div>
+		{/if}
+		{#if matching?.decider && matching.status !== 'waiting' && matching.status !== 'running'}
+			<DecisionNote trace={matching.decider} />
 		{/if}
 		{#if matching?.status === 'waiting' || matching?.status === 'running'}
 			<div class="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400" data-discuss-matching>

@@ -130,7 +130,15 @@
 						title={routingModelName}
 						data-auto-routing-model
 					>
-						由 {routingModelName} 判断
+						由 {routingModelName} 判断{row?.decision?.used ? '（辅助决策模型）' : ''}
+					</p>{/if}
+				{#if row?.decision?.fallback}<p
+						class="mt-0.5 text-[11px] text-amber-600 dark:text-amber-400"
+						data-decision-note
+						data-fallback="true"
+					>
+						辅助决策 {row.decision.name} 没用上（{row.decision.reason ||
+							'调用失败'}），按原来的方式选择
 					</p>{/if}
 			</div>
 			<a

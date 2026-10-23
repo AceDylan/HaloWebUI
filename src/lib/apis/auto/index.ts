@@ -1,10 +1,13 @@
 import { WEBUI_API_BASE_URL } from '$lib/constants';
+import type { DecisionTrace } from '$lib/apis/decision-model';
 
 export type AutoMode = 'answer' | 'discuss' | 'team';
 export type AutoRoute = {
 	id: string;
 	title?: string;
 	routing_model?: string | null;
+	/** 辅助决策模型: which model chose, what, and whether it fell back. */
+	decision?: DecisionTrace | null;
 	/** The chat it was dispatched from (the result goes back there). */
 	origin_chat_id?: string | null;
 	question: string;

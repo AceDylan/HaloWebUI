@@ -350,17 +350,45 @@ def _start(request: Request, user, chat, run: dict) -> desk.LiveAnswer:
             f"{question}\n{background[:500]}", assistants, favorites=lib.favorites_of(user), must=[chosen] if chosen else []
         )
         web_allowed = bool(current.get("webAllowed"))
-        messages = desk.plan_messages(
-            question, short_assistants, templates, bases, default_base=default_base, may_create=may_write, web_allowed=web_allowed, background=background, chosen=chosen
+        normalize = lambda raw: desk.normalize_plan(  # noqa: E731
+            raw, assistants, templates, bases, default_base=default_base, may_create=may_write, web_allowed=web_allowed, chosen=chosen
         )
-        text = ""
-        async for kind, part in desk.iterate_completion(await call_model(planner, messages)):
-            if kind == "content":
-                text += part
-        plan = desk.normalize_plan(
-            desk.parse_json_object(text), assistants, templates, bases, default_base=default_base, may_create=may_write, web_allowed=web_allowed, chosen=chosen
-        )
+
+        async def assisted(decider):
+            # 辅助决策模型: assistant, answering model and web search as typed questions; the
+            # dispatcher's own checks (normalize_plan) apply to the answer as to its own
+            state, questions, keys = desk.decision_request(
+                question, short_assistants, templates, bases, default_base=default_base, web_allowed=web_allowed, background=background, chosen=chosen
+            )
+            answers, reason = await decider.judge(state, questions)
+            raw = desk.raw_from_answers(answers, keys, reason or f"{decider.name} 的判断", chosen=chosen, default_base=default_base)
+            summary = {k: a.get("choice", a.get("noul")) for k, a in answers.items()}
+            if raw is None:  # "new": the dispatcher designs it; the web decision stays
+                return {"new": True, "web": "web_search" in answers and answers["web_search"]["noul"] >= 0.5}, {**summary, "assistant": "new → 调度模型设计"}
+            plan = normalize(raw)
+            ref = (plan["decision"].get("target") or plan["decision"].get("template") or {}).get("ref")
+            return plan, {**summary, "assistant_ref": ref, "base": plan["decision"]["spec"].get("base")}
+
+        from open_webui.utils import decision_model as dm
+
+        plan, trace = await dm.decide(request, user, "answer", assisted, models_map=models_map, timeout=45)
+        web_decided = None
+        if isinstance(plan, dict) and plan.get("new"):
+            web_decided, plan = plan["web"], None
+        if plan is None:
+            messages = desk.plan_messages(
+                question, short_assistants, templates, bases, default_base=default_base, may_create=may_write, web_allowed=web_allowed, background=background, chosen=chosen
+            )
+            text = ""
+            async for kind, part in desk.iterate_completion(await call_model(planner, messages)):
+                if kind == "content":
+                    text += part
+            plan = normalize(desk.parse_json_object(text))
+            if web_decided is not None:
+                plan["webSearch"] = web_decided and web_allowed
         decision = plan.pop("decision")
+        if trace:
+            plan["decider"] = trace  # which decision model chose, what, and whether it fell back
         choice = lib.carry_out(user, {"q": decision}, source="answer", run_ref=f"answer:{chat_id}", question=question, may_write=may_write)["q"]
         if choice.get("saved"):
             await _models(request, user, refresh=True)

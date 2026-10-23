@@ -819,6 +819,149 @@ def plan_from(raw: Any, pool: list[dict]) -> dict:
     return {"mode": mode, "rounds": rounds, "seats": seats, "reason": _clean_text(raw.get("reason"), 300)}
 
 
+# 辅助决策 (utils/decision_model.py): the table as typed questions. The moderator's draft (or the
+# default table) gives the seats their roles and duties — text the decision model does not write;
+# the decision model picks the format, the rounds and which model takes each seat.
+DECISION_POOL_MAX = 12
+
+
+def _profile_text(entry: dict) -> str:
+    profile = entry.get("profile") if isinstance(entry.get("profile"), dict) else {}
+    bits = [str(profile.get(k)) for k in ("family", "description") if profile.get(k)]
+    strengths = profile.get("strengths")
+    if isinstance(strengths, list) and strengths:
+        bits.append("strengths: " + ", ".join(str(x) for x in strengths[:4]))
+    if entry.get("vision"):
+        bits.append("sees images")
+    return _clean_text(f"{entry['id']}" + (f" — {'; '.join(bits)}" if bits else ""), 300)
+
+
+def plan_decision_request(*, ask: dict, pool: list[dict], draft: dict) -> tuple[dict, dict, dict]:
+    """(state, questions, keys): format, rounds, and a model for each of the draft's seats."""
+    from open_webui.utils import decision_model as dm
+
+    images = any(item.get("type") == "image" for item in ask.get("files") or [])
+    usable = [e for e in pool if e.get("vision") or not images]
+    first = [e for s in draft["seats"] for e in usable if e["ref"] == s["model"]]
+    ordered = list(dict.fromkeys(e["id"] for e in first + usable))[:DECISION_POOL_MAX]
+    keys = {"model": {f"m{i}": short for i, short in enumerate(ordered, 1)}}
+    by_short = {e["id"]: e for e in usable}
+    models = {k: _profile_text(by_short[short]) for k, short in keys["model"].items()}
+    questions = {
+        "mode": dm.choice(
+            "Which discussion format suits `question` best?",
+            {key: f"{MODES[key]['label']}: {guide}" for key, guide in PLAN_MODE_GUIDE.items()},
+        ),
+        "rounds": dm.choice(
+            "How many rounds should the discussion of `question` take? Every round costs one call per seat.",
+            {
+                "r1": "1 round: independent answers are enough",
+                "r2": "2 rounds: most questions",
+                "r3": "3 rounds: debates and contested questions",
+                "r4": "4 rounds: only hard, many-sided questions",
+            },
+        ),
+    }
+    for index, seat in enumerate(draft["seats"][:MAX_SEATS], 1):
+        about = " — ".join(x for x in (seat.get("role"), seat.get("duty")) if x) or f"participant {index}"
+        questions[f"seat{index}"] = dm.choice(
+            f"Which model should take seat {index} of this discussion ({about})? Prefer different families across seats "
+            "and stronger models for hard reasoning, code or maths.",
+            models,
+        )
+    state = {
+        "question": ask.get("question") or "",
+        "background": _clean_text(((ask.get("context") or {}).get("text") or ""), 1500),
+        "seats": [{k: s.get(k) for k in ("role", "duty") if s.get(k)} for s in draft["seats"][:MAX_SEATS]],
+        "models": models,
+    }
+    if images:
+        state["note"] = "The question has images: only models that see images are listed."
+    return state, questions, keys
+
+
+def plan_from_decision(answers: dict, keys: dict, draft: dict, pool: list[dict], reason: str) -> dict:
+    """The decision as the moderator's JSON, through plan_from (pool only, at least MIN_SEATS).
+    Each seat takes its most likely model not taken yet (one model twice only when it must)."""
+    from open_webui.utils import decision_model as dm
+
+    mode = answers["mode"]["choice"]
+    rounds = int(answers["rounds"]["choice"][1:])
+    rounds = {"compare": 1, "review": 2}.get(mode, rounds)
+    seats, taken = [], set()
+    debate_roles = list(MODES["debate"]["roles"])
+    sided = any(r in str(s.get("role") or "") for s in draft["seats"] for r in ("正方", "反方"))
+    for index, seat in enumerate(draft["seats"][:MAX_SEATS], 1):
+        answer = answers.get(f"seat{index}")
+        if answer is None:
+            continue
+        order = [keys["model"][k] for k in dm.ranked(answer) if k in keys["model"]]
+        short = next((m for m in order if m not in taken), order[0])
+        taken.add(short)
+        role = seat.get("role") or ""
+        if mode == "debate" and not sided and index <= len(debate_roles):
+            role = debate_roles[index - 1]
+        seats.append({"model": short, "role": role, "duty": seat.get("duty") or ""})
+    return plan_from({"mode": mode, "rounds": rounds, "seats": seats, "reason": reason or draft.get("reason") or ""}, pool)
+
+
+MATCH_ASSISTANTS = 7
+MATCH_TEMPLATES = 3
+MATCH_GUIDE = {
+    "roundtable": "complementary specialists, different angles on the question",
+    "brainstorm": "complementary specialists from different fields, so the ideas differ",
+    "debate": "expertise in the question's field; the side (正方 / 反方) is not part of the assistant; a 评审 seat gets a neutral reviewer",
+    "review": "staffed by review duty (the proposal itself, its risks, how to verify it …)",
+    "compare": "the same assistant for every seat (the best one for the question): the comparison is between the models",
+}
+
+
+def match_decision_request(*, ask: dict, seats: list[dict], assistants: list[dict], templates: list[dict], last: Optional[dict] = None) -> tuple[dict, dict, dict]:
+    """(state, questions, keys): an assistant for each automatic seat — one of the shortlist, a
+    plain role (generic), or "new" (the dispatcher designs one)."""
+    from open_webui.utils import decision_model as dm
+
+    keys: dict = {"assistant": {}}
+    options: dict = {}
+    for index, entry in enumerate(assistants[:MATCH_ASSISTANTS], 1):
+        keys["assistant"][f"a{index}"] = entry["ref"]
+        options[f"a{index}"] = _clean_text(f"{entry['name']} — {entry.get('description') or entry.get('domain') or ''}", 300)
+    for index, entry in enumerate(templates[:MATCH_TEMPLATES], 1):
+        keys["assistant"][f"t{index}"] = entry["ref"]
+        options[f"t{index}"] = _clean_text(f"{entry['name']} — {entry.get('description') or ''} (template)", 300)
+    options["generic"] = "No specialist: the seat speaks in its own role."
+    options["new"] = "None of these fits this seat: a new specialist should be designed."
+    mode = ask.get("mode") or "roundtable"
+    questions, state_seats = {}, []
+    for seat in seats:
+        about = " — ".join(x for x in (seat.get("role"), seat.get("duty")) if x) or seat.get("name") or "participant"
+        questions[seat["id"]] = dm.choice(
+            f"Which assistant should seat «{about}» use in this discussion ({MODES.get(mode, {}).get('label', mode)}: "
+            f"{MATCH_GUIDE.get(mode, '')})?",
+            options,
+        )
+        entry = {"seat": about}
+        if (last or {}).get(seat["id"]):
+            entry["last_time"] = last[seat["id"]]
+        state_seats.append(entry)
+    state = {"question": ask.get("question") or "", "seats": state_seats, "assistants": options}
+    return state, questions, keys
+
+
+def match_from_decision(answers: dict, keys: dict, seats: list[dict], reason: str) -> tuple[dict, list[str]]:
+    """(the decision as dispatcher units for normalize_decisions, seats that chose "new")."""
+    units, new = [], []
+    for seat in seats:
+        pick = answers[seat["id"]]["choice"]
+        if pick == "new":
+            new.append(seat["id"])
+        elif pick == "generic":
+            units.append({"key": seat["id"], "action": "generic", "reason": reason})
+        else:
+            units.append({"key": seat["id"], "action": "use", "ref": keys["assistant"][pick], "reason": reason})
+    return {"units": units}, new
+
+
 def parse_conclusion_sections(content: str) -> list[dict]:
     """Split a conclusion into its ``## `` sections (the UI does the same)."""
     sections: list[dict] = []
@@ -1420,6 +1563,8 @@ class LiveDiscussion:
             planning.update(
                 {"status": "error" if result.get("error") else "done", "reason": result.get("reason") or "", "error": result.get("error")}
             )
+            if result.get("decider"):
+                planning["decider"] = result["decider"]
             if self.persist_setup is not None:
                 self.persist_setup(self.setup)
         except asyncio.CancelledError:
@@ -1448,6 +1593,8 @@ class LiveDiscussion:
                     seat["duty"] = _clean_text(duties[seat["id"]], DUTY_MAX_CHARS)
             matching["status"] = "error" if (result or {}).get("error") else "done"
             matching["error"] = (result or {}).get("error")
+            if (result or {}).get("decider"):
+                matching["decider"] = result["decider"]
         except asyncio.CancelledError:
             matching["status"] = "stopped"
             raise

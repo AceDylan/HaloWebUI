@@ -22,6 +22,9 @@ or drive another user's team through this API either.
   GET  /v1/halo-teams/meta                          lead model, runners (+ availability), task kinds, assistant templates
   POST /v1/halo-teams/runners/check                 re-run the runner availability checks now
   POST /v1/halo-teams/plan/resolve                  {plan} → the plan with every member's runner worked out again
+  POST /v1/halo-teams/plan/decide                   {plan, picks, library?, decider?} → the 辅助决策模型's picks
+                                                    (executor / model / assistant per member) applied, validated again
+                                                    (/plan with decision_options: true also returns the options)
   GET  /v1/halo-teams/plan/progress?team_id=        the lead's current planning step + how long plans take here
   POST /v1/halo-teams/{team_id}/conclusion/illustrate {template?} → a gpt-image picture for the result (202, async)
   GET  /v1/halo-teams/{team_id}/conclusion          the final report (markdown) + task results + workspace files
@@ -128,6 +131,8 @@ async def _plan(request):
         progress.planning_done(plan_key)
     if result.get("ok"):
         progress.record_plan(time.time() - started)
+        if data.get("decision_options"):  # HaloWebUI's 辅助决策模型 picks from these (plan/decide)
+            result["options"] = await asyncio.to_thread(plan_mod.decision_options)
     return _json_response(result, status=200 if result.get("ok") else 502)
 
 
@@ -318,9 +323,33 @@ async def _plan_resolve(request):
             plan["estimate"] = estimate
     if plan is None:
         return _error(400, "计划没有通过检查：" + "；".join(errors))
-    for key in ("lead_model", "lead"):
+    for key in ("lead_model", "lead", "decider"):
         if isinstance(data["plan"].get(key), dict):
             plan[key] = data["plan"][key]
+    return _json_response({"ok": True, "plan": plan})
+
+
+async def _plan_decide(request):
+    """HaloWebUI's 辅助决策模型 picked executors / models / assistants for a fresh plan's members:
+    applied to what is still automatic, then the plan is validated again (or refused, 400)."""
+    from . import progress
+    from .plan import apply_decision
+
+    data = await _body(request)
+    if not isinstance(data.get("plan"), dict) or not isinstance(data.get("picks"), dict):
+        return _error(400, "plan and picks are required")
+    library = data.get("library") if isinstance(data.get("library"), dict) else None
+    plan, errors = await asyncio.to_thread(apply_decision, data["plan"], data["picks"], library)
+    if plan is None:
+        return _error(400, "决策后的计划没有通过检查：" + "；".join(errors))
+    estimate = await asyncio.to_thread(progress.estimate_plan, plan)
+    if estimate:
+        plan["estimate"] = estimate
+    for key in ("lead_model", "lead", "assistant_library"):
+        if isinstance(data["plan"].get(key), dict):
+            plan[key] = data["plan"][key]
+    if isinstance(data.get("decider"), dict):
+        plan["decider"] = data["decider"]
     return _json_response({"ok": True, "plan": plan})
 
 
@@ -472,6 +501,7 @@ def install(app: Any, adapter: Any) -> None:
     router.add_get(base + "/meta", _wrap(adapter, _meta))
     router.add_post(base + "/runners/check", _wrap(adapter, _runners_check))
     router.add_post(base + "/plan/resolve", _wrap(adapter, _plan_resolve))
+    router.add_post(base + "/plan/decide", _wrap(adapter, _plan_decide))
     router.add_get(base + "/plan/progress", _wrap(adapter, _plan_progress))
     router.add_post(base + "/plan", _wrap(adapter, _plan))
     router.add_post(base + "/notify", _wrap(adapter, _notify))

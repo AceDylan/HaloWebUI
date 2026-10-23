@@ -1,6 +1,7 @@
 import { WEBUI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
 import type { AssistantChoice } from '$lib/apis/assistant-library';
 import type { ModeCard } from '$lib/apis/discussions';
+import type { DecisionTrace } from '$lib/apis/decision-model';
 
 /** 协作台 (agent teams) API — see backend/open_webui/routers/teams.py. */
 
@@ -79,8 +80,9 @@ export type TeamPlanMember = {
 	assistant_preferred?: boolean;
 	/** Live members: why the planned assistant is not used (it was gone at approval). */
 	assistant_note?: string;
-	/** auto = picked by task kind; goal = named in the goal; user = changed by the user. */
-	executor_source?: 'auto' | 'goal' | 'user';
+	/** auto = picked by task kind; goal = named in the goal; user = changed by the user;
+	 * decision = picked by the user's 辅助决策模型. */
+	executor_source?: 'auto' | 'goal' | 'user' | 'decision';
 	/** The kind's default runner. */
 	recommended?: TeamExecutor;
 	/** The runner that will actually run it now (null: nothing on the chain is available). */
@@ -89,8 +91,9 @@ export type TeamPlanMember = {
 	runner_note?: string;
 	/** The model the member runs on whenever it runs on Hermes (its own runner or the fallback). */
 	model?: string;
-	/** lead = the lead recommended it; default = Hermes' default model; user = you picked it. */
-	model_source?: 'lead' | 'default' | 'user';
+	/** lead = the lead recommended it; default = Hermes' default model; user = you picked it;
+	 * decision = the 辅助决策模型 picked it. */
+	model_source?: 'lead' | 'default' | 'user' | 'decision';
 	/** What the lead recommended (「恢复推荐」 goes back to it). */
 	model_recommended?: string;
 };
@@ -124,6 +127,8 @@ export type TeamPlan = {
 	summary?: string;
 	lead?: { name: string; role: string; model?: string };
 	lead_model?: LeadModel;
+	/** 辅助决策模型: which model picked members' executors / models / assistants, or why not. */
+	decider?: DecisionTrace | null;
 	members: TeamPlanMember[];
 	tasks: TeamPlanTask[];
 	layers?: string[][];

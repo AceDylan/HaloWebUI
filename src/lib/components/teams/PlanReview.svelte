@@ -1,4 +1,5 @@
 <script lang="ts">
+	import DecisionNote from '$lib/components/common/DecisionNote.svelte';
 	import { createEventDispatcher } from 'svelte';
 
 	import type { HermesModel, Team, TeamExecutor, TeamPlanMember, TeamsMeta } from '$lib/apis/teams';
@@ -93,16 +94,20 @@
 	const modelSourceText = (m: TeamPlanMember) =>
 		m.model_source === 'user'
 			? '你手动指定'
-			: m.model_source === 'lead'
-				? '负责人推荐'
-				: 'Hermes 默认模型';
+			: m.model_source === 'decision'
+				? '辅助决策模型选择'
+				: m.model_source === 'lead'
+					? '负责人推荐'
+					: 'Hermes 默认模型';
 
 	const sourceText = (m: { executor_source?: string; kind?: string; recommended?: string }) =>
 		m.executor_source === 'user'
 			? '你手动指定'
 			: m.executor_source === 'goal'
 				? '目标里点名'
-				: `按「${kindLabel(m.kind) || '任务类型'}」推荐`;
+				: m.executor_source === 'decision'
+					? '辅助决策模型选择'
+					: `按「${kindLabel(m.kind) || '任务类型'}」推荐`;
 </script>
 
 {#if plan}
@@ -150,6 +155,7 @@
 							>{/if}
 					</p>
 				{/if}
+				<DecisionNote trace={plan.decider} />
 			</div>
 		</section>
 

@@ -571,7 +571,8 @@ export const SOURCE_LABEL: Record<string, string> = {
 	auto: '按任务类型自动选择',
 	goal: '目标里点名',
 	user: '你手动指定',
-	lead: '负责人诊断后改选'
+	lead: '负责人诊断后改选',
+	decision: '辅助决策模型选择'
 };
 
 export type RunnerDecision = {
@@ -579,7 +580,7 @@ export type RunnerDecision = {
 	actual: string | null;
 	changed: boolean;
 	reason: string;
-	source: 'auto' | 'goal' | 'user';
+	source: 'auto' | 'goal' | 'user' | 'decision';
 };
 
 /** A plan member's runner: where its chain starts and what will actually run it now. */
@@ -592,7 +593,9 @@ export const memberRunner = (m: {
 	const chosen = m.executor || 'hermes';
 	const actual = m.runner === undefined ? chosen : m.runner;
 	const source = (
-		['auto', 'goal', 'user'].includes(m.executor_source ?? '') ? m.executor_source : 'auto'
+		['auto', 'goal', 'user', 'decision'].includes(m.executor_source ?? '')
+			? m.executor_source
+			: 'auto'
 	) as RunnerDecision['source'];
 	return { chosen, actual, changed: actual !== chosen, reason: m.runner_note ?? '', source };
 };
@@ -608,7 +611,7 @@ export const taskRunner = (t: {
 	const chosen = t.chosen || actual;
 	const last = [...(t.trail ?? [])].reverse().find((s) => s.from !== s.to);
 	const source = (
-		['auto', 'goal', 'user'].includes(t.chosen_by ?? '') ? t.chosen_by : 'auto'
+		['auto', 'goal', 'user', 'decision'].includes(t.chosen_by ?? '') ? t.chosen_by : 'auto'
 	) as RunnerDecision['source'];
 	return {
 		chosen,

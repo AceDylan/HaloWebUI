@@ -57,7 +57,7 @@ def public(row, user, targets=None):
         "href": PATHS[mode] + target if mode in PATHS and target else None,
         "auto_start": bool(data.get("auto_start")), "target_status": None,
         "title": data["input"]["question"][:80], "routing_model": data.get("routing_model"),
-        "origin_chat_id": (data.get("origin") or {}).get("chatId")}
+        "origin_chat_id": (data.get("origin") or {}).get("chatId"), "decision": data.get("decision")}
     if targets is not None:
         info = targets.get((mode, target)) if target else None
         if target:
@@ -130,9 +130,24 @@ async def select(request, user, form, file_info):
     if not any(base["id"] == routing_model for base in bases):
         routing_model = planner["model"]
     teams_available = bool(ENABLE_AGENT_TEAMS)
+    trace = None
     if form.mode != "auto":
         raw = {"mode": form.mode, "reason": "你指定了处理方式", "execution_requested": form.mode == "team"}
     else:
+        # 辅助决策模型 first (when the user set one); its failure leaves the classifier below
+        from open_webui.utils import decision_model as dm
+        from open_webui.utils.auto_routing import decision_request, selection_from_answers
+
+        async def assisted(decider):
+            state, questions = decision_request(form.question, form.context, file_info,
+                teams_available=teams_available, discussion_available=len(bases) >= 2)
+            answers, reason = await decider.judge(state, questions)
+            picked = selection_from_answers(answers, reason, decider.name)
+            return picked, {"mode": picked["mode"], "execution_requested": picked["execution_requested"],
+                            "confidence": answers["mode"].get("confidence")}
+
+        raw, trace = await dm.decide(request, user, "auto", assisted, models_map=models, ambiguous=ambiguous, timeout=25)
+    if form.mode == "auto" and raw is None:
         async def classify():
             payload = {"model": routing_model, "stream": True,
                 "messages": selection_messages(form.question, form.context, file_info, teams_available=teams_available),
@@ -163,6 +178,11 @@ async def select(request, user, form, file_info):
     if form.mode != "auto" and decision["mode"] != form.mode:
         raise HTTPException(400, decision["reason"] + "；可改选精答")
     decision["routing_model"] = routing_model if form.mode == "auto" else None
+    if trace:
+        if trace["used"]:
+            decision["routing_model"] = trace["model"]
+            trace["result"] = {**trace.get("result", {}), "final_mode": decision["mode"]}
+        decision["decision"] = trace
     return decision, models, ambiguous, bases, planner
 
 

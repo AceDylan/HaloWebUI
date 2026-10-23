@@ -59,9 +59,11 @@
 		musicSetsLength,
 		normalizeVideoSettings,
 		videoSettingsText,
+		videoPrepIdea,
 		type VideoSettings
 	} from '$lib/utils/video-brief';
 	import { clearModeDraft, setModeDraft } from '$lib/components/scifi/mode-relay';
+	import VideoStylePicker from './VideoStylePicker.svelte';
 	import HandoffBack from '$lib/components/common/HandoffBack.svelte';
 	import LoadMore from '$lib/components/common/LoadMore.svelte';
 	import Modal from '$lib/components/common/Modal.svelte';
@@ -119,9 +121,10 @@
 	let prepOptions: PrepOptions = normalizePrepOptions(null);
 	let prepJob: StudioPrepJob | null = null;
 	// the last enhancement while its text is in the box: what it brought, the words before it
-	let prepared: { result: StudioPrepResult; original: string; model: string } | null = null;
+	let prepared: { result: StudioPrepResult; original: string; model: string; fingerprint: string } | null = null;
+	let prepStarting = false;
 	let destroyed = false;
-	$: preparing = prepJob?.status === 'running';
+	$: preparing = prepStarting || prepJob?.status === 'running';
 	$: if (prepared && !idea.trim()) prepared = null;
 	// a newer pick wins over an older upload or length reading still going
 	let musicPick = 0;
@@ -135,13 +138,23 @@
 	$: ready = attachments.filter((a) => !a.uploading && a.id && a.id !== musicReady?.id);
 	$: musicTooLong = !!music?.seconds && music.seconds > MUSIC_MAX_SECONDS;
 	$: followsMusic = musicSetsLength(music, settings.musicFit);
-	$: briefOptions = {
+	$: prepSettings = {
 		...settings,
 		attachments: ready.map((a) => ({ name: a.name, kind: a.kind })),
-		music: musicReady ? { name: musicReady.name, seconds: musicReady.seconds } : null,
+		music: musicReady ? { name: musicReady.name, seconds: musicReady.seconds } : null
+	};
+	$: prepFingerprint = JSON.stringify([videoSettingsText(prepSettings), ready.map((a) => a.id), musicReady?.id]);
+	$: prepStale = !!prepared && prepared.fingerprint !== prepFingerprint;
+	$: hasReference = ready.some((a) => a.kind === 'image' || a.kind === 'video');
+	$: styleProblem = settings.style === 'reference' && !hasReference
+		? '请先添加参考图片或视频'
+		: settings.style === 'custom' && !settings.customStyle.trim() ? '请先填写自定义风格' : '';
+	$: briefOptions = {
+		...prepSettings,
 		prep: prepared
 			? {
 					original: prepared.original,
+					stale: prepStale,
 					notes: prepared.result.notes,
 					sources: prepared.result.sources,
 					run: prepared.result.run ?? null
@@ -170,7 +183,7 @@
 				? '背景音乐还在上传'
 				: !idea.trim()
 				? '先写下想要的视频'
-				: '';
+				: styleProblem || (brief.length > HANDOFF_TEXT_MAX ? '需求较长，请精简后再制作' : '');
 
 	const saveSettings = () => {
 		try {
@@ -189,9 +202,9 @@
 		}
 	};
 
-	const rememberJob = (id: string | null, original = '') => {
+	const rememberJob = (id: string | null, original = '', fingerprint = '') => {
 		try {
-			if (id) sessionStorage.setItem(PREP_JOB_KEY, JSON.stringify({ id, original }));
+			if (id) sessionStorage.setItem(PREP_JOB_KEY, JSON.stringify({ id, original, fingerprint }));
 			else sessionStorage.removeItem(PREP_JOB_KEY);
 		} catch {
 			/* not resumed after a visit elsewhere */
@@ -200,7 +213,7 @@
 
 	/** The job read until it ends; its text into the box when it is done. Returns how it ended
 	 * ('stopped': cancelled here, or the page went away). */
-	const followPrep = async (job: StudioPrepJob, original: string): Promise<'done' | 'failed' | 'stopped'> => {
+	const followPrep = async (job: StudioPrepJob, original: string, fingerprint: string): Promise<'done' | 'failed' | 'stopped'> => {
 		prepJob = job;
 		const ended = await waitForPrep(localStorage.token, job, {
 			onUpdate: (current) => {
@@ -212,7 +225,7 @@
 		rememberJob(null);
 		if (prepJob?.id !== job.id || ended.status === 'cancelled') return 'stopped';
 		if (ended.status === 'done' && ended.result) {
-			prepared = { result: ended.result, original, model: ended.model };
+			prepared = { result: ended.result, original, model: ended.model, fingerprint };
 			idea = ended.result.idea;
 			prepJob = null;
 			return 'done';
@@ -222,12 +235,16 @@
 	};
 
 	const runPrep = async (): Promise<'done' | 'failed' | 'stopped'> => {
-		const original = idea.trim();
+		const original = prepared?.original || idea.trim();
+		const requestIdea = videoPrepIdea(idea, briefOptions.prep);
+		if (requestIdea.length > 6000) { toast.error('需求较长，请精简后再增强'); return 'failed'; }
+		const fingerprint = prepFingerprint;
 		let job: StudioPrepJob;
+		prepStarting = true;
 		try {
 			job = await startStudioPrep(localStorage.token, {
 				kind: 'video',
-				idea: original,
+				idea: requestIdea,
 				settings: videoSettingsText(briefOptions),
 				research: prepOptions.research,
 				deeper: prepOptions.deeper
@@ -235,14 +252,17 @@
 		} catch (error) {
 			prepJob = { id: '', kind: 'video', status: 'error', idea: original, steps: [], run: null, result: null, error: prepErrorText(error), model: '', createdAt: Date.now() };
 			return 'failed';
+		} finally {
+			prepStarting = false;
 		}
-		rememberJob(job.id, original);
-		return followPrep(job, original);
+		rememberJob(job.id, original, fingerprint);
+		return followPrep(job, original, fingerprint);
 	};
 
 	/** ✨ 增强: the enhanced request into the box, to read and change before 开始制作. */
 	const enhance = async () => {
-		if (preparing || !idea.trim()) return;
+		if (preparing || starting || !idea.trim()) return;
+		if (styleProblem) { toast.error(styleProblem); return; }
 		if ((await runPrep()) === 'failed' && prepJob?.error) toast.error(prepJob.error);
 	};
 
@@ -408,17 +428,26 @@
 	const start = async () => {
 		if (blocked || !hermes || starting) return;
 		saveSettings();
+		// Capture one request: edits while the start call is in flight belong to the next video.
+		const snapshot = { ...briefOptions, idea };
+		const snapshotFiles = sentFiles;
+		const needsPrep = prepOptions.enhance && (!prepared || prepStale);
+		const requestIdea = videoPrepIdea(idea, snapshot.prep);
+		if (needsPrep && requestIdea.length > 6000) { toast.error('需求较长，请精简后再增强'); return; }
+		if (fitVideoBrief({ ...snapshot, prepJob: needsPrep ? 'a'.repeat(32) : null }, HANDOFF_TEXT_MAX).length > HANDOFF_TEXT_MAX) {
+			toast.error('需求较长，请精简后再制作'); return;
+		}
 		// the enhancement starts on the server and the brief goes out at once: the chat waits for
 		// it (nobody has to stay here); the video is made from the words as written when it fails
 		let prepJobId: string | null = null;
-		if (prepOptions.enhance && !prepared) {
+		if (needsPrep) {
 			starting = true;
 			try {
 				prepJobId = (
 					await startStudioPrep(localStorage.token, {
 						kind: 'video',
-						idea: idea.trim(),
-						settings: videoSettingsText(briefOptions),
+						idea: requestIdea,
+						settings: videoSettingsText(snapshot),
 						research: prepOptions.research,
 						deeper: prepOptions.deeper
 					})
@@ -432,9 +461,9 @@
 		}
 		const stored = handOff(typeof sessionStorage === 'undefined' ? null : sessionStorage, {
 			to: 'chat',
-			text: fitVideoBrief({ ...briefOptions, idea, prepJob: prepJobId }, HANDOFF_TEXT_MAX),
+			text: fitVideoBrief({ ...snapshot, prepJob: prepJobId }, HANDOFF_TEXT_MAX),
 			models: [getModelSelectionId(hermes)],
-			files: sentFiles,
+			files: snapshotFiles,
 			from: origin,
 			send: true
 		});
@@ -603,7 +632,7 @@
 	});
 
 	const resumePrep = async () => {
-		let saved: { id?: string; original?: string } | null = null;
+		let saved: { id?: string; original?: string; fingerprint?: string } | null = null;
 		try {
 			saved = JSON.parse(sessionStorage.getItem(PREP_JOB_KEY) ?? 'null');
 		} catch {
@@ -613,7 +642,7 @@
 		try {
 			const job = await getStudioPrep(localStorage.token, saved.id);
 			if (!idea.trim()) idea = saved.original || job.idea;
-			await followPrep(job, saved.original || job.idea);
+			await followPrep(job, saved.original || job.idea, saved.fingerprint || '');
 		} catch {
 			rememberJob(null);
 		}
@@ -719,6 +748,10 @@
 					class="min-h-[9rem] max-h-[60vh] w-full resize-y rounded-xl border border-gray-200/60 bg-white/85 p-3 text-base leading-6 text-gray-900 outline-none placeholder:text-gray-400 sm:text-sm dark:border-gray-700/50 dark:bg-gray-900/70 dark:text-gray-100 dark:placeholder:text-gray-500"
 					data-video-idea
 				/>
+
+				{#if prepStale}
+					<p class="text-xs text-amber-700 dark:text-amber-300" role="status" data-video-prep-stale>制作设置已变更，文字修改已保留。{prepOptions.enhance ? '开始制作时会按新设置重新增强。' : '自动增强已关闭，制作者将按新设置调整旧草稿；也可点“再增强”预览。'}</p>
+				{/if}
 
 				<StudioPrepPanel
 					job={prepJob}
@@ -879,7 +912,7 @@
 			<div class="flex flex-col-reverse gap-2 px-1 sm:flex-row sm:items-center sm:justify-between">
 				<span class="text-xs text-gray-500 dark:text-gray-400" data-video-status data-video-blocked={blocked || undefined}>
 					{blocked ||
-						`交给 ${maker.label} · ${recipe.label} · ${lengthSummary}${musicReady ? ' · 配乐已定' : ''}，在新对话里${prepOptions.enhance && !prepared ? '先增强需求再' : ''}制作`}
+						`交给 ${maker.label} · ${recipe.label} · ${lengthSummary}${musicReady ? ' · 配乐已定' : ''}，在新对话里${prepOptions.enhance && (!prepared || prepStale) ? '先增强需求再' : ''}制作`}
 				</span>
 				<button type="submit" class="workspace-primary-button w-full sm:w-auto sm:min-w-32" disabled={!!blocked || starting} title={blocked} data-video-start>
 					<SidebarModeIcon mode="video" className="size-4" />
@@ -934,6 +967,8 @@
 					</div>
 					<p class="text-xs leading-relaxed text-gray-500 dark:text-gray-400">{recipe.hint}</p>
 				</div>
+
+				<VideoStylePicker value={settings.style} custom={settings.customStyle} disabled={preparing || starting} {hasReference} onChange={(style, customStyle) => (settings = { ...settings, style, customStyle })} />
 
 				<div class="grid gap-4 sm:grid-cols-2">
 					<div class="space-y-1.5">

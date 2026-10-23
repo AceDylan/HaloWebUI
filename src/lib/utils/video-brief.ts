@@ -7,6 +7,8 @@
 // cut to the chosen length), scene changes on its beats, and the skill's film.py proves the
 // finished file plays that track (--check-music) before it is handed over.
 
+import { cleanCustomStyle, normalizeVideoStyle, videoStyleLines, type VideoStyleKey } from './video-styles';
+
 export type VideoRecipeKey = 'explainer' | 'story' | 'footage' | 'data' | 'free';
 export type VideoFrameKey = '16:9' | '9:16' | '1:1';
 /** '' is Hermes itself; the rest are runners, started by the command in front of the brief. */
@@ -83,6 +85,8 @@ export type VideoMusic = { name: string; seconds: number | null };
  * from the web or the 精答 / 讨论 it asked first, and where they come from. */
 export type VideoPrep = {
 	original: string;
+	/** The draft predates the current settings; only its content remains useful. */
+	stale?: boolean;
 	notes: string;
 	sources: { title: string; url: string }[];
 	run?: { label: string; href: string } | null;
@@ -90,6 +94,8 @@ export type VideoPrep = {
 
 export type VideoBriefOptions = {
 	idea: string;
+	style: VideoStyleKey;
+	customStyle: string;
 	recipe: VideoRecipeKey;
 	frame: VideoFrameKey;
 	seconds: number;
@@ -111,6 +117,8 @@ export type VideoSettings = Omit<VideoBriefOptions, 'idea' | 'attachments' | 'mu
 export const prepMarkLine = (id: string) => `（制作前准备：HaloWebUI 正在增强需求，编号 ${id}）`;
 
 export const DEFAULT_VIDEO_SETTINGS: VideoSettings = {
+	style: 'auto',
+	customStyle: '',
 	recipe: 'explainer',
 	frame: '16:9',
 	seconds: 30,
@@ -128,6 +136,8 @@ export const normalizeVideoSettings = (value: unknown): VideoSettings => {
 	const raw = (value && typeof value === 'object' ? value : {}) as Record<string, unknown>;
 	const seconds = Number(raw.seconds);
 	return {
+		style: normalizeVideoStyle(raw.style),
+		customStyle: cleanCustomStyle(raw.customStyle),
 		recipe: pick(raw.recipe, VIDEO_RECIPES.map((r) => r.key), DEFAULT_VIDEO_SETTINGS.recipe),
 		frame: pick(raw.frame, VIDEO_FRAMES.map((f) => f.key), DEFAULT_VIDEO_SETTINGS.frame),
 		seconds: Number.isFinite(seconds) && seconds >= 5 && seconds <= 600 ? Math.round(seconds) : DEFAULT_VIDEO_SETTINGS.seconds,
@@ -215,9 +225,11 @@ const requirementLines = (opts: Omit<VideoBriefOptions, 'idea'>) => {
 /** The settings for 提示词增强 to size the content to (it never changes them). */
 export const videoSettingsText = (opts: Omit<VideoBriefOptions, 'idea'>): string => {
 	const lines = requirementLines(opts);
+	lines.push(...videoStyleLines(opts.style, opts.customStyle));
 	const attachments = opts.attachments ?? [];
-	if (attachments.length) lines.push(`- 参考附件：${attachmentCounts(attachments)}（${attachments.map((a) => plainName(a.name)).join('、')}）`);
 	if (opts.music) lines.push(`- 背景音乐：用户指定（${plainName(opts.music.name)}），视频按音乐的节拍和长度做`);
+	// The server accepts 1500 characters. Bound names after the essential constraints.
+	if (attachments.length) lines.push(`- 参考附件：${attachmentCounts(attachments)}（${attachments.map((a) => plainName(a.name).slice(0, 24)).join('、')}）`);
 	return lines.join('\n');
 };
 
@@ -226,6 +238,7 @@ const PREP_ORIGINAL_MAX = 1500;
 /** The brief's part from 提示词增强: the user's own words, the key facts and their sources. */
 const prepLines = (prep: VideoPrep, idea: string): string[] => {
 	const lines: string[] = [];
+	if (prep.stale) lines.push('', '## 设置已更新', '“待更新的增强草稿”段基于旧设置；如有“增强后的需求”段，以该段为更新结果。保留内容与用户文字修改，按下方当前制作设置协调分镜和视觉；旧增强补充的风格、节奏不得覆盖当前设置。用户原话中明确的视觉要求仍优先于预设。');
 	const original = prep.original.trim();
 	if (original && original !== idea.trim()) {
 		lines.push(
@@ -257,13 +270,14 @@ export const buildVideoBrief = (opts: VideoBriefOptions): string => {
 	const lines = [
 		'请制作一个视频（来自 HaloWebUI 视频工作台）。',
 		'',
-		'## 想要的视频',
+		opts.prep?.stale ? '## 待更新的增强草稿（旧视觉与节奏须按当前设置调整）' : '## 想要的视频',
 		opts.idea.trim(),
 		...(opts.prepJob && /^[0-9a-f]{32}$/.test(opts.prepJob) ? ['', prepMarkLine(opts.prepJob)] : []),
 		...(opts.prep ? prepLines(opts.prep, opts.idea) : []),
 		'',
 		'## 要求',
-		...requirementLines(opts)
+		...requirementLines(opts),
+		...videoStyleLines(opts.style, opts.customStyle)
 	];
 	if (attachments.length) {
 		const counts = attachmentCounts(attachments);
@@ -274,7 +288,9 @@ export const buildVideoBrief = (opts: VideoBriefOptions): string => {
 			// A video handed over as "做成这样" (a downloaded short with its watermark) must not
 			// end up cut into the result; with 素材剪辑 the attached footage is the material.
 			lines.push(
-				'- 附件里的视频：描述没说要剪进成片时，只当风格参考——抽帧看构图、配色、字体、节奏和转场，用自己做的画面重现这种风格，不要直接使用原片画面、水印或角色形象'
+				opts.style === 'auto' || opts.style === 'reference'
+					? '- 附件里的视频：描述没说要剪进成片时，只当风格参考——抽帧看构图、配色、字体、节奏和转场，用自己做的画面重现这种风格，不要直接使用原片画面、水印或角色形象'
+					: '- 附件里的视频：描述没说要剪进成片时，仅分析用户指定的内容、构图或动作，不覆盖所选视觉风格，不直接使用原片画面、水印或角色形象'
 			);
 		}
 	}
@@ -307,12 +323,20 @@ export const buildVideoBrief = (opts: VideoBriefOptions): string => {
  * so the requirements and the delivery line always arrive whole. */
 export const fitVideoBrief = (opts: VideoBriefOptions, max: number): string => {
 	const prep = opts.prep;
+	const minimal = prep?.stale ? { ...prep, original: '', notes: '', sources: [], run: null } : null;
 	const tries: (VideoPrep | null | undefined)[] = prep
-		? [prep, { ...prep, original: '' }, { ...prep, original: '', notes: prep.notes.slice(0, 400) }, { ...prep, original: '', notes: '', sources: prep.sources.slice(0, 3) }, null]
+		? [prep, { ...prep, original: '' }, { ...prep, original: '', notes: prep.notes.slice(0, 400) }, { ...prep, original: '', notes: '', sources: prep.sources.slice(0, 3) }, minimal]
 		: [prep];
 	for (const attempt of tries) {
 		const brief = buildVideoBrief({ ...opts, prep: attempt });
 		if (brief.length <= max) return brief;
 	}
-	return buildVideoBrief({ ...opts, prep: null });
+	// Do not silently truncate the user's words: the workbench reports an overlong brief.
+	return buildVideoBrief({ ...opts, prep: minimal });
+};
+
+/** Re-enhance a draft without mistaking generated visual details for user requirements. */
+export const videoPrepIdea = (idea: string, prep: VideoPrep | null | undefined): string => {
+	if (!prep?.stale) return idea.trim();
+	return `按当前设置更新下面的旧增强草稿，保留内容与用户文字修改；旧增强补充的视觉和节奏不覆盖新设置。用户原话中明确的视觉要求优先。\n\n用户原话：\n${prep.original}\n\n当前草稿（可能含用户修改）：\n${idea.trim()}`;
 };

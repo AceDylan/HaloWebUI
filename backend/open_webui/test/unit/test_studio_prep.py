@@ -273,3 +273,22 @@ def test_the_hermes_turn_waits_then_sends_the_enhanced_brief(monkeypatch):
     plain = {"input": "hello"}
     assert asyncio.run(hermes_agent._studio_prep_brief(plain, {"chat_id": "c", "message_id": "x"}, User(), emit)) is plain
     prep.JOBS.clear()
+
+
+def test_video_style_survives_planning_enhancement_and_background_fill():
+    model = Model(enhanced={"idea": "白板线条逐步绘制太阳系", "notes": "", "sources": []})
+    job = _job(idea="介绍太阳系")
+    job.settings = "- 视觉风格：白板手绘\n- 配音：不要配音\n- 字幕：不要字幕\n- 时长：约 30 秒"
+    _run(job, prep.Tools(ask=model, model_name="gpt-chat"))
+    assert job.status == "done"
+    assert all(job.settings in messages[1]["content"] for messages in model.calls)
+    original = "/codex 请制作一个视频\n" + prep.PREP_MARK.format(id="a" * 32) + "\n## 要求\n" + job.settings
+    filled = prep.fill_brief(original, job.result)
+    assert filled.startswith("/codex 请制作一个视频")
+    assert job.settings in filled
+    assert "白板线条逐步绘制太阳系" in filled
+    assert "旧增强草稿不覆盖新设置" in filled
+    # A missing/failed enhancement still delivers the selected style and production settings.
+    fallback = prep.fill_brief(original, None)
+    assert job.settings in fallback
+    assert "制作前准备" not in fallback

@@ -397,3 +397,164 @@ describe('Videos', () => {
 		expect(source.getAttribute('title')).toContain('20261015-224655-9fe3765e');
 	});
 });
+
+describe('Videos style presets', () => {
+	it('shows six previews initially, remembers a preset and sends it even with enhancement off', async () => {
+		api.getVideoPage.mockResolvedValue({ items: [], next: null });
+		const target = await mount();
+		expect(target.querySelectorAll('[data-video-style-grid] svg').length).toBe(6);
+		target.querySelector('[data-video-more-styles]').click();
+		await sleep(10);
+		expect(target.querySelectorAll('[data-video-style-grid] svg').length).toBe(16);
+		target.querySelector('[data-video-style="ink"]').click();
+		await typeIdea(target, '介绍黄山');
+		target.querySelector('[data-video-workbench]').dispatchEvent(new Event('submit'));
+		await sleep(10);
+		expect(prepApi.startStudioPrep).not.toHaveBeenCalled();
+		expect(JSON.parse(sessionStorage.getItem('halo.handoff')!).text).toContain('视觉风格：水墨山水');
+		expect(JSON.parse(localStorage.getItem('halo.videoStudio.settings')!).style).toBe('ink');
+		const restored = await mount();
+		expect(restored.querySelector('[data-video-style="ink"]').getAttribute('aria-pressed')).toBe('true');
+	});
+
+	it('re-enhances after a style change while retaining edited text and original requirements', async () => {
+		localStorage.setItem('halo.videoStudio.prep', JSON.stringify({ enhance: true, research: false, deeper: false }));
+		api.getVideoPage.mockResolvedValue({ items: [], next: null });
+		prepApi.startStudioPrep.mockResolvedValueOnce(prepJob());
+		const target = await mount();
+		await typeIdea(target, '介绍番茄工作法');
+		target.querySelector('[data-video-style="flat"]').click();
+		target.querySelector('[data-video-enhance]').click();
+		await sleep(30);
+		await typeIdea(target, '增强后的需求：开场倒计时。手动补充：结尾留五秒总结。');
+		target.querySelector('[data-video-style="whiteboard"]').click();
+		await sleep(10);
+		expect(target.querySelector('[data-video-prep-stale]').textContent).toContain('文字修改已保留');
+		prepApi.startStudioPrep.mockResolvedValueOnce(prepJob({ id: 'b'.repeat(32), status: 'running', result: null }));
+		target.querySelector('[data-video-workbench]').dispatchEvent(new Event('submit'));
+		await sleep(20);
+		expect(prepApi.startStudioPrep).toHaveBeenCalledTimes(2);
+		const form = prepApi.startStudioPrep.mock.calls[1][1];
+		expect(form.settings).toContain('视觉风格：白板手绘');
+		expect(form.idea).toContain('手动补充：结尾留五秒总结');
+		expect(form.idea).toContain('用户原话：\n介绍番茄工作法');
+		const text = JSON.parse(sessionStorage.getItem('halo.handoff')!).text;
+		expect(text).toContain('视觉风格：白板手绘');
+		expect(text).toContain('## 设置已更新');
+		expect(text).toContain('b'.repeat(32));
+	});
+
+	it('keeps a changed style when re-enhancement fails and does not rerun when only the maker changes', async () => {
+		localStorage.setItem('halo.videoStudio.prep', JSON.stringify({ enhance: true, research: false, deeper: false }));
+		api.getVideoPage.mockResolvedValue({ items: [], next: null });
+		prepApi.startStudioPrep.mockResolvedValueOnce(prepJob());
+		const target = await mount();
+		await typeIdea(target, '讲解工作法');
+		target.querySelector('[data-video-enhance]').click();
+		await sleep(30);
+		target.querySelector('[data-video-maker="codex"]').click();
+		await sleep(10);
+		expect(target.querySelector('[data-video-prep-stale]')).toBeFalsy();
+		target.querySelector('[data-video-style="type"]').click();
+		await sleep(10);
+		prepApi.startStudioPrep.mockRejectedValueOnce({ detail: '服务不可用' });
+		target.querySelector('[data-video-workbench]').dispatchEvent(new Event('submit'));
+		await sleep(20);
+		const text = JSON.parse(sessionStorage.getItem('halo.handoff')!).text;
+		expect(text).toContain('视觉风格：动态排版');
+		expect(text).toContain('旧增强补充的风格、节奏不得覆盖当前设置');
+		expect(text.startsWith('/codex ')).toBe(true);
+	});
+
+	it('requires a reference or custom description for those modes', async () => {
+		api.getVideoPage.mockResolvedValue({ items: [], next: null });
+		const target = await mount();
+		await typeIdea(target, '做个片头');
+		target.querySelector('[data-video-style="reference"]').click();
+		await sleep(10);
+		expect(target.querySelector('[data-video-start]').disabled).toBe(true);
+		target.querySelector('[data-video-workbench]').dispatchEvent(new Event('submit'));
+		expect(nav.goto).not.toHaveBeenCalled();
+		target.querySelector('[data-video-style="custom"]').click();
+		await sleep(10);
+		expect(target.querySelector('[data-video-start]').disabled).toBe(true);
+		const box = target.querySelector('[data-video-custom-style]');
+		box.value = '暖色绘本、缓慢运镜';
+		box.dispatchEvent(new Event('input'));
+		await sleep(10);
+		expect(target.querySelector('[data-video-start]').disabled).toBe(false);
+		target.querySelector('[data-video-workbench]').dispatchEvent(new Event('submit'));
+		await sleep(10);
+		expect(JSON.parse(sessionStorage.getItem('halo.handoff')!).text).toContain('自定义。暖色绘本、缓慢运镜');
+	});
+
+	it('uses one settings snapshot while background enhancement is being started', async () => {
+		localStorage.setItem('halo.videoStudio.prep', JSON.stringify({ enhance: true, research: false, deeper: false }));
+		api.getVideoPage.mockResolvedValue({ items: [], next: null });
+		let resolve!: (value: any) => void;
+		prepApi.startStudioPrep.mockReturnValue(new Promise((r) => { resolve = r; }));
+		const target = await mount();
+		await typeIdea(target, '介绍工作法');
+		target.querySelector('[data-video-workbench]').dispatchEvent(new Event('submit'));
+		await sleep(10);
+		target.querySelector('[data-video-length="60"]').click();
+		await typeIdea(target, '下一条视频的需求');
+		resolve(prepJob({ id: 'c'.repeat(32), status: 'running', result: null }));
+		await sleep(20);
+		const text = JSON.parse(sessionStorage.getItem('halo.handoff')!).text;
+		expect(text).toContain('时长：约 30 秒');
+		expect(text).toContain('介绍工作法');
+		expect(text).not.toContain('下一条视频的需求');
+	});
+});
+
+describe('Videos style edge cases', () => {
+	it('keeps old drafts marked when enhancement is off and accepts an uploaded reference', async () => {
+		api.getVideoPage.mockResolvedValue({ items: [], next: null });
+		prepApi.startStudioPrep.mockResolvedValueOnce(prepJob());
+		upload.uploadFileReliably.mockResolvedValue({ file: { id: 'ref1' } });
+		const target = await mount();
+		await typeIdea(target, '制作一个讲解');
+		target.querySelector('[data-video-enhance]').click();
+		await sleep(30);
+		target.querySelector('[data-video-style="reference"]').click();
+		await sleep(10);
+		await dropOn(target.querySelector('[data-scifi-conduit]'), new File([new Uint8Array([1])], 'ref.mp4', { type: 'video/mp4' }));
+		expect(target.querySelector('[data-video-start]').disabled).toBe(false);
+		expect(target.querySelector('[data-video-prep-stale]').textContent).toContain('自动增强已关闭');
+		target.querySelector('[data-video-workbench]').dispatchEvent(new Event('submit'));
+		await sleep(10);
+		expect(prepApi.startStudioPrep).toHaveBeenCalledTimes(1);
+		const handoff = JSON.parse(sessionStorage.getItem('halo.handoff')!);
+		expect(handoff.files).toContainEqual({ id: 'ref1', name: 'ref.mp4', type: 'file' });
+		expect(handoff.text).toContain('视觉风格：跟随参考');
+		expect(handoff.text).toContain('## 设置已更新');
+	});
+
+	it('marks a manual result stale when settings changed while its start request was pending', async () => {
+		api.getVideoPage.mockResolvedValue({ items: [], next: null });
+		let resolve!: (value: any) => void;
+		prepApi.startStudioPrep.mockReturnValue(new Promise((r) => { resolve = r; }));
+		const target = await mount();
+		await typeIdea(target, '解释太阳系');
+		target.querySelector('[data-video-enhance]').click();
+		await sleep(10);
+		target.querySelector('[data-video-length="60"]').click();
+		await sleep(10);
+		resolve(prepJob());
+		await sleep(20);
+		expect(target.querySelector('[data-video-prep-stale]').textContent).toContain('制作设置已变更');
+		expect(prepApi.startStudioPrep.mock.calls[0][1].settings).toContain('时长：约 30 秒');
+		expect(target.querySelector('[data-video-brief] pre').textContent).toContain('时长：约 1 分钟');
+	});
+
+	it('does not hand off a brief that would truncate style or delivery instructions', async () => {
+		api.getVideoPage.mockResolvedValue({ items: [], next: null });
+		const target = await mount();
+		await typeIdea(target, '长'.repeat(8000));
+		expect(target.querySelector('[data-video-start]').disabled).toBe(true);
+		target.querySelector('[data-video-workbench]').dispatchEvent(new Event('submit'));
+		expect(nav.goto).not.toHaveBeenCalled();
+		expect(target.querySelector('[data-video-status]').textContent).toContain('请精简');
+	});
+});

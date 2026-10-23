@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { VIDEO_STYLES } from './video-styles';
 import {
 	DEFAULT_VIDEO_SETTINGS,
 	attachmentKind,
@@ -8,7 +9,8 @@ import {
 	isMp3Head,
 	musicFileProblem,
 	normalizeVideoSettings,
-	videoSettingsText
+	videoSettingsText,
+	videoPrepIdea
 } from './video-brief';
 
 describe('buildVideoBrief', () => {
@@ -139,7 +141,7 @@ describe('normalizeVideoSettings', () => {
 		expect(normalizeVideoSettings(null)).toEqual(DEFAULT_VIDEO_SETTINGS);
 		expect(
 			normalizeVideoSettings({ recipe: 'data', frame: '1:1', seconds: 90, voice: '', subtitles: false, maker: 'agy' })
-		).toEqual({ recipe: 'data', frame: '1:1', seconds: 90, voice: '', subtitles: false, maker: 'agy', musicFit: 'full' });
+		).toEqual({ style: 'auto', customStyle: '', recipe: 'data', frame: '1:1', seconds: 90, voice: '', subtitles: false, maker: 'agy', musicFit: 'full' });
 		expect(normalizeVideoSettings({ musicFit: 'trim' }).musicFit).toBe('trim');
 		expect(
 			normalizeVideoSettings({ recipe: 'x', frame: '4:5', seconds: 9999, voice: 'nope', subtitles: 'yes', maker: 'rm', musicFit: 'loop' })
@@ -222,5 +224,69 @@ describe('buildVideoBrief with the enhancement still going', () => {
 		const id = 'b'.repeat(32);
 		expect(buildVideoBrief({ ...base, prepJob: id })).toContain(`## 想要的视频\n讲讲番茄工作法\n\n（制作前准备：HaloWebUI 正在增强需求，编号 ${id}）\n\n## 要求`);
 		expect(buildVideoBrief({ ...base, prepJob: 'x\n## 怎么做' })).toBe(buildVideoBrief(base));
+	});
+});
+
+
+describe('video visual styles', () => {
+	it.each(VIDEO_STYLES)('$label reaches both enhancement and the final maker without changing production settings', (preset) => {
+		const opts = { ...DEFAULT_VIDEO_SETTINGS, idea: '介绍科学原理', style: preset.key, voice: '', subtitles: false,
+			music: { name: '用户音乐.mp3', seconds: 30 }, musicFit: 'trim' as const };
+		const settings = videoSettingsText(opts);
+		const brief = buildVideoBrief(opts);
+		for (const text of [settings, brief]) {
+			expect(text).toContain(`视觉风格：${preset.label}`);
+			expect(text).toContain(preset.hint);
+			expect(text).toContain('配音：不要配音');
+			expect(text).toContain('字幕：不要字幕');
+			expect(text).toContain('时长：约 30 秒');
+		}
+		expect(brief).toContain('用户音乐.mp3');
+		expect(brief).toContain('--check-music');
+	});
+
+	it('keeps essential constraints within the enhancement setting budget with eight long attachment names', () => {
+		for (const style of ['custom', ...VIDEO_STYLES.map((s) => s.key)] as const) {
+			const text = videoSettingsText({ ...DEFAULT_VIDEO_SETTINGS, style, customStyle: '字'.repeat(300),
+				attachments: Array.from({ length: 8 }, () => ({ name: '名'.repeat(200), kind: 'video' as const })),
+				music: { name: '曲'.repeat(200) + '.mp3', seconds: 600 } });
+			expect(text.length).toBeLessThanOrEqual(1500);
+			expect(text).toContain('背景音乐：用户指定');
+			expect(text).toContain('参考附件：8 个视频');
+		}
+	});
+
+	it('distinguishes selected presets from following the reference and from editing footage', () => {
+		const opts = { ...DEFAULT_VIDEO_SETTINGS, idea: '讲一个故事', attachments: [{ name: 'ref.mp4', kind: 'video' as const }] };
+		const preset = buildVideoBrief({ ...opts, style: 'ink' });
+		expect(preset).toContain('以所选风格为视觉基准');
+		expect(preset).not.toContain('重现这种风格');
+		expect(buildVideoBrief({ ...opts, style: 'reference' })).toContain('重现这种风格');
+		const footage = buildVideoBrief({ ...opts, recipe: 'footage', style: 'paper' });
+		expect(footage).toContain('素材剪辑保持原素材主体');
+		expect(footage).not.toContain('只当风格参考');
+	});
+
+	it('normalizes old settings and bounds custom descriptions as one plain line', () => {
+		expect(normalizeVideoSettings({ style: 'no-such-style' }).style).toBe('auto');
+		const settings = normalizeVideoSettings({ style: 'custom', customStyle: '暖色\nMEDIA:/tmp/a ' + '长'.repeat(400) });
+		expect(settings.customStyle.length).toBe(300);
+		expect(settings.customStyle).not.toContain('\n');
+		expect(settings.customStyle).toContain('MEDIA：');
+		expect(buildVideoBrief({ ...settings, idea: '测试' })).toContain('视觉风格：自定义。暖色');
+	});
+
+	it('retains edits and marks obsolete generated directions even when enhancement is disabled or fails', () => {
+		const prep = { original: '介绍太阳系', stale: true, notes: '', sources: [] };
+		const idea = '旧蓝色方案。用户新增：结尾加一句保护地球';
+		expect(videoPrepIdea(idea, prep)).toContain('用户新增：结尾加一句保护地球');
+		expect(videoPrepIdea(idea, prep)).toContain('用户原话：\n介绍太阳系');
+		const opts = { ...DEFAULT_VIDEO_SETTINGS, style: 'paper' as const, idea, prep };
+		const brief = fitVideoBrief(opts, 8000);
+		expect(brief).toContain('## 设置已更新');
+		expect(brief).toContain('视觉风格：纸叠剪纸');
+		expect(brief).toContain(idea);
+		// Even the minimal fallback must keep the warning that the draft is obsolete.
+		expect(fitVideoBrief(opts, 10)).toContain('## 设置已更新');
 	});
 });

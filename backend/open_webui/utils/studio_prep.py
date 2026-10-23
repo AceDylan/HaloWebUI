@@ -145,11 +145,16 @@ def enhance_messages(kind: str, idea: str, settings: str, *, sources: list[dict]
         task = (
             "Rewrite the user's video request into a clear, complete brief for the agent that will make the video. "
             "Keep everything the user asked for (topic, audience, tone, style, must-have details, wording they insist on). "
-            "The settings listed are decided and stated separately in the brief (做法, 画幅, 时长, 配音, 字幕, 背景音乐, 附件): "
+            "The settings listed are decided and stated separately in the brief (做法, 画幅, 时长, 配音, 字幕, 背景音乐, 附件, 视觉风格): "
             "never contradict them and do not repeat them as items, but size the content to the length. Add what a good maker "
             "needs: the core message and audience, an opening hook, a scene-by-scene outline (about one scene per 4-8 seconds; "
             "for each: what is on screen and, when narrated, the narration / subtitle line), the visual style (palette, type, motion) "
-            "and pacing, and the ending."
+            "and pacing, and the ending. Follow the supplied visual-style and reference priority rules: explicit user visual "
+            "requirements take priority over a preset; a preset takes priority over visual details you invent. "
+            "When updating a previously enhanced draft, retain content and user edits but reconcile obsolete generated "
+            "visual details and timing with the current settings. Reference attachments are not automatically footage to "
+            "insert. If only attachment names are provided, leave visual extraction to the maker; do not pretend to have "
+            "seen them. Style never changes the chosen recipe, frame, duration, voice, subtitle switch or music."
         )
     else:
         task = (
@@ -430,7 +435,7 @@ def brief_sections(result: Optional[dict]) -> str:
     enhancement done on the page): the enhanced request, the key facts and their sources."""
     if not result or not result.get("idea"):
         return ""
-    lines = ["## 增强后的需求（gpt-chat 据上面的原话整理：按它制作，两者冲突时以原话为准）", result["idea"].strip()]
+    lines = ["## 增强后的需求（按当前制作设置执行；用户原话中的明确要求优先，旧增强草稿不覆盖新设置）", result["idea"].strip()]
     sources = [s for s in result.get("sources") or [] if re.match(r"https?://", str(s.get("url") or ""), re.I)]
     run = result.get("run")
     if (result.get("notes") or "").strip() or sources or run:

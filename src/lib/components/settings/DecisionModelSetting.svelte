@@ -69,11 +69,11 @@
 				自动分流、精答、讨论、协作里仍为「自动」的选择（处理方式、助手、模型、轮次、执行器）先交给它判断；你手动指定的不变，它失败时自动回退原来的逻辑。正文回答、成员执行和总结仍由各自的模型完成。
 			</div>
 		</div>
-		<div class="flex shrink-0 items-center gap-2 self-start">
+		<div class="flex w-full min-w-0 items-center gap-2 self-start sm:w-auto sm:shrink-0">
 			<HaloSelect
 				bind:value
 				{options}
-				className="w-full sm:w-72"
+				className="min-w-0 flex-1 sm:w-72 sm:flex-none"
 				searchEnabled={true}
 				searchPlaceholder="搜索模型"
 				noResultsText="没有可用的模型"

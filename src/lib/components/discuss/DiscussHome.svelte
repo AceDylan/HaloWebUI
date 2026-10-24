@@ -169,6 +169,9 @@
 	$: seatsValid = seats.length >= MIN_SEATS && seats.length <= MAX_SEATS && seats.every((s) => modelById(choices, s.model));
 	$: canStart = !creating && !uploading && !!question.trim() && (smart || seatsValid) && !!moderator;
 	$: moderatorChoices = choices;
+	// 自选席位: a moderator that also speaks tends to side with itself when it sums up
+	$: moderatorSeated =
+		!smart && !!moderator && seats.some((s) => !!modelById(choices, s.model) && modelById(choices, s.model) === modelById(choices, moderator));
 	$: webSearchEnabled = $config?.features?.enable_web_search !== false;
 
 	const pickDefaults = () => {
@@ -240,7 +243,10 @@
 		}
 		if (Number.isInteger(saved?.rounds)) rounds = Math.max(1, Math.min(MAX_ROUNDS, saved.rounds));
 		else rounds = modeSpec(mode).rounds;
-		const strong = choices.find((m) => /claude|gpt/i.test(m.name ?? m.id));
+		// the moderator judges the discussion: a strong model that does not also take a seat
+		const isStrong = (m: (typeof choices)[number]) => /claude|gpt/i.test(m.name ?? m.id);
+		const seated = (m: (typeof choices)[number]) => !smart && seats.some((s) => modelById(choices, s.model) === m);
+		const strong = choices.find((m) => isStrong(m) && !seated(m)) ?? choices.find(isStrong);
 		moderator =
 			saved?.moderator && modelById(choices, saved.moderator)
 				? saved.moderator
@@ -689,6 +695,11 @@
 								{/each}
 							</select>
 						</label>
+						{#if moderatorSeated}
+							<span class="text-[11px] text-amber-600 dark:text-amber-300" data-discuss-moderator-seated
+								>主持人也在席位上，总结时可能偏向自己的发言</span
+							>
+						{/if}
 						{#if !smart}
 						<button
 							type="button"

@@ -762,6 +762,10 @@ async def _plan(request: Request, user, ask: dict, call_model, history: list[dic
         if len(pool) >= room.PLAN_POOL_MAX:
             break
     moderator = ask["moderator"]["model"]
+    # the moderator judges the discussion, so it does not take a seat in it (unless too few others)
+    others = [entry for entry in pool if entry["ref"] != moderator]
+    if len(others) >= room.MIN_SEATS:
+        pool = others
     error = None
     try:
         messages = room.build_plan_messages(ask=ask, pool=pool, history=history)
@@ -838,6 +842,7 @@ def _start(
     from_round=1,
     retry_turn: Optional[str] = None,
     resume: bool = False,
+    adapt_rounds: bool = True,
 ):
     setup = _setup_of(chat)
     chat_id = chat.id
@@ -891,6 +896,7 @@ def _start(
         search=search,
         retry_turn=retry_turn,
         resume=resume,
+        adapt_rounds=adapt_rounds,
         images=_ask_images(ask, user) if ask.get("files") else [],
         match=match,
         lookup=lookup,
@@ -1339,7 +1345,8 @@ async def continue_discussion(request: Request, chat_id: str, user=Depends(get_v
     last_complete = max(complete or {0})
     ask["turns"] = [turn for turn in ask.get("turns") or [] if (turn.get("round") or 0) <= last_complete]
     ask.update({"status": "running", "endedAt": None, "error": None, "rounds": last_complete + 1})
-    _start(request, user, chat, ask, history=_history(chat, ask["id"]), from_round=last_complete + 1)
+    ask.pop("adapt", None)
+    _start(request, user, chat, ask, history=_history(chat, ask["id"]), from_round=last_complete + 1, adapt_rounds=False)
     return _detail(chat_id, user)
 
 

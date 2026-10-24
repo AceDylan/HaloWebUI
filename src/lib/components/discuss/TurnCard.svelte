@@ -7,7 +7,7 @@
 	import ReportMarkdown from '$lib/components/teams/ReportMarkdown.svelte';
 	import { now } from '$lib/components/teams/clock';
 	import SeatAvatar from './SeatAvatar.svelte';
-	import { linkCitations, seconds, tokens, turnStatusText } from './model';
+	import { STANCE_LABEL, linkCitations, seconds, tokens, turnStatusText } from './model';
 
 	/** One seat's turn in one round. */
 	export let turn: DiscussTurn;
@@ -108,6 +108,17 @@
 					<span
 						class="dc-seat-color shrink-0 rounded-full px-1.5 py-px text-[10.5px] font-medium"
 						style="background: hsl({hue} 85% 58% / 0.1)">{seat?.role}</span
+					>
+				{/if}
+				{#if turn.stance && turn.status === 'done'}
+					<span
+						class="shrink-0 rounded-full bg-gray-500/10 px-1.5 py-px text-[10.5px] font-medium {turn.stance.kind === 'disagree'
+							? 'text-red-600 dark:text-red-300'
+							: turn.stance.kind === 'partial'
+								? 'text-amber-600 dark:text-amber-300'
+								: 'text-gray-600 dark:text-gray-300'}"
+						title={turn.stance.text || STANCE_LABEL[turn.stance.kind]}
+						data-discuss-stance={turn.stance.kind}>{STANCE_LABEL[turn.stance.kind]}</span
 					>
 				{/if}
 			</div>

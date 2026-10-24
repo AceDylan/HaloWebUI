@@ -53,6 +53,8 @@ def env(monkeypatch):
         return {"status": "skipped"}
 
     monkeypatch.setattr(mode_card, "design", _no_card)
+    # 参与者复核 has its own tests (test_discussion_room.py); here the calls are the rounds'
+    monkeypatch.setenv("HALO_DISCUSS_SIGNOFF", "0")
     engine = create_engine("sqlite:///:memory:")
     chats_mod.Chat.__table__.create(engine)
     session = sessionmaker(bind=engine)
@@ -860,6 +862,9 @@ def test_moderator_receives_new_models_profiles_and_selects_their_real_refs(env)
             "discussion_profile": {"version": f"{alias}-tested-version", "strengths": ["中文摘要"],
                                    "limitations": ["联网未验证"], "vision": True},
             "private_value": "must-not-leak"}}}
+    # the moderator's own model is not a candidate
+    moderator = "modelref::openai::personal::id:test::gpt-chat"
+    models[moderator] = {"id": moderator, "selection_id": moderator, "name": "gpt-chat", "info": {"meta": {}}}
     env.request.state.MODELS = models
 
     async def call_model(moderator, messages):
@@ -875,10 +880,36 @@ def test_moderator_receives_new_models_profiles_and_selects_their_real_refs(env)
             "seats": [{"model": alias, "role": "评审"} for alias in aliases], "reason": "不同家族独立复核"}))
 
     result = asyncio.run(api._plan(env.request, USER, {
-        "question": "请评审中文方案", "moderator": {"model": next(iter(models))}, "files": []
+        "question": "请评审中文方案", "moderator": {"model": moderator}, "files": []
     }, call_model, []))
     assert result["error"] is None
-    assert [s["model"] for s in result["setup"]["seats"]] == list(models)
+    assert [s["model"] for s in result["setup"]["seats"]] == [m for m in models if m != moderator]
+
+
+def test_the_moderator_does_not_seat_its_own_model_unless_too_few_others(env):
+    def models_of(*aliases):
+        out = {}
+        for alias in aliases:
+            ref = f"modelref::openai::personal::id:test::{alias}"
+            out[ref] = {"id": ref, "selection_id": ref, "name": alias, "info": {"meta": {}}}
+        return out
+
+    seen = []
+
+    async def call_model(moderator, messages):
+        candidates = json.loads(messages[1]["content"].split("Available models:\n")[1])
+        seen.append([m["id"] for m in candidates])
+        return _Stream(json.dumps({"mode": "roundtable", "rounds": 2,
+            "seats": [{"model": m["id"]} for m in candidates], "reason": "r"}))
+
+    for aliases in (("gpt-chat", "claude-chat", "deepseek-chat"), ("gpt-chat", "claude-chat")):
+        models = models_of(*aliases)
+        env.request.state.MODELS = models
+        result = asyncio.run(api._plan(env.request, USER, {
+            "question": "选数据库", "moderator": {"model": next(iter(models))}, "files": []
+        }, call_model, []))
+        assert result["error"] is None
+    assert seen == [["claude-chat", "deepseek-chat"], ["gpt-chat", "claude-chat"]]
 
 
 def test_the_list_comes_a_page_at_a_time_with_search_and_the_live_filter(env):

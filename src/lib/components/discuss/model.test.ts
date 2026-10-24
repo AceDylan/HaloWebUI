@@ -17,6 +17,8 @@ import {
 	retryText,
 	roundsOf,
 	sectionKind,
+	signoffText,
+	adaptText,
 	tokens,
 	turnStatusText
 } from './model';
@@ -243,5 +245,25 @@ describe('结论卡片', () => {
 	it('goes after the text the way a chat reply carries it', () => {
 		expect(withCard('正文\n', '<p>x</p>')).toBe('正文\n\n````html\n<p>x</p>\n````');
 		expect(withCard('正文', '')).toBe('正文');
+	});
+});
+
+describe('参与者复核 and adaptive rounds', () => {
+	it('names the check section', () => {
+		expect(sectionKind('参与者复核', 5)).toBe('check');
+		expect(sectionKind('Participant check', 5)).toBe('check');
+	});
+	it('says how the check went', () => {
+		const item = (status: string) => ({ seat: 's', name: 'a', status, text: '' }) as any;
+		expect(signoffText(null)).toBe('');
+		expect(signoffText({ status: 'running', items: [item('waiting')] })).toBe('参与者复核中…');
+		expect(signoffText({ status: 'done', items: [item('ok'), item('ok'), item('error')] })).toBe('2 位参与者确认无误');
+		expect(signoffText({ status: 'done', items: [item('ok'), item('objection')] })).toBe('1 位参与者提了异议');
+		expect(signoffText({ status: 'done', items: [item('error')] })).toBe('');
+	});
+	it('says why the rounds changed', () => {
+		expect(adaptText(null)).toBe('');
+		expect(adaptText({ kind: 'early', round: 2, planned: 3 })).toBe('第 2 轮大家都表示同意，提前收尾（原定 3 轮）');
+		expect(adaptText({ kind: 'extra', round: 3, planned: 2 })).toBe('第 2 轮仍有人反对，自动加了第 3 轮');
 	});
 });

@@ -18,6 +18,7 @@
 		retryText,
 		sectionKind,
 		seconds,
+		signoffText,
 		tokens
 	} from './model';
 
@@ -52,6 +53,7 @@
 	// 结论卡片: once designed it stands for the whole conclusion (「显示原文」 has the sections' text)
 	$: carded = state === 'done' && Boolean(cardHtml(ask.card));
 	$: designing = state === 'done' && cardDesigning(ask.card, $now);
+	$: checked = state === 'done' ? signoffText(ask.signoff) : '';
 	// a stand-in seat writes it when the moderator cannot
 	$: writer = conclusion.standIn ? { model: conclusion.model, name: conclusion.name } : ask.moderator;
 	$: retrying = conclusion.retry ? retryText(conclusion.retry, $now) : '';
@@ -59,7 +61,7 @@
 		state === 'streaming' ? (conclusion.thinking && !conclusion.content ? 'thinking' : 'streaming') : state
 	) as 'thinking' | 'streaming' | 'waiting' | 'done' | 'error' | 'stopped';
 
-	const MARK: Record<string, string> = { agree: '✓', disagree: '≠', positions: '◎', next: '→', other: '·' };
+	const MARK: Record<string, string> = { agree: '✓', disagree: '≠', positions: '◎', next: '→', check: '!', other: '·' };
 
 	const copy = async () => {
 		if (await copyToClipboard(conclusion.content)) toast.success('已复制结论');
@@ -102,7 +104,7 @@
 					{:else if state === 'streaming'}
 						· {conclusion.thinking && !conclusion.content ? '思考中…' : '正在写结论…'}
 					{:else if state === 'done'}
-						{[took !== null ? `用时 ${took}s` : '', total ? `本问共 ${tokens(total)} tokens` : '', drawing ? '正在配图…' : '', designing ? '正在排版卡片…' : '']
+						{[took !== null ? `用时 ${took}s` : '', total ? `本问共 ${tokens(total)} tokens` : '', checked, drawing ? '正在配图…' : '', designing ? '正在排版卡片…' : '']
 							.filter(Boolean)
 							.map((s) => ` · ${s}`)
 							.join('')}

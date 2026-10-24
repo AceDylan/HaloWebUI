@@ -167,6 +167,7 @@ describe('DiscussHome', () => {
 		expect(seatText()).toEqual(['gpt-chat 正方', 'deepseek-chat 反方', 'gemini-chat 评审']);
 		expect(target.querySelector('[data-discuss-rounds]')!.textContent).toContain('3');
 
+		expect(target.querySelector('[data-discuss-moderator-seated]')).toBeFalsy();
 		const start = target.querySelector('[data-discuss-start]') as any;
 		expect(start.disabled).toBe(true);
 		const box = target.querySelector('#discuss-question') as any;
@@ -190,7 +191,7 @@ describe('DiscussHome', () => {
 				{ model: 'm-gem', role: '' }
 			],
 			rounds: 3,
-			moderator: 'm-gpt', // a strong writer by default
+			moderator: 'm-claude', // a strong writer that does not also take a seat
 			research: true,
 			files: [],
 			context: null,

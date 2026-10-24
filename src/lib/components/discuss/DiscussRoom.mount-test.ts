@@ -275,6 +275,52 @@ describe('DiscussRoom', () => {
 		expect(decodeURIComponent(url.split('&q=')[1])).toContain('用 **Postgres**');
 	}, 90000);
 
+	it('shows each seat\'s stance, why the rounds changed and the participants\' check of the conclusion', async () => {
+		const ask = runningAsk();
+		const done = (id: string, round: number, seat: string, stance?: any) => ({ id, round, seat, status: 'done', content: `${seat} 第 ${round} 轮`, stance });
+		Object.assign(ask, {
+			status: 'done',
+			rounds: 2,
+			adapt: { kind: 'early', round: 2, planned: 3 },
+			turns: [
+				done('r1-s1', 1, 's1'),
+				done('r1-s2', 1, 's2'),
+				done('r2-s1', 2, 's1', { kind: 'agree', text: '用 Postgres' }),
+				done('r2-s2', 2, 's2', { kind: 'partial', text: '备份另说' })
+			],
+			conclusion: {
+				status: 'done',
+				model: 'm-b',
+				name: 'claude-chat',
+				content: '## 结论\n用 **Postgres**。\n## 共识\n- 要备份\n## 参与者复核\n- **gpt-chat**：我说的是 15 版',
+				startedAt: 1,
+				endedAt: 9001
+			},
+			signoff: {
+				status: 'done',
+				items: [
+					{ seat: 's1', name: 'gpt-chat', status: 'objection', text: '我说的是 15 版' },
+					{ seat: 's2', name: 'claude-chat', status: 'ok', text: '' }
+				]
+			}
+		});
+		api.getDiscussion.mockResolvedValue({ ...discussion(ask), title: '数据库选型' });
+		const target = await mount();
+		await until(() => (target.querySelector('[data-discuss-answer]')?.textContent ?? '').includes('Postgres'));
+		const expand = target.querySelector('[data-discuss-unfold]') as any;
+		if (expand) {
+			expand.click();
+			await until(() => !!target.querySelector('[data-discuss-turn="r2-s1"]'));
+		}
+		expect(target.querySelector('[data-discuss-turn="r2-s1"] [data-discuss-stance="agree"]')!.textContent).toBe('同意');
+		expect(target.querySelector('[data-discuss-turn="r2-s2"] [data-discuss-stance="partial"]')!.textContent).toBe('有保留');
+		expect(target.querySelector('[data-discuss-turn="r1-s1"] [data-discuss-stance]')).toBeFalsy();
+		expect(target.querySelector('[data-discuss-adapt="early"]')!.textContent).toContain('提前收尾（原定 3 轮）');
+		const kinds = [...target.querySelectorAll('.dc-section')].map((el: any) => el.getAttribute('data-kind'));
+		expect(kinds).toEqual(['agree', 'check']);
+		expect(target.querySelector('[data-discuss-conclusion]')!.textContent).toContain('1 位参与者提了异议');
+	}, 90000);
+
 	it('a conclusion whose picture is still being drawn says so in the header and on the card', async () => {
 		const ask = runningAsk();
 		Object.assign(ask, {

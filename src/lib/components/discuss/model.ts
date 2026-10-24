@@ -5,6 +5,8 @@ import type {
 	DiscussMode,
 	DiscussRetry,
 	DiscussSeat,
+	DiscussSignoff,
+	DiscussStance,
 	DiscussTurn,
 	ModeCard,
 	ModeIllustration,
@@ -161,15 +163,37 @@ const trimRules = (body: string) => {
 	return lines.join('\n');
 };
 
-export type SectionKind = 'answer' | 'agree' | 'disagree' | 'positions' | 'next' | 'other';
+export type SectionKind = 'answer' | 'agree' | 'disagree' | 'positions' | 'next' | 'check' | 'other';
 
 const SECTION_KINDS: [SectionKind, RegExp][] = [
 	['answer', /^(结论|conclusion|verdict|answer)/i],
 	['agree', /^(共识|agreements?|consensus)/i],
 	['disagree', /^(分歧|disagreements?)/i],
 	['positions', /^(各方立场|立场|positions?|stances?)/i],
-	['next', /^(下一步|next steps?)/i]
+	['next', /^(下一步|next steps?)/i],
+	['check', /^(参与者复核|participant check)/i]
 ];
+
+export const STANCE_LABEL: Record<DiscussStance['kind'], string> = { agree: '同意', partial: '有保留', disagree: '反对' };
+
+/** 「参与者复核」 in a line: running, everyone confirmed, or how many objected. */
+export const signoffText = (signoff: DiscussSignoff | null | undefined): string => {
+	if (!signoff?.items?.length) return '';
+	if (signoff.status === 'running') return '参与者复核中…';
+	if (signoff.status === 'stopped') return '复核被停止';
+	const objected = signoff.items.filter((i) => i.status === 'objection').length;
+	const confirmed = signoff.items.filter((i) => i.status === 'ok').length;
+	if (objected) return `${objected} 位参与者提了异议`;
+	return confirmed ? `${confirmed} 位参与者确认无误` : '';
+};
+
+/** Why the rounds changed (圆桌讨论), or '' when they ran as planned. */
+export const adaptText = (adapt: DiscussAsk['adapt']): string => {
+	if (!adapt) return '';
+	return adapt.kind === 'early'
+		? `第 ${adapt.round} 轮大家都表示同意，提前收尾（原定 ${adapt.planned} 轮）`
+		: `第 ${adapt.planned} 轮仍有人反对，自动加了第 ${adapt.round} 轮`;
+};
 
 export const sectionKind = (title: string, index: number): SectionKind => {
 	for (const [kind, re] of SECTION_KINDS) if (re.test(title.trim())) return kind;

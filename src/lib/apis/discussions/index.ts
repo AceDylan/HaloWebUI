@@ -146,6 +146,24 @@ export type DiscussTurn = {
 	retry?: DiscussRetry | null;
 	/** the one more search (补查) this seat asked for before the next round */
 	lookup?: { query: string; status?: ResearchLookup['status'] | 'skipped'; added?: number } | null;
+	/** 圆桌讨论 after round 1: where the seat stands (its 立场 line) */
+	stance?: DiscussStance | null;
+};
+
+export type DiscussStance = { kind: 'agree' | 'partial' | 'disagree'; text: string };
+
+/** 参与者复核: every seat that spoke checks the finished conclusion once. */
+export type DiscussSignoff = {
+	status: 'running' | 'done' | 'stopped';
+	items: {
+		seat: string;
+		name: string;
+		status: 'waiting' | 'ok' | 'objection' | 'unclear' | 'error' | 'stopped';
+		text: string;
+		error?: string;
+	}[];
+	startedAt?: number | null;
+	endedAt?: number | null;
 };
 
 export type DiscussConclusion = {
@@ -197,6 +215,9 @@ export type DiscussAsk = {
 	error?: string | null;
 	illustration?: ModeIllustration | null;
 	card?: ModeCard | null;
+	/** 圆桌讨论 changed its rounds: everyone agreed early, or the last round still had an objection */
+	adapt?: { kind: 'early' | 'extra'; round: number; planned: number } | null;
+	signoff?: DiscussSignoff | null;
 };
 
 export type Discussion = {

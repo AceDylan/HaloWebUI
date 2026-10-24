@@ -433,7 +433,8 @@ def test_a_plan_that_cannot_be_used_falls_back_to_the_default_table(env):
 
     ask = asyncio.run(api.get_discussion(asyncio.run(scenario()), USER))["asks"][-1]
     assert ask["status"] == "done" and ask["planning"]["status"] == "error" and "默认阵容" in ask["planning"]["error"]
-    assert ask["mode"] == "roundtable" and ask["rounds"] == 2 and len(ask["seats"]) == 3
+    # the moderator (c) judges and does not take a seat: the two others sit
+    assert ask["mode"] == "roundtable" and ask["rounds"] == 2 and [s["model"] for s in ask["seats"]] == ["a", "b"]
 
 
 def test_compare_gives_every_seat_the_same_assistant(env):

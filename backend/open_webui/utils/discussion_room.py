@@ -10,7 +10,9 @@ rounds of turns, interjections and the structured conclusion.
 How a question runs: every seat answers in parallel within a round (each sees the earlier
 rounds), turns stream token by token to the user's browser over the socket (``chat-events``
 with ``type: "discuss"``), then the moderator streams a conclusion with fixed sections
-(结论 / 共识 / 分歧 / 各方立场 / 下一步). Live state lives in memory while a question runs
+(结论 / 共识 / 分歧 / 各方立场 / 下一步) and every seat checks it once (参与者复核: objections are
+added under it; nobody's approval is waited for). A roundtable's later turns end with a 立场 line:
+everyone 同意 ends it early, a 反对 in the last round adds one more. Live state lives in memory while a question runs
 (single worker) and is written to the chat at turn boundaries.
 
 Hermes is deliberately not a seat: an agent turn takes minutes, can burn millions of tokens and
@@ -22,6 +24,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import re
 import time
 import uuid
@@ -70,6 +73,28 @@ LOOKUP_MAX_SOURCES = 6
 LOOKUP_TIMEOUT_SECONDS = 90
 RESEARCH_TOTAL_SOURCES = 14
 LOOKUP_RE = re.compile(r"(?:^|\n)[ \t>*_-]*(?:补查|lookup)[*_]*\s*[:：][*_]*\s*(.+?)[ \t*_]*\s*$", re.I)
+# 立场: in a roundtable's later rounds every seat ends its turn with where it stands, so the room
+# ends early when everyone agrees and adds one round (once) when someone still objects
+STANCE_RE = re.compile(
+    r"(?:^|\n)[ \t>*_-]*(?:立场|stance)[*_]*\s*[:：][*_\s]*"
+    r"(有保留|部分同意|不同意|反对|同意|partly agree|partially agree|partly|partial|reservations?|disagree|agree)(?![a-z])"
+    r"[*_]*[ \t]*(?:[—–:：,，-]+[ \t]*)?(.*)",
+    re.I,
+)
+STANCE_KINDS = {"有保留": "partial", "部分同意": "partial", "不同意": "disagree", "反对": "disagree", "同意": "agree"}
+STANCE_LABELS = {
+    "zh": {"agree": "同意", "partial": "有保留", "disagree": "反对"},
+    "en": {"agree": "agree", "partial": "partly", "disagree": "disagree"},
+}
+# 参与者复核: once the conclusion is written, every seat that spoke checks once that it is stated
+# right and that no fact in it is wrong; objections are added under the conclusion, nothing waits
+# for anyone's approval. HALO_DISCUSS_SIGNOFF=0 turns it off.
+SIGNOFF_ENV = "HALO_DISCUSS_SIGNOFF"
+SIGNOFF_TIMEOUT_SECONDS = 90
+SIGNOFF_MAX_CHARS = 200
+SIGNOFF_HEADINGS = {"zh": "参与者复核", "en": "Participant check"}
+SIGNOFF_RE = re.compile(r"(?:异议|objection)[*_]*\s*[:：]\s*(.+)", re.I)
+SIGNOFF_OK_RE = re.compile(r"确认|无异议|confirm|no objection|\bok\b", re.I)
 MAX_FILES = 4
 FILE_TEXT_CHARS = 12000
 # A call the upstream refused for a passing reason (rate limit, overload, a dropped connection)
@@ -441,6 +466,78 @@ def may_lookup(ask: dict, seat_id: str, round_index: int) -> bool:
     return not any(t.get("lookup") for t in ask.get("turns") or [] if t.get("seat") == seat_id and t.get("round") != round_index)
 
 
+def asks_stance(mode: str, round_index: int) -> bool:
+    """Seats end their turn with a 立场 line: a roundtable's rounds after the independent first one."""
+    return mode == "roundtable" and round_index >= 2
+
+
+def take_stance(content: str) -> Optional[dict]:
+    """A turn's last 立场 line as ``{"kind": agree|partial|disagree, "text"}``, None when it has none."""
+    found = list(STANCE_RE.finditer(content or ""))
+    if not found:
+        return None
+    word, text = found[-1].group(1), found[-1].group(2)
+    lowered = word.lower()
+    kind = STANCE_KINDS.get(word) or (
+        "disagree" if lowered == "disagree" else "agree" if lowered == "agree" else "partial"
+    )
+    return {"kind": kind, "text": _clean_text(text.strip().strip("*_`").strip(), 200)}
+
+
+def final_stances(ask: dict, seats: list[dict]) -> list[tuple[dict, dict]]:
+    """Each seat's latest stance, in seat order."""
+    out = []
+    for seat in seats:
+        said = [t["stance"] for t in ask.get("turns") or [] if t.get("seat") == seat["id"] and t.get("status") == "done" and t.get("stance")]
+        if said:
+            out.append((seat, said[-1]))
+    return out
+
+
+def signoff_enabled() -> bool:
+    return os.environ.get(SIGNOFF_ENV, "1") != "0"
+
+
+def take_signoff(text: str) -> tuple[str, str]:
+    """A seat's check of the conclusion: ``("ok", "")``, ``("objection", what)`` or
+    ``("unclear", what it said)``."""
+    text = strip_think(text or "").strip()
+    match = SIGNOFF_RE.search(text)
+    if match:
+        objection = _clean_text(match.group(1).strip().strip("`*_").strip(), SIGNOFF_MAX_CHARS)
+        if objection and objection.rstrip("。.!！ ").lower() not in {"无", "没有", "none", "no", "无异议"}:
+            return "objection", objection
+        return "ok", ""
+    if SIGNOFF_OK_RE.search(text):
+        return "ok", ""
+    return "unclear", _clean_text(text, SIGNOFF_MAX_CHARS)
+
+
+def build_signoff_messages(*, ask: dict, seat: dict) -> list[dict]:
+    """One seat checks the finished conclusion: is it stated right, is a fact in it wrong."""
+    zh = ask.get("lang") == "zh"
+    own = [t for t in ask.get("turns") or [] if t.get("seat") == seat["id"] and t.get("status") == "done"]
+    identity = f'You are "{seat["label"]}"' + (f", who played the role: {seat['role']}" if seat.get("role") else "")
+    system = (
+        f"{identity}, one of the participants of a multi-model discussion. The moderator has written the conclusion. "
+        "Check it for two things only: (1) is your own position stated correctly wherever you are named; "
+        "(2) does it state as fact something that is wrong. Do not argue your view again, and do not object to the "
+        "moderator's judgment where you merely see it differently.\n"
+        f"If both are fine, reply with exactly: {'确认' if zh else 'Confirmed'}\n"
+        f"Otherwise reply with one line: `{'异议' if zh else 'Objection'}: <what is wrong, and what is right>` "
+        + ("(at most 80 characters, in Simplified Chinese)." if zh else "(at most 40 words, in the language of the question).")
+    )
+    parts = [
+        f"User question:\n{ask.get('question') or ''}",
+        f"Your last turn:\n{_clean_text(own[-1]['content'], TRANSCRIPT_TURN_CHARS)}" if own else "",
+        f"The moderator's conclusion:\n{(ask.get('conclusion') or {}).get('content') or ''}",
+    ]
+    return [
+        {"role": "system", "content": system},
+        {"role": "user", "content": "\n\n".join(part for part in parts if part)},
+    ]
+
+
 def _files_block(ask: dict, *, sees_images: bool, gets_images: bool) -> str:
     files = ask.get("files") or []
     if not files:
@@ -569,6 +666,15 @@ def build_turn_messages(
                 else "- You cannot browse the web; say so when a fact needs checking instead of inventing sources."
             ),
             (
+                f"- End your turn with one line `{'立场：同意 / 有保留 / 反对' if ask.get('lang') == 'zh' else 'Stance: agree / partly / disagree'}"
+                " — <one sentence>`. agree: no objection left to where the discussion is heading; partly: you accept the "
+                "main answer with a reservation you name; disagree: a key point is still in dispute (name it). Say it "
+                "honestly: do not agree just to end the discussion, and do not hold out over minor points."
+                + (" The 补查 line, if any, comes after it." if may_lookup(ask, seat["id"], round_index) else "")
+                if asks_stance(mode, round_index)
+                else ""
+            ),
+            (
                 f"- If a fact you need is missing from the research notes, end your turn with one last line "
                 f"`{'补查' if ask.get('lang') == 'zh' else 'Lookup'}: <search keywords>` (once in this discussion). "
                 "It is searched before the next round and the results join the notes for everyone."
@@ -664,6 +770,8 @@ def build_conclusion_messages(
         "compare": "the best answer, merging the strongest parts of each; then say plainly how the answers differ and which is more accurate or complete",
     }[mode]
     lang_rule = "Write in Simplified Chinese." if lang == "zh" else "Write in the language of the user's question."
+    stances = final_stances(ask, seats)
+    labels = STANCE_LABELS["zh" if lang == "zh" else "en"]
     system = (
         "You moderated a multi-model discussion and now write the final answer for the user. "
         f"{lang_rule} Use Markdown. Use exactly these level-2 headings, in this order, and nothing before the first one:\n"
@@ -674,6 +782,11 @@ def build_conclusion_messages(
         f"## {headings[3]}\n— one bullet per participant: **name** — their final position in one line, and whether they changed their mind.\n"
         f"## {headings[4]}\n— only if genuinely useful: what the user could verify or do next (bullets). Otherwise omit this section.\n"
         "Do not invent facts that no participant stated; flag claims that need checking."
+        + (
+            " The participants' final stances below are in their own words: the positions must agree with them."
+            if stances
+            else ""
+        )
         + (
             " Keep the [n] citations of the research notes next to the claims that rely on them."
             if research_sources(ask)
@@ -692,6 +805,11 @@ def build_conclusion_messages(
         _research_block(ask),
         f"Transcript:\n\n{transcript or '(no participant produced an answer)'}",
     ]
+    if stances:
+        parts.append(
+            "Final stances:\n"
+            + "\n".join(f"- {_seat_title(seat, ask)}: {labels[stance['kind']]}" + (f" — {stance['text']}" if stance.get("text") else "") for seat, stance in stances)
+        )
     interjections = _interjection_block(ask.get("interjections") or [])
     if interjections:
         parts.append(interjections)
@@ -1184,7 +1302,7 @@ def new_ask(
 
 def ask_usage(ask: dict) -> dict:
     totals: dict[str, int] = {}
-    for item in [*(ask.get("turns") or []), ask.get("conclusion") or {}]:
+    for item in [*(ask.get("turns") or []), ask.get("conclusion") or {}, *((ask.get("signoff") or {}).get("items") or [])]:
         for key, value in (item.get("usage") or {}).items():
             if isinstance(value, int):
                 totals[key] = totals.get(key, 0) + value
@@ -1284,6 +1402,11 @@ class LiveDiscussion:
     plan: Optional[Callable[[dict], Awaitable[dict]]] = None
     # writes the planned table to the chat, so later questions sit at it
     persist_setup: Optional[Callable[[dict], None]] = None
+    # 圆桌讨论: end early when everyone agrees, one more round when someone still objects (off for
+    # 「再讨论一轮」: the user asked for exactly one)
+    adapt_rounds: bool = True
+    # 参与者复核 after the conclusion
+    signoff: bool = field(default_factory=signoff_enabled)
 
     # -- events --------------------------------------------------------------------------------
 
@@ -1434,6 +1557,9 @@ class LiveDiscussion:
                 turn["content"] = text
                 if allowed:
                     turn["lookup"] = {"query": query}
+            turn.pop("stance", None)
+            if asks_stance(self.setup["mode"], turn["round"]):
+                turn["stance"] = take_stance(turn["content"])
         except asyncio.CancelledError:
             turn["status"] = "stopped"
             raise
@@ -1465,7 +1591,84 @@ class LiveDiscussion:
             out.append(seat)
         return out[:MAX_STAND_INS]
 
+    def _adapt_rounds(self, round_index: int):
+        """圆桌讨论: end after this round when every seat said 同意; add one round (once, up to
+        MAX_ROUNDS) when the last planned round still has a 反对."""
+        if not self.adapt_rounds or not asks_stance(self.setup["mode"], round_index):
+            return
+        turns = [t for t in self.ask["turns"] if t.get("round") == round_index]
+        kinds = [(t.get("stance") or {}).get("kind") for t in turns if t.get("status") == "done"]
+        planned = int(self.ask["rounds"])
+        if round_index < planned and len(kinds) == len(turns) >= MIN_SEATS and all(kind == "agree" for kind in kinds):
+            self.ask["adapt"] = {"kind": "early", "round": round_index, "planned": planned}
+            self.ask["rounds"] = round_index
+        elif round_index == planned < MAX_ROUNDS and "disagree" in kinds and not self.ask.get("adapt"):
+            self.ask["adapt"] = {"kind": "extra", "round": planned + 1, "planned": planned}
+            self.ask["rounds"] = planned + 1
+        else:
+            return
+        log.info("discussion %s: %s after round %d (planned %d)", self.chat_id, self.ask["adapt"]["kind"], round_index, planned)
+
+    async def _run_signoff(self):
+        """参与者复核: each seat that spoke checks the conclusion once, all at the same time; their
+        objections go under it. A seat that fails or answers off-format just does not count."""
+        conclusion = self.ask["conclusion"]
+        if not self.signoff or conclusion.get("status") != "done":
+            return
+        # a stand-in seat does not check what it wrote itself
+        writer = conclusion.get("model") if conclusion.get("standIn") else None
+        spoke = {t["seat"] for t in self.ask["turns"] if t.get("status") == "done"}
+        seats = [seat for seat in self.setup["seats"] if seat["id"] in spoke and seat["model"] != writer]
+        if not seats:
+            return
+        items = [{"seat": seat["id"], "name": seat["label"], "status": "waiting", "text": ""} for seat in seats]
+        signoff = {"status": "running", "items": items, "startedAt": now_ms(), "endedAt": None}
+        self.ask["signoff"] = signoff
+        self.ask["status"] = "concluding"
+        await self.send_state()
+
+        async def check(seat: dict, item: dict):
+            text = ""
+
+            async def answer():
+                nonlocal text
+                messages = build_signoff_messages(ask=self.ask, seat=seat)
+                async for kind, part in iterate_completion(await self.call_model(seat["model"], messages)):
+                    if kind == "content":
+                        text += part
+                    elif kind == "usage":
+                        item["usage"] = part
+
+            try:
+                await asyncio.wait_for(answer(), SIGNOFF_TIMEOUT_SECONDS)
+                item["status"], item["text"] = take_signoff(text)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                item.update({"status": "error", "error": _short_error(exc)[:160]})
+
+        try:
+            await asyncio.gather(*(check(seat, item) for seat, item in zip(seats, items)))
+            objections = [item for item in items if item["status"] == "objection"]
+            if objections:
+                zh = self.ask.get("lang") == "zh"
+                lines = "\n".join(f"- **{item['name']}**{'：' if zh else ': '}{item['text']}" for item in objections)
+                heading = SIGNOFF_HEADINGS["zh" if zh else "en"]
+                conclusion["content"] = f"{conclusion['content'].rstrip()}\n\n## {heading}\n{lines}"
+            signoff["status"] = "done"
+        except asyncio.CancelledError:
+            signoff["status"] = "stopped"
+            for item in items:
+                if item["status"] == "waiting":
+                    item["status"] = "stopped"
+            raise
+        finally:
+            signoff["endedAt"] = now_ms()
+            self.save()
+            await self.send_state()
+
     async def _run_conclusion(self):
+        self.ask.pop("signoff", None)
         conclusion = self.ask["conclusion"]
         if conclusion.get("content") and conclusion.get("status") == "done":
             self.ask["previousConclusions"].append(
@@ -1697,6 +1900,7 @@ class LiveDiscussion:
         redo = [turn for turn in self.ask["turns"] if turn.get("round") == last and turn.get("status") != "done"]
         self.from_round = last + 1
         if not redo:
+            self._adapt_rounds(last)
             return
         self.ask["round"] = last
         for turn in redo:
@@ -1707,6 +1911,7 @@ class LiveDiscussion:
         if last == 1 and not any(t["status"] == "done" for t in self.ask["turns"] if t.get("round") == 1):
             raise ValueError("第一轮所有参与者都失败了")
         await self._run_lookups(last)
+        self._adapt_rounds(last)
 
     async def _find_browsers(self):
         if self.browsers is None or not self.ask.get("research"):
@@ -1759,7 +1964,9 @@ class LiveDiscussion:
                 await self._find_browsers()
                 if self.resume:
                     await self._resume_round()
-                for round_index in range(self.from_round, int(self.ask["rounds"]) + 1):
+                round_index = self.from_round
+                # the rounds may change as they go (圆桌讨论 ends early or takes one more)
+                while round_index <= int(self.ask["rounds"]):
                     self.ask["round"] = round_index
                     turns = [
                         {"id": f"r{round_index}-{seat['id']}", "round": round_index, "seat": seat["id"], "status": "waiting", "content": ""}
@@ -1772,7 +1979,13 @@ class LiveDiscussion:
                     if round_index == 1 and not any(t["status"] == "done" for t in turns):
                         raise ValueError("第一轮所有参与者都失败了")
                     await self._run_lookups(round_index)
-            await self._run_conclusion()
+                    self._adapt_rounds(round_index)
+                    round_index += 1
+            signoff = self.ask.get("signoff") or {}
+            if not (self.resume and self.ask["conclusion"].get("status") == "done" and signoff.get("status") in {"running", "stopped"}):
+                await self._run_conclusion()
+            # picked up during 参与者复核: the conclusion stands, only the check runs again
+            await self._run_signoff()
             if self.ask["conclusion"]["status"] == "done":
                 self.ask["status"] = "done"
             else:

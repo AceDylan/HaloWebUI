@@ -37,6 +37,7 @@
 	import {
 		applyEvent,
 		discussionMarkdown,
+		adaptText,
 		hermesHandoffPrompt,
 		isLive,
 		modelRef,
@@ -540,6 +541,12 @@
 									<span class="text-xs text-gray-500">{spec.roundName(round, ask.rounds)} · 等上一轮说完</span>
 								</div>
 							{/each}
+						{/if}
+
+						{#if adaptText(ask.adapt)}
+							<p class="text-center text-[11.5px] text-gray-500 dark:text-gray-400" data-discuss-adapt={ask.adapt?.kind}>
+								{adaptText(ask.adapt)}
+							</p>
 						{/if}
 
 						<ConclusionCard

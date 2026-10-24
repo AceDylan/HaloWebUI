@@ -289,7 +289,7 @@ def test_strip_think():
 # --- runner -----------------------------------------------------------------------------------
 
 
-def _live(setup, replies, *, delay=0.0, persist=None, after_done=None):
+def _live(setup, replies, *, delay=0.0, persist=None, after_done=None, signoff=False):
     """replies: model -> list of streams/exceptions, consumed in call order."""
     events, calls, saved = [], [], []
     queues = {model: list(items) for model, items in replies.items()}
@@ -316,6 +316,7 @@ def _live(setup, replies, *, delay=0.0, persist=None, after_done=None):
         after_done=after_done,
         retry_delays=(0, 0, 0),
         stand_in_delays=(0,),
+        signoff=signoff,
     )
     return live, events, calls, saved
 
@@ -904,3 +905,176 @@ def test_a_seat_whose_own_search_fails_speaks_again_without_it():
     assert "a" in mode_chats.NATIVE_SEARCH_FAILED and live.browse == set()
     assert live.ask["status"] == "done"
     mode_chats.NATIVE_SEARCH_FAILED.clear()
+
+
+# --- 立场 / adaptive rounds / 参与者复核 ----------------------------------------------------------
+
+
+def test_take_stance_reads_the_last_stance_line():
+    assert room.take_stance("观点……\n立场：同意 — 用 Postgres") == {"kind": "agree", "text": "用 Postgres"}
+    assert room.take_stance("**立场：有保留** —— 备份要另说")["kind"] == "partial"
+    assert room.take_stance("立场: 不同意，SQLite 足够")["kind"] == "disagree"
+    assert room.take_stance("立场：反对\n补查：x")["kind"] == "disagree"
+    assert room.take_stance("Stance: partly agree - backups")["kind"] == "partial"
+    assert room.take_stance("Stance: disagree")["kind"] == "disagree"
+    assert room.take_stance("先说立场：同意\n后来\n立场：反对 — 改主意了")["kind"] == "disagree"
+    assert room.take_stance("我同意 b 的看法") is None
+    assert room.take_stance("## 各方立场：同意") is None
+
+
+def test_only_later_roundtable_rounds_ask_for_a_stance():
+    setup = _setup(rounds=3)
+    ask = _ask(setup)
+    _done(ask, 1, "s1", "x")
+    _done(ask, 1, "s2", "y")
+    first = room.build_turn_messages(setup=setup, ask=ask, seat=setup["seats"][0], round_index=1, history=[])
+    second = room.build_turn_messages(setup=setup, ask=ask, seat=setup["seats"][0], round_index=2, history=[])
+    assert "立场：同意 / 有保留 / 反对" not in first[0]["content"]
+    assert "立场：同意 / 有保留 / 反对" in second[0]["content"] and "do not agree just to end" in second[0]["content"]
+    debate = _setup(mode="debate", rounds=3)
+    later = room.build_turn_messages(setup=debate, ask=_ask(debate), seat=debate["seats"][0], round_index=2, history=[])
+    assert "立场：同意" not in later[0]["content"]
+
+
+def test_a_roundtable_ends_early_when_everyone_agrees():
+    setup = _setup(rounds=3, moderator="c")
+    live, events, calls, saved = _live(
+        setup,
+        {
+            "a": [["A1"], ["A2\n立场：同意 — 用 Postgres"]],
+            "b": [["B1"], ["B2\n**立场：同意**"]],
+            "c": [["## 结论\n用 Postgres"]],
+        },
+    )
+    asyncio.run(live.run())
+    ask = live.ask
+    assert ask["status"] == "done"
+    assert [t["id"] for t in ask["turns"]] == ["r1-s1", "r1-s2", "r2-s1", "r2-s2"]
+    assert ask["adapt"] == {"kind": "early", "round": 2, "planned": 3} and ask["rounds"] == 2
+    assert ask["turns"][2]["stance"] == {"kind": "agree", "text": "用 Postgres"}
+    assert "stance" not in ask["turns"][0]
+    # the moderator hears where everyone stands, in their own words
+    conclusion_prompt = calls[-1][1]
+    assert "Final stances:" in conclusion_prompt[1]["content"] and "同意 — 用 Postgres" in conclusion_prompt[1]["content"]
+    assert "positions must agree with them" in conclusion_prompt[0]["content"]
+
+
+def test_one_more_round_when_the_last_one_still_has_an_objection_but_only_once():
+    setup = _setup(rounds=2, moderator="c")
+    live, events, calls, saved = _live(
+        setup,
+        {
+            "a": [["A1"], ["A2\n立场：反对 — 规模估错了"], ["A3\n立场：反对 — 还是不行"]],
+            "b": [["B1"], ["B2\n立场：有保留"], ["B3\n立场：同意"]],
+            "c": [["## 结论\n两说"]],
+        },
+    )
+    asyncio.run(live.run())
+    ask = live.ask
+    assert ask["status"] == "done"
+    assert [t["round"] for t in ask["turns"]] == [1, 1, 2, 2, 3, 3]
+    assert ask["adapt"] == {"kind": "extra", "round": 3, "planned": 2} and ask["rounds"] == 3
+    assert [model for model, _ in calls] == ["a", "b", "a", "b", "a", "b", "c"]
+
+
+def test_no_early_end_while_a_seat_failed_or_gave_no_stance_and_none_when_asked_for_one_round():
+    setup = _setup(rounds=3, moderator="c")
+    live, _, calls, _ = _live(
+        setup,
+        {"a": [["A1"], ["A2\n立场：同意"], ["A3"]], "b": [["B1"], ["B2 没写立场"], ["B3"]], "c": [["## 结论\n好"]]},
+    )
+    asyncio.run(live.run())
+    assert len(live.ask["turns"]) == 6 and not live.ask.get("adapt")
+
+    live2, _, _, _ = _live(setup, {"a": [["A2\n立场：反对"]], "b": [["B2\n立场：反对"]], "c": [["## 结论\n好"]]})
+    _done(live2.ask, 1, "s1", "x")
+    _done(live2.ask, 1, "s2", "y")
+    live2.ask["rounds"] = 2
+    live2.from_round = 2
+    live2.adapt_rounds = False  # 「再讨论一轮」: exactly the one round asked for
+    asyncio.run(live2.run())
+    assert [t["round"] for t in live2.ask["turns"]] == [1, 1, 2, 2] and not live2.ask.get("adapt")
+
+
+def test_take_signoff():
+    assert room.take_signoff("确认") == ("ok", "")
+    assert room.take_signoff("Confirmed") == ("ok", "")
+    assert room.take_signoff("异议：我说的是 SQLite 适合单机，不是不适合") == ("objection", "我说的是 SQLite 适合单机，不是不适合")
+    assert room.take_signoff("**Objection:** the price is wrong") == ("objection", "the price is wrong")
+    assert room.take_signoff("异议：无") == ("ok", "")
+    assert room.take_signoff("<think>想想</think>确认，无异议。") == ("ok", "")
+    assert room.take_signoff("我觉得还行吧")[0] == "unclear"
+
+
+def test_every_seat_checks_the_conclusion_and_objections_go_under_it():
+    setup = _setup(rounds=1, moderator="c")
+    live, events, calls, saved = _live(
+        setup,
+        {
+            "a": [["A1"], ["异议：我推荐的是 Postgres 15，不是 MySQL", {"usage": {"total_tokens": 7}}]],
+            "b": [["B1"], ["确认"]],
+            "c": [["## 结论\n用 MySQL\n## 各方立场\n- **a** — MySQL"]],
+        },
+        signoff=True,
+    )
+    asyncio.run(live.run())
+    ask = live.ask
+    assert ask["status"] == "done"
+    assert [model for model, _ in calls] == ["a", "b", "c", "a", "b"]
+    check = calls[3][1]
+    assert "Check it for two things only" in check[0]["content"] and '"a"' in check[0]["content"]
+    assert "Your last turn:\nA1" in check[1]["content"] and "用 MySQL" in check[1]["content"]
+    signoff = ask["signoff"]
+    assert signoff["status"] == "done"
+    assert [(i["seat"], i["status"]) for i in signoff["items"]] == [("s1", "objection"), ("s2", "ok")]
+    assert ask["conclusion"]["content"].endswith("## 参与者复核\n- **a**：我推荐的是 Postgres 15，不是 MySQL")
+    assert ask["usage"]["total_tokens"] >= 7
+    # what the chat keeps carries the objection too
+    assert "参与者复核" in saved[-1]["conclusion"]["content"]
+    assert [s["title"] for s in room.parse_conclusion_sections(ask["conclusion"]["content"])][-1] == "参与者复核"
+
+
+def test_a_failing_check_is_left_out_and_nothing_is_added_when_all_confirm():
+    setup = _setup(rounds=1, moderator="c")
+    live, _, _, _ = _live(
+        setup, {"a": [["A1"], RuntimeError("down")], "b": [["B1"], ["确认"]], "c": [["## 结论\n好"]]}, signoff=True
+    )
+    asyncio.run(live.run())
+    assert live.ask["status"] == "done"
+    assert live.ask["conclusion"]["content"] == "## 结论\n好"
+    assert [(i["status"]) for i in live.ask["signoff"]["items"]] == ["error", "ok"]
+
+
+def test_a_stand_in_does_not_check_what_it_wrote():
+    setup = _setup(rounds=1, moderator="c")
+    live, _, calls, _ = _live(
+        setup,
+        {"a": [["A1"], ["## 结论\n代写"]], "b": [["B1"], ["确认"]], "c": [RuntimeError("model refused")]},
+        signoff=True,
+    )
+    asyncio.run(live.run())
+    assert live.ask["conclusion"]["standIn"] and live.ask["conclusion"]["model"] == "a"
+    assert [i["seat"] for i in live.ask["signoff"]["items"]] == ["s2"]
+
+
+def test_resume_during_the_check_keeps_the_conclusion():
+    setup = _setup(rounds=1, moderator="c")
+    live, _, calls, _ = _live(setup, {"a": [["确认"]], "b": [["异议：漏了备份"]]}, signoff=True)
+    _done(live.ask, 1, "s1", "x")
+    _done(live.ask, 1, "s2", "y")
+    live.ask["conclusion"].update({"status": "done", "content": "## 结论\n好", "model": "c", "name": "c"})
+    live.ask["signoff"] = {"status": "stopped", "items": []}
+    live.ask["status"] = "stopped"
+    live.resume = True
+    asyncio.run(live.run())
+    assert [model for model, _ in calls] == ["a", "b"]
+    assert live.ask["previousConclusions"] == []
+    assert live.ask["conclusion"]["content"] == "## 结论\n好\n\n## 参与者复核\n- **b**：漏了备份"
+    assert live.ask["status"] == "done"
+
+
+def test_the_check_is_on_unless_turned_off(monkeypatch):
+    monkeypatch.delenv(room.SIGNOFF_ENV, raising=False)
+    assert room.signoff_enabled() is True
+    monkeypatch.setenv(room.SIGNOFF_ENV, "0")
+    assert room.signoff_enabled() is False

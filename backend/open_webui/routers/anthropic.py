@@ -859,9 +859,15 @@ def _apply_cc_format(headers: dict, payload: dict, url: str) -> str:
 
     Returns the modified URL (with ?beta=true appended).
     """
-    # CC identification headers — only two are required by anyrouter
+    # CC identification headers.  anyrouter validates the whole CLI fingerprint:
+    # with x-app, the CLI User-Agent and a non-empty X-Claude-Code-Session-Id
+    # missing it answers HTTP 429 "Service Unavailable" for premium models
+    # (verified 2026-10-29: genuine Claude Code traffic always carries the session
+    # id, and adding it to our request turns that 429 back into a 200).
+    cc_session = str(uuid.uuid4())
     headers["x-app"] = "cli"
     headers["User-Agent"] = _CC_USER_AGENT
+    headers["X-Claude-Code-Session-Id"] = cc_session
 
     # --- Body adjustments ---
 
@@ -879,7 +885,6 @@ def _apply_cc_format(headers: dict, payload: dict, url: str) -> str:
     # accountUuid must be EMPTY — AnyRouter rejects fake/unknown account UUIDs
     uid = payload.get("metadata", {}).get("user_id", "anonymous")
     cc_hash = hashlib.sha256(uid.encode()).hexdigest()
-    cc_session = str(uuid.uuid4())
     payload["metadata"] = {
         "user_id": f"user_{cc_hash}_account__session_{cc_session}"
     }

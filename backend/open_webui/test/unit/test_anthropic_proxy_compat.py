@@ -226,6 +226,33 @@ def test_apply_cc_format_preserves_display_mode():
     assert headers["User-Agent"].startswith("claude-cli/")
 
 
+def test_apply_cc_format_sets_claude_code_session_header():
+    """anyrouter answers 429 "Service Unavailable" for premium models unless the
+    request carries a non-empty X-Claude-Code-Session-Id (verified 2026-10-29
+    against the live gateway through CCHP)."""
+
+    def run():
+        headers = {}
+        payload = {
+            "model": "claude-chat",
+            "messages": [{"role": "user", "content": "hello"}],
+            "metadata": {"user_id": "tester"},
+        }
+        anthropic._apply_cc_format(
+            headers, payload, "https://relay.example.com/v1/messages"
+        )
+        return headers, payload
+
+    headers, payload = run()
+
+    session_id = headers["X-Claude-Code-Session-Id"]
+    assert session_id
+    # The CLI sends the same session id in the header and in metadata.user_id.
+    assert payload["metadata"]["user_id"].endswith(f"_session_{session_id}")
+    # A fresh session per request, like the CLI's own print-mode sessions.
+    assert run()[0]["X-Claude-Code-Session-Id"] != session_id
+
+
 def test_apply_cc_format_moves_reasoning_effort_to_output_config():
     headers = {}
     payload = {

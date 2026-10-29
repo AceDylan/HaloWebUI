@@ -233,18 +233,28 @@ def sources_tail(sources: list[dict]) -> str:
     return "\n\n---\n**资料来源**\n\n" + "\n".join(lines) if lines else ""
 
 
+def result_content(kind: str, run: dict, *, picture: bool = True) -> str:
+    """The answer / the conclusion of a finished run as Markdown, with its sources and (unless
+    ``picture`` is False) its picture, without its card."""
+    plain_run = {**run, "card": None, **({} if picture else {"illustration": None})}
+    if kind == "answer":
+        from open_webui.utils import answer_desk as desk
+
+        return desk.stored_content(plain_run).strip()
+    from open_webui.utils import discussion_room as room
+
+    return room.stored_content(plain_run, tail=sources_tail(room.research_sources(run))).strip()
+
+
 def report_of(kind: str, chat_id: str, run: dict) -> tuple[str, str, str]:
     """(notice, content, run id) of a finished run, as its chat of origin shows it. The notice is
     what Hermes reads on the next turn: what was asked, who answered, where the run is."""
     question = _quote(run.get("question"))
     if kind == "answer":
-        from open_webui.utils import answer_desk as desk
-
         assistant = run.get("assistant") or {}
         name = f"{assistant.get('emoji') or ''}{assistant.get('name') or '助手'}".strip()
         web = "（查了网上的资料）" if (run.get("research") or {}).get("sources") else ""
         notice = f"{MODES[kind]['notice']} 「{question}」由「{name}」回答{web}，下面是它的回答。精答：/answer/{chat_id}"
-        content = desk.stored_content({**run, "card": None})
     else:
         from open_webui.utils import discussion_room as room
 
@@ -253,8 +263,7 @@ def report_of(kind: str, chat_id: str, run: dict) -> tuple[str, str, str]:
         moderator = ((run.get("conclusion") or {}).get("name") or (run.get("moderator") or {}).get("name") or "主持人")
         notice = (f"{MODES[kind]['notice']} 「{question}」：{len(seats)} 个模型{mode}（{'、'.join(seats)}），"
                   f"下面是 {moderator} 整理的结论。讨论台：/discuss/{chat_id}")
-        content = room.stored_content({**run, "card": None}, tail=sources_tail(room.research_sources(run)))
-    content = content.strip()
+    content = result_content(kind, run)
     if len(content) > REPORT_CONTENT_MAX_CHARS:
         content = content[:REPORT_CONTENT_MAX_CHARS].rstrip() + f"\n\n…（太长了，后面的部分请到{MODES[kind]['label']}页看）"
     # its card (结论卡片) whole after the text, as long as the reply still fits

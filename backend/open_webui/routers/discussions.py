@@ -1149,8 +1149,9 @@ async def open_for_chat(
 ) -> str:
     """派发方式「讨论」 (utils/mode_dispatch.py): a chat's message as a new discussion at the
     user's usual table (dispatch_setup), the conversation before it as background, the message's
-    files on the table; the conclusion goes back to ``origin`` when it is written. Returns the
-    discussion's chat id; raises HTTPException as the route does."""
+    files on the table; the conclusion goes back to ``origin`` when it is written (``origin`` None: a
+    discussion of its own, read back by routers/remote.py). Returns the discussion's chat id; raises
+    HTTPException as the route does."""
     question = room._clean_text(question, room.QUESTION_MAX_CHARS)
     if not question:
         raise HTTPException(status_code=400, detail="先写下要讨论的问题")

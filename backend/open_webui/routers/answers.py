@@ -636,8 +636,9 @@ def _open(
 
 async def open_for_chat(request: Request, user, *, question: str, context: Optional[dict], origin: dict, files: Optional[list[str]] = None) -> str:
     """派发方式「精答」 (utils/mode_dispatch.py): a chat's message as a new run, the conversation
-    before it as background; the answer goes back to ``origin`` when it is done. Returns the run's
-    chat id; raises HTTPException as the route does."""
+    before it as background; the answer goes back to ``origin`` when it is done (``origin`` None: a
+    run of its own, read back by routers/remote.py). Returns the run's chat id; raises HTTPException
+    as the route does."""
     question = desk.clean_text(question, desk.QUESTION_MAX_CHARS)
     if not question:
         raise HTTPException(status_code=400, detail="先写下要问的问题")

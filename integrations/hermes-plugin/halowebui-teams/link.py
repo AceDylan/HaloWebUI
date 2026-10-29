@@ -12,13 +12,15 @@ changes::
     {
       "halowebui": {"url": "http://127.0.0.1:3000", "public_url": "https://host.acedylan.us:3001"},
       "telegram": {"owners": {"<telegram user id>": "<HaloWebUI user id>"},
-                   "notify_web_teams": true}
+                   "notify_web_teams": true},
+      "qqbot": {"owners": {"<QQ user openid>": "<HaloWebUI user id>"}}
     }
 
 ``owners`` is who may drive teams from Telegram (and whose teams notify which chat: a private
 chat's id is the user's id). ``notify_web_teams`` (default true): teams started in the browser
 also tell the owner's Telegram when a member asks something, a task fails, or the team finishes —
-unless the team's page is open in front of them.
+unless the team's page is open in front of them. ``qqbot.owners``: who may use 精答 / 讨论 / 自动分流
+and 协作台 from QQ private chats (see remote.py).
 """
 
 from __future__ import annotations
@@ -68,14 +70,19 @@ def _section(name: str) -> dict:
     return value if isinstance(value, dict) else {}
 
 
-def owners() -> dict[str, str]:
-    raw = _section("telegram").get("owners")
+def owners(platform: str = "telegram") -> dict[str, str]:
+    raw = _section(platform).get("owners")
     return {str(k): str(v) for k, v in raw.items() if k and v} if isinstance(raw, dict) else {}
+
+
+def owner_for(platform: str, user_id: Any) -> Optional[str]:
+    """The HaloWebUI user a Telegram / QQ user acts as (None: not linked)."""
+    return owners(platform).get(str(user_id or "")) if user_id not in (None, "") else None
 
 
 def owner_for_telegram(user_id: Any) -> Optional[str]:
     """The HaloWebUI user a Telegram user drives teams as (None: not linked)."""
-    return owners().get(str(user_id or "")) if user_id not in (None, "") else None
+    return owner_for("telegram", user_id)
 
 
 def telegram_chat_for(owner: Any) -> Optional[str]:
@@ -115,17 +122,35 @@ def configured() -> bool:
     return bool(str(_section("halowebui").get("url") or "").strip() and _api_key())
 
 
-def call(method: str, path: str, owner: str, body: Any = None, *, timeout: float = 30) -> Any:
-    """One call to HaloWebUI's ``/api/v1/teams/hermes`` routes as *owner*."""
+TEAMS_PREFIX = "/api/v1/teams/hermes"
+REMOTE_PREFIX = "/api/v1/remote"
+
+
+def call(method: str, path: str, owner: str, body: Any = None, *, timeout: float = 30,
+         prefix: str = TEAMS_PREFIX) -> Any:
+    """One call to HaloWebUI's Hermes routes (the 协作台's by default) as *owner*."""
+    raw = _request(method, prefix + path, owner, body, timeout=timeout)
+    try:
+        return json.loads(raw or b"{}")
+    except ValueError:
+        raise HaloError(502, "HaloWebUI 返回的不是 JSON") from None
+
+
+def fetch(path: str, owner: str, *, timeout: float = 60, prefix: str = REMOTE_PREFIX) -> bytes:
+    """The raw body of a GET (a picture)."""
+    return _request("GET", prefix + path, owner, None, timeout=timeout, accept="*/*")
+
+
+def _request(method: str, path: str, owner: str, body: Any, *, timeout: float, accept: str = "application/json") -> bytes:
     base = str(_section("halowebui").get("url") or "").rstrip("/")
     key = _api_key()
     if not base or not key:
         raise HaloError(503, "协作台和 Telegram 还没有接通（halo-teams.json 缺 halowebui.url 或网关没有 API_SERVER_KEY）")
     data = json.dumps(body, ensure_ascii=False).encode("utf-8") if body is not None else None
     request = urllib.request.Request(
-        f"{base}/api/v1/teams/hermes{path}", data=data, method=method,
+        f"{base}{path}", data=data, method=method,
         headers={"X-Hermes-Key": key, "X-Halo-Owner": str(owner), "Content-Type": "application/json",
-                 "Accept": "application/json"},
+                 "Accept": accept},
     )
     # HaloWebUI is local: never through a proxy from the environment.
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
@@ -144,10 +169,7 @@ def call(method: str, path: str, owner: str, body: Any = None, *, timeout: float
         raise HaloError(exc.code, str(detail or f"HaloWebUI 返回 {exc.code}")[:500]) from None
     except (urllib.error.URLError, OSError, TimeoutError) as exc:
         raise HaloError(502, f"连不上 HaloWebUI：{type(exc).__name__}") from None
-    try:
-        return json.loads(raw or b"{}")
-    except ValueError:
-        raise HaloError(502, "HaloWebUI 返回的不是 JSON") from None
+    return raw
 
 
 def create(owner: str, goal: str, origin: dict, auto_start: bool = False) -> dict:
@@ -195,3 +217,19 @@ def illustrated(owner: str, team_id: str) -> dict:
 def save_knowledge(owner: str, team_id: str) -> dict:
     """「存入知识库」: the conclusion into the owner's 「协作结论」 knowledge base in HaloWebUI."""
     return call("POST", f"/teams/{team_id}/knowledge", owner, {}, timeout=180)
+
+
+# --- 精答 / 讨论 / 自动分流 (remote.py) -------------------------------------------------------------
+
+def remote_start(owner: str, kind: str, question: str, key: str) -> dict:
+    """Start a 精答 / discussion / 自动分流 for *owner*; {"kind", "id"}."""
+    return call("POST", f"/{kind}", owner, {"question": question[:8000], "key": key[:128]}, timeout=90,
+                prefix=REMOTE_PREFIX)
+
+
+def remote_state(owner: str, kind: str, run_id: str) -> dict:
+    return call("GET", f"/{kind}/{run_id}", owner, prefix=REMOTE_PREFIX)
+
+
+def remote_picture(owner: str, kind: str, run_id: str) -> bytes:
+    return fetch(f"/{kind}/{run_id}/picture", owner)

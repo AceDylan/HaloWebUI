@@ -110,6 +110,15 @@ is the Hermes side. It adds no service, port or second task store:
   back while the team's page is open (`events?visible=1`). Replies to notices answer the member /
   add a note and retry. Settings and the user link: `~/.hermes/halo-teams.json` (see `link.py`).
   The hook runs before the gateway's auth: only Telegram users listed there are handled.
+* **精答 / 讨论 / 自动分流 from Telegram and QQ** (`remote.py`): `/answer <问题>`, `/discuss <问题>`,
+  `/auto <问题>` start the user's own HaloWebUI run (`/api/v1/remote/*`, same key and owner header
+  as the 协作台 routes; one run per chat message); the bridge loop reads it back and sends the
+  result — text, its picture, the page link — to the chat (`~/.hermes/halo-teams/remote-jobs.json`
+  holds what is still awaited). 自动分流 says where it went and then follows that run; a team it
+  picks is followed by the Telegram notices above. QQ also has `/team` without buttons: the plan
+  comes back as text, 「批准」/「取消」 answer it, `/team 重做 <意见>` re-plans, the result comes back
+  when the lead has written it; a team started from QQ does not notify Telegram. QQ users are linked
+  in `qqbot.owners` of `halo-teams.json`.
 * **Where the conclusion goes** (`bridge.report_conclusion`, `link.concluded`): once the lead has
   written a conclusion when the team finished (after its acceptance check, bounded wait), the
   bridge tells HaloWebUI (`POST /api/v1/teams/hermes/teams/{id}/concluded`), which posts it as a

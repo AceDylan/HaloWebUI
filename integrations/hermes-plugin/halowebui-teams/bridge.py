@@ -211,6 +211,12 @@ def _loop() -> None:
             tick()
         except Exception:
             logger.warning("halowebui-teams: bridge loop error", exc_info=True)
+        try:  # 精答 / 讨论 / 自动分流 (and QQ teams) started from a chat: their results back there
+            from . import remote
+
+            remote.tick()
+        except Exception:
+            logger.warning("halowebui-teams: remote read-back error", exc_info=True)
 
 
 def start_bridge() -> None:

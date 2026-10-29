@@ -62,6 +62,8 @@ def target_for(team: dict) -> Optional[dict]:
         if origin.get("thread_id"):
             out["thread_id"] = str(origin["thread_id"])
         return out
+    if origin.get("platform") == "qqbot":
+        return None  # started from QQ: QQ is told (remote.py), not Telegram as well
     if link.notify_web_teams():
         chat = link.telegram_chat_for(team.get("owner"))
         if chat:

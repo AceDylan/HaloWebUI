@@ -9,10 +9,10 @@ It finds the hermes session that launched this run, then:
     payload carries the report itself (mode=display: HaloWebUI shows it as the reply,
     no model turn) and, for an older HaloWebUI, the prompt of a follow-up turn in which
     hermes reads result.md and reports.
-  * Telegram, for a run started with --detach (RUNNER_DETACHED_LOG is set): sends the
-    report straight to the chat through runner-deliver.py and records it in the chat's
+  * Telegram and QQ, for a run started with --detach (RUNNER_DETACHED_LOG is set): sends
+    the report straight to the chat through runner-deliver.py and records it in the chat's
     session. Nothing else would: a detached run has no gateway watcher.
-  * Telegram without --detach, QQ, CLI: left alone; the gateway's background-process
+  * Telegram or QQ without --detach, CLI: left alone; the gateway's background-process
     notice delivers those.
 RUNNER_DIRECT_DELIVERY=0 turns both report paths off (HaloWebUI gets only the prompt,
 Telegram is left to the gateway).
@@ -83,7 +83,7 @@ DIGEST_MAX_CHARS = 6000
 # HaloWebUI shows the whole report on one page and accepts 20000 characters
 # (NOTIFICATION_CONTENT_MAX_CHARS); a prompt the user asked for was cut at 6000 there.
 HALOWEBUI_DIGEST_MAX_CHARS = 18000
-DIRECT_PLATFORMS = ("telegram",)
+DIRECT_PLATFORMS = ("telegram", "qqbot")
 HERMES_PYTHON = "/usr/local/lib/hermes-agent/venv/bin/python"
 DELIVER_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "runner-deliver.py")
 DELIVER_TIMEOUT_SECONDS = 180
@@ -753,6 +753,17 @@ def build_digest(run_id, status, run_dir, session_id, agent="reclaude", chat=Fal
         # "没有正常完成（error）" for a run that went on by itself an hour later.
         icon, label = "⏳", f"额度用完，暂停中，约 {resume_at} 自动接着跑（不用管）"
     summary = _json_object(_read_text(os.path.join(run_dir, "result.json")))
+    review = summary.get("review_verdict") if agent == "codex" else None
+    if status == "success" and review:
+        icon, label = {
+            "PASS": ("✅", "审计通过"),
+            "FAIL": ("❌", "审计发现问题"),
+            "BLOCKED": ("⏸️", "审计受阻"),
+        }.get(review, ("⏸️", "审计结果待核验"))
+        reason = {"verification": "证据不足", "environment": "环境阻断"}.get(
+            summary.get("review_failure_class"))
+        if reason:
+            label += f"（{reason}）"
     figures = report_figures(run_dir)
     details = []
     if summary.get("model"):
@@ -814,6 +825,8 @@ def build_digest(run_id, status, run_dir, session_id, agent="reclaude", chat=Fal
                       f"隔了一小时以上再回，发 /{agent} 继续。"]
     elif status == "max_turns":
         lines += ["", "↩️ 回复「继续」，可以在同一个会话里接着跑。"]
+    elif status == "success" and chat and review:
+        lines += ["", "↩️ 追问可引用回复本报告；需要实施修改时，发 /codex 加具体修改要求，新开执行任务。"]
     elif status == "success" and chat:
         # The gateway sends a reply that quotes this report back to the run (runner_dispatch
         # replied_report); a fresh message goes to Hermes' model, which may start something new.

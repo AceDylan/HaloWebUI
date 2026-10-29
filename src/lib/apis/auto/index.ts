@@ -20,6 +20,12 @@ export type AutoRoute = {
 	href: string | null;
 	created_at: number;
 	auto_start: boolean;
+	/** 协作 that may only look (查仓库、核对配置), never change anything. */
+	read_only?: boolean;
+	/** The mode that was wanted but unavailable ('auto' = the choice itself failed): this one stands in. */
+	degraded?: AutoMode | 'auto' | null;
+	/** Real files had to be checked and nothing available could: reported, not answered from memory. */
+	blocked?: boolean;
 };
 export type AutoInput = {
 	question: string;
@@ -80,9 +86,13 @@ export const MODE_LABEL: Record<AutoMode, string> = {
 	discuss: '讨论',
 	team: '协作台'
 };
+/** Who handles it, e.g. 「协作台（只读）」. */
+export const routeTarget = (row: Pick<AutoRoute, 'mode' | 'read_only'>) =>
+	row.mode ? MODE_LABEL[row.mode] + (row.read_only ? '（只读）' : '') : '';
 export const routePending = (row: AutoRoute) =>
 	row.status === 'routing' || row.status === 'dispatching';
 export const routeStatus = (row: AutoRoute) => {
+	if (row.status === 'error' && row.blocked) return '已阻塞';
 	if (row.status !== 'dispatched')
 		return {
 			routing: '正在选择处理方式',

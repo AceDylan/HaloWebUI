@@ -10,6 +10,7 @@
 		retryAutoRoute,
 		routePending,
 		routeStatus,
+		routeTarget,
 		MODE_LABEL,
 		type AutoMode,
 		type AutoRoute
@@ -44,7 +45,7 @@
 	const MODES: AutoMode[] = ['answer', 'discuss', 'team'];
 	let retrying = '';
 	$: canRetry = !!row && RETRYABLE.has(row.status);
-	$: failed = !!row && (row.status === 'error' || row.status === 'interrupted');
+	$: failed = !!row && !row.blocked && (row.status === 'error' || row.status === 'interrupted');
 	$: pending = !row || routePending(row);
 	async function retry(mode: 'auto' | AutoMode) {
 		if (retrying) return;
@@ -106,17 +107,23 @@
 			<div class="min-w-0 flex-1">
 				<div class="flex flex-wrap items-center gap-2">
 					<strong class="text-sm font-semibold text-gray-900 dark:text-gray-100"
-						>自动分流{row?.mode ? ` → ${MODE_LABEL[row.mode]}` : ''}</strong
+						>自动分流{row?.mode ? ` → ${routeTarget(row)}` : ''}</strong
 					><span
 						class="rounded-full px-2 py-0.5 text-xs {failed
 							? 'bg-red-500/10 text-red-600 dark:text-red-400'
-							: 'bg-gray-500/10 text-gray-500 dark:text-gray-400'}"
+							: row?.blocked
+								? 'bg-amber-500/10 text-amber-700 dark:text-amber-400'
+								: 'bg-gray-500/10 text-gray-500 dark:text-gray-400'}"
 						>{row
 							? row.status === 'dispatched'
-								? `已交给${row.mode ? MODE_LABEL[row.mode] : '工作台'}`
+								? `已交给${routeTarget(row) || '工作台'}`
 								: routeStatus(row)
 							: '正在连接'}</span
-					>
+					>{#if row?.degraded}<span
+							class="rounded-full bg-amber-500/10 px-2 py-0.5 text-xs text-amber-700 dark:text-amber-400"
+							data-auto-degraded
+							title="想用的方式暂时不可用，由这种方式代替">临时改用</span
+						>{/if}
 				</div>
 				<p
 					class="mt-1 text-xs leading-5 text-gray-500 dark:text-gray-400 {!row?.reason && pending
@@ -147,7 +154,13 @@
 				title="在自动分流工作台查看这次分流">分流记录 ↗</a
 			>
 		</div>
-		{#if error || row?.error}<p role="alert" class="px-4 pb-3 text-xs text-red-500">
+		{#if error || row?.error}<p
+				role="alert"
+				class="px-4 pb-3 text-xs {row?.blocked && !error
+					? 'text-amber-700 dark:text-amber-400'
+					: 'text-red-500'}"
+				data-auto-blocked={row?.blocked ? 'true' : undefined}
+			>
 				{error || row?.error}
 			</p>{/if}
 		{#if row?.status === 'routing'}<div class="px-4 pb-3">

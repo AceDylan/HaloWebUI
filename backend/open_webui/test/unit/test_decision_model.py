@@ -216,7 +216,8 @@ def test_auto_routing_asks_the_decision_model_first(monkeypatch):
         calls.append(payload["metadata"]["task"])
         native = payload["metadata"][dm.REQUEST_KEY]
         assert set(native["questions"]["mode"]["criteria"]) == {"answer", "discuss"}  # no team: disabled here
-        return {"answers": {"mode": {"choice": "discuss", "confidence": 0.81}}}
+        assert "tools" in native["questions"] and "execution" not in native["questions"]
+        return {"answers": {"mode": {"choice": "discuss", "confidence": 0.81}, "tools": {"noul": 0.1}}}
 
     monkeypatch.setattr(chat, "generate_chat_completion", completion)
     monkeypatch.setattr("open_webui.utils.agent_teams.ENABLE_AGENT_TEAMS", False, raising=False)

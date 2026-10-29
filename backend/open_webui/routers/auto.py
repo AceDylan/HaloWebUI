@@ -21,6 +21,13 @@ log = logging.getLogger(__name__)
 _jobs: dict[str, asyncio.Task] = {}
 
 
+class RouteBlocked(HTTPException):
+    """The request needs real files checked and nothing available can: a blocker, not an answer."""
+
+    def __init__(self, detail):
+        super().__init__(409, detail)
+
+
 class CreateForm(BaseModel):
     question: str = Field(min_length=1, max_length=8000)
     client_key: str = Field(min_length=1, max_length=128)
@@ -57,7 +64,8 @@ def public(row, user, targets=None):
         "href": PATHS[mode] + target if mode in PATHS and target else None,
         "auto_start": bool(data.get("auto_start")), "target_status": None,
         "title": data["input"]["question"][:80], "routing_model": data.get("routing_model"),
-        "origin_chat_id": (data.get("origin") or {}).get("chatId"), "decision": data.get("decision")}
+        "origin_chat_id": (data.get("origin") or {}).get("chatId"), "decision": data.get("decision"),
+        "read_only": bool(data.get("read_only")), "degraded": data.get("degraded"), "blocked": bool(data.get("blocked"))}
     if targets is not None:
         info = targets.get((mode, target)) if target else None
         if target:
@@ -84,14 +92,16 @@ def public(row, user, targets=None):
 _PENDING_REPLY = "已交给自动分流工作台：正在选择处理方式，结果会发回这个对话。"
 
 
-def _chosen_reply(mode, reason):
-    """The chat reply once a mode is chosen: who handles it and why (what Hermes reads next turn)."""
+def _chosen_reply(mode, reason, *, read_only=False, degraded=None):
+    """The chat reply once a mode is chosen: who handles it and why (what Hermes reads next turn).
+    A stand-in for an unavailable mode says so, rather than reading as the right choice."""
     reason = str(reason or "").strip().rstrip("。.")
-    return (f"🔀 自动分流交给了{LABELS.get(mode, mode)}" + (f"：{reason}" if reason else "") +
-            "。进度在下面的卡片里，结果会发回这个对话。")
+    label = LABELS.get(mode, mode) + ("（只读）" if read_only else "")
+    head = f"🔀 自动分流临时改用{label}" if degraded else f"🔀 自动分流交给了{label}"
+    return head + (f"：{reason}" if reason else "") + "。进度在下面的卡片里，结果会发回这个对话。"
 
 
-def _settle_reply(origin, mode, reason, *, only_if=None):
+def _settle_reply(origin, mode, reason, *, only_if=None, read_only=False, degraded=None):
     if not (origin or {}).get("chatId") or not origin.get("messageId") or mode not in LABELS:
         return
     if only_if is not None:
@@ -100,7 +110,7 @@ def _settle_reply(origin, mode, reason, *, only_if=None):
         if not message or message.get("content") != only_if:
             return
     Chats.upsert_message_to_chat_by_id_and_message_id(origin["chatId"], origin["messageId"],
-        {"content": _chosen_reply(mode, reason)}, set_current=False)
+        {"content": _chosen_reply(mode, reason, read_only=read_only, degraded=degraded)}, set_current=False)
 
 
 def _files(ids, user):
@@ -132,7 +142,9 @@ async def select(request, user, form, file_info):
     teams_available = bool(ENABLE_AGENT_TEAMS)
     trace = None
     if form.mode != "auto":
-        raw = {"mode": form.mode, "reason": "你指定了处理方式", "execution_requested": form.mode == "team"}
+        # choosing 协作 is permission to use tools; 「只分析」 in the question still keeps it read-only
+        raw = {"mode": form.mode, "reason": "你指定了处理方式", "execution_requested": form.mode == "team",
+               "needs_tools": form.mode == "team"}
     else:
         # 辅助决策模型 first (when the user set one); its failure leaves the classifier below
         from open_webui.utils import decision_model as dm
@@ -163,7 +175,7 @@ async def select(request, user, form, file_info):
             raw = await asyncio.wait_for(classify(), timeout=25)
         except Exception:
             log.info("automatic selection unavailable; using answer")
-            raw = {"mode": "answer", "reason": "自动判断暂不可用，已按默认方式交给精答"}
+            raw = {"mode": "answer", "reason": "自动判断暂不可用，已按默认方式交给精答", "degraded": "auto"}
     if isinstance(raw, dict) and raw.get("mode") == "team" and teams_available:
         try:
             await hermes_target(request, user)
@@ -172,8 +184,13 @@ async def select(request, user, form, file_info):
     try:
         decision = normalize_selection(raw, question=form.question, context=form.context,
             teams_available=teams_available, discussion_available=len(bases) >= 2)
+        if raw.get("degraded") == "auto":
+            decision["degraded"] = "auto"
     except ValueError:
-        decision = {"mode": "answer", "reason": "自动判断结果不可用，已交给精答", "execution_requested": False}
+        decision = {"mode": "answer", "reason": "自动判断结果不可用，已交给精答", "execution_requested": False,
+                    "degraded": "auto"}
+    if decision.get("blocked"):
+        raise RouteBlocked(decision["reason"])
     # An explicit manual choice should explain an unavailable capability rather than change mode.
     if form.mode != "auto" and decision["mode"] != form.mode:
         raise HTTPException(400, decision["reason"] + "；可改选精答")
@@ -194,7 +211,9 @@ async def dispatch(request, user, row, form, decision, models, ambiguous, bases,
     mode = decision["mode"]
     origin = row["data"].get("origin")
     context = {"text": form.context} if form.context else None
-    data = {**row["data"], **decision, "auto_start": bool(form.auto_start and decision["execution_requested"])}
+    read_only = bool(decision.get("read_only"))
+    data = {**row["data"], **decision,
+            "auto_start": bool(form.auto_start and (decision["execution_requested"] or read_only))}
     claimed = AutoRoutes.update(row["id"], user.id, expect=("routing",), status="dispatching", mode=mode, data=data)
     if not claimed:  # cancelled while the model was selecting
         return
@@ -211,6 +230,9 @@ async def dispatch(request, user, row, form, decision, models, ambiguous, bases,
         goal = form.question
         if form.context:
             goal += "\n\n对话背景（供参考，遵守用户当前要求）：\n" + form.context
+        if read_only:
+            goal += ("\n\n用户约束：只读任务。只查看和分析（读文件、查 git 记录、核对配置），不要创建、修改或删除"
+                     "任何文件，不要提交、推送、部署，也不要运行会改变状态的命令；需要改动时写进结论里的建议。")
         if not form.research:
             goal += "\n\n用户约束：不要联网检索，只使用提供的资料和工作区。"
         if len(goal) > GOAL_MAX_CHARS:
@@ -248,7 +270,7 @@ async def dispatch(request, user, row, form, decision, models, ambiguous, bases,
     if origin:
         Chats.set_chat_meta_value_by_id(origin["chatId"], "auto_route", {"id": row["id"], "mode": mode})
         try:
-            _settle_reply(origin, mode, decision.get("reason"))
+            _settle_reply(origin, mode, decision.get("reason"), read_only=read_only, degraded=decision.get("degraded"))
         except Exception:  # the card shows the choice either way
             log.debug("auto: could not update the chat reply", exc_info=True)
         from open_webui.utils.team_chats import emit_chat_event
@@ -264,7 +286,16 @@ async def _run(request, user, row, form, file_info):
         message = exc.detail if isinstance(exc, HTTPException) else "未能完成派发，请查看原任务或调整后重试"
         current = AutoRoutes.get(row["id"], user.id)
         if current and current["status"] != "cancelled":
-            AutoRoutes.update(row["id"], user.id, status="error", data={**current["data"], "error": str(message)[:300]})
+            AutoRoutes.update(row["id"], user.id, status="error", data={**current["data"], "error": str(message)[:300],
+                "blocked": isinstance(exc, RouteBlocked)})
+            origin = current["data"].get("origin") or {}
+            if isinstance(exc, RouteBlocked) and origin.get("chatId") and origin.get("messageId"):
+                # what Hermes reads next turn: nothing was checked, not an answer from memory
+                try:
+                    Chats.upsert_message_to_chat_by_id_and_message_id(origin["chatId"], origin["messageId"],
+                        {"content": f"⛔ 自动分流没有派发：{exc.detail}。"}, set_current=False)
+                except Exception:
+                    log.debug("auto: could not update the chat reply", exc_info=True)
         log.info("auto dispatch failed (%s)", type(exc).__name__)
 
 
@@ -359,7 +390,8 @@ async def detail(id: str, user=Depends(get_verified_user), request: Request = No
     origin = row["data"].get("origin") or {}
     if row["status"] == "dispatched" and origin.get("chatId"):
         try:  # an older reply still saying "正在选择处理方式"
-            _settle_reply(origin, row.get("mode"), row["data"].get("reason"), only_if=_PENDING_REPLY)
+            _settle_reply(origin, row.get("mode"), row["data"].get("reason"), only_if=_PENDING_REPLY,
+                          read_only=bool(row["data"].get("read_only")), degraded=row["data"].get("degraded"))
         except Exception:
             log.debug("auto: could not settle an older reply", exc_info=True)
     if request and origin.get("chatId"):

@@ -58,4 +58,54 @@ describe('AutoDispatchCard', () => {
 		api.getAutoRoute.mockResolvedValue(row({ id: 'r2', status: 'routing', error: '' }));
 		await until(() => api.getAutoRoute.mock.calls.some((call: any[]) => call[1] === 'r2'));
 	});
+
+	it('tells a stand-in and a blocker apart from a normal choice', async () => {
+		(globalThis as any).localStorage.token = 'tok';
+		const { default: Card } = await import('./AutoDispatchCard.svelte');
+		target = document.createElement('div');
+		document.body.appendChild(target);
+		api.getAutoRoute.mockResolvedValue(
+			row({
+				status: 'error',
+				blocked: true,
+				error: '需要查看真实的仓库或文件，但协作台现在不可用'
+			})
+		);
+		app = new Card({ target, props: { id: 'r1', history: { messages: {} } } });
+		await until(() => !!target.querySelector('[data-auto-blocked]'));
+		expect(target.textContent).toContain('已阻塞');
+		expect(target.textContent).not.toContain('派发失败');
+		// still routed again from here: e.g. to 精答 for general advice only
+		expect(target.querySelector('[data-auto-retry-mode="answer"]')).toBeTruthy();
+		app.$destroy();
+		target.innerHTML = '';
+		api.getAutoRoute.mockResolvedValue(
+			row({
+				status: 'dispatched',
+				mode: 'team',
+				read_only: true,
+				target_id: null,
+				error: '',
+				reason: '要看仓库'
+			})
+		);
+		app = new Card({ target, props: { id: 'r2', history: { messages: {} } } });
+		await until(() => (target.textContent ?? '').includes('协作台（只读）'));
+		expect(target.querySelector('[data-auto-degraded]')).toBeFalsy();
+		app.$destroy();
+		target.innerHTML = '';
+		api.getAutoRoute.mockResolvedValue(
+			row({
+				status: 'dispatched',
+				mode: 'answer',
+				degraded: 'discuss',
+				target_id: null,
+				error: '',
+				reason: '讨论不可用（可用模型不足 2 个），临时改由精答处理'
+			})
+		);
+		app = new Card({ target, props: { id: 'r3', history: { messages: {} } } });
+		await until(() => !!target.querySelector('[data-auto-degraded]'));
+		expect(target.textContent).toContain('临时改用');
+	});
 });

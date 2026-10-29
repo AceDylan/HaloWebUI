@@ -11,6 +11,7 @@
 		MODE_LABEL,
 		routePending,
 		routeStatus,
+		routeTarget,
 		type AutoInput,
 		type AutoRoute
 	} from '$lib/apis/auto';
@@ -483,12 +484,19 @@
 				>
 					<div class="flex flex-wrap items-center justify-between gap-2">
 						<strong class="text-sm font-semibold text-gray-900 dark:text-gray-100"
-							>{active.mode ? `自动分流 → ${MODE_LABEL[active.mode]}` : '正在选择处理方式'}</strong
-						><span
-							class="rounded-full px-2 py-0.5 text-xs {active.status === 'error' ||
-							active.status === 'interrupted'
-								? 'bg-red-500/10 text-red-600 dark:text-red-400'
-								: 'bg-gray-500/10 text-gray-600 dark:text-gray-300'}">{routeStatus(active)}</span
+							>{active.mode ? `自动分流 → ${routeTarget(active)}` : '正在选择处理方式'}</strong
+						><span class="flex items-center gap-2"
+							>{#if active.degraded}<span
+									class="rounded-full bg-amber-500/10 px-2 py-0.5 text-xs text-amber-700 dark:text-amber-400"
+									data-auto-degraded>临时改用</span
+								>{/if}<span
+								class="rounded-full px-2 py-0.5 text-xs {active.blocked
+									? 'bg-amber-500/10 text-amber-700 dark:text-amber-400'
+									: active.status === 'error' || active.status === 'interrupted'
+										? 'bg-red-500/10 text-red-600 dark:text-red-400'
+										: 'bg-gray-500/10 text-gray-600 dark:text-gray-300'}"
+								>{routeStatus(active)}</span
+							></span
 						>
 					</div>
 					<p

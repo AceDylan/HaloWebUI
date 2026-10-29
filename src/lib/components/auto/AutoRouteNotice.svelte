@@ -27,7 +27,8 @@
 	>
 		<span
 			class="mt-0.5 shrink-0 rounded-full bg-cyan-500/10 px-2 py-0.5 text-[11px] font-medium text-cyan-700 dark:text-cyan-300"
-			>自动分流 → {MODE_LABEL[mode]}</span
+			>{row.degraded ? '临时改用' : '自动分流 →'}
+			{MODE_LABEL[mode]}{row.read_only ? '（只读）' : ''}</span
 		>
 		<p class="min-w-0 flex-1 text-xs leading-5 text-gray-600 dark:text-gray-300">
 			{row.reason || '按问题选择了这种处理方式'}

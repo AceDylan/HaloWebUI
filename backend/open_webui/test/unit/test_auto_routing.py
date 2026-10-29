@@ -400,3 +400,123 @@ def test_the_chat_reply_says_what_was_chosen(monkeypatch):
     monkeypatch.setattr(api.Chats, "get_chat_by_id", lambda id: chat(api._PENDING_REPLY))
     api._settle_reply(origin, "answer", "", only_if=api._PENDING_REPLY)
     assert posted[1][2] == {"content": "🔀 自动分流交给了精答。进度在下面的卡片里，结果会发回这个对话。"}
+
+
+# --- 需要工具 ≠ 允许修改；正常选择 ≠ 临时改用；查不了就报阻塞 ---------------------------------
+
+
+def tooled(mode, question, execution=False, **kwargs):
+    kwargs.setdefault("teams_available", True)
+    kwargs.setdefault("discussion_available", True)
+    return normalize_selection({"mode": mode, "reason": "按目标处理", "needs_tools": True,
+        "execution_requested": execution}, question=question, **kwargs)
+
+
+@pytest.mark.parametrize("question", ["检查仓库最近几次提交，只分析别改", "只看看最近 7 次提交改了什么", "核对一下线上配置，不要修改任何文件"])
+def test_checking_real_files_is_a_read_only_team_not_a_text_answer(question):
+    decision = tooled("team", question, execution=True)
+    assert decision["mode"] == "team" and decision["read_only"] and not decision["execution_requested"]
+
+
+def test_execution_team_is_not_read_only():
+    decision = tooled("team", "按方案实现并跑测试", execution=True)
+    assert decision["mode"] == "team" and decision["execution_requested"] and not decision.get("read_only")
+
+
+def test_advice_without_tools_or_execution_is_a_normal_answer_choice():
+    decision = normalize_selection({"mode": "team", "needs_tools": False, "execution_requested": False},
+        question="CI 该怎么设计", teams_available=True, discussion_available=True)
+    assert decision["mode"] == "answer" and not decision.get("degraded")
+
+
+def test_needing_real_files_without_team_is_blocked_not_answered_from_memory():
+    decision = tooled("team", "检查仓库近几次提交", teams_available=False)
+    assert decision["blocked"] and decision["mode"] is None and "协作台现在不可用" in decision["reason"]
+
+
+def test_unavailable_modes_are_marked_as_stand_ins():
+    team = normalize_selection({"mode": "team", "execution_requested": True}, question="写个脚本算日期差",
+        teams_available=False, discussion_available=True)
+    assert team["mode"] == "answer" and team["degraded"] == "team" and "临时" in team["reason"]
+    discuss = normalize_selection({"mode": "discuss"}, question="选哪个", teams_available=True, discussion_available=False)
+    assert discuss["mode"] == "answer" and discuss["degraded"] == "discuss" and "讨论不可用" in discuss["reason"]
+    assert not normalize_selection({"mode": "discuss"}, question="选哪个", discussion_available=True).get("degraded")
+
+
+def test_follow_ups_are_judged_by_their_own_intent():
+    background = "用户：介绍一下 PostgreSQL 和 MySQL\n\nHermes：🔀 自动分流交给了精答"
+    # the classifier picks discuss for the follow-up; earlier turns do not lock the mode
+    assert normalize_selection({"mode": "discuss"}, question="结合我的业务到底选哪个", context=background,
+        discussion_available=True)["mode"] == "discuss"
+    checked = background + "\n\n用户：检查仓库最近的提交，只分析别改"
+    # 「继续」 grants nothing: still read-only; an explicit request to implement does
+    assert tooled("team", "继续", execution=True, context=checked)["read_only"]
+    implemented = tooled("team", "现在按方案实现", execution=True, context=checked)
+    assert implemented["execution_requested"] and not implemented.get("read_only")
+
+
+def test_both_deciders_get_the_boundary_examples_and_follow_up_rule():
+    from open_webui.utils.auto_routing import EXAMPLES, decision_request, selection_from_answers
+    prompt = selection_messages("q", "", [], teams_available=True)[0]["content"]
+    assert EXAMPLES in prompt and "needs_tools" in prompt and "follow-up" in prompt
+    _, questions = decision_request("q", "", [], teams_available=False, discussion_available=True)
+    assert EXAMPLES in questions["mode"]["instructions"] and "tools" in questions and "execution" not in questions
+    raw = selection_from_answers({"mode": {"choice": "answer"}, "tools": {"noul": 0.9}}, "", "jev")
+    assert raw["needs_tools"] is True and raw["execution_requested"] is False
+
+
+def test_classifier_failure_is_marked_as_a_stand_in(env, monkeypatch):
+    from open_webui.routers import answers
+    from open_webui.utils import assistant_library, chat
+    async def models_for(*args): return {'gpt': {'id': 'gpt', 'name': 'gpt'}}, set()
+    async def completion(*args): raise RuntimeError('down')
+    monkeypatch.setattr(answers, '_models', models_for)
+    monkeypatch.setattr(answers, '_resolve_planner', lambda *a: {'model': 'gpt', 'name': 'GPT'})
+    monkeypatch.setattr(assistant_library, 'library', lambda *a: ([], [{'id': 'gpt'}]))
+    monkeypatch.setattr(chat, 'generate_chat_completion', completion)
+    decision = asyncio.run(api.select(env, USER, api.CreateForm(question='解释报错', client_key='down'), []))[0]
+    assert decision['mode'] == 'answer' and decision['degraded'] == 'auto'
+
+
+def test_blocked_request_is_reported_on_the_receipt_and_in_the_chat(env, monkeypatch):
+    posted = []
+    monkeypatch.setattr(api.Chats, "upsert_message_to_chat_by_id_and_message_id",
+                        lambda chat_id, message_id, fields, **kw: posted.append((chat_id, message_id, fields, kw)))
+    async def select(*args):
+        raise api.RouteBlocked("需要查看真实的仓库或文件，但协作台现在不可用")
+    monkeypatch.setattr(api, "select", select)
+    async def run():
+        row = await api.start(env, USER, api.CreateForm(question="检查最近提交", client_key="blocked"),
+                              origin={"chatId": "chat-1", "messageId": "reply-1"})
+        await settle(row["id"])
+        stored = api.public(api._own(row["id"], USER), USER)
+        assert stored["status"] == "error" and stored["blocked"] and stored["mode"] is None
+        assert posted[0][2]["content"].startswith("⛔ 自动分流没有派发：需要查看真实的仓库")
+        assert posted[0][3] == {"set_current": False}
+    asyncio.run(run())
+
+
+def test_read_only_team_carries_the_constraint_and_says_so_in_the_chat(env, monkeypatch):
+    from open_webui.routers import teams
+    from open_webui.utils import agent_teams
+    captured = []
+    async def target(*args): return object()
+    async def start(request, user, goal, *args, **kw):
+        captured.append((goal, kw))
+        kw['on_created']('t1')
+    monkeypatch.setattr(agent_teams, 'hermes_target', target)
+    monkeypatch.setattr(agent_teams, 'input_files', lambda *args: [])
+    monkeypatch.setattr(teams, '_enabled', lambda: None)
+    monkeypatch.setattr(teams, '_start', start)
+    async def run():
+        form = api.CreateForm(question='检查最近 7 次提交，只分析', client_key='ro', auto_start=True)
+        row, _ = records.AutoRoutes.create(USER.id, form.client_key, 'hash', {'input': form.model_dump()})
+        await api.dispatch(env, USER, row, form, {'mode': 'team', 'reason': '要看仓库', 'execution_requested': False,
+            'read_only': True}, {}, set(), [], {})
+        goal, kw = captured[0]
+        assert '只读任务' in goal and '不要创建、修改或删除' in goal
+        assert kw['auto_start'] is True
+        assert api.public(api._own(row['id'], USER), USER)['read_only'] is True
+    asyncio.run(run())
+    assert api._chosen_reply("team", "要看仓库", read_only=True).startswith("🔀 自动分流交给了协作台（只读）：要看仓库")
+    assert api._chosen_reply("answer", "讨论不可用", degraded="discuss").startswith("🔀 自动分流临时改用精答：讨论不可用")

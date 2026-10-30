@@ -1,0 +1,139 @@
+#!/usr/bin/env python3
+"""halo-search "<question>": Hermes' web search, done by HaloWebUI.
+
+HaloWebUI looks the question up exactly as a chat with search on does (same keywords, same
+engine and page readers, same page text; ``/api/v1/remote/search``). This prints one JSON record:
+the keywords, and each source numbered once (``n``, ``url``, ``title``, ``query``, an excerpt of
+its page text). The whole text of every page is saved in the file named by ``full_json``.
+
+Exit 0 with ``"ok": true`` when at least one page was read; otherwise exit 1 with ``"ok": false``
+and ``error``. Settings: ``~/.hermes/halo-teams.json`` (``halowebui.url``; the owner is
+``HALO_SEARCH_OWNER``, else ``image_gallery.default_owner``, else the one linked owner) and
+``API_SERVER_KEY`` (environment, else ``~/.hermes/.env``).
+"""
+
+import json
+import os
+import secrets
+import sys
+import time
+import urllib.error
+import urllib.request
+from pathlib import Path
+
+HERMES_HOME = Path(os.environ.get("HERMES_HOME") or Path.home() / ".hermes")
+EXCERPT_CHARS = 2000
+# a page shorter than this is a search snippet, not page text
+PAGE_MIN_CHARS = 200
+TIMEOUT = 170
+KEEP_SECONDS = 2 * 86400
+
+
+def fail(message: str) -> None:
+    print(json.dumps({"ok": False, "error": message}, ensure_ascii=False))
+    sys.exit(1)
+
+
+def settings() -> tuple[str, str, str]:
+    path = Path(os.environ.get("HALO_TEAMS_LINK_FILE") or HERMES_HOME / "halo-teams.json")
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        fail(f"读不到 {path}")
+    url = str((data.get("halowebui") or {}).get("url") or "").rstrip("/")
+    owner = (os.environ.get("HALO_SEARCH_OWNER") or "").strip()
+    owner = owner or str((data.get("image_gallery") or {}).get("default_owner") or "").strip()
+    if not owner:
+        linked = {
+            str(v)
+            for section in ("telegram", "qqbot")
+            for v in ((data.get(section) or {}).get("owners") or {}).values()
+        }
+        owner = linked.pop() if len(linked) == 1 else ""
+    key = (os.environ.get("API_SERVER_KEY") or "").strip()
+    if not key:
+        try:
+            for line in (HERMES_HOME / ".env").read_text(encoding="utf-8").splitlines():
+                name, _, value = line.partition("=")
+                if name.strip() == "API_SERVER_KEY":
+                    key = value.strip().strip("'\"")
+        except OSError:
+            pass
+    if not url or not owner or not key:
+        fail("HaloWebUI 搜索没有接通（halo-teams.json 缺 halowebui.url / owner，或没有 API_SERVER_KEY）")
+    return url, owner, key
+
+
+def save(record: dict) -> str:
+    folder = HERMES_HOME / "cache" / "halo-search"
+    folder.mkdir(parents=True, exist_ok=True)
+    now = time.time()
+    for old in folder.glob("*.json"):
+        try:
+            if now - old.stat().st_mtime > KEEP_SECONDS:
+                old.unlink()
+        except OSError:
+            pass
+    path = folder / f"{time.strftime('%Y%m%d-%H%M%S')}-{secrets.token_hex(3)}.json"
+    path.write_text(json.dumps(record, ensure_ascii=False, indent=1), encoding="utf-8")
+    path.chmod(0o600)
+    return str(path)
+
+
+def main() -> None:
+    question = " ".join(sys.argv[1:]).strip()
+    if not question or question in ("-h", "--help"):
+        print(__doc__.strip())
+        sys.exit(0 if question else 2)
+    url, owner, key = settings()
+    request = urllib.request.Request(
+        f"{url}/api/v1/remote/search",
+        data=json.dumps({"question": question[:8000]}, ensure_ascii=False).encode("utf-8"),
+        method="POST",
+        headers={"X-Hermes-Key": key, "X-Halo-Owner": owner, "Content-Type": "application/json"},
+    )
+    # HaloWebUI is local: never through a proxy from the environment.
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    try:
+        with opener.open(request, timeout=TIMEOUT) as response:
+            record = json.loads(response.read() or b"{}")
+    except urllib.error.HTTPError as exc:
+        fail(f"HaloWebUI 返回 {exc.code}")
+    except (urllib.error.URLError, OSError, ValueError) as exc:
+        fail(f"连不上 HaloWebUI：{type(exc).__name__}")
+
+    sources = record.get("sources") or []
+    out = {
+        "ok": bool(record.get("ok")) and bool(sources),
+        "searched_by": "HaloWebUI",
+        "queries": record.get("queries") or [],
+        "engine": record.get("engine") or "",
+        "elapsed_ms": record.get("elapsed_ms"),
+    }
+    # Only the keywords: their reasons (in full_json) would read as a failed search to the
+    # routing guard when the other keywords found pages.
+    if record.get("failed_queries"):
+        out["unanswered_queries"] = [f.get("query") for f in record["failed_queries"]]
+    if not out["ok"]:
+        fail(str(record.get("error") or "没有搜到可用的网页"))
+    out["full_json"] = save(record)
+    items = []
+    for source in sources:
+        text = str(source.get("content") or "")
+        page = len(text) >= PAGE_MIN_CHARS
+        items.append({
+            "n": source.get("n"),
+            "url": source.get("url") or "",
+            "title": source.get("title") or "",
+            "query": source.get("query") or "",
+            "source_type": "fetched_page" if page else "snippet",
+            "verified": page,
+            "chars": len(text),
+            "content": text[:EXCERPT_CHARS] + ("…" if len(text) > EXCERPT_CHARS else ""),
+        })
+    out["evidence_items"] = items
+    print(json.dumps(out, ensure_ascii=False))
+
+
+if __name__ == "__main__":
+    main()

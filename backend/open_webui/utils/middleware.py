@@ -4021,6 +4021,53 @@ async def chat_completion_tools_handler(
     return body, {"sources": sources, "ui_sources": ui_sources}
 
 
+async def generate_web_search_queries(
+    request: Request, model_id: str, messages: list[dict], user
+) -> list[str]:
+    """The keywords a chat with search on looks up (at most three).
+
+    Shared with Hermes' search (routers/remote.py), so it searches what a chat would.
+    """
+    user_message = get_last_user_message(messages)
+    queries = []
+    try:
+        res = await generate_queries(
+            request,
+            {
+                "model": model_id,
+                "messages": messages,
+                "prompt": user_message,
+                "type": "web_search",
+            },
+            user,
+        )
+        response = _get_generation_response_content(res)
+        if not response:
+            raise ValueError("Query generation returned no content")
+
+        try:
+            bracket_start = response.find("{")
+            bracket_end = response.rfind("}") + 1
+
+            if bracket_start == -1 or bracket_end == -1:
+                raise Exception("No JSON object found in the response")
+
+            json_str = response[bracket_start:bracket_end]
+            parsed_queries = json.loads(json_str)
+            queries = parsed_queries.get("queries", [])
+        except Exception as e:
+            queries = [user_message]
+
+    except Exception as e:
+        log.exception(e)
+        queries = [user_message]
+    # Search is on: an empty or repetitive list from the query model still
+    # searches (at most three keywords), with what the user wrote if need be.
+    return _normalize_auto_web_search_queries(
+        queries
+    ) or _normalize_auto_web_search_queries([user_message])
+
+
 async def chat_web_search_handler(
     request: Request,
     form_data: dict,
@@ -4229,44 +4276,9 @@ async def chat_web_search_handler(
             "正在生成联网搜索关键词。",
             done=False,
         )
-
-        queries = []
-        try:
-            res = await generate_queries(
-                request,
-                {
-                    "model": form_data["model"],
-                    "messages": messages,
-                    "prompt": user_message,
-                    "type": "web_search",
-                },
-                user,
-            )
-            response = _get_generation_response_content(res)
-            if not response:
-                raise ValueError("Query generation returned no content")
-
-            try:
-                bracket_start = response.find("{")
-                bracket_end = response.rfind("}") + 1
-
-                if bracket_start == -1 or bracket_end == -1:
-                    raise Exception("No JSON object found in the response")
-
-                json_str = response[bracket_start:bracket_end]
-                parsed_queries = json.loads(json_str)
-                queries = parsed_queries.get("queries", [])
-            except Exception as e:
-                queries = [user_message]
-
-        except Exception as e:
-            log.exception(e)
-            queries = [user_message]
-        # Search is on: an empty or repetitive list from the query model still
-        # searches (at most three keywords), with what the user wrote if need be.
-        queries = _normalize_auto_web_search_queries(
-            queries
-        ) or _normalize_auto_web_search_queries([user_message])
+        queries = await generate_web_search_queries(
+            request, form_data["model"], messages, user
+        )
     else:
         queries = _normalize_auto_web_search_queries(queries)
 

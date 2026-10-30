@@ -164,3 +164,47 @@ def test_result_content_with_and_without_the_picture():
     with_picture = mode_dispatch.result_content("answer", run)
     assert "/api/v1/files/abcdef12-3456/content" in with_picture and "card" not in with_picture
     assert "/api/v1/files/" not in mode_dispatch.result_content("answer", run, picture=False)
+
+
+def test_search_is_hermes_web_search_the_chat_way(client, monkeypatch):
+    """/search runs the chat's own keyword step, engine and page text, and numbers each page once."""
+    from open_webui.routers import retrieval
+    from open_webui.utils import agent_web_search, middleware
+
+    seen = {}
+
+    async def keywords(request, model_id, messages, user):
+        seen["keywords"] = (model_id, messages)
+        return ["k1", "k2", "k3"]
+
+    async def web(request, form, user=None):
+        if form.query == "k3":
+            raise RuntimeError("smart-search CLI search failed (research: timeout)")
+        url = f"https://{form.query}.example"
+        return {"docs": [
+            {"content": f"page {form.query} " * 40, "metadata": {"source": url, "title": form.query}},
+            {"content": "shared page " * 40, "metadata": {"source": "https://same.example"}},
+        ], "filenames": [url, "https://same.example"]}
+
+    async def extract(request, files, queries, user):
+        return [{"source": f, "document": [d["content"] for d in f["docs"]],
+                 "metadata": [d["metadata"] for d in f["docs"]]} for f in files]
+
+    app_config = SimpleNamespace(ENABLE_WEB_SEARCH=True, TASK_MODEL_EXTERNAL="task-model",
+                                 TASK_MODEL="", WEB_SEARCH_ENGINE="smart_search")
+    client.app.state.config = app_config
+    monkeypatch.setattr(middleware, "generate_web_search_queries", keywords)
+    monkeypatch.setattr(retrieval, "process_web_search", web)
+    monkeypatch.setattr(agent_web_search, "_extract_sources", extract)
+
+    assert client.post("/api/v1/remote/search", json={"question": "q"}).status_code == 401
+    body = client.post("/api/v1/remote/search", json={"question": " 今天的新闻 "}, headers=H).json()
+    assert seen["keywords"] == ("task-model", [{"role": "user", "content": "今天的新闻"}])
+    assert body["ok"] is True and body["queries"] == ["k1", "k2", "k3"]
+    assert [(s["n"], s["url"], s["query"]) for s in body["sources"]] == [
+        (1, "https://k1.example", "k1"), (2, "https://same.example", "k1"), (3, "https://k2.example", "k2")]
+    assert body["failed_queries"][0]["query"] == "k3" and "timeout" in body["failed_queries"][0]["reason"]
+
+    app_config.ENABLE_WEB_SEARCH = False
+    off = client.post("/api/v1/remote/search", json={"question": "q"}, headers=H).json()
+    assert off["ok"] is False and off["error"]

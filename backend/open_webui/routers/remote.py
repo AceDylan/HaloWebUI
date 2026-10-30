@@ -5,7 +5,8 @@ in a linked Telegram or QQ chat into a run here, then reads it back until it is 
 the result to that chat. A run started this way is an ordinary 精答 / discussion / 分流 of the user
 (listed on its page, named and filed like one started in the browser); only the start and the
 read-back live here. It authenticates as the 协作台's Hermes routes do (``X-Hermes-Key`` = the key of
-the user's Hermes connection, ``X-Halo-Owner`` = the user).
+the user's Hermes connection, ``X-Halo-Owner`` = the user). ``/search`` is Hermes' web search
+(``utils/agent_web_search.py``).
 """
 
 import asyncio
@@ -56,6 +57,23 @@ def _remember(user_id: str, key: str, value: dict) -> None:
     for stale in [k for k, (at, _v) in _keys.items() if now - at > KEY_WINDOW]:
         _keys.pop(stale, None)
     _keys[(user_id, key)] = (now, value)
+
+
+class SearchForm(BaseModel):
+    question: str = Field(min_length=1, max_length=8000)
+
+
+# declared before ``/{kind}``, which would take "search" for a kind
+@router.post("/search")
+async def search(request: Request, form: SearchForm, caller=Depends(_authenticated_hermes_caller)):
+    """Hermes' web search (its ``halo-search`` command): what a chat here with search on finds."""
+    from open_webui.utils.agent_web_search import search_for_agent
+
+    user, _target = caller
+    question = form.question.strip()
+    if not question:
+        raise HTTPException(status_code=400, detail="先写下要搜的问题")
+    return await search_for_agent(request, user, question)
 
 
 @router.post("/{kind}")

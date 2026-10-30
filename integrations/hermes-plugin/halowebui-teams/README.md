@@ -180,6 +180,19 @@ Environment knobs: `HALO_TEAMS_BRIDGE=0` (no bridge loop), `HALO_TEAMS_BRIDGE_IN
 `HALO_TEAMS_MAX_TOOL_EVENTS` (400 tool events per attempt, then one "truncated" note),
 `HALO_TEAMS_AUTO_ILLUSTRATE=0` (a written conclusion is not drawn on its own; the button still works).
 
+## Web search: `halo-search`
+
+`bin/halo-search "<question>"` is Hermes' first web route (SOUL.md, the `smart-search-cli` skill and
+ace-routing-guard name it): HaloWebUI searches as its chats with search on do
+(`POST /api/v1/remote/search`: the task model's keywords, `process_web_search` per keyword, the
+same page text) and the command prints the numbered sources with page excerpts, saving the whole
+record under `~/.hermes/cache/halo-search/` (`full_json`, kept two days). Exit 1 / `"ok": false`
+when HaloWebUI cannot search; Hermes then goes on to `smart-search research`.
+
+```sh
+ln -s /root/HaloWebUI/integrations/hermes-plugin/halowebui-teams/bin/halo-search /usr/local/bin/halo-search
+```
+
 ## Tests
 
 ```sh

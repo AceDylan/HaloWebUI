@@ -223,7 +223,7 @@ def save_knowledge(owner: str, team_id: str) -> dict:
 
 def remote_start(owner: str, kind: str, question: str, key: str) -> dict:
     """Start a 精答 / discussion / 自动分流 for *owner*; {"kind", "id"}."""
-    return call("POST", f"/{kind}", owner, {"question": question[:8000], "key": key[:128]}, timeout=90,
+    return call("POST", f"/{kind}", owner, {"question": question[:8000], "key": key[:512]}, timeout=90,
                 prefix=REMOTE_PREFIX)
 
 

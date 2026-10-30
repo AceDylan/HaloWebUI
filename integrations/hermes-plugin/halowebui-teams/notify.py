@@ -30,7 +30,9 @@ SEEN_WINDOW = 25            # seconds a visible poll of the team's page counts a
 DONE_WAIT = 6 * 60          # how long the done notice waits for the conclusion
 RECENT = 6 * 3600           # finished teams older than this are not looked at
 NOTIFIED_KEEP = 200
-TG_LIMIT = 3800
+# What a notice carries of a question, a failure, the lead's reply or the result: all of it (tg.asend
+# sends a long notice in several messages); only beyond this is the rest left to the page.
+TEXT_MAX = 30000
 DIAGNOSIS_WAIT = 120        # a failure notice waits this long for the lead's diagnosis
 ACCEPTANCE_WAIT = 180       # the done notice waits this long for the lead's acceptance check
 
@@ -175,13 +177,13 @@ def plan_message(team: dict, *, started: bool = False) -> tuple[str, list]:
     if started:
         lines.append("<i>成员已经开始干活，完成或需要你时我会告诉你；回复完成通知可以对负责人说要改什么。</i>")
         row = _open_row(team_id, "🌐 看工作台")
-        return clip("\n".join(lines), TG_LIMIT), [row] if row else []
+        return "\n".join(lines), [row] if row else []
     lines.append("<i>回复这条消息写修改意见，负责人会按意见重新规划。</i>")
     buttons = [[("✅ 批准并开始", f"cb:ap:{team_id}"), ("✖ 取消", f"cb:cx:{team_id}")]]
     row = _open_row(team_id)
     if row:
         buttons.append(row)
-    return clip("\n".join(lines), TG_LIMIT), buttons
+    return "\n".join(lines), buttons
 
 
 def plan_failed_message(team: dict) -> tuple[str, list]:
@@ -210,7 +212,7 @@ def ask_message(team: dict, task: dict) -> tuple[str, list]:
     who = f"{esc(task.get('member'))}{f'（{esc(role)}）' if role else ''}"
     text = (f"❓ <b>{esc(clip(team.get('title'), 60))}</b>\n"
             f"{who} 在任务「{esc(clip(task.get('title'), 40))}」里问你：\n\n"
-            f"{esc(clip(plain(question), 2500))}")
+            f"{esc(clip(plain(question), TEXT_MAX))}")
     lead_line, lead_buttons = _diagnosis_lines(team, task)
     text += lead_line + "\n\n<i>直接回复这条消息就是回答它。</i>"
     buttons = [lead_buttons] if lead_buttons else []
@@ -239,7 +241,7 @@ def fail_message(team: dict, task: dict) -> tuple[str, list]:
     word = "受阻" if task.get("sub_status") == "blocked" else "失败"
     text = (f"⚠️ <b>{esc(clip(team.get('title'), 60))}</b>\n"
             f"{esc(task.get('member'))} 的任务「{esc(clip(task.get('title'), 40))}」{word}：\n"
-            f"{esc(clip(plain(task.get('block_reason') or '原因未知'), 800))}")
+            f"{esc(clip(plain(task.get('block_reason') or '原因未知'), TEXT_MAX))}")
     lead_line, first = _diagnosis_lines(team, task)
     text += lead_line + "\n\n<i>回复这条消息写补充说明，会带着说明重试。</i>"
     buttons = [[*first, ("🔁 重试", f"cb:rt:{team['team_id']}:{task['id']}")]]
@@ -286,8 +288,7 @@ def done_message(team: dict, snap: dict, markdown: str) -> tuple[str, list]:
     if not body:
         body = "\n".join(f"• {t.get('title')}：{plain(t.get('result') or '')[:200]}" for t in tasks[:8])
     tail = "\n\n<i>回复这条消息对负责人说要追加或修改什么。</i>"
-    room = TG_LIMIT - len(head) - len(tail) - 80
-    text = head + "\n\n" + esc(clip(body, max(400, room))) + tail
+    text = head + "\n\n" + esc(clip(body, TEXT_MAX)) + tail
     actions = []
     if acceptance.get("status") == "ready" and acceptance.get("gaps"):
         actions.append(("🛠 让团队补上", f"cb:fx:{team['team_id']}"))
@@ -307,7 +308,7 @@ def change_message(team: dict, entry: dict) -> tuple[str, list]:
         return (f"⚠️ <b>{title}</b> · 负责人没能给出调整\n{esc(clip(entry.get('error'), 600))}\n\n"
                 "<i>回复这条消息再说一次。</i>"), [r for r in [_open_row(team_id)] if r]
     proposal = entry.get("proposal") or {}
-    lines = [f"🧭 <b>{title}</b> · 负责人回复", esc(clip(proposal.get("reply"), 1200))]
+    lines = [f"🧭 <b>{title}</b> · 负责人回复", esc(clip(proposal.get("reply"), TEXT_MAX))]
     if entry.get("status") == "ready":
         lines += ["", "<b>计划变更</b>（应用后才生效）"]
         for m in proposal.get("add_members") or []:
@@ -332,7 +333,7 @@ def change_message(team: dict, entry: dict) -> tuple[str, list]:
     row = _open_row(team_id)
     if row:
         buttons.append(row)
-    return clip("\n".join(lines), TG_LIMIT), buttons
+    return "\n".join(lines), buttons
 
 
 def change_notice(team: dict, entry: dict, target: dict) -> Optional[int]:

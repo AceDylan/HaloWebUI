@@ -322,9 +322,10 @@ def test_the_away_push_of_a_question_report_leads_with_the_question():
     assert push.startswith("❓ reclaude 运行 20260928-102915-46faac75 · 等你决定\n\n")
     assert "claude-opus" not in push  # the details line only took room
     assert "QUESTION: 选 A（保留旧接口）还是 B（直接迁移）？" in push
-    assert "细节很长" not in push and "Obsidian" not in push and "额度" not in push
+    # what it found comes under the question, whole: no need to open the page to decide
+    assert push.index("QUESTION:") < push.index("我先查了三处配置") and "细节很长。" * 400 in push
+    assert "Obsidian" not in push and "额度" not in push
     assert "直接回复你的决定" not in push and push.endswith(hermes_notify.PUSH_REPLY_HINT)
-    assert len(push) < 1200  # the push is cut there
 
 
 def test_the_away_push_of_a_plain_report_drops_the_reply_hint_and_quota():

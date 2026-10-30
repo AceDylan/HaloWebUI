@@ -26,8 +26,8 @@ log = logging.getLogger(__name__)
 
 Kind = Literal["answer", "discuss", "auto"]
 PAGES = {"answer": "/answer/", "discuss": "/discuss/"}
-# what the chat message carries of the result; the rest is on the page
-TEXT_MAX_CHARS = 12000
+# what the chat messages carry of the result (all of it, short of a very long one)
+TEXT_MAX_CHARS = 30000
 # 「done」 a moment after the text: the run takes its picture's slot right after it ends
 SETTLE_SECONDS = 10
 # a resent command (same key) within this window is the run it already started

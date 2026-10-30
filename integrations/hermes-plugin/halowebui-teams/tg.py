@@ -25,6 +25,7 @@ import asyncio
 import html
 import json
 import os
+import re
 import threading
 import time
 from pathlib import Path
@@ -88,26 +89,72 @@ def markup(buttons: Optional[list]):
     return InlineKeyboardMarkup(rows) if rows else None
 
 
+CHUNK_CHARS = 3800  # one Telegram message (4096 UTF-16 units) with room to spare
+_ENTITY_OR_TAG_RE = re.compile(r"(&[#\w]*|<[^>]*)$")
+
+
+def split_html(text: str, limit: int = CHUNK_CHARS) -> list[str]:
+    """A notice too long for one message, in parts at line breaks (our tags never span lines); a
+    line longer than a message is cut where no tag or entity is open."""
+    parts: list[str] = []
+    current = ""
+    for line in str(text or "").split("\n"):
+        while len(line) > limit:
+            cut = limit
+            open_ = _ENTITY_OR_TAG_RE.search(line[:cut])
+            if open_ and open_.start() > 0:
+                cut = open_.start()
+            if current:
+                parts.append(current)
+                current = ""
+            parts.append(line[:cut])
+            line = line[cut:]
+        candidate = f"{current}\n{line}" if current else line
+        if len(candidate) > limit:
+            parts.append(current)
+            current = line
+        else:
+            current = candidate
+    if current.strip() or not parts:
+        parts.append(current)
+    return [p for p in parts if p.strip()] or [""]
+
+
+# (chat, id of a long notice's last part) → the ids of its earlier parts: a reply to any part is a
+# reply to the notice (remember_message).
+_parts: dict[tuple[str, int], list[int]] = {}
+
+
 async def asend(chat_id: Any, text: str, buttons: Optional[list] = None, *, thread_id: Any = None,
                 reply_to: Any = None) -> Optional[int]:
-    """Send on the gateway loop; the message id, or None when it failed."""
+    """Send on the gateway loop, in several messages when it is long (the buttons under the last);
+    the last message's id, or None when it failed."""
     app = _state.get("app")
     if app is None:
         return None
-    kwargs: dict = {"chat_id": _chat(chat_id), "text": text, "parse_mode": "HTML",
-                    "disable_web_page_preview": True, "reply_markup": markup(buttons)}
-    if thread_id:
-        kwargs["message_thread_id"] = int(thread_id)
-    if reply_to:
-        from telegram import ReplyParameters
+    chunks = split_html(text)
+    sent: list[int] = []
+    for i, chunk in enumerate(chunks):
+        last = i == len(chunks) - 1
+        kwargs: dict = {"chat_id": _chat(chat_id), "text": chunk, "parse_mode": "HTML",
+                        "disable_web_page_preview": True, "reply_markup": markup(buttons) if last else None}
+        if thread_id:
+            kwargs["message_thread_id"] = int(thread_id)
+        if reply_to and not sent:
+            from telegram import ReplyParameters
 
-        kwargs["reply_parameters"] = ReplyParameters(message_id=int(reply_to), allow_sending_without_reply=True)
-    try:
-        message = await app.bot.send_message(**kwargs)
-    except Exception as exc:  # noqa: BLE001 — a notice must never break the caller
-        logger.warning("halowebui-teams: Telegram send failed: %s", type(exc).__name__)
-        return None
-    return int(message.message_id)
+            kwargs["reply_parameters"] = ReplyParameters(message_id=int(reply_to), allow_sending_without_reply=True)
+        try:
+            message = await app.bot.send_message(**kwargs)
+        except Exception as exc:  # noqa: BLE001 — a notice must never break the caller
+            logger.warning("halowebui-teams: Telegram send failed: %s", type(exc).__name__)
+            return None
+        sent.append(int(message.message_id))
+    if len(sent) > 1:
+        _parts[(str(chat_id), sent[-1])] = sent[:-1]
+        while len(_parts) > STORE_KEEP:
+            _parts.pop(next(iter(_parts)))
+    return sent[-1]
 
 
 async def asend_photo(chat_id: Any, path: Path, caption: str = "", *, thread_id: Any = None,
@@ -193,9 +240,11 @@ def _save(data: dict) -> None:
 
 
 def remember_message(chat_id: Any, message_id: Any, entry: dict) -> None:
+    earlier = _parts.pop((str(chat_id), int(message_id)), []) if str(message_id).isdigit() else []
     with _store_lock:
         data = _load()
-        data[f"{chat_id}:{message_id}"] = {**entry, "at": time.time()}
+        for mid in [*earlier, message_id]:
+            data[f"{chat_id}:{mid}"] = {**entry, "at": time.time()}
         _save(data)
 
 

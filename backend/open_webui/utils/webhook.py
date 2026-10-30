@@ -12,6 +12,11 @@ log.setLevel(SRC_LOG_LEVELS["WEBHOOK"])
 
 # Telegram rejects sendMessage bodies longer than this.
 TELEGRAM_MESSAGE_MAX_CHARS = 4096
+# A longer push goes out as several messages of at most this many characters (Telegram counts
+# UTF-16 units; this leaves room for emoji), split at line breaks where it can.
+TELEGRAM_CHUNK_CHARS = 3900
+# Past this many messages the rest of a push is left to the page its link opens.
+TELEGRAM_MAX_MESSAGES = 10
 # Bot API upload limits: any file 50MB, a photo 10MB (bigger pictures go as documents).
 TELEGRAM_UPLOAD_MAX_BYTES = 50 * 1024 * 1024
 TELEGRAM_PHOTO_MAX_BYTES = 10 * 1024 * 1024
@@ -78,6 +83,25 @@ def _send_telegram_media(post_url: str, chat_id, thread_id, media: list) -> None
             log.warning(f"post_webhook: Telegram {method} failed: {type(e).__name__}")
 
 
+def telegram_chunks(message: str) -> list[str]:
+    """*message* in parts Telegram takes, at paragraph or line breaks where it can."""
+    text = message or ""
+    parts: list[str] = []
+    while len(text) > TELEGRAM_CHUNK_CHARS:
+        if len(parts) == TELEGRAM_MAX_MESSAGES - 1:
+            text = text[: TELEGRAM_CHUNK_CHARS - 20].rstrip() + "\n…（后面的在网页看）"
+            break
+        cut = text.rfind("\n\n", 0, TELEGRAM_CHUNK_CHARS)
+        if cut < TELEGRAM_CHUNK_CHARS // 2:
+            cut = text.rfind("\n", 0, TELEGRAM_CHUNK_CHARS)
+        if cut < TELEGRAM_CHUNK_CHARS // 2:
+            cut = TELEGRAM_CHUNK_CHARS
+        parts.append(text[:cut].rstrip())
+        text = text[cut:].lstrip("\n")
+    parts.append(text)
+    return [p for p in parts if p.strip()] or [text]
+
+
 def post_webhook(
     name: str, url: str, message: str, event_data: dict, media: list | None = None
 ) -> bool:
@@ -94,13 +118,10 @@ def post_webhook(
             if not chat_id:
                 log.error("post_webhook: Telegram webhook URL needs ?chat_id=<id>")
                 return False
+            chunks = telegram_chunks(message)
             payload = {
                 "chat_id": chat_id,
-                "text": (
-                    message
-                    if len(message) <= TELEGRAM_MESSAGE_MAX_CHARS
-                    else f"{message[: TELEGRAM_MESSAGE_MAX_CHARS - 20]}... (truncated)"
-                ),
+                "text": chunks[0],
                 "disable_web_page_preview": True,
             }
             if thread_id:
@@ -152,6 +173,10 @@ def post_webhook(
         r = requests.post(url, json=payload)
         r.raise_for_status()
         log.debug(f"r.text: {r.text}")
+        if telegram is not None:
+            # the rest of a long push, in order, as messages of their own
+            for chunk in chunks[1:]:
+                requests.post(url, json={**payload, "text": chunk}).raise_for_status()
         if telegram is not None and media:
             _send_telegram_media(url, payload["chat_id"], payload.get("message_thread_id"), media)
         return True

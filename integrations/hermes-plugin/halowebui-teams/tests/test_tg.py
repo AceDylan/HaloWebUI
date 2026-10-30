@@ -545,3 +545,46 @@ def test_team_list_says_what_happens_now_and_how_long_is_left(linked):
     assert "等你批准" in lines[3] and "批准后约 9–13 分钟出结果" in lines[4]
     assert "比平时久，快好了" in lines[6]
     assert lines[-1].startswith("✅") and "└" not in lines[-1]
+
+
+def test_split_html_keeps_lines_whole_and_entities_unbroken():
+    import halowebui_teams.tg as telegram
+
+    text = "<b>标题</b>\n" + "\n".join("第%d行 " % i + "字" * 300 for i in range(30))
+    parts = telegram.split_html(text, 1000)
+    assert len(parts) > 3 and all(len(p) <= 1000 for p in parts)
+    assert "\n".join(parts) == text  # nothing lost, cut at line breaks
+    long_line = "a" * 998 + "&lt;b&gt;" + "c" * 10  # the 1000th character falls inside &lt;
+    cut = telegram.split_html(long_line, 1000)
+    assert cut[0] == "a" * 998 and cut[1].startswith("&lt;") and "".join(cut) == long_line
+
+
+def test_a_long_notice_goes_out_in_parts_and_a_reply_to_any_part_counts(tmp_path, monkeypatch):
+    import halowebui_teams.tg as telegram
+
+    monkeypatch.setenv("HALO_TEAMS_TG_STORE", str(tmp_path / "tg.json"))
+    sent = []
+
+    class Bot:
+        async def send_message(self, **kwargs):
+            sent.append(kwargs)
+            return SimpleNamespace(message_id=500 + len(sent))
+
+    monkeypatch.setitem(telegram._state, "app", SimpleNamespace(bot=Bot()))
+    text = "✅ <b>完成</b>\n\n" + "\n".join("结论 " + "字" * 1000 for _ in range(8))
+    message_id = asyncio.run(telegram.asend(TG_USER, text, [[("🌐 看", "url:https://halo.example/x")]], reply_to=9))
+    assert len(sent) == 3 and message_id == 503
+    assert sent[0]["reply_parameters"].message_id == 9 and "reply_parameters" not in sent[1]
+    assert sent[0]["reply_markup"] is None and sent[-1]["reply_markup"] is not None
+    assert all(len(s["text"]) <= telegram.CHUNK_CHARS for s in sent)
+    assert "".join(s["text"] for s in sent).count("字") == 8000
+    telegram.remember_message(TG_USER, message_id, {"team": "t1", "kind": "done"})
+    assert telegram.lookup(TG_USER, 501)["kind"] == "done" and telegram.lookup(TG_USER, 503)["kind"] == "done"
+
+
+def test_done_notice_carries_the_whole_conclusion(linked):
+    notify = linked.notify
+    team = {"team_id": "t1", "title": "长任务", "created_at": 0, "conclusion": {}}
+    body = "\n\n".join("第%d段：" % i + "内容" * 800 for i in range(6))
+    text, _buttons = notify.done_message(team, {"tasks": []}, body)
+    assert "第5段" in text and text.count("内容") == 4800

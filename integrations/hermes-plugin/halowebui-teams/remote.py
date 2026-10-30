@@ -34,8 +34,9 @@ PLATFORMS = ("telegram", "qqbot")
 KINDS = ("answer", "discuss", "auto")
 LABEL = {"answer": "精答", "discuss": "讨论", "auto": "自动分流", "team": "协作台"}
 PAGE = {"answer": "/answer", "discuss": "/discuss", "auto": "/auto", "team": "/teams"}
-# what a result message carries; the rest is on the page
-TEXT_LIMIT = {"telegram": 3500, "qqbot": 3000}
+# The whole result goes to the chat (the adapters split it into several messages); only beyond
+# this — a few thousand words — is the rest left to the page.
+TEXT_MAX_CHARS = 30000
 JOB_MAX_AGE = {"answer": 3 * 3600, "discuss": 3 * 3600, "auto": 3600, "team": 2 * 86400}
 # a team's result: the lead writes it (and checks it, draws its picture) after the last task
 CONCLUSION_WAIT = 15 * 60
@@ -437,17 +438,21 @@ def _tick_run(key: str, job: dict) -> None:
         _send_run_picture(job, state)
 
 
+def whole(body: str) -> str:
+    """The result as it is, cut only past TEXT_MAX_CHARS."""
+    if len(body) <= TEXT_MAX_CHARS:
+        return body
+    return body[:TEXT_MAX_CHARS].rstrip() + "\n\n…（太长了，后面的在网页看）"
+
+
 def result_message(job: dict, state: dict) -> str:
     label = LABEL[job["kind"]]
     title = clip(state.get("title") or job.get("question"), 60)
     by = f"（{state['by']}）" if state.get("by") else ""
     head = f"✅ {label}好了：**{title}**{by}"
     url = _url(state.get("url") or "")
-    tail = f"\n\n🌐 完整内容：{url}" if url else ""
-    body = str(state.get("text") or "").strip()
-    room = TEXT_LIMIT[job["platform"]] - len(head) - len(tail)
-    if len(body) > room:
-        body = body[: max(200, room - 20)].rstrip() + "\n\n…（后面的在网页看）"
+    tail = f"\n\n🌐 网页：{url}" if url else ""
+    body = whole(str(state.get("text") or "").strip())
     return f"{head}\n\n{body}{tail}"
 
 
@@ -564,9 +569,7 @@ def _team_done(key: str, job: dict, team: dict) -> None:
     head = f"✅ 协作好了：**{clip(team.get('title'), 60)}**"
     tail = f"\n\n🌐 {'阅读结论' if markdown else '工作台'}：{url}" if url else ""
     body = markdown.strip() or "结论没有写出来，各任务的结果请到工作台看。"
-    room = TEXT_LIMIT[job["platform"]] - len(head) - len(tail)
-    if len(body) > room:
-        body = body[: max(200, room - 20)].rstrip() + "\n\n…（后面的在网页看）"
+    body = whole(body)
     if not send(job, f"{head}\n\n{body}{tail}"):
         return
     drop_job(key)

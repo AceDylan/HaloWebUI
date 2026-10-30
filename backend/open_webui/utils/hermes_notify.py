@@ -50,13 +50,12 @@ _WHITESPACE_RUN_RE = re.compile(r"[ \t]+")
 
 # The away push of a runner report (usually into the same Telegram chat hermes talks in).
 # The report's "↩️ 直接回复…" is for this web chat: a reply to the push never reaches the
-# run. The push is cut near 1200 characters from the top, which for a QUESTION report
-# was all preamble and no question.
+# run. A QUESTION report's push leads with the question itself, what the run found under it.
 _REPLY_HINT_LINE_RE = re.compile(r"^↩️.*(?:\n|$)", re.MULTILINE)
 _QUOTA_FOOTER_LINE_RE = re.compile(r"^\*\*reclaude 额度\*\*.*(?:\n|$)", re.MULTILINE)
 _QUESTION_START_RE = re.compile(r"^\s*(?:\*\*)?QUESTION(?:\*\*)?\s*[:：]", re.MULTILINE)
 _QUESTION_END_RE = re.compile(r"\n\s*(?:---+|\*\*Obsidian 归档|\*\*runner 提示\*\*)")
-PUSH_QUESTION_MAX_CHARS = 900
+PUSH_QUESTION_MAX_CHARS = 8000
 PUSH_REPLY_HINT = "↩️ 要回复请打开上面的链接，在网页的这个对话里直接说（回复这条推送，它收不到）。"
 
 
@@ -389,20 +388,25 @@ def report_push_text(content: str) -> str:
     itself when the run is waiting for an answer, and where to answer."""
     text = _QUOTA_FOOTER_LINE_RE.sub("", _REPLY_HINT_LINE_RE.sub("", content or "")).strip()
     # The headline says who finished and how; the details line (model, session, cost, turns)
-    # only took room from the 1200 characters a push has.
+    # is for the page.
     header, body = split_report_header(text)
     if header:
         text = f"{header.splitlines()[0]}\n\n{body}".strip()
     questions = list(_QUESTION_START_RE.finditer(text))
     if not questions:
         return text
-    head = "\n".join(text.split("\n", 2)[:2]).strip()
-    question = text[questions[-1].start():].strip()
+    head, _, rest = text.partition("\n")
+    head = head.strip()
+    start = questions[-1].start()
+    question = text[start:].strip()
     end = _QUESTION_END_RE.search(question)
     question = question[: end.start()].strip() if end else question
     if len(question) > PUSH_QUESTION_MAX_CHARS:
         question = question[:PUSH_QUESTION_MAX_CHARS].rstrip() + "…"
-    return f"{head}\n\n{question}\n\n{PUSH_REPLY_HINT}"
+    # what the run found before it asked, under the question: no need to open the page to decide
+    preamble = text[len(head):start].strip()
+    detail = f"\n\n—— 说明 ——\n{preamble}" if preamble else ""
+    return f"{head}\n\n{question}{detail}\n\n{PUSH_REPLY_HINT}"
 
 
 async def show_notification_report(

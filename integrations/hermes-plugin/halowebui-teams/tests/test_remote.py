@@ -134,15 +134,21 @@ def test_a_finished_answer_comes_back_with_its_picture(remote, monkeypatch):
     assert remote.remote.jobs() == {}
 
 
-def test_a_long_result_is_cut_and_points_to_the_page(remote, monkeypatch):
+def test_a_long_result_goes_out_whole(remote, monkeypatch):
     remote.remote.put_job({"kind": "discuss", "id": "d1", "owner": OWNER, "platform": "qqbot", "chat_id": QQ_USER,
                            "question": "q", "at": time.time()})
-    monkeypatch.setattr(remote.link, "remote_state", lambda *a: {
-        "status": "done", "title": "长结论", "text": "字" * 20000, "url": "/discuss/d1"})
+    remote.remote.put_job({"kind": "answer", "id": "a9", "owner": OWNER, "platform": "telegram", "chat_id": TG_USER,
+                           "question": "q", "at": time.time()})
+    texts = {"d1": "字" * 20000, "a9": "长" * (remote.remote.TEXT_MAX_CHARS + 100)}
+    monkeypatch.setattr(remote.link, "remote_state", lambda owner, kind, run_id: {
+        "status": "done", "title": "长结论", "text": texts[run_id], "url": f"/{kind}/{run_id}"})
     remote.remote.tick()
-    text = remote.sent[0]["text"]
-    assert len(text) <= remote.remote.TEXT_LIMIT["qqbot"] + 50
-    assert "后面的在网页看" in text and "https://halo.example/discuss/d1" in text
+    qq = next(m["text"] for m in remote.sent if m["platform"] == "qqbot")
+    tg = next(m["text"] for m in remote.sent if m["platform"] == "telegram")
+    # the adapter splits it into messages; nothing is left to the page
+    assert "字" * 20000 in qq and "后面的在网页看" not in qq and "https://halo.example/discuss/d1" in qq
+    # only past the cap
+    assert "后面的在网页看" in tg and tg.count("长") <= remote.remote.TEXT_MAX_CHARS + 10
 
 
 def test_a_failed_run_is_told_once(remote, monkeypatch):

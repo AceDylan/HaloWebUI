@@ -162,9 +162,11 @@ ATTACHMENT_ONLY_RUN_INPUT = (
 # merged the stopped request into the next message and ran it again.
 STOPPED_REPLY_NOTE = "[用户在这里停止了这条回复，上面的请求没有做完]"
 
-# A completion webhook is read on a phone: no tool transcript, no artifact
-# source, and short enough that Telegram/Bark render it in one screen.
+# A webhook is read on a phone: no tool transcript, no artifact source. An
+# approval request stays short; a finished answer or report goes out whole
+# (Telegram gets it in several messages, utils/webhook.py) up to the second cap.
 WEBHOOK_CONTENT_MAX_CHARS = 1200
+WEBHOOK_SUMMARY_MAX_CHARS = 30000
 
 # Longest guidance accepted mid-run.
 STEER_TEXT_MAX_CHARS = 4000
@@ -854,8 +856,8 @@ def _webhook_summary(content: str) -> str:
     text = _DETAILS_BLOCK_RE.sub("", str(content or ""))
     text = strip_media_players(html_cards_as_text(text))
     text = _BLANK_RUN_RE.sub("\n\n", text).strip()
-    if len(text) > WEBHOOK_CONTENT_MAX_CHARS:
-        text = text[:WEBHOOK_CONTENT_MAX_CHARS].rstrip() + "\u2026"
+    if len(text) > WEBHOOK_SUMMARY_MAX_CHARS:
+        text = text[:WEBHOOK_SUMMARY_MAX_CHARS].rstrip() + "\u2026"
     return text
 
 

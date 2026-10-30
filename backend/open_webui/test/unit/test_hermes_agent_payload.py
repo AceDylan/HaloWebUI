@@ -494,8 +494,10 @@ def test_webhook_summary_drops_the_tool_transcript_and_caps_length():
     assert "And the risk note." in summary
     assert "\n\n\n" not in summary
 
-    long_summary = hermes_agent._webhook_summary("x" * 5000)
-    assert len(long_summary) == hermes_agent.WEBHOOK_CONTENT_MAX_CHARS + 1
+    # a long answer goes out whole (Telegram gets it in several messages); only past the cap is it cut
+    assert hermes_agent._webhook_summary("x" * 5000) == "x" * 5000
+    long_summary = hermes_agent._webhook_summary("x" * (hermes_agent.WEBHOOK_SUMMARY_MAX_CHARS + 50))
+    assert len(long_summary) == hermes_agent.WEBHOOK_SUMMARY_MAX_CHARS + 1
     assert long_summary.endswith("\u2026")
 
 

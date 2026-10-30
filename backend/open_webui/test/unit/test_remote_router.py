@@ -75,6 +75,12 @@ def test_start_each_kind_once_per_key(client, monkeypatch):
     assert started == [("answer", "天为什么是蓝的", None, None), ("discuss", "要不要换工作", None, None),
                        ("auto", "比较方案", "remote:qq:2:9", None)]
     assert client.post("/api/v1/remote/answer", json={"question": "   ", "key": "x"}, headers=H).status_code == 400
+    # a QQ key (openid + message id) is longer than a 分流's client_key may be
+    qq = "qqbot:" + "A" * 32 + ":ROBOT1.0_" + "b" * 100
+    assert client.post("/api/v1/remote/auto", json={"question": "长 key", "key": qq}, headers=H).status_code == 200
+    key = started[-1][2]
+    assert key.startswith("remote:sha256:") and len(key) <= 128
+    assert auto.CreateForm(question="q", client_key=key).client_key == key
 
 
 def _run(status="done", ended=None, **extra):

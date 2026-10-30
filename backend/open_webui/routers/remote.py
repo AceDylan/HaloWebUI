@@ -9,6 +9,7 @@ the user's Hermes connection, ``X-Halo-Owner`` = the user).
 """
 
 import asyncio
+import hashlib
 import logging
 import re
 import time
@@ -39,8 +40,15 @@ _FILE_URL_RE = re.compile(r"^/api/v1/files/([A-Za-z0-9-]{8,64})/content$")
 
 class StartForm(BaseModel):
     question: str = Field(min_length=1, max_length=8000)
-    # one per chat message (platform:chat:message), so a redelivered command starts nothing new
-    key: str = Field(min_length=1, max_length=128)
+    # one per chat message (platform:chat:message), so a redelivered command starts nothing new;
+    # QQ's openids and message ids alone come to ~120 characters
+    key: str = Field(min_length=1, max_length=512)
+
+
+def _auto_key(key: str) -> str:
+    """The 分流's client_key (≤128): the message key itself, or its digest when that is too long."""
+    out = f"remote:{key}"
+    return out if len(out) <= 128 else "remote:sha256:" + hashlib.sha256(key.encode()).hexdigest()
 
 
 def _remember(user_id: str, key: str, value: dict) -> None:
@@ -71,7 +79,7 @@ async def start(request: Request, kind: Kind, form: StartForm, caller=Depends(_a
         else:
             from open_webui.routers import auto
 
-            row = await auto.start(request, user, auto.CreateForm(question=question, client_key=f"remote:{form.key}"))
+            row = await auto.start(request, user, auto.CreateForm(question=question, client_key=_auto_key(form.key)))
             run_id = row["id"]
         out = {"kind": kind, "id": run_id}
         _remember(user.id, form.key, out)

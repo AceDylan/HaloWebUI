@@ -33,6 +33,7 @@ from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Optional
 
 from open_webui.env import BYPASS_MODEL_ACCESS_CONTROL, GLOBAL_LOG_LEVEL, SRC_LOG_LEVELS
+from open_webui.utils.vault_notes import notes_block, notes_tail
 from open_webui.utils.mode_chats import native_search_failed, sources_from_docs
 from open_webui.utils.mode_illustrate import picture_summary
 from open_webui.utils.model_identity import resolve_model_from_lookup
@@ -731,6 +732,7 @@ def build_turn_messages(
         _context_block(ask),
         f"User question:\n{question}",
         _files_block(ask, sees_images=sees, gets_images=gets_images),
+        notes_block(ask.get("notes") or []),
         _research_block(ask),
     ]
     if transcript:
@@ -802,6 +804,7 @@ def build_conclusion_messages(
         _context_block(ask),
         f"User question:\n{ask.get('question') or ''}",
         _files_block(ask, sees_images=moderator_sees, gets_images=gets_images),
+        notes_block(ask.get("notes") or []),
         _research_block(ask),
         f"Transcript:\n\n{transcript or '(no participant produced an answer)'}",
     ]
@@ -1119,8 +1122,8 @@ def stored_content(ask: dict, *, tail: str = "") -> str:
     from open_webui.utils.mode_illustrate import with_picture
 
     content = with_picture(((ask.get("conclusion") or {}).get("content") or "").strip(), ask.get("illustration"))
-    if content and tail:
-        content += tail
+    if content:
+        content += tail + notes_tail(ask.get("notes") or [])
     return with_card(content, ask.get("card"))
 
 
@@ -1261,9 +1264,11 @@ def new_ask(
     files: Optional[list[dict]] = None,
     context: Optional[dict] = None,
     origin: Optional[dict] = None,
+    notes: Optional[list[dict]] = None,
 ) -> dict:
     """``origin``: the chat whose message started this discussion (派发方式「讨论」,
-    utils/mode_dispatch.py): ``{"chatId", "messageId"}`` — the conclusion goes back there."""
+    utils/mode_dispatch.py): ``{"chatId", "messageId"}`` — the conclusion goes back there.
+    ``notes``: the related notes of the user's knowledge base (utils/vault_notes.related_notes)."""
     total_rounds = setup["rounds"] if rounds is None else max(1, min(int(rounds), MAX_ROUNDS))
     if setup["mode"] == "review":
         total_rounds = 2
@@ -1288,6 +1293,7 @@ def new_ask(
         "conclusion": {"status": "waiting", "content": "", "model": setup["moderator"]["model"], "name": setup["moderator"]["name"]},
         "previousConclusions": [],
         "research": {"status": "waiting", "queries": [], "sources": []} if setup.get("research") else None,
+        "notes": deepcopy(notes or []),
         "files": files or [],
         "context": context,
         "startedAt": now_ms(),

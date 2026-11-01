@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 from open_webui.models.auto_routes import AutoRoutes
 from open_webui.models.chats import Chats
 from open_webui.models.files import Files
+from open_webui.utils.vault_notes import with_goal_notes
 from open_webui.utils.auth import get_verified_user
 from open_webui.utils.auto_routing import LABELS, PATHS, normalize_selection, selection_messages, preferred_routing_model
 
@@ -176,7 +177,8 @@ async def select(request, user, form, file_info):
         except Exception:
             log.info("automatic selection unavailable; using answer")
             raw = {"mode": "answer", "reason": "自动判断暂不可用，已按默认方式交给精答", "degraded": "auto"}
-    if isinstance(raw, dict) and raw.get("mode") == "team" and teams_available:
+    # needs_tools sends 精答/讨论 to 协作台 too (normalize_selection): Hermes must be there for it
+    if isinstance(raw, dict) and (raw.get("mode") == "team" or raw.get("needs_tools") is True) and teams_available:
         try:
             await hermes_target(request, user)
         except TeamsError:
@@ -206,7 +208,7 @@ async def select(request, user, form, file_info):
 async def dispatch(request, user, row, form, decision, models, ambiguous, bases, planner):
     from open_webui.routers import answers, discussions, teams
     from open_webui.utils import discussion_room as room
-    from open_webui.utils.agent_teams import AssistantAccess, GOAL_MAX_CHARS, hermes_target, input_files
+    from open_webui.utils.agent_teams import AssistantAccess, GOAL_MAX_CHARS, default_title, hermes_target, input_files
 
     mode = decision["mode"]
     origin = row["data"].get("origin")
@@ -237,17 +239,18 @@ async def dispatch(request, user, row, form, decision, models, ambiguous, bases,
             goal += "\n\n用户约束：不要联网检索，只使用提供的资料和工作区。"
         if len(goal) > GOAL_MAX_CHARS:
             raise HTTPException(400, "协作目标与背景合计过长，请精简到 8000 字以内后重试")
+        goal = with_goal_notes(goal, user, form.question, GOAL_MAX_CHARS)
         if origin:
             # A chat dispatch already owns its reply; attach() would insert a second card.
             from open_webui.models.agent_teams import AgentTeams
-            from open_webui.utils.agent_teams import default_title, start_planning
+            from open_webui.utils.agent_teams import start_planning
             team = AgentTeams.insert(user.id, goal, origin["chatId"], default_title(form.question),
                 meta={"auto_start": data["auto_start"], "from_chat": True, "inputs": inputs})
             bind(team.id)
             start_planning(team, target, access=AssistantAccess(request, user))
         else:
-            await teams._start(request, user, goal, target, inputs=inputs, auto_start=data["auto_start"],
-                access=AssistantAccess(request, user), on_created=bind)
+            await teams._start(request, user, goal, target, title=default_title(form.question), inputs=inputs,
+                auto_start=data["auto_start"], access=AssistantAccess(request, user), on_created=bind)
     else:
         loaded = await asyncio.to_thread(discussions._load_files, form.files, user)
         web = form.research and bool(getattr(request.app.state.config, "ENABLE_WEB_SEARCH", True))

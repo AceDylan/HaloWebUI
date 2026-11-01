@@ -111,6 +111,8 @@ export type ModeCard = {
 	endedAt?: number;
 };
 
+export type VaultNote = { n: number; path: string; title: string; excerpt?: string };
+
 export type DiscussResearch = {
 	/** skipped: the query writer found nothing a search could help with */
 	status: 'waiting' | 'running' | 'done' | 'empty' | 'error' | 'stopped' | 'skipped';
@@ -204,6 +206,8 @@ export type DiscussAsk = {
 	conclusion: DiscussConclusion;
 	previousConclusions: { content: string; endedAt?: number | null }[];
 	research?: DiscussResearch | null;
+	/** related notes of the user's knowledge base (Obsidian), read with the question */
+	notes?: VaultNote[];
 	files?: DiscussFile[];
 	/** The conversation the discussion was started from, given to every seat as background. */
 	context?: DiscussContext | null;

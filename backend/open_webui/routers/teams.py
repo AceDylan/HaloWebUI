@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field
 from open_webui.models.agent_teams import AgentTeams
 from open_webui.models.chats import Chats
 from open_webui.models.users import Users
+from open_webui.utils.vault_notes import with_goal_notes
 from open_webui.utils.agent_teams import (
     ENABLE_AGENT_TEAMS,
     AssistantAccess,
@@ -301,15 +302,18 @@ async def create_team(request: Request, form: CreateTeamForm, user=Depends(get_v
     inputs = input_files(form.files, user)
     if form.files and len(inputs) < len(set(form.files)):
         raise HTTPException(status_code=404, detail="有附件找不到（没上传成功，或不是你的文件）")
+    # the related notes of the user's knowledge base: where Hermes can read them
+    title = default_title(goal)
+    goal = with_goal_notes(goal, user, goal, GOAL_MAX_CHARS)
     return public_team(await _start(request, user, goal, target, chat_id=chat_id, lead_model=form.lead_model,
-                                    project=form.project, auto_start=form.auto_start, inputs=inputs,
+                                    title=title, project=form.project, auto_start=form.auto_start, inputs=inputs,
                                     assistants=preferred_refs(form.assistants), access=AssistantAccess(request, user)))
 
 
 async def _start(request: Request, user, goal: str, target, *, chat_id: Optional[str] = None,
                  lead_model: Optional[str] = None, origin: Optional[dict] = None, project: Optional[str] = None,
                  auto_start: bool = False, inputs: Optional[list] = None, assistants: Optional[list] = None,
-                 access=None, on_created=None):
+                 access=None, on_created=None, title: Optional[str] = None):
     meta: dict = {}
     if inputs:
         meta["inputs"] = inputs
@@ -323,7 +327,7 @@ async def _start(request: Request, user, goal: str, target, *, chat_id: Optional
         meta["project"] = project.strip()
     if origin:
         meta["origin"] = origin
-    team = AgentTeams.insert(user.id, goal, chat_id, default_title(goal), meta=meta or None)
+    team = AgentTeams.insert(user.id, goal, chat_id, title or default_title(goal), meta=meta or None)
     if on_created:
         on_created(team.id)
     # in the chat history from the start: its own chat, or the card in the chat it came from

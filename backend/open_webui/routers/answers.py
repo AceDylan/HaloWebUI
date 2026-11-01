@@ -15,6 +15,7 @@ from pydantic import BaseModel
 
 from open_webui.models.chats import DISPATCHED_FROM_META_KEY, ChatForm, Chats
 from open_webui.socket.main import get_event_emitter
+from open_webui.utils.vault_notes import notes_for
 from open_webui.utils.auth import get_verified_user
 from open_webui.utils import answer_desk as desk
 from open_webui.utils import assistant_library as lib
@@ -583,6 +584,7 @@ def _open(
         context=context,
         origin=origin,
         files=files,
+        notes=notes_for(user, question),
     )
     if chosen.startswith(("model:", "builtin:")):
         run["chosen"] = chosen

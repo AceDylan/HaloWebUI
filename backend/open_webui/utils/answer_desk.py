@@ -40,6 +40,7 @@ from open_webui.utils.discussion_room import (
 )
 from open_webui.utils import assistant_library as lib
 from open_webui.utils.mode_chats import native_search_failed, sources_from_docs
+from open_webui.utils.vault_notes import notes_block, notes_tail
 from open_webui.utils.mode_illustrate import picture_summary
 
 log = logging.getLogger(__name__)
@@ -287,9 +288,11 @@ def new_run(
     context: Optional[dict] = None,
     origin: Optional[dict] = None,
     files: Optional[list[dict]] = None,
+    notes: Optional[list[dict]] = None,
 ) -> dict:
     """``origin``: the chat whose message became this run (派发方式「精答」, utils/mode_dispatch.py):
-    ``{"chatId", "messageId"}`` — the answer goes back there when it is done."""
+    ``{"chatId", "messageId"}`` — the answer goes back there when it is done. ``notes``: the
+    related notes of the user's knowledge base (utils/vault_notes.related_notes)."""
     run = {
         "v": 1,
         "id": message_id,
@@ -304,6 +307,7 @@ def new_run(
         "plan": {"status": "running", "startedAt": now_ms(), "endedAt": None},
         "assistant": None,
         "research": None,
+        "notes": deepcopy(notes or []),
         "answer": {"status": "waiting", "content": "", "thinking": False, "usage": {}, "startedAt": None, "endedAt": None, "error": None, "retry": None},
         "startedAt": now_ms(),
         "endedAt": None,
@@ -394,6 +398,9 @@ def answer_messages(run: dict, browse: bool = False) -> list[dict]:
             f"Background: the user's earlier conversation{title}, which led to this question. Use it to "
             f"understand what they need; answer the question itself.\n\n{context['text']}\n\n---\nQuestion: {content}"
         )
+    notes = notes_block(run.get("notes") or [])
+    if notes:
+        content = f"{content}\n\n---\n{notes}"
     sources = (run.get("research") or {}).get("sources") or []
     if sources:
         content = f"{content}\n\n---\n{research_block(sources)}"
@@ -410,13 +417,13 @@ def stored_content(run: dict) -> str:
     """The answer as the chat keeps it: with its picture (结论配图) and its sources listed, since
     the chat view has no panel, then its card (结论卡片)."""
     from open_webui.utils.mode_card import with_card
+    from open_webui.utils.mode_dispatch import sources_tail
     from open_webui.utils.mode_illustrate import with_picture
 
     content = with_picture(((run.get("answer") or {}).get("content") or "").strip(), run.get("illustration"))
     sources = (run.get("research") or {}).get("sources") or []
-    if content and sources:
-        lines = [f"{s['n']}. [{s.get('title') or s['url']}]({s['url']})" for s in sources]
-        content += "\n\n---\n**资料来源**\n\n" + "\n".join(lines)
+    if content:
+        content += sources_tail(sources) + notes_tail(run.get("notes") or [])
     return with_card(content, run.get("card"))
 
 

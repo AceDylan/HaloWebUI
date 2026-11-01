@@ -520,3 +520,33 @@ def test_read_only_team_carries_the_constraint_and_says_so_in_the_chat(env, monk
     asyncio.run(run())
     assert api._chosen_reply("team", "要看仓库", read_only=True).startswith("🔀 自动分流交给了协作台（只读）：要看仓库")
     assert api._chosen_reply("answer", "讨论不可用", degraded="discuss").startswith("🔀 自动分流临时改用精答：讨论不可用")
+
+
+def test_real_files_go_to_a_read_only_team_unless_the_mode_is_named():
+    raw = {"mode": "answer", "reason": "咨询", "needs_tools": True, "execution_requested": False}
+    out = normalize_selection(raw, question="当前 halowebui 自动分流有优化空间吗", teams_available=True, discussion_available=True)
+    assert out["mode"] == "team" and out["read_only"] is True and "精答看不到" in out["reason"]
+    out = normalize_selection({**raw, "mode": "discuss"}, question="看看仓库里的分流代码怎么改", teams_available=True,
+                              discussion_available=True)
+    assert out["mode"] == "team" and out["read_only"] is True
+    # the user named the mode, or no 协作 to send it to: it stays
+    assert normalize_selection(raw, question="用精答说说 halowebui 的分流", teams_available=True,
+                               discussion_available=True)["mode"] == "answer"
+    assert normalize_selection({**raw, "mode": "discuss"}, question="讨论下仓库的分流架构", teams_available=True,
+                               discussion_available=True)["mode"] == "discuss"
+    assert normalize_selection(raw, question="分流有优化空间吗", teams_available=False,
+                               discussion_available=True)["mode"] == "answer"
+    # general knowledge stays with 精答
+    assert normalize_selection({**raw, "needs_tools": False}, question="Redis 和 Memcached 区别", teams_available=True,
+                               discussion_available=True)["mode"] == "answer"
+
+
+def test_an_unsure_decision_model_leaves_the_choice_to_the_classifier():
+    from open_webui.utils.auto_routing import selection_from_answers
+    from open_webui.utils.decision_model import DecisionError, _brief
+
+    with pytest.raises(DecisionError) as unsure:
+        selection_from_answers({"mode": {"choice": "answer", "confidence": 0.18}, "tools": {"noul": 0.9}}, "", "jev-chat")
+    assert _brief(unsure.value) == "选精答的把握只有 18%，改由分类模型判断"
+    sure = selection_from_answers({"mode": {"choice": "answer", "confidence": 0.8}, "tools": {"noul": 0.1}}, "", "jev-chat")
+    assert sure["mode"] == "answer" and "把握 80%" in sure["reason"]

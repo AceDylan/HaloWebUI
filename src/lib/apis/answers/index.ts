@@ -10,6 +10,7 @@ import type {
 	DispatchOrigin,
 	ModeCard,
 	ModeIllustration,
+	VaultNote,
 	ReportBack
 } from '$lib/apis/discussions';
 
@@ -84,6 +85,8 @@ export type AnswerRun = {
 	plan: AnswerPlan;
 	assistant: AnswerAssistant | null;
 	research: DiscussResearch | null;
+	/** related notes of the user's knowledge base (Obsidian), read with the question */
+	notes?: VaultNote[];
 	answer: AnswerPart;
 	startedAt: number;
 	endedAt?: number | null;

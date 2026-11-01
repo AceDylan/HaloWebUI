@@ -1078,3 +1078,14 @@ def test_the_check_is_on_unless_turned_off(monkeypatch):
     assert room.signoff_enabled() is True
     monkeypatch.setenv(room.SIGNOFF_ENV, "0")
     assert room.signoff_enabled() is False
+
+
+def test_every_seat_and_the_moderator_read_the_related_notes():
+    setup = _setup()
+    notes = [{"n": 1, "path": "项目/数据库.md", "title": "数据库", "excerpt": "我们用 Postgres 16。"}]
+    ask = room.new_ask(question="如何选数据库？", setup=setup, user_message_id="u", message_id="m", notes=notes)
+    turn = room.build_turn_messages(setup=setup, ask=ask, seat=setup["seats"][0], round_index=1, history=[])[1]["content"]
+    assert "《数据库》" in turn and "我们用 Postgres 16。" in turn
+    conclusion = room.build_conclusion_messages(setup=setup, ask=ask, history=[])[1]["content"]
+    assert "我们用 Postgres 16。" in conclusion
+    assert "knowledge base" not in room.build_turn_messages(setup=setup, ask=_ask(setup), seat=setup["seats"][0], round_index=1, history=[])[1]["content"]

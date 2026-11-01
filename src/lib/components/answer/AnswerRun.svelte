@@ -18,6 +18,7 @@
 	import MenuLines from '$lib/components/icons/MenuLines.svelte';
 	import { now, timeAgo } from '$lib/components/teams/clock';
 	import ResearchPanel from '$lib/components/discuss/ResearchPanel.svelte';
+	import VaultNotesPanel from '$lib/components/discuss/VaultNotesPanel.svelte';
 	import ConclusionPicture from '$lib/components/discuss/ConclusionPicture.svelte';
 	import ConclusionBody from '$lib/components/discuss/ConclusionBody.svelte';
 	import { cardDesigning, linkCitations, modelById, retryText, seconds, tokens } from '$lib/components/discuss/model';
@@ -404,6 +405,7 @@
 					</section>
 				{/if}
 
+				<VaultNotesPanel notes={run.notes ?? []} />
 				{#if run.research}
 					<ResearchPanel research={run.research} />
 				{/if}

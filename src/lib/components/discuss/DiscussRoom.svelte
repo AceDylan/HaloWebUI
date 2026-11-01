@@ -31,6 +31,7 @@
 	import { now, timeAgo } from '$lib/components/teams/clock';
 	import ConclusionCard from './ConclusionCard.svelte';
 	import ResearchPanel from './ResearchPanel.svelte';
+	import VaultNotesPanel from './VaultNotesPanel.svelte';
 	import SeatAssistants from './SeatAssistants.svelte';
 	import SeatAvatar from './SeatAvatar.svelte';
 	import TurnCard from './TurnCard.svelte';
@@ -483,6 +484,7 @@
 							<SeatAssistants {ask} undoable={ai === asks.length - 1 && !liveNow} {busy} on:undo={(e) => undoAssistant(e.detail)} />
 						</header>
 
+						<VaultNotesPanel notes={ask.notes ?? []} />
 						{#if ask.research}
 							<ResearchPanel research={ask.research} />
 						{/if}

@@ -144,6 +144,18 @@ describe('AnswerRun', () => {
 		expect(target.querySelector('[data-answer-files] a')!.getAttribute('href')).toContain('/files/doc/content');
 	});
 
+	it('shows the notes of the knowledge base it read with the question', async () => {
+		api.getAnswer.mockResolvedValue(
+			detail(created({ notes: [{ n: 1, path: '项目/租房.md', title: '租房', excerpt: '押金按月租两个月。' }] }))
+		);
+		const target = await mount();
+		await until(() => !!target.querySelector('[data-vault-notes]'));
+		expect(text(target, '[data-vault-notes]')).toContain('笔记库 · 1 篇');
+		(target.querySelector('[data-vault-notes-toggle]') as HTMLButtonElement).click();
+		await until(() => !!target.querySelector('[data-vault-notes-list]'));
+		expect(text(target, '[data-vault-notes-list]')).toContain('押金按月租两个月。');
+	});
+
 	it('shows the dispatcher at work, then the new assistant, then streams its answer', async () => {
 		api.getAnswer.mockResolvedValue(detail(routing()));
 		const target = await mount();

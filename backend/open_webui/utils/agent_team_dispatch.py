@@ -14,6 +14,7 @@ from typing import Any
 
 from open_webui.models.agent_teams import AgentTeams
 from open_webui.models.chats import Chats
+from open_webui.utils.vault_notes import with_goal_notes
 from open_webui.utils.agent_teams import (
     ENABLE_AGENT_TEAMS,
     GOAL_MAX_CHARS,
@@ -117,7 +118,8 @@ async def run_team_dispatch(request, form_data: dict, user, metadata: dict, mode
                 meta: dict = {"auto_start": True, "from_chat": True}
                 if inputs:
                     meta["inputs"] = inputs
-                team = AgentTeams.insert(user.id, goal or "处理附带的文件", chat_id, title, meta=meta)
+                full_goal = with_goal_notes(goal or "处理附带的文件", user, ask, GOAL_MAX_CHARS)
+                team = AgentTeams.insert(user.id, full_goal, chat_id, title, meta=meta)
                 start_planning(team, target, access=AssistantAccess(request, user))
             except TeamsError as exc:
                 error = exc.detail

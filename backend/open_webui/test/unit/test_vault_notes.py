@@ -1,6 +1,7 @@
 """Obsidian 笔记 in the composer: search, read, path safety, and the host paths hermes gets."""
 
 import os
+from types import SimpleNamespace
 
 import pytest
 
@@ -82,3 +83,74 @@ def test_hermes_is_told_where_attached_notes_live(monkeypatch):
     both = _attachment_note([("a.pdf", "/data/a.pdf")], notes)
     assert both.index("[附件原文件]") < both.index("[Obsidian 笔记]")
     assert _attachment_note([], []) == ""
+
+
+# --- 精答 / 讨论 / 协作: related notes --------------------------------------------------------
+
+
+@pytest.fixture
+def kb(tmp_path, monkeypatch):
+    root = tmp_path / "kb"
+    (root / "项目" / "HaloWebUI").mkdir(parents=True)
+    (root / "运维").mkdir()
+    (root / "项目" / "HaloWebUI" / "自动分流与共享标题.md").write_text(
+        "---\nkind: fix\n---\n# 自动分流\n\n## 结论\n\n自动分流按哪种方式提升结果选择精答、讨论或协作。\n\n"
+        "## 回滚\n\n部署上一镜像。\n"
+    )
+    (root / "项目" / "HaloWebUI" / "讨论台.md").write_text("讨论台多个模型讨论，主持人写结论。HaloWebUI 的模式之一。")
+    (root / "运维" / "多 VPS 管理清单.md").write_text("hk vps 的 ssh 端口 61234。\n\n其它机器同样。")
+    for i in range(6):
+        (root / f"杂项{i}.md").write_text(f"第 {i} 篇无关的记录：今天天气不错，HaloWebUI 照常运行。")
+    monkeypatch.setenv(vault_notes.VAULT_DIR_ENV, str(root))
+    monkeypatch.setenv("HUB_VAULT_ROOT", "/host/vault")
+    monkeypatch.delenv(vault_notes.MODES_ENV, raising=False)
+    vault_notes._text_cache.clear()
+    return root
+
+
+def test_related_notes_find_the_subject_not_stray_words(kb):
+    hits = vault_notes.related_notes("当前 HaloWebUI 自动分流有优化空间吗")
+    assert hits[0]["path"] == "项目/HaloWebUI/自动分流与共享标题.md"
+    assert hits[0]["n"] == 1 and hits[0]["title"] == "自动分流与共享标题"
+    assert "精答、讨论或协作" in hits[0]["excerpt"] and "kind: fix" not in hits[0]["excerpt"]
+    assert hits[0]["hostPath"] == "/host/vault/项目/HaloWebUI/自动分流与共享标题.md"
+    assert [h["path"] for h in vault_notes.related_notes("hk vps 的 ssh 端口是多少")] == ["运维/多 VPS 管理清单.md"]
+    # general questions share a stray pair of characters with some note at most
+    assert vault_notes.related_notes("人为什么需要吃饭") == []
+    assert vault_notes.related_notes("帮我写一首关于秋天的诗") == []
+    assert vault_notes.related_notes("") == []
+
+
+def test_notes_are_for_admins_and_can_be_turned_off(kb, monkeypatch):
+    admin, member = SimpleNamespace(role="admin"), SimpleNamespace(role="user")
+    assert vault_notes.notes_for(admin, "自动分流怎么选")
+    assert vault_notes.notes_for(member, "自动分流怎么选") == []
+    monkeypatch.setenv(vault_notes.MODES_ENV, "0")
+    assert vault_notes.notes_for(admin, "自动分流怎么选") == []
+    monkeypatch.setenv(vault_notes.VAULT_DIR_ENV, str(kb / "nope"))
+    monkeypatch.delenv(vault_notes.MODES_ENV)
+    assert vault_notes.notes_for(admin, "自动分流怎么选") == []
+
+
+def test_notes_reach_the_answer_the_discussion_and_the_team(kb):
+    from open_webui.utils import answer_desk as desk
+    from open_webui.utils import discussion_room as room
+
+    notes = vault_notes.related_notes("自动分流怎么选")
+    run = {"question": "自动分流怎么选", "assistant": {"saved": True}, "notes": notes,
+           "answer": {"content": "按结果选。"}}
+    prompt = desk.answer_messages(run)[-1]["content"]
+    assert "user's own knowledge base" in prompt and "《自动分流与共享标题》" in prompt
+    stored = desk.stored_content(run)
+    assert "**笔记库参考**" in stored and "`项目/HaloWebUI/自动分流与共享标题.md`" in stored
+    assert "笔记库参考" not in desk.stored_content({**run, "notes": []})
+
+    ask = {"question": "q", "notes": notes, "conclusion": {"content": "结论"}}
+    assert "笔记库参考" in room.stored_content(ask)
+    assert room.stored_content({**ask, "conclusion": {"content": ""}}) == ""
+
+    admin = SimpleNamespace(role="admin")
+    goal = vault_notes.with_goal_notes("优化自动分流", admin, "自动分流怎么选", 8000)
+    assert goal.startswith("优化自动分流\n\n笔记库里可能相关的笔记")
+    assert "/host/vault/项目/HaloWebUI/自动分流与共享标题.md" in goal
+    assert vault_notes.with_goal_notes("优化自动分流", admin, "自动分流怎么选", 20) == "优化自动分流"

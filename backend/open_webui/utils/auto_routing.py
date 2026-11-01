@@ -6,6 +6,11 @@ import re
 MODES = {"answer", "discuss", "team"}
 LABELS = {"answer": "精答", "discuss": "讨论", "team": "协作台"}
 PATHS = {"answer": "/answer/", "discuss": "/discuss/", "team": "/teams/"}
+# the user naming 精答 / 讨论 in the question keeps it there even when real files would help
+NAMED = {"answer": re.compile(r"精答"), "discuss": re.compile(r"讨论")}
+# 辅助决策: a pick it is less sure of than this goes to the classifier instead (a 18% 精答 was
+# a guess between modes, not a choice)
+MIN_DECISION_CONFIDENCE = 0.5
 # Constraints that forbid doing the work at all. Forbidding one action ("不要部署", "不要修改数据库",
 # "don't deploy") is a constraint on the work, passed along with it, not a request for analysis only.
 _END = r"(?=$|[，。,.；;！!？?、\s）)])"
@@ -105,6 +110,11 @@ def normalize_selection(raw, *, question, context="", teams_available=False, dis
     tools = raw.get("needs_tools") is True
     execution = raw.get("execution_requested") is True and not analysis_only(question, context)
     out = {"mode": mode, "reason": reason, "execution_requested": execution, "needs_tools": tools}
+    if mode != "team" and tools and teams_available and not NAMED[mode].search(question or ""):
+        # 精答 and 讨论 see no repository, file or system: what must be checked there goes to 协作台
+        out.update(mode="team", reason=f"要查看真实的仓库、文件或系统才能如实回答，{LABELS[mode]}看不到，改由协作台"
+                   + ("" if execution else "只读查看"))
+        mode = "team"
     if mode == "team" and not (execution or tools):
         out.update(mode="answer", reason="不需要动手，也不用查看真实文件，交给精答")
     elif mode == "team" and not teams_available:
@@ -170,8 +180,12 @@ def decision_request(question, context, files, *, teams_available, discussion_av
 def selection_from_answers(answers, reason, model_name):
     """The decision's answers as the classifier's raw selection (normalize_selection checks it)."""
     mode = answers["mode"]["choice"]
+    confidence = answers["mode"].get("confidence")
+    if confidence is not None and confidence < MIN_DECISION_CONFIDENCE:
+        from open_webui.utils.decision_model import DecisionError
+
+        raise DecisionError(f"选{LABELS[mode]}的把握只有 {confidence * 100:.0f}%，改由分类模型判断")
     if not reason:
-        confidence = answers["mode"].get("confidence")
         reason = f"{model_name} 判断交给{LABELS[mode]}" + (f"（把握 {confidence * 100:.0f}%）" if confidence is not None else "")
     execution = "execution" in answers and answers["execution"]["noul"] >= 0.5
     tools = "tools" in answers and answers["tools"]["noul"] >= 0.5

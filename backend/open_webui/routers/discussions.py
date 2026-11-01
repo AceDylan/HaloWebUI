@@ -16,6 +16,7 @@ from pydantic import BaseModel
 
 from open_webui.models.chats import DISPATCHED_FROM_META_KEY, ChatForm, Chats
 from open_webui.socket.main import get_event_emitter
+from open_webui.utils.vault_notes import notes_for
 from open_webui.utils.access_control import has_permission
 from open_webui.utils.auth import get_verified_user
 from open_webui.utils import discussion_room as room
@@ -1041,6 +1042,7 @@ def _open(
         files=files,
         context=context,
         origin=origin,
+        notes=notes_for(user, question),
     )
     messages = {
         user_message_id: _user_message(user_message_id, question, None, assistant_message_id, ask["moderator"]["model"], files),
@@ -1247,6 +1249,7 @@ async def ask_again(request: Request, chat_id: str, form: AskForm, user=Depends(
         message_id=assistant_message_id,
         rounds=form.rounds,
         files=files,
+        notes=notes_for(user, question),
     )
     history = _history(chat)
     chat_payload = dict(chat.chat)

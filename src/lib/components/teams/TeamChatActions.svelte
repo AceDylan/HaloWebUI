@@ -60,6 +60,8 @@
 	let models: HermesModel[] = [];
 	let metaState: '' | 'loading' | 'ready' | 'error' = '';
 	let metaError = '';
+	// bumped when a change is refused: the selects are drawn again from the plan
+	let revision = 0;
 
 	$: plan = team.plan ?? null;
 	$: reviewing = !!plan && ['plan_ready', 'start_failed'].includes(team.status);
@@ -127,7 +129,7 @@
 	};
 	// a refused change puts the selects back to what the plan says
 	const edit = async (key: string, change: Parameters<typeof editTeamPlan>[2][number]) => {
-		if (!(await act(key, () => editTeamPlan(localStorage.token, teamId, [change])))) team = team;
+		if (!(await act(key, () => editTeamPlan(localStorage.token, teamId, [change])))) revision += 1;
 	};
 	const setRunner = (m: TeamPlanMember, value: string, source: 'user' | 'auto' = 'user') =>
 		edit(`runner:${m.name}`, {
@@ -302,7 +304,8 @@
 						>
 					</p>
 				{/if}
-				<ul class="flex list-none flex-col gap-2 p-0">
+				{#key revision}
+					<ul class="flex list-none flex-col gap-2 p-0">
 					{#each members as m (m.name)}
 						{@const runner = memberRunner(m)}
 						{@const onHermes = runsOnHermes(m, runner.actual)}
@@ -381,7 +384,8 @@
 							{/if}
 						</li>
 					{/each}
-				</ul>
+					</ul>
+				{/key}
 				<p class="text-[11px] text-gray-400">
 					改完立即生效，批准时按这里的选择开始；执行者不可用时会沿兜底链往后换。
 				</p>

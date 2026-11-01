@@ -537,9 +537,20 @@ describe('TeamChatCard (派发方式「协作台」 in a chat)', () => {
 			'codex · 推荐', 'Hermes 代理', 'agy（不可用）'
 		]);
 
-		api.getTeam.mockResolvedValue(plan('gpt-chat', 'user'));
+		// a refused change: the select shows the plan's model again
+		api.editTeamPlan.mockRejectedValueOnce(new Error('计划已经开始了'));
 		model.value = 'gpt-chat';
 		model.dispatchEvent(new (window as any).Event('change'));
+		await sleep(30);
+		const again = target.querySelector('[data-team-chat-model="writer"]') as any;
+		expect(again).not.toBe(model);
+		const selected = Array.from(again.querySelectorAll('option')).find((o: any) => o.selected) as any;
+		expect(selected.value).toBe('deepseek-chat');
+
+		api.getTeam.mockResolvedValue(plan('gpt-chat', 'user'));
+		const picked = target.querySelector('[data-team-chat-model="writer"]') as any;
+		picked.value = 'gpt-chat';
+		picked.dispatchEvent(new (window as any).Event('change'));
 		await sleep(30);
 		expect(api.editTeamPlan).toHaveBeenLastCalledWith('tok', 'team-m', [
 			{ name: 'writer', model: 'gpt-chat', model_source: 'user' }
@@ -551,8 +562,9 @@ describe('TeamChatCard (派发方式「协作台」 in a chat)', () => {
 			{ name: 'writer', model_source: 'auto' }
 		]);
 
-		runner.value = 'hermes';
-		runner.dispatchEvent(new (window as any).Event('change'));
+		const runnerNow = target.querySelector('[data-team-chat-runner="coder"]') as any;
+		runnerNow.value = 'hermes';
+		runnerNow.dispatchEvent(new (window as any).Event('change'));
 		await sleep(20);
 		expect(api.editTeamPlan).toHaveBeenLastCalledWith('tok', 'team-m', [
 			{ name: 'coder', executor: 'hermes', source: 'user' }

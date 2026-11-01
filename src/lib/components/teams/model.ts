@@ -6,7 +6,7 @@
  * stream up to that point (each event carries the task status after it, computed by Hermes).
  * The live view additionally trusts Hermes' authoritative snapshot for the current state.
  */
-import type { LiveTask, TeamEvent, TeamExecutor } from '$lib/apis/teams';
+import type { HermesModel, LiveTask, TeamEvent, TeamExecutor } from '$lib/apis/teams';
 
 export type TaskState = { status: string; sub_status: string };
 
@@ -764,6 +764,16 @@ export const runnerLabel = (name: string | null | undefined) =>
  */
 export const offChainRunners = <T extends { name: string }>(order: string[], runners: T[]): T[] =>
 	order.length ? runners.filter((r) => !order.includes(r.name)) : [];
+
+/** A member's model matters when Hermes does its work: its own runner, or where it fell back to. */
+export const runsOnHermes = (m: { executor?: string }, actual: string | null | undefined) =>
+	m.executor === 'hermes' || actual === 'hermes';
+
+/** The models a member can be given: Hermes' own, plus the member's when Hermes no longer lists it. */
+export const memberModelOptions = (m: { model?: string }, models: HermesModel[]): HermesModel[] =>
+	m.model && !models.some((o) => o.model === m.model)
+		? [...models, { model: m.model, default: false, hint: '' }]
+		: models;
 
 // --- stage: what happens now and how long it may still take --------------------------------------
 

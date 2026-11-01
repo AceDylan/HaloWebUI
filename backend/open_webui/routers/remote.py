@@ -44,6 +44,8 @@ class StartForm(BaseModel):
     # one per chat message (platform:chat:message), so a redelivered command starts nothing new;
     # QQ's openids and message ids alone come to ~120 characters
     key: str = Field(min_length=1, max_length=512)
+    # the Telegram / QQ chat the command came from: a team 自动分流 starts sends its plan there
+    origin: dict = Field(default_factory=dict)
 
 
 def _auto_key(key: str) -> str:
@@ -96,8 +98,10 @@ async def start(request: Request, kind: Kind, form: StartForm, caller=Depends(_a
             run_id = await discussions.open_for_chat(request, user, question=question, context=None, origin=None)
         else:
             from open_webui.routers import auto
+            from open_webui.routers.teams import _clean_origin
 
-            row = await auto.start(request, user, auto.CreateForm(question=question, client_key=_auto_key(form.key)))
+            row = await auto.start(request, user, auto.CreateForm(question=question, client_key=_auto_key(form.key)),
+                                   remote=_clean_origin(form.origin))
             run_id = row["id"]
         out = {"kind": kind, "id": run_id}
         _remember(user.id, form.key, out)

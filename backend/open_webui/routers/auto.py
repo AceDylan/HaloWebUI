@@ -250,7 +250,8 @@ async def dispatch(request, user, row, form, decision, models, ambiguous, bases,
             start_planning(team, target, access=AssistantAccess(request, user))
         else:
             await teams._start(request, user, goal, target, title=default_title(form.question), inputs=inputs,
-                auto_start=data["auto_start"], access=AssistantAccess(request, user), on_created=bind)
+                auto_start=data["auto_start"], origin=row["data"].get("remote"),
+                access=AssistantAccess(request, user), on_created=bind)
     else:
         loaded = await asyncio.to_thread(discussions._load_files, form.files, user)
         web = form.research and bool(getattr(request.app.state.config, "ENABLE_WEB_SEARCH", True))
@@ -302,7 +303,10 @@ async def _run(request, user, row, form, file_info):
         log.info("auto dispatch failed (%s)", type(exc).__name__)
 
 
-async def start(request, user, form, origin=None):
+async def start(request, user, form, origin=None, remote=None):
+    """``origin``: the HaloWebUI chat the question was asked in. ``remote``: the Telegram / QQ chat
+    it came from (``/auto`` there) — a team it goes to carries it, so the plan is sent back there
+    to approve."""
     form = form.model_copy(update={"question": form.question.strip()})
     if not form.question:
         raise HTTPException(400, "请写下问题或任务")
@@ -319,7 +323,8 @@ async def start(request, user, form, origin=None):
     file_info = _files(form.files, user)
     if AutoRoutes.count_active(user.id) >= 3:
         raise HTTPException(429, "已有 3 个问题正在分流，请稍后再试")
-    row, created = AutoRoutes.create(user.id, form.client_key, fingerprint, {"input": payload, "origin": origin})
+    data = {"input": payload, "origin": origin, **({"remote": remote} if remote else {})}
+    row, created = AutoRoutes.create(user.id, form.client_key, fingerprint, data)
     if row["fingerprint"] != fingerprint:
         raise HTTPException(409, "这次提交的内容已改变，请重新开始")
     if created:

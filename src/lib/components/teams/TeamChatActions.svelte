@@ -6,22 +6,37 @@
 		approveTeam,
 		cancelTeam,
 		controlTeam,
+		editTeamPlan,
+		getTeamsMeta,
 		replanTeam,
 		retryTeamTask,
 		sendTeamMessage,
 		taskDiagnosis,
+		type HermesModel,
 		type LiveSnapshot,
 		type LiveTask,
-		type Team
+		type Team,
+		type TeamExecutor,
+		type TeamPlanMember,
+		type TeamsMeta
 	} from '$lib/apis/teams';
 	import TeamAvatar from './TeamAvatar.svelte';
-	import { avatarKind, memberRunner, runnerLabel } from './model';
+	import {
+		avatarKind,
+		EXECUTOR_OPTIONS,
+		memberModelOptions,
+		memberRunner,
+		offChainRunners,
+		runnerLabel,
+		runsOnHermes
+	} from './model';
 
 	/**
 	 * What the team needs from the user, done right in the chat card instead of on the 协作台:
 	 * approve the lead's plan (or ask for another / cancel it), plan again after a failed plan,
-	 * answer a member's question or retry its failed task, and stop a team at work. The 协作台
-	 * stays the place for the details (runners per member, the board, the logs).
+	 * answer a member's question or retry its failed task, and stop a team at work. Before approving,
+	 * each member's runner and model (the lead's recommendation) can be changed here too. The 协作台
+	 * stays the place for the details (each task, the board, the logs).
 	 */
 	export let teamId: string;
 	export let team: Team;
@@ -38,10 +53,21 @@
 	let stopArmed = false;
 	let stopTimer: ReturnType<typeof setTimeout> | null = null;
 
+	// 「换执行者/模型」: what can run a member and which models Hermes has — read only when opened
+	// (Hermes checks every runner for it, which takes a moment).
+	let adjusting = false;
+	let registry: TeamsMeta['registry'] | null = null;
+	let models: HermesModel[] = [];
+	let metaState: '' | 'loading' | 'ready' | 'error' = '';
+	let metaError = '';
+
 	$: plan = team.plan ?? null;
 	$: reviewing = !!plan && ['plan_ready', 'start_failed'].includes(team.status);
 	$: members = plan?.members ?? [];
 	$: blocked = members.filter((m) => memberRunner(m).actual === null).length;
+	$: order = registry?.order?.length ? registry.order : EXECUTOR_OPTIONS.map((o) => o.value);
+	$: runnersBy = new Map((registry?.runners ?? []).map((r) => [r.name, r]));
+	$: choices = [...order, ...offChainRunners(order, registry?.runners ?? []).map((r) => r.name)];
 	// tasks waiting on the user: a member's question first, then failures
 	$: needs = (live?.tasks ?? [])
 		.filter(
@@ -76,6 +102,44 @@
 			busy = '';
 		}
 	};
+
+	const loadMeta = async () => {
+		if (metaState === 'loading' || metaState === 'ready') return;
+		metaState = 'loading';
+		try {
+			const meta = await getTeamsMeta(localStorage.token);
+			registry = meta.registry ?? null;
+			models = meta.hermes_models ?? [];
+			metaState = 'ready';
+		} catch (error) {
+			metaError = `${(error as Error)?.message ?? error}`;
+			metaState = 'error';
+		}
+	};
+	const toggleAdjust = () => {
+		adjusting = !adjusting;
+		if (adjusting) void loadMeta();
+	};
+	const runnerOption = (name: string) => {
+		const info = runnersBy.get(name as TeamExecutor);
+		const base = name === 'hermes' ? 'Hermes 代理' : runnerLabel(name);
+		return info && !info.available ? `${base}（不可用）` : base;
+	};
+	// a refused change puts the selects back to what the plan says
+	const edit = async (key: string, change: Parameters<typeof editTeamPlan>[2][number]) => {
+		if (!(await act(key, () => editTeamPlan(localStorage.token, teamId, [change])))) team = team;
+	};
+	const setRunner = (m: TeamPlanMember, value: string, source: 'user' | 'auto' = 'user') =>
+		edit(`runner:${m.name}`, {
+			name: m.name,
+			executor: EXECUTOR_OPTIONS.find((o) => o.value === value)?.value ?? m.executor,
+			source
+		});
+	const setModel = (m: TeamPlanMember, model: string) =>
+		edit(
+			`model:${m.name}`,
+			model ? { name: m.name, model, model_source: 'user' } : { name: m.name, model_source: 'auto' }
+		);
 
 	const approve = () =>
 		act('approve', () => approveTeam(localStorage.token, teamId), '已批准，成员开始工作');
@@ -165,7 +229,12 @@
 							class="shrink-0 {runner.actual === null
 								? 'text-amber-700 dark:text-amber-300'
 								: 'text-gray-500 dark:text-gray-400'}"
-							>{runner.actual === null ? '无可用执行者' : runnerLabel(runner.actual)}</span
+							>{runner.actual === null ? '无可用执行者' : runnerLabel(runner.actual)}{runsOnHermes(
+								m,
+								runner.actual
+							) && m.model
+								? ` · ${m.model}`
+								: ''}</span
 						>
 					</li>
 				{/each}
@@ -174,11 +243,11 @@
 		<p class="text-[11px] text-gray-500 dark:text-gray-400">
 			{members.length} 位成员 · {plan.tasks?.length ?? 0} 个任务{plan.project?.name
 				? ` · 在 ${plan.project.name} 里做`
-				: ''}。批准后成员才开始工作，会消耗模型额度；要换执行者或细看每个任务，到协作台调整。
+				: ''}。批准后成员才开始工作，会消耗模型额度；执行者和模型可以在这里换，细看每个任务到协作台。
 		</p>
 		{#if blocked}
 			<p class="text-[11px] text-amber-700 dark:text-amber-300" data-team-chat-plan-blocked>
-				{blocked} 位成员现在没有可用的执行来源，批准时会再检查一次；也可以到协作台给它换一个。
+				{blocked} 位成员现在没有可用的执行来源，批准时会再检查一次；也可以点「换执行者/模型」给它换一个。
 			</p>
 		{/if}
 		<div class="flex flex-wrap items-center gap-2">
@@ -194,6 +263,15 @@
 						? '重新批准'
 						: '批准并开始'}</button
 			>
+			{#if members.length}
+				<button
+					type="button"
+					class="tm-btn-ghost !text-xs"
+					aria-expanded={adjusting}
+					on:click={toggleAdjust}
+					data-team-chat-adjust-toggle>换执行者/模型</button
+				>
+			{/if}
 			<button
 				type="button"
 				class="tm-btn-ghost !text-xs"
@@ -210,6 +288,105 @@
 				data-team-chat-cancel>{busy === 'cancel' ? '取消中…' : '取消'}</button
 			>
 		</div>
+		{#if adjusting}
+			<div class="tm-hairline flex flex-col gap-2 border-t pt-2.5" data-team-chat-adjust>
+				{#if metaState === 'loading'}
+					<p class="text-[11px] text-gray-500 dark:text-gray-400">正在查看哪些执行者和模型能用…</p>
+				{:else if metaState === 'error'}
+					<p class="text-[11px] text-amber-700 dark:text-amber-300" data-team-chat-adjust-error>
+						没读到可用的执行者和模型：{metaError}
+						<button
+							type="button"
+							class="ml-1 text-sky-700 hover:underline dark:text-sky-300"
+							on:click={loadMeta}>再试一次</button
+						>
+					</p>
+				{/if}
+				<ul class="flex list-none flex-col gap-2 p-0">
+					{#each members as m (m.name)}
+						{@const runner = memberRunner(m)}
+						{@const onHermes = runsOnHermes(m, runner.actual)}
+						<li class="flex min-w-0 flex-col gap-1.5" data-team-chat-adjust-member={m.name}>
+							<div class="flex min-w-0 items-center gap-1.5 text-xs">
+								<TeamAvatar kind={avatarKind(m)} size={14} />
+								<span class="truncate font-medium text-gray-800 dark:text-gray-100">{m.name}</span>
+								<span class="truncate text-[11px] text-gray-400">{m.role}</span>
+							</div>
+							<div class="flex min-w-0 flex-wrap items-center gap-1.5 pl-5">
+								<select
+									class="chat-select min-w-0 max-w-[12rem] flex-1 truncate rounded-lg border border-gray-200 bg-white py-1 pl-2 pr-6 text-xs text-gray-900 focus:border-sky-400 focus:outline-none disabled:opacity-60 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+									aria-label="{m.name} 的执行者"
+									value={m.executor}
+									disabled={!!busy || m.kind === 'image'}
+									title={m.kind === 'image' ? '生图成员只能由 Hermes 执行' : ''}
+									on:change={(e) => setRunner(m, e.currentTarget.value)}
+									data-team-chat-runner={m.name}
+								>
+									{#each choices.includes(m.executor) ? choices : [m.executor, ...choices] as name}
+										<option value={name}
+											>{runnerOption(name)}{m.recommended === name ? ' · 推荐' : ''}</option
+										>
+									{/each}
+								</select>
+								{#if onHermes && (models.length || m.model)}
+									<select
+										class="chat-select min-w-0 max-w-[14rem] flex-1 truncate rounded-lg border border-gray-200 bg-white py-1 pl-2 pr-6 font-mono text-xs text-gray-900 focus:border-sky-400 focus:outline-none disabled:opacity-60 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+										aria-label="{m.name} 的模型"
+										value={m.model ?? ''}
+										disabled={!!busy || !models.length}
+										on:change={(e) => setModel(m, e.currentTarget.value)}
+										data-team-chat-model={m.name}
+									>
+										{#each memberModelOptions(m, models) as option (option.model)}
+											<option value={option.model} title={option.hint}
+												>{option.model}{option.model === m.model_recommended
+													? ' · 推荐'
+													: option.default
+														? ' · 默认'
+														: ''}</option
+											>
+										{/each}
+									</select>
+								{/if}
+								{#if m.model_source === 'user' && m.model_recommended && m.model_recommended !== m.model}
+									<button
+										type="button"
+										class="shrink-0 rounded-md px-1.5 py-0.5 text-[11px] text-sky-700 transition hover:bg-sky-50 disabled:opacity-50 dark:text-sky-300 dark:hover:bg-sky-950/40"
+										disabled={!!busy}
+										title="用负责人推荐的 {m.model_recommended}"
+										on:click={() => setModel(m, '')}
+										data-team-chat-model-reset={m.name}>恢复推荐模型</button
+									>
+								{:else if m.executor_source === 'user'}
+									<button
+										type="button"
+										class="shrink-0 rounded-md px-1.5 py-0.5 text-[11px] text-sky-700 transition hover:bg-sky-50 disabled:opacity-50 dark:text-sky-300 dark:hover:bg-sky-950/40"
+										disabled={!!busy}
+										title="按任务类型重新自动选择执行者"
+										on:click={() => setRunner(m, m.executor, 'auto')}
+										data-team-chat-runner-reset={m.name}>恢复自动</button
+									>
+								{/if}
+							</div>
+							{#if runner.actual === null}
+								<p class="pl-5 text-[11px] text-red-700 dark:text-red-300">
+									{runnerLabel(runner.chosen)} 之后的执行来源都不可用{runner.reason
+										? `：${runner.reason}`
+										: ''}
+								</p>
+							{:else if runner.changed}
+								<p class="pl-5 text-[11px] text-amber-800 dark:text-amber-200">
+									实际将由 {runnerLabel(runner.actual)} 执行{runner.reason ? ` · ${runner.reason}` : ''}
+								</p>
+							{/if}
+						</li>
+					{/each}
+				</ul>
+				<p class="text-[11px] text-gray-400">
+					改完立即生效，批准时按这里的选择开始；执行者不可用时会沿兜底链往后换。
+				</p>
+			</div>
+		{/if}
 		{#if showFeedback}
 			<div class="flex flex-col gap-1.5">
 				<textarea
@@ -345,3 +522,13 @@
 		>
 	{/if}
 {/if}
+
+<style>
+	/* The app's global `select` rule (unlayered) outranks Tailwind's utilities: size these here. */
+	.chat-select {
+		font-size: 0.75rem;
+		line-height: 1rem;
+		padding: 0.3rem 1.6rem 0.3rem 0.5rem;
+		background-size: 1em 1em;
+	}
+</style>

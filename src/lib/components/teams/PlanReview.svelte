@@ -11,9 +11,11 @@
 		avatarKind,
 		EXECUTOR_OPTIONS,
 		KIND_LABEL,
+		memberModelOptions,
 		memberRunner,
 		offChainRunners,
-		runnerLabel
+		runnerLabel,
+		runsOnHermes
 	} from './model';
 
 	/**
@@ -83,13 +85,7 @@
 		return info && !info.available ? `${base}（不可用）` : base;
 	};
 
-	// The model matters when Hermes does the member's work: its own runner, or where it fell back to.
-	const runsOnHermes = (m: TeamPlanMember, actual: string | null | undefined) =>
-		m.executor === 'hermes' || actual === 'hermes';
-	const modelOptions = (m: TeamPlanMember): HermesModel[] =>
-		m.model && !models.some((o) => o.model === m.model)
-			? [...models, { model: m.model, default: false, hint: '' }]
-			: models;
+	const modelOptions = (m: TeamPlanMember) => memberModelOptions(m, models);
 	const modelHint = (name?: string) => models.find((o) => o.model === name)?.hint ?? '';
 	const modelSourceText = (m: TeamPlanMember) =>
 		m.model_source === 'user'

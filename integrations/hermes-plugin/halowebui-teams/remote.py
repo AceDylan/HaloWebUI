@@ -246,6 +246,14 @@ def command_fallback(raw_args: str = "") -> str:
             "请在 HaloWebUI 网页里用。")
 
 
+def _origin(source: Any) -> dict:
+    """The chat a command came from, as a team started from it records it (``notify.target_for``)."""
+    out = {"platform": _platform(source), "chat_id": str(source.chat_id), "user_id": str(source.user_id or "")}
+    if getattr(source, "thread_id", None):
+        out["thread_id"] = str(source.thread_id)
+    return out
+
+
 def _job_base(source: Any, event: Any) -> dict:
     job = {"platform": _platform(source), "chat_id": str(source.chat_id), "at": time.time()}
     if getattr(source, "thread_id", None):
@@ -292,7 +300,7 @@ async def _start(source: Any, owner: str, kind: str, question: str, event: Any) 
         return
     key = f"{platform}:{source.chat_id}:{getattr(event, 'message_id', '') or int(time.time())}"
     try:
-        started = await asyncio.to_thread(link.remote_start, owner, kind, question, key)
+        started = await asyncio.to_thread(link.remote_start, owner, kind, question, key, _origin(source))
     except link.HaloError as exc:
         await _say(source, f"⚠️ 没能交给{LABEL[kind]}：{exc.message}", event)
         return
@@ -351,9 +359,8 @@ async def _team_command(source: Any, owner: str, args: str, event: Any) -> None:
     if not goal:
         await _say(source, usage_text(platform, source.chat_id), event)
         return
-    origin = {"platform": platform, "chat_id": str(source.chat_id), "user_id": str(source.user_id or "")}
     try:
-        team = await asyncio.to_thread(link.create, owner, goal, origin, auto_start)
+        team = await asyncio.to_thread(link.create, owner, goal, _origin(source), auto_start)
     except link.HaloError as exc:
         await _say(source, f"⚠️ 没能发起协作：{exc.message}", event)
         return
@@ -487,8 +494,8 @@ def _after_routing(key: str, job: dict, state: dict) -> None:
         drop_job(key)
         return
     if mode == "team" and job["platform"] == "telegram":
-        tail = "计划会照常发到 Telegram 给你批准。" if link.notify_web_teams() and link.telegram_chat_for(job["owner"]) \
-            else "计划在网页的协作台里等你批准。"
+        # the team carries this chat as its origin: the 协作台 sends its plan here, with buttons
+        tail = "计划好了发到这里，点「✅ 批准并开始」才开始；回复计划消息可以写修改意见。"
     elif mode == "team":
         tail = "计划好了发到这里，回「批准」开始。"
     else:

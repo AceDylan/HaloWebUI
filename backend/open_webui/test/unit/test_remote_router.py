@@ -46,7 +46,7 @@ def test_only_the_users_own_hermes_key_is_accepted(client):
 
 
 def test_start_each_kind_once_per_key(client, monkeypatch):
-    started = []
+    started, remotes = [], []
 
     async def open_answer(request, user, *, question, context, origin, files=None):
         started.append(("answer", question, context, origin))
@@ -56,8 +56,9 @@ def test_start_each_kind_once_per_key(client, monkeypatch):
         started.append(("discuss", question, context, origin))
         return "chat-d"
 
-    async def start_auto(request, user, form, origin=None):
+    async def start_auto(request, user, form, origin=None, remote=None):
         started.append(("auto", form.question, form.client_key, origin))
+        remotes.append(remote)
         return {"id": "route-1"}
 
     monkeypatch.setattr(answers, "open_for_chat", open_answer)
@@ -81,6 +82,12 @@ def test_start_each_kind_once_per_key(client, monkeypatch):
     key = started[-1][2]
     assert key.startswith("remote:sha256:") and len(key) <= 128
     assert auto.CreateForm(question="q", client_key=key).client_key == key
+    # the Telegram / QQ chat goes to the 分流 (a team it starts sends its plan there), cleaned
+    origin = {"platform": "telegram", "chat_id": "52", "user_id": "52", "secret": "x", "thread_id": ""}
+    assert client.post("/api/v1/remote/auto", json={"question": "做个工具", "key": "tg:52:3", "origin": origin},
+                       headers=H).status_code == 200
+    assert remotes[-1] == {"platform": "telegram", "chat_id": "52", "user_id": "52"}
+    assert remotes[:2] == [None, None]
 
 
 def _run(status="done", ended=None, **extra):

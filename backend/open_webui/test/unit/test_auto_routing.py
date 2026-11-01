@@ -193,6 +193,34 @@ def test_team_auto_start_requires_explicit_option(env, monkeypatch, allow):
     asyncio.run(run())
 
 
+def test_a_team_from_telegram_or_qq_carries_that_chat(env, monkeypatch):
+    """/auto from Telegram / QQ: the team it starts records the chat, so its plan goes back there."""
+    from open_webui.routers import teams
+    from open_webui.utils import agent_teams
+    captured = []
+    async def target(*args): return object()
+    async def start(*args, **kw):
+        captured.append(kw)
+        kw['on_created']('t1')
+    async def select(*args):
+        return ({'mode': 'team', 'reason': '执行', 'execution_requested': True}, {}, set(), [], {})
+    monkeypatch.setattr(agent_teams, 'hermes_target', target)
+    monkeypatch.setattr(agent_teams, 'input_files', lambda *args: [])
+    monkeypatch.setattr(teams, '_enabled', lambda: None)
+    monkeypatch.setattr(teams, '_start', start)
+    monkeypatch.setattr(api, 'select', select)
+    remote = {'platform': 'qqbot', 'chat_id': 'Q1', 'user_id': 'Q1'}
+    async def run():
+        row = await api.start(env, USER, api.CreateForm(question='做个工具', client_key='remote:q'), remote=remote)
+        await settle(row['id'])
+        assert captured[-1]['origin'] == remote
+        # the browser's own 分流 starts a team of no outside chat
+        row = await api.start(env, USER, api.CreateForm(question='做个工具', client_key='web'))
+        await settle(row['id'])
+        assert captured[-1]['origin'] is None
+    asyncio.run(run())
+
+
 def test_interrupted_request_is_not_automatically_repeated(env):
     form = api.CreateForm(question='实现功能', client_key='old')
     row, _ = records.AutoRoutes.create(USER.id, form.client_key, 'hash', {'input': form.model_dump()})

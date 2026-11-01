@@ -75,14 +75,16 @@ def _dispatch(remote, event):
 
 
 def test_answer_from_telegram_starts_a_run_and_remembers_it(remote, monkeypatch):
-    def start(owner, kind, question, key):
-        remote.calls.append((owner, kind, question, key))
+    def start(owner, kind, question, key, origin):
+        remote.calls.append((owner, kind, question, key, origin))
         return {"kind": kind, "id": "chat-1"}
 
     monkeypatch.setattr(remote.link, "remote_start", start)
     result = _dispatch(remote.remote, _event("telegram", TG_USER, "/answer 为什么天是蓝的"))
     assert result == {"action": "skip", "reason": "halo answer command"}
-    assert remote.calls == [(OWNER, "answer", "为什么天是蓝的", f"telegram:{TG_USER}:77")]
+    # the chat it came from goes along: a team 自动分流 starts sends its plan back there
+    origin = {"platform": "telegram", "chat_id": TG_USER, "user_id": TG_USER}
+    assert remote.calls == [(OWNER, "answer", "为什么天是蓝的", f"telegram:{TG_USER}:77", origin)]
     job = remote.remote.jobs()["answer:chat-1"]
     assert job["platform"] == "telegram" and job["chat_id"] == TG_USER and job["reply_to"] == "77"
     assert "已交给精答" in remote.sent[-1]["text"] and "https://halo.example/answer/chat-1" in remote.sent[-1]["text"]
@@ -191,7 +193,7 @@ def test_auto_routing_to_a_team(remote, monkeypatch):
     # Telegram: the 协作台's own notices (buttons) take over; QQ: followed here
     assert list(remote.remote.jobs()) == ["team:teamqqbot"]
     tg, qq = (next(m for m in remote.sent if m["platform"] == p) for p in ("telegram", "qqbot"))
-    assert "计划会照常发到 Telegram" in tg["text"] and "只读" in tg["text"]
+    assert "计划好了发到这里" in tg["text"] and "批准并开始" in tg["text"] and "只读" in tg["text"]
     assert "回「批准」开始" in qq["text"]
 
 

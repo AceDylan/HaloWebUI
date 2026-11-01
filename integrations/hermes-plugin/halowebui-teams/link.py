@@ -221,10 +221,11 @@ def save_knowledge(owner: str, team_id: str) -> dict:
 
 # --- 精答 / 讨论 / 自动分流 (remote.py) -------------------------------------------------------------
 
-def remote_start(owner: str, kind: str, question: str, key: str) -> dict:
-    """Start a 精答 / discussion / 自动分流 for *owner*; {"kind", "id"}."""
-    return call("POST", f"/{kind}", owner, {"question": question[:8000], "key": key[:512]}, timeout=90,
-                prefix=REMOTE_PREFIX)
+def remote_start(owner: str, kind: str, question: str, key: str, origin: Optional[dict] = None) -> dict:
+    """Start a 精答 / discussion / 自动分流 for *owner*; {"kind", "id"}. ``origin``: the Telegram / QQ
+    chat it came from — a team 自动分流 starts sends its plan there to approve."""
+    body = {"question": question[:8000], "key": key[:512], **({"origin": origin} if origin else {})}
+    return call("POST", f"/{kind}", owner, body, timeout=90, prefix=REMOTE_PREFIX)
 
 
 def remote_state(owner: str, kind: str, run_id: str) -> dict:

@@ -18,6 +18,8 @@ const api = vi.hoisted(() => ({
 	retryTeamTask: vi.fn(),
 	sendTeamMessage: vi.fn(),
 	taskDiagnosis: vi.fn(),
+	editTeamPlan: vi.fn(),
+	getTeamsMeta: vi.fn(),
 	getTeamEvents: vi.fn(async () => ({ events: [], next_after: 7, has_more: false, latest_seq: 7, reconcile: [] }))
 }));
 vi.mock('$lib/apis/teams', () => api);
@@ -471,6 +473,93 @@ describe('TeamChatCard (派发方式「协作台」 in a chat)', () => {
 		(target.querySelector('[data-team-chat-approve]') as any).click();
 		await sleep(20);
 		expect(api.approveTeam).toHaveBeenCalledWith('tok', 'team-p');
+		expect(nav.goto).not.toHaveBeenCalled();
+	});
+
+	it('changes a member\'s runner and the lead\'s recommended model right in the card', async () => {
+		const plan = (model: string, source: string) => ({
+			team: {
+				id: 'team-m',
+				title: '整理接口',
+				status: 'plan_ready',
+				member_count: 2,
+				task_count: 2,
+				plan: {
+					title: '整理接口',
+					summary: '两个人分工',
+					members: [
+						{ name: 'coder', role: '开发', executor: 'codex', runner: 'codex', recommended: 'codex' },
+						{
+							name: 'writer', role: '文档', executor: 'hermes', runner: 'hermes',
+							model, model_source: source, model_recommended: 'deepseek-chat'
+						}
+					],
+					tasks: [
+						{ key: 'T1', title: '改', description: '', member: 'coder', depends_on: [] },
+						{ key: 'T2', title: '写', description: '', member: 'writer', depends_on: ['T1'] }
+					]
+				}
+			},
+			live: null,
+			stage: { key: 'approval', label: '等你批准', now: '计划好了', at: nowTs(), steps: steps(1) }
+		});
+		api.getTeam.mockResolvedValue(plan('deepseek-chat', 'lead'));
+		api.getTeamsMeta.mockResolvedValue({
+			hermes_models: [
+				{ model: 'gpt-chat', default: true, hint: '' },
+				{ model: 'deepseek-chat', default: false, hint: '' }
+			],
+			registry: {
+				runners: [
+					{ name: 'hermes', available: true },
+					{ name: 'codex', available: true },
+					{ name: 'agy', available: false }
+				],
+				kinds: [],
+				order: ['codex', 'hermes', 'agy'],
+				cache_seconds: 60
+			}
+		});
+		api.editTeamPlan.mockResolvedValue({});
+		await card({ teamId: 'team-m' });
+		expect(text('[data-team-chat-plan-members]')).toContain('Hermes · deepseek-chat');
+		expect(target.querySelector('[data-team-chat-adjust]')).toBeFalsy();
+		(target.querySelector('[data-team-chat-adjust-toggle]') as any).click();
+		await sleep(20);
+		expect(api.getTeamsMeta).toHaveBeenCalledTimes(1);
+		const model = target.querySelector('[data-team-chat-model="writer"]') as any;
+		const labels = Array.from(model.querySelectorAll('option')).map((o: any) => o.textContent.trim());
+		expect(labels).toEqual(['gpt-chat · 默认', 'deepseek-chat · 推荐']);
+		// codex members have no model to pick: Hermes does not run them
+		expect(target.querySelector('[data-team-chat-model="coder"]')).toBeFalsy();
+		const runner = target.querySelector('[data-team-chat-runner="coder"]') as any;
+		expect(Array.from(runner.querySelectorAll('option')).map((o: any) => o.textContent.trim())).toEqual([
+			'codex · 推荐', 'Hermes 代理', 'agy（不可用）'
+		]);
+
+		api.getTeam.mockResolvedValue(plan('gpt-chat', 'user'));
+		model.value = 'gpt-chat';
+		model.dispatchEvent(new (window as any).Event('change'));
+		await sleep(30);
+		expect(api.editTeamPlan).toHaveBeenLastCalledWith('tok', 'team-m', [
+			{ name: 'writer', model: 'gpt-chat', model_source: 'user' }
+		]);
+		expect(text('[data-team-chat-plan-members]')).toContain('Hermes · gpt-chat');
+		(target.querySelector('[data-team-chat-model-reset="writer"]') as any).click();
+		await sleep(20);
+		expect(api.editTeamPlan).toHaveBeenLastCalledWith('tok', 'team-m', [
+			{ name: 'writer', model_source: 'auto' }
+		]);
+
+		runner.value = 'hermes';
+		runner.dispatchEvent(new (window as any).Event('change'));
+		await sleep(20);
+		expect(api.editTeamPlan).toHaveBeenLastCalledWith('tok', 'team-m', [
+			{ name: 'coder', executor: 'hermes', source: 'user' }
+		]);
+		// the panel stays open across the card's reloads, the meta is read once
+		expect(target.querySelector('[data-team-chat-adjust]')).toBeTruthy();
+		expect(api.getTeamsMeta).toHaveBeenCalledTimes(1);
 		expect(nav.goto).not.toHaveBeenCalled();
 	});
 

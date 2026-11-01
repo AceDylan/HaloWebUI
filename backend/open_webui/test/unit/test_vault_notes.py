@@ -115,6 +115,9 @@ def test_related_notes_find_the_subject_not_stray_words(kb):
     assert "精答、讨论或协作" in hits[0]["excerpt"] and "kind: fix" not in hits[0]["excerpt"]
     assert hits[0]["hostPath"] == "/host/vault/项目/HaloWebUI/自动分流与共享标题.md"
     assert [h["path"] for h in vault_notes.related_notes("hk vps 的 ssh 端口是多少")] == ["运维/多 VPS 管理清单.md"]
+    # pairs across two words (「选精」「么规」) are not words the vault lacks
+    asked = vault_notes.related_notes("HaloWebUI 的自动分流现在按什么规则选精答、讨论还是协作？")
+    assert asked and asked[0]["path"] == "项目/HaloWebUI/自动分流与共享标题.md"
     # general questions share a stray pair of characters with some note at most
     assert vault_notes.related_notes("人为什么需要吃饭") == []
     assert vault_notes.related_notes("帮我写一首关于秋天的诗") == []

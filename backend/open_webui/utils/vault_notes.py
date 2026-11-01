@@ -188,15 +188,32 @@ def _modes_enabled() -> bool:
     return os.environ.get(MODES_ENV, "1").strip() != "0"
 
 
-def _terms(question: str) -> set[str]:
-    """The question's words: ASCII words, and each pair of adjacent Chinese characters (the vault
-    is mostly Chinese, written without spaces)."""
+def _segments(question: str) -> tuple[set[str], list[str]]:
+    """The question's ASCII words, and its Chinese runs cut at particles (the vault is mostly
+    Chinese, written without spaces: its words are matched as pairs of adjacent characters)."""
     text = (question or "").lower()[:2000]
-    terms = {w for w in _ASCII_RE.findall(text) if len(w) >= 2}
-    for run in _CJK_RE.findall(text):
-        for part in _PARTICLES_RE.split(run):
-            terms.update(part[i : i + 2] for i in range(len(part) - 1))
-    return terms - _STOP
+    words = {w for w in _ASCII_RE.findall(text) if len(w) >= 2} - _STOP
+    runs = [part for run in _CJK_RE.findall(text) for part in _PARTICLES_RE.split(run) if len(part) >= 2]
+    return words, runs
+
+
+def _pairs(run: str) -> list[str]:
+    return [run[i : i + 2] for i in range(len(run) - 1)]
+
+
+def _bridges(runs: list[str], known) -> set[str]:
+    """Unknown pairs that only join two known words (「选精」 in 「规则选精答」): one character of a
+    word on each side, not a word of their own. A run's edge counts as a side, unless the pair is
+    the whole run."""
+    out = set()
+    for run in runs:
+        pairs = _pairs(run)
+        for i, pair in enumerate(pairs):
+            if known(pair) or len(pairs) == 1:
+                continue
+            if (i == 0 or known(pairs[i - 1])) and (i == len(pairs) - 1 or known(pairs[i + 1])):
+                out.add(pair)
+    return out
 
 
 def _note_text(rel: str, path: Path, mtime: float) -> str:
@@ -234,12 +251,15 @@ def related_notes(question: str, limit: int = RELATED_LIMIT) -> list[dict]:
     — or [] when the vault is off or nothing covers enough of the question. Words are weighted by
     how rare they are in the vault; a word in a note's name or folder counts three times."""
     root = vault_dir()
-    terms = _terms(question)
+    words, runs = _segments(question)
+    terms = (words | {p for run in runs for p in _pairs(run)}) - _STOP
     if root is None or not terms:
         return []
     notes = [(rel, _title(rel).lower() + " " + rel.lower(), _note_text(rel, path, mtime).lower())
              for rel, path, mtime in _notes(root)]
     df = {t: sum(1 for _, name, body in notes if t in name or t in body) for t in terms}
+    terms -= _bridges(runs, lambda pair: pair in _STOP or df.get(pair, 0) > 0)
+    df = {t: df[t] for t in terms}
     total = len(notes)
     # a word no note has still counts in the question's whole: a question about something else
     # (「人为什么需要吃饭」) shares a stray pair with some note, not most of its words

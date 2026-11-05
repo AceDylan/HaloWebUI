@@ -171,6 +171,7 @@ export const connectionsConfigCache = writable(null);
 
 export const showSidebar = writable(false);
 export const showArchivedChats = writable(false);
+export const showHermesSessions = writable(false);
 export const showChangelog = writable(false);
 
 export const showControls = writable(false);

@@ -16,6 +16,7 @@
 		showSidebar,
 		mobile,
 		showArchivedChats,
+		showHermesSessions,
 		showBookmarks,
 		showCommandPalette,
 		selectedAssistantScene,
@@ -229,7 +230,6 @@
 	let allChatsLoaded = false;
 	let assistantScenes = [];
 	let folders: Record<string, SidebarFolder> = {};
-	let showHermesSessions = false;
 	let folderOptions: SidebarFolderOption[] = [];
 	let newFolderId: string | null = null;
 
@@ -753,7 +753,7 @@
 </script>
 
 <HermesSessionsModal
-	bind:show={showHermesSessions}
+	bind:show={$showHermesSessions}
 	on:change={async () => {
 		await initChatList();
 	}}
@@ -1381,16 +1381,9 @@
 				{#if $user !== undefined && $user !== null}
 					<UserMenu
 						role={$user?.role}
-						hermesSessions
 						on:show={(e) => {
 							if (e.detail === 'archived-chat') {
 								showArchivedChats.set(true);
-							} else if (e.detail === 'hermes-sessions') {
-								// Telegram / QQ / CLI 的会话在网页继续（入口在用户菜单里）
-								showHermesSessions = true;
-								if ($mobile) {
-									showSidebar.set(false);
-								}
 							}
 						}}
 						let:builder

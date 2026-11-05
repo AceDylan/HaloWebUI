@@ -10,6 +10,7 @@
 		USAGE_POOL,
 		mobile,
 		showBookmarks,
+		showHermesSessions,
 		showSidebar,
 		user
 	} from '$lib/stores';
@@ -24,8 +25,6 @@
 	export let show = false;
 	export let role = '';
 	export let className = 'max-w-[240px]';
-	// Only the sidebar hosts the Hermes sessions dialog.
-	export let hermesSessions = false;
 
 	const dispatch = createEventDispatcher();
 
@@ -135,14 +134,18 @@
 			</button>
 
 			<!-- Continuing a Telegram / QQ / CLI session here is rare: it lives in
-			     this menu rather than as a top-level sidebar entry. -->
-			{#if hermesSessions}
+			     this menu rather than as a top-level sidebar entry. Every avatar menu
+			     has it; the sidebar hosts the dialog. -->
 			<button
 				class="flex rounded-md py-2 px-3 w-full hover:bg-gray-50 dark:hover:bg-gray-800 transition"
 				data-halo-user-menu-item="hermes-sessions"
 				on:click={() => {
-					dispatch('show', 'hermes-sessions');
+					showHermesSessions.set(true);
 					show = false;
+
+					if ($mobile) {
+						showSidebar.set(false);
+					}
 				}}
 			>
 				<div class=" self-center mr-3">
@@ -150,7 +153,6 @@
 				</div>
 				<div class=" self-center truncate">{$i18n.t('Hermes Sessions')}</div>
 			</button>
-			{/if}
 
 			{#if $activeUserIds?.length > 0}
 				<hr class=" border-gray-100 dark:border-gray-850 my-1 p-0" />

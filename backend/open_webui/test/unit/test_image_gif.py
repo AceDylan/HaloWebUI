@@ -36,6 +36,7 @@ def upstream(monkeypatch):
 
     class Upstream:
         reply = _gif()
+        images = 1
         bodies: list = []
         uploads: list = []
 
@@ -44,7 +45,8 @@ def upstream(monkeypatch):
 
     async def send(**kwargs):
         state.bodies.append(kwargs.get("json_body") or kwargs.get("form_fields"))
-        body = {"data": [{"b64_json": base64.b64encode(state.reply).decode()}]}
+        image = {"b64_json": base64.b64encode(state.reply).decode()}
+        body = {"data": [image] * state.images}
         return {"status": 200, "response_body": json.dumps(body), "headers": {}}, {}
 
     monkeypatch.setattr(images_router, "_send_openai_image_request_with_key_pool", send)
@@ -140,3 +142,13 @@ def test_edit_sends_gif_and_a_stored_gif_source_goes_up_as_png(upstream, monkeyp
     assert upstream.bodies[0]["output_format"] == "gif"
     assert "animated GIF" in upstream.bodies[0]["prompt"]
     assert seen["files"][0]["mime"] == "image/png"
+
+
+def test_a_relay_answering_with_extra_images_yields_only_what_was_asked(upstream):
+    upstream.images = 2
+    result = asyncio.run(
+        images_router._generate_via_openai_images_endpoint(
+            _Request(), None, n=1, output_format="gif", **COMMON
+        )
+    )
+    assert len(result) == 1 and len(upstream.uploads) == 1

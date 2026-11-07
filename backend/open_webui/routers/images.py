@@ -6347,6 +6347,8 @@ async def _generate_via_openai_image_edits_endpoint(
             detail="Upstream image edit completed but returned no images.",
         )
     if output_format:
+        # The relay sometimes answers one GIF request with two images.
+        images = images[:n]
         _require_animated_gifs(images)
 
     return [
@@ -6499,6 +6501,8 @@ async def _generate_via_openai_images_endpoint(
             detail=_build_openai_empty_image_error_detail(context),
         )
     if output_format:
+        # The relay sometimes answers one GIF request with two images.
+        images = images[:n]
         _require_animated_gifs(images)
 
     return [

@@ -4365,6 +4365,11 @@ async def get_models(
 
 
 _GIF_UNSUPPORTED_DETAIL = "当前图片模型不支持动图，请换用 gpt-image 模型。"
+# The relay's gpt-image only animates when the prompt asks for it: left out, it answers
+# output_format=gif with a PNG.
+_GIF_PROMPT_SUFFIX = (
+    "\n\nOutput as an animated GIF: a seamless loop with clearly different frames showing motion."
+)
 
 
 class GenerateImageForm(BaseModel):
@@ -6263,6 +6268,7 @@ async def _generate_via_openai_image_edits_endpoint(
         payload["size"] = size
     if output_format:
         payload["output_format"] = output_format
+        payload["prompt"] = f"{prompt}{_GIF_PROMPT_SUFFIX}"
     if background:
         payload["background"] = background
     if quality:
@@ -6417,6 +6423,7 @@ async def _generate_via_openai_images_endpoint(
         payload["size"] = size
     if output_format:
         payload["output_format"] = output_format
+        payload["prompt"] = f"{prompt}{_GIF_PROMPT_SUFFIX}"
     if _openai_image_model_has_default_response_format(base_name):
         if stream_enabled:
             payload["stream"] = True

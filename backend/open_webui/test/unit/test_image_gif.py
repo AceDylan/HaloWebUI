@@ -81,6 +81,8 @@ def test_generation_sends_gif_without_streaming_and_stores_it_as_gif(upstream):
     )
     body = upstream.bodies[0]
     assert body["output_format"] == "gif" and body["size"] == "auto"
+    # Without this the relay answers output_format=gif with a PNG.
+    assert body["prompt"].startswith("a waving cat") and "animated GIF" in body["prompt"]
     assert "stream" not in body and "partial_images" not in body
     assert result[0]["url"] == "/files/file-id/content"
     assert upstream.uploads[0].filename.endswith(".gif")
@@ -114,6 +116,7 @@ def test_a_still_request_is_unchanged(upstream):
     upstream.reply = _png()
     asyncio.run(images_router._generate_via_openai_images_endpoint(_Request(), None, n=1, **COMMON))
     assert "output_format" not in upstream.bodies[0]
+    assert upstream.bodies[0]["prompt"] == "a waving cat"
     assert upstream.uploads[0].headers["content-type"] == "image/png"
 
 
@@ -135,4 +138,5 @@ def test_edit_sends_gif_and_a_stored_gif_source_goes_up_as_png(upstream, monkeyp
         )
     )
     assert upstream.bodies[0]["output_format"] == "gif"
+    assert "animated GIF" in upstream.bodies[0]["prompt"]
     assert seen["files"][0]["mime"] == "image/png"

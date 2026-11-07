@@ -1,7 +1,8 @@
 """结论配图 for the modes that write their own chats (精答, 讨论台), like a team's result picture.
 
 Once an answer or a conclusion is done, it gets one picture on its own: the run's model condenses
-it into what fits on one picture (a title, a subtitle, 3–6 short points), then the app's own image
+it into what fits on one picture (a title, a subtitle, 3–6 short points; when that model fails or
+is too slow, the result's own text, ``digest``), then the app's own image
 generation draws it in the owner's 「手绘万能图 · 自动选画风与画幅」 image template (its prompt,
 model and canvas; without it the default image model and a plain hand-drawn infographic prompt).
 The picture is a file of the owner's like any generated image; it goes into the image studio
@@ -25,8 +26,10 @@ log = logging.getLogger(__name__)
 
 AUTO_ENV = "HALO_MODES_AUTO_ILLUSTRATE"
 TIMEOUT_SECONDS = 420
-CONDENSE_TIMEOUT_SECONDS = 120
+# A slow upstream must not cost the picture: past this the answer's own text goes on it (digest).
+CONDENSE_TIMEOUT_SECONDS = 90
 TEXT_MAX_CHARS = 30000
+DIGEST_MAX_CHARS = 1500
 CONDENSE_SYSTEM = """你要把一份结果提炼成一张图上放的内容。只输出这些内容本身，不要解释、不要代码块：
 标题：不超过 16 个字
 副标题：一句话（可省略）
@@ -38,6 +41,9 @@ FALLBACK_PROMPT = (
 )
 FALLBACK_NAME = "手绘信息图"
 _THINK_RE = re.compile(r"<think>.*?</think>\s*", re.S)
+_CODE_RE = re.compile(r"```.*?```", re.S)
+_IMAGE_RE = re.compile(r"!\[[^\]]*\]\([^)]*\)")
+_LINK_RE = re.compile(r"\[([^\]]*)\]\([^)]*\)")
 
 OnChange = Callable[[dict], Awaitable[None]]
 _background: set = set()
@@ -133,6 +139,14 @@ async def condense(request, user, model_id: str, text: str, metadata: dict) -> s
     return content
 
 
+def digest(text: str) -> str:
+    """What goes on the picture when the model could not condense it: the result itself, without
+    thinking, code, images and link targets, cut short."""
+    plain = _LINK_RE.sub(r"\1", _IMAGE_RE.sub("", _CODE_RE.sub("", _THINK_RE.sub("", text or ""))))
+    lines = [line.strip() for line in plain.splitlines() if line.strip()]
+    return ("\n".join(lines) or (text or "").strip())[:DIGEST_MAX_CHARS]
+
+
 async def draw(request, user, template: Optional[dict], content: str) -> dict:
     """One picture through the app's image generation; ``{"url", "model", "template", "prompt"}``."""
     from open_webui.routers.images import GenerateImageForm, image_generations
@@ -225,7 +239,13 @@ async def _illustrate(request, user, chat_id, message_id, text, model_id, task, 
     await change({"step": "condense"})
 
     async def run() -> dict:
-        content = await condense(request, user, model_id, text, {"chat_id": chat_id, "message_id": message_id, "task": task})
+        try:
+            content = await condense(request, user, model_id, text, {"chat_id": chat_id, "message_id": message_id, "task": task})
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001 — still draw it, from the text itself
+            log.warning("illustrate: %s condense for %s failed (%r); drawing from the text", task, chat_id, exc)
+            content = digest(text)
         await change({"step": "draw"})
         return await draw(request, user, template, content)
 
@@ -234,7 +254,7 @@ async def _illustrate(request, user, chat_id, message_id, text, model_id, task, 
     except asyncio.CancelledError:
         raise
     except Exception as exc:  # noqa: BLE001
-        log.info("illustrate: %s picture for %s failed: %s", task, chat_id, exc)
+        log.warning("illustrate: %s picture for %s failed: %r", task, chat_id, exc)
         await change({"status": "failed", "error": _error_text(exc), "step": "", "endedAt": now_ms()})
         return dict(entry)
 

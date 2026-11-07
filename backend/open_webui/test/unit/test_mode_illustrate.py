@@ -119,3 +119,37 @@ def test_a_list_row_knows_whether_the_picture_is_still_being_drawn():
     ask = {"status": "done", "illustration": {"status": "ready", "url": "/x", "startedAt": 7}}
     assert discussion_room.summary_meta(setup, [ask])["picture"] == {"status": "ready", "startedAt": 7}
     assert discussion_room.summary_meta(setup, [{"status": "done"}])["picture"] is None
+
+
+def test_a_digest_is_the_text_itself_plain_and_short():
+    text = "<think>想想</think># 结论\n\n```py\nx = 1\n```\n![图](/a.png)\n- 看 [文档](https://e.com)\n\n" + "长" * 3000
+    out = mi.digest(text)
+    assert out.startswith("# 结论\n- 看 文档\n") and "想想" not in out and "x = 1" not in out and "https" not in out
+    assert len(out) == mi.DIGEST_MAX_CHARS
+    assert mi.digest("```\nonly code\n```") == "```\nonly code\n```"
+
+
+def test_a_slow_or_failed_condense_still_draws_the_picture(monkeypatch):
+    """11-07: gemini-chat took 148 s to condense, the picture failed without ever calling gpt-image."""
+    from open_webui.utils import image_studio_record
+
+    drawn, changes = [], []
+
+    async def slow_condense(request, user, model_id, text, metadata):
+        raise asyncio.TimeoutError()
+
+    async def fake_draw(request, user, template, content):
+        drawn.append(content)
+        return {"url": "/api/v1/files/p/content", "model": "gpt-image", "template": "手绘信息图", "prompt": content, "size": "auto"}
+
+    async def on_change(entry):
+        changes.append(entry)
+
+    monkeypatch.setattr(mi, "condense", slow_condense)
+    monkeypatch.setattr(mi, "draw", fake_draw)
+    monkeypatch.setattr(mi, "picture_template", lambda user_id: None)
+    monkeypatch.setattr(image_studio_record, "record_chat_images_in_studio", lambda *a, **k: None)
+    entry = asyncio.run(mi._illustrate(None, SimpleNamespace(id="u1"), "c1", "m1", "# 结论\n用 Postgres。", "gemini-chat", "answer", on_change))
+    assert drawn == ["# 结论\n用 Postgres。"]
+    assert entry["status"] == "ready" and entry["url"] == "/api/v1/files/p/content"
+    assert [c.get("step") for c in changes][:2] == ["condense", "draw"]

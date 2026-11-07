@@ -46,14 +46,15 @@ def store_image(form: HermesImageForm, user_id: str, *, chat_id: str = "", team_
             if len(raw) > MAX_BYTES:
                 raise ValueError("image too large")
             with Image.open(io.BytesIO(raw)) as picture:
-                if picture.format not in {"PNG", "JPEG", "WEBP"}:
+                if picture.format not in {"PNG", "JPEG", "WEBP", "GIF"}:
                     raise ValueError("unsupported image")
                 content_type = Image.MIME[picture.format]
                 picture.verify()
         except (ValueError, binascii.Error, OSError, UnidentifiedImageError, Image.DecompressionBombError):
-            raise HTTPException(422, "Invalid PNG, JPEG or WebP image") from None
+            raise HTTPException(422, "Invalid PNG, JPEG, WebP or GIF image") from None
         raw, content_type = compact_generated_image(raw, content_type)
-        extension = {"image/png": "png", "image/jpeg": "jpg", "image/webp": "webp"}[content_type]
+        extension = {"image/png": "png", "image/jpeg": "jpg", "image/webp": "webp",
+                     "image/gif": "gif"}[content_type]
         name = f"{file_id}.{extension}"
         size, path = Storage.upload_file(io.BytesIO(raw), name)
         existing = Files.insert_new_file(user_id, FileForm(

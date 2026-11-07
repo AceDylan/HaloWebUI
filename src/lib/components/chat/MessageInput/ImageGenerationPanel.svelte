@@ -63,6 +63,7 @@
 		steps?: number | null;
 		background?: string | null;
 		quality?: string | null;
+		output_format?: string | null;
 		image_route_mode?: string | null;
 	};
 
@@ -751,6 +752,12 @@
 		hasBuiltinImage &&
 		Boolean(builtinModelMeta?.supports_quality) &&
 		openAIRouteUsesExactSize;
+	// Only gpt-image on an images route can return a GIF, the same models that offer quality.
+	$: canUseGif = canUseOpenAIQuality;
+	$: wantsGif = imageGenerationOptions?.output_format === 'gif';
+	$: if (wantsGif && builtinReady && !loading && !canUseGif) {
+		setOption({ output_format: null });
+	}
 	$: if (pendingTemplateConfig && imageGenerationEnabled && !loading && builtinReady) {
 		applyTemplateSettings(pendingTemplateConfig, {
 			exactSize: canUseExactSizeControl,
@@ -1273,6 +1280,35 @@
 											}}
 										>
 											{tr(option.labelZh, option.labelEn)}
+										</button>
+									{/each}
+								</div>
+							</div>
+						{/if}
+						{#if canUseGif}
+							<div>
+								<div class="mb-1.5 flex items-center justify-between">
+									<div class="text-xs font-medium text-gray-600 dark:text-gray-300">
+										{tr('格式', 'Format')}
+									</div>
+									{#if wantsGif}
+										<div class="text-2xs text-gray-400">
+											{tr('尺寸由模型决定', 'Size set by the model')}
+										</div>
+									{/if}
+								</div>
+								<div class="grid grid-cols-2 gap-1.5">
+									{#each [{ gif: false, zh: '静图', en: 'Still' }, { gif: true, zh: '动图 GIF', en: 'Animated GIF' }] as option}
+										<button
+											type="button"
+											aria-pressed={wantsGif === option.gif}
+											class="rounded-lg border px-2 py-1.5 text-xs font-medium transition
+													{wantsGif === option.gif
+												? 'border-teal-400 bg-white text-teal-700 dark:border-teal-400/60 dark:bg-teal-500/15 dark:text-teal-200'
+												: 'border-gray-200 bg-white text-gray-700 hover:border-gray-300 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:border-gray-600'}"
+											on:click={() => setOption({ output_format: option.gif ? 'gif' : null })}
+										>
+											{tr(option.zh, option.en)}
 										</button>
 									{/each}
 								</div>

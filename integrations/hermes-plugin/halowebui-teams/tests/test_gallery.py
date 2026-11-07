@@ -68,11 +68,3 @@ def test_context_scopes_and_disabled_capture(monkeypatch, tmp_path):
         clear_session_vars(tokens)
     gallery.on_image_generated(result={"success": True, "model": "gpt-image-2", "image": str(tmp_path)})
     assert not gallery.root().exists()
-
-
-def test_gif_is_not_queued_because_the_gallery_rejects_it_permanently(configured):
-    source = configured / "generated.gif"
-    source.write_bytes(b"GIF89a")
-    gallery.on_image_generated(result={"success": True, "image": str(source), "model": "gpt-image-2"})
-    assert not gallery.root().exists()
-

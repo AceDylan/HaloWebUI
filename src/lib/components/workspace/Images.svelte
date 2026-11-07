@@ -231,6 +231,8 @@
 	let customBackground = '';
 	// gpt-image quality tier; auto omits the field so the upstream default applies
 	let quality = 'auto';
+	// Starts as a still every visit: a GIF is asked for, not remembered.
+	let outputFormat: 'still' | 'gif' = 'still';
 
 	// 标签页状态
 	let activeTab: TabKey = 'workbench';
@@ -1249,6 +1251,7 @@
 			steps: showsStepsControl ? steps : undefined,
 			numberOfImages,
 			background,
+			outputFormat,
 			references: referenceUrls.length ? [...referenceUrls] : undefined
 		}
 	});
@@ -1312,6 +1315,7 @@
 		if (typeof params.steps === 'number') steps = params.steps;
 		if (params.numberOfImages) numberOfImages = `${params.numberOfImages}`;
 		if (params.background) background = params.background;
+		outputFormat = params.outputFormat === 'gif' ? 'gif' : 'still';
 		if (Array.isArray(params.references)) {
 			referenceImages = params.references
 				.filter((url: unknown) => typeof url === 'string' && url)
@@ -1711,6 +1715,7 @@
 							? background
 							: undefined,
 				quality: showsQualityControl && quality !== 'auto' ? quality : undefined,
+				output_format: showsQualityControl && outputFormat === 'gif' ? 'gif' : undefined,
 				credential_source:
 					selectedModelMeta?.source === 'personal' || selectedModelMeta?.source === 'shared'
 						? selectedModelMeta.source
@@ -2487,6 +2492,27 @@
 								<div class="text-xs text-gray-500 dark:text-gray-400">
 									{$i18n.t('Low is fastest and cheapest; high keeps the most detail.')}
 								</div>
+							</div>
+						{/if}
+
+						{#if showsQualityControl}
+							<div class="space-y-1.5">
+								<div class="text-xs font-medium text-gray-500 dark:text-gray-400">
+									{$i18n.t('Image format')}
+								</div>
+								<HaloSelect
+									bind:value={outputFormat}
+									options={[
+										{ value: 'still', label: $i18n.t('Still image') },
+										{ value: 'gif', label: $i18n.t('Animated GIF') }
+									]}
+									className="w-full text-xs"
+								/>
+								{#if outputFormat === 'gif'}
+									<div class="text-2xs text-gray-400">
+										{$i18n.t('GIF size and background are set by the model')}
+									</div>
+								{/if}
 							</div>
 						{/if}
 

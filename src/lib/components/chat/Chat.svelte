@@ -1869,6 +1869,7 @@
 		'steps',
 		'background',
 		'quality',
+		'output_format',
 		'image_route_mode'
 	] as const;
 

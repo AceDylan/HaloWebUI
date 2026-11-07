@@ -77,9 +77,6 @@ def on_image_generated(result=None, **_kwargs) -> None:
     model = str(result.get("model") or "").lower().split("/")[-1]
     if not result.get("success") or not (model.startswith("gpt-image") or model == "chatgpt-image-latest"):
         return
-    # HaloWebUI's gallery stores stills only and answers 422 forever; don't queue GIFs.
-    if str(result.get("image") or "").lower().endswith(".gif"):
-        return
     try:
         source = Path(str(result.get("image") or ""))
         if not source.is_file() or source.stat().st_size > MAX_BYTES:

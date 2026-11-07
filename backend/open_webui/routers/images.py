@@ -30,7 +30,11 @@ from open_webui.routers import gemini as gemini_router
 from open_webui.routers import grok as grok_router
 from open_webui.routers import openai as openai_router
 from open_webui.routers.files import upload_file
-from open_webui.utils.image_output import as_png_for_upstream, compact_generated_image
+from open_webui.utils.image_output import (
+    as_png_for_upstream,
+    compact_generated_image,
+    is_animated_gif,
+)
 from open_webui.utils.chat_image_refs import (
     extract_chat_image_file_id,
     resolve_chat_image_url_to_bytes,
@@ -4360,6 +4364,9 @@ async def get_models(
     return models
 
 
+_GIF_UNSUPPORTED_DETAIL = "当前图片模型不支持动图，请换用 gpt-image 模型。"
+
+
 class GenerateImageForm(BaseModel):
     model: Optional[str] = None
     model_ref: Optional[dict[str, Any]] = None
@@ -4378,6 +4385,8 @@ class GenerateImageForm(BaseModel):
     steps: Optional[int] = None
     background: Optional[str] = None
     quality: Optional[str] = None
+    # "gif" asks gpt-image for an animation; anything else is the default still image.
+    output_format: Optional[str] = None
     image_route_mode: Optional[str] = None
     chat_generation: bool = False
     client_request_id: Optional[str] = None
@@ -4485,7 +4494,19 @@ def load_url_image_data(
         return None
 
 
+def _require_animated_gifs(images: list[tuple[bytes, str]]) -> None:
+    """A relay may ignore output_format; never pass its still image off as an animation."""
+    if not all(is_animated_gif(data) for data, _mime in images):
+        raise HTTPException(
+            status_code=502,
+            detail="上游没有返回动图（它可能不支持 GIF），未重试。",
+        )
+
+
 def upload_image(request, image_metadata, image_data, content_type, user):
+    # Base64 answers carry no type of their own and are read as PNG.
+    if image_data[:4] == b"GIF8":
+        content_type = "image/gif"
     image_data, content_type = compact_generated_image(image_data, content_type)
     image_format = mimetypes.guess_extension(content_type) or ".png"
     file = UploadFile(
@@ -6132,6 +6153,7 @@ async def _generate_via_openai_image_edits_endpoint(
         Callable[[int, dict[str, Any]], Awaitable[None]]
     ] = None,
     quality: Optional[str] = None,
+    output_format: Optional[str] = None,
 ) -> list[dict[str, str]]:
     reference_image_urls = _normalize_reference_image_urls(image_url, image_urls)
     if not reference_image_urls:
@@ -6157,6 +6179,7 @@ async def _generate_via_openai_image_edits_endpoint(
                 background=background,
                 source=source,
                 quality=quality,
+                output_format=output_format,
             )
 
         return await _run_openai_image_split_batch(
@@ -6195,7 +6218,8 @@ async def _generate_via_openai_image_edits_endpoint(
     headers = build_attempt_headers(api_key)
     upstream_model_id = _strip_connection_model_prefix(model_id, api_config)
     base_name = _model_id_basename(upstream_model_id).lower()
-    stream_enabled = _openai_image_stream_enabled(stream)
+    # Streaming partial images are not animation frames.
+    stream_enabled = _openai_image_stream_enabled(stream) and not output_format
 
     resolved_images: list[tuple[str, bytes]] = []
     input_summaries: list[dict[str, Any]] = []
@@ -6237,6 +6261,8 @@ async def _generate_via_openai_image_edits_endpoint(
     }
     if size:
         payload["size"] = size
+    if output_format:
+        payload["output_format"] = output_format
     if background:
         payload["background"] = background
     if quality:
@@ -6314,6 +6340,8 @@ async def _generate_via_openai_image_edits_endpoint(
             status_code=400,
             detail="Upstream image edit completed but returned no images.",
         )
+    if output_format:
+        _require_animated_gifs(images)
 
     return [
         {
@@ -6339,6 +6367,7 @@ async def _generate_via_openai_images_endpoint(
         Callable[[int, dict[str, Any]], Awaitable[None]]
     ] = None,
     quality: Optional[str] = None,
+    output_format: Optional[str] = None,
 ) -> list[dict[str, str]]:
     requested_n = max(1, int(n or 1))
     if requested_n > 1:
@@ -6355,6 +6384,7 @@ async def _generate_via_openai_images_endpoint(
                 background=background,
                 source=source,
                 quality=quality,
+                output_format=output_format,
             )
 
         return await _run_openai_image_split_batch(
@@ -6375,7 +6405,8 @@ async def _generate_via_openai_images_endpoint(
 
     upstream_model_id = _strip_connection_model_prefix(model_id, api_config)
     base_name = _model_id_basename(upstream_model_id).lower()
-    stream_enabled = _openai_image_stream_enabled(stream)
+    # Streaming partial images are not animation frames.
+    stream_enabled = _openai_image_stream_enabled(stream) and not output_format
 
     payload: dict[str, Any] = {
         "model": upstream_model_id,
@@ -6384,6 +6415,8 @@ async def _generate_via_openai_images_endpoint(
     }
     if size:
         payload["size"] = size
+    if output_format:
+        payload["output_format"] = output_format
     if _openai_image_model_has_default_response_format(base_name):
         if stream_enabled:
             payload["stream"] = True
@@ -6458,6 +6491,8 @@ async def _generate_via_openai_images_endpoint(
             status_code=400,
             detail=_build_openai_empty_image_error_detail(context),
         )
+    if output_format:
+        _require_animated_gifs(images)
 
     return [
         {
@@ -7706,6 +7741,8 @@ async def _image_generations(request: Request, form_data: GenerateImageForm, use
 
     r = None
     try:
+        if form_data.output_format == "gif" and selected_engine != "openai":
+            raise HTTPException(status_code=400, detail=_GIF_UNSUPPORTED_DETAIL)
         if selected_engine == "openai":
             credential_source = _normalize_credential_source(
                 form_data.credential_source
@@ -7834,6 +7871,18 @@ async def _image_generations(request: Request, form_data: GenerateImageForm, use
                 else None
             )
             openai_request_size: Optional[str] = effective_size
+            output_format: Optional[str] = None
+            if form_data.output_format == "gif":
+                if not (selected_model_meta or {}).get(
+                    "supports_quality"
+                ) or openai_image_route in {
+                    OPENAI_IMAGE_ROUTE_CHAT,
+                    OPENAI_IMAGE_ROUTE_RESPONSES,
+                }:
+                    raise HTTPException(status_code=400, detail=_GIF_UNSUPPORTED_DETAIL)
+                output_format = "gif"
+                background = None
+                openai_request_size = "auto"
 
             try:
                 log.info(
@@ -7898,6 +7947,7 @@ async def _image_generations(request: Request, form_data: GenerateImageForm, use
                     source=source,
                     partial_image_callback=partial_image_callback,
                     quality=quality,
+                    output_format=output_format,
                 )
 
             if reference_image_urls:
@@ -7918,6 +7968,7 @@ async def _image_generations(request: Request, form_data: GenerateImageForm, use
                 source=source,
                 partial_image_callback=partial_image_callback,
                 quality=quality,
+                output_format=output_format,
             )
 
         elif selected_engine == "gemini":

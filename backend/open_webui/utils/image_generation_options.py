@@ -18,6 +18,7 @@ CHAT_IMAGE_GENERATION_OPTION_KEYS = (
     "steps",
     "background",
     "quality",
+    "output_format",
     "image_route_mode",
 )
 

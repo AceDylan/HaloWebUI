@@ -16,6 +16,8 @@ export type ImageGenerationRequest = {
 	steps?: number;
 	background?: string;
 	quality?: 'auto' | 'low' | 'medium' | 'high' | string;
+	// 'gif' asks gpt-image for an animation; absent is a still image.
+	output_format?: string;
 	image_route_mode?: 'auto' | 'generations' | 'chat' | 'responses' | 'edits' | string;
 	// Source / reference images (file content URLs): the request becomes an edit.
 	image_url?: string;

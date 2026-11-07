@@ -9,7 +9,7 @@ animations, data Pillow cannot read, or a WebP that would not be clearly
 smaller -- is kept as it came. ``HALO_IMAGE_OUTPUT_WEBP=0`` turns it off.
 
 Edits go the other way (``as_png_for_upstream``): the edit endpoint gets a PNG
-as before, whatever format the stored image is in.
+as before, whatever format the stored image is in; a GIF sends its first frame.
 """
 
 import io
@@ -70,9 +70,24 @@ def compact_generated_image(data: bytes, content_type: str) -> tuple[bytes, str]
     return webp, "image/webp"
 
 
+def is_animated_gif(data: bytes) -> bool:
+    """Whether *data* is a GIF that really moves: more than one distinct frame."""
+    try:
+        with Image.open(io.BytesIO(data)) as image:
+            if image.format != "GIF":
+                return False
+            frames = set()
+            for index in range(image.n_frames):
+                image.seek(index)
+                frames.add(image.convert("RGBA").tobytes())
+            return len(frames) > 1
+    except Exception:  # noqa: BLE001 -- unreadable data is no animation
+        return False
+
+
 def as_png_for_upstream(mime: str, data: bytes) -> tuple[str, bytes]:
-    """A stored WebP goes to the edit endpoint as PNG; anything else unchanged."""
-    if str(mime or "").split(";")[0].strip().lower() != "image/webp":
+    """A stored WebP or GIF goes to the edit endpoint as PNG; anything else unchanged."""
+    if str(mime or "").split(";")[0].strip().lower() not in {"image/webp", "image/gif"}:
         return mime, data
     try:
         with Image.open(io.BytesIO(data)) as image:
@@ -82,5 +97,5 @@ def as_png_for_upstream(mime: str, data: bytes) -> tuple[str, bytes]:
             image.convert(mode).save(out, "PNG")
             return "image/png", out.getvalue()
     except Exception as e:  # noqa: BLE001 -- let the upstream judge the WebP
-        log.warning("edit input sent as WebP: %s", e)
+        log.warning("edit input sent as is: %s", e)
         return mime, data

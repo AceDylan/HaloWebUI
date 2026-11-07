@@ -649,12 +649,14 @@ def get_builtin_tools(
             n: int = 1,
             size: Optional[str] = None,
             negative_prompt: Optional[str] = None,
+            output_format: Optional[str] = None,
         ):
             form = GenerateImageForm(
                 prompt=str(prompt),
                 n=int(n or 1),
                 size=size,
                 negative_prompt=negative_prompt,
+                output_format=output_format,
             )
             return await image_generations(request, form, user=user)
 
@@ -676,6 +678,16 @@ def get_builtin_tools(
                         "negative_prompt": {
                             "type": "string",
                             "description": "Negative prompt (if supported).",
+                        },
+                        "output_format": {
+                            "type": "string",
+                            "enum": ["png", "gif"],
+                            "description": (
+                                "Omit for a still image (the default). Set \"gif\" only when the "
+                                "user asks you to produce an animation: 动图, GIF, animated, make it "
+                                "move. Mentioning GIFs, declining them, or depicting animation in a "
+                                "still (a poster saying GIF) stays a still image."
+                            ),
                         },
                     },
                     "required": ["prompt"],

@@ -105,3 +105,15 @@ def test_db_retry_reuses_file_and_queued_illustration_skips_legacy_import(client
     import asyncio
     from open_webui.utils.agent_team_outputs import illustration_to_gallery
     assert asyncio.run(illustration_to_gallery(None, None, None, {"gallery_queued": True}))["reason"] == "hermes image queue"
+
+
+def test_animated_gif_is_stored_byte_for_byte_in_the_gallery(client):
+    frames = [Image.new("RGB", (8, 8), color) for color in ("red", "blue")]
+    out = io.BytesIO()
+    frames[0].save(out, format="GIF", save_all=True, append_images=frames[1:], duration=100)
+    body = payload("c", image_base64=base64.b64encode(out.getvalue()).decode())
+    response = client.post(ENDPOINT, headers=HEADERS, json=body)
+    assert response.status_code == 200, response.text
+    stored = Files.get_file_by_id(response.json()["url"].split("/")[-2])
+    assert stored.filename.endswith(".gif") and stored.meta["content_type"] == "image/gif"
+    assert Path(stored.path).read_bytes() == out.getvalue()

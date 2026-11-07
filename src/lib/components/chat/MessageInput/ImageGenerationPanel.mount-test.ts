@@ -63,6 +63,18 @@ afterEach(() => {
 	vi.mocked(toast.success).mockClear();
 });
 
+describe('animated GIF option in the chat image panel', () => {
+	it('keeps the GIF choice for gpt-image', async () => {
+		await mount([gptImage], { output_format: 'gif' });
+		expect(options().output_format).toBe('gif');
+	});
+
+	it('drops the GIF choice for a model that cannot make one', async () => {
+		await mount([{ ...gptImage, supports_quality: false }], { output_format: 'gif' });
+		expect(options().output_format).toBeNull();
+	});
+});
+
 describe('image template settings in the chat image panel', () => {
 	it("applies a picked template's size and quality once the model is known", async () => {
 		await mount([gptImage], { quality: 'low' });

@@ -373,7 +373,7 @@ def _start(request: Request, user, chat, run: dict) -> desk.LiveAnswer:
             ref = (plan["decision"].get("target") or plan["decision"].get("template") or {}).get("ref")
             return plan, {**summary, "assistant": ref}
 
-        plan, trace = await dm.decide(request, user, "answer", assisted, models_map=models_map, timeout=45)
+        plan, trace = await dm.decide(request, user, "answer", assisted, models_map=models_map)
         web_decided = None
         if isinstance(plan, dict) and plan.get("new"):
             web_decided, plan = plan["web"], None

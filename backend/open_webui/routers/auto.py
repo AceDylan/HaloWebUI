@@ -159,7 +159,7 @@ async def select(request, user, form, file_info):
             return picked, {"mode": picked["mode"], "execution_requested": picked["execution_requested"],
                             "confidence": answers["mode"].get("confidence")}
 
-        raw, trace = await dm.decide(request, user, "auto", assisted, models_map=models, ambiguous=ambiguous, timeout=25)
+        raw, trace = await dm.decide(request, user, "auto", assisted, models_map=models, ambiguous=ambiguous)
     if form.mode == "auto" and raw is None:
         async def classify():
             payload = {"model": routing_model, "stream": True,
@@ -283,7 +283,8 @@ async def dispatch(request, user, row, form, decision, models, ambiguous, bases,
 
 async def _run(request, user, row, form, file_info):
     try:
-        selection = await asyncio.wait_for(select(request, user, form, file_info), timeout=60)
+        # up to 60s for the 辅助决策模型, then 25s for the classifier it falls back to
+        selection = await asyncio.wait_for(select(request, user, form, file_info), timeout=95)
         await asyncio.wait_for(dispatch(request, user, row, form, *selection), timeout=180)
     except Exception as exc:
         # Never persist provider messages, credentials, or raw model output in a receipt.

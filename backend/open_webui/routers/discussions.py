@@ -683,7 +683,7 @@ async def _match(request: Request, user, chat_id: str, ask: dict, call_model) ->
             summary = {key: (d.get("target") or d.get("template") or {}).get("name") or d["action"] for key, d in found.items()}
             return (found, new), {**summary, **{key: "new → 主持人设计" for key in new}}
 
-        decided, trace = await dm.decide(request, user, "discuss", assisted, timeout=45)
+        decided, trace = await dm.decide(request, user, "discuss", assisted)
         if decided is not None:
             found, new = decided
             decisions.update(found)
@@ -809,7 +809,7 @@ async def _plan(request: Request, user, ask: dict, call_model, history: list[dic
 
     from open_webui.utils import decision_model as dm
 
-    decided, trace = await dm.decide(request, user, "discuss", assisted, models_map=models_map, ambiguous=ambiguous, timeout=45)
+    decided, trace = await dm.decide(request, user, "discuss", assisted, models_map=models_map, ambiguous=ambiguous)
     if decided is not None:
         setup, reason = decided
         return {"setup": setup, "reason": reason, "error": None, "decider": trace}

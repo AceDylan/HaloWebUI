@@ -52,7 +52,7 @@ QUESTION_MAX_CHARS = 8000
 ROLE_MAX_CHARS = 40
 # a seat's duty in this discussion (run-only; what its assistant brings is in the assistant)
 DUTY_MAX_CHARS = 120
-MATCH_TIMEOUT_SECONDS = 150
+MATCH_TIMEOUT_SECONDS = 165  # 辅助决策模型 (up to 60s) and then the dispatcher
 # 主持人安排: the moderator reads the question and staffs the discussion (format, rounds, seats)
 PLAN_TIMEOUT_SECONDS = 90
 PLAN_POOL_MAX = 40

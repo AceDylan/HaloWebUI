@@ -70,7 +70,7 @@ def _tools(request: Request, user, model_id: str, model_name: str, kind: str) ->
         return run_result(kind, chat_id, user.id)
 
     async def decide(run):
-        return await dm.decide(request, user, "video", run, timeout=45)
+        return await dm.decide(request, user, "video", run)
 
     # 视频工作台's choices (web / 精答 / 讨论 first) go to the user's 辅助决策模型 when one is set
     assisted = kind == "video" and bool(dm.current(user))

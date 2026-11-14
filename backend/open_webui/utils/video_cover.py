@@ -40,6 +40,8 @@ COVER_MAX_SIDE = 1920
 TITLE_MAX_CHARS = 40
 # The template whose model a cover is drawn with first (the one 结论配图 uses), then any gpt-image one.
 PREFERRED_TEMPLATE_ID = "halo_hand_v1_auto_style"
+COVR_SCAN_BYTES = 8 * 1024 * 1024
+FRAME_ZERO_MODEL = "视频第 0 帧"
 COVER_PROMPT = """参考图是一支视频的第一帧画面。请把它重新绘制成这支视频的封面（缩略图）：
 - 保持参考图里的主角、场景、画风和配色，让人一眼认出是同一支视频；不要换成别的风格；
 - 构图更集中、更有冲击力，主体清晰、光影更精致，适合在视频列表里小尺寸显示；
@@ -186,15 +188,44 @@ def _chat_title(chat_id: Optional[str]) -> str:
         return ""
 
 
-async def draw_cover(request, user, video: dict) -> dict:
-    """Draws one cover for a library video (its data); ``{"url", "fileId", "model"}``."""
-    from open_webui.routers.images import GenerateImageForm, image_generations, upload_image
+def has_cover_art(path: str) -> bool:
+    """The MP4 carries cover art (a ``covr`` atom): the video studio pipeline put its cover there
+    and in frame 0 (skill video-studio ``scripts/cover.py``), so that frame is the cover."""
+    try:
+        size = os.path.getsize(path)
+        with open(path, "rb") as f:
+            head = f.read(COVR_SCAN_BYTES)
+            f.seek(max(0, size - COVR_SCAN_BYTES))
+            tail = f.read(COVR_SCAN_BYTES)
+        return b"covr" in head or b"covr" in tail
+    except OSError:
+        return False
+
+
+def frame_zero(path: str) -> tuple[bytes, int, int]:
+    """Frame 0 as a JPEG at full size, and the video's width and height."""
+    import cv2
+
+    capture = cv2.VideoCapture(path)
+    try:
+        ok, frame = capture.read()
+        if not ok or frame is None:
+            raise IllustrateError("视频里读不出画面")
+        ok, encoded = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), 92])
+        if not ok:
+            raise IllustrateError("首帧转图片失败")
+        return encoded.tobytes(), frame.shape[1], frame.shape[0]
+    finally:
+        capture.release()
+
+
+async def draw_from_frame(request, user, frame: bytes, width: int, height: int, title: str) -> tuple[bytes, str]:
+    """gpt-image redraws *frame* as the cover titled *title*, cut to width:height; (JPEG, model).
+    The uncut picture image generation stored as a file of the user's is removed again."""
+    from open_webui.routers.images import GenerateImageForm, image_generations
     from open_webui.utils.chat_image_refs import extract_chat_image_file_id, resolve_chat_image_url_to_bytes
 
-    path = _local_path(str(video.get("fileId") or ""))
-    frame, width, height = await asyncio.to_thread(first_frame, path)
     size, orientation = canvas_for(width, height)
-    title = cover_title(str(video.get("name") or ""), _chat_title(video.get("chatId")))
     model = cover_model(user.id)
     form = GenerateImageForm(
         prompt=COVER_PROMPT.format(title=title, orientation=orientation, extra=""),
@@ -208,15 +239,44 @@ async def draw_cover(request, user, video: dict) -> dict:
     if not url:
         raise IllustrateError("生图没有返回图片")
     drawn = resolve_chat_image_url_to_bytes(url, user_id=user.id, is_admin=getattr(user, "role", "") == "admin")
-    if drawn:
-        try:
-            cover = await asyncio.to_thread(fit_to, drawn[1], width, height)
-            url = upload_image(request, {"video_cover": video.get("id"), "chat_id": video.get("chatId")},
-                               cover, "image/jpeg", user)
-        except Exception:  # noqa: BLE001 — the uncut picture is still a cover
-            log.warning("video cover: could not cut the cover of %s; keeping it as drawn", video.get("id"), exc_info=True)
-    return {"url": url, "fileId": extract_chat_image_file_id(url) or "",
-            "model": (model or "").rsplit("::", 1)[-1]}
+    if not drawn:
+        raise IllustrateError("读不到生成的图片")
+    cover = await asyncio.to_thread(fit_to, drawn[1], width, height)
+    _remove_file(extract_chat_image_file_id(url))
+    return cover, (model or "").rsplit("::", 1)[-1]
+
+
+def _remove_file(file_id: Optional[str]) -> None:
+    if not file_id:
+        return
+    try:
+        from open_webui.models.files import Files
+        from open_webui.storage.provider import Storage
+
+        file = Files.get_file_by_id(file_id)
+        if file is not None and file.path:
+            Storage.delete_file(file.path)
+        Files.delete_file_by_id(file_id)
+    except Exception:  # noqa: BLE001 — only a leftover picture
+        log.warning("video cover: could not remove the uncut picture %s", file_id, exc_info=True)
+
+
+async def draw_cover(request, user, video: dict) -> dict:
+    """The cover of a library video (its data); ``{"url", "fileId", "model"}``. A video whose
+    frame 0 already is its cover (cover art in the MP4) gets that frame, without drawing."""
+    from open_webui.routers.images import upload_image
+    from open_webui.utils.chat_image_refs import extract_chat_image_file_id
+
+    path = _local_path(str(video.get("fileId") or ""))
+    if await asyncio.to_thread(has_cover_art, path):
+        frame, width, height = await asyncio.to_thread(frame_zero, path)
+        cover, model = await asyncio.to_thread(fit_to, frame, width, height), FRAME_ZERO_MODEL
+    else:
+        frame, width, height = await asyncio.to_thread(first_frame, path)
+        title = cover_title(str(video.get("name") or ""), _chat_title(video.get("chatId")))
+        cover, model = await draw_from_frame(request, user, frame, width, height, title)
+    url = upload_image(request, {"video_cover": video.get("id"), "chat_id": video.get("chatId")}, cover, "image/jpeg", user)
+    return {"url": url, "fileId": extract_chat_image_file_id(url) or "", "model": model}
 
 
 def _error_text(exc: BaseException) -> str:

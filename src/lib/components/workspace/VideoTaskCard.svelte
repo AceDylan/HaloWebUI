@@ -19,6 +19,7 @@
 	export let task: VideoTask;
 	export let where: 'studio' | 'chat' = 'studio';
 	export let stopping = false;
+	export let deleting = false;
 	/** Opened from the chat's card: shown with a ring until the next look elsewhere. */
 	export let highlight = false;
 
@@ -164,6 +165,17 @@
 					disabled={stopping}
 					on:click={() => dispatch('stop', task)}
 					data-video-task-stop>{stopping ? '停止中…' : '停止'}</button
+				>
+			</div>
+		{:else if where === 'studio'}
+			<div class="mt-2 flex justify-end">
+				<button
+					type="button"
+					class="rounded-lg px-1 text-[11px] text-gray-400 transition hover:text-red-600 disabled:opacity-60 dark:hover:text-red-400"
+					disabled={deleting}
+					title="删除这个任务的对话和它做出的视频文件，释放空间"
+					on:click={() => dispatch('delete', task)}
+					data-video-task-delete>{deleting ? '删除中…' : '删除'}</button
 				>
 			</div>
 		{/if}

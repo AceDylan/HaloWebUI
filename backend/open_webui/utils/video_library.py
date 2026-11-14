@@ -148,6 +148,45 @@ def mark_video_chat(chat_id: str, messages) -> bool:
         return False
 
 
+def delete_owned_file(user_id: str, file_id: str) -> int:
+    """Deletes one of the user's files for good (the stored bytes and the row); its size in bytes,
+    0 when it is not theirs or not there. A chat that showed it no longer can."""
+    from open_webui.models.files import Files
+    from open_webui.storage.provider import Storage
+
+    if not file_id:
+        return 0
+    file = Files.get_file_by_id(file_id)
+    if file is None or file.user_id != user_id:
+        return 0
+    size = int((file.meta or {}).get("size") or 0)
+    if file.path:
+        try:
+            if not size and os.path.isfile(file.path):
+                size = os.path.getsize(file.path)
+            Storage.delete_file(file.path)
+        except Exception:  # noqa: BLE001 — the row still goes: nothing left to show
+            log.warning("could not delete the stored bytes of %s", file_id, exc_info=True)
+    Files.delete_file_by_id(file_id)
+    return size
+
+
+def delete_video(user_id: str, item_id: str, files: bool = True) -> Optional[int]:
+    """Takes a video out of the library; with *files* also deletes the video file and its cover
+    (frees the space; the chat that showed it can no longer play it). Bytes freed, None when the
+    video is not in the library."""
+    row = _get_video(user_id, item_id)
+    if row is None:
+        return None
+    freed = 0
+    if files:
+        data = row.data or {}
+        for key in ("fileId", "coverFileId"):
+            freed += delete_owned_file(user_id, str(data.get(key) or ""))
+    ImageStudioItems.delete_item_by_id_and_user_id(item_id, user_id)
+    return freed
+
+
 VIDEO_EXTENSIONS = (".mp4", ".m4v", ".mov", ".webm", ".mkv")
 RUN_VIDEOS_MAX = 6
 

@@ -209,7 +209,9 @@ describe('normalizeVideoSettings', () => {
 			subtitles: false,
 			maker: 'agy',
 			musicFit: 'full',
-			place: 'pc'
+			place: 'pc',
+			kind: 'normal',
+			mvTheme: 'lyricpv'
 		});
 		expect(normalizeVideoSettings({ musicFit: 'trim' }).musicFit).toBe('trim');
 		expect(normalizeVideoSettings({ place: 'server' }).place).toBe('server');
@@ -497,5 +499,46 @@ describe('video visual styles', () => {
 		expect(brief).toContain(idea);
 		// Even the minimal fallback must keep the warning that the draft is obsolete.
 		expect(fitVideoBrief(opts, 10)).toContain('## 设置已更新');
+	});
+});
+
+describe('publishing standard and MP3 做 MV', () => {
+	const base = { ...DEFAULT_VIDEO_SETTINGS, idea: '  用 60 秒讲清楚 HTTPS  ' };
+	it('asks every video to hold people from the first frame and to carry its cover in frame 0', () => {
+		for (const brief of [buildVideoBrief(base), buildVideoBrief({ ...base, place: 'server' }), buildVideoBrief({ ...base, recipe: 'footage' })]) {
+			expect(brief).toContain('## 发布标准');
+			expect(brief).toContain('第 0.5 秒内');
+			expect(brief).toContain('同一张图停留不超过 4 秒');
+			expect(brief).toContain('放进视频第 0 帧');
+			expect(brief).toContain('scripts/cover.py all');
+		}
+		expect(buildVideoBrief(base)).toContain('pc-video deliver');
+		expect(buildVideoBrief(base)).toContain('只写 Windows 路径');
+		expect(buildVideoBrief({ ...base, place: 'server' })).not.toContain('pc-video');
+	});
+
+	it('MP3 做 MV: a JIZURA lyric MV of the song, its lyrics and theme, no voice or recipe', () => {
+		const song = { name: '笑一笑.mp3', seconds: 171 };
+		const mv = buildVideoBrief({ ...base, kind: 'mv', mvTheme: 'ballad', music: song, idea: '轻快治愈', lyrics: '闹钟响了三遍才爬起来\n镜子里的自己有点呆' });
+		expect(mv.startsWith('请制作一个视频（来自 HaloWebUI 视频工作台）')).toBe(true);
+		expect(mv).toContain('歌曲 MV');
+		expect(mv).toContain('pc-video jizura');
+		expect(mv).toContain('--theme ballad');
+		expect(mv).toContain('笑一笑.mp3（2:51）');
+		expect(mv).toContain('没有时间轴：先与人声对齐成 LRC');
+		expect(mv).toContain('## 歌词\n闹钟响了三遍才爬起来');
+		expect(mv).toContain('## 发布标准');
+		expect(mv).not.toContain('- 配音');
+		expect(mv).not.toContain('## 背景音乐');
+		// timed lyrics are used as they are; no lyrics: transcribe and ask about doubtful words
+		expect(buildVideoBrief({ ...base, kind: 'mv', music: song, lyrics: '[00:07.74]闹钟' })).toContain('带时间轴，直接用');
+		expect(buildVideoBrief({ ...base, kind: 'mv', music: song, lyrics: '' })).toContain('交给用户确认');
+		// the server has no JIZURA
+		const server = buildVideoBrief({ ...base, kind: 'mv', music: song, place: 'server' });
+		expect(server).toContain('改用 Remotion');
+		expect(server).not.toContain('pc-video');
+		expect(buildVideoBrief({ ...base, kind: 'mv', music: song, maker: 'codex' }).startsWith('/codex ')).toBe(true);
+		expect(normalizeVideoSettings({ kind: 'mv', mvTheme: 'kinetic' })).toMatchObject({ kind: 'mv', mvTheme: 'kinetic' });
+		expect(normalizeVideoSettings({ kind: 'x', mvTheme: 'y' })).toMatchObject({ kind: 'normal', mvTheme: 'lyricpv' });
 	});
 });

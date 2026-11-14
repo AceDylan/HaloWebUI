@@ -92,9 +92,9 @@ def test_the_library_comes_a_page_at_a_time_with_titles_and_search():
 def test_taking_a_video_out_touches_only_the_library():
     record_video("vid-cat", file_id="c1", name="a.mp4", size=9, content_type="video/mp4")
     item_id = video_item_id("a.mp4", 9)
-    assert _client("vid-eve").delete(f"/api/v1/video-studio/items/{item_id}").json() is False
+    assert _client("vid-eve").delete(f"/api/v1/video-studio/items/{item_id}").status_code == 404
     assert _client("vid-cat").delete("/api/v1/video-studio/items/gallery_x").status_code == 404
-    assert _client("vid-cat").delete(f"/api/v1/video-studio/items/{item_id}").json() is True
+    assert _client("vid-cat").delete(f"/api/v1/video-studio/items/{item_id}").json() == {"deleted": True, "freed": 0}
     assert ImageStudioItems.get_items_by_user_id("vid-cat", kind="video") == []
 
 
@@ -247,3 +247,47 @@ def test_the_home_pc_state_comes_from_the_hosts_report(monkeypatch):
     report.write_text("not json")
     assert client.get("/api/v1/video-studio/pc").json()["state"] == "unknown"
     report.unlink()
+
+
+
+def _stored(user_id: str, file_id: str, name: str, size: int = 2048) -> str:
+    from open_webui.config import UPLOAD_DIR
+    from open_webui.models.files import FileForm, Files
+
+    os.makedirs(UPLOAD_DIR, exist_ok=True)
+    path = os.path.join(str(UPLOAD_DIR), f"{file_id}_{name}")
+    with open(path, "wb") as f:
+        f.write(b"x" * size)
+    Files.insert_new_file(user_id, FileForm(id=file_id, filename=name, path=path, meta={"name": name, "size": size}))
+    return path
+
+
+def test_a_video_deleted_with_its_files_frees_the_space():
+    video = _stored("vid-hd", "hd-video", "成片.mp4", 5000)
+    cover = _stored("vid-hd", "hd-cover", "cover.jpg", 300)
+    item_id = record_video("vid-hd", file_id="hd-video", name="成片.mp4", size=5000, content_type="video/mp4")
+    from open_webui.utils.video_library import set_video_fields
+
+    set_video_fields("vid-hd", item_id, {"coverFileId": "hd-cover", "cover": "/api/v1/files/hd-cover/content"})
+    # someone else cannot
+    assert _client("vid-other").delete(f"/api/v1/video-studio/items/{item_id}?files=true").status_code == 404
+    res = _client("vid-hd").delete(f"/api/v1/video-studio/items/{item_id}?files=true").json()
+    assert res == {"deleted": True, "freed": 5300}
+    assert not os.path.exists(video) and not os.path.exists(cover)
+    from open_webui.models.files import Files
+
+    assert Files.get_file_by_id("hd-video") is None and Files.get_file_by_id("hd-cover") is None
+    assert ImageStudioItems.get_items_by_user_id("vid-hd", kind="video") == []
+
+
+def test_an_uploaded_mp3_is_deleted_for_good_with_its_copies():
+    a = _stored("vid-mu", "mu-1", "夏日.mp3", 1000)
+    b = _stored("vid-mu", "mu-2", "夏日.mp3", 1000)   # the same song uploaded again
+    c = _stored("vid-mu", "mu-3", "别的.mp3", 700)
+    client = _client("vid-mu")
+    assert {m["name"] for m in client.get("/api/v1/video-studio/music").json()} == {"夏日.mp3", "别的.mp3"}
+    assert _client("vid-x").delete("/api/v1/video-studio/music/mu-1").status_code == 404
+    assert client.delete("/api/v1/video-studio/music/mu-1").json() == {"deleted": 2, "freed": 2000}
+    assert not os.path.exists(a) and not os.path.exists(b) and os.path.exists(c)
+    assert [m["name"] for m in client.get("/api/v1/video-studio/music").json()] == ["别的.mp3"]
+    assert client.delete("/api/v1/video-studio/music/mu-1").status_code == 404

@@ -86,6 +86,37 @@ export const VIDEO_MAKERS: { key: VideoMaker; label: string; sub: string }[] = [
 	{ key: 'agy', label: 'agy', sub: 'Gemini · 快' }
 ];
 
+/** 两类视频: an ordinary video, or an MP3 made into an MP4 (a lyric MV, JIZURA on the home PC). */
+export type VideoKind = 'normal' | 'mv';
+export type MvTheme = 'lyricpv' | 'kinetic' | 'ballad' | 'pop' | 'any';
+export const VIDEO_KINDS: { key: VideoKind; label: string; sub: string }[] = [
+	{ key: 'normal', label: '普通视频', sub: '讲解、宣传、图文、剪辑…' },
+	{ key: 'mv', label: 'MP3 做 MV', sub: '一首歌 → 歌词 MV（MP4）' }
+];
+/** JIZURA's おまかせ directions (skill video-studio「歌曲 MV / 歌词视频」, --theme). */
+export const MV_THEMES: { key: MvTheme; label: string; sub: string }[] = [
+	{ key: 'lyricpv', label: '文字 PV', sub: '排版感，适合多数歌' },
+	{ key: 'kinetic', label: '动感', sub: '跳跃、快切，节奏强的歌' },
+	{ key: 'ballad', label: '抒情', sub: '慢歌、温柔' },
+	{ key: 'pop', label: '流行', sub: '明快、多彩' },
+	{ key: 'any', label: '随机', sub: '交给它挑' }
+];
+/** Lyrics pasted for an MV (a whole song's lines, LRC times included). */
+export const MV_LYRICS_MAX = 4000;
+
+/** 发布标准: every video is made to be published — it has to hold people from the first frame to
+ * the last (the user's standing requirement, 2026-11-14), wherever it is rendered. */
+export const publishLines = (place: VideoPlace) => [
+	'',
+	'## 发布标准（默认要求，每个视频都要做到）',
+	'- 这是要发布出去的视频，目标是抓人、让人看完：第 0.5 秒内就要有吸引人的动态画面或一句钩子，不要黑场、静止片名卡或一张图干等',
+	'- 片头片尾即使只有音乐、没有人声，画面也要一直在动（镜头推移、元素进出、文字动效、随节拍切换）：任何画面静止不超过 2 秒，同一张图停留不超过 4 秒',
+	'- 全程连续、节奏跟着音乐或旁白走，大约在 60–75% 处放最有冲击力的画面；结尾 1–2 秒内收在一个仍有动作的画面上，不要拖长的静止片尾',
+	place === 'server'
+		? '- 封面：交付前按技能 video-studio「封面」一节运行 scripts/cover.py all，用 gpt-image 依据首帧画好封面并放进视频第 0 帧'
+		: '- 封面：交付前按技能 video-studio「封面」一节，用 gpt-image 依据首帧画好封面并放进视频第 0 帧（pc-video deliver 会自动做；家里电脑不在线、改在服务器做时运行 scripts/cover.py all）'
+];
+
 export const VIDEO_PLACES: { key: VideoPlace; label: string; sub: string }[] = [
 	{ key: 'pc', label: '家里电脑', sub: 'RTX 3070 · 成片存 D 盘' },
 	{ key: 'server', label: '服务器', sub: '一直在线 · 渲染较慢' }
@@ -140,11 +171,16 @@ export type VideoBriefOptions = {
 	prepJob?: string | null;
 	/** What 自动选择 reads to pick a style: the user's own words (the idea before enhancement). */
 	styleTopic?: string;
+	/** 普通视频 (default) or MP3 做 MV. */
+	kind?: VideoKind;
+	mvTheme?: MvTheme;
+	/** MP3 做 MV: the lyrics the user pasted ('' = none: they are transcribed). */
+	lyrics?: string;
 };
 
 export type VideoSettings = Omit<
 	VideoBriefOptions,
-	'idea' | 'attachments' | 'music' | 'prep' | 'prepJob' | 'styleTopic'
+	'idea' | 'attachments' | 'music' | 'prep' | 'prepJob' | 'styleTopic' | 'lyrics'
 >;
 
 /** The brief's line for an enhancement still going (backend utils/studio_prep.py PREP_MARK). */
@@ -161,7 +197,9 @@ export const DEFAULT_VIDEO_SETTINGS: VideoSettings = {
 	subtitles: true,
 	maker: '',
 	musicFit: 'full',
-	place: 'pc'
+	place: 'pc',
+	kind: 'normal',
+	mvTheme: 'lyricpv'
 };
 
 const pick = <T extends string>(value: unknown, allowed: readonly T[], fallback: T): T =>
@@ -206,6 +244,16 @@ export const normalizeVideoSettings = (value: unknown): VideoSettings => {
 			raw.place,
 			VIDEO_PLACES.map((p) => p.key),
 			DEFAULT_VIDEO_SETTINGS.place
+		),
+		kind: pick(
+			raw.kind,
+			VIDEO_KINDS.map((k) => k.key),
+			'normal'
+		),
+		mvTheme: pick(
+			raw.mvTheme,
+			MV_THEMES.map((t) => t.key),
+			'lyricpv'
 		)
 	};
 };
@@ -353,7 +401,55 @@ const prepLines = (prep: VideoPrep, idea: string): string[] => {
 };
 
 /** The message the chat sends: the runner's command in front, then the brief. */
+/** The delivery paragraph's last instruction: where the finished video goes. */
+const MEDIA_DELIVERY = '最后单独一行写「MEDIA:」紧跟成片 mp4 的绝对路径（这一行不要放进代码块）';
+const deliveryLine = (place: VideoPlace) =>
+	place === 'server'
+		? `完成后用一小段话说明做法、时长和分镜；先用 scripts/cover.py all 放好封面，${MEDIA_DELIVERY}。`
+		: `完成后用一小段话说明做法、时长和分镜。在家里电脑做的：按技能用 pc-video deliver 交付（自动放封面、存到 D:\\HermesWork\\视频\\），回复里只写 Windows 路径，不写 MEDIA；家里电脑不在线、改在服务器做的：先用 scripts/cover.py all 放好封面，${MEDIA_DELIVERY}。`;
+
+/** MP3 做 MV: a lyric MV of the user's song (JIZURA on the home PC). */
+export const buildMvBrief = (opts: VideoBriefOptions): string => {
+	const music = opts.music ?? null;
+	const theme = MV_THEMES.find((t) => t.key === opts.mvTheme) ?? MV_THEMES[0];
+	const frame = VIDEO_FRAMES.find((f) => f.key === opts.frame) ?? VIDEO_FRAMES[0];
+	const lyrics = (opts.lyrics ?? '').trim().slice(0, MV_LYRICS_MAX);
+	const timed = /^\s*\[\d+:\d+(?:[.:]\d+)?\]/m.test(lyrics);
+	const attachments = opts.attachments ?? [];
+	const lines = [
+		'请制作一个视频（来自 HaloWebUI 视频工作台）。',
+		'',
+		'## 想要的视频',
+		`把这首歌做成歌词 MV（MP4）。${opts.idea.trim() ? `\n${opts.idea.trim()}` : ''}`,
+		'',
+		'## 要求',
+		opts.place === 'server'
+			? '- 做法：歌曲 MV —— 按技能 video-studio「歌曲 MV / 歌词视频」一节做跟着节拍走的动态歌词画面；无旁白、不另加字幕层'
+			: '- 做法：歌曲 MV —— 按技能 video-studio「歌曲 MV / 歌词视频」一节，用 JIZURA（pc-video jizura）把歌词做成跟着节拍走的动态文字画面；无旁白、不另加字幕层',
+		music
+			? `- 歌曲：${plainName(music.name)}${music.seconds ? `（${clockLabel(music.seconds)}）` : ''}，随消息附上，原文件路径见消息末尾的附件原文件；成片和这首歌一样长，音乐从 0 秒开始，不换、不加别的配乐`
+			: '- 歌曲：（还没选）',
+		`- 画面主题：${theme.label}（--theme ${theme.key}）；先渲一段样片看拼图，满意再出整首`,
+		`- 画幅：${frame.label} ${frame.key}（${frame.size}）`,
+		lyrics
+			? `- 歌词：用户已提供（见下面「## 歌词」）${timed ? '，带时间轴，直接用' : '，没有时间轴：先与人声对齐成 LRC 再做，对不上的地方以人声为准'}`
+			: '- 歌词：用户没给。先识别歌词并与人声对齐成 LRC；听不清、拿不准的词不要猜，列出来交给用户确认后再做整首',
+		placeLine(opts.place),
+		...(opts.place === 'server'
+			? ['- 选了服务器：JIZURA 只装在家里电脑，服务器上改用 Remotion 做「无旁白：音乐 + 设计字幕」的动态歌词，交付时说明']
+			: ['- 家里电脑不在线时 JIZURA 用不了：说明情况，等电脑开机或改用 Remotion 在服务器做动态歌词'])
+	];
+	if (attachments.length) {
+		lines.push(`- 参考附件：${attachmentCounts(attachments)}（${attachments.map((a) => plainName(a.name)).join('、')}），先看完；LRC/SRT 歌词文件优先于下面贴的歌词`);
+	}
+	if (lyrics) lines.push('', '## 歌词', lyrics);
+	lines.push(...publishLines(opts.place), '', '## 怎么做', `先读技能 video-studio（${VIDEO_SKILL_PATH}）。`, deliveryLine(opts.place));
+	const brief = lines.join('\n');
+	return opts.maker ? `/${opts.maker} ${brief}` : brief;
+};
+
 export const buildVideoBrief = (opts: VideoBriefOptions): string => {
+	if (opts.kind === 'mv') return buildMvBrief(opts);
 	const recipe = VIDEO_RECIPES.find((r) => r.key === opts.recipe) ?? VIDEO_RECIPES[0];
 	const attachments = opts.attachments ?? [];
 	const music = opts.music ?? null;
@@ -412,10 +508,11 @@ export const buildVideoBrief = (opts: VideoBriefOptions): string => {
 		}
 	}
 	lines.push(
+		...publishLines(opts.place),
 		'',
 		'## 怎么做',
 		`先读技能 video-studio（${VIDEO_SKILL_PATH}），按其中「${recipe.label}」的做法和流程制作；正式渲染前先出样片或分镜拼图自己检查一遍。`,
-		'完成后用一小段话说明做法、时长和分镜，最后单独一行写「MEDIA:」紧跟成片 mp4 的绝对路径来交付（这一行不要放进代码块）。'
+		deliveryLine(opts.place)
 	);
 	const brief = lines.join('\n');
 	return opts.maker ? `/${opts.maker} ${brief}` : brief;

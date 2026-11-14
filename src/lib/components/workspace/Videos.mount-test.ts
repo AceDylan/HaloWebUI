@@ -14,7 +14,9 @@ vi.mock('$app/stores', async () => {
 });
 const api = vi.hoisted(() => ({
 	getVideoPage: vi.fn(),
-	deleteLibraryVideo: vi.fn(async () => true),
+	deleteLibraryVideo: vi.fn(async () => ({ deleted: true, freed: 2048 })),
+	deleteMusicFile: vi.fn(async () => ({ deleted: 1, freed: 1000 })),
+	deleteVideoTask: vi.fn(async () => ({ deleted: true, videos: 1, freed: 4096 })),
 	getMusicFiles: vi.fn(async () => [] as any[]),
 	startVideoTask: vi.fn(),
 	getVideoTasks: vi.fn(async () => [] as any[]),
@@ -63,6 +65,12 @@ const dropOn = async (el: any, file: File) => {
 const mp3 = (name = '夏日.mp3', bytes = [0x49, 0x44, 0x33, 4, 0, 0]) => new File([new Uint8Array(bytes)], name, { type: 'audio/mpeg' });
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+// the ConfirmDialog's confirm button (its last button)
+const confirmDelete = async () => {
+	const buttons = Array.from(document.querySelectorAll('button') as any).filter((b: any) => b.textContent.trim() === '删除');
+	(buttons.at(-1) as any).click();
+	await sleep(30);
+};
 // what 开始制作 sent to the server: the brief as `text`, with the files, the maker and the words
 const sent = () => {
 	const form = api.startVideoTask.mock.calls.at(-1)[1];
@@ -116,6 +124,8 @@ beforeEach(() => {
 	api.stopVideoTask.mockReset();
 	api.getVideoPage.mockReset();
 	api.deleteLibraryVideo.mockClear();
+	api.deleteMusicFile.mockClear();
+	api.deleteVideoTask.mockClear();
 	api.getMusicFiles.mockReset();
 	api.getMusicFiles.mockResolvedValue([]);
 	upload.uploadFileReliably.mockReset();
@@ -425,7 +435,11 @@ describe('Videos', () => {
 		expect(cards()).toEqual(['video_3', 'video_2', 'video_1']);
 		target.querySelector('[data-video-delete="video_2"]').click();
 		await sleep(20);
-		expect(api.deleteLibraryVideo).toHaveBeenCalledWith(expect.anything(), 'video_2');
+		// it asks first: the file goes for good
+		expect(api.deleteLibraryVideo).not.toHaveBeenCalled();
+		expect(document.body.textContent).toContain('删除视频文件');
+		await confirmDelete();
+		expect(api.deleteLibraryVideo).toHaveBeenCalledWith(expect.anything(), 'video_2', true);
 		expect(cards()).toEqual(['video_3', 'video_1']);
 	});
 
@@ -759,6 +773,65 @@ describe('Videos 制作任务', () => {
 		await sleep(10);
 		expect(target.querySelector('[data-video-task="ok1"]')).toBeFalsy();
 		expect(target.querySelector('[data-video-task="run1"]')).toBeFalsy();
+	});
+
+	it('MP3 做 MV: the song is required, an MV has no voice, subtitles or recipe, and the brief asks for JIZURA', async () => {
+		api.getVideoPage.mockResolvedValue({ items: [], next: null });
+		upload.uploadFileReliably.mockResolvedValue({ file: { id: 'm9' } });
+		const target = await mount();
+		target.querySelector('[data-video-kind="mv"]').click();
+		await sleep(10);
+		expect(target.querySelector('[data-video-kind="mv"]').getAttribute('aria-checked')).toBe('true');
+		for (const gone of ['[data-video-recipe]', '[data-video-voice]', '[data-video-length]', '[data-video-prep-options]', '[data-video-music-fit]'])
+			expect(target.querySelector(gone)).toBeFalsy();
+		expect(target.querySelectorAll('[data-video-mv-theme]').length).toBe(5);
+		expect(target.querySelector('[data-video-status]').textContent).toContain('先选一首 MP3');
+		await dropOn(target.querySelector('[data-video-music]'), mp3('笑一笑.mp3'));
+		const box = target.querySelector('[data-video-lyrics]');
+		box.value = '[00:07.74]闹钟响了三遍才爬起来\n[00:11.90]镜子里的自己有点呆';
+		box.dispatchEvent(new Event('input'));
+		target.querySelector('[data-video-mv-theme="kinetic"]').click();
+		await sleep(10);
+		expect(target.querySelector('[data-video-status]').textContent).toContain('歌词 MV（动感）');
+		target.querySelector('[data-video-workbench]').dispatchEvent(new Event('submit'));
+		await sleep(20);
+		expect(prepApi.startStudioPrep).not.toHaveBeenCalled(); // nothing to enhance
+		const entry = sent();
+		expect(entry.files).toEqual([{ id: 'm9', name: '笑一笑.mp3', type: 'file' }]);
+		expect(entry.text).toContain('歌曲 MV');
+		expect(entry.text).toContain('--theme kinetic');
+		expect(entry.text).toContain('带时间轴，直接用');
+		expect(entry.text).toContain('## 歌词\n[00:07.74]闹钟响了三遍才爬起来');
+		expect(entry.text).toContain('## 发布标准');
+		expect(entry.text).not.toContain('配音');
+		expect(JSON.parse(localStorage.getItem('halo.videoStudio.settings')!)).toMatchObject({ kind: 'mv', mvTheme: 'kinetic' });
+	});
+
+	it('deletes an uploaded MP3 and a finished task for good, after asking', async () => {
+		api.getVideoPage.mockResolvedValue({ items: [], next: null });
+		api.getMusicFiles.mockResolvedValue([{ id: 'old1', name: '旧歌.mp3', size: 1000, createdAt: 1 }]);
+		api.getVideoTasks.mockResolvedValue([
+			videoTask({ chatId: 'ok1', id: 'ok1', state: 'done', now: '成片 1 个', endedAt: Math.floor(Date.now() / 1000), videos: [video(7)] }),
+			videoTask({ chatId: 'run1', id: 'run1', state: 'running' })
+		]);
+		const target = await mount();
+		await sleep(20);
+		target.querySelector('[data-video-music-delete="old1"]').click();
+		await sleep(10);
+		expect(document.body.textContent).toContain('删除这首音乐');
+		await confirmDelete();
+		expect(api.deleteMusicFile).toHaveBeenCalledWith('token', 'old1');
+		expect(target.querySelector('[data-video-music-pick="old1"]')).toBeFalsy();
+		// a task at work has 停止, not 删除
+		expect(target.querySelector('[data-video-task="run1"] [data-video-task-delete]')).toBeFalsy();
+		target.querySelector('[data-video-task-history-toggle]').click();
+		await sleep(10);
+		target.querySelector('[data-video-task="ok1"] [data-video-task-delete]').click();
+		await sleep(10);
+		expect(document.body.textContent).toContain('删除任务');
+		await confirmDelete();
+		expect(api.deleteVideoTask).toHaveBeenCalledWith('token', 'ok1');
+		expect(target.querySelector('[data-video-task="ok1"]')).toBeFalsy();
 	});
 
 	it('shows whether the home PC is on next to 生成位置, read when the page opens', async () => {

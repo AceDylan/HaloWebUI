@@ -290,6 +290,41 @@ def test_a_video_left_on_the_home_pc_is_done_by_its_windows_path():
     assert video_tasks.get_task("vt-pc", other.id)["state"] == "replied"
 
 
+def test_deleting_a_task_deletes_its_chat_and_its_video_files():
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from open_webui.routers import video_studio
+    from open_webui.utils.auth import get_verified_user
+
+    class _U:
+        id, role = "vt-del", "user"
+
+    app = FastAPI()
+    app.include_router(video_studio.router, prefix="/api/v1/video-studio")
+    app.dependency_overrides[get_verified_user] = lambda: _U()
+    client = TestClient(app)
+
+    from open_webui.config import UPLOAD_DIR
+
+    os.makedirs(UPLOAD_DIR, exist_ok=True)
+    path = f"{UPLOAD_DIR}/del-video.mp4"
+    with open(path, "wb") as f:
+        f.write(b"v" * 4000)
+    Files.insert_new_file("vt-del", FileForm(id="fdel", filename="del-video.mp4", path=path,
+                                             meta={"name": "del-video.mp4", "size": 4000}))
+    done = _task_chat("vt-del", {"done": True, "completedAt": int(time.time())})
+    record_video("vt-del", file_id="fdel", name="del-video.mp4", size=4000, content_type="video/mp4", chat_id=done.id)
+    working = _task_chat("vt-del", {"done": False, "hermes_run": {"active": True}})
+    assert client.delete(f"/api/v1/video-studio/tasks/{working.id}").status_code == 409
+    assert client.delete("/api/v1/video-studio/tasks/nope").status_code == 404
+    res = client.delete(f"/api/v1/video-studio/tasks/{done.id}").json()
+    assert res == {"deleted": True, "videos": 1, "freed": 4000}
+    assert Chats.get_chat_by_id(done.id) is None
+    assert not os.path.exists(path) and Files.get_file_by_id("fdel") is None
+    assert video_tasks.get_task("vt-del", done.id) is None
+
+
 def test_failed_stopped_and_cut_off_say_where_they_ended():
     failed = _task_chat("vt-fay", {"done": True, "error": {"content": "Hermes 连接失败"}})
     stopped = _task_chat("vt-fay", {"done": True}, meta={"stoppedAt": int(time.time())})

@@ -182,3 +182,41 @@ def test_start_needs_a_request_and_a_loop(monkeypatch):
     assert video_cover.start(None, _User("x"), "video_1") is False
     assert video_cover.start(object(), _User("x"), "video_1") is False  # no running loop
     assert video_cover.start(object(), _User("x"), None) is False
+
+
+def test_a_video_with_cover_art_uses_its_frame_zero(tmp_path, monkeypatch):
+    plain = tmp_path / "plain.mp4"
+    plain.write_bytes(b"\x00" * 1000 + b"moov" + b"\x00" * 1000)
+    covered = tmp_path / "covered.mp4"
+    covered.write_bytes(b"\x00" * 1000 + b"moovudtametailstcovr" + b"\x00" * 1000)
+    assert not video_cover.has_cover_art(str(plain))
+    assert video_cover.has_cover_art(str(covered))
+
+    calls = []
+    monkeypatch.setattr(video_cover, "_local_path", lambda file_id: str(covered))
+    monkeypatch.setattr(video_cover, "frame_zero", lambda path: (_png(1280, 720), 1280, 720))
+
+    async def draw(*a, **k):
+        calls.append(a)
+        return b"x", "gpt-image"
+
+    monkeypatch.setattr(video_cover, "draw_from_frame", draw)
+    import open_webui.routers.images as images
+
+    monkeypatch.setattr(images, "upload_image", lambda request, meta, data, kind, user: "/api/v1/files/fz/content")
+    out = asyncio.run(video_cover.draw_cover(None, _User("vc-fz"), {"id": "video_1", "fileId": "f"}))
+    assert out == {"url": "/api/v1/files/fz/content", "fileId": "fz", "model": video_cover.FRAME_ZERO_MODEL}
+    assert calls == []  # no drawing: frame 0 already is the cover
+
+
+def test_the_pipeline_cover_endpoint_needs_the_notification_token(monkeypatch):
+    app = FastAPI()
+    app.include_router(video_studio.router, prefix="/api/v1/video-studio")
+    client = TestClient(app)
+    body = {"frame": "A" * 200, "width": 1920, "height": 1080, "title": "笑一笑"}
+    monkeypatch.delenv("HERMES_AGENT_NOTIFY_TOKEN", raising=False)
+    assert client.post("/api/v1/video-studio/cover-image", json=body).status_code == 503
+    monkeypatch.setenv("HERMES_AGENT_NOTIFY_TOKEN", "tok-1")
+    assert client.post("/api/v1/video-studio/cover-image", json=body).status_code == 401
+    assert client.post("/api/v1/video-studio/cover-image", json=body,
+                       headers={"Authorization": "Bearer nope"}).status_code == 401

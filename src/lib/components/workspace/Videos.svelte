@@ -31,6 +31,8 @@
 	import {
 		deleteLibraryVideo,
 		redrawVideoCover,
+		deleteMusicFile,
+		deleteVideoTask,
 		getPcStatus,
 		getMusicFiles,
 		getVideoPage,
@@ -47,6 +49,7 @@
 		type VideoTask
 	} from '$lib/apis/video-studio';
 	import { uploadFileReliably } from '$lib/utils/reliable-upload';
+	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import { isHermesAgentModel } from '$lib/utils/hermes';
 	import { formatFileSize } from '$lib/utils';
 	import { HANDOFF_TEXT_MAX, takeHandoff, type HandoffOrigin } from '$lib/utils/handoff';
@@ -62,6 +65,9 @@
 		VIDEO_FRAMES,
 		VIDEO_LENGTHS,
 		VIDEO_MAKERS,
+		VIDEO_KINDS,
+		MV_THEMES,
+		MV_LYRICS_MAX,
 		VIDEO_PLACES,
 		VIDEO_RECIPES,
 		VIDEO_VOICES,
@@ -151,6 +157,12 @@
 	let modelsChecked = false;
 	$: uploading = attachments.some((a) => a.uploading);
 	$: musicReady = music && !music.uploading && music.id ? music : null;
+	// MP3 做 MV: the song is the video (JIZURA on the home PC); its lyrics, when the user has them
+	$: isMv = settings.kind === 'mv';
+	let lyrics = '';
+	// an MV is always as long as its song
+	const setKind = (kind: VideoSettings['kind']) =>
+		(settings = { ...settings, kind, ...(kind === 'mv' ? { musicFit: 'full' as const } : {}) });
 	// the music is listed as music, not again as an attachment (a file handed over from a chat)
 	$: ready = attachments.filter((a) => !a.uploading && a.id && a.id !== musicReady?.id);
 	$: musicTooLong = !!music?.seconds && music.seconds > MUSIC_MAX_SECONDS;
@@ -171,6 +183,7 @@
 		: settings.style === 'custom' && !settings.customStyle.trim() ? '请先填写自定义风格' : '';
 	$: briefOptions = {
 		...prepSettings,
+		...(isMv ? { musicFit: 'full' as const, lyrics } : {}),
 		prep: prepared
 			? {
 					original: prepared.original,
@@ -181,7 +194,7 @@
 				}
 			: null
 	};
-	$: brief = fitVideoBrief({ ...briefOptions, idea: idea.trim() || '（在左边写下想要的视频）' }, HANDOFF_TEXT_MAX);
+	$: brief = fitVideoBrief({ ...briefOptions, idea: isMv ? idea.trim() : idea.trim() || '（在左边写下想要的视频）' }, HANDOFF_TEXT_MAX);
 	$: sentFiles = [
 		...ready.map((a) => ({ id: a.id, name: a.name, type: a.kind === 'image' ? 'image' : 'file' })),
 		...(musicReady ? [{ id: musicReady.id, name: musicReady.name, type: 'file' }] : [])
@@ -217,8 +230,10 @@
 		: uploading
 			? '附件还在上传'
 			: music?.uploading
-				? '背景音乐还在上传'
-				: !idea.trim()
+				? (isMv ? '歌曲还在上传' : '背景音乐还在上传')
+				: isMv && !musicReady
+				? '先选一首 MP3'
+				: !isMv && !idea.trim()
 				? '先写下想要的视频'
 				: styleProblem || (brief.length > HANDOFF_TEXT_MAX ? '需求较长，请精简后再制作' : '');
 
@@ -476,7 +491,8 @@
 		// this click's key: a resend of its request (a phone losing the response) is the same task
 		const clickKey = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 		const snapshotFiles = sentFiles;
-		const needsPrep = prepOptions.enhance && (!prepared || prepStale);
+		// an MV is made from the song and its lyrics: nothing to enhance
+		const needsPrep = !isMv && prepOptions.enhance && (!prepared || prepStale);
 		const requestIdea = videoPrepIdea(idea, snapshot.prep);
 		if (needsPrep && requestIdea.length > 6000) { toast.error('需求较长，请精简后再增强'); return; }
 		if (fitVideoBrief({ ...snapshot, prepJob: needsPrep ? 'a'.repeat(32) : null }, HANDOFF_TEXT_MAX).length > HANDOFF_TEXT_MAX) {
@@ -521,6 +537,7 @@
 				idea = '';
 				prepared = null;
 			}
+			if (isMv && lyrics === (snapshot as { lyrics?: string }).lyrics) lyrics = '';
 			const sentIds = new Set(snapshotFiles.map((f) => f.id));
 			attachments.forEach((a) => sentIds.has(a.id) && a.preview?.startsWith('blob:') && URL.revokeObjectURL(a.preview));
 			attachments = attachments.filter((a) => !sentIds.has(a.id));
@@ -702,17 +719,61 @@
 		searchTimer = setTimeout(loadFirst, 300);
 	}
 
-	const remove = async (video: LibraryVideo) => {
-		try {
-			await deleteLibraryVideo(localStorage.token, video.id);
-			videos = videos.filter((v) => v.id !== video.id);
-			if (playing?.id === video.id) playerOpen = false;
-			toast.success(video.chatId ? '已从视频库移除，对话里的视频还在' : '已从视频库移除');
-		} catch (error) {
-			console.warn('video remove failed', error);
-			toast.error('移除失败');
-		}
-	};
+	// 删除 asks first: what goes is gone for good (the files, to free the space)
+	let ask = { show: false, title: '', message: '', run: async () => {} };
+	const confirmThen = (title: string, message: string, run: () => Promise<void>) =>
+		(ask = { show: true, title, message, run });
+	const freedLabel = (bytes: number) => (bytes > 0 ? `，释放 ${formatFileSize(bytes)}` : '');
+
+	const remove = (video: LibraryVideo) =>
+		confirmThen(
+			'删除视频文件',
+			`彻底删除「${videoTitle(video)}」${video.size ? `（${formatFileSize(video.size)}）` : ''}和它的封面，释放空间。${video.chatId ? '对话里的这个视频之后也放不了了。' : ''}删除后不能恢复。`,
+			async () => {
+				try {
+					const res = await deleteLibraryVideo(localStorage.token, video.id, true);
+					videos = videos.filter((v) => v.id !== video.id);
+					tasks = tasks.map((t) => ({ ...t, videos: t.videos.filter((v) => v.id !== video.id) }));
+					if (playing?.id === video.id) playerOpen = false;
+					toast.success(`已删除${freedLabel(res.freed)}`);
+				} catch (error) {
+					console.warn('video delete failed', error);
+					toast.error(`删除失败：${(error as any)?.detail ?? (error as Error)?.message ?? error}`);
+				}
+			}
+		);
+
+	const removeMusic = (m: MusicFile) =>
+		confirmThen('删除这首音乐', `彻底删除上传的「${m.name}」（${formatFileSize(m.size)}，同名同大小的重复上传一起删），删除后不能恢复。`, async () => {
+			try {
+				const res = await deleteMusicFile(localStorage.token, m.id);
+				recentMusic = recentMusic.filter((r) => !(r.id === m.id || (r.name === m.name && r.size === m.size)));
+				if (music?.id === m.id) dropMusic();
+				toast.success(`已删除${freedLabel(res.freed)}`);
+			} catch (error) {
+				toast.error(`删除失败：${(error as any)?.detail ?? (error as Error)?.message ?? error}`);
+			}
+		});
+
+	let deletingTask = '';
+	const removeTask = (task: VideoTask) =>
+		confirmThen(
+			'删除任务',
+			`删除「${task.title}」的对话${task.videos.length ? `和它做出的 ${task.videos.length} 个视频文件` : ''}，释放空间，删除后不能恢复。${task.pcVideos?.length ? '家里电脑上的成片不会删，需要的话在电脑上自己删。' : ''}`,
+			async () => {
+				deletingTask = task.chatId;
+				try {
+					const res = await deleteVideoTask(localStorage.token, task.chatId);
+					tasks = tasks.filter((t) => t.chatId !== task.chatId);
+					videos = videos.filter((v) => v.chatId !== task.chatId);
+					toast.success(`已删除${freedLabel(res.freed)}`);
+				} catch (error) {
+					toast.error(`删除失败：${(error as any)?.detail ?? (error as Error)?.message ?? error}`);
+				} finally {
+					deletingTask = '';
+				}
+			}
+		);
 
 	const videoTitle = (video: LibraryVideo) => video.chatTitle || video.runTitle || video.title || video.name;
 	// Who made it: the runner's name for a run (codex, officlaude …), Hermes for its own reply.
@@ -867,6 +928,23 @@
 </div>
 
 {#if tab === 'workbench'}
+	<div class="mb-4 grid grid-cols-2 gap-2 sm:max-w-xl" role="radiogroup" aria-label="视频类型" data-video-kinds>
+		{#each VIDEO_KINDS as k (k.key)}
+			<button
+				type="button"
+				role="radio"
+				aria-checked={settings.kind === k.key}
+				class="min-w-0 rounded-2xl border px-4 py-3 text-left transition {settings.kind === k.key
+					? 'border-gray-900 bg-gray-900 text-white shadow-sm dark:border-white dark:bg-white dark:text-gray-900'
+					: 'border-gray-200/70 bg-white/70 text-gray-700 hover:border-gray-300 dark:border-gray-700/60 dark:bg-white/[0.03] dark:text-gray-200 dark:hover:border-gray-600'}"
+				on:click={() => setKind(k.key)}
+				data-video-kind={k.key}
+			>
+				<div class="truncate text-sm font-semibold">{k.label}</div>
+				<div class="truncate text-xs opacity-70">{k.sub}</div>
+			</button>
+		{/each}
+	</div>
 	<form
 		class="flex flex-col gap-4 lg:grid lg:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)] lg:items-start"
 		on:submit|preventDefault={start}
@@ -887,8 +965,8 @@
 				}}
 			>
 				<div class="flex items-center justify-between gap-2">
-					<div class="text-sm font-semibold text-gray-900 dark:text-gray-100">想要什么样的视频</div>
-					{#if idea.trim()}
+					<div class="text-sm font-semibold text-gray-900 dark:text-gray-100">{isMv ? '歌名和想要的感觉' : '想要什么样的视频'}</div>
+					{#if idea.trim() && !isMv}
 						<span class="flex shrink-0 items-center gap-1">
 							<button
 								type="button"
@@ -926,13 +1004,32 @@
 						event.preventDefault();
 						void addFiles(files);
 					}}
-					placeholder="主题、给谁看、想传达什么、喜欢的风格……例如：用 60 秒讲清楚 HTTPS 是怎么保护网页的，深色科技风，适合发朋友圈"
+					placeholder={isMv
+						? '可选 · 歌名、歌手、想要的感觉……例如：《笑一笑》，轻快治愈，发抖音用竖屏'
+						: '主题、给谁看、想传达什么、喜欢的风格……例如：用 60 秒讲清楚 HTTPS 是怎么保护网页的，深色科技风，适合发朋友圈'}
 					class="min-h-[9rem] max-h-[60vh] w-full resize-y rounded-xl border border-gray-200/60 bg-white/85 p-3 text-base leading-6 text-gray-900 outline-none placeholder:text-gray-400 sm:text-sm dark:border-gray-700/50 dark:bg-gray-900/70 dark:text-gray-100 dark:placeholder:text-gray-500"
 					data-video-idea
 				/>
 
 				{#if prepStale}
 					<p class="text-xs text-amber-700 dark:text-amber-300" role="status" data-video-prep-stale>制作设置已变更，文字修改已保留。{prepOptions.enhance ? '开始制作时会按新设置重新增强。' : '自动增强已关闭，制作者将按新设置调整旧草稿；也可点“再增强”预览。'}</p>
+				{/if}
+
+				{#if isMv}
+					<div class="space-y-1.5" data-video-lyrics-box>
+						<div class="flex items-center justify-between gap-2 text-xs text-gray-500 dark:text-gray-400">
+							<span class="font-medium">歌词（可选）</span>
+							<span>{lyrics.length}/{MV_LYRICS_MAX}</span>
+						</div>
+						<textarea
+							bind:value={lyrics}
+							rows="6"
+							maxlength={MV_LYRICS_MAX}
+							placeholder="一行一句；带 [00:12.30] 时间的 LRC 最准。不贴也行：会先识别歌词并和人声对齐，拿不准的词会先问你"
+							class="max-h-[50vh] w-full resize-y rounded-xl border border-gray-200/60 bg-white/85 p-3 text-sm leading-6 text-gray-900 outline-none placeholder:text-gray-400 dark:border-gray-700/50 dark:bg-gray-900/70 dark:text-gray-100 dark:placeholder:text-gray-500"
+							data-video-lyrics
+						/>
+					</div>
 				{/if}
 
 				<StudioPrepPanel
@@ -978,7 +1075,13 @@
 						</button>
 					{/if}
 					<span class="text-xs text-gray-500 dark:text-gray-400">
-						{uploading ? '上传中…' : attachments.length ? '执行者会先看这些再动手' : '可选 · 图片、视频素材、脚本文档，可粘贴或拖进来（背景音乐在下面单独选）'}
+						{uploading
+							? '上传中…'
+							: attachments.length
+								? '执行者会先看这些再动手'
+								: isMv
+									? '可选 · LRC / SRT 歌词文件（歌曲在下面单独选）'
+									: '可选 · 图片、视频素材、脚本文档，可粘贴或拖进来（背景音乐在下面单独选）'}
 					</span>
 					<input
 						bind:this={fileInput}
@@ -1010,8 +1113,10 @@
 			>
 				<div class="flex items-start justify-between gap-2">
 					<div class="min-w-0">
-						<div class="text-sm font-semibold text-gray-900 dark:text-gray-100">背景音乐</div>
-						<div class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">可选 · 你先定音乐，视频跟着它的长度和节拍做</div>
+						<div class="text-sm font-semibold text-gray-900 dark:text-gray-100">{isMv ? '歌曲' : '背景音乐'}</div>
+						<div class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+							{isMv ? '必选 · 成片和这首歌一样长，画面跟着节拍和歌词走' : '可选 · 你先定音乐，视频跟着它的长度和节拍做'}
+						</div>
 					</div>
 					{#if music}
 						<span class="flex shrink-0 items-center gap-1">
@@ -1038,6 +1143,7 @@
 					</div>
 					<!-- svelte-ignore a11y-media-has-caption -->
 					<audio src={music.url} controls preload="metadata" class="h-9 w-full" data-video-music-player />
+					{#if !isMv}
 					<div class="flex flex-wrap gap-1.5">
 						<button type="button" class={followsMusic ? chipOn : chip} disabled={musicTooLong} on:click={() => (settings = { ...settings, musicFit: 'full' })} data-video-music-fit="full">
 							跟音乐一样长{music.seconds ? `（${clockLabel(music.seconds)}）` : ''}
@@ -1053,6 +1159,7 @@
 								? '成片和这首音乐一样长，转场卡在节拍上；交付前核验成片里确实是这首音乐'
 								: `成片约 ${settings.seconds} 秒，音乐从开头截取、结尾淡出${music.seconds && music.seconds < settings.seconds ? '；音乐比视频短，会循环' : ''}`}
 					</p>
+					{/if}
 				{:else}
 					<div class="flex flex-wrap items-center gap-2">
 						<button
@@ -1070,7 +1177,10 @@
 							<div class="text-xs font-medium text-gray-500 dark:text-gray-400">用以前上传的</div>
 							<div class="flex flex-wrap gap-1.5">
 								{#each recentMusic.slice(0, 6) as m (m.id)}
-									<button type="button" class="{chip} max-w-[14rem] truncate" title={m.name} on:click={() => pickMusic(m)} data-video-music-pick={m.id}>♪ {m.name}</button>
+									<span class="inline-flex max-w-[16rem] items-center rounded-full border border-gray-200/70 bg-white/80 dark:border-gray-700/60 dark:bg-white/[0.03]">
+										<button type="button" class="min-w-0 truncate py-1.5 pl-3 pr-1 text-xs font-medium text-gray-600 hover:text-gray-900 dark:text-gray-300 dark:hover:text-white" title={m.name} on:click={() => pickMusic(m)} data-video-music-pick={m.id}>♪ {m.name}</button>
+										<button type="button" class="shrink-0 rounded-full px-2 py-1.5 text-gray-400 hover:text-red-600 dark:hover:text-red-400" aria-label="删除 {m.name}" title="删除这首音乐（文件一起删）" on:click={() => removeMusic(m)} data-video-music-delete={m.id}>×</button>
+									</span>
 								{/each}
 							</div>
 						</div>
@@ -1094,7 +1204,9 @@
 			<div class="flex flex-col-reverse gap-2 px-1 sm:flex-row sm:items-center sm:justify-between">
 				<span class="text-xs text-gray-500 dark:text-gray-400" data-video-status data-video-blocked={blocked || undefined}>
 					{blocked ||
-						`交给 ${maker.label} · ${recipe.label} · ${lengthSummary}${musicReady ? ' · 配乐已定' : ''} · ${place.label}渲染，在这里${prepOptions.enhance && (!prepared || prepStale) ? '先增强需求再' : ''}制作，同时记成一个对话`}
+						(isMv
+							? `交给 ${maker.label} · 歌词 MV（${(MV_THEMES.find((t) => t.key === settings.mvTheme) ?? MV_THEMES[0]).label}）· 跟歌一样长 · ${place.label}渲染，同时记成一个对话`
+							: `交给 ${maker.label} · ${recipe.label} · ${lengthSummary}${musicReady ? ' · 配乐已定' : ''} · ${place.label}渲染，在这里${prepOptions.enhance && (!prepared || prepStale) ? '先增强需求再' : ''}制作，同时记成一个对话`)}
 				</span>
 				<button type="submit" class="workspace-primary-button w-full sm:w-auto sm:min-w-32" disabled={!!blocked || starting} title={blocked} data-video-start>
 					<SidebarModeIcon mode="video" className="size-4" />
@@ -1115,6 +1227,8 @@
 							stopping={stoppingTask === task.chatId}
 							highlight={task.chatId === focusTask}
 							on:stop={(event) => stopTask(event.detail)}
+							deleting={deletingTask === task.chatId}
+							on:delete={(event) => removeTask(event.detail)}
 						/>
 					{/each}
 					{#if historyTasks.length}
@@ -1135,7 +1249,7 @@
 						<div id="video-task-history" class="space-y-3" hidden={!showTaskHistory}>
 							{#if showTaskHistory}
 								{#each historyTasks as task (task.chatId)}
-									<VideoTaskCard {task} where="studio" />
+									<VideoTaskCard {task} where="studio" deleting={deletingTask === task.chatId} on:delete={(event) => removeTask(event.detail)} />
 								{/each}
 							{/if}
 						</div>
@@ -1174,6 +1288,30 @@
 
 		<section class="flex min-w-0 flex-col gap-4">
 			<div class="glass-item p-4 space-y-4" data-video-settings>
+				{#if isMv}
+				<div class="space-y-2" data-video-mv-themes>
+					<div class="text-sm font-semibold text-gray-900 dark:text-gray-100">MV 画面</div>
+					<div class="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-2 xl:grid-cols-3">
+						{#each MV_THEMES as t (t.key)}
+							<button
+								type="button"
+								class="rounded-xl border px-3 py-2 text-left transition {settings.mvTheme === t.key
+									? 'border-gray-900 bg-gray-900 text-white dark:border-white dark:bg-white dark:text-gray-900'
+									: 'border-gray-200/70 bg-white/70 text-gray-700 hover:border-gray-300 dark:border-gray-700/60 dark:bg-white/[0.03] dark:text-gray-200 dark:hover:border-gray-600'}"
+								aria-pressed={settings.mvTheme === t.key}
+								on:click={() => (settings = { ...settings, mvTheme: t.key })}
+								data-video-mv-theme={t.key}
+							>
+								<div class="text-sm font-medium">{t.label}</div>
+								<div class="text-[11px] opacity-70">{t.sub}</div>
+							</button>
+						{/each}
+					</div>
+					<p class="text-xs leading-relaxed text-gray-500 dark:text-gray-400">
+						歌词随节拍出现的动态文字画面（JIZURA，在家里电脑上做），不配音、不另加字幕；成片和歌一样长，封面放在第 0 帧。
+					</p>
+				</div>
+				{:else}
 				<div class="space-y-2">
 					<div class="text-sm font-semibold text-gray-900 dark:text-gray-100">做法</div>
 					<div class="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-2 xl:grid-cols-3">
@@ -1206,6 +1344,7 @@
 					pick={stylePick}
 					onChange={(style, customStyle) => (settings = { ...settings, style, customStyle })}
 				/>
+				{/if}
 
 				<div class="grid gap-4 sm:grid-cols-2">
 					<div class="space-y-1.5">
@@ -1218,6 +1357,7 @@
 							{/each}
 						</div>
 					</div>
+					{#if !isMv}
 					<div class="space-y-1.5">
 						<div class="text-xs font-medium text-gray-500 dark:text-gray-400">
 							时长{followsMusic ? ` · 跟背景音乐${music?.seconds ? `（${clockLabel(music.seconds)}）` : ''}` : ''}
@@ -1257,8 +1397,10 @@
 							<button type="button" class={!settings.subtitles ? chipOn : chip} on:click={() => (settings = { ...settings, subtitles: false })}>不要字幕</button>
 						</div>
 					</div>
+					{/if}
 				</div>
 
+				{#if !isMv}
 				<div class="space-y-2" data-video-prep-options>
 					<div class="text-xs font-medium text-gray-500 dark:text-gray-400">提示词增强</div>
 					<div class="flex flex-wrap gap-1.5">
@@ -1278,6 +1420,7 @@
 							: '已关自动增强：点需求框右上的「增强」可以先看改写结果。'}
 					</p>
 				</div>
+				{/if}
 
 				<div class="space-y-2">
 					<div class="text-xs font-medium text-gray-500 dark:text-gray-400">谁来做</div>
@@ -1406,7 +1549,7 @@
 									<a href={video.url} download={video.name} class="rounded-lg p-1 hover:bg-gray-100 hover:text-gray-800 dark:hover:bg-gray-800 dark:hover:text-gray-200" aria-label="下载" title="下载 {video.name}">
 										<ArrowDownTray className="size-3.5" />
 									</a>
-									<button type="button" class="rounded-lg p-1 hover:bg-gray-100 hover:text-red-600 dark:hover:bg-gray-800 dark:hover:text-red-400" aria-label="从视频库移除" title="从视频库移除（对话里的视频还在）" on:click={() => remove(video)} data-video-delete={video.id}>
+									<button type="button" class="rounded-lg p-1 hover:bg-gray-100 hover:text-red-600 dark:hover:bg-gray-800 dark:hover:text-red-400" aria-label="删除视频" title="删除视频文件和封面（释放空间）" on:click={() => remove(video)} data-video-delete={video.id}>
 										<GarbageBin className="size-3.5" />
 									</button>
 								</span>
@@ -1470,3 +1613,11 @@
 		</div>
 	</Modal>
 {/if}
+
+<ConfirmDialog
+	bind:show={ask.show}
+	title={ask.title}
+	message={ask.message}
+	confirmLabel="删除"
+	onConfirm={() => ask.run()}
+/>

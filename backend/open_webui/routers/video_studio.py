@@ -158,12 +158,41 @@ async def get_music(limit: int = Query(default=12, ge=1, le=50), user=Depends(ge
     return music
 
 
-@router.delete("/items/{item_id}", response_model=bool)
-async def delete_video(item_id: str, user=Depends(get_verified_user)):
-    """Takes a video out of the library; the file stays in the chat that shows it."""
+@router.delete("/items/{item_id}")
+async def delete_video(item_id: str, files: bool = False, user=Depends(get_verified_user)):
+    """Takes a video out of the library; ``files=true`` also deletes the video file and its cover
+    for good (frees the space; the chat that showed it can no longer play it). Returns
+    ``{"deleted": true, "freed": <bytes>}``."""
+    from open_webui.utils.video_library import delete_video as remove
+
     if not item_id.startswith("video_"):
         raise HTTPException(404, "视频不存在")
-    return ImageStudioItems.delete_item_by_id_and_user_id(item_id, user.id)
+    freed = remove(user.id, item_id, files=files)
+    if freed is None:
+        raise HTTPException(404, "视频不存在")
+    return {"deleted": True, "freed": freed}
+
+
+@router.delete("/music/{file_id}")
+async def delete_music(file_id: str, user=Depends(get_verified_user)):
+    """Deletes an MP3 the user uploaded (「用以前上传的」), with its copies of the same name and
+    size, for good. Returns ``{"deleted": <files>, "freed": <bytes>}``."""
+    from open_webui.utils.video_library import delete_owned_file
+
+    with get_db() as db:
+        row = db.query(File.id, File.filename, File.meta).filter(File.id == file_id, File.user_id == user.id).first()
+        if row is None or not str(row.filename or "").lower().endswith(".mp3"):
+            raise HTTPException(404, "音乐不存在")
+        meta = row.meta if isinstance(row.meta, dict) else {}
+        name, size = str(meta.get("name") or row.filename), int(meta.get("size") or 0)
+        same = [
+            r.id
+            for r in db.query(File.id, File.filename, File.meta).filter(File.user_id == user.id, File.filename.ilike("%.mp3")).all()
+            if str(((r.meta if isinstance(r.meta, dict) else {}) or {}).get("name") or r.filename) == name
+            and int(((r.meta if isinstance(r.meta, dict) else {}) or {}).get("size") or 0) == size
+        ]
+    freed = sum(delete_owned_file(user.id, fid) for fid in dict.fromkeys([file_id, *same]))
+    return {"deleted": len(set([file_id, *same])), "freed": freed}
 
 
 @router.post("/items/{item_id}/cover", response_model=ImageStudioItemModel)
@@ -182,6 +211,50 @@ async def redraw_cover(request: Request, item_id: str, user=Depends(get_verified
     video_cover.start(request, user, item_id, force=True)
     return row.model_copy(update={"data": {**(row.data or {}), "coverStatus": "generating",
                                            "coverStartedAt": video_cover.now_ms()}})
+
+
+class CoverImageForm(BaseModel):
+    # the video's frame to redraw (JPEG/PNG, base64), the video's size and its title
+    frame: str = Field(min_length=100, max_length=8 * 1024 * 1024)
+    width: int = Field(ge=16, le=8192)
+    height: int = Field(ge=16, le=8192)
+    title: str = Field(default="", max_length=200)
+
+
+@router.post("/cover-image")
+async def draw_cover_image(request: Request, form: CoverImageForm):
+    """封面 for a video the studio pipeline made (skill video-studio scripts/cover.py, on this host,
+    for videos rendered here or on the home PC): gpt-image redraws the frame as the cover, cut to the
+    video's size, drawn as the Hermes owner (the admin) with their gpt-image model. Notification
+    token, like /runner-videos. Returns ``{"image": <JPEG base64>, "model"}``; the pipeline puts it
+    in frame 0 of the video."""
+    import base64
+    import binascii
+
+    from open_webui.utils import video_cover
+
+    if not notify_token_configured():
+        raise HTTPException(503, "HERMES_AGENT_NOTIFY_TOKEN is not set")
+    if not verify_notify_token(request.headers.get("Authorization")):
+        raise HTTPException(401, "invalid notification token")
+    owner = Users.get_first_user()
+    if owner is None:
+        raise HTTPException(503, "no account to draw the cover for")
+    if not video_cover.may_cover(request, owner):
+        raise HTTPException(403, "生图未开启或无权使用，不能生成封面")
+    try:
+        frame = base64.b64decode(form.frame.split(",", 1)[-1], validate=True)
+    except (binascii.Error, ValueError):
+        raise HTTPException(400, "frame is not base64")
+    title = video_cover.cover_title("", form.title) if form.title.strip() else "视频"
+    try:
+        cover, model = await video_cover.draw_from_frame(request, owner, frame, form.width, form.height, title)
+    except HTTPException:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        log.warning("cover-image failed: %r", exc)
+        raise HTTPException(502, f"封面没画出来：{str(exc)[:200]}")
+    return {"image": base64.b64encode(cover).decode("ascii"), "model": model}
 
 
 class RunnerVideosForm(BaseModel):
@@ -258,6 +331,29 @@ async def get_video_task(chat_id: str, user=Depends(get_verified_user)):
     if task is None:
         raise HTTPException(404, "这个视频任务不存在")
     return task
+
+
+@router.delete("/tasks/{chat_id}")
+async def delete_video_task(chat_id: str, user=Depends(get_verified_user)):
+    """删除任务: the task's chat and the videos it made (their files and covers, for good). Refused
+    while it is still being made (stop it first). Videos left on the home PC are not touched.
+    Returns ``{"deleted": true, "videos": <n>, "freed": <bytes>}``."""
+    from open_webui.models.chats import Chats
+    from open_webui.utils.video_library import delete_video as remove
+
+    task = video_tasks.get_task(user.id, chat_id)
+    if task is None:
+        raise HTTPException(404, "任务不存在")
+    if task["state"] in ("running", "background"):
+        raise HTTPException(409, "还在制作，先停止再删除")
+    freed, count = 0, 0
+    for video in task.get("videos") or []:
+        gone = remove(user.id, video["id"], files=True)
+        if gone is not None:
+            freed += gone
+            count += 1
+    Chats.delete_chat_by_id_and_user_id(chat_id, user.id)
+    return {"deleted": True, "videos": count, "freed": freed}
 
 
 @router.post("/tasks/{chat_id}/stop")

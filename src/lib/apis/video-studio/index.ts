@@ -52,12 +52,29 @@ export const getVideoPage = async (
 	return { items, next: res?.next ?? null };
 };
 
-/** Takes a video out of the library (the chat that shows it keeps it). */
-export const deleteLibraryVideo = async (token: string, id: string): Promise<boolean> =>
-	fetch(`${VIDEO_STUDIO_API_BASE_URL}/items/${encodeURIComponent(id)}`, {
+export type Deleted = { deleted: boolean | number; freed: number; videos?: number };
+
+/** Takes a video out of the library; `files` also deletes the video file and its cover for good
+ * (frees the space; the chat that showed it can no longer play it). */
+export const deleteLibraryVideo = async (token: string, id: string, files = false): Promise<Deleted> =>
+	fetch(`${VIDEO_STUDIO_API_BASE_URL}/items/${encodeURIComponent(id)}${files ? '?files=true' : ''}`, {
 		method: 'DELETE',
 		headers: headers(token)
-	}).then(parseJsonResponse<boolean>);
+	}).then(parseJsonResponse<Deleted>);
+
+/** Deletes an uploaded MP3 (and its copies of the same name and size) for good. */
+export const deleteMusicFile = async (token: string, id: string): Promise<Deleted> =>
+	fetch(`${VIDEO_STUDIO_API_BASE_URL}/music/${encodeURIComponent(id)}`, {
+		method: 'DELETE',
+		headers: headers(token)
+	}).then(parseJsonResponse<Deleted>);
+
+/** 删除任务: the task's chat and the videos it made, files included (not while it is being made). */
+export const deleteVideoTask = async (token: string, chatId: string): Promise<Deleted> =>
+	fetch(`${VIDEO_STUDIO_API_BASE_URL}/tasks/${encodeURIComponent(chatId)}`, {
+		method: 'DELETE',
+		headers: headers(token)
+	}).then(parseJsonResponse<Deleted>);
 
 /** 重新生成封面: a new cover for one library video, drawn in the background (409 while one is). */
 export const redrawVideoCover = async (token: string, id: string): Promise<LibraryVideo> => {

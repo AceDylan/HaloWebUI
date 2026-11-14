@@ -21,6 +21,7 @@ const api = vi.hoisted(() => ({
 	getVideoTask: vi.fn(),
 	stopVideoTask: vi.fn(),
 	redrawVideoCover: vi.fn(),
+	getPcStatus: vi.fn(async () => ({ state: 'ready', checkedAt: Date.now() - 12_000 })),
 	videoTaskLive: (task: any) => task?.state === 'running' || task?.state === 'background',
 	videoTaskCovering: (task: any) =>
 		task?.state === 'done' && (task.videos ?? []).some((v: any) => v.coverStatus === 'generating')
@@ -758,6 +759,27 @@ describe('Videos 制作任务', () => {
 		await sleep(10);
 		expect(target.querySelector('[data-video-task="ok1"]')).toBeFalsy();
 		expect(target.querySelector('[data-video-task="run1"]')).toBeFalsy();
+	});
+
+	it('shows whether the home PC is on next to 生成位置, read when the page opens', async () => {
+		api.getVideoPage.mockResolvedValue({ items: [], next: null });
+		api.getPcStatus.mockResolvedValueOnce({ state: 'ready', checkedAt: Date.now() - 12_000 });
+		let target = await mount();
+		await sleep(20);
+		let badge = target.querySelector('[data-pc-status]');
+		expect(badge.getAttribute('data-pc-status')).toBe('ready');
+		expect(badge.textContent).toContain('家里电脑在线');
+		expect(badge.textContent).toMatch(/1[12] 秒前检测/);
+		expect(api.getPcStatus).toHaveBeenCalledWith('token');
+		apps.splice(0).forEach((app) => app.$destroy());
+		document.body.innerHTML = '';
+		// switched off: says so, and that the render moves to the server
+		api.getPcStatus.mockResolvedValueOnce({ state: 'off', checkedAt: Date.now() - 5_000 });
+		target = await mount();
+		await sleep(20);
+		badge = target.querySelector('[data-pc-status]');
+		expect(badge.textContent).toContain('家里电脑已关机');
+		expect(target.textContent).toContain('家里电脑现在不在线：会自动改在服务器渲染');
 	});
 
 	it('a video left on the home PC is shown by its Windows path, ready to copy', async () => {

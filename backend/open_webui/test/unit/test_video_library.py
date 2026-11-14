@@ -224,3 +224,26 @@ def test_a_chat_sent_from_the_video_studio_is_marked_once():
     assert not mark_video_chat("missing", [{"role": "user", "content": head}])
     assert Chats.get_chat_by_id("vid-chat").meta.get("video_studio") is True
     assert "video_studio" not in (Chats.get_chat_by_id("plain-chat").meta or {})
+
+
+def test_the_home_pc_state_comes_from_the_hosts_report(monkeypatch):
+    import json as _json
+    import time as _time
+
+    from open_webui.env import DATA_DIR
+
+    report = DATA_DIR / video_studio.PC_STATUS_FILE
+    client = _client("vid-pc")
+    report.unlink(missing_ok=True)
+    assert client.get("/api/v1/video-studio/pc").json() == {"state": "unknown", "checkedAt": None}
+    now = int(_time.time())
+    report.write_text(_json.dumps({"state": "ready", "checked": now - 10}))
+    assert client.get("/api/v1/video-studio/pc").json() == {"state": "ready", "checkedAt": (now - 10) * 1000}
+    report.write_text(_json.dumps({"state": "off", "checked": now}))
+    assert client.get("/api/v1/video-studio/pc").json()["state"] == "off"
+    # an old report (the host stopped publishing) or a state it does not know: unknown
+    report.write_text(_json.dumps({"state": "ready", "checked": now - video_studio.PC_STATUS_STALE_SECONDS - 5}))
+    assert client.get("/api/v1/video-studio/pc").json()["state"] == "unknown"
+    report.write_text("not json")
+    assert client.get("/api/v1/video-studio/pc").json()["state"] == "unknown"
+    report.unlink()

@@ -31,6 +31,7 @@
 	import {
 		deleteLibraryVideo,
 		redrawVideoCover,
+		getPcStatus,
 		getMusicFiles,
 		getVideoPage,
 		getVideoTask,
@@ -41,6 +42,8 @@
 		videoTaskLive,
 		type LibraryVideo,
 		type MusicFile,
+		type PcState,
+		type PcStatus,
 		type VideoTask
 	} from '$lib/apis/video-studio';
 	import { uploadFileReliably } from '$lib/utils/reliable-upload';
@@ -189,6 +192,22 @@
 	$: recipe = VIDEO_RECIPES.find((r) => r.key === settings.recipe) ?? VIDEO_RECIPES[0];
 	$: maker = VIDEO_MAKERS.find((m) => m.key === settings.maker) ?? VIDEO_MAKERS[0];
 	$: place = VIDEO_PLACES.find((p) => p.key === settings.place) ?? VIDEO_PLACES[0];
+
+	// 家里电脑在不在线: read once when the page opens (refresh the page to read it again); the host
+	// checks every 30 s.
+	let pc: PcStatus | null = null;
+	const PC_LABEL: Record<PcState, string> = {
+		ready: '在线',
+		off: '已关机',
+		'on-no-ssh': '开机了但连不上',
+		'on-untrusted': '开机了但未信任',
+		unknown: '状态未知'
+	};
+	const pcAgo = (ms: number | null) => {
+		if (!ms) return '';
+		const s = Math.max(0, Math.round((Date.now() - ms) / 1000));
+		return s < 60 ? `${s} 秒前检测` : `${Math.round(s / 60)} 分钟前检测`;
+	};
 	$: blocked = !hermes
 		? modelsChecked
 			? '没有可用的 Hermes 模型：视频由 Hermes 或 runner 制作'
@@ -747,6 +766,9 @@
 		} catch {
 			prepOptions = normalizePrepOptions(null);
 		}
+		getPcStatus(localStorage.token)
+			.then((s) => (pc = s))
+			.catch(() => (pc = { state: 'unknown', checkedAt: null }));
 		const landing = new URL(window.location.href).searchParams;
 		if (landing.get('tab') === 'library') tab = 'library';
 		const asked = landing.get('task') ?? '';
@@ -1283,7 +1305,26 @@
 				</div>
 
 				<div class="space-y-2">
-					<div class="text-xs font-medium text-gray-500 dark:text-gray-400">生成位置</div>
+					<div class="flex items-center justify-between gap-2">
+						<div class="text-xs font-medium text-gray-500 dark:text-gray-400">生成位置</div>
+						{#if pc}
+							<span
+								class="flex min-w-0 items-center gap-1.5 text-[11px] text-gray-500 dark:text-gray-400"
+								title={pc.checkedAt ? `${new Date(pc.checkedAt).toLocaleString()} 检测；刷新页面重新读取` : '刷新页面重新读取'}
+								data-pc-status={pc.state}
+							>
+								<span
+									class="size-1.5 shrink-0 rounded-full {pc.state === 'ready'
+										? 'bg-emerald-500'
+										: pc.state === 'off' || pc.state === 'unknown'
+											? 'bg-gray-400'
+											: 'bg-amber-500'}"
+									aria-hidden="true"
+								/>
+								<span class="truncate">家里电脑{PC_LABEL[pc.state]}{pcAgo(pc.checkedAt) ? ` · ${pcAgo(pc.checkedAt)}` : ''}</span>
+							</span>
+						{/if}
+					</div>
 					<div class="grid grid-cols-2 gap-1.5">
 						{#each VIDEO_PLACES as p (p.key)}
 							<button
@@ -1302,7 +1343,9 @@
 					</div>
 					<p class="text-xs leading-relaxed text-gray-500 dark:text-gray-400">
 						{settings.place === 'pc'
-							? '画面渲染和合成放到家里电脑（快约 4 倍）；电脑关机或中途断开时自动改在服务器做，成片照样回到这里。'
+							? pc && pc.state !== 'ready' && pc.state !== 'unknown'
+								? '家里电脑现在不在线：会自动改在服务器渲染，成片回到这里（歌词 MV 要等电脑开机）。'
+								: '画面渲染和合成放到家里电脑（快约 4 倍），成片存在电脑的 D:\\HermesWork\\视频\\，这里显示位置；电脑关机或中途断开时自动改在服务器做，成片回到这里。'
 							: '全部在服务器上渲染，不用家里电脑。'}
 					</p>
 				</div>

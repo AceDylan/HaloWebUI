@@ -87,7 +87,7 @@ export const VIDEO_MAKERS: { key: VideoMaker; label: string; sub: string }[] = [
 ];
 
 export const VIDEO_PLACES: { key: VideoPlace; label: string; sub: string }[] = [
-	{ key: 'pc', label: '家里电脑', sub: 'RTX 3070 · 关机时回服务器' },
+	{ key: 'pc', label: '家里电脑', sub: 'RTX 3070 · 成片存 D 盘' },
 	{ key: 'server', label: '服务器', sub: '一直在线 · 渲染较慢' }
 ];
 
@@ -300,7 +300,7 @@ const requirementLines = (opts: Omit<VideoBriefOptions, 'idea'>) => {
 export const placeLine = (place: VideoPlace) =>
 	place === 'server'
 		? '- 生成位置：服务器（直接在服务器渲染，不用家里电脑）'
-		: '- 生成位置：家里电脑（按技能 video-studio「生成位置」一节，渲染都用 pc-video；家里电脑不在线时它自动改在服务器渲染，交付时说明实际在哪渲染）';
+		: '- 生成位置：家里电脑（按技能 video-studio「生成位置」一节，渲染都用 pc-video；成片用 pc-video deliver 留在家里电脑 D:\\HermesWork\\视频\\，回复只写 Windows 路径；家里电脑不在线时自动改在服务器渲染并照常交付，交付时说明实际在哪渲染）';
 
 /** The settings for 提示词增强 to size the content to (it never changes them). */
 export const videoSettingsText = (opts: Omit<VideoBriefOptions, 'idea'>): string => {

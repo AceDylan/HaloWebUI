@@ -68,6 +68,17 @@ export const redrawVideoCover = async (token: string, id: string): Promise<Libra
 	return { ...res.data, id: res.id, createdAt: res.data.createdAt || res.created_at * 1000 };
 };
 
+/** 家里电脑 (生成位置): whether the home PC is on, as the host last saw it (every 30 s). */
+export type PcState = 'ready' | 'off' | 'on-no-ssh' | 'on-untrusted' | 'unknown';
+export type PcStatus = { state: PcState; checkedAt: number | null };
+
+export const getPcStatus = async (token: string): Promise<PcStatus> => {
+	const res = await fetch(`${VIDEO_STUDIO_API_BASE_URL}/pc`, { method: 'GET', headers: headers(token) }).then(
+		parseJsonResponse<PcStatus>
+	);
+	return { state: res?.state ?? 'unknown', checkedAt: res?.checkedAt ?? null };
+};
+
 /** An MP3 the user uploaded before: background music the workbench can pick again. */
 export type MusicFile = { id: string; name: string; size: number; createdAt: number };
 

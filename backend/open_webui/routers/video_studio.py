@@ -97,6 +97,34 @@ async def get_video_page(
     }
 
 
+# The home PC's state, published by the host (pc-status-publish.timer runs `pc status` every 30 s
+# and writes it into the data volume): this container cannot reach the PC itself.
+PC_STATUS_FILE = "pc-status.json"
+PC_STATUS_STALE_SECONDS = 180
+PC_STATES = ("ready", "off", "on-no-ssh", "on-untrusted")
+
+
+@router.get("/pc")
+async def get_pc_status(user=Depends(get_verified_user)):
+    """家里电脑在不在线 (生成位置): ``state`` ready | off | on-no-ssh | on-untrusted | unknown
+    (no report, or none for PC_STATUS_STALE_SECONDS), ``checkedAt`` (ms) of the last check."""
+    import json
+    import os
+    import time
+
+    from open_webui.env import DATA_DIR
+
+    try:
+        with open(os.path.join(DATA_DIR, PC_STATUS_FILE), encoding="utf-8") as f:
+            data = json.load(f)
+        state, checked = str(data.get("state") or ""), int(data.get("checked") or 0)
+    except (OSError, ValueError, TypeError, AttributeError):
+        return {"state": "unknown", "checkedAt": None}
+    if state not in PC_STATES or time.time() - checked > PC_STATUS_STALE_SECONDS:
+        return {"state": "unknown", "checkedAt": checked * 1000 or None}
+    return {"state": state, "checkedAt": checked * 1000}
+
+
 class MusicFile(BaseModel):
     id: str
     name: str

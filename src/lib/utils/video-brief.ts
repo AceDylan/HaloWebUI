@@ -95,14 +95,14 @@ export const VIDEO_SKILL_PATH = '/root/.hermes/skills/creative/video-studio/SKIL
 export const VIDEO_FILM_SCRIPT = '/root/.hermes/skills/creative/video-studio/scripts/film.py';
 
 /** The longest music a video follows (「跟随音乐」, e.g. an MP3 made into an MP4). An hour still fits
- * HaloWebUI's 200 MB limit for a delivered video at 720p; longer music is cut to the chosen length. */
+ * HaloWebUI's 500 MB limit for a delivered video at 720p; longer music is cut to the chosen length. */
 export const MUSIC_MAX_SECONDS = 60 * 60;
 /** nginx in front of HaloWebUI takes uploads up to 100 MB (an hour of MP3 at ~200 kbps). */
 export const MUSIC_MAX_BYTES = 100 * 1024 * 1024;
-/** Beyond this a video following its music gets the long-video guidance (light pictures, 720p, ≤ 200 MB). */
+/** Beyond this a video following its music gets the long-video guidance (light pictures, 720p, ≤ 500 MB). */
 export const LONG_VIDEO_SECONDS = 10 * 60;
-/** HaloWebUI fetches a delivered file of at most 200 MB (utils/hermes_media.py MEDIA_FETCH_MAX_BYTES). */
-const DELIVERY_MAX_MB = 200;
+/** HaloWebUI fetches a delivered file of at most 500 MB (utils/hermes_media.py MEDIA_FETCH_MAX_BYTES). */
+const DELIVERY_MAX_MB = 500;
 const MP3_TYPES = ['', 'audio/mpeg', 'audio/mp3', 'audio/mpeg3', 'audio/x-mpeg-3', 'audio/x-mp3'];
 
 /** The background music the brief names: its file name and length (null: not known yet). */

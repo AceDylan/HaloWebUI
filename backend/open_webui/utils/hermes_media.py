@@ -20,9 +20,11 @@ from urllib.parse import quote
 # Standard library only at import time: html_visual_prompt uses the patterns below.
 log = logging.getLogger(__name__)
 
-# Same cap as Hermes' GET /v1/media.
-MEDIA_FETCH_MAX_BYTES = 200 * 1024 * 1024
-MEDIA_FETCH_TIMEOUT_SECONDS = 120
+# Same cap as Hermes' GET /v1/media (a long 1080p music video is 200–500 MB). The file is spooled
+# to disk as it arrives, never held in memory.
+MEDIA_FETCH_MAX_BYTES = 500 * 1024 * 1024
+MEDIA_FETCH_TIMEOUT_SECONDS = 300
+_TOO_BIG = f"文件超过 {MEDIA_FETCH_MAX_BYTES // (1024 * 1024)}MB"
 # A report that names more is listing files, not handing them over.
 MEDIA_TAGS_MAX = 12
 
@@ -231,7 +233,7 @@ async def _fetch_from_hermes(media_url: str, headers: dict, path: str):
             if response.status == 404:
                 return None, None, "文件不存在或不允许读取"
             if response.status == 413:
-                return None, None, "文件超过 200MB"
+                return None, None, _TOO_BIG
             if response.status != 200:
                 return None, None, f"Hermes 返回 HTTP {response.status}"
             handle = tempfile.SpooledTemporaryFile(max_size=8 * 1024 * 1024)
@@ -240,7 +242,7 @@ async def _fetch_from_hermes(media_url: str, headers: dict, path: str):
                 size += len(chunk)
                 if size > MEDIA_FETCH_MAX_BYTES:
                     handle.close()
-                    return None, None, "文件超过 200MB"
+                    return None, None, _TOO_BIG
                 handle.write(chunk)
             handle.seek(0)
             content_type = response.headers.get("Content-Type", "").split(";", 1)[0].strip()

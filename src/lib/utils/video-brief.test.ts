@@ -41,10 +41,10 @@ describe('buildVideoBrief', () => {
 		expect(brief).toContain('"music_fit": "full"');
 		expect(brief).toContain('长视频（40:00）');
 		expect(brief).toContain('720p');
-		expect(brief).toMatch(/成片必须小于 200 MB.*-b:v \d+k/);
-		// the bitrate leaves room under 200 MB for the whole length
+		expect(brief).toMatch(/成片必须小于 500 MB.*-b:v \d+k/);
+		// the bitrate leaves room under 500 MB for the whole length
 		const kbps = Number(brief.match(/-b:v (\d+)k/)![1]);
-		expect(((kbps + 128) * 1000 * 40 * 60) / 8 / 1024 / 1024).toBeLessThan(200);
+		expect(((kbps + 128) * 1000 * 40 * 60) / 8 / 1024 / 1024).toBeLessThan(500);
 		// a short song gets no long-video lines; music over an hour is cut to the chosen length
 		expect(buildVideoBrief({ ...base, music: { name: 'a.mp3', seconds: 163 }, musicFit: 'full' })).not.toContain('长视频');
 		const tooLong = buildVideoBrief({ ...base, music: { name: 'b.mp3', seconds: 2 * 3600 }, musicFit: 'full', seconds: 60 });

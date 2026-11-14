@@ -94,9 +94,15 @@ export const VIDEO_PLACES: { key: VideoPlace; label: string; sub: string }[] = [
 export const VIDEO_SKILL_PATH = '/root/.hermes/skills/creative/video-studio/SKILL.md';
 export const VIDEO_FILM_SCRIPT = '/root/.hermes/skills/creative/video-studio/scripts/film.py';
 
-/** The longest video and so the longest music it can follow (the length settings' own limit). */
-export const MUSIC_MAX_SECONDS = 600;
-export const MUSIC_MAX_BYTES = 50 * 1024 * 1024;
+/** The longest music a video follows (「跟随音乐」, e.g. an MP3 made into an MP4). An hour still fits
+ * HaloWebUI's 200 MB limit for a delivered video at 720p; longer music is cut to the chosen length. */
+export const MUSIC_MAX_SECONDS = 60 * 60;
+/** nginx in front of HaloWebUI takes uploads up to 100 MB (an hour of MP3 at ~200 kbps). */
+export const MUSIC_MAX_BYTES = 100 * 1024 * 1024;
+/** Beyond this a video following its music gets the long-video guidance (light pictures, 720p, ≤ 200 MB). */
+export const LONG_VIDEO_SECONDS = 10 * 60;
+/** HaloWebUI fetches a delivered file of at most 200 MB (utils/hermes_media.py MEDIA_FETCH_MAX_BYTES). */
+const DELIVERY_MAX_MB = 200;
 const MP3_TYPES = ['', 'audio/mpeg', 'audio/mp3', 'audio/mpeg3', 'audio/x-mpeg-3', 'audio/x-mp3'];
 
 /** The background music the brief names: its file name and length (null: not known yet). */
@@ -396,6 +402,14 @@ export const buildVideoBrief = (opts: VideoBriefOptions): string => {
 			'- 用 film.py 出片（"music" 写这首音乐的路径；Remotion 画面用 --picture 交给它混音）：音乐从 0 秒开始，有配音时自动压低',
 			`- 交付前核验：python3 ${VIDEO_FILM_SCRIPT} --check-music <成片.mp4> <音乐路径>，必须输出 "music_found": true，否则修好再交付`
 		);
+		if (fullLength && music.seconds != null && music.seconds > LONG_VIDEO_SECONDS) {
+			// Kbps for the whole file to land under the delivery limit, less 128 for the audio.
+			const kbps = Math.max(150, Math.floor(((DELIVERY_MAX_MB - 10) * 8 * 1024) / music.seconds) - 128);
+			lines.push(
+				`- 长视频（${musicClock}）：画面以少量关键画面的慢速运镜、循环动效为主，不必每个节拍都转场；画幅按所选比例用 720p（如 1280×720）`,
+				`- 成片必须小于 ${DELIVERY_MAX_MB} MB（HaloWebUI 收片上限）：film.py 出片后若超出，用 ffmpeg 重新压一遍（libx264 -b:v ${kbps}k -maxrate ${kbps}k -bufsize ${kbps * 2}k，音频 aac 128k，+faststart），再做一次 --check-music`
+			);
+		}
 	}
 	lines.push(
 		'',

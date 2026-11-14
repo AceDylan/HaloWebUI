@@ -61,6 +61,7 @@
 		VIDEO_RECIPES,
 		VIDEO_VOICES,
 		MUSIC_MAX_SECONDS,
+		MUSIC_MAX_BYTES,
 		attachmentKind,
 		clockLabel,
 		fitVideoBrief,
@@ -362,7 +363,7 @@
 		music = null;
 	};
 
-	/** A new MP3 from the computer: checked (MP3 by name, type and first bytes, ≤ 50 MB, plays in
+	/** A new MP3 from the computer: checked (MP3 by name, type and first bytes, ≤ 100 MB, plays in
 	 * the browser), then uploaded as is for Hermes to read on the host. */
 	const uploadMusic = async (file: File | null | undefined) => {
 		if (!file) return;
@@ -425,6 +426,12 @@
 		}
 		item.seconds = seconds;
 		music = item;
+	};
+
+	// 「跟随音乐」 among the lengths: the video as long as the MP3 (picked here when there is none yet)
+	const followMusic = () => {
+		settings = { ...settings, musicFit: 'full' };
+		if (!music) musicInput?.click();
 	};
 
 	const setLength = (seconds: number) => {
@@ -988,7 +995,7 @@
 						>
 							<span aria-hidden="true">＋</span> 上传 MP3
 						</button>
-						<span class="text-xs text-gray-500 dark:text-gray-400">MP3，最大 50 MB，可拖进来</span>
+						<span class="text-xs text-gray-500 dark:text-gray-400">MP3，最大 {MUSIC_MAX_BYTES / 1024 / 1024} MB，可拖进来</span>
 					</div>
 					{#if recentMusic.length}
 						<div class="space-y-1.5" data-video-music-recent>
@@ -1144,6 +1151,16 @@
 							时长{followsMusic ? ` · 跟背景音乐${music?.seconds ? `（${clockLabel(music.seconds)}）` : ''}` : ''}
 						</div>
 						<div class="flex flex-wrap gap-1.5">
+							<button
+								type="button"
+								class={followsMusic ? chipOn : chip}
+								disabled={musicTooLong}
+								title={music ? '' : '上传一首 MP3，成片和它一样长（适合把 MP3 做成 MP4）'}
+								on:click={followMusic}
+								data-video-length="music"
+							>
+								跟随音乐{music?.seconds ? `（${clockLabel(music.seconds)}）` : ''}
+							</button>
 							{#each VIDEO_LENGTHS as s}
 								<button type="button" class={settings.seconds === s && !followsMusic ? chipOn : chip} on:click={() => setLength(s)} data-video-length={s}>
 									{s >= 60 ? `${s / 60} 分钟` : `${s} 秒`}

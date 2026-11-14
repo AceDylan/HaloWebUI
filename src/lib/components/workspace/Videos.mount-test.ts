@@ -322,6 +322,16 @@ describe('Videos', () => {
 		target.querySelector('[data-video-music-fit="full"]').click();
 		await sleep(10);
 		expect(brief()).toContain('"music_fit": "full"');
+		// 「跟随音乐」 among the lengths does the same
+		target.querySelector('[data-video-length="60"]').click();
+		await sleep(10);
+		expect(brief()).toContain('"music_fit": "trim"');
+		const follow = target.querySelector('[data-video-length="music"]');
+		expect(follow.textContent).toContain('跟随音乐（2:43）');
+		follow.click();
+		await sleep(10);
+		expect(brief()).toContain('"music_fit": "full"');
+		expect(brief()).not.toContain('长视频');
 		target.querySelector('[data-video-workbench]').dispatchEvent(new Event('submit'));
 		await sleep(10);
 		const entry = sent();

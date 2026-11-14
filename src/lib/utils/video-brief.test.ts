@@ -34,6 +34,24 @@ describe('buildVideoBrief', () => {
 		expect(brief).not.toContain('参考附件');
 	});
 
+	it('follows music up to an hour and keeps a long video under the delivery limit', () => {
+		const long = { name: '专辑.mp3', seconds: 40 * 60 };
+		const brief = buildVideoBrief({ ...base, music: long, musicFit: 'full' });
+		expect(brief).toContain('时长：跟背景音乐一样长（40:00）');
+		expect(brief).toContain('"music_fit": "full"');
+		expect(brief).toContain('长视频（40:00）');
+		expect(brief).toContain('720p');
+		expect(brief).toMatch(/成片必须小于 200 MB.*-b:v \d+k/);
+		// the bitrate leaves room under 200 MB for the whole length
+		const kbps = Number(brief.match(/-b:v (\d+)k/)![1]);
+		expect(((kbps + 128) * 1000 * 40 * 60) / 8 / 1024 / 1024).toBeLessThan(200);
+		// a short song gets no long-video lines; music over an hour is cut to the chosen length
+		expect(buildVideoBrief({ ...base, music: { name: 'a.mp3', seconds: 163 }, musicFit: 'full' })).not.toContain('长视频');
+		const tooLong = buildVideoBrief({ ...base, music: { name: 'b.mp3', seconds: 2 * 3600 }, musicFit: 'full', seconds: 60 });
+		expect(tooLong).toContain('"music_fit": "trim", "seconds": 60');
+		expect(tooLong).not.toContain('长视频');
+	});
+
 	it('says where to render: the home PC by default, the server when chosen', () => {
 		const pc = buildVideoBrief(base);
 		expect(pc).toContain('- 生成位置：家里电脑');
@@ -118,10 +136,10 @@ describe('buildVideoBrief with background music', () => {
 			seconds: 60
 		});
 		expect(loops).toContain('音乐比视频短，会循环播放');
-		// music longer than a video can be is cut even when "as long as the music" was chosen
+		// music over an hour (longer than a video follows) is cut even when "as long as the music" was chosen
 		const long = buildVideoBrief({
 			...base,
-			music: { name: 'mix.mp3', seconds: 3600 },
+			music: { name: 'mix.mp3', seconds: 2 * 3600 },
 			musicFit: 'full',
 			seconds: 90
 		});
@@ -145,7 +163,7 @@ describe('buildVideoBrief with background music', () => {
 
 describe('musicFileProblem', () => {
 	const mp3 = { name: 'bgm.mp3', type: 'audio/mpeg', size: 2_310_106 };
-	it('takes an MP3 up to 50 MB whose first bytes are MP3', () => {
+	it('takes an MP3 up to 100 MB whose first bytes are MP3', () => {
 		expect(musicFileProblem(mp3)).toBe('');
 		expect(musicFileProblem(mp3, new Uint8Array([0x49, 0x44, 0x33, 4]))).toBe('');
 		expect(
@@ -158,7 +176,7 @@ describe('musicFileProblem', () => {
 		);
 		expect(musicFileProblem({ ...mp3, type: 'video/mp4' })).toContain('只支持 MP3');
 		expect(musicFileProblem({ ...mp3, size: 0 })).toContain('空的');
-		expect(musicFileProblem({ ...mp3, size: 51 * 1024 * 1024 })).toContain('50 MB');
+		expect(musicFileProblem({ ...mp3, size: 101 * 1024 * 1024 })).toContain('100 MB');
 		expect(musicFileProblem(mp3, new TextEncoder().encode('<html>'))).toContain('不是 MP3');
 		expect(isMp3Head(new Uint8Array([0x4d, 0x5a, 0x90]))).toBe(false);
 	});

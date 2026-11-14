@@ -57,6 +57,7 @@
 		VIDEO_FRAMES,
 		VIDEO_LENGTHS,
 		VIDEO_MAKERS,
+		VIDEO_PLACES,
 		VIDEO_RECIPES,
 		VIDEO_VOICES,
 		MUSIC_MAX_SECONDS,
@@ -184,6 +185,7 @@
 		: `约 ${settings.seconds} 秒`;
 	$: recipe = VIDEO_RECIPES.find((r) => r.key === settings.recipe) ?? VIDEO_RECIPES[0];
 	$: maker = VIDEO_MAKERS.find((m) => m.key === settings.maker) ?? VIDEO_MAKERS[0];
+	$: place = VIDEO_PLACES.find((p) => p.key === settings.place) ?? VIDEO_PLACES[0];
 	$: blocked = !hermes
 		? modelsChecked
 			? '没有可用的 Hermes 模型：视频由 Hermes 或 runner 制作'
@@ -1017,7 +1019,7 @@
 			<div class="flex flex-col-reverse gap-2 px-1 sm:flex-row sm:items-center sm:justify-between">
 				<span class="text-xs text-gray-500 dark:text-gray-400" data-video-status data-video-blocked={blocked || undefined}>
 					{blocked ||
-						`交给 ${maker.label} · ${recipe.label} · ${lengthSummary}${musicReady ? ' · 配乐已定' : ''}，在这里${prepOptions.enhance && (!prepared || prepStale) ? '先增强需求再' : ''}制作，同时记成一个对话`}
+						`交给 ${maker.label} · ${recipe.label} · ${lengthSummary}${musicReady ? ' · 配乐已定' : ''} · ${place.label}渲染，在这里${prepOptions.enhance && (!prepared || prepStale) ? '先增强需求再' : ''}制作，同时记成一个对话`}
 				</span>
 				<button type="submit" class="workspace-primary-button w-full sm:w-auto sm:min-w-32" disabled={!!blocked || starting} title={blocked} data-video-start>
 					<SidebarModeIcon mode="video" className="size-4" />
@@ -1210,6 +1212,31 @@
 						{settings.maker
 							? `消息前加 /${settings.maker}，由 ${maker.label} 在后台独占制作，做完把成片和报告发回对话。`
 							: 'Hermes 自己用视频技能制作，过程和成片都在对话里。'}
+					</p>
+				</div>
+
+				<div class="space-y-2">
+					<div class="text-xs font-medium text-gray-500 dark:text-gray-400">生成位置</div>
+					<div class="grid grid-cols-2 gap-1.5">
+						{#each VIDEO_PLACES as p (p.key)}
+							<button
+								type="button"
+								class="min-w-0 rounded-xl border px-2 py-1.5 text-left transition {settings.place === p.key
+									? 'border-gray-900 bg-gray-900 text-white dark:border-white dark:bg-white dark:text-gray-900'
+									: 'border-gray-200/70 bg-white/70 text-gray-700 hover:border-gray-300 dark:border-gray-700/60 dark:bg-white/[0.03] dark:text-gray-200 dark:hover:border-gray-600'}"
+								aria-pressed={settings.place === p.key}
+								on:click={() => (settings = { ...settings, place: p.key })}
+								data-video-place={p.key}
+							>
+								<div class="truncate text-xs font-semibold">{p.label}</div>
+								<div class="truncate text-[10.5px] opacity-70">{p.sub}</div>
+							</button>
+						{/each}
+					</div>
+					<p class="text-xs leading-relaxed text-gray-500 dark:text-gray-400">
+						{settings.place === 'pc'
+							? '画面渲染和合成放到家里电脑（快约 4 倍）；电脑关机或中途断开时自动改在服务器做，成片照样回到这里。'
+							: '全部在服务器上渲染，不用家里电脑。'}
 					</p>
 				</div>
 			</div>

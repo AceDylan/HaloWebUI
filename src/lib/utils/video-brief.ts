@@ -28,6 +28,9 @@ export type VideoMaker =
 	| 'agy';
 /** With background music: the video as long as the music, or the music cut to the chosen length. */
 export type VideoMusicFit = 'full' | 'trim';
+/** Where the rendering runs: the home PC (RTX 3070; back to the server by itself when the PC is
+ * off — the skill's `pc-video`), or the server. Pictures, narration and the chat stay on the server. */
+export type VideoPlace = 'pc' | 'server';
 
 export const VIDEO_RECIPES: { key: VideoRecipeKey; label: string; sub: string; hint: string }[] = [
 	{
@@ -83,6 +86,11 @@ export const VIDEO_MAKERS: { key: VideoMaker; label: string; sub: string }[] = [
 	{ key: 'agy', label: 'agy', sub: 'Gemini · 快' }
 ];
 
+export const VIDEO_PLACES: { key: VideoPlace; label: string; sub: string }[] = [
+	{ key: 'pc', label: '家里电脑', sub: 'RTX 3070 · 关机时回服务器' },
+	{ key: 'server', label: '服务器', sub: '一直在线 · 渲染较慢' }
+];
+
 export const VIDEO_SKILL_PATH = '/root/.hermes/skills/creative/video-studio/SKILL.md';
 export const VIDEO_FILM_SCRIPT = '/root/.hermes/skills/creative/video-studio/scripts/film.py';
 
@@ -117,6 +125,7 @@ export type VideoBriefOptions = {
 	subtitles: boolean;
 	maker: VideoMaker;
 	musicFit: VideoMusicFit;
+	place: VideoPlace;
 	attachments?: { name: string; kind: 'image' | 'video' | 'audio' | 'file' }[];
 	music?: VideoMusic | null;
 	prep?: VideoPrep | null;
@@ -145,7 +154,8 @@ export const DEFAULT_VIDEO_SETTINGS: VideoSettings = {
 	voice: 'zh-CN-YunxiNeural',
 	subtitles: true,
 	maker: '',
-	musicFit: 'full'
+	musicFit: 'full',
+	place: 'pc'
 };
 
 const pick = <T extends string>(value: unknown, allowed: readonly T[], fallback: T): T =>
@@ -185,7 +195,12 @@ export const normalizeVideoSettings = (value: unknown): VideoSettings => {
 			VIDEO_MAKERS.map((m) => m.key),
 			DEFAULT_VIDEO_SETTINGS.maker
 		),
-		musicFit: pick(raw.musicFit, ['full', 'trim'] as const, DEFAULT_VIDEO_SETTINGS.musicFit)
+		musicFit: pick(raw.musicFit, ['full', 'trim'] as const, DEFAULT_VIDEO_SETTINGS.musicFit),
+		place: pick(
+			raw.place,
+			VIDEO_PLACES.map((p) => p.key),
+			DEFAULT_VIDEO_SETTINGS.place
+		)
 	};
 };
 
@@ -275,6 +290,12 @@ const requirementLines = (opts: Omit<VideoBriefOptions, 'idea'>) => {
 	];
 };
 
+/** The brief's line on where to render (the skill's 「生成位置」 section acts on it). */
+export const placeLine = (place: VideoPlace) =>
+	place === 'server'
+		? '- 生成位置：服务器（直接在服务器渲染，不用家里电脑）'
+		: '- 生成位置：家里电脑（按技能 video-studio「生成位置」一节，渲染都用 pc-video；家里电脑不在线时它自动改在服务器渲染，交付时说明实际在哪渲染）';
+
 /** The settings for 提示词增强 to size the content to (it never changes them). */
 export const videoSettingsText = (opts: Omit<VideoBriefOptions, 'idea'>): string => {
 	const lines = requirementLines(opts);
@@ -344,7 +365,8 @@ export const buildVideoBrief = (opts: VideoBriefOptions): string => {
 		'',
 		'## 要求',
 		...requirementLines(opts),
-		...videoStyleLines({ ...opts, topic: opts.styleTopic ?? opts.idea }, true)
+		...videoStyleLines({ ...opts, topic: opts.styleTopic ?? opts.idea }, true),
+		placeLine(opts.place)
 	];
 	if (attachments.length) {
 		const counts = attachmentCounts(attachments);

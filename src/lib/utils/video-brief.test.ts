@@ -34,6 +34,20 @@ describe('buildVideoBrief', () => {
 		expect(brief).not.toContain('参考附件');
 	});
 
+	it('says where to render: the home PC by default, the server when chosen', () => {
+		const pc = buildVideoBrief(base);
+		expect(pc).toContain('- 生成位置：家里电脑');
+		expect(pc).toContain('pc-video');
+		const server = buildVideoBrief({ ...base, place: 'server' });
+		expect(server).toContain('- 生成位置：服务器');
+		expect(server).not.toContain('pc-video');
+		// the line belongs to the requirements, before how to make it
+		expect(pc.indexOf('生成位置')).toBeGreaterThan(pc.indexOf('## 要求'));
+		expect(pc.indexOf('生成位置')).toBeLessThan(pc.indexOf('## 怎么做'));
+		// enhancement sizes content, it does not need to know where the render runs
+		expect(videoSettingsText(base)).not.toContain('生成位置');
+	});
+
 	it('puts the runner command in front and lists the attachments', () => {
 		const brief = buildVideoBrief({
 			...base,
@@ -176,9 +190,12 @@ describe('normalizeVideoSettings', () => {
 			voice: '',
 			subtitles: false,
 			maker: 'agy',
-			musicFit: 'full'
+			musicFit: 'full',
+			place: 'pc'
 		});
 		expect(normalizeVideoSettings({ musicFit: 'trim' }).musicFit).toBe('trim');
+		expect(normalizeVideoSettings({ place: 'server' }).place).toBe('server');
+		expect(normalizeVideoSettings({ place: 'mars' }).place).toBe('pc');
 		expect(
 			normalizeVideoSettings({
 				recipe: 'x',

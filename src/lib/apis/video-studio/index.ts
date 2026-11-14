@@ -104,6 +104,8 @@ export type VideoTask = {
 		LibraryVideo,
 		'id' | 'fileId' | 'url' | 'name' | 'title' | 'size' | 'contentType' | 'createdAt' | 'cover' | 'coverStatus'
 	>[];
+	/** Videos made on the home PC and left there (pc-video deliver): their Windows paths. */
+	pcVideos?: string[];
 	runner: { runId: string; agent: string; step?: number | null; startedAt?: number | null; activity?: string } | null;
 	error: string;
 	/** Where a stopped or failed task ended: the enhancement, Hermes' turn, or the runner. */

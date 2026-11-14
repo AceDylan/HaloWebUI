@@ -11,6 +11,8 @@
 
 	import '$lib/components/teams/teams.css';
 	import type { VideoTask } from '$lib/apis/video-studio';
+	import { toast } from 'svelte-sonner';
+	import { copyToClipboard } from '$lib/utils';
 	import StatusChip from '$lib/components/teams/StatusChip.svelte';
 	import { elapsed, now } from '$lib/components/teams/clock';
 
@@ -69,7 +71,7 @@
 						{ key: 'make', label: `${task.maker} 制作` }
 					]
 				: [{ key: 'make', label: 'Hermes 制作' }]),
-			{ key: 'video', label: '成片入库' }
+			{ key: 'video', label: task.pcVideos?.length ? '成片在家里电脑' : '成片入库' }
 		];
 		if (task.state === 'done') return list.map((step) => ({ ...step, state: 'done' as StepState }));
 		const at = Math.max(0, list.findIndex((step) => step.key === stageKey(task, viaRunner)));
@@ -194,6 +196,24 @@
 						<a href="/workspace/videos?tab=library" class="shrink-0 font-medium text-sky-700 hover:underline dark:text-sky-300">视频库 ↗</a>
 					</div>
 				{/if}
+			</div>
+		{:else if task.state === 'done' && task.pcVideos?.length}
+			<!-- made on the home PC and left there (pc-video deliver): where to find it -->
+			<div class="vt-foot mt-3 space-y-1 pt-2.5 text-xs text-gray-600 dark:text-gray-300" data-video-task-pc>
+				<div class="font-medium text-gray-900 dark:text-gray-100">成片在家里电脑</div>
+				{#each task.pcVideos as path (path)}
+					<div class="flex items-center gap-2">
+						<code class="min-w-0 flex-1 truncate rounded bg-gray-100 px-1.5 py-0.5 dark:bg-gray-800" title={path}>{path}</code>
+						<button
+							type="button"
+							class="shrink-0 hover:underline"
+							on:click={async () => {
+								if (await copyToClipboard(path)) toast.success('已复制路径');
+							}}
+							data-video-task-pc-copy={path}>复制</button
+						>
+					</div>
+				{/each}
 			</div>
 		{/if}
 	</section>

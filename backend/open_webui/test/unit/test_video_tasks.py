@@ -276,6 +276,20 @@ def test_a_runner_at_work_then_its_report_with_the_video():
     assert done["videos"][0]["url"] == "/api/v1/files/fv/content"
 
 
+def test_a_video_left_on_the_home_pc_is_done_by_its_windows_path():
+    reply = ("在家里电脑用 JIZURA 渲染，成片在家里电脑：`D:\\HermesWork\\视频\\20261114-2021-笑一笑_歌词MV.mp4`，"
+             "片段 D:\\HermesWork\\视频\\20261114-2013-片段.mp4。")
+    chat = _task_chat("vt-pc", {"done": True, "completedAt": int(time.time()) - 5, "content": reply})
+    task = video_tasks.get_task("vt-pc", chat.id)
+    assert task["state"] == "done" and task["videos"] == []
+    assert task["pcVideos"] == ["D:\\HermesWork\\视频\\20261114-2021-笑一笑_歌词MV.mp4",
+                                "D:\\HermesWork\\视频\\20261114-2013-片段.mp4"]
+    assert task["now"].startswith("成片在家里电脑：D:\\HermesWork") and task["now"].endswith("等 2 个")
+    # a path elsewhere on the PC, or no path at all, is not a delivered video
+    other = _task_chat("vt-pc", {"done": True, "content": "草稿在 D:\\HermesWork\\wsl\\x.mp4"})
+    assert video_tasks.get_task("vt-pc", other.id)["state"] == "replied"
+
+
 def test_failed_stopped_and_cut_off_say_where_they_ended():
     failed = _task_chat("vt-fay", {"done": True, "error": {"content": "Hermes 连接失败"}})
     stopped = _task_chat("vt-fay", {"done": True}, meta={"stoppedAt": int(time.time())})

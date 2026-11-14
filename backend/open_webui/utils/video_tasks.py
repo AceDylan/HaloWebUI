@@ -263,6 +263,21 @@ def _status_line(reply: dict) -> tuple[str, Optional[str]]:
     return "", prep_state
 
 
+# A video made on the home PC stays there (pc-video deliver): the reply names it by its Windows
+# path instead of handing a file over, and that counts as the finished video.
+_PC_VIDEO_RE = re.compile(r"[A-Za-z]:\\HermesWork\\视频\\[^\s`'\"<>|*?]+?\.(?:mp4|mov|webm|mkv|m4v)", re.IGNORECASE)
+PC_VIDEOS_MAX = 6
+
+
+def _pc_videos(*texts) -> list[str]:
+    found: list[str] = []
+    for text in texts:
+        for path in _PC_VIDEO_RE.findall(str(text or "")):
+            if path not in found:
+                found.append(path)
+    return found[:PC_VIDEOS_MAX]
+
+
 def _report_after(messages: dict, reply: dict, run_id: str) -> Optional[dict]:
     """The runner's report that came back into the chat after the reply that launched it."""
     since = int(reply.get("timestamp") or 0)
@@ -323,6 +338,7 @@ def task_of(chat, user_id: str, videos: Optional[dict[str, list[dict]]] = None) 
         "prep": prep or ("running" if not replied and prep_job_in(asked.get("content")) else None),
         "steps": steps,
         "videos": made,
+        "pcVideos": [],
         "runner": None,
         "now": "",
         "error": "",
@@ -363,8 +379,12 @@ def task_of(chat, user_id: str, videos: Optional[dict[str, list[dict]]] = None) 
             task["now"] = f"{task['maker']} 在后台制作，做好后报告会发回对话"
         return task
     task["endedAt"] = (report or {}).get("at") or int(reply.get("completedAt") or 0) or None
+    pc = [] if made else _pc_videos((report or {}).get("content"), reply.get("content"))
     if made:
         task.update(state="done", now=f"成片 {len(made)} 个，已进视频库")
+    elif pc:
+        task.update(state="done", pcVideos=pc,
+                    now=f"成片在家里电脑：{pc[0]}" + (f" 等 {len(pc)} 个" if len(pc) > 1 else ""))
     else:
         task.update(state="replied", now="已回复，但还没有成片：打开对话看看（可能在等你确认）")
     return task

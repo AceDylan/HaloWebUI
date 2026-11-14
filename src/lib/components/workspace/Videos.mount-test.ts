@@ -760,6 +760,26 @@ describe('Videos 制作任务', () => {
 		expect(target.querySelector('[data-video-task="run1"]')).toBeFalsy();
 	});
 
+	it('a video left on the home PC is shown by its Windows path, ready to copy', async () => {
+		api.getVideoPage.mockResolvedValue({ items: [], next: null });
+		const path = 'D:\\HermesWork\\视频\\20261114-2021-笑一笑_歌词MV.mp4';
+		api.getVideoTasks.mockResolvedValue([
+			videoTask({ chatId: 'pc1', id: 'pc1', state: 'done', now: `成片在家里电脑：${path}`, endedAt: Math.floor(Date.now() / 1000), videos: [], pcVideos: [path] })
+		]);
+		const target = await mount();
+		await sleep(20);
+		target.querySelector('[data-video-task-history-toggle]').click();
+		await sleep(10);
+		const card = target.querySelector('[data-video-task="pc1"]');
+		expect(card.querySelector('[data-video-task-player]')).toBeFalsy();
+		const block = card.querySelector('[data-video-task-pc]');
+		expect(block.textContent).toContain('成片在家里电脑');
+		expect(block.querySelector('code').textContent).toBe(path);
+		expect(card.querySelector('[data-step="video"]').textContent).toContain('成片在家里电脑');
+		expect(card.querySelector('[data-step="video"]').getAttribute('data-state')).toBe('done');
+		expect(block.querySelector(`[data-video-task-pc-copy]`)).toBeTruthy();
+	});
+
 	it('the chat\'s card leads back to the workbench and does not play the video again', async () => {
 		const { writable } = await import('svelte/store');
 		const { default: Card } = await import('./VideoTaskCard.svelte');

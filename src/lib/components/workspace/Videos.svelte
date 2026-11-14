@@ -1405,7 +1405,7 @@
 			<video src={playing.url} poster={playing.cover || undefined} controls autoplay playsinline class="max-h-[70vh] w-full rounded-xl bg-black" />
 			<div class="flex flex-wrap items-center justify-between gap-2 px-1 text-xs text-gray-500">
 				<span>{playing.name}{playing.size ? ` · ${formatFileSize(playing.size)}` : ''} · {dateLabel(playing.createdAt)}{playing.runId ? ` · ${makerLabel(playing)} 运行 ${playing.runId}` : ''}{runSource(playing) ? `（${runSource(playing)} 发起）` : ''}</span>
-				<span class="flex items-center gap-2">
+				<span class="flex flex-wrap items-center gap-2">
 					{#if playing.chatId}
 						<a class="workspace-secondary-button text-xs" href="/c/{encodeURIComponent(playing.chatId)}">打开对话</a>
 					{/if}

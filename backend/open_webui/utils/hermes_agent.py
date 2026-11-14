@@ -1942,9 +1942,10 @@ def _store_generated_file(request, user, metadata, name: str, data, content_type
         ),
     )
     if media_kind(content_type, name) == "video":
+        from open_webui.utils import video_cover
         from open_webui.utils.video_library import record_video
 
-        record_video(
+        item_id = record_video(
             user.id,
             file_id=file_id,
             name=name,
@@ -1954,6 +1955,7 @@ def _store_generated_file(request, user, metadata, name: str, data, content_type
             origin=origin,
             run=metadata.get("video_run"),
         )
+        video_cover.start(request, user, item_id)
     return f"/api/v1/files/{file_id}/content"
 
 

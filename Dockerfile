@@ -164,6 +164,14 @@ RUN set -eux; \
     if [ "$HALO_RUNTIME_PROFILE" = "main" ]; then \
         uv pip install --system -r requirements/storage-s3.txt --no-cache-dir; \
     fi; \
+    # rapidocr pulls in the GUI opencv-python, whose cv2 overwrites the headless one and needs
+    # libGL (not installed): keep only the headless build so cv2 imports (OCR, video covers).
+    if python -c "import importlib.metadata as m; m.version('opencv-python')" 2>/dev/null; then \
+        headless_version="$(python -c "import importlib.metadata as m; print(m.version('opencv-python-headless'))" 2>/dev/null || python -c "import importlib.metadata as m; print(m.version('opencv-python'))")"; \
+        pip uninstall -y opencv-python; \
+        uv pip install --system --no-deps --reinstall "opencv-python-headless==${headless_version}" --no-cache-dir; \
+        python -c "import cv2; print('cv2', cv2.__version__)"; \
+    fi; \
     if [ "$INSTALL_SMART_SEARCH" = "true" ]; then \
         if [ "$HALO_RUNTIME_PROFILE" != "main" ]; then \
             echo "Skipping Smart Search CLI for HALO_RUNTIME_PROFILE=$HALO_RUNTIME_PROFILE"; \

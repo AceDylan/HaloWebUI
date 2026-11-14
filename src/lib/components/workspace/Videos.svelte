@@ -30,12 +30,14 @@
 	import { ensureModels } from '$lib/services/models';
 	import {
 		deleteLibraryVideo,
+		redrawVideoCover,
 		getMusicFiles,
 		getVideoPage,
 		getVideoTask,
 		getVideoTasks,
 		startVideoTask,
 		stopVideoTask,
+		videoTaskCovering,
 		videoTaskLive,
 		type LibraryVideo,
 		type MusicFile,
@@ -532,9 +534,10 @@
 	const watchTasks = () => {
 		if (tasksTimer) clearTimeout(tasksTimer);
 		tasksTimer = null;
-		if (destroyed || !tasks.some(videoTaskLive)) return;
+		if (destroyed || !tasks.some((t) => videoTaskLive(t) || videoTaskCovering(t))) return;
 		const hidden = typeof document !== 'undefined' && document.visibilityState === 'hidden';
-		const quiet = !tasks.some((t) => t.state === 'running'); // only runners at work: slower
+		// only runners at work, or only covers being drawn: slower
+		const quiet = !tasks.some((t) => t.state === 'running');
 		tasksTimer = setTimeout(loadTasks, hidden ? 30000 : quiet ? 10000 : 3000);
 	};
 
@@ -551,6 +554,8 @@
 			tasks = focused ? [...list, focused] : list;
 			// a video that just came in belongs in the library too
 			if (finished.length && libraryLoaded) void loadFirst();
+			else if (libraryLoaded && list.some((t) => t.videos.some((v) => videos.some((o) => o.id === v.id && o.coverStatus !== v.coverStatus))))
+				void refreshCovers();
 		} catch (error) {
 			console.warn('video tasks unavailable', error);
 		}
@@ -612,6 +617,46 @@
 			toast.error('视频库读取失败');
 		} finally {
 			libraryLoaded = true;
+		}
+	};
+
+	// 封面: a cover being drawn shows up on its own (the newest videos, the first page)
+	let coversTimer: ReturnType<typeof setTimeout> | null = null;
+	const refreshCovers = async () => {
+		try {
+			const page = await getVideoPage(localStorage.token, { limit: PAGE, q: asked });
+			const fresh = new Map(page.items.map((v) => [v.id, v]));
+			videos = videos.map((v) => {
+				const f = fresh.get(v.id);
+				return f ? { ...v, cover: f.cover, coverStatus: f.coverStatus, coverError: f.coverError } : v;
+			});
+			if (playing) playing = videos.find((v) => v.id === playing?.id) ?? playing;
+		} catch (error) {
+			console.warn('video covers unavailable', error);
+		}
+		watchCovers();
+	};
+	const watchCovers = () => {
+		if (coversTimer) clearTimeout(coversTimer);
+		coversTimer = null;
+		if (!destroyed && videos.some((v) => v.coverStatus === 'generating')) coversTimer = setTimeout(refreshCovers, 8000);
+	};
+	$: drawingCovers = videos.some((v) => v.coverStatus === 'generating');
+	$: drawingCovers, watchCovers();
+
+	let redrawing = '';
+	const redrawCover = async (video: LibraryVideo) => {
+		if (redrawing) return;
+		redrawing = video.id;
+		try {
+			const row = await redrawVideoCover(localStorage.token, video.id);
+			videos = videos.map((v) => (v.id === row.id ? { ...v, coverStatus: row.coverStatus, coverError: '' } : v));
+			if (playing?.id === row.id) playing = { ...playing, coverStatus: row.coverStatus, coverError: '' };
+			toast.success('正在用 gpt-image 生成封面，约 1–2 分钟');
+		} catch (error) {
+			toast.error(`${(error as any)?.detail ?? (error as Error)?.message ?? error}`);
+		} finally {
+			redrawing = '';
 		}
 	};
 
@@ -766,6 +811,7 @@
 	onDestroy(() => {
 		destroyed = true;
 		if (tasksTimer) clearTimeout(tasksTimer);
+		if (coversTimer) clearTimeout(coversTimer);
 		if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', onVisibility);
 		clearModeDraft('video');
 		if (searchTimer) clearTimeout(searchTimer);
@@ -1087,7 +1133,11 @@
 								<div class="relative aspect-video overflow-hidden rounded-lg bg-gray-900">
 									<!-- svelte-ignore a11y-media-has-caption -->
 									<!-- svelte-ignore a11y-media-has-caption -->
-							<video use:nearScreen={video.url} class="size-full object-cover" muted playsinline preload="metadata" />
+							{#if video.cover}
+										<img src={video.cover} alt="" loading="lazy" class="size-full object-cover" data-video-cover={video.id} />
+									{:else}
+										<video use:nearScreen={video.url} class="size-full object-cover" muted playsinline preload="metadata" />
+									{/if}
 									<span class="absolute inset-0 grid place-items-center bg-black/10 opacity-80 transition group-hover:bg-black/25">
 										<span class="grid size-8 place-items-center rounded-full bg-white/90 text-gray-900 shadow">▶</span>
 									</span>
@@ -1285,7 +1335,14 @@
 				{#each videos as video (video.id)}
 					<div class="glass-item group p-1.5" data-video-card={video.id}>
 						<button type="button" class="relative block aspect-video w-full overflow-hidden rounded-lg bg-gray-900" on:click={() => play(video)} aria-label="播放 {videoTitle(video)}">
-							<video use:nearScreen={video.url} class="size-full object-cover" muted playsinline preload="metadata" />
+							{#if video.cover}
+								<img src={video.cover} alt="" loading="lazy" class="size-full object-cover" data-video-cover={video.id} />
+							{:else}
+								<video use:nearScreen={video.url} class="size-full object-cover" muted playsinline preload="metadata" />
+							{/if}
+							{#if video.coverStatus === 'generating'}
+								<span class="absolute bottom-2 left-2 rounded-full bg-black/55 px-2 py-0.5 text-[10.5px] text-white backdrop-blur" data-video-cover-drawing={video.id}>封面生成中…</span>
+							{/if}
 							<span class="absolute inset-0 grid place-items-center bg-black/10 transition group-hover:bg-black/25">
 								<span class="grid size-10 place-items-center rounded-full bg-white/90 text-gray-900 shadow-lg transition group-hover:scale-105">▶</span>
 							</span>
@@ -1345,13 +1402,25 @@
 				</button>
 			</div>
 			<!-- svelte-ignore a11y-media-has-caption -->
-			<video src={playing.url} controls autoplay playsinline class="max-h-[70vh] w-full rounded-xl bg-black" />
+			<video src={playing.url} poster={playing.cover || undefined} controls autoplay playsinline class="max-h-[70vh] w-full rounded-xl bg-black" />
 			<div class="flex flex-wrap items-center justify-between gap-2 px-1 text-xs text-gray-500">
 				<span>{playing.name}{playing.size ? ` · ${formatFileSize(playing.size)}` : ''} · {dateLabel(playing.createdAt)}{playing.runId ? ` · ${makerLabel(playing)} 运行 ${playing.runId}` : ''}{runSource(playing) ? `（${runSource(playing)} 发起）` : ''}</span>
 				<span class="flex items-center gap-2">
 					{#if playing.chatId}
 						<a class="workspace-secondary-button text-xs" href="/c/{encodeURIComponent(playing.chatId)}">打开对话</a>
 					{/if}
+					{#if playing.cover}
+						<a class="workspace-secondary-button text-xs" href={playing.cover} download="{playing.title || 'video'}-封面.jpg" data-video-cover-download>下载封面</a>
+					{/if}
+					<button
+						type="button"
+						class="workspace-secondary-button text-xs"
+						disabled={playing.coverStatus === 'generating' || redrawing === playing.id}
+						title={playing.coverStatus === 'failed' && playing.coverError ? `上次失败：${playing.coverError}` : '用 gpt-image 按首帧重画封面'}
+						on:click={() => playing && redrawCover(playing)}
+						data-video-cover-redraw
+						>{playing.coverStatus === 'generating' ? '封面生成中…' : playing.cover ? '重新生成封面' : '生成封面'}</button
+					>
 					<a class="workspace-secondary-button text-xs" href={playing.url} download={playing.name}>下载</a>
 				</span>
 			</div>

@@ -77,16 +77,42 @@ def video_form(
     return ImageStudioItemForm(id=item_id, kind=VIDEO_KIND, data=data)
 
 
-def record_video(user_id: str, **kwargs) -> bool:
-    """Adds a stored video to the user's library; never fails the reply or report it came in."""
+# The cover drawn for a video once it is in (utils/video_cover.py): kept when the same video
+# is filed again (a reply recovered after a reconnect fetches it a second time).
+COVER_FIELDS = ("cover", "coverFileId", "coverStatus", "coverStartedAt", "coverAt", "coverModel", "coverError")
+
+
+def _get_video(user_id: str, item_id: str):
+    return ImageStudioItems.get_item(user_id, item_id, kind=VIDEO_KIND)
+
+
+def record_video(user_id: str, **kwargs) -> Optional[str]:
+    """Adds a stored video to the user's library; returns its library id (None when it could not
+    be filed). Never fails the reply or report it came in."""
     if not user_id:
-        return False
+        return None
     try:
-        ImageStudioItems.upsert_items(user_id, [video_form(**kwargs)])
-        return True
+        form = video_form(**kwargs)
+        old = _get_video(user_id, form.id)
+        if old is not None:
+            form.data.update({key: old.data[key] for key in COVER_FIELDS if key in (old.data or {})})
+        ImageStudioItems.upsert_items(user_id, [form])
+        return form.id
     except Exception as e:  # noqa: BLE001 — the video is already in the chat
         log.warning("Could not add a video to the video library: %s", e)
-        return False
+        return None
+
+
+def set_video_fields(user_id: str, item_id: str, fields: dict) -> Optional[dict]:
+    """Merges *fields* (None removes one) into a library video's data; None when it is not
+    (or no longer) in the library."""
+    row = _get_video(user_id, item_id)
+    if row is None:
+        return None
+    data = {**(row.data or {}), **fields}
+    data = {key: value for key, value in data.items() if value is not None}
+    ImageStudioItems.upsert_items(user_id, [ImageStudioItemForm(id=item_id, kind=VIDEO_KIND, data=data)])
+    return data
 
 
 # The video studio's brief (src/lib/utils/video-brief.ts) starts with this line, after a runner's

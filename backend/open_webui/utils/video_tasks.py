@@ -223,7 +223,8 @@ def _videos_by_chat(user_id: str) -> dict[str, list[dict]]:
         chat_id = data.get("chatId")
         if chat_id:
             video = {key: data[key] for key in ("fileId", "url", "name", "title", "size", "contentType",
-                                                "createdAt", "runner") if data.get(key) is not None}
+                                                "createdAt", "runner", "cover", "coverStatus")
+                     if data.get(key) is not None}
             found.setdefault(chat_id, []).append({**video, "id": row.id})
     for videos in found.values():
         videos.sort(key=lambda v: v.get("createdAt") or 0)

@@ -20,7 +20,10 @@ const api = vi.hoisted(() => ({
 	getVideoTasks: vi.fn(async () => [] as any[]),
 	getVideoTask: vi.fn(),
 	stopVideoTask: vi.fn(),
-	videoTaskLive: (task: any) => task?.state === 'running' || task?.state === 'background'
+	redrawVideoCover: vi.fn(),
+	videoTaskLive: (task: any) => task?.state === 'running' || task?.state === 'background',
+	videoTaskCovering: (task: any) =>
+		task?.state === 'done' && (task.videos ?? []).some((v: any) => v.coverStatus === 'generating')
 }));
 vi.mock('$lib/apis/video-studio', () => api);
 const upload = vi.hoisted(() => ({ uploadFileReliably: vi.fn() }));
@@ -425,6 +428,38 @@ describe('Videos', () => {
 		expect(cards()).toEqual(['video_3', 'video_1']);
 	});
 
+	it('shows a video by its cover, plays it with the cover as poster and draws a new one', async () => {
+		api.getVideoPage.mockResolvedValue({
+			items: [
+				video(5, { cover: '/api/v1/files/cv5/content', coverStatus: 'ready', title: '笑一笑' }),
+				video(4, { coverStatus: 'generating' })
+			],
+			next: null
+		});
+		api.redrawVideoCover.mockResolvedValue(video(5, { coverStatus: 'generating' }));
+		const target = await mount();
+		target.querySelector('[data-video-tab="library"]').click();
+		await sleep(20);
+		const withCover = target.querySelector('[data-video-card="video_5"]');
+		expect(withCover.querySelector('[data-video-cover="video_5"]').getAttribute('src')).toBe('/api/v1/files/cv5/content');
+		expect(withCover.querySelector('video')).toBeFalsy();
+		const drawing = target.querySelector('[data-video-card="video_4"]');
+		expect(drawing.querySelector('video')).toBeTruthy();
+		expect(drawing.querySelector('[data-video-cover-drawing="video_4"]').textContent).toContain('封面生成中');
+		withCover.querySelector('button').click();
+		await sleep(20);
+		const player = document.querySelector('video[autoplay]') as HTMLVideoElement;
+		expect(player.getAttribute('poster')).toBe('/api/v1/files/cv5/content');
+		expect(document.querySelector('[data-video-cover-download]').getAttribute('href')).toBe('/api/v1/files/cv5/content');
+		const redraw = document.querySelector('[data-video-cover-redraw]') as HTMLButtonElement;
+		expect(redraw.textContent).toContain('重新生成封面');
+		redraw.click();
+		await sleep(20);
+		expect(api.redrawVideoCover).toHaveBeenCalledWith('token', 'video_5');
+		expect(redraw.disabled).toBe(true);
+		expect(redraw.textContent).toContain('封面生成中');
+	});
+
 	it('shows a video from a run started on Telegram by its task, runner and platform', async () => {
 		api.getVideoPage.mockResolvedValue({
 			items: [video(7, { origin: 'runner', runner: 'codex', platform: 'telegram', runId: '20261015-224655-9fe3765e', runTitle: '生成一段视频，讲述长征', name: '长征_山河记得.mp4' })],
@@ -688,7 +723,7 @@ describe('Videos 制作任务', () => {
 		api.getVideoPage.mockResolvedValue({ items: [], next: null });
 		api.getVideoTasks.mockResolvedValue([
 			videoTask({ chatId: 'run1', id: 'run1', maker: 'codex', state: 'background', now: 'codex 在渲染', runner: { runId: 'r1', agent: 'codex', step: 12, startedAt: Math.floor(Date.now() / 1000) - 600 } }),
-			videoTask({ chatId: 'ok1', id: 'ok1', state: 'done', now: '成片 1 个，已进视频库', endedAt: Math.floor(Date.now() / 1000), videos: [video(7)] })
+			videoTask({ chatId: 'ok1', id: 'ok1', state: 'done', now: '成片 1 个，已进视频库', endedAt: Math.floor(Date.now() / 1000), videos: [video(7, { cover: '/api/v1/files/cv7/content', coverStatus: 'ready' })] })
 		]);
 		api.stopVideoTask.mockResolvedValue(videoTask({ chatId: 'run1', id: 'run1', maker: 'codex', state: 'stopped', now: '已停止', endedIn: 'runner' }));
 		const target = await mount();
@@ -706,7 +741,10 @@ describe('Videos 制作任务', () => {
 		await sleep(10);
 		expect(historyToggle.getAttribute('aria-expanded')).toBe('true');
 		const done = target.querySelector('[data-video-task="ok1"]');
-		expect(done.querySelector('[data-video-task-player="video_7"]').getAttribute('src')).toContain('/api/v1/files/f7/content');
+		const player = done.querySelector('[data-video-task-player="video_7"]');
+		expect(player.getAttribute('src')).toBe('/api/v1/files/f7/content'); // no #t=: the poster stays
+		expect(player.getAttribute('poster')).toBe('/api/v1/files/cv7/content');
+		expect(done.querySelector('[data-video-task-cover]').getAttribute('href')).toBe('/api/v1/files/cv7/content');
 		expect(done.querySelector('[data-step="video"]').getAttribute('data-state')).toBe('done');
 		expect(done.querySelector('[data-video-task-stop]')).toBeFalsy();
 		background.querySelector('[data-video-task-stop]').click();

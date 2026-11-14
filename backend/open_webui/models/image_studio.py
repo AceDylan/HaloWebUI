@@ -185,6 +185,15 @@ class ImageStudioItemsTable:
                 query = query.limit(limit)
             return [ImageStudioItemModel.model_validate(item) for item in query.all()]
 
+    def get_item(
+        self, user_id: str, id: str, kind: Optional[str] = None
+    ) -> Optional[ImageStudioItemModel]:
+        with get_db() as db:
+            item = db.get(ImageStudioItem, {"id": id, "user_id": user_id})
+            if item is None or (kind and item.kind != kind):
+                return None
+            return ImageStudioItemModel.model_validate(item)
+
     def page_items(
         self,
         user_id: str,

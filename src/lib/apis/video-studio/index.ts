@@ -24,6 +24,11 @@ export type LibraryVideo = {
 	runner?: string;
 	platform?: string;
 	runTitle?: string;
+	/** 视频封面 (backend utils/video_cover.py): gpt-image redraws the first frame once the video is
+	 * in; `cover` is the picture (the players' poster) when `coverStatus` is ready. */
+	cover?: string;
+	coverStatus?: 'generating' | 'ready' | 'failed';
+	coverError?: string;
 };
 
 const headers = (token: string) => ({ Accept: 'application/json', authorization: `Bearer ${token}` });
@@ -53,6 +58,15 @@ export const deleteLibraryVideo = async (token: string, id: string): Promise<boo
 		method: 'DELETE',
 		headers: headers(token)
 	}).then(parseJsonResponse<boolean>);
+
+/** 重新生成封面: a new cover for one library video, drawn in the background (409 while one is). */
+export const redrawVideoCover = async (token: string, id: string): Promise<LibraryVideo> => {
+	const res = await fetch(`${VIDEO_STUDIO_API_BASE_URL}/items/${encodeURIComponent(id)}/cover`, {
+		method: 'POST',
+		headers: headers(token)
+	}).then(parseJsonResponse<{ id: string; data: LibraryVideo; created_at: number }>);
+	return { ...res.data, id: res.id, createdAt: res.data.createdAt || res.created_at * 1000 };
+};
 
 /** An MP3 the user uploaded before: background music the workbench can pick again. */
 export type MusicFile = { id: string; name: string; size: number; createdAt: number };
@@ -86,7 +100,10 @@ export type VideoTask = {
 	steps: number;
 	startedAt: number;
 	endedAt: number | null;
-	videos: Pick<LibraryVideo, 'id' | 'fileId' | 'url' | 'name' | 'title' | 'size' | 'contentType' | 'createdAt'>[];
+	videos: Pick<
+		LibraryVideo,
+		'id' | 'fileId' | 'url' | 'name' | 'title' | 'size' | 'contentType' | 'createdAt' | 'cover' | 'coverStatus'
+	>[];
 	runner: { runId: string; agent: string; step?: number | null; startedAt?: number | null; activity?: string } | null;
 	error: string;
 	/** Where a stopped or failed task ended: the enhancement, Hermes' turn, or the runner. */
@@ -148,3 +165,7 @@ export const stopVideoTask = async (token: string, chatId: string): Promise<Vide
 /** Still moving: worth reading again. */
 export const videoTaskLive = (task: VideoTask | null | undefined) =>
 	task?.state === 'running' || task?.state === 'background';
+
+/** A finished task whose video's cover is still being drawn (worth reading again shortly). */
+export const videoTaskCovering = (task: VideoTask | null | undefined) =>
+	task?.state === 'done' && task.videos.some((v) => v.coverStatus === 'generating');

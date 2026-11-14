@@ -59,9 +59,9 @@ def now_ms() -> int:
     return int(time.time() * 1000)
 
 
-def may_illustrate(request, user) -> bool:
-    """Automatic pictures are on, and this user may generate images at all."""
-    if os.environ.get(AUTO_ENV, "1") == "0":
+def may_illustrate(request, user, env: str = AUTO_ENV) -> bool:
+    """Automatic pictures are on (*env* is not ``0``), and this user may generate images at all."""
+    if os.environ.get(env, "1") == "0":
         return False
     try:
         from open_webui.routers.images import _can_use_image_generation

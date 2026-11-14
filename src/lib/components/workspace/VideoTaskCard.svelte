@@ -173,9 +173,15 @@
 						{#each task.videos as video (video.id)}
 							<div class="min-w-0">
 								<!-- svelte-ignore a11y-media-has-caption -->
-								<video src="{video.url}#t=0.1" controls playsinline preload="metadata" class="aspect-video w-full rounded-lg bg-black" data-video-task-player={video.id} />
+								<!-- with a cover the poster shows until play (a #t= start would hide it) -->
+								<video src={video.cover ? video.url : `${video.url}#t=0.1`} poster={video.cover || undefined} controls playsinline preload="metadata" class="aspect-video w-full rounded-lg bg-black" data-video-task-player={video.id} />
 								<div class="mt-1 flex items-center gap-2 text-xs text-gray-600 dark:text-gray-300">
 									<span class="min-w-0 flex-1 truncate" title={video.name}>{video.title || video.name}</span>
+									{#if video.coverStatus === 'generating'}
+										<span class="shrink-0 text-gray-400" data-video-task-cover-drawing>封面生成中…</span>
+									{:else if video.cover}
+										<a href={video.cover} download="{video.title || 'video'}-封面.jpg" class="shrink-0 hover:underline" data-video-task-cover>封面</a>
+									{/if}
 									<a href={video.url} download={video.name} class="shrink-0 hover:underline">下载</a>
 								</div>
 							</div>

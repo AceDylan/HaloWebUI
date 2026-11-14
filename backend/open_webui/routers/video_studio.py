@@ -138,6 +138,24 @@ async def delete_video(item_id: str, user=Depends(get_verified_user)):
     return ImageStudioItems.delete_item_by_id_and_user_id(item_id, user.id)
 
 
+@router.post("/items/{item_id}/cover", response_model=ImageStudioItemModel)
+async def redraw_cover(request: Request, item_id: str, user=Depends(get_verified_user)):
+    """重新生成封面: draws a new cover for one of the user's videos (in the background; the row's
+    ``coverStatus`` says how it goes). 409 while one is already being drawn."""
+    from open_webui.utils import video_cover
+
+    row = ImageStudioItems.get_item(user.id, item_id, kind=VIDEO_KIND)
+    if row is None:
+        raise HTTPException(404, "视频不存在")
+    if not video_cover.may_cover(request, user):
+        raise HTTPException(403, "生图未开启或无权使用，不能生成封面")
+    if video_cover.busy(row.data or {}, force=True):
+        raise HTTPException(409, "封面正在生成")
+    video_cover.start(request, user, item_id, force=True)
+    return row.model_copy(update={"data": {**(row.data or {}), "coverStatus": "generating",
+                                           "coverStartedAt": video_cover.now_ms()}})
+
+
 class RunnerVideosForm(BaseModel):
     run_id: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9._-]+$")
     runner: str = Field(default="", max_length=32)

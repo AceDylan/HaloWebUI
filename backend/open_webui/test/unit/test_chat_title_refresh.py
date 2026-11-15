@@ -16,6 +16,15 @@ from open_webui.utils import middleware  # noqa: E402
 from open_webui.utils.task import title_generation_template  # noqa: E402
 
 
+@pytest.fixture
+def task_request():
+    config = SimpleNamespace(
+        ENABLE_TITLE_GENERATION=True,
+        ENABLE_FOLDER_AUTO_ASSIGNMENT=False,
+    )
+    return SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(config=config)))
+
+
 def _message_chain(user_turns: int):
     messages = {}
     parent_id = None
@@ -55,7 +64,7 @@ def _message_chain(user_turns: int):
     ],
 )
 def test_background_title_refresh_skips_manual_duplicate_and_stale_requests(
-    monkeypatch, title, title_generation
+    monkeypatch, task_request, title, title_generation
 ):
     message_map, message_id = _message_chain(3)
 
@@ -78,7 +87,7 @@ def test_background_title_refresh_skips_manual_duplicate_and_stale_requests(
 
     asyncio.run(
         middleware.background_tasks_handler(
-            SimpleNamespace(),
+            task_request,
             SimpleNamespace(),
             {"chat_id": "chat-1", "message_id": message_id},
             {TASKS.TITLE_GENERATION: True},
@@ -88,7 +97,7 @@ def test_background_title_refresh_skips_manual_duplicate_and_stale_requests(
 
 
 def test_background_title_refresh_uses_full_chain_and_marks_automatic_metadata(
-    monkeypatch,
+    monkeypatch, task_request,
 ):
     message_map, message_id = _message_chain(3)
     generated = []
@@ -128,7 +137,7 @@ def test_background_title_refresh_uses_full_chain_and_marks_automatic_metadata(
 
     asyncio.run(
         middleware.background_tasks_handler(
-            SimpleNamespace(),
+            task_request,
             SimpleNamespace(),
             {"chat_id": "chat-1", "message_id": message_id},
             {TASKS.TITLE_GENERATION: True},
@@ -145,6 +154,7 @@ def test_background_title_refresh_uses_full_chain_and_marks_automatic_metadata(
                 "auto_generated": True,
                 "last_user_message_count": 3,
                 "source_message_id": "assistant-3",
+                "generation_status": "generated",
             },
         )
     ]

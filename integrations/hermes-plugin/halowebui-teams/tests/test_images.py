@@ -243,8 +243,8 @@ def test_a_written_result_gets_its_picture_on_its_own_in_the_template_handed_ove
     illustrate._set(slug, status="failed", error="生图失败")
     pkg.conclusion.start(slug, by="auto", force=True)
     assert len(draws) == 2
-    # turned off: left to the button
-    monkeypatch.setenv("HALO_TEAMS_AUTO_ILLUSTRATE", "0")
+    # by default: left to the button
+    monkeypatch.delenv("HALO_TEAMS_AUTO_ILLUSTRATE")
     illustrate._set(slug, status="failed", error="生图失败")
     pkg.conclusion.start(slug, by="auto", force=True)
     assert len(draws) == 2

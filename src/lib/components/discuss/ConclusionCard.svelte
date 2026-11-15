@@ -7,6 +7,7 @@
 	import { now } from '$lib/components/teams/clock';
 	import ConclusionBody from './ConclusionBody.svelte';
 	import ConclusionPicture from './ConclusionPicture.svelte';
+	import FinishChips from './FinishChips.svelte';
 	import SeatAvatar from './SeatAvatar.svelte';
 	import {
 		cardDesigning,
@@ -36,6 +37,12 @@
 	/** 「重写结论」 on a conclusion that failed (only once the question has settled). */
 	export let rewrite: (() => void) | null = null;
 	export let busy = false;
+	/** 「生成 HTML 卡片」 / 「生成配图」 for this finished conclusion (nothing makes them on its own). */
+	export let finish: {
+		card: () => Promise<unknown>;
+		picture: () => Promise<unknown>;
+		pictureAllowed: boolean;
+	} | null = null;
 
 	$: conclusion = ask.conclusion;
 	$: sources = ask.research?.status === 'done' ? ask.research.sources : [];
@@ -87,7 +94,7 @@
 		aria-busy={state === 'streaming'}
 		data-discuss-conclusion={state}
 	>
-		<header class="flex items-center gap-2.5 px-5 pt-4 pb-1">
+		<header class="flex flex-wrap items-center gap-2.5 px-5 pt-4 pb-1">
 			<SeatAvatar
 				model={writer.model}
 				name={writer.name}
@@ -115,6 +122,15 @@
 					{/if}
 				</div>
 			</div>
+			{#if finish && state === 'done' && conclusion.content}
+				<FinishChips
+					card={ask.card}
+					illustration={ask.illustration}
+					pictureAllowed={finish.pictureAllowed}
+					onCard={finish.card}
+					onPicture={finish.picture}
+				/>
+			{/if}
 			{#if conclusion.content && state !== 'streaming'}
 				<button
 					type="button"

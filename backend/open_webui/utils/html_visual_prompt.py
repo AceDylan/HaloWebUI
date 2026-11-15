@@ -122,52 +122,21 @@ HTML_VISUAL_FORCE_PROMPT = f"""{HTML_VISUAL_PROMPT}
 当前模式是 force。最终回复必须包含一个非空的 fenced `html` Artifact；即使答案主要是纯文本，也要在保留原始结论后提供安全、自包含的 HTML 可视化。
 """.strip()
 
-# Force mode while the post-answer AGY pass is healthy: AGY designs the artifact from the
-# finished answer (design_html_visual_artifact_with_agy) and replaces any HTML the model
-# wrote, so the model's own artifact was pure overhead — about 300 output tokens, 10-30 s
-# at the end of every reply. The model writes the content only; if AGY then fails,
-# append_html_visual_fallback adds a plain card unless the reply is already
-# structured Markdown.
+# Force mode: the card is made on request. 「生成 HTML 卡片」 under a reply hands the
+# finished answer to AGY (design_html_visual_artifact_with_agy, utils/message_card.py),
+# which replaces any HTML the model wrote, so the model's own artifact would be pure
+# overhead (about 300 output tokens, 10-30 s at the end of every reply). The model writes
+# the content only; nothing designs a card unless the person asks for one.
 HTML_VISUAL_AGY_OWNED_PROMPT = f"""[{HTML_VISUAL_PROMPT_MARKER}]
 [{HTML_VISUAL_AGY_OWNED_PROMPT_MARKER}]
 当前输出 surface 是 HaloWebUI Web Chat；本规则只适用于当前 Web 会话，不代表 Telegram/纯文本平台也支持 HTML。
-回答完成后，服务端会把你的最终回答交给 AGY 设计配套的 HTML 可视化卡片，自动附在这条回复里。
+回答完成后，用户可以点「生成 HTML 卡片」，让 AGY 按你的最终回答设计配套的 HTML 可视化卡片。
 
 - 不要自己输出 fenced `html`、`css`、`js` 等预览 Artifact，也不要预告、描述或索要这张卡片；只把内容写清楚。
 - 使用简体中文；结论先行；Markdown 标题从 ## 起，子层级使用 ###，禁用单个 #。
 - 复杂结构、横向对比、流程、参数矩阵等用清晰的 Markdown（小标题、列表、表格）组织，AGY 会据此排版；不要为了排版重复罗列同一内容。
 - 长哈希、URL、命令放进行内代码或代码块。
 """.strip()
-
-# After this many AGY answer-design failures in a row (within the window below) force mode
-# asks the model for its own artifact again, so an AGY outage (quota, login, missing
-# binary) does not leave every reply with the plain fallback card. One success resets it.
-AGY_ANSWER_FAILURE_THRESHOLD = 3
-AGY_ANSWER_FAILURE_WINDOW_SECONDS = 30 * 60
-_agy_answer_health = {"failures": 0, "last_failure": 0.0}
-
-
-def _note_agy_answer_outcome(success: bool) -> None:
-    if success:
-        _agy_answer_health["failures"] = 0
-    else:
-        _agy_answer_health["failures"] += 1
-        _agy_answer_health["last_failure"] = time.monotonic()
-
-
-def agy_answer_design_active() -> bool:
-    """Whether the post-answer AGY pass should own the force-mode artifact: its command
-    is configured and it has not just failed AGY_ANSWER_FAILURE_THRESHOLD times in a row."""
-    try:
-        if not _agy_command_argv():
-            return False
-    except ValueError:
-        return False
-    return not (
-        _agy_answer_health["failures"] >= AGY_ANSWER_FAILURE_THRESHOLD
-        and time.monotonic() - _agy_answer_health["last_failure"]
-        < AGY_ANSWER_FAILURE_WINDOW_SECONDS
-    )
 
 HTML_VISUAL_AGY_REQUEST_PROMPT = """You are AGY, a UI design-planning helper. Produce a concise design specification for a HaloWebUI fenced HTML artifact that answers the user request below.
 
@@ -1070,11 +1039,7 @@ def apply_html_visual_prompt_overlay(
     mode = get_html_visual_mode(metadata)
     # A request that already ran the legacy pre-answer AGY pass (a design spec or its
     # failure in metadata) keeps asking the model to build the artifact from that.
-    agy_owned = (
-        mode == "force"
-        and not _as_mapping(metadata).get(HTML_VISUAL_AGY_METADATA_KEY)
-        and agy_answer_design_active()
-    )
+    agy_owned = mode == "force" and not _as_mapping(metadata).get(HTML_VISUAL_AGY_METADATA_KEY)
     if agy_owned:
         prompt = HTML_VISUAL_AGY_OWNED_PROMPT
     else:
@@ -1943,7 +1908,6 @@ def _record_agy_html_status(
     if html_fragment is not None:
         record["html"] = html_fragment
     metadata[HTML_VISUAL_AGY_HTML_METADATA_KEY] = record
-    _note_agy_answer_outcome(status == "success")
 
     log_method = log.info if status == "success" else log.warning
     log_method(
@@ -1957,15 +1921,14 @@ def _record_agy_html_status(
 
 
 async def design_html_visual_artifact_with_agy(
-    content: Any, metadata: dict[str, Any] | None
+    content: Any, metadata: dict[str, Any] | None, *, allow_brief: bool = False
 ) -> Any:
     """Hand the finished answer to AGY and swap in its HTML artifact.
 
-    Runs after the main model's response is complete, so AGY designs around the
-    actual answer content. Every failure path returns the content unchanged,
-    which keeps the main model's own HTML artifact as the fallback; the caller's
-    ``append_html_visual_fallback`` then adds a plain card unless the reply is
-    already structured Markdown.
+    Runs on a finished answer (when the person asks for its card), so AGY designs
+    around the actual answer content. Every failure path returns the content
+    unchanged; the outcome is recorded under ``HTML_VISUAL_AGY_HTML_METADATA_KEY``
+    in *metadata* (status, reason, html).
     """
     if (
         not isinstance(content, str)
@@ -1976,9 +1939,9 @@ async def design_html_visual_artifact_with_agy(
         return content
     if not isinstance(metadata, dict):
         return content
-    if is_brief_plain_reply(content):
-        # Not an AGY outcome: nothing is recorded, so the health counter that
-        # decides between AGY and the main model is not touched.
+    if not allow_brief and is_brief_plain_reply(content):
+        # Not an AGY outcome: nothing is recorded. ``allow_brief``: the person
+        # asked for this card (「生成 HTML 卡片」), however short the reply.
         log.info("HTML visual AGY answer design skipped: brief reply")
         return content
 

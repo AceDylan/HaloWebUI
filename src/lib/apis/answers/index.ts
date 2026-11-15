@@ -221,4 +221,12 @@ export const revertAnswerUpgrade = (token: string, chatId: string) => request<An
 /** 「把结果放进这个对话」: the answer of a run sent from a chat, into that chat now. */
 export const reportBackAnswer = (token: string, chatId: string) => request<ReportBack>(token, 'POST', `/${id(chatId)}/report-back`);
 
+/** 「生成 HTML 卡片」: the finished answer's card, designed by AGY in the background. */
+export const makeAnswerCard = (token: string, chatId: string) =>
+	request<{ card: ModeCard }>(token, 'POST', `/${id(chatId)}/card`);
+
+/** 「生成配图」: the finished answer's picture, drawn in the background. */
+export const makeAnswerPicture = (token: string, chatId: string) =>
+	request<{ run: AnswerRun }>(token, 'POST', `/${id(chatId)}/picture`);
+
 export const deleteAnswer = (token: string, chatId: string) => request<{ ok: boolean }>(token, 'DELETE', `/${id(chatId)}`);

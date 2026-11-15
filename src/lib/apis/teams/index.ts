@@ -872,6 +872,10 @@ export const saveTeamConclusionToKnowledge = (token: string, teamId: string) =>
 		generated_at: number;
 	}>(token, 'POST', `/${id(teamId)}/conclusion/knowledge`);
 
+/** 「生成 HTML 卡片」: the result's card, designed by AGY from the conclusion on screen (async). */
+export const makeTeamConclusionCard = (token: string, teamId: string) =>
+	request<{ card: ModeCard & { generated_at?: number } }>(token, 'POST', `/${id(teamId)}/conclusion/card`, {});
+
 /** 「为结果配图」: draw the result in one of the user's image templates (none: Hermes' hand-drawn infographic). */
 export const illustrateTeamConclusion = (token: string, teamId: string, templateId?: string) =>
 	request<ConclusionIllustration>(

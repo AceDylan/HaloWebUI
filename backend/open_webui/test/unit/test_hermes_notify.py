@@ -229,8 +229,7 @@ def test_show_notification_report_saves_announces_and_starts_no_turn(monkeypatch
         result = await hermes_notify.show_notification_report(
             object(), chat_id="chat-1", content="✅ 报告", notice="[后台任务完成通知] x", source="reclaude-runner"
         )
-        await asyncio.sleep(0)  # let the design task run
-        await asyncio.gather(*hermes_notify._REPORT_DESIGN_TASKS)
+        await asyncio.sleep(0)
         return result
 
     result = asyncio.run(run())
@@ -240,7 +239,8 @@ def test_show_notification_report_saves_announces_and_starts_no_turn(monkeypatch
     assert calls["events"][0]["type"] == RELOAD_EVENT_TYPE
     assert calls["unread"] == ["chat-1"]
     assert calls["webhook"] == [("标题", "✅ 报告")]
-    assert calls["designed"][0]["server_surface"] == "halowebui-web"
+    # no card on its own: it is made on request (「生成 HTML 卡片」, utils/message_card.py)
+    assert calls["designed"] == []
 
 
 def test_show_notification_report_shows_a_run_once(monkeypatch):
@@ -252,7 +252,6 @@ def test_show_notification_report_shows_a_run_once(monkeypatch):
         first = await hermes_notify.show_notification_report(
             object(), chat_id="chat-1", content="✅ 报告", source="reclaude-runner", run_id="r-1"
         )
-        await asyncio.gather(*hermes_notify._REPORT_DESIGN_TASKS)
         return first
 
     first = asyncio.run(run())
@@ -339,10 +338,10 @@ def test_a_longer_report_needs_an_in_process_caller_that_allows_it(monkeypatch):
     calls, asyncio = _patch_report_stack(monkeypatch)
     long = "✅ " + "完整结果" * 6000  # 24 002 characters
     with pytest.raises(hermes_notify.HermesNotifyError) as error:
-        asyncio.run(hermes_notify.show_notification_report(object(), chat_id="chat-1", content=long, design=False))
+        asyncio.run(hermes_notify.show_notification_report(object(), chat_id="chat-1", content=long))
     assert error.value.status_code == 422 and calls["saved"] == []
     result = asyncio.run(hermes_notify.show_notification_report(object(), chat_id="chat-1", content=long,
-                                                               design=False, max_chars=64000))
+                                                               max_chars=64000))
     assert calls["saved"][-1]["history"]["messages"][result["assistant_message_id"]]["content"] == long
 
 
@@ -361,30 +360,3 @@ def test_split_report_header_keeps_the_runner_lines_out_of_the_card():
     official = "✅ 官方 Claude 运行 official-run · 已完成\nClaude 会话 s · 3 轮\n\n正文"
     assert hermes_notify.split_report_header(official) == (
         "✅ 官方 Claude 运行 official-run · 已完成\nClaude 会话 s · 3 轮", "正文")
-
-
-def test_the_design_pass_gets_the_report_body_and_keeps_the_header_outside(monkeypatch):
-    calls, asyncio = _patch_report_stack(monkeypatch)
-    seen, upserts = [], []
-
-    async def design(content, metadata):
-        seen.append(content)
-        return content + "\n\n````html\n<div>card</div>\n````"
-
-    from open_webui.utils import html_visual_prompt
-
-    monkeypatch.setattr(html_visual_prompt, "design_html_visual_artifact_with_agy", design)
-    monkeypatch.setattr(
-        hermes_notify.Chats,
-        "upsert_message_to_chat_by_id_and_message_id",
-        lambda chat_id, message_id, message, **_kw: upserts.append(message),
-    )
-    report = "✅ agy 运行 r9 · 已完成\nAGY conversation e87 · 1 轮\n\n正文"
-
-    async def run():
-        await hermes_notify.show_notification_report(object(), chat_id="chat-1", content=report, run_id="r9")
-        await asyncio.gather(*hermes_notify._REPORT_DESIGN_TASKS)
-
-    asyncio.run(run())
-    assert seen == ["正文"]
-    assert upserts[-1]["content"] == "✅ agy 运行 r9 · 已完成\nAGY conversation e87 · 1 轮\n\n正文\n\n````html\n<div>card</div>\n````"

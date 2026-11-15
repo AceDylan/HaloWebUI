@@ -231,45 +231,115 @@ async def post_to_chat(request, team: AgentTeamModel, conclusion: dict, *, quiet
             run_id=run_id(team.id, generated_at),
             quiet=quiet,
             push=push,
-            design=False,
             max_chars=CHAT_POST_MAX_CHARS,
         )
     except HermesNotifyError as exc:
         raise _notify_error(exc) from exc
     _set_meta(team, "chat_posted", {"generated_at": generated_at, "at": int(time.time()), "message_id": result.get("assistant_message_id")})
-    if card is None and not result.get("duplicate") and result.get("assistant_message_id"):
-        mode_card.later(_card_into_chat(team, conclusion, team.chat_id, result["assistant_message_id"]))
     return result
 
 
-async def _card_into_chat(team: AgentTeamModel, conclusion: dict, chat_id: str, message_id: str) -> None:
-    """The posted conclusion's card (utils/mode_card.py): designed after the post (the lead's
-    hand-over does not wait for it), kept on the team for this version, then put into the reply."""
-    from open_webui.socket.main import get_event_emitter
+def _posted_reply(team: AgentTeamModel, generated_at: int) -> Optional[str]:
+    """The chat reply this version of the conclusion was posted as (the reply under the notice that
+    carries its run id), while it is still there."""
+    fresh = AgentTeams.get(team.id, team.user_id) or team
+    if not fresh.chat_id:
+        return None
+    chat = Chats.get_chat_by_id(fresh.chat_id)
+    messages = (((chat.chat or {}).get("history") or {}).get("messages") or {}) if chat is not None else {}
+    wanted = run_id(team.id, generated_at)
+    for message_id, message in messages.items():
+        notice = (messages.get(message.get("parentId") or "") or {}).get("hermes_notice") or {}
+        if message.get("role") == "assistant" and message.get("content") and notice.get("run_id") == wanted:
+            return message_id
+    return None  # not posted, or the reply is gone (deleted, or the chat with it)
+
+
+async def refresh_reply(team: AgentTeamModel, conclusion: dict) -> bool:
+    """The posted reply of this version brought up to date: its picture (in the conclusion) and its
+    card, once they are made. Whether it changed."""
+    from open_webui.utils import message_card
+
+    generated_at = _generated_at(conclusion)
+    message_id = _posted_reply(team, generated_at)
+    if not message_id or conclusion.get("status") != "ready":
+        return False
+    fresh = AgentTeams.get(team.id, team.user_id) or team
+    content = chat_content(fresh, conclusion, card_of(fresh, generated_at))
+    chat = Chats.get_chat_by_id(fresh.chat_id)
+    current = ((((chat.chat or {}).get("history") or {}).get("messages") or {}).get(message_id) or {}) if chat else {}
+    if current.get("content") == content:
+        return False
+    Chats.upsert_message_to_chat_by_id_and_message_id(
+        fresh.chat_id, message_id, {"content": content}, guard_stopped=True, set_current=False
+    )
+    await message_card.tell(fresh.user_id, fresh.chat_id, message_id, None, content)
+    return True
+
+
+async def _make_card(team: AgentTeamModel, conclusion: dict) -> None:
+    """The conclusion's card (utils/mode_card.py), kept on the team for this version and put into
+    its posted reply."""
+    from open_webui.utils import message_card
 
     generated_at = _generated_at(conclusion)
 
     async def on_change(entry: dict) -> None:
         _set_meta(team, CARD_META_KEY, {**entry, "generated_at": generated_at})
+        message_id = _posted_reply(team, generated_at)
+        if message_id:
+            await message_card.tell(team.user_id, team.chat_id, message_id, entry)
 
-    card = await mode_card.make(card_source(team, conclusion), on_change)
-    if not card or card.get("status") != "ready":
-        return
-    chat = Chats.get_chat_by_id(chat_id)
-    messages = (((chat.chat or {}).get("history") or {}).get("messages") or {}) if chat is not None else {}
-    message = messages.get(message_id) or {}
-    notice = (messages.get(message.get("parentId") or "") or {}).get("hermes_notice") or {}
-    if not message.get("content") or notice.get("run_id") != run_id(team.id, generated_at):
-        return  # the reply is gone (deleted, or the chat with it)
-    content = chat_content(team, conclusion, card)
-    Chats.upsert_message_to_chat_by_id_and_message_id(
-        chat_id, message_id, {"content": content}, guard_stopped=True, set_current=False
-    )
-    emit = get_event_emitter({"user_id": team.user_id, "chat_id": chat_id, "message_id": message_id}, update_db=False)
-    try:
-        await emit({"type": "chat:completion", "data": {"content": content}})
-    except Exception:  # noqa: BLE001 — saved; the chat shows it on next open
-        log.debug("teams: card update event for %s failed", team.id, exc_info=True)
+    card = await mode_card.make(card_source(team, conclusion), on_change, allow_brief=True)
+    if card and card.get("status") == "ready":
+        await refresh_reply(team, conclusion)
+
+
+async def team_and_target(request, user, team_id: str) -> tuple[AgentTeamModel, HermesTarget]:
+    """The user's running team and where its Hermes is (for callers outside the teams router)."""
+    team = AgentTeams.get(team_id, user.id)
+    if team is None:
+        raise TeamsError(404, "协作任务不存在")
+    if team.status != "running":
+        raise TeamsError(409, "这个协作任务还没有开始执行")
+    return team, await agent_teams.hermes_target(request, user)
+
+
+async def _ready_conclusion(team: AgentTeamModel, target: HermesTarget) -> dict:
+    conclusion = await read_conclusion(target, team)
+    if conclusion.get("status") != "ready" or not (conclusion.get("markdown") or "").strip():
+        raise TeamsError(409, "结论写好后才能生成")
+    return conclusion
+
+
+async def start_card(team: AgentTeamModel, target: HermesTarget) -> dict:
+    """「生成 HTML 卡片」 for the conclusion on screen: designed in the background; the card as it stands."""
+    if not mode_card.enabled():
+        raise TeamsError(403, "HTML 卡片已在服务端关闭")
+    conclusion = await _ready_conclusion(team, target)
+    generated_at = _generated_at(conclusion)
+    current = card_of(AgentTeams.get(team.id, team.user_id) or team, generated_at)
+    if mode_card.busy(current):
+        return current
+    entry = {"status": "designing", "startedAt": mode_card.now_ms(), "generated_at": generated_at}
+    _set_meta(team, CARD_META_KEY, entry)
+    mode_card.later(_make_card(team, conclusion))
+    return entry
+
+
+# The template a picture asked for from the chat is drawn in (as the result page picks first).
+_HAND_TEMPLATE_RE = re.compile(r"万能|auto_style")
+
+
+async def start_picture(team: AgentTeamModel, target: HermesTarget) -> dict:
+    """「生成配图」 under the result in the chat: drawn by Hermes in the owner's 「手绘万能图」 template
+    (else Hermes' own), like 「为结果配图」 on the result page."""
+    await _ready_conclusion(team, target)
+    template = next((t for t in agent_teams.image_templates(team.user_id)
+                     if _HAND_TEMPLATE_RE.search(f"{t.get('name') or ''} {t.get('id') or ''}")), None)
+    body = await agent_teams.hermes_call(target, "POST", f"/{team.id}/conclusion/illustrate",
+                                         json_body={"template": template} if template else {})
+    return body if isinstance(body, dict) else {}
 
 
 async def concluded(request, team: AgentTeamModel, target: HermesTarget, *, telegram: bool = False) -> dict:

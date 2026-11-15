@@ -295,7 +295,6 @@ async def report_back(request, kind: str, chat_id: str, run: dict, *, quiet: boo
             source=kind,
             run_id=run_id,
             quiet=quiet,
-            design=False,
             max_chars=REPORT_POST_MAX_CHARS,
             session_id=_sessions.get(chat_id),
         )

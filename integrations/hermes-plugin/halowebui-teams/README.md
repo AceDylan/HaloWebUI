@@ -71,9 +71,11 @@ is the Hermes side. It adds no service, port or second task store:
   condenses the result into title + points, gpt-image draws it in the chosen template's style (else
   Hermes' hand-drawn infographic template), the picture goes under the result's title between
   `<!-- halo:illustration -->` marks (kept when the conclusion is rewritten); stage `illustrating`.
-  A freshly written conclusion is drawn on its own (`illustrate.auto`) in the template HaloWebUI
-  hands over at approval (`conclusion_template`: the owner's 「手绘万能图 · 自动选画风与画幅」), and its
-  hand-over to the chat waits for the picture (up to `illustrate.WAIT`).
+  A picture is drawn on request only (the result page's 「为结果配图」, or 「生成配图」 under the result
+  in the chat). With `HALO_TEAMS_AUTO_ILLUSTRATE=1` a freshly written conclusion is drawn on its own
+  (`illustrate.auto`) in the template HaloWebUI hands over at approval (`conclusion_template`: the
+  owner's 「手绘万能图 · 自动选画风与画幅」), and its hand-over to the chat waits for the picture (up to
+  `illustrate.WAIT`).
 * **Files given with the goal** (`teams.copy_inputs`): HaloWebUI hands over the uploads of a team
   (the 协作台 composer's attachments, or a chat message dispatched with 派发方式「协作台」) as host
   paths; the lead plans knowing their names, and at approval they are copied into the workspace's
@@ -178,7 +180,8 @@ Environment knobs: `HALO_TEAMS_BRIDGE=0` (no bridge loop), `HALO_TEAMS_BRIDGE_IN
 (8 s), `HALO_TEAMS_RUNNER_MAX` (1 concurrent member per runner kind; old name `HALO_TEAMS_RECLAUDE_MAX`), `HALO_TEAMS_WORKSPACE_ROOT`
 (`/root/work/agent-teams`), `HALO_TEAMS_NATIVE_MAX_RUNTIME` (3600 s per Hermes attempt),
 `HALO_TEAMS_MAX_TOOL_EVENTS` (400 tool events per attempt, then one "truncated" note),
-`HALO_TEAMS_AUTO_ILLUSTRATE=0` (a written conclusion is not drawn on its own; the button still works).
+`HALO_TEAMS_AUTO_ILLUSTRATE=1` (a written conclusion is drawn on its own; off by default, pictures are
+drawn on request).
 
 ## Web search: `halo-search`
 

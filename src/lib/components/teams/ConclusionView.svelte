@@ -565,6 +565,11 @@
 				generatedAt={entry.generated_at}
 				{variant}
 				illustration={entry.illustration}
+				card={data?.card}
+				on:card={(e) => {
+					if (data) data = { ...data, card: e.detail };
+					schedule();
+				}}
 				on:illustrate={(e) => {
 					if (data) data = { ...data, entry: { ...data.entry, illustration: e.detail } };
 					schedule();

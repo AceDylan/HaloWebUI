@@ -10,7 +10,9 @@ const api = vi.hoisted(() => ({
 	stopAnswer: vi.fn(),
 	retryAnswer: vi.fn(),
 	revertAnswerUpgrade: vi.fn(),
-	deleteAnswer: vi.fn()
+	deleteAnswer: vi.fn(),
+	makeAnswerCard: vi.fn(),
+	makeAnswerPicture: vi.fn()
 }));
 vi.mock('$lib/apis/answers', () => api);
 const service = vi.hoisted(() => ({ refreshModels: vi.fn(async () => []) }));
@@ -308,5 +310,38 @@ describe('AnswerRun', () => {
 		});
 		await until(() => !!target.querySelector('[data-conclusion-card] [data-halo-inline-html-preview]'));
 		expect(target.textContent).not.toContain('正在排版卡片');
+	}, 90000);
+
+	it('a finished answer gets its card only when asked for (生成 HTML 卡片)', async () => {
+		const done = created({
+			status: 'done',
+			answer: { status: 'done', content: '## 押金\n\n- 写清退还期限', startedAt: 1000, endedAt: 9000 }
+		});
+		api.getAnswer.mockResolvedValue(detail(done, { running: false }));
+		api.makeAnswerCard.mockResolvedValue({ card: { status: 'designing', startedAt: Date.now() } });
+		const target = await mount();
+		await until(() => text(target, '[data-answer-body]').includes('写清退还期限'));
+		const chip = () => target.querySelector('[data-make-card]') as any;
+		expect(chip().getAttribute('data-make-card')).toBe('idle');
+		expect(chip().textContent).toContain('生成 HTML 卡片');
+		chip().click();
+		await until(() => api.makeAnswerCard.mock.calls.length === 1);
+		expect(api.makeAnswerCard.mock.calls[0][1]).toBe('chat1');
+		await until(() => chip()?.getAttribute('data-make-card') === 'designing');
+		expect(text(target, '[data-answer-answer]')).toContain('正在排版卡片');
+		await sleep(100); // the click's own answer has landed
+		emit({ kind: 'state', chatId: 'chat1', runId: 'm1', v: 9, run: { ...done, card: { status: 'failed', reason: 'timeout', startedAt: Date.now() } } });
+		await until(() => chip()?.getAttribute('data-make-card') === 'failed');
+		expect(chip().textContent).toContain('重试 HTML 卡片');
+		expect(chip().getAttribute('title')).toContain('AGY 超时了');
+		emit({
+			kind: 'state',
+			chatId: 'chat1',
+			runId: 'm1',
+			v: 10,
+			run: { ...done, card: { status: 'ready', html: '<section class="hv"><h1 class="hv-title">押金</h1></section>' } }
+		});
+		await until(() => !!target.querySelector('[data-conclusion-card] [data-halo-inline-html-preview]'));
+		expect(chip()).toBeFalsy();
 	}, 90000);
 });

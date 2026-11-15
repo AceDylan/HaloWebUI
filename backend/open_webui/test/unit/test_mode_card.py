@@ -56,7 +56,7 @@ def test_the_conclusion_keeps_its_tail_before_the_card():
 def test_design_hands_back_the_card_or_why_not(monkeypatch):
     seen = []
 
-    async def designed(content, metadata):
+    async def designed(content, metadata, **_kw):
         seen.append((content, hv.should_apply_html_visual_prompt(metadata), hv.get_html_visual_mode(metadata)))
         metadata[hv.HTML_VISUAL_AGY_HTML_METADATA_KEY] = {"status": "success", "html": HTML}
         return content
@@ -68,7 +68,7 @@ def test_design_hands_back_the_card_or_why_not(monkeypatch):
     # the team's picture block is not text to design; the web surface's force mode is what designs
     assert seen == [(LONG, True, "force")]
 
-    async def timed_out(content, metadata):
+    async def timed_out(content, metadata, **_kw):
         metadata[hv.HTML_VISUAL_AGY_HTML_METADATA_KEY] = {"status": "timeout"}
         return content
 
@@ -76,17 +76,44 @@ def test_design_hands_back_the_card_or_why_not(monkeypatch):
     assert asyncio.run(mode_card.design(LONG))["status"] == "failed"
     assert asyncio.run(mode_card.design(LONG))["reason"] == "timeout"
 
-    async def broken(content, metadata):
+    async def broken(content, metadata, **_kw):
         raise RuntimeError("boom")
 
     monkeypatch.setattr(hv, "design_html_visual_artifact_with_agy", broken)
     assert asyncio.run(mode_card.design(LONG))["status"] == "failed"
-    # a few plain words need no card
+    # a few plain words need no card, unless the person asked for this one
     assert asyncio.run(mode_card.design("好的，用 Postgres。")) == {"status": "skipped"}
+    assert asyncio.run(mode_card.design("好的，用 Postgres。", allow_brief=True))["status"] == "failed"
+
+
+def test_design_merged_hands_back_the_reply_with_its_card(monkeypatch):
+    async def designed(content, metadata, *, allow_brief=False):
+        assert allow_brief is True
+        metadata[hv.HTML_VISUAL_AGY_HTML_METADATA_KEY] = {"status": "success", "html": HTML}
+        return f"{content}\n\n{FENCE}"
+
+    monkeypatch.setattr(hv, "design_html_visual_artifact_with_agy", designed)
+    merged, entry = asyncio.run(mode_card.design_merged("好的。"))
+    assert merged == f"好的。\n\n{FENCE}" and entry["status"] == "ready" and entry["html"] == HTML
+
+    async def failed(content, metadata, **_kw):
+        metadata[hv.HTML_VISUAL_AGY_HTML_METADATA_KEY] = {"status": "failed", "reason": "http_429"}
+        return content
+
+    monkeypatch.setattr(hv, "design_html_visual_artifact_with_agy", failed)
+    merged, entry = asyncio.run(mode_card.design_merged("好的。"))
+    assert merged == "好的。" and entry["status"] == "failed" and entry["reason"] == "http_429"
+
+
+def test_a_card_lost_to_a_restart_is_not_busy():
+    now = mode_card.now_ms()
+    assert mode_card.busy({"status": "designing", "startedAt": now})
+    assert not mode_card.busy({"status": "designing", "startedAt": now - mode_card.STALE_MS - 1})
+    assert not mode_card.busy({"status": "ready", "startedAt": now}) and not mode_card.busy(None)
 
 
 def test_make_tells_where_the_card_stands_and_can_be_turned_off(monkeypatch):
-    async def design(text):
+    async def design(text, **_kw):
         return {"status": "ready", "html": HTML}
 
     monkeypatch.setattr(mode_card, "design", design)

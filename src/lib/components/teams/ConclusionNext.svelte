@@ -8,6 +8,7 @@
 		followUpTeamConclusion,
 		getTeamsMeta,
 		illustrateTeamConclusion,
+		makeTeamConclusionCard,
 		saveTeamConclusionToKnowledge,
 		type ConclusionIllustration,
 		type ImageTemplateRef,
@@ -16,6 +17,9 @@
 	import { elapsed, now } from './clock';
 	import { handOff, HANDOFF_PATH } from '$lib/utils/handoff';
 	import SidebarModeIcon from '$lib/components/layout/Sidebar/SidebarModeIcon.svelte';
+	import type { ModeCard } from '$lib/apis/discussions';
+	import { cardDesigning, cardHtml } from '$lib/components/discuss/model';
+	import { cardFailureText } from '$lib/utils/html-card';
 
 	/**
 	 * What to do with a written conclusion: carry on in a chat (the one the team came from, or a
@@ -33,7 +37,27 @@
 	/** 「为结果配图」 as it stands (the conclusion entry's). */
 	export let illustration: ConclusionIllustration | null | undefined = undefined;
 
-	const dispatch = createEventDispatcher<{ illustrate: ConclusionIllustration }>();
+	/** 「生成 HTML 卡片」 as it stands (this version's card). */
+	export let card: ModeCard | null | undefined = undefined;
+
+	const dispatch = createEventDispatcher<{ illustrate: ConclusionIllustration; card: ModeCard }>();
+	let carding = false;
+	$: cardBusy = carding || cardDesigning(card, $now);
+	$: cardFailed = !cardBusy && (card?.status === 'failed' || card?.status === 'skipped');
+	$: cardReady = !!cardHtml(card);
+
+	const makeCard = async () => {
+		if (cardBusy) return;
+		carding = true;
+		try {
+			const out = await makeTeamConclusionCard(localStorage.token, teamId);
+			dispatch('card', out.card);
+		} catch (e) {
+			toast.error(`${(e as Error)?.message ?? e}`);
+		} finally {
+			carding = false;
+		}
+	};
 	let opening = false;
 	let picking = false;
 	let drawing = false;
@@ -245,6 +269,47 @@
 				</span>
 			</button>
 		{/if}
+		{#if !cardReady}
+			<button
+				type="button"
+				class="tm-card tm-hover flex items-start gap-3 !rounded-xl px-3.5 py-3 text-left disabled:opacity-60 {cardBusy
+					? 'tm-live'
+					: ''}"
+				disabled={cardBusy}
+				on:click={makeCard}
+				data-conclusion-card-make={cardBusy ? 'designing' : cardFailed ? 'failed' : 'idle'}
+			>
+				<span class="icon grid size-8 shrink-0 place-items-center rounded-lg" aria-hidden="true">
+					<svg class="size-4" viewBox="0 0 16 16" fill="none"
+						><rect x="2.25" y="2.75" width="11.5" height="10.5" rx="1.6" stroke="currentColor" stroke-width="1.3" /><path
+							d="M2.75 6h10.5M6.25 6v6.75"
+							stroke="currentColor"
+							stroke-width="1.3"
+						/></svg
+					>
+				</span>
+				<span class="min-w-0 flex-1">
+					<span class="block text-sm font-medium text-gray-900 dark:text-gray-100">
+						{#if cardBusy}
+							<span class="tm-shimmer">正在生成 HTML 卡片</span>
+						{:else if cardFailed}
+							重新生成 HTML 卡片
+						{:else}
+							生成 HTML 卡片
+						{/if}
+					</span>
+					<span class="mt-0.5 block text-xs leading-relaxed text-gray-500 dark:text-gray-400">
+						{#if cardBusy}
+							AGY 在按结果排版{card?.startedAt ? ` · 已 ${elapsed($now - card.startedAt / 1000)}` : ''}
+						{:else if cardFailed}
+							<span class="text-red-600 dark:text-red-300">上次没生成：{cardFailureText(card)}</span> · 可以再试一次
+						{:else}
+							AGY 把结果排成一张可视化卡片，放在结果最上面，结果发回的对话里也会有
+						{/if}
+					</span>
+				</span>
+			</button>
+		{/if}
 		<div
 			class="tm-card flex flex-col gap-2 !rounded-xl px-3.5 py-3 {variant === 'page'
 				? 'sm:col-span-2'
@@ -297,7 +362,7 @@
 						{:else if illustration?.status === 'ready'}
 							图在结果的标题下面{illustration.template ? `（${illustration.template}）` : ''}，提示词也存在工作目录里
 						{:else}
-							用 gpt-image 把结果画成一张图，放在结果最上面（新写好的结论会自动按「手绘万能图」配一张）；也可以选别的模板风格重画
+							用 gpt-image 把结果画成一张图，放在结果最上面，结果发回的对话里也会有；可以选模板风格
 						{/if}
 					</span>
 				</span>

@@ -2477,8 +2477,8 @@
 												</label>
 												<Tooltip
 													content={tr(
-														'Web Chat 由服务端强制注入并尝试 AGY；此选择仅作客户端兼容提示。Telegram 等纯文本入口始终禁用。',
-														'Web Chat always uses the server-enforced AGY/HTML flow; this selector is retained for client compatibility. Plain-text surfaces such as Telegram remain disabled.'
+														'回复默认不带 HTML 卡片，需要时点回复下方的「生成 HTML 卡片」由 AGY 设计；此选择仅作客户端兼容保留，不影响这一点。Telegram 等纯文本入口始终没有卡片。',
+														'Replies come without an HTML card; click "生成 HTML 卡片" under a reply to have AGY design one. This selector is kept for client compatibility only. Plain-text surfaces such as Telegram never get cards.'
 													)}
 												>
 													<QuestionMarkCircle className="size-3.5 cursor-help text-gray-400 dark:text-gray-500" />

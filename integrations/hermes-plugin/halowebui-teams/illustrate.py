@@ -10,10 +10,11 @@ points); then Hermes' ``image_generate`` (gpt-image through the configured provi
 thread; ``conclusion.illustration`` in the team record says where it stands. A finished picture is
 also handed to HaloWebUI, which keeps it in the owner's image studio gallery.
 
-A conclusion the lead has just written gets its picture on its own (``auto``), in the template
-HaloWebUI handed over when the team started (the owner's 「手绘万能图 · 自动选画风与画幅」); the
-hand-over of the result to its chat waits for it (``WAIT``). HALO_TEAMS_AUTO_ILLUSTRATE=0 leaves it
-to the button.
+A picture is drawn when the person asks for it (「为结果配图」 on the result page, 「生成配图」 under
+the result in the chat). ``HALO_TEAMS_AUTO_ILLUSTRATE=1`` brings back the old automatic picture for
+a conclusion the lead has just written (``auto``), in the template HaloWebUI handed over when the
+team started (the owner's 「手绘万能图 · 自动选画风与画幅」); the hand-over of the result to its
+chat waits for a picture being drawn (``WAIT``).
 """
 
 from __future__ import annotations
@@ -243,11 +244,11 @@ def start(slug: str, template: Optional[dict] = None, *, by: str = "user") -> di
 
 
 def auto(slug: str) -> Optional[dict]:
-    """The lead has just written the conclusion: draw its picture unless it has one (a rewrite keeps
+    """The lead has just written the conclusion: when automatic pictures are on, draw its picture unless it has one (a rewrite keeps
     the picture of the version before) or one is being drawn. In the template the team was handed
     at the start (the owner's 「手绘万能图」), else Hermes' hand-drawn infographic."""
-    if os.environ.get("HALO_TEAMS_AUTO_ILLUSTRATE", "1") == "0":
-        return None
+    if os.environ.get("HALO_TEAMS_AUTO_ILLUSTRATE", "0") != "1":
+        return None  # pictures are drawn on request
     team = read_team(slug) or {}
     current = public((team.get("conclusion") or {}).get("illustration")) or {}
     if current.get("status") == "generating":

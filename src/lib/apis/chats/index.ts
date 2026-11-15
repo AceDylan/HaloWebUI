@@ -1510,3 +1510,38 @@ export const archiveAllChats = async (token: string) => {
 //
 // 	return res;
 // };
+
+/** Where a reply's HTML card stands (utils/message_card.py): `htmlCard` on the message. */
+export type MessageHtmlCard = {
+	status: 'designing' | 'ready' | 'failed' | 'skipped';
+	reason?: string;
+	startedAt?: number;
+	endedAt?: number;
+};
+
+const postMessageAction = async <T>(token: string, chatId: string, messageId: string, action: string) => {
+	const res = await fetch(
+		`${WEBUI_API_BASE_URL}/chats/${encodeURIComponent(chatId)}/messages/${encodeURIComponent(messageId)}/${action}`,
+		{
+			method: 'POST',
+			headers: {
+				Accept: 'application/json',
+				'Content-Type': 'application/json',
+				...(token && { authorization: `Bearer ${token}` })
+			}
+		}
+	);
+	const json = await res.json().catch(() => null);
+	if (!res.ok) {
+		throw json?.detail ?? `${res.status} ${res.statusText}`;
+	}
+	return json as T;
+};
+
+/** 「生成 HTML 卡片」 under a reply: AGY designs it in the background; the card as it stands. */
+export const generateMessageHtmlCard = (token: string, chatId: string, messageId: string) =>
+	postMessageAction<MessageHtmlCard>(token, chatId, messageId, 'html-card');
+
+/** 「生成配图」 under a result of 精答 / 讨论台 / 协作台: drawn in the background. */
+export const generateMessagePicture = (token: string, chatId: string, messageId: string) =>
+	postMessageAction<{ status?: string }>(token, chatId, messageId, 'picture');

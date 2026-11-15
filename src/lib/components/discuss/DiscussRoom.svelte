@@ -20,6 +20,8 @@
 		stopDiscussion,
 		undoSeatAssistant,
 		type DiscussAsk,
+		makeDiscussionCard,
+		makeDiscussionPicture,
 		type Discussion
 	} from '$lib/apis/discussions';
 	import { copyToClipboard } from '$lib/utils';
@@ -154,6 +156,23 @@
 			busy = false;
 		}
 	};
+
+	// 「生成 HTML 卡片」 / 「生成配图」 of a conclusion: only when asked for; the state events carry them on
+	const setAsk = (next: DiscussAsk) => {
+		asks = asks.map((a) => (a.id === next.id ? next : a));
+	};
+	const finishFor = (ask: DiscussAsk) => ({
+		pictureAllowed: studioAllowed,
+		card: async () => {
+			const out = await makeDiscussionCard(localStorage.token, chatId, ask.id);
+			const now = asks.find((a) => a.id === ask.id) ?? ask;
+			// unless the state event of a newer step got here first
+			if ((now.card?.startedAt ?? 0) <= (out.card.startedAt ?? 0)) setAsk({ ...now, card: out.card });
+		},
+		picture: async () => {
+			setAsk((await makeDiscussionPicture(localStorage.token, chatId, ask.id)).ask);
+		}
+	});
 
 	const submit = async () => {
 		const text = input.trim();
@@ -563,6 +582,7 @@
 									}
 								: null}
 							rewrite={ask === last && canConclude ? conclude : null}
+							finish={ask.status === 'done' ? finishFor(ask) : null}
 							{busy}
 						/>
 

@@ -203,7 +203,7 @@ def test_multi_model_discussion_orchestrates_models_and_events(monkeypatch):
     assert final_upsert["sources"] == search_sources
 
 
-def test_multi_model_discussion_force_mode_replaces_rejected_final_artifact(
+def test_multi_model_discussion_final_answer_gets_no_card_on_its_own(
     monkeypatch,
 ):
     events = []
@@ -222,10 +222,7 @@ def test_multi_model_discussion_force_mode_replaces_rejected_final_artifact(
         else:
             content = """Final explanation remains.
 ```html
-<div style="color:#111">Rejected companion artifact</div>
-```
-```js
-window.discussionUnsafe = true;
+<div style="color:#111">Model companion artifact</div>
 ```"""
         return {"choices": [{"message": {"content": content}}]}
 
@@ -281,11 +278,10 @@ window.discussionUnsafe = true;
     assert result == {"status": True, "task_id": "task-force"}
     completion = next(event for event in events if event["type"] == "chat:completion")
     final_content = completion["data"]["content"]
+    # the final answer as the model wrote it: a card is made on request (「生成 HTML 卡片」)
     assert final_content.startswith("Final explanation remains.")
-    assert "Rejected companion artifact" not in final_content
-    assert "window.discussionUnsafe" not in final_content
-    assert final_content.count(HTML_VISUAL_FALLBACK_MARKER) == 1
-    assert final_content.count("```html\n") == 1
+    assert "Model companion artifact" in final_content
+    assert HTML_VISUAL_FALLBACK_MARKER not in final_content
     assert upserts[-1][0][2]["content"] == final_content
 
 

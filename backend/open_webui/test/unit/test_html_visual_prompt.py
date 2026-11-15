@@ -34,21 +34,9 @@ from open_webui.utils.html_visual_prompt import (
 )
 
 
-_REAL_AGY_ANSWER_DESIGN_ACTIVE = html_visual_prompt.agy_answer_design_active
-
 # A plain answer long enough to get a card. Shorter plain replies are left as
 # they are (is_brief_plain_reply), so tests of the card itself use this.
 LONG_PLAIN_RESPONSE = " ".join(["Plain response with enough detail to be worth a card."] * 5)
-
-
-@pytest.fixture(autouse=True)
-def _model_owns_the_artifact_by_default(monkeypatch):
-    """The prompt tests below describe the model-built artifact, which is what force mode
-    asks for whenever the post-answer AGY pass is not in charge; whether it is depends on
-    the host (the container configures AGY), so pin it off here. The AGY-owned tests at
-    the end switch the real check back on. Also starts every test with a clean AGY health."""
-    monkeypatch.setattr(html_visual_prompt, "agy_answer_design_active", lambda: False)
-    monkeypatch.setattr(html_visual_prompt, "_agy_answer_health", {"failures": 0, "last_failure": 0.0})
 
 
 def _form_data():
@@ -132,7 +120,7 @@ def test_server_web_surface_forces_prompt_for_every_client_mode(client_mode):
 
     prompt = form_data["messages"][1]["content"]
     assert HTML_VISUAL_PROMPT_MARKER in prompt
-    assert HTML_VISUAL_FORCE_PROMPT_MARKER in prompt
+    assert html_visual_prompt.HTML_VISUAL_AGY_OWNED_PROMPT_MARKER in prompt
     assert metadata["html_visual_artifacts"]["mode"] == "force"
 
 
@@ -199,7 +187,7 @@ def test_server_surface_is_authoritative_over_client_surface_and_mode():
     }
     assert should_apply_html_visual_prompt(trusted_web_metadata)
     trusted_form = apply_html_visual_prompt_overlay(_form_data(), trusted_web_metadata)
-    assert HTML_VISUAL_FORCE_PROMPT_MARKER in trusted_form["messages"][1]["content"]
+    assert html_visual_prompt.HTML_VISUAL_AGY_OWNED_PROMPT_MARKER in trusted_form["messages"][1]["content"]
 
 
 def test_default_agy_command_uses_noninteractive_sandbox():
@@ -313,7 +301,7 @@ def test_server_web_surface_forces_prompt_without_client_feature():
     form_data = apply_html_visual_prompt_overlay(_form_data(), metadata)
 
     assert should_apply_html_visual_prompt(metadata)
-    assert HTML_VISUAL_FORCE_PROMPT_MARKER in form_data["messages"][1]["content"]
+    assert html_visual_prompt.HTML_VISUAL_AGY_OWNED_PROMPT_MARKER in form_data["messages"][1]["content"]
 
 
 def test_html_visual_prompt_and_fallback_reject_client_only_web_claim():
@@ -1604,61 +1592,45 @@ def _web_metadata():
     return {"server_surface": "halowebui-web"}
 
 
-def test_force_mode_leaves_the_artifact_to_agy_when_it_is_configured(monkeypatch):
-    monkeypatch.setattr(html_visual_prompt, "agy_answer_design_active", _REAL_AGY_ANSWER_DESIGN_ACTIVE)
-    monkeypatch.setenv(html_visual_prompt.HTML_VISUAL_AGY_COMMAND_ENV, "/opt/host-agy/bin/agy -p")
-    metadata = _web_metadata()
+def test_force_mode_never_asks_the_model_for_a_card(monkeypatch):
+    # The card is made on request (「生成 HTML 卡片」), with or without an AGY command on this host.
+    for command in ("/opt/host-agy/bin/agy -p", ""):
+        monkeypatch.setenv(html_visual_prompt.HTML_VISUAL_AGY_COMMAND_ENV, command)
+        metadata = _web_metadata()
 
-    prompt = apply_html_visual_prompt_overlay(_form_data(), metadata)["messages"][1]["content"]
+        prompt = apply_html_visual_prompt_overlay(_form_data(), metadata)["messages"][1]["content"]
 
-    assert HTML_VISUAL_PROMPT_MARKER in prompt
-    assert html_visual_prompt.HTML_VISUAL_AGY_OWNED_PROMPT_MARKER in prompt
-    assert HTML_VISUAL_FORCE_PROMPT_MARKER not in prompt
-    assert "必须包含一个非空的 fenced" not in prompt
-    assert "不要自己输出 fenced `html`" in prompt
-    assert "Telegram" in prompt
-    assert metadata["html_visual_artifacts"] == {
-        "enabled": True, "surface": "halowebui-web", "mode": "force", "author": "agy"}
-
-
-def test_without_an_agy_command_the_model_still_writes_the_artifact(monkeypatch):
-    monkeypatch.setattr(html_visual_prompt, "agy_answer_design_active", _REAL_AGY_ANSWER_DESIGN_ACTIVE)
-    monkeypatch.setenv(html_visual_prompt.HTML_VISUAL_AGY_COMMAND_ENV, "")
-    metadata = _web_metadata()
-    prompt = apply_html_visual_prompt_overlay(_form_data(), metadata)["messages"][1]["content"]
-    assert HTML_VISUAL_FORCE_PROMPT_MARKER in prompt
-    assert metadata["html_visual_artifacts"]["author"] == "model"
+        assert HTML_VISUAL_PROMPT_MARKER in prompt
+        assert html_visual_prompt.HTML_VISUAL_AGY_OWNED_PROMPT_MARKER in prompt
+        assert HTML_VISUAL_FORCE_PROMPT_MARKER not in prompt
+        assert "必须包含一个非空的 fenced" not in prompt
+        assert "不要自己输出 fenced `html`" in prompt
+        assert "生成 HTML 卡片" in prompt and "自动附在" not in prompt
+        assert "Telegram" in prompt
+        assert metadata["html_visual_artifacts"] == {
+            "enabled": True, "surface": "halowebui-web", "mode": "force", "author": "agy"}
 
 
-def test_repeated_agy_failures_hand_the_artifact_back_until_agy_succeeds(monkeypatch):
-    monkeypatch.setattr(html_visual_prompt, "agy_answer_design_active", _REAL_AGY_ANSWER_DESIGN_ACTIVE)
-    monkeypatch.setenv(html_visual_prompt.HTML_VISUAL_AGY_COMMAND_ENV, "/opt/host-agy/bin/agy -p")
-    started = 0.0
-    for _ in range(html_visual_prompt.AGY_ANSWER_FAILURE_THRESHOLD - 1):
-        html_visual_prompt._record_agy_html_status({}, "timeout", started)
-    assert _REAL_AGY_ANSWER_DESIGN_ACTIVE()  # not yet
-
-    html_visual_prompt._record_agy_html_status({}, "failed", started, reason="authentication_required")
-    assert not _REAL_AGY_ANSWER_DESIGN_ACTIVE()
-    prompt = apply_html_visual_prompt_overlay(_form_data(), _web_metadata())["messages"][1]["content"]
-    assert HTML_VISUAL_FORCE_PROMPT_MARKER in prompt
-
-    # The failures are old news after the window, and one success clears them at once.
-    health = html_visual_prompt._agy_answer_health
-    health["last_failure"] -= html_visual_prompt.AGY_ANSWER_FAILURE_WINDOW_SECONDS + 1
-    assert _REAL_AGY_ANSWER_DESIGN_ACTIVE()
-    health["last_failure"] += html_visual_prompt.AGY_ANSWER_FAILURE_WINDOW_SECONDS + 1
-    html_visual_prompt._record_agy_html_status({}, "success", started, html_fragment="<div>x</div>")
-    assert _REAL_AGY_ANSWER_DESIGN_ACTIVE()
-
-
-def test_a_legacy_pre_answer_agy_result_keeps_the_model_artifact(monkeypatch):
-    monkeypatch.setattr(html_visual_prompt, "agy_answer_design_active", lambda: True)
+def test_a_legacy_pre_answer_agy_result_keeps_the_model_artifact():
     metadata = {**_web_metadata(), html_visual_prompt.HTML_VISUAL_AGY_METADATA_KEY: {"status": "timeout"}}
     prompt = apply_html_visual_prompt_overlay(_form_data(), metadata)["messages"][1]["content"]
     assert HTML_VISUAL_FORCE_PROMPT_MARKER in prompt
     assert metadata["html_visual_artifacts"]["author"] == "model"
 
+
+def test_a_requested_card_is_designed_even_for_a_short_reply(monkeypatch):
+    async def gateway(*_a, **_k):
+        return b'<div class="hv" data-theme="ion"><p>short</p></div>'
+
+    monkeypatch.setattr(html_visual_prompt, "_agy_gateway_config", lambda: {"url": "x"})
+    monkeypatch.setattr(html_visual_prompt, "_request_agy_gateway", gateway)
+    metadata = _web_metadata()
+    assert asyncio.run(html_visual_prompt.design_html_visual_artifact_with_agy("好的。", metadata)) == "好的。"
+    assert html_visual_prompt.HTML_VISUAL_AGY_HTML_METADATA_KEY not in metadata
+    designed = asyncio.run(
+        html_visual_prompt.design_html_visual_artifact_with_agy("好的。", metadata, allow_brief=True))
+    assert designed.startswith("好的。") and 'data-theme="ion"' in designed
+    assert metadata[html_visual_prompt.HTML_VISUAL_AGY_HTML_METADATA_KEY]["status"] == "success"
 
 
 def test_history_replies_go_back_without_their_visual_cards():

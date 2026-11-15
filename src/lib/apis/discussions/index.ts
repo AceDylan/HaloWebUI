@@ -360,5 +360,13 @@ export const undoSeatAssistant = (token: string, chatId: string, seat: string) =
 export const reportBackDiscussion = (token: string, chatId: string) =>
 	request<ReportBack>(token, 'POST', `/${id(chatId)}/report-back`);
 
+/** 「生成 HTML 卡片」: a conclusion's card (the last question's unless `askId`), designed by AGY. */
+export const makeDiscussionCard = (token: string, chatId: string, askId?: string) =>
+	request<{ card: ModeCard }>(token, 'POST', `/${id(chatId)}/card`, askId ? { ask_id: askId } : {});
+
+/** 「生成配图」: a conclusion's picture (the last question's unless `askId`), drawn in the background. */
+export const makeDiscussionPicture = (token: string, chatId: string, askId?: string) =>
+	request<{ ask: DiscussAsk }>(token, 'POST', `/${id(chatId)}/picture`, askId ? { ask_id: askId } : {});
+
 export const deleteDiscussion = (token: string, chatId: string) =>
 	request<{ ok: boolean }>(token, 'DELETE', `/${id(chatId)}`);

@@ -1928,7 +1928,7 @@ class LiveDiscussion:
             log.info("discussion %s: native web search check failed: %s", self.chat_id, exc)
 
     async def run(self):
-        self.ask.pop("illustration", None)  # a new conclusion gets its own picture and card once it is done
+        self.ask.pop("illustration", None)  # a new conclusion gets its own picture and card when asked for
         self.ask.pop("card", None)
         self.flusher = asyncio.create_task(self._flush_loop())
         try:

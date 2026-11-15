@@ -3296,6 +3296,9 @@
 					if (shouldAutoScrollOnStreaming()) {
 						scrollToBottom();
 					}
+				} else if (type === 'chat:message:html_card') {
+					// 「生成 HTML 卡片」 asked for under this reply: where its card stands (utils/message_card.py)
+					message.htmlCard = data;
 				} else if (type === 'chat:message:follow_ups') {
 					message.followUps = data?.follow_ups ?? [];
 					if (shouldAutoScrollOnStreaming()) {

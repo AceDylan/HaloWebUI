@@ -1800,9 +1800,8 @@ async def chat_completion(
 
         request.state.metadata = metadata
         form_data["metadata"] = metadata
-        # AGY now runs AFTER the answer completes (design_html_visual_artifact_with_agy
-        # in the response finalizers), so it designs around the actual answer instead
-        # of the question. Only the prompt overlay is applied up front.
+        # The HTML card is made on request after the answer (「生成 HTML 卡片」,
+        # utils/message_card.py); only the prompt overlay is applied up front.
         form_data = apply_html_visual_prompt_overlay(form_data, metadata)
 
         form_data, metadata, events = await process_chat_payload(

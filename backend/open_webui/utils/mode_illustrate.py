@@ -1,6 +1,7 @@
 """结论配图 for the modes that write their own chats (精答, 讨论台), like a team's result picture.
 
-Once an answer or a conclusion is done, it gets one picture on its own: the run's model condenses
+When the person asks for it (「生成配图」 on a finished answer or conclusion; nothing draws one on
+its own), it gets one picture: the run's model condenses
 it into what fits on one picture (a title, a subtitle, 3–6 short points; when that model fails or
 is too slow, the result's own text, ``digest``), then the app's own image
 generation draws it in the owner's 「手绘万能图 · 自动选画风与画幅」 image template (its prompt,
@@ -9,8 +10,8 @@ The picture is a file of the owner's like any generated image; it goes into the 
 gallery (linked back to the chat) and into the chat's message under the answer's title.
 
 The run keeps where it stands as ``illustration`` ({status: generating|ready|failed, url, ...});
-the caller stores it and tells the page. The picture is the work's last step: while it is drawn the
-work stays in 运行中 (``DRAWING``), and its "done" notice goes out once the picture is there.
+the caller stores it and tells the page. While it is drawn the work shows in 运行中
+(``DRAWING``).
 HALO_MODES_AUTO_ILLUSTRATE=0 turns it off; so does image generation being off or not allowed for the user (then nothing is shown at all).
 """
 
@@ -330,3 +331,10 @@ def with_picture(markdown: str, illustration: Optional[dict], title: str = "配�
             tail = tail[1:]
         return "\n".join(head + ["", block, ""] + tail)
     return f"{block}\n\n{markdown.lstrip()}"
+
+
+def busy(illustration: Optional[dict]) -> bool:
+    """Whether this picture is being drawn right now (one lost to a restart is not)."""
+    entry = illustration if isinstance(illustration, dict) else {}
+    started = int(entry.get("startedAt") or 0)
+    return entry.get("status") == "generating" and now_ms() - started < (TIMEOUT_SECONDS + 60) * 1000

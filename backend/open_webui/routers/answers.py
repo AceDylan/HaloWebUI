@@ -180,20 +180,11 @@ def _emitter(user, chat_id: str, message_id: str):
 
 
 async def _after_done(request: Request, user, chat_id: str, run: dict) -> None:
-    from open_webui.utils import mode_illustrate
-
     chat = Chats.get_chat_by_id_and_user_id(chat_id, user.id)
     if chat is None:
         return
-    # 运行中 keeps the answer from now until its picture is drawn
-    held = mode_illustrate.hold(request, user, chat_id, {
-        "kind": "answer", "title": run.get("question"), "started_at": (run.get("startedAt") or 0) / 1000 or None})
-    try:
-        title = await _name(request, user, chat_id, chat, run)
-    except BaseException:
-        mode_illustrate.release(chat_id, held)
-        raise
-    mode_illustrate.later(_illustrate_and_report(request, user, chat_id, run, title, held))
+    title = await _name(request, user, chat_id, chat, run)
+    await _report_done(request, user, chat_id, run, title)
 
 
 async def _name(request: Request, user, chat_id: str, chat, run: dict) -> str:
@@ -222,25 +213,16 @@ async def _name(request: Request, user, chat_id: str, chat, run: dict) -> str:
     return title
 
 
-async def _illustrate_and_report(request: Request, user, chat_id: str, run: dict, title: str,
-                                 held: Optional[dict]) -> None:
-    # 结论配图 and 结论卡片 are the answer's last steps, side by side: it is "done" (back in its chat
-    # of origin, or the app's "reply ready" toast) once both are there
-    from open_webui.utils import mode_illustrate
-
-    answer = (run.get("answer") or {}).get("content") or ""
-    try:
-        await asyncio.gather(
-            _illustrate(request, user, chat_id, run, answer), _card(user, chat_id, run), return_exceptions=True
-        )
-    finally:
-        mode_illustrate.release(chat_id, held)
+async def _report_done(request: Request, user, chat_id: str, run: dict, title: str) -> None:
+    # The answer is done with its text: its picture and card are made only when asked for
+    # (start_picture / start_card).
     if run.get("origin"):
         # 派发方式「精答」: the answer goes back into the chat it was asked in
         from open_webui.utils import mode_dispatch
 
         mode_dispatch.report_back_later(request, "answer", chat_id, run)
         return
+    answer = (run.get("answer") or {}).get("content") or ""
     try:
         await _emitter(user, chat_id, run["id"])(
             {"type": "chat:completion", "data": {"done": True, "title": title, "content": answer[:400], "answer_desk": True}}
@@ -262,6 +244,10 @@ async def _keep(user, chat_id: str, run: dict, key: str, entry: dict) -> None:
     await _emitter(user, chat_id, run["id"])(
         {"type": "answer", "data": {"kind": "state", "chatId": chat_id, "runId": run["id"], "run": desk.public_run(stored)}}
     )
+    # the reply in the chat view: its content (picture / card in it), and the card's state
+    from open_webui.utils import message_card
+
+    await message_card.tell(user.id, chat_id, run["id"], entry if key == "card" else None, desk.stored_content(stored))
 
 
 async def _illustrate(request: Request, user, chat_id: str, run: dict, answer: str, held: Optional[dict] = None) -> None:
@@ -292,7 +278,52 @@ async def _card(user, chat_id: str, run: dict) -> None:
     async def on_change(entry: dict) -> None:
         await _keep(user, chat_id, run, "card", entry)
 
-    await mode_card.make(desk.card_source(run), on_change)
+    await mode_card.make(desk.card_source(run), on_change, allow_brief=True)
+
+
+def _finished_run(user, chat_id: str, message_id: Optional[str]) -> dict:
+    """The stored run of a finished answer (the one a picture or card is asked for)."""
+    chat = _own(chat_id, user)
+    run = _stored_run(chat)
+    if not run or (message_id and run.get("id") != message_id):
+        raise HTTPException(status_code=404, detail="没有这个回答")
+    if chat_id in LIVE or run.get("status") != "done":
+        raise HTTPException(status_code=409, detail="回答完成后才能生成")
+    return run
+
+
+def start_card(user, chat_id: str, message_id: Optional[str] = None) -> dict:
+    """「生成 HTML 卡片」 for a finished answer: designed in the background; the card as it stands."""
+    from open_webui.utils import mode_card
+
+    if not mode_card.enabled():
+        raise HTTPException(status_code=403, detail="HTML 卡片已在服务端关闭")
+    run = _finished_run(user, chat_id, message_id)
+    if mode_card.busy(run.get("card")):
+        return run["card"]
+    run["card"] = {"status": "designing", "startedAt": desk.now_ms()}
+    _persist(chat_id, run)
+    mode_card.later(_card(user, chat_id, run))
+    return run["card"]
+
+
+def start_picture(request: Request, user, chat_id: str, message_id: Optional[str] = None) -> dict:
+    """「生成配图」 for a finished answer: drawn in the background; the run as it stands."""
+    from open_webui.utils import mode_illustrate
+
+    run = _finished_run(user, chat_id, message_id)
+    if not mode_illustrate.may_illustrate(request, user):
+        raise HTTPException(status_code=403, detail="生图没有开启，或你没有生图权限")
+    if not mode_illustrate.busy(run.get("illustration")):
+        chat = _own(chat_id, user)
+        # 运行中 shows the answer while its picture is drawn
+        held = mode_illustrate.hold(request, user, chat_id, {
+            "kind": "answer", "title": chat.title or run.get("question"), "started_at": time.time()})
+        run["illustration"] = {"status": "generating", "startedAt": desk.now_ms()}
+        _persist(chat_id, run)
+        answer = (run.get("answer") or {}).get("content") or ""
+        mode_illustrate.later(_illustrate(request, user, chat_id, run, answer, held))
+    return desk.public_run(run)
 
 
 def _resolve_planner(requested: Optional[str], models_map: dict, ambiguous: set, user) -> dict:
@@ -761,6 +792,18 @@ async def report_back(request: Request, chat_id: str, user=Depends(get_verified_
         return await mode_dispatch.report_back(request, "answer", chat_id, run, quiet=True)
     except mode_dispatch.ReportError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail)
+
+
+@router.post("/{chat_id}/card")
+async def make_card(chat_id: str, user=Depends(get_verified_user)):
+    """「生成 HTML 卡片」: the answer's card, designed by AGY from the finished answer."""
+    return {"card": start_card(user, chat_id)}
+
+
+@router.post("/{chat_id}/picture")
+async def make_picture(request: Request, chat_id: str, user=Depends(get_verified_user)):
+    """「生成配图」: the answer's picture, in the owner's 「手绘万能图」 template."""
+    return {"run": start_picture(request, user, chat_id)}
 
 
 @router.delete("/{chat_id}")

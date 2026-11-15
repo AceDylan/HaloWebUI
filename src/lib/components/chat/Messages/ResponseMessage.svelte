@@ -24,6 +24,9 @@
 		temporaryChatEnabled
 	} from '$lib/stores';
 	import { addBookmark, removeBookmarkByMessage } from '$lib/apis/bookmarks';
+	import { generateMessagePicture } from '$lib/apis/chats';
+	import { hasHtmlCard } from '$lib/utils/html-card';
+	import HtmlCardButton from './ResponseMessage/HtmlCardButton.svelte';
 	import {
 		describeHermesReply,
 		describeTeamNotice,
@@ -98,7 +101,8 @@
 		MessagesSquare,
 		Users,
 		Bookmark as BookmarkIcon,
-		Columns2
+		Columns2,
+		ImagePlus
 	} from 'lucide-svelte';
 	import BranchCompare from './BranchCompare.svelte';
 	import { branchAnswers, chatAnswers } from '$lib/utils/branch-compare';
@@ -973,6 +977,42 @@
 			toast.error(typeof error === 'string' && error ? error : '收藏没有成功，请稍后再试');
 		} finally {
 			bookmarkBusy = false;
+		}
+	};
+
+	// 「生成 HTML 卡片」: a finished reply of a saved chat that has no card yet (nothing makes one on
+	// its own any more; backend utils/message_card.py).
+	$: canMakeCard = Boolean(
+		bookmarkable &&
+			message?.done &&
+			!message?.error &&
+			`${message?.content ?? ''}`.trim() &&
+			!hasHtmlCard(message?.content)
+	);
+	// 「生成配图」: a finished result of 精答 / 讨论台 / 协作台 without its picture yet.
+	$: pictureRun = ((message as any)?.answer_desk ?? (message as any)?.discussion_room ?? null) as any;
+	$: teamReply = `${(history.messages?.[message?.parentId as string] as any)?.hermes_notice?.run_id ?? ''}`.startsWith(
+		'team:'
+	);
+	$: picturable = Boolean(
+		bookmarkable &&
+			message?.done &&
+			(pictureRun ? pictureRun.status === 'done' : teamReply) &&
+			!['ready', 'generating'].includes(pictureRun?.illustration?.status ?? '') &&
+			!`${message?.content ?? ''}`.includes('halo:illustration')
+	);
+	let pictureStarting = false;
+	const makePicture = async () => {
+		showMoreMenu = false;
+		if (pictureStarting || !message?.id) return;
+		pictureStarting = true;
+		try {
+			await generateMessagePicture(localStorage.token, chatId, message.id);
+			toast.success('开始配图：先提炼要点再画，通常 1–3 分钟，画好后放在结果最上面');
+		} catch (error) {
+			toast.error(typeof error === 'string' && error ? error : '配图没能开始，请稍后再试');
+		} finally {
+			pictureStarting = false;
 		}
 	};
 
@@ -2339,6 +2379,10 @@
 									<Copy class="w-4 h-4" strokeWidth={2} />
 								</button>
 
+								{#if canMakeCard}
+									<HtmlCardButton {chatId} {message} buttonClass={mobileActionButtonClass} />
+								{/if}
+
 								{#if bookmarked}
 									<button
 										type="button"
@@ -2440,6 +2484,18 @@
 												>
 													<Columns2 class="w-4 h-4 shrink-0" strokeWidth={1.75} />
 													<span>并排对比</span>
+												</DropdownMenu.Item>
+											{/if}
+
+											{#if picturable}
+												<DropdownMenu.Item
+													class="{menuItemClass} {pictureStarting ? 'opacity-50' : ''}"
+													disabled={pictureStarting}
+													data-halo-make-picture
+													on:click={makePicture}
+												>
+													<ImagePlus class="w-4 h-4 shrink-0" strokeWidth={1.75} />
+													<span>生成配图</span>
 												</DropdownMenu.Item>
 											{/if}
 
@@ -2724,6 +2780,16 @@
 										</button>
 									</Tooltip>
 
+									{#if canMakeCard}
+										<HtmlCardButton
+											{chatId}
+											{message}
+											buttonClass="{isLastMessage
+												? 'visible'
+												: 'invisible group-hover:visible'} p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-xl dark:hover:text-white hover:text-black transition-all duration-200 hover:scale-110 active:scale-95"
+										/>
+									{/if}
+
 									{#if bookmarked}
 										<Tooltip content="取消收藏" placement="bottom">
 											<button
@@ -2998,6 +3064,18 @@
 													>
 														<Columns2 class="w-4 h-4 shrink-0" strokeWidth={1.75} />
 														<span>并排对比</span>
+													</DropdownMenu.Item>
+												{/if}
+
+												{#if picturable}
+													<DropdownMenu.Item
+														class="{menuItemClass} {pictureStarting ? 'opacity-50' : ''}"
+														disabled={pictureStarting}
+														data-halo-make-picture
+														on:click={makePicture}
+													>
+														<ImagePlus class="w-4 h-4 shrink-0" strokeWidth={1.75} />
+														<span>生成配图</span>
 													</DropdownMenu.Item>
 												{/if}
 

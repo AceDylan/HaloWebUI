@@ -48,8 +48,11 @@ from open_webui.utils.agent_team_outputs import (
     conclusion_with_card,
     follow_up,
     illustration_to_gallery,
+    read_conclusion,
+    refresh_reply,
     save_to_knowledge,
     snapshot_illustration,
+    start_card,
 )
 from open_webui.utils import team_chats
 from open_webui.models.agent_team_schedules import AgentTeamSchedules
@@ -665,6 +668,16 @@ async def conclusion_illustrate(request: Request, team_id: str, form: Illustrate
         _raise(exc)
 
 
+@router.post("/{team_id}/conclusion/card", dependencies=[Depends(_enabled)])
+async def conclusion_card(request: Request, team_id: str, user=Depends(get_verified_user)):
+    """「生成 HTML 卡片」: the result's card, designed by AGY from the conclusion on screen (async)."""
+    team, target = await _running_target(request, team_id, user)
+    try:
+        return {"card": await start_card(team, target)}
+    except TeamsError as exc:
+        _raise(exc)
+
+
 @router.post("/{team_id}/conclusion/chat", dependencies=[Depends(_enabled)])
 async def conclusion_chat(request: Request, team_id: str, user=Depends(get_verified_user)):
     """「在对话里追问」: the team's chat (or a new one) with the conclusion in it → {chat_id}."""
@@ -987,12 +1000,18 @@ async def hermes_concluded(request: Request, team_id: str, form: ConcludedForm, 
 
 @router.post("/hermes/teams/{team_id}/illustrated")
 async def hermes_illustrated(request: Request, team_id: str, caller=Depends(_hermes_caller)):
-    """The result's picture is drawn: a copy goes into the owner's image studio gallery."""
+    """The result's picture is drawn: a copy goes into the owner's image studio gallery, and the
+    result's reply in the chat gets it too."""
     user, target = caller
     team, snap, _err = await reconcile(_own(team_id, user), target)
     if team.status != "running":
         return {"added": False, "reason": "not running"}
-    return await illustration_to_gallery(request, team, target, snapshot_illustration(snap))
+    result = await illustration_to_gallery(request, team, target, snapshot_illustration(snap))
+    try:
+        await refresh_reply(team, await read_conclusion(target, team))
+    except Exception:  # noqa: BLE001 — the picture is on the result page either way
+        log.warning("teams: reply of team %s did not get its picture", team.id, exc_info=True)
+    return result
 
 
 @router.post("/hermes/teams/{team_id}/knowledge")

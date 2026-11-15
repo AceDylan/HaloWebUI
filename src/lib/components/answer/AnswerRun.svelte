@@ -10,7 +10,7 @@
 	import '$lib/components/discuss/discuss.css';
 	import './answer.css';
 	import { chatId as currentChatId, config, mobile, models, showSidebar, socket, user, WEBUI_NAME } from '$lib/stores';
-	import { deleteAnswer, getAnswer, retryAnswer, revertAnswerUpgrade, stopAnswer, type AnswerDetail, type AnswerRun } from '$lib/apis/answers';
+	import { deleteAnswer, getAnswer, makeAnswerCard, makeAnswerPicture, retryAnswer, revertAnswerUpgrade, stopAnswer, type AnswerDetail, type AnswerRun } from '$lib/apis/answers';
 	import { refreshModels } from '$lib/services/models';
 	import { copyToClipboard } from '$lib/utils';
 	import { handOff, HANDOFF_PATH } from '$lib/utils/handoff';
@@ -21,6 +21,7 @@
 	import VaultNotesPanel from '$lib/components/discuss/VaultNotesPanel.svelte';
 	import ConclusionPicture from '$lib/components/discuss/ConclusionPicture.svelte';
 	import ConclusionBody from '$lib/components/discuss/ConclusionBody.svelte';
+	import FinishChips from '$lib/components/discuss/FinishChips.svelte';
 	import { cardDesigning, linkCitations, modelById, retryText, seconds, tokens } from '$lib/components/discuss/model';
 	import AssistantAvatar from './AssistantAvatar.svelte';
 	import { ACTION_LABEL, actionSentence, answerContext, applyEvent, isDrawing, isLive, stagesOf, STATUS_LABEL, type AnswerEvent } from './model';
@@ -137,6 +138,15 @@
 	const stop = () => act(() => stopAnswer(localStorage.token, chatId), '已停止');
 	const retry = () => act(() => retryAnswer(localStorage.token, chatId));
 	const revert = () => act(() => revertAnswerUpgrade(localStorage.token, chatId), `已撤销对「${assistant?.name}」的升级`);
+	// 「生成 HTML 卡片」 / 「生成配图」: only when asked for; the run's state events carry them on
+	const makeCard = async () => {
+		const out = await makeAnswerCard(localStorage.token, chatId);
+		// unless the state event of a newer step got here first
+		if (run && (run.card?.startedAt ?? 0) <= (out.card.startedAt ?? 0)) run = { ...run, card: out.card };
+	};
+	const makePicture = async () => {
+		run = (await makeAnswerPicture(localStorage.token, chatId)).run;
+	};
 
 	const copyAnswer = async () => {
 		showMenu = false;
@@ -418,7 +428,7 @@
 						data-answer-answer={answerState}
 						in:fade={{ duration: 200 }}
 					>
-						<header class="flex items-center gap-2.5 px-5 pt-4 pb-1">
+						<header class="flex flex-wrap items-center gap-2.5 px-5 pt-4 pb-1">
 							<div class="min-w-0 flex-1">
 								<div class="tm-eyebrow">回答</div>
 								<div class="truncate text-xs text-gray-500 dark:text-gray-400">
@@ -448,6 +458,15 @@
 									{/if}
 								</div>
 							</div>
+							{#if answer?.content && answerState === 'done' && run.status === 'done' && !liveNow}
+								<FinishChips
+									card={run.card}
+									illustration={run.illustration}
+									pictureAllowed={studioAllowed}
+									onCard={makeCard}
+									onPicture={makePicture}
+								/>
+							{/if}
 							{#if answer?.content && answerState !== 'streaming'}
 								<button type="button" class="dc-chip" on:click={copyAnswer} data-answer-copy>复制</button>
 							{/if}

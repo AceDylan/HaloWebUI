@@ -624,7 +624,7 @@ class LiveAnswer:
 
     async def run_all(self):
         run = self.run
-        run.pop("illustration", None)  # a new answer gets its own picture and card once it is done
+        run.pop("illustration", None)  # a new answer gets its own picture and card when asked for
         run.pop("card", None)
         flusher = asyncio.create_task(self._flush_loop())
         try:

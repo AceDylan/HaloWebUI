@@ -681,7 +681,7 @@ def test_the_conclusion_goes_into_the_chat_the_team_came_from(hermes, monkeypatc
     assert out.status_code == 200 and out.json() == {"posted": True, "chat_id": "chat-1", "duplicate": False}
     call = shown[0]
     assert call["chat_id"] == "chat-1" and call["source"] == "team" and call["run_id"] == f"team:{team_id}:1700000123"
-    assert call["push"] is False and call["design"] is False and call["quiet"] is False  # Telegram already told them
+    assert call["push"] is False and "design" not in call and call["quiet"] is False  # Telegram already told them
     assert call["max_chars"] >= 60000  # the complete result, not a 20000-char report
     content = call["content"]
     assert f"](/api/v1/teams/{team_id}/files/charts/a.png)" in content
@@ -1395,20 +1395,20 @@ def test_edit_plan_keeps_the_assistant_decisions(hermes):
 
 
 def test_the_results_card_goes_into_its_posted_reply_and_onto_the_result_page(hermes, monkeypatch):
-    """结论卡片: designed after the conclusion is posted, put into that reply before the line the
-    page shows as buttons, kept for this version (the result page shows it)."""
+    """结论卡片 on request (「生成 HTML 卡片」): put into the posted reply before the line the page
+    shows as buttons, kept for this version (the result page shows it)."""
     import asyncio
 
     from open_webui.models.chats import Chats
     from open_webui.socket import main as socket_main
     from open_webui.utils import agent_team_outputs as outputs
-    from open_webui.utils import hermes_notify, hermes_sessions, mode_card
+    from open_webui.utils import hermes_notify, hermes_sessions, message_card, mode_card
 
     html = '<section class="hv"><h1 class="hv-title">计算器</h1></section>'
     designed, emitted = [], []
 
-    async def design(text):
-        designed.append(text)
+    async def design(text, **kw):
+        designed.append((text, kw.get("allow_brief")))
         return {"status": "ready", "html": html}
 
     async def model(request, user, model_id=None):
@@ -1423,26 +1423,40 @@ def test_the_results_card_goes_into_its_posted_reply_and_onto_the_result_page(he
     monkeypatch.setattr(hermes_sessions, "resolve_hermes_model", model)
     monkeypatch.setattr(hermes_notify.Users, "get_user_by_id", lambda uid: _User(uid))
     monkeypatch.setattr(socket_main, "get_event_emitter", emitter)
+    monkeypatch.setattr(message_card, "get_event_emitter", emitter)
     client = _client("u1")
     team_id = _finished_team(client, hermes)
     chat_id = client.post(f"/api/v1/teams/{team_id}/conclusion/chat").json()["chat_id"]
     history = Chats.get_chat_by_id(chat_id).chat["history"]
     reply_id = history["currentId"]
-    assert "````" not in history["messages"][reply_id]["content"]
+    # nothing designs a card on its own
+    assert "````" not in history["messages"][reply_id]["content"] and designed == []
 
-    team = AgentTeams.get(team_id, "u1")
-    asyncio.run(outputs._card_into_chat(team, CONCLUSION, chat_id, reply_id))
+    response = client.post(f"/api/v1/teams/{team_id}/conclusion/card")
+    assert response.status_code == 200, response.text
+    started = response.json()["card"]
+    assert started["status"] == "designing" and started["generated_at"] == 1700000123
+    asyncio.run(mode_card.settle())
     # designed from the report and the lead's acceptance, not the link line
-    assert "负责人验收" in designed[0] and "在协作台看" not in designed[0]
+    assert len(designed) == 1 and designed[0][1] is True
+    assert "负责人验收" in designed[0][0] and "在协作台看" not in designed[0][0]
     content = Chats.get_chat_by_id(chat_id).chat["history"]["messages"][reply_id]["content"]
     fence = f"````html\n{html}\n````"
     assert fence in content and content.index(fence) < content.index("负责人验收")
     assert content.rstrip().splitlines()[-1].startswith("在协作台看：")
-    assert [(m, e) for m, e in emitted if e["type"] == "chat:completion"] == [
-        (reply_id, {"type": "chat:completion", "data": {"content": content}})]
+    assert (reply_id, {"type": "chat:completion", "data": {"content": content}}) in emitted
+    assert [e["data"]["status"] for m, e in emitted if e["type"] == message_card.EVENT and m == reply_id] == [
+        "designing", "ready"]
     card = AgentTeams.get(team_id, "u1").meta[outputs.CARD_META_KEY]
     assert card["status"] == "ready" and card["generated_at"] == 1700000123
     assert client.get(f"/api/v1/teams/{team_id}/conclusion").json()["card"]["html"] == html
-    # a reply that is gone gets nothing
-    asyncio.run(outputs._card_into_chat(team, CONCLUSION, chat_id, "missing"))
-    assert "missing" not in Chats.get_chat_by_id(chat_id).chat["history"]["messages"]
+    # asked from the reply in the chat: the same card flow
+    from open_webui.routers import teams as teams_router
+    from open_webui.utils import agent_teams as agent_teams_utils
+
+    monkeypatch.setattr(agent_teams_utils, "hermes_target", teams_router.hermes_target)
+    out = asyncio.run(message_card.start_card(None, _User("u1"), chat_id, reply_id))
+    asyncio.run(mode_card.settle())
+    assert out["status"] == "designing" and len(designed) == 2
+
+

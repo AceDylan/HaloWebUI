@@ -378,7 +378,7 @@ def pending(team: dict, snap: dict) -> list[tuple[str, str, Optional[dict]]]:
         waited = now() - int(team.get("completed_at") or now())
         checking = ((entry.get("acceptance") or {}).get("status") == "checking"
                     and now() - int((entry.get("acceptance") or {}).get("started_at") or 0) < ACCEPTANCE_WAIT)
-        # the picture is the result's last step: the notice goes out with it (bounded by illustrate.WAIT)
+        # a picture being drawn (on request, or HALO_TEAMS_AUTO_ILLUSTRATE=1) goes out with the notice (bounded by illustrate.WAIT)
         if (entry.get("status") in ("ready", "failed") and not checking and not illustrate.drawing(entry)) \
                 or waited >= DONE_WAIT:
             rounds = int(team.get("round") or 0)

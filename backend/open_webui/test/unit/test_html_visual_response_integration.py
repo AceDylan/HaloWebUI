@@ -73,7 +73,7 @@ def _patch_response_dependencies(monkeypatch, events, upserts):
     )
 
 
-def test_direct_non_streaming_force_mode_finalizes_with_fallback(monkeypatch):
+def test_direct_non_streaming_force_mode_gets_no_card_on_its_own(monkeypatch):
     events = []
     upserts = []
     _patch_response_dependencies(monkeypatch, events, upserts)
@@ -94,15 +94,15 @@ def test_direct_non_streaming_force_mode_finalizes_with_fallback(monkeypatch):
         )
     )
 
+    # no card on its own: it is made on request (「生成 HTML 卡片」)
     final_content = result["choices"][0]["message"]["content"]
-    assert final_content.startswith("Plain\n\n")
-    assert "<unsafe>" not in final_content
-    assert final_content.count(HTML_VISUAL_FALLBACK_MARKER) == 1
+    assert final_content == "Plain <unsafe>"
+    assert HTML_VISUAL_FALLBACK_MARKER not in final_content
     assert upserts[-1][2]["content"] == final_content
     assert events[-1]["data"]["content"] == final_content
 
 
-def test_non_streaming_force_mode_without_session_finalizes_with_fallback(monkeypatch):
+def test_non_streaming_force_mode_without_session_keeps_the_reply_as_written(monkeypatch):
     monkeypatch.setattr(
         middleware,
         "get_event_emitter",
@@ -112,18 +112,16 @@ def test_non_streaming_force_mode_without_session_finalizes_with_fallback(monkey
     )
     metadata = _metadata()
     metadata.pop("session_id")
+    response_content = """Explanation remains.
+```html
+<div style="color:#111">Model source</div>
+```"""
     response = {
         "choices": [
             {
                 "message": {
                     "role": "assistant",
-                    "content": """Explanation remains.
-```html
-<div style="color:#111">Rejected source</div>
-```
-```javascript
-window.nonEmitterUnsafe = true;
-```""",
+                    "content": response_content,
                 }
             }
         ]
@@ -143,11 +141,8 @@ window.nonEmitterUnsafe = true;
     )
 
     final_content = result["choices"][0]["message"]["content"]
-    assert final_content.startswith("Explanation remains.")
-    assert "Rejected source" not in final_content
-    assert "window.nonEmitterUnsafe" not in final_content
-    assert final_content.count(HTML_VISUAL_FALLBACK_MARKER) == 1
-    assert final_content.count("```html\n") == 1
+    assert final_content == response_content
+    assert HTML_VISUAL_FALLBACK_MARKER not in final_content
 
 
 async def _sse_stream():
@@ -156,7 +151,7 @@ async def _sse_stream():
     yield b"data: [DONE]\n\n"
 
 
-def test_direct_streaming_force_mode_marks_done_before_the_card(monkeypatch):
+def test_direct_streaming_force_mode_gets_no_card_on_its_own(monkeypatch):
     events = []
     upserts = []
     created = {}
@@ -197,39 +192,20 @@ def test_direct_streaming_force_mode_marks_done_before_the_card(monkeypatch):
         for index, event in enumerate(completion_events)
         if event.get("data", {}).get("done") is True
     )
-    # Done goes out with the plain answer: the card is post-processing (AGY
-    # takes tens of seconds) and must not keep the reply looking unfinished.
+    # Done goes out with the plain answer, and nothing follows it: the card is made
+    # on request (「生成 HTML 卡片」).
     done_content = completion_events[done_index]["data"]["content"]
+    assert done_content.startswith("Streamed <unsafe>")
     assert HTML_VISUAL_FALLBACK_MARKER not in done_content
-    assert all(
-        HTML_VISUAL_FALLBACK_MARKER not in event.get("data", {}).get("content", "")
-        for event in completion_events[: done_index + 1]
-    )
-
-    # The card follows as a content-only update of the same reply.
-    card_update = completion_events[-1]["data"]
-    assert "done" not in card_update
-    final_content = card_update["content"]
-    assert final_content.startswith("Streamed\n\n")
-    assert "<unsafe>" not in final_content
-    assert final_content.count(HTML_VISUAL_FALLBACK_MARKER) == 1
-
-    # Persisted without pulling the chat's current message back to this reply.
-    chat_id, message_id, payload, kwargs = upserts[-1]
-    assert (chat_id, message_id) == ("chat-1", "assistant-1")
-    assert payload == {"content": final_content}
-    assert kwargs.get("set_current") is False
-    assert kwargs.get("guard_stopped") is True
+    assert done_index == len(completion_events) - 1
+    assert all("```html" not in str(payload.get("content") or "") for _c, _m, payload, _k in upserts)
 
 
-def test_streaming_force_mode_without_session_buffers_and_validates(monkeypatch):
+def test_streaming_force_mode_without_session_streams_through(monkeypatch):
     async def unsafe_stream():
         content = """Streaming explanation.
 ```html
-<div>Rejected streamed source</div>
-```
-```js
-window.streamUnsafe = true;
+<div>Model streamed source</div>
 ```"""
         chunk = {"choices": [{"delta": {"content": content}}]}
         yield f"data: {json.dumps(chunk)}\n\n".encode()
@@ -264,8 +240,8 @@ window.streamUnsafe = true;
         return "".join(chunks)
 
     streamed = asyncio.run(consume())
+    # streamed through as it comes (no buffering for a card any more)
     assert "Streaming explanation." in streamed
-    assert "Rejected streamed source" not in streamed
-    assert "window.streamUnsafe" not in streamed
-    assert streamed.count(HTML_VISUAL_FALLBACK_MARKER) == 1
+    assert "Model streamed source" in streamed
+    assert HTML_VISUAL_FALLBACK_MARKER not in streamed
     assert streamed.rstrip().endswith("data: [DONE]")

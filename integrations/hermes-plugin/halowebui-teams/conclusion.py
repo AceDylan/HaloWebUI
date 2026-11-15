@@ -456,7 +456,7 @@ def _run(slug: str, by: str) -> None:
         if entry.get("status") == "ready":
             from . import illustrate
 
-            try:  # its picture is drawn meanwhile (the hand-over to the chat waits for both)
+            try:  # only when automatic pictures are on (HALO_TEAMS_AUTO_ILLUSTRATE=1)
                 illustrate.auto(slug)
             except Exception:  # noqa: BLE001
                 logger.warning("halowebui-teams: automatic illustration for %s did not start", slug, exc_info=True)

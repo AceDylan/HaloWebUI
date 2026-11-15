@@ -22,13 +22,6 @@ def _isolated_state(monkeypatch, tmp_path):
         hermes_agent, "_schedule_completion_webhook", lambda *_args, **_kwargs: None
     )
 
-    async def no_design(content, _metadata):
-        return content
-
-    monkeypatch.setattr(hermes_agent, "design_html_visual_artifact_with_agy", no_design)
-    monkeypatch.setattr(
-        hermes_agent, "append_html_visual_fallback", lambda content, _metadata: content
-    )
     hermes_agent._HOST_DATA_DIR_CACHE.clear()
     yield
     hermes_agent._HOST_DATA_DIR_CACHE.clear()
@@ -125,9 +118,6 @@ def test_cchclaude_dispatch_goes_to_its_own_runner():
         {"messages": [{"role": "user", "content": "/cchclaude 进度"}]}, {"chat_id": "c"}, "hermes-agent"
     )
     assert typed["dispatch"] == {"runner": "cchclaude"}
-    assert hermes_agent._RUNNER_LAUNCH_RE.search(
-        "/root/.hermes/scripts/cchclaude-run.sh run --detach --cwd /root --task-file /tmp/t.md"
-    )
 
 
 @pytest.mark.parametrize("runner", ["anyclaude", "officlaude"])
@@ -146,9 +136,6 @@ def test_named_claude_dispatch_goes_to_its_own_runner(runner):
         {"messages": [{"role": "user", "content": f"/{runner} 进度"}]}, {"chat_id": "c"}, "hermes-agent"
     )
     assert typed["dispatch"] == {"runner": runner}
-    assert hermes_agent._RUNNER_LAUNCH_RE.search(
-        f"/root/.hermes/scripts/{runner}-run.sh answer 20260930-112556-677bec3c --detach --task-file /tmp/t.md"
-    )
 
 
 def test_a_typed_slash_command_wins_over_the_dispatch_option():
@@ -848,14 +835,7 @@ def test_a_typed_runner_command_is_sent_as_dispatch(monkeypatch):
     assert "dispatch" not in payload and payload["input"] == "/codex 修复登录页"
 
 
-def test_a_runner_launch_records_who_answered_and_gets_no_card(monkeypatch):
-    designed = []
-
-    async def design(content, _metadata):
-        designed.append(content)
-        return content
-
-    monkeypatch.setattr(hermes_agent, "design_html_visual_artifact_with_agy", design)
+def test_a_runner_launch_records_who_answered(monkeypatch):
     hermes = _Hermes(
         events=[
             {"event": "tool.started", "tool": "terminal", "tool_call_id": "c1",
@@ -876,7 +856,6 @@ def test_a_runner_launch_records_who_answered_and_gets_no_card(monkeypatch):
     assert run["dispatch"] == "reclaude"
     assert run["requested_model"] == "gemini-chat"
     assert run["model"] == "deepseek-chat" and run["fallback_from"] == "gemini-chat"
-    assert designed == []
     started = json.loads(json.dumps(hermes.posts[0][1]["json"]))
     assert started["dispatch"] == {"runner": "reclaude"}
 

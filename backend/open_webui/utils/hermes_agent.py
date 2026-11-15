@@ -70,8 +70,6 @@ from open_webui.utils.hermes_media import (
 from open_webui.utils.hermes_unread import mark_unread
 from open_webui.utils.html_visual_prompt import (
     _FENCED_HTML_BLOCK_RE,
-    append_html_visual_fallback,
-    design_html_visual_artifact_with_agy,
     html_cards_as_text,
 )
 from open_webui.utils.model_identity import parse_selection_id
@@ -2061,25 +2059,6 @@ def _runtime_from_event(event) -> dict:
     return runtime
 
 
-# The launch command of a background runner (reclaude-run.sh run|answer,
-# cchclaude-run.sh, anyclaude-run.sh, officlaude-run.sh, codex-run.sh, agy-run.sh), as the terminal call's preview shows it.
-_RUNNER_LAUNCH_RE = re.compile(
-    r"(?:reclaude|cchclaude|anyclaude|officlaude|codex|agy)-run\.sh\s+(?:run|answer)\b|runner-detach\.py"
-)
-
-
-def _launched_runner(blocks, runtime) -> bool:
-    """True when the run started a background runner. Its reply is a
-    three-line receipt: no visual card (the runner's report gets one)."""
-    if runtime.get("runner_run_id") or runtime.get("fast_dispatch"):
-        return True
-    return any(
-        block.get("type") == "tool"
-        and _RUNNER_LAUNCH_RE.search(str(block.get("preview") or ""))
-        for block in blocks
-    )
-
-
 async def _studio_prep_brief(run_payload: dict, metadata: dict, user, emit_status) -> dict:
     """A video studio brief sent with its 提示词增强 still going (utils/studio_prep.py): waits for
     it here, its steps as the reply's status, then the payload with the result in the brief (and
@@ -2480,9 +2459,8 @@ async def run_hermes_agent(request, form_data, user, metadata, model, events, ta
                 upsert_response_message({"hermes_run": run_state})
             except Exception as e:
                 log.debug(f"hermes run-state persist failed: {e}")
-            # The reply is marked done with the plain answer; the AGY HTML
-            # design pass (tens of seconds, up to its timeout) runs afterwards
-            # in _design_html_visual and swaps the artifact in when ready.
+            # The reply is done with the plain answer; its HTML card is made only
+            # when the person asks for it (「生成 HTML 卡片」, utils/message_card.py).
             # A fast dispatch's launch command (the "终端 已完成" step) was shown while it ran;
             # the receipt that stays says who has the task, where, and its run id.
             content = _serialize_blocks(
@@ -2547,40 +2525,7 @@ async def run_hermes_agent(request, form_data, user, metadata, model, events, ta
                 except Exception as e:
                     log.warning(f"hermes background tasks failed: {e}")
 
-            # A reply that only says a runner started is a receipt: turning it
-            # into a card took ~40 s and replaced three lines with a big block.
-            if successful and not error and not _launched_runner(blocks, runtime):
-                await asyncio.gather(
-                    _background_tasks(), _design_html_visual(content)
-                )
-            else:
-                await _background_tasks()
-
-        async def _design_html_visual(content):
-            try:
-                designed = await design_html_visual_artifact_with_agy(content, metadata)
-                designed = append_html_visual_fallback(designed, metadata)
-            except asyncio.CancelledError:
-                raise
-            except Exception as e:
-                log.warning(f"hermes html visual design failed: {e}")
-                return
-            if designed == content:
-                return
-            try:
-                Chats.upsert_message_to_chat_by_id_and_message_id(
-                    metadata["chat_id"],
-                    metadata["message_id"],
-                    {"content": designed},
-                    guard_stopped=True,
-                    set_current=False,
-                )
-            except Exception as e:
-                log.warning(f"hermes html visual persist failed: {e}")
-            try:
-                await _emit_completion({"content": designed})
-            except Exception as e:
-                log.warning(f"hermes html visual emit failed: {e}")
+            await _background_tasks()
 
         async def _conclude_after_stream_loss(run_started_at: float):
             announced = False

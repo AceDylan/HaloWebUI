@@ -1274,6 +1274,27 @@ async def get_pinned_status_by_id(id: str, user=Depends(get_verified_user)):
 ############################
 
 
+@router.post("/{id}/messages/{message_id}/html-card")
+async def make_chat_message_html_card(
+    request: Request, id: str, message_id: str, user=Depends(get_verified_user)
+):
+    """「生成 HTML 卡片」 under a reply: AGY designs it in the background (utils/message_card.py);
+    the card's state as it stands ({status, startedAt, ...})."""
+    from open_webui.utils.message_card import start_card
+
+    return await start_card(request, user, id, message_id)
+
+
+@router.post("/{id}/messages/{message_id}/picture")
+async def make_chat_message_picture(
+    request: Request, id: str, message_id: str, user=Depends(get_verified_user)
+):
+    """「生成配图」 under a result of 精答 / 讨论台 / 协作台: drawn in the background."""
+    from open_webui.utils.message_card import start_picture
+
+    return await start_picture(request, user, id, message_id)
+
+
 @router.post("/{id}/pin", response_model=Optional[ChatResponse])
 async def pin_chat_by_id(id: str, user=Depends(get_verified_user)):
     chat = Chats.get_chat_by_id_and_user_id(id, user.id)

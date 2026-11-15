@@ -78,7 +78,7 @@ def _desks(user_id: str) -> list[dict]:
             rows.append({"kind": kind, "id": chat_id, "chat_id": chat_id, "href": paths[kind] + chat_id,
                          "title": _question(run.get("question")),
                          "started_at": started / 1000 if started else time.time(), "state": "running"})
-    # the picture is the last step: the work stays here, on the clock it started on, until it is drawn
+    # a finished answer / conclusion whose picture is being drawn (asked for) stays here until it is drawn
     shown = {row["id"] for row in rows}
     for chat_id, drawing in list(DRAWING.items()):
         kind = drawing.get("kind")

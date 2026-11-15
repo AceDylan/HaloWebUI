@@ -99,13 +99,7 @@ from open_webui.utils.image_generation_options import (
     CHAT_IMAGE_GENERATION_OPTION_KEYS,
     sanitize_chat_image_generation_options,
 )
-from open_webui.utils.html_visual_prompt import (
-    append_html_visual_fallback,
-    compact_html_cards_in_history,
-    design_html_visual_artifact_with_agy,
-    get_html_visual_mode,
-    should_apply_html_visual_prompt,
-)
+from open_webui.utils.html_visual_prompt import compact_html_cards_in_history
 from open_webui.utils.error_handling import build_error_detail
 
 
@@ -6389,9 +6383,6 @@ async def process_chat_response(
                 message_payload,
                 allow_base64_image_url_conversion=allow_base64_image_url_conversion,
             )
-            if "error" not in response:
-                content = await design_html_visual_artifact_with_agy(content, metadata)
-                content = append_html_visual_fallback(content, metadata)
             response_message = choices[0].setdefault("message", {})
             if isinstance(response_message, dict):
                 response_message["content"] = content
@@ -6523,37 +6514,6 @@ async def process_chat_response(
             backtick_segments = content.split("```")
             # Even number of segments means the last backticks are opening a new block
             return len(backtick_segments) > 1 and len(backtick_segments) % 2 == 0
-
-        async def _design_html_visual_after_done(content: str):
-            # Runs once the reply is already done. A late write must not pull
-            # history.currentId back to this reply when the user has moved on
-            # (set_current=False), and guard_stopped keeps a stop authoritative.
-            try:
-                designed = await design_html_visual_artifact_with_agy(content, metadata)
-                designed = append_html_visual_fallback(designed, metadata)
-            except asyncio.CancelledError:
-                raise
-            except Exception as e:
-                log.warning(f"html visual design failed: {e}")
-                return
-            if designed == content:
-                return
-            try:
-                Chats.upsert_message_to_chat_by_id_and_message_id(
-                    metadata["chat_id"],
-                    metadata["message_id"],
-                    {"content": designed},
-                    guard_stopped=True,
-                    set_current=False,
-                )
-            except Exception as e:
-                log.warning(f"html visual persist failed: {e}")
-            try:
-                await event_emitter(
-                    {"type": "chat:completion", "data": {"content": designed}}
-                )
-            except Exception as e:
-                log.warning(f"html visual emit failed: {e}")
 
         # Handle as a background task
         async def post_response_handler(response, events):
@@ -10397,11 +10357,8 @@ async def process_chat_response(
                             "suggestion": "retry_or_switch",
                         }
 
-                # The reply is marked done with the plain answer; the AGY HTML
-                # design pass (tens of seconds, up to its timeout) runs after
-                # completion in _design_html_visual_after_done, next to the
-                # title/follow-up tasks, and swaps the card in when ready. Same
-                # order as the hermes path.
+                # The reply is done with the plain answer; its HTML card is made only
+                # when the person asks for it (「生成 HTML 卡片」, utils/message_card.py).
                 final_content = serialize_content_blocks(content_blocks)
 
                 completed_at = int(time.time())
@@ -10511,11 +10468,8 @@ async def process_chat_response(
                         request, user, metadata, tasks, event_emitter
                     )
                 else:
-                    await asyncio.gather(
-                        background_tasks_handler(
-                            request, user, metadata, tasks, event_emitter
-                        ),
-                        _design_html_visual_after_done(final_content),
+                    await background_tasks_handler(
+                        request, user, metadata, tasks, event_emitter
                     )
             except asyncio.CancelledError:
                 log.warning("Task was cancelled!")
@@ -10596,173 +10550,6 @@ async def process_chat_response(
 
     else:
         # Fallback to the original response
-        force_html_visual_validation = (
-            get_html_visual_mode(metadata) == "force"
-            and should_apply_html_visual_prompt(metadata)
-        )
-
-        if force_html_visual_validation:
-            # Without a chat event channel there is nowhere to replace content
-            # after unsafe deltas have reached the browser. Buffer only this
-            # explicit force path, validate its terminal content, then emit one
-            # consolidated completion through the original streaming protocol.
-            async def validated_force_stream_wrapper(original_generator, events):
-                buffered_chunks: list[str] = []
-
-                def buffer_item(item: Any) -> None:
-                    if isinstance(item, bytes):
-                        buffered_chunks.append(item.decode("utf-8", errors="replace"))
-                    elif isinstance(item, dict):
-                        buffered_chunks.append(json.dumps(item, ensure_ascii=False) + "\n")
-                    elif item is not None:
-                        buffered_chunks.append(str(item))
-
-                for event in events:
-                    event, _ = await process_filter_functions(
-                        request=request,
-                        filter_functions=filter_functions,
-                        filter_type="stream",
-                        form_data=event,
-                        extra_params=extra_params,
-                    )
-                    buffer_item(event)
-
-                async for data in original_generator:
-                    data, _ = await process_filter_functions(
-                        request=request,
-                        filter_functions=filter_functions,
-                        filter_type="stream",
-                        form_data=data,
-                        extra_params=extra_params,
-                    )
-                    buffer_item(data)
-
-                payloads: list[dict] = []
-                for line in "".join(buffered_chunks).splitlines():
-                    candidate = line.strip()
-                    if candidate.startswith("data:"):
-                        candidate = candidate[len("data:") :].strip()
-                    if not candidate or candidate == "[DONE]":
-                        continue
-                    try:
-                        payload = json.loads(candidate)
-                    except (TypeError, ValueError):
-                        continue
-                    if isinstance(payload, dict):
-                        payloads.append(payload)
-
-                content_parts: list[str] = []
-                response_envelope: dict[str, Any] = {}
-                response_usage: dict | None = None
-                response_error: Any = None
-                for payload in payloads:
-                    if response_error is None and payload.get("error") is not None:
-                        response_error = payload.get("error")
-                    if isinstance(payload.get("usage"), dict):
-                        response_usage = payload["usage"]
-                    if not response_envelope:
-                        response_envelope = {
-                            key: payload[key]
-                            for key in (
-                                "id",
-                                "object",
-                                "created",
-                                "model",
-                                "system_fingerprint",
-                            )
-                            if key in payload
-                        }
-
-                    choices = payload.get("choices")
-                    if isinstance(choices, list) and choices and isinstance(
-                        choices[0], dict
-                    ):
-                        choice = choices[0]
-                        delta = choice.get("delta")
-                        if isinstance(delta, dict):
-                            piece, _ = _extract_stream_content_and_files(
-                                delta,
-                                allow_base64_image_url_conversion=False,
-                            )
-                            if piece:
-                                content_parts.append(piece)
-                        message = choice.get("message")
-                        if isinstance(message, dict):
-                            piece, _ = _extract_stream_content_and_files(
-                                message,
-                                allow_base64_image_url_conversion=False,
-                            )
-                            if piece:
-                                content_parts = [piece]
-                        elif isinstance(choice.get("text"), str):
-                            content_parts.append(choice["text"])
-                    elif (
-                        payload.get("type") == "response.output_text.delta"
-                        and isinstance(payload.get("delta"), str)
-                    ):
-                        content_parts.append(payload["delta"])
-
-                final_content = await design_html_visual_artifact_with_agy(
-                    "".join(content_parts), metadata
-                )
-                final_content = append_html_visual_fallback(final_content, metadata)
-                is_ndjson = "application/x-ndjson" in response.headers.get(
-                    "Content-Type", ""
-                )
-
-                def encode_payload(payload: Any) -> str:
-                    serialized = (
-                        payload
-                        if isinstance(payload, str)
-                        else json.dumps(payload, ensure_ascii=False)
-                    )
-                    return (
-                        f"{serialized}\n"
-                        if is_ndjson
-                        else f"data: {serialized}\n\n"
-                    )
-
-                if final_content:
-                    yield encode_payload(
-                        {
-                            **response_envelope,
-                            "choices": [
-                                {
-                                    "index": 0,
-                                    "delta": {
-                                        "role": "assistant",
-                                        "content": final_content,
-                                    },
-                                    "finish_reason": None,
-                                }
-                            ],
-                        }
-                    )
-                    final_payload = {
-                        **response_envelope,
-                        "choices": [
-                            {
-                                "index": 0,
-                                "delta": {},
-                                "finish_reason": "stop",
-                            }
-                        ],
-                    }
-                    if response_usage:
-                        final_payload["usage"] = response_usage
-                    yield encode_payload(final_payload)
-                elif response_error is not None:
-                    yield encode_payload({"error": response_error})
-
-                if not is_ndjson:
-                    yield encode_payload("[DONE]")
-
-            return StreamingResponse(
-                validated_force_stream_wrapper(response.body_iterator, events),
-                headers=dict(response.headers),
-                background=response.background,
-            )
-
         async def stream_wrapper(original_generator, events):
             def wrap_item(item):
                 return f"data: {item}\n\n"

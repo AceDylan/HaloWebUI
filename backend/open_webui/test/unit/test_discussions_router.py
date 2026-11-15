@@ -49,7 +49,9 @@ def env(monkeypatch):
     # 结论卡片 (utils/mode_card.py) is AGY's: never designed for real here
     from open_webui.utils import mode_card
 
-    async def _no_card(text):
+    from open_webui.utils import message_card
+
+    async def _no_card(text, **_kw):
         return {"status": "skipped"}
 
     monkeypatch.setattr(mode_card, "design", _no_card)
@@ -89,6 +91,7 @@ def env(monkeypatch):
         return emit
 
     monkeypatch.setattr(api, "_emitter", emitter)
+    monkeypatch.setattr(message_card, "_emitter", lambda user_id, chat_id, message_id: emitter(None, chat_id, message_id))
 
     async def fake_after_done(request, user, chat_id, ask):
         after.append((chat_id, ask["id"], ask["status"]))
@@ -792,7 +795,7 @@ def test_the_conclusion_goes_back_into_the_chat_once(env, monkeypatch):
     assert len(posted) == 1
     sent = posted[0]
     assert sent["chat_id"] == origin and sent["source"] == "discuss" and sent["run_id"] == run_id
-    assert sent["notice"] == notice and sent["content"] == content and sent["design"] is False
+    assert sent["notice"] == notice and sent["content"] == content and "design" not in sent
 
     # 「把结论放进这个对话」 by hand: the route, quietly
     out = asyncio.run(api.report_back(env.request, run_chat_id, USER))
@@ -819,7 +822,7 @@ def test_after_done_sends_a_dispatched_conclusion_back(env, monkeypatch):
     from open_webui.utils import mode_illustrate
 
     async def after_done(ask):
-        # the report back waits for the picture, in a job of its own
+        # the report back goes out with the text (pictures and cards are made on request)
         await ORIGINAL_AFTER_DONE(env.request, USER, detail["id"], ask)
         await mode_illustrate.settle()
 
@@ -985,8 +988,18 @@ def test_a_finished_conclusion_gets_its_picture_in_the_chat_and_the_gallery(env,
         await ORIGINAL_AFTER_DONE(env.request, USER, detail["id"], {**ask, "origin": {"chatId": "c-1", "messageId": "m"}})
         await mode_illustrate.settle()
 
-    env.events.clear()
+    # done with its text alone: no picture on its own, and the report back goes out at once
     asyncio.run(after_done())
+    assert seen["condense"] == [] and sent == ["## 结论\n用 Postgres。\n## 共识\n- 要备份"]
+
+    async def draw():
+        out = await api.make_picture(env.request, detail["id"], api.FinishForm(ask_id=ask["id"]), USER)
+        await mode_illustrate.settle()
+        return out
+
+    env.events.clear()
+    started = asyncio.run(draw())["ask"]
+    assert started["illustration"]["status"] == "generating"
     assert seen["condense"] == [("c", "## 结论\n用 Postgres。\n## 共识\n- 要备份", "discussion_room_illustration")]
     assert seen["draw"][0][0]["name"] == "手绘万能图"
     user_id, kw = seen["gallery"][0]
@@ -1001,8 +1014,8 @@ def test_a_finished_conclusion_gets_its_picture_in_the_chat_and_the_gallery(env,
     # the page saw it being drawn, then the picture
     states = [e["data"]["ask"]["illustration"]["status"] for e in env.events if e["type"] == "discuss" and e["data"]["kind"] == "state"]
     assert states[0] == "generating" and states[-1] == "ready"
-    # the report back to the chat of origin waited for it
-    assert sent and sent[0].startswith("![配图](/api/v1/files/pic-1/content)")
+    # the chat view gets the new content too
+    assert {"type": "chat:completion", "data": {"content": message["content"]}} in env.events
 
 
 def test_a_picture_that_fails_leaves_the_conclusion_as_it_was(env, monkeypatch):
@@ -1017,11 +1030,11 @@ def test_a_picture_that_fails_leaves_the_conclusion_as_it_was(env, monkeypatch):
     ask = asyncio.run(api.get_discussion(detail["id"], USER))["asks"][0]
     assert ask["status"] == "done"
 
-    async def after_done():
-        await ORIGINAL_AFTER_DONE(env.request, USER, detail["id"], ask)
+    async def draw():
+        await api.make_picture(env.request, detail["id"], None, USER)  # the last question
         await mode_illustrate.settle()
 
-    asyncio.run(after_done())
+    asyncio.run(draw())
     stored = asyncio.run(api.get_discussion(detail["id"], USER))["asks"][0]
     assert stored["illustration"]["status"] == "failed" and "生图没有返回图片" in stored["illustration"]["error"]
     assert seen["gallery"] == []
@@ -1042,9 +1055,39 @@ def test_no_picture_when_image_generation_is_not_allowed(env, monkeypatch):
     ask = asyncio.run(api.get_discussion(detail["id"], USER))["asks"][0]
     assert ask["status"] == "done"
 
-    async def after_done():
-        await ORIGINAL_AFTER_DONE(env.request, USER, detail["id"], ask)
-        await mode_illustrate.settle()
-
-    asyncio.run(after_done())
+    with pytest.raises(HTTPException) as refused:
+        asyncio.run(api.make_picture(env.request, detail["id"], None, USER))
+    assert refused.value.status_code == 403
     assert seen["condense"] == [] and "illustration" not in asyncio.run(api.get_discussion(detail["id"], USER))["asks"][0]
+
+
+def test_a_conclusion_gets_its_card_when_asked_for(env, monkeypatch):
+    from open_webui.utils import mode_card
+
+    html = '<section class="hv"><h1 class="hv-title">选库</h1></section>'
+    designed = []
+
+    async def design(text, **kw):
+        designed.append((text, kw.get("allow_brief")))
+        return {"status": "ready", "html": html}
+
+    monkeypatch.setattr(mode_card, "design", design)
+    detail = {"id": _discuss_first(env)}
+    ask = asyncio.run(api.get_discussion(detail["id"], USER))["asks"][0]
+
+    async def make():
+        out = await api.make_card(detail["id"], api.FinishForm(ask_id=ask["id"]), USER)
+        await mode_card.settle()
+        return out
+
+    env.events.clear()
+    assert asyncio.run(make())["card"]["status"] == "designing"
+    assert designed == [("## 结论\n用 Postgres。\n## 共识\n- 要备份", True)]
+    stored = asyncio.run(api.get_discussion(detail["id"], USER))["asks"][0]
+    assert stored["card"]["status"] == "ready"
+    message = chats_mod.ChatTable().get_chat_by_id(detail["id"]).chat["history"]["messages"][ask["id"]]
+    assert message["content"].endswith(f"````html\n{html}\n````")
+    assert [e["data"]["status"] for e in env.events if e["type"] == "chat:message:html_card"] == ["designing", "ready"]
+    with pytest.raises(HTTPException) as missing:
+        asyncio.run(api.make_card(detail["id"], api.FinishForm(ask_id="nope"), USER))
+    assert missing.value.status_code == 404

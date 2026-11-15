@@ -12,7 +12,7 @@ import time
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from open_webui.models.chats import DISPATCHED_FROM_META_KEY, ChatForm, Chats
 from open_webui.socket.main import get_event_emitter
@@ -340,20 +340,11 @@ def _emitter(user, chat_id: str, message_id: str):
 
 
 async def _after_done(request: Request, user, chat_id: str, ask: dict) -> None:
-    from open_webui.utils import mode_illustrate
-
     chat = Chats.get_chat_by_id_and_user_id(chat_id, user.id)
     if chat is None:
         return
-    # 运行中 keeps the discussion from now until its conclusion's picture is drawn
-    held = mode_illustrate.hold(request, user, chat_id, {
-        "kind": "discuss", "title": ask.get("question"), "started_at": (ask.get("startedAt") or 0) / 1000 or None})
-    try:
-        title = await _name(request, user, chat_id, chat, ask)
-    except BaseException:
-        mode_illustrate.release(chat_id, held)
-        raise
-    mode_illustrate.later(_illustrate_and_report(request, user, chat_id, ask, title, held))
+    title = await _name(request, user, chat_id, chat, ask)
+    await _report_done(request, user, chat_id, ask, title)
 
 
 async def _name(request: Request, user, chat_id: str, chat, ask: dict) -> str:
@@ -387,16 +378,9 @@ async def _name(request: Request, user, chat_id: str, chat, ask: dict) -> str:
     return title
 
 
-async def _illustrate_and_report(request: Request, user, chat_id: str, ask: dict, title: str,
-                                 held: Optional[dict]) -> None:
-    # 结论配图 and 结论卡片 are the conclusion's last steps, side by side: it is "done" (back in its
-    # chat of origin, or the app's "reply ready" toast) once both are there
-    from open_webui.utils import mode_illustrate
-
-    try:
-        await asyncio.gather(_illustrate(request, user, chat_id, ask), _card(user, chat_id, ask), return_exceptions=True)
-    finally:
-        mode_illustrate.release(chat_id, held)
+async def _report_done(request: Request, user, chat_id: str, ask: dict, title: str) -> None:
+    # The conclusion is done with its text: its picture and card are made only when asked for
+    # (start_picture / start_card).
     if ask.get("origin"):
         # 派发方式「讨论」: the conclusion goes back into the chat the question was asked in
         from open_webui.utils import mode_dispatch
@@ -428,6 +412,10 @@ async def _keep(user, chat_id: str, ask: dict, key: str, entry: dict) -> None:
     await _emitter(user, chat_id, ask["id"])(
         {"type": "discuss", "data": {"kind": "state", "chatId": chat_id, "askId": ask["id"], "ask": room.public_ask(stored)}}
     )
+    # the reply in the chat view: its content (picture / card in it), and the card's state
+    from open_webui.utils import message_card
+
+    await message_card.tell(user.id, chat_id, ask["id"], entry if key == "card" else None, room.stored_content(stored))
 
 
 async def _illustrate(request: Request, user, chat_id: str, ask: dict, held: Optional[dict] = None) -> None:
@@ -461,7 +449,53 @@ async def _card(user, chat_id: str, ask: dict) -> None:
         await _keep(user, chat_id, ask, "card", entry)
 
     text = ((ask.get("conclusion") or {}).get("content") or "").strip()
-    await mode_card.make(text + sources_tail(room.research_sources(ask)) if text else "", on_change)
+    await mode_card.make(text + sources_tail(room.research_sources(ask)) if text else "", on_change, allow_brief=True)
+
+
+def _finished_ask(user, chat_id: str, ask_id: Optional[str]) -> tuple[Any, dict]:
+    """The chat and a finished question of it (the last one unless *ask_id*), the one a picture
+    or card is asked for."""
+    chat = _own(chat_id, user)
+    asks = _asks_of(chat)
+    ask = next((a for a in asks if a.get("id") == ask_id), None) if ask_id else (asks[-1] if asks else None)
+    if ask is None:
+        raise HTTPException(status_code=404, detail="没有这个问题")
+    live = LIVE.get(chat_id)
+    if ask.get("status") != "done" or (live and live.ask.get("id") == ask.get("id")):
+        raise HTTPException(status_code=409, detail="讨论有结论后才能生成")
+    return chat, ask
+
+
+def start_card(user, chat_id: str, ask_id: Optional[str] = None) -> dict:
+    """「生成 HTML 卡片」 for a conclusion: designed in the background; the card as it stands."""
+    from open_webui.utils import mode_card
+
+    if not mode_card.enabled():
+        raise HTTPException(status_code=403, detail="HTML 卡片已在服务端关闭")
+    chat, ask = _finished_ask(user, chat_id, ask_id)
+    if mode_card.busy(ask.get("card")):
+        return ask["card"]
+    ask["card"] = {"status": "designing", "startedAt": room.now_ms()}
+    _persist_ask(chat_id, ask, _setup_of(chat))
+    mode_card.later(_card(user, chat_id, ask))
+    return ask["card"]
+
+
+def start_picture(request: Request, user, chat_id: str, ask_id: Optional[str] = None) -> dict:
+    """「生成配图」 for a conclusion: drawn in the background; the question as it stands."""
+    from open_webui.utils import mode_illustrate
+
+    chat, ask = _finished_ask(user, chat_id, ask_id)
+    if not mode_illustrate.may_illustrate(request, user):
+        raise HTTPException(status_code=403, detail="生图没有开启，或你没有生图权限")
+    if not mode_illustrate.busy(ask.get("illustration")):
+        # 运行中 shows the discussion while its picture is drawn
+        held = mode_illustrate.hold(request, user, chat_id, {
+            "kind": "discuss", "title": chat.title or ask.get("question"), "started_at": time.time()})
+        ask["illustration"] = {"status": "generating", "startedAt": room.now_ms()}
+        _persist_ask(chat_id, ask, _setup_of(chat))
+        mode_illustrate.later(_illustrate(request, user, chat_id, ask, held))
+    return room.public_ask(ask)
 
 
 def _parse_queries(res: Any) -> Optional[list[str]]:
@@ -1434,6 +1468,23 @@ async def report_back(request: Request, chat_id: str, user=Depends(get_verified_
         return await mode_dispatch.report_back(request, "discuss", chat_id, ask, quiet=True)
     except mode_dispatch.ReportError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail)
+
+
+class FinishForm(BaseModel):
+    ask_id: Optional[str] = Field(default=None, max_length=120)
+
+
+@router.post("/{chat_id}/card")
+async def make_card(chat_id: str, form: Optional[FinishForm] = None, user=Depends(get_verified_user)):
+    """「生成 HTML 卡片」: the conclusion's card, designed by AGY from the finished conclusion."""
+    return {"card": start_card(user, chat_id, (form or FinishForm()).ask_id)}
+
+
+@router.post("/{chat_id}/picture")
+async def make_picture(request: Request, chat_id: str, form: Optional[FinishForm] = None,
+                       user=Depends(get_verified_user)):
+    """「生成配图」: the conclusion's picture, in the owner's 「手绘万能图」 template."""
+    return {"ask": start_picture(request, user, chat_id, (form or FinishForm()).ask_id)}
 
 
 @router.delete("/{chat_id}")

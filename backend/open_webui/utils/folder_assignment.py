@@ -13,9 +13,10 @@ Rules (kept deliberately small and testable):
 * ``manual`` is written by the sidebar move / remove endpoint and freezes the
   chat forever. A chat that sits in a folder without any marker is treated as
   manual as well.
-* ``auto`` chats may be corrected while ``evaluations`` is below
+* ``auto`` chats may be corrected while ``successful_evaluations`` is below
   :data:`MAX_AUTO_EVALUATIONS`. A ``null`` answer never moves a chat out of
-  its folder. Every attempt counts, whether or not the model answered.
+  its folder. ``evaluations`` counts attempts for diagnosis; failed attempts
+  can retry on the next user turn without spending the classification budget.
 * Old chats are never back-filled; an unmarked, unfoldered chat starts being
   evaluated at the next title milestone it reaches and then gets the usual
   budget of three evaluations at consecutive milestones.
@@ -51,6 +52,8 @@ log.setLevel(SRC_LOG_LEVELS["MAIN"])
 
 
 MAX_AUTO_EVALUATIONS = 3
+SUCCESSFUL_STATUSES = {"assigned", "unchanged", "no_match"}
+RETRYABLE_STATUSES = {"timeout", "error", "empty", "invalid", "no_candidates", "candidate_gone", "folder_full"}
 USER_INFO_KEY = "folder_auto_assignment"
 PRESETS_VERSION = 1
 
@@ -139,6 +142,16 @@ def get_evaluation_count(meta: Optional[dict]) -> int:
     return max(evaluations, 0)
 
 
+def get_successful_evaluation_count(meta: Optional[dict]) -> int:
+    assignment = get_folder_assignment_metadata(meta)
+    successes = assignment.get("successful_evaluations")
+    if isinstance(successes, int) and not isinstance(successes, bool):
+        return max(successes, 0)
+    # Legacy records counted failures too. Only the last failure is provable;
+    # discount that one without guessing the outcomes of earlier attempts.
+    return max(0, get_evaluation_count(meta) - int(assignment.get("last_status") in RETRYABLE_STATUSES))
+
+
 def can_auto_assign_folder(
     folder_id: Optional[str],
     meta: Optional[dict],
@@ -146,10 +159,13 @@ def can_auto_assign_folder(
     message_id: Optional[str] = None,
 ) -> bool:
     """Return whether the background task may evaluate this chat right now."""
+    if isinstance(user_message_count, bool) or not isinstance(user_message_count, int) or user_message_count < 1:
+        return False
     assignment = get_folder_assignment_metadata(meta)
     source = assignment.get("source")
 
-    if not is_folder_assignment_milestone(
+    retry = assignment.get("last_status") in RETRYABLE_STATUSES
+    if not retry and not is_folder_assignment_milestone(
         user_message_count
     ) and not missed_folder_assignment_milestone(
         assignment.get("last_user_message_count"), user_message_count
@@ -165,7 +181,7 @@ def can_auto_assign_folder(
     if source != "auto":
         return False
 
-    if get_evaluation_count(meta) >= MAX_AUTO_EVALUATIONS:
+    if get_successful_evaluation_count(meta) >= MAX_AUTO_EVALUATIONS:
         return False
 
     last_message_id = assignment.get("last_message_id")
@@ -349,6 +365,22 @@ def parse_folder_choice(text: Optional[str], candidates: list[dict]) -> Optional
     return None
 
 
+def is_explicit_no_folder(text: str) -> bool:
+    """A valid abstention consumes an evaluation; malformed/unknown choices do not."""
+    text = text.strip()
+    start, end = text.find("{"), text.rfind("}")
+    if start != -1 and end > start:
+        try:
+            data = json.loads(text[start:end + 1])
+        except (ValueError, TypeError):
+            return False
+        if not isinstance(data, dict) or "folder" not in data:
+            return False
+        answer = data["folder"]
+        return answer is None or (isinstance(answer, str) and answer.strip().casefold() in NULL_ANSWERS)
+    return bool(text) and text.strip("\"'`").strip().casefold() in NULL_ANSWERS
+
+
 ####################
 # Dependencies
 ####################
@@ -485,7 +517,8 @@ async def assign_chat_folder(
     require_external_task_model: bool = False,
 ) -> FolderAssignmentResult:
     """Evaluate one chat at one milestone. Never raises for model problems;
-    every failure path records the attempt and leaves the chat where it is."""
+    every failure path records the attempt and leaves the chat where it is.
+    Failed attempts do not consume the three valid-classification evaluations."""
     if not deps.enabled:
         return FolderAssignmentResult("disabled")
 
@@ -560,7 +593,8 @@ async def assign_chat_folder(
     text = parse_completion_text(res)
     choice = parse_folder_choice(text, candidates)
     if choice is None:
-        return record("no_match" if text else "empty", detail=text[:120])
+        status = "empty" if not text else ("no_match" if is_explicit_no_folder(text) else "invalid")
+        return record(status, detail=text[:120])
 
     if choice["id"] == current_folder_id:
         return record("unchanged", choice)

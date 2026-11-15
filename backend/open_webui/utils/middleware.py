@@ -29,7 +29,7 @@ from fastapi.concurrency import run_in_threadpool
 from starlette.responses import Response, StreamingResponse
 
 
-from open_webui.models.chats import Chats, can_auto_generate_chat_title
+from open_webui.models.chats import Chats, DISPATCHED_FROM_META_KEY, can_auto_generate_chat_title
 from open_webui.models.files import FileForm, Files
 from open_webui.utils.image_studio_record import record_chat_images_in_studio
 from open_webui.models.users import Users
@@ -47,6 +47,7 @@ from open_webui.routers.tasks import (
 from open_webui.utils.folder_assignment import (
     assign_chat_folder,
     build_default_deps,
+    can_auto_assign_folder,
 )
 from open_webui.routers.retrieval import (
     ProcessFileForm,
@@ -6058,6 +6059,7 @@ async def process_chat_payload(request, form_data, user, metadata, model, tasks=
 
 
 async def background_tasks_handler(request, user, metadata, tasks, event_emitter):
+    tasks = tasks or {}
     message_map = Chats.get_messages_by_chat_id(metadata["chat_id"])
     message = message_map.get(metadata["message_id"]) if message_map else None
 
@@ -6088,35 +6090,47 @@ async def background_tasks_handler(request, user, metadata, tasks, event_emitter
                 metadata["message_id"],
             )
 
-        async def apply_chat_title(title: str) -> Optional[str]:
+        async def apply_chat_title(title: str, *, generation_status: str = "generated") -> Optional[str]:
             """Persist an automatic title. Returns the title when it was
-            written. The sidebar refresh event (chat:title) is emitted later,
-            after the folder step, so a folder change is already in the
-            database when the client re-fetches the folder tree."""
+            written. Publish immediately; folder changes publish their own refresh."""
             updated = Chats.update_chat_title_by_id(
                 metadata["chat_id"],
                 title,
                 auto_generated=True,
                 last_user_message_count=user_message_count,
                 source_message_id=metadata["message_id"],
+                generation_status=generation_status,
             )
             if updated is None:
                 return None
+            try:
+                await event_emitter({"type": "chat:title", "data": title})
+            except Exception:
+                log.debug("chat title notification failed", exc_info=True)
             return title
 
         async def assign_chat_folder_step(current_title: Optional[str]) -> bool:
             # Sort the chat into one of the user's existing folders on the same
             # cadence as the title (user turn 1, 3, 6...). Runs after the title
-            # is persisted and before the sidebar refresh event. Manual titles
-            # do not block it; any failure just leaves the chat where it is.
-            if TASKS.TITLE_GENERATION not in tasks:
-                return False
-
+            # is persisted. Manual titles do not block it; any failure leaves
+            # the chat where it is.
             try:
                 if not getattr(
                     request.app.state.config, "ENABLE_FOLDER_AUTO_ASSIGNMENT", False
                 ):
                     return False
+
+                if TASKS.TITLE_GENERATION not in tasks:
+                    # The browser only asks for titles at milestones. An existing
+                    # automatic assignment may need a retry or a missed milestone
+                    # even when this reply has no title/tags/follow-up task at all.
+                    chat = Chats.get_chat_by_id_and_user_id(metadata["chat_id"], user.id)
+                    chat_meta = (chat.meta or {}) if chat else {}
+                    if (not chat or DISPATCHED_FROM_META_KEY in chat_meta
+                            or (chat_meta.get("folder_assignment") or {}).get("source") != "auto"
+                            or not can_auto_assign_folder(chat.folder_id, chat_meta,
+                                user_message_count, metadata["message_id"])):
+                        return False
 
                 async def call_model(payload: dict):
                     return await generate_folder_assignment(request, payload, user)
@@ -6183,7 +6197,7 @@ async def background_tasks_handler(request, user, metadata, tasks, event_emitter
 
             return title_string.strip(" \"'")
 
-        async def generate_or_fallback_chat_title() -> str:
+        async def generate_or_fallback_chat_title() -> tuple[str, str]:
             # Image-only / multi-model-discussion sessions can't dispatch text
             # completion to their primary model. We still try the configured
             # external task model (a text model) when available; the
@@ -6202,27 +6216,29 @@ async def background_tasks_handler(request, user, metadata, tasks, event_emitter
                 if require_external_task_model:
                     title_form_data["require_external_task_model"] = True
 
-                res = await generate_title(
-                    request,
-                    title_form_data,
-                    user,
+                from open_webui.utils.mode_chats import TITLE_GENERATION_TIMEOUT
+                res = await asyncio.wait_for(
+                    generate_title(request, title_form_data, user),
+                    timeout=TITLE_GENERATION_TIMEOUT,
                 )
                 title = parse_generated_chat_title(res)
             except Exception as e:
                 log.debug(f"Error generating chat title: {e}")
                 title = ""
 
-            return title or build_fallback_chat_title(messages)
+            return (title, "generated") if title else (build_fallback_chat_title(messages), "fallback")
 
-        if tasks:
+        if tasks or getattr(request.app.state.config, "ENABLE_FOLDER_AUTO_ASSIGNMENT", False):
             updated_title = None
             if TASKS.TITLE_GENERATION in tasks and may_refresh_chat_title():
-                if tasks[TASKS.TITLE_GENERATION]:
-                    title = await generate_or_fallback_chat_title()
-                    updated_title = await apply_chat_title(title)
+                if tasks[TASKS.TITLE_GENERATION] and getattr(
+                    request.app.state.config, "ENABLE_TITLE_GENERATION", True
+                ):
+                    title, status = await generate_or_fallback_chat_title()
+                    updated_title = await apply_chat_title(title, generation_status=status)
                 elif user_message_count == 1:
                     updated_title = await apply_chat_title(
-                        build_fallback_chat_title(messages)
+                        build_fallback_chat_title(messages), generation_status="disabled"
                     )
 
             folder_changed = await assign_chat_folder_step(
@@ -6231,15 +6247,9 @@ async def background_tasks_handler(request, user, metadata, tasks, event_emitter
                 else Chats.get_chat_title_by_id(metadata["chat_id"])
             )
 
-            # One sidebar refresh for both changes: on chat:title the client
-            # re-fetches the chat list and the folder tree, so the folder write
-            # above must already be committed.
-            if updated_title is not None or folder_changed:
-                event_title = (
-                    updated_title
-                    if updated_title is not None
-                    else Chats.get_chat_title_by_id(metadata["chat_id"])
-                )
+            # Re-fetch after a committed move, without holding up a ready title.
+            if folder_changed:
+                event_title = Chats.get_chat_title_by_id(metadata["chat_id"])
                 if event_title:
                     await event_emitter(
                         {

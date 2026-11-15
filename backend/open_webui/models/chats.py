@@ -64,7 +64,7 @@ def get_title_generation_metadata(meta: Optional[dict]) -> dict:
 
 def get_folder_assignment_metadata(meta: Optional[dict]) -> dict:
     """``chat.meta.folder_assignment``: ``{"source": "auto"|"manual", "evaluations": n,
-    "last_user_message_count": n, "last_message_id": str, "last_status": str,
+    "successful_evaluations": n, "last_user_message_count": n, "last_message_id": str, "last_status": str,
     "folder_id": str|None}``.
 
     ``manual`` is written by the sidebar move/remove endpoint and freezes the chat
@@ -102,7 +102,7 @@ def can_auto_generate_chat_title(
 
     last_message_id = title_generation.get("last_message_id")
     if message_id and isinstance(last_message_id, str):
-        if message_id == last_message_id:
+        if message_id == last_message_id and title_generation.get("last_status") != "fallback":
             return False
     else:
         last_user_message_count = title_generation.get("last_user_message_count")
@@ -718,6 +718,7 @@ class ChatTable:
         auto_generated: Optional[bool] = None,
         last_user_message_count: Optional[int] = None,
         source_message_id: Optional[str] = None,
+        generation_status: str = "generated",
     ) -> Optional[ChatModel]:
         try:
             with get_db() as db:
@@ -749,6 +750,13 @@ class ChatTable:
                     history = chat.get("history") or {}
                     if not is_message_on_current_branch(history, source_message_id):
                         return None
+                    previous = get_title_generation_metadata(chat_item.meta)
+                    previous_count = previous.get("last_user_message_count")
+                    if (isinstance(previous_count, int) and not isinstance(previous_count, bool)
+                            and last_user_message_count < previous_count
+                            and previous.get("last_message_id")
+                            and is_message_on_current_branch(history, previous["last_message_id"])):
+                        return None
 
                 chat["title"] = title
 
@@ -761,6 +769,7 @@ class ChatTable:
                     title_generation = dict(get_title_generation_metadata(meta))
                     title_generation["auto_generated"] = auto_generated
                     if auto_generated is True:
+                        title_generation["last_status"] = generation_status
                         title_generation["last_user_message_count"] = (
                             last_user_message_count
                         )
@@ -1890,8 +1899,8 @@ class ChatTable:
 
         Runs under a row lock and re-reads the marker, so a manual move that
         landed while the task model was thinking always wins. ``apply_folder``
-        False records the attempt (counts it) without touching ``folder_id``;
-        ``last_status`` says why (``empty``, ``timeout``...).
+        False records the attempt without touching ``folder_id``. Only valid
+        classifications spend the successful-evaluation budget; failures remain retryable.
         Returns None when nothing was written."""
         try:
             with get_db() as db:
@@ -1911,8 +1920,26 @@ class ChatTable:
                     # Placed before markers existed: treat as manual, never touch.
                     return None
 
+                from open_webui.utils.folder_assignment import (
+                    SUCCESSFUL_STATUSES, can_auto_assign_folder, get_successful_evaluation_count,
+                )
+                if last_user_message_count is not None and not can_auto_assign_folder(
+                    chat.folder_id, meta, last_user_message_count, last_message_id
+                ):
+                    return None
+                if last_message_id and not is_message_on_current_branch(
+                    (chat.chat or {}).get("history"), last_message_id
+                ):
+                    return None
+
+                successes = get_successful_evaluation_count(meta)
+                previous_evaluations = assignment.get("evaluations", 0)
+                if not isinstance(previous_evaluations, int) or isinstance(previous_evaluations, bool):
+                    previous_evaluations = 0
                 assignment["source"] = "auto"
-                assignment["evaluations"] = evaluations
+                # Increment under the lock, rather than writing a stale caller's counter.
+                assignment["evaluations"] = max(0, previous_evaluations) + 1
+                assignment["successful_evaluations"] = successes + int(last_status in SUCCESSFUL_STATUSES)
                 if last_user_message_count is not None:
                     assignment["last_user_message_count"] = last_user_message_count
                 if last_message_id:

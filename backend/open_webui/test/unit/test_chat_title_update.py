@@ -222,6 +222,7 @@ def test_automatic_title_update_persists_generation_metadata_without_activity_bu
         "title_generation": {
             "auto_generated": True,
             "last_user_message_count": 3,
+            "last_status": "generated",
         },
     }
     assert result.updated_at == 100
@@ -324,7 +325,20 @@ def test_automatic_title_refresh_tracks_branch_tip_instead_of_global_turn_count(
         "auto_generated": True,
         "last_user_message_count": 3,
         "last_message_id": "branch-assistant-3",
+        "last_status": "generated",
     }
+
+
+def test_late_ancestor_title_does_not_replace_a_newer_title_on_the_same_branch(monkeypatch):
+    table = chats_mod.ChatTable()
+    row = _fake_chat_row(title="较新标题", meta={"title_generation": {
+        "auto_generated": True, "last_user_message_count": 3, "last_message_id": "reply3"}})
+    row.chat["history"] = {"currentId": "reply3", "messages": {
+        "reply1": {"parentId": None}, "reply3": {"parentId": "reply1"}}}
+    _install_fake_db(monkeypatch, row)
+    assert table.update_chat_title_by_id("chat-1", "过期标题", auto_generated=True,
+        last_user_message_count=1, source_message_id="reply1") is None
+    assert row.title == "较新标题"
 
 
 def test_automatic_title_refresh_rejects_non_current_branch(monkeypatch):

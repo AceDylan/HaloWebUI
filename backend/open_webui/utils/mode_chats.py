@@ -8,6 +8,7 @@ import re
 from typing import Any, Optional
 
 log = logging.getLogger(__name__)
+TITLE_GENERATION_TIMEOUT = 30
 
 
 def title_from(res: Any) -> str:
@@ -49,12 +50,13 @@ async def auto_title_and_folder(
     from open_webui.models.chats import Chats, can_auto_generate_chat_title
     from open_webui.routers.tasks import generate_title
     from open_webui.utils.task import build_fallback_chat_title
+    from open_webui.utils.team_chats import emit_chat_event
 
     chat_id = chat.id
     config = request.app.state.config
     title = chat.title
     try:
-        may_title = getattr(config, "ENABLE_TITLE_GENERATION", True) and can_auto_generate_chat_title(
+        may_title = can_auto_generate_chat_title(
             chat.title,
             {"title_generation": Chats.get_chat_title_generation_metadata_by_id(chat_id)},
             user_message_count,
@@ -64,36 +66,47 @@ async def auto_title_and_folder(
         may_title = False
     if may_title:
         generated = ""
-        try:
-            generated = title_from(
-                await generate_title(request, {"model": model_id, "messages": messages, "chat_id": chat_id}, user)
-            )
-        except Exception as exc:
-            log.info("%s %s: title generation failed: %s", label, chat_id, exc)
-        generated = generated or build_fallback_chat_title(messages)
-        if generated and Chats.update_chat_title_by_id(
+        enabled = getattr(config, "ENABLE_TITLE_GENERATION", True)
+        if enabled:
+            try:
+                generated = title_from(await asyncio.wait_for(
+                    generate_title(request, {"model": model_id, "messages": messages, "chat_id": chat_id}, user),
+                    timeout=TITLE_GENERATION_TIMEOUT,
+                ))
+            except Exception as exc:
+                log.info("%s %s: title generation failed: %s", label, chat_id, exc)
+        status = "generated" if generated else ("fallback" if enabled else "disabled")
+        # With generation disabled only replace a default title, as in ordinary chats.
+        candidate = generated or (build_fallback_chat_title(messages) if enabled or chat.title in
+                                 ("New Chat", "新对话", "新聊天", "") else "")
+        if candidate and Chats.update_chat_title_by_id(
             chat_id,
-            generated,
+            candidate,
             auto_generated=True,
             last_user_message_count=user_message_count,
             source_message_id=message_id,
+            generation_status=status,
         ):
-            title = generated
+            title = candidate
+            # Publish the persisted title before spending the independent folder budget.
+            await emit_chat_event(user.id, chat_id, "chat:title", title)
 
     title = Chats.get_chat_title_by_id(chat_id) or title
     if not folder:
         return title, chat.folder_id
-    folder_id = await auto_folder(
-        request,
-        user,
-        chat,
-        messages=messages,
-        model_id=model_id,
-        message_id=message_id,
-        user_message_count=user_message_count,
-        title=title,
-        label=label,
-    )
+    folder_id = chat.folder_id
+    try:
+        folder_id = await auto_folder(
+            request, user, chat, messages=messages, model_id=model_id,
+            message_id=message_id, user_message_count=user_message_count,
+            title=title, label=label,
+        )
+    except Exception as exc:
+        log.warning("%s %s: folder assignment failed: %s", label, chat_id, exc)
+    # A manual rename or newer turn can finish while the folder model is running.
+    title = Chats.get_chat_title_by_id(chat_id) or title
+    if folder_id != chat.folder_id:
+        await emit_chat_event(user.id, chat_id, "chat:title", title)
     return title, folder_id
 
 
@@ -388,23 +401,13 @@ def schedule_chat_metadata(request, user, chat_id, *, messages, model_id, messag
         if chat is None:
             return
         try:
-            if chat.title in ("New Chat", "新对话", "新聊天", "") and not getattr(request.app.state.config, "ENABLE_TITLE_GENERATION", True):
-                from open_webui.utils.task import build_fallback_chat_title
-                Chats.update_chat_title_by_id(chat_id, build_fallback_chat_title(messages),
-                    auto_generated=True, last_user_message_count=user_message_count,
-                    source_message_id=message_id)
-                chat = Chats.get_chat_by_id_and_user_id(chat_id, user.id)
-                if chat is None:
-                    return
-            title, _ = await asyncio.wait_for(auto_title_and_folder(
+            title, _ = await auto_title_and_folder(
                 request, user, chat, messages=messages, model_id=model_id,
                 message_id=message_id, user_message_count=user_message_count,
-            ), timeout=60)
+            )
         except Exception:
-            from open_webui.utils.task import build_fallback_chat_title
-            log.info("workbench metadata unavailable for %s", chat_id)
-            Chats.update_chat_title_by_id(chat_id, build_fallback_chat_title(messages),
-                auto_generated=True, last_user_message_count=user_message_count, source_message_id=message_id)
+            # A later failure must never replace a title already persisted by this task.
+            log.exception("workbench metadata unavailable for %s", chat_id)
             title = Chats.get_chat_title_by_id(chat_id)
         if team_id:
             from open_webui.models.agent_teams import AgentTeams

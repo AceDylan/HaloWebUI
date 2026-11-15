@@ -567,9 +567,65 @@ def test_bad_completion_shape_counts_as_empty():
 def test_unknown_or_invented_folder_is_ignored():
     deps, state = make_deps(chat=_chat(), folders=_preset_folders(), model_answer='{"folder": "新建一个分组"}')
 
-    assert _run(deps).status == "no_match"
+    assert _run(deps).status == "invalid"
     assert state["chat"].folder_id is None
     assert state["inserted"] == []
+
+
+@pytest.mark.parametrize("status", ["timeout", "error", "empty", "invalid", "candidate_gone", "folder_full"])
+def test_failure_is_retryable_on_the_next_turn_even_after_the_old_budget(status):
+    meta = {"folder_assignment": {"source": "auto", "evaluations": 3,
+        "last_status": status, "last_user_message_count": 3, "last_message_id": "m3"}}
+    assert fa.can_auto_assign_folder(None, meta, 4, "m4")
+    assert not fa.can_auto_assign_folder(None, meta, 3, "m3")
+    assert not fa.can_auto_assign_folder(None, meta, 2, "m2")
+    meta["folder_assignment"]["source"] = "manual"
+    assert not fa.can_auto_assign_folder(None, meta, 4, "m4")
+
+
+def test_repeated_failures_do_not_spend_successful_evaluations(monkeypatch):
+    table = chats_mod.ChatTable()
+    row = _chat()
+    _install_db(monkeypatch, row)
+    deps, state = make_deps(chat=row, folders=_preset_folders(), model_error=RuntimeError("unavailable"))
+    deps.commit_assignment = table.update_chat_folder_assignment_by_id_and_user_id
+    for count in (1, 2, 3, 4):
+        assert _run(deps, count=count, message_id=f"m{count}").status == "error"
+    assert row.meta["folder_assignment"]["evaluations"] == 4
+    assert row.meta["folder_assignment"]["successful_evaluations"] == 0
+    async def recovered(payload):
+        return {"choices": [{"message": {"content": '{"folder":"图片生成"}'}}]}
+    deps.call_model = recovered
+    assert _run(deps, count=5, message_id="m5").changed
+    assert row.folder_id == "f-4"
+    assert row.meta["folder_assignment"]["successful_evaluations"] == 1
+
+
+@pytest.mark.parametrize("stale_status", ["assigned", "timeout"])
+def test_late_folder_result_cannot_replace_a_newer_evaluation(monkeypatch, stale_status):
+    table = chats_mod.ChatTable()
+    row = _chat(folder_id="f-2", meta={"folder_assignment": {"source": "auto",
+        "evaluations": 2, "last_status": "assigned", "last_user_message_count": 6,
+        "last_message_id": "m6", "folder_id": "f-2"}})
+    db = _install_db(monkeypatch, row)
+    before = dict(row.meta["folder_assignment"])
+    result = table.update_chat_folder_assignment_by_id_and_user_id("chat-1", "user-1", "f-1",
+        apply_folder=stale_status == "assigned", evaluations=1, last_user_message_count=3,
+        last_message_id="m3", last_status=stale_status)
+    assert result is None and db.commits == 0
+    assert row.folder_id == "f-2" and row.meta["folder_assignment"] == before
+
+
+def test_folder_result_from_a_previous_branch_is_ignored(monkeypatch):
+    table = chats_mod.ChatTable()
+    row = _chat(chat={"history": {"currentId": "new-reply", "messages": {
+        "question": {"parentId": None}, "old-reply": {"parentId": "question"},
+        "new-reply": {"parentId": "question"}}}})
+    db = _install_db(monkeypatch, row)
+    result = table.update_chat_folder_assignment_by_id_and_user_id("chat-1", "user-1", "f-1",
+        apply_folder=True, evaluations=1, last_user_message_count=1,
+        last_message_id="old-reply", last_status="assigned")
+    assert result is None and row.folder_id is None and db.commits == 0
 
 
 def test_candidate_deleted_while_model_was_thinking_is_not_applied():

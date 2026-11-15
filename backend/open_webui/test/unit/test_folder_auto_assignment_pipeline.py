@@ -14,6 +14,7 @@ import pathlib
 import sys
 from types import SimpleNamespace
 
+import pytest
 from fastapi.responses import JSONResponse
 
 
@@ -214,6 +215,7 @@ def _wire(monkeypatch, *, title_meta, current_title, title_answer, folder_result
     order = []
     events = []
     folder_calls = []
+    persisted_title = [current_title]
 
     async def emitter(event):
         order.append(("emit", event["type"]))
@@ -224,6 +226,7 @@ def _wire(monkeypatch, *, title_meta, current_title, title_answer, folder_result
 
     def fake_update_title(_chat_id, title, **_kwargs):
         order.append(("title_write", title))
+        persisted_title[0] = title
         return SimpleNamespace(title=title)
 
     async def fake_assign(**kwargs):
@@ -240,7 +243,7 @@ def _wire(monkeypatch, *, title_meta, current_title, title_answer, folder_result
     monkeypatch.setattr(middleware, "generate_folder_assignment", fake_generate_folder_assignment)
     monkeypatch.setattr(middleware, "assign_chat_folder", fake_assign)
     monkeypatch.setattr(middleware.Chats, "get_messages_by_chat_id", lambda _c: _messages())
-    monkeypatch.setattr(middleware.Chats, "get_chat_title_by_id", lambda _c: current_title)
+    monkeypatch.setattr(middleware.Chats, "get_chat_title_by_id", lambda _c: persisted_title[0])
     monkeypatch.setattr(middleware.Chats, "get_chat_title_generation_metadata_by_id", lambda _c: title_meta)
     monkeypatch.setattr(middleware.Chats, "update_chat_title_by_id", fake_update_title)
     return order, events, folder_calls, emitter
@@ -252,7 +255,7 @@ def _run_handler(emitter, *, tasks, enabled=True, metadata_extra=None):
     asyncio.run(middleware.background_tasks_handler(_request(enabled), user, metadata, tasks, emitter))
 
 
-def test_title_is_persisted_then_folder_then_single_refresh_event(monkeypatch):
+def test_title_is_published_before_folder_and_move_refreshes_again(monkeypatch):
     order, events, folder_calls, emitter = _wire(
         monkeypatch,
         title_meta={},
@@ -265,10 +268,11 @@ def test_title_is_persisted_then_folder_then_single_refresh_event(monkeypatch):
 
     assert order == [
         ("title_write", "Hermes 网关故障"),
+        ("emit", "chat:title"),
         ("folder_step", "Hermes 网关故障"),
         ("emit", "chat:title"),
     ]
-    assert events == [{"type": "chat:title", "data": "Hermes 网关故障"}]
+    assert events == [{"type": "chat:title", "data": "Hermes 网关故障"}] * 2
     call = folder_calls[0]
     assert call["chat_id"] == "chat-1" and call["user_id"] == "user-1"
     assert call["model_id"] == "gpt-5" and call["user_message_count"] == 1
@@ -319,7 +323,7 @@ def test_folder_step_failure_never_blocks_the_title_event(monkeypatch):
 
     _run_handler(emitter, tasks={TASKS.TITLE_GENERATION: True})
 
-    assert order == [("title_write", "新标题"), ("folder_step", "新标题"), ("emit", "chat:title")]
+    assert order == [("title_write", "新标题"), ("emit", "chat:title"), ("folder_step", "新标题")]
     assert events == [{"type": "chat:title", "data": "新标题"}]
 
 
@@ -358,5 +362,70 @@ def test_image_sessions_run_folder_step_with_external_flag_before_returning(monk
     )
 
     assert folder_calls[0]["require_external_task_model"] is True
-    assert order == [("title_write", "橘猫写真"), ("folder_step", "橘猫写真"), ("emit", "chat:title")]
-    assert [event["type"] for event in events] == ["chat:title"]
+    assert order == [("title_write", "橘猫写真"), ("emit", "chat:title"), ("folder_step", "橘猫写真"), ("emit", "chat:title")]
+    assert [event["type"] for event in events] == ["chat:title", "chat:title"]
+
+
+def test_ordinary_title_timeout_does_not_starve_folder_assignment(monkeypatch):
+    order, events, calls, emitter = _wire(monkeypatch, title_meta={}, current_title="New Chat",
+        title_answer="unused", folder_result=fa.FolderAssignmentResult("assigned", changed=True))
+    real_wait_for = asyncio.wait_for
+
+    async def bounded(awaitable, timeout):
+        return await real_wait_for(awaitable, min(timeout, 0.01))
+
+    async def slow(*args):
+        await asyncio.sleep(1)
+
+    monkeypatch.setattr(asyncio, "wait_for", bounded)
+    monkeypatch.setattr(middleware, "generate_title", slow)
+    _run_handler(emitter, tasks={TASKS.TITLE_GENERATION: True})
+    assert len(calls) == 1
+    assert events[0] == {"type": "chat:title", "data": "hermes gateway"}
+    assert order[1] == ("emit", "chat:title")
+
+
+def test_ordinary_ready_title_is_published_while_folder_is_still_waiting(monkeypatch):
+    order, events, calls, emitter = _wire(monkeypatch, title_meta={}, current_title="New Chat",
+        title_answer="成功标题", folder_result=None)
+    visible = []
+
+    async def slow_folder(**kwargs):
+        visible.append(list(events))
+        await asyncio.sleep(0.01)
+        return fa.FolderAssignmentResult("timeout")
+
+    monkeypatch.setattr(middleware, "assign_chat_folder", slow_folder)
+    _run_handler(emitter, tasks={TASKS.TITLE_GENERATION: True})
+    assert visible == [[{"type": "chat:title", "data": "成功标题"}]]
+    assert events == visible[0]
+
+
+@pytest.mark.parametrize("tasks", [None, {}, {TASKS.FOLLOW_UP_GENERATION: False}])
+def test_recorded_folder_failure_retries_without_a_title_task(monkeypatch, tasks):
+    _, _, calls, emitter = _wire(monkeypatch, title_meta={"auto_generated": False},
+        current_title="手工标题", title_answer="unused",
+        folder_result=fa.FolderAssignmentResult("assigned", changed=True))
+    messages = _messages()
+    messages.update({
+        "user-2": {"id": "user-2", "role": "user", "content": "继续", "parentId": "assistant-1"},
+        "assistant-2": {"id": "assistant-2", "role": "assistant", "content": "好了", "parentId": "user-2", "model": "gpt-5"},
+    })
+    chat = SimpleNamespace(folder_id=None, meta={"folder_assignment": {"source": "auto",
+        "evaluations": 1, "last_status": "timeout", "last_user_message_count": 1}})
+    monkeypatch.setattr(middleware.Chats, "get_messages_by_chat_id", lambda cid: messages)
+    monkeypatch.setattr(middleware.Chats, "get_chat_by_id_and_user_id", lambda cid, uid: chat)
+    _run_handler(emitter, tasks=tasks, metadata_extra={"message_id": "assistant-2"})
+    assert len(calls) == 1 and calls[0]["user_message_count"] == 2
+    assert calls[0]["title"] == "手工标题"
+
+
+def test_title_disabled_still_allows_folder_assignment(monkeypatch):
+    _, events, calls, emitter = _wire(monkeypatch, title_meta={}, current_title="New Chat",
+        title_answer="不应该生成", folder_result=fa.FolderAssignmentResult("timeout"))
+    request = _request()
+    request.app.state.config.ENABLE_TITLE_GENERATION = False
+    asyncio.run(middleware.background_tasks_handler(request, SimpleNamespace(id="user-1"),
+        {"chat_id": "chat-1", "message_id": "assistant-1"}, {TASKS.TITLE_GENERATION: True}, emitter))
+    assert len(calls) == 1 and calls[0]["title"] == "hermes gateway"
+    assert events == [{"type": "chat:title", "data": "hermes gateway"}]

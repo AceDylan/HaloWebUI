@@ -384,7 +384,9 @@ async def _report_done(request: Request, user, chat_id: str, ask: dict, title: s
     if ask.get("origin"):
         # 派发方式「讨论」: the conclusion goes back into the chat the question was asked in
         from open_webui.utils import mode_dispatch
+        from open_webui.utils.mode_chats import schedule_origin_metadata
 
+        schedule_origin_metadata(request, user, chat_id, ask)
         mode_dispatch.report_back_later(request, "discuss", chat_id, ask)
         return
     # the app's "reply ready" toast, for when the room is not on screen

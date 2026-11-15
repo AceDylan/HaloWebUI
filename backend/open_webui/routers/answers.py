@@ -219,7 +219,9 @@ async def _report_done(request: Request, user, chat_id: str, run: dict, title: s
     if run.get("origin"):
         # 派发方式「精答」: the answer goes back into the chat it was asked in
         from open_webui.utils import mode_dispatch
+        from open_webui.utils.mode_chats import schedule_origin_metadata
 
+        schedule_origin_metadata(request, user, chat_id, run)
         mode_dispatch.report_back_later(request, "answer", chat_id, run)
         return
     answer = (run.get("answer") or {}).get("content") or ""

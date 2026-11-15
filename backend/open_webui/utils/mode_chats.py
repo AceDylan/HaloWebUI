@@ -7,8 +7,9 @@ import logging
 import re
 from typing import Any, Optional
 
+from open_webui.env import TITLE_GENERATION_TIMEOUT
+
 log = logging.getLogger(__name__)
-TITLE_GENERATION_TIMEOUT = 30
 
 
 def title_from(res: Any) -> str:
@@ -42,6 +43,7 @@ async def auto_title_and_folder(
     user_message_count: int,
     label: str = "chat",
     folder: bool = True,
+    retry_failed_folder: bool = False,
 ) -> tuple[str, Optional[str]]:
     """Title and folder on the same cadence as ordinary chats; returns (title, folder_id) as they
     are afterwards. Never raises: a failed title falls back to the question, a failed folder
@@ -100,6 +102,7 @@ async def auto_title_and_folder(
             request, user, chat, messages=messages, model_id=model_id,
             message_id=message_id, user_message_count=user_message_count,
             title=title, label=label,
+            retry_failed=retry_failed_folder,
         )
     except Exception as exc:
         log.warning("%s %s: folder assignment failed: %s", label, chat_id, exc)
@@ -121,6 +124,7 @@ async def auto_folder(
     user_message_count: int,
     title: Optional[str],
     label: str = "chat",
+    retry_failed: bool = False,
 ) -> Optional[str]:
     """The folder an ordinary chat would be sorted into at this point (the same milestones and
     rules); returns the chat's folder id afterwards. Never raises: a failed assignment leaves the
@@ -146,6 +150,7 @@ async def auto_folder(
             message_id=message_id,
             title=title,
             deps=build_default_deps(call_model),
+            retry_failed=retry_failed,
         )
         log.info("%s %s folder assignment: %s %r", label, chat.id, result.status, result.folder_name)
         if result.changed:
@@ -386,10 +391,12 @@ async def native_search_models(request, user, model_ids) -> set:
 
 
 _metadata_tasks: set = set()
+_metadata_queues: dict = {}
 
 
 def schedule_chat_metadata(request, user, chat_id, *, messages, model_id, message_id,
-                           user_message_count=1, team_id=None):
+                           user_message_count=1, team_id=None, generated_title="",
+                           retry_failed_folder=False):
     """Name and group non-model turns using the ordinary smart-generation settings.
 
     Runs independently of dispatch/completion, with manual-title and branch guards.
@@ -401,9 +408,17 @@ def schedule_chat_metadata(request, user, chat_id, *, messages, model_id, messag
         if chat is None:
             return
         try:
+            if generated_title and getattr(request.app.state.config, "ENABLE_TITLE_GENERATION", True):
+                if Chats.update_chat_title_by_id(chat_id, generated_title, auto_generated=True,
+                        last_user_message_count=user_message_count, source_message_id=message_id):
+                    await emit_chat_event(user.id, chat_id, "chat:title", generated_title)
+                    chat = Chats.get_chat_by_id_and_user_id(chat_id, user.id)
+                    if chat is None:
+                        return
             title, _ = await auto_title_and_folder(
                 request, user, chat, messages=messages, model_id=model_id,
                 message_id=message_id, user_message_count=user_message_count,
+                retry_failed_folder=retry_failed_folder,
             )
         except Exception:
             # A later failure must never replace a title already persisted by this task.
@@ -415,6 +430,57 @@ def schedule_chat_metadata(request, user, chat_id, *, messages, model_id, messag
             if team and team.title == chat.title and title and title != chat.title:
                 AgentTeams.update(team_id, user.id, title=title)
         await emit_chat_event(user.id, chat_id, "chat:title", title)
-    task = asyncio.create_task(run())
+    # A completion can arrive while dispatch metadata is still running. Recheck
+    # the persisted state after that job instead of launching duplicate model calls.
+    queue = _metadata_queues.setdefault(chat_id, {"lock": asyncio.Lock(), "pending": 0})
+    queue["pending"] += 1
+
+    async def serialized():
+        async with queue["lock"]:
+            await run()
+
+    task = asyncio.create_task(serialized())
     _metadata_tasks.add(task)
-    task.add_done_callback(_metadata_tasks.discard)
+
+    def finished(task):
+        _metadata_tasks.discard(task)
+        queue["pending"] -= 1
+        if not queue["pending"]:
+            _metadata_queues.pop(chat_id, None)
+
+    task.add_done_callback(finished)
+
+
+def schedule_origin_metadata(request, user, child_chat_id: str, run: dict) -> None:
+    """One completion recovery for the real history chat, anchored to its dispatch branch."""
+    from open_webui.models.chats import Chats, DISPATCHED_FROM_META_KEY, is_message_on_current_branch
+    from open_webui.utils.misc import get_message_list
+
+    try:
+        origin = run.get("origin") or {}
+        origin_id, message_id = origin.get("chatId"), origin.get("messageId")
+        child = Chats.get_chat_by_id_and_user_id(child_chat_id, user.id)
+        chat = Chats.get_chat_by_id_and_user_id(origin_id, user.id) if origin_id else None
+        if not child or not chat or (child.meta or {}).get(DISPATCHED_FROM_META_KEY) != origin_id:
+            return
+        history = (chat.chat or {}).get("history") or {}
+        if not message_id or not is_message_on_current_branch(history, message_id):
+            return
+        branch = get_message_list(history.get("messages") or {}, message_id) or []
+        if not branch:
+            return
+        count = sum(m.get("role") == "user" and not m.get("hermes_notice") for m in branch)
+        title_meta = (child.meta or {}).get("title_generation") or {}
+        generated_title = child.title if (
+            title_meta.get("auto_generated") is True and title_meta.get("last_status") == "generated"
+            and title_meta.get("last_message_id") == run.get("id")
+        ) else ""
+        answer = (run.get("answer") or run.get("conclusion") or {}).get("content") or ""
+        schedule_chat_metadata(request, user, origin_id,
+            messages=[{"role": "user", "content": run.get("question") or ""},
+                      {"role": "assistant", "content": str(answer)[:3000]}],
+            model_id=((chat.chat or {}).get("models") or ["hermes-agent"])[0],
+            message_id=message_id, user_message_count=max(1, count),
+            generated_title=generated_title, retry_failed_folder=True)
+    except Exception:
+        log.exception("could not schedule origin metadata for %s", child_chat_id)

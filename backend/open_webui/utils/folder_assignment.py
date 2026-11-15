@@ -45,7 +45,7 @@ from open_webui.env import (
     FOLDER_MAX_ITEM_COUNT,
     SRC_LOG_LEVELS,
 )
-from open_webui.models.chats import Chats, get_folder_assignment_metadata
+from open_webui.models.chats import Chats, get_folder_assignment_metadata, is_message_on_current_branch
 
 log = logging.getLogger(__name__)
 log.setLevel(SRC_LOG_LEVELS["MAIN"])
@@ -157,8 +157,13 @@ def can_auto_assign_folder(
     meta: Optional[dict],
     user_message_count: Any,
     message_id: Optional[str] = None,
+    *,
+    retry_failed: bool = False,
 ) -> bool:
-    """Return whether the background task may evaluate this chat right now."""
+    """Allow milestones, new-turn/branch retries, or one explicit completion recovery.
+
+    Ordinary duplicate callbacks still skip the same message after a failure.
+    """
     if isinstance(user_message_count, bool) or not isinstance(user_message_count, int) or user_message_count < 1:
         return False
     assignment = get_folder_assignment_metadata(meta)
@@ -185,16 +190,18 @@ def can_auto_assign_folder(
         return False
 
     last_message_id = assignment.get("last_message_id")
-    if message_id and isinstance(last_message_id, str) and message_id == last_message_id:
+    same_message = bool(message_id and message_id == last_message_id)
+    if same_message and not (retry and retry_failed):
         return False
 
     last_user_message_count = assignment.get("last_user_message_count")
-    if (
-        isinstance(last_user_message_count, int)
-        and not isinstance(last_user_message_count, bool)
-        and user_message_count <= last_user_message_count
-    ):
-        return False
+    if isinstance(last_user_message_count, int) and not isinstance(last_user_message_count, bool):
+        if user_message_count < last_user_message_count:
+            return False
+        if user_message_count == last_user_message_count:
+            regenerated = bool(message_id and last_message_id and not same_message)
+            if not retry or not (retry_failed or regenerated):
+                return False
 
     return True
 
@@ -515,6 +522,7 @@ async def assign_chat_folder(
     title: Optional[str],
     deps: FolderAssignmentDeps,
     require_external_task_model: bool = False,
+    retry_failed: bool = False,
 ) -> FolderAssignmentResult:
     """Evaluate one chat at one milestone. Never raises for model problems;
     every failure path records the attempt and leaves the chat where it is.
@@ -528,7 +536,12 @@ async def assign_chat_folder(
 
     meta = _get(chat, "meta")
     current_folder_id = _get(chat, "folder_id")
-    if not can_auto_assign_folder(current_folder_id, meta, user_message_count, message_id):
+    if not can_auto_assign_folder(current_folder_id, meta, user_message_count, message_id,
+                                  retry_failed=retry_failed):
+        return FolderAssignmentResult("ineligible")
+    if message_id and not is_message_on_current_branch(
+        (_get(chat, "chat") or {}).get("history"), message_id
+    ):
         return FolderAssignmentResult("ineligible")
 
     presets_created = 0
@@ -551,6 +564,8 @@ async def assign_chat_folder(
             last_user_message_count=user_message_count,
             last_message_id=message_id,
             last_status=status,
+            **({"retry_failed": True, "expected_evaluations": get_evaluation_count(meta)}
+               if retry_failed else {}),
         )
         if updated is None:
             return FolderAssignmentResult(

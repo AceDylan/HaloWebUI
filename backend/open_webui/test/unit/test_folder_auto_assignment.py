@@ -628,6 +628,29 @@ def test_folder_result_from_a_previous_branch_is_ignored(monkeypatch):
     assert result is None and row.folder_id is None and db.commits == 0
 
 
+def test_failed_regeneration_may_retry_at_the_same_turn_without_repeating_the_old_message():
+    meta = {"folder_assignment": {"source": "auto", "evaluations": 1,
+        "last_status": "timeout", "last_user_message_count": 1, "last_message_id": "old"}}
+    assert fa.can_auto_assign_folder(None, meta, 1, "new")
+    assert not fa.can_auto_assign_folder(None, meta, 1, "old")
+    assert fa.can_auto_assign_folder(None, meta, 1, "old", retry_failed=True)
+    meta["folder_assignment"]["last_status"] = "assigned"
+    assert not fa.can_auto_assign_folder(None, meta, 1, "old", retry_failed=True)
+
+
+@pytest.mark.parametrize("new_status", ["assigned", "timeout"])
+def test_late_same_turn_recovery_cannot_overwrite_another_attempt(monkeypatch, new_status):
+    table = chats_mod.ChatTable()
+    row = _chat(meta={"folder_assignment": {"source": "auto", "evaluations": 2,
+        "last_status": new_status, "last_user_message_count": 1, "last_message_id": "reply"}})
+    db = _install_db(monkeypatch, row)
+    before = dict(row.meta["folder_assignment"])
+    assert table.update_chat_folder_assignment_by_id_and_user_id("chat-1", "user-1", None,
+        apply_folder=False, evaluations=2, last_user_message_count=1, last_message_id="reply",
+        last_status="error", retry_failed=True, expected_evaluations=1) is None
+    assert row.meta["folder_assignment"] == before and db.commits == 0
+
+
 def test_candidate_deleted_while_model_was_thinking_is_not_applied():
     deps, state = make_deps(
         chat=_chat(),

@@ -523,11 +523,11 @@ AIOHTTP_CLIENT_SESSION_TOOL_SERVER_SSL = os.environ.get(
 # Maximum number of chats allowed per folder. 0 = unlimited.
 FOLDER_MAX_ITEM_COUNT = int(os.environ.get("FOLDER_MAX_ITEM_COUNT", "0"))
 
-# Upper bound (seconds) for the background task-model call that sorts a chat
-# into a folder. The call runs after the reply and before the sidebar refresh
-# event, so it must never hang the title update.
+# Independent task budgets. Gateway archives show valid metadata responses
+# taking 33-70 seconds; a 30-second client deadline discards those responses.
+TITLE_GENERATION_TIMEOUT = float(os.environ.get("TITLE_GENERATION_TIMEOUT", "90"))
 FOLDER_AUTO_ASSIGNMENT_TIMEOUT = float(
-    os.environ.get("FOLDER_AUTO_ASSIGNMENT_TIMEOUT", "30")
+    os.environ.get("FOLDER_AUTO_ASSIGNMENT_TIMEOUT", "90")
 )
 
 ####################################

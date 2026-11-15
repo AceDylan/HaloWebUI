@@ -1894,6 +1894,8 @@ class ChatTable:
         last_user_message_count: Optional[int] = None,
         last_message_id: Optional[str] = None,
         last_status: Optional[str] = None,
+        retry_failed: bool = False,
+        expected_evaluations: Optional[int] = None,
     ) -> Optional[ChatModel]:
         """Persist one automatic folder evaluation.
 
@@ -1901,6 +1903,8 @@ class ChatTable:
         landed while the task model was thinking always wins. ``apply_folder``
         False records the attempt without touching ``folder_id``. Only valid
         classifications spend the successful-evaluation budget; failures remain retryable.
+        Completion recovery may retry the same failed message, but must still
+        match the attempt counter it read before calling the model.
         Returns None when nothing was written."""
         try:
             with get_db() as db:
@@ -1921,10 +1925,14 @@ class ChatTable:
                     return None
 
                 from open_webui.utils.folder_assignment import (
-                    SUCCESSFUL_STATUSES, can_auto_assign_folder, get_successful_evaluation_count,
+                    SUCCESSFUL_STATUSES, can_auto_assign_folder, get_evaluation_count,
+                    get_successful_evaluation_count,
                 )
+                if expected_evaluations is not None and get_evaluation_count(meta) != expected_evaluations:
+                    return None
                 if last_user_message_count is not None and not can_auto_assign_folder(
-                    chat.folder_id, meta, last_user_message_count, last_message_id
+                    chat.folder_id, meta, last_user_message_count, last_message_id,
+                    retry_failed=retry_failed,
                 ):
                     return None
                 if last_message_id and not is_message_on_current_branch(

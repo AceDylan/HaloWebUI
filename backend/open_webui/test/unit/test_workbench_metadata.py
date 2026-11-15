@@ -214,3 +214,138 @@ def test_manual_rename_while_grouping_is_the_final_announced_title(env, monkeypa
     refresh(request, user, chat)
     assert chats.Chats.get_chat_title_by_id(chat.id) == "手动标题"
     assert events[-1] == (user.id, chat.id, "chat:title", "手动标题")
+
+
+@pytest.fixture
+def folder_env(env, monkeypatch):
+    from open_webui.utils import folder_assignment as fa
+    request, user, events, calls = env
+    request.app.state.config.ENABLE_FOLDER_AUTO_ASSIGNMENT = True
+    folder = SimpleNamespace(id="owned-folder", name="编程", parent_id=None, meta={}, created_at=1)
+    folder_calls = []
+
+    def deps(call_model):
+        return fa.FolderAssignmentDeps(
+            call_model=call_model, get_chat=chats.Chats.get_chat_by_id_and_user_id,
+            get_folders=lambda uid: [folder], get_folder=lambda fid, uid: folder,
+            insert_folder=lambda *args: None, count_folder_chats=lambda *args: 0,
+            commit_assignment=chats.Chats.update_chat_folder_assignment_by_id_and_user_id,
+            get_user_info=lambda uid: {fa.USER_INFO_KEY: {"presets_initialized_at": 1}},
+            patch_user_info=lambda *args: None,
+        )
+
+    async def generate(request, form, user):
+        folder_calls.append(form)
+        return {"choices": [{"message": {"content": '{"folder":"编程"}'}}]}
+
+    monkeypatch.setattr(fa, "build_default_deps", deps)
+    monkeypatch.setattr(tasks, "generate_folder_assignment", generate)
+    return request, user, events, calls, folder_calls
+
+
+def test_observed_slow_title_and_folder_responses_finish_with_independent_budgets(folder_env, monkeypatch):
+    request, user, events, _, _ = folder_env
+    chat = make_chat(user)
+    real_wait_for = asyncio.wait_for
+
+    async def scaled(awaitable, timeout):
+        return await real_wait_for(awaitable, timeout / 1000)
+
+    async def title(*args):
+        await asyncio.sleep(0.064)
+        return {"choices": [{"message": {"content": '{"title":"慢响应标题"}'}}]}
+
+    async def folder(*args):
+        assert (user.id, chat.id, "chat:title", "慢响应标题") in events
+        await asyncio.sleep(0.070)
+        return {"choices": [{"message": {"content": '{"folder":"编程"}'}}]}
+
+    monkeypatch.setattr(asyncio, "wait_for", scaled)
+    monkeypatch.setattr(tasks, "generate_title", title)
+    monkeypatch.setattr(tasks, "generate_folder_assignment", folder)
+    refresh(request, user, chat)
+    stored = chats.Chats.get_chat_by_id_and_user_id(chat.id, user.id)
+    assert stored.title == "慢响应标题" and stored.folder_id == "owned-folder"
+
+
+@pytest.mark.parametrize("kind", ["answer", "discuss"])
+@pytest.mark.parametrize("protection", [None, "manual", "branch", "disabled", "other_user"])
+def test_completion_recovers_original_metadata_using_its_generated_child_title(
+    folder_env, monkeypatch, kind, protection
+):
+    from open_webui.routers import answers, discussions
+    from open_webui.utils import mode_dispatch
+    request, user, _, calls, folder_calls = folder_env
+    original = make_chat(user)
+    chats.Chats.update_chat_title_by_id(original.id, "比较数据库", auto_generated=True,
+        last_user_message_count=1, source_message_id="reply", generation_status="fallback")
+    chats.Chats.update_chat_folder_assignment_by_id_and_user_id(original.id, user.id, None,
+        apply_folder=False, evaluations=1, last_user_message_count=1,
+        last_message_id="reply", last_status="timeout")
+    child_user = SimpleNamespace(id="another-user") if protection == "other_user" else user
+    child = make_chat(child_user)
+    chats.Chats.update_chat_title_by_id(child.id, "子任务生成的主题", auto_generated=True,
+        last_user_message_count=1, source_message_id="reply")
+    chats.Chats.set_chat_meta_value_by_id(child.id, chats.DISPATCHED_FROM_META_KEY, original.id)
+    if protection == "manual":
+        chats.Chats.update_chat_title_by_id(original.id, "手动标题", auto_generated=False)
+        chats.Chats.update_chat_folder_id_by_id_and_user_id(original.id, user.id, None)
+    elif protection == "branch":
+        data = chats.Chats.get_chat_by_id(original.id).chat
+        data["history"]["messages"]["new-reply"] = {"id": "new-reply", "role": "assistant", "parentId": "question"}
+        data["history"]["currentId"] = "new-reply"
+        chats.Chats.update_chat_by_id(original.id, data, update_title=False)
+    elif protection == "disabled":
+        request.app.state.config.ENABLE_TITLE_GENERATION = False
+        request.app.state.config.ENABLE_FOLDER_AUTO_ASSIGNMENT = False
+    forwarded = []
+    monkeypatch.setattr(mode_dispatch, "report_back_later", lambda *args: forwarded.append(args))
+    run = {"id": "reply", "question": "比较数据库", "origin": {"chatId": original.id, "messageId": "reply"},
+           "planner": {"model": "gpt-chat"}, "moderator": {"model": "gpt-chat"},
+           "answer": {"content": "比较结论"}, "conclusion": {"content": "比较结论"}}
+
+    async def finish():
+        api = answers if kind == "answer" else discussions
+        await api._report_done(request, user, child.id, run, "子任务生成的主题")
+        await asyncio.gather(*list(mode_chats._metadata_tasks))
+
+    asyncio.run(finish())
+    stored = chats.Chats.get_chat_by_id(original.id)
+    assert len(forwarded) == 1
+    assert not calls  # The generated child title is reused, without another title-model call.
+    if protection is None:
+        assert stored.title == "子任务生成的主题" and stored.folder_id == "owned-folder"
+        assert stored.meta["folder_assignment"]["successful_evaluations"] == 1
+        assert len(folder_calls) == 1
+    else:
+        assert stored.title == ("手动标题" if protection == "manual" else "比较数据库")
+        assert stored.folder_id is None and not folder_calls
+    assert chats.Chats.get_chat_by_id(child.id).meta[chats.DISPATCHED_FROM_META_KEY] == original.id
+
+
+def test_completion_waits_for_pending_dispatch_metadata_instead_of_calling_the_model_twice(folder_env, monkeypatch):
+    request, user, _, _, _ = folder_env
+    chat = make_chat(user)
+    calls = []
+
+    async def scenario():
+        started, release = asyncio.Event(), asyncio.Event()
+
+        async def folder(*args):
+            calls.append(True)
+            started.set()
+            await release.wait()
+            return {"choices": [{"message": {"content": '{"folder":"编程"}'}}]}
+
+        monkeypatch.setattr(tasks, "generate_folder_assignment", folder)
+        kwargs = dict(messages=[{"role": "user", "content": "比较数据库"}],
+                      model_id="gpt-chat", message_id="reply")
+        mode_chats.schedule_chat_metadata(request, user, chat.id, **kwargs)
+        await started.wait()
+        mode_chats.schedule_chat_metadata(request, user, chat.id, **kwargs, retry_failed_folder=True)
+        release.set()
+        await asyncio.gather(*list(mode_chats._metadata_tasks))
+
+    asyncio.run(scenario())
+    assert len(calls) == 1
+    assert chats.Chats.get_chat_by_id(chat.id).folder_id == "owned-folder"

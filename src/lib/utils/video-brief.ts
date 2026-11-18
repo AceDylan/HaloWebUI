@@ -101,6 +101,13 @@ export const MV_THEMES: { key: MvTheme; label: string; sub: string }[] = [
 	{ key: 'pop', label: '流行', sub: '明快、多彩' },
 	{ key: 'any', label: '随机', sub: '交给它挑' }
 ];
+/** What an MV shows: animated pictures that follow the lyrics with the lyrics animated on top (the
+ * default, the user's wish 2026-11-18: Remotion), or the lyrics alone as a text PV (JIZURA, fast). */
+export type MvVisual = 'animated' | 'lyrics';
+export const MV_VISUALS: { key: MvVisual; label: string; sub: string }[] = [
+	{ key: 'animated', label: '歌词 + 动画', sub: '跟着歌词意境的动画画面，歌词动效叠在上面' },
+	{ key: 'lyrics', label: '只有歌词动效', sub: '文字 PV（JIZURA），出片快' }
+];
 /** Lyrics pasted for an MV (a whole song's lines, LRC times included). */
 export const MV_LYRICS_MAX = 4000;
 
@@ -174,6 +181,7 @@ export type VideoBriefOptions = {
 	/** 普通视频 (default) or MP3 做 MV. */
 	kind?: VideoKind;
 	mvTheme?: MvTheme;
+	mvVisual?: MvVisual;
 	/** MP3 做 MV: the lyrics the user pasted ('' = none: they are transcribed). */
 	lyrics?: string;
 };
@@ -199,7 +207,8 @@ export const DEFAULT_VIDEO_SETTINGS: VideoSettings = {
 	musicFit: 'full',
 	place: 'pc',
 	kind: 'normal',
-	mvTheme: 'lyricpv'
+	mvTheme: 'lyricpv',
+	mvVisual: 'animated'
 };
 
 const pick = <T extends string>(value: unknown, allowed: readonly T[], fallback: T): T =>
@@ -254,6 +263,11 @@ export const normalizeVideoSettings = (value: unknown): VideoSettings => {
 			raw.mvTheme,
 			MV_THEMES.map((t) => t.key),
 			'lyricpv'
+		),
+		mvVisual: pick(
+			raw.mvVisual,
+			MV_VISUALS.map((v) => v.key),
+			'animated'
 		)
 	};
 };
@@ -408,10 +422,28 @@ const deliveryLine = (place: VideoPlace) =>
 		? `完成后用一小段话说明做法、时长和分镜；先用 scripts/cover.py all 放好封面，${MEDIA_DELIVERY}。`
 		: `完成后用一小段话说明做法、时长和分镜。在家里电脑做的：按技能用 pc-video deliver 交付（自动放封面、存到 D:\\HermesWork\\视频\\），回复里只写 Windows 路径，不写 MEDIA；家里电脑不在线、改在服务器做的：先用 scripts/cover.py all 放好封面，${MEDIA_DELIVERY}。`;
 
-/** MP3 做 MV: a lyric MV of the user's song (JIZURA on the home PC). */
+/** 歌词 + 动画: what the pictures and the lyrics each have to do (Remotion, the skill's「歌词 + 动画」). */
+const animatedMvLines = (place: VideoPlace, theme: (typeof MV_THEMES)[number]) => [
+	`- 做法：歌曲 MV（歌词 + 动画）—— 按技能 video-studio「歌曲 MV / 歌词视频」一节的「歌词 + 动画」做法，用 Remotion${place === 'server' ? ' 在服务器' : '（pc-video remotion render）'}做：底下是跟着歌词走的动画画面，上面是动态歌词；无旁白、不另加字幕层`,
+	'- 动画画面：按歌曲段落（前奏、主歌、副歌、间奏、尾奏）分场景，画面内容取自歌词里的意象和情绪（人物、物件、场景或抽象图形都可以），全片同一套画风和配色；每个场景都在动（镜头推移或视差、元素入场回弹、粒子光效、图形随节拍跳动），切镜落在节拍上，副歌画面最满、能量最高，不要只拿一张图慢慢放大',
+	'- 歌词动效：每句随演唱出现和退场（入场方式跟画面一起设计，重点词可逐字弹出、放大或换强调色），时间以对齐好的 LRC 为准；字大、对比够，手机上看得清，不挡画面主体；没有歌词的前奏、间奏、尾奏靠动画和歌名、段落字样撑住',
+	`- 画面基调：${theme.label}（${theme.sub}）；先选副歌渲 15–20 秒样片看拼图，确认动画和歌词都在动、对得上拍，再出整首`
+];
+
+/** 只有歌词动效: the lyrics alone, JIZURA on the home PC (Remotion on the server). */
+const lyricsOnlyMvLines = (place: VideoPlace, theme: (typeof MV_THEMES)[number]) => [
+	place === 'server'
+		? '- 做法：歌曲 MV（只有歌词动效）—— 按技能 video-studio「歌曲 MV / 歌词视频」一节做跟着节拍走的动态歌词画面；无旁白、不另加字幕层'
+		: '- 做法：歌曲 MV（只有歌词动效）—— 按技能 video-studio「歌曲 MV / 歌词视频」一节，用 JIZURA（pc-video jizura）把歌词做成跟着节拍走的动态文字画面；无旁白、不另加字幕层',
+	`- 画面主题：${theme.label}（--theme ${theme.key}）；先渲一段样片看拼图，满意再出整首`
+];
+
+/** MP3 做 MV: an MV of the user's song — animated pictures with animated lyrics (Remotion), or the
+ * lyrics alone (JIZURA on the home PC). */
 export const buildMvBrief = (opts: VideoBriefOptions): string => {
 	const music = opts.music ?? null;
 	const theme = MV_THEMES.find((t) => t.key === opts.mvTheme) ?? MV_THEMES[0];
+	const animated = (opts.mvVisual ?? 'animated') === 'animated';
 	const frame = VIDEO_FRAMES.find((f) => f.key === opts.frame) ?? VIDEO_FRAMES[0];
 	const lyrics = (opts.lyrics ?? '').trim().slice(0, MV_LYRICS_MAX);
 	const timed = /^\s*\[\d+:\d+(?:[.:]\d+)?\]/m.test(lyrics);
@@ -420,27 +452,26 @@ export const buildMvBrief = (opts: VideoBriefOptions): string => {
 		'请制作一个视频（来自 HaloWebUI 视频工作台）。',
 		'',
 		'## 想要的视频',
-		`把这首歌做成歌词 MV（MP4）。${opts.idea.trim() ? `\n${opts.idea.trim()}` : ''}`,
+		`把这首歌做成${animated ? '有动画画面的歌词 MV' : '歌词 MV'}（MP4）。${opts.idea.trim() ? `\n${opts.idea.trim()}` : ''}`,
 		'',
 		'## 要求',
-		opts.place === 'server'
-			? '- 做法：歌曲 MV —— 按技能 video-studio「歌曲 MV / 歌词视频」一节做跟着节拍走的动态歌词画面；无旁白、不另加字幕层'
-			: '- 做法：歌曲 MV —— 按技能 video-studio「歌曲 MV / 歌词视频」一节，用 JIZURA（pc-video jizura）把歌词做成跟着节拍走的动态文字画面；无旁白、不另加字幕层',
+		...(animated ? animatedMvLines(opts.place, theme) : lyricsOnlyMvLines(opts.place, theme)),
 		music
 			? `- 歌曲：${plainName(music.name)}${music.seconds ? `（${clockLabel(music.seconds)}）` : ''}，随消息附上，原文件路径见消息末尾的附件原文件；成片和这首歌一样长，音乐从 0 秒开始，不换、不加别的配乐`
 			: '- 歌曲：（还没选）',
-		`- 画面主题：${theme.label}（--theme ${theme.key}）；先渲一段样片看拼图，满意再出整首`,
 		`- 画幅：${frame.label} ${frame.key}（${frame.size}）`,
 		lyrics
 			? `- 歌词：用户已提供（见下面「## 歌词」）${timed ? '，带时间轴，直接用' : '，没有时间轴：先与人声对齐成 LRC 再做，对不上的地方以人声为准'}`
 			: '- 歌词：用户没给。先识别歌词并与人声对齐成 LRC；听不清、拿不准的词不要猜，列出来交给用户确认后再做整首',
 		placeLine(opts.place),
-		...(opts.place === 'server'
-			? ['- 选了服务器：JIZURA 只装在家里电脑，服务器上改用 Remotion 做「无旁白：音乐 + 设计字幕」的动态歌词，交付时说明']
-			: ['- 家里电脑不在线时 JIZURA 用不了：说明情况，等电脑开机或改用 Remotion 在服务器做动态歌词'])
+		...(animated
+			? []
+			: opts.place === 'server'
+				? ['- 选了服务器：JIZURA 只装在家里电脑，服务器上改用 Remotion 做「无旁白：音乐 + 设计字幕」的动态歌词，交付时说明']
+				: ['- 家里电脑不在线时 JIZURA 用不了：说明情况，等电脑开机或改用 Remotion 在服务器做动态歌词'])
 	];
 	if (attachments.length) {
-		lines.push(`- 参考附件：${attachmentCounts(attachments)}（${attachments.map((a) => plainName(a.name)).join('、')}），先看完；LRC/SRT 歌词文件优先于下面贴的歌词`);
+		lines.push(`- 参考附件：${attachmentCounts(attachments)}（${attachments.map((a) => plainName(a.name)).join('、')}），先看完；LRC/SRT 歌词文件优先于下面贴的歌词${animated ? '；图片当画风、角色或场景参考' : ''}`);
 	}
 	if (lyrics) lines.push('', '## 歌词', lyrics);
 	lines.push(...publishLines(opts.place), '', '## 怎么做', `先读技能 video-studio（${VIDEO_SKILL_PATH}）。`, deliveryLine(opts.place));

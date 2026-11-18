@@ -785,6 +785,8 @@ describe('Videos 制作任务', () => {
 		for (const gone of ['[data-video-recipe]', '[data-video-voice]', '[data-video-length]', '[data-video-prep-options]', '[data-video-music-fit]'])
 			expect(target.querySelector(gone)).toBeFalsy();
 		expect(target.querySelectorAll('[data-video-mv-theme]').length).toBe(5);
+		// 歌词 + 动画 by default; 只有歌词动效 is the JIZURA text PV
+		expect(target.querySelector('[data-video-mv-visual="animated"]').getAttribute('aria-pressed')).toBe('true');
 		expect(target.querySelector('[data-video-status]').textContent).toContain('先选一首 MP3');
 		await dropOn(target.querySelector('[data-video-music]'), mp3('笑一笑.mp3'));
 		const box = target.querySelector('[data-video-lyrics]');
@@ -792,7 +794,11 @@ describe('Videos 制作任务', () => {
 		box.dispatchEvent(new Event('input'));
 		target.querySelector('[data-video-mv-theme="kinetic"]').click();
 		await sleep(10);
+		expect(target.querySelector('[data-video-status]').textContent).toContain('歌词 + 动画 MV（动感）');
+		target.querySelector('[data-video-mv-visual="lyrics"]').click();
+		await sleep(10);
 		expect(target.querySelector('[data-video-status]').textContent).toContain('歌词 MV（动感）');
+		expect(target.querySelector('[data-video-status]').textContent).not.toContain('动画');
 		target.querySelector('[data-video-workbench]').dispatchEvent(new Event('submit'));
 		await sleep(20);
 		expect(prepApi.startStudioPrep).not.toHaveBeenCalled(); // nothing to enhance
@@ -804,7 +810,7 @@ describe('Videos 制作任务', () => {
 		expect(entry.text).toContain('## 歌词\n[00:07.74]闹钟响了三遍才爬起来');
 		expect(entry.text).toContain('## 发布标准');
 		expect(entry.text).not.toContain('配音');
-		expect(JSON.parse(localStorage.getItem('halo.videoStudio.settings')!)).toMatchObject({ kind: 'mv', mvTheme: 'kinetic' });
+		expect(JSON.parse(localStorage.getItem('halo.videoStudio.settings')!)).toMatchObject({ kind: 'mv', mvTheme: 'kinetic', mvVisual: 'lyrics' });
 	});
 
 	it('deletes an uploaded MP3 and a finished task for good, after asking', async () => {

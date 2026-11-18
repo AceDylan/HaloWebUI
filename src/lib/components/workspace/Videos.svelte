@@ -67,6 +67,7 @@
 		VIDEO_MAKERS,
 		VIDEO_KINDS,
 		MV_THEMES,
+		MV_VISUALS,
 		MV_LYRICS_MAX,
 		VIDEO_PLACES,
 		VIDEO_RECIPES,
@@ -1205,7 +1206,7 @@
 				<span class="text-xs text-gray-500 dark:text-gray-400" data-video-status data-video-blocked={blocked || undefined}>
 					{blocked ||
 						(isMv
-							? `交给 ${maker.label} · 歌词 MV（${(MV_THEMES.find((t) => t.key === settings.mvTheme) ?? MV_THEMES[0]).label}）· 跟歌一样长 · ${place.label}渲染，同时记成一个对话`
+							? `交给 ${maker.label} · ${settings.mvVisual === 'lyrics' ? '歌词 MV' : '歌词 + 动画 MV'}（${(MV_THEMES.find((t) => t.key === settings.mvTheme) ?? MV_THEMES[0]).label}）· 跟歌一样长 · ${place.label}渲染，同时记成一个对话`
 							: `交给 ${maker.label} · ${recipe.label} · ${lengthSummary}${musicReady ? ' · 配乐已定' : ''} · ${place.label}渲染，在这里${prepOptions.enhance && (!prepared || prepStale) ? '先增强需求再' : ''}制作，同时记成一个对话`)}
 				</span>
 				<button type="submit" class="workspace-primary-button w-full sm:w-auto sm:min-w-32" disabled={!!blocked || starting} title={blocked} data-video-start>
@@ -1289,8 +1290,27 @@
 		<section class="flex min-w-0 flex-col gap-4">
 			<div class="glass-item p-4 space-y-4" data-video-settings>
 				{#if isMv}
+				<div class="space-y-2" data-video-mv-visuals>
+					<div class="text-sm font-semibold text-gray-900 dark:text-gray-100">MV 内容</div>
+					<div class="grid grid-cols-2 gap-2">
+						{#each MV_VISUALS as v (v.key)}
+							<button
+								type="button"
+								class="rounded-xl border px-3 py-2 text-left transition {settings.mvVisual === v.key
+									? 'border-gray-900 bg-gray-900 text-white dark:border-white dark:bg-white dark:text-gray-900'
+									: 'border-gray-200/70 bg-white/70 text-gray-700 hover:border-gray-300 dark:border-gray-700/60 dark:bg-white/[0.03] dark:text-gray-200 dark:hover:border-gray-600'}"
+								aria-pressed={settings.mvVisual === v.key}
+								on:click={() => (settings = { ...settings, mvVisual: v.key })}
+								data-video-mv-visual={v.key}
+							>
+								<div class="text-sm font-medium">{v.label}</div>
+								<div class="text-[11px] opacity-70">{v.sub}</div>
+							</button>
+						{/each}
+					</div>
+				</div>
 				<div class="space-y-2" data-video-mv-themes>
-					<div class="text-sm font-semibold text-gray-900 dark:text-gray-100">MV 画面</div>
+					<div class="text-sm font-semibold text-gray-900 dark:text-gray-100">画面基调</div>
 					<div class="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-2 xl:grid-cols-3">
 						{#each MV_THEMES as t (t.key)}
 							<button
@@ -1308,7 +1328,9 @@
 						{/each}
 					</div>
 					<p class="text-xs leading-relaxed text-gray-500 dark:text-gray-400">
-						歌词随节拍出现的动态文字画面（JIZURA，在家里电脑上做），不配音、不另加字幕；成片和歌一样长，封面放在第 0 帧。
+						{settings.mvVisual === 'lyrics'
+							? '歌词随节拍出现的动态文字画面（JIZURA，在家里电脑上做）'
+							: '跟着歌词内容和情绪走的动画场景，切镜卡节拍，歌词动效叠在上面（Remotion）'}，不配音、不另加字幕；成片和歌一样长，封面放在第 0 帧。
 					</p>
 				</div>
 				{:else}

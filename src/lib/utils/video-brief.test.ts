@@ -211,7 +211,8 @@ describe('normalizeVideoSettings', () => {
 			musicFit: 'full',
 			place: 'pc',
 			kind: 'normal',
-			mvTheme: 'lyricpv'
+			mvTheme: 'lyricpv',
+			mvVisual: 'animated'
 		});
 		expect(normalizeVideoSettings({ musicFit: 'trim' }).musicFit).toBe('trim');
 		expect(normalizeVideoSettings({ place: 'server' }).place).toBe('server');
@@ -517,9 +518,31 @@ describe('publishing standard and MP3 做 MV', () => {
 		expect(buildVideoBrief({ ...base, place: 'server' })).not.toContain('pc-video');
 	});
 
-	it('MP3 做 MV: a JIZURA lyric MV of the song, its lyrics and theme, no voice or recipe', () => {
+	it('MP3 做 MV by default: animated scenes from the lyrics with animated lyrics on top (Remotion)', () => {
 		const song = { name: '笑一笑.mp3', seconds: 171 };
-		const mv = buildVideoBrief({ ...base, kind: 'mv', mvTheme: 'ballad', music: song, idea: '轻快治愈', lyrics: '闹钟响了三遍才爬起来\n镜子里的自己有点呆' });
+		const mv = buildVideoBrief({ ...base, kind: 'mv', mvTheme: 'ballad', music: song, lyrics: '闹钟响了三遍才爬起来' });
+		expect(mv).toContain('有动画画面的歌词 MV');
+		expect(mv).toContain('「歌词 + 动画」做法');
+		expect(mv).toContain('pc-video remotion render');
+		expect(mv).toContain('- 动画画面：');
+		expect(mv).toContain('- 歌词动效：');
+		expect(mv).toContain('画面基调：抒情');
+		expect(mv).toContain('没有时间轴：先与人声对齐成 LRC');
+		expect(mv).not.toContain('jizura');
+		expect(mv).not.toContain('--theme');
+		const server = buildVideoBrief({ ...base, kind: 'mv', music: song, place: 'server' });
+		expect(server).toContain('用 Remotion 在服务器做');
+		expect(server).not.toContain('pc-video');
+		expect(server).not.toContain('JIZURA');
+		expect(buildVideoBrief({ ...base, kind: 'mv', music: song, attachments: [{ name: 'a.png', kind: 'image' }] })).toContain('图片当画风、角色或场景参考');
+		expect(normalizeVideoSettings({ mvVisual: 'lyrics' }).mvVisual).toBe('lyrics');
+		expect(normalizeVideoSettings({ mvVisual: 'x' }).mvVisual).toBe('animated');
+	});
+
+	it('MP3 做 MV, 只有歌词动效: a JIZURA lyric MV of the song, its lyrics and theme, no voice or recipe', () => {
+		const song = { name: '笑一笑.mp3', seconds: 171 };
+		const lyricsOnly = { ...base, kind: 'mv' as const, mvVisual: 'lyrics' as const };
+		const mv = buildVideoBrief({ ...lyricsOnly, mvTheme: 'ballad', music: song, idea: '轻快治愈', lyrics: '闹钟响了三遍才爬起来\n镜子里的自己有点呆' });
 		expect(mv.startsWith('请制作一个视频（来自 HaloWebUI 视频工作台）')).toBe(true);
 		expect(mv).toContain('歌曲 MV');
 		expect(mv).toContain('pc-video jizura');
@@ -531,13 +554,13 @@ describe('publishing standard and MP3 做 MV', () => {
 		expect(mv).not.toContain('- 配音');
 		expect(mv).not.toContain('## 背景音乐');
 		// timed lyrics are used as they are; no lyrics: transcribe and ask about doubtful words
-		expect(buildVideoBrief({ ...base, kind: 'mv', music: song, lyrics: '[00:07.74]闹钟' })).toContain('带时间轴，直接用');
-		expect(buildVideoBrief({ ...base, kind: 'mv', music: song, lyrics: '' })).toContain('交给用户确认');
+		expect(buildVideoBrief({ ...lyricsOnly, music: song, lyrics: '[00:07.74]闹钟' })).toContain('带时间轴，直接用');
+		expect(buildVideoBrief({ ...lyricsOnly, music: song, lyrics: '' })).toContain('交给用户确认');
 		// the server has no JIZURA
-		const server = buildVideoBrief({ ...base, kind: 'mv', music: song, place: 'server' });
+		const server = buildVideoBrief({ ...lyricsOnly, music: song, place: 'server' });
 		expect(server).toContain('改用 Remotion');
 		expect(server).not.toContain('pc-video');
-		expect(buildVideoBrief({ ...base, kind: 'mv', music: song, maker: 'codex' }).startsWith('/codex ')).toBe(true);
+		expect(buildVideoBrief({ ...lyricsOnly, music: song, maker: 'codex' }).startsWith('/codex ')).toBe(true);
 		expect(normalizeVideoSettings({ kind: 'mv', mvTheme: 'kinetic' })).toMatchObject({ kind: 'mv', mvTheme: 'kinetic' });
 		expect(normalizeVideoSettings({ kind: 'x', mvTheme: 'y' })).toMatchObject({ kind: 'normal', mvTheme: 'lyricpv' });
 	});

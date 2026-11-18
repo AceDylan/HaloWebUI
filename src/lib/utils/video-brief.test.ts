@@ -510,12 +510,23 @@ describe('publishing standard and MP3 做 MV', () => {
 			expect(brief).toContain('## 发布标准');
 			expect(brief).toContain('第 0.5 秒内');
 			expect(brief).toContain('同一张图停留不超过 4 秒');
+			expect(brief).toContain('动画要贴内容');
 			expect(brief).toContain('放进视频第 0 帧');
 			expect(brief).toContain('scripts/cover.py all');
 		}
 		expect(buildVideoBrief(base)).toContain('pc-video deliver');
 		expect(buildVideoBrief(base)).toContain('只写 Windows 路径');
 		expect(buildVideoBrief({ ...base, place: 'server' })).not.toContain('pc-video');
+	});
+
+	it('图文成片 and 素材剪辑 ask for moving layers, not just a push on each still', () => {
+		const story = buildVideoBrief({ ...base, recipe: 'story', style: 'flat' });
+		expect(story).toContain('画面要动起来');
+		expect(story).toContain('同一张图超过 4 秒就换景别或接特写');
+		expect(story).toContain('光效粒子、标注描线、关键词花字');
+		const footage = buildVideoBrief({ ...base, recipe: 'footage', style: 'flat' });
+		expect(footage).toContain('包装也要动');
+		expect(footage).not.toContain('画面要动起来');
 	});
 
 	it('MP3 做 MV by default: animated scenes from the lyrics with animated lyrics on top (Remotion)', () => {

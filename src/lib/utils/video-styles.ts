@@ -231,11 +231,11 @@ export const videoStyleLines = (opts: VideoStyleOptions, forMaker = false): stri
 		);
 		if (recipe === 'footage')
 			lines.push(
-				'- 素材剪辑保持原素材主体，只把该风格用于标题、字幕、贴纸、包装与转场，不要求重绘或重演素材。'
+				'- 素材剪辑保持原素材主体，只把该风格用于标题、字幕、贴纸、包装与转场，不要求重绘或重演素材；包装也要动：标题和关键词弹入，重点处推近或描线标注，转场卡在节拍上。'
 			);
 		else if (recipe === 'story')
 			lines.push(
-				`- 图文成片：每张画面都用同一句风格描述「${preset.still}」，用关键画面加运镜表现，不宣称完成连续动画。`
+				`- 图文成片：每张画面都用同一句风格描述「${preset.still}」；画面要动起来：运镜之外叠加贴合画面内容的动态层（光效、粒子或天气、标注描线、关键词花字），同一张图超过 4 秒就换景别或接特写；不宣称角色连续动画。`
 			);
 		else {
 			lines.push(`- 关键技法：${preset.motion}`);

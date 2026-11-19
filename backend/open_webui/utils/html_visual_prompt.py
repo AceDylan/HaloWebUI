@@ -24,6 +24,7 @@ import time
 from html.parser import HTMLParser
 from typing import Any
 
+from open_webui.utils.content_chunks import split_stringified_chunks
 from open_webui.utils.hermes_media import MEDIA_PLAYER_RE, strip_media_players
 
 HTML_VISUAL_FEATURE_KEY = "html_visual_artifacts"
@@ -652,6 +653,9 @@ async def _request_agy_gateway(
         and isinstance(part.get("text"), str)
         and not part.get("thought")
     )
+    # When the gateway routes this model to a Mistral reasoning model, CPA
+    # stringifies its thinking chunks into the text; keep only the answer.
+    _thinking, text = split_stringified_chunks(text)
     output = text.encode("utf-8")
     if len(output) > output_limit:
         raise _AgyOutputLimitError("stdout")

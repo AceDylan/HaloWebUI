@@ -84,6 +84,10 @@ from open_webui.utils.api_key_pool import (
 )
 
 from open_webui.utils.auth import get_admin_user, get_verified_user
+from open_webui.utils.content_chunks import (
+    StringifiedChunkDecoder,
+    normalize_chat_completion_payload,
+)
 from open_webui.utils.access_control import has_access
 from open_webui.utils.headers import get_user_agent_config, set_model_user_agent
 from open_webui.utils.codex_emulation import (
@@ -3569,6 +3573,7 @@ async def generate_chat_completion(
                 _last_usage = None
                 _total_content_len = 0
                 _image_payload_count = 0
+                _chunk_decoder = StringifiedChunkDecoder()
                 try:
                     _chunk_max_buffer_size = int(
                         getattr(
@@ -3617,6 +3622,16 @@ async def generate_chat_completion(
                                 _first_data_line = _stripped[:500]
                             try:
                                 _payload = json.loads(_stripped[5:].strip())
+                                # Relays may stringify another provider's typed
+                                # chunks (Mistral thinking) into delta.content.
+                                if normalize_chat_completion_payload(
+                                    _payload, _chunk_decoder
+                                ):
+                                    line_bytes = (
+                                        "data: "
+                                        + json.dumps(_payload, ensure_ascii=False)
+                                        + "\n"
+                                    ).encode("utf-8")
                                 _choices = _payload.get("choices", [])
                                 if _choices and isinstance(_choices[0], dict):
                                     _c0 = _choices[0]
@@ -3625,7 +3640,7 @@ async def generate_chat_completion(
                                         _last_finish_reason = _fr
                                     _delta = _c0.get("delta", {}) or {}
                                     _ct = _delta.get("content")
-                                    if _ct:
+                                    if isinstance(_ct, str) and _ct:
                                         _total_content_len += len(_ct)
                                     _image_url = _delta.get("image_url")
                                     if isinstance(_image_url, dict):
@@ -3730,6 +3745,7 @@ async def generate_chat_completion(
             log.debug("[UPSTREAM RESPONSE BODY] %s", _resp_preview)
 
         r.raise_for_status()
+        normalize_chat_completion_payload(response)
         return response
     except HTTPException:
         raise

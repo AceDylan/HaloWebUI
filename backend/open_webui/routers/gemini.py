@@ -27,6 +27,7 @@ from fastapi.responses import StreamingResponse, JSONResponse
 from pydantic import BaseModel
 
 from open_webui.models.models import Models
+from open_webui.utils.content_chunks import StringifiedChunkDecoder
 from open_webui.models.users import UserModel
 from open_webui.utils.user_connections import (
     get_user_connections,
@@ -809,7 +810,9 @@ def _convert_openai_tools_to_gemini(openai_tools: list) -> list:
 
 
 def _extract_content_segments(
-    candidate: dict, starting_tool_index: int = 0
+    candidate: dict,
+    starting_tool_index: int = 0,
+    chunk_decoder: Optional[StringifiedChunkDecoder] = None,
 ) -> tuple[str, list[dict], str, str, list, int]:
     """
     Extract text + inline images + grounding metadata + thinking content + tool calls from a Gemini candidate.
@@ -817,6 +820,8 @@ def _extract_content_segments(
     Args:
         candidate: Gemini API response candidate
         starting_tool_index: The starting index for tool calls (for parallel tool call scenarios)
+        chunk_decoder: Shared per-stream decoder for relays that put another
+            provider's typed content chunks (Mistral thinking) into ``text``.
 
     Returns:
         Tuple of (text, images, grounding_markdown, thinking_content, tool_calls, next_tool_index)
@@ -834,6 +839,8 @@ def _extract_content_segments(
     images = []
     tool_calls = []
     tool_call_index = starting_tool_index  # CRITICAL: Use starting index for parallel tool calls
+    if chunk_decoder is None:
+        chunk_decoder = StringifiedChunkDecoder()
 
     for part in parts:
         # DEBUG: Log each part to see what Gemini returns
@@ -846,7 +853,13 @@ def _extract_content_segments(
                 thinking_parts.append(part["text"])
                 log.info(f"[GEMINI THINKING] Extracted thinking content: {part['text'][:200]}...")
             else:
-                text_parts.append(part["text"])
+                # A relay may hand us another provider's typed chunks as text
+                # (CPA -> Mistral reasoning models): split thinking back out.
+                chunk_thinking, chunk_text = chunk_decoder.split(part["text"])
+                if chunk_thinking:
+                    thinking_parts.append(chunk_thinking)
+                if chunk_text:
+                    text_parts.append(chunk_text)
         elif "inlineData" in part:
             if part.get("thought") is True:
                 log.info("[GEMINI THINKING] Skipping inlineData from thought part")
@@ -938,6 +951,7 @@ def _build_stream_chunks_from_gemini_obj(
     starting_tool_index: int,
     *,
     default_finish_reason: Optional[str] = None,
+    chunk_decoder: Optional[StringifiedChunkDecoder] = None,
 ) -> tuple[list[str], int, bool]:
     chunks: list[str] = []
 
@@ -950,7 +964,7 @@ def _build_stream_chunks_from_gemini_obj(
         return chunks, starting_tool_index, False
 
     text, images, grounding_md, thinking_content, tool_calls, next_tool_call_index = (
-        _extract_content_segments(c0, starting_tool_index)
+        _extract_content_segments(c0, starting_tool_index, chunk_decoder)
     )
 
     if thinking_content:
@@ -2355,6 +2369,7 @@ async def generate_chat_completion(
             stream_id = f"chatcmpl-gemini-{uuid.uuid4().hex}"
             global_tool_call_index = 0  # CRITICAL: Track tool call index across stream chunks for parallel tool calls
             warning_limiter = _StreamWarningLimiter(stream_id)
+            chunk_decoder = StringifiedChunkDecoder()
 
             try:
                 async with aiohttp.ClientSession(timeout=timeout, trust_env=True) as session:
@@ -2436,6 +2451,7 @@ async def generate_chat_completion(
                                     model_id,
                                     global_tool_call_index,
                                     default_finish_reason="stop",
+                                    chunk_decoder=chunk_decoder,
                                 )
                             )
                             for stream_chunk in stream_chunks:
@@ -2507,6 +2523,7 @@ async def generate_chat_completion(
                                         stream_id,
                                         model_id,
                                         global_tool_call_index,
+                                        chunk_decoder=chunk_decoder,
                                     )
                                     for stream_chunk in stream_chunks:
                                         yield stream_chunk
@@ -2534,6 +2551,7 @@ async def generate_chat_completion(
                                         stream_id,
                                         model_id,
                                         global_tool_call_index,
+                                        chunk_decoder=chunk_decoder,
                                     )
                                     for stream_chunk in stream_chunks:
                                         yield stream_chunk

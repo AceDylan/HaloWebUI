@@ -439,6 +439,13 @@ const lyricsOnlyMvLines = (place: VideoPlace, theme: (typeof MV_THEMES)[number])
 	`- 画面主题：${theme.label}（--theme ${theme.key}）；先渲一段样片看拼图，满意再出整首`
 ];
 
+/** Lyrics recognition / alignment (skill video-studio「歌词识别与对齐」): the home PC's GPU by
+ * default, back to the server's CPU by itself; the server when the brief chose it. */
+const asrTool = (place: VideoPlace) =>
+	place === 'server'
+		? '识别与对齐在服务器 CPU 上跑，见技能「歌词识别与对齐」'
+		: '识别与对齐用 pc-video asr，在家里电脑显卡上跑，不在线自动回服务器，见技能「歌词识别与对齐」';
+
 /** MP3 做 MV: an MV of the user's song — animated pictures with animated lyrics (Remotion), or the
  * lyrics alone (JIZURA on the home PC). */
 export const buildMvBrief = (opts: VideoBriefOptions): string => {
@@ -462,8 +469,8 @@ export const buildMvBrief = (opts: VideoBriefOptions): string => {
 			: '- 歌曲：（还没选）',
 		`- 画幅：${frame.label} ${frame.key}（${frame.size}）`,
 		lyrics
-			? `- 歌词：用户已提供（见下面「## 歌词」）${timed ? '，带时间轴，直接用' : '，没有时间轴：先与人声对齐成 LRC 再做，对不上的地方以人声为准'}`
-			: '- 歌词：用户没给。先识别歌词并与人声对齐成 LRC；听不清、拿不准的词不要猜，列出来交给用户确认后再做整首',
+			? `- 歌词：用户已提供（见下面「## 歌词」）${timed ? '，带时间轴，直接用' : `，没有时间轴：先与人声对齐成 LRC 再做，对不上的地方以人声为准（${asrTool(opts.place)}）`}`
+			: `- 歌词：用户没给。先识别歌词并与人声对齐成 LRC（${asrTool(opts.place)}）；听不清、拿不准的词不要猜，列出来交给用户确认后再做整首`,
 		placeLine(opts.place),
 		...(animated
 			? []

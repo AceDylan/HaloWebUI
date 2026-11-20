@@ -539,10 +539,12 @@ describe('publishing standard and MP3 做 MV', () => {
 		expect(mv).toContain('- 歌词动效：');
 		expect(mv).toContain('画面基调：抒情');
 		expect(mv).toContain('没有时间轴：先与人声对齐成 LRC');
+		expect(mv).toContain('识别与对齐用 pc-video asr，在家里电脑显卡上跑，不在线自动回服务器');
 		expect(mv).not.toContain('jizura');
 		expect(mv).not.toContain('--theme');
 		const server = buildVideoBrief({ ...base, kind: 'mv', music: song, place: 'server' });
 		expect(server).toContain('用 Remotion 在服务器做');
+		expect(server).toContain('先识别歌词并与人声对齐成 LRC（识别与对齐在服务器 CPU 上跑');
 		expect(server).not.toContain('pc-video');
 		expect(server).not.toContain('JIZURA');
 		expect(buildVideoBrief({ ...base, kind: 'mv', music: song, attachments: [{ name: 'a.png', kind: 'image' }] })).toContain('图片当画风、角色或场景参考');

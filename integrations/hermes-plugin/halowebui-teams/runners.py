@@ -65,7 +65,7 @@ class RunnerSpec:
     script: str = ""        # <name>-run.sh in ~/.hermes/scripts
     command: str = ""       # the CLI it drives
     probe: str = ""         # account / reachability check, see _probe_account
-    settings: str = ""      # Claude Code settings file of a relay (claude_settings probe)
+    settings: str = ""      # fallback settings file of a relay; the wrapper's own --settings wins
     max_turns: bool = False  # the script takes --max-turns
     answer_sets_id: bool = False  # `answer` is told the new run id
     quota_wait: bool = False      # parks itself for a quota reset and continues the same session
@@ -86,10 +86,10 @@ SPECS: tuple[RunnerSpec, ...] = (
                script="reclaude-run.sh", command="reclaude", probe="reclaude_quota", max_turns=True, quota_wait=True),
     RunnerSpec("cchclaude", "cchclaude", "Claude Code", "Claude Code（自己的 cch 中转）：后端 / 通用代码的首选",
                script="cchclaude-run.sh", command="cchclaude", probe="claude_settings",
-               settings="/root/.claude/settings-cch.json", max_turns=True, quota_wait=True),
+               settings="/root/.claude-thirdparty/settings-cch.json", max_turns=True, quota_wait=True),
     RunnerSpec("anyclaude", "anyclaude", "Claude Code", "Claude Code（anyrouter 免费服务）：慢，适合不急的代码任务",
                script="anyclaude-run.sh", command="anyclaude", probe="claude_settings",
-               settings="/root/.claude/settings-any.json", max_turns=True, quota_wait=True),
+               settings="/root/.claude-thirdparty/settings-any.json", max_turns=True, quota_wait=True),
     RunnerSpec("officlaude", "官方 Claude", "Claude Code", "官网 claude.ai 订阅 OAuth 账号；仅点名使用，认证/额度失败后手动续跑",
                script="officlaude-run.sh", command="officlaude", probe="claude_official", max_turns=True),
     RunnerSpec("codex", "codex", "Codex", "OpenAI Codex CLI：代码任务的另一条线，额度用完即失败",
@@ -245,11 +245,12 @@ def _layer(name: str, ok: bool, detail: str = "") -> dict:
     return {"layer": name, "ok": bool(ok), "detail": detail}
 
 
-def _http_probe(url: str, headers: dict) -> tuple[str, str]:
+def _http_probe(url: str, headers: dict, proxy: str = "") -> tuple[str, str]:
     """('ok' | 'account' | 'quota' | 'unreachable', detail)."""
     req = urllib.request.Request(url, headers=headers)
+    handlers = [urllib.request.ProxyHandler({"http": proxy, "https": proxy})] if proxy else []
     try:
-        with urllib.request.urlopen(req, timeout=PROBE_TIMEOUT) as resp:
+        with urllib.request.build_opener(*handlers).open(req, timeout=PROBE_TIMEOUT) as resp:
             return "ok", f"HTTP {resp.status}"
     except urllib.error.HTTPError as exc:
         if exc.code in (401, 403):
@@ -263,6 +264,23 @@ def _http_probe(url: str, headers: dict) -> tuple[str, str]:
         return "ok", f"HTTP {exc.code}"
     except Exception as exc:  # URLError, timeouts, SSL
         return "unreachable", f"连不上中转（{type(exc).__name__}）"
+
+
+_SETTINGS_FLAG = re.compile(r"--settings[ =]+[\"']?([^\s\"']+)")
+
+
+def _settings_file(spec: RunnerSpec) -> str:
+    """The settings file the runner really uses: the ``--settings`` its wrapper passes (wrappers
+    move, e.g. ~/.claude → ~/.claude-thirdparty), else the registry default."""
+    command = _which(spec.command)
+    if command:
+        try:
+            match = _SETTINGS_FLAG.search(Path(command).read_text(encoding="utf-8", errors="replace")[:20000])
+        except OSError:
+            match = None
+        if match and os.path.isfile(match.group(1)):
+            return match.group(1)
+    return spec.settings
 
 
 def _probe_account(spec: RunnerSpec) -> tuple[str, str, Optional[str]]:
@@ -284,17 +302,19 @@ def _probe_account(spec: RunnerSpec) -> tuple[str, str, Optional[str]]:
         state = "account" if reason == "account_inactive" else "quota"
         return state, redact(verdict.get("headline") or "额度不足", 200), verdict.get("resume_at") or None
     if spec.probe == "claude_settings":
+        settings = _settings_file(spec)
         try:
-            env = (json.loads(Path(spec.settings).read_text(encoding="utf-8")).get("env") or {})
+            env = (json.loads(Path(settings).read_text(encoding="utf-8")).get("env") or {})
         except (OSError, ValueError):
-            return "account", f"读不到设置文件 {spec.settings}", None
+            return "account", f"读不到设置文件 {settings}", None
         base = str(env.get("ANTHROPIC_BASE_URL") or "").rstrip("/")
         key = str(env.get("ANTHROPIC_API_KEY") or env.get("ANTHROPIC_AUTH_TOKEN") or "")
         if not base or not key:
             return "account", "设置文件里没有中转地址或密钥", None
         state, detail = _http_probe(base + "/v1/models", {
             "x-api-key": key, "Authorization": f"Bearer {key}", "anthropic-version": "2023-06-01",
-            "User-Agent": "halowebui-teams/runner-check"})
+            "User-Agent": "halowebui-teams/runner-check"},
+            proxy=str(env.get("HTTPS_PROXY") or env.get("https_proxy") or ""))
         host = re.sub(r"^https?://", "", base).split("/")[0]
         return state, f"{host}：{detail}", None
     if spec.probe == "claude_official":

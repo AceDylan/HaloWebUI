@@ -473,3 +473,29 @@ def test_official_account_probe_is_read_only_oauth_status(pkg, monkeypatch, resp
     assert state == expected and reset is None
     assert calls == [["/stub/officlaude", "auth", "status", "--json"]]
     assert "官方 Claude" in detail
+
+
+def test_relay_probe_reads_the_settings_file_the_wrapper_passes(pkg, monkeypatch, tmp_path):
+    """cchclaude / anyclaude wrappers moved their settings (~/.claude → ~/.claude-thirdparty);
+    the probe must follow the wrapper's --settings, not a stale hard-coded path."""
+    r = pkg.runners
+    settings = tmp_path / "settings-cch.json"
+    settings.write_text(json.dumps({"env": {"ANTHROPIC_BASE_URL": "http://relay.test:8081/",
+                                            "ANTHROPIC_API_KEY": "k", "HTTPS_PROXY": "http://proxy.test:7890"}}))
+    wrapper = tmp_path / "cchclaude"
+    wrapper.write_text(f"#!/usr/bin/env bash\nexec claude --settings {settings} --dangerously-skip-permissions \"$@\"\n")
+    monkeypatch.setattr(r, "_which", lambda name: str(wrapper))
+    seen = {}
+
+    def probe(url, headers, proxy=""):
+        seen.update(url=url, proxy=proxy)
+        return "ok", "HTTP 200"
+
+    monkeypatch.setattr(r, "_http_probe", probe)
+    state, detail, _ = r._probe_account(r.BY_NAME["cchclaude"])
+    assert state == "ok" and detail == "relay.test:8081：HTTP 200"
+    assert seen == {"url": "http://relay.test:8081/v1/models", "proxy": "http://proxy.test:7890"}
+
+    # A wrapper without --settings (or pointing at a missing file) falls back to the registry default.
+    wrapper.write_text("#!/usr/bin/env bash\nexec claude --settings /nonexistent/s.json \"$@\"\n")
+    assert r._settings_file(r.BY_NAME["cchclaude"]) == r.BY_NAME["cchclaude"].settings

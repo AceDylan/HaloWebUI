@@ -1492,7 +1492,7 @@ def test_agy_timeout_on_a_structured_report_adds_no_fallback_card(monkeypatch):
         html_visual_prompt.design_html_visual_artifact_with_agy(STRUCTURED_REPORT, metadata)
     )
 
-    assert timeouts == [150.0]
+    assert timeouts == [300.0]
     assert metadata[html_visual_prompt.HTML_VISUAL_AGY_HTML_METADATA_KEY]["status"] == "timeout"
     assert append_html_visual_fallback(designed, metadata) == STRUCTURED_REPORT
 
@@ -1689,7 +1689,7 @@ def test_agy_answer_design_asks_the_gateway_directly_when_configured(monkeypatch
     assert len(calls) == 1
     assert calls[0][0] is _GATEWAY
     assert "<final_answer>" in calls[0][1]
-    assert calls[0][2]["timeout_seconds"] == 150.0
+    assert calls[0][2]["timeout_seconds"] == 300.0
     assert designed.endswith(f"````html\n{_KIT_CARD}\n````")
     assert metadata[html_visual_prompt.HTML_VISUAL_AGY_HTML_METADATA_KEY]["status"] == "success"
 

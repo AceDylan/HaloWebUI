@@ -63,10 +63,10 @@ HTML_VISUAL_AGY_QUEUE_TIMEOUT_SECONDS = 1.0
 # returns the actual HTML fragment. Larger budgets than the (legacy) pre-answer
 # design-spec pass because full HTML for a rich answer is bigger and slower.
 # Successful runs take 30-50 s but some need more than 90 s, and a timeout leaves
-# the reply without a designed card, so the default is 150 s.
+# the reply without a designed card, so the default is the 300 s ceiling.
 HTML_VISUAL_AGY_HTML_METADATA_KEY = "html_visual_agy_html"
 HTML_VISUAL_AGY_HTML_TIMEOUT_ENV = "HALOWEBUI_AGY_HTML_TIMEOUT_SECONDS"
-HTML_VISUAL_AGY_HTML_DEFAULT_TIMEOUT_SECONDS = 150.0
+HTML_VISUAL_AGY_HTML_DEFAULT_TIMEOUT_SECONDS = 300.0
 HTML_VISUAL_AGY_HTML_MAX_TIMEOUT_SECONDS = 300.0
 HTML_VISUAL_AGY_HTML_MAX_OUTPUT_BYTES = 64 * 1024
 HTML_VISUAL_AGY_HTML_MAX_INPUT_CHARS = 24 * 1024

@@ -1264,6 +1264,34 @@ def _has_visible_message_files(message_files: Any) -> bool:
     return False
 
 
+def _has_answer_text(content_blocks: Any) -> bool:
+    """True when the reply has answer text, not only thinking."""
+    return isinstance(content_blocks, list) and any(
+        isinstance(block, dict)
+        and block.get("type") == "text"
+        and str(block.get("content") or "").strip()
+        for block in content_blocks
+    )
+
+
+def _output_limit_notice(has_answer: bool) -> str:
+    """The note under a reply the upstream cut off at its output limit
+    (finish_reason=length); without it a reply that is all thinking just stops."""
+    summary = (
+        "回答不完整：达到了模型的输出长度上限"
+        if has_answer
+        else "只有思考没有回答：思考用完了模型的输出长度上限"
+    )
+    return (
+        '<details type="warning" done="true">\n'
+        f"<summary>{summary}</summary>\n"
+        "上游返回 finish_reason=length，回答在这里被截断。"
+        "可以回复「继续」让模型接着写，或者换一个模型；"
+        "如果经常这样，调大这个模型的最大输出 token（max_tokens）。\n"
+        "</details>"
+    )
+
+
 def _has_visible_assistant_output(content_blocks: Any, message_files: Any) -> bool:
     return _has_nonempty_text_content(content_blocks) or _has_visible_message_files(
         message_files
@@ -7872,6 +7900,16 @@ async def process_chat_response(
                                             "content": "",
                                         }
                                     )
+
+                    if _stream_finish_reason == "length" and not response_tool_calls:
+                        content_blocks.append(
+                            {
+                                "type": "text",
+                                "content": _output_limit_notice(
+                                    _has_answer_text(content_blocks)
+                                ),
+                            }
+                        )
 
                     if response_tool_calls:
                         tool_calls.append(response_tool_calls)

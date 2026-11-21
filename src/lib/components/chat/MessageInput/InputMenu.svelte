@@ -59,8 +59,10 @@
 	export let onResponseHtmlFormatChange: ((enabled: boolean) => void | Promise<void>) | null = null;
 
 	export let onClose: Function;
-	/** 「交给…」: hands the draft (and the conversation) to 讨论台 / 协作台 / the image studio. */
-	export let onHandoff: ((to: 'answer' | 'discuss' | 'teams' | 'studio' | 'video') => void) | null = null;
+	/** 「交给…」: hands the draft (and the conversation) to 自动分流 / 精答 / 讨论台 / 协作台 / 生图 / 视频. */
+	export let onHandoff:
+		| ((to: 'auto' | 'answer' | 'discuss' | 'teams' | 'studio' | 'video') => void)
+		| null = null;
 	/** 「选择助手」: opens the assistant picker (the user's assistants and the templates); the pick
 	 * puts its prompt on the current model. Left out when not given. */
 	export let onSelectAssistant: (() => void) | null = null;
@@ -618,14 +620,27 @@
 				{#if onHandoff}
 					<hr class="border-black/5 dark:border-white/5 my-1" />
 					<div class="px-3 pt-1 pb-0.5 text-2xs font-medium text-gray-400 dark:text-gray-500">
-						{tr('交给…（带上这句话）', 'Hand to… (with this draft)')}
+						{tr('交给工作台（带上这句话）', 'Hand to workbench (with this draft)')}
 					</div>
+					<DropdownMenu.Item
+						class="flex gap-2 items-center px-3 py-2 text-sm font-medium cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl"
+						data-halo-input-handoff="auto"
+						on:click={() => onHandoff?.('auto')}
+					>
+						<span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-cyan-500/12 text-cyan-700 dark:bg-cyan-400/15 dark:text-cyan-300">
+							<SidebarModeIcon mode="auto" className="size-4" />
+						</span>
+						<div class="min-w-0">
+							<div class="truncate">{tr('自动分流', 'Auto route')}</div>
+							<div class="truncate text-xs font-normal text-gray-500 dark:text-gray-400">{tr('按问题自动选择精答、讨论或协作', 'Auto-pick answer, discussion, or team')}</div>
+						</div>
+					</DropdownMenu.Item>
 					<DropdownMenu.Item
 						class="flex gap-2 items-center px-3 py-2 text-sm font-medium cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl"
 						data-halo-input-handoff="answer"
 						on:click={() => onHandoff?.('answer')}
 					>
-						<span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-gray-100 text-gray-600 dark:bg-gray-700/60 dark:text-gray-300">
+						<span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-amber-500/12 text-amber-700 dark:bg-amber-400/15 dark:text-amber-300">
 							<SidebarModeIcon mode="answer" className="size-4" />
 						</span>
 						<div class="min-w-0">
@@ -638,7 +653,7 @@
 						data-halo-input-handoff="discuss"
 						on:click={() => onHandoff?.('discuss')}
 					>
-						<span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-gray-100 text-gray-600 dark:bg-gray-700/60 dark:text-gray-300">
+						<span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-indigo-500/12 text-indigo-700 dark:bg-indigo-400/15 dark:text-indigo-300">
 							<MessagesSquare class="size-4" strokeWidth={2} />
 						</span>
 						<div class="min-w-0">
@@ -652,7 +667,7 @@
 							data-halo-input-handoff="teams"
 							on:click={() => onHandoff?.('teams')}
 						>
-							<span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-gray-100 text-gray-600 dark:bg-gray-700/60 dark:text-gray-300">
+							<span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-blue-500/12 text-blue-700 dark:bg-blue-400/15 dark:text-blue-300">
 								<Users class="size-4" strokeWidth={2} />
 							</span>
 							<div class="min-w-0">
@@ -667,7 +682,7 @@
 							data-halo-input-handoff="studio"
 							on:click={() => onHandoff?.('studio')}
 						>
-							<span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-gray-100 text-gray-600 dark:bg-gray-700/60 dark:text-gray-300">
+							<span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-rose-500/12 text-rose-700 dark:bg-rose-400/15 dark:text-rose-300">
 								<ImageIcon class="size-4" strokeWidth={2} />
 							</span>
 							<div class="min-w-0">
@@ -681,7 +696,7 @@
 						data-halo-input-handoff="video"
 						on:click={() => onHandoff?.('video')}
 					>
-						<span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-gray-100 text-gray-600 dark:bg-gray-700/60 dark:text-gray-300">
+						<span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-fuchsia-500/12 text-fuchsia-700 dark:bg-fuchsia-400/15 dark:text-fuchsia-300">
 							<Clapperboard class="size-4" strokeWidth={2} />
 						</span>
 						<div class="min-w-0">

@@ -21,12 +21,17 @@
 
 	import { slide } from 'svelte/transition';
 	import { page } from '$app/stores';
+	import { DropdownMenu } from 'bits-ui';
+	import { flyAndScale } from '$lib/utils/transitions';
 
 	import ShareChatModal from '../chat/ShareChatModal.svelte';
 	import ModelSelector from '../chat/ModelSelector.svelte';
 	import Tooltip from '../common/Tooltip.svelte';
+	import Dropdown from '../common/Dropdown.svelte';
 	import Menu from '$lib/components/layout/Navbar/Menu.svelte';
 	import UserMenu from '$lib/components/layout/Sidebar/UserMenu.svelte';
+	import SidebarModeIcon from '$lib/components/layout/Sidebar/SidebarModeIcon.svelte';
+	import { modeLive, type ModeKey } from '$lib/components/scifi/mode-relay';
 	import MenuLines from '../icons/MenuLines.svelte';
 	import AdjustmentsHorizontal from '../icons/AdjustmentsHorizontal.svelte';
 
@@ -46,9 +51,67 @@
 	export let showModelSelector = true;
 	/** Ticking several models in the menu: the chat hands its draft and conversation to 讨论台. */
 	export let onDiscuss: ((models: string[]) => void) | null = null;
+	/** Quick workbench switcher in the chat navbar: carries draft + files + conversation context. */
+	export let onWorkbenchHandoff:
+		| ((to: 'auto' | 'answer' | 'discuss' | 'teams' | 'studio' | 'video') => void)
+		| null = null;
+	export let hasDraftOrContext = false;
 
 	let showShareChatModal = false;
 	let showDownloadChatModal = false;
+	let showWorkbenchMenu = false;
+
+	type WorkbenchKey = 'auto' | 'answer' | 'discuss' | 'teams' | 'studio' | 'video';
+	$: studioAllowed =
+		!!$config?.features?.enable_image_generation &&
+		($user?.role === 'admin' || !!($user as any)?.permissions?.features?.image_generation);
+	$: workbenches = (
+		[
+			{
+				key: 'auto' as const,
+				label: '自动分流',
+				desc: '按问题自动选精答、讨论或协作',
+				tone: 'bg-cyan-500/12 text-cyan-700 dark:bg-cyan-400/15 dark:text-cyan-300',
+				show: true
+			},
+			{
+				key: 'answer' as const,
+				label: '精答',
+				desc: '挑最合适的专家助手来答',
+				tone: 'bg-amber-500/12 text-amber-700 dark:bg-amber-400/15 dark:text-amber-300',
+				show: true
+			},
+			{
+				key: 'discuss' as const,
+				label: '讨论台',
+				desc: '多模型讨论，主持人写结论',
+				tone: 'bg-indigo-500/12 text-indigo-700 dark:bg-indigo-400/15 dark:text-indigo-300',
+				show: true
+			},
+			{
+				key: 'teams' as const,
+				label: '协作台',
+				desc: 'AI 团队拆任务并行完成',
+				tone: 'bg-blue-500/12 text-blue-700 dark:bg-blue-400/15 dark:text-blue-300',
+				show: !!($config?.features as any)?.enable_agent_teams
+			},
+			{
+				key: 'studio' as const,
+				label: '生图工作台',
+				desc: '提示词、参考图与图库',
+				tone: 'bg-rose-500/12 text-rose-700 dark:bg-rose-400/15 dark:text-rose-300',
+				show: studioAllowed
+			},
+			{
+				key: 'video' as const,
+				label: '视频工作台',
+				desc: 'Hermes / runner 制作视频',
+				tone: 'bg-fuchsia-500/12 text-fuchsia-700 dark:bg-fuchsia-400/15 dark:text-fuchsia-300',
+				show: true
+			}
+		] as { key: WorkbenchKey; label: string; desc: string; tone: string; show: boolean }[]
+	).filter((w) => w.show);
+	$: totalLiveWorkbenches = workbenches.reduce((sum, w) => sum + ($modeLive[w.key as ModeKey] ?? 0), 0);
 </script>
 
 <ShareChatModal bind:show={showShareChatModal} chatId={$chatId} />
@@ -106,7 +169,106 @@
 					</div>
 				{/if}
 
-				<div class="self-start flex flex-none items-center text-gray-600 dark:text-gray-400">
+				<div class="self-start flex flex-none items-center gap-0.5 text-gray-600 dark:text-gray-400">
+					{#if onWorkbenchHandoff && workbenches.length}
+						<div class="flex shrink-0">
+							<Dropdown bind:show={showWorkbenchMenu} side="bottom" align="end">
+								<button
+									type="button"
+									class="halo-wb-nav-btn relative inline-flex h-9 items-center gap-1.5 rounded-full border border-gray-200/80 bg-white/75 px-2.5 text-xs font-medium text-gray-700 transition hover:border-gray-300 hover:bg-white hover:text-gray-950 dark:border-gray-700/60 dark:bg-white/[0.04] dark:text-gray-200 dark:hover:border-gray-600 dark:hover:bg-white/[0.08] dark:hover:text-white"
+									aria-label="切换工作台"
+									title={hasDraftOrContext
+										? '切换工作台（会带上当前草稿与对话背景）'
+										: '快速切换工作台'}
+									data-halo-navbar-workbenches
+								>
+									<svg
+										class="size-3.5 shrink-0 text-cyan-600 dark:text-cyan-400"
+										viewBox="0 0 20 20"
+										fill="none"
+										stroke="currentColor"
+										stroke-width="1.75"
+										stroke-linecap="round"
+										stroke-linejoin="round"
+										aria-hidden="true"
+									>
+										<rect x="2.75" y="2.75" width="5.5" height="5.5" rx="1.4" />
+										<rect x="11.75" y="2.75" width="5.5" height="5.5" rx="1.4" />
+										<rect x="2.75" y="11.75" width="5.5" height="5.5" rx="1.4" />
+										<rect x="11.75" y="11.75" width="5.5" height="5.5" rx="1.4" />
+									</svg>
+									<span class="hidden sm:inline">工作台</span>
+									{#if totalLiveWorkbenches > 0}
+										<span
+											class="inline-grid min-w-[1rem] h-4 place-items-center rounded-full bg-sky-500 px-1 font-mono text-[10px] font-semibold text-white"
+											data-halo-navbar-workbenches-live>{totalLiveWorkbenches}</span
+										>
+									{/if}
+								</button>
+
+								<div slot="content">
+									<DropdownMenu.Content
+										class="w-72 rounded-2xl border border-gray-200/80 bg-white/95 p-1.5 shadow-xl backdrop-blur-xl dark:border-gray-700/60 dark:bg-gray-900/95 dark:text-white z-50"
+										sideOffset={8}
+										side="bottom"
+										align="end"
+										transition={flyAndScale}
+									>
+										<div class="flex items-center justify-between px-2.5 pt-1 pb-1.5">
+											<span class="text-[11px] font-semibold text-gray-500 dark:text-gray-400"
+												>工作台</span
+											>
+											{#if hasDraftOrContext}
+												<span
+													class="rounded-full bg-cyan-500/10 px-2 py-0.5 text-[10px] font-medium text-cyan-700 dark:text-cyan-300"
+													>带上当前草稿与背景</span
+												>
+											{/if}
+										</div>
+										<div class="flex flex-col gap-0.5">
+											{#each workbenches as wb (wb.key)}
+												{@const live = $modeLive[wb.key] ?? 0}
+												<DropdownMenu.Item
+													class="flex items-center gap-2.5 rounded-xl px-2.5 py-2 text-left text-sm cursor-pointer transition hover:bg-gray-100/90 dark:hover:bg-white/[0.06]"
+													data-halo-navbar-workbench={wb.key}
+													on:click={() => {
+														showWorkbenchMenu = false;
+														onWorkbenchHandoff?.(wb.key);
+													}}
+												>
+													<span
+														class="grid size-7 shrink-0 place-items-center rounded-lg {wb.tone}"
+													>
+														<SidebarModeIcon mode={wb.key} className="size-4" />
+													</span>
+													<div class="min-w-0 flex-1">
+														<div class="flex items-center gap-1.5">
+															<span
+																class="truncate text-[13px] font-medium text-gray-900 dark:text-gray-100"
+																>{wb.label}</span
+															>
+															{#if live > 0}
+																<span
+																	class="inline-grid min-w-[1rem] h-4 place-items-center rounded-full bg-sky-500/15 px-1 font-mono text-[10px] font-semibold text-sky-700 dark:text-sky-300"
+																	>{live}</span
+																>
+															{/if}
+														</div>
+														<div
+															class="truncate text-[11px] text-gray-500 dark:text-gray-400"
+														>
+															{wb.desc}
+														</div>
+													</div>
+													<span class="text-xs text-gray-400" aria-hidden="true">↗</span>
+												</DropdownMenu.Item>
+											{/each}
+										</div>
+									</DropdownMenu.Content>
+								</div>
+							</Dropdown>
+						</div>
+					{/if}
 					<!-- <div class="md:hidden flex self-center w-[1px] h-5 mx-2 bg-gray-300 dark:bg-stone-700" /> -->
 					{#if shareEnabled && chat && (chat.id || $temporaryChatEnabled)}
 						<!-- Dropdown's trigger is min-w-0, which let this row squeeze it to 16px
@@ -262,3 +424,18 @@
 		</div>
 	{/if}
 </nav>
+
+<style>
+	:global(html.halo-scifi) .halo-wb-nav-btn {
+		border-color: rgb(8 145 178 / 0.22);
+	}
+	:global(html.halo-scifi.dark) .halo-wb-nav-btn {
+		border-color: rgb(94 231 255 / 0.18);
+		background: rgb(6 9 20 / 0.55);
+		box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.04);
+	}
+	:global(html.halo-scifi) .halo-wb-nav-btn:hover {
+		border-color: var(--scifi-cyan);
+		box-shadow: 0 0 16px -4px var(--scifi-glow);
+	}
+</style>

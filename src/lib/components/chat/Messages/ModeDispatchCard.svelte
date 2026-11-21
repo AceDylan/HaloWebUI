@@ -438,7 +438,7 @@
 
 <!-- not-prose: the chat's Markdown typography must not style the card (nor number its steps) -->
 <div
-	class="md-card not-prose my-2 flex max-w-2xl flex-col gap-2"
+	class="md-card not-prose my-2 max-w-2xl"
 	data-teams-ui
 	data-discuss-ui
 	data-answer-ui
@@ -456,228 +456,229 @@
 			这个{kind === 'answer' ? '精答' : '讨论'}已经删除了；对话和发回来的结果都还在。
 		</div>
 	{:else}
-		<div class="flex min-w-0 items-center gap-2.5">
-			{#if kind === 'answer' && assistant}
-				<AssistantAvatar
-					id={assistant.id}
-					name={assistant.name}
-					emoji={assistant.emoji ?? ''}
-					size={28}
-					state={live
-						? run?.answer?.thinking
-							? 'thinking'
-							: run?.status === 'answering'
-								? 'streaming'
-								: 'waiting'
-						: done
-							? 'done'
-							: 'idle'}
-				/>
-			{:else}
-				<span
-					class="md-tile size-[32px] text-[15px] {live ? 'tm-live' : ''}"
-					data-kind={kind}
-					aria-hidden="true">{kind === 'answer' ? '🎯' : '💬'}</span
-				>
-			{/if}
-			<div class="min-w-0 flex-1">
-				<div class="flex min-w-0 items-center gap-2">
+		<div class="wb-shell {live || drawing ? 'tm-live' : ''}" data-wb-kind={kind}>
+			<div class="wb-shell-head">
+				{#if kind === 'answer' && assistant}
+					<AssistantAvatar
+						id={assistant.id}
+						name={assistant.name}
+						emoji={assistant.emoji ?? ''}
+						size={28}
+						state={live
+							? run?.answer?.thinking
+								? 'thinking'
+								: run?.status === 'answering'
+									? 'streaming'
+									: 'waiting'
+							: done
+								? 'done'
+								: 'idle'}
+					/>
+				{:else}
 					<span
-						class="truncate text-sm font-semibold text-gray-900 dark:text-gray-100"
-						title={question}>{question || label}</span
+						class="md-tile size-[32px] text-[15px] {live ? 'tm-live' : ''}"
+						data-kind={kind}
+						aria-hidden="true">{kind === 'answer' ? '🎯' : '💬'}</span
 					>
-					{#if status}<span class="shrink-0"
-							><StatusChip status={chip} label={chipLabel} size="sm" /></span
-						>{/if}
-				</div>
-				<div
-					class="flex min-w-0 items-center gap-1.5 text-[11px] text-gray-500 dark:text-gray-400"
-					data-mode-dispatch-facts
-				>
-					{#if kind === 'discuss' && seats.length}
-						<span class="flex shrink-0 -space-x-1" aria-hidden="true">
-							{#each seats.slice(0, 5) as seat, i (seat.id)}
-								<SeatAvatar
-									model={seat.model}
-									name={seat.label}
-									hue={seatHue(i)}
-									state={seatState(seat.id)}
-									size={14}
-								/>
-							{/each}
-						</span>
-					{/if}
-					<span class="truncate">{facts.join(' · ')}</span>
-				</div>
-			</div>
-			<a {href} class="tm-btn-ghost shrink-0 !text-xs" data-mode-dispatch-open
-				>{live ? `在${label}看` : `打开${label}`} ↗</a
-			>
-		</div>
-
-		{#if status}
-			<section
-				class="md-stage tm-card px-4 py-3 {live || drawing ? 'tm-live' : ''}"
-				data-tone={tone}
-				data-mode-dispatch-stage
-				aria-label="{label}的进度"
-			>
-				<ol class="md-rail mb-2.5 flex list-none items-center p-0" aria-label="步骤">
-					{#each steps as step, i (step.key)}
-						<li
-							class="md-step flex shrink-0 items-center gap-1.5"
-							data-step={step.key}
-							data-state={step.state}
-							title={step.note || null}
-							aria-current={step.state === 'active' ? 'step' : undefined}
-						>
-							<span class="md-dot grid size-[18px] place-items-center rounded-full" aria-hidden="true">
-								{#if step.state === 'done'}
-									<svg class="size-2.5" viewBox="0 0 12 12" fill="none"
-										><path
-											d="m2.5 6.3 2.2 2.2 4.8-5"
-											stroke="currentColor"
-											stroke-width="1.8"
-											stroke-linecap="round"
-											stroke-linejoin="round"
-										/></svg
-									>
-								{:else if step.state === 'failed'}
-									<svg class="size-2.5" viewBox="0 0 12 12" fill="none"
-										><path
-											d="m3.5 3.5 5 5m0-5-5 5"
-											stroke="currentColor"
-											stroke-width="1.8"
-											stroke-linecap="round"
-										/></svg
-									>
-								{:else}
-									<span class="md-core size-1.5 rounded-full" />
-								{/if}
-							</span>
-							<span class="md-label whitespace-nowrap text-xs">{step.label}</span>
-						</li>
-						{#if i < steps.length - 1}
-							<li
-								class="md-bar mx-1.5 h-px min-w-3 flex-1"
-								data-state={step.state === 'done' ? 'done' : 'pending'}
-								aria-hidden="true"
-							/>
-						{/if}
-					{/each}
-				</ol>
-
-				<div class="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-					<span class="md-kind shrink-0 text-xs font-semibold" data-mode-dispatch-stage-label
-						>{stageLabel}</span
-					>
-					<p
-						class="min-w-0 flex-1 basis-48 break-words text-sm text-gray-800 dark:text-gray-100"
-						data-mode-dispatch-line
-					>
-						<span class={live || drawing ? 'tm-shimmer' : ''}>{nowLine}</span>
-					</p>
-					{#if spent !== null || took !== null}
+				{/if}
+				<div class="min-w-0 flex-1">
+					<div class="flex min-w-0 items-center gap-2">
 						<span
-							class="tm-num shrink-0 text-xs text-gray-500 dark:text-gray-400"
-							data-mode-dispatch-clock
-							>{spent !== null ? `${drawing ? '配图' : ''}已用 ${elapsed(spent)}` : `用时 ${elapsed(took ?? 0)}`}</span
+							class="truncate text-sm font-semibold text-gray-900 dark:text-gray-100"
+							title={question}>{question || label}</span
 						>
-					{/if}
-				</div>
-
-				{#if kind === 'answer' && live && answerTail}
-					<div
-						class="md-preview mt-2.5 rounded-xl px-3 py-2 text-xs leading-relaxed text-gray-600 dark:text-gray-300"
-						data-mode-dispatch-preview
-					>
-						<!-- the newest words stay in view: three lines kept from the bottom up -->
-						<div class="md-tail"><p>{answerTail}<span class="md-caret" aria-hidden="true" /></p></div>
+						{#if status}<span class="shrink-0"
+								><StatusChip status={chip} label={chipLabel} size="sm" /></span
+							>{/if}
 					</div>
-				{/if}
-
-				{#if kind === 'discuss' && seats.length && !done}
-					<ul class="mt-2.5 flex list-none flex-wrap gap-1.5 p-0" data-mode-dispatch-seats>
-						{#each seats as seat, i (seat.id)}
-							{@const state = seatState(seat.id)}
-							<li
-								class="md-seat inline-flex max-w-full items-center gap-1.5 rounded-full px-2 py-[3px] text-[11px]"
-								data-state={state}
-								style="--seat-hue: {seatHue(i)}"
-							>
-								<span class="md-seat-dot size-1.5 shrink-0 rounded-full" aria-hidden="true" />
-								<span class="truncate font-medium text-gray-700 dark:text-gray-200">{seat.label}</span>
-								{#if seatText(seat.id)}<span class="shrink-0 text-gray-500 dark:text-gray-400"
-										>{seatText(seat.id)}</span
-									>{/if}
-							</li>
-						{/each}
-						{#if ask?.conclusion?.name || ask?.moderator?.name}
-							<li
-								class="md-seat inline-flex max-w-full items-center gap-1.5 rounded-full px-2 py-[3px] text-[11px]"
-								data-state={moderatorState}
-								data-moderator
-								style="--seat-hue: 250"
-							>
-								<span class="md-seat-dot size-1.5 shrink-0 rounded-full" aria-hidden="true" />
-								<span class="truncate font-medium text-gray-700 dark:text-gray-200"
-									>{ask?.conclusion?.name || ask?.moderator?.name}</span
-								>
-								<span class="shrink-0 text-gray-500 dark:text-gray-400"
-									>{moderatorState === 'streaming' || moderatorState === 'thinking'
-										? '在写结论'
-										: '主持'}</span
-								>
-							</li>
+					<div
+						class="mt-0.5 flex min-w-0 items-center gap-1.5 text-[11px] text-gray-500 dark:text-gray-400"
+						data-mode-dispatch-facts
+					>
+						{#if kind === 'discuss' && seats.length}
+							<span class="flex shrink-0 -space-x-1" aria-hidden="true">
+								{#each seats.slice(0, 5) as seat, i (seat.id)}
+									<SeatAvatar
+										model={seat.model}
+										name={seat.label}
+										hue={seatHue(i)}
+										state={seatState(seat.id)}
+										size={14}
+									/>
+								{/each}
+							</span>
 						{/if}
-					</ul>
-				{/if}
-
-				{#if live && !drawing}
-					<div class="mt-2 flex justify-end">
-						<button
-							type="button"
-							class="rounded-lg px-1 text-[11px] text-gray-400 transition hover:text-red-600 disabled:opacity-60 dark:hover:text-red-400"
-							disabled={!!acting}
-							on:click={() => act('stop')}
-							data-mode-dispatch-stop>{acting === 'stop' ? '停止中…' : '停止'}</button
-						>
+						<span class="truncate">{facts.join(' · ')}</span>
 					</div>
-				{/if}
-				{#if ended}
-					<div
-						class="mt-2 flex flex-wrap items-center gap-2 text-xs text-gray-500 dark:text-gray-400"
-						data-mode-dispatch-failure
-					>
-						{#if canResume}
+				</div>
+				<a {href} class="tm-btn-ghost shrink-0 !text-xs" data-mode-dispatch-open
+					>{live ? `在${label}看` : `打开${label}`} ↗</a
+				>
+			</div>
+
+			{#if status}
+				<section
+					class="md-stage wb-shell-body {live || drawing ? 'tm-live md-stage-embedded' : 'md-stage-embedded'}"
+					data-tone={tone}
+					data-mode-dispatch-stage
+					aria-label="{label}的进度"
+				>
+					<ol class="md-rail mb-2.5 flex list-none items-center p-0" aria-label="步骤">
+						{#each steps as step, i (step.key)}
+							<li
+								class="md-step flex shrink-0 items-center gap-1.5"
+								data-step={step.key}
+								data-state={step.state}
+								title={step.note || null}
+								aria-current={step.state === 'active' ? 'step' : undefined}
+							>
+								<span class="md-dot grid size-[18px] place-items-center rounded-full" aria-hidden="true">
+									{#if step.state === 'done'}
+										<svg class="size-2.5" viewBox="0 0 12 12" fill="none"
+											><path
+												d="m2.5 6.3 2.2 2.2 4.8-5"
+												stroke="currentColor"
+												stroke-width="1.8"
+												stroke-linecap="round"
+												stroke-linejoin="round"
+											/></svg
+										>
+									{:else if step.state === 'failed'}
+										<svg class="size-2.5" viewBox="0 0 12 12" fill="none"
+											><path
+												d="m3.5 3.5 5 5m0-5-5 5"
+												stroke="currentColor"
+												stroke-width="1.8"
+												stroke-linecap="round"
+											/></svg
+										>
+									{:else}
+										<span class="md-core size-1.5 rounded-full" />
+									{/if}
+								</span>
+								<span class="md-label whitespace-nowrap text-xs">{step.label}</span>
+							</li>
+							{#if i < steps.length - 1}
+								<li
+									class="md-bar mx-1.5 h-px min-w-3 flex-1"
+									data-state={step.state === 'done' ? 'done' : 'pending'}
+									aria-hidden="true"
+								/>
+							{/if}
+						{/each}
+					</ol>
+
+					<div class="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+						<span class="md-kind shrink-0 text-xs font-semibold" data-mode-dispatch-stage-label
+							>{stageLabel}</span
+						>
+						<p
+							class="min-w-0 flex-1 basis-48 break-words text-sm text-gray-800 dark:text-gray-100"
+							data-mode-dispatch-line
+						>
+							<span class={live || drawing ? 'tm-shimmer' : ''}>{nowLine}</span>
+						</p>
+						{#if spent !== null || took !== null}
+							<span
+								class="tm-num shrink-0 text-xs text-gray-500 dark:text-gray-400"
+								data-mode-dispatch-clock
+								>{spent !== null ? `${drawing ? '配图' : ''}已用 ${elapsed(spent)}` : `用时 ${elapsed(took ?? 0)}`}</span
+							>
+						{/if}
+					</div>
+
+					{#if kind === 'answer' && live && answerTail}
+						<div
+							class="md-preview mt-2.5 rounded-xl px-3 py-2 text-xs leading-relaxed text-gray-600 dark:text-gray-300"
+							data-mode-dispatch-preview
+						>
+							<!-- the newest words stay in view: three lines kept from the bottom up -->
+							<div class="md-tail"><p>{answerTail}<span class="md-caret" aria-hidden="true" /></p></div>
+						</div>
+					{/if}
+
+					{#if kind === 'discuss' && seats.length && !done}
+						<ul class="mt-2.5 flex list-none flex-wrap gap-1.5 p-0" data-mode-dispatch-seats>
+							{#each seats as seat, i (seat.id)}
+								{@const state = seatState(seat.id)}
+								<li
+									class="md-seat inline-flex max-w-full items-center gap-1.5 rounded-full px-2 py-[3px] text-[11px]"
+									data-state={state}
+									style="--seat-hue: {seatHue(i)}"
+								>
+									<span class="md-seat-dot size-1.5 shrink-0 rounded-full" aria-hidden="true" />
+									<span class="truncate font-medium text-gray-700 dark:text-gray-200">{seat.label}</span>
+									{#if seatText(seat.id)}<span class="shrink-0 text-gray-500 dark:text-gray-400"
+											>{seatText(seat.id)}</span
+										>{/if}
+								</li>
+							{/each}
+							{#if ask?.conclusion?.name || ask?.moderator?.name}
+								<li
+									class="md-seat inline-flex max-w-full items-center gap-1.5 rounded-full px-2 py-[3px] text-[11px]"
+									data-state={moderatorState}
+									data-moderator
+									style="--seat-hue: 250"
+								>
+									<span class="md-seat-dot size-1.5 shrink-0 rounded-full" aria-hidden="true" />
+									<span class="truncate font-medium text-gray-700 dark:text-gray-200"
+										>{ask?.conclusion?.name || ask?.moderator?.name}</span
+									>
+									<span class="shrink-0 text-gray-500 dark:text-gray-400"
+										>{moderatorState === 'streaming' || moderatorState === 'thinking'
+											? '在写结论'
+											: '主持'}</span
+									>
+								</li>
+							{/if}
+						</ul>
+					{/if}
+
+					{#if live && !drawing}
+						<div class="mt-2.5 flex justify-end">
 							<button
 								type="button"
-								class="tm-btn-primary !px-2.5 !py-1 !text-xs"
+								class="tm-btn-ghost tm-btn-danger !px-2 !py-0.5 !text-[11px]"
 								disabled={!!acting}
-								on:click={() => act('resume')}
-								data-mode-dispatch-resume
-								>{acting === 'resume' ? '处理中…' : '从停下的地方继续'}</button
+								on:click={() => act('stop')}
+								data-mode-dispatch-stop>{acting === 'stop' ? '停止中…' : '停止'}</button
 							>
-							{#if kind === 'discuss' && spoke}
+						</div>
+					{/if}
+					{#if ended}
+						<div
+							class="mt-2.5 flex flex-wrap items-center gap-2 text-xs text-gray-500 dark:text-gray-400"
+							data-mode-dispatch-failure
+						>
+							{#if canResume}
 								<button
 									type="button"
-									class="tm-btn-ghost !text-xs"
+									class="tm-btn-primary !px-2.5 !py-1 !text-xs"
 									disabled={!!acting}
-									on:click={() => act('conclude')}
-									data-mode-dispatch-conclude
-									>{acting === 'conclude' ? '处理中…' : '用已有发言写结论'}</button
+									on:click={() => act('resume')}
+									data-mode-dispatch-resume
+									>{acting === 'resume' ? '处理中…' : '从停下的地方继续'}</button
 								>
+								{#if kind === 'discuss' && spoke}
+									<button
+										type="button"
+										class="tm-btn-ghost !text-xs"
+										disabled={!!acting}
+										on:click={() => act('conclude')}
+										data-mode-dispatch-conclude
+										>{acting === 'conclude' ? '处理中…' : '用已有发言写结论'}</button
+									>
+								{/if}
+								<span class="min-w-0 flex-1">结果照样发回这个对话。</span>
+							{:else}
+								<span>讨论台里后来又问了别的问题，到讨论台接着处理。</span>
 							{/if}
-							<span class="min-w-0 flex-1">结果照样发回这个对话。</span>
-						{:else}
-							<span>讨论台里后来又问了别的问题，到讨论台接着处理。</span>
-						{/if}
-					</div>
-				{/if}
-
+						</div>
+					{/if}
+				</section>
 				{#if done}
 					<div
-						class="md-foot mt-3 flex flex-wrap items-center gap-x-3 gap-y-1.5 pt-2.5 text-xs text-gray-600 dark:text-gray-300"
+						class="wb-shell-foot flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs text-gray-600 dark:text-gray-300"
 						data-mode-dispatch-done
 					>
 						<span class="font-medium text-gray-900 dark:text-gray-100"
@@ -691,7 +692,7 @@
 							<span class="min-w-0 flex-1">已发回这个对话，可以接着追问。</span>
 							<button
 								type="button"
-								class="shrink-0 font-medium text-sky-700 hover:underline dark:text-sky-300"
+								class="tm-btn-ghost !px-2.5 !py-1 !text-xs !text-sky-700 dark:!text-sky-300"
 								on:click={jump}
 								data-mode-dispatch-jump>看结果 ↓</button
 							>
@@ -703,7 +704,7 @@
 							<span class="min-w-0 flex-1">结果已生成，正在等待同步到对话。</span>
 							<button
 								type="button"
-								class="shrink-0 font-medium text-sky-700 hover:underline disabled:opacity-60 dark:text-sky-300"
+								class="tm-btn-ghost !px-2.5 !py-1 !text-xs !text-sky-700 disabled:opacity-60 dark:!text-sky-300"
 								disabled={bringing}
 								on:click={bring}
 								data-mode-dispatch-bring
@@ -712,15 +713,21 @@
 						{/if}
 					</div>
 				{/if}
-			</section>
-		{:else if error}
-			<div class="text-xs text-amber-700 dark:text-amber-300">读不到{label}的进度：{error}</div>
-		{:else}
-			<div class="tm-card h-[92px] animate-pulse" aria-busy="true" />
-		{/if}
-		{#if status && error}
-			<div class="text-xs text-amber-700 dark:text-amber-300">读不到{label}的最新进度：{error}</div>
-		{/if}
+			{:else if error}
+				<div class="wb-shell-body text-xs text-amber-700 dark:text-amber-300">
+					读不到{label}的进度：{error}
+				</div>
+			{:else}
+				<div class="wb-shell-body">
+					<div class="h-14 animate-pulse rounded-xl bg-gray-100 dark:bg-white/[0.04]" aria-busy="true" />
+				</div>
+			{/if}
+			{#if status && error}
+				<div class="wb-shell-foot text-xs text-amber-700 dark:text-amber-300">
+					读不到{label}的最新进度：{error}
+				</div>
+			{/if}
+		</div>
 	{/if}
 </div>
 
@@ -860,10 +867,6 @@
 		background: hsl(var(--tm-bad));
 	}
 
-	.md-foot {
-		border-top: 1px solid hsl(var(--tm-line));
-	}
-
 	@keyframes md-beat {
 		50% {
 			transform: scale(1.7);
@@ -880,17 +883,14 @@
 			display: none;
 		}
 	}
+	.md-stage-embedded.tm-live::before,
+	.md-stage-embedded.tm-live::after {
+		display: none;
+	}
 	@media (prefers-reduced-motion: reduce) {
 		.md-core,
 		.md-seat-dot,
-		.md-tail {
-		display: flex;
-		flex-direction: column;
-		justify-content: flex-end;
-		max-height: calc(3 * 1.625em);
-		overflow: hidden;
-	}
-	.md-caret {
+		.md-caret {
 			animation: none !important;
 		}
 	}

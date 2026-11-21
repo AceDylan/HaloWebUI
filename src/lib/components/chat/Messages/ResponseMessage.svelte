@@ -121,6 +121,7 @@
 	import VideoTaskChatCard from './VideoTaskChatCard.svelte';
 	import AutoDispatchCard from '$lib/components/auto/AutoDispatchCard.svelte';
 	import TeamResultBar from '$lib/components/teams/TeamResultBar.svelte';
+	import SidebarModeIcon from '$lib/components/layout/Sidebar/SidebarModeIcon.svelte';
 	import MessageOutline from './MessageOutline.svelte';
 	import ThinkingIndicator from './ThinkingIndicator.svelte';
 	import GenerationElapsed from './GenerationElapsed.svelte';
@@ -920,9 +921,9 @@
 	$: versionCount = message?.done ? branchAnswers(history, message.id).length : 0;
 	$: canCompare = versionCount > 1 || (showMoreMenu && chatAnswers(history).length > 1);
 
-	// This reply to 讨论台 / 协作台: its question again, with the conversation up to here as
-	// background and a way back to this chat.
-	const handOffReply = (to: 'discuss' | 'teams') => {
+	// This reply to 自动分流 / 精答 / 讨论台 / 协作台 / 视频工作台: its question again, with the
+	// conversation up to here as background and a way back to this chat.
+	const handOffReply = (to: 'auto' | 'answer' | 'discuss' | 'teams' | 'video') => {
 		showMoreMenu = false;
 		handOff(
 			typeof sessionStorage === 'undefined' ? null : sessionStorage,
@@ -2580,12 +2581,33 @@
 
 												{#if message?.parentId}
 													<hr class="border-black/5 dark:border-white/5 my-0.5" />
+													<div
+														class="px-3 pt-1 pb-0.5 text-2xs font-medium text-gray-400 dark:text-gray-500"
+													>
+														{tr('交给工作台处理', 'Hand off to workbench')}
+													</div>
+													<DropdownMenu.Item
+														class={menuItemClass}
+														data-halo-reply-handoff="auto"
+														on:click={() => handOffReply('auto')}
+													>
+														<SidebarModeIcon mode="auto" className="w-4 h-4 shrink-0 text-cyan-600 dark:text-cyan-400" />
+														<span>{tr('自动分流', 'Auto route')}</span>
+													</DropdownMenu.Item>
+													<DropdownMenu.Item
+														class={menuItemClass}
+														data-halo-reply-handoff="answer"
+														on:click={() => handOffReply('answer')}
+													>
+														<SidebarModeIcon mode="answer" className="w-4 h-4 shrink-0 text-amber-600 dark:text-amber-400" />
+														<span>{tr('交给精答', 'Precise answer')}</span>
+													</DropdownMenu.Item>
 													<DropdownMenu.Item
 														class={menuItemClass}
 														data-halo-reply-handoff="discuss"
 														on:click={() => handOffReply('discuss')}
 													>
-														<MessagesSquare class="w-4 h-4 shrink-0" strokeWidth={1.75} />
+														<MessagesSquare class="w-4 h-4 shrink-0 text-indigo-600 dark:text-indigo-400" strokeWidth={1.75} />
 														<span>{tr('让几个模型讨论', 'Discuss with several models')}</span>
 													</DropdownMenu.Item>
 													{#if $config?.features?.enable_agent_teams}
@@ -2594,10 +2616,18 @@
 															data-halo-reply-handoff="teams"
 															on:click={() => handOffReply('teams')}
 														>
-															<Users class="w-4 h-4 shrink-0" strokeWidth={1.75} />
+															<Users class="w-4 h-4 shrink-0 text-blue-600 dark:text-blue-400" strokeWidth={1.75} />
 															<span>{tr('交给协作台', 'Hand to a team')}</span>
 														</DropdownMenu.Item>
 													{/if}
+													<DropdownMenu.Item
+														class={menuItemClass}
+														data-halo-reply-handoff="video"
+														on:click={() => handOffReply('video')}
+													>
+														<SidebarModeIcon mode="video" className="w-4 h-4 shrink-0 text-fuchsia-600 dark:text-fuchsia-400" />
+														<span>{tr('做成视频', 'Make a video')}</span>
+													</DropdownMenu.Item>
 												{/if}
 
 												{#if regenerateModelOptions.length > 0}
@@ -3170,12 +3200,33 @@
 
 													{#if message?.parentId}
 														<hr class="border-black/5 dark:border-white/5 my-0.5" />
+														<div
+															class="px-3 pt-1 pb-0.5 text-2xs font-medium text-gray-400 dark:text-gray-500"
+														>
+															{tr('交给工作台处理', 'Hand off to workbench')}
+														</div>
+														<DropdownMenu.Item
+															class={menuItemClass}
+															data-halo-reply-handoff="auto"
+															on:click={() => handOffReply('auto')}
+														>
+															<SidebarModeIcon mode="auto" className="w-4 h-4 shrink-0 text-cyan-600 dark:text-cyan-400" />
+															<span>{tr('自动分流', 'Auto route')}</span>
+														</DropdownMenu.Item>
+														<DropdownMenu.Item
+															class={menuItemClass}
+															data-halo-reply-handoff="answer"
+															on:click={() => handOffReply('answer')}
+														>
+															<SidebarModeIcon mode="answer" className="w-4 h-4 shrink-0 text-amber-600 dark:text-amber-400" />
+															<span>{tr('交给精答', 'Precise answer')}</span>
+														</DropdownMenu.Item>
 														<DropdownMenu.Item
 															class={menuItemClass}
 															data-halo-reply-handoff="discuss"
 															on:click={() => handOffReply('discuss')}
 														>
-															<MessagesSquare class="w-4 h-4 shrink-0" strokeWidth={1.75} />
+															<MessagesSquare class="w-4 h-4 shrink-0 text-indigo-600 dark:text-indigo-400" strokeWidth={1.75} />
 															<span>{tr('让几个模型讨论', 'Discuss with several models')}</span>
 														</DropdownMenu.Item>
 														{#if $config?.features?.enable_agent_teams}
@@ -3184,10 +3235,18 @@
 																data-halo-reply-handoff="teams"
 																on:click={() => handOffReply('teams')}
 															>
-																<Users class="w-4 h-4 shrink-0" strokeWidth={1.75} />
+																<Users class="w-4 h-4 shrink-0 text-blue-600 dark:text-blue-400" strokeWidth={1.75} />
 																<span>{tr('交给协作台', 'Hand to a team')}</span>
 															</DropdownMenu.Item>
 														{/if}
+														<DropdownMenu.Item
+															class={menuItemClass}
+															data-halo-reply-handoff="video"
+															on:click={() => handOffReply('video')}
+														>
+															<SidebarModeIcon mode="video" className="w-4 h-4 shrink-0 text-fuchsia-600 dark:text-fuchsia-400" />
+															<span>{tr('做成视频', 'Make a video')}</span>
+														</DropdownMenu.Item>
 													{/if}
 
 													<hr class="border-black/5 dark:border-white/5 my-0.5" />

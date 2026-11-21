@@ -29,7 +29,7 @@
 <div class="halo-image-actions absolute right-2 bottom-2 flex gap-1.5" data-image-actions>
 	<button
 		type="button"
-		class="flex items-center gap-1 rounded-full bg-black/55 px-2.5 py-1 text-xs font-medium text-white backdrop-blur transition hover:bg-black/75"
+		class="flex items-center gap-1 rounded-full border border-white/15 bg-black/60 px-2.5 py-1 text-xs font-medium text-white shadow-sm backdrop-blur-md transition hover:border-white/30 hover:bg-black/80 active:scale-95"
 		data-image-action="edit"
 		title={tr('把这张图放进输入框，接着改', 'Put this image in the message box to edit it')}
 		on:click|stopPropagation={edit}
@@ -39,7 +39,7 @@
 	</button>
 	<button
 		type="button"
-		class="flex items-center gap-1 rounded-full bg-black/55 px-2.5 py-1 text-xs font-medium text-white backdrop-blur transition hover:bg-black/75"
+		class="flex items-center gap-1 rounded-full border border-white/15 bg-black/60 px-2.5 py-1 text-xs font-medium text-white shadow-sm backdrop-blur-md transition hover:border-white/30 hover:bg-black/80 active:scale-95"
 		data-image-action="studio"
 		title={tr('在图片工作台打开（作为参考图）', 'Open in the image studio as a reference')}
 		on:click|stopPropagation={openInStudio}

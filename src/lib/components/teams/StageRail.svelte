@@ -11,6 +11,8 @@
 	export let stage: TeamStage | null = null;
 	/** Hide the five steps (a page that shows them elsewhere). */
 	export let steps = true;
+	/** Inside an enclosing workbench card shell (TeamChatCard): omit outer card chrome. */
+	export let embedded = false;
 
 	$: moving = !!stage && STAGE_MOVING.has(stage.key);
 	$: stepState = new Map((stage?.steps ?? []).map((s) => [s.key, s.state]));
@@ -34,7 +36,7 @@
 
 {#if stage}
 	<section
-		class="stage tm-card px-4 py-3 {moving ? 'tm-live' : ''}"
+		class="stage {embedded ? 'wb-shell-body stage-embedded' : 'tm-card px-4 py-3'} {moving ? 'tm-live' : ''}"
 		data-stage={stage.key}
 		data-tone={tone}
 		aria-label="当前阶段"
@@ -139,6 +141,10 @@
 <style>
 	.stage {
 		--stage-tone: var(--tm-accent);
+	}
+	.stage-embedded.tm-live::before,
+	.stage-embedded.tm-live::after {
+		display: none;
 	}
 	/* Wherever it sits (a chat reply's Markdown styles too): steps are not a numbered list. */
 	.stage :global(li) {

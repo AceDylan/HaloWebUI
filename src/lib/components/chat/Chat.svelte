@@ -1211,6 +1211,13 @@
 		);
 		goto(HANDOFF_PATH.discuss);
 	};
+	const handOffToWorkbench = (to: 'auto' | 'answer' | 'discuss' | 'teams' | 'studio' | 'video') => {
+		handOff(
+			typeof sessionStorage === 'undefined' ? null : sessionStorage,
+			chatHandoff(to, { text: prompt, files, history, chatId: $chatId, title: $chatTitle })
+		);
+		goto(HANDOFF_PATH[to]);
+	};
 	let params = {};
 	// The frame and quality a new chat's image generation starts with (the last ones sent).
 	let rememberedImageConfig: ImageTemplateConfig | null = null;
@@ -7464,6 +7471,8 @@
 					bind:multiModelDiscussionEnabled
 					maxDiscussionModels={MULTI_MODEL_DISCUSSION_MAX_MODELS}
 					onDiscuss={handOffToDiscussion}
+					onWorkbenchHandoff={handOffToWorkbench}
+					hasDraftOrContext={Boolean(prompt.trim() || files.length > 0 || history?.currentId)}
 					shareEnabled={!!history.currentId}
 				/>
 

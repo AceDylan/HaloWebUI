@@ -101,6 +101,16 @@
 
 	$: key = stage?.key ?? '';
 	$: settled = gone || SETTLED.has(key) || (team?.status === 'running' && team.phase === 'stopped');
+	$: shellMoving = !settled && key !== 'approval' && key !== 'paused';
+	$: hasActions =
+		!!team &&
+		key !== 'done' &&
+		(Boolean(team.plan && ['plan_ready', 'start_failed'].includes(team.status)) ||
+			team.status === 'plan_failed' ||
+			team.status === 'planning' ||
+			(team.status === 'running' &&
+				!['completed', 'stopped'].includes(live?.team?.phase ?? team.phase ?? '') &&
+				live?.team?.state !== 'stopped'));
 	$: chip =
 		key === 'done'
 			? 'done'
@@ -230,7 +240,7 @@
 
 <!-- not-prose: the chat's Markdown typography must not number the rail's steps -->
 <div
-	class="not-prose my-2 flex max-w-2xl flex-col gap-2"
+	class="not-prose my-2 max-w-2xl"
 	data-teams-ui
 	data-team-chat-card={teamId}
 	data-team-chat-state={gone ? 'gone' : key || 'loading'}
@@ -244,96 +254,112 @@
 			这个协作任务已经在协作台删除了；对话和发回来的结果都还在。
 		</div>
 	{:else}
-		<div class="flex min-w-0 items-center gap-2.5">
-			<TeamAvatar
-				kind="lead"
-				status={settled
-					? key === 'done'
-						? 'done'
-						: 'idle'
-					: key === 'approval'
-						? 'waiting_user'
-						: 'running'}
-				size={30}
-			/>
-			<div class="min-w-0 flex-1">
-				<div class="flex min-w-0 items-center gap-2">
-					<span class="truncate text-sm font-semibold text-gray-900 dark:text-gray-100"
-						>{team?.title ?? '协作任务'}</span
-					>
-					{#if team}<span class="shrink-0"
-							><StatusChip status={chip} label={chipLabel} size="sm" /></span
-						>{/if}
+		<div class="wb-shell {shellMoving ? 'tm-live' : ''}" data-wb-kind="team">
+			<div class="wb-shell-head">
+				<TeamAvatar
+					kind="lead"
+					status={settled
+						? key === 'done'
+							? 'done'
+							: 'idle'
+						: key === 'approval'
+							? 'waiting_user'
+							: 'running'}
+					size={30}
+				/>
+				<div class="min-w-0 flex-1">
+					<div class="flex min-w-0 items-center gap-2">
+						<span class="truncate text-sm font-semibold text-gray-900 dark:text-gray-100"
+							>{team?.title ?? '协作任务'}</span
+						>
+						{#if team}<span class="shrink-0"
+								><StatusChip status={chip} label={chipLabel} size="sm" /></span
+							>{/if}
+					</div>
+					<div class="mt-0.5 flex min-w-0 items-center gap-1.5 text-[11px] text-gray-500 dark:text-gray-400">
+						{#if roster.length}
+							<span class="flex shrink-0 -space-x-1" aria-hidden="true">
+								{#each roster.slice(0, 5) as m}
+									<span class="stack" title="{m.name} · {m.role}"
+										><TeamAvatar kind={avatarKind(m)} size={16} /></span
+									>
+								{/each}
+							</span>
+						{/if}
+						<span class="truncate">协作台 · {facts.join(' · ')}</span>
+					</div>
 				</div>
-				<div class="flex min-w-0 items-center gap-1.5 text-[11px] text-gray-500 dark:text-gray-400">
-					{#if roster.length}
-						<span class="flex shrink-0 -space-x-1" aria-hidden="true">
-							{#each roster.slice(0, 5) as m}
-								<span class="stack" title="{m.name} · {m.role}"
-									><TeamAvatar kind={avatarKind(m)} size={16} /></span
-								>
-							{/each}
-						</span>
-					{/if}
-					<span class="truncate">协作台 · {facts.join(' · ')}</span>
-				</div>
-			</div>
-			<a href="/teams/{teamId}" class="tm-btn-ghost shrink-0 !text-xs" data-team-chat-open
-				>{action} ↗</a
-			>
-		</div>
-		{#if key === 'done'}
-			<div class="tm-card-quiet flex flex-col gap-2 px-3.5 py-2.5" data-team-chat-done>
-				<div
-					class="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs text-gray-600 dark:text-gray-300"
+				<a href="/teams/{teamId}" class="tm-btn-ghost shrink-0 !text-xs" data-team-chat-open
+					>{action} ↗</a
 				>
-					<span class="font-medium text-gray-900 dark:text-gray-100">完整结果已整理好</span>
-					{#if resultId}
-						<span class="min-w-0 flex-1">已发回这个对话，可以接着追问。</span>
+			</div>
+
+			{#if key === 'done'}
+				<div class="wb-shell-body flex flex-col gap-2.5" data-team-chat-done>
+					<div
+						class="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs text-gray-600 dark:text-gray-300"
+					>
+						<span class="font-medium text-gray-900 dark:text-gray-100">完整结果已整理好</span>
+						{#if resultId}
+							<span class="min-w-0 flex-1">已发回这个对话，可以接着追问。</span>
+							<button
+								type="button"
+								class="tm-btn-ghost !px-2.5 !py-1 !text-xs !text-sky-700 dark:!text-sky-300"
+								on:click={jump}
+								data-team-chat-jump>看结果 ↓</button
+							>
+						{:else}
+							<span class="min-w-0 flex-1">结果已生成，正在等待同步到对话。</span>
+							<button
+								type="button"
+								class="tm-btn-ghost !px-2.5 !py-1 !text-xs !text-sky-700 disabled:opacity-60 dark:!text-sky-300"
+								disabled={bringing}
+								on:click={bring}
+								data-team-chat-bring>{bringing ? '正在同步…' : '重新同步结果'}</button
+							>
+						{/if}
+					</div>
+					<TeamResultBar {teamId} team={false} />
+				</div>
+			{:else if stage}
+				<StageRail {stage} embedded />
+				{#if ENDED.has(key) && team?.error}
+					<div class="px-4 pb-3 text-xs text-gray-500 dark:text-gray-400">{team.error}</div>
+				{/if}
+			{:else if error}
+				<div class="wb-shell-body text-xs text-amber-700 dark:text-amber-300">
+					读不到团队的进度：{error}
+				</div>
+			{:else}
+				<div class="wb-shell-body">
+					<div class="h-14 animate-pulse rounded-xl bg-gray-100 dark:bg-white/[0.04]" aria-busy="true" />
+				</div>
+			{/if}
+
+			{#if team && key !== 'done' && hasActions}
+				<div class="wb-shell-section flex flex-col gap-2">
+					<TeamChatActions {teamId} {team} {live} stageKey={key} on:changed={leadChanged} />
+				</div>
+			{/if}
+
+			{#if showLead || canTalk}
+				<div class="wb-shell-foot">
+					{#if showLead}
+						<LeadDesk {teamId} change={leadChange} phase={livePhase} on:changed={leadChanged} />
+					{:else if canTalk}
 						<button
 							type="button"
-							class="shrink-0 font-medium text-sky-700 hover:underline dark:text-sky-300"
-							on:click={jump}
-							data-team-chat-jump>看结果 ↓</button
+							class="inline-flex items-center gap-1.5 text-xs font-medium text-gray-600 transition hover:text-gray-950 dark:text-gray-300 dark:hover:text-white"
+							on:click={() => (leadOpen = true)}
+							data-team-chat-talk
 						>
-					{:else}
-						<span class="min-w-0 flex-1">结果已生成，正在等待同步到对话。</span>
-						<button
-							type="button"
-							class="shrink-0 font-medium text-sky-700 hover:underline disabled:opacity-60 dark:text-sky-300"
-							disabled={bringing}
-							on:click={bring}
-							data-team-chat-bring>{bringing ? '正在同步…' : '重新同步结果'}</button
-						>
+							<span class="size-1.5 rounded-full bg-sky-500" aria-hidden="true" />
+							{livePhase === 'completed' ? '还要补什么？对负责人说 →' : '追加或调整？对负责人说 →'}
+						</button>
 					{/if}
 				</div>
-				<TeamResultBar {teamId} team={false} />
-			</div>
-		{:else if stage}
-			<StageRail {stage} />
-			{#if ENDED.has(key) && team?.error}
-				<div class="text-xs text-gray-500 dark:text-gray-400">{team.error}</div>
 			{/if}
-		{:else if error}
-			<div class="text-xs text-amber-700 dark:text-amber-300">读不到团队的进度：{error}</div>
-		{:else}
-			<div class="tm-card-quiet h-16 animate-pulse" aria-busy="true" />
-		{/if}
-		{#if team && key !== 'done'}
-			<TeamChatActions {teamId} {team} {live} stageKey={key} on:changed={leadChanged} />
-		{/if}
-		{#if showLead}
-			<LeadDesk {teamId} change={leadChange} phase={livePhase} on:changed={leadChanged} />
-		{:else if canTalk}
-			<button
-				type="button"
-				class="self-start text-xs font-medium text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100"
-				on:click={() => (leadOpen = true)}
-				data-team-chat-talk
-			>
-				{livePhase === 'completed' ? '还要补什么？对负责人说 →' : '追加或调整？对负责人说 →'}
-			</button>
-		{/if}
+		</div>
 	{/if}
 </div>
 

@@ -17,6 +17,8 @@
 	} from '$lib/apis/auto';
 	import ModeDispatchCard from '$lib/components/chat/Messages/ModeDispatchCard.svelte';
 	import TeamChatCard from '$lib/components/teams/TeamChatCard.svelte';
+	import SidebarModeIcon from '$lib/components/layout/Sidebar/SidebarModeIcon.svelte';
+	import { elapsed, now } from '$lib/components/teams/clock';
 	export let id: string;
 	export let history: any = null;
 	let row: AutoRoute | null = null;
@@ -29,6 +31,7 @@
 	let error = '';
 	let timer: ReturnType<typeof setTimeout> | undefined;
 	let destroyed = false;
+	let reasonExpanded = false;
 	async function load() {
 		try {
 			row = await getAutoRoute(localStorage.token, id);
@@ -47,6 +50,10 @@
 	$: canRetry = !!row && RETRYABLE.has(row.status);
 	$: failed = !!row && !row.blocked && (row.status === 'error' || row.status === 'interrupted');
 	$: pending = !row || routePending(row);
+	$: hasChildCard = Boolean(row?.target_id && row.target_status !== 'deleted');
+	$: routeStartedAt = row?.created_at ? (row.created_at > 1e12 ? row.created_at / 1000 : row.created_at) : null;
+	$: routingElapsed = pending && routeStartedAt ? Math.max(0, $now - routeStartedAt) : null;
+	$: longReason = (row?.reason?.length ?? 0) > 90;
 	async function retry(mode: 'auto' | AutoMode) {
 		if (retrying) return;
 		retrying = mode;
@@ -79,117 +86,198 @@
 </script>
 
 <section
-	class="not-prose my-3 flex max-w-2xl flex-col gap-3"
+	class="not-prose my-3 flex max-w-2xl flex-col {hasChildCard ? 'gap-0' : 'gap-2.5'}"
 	data-teams-ui
 	data-auto-dispatch
 	aria-live="polite"
 >
-	<div class="tm-card overflow-hidden {pending ? 'tm-live' : ''}">
-		<div class="flex items-center gap-3 px-4 py-3">
-			<span
-				class="grid size-10 shrink-0 place-items-center rounded-xl bg-cyan-500/10 text-cyan-700 dark:text-cyan-300"
-				aria-hidden="true"
-			>
-				<svg
-					width="22"
-					height="22"
-					viewBox="0 0 24 24"
-					fill="none"
-					stroke="currentColor"
-					stroke-width="1.7"
-					stroke-linecap="round"
-					stroke-linejoin="round"
-					><path d="M5 12h5m0 0 5-6h4m-9 6 5 6h4" /><circle cx="4" cy="12" r="2" /><path
-						d="m17 4 3 2-3 2m0 8 3 2-3 2"
-					/></svg
+	{#if hasChildCard}
+		<!-- Compact connected routing strip once the target workbench card is rendered below -->
+		<div class="wb-route-strip" data-auto-strip>
+			<div class="flex items-start gap-2.5">
+				<span
+					class="mt-0.5 grid size-6 shrink-0 place-items-center rounded-lg bg-cyan-500/12 text-cyan-700 dark:bg-cyan-400/15 dark:text-cyan-300"
+					aria-hidden="true"
 				>
-			</span>
-			<div class="min-w-0 flex-1">
-				<div class="flex flex-wrap items-center gap-2">
-					<strong class="text-sm font-semibold text-gray-900 dark:text-gray-100"
-						>自动分流{row?.mode ? ` → ${routeTarget(row)}` : ''}</strong
-					><span
-						class="rounded-full px-2 py-0.5 text-xs {failed
-							? 'bg-red-500/10 text-red-600 dark:text-red-400'
-							: row?.blocked
-								? 'bg-amber-500/10 text-amber-700 dark:text-amber-400'
-								: 'bg-gray-500/10 text-gray-500 dark:text-gray-400'}"
-						>{row
-							? row.status === 'dispatched'
+					<SidebarModeIcon mode="auto" className="size-3.5" />
+				</span>
+				<div class="min-w-0 flex-1">
+					<div class="flex flex-wrap items-center gap-1.5 text-xs">
+						<strong class="font-semibold text-gray-900 dark:text-gray-100"
+							>自动分流{row?.mode ? ` → ${routeTarget(row)}` : ''}</strong
+						>
+						<span
+							class="rounded-full bg-cyan-500/10 px-2 py-0.5 text-[11px] font-medium text-cyan-700 dark:text-cyan-300"
+							>{row?.status === 'dispatched'
 								? `已交给${routeTarget(row) || '工作台'}`
-								: routeStatus(row)
-							: '正在连接'}</span
-					>{#if row?.degraded}<span
-							class="rounded-full bg-amber-500/10 px-2 py-0.5 text-xs text-amber-700 dark:text-amber-400"
-							data-auto-degraded
-							title="想用的方式暂时不可用，由这种方式代替">临时改用</span
-						>{/if}
+								: routeStatus(row)}</span
+						>
+						{#if row?.degraded}<span
+								class="rounded-full bg-amber-500/12 px-2 py-0.5 text-[11px] font-medium text-amber-700 dark:text-amber-300"
+								data-auto-degraded
+								title="想用的方式暂时不可用，由这种方式代替">临时改用</span
+							>{/if}
+						{#if row?.routing_model}<span
+								class="truncate text-[11px] text-gray-400 dark:text-gray-500"
+								title={routingModelName}
+								data-auto-routing-model
+								>· 由 {routingModelName} 判断{row?.decision?.used ? '（辅助决策）' : ''}</span
+							>{/if}
+					</div>
+					{#if row?.reason}
+						<p
+							class="mt-1 text-xs leading-5 text-gray-600 dark:text-gray-300 {longReason && !reasonExpanded
+								? 'line-clamp-2'
+								: ''}"
+						>
+							{row.reason}
+						</p>
+						{#if longReason}
+							<button
+								type="button"
+								class="mt-0.5 text-[11px] font-medium text-cyan-700 hover:underline dark:text-cyan-300"
+								on:click={() => (reasonExpanded = !reasonExpanded)}
+								>{reasonExpanded ? '收起依据' : '展开分流依据'}</button
+							>
+						{/if}
+					{/if}
+					{#if row?.decision?.fallback}<p
+							class="mt-0.5 text-[11px] text-amber-600 dark:text-amber-400"
+							data-decision-note
+							data-fallback="true"
+						>
+							辅助决策 {row.decision.name} 没用上（{row.decision.reason || '调用失败'}），按原来的方式选择
+						</p>{/if}
 				</div>
+				<a
+					href={`/auto?request=${encodeURIComponent(id)}`}
+					class="tm-btn-ghost shrink-0 !px-2 !py-1 !text-[11px]"
+					title="在自动分流工作台查看这次分流">分流记录 ↗</a
+				>
+			</div>
+			{#if error || row?.error}<p
+					role="alert"
+					class="mt-1.5 pl-8 text-xs {row?.blocked && !error
+						? 'text-amber-700 dark:text-amber-400'
+						: 'text-red-500'}"
+					data-auto-blocked={row?.blocked ? 'true' : undefined}
+				>
+					{error || row?.error}
+				</p>{/if}
+		</div>
+		<div class="wb-route-connector" aria-hidden="true" />
+	{:else}
+		<div class="wb-shell {pending ? 'tm-live' : ''}" data-wb-kind="auto">
+			<div class="wb-shell-head">
+				<span
+					class="grid size-9 shrink-0 place-items-center rounded-xl bg-cyan-500/12 text-cyan-700 dark:bg-cyan-400/15 dark:text-cyan-300"
+					aria-hidden="true"
+				>
+					<SidebarModeIcon mode="auto" className="size-5" />
+				</span>
+				<div class="min-w-0 flex-1">
+					<div class="flex flex-wrap items-center gap-2">
+						<strong class="text-sm font-semibold text-gray-900 dark:text-gray-100"
+							>自动分流{row?.mode ? ` → ${routeTarget(row)}` : ''}</strong
+						><span
+							class="rounded-full px-2 py-0.5 text-xs font-medium {failed
+								? 'bg-red-500/10 text-red-600 dark:text-red-400'
+								: row?.blocked
+									? 'bg-amber-500/12 text-amber-700 dark:text-amber-400'
+									: 'bg-cyan-500/10 text-cyan-700 dark:text-cyan-300'}"
+							>{row
+								? row.status === 'dispatched'
+									? `已交给${routeTarget(row) || '工作台'}`
+									: routeStatus(row)
+								: '正在连接'}</span
+						>{#if row?.degraded}<span
+								class="rounded-full bg-amber-500/12 px-2 py-0.5 text-xs font-medium text-amber-700 dark:text-amber-400"
+								data-auto-degraded
+								title="想用的方式暂时不可用，由这种方式代替">临时改用</span
+							>{/if}
+						{#if routingElapsed !== null}
+							<span class="tm-num text-[11px] text-gray-400 dark:text-gray-500"
+								>已用 {elapsed(routingElapsed)}</span
+							>
+						{/if}
+					</div>
+					{#if row?.routing_model}<p
+							class="mt-0.5 truncate text-[11px] text-gray-500 dark:text-gray-400"
+							title={routingModelName}
+							data-auto-routing-model
+						>
+							由 {routingModelName} 判断{row?.decision?.used ? '（辅助决策模型）' : ''}
+						</p>{/if}
+				</div>
+				<a
+					href={`/auto?request=${encodeURIComponent(id)}`}
+					class="tm-btn-ghost shrink-0 !text-xs"
+					title="在自动分流工作台查看这次分流">分流记录 ↗</a
+				>
+			</div>
+			<div class="wb-shell-body space-y-2">
 				<p
-					class="mt-1 text-xs leading-5 text-gray-500 dark:text-gray-400 {!row?.reason && pending
+					class="text-xs leading-5 text-gray-600 dark:text-gray-300 {!row?.reason && pending
 						? 'tm-shimmer'
 						: ''}"
 				>
 					{row?.reason || '正在理解目标、附件和约束，选择合适的处理方式…'}
 				</p>
-				{#if row?.routing_model}<p
-						class="mt-0.5 truncate text-[11px] text-gray-400"
-						title={routingModelName}
-						data-auto-routing-model
-					>
-						由 {routingModelName} 判断{row?.decision?.used ? '（辅助决策模型）' : ''}
-					</p>{/if}
 				{#if row?.decision?.fallback}<p
-						class="mt-0.5 text-[11px] text-amber-600 dark:text-amber-400"
+						class="text-[11px] text-amber-600 dark:text-amber-400"
 						data-decision-note
 						data-fallback="true"
 					>
 						辅助决策 {row.decision.name} 没用上（{row.decision.reason ||
 							'调用失败'}），按原来的方式选择
 					</p>{/if}
-			</div>
-			<a
-				href={`/auto?request=${encodeURIComponent(id)}`}
-				class="tm-btn-ghost shrink-0 !text-xs"
-				title="在自动分流工作台查看这次分流">分流记录 ↗</a
-			>
-		</div>
-		{#if error || row?.error}<p
-				role="alert"
-				class="px-4 pb-3 text-xs {row?.blocked && !error
-					? 'text-amber-700 dark:text-amber-400'
-					: 'text-red-500'}"
-				data-auto-blocked={row?.blocked ? 'true' : undefined}
-			>
-				{error || row?.error}
-			</p>{/if}
-		{#if row?.status === 'routing'}<div class="px-4 pb-3">
-				<button class="tm-btn-ghost" on:click={cancel}>取消分流</button>
-			</div>{/if}
-		{#if canRetry}<div class="flex flex-wrap items-center gap-2 px-4 pb-3" data-auto-retry>
-				<button
-					type="button"
-					class="tm-btn-primary !px-2.5 !py-1 !text-xs"
-					disabled={!!retrying}
-					on:click={() => retry('auto')}
-					data-auto-retry-mode="auto">{retrying === 'auto' ? '分流中…' : '重新分流'}</button
-				>
-				<span class="text-xs text-gray-500">或直接交给</span>
-				{#each MODES as mode}
-					<button
-						type="button"
-						class="tm-btn-ghost !text-xs"
-						disabled={!!retrying}
-						on:click={() => retry(mode)}
-						data-auto-retry-mode={mode}>{MODE_LABEL[mode]}</button
+				{#if error || row?.error}<p
+						role="alert"
+						class="text-xs {row?.blocked && !error
+							? 'text-amber-700 dark:text-amber-400'
+							: 'text-red-500'}"
+						data-auto-blocked={row?.blocked ? 'true' : undefined}
 					>
-				{/each}
-			</div>{/if}
-		{#if row?.target_status === 'deleted'}<p class="px-4 pb-3 text-xs text-gray-500">
-				目标任务已删除，分流依据仍保留在记录中。
-			</p>{/if}
-	</div>
-	{#if row?.target_id && row.target_status !== 'deleted'}
+						{error || row?.error}
+					</p>{/if}
+				{#if row?.target_status === 'deleted'}<p class="text-xs text-gray-500">
+						目标任务已删除，分流依据仍保留在记录中。
+					</p>{/if}
+			</div>
+			{#if row?.status === 'routing' || canRetry}
+				<div class="wb-shell-foot">
+					{#if row?.status === 'routing'}
+						<div class="flex justify-end">
+							<button class="tm-btn-ghost tm-btn-danger !text-xs" on:click={cancel}>取消分流</button>
+						</div>
+					{/if}
+					{#if canRetry}<div class="flex flex-wrap items-center gap-1.5" data-auto-retry>
+							<button
+								type="button"
+								class="tm-btn-primary !px-2.5 !py-1 !text-xs"
+								disabled={!!retrying}
+								on:click={() => retry('auto')}
+								data-auto-retry-mode="auto">{retrying === 'auto' ? '分流中…' : '重新分流'}</button
+							>
+							<span class="px-0.5 text-xs text-gray-500">或直接交给</span>
+							{#each MODES as mode}
+								<button
+									type="button"
+									class="tm-btn-ghost !text-xs"
+									disabled={!!retrying}
+									on:click={() => retry(mode)}
+									data-auto-retry-mode={mode}
+								>
+									<SidebarModeIcon mode={mode === 'team' ? 'teams' : mode} className="size-3.5" />
+									{MODE_LABEL[mode]}
+								</button>
+							{/each}
+						</div>{/if}
+				</div>
+			{/if}
+		</div>
+	{/if}
+	{#if hasChildCard && row?.target_id}
 		{#if row.mode === 'team'}<TeamChatCard teamId={row.target_id} {history} />
 		{:else if row.mode === 'answer' || row.mode === 'discuss'}<ModeDispatchCard
 				kind={row.mode}

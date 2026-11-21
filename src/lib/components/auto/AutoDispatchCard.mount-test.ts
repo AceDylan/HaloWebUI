@@ -108,4 +108,25 @@ describe('AutoDispatchCard', () => {
 		await until(() => !!target.querySelector('[data-auto-degraded]'));
 		expect(target.textContent).toContain('临时改用');
 	});
+
+	it('renders a compact connected routing strip once dispatched to a workbench card', async () => {
+		(globalThis as any).localStorage.token = 'tok';
+		const { default: Card } = await import('./AutoDispatchCard.svelte');
+		target = document.createElement('div');
+		document.body.appendChild(target);
+		api.getAutoRoute.mockResolvedValue(
+			row({
+				status: 'dispatched',
+				mode: 'answer',
+				target_id: 'ans-1',
+				target_status: 'active',
+				error: '',
+				reason: '单一专业问题，交给精答挑专家直接回答'
+			})
+		);
+		app = new Card({ target, props: { id: 'r4', history: { messages: {} } } });
+		await until(() => !!target.querySelector('[data-auto-strip]'));
+		expect(target.querySelector('[data-auto-strip]')?.textContent).toContain('自动分流 → 精答');
+		expect(target.querySelector('[data-mode-dispatch-card="answer"]')).toBeTruthy();
+	});
 });

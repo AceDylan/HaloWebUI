@@ -46,14 +46,25 @@ const mount = async (Component: any, props: Record<string, unknown> = {}) => {
 };
 
 describe('ModeShortcuts', () => {
-	it('hands the draft and its files to the mode picked', async () => {
+	it('hands the draft and its files to the mode picked, including 自动分流 and live counts', async () => {
+		const { setModeLive } = await import('$lib/components/scifi/mode-relay');
+		setModeLive('teams', 2);
 		const { default: ModeShortcuts } = await import('./ModeShortcuts.svelte');
 		const target = await mount(ModeShortcuts, {
 			prompt: '画一只柴犬',
 			files: [{ id: 'f1', name: 'dog.png', type: 'image', status: 'uploaded' }]
 		});
 		expect(target.textContent).toContain('把这句话交给');
-		expect(target.querySelectorAll('[data-halo-mode-shortcut]').length).toBe(5);
+		expect(target.querySelector('[data-halo-shortcuts-cargo]')?.textContent).toContain('1 个附件');
+		expect(target.querySelector('[data-halo-mode-shortcut-live="teams"]')?.textContent).toBe('2');
+		expect(target.querySelectorAll('[data-halo-mode-shortcut]').length).toBe(6);
+		(target.querySelector('[data-halo-mode-shortcut="auto"]') as any).click();
+		expect(nav.goto).toHaveBeenCalledWith('/auto');
+		expect(JSON.parse(sessionStorage.getItem('halo.handoff')!)).toMatchObject({
+			to: 'auto',
+			text: '画一只柴犬',
+			files: [{ id: 'f1', name: 'dog.png', type: 'image' }]
+		});
 		(target.querySelector('[data-halo-mode-shortcut="studio"]') as any).click();
 		expect(nav.goto).toHaveBeenCalledWith('/workspace/images?tab=workbench');
 		const entry = JSON.parse(sessionStorage.getItem('halo.handoff')!);
@@ -61,15 +72,22 @@ describe('ModeShortcuts', () => {
 		(target.querySelector('[data-halo-mode-shortcut="answer"]') as any).click();
 		expect(nav.goto).toHaveBeenLastCalledWith('/answer');
 		expect(JSON.parse(sessionStorage.getItem('halo.handoff')!)).toMatchObject({ to: 'answer', text: '画一只柴犬' });
+		setModeLive('teams', 0);
 	});
 
-	it('offers only what the account may use', async () => {
+	it('offers only what the account may use, and recognizes attachment-only drafts', async () => {
 		stores.config.set({ features: { enable_agent_teams: false, enable_image_generation: true } } as any);
 		stores.user.set({ id: 'u2', role: 'user', permissions: { features: { image_generation: false } } } as any);
 		const { default: ModeShortcuts } = await import('./ModeShortcuts.svelte');
 		const target = await mount(ModeShortcuts, { prompt: '' });
-		expect([...target.querySelectorAll('[data-halo-mode-shortcut]')].map((el: any) => el.getAttribute('data-halo-mode-shortcut'))).toEqual(['answer', 'discuss', 'video']);
-		expect(target.textContent).toContain('也可以');
+		expect([...target.querySelectorAll('[data-halo-mode-shortcut]')].map((el: any) => el.getAttribute('data-halo-mode-shortcut'))).toEqual(['auto', 'answer', 'discuss', 'video']);
+		expect(target.textContent).toContain('工作台');
+		const withFile = await mount(ModeShortcuts, {
+			prompt: '',
+			files: [{ id: 'f2', name: 'doc.pdf', type: 'file', status: 'uploaded' }]
+		});
+		expect(withFile.querySelector('[data-halo-mode-shortcuts]')?.hasAttribute('data-carrying')).toBe(true);
+		expect(withFile.querySelector('[data-halo-shortcuts-cargo]')?.textContent).toContain('1 个附件');
 	});
 });
 

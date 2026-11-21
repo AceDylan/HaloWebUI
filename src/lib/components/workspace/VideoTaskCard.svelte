@@ -97,91 +97,93 @@
 </script>
 
 <div
-	class="vt-card not-prose flex max-w-2xl flex-col gap-2 {highlight ? 'vt-highlight' : ''}"
+	class="vt-card not-prose max-w-2xl {highlight ? 'vt-highlight' : ''}"
 	data-teams-ui
 	data-video-task={task.chatId}
 	data-video-task-state={task.state}
 	data-video-task-where={where}
 >
-	<div class="flex min-w-0 items-center gap-2.5">
-		<span class="vt-tile size-[32px] text-[15px] {live ? 'tm-live' : ''}" aria-hidden="true">🎬</span>
-		<div class="min-w-0 flex-1">
-			<div class="flex min-w-0 items-center gap-2">
-				<span class="truncate text-sm font-semibold text-gray-900 dark:text-gray-100" title={task.title}
-					>{task.title}</span
-				>
-				<span class="shrink-0"><StatusChip status={CHIP[task.state]} label={STATE_LABEL[task.state]} size="sm" /></span>
+	<div class="wb-shell {live ? 'tm-live' : ''}" data-wb-kind="video">
+		<div class="wb-shell-head">
+			<span class="vt-tile size-[32px] text-[15px] {live ? 'tm-live' : ''}" aria-hidden="true">🎬</span>
+			<div class="min-w-0 flex-1">
+				<div class="flex min-w-0 items-center gap-2">
+					<span class="truncate text-sm font-semibold text-gray-900 dark:text-gray-100" title={task.title}
+						>{task.title}</span
+					>
+					<span class="shrink-0"><StatusChip status={CHIP[task.state]} label={STATE_LABEL[task.state]} size="sm" /></span>
+				</div>
+				<div class="mt-0.5 truncate text-[11px] text-gray-500 dark:text-gray-400" data-video-task-facts>{facts.join(' · ')}</div>
 			</div>
-			<div class="truncate text-[11px] text-gray-500 dark:text-gray-400" data-video-task-facts>{facts.join(' · ')}</div>
-		</div>
-		{#if where === 'studio'}
-			<a href={chatHref} class="tm-btn-ghost shrink-0 !text-xs" data-video-task-chat>打开对话 ↗</a>
-		{:else}
-			<a href={studioHref} class="tm-btn-ghost shrink-0 !text-xs" data-video-task-studio>在视频工作台看 ↗</a>
-		{/if}
-	</div>
-
-	<section class="vt-stage tm-card px-4 py-3 {live ? 'tm-live' : ''}" data-tone={tone} aria-label="视频任务的进度">
-		<ol class="mb-2.5 flex list-none items-center p-0" aria-label="步骤">
-			{#each steps as step, i (step.key)}
-				<li class="vt-step flex shrink-0 items-center gap-1.5" data-step={step.key} data-state={step.state} aria-current={step.state === 'active' ? 'step' : undefined}>
-					<span class="vt-dot grid size-[18px] place-items-center rounded-full" aria-hidden="true">
-						{#if step.state === 'done'}
-							<svg class="size-2.5" viewBox="0 0 12 12" fill="none"
-								><path d="m2.5 6.3 2.2 2.2 4.8-5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" /></svg
-							>
-						{:else if step.state === 'failed'}
-							<svg class="size-2.5" viewBox="0 0 12 12" fill="none"
-								><path d="m3.5 3.5 5 5m0-5-5 5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" /></svg
-							>
-						{:else}
-							<span class="vt-core size-1.5 rounded-full" />
-						{/if}
-					</span>
-					<span class="vt-label whitespace-nowrap text-xs">{step.label}</span>
-				</li>
-				{#if i < steps.length - 1}
-					<li class="vt-bar mx-1.5 h-px min-w-3 flex-1" data-state={step.state === 'done' ? 'done' : 'pending'} aria-hidden="true" />
-				{/if}
-			{/each}
-		</ol>
-
-		<div class="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-			<p class="min-w-0 flex-1 basis-48 break-words text-sm text-gray-800 dark:text-gray-100" data-video-task-now>
-				<span class={live ? 'tm-shimmer' : ''}>{task.now}</span>
-			</p>
-			{#if spent !== null || took !== null}
-				<span class="tm-num shrink-0 text-xs text-gray-500 dark:text-gray-400" data-video-task-clock
-					>{spent !== null ? `已用 ${elapsed(spent)}` : `用时 ${elapsed(took ?? 0)}`}</span
-				>
+			{#if where === 'studio'}
+				<a href={chatHref} class="tm-btn-ghost shrink-0 !text-xs" data-video-task-chat>打开对话 ↗</a>
+			{:else}
+				<a href={studioHref} class="tm-btn-ghost shrink-0 !text-xs" data-video-task-studio>在视频工作台看 ↗</a>
 			{/if}
 		</div>
 
-		{#if live}
-			<div class="mt-2 flex justify-end">
-				<button
-					type="button"
-					class="rounded-lg px-1 text-[11px] text-gray-400 transition hover:text-red-600 disabled:opacity-60 dark:hover:text-red-400"
-					disabled={stopping}
-					on:click={() => dispatch('stop', task)}
-					data-video-task-stop>{stopping ? '停止中…' : '停止'}</button
-				>
+		<section class="vt-stage wb-shell-body" data-tone={tone} aria-label="视频任务的进度">
+			<ol class="mb-2.5 flex list-none items-center p-0" aria-label="步骤">
+				{#each steps as step, i (step.key)}
+					<li class="vt-step flex shrink-0 items-center gap-1.5" data-step={step.key} data-state={step.state} aria-current={step.state === 'active' ? 'step' : undefined}>
+						<span class="vt-dot grid size-[18px] place-items-center rounded-full" aria-hidden="true">
+							{#if step.state === 'done'}
+								<svg class="size-2.5" viewBox="0 0 12 12" fill="none"
+									><path d="m2.5 6.3 2.2 2.2 4.8-5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" /></svg
+								>
+							{:else if step.state === 'failed'}
+								<svg class="size-2.5" viewBox="0 0 12 12" fill="none"
+									><path d="m3.5 3.5 5 5m0-5-5 5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" /></svg
+								>
+							{:else}
+								<span class="vt-core size-1.5 rounded-full" />
+							{/if}
+						</span>
+						<span class="vt-label whitespace-nowrap text-xs">{step.label}</span>
+					</li>
+					{#if i < steps.length - 1}
+						<li class="vt-bar mx-1.5 h-px min-w-3 flex-1" data-state={step.state === 'done' ? 'done' : 'pending'} aria-hidden="true" />
+					{/if}
+				{/each}
+			</ol>
+
+			<div class="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+				<p class="min-w-0 flex-1 basis-48 break-words text-sm text-gray-800 dark:text-gray-100" data-video-task-now>
+					<span class={live ? 'tm-shimmer' : ''}>{task.now}</span>
+				</p>
+				{#if spent !== null || took !== null}
+					<span class="tm-num shrink-0 text-xs text-gray-500 dark:text-gray-400" data-video-task-clock
+						>{spent !== null ? `已用 ${elapsed(spent)}` : `用时 ${elapsed(took ?? 0)}`}</span
+					>
+				{/if}
 			</div>
-		{:else if where === 'studio'}
-			<div class="mt-2 flex justify-end">
-				<button
-					type="button"
-					class="rounded-lg px-1 text-[11px] text-gray-400 transition hover:text-red-600 disabled:opacity-60 dark:hover:text-red-400"
-					disabled={deleting}
-					title="删除这个任务的对话和它做出的视频文件，释放空间"
-					on:click={() => dispatch('delete', task)}
-					data-video-task-delete>{deleting ? '删除中…' : '删除'}</button
-				>
-			</div>
-		{/if}
+
+			{#if live}
+				<div class="mt-2.5 flex justify-end">
+					<button
+						type="button"
+						class="tm-btn-ghost tm-btn-danger !px-2 !py-0.5 !text-[11px]"
+						disabled={stopping}
+						on:click={() => dispatch('stop', task)}
+						data-video-task-stop>{stopping ? '停止中…' : '停止'}</button
+					>
+				</div>
+			{:else if where === 'studio'}
+				<div class="mt-2 flex justify-end">
+					<button
+						type="button"
+						class="rounded-lg px-1 text-[11px] text-gray-400 transition hover:text-red-600 disabled:opacity-60 dark:hover:text-red-400"
+						disabled={deleting}
+						title="删除这个任务的对话和它做出的视频文件，释放空间"
+						on:click={() => dispatch('delete', task)}
+						data-video-task-delete>{deleting ? '删除中…' : '删除'}</button
+					>
+				</div>
+			{/if}
+		</section>
 
 		{#if task.state === 'done' && task.videos.length}
-			<div class="vt-foot mt-3 pt-2.5" data-video-task-videos>
+			<div class="wb-shell-foot" data-video-task-videos>
 				{#if where === 'studio'}
 					<div class="grid gap-2 {task.videos.length > 1 ? 'sm:grid-cols-2' : ''}">
 						{#each task.videos as video (video.id)}
@@ -202,23 +204,44 @@
 						{/each}
 					</div>
 				{:else}
-					<div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-600 dark:text-gray-300">
+					<div class="flex flex-wrap items-center gap-x-2.5 gap-y-1.5 text-xs text-gray-600 dark:text-gray-300">
 						<span class="font-medium text-gray-900 dark:text-gray-100">成片已进视频库</span>
-						<span class="min-w-0 flex-1 truncate">{task.videos.map((v) => v.name).join('、')}</span>
-						<a href="/workspace/videos?tab=library" class="shrink-0 font-medium text-sky-700 hover:underline dark:text-sky-300">视频库 ↗</a>
+						<span class="min-w-0 flex-1 truncate" title={task.videos.map((v) => v.name).join('、')}
+							>{task.videos.map((v) => v.name).join('、')}</span
+						>
+						{#if task.videos.length === 1 && task.videos[0].cover}
+							<a
+								href={task.videos[0].cover}
+								download="{task.videos[0].title || 'video'}-封面.jpg"
+								class="tm-btn-ghost shrink-0 !px-2 !py-0.5 !text-[11px]"
+								data-video-task-cover>封面</a
+							>
+						{/if}
+						{#if task.videos.length === 1}
+							<a
+								href={task.videos[0].url}
+								download={task.videos[0].name}
+								class="tm-btn-ghost shrink-0 !px-2 !py-0.5 !text-[11px]">下载</a
+							>
+						{/if}
+						<a
+							href="/workspace/videos?tab=library"
+							class="tm-btn-ghost shrink-0 !px-2 !py-0.5 !text-[11px] !text-sky-700 dark:!text-sky-300"
+							>视频库 ↗</a
+						>
 					</div>
 				{/if}
 			</div>
 		{:else if task.state === 'done' && task.pcVideos?.length}
 			<!-- made on the home PC and left there (pc-video deliver): where to find it -->
-			<div class="vt-foot mt-3 space-y-1 pt-2.5 text-xs text-gray-600 dark:text-gray-300" data-video-task-pc>
+			<div class="wb-shell-foot space-y-1 text-xs text-gray-600 dark:text-gray-300" data-video-task-pc>
 				<div class="font-medium text-gray-900 dark:text-gray-100">成片在家里电脑</div>
 				{#each task.pcVideos as path (path)}
 					<div class="flex items-center gap-2">
 						<code class="min-w-0 flex-1 truncate rounded bg-gray-100 px-1.5 py-0.5 dark:bg-gray-800" title={path}>{path}</code>
 						<button
 							type="button"
-							class="shrink-0 hover:underline"
+							class="tm-btn-ghost shrink-0 !px-2 !py-0.5 !text-[11px]"
 							on:click={async () => {
 								if (await copyToClipboard(path)) toast.success('已复制路径');
 							}}
@@ -228,7 +251,7 @@
 				{/each}
 			</div>
 		{/if}
-	</section>
+	</div>
 </div>
 
 <style>
@@ -303,9 +326,6 @@
 	}
 	.vt-bar[data-state='done'] {
 		background: hsl(var(--tm-done) / 0.6);
-	}
-	.vt-foot {
-		border-top: 1px solid hsl(var(--tm-line));
 	}
 	@keyframes vt-beat {
 		50% {

@@ -3,6 +3,7 @@
 
 	import { getHermesModelOptions, type HermesModelOptions } from '$lib/apis/hermes';
 	import { user } from '$lib/stores';
+	import SidebarModeIcon from '$lib/components/layout/Sidebar/SidebarModeIcon.svelte';
 	import {
 		EMPTY_HERMES_RUN_OPTIONS,
 		isModeDispatch,
@@ -341,6 +342,7 @@
 				</div>
 				{#each MODES as item}
 					{@const checked = current.dispatch === item.value}
+					{@const modeIcon = item.value === 'team' ? 'teams' : item.value}
 					<button
 						type="button"
 						role="radio"
@@ -350,7 +352,10 @@
 						class="halo-dispatch__choice {item.value === 'auto' ? 'col-span-3' : ''} {checked ? 'is-on' : ''}"
 						on:click={() => update({ dispatch: item.value })}
 					>
-						<span class="halo-dispatch__name">{item.label}</span>
+						<span class="halo-dispatch__name inline-flex items-center gap-1">
+							<SidebarModeIcon mode={modeIcon} className="size-3 shrink-0 opacity-80" />
+							<span>{item.label}</span>
+						</span>
 						<span class="halo-dispatch__sub">{item.sub}</span>
 					</button>
 				{/each}

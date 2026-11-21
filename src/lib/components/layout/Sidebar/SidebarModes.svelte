@@ -45,8 +45,9 @@
 	>
 		{#each modes as mode (mode.key)}
 			<a
-				class="halo-mode-tile relative flex min-w-0 flex-col items-center gap-1 rounded-xl px-1 pt-2 pb-1.5 text-[12px] font-medium transition-colors hover:bg-gray-100 dark:hover:bg-gray-850"
+				class="halo-mode-tile relative flex min-w-0 flex-col items-center gap-1 rounded-xl border border-transparent px-1 pt-2 pb-1.5 text-[11.5px] font-medium transition hover:bg-gray-100/90 dark:hover:bg-gray-850"
 				class:is-active={mode.active}
+				data-accent={mode.key}
 				href={mode.href}
 				title={mode.title}
 				aria-current={mode.active ? 'page' : undefined}
@@ -58,7 +59,7 @@
 				data-sidebar-teams={mode.key === 'teams' ? '' : undefined}
 				data-sidebar-studio={mode.key === 'studio' ? '' : undefined}
 			>
-				<SidebarModeIcon mode={mode.key} className="size-[18px]" />
+				<SidebarModeIcon mode={mode.key} className="halo-mode-tile__icon size-[17px]" />
 				<span class="truncate">{mode.label}</span>
 				{#if mode.key === 'teams'}<TeamsBadge compact />{:else if mode.key === 'discuss'}<DiscussBadge compact />{:else if mode.key === 'answer'}<AnswerBadge compact />{/if}
 			</a>
@@ -67,7 +68,38 @@
 {/if}
 
 <style>
+	.halo-mode-tile {
+		--tile-hue: 215;
+	}
+	.halo-mode-tile[data-accent='answer'] {
+		--tile-hue: 26;
+	}
+	.halo-mode-tile[data-accent='discuss'] {
+		--tile-hue: 245;
+	}
+	.halo-mode-tile[data-accent='teams'] {
+		--tile-hue: 222;
+	}
+	.halo-mode-tile[data-accent='studio'] {
+		--tile-hue: 342;
+	}
+	.halo-mode-tile[data-accent='video'] {
+		--tile-hue: 288;
+	}
+	.halo-mode-tile:hover :global(.halo-mode-tile__icon),
+	.halo-mode-tile.is-active :global(.halo-mode-tile__icon) {
+		color: hsl(var(--tile-hue) 78% 46%);
+	}
+	:global(.dark) .halo-mode-tile:hover :global(.halo-mode-tile__icon),
+	:global(.dark) .halo-mode-tile.is-active :global(.halo-mode-tile__icon) {
+		color: hsl(var(--tile-hue) 88% 72%);
+	}
 	.halo-mode-tile.is-active {
-		background: rgb(127 127 127 / 0.12);
+		background: hsl(var(--tile-hue) 85% 56% / 0.1);
+		border-color: hsl(var(--tile-hue) 80% 52% / 0.22);
+	}
+	:global(.dark) .halo-mode-tile.is-active {
+		background: hsl(var(--tile-hue) 85% 60% / 0.14);
+		border-color: hsl(var(--tile-hue) 85% 68% / 0.24);
 	}
 </style>

@@ -39,11 +39,15 @@ vi.mock('svelte-sonner', () => ({ toast: toasts }));
 
 // The browser reads the music's length from its metadata; this one says 163.6 s (2:43), or
 // fails to decode a file whose URL says so.
+let audioProbes = 0;
 class FakeAudio {
 	duration = NaN;
 	preload = '';
 	onloadedmetadata: (() => void) | null = null;
 	onerror: (() => void) | null = null;
+	constructor() {
+		audioProbes += 1;
+	}
 	set src(value: string) {
 		setTimeout(() => {
 			if (value.includes('broken')) this.onerror?.();
@@ -54,6 +58,7 @@ class FakeAudio {
 		}, 1);
 	}
 	removeAttribute() {}
+	load() {}
 }
 
 const dropOn = async (el: any, file: File) => {
@@ -130,6 +135,7 @@ beforeEach(() => {
 	api.getMusicFiles.mockResolvedValue([]);
 	upload.uploadFileReliably.mockReset();
 	Object.values(toasts).forEach((fn) => fn.mockClear());
+	audioProbes = 0;
 	(globalThis as any).Audio = FakeAudio;
 	(globalThis as any).URL.createObjectURL ??= () => 'blob:local';
 	(globalThis as any).URL.revokeObjectURL ??= () => {};
@@ -379,19 +385,35 @@ describe('Videos', () => {
 		expect(target.querySelector('[data-video-start]').disabled).toBe(false);
 	});
 
-	it('picks music uploaded before, and takes it out again', async () => {
+	it('picks music uploaded before without a second audio probe, reads metadata from the player, and handles errors', async () => {
 		api.getVideoPage.mockResolvedValue({ items: [], next: null });
-		api.getMusicFiles.mockResolvedValue([{ id: 'm1', name: 'old.mp3', size: 1024, createdAt: 1 }]);
+		api.getMusicFiles.mockResolvedValue([
+			{ id: 'm1', name: 'old.mp3', size: 1024, createdAt: 2 },
+			{ id: 'm2', name: 'broken.mp3', size: 512, createdAt: 1 }
+		]);
 		const target = await mount();
 		await typeIdea(target, '做个片头');
 		target.querySelector('[data-video-music-pick="m1"]').click();
 		await sleep(20);
-		expect(target.querySelector('[data-video-music-player]').getAttribute('src')).toBe('/api/v1/files/m1/content');
+		// Must not spawn a parallel new Audio() probe for the same URL (Chromium HTTP cache lock deadlock)
+		expect(audioProbes).toBe(0);
+		const player = target.querySelector('[data-video-music-player]');
+		expect(player.getAttribute('src')).toBe('/api/v1/files/m1/content');
+		Object.defineProperty(player, 'duration', { value: 163.6, configurable: true });
+		player.dispatchEvent(new Event('loadedmetadata'));
+		await sleep(10);
 		expect(target.querySelector('[data-video-brief] pre').textContent).toContain('音乐文件：old.mp3（2:43）');
 		target.querySelector('[data-video-music-remove]').click();
 		await sleep(10);
 		expect(target.querySelector('[data-video-brief] pre').textContent).not.toContain('背景音乐');
 		expect(target.querySelector('[data-video-music-pick="m1"]')).toBeTruthy();
+		// If the player itself fails to decode/fetch, clear the selection and report the error
+		target.querySelector('[data-video-music-pick="m2"]').click();
+		await sleep(10);
+		target.querySelector('[data-video-music-player]').dispatchEvent(new Event('error'));
+		await sleep(10);
+		expect(target.querySelector('[data-video-music-picked]')).toBeFalsy();
+		expect(toasts.error).toHaveBeenLastCalledWith('「broken.mp3」读不出来，换一首或重新上传');
 	});
 
 	it('says why it cannot start without a Hermes model', async () => {

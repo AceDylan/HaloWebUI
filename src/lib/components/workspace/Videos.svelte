@@ -129,10 +129,12 @@
 
 	// ---- background music: the user's MP3, chosen before the video is made ----------------------
 	type Music = {
+		key: number;
 		id: string;
 		name: string;
 		size: number;
 		seconds: number | null;
+		reading?: boolean;
 		url: string;
 		uploading?: boolean;
 		progress?: number;
@@ -381,10 +383,16 @@
 		new Promise((resolve) => {
 			if (typeof Audio === 'undefined') return resolve({ playable: true, seconds: null });
 			const audio = new Audio();
+			let settled = false;
 			const done = (playable: boolean) => {
+				if (settled) return;
+				settled = true;
 				clearTimeout(timer);
 				const seconds = playable && Number.isFinite(audio.duration) && audio.duration > 0 ? audio.duration : null;
+				audio.onloadedmetadata = null;
+				audio.onerror = null;
 				audio.removeAttribute('src');
+				audio.load?.();
 				resolve({ playable, seconds });
 			};
 			const timer = setTimeout(() => done(false), ms);
@@ -419,7 +427,7 @@
 		}
 		dropMusic();
 		const pick = musicPick;
-		const item: Music = { id: '', name: file.name, size: file.size, seconds, url: local, uploading: true, progress: 0 };
+		const item: Music = { key: pick, id: '', name: file.name, size: file.size, seconds, url: local, uploading: true, progress: 0 };
 		music = item;
 		try {
 			const { file: stored } = await uploadFileReliably(localStorage.token, file, {
@@ -448,21 +456,46 @@
 		}
 	};
 
-	/** An MP3 uploaded before. */
-	const pickMusic = async (picked: MusicFile) => {
+	/** An MP3 uploaded before: let the rendered <audio> player read its metadata directly so the
+	 * browser never opens two concurrent range requests for the same URL (which hits Chromium's
+	 * 20 s HTTP cache lock timeout and makes a second probe time out). */
+	const pickMusic = (picked: MusicFile) => {
 		dropMusic();
-		const pick = musicPick;
-		const item: Music = { id: picked.id, name: picked.name, size: picked.size, seconds: null, url: fileUrl(picked.id) };
-		music = item;
-		const { playable, seconds } = await readAudio(item.url);
-		if (pick !== musicPick) return;
-		if (!playable) {
-			music = null;
-			toast.error(`「${picked.name}」读不出来，换一首或重新上传`);
-			return;
-		}
-		item.seconds = seconds;
-		music = item;
+		const key = musicPick;
+		music = {
+			key,
+			id: picked.id,
+			name: picked.name,
+			size: picked.size,
+			seconds: null,
+			reading: true,
+			url: fileUrl(picked.id)
+		};
+	};
+
+	const onMusicMetadata = (key: number, node: HTMLAudioElement | null) => {
+		if (!music || music.key !== key) return;
+		const duration = node?.duration;
+		const seconds = typeof duration === 'number' && Number.isFinite(duration) && duration > 0 ? duration : music.seconds;
+		music = { ...music, seconds, reading: false };
+	};
+
+	const onMusicError = (key: number) => {
+		if (!music || music.key !== key || music.url.startsWith('blob:')) return;
+		const name = music.name;
+		dropMusic();
+		toast.error(`「${name}」读不出来，换一首或重新上传`);
+	};
+
+	const musicPlayer = (node: HTMLAudioElement, key: number) => {
+		if (node.readyState >= 1) onMusicMetadata(key, node);
+		return {
+			destroy: () => {
+				node.pause?.();
+				node.removeAttribute('src');
+				node.load?.();
+			}
+		};
 	};
 
 	// 「跟随音乐」 among the lengths: the video as long as the MP3 (picked here when there is none yet)
@@ -1128,6 +1161,7 @@
 				</div>
 
 				{#if music}
+					{@const key = music.key}
 					<div class="flex items-center gap-3 rounded-xl bg-gray-50 p-2.5 ring-1 ring-gray-200/70 dark:bg-gray-900/60 dark:ring-white/10" data-video-music-picked={music.id || 'uploading'}>
 						<span class="relative grid size-10 shrink-0 place-items-center rounded-lg bg-gray-900 text-white dark:bg-white dark:text-gray-900" aria-hidden="true">
 							<svg class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13" /><circle cx="6" cy="18" r="3" /><circle cx="18" cy="16" r="3" /></svg>
@@ -1138,12 +1172,24 @@
 						<div class="min-w-0 flex-1">
 							<div class="truncate text-sm font-medium text-gray-800 dark:text-gray-100" title={music.name}>{music.name}</div>
 							<div class="text-xs text-gray-500 dark:text-gray-400">
-								{music.seconds ? clockLabel(music.seconds) : '读取时长…'}{music.size ? ` · ${formatFileSize(music.size)}` : ''}{music.uploading ? ' · 上传中' : ''}
+								{music.seconds ? clockLabel(music.seconds) : music.reading ? '读取时长…' : 'MP3'}{music.size ? ` · ${formatFileSize(music.size)}` : ''}{music.uploading ? ' · 上传中' : ''}
 							</div>
 						</div>
 					</div>
-					<!-- svelte-ignore a11y-media-has-caption -->
-					<audio src={music.url} controls preload="metadata" class="h-9 w-full" data-video-music-player />
+					{#key key}
+						<!-- svelte-ignore a11y-media-has-caption -->
+						<audio
+							src={music.url}
+							controls
+							preload="metadata"
+							class="h-9 w-full"
+							use:musicPlayer={key}
+							on:loadedmetadata={(event) => onMusicMetadata(key, event.currentTarget)}
+							on:durationchange={(event) => onMusicMetadata(key, event.currentTarget)}
+							on:error={() => onMusicError(key)}
+							data-video-music-player
+						/>
+					{/key}
 					{#if !isMv}
 					<div class="flex flex-wrap gap-1.5">
 						<button type="button" class={followsMusic ? chipOn : chip} disabled={musicTooLong} on:click={() => (settings = { ...settings, musicFit: 'full' })} data-video-music-fit="full">

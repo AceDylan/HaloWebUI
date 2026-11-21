@@ -45,12 +45,18 @@
 	}
 	// failed, interrupted or cancelled: route it again here, automatically or in a chosen mode
 	const RETRYABLE = new Set(['error', 'interrupted', 'cancelled']);
-	const MODES: AutoMode[] = ['answer', 'discuss', 'team'];
+	const MODES: AutoMode[] = ['hermes', 'answer', 'discuss', 'team'];
+	const modeIcon = (mode: AutoMode) => (mode === 'team' ? 'teams' : mode);
 	let retrying = '';
 	$: canRetry = !!row && RETRYABLE.has(row.status);
 	$: failed = !!row && !row.blocked && (row.status === 'error' || row.status === 'interrupted');
 	$: pending = !row || routePending(row);
-	$: hasChildCard = Boolean(row?.target_id && row.target_status !== 'deleted');
+	// Handed to Hermes: its answer is this reply itself (or a chat of its own, from a retry
+	// elsewhere): the strip says so and links there when it is another chat.
+	$: toHermes = row?.mode === 'hermes' && row.status === 'dispatched';
+	$: hasChildCard = Boolean(row?.target_id && row.target_status !== 'deleted') && !toHermes;
+	$: compact = hasChildCard || toHermes;
+	$: hermesElsewhere = toHermes && !!row?.target_id && row.target_id !== row.origin_chat_id;
 	$: routeStartedAt = row?.created_at ? (row.created_at > 1e12 ? row.created_at / 1000 : row.created_at) : null;
 	$: routingElapsed = pending && routeStartedAt ? Math.max(0, $now - routeStartedAt) : null;
 	$: longReason = (row?.reason?.length ?? 0) > 90;
@@ -86,12 +92,13 @@
 </script>
 
 <section
-	class="not-prose my-3 flex max-w-2xl flex-col {hasChildCard ? 'gap-0' : 'gap-2.5'}"
+	class="not-prose my-3 flex max-w-2xl flex-col {compact ? 'gap-0' : 'gap-2.5'}"
 	data-teams-ui
 	data-auto-dispatch
+	data-auto-mode={row?.mode ?? undefined}
 	aria-live="polite"
 >
-	{#if hasChildCard}
+	{#if compact}
 		<!-- Compact connected routing strip once the target workbench card is rendered below -->
 		<div class="wb-route-strip" data-auto-strip>
 			<div class="flex items-start gap-2.5">
@@ -99,7 +106,7 @@
 					class="mt-0.5 grid size-6 shrink-0 place-items-center rounded-lg bg-cyan-500/12 text-cyan-700 dark:bg-cyan-400/15 dark:text-cyan-300"
 					aria-hidden="true"
 				>
-					<SidebarModeIcon mode="auto" className="size-3.5" />
+					<SidebarModeIcon mode={toHermes ? 'hermes' : 'auto'} className="size-3.5" />
 				</span>
 				<div class="min-w-0 flex-1">
 					<div class="flex flex-wrap items-center gap-1.5 text-xs">
@@ -149,6 +156,12 @@
 							辅助决策 {row.decision.name} 没用上（{row.decision.reason || '调用失败'}），按原来的方式选择
 						</p>{/if}
 				</div>
+				{#if hermesElsewhere && row?.href}<a
+						href={row.href}
+						class="tm-btn-ghost shrink-0 !px-2 !py-1 !text-[11px]"
+						data-auto-open-hermes
+						title="打开 Hermes 回答的对话">打开对话 →</a
+					>{/if}
 				<a
 					href={`/auto?request=${encodeURIComponent(id)}`}
 					class="tm-btn-ghost shrink-0 !px-2 !py-1 !text-[11px]"
@@ -165,7 +178,7 @@
 					{error || row?.error}
 				</p>{/if}
 		</div>
-		<div class="wb-route-connector" aria-hidden="true" />
+		{#if hasChildCard}<div class="wb-route-connector" aria-hidden="true" />{/if}
 	{:else}
 		<div class="wb-shell {pending ? 'tm-live' : ''}" data-wb-kind="auto">
 			<div class="wb-shell-head">
@@ -268,7 +281,7 @@
 									on:click={() => retry(mode)}
 									data-auto-retry-mode={mode}
 								>
-									<SidebarModeIcon mode={mode === 'team' ? 'teams' : mode} className="size-3.5" />
+									<SidebarModeIcon mode={modeIcon(mode)} className="size-3.5" />
 									{MODE_LABEL[mode]}
 								</button>
 							{/each}

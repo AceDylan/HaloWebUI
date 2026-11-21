@@ -77,7 +77,7 @@ async def settle(id):
 
 def test_durable_retry_and_ownership(env, monkeypatch):
     calls = []
-    async def select(*args):
+    async def select(*args, **kw):
         return ({'mode': 'answer', 'reason': '普通问题', 'execution_requested': False}, {}, set(), [], {})
     async def dispatch(request, user, row, *args):
         calls.append(row['id'])
@@ -107,7 +107,7 @@ def test_cancel_during_selection_prevents_creation(env, monkeypatch):
     monkeypatch.setattr(answers, '_open', lambda *a, **kw: opened.append(kw))
     async def run():
         gate = asyncio.Event()
-        async def select(*args):
+        async def select(*args, **kw):
             await gate.wait()
             return ({'mode': 'answer', 'reason': '普通问题', 'execution_requested': False}, {}, set(), [], {})
         monkeypatch.setattr(api, 'select', select)
@@ -202,7 +202,7 @@ def test_a_team_from_telegram_or_qq_carries_that_chat(env, monkeypatch):
     async def start(*args, **kw):
         captured.append(kw)
         kw['on_created']('t1')
-    async def select(*args):
+    async def select(*args, **kw):
         return ({'mode': 'team', 'reason': '执行', 'execution_requested': True}, {}, set(), [], {})
     monkeypatch.setattr(agent_teams, 'hermes_target', target)
     monkeypatch.setattr(agent_teams, 'input_files', lambda *args: [])
@@ -288,7 +288,7 @@ def test_chat_auto_dispatch_bypasses_normal_hermes_run(monkeypatch):
     from open_webui.utils import auto_dispatch, hermes_agent
     seen = []
     monkeypatch.setattr(hermes_agent, '_resolve_hermes_connection', lambda *args: ('http://hermes.test/v1', '', 'hermes-agent'))
-    async def dispatch(request, form, user, metadata, model):
+    async def dispatch(request, form, user, metadata, model_id, **kw):
         seen.append((form['messages'], metadata['chat_id']))
         return {'status': True, 'task_id': 'auto-task'}
     monkeypatch.setattr(auto_dispatch, 'run_auto_dispatch', dispatch)
@@ -379,9 +379,9 @@ def test_failed_request_is_routed_again_from_its_card(env, monkeypatch):
     posted = []
     monkeypatch.setattr(api.Chats, "upsert_message_to_chat_by_id_and_message_id",
                         lambda chat_id, message_id, fields, **kw: posted.append((chat_id, message_id, fields, kw)))
-    async def failing(*args):
+    async def failing(*args, **kw):
         raise HTTPException(503, "暂时不可用")
-    async def ok(request, user, form, file_info):
+    async def ok(request, user, form, file_info, **kw):
         return ({"mode": form.mode if form.mode != "auto" else "answer", "reason": "重试",
                  "execution_requested": False}, {}, set(), [], {})
     async def dispatch(request, user, row, *args):
@@ -510,7 +510,7 @@ def test_blocked_request_is_reported_on_the_receipt_and_in_the_chat(env, monkeyp
     posted = []
     monkeypatch.setattr(api.Chats, "upsert_message_to_chat_by_id_and_message_id",
                         lambda chat_id, message_id, fields, **kw: posted.append((chat_id, message_id, fields, kw)))
-    async def select(*args):
+    async def select(*args, **kw):
         raise api.RouteBlocked("需要查看真实的仓库或文件，但协作台现在不可用")
     monkeypatch.setattr(api, "select", select)
     async def run():
@@ -578,3 +578,248 @@ def test_an_unsure_decision_model_leaves_the_choice_to_the_classifier():
     assert _brief(unsure.value) == "选精答的把握只有 18%，改由分类模型判断"
     sure = selection_from_answers({"mode": {"choice": "answer", "confidence": 0.8}, "tools": {"noul": 0.1}}, "", "jev-chat")
     assert sure["mode"] == "answer" and "把握 80%" in sure["reason"]
+
+
+# --- 交给 Hermes：日常与本机小事；精答/讨论看不到的先给 Hermes；Hermes 不在时有替补 -----------------
+
+
+def hermes(raw, question="看下 nginx 最近有没有报错", **kwargs):
+    kwargs.setdefault("teams_available", True)
+    kwargs.setdefault("discussion_available", True)
+    kwargs.setdefault("hermes_available", True)
+    return normalize_selection({"reason": "按目标处理", **raw}, question=question, **kwargs)
+
+
+def test_hermes_takes_quick_work_and_what_answer_or_discussion_cannot_see():
+    assert hermes({"mode": "hermes", "needs_tools": True})["mode"] == "hermes"
+    looked = hermes({"mode": "answer", "needs_tools": True}, question="halowebui 容器起来没有")
+    assert looked["mode"] == "hermes" and "Hermes 直接查看" in looked["reason"] and not looked.get("degraded")
+    assert hermes({"mode": "discuss", "needs_tools": True}, question="看看仓库里的分流代码")["mode"] == "hermes"
+    # big work still goes to the team, read-only when only asked to look
+    team = hermes({"mode": "team", "needs_tools": True}, question="全面审查这个仓库的安全问题，只分析别改")
+    assert team["mode"] == "team" and team["read_only"]
+    assert hermes({"mode": "team", "execution_requested": True}, question="加导出按钮并提交")["mode"] == "team"
+    # without 协作 a team's work stands in with Hermes, which can still look and act
+    stand_in = hermes({"mode": "team", "execution_requested": True}, question="加导出按钮", teams_available=False)
+    assert stand_in["mode"] == "hermes" and stand_in["degraded"] == "team"
+
+
+def test_without_hermes_its_choice_has_a_stand_in():
+    looked = hermes({"mode": "hermes", "needs_tools": True}, hermes_available=False)
+    assert looked["mode"] == "team" and looked["read_only"] and looked["degraded"] == "hermes"
+    chat = hermes({"mode": "hermes"}, question="讲个笑话", hermes_available=False)
+    assert chat["mode"] == "answer" and chat["degraded"] == "hermes"
+    # the old rules are unchanged where Hermes cannot take it
+    assert hermes({"mode": "answer", "needs_tools": True}, hermes_available=False)["mode"] == "team"
+
+
+def test_the_deciders_offer_hermes_only_where_it_can_take_it():
+    from open_webui.utils.auto_routing import HERMES_EXAMPLES, HERMES_RULE, NO_HERMES_EXAMPLES, decision_request
+    with_hermes = selection_messages("q", "", [], teams_available=True, hermes_available=True)[0]["content"]
+    without = selection_messages("q", "", [], teams_available=True)[0]["content"]
+    assert "mode (hermes|answer|discuss|team)" in with_hermes and HERMES_RULE in with_hermes
+    assert HERMES_EXAMPLES in with_hermes and NO_HERMES_EXAMPLES not in with_hermes
+    assert "mode (answer|discuss|team)" in without and HERMES_RULE not in without
+    assert "hermes" not in without and NO_HERMES_EXAMPLES in without
+    _, questions = decision_request("q", "", [], teams_available=False, discussion_available=True, hermes_available=True)
+    assert "hermes" in questions["mode"]["criteria"] and "execution" in questions
+
+
+def _select_env(monkeypatch, models, completion):
+    from open_webui.routers import answers
+    from open_webui.utils import assistant_library, chat
+    async def models_for(*args): return models, set()
+    monkeypatch.setattr(answers, '_models', models_for)
+    monkeypatch.setattr(answers, '_resolve_planner', lambda *a: {'model': 'gpt', 'name': 'GPT'})
+    monkeypatch.setattr(assistant_library, 'library', lambda *a: ([], [{'id': 'gpt'}]))
+    monkeypatch.setattr(chat, 'generate_chat_completion', completion)
+
+
+HERMES_MODELS = {'gpt': {'id': 'gpt', 'name': 'gpt'},
+                 'hermes-agent': {'id': 'hermes-agent', 'name': 'Hermes', 'owned_by': 'hermes'}}
+
+
+def test_no_choice_defaults_to_hermes_where_it_answers_and_never_from_telegram(env, monkeypatch):
+    from open_webui.utils import hermes_agent
+    monkeypatch.setattr(hermes_agent, 'is_hermes_agent_model', lambda m: m.get('id') == 'hermes-agent')
+    async def down(*args): raise RuntimeError('down')
+    _select_env(monkeypatch, HERMES_MODELS, down)
+    decision = asyncio.run(api.select(env, USER, api.CreateForm(question='在吗', client_key='h1'), []))[0]
+    assert decision['mode'] == 'hermes' and decision['degraded'] == 'auto'
+    decision = asyncio.run(api.select(env, USER, api.CreateForm(question='在吗', client_key='h2'), [], remote=True))[0]
+    assert decision['mode'] == 'answer'
+    # chosen by hand: Hermes, or a clear error when there is none
+    picked = asyncio.run(api.select(env, USER, api.CreateForm(question='在吗', client_key='h3', mode='hermes'), []))[0]
+    assert picked['mode'] == 'hermes'
+    with pytest.raises(HTTPException) as err:
+        asyncio.run(api.select(env, USER, api.CreateForm(question='在吗', client_key='h4', mode='hermes'), [], remote=True))
+    assert "没有可用的 Hermes" in err.value.detail
+
+
+def test_hermes_from_the_auto_page_opens_a_chat_and_from_a_chat_answers_there(env, monkeypatch):
+    from open_webui.utils import hermes_route
+    opened, answered, meta = [], [], {}
+    async def open_chat(request, user, form, route_id, on_created=None):
+        opened.append((form.question, route_id))
+        on_created('hc1')
+        return 'hc1', 'reply-h'
+    async def answer_in_chat(request, user, chat_id, message_id, route_id):
+        answered.append((chat_id, message_id, route_id))
+    monkeypatch.setattr(hermes_route, 'open_chat', open_chat)
+    monkeypatch.setattr(hermes_route, 'answer_in_chat', answer_in_chat)
+    monkeypatch.setattr(api.Chats, 'set_chat_meta_value_by_id', lambda id, key, value: meta.update({id: value}))
+    monkeypatch.setattr(api.Chats, 'get_chat_title_by_id', lambda id: 'T')
+    posted = []
+    monkeypatch.setattr(api.Chats, 'upsert_message_to_chat_by_id_and_message_id', lambda *a, **k: posted.append(a))
+    from open_webui.utils import team_chats
+    async def emit(*args): pass
+    monkeypatch.setattr(team_chats, 'emit_chat_event', emit)
+    decision = {'mode': 'hermes', 'reason': '看日志', 'execution_requested': False}
+    async def run():
+        form = api.CreateForm(question='看下日志', client_key='page')
+        row, _ = records.AutoRoutes.create(USER.id, form.client_key, 'hash', {'input': form.model_dump()})
+        await api.dispatch(env, USER, row, form, decision, {}, set(), [], {})
+        page = api.public(api._own(row['id'], USER), USER)
+        assert opened == [('看下日志', row['id'])] and page['href'] == '/c/hc1' and page['mode'] == 'hermes'
+        origin = {'chatId': 'c9', 'messageId': 'm9'}
+        for key, turn in (('chat', True), ('card', False)):
+            data = {'input': form.model_dump(), 'origin': origin, **({'chat_turn': True} if turn else {})}
+            row, _ = records.AutoRoutes.create(USER.id, key, key, data)
+            await api.dispatch(env, USER, row, form, decision, {}, set(), [], {})
+            stored = records.AutoRoutes.get(row['id'], USER.id)
+            assert stored['status'] == 'dispatched' and stored['target_id'] == 'c9'
+            assert stored['data']['target_message'] == 'm9'
+        # the chat's own reply goes on by itself; only the card's retry starts Hermes here
+        assert answered == [('c9', 'm9', row['id'])]
+        assert meta['c9'] == {'id': row['id'], 'mode': 'hermes'}
+        assert posted == []  # Hermes' reply is not rewritten into a note about where it went
+    asyncio.run(run())
+
+
+def test_hermes_status_follows_its_reply():
+    chat = lambda message: SimpleNamespace(chat={"history": {"messages": {"r": message}}})
+    assert api._hermes_status(chat({"done": False}), "r") == "answering"
+    assert api._hermes_status(chat({"done": True}), "r") == "done"
+    assert api._hermes_status(chat({"done": True, "stopped": True}), "r") == "stopped"
+    assert api._hermes_status(chat({"done": True, "error": {"content": "x"}}), "r") == "error"
+    assert api._hermes_status(chat({}), "missing") is None
+
+
+def test_answer_in_chat_rebuilds_the_branch_for_hermes(monkeypatch):
+    from open_webui.utils import hermes_route
+    from open_webui.socket import main as socket_main
+    messages = {
+        "u1": {"id": "u1", "parentId": None, "role": "user", "content": "第一问"},
+        "a1": {"id": "a1", "parentId": "u1", "role": "assistant", "content": "第一答", "stopped": True},
+        "u2": {"id": "u2", "parentId": "a1", "role": "user", "content": "看下日志",
+               "files": [{"type": "image", "id": "img"}, {"type": "file", "id": "doc"}]},
+        "r": {"id": "r", "parentId": "u2", "role": "assistant", "content": "旧的", "model": "hermes-agent", "stopped": True},
+        "other": {"id": "other", "parentId": "u1", "role": "user", "content": "另一分支"},
+    }
+    chat = SimpleNamespace(chat={"history": {"messages": messages}, "params": {"system": "背景"}, "models": ["hermes-agent"]})
+    monkeypatch.setattr(hermes_route.Chats, "get_chat_by_id_and_user_id", lambda *a: chat)
+    written = []
+    monkeypatch.setattr(hermes_route.Chats, "upsert_message_to_chat_by_id_and_message_id",
+                        lambda chat_id, mid, fields, **kw: written.append((mid, fields, kw)))
+    async def model(request, user, model_id=None): return {"id": model_id or "hermes-agent", "name": "Hermes"}
+    monkeypatch.setattr(hermes_route, "_hermes_model", model)
+    events = []
+    monkeypatch.setattr(socket_main, "get_event_emitter", lambda meta, update_db=True: (lambda e: _async(events.append(e))))
+    runs = []
+    async def run_turn(request, form, user, metadata, model, events=None, wait=False):
+        runs.append((form, metadata))
+        return {"status": True, "task_id": "t"}
+    monkeypatch.setattr(hermes_route, "run_turn", run_turn)
+    asyncio.run(hermes_route.answer_in_chat(None, USER, "c1", "r", "route-1"))
+    form, metadata = runs[0]
+    assert [m["content"] for m in form["messages"]] == ["背景", "第一问", "第一答", "看下日志"]
+    assert form["messages"][2]["stopped"] is True
+    assert metadata["message_id"] == "r" and metadata["files"] == [{"type": "file", "id": "img"}, {"type": "file", "id": "doc"}]
+    mid, fields, kw = written[0]
+    assert mid == "r" and fields["content"] == "" and fields["stopped"] is False and kw == {"set_current": False}
+    assert fields["auto_route"] == {"id": "route-1", "mode": "hermes"}
+    assert events[0]["data"]["auto_route"]["mode"] == "hermes"
+
+
+async def _async(value):
+    return value
+
+
+def test_without_dispatch_keeps_the_model_choice():
+    from open_webui.utils.hermes_route import without_dispatch
+    form = {"model": "h", "hermes_options": {"dispatch": "auto", "model": "m", "provider": "p"}}
+    assert without_dispatch(form)["hermes_options"] == {"model": "m", "provider": "p"}
+    assert form["hermes_options"]["dispatch"] == "auto"
+    assert without_dispatch({"model": "h"})["hermes_options"] is None
+
+
+def _chat_dispatch_env(monkeypatch, chosen):
+    """The chat's 自动分流 reply with select/dispatch replaced: ``chosen`` is the mode picked."""
+    from open_webui.utils import auto_dispatch, hermes_route, mode_chats, team_chats, dispatch_files
+    from open_webui.socket import main as socket_main
+    from open_webui import tasks
+    store = {}
+    monkeypatch.setattr(api.Chats, 'upsert_message_to_chat_by_id_and_message_id',
+                        lambda cid, mid, fields, **kw: store.setdefault(mid, {}).update(fields))
+    monkeypatch.setattr(api.Chats, 'get_message_by_id_and_message_id', lambda cid, mid: store.get(mid))
+    monkeypatch.setattr(api.Chats, 'set_chat_meta_value_by_id', lambda *a: None)
+    monkeypatch.setattr(api.Chats, 'get_chat_title_by_id', lambda id: 'T')
+    monkeypatch.setattr(api.Chats, 'get_chat_by_id_and_user_id', lambda *a: SimpleNamespace(meta={}, title='T'))
+    async def emit(*args): pass
+    monkeypatch.setattr(team_chats, 'emit_chat_event', emit)
+    monkeypatch.setattr(mode_chats, 'schedule_chat_metadata', lambda *a, **k: None)
+    monkeypatch.setattr(dispatch_files, 'conversation_file_ids', lambda *a: [])
+    events = []
+    monkeypatch.setattr(socket_main, 'get_event_emitter', lambda meta, update_db=True: (lambda e: _async(events.append(e))))
+    async def select(*args, **kw):
+        return ({'mode': chosen, 'reason': '按目标', 'execution_requested': False}, {}, set(), [], {})
+    async def dispatch(request, user, row, *args):
+        if chosen != 'hermes':
+            store['m1']['content'] = f'🔀 自动分流交给了{chosen}'
+        records.AutoRoutes.update(row['id'], user.id, status='dispatched', mode=chosen, target_id='x')
+    monkeypatch.setattr(api, 'select', select)
+    monkeypatch.setattr(api, 'dispatch', dispatch)
+    turns = []
+    async def run_turn(request, form, user, metadata, model, events=None, wait=False):
+        turns.append((form, metadata, wait))
+        return {'status': True, 'task_id': 'hermes-task'}
+    monkeypatch.setattr(hermes_route, 'run_turn', run_turn)
+    started = []
+    real_create = tasks.create_task
+    def create_task(coro, **kw):
+        task_id, task = real_create(coro, **kw)
+        started.append(task)
+        return task_id, task
+    monkeypatch.setattr(tasks, 'create_task', create_task)
+    return auto_dispatch, store, events, turns, started
+
+
+FORM = {'model': 'hermes-agent', 'messages': [{'role': 'user', 'content': '看下日志'}],
+        'hermes_options': {'dispatch': 'auto', 'model': 'm'}}
+META = {'session_id': 's', 'chat_id': 'c1', 'message_id': 'm1', 'user_id': USER.id}
+
+
+@pytest.mark.parametrize('chosen', ['hermes', 'answer'])
+def test_the_chat_reply_waits_for_the_choice(env, monkeypatch, chosen):
+    auto_dispatch, store, events, turns, started = _chat_dispatch_env(monkeypatch, chosen)
+    async def run():
+        out = await auto_dispatch.run_auto_dispatch(env, FORM, USER, META, 'hermes-agent', model={'id': 'hermes-agent'})
+        await started[0]
+        return out
+    out = asyncio.run(run())
+    assert out['task_id']
+    assert events[0]['data']['content'] == auto_dispatch.CHOOSING and 'done' not in events[0]['data']
+    if chosen == 'hermes':
+        # the same reply goes on as Hermes' answer, waited for so stopping the reply stops the run
+        assert events[-1]['data'] == {'content': '', 'auto_route': {'id': events[0]['data']['auto_route']['id'], 'mode': 'hermes'}}
+        assert turns == [(FORM, META, True)]
+        assert store['m1'].get('done') is None
+    else:
+        assert turns == []
+        assert events[-1]['data']['done'] is True and events[-1]['data']['content'] == '🔀 自动分流交给了answer'
+
+
+def test_a_temporary_chat_is_answered_by_hermes(env, monkeypatch):
+    auto_dispatch, store, events, turns, started = _chat_dispatch_env(monkeypatch, 'answer')
+    out = asyncio.run(auto_dispatch.run_auto_dispatch(env, FORM, USER, {**META, 'chat_id': 'local'}, 'hermes-agent'))
+    assert out == {'status': True, 'task_id': 'hermes-task'} and len(turns) == 1 and not started

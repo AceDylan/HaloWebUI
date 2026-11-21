@@ -30,7 +30,7 @@
 				icon: 'auto',
 				label: '自动分流',
 				cue: '智能路由',
-				title: '自动分流：按问题自动选择精答、讨论或协作台',
+				title: '自动分流：按问题自动选择 Hermes、精答、讨论或协作台',
 				accent: 'auto',
 				show: true
 			},

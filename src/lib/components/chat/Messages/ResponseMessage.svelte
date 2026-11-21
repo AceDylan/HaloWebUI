@@ -1462,6 +1462,8 @@
 	});
 	// 派发方式「协作台」: this reply is a team's live card.
 	$: autoRouteId = (message as any)?.auto_route?.id as string | undefined;
+	// 自动分流 → Hermes: Hermes answers in this reply, so the routing strip goes above the answer.
+	$: autoRouteAbove = (message as any)?.auto_route?.mode === 'hermes';
 	$: teamDispatchId = ((message as any)?.team_dispatch?.team_id as string | undefined) ?? null;
 	// 派发方式「精答」/「讨论」: this reply is the run's live card.
 	$: modeDispatch = (() => {
@@ -2112,6 +2114,9 @@
 										{#if videoTask}
 											<VideoTaskChatCard {chatId} />
 										{/if}
+										{#if autoRouteId && autoRouteAbove}
+											<AutoDispatchCard id={autoRouteId} {history} />
+										{/if}
 
 										{#if showImageGenerationPlaceholder}
 											<div
@@ -2226,7 +2231,7 @@
 											/>
 										{/if}
 
-										{#if autoRouteId}
+										{#if autoRouteId && !autoRouteAbove}
 											<AutoDispatchCard id={autoRouteId} {history} />
 										{/if}
 										{#if teamDispatchId}

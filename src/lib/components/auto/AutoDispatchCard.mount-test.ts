@@ -49,7 +49,7 @@ describe('AutoDispatchCard', () => {
 		await until(() => !!target.querySelector('[data-auto-retry]'));
 		expect(
 			[...target.querySelectorAll('[data-auto-retry-mode]')].map((b: any) => b.getAttribute('data-auto-retry-mode'))
-		).toEqual(['auto', 'answer', 'discuss', 'team']);
+		).toEqual(['auto', 'hermes', 'answer', 'discuss', 'team']);
 		(target.querySelector('[data-auto-retry-mode="discuss"]') as any).click();
 		await until(() => api.retryAutoRoute.mock.calls.length === 1);
 		expect(api.retryAutoRoute.mock.calls[0]).toEqual(['tok', 'r1', 'discuss']);
@@ -128,5 +128,41 @@ describe('AutoDispatchCard', () => {
 		await until(() => !!target.querySelector('[data-auto-strip]'));
 		expect(target.querySelector('[data-auto-strip]')?.textContent).toContain('自动分流 → 精答');
 		expect(target.querySelector('[data-mode-dispatch-card="answer"]')).toBeTruthy();
+	});
+
+	it('handed to Hermes in this chat: a strip only, with no card below and no link away', async () => {
+		(globalThis as any).localStorage.token = 'tok';
+		const { default: Card } = await import('./AutoDispatchCard.svelte');
+		target = document.createElement('div');
+		document.body.appendChild(target);
+		api.getAutoRoute.mockResolvedValue(
+			row({
+				status: 'dispatched',
+				mode: 'hermes',
+				target_id: 'chat-1',
+				origin_chat_id: 'chat-1',
+				href: '/c/chat-1',
+				target_status: 'answering',
+				error: '',
+				reason: '看日志一两步就能查完，交给 Hermes'
+			})
+		);
+		app = new Card({ target, props: { id: 'r5', history: { messages: {} } } });
+		await until(() => !!target.querySelector('[data-auto-strip]'));
+		const strip = target.querySelector('[data-auto-strip]')?.textContent ?? '';
+		expect(strip).toContain('自动分流 → Hermes');
+		expect(strip).toContain('已交给Hermes');
+		expect(target.querySelector('.wb-route-connector')).toBeFalsy();
+		expect(target.querySelector('[data-mode-dispatch-card]')).toBeFalsy();
+		expect(target.querySelector('[data-auto-open-hermes]')).toBeFalsy();
+		app.$destroy();
+		target.innerHTML = '';
+		// a retry from another chat's card answered in a chat of its own: linked
+		api.getAutoRoute.mockResolvedValue(
+			row({ status: 'dispatched', mode: 'hermes', target_id: 'hc-2', origin_chat_id: null, href: '/c/hc-2', error: '' })
+		);
+		app = new Card({ target, props: { id: 'r6', history: { messages: {} } } });
+		await until(() => !!target.querySelector('[data-auto-open-hermes]'));
+		expect(target.querySelector('[data-auto-open-hermes]')?.getAttribute('href')).toBe('/c/hc-2');
 	});
 });

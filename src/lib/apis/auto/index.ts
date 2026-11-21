@@ -1,7 +1,8 @@
 import { WEBUI_API_BASE_URL } from '$lib/constants';
 import type { DecisionTrace } from '$lib/apis/decision-model';
 
-export type AutoMode = 'answer' | 'discuss' | 'team';
+/** hermes: Hermes answers in a chat (the one asked in, or one made for it on /auto). */
+export type AutoMode = 'hermes' | 'answer' | 'discuss' | 'team';
 export type AutoRoute = {
 	id: string;
 	title?: string;
@@ -82,10 +83,34 @@ export const retryAutoRoute = (token: string, id: string, mode: 'auto' | AutoMod
 export const targetAutoRoute = (token: string, mode: AutoMode, id: string) =>
 	call<AutoRoute | null>(token, `target/${mode}/${encodeURIComponent(id)}`);
 export const MODE_LABEL: Record<AutoMode, string> = {
+	hermes: 'Hermes',
 	answer: '精答',
 	discuss: '讨论',
 	team: '协作台'
 };
+/**
+ * When each one is the right choice (backend utils/auto_routing.py GUIDE says the same to the
+ * models that choose): shown on /auto and under the composer's 派发 panel.
+ */
+export const MODE_GUIDE: Record<AutoMode, { when: string; how: string }> = {
+	hermes: {
+		when: '日常对话、追问；一两步就能做完的本机小事：看状态、查日志、读文件、跑一条命令、提醒/定时/发 TG/生图',
+		how: '一个 Hermes 直接动手，最快，不出计划'
+	},
+	answer: {
+		when: '不碰真实系统的知识与表达：解释、怎么用、写作翻译、代码示例、简单推荐',
+		how: '挑最合适的助手答透，可按需联网'
+	},
+	discuss: {
+		when: '有几种合理方案、取舍会改变结论：结合自身条件选型、找方案漏洞、定优先级和架构',
+		how: '几个模型对照讨论，主持人写结论'
+	},
+	team: {
+		when: '要拆计划、分工执行的大活：在仓库里开发修复并测试提交、系统调研出报告、全仓库审查',
+		how: '负责人出计划等你批准，成员并行执行'
+	}
+};
+export const MODE_ORDER: AutoMode[] = ['hermes', 'answer', 'discuss', 'team'];
 /** Who handles it, e.g. 「协作台（只读）」. */
 export const routeTarget = (row: Pick<AutoRoute, 'mode' | 'read_only'>) =>
 	row.mode ? MODE_LABEL[row.mode] + (row.read_only ? '（只读）' : '') : '';

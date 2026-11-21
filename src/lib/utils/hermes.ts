@@ -160,6 +160,16 @@ export const EMPTY_HERMES_RUN_OPTIONS: HermesRunOptions = {
 	provider: ''
 };
 
+/**
+ * A new chat starts on 自动分流: its first message goes to Hermes, 精答, 讨论 or 协作台, whichever
+ * fits (Hermes for everyday questions and small jobs on this machine). Like any 派发方式 it is for
+ * that one message; later ones go to Hermes directly unless another choice is picked.
+ */
+export const NEW_CHAT_HERMES_RUN_OPTIONS: HermesRunOptions = {
+	...EMPTY_HERMES_RUN_OPTIONS,
+	dispatch: 'auto'
+};
+
 // cchclaude: the reclaude runner driving Claude Code through the user's own cch hub;
 // anyclaude: the same on anyrouter (free and slow); officlaude: official claude.ai subscription OAuth.
 const HERMES_RUNNERS = new Set([
@@ -338,7 +348,7 @@ const DISPATCH_LABELS: Record<string, string> = {
 
 // What a reply handed to another mode says it was (no Hermes model took part).
 const MODE_DISPATCH_LINES: Record<string, string> = {
-	auto: '自动选择精答、讨论或协作台；协作先出计划，结果发回这个对话',
+	auto: '自动选择 Hermes、精答、讨论或协作台：日常和本机小事由 Hermes 直接回答，其余交给对应工作台，结果发回这个对话',
 	answer: '交给精答：调度器挑最合适的助手来回答，答完发回这个对话（没有经过 Hermes 的模型）',
 	discuss: '交给讨论台：几个模型讨论，主持人写的结论发回这个对话（没有经过 Hermes 的模型）',
 	team: '交给协作台的团队：负责人做计划、成员分工执行，结果会发回这个对话（没有经过模型）'

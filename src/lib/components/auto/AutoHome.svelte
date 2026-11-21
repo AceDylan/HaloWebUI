@@ -8,7 +8,9 @@
 		getAutoRoute,
 		listAutoRoutes,
 		cancelAutoRoute,
+		MODE_GUIDE,
 		MODE_LABEL,
+		MODE_ORDER,
 		routePending,
 		routeStatus,
 		routeTarget,
@@ -22,6 +24,7 @@
 	import ModeEmblem from '$lib/components/scifi/ModeEmblem.svelte';
 	import ModeFlow from '$lib/components/scifi/ModeFlow.svelte';
 	import ModeDock from '$lib/components/scifi/ModeDock.svelte';
+	import SidebarModeIcon from '$lib/components/layout/Sidebar/SidebarModeIcon.svelte';
 	import MenuLines from '$lib/components/icons/MenuLines.svelte';
 	import HandoffBack from '$lib/components/common/HandoffBack.svelte';
 	import '$lib/components/teams/teams.css';
@@ -73,6 +76,12 @@
 
 	const QUICK = [
 		{
+			badge: 'Hermes',
+			title: '本机上看一眼、做件小事',
+			hint: 'Hermes 直接动手，最快',
+			text: '看一下 halowebui 容器现在是否健康，最近一小时的日志里有没有报错，有的话说说是什么问题。'
+		},
+		{
 			badge: '精答型',
 			title: '精准拆解复杂问题',
 			hint: '挑最合适专家直接答透',
@@ -94,13 +103,16 @@
 
 	const HISTORY_MODES = [
 		{ value: '', label: '全部' },
+		{ value: 'hermes', label: 'Hermes' },
 		{ value: 'answer', label: '精答' },
 		{ value: 'discuss', label: '讨论' },
 		{ value: 'team', label: '协作' }
 	] as const;
 
 	const modeTone = (m: string | null | undefined) =>
-		m === 'answer'
+		m === 'hermes'
+			? 'bg-amber-500/12 text-amber-700 dark:bg-amber-400/15 dark:text-amber-300'
+			: m === 'answer'
 			? 'bg-cyan-500/12 text-cyan-700 dark:bg-cyan-400/15 dark:text-cyan-300'
 			: m === 'discuss'
 				? 'bg-violet-500/12 text-violet-700 dark:bg-violet-400/15 dark:text-violet-300'
@@ -288,7 +300,9 @@
 				context = typeof saved.context === 'string' ? saved.context.slice(0, 12000) : '';
 				research = saved.research !== false;
 				preference = saved.preference === 'economy' ? 'economy' : 'standard';
-				mode = ['auto', 'answer', 'discuss', 'team'].includes(saved.mode) ? saved.mode : 'auto';
+				mode = ['auto', 'hermes', 'answer', 'discuss', 'team'].includes(saved.mode)
+					? saved.mode
+					: 'auto';
 				autoStart = saved.autoStart === true;
 				attachments = Array.isArray(saved.attachments)
 					? saved.attachments.filter((f: any) => f.id).slice(0, 4)
@@ -348,7 +362,7 @@
 	<div class="tm-scroll flex-1 overflow-y-auto px-4 pb-16">
 		<div class="mx-auto flex max-w-3xl flex-col pt-3 sm:pt-7">
 			<header class="halo-mode-hero tm-rise relative mb-4 flex flex-col gap-2.5">
-				<ModeEmblem mode="auto" stats={[{ k: 'ROUTES', v: teamsEnabled ? 3 : 2 }]} />
+				<ModeEmblem mode="auto" stats={[{ k: 'ROUTES', v: teamsEnabled ? 4 : 3 }]} />
 				<div class="flex items-center gap-2">
 					<span class="tm-eyebrow halo-mode-eyebrow">Halo Auto</span><span
 						class="h-3 w-px bg-gray-300 dark:bg-gray-700"
@@ -362,10 +376,10 @@
 				</h2>
 				<ModeFlow
 					label="自动分流怎么处理"
-					steps={['理解目标与约束', '精答 · 讨论 · 协作', '查看结果，接着追问']}
+					steps={['理解目标与约束', 'Hermes · 精答 · 讨论 · 协作', '查看结果，接着追问']}
 				/>
 				<p class="hidden max-w-xl text-xs leading-relaxed text-gray-500 sm:block dark:text-gray-400">
-					直接提问交给精答；多方权衡展开讨论；动手交付交给协作台，依据与进度全程可查。
+					日常和本机小事交给 Hermes 直接做；知识与表达交给精答；多方权衡展开讨论；要拆计划分工的大活交给协作台，依据与进度全程可查。
 				</p>
 			</header>
 			<form
@@ -464,8 +478,9 @@
 							disabled={busy}
 							class="dc-select"
 						>
-							<option value="auto">自动选择</option><option value="answer">精答</option><option
-								value="discuss">讨论</option
+							<option value="auto">自动选择</option><option value="hermes">Hermes</option><option
+								value="answer">精答</option
+							><option value="discuss">讨论</option
 							>{#if teamsEnabled}<option value="team">协作台</option>{/if}
 						</select></label
 					>
@@ -620,7 +635,9 @@
 						{#if active.href && active.target_status !== 'deleted'}<a
 								href={active.href}
 								class="tm-btn-primary !px-3 !py-1.5 !text-xs"
-								>打开{active.mode ? MODE_LABEL[active.mode] : '任务'} →</a
+								>{active.mode === 'hermes'
+									? '打开 Hermes 对话'
+									: `打开${active.mode ? MODE_LABEL[active.mode] : '任务'}`} →</a
 							>{/if}
 						{#if active.status === 'routing'}<button class="tm-btn-ghost !text-xs" on:click={cancel}
 								>取消分流</button
@@ -633,7 +650,7 @@
 			{#if !active}
 				<section class="tm-rise mt-5" style="--i:2" aria-label="试一试" data-auto-quick>
 					<div class="mb-2"><span class="tm-eyebrow">典型场景</span></div>
-					<ul class="grid grid-cols-1 gap-2 sm:grid-cols-3">
+					<ul class="grid grid-cols-1 gap-2 sm:grid-cols-2">
 						{#each QUICK as q}
 							<li>
 								<button
@@ -652,6 +669,33 @@
 							</li>
 						{/each}
 					</ul>
+				</section>
+				<section class="tm-rise mt-5" style="--i:2" aria-label="什么时候交给谁" data-auto-guide>
+					<div class="mb-2"><span class="tm-eyebrow">什么时候交给谁</span></div>
+					<ul class="grid grid-cols-1 gap-2 sm:grid-cols-2">
+						{#each MODE_ORDER.filter((m) => m !== 'team' || teamsEnabled) as m}
+							<li class="tm-card-quiet flex gap-2.5 px-3.5 py-2.5" data-auto-guide-mode={m}>
+								<span
+									class="mt-0.5 grid size-6 shrink-0 place-items-center rounded-lg {modeTone(m)}"
+									aria-hidden="true"
+									><SidebarModeIcon mode={m === 'team' ? 'teams' : m} className="size-3.5" /></span
+								>
+								<span class="min-w-0">
+									<span class="block text-[13px] font-medium text-gray-900 dark:text-gray-100"
+										>{MODE_LABEL[m]}<span class="ml-1.5 text-[11px] font-normal text-gray-500 dark:text-gray-400"
+											>{MODE_GUIDE[m].how}</span
+										></span
+									>
+									<span class="mt-0.5 block text-[11.5px] leading-5 text-gray-500 dark:text-gray-400"
+										>{MODE_GUIDE[m].when}</span
+									>
+								</span>
+							</li>
+						{/each}
+					</ul>
+					<p class="mt-2 text-[11.5px] leading-5 text-gray-400 dark:text-gray-500">
+						拿不准时：要动手又不大的给 Hermes，大活给协作台；只要答案的给精答，有几种合理方案再讨论。问题里写明「只分析、不执行」或点名某种方式时，按你的要求来。
+					</p>
 				</section>
 			{/if}
 			<section class="tm-rise mt-8 pb-8" style="--i:3">

@@ -176,6 +176,7 @@
 	import { HermesSteerError, steerHermesRun } from '$lib/apis/hermes';
 	import {
 		EMPTY_HERMES_RUN_OPTIONS,
+		NEW_CHAT_HERMES_RUN_OPTIONS,
 		findHermesContinuation,
 		hermesDispatchToRestore,
 		hermesOptionsForMessage,
@@ -4004,7 +4005,7 @@
 		}
 
 		let temporaryChatState = syncTemporaryChatState();
-		hermesOptions = { ...EMPTY_HERMES_RUN_OPTIONS };
+		hermesOptions = { ...NEW_CHAT_HERMES_RUN_OPTIONS };
 		// Only what was queued in an unsaved new chat goes; other chats keep theirs.
 		messageQueue = messageQueue.filter((item) => item.chatId);
 
@@ -5547,7 +5548,9 @@
 		}
 
 		if (auto_route && typeof auto_route.id === 'string') {
-			message.auto_route = { id: auto_route.id };
+			// mode 'hermes': Hermes answers in this very reply, under the routing strip
+			message.auto_route =
+				auto_route.mode === 'hermes' ? { id: auto_route.id, mode: 'hermes' } : { id: auto_route.id };
 		}
 		if (team_dispatch && typeof team_dispatch === 'object' && team_dispatch.team_id) {
 			// 派发方式「协作台」: this reply is a team's card (TeamChatCard), not a Hermes answer.

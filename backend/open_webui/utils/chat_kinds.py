@@ -115,7 +115,9 @@ def chat_kinds(user_id: str, chat_ids: Iterable[str]) -> dict[str, str]:
                 kinds[chat_id] = "discuss"
             for chat_id, meta in db.query(Chat.id, Chat.meta).filter(Chat.user_id == user_id, Chat.id.in_(ids)):
                 route = (meta or {}).get("auto_route")
-                if isinstance(route, dict):
+                # handed to Hermes it is an ordinary Hermes chat (the default for a new chat): no
+                # mark of its own, whatever an earlier message of it was handed to stays
+                if isinstance(route, dict) and route.get("mode") != "hermes":
                     mode = route.get("mode")
                     kinds[chat_id] = f"auto_{mode}" if mode in ("answer", "discuss", "team") else "auto"
     except Exception:

@@ -170,3 +170,24 @@ it('uses fixed cursor pages and applies server-side search without retaining old
 	await until(() => api.listAutoRoutes.mock.calls.at(-1)?.[1].q === '数据库');
 	expect(api.listAutoRoutes.mock.calls.at(-1)?.[1].before).toBeNull();
 });
+
+it('says when each way fits, Hermes first, and opens Hermes in its chat', async () => {
+	await mount();
+	const guide = [...target.querySelectorAll('[data-auto-guide-mode]')].map((li: any) =>
+		li.getAttribute('data-auto-guide-mode')
+	);
+	expect(guide).toEqual(['hermes', 'answer', 'discuss', 'team']);
+	expect(target.querySelector('[data-auto-guide]')?.textContent).toContain('本机小事');
+	const options = [...target.querySelectorAll('[aria-label="处理方式"] option')].map((o: any) => o.value);
+	expect(options).toEqual(['auto', 'hermes', 'answer', 'discuss', 'team']);
+	stores.config.set({ features: { enable_agent_teams: false, enable_web_search: true } });
+	await tick();
+	expect(target.querySelector('[data-auto-guide-mode="team"]')).toBeFalsy();
+	api.getAutoRoute.mockResolvedValue(
+		row({ status: 'dispatched', mode: 'hermes', target_id: 'hc1', href: '/c/hc1' })
+	);
+	await typeQuestion('看下容器日志');
+	await submit();
+	await until(() => nav.goto.mock.calls.length === 1);
+	expect(nav.goto.mock.calls[0][0]).toBe('/c/hc1');
+});

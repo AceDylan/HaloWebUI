@@ -2112,7 +2112,7 @@ async def run_hermes_agent(request, form_data, user, metadata, model, events, ta
     if mode == "auto":
         from open_webui.utils.auto_dispatch import run_auto_dispatch
 
-        return await run_auto_dispatch(request, form_data, user, metadata, model_id)
+        return await run_auto_dispatch(request, form_data, user, metadata, model_id, model=model, events=events)
     if mode == "team":
         # 派发方式「协作台」: the message becomes a 协作台 team, no Hermes run.
         from open_webui.utils.agent_team_dispatch import run_team_dispatch

@@ -637,7 +637,7 @@
 						</span>
 						<div class="min-w-0">
 							<div class="truncate">{tr('自动分流', 'Auto route')}</div>
-							<div class="truncate text-xs font-normal text-gray-500 dark:text-gray-400">{tr('按问题自动选择精答、讨论或协作', 'Auto-pick answer, discussion, or team')}</div>
+							<div class="truncate text-xs font-normal text-gray-500 dark:text-gray-400">{tr('按问题自动选择 Hermes、精答、讨论或协作', 'Auto-pick Hermes, answer, discussion, or team')}</div>
 						</div>
 					</DropdownMenu.Item>
 					<DropdownMenu.Item

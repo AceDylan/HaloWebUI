@@ -114,6 +114,16 @@ def test_auto_mark_keeps_both_route_and_actual_mode(monkeypatch):
         "answer": "auto_answer", "discuss": "auto_discuss", "team": "auto_team", "None": "auto"}
 
 
+def test_a_chat_handed_to_hermes_is_an_ordinary_chat(monkeypatch):
+    """自动分流 → Hermes is what a new chat does by default: no mark, an earlier 精答 keeps its own."""
+    session = _db(monkeypatch)
+    with session() as db:
+        _chat(db, "plain", meta={"auto_route": {"mode": "hermes"}})
+        _chat(db, "asked", meta={"auto_route": {"mode": "hermes"}, "mode_dispatch": ["answer"]})
+        db.commit()
+    assert mod.chat_kinds("u1", ["plain", "asked"]) == {"asked": "answer_dispatch"}
+
+
 def test_marks_video_chats_from_the_studio_or_the_library(monkeypatch):
     session = _db(monkeypatch)
     with session() as db:

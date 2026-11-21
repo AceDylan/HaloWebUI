@@ -36,7 +36,7 @@ class CreateForm(BaseModel):
     context: str = Field(default="", max_length=12000)
     research: bool = True
     preference: Literal["standard", "economy"] = "standard"
-    mode: Literal["auto", "answer", "discuss", "team"] = "auto"
+    mode: Literal["auto", "hermes", "answer", "discuss", "team"] = "auto"
     auto_start: bool = False
 
 
@@ -86,7 +86,25 @@ def public(row, user, targets=None):
         if chat:
             result["title"] = chat.title if chat.title != "New Chat" else result["title"]
         result["target_status"] = (chat.meta or {}).get(key, {}).get("status") if chat else "deleted"
+    elif target and mode == "hermes":
+        chat = Chats.get_chat_by_id_and_user_id(target, user.id)
+        if chat:
+            result["title"] = chat.title if chat.title != "New Chat" else result["title"]
+        result["target_status"] = _hermes_status(chat, data.get("target_message")) if chat else "deleted"
     return result
+
+
+def _hermes_status(chat, message_id):
+    """Where Hermes' reply stands: 正在作答 until it is done, then 已完成 (or 已停止 / 任务出错)."""
+    content = getattr(chat, "chat", None) or {}
+    message = (((content.get("history") or {}).get("messages") or {}).get(message_id or "")) or {}
+    if not message:
+        return None
+    if message.get("error"):
+        return "error"
+    if message.get("stopped") or message.get("stoppedByUser"):
+        return "stopped"
+    return "done" if message.get("done") else "answering"
 
 
 # What the chat's reply said before a mode was chosen (older replies keep it until their card opens).
@@ -124,7 +142,7 @@ def _files(ids, user):
     return items
 
 
-async def select(request, user, form, file_info):
+async def select(request, user, form, file_info, *, remote=False):
     from open_webui.routers import answers
     from open_webui.utils import assistant_library as lib
     from open_webui.utils.agent_teams import ENABLE_AGENT_TEAMS, TeamsError, hermes_target
@@ -141,6 +159,10 @@ async def select(request, user, form, file_info):
     if not any(base["id"] == routing_model for base in bases):
         routing_model = planner["model"]
     teams_available = bool(ENABLE_AGENT_TEAMS)
+    # Hermes takes it in a chat it answers (its own, or one made for it). Not from Telegram / QQ:
+    # there a plain message already is Hermes, /auto asks for one of the workbenches.
+    from open_webui.utils.hermes_agent import is_hermes_agent_model
+    hermes_available = not remote and any(is_hermes_agent_model(m) for m in models.values() if isinstance(m, dict))
     trace = None
     if form.mode != "auto":
         # choosing 协作 is permission to use tools; 「只分析」 in the question still keeps it read-only
@@ -153,7 +175,8 @@ async def select(request, user, form, file_info):
 
         async def assisted(decider):
             state, questions = decision_request(form.question, form.context, file_info,
-                teams_available=teams_available, discussion_available=len(bases) >= 2)
+                teams_available=teams_available, discussion_available=len(bases) >= 2,
+                hermes_available=hermes_available)
             answers, reason = await decider.judge(state, questions)
             picked = selection_from_answers(answers, reason, decider.name)
             return picked, {"mode": picked["mode"], "execution_requested": picked["execution_requested"],
@@ -163,7 +186,8 @@ async def select(request, user, form, file_info):
     if form.mode == "auto" and raw is None:
         async def classify():
             payload = {"model": routing_model, "stream": True,
-                "messages": selection_messages(form.question, form.context, file_info, teams_available=teams_available),
+                "messages": selection_messages(form.question, form.context, file_info, teams_available=teams_available,
+                                               hermes_available=hermes_available),
                 "metadata": {"task": "auto_routing"}, "max_tokens": 400}
             text = ""
             async for kind, part in iterate_completion(await generate_chat_completion(request, payload, user)):
@@ -175,8 +199,8 @@ async def select(request, user, form, file_info):
         try:
             raw = await asyncio.wait_for(classify(), timeout=25)
         except Exception:
-            log.info("automatic selection unavailable; using answer")
-            raw = {"mode": "answer", "reason": "自动判断暂不可用，已按默认方式交给精答", "degraded": "auto"}
+            log.info("automatic selection unavailable; using the default")
+            raw = _default_choice(hermes_available, "自动判断暂不可用")
     # needs_tools sends 精答/讨论 to 协作台 too (normalize_selection): Hermes must be there for it
     if isinstance(raw, dict) and (raw.get("mode") == "team" or raw.get("needs_tools") is True) and teams_available:
         try:
@@ -185,17 +209,17 @@ async def select(request, user, form, file_info):
             teams_available = False
     try:
         decision = normalize_selection(raw, question=form.question, context=form.context,
-            teams_available=teams_available, discussion_available=len(bases) >= 2)
+            teams_available=teams_available, discussion_available=len(bases) >= 2, hermes_available=hermes_available)
         if raw.get("degraded") == "auto":
             decision["degraded"] = "auto"
     except ValueError:
-        decision = {"mode": "answer", "reason": "自动判断结果不可用，已交给精答", "execution_requested": False,
-                    "degraded": "auto"}
+        decision = {**_default_choice(hermes_available, "自动判断结果不可用"), "execution_requested": False}
     if decision.get("blocked"):
         raise RouteBlocked(decision["reason"])
     # An explicit manual choice should explain an unavailable capability rather than change mode.
     if form.mode != "auto" and decision["mode"] != form.mode:
-        raise HTTPException(400, decision["reason"] + "；可改选精答")
+        raise HTTPException(400, decision["reason"] + ("；你的账号没有可用的 Hermes，可改选精答" if form.mode == "hermes"
+                                                       else "；可改选精答"))
     decision["routing_model"] = routing_model if form.mode == "auto" else None
     if trace:
         if trace["used"]:
@@ -203,6 +227,12 @@ async def select(request, user, form, file_info):
             trace["result"] = {**trace.get("result", {}), "final_mode": decision["mode"]}
         decision["decision"] = trace
     return decision, models, ambiguous, bases, planner
+
+
+def _default_choice(hermes_available, why):
+    """When nothing chose: Hermes where it can take it (what the chat would have done), else 精答."""
+    mode = "hermes" if hermes_available else "answer"
+    return {"mode": mode, "reason": f"{why}，已按默认方式交给{LABELS[mode]}", "degraded": "auto"}
 
 
 async def dispatch(request, user, row, form, decision, models, ambiguous, bases, planner):
@@ -223,7 +253,20 @@ async def dispatch(request, user, row, form, decision, models, ambiguous, bases,
     def bind(target_id):
         AutoRoutes.update(row["id"], user.id, target_id=target_id)
 
-    if mode == "team":
+    if mode == "hermes":
+        from open_webui.utils import hermes_route
+        if origin:
+            bind(origin["chatId"])
+            data["target_message"] = origin["messageId"]
+            AutoRoutes.update(row["id"], user.id, data=data)
+            # From the chat's own message (utils/auto_dispatch.py) its reply simply goes on as Hermes'
+            # answer; a retry from the card has nobody waiting, so Hermes is started on that reply here.
+            if not row["data"].get("chat_turn"):
+                await hermes_route.answer_in_chat(request, user, origin["chatId"], origin["messageId"], row["id"])
+        else:
+            chat_id, message_id = await hermes_route.open_chat(request, user, form, row["id"], on_created=bind)
+            AutoRoutes.update(row["id"], user.id, data={**data, "target_message": message_id})
+    elif mode == "team":
         teams._enabled()
         target = await hermes_target(request, user)
         inputs = input_files(form.files, user)
@@ -273,8 +316,9 @@ async def dispatch(request, user, row, form, decision, models, ambiguous, bases,
     AutoRoutes.update(row["id"], user.id, status="dispatched")
     if origin:
         Chats.set_chat_meta_value_by_id(origin["chatId"], "auto_route", {"id": row["id"], "mode": mode})
-        try:
-            _settle_reply(origin, mode, decision.get("reason"), read_only=read_only, degraded=decision.get("degraded"))
+        try:  # Hermes' reply is its own answer, not a note about where it went
+            if mode != "hermes":
+                _settle_reply(origin, mode, decision.get("reason"), read_only=read_only, degraded=decision.get("degraded"))
         except Exception:  # the card shows the choice either way
             log.debug("auto: could not update the chat reply", exc_info=True)
         from open_webui.utils.team_chats import emit_chat_event
@@ -284,7 +328,8 @@ async def dispatch(request, user, row, form, decision, models, ambiguous, bases,
 async def _run(request, user, row, form, file_info):
     try:
         # up to 60s for the 辅助决策模型, then 25s for the classifier it falls back to
-        selection = await asyncio.wait_for(select(request, user, form, file_info), timeout=95)
+        selection = await asyncio.wait_for(select(request, user, form, file_info,
+                                                  remote=bool(row["data"].get("remote"))), timeout=95)
         await asyncio.wait_for(dispatch(request, user, row, form, *selection), timeout=180)
     except Exception as exc:
         # Never persist provider messages, credentials, or raw model output in a receipt.
@@ -304,10 +349,11 @@ async def _run(request, user, row, form, file_info):
         log.info("auto dispatch failed (%s)", type(exc).__name__)
 
 
-async def start(request, user, form, origin=None, remote=None):
+async def start(request, user, form, origin=None, remote=None, chat_turn=False):
     """``origin``: the HaloWebUI chat the question was asked in. ``remote``: the Telegram / QQ chat
     it came from (``/auto`` there) — a team it goes to carries it, so the plan is sent back there
-    to approve."""
+    to approve. ``chat_turn``: the chat's reply waits for the choice (utils/auto_dispatch.py) and
+    goes on as Hermes' answer when Hermes is chosen."""
     form = form.model_copy(update={"question": form.question.strip()})
     if not form.question:
         raise HTTPException(400, "请写下问题或任务")
@@ -324,7 +370,8 @@ async def start(request, user, form, origin=None, remote=None):
     file_info = _files(form.files, user)
     if AutoRoutes.count_active(user.id) >= 3:
         raise HTTPException(429, "已有 3 个问题正在分流，请稍后再试")
-    data = {"input": payload, "origin": origin, **({"remote": remote} if remote else {})}
+    data = {"input": payload, "origin": origin, **({"remote": remote} if remote else {}),
+            **({"chat_turn": True} if chat_turn and origin else {})}
     row, created = AutoRoutes.create(user.id, form.client_key, fingerprint, data)
     if row["fingerprint"] != fingerprint:
         raise HTTPException(409, "这次提交的内容已改变，请重新开始")
@@ -333,6 +380,15 @@ async def start(request, user, form, origin=None, remote=None):
         _jobs[row["id"]] = task
         task.add_done_callback(lambda _: _jobs.pop(row["id"], None))
     return public(_own(row["id"], user), user)
+
+
+async def routed(id, user, timeout=300):
+    """The request once its mode is chosen and dispatched (or it failed): waits for this process'
+    job, never cancelling it when the waiter itself is stopped."""
+    job = _jobs.get(id)
+    if job is not None:
+        await asyncio.wait({job}, timeout=timeout)
+    return _own(id, user)
 
 
 @router.post("/")
@@ -351,8 +407,9 @@ def _target_summaries(rows, user):
         return result
     with get_db() as db:
         for id, title, meta in db.query(Chat.id, Chat.title, Chat.meta).filter(Chat.user_id == user.id, Chat.id.in_(ids)):
-            for mode, key in (("answer", "answer_desk"), ("discuss", "discussion_room")):
-                info = {"target_status": (meta or {}).get(key, {}).get("status")}
+            for mode, key in (("answer", "answer_desk"), ("discuss", "discussion_room"), ("hermes", None)):
+                # a Hermes reply's state is in the transcript, not read for a list: 已派发
+                info = {"target_status": (meta or {}).get(key, {}).get("status") if key else None}
                 if title and title != "New Chat":
                     info["title"] = title
                 result[(mode, id)] = info
@@ -365,7 +422,7 @@ def _target_summaries(rows, user):
 @router.get("/")
 async def history(offset: int = Query(0, ge=0), limit: int = Query(30, ge=1, le=50),
                   before: Optional[str] = None, q: str = Query("", max_length=200),
-                  mode: Optional[Literal["answer", "discuss", "team"]] = None,
+                  mode: Optional[Literal["hermes", "answer", "discuss", "team"]] = None,
                   user=Depends(get_verified_user)):
     cursor = None
     if before:
@@ -418,7 +475,7 @@ async def detail(id: str, user=Depends(get_verified_user), request: Request = No
 
 
 class RetryForm(BaseModel):
-    mode: Literal["auto", "answer", "discuss", "team"] = "auto"
+    mode: Literal["auto", "hermes", "answer", "discuss", "team"] = "auto"
 
 
 RETRYABLE = ("error", "interrupted", "cancelled")

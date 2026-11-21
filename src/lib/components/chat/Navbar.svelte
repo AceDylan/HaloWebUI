@@ -72,7 +72,7 @@
 			{
 				key: 'auto' as const,
 				label: '自动分流',
-				desc: '按问题自动选精答、讨论或协作',
+				desc: '按问题自动选 Hermes、精答、讨论或协作',
 				tone: 'bg-cyan-500/12 text-cyan-700 dark:bg-cyan-400/15 dark:text-cyan-300',
 				show: true
 			},

@@ -1,6 +1,6 @@
 <script lang="ts">
 	/**
-	 * Icons of the chat and its modes (对话 / 精答 / 讨论 / 协作 / 生图 / 视频) and of the libraries next to
+	 * Icons of the chat and its modes (对话 / Hermes / 精答 / 讨论 / 协作 / 生图 / 视频) and of the libraries next to
 	 * them (助手 / 提示词), the same everywhere they appear.
 	 */
 	export let mode: 'chat' | 'answer' | 'discuss' | 'teams' | 'studio' | 'video' | 'assistants' | 'prompts' | 'schedules' | string;
@@ -9,6 +9,11 @@
 
 {#if mode === 'auto'}
 	<svg class={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12h5m0 0 5-7h6M9 12h11M9 12l5 7h6"/><circle cx="3" cy="12" r="1.5"/><path d="m18 3 2 2-2 2m0 3 2 2-2 2m0 3 2 2-2 2"/></svg>
+{:else if mode === 'hermes'}
+	<!-- Hermes: the agent that answers in the chat itself (a winged spark) -->
+	<svg class={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+		><path d="M13 2 5 13.5h6L10 22l8-11.5h-6z" /><path d="M3 7.5c1.6-.2 3 .2 4.2 1.2M21 7.5c-1.6-.2-3 .2-4.2 1.2" /></svg
+	>
 {:else if mode === 'chat'}
 	<svg class={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
 		><path d="M21 12a8.5 8.5 0 0 1-12.6 7.45L3 21l1.55-5.4A8.5 8.5 0 1 1 21 12z" /><path d="M8.5 12h.01M12 12h.01M15.5 12h.01" /></svg

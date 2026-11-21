@@ -79,12 +79,6 @@
 						: 3;
 		return [...filtered].sort((a, b) => rank(a) - rank(b));
 	};
-	const quotaTone = (pct: number) =>
-		pct >= 100
-			? 'bg-red-500 dark:bg-red-400'
-			: pct >= 90
-				? 'bg-amber-400 dark:bg-amber-500'
-				: 'bg-gray-800 dark:bg-gray-200';
 	const remainingTone = (rem: number) =>
 		rem <= 0
 			? 'bg-red-500 dark:bg-red-400'
@@ -197,16 +191,14 @@
 			</div>
 			<div class="mt-3 grid gap-4 {windows.length > 2 ? 'sm:grid-cols-3' : windows.length === 1 ? 'sm:grid-cols-1' : 'sm:grid-cols-2'}">
 				{#each windows as window}
-					{@const pct = Math.round(window.utilization)}
+					{@const pct = Math.max(0, Math.min(100, Math.round(window.utilization)))}
 					{@const rem = Math.max(0, Math.min(100, 100 - pct))}
 					{@const isPrimary = isOffiagy && window.key === 'gemini_weekly'}
 					<div
-						role={pct >= 90 ? 'alert' : undefined}
+						role={rem <= 10 ? 'alert' : undefined}
 						class={isPrimary
 							? 'rounded-xl border border-cyan-500/25 bg-cyan-500/[0.04] p-3 dark:border-cyan-400/25 dark:bg-cyan-400/[0.06]'
-							: isOffiagy
-								? 'rounded-xl border border-gray-100/80 bg-gray-50/40 p-3 dark:border-white/[0.06] dark:bg-white/[0.02]'
-								: ''}
+							: 'rounded-xl border border-gray-100/80 bg-gray-50/40 p-3 dark:border-white/[0.06] dark:bg-white/[0.02]'}
 						data-halo-quota-window={window.key}
 					>
 						<div class="flex items-baseline justify-between gap-2 text-sm">
@@ -218,38 +210,28 @@
 									>
 								{/if}
 							</span>
-							{#if isOffiagy}
-								<span
-									class="shrink-0 font-display font-semibold tabular-nums {rem <= 0
-										? 'text-red-600 dark:text-red-400'
-										: rem <= 10
-											? 'text-amber-600 dark:text-amber-400'
-											: isPrimary
-												? 'text-cyan-700 dark:text-cyan-300'
-												: 'text-gray-900 dark:text-gray-100'}">剩余 {rem}%</span
-								>
-							{:else}
-								<span
-									class="shrink-0 font-display font-semibold tabular-nums {pct >= 100
-										? 'text-red-600 dark:text-red-400'
-										: 'text-gray-900 dark:text-gray-100'}">{pct}%</span
-								>
-							{/if}
+							<span
+								class="shrink-0 font-display font-semibold tabular-nums {rem <= 0
+									? 'text-red-600 dark:text-red-400'
+									: rem <= 10
+										? 'text-amber-600 dark:text-amber-400'
+										: isPrimary
+											? 'text-cyan-700 dark:text-cyan-300'
+											: 'text-gray-900 dark:text-gray-100'}">剩余 {rem}%</span
+							>
 						</div>
 						<div class="mt-1.5 h-1.5 overflow-hidden rounded-full bg-gray-100 dark:bg-zinc-800">
 							<div
-								class="h-full rounded-full transition-all duration-300 {isOffiagy
-									? remainingTone(rem)
-									: quotaTone(pct)}"
-								style="width: {isOffiagy ? rem : Math.min(pct, 100)}%"
+								class="h-full rounded-full transition-all duration-300 {remainingTone(rem)}"
+								style="width: {rem}%"
 							></div>
 						</div>
 						<div class="mt-1 text-xs text-gray-400 dark:text-gray-500">
-							{resetTime(window.resets_at)} 重置{#if isOffiagy} · 已用 {pct}%{/if}{#if pct >= 100}<span
+							{resetTime(window.resets_at)} 重置 · 已用 {pct}%{#if rem <= 0}<span
 									class="text-red-600 dark:text-red-400"
 								>
 									· 额度已用完</span
-								>{:else if pct >= 90}<span class="text-amber-600 dark:text-amber-400">
+								>{:else if rem <= 10}<span class="text-amber-600 dark:text-amber-400">
 									· 额度即将用完</span
 								>{/if}
 						</div>

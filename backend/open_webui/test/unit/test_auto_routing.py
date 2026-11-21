@@ -823,3 +823,129 @@ def test_a_temporary_chat_is_answered_by_hermes(env, monkeypatch):
     auto_dispatch, store, events, turns, started = _chat_dispatch_env(monkeypatch, 'answer')
     out = asyncio.run(auto_dispatch.run_auto_dispatch(env, FORM, USER, {**META, 'chat_id': 'local'}, 'hermes-agent'))
     assert out == {'status': True, 'task_id': 'hermes-task'} and len(turns) == 1 and not started
+
+
+# --- Resilient fallback: backup classifier, cooldown bypass, heuristic accuracy, block consistency ---
+
+
+def test_hermes_needs_tools_without_hermes_or_teams_is_blocked():
+    blocked = normalize_selection(
+        {"mode": "hermes", "needs_tools": True, "execution_requested": False},
+        question="查一下线上配置", teams_available=False, discussion_available=True, hermes_available=False,
+    )
+    assert blocked["blocked"] is True and blocked["mode"] is None and blocked["degraded"] == "hermes"
+
+
+def test_classifier_candidates_skip_failed_model_and_prefer_diverse_family():
+    from open_webui.utils.auto_routing import classifier_candidates
+
+    bases = [
+        {"id": "c1.gpt-chat", "name": "gpt-chat"},
+        {"id": "c2.gpt-4o", "name": "gpt-4o"},
+        {"id": "c3.gemini-flash", "name": "gemini-flash"},
+        {"id": "c4.claude-sonnet", "name": "claude-sonnet"},
+    ]
+    models = {b["id"]: b for b in bases}
+    picked = classifier_candidates(bases, models, preferred="c1.gpt-chat", planner_model="c1.gpt-chat", limit=2)
+    assert picked == ["c1.gpt-chat", "c3.gemini-flash"]
+    # Excluding a failed gpt-chat moves directly to another family without retrying gpt-chat.
+    skipped = classifier_candidates(bases, models, preferred="c1.gpt-chat", planner_model="c1.gpt-chat",
+                                    exclude={"c1.gpt-chat"}, limit=2)
+    assert "c1.gpt-chat" not in skipped and len(skipped) == 2 and skipped[0] == "c2.gpt-4o" and skipped[1] == "c3.gemini-flash"
+
+
+@pytest.mark.parametrize("question,hermes_avail,expected_mode,expected_ro", [
+    ("结合我们订单量大、要求强一致的业务，PostgreSQL 和 MySQL 到底选哪个", True, "discuss", False),
+    ("讨论下这个架构方案的优缺点和取舍", True, "discuss", False),
+    ("用精答解释一下 Redis 持久化机制", True, "answer", False),
+    ("PostgreSQL 和 MySQL 有什么区别？", True, "answer", False),
+    ("帮我把这段文字翻译成英文", True, "answer", False),
+    ("看下 nginx 最近有没有报错", True, "hermes", False),
+    ("明早 9 点提醒我开会", True, "hermes", False),
+    ("画一张橘猫的头像", True, "hermes", False),
+    ("给 HaloWebUI 加一个导出按钮，写单测并提交推送部署", True, "team", False),
+    ("全面审查这个仓库的安全问题，只分析别改，出一份报告", True, "team", True),
+    ("在吗", True, "hermes", False),
+    ("在吗", False, "answer", False),
+])
+def test_heuristic_selection_routes_accurately_when_all_models_fail(question, hermes_avail, expected_mode, expected_ro):
+    from open_webui.utils.auto_routing import heuristic_selection
+
+    raw = heuristic_selection(
+        question, teams_available=True, discussion_available=True, hermes_available=hermes_avail,
+    )
+    decision = normalize_selection(
+        raw, question=question, teams_available=True, discussion_available=True, hermes_available=hermes_avail,
+    )
+    assert decision["mode"] == expected_mode
+    assert bool(decision.get("read_only")) is expected_ro
+    assert raw["degraded"] == "auto"
+
+
+def test_select_uses_backup_classifier_when_primary_fails_and_skips_dead_decision_model(env, monkeypatch):
+    from open_webui.routers import answers
+    from open_webui.utils import assistant_library, chat, decision_model as dm
+
+    api._reset_decision_health()
+    models = {
+        "gpt-chat": {"id": "gpt-chat", "name": "gpt-chat"},
+        "gemini-flash": {"id": "gemini-flash", "name": "gemini-flash"},
+        "claude-sonnet": {"id": "claude-sonnet", "name": "claude-sonnet"},
+    }
+    async def models_for(*a): return models, set()
+    monkeypatch.setattr(answers, "_models", models_for)
+    monkeypatch.setattr(answers, "_resolve_planner", lambda *a: {"model": "gpt-chat", "name": "gpt-chat"})
+    monkeypatch.setattr(assistant_library, "library", lambda *a: ([], list(models.values())))
+    monkeypatch.setattr(dm, "current", lambda user: "gpt-chat")
+    monkeypatch.setattr(dm, "lookup", lambda *a: {"id": "gpt-chat", "name": "gpt-chat", "kind": "text", "connection": ""})
+
+    called = []
+    async def completion(request, payload, user):
+        called.append((payload["metadata"]["task"], payload["model"]))
+        if payload["model"] in ("gpt-chat", "gemini-flash"):
+            raise RuntimeError("upstream timeout")
+        return {"choices": [{"message": {"content": json.dumps({"mode": "discuss", "reason": "多方案取舍"})}}]}
+
+    monkeypatch.setattr(chat, "generate_chat_completion", completion)
+    decision = asyncio.run(api.select(env, USER, api.CreateForm(question="选哪个架构", client_key="b1"), []))[0]
+    # gpt-chat failed in decision -> skipped in classifier -> gemini-flash failed -> claude-sonnet succeeded!
+    assert called == [("decision", "gpt-chat"), ("auto_routing", "gemini-flash"), ("auto_routing", "claude-sonnet")]
+    assert decision["mode"] == "discuss" and decision["routing_model"] == "claude-sonnet"
+    assert decision["decision"]["fallback"] is True and not decision.get("degraded")
+
+
+def test_select_opens_cooldown_after_consecutive_decision_failures_and_falls_back_to_heuristic(env, monkeypatch):
+    from open_webui.routers import answers
+    from open_webui.utils import assistant_library, chat, decision_model as dm
+
+    api._reset_decision_health()
+    models = {
+        "jev": {"id": "jev", "name": "jev-latest"},
+        "gpt-chat": {"id": "gpt-chat", "name": "gpt-chat"},
+        "claude-sonnet": {"id": "claude-sonnet", "name": "claude-sonnet"},
+    }
+    async def models_for(*a): return models, set()
+    monkeypatch.setattr(answers, "_models", models_for)
+    monkeypatch.setattr(answers, "_resolve_planner", lambda *a: {"model": "gpt-chat", "name": "gpt-chat"})
+    monkeypatch.setattr(assistant_library, "library", lambda *a: ([], [models["gpt-chat"], models["claude-sonnet"]]))
+    monkeypatch.setattr(dm, "current", lambda user: "jev")
+    monkeypatch.setattr(dm, "lookup", lambda *a: {"id": "jev", "name": "jev-latest", "kind": "system_one", "connection": ""})
+
+    decision_calls = 0
+    async def all_down(request, payload, user):
+        nonlocal decision_calls
+        if payload["metadata"]["task"] == "decision":
+            decision_calls += 1
+            raise asyncio.TimeoutError()
+        raise RuntimeError("classifier down")
+
+    monkeypatch.setattr(chat, "generate_chat_completion", all_down)
+    # 1st and 2nd failure hit threshold=2 and open cooldown; heuristic still classifies accurately!
+    d1 = asyncio.run(api.select(env, USER, api.CreateForm(question="讨论下 PostgreSQL 和 MySQL 选哪个", client_key="c1"), []))[0]
+    d2 = asyncio.run(api.select(env, USER, api.CreateForm(question="PostgreSQL 和 MySQL 有什么区别？", client_key="c2"), []))[0]
+    d3 = asyncio.run(api.select(env, USER, api.CreateForm(question="讨论下架构边界怎么定", client_key="c3"), []))[0]
+    assert decision_calls == 2  # 3rd call bypassed dead jev immediately via cooldown
+    assert d1["mode"] == "discuss" and d1["degraded"] == "auto" and d1["routing_model"] is None
+    assert d2["mode"] == "answer" and d2["degraded"] == "auto" and d2["routing_model"] is None
+    assert d3["mode"] == "discuss" and d3["decision"]["fallback"] is True and "跳过" in d3["decision"]["reason"]
+    api._reset_decision_health()

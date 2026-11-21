@@ -15,11 +15,75 @@ from open_webui.models.chats import Chats
 from open_webui.models.files import Files
 from open_webui.utils.vault_notes import with_goal_notes
 from open_webui.utils.auth import get_verified_user
-from open_webui.utils.auto_routing import LABELS, PATHS, normalize_selection, selection_messages, preferred_routing_model
+from open_webui.utils.auto_routing import (
+    LABELS,
+    MODES,
+    PATHS,
+    classifier_candidates,
+    heuristic_selection,
+    normalize_selection,
+    preferred_routing_model,
+    selection_messages,
+)
 
 router = APIRouter()
 log = logging.getLogger(__name__)
 _jobs: dict[str, asyncio.Task] = {}
+
+# Per-model short circuit-breaker for auto-routing's 辅助决策模型: if the configured decision model
+# fails with consecutive transport/timeout/HTTP errors, bypass waiting 60s for a short window so new
+# chats stay snappy while still probing again once the cooldown expires.
+_DECISION_COOLDOWN_THRESHOLD = 2
+_DECISION_COOLDOWN_SECONDS = 180
+_DECISION_FAILURE_WINDOW = 120
+_decision_health: dict[str, dict] = {}
+
+
+def _is_transport_failure(trace: Optional[dict]) -> bool:
+    if not trace or not trace.get("fallback"):
+        return False
+    reason = str(trace.get("reason") or "")
+    # Low-confidence or schema mismatch means the model answered; only transport/timeout/unavailability
+    # should trigger cooldown or exclude the model from classifier fallback.
+    return any(tok in reason for tok in ("超时", "调用失败", "不可用"))
+
+
+def _decision_cooldown_active(model_id: str) -> bool:
+    state = _decision_health.get(model_id)
+    if not state:
+        return False
+    now = time.monotonic()
+    until = float(state.get("cooldown_until") or 0)
+    if until > now:
+        return True
+    if until and until <= now:
+        # Cooldown elapsed: allow a half-open probe; keep count at threshold-1 so one more failure re-opens.
+        state["cooldown_until"] = 0.0
+        state["failures"] = max(0, _DECISION_COOLDOWN_THRESHOLD - 1)
+    return False
+
+
+def _record_decision_outcome(model_id: str, trace: Optional[dict]) -> None:
+    if not model_id or not trace:
+        return
+    if trace.get("used"):
+        _decision_health.pop(model_id, None)
+        return
+    if not _is_transport_failure(trace):
+        return
+    now = time.monotonic()
+    state = _decision_health.get(model_id) or {"failures": 0, "last_at": 0.0, "cooldown_until": 0.0}
+    if now - float(state.get("last_at") or 0) > _DECISION_FAILURE_WINDOW:
+        state["failures"] = 0
+    state["failures"] = int(state["failures"]) + 1
+    state["last_at"] = now
+    if state["failures"] >= _DECISION_COOLDOWN_THRESHOLD:
+        state["cooldown_until"] = now + _DECISION_COOLDOWN_SECONDS
+    _decision_health[model_id] = state
+
+
+def _reset_decision_health() -> None:
+    _decision_health.clear()
 
 
 class RouteBlocked(HTTPException):
@@ -154,16 +218,17 @@ async def select(request, user, form, file_info, *, remote=False):
     preferred = preferred_routing_model(bases, models)
     planner = answers._resolve_planner(preferred, models, ambiguous, user)
     from open_webui.utils.task import get_task_model_id
-    routing_model = preferred or get_task_model_id(planner["model"], "",
+    task_model = get_task_model_id(planner["model"], "",
         getattr(request.app.state.config, "TASK_MODEL_EXTERNAL", ""), models, ambiguous)
-    if not any(base["id"] == routing_model for base in bases):
-        routing_model = planner["model"]
     teams_available = bool(ENABLE_AGENT_TEAMS)
+    discussion_available = len(bases) >= 2
     # Hermes takes it in a chat it answers (its own, or one made for it). Not from Telegram / QQ:
     # there a plain message already is Hermes, /auto asks for one of the workbenches.
     from open_webui.utils.hermes_agent import is_hermes_agent_model
     hermes_available = not remote and any(is_hermes_agent_model(m) for m in models.values() if isinstance(m, dict))
     trace = None
+    failed_models = set()
+    used_classifier_model = None
     if form.mode != "auto":
         # choosing 协作 is permission to use tools; 「只分析」 in the question still keeps it read-only
         raw = {"mode": form.mode, "reason": "你指定了处理方式", "execution_requested": form.mode == "team",
@@ -173,66 +238,113 @@ async def select(request, user, form, file_info, *, remote=False):
         from open_webui.utils import decision_model as dm
         from open_webui.utils.auto_routing import decision_request, selection_from_answers
 
-        async def assisted(decider):
-            state, questions = decision_request(form.question, form.context, file_info,
-                teams_available=teams_available, discussion_available=len(bases) >= 2,
-                hermes_available=hermes_available)
-            answers, reason = await decider.judge(state, questions)
-            picked = selection_from_answers(answers, reason, decider.name)
-            return picked, {"mode": picked["mode"], "execution_requested": picked["execution_requested"],
-                            "confidence": answers["mode"].get("confidence")}
+        configured_decision = dm.current(user)
+        if configured_decision and _decision_cooldown_active(configured_decision):
+            failed_models.add(configured_decision)
+            name = str((models.get(configured_decision) or {}).get("name") or configured_decision)
+            raw = None
+            trace = dm.trace_of(
+                "auto", configured_decision, name, "",
+                fallback=True, reason="辅助决策模型近期连续超时或不可用，暂时跳过并由分类模型判断",
+            )
+            log.info("[DECISION] module=auto model=%s fallback=1 reason=cooldown", name)
+        else:
+            async def assisted(decider):
+                state, questions = decision_request(form.question, form.context, file_info,
+                    teams_available=teams_available, discussion_available=discussion_available,
+                    hermes_available=hermes_available)
+                answers_map, reason = await decider.judge(state, questions)
+                picked = selection_from_answers(answers_map, reason, decider.name)
+                return picked, {"mode": picked["mode"], "execution_requested": picked["execution_requested"],
+                                "confidence": answers_map["mode"].get("confidence")}
 
-        raw, trace = await dm.decide(request, user, "auto", assisted, models_map=models, ambiguous=ambiguous)
+            raw, trace = await dm.decide(request, user, "auto", assisted, models_map=models, ambiguous=ambiguous)
+            if configured_decision and trace:
+                _record_decision_outcome(configured_decision, trace)
+                if _is_transport_failure(trace):
+                    failed_models.add(configured_decision)
+
     if form.mode == "auto" and raw is None:
-        async def classify():
-            payload = {"model": routing_model, "stream": True,
-                "messages": selection_messages(form.question, form.context, file_info, teams_available=teams_available,
-                                               hermes_available=hermes_available),
-                "metadata": {"task": "auto_routing"}, "max_tokens": 400}
-            text = ""
-            async for kind, part in iterate_completion(await generate_chat_completion(request, payload, user)):
-                if kind == "content":
-                    text += part
-                    if len(text) > 6000:
-                        raise ValueError("route response too long")
-            return parse_json_object(text)
-        try:
-            raw = await asyncio.wait_for(classify(), timeout=25)
-        except Exception:
-            log.info("automatic selection unavailable; using the default")
-            raw = _default_choice(hermes_available, "自动判断暂不可用")
-    # needs_tools sends 精答/讨论 to 协作台 too (normalize_selection): Hermes must be there for it
-    if isinstance(raw, dict) and (raw.get("mode") == "team" or raw.get("needs_tools") is True) and teams_available:
+        candidates = classifier_candidates(
+            bases, models,
+            preferred=preferred,
+            task_model=task_model,
+            planner_model=planner["model"],
+            exclude=failed_models,
+            limit=2,
+        )
+        messages = selection_messages(
+            form.question, form.context, file_info,
+            teams_available=teams_available, hermes_available=hermes_available,
+        )
+        for idx, candidate in enumerate(candidates):
+            async def classify(model_id=candidate):
+                payload = {"model": model_id, "stream": True, "messages": messages,
+                           "metadata": {"task": "auto_routing"}, "max_tokens": 400}
+                text = ""
+                async for kind, part in iterate_completion(await generate_chat_completion(request, payload, user)):
+                    if kind == "content":
+                        text += part
+                        if len(text) > 6000:
+                            raise ValueError("route response too long")
+                parsed = parse_json_object(text)
+                if not isinstance(parsed, dict) or parsed.get("mode") not in MODES:
+                    raise ValueError("invalid route")
+                return parsed
+            try:
+                raw = await asyncio.wait_for(classify(), timeout=20 if idx == 0 else 15)
+                used_classifier_model = candidate
+                break
+            except Exception:
+                log.info("automatic selection candidate %s unavailable; trying next fallback", candidate)
+        if raw is None:
+            log.info("automatic selection unavailable; using heuristic fallback")
+            raw = heuristic_selection(
+                form.question, form.context, file_info,
+                teams_available=teams_available,
+                discussion_available=discussion_available,
+                hermes_available=hermes_available,
+            )
+    # Only probe Hermes team availability when the selection could actually land on 协作台.
+    needs_team_check = isinstance(raw, dict) and teams_available and (
+        raw.get("mode") == "team"
+        or (raw.get("mode") in ("answer", "discuss") and raw.get("needs_tools") is True and not hermes_available)
+        or (raw.get("mode") == "hermes" and not hermes_available
+            and (raw.get("needs_tools") is True or raw.get("execution_requested") is True))
+    )
+    if needs_team_check:
         try:
             await hermes_target(request, user)
         except TeamsError:
             teams_available = False
     try:
         decision = normalize_selection(raw, question=form.question, context=form.context,
-            teams_available=teams_available, discussion_available=len(bases) >= 2, hermes_available=hermes_available)
+            teams_available=teams_available, discussion_available=discussion_available, hermes_available=hermes_available)
         if raw.get("degraded") == "auto":
             decision["degraded"] = "auto"
     except ValueError:
-        decision = {**_default_choice(hermes_available, "自动判断结果不可用"), "execution_requested": False}
+        fallback_raw = heuristic_selection(
+            form.question, form.context, file_info,
+            teams_available=teams_available,
+            discussion_available=discussion_available,
+            hermes_available=hermes_available,
+        )
+        decision = normalize_selection(fallback_raw, question=form.question, context=form.context,
+            teams_available=teams_available, discussion_available=discussion_available, hermes_available=hermes_available)
+        decision["degraded"] = "auto"
     if decision.get("blocked"):
         raise RouteBlocked(decision["reason"])
     # An explicit manual choice should explain an unavailable capability rather than change mode.
     if form.mode != "auto" and decision["mode"] != form.mode:
         raise HTTPException(400, decision["reason"] + ("；你的账号没有可用的 Hermes，可改选精答" if form.mode == "hermes"
                                                        else "；可改选精答"))
-    decision["routing_model"] = routing_model if form.mode == "auto" else None
+    decision["routing_model"] = used_classifier_model if (form.mode == "auto" and decision.get("degraded") != "auto") else None
     if trace:
         if trace["used"]:
             decision["routing_model"] = trace["model"]
             trace["result"] = {**trace.get("result", {}), "final_mode": decision["mode"]}
         decision["decision"] = trace
     return decision, models, ambiguous, bases, planner
-
-
-def _default_choice(hermes_available, why):
-    """When nothing chose: Hermes where it can take it (what the chat would have done), else 精答."""
-    mode = "hermes" if hermes_available else "answer"
-    return {"mode": mode, "reason": f"{why}，已按默认方式交给{LABELS[mode]}", "degraded": "auto"}
 
 
 async def dispatch(request, user, row, form, decision, models, ambiguous, bases, planner):
@@ -327,9 +439,9 @@ async def dispatch(request, user, row, form, decision, models, ambiguous, bases,
 
 async def _run(request, user, row, form, file_info):
     try:
-        # up to 60s for the 辅助决策模型, then 25s for the classifier it falls back to
+        # up to 60s for the 辅助决策模型, then 20s + 15s for primary/backup classifiers before heuristic
         selection = await asyncio.wait_for(select(request, user, form, file_info,
-                                                  remote=bool(row["data"].get("remote"))), timeout=95)
+                                                  remote=bool(row["data"].get("remote"))), timeout=110)
         await asyncio.wait_for(dispatch(request, user, row, form, *selection), timeout=180)
     except Exception as exc:
         # Never persist provider messages, credentials, or raw model output in a receipt.

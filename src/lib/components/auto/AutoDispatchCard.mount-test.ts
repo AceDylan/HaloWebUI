@@ -107,6 +107,23 @@ describe('AutoDispatchCard', () => {
 		app = new Card({ target, props: { id: 'r3', history: { messages: {} } } });
 		await until(() => !!target.querySelector('[data-auto-degraded]'));
 		expect(target.textContent).toContain('临时改用');
+		app.$destroy();
+		target.innerHTML = '';
+		api.getAutoRoute.mockResolvedValue(
+			row({
+				status: 'dispatched',
+				mode: 'discuss',
+				degraded: 'auto',
+				routing_model: null,
+				target_id: null,
+				error: '',
+				reason: '判断模型暂不可用，按规则识别为多方案权衡取舍，交由讨论处理'
+			})
+		);
+		app = new Card({ target, props: { id: 'r3b', history: { messages: {} } } });
+		await until(() => !!target.querySelector('[data-auto-degraded]'));
+		expect(target.textContent).toContain('规则研判');
+		expect(target.querySelector('[data-auto-routing-model]')).toBeFalsy();
 	});
 
 	it('renders a compact connected routing strip once dispatched to a workbench card', async () => {

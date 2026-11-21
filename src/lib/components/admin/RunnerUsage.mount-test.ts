@@ -70,7 +70,10 @@ describe('runner usage page', () => {
 		}));
 		await mount();
 		expect(target.textContent).toContain('订阅实际账单另计');
-		expect(target.querySelector('[role="alert"]').textContent).toContain('额度即将用完');
+		const quotaAlert = target.querySelector('[role="alert"]');
+		expect(quotaAlert.textContent).toContain('剩余 6%');
+		expect(quotaAlert.textContent).toContain('已用 94%');
+		expect(quotaAlert.textContent).toContain('额度即将用完');
 		expect(target.querySelector('[data-halo-runner-rows]').textContent).toContain('$2.00');
 		expect(target.textContent).toContain('1 次费用缺失');
 		// codex reports tokens only: Hermes' estimate is marked ≈ and explains itself

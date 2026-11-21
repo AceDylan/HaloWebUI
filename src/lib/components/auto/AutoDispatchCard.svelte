@@ -122,7 +122,10 @@
 						{#if row?.degraded}<span
 								class="rounded-full bg-amber-500/12 px-2 py-0.5 text-[11px] font-medium text-amber-700 dark:text-amber-300"
 								data-auto-degraded
-								title="想用的方式暂时不可用，由这种方式代替">临时改用</span
+								title={row.degraded === 'auto'
+									? '判断模型暂不可用，已按规则自动研判'
+									: '想用的方式暂时不可用，由这种方式代替'}
+								>{row.degraded === 'auto' ? '规则研判' : '临时改用'}</span
 							>{/if}
 						{#if row?.routing_model}<span
 								class="truncate text-[11px] text-gray-400 dark:text-gray-500"
@@ -206,7 +209,10 @@
 						>{#if row?.degraded}<span
 								class="rounded-full bg-amber-500/12 px-2 py-0.5 text-xs font-medium text-amber-700 dark:text-amber-400"
 								data-auto-degraded
-								title="想用的方式暂时不可用，由这种方式代替">临时改用</span
+								title={row.degraded === 'auto'
+									? '判断模型暂不可用，已按规则自动研判'
+									: '想用的方式暂时不可用，由这种方式代替'}
+								>{row.degraded === 'auto' ? '规则研判' : '临时改用'}</span
 							>{/if}
 						{#if routingElapsed !== null}
 							<span class="tm-num text-[11px] text-gray-400 dark:text-gray-500"

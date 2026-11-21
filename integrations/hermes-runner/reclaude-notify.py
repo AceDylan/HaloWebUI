@@ -402,7 +402,7 @@ def recorded_origin(meta, session_id="", platform="", db_path=STATE_DB):
 
 
 QUOTA_FOOTER_MARKER = "reclaude 额度"
-QUOTA_FOOTER_MARKERS = (QUOTA_FOOTER_MARKER, "官方 Claude 额度")
+QUOTA_FOOTER_MARKERS = (QUOTA_FOOTER_MARKER, "官方 Claude 额度", "offiagy 额度")
 
 
 def has_quota_footer(result_path, marker=None):

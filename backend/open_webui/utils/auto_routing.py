@@ -158,6 +158,11 @@ def normalize_selection(raw, *, question, context="", teams_available=False, dis
         if hermes_available:
             return out
         # Hermes cannot take it here: what it would have checked or done goes to 协作台, the rest to 精答
+        if tools and not teams_available:
+            out.update(mode=None, blocked=True, degraded="hermes",
+                       reason="需要查看真实的仓库、文件或系统，但这里不能直接交给 Hermes 且协作台不可用；"
+                              "精答无法查证，不会凭印象作答。请启用协作后重新分流，或改选精答只要一般建议")
+            return out
         mode = "team" if (tools or execution) and teams_available else "answer"
         out.update(mode=mode, degraded="hermes",
                    reason=f"这里不能直接交给 Hermes，临时改由{LABELS[mode]}处理" + ("（只读）" if mode == "team" and not execution else ""))
@@ -198,6 +203,170 @@ def preferred_routing_model(bases, models):
         if any(str(v or "").lower().split("/")[-1] == "gpt-chat" for v in values):
             return base["id"]
     return None
+
+
+def _model_family(base, models):
+    model = (models or {}).get(base["id"], {})
+    text = " ".join(str(v or "") for v in (base.get("name"), base["id"], model.get("model_id"), model.get("original_id"))).lower()
+    for family in ("gpt", "openai", "claude", "anthropic", "gemini", "deepseek", "qwen", "glm", "kimi", "mistral", "llama"):
+        if family in text:
+            return {"openai": "gpt", "anthropic": "claude"}.get(family, family)
+    return base["id"]
+
+
+def classifier_candidates(bases, models, *, preferred=None, task_model=None, planner_model=None, exclude=None, limit=2):
+    """Ordered distinct text models for the fallback classifier, skipping an already-failed model
+    and preferring a different model family for the backup attempt."""
+    base_by_id = {b["id"]: b for b in (bases or []) if isinstance(b, dict) and b.get("id")}
+    excluded = {str(x) for x in (exclude or ()) if x}
+    ordered = []
+    seen = set()
+
+    def add(mid):
+        if mid and mid in base_by_id and mid not in seen and mid not in excluded:
+            seen.add(mid)
+            ordered.append(mid)
+
+    for candidate in (preferred, task_model, planner_model):
+        add(candidate)
+
+    if len(ordered) < limit:
+        used_families = {_model_family(base_by_id[mid], models) for mid in ordered}
+        # First pass: prefer a different model family (avoids hitting the same broken upstream).
+        for base in bases or []:
+            mid = base.get("id")
+            if mid and mid not in seen and mid not in excluded and _model_family(base, models) not in used_families:
+                add(mid)
+                used_families.add(_model_family(base, models))
+                if len(ordered) >= limit:
+                    break
+        # Second pass: any other available base model.
+        for base in bases or []:
+            if len(ordered) >= limit:
+                break
+            add(base.get("id"))
+
+    # If excluding a failed model left zero candidates, allow falling back to the remaining list.
+    if not ordered:
+        for candidate in (preferred, task_model, planner_model):
+            if candidate and candidate in base_by_id and candidate not in seen:
+                seen.add(candidate)
+                ordered.append(candidate)
+                break
+    return ordered[:limit]
+
+
+# --- Deterministic rule-based fallback when all decision & classifier models fail / time out ---
+
+_EXPLICIT_TEAM_RE = re.compile(r"(?:用|交给|走|让|开|建).{0,6}协作台|协作台.{0,6}(?:做|处理|来|执行|审查|开发)")
+_EXPLICIT_DISCUSS_RE = re.compile(r"(?:用|交给|走|让|开).{0,4}讨论台?|(?:^|[，。；,\s])讨论(?:一下|下)|多模型讨论|辩论(?:一下|下)")
+_EXPLICIT_ANSWER_RE = re.compile(r"(?:用|交给|走|让).{0,4}精答|精答(?:一下|来)")
+_EXPLICIT_HERMES_RE = re.compile(r"(?:直接)?(?:交给|用|让)\s*hermes", re.I)
+
+_HERMES_SKILL_RE = re.compile(
+    r"提醒我|定时任务|设个?闹钟|(?:明早|明天|今晚|每天|每周).{0,6}\d+\s*点|"
+    r"发(?:到|给)\s*(?:tg|telegram|qq)|(?:画一|生成一?)[张幅个].{0,12}(?:图|头像|海报|封面|插画)|"
+    r"生图|做成?视频|(?:记到|写入?|查(?:一下|下)?)\s*(?:obsidian|笔记|知识库)|"
+    r"(?:^|\s)/(?:reclaude|officlaude|cchclaude|anyclaude|codex|agy|offiagy)\b|"
+    r"交给\s*(?:reclaude|officlaude|cchclaude|anyclaude|codex|agy|offiagy)", re.I,
+)
+_QUICK_LOCAL_RE = re.compile(
+    r"(?:看|查|检查|确认|读|翻|盯)(?:一下|下)?[^，。！？\n]{0,24}(?:日志|状态|容器|端口|进程|服务|负载|磁盘|内存|配置|报错|错误|"
+    r"起来没有|在不在跑|运行情况|最近.{0,6}提交|git\s*(?:log|status|diff))|"
+    r"\b(?:docker\s+(?:ps|logs|inspect)|systemctl\s+status|git\s+(?:log|status|diff)|tail\s+-n|journalctl)\b", re.I,
+)
+_TEAM_AUDIT_RE = re.compile(
+    r"全面(?:审查|排查|审计|检查|分析|评估|梳理)|全仓库|整个(?:仓库|项目)[^，。！？\n]{0,16}(?:审查|审计|排查|梳理|重构)|"
+    r"系统(?:调研|梳理|评估)[^，。！？\n]{0,16}(?:报告|方案)", re.I,
+)
+_TEAM_DELIVERY_RE = re.compile(
+    r"(?:修改|修复|新增|添加|加一?个|实现|重构|优化|开发|升级|改造)[^，。！？\n]{0,40}(?:并|然后|并且|后)[^，。！？\n]{0,20}"
+    r"(?:测试|单测|验证|提交|推送|部署|清理|commit|pr)|"
+    r"提交推送部署|写(?:单测|测试)并提交|拆计划|分工(?:执行|合作)", re.I,
+)
+_DISCUSS_TRADEOFF_RE = re.compile(
+    r"(?:结合|针对)(?:我们|我的|目前|当前|现有)[^，。！？\n]{0,30}(?:选哪个|怎么选|方案|架构|取舍|路线)|"
+    r"(?:到底|应该|该)选哪个|对比[^，。！？\n]{0,24}(?:优缺点|取舍|方案|利弊)|"
+    r"(?:找|挑).{0,4}(?:漏洞|隐患|风险)|(?:架构|技术选型|优先级|边界)[^，。！？\n]{0,16}(?:怎么定|怎么选|评审|取舍)|"
+    r"还是.{1,20}(?:更好|更合适|合适)|权衡|取舍", re.I,
+)
+_LOCAL_SYSTEM_RE = re.compile(
+    r"(?:/(?:root|etc|var|opt|usr|home)/)|"
+    r"\b[\w-]+\.(?:py|ts|js|svelte|yaml|yml|json|sh|conf|toml|sql|go|rs)\b|"
+    r"\b(?:halowebui|hermes|nginx|docker(?:-compose)?|systemd|cchp|offiagy|officlaude|reclaude|codex|agy)\b|"
+    r"(?:本机|服务器|容器|线上|仓库|代码库|当前项目|配置文件|数据库表)", re.I,
+)
+_PURE_KNOWLEDGE_RE = re.compile(
+    r"(?:是什么|有什么区别|各适合什么场景|原理(?:是什么)?|怎么用|如何理解|解释(?:一下|下)|介绍(?:一下|下)|"
+    r"写一(?:篇|段|份|个)[^，。！？\n]{0,16}(?:文章|邮件|文案|示例|例子|demo|模板|函数|脚本)|"
+    r"翻译(?:成|为)|润色|总结(?:一下|下)|代码(?:示例|例子)|概念|教程)", re.I,
+)
+_EXECUTION_ACTION_RE = re.compile(
+    r"(?:帮我|请|直接)?(?:修改|修复|改动|新增|添加|加一?个|实现|重构|部署|重启|清理|删除|写入|安装|升级|配置|提交|推送)|"
+    r"\b(?:fix|implement|deploy|refactor|restart|install|commit|push)\b", re.I,
+)
+
+
+def heuristic_selection(question, context="", files=None, *, teams_available=False, discussion_available=False,
+                        hermes_available=False):
+    """High-precision deterministic router used when both the decision model and fallback classifiers
+    are unavailable or timed out. Output still passes through ``normalize_selection``."""
+    q = (question or "").strip()
+    ro = analysis_only(q, context)
+    prefix = "判断模型暂不可用，按规则识别为"
+
+    # 1. Explicit mode requests always win.
+    if _EXPLICIT_TEAM_RE.search(q):
+        return {"mode": "team", "reason": f"{prefix}明确指定协作台",
+                "needs_tools": True, "execution_requested": not ro, "degraded": "auto"}
+    if _EXPLICIT_DISCUSS_RE.search(q):
+        return {"mode": "discuss", "reason": f"{prefix}需要多模型讨论",
+                "needs_tools": False, "execution_requested": False, "degraded": "auto"}
+    if _EXPLICIT_ANSWER_RE.search(q):
+        return {"mode": "answer", "reason": f"{prefix}明确指定精答",
+                "needs_tools": False, "execution_requested": False, "degraded": "auto"}
+    if _EXPLICIT_HERMES_RE.search(q):
+        return {"mode": "hermes", "reason": f"{prefix}明确指定交给 Hermes",
+                "needs_tools": bool(_LOCAL_SYSTEM_RE.search(q)),
+                "execution_requested": bool(_EXECUTION_ACTION_RE.search(q)) and not ro, "degraded": "auto"}
+
+    # 2. Multi-step repository delivery or full-repo systematic audit -> team.
+    if _TEAM_DELIVERY_RE.search(q):
+        return {"mode": "team", "reason": f"{prefix}多步仓库开发/交付任务，交由协作台处理",
+                "needs_tools": True, "execution_requested": not ro, "degraded": "auto"}
+    if _TEAM_AUDIT_RE.search(q):
+        return {"mode": "team", "reason": f"{prefix}全仓库或系统性审查任务，交由协作台处理",
+                "needs_tools": True, "execution_requested": False, "degraded": "auto"}
+
+    # 3. Hermes native skills & quick single-step local inspections -> hermes (or team if no hermes).
+    if _HERMES_SKILL_RE.search(q):
+        return {"mode": "hermes", "reason": f"{prefix}Hermes 原生技能/快捷任务，交由 Hermes 处理",
+                "needs_tools": True, "execution_requested": not ro, "degraded": "auto"}
+    if _QUICK_LOCAL_RE.search(q):
+        return {"mode": "hermes", "reason": f"{prefix}本机快速查看任务，交由 Hermes 直接处理",
+                "needs_tools": True, "execution_requested": False, "degraded": "auto"}
+
+    # 4. Trade-off / multi-option decision -> discuss (when no real system inspection needed).
+    has_local = bool(_LOCAL_SYSTEM_RE.search(q))
+    if _DISCUSS_TRADEOFF_RE.search(q) and not has_local:
+        return {"mode": "discuss", "reason": f"{prefix}多方案权衡取舍，交由讨论处理",
+                "needs_tools": False, "execution_requested": False, "degraded": "auto"}
+
+    # 5. Pure knowledge / explanation / writing / translation without real-system cues -> answer.
+    if _PURE_KNOWLEDGE_RE.search(q) and not has_local:
+        return {"mode": "answer", "reason": f"{prefix}通用知识或表达类问题，交由精答处理",
+                "needs_tools": False, "execution_requested": False, "degraded": "auto"}
+
+    # 6. References real local files / host / repo -> hermes (small action/check) or team.
+    if has_local:
+        wants_exec = bool(_EXECUTION_ACTION_RE.search(q)) and not ro
+        return {"mode": "hermes", "reason": f"{prefix}涉及本机或仓库核查，交由 Hermes 处理",
+                "needs_tools": True, "execution_requested": wants_exec, "degraded": "auto"}
+
+    # 7. Default for greetings, short follow-ups, or open chat.
+    mode = "hermes" if hermes_available else "answer"
+    return {"mode": mode, "reason": f"自动判断暂不可用，已按默认方式交给{LABELS[mode]}",
+            "needs_tools": False, "execution_requested": False, "degraded": "auto"}
 
 
 # 辅助决策 (utils/decision_model.py): the same choice as typed questions over the modes available

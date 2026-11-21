@@ -45,6 +45,7 @@
 		/** source auto: back to the lead's recommendation. */
 		model: { name: string; model: string; source: 'user' | 'auto' };
 		recheck: void;
+		'auto-deploy': boolean;
 	}>();
 	let feedback = '';
 	let showFeedback = false;
@@ -224,13 +225,43 @@
 				<p class="text-xs leading-relaxed text-gray-500 dark:text-gray-400">
 					批准后团队从 <span class="font-mono">{plan.project.branch || 'HEAD'}</span>
 					{plan.project.head ? `（${plan.project.head}）` : ''}开一个自己的分支，在独立的 worktree
-					里改，不碰你正在用的工作区；每个任务完成自动提交。结束后在「变更」里看差异，合并、推送都由你来点。{#if plan.project.auto}
+					里改，不碰你正在用的工作区；每个任务完成自动提交。结束后可在「变更」里一键推送部署并清理分支。{#if plan.project.auto}
 						只是提问、做分析也可以留在项目里（成员能读到代码）；团队结束时如果没有改动任何文件，分支会自动清理。{/if}{#if plan.project.dirty}<span
 							class="text-amber-700 dark:text-amber-300"
 						>
 							你的工作区现在有未提交的改动：不影响团队，合并前需要先提交。</span
 						>{/if}
 				</p>
+				<div
+					class="tm-hairline mt-1 flex flex-wrap items-center gap-x-3 gap-y-1.5 border-t pt-2 text-xs"
+					data-plan-deploy
+				>
+					<span class="text-gray-500 dark:text-gray-400">
+						发布流程：<span class="text-gray-700 dark:text-gray-200"
+							>{plan.project.deploy_profile?.label || '合并到主分支、推送 origin 并清理团队分支'}</span
+						>
+					</span>
+					{#if editable}
+						<label
+							class="ml-auto inline-flex cursor-pointer select-none items-center gap-1.5 text-gray-700 dark:text-gray-200"
+						>
+							<input
+								type="checkbox"
+								class="size-3.5 rounded accent-sky-600"
+								checked={!!team.auto_deploy}
+								disabled={busy}
+								on:change={(e) => dispatch('auto-deploy', e.currentTarget.checked)}
+								data-plan-auto-deploy
+							/>
+							<span>完成后自动推送部署并清理</span>
+						</label>
+					{:else if team.auto_deploy}
+						<span
+							class="ml-auto rounded-full bg-sky-50 px-2 py-0.5 text-[11px] text-sky-700 dark:bg-sky-950 dark:text-sky-300"
+							>已开启自动推送部署</span
+						>
+					{/if}
+				</div>
 			{/if}
 		</section>
 

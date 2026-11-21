@@ -158,6 +158,8 @@ HaloWebUI sends `X-Halo-Owner: <user id>`; a team recorded for another owner is 
 | `GET /v1/halo-teams/{id}/changes` | a project team's branch: commits, files (+/−), not yet committed, merged / pushed |
 | `GET /v1/halo-teams/{id}/changes/diff?path=` | one file's diff against the base |
 | `POST /v1/halo-teams/{id}/changes/{merge,push,discard}` | user actions once the team is completed or stopped; push `{what: branch|base}` |
+| `POST /v1/halo-teams/{id}/changes/deploy` `{cleanup?: bool}` | one-click merge → push → CI → deploy → cleanup pipeline (`deploy.py`, 202 async); project recipes in `~/.hermes/halo-teams-deploy.json` (plus built-in host recipes) |
+| `POST /v1/halo-teams/{id}/changes/auto-deploy` `{enabled: bool}` | toggle automatic push/deploy/cleanup after completion and acceptance |
 | `POST /v1/halo-teams/notify` `{event, team, origin}` | HaloWebUI hands over a finished plan (or why there is none) of a team started from Telegram; the plan card goes to that chat |
 
 `sub_status` values: `queued` (ready, waiting for a slot), `waiting_deps`, `running`,

@@ -502,6 +502,34 @@ def test_change_routes_are_proxied_only_for_running_teams(hermes):
     assert _client("u2").post(f"/api/v1/teams/{team_id}/changes/merge").status_code == 404
 
 
+def test_auto_deploy_and_deploy_routes(hermes):
+    client = _client("u1")
+    created = client.post("/api/v1/teams/", json={"goal": "给 HaloWebUI 加部署模块", "auto_deploy": True}).json()
+    assert created["auto_deploy"] is True
+    team_id = created["id"]
+    AgentTeams.update(team_id, "u1", status="plan_ready", plan=PLAN, title="部署模块")
+
+    # Toggle before approval updates HaloWebUI meta without calling Hermes
+    res = client.post(f"/api/v1/teams/{team_id}/changes/auto-deploy", json={"enabled": False})
+    assert res.status_code == 200 and res.json() == {"auto_deploy": False}
+    assert AgentTeams.get(team_id, "u1").meta["auto_deploy"] is False
+
+    # Running team proxies both auto-deploy and deploy
+    AgentTeams.update(team_id, "u1", status="running", phase="completed")
+    res = client.post(f"/api/v1/teams/{team_id}/changes/auto-deploy", json={"enabled": True})
+    assert res.status_code == 200 and hermes.calls[-1][2].endswith("/changes/auto-deploy")
+    assert hermes.calls[-1][3] == {"enabled": True}
+
+    hermes.responses[("POST", "/changes/deploy")] = {"deploy": {"status": "running", "step": "merge"}}
+    dep = client.post(f"/api/v1/teams/{team_id}/changes/deploy", json={"cleanup": False})
+    assert dep.status_code == 200 and dep.json()["deploy"]["status"] == "running"
+    assert hermes.calls[-1][2].endswith("/changes/deploy") and hermes.calls[-1][3] == {"cleanup": False}
+    assert _client("u2").post(f"/api/v1/teams/{team_id}/changes/deploy", json={}).status_code == 404
+
+    assert teams_utils.result_settled({"conclusion": {"status": "ready"}, "deploy": {"status": "running"}}) is False
+    assert teams_utils.result_settled({"conclusion": {"status": "ready"}, "deploy": {"status": "succeeded"}}) is True
+
+
 def test_lead_routes_are_proxied_and_new_work_reopens_a_finished_team(hermes):
     client = _client("u1")
     team_id = _ready_team(client, hermes)

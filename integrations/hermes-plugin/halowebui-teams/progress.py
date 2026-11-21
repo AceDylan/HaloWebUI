@@ -50,7 +50,7 @@ TOOL_LABELS = {
 STAGE_LABELS = {
     "planning": "负责人制定计划", "approval": "等你批准", "starting": "启动成员", "running": "成员执行中",
     "attention": "需要你处理", "paused": "已暂停派发", "concluding": "整理完整结果", "checking": "对照目标验收",
-    "illustrating": "为结果配图",
+    "illustrating": "为结果配图", "deploying": "推送与部署中",
     "done": "已完成", "stopped": "已停止",
 }
 
@@ -379,7 +379,7 @@ def _latest_activity(slug: str, task_ids: list[str]) -> dict[str, dict]:
 def _step_states(key: str) -> list[dict]:
     order = ["plan", "approve", "run", "conclude", "check"]
     position = {"planning": 0, "approval": 1, "starting": 2, "running": 2, "attention": 2, "paused": 2,
-                "concluding": 3, "illustrating": 3, "checking": 4, "done": 5, "stopped": 5}.get(key, 2)
+                "concluding": 3, "illustrating": 3, "checking": 4, "deploying": 5, "done": 5, "stopped": 5}.get(key, 2)
     out = []
     for i, name in enumerate(order):
         state = "done" if i < position else ("active" if i == position else "pending")
@@ -430,6 +430,12 @@ def stage(slug: str, team: dict, tasks: list[dict], phase: str, stats: Optional[
             out.update(key="checking", started_at=started, now="结果已经写好，负责人在对照目标逐项验收",
                        eta={"seconds": int(max(5, left)), "high": int(max(left, 0) + a["p75"]), "overtime": left <= 0,
                             "basis": f"按{a['basis']}验收的用时估算"})
+        elif ((team.get("project") or {}).get("deploy") or {}).get("status") == "running":
+            dep = (team.get("project") or {})["deploy"]
+            steps = dep.get("steps") or []
+            active = next((s for s in steps if s.get("status") == "running"), None)
+            step_now = (active.get("detail") or active.get("label")) if isinstance(active, dict) else "正在合并、推送并部署"
+            out.update(key="deploying", started_at=int(dep.get("started_at") or at), now=step_now)
         else:
             failed = entry.get("status") == "failed"
             out.update(key="done", started_at=team.get("completed_at"),

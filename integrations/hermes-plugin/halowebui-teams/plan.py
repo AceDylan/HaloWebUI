@@ -575,7 +575,7 @@ def validate_plan(raw: Any, *, parallel_cap: int = DEFAULT_PARALLEL_CAP,
     if isinstance(raw.get("decider"), dict):
         plan["decider"] = raw["decider"]
     if isinstance(raw.get("project"), dict) and raw["project"].get("path"):
-        plan["project"] = {k: raw["project"].get(k) for k in ("path", "name", "branch", "head", "dirty", "auto")
+        plan["project"] = {k: raw["project"].get(k) for k in ("path", "name", "branch", "head", "dirty", "auto", "deploy_profile")
                            if raw["project"].get(k) not in (None, "")}
     return plan, []
 
@@ -650,7 +650,7 @@ def _find_cycle(tasks: list[dict]) -> Optional[list[str]]:
 def resolve_project(goal: str, choice: str) -> Optional[dict]:
     """The project a plan works in: "none" → none; a path → that repository; "" → the project the
     goal names, if any (``auto``). Raises ValueError for a path that is not a usable repository."""
-    from . import projects
+    from . import deploy, projects
 
     choice = (choice or "").strip()
     if choice == "none":
@@ -659,10 +659,10 @@ def resolve_project(goal: str, choice: str) -> Optional[dict]:
         described = projects.describe(choice)
         if described is None:
             raise ValueError(f"{choice} 不是可以协作的 git 仓库（要是本机某个仓库的根目录，不能是主目录）")
-        return described
+        return {**described, "deploy_profile": deploy.public_profile(described["path"])}
     suggested = projects.suggest(goal)
     described = projects.describe(suggested["path"]) if suggested else None
-    return {**described, "auto": True} if described else None
+    return {**described, "auto": True, "deploy_profile": deploy.public_profile(described["path"])} if described else None
 
 
 def propose_plan(goal: str, workspace: str, *, feedback: str = "", previous: Optional[dict] = None,

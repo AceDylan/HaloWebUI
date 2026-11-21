@@ -1,19 +1,21 @@
 <script lang="ts">
-	// 变更: what a team working on a project changed on its own branch — commits per task, files
-	// with +/−, a file's diff on demand — and the user's explicit actions: merge into the base
-	// branch, push, throw the branch away. Nothing is merged or pushed without a click here.
+	// 变更与部署: what a team working on a project changed on its own branch — commits per task,
+	// files with +/−, a file's diff on demand — plus one-click & automatic merge → push → CI →
+	// deploy → cleanup, and granular manual actions.
 	import { onDestroy } from 'svelte';
 	import { toast } from 'svelte-sonner';
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import {
+		deployTeamChanges,
 		discardTeamChanges,
 		getTeamChangeDiff,
 		getTeamChanges,
 		mergeTeamChanges,
 		pushTeamChanges,
+		setTeamAutoDeploy,
 		type TeamChanges
 	} from '$lib/apis/teams';
-	import { now, timeAgo } from './clock';
+	import { elapsed, now, timeAgo } from './clock';
 
 	export let teamId: string;
 	export let phase: string | null = null;
@@ -27,6 +29,9 @@
 	let confirmMerge = false;
 	let confirmPushBase = false;
 	let confirmDiscard = false;
+	let confirmDeploy = false;
+	let deployCleanup = true;
+	let showDeployLog = false;
 	let timer: ReturnType<typeof setTimeout> | null = null;
 
 	$: finished = phase === 'completed' || phase === 'stopped';
@@ -36,6 +41,16 @@
 	$: merged = !!data?.merged;
 	$: pushedBranch = !!project?.pushed?.branch;
 	$: pushedBase = !!project?.pushed?.base;
+	$: deploy = data?.deploy ?? null;
+	$: deployProfile = data?.deploy_profile ?? null;
+	$: deployRunning = deploy?.status === 'running';
+	$: autoDeploy = !!data?.auto_deploy;
+	$: hasChanges = commits.length > 0 || (data?.pending?.length ?? 0) > 0;
+	$: canShip =
+		finished &&
+		!deployRunning &&
+		!!project?.base_branch &&
+		((!!data?.available && hasChanges) || (!!project?.merged_at && deploy?.status === 'failed'));
 
 	const load = async () => {
 		loading = true;
@@ -48,8 +63,12 @@
 			loading = false;
 		}
 		if (timer) clearTimeout(timer);
-		// While members work the branch grows: look again now and then (cheap, git only).
-		if (!finished) timer = setTimeout(load, 20000);
+		// Poll briskly while pushing/deploying; gently while members are still editing.
+		if (data?.deploy?.status === 'running') {
+			timer = setTimeout(load, 3000);
+		} else if (!finished) {
+			timer = setTimeout(load, 20000);
+		}
 	};
 
 	$: teamId, phase, load();
@@ -104,6 +123,36 @@
 		);
 	const discard = () =>
 		act('discard', () => discardTeamChanges(localStorage.token, teamId), '已删除团队分支');
+	const startDeploy = () =>
+		act(
+			'deploy',
+			() => deployTeamChanges(localStorage.token, teamId, deployCleanup),
+			'已启动推送部署流水线'
+		);
+	const toggleAutoDeploy = () =>
+		act(
+			'auto-deploy',
+			() => setTeamAutoDeploy(localStorage.token, teamId, !autoDeploy),
+			!autoDeploy ? '已开启完成后自动推送部署' : '已关闭自动推送部署'
+		);
+
+	const stepIcon = (status: string) =>
+		({
+			done: '✓',
+			running: '…',
+			failed: '✕',
+			skipped: '–',
+			pending: '·'
+		})[status] ?? '·';
+
+	const stepTone = (status: string) =>
+		status === 'done'
+			? 'text-emerald-700 dark:text-emerald-300'
+			: status === 'running'
+				? 'text-sky-700 dark:text-sky-300 font-medium'
+				: status === 'failed'
+					? 'text-red-700 dark:text-red-300 font-medium'
+					: 'text-gray-400 dark:text-gray-500';
 
 	const lineClass = (line: string) =>
 		line.startsWith('+++') || line.startsWith('---')
@@ -153,7 +202,12 @@
 				{#if project.discarded_at}
 					<span
 						class="rounded-full bg-gray-100 px-2 py-0.5 text-[11px] text-gray-500 dark:bg-gray-800"
-						data-changes-discarded>{project.auto_cleaned ? '没有改动，分支已自动清理' : '分支已删除'}</span
+						data-changes-discarded
+						>{project.auto_cleaned
+							? '没有改动，分支已自动清理'
+							: project.shipped_cleaned
+								? '已发布并清理分支'
+								: '分支已删除'}</span
 					>
 				{/if}
 			</div>
@@ -162,7 +216,149 @@
 					团队没有改动项目里的任何文件，团队分支和 worktree 已经自动删掉；结论保留。再对负责人追加工作，会从
 					{project.base_branch || '原来的提交'} 重新开一个分支。
 				</p>
+			{:else if project.shipped_cleaned}
+				<p class="text-xs text-gray-500">
+					代码已合并、推送并完成发布，团队分支与 worktree 已自动清理；结论报告保留。
+				</p>
 			{/if}
+
+			{#if deployProfile || deploy}
+				<div
+					class="tm-card-quiet flex flex-col gap-2.5 px-3 py-2.5 text-xs"
+					data-changes-deploy-panel
+				>
+					<div class="flex flex-wrap items-center gap-x-2 gap-y-1.5">
+						<span class="font-semibold text-gray-800 dark:text-gray-100">推送与部署</span>
+						{#if deployProfile?.label}
+							<span class="min-w-0 flex-1 truncate text-gray-500 dark:text-gray-400" title={deployProfile.label}
+								>{deployProfile.label}</span
+							>
+						{/if}
+						{#if !project.discarded_at}
+							<button
+								type="button"
+								class="rounded-full border px-2 py-0.5 text-[11px] transition tm-hairline {autoDeploy
+									? 'border-sky-500/40 bg-sky-500/10 text-sky-700 dark:text-sky-300'
+									: 'text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200'}"
+								disabled={!!busy || deployRunning}
+								aria-pressed={autoDeploy}
+								on:click={toggleAutoDeploy}
+								title="开启后，任务完成且验收通过时自动合并、推送、部署并清理分支"
+								data-changes-auto-deploy>{autoDeploy ? '自动部署：开' : '自动部署：关'}</button
+							>
+						{/if}
+					</div>
+
+					{#if deploy}
+						<div class="flex flex-wrap items-center gap-x-2.5 gap-y-1" data-deploy-status={deploy.status}>
+							{#if deploy.status === 'running'}
+								<span class="tm-shimmer font-medium text-sky-700 dark:text-sky-300"
+									>正在执行推送部署…</span
+								>
+								{#if deploy.started_at}
+									<span class="tm-num text-gray-400">{elapsed($now - deploy.started_at)}</span>
+								{/if}
+							{:else if deploy.status === 'succeeded'}
+								<span class="font-medium text-emerald-700 dark:text-emerald-300"
+									>推送与部署已完成</span
+								>
+								{#if deploy.sha}
+									<span class="font-mono text-[11px] text-gray-500">{deploy.sha.slice(0, 8)}</span>
+								{/if}
+								{#if deploy.seconds}
+									<span class="tm-num text-gray-400">用时 {elapsed(deploy.seconds)}</span>
+								{/if}
+							{:else if deploy.status === 'skipped'}
+								<span class="font-medium text-amber-700 dark:text-amber-300">已跳过自动部署</span>
+							{:else if deploy.status === 'failed'}
+								<span class="font-medium text-red-700 dark:text-red-300">推送部署失败</span>
+								{#if deploy.seconds}
+									<span class="tm-num text-gray-400">用时 {elapsed(deploy.seconds)}</span>
+								{/if}
+							{/if}
+							{#if deploy.ci_url}
+								<a
+									href={deploy.ci_url}
+									target="_blank"
+									rel="noopener noreferrer"
+									class="ml-auto text-sky-700 hover:underline dark:text-sky-300"
+									data-changes-ci-link>查看 CI 运行 ↗</a
+								>
+							{/if}
+						</div>
+
+						{#if deploy.steps?.length}
+							<ol class="flex flex-col gap-1" data-deploy-steps>
+								{#each deploy.steps as s (s.key)}
+									<li class="flex min-w-0 items-baseline gap-2 {stepTone(s.status)}">
+										<span class="w-3 shrink-0 text-center font-mono">{stepIcon(s.status)}</span>
+										<span class="shrink-0">{s.label}</span>
+										{#if s.detail}
+											<span class="min-w-0 truncate text-[11px] opacity-80" title={s.detail}
+												>{s.detail}</span
+											>
+										{/if}
+									</li>
+								{/each}
+							</ol>
+						{/if}
+
+						{#if deploy.error}
+							<div
+								class="rounded-lg border border-red-500/20 bg-red-500/[0.06] px-2.5 py-1.5 text-[11.5px] leading-relaxed text-red-700 dark:text-red-300"
+								role="alert"
+								data-deploy-error
+							>
+								{deploy.error}
+							</div>
+						{/if}
+						{#if deploy.note}
+							<p class="text-[11px] text-sky-700 dark:text-sky-300">{deploy.note}</p>
+						{/if}
+						{#if deploy.log}
+							<div>
+								<button
+									type="button"
+									class="text-[11px] text-sky-700 hover:underline dark:text-sky-300"
+									on:click={() => (showDeployLog = !showDeployLog)}
+									data-deploy-log-toggle>{showDeployLog ? '收起部署输出' : '查看部署输出'}</button
+								>
+								{#if showDeployLog}
+									<pre
+										class="tm-scroll mt-1.5 max-h-56 overflow-auto rounded-lg border bg-black/[0.03] p-2 font-mono text-[11px] leading-relaxed text-gray-700 tm-hairline dark:bg-white/[0.03] dark:text-gray-300"
+										data-changes-deploy-log>{deploy.log}</pre>
+								{/if}
+							</div>
+						{/if}
+					{/if}
+
+					{#if canShip}
+						<div class="flex flex-wrap items-center gap-2 pt-0.5">
+							<button
+								type="button"
+								class="tm-btn-primary !py-1.5 !text-xs"
+								disabled={!!busy}
+								on:click={() => {
+									deployCleanup = deployProfile?.cleanup ?? true;
+									confirmDeploy = true;
+								}}
+								data-changes-deploy
+								>{busy === 'deploy'
+									? '启动中…'
+									: deploy?.status === 'failed'
+										? '重试推送部署'
+										: '一键推送部署'}</button
+							>
+							<span class="text-[11px] text-gray-400">
+								合并到 {project.base_branch} → 推送{deployProfile?.has_ci ? ' → 等待 CI' : ''}{deployProfile?.has_command
+									? ' → 部署'
+									: ''} → 清理分支
+							</span>
+						</div>
+					{/if}
+				</div>
+			{/if}
+
 			{#if data.available}
 				<div
 					class="tm-num flex flex-wrap items-baseline gap-x-4 gap-y-1 text-sm"
@@ -187,14 +383,15 @@
 				{/if}
 				<div class="flex flex-wrap items-center gap-2">
 					{#if !finished}
-						<span class="text-xs text-gray-500">成员还在干活；团队完成或停止后可以合并、推送。</span
+						<span class="text-xs text-gray-500"
+							>成员还在干活；团队完成后可一键推送部署，或手动合并、推送。</span
 						>
 					{:else}
 						{#if !merged && project.base_branch}
 							<button
 								type="button"
-								class="tm-btn-primary !py-1.5 !text-xs"
-								disabled={!!busy || (!commits.length && !data.pending?.length)}
+								class="tm-btn-ghost !py-1.5 !text-xs"
+								disabled={!!busy || deployRunning || (!commits.length && !data.pending?.length)}
 								on:click={() => (confirmMerge = true)}
 								data-changes-merge
 								>{busy === 'merge' ? '合并中…' : `合并到 ${project.base_branch}`}</button
@@ -203,8 +400,8 @@
 						{#if merged && project.base_branch && !pushedBase}
 							<button
 								type="button"
-								class="tm-btn-primary !py-1.5 !text-xs"
-								disabled={!!busy}
+								class="tm-btn-ghost !py-1.5 !text-xs"
+								disabled={!!busy || deployRunning}
 								on:click={() => (confirmPushBase = true)}
 								data-changes-push-base
 								>{busy === 'push-base' ? '推送中…' : `推送 ${project.base_branch}`}</button
@@ -213,7 +410,7 @@
 						<button
 							type="button"
 							class="tm-btn-ghost !py-1.5 !text-xs"
-							disabled={!!busy}
+							disabled={!!busy || deployRunning}
 							on:click={pushBranch}
 							data-changes-push-branch
 							>{busy === 'push-branch'
@@ -225,7 +422,7 @@
 						<button
 							type="button"
 							class="tm-btn-ghost !py-1.5 !text-xs !text-red-600 dark:!text-red-400"
-							disabled={!!busy}
+							disabled={!!busy || deployRunning}
 							on:click={() => (confirmDiscard = true)}
 							data-changes-discard>放弃分支</button
 						>
@@ -314,6 +511,35 @@
 	{/if}
 </div>
 
+<ConfirmDialog
+	bind:show={confirmDeploy}
+	title="一键推送并部署？"
+	confirmLabel="开始推送部署"
+	on:confirm={startDeploy}
+>
+	<div class="flex flex-col gap-3 text-sm text-gray-500 dark:text-gray-400">
+		<p>
+			将按顺序执行：合并 <span class="font-mono text-gray-700 dark:text-gray-200"
+				>{project?.branch}</span
+			>
+			到 <span class="font-mono text-gray-700 dark:text-gray-200">{project?.base_branch}</span> →
+			推送 origin{deployProfile?.has_ci ? ' → 等待 GitHub CI 通过' : ''}{deployProfile?.has_command
+				? ' → 运行项目部署脚本'
+				: ''}{deployCleanup ? ' → 清理团队分支与 worktree（结论保留）' : ''}。
+		</p>
+		<label
+			class="inline-flex cursor-pointer select-none items-center gap-2 text-xs text-gray-700 dark:text-gray-200"
+		>
+			<input
+				type="checkbox"
+				class="size-3.5 rounded accent-sky-600"
+				bind:checked={deployCleanup}
+				data-deploy-cleanup-checkbox
+			/>
+			<span>部署完成后自动清理团队分支与 worktree</span>
+		</label>
+	</div>
+</ConfirmDialog>
 <ConfirmDialog
 	bind:show={confirmMerge}
 	title="合并到 {project?.base_branch}？"

@@ -90,6 +90,8 @@ class CreateTeamForm(BaseModel):
     project: Optional[str] = Field(default=None, max_length=500)
     # 「计划好直接开始」: approve the plan as soon as it is ready (when every member can run now).
     auto_start: bool = False
+    # 「自动推送部署」: once a project team finishes and passes acceptance, merge → push → deploy → clean up.
+    auto_deploy: bool = False
     # Files uploaded for the team (their ids, /api/v1/files): copied into its workspace's inputs/.
     files: list[str] = Field(default_factory=list, max_length=INPUT_FILES_MAX)
     # 「用于协作」 from the assistant library: assistants (model:<id> / builtin:<id>) at least one
@@ -309,14 +311,15 @@ async def create_team(request: Request, form: CreateTeamForm, user=Depends(get_v
     title = default_title(goal)
     goal = with_goal_notes(goal, user, goal, GOAL_MAX_CHARS)
     return public_team(await _start(request, user, goal, target, chat_id=chat_id, lead_model=form.lead_model,
-                                    title=title, project=form.project, auto_start=form.auto_start, inputs=inputs,
+                                    title=title, project=form.project, auto_start=form.auto_start,
+                                    auto_deploy=form.auto_deploy, inputs=inputs,
                                     assistants=preferred_refs(form.assistants), access=AssistantAccess(request, user)))
 
 
 async def _start(request: Request, user, goal: str, target, *, chat_id: Optional[str] = None,
                  lead_model: Optional[str] = None, origin: Optional[dict] = None, project: Optional[str] = None,
-                 auto_start: bool = False, inputs: Optional[list] = None, assistants: Optional[list] = None,
-                 access=None, on_created=None, title: Optional[str] = None):
+                 auto_start: bool = False, auto_deploy: bool = False, inputs: Optional[list] = None,
+                 assistants: Optional[list] = None, access=None, on_created=None, title: Optional[str] = None):
     meta: dict = {}
     if inputs:
         meta["inputs"] = inputs
@@ -324,6 +327,8 @@ async def _start(request: Request, user, goal: str, target, *, chat_id: Optional
         meta["assistants"] = assistants
     if auto_start:
         meta["auto_start"] = True
+    if auto_deploy:
+        meta["auto_deploy"] = True
     if (lead_model or "").strip():
         meta["lead_model"] = lead_model.strip()
     if (project or "").strip():
@@ -770,6 +775,14 @@ class PushForm(BaseModel):
     what: Literal["branch", "base"]
 
 
+class DeployForm(BaseModel):
+    cleanup: Optional[bool] = True
+
+
+class AutoDeployForm(BaseModel):
+    enabled: bool
+
+
 @router.get("/{team_id}/changes", dependencies=[Depends(_enabled)])
 async def get_changes(request: Request, team_id: str, user=Depends(get_verified_user)):
     """A team that worked on a project: its branch, commits and changed files."""
@@ -816,6 +829,34 @@ async def discard_changes(request: Request, team_id: str, user=Depends(get_verif
         return await hermes_call(target, "POST", f"/{team.id}/changes/discard", json_body={}, timeout=120)
     except TeamsError as exc:
         _raise(exc)
+
+
+@router.post("/{team_id}/changes/deploy", dependencies=[Depends(_enabled)])
+async def deploy_changes(request: Request, team_id: str, form: DeployForm, user=Depends(get_verified_user)):
+    """One-click merge → push → CI → deploy → cleanup for a finished project team (async, 202)."""
+    team, target = await _running_target(request, team_id, user)
+    try:
+        return await hermes_call(target, "POST", f"/{team.id}/changes/deploy",
+                                 json_body={"cleanup": form.cleanup}, timeout=60)
+    except TeamsError as exc:
+        _raise(exc)
+
+
+@router.post("/{team_id}/changes/auto-deploy", dependencies=[Depends(_enabled)])
+async def set_auto_deploy(request: Request, team_id: str, form: AutoDeployForm, user=Depends(get_verified_user)):
+    """Toggle auto-deploy before approval or while the team runs."""
+    team = _own(team_id, user)
+    if team.status == "running":
+        try:
+            target = await hermes_target(request, user)
+            await hermes_call(target, "POST", f"/{team.id}/changes/auto-deploy",
+                              json_body={"enabled": form.enabled}, timeout=30)
+        except TeamsError as exc:
+            _raise(exc)
+    meta = dict(team.meta or {})
+    meta["auto_deploy"] = bool(form.enabled)
+    AgentTeams.update(team.id, user.id, meta=meta)
+    return {"auto_deploy": bool(form.enabled)}
 
 
 _PASS_HEADERS = ("Content-Type", "Content-Disposition", "Cache-Control", "Content-Security-Policy")
@@ -865,6 +906,7 @@ class HermesCreateForm(BaseModel):
     goal: str = Field(min_length=1, max_length=GOAL_MAX_CHARS)
     origin: dict = Field(default_factory=dict)
     auto_start: bool = False
+    auto_deploy: bool = False
 
 
 async def _hermes_caller(request: Request):
@@ -959,7 +1001,8 @@ async def hermes_create(request: Request, form: HermesCreateForm, caller=Depends
     if not goal:
         raise HTTPException(status_code=400, detail="请写下要协作完成的目标")
     return public_team(await _start(request, user, goal, target, origin=_clean_origin(form.origin),
-                                    auto_start=form.auto_start, access=AssistantAccess(request, user)))
+                                    auto_start=form.auto_start, auto_deploy=form.auto_deploy,
+                                    access=AssistantAccess(request, user)))
 
 
 @router.get("/hermes/teams/{team_id}")

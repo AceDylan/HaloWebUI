@@ -46,7 +46,8 @@
 		'paused',
 		'concluding',
 		'illustrating',
-		'checking'
+		'checking',
+		'deploying'
 	]);
 
 	/** Your collaboration tasks (only yours) and a box to start a new one. */
@@ -80,6 +81,17 @@
 		autoStart = !autoStart;
 		try {
 			localStorage.setItem(AUTO_START_KEY, autoStart ? '1' : '0');
+		} catch {
+			// storage unavailable: the choice holds for this page only
+		}
+	};
+	// 「自动部署」: for code/project teams, automatically merge → push → deploy → clean up after completion.
+	const AUTO_DEPLOY_KEY = 'halo.teams.autoDeploy';
+	let autoDeploy = false;
+	const toggleAutoDeploy = () => {
+		autoDeploy = !autoDeploy;
+		try {
+			localStorage.setItem(AUTO_DEPLOY_KEY, autoDeploy ? '1' : '0');
 		} catch {
 			// storage unavailable: the choice holds for this page only
 		}
@@ -136,7 +148,7 @@
 	$: activeCount = counts.active ?? 0;
 	// A team that just finished is still moving while the lead writes and checks its result.
 	$: settling = teams.some(
-		(t) => t.stage && ['concluding', 'illustrating', 'checking'].includes(t.stage.key)
+		(t) => t.stage && ['concluding', 'illustrating', 'checking', 'deploying'].includes(t.stage.key)
 	);
 
 	const QUICK_STARTS = [
@@ -371,7 +383,8 @@
 				project,
 				autoStart,
 				attached.filter((f) => f.id).map((f) => f.id as string),
-				preferred ? [preferred.ref] : []
+				preferred ? [preferred.ref] : [],
+				autoDeploy
 			);
 			// its chat is in the history from now on (the socket says so too; this covers a lost event)
 			chatListRefreshRevision.update((n) => n + 1);
@@ -428,6 +441,11 @@
 			autoStart = localStorage.getItem(AUTO_START_KEY) === '1';
 		} catch {
 			autoStart = false;
+		}
+		try {
+			autoDeploy = localStorage.getItem(AUTO_DEPLOY_KEY) === '1';
+		} catch {
+			autoDeploy = false;
 		}
 		// "发起协作任务" from a chat links here with ?chat=<id> (and an optional ?goal=).
 		const params = new URLSearchParams(window.location.search);
@@ -747,6 +765,27 @@
 							/></svg
 						>
 						直接开始
+					</button>
+					<button
+						type="button"
+						class="pill inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-1 text-xs {autoDeploy
+							? 'pill-on'
+							: 'text-gray-600 dark:text-gray-300'}"
+						aria-pressed={autoDeploy}
+						on:click={toggleAutoDeploy}
+						title="打开后，涉及代码的协作任务完成且验收通过后，自动合并到主分支、推送、按项目配置部署并清理团队分支（普通非代码任务不受影响）"
+						data-auto-deploy
+					>
+						<svg class="size-3.5 shrink-0" viewBox="0 0 16 16" fill="none" aria-hidden="true"
+							><path
+								d="M8 2.25v7.5M5.25 5 8 2.25 10.75 5M3 10.5v1.75A1.5 1.5 0 0 0 4.5 13.75h7a1.5 1.5 0 0 0 1.5-1.5V10.5"
+								stroke="currentColor"
+								stroke-width="1.3"
+								stroke-linecap="round"
+								stroke-linejoin="round"
+							/></svg
+						>
+						自动部署
 					</button>
 					{#if goal.trim() && !creating}
 						<button

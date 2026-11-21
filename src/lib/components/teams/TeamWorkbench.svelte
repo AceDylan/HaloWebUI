@@ -17,6 +17,7 @@
 		getTeamEvents,
 		getTeamsMeta,
 		replanTeam,
+		setTeamAutoDeploy,
 		type LiveSnapshot,
 		type Team,
 		type TeamEvent,
@@ -170,6 +171,7 @@
 	$: titles = new Map(tasks.map((t) => [t.id, t.key]));
 	$: conclusionBrief = live?.team.conclusion;
 	$: acceptance = conclusionBrief?.acceptance;
+	$: deployBrief = live?.team.deploy ?? null;
 	$: leadChange = live?.team.change ?? null;
 	$: leadModel =
 		live?.team.lead_model?.model ?? team?.plan?.lead_model?.model ?? team?.plan?.lead?.model ?? '';
@@ -284,10 +286,11 @@
 		// Nothing more happens on its own once finished — except the lead's conclusion being written.
 		const conclusionPending =
 			phase === 'completed' && !['ready', 'failed'].includes(live?.team.conclusion?.status ?? '');
-		// … and the lead answering 对负责人说, or checking the result against the goal.
+		// … and the lead answering 对负责人说, or checking the result against the goal, or deploying.
 		const leadPending =
 			live?.team.change?.status === 'thinking' ||
-			live?.team.conclusion?.acceptance?.status === 'checking';
+			live?.team.conclusion?.acceptance?.status === 'checking' ||
+			live?.team.deploy?.status === 'running';
 		if (settled || (finished && finishedFetches > 2 && !conclusionPending && !leadPending)) return;
 		schedule();
 	};
@@ -350,6 +353,11 @@
 				source === 'auto' ? { name, model_source: 'auto' } : { name, model, model_source: 'user' }
 			]);
 		});
+	const setPlanAutoDeploy = (enabled: boolean) =>
+		act(async () => {
+			await setTeamAutoDeploy(localStorage.token, teamId, enabled);
+			if (team) team = { ...team, auto_deploy: enabled };
+		}, enabled ? '已开启完成后自动推送部署' : '已关闭自动推送部署');
 
 	// Runner availability for the plan review: loaded once, re-checked on request (which also lets
 	// Hermes work out every member's runner again).
@@ -408,6 +416,18 @@
 		selectedTask = null;
 		selectedMember = null;
 		asideTab = 'conclusion';
+		asideTouched = true;
+	};
+	const showChanges = async () => {
+		if ($mobile) {
+			mobileTab = 'changes';
+			selectedTask = null;
+			selectedMember = null;
+			return;
+		}
+		selectedTask = null;
+		selectedMember = null;
+		asideTab = 'changes';
 		asideTouched = true;
 	};
 
@@ -697,6 +717,7 @@
 						on:executor={(e) => setExecutor(e.detail.name, e.detail.executor, e.detail.source)}
 						on:model={(e) => setModel(e.detail.name, e.detail.model, e.detail.source)}
 						on:recheck={recheck}
+						on:auto-deploy={(e) => setPlanAutoDeploy(e.detail)}
 					/>
 				{/if}
 			</div>
@@ -781,9 +802,30 @@
 								{/if}
 							</div>
 						</div>
-						<button type="button" class="tm-btn-primary !py-1.5 !text-xs" on:click={showConclusion}
-							>阅读结论</button
-						>
+						<div class="flex shrink-0 flex-wrap items-center gap-2">
+							{#if projectTeam}
+								<button
+									type="button"
+									class="tm-btn-ghost !py-1.5 !text-xs {deployBrief?.status === 'failed'
+										? '!border-red-400/50 !text-red-700 dark:!text-red-300'
+										: deployBrief?.status === 'succeeded'
+											? '!border-emerald-400/40 !text-emerald-700 dark:!text-emerald-300'
+											: ''}"
+									on:click={showChanges}
+									data-banner-changes
+									>{deployBrief?.status === 'running'
+										? '推送部署中…'
+										: deployBrief?.status === 'succeeded'
+											? '已推送部署'
+											: deployBrief?.status === 'failed'
+												? '部署失败 · 查看'
+												: '变更与部署'}</button
+								>
+							{/if}
+							<button type="button" class="tm-btn-primary !py-1.5 !text-xs" on:click={showConclusion}
+								>阅读结论</button
+							>
+						</div>
 						{#if conclusionBrief?.status === 'ready' && acceptance}
 							<div
 								class="accept basis-full border-t pt-2.5 text-xs"
@@ -1076,6 +1118,14 @@
 												>{label}{#if value === 'conclusion' && conclusionBrief?.status === 'ready' && asideTab !== 'conclusion'}<span
 														class="absolute right-1 top-1 size-1.5 rounded-full bg-[hsl(var(--tm-accent))]"
 														aria-label="结论已生成"
+													/>{:else if value === 'changes' && asideTab !== 'changes' && (deployBrief?.status === 'running' || deployBrief?.status === 'failed')}<span
+														class="absolute right-1 top-1 size-1.5 rounded-full {deployBrief.status ===
+														'failed'
+															? 'bg-red-500'
+															: 'bg-sky-500'}"
+														aria-label={deployBrief.status === 'failed'
+															? '推送部署失败'
+															: '推送部署中'}
 													/>{/if}</button
 											>
 										{/each}

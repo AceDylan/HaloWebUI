@@ -269,16 +269,23 @@ def _numstat(cwd: str, *spec: str) -> list[dict]:
 
 
 def changes(team: dict) -> dict:
-    """The 变更 view: branch, commits since the base, files (+/-), what is not committed yet."""
+    """The 变更 view: branch, commits since the base, files (+/-), what is not committed yet,
+    and the delivery/deploy status."""
+    from . import deploy
+
     project = team.get("project") or {}
     workspace = team.get("workspace") or ""
     if not project.get("branch"):
         return {"project": None}
     info = {k: project.get(k) for k in ("path", "name", "base_branch", "base_sha", "branch", "merged_at",
-                                         "merged_sha", "pushed", "discarded_at", "auto_cleaned")}
+                                         "merged_sha", "pushed", "discarded_at", "auto_cleaned", "shipped_cleaned")}
+    deploy_state = project.get("deploy") if isinstance(project.get("deploy"), dict) else None
+    profile = deploy.public_profile(project.get("path"))
+    auto_deploy = bool(team.get("auto_deploy"))
     if project.get("discarded_at") or not os.path.isdir(workspace):
         return {"project": info, "commits": [], "files": [], "pending": [], "available": False,
-                "merged": bool(project.get("merged_at"))}
+                "merged": bool(project.get("merged_at")), "deploy": deploy_state,
+                "deploy_profile": profile, "auto_deploy": auto_deploy}
     base = project["base_sha"]
     log = git(workspace, "log", "--format=%H%x1f%s%x1f%an%x1f%at", f"{base}..HEAD", "-n", "200").stdout
     commits = []
@@ -303,7 +310,8 @@ def changes(team: dict) -> dict:
         repo, "merge-base", "--is-ancestor", project["branch"], base_branch, timeout=20).returncode == 0
     return {"project": info, "commits": commits, "files": files, "pending": pending[:200], "available": True,
             "added": sum(f["added"] or 0 for f in files), "removed": sum(f["removed"] or 0 for f in files),
-            "base_moved": behind, "merged": merged}
+            "base_moved": behind, "merged": merged, "deploy": deploy_state,
+            "deploy_profile": profile, "auto_deploy": auto_deploy}
 
 
 def changed_paths(team: dict) -> Optional[list[str]]:
@@ -441,9 +449,9 @@ def push(slug: str, team: dict, what: str) -> dict:
     return {"pushed": True, "ref": ref}
 
 
-def discard(slug: str, team: dict, *, auto: bool = False) -> dict:
-    """Remove the team's worktree and branch (after the team is over; explicit action, or ``auto``
-    for a branch with nothing on it, see ``clean_if_empty``)."""
+def discard(slug: str, team: dict, *, auto: bool = False, shipped: bool = False) -> dict:
+    """Remove the team's worktree and branch (after the team is over; explicit action, ``auto``
+    for a branch with nothing on it, or ``shipped`` after push/deploy)."""
     project = team.get("project") or {}
     repo, branch = project.get("path"), project.get("branch")
     if not repo or not branch:
@@ -470,7 +478,8 @@ def discard(slug: str, team: dict, *, auto: bool = False) -> dict:
     git(repo, "branch", "-D", branch, timeout=20)
     from .common import update_team
 
-    update_team(slug, lambda rec: rec.setdefault("project", {}).update({"discarded_at": now(), "auto_cleaned": auto}))
+    update_team(slug, lambda rec: rec.setdefault("project", {}).update(
+        {"discarded_at": now(), "auto_cleaned": auto, "shipped_cleaned": shipped}))
     return {"discarded": True}
 
 
@@ -539,6 +548,7 @@ def revive(slug: str, team: dict) -> None:
     from .common import update_team
 
     update_team(slug, lambda rec: rec.setdefault("project", {}).update({
-        "discarded_at": None, "auto_cleaned": False, "clean_checked": None, "base_sha": base_sha, "last_head": base_sha,
-        "task_commits": {}, "merged_at": None, "merged_sha": None, "pushed": None}))
+        "discarded_at": None, "auto_cleaned": False, "shipped_cleaned": False, "clean_checked": None,
+        "base_sha": base_sha, "last_head": base_sha, "task_commits": {},
+        "merged_at": None, "merged_sha": None, "pushed": None}))
     logger.info("halowebui-teams: %s got new work, branch %s again from %s", slug, branch, base_sha[:10])

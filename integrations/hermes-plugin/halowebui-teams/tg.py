@@ -549,7 +549,8 @@ async def _on_callback(update: Any, context: Any) -> None:
 
 CALLBACK_DONE = {"ap": "✅ 已批准，成员开始干活了", "cx": "✖ 已取消", "rp": "🔄 负责人在重新规划", "rt": "🔁 已重试",
                  "dx": "✅ 已按负责人的建议处理", "fx": "🛠 已交给负责人：补缺口的计划好了发到这里",
-                 "ca": "✅ 变更已应用", "cd": "✖ 已放弃这个变更", "kb": "📚 已存入「协作结论」知识库"}
+                 "ca": "✅ 变更已应用", "cd": "✖ 已放弃这个变更", "kb": "📚 已存入「协作结论」知识库",
+                 "dp": "🚀 已启动合并、推送、部署与清理，完成后会通知你"}
 
 
 async def _handle_callback(query: Any) -> None:
@@ -587,6 +588,18 @@ async def _handle_callback(query: Any) -> None:
                                     via="telegram", reply_to={"chat_id": chat, "thread_id": thread})
         elif action == "kb":
             await asyncio.to_thread(link.save_knowledge, owner, team_id)
+        elif action == "dp":
+            from . import deploy, projects
+            from .teams import _require_team
+
+            def _start_dp() -> None:
+                slug, _team = _require_team(team_id, owner)
+                try:
+                    deploy.start(slug, by="telegram")
+                except projects.ProjectError as exc:
+                    raise TeamError(exc.status, exc.message) from None
+
+            await asyncio.to_thread(_start_dp)
         elif action in ("ca", "cd") and task_id:
             from .lead import apply_change, discard_change
 
@@ -613,7 +626,7 @@ async def _handle_callback(query: Any) -> None:
     for row in (message.reply_markup.inline_keyboard if message.reply_markup else ()):
         # Links stay; so do the other buttons of a notice that 存入知识库 does not settle.
         urls = [(b.text, "url:" + b.url if getattr(b, "url", None) else "cb:" + b.callback_data[3:]) for b in row
-                if getattr(b, "url", None) or (action == "kb" and str(b.callback_data or "").startswith("ht:")
+                if getattr(b, "url", None) or (action in ("kb", "dp") and str(b.callback_data or "").startswith("ht:")
                                                and b.callback_data != query.data)]
         if urls:
             keep.append(urls)

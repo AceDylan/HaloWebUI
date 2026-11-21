@@ -327,7 +327,8 @@ async def start_team(team: AgentTeamModel, target: HermesTarget,
             snapshots = member_snapshots(applied)
         sent = {k: v for k, v in plan.items() if k != "assistants_applied"}
         body = {"team_id": team.id, "plan": sent, "goal": team.goal, "title": team.title,
-                "chat_id": team.chat_id or "", "origin": team_origin(team)}
+                "chat_id": team.chat_id or "", "origin": team_origin(team),
+                "auto_deploy": bool((team.meta or {}).get("auto_deploy"))}
         if snapshots:
             body["member_assistants"] = snapshots
         templates = image_templates(team.user_id, limit=200)
@@ -655,14 +656,17 @@ async def reconcile(team: AgentTeamModel, target: Optional[HermesTarget]) -> tup
 
 
 def result_settled(live: Optional[dict]) -> bool:
-    """The lead is done with a finished team: the result is written (or failed) and not being checked."""
+    """The lead is done with a finished team: the result is written (or failed), not being checked,
+    and no push/deploy pipeline is still running."""
     conclusion = (live or {}).get("conclusion") if isinstance(live, dict) else None
     if not isinstance(conclusion, dict):
         return False
     acceptance = conclusion.get("acceptance") if isinstance(conclusion.get("acceptance"), dict) else {}
     illustration = conclusion.get("illustration") if isinstance(conclusion.get("illustration"), dict) else {}
+    deploy = (live or {}).get("deploy") if isinstance(live, dict) else None
+    deploying = isinstance(deploy, dict) and deploy.get("status") == "running"
     return (conclusion.get("status") in ("ready", "failed") and acceptance.get("status") != "checking"
-            and illustration.get("status") != "generating")
+            and illustration.get("status") != "generating" and not deploying)
 
 
 def snapshot_progress(snap: Any) -> Optional[dict]:
@@ -778,6 +782,7 @@ def public_team(team: AgentTeamModel, *, with_plan: bool = True) -> dict:
     data["preferred_assistants"] = preferred_refs(meta.get("assistants"))
     data["lead_model"] = meta.get("lead_model")
     data["auto_start"] = bool(meta.get("auto_start"))
+    data["auto_deploy"] = bool(meta.get("auto_deploy"))
     # 再来一次 / 定时: the team this one repeats, and whether a schedule started it
     data["repeat_of"] = meta.get("repeat_of")
     data["scheduled"] = bool(meta.get("schedule_id"))

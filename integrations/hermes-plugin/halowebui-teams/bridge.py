@@ -89,6 +89,12 @@ def tick() -> None:
                     projects.clean_if_empty(slug, read_team(slug) or team)  # nothing changed: no branch left behind
                 except Exception:
                     logger.warning("halowebui-teams: empty-branch cleanup failed for %s", slug, exc_info=True)
+                try:
+                    from . import deploy
+
+                    deploy.tick_board(slug, read_team(slug) or team)  # auto-ship when auto_deploy is on
+                except Exception:
+                    logger.warning("halowebui-teams: auto-deploy tick failed for %s", slug, exc_info=True)
         except Exception:
             logger.warning("halowebui-teams: bridge tick failed for %s", slug, exc_info=True)
 

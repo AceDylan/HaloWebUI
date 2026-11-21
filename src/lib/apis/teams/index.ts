@@ -144,6 +144,7 @@ export type TeamPlan = {
 		head?: string;
 		dirty?: boolean;
 		auto?: boolean;
+		deploy_profile?: DeployProfile;
 	} | null;
 	/** About how long the plan takes once approved (tasks, result, acceptance), from this machine's history. */
 	estimate?: StageEta | null;
@@ -178,6 +179,7 @@ export type StageKey =
 	| 'concluding'
 	| 'illustrating'
 	| 'checking'
+	| 'deploying'
 	| 'done'
 	| 'stopped'
 	| 'plan_failed'
@@ -240,6 +242,41 @@ export type StageBrief = {
 	after_approval_high?: number;
 };
 
+export type DeployProfile = {
+	configured: boolean;
+	label: string;
+	has_ci: boolean;
+	has_command: boolean;
+	cleanup: boolean;
+};
+
+export type DeployStep = {
+	key: 'merge' | 'push' | 'ci' | 'deploy' | 'cleanup' | string;
+	label: string;
+	status: 'pending' | 'running' | 'done' | 'failed' | 'skipped';
+	detail?: string;
+	at?: number;
+};
+
+export type TeamDeployState = {
+	status: 'running' | 'succeeded' | 'failed' | 'skipped';
+	by?: 'auto' | 'user' | 'telegram' | string;
+	step?: string;
+	steps?: DeployStep[];
+	started_at?: number;
+	finished_at?: number | null;
+	seconds?: number | null;
+	sha?: string;
+	base_branch?: string;
+	ci_url?: string;
+	ci_run_id?: number | null;
+	cleanup?: boolean;
+	error?: string;
+	note?: string;
+	log?: string;
+	profile_label?: string;
+};
+
 export type Team = {
 	id: string;
 	chat_id: string | null;
@@ -248,6 +285,7 @@ export type Team = {
 	status: TeamStatus;
 	phase: string | null;
 	plan?: TeamPlan | null;
+	auto_deploy?: boolean;
 	error: string | null;
 	board: string | null;
 	created_at: number;
@@ -572,6 +610,10 @@ export type LiveSnapshot = {
 		round?: number;
 		/** A project team that changed nothing: its branch was cleaned up, no 变更 to show. */
 		project_cleaned?: boolean;
+		/** Whether this project team auto-merges, pushes, deploys and cleans up on completion. */
+		auto_deploy?: boolean;
+		/** Live / latest push-and-deploy pipeline status for a project team. */
+		deploy?: TeamDeployState | null;
 		/** The open 对负责人说 request / proposal, and the latest decided ones. */
 		change?: TeamChangeRequest | null;
 		changes_log?: TeamChangeRequest[];
@@ -743,7 +785,8 @@ export const createTeam = (
 	project?: string | null,
 	autoStart = false,
 	files: string[] = [],
-	assistants: string[] = []
+	assistants: string[] = [],
+	autoDeploy = false
 ) =>
 	request<Team>(token, 'POST', '/', {
 		goal,
@@ -751,6 +794,7 @@ export const createTeam = (
 		lead_model: leadModel || null,
 		project: project || null,
 		auto_start: autoStart,
+		...(autoDeploy ? { auto_deploy: true } : {}),
 		...(files.length ? { files } : {}),
 		...(assistants.length ? { assistants } : {})
 	});
@@ -794,6 +838,8 @@ export type TeamChanges = {
 		discarded_at?: number | null;
 		/** The team changed nothing, so its branch was cleaned up on its own. */
 		auto_cleaned?: boolean;
+		/** The team shipped its code and cleaned up its branch & worktree. */
+		shipped_cleaned?: boolean;
 	} | null;
 	available?: boolean;
 	commits?: TeamCommit[];
@@ -803,6 +849,9 @@ export type TeamChanges = {
 	removed?: number;
 	base_moved?: number;
 	merged?: boolean;
+	deploy?: TeamDeployState | null;
+	deploy_profile?: DeployProfile | null;
+	auto_deploy?: boolean;
 };
 
 export const getTeamChanges = (token: string, teamId: string) =>
@@ -827,6 +876,14 @@ export const pushTeamChanges = (token: string, teamId: string, what: 'branch' | 
 
 export const discardTeamChanges = (token: string, teamId: string) =>
 	request<{ discarded: boolean }>(token, 'POST', `/${id(teamId)}/changes/discard`);
+
+export const deployTeamChanges = (token: string, teamId: string, cleanup = true) =>
+	request<{ deploy: TeamDeployState }>(token, 'POST', `/${id(teamId)}/changes/deploy`, { cleanup });
+
+export const setTeamAutoDeploy = (token: string, teamId: string, enabled: boolean) =>
+	request<{ auto_deploy: boolean }>(token, 'POST', `/${id(teamId)}/changes/auto-deploy`, {
+		enabled
+	});
 
 export const editTeamPlan = (
 	token: string,

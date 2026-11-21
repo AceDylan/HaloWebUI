@@ -796,7 +796,8 @@ export const STAGE_MOVING = new Set([
 	'running',
 	'concluding',
 	'illustrating',
-	'checking'
+	'checking',
+	'deploying'
 ]);
 
 /**

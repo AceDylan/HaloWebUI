@@ -10,7 +10,9 @@ const api = vi.hoisted(() => ({
 	getTeamChangeDiff: vi.fn(),
 	mergeTeamChanges: vi.fn(),
 	pushTeamChanges: vi.fn(),
-	discardTeamChanges: vi.fn()
+	discardTeamChanges: vi.fn(),
+	deployTeamChanges: vi.fn(),
+	setTeamAutoDeploy: vi.fn()
 }));
 vi.mock('$lib/apis/teams', () => api);
 vi.mock('svelte-sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
@@ -160,5 +162,68 @@ describe('ChangesView', () => {
 		api.getTeamChanges.mockResolvedValue({ project: null });
 		await mount({ teamId: 'team-2', phase: 'completed' });
 		expect(target.textContent).toContain('不是在项目里做的');
+	});
+
+	it('triggers one-click deploy after confirm, shows progress steps, CI link and auto-deploy toggle', async () => {
+		api.getTeamChanges.mockResolvedValue({
+			...CHANGES,
+			auto_deploy: false,
+			deploy_profile: {
+				configured: true,
+				label: 'HaloWebUI（GitHub CI 构建镜像 → 拉取部署）',
+				has_ci: true,
+				has_command: true,
+				cleanup: true
+			}
+		});
+		await mount({ teamId: 'team-1', phase: 'completed' });
+		expect(target.querySelector('[data-changes-deploy-panel]').textContent).toContain('HaloWebUI');
+
+		// Toggle auto-deploy
+		api.setTeamAutoDeploy.mockResolvedValue({ auto_deploy: true });
+		target.querySelector('[data-changes-auto-deploy]').click();
+		await sleep(10);
+		expect(api.setTeamAutoDeploy).toHaveBeenCalledWith('tok', 'team-1', true);
+
+		// One-click deploy confirms first
+		target.querySelector('[data-changes-deploy]').click();
+		await sleep(10);
+		expect(api.deployTeamChanges).not.toHaveBeenCalled();
+
+		api.deployTeamChanges.mockResolvedValue({ deploy: { status: 'running' } });
+		api.getTeamChanges.mockResolvedValue({
+			...CHANGES,
+			available: false,
+			project: { ...CHANGES.project, discarded_at: 1790900600, shipped_cleaned: true },
+			deploy_profile: {
+				configured: true,
+				label: 'HaloWebUI（GitHub CI 构建镜像 → 拉取部署）',
+				has_ci: true,
+				has_command: true,
+				cleanup: true
+			},
+			deploy: {
+				status: 'succeeded',
+				sha: 'c'.repeat(40),
+				ci_url: 'https://github.com/AceDylan/HaloWebUI/actions/runs/123',
+				log: 'health=healthy\nversion ok',
+				steps: [
+					{ key: 'merge', label: '合并到主分支', status: 'done', detail: 'fast-forward' },
+					{ key: 'push', label: '推送 origin', status: 'done' }
+				]
+			}
+		});
+		const confirm = Array.from(document.querySelectorAll('button')).find(
+			(b: any) => b.textContent.trim() === '开始推送部署'
+		) as any;
+		confirm.click();
+		await sleep(20);
+		expect(api.deployTeamChanges).toHaveBeenCalledWith('tok', 'team-1', true);
+		expect(target.querySelector('[data-deploy-status="succeeded"]')).toBeTruthy();
+		expect(target.querySelector('[data-changes-ci-link]').getAttribute('href')).toContain('/runs/123');
+		expect(target.querySelector('[data-changes-discarded]').textContent).toContain('已发布并清理分支');
+		target.querySelector('[data-deploy-log-toggle]').click();
+		await sleep(5);
+		expect(target.querySelector('[data-changes-deploy-log]').textContent).toContain('health=healthy');
 	});
 });

@@ -151,8 +151,9 @@ def plan_message(team: dict, *, started: bool = False) -> tuple[str, list]:
     project = plan.get("project") if isinstance(plan.get("project"), dict) else None
     if project and project.get("path"):
         lines.append("")
+        ship_hint = "完成后自动合并、推送、部署并清理分支" if team.get("auto_deploy") else "合并、推送与部署由你在协作台决定"
         lines.append(f"📁 在项目 <b>{esc(project.get('name'))}</b> 里做：团队开自己的分支，不碰你的工作区；"
-                     "合并、推送由你在协作台决定" + ("（目标里点名了它）" if project.get("auto") else ""))
+                     f"{ship_hint}" + ("（目标里点名了它）" if project.get("auto") else ""))
     lines.append("")
     lines.append(f"<b>成员 {len(members)} 位</b>")
     for m in members[:8]:
@@ -263,6 +264,7 @@ def done_message(team: dict, snap: dict, markdown: str) -> tuple[str, list]:
     head = (f"✅ <b>{esc(clip(team.get('title'), 60))}</b> · 完成\n"
             f"{done}/{len(tasks)} 个任务{' · 用时 ' + took if took else ''}")
     project = team.get("project") or {}
+    can_deploy_btn = False
     if project.get("branch"):
         from . import projects
 
@@ -270,10 +272,23 @@ def done_message(team: dict, snap: dict, markdown: str) -> tuple[str, list]:
             change = projects.changes(team)
         except Exception:  # noqa: BLE001 — the notice goes out without the change line
             change = {}
+        dep = project.get("deploy") if isinstance(project.get("deploy"), dict) else {}
         if change.get("available"):
+            has_diff = bool(change.get("commits") or change.get("pending"))
+            if dep.get("status") == "running":
+                tail_hint = "正在自动推送部署，完成后会通知你"
+            elif dep.get("status") == "succeeded":
+                tail_hint = "已完成推送部署"
+            elif team.get("auto_deploy") and has_diff:
+                tail_hint = "已开启自动部署，马上自动合并、推送、部署并清理分支"
+            else:
+                tail_hint = "还没合并——在工作台「变更」里看差异，或直接点下方「推送部署」"
+                can_deploy_btn = has_diff
             head += (f"\n📁 {esc(project.get('name'))} · 分支 <code>{esc(project['branch'])}</code>："
                      f"{len(change.get('files') or [])} 个文件 +{change.get('added', 0)} −{change.get('removed', 0)}，"
-                     "还没合并——在工作台「变更」里看差异、合并或推送")
+                     f"{tail_hint}")
+        elif dep.get("status") == "succeeded":
+            head += f"\n🚀 {esc(project.get('name'))} 已推送部署并清理分支（<code>{esc((dep.get('sha') or '')[:8])}</code>）"
     acceptance = (team.get("conclusion") or {}).get("acceptance") or {}
     check = ""
     if acceptance.get("status") == "ready":
@@ -290,6 +305,8 @@ def done_message(team: dict, snap: dict, markdown: str) -> tuple[str, list]:
     tail = "\n\n<i>回复这条消息对负责人说要追加或修改什么。</i>"
     text = head + "\n\n" + esc(clip(body, TEXT_MAX)) + tail
     actions = []
+    if can_deploy_btn:
+        actions.append(("🚀 推送部署", f"cb:dp:{team['team_id']}"))
     if acceptance.get("status") == "ready" and acceptance.get("gaps"):
         actions.append(("🛠 让团队补上", f"cb:fx:{team['team_id']}"))
     if markdown:
@@ -297,6 +314,65 @@ def done_message(team: dict, snap: dict, markdown: str) -> tuple[str, list]:
     buttons = [actions] if actions else []
     buttons.append([*_open_row(team["team_id"], "📄 阅读结论", "/conclusion"), *_open_row(team["team_id"], "🌐 工作台")])
     return text, [b for b in buttons if b]
+
+
+def deploy_message(team: dict) -> tuple[str, list]:
+    """Telegram notice for a finished / failed / skipped push-and-deploy run."""
+    project = team.get("project") or {}
+    dep = project.get("deploy") if isinstance(project.get("deploy"), dict) else {}
+    status = dep.get("status") or ""
+    title = esc(clip(team.get("title"), 60))
+    proj = esc(project.get("name") or "项目")
+    sha = esc((dep.get("sha") or "")[:8])
+    took = duration(dep.get("seconds")) if dep.get("seconds") else ""
+    buttons = []
+    if status == "succeeded":
+        lines = [f"🚀 <b>{title}</b> · 推送部署完成", f"📁 {proj} · <code>{esc(dep.get('base_branch') or 'main')}</code>"
+                 + (f" ({sha})" if sha else "") + (f" · 用时 {took}" if took else "")]
+        if dep.get("profile_label"):
+            lines.append(f"流程：{esc(dep['profile_label'])}")
+        if dep.get("cleanup"):
+            lines.append("🧹 已清理团队分支与 worktree")
+        if dep.get("note"):
+            lines.append(f"ℹ️ {esc(dep['note'])}")
+    elif status == "skipped":
+        lines = [f"⏸ <b>{title}</b> · 已跳过自动推送部署", f"📁 {proj}",
+                 esc(clip(dep.get("error") or "未满足自动部署条件", 500))]
+        buttons.append([("🚀 仍要推送部署", f"cb:dp:{team['team_id']}")])
+    else:
+        lines = [f"⚠️ <b>{title}</b> · 推送部署失败", f"📁 {proj}" + (f" ({sha})" if sha else "")
+                 + (f" · 用时 {took}" if took else ""),
+                 esc(clip(dep.get("error") or "原因未知，请到协作台「变更」查看日志", 800))]
+        buttons.append([("🔁 重试推送部署", f"cb:dp:{team['team_id']}")])
+    row = []
+    if dep.get("ci_url"):
+        row.append(("🔗 查看 CI", "url:" + str(dep["ci_url"])))
+    row += _open_row(team["team_id"], "🌐 打开协作台")
+    if row:
+        buttons.append(row)
+    return "\n".join(lines), buttons
+
+
+def deploy_notice(slug: str, team: dict) -> Optional[int]:
+    """Send a Telegram notice once the deploy pipeline reaches a terminal state."""
+    from . import tg as telegram
+
+    if not telegram.ready():
+        return None
+    dep = (team.get("project") or {}).get("deploy")
+    if not isinstance(dep, dict) or dep.get("status") not in ("succeeded", "failed", "skipped"):
+        return None
+    target = target_for(team)
+    if target is None:
+        return None
+    key = f"deploy:{dep.get('status')}:{dep.get('finished_at') or dep.get('started_at') or 0}"
+    if key in set(team.get("notified") or []):
+        return None
+    text, buttons = deploy_message(team)
+    message_id = telegram.send(target["chat_id"], text, buttons, thread_id=target.get("thread_id"))
+    if message_id is not None:
+        _remember(slug, [key])
+    return message_id
 
 
 def change_message(team: dict, entry: dict) -> tuple[str, list]:

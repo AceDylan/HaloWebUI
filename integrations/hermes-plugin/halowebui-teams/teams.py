@@ -285,7 +285,7 @@ def _workspace_text(team: dict) -> str:
 def create_team(team_id: str, plan: dict, *, owner: str, chat_id: str = "", goal: str = "",
                 title: str = "", origin: Optional[dict] = None, image_templates: Optional[list] = None,
                 inputs: Optional[list] = None, conclusion_template: Optional[dict] = None,
-                member_assistants: Optional[dict] = None) -> dict:
+                member_assistants: Optional[dict] = None, auto_deploy: bool = False) -> dict:
     """Create (or return) the board for *team_id* from a validated *plan*; idempotent.
     ``image_templates``: the owner's HaloWebUI image templates, offered to image members.
     ``conclusion_template``: the one the result's picture is drawn in once it is written.
@@ -333,6 +333,7 @@ def create_team(team_id: str, plan: dict, *, owner: str, chat_id: str = "", goal
                        if k in ("platform", "chat_id", "user_id", "thread_id") and v},
             "workspace": workspace,
             "project": project,
+            "auto_deploy": bool(auto_deploy),
             "lead": checked["lead"],
             "members": checked["members"],
             "max_parallel": checked["max_parallel"],
@@ -614,6 +615,8 @@ def snapshot(team_id: str, owner: Optional[str] = None) -> dict:
             "stage": stage_data,
             # a project team that changed nothing: its branch is gone, there are no changes to show
             "project_cleaned": bool((team.get("project") or {}).get("auto_cleaned")),
+            "auto_deploy": bool(team.get("auto_deploy")),
+            "deploy": _deploy_brief(team),
             **_lead_state(team),
         },
         "members": members,
@@ -652,6 +655,19 @@ def _conclusion_brief(team: dict) -> dict:
     if illustration:
         out["illustration"] = illustration
     return out
+
+
+def _deploy_brief(team: dict) -> Optional[dict]:
+    from . import deploy
+
+    return deploy.public_state(team)
+
+
+def set_auto_deploy(team_id: str, enabled: bool, *, owner: Optional[str] = None) -> dict:
+    """Toggle auto_deploy on an existing team board."""
+    slug, _team = _require_team(team_id, owner)
+    update_team(slug, lambda rec: rec.update({"auto_deploy": bool(enabled)}))
+    return {"auto_deploy": bool(enabled)}
 
 
 def _lead_state(team: dict) -> dict:
@@ -998,6 +1014,11 @@ def _team_text(payload: dict) -> str:
         "diagnosis_applied": f"按负责人的建议处理：{_suggestion_label(payload.get('suggestion'))}",
         "accepted": "负责人验收：目标已达成" if payload.get("verdict") == "met"
                     else f"负责人验收：发现 {payload.get('gaps') or 0} 处缺口",
+        "deploy_started": f"开始{'自动' if payload.get('by') == 'auto' else ''}推送并部署"
+                          + (f"（{payload.get('profile')}）" if payload.get("profile") else ""),
+        "deploy_succeeded": f"推送与部署完成（{payload.get('sha') or '已发布'}）"
+                            + ("，已清理团队分支" if payload.get("cleanup") else ""),
+        "deploy_failed": f"推送/部署失败（{payload.get('step') or 'deploy'}）：{payload.get('error') or '见变更页日志'}",
     }.get(action, str(action or "团队事件"))
 
 

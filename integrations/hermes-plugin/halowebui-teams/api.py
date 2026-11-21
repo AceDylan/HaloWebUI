@@ -164,6 +164,7 @@ async def _create(request):
         inputs=data.get("inputs") if isinstance(data.get("inputs"), list) else None,
         conclusion_template=data.get("conclusion_template") if isinstance(data.get("conclusion_template"), dict) else None,
         member_assistants=data.get("member_assistants") if isinstance(data.get("member_assistants"), dict) else None,
+        auto_deploy=bool(data.get("auto_deploy")),
     )
     return _json_response(result, status=201 if result.get("created") else 200)
 
@@ -451,9 +452,25 @@ async def _changes_post(request):
             return _project_call(lambda: projects.push(slug, team, str(data.get("what") or "")))
         if action == "discard":
             return _project_call(lambda: projects.discard(slug, team))
+        if action == "deploy":
+            from . import deploy
+
+            cleanup = data.get("cleanup")
+            return _project_call(lambda: {"deploy": deploy.start(slug, by="user",
+                                                                 cleanup=None if cleanup is None else bool(cleanup))})
         return {"error": "unknown action"}
 
-    return _json_response(await asyncio.to_thread(run))
+    status = 202 if action == "deploy" else 200
+    return _json_response(await asyncio.to_thread(run), status=status)
+
+
+async def _changes_auto_deploy(request):
+    from .teams import set_auto_deploy
+
+    data = await _body(request)
+    return _json_response(await asyncio.to_thread(
+        set_auto_deploy, request.match_info["team_id"], bool(data.get("enabled")), owner=_owner(request),
+    ))
 
 
 async def _file(request):
@@ -522,7 +539,8 @@ def install(app: Any, adapter: Any) -> None:
     router.add_get(base + "/{team_id}/files", _wrap(adapter, _files))
     router.add_get(base + "/{team_id}/changes", _wrap(adapter, _changes))
     router.add_get(base + "/{team_id}/changes/diff", _wrap(adapter, _changes_diff))
-    router.add_post(base + "/{team_id}/changes/{action:merge|push|discard}", _wrap(adapter, _changes_post))
+    router.add_post(base + "/{team_id}/changes/{action:merge|push|discard|deploy}", _wrap(adapter, _changes_post))
+    router.add_post(base + "/{team_id}/changes/auto-deploy", _wrap(adapter, _changes_auto_deploy))
     router.add_get(base + "/{team_id}/files/{path:.+}", _wrap(adapter, _file))
     if not _installed["done"]:
         _installed["done"] = True

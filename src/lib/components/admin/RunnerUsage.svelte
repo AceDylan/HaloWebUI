@@ -26,7 +26,8 @@
 	export let days = 30;
 	let loadedDays = 0;
 	let runs: RunnerRun[] = [];
-	let quota: RunnerQuota | undefined;
+	/** One card per official account (官方 Claude, offiagy); a Hermes before offiagy sends only `quota`. */
+	let quotas: RunnerQuota[] = [];
 	let loading = true;
 	let error = '';
 	const ALL = '__all';
@@ -57,6 +58,8 @@
 	};
 	const runTime = (ts: number) => shortTime(new Date(ts * 1000));
 	const resetTime = (value: string | null) => (value ? shortTime(new Date(value)) : '时间未知');
+	const quotaTitle = (q: RunnerQuota) =>
+		q.runner === 'offiagy' ? 'offiagy（AGY · Google 账号）额度' : '官方 Claude 订阅额度';
 	const quotaTone = (pct: number) =>
 		pct >= 100
 			? 'bg-red-500 dark:bg-red-400'
@@ -72,7 +75,7 @@
 			const data = await getRunnerStats(localStorage.token, Math.min(windowDays, 90));
 			if (id !== requestId) return;
 			runs = data.runs;
-			quota = data.quota;
+			quotas = data.quotas ?? (data.quota ? [data.quota] : []);
 			loadedDays = data.days;
 			page = 0;
 		} catch (err) {
@@ -155,17 +158,17 @@
 		</button>
 	</div>
 
-	{#if quota?.available}
-		<section class="{card} p-4" data-halo-runner-quota>
+	{#each quotas.filter((q) => q.available) as quota (quota.runner ?? 'officlaude')}
+		<section class="{card} p-4" data-halo-runner-quota={quota.runner ?? 'officlaude'}>
 			<div class="flex items-baseline justify-between gap-3">
 				<h3 class="text-[13px] font-medium text-gray-500 dark:text-gray-400">
-					官方 Claude 订阅额度
+					{quotaTitle(quota)}
 				</h3>
 				<span class="text-2xs tabular-nums text-gray-400 dark:text-gray-500"
 					>查询于 {runTime(quota.checked_at)}</span
 				>
 			</div>
-			<div class="mt-3 grid gap-4 sm:grid-cols-2">
+			<div class="mt-3 grid gap-4 {quota.windows.length > 2 ? 'sm:grid-cols-3' : 'sm:grid-cols-2'}">
 				{#each quota.windows as window}
 					{@const pct = Math.round(window.utilization)}
 					<div role={pct >= 90 ? 'alert' : undefined}>
@@ -196,10 +199,16 @@
 				{/each}
 			</div>
 		</section>
-	{:else if !loading && !error}
-		<p class="text-xs text-gray-400 dark:text-gray-500">
-			{quota?.notice || '当前执行器未提供实时订阅额度。'}
-		</p>
+	{/each}
+	{#if !loading && !error}
+		{#each quotas.filter((q) => !q.available) as quota (quota.runner ?? 'officlaude')}
+			<p class="text-xs text-gray-400 dark:text-gray-500">
+				{quota.notice || `${quotaTitle(quota)}暂时无法获取。`}
+			</p>
+		{/each}
+		{#if quotas.length === 0}
+			<p class="text-xs text-gray-400 dark:text-gray-500">当前执行器未提供实时订阅额度。</p>
+		{/if}
 	{/if}
 
 	{#if loading && runs.length === 0}

@@ -447,6 +447,9 @@ export type RunnerRun = {
 };
 
 export type RunnerQuota = {
+	/** Which official account: officlaude (官方 Claude) or offiagy; absent from a Hermes before offiagy. */
+	runner?: string;
+	label?: string;
 	available: boolean;
 	checked_at: number;
 	notice?: string;
@@ -459,4 +462,4 @@ export const getRunnerStats = async (token: string, days = 30) =>
 	}).then(async (res) => {
 		if (!res.ok) throw await detailOf(res);
 		return res.json();
-	})) as { days: number; runs: RunnerRun[]; quota?: RunnerQuota };
+	})) as { days: number; runs: RunnerRun[]; quota?: RunnerQuota; quotas?: RunnerQuota[] };

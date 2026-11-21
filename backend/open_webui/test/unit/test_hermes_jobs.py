@@ -172,6 +172,13 @@ def test_runner_stats_preserves_quota_and_rejects_malformed_data(monkeypatch):
         lambda **_kw: _GetSession((200, {"days": 7, "runs": [], "quota": quota}), calls),
     )
     assert asyncio.run(hermes_jobs.runner_stats(None, USER, 7))["quota"] == quota
+    offiagy = {"runner": "offiagy", "label": "offiagy", "available": True, "windows": []}
+    monkeypatch.setattr(
+        hermes_jobs.aiohttp, "ClientSession",
+        lambda **_kw: _GetSession((200, {"days": 7, "runs": [], "quota": quota,
+                                          "quotas": [quota, offiagy, "junk"]}), calls),
+    )
+    assert asyncio.run(hermes_jobs.runner_stats(None, USER, 7))["quotas"] == [quota, offiagy]
     monkeypatch.setattr(
         hermes_jobs.aiohttp, "ClientSession", lambda **_kw: _GetSession((200, []), calls)
     )

@@ -94,7 +94,7 @@ describe('runner usage page', () => {
 		await sleep();
 		expect(api.getRunnerStats.mock.calls.at(-1)[1]).toBe(30);
 	});
-	it('shows a card per official account: 官方 Claude and offiagy', async () => {
+	it('shows offiagy Gemini Weekly Limit Remaining first and hides Claude/GPT windows', async () => {
 		const now = Date.now() / 1000;
 		api.getRunnerStats.mockResolvedValue({
 			days: 7,
@@ -122,16 +122,23 @@ describe('runner usage page', () => {
 					windows: [
 						{ key: 'five_hour', label: 'Claude/GPT 5 小时', utilization: 12, resets_at: null },
 						{ key: 'seven_day', label: 'Claude/GPT 每周', utilization: 3, resets_at: null },
-						{ key: 'gemini', label: 'Gemini', utilization: 40, resets_at: null }
+						{ key: 'gemini_five_hour', label: 'Gemini 5 小时', utilization: 12, resets_at: null },
+						{ key: 'gemini_weekly', label: 'Gemini 每周（Weekly Limit）', utilization: 5, resets_at: null }
 					]
 				}
 			]
 		});
 		await mount();
 		const card = target.querySelector('[data-halo-runner-quota="offiagy"]');
-		expect(card.textContent).toContain('offiagy（AGY · Google 账号）额度');
-		expect(card.textContent).toContain('Claude/GPT 每周');
-		expect(card.textContent).toContain('40%');
+		expect(card.textContent).toContain('offiagy（AGY · Google 账号）Gemini 额度');
+		expect(card.textContent).toContain('Gemini 每周（Weekly Limit）');
+		expect(card.textContent).toContain('剩余 95%');
+		expect(card.textContent).toContain('剩余 88%');
+		expect(card.textContent).not.toContain('Claude/GPT');
+		const keys = Array.from(card.querySelectorAll('[data-halo-quota-window]')).map((el: any) =>
+			el.getAttribute('data-halo-quota-window')
+		);
+		expect(keys).toEqual(['gemini_weekly', 'gemini_five_hour']);
 		expect(target.querySelector('[data-halo-runner-quota="officlaude"]')).toBeFalsy();
 		expect(target.textContent).toContain('暂时无法获取官方 Claude的实时额度');
 		api.getRunnerStats.mockReset();

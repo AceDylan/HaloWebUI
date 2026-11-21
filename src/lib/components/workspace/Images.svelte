@@ -1973,36 +1973,55 @@
 			<HandoffBack origin={studioOrigin} className="-ml-2.5" />
 		</div>
 	{/if}
-	<!-- 标签页导航：一个紧凑的分段切换，窄屏横向滚动，不再把标签挤成竖排字 -->
-	<div class="halo-seg mb-4 flex w-fit max-w-full items-center overflow-x-auto scrollbar-hidden">
-		<button
-			class="tab-button {activeTab === 'workbench' ? 'active' : ''}"
-			on:click={() => (activeTab = 'workbench')}
-		>
-			<PhotoSolid className="size-4" />
-			<span>{$i18n.t('Workbench')}</span>
-		</button>
-		<button
-			class="tab-button {activeTab === 'prompts' ? 'active' : ''}"
-			on:click={() => (activeTab = 'prompts')}
-		>
-			<Sparkles className="size-4" />
-			<span>{$i18n.t('Prompt Management')}</span>
-		</button>
-		<button
-			class="tab-button {activeTab === 'gallery' ? 'active' : ''}"
-			on:click={() => (activeTab = 'gallery')}
-		>
-			<PhotoSolid className="size-4" />
-			<span>{$i18n.t('Gallery')}</span>
-		</button>
-		<button
-			class="tab-button {activeTab === 'history' ? 'active' : ''}"
-			on:click={() => (activeTab = 'history')}
-		>
-			<Clipboard className="size-4" />
-			<span>{$i18n.t('History')}</span>
-		</button>
+	<!-- 标签页导航 + 模型选择同一行，首屏直接把提示词与预览区拉高 -->
+	<div class="mb-4 flex flex-wrap items-center justify-between gap-3">
+		<div class="halo-seg flex w-fit max-w-full items-center overflow-x-auto scrollbar-hidden">
+			<button
+				class="tab-button {activeTab === 'workbench' ? 'active' : ''}"
+				on:click={() => (activeTab = 'workbench')}
+			>
+				<PhotoSolid className="size-4" />
+				<span>{$i18n.t('Workbench')}</span>
+			</button>
+			<button
+				class="tab-button {activeTab === 'prompts' ? 'active' : ''}"
+				on:click={() => (activeTab = 'prompts')}
+			>
+				<Sparkles className="size-4" />
+				<span>{$i18n.t('Prompt Management')}</span>
+			</button>
+			<button
+				class="tab-button {activeTab === 'gallery' ? 'active' : ''}"
+				on:click={() => (activeTab = 'gallery')}
+			>
+				<PhotoSolid className="size-4" />
+				<span>{$i18n.t('Gallery')}</span>
+			</button>
+			<button
+				class="tab-button {activeTab === 'history' ? 'active' : ''}"
+				on:click={() => (activeTab = 'history')}
+			>
+				<Clipboard className="size-4" />
+				<span>{$i18n.t('History')}</span>
+			</button>
+		</div>
+
+		{#if viewState === 'ready' && !workspaceNoModels && activeTab === 'workbench'}
+			<div class="w-full sm:w-auto sm:min-w-[17rem]">
+				<HaloSelect
+					bind:value={selectedModel}
+					triggerId={WORKSPACE_IMAGE_MODEL_SELECTOR_ID}
+					options={modelOptions}
+					placeholder={$i18n.t('Select a model')}
+					searchEnabled={true}
+					searchPlaceholder={$i18n.t('Search a model')}
+					noResultsText={$i18n.t('No results found')}
+					className="w-full sm:w-72 text-xs"
+					on:search={handleModelSearch}
+					on:change={handleModelChange}
+				/>
+			</div>
+		{/if}
 	</div>
 
 	{#if viewState !== 'ready' || workspaceNoModels}
@@ -2058,39 +2077,6 @@
 				class="flex flex-col gap-4 lg:grid lg:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)] lg:items-start"
 				on:submit|preventDefault={submitHandler}
 			>
-			<!-- The "Workbench" tab above already names this view; no extra title pill here, so
-			     the prompt box starts higher. -->
-			<div class="workspace-toolbar-row lg:col-span-2">
-					<div class="workspace-toolbar-summary">
-						<div
-							class="text-xs text-gray-600 dark:text-gray-400"
-							title={$i18n.t(
-								'This image workbench remembers your last model and generation settings only in this browser.'
-							)}
-						>
-							{$i18n.t('Create polished visuals from a single prompt.')}
-							<span class="hidden sm:inline ml-1">
-								{$i18n.t('Press Ctrl/Command + Enter to generate.')}
-							</span>
-						</div>
-					</div>
-
-					<div class="workspace-toolbar">
-						<HaloSelect
-							bind:value={selectedModel}
-							triggerId={WORKSPACE_IMAGE_MODEL_SELECTOR_ID}
-							options={modelOptions}
-							placeholder={$i18n.t('Select a model')}
-							searchEnabled={true}
-							searchPlaceholder={$i18n.t('Search a model')}
-							noResultsText={$i18n.t('No results found')}
-							className="w-full lg:w-72 text-xs"
-							on:search={handleModelSearch}
-							on:change={handleModelChange}
-						/>
-					</div>
-			</div>
-
 			<!-- The cards sit on the page: no extra section card around them (it made four
 			     nested boxes under the workspace header). -->
 			<section class="contents lg:flex lg:flex-col lg:gap-4">
@@ -2248,32 +2234,55 @@
 						/>
 					</div>
 
-					<!-- Under the prompt on every screen: write, then generate (the button used
-					     to sit above-right of the prompt on desktop). -->
-					<div class="flex sm:justify-end">
-					<button
-						type="submit"
-						class="workspace-primary-button w-full sm:w-auto sm:min-w-32"
-						disabled={!canSubmit}
-						title={blockedReason ?? ''}
-						data-halo-image-generate
-					>
-						{#if loading}
-							<svg class="size-4 animate-spin" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-								<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
-								<path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-							</svg>
-						{:else}
-							<Sparkles className="size-4" strokeWidth="2" />
-						{/if}
-						<span data-image-studio-elapsed={loading ? elapsedSeconds : undefined}
-							>{loading
-								? elapsedSeconds > 0
-									? $i18n.t('Generating... {{seconds}}s', { seconds: elapsedSeconds })
-									: $i18n.t('Generating...')
-								: $i18n.t('Generate')}</span
+					<!-- 参数摘要 + 生成按钮同行：一目了然确认规格后直接触发 -->
+					<div class="flex flex-wrap items-center justify-between gap-2 border-t border-gray-200/50 pt-3 dark:border-white/[0.06]">
+						<div class="flex flex-wrap items-center gap-1.5 text-[11px] text-gray-500 dark:text-gray-400">
+							<span class="rounded-full bg-gray-100/80 px-2 py-0.5 font-mono dark:bg-white/[0.05]">
+								{usesNativeAspectRatioControls ? selectedAspectRatioOption : activeSizeLabel}
+							</span>
+							{#if showsResolutionControl}
+								<span class="rounded-full bg-gray-100/80 px-2 py-0.5 font-mono uppercase dark:bg-white/[0.05]">
+									{selectedResolution}
+								</span>
+							{/if}
+							<span class="rounded-full bg-gray-100/80 px-2 py-0.5 dark:bg-white/[0.05]">
+								{numberOfImages} 张
+							</span>
+							{#if showsQualityControl && quality !== 'auto'}
+								<span class="rounded-full bg-gray-100/80 px-2 py-0.5 dark:bg-white/[0.05]">
+									{quality}
+								</span>
+							{/if}
+							{#if referenceImages.length > 0}
+								<span class="rounded-full bg-cyan-500/12 px-2 py-0.5 text-cyan-700 dark:text-cyan-300">
+									{referenceImages.length} 张参考图
+								</span>
+							{/if}
+							<kbd class="hidden rounded-md px-1.5 py-0.5 font-mono text-[10.5px] text-gray-400 sm:inline-block">Ctrl/⌘ ↵</kbd>
+						</div>
+						<button
+							type="submit"
+							class="workspace-primary-button w-full sm:w-auto sm:min-w-32"
+							disabled={!canSubmit}
+							title={blockedReason ?? ''}
+							data-halo-image-generate
 						>
-					</button>
+							{#if loading}
+								<svg class="size-4 animate-spin" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+									<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
+									<path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+								</svg>
+							{:else}
+								<Sparkles className="size-4" strokeWidth="2" />
+							{/if}
+							<span data-image-studio-elapsed={loading ? elapsedSeconds : undefined}
+								>{loading
+									? elapsedSeconds > 0
+										? $i18n.t('Generating... {{seconds}}s', { seconds: elapsedSeconds })
+										: $i18n.t('Generating...')
+									: $i18n.t('Generate')}</span
+							>
+						</button>
 					</div>
 				</div>
 
@@ -2323,36 +2332,67 @@
 
 					<div class="grid gap-4 sm:grid-cols-2">
 						{#if usesNativeAspectRatioControls}
-							<div class="space-y-1.5">
+							<div class="space-y-1.5 sm:col-span-2">
 								<div class="text-xs font-medium text-gray-500 dark:text-gray-400">
 									{$i18n.t('Aspect Ratio')}
 								</div>
-								<HaloSelect
-									bind:value={selectedAspectRatioOption}
-									options={nativeAspectRatioOptions}
-									className="w-full text-xs"
-								/>
-								<div class="text-xs text-gray-500 dark:text-gray-400">
-									{$i18n.t('This model uses aspect ratio instead of exact pixel size.')}
+								<div class="flex flex-wrap gap-1.5" role="radiogroup" aria-label={$i18n.t('Aspect Ratio')}>
+									{#each nativeAspectRatioOptions as option (option.value)}
+										<button
+											type="button"
+											role="radio"
+											aria-checked={selectedAspectRatioOption === option.value}
+											class="halo-wb-opt"
+											on:click={() => (selectedAspectRatioOption = option.value)}
+										>
+											{option.label}
+										</button>
+									{/each}
 								</div>
 							</div>
 						{:else}
-							<div class="space-y-1.5">
-								<div class="text-xs font-medium text-gray-500 dark:text-gray-400">
-									{$i18n.t('Size')}
+							<div class="space-y-1.5 sm:col-span-2">
+								<div class="flex items-center justify-between gap-2">
+									<div class="text-xs font-medium text-gray-500 dark:text-gray-400">
+										{$i18n.t('Size')}
+									</div>
+									<div class="w-44">
+										<HaloSelect
+											value={sizeSelectValue}
+											options={sizeOptions.map((option) => ({
+												value: option.value,
+												label:
+													option.value === CUSTOM_SIZE_OPTION_VALUE
+														? option.label
+														: `${option.ratio} · ${option.label}`
+											}))}
+											className="w-full text-xs"
+											on:change={(event) => handleSizeSelect(event.detail.value)}
+										/>
+									</div>
 								</div>
-								<HaloSelect
-									value={sizeSelectValue}
-									options={sizeOptions.map((option) => ({
-										value: option.value,
-										label:
-											option.value === CUSTOM_SIZE_OPTION_VALUE
-												? option.label
-												: `${option.ratio} · ${option.label}`
-									}))}
-									className="w-full text-xs"
-									on:change={(event) => handleSizeSelect(event.detail.value)}
-								/>
+								<div class="flex flex-wrap gap-1.5">
+									{#each curatedSizeOptions as option (option.value)}
+										<button
+											type="button"
+											aria-pressed={!usingCustomSize && selectedPresetSize === option.value}
+											class="halo-wb-opt"
+											title={`${option.ratio} · ${option.label}`}
+											on:click={() => handleSizeSelect(option.value)}
+										>
+											<span class="font-mono text-[11px]">{option.ratio}</span>
+											<span class="text-[11px] opacity-75">{option.value}</span>
+										</button>
+									{/each}
+									<button
+										type="button"
+										aria-pressed={usingCustomSize}
+										class="halo-wb-opt"
+										on:click={() => handleSizeSelect(CUSTOM_SIZE_OPTION_VALUE)}
+									>
+										{$i18n.t('Custom')}
+									</button>
+								</div>
 
 								{#if usingCustomSize}
 									<div class="space-y-2 rounded-xl border border-dashed border-gray-200/80 bg-gray-50/70 p-3 dark:border-gray-700/60 dark:bg-gray-900/40">
@@ -2428,11 +2468,19 @@
 								<div class="text-xs font-medium text-gray-500 dark:text-gray-400">
 									{$i18n.t('Resolution')}
 								</div>
-								<HaloSelect
-									bind:value={selectedResolution}
-									options={nativeResolutionOptions}
-									className="w-full text-xs"
-								/>
+								<div class="flex flex-wrap gap-1.5" role="radiogroup" aria-label={$i18n.t('Resolution')}>
+									{#each nativeResolutionOptions as option (option.value)}
+										<button
+											type="button"
+											role="radio"
+											aria-checked={selectedResolution === option.value}
+											class="halo-wb-opt"
+											on:click={() => (selectedResolution = option.value)}
+										>
+											{option.label}
+										</button>
+									{/each}
+								</div>
 							{:else if showsStepsControl}
 								<div class="flex items-center justify-between">
 									<div class="text-xs font-medium text-gray-500 dark:text-gray-400">
@@ -2453,44 +2501,49 @@
 							{/if}
 						</div>
 
-						<!-- 生成数量 -->
+						<!-- 生成数量：一键分段选择 -->
 						<div class="space-y-1.5">
 							<div class="text-xs font-medium text-gray-500 dark:text-gray-400">
 								{$i18n.t('Number of Images')}
 							</div>
-							<HaloSelect
-								bind:value={numberOfImages}
-								options={[
-									{ value: '1', label: '1' },
-									{ value: '2', label: '2' },
-									{ value: '3', label: '3' },
-									{ value: '4', label: '4' }
-								]}
-								className="w-full text-xs"
-							/>
-							<div class="text-xs text-gray-500 dark:text-gray-400">
-								{$i18n.t('Generate multiple images at once')}
+							<div class="grid grid-cols-4 gap-1.5" role="radiogroup" aria-label={$i18n.t('Number of Images')}>
+								{#each ['1', '2', '3', '4'] as count (count)}
+									<button
+										type="button"
+										role="radio"
+										aria-checked={numberOfImages === count}
+										class="halo-wb-opt"
+										on:click={() => (numberOfImages = count)}
+									>
+										{count} 张
+									</button>
+								{/each}
 							</div>
 						</div>
 
 						{#if showsQualityControl}
-							<!-- gpt-image 质量档位 -->
+							<!-- gpt-image 质量档位：一键切换 -->
 							<div class="space-y-1.5">
 								<div class="text-xs font-medium text-gray-500 dark:text-gray-400">
 									{$i18n.t('Quality')}
 								</div>
-								<HaloSelect
-									bind:value={quality}
-									options={[
+								<div class="grid grid-cols-4 gap-1.5" role="radiogroup" aria-label={$i18n.t('Quality')}>
+									{#each [
 										{ value: 'auto', label: $i18n.t('Auto') },
 										{ value: 'low', label: $i18n.t('Low') },
 										{ value: 'medium', label: $i18n.t('Medium') },
 										{ value: 'high', label: $i18n.t('High') }
-									]}
-									className="w-full text-xs"
-								/>
-								<div class="text-xs text-gray-500 dark:text-gray-400">
-									{$i18n.t('Low is fastest and cheapest; high keeps the most detail.')}
+									] as opt (opt.value)}
+										<button
+											type="button"
+											role="radio"
+											aria-checked={quality === opt.value}
+											class="halo-wb-opt"
+											on:click={() => (quality = opt.value)}
+										>
+											{opt.label}
+										</button>
+									{/each}
 								</div>
 							</div>
 						{/if}
@@ -2500,14 +2553,22 @@
 								<div class="text-xs font-medium text-gray-500 dark:text-gray-400">
 									{$i18n.t('Image format')}
 								</div>
-								<HaloSelect
-									bind:value={outputFormat}
-									options={[
+								<div class="grid grid-cols-2 gap-1.5" role="radiogroup" aria-label={$i18n.t('Image format')}>
+									{#each [
 										{ value: 'still', label: $i18n.t('Still image') },
 										{ value: 'gif', label: $i18n.t('Animated GIF') }
-									]}
-									className="w-full text-xs"
-								/>
+									] as opt (opt.value)}
+										<button
+											type="button"
+											role="radio"
+											aria-checked={outputFormat === opt.value}
+											class="halo-wb-opt"
+											on:click={() => (outputFormat = opt.value)}
+										>
+											{opt.label}
+										</button>
+									{/each}
+								</div>
 								{#if outputFormat === 'gif'}
 									<div class="text-2xs text-gray-400">
 										{$i18n.t('GIF size and background are set by the model')}
@@ -2516,16 +2577,24 @@
 							</div>
 						{/if}
 
-						<!-- 背景参数 -->
+						<!-- 背景参数：一键切换 -->
 						<div class="space-y-1.5">
 							<div class="text-xs font-medium text-gray-500 dark:text-gray-400">
 								{$i18n.t('Background')}
 							</div>
-							<HaloSelect
-								bind:value={background}
-								options={backgroundOptions}
-								className="w-full text-xs"
-							/>
+							<div class="flex flex-wrap gap-1.5" role="radiogroup" aria-label={$i18n.t('Background')}>
+								{#each backgroundOptions as opt (opt.value)}
+									<button
+										type="button"
+										role="radio"
+										aria-checked={background === opt.value}
+										class="halo-wb-opt"
+										on:click={() => (background = opt.value)}
+									>
+										{opt.label}
+									</button>
+								{/each}
+							</div>
 
 							{#if background === 'custom'}
 								<input
@@ -2685,7 +2754,19 @@
 										class="absolute inset-x-0 bottom-0 flex items-end justify-between gap-2 bg-gradient-to-t from-black/70 via-black/20 to-transparent p-3 text-white opacity-0 transition duration-200 group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100"
 									>
 										<div class="text-xs font-medium">{activeSizeLabel}</div>
-										<div class="flex items-center gap-2">
+										<div class="flex items-center gap-1.5">
+											<button
+												type="button"
+												class="rounded-xl bg-white/15 px-2.5 py-1.5 text-[11px] font-medium backdrop-blur transition hover:bg-white/25"
+												data-image-result-reference
+												on:click|stopPropagation={() => {
+													addReferenceUrl(image.url);
+													toast.success($i18n.t('Use as reference'));
+												}}
+												title={$i18n.t('Use as reference')}
+											>
+												作参考图
+											</button>
 											<button
 												type="button"
 												class="rounded-xl bg-white/15 p-2 backdrop-blur transition hover:bg-white/25"

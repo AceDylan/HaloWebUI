@@ -73,7 +73,10 @@
 
 {#if loaded}
 	<div class="relative flex flex-col w-full h-screen max-h-[100dvh] max-w-full">
-		<nav data-halo-layer="0" class="px-2.5 pt-1 md:backdrop-blur-xl drag-region">
+		<nav
+			data-halo-layer="0"
+			class="px-2.5 pt-1 pb-1.5 drag-region {modePage ? 'halo-mode-nav' : 'md:backdrop-blur-xl'}"
+		>
 			<div class="flex items-center gap-1 {modePage ? 'pt-1' : ''}">
 				<div class="{$mobile ? '' : 'hidden'} self-center flex flex-none items-center">
 					<button
@@ -107,23 +110,20 @@
 			id="workspace-container"
 			data-halo-mode={studio ? 'images' : videoStudio ? 'videos' : undefined}
 		>
-			<div class="max-w-6xl mx-auto flex min-h-full flex-col gap-6 pb-4">
+			<div class="max-w-6xl mx-auto flex min-h-full flex-col gap-4 pb-4">
 				{#if studio}
-					<header class="halo-mode-hero relative flex flex-col gap-2 pt-4 sm:pt-8" data-studio-hero>
+					<header class="halo-mode-hero relative flex flex-col gap-2 pt-2 sm:pt-5" data-studio-hero>
 						<ModeEmblem mode="images" stats={[{ k: 'RENDER', v: 'READY' }]} />
 						<div class="flex items-center gap-2">
 							<span class="halo-mode-eyebrow text-[11px] font-semibold uppercase tracking-[0.08em] text-gray-500 dark:text-gray-400">Halo Studio</span>
 							<span class="h-3 w-px bg-gray-300 dark:bg-gray-700" aria-hidden="true" />
-							<span class="text-xs text-gray-500 dark:text-gray-400">生图</span>
+							<span class="text-xs text-gray-500 dark:text-gray-400">生图工作台</span>
 						</div>
-						<h2 class="halo-mode-title font-display text-[26px] font-semibold leading-[1.15] text-gray-950 sm:text-[32px] dark:text-white">把想法画出来</h2>
+						<h2 class="halo-mode-title font-display text-[24px] font-semibold leading-[1.15] text-gray-950 sm:text-[30px] dark:text-white">把想法画出来</h2>
 						<ModeFlow label="生图怎么进行" steps={['写提示词', '加参考图 · 套模板', '渲染', '进图库，随时再改']} />
-						<p class="hidden max-w-2xl text-sm leading-relaxed text-gray-500 sm:block dark:text-gray-400">
-							写提示词、加参考图、套风格模板；对话里生成的图也会自动进图库，随时拿回来接着改。
-						</p>
 					</header>
 				{:else if videoStudio}
-					<header class="halo-mode-hero relative flex flex-col gap-2 pt-4 sm:pt-8" data-studio-hero data-video-hero>
+					<header class="halo-mode-hero relative flex flex-col gap-2 pt-2 sm:pt-5" data-studio-hero data-video-hero>
 						<ModeEmblem mode="videos" stats={[{ k: 'REEL', v: 'READY' }]} />
 						<div class="flex items-center gap-2">
 							<span class="halo-mode-eyebrow text-[11px] font-semibold uppercase tracking-[0.08em] text-gray-500 dark:text-gray-400">Halo Studio</span>

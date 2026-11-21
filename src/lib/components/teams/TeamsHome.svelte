@@ -462,7 +462,7 @@
 	data-teams-home
 	data-teams-ui
 >
-	<nav class="flex flex-wrap items-center gap-2 px-3 pt-2 pb-1">
+	<nav class="halo-mode-nav flex flex-wrap items-center gap-2 px-3 py-2">
 		<div class="{$mobile ? '' : 'hidden'} flex flex-none items-center">
 			<button
 				class="rounded-xl p-1.5 hover:bg-gray-100 dark:hover:bg-gray-850"
@@ -484,33 +484,30 @@
 	</nav>
 
 	<div class="tm-scroll flex-1 overflow-y-auto px-4 pb-16">
-		<div class="mx-auto flex max-w-3xl flex-col pt-6 sm:pt-14">
+		<div class="mx-auto flex max-w-3xl flex-col pt-3 sm:pt-7">
 			<!-- hero -->
-			<header class="halo-mode-hero tm-rise relative mb-6 flex flex-col gap-3">
+			<header class="halo-mode-hero tm-rise relative mb-4 flex flex-col gap-2.5">
 				<ModeEmblem mode="teams" stats={[{ k: 'MISSIONS', v: counts.all ?? teams.length }, { k: 'ACTIVE', v: activeCount }]} />
-				<div class="flex items-center gap-2">
+				<div class="flex flex-wrap items-center gap-2">
 					<span class="tm-eyebrow halo-mode-eyebrow">Halo Teams</span>
 					<span class="h-3 w-px bg-gray-300 dark:bg-gray-700" aria-hidden="true" />
 					<span class="text-xs text-gray-500 dark:text-gray-400">多代理协作</span>
+					<span
+						class="inline-flex items-center gap-1 rounded-full border border-cyan-500/20 bg-cyan-500/[0.06] px-2 py-0.5 text-[10.5px] text-gray-500 dark:border-cyan-400/20 dark:text-gray-400"
+						title="不在电脑前也行：在 Telegram 给 Hermes 发 /team 目标 即可发起，计划、成员提问和结论都会推送到 Telegram"
+						data-teams-tg-hint
+					>
+						TG <code class="font-mono text-[10.5px] text-cyan-700 dark:text-cyan-300">/team 目标</code>
+					</span>
 				</div>
 				<h2
-					class="halo-mode-title tm-display text-[28px] font-semibold leading-[1.15] text-gray-950 sm:text-[36px] dark:text-white"
+					class="halo-mode-title tm-display text-[26px] font-semibold leading-[1.15] text-gray-950 sm:text-[32px] dark:text-white"
 				>
 					把目标交给一支 AI 团队
 				</h2>
 				<ModeFlow label="协作怎么进行" steps={['写下目标', '负责人拆计划', '你批准', '成员并行执行', '交付完整结果']} />
-				<p class="hidden max-w-xl text-sm leading-relaxed text-gray-500 sm:block dark:text-gray-400">
-					负责人拆分任务、为每位成员挑选最合适的代理并按依赖并行推进；你批准计划后才开工，结束时交付完整结果——完整的答案、文档和图片。在对话的「+」菜单、回答的「⋯」或讨论结论下，也能直接交给协作台。
-				</p>
-				<p
-					class="max-w-xl text-xs leading-relaxed text-gray-400 dark:text-gray-500"
-					data-teams-tg-hint
-				>
-					不在电脑前也行：在 Telegram 给 Hermes 发 <code
-						class="rounded bg-gray-100 px-1 py-0.5 font-mono text-[11px] text-gray-600 dark:bg-gray-800 dark:text-gray-300"
-						>/team 目标</code
-					>
-					就能发起；计划、成员提问和完成结论都会推送到 Telegram，直接点按钮或回复即可。
+				<p class="hidden max-w-xl text-xs leading-relaxed text-gray-500 sm:block dark:text-gray-400">
+					负责人拆解依赖、调度多代理并行执行；默认先出计划等你批准，交付完整报告、代码与文件。
 				</p>
 			</header>
 
@@ -615,7 +612,7 @@
 						{/each}
 					</ul>
 				{/if}
-				<div class="flex items-center gap-2 px-3 pt-1 pb-3">
+				<div class="flex flex-wrap items-center gap-2 border-t border-gray-100 px-4 py-3 dark:border-gray-800/70">
 					<input
 						bind:this={fileInput}
 						type="file"
@@ -626,7 +623,7 @@
 					/>
 					<button
 						type="button"
-						class="pill grid size-7 shrink-0 place-items-center rounded-full text-gray-600 dark:text-gray-300"
+						class="pill inline-flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-xs text-gray-600 dark:text-gray-300"
 						title="附带文件或图片：团队开工时会放进工作目录的 inputs/，成员都能读"
 						aria-label="附带文件"
 						on:click={() => fileInput?.click()}
@@ -639,121 +636,132 @@
 								stroke-linecap="round"
 								stroke-linejoin="round"
 							/></svg
-						></button
+						>附件{attached.length ? ` ${attached.length}` : ''}</button
 					>
-					<div class="tm-scroll tm-fade-x flex min-w-0 flex-1 items-center gap-2 overflow-x-auto">
-						<label
-							class="pill flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full py-1 pr-1 pl-2.5 text-xs"
-							data-lead-model
-							title="负责人做计划、写结论用的模型；默认跟随 Hermes 当前的默认模型"
+					<label
+						class="pill flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full py-1 pr-1 pl-2.5 text-xs"
+						data-lead-model
+						title="负责人做计划、写结论用的模型；默认跟随 Hermes 当前的默认模型"
+					>
+						<TeamAvatar kind="lead" size={16} />
+						<span class="shrink-0 text-gray-500 dark:text-gray-400">负责人</span>
+						<select
+							bind:value={leadModel}
+							class="compact-select min-w-0 max-w-[9rem] truncate sm:max-w-[11rem]"
 						>
-							<TeamAvatar kind="lead" size={16} />
-							<span class="shrink-0 text-gray-500 dark:text-gray-400">负责人</span>
-							<select
-								bind:value={leadModel}
-								class="compact-select min-w-0 max-w-[9rem] truncate sm:max-w-[12rem]"
+							<option value=""
+								>{meta?.lead_model?.model
+									? `默认 · ${defaultModel}`
+									: 'Hermes 默认'}</option
 							>
-								<option value=""
-									>{meta?.lead_model?.model
-										? `默认 · ${defaultModel}`
-										: 'Hermes 默认'}</option
-								>
-								{#each modelChoices as model}
-									<option value={model}>{model}</option>
-								{/each}
-							</select>
-						</label>
-						<label
-							class="pill flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full py-1 pr-1 pl-2.5 text-xs"
-							data-team-project
-							title="团队在哪干活：自动 = 目标里点名了项目就在项目里，否则新目录；项目 = 在这个 git 仓库的独立分支上改（合并、推送由你在协作台决定）；新目录 = 一个空的工作目录"
+							{#each modelChoices as model}
+								<option value={model}>{model}</option>
+							{/each}
+						</select>
+					</label>
+					<label
+						class="pill flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full py-1 pr-1 pl-2.5 text-xs"
+						data-team-project
+						title="团队在哪干活：自动 = 目标里点名了项目就在项目里，否则新目录；项目 = 在这个 git 仓库的独立分支上改（合并、推送由你在协作台决定）；新目录 = 一个空的工作目录"
+					>
+						<svg
+							class="size-3.5 shrink-0 text-gray-400"
+							viewBox="0 0 16 16"
+							fill="none"
+							aria-hidden="true"
+							><path
+								d="M2 4.5A1.5 1.5 0 0 1 3.5 3h2.6l1.4 1.5h5A1.5 1.5 0 0 1 14 6v5.5a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 11.5v-7Z"
+								stroke="currentColor"
+								stroke-width="1.3"
+								stroke-linejoin="round"
+							/></svg
 						>
-							<svg
-								class="size-3.5 shrink-0 text-gray-400"
-								viewBox="0 0 16 16"
-								fill="none"
-								aria-hidden="true"
-								><path
-									d="M2 4.5A1.5 1.5 0 0 1 3.5 3h2.6l1.4 1.5h5A1.5 1.5 0 0 1 14 6v5.5a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 11.5v-7Z"
-									stroke="currentColor"
-									stroke-width="1.3"
-									stroke-linejoin="round"
-								/></svg
-							>
-							<span class="shrink-0 text-gray-500 dark:text-gray-400">在哪做</span>
-							<select
-								bind:value={project}
-								class="compact-select min-w-0 max-w-[9rem] truncate sm:max-w-[12rem]"
-							>
-								<option value="" title="目标里点名了项目就在项目里，否则用新目录">自动</option>
-								<option value="none">新目录</option>
-								{#each meta?.projects ?? [] as p (p.path)}
-									<option value={p.path}>项目 · {p.name}</option>
-								{/each}
-							</select>
-						</label>
+						<span class="shrink-0 text-gray-500 dark:text-gray-400">在哪做</span>
+						<select
+							bind:value={project}
+							class="compact-select min-w-0 max-w-[9rem] truncate sm:max-w-[11rem]"
+						>
+							<option value="" title="目标里点名了项目就在项目里，否则用新目录">自动</option>
+							<option value="none">新目录</option>
+							{#each meta?.projects ?? [] as p (p.path)}
+								<option value={p.path}>项目 · {p.name}</option>
+							{/each}
+						</select>
+					</label>
+					<button
+						type="button"
+						class="pill inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-1 text-xs text-gray-600 dark:text-gray-300"
+						aria-expanded={showRunners}
+						on:click={() => (showRunners = !showRunners)}
+						data-runner-summary
+					>
+						<span class="flex -space-x-0.5" aria-hidden="true">
+							{#each runners as r}
+								<span
+									class="size-1.5 rounded-full ring-2 ring-white dark:ring-gray-900 {r.available
+										? 'bg-emerald-500'
+										: r.state === 'not_configured'
+											? 'bg-gray-300 dark:bg-gray-600'
+											: 'bg-red-500'}"
+								/>
+							{/each}
+						</span>
+						{#if !meta && !metaError}
+							检测执行来源…
+						{:else if metaError}
+							执行来源检测失败
+						{:else}
+							执行来源 <b class="tm-num font-semibold">{runnersUp}/{runners.length}</b> 可用
+						{/if}
+						<svg
+							class="size-3 transition-transform {showRunners ? 'rotate-180' : ''}"
+							viewBox="0 0 12 12"
+							fill="none"
+							aria-hidden="true"
+							><path
+								d="m3 4.5 3 3 3-3"
+								stroke="currentColor"
+								stroke-width="1.4"
+								stroke-linecap="round"
+								stroke-linejoin="round"
+							/></svg
+						>
+					</button>
+					<button
+						type="button"
+						class="pill inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-1 text-xs {autoStart
+							? 'pill-on'
+							: 'text-gray-600 dark:text-gray-300'}"
+						aria-pressed={autoStart}
+						on:click={toggleAutoStart}
+						title="打开后，负责人做好计划就直接开始，不用你批准（有成员没有可用的执行来源时仍会等你）。计划照样能在工作台里看，运行中也能对负责人说要改什么。"
+						data-auto-start
+					>
+						<svg class="size-3.5 shrink-0" viewBox="0 0 16 16" fill="none" aria-hidden="true"
+							><path
+								d="M9 1.75 3.75 9h3.5L6.5 14.25 12.25 6.75h-3.5L9 1.75Z"
+								stroke="currentColor"
+								stroke-width="1.3"
+								stroke-linejoin="round"
+								fill={autoStart ? 'currentColor' : 'none'}
+							/></svg
+						>
+						直接开始
+					</button>
+					{#if goal.trim() && !creating}
 						<button
 							type="button"
-							class="pill inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-1 text-xs text-gray-600 dark:text-gray-300"
-							aria-expanded={showRunners}
-							on:click={() => (showRunners = !showRunners)}
-							data-runner-summary
+							class="pill inline-flex shrink-0 items-center rounded-full px-2.5 py-1 text-xs text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200"
+							on:click={() => {
+								goal = '';
+								tick().then(() => {
+									resize();
+									composer?.focus();
+								});
+							}}>清空</button
 						>
-							<span class="flex -space-x-0.5" aria-hidden="true">
-								{#each runners as r}
-									<span
-										class="size-1.5 rounded-full ring-2 ring-white dark:ring-gray-900 {r.available
-											? 'bg-emerald-500'
-											: r.state === 'not_configured'
-												? 'bg-gray-300 dark:bg-gray-600'
-												: 'bg-red-500'}"
-									/>
-								{/each}
-							</span>
-							{#if !meta && !metaError}
-								检测执行来源…
-							{:else if metaError}
-								执行来源检测失败
-							{:else}
-								执行来源 <b class="tm-num font-semibold">{runnersUp}/{runners.length}</b> 可用
-							{/if}
-							<svg
-								class="size-3 transition-transform {showRunners ? 'rotate-180' : ''}"
-								viewBox="0 0 12 12"
-								fill="none"
-								aria-hidden="true"
-								><path
-									d="m3 4.5 3 3 3-3"
-									stroke="currentColor"
-									stroke-width="1.4"
-									stroke-linecap="round"
-									stroke-linejoin="round"
-								/></svg
-							>
-						</button>
-					</div>
+					{/if}
 					<div class="ml-auto flex shrink-0 items-center gap-2">
-						<button
-							type="button"
-							class="pill inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-1 text-xs {autoStart
-								? 'pill-on'
-								: 'text-gray-600 dark:text-gray-300'}"
-							aria-pressed={autoStart}
-							on:click={toggleAutoStart}
-							title="打开后，负责人做好计划就直接开始，不用你批准（有成员没有可用的执行来源时仍会等你）。计划照样能在工作台里看，运行中也能对负责人说要改什么。"
-							data-auto-start
-						>
-							<svg class="size-3.5 shrink-0" viewBox="0 0 16 16" fill="none" aria-hidden="true"
-								><path
-									d="M9 1.75 3.75 9h3.5L6.5 14.25 12.25 6.75h-3.5L9 1.75Z"
-									stroke="currentColor"
-									stroke-width="1.3"
-									stroke-linejoin="round"
-									fill={autoStart ? 'currentColor' : 'none'}
-								/></svg
-							>
-							直接开始
-						</button>
 						<kbd
 							class="hidden rounded-md px-1.5 py-0.5 font-mono text-[11px] text-gray-400 sm:inline-block"
 							title="快捷键提交">{isMac ? '⌘' : 'Ctrl'} ↵</kbd
@@ -884,7 +892,7 @@
 			{/if}
 
 			<!-- the list -->
-			<section class="mt-10" aria-label="我的协作任务">
+			<section class="mt-8" aria-label="我的协作任务">
 				<div class="mb-3 flex flex-wrap items-center gap-x-3 gap-y-2">
 					<h3 class="tm-display text-base font-semibold text-gray-900 dark:text-gray-100">
 						我的协作
@@ -892,7 +900,7 @@
 					{#if counts.all}
 						<span class="tm-num text-xs text-gray-400">{counts.all}</span>
 					{/if}
-					<label class="search ml-auto flex min-w-0 items-center gap-1.5 rounded-xl px-2.5 py-1.5">
+					<label class="halo-wb-search ml-auto w-full sm:w-52">
 						<svg
 							class="size-3.5 shrink-0 text-gray-400"
 							viewBox="0 0 16 16"
@@ -910,7 +918,7 @@
 							type="search"
 							bind:value={query}
 							placeholder="搜索标题或目标"
-							class="w-36 min-w-0 bg-transparent text-xs outline-none placeholder:text-gray-400 sm:w-44"
+							class="w-full min-w-0 bg-transparent text-xs outline-none placeholder:text-gray-400"
 						/>
 					</label>
 				</div>
@@ -1284,13 +1292,6 @@
 		color: hsl(var(--tm-accent));
 		background: hsl(var(--tm-accent) / 0.09);
 		box-shadow: inset 0 0 0 1px hsl(var(--tm-accent) / 0.14);
-	}
-	.search {
-		border: 1px solid hsl(var(--tm-line));
-		background: hsl(var(--tm-surface) / 0.7);
-	}
-	.search:focus-within {
-		border-color: hsl(var(--tm-accent) / 0.45);
 	}
 	.stack {
 		border-radius: 9999px;

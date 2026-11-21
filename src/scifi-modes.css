@@ -140,13 +140,138 @@ html.halo-scifi .halo-mode-hero::after {
 	}
 }
 
+/* sticky top mode dock bar: translucent star-core glass so switching modes is always one tap */
+.halo-mode-nav {
+	position: sticky;
+	top: 0;
+	z-index: 20;
+	backdrop-filter: blur(14px) saturate(1.3);
+	-webkit-backdrop-filter: blur(14px) saturate(1.3);
+	background: linear-gradient(to bottom, hsl(var(--tm-page, 0 0% 100%) / 0.88), hsl(var(--tm-page, 0 0% 100%) / 0.65));
+}
+html.halo-scifi .halo-mode-nav {
+	background: linear-gradient(to bottom, rgb(248 250 254 / 0.86), rgb(248 250 254 / 0.56));
+	border-bottom: 1px solid rgb(8 145 178 / 0.08);
+}
+html.halo-scifi.dark .halo-mode-nav {
+	background: linear-gradient(to bottom, rgb(6 8 18 / 0.84), rgb(6 8 18 / 0.52));
+	border-bottom: 1px solid rgb(94 231 255 / 0.08);
+}
+
+/* unified workbench search pill */
+.halo-wb-search {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.4rem;
+	border-radius: 9999px;
+	border: 1px solid hsl(var(--tm-line, 228 22% 14% / 0.12));
+	background: hsl(var(--tm-surface, 0 0% 100%) / 0.72);
+	padding: 0.35rem 0.75rem;
+	transition:
+		border-color 0.2s ease,
+		box-shadow 0.2s ease,
+		background-color 0.2s ease;
+}
+.halo-wb-search:focus-within {
+	border-color: hsl(var(--tm-accent, 227 92% 57%) / 0.5);
+	box-shadow: 0 0 0 3px hsl(var(--tm-accent, 227 92% 57%) / 0.12);
+}
+html.halo-scifi.dark .halo-wb-search {
+	border-color: rgb(94 231 255 / 0.14);
+	background: rgb(9 13 28 / 0.68);
+}
+html.halo-scifi.dark .halo-wb-search:focus-within {
+	border-color: rgb(94 231 255 / 0.52);
+	box-shadow:
+		0 0 0 3px rgb(94 231 255 / 0.12),
+		0 0 20px -6px var(--scifi-glow);
+}
+
+/* quick-pick star-core option pills (Image Studio settings, Auto quick chips) */
+.halo-wb-opt {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 0.3rem;
+	border-radius: 0.65rem;
+	border: 1px solid rgb(15 23 42 / 0.1);
+	background: rgb(255 255 255 / 0.72);
+	padding: 0.32rem 0.62rem;
+	font-size: 0.75rem;
+	font-weight: 500;
+	line-height: 1.2;
+	color: rgb(71 85 105);
+	transition:
+		border-color 0.18s ease,
+		background-color 0.18s ease,
+		color 0.18s ease,
+		box-shadow 0.2s ease;
+}
+.halo-wb-opt:hover:not(:disabled) {
+	border-color: rgb(15 23 42 / 0.22);
+	color: rgb(15 23 42);
+}
+.halo-wb-opt[aria-pressed='true'],
+.halo-wb-opt[aria-checked='true'] {
+	border-color: rgb(15 23 42 / 0.85);
+	background: rgb(15 23 42);
+	color: #fff;
+}
+.dark .halo-wb-opt {
+	border-color: rgb(255 255 255 / 0.09);
+	background: rgb(255 255 255 / 0.035);
+	color: rgb(148 163 184);
+}
+.dark .halo-wb-opt:hover:not(:disabled) {
+	border-color: rgb(255 255 255 / 0.2);
+	color: #fff;
+}
+.dark .halo-wb-opt[aria-pressed='true'],
+.dark .halo-wb-opt[aria-checked='true'] {
+	border-color: rgb(255 255 255 / 0.85);
+	background: #fff;
+	color: rgb(15 23 42);
+}
+html.halo-scifi .halo-wb-opt {
+	border-color: rgb(8 145 178 / 0.16);
+}
+html.halo-scifi .halo-wb-opt:hover:not(:disabled) {
+	border-color: rgb(8 145 178 / 0.42);
+}
+html.halo-scifi .halo-wb-opt[aria-pressed='true'],
+html.halo-scifi .halo-wb-opt[aria-checked='true'] {
+	border-color: var(--scifi-cyan);
+	background: linear-gradient(to top, rgb(8 145 178 / 0.14), rgb(255 255 255 / 0.92));
+	color: var(--scifi-cyan);
+	box-shadow:
+		inset 0 -1.5px 0 var(--scifi-cyan),
+		0 0 14px -4px var(--scifi-glow);
+}
+html.halo-scifi.dark .halo-wb-opt {
+	border-color: rgb(94 231 255 / 0.13);
+	background: rgb(9 13 28 / 0.62);
+}
+html.halo-scifi.dark .halo-wb-opt:hover:not(:disabled) {
+	border-color: rgb(94 231 255 / 0.36);
+	color: #e0fbff;
+}
+html.halo-scifi.dark .halo-wb-opt[aria-pressed='true'],
+html.halo-scifi.dark .halo-wb-opt[aria-checked='true'] {
+	border-color: rgb(94 231 255 / 0.55);
+	background: linear-gradient(to top, rgb(94 231 255 / 0.2), rgb(94 231 255 / 0.04));
+	color: #e0fbff;
+	box-shadow:
+		inset 0 -1.5px 0 var(--scifi-cyan),
+		0 0 18px -4px rgb(94 231 255 / 0.55);
+}
+
 /* the emblem: the reactor's outer halo with the mode drawn inside */
 .halo-emblem {
 	position: absolute;
-	top: -2.25rem;
-	right: -2.5rem;
+	top: -1.6rem;
+	right: -2.25rem;
 	z-index: -1;
-	width: 176px;
+	width: 164px;
 	pointer-events: none;
 	animation: sf-emblem-in 1.1s 0.1s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
@@ -393,6 +518,7 @@ html.halo-scifi .halo-mode-hero::after {
 
 html.halo-scifi
 	:is(
+		[data-auto-row],
 		[data-discuss-row],
 		[data-answer-row],
 		[data-team-row],
@@ -444,6 +570,7 @@ html.halo-scifi :is(.dc-turn, #team-inspector, [data-halo-mode] .glass-item:not(
 /* … list rows and quick starts lock on when the pointer reaches them */
 html.halo-scifi
 	:is(
+		[data-auto-row],
 		[data-discuss-row],
 		[data-answer-row],
 		[data-team-row],
@@ -455,7 +582,7 @@ html.halo-scifi
 	--sf-k: 12px;
 	--sf-spot: var(--sf-spot-on);
 }
-html.halo-scifi :is([data-discuss-row], [data-answer-row], [data-team-row], [data-teams-ui] .tm-card-quiet.tm-hover):hover {
+html.halo-scifi :is([data-auto-row], [data-discuss-row], [data-answer-row], [data-team-row], [data-teams-ui] .tm-card-quiet.tm-hover):hover {
 	border-color: hsl(var(--tm-accent) / 0.35);
 	box-shadow:
 		0 0 0 1px hsl(var(--tm-accent) / 0.12),
@@ -491,8 +618,22 @@ html.halo-scifi:not(.dark)
 	) {
 	background: linear-gradient(to top, rgb(8 145 178 / 0.1), rgb(255 255 255 / 0.9) 70%);
 }
-html.halo-scifi [data-discuss-ui] .dc-chip:is([aria-pressed='true'], [data-on='true']) {
-	box-shadow: 0 0 14px -4px hsl(var(--tm-accent) / 0.6);
+html.halo-scifi [data-discuss-ui] .dc-chip:is([aria-pressed='true'], [data-on='true']),
+html.halo-scifi [data-answer-ui] .ad-lib-chip[aria-pressed='true'],
+html.halo-scifi [data-teams-ui] .pill-on {
+	border-color: hsl(var(--tm-accent) / 0.55);
+	box-shadow: 0 0 16px -4px hsl(var(--tm-accent) / 0.6);
+}
+html.halo-scifi.dark [data-answer-ui] .ad-lib-chip {
+	background: rgb(9 13 28 / 0.65);
+	border-color: rgb(94 231 255 / 0.12);
+}
+html.halo-scifi.dark [data-answer-ui] .ad-lib-chip:hover {
+	border-color: rgb(94 231 255 / 0.36);
+}
+html.halo-scifi.dark [data-answer-ui] .ad-lib-chip[aria-pressed='true'] {
+	background: linear-gradient(to top, rgb(94 231 255 / 0.18), rgb(94 231 255 / 0.04));
+	border-color: rgb(94 231 255 / 0.6);
 }
 
 /* ------------------------------------------------------------------ the energy button */

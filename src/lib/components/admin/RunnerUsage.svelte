@@ -59,13 +59,38 @@
 	const runTime = (ts: number) => shortTime(new Date(ts * 1000));
 	const resetTime = (value: string | null) => (value ? shortTime(new Date(value)) : '时间未知');
 	const quotaTitle = (q: RunnerQuota) =>
-		q.runner === 'offiagy' ? 'offiagy（AGY · Google 账号）额度' : '官方 Claude 订阅额度';
+		q.runner === 'offiagy' ? 'offiagy（AGY · Google 账号）Gemini 额度' : '官方 Claude 订阅额度';
+	const quotaWindows = (q: RunnerQuota) => {
+		if (q.runner !== 'offiagy') return q.windows;
+		// offiagy only tracks Gemini windows (Weekly Limit Remaining first); never show Claude/GPT.
+		const filtered = q.windows.filter(
+			(w) =>
+				!/claude|gpt/i.test(`${w.key} ${w.label}`) &&
+				w.key !== 'five_hour' &&
+				w.key !== 'seven_day'
+		);
+		const rank = (w: RunnerQuota['windows'][number]) =>
+			w.key === 'gemini_weekly'
+				? 0
+				: w.key === 'gemini_five_hour' || w.key === 'gemini'
+					? 1
+					: /weekly|每周/i.test(`${w.key} ${w.label}`)
+						? 2
+						: 3;
+		return [...filtered].sort((a, b) => rank(a) - rank(b));
+	};
 	const quotaTone = (pct: number) =>
 		pct >= 100
 			? 'bg-red-500 dark:bg-red-400'
 			: pct >= 90
 				? 'bg-amber-400 dark:bg-amber-500'
 				: 'bg-gray-800 dark:bg-gray-200';
+	const remainingTone = (rem: number) =>
+		rem <= 0
+			? 'bg-red-500 dark:bg-red-400'
+			: rem <= 10
+				? 'bg-amber-400 dark:bg-amber-500'
+				: 'bg-cyan-500 dark:bg-cyan-400';
 
 	const load = async (windowDays = days) => {
 		const id = ++requestId;
@@ -158,7 +183,9 @@
 		</button>
 	</div>
 
-	{#each quotas.filter((q) => q.available) as quota (quota.runner ?? 'officlaude')}
+	{#each quotas.filter((q) => q.available && quotaWindows(q).length > 0) as quota (quota.runner ?? 'officlaude')}
+		{@const windows = quotaWindows(quota)}
+		{@const isOffiagy = quota.runner === 'offiagy'}
 		<section class="{card} p-4" data-halo-runner-quota={quota.runner ?? 'officlaude'}>
 			<div class="flex items-baseline justify-between gap-3">
 				<h3 class="text-[13px] font-medium text-gray-500 dark:text-gray-400">
@@ -168,26 +195,57 @@
 					>查询于 {runTime(quota.checked_at)}</span
 				>
 			</div>
-			<div class="mt-3 grid gap-4 {quota.windows.length > 2 ? 'sm:grid-cols-3' : 'sm:grid-cols-2'}">
-				{#each quota.windows as window}
+			<div class="mt-3 grid gap-4 {windows.length > 2 ? 'sm:grid-cols-3' : windows.length === 1 ? 'sm:grid-cols-1' : 'sm:grid-cols-2'}">
+				{#each windows as window}
 					{@const pct = Math.round(window.utilization)}
-					<div role={pct >= 90 ? 'alert' : undefined}>
-						<div class="flex items-baseline justify-between text-sm">
-							<span class="text-gray-700 dark:text-gray-200">{window.label}</span>
-							<span
-								class="font-display font-semibold tabular-nums {pct >= 100
-									? 'text-red-600 dark:text-red-400'
-									: 'text-gray-900 dark:text-gray-100'}">{pct}%</span
-							>
+					{@const rem = Math.max(0, Math.min(100, 100 - pct))}
+					{@const isPrimary = isOffiagy && window.key === 'gemini_weekly'}
+					<div
+						role={pct >= 90 ? 'alert' : undefined}
+						class={isPrimary
+							? 'rounded-xl border border-cyan-500/25 bg-cyan-500/[0.04] p-3 dark:border-cyan-400/25 dark:bg-cyan-400/[0.06]'
+							: isOffiagy
+								? 'rounded-xl border border-gray-100/80 bg-gray-50/40 p-3 dark:border-white/[0.06] dark:bg-white/[0.02]'
+								: ''}
+						data-halo-quota-window={window.key}
+					>
+						<div class="flex items-baseline justify-between gap-2 text-sm">
+							<span class="flex min-w-0 items-center gap-1.5 text-gray-700 dark:text-gray-200">
+								<span class="truncate font-medium">{window.label}</span>
+								{#if isPrimary}
+									<span class="shrink-0 rounded-full bg-cyan-500/15 px-1.5 py-0.5 text-[10px] font-medium text-cyan-700 dark:bg-cyan-400/15 dark:text-cyan-300"
+										>主要</span
+									>
+								{/if}
+							</span>
+							{#if isOffiagy}
+								<span
+									class="shrink-0 font-display font-semibold tabular-nums {rem <= 0
+										? 'text-red-600 dark:text-red-400'
+										: rem <= 10
+											? 'text-amber-600 dark:text-amber-400'
+											: isPrimary
+												? 'text-cyan-700 dark:text-cyan-300'
+												: 'text-gray-900 dark:text-gray-100'}">剩余 {rem}%</span
+								>
+							{:else}
+								<span
+									class="shrink-0 font-display font-semibold tabular-nums {pct >= 100
+										? 'text-red-600 dark:text-red-400'
+										: 'text-gray-900 dark:text-gray-100'}">{pct}%</span
+								>
+							{/if}
 						</div>
 						<div class="mt-1.5 h-1.5 overflow-hidden rounded-full bg-gray-100 dark:bg-zinc-800">
 							<div
-								class="h-full rounded-full transition-all duration-300 {quotaTone(pct)}"
-								style="width: {Math.min(pct, 100)}%"
+								class="h-full rounded-full transition-all duration-300 {isOffiagy
+									? remainingTone(rem)
+									: quotaTone(pct)}"
+								style="width: {isOffiagy ? rem : Math.min(pct, 100)}%"
 							></div>
 						</div>
 						<div class="mt-1 text-xs text-gray-400 dark:text-gray-500">
-							{resetTime(window.resets_at)} 重置{#if pct >= 100}<span
+							{resetTime(window.resets_at)} 重置{#if isOffiagy} · 已用 {pct}%{/if}{#if pct >= 100}<span
 									class="text-red-600 dark:text-red-400"
 								>
 									· 额度已用完</span

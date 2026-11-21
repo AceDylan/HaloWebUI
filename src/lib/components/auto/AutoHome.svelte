@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { afterUpdate, onDestroy, onMount } from 'svelte';
+	import { afterUpdate, onDestroy, onMount, tick } from 'svelte';
 	import { goto, replaceState } from '$app/navigation';
 	import { v4 as uuidv4 } from 'uuid';
 	import { config, mobile, showSidebar } from '$lib/stores';
@@ -18,6 +18,7 @@
 	import { uploadFileReliably, uploadErrorText } from '$lib/utils/reliable-upload';
 	import { takeHandoff, type HandoffOrigin } from '$lib/utils/handoff';
 	import { setModeDraft, clearModeDraft } from '$lib/components/scifi/mode-relay';
+	import { warp } from '$lib/components/scifi/scifi';
 	import ModeEmblem from '$lib/components/scifi/ModeEmblem.svelte';
 	import ModeFlow from '$lib/components/scifi/ModeFlow.svelte';
 	import ModeDock from '$lib/components/scifi/ModeDock.svelte';
@@ -44,6 +45,8 @@
 	let autoStart = false;
 	let attachments: Attachment[] = [];
 	let fileInput: HTMLInputElement;
+	let composer: HTMLTextAreaElement;
+	let isMac = false;
 	let active: AutoRoute | null = null;
 	let items: AutoRoute[] = [];
 	let more = false;
@@ -67,6 +70,56 @@
 	$: teamsEnabled = !!$config?.features?.enable_agent_teams;
 	$: webEnabled = $config?.features?.enable_web_search !== false;
 	$: failedUpload = attachments.some((f) => f.error);
+
+	const QUICK = [
+		{
+			badge: '精答型',
+			title: '精准拆解复杂问题',
+			hint: '挑最合适专家直接答透',
+			text: '帮我逐条审查这份 SaaS 采购合同里的隐藏风险、自动续费陷阱和违约责任条款，并给出可谈判的修改建议。'
+		},
+		{
+			badge: '讨论型',
+			title: '多方权衡技术选型',
+			hint: '多模型交锋并汇总共识',
+			text: '我们是一个 6 人全栈团队，准备做一套内部知识库与自动化工作流平台，从长期维护成本、扩展性和 AI 集成角度权衡自建还是基于开源方案二开。'
+		},
+		{
+			badge: '协作型',
+			title: '调研并交付完整成果',
+			hint: '拆计划、并行执行与验收',
+			text: '调研当前主流的三款开源向量数据库（Qdrant、Milvus、pgvector），从部署资源占用、召回精度和运维复杂度整理一份结构化对比报告。'
+		}
+	];
+
+	const HISTORY_MODES = [
+		{ value: '', label: '全部' },
+		{ value: 'answer', label: '精答' },
+		{ value: 'discuss', label: '讨论' },
+		{ value: 'team', label: '协作' }
+	] as const;
+
+	const modeTone = (m: string | null | undefined) =>
+		m === 'answer'
+			? 'bg-cyan-500/12 text-cyan-700 dark:bg-cyan-400/15 dark:text-cyan-300'
+			: m === 'discuss'
+				? 'bg-violet-500/12 text-violet-700 dark:bg-violet-400/15 dark:text-violet-300'
+				: m === 'team'
+					? 'bg-emerald-500/12 text-emerald-700 dark:bg-emerald-400/15 dark:text-emerald-300'
+					: 'bg-gray-500/10 text-gray-600 dark:text-gray-300';
+
+	const resize = () => {
+		if (!composer) return;
+		composer.style.height = 'auto';
+		composer.style.height = `${Math.min(composer.scrollHeight, 320)}px`;
+	};
+
+	const useQuick = async (text: string) => {
+		question = text;
+		await tick();
+		resize();
+		composer?.focus();
+	};
 
 	function draft() {
 		return {
@@ -253,7 +306,10 @@
 			attachments = incoming.files.map((f) => ({ ...f, key: uuidv4(), progress: 100 }));
 		}
 		ready = true;
+		isMac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent || '');
+		warp(520);
 		loadHistory();
+		tick().then(resize);
 		const id = new URLSearchParams(window.location.search).get('request');
 		if (id) {
 			getAutoRoute(localStorage.token, id)
@@ -279,7 +335,7 @@
 	data-discuss-ui
 	data-auto-home
 >
-	<nav class="flex flex-wrap items-center gap-2 px-3 pt-2 pb-1">
+	<nav class="halo-mode-nav flex flex-wrap items-center gap-2 px-3 py-2">
 		{#if $mobile}<button
 				class="rounded-xl p-1.5 hover:bg-gray-100 dark:hover:bg-gray-850"
 				aria-label="打开侧栏"
@@ -290,17 +346,17 @@
 		{#if origin}<HandoffBack {origin} />{/if}
 	</nav>
 	<div class="tm-scroll flex-1 overflow-y-auto px-4 pb-16">
-		<div class="mx-auto flex max-w-3xl flex-col pt-6 sm:pt-14">
-			<header class="halo-mode-hero tm-rise relative mb-6 flex flex-col gap-3">
+		<div class="mx-auto flex max-w-3xl flex-col pt-3 sm:pt-7">
+			<header class="halo-mode-hero tm-rise relative mb-4 flex flex-col gap-2.5">
 				<ModeEmblem mode="auto" stats={[{ k: 'ROUTES', v: teamsEnabled ? 3 : 2 }]} />
 				<div class="flex items-center gap-2">
 					<span class="tm-eyebrow halo-mode-eyebrow">Halo Auto</span><span
 						class="h-3 w-px bg-gray-300 dark:bg-gray-700"
 						aria-hidden="true"
-					/><span class="text-xs text-gray-500">按目标选择处理方式</span>
+					/><span class="text-xs text-gray-500 dark:text-gray-400">按目标智能分流</span>
 				</div>
 				<h2
-					class="halo-mode-title tm-display text-[28px] font-semibold leading-[1.15] text-gray-950 sm:text-[36px] dark:text-white"
+					class="halo-mode-title tm-display text-[26px] font-semibold leading-[1.15] text-gray-950 sm:text-[32px] dark:text-white"
 				>
 					一个入口，找到合适的解法
 				</h2>
@@ -308,24 +364,27 @@
 					label="自动分流怎么处理"
 					steps={['理解目标与约束', '精答 · 讨论 · 协作', '查看结果，接着追问']}
 				/>
-				<p class="max-w-xl text-sm leading-relaxed text-gray-500 dark:text-gray-400">
-					直接提问交给精答；需要多方权衡就展开讨论；需要动手完成任务则交给协作台。选择依据和处理进度都能查看。
+				<p class="hidden max-w-xl text-xs leading-relaxed text-gray-500 sm:block dark:text-gray-400">
+					直接提问交给精答；多方权衡展开讨论；动手交付交给协作台，依据与进度全程可查。
 				</p>
 			</header>
 			<form
-				class="tm-rise tm-card relative flex flex-col"
+				class="tm-rise composer tm-card relative flex flex-col"
+				style="--i:1"
 				data-scifi-conduit
 				on:submit|preventDefault={start}
 				on:dragover|preventDefault
 				on:drop|preventDefault={(e) => attach(e.dataTransfer?.files ?? null)}
 			>
 				<textarea
+					bind:this={composer}
 					aria-label="问题或任务"
 					maxlength="8000"
-					rows="5"
+					rows="3"
 					bind:value={question}
 					disabled={busy}
-					class="w-full resize-none rounded-t-2xl bg-transparent px-5 pt-5 pb-3 text-base leading-relaxed outline-none"
+					on:input={resize}
+					class="tm-scroll w-full resize-none rounded-t-2xl bg-transparent px-5 pt-4 pb-2 text-[15px] leading-relaxed text-gray-900 outline-none placeholder:text-gray-400 dark:text-gray-100 dark:placeholder:text-gray-500"
 					placeholder="你想了解什么，或希望完成什么？附件可以粘贴或拖进来"
 					on:paste={(e) => {
 						if (e.clipboardData?.files.length) {
@@ -385,9 +444,20 @@
 						title="附带文件或图片，也可以粘贴或拖进来（最多 4 个）"
 						disabled={busy || uploading || attachments.length >= 4}
 						on:click={() => fileInput.click()}
+						><svg class="size-3.5" viewBox="0 0 16 16" fill="none" aria-hidden="true"
+							><path
+								d="M10.5 4.5 5.4 9.6a1.6 1.6 0 0 0 2.3 2.3l5.2-5.2a3 3 0 0 0-4.3-4.3L3.4 7.6a4.4 4.4 0 0 0 6.2 6.2l4-4"
+								stroke="currentColor"
+								stroke-width="1.3"
+								stroke-linecap="round"
+								stroke-linejoin="round"
+							/></svg
 						>附件{attachments.length ? ` ${attachments.length}/4` : ''}</button
 					>
-					<label class="dc-chip !py-1 !pr-1.5" title="自动选择，或直接指定交给谁"
+					<label
+						class="dc-chip !py-1 !pr-1.5"
+						data-on={mode !== 'auto'}
+						title="自动选择，或直接指定交给谁"
 						><span>交给</span><select
 							aria-label="处理方式"
 							bind:value={mode}
@@ -405,23 +475,58 @@
 							aria-pressed={research}
 							title="需要最新信息时先查资料；关掉则只凭模型自己的知识，协作任务也会带上不联网的要求"
 							disabled={busy}
-							on:click={() => (research = !research)}>按需联网</button
+							on:click={() => (research = !research)}
+							><svg class="size-3.5" viewBox="0 0 16 16" fill="none" aria-hidden="true"
+								><circle cx="8" cy="8" r="6.2" stroke="currentColor" stroke-width="1.3" /><path
+									d="M1.8 8h12.4M8 1.8c1.8 2 1.8 10.4 0 12.4M8 1.8c-1.8 2-1.8 10.4 0 12.4"
+									stroke="currentColor"
+									stroke-width="1.1"
+								/></svg
+							>按需联网</button
 						>{/if}
+					{#if question.trim() && !busy}
+						<button
+							type="button"
+							class="dc-chip"
+							on:click={() => {
+								question = '';
+								tick().then(() => {
+									resize();
+									composer?.focus();
+								});
+							}}>清空</button
+						>
+					{/if}
 					<div class="ml-auto flex items-center gap-2">
 						<kbd
 							class="hidden rounded-md px-1.5 py-0.5 font-mono text-[11px] text-gray-400 sm:inline-block"
-							>Ctrl ↵</kbd
+							>{isMac ? '⌘' : 'Ctrl'} ↵</kbd
 						>
 						<button
 							type="submit"
 							class="tm-btn-primary"
 							disabled={busy || uploading || failedUpload || !question.trim()}
-							>{busy ? '正在处理…' : '开始处理'}</button
+							>{#if busy}<span
+									class="size-3.5 animate-spin rounded-full border-2 border-current border-r-transparent"
+									aria-hidden="true"
+								/>正在处理…{:else}开始处理<svg
+									class="size-3.5"
+									viewBox="0 0 16 16"
+									fill="none"
+									aria-hidden="true"
+									><path
+										d="M3 8h9.5M8.5 4l4 4-4 4"
+										stroke="currentColor"
+										stroke-width="1.7"
+										stroke-linecap="round"
+										stroke-linejoin="round"
+									/></svg
+								>{/if}</button
 						>
 					</div>
 				</div>
 			</form>
-			<details class="auto-more group mt-3 text-sm text-gray-600 dark:text-gray-400" data-auto-more>
+			<details class="auto-more group mt-2.5 text-sm text-gray-600 dark:text-gray-400" data-auto-more>
 				<summary
 					class="inline-flex cursor-pointer select-none items-center gap-1.5 rounded-lg px-1 py-1 text-xs font-medium text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200"
 				>
@@ -438,7 +543,9 @@
 							stroke-linejoin="round"
 						/></svg
 					>
-					更多设置：讨论席位、协作启动、补充背景{context ? ' · 已带入背景' : ''}
+					更多设置：讨论席位、协作启动、补充背景{preference === 'economy'
+						? ' · 精简 2 席'
+						: ''}{autoStart ? ' · 直接开始' : ''}{context ? ' · 已带入背景' : ''}
 				</summary>
 				<div class="tm-card-quiet mt-2 flex flex-col gap-3 p-4">
 					<div class="flex flex-wrap items-center gap-2">
@@ -478,7 +585,7 @@
 			</details>
 			{#if error}<p role="alert" class="mt-4 text-sm text-red-500">{error}</p>{/if}
 			{#if active}<section
-					class="tm-card mt-6 p-5 {routePending(active) ? 'tm-live' : ''}"
+					class="tm-card mt-5 p-5 {routePending(active) ? 'tm-live' : ''}"
 					aria-live="polite"
 					data-auto-active
 				>
@@ -494,7 +601,7 @@
 									? 'bg-amber-500/10 text-amber-700 dark:text-amber-400'
 									: active.status === 'error' || active.status === 'interrupted'
 										? 'bg-red-500/10 text-red-600 dark:text-red-400'
-										: 'bg-gray-500/10 text-gray-600 dark:text-gray-300'}"
+										: 'bg-cyan-500/10 text-cyan-700 dark:text-cyan-300'}"
 								>{routeStatus(active)}</span
 							></span
 						>
@@ -523,83 +630,131 @@
 							>{/if}
 					</div>
 				</section>{/if}
-			<section class="mt-10 pb-8">
-				<div class="flex items-center justify-between">
-					<h2 class="text-base font-semibold">最近处理</h2>
-					<button
-						class="rounded-lg px-2 py-1 text-xs text-gray-500 hover:bg-gray-500/10 hover:text-gray-800 disabled:opacity-50 dark:hover:text-gray-200"
-						disabled={loading}
-						on:click={() => loadHistory(0, true)}>刷新</button
+			{#if !active}
+				<section class="tm-rise mt-5" style="--i:2" aria-label="试一试" data-auto-quick>
+					<div class="mb-2"><span class="tm-eyebrow">典型场景</span></div>
+					<ul class="grid grid-cols-1 gap-2 sm:grid-cols-3">
+						{#each QUICK as q}
+							<li>
+								<button
+									type="button"
+									class="tm-card-quiet tm-hover flex h-full w-full flex-col items-start gap-1 px-3.5 py-2.5 text-left"
+									disabled={busy}
+									on:click={() => useQuick(q.text)}
+									title={q.text}
+								>
+									<span class="flex w-full items-center justify-between gap-2">
+										<span class="text-[13px] font-medium text-gray-900 dark:text-gray-100">{q.title}</span>
+										<span class="shrink-0 rounded-full bg-cyan-500/10 px-1.5 py-0.5 text-[10px] font-medium text-cyan-700 dark:text-cyan-300">{q.badge}</span>
+									</span>
+									<span class="text-[11.5px] text-gray-500 dark:text-gray-400">{q.hint}</span>
+								</button>
+							</li>
+						{/each}
+					</ul>
+				</section>
+			{/if}
+			<section class="tm-rise mt-8 pb-8" style="--i:3">
+				<div class="mb-3 flex flex-wrap items-center gap-x-3 gap-y-2">
+					<h2 class="tm-display text-base font-semibold text-gray-900 dark:text-gray-50">最近处理</h2>
+					<div class="tm-segment" role="tablist" aria-label="按处理方式筛选">
+						{#each HISTORY_MODES as hm}
+							<button
+								type="button"
+								role="tab"
+								aria-selected={historyMode === hm.value}
+								disabled={loading}
+								on:click={() => {
+									historyMode = hm.value;
+									loadHistory(0, true);
+								}}>{hm.label}</button
+							>
+						{/each}
+					</div>
+					<form
+						class="ml-auto flex min-w-0 flex-1 items-center justify-end gap-2 sm:flex-initial"
+						on:submit|preventDefault={() => loadHistory(0, true)}
 					>
+						<label class="halo-wb-search min-w-0 flex-1 sm:w-52 sm:flex-initial">
+							<svg class="size-3.5 shrink-0 text-gray-400" viewBox="0 0 16 16" fill="none" aria-hidden="true"
+								><circle cx="7" cy="7" r="4.5" stroke="currentColor" stroke-width="1.5" /><path
+									d="m10.5 10.5 3 3"
+									stroke="currentColor"
+									stroke-width="1.5"
+									stroke-linecap="round"
+								/></svg
+							>
+							<input
+								aria-label="搜索处理记录"
+								bind:value={search}
+								maxlength="200"
+								placeholder="搜索问题或任务"
+								class="w-full min-w-0 bg-transparent text-xs outline-none placeholder:text-gray-400"
+								disabled={loading}
+							/>
+						</label>
+						<button type="submit" class="tm-btn-ghost shrink-0" disabled={loading}>搜索</button>
+						<button
+							type="button"
+							class="tm-btn-ghost shrink-0"
+							disabled={loading}
+							on:click={() => loadHistory(0, true)}>刷新</button
+						>
+					</form>
 				</div>
-				<form
-					class="mt-4 flex flex-wrap gap-2"
-					on:submit|preventDefault={() => loadHistory(0, true)}
-				>
-					<input
-						aria-label="搜索处理记录"
-						bind:value={search}
-						maxlength="200"
-						placeholder="搜索问题或任务"
-						class="tm-card min-w-0 flex-1 px-3 py-2 text-sm"
-						disabled={loading}
-					/>
-					<select
-						aria-label="筛选处理方式"
-						bind:value={historyMode}
-						class="tm-card px-3 py-2 text-sm"
-						disabled={loading}
-					>
-						<option value="">全部方式</option><option value="answer">精答</option><option
-							value="discuss">讨论</option
-						><option value="team">协作</option>
-					</select>
-					<button class="tm-btn-ghost" disabled={loading}>搜索</button>
-				</form>
 				{#if historyError}<p role="alert" class="mt-3 text-sm text-red-500">{historyError}</p>{/if}
-				{#if !items.length && !loading}<p class="mt-5 text-sm text-gray-400">
+				{#if !items.length && !loading}<p class="mt-6 text-center text-sm text-gray-400">
 						{historyQuery.q || historyQuery.mode
 							? '没有匹配的处理记录。'
 							: '提交第一个问题，处理记录会保存在这里。'}
 					</p>{/if}
-				<div class="mt-4 divide-y divide-gray-100 dark:divide-gray-800">
-					{#each items as row (row.id)}<a
-							href={row.target_status === 'deleted'
-								? `/auto?request=${row.id}`
-								: row.href || `/auto?request=${row.id}`}
-							class="flex flex-wrap items-center gap-3 rounded-xl px-3 py-4 hover:bg-gray-500/5"
-							on:click={(e) => {
-								if (!row.href || row.target_status === 'deleted') {
-									e.preventDefault();
-									active = row;
-									follow = false;
-									replaceState(`/auto?request=${row.id}`, {});
-									poll();
-								}
-							}}
+				<ul class="mt-3 flex flex-col gap-2">
+					{#each items as row (row.id)}
+						{@const live = routePending(row)}
+						{@const isErr = ['error', 'interrupted', 'failed', 'plan_failed'].includes(
+							row.status === 'dispatched' ? (row.target_status ?? '') : row.status
+						)}
+						<li
+							class="tm-card tm-hover relative {live ? 'tm-live' : ''}"
+							data-auto-row={row.id}
 						>
-							<span class="min-w-0 flex-1"
-								><span class="block truncate text-sm font-medium">{row.title || row.question}</span
-								><span class="mt-1 block truncate text-xs text-gray-500"
-									>{row.reason || row.question}</span
-								></span
+							<a
+								href={row.target_status === 'deleted'
+									? `/auto?request=${row.id}`
+									: row.href || `/auto?request=${row.id}`}
+								class="flex flex-wrap items-center gap-3 px-4 py-3"
+								on:click={(e) => {
+									if (!row.href || row.target_status === 'deleted') {
+										e.preventDefault();
+										active = row;
+										follow = false;
+										replaceState(`/auto?request=${row.id}`, {});
+										poll();
+									}
+								}}
 							>
-							<span
-								class="shrink-0 rounded-full bg-cyan-500/10 px-2 py-0.5 text-[11px] font-medium text-cyan-700 dark:text-cyan-300"
-								>{row.mode ? MODE_LABEL[row.mode] : '分流中'}</span
-							>
-							<span
-								class="min-w-[4rem] shrink-0 text-right text-xs {[
-									'error',
-									'interrupted',
-									'failed',
-									'plan_failed'
-								].includes(row.status === 'dispatched' ? (row.target_status ?? '') : row.status)
-									? 'text-red-500'
-									: 'text-gray-400'}">{routeStatus(row)}</span
-							>
-						</a>{/each}
-				</div>
+								<span class="min-w-0 flex-1"
+									><span class="block truncate text-[14px] font-medium text-gray-900 dark:text-gray-100"
+										>{row.title || row.question}</span
+									><span class="mt-0.5 block truncate text-xs text-gray-500 dark:text-gray-400"
+										>{row.reason || row.question}</span
+									></span
+								>
+								<span
+									class="shrink-0 rounded-full px-2.5 py-0.5 text-[11px] font-medium {modeTone(row.mode)}"
+									>{row.mode ? MODE_LABEL[row.mode] : '分流中'}</span
+								>
+								<span
+									class="min-w-[3.75rem] shrink-0 text-right text-xs {isErr
+										? 'text-red-500'
+										: live
+											? 'text-cyan-600 dark:text-cyan-300'
+											: 'text-gray-400'}">{routeStatus(row)}</span
+								>
+							</a>
+						</li>
+					{/each}
+				</ul>
 				{#if pageIndex > 0 || more}
 					<div class="mt-4 flex items-center justify-between gap-3" aria-label="历史分页">
 						<button
@@ -619,6 +774,18 @@
 </div>
 
 <style>
+	.composer {
+		border-radius: 1.4rem;
+		transition:
+			box-shadow 0.3s var(--tm-ease),
+			border-color 0.3s ease;
+	}
+	.composer:focus-within {
+		border-color: hsl(var(--tm-accent) / 0.45);
+		box-shadow:
+			0 0 0 4px hsl(var(--tm-accent) / 0.1),
+			var(--tm-shadow-lift);
+	}
 	/* the disclosure draws its own chevron */
 	.auto-more > summary {
 		list-style: none;

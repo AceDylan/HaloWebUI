@@ -363,7 +363,7 @@
 </script>
 
 <div class="tm-ambient relative flex h-screen max-h-[100dvh] w-full flex-col" data-teams-ui data-discuss-ui data-answer-ui data-answer-home>
-	<nav class="flex flex-wrap items-center gap-2 px-3 pt-2 pb-1">
+	<nav class="halo-mode-nav flex flex-wrap items-center gap-2 px-3 py-2">
 		<div class="{$mobile ? '' : 'hidden'} flex flex-none items-center">
 			<button class="rounded-xl p-1.5 hover:bg-gray-100 dark:hover:bg-gray-850" on:click={() => showSidebar.set(!$showSidebar)} aria-label="切换侧栏"
 				><MenuLines /></button
@@ -377,8 +377,8 @@
 	</nav>
 
 	<div class="tm-scroll flex-1 overflow-y-auto px-4 pb-16">
-		<div class="mx-auto flex max-w-3xl flex-col pt-6 sm:pt-14">
-			<header class="halo-mode-hero tm-rise relative mb-6 flex flex-col gap-3">
+		<div class="mx-auto flex max-w-3xl flex-col pt-3 sm:pt-7">
+			<header class="halo-mode-hero tm-rise relative mb-4 flex flex-col gap-2.5">
 				<ModeEmblem
 					mode="answer"
 					stats={[
@@ -391,12 +391,12 @@
 					<span class="h-3 w-px bg-gray-300 dark:bg-gray-700" aria-hidden="true" />
 					<span class="text-xs text-gray-500 dark:text-gray-400">按问题挑助手</span>
 				</div>
-				<h2 class="halo-mode-title tm-display text-[28px] font-semibold leading-[1.15] text-gray-950 sm:text-[36px] dark:text-white">
+				<h2 class="halo-mode-title tm-display text-[26px] font-semibold leading-[1.15] text-gray-950 sm:text-[32px] dark:text-white">
 					每个问题，交给最合适的助手
 				</h2>
 				<ModeFlow label="精答怎么答" steps={['读你的助手库', '选用 · 升级 · 新建', '按需联网查资料', '作答，成为一个对话']} />
-				<p class="hidden max-w-xl text-sm leading-relaxed text-gray-500 sm:block dark:text-gray-400">
-					先读一遍你的助手库：有合适的就直接用；领域对但缺本事的，就把它升级一下；都不合适，就按这类问题新建一位专家。需要最新信息时先联网查资料，再由选中的助手作答。答完它就是一个普通对话，自动起标题、归进合适的分组，可以接着追问。
+				<p class="hidden max-w-xl text-xs leading-relaxed text-gray-500 sm:block dark:text-gray-400">
+					优先复用或升级已有专家助手，缺位时自动新建；答完即沉淀为普通对话，支持持续追问。
 				</p>
 			</header>
 
@@ -511,7 +511,16 @@
 						disabled={creating || attachments.length >= MAX_FILES}
 						title="附带文件或图片，也可以粘贴或拖进来（最多 4 个）"
 						on:click={() => fileInput?.click()}
-						data-answer-attach>附件</button
+						data-answer-attach
+						><svg class="size-3.5" viewBox="0 0 16 16" fill="none" aria-hidden="true"
+							><path
+								d="M10.5 4.5 5.4 9.6a1.6 1.6 0 0 0 2.3 2.3l5.2-5.2a3 3 0 0 0-4.3-4.3L3.4 7.6a4.4 4.4 0 0 0 6.2 6.2l4-4"
+								stroke="currentColor"
+								stroke-width="1.3"
+								stroke-linecap="round"
+								stroke-linejoin="round"
+							/></svg
+						>附件{attachments.length ? ` ${attachments.length}/${MAX_FILES}` : ''}</button
 					>
 					<label class="dc-chip !py-1 !pr-1.5" title="由谁读助手库、挑选或编写助手" data-answer-planner>
 						<span>调度</span>
@@ -522,7 +531,7 @@
 						</select>
 					</label>
 					{#if chosen}
-						<span class="dc-chip !py-1 !pr-1" title="这位助手来回答；需要时调度会先给它升级" data-answer-chosen={chosen.ref}>
+						<span class="dc-chip !py-1 !pr-1" data-on="true" title="这位助手来回答；需要时调度会先给它升级" data-answer-chosen={chosen.ref}>
 							<span>指定助手</span>
 							<b class="max-w-[8rem] truncate font-medium text-gray-800 dark:text-gray-100">{chosen.name || '…'}</b>
 							<button
@@ -553,6 +562,19 @@
 							按需联网
 						</button>
 					{/if}
+					{#if question.trim() && !creating}
+						<button
+							type="button"
+							class="dc-chip"
+							on:click={() => {
+								question = '';
+								tick().then(() => {
+									resize();
+									composer?.focus();
+								});
+							}}>清空</button
+						>
+					{/if}
 					<div class="ml-auto flex items-center gap-2">
 						<kbd class="hidden rounded-md px-1.5 py-0.5 font-mono text-[11px] text-gray-400 sm:inline-block">{isMac ? '⌘' : 'Ctrl'} ↵</kbd>
 						<button
@@ -573,16 +595,24 @@
 					</div>
 				</div>
 			</form>
-			<p class="mt-2 px-1 text-[11px] leading-relaxed text-gray-400 dark:text-gray-500">
+			<p
+				class="mt-2 px-1 text-[11px] leading-relaxed text-gray-400 dark:text-gray-500"
+				title={mayCreate
+					? '新建和升级的助手会保存到侧栏「助手」里（标签「精答」）；新建的默认不出现在模型菜单，讨论台、协作台也能自动选到它。每次升级都留版本，可以撤销。'
+					: ''}
+			>
 				{mayCreate
-					? '新建和升级的助手会保存到侧栏「助手」里（标签「精答」）；新建的默认不出现在模型菜单，讨论台、协作台也能自动选到它。每次升级都留版本，可以撤销。点下面的助手可以指定由它回答。'
-					: '你没有新建助手的权限：没有合适的助手时，会临时按问题组一个助手回答，但不会保存。'}
+					? '新建/升级的助手会自动归档并保留版本（讨论台与协作台可复用）；点击下方助手可直接指定。'
+					: '你没有新建助手的权限：无合适助手时会临时组合专家作答（不保存）。'}
 			</p>
 
-			<section class="tm-rise mt-6" style="--i:2" aria-label="助手库" data-answer-library>
+			<section class="tm-rise mt-5" style="--i:2" aria-label="助手库" data-answer-library>
 				<div class="mb-2 flex items-center gap-2">
 					<span class="tm-eyebrow">助手库</span>
 					<span class="tm-num text-[11px] text-gray-400">{library.length}</span>
+					{#if library.length && !chosen}
+						<span class="hidden text-[11px] text-gray-400 sm:inline">· 点选可指定作答助手</span>
+					{/if}
 					<a href="/workspace/models" class="ml-auto text-[11px] text-gray-400 hover:text-gray-700 dark:hover:text-gray-200">管理助手 →</a>
 				</div>
 				{#if library.length}
@@ -633,17 +663,27 @@
 				</ul>
 			</section>
 
-			<section class="tm-rise mt-10" style="--i:4" aria-label="我的精答">
+			<section class="tm-rise mt-8" style="--i:4" aria-label="我的精答">
 				<div class="mb-3 flex flex-wrap items-center gap-3">
-					<h3 class="tm-display text-lg font-semibold text-gray-900 dark:text-gray-50">我的精答</h3>
-					<span class="tm-num text-sm text-gray-400">{total ?? items.length}</span>
-					{#if liveCount}<span class="rounded-full bg-blue-500/10 px-2 py-0.5 text-[11px] text-blue-600 dark:text-blue-300">{liveCount} 个进行中</span>{/if}
-					<input
-						type="search"
-						bind:value={query}
-						placeholder="搜索问题或助手"
-						class="ml-auto w-full rounded-full border border-gray-200/70 bg-transparent px-3.5 py-1.5 text-xs outline-none focus:border-blue-400/60 sm:w-56 dark:border-gray-800"
-					/>
+					<h3 class="tm-display text-base font-semibold text-gray-900 dark:text-gray-50">我的精答</h3>
+					<span class="tm-num text-xs text-gray-400">{total ?? items.length}</span>
+					{#if liveCount}<span class="rounded-full bg-cyan-500/12 px-2 py-0.5 text-[11px] font-medium text-cyan-700 dark:text-cyan-300">{liveCount} 个进行中</span>{/if}
+					<label class="halo-wb-search ml-auto w-full sm:w-56">
+						<svg class="size-3.5 shrink-0 text-gray-400" viewBox="0 0 16 16" fill="none" aria-hidden="true"
+							><circle cx="7" cy="7" r="4.5" stroke="currentColor" stroke-width="1.5" /><path
+								d="m10.5 10.5 3 3"
+								stroke="currentColor"
+								stroke-width="1.5"
+								stroke-linecap="round"
+							/></svg
+						>
+						<input
+							type="search"
+							bind:value={query}
+							placeholder="搜索问题或助手"
+							class="w-full min-w-0 bg-transparent text-xs outline-none placeholder:text-gray-400"
+						/>
+					</label>
 				</div>
 
 				{#if !loaded}
@@ -663,7 +703,7 @@
 						{#each shown as d (d.id)}
 							{@const live = isLive(d.status) || d.running}
 							{@const drawing = !live && d.status === 'done' && pictureState(d.picture, $now) === 'generating'}
-							<li class="group tm-card tm-hover relative flex items-center gap-3 px-4 py-3" data-answer-row={d.id}>
+							<li class="group tm-card tm-hover relative flex items-center gap-3 px-4 py-3 {live ? 'tm-live' : ''}" data-answer-row={d.id}>
 								<AssistantAvatar
 									id={d.assistant?.id ?? ''}
 									name={d.assistant?.name ?? '精答'}

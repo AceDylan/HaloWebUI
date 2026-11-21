@@ -490,7 +490,7 @@
 </script>
 
 <div class="tm-ambient relative flex h-screen max-h-[100dvh] w-full flex-col" data-teams-ui data-discuss-ui data-discuss-home>
-	<nav class="flex flex-wrap items-center gap-2 px-3 pt-2 pb-1">
+	<nav class="halo-mode-nav flex flex-wrap items-center gap-2 px-3 py-2">
 		<div class="{$mobile ? '' : 'hidden'} flex flex-none items-center">
 			<button
 				class="rounded-xl p-1.5 hover:bg-gray-100 dark:hover:bg-gray-850"
@@ -506,15 +506,15 @@
 	</nav>
 
 	<div class="tm-scroll flex-1 overflow-y-auto px-4 pb-16">
-		<div class="mx-auto flex max-w-3xl flex-col pt-6 sm:pt-14">
-			<header class="halo-mode-hero tm-rise relative mb-6 flex flex-col gap-3">
+		<div class="mx-auto flex max-w-3xl flex-col pt-3 sm:pt-7">
+			<header class="halo-mode-hero tm-rise relative mb-4 flex flex-col gap-2.5">
 				<ModeEmblem mode="discuss" stats={[{ k: 'SESSIONS', v: total ?? items.length }, { k: 'LIVE', v: liveCount }]} />
 				<div class="flex items-center gap-2">
 					<span class="tm-eyebrow halo-mode-eyebrow">Halo Roundtable</span>
 					<span class="h-3 w-px bg-gray-300 dark:bg-gray-700" aria-hidden="true" />
 					<span class="text-xs text-gray-500 dark:text-gray-400">多模型讨论</span>
 				</div>
-				<h2 class="halo-mode-title tm-display text-[28px] font-semibold leading-[1.15] text-gray-950 sm:text-[36px] dark:text-white">
+				<h2 class="halo-mode-title tm-display text-[26px] font-semibold leading-[1.15] text-gray-950 sm:text-[32px] dark:text-white">
 					让几个模型把问题讨论透
 				</h2>
 				<ModeFlow
@@ -523,8 +523,8 @@
 						? ['主持人读题', '安排方式、轮数与席位', '各自发言、互相交锋', '主持人给结论']
 						: ['选 2–5 个席位', '同一轮各自发言', '互相补充、交锋', '主持人给结论']}
 				/>
-				<p class="hidden max-w-xl text-sm leading-relaxed text-gray-500 sm:block dark:text-gray-400">
-					写下问题，主持人会先读题，像协作台的负责人一样安排：用圆桌、各自回答、辩论、评审还是头脑风暴，讨论几轮，请哪几个模型（2–5 位），各自担任什么角色、配什么助手。同一轮里大家同时发言，最后由主持人给出结论，并把共识和分歧分开列出来。也可以切到「自己安排」手动选。
+				<p class="hidden max-w-xl text-xs leading-relaxed text-gray-500 sm:block dark:text-gray-400">
+					主持人按题自动编排模式、轮数与席位，也可切到「自己安排」手动配席；结束后汇总共识与分歧。
 				</p>
 			</header>
 
@@ -631,23 +631,25 @@
 						{/if}
 					</div>
 					{#if !smart}
-					<div class="tm-scroll tm-fade-x -mx-1 flex items-center gap-1.5 overflow-x-auto px-1" role="radiogroup" aria-label="讨论方式">
-						{#each MODES as m}
-							<button
-								type="button"
-								class="dc-chip shrink-0"
-								role="radio"
-								aria-checked={mode === m.value}
-								data-on={mode === m.value}
-								title={m.hint}
-								on:click={() => setMode(m.value)}
-								data-discuss-mode={m.value}>{m.label}</button
-							>
-						{/each}
-						<span class="hidden shrink-0 pl-1 text-[11px] text-gray-400 sm:inline dark:text-gray-500">{spec.hint}</span>
-					</div>
+					<div class="flex flex-col gap-2.5 rounded-xl border border-gray-200/60 bg-gray-50/45 p-2.5 dark:border-white/[0.06] dark:bg-white/[0.02]">
+						<div class="tm-scroll tm-fade-x -mx-1 flex items-center gap-1.5 overflow-x-auto px-1" role="radiogroup" aria-label="讨论方式">
+							{#each MODES as m}
+								<button
+									type="button"
+									class="dc-chip shrink-0"
+									role="radio"
+									aria-checked={mode === m.value}
+									data-on={mode === m.value}
+									title={m.hint}
+									on:click={() => setMode(m.value)}
+									data-discuss-mode={m.value}>{m.label}</button
+								>
+							{/each}
+							<span class="hidden shrink-0 pl-1 text-[11px] text-gray-400 sm:inline dark:text-gray-500">{spec.hint}</span>
+						</div>
 
-					<SeatPicker bind:seats {choices} mode={spec} {autoMatch} {library} />
+						<SeatPicker bind:seats {choices} mode={spec} {autoMatch} {library} />
+					</div>
 					{/if}
 					<input bind:this={fileInput} type="file" multiple class="hidden" on:change={(e) => { attach(e.currentTarget.files); e.currentTarget.value = ''; }} data-discuss-file-input />
 
@@ -739,6 +741,19 @@
 								联网查资料
 							</button>
 						{/if}
+						{#if question.trim() && !creating}
+							<button
+								type="button"
+								class="dc-chip"
+								on:click={() => {
+									question = '';
+									tick().then(() => {
+										resize();
+										composer?.focus();
+									});
+								}}>清空</button
+							>
+						{/if}
 						<div class="ml-auto flex items-center gap-2">
 							<kbd class="hidden rounded-md px-1.5 py-0.5 font-mono text-[11px] text-gray-400 sm:inline-block">{isMac ? '⌘' : 'Ctrl'} ↵</kbd>
 							<button type="submit" class="tm-btn-primary" disabled={!canStart} data-discuss-start>
@@ -757,14 +772,13 @@
 			</form>
 			<p class="mt-2 px-1 text-[11px] leading-relaxed text-gray-400 dark:text-gray-500">
 				{#if smart}
-					主持人先安排一次、为席位配助手一次，之后每轮每位参与者调用一次模型，最后主持人再总结一次（席位与轮数由主持人按问题定：简单问题 2–3 位 1–2 轮，复杂问题最多 5 位 4 轮）。
+					主持人按问题复杂度动态定 2–5 席与轮数；结论完成后可一键「交给 Hermes」核查或执行。
 				{:else}
-					每轮每位参与者调用一次模型，最后主持人再调用一次（{seats.length} 位 × {rounds} 轮 + 1 = 约 {seats.length * rounds + 1} 次）。
+					预计调用 <span class="tm-num font-medium text-gray-500 dark:text-gray-400">{seats.length} 位 × {rounds} 轮 + 1 = {seats.length * rounds + 1} 次</span>；结论完成后可「交给 Hermes」执行。
 				{/if}
-				Hermes 不参加讨论——它是要跑工具的代理；讨论结束后可以把结论「交给 Hermes」去核查或执行。
 			</p>
 
-			<section class="tm-rise mt-6" style="--i:2" aria-label="快速开始">
+			<section class="tm-rise mt-5" style="--i:2" aria-label="快速开始">
 				<div class="mb-2"><span class="tm-eyebrow">快速开始</span></div>
 				<ul class="grid grid-cols-2 gap-2 sm:grid-cols-4">
 					{#each QUICK as q}
@@ -783,23 +797,33 @@
 				</ul>
 			</section>
 
-			<section class="tm-rise mt-10" style="--i:3" aria-label="我的讨论">
-				<div class="mb-3 flex flex-wrap items-center gap-3">
-					<h3 class="tm-display text-lg font-semibold text-gray-900 dark:text-gray-50">我的讨论</h3>
-					<span class="tm-num text-sm text-gray-400">{total ?? items.length}</span>
-					<input
-						type="search"
-						bind:value={query}
-						placeholder="搜索标题或问题"
-						class="ml-auto w-full rounded-full border border-gray-200/70 bg-transparent px-3.5 py-1.5 text-xs outline-none focus:border-blue-400/60 sm:w-56 dark:border-gray-800"
-					/>
-				</div>
-				<div class="tm-segment mb-3 w-fit" role="tablist">
-					{#each FILTERS as f}
-						<button type="button" role="tab" aria-selected={filter === f.value} on:click={() => (filter = f.value)}
-							>{f.label}{#if f.value === 'live' && liveCount}<span class="tm-num ml-1 opacity-60">{liveCount}</span>{/if}</button
+			<section class="tm-rise mt-8" style="--i:3" aria-label="我的讨论">
+				<div class="mb-3 flex flex-wrap items-center gap-x-3 gap-y-2">
+					<h3 class="tm-display text-base font-semibold text-gray-900 dark:text-gray-50">我的讨论</h3>
+					<span class="tm-num text-xs text-gray-400">{total ?? items.length}</span>
+					<div class="tm-segment w-fit" role="tablist">
+						{#each FILTERS as f}
+							<button type="button" role="tab" aria-selected={filter === f.value} on:click={() => (filter = f.value)}
+								>{f.label}{#if f.value === 'live' && liveCount}<span class="tm-num ml-1 opacity-60">{liveCount}</span>{/if}</button
+							>
+						{/each}
+					</div>
+					<label class="halo-wb-search ml-auto w-full sm:w-52">
+						<svg class="size-3.5 shrink-0 text-gray-400" viewBox="0 0 16 16" fill="none" aria-hidden="true"
+							><circle cx="7" cy="7" r="4.5" stroke="currentColor" stroke-width="1.5" /><path
+								d="m10.5 10.5 3 3"
+								stroke="currentColor"
+								stroke-width="1.5"
+								stroke-linecap="round"
+							/></svg
 						>
-					{/each}
+						<input
+							type="search"
+							bind:value={query}
+							placeholder="搜索标题或问题"
+							class="w-full min-w-0 bg-transparent text-xs outline-none placeholder:text-gray-400"
+						/>
+					</label>
 				</div>
 
 				{#if !loaded}
@@ -819,7 +843,7 @@
 						{#each shown as d (d.id)}
 							{@const live = isLive(d.status) || d.running}
 							{@const drawing = !live && d.status === 'done' && pictureState(d.picture, $now) === 'generating'}
-							<li class="group tm-card tm-hover relative flex items-center gap-3 px-4 py-3" data-discuss-row={d.id}>
+							<li class="group tm-card tm-hover relative flex items-center gap-3 px-4 py-3 {live ? 'tm-live' : ''}" data-discuss-row={d.id}>
 								<div class="flex shrink-0 -space-x-2">
 									{#each (d.seats ?? []).slice(0, 4) as seat, i}
 										<SeatAvatar model={seat.model} name={seat.label} hue={seatHue(i)} state={live ? 'streaming' : 'idle'} size={22} />

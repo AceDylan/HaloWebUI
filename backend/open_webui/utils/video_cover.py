@@ -48,6 +48,11 @@ COVER_PROMPT = """参考图是一支视频的第一帧画面。请把它重新�
 - 封面上只写一个标题：「{title}」，字大、醒目、清晰，不要错别字，不要写任何其他文字、logo、水印或播放按钮；
 - 画幅是 {orientation}，主体和标题放在中间区域，四周留出安全边距（边缘会被裁掉一点）；
 - 画面不透明，不要留白边框。{extra}"""
+VERTICAL_COVER_EXTRA = (
+    "\n- 这是竖屏短视频（抖音风格）封面：主标题特别粗大醒目，使用高对比配色（纯白或亮黄字配深色粗描边或色块底衬），"
+    "标题和主体聚焦在画面中上部到中心黄金区（避开顶部状态栏、右侧互动按钮列和底部文案栏，四周留足约 15% 安全边距），"
+    "拉高主体与背景的明暗对比，确保手机信息流小图 0.5 秒一眼看清主题。"
+)
 _NAME_NOISE = re.compile(r"[_\-]+")
 
 
@@ -273,8 +278,9 @@ async def draw_from_frame(request, user, frame: bytes, width: int, height: int, 
 
     size, orientation = canvas_for(width, height)
     model = cover_model(user.id)
+    extra = VERTICAL_COVER_EXTRA if height > width * 1.1 else ""
     form = GenerateImageForm(
-        prompt=COVER_PROMPT.format(title=title, orientation=orientation, extra=""),
+        prompt=COVER_PROMPT.format(title=title, orientation=orientation, extra=extra),
         model=model,
         size=size,
         image_url="data:image/jpeg;base64," + base64.b64encode(frame).decode("ascii"),

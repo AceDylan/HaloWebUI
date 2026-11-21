@@ -397,3 +397,17 @@ def test_video_style_survives_planning_enhancement_and_background_fill():
     fallback = prep.fill_brief(original, None)
     assert job.settings in fallback
     assert "制作前准备" not in fallback
+
+
+def test_video_enhance_prompt_covers_douyin_viral_optimization():
+    messages = prep.enhance_messages(
+        "video",
+        "讲讲为什么越努力越内耗",
+        "- 画幅：竖屏 9:16\n- 抖音爆款优化：开启（前 3 秒「反常识」钩子）",
+        sources=[],
+        conclusion="",
+    )
+    system = messages[0]["content"]
+    assert "抖音爆款优化" in system
+    assert "2-4 seconds" in system
+    assert "9:16 Douyin UI safe zone" in system

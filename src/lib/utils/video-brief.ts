@@ -17,6 +17,8 @@ import {
 
 export type VideoRecipeKey = 'explainer' | 'story' | 'footage' | 'data' | 'free';
 export type VideoFrameKey = '16:9' | '9:16' | '1:1';
+/** Opening 3-second hook pattern for Douyin viral optimization. */
+export type VideoHookKey = 'auto' | 'reversal' | 'pain' | 'result' | 'list';
 /** '' is Hermes itself; the rest are runners, started by the command in front of the brief. */
 export type VideoMaker =
 	| ''
@@ -61,13 +63,46 @@ export const VIDEO_RECIPES: { key: VideoRecipeKey; label: string; sub: string; h
 	{ key: 'free', label: '自由发挥', sub: '执行者自己判断', hint: '由执行者按内容选最合适的做法' }
 ];
 
-export const VIDEO_FRAMES: { key: VideoFrameKey; label: string; size: string }[] = [
+export const VIDEO_FRAMES: { key: VideoFrameKey; label: string; size: string; tag?: string }[] = [
+	{ key: '9:16', label: '竖屏', size: '1080×1920', tag: '抖音' },
 	{ key: '16:9', label: '横屏', size: '1920×1080' },
-	{ key: '9:16', label: '竖屏', size: '1080×1920' },
 	{ key: '1:1', label: '方形', size: '1080×1080' }
 ];
 
-export const VIDEO_LENGTHS = [15, 30, 60, 90, 180];
+export const VIDEO_LENGTHS = [15, 30, 45, 60, 90, 180];
+
+export const VIDEO_HOOKS: { key: VideoHookKey; label: string; sub: string; guide: string }[] = [
+	{
+		key: 'auto',
+		label: '自动匹配',
+		sub: '按主题选最强开场',
+		guide: '自动按题材挑选最抓人的前 3 秒开场（反常识/痛点/悬念/数字结论），第 0.5 秒出动态主视觉与爆点大字'
+	},
+	{
+		key: 'reversal',
+		label: '反常识',
+		sub: '“90%的人都错了”',
+		guide: '前 3 秒用反常识或颠覆认知的金句开场（如“别再…了”“90%的人都做错了”），立刻制造认知冲突'
+	},
+	{
+		key: 'pain',
+		label: '痛点直击',
+		sub: '戳中烦恼给解法',
+		guide: '前 3 秒直接戳中观众最焦虑的具体场景与痛点，紧接给出可落地解法承诺'
+	},
+	{
+		key: 'result',
+		label: '结果前置',
+		sub: '先抛高能结论/悬念',
+		guide: '第 1 秒直接把最震撼的结果、反转画面或核心结论甩在前面，再倒叙拆解原因'
+	},
+	{
+		key: 'list',
+		label: '数字榜单',
+		sub: '“3个必看/TOP 5”',
+		guide: '前 3 秒用明确数字清单开场（“3 个…最后一个最关键”），倒数递进拉满完播率'
+	}
+];
 
 export const VIDEO_VOICES: { key: string; label: string }[] = [
 	{ key: 'zh-CN-YunxiNeural', label: '男声 · 讲述' },
@@ -88,11 +123,132 @@ export const VIDEO_MAKERS: { key: VideoMaker; label: string; sub: string }[] = [
 	{ key: 'offiagy', label: 'offiagy', sub: 'AGY · Google 官方登录' }
 ];
 
+/** One-click Douyin viral recipes: sets frame, duration, recipe, visual style, voice and hook at once. */
+export type DouyinTemplate = {
+	key: string;
+	label: string;
+	badge: string;
+	sub: string;
+	sample: string;
+	patch: Partial<VideoSettings>;
+};
+
+export const DOUYIN_TEMPLATES: DouyinTemplate[] = [
+	{
+		key: 'viral-insight',
+		label: '认知干货',
+		badge: '爆款',
+		sub: '9:16 · 45秒 · 黑金大字',
+		sample: '用 45 秒讲透“为什么越努力越容易内耗”，开头反常识破冰，拆 3 个核心原因和立刻能用的解法',
+		patch: {
+			kind: 'normal',
+			douyin: true,
+			hook: 'reversal',
+			frame: '9:16',
+			seconds: 45,
+			recipe: 'explainer',
+			style: 'douyin-bold',
+			voice: 'zh-CN-YunxiNeural',
+			subtitles: true
+		}
+	},
+	{
+		key: 'viral-pitfall',
+		label: '避坑对比',
+		badge: '高互动',
+		sub: '9:16 · 30秒 · 红黑反差',
+		sample: '30 秒避坑指南：普通人最容易踩的 3 个习惯误区，红黑正反对比拆解，结尾给防忘总结卡',
+		patch: {
+			kind: 'normal',
+			douyin: true,
+			hook: 'pain',
+			frame: '9:16',
+			seconds: 30,
+			recipe: 'explainer',
+			style: 'contrast',
+			voice: 'zh-CN-XiaoyiNeural',
+			subtitles: true
+		}
+	},
+	{
+		key: 'viral-dossier',
+		label: '热点揭秘',
+		badge: '高完播',
+		sub: '9:16 · 60秒 · 档案揭秘',
+		sample: '60 秒深度揭秘一个看似反常的商业现象：结果前置抛悬念，按时间线和关键证据一步步反转真相',
+		patch: {
+			kind: 'normal',
+			douyin: true,
+			hook: 'result',
+			frame: '9:16',
+			seconds: 60,
+			recipe: 'explainer',
+			style: 'dossier',
+			voice: 'zh-CN-YunyangNeural',
+			subtitles: true
+		}
+	},
+	{
+		key: 'viral-science',
+		label: '硬核科普',
+		badge: '涨粉',
+		sub: '9:16 · 60秒 · 贴纸科普',
+		sample: '用 60 秒硬核科普日常高频现象背后的科学原理，数据可视化对比，节奏紧凑好懂',
+		patch: {
+			kind: 'normal',
+			douyin: true,
+			hook: 'list',
+			frame: '9:16',
+			seconds: 60,
+			recipe: 'explainer',
+			style: 'sticker',
+			voice: 'zh-CN-YunxiNeural',
+			subtitles: true
+		}
+	},
+	{
+		key: 'viral-healing',
+		label: '治愈金句',
+		badge: '高转发',
+		sub: '9:16 · 30秒 · 胶片治愈',
+		sample: '30 秒深夜情感共鸣短片：写给正在独自扛压力的普通人，暖调胶片质感配走心金句，结尾留余韵',
+		patch: {
+			kind: 'normal',
+			douyin: true,
+			hook: 'auto',
+			frame: '9:16',
+			seconds: 30,
+			recipe: 'story',
+			style: 'healing',
+			voice: 'zh-CN-XiaoxiaoNeural',
+			subtitles: true
+		}
+	},
+	{
+		key: 'viral-fun',
+		label: '花字剪辑',
+		badge: '轻快',
+		sub: '9:16 · 30秒 · 综艺花字',
+		sample: '把上传的日常/萌宠/探店素材剪成 30 秒高能卡点短视频，抓笑点和反差瞬间弹综艺花字',
+		patch: {
+			kind: 'normal',
+			douyin: true,
+			hook: 'result',
+			frame: '9:16',
+			seconds: 30,
+			recipe: 'footage',
+			style: 'hanazi',
+			voice: '',
+			subtitles: false
+		}
+	}
+];
+
 /** 两类视频: an ordinary video, or an MP3 made into an MP4 (a lyric MV, JIZURA on the home PC). */
 export type VideoKind = 'normal' | 'mv';
 export type MvTheme = 'lyricpv' | 'kinetic' | 'ballad' | 'pop' | 'any';
 export const VIDEO_KINDS: { key: VideoKind; label: string; sub: string }[] = [
-	{ key: 'normal', label: '普通视频', sub: '讲解、宣传、图文、剪辑…' },
+	{ key: 'normal', label: '普通视频', sub: '抖音爆款、科普、图文、剪辑…' },
 	{ key: 'mv', label: 'MP3 做 MV', sub: '一首歌 → 歌词 MV（MP4）' }
 ];
 /** JIZURA's おまかせ directions (skill video-studio「歌曲 MV / 歌词视频」, --theme). */
@@ -126,6 +282,34 @@ export const publishLines = (place: VideoPlace) => [
 		? '- 封面：交付前按技能 video-studio「封面」一节运行 scripts/cover.py all，用 gpt-image 依据首帧画好封面并放进视频第 0 帧'
 		: '- 封面：交付前按技能 video-studio「封面」一节，用 gpt-image 依据首帧画好封面并放进视频第 0 帧（pc-video deliver 会自动做；家里电脑不在线、改在服务器做时运行 scripts/cover.py all）'
 ];
+
+/** 抖音爆款规格: concise line for 提示词增强 (1500-char budget) or full section for the maker. */
+export const douyinLines = (
+	opts: Pick<VideoBriefOptions, 'douyin' | 'hook' | 'frame'>,
+	forMaker = false
+): string[] => {
+	if (!opts.douyin) return [];
+	const hook = VIDEO_HOOKS.find((h) => h.key === opts.hook) ?? VIDEO_HOOKS[0];
+	const vertical = opts.frame === '9:16';
+	if (!forMaker) {
+		return [
+			`- 抖音爆款优化：开启（前 3 秒「${hook.label}」钩子禁寒暄；2–4 秒换画面节奏；${vertical ? '严守 9:16 抖音安全区；' : ''}每幕给高亮爆点词；结尾防忘总结卡+轻互动，并拟 6–10 字高点击封面标题）`
+		];
+	}
+	return [
+		'',
+		'## 抖音爆款规格（已开启，按抖音完播率与互动率标准执行）',
+		`- 前 3 秒黄金钩子（${hook.label}）：${hook.guide}；严禁“大家好/今天聊聊”式慢热开场`,
+		'- 高密完播节奏：口播短句口语化（每句 ≤ 14 字），每 2–3 秒必有一次视觉变化（切镜、爆点词弹入、划重点或图示生长），约 60–75% 处给反转或最高能干货',
+		...(vertical
+			? [
+					'- 抖音 9:16 安全区（硬规范）：顶部留 12%（状态/搜索栏）、右侧留 14%（点赞/评论/收藏/转发按钮列）、底部留 22%（作者名/标题/进度条）；所有主标题、高亮大字与字幕严格控制在中心安全区（X: 6%–84%，Y: 14%–76%），字幕每行 ≤ 12 字、核心词放大撞色配描边'
+				]
+			: ['- 大字可读性：核心爆点词放大撞色配描边或半透底衬，手机小屏一眼看清']),
+		'- 收藏与互动收尾：结尾前 3–4 秒给一张信息浓缩的「可截图防忘总结卡」刺激收藏，最后 1–2 秒配一句自然轻互动引导（提问或收藏提示），不拖沓不静止',
+		'- 高点击封面：第 0 帧封面使用 6–10 字强冲击短标题（突出数字、反差或结果），字大居中、高对比色，在信息流小图 0.5 秒看清'
+	];
+};
 
 export const VIDEO_PLACES: { key: VideoPlace; label: string; sub: string }[] = [
 	{ key: 'pc', label: '家里电脑', sub: 'RTX 3070 · 成片存 D 盘' },
@@ -170,6 +354,8 @@ export type VideoBriefOptions = {
 	seconds: number;
 	voice: string;
 	subtitles: boolean;
+	douyin: boolean;
+	hook: VideoHookKey;
 	maker: VideoMaker;
 	musicFit: VideoMusicFit;
 	place: VideoPlace;
@@ -202,10 +388,12 @@ export const DEFAULT_VIDEO_SETTINGS: VideoSettings = {
 	customStyle: '',
 	appearance: '',
 	recipe: 'explainer',
-	frame: '16:9',
+	frame: '9:16',
 	seconds: 30,
 	voice: 'zh-CN-YunxiNeural',
 	subtitles: true,
+	douyin: true,
+	hook: 'auto',
 	maker: '',
 	musicFit: 'full',
 	place: 'pc',
@@ -246,6 +434,12 @@ export const normalizeVideoSettings = (value: unknown): VideoSettings => {
 		),
 		subtitles:
 			typeof raw.subtitles === 'boolean' ? raw.subtitles : DEFAULT_VIDEO_SETTINGS.subtitles,
+		douyin: typeof raw.douyin === 'boolean' ? raw.douyin : DEFAULT_VIDEO_SETTINGS.douyin,
+		hook: pick(
+			raw.hook,
+			VIDEO_HOOKS.map((h) => h.key),
+			DEFAULT_VIDEO_SETTINGS.hook
+		),
 		maker: pick(
 			raw.maker,
 			VIDEO_MAKERS.map((m) => m.key),
@@ -276,7 +470,7 @@ export const normalizeVideoSettings = (value: unknown): VideoSettings => {
 };
 
 /** Why *file* cannot be the background music ('' when it can): an MP3 by name and type, not
- * empty, not over 50 MB. Its first bytes (*head*, when read) must look like MP3 too. */
+ * empty, not over 100 MB. Its first bytes (*head*, when read) must look like MP3 too. */
 export const musicFileProblem = (
 	file: { name: string; type: string; size: number },
 	head?: Uint8Array
@@ -371,13 +565,14 @@ export const placeLine = (place: VideoPlace) =>
 export const videoSettingsText = (opts: Omit<VideoBriefOptions, 'idea'>): string => {
 	const lines = requirementLines(opts);
 	const attachments = opts.attachments ?? [];
+	lines.push(...douyinLines(opts, false));
 	lines.push(...videoStyleLines({ ...opts, topic: opts.styleTopic ?? '' }));
 	if (opts.music)
 		lines.push(`- 背景音乐：用户指定（${plainName(opts.music.name)}），视频按音乐的节拍和长度做`);
 	// The server accepts 1500 characters. Bound names after the essential constraints.
 	if (attachments.length)
 		lines.push(
-			`- 参考附件：${attachmentCounts(attachments)}（${attachments.map((a) => plainName(a.name).slice(0, 24)).join('、')}）`
+			`- 参考附件：${attachmentCounts(attachments)}（${attachments.map((a) => plainName(a.name).slice(0, 18)).join('、')}）`
 		);
 	return lines.join('\n');
 };
@@ -470,6 +665,9 @@ export const buildMvBrief = (opts: VideoBriefOptions): string => {
 			? `- 歌曲：${plainName(music.name)}${music.seconds ? `（${clockLabel(music.seconds)}）` : ''}，随消息附上，原文件路径见消息末尾的附件原文件；成片和这首歌一样长，音乐从 0 秒开始，不换、不加别的配乐`
 			: '- 歌曲：（还没选）',
 		`- 画幅：${frame.label} ${frame.key}（${frame.size}）`,
+		...(frame.key === '9:16'
+			? ['- 抖音 9:16 安全区：歌词和画面主体避开顶部 12%、右侧 14% 互动按钮列与底部 22% 文案栏']
+			: []),
 		lyrics
 			? `- 歌词：用户已提供（见下面「## 歌词」）${timed ? '，带时间轴，直接用' : `，没有时间轴：先与人声对齐成 LRC 再做，对不上的地方以人声为准（${asrTool(opts.place)}）`}`
 			: `- 歌词：用户没给。先识别歌词并与人声对齐成 LRC（${asrTool(opts.place)}）；听不清、拿不准的词不要猜，列出来交给用户确认后再做整首`,
@@ -481,7 +679,9 @@ export const buildMvBrief = (opts: VideoBriefOptions): string => {
 				: ['- 家里电脑不在线时 JIZURA 用不了：说明情况，等电脑开机或改用 Remotion 在服务器做动态歌词'])
 	];
 	if (attachments.length) {
-		lines.push(`- 参考附件：${attachmentCounts(attachments)}（${attachments.map((a) => plainName(a.name)).join('、')}），先看完；LRC/SRT 歌词文件优先于下面贴的歌词${animated ? '；图片当画风、角色或场景参考' : ''}`);
+		lines.push(
+			`- 参考附件：${attachmentCounts(attachments)}（${attachments.map((a) => plainName(a.name)).join('、')}），先看完；LRC/SRT 歌词文件优先于下面贴的歌词${animated ? '；图片当画风、角色或场景参考' : ''}`
+		);
 	}
 	if (lyrics) lines.push('', '## 歌词', lyrics);
 	lines.push(...publishLines(opts.place), '', '## 怎么做', `先读技能 video-studio（${VIDEO_SKILL_PATH}）。`, deliveryLine(opts.place));
@@ -549,6 +749,7 @@ export const buildVideoBrief = (opts: VideoBriefOptions): string => {
 		}
 	}
 	lines.push(
+		...douyinLines(opts, true),
 		...publishLines(opts.place),
 		'',
 		'## 怎么做',

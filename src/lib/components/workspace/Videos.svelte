@@ -1,14 +1,14 @@
 <script lang="ts">
 	/**
 	 * 视频工作台 (/workspace/videos). The workbench writes a brief — what you want, how it should be
-	 * made (做法), frame, length, narration, subtitles, reference files — and starts it from here
-	 * (backend utils/video_tasks.py): the server opens a new Hermes chat with the brief and starts
-	 * its turn, Hermes itself or a runner (codex, reclaude …, by the command in front) makes the
-	 * video with its video-studio skill and hands it over as MEDIA. The workbench stays: its 制作任务
-	 * list follows each video to the end (and plays it) and leads to the chat, which shows the same
-	 * task as a card on its reply (?task=<chat id> leads back here). Every video a reply or a
-	 * runner's report hands over lands in the library (backend utils/video_library.py), which
-	 * comes a page at a time and loads each player only when it scrolls into view.
+	 * made (做法), frame, length, narration, subtitles, Douyin viral packaging, reference files — and
+	 * starts it from here (backend utils/video_tasks.py): the server opens a new Hermes chat with the
+	 * brief and starts its turn, Hermes itself or a runner (codex, reclaude …, by the command in front)
+	 * makes the video with its video-studio skill and hands it over as MEDIA. The workbench stays: its
+	 * 制作任务 list follows each video to the end (and plays it) and leads to the chat, which shows the
+	 * same task as a card on its reply (?task=<chat id> leads back here). Every video a reply or a
+	 * runner's report hands over lands in the library (backend utils/video_library.py), which comes a
+	 * page at a time and loads each player only when it scrolls into view.
 	 *
 	 * 背景音乐: the user's own MP3 (uploaded here or picked again from their earlier uploads) is
 	 * decided before the video: the brief has the maker plan to its length and beats and prove
@@ -63,7 +63,9 @@
 	} from '$lib/apis/studio-prep';
 	import { normalizePrepOptions, prepErrorText, waitForPrep, type PrepOptions } from '$lib/utils/studio-prep';
 	import {
+		DOUYIN_TEMPLATES,
 		VIDEO_FRAMES,
+		VIDEO_HOOKS,
 		VIDEO_LENGTHS,
 		VIDEO_MAKERS,
 		VIDEO_KINDS,
@@ -83,10 +85,11 @@
 		normalizeVideoSettings,
 		videoSettingsText,
 		videoPrepIdea,
+		type DouyinTemplate,
 		type VideoSettings
 	} from '$lib/utils/video-brief';
 	import { clearModeDraft, setModeDraft } from '$lib/components/scifi/mode-relay';
-	import { pickVideoStyle } from '$lib/utils/video-styles';
+	import { VIDEO_STYLES, pickVideoStyle } from '$lib/utils/video-styles';
 	import VideoStylePicker from './VideoStylePicker.svelte';
 	import VideoTaskCard from './VideoTaskCard.svelte';
 	import HandoffBack from '$lib/components/common/HandoffBack.svelte';
@@ -161,12 +164,37 @@
 	let modelsChecked = false;
 	$: uploading = attachments.some((a) => a.uploading);
 	$: musicReady = music && !music.uploading && music.id ? music : null;
-	// MP3 做 MV: the song is the video (JIZURA on the home PC); its lyrics, when the user has them
+	// MP3 做 MV: the song is the video (JIZURA / Remotion on the home PC); its lyrics, when the user has them
 	$: isMv = settings.kind === 'mv';
 	let lyrics = '';
 	// an MV is always as long as its song
 	const setKind = (kind: VideoSettings['kind']) =>
 		(settings = { ...settings, kind, ...(kind === 'mv' ? { musicFit: 'full' as const } : {}) });
+
+	// One-click Douyin viral recipe: updates settings without clobbering user's typed idea.
+	const applyTemplate = (tpl: DouyinTemplate) => {
+		settings = {
+			...settings,
+			...tpl.patch,
+			...(music ? { musicFit: 'trim' as const } : {})
+		};
+		toast.success(`已套用「${tpl.label}」抖音爆款配置`);
+	};
+	$: activeTemplate = !isMv
+		? DOUYIN_TEMPLATES.find(
+				(t) =>
+					settings.douyin === !!t.patch.douyin &&
+					settings.frame === t.patch.frame &&
+					settings.recipe === t.patch.recipe &&
+					settings.style === t.patch.style &&
+					settings.hook === t.patch.hook
+			) ?? null
+		: null;
+	const fillSample = (sample: string) => {
+		idea = sample;
+		ideaBox?.focus();
+	};
+
 	// the music is listed as music, not again as an attachment (a file handed over from a chat)
 	$: ready = attachments.filter((a) => !a.uploading && a.id && a.id !== musicReady?.id);
 	$: musicTooLong = !!music?.seconds && music.seconds > MUSIC_MAX_SECONDS;
@@ -209,6 +237,14 @@
 	$: recipe = VIDEO_RECIPES.find((r) => r.key === settings.recipe) ?? VIDEO_RECIPES[0];
 	$: maker = VIDEO_MAKERS.find((m) => m.key === settings.maker) ?? VIDEO_MAKERS[0];
 	$: place = VIDEO_PLACES.find((p) => p.key === settings.place) ?? VIDEO_PLACES[0];
+	$: activeHook = VIDEO_HOOKS.find((h) => h.key === settings.hook) ?? VIDEO_HOOKS[0];
+	$: resolvedStyleLabel =
+		settings.style === 'reference'
+			? '跟随参考'
+			: settings.style === 'custom'
+				? '自定义风格'
+				: (VIDEO_STYLES.find((s) => s.key === (settings.style === 'auto' ? stylePick.key : settings.style))?.label ?? '自动风格');
+	$: activeVoiceLabel = VIDEO_VOICES.find((v) => v.key === settings.voice)?.label ?? '配音';
 
 	// 家里电脑在不在线: read once when the page opens (refresh the page to read it again); the host
 	// checks every 30 s.
@@ -669,6 +705,14 @@
 	let searchTimer: ReturnType<typeof setTimeout> | null = null;
 	let playing: LibraryVideo | null = null;
 	let playerOpen = false;
+	// Track portrait (9:16 Douyin) video posters so their big titles are never cropped in 16:9 tiles
+	let portraitIds: Record<string, boolean> = {};
+	const markPosterShape = (id: string, event: Event) => {
+		const img = event.currentTarget as HTMLImageElement | null;
+		if (img && img.naturalHeight > img.naturalWidth * 1.05 && !portraitIds[id]) {
+			portraitIds = { ...portraitIds, [id]: true };
+		}
+	};
 	$: if (!playerOpen) playing = null;
 	const play = (video: LibraryVideo) => {
 		playing = video;
@@ -924,9 +968,9 @@
 	});
 
 	const chip =
-		'rounded-full border px-3 py-1.5 text-xs font-medium transition disabled:opacity-50 border-gray-200/70 bg-white/80 text-gray-600 hover:border-gray-300 hover:text-gray-900 dark:border-gray-700/60 dark:bg-white/[0.03] dark:text-gray-300 dark:hover:border-gray-600 dark:hover:text-white';
+		'rounded-full border px-2.5 py-1 text-xs font-medium transition disabled:opacity-50 border-gray-200/70 bg-white/80 text-gray-600 hover:border-gray-300 hover:text-gray-900 dark:border-gray-700/60 dark:bg-white/[0.03] dark:text-gray-300 dark:hover:border-gray-600 dark:hover:text-white';
 	const chipOn =
-		'rounded-full border px-3 py-1.5 text-xs font-medium transition border-gray-900 bg-gray-900 text-white dark:border-white dark:bg-white dark:text-gray-900';
+		'rounded-full border px-2.5 py-1 text-xs font-medium transition border-gray-900 bg-gray-900 text-white dark:border-white dark:bg-white dark:text-gray-900';
 </script>
 
 {#if origin}
@@ -935,39 +979,78 @@
 	</div>
 {/if}
 
-<div class="halo-seg mb-4 flex w-fit max-w-full items-center overflow-x-auto scrollbar-hidden">
-	<button class="tab-button {tab === 'workbench' ? 'active' : ''}" on:click={() => setTab('workbench')} data-video-tab="workbench">
-		<SidebarModeIcon mode="video" className="size-4" />
-		<span>工作台</span>
-	</button>
-	<button class="tab-button {tab === 'library' ? 'active' : ''}" on:click={() => setTab('library')} data-video-tab="library">
-		<svg class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
-			><rect x="3" y="3" width="7" height="7" rx="1.5" /><rect x="14" y="3" width="7" height="7" rx="1.5" /><rect x="3" y="14" width="7" height="7" rx="1.5" /><rect x="14" y="14" width="7" height="7" rx="1.5" /></svg
-		>
-		<span>视频库{videos.length ? ` · ${videos.length}${next ? '+' : ''}` : ''}</span>
-	</button>
+<div class="mb-4 flex flex-wrap items-center justify-between gap-3">
+	<div class="halo-seg flex w-fit max-w-full items-center overflow-x-auto scrollbar-hidden">
+		<button class="tab-button {tab === 'workbench' ? 'active' : ''}" on:click={() => setTab('workbench')} data-video-tab="workbench">
+			<SidebarModeIcon mode="video" className="size-4" />
+			<span>工作台</span>
+		</button>
+		<button class="tab-button {tab === 'library' ? 'active' : ''}" on:click={() => setTab('library')} data-video-tab="library">
+			<svg class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+				><rect x="3" y="3" width="7" height="7" rx="1.5" /><rect x="14" y="3" width="7" height="7" rx="1.5" /><rect x="3" y="14" width="7" height="7" rx="1.5" /><rect x="14" y="14" width="7" height="7" rx="1.5" /></svg
+			>
+			<span>视频库{videos.length ? ` · ${videos.length}${next ? '+' : ''}` : ''}</span>
+		</button>
+	</div>
+
+	{#if tab === 'workbench'}
+		<div class="grid w-full grid-cols-2 gap-1.5 sm:w-auto sm:min-w-[20rem]" role="radiogroup" aria-label="视频类型" data-video-kinds>
+			{#each VIDEO_KINDS as k (k.key)}
+				<button
+					type="button"
+					role="radio"
+					aria-checked={settings.kind === k.key}
+					class="min-w-0 rounded-xl border px-3 py-2 text-left transition {settings.kind === k.key
+						? 'border-gray-900 bg-gray-900 text-white shadow-sm dark:border-white dark:bg-white dark:text-gray-900'
+						: 'border-gray-200/70 bg-white/70 text-gray-700 hover:border-gray-300 dark:border-gray-700/60 dark:bg-white/[0.03] dark:text-gray-200 dark:hover:border-gray-600'}"
+					on:click={() => setKind(k.key)}
+					data-video-kind={k.key}
+				>
+					<div class="truncate text-xs font-semibold sm:text-sm">{k.label}</div>
+					<div class="truncate text-[10.5px] opacity-70">{k.sub}</div>
+				</button>
+			{/each}
+		</div>
+	{/if}
 </div>
 
 {#if tab === 'workbench'}
-	<div class="mb-4 grid grid-cols-2 gap-2 sm:max-w-xl" role="radiogroup" aria-label="视频类型" data-video-kinds>
-		{#each VIDEO_KINDS as k (k.key)}
-			<button
-				type="button"
-				role="radio"
-				aria-checked={settings.kind === k.key}
-				class="min-w-0 rounded-2xl border px-4 py-3 text-left transition {settings.kind === k.key
-					? 'border-gray-900 bg-gray-900 text-white shadow-sm dark:border-white dark:bg-white dark:text-gray-900'
-					: 'border-gray-200/70 bg-white/70 text-gray-700 hover:border-gray-300 dark:border-gray-700/60 dark:bg-white/[0.03] dark:text-gray-200 dark:hover:border-gray-600'}"
-				on:click={() => setKind(k.key)}
-				data-video-kind={k.key}
-			>
-				<div class="truncate text-sm font-semibold">{k.label}</div>
-				<div class="truncate text-xs opacity-70">{k.sub}</div>
-			</button>
-		{/each}
-	</div>
+	{#if !isMv}
+		<div class="mb-4 glass-item p-3 space-y-2" data-video-douyin-templates>
+			<div class="flex flex-wrap items-center justify-between gap-2">
+				<div class="flex items-center gap-2">
+					<span class="inline-flex items-center rounded-full bg-rose-500/15 px-2 py-0.5 text-[11px] font-semibold text-rose-600 dark:text-rose-300">抖音爆款</span>
+					<span class="text-xs font-semibold text-gray-900 dark:text-gray-100">一键爆款配方</span>
+				</div>
+				<span class="text-[11px] text-gray-500 dark:text-gray-400">点选即配好 9:16 竖屏、爆款风格、黄金时长与前 3 秒钩子</span>
+			</div>
+			<div class="grid grid-cols-2 gap-1.5 sm:grid-cols-3 lg:grid-cols-6">
+				{#each DOUYIN_TEMPLATES as tpl (tpl.key)}
+					{@const active = activeTemplate?.key === tpl.key}
+					<button
+						type="button"
+						class="min-w-0 rounded-xl border px-2.5 py-2 text-left transition {active
+							? 'border-rose-500 bg-rose-50/90 text-gray-900 ring-1 ring-rose-500/30 dark:border-rose-400 dark:bg-rose-950/35 dark:text-white'
+							: 'border-gray-200/70 bg-white/75 text-gray-700 hover:border-gray-300 hover:bg-white dark:border-gray-700/60 dark:bg-white/[0.03] dark:text-gray-200 dark:hover:border-gray-500'}"
+						aria-pressed={active}
+						on:click={() => applyTemplate(tpl)}
+						data-video-template={tpl.key}
+					>
+						<div class="flex items-center justify-between gap-1">
+							<span class="truncate text-xs font-semibold">{tpl.label}</span>
+							<span class="shrink-0 rounded-full px-1.5 py-0.5 text-[9.5px] font-medium {active
+								? 'bg-rose-600 text-white'
+								: 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300'}">{tpl.badge}</span>
+						</div>
+						<div class="mt-0.5 truncate text-[10.5px] text-gray-500 dark:text-gray-400">{tpl.sub}</div>
+					</button>
+				{/each}
+			</div>
+		</div>
+	{/if}
+
 	<form
-		class="flex flex-col gap-4 lg:grid lg:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)] lg:items-start"
+		class="flex flex-col gap-4 lg:grid lg:grid-cols-[minmax(0,1.08fr)_minmax(0,1fr)] lg:items-start"
 		on:submit|preventDefault={start}
 		data-video-workbench
 	>
@@ -1017,7 +1100,7 @@
 					bind:this={ideaBox}
 					bind:value={idea}
 					readonly={preparing}
-					rows="7"
+					rows="6"
 					on:keydown={onKeydown}
 					on:paste={(event) => {
 						const files = Array.from(event.clipboardData?.files ?? []);
@@ -1027,10 +1110,35 @@
 					}}
 					placeholder={isMv
 						? '可选 · 歌名、歌手、想要的感觉……例如：《笑一笑》，轻快治愈，发抖音用竖屏'
-						: '主题、给谁看、想传达什么、喜欢的风格……例如：用 60 秒讲清楚 HTTPS 是怎么保护网页的，深色科技风，适合发朋友圈'}
-					class="min-h-[9rem] max-h-[60vh] w-full resize-y rounded-xl border border-gray-200/60 bg-white/85 p-3 text-base leading-6 text-gray-900 outline-none placeholder:text-gray-400 sm:text-sm dark:border-gray-700/50 dark:bg-gray-900/70 dark:text-gray-100 dark:placeholder:text-gray-500"
+						: '写主题、目标人群和想打爆的观点……例如：45 秒讲透“为什么越努力越内耗”，开头反常识破冰，拆 3 个避坑点，适合发抖音'}
+					class="min-h-[8.5rem] max-h-[60vh] w-full resize-y rounded-xl border border-gray-200/60 bg-white/85 p-3 text-base leading-6 text-gray-900 outline-none placeholder:text-gray-400 sm:text-sm dark:border-gray-700/50 dark:bg-gray-900/70 dark:text-gray-100 dark:placeholder:text-gray-500"
 					data-video-idea
 				/>
+
+				{#if !isMv && !idea.trim()}
+					<div class="flex flex-wrap items-center gap-1.5 text-[11px]" data-video-idea-starters>
+						<span class="text-gray-400 dark:text-gray-500">灵感示例：</span>
+						{#if activeTemplate}
+							<button
+								type="button"
+								class="rounded-full border border-rose-200 bg-rose-50/70 px-2.5 py-0.5 text-rose-700 transition hover:bg-rose-100 dark:border-rose-800/60 dark:bg-rose-950/30 dark:text-rose-300 dark:hover:bg-rose-950/60"
+								on:click={() => fillSample(activeTemplate.sample)}
+							>填入「{activeTemplate.label}」示例</button>
+						{/if}
+						{#each DOUYIN_TEMPLATES.slice(0, 3) as t (t.key)}
+							{#if !activeTemplate || activeTemplate.key !== t.key}
+								<button
+									type="button"
+									class="rounded-full border border-gray-200/80 px-2.5 py-0.5 text-gray-500 transition hover:border-gray-300 hover:text-gray-800 dark:border-gray-700/70 dark:text-gray-400 dark:hover:border-gray-500 dark:hover:text-gray-200"
+									on:click={() => {
+										applyTemplate(t);
+										fillSample(t.sample);
+									}}
+								>{t.label}示例</button>
+							{/if}
+						{/each}
+					</div>
+				{/if}
 
 				{#if prepStale}
 					<p class="text-xs text-amber-700 dark:text-amber-300" role="status" data-video-prep-stale>制作设置已变更，文字修改已保留。{prepOptions.enhance ? '开始制作时会按新设置重新增强。' : '自动增强已关闭，制作者将按新设置调整旧草稿；也可点“再增强”预览。'}</p>
@@ -1102,7 +1210,7 @@
 								? '执行者会先看这些再动手'
 								: isMv
 									? '可选 · LRC / SRT 歌词文件（歌曲在下面单独选）'
-									: '可选 · 图片、视频素材、脚本文档，可粘贴或拖进来（背景音乐在下面单独选）'}
+									: '可选 · 参考爆款视频、图片素材或脚本，可粘贴或拖进来'}
 					</span>
 					<input
 						bind:this={fileInput}
@@ -1116,7 +1224,6 @@
 						}}
 					/>
 				</div>
-
 			</div>
 
 			<!-- svelte-ignore a11y-no-static-element-interactions -->
@@ -1136,7 +1243,7 @@
 					<div class="min-w-0">
 						<div class="text-sm font-semibold text-gray-900 dark:text-gray-100">{isMv ? '歌曲' : '背景音乐'}</div>
 						<div class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
-							{isMv ? '必选 · 成片和这首歌一样长，画面跟着节拍和歌词走' : '可选 · 你先定音乐，视频跟着它的长度和节拍做'}
+							{isMv ? '必选 · 成片和这首歌一样长，画面跟着节拍和歌词走' : '可选 · 先选热门 BGM，转场卡在鼓点与高潮上'}
 						</div>
 					</div>
 					{#if music}
@@ -1234,18 +1341,34 @@
 				/>
 			</div>
 
-			<!-- after the music: the music is decided before the video is started -->
-			<div class="flex flex-col-reverse gap-2 px-1 sm:flex-row sm:items-center sm:justify-between">
-				<span class="text-xs text-gray-500 dark:text-gray-400" data-video-status data-video-blocked={blocked || undefined}>
-					{blocked ||
-						(isMv
-							? `交给 ${maker.label} · ${settings.mvVisual === 'lyrics' ? '歌词 MV' : '歌词 + 动画 MV'}（${(MV_THEMES.find((t) => t.key === settings.mvTheme) ?? MV_THEMES[0]).label}）· 跟歌一样长 · ${place.label}渲染，同时记成一个对话`
-							: `交给 ${maker.label} · ${recipe.label} · ${lengthSummary}${musicReady ? ' · 配乐已定' : ''} · ${place.label}渲染，在这里${prepOptions.enhance && (!prepared || prepStale) ? '先增强需求再' : ''}制作，同时记成一个对话`)}
-				</span>
-				<button type="submit" class="workspace-primary-button w-full sm:w-auto sm:min-w-32" disabled={!!blocked || starting} title={blocked} data-video-start>
-					<SidebarModeIcon mode="video" className="size-4" />
-					<span>{preparing ? '增强中…' : starting ? '发出中…' : '开始制作'}</span>
-				</button>
+			<!-- Launch bar with live summary pills -->
+			<div class="glass-item p-3.5 space-y-2.5" data-video-launch>
+				<div class="flex flex-wrap items-center gap-1.5 text-[11px]">
+					<span class="rounded-full bg-gray-100 px-2 py-0.5 font-medium text-gray-700 dark:bg-gray-800 dark:text-gray-200">{settings.frame}</span>
+					{#if !isMv}
+						<span class="rounded-full bg-gray-100 px-2 py-0.5 font-medium text-gray-700 dark:bg-gray-800 dark:text-gray-200">{lengthSummary}</span>
+						<span class="rounded-full bg-indigo-500/12 px-2 py-0.5 font-medium text-indigo-700 dark:text-indigo-300">{resolvedStyleLabel}</span>
+						{#if settings.douyin}
+							<span class="rounded-full bg-rose-500/12 px-2 py-0.5 font-medium text-rose-700 dark:text-rose-300">抖音爆款 · {activeHook.label}</span>
+						{/if}
+						<span class="rounded-full bg-gray-100 px-2 py-0.5 text-gray-600 dark:bg-gray-800 dark:text-gray-300">{activeVoiceLabel}</span>
+					{:else}
+						<span class="rounded-full bg-indigo-500/12 px-2 py-0.5 font-medium text-indigo-700 dark:text-indigo-300">{settings.mvVisual === 'lyrics' ? '歌词动效 MV' : '歌词 + 动画 MV'}</span>
+					{/if}
+					<span class="rounded-full bg-gray-100 px-2 py-0.5 text-gray-600 dark:bg-gray-800 dark:text-gray-300">{maker.label} · {place.label}</span>
+				</div>
+				<div class="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between">
+					<span class="text-xs text-gray-500 dark:text-gray-400" data-video-status data-video-blocked={blocked || undefined}>
+						{blocked ||
+							(isMv
+								? `交给 ${maker.label} · ${settings.mvVisual === 'lyrics' ? '歌词 MV' : '歌词 + 动画 MV'}（${(MV_THEMES.find((t) => t.key === settings.mvTheme) ?? MV_THEMES[0]).label}）· 跟歌一样长 · ${place.label}渲染，同时记成一个对话`
+								: `交给 ${maker.label} · ${recipe.label} · ${lengthSummary}${musicReady ? ' · 配乐已定' : ''} · ${place.label}渲染，在这里${prepOptions.enhance && (!prepared || prepStale) ? '先增强需求再' : ''}制作，同时记成一个对话`)}
+					</span>
+					<button type="submit" class="workspace-primary-button w-full shrink-0 sm:w-auto sm:min-w-36" disabled={!!blocked || starting} title={blocked} data-video-start>
+						<SidebarModeIcon mode="video" className="size-4" />
+						<span>{preparing ? '增强中…' : starting ? '发出中…' : '开始制作'}</span>
+					</button>
+				</div>
 			</div>
 
 			{#if tasks.length}
@@ -1300,9 +1423,18 @@
 					<div class="grid grid-cols-2 gap-2 sm:grid-cols-3">
 						{#each videos.slice(0, 3) as video (video.id)}
 							<button type="button" class="group min-w-0 text-left" on:click={() => play(video)}>
-								<div class="relative aspect-video overflow-hidden rounded-lg bg-gray-900">
+								<div class="relative aspect-video overflow-hidden rounded-lg bg-gray-950">
 									{#if videoPoster(video)}
-										<img src={videoPoster(video)} alt="" loading="lazy" class="size-full object-cover" data-video-cover={video.cover ? video.id : undefined} data-video-thumb={video.cover ? undefined : video.id} on:error={hideBroken} />
+										<img
+											src={videoPoster(video)}
+											alt=""
+											loading="lazy"
+											class="size-full {portraitIds[video.id] ? 'object-contain' : 'object-cover'}"
+											data-video-cover={video.cover ? video.id : undefined}
+											data-video-thumb={video.cover ? undefined : video.id}
+											on:load={(e) => markPosterShape(video.id, e)}
+											on:error={hideBroken}
+										/>
 									{/if}
 									<span class="absolute inset-0 grid place-items-center bg-black/10 opacity-80 transition group-hover:bg-black/25">
 										<span class="grid size-8 place-items-center rounded-full bg-white/90 text-gray-900 shadow">▶</span>
@@ -1316,94 +1448,67 @@
 			{/if}
 		</section>
 
-		<section class="flex min-w-0 flex-col gap-4">
-			<div class="glass-item p-4 space-y-4" data-video-settings>
-				{#if isMv}
-				<div class="space-y-2" data-video-mv-visuals>
-					<div class="text-sm font-semibold text-gray-900 dark:text-gray-100">MV 内容</div>
-					<div class="grid grid-cols-2 gap-2">
-						{#each MV_VISUALS as v (v.key)}
+		<section class="flex min-w-0 flex-col gap-3.5" data-video-settings>
+			<!-- Card 1: Douyin Viral Engine + Core Output Spec -->
+			<div class="glass-item p-4 space-y-3.5">
+				{#if !isMv}
+					<div class="space-y-2 rounded-xl border p-3 transition {settings.douyin
+						? 'border-rose-300/70 bg-rose-50/40 dark:border-rose-500/35 dark:bg-rose-950/20'
+						: 'border-gray-200/70 bg-gray-50/40 dark:border-gray-700/60 dark:bg-white/[0.02]'}" data-video-douyin-panel>
+						<div class="flex items-center justify-between gap-2">
+							<div class="min-w-0">
+								<div class="flex items-center gap-1.5 text-sm font-semibold text-gray-900 dark:text-gray-100">
+									<span>抖音爆款优化</span>
+									{#if settings.douyin && settings.frame === '9:16'}
+										<span class="rounded-full bg-rose-500/15 px-1.5 py-0.5 text-[10px] font-medium text-rose-600 dark:text-rose-300">9:16 安全区已保护</span>
+									{/if}
+								</div>
+								<p class="text-[11px] text-gray-500 dark:text-gray-400">
+									{settings.douyin
+										? '前 3 秒钩子破冰 · 2–3 秒视觉换拍 · 结尾防忘总结卡与互动引导'
+										: '已关闭：按常规短视频节奏制作'}
+								</p>
+							</div>
 							<button
 								type="button"
-								class="rounded-xl border px-3 py-2 text-left transition {settings.mvVisual === v.key
-									? 'border-gray-900 bg-gray-900 text-white dark:border-white dark:bg-white dark:text-gray-900'
-									: 'border-gray-200/70 bg-white/70 text-gray-700 hover:border-gray-300 dark:border-gray-700/60 dark:bg-white/[0.03] dark:text-gray-200 dark:hover:border-gray-600'}"
-								aria-pressed={settings.mvVisual === v.key}
-								on:click={() => (settings = { ...settings, mvVisual: v.key })}
-								data-video-mv-visual={v.key}
-							>
-								<div class="text-sm font-medium">{v.label}</div>
-								<div class="text-[11px] opacity-70">{v.sub}</div>
-							</button>
-						{/each}
-					</div>
-				</div>
-				<div class="space-y-2" data-video-mv-themes>
-					<div class="text-sm font-semibold text-gray-900 dark:text-gray-100">画面基调</div>
-					<div class="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-2 xl:grid-cols-3">
-						{#each MV_THEMES as t (t.key)}
-							<button
-								type="button"
-								class="rounded-xl border px-3 py-2 text-left transition {settings.mvTheme === t.key
-									? 'border-gray-900 bg-gray-900 text-white dark:border-white dark:bg-white dark:text-gray-900'
-									: 'border-gray-200/70 bg-white/70 text-gray-700 hover:border-gray-300 dark:border-gray-700/60 dark:bg-white/[0.03] dark:text-gray-200 dark:hover:border-gray-600'}"
-								aria-pressed={settings.mvTheme === t.key}
-								on:click={() => (settings = { ...settings, mvTheme: t.key })}
-								data-video-mv-theme={t.key}
-							>
-								<div class="text-sm font-medium">{t.label}</div>
-								<div class="text-[11px] opacity-70">{t.sub}</div>
-							</button>
-						{/each}
-					</div>
-					<p class="text-xs leading-relaxed text-gray-500 dark:text-gray-400">
-						{settings.mvVisual === 'lyrics'
-							? '歌词随节拍出现的动态文字画面（JIZURA，在家里电脑上做）'
-							: '跟着歌词内容和情绪走的动画场景，切镜卡节拍，歌词动效叠在上面（Remotion）'}，不配音、不另加字幕；成片和歌一样长，封面放在第 0 帧。
-					</p>
-				</div>
-				{:else}
-				<div class="space-y-2">
-					<div class="text-sm font-semibold text-gray-900 dark:text-gray-100">做法</div>
-					<div class="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-2 xl:grid-cols-3">
-						{#each VIDEO_RECIPES as r (r.key)}
-							<button
-								type="button"
-								class="rounded-xl border px-3 py-2 text-left transition {settings.recipe === r.key
-									? 'border-gray-900 bg-gray-900 text-white dark:border-white dark:bg-white dark:text-gray-900'
-									: 'border-gray-200/70 bg-white/70 text-gray-700 hover:border-gray-300 dark:border-gray-700/60 dark:bg-white/[0.03] dark:text-gray-200 dark:hover:border-gray-600'}"
-								aria-pressed={settings.recipe === r.key}
-								on:click={() => (settings = { ...settings, recipe: r.key })}
-								data-video-recipe={r.key}
-							>
-								<div class="text-sm font-medium">{r.label}</div>
-								<div class="text-[11px] opacity-70">{r.sub}</div>
-							</button>
-						{/each}
-					</div>
-					<p class="text-xs leading-relaxed text-gray-500 dark:text-gray-400">{recipe.hint}</p>
-				</div>
+								role="switch"
+								aria-checked={settings.douyin}
+								class="shrink-0 rounded-full border px-3 py-1 text-xs font-semibold transition {settings.douyin
+									? 'border-rose-600 bg-rose-600 text-white dark:border-rose-500 dark:bg-rose-500'
+									: 'border-gray-300 bg-white text-gray-600 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300'}"
+								on:click={() => (settings = { ...settings, douyin: !settings.douyin })}
+								data-video-douyin-toggle
+							>{settings.douyin ? '已开启' : '未开启'}</button>
+						</div>
 
-				<VideoStylePicker
-					value={settings.style}
-					custom={settings.customStyle}
-					appearance={settings.appearance}
-					recipe={settings.recipe}
-					onAppearance={(appearance) => (settings = { ...settings, appearance })}
-					disabled={preparing || starting}
-					{hasReference}
-					pick={stylePick}
-					onChange={(style, customStyle) => (settings = { ...settings, style, customStyle })}
-				/>
+						{#if settings.douyin}
+							<div class="space-y-1.5 pt-1">
+								<div class="text-[11px] font-medium text-gray-600 dark:text-gray-300">前 3 秒开场钩子</div>
+								<div class="flex flex-wrap gap-1.5" data-video-hooks>
+									{#each VIDEO_HOOKS as h (h.key)}
+										<button
+											type="button"
+											class={settings.hook === h.key ? chipOn : chip}
+											aria-pressed={settings.hook === h.key}
+											title={h.sub}
+											on:click={() => (settings = { ...settings, hook: h.key })}
+											data-video-hook={h.key}
+										>{h.label}</button>
+									{/each}
+								</div>
+								<p class="text-[11px] leading-relaxed text-gray-500 dark:text-gray-400">{activeHook.sub} · {activeHook.guide}</p>
+							</div>
+						{/if}
+					</div>
 				{/if}
 
-				<div class="grid gap-4 sm:grid-cols-2">
+				<div class="grid gap-3 sm:grid-cols-2">
 					<div class="space-y-1.5">
 						<div class="text-xs font-medium text-gray-500 dark:text-gray-400">画幅</div>
 						<div class="flex flex-wrap gap-1.5">
 							{#each VIDEO_FRAMES as f (f.key)}
 								<button type="button" class={settings.frame === f.key ? chipOn : chip} on:click={() => (settings = { ...settings, frame: f.key })} title={f.size} data-video-frame={f.key}>
-									{f.label} {f.key}
+									{f.label} {f.key}{#if f.tag}<span class="ml-1 opacity-75">· {f.tag}</span>{/if}
 								</button>
 							{/each}
 						</div>
@@ -1450,30 +1555,136 @@
 					</div>
 					{/if}
 				</div>
+			</div>
+
+			<!-- Card 2: Creative Direction (Recipe + Visual Styles / MV Visuals & Theme) -->
+			<div class="glass-item p-4 space-y-4">
+				{#if isMv}
+					<div class="space-y-2" data-video-mv-visuals>
+						<div class="text-sm font-semibold text-gray-900 dark:text-gray-100">MV 内容</div>
+						<div class="grid grid-cols-2 gap-2">
+							{#each MV_VISUALS as v (v.key)}
+								<button
+									type="button"
+									class="rounded-xl border px-3 py-2 text-left transition {settings.mvVisual === v.key
+										? 'border-gray-900 bg-gray-900 text-white dark:border-white dark:bg-white dark:text-gray-900'
+										: 'border-gray-200/70 bg-white/70 text-gray-700 hover:border-gray-300 dark:border-gray-700/60 dark:bg-white/[0.03] dark:text-gray-200 dark:hover:border-gray-600'}"
+									aria-pressed={settings.mvVisual === v.key}
+									on:click={() => (settings = { ...settings, mvVisual: v.key })}
+									data-video-mv-visual={v.key}
+								>
+									<div class="text-sm font-medium">{v.label}</div>
+									<div class="text-[11px] opacity-70">{v.sub}</div>
+								</button>
+							{/each}
+						</div>
+					</div>
+					<div class="space-y-2" data-video-mv-themes>
+						<div class="text-sm font-semibold text-gray-900 dark:text-gray-100">画面基调</div>
+						<div class="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-2 xl:grid-cols-3">
+							{#each MV_THEMES as t (t.key)}
+								<button
+									type="button"
+									class="rounded-xl border px-3 py-2 text-left transition {settings.mvTheme === t.key
+										? 'border-gray-900 bg-gray-900 text-white dark:border-white dark:bg-white dark:text-gray-900'
+										: 'border-gray-200/70 bg-white/70 text-gray-700 hover:border-gray-300 dark:border-gray-700/60 dark:bg-white/[0.03] dark:text-gray-200 dark:hover:border-gray-600'}"
+									aria-pressed={settings.mvTheme === t.key}
+									on:click={() => (settings = { ...settings, mvTheme: t.key })}
+									data-video-mv-theme={t.key}
+								>
+									<div class="text-sm font-medium">{t.label}</div>
+									<div class="text-[11px] opacity-70">{t.sub}</div>
+								</button>
+							{/each}
+						</div>
+						<p class="text-xs leading-relaxed text-gray-500 dark:text-gray-400">
+							{settings.mvVisual === 'lyrics'
+								? '歌词随节拍出现的动态文字画面（JIZURA，在家里电脑上做）'
+								: '跟着歌词内容和情绪走的动画场景，切镜卡节拍，歌词动效叠在上面（Remotion）'}，不配音、不另加字幕；成片和歌一样长，封面放在第 0 帧。
+						</p>
+					</div>
+				{:else}
+					<div class="space-y-2">
+						<div class="text-sm font-semibold text-gray-900 dark:text-gray-100">做法</div>
+						<div class="grid grid-cols-2 gap-1.5 sm:grid-cols-3 lg:grid-cols-3">
+							{#each VIDEO_RECIPES as r (r.key)}
+								<button
+									type="button"
+									class="rounded-xl border px-2.5 py-2 text-left transition {settings.recipe === r.key
+										? 'border-gray-900 bg-gray-900 text-white dark:border-white dark:bg-white dark:text-gray-900'
+										: 'border-gray-200/70 bg-white/70 text-gray-700 hover:border-gray-300 dark:border-gray-700/60 dark:bg-white/[0.03] dark:text-gray-200 dark:hover:border-gray-600'}"
+									aria-pressed={settings.recipe === r.key}
+									on:click={() => (settings = { ...settings, recipe: r.key })}
+									data-video-recipe={r.key}
+								>
+									<div class="text-xs font-semibold sm:text-sm">{r.label}</div>
+									<div class="truncate text-[10.5px] opacity-70">{r.sub}</div>
+								</button>
+							{/each}
+						</div>
+						<p class="text-xs leading-relaxed text-gray-500 dark:text-gray-400">{recipe.hint}</p>
+					</div>
+
+					<VideoStylePicker
+						value={settings.style}
+						custom={settings.customStyle}
+						appearance={settings.appearance}
+						recipe={settings.recipe}
+						onAppearance={(appearance) => (settings = { ...settings, appearance })}
+						disabled={preparing || starting}
+						{hasReference}
+						pick={stylePick}
+						onChange={(style, customStyle) => (settings = { ...settings, style, customStyle })}
+					/>
+				{/if}
+			</div>
+
+			<!-- Card 3: Execution Pipeline (Enhancement, Maker, Render Location) -->
+			<div class="glass-item p-4 space-y-3.5" data-video-pipeline>
+				<div class="flex flex-wrap items-center justify-between gap-2">
+					<div class="text-sm font-semibold text-gray-900 dark:text-gray-100">制作管线</div>
+					{#if pc}
+						<span
+							class="flex min-w-0 items-center gap-1.5 text-[11px] text-gray-500 dark:text-gray-400"
+							title={pc.checkedAt ? `${new Date(pc.checkedAt).toLocaleString()} 检测；刷新页面重新读取` : '刷新页面重新读取'}
+							data-pc-status={pc.state}
+						>
+							<span
+								class="size-1.5 shrink-0 rounded-full {pc.state === 'ready'
+									? 'bg-emerald-500'
+									: pc.state === 'off' || pc.state === 'unknown'
+										? 'bg-gray-400'
+										: 'bg-amber-500'}"
+								aria-hidden="true"
+							/>
+							<span class="truncate">家里电脑{PC_LABEL[pc.state]}{pcAgo(pc.checkedAt) ? ` · ${pcAgo(pc.checkedAt)}` : ''}</span>
+						</span>
+					{/if}
+				</div>
 
 				{#if !isMv}
-				<div class="space-y-2" data-video-prep-options>
-					<div class="text-xs font-medium text-gray-500 dark:text-gray-400">提示词增强</div>
-					<div class="flex flex-wrap gap-1.5">
-						<button type="button" class={prepOptions.enhance ? chipOn : chip} aria-pressed={prepOptions.enhance} on:click={() => setPrepOption({ enhance: !prepOptions.enhance })} data-video-prep="enhance">
-							开始前自动增强
-						</button>
-						<button type="button" class={prepOptions.research ? chipOn : chip} aria-pressed={prepOptions.research} on:click={() => setPrepOption({ research: !prepOptions.research })} data-video-prep="research">
-							联网搜索
-						</button>
-						<button type="button" class={prepOptions.deeper ? chipOn : chip} aria-pressed={prepOptions.deeper} on:click={() => setPrepOption({ deeper: !prepOptions.deeper })} data-video-prep="deeper">
-							需要时先精答 / 讨论
-						</button>
+					<div class="space-y-1.5" data-video-prep-options>
+						<div class="text-xs font-medium text-gray-500 dark:text-gray-400">提示词增强</div>
+						<div class="flex flex-wrap gap-1.5">
+							<button type="button" class={prepOptions.enhance ? chipOn : chip} aria-pressed={prepOptions.enhance} on:click={() => setPrepOption({ enhance: !prepOptions.enhance })} data-video-prep="enhance">
+								开始前自动增强
+							</button>
+							<button type="button" class={prepOptions.research ? chipOn : chip} aria-pressed={prepOptions.research} on:click={() => setPrepOption({ research: !prepOptions.research })} data-video-prep="research">
+								联网搜索
+							</button>
+							<button type="button" class={prepOptions.deeper ? chipOn : chip} aria-pressed={prepOptions.deeper} on:click={() => setPrepOption({ deeper: !prepOptions.deeper })} data-video-prep="deeper">
+								需要时先精答 / 讨论
+							</button>
+						</div>
+						<p class="text-[11px] leading-relaxed text-gray-500 dark:text-gray-400">
+							gpt-chat 自动联网查证并按时长拆好爆款分镜；点完开始制作即可离开。{prepOptions.enhance
+								? ''
+								: '已关自动增强：可点需求框右上「增强」先预览改写。'}
+						</p>
 					</div>
-					<p class="text-xs leading-relaxed text-gray-500 dark:text-gray-400">
-						gpt-chat 先判断：需要事实就联网查，内容要先想清楚就交给精答（有争议交给讨论），等结论出来再把需求改写完整、按时长拆好分镜，然后交给制作者。这些都在新对话里自动进行，点完开始制作就可以离开。{prepOptions.enhance
-							? ''
-							: '已关自动增强：点需求框右上的「增强」可以先看改写结果。'}
-					</p>
-				</div>
 				{/if}
 
-				<div class="space-y-2">
+				<div class="space-y-1.5">
 					<div class="text-xs font-medium text-gray-500 dark:text-gray-400">谁来做</div>
 					<div class="grid grid-cols-3 gap-1.5 sm:grid-cols-4 lg:grid-cols-3 xl:grid-cols-4">
 						{#each VIDEO_MAKERS as m (m.key)}
@@ -1487,43 +1698,24 @@
 								data-video-maker={m.key || 'hermes'}
 							>
 								<div class="truncate text-xs font-semibold">{m.label}</div>
-								<div class="truncate text-[10.5px] opacity-70">{m.sub}</div>
+								<div class="truncate text-[10px] opacity-70">{m.sub}</div>
 							</button>
 						{/each}
 					</div>
-					<p class="text-xs leading-relaxed text-gray-500 dark:text-gray-400">
+					<p class="text-[11px] leading-relaxed text-gray-500 dark:text-gray-400">
 						{settings.maker
 							? `消息前加 /${settings.maker}，由 ${maker.label} 在后台独占制作，做完把成片和报告发回对话。`
 							: 'Hermes 自己用视频技能制作，过程和成片都在对话里。'}
 					</p>
 				</div>
 
-				<div class="space-y-2">
-					<div class="flex items-center justify-between gap-2">
-						<div class="text-xs font-medium text-gray-500 dark:text-gray-400">生成位置</div>
-						{#if pc}
-							<span
-								class="flex min-w-0 items-center gap-1.5 text-[11px] text-gray-500 dark:text-gray-400"
-								title={pc.checkedAt ? `${new Date(pc.checkedAt).toLocaleString()} 检测；刷新页面重新读取` : '刷新页面重新读取'}
-								data-pc-status={pc.state}
-							>
-								<span
-									class="size-1.5 shrink-0 rounded-full {pc.state === 'ready'
-										? 'bg-emerald-500'
-										: pc.state === 'off' || pc.state === 'unknown'
-											? 'bg-gray-400'
-											: 'bg-amber-500'}"
-									aria-hidden="true"
-								/>
-								<span class="truncate">家里电脑{PC_LABEL[pc.state]}{pcAgo(pc.checkedAt) ? ` · ${pcAgo(pc.checkedAt)}` : ''}</span>
-							</span>
-						{/if}
-					</div>
+				<div class="space-y-1.5">
+					<div class="text-xs font-medium text-gray-500 dark:text-gray-400">生成位置</div>
 					<div class="grid grid-cols-2 gap-1.5">
 						{#each VIDEO_PLACES as p (p.key)}
 							<button
 								type="button"
-								class="min-w-0 rounded-xl border px-2 py-1.5 text-left transition {settings.place === p.key
+								class="min-w-0 rounded-xl border px-2.5 py-1.5 text-left transition {settings.place === p.key
 									? 'border-gray-900 bg-gray-900 text-white dark:border-white dark:bg-white dark:text-gray-900'
 									: 'border-gray-200/70 bg-white/70 text-gray-700 hover:border-gray-300 dark:border-gray-700/60 dark:bg-white/[0.03] dark:text-gray-200 dark:hover:border-gray-600'}"
 								aria-pressed={settings.place === p.key}
@@ -1535,11 +1727,11 @@
 							</button>
 						{/each}
 					</div>
-					<p class="text-xs leading-relaxed text-gray-500 dark:text-gray-400">
+					<p class="text-[11px] leading-relaxed text-gray-500 dark:text-gray-400">
 						{settings.place === 'pc'
 							? pc && pc.state !== 'ready' && pc.state !== 'unknown'
 								? '家里电脑现在不在线：会自动改在服务器渲染，成片回到这里（歌词 MV 要等电脑开机）。'
-								: '画面渲染和合成放到家里电脑（快约 4 倍），成片存在电脑的 D:\\HermesWork\\视频\\，这里显示位置；电脑关机或中途断开时自动改在服务器做，成片回到这里。'
+								: '画面渲染和合成放到家里电脑（快约 4 倍），成片存在电脑的 D:\\HermesWork\\视频\\；电脑关机时自动改在服务器做。'
 							: '全部在服务器上渲染，不用家里电脑。'}
 					</p>
 				</div>
@@ -1571,9 +1763,18 @@
 			<div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3" data-video-grid>
 				{#each videos as video (video.id)}
 					<div class="glass-item group p-1.5" data-video-card={video.id}>
-						<button type="button" class="relative block aspect-video w-full overflow-hidden rounded-lg bg-gray-900" on:click={() => play(video)} aria-label="播放 {videoTitle(video)}">
+						<button type="button" class="relative block aspect-video w-full overflow-hidden rounded-lg bg-gray-950" on:click={() => play(video)} aria-label="播放 {videoTitle(video)}">
 							{#if videoPoster(video)}
-								<img src={videoPoster(video)} alt="" loading="lazy" class="size-full object-cover" data-video-cover={video.cover ? video.id : undefined} data-video-thumb={video.cover ? undefined : video.id} on:error={hideBroken} />
+								<img
+									src={videoPoster(video)}
+									alt=""
+									loading="lazy"
+									class="size-full {portraitIds[video.id] ? 'object-contain' : 'object-cover'}"
+									data-video-cover={video.cover ? video.id : undefined}
+									data-video-thumb={video.cover ? undefined : video.id}
+									on:load={(e) => markPosterShape(video.id, e)}
+									on:error={hideBroken}
+								/>
 							{/if}
 							{#if video.coverStatus === 'generating'}
 								<span class="absolute bottom-2 left-2 rounded-full bg-black/55 px-2 py-0.5 text-[10.5px] text-white backdrop-blur" data-video-cover-drawing={video.id}>封面生成中…</span>

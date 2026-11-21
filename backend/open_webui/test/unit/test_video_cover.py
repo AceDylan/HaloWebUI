@@ -76,6 +76,27 @@ def test_canvas_and_title_follow_the_video():
     assert video_cover.cover_title("", "我的对话") == "我的对话"
 
 
+def test_vertical_cover_prompt_adds_douyin_safe_zone_guidance(monkeypatch):
+    import open_webui.routers.images as images
+    import open_webui.utils.chat_image_refs as refs
+
+    prompts = []
+
+    async def fake_generate(request, form, user=None):
+        prompts.append(form.prompt)
+        return [{"url": "/api/v1/files/tmp1/content"}]
+
+    monkeypatch.setattr(images, "image_generations", fake_generate)
+    monkeypatch.setattr(refs, "resolve_chat_image_url_to_bytes", lambda *a, **k: ("image/png", _png(1024, 1536)))
+    monkeypatch.setattr(video_cover, "_remove_file", lambda _fid: None)
+    monkeypatch.setattr(video_cover, "cover_model", lambda _uid: "gpt-image")
+
+    asyncio.run(video_cover.draw_from_frame(None, _User("vc-dy"), _png(1080, 1920), 1080, 1920, "别再内耗了"))
+    asyncio.run(video_cover.draw_from_frame(None, _User("vc-dy"), _png(1920, 1080), 1920, 1080, "横屏测试"))
+    assert "抖音风格" in prompts[0] and "15% 安全边距" in prompts[0]
+    assert "抖音风格" not in prompts[1]
+
+
 def test_the_first_frame_skips_a_fade_from_black(tmp_path):
     cv2 = pytest.importorskip("cv2")
     import numpy as np

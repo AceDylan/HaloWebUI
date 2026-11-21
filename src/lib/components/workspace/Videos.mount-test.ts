@@ -524,12 +524,23 @@ describe('Videos style presets', () => {
 		api.getVideoPage.mockResolvedValue({ items: [], next: null });
 		prepApi.startStudioPrep.mockResolvedValueOnce(prepJob());
 		const target = await mount();
-		expect(target.querySelectorAll('[data-video-style-grid] img').length).toBe(8);
+		expect(target.querySelectorAll('[data-video-style-grid] img').length).toBe(12);
 		let sample = target.querySelector('[data-video-style-sample]');
-		expect(sample.getAttribute('src')).toBe('/video-presets/v2/flat.mp4');
+		// Douyin mode is on by default, so empty topic defaults to 黑金大字
+		expect(sample.getAttribute('src')).toBe('/video-presets/v2/douyin-bold.mp4');
 		expect(sample.getAttribute('preload')).toBe('none');
 		expect(sample.hasAttribute('autoplay')).toBe(false);
 		expect(target.querySelectorAll('[data-video-style-sample]').length).toBe(1);
+		// Category filter narrows to Douyin (6) and MG (8) then back to all (12)
+		target.querySelector('[data-video-style-cat="douyin"]').click();
+		await sleep(10);
+		expect(target.querySelectorAll('[data-video-style-grid] img').length).toBe(6);
+		target.querySelector('[data-video-style-cat="mg"]').click();
+		await sleep(10);
+		expect(target.querySelectorAll('[data-video-style-grid] img').length).toBe(8);
+		target.querySelector('[data-video-style-cat="all"]').click();
+		await sleep(10);
+		expect(target.querySelectorAll('[data-video-style-grid] img').length).toBe(12);
 		await typeIdea(target, '科普：一部手机里有多少种元素');
 		expect(target.querySelector('[data-video-style-auto]').getAttribute('data-video-style')).toBe('sticker');
 		expect(target.querySelector('[data-video-auto-pick]').textContent).toContain('贴纸科普');
@@ -905,6 +916,28 @@ describe('Videos 制作任务', () => {
 		expect(card.querySelector('[data-step="video"]').textContent).toContain('成片在家里电脑');
 		expect(card.querySelector('[data-step="video"]').getAttribute('data-state')).toBe('done');
 		expect(block.querySelector(`[data-video-task-pc-copy]`)).toBeTruthy();
+	});
+
+	it('applies one-click Douyin viral templates, toggles Douyin mode and switches opening hook', async () => {
+		api.getVideoPage.mockResolvedValue({ items: [], next: null });
+		const target = await mount();
+		await typeIdea(target, '我的原始内容不要被覆盖');
+		target.querySelector('[data-video-template="viral-pitfall"]').click();
+		await sleep(10);
+		// User's typed text is preserved; template configures 9:16, 30s, contrast style, pain hook
+		expect(target.querySelector('[data-video-idea]').value).toBe('我的原始内容不要被覆盖');
+		const brief = () => target.querySelector('[data-video-brief] pre').textContent;
+		expect(brief()).toContain('视觉风格：红黑反差');
+		expect(brief()).toContain('画幅：竖屏 9:16');
+		expect(brief()).toContain('前 3 秒黄金钩子（痛点直击）');
+		// Switch hook and toggle Douyin off
+		target.querySelector('[data-video-hook="reversal"]').click();
+		await sleep(10);
+		expect(brief()).toContain('前 3 秒黄金钩子（反常识）');
+		target.querySelector('[data-video-douyin-toggle]').click();
+		await sleep(10);
+		expect(target.querySelector('[data-video-douyin-toggle]').getAttribute('aria-checked')).toBe('false');
+		expect(brief()).not.toContain('## 抖音爆款规格');
 	});
 
 	it('the chat\'s card leads back to the workbench and does not play the video again', async () => {

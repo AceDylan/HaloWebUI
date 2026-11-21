@@ -4,6 +4,9 @@ import { resolve } from 'node:path';
 import { VIDEO_STYLES, pickVideoStyle, videoSamplePath } from './video-styles';
 import {
 	DEFAULT_VIDEO_SETTINGS,
+	DOUYIN_TEMPLATES,
+	VIDEO_HOOKS,
+	VIDEO_LENGTHS,
 	attachmentKind,
 	buildVideoBrief,
 	clockLabel,
@@ -23,10 +26,12 @@ describe('buildVideoBrief', () => {
 		expect(brief.startsWith('请制作一个视频')).toBe(true);
 		expect(brief).toContain('用 60 秒讲清楚 HTTPS');
 		expect(brief).toContain('做法：讲解动画');
-		expect(brief).toContain('画幅：横屏 16:9（1920×1080，30fps）');
+		expect(brief).toContain('画幅：竖屏 9:16（1080×1920，30fps）');
 		expect(brief).toContain('时长：约 1 分钟');
 		expect(brief).toContain('zh-CN-YunxiNeural');
 		expect(brief).toContain('烧录中文字幕');
+		expect(brief).toContain('## 抖音爆款规格');
+		expect(brief).toContain('抖音 9:16 安全区');
 		expect(brief).toContain('/root/.hermes/skills/creative/video-studio/SKILL.md');
 		expect(brief).toContain('「MEDIA:」');
 		// no path that the media fetcher could take for a file to hand over
@@ -197,6 +202,8 @@ describe('normalizeVideoSettings', () => {
 				seconds: 90,
 				voice: '',
 				subtitles: false,
+				douyin: false,
+				hook: 'reversal',
 				maker: 'agy'
 			})
 		).toEqual({
@@ -208,6 +215,8 @@ describe('normalizeVideoSettings', () => {
 			seconds: 90,
 			voice: '',
 			subtitles: false,
+			douyin: false,
+			hook: 'reversal',
 			maker: 'agy',
 			musicFit: 'full',
 			place: 'pc',
@@ -225,6 +234,8 @@ describe('normalizeVideoSettings', () => {
 				seconds: 9999,
 				voice: 'nope',
 				subtitles: 'yes',
+				douyin: 'yes',
+				hook: 'unknown',
 				maker: 'rm',
 				musicFit: 'loop'
 			})
@@ -318,9 +329,9 @@ describe('buildVideoBrief with the enhancement still going', () => {
 });
 
 describe('video visual styles', () => {
-	it('offers eight distinct MG styles, each with a shipped sample and poster', () => {
-		expect(VIDEO_STYLES).toHaveLength(8);
-		expect(new Set(VIDEO_STYLES.map((s) => s.key)).size).toBe(8);
+	it('offers twelve distinct styles (4 Douyin-native + 8 MG), each with a shipped sample and poster', () => {
+		expect(VIDEO_STYLES).toHaveLength(12);
+		expect(new Set(VIDEO_STYLES.map((s) => s.key)).size).toBe(12);
 		for (const style of VIDEO_STYLES)
 			for (const extension of ['mp4', 'jpg'] as const)
 				expect(existsSync(resolve('static', videoSamplePath(style.key, extension).slice(1)))).toBe(
@@ -395,6 +406,10 @@ describe('video visual styles', () => {
 			['讲一个乌鸦喝水的寓言故事', 'handdrawn'],
 			['一座建筑事务所的品牌故事', 'line'],
 			['介绍公司的新服务', 'flat'],
+			['45秒讲透职场赚钱底层逻辑', 'douyin-bold'],
+			['3个装修避坑对比和智商税盘点', 'contrast'],
+			['深度揭秘这件事背后的悬疑真相与内幕', 'dossier'],
+			['深夜情感独白与胶片治愈晚霞感悟', 'healing'],
 			// the style named outright wins over topic words
 			['用手绘风讲讲数据统计', 'handdrawn'],
 			// 「AI」 counts only as a word
@@ -402,6 +417,7 @@ describe('video visual styles', () => {
 		];
 		for (const [topic, key] of cases) expect([topic, pickVideoStyle(topic).key]).toEqual([topic, key]);
 		expect(pickVideoStyle('')).toEqual({ key: 'flat', words: [] });
+		expect(pickVideoStyle('', { douyin: true })).toEqual({ key: 'douyin-bold', words: [] });
 		expect(pickVideoStyle('', { recipe: 'data' }).key).toBe('sticker');
 		expect(pickVideoStyle('', { recipe: 'footage' }).key).toBe('hanazi');
 		// a reference video is followed, unless it is the footage being edited
@@ -416,6 +432,9 @@ describe('video visual styles', () => {
 			expect(text).toContain(sticker.motion);
 		}
 		expect(buildVideoBrief({ ...opts, idea: '随便做点什么' })).toContain(
+			'抖音爆款默认通用款，选黑金大字'
+		);
+		expect(buildVideoBrief({ ...opts, douyin: false, idea: '随便做点什么' })).toContain(
 			'需求没有明显的题材线索，选最通用的扁平 MG'
 		);
 	});
@@ -577,5 +596,21 @@ describe('publishing standard and MP3 做 MV', () => {
 		expect(buildVideoBrief({ ...lyricsOnly, music: song, maker: 'codex' }).startsWith('/codex ')).toBe(true);
 		expect(normalizeVideoSettings({ kind: 'mv', mvTheme: 'kinetic' })).toMatchObject({ kind: 'mv', mvTheme: 'kinetic' });
 		expect(normalizeVideoSettings({ kind: 'x', mvTheme: 'y' })).toMatchObject({ kind: 'normal', mvTheme: 'lyricpv' });
+	});
+
+	it('Douyin viral mode adds hook, 9:16 safe-zone rules, 45s duration and one-click templates', () => {
+		expect(VIDEO_LENGTHS).toContain(45);
+		expect(DOUYIN_TEMPLATES.length).toBeGreaterThanOrEqual(6);
+		expect(VIDEO_HOOKS.map((h) => h.key)).toEqual(['auto', 'reversal', 'pain', 'result', 'list']);
+		const on = buildVideoBrief({ ...base, douyin: true, hook: 'reversal', frame: '9:16' });
+		expect(on).toContain('## 抖音爆款规格');
+		expect(on).toContain('前 3 秒黄金钩子（反常识）');
+		expect(on).toContain('抖音 9:16 安全区');
+		expect(on).toContain('可截图防忘总结卡');
+		const settingsOn = videoSettingsText({ ...base, douyin: true, hook: 'reversal', frame: '9:16' });
+		expect(settingsOn).toContain('抖音爆款优化：开启（前 3 秒「反常识」钩子');
+		const off = buildVideoBrief({ ...base, douyin: false });
+		expect(off).not.toContain('## 抖音爆款规格');
+		expect(videoSettingsText({ ...base, douyin: false })).not.toContain('抖音爆款优化');
 	});
 });

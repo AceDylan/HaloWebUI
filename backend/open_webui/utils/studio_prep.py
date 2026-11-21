@@ -217,7 +217,13 @@ def enhance_messages(kind: str, idea: str, settings: str, *, sources: list[dict]
             "When updating a previously enhanced draft, retain content and user edits but reconcile obsolete generated "
             "visual details and timing with the current settings. Reference attachments are not automatically footage to "
             "insert. If only attachment names are provided, leave visual extraction to the maker; do not pretend to have "
-            "seen them. Style never changes the chosen recipe, frame, duration, voice, subtitle switch or music."
+            "seen them. Style never changes the chosen recipe, frame, duration, voice, subtitle switch or music. "
+            "When 抖音爆款优化 is enabled in the settings: optimize explicitly for Douyin short-video completion and "
+            "engagement — hook immediately within 0-3 s using the chosen hook pattern (never open with '大家好' or slow "
+            "greetings), tighten pacing to one visual beat every 2-4 seconds, write crisp colloquial spoken lines "
+            "(<= 14 Chinese chars per sentence), specify 3-6 character on-screen highlight words per beat, respect the "
+            "9:16 Douyin UI safe zone (avoid right-side buttons and bottom caption bar), close with a screenshot-worthy "
+            "takeaway card plus one light natural engagement prompt, and suggest a high-CTR 6-10 character cover title."
         )
     else:
         task = (

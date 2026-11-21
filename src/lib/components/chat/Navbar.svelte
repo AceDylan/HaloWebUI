@@ -56,6 +56,8 @@
 		| ((to: 'auto' | 'answer' | 'discuss' | 'teams' | 'studio' | 'video') => void)
 		| null = null;
 	export let hasDraftOrContext = false;
+	/** One-line description of what will travel to the workbench (draft / attachments / turns). */
+	export let handoffSummary = '';
 
 	let showShareChatModal = false;
 	let showDownloadChatModal = false;
@@ -177,9 +179,10 @@
 									type="button"
 									class="halo-wb-nav-btn relative inline-flex h-9 items-center gap-1.5 rounded-full border border-gray-200/80 bg-white/75 px-2.5 text-xs font-medium text-gray-700 transition hover:border-gray-300 hover:bg-white hover:text-gray-950 dark:border-gray-700/60 dark:bg-white/[0.04] dark:text-gray-200 dark:hover:border-gray-600 dark:hover:bg-white/[0.08] dark:hover:text-white"
 									aria-label="切换工作台"
-									title={hasDraftOrContext
-										? '切换工作台（会带上当前草稿与对话背景）'
-										: '快速切换工作台'}
+									title={handoffSummary ||
+										(hasDraftOrContext
+											? '切换工作台（会带上当前草稿与对话背景，仅预填不会直接开跑）'
+											: '快速切换工作台')}
 									data-halo-navbar-workbenches
 								>
 									<svg
@@ -214,15 +217,22 @@
 										align="end"
 										transition={flyAndScale}
 									>
-										<div class="flex items-center justify-between px-2.5 pt-1 pb-1.5">
-											<span class="text-[11px] font-semibold text-gray-500 dark:text-gray-400"
-												>工作台</span
-											>
-											{#if hasDraftOrContext}
-												<span
-													class="rounded-full bg-cyan-500/10 px-2 py-0.5 text-[10px] font-medium text-cyan-700 dark:text-cyan-300"
-													>带上当前草稿与背景</span
+										<div class="px-2.5 pt-1 pb-1.5">
+											<div class="flex items-center justify-between gap-2">
+												<span class="text-[11px] font-semibold text-gray-500 dark:text-gray-400"
+													>工作台</span
 												>
+												<span class="text-[10px] text-gray-400 dark:text-gray-500"
+													>仅预填，不直接开跑</span
+												>
+											</div>
+											{#if handoffSummary || hasDraftOrContext}
+												<div
+													class="mt-1 rounded-lg bg-cyan-500/10 px-2 py-1 text-[10.5px] leading-snug font-medium text-cyan-700 dark:bg-cyan-400/10 dark:text-cyan-300"
+													data-halo-navbar-handoff-summary
+												>
+													{handoffSummary || '将带走当前草稿与对话背景（仅预填，不会立即开跑）'}
+												</div>
 											{/if}
 										</div>
 										<div class="flex flex-col gap-0.5">

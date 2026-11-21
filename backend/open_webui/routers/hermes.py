@@ -54,14 +54,18 @@ from open_webui.utils.hermes_sessions import (
     LIST_LIMIT_DEFAULT,
     LIST_LIMIT_MAX,
     LIST_OFFSET_MAX,
+    SEARCH_LIMIT_DEFAULT,
+    SEARCH_LIMIT_MAX,
     HermesSessionsError,
     import_session,
     list_model_options,
     list_sessions,
+    search_sessions,
     stop_background_runner,
     validate_session_id,
 )
 from open_webui.utils import hermes_jobs
+from open_webui.utils.task_inbox import DEFAULT_DAYS as INBOX_DEFAULT_DAYS, MAX_DAYS as INBOX_MAX_DAYS, get_task_inbox
 from open_webui.utils.hermes_unread import list_unread_chat_ids, mark_read
 from open_webui.utils.hermes_runner_progress import (
     clear_runner_progress,
@@ -196,6 +200,17 @@ async def get_active_hermes_runs(user=Depends(get_verified_user)):
     }
 
 
+@router.get("/inbox")
+async def get_hermes_task_inbox(
+    request: Request,
+    days: int = Query(INBOX_DEFAULT_DAYS, ge=1, le=INBOX_MAX_DAYS),
+    user=Depends(get_verified_user),
+):
+    """Unified Task Inbox: attention (waiting on user), running, and recently ended tasks
+    across web workbenches, background runners, and Telegram/QQ Hermes sessions."""
+    return await get_task_inbox(request, user, days=days)
+
+
 @router.get("/model-options")
 async def get_hermes_model_options(
     request: Request, model_id: Optional[str] = None, user=Depends(get_verified_user)
@@ -271,6 +286,31 @@ async def list_hermes_sessions(
 
 class HermesSessionImportForm(BaseModel):
     model_id: Optional[str] = Field(default=None, max_length=256)
+
+
+@router.get("/sessions/search")
+async def search_hermes_sessions(
+    request: Request,
+    q: str = Query("", max_length=200),
+    source: Optional[str] = None,
+    limit: int = Query(SEARCH_LIMIT_DEFAULT, ge=1, le=SEARCH_LIMIT_MAX),
+    include_imported: bool = False,
+    model_id: Optional[str] = None,
+    user=Depends(get_verified_user),
+):
+    """Search recent Telegram / QQ / CLI hermes sessions (unimported by default, for ⌘K)."""
+    try:
+        return await search_sessions(
+            request,
+            user,
+            query=q,
+            limit=limit,
+            source=source,
+            include_imported=include_imported,
+            model_id=model_id,
+        )
+    except HermesSessionsError as e:
+        raise HTTPException(status_code=e.status_code, detail=e.detail)
 
 
 @router.post("/sessions/{session_id}/import")

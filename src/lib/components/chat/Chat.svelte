@@ -85,6 +85,7 @@
 		type PersistedSelectionThreads
 	} from '$lib/utils/selection-threads';
 	import { refreshHermesActivitySoon } from '$lib/utils/hermes-activity';
+	import { summarizeHandoff } from '$lib/utils/handoff-summary';
 	import { sourcesHistoryNote } from '$lib/utils/citations';
 	import { getModelChatDisplayName } from '$lib/utils/model-display';
 	import { createComposerStatePersister } from '$lib/utils/composer-state-persist';
@@ -7473,6 +7474,7 @@
 					onDiscuss={handOffToDiscussion}
 					onWorkbenchHandoff={handOffToWorkbench}
 					hasDraftOrContext={Boolean(prompt.trim() || files.length > 0 || history?.currentId)}
+					handoffSummary={summarizeHandoff({ text: prompt, files, history }).line}
 					shareEnabled={!!history.currentId}
 				/>
 

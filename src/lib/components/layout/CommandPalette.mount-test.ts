@@ -7,8 +7,16 @@ installDominoDom('http://localhost/');
 
 const nav = vi.hoisted(() => ({ goto: vi.fn(async () => {}) }));
 vi.mock('$app/navigation', () => nav);
-const chatsApi = vi.hoisted(() => ({ getChatListBySearchText: vi.fn() }));
+const chatsApi = vi.hoisted(() => ({
+	getChatListBySearchText: vi.fn(),
+	getChatList: vi.fn(async () => [])
+}));
 vi.mock('$lib/apis/chats', () => chatsApi);
+const hermesApi = vi.hoisted(() => ({
+	searchHermesSessions: vi.fn(async () => []),
+	importHermesSession: vi.fn()
+}));
+vi.mock('$lib/apis/hermes', () => hermesApi);
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const until = async (check: () => boolean, ms = 10000) => {
@@ -33,6 +41,11 @@ beforeEach(async () => {
 	nav.goto.mockReset();
 	chatsApi.getChatListBySearchText.mockReset();
 	chatsApi.getChatListBySearchText.mockResolvedValue([]);
+	chatsApi.getChatList.mockReset();
+	chatsApi.getChatList.mockResolvedValue([]);
+	hermesApi.searchHermesSessions.mockReset();
+	hermesApi.searchHermesSessions.mockResolvedValue([]);
+	hermesApi.importHermesSession.mockReset();
 	(globalThis as any).localStorage.token = 'tok';
 	stores.config.set({ features: { enable_agent_teams: true } });
 	stores.user.set({ id: 'u1', role: 'admin' });
@@ -42,6 +55,7 @@ beforeEach(async () => {
 	]);
 	stores.models.set([{ id: 'openai.gpt-chat', name: 'gpt-chat' }]);
 	stores.showBookmarks.set(false);
+	stores.showTaskInbox.set(false);
 	stores.pendingMessageReveal.set(null);
 	const { writable } = await import('svelte/store');
 	target = document.createElement('div');
@@ -150,5 +164,44 @@ describe('CommandPalette', () => {
 		await sleep(30);
 		expect(ids()).not.toContain('chat:stale');
 		expect(ids()).toContain('chat:c1');
+	});
+
+	it('finds unimported Telegram/QQ sessions, labels source, and imports on click', async () => {
+		chatsApi.getChatListBySearchText.mockResolvedValue([]);
+		hermesApi.searchHermesSessions.mockResolvedValue([
+			{
+				id: '20261120_100000_abcd',
+				source: 'telegram',
+				title: '折叠屏体验清单',
+				preview: '先测 X Fold6 外屏',
+				message_count: 8,
+				imported: false
+			}
+		]);
+		hermesApi.importHermesSession.mockResolvedValue({
+			chat_id: '20261120_100000_abcd',
+			title: '折叠屏体验清单',
+			created: true,
+			imported_turns: 4
+		});
+		await type('折叠屏');
+		await until(() => ids().includes('remote:20261120_100000_abcd'));
+		expect(hermesApi.searchHermesSessions).toHaveBeenCalledWith('tok', '折叠屏', {
+			limit: 6,
+			includeImported: false
+		});
+		const row = target.querySelector('[data-command-palette-item="remote:20261120_100000_abcd"]') as any;
+		expect(row.querySelector('[data-command-palette-source="telegram"]').textContent.trim()).toBe('Telegram');
+		row.click();
+		await until(() => nav.goto.mock.calls.length > 0);
+		expect(hermesApi.importHermesSession).toHaveBeenCalledWith('tok', '20261120_100000_abcd');
+		expect(nav.goto).toHaveBeenCalledWith('/c/20261120_100000_abcd');
+	});
+
+	it('opens Task Inbox from the palette without leaving the page', async () => {
+		await type('任务收件箱');
+		await key('Enter');
+		const { get } = await import('svelte/store');
+		expect(get(stores.showTaskInbox)).toBe(true);
 	});
 });

@@ -63,6 +63,8 @@
 	export let onHandoff:
 		| ((to: 'auto' | 'answer' | 'discuss' | 'teams' | 'studio' | 'video') => void)
 		| null = null;
+	/** One-line description of what will travel to the workbench (draft / attachments / turns). */
+	export let handoffSummary = '';
 	/** 「选择助手」: opens the assistant picker (the user's assistants and the templates); the pick
 	 * puts its prompt on the current model. Left out when not given. */
 	export let onSelectAssistant: (() => void) | null = null;
@@ -619,8 +621,11 @@
 
 				{#if onHandoff}
 					<hr class="border-black/5 dark:border-white/5 my-1" />
-					<div class="px-3 pt-1 pb-0.5 text-2xs font-medium text-gray-400 dark:text-gray-500">
-						{tr('交给工作台（带上这句话）', 'Hand to workbench (with this draft)')}
+					<div
+						class="px-3 pt-1 pb-0.5 text-2xs font-medium text-gray-400 dark:text-gray-500"
+						data-halo-input-handoff-summary
+					>
+						{handoffSummary || tr('交给工作台（仅预填，不会立即开跑）', 'Hand to workbench (prefill only)')}
 					</div>
 					<DropdownMenu.Item
 						class="flex gap-2 items-center px-3 py-2 text-sm font-medium cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl"

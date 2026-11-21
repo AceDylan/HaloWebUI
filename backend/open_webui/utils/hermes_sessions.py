@@ -240,6 +240,144 @@ async def list_sessions(
     }
 
 
+# ---------------------------------------------------------- cross-channel search
+
+SEARCH_POOL_TTL_SECONDS = 30
+SEARCH_POOL_PER_SOURCE = 80
+SEARCH_LIMIT_DEFAULT = 8
+SEARCH_LIMIT_MAX = 30
+_SEARCH_POOL_CACHE: dict[str, tuple[float, list[dict]]] = {}
+
+
+def _session_sort_ts(item: dict) -> float:
+    raw = item.get("last_active") or item.get("started_at")
+    if isinstance(raw, (int, float)):
+        return float(raw) / 1000.0 if float(raw) > 1e12 else float(raw)
+    if isinstance(raw, str) and raw.strip():
+        try:
+            v = float(raw.strip())
+            return v / 1000.0 if v > 1e12 else v
+        except ValueError:
+            from datetime import datetime
+
+            try:
+                return datetime.fromisoformat(raw.strip().replace("Z", "+00:00")).timestamp()
+            except ValueError:
+                return 0.0
+    return 0.0
+
+
+async def _fetch_search_pool(request, user, model_id: Optional[str] = None) -> list[dict]:
+    """Fetch recent sessions across Telegram, QQ, CLI in parallel with a short per-user TTL."""
+    now = time.time()
+    cached = _SEARCH_POOL_CACHE.get(user.id)
+    if cached and cached[0] > now:
+        return cached[1]
+
+    model = await resolve_hermes_model(request, user, model_id)
+    root, headers = _connection(request, user, model)
+
+    async def fetch_source(src: str) -> list[dict]:
+        try:
+            data = await _get_json(
+                f"{root}/api/sessions",
+                headers,
+                {"source": src, "limit": str(SEARCH_POOL_PER_SOURCE), "offset": "0"},
+            )
+        except Exception:
+            log.debug("hermes session search: source %s unavailable", src, exc_info=True)
+            return []
+        out: list[dict] = []
+        seen: set[str] = set()
+        for item in data.get("data") or []:
+            if not isinstance(item, dict):
+                continue
+            sid = item.get("id")
+            if not sid or sid in seen or not SESSION_ID_RE.match(str(sid)):
+                continue
+            if not (item.get("message_count") or 0):
+                continue
+            seen.add(sid)
+            out.append(
+                {
+                    "id": sid,
+                    "source": item.get("source") or src,
+                    "title": (item.get("title") or "").strip(),
+                    "preview": (item.get("preview") or "").strip(),
+                    "message_count": item.get("message_count") or 0,
+                    "started_at": item.get("started_at"),
+                    "last_active": item.get("last_active"),
+                    "model": item.get("model"),
+                }
+            )
+        return out
+
+    pages = await asyncio.gather(*(fetch_source(src) for src in SOURCES))
+    pool: list[dict] = []
+    seen_all: set[str] = set()
+    for page in pages:
+        for item in page:
+            if item["id"] in seen_all:
+                continue
+            seen_all.add(item["id"])
+            pool.append(item)
+    pool.sort(key=_session_sort_ts, reverse=True)
+    _SEARCH_POOL_CACHE[user.id] = (now + SEARCH_POOL_TTL_SECONDS, pool)
+    return pool
+
+
+async def search_sessions(
+    request,
+    user,
+    *,
+    query: str,
+    limit: int = SEARCH_LIMIT_DEFAULT,
+    source: Optional[str] = None,
+    include_imported: bool = False,
+    model_id: Optional[str] = None,
+) -> dict:
+    """Search recent Telegram / QQ / CLI Hermes sessions by title, preview or id.
+
+    Designed for ⌘K / Ctrl+K unified search: by default returns only sessions not
+    yet imported into HaloWebUI (already-imported ones are found by chat search),
+    with a live check against the Chats table so newly imported sessions drop out
+    immediately.
+    """
+    q = (query or "").strip()
+    if not q:
+        return {"sessions": [], "query": ""}
+    if source and source not in SOURCES:
+        raise HermesSessionsError(400, f"source must be one of: {', '.join(SOURCES)}")
+    limit = max(1, min(int(limit), SEARCH_LIMIT_MAX))
+
+    pool = await _fetch_search_pool(request, user, model_id=model_id)
+    tokens = [tok.lower() for tok in q.split() if tok]
+
+    matched: list[dict] = []
+    for item in pool:
+        if source and item.get("source") != source:
+            continue
+        haystack = f"{item.get('title') or ''} {item.get('preview') or ''} {item.get('id') or ''}".lower()
+        if all(tok in haystack for tok in tokens):
+            matched.append(item)
+
+    if not matched:
+        return {"sessions": [], "query": q}
+
+    imported_ids = Chats.get_existing_chat_ids_by_user_id(
+        [item["id"] for item in matched], user.id
+    )
+    results: list[dict] = []
+    for item in matched:
+        imported = item["id"] in imported_ids
+        if imported and not include_imported:
+            continue
+        results.append({**item, "imported": imported})
+        if len(results) >= limit:
+            break
+    return {"sessions": results, "query": q}
+
+
 # ---------------------------------------------------------------- transcript
 
 

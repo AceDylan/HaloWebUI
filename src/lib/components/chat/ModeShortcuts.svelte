@@ -2,6 +2,7 @@
 	import { goto } from '$app/navigation';
 	import { config, user } from '$lib/stores';
 	import { chatHandoff, composerFiles, handOff, HANDOFF_PATH } from '$lib/utils/handoff';
+	import { summarizeHandoff } from '$lib/utils/handoff-summary';
 	import SidebarModeIcon from '$lib/components/layout/Sidebar/SidebarModeIcon.svelte';
 	import { modeLive, type ModeKey } from '$lib/components/scifi/mode-relay';
 
@@ -14,6 +15,7 @@
 	$: uploadedCount = composerFiles(files).length;
 	$: draftChars = prompt.trim().length;
 	$: carrying = draftChars > 0 || uploadedCount > 0;
+	$: handoffInfo = summarizeHandoff({ text: prompt, files });
 	$: cargoSummary = [
 		draftChars > 0 ? `${draftChars} 字` : '',
 		uploadedCount > 0 ? `${uploadedCount} 个附件` : ''
@@ -104,12 +106,15 @@
 	data-carrying={carrying ? '' : undefined}
 	data-halo-mode-shortcuts
 >
-	<span class="halo-shortcuts__lead mr-0.5 inline-flex items-center gap-1">
+	<span class="halo-shortcuts__lead mr-0.5 inline-flex items-center gap-1" title={handoffInfo.line}>
 		{#if carrying}
 			<span>把这句话交给</span>
 			{#if cargoSummary}
 				<span class="halo-shortcuts__cargo" data-halo-shortcuts-cargo>{cargoSummary}</span>
 			{/if}
+			<span class="hidden sm:inline text-[10.5px] opacity-75" data-halo-shortcuts-mode-note
+				>· 仅预填不直接开跑</span
+			>
 		{:else}
 			<span>工作台</span>
 		{/if}
@@ -120,7 +125,7 @@
 			type="button"
 			class="halo-shortcuts__chip group inline-flex items-center gap-1.5 rounded-full border border-gray-200/80 bg-white/75 px-2.5 py-1.5 font-medium text-gray-700 transition hover:text-gray-950 dark:border-gray-700/60 dark:bg-white/[0.035] dark:text-gray-200 dark:hover:text-white"
 			data-accent={mode.accent}
-			title={carrying ? `带着当前内容去${mode.label}：${mode.title}` : mode.title}
+			title={carrying ? `${handoffInfo.line} → ${mode.label}` : mode.title}
 			on:click={() => go(mode.to)}
 			data-halo-mode-shortcut={mode.to}
 		>

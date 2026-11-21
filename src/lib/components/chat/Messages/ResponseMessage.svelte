@@ -2584,7 +2584,7 @@
 													<div
 														class="px-3 pt-1 pb-0.5 text-2xs font-medium text-gray-400 dark:text-gray-500"
 													>
-														{tr('交给工作台处理', 'Hand off to workbench')}
+														{tr('交给工作台（带本轮问题与前文，仅预填）', 'Hand off to workbench (prefill only)')}
 													</div>
 													<DropdownMenu.Item
 														class={menuItemClass}

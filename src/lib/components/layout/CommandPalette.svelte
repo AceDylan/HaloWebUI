@@ -1,11 +1,14 @@
 <script lang="ts">
 	import { tick, onDestroy } from 'svelte';
 	import { goto } from '$app/navigation';
+	import { toast } from 'svelte-sonner';
 
-	import { getChatListBySearchText } from '$lib/apis/chats';
+	import { getChatList, getChatListBySearchText } from '$lib/apis/chats';
+	import { importHermesSession, searchHermesSessions } from '$lib/apis/hermes';
 	import {
 		chats,
 		config,
+		currentChatPage,
 		mobile,
 		models,
 		pendingMessageReveal,
@@ -13,24 +16,33 @@
 		showBookmarks,
 		showCommandPalette,
 		showSidebar,
+		showTaskInbox,
 		user
 	} from '$lib/stores';
 	import { CHAT_KIND_LABEL } from '$lib/utils/chat-kind';
-	import { paletteItems, type PaletteChat, type PaletteItem } from '$lib/utils/command-palette';
+	import {
+		paletteItems,
+		REMOTE_SOURCE_LABEL,
+		type PaletteChat,
+		type PaletteItem,
+		type PaletteRemoteSession
+	} from '$lib/utils/command-palette';
 	import { autoDestination, libraryDestinations, modeDestinations } from '$lib/utils/destinations';
 	import { snippetParts } from '$lib/utils/search-snippet';
 	import SidebarModeIcon from './Sidebar/SidebarModeIcon.svelte';
 
 	/**
 	 * ⌘K / Ctrl+K: one box to go anywhere — a mode or a library page, any chat (full-text, archived
-	 * ones too, opening at the message the words are in), or a new chat on some model. Arrow keys
-	 * and Enter, or tap; Esc closes.
+	 * ones too, opening at the message the words are in), unimported Telegram/QQ/CLI Hermes sessions
+	 * (imported on select), or a new chat on some model. Arrow keys and Enter, or tap; Esc closes.
 	 */
 
 	let query = '';
 	let index = 0;
 	let input: HTMLInputElement | null = null;
 	let hits: PaletteChat[] | null = null;
+	let remoteSessions: PaletteRemoteSession[] | null = null;
+	let importingSessionId: string | null = null;
 	let searchTimer: ReturnType<typeof setTimeout> | null = null;
 	let searchSeq = 0;
 	let listEl: HTMLElement | null = null;
@@ -41,6 +53,8 @@
 	const opened = async () => {
 		query = '';
 		hits = null;
+		remoteSessions = null;
+		importingSessionId = null;
 		index = 0;
 		await tick();
 		input?.focus();
@@ -55,13 +69,21 @@
 	const search = (text: string, visible: boolean) => {
 		cancelSearch();
 		hits = null;
+		remoteSessions = null;
 		const q = text.trim();
 		if (!visible || !q) return;
 		const seq = searchSeq;
 		searchTimer = setTimeout(async () => {
 			searchTimer = null;
-			const found = await getChatListBySearchText(localStorage.token, q, 1).catch(() => null);
-			if (seq === searchSeq && Array.isArray(found)) hits = found;
+			const [found, remote] = await Promise.all([
+				getChatListBySearchText(localStorage.token, q, 1).catch(() => null),
+				searchHermesSessions(localStorage.token, q, { limit: 6, includeImported: false }).catch(
+					() => []
+				)
+			]);
+			if (seq !== searchSeq) return;
+			if (Array.isArray(found)) hits = found;
+			remoteSessions = Array.isArray(remote) ? remote : [];
 		}, 200);
 	};
 	$: search(query, $showCommandPalette);
@@ -72,14 +94,38 @@
 		admin: $user?.role === 'admin',
 		recent: Array.isArray($chats) ? ($chats as PaletteChat[]) : [],
 		hits,
+		remoteSessions,
 		models: ($models ?? []) as any[]
 	});
 	$: if (index >= items.length) index = Math.max(0, items.length - 1);
 
 	const choose = async (item: PaletteItem | undefined) => {
-		if (!item) return;
+		if (!item || importingSessionId) return;
+		if (item.sessionId) {
+			importingSessionId = item.sessionId;
+			try {
+				const result = await importHermesSession(localStorage.token, item.sessionId);
+				if (result?.created) {
+					currentChatPage.set(1);
+					getChatList(localStorage.token, 1)
+						.then((list) => {
+							if (Array.isArray(list)) chats.set(list);
+						})
+						.catch(() => {});
+				}
+				close();
+				if ($mobile) showSidebar.set(false);
+				await goto(`/c/${result.chat_id}`);
+			} catch (e) {
+				toast.error(`${e}`);
+			} finally {
+				importingSessionId = null;
+			}
+			return;
+		}
 		close();
 		if ($mobile) showSidebar.set(false);
+		if (item.open === 'inbox') return showTaskInbox.set(true);
 		if (item.open === 'bookmarks') return showBookmarks.set(true);
 		if (item.open === 'archived') return showArchivedChats.set(true);
 		if (item.messageId) {
@@ -106,9 +152,10 @@
 
 	const iconOf = (item: PaletteItem) => {
 		if (item.section === '对话') return item.kind === 'discuss' || item.kind === 'discuss_dispatch' ? 'discuss' : 'chat';
+		if (item.section === '其他端会话') return 'chat';
 		if (item.section === '用模型开新对话') return 'chat';
 		const key = item.id.slice('go:'.length);
-		return key === 'new' ? 'chat' : key;
+		return key === 'new' || key === 'inbox' ? 'chat' : key;
 	};
 </script>
 
@@ -134,7 +181,7 @@
 					bind:value={query}
 					on:keydown={onKeydown}
 					class="min-w-0 flex-1 bg-transparent text-[15px] text-gray-900 outline-hidden placeholder:text-gray-400 dark:text-gray-100"
-					placeholder="搜对话、去哪个页面、用哪个模型开新对话…"
+					placeholder="搜网页 / Telegram / QQ 会话、去哪个页面、用哪个模型开新对话…"
 					role="combobox"
 					aria-expanded="true"
 					aria-controls="command-palette-list"
@@ -175,7 +222,7 @@
 							<span class="block truncate text-gray-900 dark:text-gray-100">{item.label}</span>
 							{#if item.hint}
 								<span class="block truncate text-xs text-gray-500 dark:text-gray-400">
-									{#if item.section === '对话'}
+									{#if item.section === '对话' || item.section === '其他端会话'}
 										{#each snippetParts(item.hint, query) as piece}{#if piece.match}<mark
 													class="rounded-sm bg-amber-200/70 px-px text-gray-900 dark:bg-amber-400/30 dark:text-amber-100"
 													>{piece.text}</mark
@@ -186,6 +233,17 @@
 								</span>
 							{/if}
 						</span>
+						{#if item.source}
+							<span
+								class="shrink-0 rounded px-1.5 py-0.5 text-2xs font-medium leading-none bg-sky-500/10 text-sky-700 dark:bg-sky-400/15 dark:text-sky-300"
+								data-command-palette-source={item.source}
+							>
+								{REMOTE_SOURCE_LABEL[item.source] ?? item.source}
+							</span>
+							<span class="shrink-0 text-2xs text-gray-400">
+								{importingSessionId === item.sessionId ? '导入中…' : '点开导入'}
+							</span>
+						{/if}
 						{#if item.kind && CHAT_KIND_LABEL[item.kind]}
 							<span class="shrink-0 rounded px-1 py-0.5 text-2xs leading-none text-gray-500 ring-1 ring-inset ring-gray-200 dark:text-gray-400 dark:ring-gray-700">
 								{CHAT_KIND_LABEL[item.kind]}

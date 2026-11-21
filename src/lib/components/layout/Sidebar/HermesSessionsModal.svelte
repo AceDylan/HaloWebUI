@@ -6,7 +6,12 @@
 	import relativeTime from 'dayjs/plugin/relativeTime';
 
 	import { mobile, showSidebar } from '$lib/stores';
-	import { getHermesSessions, importHermesSession, type HermesSession } from '$lib/apis/hermes';
+	import {
+		getHermesSessions,
+		importHermesSession,
+		searchHermesSessions,
+		type HermesSession
+	} from '$lib/apis/hermes';
 	import Modal from '$lib/components/common/Modal.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 
@@ -30,6 +35,8 @@
 	const PAGE_SIZE = 20;
 
 	let source = 'telegram';
+	let query = '';
+	let searchTimer: ReturnType<typeof setTimeout> | null = null;
 	let sessions: HermesSession[] = [];
 	let nextOffset = 0;
 	let hasMore = false;
@@ -56,6 +63,20 @@
 			hasMore = false;
 		}
 		try {
+			const trimmed = query.trim();
+			if (trimmed) {
+				const found = await searchHermesSessions(localStorage.token, trimmed, {
+					source: wanted,
+					limit: 30,
+					includeImported: true
+				});
+				if (seq !== requestId) return;
+				sessions = found;
+				nextOffset = found.length;
+				hasMore = false;
+				error = '';
+				return;
+			}
 			const page = await getHermesSessions(localStorage.token, wanted, {
 				limit: PAGE_SIZE,
 				offset
@@ -101,11 +122,24 @@
 		loadedFor = '';
 	};
 
+	const onQueryInput = () => {
+		if (searchTimer) clearTimeout(searchTimer);
+		searchTimer = setTimeout(() => {
+			searchTimer = null;
+			if (show) void load(false);
+		}, 220);
+	};
+
 	// Fetch on open and whenever the source tab changes; forget on close so the
 	// next open shows fresh data. `loadedFor` is claimed before awaiting so this
 	// statement cannot fire the same load twice.
 	$: if (!show && loadedFor) {
 		loadedFor = '';
+		query = '';
+		if (searchTimer) {
+			clearTimeout(searchTimer);
+			searchTimer = null;
+		}
 	}
 	$: if (show && loadedFor !== source) {
 		loadedFor = source;
@@ -200,6 +234,16 @@
 				>
 					{$i18n.t('Refresh')}
 				</button>
+			</div>
+			<div class="mt-2">
+				<input
+					type="search"
+					bind:value={query}
+					on:input={onQueryInput}
+					placeholder="按关键词搜索当前来源的会话…"
+					class="w-full rounded-xl border border-gray-200/80 bg-gray-50/70 px-3 py-1.5 text-xs text-gray-800 outline-hidden placeholder:text-gray-400 focus:border-primary-400 dark:border-gray-800 dark:bg-gray-900/70 dark:text-gray-100"
+					data-halo-hermes-sessions-search
+				/>
 			</div>
 			<hr class="border-gray-100 dark:border-gray-850 my-2" />
 

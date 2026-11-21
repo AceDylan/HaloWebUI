@@ -97,6 +97,7 @@
 		getSmartWebSearchRouteLabel
 	} from '$lib/utils/native-web-search';
 	import { translateWithDefault } from '$lib/i18n';
+	import { summarizeHandoff } from '$lib/utils/handoff-summary';
 	import { saveUserSettingsPatch } from '$lib/utils/user-settings';
 
 	import XMark from '../icons/XMark.svelte';
@@ -1902,6 +1903,7 @@
 												}
 											}}
 											onHandoff={handOffDraft}
+											handoffSummary={summarizeHandoff({ text: prompt, files, history }).line}
 											onSelectAssistant={onActivateAssistant ? () => (showAssistantPicker = true) : null}
 											onReferenceNote={$_user?.role === 'admin'
 												? () => {

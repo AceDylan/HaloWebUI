@@ -17,6 +17,7 @@
 		mobile,
 		showArchivedChats,
 		showHermesSessions,
+		showTaskInbox,
 		showBookmarks,
 		showCommandPalette,
 		selectedAssistantScene,
@@ -52,6 +53,7 @@
 
 	import ArchivedChatsModal from './Sidebar/ArchivedChatsModal.svelte';
 	import HermesSessionsModal from './Sidebar/HermesSessionsModal.svelte';
+	import TaskInboxModal from './Sidebar/TaskInboxModal.svelte';
 	import ChatHistoryModal from './Sidebar/ChatHistoryModal.svelte';
 	import BookmarksModal from './Sidebar/BookmarksModal.svelte';
 	import UserMenu from './Sidebar/UserMenu.svelte';
@@ -754,6 +756,13 @@
 
 <HermesSessionsModal
 	bind:show={$showHermesSessions}
+	on:change={async () => {
+		await initChatList();
+	}}
+/>
+
+<TaskInboxModal
+	bind:show={$showTaskInbox}
 	on:change={async () => {
 		await initChatList();
 	}}

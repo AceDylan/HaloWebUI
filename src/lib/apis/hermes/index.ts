@@ -142,6 +142,98 @@ export const getHermesSessions = async (
 };
 
 /**
+ * Search recent hermes sessions across Telegram / QQ / CLI (unimported by default, for ⌘K).
+ */
+export const searchHermesSessions = async (
+	token: string,
+	query: string,
+	{
+		limit = 8,
+		includeImported = false,
+		source
+	}: { limit?: number; includeImported?: boolean; source?: string } = {}
+): Promise<HermesSession[]> => {
+	const q = query.trim();
+	if (!q) return [];
+	const params = new URLSearchParams({
+		q,
+		limit: `${limit}`,
+		include_imported: includeImported ? 'true' : 'false'
+	});
+	if (source) params.set('source', source);
+	const res = await fetch(`${WEBUI_API_BASE_URL}/hermes/sessions/search?${params}`, {
+		method: 'GET',
+		headers: jsonHeaders(token)
+	});
+	if (!res.ok) {
+		throw await detailOf(res);
+	}
+	const data = await res.json();
+	return Array.isArray(data?.sessions) ? data.sessions : [];
+};
+
+export type TaskInboxItem = {
+	id: string;
+	bucket: 'attention' | 'running' | 'ended';
+	kind: 'hermes' | 'runner' | 'team' | 'answer' | 'discuss' | 'video' | 'auto' | 'chat' | 'image' | 'session';
+	source: 'web' | 'telegram' | 'qqbot' | 'cli';
+	title: string;
+	status: string;
+	status_label: string;
+	summary?: string;
+	href?: string | null;
+	chat_id?: string | null;
+	session_id?: string | null;
+	imported?: boolean;
+	run_id?: string | null;
+	agent?: string | null;
+	timestamp: number;
+	unread?: boolean;
+	/** Explicit recovery semantics on failed/stopped tasks: continue original vs start fresh. */
+	recovery?: 'continue' | 'restart' | null;
+};
+
+export type TaskInboxResponse = {
+	days: number;
+	attention: TaskInboxItem[];
+	running: TaskInboxItem[];
+	ended: TaskInboxItem[];
+	counts: { attention: number; running: number; ended: number };
+};
+
+/**
+ * Unified Task Inbox: waiting-for-user, running, and recently ended tasks across web workbenches,
+ * background runners, and Telegram/QQ Hermes sessions.
+ */
+export const getTaskInbox = async (token: string, days = 7): Promise<TaskInboxResponse> => {
+	const res = await fetch(`${WEBUI_API_BASE_URL}/hermes/inbox?days=${days}`, {
+		method: 'GET',
+		headers: jsonHeaders(token)
+	});
+	if (res.status === 401) {
+		throw new HermesSessionExpiredError();
+	}
+	if (!res.ok) {
+		throw await detailOf(res);
+	}
+	const data = await res.json();
+	const attention = Array.isArray(data?.attention) ? data.attention : [];
+	const running = Array.isArray(data?.running) ? data.running : [];
+	const ended = Array.isArray(data?.ended) ? data.ended : [];
+	return {
+		days: typeof data?.days === 'number' ? data.days : days,
+		attention,
+		running,
+		ended,
+		counts: {
+			attention: data?.counts?.attention ?? attention.length,
+			running: data?.counts?.running ?? running.length,
+			ended: data?.counts?.ended ?? ended.length
+		}
+	};
+};
+
+/**
  * Import a hermes session as a chat (id = session id, so the chat continues
  * that session). Idempotent: an already-imported session returns its chat.
  */

@@ -22,9 +22,32 @@ describe('paletteItems', () => {
 	it('lists every place and the recent chats before anything is typed', () => {
 		const items = paletteItems({ ...base, query: '' });
 		const labels = items.filter((i) => i.section === '跳转').map((i) => i.label);
-		expect(labels).toEqual(['新对话', '精答', '讨论', '协作', '视频', '助手', '提示词', '定时', '收藏', '已归档的对话', '设置', '管理后台']);
+		expect(labels).toEqual(['新对话', '精答', '讨论', '协作', '视频', '助手', '提示词', '定时', '任务收件箱', '收藏', '已归档的对话', '设置', '管理后台']);
 		expect(items.filter((i) => i.section === '对话').map((i) => i.href)).toEqual(['/c/c1', '/discuss/d1']);
 		expect(items.some((i) => i.section === '用模型开新对话')).toBe(false);
+	});
+
+	it('includes unimported remote sessions under 其他端会话 without duplicating chats', () => {
+		const items = paletteItems({
+			...base,
+			query: '折叠屏',
+			hits: [{ id: 'c-dup', title: '已导入的折叠屏', kind: null }],
+			remoteSessions: [
+				{ id: 'c-dup', source: 'telegram', title: '已导入的折叠屏', preview: 'dup', message_count: 2 },
+				{ id: 'tg-2', source: 'telegram', title: 'X Fold6 回归', preview: '外屏和内屏', message_count: 5 }
+			]
+		});
+		const remote = items.filter((i) => i.section === '其他端会话');
+		expect(remote).toEqual([
+			{
+				id: 'remote:tg-2',
+				section: '其他端会话',
+				label: 'X Fold6 回归',
+				hint: '外屏和内屏',
+				sessionId: 'tg-2',
+				source: 'telegram'
+			}
+		]);
 	});
 
 	it('narrows places, uses the server hits for chats, and offers matching models', () => {

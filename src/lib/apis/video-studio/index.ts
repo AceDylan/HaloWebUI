@@ -1,7 +1,13 @@
 import { WEBUI_API_BASE_URL } from '$lib/constants';
+import { videoThumbUrl } from '$lib/utils/lazy-video';
 import { parseJsonResponse } from '../response';
 
 const VIDEO_STUDIO_API_BASE_URL = `${WEBUI_API_BASE_URL}/video-studio`;
+
+/** The picture a video shows before it plays: its cover, else its first frame as a small JPEG
+ * (utils/lazy-video). Tiles and players show this instead of buffering the video itself. */
+export const videoPoster = (video: { cover?: string; fileId?: string }): string =>
+	video.cover || (video.fileId ? videoThumbUrl(video.fileId) : '');
 
 /** A video Hermes or a runner handed over (backend utils/video_library.py). */
 export type LibraryVideo = {

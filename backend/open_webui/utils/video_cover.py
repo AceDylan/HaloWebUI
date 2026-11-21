@@ -94,8 +94,8 @@ def _blank(frame) -> bool:
     return float(small.std()) < 6.0
 
 
-def first_frame(path: str) -> tuple[bytes, int, int]:
-    """The first frame with something on it, as JPEG bytes (at most REFERENCE_MAX_SIDE), and the
+def first_frame(path: str, max_side: int = REFERENCE_MAX_SIDE, quality: int = 90) -> tuple[bytes, int, int]:
+    """The first frame with something on it, as JPEG bytes (at most *max_side*), and the
     video's width and height."""
     import cv2
 
@@ -119,16 +119,62 @@ def first_frame(path: str) -> tuple[bytes, int, int]:
             at += SCAN_STEP_SECONDS
         height = height or chosen.shape[0]
         width = width or chosen.shape[1]
-        scale = min(1.0, REFERENCE_MAX_SIDE / max(chosen.shape[0], chosen.shape[1]))
+        scale = min(1.0, max_side / max(chosen.shape[0], chosen.shape[1]))
         if scale < 1.0:
             chosen = cv2.resize(chosen, (int(chosen.shape[1] * scale), int(chosen.shape[0] * scale)),
                                 interpolation=cv2.INTER_AREA)
-        ok, encoded = cv2.imencode(".jpg", chosen, [int(cv2.IMWRITE_JPEG_QUALITY), 90])
+        ok, encoded = cv2.imencode(".jpg", chosen, [int(cv2.IMWRITE_JPEG_QUALITY), quality])
         if not ok:
             raise IllustrateError("首帧转图片失败")
         return encoded.tobytes(), width, height
     finally:
         capture.release()
+
+
+# 缩略图: a video without a cover (older than the covers, or its cover failed) shows its first
+# frame as a small JPEG in the library and as the players' poster, instead of each <video> tile
+# buffering megabytes of the video over a slow link. Made once per file, kept in the cache.
+THUMB_MAX_SIDE = 480
+THUMB_QUALITY = 80
+_thumb_slots: Optional[asyncio.Semaphore] = None
+
+
+def thumb_path(file_id: str) -> str:
+    from open_webui.config import CACHE_DIR
+
+    return os.path.join(str(CACHE_DIR), "video-thumbs", f"{file_id}.jpg")
+
+
+def drop_thumb(file_id: str) -> None:
+    try:
+        os.remove(thumb_path(file_id))
+    except OSError:
+        pass
+
+
+async def thumbnail(file_id: str, video_path: str) -> bytes:
+    """The cached first-frame JPEG of *file_id* (made from *video_path* the first time; two at a
+    time, a page of tiles asks at once)."""
+    global _thumb_slots
+    target = thumb_path(file_id)
+    try:
+        with open(target, "rb") as f:
+            return f.read()
+    except OSError:
+        pass
+    if _thumb_slots is None:
+        _thumb_slots = asyncio.Semaphore(2)
+    async with _thumb_slots:
+        if os.path.isfile(target):
+            with open(target, "rb") as f:
+                return f.read()
+        jpeg, _, _ = await asyncio.to_thread(first_frame, video_path, THUMB_MAX_SIDE, THUMB_QUALITY)
+        os.makedirs(os.path.dirname(target), exist_ok=True)
+        partial = f"{target}.{os.getpid()}.part"
+        with open(partial, "wb") as f:
+            f.write(jpeg)
+        os.replace(partial, target)
+        return jpeg
 
 
 def canvas_for(width: int, height: int) -> tuple[str, str]:

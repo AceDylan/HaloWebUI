@@ -19,7 +19,7 @@ or picks again from their earlier ones: ``/music`` lists those.
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field
 
 from open_webui.internal.db import get_db
@@ -193,6 +193,37 @@ async def delete_music(file_id: str, user=Depends(get_verified_user)):
         ]
     freed = sum(delete_owned_file(user.id, fid) for fid in dict.fromkeys([file_id, *same]))
     return {"deleted": len(set([file_id, *same])), "freed": freed}
+
+
+THUMB_CACHE_SECONDS = 7 * 24 * 3600
+
+
+@router.get("/thumb/{file_id}")
+async def get_video_thumb(file_id: str, user=Depends(get_verified_user)):
+    """缩略图: the first frame of one of the user's video files as a small JPEG (at most
+    video_cover.THUMB_MAX_SIDE), for the tiles and players of a video without a cover. A file
+    never changes under its id, so the browser keeps it."""
+    from open_webui.models.files import Files
+    from open_webui.storage.provider import Storage
+    from open_webui.utils import video_cover
+
+    file = Files.get_file_by_id(file_id)
+    if file is None or not file.path or (file.user_id != user.id and getattr(user, "role", "") != "admin"):
+        raise HTTPException(404, "视频不存在")
+    meta = file.meta or {}
+    kind = str(meta.get("content_type") or "")
+    if not kind.startswith("video/") and not str(file.filename or "").lower().endswith(
+        (".mp4", ".m4v", ".mov", ".webm", ".mkv")
+    ):
+        raise HTTPException(404, "不是视频")
+    try:
+        jpeg = await video_cover.thumbnail(file.id, Storage.get_file(file.path))
+    except Exception as exc:  # noqa: BLE001 — the tile stays dark
+        log.info("video thumb for %s unavailable: %r", file_id, exc)
+        raise HTTPException(404, "读不出画面")
+    return Response(
+        jpeg, media_type="image/jpeg", headers={"Cache-Control": f"private, max-age={THUMB_CACHE_SECONDS}"}
+    )
 
 
 @router.post("/items/{item_id}/cover", response_model=ImageStudioItemModel)

@@ -10,7 +10,7 @@
 	import { createEventDispatcher } from 'svelte';
 
 	import '$lib/components/teams/teams.css';
-	import type { VideoTask } from '$lib/apis/video-studio';
+	import { videoPoster, type VideoTask } from '$lib/apis/video-studio';
 	import { toast } from 'svelte-sonner';
 	import { copyToClipboard } from '$lib/utils';
 	import StatusChip from '$lib/components/teams/StatusChip.svelte';
@@ -187,8 +187,8 @@
 						{#each task.videos as video (video.id)}
 							<div class="min-w-0">
 								<!-- svelte-ignore a11y-media-has-caption -->
-								<!-- with a cover the poster shows until play (a #t= start would hide it) -->
-								<video src={video.cover ? video.url : `${video.url}#t=0.1`} poster={video.cover || undefined} controls playsinline preload="metadata" class="aspect-video w-full rounded-lg bg-black" data-video-task-player={video.id} />
+								<!-- the cover (or the first frame the server cut) until play: nothing of the video is fetched before -->
+								<video src={video.url} poster={videoPoster(video) || undefined} controls playsinline preload="none" class="aspect-video w-full rounded-lg bg-black" data-video-task-player={video.id} />
 								<div class="mt-1 flex items-center gap-2 text-xs text-gray-600 dark:text-gray-300">
 									<span class="min-w-0 flex-1 truncate" title={video.name}>{video.title || video.name}</span>
 									{#if video.coverStatus === 'generating'}

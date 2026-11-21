@@ -24,6 +24,7 @@ const api = vi.hoisted(() => ({
 	stopVideoTask: vi.fn(),
 	redrawVideoCover: vi.fn(),
 	getPcStatus: vi.fn(async () => ({ state: 'ready', checkedAt: Date.now() - 12_000 })),
+	videoPoster: (v: any) => v.cover || (v.fileId ? `/api/v1/video-studio/thumb/${v.fileId}` : ''),
 	videoTaskLive: (task: any) => task?.state === 'running' || task?.state === 'background',
 	videoTaskCovering: (task: any) =>
 		task?.state === 'done' && (task.videos ?? []).some((v: any) => v.coverStatus === 'generating')
@@ -481,7 +482,9 @@ describe('Videos', () => {
 		expect(withCover.querySelector('[data-video-cover="video_5"]').getAttribute('src')).toBe('/api/v1/files/cv5/content');
 		expect(withCover.querySelector('video')).toBeFalsy();
 		const drawing = target.querySelector('[data-video-card="video_4"]');
-		expect(drawing.querySelector('video')).toBeTruthy();
+		// no cover yet: its first frame as a picture, the video itself is not fetched
+		expect(drawing.querySelector('video')).toBeFalsy();
+		expect(drawing.querySelector('[data-video-thumb="video_4"]').getAttribute('src')).toBe('/api/v1/video-studio/thumb/f4');
 		expect(drawing.querySelector('[data-video-cover-drawing="video_4"]').textContent).toContain('封面生成中');
 		withCover.querySelector('button').click();
 		await sleep(20);
@@ -781,6 +784,7 @@ describe('Videos 制作任务', () => {
 		const player = done.querySelector('[data-video-task-player="video_7"]');
 		expect(player.getAttribute('src')).toBe('/api/v1/files/f7/content'); // no #t=: the poster stays
 		expect(player.getAttribute('poster')).toBe('/api/v1/files/cv7/content');
+		expect(player.getAttribute('preload')).toBe('none'); // nothing fetched before play
 		expect(done.querySelector('[data-video-task-cover]').getAttribute('href')).toBe('/api/v1/files/cv7/content');
 		expect(done.querySelector('[data-step="video"]').getAttribute('data-state')).toBe('done');
 		expect(done.querySelector('[data-video-task-stop]')).toBeFalsy();

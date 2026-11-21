@@ -1,6 +1,7 @@
 import { decode } from 'html-entities';
 
 import { getDataUrlDownloadName } from './download-links';
+import { storedFileId, videoThumbUrl } from './lazy-video';
 import { resolveSafeMarkdownUrl } from './html-safety';
 import { hubNoteUrl, splitVaultNotePaths, vaultNotePath } from './hub-embed';
 import {
@@ -1344,8 +1345,12 @@ const renderBlock = (block: ParsedBlock, blockId: string) => {
 			)}">`;
 
 		case 'media':
-			return `<div data-halo-block="media"><${block.tag} src="${escapeAttribute(block.src)}" controls preload="metadata"${
-				block.tag === 'video' ? ' playsinline' : ''
+			return `<div data-halo-block="media"><${block.tag} src="${escapeAttribute(block.src)}" controls preload="${
+				block.tag === 'video' ? 'none' : 'metadata'
+			}"${
+				block.tag === 'video'
+					? `${storedFileId(block.src) ? ` poster="${escapeAttribute(videoThumbUrl(storedFileId(block.src)))}"` : ''} playsinline`
+					: ''
 			} style="${escapeAttribute(
 				block.tag === 'video'
 					? toStyle({ 'max-width': '100%', 'max-height': '70vh', 'border-radius': '12px', background: '#000' })

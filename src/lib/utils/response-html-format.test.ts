@@ -7,6 +7,7 @@ import {
 	renderResponseHtmlFormat,
 	resolveHaloThemeVars
 } from './response-html-format';
+import { videoThumbUrl } from './lazy-video';
 
 describe('response-html-format', () => {
 	it('renders markdown-like content as a Halo inline HTML fragment', () => {
@@ -376,7 +377,10 @@ describe('renderResponseHtmlFormat: files Hermes made', () => {
 			].join('\n')
 		);
 
-		expect(html).toContain(`<video src="${video}" controls preload="metadata" playsinline`);
+		// nothing of the video is fetched until it plays; its first frame stands in (utils/lazy-video)
+		expect(html).toContain(
+			`<video src="${video}" controls preload="none" poster="${videoThumbUrl('7807b3bf-983b-48d9-a15b-ff4001a08f99')}" playsinline`
+		);
 		expect(html).toContain('<audio src="/api/v1/files/a1b2c3d4/content" controls');
 		expect(html).toContain(`href="${video}"`);
 		expect(html).not.toContain('&lt;video');

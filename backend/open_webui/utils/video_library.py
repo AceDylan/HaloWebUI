@@ -168,6 +168,9 @@ def delete_owned_file(user_id: str, file_id: str) -> int:
         except Exception:  # noqa: BLE001 — the row still goes: nothing left to show
             log.warning("could not delete the stored bytes of %s", file_id, exc_info=True)
     Files.delete_file_by_id(file_id)
+    from open_webui.utils.video_cover import drop_thumb
+
+    drop_thumb(file_id)
     return size
 
 

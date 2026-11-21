@@ -220,3 +220,49 @@ def test_the_pipeline_cover_endpoint_needs_the_notification_token(monkeypatch):
     assert client.post("/api/v1/video-studio/cover-image", json=body).status_code == 401
     assert client.post("/api/v1/video-studio/cover-image", json=body,
                        headers={"Authorization": "Bearer nope"}).status_code == 401
+
+
+def test_the_thumb_endpoint_cuts_the_first_frame_once_and_only_for_the_owner(tmp_path, monkeypatch):
+    cv2 = pytest.importorskip("cv2")
+    import numpy as np
+    from open_webui.models.files import FileForm, Files
+
+    path = str(tmp_path / "clip.mp4")
+    writer = cv2.VideoWriter(path, cv2.VideoWriter_fourcc(*"mp4v"), 10, (1280, 720))
+    assert writer.isOpened()
+    for _ in range(5):
+        frame = np.zeros((720, 1280, 3), np.uint8)
+        frame[:, :640] = (0, 200, 0)
+        writer.write(frame)
+    writer.release()
+    Files.insert_new_file("vt-owner", FileForm(id="vt-f1", filename="clip.mp4", path=path,
+                                                meta={"content_type": "video/mp4"}))
+    Files.insert_new_file("vt-owner", FileForm(id="vt-doc", filename="a.pdf", path=path,
+                                                meta={"content_type": "application/pdf"}))
+
+    app = FastAPI()
+    app.include_router(video_studio.router, prefix="/api/v1/video-studio")
+    who = {"user": _User("vt-owner")}
+    app.dependency_overrides[get_verified_user] = lambda: who["user"]
+    client = TestClient(app)
+
+    res = client.get("/api/v1/video-studio/thumb/vt-f1")
+    assert res.status_code == 200 and res.headers["content-type"] == "image/jpeg"
+    assert "max-age" in res.headers["cache-control"]
+    picture = cv2.imdecode(np.frombuffer(res.content, np.uint8), cv2.IMREAD_COLOR)
+    assert max(picture.shape[:2]) == video_cover.THUMB_MAX_SIDE
+    assert os.path.isfile(video_cover.thumb_path("vt-f1"))
+
+    # cut once: the cached picture is served even when the video can no longer be read
+    monkeypatch.setattr(video_cover, "first_frame", lambda *a, **k: (_ for _ in ()).throw(AssertionError("cut again")))
+    assert client.get("/api/v1/video-studio/thumb/vt-f1").content == res.content
+
+    assert client.get("/api/v1/video-studio/thumb/vt-doc").status_code == 404
+    assert client.get("/api/v1/video-studio/thumb/nope").status_code == 404
+    who["user"] = _User("vt-other")
+    assert client.get("/api/v1/video-studio/thumb/vt-f1").status_code == 404
+
+    from open_webui.utils.video_library import delete_owned_file
+
+    delete_owned_file("vt-owner", "vt-f1")
+    assert not os.path.exists(video_cover.thumb_path("vt-f1"))

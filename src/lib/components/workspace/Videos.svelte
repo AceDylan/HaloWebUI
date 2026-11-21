@@ -36,6 +36,7 @@
 		getPcStatus,
 		getMusicFiles,
 		getVideoPage,
+		videoPoster,
 		getVideoTask,
 		getVideoTasks,
 		startVideoTask,
@@ -822,24 +823,10 @@
 		return Number.isNaN(d.getTime()) ? '' : d.toLocaleString(undefined, { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 	};
 
-	// A player gets its file only when it comes near the screen: a page of 24 would otherwise ask
-	// for 24 videos at once.
-	const nearScreen = (node: HTMLVideoElement, src: string) => {
-		let observer: IntersectionObserver | null = null;
-		const load = () => {
-			node.src = `${src}#t=0.1`;
-			observer?.disconnect();
-			observer = null;
-		};
-		if (typeof IntersectionObserver === 'undefined') load();
-		else {
-			observer = new IntersectionObserver((entries) => entries.some((e) => e.isIntersecting) && load(), {
-				rootMargin: '300px 0px'
-			});
-			observer.observe(node);
-		}
-		return { destroy: () => observer?.disconnect() };
-	};
+	// A tile shows a picture (the cover, else the first frame the server cut once), never the video:
+	// a <video> asked for a first frame buffers megabytes, and a page of them filled a slow link so
+	// every other click waited. A frame that cannot be read leaves the tile dark.
+	const hideBroken = (event: Event) => ((event.currentTarget as HTMLImageElement).style.visibility = 'hidden');
 
 	// ---- page ----------------------------------------------------------------------------------
 	const setTab = (value: Tab) => {
@@ -1314,12 +1301,8 @@
 						{#each videos.slice(0, 3) as video (video.id)}
 							<button type="button" class="group min-w-0 text-left" on:click={() => play(video)}>
 								<div class="relative aspect-video overflow-hidden rounded-lg bg-gray-900">
-									<!-- svelte-ignore a11y-media-has-caption -->
-									<!-- svelte-ignore a11y-media-has-caption -->
-							{#if video.cover}
-										<img src={video.cover} alt="" loading="lazy" class="size-full object-cover" data-video-cover={video.id} />
-									{:else}
-										<video use:nearScreen={video.url} class="size-full object-cover" muted playsinline preload="metadata" />
+									{#if videoPoster(video)}
+										<img src={videoPoster(video)} alt="" loading="lazy" class="size-full object-cover" data-video-cover={video.cover ? video.id : undefined} data-video-thumb={video.cover ? undefined : video.id} on:error={hideBroken} />
 									{/if}
 									<span class="absolute inset-0 grid place-items-center bg-black/10 opacity-80 transition group-hover:bg-black/25">
 										<span class="grid size-8 place-items-center rounded-full bg-white/90 text-gray-900 shadow">▶</span>
@@ -1589,10 +1572,8 @@
 				{#each videos as video (video.id)}
 					<div class="glass-item group p-1.5" data-video-card={video.id}>
 						<button type="button" class="relative block aspect-video w-full overflow-hidden rounded-lg bg-gray-900" on:click={() => play(video)} aria-label="播放 {videoTitle(video)}">
-							{#if video.cover}
-								<img src={video.cover} alt="" loading="lazy" class="size-full object-cover" data-video-cover={video.id} />
-							{:else}
-								<video use:nearScreen={video.url} class="size-full object-cover" muted playsinline preload="metadata" />
+							{#if videoPoster(video)}
+								<img src={videoPoster(video)} alt="" loading="lazy" class="size-full object-cover" data-video-cover={video.cover ? video.id : undefined} data-video-thumb={video.cover ? undefined : video.id} on:error={hideBroken} />
 							{/if}
 							{#if video.coverStatus === 'generating'}
 								<span class="absolute bottom-2 left-2 rounded-full bg-black/55 px-2 py-0.5 text-[10.5px] text-white backdrop-blur" data-video-cover-drawing={video.id}>封面生成中…</span>
@@ -1656,7 +1637,7 @@
 				</button>
 			</div>
 			<!-- svelte-ignore a11y-media-has-caption -->
-			<video src={playing.url} poster={playing.cover || undefined} controls autoplay playsinline class="max-h-[70vh] w-full rounded-xl bg-black" />
+			<video src={playing.url} poster={videoPoster(playing) || undefined} controls autoplay playsinline class="max-h-[70vh] w-full rounded-xl bg-black" />
 			<div class="flex flex-wrap items-center justify-between gap-2 px-1 text-xs text-gray-500">
 				<span>{playing.name}{playing.size ? ` · ${formatFileSize(playing.size)}` : ''} · {dateLabel(playing.createdAt)}{playing.runId ? ` · ${makerLabel(playing)} 运行 ${playing.runId}` : ''}{runSource(playing) ? `（${runSource(playing)} 发起）` : ''}</span>
 				<span class="flex flex-wrap items-center gap-2">

@@ -26,6 +26,7 @@
 	import { isSvgMarkup, promoteSvgMarkupTokens } from './svgMarkupTokens';
 	import { getHeadingAnchorId } from '$lib/utils/headings';
 	import { rewriteDataUrlDownloadLinks } from '$lib/utils/download-links';
+	import { lazyVideoHtml } from '$lib/utils/lazy-video';
 	import KatexHtml from './KatexHtml.svelte';
 	import {
 		rewriteGeneratedFileHtmlLinks,
@@ -567,7 +568,7 @@
 					}}
 				/>
 			{:else if html && (html.includes('<video') || html.includes('<audio'))}
-				{@html html}
+				{@html lazyVideoHtml(html)}
 			{:else if iframeSrc}
 				<iframe
 					src={iframeSrc}

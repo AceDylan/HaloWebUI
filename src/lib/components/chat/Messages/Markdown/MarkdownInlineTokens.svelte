@@ -14,6 +14,7 @@
 	import { splitVaultNotePaths, vaultNotePath } from '$lib/utils/hub-embed';
 	import { inAppPath } from '$lib/utils/app-links';
 	import { getDataUrlDownloadName, rewriteDataUrlDownloadLinks } from '$lib/utils/download-links';
+	import { lazyVideoHtml } from '$lib/utils/lazy-video';
 	import KatexHtml from './KatexHtml.svelte';
 
 	import Image from '$lib/components/common/Image.svelte';
@@ -106,7 +107,7 @@
 		{#if isSvgMarkupToken}
 			<span class="font-mono whitespace-pre-wrap break-all">{tokenText}</span>
 		{:else if html && (html.includes('<video') || html.includes('<audio'))}
-			{@html html}
+			{@html lazyVideoHtml(html)}
 		{:else if iframeSrc}
 			<iframe
 				src={iframeSrc}

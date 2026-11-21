@@ -26,7 +26,28 @@ DEFAULT_DAYS = 7
 MAX_DAYS = 30
 UPSTREAM_TIMEOUT_SECONDS = 4.0
 MAX_ENDED_ITEMS = 40
+STALE_RUNNER_SECONDS = 6 * 3600
+DISMISSED_INFO_KEY = "task_inbox_dismissed"
+DISMISSED_MAX_ITEMS = 200
+DISMISSED_TTL_SECONDS = (MAX_DAYS + 1) * 86400
 PLACEHOLDER_TITLES = {"New Chat", "新对话", "新聊天", "新精答", "新讨论"}
+_GENERIC_CONTINUATION_TITLES = {
+    "继续",
+    "继续吧",
+    "继续做",
+    "继续执行",
+    "好的",
+    "好",
+    "确认",
+    "同意",
+    "是",
+    "ok",
+    "yes",
+    "continue",
+    "go",
+    "go on",
+}
+_CHAT_KEYED_PREFIXES = {"hermes", "chat", "video", "answer", "discuss", "image"}
 
 _RUNNER_PLATFORM_TO_SOURCE = {
     "telegram": "telegram",
@@ -373,6 +394,18 @@ def _collect_local(user_id: str, days: int, now: float) -> tuple[list[dict], lis
                 title = row.get("title")
                 if not title or title in PLACEHOLDER_TITLES:
                     title = _clip(meta_val.get("question"), 48) or default_title
+                assistant = meta_val.get("assistant")
+                if isinstance(assistant, dict):
+                    assistant_text = " ".join(
+                        p
+                        for p in (
+                            str(assistant.get("emoji") or "").strip(),
+                            str(assistant.get("name") or "").strip(),
+                        )
+                        if p
+                    )
+                else:
+                    assistant_text = str(assistant or "").strip()
                 ended.append({
                     "id": f"{kind}:{cid}",
                     "bucket": "ended",
@@ -381,7 +414,7 @@ def _collect_local(user_id: str, days: int, now: float) -> tuple[list[dict], lis
                     "title": title,
                     "status": status,
                     "status_label": label,
-                    "summary": _clip(meta_val.get("assistant") or meta_val.get("preview") or ""),
+                    "summary": _clip(assistant_text or meta_val.get("preview") or ""),
                     "href": f"{path_prefix}{cid}",
                     "chat_id": cid,
                     "timestamp": ts,
@@ -428,8 +461,95 @@ def _collect_local(user_id: str, days: int, now: float) -> tuple[list[dict], lis
     return attention, running, ended, active_run_ids
 
 
+def _resolve_runner_title(run: dict, runs_by_id: dict[str, dict]) -> str:
+    """Walk parent_run upwards when a resumed run's prompt is a bare continuation like '继续'."""
+    cur: Optional[dict] = run
+    visited: set[str] = set()
+    first_raw = str(run.get("title") or "").strip()
+    for _ in range(16):
+        if cur is None:
+            break
+        rid = str(cur.get("run_id") or "").strip()
+        if rid in visited:
+            break
+        if rid:
+            visited.add(rid)
+        raw = str(cur.get("title") or "").strip()
+        normalized = raw.lower().strip("。.!！,， ")
+        if raw and normalized not in _GENERIC_CONTINUATION_TITLES:
+            return _clip(raw, 64)
+        parent_id = str(cur.get("parent_run") or "").strip()
+        cur = runs_by_id.get(parent_id) if parent_id else None
+    agent = str(run.get("agent") or "runner")
+    return _clip(first_raw or run.get("project") or f"{agent} 任务", 64)
+
+
+def _load_dismissed(user_id: str, now: float) -> dict[str, float]:
+    """Read this user's dismissed inbox item timestamps from ``user.info``."""
+    try:
+        from open_webui.models.users import Users
+
+        user = Users.get_user_by_id(user_id)
+        info = user.info if user and isinstance(user.info, dict) else {}
+        raw = info.get(DISMISSED_INFO_KEY)
+        if not isinstance(raw, dict):
+            return {}
+        cutoff = now - DISMISSED_TTL_SECONDS
+        out: dict[str, float] = {}
+        for k, v in raw.items():
+            ts = _epoch(v, 0.0)
+            if isinstance(k, str) and k and ts >= cutoff:
+                out[k] = ts
+        return out
+    except Exception:
+        log.debug("task_inbox: _load_dismissed failed", exc_info=True)
+        return {}
+
+
+def _save_dismissed(user_id: str, keys: list[str], now: float) -> None:
+    """Persist dismissed item IDs into ``user.info`` (pruned & bounded)."""
+    clean_keys = [str(k).strip() for k in keys if str(k or "").strip()]
+    if not clean_keys:
+        return
+    try:
+        from open_webui.models.users import Users
+
+        current = _load_dismissed(user_id, now)
+        for k in clean_keys:
+            current[k] = now
+        if len(current) > DISMISSED_MAX_ITEMS:
+            newest = sorted(current.items(), key=lambda kv: kv[1], reverse=True)[:DISMISSED_MAX_ITEMS]
+            current = dict(newest)
+        Users.patch_user_info_by_id(user_id, {DISMISSED_INFO_KEY: current})
+    except Exception:
+        log.debug("task_inbox: _save_dismissed failed", exc_info=True)
+
+
+def _is_dismissed(item: dict, dismissed: dict[str, float]) -> bool:
+    if not dismissed:
+        return False
+    item_id = str(item.get("id") or "")
+    candidates = [item_id]
+    run_id = str(item.get("run_id") or "").strip()
+    if run_id:
+        candidates.extend([f"runner:{run_id}", f"runner-stat:{run_id}"])
+    dismissed_at = 0.0
+    matched_key = ""
+    for key in candidates:
+        if key in dismissed and dismissed[key] > dismissed_at:
+            dismissed_at = dismissed[key]
+            matched_key = key
+    if not matched_key:
+        return False
+    prefix = matched_key.partition(":")[0]
+    if prefix in _CHAT_KEYED_PREFIXES:
+        item_ts = _epoch(item.get("timestamp"), 0.0)
+        return item_ts <= dismissed_at + 2.0
+    return True
+
+
 async def _collect_upstream_hermes(
-    request, user, days: int, since: float, active_run_ids: set[str], seen_chat_ids: set[str]
+    request, user, days: int, since: float, now: float, active_run_ids: set[str], seen_chat_ids: set[str]
 ) -> tuple[list[dict], list[dict], list[dict]]:
     """Fetch cross-channel Telegram/QQ sessions and (for admins) runner runs from Hermes.
 
@@ -471,19 +591,33 @@ async def _collect_upstream_hermes(
         log.debug("task_inbox: upstream hermes timed out or failed", exc_info=True)
         return [], [], []
 
+    # Build parent_run chain index across ALL returned runner_runs before filtering:
+    # if a run (e.g. status="question") already has a child run with parent_run == rid,
+    # the user already answered / continued it and only the latest run in the chain represents it.
+    runs_by_id: dict[str, dict] = {}
+    superseded_ids: set[str] = set()
+    for r in runner_runs:
+        rid = str(r.get("run_id") or "").strip()
+        if rid:
+            runs_by_id[rid] = r
+        parent = str(r.get("parent_run") or "").strip()
+        if parent:
+            superseded_ids.add(parent)
+
     # Cross-channel runner runs (Telegram / QQ / CLI / web questions)
     for r in runner_runs:
-        rid = str(r.get("run_id") or "")
-        if not rid or rid in active_run_ids:
+        rid = str(r.get("run_id") or "").strip()
+        if not rid or rid in active_run_ids or rid in superseded_ids:
             continue
         source = _normalize_source(r.get("origin"))
         status = str(r.get("status") or "").lower()
         started = _epoch(r.get("started_at"))
+        has_ended = r.get("ended_at") not in (None, "")
         ended_at = _epoch(r.get("ended_at"), started)
         if max(started, ended_at) < since:
             continue
         agent = str(r.get("agent") or "runner")
-        title = _clip(r.get("title") or r.get("project") or f"{agent} 任务", 64)
+        title = _resolve_runner_title(r, runs_by_id)
         project = str(r.get("project") or "").strip()
 
         if status == "question":
@@ -502,7 +636,7 @@ async def _collect_upstream_hermes(
                 "timestamp": ended_at or started,
                 "recovery": "continue",
             })
-        elif status == "running":
+        elif status == "running" and not has_ended and (not started or now - started <= STALE_RUNNER_SECONDS):
             running.append({
                 "id": f"runner-stat:{rid}",
                 "bucket": "running",
@@ -521,6 +655,7 @@ async def _collect_upstream_hermes(
             # Show recent non-web runner results (e.g. Telegram/QQ/CLI runs) so user can find them on web
             ok = status in ("ok", "success", "completed", "done")
             stopped = status in ("stopped", "cancelled")
+            stale_running = status == "running"
             ended.append({
                 "id": f"runner-stat:{rid}",
                 "bucket": "ended",
@@ -528,7 +663,11 @@ async def _collect_upstream_hermes(
                 "source": source,
                 "title": title,
                 "status": "done" if ok else ("stopped" if stopped else "failed"),
-                "status_label": "已完成" if ok else ("已停止" if stopped else "执行失败"),
+                "status_label": (
+                    "已完成"
+                    if ok
+                    else ("已停止" if stopped else ("已中断" if stale_running else "执行失败"))
+                ),
                 "summary": " · ".join(
                     p
                     for p in (
@@ -542,7 +681,7 @@ async def _collect_upstream_hermes(
                 "run_id": rid,
                 "agent": agent,
                 "timestamp": ended_at or started,
-                "recovery": None if ok else ("continue" if stopped else "restart"),
+                "recovery": None if ok else ("continue" if (stopped or stale_running) else "restart"),
             })
 
     # Recent Telegram / QQ sessions (clickable to import & open directly in web!)
@@ -578,6 +717,176 @@ async def _collect_upstream_hermes(
     return attention, running, ended
 
 
+async def remove_inbox_item(
+    request,
+    user,
+    *,
+    item_id: str,
+    kind: Optional[str] = None,
+    chat_id: Optional[str] = None,
+    run_id: Optional[str] = None,
+) -> dict:
+    """Stop (when owned & live) and dismiss a task inbox item so unwanted running / pending tasks
+    can be cleaned up directly from the page without deleting chat history."""
+    item_id = str(item_id or "").strip()
+    prefix, sep, target = item_id.partition(":")
+    if not sep or not prefix or not target:
+        raise ValueError("invalid task inbox item id")
+
+    stopped = False
+    dismiss_keys: list[str] = [item_id]
+
+    if prefix in ("runner", "runner-stat"):
+        rid = str(run_id or target).strip()
+        if rid:
+            dismiss_keys.extend([f"runner:{rid}", f"runner-stat:{rid}"])
+            try:
+                from open_webui.utils.hermes_runner_progress import (
+                    clear_runner_progress,
+                    get_runner_progress,
+                )
+                from open_webui.utils.hermes_sessions import stop_background_runner
+
+                entry = get_runner_progress(rid)
+                if entry and entry.get("user_id") == user.id:
+                    try:
+                        await stop_background_runner(request, user, rid)
+                        stopped = True
+                    except Exception:
+                        log.debug("task_inbox: stop_background_runner failed for %s", rid, exc_info=True)
+                    clear_runner_progress(rid)
+                    stopped = True
+            except Exception:
+                log.debug("task_inbox: runner cleanup failed for %s", rid, exc_info=True)
+
+    elif prefix == "hermes":
+        cid = str(chat_id or target).strip()
+        if cid:
+            dismiss_keys.extend([f"hermes:{cid}", f"chat:{cid}"])
+            try:
+                from open_webui.models.chats import Chats
+                from open_webui.tasks import list_task_ids_by_chat_id, stop_task
+                from open_webui.utils.hermes_agent import list_active_runs
+
+                owns = bool(Chats.get_chat_by_id_and_user_id(cid, user.id)) or any(
+                    r.get("chat_id") == cid for r in list_active_runs(user.id)
+                )
+                if owns:
+                    for tid in list_task_ids_by_chat_id(cid):
+                        try:
+                            await stop_task(tid)
+                            stopped = True
+                        except Exception:
+                            pass
+            except Exception:
+                log.debug("task_inbox: hermes stop failed for %s", cid, exc_info=True)
+
+    elif prefix == "video":
+        cid = str(chat_id or target).strip()
+        if cid:
+            try:
+                from open_webui.utils import video_tasks
+
+                task = video_tasks.get_task(user.id, cid)
+                if task and task.get("state") in ("running", "background"):
+                    await video_tasks.stop(request, user, cid)
+                    stopped = True
+            except Exception:
+                log.debug("task_inbox: video stop failed for %s", cid, exc_info=True)
+
+    elif prefix == "team":
+        try:
+            from open_webui.models.agent_teams import AgentTeams
+
+            team = AgentTeams.get(target)
+            if team and team.user_id == user.id:
+                if team.status in ("planning", "plan_ready", "plan_failed", "start_failed"):
+                    updated = AgentTeams.update(
+                        team.id,
+                        user.id,
+                        expect_status=("planning", "plan_ready", "plan_failed", "start_failed"),
+                        status="cancelled",
+                    )
+                    stopped = updated is not None
+                elif team.status in ("running", "starting") and team.phase not in ("completed", "stopped"):
+                    try:
+                        from open_webui.utils.agent_teams import hermes_call, hermes_target
+
+                        cfg = await hermes_target(request, user)
+                        await hermes_call(
+                            cfg,
+                            "POST",
+                            f"/{team.id}/control",
+                            json_body={"action": "stop", "actor": getattr(user, "name", "") or ""},
+                        )
+                    except Exception:
+                        log.debug("task_inbox: team hermes stop failed for %s", team.id, exc_info=True)
+                    AgentTeams.update(
+                        team.id,
+                        user.id,
+                        phase="stopped",
+                        finished_at=team.finished_at or int(time.time()),
+                    )
+                    stopped = True
+        except Exception:
+            log.debug("task_inbox: team stop failed for %s", target, exc_info=True)
+
+    elif prefix in ("answer", "discuss"):
+        cid = str(chat_id or target).strip()
+        if cid:
+            try:
+                from open_webui.models.chats import Chats
+                from open_webui.utils import answer_desk, discussion_room
+                from open_webui.utils.mode_illustrate import DRAWING
+
+                if Chats.get_chat_by_id_and_user_id(cid, user.id):
+                    mod = answer_desk if prefix == "answer" else discussion_room
+                    stopped = bool(await mod.stop_live(cid))
+                    drawing = DRAWING.get(cid)
+                    if drawing and drawing.get("user_id") == user.id and drawing.get("kind") == prefix:
+                        DRAWING.pop(cid, None)
+                        stopped = True
+            except Exception:
+                log.debug("task_inbox: %s stop failed for %s", prefix, cid, exc_info=True)
+
+    elif prefix == "auto":
+        try:
+            from open_webui.models.auto_routes import AutoRoutes
+
+            row = AutoRoutes.update(target, user.id, expect=("routing",), status="cancelled")
+            stopped = row is not None
+        except Exception:
+            log.debug("task_inbox: auto cancel failed for %s", target, exc_info=True)
+
+    elif prefix in ("chat", "image"):
+        cid = str(chat_id or (target if prefix == "chat" else "")).strip()
+        if cid:
+            try:
+                from open_webui.models.chats import Chats
+                from open_webui.tasks import list_task_ids_by_chat_id, stop_task
+
+                if Chats.get_chat_by_id_and_user_id(cid, user.id):
+                    for tid in list_task_ids_by_chat_id(cid):
+                        try:
+                            await stop_task(tid)
+                            stopped = True
+                        except Exception:
+                            pass
+            except Exception:
+                log.debug("task_inbox: %s stop failed for %s", prefix, cid, exc_info=True)
+
+    # Save dismissal timestamp AFTER stop actions so any newly recorded finished_at / stoppedAt
+    # is <= dismissed_at.
+    _save_dismissed(user.id, list(dict.fromkeys(dismiss_keys)), time.time())
+    return {
+        "status": True,
+        "id": item_id,
+        "stopped": stopped,
+        "dismissed": True,
+        "cross_channel": prefix == "runner-stat" and not stopped,
+    }
+
+
 async def get_task_inbox(request, user, days: int = DEFAULT_DAYS) -> dict:
     """Return the user's unified Task Inbox grouped into attention / running / ended."""
     days = max(1, min(int(days), MAX_DAYS))
@@ -592,11 +901,17 @@ async def get_task_inbox(request, user, days: int = DEFAULT_DAYS) -> dict:
     }
 
     up_att, up_run, up_end = await _collect_upstream_hermes(
-        request, user, days, since, active_run_ids, seen_chat_ids
+        request, user, days, since, now, active_run_ids, seen_chat_ids
     )
     attention.extend(up_att)
     running.extend(up_run)
     ended.extend(up_end)
+
+    dismissed = _load_dismissed(user.id, now)
+    if dismissed:
+        attention = [item for item in attention if not _is_dismissed(item, dismissed)]
+        running = [item for item in running if not _is_dismissed(item, dismissed)]
+        ended = [item for item in ended if not _is_dismissed(item, dismissed)]
 
     # Sort: attention & running newest first; ended has unread first, then newest first
     attention.sort(key=lambda item: item.get("timestamp") or 0, reverse=True)

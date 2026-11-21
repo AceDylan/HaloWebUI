@@ -65,7 +65,12 @@ from open_webui.utils.hermes_sessions import (
     validate_session_id,
 )
 from open_webui.utils import hermes_jobs
-from open_webui.utils.task_inbox import DEFAULT_DAYS as INBOX_DEFAULT_DAYS, MAX_DAYS as INBOX_MAX_DAYS, get_task_inbox
+from open_webui.utils.task_inbox import (
+    DEFAULT_DAYS as INBOX_DEFAULT_DAYS,
+    MAX_DAYS as INBOX_MAX_DAYS,
+    get_task_inbox,
+    remove_inbox_item,
+)
 from open_webui.utils.hermes_unread import list_unread_chat_ids, mark_read
 from open_webui.utils.hermes_runner_progress import (
     clear_runner_progress,
@@ -209,6 +214,33 @@ async def get_hermes_task_inbox(
     """Unified Task Inbox: attention (waiting on user), running, and recently ended tasks
     across web workbenches, background runners, and Telegram/QQ Hermes sessions."""
     return await get_task_inbox(request, user, days=days)
+
+
+class TaskInboxRemoveForm(BaseModel):
+    id: str = Field(min_length=1, max_length=160)
+    kind: Optional[str] = Field(default=None, max_length=32)
+    chat_id: Optional[str] = Field(default=None, max_length=128)
+    run_id: Optional[str] = Field(default=None, max_length=128)
+
+
+@router.post("/inbox/remove")
+async def remove_hermes_task_inbox_item(
+    request: Request,
+    form_data: TaskInboxRemoveForm,
+    user=Depends(get_verified_user),
+):
+    """Stop (when owned and live) and dismiss a task from the user's Task Inbox."""
+    try:
+        return await remove_inbox_item(
+            request,
+            user,
+            item_id=form_data.id,
+            kind=form_data.kind,
+            chat_id=form_data.chat_id,
+            run_id=form_data.run_id,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.get("/model-options")

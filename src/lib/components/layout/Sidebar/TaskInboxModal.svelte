@@ -5,14 +5,20 @@
 	import dayjs from 'dayjs';
 	import relativeTime from 'dayjs/plugin/relativeTime';
 
-	import { mobile, showHermesSessions, showSidebar } from '$lib/stores';
+	import {
+		hermesBackgroundRuns,
+		mobile,
+		showHermesSessions,
+		showSidebar
+	} from '$lib/stores';
 	import {
 		getTaskInbox,
 		importHermesSession,
+		removeTaskInboxItem,
 		type TaskInboxItem,
 		type TaskInboxResponse
 	} from '$lib/apis/hermes';
-	import { createRunStopper } from '$lib/utils/runner-stop';
+	import { refreshHermesActivitySoon } from '$lib/utils/hermes-activity';
 	import Modal from '$lib/components/common/Modal.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import XMark from '$lib/components/icons/XMark.svelte';
@@ -57,12 +63,20 @@
 	let loaded = false;
 	let requestSeq = 0;
 
-	let armed: string | null = null;
-	let stopping: string | null = null;
-	const stopper = createRunStopper((state) => ({ armed, stopping } = state));
+	let armedRemoveId: string | null = null;
+	let removingId: string | null = null;
+	let armTimer: ReturnType<typeof setTimeout> | null = null;
+
+	const clearArm = () => {
+		if (armTimer) {
+			clearTimeout(armTimer);
+			armTimer = null;
+		}
+		armedRemoveId = null;
+	};
 
 	onDestroy(() => {
-		stopper.dispose();
+		clearArm();
 	});
 
 	const load = async (autoPickTab = false) => {
@@ -94,6 +108,7 @@
 	}
 	$: if (!show && loaded) {
 		loaded = false;
+		clearArm();
 	}
 
 	$: allItems = inbox ? [...inbox.attention, ...inbox.running, ...inbox.ended] : [];
@@ -174,20 +189,58 @@
 		showHermesSessions.set(true);
 	};
 
-	const stopItem = async (item: TaskInboxItem) => {
-		if (!item.run_id) return;
-		await stopper.press({
-			run_id: item.run_id,
-			chat_id: item.chat_id ?? '',
-			agent: item.agent ?? 'runner',
-			status: 'running',
-			started_at: item.timestamp,
-			step: null,
-			last_activity: item.summary ?? '',
-			updated_at: item.timestamp
-		});
-		if (!armed && !stopping) {
-			void load(false);
+	const removeItem = async (item: TaskInboxItem) => {
+		if (removingId) return;
+		if (armedRemoveId !== item.id) {
+			clearArm();
+			armedRemoveId = item.id;
+			armTimer = setTimeout(() => {
+				armedRemoveId = null;
+				armTimer = null;
+			}, 5000);
+			return;
+		}
+		clearArm();
+		removingId = item.id;
+		try {
+			const res = await removeTaskInboxItem(localStorage.token, item);
+			if (inbox) {
+				const drop = (list: TaskInboxItem[]) =>
+					list.filter(
+						(entry) =>
+							entry.id !== item.id &&
+							!(item.run_id && entry.run_id && entry.run_id === item.run_id)
+					);
+				const attention = drop(inbox.attention);
+				const running = drop(inbox.running);
+				const ended = drop(inbox.ended);
+				inbox = {
+					...inbox,
+					attention,
+					running,
+					ended,
+					counts: {
+						attention: attention.length,
+						running: running.length,
+						ended: ended.length
+					}
+				};
+			}
+			if (item.run_id) {
+				hermesBackgroundRuns.update((runs) => runs.filter((r) => r.run_id !== item.run_id));
+			}
+			refreshHermesActivitySoon(100);
+			if (res.stopped) {
+				toast.success('已停止并删除该任务');
+			} else if (res.cross_channel) {
+				toast.success('已从列表清理（跨端后台任务如需终止请在发起端执行 /stop）');
+			} else {
+				toast.success(item.bucket === 'running' ? '已从进行中删除' : '已从列表清理');
+			}
+		} catch (e) {
+			toast.error(`没能删除：${(e as Error)?.message ?? e}`);
+		} finally {
+			removingId = null;
 		}
 	};
 </script>
@@ -425,18 +478,27 @@
 								</span>
 							</button>
 
-							{#if item.bucket === 'running' && item.kind === 'runner' && item.run_id && item.chat_id}
+							{#if item.bucket === 'running' || item.bucket === 'attention'}
 								<button
 									type="button"
-									class="shrink-0 rounded-md px-2 py-1 text-2xs font-medium transition {armed ===
-									item.run_id
+									class="shrink-0 rounded-md px-2 py-1 text-2xs font-medium transition disabled:opacity-50 {armedRemoveId ===
+									item.id
 										? 'bg-red-50 text-red-600 dark:bg-red-950/40 dark:text-red-400'
 										: 'text-gray-400 hover:bg-gray-100 hover:text-red-600 dark:hover:bg-gray-800 dark:hover:text-red-400'}"
-									disabled={stopping === item.run_id}
-									on:click|stopPropagation={() => stopItem(item)}
-									data-halo-task-inbox-stop={item.run_id}
+									disabled={removingId === item.id}
+									on:click|stopPropagation={() => removeItem(item)}
+									data-halo-task-inbox-remove={item.id}
+									aria-label={armedRemoveId === item.id
+										? `确认删除 ${item.title}`
+										: `删除 ${item.title}`}
 								>
-									{stopping === item.run_id ? '停止中…' : armed === item.run_id ? '确认停止' : '停止'}
+									{#if removingId === item.id}
+										删除中…
+									{:else if armedRemoveId === item.id}
+										{item.bucket === 'running' ? '确认删除' : '确认清理'}
+									{:else}
+										{item.bucket === 'running' ? '删除' : '清理'}
+									{/if}
 								</button>
 							{/if}
 						</div>

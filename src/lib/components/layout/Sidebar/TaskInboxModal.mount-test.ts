@@ -13,6 +13,7 @@ vi.mock('$app/navigation', () => nav);
 const api = vi.hoisted(() => ({
 	getTaskInbox: vi.fn(),
 	importHermesSession: vi.fn(),
+	removeTaskInboxItem: vi.fn(),
 	stopHermesBackgroundRunner: vi.fn()
 }));
 vi.mock('$lib/apis/hermes', () => api);
@@ -46,6 +47,7 @@ beforeEach(() => {
 	nav.goto.mockReset();
 	api.getTaskInbox.mockReset();
 	api.importHermesSession.mockReset();
+	api.removeTaskInboxItem.mockReset();
 	api.stopHermesBackgroundRunner.mockReset();
 	toast.success.mockReset();
 	toast.error.mockReset();
@@ -179,5 +181,62 @@ describe('TaskInboxModal', () => {
 		await until(() => nav.goto.mock.calls.length > 0);
 		expect(api.importHermesSession).toHaveBeenCalledWith('tok', 'tg-1');
 		expect(nav.goto).toHaveBeenCalledWith('/c/tg-1');
+	});
+
+	it('allows deleting running items (including cross-channel runs) with two-step confirm', async () => {
+		const now = Math.floor(Date.now() / 1000);
+		api.getTaskInbox.mockResolvedValue({
+			days: 7,
+			attention: [],
+			running: [
+				{
+					id: 'runner-stat:20261121-195302-40ec49c5',
+					bucket: 'running',
+					kind: 'runner',
+					source: 'telegram',
+					title: '不想继续的 TG 任务',
+					status: 'running',
+					status_label: 'offiagy运行中',
+					summary: 'HaloWebUI',
+					href: null,
+					chat_id: null,
+					run_id: '20261121-195302-40ec49c5',
+					agent: 'offiagy',
+					timestamp: now - 30
+				}
+			],
+			ended: [],
+			counts: { attention: 0, running: 1, ended: 0 }
+		});
+		api.removeTaskInboxItem.mockResolvedValue({
+			status: true,
+			id: 'runner-stat:20261121-195302-40ec49c5',
+			stopped: false,
+			dismissed: true,
+			cross_channel: true
+		});
+
+		await mount();
+		const modal = () => document.body.querySelector('[data-halo-task-inbox-modal]') as any;
+		const btnSel = '[data-halo-task-inbox-remove="runner-stat:20261121-195302-40ec49c5"]';
+		await until(() => !!modal().querySelector(btnSel));
+
+		// First click arms confirm without calling API
+		const btn = modal().querySelector(btnSel);
+		expect(btn.textContent.trim()).toBe('删除');
+		btn.click();
+		await until(() => modal().querySelector(btnSel)?.textContent.trim() === '确认删除');
+		expect(api.removeTaskInboxItem).not.toHaveBeenCalled();
+
+		// Second click removes the item
+		modal().querySelector(btnSel).click();
+		await until(() => api.removeTaskInboxItem.mock.calls.length === 1);
+		expect(api.removeTaskInboxItem).toHaveBeenCalledWith(
+			'tok',
+			expect.objectContaining({ id: 'runner-stat:20261121-195302-40ec49c5' })
+		);
+		await until(() => !modal().querySelector('[data-halo-task-inbox-item="runner-stat:20261121-195302-40ec49c5"]'));
+		expect(modal().querySelector('[data-halo-task-inbox-empty]').textContent).toContain('当前没有进行中的任务');
+		expect(toast.success).toHaveBeenCalled();
 	});
 });

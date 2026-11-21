@@ -233,6 +233,41 @@ export const getTaskInbox = async (token: string, days = 7): Promise<TaskInboxRe
 	};
 };
 
+export type TaskInboxRemoveResult = {
+	status: boolean;
+	id: string;
+	stopped: boolean;
+	dismissed: boolean;
+	cross_channel?: boolean;
+};
+
+/**
+ * Stop (when owned and live) and remove a task from the user's Task Inbox so unwanted
+ * running or pending tasks can be cleaned up directly from the page.
+ */
+export const removeTaskInboxItem = async (
+	token: string,
+	item: Pick<TaskInboxItem, 'id' | 'kind' | 'chat_id' | 'run_id'>
+): Promise<TaskInboxRemoveResult> => {
+	const res = await fetch(`${WEBUI_API_BASE_URL}/hermes/inbox/remove`, {
+		method: 'POST',
+		headers: jsonHeaders(token),
+		body: JSON.stringify({
+			id: item.id,
+			kind: item.kind,
+			chat_id: item.chat_id ?? null,
+			run_id: item.run_id ?? null
+		})
+	});
+	if (res.status === 401) {
+		throw new HermesSessionExpiredError();
+	}
+	if (!res.ok) {
+		throw await detailOf(res);
+	}
+	return await res.json();
+};
+
 /**
  * Import a hermes session as a chat (id = session id, so the chat continues
  * that session). Idempotent: an already-imported session returns its chat.

@@ -132,8 +132,14 @@ def test_ci_failure_stops_before_deploy_and_keeps_branch_for_retry(pkg, team_id,
     monkeypatch.setattr(deploy, "_github_repo", lambda _p: "AceDylan/myapp")
 
     def fake_gh(args, *, cwd, timeout=30):
-        out = json.dumps([{"databaseId": 999, "status": "completed", "conclusion": "failure",
-                           "workflowName": "Docker Image CI", "url": "https://github.com/AceDylan/myapp/actions/runs/999"}])
+        assert "--commit" not in args and "headSha" in " ".join(args)
+        head = _git(repo, "rev-parse", "main")
+        out = json.dumps([
+            {"databaseId": 998, "headSha": "0" * 40, "status": "completed", "conclusion": "success",
+             "name": "Docker Image CI", "url": "https://github.com/AceDylan/myapp/actions/runs/998"},
+            {"databaseId": 999, "headSha": head, "status": "completed", "conclusion": "failure",
+             "name": "Docker Image CI", "url": "https://github.com/AceDylan/myapp/actions/runs/999"},
+        ])
         return subprocess.CompletedProcess(["gh", *args], 0, out, "")
 
     monkeypatch.setattr(deploy, "_run_gh", fake_gh)

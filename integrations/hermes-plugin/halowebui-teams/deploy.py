@@ -273,11 +273,11 @@ def _wait_for_ci(slug: str, repo_path: str, sha: str, base_branch: str, profile:
     no_run_deadline = time.time() + 180
 
     while time.time() < deadline:
-        res = _run_gh(
-            ["run", "list", "-R", gh_repo, "--commit", sha, "--limit", "10",
-             "--json", "databaseId,status,conclusion,name,url,workflowName"],
-            cwd=repo_path, timeout=30,
-        )
+        args = ["run", "list", "-R", gh_repo, "--limit", "20",
+                "--json", "databaseId,headSha,status,conclusion,name,url"]
+        if workflow_name:
+            args += ["--workflow", workflow_name]
+        res = _run_gh(args, cwd=repo_path, timeout=30)
         if res.returncode != 0:
             raise projects.ProjectError(502, "查询 GitHub CI 状态失败：" + _clean_output(res.stderr or res.stdout, 300))
         try:
@@ -286,10 +286,11 @@ def _wait_for_ci(slug: str, repo_path: str, sha: str, base_branch: str, profile:
             runs = []
         matched = None
         if isinstance(runs, list) and runs:
+            sha_runs = [r for r in runs if str(r.get("headSha") or "").startswith(sha[:8])]
             if workflow_name:
-                matched = next((r for r in runs if r.get("workflowName") == workflow_name or r.get("name") == workflow_name), None)
-            if matched is None:
-                matched = runs[0]
+                matched = next((r for r in sha_runs if r.get("name") == workflow_name), None)
+            if matched is None and sha_runs:
+                matched = sha_runs[0]
         if matched:
             run_url = str(matched.get("url") or "")
             run_id = matched.get("databaseId")
@@ -352,12 +353,13 @@ def _run_deploy_command(slug: str, repo_path: str, sha: str, base_branch: str, b
 
 
 def _schedule_gateway_restart() -> None:
-    """Detached restart of hermes-gateway so the current response and Telegram notice finish first."""
+    """Detached graceful reload of hermes-gateway (SIGUSR1 drain -> systemd restart) so the
+    current response and Telegram notice finish first."""
     if os.environ.get("HALO_TEAMS_NO_GATEWAY_RESTART") == "1":
         return
     try:
         subprocess.Popen(
-            ["bash", "-lc", "sleep 3 && systemctl --user restart hermes-gateway"],
+            ["bash", "-lc", "sleep 3 && systemctl --user reload hermes-gateway"],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,

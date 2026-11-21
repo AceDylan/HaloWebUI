@@ -1,24 +1,41 @@
 // The video studio (/workspace/videos): what you want, how it should be made and who makes it,
-// written as one brief for Hermes or a runner. The making happens in a chat (Hermes' video-studio
-// skill: Remotion, pictures + camera moves, narration, subtitles); the finished file comes back
-// as `MEDIA:` and lands in the video library.
-//
-// 背景音乐: the user picks the MP3 first and the video is made to it — as long as the music (or
-// cut to the chosen length), scene changes on its beats, and the skill's film.py proves the
-// finished file plays that track (--check-music) before it is handed over.
+// written as one brief for Hermes or a runner. Animation-first for both normal videos and MVs:
+// never pure kinetic text or simplistic stills; concrete multi-style animation closely matching
+// subtitles or lyrics, restrained on-screen text when subtitles are burned in, and first-class
+// integration with the home PC's JIZURA kinetic engine (split-screen half-cartoon + half-JIZURA
+// for MVs & split-mix normal videos, or JIZURA beat accents/transitions).
 
 import {
 	cleanVideoAppearance,
 	cleanCustomStyle,
 	normalizeVideoStyle,
+	pickVideoStyle,
 	videoStyleLines,
+	VIDEO_STYLES,
 	type VideoStyleKey
 } from './video-styles';
 
-export type VideoRecipeKey = 'explainer' | 'story' | 'footage' | 'data' | 'free';
+export type VideoRecipeKey = 'explainer' | 'story' | 'split-jizura' | 'data' | 'footage' | 'free';
 export type VideoFrameKey = '16:9' | '9:16' | '1:1';
-/** Opening 3-second hook pattern for Douyin viral optimization. */
+/** Opening 3-second visual hook pattern for Douyin optimization. */
 export type VideoHookKey = 'auto' | 'reversal' | 'pain' | 'result' | 'list';
+/** Split-screen direction for cartoon + JIZURA hybrid videos. */
+export type SplitLayoutKey = 'auto' | 'tb' | 'lr';
+/** Home PC JIZURA visual style (--style in jizura_mv.py; 'auto' lets --theme / omakase choose). */
+export type JizuraStyleKey =
+	| 'auto'
+	| 'noir'
+	| 'crimson'
+	| 'caution'
+	| 'magenta'
+	| 'paper'
+	| 'hud'
+	| 'mint'
+	| 'specimen'
+	| 'transit'
+	| 'blueprint'
+	| 'rouge'
+	| 'mono';
 /** '' is Hermes itself; the rest are runners, started by the command in front of the brief. */
 export type VideoMaker =
 	| ''
@@ -38,29 +55,40 @@ export type VideoPlace = 'pc' | 'server';
 export const VIDEO_RECIPES: { key: VideoRecipeKey; label: string; sub: string; hint: string }[] = [
 	{
 		key: 'explainer',
-		label: '讲解动画',
-		sub: '动态图形 · 配音字幕',
-		hint: 'Remotion 写的动态图形：标题、示意图、要点逐个动起来，配音和字幕对齐'
+		label: '剧情动画',
+		sub: '贴合字幕 · 多风格全动画',
+		hint: '用 Remotion 分层角色与场景制作贴近字幕内容的连续动画，用画面把每句台词演活，绝不做纯文字动效'
 	},
 	{
 		key: 'story',
-		label: '图文成片',
-		sub: '生成画面 · 动效运镜',
-		hint: '先画出统一风格的关键画面（或用你的图片），画面上叠会动的元素（光效粒子、标注描线、关键词花字），配运镜、转场、配音和字幕'
+		label: '绘本动画',
+		sub: '统一画风分镜 · 动效运镜',
+		hint: '先画统一风格的高质感动画分镜（或用你的图片），分层叠光影、天气、角色微动与镜头视差，不做静态幻灯片'
 	},
 	{
-		key: 'footage',
-		label: '素材剪辑',
-		sub: '剪你上传的视频',
-		hint: '从你上传的视频里挑段落剪辑拼接，加字幕、配音或音乐'
+		key: 'split-jizura',
+		label: '分屏混搭',
+		sub: '卡通动画 · JIZURA 动效',
+		hint: '上下或左右分屏：一半是贴合字幕的卡通/多风格动画场景，另一半由家里电脑 JIZURA 生成高能节奏动效与视觉装饰（PC 离线自动回落 Remotion）'
 	},
 	{
 		key: 'data',
-		label: '数据动画',
-		sub: '图表动起来',
-		hint: '把数据做成会动的图表：数字滚动、柱子长高、曲线画出来，每张图一句结论'
+		label: '动态图解',
+		sub: '场景可视化 · 动画图表',
+		hint: '把原理、流程或数据做成具象动画场景与动态图表，用画面直观演活逻辑，拒绝枯燥纯文字'
 	},
-	{ key: 'free', label: '自由发挥', sub: '执行者自己判断', hint: '由执行者按内容选最合适的做法' }
+	{
+		key: 'footage',
+		label: '素材精剪',
+		sub: '剪你上传的视频 · 动画包装',
+		hint: '从你上传的视频里精选高光段落卡点剪辑，叠贴合氛围的卡通贴纸、动态转场与轻字幕'
+	},
+	{
+		key: 'free',
+		label: '自由混搭',
+		sub: '按题材组合动画 + JIZURA',
+		hint: '由执行者按主题自由组合全屏动画、绘本分镜或家里电脑 JIZURA 分屏/转场动效'
+	}
 ];
 
 export const VIDEO_FRAMES: { key: VideoFrameKey; label: string; size: string; tag?: string }[] = [
@@ -71,36 +99,59 @@ export const VIDEO_FRAMES: { key: VideoFrameKey; label: string; size: string; ta
 
 export const VIDEO_LENGTHS = [15, 30, 45, 60, 90, 180];
 
+export const SPLIT_LAYOUTS: { key: SplitLayoutKey; label: string; sub: string }[] = [
+	{ key: 'auto', label: '自动适配', sub: '竖屏上下分 · 横屏左右分' },
+	{ key: 'tb', label: '上下分屏', sub: '上卡通动画 · 下 JIZURA 动效' },
+	{ key: 'lr', label: '左右分屏', sub: '左卡通动画 · 右 JIZURA 动效' }
+];
+
+/** Curated JIZURA styles on the home PC (12 named skins + 'auto' across all 27 omakase styles). */
+export const JIZURA_STYLES: { key: JizuraStyleKey; label: string; sub: string }[] = [
+	{ key: 'auto', label: '自动配对', sub: '从 27 种风格按氛围挑' },
+	{ key: 'caution', label: '潮酷黄黑', sub: 'caution · 冲击警示' },
+	{ key: 'magenta', label: '赛博霓虹', sub: 'magenta · 潮流电音' },
+	{ key: 'crimson', label: '绯红张力', sub: 'crimson · 热血高燃' },
+	{ key: 'mint', label: '清新薄荷', sub: 'mint · 明快清爽' },
+	{ key: 'paper', label: '复古纸感', sub: 'paper · 温柔胶片' },
+	{ key: 'noir', label: '暗黑电影', sub: 'noir · 高级冷峻' },
+	{ key: 'hud', label: '战术光栅', sub: 'hud · 科技数据' },
+	{ key: 'blueprint', label: '工程蓝图', sub: 'blueprint · 精密网格' },
+	{ key: 'rouge', label: '复古胭脂', sub: 'rouge · 东方韵味' },
+	{ key: 'specimen', label: '杂志标本', sub: 'specimen · 精致刊物' },
+	{ key: 'transit', label: '都市导视', sub: 'transit · 现代节奏' },
+	{ key: 'mono', label: '极简黑白', sub: 'mono · 利落反差' }
+];
+
 export const VIDEO_HOOKS: { key: VideoHookKey; label: string; sub: string; guide: string }[] = [
 	{
 		key: 'auto',
 		label: '自动匹配',
-		sub: '按主题选最强开场',
-		guide: '自动按题材挑选最抓人的前 3 秒开场（反常识/痛点/悬念/数字结论），第 0.5 秒出动态主视觉与爆点大字'
+		sub: '按主题选最强动画开场',
+		guide: '前 3 秒按题材直接切入最抓眼的动画场景（动作冲突、反差画面或悬念特写），第 0.5 秒画面立刻动起来'
 	},
 	{
 		key: 'reversal',
-		label: '反常识',
-		sub: '“90%的人都错了”',
-		guide: '前 3 秒用反常识或颠覆认知的金句开场（如“别再…了”“90%的人都做错了”），立刻制造认知冲突'
+		label: '反差反转',
+		sub: '画面一秒制造反差冲突',
+		guide: '前 3 秒用强烈的正反动画画面对比或出人意料的卡通小剧场破冰，用视觉反差留住观众而非靠大字喊口号'
 	},
 	{
 		key: 'pain',
-		label: '痛点直击',
-		sub: '戳中烦恼给解法',
-		guide: '前 3 秒直接戳中观众最焦虑的具体场景与痛点，紧接给出可落地解法承诺'
+		label: '情景代入',
+		sub: '卡通演活真实痛点瞬间',
+		guide: '前 3 秒用贴近生活的卡通角色与具体场景直接演活观众共鸣瞬间，紧接用动画演示转折与解法'
 	},
 	{
 		key: 'result',
-		label: '结果前置',
-		sub: '先抛高能结论/悬念',
-		guide: '第 1 秒直接把最震撼的结果、反转画面或核心结论甩在前面，再倒叙拆解原因'
+		label: '高能前置',
+		sub: '先放最炸动画高潮瞬间',
+		guide: '第 1 秒直接抛最有视觉冲击力的动画高潮帧或悬念画面，再按节奏展开前因后果'
 	},
 	{
 		key: 'list',
-		label: '数字榜单',
-		sub: '“3个必看/TOP 5”',
-		guide: '前 3 秒用明确数字清单开场（“3 个…最后一个最关键”），倒数递进拉满完播率'
+		label: '视觉清单',
+		sub: '逐格演完 3 个对比场景',
+		guide: '前 3 秒先预告核心对比看点，再用逐格动画场景与道具演变依次演完每个要点，越往后越精彩'
 	}
 ];
 
@@ -123,7 +174,7 @@ export const VIDEO_MAKERS: { key: VideoMaker; label: string; sub: string }[] = [
 	{ key: 'offiagy', label: 'offiagy', sub: 'AGY · Google 官方登录' }
 ];
 
-/** One-click Douyin viral recipes: sets frame, duration, recipe, visual style, voice and hook at once. */
+/** One-click animation-first Douyin recipes: sets frame, duration, recipe, visual style, voice, hook and JIZURA config. */
 export type DouyinTemplate = {
 	key: string;
 	label: string;
@@ -135,65 +186,91 @@ export type DouyinTemplate = {
 
 export const DOUYIN_TEMPLATES: DouyinTemplate[] = [
 	{
-		key: 'viral-insight',
-		label: '认知干货',
-		badge: '爆款',
-		sub: '9:16 · 45秒 · 黑金大字',
-		sample: '用 45 秒讲透“为什么越努力越容易内耗”，开头反常识破冰，拆 3 个核心原因和立刻能用的解法',
-		patch: {
-			kind: 'normal',
-			douyin: true,
-			hook: 'reversal',
-			frame: '9:16',
-			seconds: 45,
-			recipe: 'explainer',
-			style: 'douyin-bold',
-			voice: 'zh-CN-YunxiNeural',
-			subtitles: true
-		}
-	},
-	{
-		key: 'viral-pitfall',
-		label: '避坑对比',
-		badge: '高互动',
-		sub: '9:16 · 30秒 · 红黑反差',
-		sample: '30 秒避坑指南：普通人最容易踩的 3 个习惯误区，红黑正反对比拆解，结尾给防忘总结卡',
+		key: 'anime-story',
+		label: '动漫剧情',
+		badge: '推荐',
+		sub: '9:16 · 45秒 · 日漫卡通',
+		sample: '用 45 秒日漫卡通动画讲“为什么越想自律越容易摆烂”，用生动卡通角色演活日常心理变化，画面紧贴旁白字幕',
 		patch: {
 			kind: 'normal',
 			douyin: true,
 			hook: 'pain',
 			frame: '9:16',
-			seconds: 30,
+			seconds: 45,
 			recipe: 'explainer',
-			style: 'contrast',
+			style: 'anime-cartoon',
+			jizuraAccent: true,
+			voice: 'zh-CN-YunxiNeural',
+			subtitles: true
+		}
+	},
+	{
+		key: 'split-jizura',
+		label: '分屏动画×JIZURA',
+		badge: 'PC特色',
+		sub: '9:16 · 30秒 · 上下分屏',
+		sample: '30 秒上下分屏动画短片：上半屏卡通动画演活职场反常识瞬间，下半屏联动家里电脑 JIZURA 潮酷动效卡拍呼应',
+		patch: {
+			kind: 'normal',
+			douyin: true,
+			hook: 'reversal',
+			frame: '9:16',
+			seconds: 30,
+			recipe: 'split-jizura',
+			style: 'anime-cartoon',
+			splitLayout: 'tb',
+			mvTheme: 'kinetic',
+			jizuraStyle: 'auto',
+			jizuraAccent: true,
 			voice: 'zh-CN-XiaoyiNeural',
 			subtitles: true
 		}
 	},
 	{
-		key: 'viral-dossier',
-		label: '热点揭秘',
+		key: 'comic-contrast',
+		label: '漫格避坑',
+		badge: '高互动',
+		sub: '9:16 · 30秒 · 潮酷漫格',
+		sample: '30 秒波普漫画风避坑动画：用卡通分格正反角色对比演活 3 个日常踩坑习惯，节奏明快有趣',
+		patch: {
+			kind: 'normal',
+			douyin: true,
+			hook: 'reversal',
+			frame: '9:16',
+			seconds: 30,
+			recipe: 'explainer',
+			style: 'comic-pop',
+			jizuraAccent: true,
+			voice: 'zh-CN-XiaoyiNeural',
+			subtitles: true
+		}
+	},
+	{
+		key: 'guochao-tale',
+		label: '国潮叙事',
 		badge: '高完播',
-		sub: '9:16 · 60秒 · 档案揭秘',
-		sample: '60 秒深度揭秘一个看似反常的商业现象：结果前置抛悬念，按时间线和关键证据一步步反转真相',
+		sub: '9:16 · 60秒 · 国潮插画',
+		sample: '60 秒国潮插画动画讲述一个跌宕起伏的历史典故：先抛悬念高潮画面，山水云雾与人物剪影层层推进',
 		patch: {
 			kind: 'normal',
 			douyin: true,
 			hook: 'result',
 			frame: '9:16',
 			seconds: 60,
-			recipe: 'explainer',
-			style: 'dossier',
+			recipe: 'story',
+			style: 'guochao',
+			mvTheme: 'wa',
+			jizuraAccent: true,
 			voice: 'zh-CN-YunyangNeural',
 			subtitles: true
 		}
 	},
 	{
-		key: 'viral-science',
-		label: '硬核科普',
+		key: 'sticker-science',
+		label: '贴纸科普',
 		badge: '涨粉',
-		sub: '9:16 · 60秒 · 贴纸科普',
-		sample: '用 60 秒硬核科普日常高频现象背后的科学原理，数据可视化对比，节奏紧凑好懂',
+		sub: '9:16 · 60秒 · 贴纸大画布',
+		sample: '60 秒贴纸大画布科普动画：一镜到底用可视化道具与微缩动作拆解日常现象背后的科学原理',
 		patch: {
 			kind: 'normal',
 			douyin: true,
@@ -202,16 +279,17 @@ export const DOUYIN_TEMPLATES: DouyinTemplate[] = [
 			seconds: 60,
 			recipe: 'explainer',
 			style: 'sticker',
+			jizuraAccent: false,
 			voice: 'zh-CN-YunxiNeural',
 			subtitles: true
 		}
 	},
 	{
-		key: 'viral-healing',
-		label: '治愈金句',
+		key: 'storybook-heal',
+		label: '治愈绘本',
 		badge: '高转发',
-		sub: '9:16 · 30秒 · 胶片治愈',
-		sample: '30 秒深夜情感共鸣短片：写给正在独自扛压力的普通人，暖调胶片质感配走心金句，结尾留余韵',
+		sub: '9:16 · 30秒 · 水彩绘本',
+		sample: '30 秒水彩绘本治愈动画：暮色窗景、晃尾巴小橘猫与暖光微风的温柔日常，画面细腻呼应字幕情绪',
 		patch: {
 			kind: 'normal',
 			douyin: true,
@@ -219,73 +297,94 @@ export const DOUYIN_TEMPLATES: DouyinTemplate[] = [
 			frame: '9:16',
 			seconds: 30,
 			recipe: 'story',
-			style: 'healing',
+			style: 'storybook',
+			mvTheme: 'ballad',
+			jizuraAccent: false,
 			voice: 'zh-CN-XiaoxiaoNeural',
 			subtitles: true
-		}
-	},
-	{
-		key: 'viral-fun',
-		label: '花字剪辑',
-		badge: '轻快',
-		sub: '9:16 · 30秒 · 综艺花字',
-		sample: '把上传的日常/萌宠/探店素材剪成 30 秒高能卡点短视频，抓笑点和反差瞬间弹综艺花字',
-		patch: {
-			kind: 'normal',
-			douyin: true,
-			hook: 'result',
-			frame: '9:16',
-			seconds: 30,
-			recipe: 'footage',
-			style: 'hanazi',
-			voice: '',
-			subtitles: false
 		}
 	}
 ];
 
-/** 两类视频: an ordinary video, or an MP3 made into an MP4 (a lyric MV, JIZURA on the home PC). */
+/** 两类视频: an ordinary animated video, or an MP3 made into an animated / split-screen MV. */
 export type VideoKind = 'normal' | 'mv';
-export type MvTheme = 'lyricpv' | 'kinetic' | 'ballad' | 'pop' | 'any';
+export type MvTheme = 'kinetic' | 'pop' | 'ballad' | 'lyricpv' | 'wa' | 'any';
 export const VIDEO_KINDS: { key: VideoKind; label: string; sub: string }[] = [
-	{ key: 'normal', label: '普通视频', sub: '抖音爆款、科普、图文、剪辑…' },
-	{ key: 'mv', label: 'MP3 做 MV', sub: '一首歌 → 歌词 MV（MP4）' }
+	{ key: 'normal', label: '普通视频', sub: '多风格动画、剧情、分屏、科普…' },
+	{ key: 'mv', label: 'MP3 做 MV', sub: '动画 MV · 卡通×JIZURA 分屏' }
 ];
-/** JIZURA's おまかせ directions (skill video-studio「歌曲 MV / 歌词视频」, --theme). */
+
+/** JIZURA's おまかせ directions (skill video-studio, --theme). */
 export const MV_THEMES: { key: MvTheme; label: string; sub: string }[] = [
-	{ key: 'lyricpv', label: '文字 PV', sub: '排版感，适合多数歌' },
-	{ key: 'kinetic', label: '动感', sub: '跳跃、快切，节奏强的歌' },
-	{ key: 'ballad', label: '抒情', sub: '慢歌、温柔' },
-	{ key: 'pop', label: '流行', sub: '明快、多彩' },
-	{ key: 'any', label: '随机', sub: '交给它挑' }
+	{ key: 'kinetic', label: '动感潮酷', sub: '跳跃快切 · 强鼓点' },
+	{ key: 'pop', label: '明快流行', sub: '活力多彩 · 轻快感' },
+	{ key: 'ballad', label: '温柔抒情', sub: '慢歌氛围 · 柔光感' },
+	{ key: 'lyricpv', label: '精致排版', sub: '设计感强 · 百搭曲风' },
+	{ key: 'wa', label: '东方和风', sub: '国风/古风 · 诗意感' },
+	{ key: 'any', label: '随机探索', sub: '交给 JIZURA 自动挑' }
 ];
-/** What an MV shows: animated pictures that follow the lyrics with the lyrics animated on top (the
- * default, the user's wish 2026-11-18: Remotion), or the lyrics alone as a text PV (JIZURA, fast). */
-export type MvVisual = 'animated' | 'lyrics';
-export const MV_VISUALS: { key: MvVisual; label: string; sub: string }[] = [
-	{ key: 'animated', label: '歌词 + 动画', sub: '跟着歌词意境的动画画面，歌词动效叠在上面' },
-	{ key: 'lyrics', label: '只有歌词动效', sub: '文字 PV（JIZURA），出片快' }
+
+/** What an MV shows — NEVER pure text PV:
+ *  - split-tb: top half cartoon/multi-style animation + bottom half PC JIZURA motion (ideal for 9:16)
+ *  - split-lr: left half cartoon/multi-style animation + right half PC JIZURA motion (ideal for 16:9 / 1:1)
+ *  - animated: full-frame rich multi-style animation with dynamic lyrics integrated into the scenes
+ */
+export type MvVisual = 'split-tb' | 'split-lr' | 'animated';
+export const MV_VISUALS: { key: MvVisual; label: string; sub: string; tag?: string }[] = [
+	{
+		key: 'split-tb',
+		label: '上下分屏 · 卡通 + 动效',
+		sub: '上半屏贴歌词卡通动画，下半屏 PC JIZURA 动效',
+		tag: '竖屏推荐'
+	},
+	{
+		key: 'split-lr',
+		label: '左右分屏 · 卡通 + 动效',
+		sub: '左半屏贴歌词卡通动画，右半屏 PC JIZURA 动效',
+		tag: '横屏推荐'
+	},
+	{
+		key: 'animated',
+		label: '全屏动画 · 多风格融字',
+		sub: '全屏贴歌词意境的多风格动画，动态歌词融入画面'
+	}
 ];
+
 /** Lyrics pasted for an MV (a whole song's lines, LRC times included). */
 export const MV_LYRICS_MAX = 4000;
 
-/** 发布标准: every video is made to be published — it has to hold people from the first frame to
- * the last (the user's standing requirement, 2026-11-14), wherever it is rendered. */
+/** 发布标准: every video is animation-first and made to be published — never pure text motion,
+ * never simplistic stills, holding people from frame 0 to the end. */
 export const publishLines = (place: VideoPlace) => [
 	'',
 	'## 发布标准（默认要求，每个视频都要做到）',
-	'- 这是要发布出去的视频，目标是抓人、让人看完：第 0.5 秒内就要有吸引人的动态画面或一句钩子，不要黑场、静止片名卡或一张图干等',
-	'- 片头片尾即使只有音乐、没有人声，画面也要一直在动（镜头推移、元素进出、文字动效、随节拍切换）：任何画面静止不超过 2 秒，同一张图停留不超过 4 秒',
-	'- 动画要贴内容：动作表达画面在讲的事和情绪（讲流程就让步骤依次走起来、讲对比就并排滑入、讲数字就滚动计数，抒情处缓、高潮处快），不要为动而动的整屏漂移或随机晃动',
-	'- 全程连续、节奏跟着音乐或旁白走，大约在 60–75% 处放最有冲击力的画面；结尾 1–2 秒内收在一个仍有动作的画面上，不要拖长的静止片尾',
+	'- 拒绝纯文字动效与简陋画面：无论普通视频还是 MV，都要做贴近字幕或歌词意境的丰富动画（具象角色、场景、道具、光影与镜头运动），绝不做纯黑底飞大字或单图干放大',
+	'- 第 0.5 秒内就要进入有吸引力的动态画面，不要黑场、静止片名卡或静态干等',
+	'- 片头片尾即使只有音乐没有人声，动画画面也要持续流动（镜头推移、角色/天气/光影微动、随节拍切镜）：任何画面静止不超过 2 秒，同一构图停留不超过 4 秒',
+	'- 动画要贴内容：动作直接演绎画面在讲的事和情绪（讲故事有角色表演、讲对比有分格反差、讲流程有物件运转，抒情缓高潮快），不做无意义的整屏乱晃',
+	'- 全程连续、节奏跟着音乐或旁白走，约 60–75% 处放最有冲击力的动画高潮镜头；结尾 1–2 秒内收在一个仍有微动的完整构图上',
 	place === 'server'
-		? '- 封面：交付前按技能 video-studio「封面」一节运行 scripts/cover.py all，用 gpt-image 依据首帧画好封面并放进视频第 0 帧'
-		: '- 封面：交付前按技能 video-studio「封面」一节，用 gpt-image 依据首帧画好封面并放进视频第 0 帧（pc-video deliver 会自动做；家里电脑不在线、改在服务器做时运行 scripts/cover.py all）'
+		? '- 封面：交付前按技能 video-studio「封面」一节运行 scripts/cover.py all，用 gpt-image 依据首帧画好动画风封面并放进视频第 0 帧'
+		: '- 封面：交付前按技能 video-studio「封面」一节，用 gpt-image 依据首帧画好动画风封面并放进视频第 0 帧（pc-video deliver 会自动做；家里电脑不在线、改在服务器做时运行 scripts/cover.py all）'
 ];
 
-/** 抖音爆款规格: concise line for 提示词增强 (1500-char budget) or full section for the maker. */
+/** Describe the PC JIZURA configuration cleanly (shared between normal split-mix / accent and MV). */
+export const jizuraSpecText = (themeKey: MvTheme, styleKey: JizuraStyleKey): string => {
+	const theme = MV_THEMES.find((t) => t.key === themeKey) ?? MV_THEMES[0];
+	const style = JIZURA_STYLES.find((s) => s.key === styleKey) ?? JIZURA_STYLES[0];
+	const styleFlag = style.key === 'auto' ? '（样式由主题从 27 种里自动配对）' : `，指定 --style ${style.key}（${style.label}）`;
+	return `--theme ${theme.key}（${theme.label}）${styleFlag}`;
+};
+
+export const resolveSplitDirection = (layout: SplitLayoutKey, frame: VideoFrameKey): 'tb' | 'lr' => {
+	if (layout === 'tb' || layout === 'lr') return layout;
+	return frame === '9:16' ? 'tb' : 'lr';
+};
+
+/** 抖音爆款规格: animation-first short-video rules (never pushing pure-text kinetic walls;
+ * respects burned-in subtitles by keeping on-screen text minimal when subtitles are on). */
 export const douyinLines = (
-	opts: Pick<VideoBriefOptions, 'douyin' | 'hook' | 'frame'>,
+	opts: Pick<VideoBriefOptions, 'douyin' | 'hook' | 'frame' | 'subtitles'>,
 	forMaker = false
 ): string[] => {
 	if (!opts.douyin) return [];
@@ -293,26 +392,32 @@ export const douyinLines = (
 	const vertical = opts.frame === '9:16';
 	if (!forMaker) {
 		return [
-			`- 抖音爆款优化：开启（前 3 秒「${hook.label}」钩子禁寒暄；2–4 秒换画面节奏；${vertical ? '严守 9:16 抖音安全区；' : ''}每幕给高亮爆点词；结尾防忘总结卡+轻互动，并拟 6–10 字高点击封面标题）`
+			`- 抖音爆款优化：开启（前 3 秒「${hook.label}」动画钩子禁寒暄；2–4 秒换动画景别/动作；${vertical ? '严守 9:16 安全区；' : ''}${opts.subtitles ? '已有字幕不堆文字动效，专注动画演活台词；' : '动画为主、短标题克制融入；'}结尾动画收束+拟 6–10 字动画风封面标题）`
 		];
 	}
 	return [
 		'',
-		'## 抖音爆款规格（已开启，按抖音完播率与互动率标准执行）',
-		`- 前 3 秒黄金钩子（${hook.label}）：${hook.guide}；严禁“大家好/今天聊聊”式慢热开场`,
-		'- 高密完播节奏：口播短句口语化（每句 ≤ 14 字），每 2–3 秒必有一次视觉变化（切镜、爆点词弹入、划重点或图示生长），约 60–75% 处给反转或最高能干货',
+		'## 抖音爆款规格（动画叙事优先，按高完播与高互动标准执行）',
+		`- 前 3 秒动画视觉钩子（${hook.label}）：${hook.guide}；严禁“大家好/今天聊聊”式慢热开场或纯黑底大字卡`,
+		'- 高密动画节拍：旁白短句口语化（每句 ≤ 14 字），每 2–4 秒必有一次画面演进（角色动作切换、景别推拉、场景转换或道具互动），每一幕画面紧扣当前字幕内容，约 60–75% 处给最高能动画反转或视觉高潮',
+		...(opts.subtitles
+			? [
+					'- 有字幕不凸显文字动效：视频已开启底部烧录字幕，画面不必再堆叠满屏弹跳大字、花字或繁复文字动效；把视觉焦点全部留给贴合字幕内容的动画剧情与细节表演，仅在章节转场或关键数据时点缀极简标签'
+				]
+			: [
+					'- 无字幕轻排版：未开烧录字幕时，仅把极少量关键短句克制融入动画构图，画面主体仍必须是生动动画场景，绝不退化成纯文字视频'
+				]),
 		...(vertical
 			? [
-					'- 抖音 9:16 安全区（硬规范）：顶部留 12%（状态/搜索栏）、右侧留 14%（点赞/评论/收藏/转发按钮列）、底部留 22%（作者名/标题/进度条）；所有主标题、高亮大字与字幕严格控制在中心安全区（X: 6%–84%，Y: 14%–76%），字幕每行 ≤ 12 字、核心词放大撞色配描边'
+					'- 抖音 9:16 安全区（硬规范）：顶部留 12%（状态/搜索栏）、右侧留 14%（点赞/评论/收藏/转发按钮列）、底部留 22%（作者名/标题/进度条）；动画主角焦点与字幕严格放在安全区内（X: 6%–84%，Y: 14%–76%），字幕清晰易读不挡角色表情'
 				]
-			: ['- 大字可读性：核心爆点词放大撞色配描边或半透底衬，手机小屏一眼看清']),
-		'- 收藏与互动收尾：结尾前 3–4 秒给一张信息浓缩的「可截图防忘总结卡」刺激收藏，最后 1–2 秒配一句自然轻互动引导（提问或收藏提示），不拖沓不静止',
-		'- 高点击封面：第 0 帧封面使用 6–10 字强冲击短标题（突出数字、反差或结果），字大居中、高对比色，在信息流小图 0.5 秒看清'
+			: ['- 构图可读性：动画主体居中聚焦，字幕与画面对比清晰，手机小屏一眼看清']),
+		'- 动画收尾与高点击封面：结尾 3–4 秒用一组完整呼应主题的动画定格画面自然收束（配一句轻互动提问或收藏提示，不做丑陋文字墙）；第 0 帧封面延用本片动画画风，构图集中、配 6–10 字干净短标题'
 	];
 };
 
 export const VIDEO_PLACES: { key: VideoPlace; label: string; sub: string }[] = [
-	{ key: 'pc', label: '家里电脑', sub: 'RTX 3070 · 成片存 D 盘' },
+	{ key: 'pc', label: '家里电脑', sub: 'RTX 3070 · 支持 JIZURA · 存 D 盘' },
 	{ key: 'server', label: '服务器', sub: '一直在线 · 渲染较慢' }
 ];
 
@@ -356,6 +461,9 @@ export type VideoBriefOptions = {
 	subtitles: boolean;
 	douyin: boolean;
 	hook: VideoHookKey;
+	splitLayout: SplitLayoutKey;
+	jizuraStyle: JizuraStyleKey;
+	jizuraAccent: boolean;
 	maker: VideoMaker;
 	musicFit: VideoMusicFit;
 	place: VideoPlace;
@@ -394,18 +502,22 @@ export const DEFAULT_VIDEO_SETTINGS: VideoSettings = {
 	subtitles: true,
 	douyin: true,
 	hook: 'auto',
+	splitLayout: 'auto',
+	jizuraStyle: 'auto',
+	jizuraAccent: true,
 	maker: '',
 	musicFit: 'full',
 	place: 'pc',
 	kind: 'normal',
-	mvTheme: 'lyricpv',
-	mvVisual: 'animated'
+	mvTheme: 'kinetic',
+	mvVisual: 'split-tb'
 };
 
 const pick = <T extends string>(value: unknown, allowed: readonly T[], fallback: T): T =>
 	allowed.includes(value as T) ? (value as T) : fallback;
 
-/** The choices remembered between visits (localStorage), whatever shape they were stored in. */
+/** The choices remembered between visits (localStorage), whatever shape they were stored in.
+ * Legacy mvVisual='lyrics' migrates to 'split-tb' (half cartoon + half JIZURA motion). */
 export const normalizeVideoSettings = (value: unknown): VideoSettings => {
 	const raw = (value && typeof value === 'object' ? value : {}) as Record<string, unknown>;
 	const seconds = Number(raw.seconds);
@@ -440,6 +552,20 @@ export const normalizeVideoSettings = (value: unknown): VideoSettings => {
 			VIDEO_HOOKS.map((h) => h.key),
 			DEFAULT_VIDEO_SETTINGS.hook
 		),
+		splitLayout: pick(
+			raw.splitLayout,
+			SPLIT_LAYOUTS.map((l) => l.key),
+			DEFAULT_VIDEO_SETTINGS.splitLayout
+		),
+		jizuraStyle: pick(
+			raw.jizuraStyle,
+			JIZURA_STYLES.map((s) => s.key),
+			DEFAULT_VIDEO_SETTINGS.jizuraStyle
+		),
+		jizuraAccent:
+			typeof raw.jizuraAccent === 'boolean'
+				? raw.jizuraAccent
+				: DEFAULT_VIDEO_SETTINGS.jizuraAccent,
 		maker: pick(
 			raw.maker,
 			VIDEO_MAKERS.map((m) => m.key),
@@ -459,12 +585,12 @@ export const normalizeVideoSettings = (value: unknown): VideoSettings => {
 		mvTheme: pick(
 			raw.mvTheme,
 			MV_THEMES.map((t) => t.key),
-			'lyricpv'
+			DEFAULT_VIDEO_SETTINGS.mvTheme
 		),
 		mvVisual: pick(
 			raw.mvVisual,
 			MV_VISUALS.map((v) => v.key),
-			'animated'
+			DEFAULT_VIDEO_SETTINGS.mvVisual
 		)
 	};
 };
@@ -537,8 +663,39 @@ const attachmentCounts = (attachments: NonNullable<VideoBriefOptions['attachment
 		.map(([kind, n]) => `${n} 个${ATTACHMENT_KIND[kind] ?? '文件'}`)
 		.join('、');
 
+/** Normal-video JIZURA integration lines (split-screen hybrid OR beat-synced accent layer on PC). */
+const normalJizuraLines = (opts: Omit<VideoBriefOptions, 'idea'>, forMaker = false): string[] => {
+	const jizuraCfg = jizuraSpecText(opts.mvTheme ?? 'kinetic', opts.jizuraStyle ?? 'auto');
+	if (opts.recipe === 'split-jizura') {
+		const dir = resolveSplitDirection(opts.splitLayout ?? 'auto', opts.frame);
+		const dirLabel = dir === 'tb' ? '上下分屏（上半屏约 56% 卡通/多风格动画 + 下半屏约 44% 节奏动效）' : '左右分屏（左半屏约 56% 卡通/多风格动画 + 右半屏约 44% 节奏动效）';
+		if (!forMaker) {
+			return [
+				`- 分屏混搭（动画 × PC JIZURA）：${dirLabel}；动效半屏风格 ${jizuraCfg}，两半配色统一、绝不做纯文字全屏`
+			];
+		}
+		return [
+			`- 分屏布局：${dirLabel}，两半之间用精致动态分割线或声波条衔接，配色与主动画画风呼应`,
+			opts.place === 'server'
+				? `- 动效半屏（服务器模式）：用 Remotion 做出等效的节奏图形、几何脉冲与动效层（${jizuraCfg} 风格方向），不退化成纯白底大字`
+				: `- 动效半屏（家里电脑 JIZURA）：调用家里电脑 pc-video jizura（${jizuraCfg}）渲染高质感节奏动效层（传入对应章节短词/情绪词或节奏锚点，而非满屏长字幕），与 Remotion 卡通动画半屏合成；家里电脑不在线时自动改用 Remotion 制作同等动效半屏`
+		];
+	}
+	if (opts.recipe !== 'footage' && opts.jizuraAccent) {
+		if (!forMaker) {
+			return [`- PC JIZURA 动效加持：开启（片头/转场/高潮可融合家里电脑 JIZURA ${jizuraCfg} 动效，主体保持全动画）`];
+		}
+		return [
+			opts.place === 'server'
+				? '- 动效转场加持：开头钩子、章节切换与高潮处加入强节奏动态图形转场，主体始终是贴合字幕的多风格动画'
+				: `- PC JIZURA 动效加持：可调用家里电脑 pc-video jizura（${jizuraCfg}）制作高冲击力的片头视觉转场、章节卡点叠层或高潮短切（控制在局部点缀，绝不做整片纯文字，且有底部字幕时不抢戏）；PC 离线自动改用 Remotion`
+		];
+	}
+	return [];
+};
+
 /** The decided settings as the brief words them (做法, 画幅, 时长, 配音, 字幕), one per line. */
-const requirementLines = (opts: Omit<VideoBriefOptions, 'idea'>) => {
+const requirementLines = (opts: Omit<VideoBriefOptions, 'idea'>, forMaker = false) => {
 	const recipe = VIDEO_RECIPES.find((r) => r.key === opts.recipe) ?? VIDEO_RECIPES[0];
 	const frame = VIDEO_FRAMES.find((f) => f.key === opts.frame) ?? VIDEO_FRAMES[0];
 	const voice = VIDEO_VOICES.find((v) => v.key === opts.voice);
@@ -551,7 +708,8 @@ const requirementLines = (opts: Omit<VideoBriefOptions, 'idea'>) => {
 			? `- 时长：跟背景音乐一样长${musicClock ? `（${musicClock}）` : ''}`
 			: `- 时长：约 ${lengthLabel(opts.seconds)}`,
 		`- 配音：${voice && voice.key ? `中文配音，${voice.label}（edge-tts ${voice.key}）` : '不要配音'}`,
-		`- 字幕：${opts.subtitles ? '烧录中文字幕' : '不要字幕'}`
+		`- 字幕：${opts.subtitles ? '烧录中文字幕（已有字幕，画面不必凸显文字动效）' : '不要字幕'}`,
+		...normalJizuraLines(opts, forMaker)
 	];
 };
 
@@ -563,16 +721,16 @@ export const placeLine = (place: VideoPlace) =>
 
 /** The settings for 提示词增强 to size the content to (it never changes them). */
 export const videoSettingsText = (opts: Omit<VideoBriefOptions, 'idea'>): string => {
-	const lines = requirementLines(opts);
+	const lines = requirementLines(opts, false);
 	const attachments = opts.attachments ?? [];
 	lines.push(...douyinLines(opts, false));
-	lines.push(...videoStyleLines({ ...opts, topic: opts.styleTopic ?? '' }));
+	lines.push(...videoStyleLines({ ...opts, topic: opts.styleTopic ?? '' }, false));
 	if (opts.music)
 		lines.push(`- 背景音乐：用户指定（${plainName(opts.music.name)}），视频按音乐的节拍和长度做`);
 	// The server accepts 1500 characters. Bound names after the essential constraints.
 	if (attachments.length)
 		lines.push(
-			`- 参考附件：${attachmentCounts(attachments)}（${attachments.map((a) => plainName(a.name).slice(0, 18)).join('、')}）`
+			`- 参考附件：${attachmentCounts(attachments)}（${attachments.map((a) => plainName(a.name).slice(0, 14)).join('、')}）`
 		);
 	return lines.join('\n');
 };
@@ -612,29 +770,64 @@ const prepLines = (prep: VideoPrep, idea: string): string[] => {
 	return lines;
 };
 
-/** The message the chat sends: the runner's command in front, then the brief. */
 /** The delivery paragraph's last instruction: where the finished video goes. */
 const MEDIA_DELIVERY = '最后单独一行写「MEDIA:」紧跟成片 mp4 的绝对路径（这一行不要放进代码块）';
 const deliveryLine = (place: VideoPlace) =>
 	place === 'server'
-		? `完成后用一小段话说明做法、时长和分镜；先用 scripts/cover.py all 放好封面，${MEDIA_DELIVERY}。`
-		: `完成后用一小段话说明做法、时长和分镜。在家里电脑做的：按技能用 pc-video deliver 交付（自动放封面、存到 D:\\HermesWork\\视频\\），回复里只写 Windows 路径，不写 MEDIA；家里电脑不在线、改在服务器做的：先用 scripts/cover.py all 放好封面，${MEDIA_DELIVERY}。`;
+		? `完成后用一小段话说明做法、动画风格、时长和分镜；先用 scripts/cover.py all 放好封面，${MEDIA_DELIVERY}。`
+		: `完成后用一小段话说明做法、动画风格、是否联动 JIZURA、时长和分镜。在家里电脑做的：按技能用 pc-video deliver 交付（自动放封面、存到 D:\\HermesWork\\视频\\），回复里只写 Windows 路径，不写 MEDIA；家里电脑不在线、改在服务器做的：先用 scripts/cover.py all 放好封面，${MEDIA_DELIVERY}。`;
 
-/** 歌词 + 动画: what the pictures and the lyrics each have to do (Remotion, the skill's「歌词 + 动画」). */
-const animatedMvLines = (place: VideoPlace, theme: (typeof MV_THEMES)[number]) => [
-	`- 做法：歌曲 MV（歌词 + 动画）—— 按技能 video-studio「歌曲 MV / 歌词视频」一节的「歌词 + 动画」做法，用 Remotion${place === 'server' ? ' 在服务器' : '（pc-video remotion render）'}做：底下是跟着歌词走的动画画面，上面是动态歌词；无旁白、不另加字幕层`,
-	'- 动画画面：按歌曲段落（前奏、主歌、副歌、间奏、尾奏）分场景，画面内容取自歌词里的意象和情绪（人物、物件、场景或抽象图形都可以），全片同一套画风和配色；每个场景都在动（镜头推移或视差、元素入场回弹、粒子光效、图形随节拍跳动），切镜落在节拍上，副歌画面最满、能量最高，不要只拿一张图慢慢放大',
-	'- 歌词动效：每句随演唱出现和退场（入场方式跟画面一起设计，重点词可逐字弹出、放大或换强调色），时间以对齐好的 LRC 为准；字大、对比够，手机上看得清，不挡画面主体；没有歌词的前奏、间奏、尾奏靠动画和歌名、段落字样撑住',
-	`- 画面基调：${theme.label}（${theme.sub}）；先选副歌渲 15–20 秒样片看拼图，确认动画和歌词都在动、对得上拍，再出整首`
-];
+/** Resolve the MV's cartoon/animation visual style label for UI and brief clarity. */
+export const resolveMvStyleLabel = (opts: Pick<VideoBriefOptions, 'style' | 'styleTopic' | 'idea' | 'attachments'>): string => {
+	if (opts.style === 'reference') return '跟随参考';
+	if (opts.style === 'custom') return '自定义动画风';
+	const key =
+		opts.style === 'auto'
+			? pickVideoStyle(opts.styleTopic ?? opts.idea ?? '', { attachments: opts.attachments, kind: 'mv' }).key
+			: opts.style;
+	return VIDEO_STYLES.find((s) => s.key === key)?.label ?? '日漫卡通';
+};
 
-/** 只有歌词动效: the lyrics alone, JIZURA on the home PC (Remotion on the server). */
-const lyricsOnlyMvLines = (place: VideoPlace, theme: (typeof MV_THEMES)[number]) => [
-	place === 'server'
-		? '- 做法：歌曲 MV（只有歌词动效）—— 按技能 video-studio「歌曲 MV / 歌词视频」一节做跟着节拍走的动态歌词画面；无旁白、不另加字幕层'
-		: '- 做法：歌曲 MV（只有歌词动效）—— 按技能 video-studio「歌曲 MV / 歌词视频」一节，用 JIZURA（pc-video jizura）把歌词做成跟着节拍走的动态文字画面；无旁白、不另加字幕层',
-	`- 画面主题：${theme.label}（--theme ${theme.key}）；先渲一段样片看拼图，满意再出整首`
-];
+/** Split-screen MV (half cartoon/multi-style animation + half PC JIZURA kinetic motion). */
+const splitMvLines = (
+	place: VideoPlace,
+	mvVisual: 'split-tb' | 'split-lr',
+	theme: (typeof MV_THEMES)[number],
+	jizuraStyle: JizuraStyleKey,
+	frame: VideoFrameKey
+) => {
+	const isTb = mvVisual === 'split-tb';
+	const dirName = isTb ? '上下分屏' : '左右分屏';
+	const cartoonPos = isTb ? '上半屏（约 55–58% 高度）' : '左半屏（约 55–58% 宽度）';
+	const motionPos = isTb ? '下半屏（约 42–45% 高度）' : '右半屏（约 42–45% 宽度）';
+	const jizuraAspect = isTb ? (frame === '9:16' ? '1:1 或 4:3' : '16:9') : frame === '16:9' ? '1:1 或 3:4' : '9:16';
+	const jizuraCfg = jizuraSpecText(theme.key, jizuraStyle);
+	return [
+		`- 做法：分屏动画 MV（${dirName}：一半卡通动画 + 一半动效）—— 按技能 video-studio「分屏动画 MV」流程制作，严禁纯文字 PV 或单图慢放；无旁白、不另加底部字幕条`,
+		`- 卡通动画半屏（${cartoonPos}）：用 Remotion${place === 'server' ? '（服务器）' : '（pc-video remotion render）'}按歌曲段落（前奏、主歌、副歌、间奏、尾奏）制作紧贴歌词意象与情绪的多场景动画（角色表情动作、天气光影、道具演变与镜头视差），切镜卡在鼓点上，副歌最满最炸`,
+		place === 'server'
+			? `- 动效半屏（${motionPos}）：在服务器用 Remotion 制作随节拍跳动的潮流歌词动效、音频律动图形与几何装饰（风格基调：${theme.label}），与卡通动画半屏在配色和节拍上严格呼应`
+			: `- 动效半屏（${motionPos}，家里电脑 JIZURA）：调用家里电脑 pc-video jizura（${jizuraCfg}，--aspect 按半屏比例匹配如 ${jizuraAspect}）渲染高质感歌词动效与视觉装饰层（保留 JIZURA 丰富动态版式与鼓点卡切），再与 Remotion 卡通半屏通过 Remotion 合成或 FFmpeg ${isTb ? 'vstack' : 'hstack'} 拼合成完整分屏 MV，中间加一条随节拍律动的精致分割线；家里电脑不在线时改用 Remotion 做同等动效半屏并说明`,
+		`- 样片核验：先选副歌 15–20 秒同时出卡通半屏 + 动效半屏的合成样片与拼图，确认两半节奏同步、画风和谐、都不静止且歌词清晰，再出整首`
+	];
+};
+
+/** Full-frame multi-style animated MV with integrated dynamic lyrics (and optional JIZURA accents). */
+const fullAnimatedMvLines = (
+	place: VideoPlace,
+	theme: (typeof MV_THEMES)[number],
+	jizuraStyle: JizuraStyleKey
+) => {
+	const jizuraCfg = jizuraSpecText(theme.key, jizuraStyle);
+	return [
+		`- 做法：全屏动画 MV（多风格动画 + 融字动效）—— 按技能 video-studio「全屏动画 MV」流程，用 Remotion${place === 'server' ? ' 在服务器' : '（pc-video remotion render）'}做：全屏贴近歌词意象的丰富动画场景 + 随节拍融入画面的动态歌词；无旁白、不另加生硬字幕条`,
+		'- 动画画面：按歌曲段落（前奏、主歌、副歌、间奏、尾奏）分场景，画面直接演绎每段歌词的人物、物件、风景与情绪，全片统一画风；镜头推移、角色动作、粒子光影与图形随节拍持续变化，副歌最满，绝不只拿单图慢放',
+		place === 'server'
+			? `- 歌词与动效融合（基调：${theme.label}）：歌词在 Remotion 里做成贴合画面的动态排版，重点词随鼓点弹出或变色，不遮挡角色主角；前奏间奏尾奏用动画场景 + 歌名动效撑住`
+			: `- 歌词与动效融合（基调：${theme.label}，可联动 PC JIZURA）：歌词做成贴合画面的动态排版，前奏/间奏/副歌爆发转场可借力家里电脑 pc-video jizura（${jizuraCfg}）做高能视觉转场或局部动效叠层，但全片绝不退化成纯文字 PV`,
+		'- 样片核验：先选副歌渲 15–20 秒样片看拼图，确认动画与歌词都贴合旋律与拍点，再出整首'
+	];
+};
 
 /** Lyrics recognition / alignment (skill video-studio「歌词识别与对齐」): the home PC's GPU by
  * default, back to the server's CPU by itself; the server when the brief chose it. */
@@ -643,44 +836,59 @@ const asrTool = (place: VideoPlace) =>
 		? '识别与对齐在服务器 CPU 上跑，见技能「歌词识别与对齐」'
 		: '识别与对齐用 pc-video asr，在家里电脑显卡上跑，不在线自动回服务器，见技能「歌词识别与对齐」';
 
-/** MP3 做 MV: an MV of the user's song — animated pictures with animated lyrics (Remotion), or the
- * lyrics alone (JIZURA on the home PC). */
+/** MP3 做 MV: split-screen (half cartoon animation + half PC JIZURA motion) or full-frame multi-style animation. */
 export const buildMvBrief = (opts: VideoBriefOptions): string => {
 	const music = opts.music ?? null;
 	const theme = MV_THEMES.find((t) => t.key === opts.mvTheme) ?? MV_THEMES[0];
-	const animated = (opts.mvVisual ?? 'animated') === 'animated';
+	const mvVisual: MvVisual = opts.mvVisual ?? 'split-tb';
 	const frame = VIDEO_FRAMES.find((f) => f.key === opts.frame) ?? VIDEO_FRAMES[0];
 	const lyrics = (opts.lyrics ?? '').trim().slice(0, MV_LYRICS_MAX);
 	const timed = /^\s*\[\d+:\d+(?:[.:]\d+)?\]/m.test(lyrics);
 	const attachments = opts.attachments ?? [];
+	const visualLabel =
+		mvVisual === 'split-tb'
+			? '上下分屏动画 MV（一半卡通动画 + 一半动效）'
+			: mvVisual === 'split-lr'
+				? '左右分屏动画 MV（一半卡通动画 + 一半动效）'
+				: '全屏多风格动画 MV';
+	const styleLines = videoStyleLines(
+		{
+			style: opts.style,
+			customStyle: opts.customStyle,
+			appearance: opts.appearance,
+			topic: `${opts.styleTopic ?? opts.idea} ${music?.name ?? ''}`,
+			attachments,
+			kind: 'mv',
+			douyin: frame.key === '9:16'
+		},
+		true
+	);
 	const lines = [
 		'请制作一个视频（来自 HaloWebUI 视频工作台）。',
 		'',
 		'## 想要的视频',
-		`把这首歌做成${animated ? '有动画画面的歌词 MV' : '歌词 MV'}（MP4）。${opts.idea.trim() ? `\n${opts.idea.trim()}` : ''}`,
+		`把这首歌做成${visualLabel}（MP4）。${opts.idea.trim() ? `\n${opts.idea.trim()}` : ''}`,
 		'',
 		'## 要求',
-		...(animated ? animatedMvLines(opts.place, theme) : lyricsOnlyMvLines(opts.place, theme)),
+		...(mvVisual === 'animated'
+			? fullAnimatedMvLines(opts.place, theme, opts.jizuraStyle ?? 'auto')
+			: splitMvLines(opts.place, mvVisual, theme, opts.jizuraStyle ?? 'auto', frame.key)),
+		...styleLines,
 		music
 			? `- 歌曲：${plainName(music.name)}${music.seconds ? `（${clockLabel(music.seconds)}）` : ''}，随消息附上，原文件路径见消息末尾的附件原文件；成片和这首歌一样长，音乐从 0 秒开始，不换、不加别的配乐`
 			: '- 歌曲：（还没选）',
 		`- 画幅：${frame.label} ${frame.key}（${frame.size}）`,
 		...(frame.key === '9:16'
-			? ['- 抖音 9:16 安全区：歌词和画面主体避开顶部 12%、右侧 14% 互动按钮列与底部 22% 文案栏']
+			? ['- 抖音 9:16 安全区：卡通主角焦点与动态歌词避开顶部 12%、右侧 14% 互动按钮列与底部 22% 文案栏']
 			: []),
 		lyrics
 			? `- 歌词：用户已提供（见下面「## 歌词」）${timed ? '，带时间轴，直接用' : `，没有时间轴：先与人声对齐成 LRC 再做，对不上的地方以人声为准（${asrTool(opts.place)}）`}`
 			: `- 歌词：用户没给。先识别歌词并与人声对齐成 LRC（${asrTool(opts.place)}）；听不清、拿不准的词不要猜，列出来交给用户确认后再做整首`,
-		placeLine(opts.place),
-		...(animated
-			? []
-			: opts.place === 'server'
-				? ['- 选了服务器：JIZURA 只装在家里电脑，服务器上改用 Remotion 做「无旁白：音乐 + 设计字幕」的动态歌词，交付时说明']
-				: ['- 家里电脑不在线时 JIZURA 用不了：说明情况，等电脑开机或改用 Remotion 在服务器做动态歌词'])
+		placeLine(opts.place)
 	];
 	if (attachments.length) {
 		lines.push(
-			`- 参考附件：${attachmentCounts(attachments)}（${attachments.map((a) => plainName(a.name)).join('、')}），先看完；LRC/SRT 歌词文件优先于下面贴的歌词${animated ? '；图片当画风、角色或场景参考' : ''}`
+			`- 参考附件：${attachmentCounts(attachments)}（${attachments.map((a) => plainName(a.name)).join('、')}），先看完；LRC/SRT 歌词文件优先于下面贴的歌词；图片当动画画风、角色或场景参考`
 		);
 	}
 	if (lyrics) lines.push('', '## 歌词', lyrics);
@@ -707,7 +915,7 @@ export const buildVideoBrief = (opts: VideoBriefOptions): string => {
 		...(opts.prep ? prepLines(opts.prep, opts.idea) : []),
 		'',
 		'## 要求',
-		...requirementLines(opts),
+		...requirementLines(opts, true),
 		...videoStyleLines({ ...opts, topic: opts.styleTopic ?? opts.idea }, true),
 		placeLine(opts.place)
 	];
@@ -717,11 +925,9 @@ export const buildVideoBrief = (opts: VideoBriefOptions): string => {
 			`- 参考附件：${counts}（${attachments.map((a) => plainName(a.name)).join('、')}），随消息附上，原文件路径见消息末尾；先看完再动手，是素材还是风格参考以上面的描述为准`
 		);
 		if (opts.recipe !== 'footage' && attachments.some((a) => a.kind === 'video')) {
-			// A video handed over as "做成这样" (a downloaded short with its watermark) must not
-			// end up cut into the result; with 素材剪辑 the attached footage is the material.
 			lines.push(
 				opts.style === 'auto' || opts.style === 'reference'
-					? '- 附件里的视频：描述没说要剪进成片时，只当风格参考——抽帧看构图、配色、字体、节奏和转场，用自己做的画面重现这种风格，不要直接使用原片画面、水印或角色形象'
+					? '- 附件里的视频：描述没说要剪进成片时，只当风格参考——抽帧看构图、配色、字体、节奏和转场，用自己做的动画重现这种风格，不要直接使用原片画面、水印或角色形象'
 					: '- 附件里的视频：描述没说要剪进成片时，仅分析用户指定的内容、构图或动作，不覆盖所选视觉风格，不直接使用原片画面、水印或角色形象'
 			);
 		}
@@ -735,12 +941,11 @@ export const buildVideoBrief = (opts: VideoBriefOptions): string => {
 			fullLength
 				? '- 长度：视频和这首音乐一样长（film.py 用 "music_fit": "full"），旁白要放得进音乐的长度'
 				: `- 长度：视频约 ${lengthLabel(opts.seconds)}，音乐从开头截取、结尾淡出（film.py 用 "music_fit": "trim", "seconds": ${opts.seconds}）${loops ? '；音乐比视频短，会循环播放' : ''}`,
-			`- 先听音乐再分镜：python3 ${VIDEO_FILM_SCRIPT} --music-info <音乐路径>，得到时长、节拍（beats）、每秒能量和高潮位置；转场卡在节拍上，最有冲击力的画面放在高潮，结尾落在音乐结尾`,
+			`- 先听音乐再分镜：python3 ${VIDEO_FILM_SCRIPT} --music-info <音乐路径>，得到时长、节拍（beats）、每秒能量和高潮位置；转场卡在节拍上，最有冲击力的动画画面放在高潮，结尾落在音乐结尾`,
 			'- 用 film.py 出片（"music" 写这首音乐的路径；Remotion 画面用 --picture 交给它混音）：音乐从 0 秒开始，有配音时自动压低',
 			`- 交付前核验：python3 ${VIDEO_FILM_SCRIPT} --check-music <成片.mp4> <音乐路径>，必须输出 "music_found": true，否则修好再交付`
 		);
 		if (fullLength && music.seconds != null && music.seconds > LONG_VIDEO_SECONDS) {
-			// Kbps for the whole file to land under the delivery limit, less 128 for the audio.
 			const kbps = Math.max(150, Math.floor(((DELIVERY_MAX_MB - 10) * 8 * 1024) / music.seconds) - 128);
 			lines.push(
 				`- 长视频（${musicClock}）：画面以少量关键画面的慢速运镜、循环动效为主，不必每个节拍都转场；画幅按所选比例用 720p（如 1280×720）`,
@@ -779,7 +984,6 @@ export const fitVideoBrief = (opts: VideoBriefOptions, max: number): string => {
 		const brief = buildVideoBrief({ ...opts, prep: attempt });
 		if (brief.length <= max) return brief;
 	}
-	// Do not silently truncate the user's words: the workbench reports an overlong brief.
 	return buildVideoBrief({ ...opts, prep: minimal });
 };
 

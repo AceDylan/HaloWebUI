@@ -93,7 +93,7 @@ def test_vertical_cover_prompt_adds_douyin_safe_zone_guidance(monkeypatch):
 
     asyncio.run(video_cover.draw_from_frame(None, _User("vc-dy"), _png(1080, 1920), 1080, 1920, "别再内耗了"))
     asyncio.run(video_cover.draw_from_frame(None, _User("vc-dy"), _png(1920, 1080), 1920, 1080, "横屏测试"))
-    assert "抖音风格" in prompts[0] and "15% 安全边距" in prompts[0]
+    assert "抖音风格" in prompts[0] and "15% 安全边距" in prompts[0] and "不要做成纯黑底大字海报" in prompts[0]
     assert "抖音风格" not in prompts[1]
 
 

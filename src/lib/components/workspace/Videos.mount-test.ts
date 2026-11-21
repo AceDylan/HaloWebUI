@@ -211,7 +211,7 @@ describe('Videos 提示词增强', () => {
 		await sleep(30);
 		const form = prepApi.startStudioPrep.mock.calls[0][1];
 		expect(form).toMatchObject({ kind: 'video', idea: '用 30 秒讲讲番茄工作法', research: true, deeper: true });
-		expect(form.settings).toContain('做法：讲解动画');
+		expect(form.settings).toContain('做法：剧情动画');
 		expect(form.settings).toContain('时长：约 30 秒');
 		// no waiting here: nobody polls the job, the task starts at once
 		expect(prepApi.getStudioPrep).not.toHaveBeenCalled();
@@ -306,7 +306,7 @@ describe('Videos', () => {
 		target.querySelector('[data-video-maker="codex"]').click();
 		target.querySelector('[data-video-recipe="story"]').click();
 		await sleep(10);
-		expect(target.querySelector('[data-video-brief] pre').textContent).toContain('做法：图文成片');
+		expect(target.querySelector('[data-video-brief] pre').textContent).toContain('做法：绘本动画');
 		target.querySelector('[data-video-workbench]').dispatchEvent(new Event('submit'));
 		await sleep(10);
 		expect(api.startVideoTask).toHaveBeenCalledTimes(1);
@@ -526,13 +526,13 @@ describe('Videos style presets', () => {
 		const target = await mount();
 		expect(target.querySelectorAll('[data-video-style-grid] img').length).toBe(12);
 		let sample = target.querySelector('[data-video-style-sample]');
-		// Douyin mode is on by default, so empty topic defaults to 黑金大字
-		expect(sample.getAttribute('src')).toBe('/video-presets/v2/douyin-bold.mp4');
+		// Animation-first Douyin mode is on by default, so empty topic defaults to 日漫卡通
+		expect(sample.getAttribute('src')).toBe('/video-presets/v2/anime-cartoon.mp4');
 		expect(sample.getAttribute('preload')).toBe('none');
 		expect(sample.hasAttribute('autoplay')).toBe(false);
 		expect(target.querySelectorAll('[data-video-style-sample]').length).toBe(1);
-		// Category filter narrows to Douyin (6) and MG (8) then back to all (12)
-		target.querySelector('[data-video-style-cat="douyin"]').click();
+		// Category filter narrows to Anime (6) and MG (8) then back to all (12)
+		target.querySelector('[data-video-style-cat="anime"]').click();
 		await sleep(10);
 		expect(target.querySelectorAll('[data-video-style-grid] img').length).toBe(6);
 		target.querySelector('[data-video-style-cat="mg"]').click();
@@ -563,9 +563,9 @@ describe('Videos style presets', () => {
 		await sleep(20);
 		const form = prepApi.startStudioPrep.mock.calls[1][1];
 		expect(form.settings).toContain('关键技法：一张超大画布一镜到底');
-		expect(form.settings).toContain('配色与字体偏好：米白与深绿，黑体');
+		expect(form.settings).toContain('配色与外观偏好：米白与深绿，黑体');
 		expect(sent().text).toContain('实现路线：Remotion 大画布容器');
-		expect(sent().text).toContain('配色与字体偏好：米白与深绿，黑体');
+		expect(sent().text).toContain('配色与外观偏好：米白与深绿，黑体');
 		expect(JSON.parse(localStorage.getItem('halo.videoStudio.settings')!).appearance).toBe('米白与深绿，黑体');
 	});
 
@@ -583,7 +583,7 @@ describe('Videos style presets', () => {
 		target.querySelector('[data-video-workbench]').dispatchEvent(new Event('submit'));
 		await sleep(10);
 		expect(prepApi.startStudioPrep).not.toHaveBeenCalled();
-		expect(sent().text).toContain('视觉风格：综艺花字（Variety Show Captions');
+		expect(sent().text).toContain('视觉风格：轻漫综艺（Variety Comic Stickers');
 		expect(JSON.parse(localStorage.getItem('halo.videoStudio.settings')!).style).toBe('hanazi');
 		const restored = await mount();
 		expect(restored.querySelector('[data-video-style="hanazi"]').getAttribute('aria-pressed')).toBe('true');
@@ -812,7 +812,7 @@ describe('Videos 制作任务', () => {
 		expect(target.querySelector('[data-video-task="run1"]')).toBeFalsy();
 	});
 
-	it('MP3 做 MV: the song is required, an MV has no voice, subtitles or recipe, and the brief asks for JIZURA', async () => {
+	it('MP3 做 MV: defaults to split-screen cartoon + PC JIZURA, lets user pick animation style & JIZURA skin', async () => {
 		api.getVideoPage.mockResolvedValue({ items: [], next: null });
 		upload.uploadFileReliably.mockResolvedValue({ file: { id: 'm9' } });
 		const target = await mount();
@@ -821,33 +821,41 @@ describe('Videos 制作任务', () => {
 		expect(target.querySelector('[data-video-kind="mv"]').getAttribute('aria-checked')).toBe('true');
 		for (const gone of ['[data-video-recipe]', '[data-video-voice]', '[data-video-length]', '[data-video-prep-options]', '[data-video-music-fit]'])
 			expect(target.querySelector(gone)).toBeFalsy();
-		expect(target.querySelectorAll('[data-video-mv-theme]').length).toBe(5);
-		// 歌词 + 动画 by default; 只有歌词动效 is the JIZURA text PV
-		expect(target.querySelector('[data-video-mv-visual="animated"]').getAttribute('aria-pressed')).toBe('true');
+		expect(target.querySelectorAll('[data-video-mv-theme]').length).toBe(6);
+		expect(target.querySelectorAll('[data-video-mv-visual]').length).toBe(3);
+		// 上下分屏 (split-tb) by default; never pure-text MV
+		expect(target.querySelector('[data-video-mv-visual="split-tb"]').getAttribute('aria-pressed')).toBe('true');
 		expect(target.querySelector('[data-video-status]').textContent).toContain('先选一首 MP3');
-		await dropOn(target.querySelector('[data-video-music]'), mp3('笑一笑.mp3'));
+		await dropOn(target.querySelector('[data-video-music]'), mp3('夏日回响.mp3'));
 		const box = target.querySelector('[data-video-lyrics]');
-		box.value = '[00:07.74]闹钟响了三遍才爬起来\n[00:11.90]镜子里的自己有点呆';
+		box.value = '[00:07.74]海风吹过夏天的屋檐\n[00:11.90]夕阳洒在操场边';
 		box.dispatchEvent(new Event('input'));
-		target.querySelector('[data-video-mv-theme="kinetic"]').click();
+		target.querySelector('[data-video-mv-visual="split-lr"]').click();
+		target.querySelector('[data-video-style="guochao"]').click();
+		target.querySelector('[data-video-mv-theme="wa"]').click();
+		target.querySelector('[data-video-jizura-style="rouge"]').click();
 		await sleep(10);
-		expect(target.querySelector('[data-video-status]').textContent).toContain('歌词 + 动画 MV（动感）');
-		target.querySelector('[data-video-mv-visual="lyrics"]').click();
-		await sleep(10);
-		expect(target.querySelector('[data-video-status]').textContent).toContain('歌词 MV（动感）');
-		expect(target.querySelector('[data-video-status]').textContent).not.toContain('动画');
+		expect(target.querySelector('[data-video-status]').textContent).toContain('左右分屏 · 卡通 + 动效（国潮插画 × 东方和风）');
 		target.querySelector('[data-video-workbench]').dispatchEvent(new Event('submit'));
 		await sleep(20);
 		expect(prepApi.startStudioPrep).not.toHaveBeenCalled(); // nothing to enhance
 		const entry = sent();
-		expect(entry.files).toEqual([{ id: 'm9', name: '笑一笑.mp3', type: 'file' }]);
-		expect(entry.text).toContain('歌曲 MV');
-		expect(entry.text).toContain('--theme kinetic');
+		expect(entry.files).toEqual([{ id: 'm9', name: '夏日回响.mp3', type: 'file' }]);
+		expect(entry.text).toContain('左右分屏动画 MV（一半卡通动画 + 一半动效）');
+		expect(entry.text).toContain('视觉风格：国潮插画');
+		expect(entry.text).toContain('--theme wa');
+		expect(entry.text).toContain('--style rouge');
 		expect(entry.text).toContain('带时间轴，直接用');
-		expect(entry.text).toContain('## 歌词\n[00:07.74]闹钟响了三遍才爬起来');
+		expect(entry.text).toContain('## 歌词\n[00:07.74]海风吹过夏天的屋檐');
 		expect(entry.text).toContain('## 发布标准');
 		expect(entry.text).not.toContain('配音');
-		expect(JSON.parse(localStorage.getItem('halo.videoStudio.settings')!)).toMatchObject({ kind: 'mv', mvTheme: 'kinetic', mvVisual: 'lyrics' });
+		expect(JSON.parse(localStorage.getItem('halo.videoStudio.settings')!)).toMatchObject({
+			kind: 'mv',
+			mvTheme: 'wa',
+			mvVisual: 'split-lr',
+			style: 'guochao',
+			jizuraStyle: 'rouge'
+		});
 	});
 
 	it('deletes an uploaded MP3 and a finished task for good, after asking', async () => {
@@ -918,22 +926,31 @@ describe('Videos 制作任务', () => {
 		expect(block.querySelector(`[data-video-task-pc-copy]`)).toBeTruthy();
 	});
 
-	it('applies one-click Douyin viral templates, toggles Douyin mode and switches opening hook', async () => {
+	it('applies animation-first templates, configures split-jizura normal videos, toggles Douyin mode and switches opening hook', async () => {
 		api.getVideoPage.mockResolvedValue({ items: [], next: null });
 		const target = await mount();
 		await typeIdea(target, '我的原始内容不要被覆盖');
-		target.querySelector('[data-video-template="viral-pitfall"]').click();
+		target.querySelector('[data-video-template="split-jizura"]').click();
 		await sleep(10);
-		// User's typed text is preserved; template configures 9:16, 30s, contrast style, pain hook
+		// User's typed text is preserved; template configures 9:16, 30s, split-jizura, anime-cartoon, reversal hook
 		expect(target.querySelector('[data-video-idea]').value).toBe('我的原始内容不要被覆盖');
 		const brief = () => target.querySelector('[data-video-brief] pre').textContent;
-		expect(brief()).toContain('视觉风格：红黑反差');
-		expect(brief()).toContain('画幅：竖屏 9:16');
-		expect(brief()).toContain('前 3 秒黄金钩子（痛点直击）');
-		// Switch hook and toggle Douyin off
-		target.querySelector('[data-video-hook="reversal"]').click();
+		expect(brief()).toContain('做法：分屏混搭');
+		expect(brief()).toContain('视觉风格：日漫卡通');
+		expect(brief()).toContain('上下分屏');
+		expect(brief()).toContain('pc-video jizura');
+		expect(brief()).toContain('前 3 秒动画视觉钩子（反差反转）');
+		expect(brief()).toContain('有字幕不凸显文字动效');
+		// Switch split direction & JIZURA skin
+		target.querySelector('[data-video-split-layout="lr"]').click();
+		target.querySelector('[data-video-jizura-style="caution"]').click();
 		await sleep(10);
-		expect(brief()).toContain('前 3 秒黄金钩子（反常识）');
+		expect(brief()).toContain('左右分屏');
+		expect(brief()).toContain('--style caution');
+		// Switch hook and toggle Douyin off
+		target.querySelector('[data-video-hook="pain"]').click();
+		await sleep(10);
+		expect(brief()).toContain('前 3 秒动画视觉钩子（情景代入）');
 		target.querySelector('[data-video-douyin-toggle]').click();
 		await sleep(10);
 		expect(target.querySelector('[data-video-douyin-toggle]').getAttribute('aria-checked')).toBe('false');

@@ -386,7 +386,7 @@ def test_video_style_survives_planning_enhancement_and_background_fill():
     assert all(job.settings in messages[1]["content"] for messages in model.calls)
     # the enhancer is told what the style's lines mean, under the names the workbench writes
     system = model.calls[-1][0]["content"]
-    assert all(name in system for name in ("风格特征", "配色字体", "关键技法", "验收"))
+    assert all(name in system for name in ("风格特征", "配色", "关键技法", "验收"))
     original = "/codex 请制作一个视频\n" + prep.PREP_MARK.format(id="a" * 32) + "\n## 要求\n" + job.settings
     filled = prep.fill_brief(original, job.result)
     assert filled.startswith("/codex 请制作一个视频")
@@ -403,7 +403,7 @@ def test_video_enhance_prompt_covers_douyin_viral_optimization():
     messages = prep.enhance_messages(
         "video",
         "讲讲为什么越努力越内耗",
-        "- 画幅：竖屏 9:16\n- 抖音爆款优化：开启（前 3 秒「反常识」钩子）",
+        "- 画幅：竖屏 9:16\n- 字幕：烧录中文字幕\n- 抖音爆款优化：开启（前 3 秒「反差反转」动画钩子）",
         sources=[],
         conclusion="",
     )
@@ -411,3 +411,5 @@ def test_video_enhance_prompt_covers_douyin_viral_optimization():
     assert "抖音爆款优化" in system
     assert "2-4 seconds" in system
     assert "9:16 Douyin UI safe zone" in system
+    assert "DO NOT ask for flashy on-screen text animations" in system
+    assert "PC JIZURA" in system

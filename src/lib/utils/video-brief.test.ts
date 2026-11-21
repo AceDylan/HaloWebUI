@@ -25,12 +25,13 @@ describe('buildVideoBrief', () => {
 		const brief = buildVideoBrief({ ...base, seconds: 60 });
 		expect(brief.startsWith('请制作一个视频')).toBe(true);
 		expect(brief).toContain('用 60 秒讲清楚 HTTPS');
-		expect(brief).toContain('做法：讲解动画');
+		expect(brief).toContain('做法：剧情动画');
 		expect(brief).toContain('画幅：竖屏 9:16（1080×1920，30fps）');
 		expect(brief).toContain('时长：约 1 分钟');
 		expect(brief).toContain('zh-CN-YunxiNeural');
-		expect(brief).toContain('烧录中文字幕');
+		expect(brief).toContain('烧录中文字幕（已有字幕，画面不必凸显文字动效）');
 		expect(brief).toContain('## 抖音爆款规格');
+		expect(brief).toContain('有字幕不凸显文字动效');
 		expect(brief).toContain('抖音 9:16 安全区');
 		expect(brief).toContain('/root/.hermes/skills/creative/video-studio/SKILL.md');
 		expect(brief).toContain('「MEDIA:」');
@@ -87,7 +88,7 @@ describe('buildVideoBrief', () => {
 			]
 		});
 		expect(brief.startsWith('/codex 请制作一个视频')).toBe(true);
-		expect(brief).toContain('做法：素材剪辑');
+		expect(brief).toContain('做法：素材精剪');
 		expect(brief).toContain('竖屏 9:16（1080×1920');
 		expect(brief).toContain('时长：约 15 秒');
 		expect(brief).toContain('配音：不要配音');
@@ -204,6 +205,9 @@ describe('normalizeVideoSettings', () => {
 				subtitles: false,
 				douyin: false,
 				hook: 'reversal',
+				splitLayout: 'lr',
+				jizuraStyle: 'hud',
+				jizuraAccent: false,
 				maker: 'agy'
 			})
 		).toEqual({
@@ -217,12 +221,15 @@ describe('normalizeVideoSettings', () => {
 			subtitles: false,
 			douyin: false,
 			hook: 'reversal',
+			splitLayout: 'lr',
+			jizuraStyle: 'hud',
+			jizuraAccent: false,
 			maker: 'agy',
 			musicFit: 'full',
 			place: 'pc',
 			kind: 'normal',
-			mvTheme: 'lyricpv',
-			mvVisual: 'animated'
+			mvTheme: 'kinetic',
+			mvVisual: 'split-tb'
 		});
 		expect(normalizeVideoSettings({ musicFit: 'trim' }).musicFit).toBe('trim');
 		expect(normalizeVideoSettings({ place: 'server' }).place).toBe('server');
@@ -310,7 +317,7 @@ describe('videoSettingsText', () => {
 			attachments: [{ name: 'a.png', kind: 'image' }],
 			music: { name: '夏日.mp3', seconds: 120 }
 		});
-		expect(text).toContain('- 做法：讲解动画');
+		expect(text).toContain('- 做法：剧情动画');
 		expect(text).toContain('- 时长：跟背景音乐一样长（2:00）');
 		expect(text).toContain('- 参考附件：1 个图片（a.png）');
 		expect(text).toContain('- 背景音乐：用户指定（夏日.mp3）');
@@ -329,7 +336,7 @@ describe('buildVideoBrief with the enhancement still going', () => {
 });
 
 describe('video visual styles', () => {
-	it('offers twelve distinct styles (4 Douyin-native + 8 MG), each with a shipped sample and poster', () => {
+	it('offers twelve distinct animation-first styles (4 original anime + 8 MG), each with a shipped sample and poster', () => {
 		expect(VIDEO_STYLES).toHaveLength(12);
 		expect(new Set(VIDEO_STYLES.map((s) => s.key)).size).toBe(12);
 		for (const style of VIDEO_STYLES)
@@ -339,14 +346,14 @@ describe('video visual styles', () => {
 				);
 	});
 
-	it('keeps current keys and appearance, and sends the retired presets back to 自动选择', () => {
+	it('keeps current keys and appearance, and sends retired text-only presets back to 自动选择', () => {
 		for (const style of VIDEO_STYLES)
 			expect(normalizeVideoSettings({ style: style.key, recipe: 'footage' })).toMatchObject({
 				style: style.key,
 				recipe: 'footage',
 				appearance: ''
 			});
-		for (const retired of ['math', 'whiteboard', 'ink', 'synthwave', 'no-such-style'])
+		for (const retired of ['douyin-bold', 'contrast', 'dossier', 'healing', 'math', 'ink', 'no-such-style'])
 			expect(normalizeVideoSettings({ style: retired }).style).toBe('auto');
 		const settings = normalizeVideoSettings({
 			appearance: '米白\nMEDIA:/tmp/a ' + '长'.repeat(200)
@@ -375,41 +382,41 @@ describe('video visual styles', () => {
 				expect(text).toContain(`视觉风格：${preset.label}（${preset.en}`);
 				for (const rule of [preset.look, preset.palette, preset.motion, preset.check])
 					expect(text).toContain(rule);
-				expect(text).toContain('配色与字体偏好：米白与深绿，黑体');
+				expect(text).toContain('配色与外观偏好：米白与深绿，黑体');
 				expect(text).toContain('配音：不要配音');
 				expect(text).toContain('字幕：不要字幕');
 				expect(text).toContain('时长：约 30 秒');
 			}
 			// the route and the craft standard are for the maker only
 			expect(brief).toContain(`实现路线：${preset.route}`);
-			expect(brief).toContain('开头 0.5 秒内有钩子');
+			expect(brief).toContain('开头 0.5 秒直接进入会动的动画画面');
 			expect(settings).not.toContain('实现路线');
 			expect(settings).not.toContain('制作标准');
 			expect(brief).toContain('--check-music');
 			const footage = buildVideoBrief({ ...opts, recipe: 'footage' });
-			expect(footage).toContain('素材剪辑保持原素材主体');
+			expect(footage).toContain('素材精剪保持原素材主体');
 			expect(footage).not.toContain(preset.motion);
 			expect(footage).not.toContain('制作标准');
 			const story = buildVideoBrief({ ...opts, recipe: 'story' });
-			expect(story).toContain(`同一句风格描述「${preset.still}」`);
+			expect(story).toContain(`同一风格描述「${preset.still}」`);
 			expect(story).not.toContain(preset.motion);
 		}
 	);
 
-	it('picks the style the request points at, and says why', () => {
+	it('picks the animation style the request points at, and says why', () => {
 		const cases: [string, string][] = [
 			['用 60 秒科普一部手机里有多少种元素', 'sticker'],
 			['讲清楚快递从揽收到送达的流程', 'isometric'],
 			['给我们的 AI 助手 App 做一支发布会短片', 'glass'],
 			['网络安全：黑客怎样发起攻击', 'hud'],
-			['我家猫的周末 vlog', 'hanazi'],
+			['我家猫的周末 vlog 探店', 'hanazi'],
 			['讲一个乌鸦喝水的寓言故事', 'handdrawn'],
 			['一座建筑事务所的品牌故事', 'line'],
 			['介绍公司的新服务', 'flat'],
-			['45秒讲透职场赚钱底层逻辑', 'douyin-bold'],
-			['3个装修避坑对比和智商税盘点', 'contrast'],
-			['深度揭秘这件事背后的悬疑真相与内幕', 'dossier'],
-			['深夜情感独白与胶片治愈晚霞感悟', 'healing'],
+			['45秒日漫卡通故事讲职场成长与内耗', 'anime-cartoon'],
+			['3个装修避坑对比和智商税盘点', 'comic-pop'],
+			['国潮东方插画讲一段山海江湖传说历史', 'guochao'],
+			['深夜晚霞水彩绘本感悟与治愈独白', 'storybook'],
 			// the style named outright wins over topic words
 			['用手绘风讲讲数据统计', 'handdrawn'],
 			// 「AI」 counts only as a word
@@ -417,7 +424,8 @@ describe('video visual styles', () => {
 		];
 		for (const [topic, key] of cases) expect([topic, pickVideoStyle(topic).key]).toEqual([topic, key]);
 		expect(pickVideoStyle('')).toEqual({ key: 'flat', words: [] });
-		expect(pickVideoStyle('', { douyin: true })).toEqual({ key: 'douyin-bold', words: [] });
+		expect(pickVideoStyle('', { douyin: true })).toEqual({ key: 'anime-cartoon', words: [] });
+		expect(pickVideoStyle('', { kind: 'mv' })).toEqual({ key: 'anime-cartoon', words: [] });
 		expect(pickVideoStyle('', { recipe: 'data' }).key).toBe('sticker');
 		expect(pickVideoStyle('', { recipe: 'footage' }).key).toBe('hanazi');
 		// a reference video is followed, unless it is the footage being edited
@@ -432,10 +440,10 @@ describe('video visual styles', () => {
 			expect(text).toContain(sticker.motion);
 		}
 		expect(buildVideoBrief({ ...opts, idea: '随便做点什么' })).toContain(
-			'抖音爆款默认通用款，选黑金大字'
+			'动画叙事默认推荐，选日漫卡通'
 		);
 		expect(buildVideoBrief({ ...opts, douyin: false, idea: '随便做点什么' })).toContain(
-			'需求没有明显的题材线索，选最通用的扁平 MG'
+			'需求没有明显的题材线索，选最通用的扁平动画'
 		);
 	});
 
@@ -451,7 +459,7 @@ describe('video visual styles', () => {
 
 	it('keeps essential constraints within the enhancement setting budget with eight long attachment names', () => {
 		for (const style of ['auto', 'reference', 'custom', ...VIDEO_STYLES.map((s) => s.key)] as const) {
-			for (const recipe of ['explainer', 'story', 'footage'] as const) {
+			for (const recipe of ['explainer', 'story', 'split-jizura', 'footage'] as const) {
 				const text = videoSettingsText({
 					...DEFAULT_VIDEO_SETTINGS,
 					style,
@@ -465,7 +473,7 @@ describe('video visual styles', () => {
 					})),
 					music: { name: '曲'.repeat(200) + '.mp3', seconds: 600 }
 				});
-				expect([style, recipe, text.length <= 1500]).toEqual([style, recipe, true]);
+				expect([style, recipe, text.length, text.length <= 1500]).toEqual([style, recipe, text.length, true]);
 				expect(text).toContain('背景音乐：用户指定');
 				expect(text).toContain('参考附件：8 个图片');
 			}
@@ -479,7 +487,7 @@ describe('video visual styles', () => {
 			attachments: [{ name: 'ref.mp4', kind: 'video' as const }]
 		};
 		const preset = buildVideoBrief({ ...opts, style: 'line' });
-		expect(preset).toContain('以所选风格为视觉基准');
+		expect(preset).toContain('以所选动画风格为准');
 		expect(preset).not.toContain('重现这种风格');
 		expect(buildVideoBrief({ ...opts, style: 'reference' })).toContain('重现这种风格');
 		// 自动选择 with a reference video follows it
@@ -487,14 +495,13 @@ describe('video visual styles', () => {
 		expect(auto).toContain('视觉风格：自动选择 → 附件里有参考视频，跟随参考');
 		expect(auto).toContain('重现这种风格');
 		const footage = buildVideoBrief({ ...opts, recipe: 'footage', style: 'hanazi' });
-		expect(footage).toContain('素材剪辑保持原素材主体');
+		expect(footage).toContain('素材精剪保持原素材主体');
 		expect(footage).not.toContain('只当风格参考');
-		// the footage is the material: no line may reduce it to a reference
-		expect(footage).not.toContain('附件只提供用户指定的内容');
+		expect(footage).not.toContain('附件仅作内容/构图参考');
 		expect(videoSettingsText({ ...opts, recipe: 'footage', style: 'hanazi' })).not.toContain(
-			'附件只提供用户指定的内容'
+			'附件仅作内容/构图参考'
 		);
-		expect(preset).not.toContain('素材剪辑保持原素材主体');
+		expect(preset).not.toContain('素材精剪保持原素材主体');
 	});
 
 	it('bounds custom descriptions as one plain line', () => {
@@ -523,13 +530,14 @@ describe('video visual styles', () => {
 	});
 });
 
-describe('publishing standard and MP3 做 MV', () => {
+describe('publishing standard, split-jizura and MP3 做 MV', () => {
 	const base = { ...DEFAULT_VIDEO_SETTINGS, idea: '  用 60 秒讲清楚 HTTPS  ' };
-	it('asks every video to hold people from the first frame and to carry its cover in frame 0', () => {
+	it('forbids pure-text videos and asks every video to animate concrete visuals and carry frame-0 cover', () => {
 		for (const brief of [buildVideoBrief(base), buildVideoBrief({ ...base, place: 'server' }), buildVideoBrief({ ...base, recipe: 'footage' })]) {
 			expect(brief).toContain('## 发布标准');
+			expect(brief).toContain('拒绝纯文字动效与简陋画面');
 			expect(brief).toContain('第 0.5 秒内');
-			expect(brief).toContain('同一张图停留不超过 4 秒');
+			expect(brief).toContain('同一构图停留不超过 4 秒');
 			expect(brief).toContain('动画要贴内容');
 			expect(brief).toContain('放进视频第 0 帧');
 			expect(brief).toContain('scripts/cover.py all');
@@ -539,76 +547,113 @@ describe('publishing standard and MP3 做 MV', () => {
 		expect(buildVideoBrief({ ...base, place: 'server' })).not.toContain('pc-video');
 	});
 
-	it('图文成片 and 素材剪辑 ask for moving layers, not just a push on each still', () => {
-		const story = buildVideoBrief({ ...base, recipe: 'story', style: 'flat' });
-		expect(story).toContain('画面要动起来');
-		expect(story).toContain('同一张图超过 4 秒就换景别或接特写');
-		expect(story).toContain('光效粒子、标注描线、关键词花字');
+	it('绘本动画, 分屏混搭 and 素材精剪 configure layered animation and PC JIZURA correctly', () => {
+		const story = buildVideoBrief({ ...base, recipe: 'story', style: 'storybook' });
+		expect(story).toContain('画面必须动起来');
+		expect(story).toContain('同构图不超 4 秒就换景别或特写');
+		const split = buildVideoBrief({
+			...base,
+			recipe: 'split-jizura',
+			style: 'anime-cartoon',
+			splitLayout: 'lr',
+			mvTheme: 'kinetic',
+			jizuraStyle: 'caution'
+		});
+		expect(split).toContain('左右分屏');
+		expect(split).toContain('pc-video jizura');
+		expect(split).toContain('--theme kinetic');
+		expect(split).toContain('--style caution');
+		const splitServer = buildVideoBrief({ ...base, recipe: 'split-jizura', place: 'server' });
+		expect(splitServer).toContain('动效半屏（服务器模式）');
+		expect(splitServer).not.toContain('pc-video');
 		const footage = buildVideoBrief({ ...base, recipe: 'footage', style: 'flat' });
-		expect(footage).toContain('包装也要动');
-		expect(footage).not.toContain('画面要动起来');
+		expect(footage).toContain('素材精剪保持原素材主体');
+		expect(footage).not.toContain('画面必须动起来');
 	});
 
-	it('MP3 做 MV by default: animated scenes from the lyrics with animated lyrics on top (Remotion)', () => {
-		const song = { name: '笑一笑.mp3', seconds: 171 };
-		const mv = buildVideoBrief({ ...base, kind: 'mv', mvTheme: 'ballad', music: song, lyrics: '闹钟响了三遍才爬起来' });
-		expect(mv).toContain('有动画画面的歌词 MV');
-		expect(mv).toContain('「歌词 + 动画」做法');
-		expect(mv).toContain('pc-video remotion render');
-		expect(mv).toContain('- 动画画面：');
-		expect(mv).toContain('- 歌词动效：');
-		expect(mv).toContain('画面基调：抒情');
-		expect(mv).toContain('没有时间轴：先与人声对齐成 LRC');
-		expect(mv).toContain('识别与对齐用 pc-video asr，在家里电脑显卡上跑，不在线自动回服务器');
-		expect(mv).not.toContain('jizura');
-		expect(mv).not.toContain('--theme');
+	it('MP3 做 MV defaults to split-screen (half cartoon animation + half PC JIZURA motion) and supports left/right or full-screen', () => {
+		const song = { name: '夏日回响.mp3', seconds: 160 };
+		const mvTb = buildVideoBrief({
+			...base,
+			kind: 'mv',
+			mvVisual: 'split-tb',
+			mvTheme: 'pop',
+			jizuraStyle: 'mint',
+			style: 'anime-cartoon',
+			music: song,
+			lyrics: '海风吹过夏天的屋檐'
+		});
+		expect(mvTb).toContain('上下分屏动画 MV（一半卡通动画 + 一半动效）');
+		expect(mvTb).toContain('严禁纯文字 PV');
+		expect(mvTb).toContain('pc-video remotion render');
+		expect(mvTb).toContain('pc-video jizura');
+		expect(mvTb).toContain('--theme pop');
+		expect(mvTb).toContain('--style mint');
+		expect(mvTb).toContain('视觉风格：日漫卡通');
+		expect(mvTb).toContain('vstack');
+		expect(mvTb).toContain('没有时间轴：先与人声对齐成 LRC');
+		expect(mvTb).toContain('识别与对齐用 pc-video asr');
+
+		const mvLr = buildVideoBrief({
+			...base,
+			kind: 'mv',
+			frame: '16:9',
+			mvVisual: 'split-lr',
+			mvTheme: 'wa',
+			style: 'guochao',
+			music: song,
+			lyrics: '[00:07.74]长安灯火'
+		});
+		expect(mvLr).toContain('左右分屏动画 MV');
+		expect(mvLr).toContain('hstack');
+		expect(mvLr).toContain('--theme wa');
+		expect(mvLr).toContain('视觉风格：国潮插画');
+		expect(mvLr).toContain('带时间轴，直接用');
+
+		const mvFull = buildVideoBrief({
+			...base,
+			kind: 'mv',
+			mvVisual: 'animated',
+			mvTheme: 'ballad',
+			style: 'storybook',
+			music: song,
+			lyrics: ''
+		});
+		expect(mvFull).toContain('全屏多风格动画 MV');
+		expect(mvFull).toContain('视觉风格：治愈绘本');
+		expect(mvFull).toContain('交给用户确认');
+
 		const server = buildVideoBrief({ ...base, kind: 'mv', music: song, place: 'server' });
-		expect(server).toContain('用 Remotion 在服务器做');
-		expect(server).toContain('先识别歌词并与人声对齐成 LRC（识别与对齐在服务器 CPU 上跑');
+		expect(server).toContain('动效半屏');
+		expect(server).toContain('识别与对齐在服务器 CPU 上跑');
 		expect(server).not.toContain('pc-video');
-		expect(server).not.toContain('JIZURA');
-		expect(buildVideoBrief({ ...base, kind: 'mv', music: song, attachments: [{ name: 'a.png', kind: 'image' }] })).toContain('图片当画风、角色或场景参考');
-		expect(normalizeVideoSettings({ mvVisual: 'lyrics' }).mvVisual).toBe('lyrics');
-		expect(normalizeVideoSettings({ mvVisual: 'x' }).mvVisual).toBe('animated');
+		expect(buildVideoBrief({ ...base, kind: 'mv', music: song, attachments: [{ name: 'a.png', kind: 'image' }] })).toContain('图片当动画画风、角色或场景参考');
+		// Legacy pure-text 'lyrics' migrates cleanly to split-tb
+		expect(normalizeVideoSettings({ mvVisual: 'lyrics' }).mvVisual).toBe('split-tb');
+		expect(normalizeVideoSettings({ mvVisual: 'split-lr' }).mvVisual).toBe('split-lr');
+		expect(normalizeVideoSettings({ mvVisual: 'animated' }).mvVisual).toBe('animated');
+		expect(normalizeVideoSettings({ kind: 'mv', mvTheme: 'wa', jizuraStyle: 'rouge' })).toMatchObject({
+			kind: 'mv',
+			mvTheme: 'wa',
+			jizuraStyle: 'rouge'
+		});
 	});
 
-	it('MP3 做 MV, 只有歌词动效: a JIZURA lyric MV of the song, its lyrics and theme, no voice or recipe', () => {
-		const song = { name: '笑一笑.mp3', seconds: 171 };
-		const lyricsOnly = { ...base, kind: 'mv' as const, mvVisual: 'lyrics' as const };
-		const mv = buildVideoBrief({ ...lyricsOnly, mvTheme: 'ballad', music: song, idea: '轻快治愈', lyrics: '闹钟响了三遍才爬起来\n镜子里的自己有点呆' });
-		expect(mv.startsWith('请制作一个视频（来自 HaloWebUI 视频工作台）')).toBe(true);
-		expect(mv).toContain('歌曲 MV');
-		expect(mv).toContain('pc-video jizura');
-		expect(mv).toContain('--theme ballad');
-		expect(mv).toContain('笑一笑.mp3（2:51）');
-		expect(mv).toContain('没有时间轴：先与人声对齐成 LRC');
-		expect(mv).toContain('## 歌词\n闹钟响了三遍才爬起来');
-		expect(mv).toContain('## 发布标准');
-		expect(mv).not.toContain('- 配音');
-		expect(mv).not.toContain('## 背景音乐');
-		// timed lyrics are used as they are; no lyrics: transcribe and ask about doubtful words
-		expect(buildVideoBrief({ ...lyricsOnly, music: song, lyrics: '[00:07.74]闹钟' })).toContain('带时间轴，直接用');
-		expect(buildVideoBrief({ ...lyricsOnly, music: song, lyrics: '' })).toContain('交给用户确认');
-		// the server has no JIZURA
-		const server = buildVideoBrief({ ...lyricsOnly, music: song, place: 'server' });
-		expect(server).toContain('改用 Remotion');
-		expect(server).not.toContain('pc-video');
-		expect(buildVideoBrief({ ...lyricsOnly, music: song, maker: 'codex' }).startsWith('/codex ')).toBe(true);
-		expect(normalizeVideoSettings({ kind: 'mv', mvTheme: 'kinetic' })).toMatchObject({ kind: 'mv', mvTheme: 'kinetic' });
-		expect(normalizeVideoSettings({ kind: 'x', mvTheme: 'y' })).toMatchObject({ kind: 'normal', mvTheme: 'lyricpv' });
-	});
-
-	it('Douyin viral mode adds hook, 9:16 safe-zone rules, 45s duration and one-click templates', () => {
+	it('Douyin animation optimization restrains text motion when subtitles are on and preserves 9:16 safe zone', () => {
 		expect(VIDEO_LENGTHS).toContain(45);
 		expect(DOUYIN_TEMPLATES.length).toBeGreaterThanOrEqual(6);
 		expect(VIDEO_HOOKS.map((h) => h.key)).toEqual(['auto', 'reversal', 'pain', 'result', 'list']);
-		const on = buildVideoBrief({ ...base, douyin: true, hook: 'reversal', frame: '9:16' });
-		expect(on).toContain('## 抖音爆款规格');
-		expect(on).toContain('前 3 秒黄金钩子（反常识）');
-		expect(on).toContain('抖音 9:16 安全区');
-		expect(on).toContain('可截图防忘总结卡');
-		const settingsOn = videoSettingsText({ ...base, douyin: true, hook: 'reversal', frame: '9:16' });
-		expect(settingsOn).toContain('抖音爆款优化：开启（前 3 秒「反常识」钩子');
+		const onSub = buildVideoBrief({ ...base, douyin: true, hook: 'reversal', frame: '9:16', subtitles: true });
+		expect(onSub).toContain('## 抖音爆款规格');
+		expect(onSub).toContain('前 3 秒动画视觉钩子（反差反转）');
+		expect(onSub).toContain('有字幕不凸显文字动效');
+		expect(onSub).toContain('抖音 9:16 安全区');
+		const noSub = buildVideoBrief({ ...base, douyin: true, hook: 'reversal', frame: '9:16', subtitles: false });
+		expect(noSub).toContain('无字幕轻排版');
+		expect(noSub).not.toContain('有字幕不凸显文字动效');
+		const settingsOn = videoSettingsText({ ...base, douyin: true, hook: 'reversal', frame: '9:16', subtitles: true });
+		expect(settingsOn).toContain('抖音爆款优化：开启（前 3 秒「反差反转」动画钩子');
+		expect(settingsOn).toContain('已有字幕不堆文字动效');
 		const off = buildVideoBrief({ ...base, douyin: false });
 		expect(off).not.toContain('## 抖音爆款规格');
 		expect(videoSettingsText({ ...base, douyin: false })).not.toContain('抖音爆款优化');

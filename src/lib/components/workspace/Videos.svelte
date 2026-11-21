@@ -64,6 +64,8 @@
 	import { normalizePrepOptions, prepErrorText, waitForPrep, type PrepOptions } from '$lib/utils/studio-prep';
 	import {
 		DOUYIN_TEMPLATES,
+		JIZURA_STYLES,
+		SPLIT_LAYOUTS,
 		VIDEO_FRAMES,
 		VIDEO_HOOKS,
 		VIDEO_LENGTHS,
@@ -83,6 +85,8 @@
 		musicFileProblem,
 		musicSetsLength,
 		normalizeVideoSettings,
+		resolveMvStyleLabel,
+		resolveSplitDirection,
 		videoSettingsText,
 		videoPrepIdea,
 		type DouyinTemplate,
@@ -171,14 +175,14 @@
 	const setKind = (kind: VideoSettings['kind']) =>
 		(settings = { ...settings, kind, ...(kind === 'mv' ? { musicFit: 'full' as const } : {}) });
 
-	// One-click Douyin viral recipe: updates settings without clobbering user's typed idea.
+	// One-click animation-first recipe: updates settings without clobbering user's typed idea.
 	const applyTemplate = (tpl: DouyinTemplate) => {
 		settings = {
 			...settings,
 			...tpl.patch,
 			...(music ? { musicFit: 'trim' as const } : {})
 		};
-		toast.success(`已套用「${tpl.label}」抖音爆款配置`);
+		toast.success(`已套用「${tpl.label}」动画配方`);
 	};
 	$: activeTemplate = !isMv
 		? DOUYIN_TEMPLATES.find(
@@ -204,7 +208,7 @@
 		attachments: ready.map((a) => ({ name: a.name, kind: a.kind })),
 		music: musicReady ? { name: musicReady.name, seconds: musicReady.seconds } : null,
 		// 自动选择 reads the user's own words, so an enhanced draft keeps the style it was made for
-		styleTopic: prepared?.original || idea
+		styleTopic: prepared?.original || (isMv ? `${idea} ${musicReady?.name ?? ''}` : idea)
 	};
 	$: stylePick = pickVideoStyle(prepSettings.styleTopic, prepSettings);
 	$: prepFingerprint = JSON.stringify([videoSettingsText(prepSettings), ready.map((a) => a.id), musicReady?.id]);
@@ -238,12 +242,22 @@
 	$: maker = VIDEO_MAKERS.find((m) => m.key === settings.maker) ?? VIDEO_MAKERS[0];
 	$: place = VIDEO_PLACES.find((p) => p.key === settings.place) ?? VIDEO_PLACES[0];
 	$: activeHook = VIDEO_HOOKS.find((h) => h.key === settings.hook) ?? VIDEO_HOOKS[0];
-	$: resolvedStyleLabel =
-		settings.style === 'reference'
+	$: activeMvVisual = MV_VISUALS.find((v) => v.key === settings.mvVisual) ?? MV_VISUALS[0];
+	$: activeMvTheme = MV_THEMES.find((t) => t.key === settings.mvTheme) ?? MV_THEMES[0];
+	$: activeJizuraStyle = JIZURA_STYLES.find((s) => s.key === settings.jizuraStyle) ?? JIZURA_STYLES[0];
+	$: resolvedSplitDir = resolveSplitDirection(settings.splitLayout, settings.frame);
+	$: resolvedStyleLabel = isMv
+		? resolveMvStyleLabel({
+				style: settings.style,
+				styleTopic: prepSettings.styleTopic,
+				idea,
+				attachments: prepSettings.attachments
+			})
+		: settings.style === 'reference'
 			? '跟随参考'
 			: settings.style === 'custom'
 				? '自定义风格'
-				: (VIDEO_STYLES.find((s) => s.key === (settings.style === 'auto' ? stylePick.key : settings.style))?.label ?? '自动风格');
+				: (VIDEO_STYLES.find((s) => s.key === (settings.style === 'auto' ? stylePick.key : settings.style))?.label ?? '日漫卡通');
 	$: activeVoiceLabel = VIDEO_VOICES.find((v) => v.key === settings.voice)?.label ?? '配音';
 
 	// 家里电脑在不在线: read once when the page opens (refresh the page to read it again); the host
@@ -1019,10 +1033,10 @@
 		<div class="mb-4 glass-item p-3 space-y-2" data-video-douyin-templates>
 			<div class="flex flex-wrap items-center justify-between gap-2">
 				<div class="flex items-center gap-2">
-					<span class="inline-flex items-center rounded-full bg-rose-500/15 px-2 py-0.5 text-[11px] font-semibold text-rose-600 dark:text-rose-300">抖音爆款</span>
-					<span class="text-xs font-semibold text-gray-900 dark:text-gray-100">一键爆款配方</span>
+					<span class="inline-flex items-center rounded-full bg-indigo-500/15 px-2 py-0.5 text-[11px] font-semibold text-indigo-600 dark:text-indigo-300">多风格动画</span>
+					<span class="text-xs font-semibold text-gray-900 dark:text-gray-100">一键动画配方</span>
 				</div>
-				<span class="text-[11px] text-gray-500 dark:text-gray-400">点选即配好 9:16 竖屏、爆款风格、黄金时长与前 3 秒钩子</span>
+				<span class="text-[11px] text-gray-500 dark:text-gray-400">拒绝纯文字动效 · 配好贴合字幕的动画画风、分屏 JIZURA 与 9:16 抖音优化</span>
 			</div>
 			<div class="grid grid-cols-2 gap-1.5 sm:grid-cols-3 lg:grid-cols-6">
 				{#each DOUYIN_TEMPLATES as tpl (tpl.key)}
@@ -1030,7 +1044,7 @@
 					<button
 						type="button"
 						class="min-w-0 rounded-xl border px-2.5 py-2 text-left transition {active
-							? 'border-rose-500 bg-rose-50/90 text-gray-900 ring-1 ring-rose-500/30 dark:border-rose-400 dark:bg-rose-950/35 dark:text-white'
+							? 'border-indigo-500 bg-indigo-50/90 text-gray-900 ring-1 ring-indigo-500/30 dark:border-indigo-400 dark:bg-indigo-950/35 dark:text-white'
 							: 'border-gray-200/70 bg-white/75 text-gray-700 hover:border-gray-300 hover:bg-white dark:border-gray-700/60 dark:bg-white/[0.03] dark:text-gray-200 dark:hover:border-gray-500'}"
 						aria-pressed={active}
 						on:click={() => applyTemplate(tpl)}
@@ -1039,7 +1053,7 @@
 						<div class="flex items-center justify-between gap-1">
 							<span class="truncate text-xs font-semibold">{tpl.label}</span>
 							<span class="shrink-0 rounded-full px-1.5 py-0.5 text-[9.5px] font-medium {active
-								? 'bg-rose-600 text-white'
+								? 'bg-indigo-600 text-white'
 								: 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300'}">{tpl.badge}</span>
 						</div>
 						<div class="mt-0.5 truncate text-[10.5px] text-gray-500 dark:text-gray-400">{tpl.sub}</div>
@@ -1109,8 +1123,8 @@
 						void addFiles(files);
 					}}
 					placeholder={isMv
-						? '可选 · 歌名、歌手、想要的感觉……例如：《笑一笑》，轻快治愈，发抖音用竖屏'
-						: '写主题、目标人群和想打爆的观点……例如：45 秒讲透“为什么越努力越内耗”，开头反常识破冰，拆 3 个避坑点，适合发抖音'}
+						? '可选 · 歌名、歌手、画面意境……例如：《夏日回响》，晴空海风少年感，上半屏日漫卡通 + 下半屏 JIZURA 动效'
+						: '写主题、画面故事或想传达的内容……例如：45 秒日漫卡通动画讲“改掉拖延症的一天”，用生活化卡通角色演活心理变化'}
 					class="min-h-[8.5rem] max-h-[60vh] w-full resize-y rounded-xl border border-gray-200/60 bg-white/85 p-3 text-base leading-6 text-gray-900 outline-none placeholder:text-gray-400 sm:text-sm dark:border-gray-700/50 dark:bg-gray-900/70 dark:text-gray-100 dark:placeholder:text-gray-500"
 					data-video-idea
 				/>
@@ -1347,13 +1361,19 @@
 					<span class="rounded-full bg-gray-100 px-2 py-0.5 font-medium text-gray-700 dark:bg-gray-800 dark:text-gray-200">{settings.frame}</span>
 					{#if !isMv}
 						<span class="rounded-full bg-gray-100 px-2 py-0.5 font-medium text-gray-700 dark:bg-gray-800 dark:text-gray-200">{lengthSummary}</span>
-						<span class="rounded-full bg-indigo-500/12 px-2 py-0.5 font-medium text-indigo-700 dark:text-indigo-300">{resolvedStyleLabel}</span>
+						<span class="rounded-full bg-indigo-500/12 px-2 py-0.5 font-medium text-indigo-700 dark:text-indigo-300">{recipe.label} · {resolvedStyleLabel}</span>
+						{#if settings.recipe === 'split-jizura' || (settings.recipe !== 'footage' && settings.jizuraAccent)}
+							<span class="rounded-full bg-violet-500/12 px-2 py-0.5 font-medium text-violet-700 dark:text-violet-300">
+								JIZURA · {settings.recipe === 'split-jizura' ? (resolvedSplitDir === 'tb' ? '上下分屏' : '左右分屏') : activeMvTheme.label}
+							</span>
+						{/if}
 						{#if settings.douyin}
-							<span class="rounded-full bg-rose-500/12 px-2 py-0.5 font-medium text-rose-700 dark:text-rose-300">抖音爆款 · {activeHook.label}</span>
+							<span class="rounded-full bg-rose-500/12 px-2 py-0.5 font-medium text-rose-700 dark:text-rose-300">抖音动画 · {activeHook.label}</span>
 						{/if}
 						<span class="rounded-full bg-gray-100 px-2 py-0.5 text-gray-600 dark:bg-gray-800 dark:text-gray-300">{activeVoiceLabel}</span>
 					{:else}
-						<span class="rounded-full bg-indigo-500/12 px-2 py-0.5 font-medium text-indigo-700 dark:text-indigo-300">{settings.mvVisual === 'lyrics' ? '歌词动效 MV' : '歌词 + 动画 MV'}</span>
+						<span class="rounded-full bg-indigo-500/12 px-2 py-0.5 font-medium text-indigo-700 dark:text-indigo-300">{activeMvVisual.label}</span>
+						<span class="rounded-full bg-violet-500/12 px-2 py-0.5 font-medium text-violet-700 dark:text-violet-300">{resolvedStyleLabel} × JIZURA({activeMvTheme.label})</span>
 					{/if}
 					<span class="rounded-full bg-gray-100 px-2 py-0.5 text-gray-600 dark:bg-gray-800 dark:text-gray-300">{maker.label} · {place.label}</span>
 				</div>
@@ -1361,8 +1381,8 @@
 					<span class="text-xs text-gray-500 dark:text-gray-400" data-video-status data-video-blocked={blocked || undefined}>
 						{blocked ||
 							(isMv
-								? `交给 ${maker.label} · ${settings.mvVisual === 'lyrics' ? '歌词 MV' : '歌词 + 动画 MV'}（${(MV_THEMES.find((t) => t.key === settings.mvTheme) ?? MV_THEMES[0]).label}）· 跟歌一样长 · ${place.label}渲染，同时记成一个对话`
-								: `交给 ${maker.label} · ${recipe.label} · ${lengthSummary}${musicReady ? ' · 配乐已定' : ''} · ${place.label}渲染，在这里${prepOptions.enhance && (!prepared || prepStale) ? '先增强需求再' : ''}制作，同时记成一个对话`)}
+								? `交给 ${maker.label} · ${activeMvVisual.label}（${resolvedStyleLabel} × ${activeMvTheme.label}）· 跟歌一样长 · ${place.label}渲染，同时记成一个对话`
+								: `交给 ${maker.label} · ${recipe.label}（${resolvedStyleLabel}）· ${lengthSummary}${musicReady ? ' · 配乐已定' : ''} · ${place.label}渲染，在这里${prepOptions.enhance && (!prepared || prepStale) ? '先增强需求再' : ''}制作，同时记成一个对话`)}
 					</span>
 					<button type="submit" class="workspace-primary-button w-full shrink-0 sm:w-auto sm:min-w-36" disabled={!!blocked || starting} title={blocked} data-video-start>
 						<SidebarModeIcon mode="video" className="size-4" />
@@ -1465,8 +1485,8 @@
 								</div>
 								<p class="text-[11px] text-gray-500 dark:text-gray-400">
 									{settings.douyin
-										? '前 3 秒钩子破冰 · 2–3 秒视觉换拍 · 结尾防忘总结卡与互动引导'
-										: '已关闭：按常规短视频节奏制作'}
+										? '前 3 秒动画视觉钩子 · 2–4 秒动画换拍 · 9:16 安全区 · 有字幕时不堆文字动效'
+										: '已关闭：按常规节奏制作多风格动画'}
 								</p>
 							</div>
 							<button
@@ -1549,20 +1569,26 @@
 					<div class="space-y-1.5">
 						<div class="text-xs font-medium text-gray-500 dark:text-gray-400">字幕</div>
 						<div class="flex flex-wrap gap-1.5">
-							<button type="button" class={settings.subtitles ? chipOn : chip} on:click={() => (settings = { ...settings, subtitles: true })}>烧录字幕</button>
-							<button type="button" class={!settings.subtitles ? chipOn : chip} on:click={() => (settings = { ...settings, subtitles: false })}>不要字幕</button>
+							<button type="button" class={settings.subtitles ? chipOn : chip} on:click={() => (settings = { ...settings, subtitles: true })} data-video-subtitles="on">烧录字幕</button>
+							<button type="button" class={!settings.subtitles ? chipOn : chip} on:click={() => (settings = { ...settings, subtitles: false })} data-video-subtitles="off">不要字幕</button>
 						</div>
+						{#if settings.subtitles}
+							<p class="text-[10.5px] leading-relaxed text-gray-500 dark:text-gray-400">已有字幕：画面专注贴合字幕的动画演绎，不堆砌文字动效</p>
+						{/if}
 					</div>
 					{/if}
 				</div>
 			</div>
 
-			<!-- Card 2: Creative Direction (Recipe + Visual Styles / MV Visuals & Theme) -->
+			<!-- Card 2: Creative Direction (Recipe + Animation Styles + PC JIZURA / MV Split-Screen & Styles) -->
 			<div class="glass-item p-4 space-y-4">
 				{#if isMv}
 					<div class="space-y-2" data-video-mv-visuals>
-						<div class="text-sm font-semibold text-gray-900 dark:text-gray-100">MV 内容</div>
-						<div class="grid grid-cols-2 gap-2">
+						<div class="flex items-center justify-between gap-2">
+							<div class="text-sm font-semibold text-gray-900 dark:text-gray-100">MV 布局形式</div>
+							<span class="text-[11px] text-gray-500 dark:text-gray-400">拒绝纯文字 PV · 卡通动画与动效结合</span>
+						</div>
+						<div class="grid gap-2 sm:grid-cols-3 lg:grid-cols-1 xl:grid-cols-3">
 							{#each MV_VISUALS as v (v.key)}
 								<button
 									type="button"
@@ -1573,35 +1599,80 @@
 									on:click={() => (settings = { ...settings, mvVisual: v.key })}
 									data-video-mv-visual={v.key}
 								>
-									<div class="text-sm font-medium">{v.label}</div>
-									<div class="text-[11px] opacity-70">{v.sub}</div>
+									<div class="flex items-center justify-between gap-1">
+										<span class="text-xs font-semibold sm:text-sm">{v.label}</span>
+										{#if v.tag}
+											<span class="shrink-0 rounded-full px-1.5 py-0.5 text-[9.5px] font-medium {settings.mvVisual === v.key
+												? 'bg-white/20 text-white dark:bg-gray-900/15 dark:text-gray-900'
+												: 'bg-indigo-500/12 text-indigo-600 dark:text-indigo-300'}">{v.tag}</span>
+										{/if}
+									</div>
+									<div class="mt-0.5 text-[11px] opacity-75">{v.sub}</div>
 								</button>
 							{/each}
 						</div>
 					</div>
-					<div class="space-y-2" data-video-mv-themes>
-						<div class="text-sm font-semibold text-gray-900 dark:text-gray-100">画面基调</div>
-						<div class="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-2 xl:grid-cols-3">
-							{#each MV_THEMES as t (t.key)}
-								<button
-									type="button"
-									class="rounded-xl border px-3 py-2 text-left transition {settings.mvTheme === t.key
-										? 'border-gray-900 bg-gray-900 text-white dark:border-white dark:bg-white dark:text-gray-900'
-										: 'border-gray-200/70 bg-white/70 text-gray-700 hover:border-gray-300 dark:border-gray-700/60 dark:bg-white/[0.03] dark:text-gray-200 dark:hover:border-gray-600'}"
-									aria-pressed={settings.mvTheme === t.key}
-									on:click={() => (settings = { ...settings, mvTheme: t.key })}
-									data-video-mv-theme={t.key}
-								>
-									<div class="text-sm font-medium">{t.label}</div>
-									<div class="text-[11px] opacity-70">{t.sub}</div>
-								</button>
-							{/each}
+
+					<VideoStylePicker
+						title="卡通 / 动画画风"
+						mvMode={true}
+						value={settings.style}
+						custom={settings.customStyle}
+						appearance={settings.appearance}
+						recipe="explainer"
+						onAppearance={(appearance) => (settings = { ...settings, appearance })}
+						disabled={preparing || starting}
+						{hasReference}
+						pick={stylePick}
+						onChange={(style, customStyle) => (settings = { ...settings, style, customStyle })}
+					/>
+
+					<div class="space-y-3 rounded-xl border border-violet-200/70 bg-violet-50/35 p-3 dark:border-violet-500/30 dark:bg-violet-950/20" data-video-mv-themes>
+						<div class="flex flex-wrap items-center justify-between gap-2">
+							<div class="text-sm font-semibold text-gray-900 dark:text-gray-100">PC JIZURA 动效风格</div>
+							<span class="text-[11px] text-violet-700 dark:text-violet-300">
+								{settings.mvVisual === 'animated' ? '用于片头/间奏/高潮动效联动' : '用于动效半屏（27 种风格）'}
+							</span>
 						</div>
-						<p class="text-xs leading-relaxed text-gray-500 dark:text-gray-400">
-							{settings.mvVisual === 'lyrics'
-								? '歌词随节拍出现的动态文字画面（JIZURA，在家里电脑上做）'
-								: '跟着歌词内容和情绪走的动画场景，切镜卡节拍，歌词动效叠在上面（Remotion）'}，不配音、不另加字幕；成片和歌一样长，封面放在第 0 帧。
-						</p>
+						<div class="space-y-1.5">
+							<div class="text-[11px] font-medium text-gray-600 dark:text-gray-300">动效基调（--theme）</div>
+							<div class="grid grid-cols-2 gap-1.5 sm:grid-cols-3">
+								{#each MV_THEMES as t (t.key)}
+									<button
+										type="button"
+										class="rounded-xl border px-2.5 py-1.5 text-left transition {settings.mvTheme === t.key
+											? 'border-gray-900 bg-gray-900 text-white dark:border-white dark:bg-white dark:text-gray-900'
+											: 'border-gray-200/70 bg-white/80 text-gray-700 hover:border-gray-300 dark:border-gray-700/60 dark:bg-white/[0.03] dark:text-gray-200 dark:hover:border-gray-600'}"
+										aria-pressed={settings.mvTheme === t.key}
+										on:click={() => (settings = { ...settings, mvTheme: t.key })}
+										data-video-mv-theme={t.key}
+									>
+										<div class="text-xs font-semibold">{t.label}</div>
+										<div class="truncate text-[10px] opacity-70">{t.sub}</div>
+									</button>
+								{/each}
+							</div>
+						</div>
+						<div class="space-y-1.5" data-video-jizura-styles>
+							<div class="text-[11px] font-medium text-gray-600 dark:text-gray-300">JIZURA 视觉皮肤（--style，可选）</div>
+							<div class="flex flex-wrap gap-1.5">
+								{#each JIZURA_STYLES as js (js.key)}
+									<button
+										type="button"
+										class={settings.jizuraStyle === js.key ? chipOn : chip}
+										aria-pressed={settings.jizuraStyle === js.key}
+										title={js.sub}
+										on:click={() => (settings = { ...settings, jizuraStyle: js.key })}
+										data-video-jizura-style={js.key}
+									>{js.label}</button>
+								{/each}
+							</div>
+							<p class="text-[11px] leading-relaxed text-gray-500 dark:text-gray-400">
+								{activeJizuraStyle.sub}；{settings.mvVisual === 'animated'
+									? '全屏动画为主，高潮和间奏可融合家里电脑 JIZURA 动效'
+									: '一半贴歌词卡通动画（Remotion），一半 PC JIZURA 动效层（PC 关机自动回落 Remotion 同等动效）'}，不配音、不另加生硬字幕条，封面在第 0 帧。
+							</p>
+						</div>
 					</div>
 				{:else}
 					<div class="space-y-2">
@@ -1625,7 +1696,99 @@
 						<p class="text-xs leading-relaxed text-gray-500 dark:text-gray-400">{recipe.hint}</p>
 					</div>
 
+					{#if settings.recipe === 'split-jizura'}
+						<div class="space-y-3 rounded-xl border border-violet-200/70 bg-violet-50/35 p-3 dark:border-violet-500/30 dark:bg-violet-950/20" data-video-jizura-panel>
+							<div class="flex flex-wrap items-center justify-between gap-2">
+								<span class="text-xs font-semibold text-gray-900 dark:text-gray-100">分屏布局与 PC JIZURA 动效</span>
+								<span class="text-[11px] text-violet-700 dark:text-violet-300">一半卡通动画 + 一半 JIZURA</span>
+							</div>
+							<div class="space-y-1.5">
+								<div class="text-[11px] font-medium text-gray-600 dark:text-gray-300">分屏方向</div>
+								<div class="flex flex-wrap gap-1.5" data-video-split-layouts>
+									{#each SPLIT_LAYOUTS as l (l.key)}
+										<button
+											type="button"
+											class={settings.splitLayout === l.key ? chipOn : chip}
+											aria-pressed={settings.splitLayout === l.key}
+											title={l.sub}
+											on:click={() => (settings = { ...settings, splitLayout: l.key })}
+											data-video-split-layout={l.key}
+										>{l.label}</button>
+									{/each}
+								</div>
+							</div>
+							<div class="space-y-1.5">
+								<div class="text-[11px] font-medium text-gray-600 dark:text-gray-300">JIZURA 动效基调</div>
+								<div class="flex flex-wrap gap-1.5">
+									{#each MV_THEMES as t (t.key)}
+										<button
+											type="button"
+											class={settings.mvTheme === t.key ? chipOn : chip}
+											aria-pressed={settings.mvTheme === t.key}
+											title={t.sub}
+											on:click={() => (settings = { ...settings, mvTheme: t.key })}
+											data-video-mv-theme={t.key}
+										>{t.label}</button>
+									{/each}
+								</div>
+							</div>
+							<div class="space-y-1.5" data-video-jizura-styles>
+								<div class="text-[11px] font-medium text-gray-600 dark:text-gray-300">JIZURA 视觉皮肤</div>
+								<div class="flex flex-wrap gap-1.5">
+									{#each JIZURA_STYLES as js (js.key)}
+										<button
+											type="button"
+											class={settings.jizuraStyle === js.key ? chipOn : chip}
+											aria-pressed={settings.jizuraStyle === js.key}
+											title={js.sub}
+											on:click={() => (settings = { ...settings, jizuraStyle: js.key })}
+											data-video-jizura-style={js.key}
+										>{js.label}</button>
+									{/each}
+								</div>
+							</div>
+						</div>
+					{:else if settings.recipe !== 'footage'}
+						<div class="space-y-2 rounded-xl border border-gray-200/75 bg-gray-50/50 p-3 dark:border-gray-700/60 dark:bg-white/[0.02]" data-video-jizura-accent-panel>
+							<div class="flex items-center justify-between gap-2">
+								<div class="min-w-0">
+									<div class="text-xs font-semibold text-gray-900 dark:text-gray-100">PC JIZURA 动效加持</div>
+									<p class="text-[11px] text-gray-500 dark:text-gray-400">
+										{settings.jizuraAccent
+											? '片头转场与高潮可融合家里电脑 JIZURA（27 种风格），主体保持全动画'
+											: '仅使用 Remotion 动画渲染'}
+									</p>
+								</div>
+								<button
+									type="button"
+									role="switch"
+									aria-checked={settings.jizuraAccent}
+									class="shrink-0 rounded-full border px-2.5 py-1 text-xs font-medium transition {settings.jizuraAccent
+										? 'border-violet-600 bg-violet-600 text-white dark:border-violet-500 dark:bg-violet-500'
+										: 'border-gray-300 bg-white text-gray-600 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300'}"
+									on:click={() => (settings = { ...settings, jizuraAccent: !settings.jizuraAccent })}
+									data-video-jizura-accent
+								>{settings.jizuraAccent ? '已开启' : '未开启'}</button>
+							</div>
+							{#if settings.jizuraAccent}
+								<div class="flex flex-wrap gap-1.5 pt-0.5">
+									{#each MV_THEMES as t (t.key)}
+										<button
+											type="button"
+											class={settings.mvTheme === t.key ? chipOn : chip}
+											aria-pressed={settings.mvTheme === t.key}
+											title={t.sub}
+											on:click={() => (settings = { ...settings, mvTheme: t.key })}
+											data-video-mv-theme={t.key}
+										>{t.label}</button>
+									{/each}
+								</div>
+							{/if}
+						</div>
+					{/if}
+
 					<VideoStylePicker
+						title="动画画风"
 						value={settings.style}
 						custom={settings.customStyle}
 						appearance={settings.appearance}

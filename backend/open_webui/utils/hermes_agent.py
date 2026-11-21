@@ -949,6 +949,8 @@ HERMES_DISPATCH_COMMANDS = {
     "officlaude": "/officlaude",
     "codex": "/codex",
     "agy": "/agy",
+    # offiagy: AGY on the official Google account sign-in instead of the gemini-chat gateway.
+    "offiagy": "/offiagy",
 }
 # "接着上次": the run a follow-up goes back to, as the runners name them
 # ("20260927-005655-f2dd355f", an answer round "…-a1").
@@ -998,7 +1000,7 @@ def _inherited_reasoning_effort(form_data) -> str | None:
 # "/model". "/root/app/x.txt" is a path, not a command.
 _SLASH_COMMAND_RE = re.compile(r"^/[A-Za-z][\w-]*(?:\s|$)")
 _RUNNER_COMMAND_RE = re.compile(
-    r"^/(reclaude|cchclaude|anyclaude|officlaude|codex|agy)(?:\s|$)", re.IGNORECASE
+    r"^/(reclaude|cchclaude|anyclaude|officlaude|codex|agy|offiagy)(?:\s|$)", re.IGNORECASE
 )
 
 
@@ -1041,7 +1043,7 @@ def _run_input_text(run_input) -> str:
 
 
 def _dispatch_runner(run_input) -> str | None:
-    """"reclaude" / "cchclaude" / "anyclaude" / "officlaude" / "codex" / "agy" when the input launches that runner."""
+    """"reclaude" / "cchclaude" / "anyclaude" / "officlaude" / "codex" / "agy" / "offiagy" when the input launches that runner."""
     match = _RUNNER_COMMAND_RE.match(_run_input_text(run_input).lstrip())
     return match.group(1).lower() if match else None
 

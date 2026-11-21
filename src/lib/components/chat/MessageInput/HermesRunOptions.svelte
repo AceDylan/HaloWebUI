@@ -13,7 +13,7 @@
 
 	const i18n: any = getContext('i18n');
 
-	// How the next hermes run starts. "派发方式" puts /reclaude, /cchclaude, /anyclaude, /officlaude, /codex or /agy
+	// How the next hermes run starts. "派发方式" puts /reclaude, /cchclaude, /anyclaude, /officlaude, /codex, /agy or /offiagy
 	// in front of the next message only (left on, every later "进度怎么样？"
 	// started another run), or hands it to 精答 / 讨论台 / 协作台 instead of a run (the result
 	// comes back into the chat); right after a runner's report the next message
@@ -63,7 +63,13 @@
 			hint: '交给官方 Claude（claude.ai 订阅 OAuth 账号）在后台独占执行；需本人登录，额度用尽后手动续跑'
 		},
 		{ value: 'codex', label: 'codex', sub: 'OpenAI Codex', hint: '交给 Codex 在后台独占执行' },
-		{ value: 'agy', label: 'agy', sub: 'Gemini · 快', hint: '交给 AGY 在后台独占执行' }
+		{ value: 'agy', label: 'agy', sub: 'Gemini · 快', hint: '交给 AGY 在后台独占执行' },
+		{
+			value: 'offiagy',
+			label: 'offiagy',
+			sub: 'AGY · Google 官方登录',
+			hint: '交给 AGY（Google 账号官方登录，不走网关）在后台独占执行；需本人登录，登录失效后手动续跑'
+		}
 	];
 	const MODES: typeof RUNNERS = [
 		{ value: 'auto', label: '自动分流', sub: '按问题选择处理方式', hint: '自动选择精答、讨论或协作台；协作先出计划，结果发回这里' },
@@ -387,7 +393,7 @@
 				{#if isModeDispatch(current.dispatch)}
 					这条消息交给{DISPATCHES.find((item) => item.value === current.dispatch)?.label}，不经过 Hermes 的模型；之后的消息照常用它
 				{:else}
-					只管 Hermes 自己这一轮；派发给 reclaude/cchclaude/anyclaude/officlaude/codex/agy 时它们用自己的模型
+					只管 Hermes 自己这一轮；派发给 reclaude/cchclaude/anyclaude/officlaude/codex/agy/offiagy 时它们用自己的模型
 				{/if}
 			</div>
 			{#if loadingModels}

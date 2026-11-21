@@ -239,7 +239,8 @@ describe('PlanReview', () => {
 			'anyclaude',
 			'officlaude',
 			'codex',
-			'agy'
+			'agy',
+			'offiagy'
 		]);
 		select.value = 'codex';
 		select.dispatchEvent(new (globalThis as any).Event('change', { bubbles: true }));

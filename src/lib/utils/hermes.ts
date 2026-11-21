@@ -123,7 +123,7 @@ export type HermesApprovalRequest = {
 
 /**
  * Per-chat choices for how a hermes run starts (the composer's "Hermes 选项"):
- * `dispatch` puts /reclaude, /cchclaude, /anyclaude, /officlaude, /codex or /agy in front of the message; `model`
+ * `dispatch` puts /reclaude, /cchclaude, /anyclaude, /officlaude, /codex, /agy or /offiagy in front of the message; `model`
  * (+ `provider`) overrides hermes' configured default for this chat. Empty
  * strings mean "hermes decides". The thinking level is HaloWebUI's (see
  * _inherited_reasoning_effort in the backend), not a hermes option.
@@ -143,6 +143,7 @@ export type HermesRunOptions = {
 		| 'officlaude'
 		| 'codex'
 		| 'agy'
+		| 'offiagy'
 		| 'auto'
 		| 'answer'
 		| 'discuss'
@@ -167,7 +168,8 @@ const HERMES_RUNNERS = new Set([
 	'anyclaude',
 	'officlaude',
 	'codex',
-	'agy'
+	'agy',
+	'offiagy'
 ]);
 // The message goes to another mode instead of a Hermes run: 'answer' a 精答 run, 'discuss' a
 // 讨论台 discussion (mode_dispatch in the backend), 'team' a 协作台 team (agent_team_dispatch).
@@ -219,7 +221,7 @@ export const hermesRunOptionsForRequest = (
  * its report, and for a run that never started.
  */
 export type HermesContinuation = {
-	runner: 'reclaude' | 'cchclaude' | 'anyclaude' | 'officlaude' | 'codex' | 'agy';
+	runner: 'reclaude' | 'cchclaude' | 'anyclaude' | 'officlaude' | 'codex' | 'agy' | 'offiagy';
 	runId: string;
 	status: string;
 };
@@ -327,6 +329,7 @@ const DISPATCH_LABELS: Record<string, string> = {
 	officlaude: '官方 Claude',
 	codex: 'codex',
 	agy: 'agy',
+	offiagy: 'offiagy',
 	auto: '自动分流',
 	answer: '精答',
 	discuss: '讨论',

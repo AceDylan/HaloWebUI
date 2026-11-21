@@ -193,6 +193,11 @@ describe('hermes run options', () => {
 		expect(reply?.title).toContain('结果会发回这个对话');
 	});
 
+	it('knows offiagy as a runner dispatch of its own', () => {
+		expect(normalizeHermesRunOptions({ dispatch: 'offiagy' }).dispatch).toBe('offiagy');
+		expect(isModeDispatch('offiagy')).toBe(false);
+	});
+
 	it('knows 精答 and 讨论 as dispatches to another mode, like 协作台', () => {
 		for (const dispatch of ['auto', 'answer', 'discuss', 'team'] as const) {
 			expect(isModeDispatch(dispatch)).toBe(true);

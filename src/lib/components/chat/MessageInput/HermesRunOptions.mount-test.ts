@@ -150,7 +150,7 @@ describe('HermesRunOptions', () => {
 		expect(hint.textContent).toContain('交给 Codex 在后台独占执行');
 		expect(hint.textContent).toContain('只对下一条消息生效');
 		expect(panel.textContent).toContain(
-			'派发给 reclaude/cchclaude/anyclaude/officlaude/codex/agy 时它们用自己的模型'
+			'派发给 reclaude/cchclaude/anyclaude/officlaude/codex/agy/offiagy 时它们用自己的模型'
 		);
 	});
 
@@ -167,6 +167,7 @@ describe('HermesRunOptions', () => {
 			'officlaude',
 			'codex',
 			'agy',
+			'offiagy',
 			'auto',
 			'answer',
 			'discuss',
@@ -219,7 +220,7 @@ describe('HermesRunOptions', () => {
 		choice('direct').click();
 		await waitFor(() => choice('direct').getAttribute('aria-checked') === 'true', 'back to 直接');
 		expect(panel.querySelector('[data-halo-hermes-model-note]').textContent).toContain(
-			'派发给 reclaude/cchclaude/anyclaude/officlaude/codex/agy 时它们用自己的模型'
+			'派发给 reclaude/cchclaude/anyclaude/officlaude/codex/agy/offiagy 时它们用自己的模型'
 		);
 	});
 

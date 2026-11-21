@@ -541,7 +541,8 @@ export const EXECUTOR_OPTIONS: { value: TeamExecutor; label: string }[] = [
 	{ value: 'anyclaude', label: 'anyclaude · 慢' },
 	{ value: 'officlaude', label: '官方 Claude' },
 	{ value: 'codex', label: 'codex' },
-	{ value: 'agy', label: 'agy' }
+	{ value: 'agy', label: 'agy' },
+	{ value: 'offiagy', label: 'offiagy · 官方登录' }
 ];
 
 export const EXECUTOR_LABEL: Record<string, string> = Object.fromEntries(

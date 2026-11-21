@@ -189,6 +189,7 @@ describe('musicFileProblem', () => {
 describe('normalizeVideoSettings', () => {
 	it('keeps what is valid and falls back for the rest', () => {
 		expect(normalizeVideoSettings(null)).toEqual(DEFAULT_VIDEO_SETTINGS);
+		expect(normalizeVideoSettings({ maker: 'offiagy' }).maker).toBe('offiagy');
 		expect(
 			normalizeVideoSettings({
 				recipe: 'data',

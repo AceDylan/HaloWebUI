@@ -143,7 +143,7 @@ def replay_gemini_tool_calls_one_by_one(**kwargs: Any) -> dict[str, Any] | None:
 # ── Runner launches: at most one identical launch per turn ───────────────────
 
 RUNNER_LAUNCH_RE = re.compile(
-    r"(?:^|[\s/;&|(\"'])(reclaude-run\.sh|cchclaude-run\.sh|anyclaude-run\.sh|officlaude-run\.sh|codex-run\.sh|agy-run\.sh)"
+    r"(?:^|[\s/;&|(\"'])(reclaude-run\.sh|cchclaude-run\.sh|anyclaude-run\.sh|officlaude-run\.sh|codex-run\.sh|agy-run\.sh|offiagy-run\.sh)"
     r"\s+(run|answer)(?=\s|$)"
 )
 RUN_ID_RE = re.compile(r"(?:====\s+\w+\s+run|detached:\s+\w+\s+run)\s+(\S+?)(?:\s|$)")

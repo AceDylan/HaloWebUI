@@ -457,6 +457,25 @@ def test_official_claude_is_explicit_only_even_with_order_overrides(pkg, availab
     assert r.classify_failure("", "official_limit") == "quota"
 
 
+def test_offiagy_is_explicit_only_and_probes_the_google_sign_in(pkg, availability, override, monkeypatch, tmp_path):
+    r = pkg.runners
+    spec = r.BY_NAME["offiagy"]
+    assert spec.engine == "Antigravity" and spec.script == "offiagy-run.sh" and spec.answer_sets_id
+    assert r.chain_from("offiagy") == ["offiagy"]
+    assert r.select("offiagy")["executor"] == "offiagy"
+    for name in r.DEFAULT_ORDER:
+        assert "offiagy" not in r.chain_from(name)
+    override({"order": ["agy", "offiagy", "codex"], "kinds": {"ui": "offiagy"}})
+    assert r.fallback_order() == ("agy", "codex", "hermes")
+    assert r.kind_default("ui") == "agy"
+    token = tmp_path / "token"
+    monkeypatch.setenv("HALO_TEAMS_AGY_TOKEN", str(token))
+    state, detail, _ = r._probe_account(spec)
+    assert state == "account" and "offiagy" in detail
+    token.write_text("x")
+    assert r._probe_account(spec)[0] == "ok"
+
+
 @pytest.mark.parametrize("response,rc,expected", [
     ({"loggedIn": True, "authMethod": "claude.ai"}, 0, "ok"),
     ({"loggedIn": False, "authMethod": "none"}, 1, "account"),

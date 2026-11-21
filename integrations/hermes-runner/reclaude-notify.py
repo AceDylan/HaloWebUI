@@ -103,7 +103,7 @@ STATUS_LABELS = {
     "timeout": ("⏱", "超时"),
 }
 SESSION_LABELS = {"reclaude": "Claude 会话", "cchclaude": "Claude 会话", "anyclaude": "Claude 会话", "officlaude": "Claude 会话",
-                  "codex": "codex thread", "agy": "AGY conversation"}
+                  "codex": "codex thread", "agy": "AGY conversation", "offiagy": "AGY conversation"}
 
 
 def log(message):
@@ -1128,7 +1128,7 @@ def main():
     parser.add_argument(
         "--agent",
         default="reclaude",
-        help="agent label used in the notice text (reclaude, cchclaude, anyclaude, officlaude, codex, agy)",
+        help="agent label used in the notice text (reclaude, cchclaude, anyclaude, officlaude, codex, agy, offiagy)",
     )
     parser.add_argument(
         "--runner-name",

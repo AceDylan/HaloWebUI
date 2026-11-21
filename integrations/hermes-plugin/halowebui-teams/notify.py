@@ -125,7 +125,7 @@ def duration(seconds: Any) -> str:
 
 
 RUNNER_LABEL = {"hermes": "Hermes", "reclaude": "reclaude", "cchclaude": "cchclaude", "anyclaude": "anyclaude", "officlaude": "官方 Claude",
-                "codex": "codex", "agy": "agy"}
+                "codex": "codex", "agy": "agy", "offiagy": "offiagy"}
 
 
 def _open_row(team_id: str, label: str = "🌐 在网页看", suffix: str = "") -> list:

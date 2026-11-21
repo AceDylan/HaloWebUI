@@ -13,7 +13,8 @@ export type TeamExecutor =
 	| 'anyclaude'
 	| 'officlaude'
 	| 'codex'
-	| 'agy';
+	| 'agy'
+	| 'offiagy';
 
 /** What a member's work is, which decides the runner it starts on (see the plugin's runners.py). */
 export type TaskKind = 'code' | 'ui' | 'complex' | 'research' | 'writing' | 'image';

@@ -25,7 +25,8 @@ export type VideoMaker =
 	| 'cchclaude'
 	| 'officlaude'
 	| 'anyclaude'
-	| 'agy';
+	| 'agy'
+	| 'offiagy';
 /** With background music: the video as long as the music, or the music cut to the chosen length. */
 export type VideoMusicFit = 'full' | 'trim';
 /** Where the rendering runs: the home PC (RTX 3070; back to the server by itself when the PC is
@@ -83,7 +84,8 @@ export const VIDEO_MAKERS: { key: VideoMaker; label: string; sub: string }[] = [
 	{ key: 'cchclaude', label: 'cchclaude', sub: 'Claude · 自有中转' },
 	{ key: 'officlaude', label: '官方 Claude', sub: 'Claude · 官网订阅' },
 	{ key: 'anyclaude', label: 'anyclaude', sub: 'Claude · 免费较慢' },
-	{ key: 'agy', label: 'agy', sub: 'Gemini · 快' }
+	{ key: 'agy', label: 'agy', sub: 'Gemini · 快' },
+	{ key: 'offiagy', label: 'offiagy', sub: 'AGY · Google 官方登录' }
 ];
 
 /** 两类视频: an ordinary video, or an MP3 made into an MP4 (a lyric MV, JIZURA on the home PC). */

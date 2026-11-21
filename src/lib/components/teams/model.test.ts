@@ -265,13 +265,16 @@ describe('executors', () => {
 			'anyclaude',
 			'officlaude',
 			'codex',
-			'agy'
+			'agy',
+			'offiagy'
 		]);
 		expect(EXECUTOR_LABEL.hermes).toBe('Hermes 代理');
 		expect(EXECUTOR_LABEL.codex).toBe('codex');
 		expect(EXECUTOR_LABEL.officlaude).toBe('官方 Claude');
 		expect(
-			['reclaude', 'cchclaude', 'anyclaude', 'officlaude', 'codex', 'agy'].every(isRunnerExecutor)
+			['reclaude', 'cchclaude', 'anyclaude', 'officlaude', 'codex', 'agy', 'offiagy'].every(
+				isRunnerExecutor
+			)
 		).toBe(true);
 		expect(isRunnerExecutor('hermes')).toBe(false);
 		expect(isRunnerExecutor('gpt')).toBe(false);

@@ -96,6 +96,8 @@ SPECS: tuple[RunnerSpec, ...] = (
                script="codex-run.sh", command="codex", probe="codex_login"),
     RunnerSpec("agy", "agy", "Antigravity", "Antigravity CLI：前端 / UI / UX / 视觉设计的首选；没有工具记录",
                script="agy-run.sh", command="agy", probe="agy_token", answer_sets_id=True),
+    RunnerSpec("offiagy", "offiagy", "Antigravity", "Antigravity CLI（Google 账号官方登录，不走网关）；仅点名使用，登录失效后手动续跑",
+               script="offiagy-run.sh", command="offiagy", probe="agy_official", answer_sets_id=True),
     RunnerSpec("hermes", "Hermes", "Hermes", "Hermes 代理：联网搜索、调研、写作、汇总；永远是最后的兜底",
                native=True, probe="hermes"),
 )
@@ -104,6 +106,9 @@ NAMES = tuple(BY_NAME)
 EXTERNAL = tuple(spec.name for spec in SPECS if not spec.native)
 assert EXTERNAL == RUNNER_EXECUTORS, "common.RUNNER_EXECUTORS and runners.SPECS must list the same runners"
 DEFAULT_ORDER = ("reclaude", "cchclaude", "anyclaude", "codex", "agy", "hermes")
+# Runners on the user's own official account: only a member the user named runs on them, and they
+# never join the fallback chain (as a start or as a step after another runner).
+NAMED_ONLY = ("officlaude", "offiagy")
 
 # Task kinds the lead labels every member with, and the runner each starts from.
 KINDS: dict[str, dict] = {
@@ -181,7 +186,7 @@ def overrides() -> dict:
 def fallback_order() -> tuple[str, ...]:
     order = overrides().get("order")
     if isinstance(order, list):
-        names = [n for n in order if n in BY_NAME and n != "officlaude"]
+        names = [n for n in order if n in BY_NAME and n not in NAMED_ONLY]
         if names:
             # Hermes always ends the chain: it is the executor that never needs another account.
             return tuple(n for n in names if n != "hermes") + ("hermes",)
@@ -190,7 +195,7 @@ def fallback_order() -> tuple[str, ...]:
 
 def kind_default(kind: str) -> str:
     custom = overrides().get("kinds")
-    if isinstance(custom, dict) and custom.get(kind) in BY_NAME and custom.get(kind) != "officlaude":
+    if isinstance(custom, dict) and custom.get(kind) in BY_NAME and custom.get(kind) not in NAMED_ONLY:
         return custom[kind]
     return KINDS.get(kind, KINDS[DEFAULT_KIND])["default"]
 
@@ -208,8 +213,8 @@ def normalize_kind(kind: Any) -> str:
 
 def chain_from(start: str) -> list[str]:
     """``start`` and every runner after it in the fallback order (Hermes last)."""
-    if start == "officlaude":
-        return ["officlaude"]
+    if start in NAMED_ONLY:
+        return [start]
     order = list(fallback_order())
     if start not in order:
         return ["hermes"] if start != "hermes" else ["hermes"]
@@ -340,6 +345,15 @@ def _probe_account(spec: RunnerSpec) -> tuple[str, str, Optional[str]]:
         except OSError:
             pass
         return "account", "agy 没有登录（找不到 OAuth 令牌）", None
+    if spec.probe == "agy_official":
+        # offiagy signs in with the Google account; its OAuth token file is the sign-in.
+        token = Path(os.environ.get("HALO_TEAMS_AGY_TOKEN", "/root/.gemini/antigravity-cli/antigravity-oauth-token"))
+        try:
+            if token.stat().st_size > 0:
+                return "ok", "Google 账号已登录（有 OAuth 令牌）；实际请求以 runner 结果为准", None
+        except OSError:
+            pass
+        return "account", "offiagy 没有登录：在服务器终端运行 offiagy，按提示在浏览器授权", None
     return "ok", "", None
 
 

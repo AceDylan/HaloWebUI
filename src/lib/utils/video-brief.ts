@@ -273,6 +273,7 @@ export const DOUYIN_TEMPLATES: DouyinTemplate[] = [
 			kind: 'normal',
 			douyin: true,
 			hook: 'pain',
+			pace: 'fast',
 			creative: 'metaphor',
 			frame: '9:16',
 			seconds: 45,
@@ -293,6 +294,7 @@ export const DOUYIN_TEMPLATES: DouyinTemplate[] = [
 			kind: 'normal',
 			douyin: true,
 			hook: 'reversal',
+			pace: 'fast',
 			creative: 'contrast',
 			frame: '9:16',
 			seconds: 30,
@@ -316,6 +318,7 @@ export const DOUYIN_TEMPLATES: DouyinTemplate[] = [
 			kind: 'normal',
 			douyin: true,
 			hook: 'reversal',
+			pace: 'fast',
 			creative: 'contrast',
 			frame: '9:16',
 			seconds: 30,
@@ -336,6 +339,7 @@ export const DOUYIN_TEMPLATES: DouyinTemplate[] = [
 			kind: 'normal',
 			douyin: true,
 			hook: 'result',
+			pace: 'fast',
 			creative: 'metaphor',
 			frame: '9:16',
 			seconds: 60,
@@ -357,6 +361,7 @@ export const DOUYIN_TEMPLATES: DouyinTemplate[] = [
 			kind: 'normal',
 			douyin: true,
 			hook: 'list',
+			pace: 'fast',
 			creative: 'oneshot',
 			frame: '9:16',
 			seconds: 60,
@@ -377,6 +382,7 @@ export const DOUYIN_TEMPLATES: DouyinTemplate[] = [
 			kind: 'normal',
 			douyin: true,
 			hook: 'reversal',
+			pace: 'balanced',
 			creative: 'metaphor',
 			frame: '9:16',
 			seconds: 30,
@@ -843,7 +849,7 @@ const requirementLines = (opts: Omit<VideoBriefOptions, 'idea'>, forMaker = fals
 export const placeLine = (place: VideoPlace) =>
 	place === 'server'
 		? '- 生成位置：服务器（直接在服务器渲染，不用家里电脑）'
-		: '- 生成位置：家里电脑（按技能 video-studio「生成位置」一节，渲染都用 pc-video；成片用 pc-video deliver 留在家里电脑 D:\\HermesWork\\视频\\，回复只写 Windows 路径；家里电脑不在线时自动改在服务器渲染并照常交付，交付时说明实际在哪渲染）';
+		: '- 生成位置：家里电脑（按技能 video-studio「生成位置」一节，渲染都用 pc-video；成片用 pc-video deliver 留在家里电脑 D:\\HermesWork\\视频\\，回复只写 Windows 路径；家里电脑不在线或 WSL 无响应时自动改在服务器渲染并照常交付，交付时说明实际在哪渲染）';
 
 /** The settings for 提示词增强 to size the content to (it never changes them). */
 export const videoSettingsText = (opts: Omit<VideoBriefOptions, 'idea'>): string => {

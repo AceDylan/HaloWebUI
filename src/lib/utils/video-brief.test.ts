@@ -669,6 +669,9 @@ describe('publishing standard, split-jizura and MP3 做 MV', () => {
 	it('fast-paced high-density defaults and directorial creative modes reach enhancement and maker brief, fitting 3600-char drafts under 8000 chars', () => {
 		expect(VIDEO_PACES.map((p) => p.key)).toEqual(['fast', 'balanced', 'cinematic']);
 		expect(DEFAULT_VIDEO_SETTINGS.pace).toBe('fast');
+		for (const tpl of DOUYIN_TEMPLATES) {
+			expect(tpl.patch.pace).toBe(tpl.key === 'storybook-heal' ? 'balanced' : 'fast');
+		}
 		expect(VIDEO_CREATIVES.map((c) => c.key)).toEqual(['auto', 'metaphor', 'contrast', 'montage', 'oneshot']);
 		const opts = {
 			...base,

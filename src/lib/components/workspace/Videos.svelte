@@ -264,9 +264,27 @@
 				: (VIDEO_STYLES.find((s) => s.key === (settings.style === 'auto' ? stylePick.key : settings.style))?.label ?? '日漫卡通');
 	$: activeVoiceLabel = VIDEO_VOICES.find((v) => v.key === settings.voice)?.label ?? '配音';
 
-	// 家里电脑在不在线: read once when the page opens (refresh the page to read it again); the host
-	// checks every 30 s.
+	// 家里电脑在不在线: read when the page opens, when returning to the tab (>=30 s throttle), or on click;
+	// the host checks every 30 s.
 	let pc: PcStatus | null = null;
+	let pcFetchedAt = 0;
+	let pcRefreshing = false;
+	const refreshPcStatus = async (force = false) => {
+		if (destroyed || pcRefreshing) return;
+		if (!force && Date.now() - pcFetchedAt < 30_000) return;
+		pcRefreshing = true;
+		try {
+			const next = await getPcStatus(localStorage.token);
+			if (!destroyed) {
+				pc = next;
+				pcFetchedAt = Date.now();
+			}
+		} catch {
+			if (!destroyed && !pc) pc = { state: 'unknown', checkedAt: null };
+		} finally {
+			pcRefreshing = false;
+		}
+	};
 	const PC_LABEL: Record<PcState, string> = {
 		ready: '在线',
 		off: '已关机',
@@ -702,9 +720,11 @@
 		watchTasks();
 	};
 
-	// back on this tab: read again while anything is still being made
+	// back on this tab: refresh live tasks and throttled PC status
 	const onVisibility = () => {
-		if (document.visibilityState === 'visible' && tasks.some(videoTaskLive)) void loadTasks();
+		if (document.visibilityState !== 'visible') return;
+		if (tasks.some(videoTaskLive)) void loadTasks();
+		void refreshPcStatus();
 	};
 
 	const onKeydown = (event: KeyboardEvent) => {
@@ -911,9 +931,7 @@
 		} catch {
 			prepOptions = normalizePrepOptions(null);
 		}
-		getPcStatus(localStorage.token)
-			.then((s) => (pc = s))
-			.catch(() => (pc = { state: 'unknown', checkedAt: null }));
+		void refreshPcStatus(true);
 		const landing = new URL(window.location.href).searchParams;
 		if (landing.get('tab') === 'library') tab = 'library';
 		const asked = landing.get('task') ?? '';
@@ -1857,9 +1875,12 @@
 				<div class="flex flex-wrap items-center justify-between gap-2">
 					<div class="text-sm font-semibold text-gray-900 dark:text-gray-100">制作管线</div>
 					{#if pc}
-						<span
-							class="flex min-w-0 items-center gap-1.5 text-[11px] text-gray-500 dark:text-gray-400"
-							title={pc.checkedAt ? `${new Date(pc.checkedAt).toLocaleString()} 检测；刷新页面重新读取` : '刷新页面重新读取'}
+						<button
+							type="button"
+							class="flex min-w-0 items-center gap-1.5 rounded-full px-1.5 py-0.5 text-[11px] text-gray-500 transition hover:bg-gray-100 hover:text-gray-800 disabled:opacity-60 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-200"
+							title={pc.checkedAt ? `${new Date(pc.checkedAt).toLocaleString()} 检测；点击刷新状态` : '点击刷新家里电脑状态'}
+							disabled={pcRefreshing}
+							on:click={() => void refreshPcStatus(true)}
 							data-pc-status={pc.state}
 						>
 							<span
@@ -1871,7 +1892,7 @@
 								aria-hidden="true"
 							/>
 							<span class="truncate">家里电脑{PC_LABEL[pc.state]}{pcAgo(pc.checkedAt) ? ` · ${pcAgo(pc.checkedAt)}` : ''}</span>
-						</span>
+						</button>
 					{/if}
 				</div>
 

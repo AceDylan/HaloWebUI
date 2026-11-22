@@ -914,6 +914,13 @@ describe('Videos 制作任务', () => {
 		expect(badge.getAttribute('data-pc-status')).toBe('on-wsl-hung');
 		expect(badge.textContent).toContain('家里电脑WSL 无响应');
 		expect(target.textContent).toContain('家里电脑已开机但 WSL 无响应');
+		// Clicking the PC status badge refreshes live status without reloading the page
+		api.getPcStatus.mockResolvedValueOnce({ state: 'ready', checkedAt: Date.now() });
+		badge.click();
+		await sleep(20);
+		badge = target.querySelector('[data-pc-status]');
+		expect(badge.getAttribute('data-pc-status')).toBe('ready');
+		expect(badge.textContent).toContain('家里电脑在线');
 	});
 
 	it('a video left on the home PC is shown by its Windows path, ready to copy', async () => {

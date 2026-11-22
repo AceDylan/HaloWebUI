@@ -2,6 +2,7 @@
 new chat starts with the request and the summary on a valid one-branch history."""
 
 from open_webui.utils.chat_handoff import (
+    DEFAULT_CONTEXT_TOKENS,
     branch_messages,
     build_handoff_chat,
     build_transcript,
@@ -37,7 +38,8 @@ def test_branch_on_screen_oldest_first():
 
 
 def test_transcript_has_the_branch_without_reasoning():
-    transcript, omitted = build_transcript(branch_messages(_chat()), 128_000)
+    assert DEFAULT_CONTEXT_TOKENS == 300_000
+    transcript, omitted = build_transcript(branch_messages(_chat()), 300_000)
 
     assert omitted == 0
     assert transcript.splitlines()[0] == "用户：nginx 起不来"

@@ -22,21 +22,29 @@ describe('resolveContextWindow', () => {
 			tokens: 32768,
 			source: 'model'
 		});
+		expect(resolveContextWindow({ id: 'gpt-chat', info: { meta: { context_window: 500_000 } } })).toEqual({
+			tokens: 500_000,
+			source: 'model'
+		});
 	});
 
-	it('falls back to the family, a workspace assistant by its base model', () => {
-		expect(resolveContextWindow({ id: 'claude-sonnet-4-5' })).toEqual({ tokens: 200_000, source: 'family' });
-		expect(resolveContextWindow({ id: 'claude-chat' }).tokens).toBe(1_000_000);
-		expect(resolveContextWindow({ id: 'my-helper', info: { base_model_id: 'gemini-2.5-pro' } }).tokens).toBe(
-			1_000_000
-		);
-		expect(resolveContextWindow({ id: 'o3-mini' }).tokens).toBe(200_000);
-		expect(resolveContextWindow({ id: 'gpt-4o-mini' }).tokens).toBe(128_000);
-	});
-
-	it('uses a default for an unknown model', () => {
-		expect(resolveContextWindow({ id: 'gpt-chat' })).toEqual({ tokens: 128_000, source: 'default' });
-		expect(resolveContextWindow(null).source).toBe('default');
+	it('uses the unified 300k default whenever no size is declared', () => {
+		for (const model of [
+			{ id: 'gpt-chat' },
+			{ id: 'claude-chat' },
+			{ id: 'claude-sonnet-4-5' },
+			{ id: 'gemini-chat' },
+			{ id: 'my-helper', info: { base_model_id: 'gemini-2.5-pro' } },
+			{ id: 'deepseek-chat' },
+			{ id: 'glm-chat' },
+			{ id: 'grok-chat' },
+			{ id: 'kimi-chat' },
+			{ id: 'o3-mini' },
+			{ id: 'gpt-4o-mini' },
+			null
+		]) {
+			expect(resolveContextWindow(model)).toEqual({ tokens: 300_000, source: 'default' });
+		}
 	});
 });
 
@@ -61,14 +69,14 @@ describe('computeContextUsage', () => {
 			}
 		};
 
-		const usage = computeContextUsage(history, 10_000, 'family');
+		const usage = computeContextUsage(history, 10_000, 'default');
 
 		expect(usage).toEqual({
 			tokens: 1000 + 4000 + 100 + 2,
 			window: 10_000,
 			ratio: 5102 / 10_000,
 			estimated: false,
-			windowSource: 'family'
+			windowSource: 'default'
 		});
 	});
 
@@ -95,6 +103,7 @@ describe('formatting', () => {
 		expect(formatTokenCount(950)).toBe('950');
 		expect(formatTokenCount(45_300)).toBe('45.3k');
 		expect(formatTokenCount(200_000)).toBe('200k');
+		expect(formatTokenCount(300_000)).toBe('300k');
 		expect(formatTokenCount(1_000_000)).toBe('1M');
 		expect(estimateTokens('你好abcd')).toBe(3);
 	});

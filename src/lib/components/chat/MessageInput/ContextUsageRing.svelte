@@ -32,11 +32,7 @@
 				? 'text-amber-500 dark:text-amber-400'
 				: 'text-gray-400 dark:text-gray-500';
 	$: windowNote =
-		usage.windowSource === 'model'
-			? '上限取自模型设置'
-			: usage.windowSource === 'family'
-				? '上限按模型系列估计'
-				: '不知道这个模型的上限，按 128k 估计';
+		usage.windowSource === 'model' ? '上限取自模型设置' : '上限按默认 300k 计算';
 </script>
 
 <Dropdown bind:show side="top" align="end">

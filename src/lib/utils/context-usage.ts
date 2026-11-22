@@ -3,7 +3,7 @@
 // provider actually billed for the conversation so far) plus anything sent
 // after it; a chat without usage falls back to counting characters.
 
-export type ContextWindowSource = 'model' | 'family' | 'default';
+export type ContextWindowSource = 'model' | 'default';
 
 export type ContextUsage = {
 	tokens: number;
@@ -14,27 +14,11 @@ export type ContextUsage = {
 	windowSource: ContextWindowSource;
 };
 
-export const DEFAULT_CONTEXT_WINDOW = 128_000;
+export const DEFAULT_CONTEXT_WINDOW = 300_000;
 // The ring turns amber, then red; at NOTICE the chat suggests 总结后在新对话继续.
 export const CONTEXT_WARN_RATIO = 0.6;
 export const CONTEXT_NOTICE_RATIO = 0.8;
 export const CONTEXT_FULL_RATIO = 0.9;
-
-// Conservative where a family spans sizes: warning early beats a request that fails.
-const FAMILY_WINDOWS: Array<[RegExp, number]> = [
-	[/(^|[/:.])claude-chat$/, 1_000_000],
-	[/claude/, 200_000],
-	[/gemini/, 1_000_000],
-	[/gpt-4\.1/, 1_000_000],
-	[/gpt-5/, 400_000],
-	[/(^|[/:.-])o[134](-|$)/, 200_000],
-	[/gpt-4o|chatgpt-4o|gpt-4-turbo/, 128_000],
-	[/gpt-3\.5/, 16_000],
-	[/grok-4/, 256_000],
-	[/grok/, 131_000],
-	[/kimi|moonshot/, 256_000],
-	[/deepseek|qwen|glm|llama|mistral|mixtral/, 128_000]
-];
 
 const positive = (value: unknown): number | null => {
 	if (typeof value === 'number' && Number.isFinite(value) && value > 0) return Math.floor(value);
@@ -61,20 +45,6 @@ export const resolveContextWindow = (
 		.find((value) => value !== null);
 	if (declared) return { tokens: declared, source: 'model' };
 
-	const ids = [
-		model?.original_id,
-		model?.model_id,
-		model?.model_ref?.model_id,
-		model?.info?.base_model_id,
-		model?.id,
-		model?.name
-	]
-		.filter((value): value is string => typeof value === 'string' && value.trim() !== '')
-		.map((value) => value.trim().toLowerCase());
-	for (const id of ids) {
-		const family = FAMILY_WINDOWS.find(([pattern]) => pattern.test(id));
-		if (family) return { tokens: family[1], source: 'family' };
-	}
 	return { tokens: DEFAULT_CONTEXT_WINDOW, source: 'default' };
 };
 

@@ -26,7 +26,7 @@ HANDOFF_PROMPT = """下面是一段对话的记录。之后会开一个新对话
 # What fits: the transcript gets this share of the model's context window,
 # the prompt and the summary itself need the rest.
 TRANSCRIPT_SHARE = 0.7
-DEFAULT_CONTEXT_TOKENS = 128_000
+DEFAULT_CONTEXT_TOKENS = 300_000
 MAX_TRANSCRIPT_TOKENS = 600_000
 MAX_MESSAGE_CHARS = 24_000
 

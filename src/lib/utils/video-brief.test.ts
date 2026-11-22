@@ -5,6 +5,7 @@ import { VIDEO_STYLES, pickVideoStyle, videoSamplePath } from './video-styles';
 import {
 	DEFAULT_VIDEO_SETTINGS,
 	DOUYIN_TEMPLATES,
+	VIDEO_CREATIVES,
 	VIDEO_HOOKS,
 	VIDEO_LENGTHS,
 	attachmentKind,
@@ -205,6 +206,7 @@ describe('normalizeVideoSettings', () => {
 				subtitles: false,
 				douyin: false,
 				hook: 'reversal',
+				creative: 'metaphor',
 				splitLayout: 'lr',
 				jizuraStyle: 'hud',
 				jizuraAccent: false,
@@ -221,6 +223,7 @@ describe('normalizeVideoSettings', () => {
 			subtitles: false,
 			douyin: false,
 			hook: 'reversal',
+			creative: 'metaphor',
 			splitLayout: 'lr',
 			jizuraStyle: 'hud',
 			jizuraAccent: false,
@@ -417,6 +420,7 @@ describe('video visual styles', () => {
 			['3个装修避坑对比和智商税盘点', 'comic-pop'],
 			['国潮东方插画讲一段山海江湖传说历史', 'guochao'],
 			['深夜晚霞水彩绘本感悟与治愈独白', 'storybook'],
+			['你想象中的很多事情并没有那么复杂 不要担心太多 其实不会出现', 'storybook'],
 			// the style named outright wins over topic words
 			['用手绘风讲讲数据统计', 'handdrawn'],
 			// 「AI」 counts only as a word
@@ -657,5 +661,32 @@ describe('publishing standard, split-jizura and MP3 做 MV', () => {
 		const off = buildVideoBrief({ ...base, douyin: false });
 		expect(off).not.toContain('## 抖音爆款规格');
 		expect(videoSettingsText({ ...base, douyin: false })).not.toContain('抖音爆款优化');
+	});
+
+	it('directorial creative modes reach both enhancement and maker brief, and 3200-char enhanced briefs fit cleanly under 8000 chars', () => {
+		expect(VIDEO_CREATIVES.map((c) => c.key)).toEqual(['auto', 'metaphor', 'contrast', 'montage', 'oneshot']);
+		const opts = {
+			...base,
+			creative: 'metaphor' as const,
+			recipe: 'explainer' as const,
+			style: 'storybook' as const,
+			music: { name: '夏日回响.mp3', seconds: 160 },
+			musicFit: 'full' as const
+		};
+		const settings = videoSettingsText(opts);
+		const brief = buildVideoBrief(opts);
+		expect(settings).toContain('- 动画编排：视觉隐喻');
+		expect(brief).toContain('- 动画编排（视觉隐喻）');
+		expect(brief).toContain('动画导演级创意与转场');
+		expect(brief).toContain('匹配剪辑（Match Cut）');
+		expect(brief).toContain('严禁整片机械均分等长镜头');
+		// Footage keeps original footage without animation choreography override
+		expect(videoSettingsText({ ...opts, recipe: 'footage' })).not.toContain('动画编排');
+		expect(buildVideoBrief({ ...opts, recipe: 'footage' })).not.toContain('动画编排（');
+		// A full 3200-char enhanced brief still fits inside HANDOFF_TEXT_MAX (8000)
+		const longEnhanced = fitVideoBrief({ ...opts, idea: '幕'.repeat(3200) }, 8000);
+		expect(longEnhanced.length).toBeLessThanOrEqual(8000);
+		expect(longEnhanced).toContain('## 发布标准');
+		expect(longEnhanced).toContain('## 怎么做');
 	});
 });

@@ -403,7 +403,7 @@ def test_video_enhance_prompt_covers_douyin_viral_optimization():
     messages = prep.enhance_messages(
         "video",
         "讲讲为什么越努力越内耗",
-        "- 画幅：竖屏 9:16\n- 字幕：烧录中文字幕\n- 抖音爆款优化：开启（前 3 秒「反差反转」动画钩子）",
+        "- 画幅：竖屏 9:16\n- 字幕：烧录中文字幕\n- 动画编排：视觉隐喻\n- 抖音爆款优化：开启（前 3 秒「反差反转」动画钩子）",
         sources=[],
         conclusion="",
     )
@@ -413,3 +413,19 @@ def test_video_enhance_prompt_covers_douyin_viral_optimization():
     assert "9:16 Douyin UI safe zone" in system
     assert "DO NOT ask for flashy on-screen text animations" in system
     assert "PC JIZURA" in system
+    # Director-grade creative & anti-cliché animation requirements
+    assert "CORE VISUAL METAPHOR" in system
+    assert "RECURRING VISUAL MOTIF" in system
+    assert "NEVER cut a medium/long video into 20+ identical 6-second metronome rows" in system
+    assert "match cut" in system
+    assert "动画编排" in system
+    assert "【核心创意与视觉母题】" in system
+    assert "【动画封面建议】" in system
+
+
+def test_video_enhanced_limit_allows_complete_long_form_director_brief():
+    assert prep.ENHANCED_MAX_CHARS["video"] == 3200
+    long_brief = "【核心创意与视觉母题】\n" + ("分镜内容" * 700) + "\n【动画封面建议】别怕没发生的事"
+    assert 2200 < len(long_brief) < 3200
+    out = prep.normalize_enhanced({"idea": long_brief, "notes": "", "sources": []}, "video", [])
+    assert out["idea"].endswith("【动画封面建议】别怕没发生的事")

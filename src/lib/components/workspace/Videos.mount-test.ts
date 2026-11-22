@@ -951,6 +951,11 @@ describe('Videos 制作任务', () => {
 		target.querySelector('[data-video-hook="pain"]').click();
 		await sleep(10);
 		expect(brief()).toContain('前 3 秒动画视觉钩子（情景代入）');
+		// Switch directorial creative mode and verify it reaches the brief and persists
+		target.querySelector('[data-video-creative="metaphor"]').click();
+		await sleep(10);
+		expect(target.querySelector('[data-video-creative="metaphor"]').getAttribute('aria-pressed')).toBe('true');
+		expect(brief()).toContain('动画编排（视觉隐喻）');
 		target.querySelector('[data-video-douyin-toggle]').click();
 		await sleep(10);
 		expect(target.querySelector('[data-video-douyin-toggle]').getAttribute('aria-checked')).toBe('false');

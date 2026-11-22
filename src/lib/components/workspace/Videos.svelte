@@ -66,6 +66,7 @@
 		DOUYIN_TEMPLATES,
 		JIZURA_STYLES,
 		SPLIT_LAYOUTS,
+		VIDEO_CREATIVES,
 		VIDEO_FRAMES,
 		VIDEO_HOOKS,
 		VIDEO_LENGTHS,
@@ -242,6 +243,7 @@
 	$: maker = VIDEO_MAKERS.find((m) => m.key === settings.maker) ?? VIDEO_MAKERS[0];
 	$: place = VIDEO_PLACES.find((p) => p.key === settings.place) ?? VIDEO_PLACES[0];
 	$: activeHook = VIDEO_HOOKS.find((h) => h.key === settings.hook) ?? VIDEO_HOOKS[0];
+	$: activeCreative = VIDEO_CREATIVES.find((c) => c.key === settings.creative) ?? VIDEO_CREATIVES[0];
 	$: activeMvVisual = MV_VISUALS.find((v) => v.key === settings.mvVisual) ?? MV_VISUALS[0];
 	$: activeMvTheme = MV_THEMES.find((t) => t.key === settings.mvTheme) ?? MV_THEMES[0];
 	$: activeJizuraStyle = JIZURA_STYLES.find((s) => s.key === settings.jizuraStyle) ?? JIZURA_STYLES[0];
@@ -1362,6 +1364,9 @@
 					{#if !isMv}
 						<span class="rounded-full bg-gray-100 px-2 py-0.5 font-medium text-gray-700 dark:bg-gray-800 dark:text-gray-200">{lengthSummary}</span>
 						<span class="rounded-full bg-indigo-500/12 px-2 py-0.5 font-medium text-indigo-700 dark:text-indigo-300">{recipe.label} · {resolvedStyleLabel}</span>
+						{#if settings.recipe !== 'footage' && settings.creative && settings.creative !== 'auto'}
+							<span class="rounded-full bg-amber-500/12 px-2 py-0.5 font-medium text-amber-700 dark:text-amber-300">编排 · {activeCreative.label}</span>
+						{/if}
 						{#if settings.recipe === 'split-jizura' || (settings.recipe !== 'footage' && settings.jizuraAccent)}
 							<span class="rounded-full bg-violet-500/12 px-2 py-0.5 font-medium text-violet-700 dark:text-violet-300">
 								JIZURA · {settings.recipe === 'split-jizura' ? (resolvedSplitDir === 'tb' ? '上下分屏' : '左右分屏') : activeMvTheme.label}
@@ -1696,6 +1701,28 @@
 						<p class="text-xs leading-relaxed text-gray-500 dark:text-gray-400">{recipe.hint}</p>
 					</div>
 
+					{#if settings.recipe !== 'footage'}
+						<div class="space-y-1.5" data-video-creatives>
+							<div class="flex flex-wrap items-center justify-between gap-2">
+								<span class="text-xs font-medium text-gray-600 dark:text-gray-300">动画编排手法</span>
+								<span class="text-[11px] text-gray-500 dark:text-gray-400">决定视觉隐喻、节奏反差与创意转场</span>
+							</div>
+							<div class="flex flex-wrap gap-1.5">
+								{#each VIDEO_CREATIVES as c (c.key)}
+									<button
+										type="button"
+										class={(settings.creative ?? 'auto') === c.key ? chipOn : chip}
+										aria-pressed={(settings.creative ?? 'auto') === c.key}
+										title={c.sub}
+										on:click={() => (settings = { ...settings, creative: c.key })}
+										data-video-creative={c.key}
+									>{c.label}</button>
+								{/each}
+							</div>
+							<p class="text-[11px] leading-relaxed text-gray-500 dark:text-gray-400">{activeCreative.sub} · {activeCreative.short}</p>
+						</div>
+					{/if}
+
 					{#if settings.recipe === 'split-jizura'}
 						<div class="space-y-3 rounded-xl border border-violet-200/70 bg-violet-50/35 p-3 dark:border-violet-500/30 dark:bg-violet-950/20" data-video-jizura-panel>
 							<div class="flex flex-wrap items-center justify-between gap-2">
@@ -1840,7 +1867,7 @@
 							</button>
 						</div>
 						<p class="text-[11px] leading-relaxed text-gray-500 dark:text-gray-400">
-							gpt-chat 自动联网查证并按时长拆好爆款分镜；点完开始制作即可离开。{prepOptions.enhance
+							gpt-chat 以动画导演视角构思视觉隐喻、变速节奏与创意转场，需要时自动联网查证并拆好分镜；点完开始制作即可离开。{prepOptions.enhance
 								? ''
 								: '已关自动增强：可点需求框右上「增强」先预览改写。'}
 						</p>

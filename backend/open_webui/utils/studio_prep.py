@@ -37,7 +37,7 @@ IDEA_MAX_CHARS = 6000
 SETTINGS_MAX_CHARS = 1500
 # what the enhanced request and its notes may take (the video brief travels to the chat whole,
 # at most 8000 characters with its fixed parts)
-ENHANCED_MAX_CHARS = {"video": 2200, "image": 1200}
+ENHANCED_MAX_CHARS = {"video": 3200, "image": 1200}
 NOTES_MAX_CHARS = 1200
 SOURCES_MAX = 6
 SOURCE_EXCERPT_CHARS = 1400
@@ -63,11 +63,11 @@ STEP_LABELS = {
 
 WHAT = {
     "video": (
-        "HaloWebUI's video studio: an AI agent makes rich multi-style animated videos "
-        "(Remotion layered cartoon/anime/illustrated animation, storybook animated scenes, "
-        "split-screen cartoon + home-PC JIZURA kinetic motion, animated visual explainers, "
-        "or edited user footage; narration by TTS, burned-in subtitles). Never pure text-only "
-        "kinetic videos or simplistic single-still slides."
+        "HaloWebUI's video studio: an AI animation director & maker produces high-concept, multi-style "
+        "animated films (Remotion layered cartoon/anime/illustrated animation, surreal visual-metaphor "
+        "storytelling, storybook animated scenes, split-screen cartoon + home-PC JIZURA kinetic motion, "
+        "animated visual explainers, or edited user footage; narration by TTS, burned-in subtitles). "
+        "Never pure text-only kinetic videos, simplistic single-still slides, or bland mundane diary plots."
     ),
     "image": "HaloWebUI's image studio: one picture from a text-to-image model (gpt-image class), optionally edited from reference images.",
 }
@@ -202,36 +202,36 @@ def enhance_messages(kind: str, idea: str, settings: str, *, sources: list[dict]
     limit = ENHANCED_MAX_CHARS[kind]
     if kind == "video":
         task = (
-            "Rewrite the user's video request into a clear, complete brief for the agent that will make the video. "
+            "Act as an award-winning animation director and visual screenwriter (Pixar SparkShorts / Kurzgesagt / "
+            "Spider-Verse / Ghibli craft level). Rewrite the user's video request into a vivid, inventive, "
+            "production-ready director's treatment for the agent that will make the video. "
             "Keep everything the user asked for (topic, audience, tone, style, must-have details, wording they insist on). "
-            "The settings listed are decided and stated separately in the brief (做法, 画幅, 时长, 配音, 字幕, 背景音乐, 附件, 视觉风格): "
-            "never contradict them and do not repeat them as items, but size the content to the length. Add what a good maker "
-            "needs: the core message and audience, an opening hook, a scene-by-scene outline (about one scene per 4-8 seconds; "
-            "for each: what is on screen and, when narrated, the narration / subtitle line), the visual style (palette, type, motion) "
-            "and pacing, and the ending. Follow the supplied visual-style and reference priority rules: explicit user visual "
-            "requirements take priority over a preset; a preset takes priority over visual details you invent. "
-            "When supplied, 风格特征, 配色, 关键技法 and 验收 define the chosen animation style: write the outline so "
-            "every shot depicts concrete animated characters, environments, props and camera motion that closely act out "
-            "the subtitle/narration content (a hook in the first 0.5 s, one hero animation moment at about 60-75 % of the "
-            "length, a composed end frame held about 1 s), never pure kinetic text on plain dark backgrounds or static "
-            "title cards. When 烧录中文字幕 is enabled in settings, DO NOT ask for flashy on-screen text animations or "
-            "giant floating highlight words — keep on-screen text minimal and devote the visual design to animated "
-            "storytelling. When 分屏混搭 (split-screen with PC JIZURA) is chosen, specify both the cartoon/animated "
-            "story half and the synchronized JIZURA kinetic motion half. 配色与外观偏好 changes appearance only, not the "
-            "techniques. Respect the selected recipe: footage keeps its original subject; picture/storybook animations "
-            "use layered motion over unified illustrations. If a required rendering capability is unavailable, state the "
-            "limitation instead of silently promising it. When updating a previously enhanced draft, retain content and "
-            "user edits but reconcile obsolete generated visual details and timing with the current settings. Reference "
-            "attachments are not automatically footage to insert. If only attachment names are provided, leave visual "
-            "extraction to the maker; do not pretend to have seen them. Style never changes the chosen recipe, frame, "
-            "duration, voice, subtitle switch or music. "
-            "When 抖音爆款优化 is enabled in the settings: optimize for high completion with animation-first storytelling — "
-            "hook visually within 0-3 s using the chosen animated hook pattern (never open with '大家好' or a bare text "
-            "card), tighten pacing to one animated visual beat every 2-4 seconds, write crisp colloquial spoken lines "
-            "(<= 14 Chinese chars per sentence), respect the 9:16 Douyin UI safe zone (keep focal characters and subtitles "
-            "clear of right-side buttons and bottom bar), restrain on-screen text effects whenever subtitles are enabled, "
-            "close with a cohesive animated payoff scene plus a light natural engagement cue, and suggest a clean 6-10 "
-            "character animated cover title."
+            "The settings listed are decided and stated separately in the brief (做法, 画幅, 时长, 配音, 字幕, 背景音乐, 附件, 视觉风格, 动画编排): "
+            "never contradict them and do not repeat them as bare setting items, but tailor narrative structure and pacing strictly to the length.\n"
+            "1) ANTI-CLICHÉ & ANIMATION-NATIVE VISUAL METAPHOR (mandatory): "
+            "Never settle for bland, literal, mundane everyday plots (e.g. stretching one trivial errand like 'sent a message, got no reply, walked down a hallway, opened a door' across a whole film) or preachy cliché monologues. "
+            "For abstract, emotional, psychological, reflective, or conceptual topics (such as overthinking/worry, self-discipline, anxiety, principles), invent a bold CORE VISUAL METAPHOR and a RECURRING VISUAL MOTIF that ONLY animation can pull off — e.g., exaggerated scale contrast (a tiny pebble casting a 100-meter shadow monster under an overthinking spotlight, collapsing into a palm-sized paper creature the moment real sunlight hits), surreal mental-space morphing, anthropomorphic contraptions, or 2–3 sharply relatable modern-life micro-vignettes fused seamlessly by one visual motif. "
+            "Make narration lines sharp, insightful, human, and memorable (zero diary filler); deliberately include 1–2 s silent/music breathing beats at key visual reveals so animation and music carry emotion.\n"
+            "2) DRAMATIC ARC & VARIABLE PACING (never monotonous equal-length rows): "
+            "Shape a real cinematic tension curve: 0–3 s high-concept visual hook -> metaphor/world setup -> escalating tension or contrast (accelerate into 1.5–2.5 s quick-cut montage beats as pressure builds) -> apex pressure + brief stillness/beat drop -> unforgettable 60–75% hero visual reversal/climax -> resonant closing frame that echoes and transforms the opening motif (held ~1 s with gentle ambient motion). "
+            "NEVER cut a medium/long video into 20+ identical 6-second metronome rows: "
+            "for short videos (<= 45 s), design 5–8 dynamically timed shots (varying 1.5–5 s); "
+            "for medium/long videos (60–180 s or full-song length), structure into 6–10 dramatic Acts/Chapters (幕), each stating its time span, internal 2–4 s beat progression, hero visual transformation, camera & transition, and crisp narration/breathing beats.\n"
+            "3) DIRECTOR-GRADE CHOREOGRAPHY, CAMERA & TRANSITIONS (built for Remotion/SVG/layered animation): "
+            "In every shot/act specify: (a) foreground/midground/background composition, dramatic color-temperature/lighting contrast (e.g., oppressive cold shadow vs warm open light), and expressive animation physics (scale exaggeration, squash-and-stretch, shape morphing, silhouette shatter/dissolution, parallax); "
+            "(b) cinematic camera framing & movement (extreme close-up <-> sudden wide pullback, low-angle loom <-> open horizon, dolly push-through) and explicit creative transitions between beats (match cut, graphic morph, doorway/pupil pass-through, foreground wipe, light wash — never vague '镜头切换'); "
+            "(c) bold, iconic, renderable visual staging instead of fragile microscopic realistic hand gestures that look stiff in vector/layered animation.\n"
+            "4) SETTINGS, STYLE & JIZURA DISCIPLINE: "
+            "Follow visual-style and reference priority rules: explicit user visual requirements > preset > invented details. "
+            "Honor 风格特征, 配色, 关键技法, 验收 and 动画编排 when supplied; never design pure kinetic text on plain dark backgrounds or static title cards. "
+            "When 烧录中文字幕 is enabled in settings, DO NOT ask for flashy on-screen text animations or giant floating highlight words — keep on-screen text minimal and devote the screen to animated storytelling. "
+            "When 分屏混搭 or PC JIZURA is enabled, specify concrete moments/acts where the animated story half and the synchronized JIZURA kinetic motion half physically respond to each other (e.g., pressure-montage pulses, climax shadow-shatter burst on the beat) rather than a generic footnote. "
+            "配色与外观偏好 changes appearance only, not techniques. Respect the selected recipe: footage keeps its original subject; storybook animations use layered motion over unified illustrations. If a required rendering capability is unavailable, state the limitation instead of silently promising it. "
+            "When updating a previously enhanced draft, retain content and user edits but reconcile obsolete generated visual details and timing with current settings. Reference attachments are not automatically footage to insert; if only names are provided, leave visual extraction to the maker. Style never changes recipe, frame, duration, voice, subtitle switch, or music. "
+            "When 抖音爆款优化 is enabled in the settings: optimize for high completion with animation-first storytelling — hook visually within 0–3 s using the chosen animated hook pattern (never open with '大家好' or a bare text card), tighten pacing to one animated visual beat every 2-4 seconds (with faster 1.5–2.5 s escalations where tension rises), write crisp colloquial spoken lines (<= 14 Chinese chars per sentence), respect the 9:16 Douyin UI safe zone (keep focal characters and subtitles clear of right-side buttons and bottom bar), restrain on-screen text effects whenever subtitles are enabled, close with a cohesive animated payoff scene plus a light natural engagement cue, and include a clean 6–10 character animated cover title and high-contrast cover framing.\n"
+            "5) OUTPUT FORMAT & LENGTH BUDGET: "
+            "Organize cleanly with concise plain-text headings: 【核心创意与视觉母题】, 【美术与光影反差】, 【动态分镜与转场编排】, 【高潮名场面与收尾回扣】, 【动画封面建议】. "
+            f"Keep the total response comfortably under {limit - 200} characters so EVERY section (including the ending and cover title) finishes cleanly without ever being cut off."
         )
     else:
         task = (

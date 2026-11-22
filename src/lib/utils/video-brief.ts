@@ -19,6 +19,8 @@ export type VideoRecipeKey = 'explainer' | 'story' | 'split-jizura' | 'data' | '
 export type VideoFrameKey = '16:9' | '9:16' | '1:1';
 /** Opening 3-second visual hook pattern for Douyin optimization. */
 export type VideoHookKey = 'auto' | 'reversal' | 'pain' | 'result' | 'list';
+/** Directorial animation choreography & storytelling strategy (for both enhancement and maker). */
+export type VideoCreativeKey = 'auto' | 'metaphor' | 'contrast' | 'montage' | 'oneshot';
 /** Split-screen direction for cartoon + JIZURA hybrid videos. */
 export type SplitLayoutKey = 'auto' | 'tb' | 'lr';
 /** Home PC JIZURA visual style (--style in jizura_mv.py; 'auto' lets --theme / omakase choose). */
@@ -126,32 +128,76 @@ export const VIDEO_HOOKS: { key: VideoHookKey; label: string; sub: string; guide
 	{
 		key: 'auto',
 		label: '自动匹配',
-		sub: '按主题选最强动画开场',
-		guide: '前 3 秒按题材直接切入最抓眼的动画场景（动作冲突、反差画面或悬念特写），第 0.5 秒画面立刻动起来'
+		sub: '按主题选最强高概念开场',
+		guide: '前 3 秒直接切入最有视觉奇观或情绪张力的动画意象（夸张尺度反差、超现实隐喻或高能冲突），第 0.5 秒画面立刻动起来'
 	},
 	{
 		key: 'reversal',
 		label: '反差反转',
-		sub: '画面一秒制造反差冲突',
-		guide: '前 3 秒用强烈的正反动画画面对比或出人意料的卡通小剧场破冰，用视觉反差留住观众而非靠大字喊口号'
+		sub: '一秒制造强烈视觉反差',
+		guide: '前 3 秒用极强的正反动画画面对比（如巨大脑内暗影瞬间坍缩成巴掌大纸团）破冰，用视觉反差留住观众而非靠大字喊口号'
 	},
 	{
 		key: 'pain',
 		label: '情景代入',
-		sub: '卡通演活真实痛点瞬间',
-		guide: '前 3 秒用贴近生活的卡通角色与具体场景直接演活观众共鸣瞬间，紧接用动画演示转折与解法'
+		sub: '动画意象直击共鸣瞬间',
+		guide: '前 3 秒用高共鸣生活瞬间叠加超现实心理可视化直接击中痛点，紧接用创意变形转场展开转折与解法'
 	},
 	{
 		key: 'result',
 		label: '高能前置',
-		sub: '先放最炸动画高潮瞬间',
-		guide: '第 1 秒直接抛最有视觉冲击力的动画高潮帧或悬念画面，再按节奏展开前因后果'
+		sub: '先抛全片最炸动画名场面',
+		guide: '第 1 秒直接抛最有视觉冲击力的动画高潮帧或奇观隐喻，再以变速节奏层层揭晓前因与反转'
 	},
 	{
 		key: 'list',
 		label: '视觉清单',
-		sub: '逐格演完 3 个对比场景',
-		guide: '前 3 秒先预告核心对比看点，再用逐格动画场景与道具演变依次演完每个要点，越往后越精彩'
+		sub: '用同一母题串起 3 幕演进',
+		guide: '前 3 秒先抛出贯穿全片的视觉母题与核心悬念，再用递进式动画场景与道具变形依次演完每个要点，越往后越惊艳'
+	}
+];
+
+export const VIDEO_CREATIVES: {
+	key: VideoCreativeKey;
+	label: string;
+	sub: string;
+	short: string;
+	guide: string;
+}[] = [
+	{
+		key: 'auto',
+		label: '智能导演',
+		sub: '按题材自动定隐喻、变速与转场',
+		short: '自动构思核心视觉隐喻、变速节奏与创意匹配转场，忌平淡流水账',
+		guide: '按题材自由组合核心视觉隐喻、正反世界反差、变速快切与匹配变形转场；严禁把一件琐碎日常平摊成等长流水账'
+	},
+	{
+		key: 'metaphor',
+		label: '视觉隐喻',
+		sub: '把抽象情绪/道理化成动画奇观',
+		short: '以超现实视觉隐喻贯穿全片（如尺度夸张、影子怪兽坍缩、意象变形），忌写实流水账',
+		guide: '必须设计只有动画才演得出的核心视觉隐喻（如脑内聚光灯把小石子投射成百米巨兽阴影、一碰现实阳光便泄气缩成纸偶），用强轮廓、大光影反差和形态变形外化内心或原理'
+	},
+	{
+		key: 'contrast',
+		label: '反差双世界',
+		sub: '想象与现实 / 误区与真相强对撞',
+		short: '冷暖色温与尺度极强对撞（如压抑暗影脑补世界 vs 轻盈通透现实），用破壁转场反转',
+		guide: '建立两套视觉反差极强的世界（压抑冷暗/夸张扭曲的脑补或误区态 vs 暖光开阔/轻盈松弛的真相态），通过多次拉扯与高潮破壁一举反转情绪'
+	},
+	{
+		key: 'montage',
+		label: '多幕共鸣',
+		sub: '同一视觉母题串起 2–3 个高共鸣切面',
+		short: '用同一贯穿视觉母题无缝串联 2–3 个直击人心的生活切面，节奏递进收束',
+		guide: '拒绝死磕一件平淡小事撑满全片：提炼 2–3 个高度共鸣的真实生活切面，用同一个标志性视觉母题（如同一束光、同一只变形纸怪或同一枚跳动红点）无缝串接并层层升华'
+	},
+	{
+		key: 'oneshot',
+		label: '一镜变形',
+		sub: '匹配剪辑与图形变形丝滑穿梭',
+		short: '全程匹配剪辑、图形变形与穿门/穿镜穿梭，镜头如流体连贯流动，零生硬硬切',
+		guide: '把全片编排为流动的视觉长卷：镜头通过物体变形（Morph）、形状匹配剪辑（Match Cut）、穿门/穿瞳孔/前景擦除无缝切入下一幕，让每次转场本身成为惊喜'
 	}
 ];
 
@@ -195,6 +241,7 @@ export const DOUYIN_TEMPLATES: DouyinTemplate[] = [
 			kind: 'normal',
 			douyin: true,
 			hook: 'pain',
+			creative: 'metaphor',
 			frame: '9:16',
 			seconds: 45,
 			recipe: 'explainer',
@@ -209,11 +256,12 @@ export const DOUYIN_TEMPLATES: DouyinTemplate[] = [
 		label: '分屏动画×JIZURA',
 		badge: 'PC特色',
 		sub: '9:16 · 30秒 · 上下分屏',
-		sample: '30 秒上下分屏动画短片：上半屏卡通动画演活职场反常识瞬间，下半屏联动家里电脑 JIZURA 潮酷动效卡拍呼应',
+		sample: '30 秒上下分屏动画短片：上半屏用夸张视觉隐喻演活职场反常识反转，下半屏联动家里电脑 JIZURA 潮酷动效卡拍呼应',
 		patch: {
 			kind: 'normal',
 			douyin: true,
 			hook: 'reversal',
+			creative: 'contrast',
 			frame: '9:16',
 			seconds: 30,
 			recipe: 'split-jizura',
@@ -231,11 +279,12 @@ export const DOUYIN_TEMPLATES: DouyinTemplate[] = [
 		label: '漫格避坑',
 		badge: '高互动',
 		sub: '9:16 · 30秒 · 潮酷漫格',
-		sample: '30 秒波普漫画风避坑动画：用卡通分格正反角色对比演活 3 个日常踩坑习惯，节奏明快有趣',
+		sample: '30 秒波普漫画风避坑动画：用卡通分格正反世界强对比演活 3 个日常踩坑习惯，节奏明快有趣',
 		patch: {
 			kind: 'normal',
 			douyin: true,
 			hook: 'reversal',
+			creative: 'contrast',
 			frame: '9:16',
 			seconds: 30,
 			recipe: 'explainer',
@@ -250,11 +299,12 @@ export const DOUYIN_TEMPLATES: DouyinTemplate[] = [
 		label: '国潮叙事',
 		badge: '高完播',
 		sub: '9:16 · 60秒 · 国潮插画',
-		sample: '60 秒国潮插画动画讲述一个跌宕起伏的历史典故：先抛悬念高潮画面，山水云雾与人物剪影层层推进',
+		sample: '60 秒国潮插画动画讲述一个跌宕起伏的历史典故：先抛悬念高潮名场面，山水云雾与人物剪影层层推进',
 		patch: {
 			kind: 'normal',
 			douyin: true,
 			hook: 'result',
+			creative: 'metaphor',
 			frame: '9:16',
 			seconds: 60,
 			recipe: 'story',
@@ -270,11 +320,12 @@ export const DOUYIN_TEMPLATES: DouyinTemplate[] = [
 		label: '贴纸科普',
 		badge: '涨粉',
 		sub: '9:16 · 60秒 · 贴纸大画布',
-		sample: '60 秒贴纸大画布科普动画：一镜到底用可视化道具与微缩动作拆解日常现象背后的科学原理',
+		sample: '60 秒贴纸大画布科普动画：一镜到底用可视化道具与微缩机关拆解日常现象背后的科学原理',
 		patch: {
 			kind: 'normal',
 			douyin: true,
 			hook: 'list',
+			creative: 'oneshot',
 			frame: '9:16',
 			seconds: 60,
 			recipe: 'explainer',
@@ -289,11 +340,12 @@ export const DOUYIN_TEMPLATES: DouyinTemplate[] = [
 		label: '治愈绘本',
 		badge: '高转发',
 		sub: '9:16 · 30秒 · 水彩绘本',
-		sample: '30 秒水彩绘本治愈动画：暮色窗景、晃尾巴小橘猫与暖光微风的温柔日常，画面细腻呼应字幕情绪',
+		sample: '30 秒水彩绘本治愈动画：脑海里把小担忧投射成遮天蔽日的巨兽影子，阳光一照“啵”地缩成掌心暖光纸偶，温柔治愈',
 		patch: {
 			kind: 'normal',
 			douyin: true,
-			hook: 'auto',
+			hook: 'reversal',
+			creative: 'metaphor',
 			frame: '9:16',
 			seconds: 30,
 			recipe: 'story',
@@ -358,11 +410,12 @@ export const MV_LYRICS_MAX = 4000;
 export const publishLines = (place: VideoPlace) => [
 	'',
 	'## 发布标准（默认要求，每个视频都要做到）',
-	'- 拒绝纯文字动效与简陋画面：无论普通视频还是 MV，都要做贴近字幕或歌词意境的丰富动画（具象角色、场景、道具、光影与镜头运动），绝不做纯黑底飞大字或单图干放大',
+	'- 拒绝纯文字动效与简陋画面：无论普通视频还是 MV，都要做贴近字幕或歌词意境的丰富动画（具象角色、视觉隐喻、场景、道具、光影与镜头运动），绝不做纯黑底飞大字或单图干放大',
+	'- 动画导演级创意与转场：用只有动画才演得出的视觉隐喻、夸张尺度反差与冷暖光影外化主题，严禁平淡写实流水账；幕间优先使用匹配剪辑（Match Cut）、图形变形（Morph）、前景遮挡擦除或穿门/穿镜转场，少用生硬硬切',
 	'- 第 0.5 秒内就要进入有吸引力的动态画面，不要黑场、静止片名卡或静态干等',
-	'- 片头片尾即使只有音乐没有人声，动画画面也要持续流动（镜头推移、角色/天气/光影微动、随节拍切镜）：任何画面静止不超过 2 秒，同一构图停留不超过 4 秒',
-	'- 动画要贴内容：动作直接演绎画面在讲的事和情绪（讲故事有角色表演、讲对比有分格反差、讲流程有物件运转，抒情缓高潮快），不做无意义的整屏乱晃',
-	'- 全程连续、节奏跟着音乐或旁白走，约 60–75% 处放最有冲击力的动画高潮镜头；结尾 1–2 秒内收在一个仍有微动的完整构图上',
+	'- 变速节奏与呼吸感：片头片尾即使只有音乐没有人声，动画画面也要持续流动（任何画面静止不超过 2 秒，同一构图停留不超过 4 秒）；紧张或堆叠处可 1.5–3 秒快切，反转或高潮前留短暂顿挫，严禁整片机械均分等长镜头',
+	'- 动画要贴内容：动作直接演绎画面在讲的事和情绪（讲故事有角色大姿态与意象变形、讲对比有双世界反差、讲流程有物件运转，抒情缓高潮快），不做无意义的整屏乱晃或生硬碎微动作',
+	'- 全程连续、节奏跟着音乐或旁白走，约 60–75% 处放最有冲击力的动画高潮镜头；结尾 1–2 秒内回扣开场意象并收在一个仍有微动的完整构图上',
 	place === 'server'
 		? '- 封面：交付前按技能 video-studio「封面」一节运行 scripts/cover.py all，用 gpt-image 依据首帧画好动画风封面并放进视频第 0 帧'
 		: '- 封面：交付前按技能 video-studio「封面」一节，用 gpt-image 依据首帧画好动画风封面并放进视频第 0 帧（pc-video deliver 会自动做；家里电脑不在线、改在服务器做时运行 scripts/cover.py all）'
@@ -379,6 +432,22 @@ export const jizuraSpecText = (themeKey: MvTheme, styleKey: JizuraStyleKey): str
 export const resolveSplitDirection = (layout: SplitLayoutKey, frame: VideoFrameKey): 'tb' | 'lr' => {
 	if (layout === 'tb' || layout === 'lr') return layout;
 	return frame === '9:16' ? 'tb' : 'lr';
+};
+
+/** Directorial animation choreography line(s) for both 提示词增强 and the final maker brief. */
+export const creativeLines = (
+	opts: Pick<VideoBriefOptions, 'creative' | 'recipe'>,
+	forMaker = false
+): string[] => {
+	if (opts.recipe === 'footage') return [];
+	const mode = VIDEO_CREATIVES.find((c) => c.key === opts.creative) ?? VIDEO_CREATIVES[0];
+	if (!forMaker) {
+		return [`- 动画编排：${mode.label}（${mode.short}）`];
+	}
+	return [
+		`- 动画编排（${mode.label}）：${mode.guide}`,
+		'- 镜头与转场编排：景别在极近特写、中景与开阔全景间拉开反差；用强轮廓、大光影变化与图形变形打造适合 Remotion/SVG 分层动画演活的标志性镜头，幕间以匹配剪辑、变形或前景遮挡衔接'
+	];
 };
 
 /** 抖音爆款规格: animation-first short-video rules (never pushing pure-text kinetic walls;
@@ -461,6 +530,7 @@ export type VideoBriefOptions = {
 	subtitles: boolean;
 	douyin: boolean;
 	hook: VideoHookKey;
+	creative?: VideoCreativeKey;
 	splitLayout: SplitLayoutKey;
 	jizuraStyle: JizuraStyleKey;
 	jizuraAccent: boolean;
@@ -502,6 +572,7 @@ export const DEFAULT_VIDEO_SETTINGS: VideoSettings = {
 	subtitles: true,
 	douyin: true,
 	hook: 'auto',
+	creative: 'auto',
 	splitLayout: 'auto',
 	jizuraStyle: 'auto',
 	jizuraAccent: true,
@@ -551,6 +622,11 @@ export const normalizeVideoSettings = (value: unknown): VideoSettings => {
 			raw.hook,
 			VIDEO_HOOKS.map((h) => h.key),
 			DEFAULT_VIDEO_SETTINGS.hook
+		),
+		creative: pick(
+			raw.creative,
+			VIDEO_CREATIVES.map((c) => c.key),
+			DEFAULT_VIDEO_SETTINGS.creative ?? 'auto'
 		),
 		splitLayout: pick(
 			raw.splitLayout,
@@ -709,6 +785,7 @@ const requirementLines = (opts: Omit<VideoBriefOptions, 'idea'>, forMaker = fals
 			: `- 时长：约 ${lengthLabel(opts.seconds)}`,
 		`- 配音：${voice && voice.key ? `中文配音，${voice.label}（edge-tts ${voice.key}）` : '不要配音'}`,
 		`- 字幕：${opts.subtitles ? '烧录中文字幕（已有字幕，画面不必凸显文字动效）' : '不要字幕'}`,
+		...creativeLines(opts, forMaker),
 		...normalJizuraLines(opts, forMaker)
 	];
 };

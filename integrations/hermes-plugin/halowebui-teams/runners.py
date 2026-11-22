@@ -94,9 +94,9 @@ SPECS: tuple[RunnerSpec, ...] = (
                script="officlaude-run.sh", command="officlaude", probe="claude_official", max_turns=True),
     RunnerSpec("codex", "codex", "Codex", "OpenAI Codex CLI：代码任务的另一条线，额度用完即失败",
                script="codex-run.sh", command="codex", probe="codex_login"),
-    RunnerSpec("agy", "agy", "Antigravity", "Antigravity CLI：前端 / UI / UX / 视觉设计的首选；没有工具记录",
+    RunnerSpec("agy", "agy", "Antigravity", "Antigravity CLI（Hermes 网关）：offiagy 不可用时前端 / UI / UX / 视觉设计的兜底；没有工具记录",
                script="agy-run.sh", command="agy", probe="agy_token", answer_sets_id=True),
-    RunnerSpec("offiagy", "offiagy", "Antigravity", "Antigravity CLI（Google 账号官方登录，不走网关）；仅点名使用，登录失效后手动续跑",
+    RunnerSpec("offiagy", "offiagy", "Antigravity", "Antigravity CLI（Google 账号官方登录，不走网关）：前端 / UI / UX / 视觉设计的首选，不可用时回退 agy；点名使用时不回退",
                script="offiagy-run.sh", command="offiagy", probe="agy_official", answer_sets_id=True),
     RunnerSpec("hermes", "Hermes", "Hermes", "Hermes 代理：联网搜索、调研、写作、汇总；永远是最后的兜底",
                native=True, probe="hermes"),
@@ -106,15 +106,18 @@ NAMES = tuple(BY_NAME)
 EXTERNAL = tuple(spec.name for spec in SPECS if not spec.native)
 assert EXTERNAL == RUNNER_EXECUTORS, "common.RUNNER_EXECUTORS and runners.SPECS must list the same runners"
 DEFAULT_ORDER = ("reclaude", "cchclaude", "anyclaude", "codex", "agy", "hermes")
-# Runners on the user's own official account: only a member the user named runs on them, and they
-# never join the fallback chain (as a start or as a step after another runner).
+# Runners on the user's own official account: they never join the fallback chain as a step after
+# another runner, and a member the user named one for has no fallback.
 NAMED_ONLY = ("officlaude", "offiagy")
+# ...except a kind default on one: an automatic choice there falls back onto the ordinary chain
+# from here (the user wants offiagy first for UI work, agy when it cannot run; 2026-11-22).
+AUTO_THEN = {"offiagy": "agy"}
 
 # Task kinds the lead labels every member with, and the runner each starts from.
 KINDS: dict[str, dict] = {
     "code": {"label": "后端 / 通用代码", "default": "cchclaude",
              "hint": "后端、服务端、脚本、接口、数据库、测试、代码评审、修 bug 等通用代码任务"},
-    "ui": {"label": "前端 / UI / UX / 视觉", "default": "agy",
+    "ui": {"label": "前端 / UI / UX / 视觉", "default": "offiagy",
            "hint": "前端页面、组件、交互、样式、视觉设计、UX 走查"},
     "complex": {"label": "复杂任务", "default": "reclaude",
                 "hint": "深度重构、跨多个项目修改、大规模架构调整、需要很强自主执行能力的长任务"},
@@ -211,10 +214,12 @@ def normalize_kind(kind: Any) -> str:
     return value if value in KINDS else ""
 
 
-def chain_from(start: str) -> list[str]:
-    """``start`` and every runner after it in the fallback order (Hermes last)."""
+def chain_from(start: str, *, auto: bool = False) -> list[str]:
+    """``start`` and every runner after it in the fallback order (Hermes last). ``auto``: nobody
+    named ``start`` (the kind's default), so an official-account start falls back too."""
     if start in NAMED_ONLY:
-        return [start]
+        then = AUTO_THEN.get(start) if auto else None
+        return [start, *chain_from(then)] if then else [start]
     order = list(fallback_order())
     if start not in order:
         return ["hermes"] if start != "hermes" else ["hermes"]
@@ -567,10 +572,11 @@ def forget(name: Optional[str] = None) -> None:
 
 # --- selection ----------------------------------------------------------------------------------
 
-def select(start: str, availability: Optional[dict] = None, *, skip: tuple = ()) -> dict:
-    """Walk the fallback chain from *start*: {executor, start, chain, skipped:[{name, reason}]}.
-    ``executor`` is None when nothing in the chain can run."""
-    chain = chain_from(start if start in BY_NAME else "hermes")
+def select(start: str, availability: Optional[dict] = None, *, skip: tuple = (), auto: bool = False) -> dict:
+    """Walk the fallback chain from *start* (``auto``: see ``chain_from``):
+    {executor, start, chain, skipped:[{name, reason}]}. ``executor`` is None when nothing in the
+    chain can run."""
+    chain = chain_from(start if start in BY_NAME else "hermes", auto=auto)
     avail = availability if availability is not None else check(chain)
     skipped = []
     for name in chain:
@@ -585,10 +591,10 @@ def select(start: str, availability: Optional[dict] = None, *, skip: tuple = ())
     return {"executor": None, "start": start, "chain": chain, "skipped": skipped}
 
 
-def select_after(start: str, current: str, availability: Optional[dict] = None) -> dict:
+def select_after(start: str, current: str, availability: Optional[dict] = None, *, auto: bool = False) -> dict:
     """The next available runner *after* ``current`` on the chain that starts at ``start`` (a
     fallback only moves forward). Same shape as ``select``."""
-    chain = chain_from(start if start in BY_NAME else current)
+    chain = chain_from(start if start in BY_NAME else current, auto=auto)
     rest = chain[chain.index(current) + 1:] if current in chain else chain_from(current)[1:]
     if not rest:
         return {"executor": None, "start": start, "chain": chain, "skipped": []}
@@ -615,7 +621,7 @@ def recommend(kind: str, availability: Optional[dict] = None) -> dict:
     """Default runner for a task kind and what will actually run it now."""
     kind = normalize_kind(kind) or DEFAULT_KIND
     default = kind_default(kind)
-    picked = select(default, availability)
+    picked = select(default, availability, auto=True)
     return {"kind": kind, "default": default, **picked}
 
 

@@ -70,6 +70,13 @@ HTML_VISUAL_AGY_HTML_DEFAULT_TIMEOUT_SECONDS = 300.0
 HTML_VISUAL_AGY_HTML_MAX_TIMEOUT_SECONDS = 300.0
 HTML_VISUAL_AGY_HTML_MAX_OUTPUT_BYTES = 64 * 1024
 HTML_VISUAL_AGY_HTML_MAX_INPUT_CHARS = 24 * 1024
+# The card is first asked of the Google account sign-in (what the host calls
+# `offiagy`) with this model; any failure falls back to the usual AGY path
+# (Hermes gateway or the CLI's own default). Empty disables the preference.
+# A model id from `offiagy models`; it gets half the budget, the fallback the rest.
+HTML_VISUAL_AGY_PREFERRED_MODEL_ENV = "HALOWEBUI_AGY_PREFERRED_MODEL"
+HTML_VISUAL_AGY_PREFERRED_DEFAULT_MODEL = "gemini-4-argon-high"
+_AGY_MODEL_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}")
 
 _AGY_ENV_ALLOWLIST = (
     "PATH",
@@ -669,7 +676,10 @@ async def _run_agy_process(
     *,
     output_limit: int = HTML_VISUAL_AGY_MAX_OUTPUT_BYTES,
     timeout_seconds: float | None = None,
+    oauth_model: str | None = None,
 ) -> tuple[bytes, int]:
+    """Run the AGY CLI once. *oauth_model*: the account sign-in with that model,
+    whatever the host's API-key switch says (the host's `offiagy`)."""
     timeout = timeout_seconds if timeout_seconds is not None else _agy_timeout_seconds()
     await _acquire_agy_slot(timeout)
 
@@ -678,9 +688,11 @@ async def _run_agy_process(
         try:
             subprocess_env = _agy_subprocess_env(workdir)
             argv = list(command)
-            gateway = _agy_gateway_config()
+            gateway = None if oauth_model else _agy_gateway_config()
             if gateway is None:
                 _stage_agy_oauth_token(workdir)
+                if oauth_model:
+                    argv[1:1] = ["--model", oauth_model]
             else:
                 _stage_agy_gateway_settings(workdir)
                 subprocess_env["GEMINI_API_KEY"] = gateway["api_key"]
@@ -1897,6 +1909,8 @@ def _record_agy_html_status(
     exit_code: int | None = None,
     output_bytes: int | None = None,
     html_fragment: str | None = None,
+    backend: str | None = None,
+    fallback_reason: str | None = None,
 ) -> None:
     record: dict[str, Any] = {
         "attempted": True,
@@ -1905,6 +1919,10 @@ def _record_agy_html_status(
     }
     if reason:
         record["reason"] = reason
+    if backend:
+        record["backend"] = backend
+    if fallback_reason:
+        record["fallback_reason"] = fallback_reason
     if exit_code is not None:
         record["exit_code"] = exit_code
     if output_bytes is not None:
@@ -1915,12 +1933,14 @@ def _record_agy_html_status(
 
     log_method = log.info if status == "success" else log.warning
     log_method(
-        "HTML visual AGY answer design status=%s duration_ms=%s reason=%s exit_code=%s output_bytes=%s",
+        "HTML visual AGY answer design status=%s duration_ms=%s reason=%s exit_code=%s output_bytes=%s backend=%s fallback_reason=%s",
         status,
         record["duration_ms"],
         reason or "",
         exit_code if exit_code is not None else "",
         output_bytes if output_bytes is not None else "",
+        backend or "",
+        fallback_reason or "",
     )
 
 
@@ -1973,111 +1993,138 @@ async def design_html_visual_artifact_with_agy(
         _record_agy_html_status(metadata, "invalid", started_at, reason="empty_command")
         return content
 
-    try:
-        prompt = _build_agy_html_request_prompt(content)
-        workdir_parent = (
-            os.environ.get(
-                HTML_VISUAL_AGY_WORKDIR_ENV, HTML_VISUAL_AGY_DEFAULT_WORKDIR
-            ).strip()
-            or HTML_VISUAL_AGY_DEFAULT_WORKDIR
+    prompt = _build_agy_html_request_prompt(content)
+    workdir_parent = (
+        os.environ.get(HTML_VISUAL_AGY_WORKDIR_ENV, HTML_VISUAL_AGY_DEFAULT_WORKDIR).strip()
+        or HTML_VISUAL_AGY_DEFAULT_WORKDIR
+    )
+    timeout_seconds = _agy_timeout_seconds(
+        HTML_VISUAL_AGY_HTML_TIMEOUT_ENV,
+        HTML_VISUAL_AGY_HTML_DEFAULT_TIMEOUT_SECONDS,
+        HTML_VISUAL_AGY_HTML_MAX_TIMEOUT_SECONDS,
+    )
+
+    fallback_reason = None
+    remaining = timeout_seconds
+    preferred_model = _agy_preferred_model()
+    if preferred_model:
+        outcome = await _attempt_agy_html(
+            lambda: _run_agy_process(
+                command,
+                prompt,
+                workdir_parent,
+                output_limit=HTML_VISUAL_AGY_HTML_MAX_OUTPUT_BYTES,
+                timeout_seconds=timeout_seconds / 2,
+                oauth_model=preferred_model,
+            )
         )
-        timeout_seconds = _agy_timeout_seconds(
-            HTML_VISUAL_AGY_HTML_TIMEOUT_ENV,
-            HTML_VISUAL_AGY_HTML_DEFAULT_TIMEOUT_SECONDS,
-            HTML_VISUAL_AGY_HTML_MAX_TIMEOUT_SECONDS,
+        if outcome["status"] == "success":
+            return _finish_agy_html(metadata, content, started_at, outcome, f"offiagy:{preferred_model}")
+        fallback_reason = f"{outcome['status']}:{outcome.get('reason', '')}"
+        log.warning(
+            "HTML visual AGY preferred model=%s failed status=%s reason=%s exit_code=%s; falling back",
+            preferred_model,
+            outcome["status"],
+            outcome.get("reason", ""),
+            outcome.get("exit_code", ""),
         )
+        remaining = timeout_seconds - (time.monotonic() - started_at)
+
+    async def _usual_backend() -> tuple[bytes, int]:
         gateway = _agy_gateway_config()
         if gateway is not None:
             stdout = await _request_agy_gateway(
                 gateway,
                 prompt,
                 output_limit=HTML_VISUAL_AGY_HTML_MAX_OUTPUT_BYTES,
-                timeout_seconds=timeout_seconds,
+                timeout_seconds=remaining,
             )
-            return_code = 0
-        else:
-            stdout, return_code = await _run_agy_process(
-                command,
-                prompt,
-                workdir_parent,
-                output_limit=HTML_VISUAL_AGY_HTML_MAX_OUTPUT_BYTES,
-                timeout_seconds=timeout_seconds,
-            )
-    except FileNotFoundError:
-        _record_agy_html_status(metadata, "missing", started_at, reason="not_found")
-        return content
+            return stdout, 0
+        return await _run_agy_process(
+            command,
+            prompt,
+            workdir_parent,
+            output_limit=HTML_VISUAL_AGY_HTML_MAX_OUTPUT_BYTES,
+            timeout_seconds=remaining,
+        )
+
+    outcome = await _attempt_agy_html(_usual_backend)
+    return _finish_agy_html(
+        metadata, content, started_at, outcome, "agy", fallback_reason=fallback_reason
+    )
+
+
+def _agy_preferred_model() -> str | None:
+    """The account sign-in model tried first, or None (no OAuth token configured,
+    preference disabled, or a value that is not a plain model id)."""
+    if not os.environ.get(HTML_VISUAL_AGY_OAUTH_TOKEN_FILE_ENV, "").strip():
+        return None
+    model = os.environ.get(
+        HTML_VISUAL_AGY_PREFERRED_MODEL_ENV, HTML_VISUAL_AGY_PREFERRED_DEFAULT_MODEL
+    ).strip()
+    if not model:
+        return None
+    if not _AGY_MODEL_ID_RE.fullmatch(model):
+        log.warning("HTML visual AGY preferred model ignored: not a model id")
+        return None
+    return model
+
+
+async def _attempt_agy_html(run) -> dict[str, Any]:
+    """One AGY backend run (*run*: a coroutine factory returning stdout, exit code)
+    as an outcome: status, and reason / exit_code / output_bytes / html."""
+    try:
+        stdout, return_code = await run()
     except asyncio.CancelledError:
         raise
+    except FileNotFoundError:
+        return {"status": "missing", "reason": "not_found"}
     except _AgyBusyError:
-        _record_agy_html_status(metadata, "unavailable", started_at, reason="busy")
-        return content
+        return {"status": "unavailable", "reason": "busy"}
     except _AgyAuthenticationRequiredError:
-        _record_agy_html_status(
-            metadata, "failed", started_at, reason="authentication_required"
-        )
-        return content
+        return {"status": "failed", "reason": "authentication_required"}
     except _AgyOAuthTokenStagingError:
-        _record_agy_html_status(
-            metadata, "failed", started_at, reason="oauth_token_file_unavailable"
-        )
-        return content
+        return {"status": "failed", "reason": "oauth_token_file_unavailable"}
     except _AgyGatewayConfigError:
-        _record_agy_html_status(
-            metadata, "failed", started_at, reason="gateway_config_unavailable"
-        )
-        return content
+        return {"status": "failed", "reason": "gateway_config_unavailable"}
     except asyncio.TimeoutError:
-        _record_agy_html_status(metadata, "timeout", started_at)
-        return content
+        return {"status": "timeout"}
     except _AgyGatewayHttpError as error:
-        _record_agy_html_status(
-            metadata, "failed", started_at, reason=f"http_{error.status}"
-        )
-        return content
+        return {"status": "failed", "reason": f"http_{error.status}"}
     except _AgyOutputLimitError as error:
-        _record_agy_html_status(
-            metadata,
-            "invalid",
-            started_at,
-            reason=f"{error.stream_name}_too_large",
-        )
-        return content
+        return {"status": "invalid", "reason": f"{error.stream_name}_too_large"}
     except Exception as error:
-        _record_agy_html_status(
-            metadata, "failed", started_at, reason=type(error).__name__
-        )
-        return content
+        return {"status": "failed", "reason": type(error).__name__}
 
+    produced = {"exit_code": return_code, "output_bytes": len(stdout)}
     if return_code != 0:
-        _record_agy_html_status(
-            metadata,
-            "failed",
-            started_at,
-            reason="nonzero_exit",
-            exit_code=return_code,
-            output_bytes=len(stdout),
-        )
-        return content
-
+        return {"status": "failed", "reason": "nonzero_exit", **produced}
     fragment, extraction_error = _extract_agy_html_fragment(stdout)
     if fragment is None:
         status = "empty" if extraction_error == "empty_output" else "invalid"
-        _record_agy_html_status(
-            metadata,
-            status,
-            started_at,
-            reason=extraction_error,
-            exit_code=return_code,
-            output_bytes=len(stdout),
-        )
-        return content
+        return {"status": status, "reason": extraction_error, **produced}
+    return {"status": "success", "html": fragment, **produced}
 
+
+def _finish_agy_html(
+    metadata: dict[str, Any],
+    content: str,
+    started_at: float,
+    outcome: dict[str, Any],
+    backend: str,
+    *,
+    fallback_reason: str | None = None,
+) -> str:
     _record_agy_html_status(
         metadata,
-        "success",
+        outcome["status"],
         started_at,
-        exit_code=return_code,
-        output_bytes=len(stdout),
-        html_fragment=fragment,
+        reason=outcome.get("reason"),
+        exit_code=outcome.get("exit_code"),
+        output_bytes=outcome.get("output_bytes"),
+        html_fragment=outcome.get("html"),
+        backend=backend,
+        fallback_reason=fallback_reason,
     )
-    return _merge_agy_html_artifact(content, fragment)
+    fragment = outcome.get("html")
+    return _merge_agy_html_artifact(content, fragment) if fragment else content

@@ -38,7 +38,7 @@ def test_chain_starts_where_the_default_is_and_always_ends_with_hermes(pkg):
 def test_kind_defaults(pkg):
     r = pkg.runners
     assert {k: r.recommend(k)["default"] for k in ("code", "ui", "complex", "research", "writing")} == {
-        "code": "cchclaude", "ui": "agy", "complex": "reclaude", "research": "hermes", "writing": "hermes"}
+        "code": "cchclaude", "ui": "offiagy", "complex": "reclaude", "research": "hermes", "writing": "hermes"}
     assert r.normalize_kind("frontend") == "ui" and r.normalize_kind("backend") == "code"
     assert r.normalize_kind("nonsense") == ""
 
@@ -61,10 +61,33 @@ def test_backend_task_walks_the_chain(pkg, availability, down, expected):
         assert "演练不可用" in pkg.runners.fallback_reason(picked)
 
 
-def test_ui_task_goes_agy_then_hermes(pkg, availability):
-    assert pkg.runners.recommend("ui")["executor"] == "agy"
+def test_ui_task_goes_offiagy_then_agy_then_hermes(pkg, availability):
+    r = pkg.runners
+    assert r.recommend("ui")["executor"] == "offiagy"
+    assert r.recommend("ui")["chain"] == ["offiagy", "agy", "hermes"]
+    availability.down["offiagy"] = "offiagy 没有登录"
+    picked = r.recommend("ui")
+    assert picked["executor"] == "agy" and "offiagy 没有登录" in r.fallback_reason(picked)
     availability.down["agy"] = "agy 没登录"
-    assert pkg.runners.recommend("ui")["executor"] == "hermes"
+    assert r.recommend("ui")["executor"] == "hermes"
+    # automatic choice only: a member the user named offiagy for still has no fallback
+    assert r.chain_from("offiagy") == ["offiagy"] and r.select("offiagy")["executor"] is None
+    assert r.select_after("offiagy", "offiagy", auto=True)["executor"] == "hermes"
+    assert r.select_after("offiagy", "offiagy")["executor"] is None
+
+
+def test_auto_offiagy_login_failure_at_runtime_moves_to_agy(pkg, availability, bridge):
+    offiagy = pkg.reclaude.RUNNERS["offiagy"]
+    t = bridge.team([{"name": "ui-dev", "role": "前端", "kind": "ui"}])
+    assert t.task().assignee == "offiagy"
+    t.tick()
+    run_id = t.run_meta()["runner_run_id"]
+    bridge.fake.write(run_id, status="error", _root=str(offiagy.runs_root))
+    json.dump({"error": "401 Unauthorized: token expired"}, open(offiagy.runs_root / run_id / "result.json", "w"))
+    t.tick()
+    assert t.task().assignee == "agy" and t.task().status == "running"
+    snap = t.snap()
+    assert snap["chosen"] == "offiagy" and snap["trail"][-1]["fail_kind"] == "auth"
 
 
 def test_select_after_only_moves_forward(pkg, availability):
@@ -162,7 +185,7 @@ def test_plan_members_get_assistant_kind_and_runner(pkg, availability):
     assert by["backend-dev"]["assistant"]["name"] == "开发工程师" and by["backend-dev"]["kind"] == "code"
     assert by["backend-dev"]["executor"] == "cchclaude" == by["backend-dev"]["runner"]
     assert by["backend-dev"]["executor_source"] == "auto" and by["backend-dev"]["runner_note"] == ""
-    assert by["ui-dev"]["assistant"]["id"] == "15" and by["ui-dev"]["kind"] == "ui" and by["ui-dev"]["runner"] == "agy"
+    assert by["ui-dev"]["assistant"]["id"] == "15" and by["ui-dev"]["kind"] == "ui" and by["ui-dev"]["runner"] == "offiagy"
     assert by["analyst"]["assistant"] is None and by["analyst"]["runner"] == "hermes"
     assert by["refactor"]["assistant"] is None and by["refactor"]["runner"] == "reclaude"
 
@@ -371,8 +394,8 @@ def test_quota_blocked_start_moves_on(pkg, availability, bridge):
 
 def test_whole_chain_down_blocks_with_every_reason(pkg, availability, bridge):
     t = bridge.team([{"name": "ui-dev", "role": "前端", "kind": "ui"}])
-    assert t.task().assignee == "agy"
-    availability.down.update(agy="agy 没登录", hermes="Hermes 停用")
+    assert t.task().assignee == "offiagy"
+    availability.down.update(offiagy="offiagy 没有登录", agy="agy 没登录", hermes="Hermes 停用")
     t.tick()
     task = t.task()
     assert task.status == "blocked"
@@ -465,9 +488,9 @@ def test_offiagy_is_explicit_only_and_probes_the_google_sign_in(pkg, availabilit
     assert r.select("offiagy")["executor"] == "offiagy"
     for name in r.DEFAULT_ORDER:
         assert "offiagy" not in r.chain_from(name)
-    override({"order": ["agy", "offiagy", "codex"], "kinds": {"ui": "offiagy"}})
+    override({"order": ["agy", "offiagy", "codex"], "kinds": {"code": "offiagy"}})
     assert r.fallback_order() == ("agy", "codex", "hermes")
-    assert r.kind_default("ui") == "agy"
+    assert r.kind_default("code") == "cchclaude" and r.kind_default("ui") == "offiagy"
     token = tmp_path / "token"
     monkeypatch.setenv("HALO_TEAMS_AGY_TOKEN", str(token))
     state, detail, _ = r._probe_account(spec)

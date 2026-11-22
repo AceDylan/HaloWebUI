@@ -82,7 +82,7 @@
 			{@const r = runners.find((x) => x.name === name)}
 			{#if r}
 				{#if index === chain.length}
-					<li class="ml-3 mr-1.5 text-[11px] text-gray-400" aria-hidden="true">仅点名</li>
+					<li class="ml-3 mr-1.5 text-[11px] text-gray-400" aria-hidden="true">官方账号 · 不进兜底链</li>
 				{/if}
 				<li class="flex items-center">
 					<button

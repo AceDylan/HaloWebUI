@@ -34,6 +34,13 @@ from open_webui.utils.html_visual_prompt import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _no_host_agy_sign_in(monkeypatch):
+    # The live container sets the OAuth token file; tests opt in to the account sign-in.
+    monkeypatch.delenv("HALOWEBUI_AGY_OAUTH_TOKEN_FILE", raising=False)
+    monkeypatch.delenv("HALOWEBUI_AGY_PREFERRED_MODEL", raising=False)
+
+
 # A plain answer long enough to get a card. Shorter plain replies are left as
 # they are (is_brief_plain_reply), so tests of the card itself use this.
 LONG_PLAIN_RESPONSE = " ".join(["Plain response with enough detail to be worth a card."] * 5)
@@ -1063,10 +1070,16 @@ def test_agy_answer_design_reports_an_unusable_gateway_export(monkeypatch, tmp_p
     )
 
     assert result == LONG_PLAIN_RESPONSE
-    assert metadata[html_visual_prompt.HTML_VISUAL_AGY_HTML_METADATA_KEY]["reason"] == (
-        "gateway_config_unavailable"
-    )
-    assert not record.exists()
+    outcome = metadata[html_visual_prompt.HTML_VISUAL_AGY_HTML_METADATA_KEY]
+    assert outcome["reason"] == "gateway_config_unavailable"
+    # The account sign-in ran first (whatever the API-key switch says) with the preferred
+    # model; its text was not a card, so the usual path was tried and reported.
+    seen = json.loads(record.read_text())
+    assert seen["argv"] == [
+        "--model", "gemini-4-argon-high", "--sandbox", "--disable-slash-commands", "-p"]
+    assert seen["token"] is True and seen["key"] is None and seen["settings"] is None
+    assert outcome["backend"] == "agy"
+    assert outcome["fallback_reason"] == "invalid:not_a_fragment"
 
 
 def test_agy_timeout_kills_descendant_process_group(monkeypatch, tmp_path):
@@ -1790,3 +1803,93 @@ def test_agy_gateway_request_returns_only_the_answer_text():
     assert seen["path"] == "/v1beta/models/gemini-chat:generateContent"
     assert seen["key"] == "test-key"
     assert seen["body"]["contents"][0]["parts"][0]["text"] == "prompt text"
+
+
+def _preferred_setup(monkeypatch, run_agy, gateway_calls):
+    async def _gateway(gateway, prompt, **kwargs):
+        gateway_calls.append(kwargs["timeout_seconds"])
+        return _KIT_CARD.encode()
+
+    monkeypatch.setattr(html_visual_prompt, "_agy_gateway_config", lambda: _GATEWAY)
+    monkeypatch.setattr(html_visual_prompt, "_request_agy_gateway", _gateway)
+    monkeypatch.setattr(html_visual_prompt, "_run_agy_process", run_agy)
+    monkeypatch.setenv("HALOWEBUI_AGY_COMMAND", "agy")
+    monkeypatch.setenv("HALOWEBUI_AGY_OAUTH_TOKEN_FILE", "/opt/host-agy/antigravity-cli/token")
+
+
+def test_agy_answer_design_prefers_the_account_sign_in_model(monkeypatch):
+    runs, gateway_calls = [], []
+
+    async def _offiagy(command, prompt, workdir_parent, **kwargs):
+        runs.append(kwargs)
+        return _KIT_CARD.encode(), 0
+
+    _preferred_setup(monkeypatch, _offiagy, gateway_calls)
+    metadata = _metadata()
+
+    designed = asyncio.run(
+        html_visual_prompt.design_html_visual_artifact_with_agy(STRUCTURED_REPORT, metadata)
+    )
+
+    assert designed.endswith(f"````html\n{_KIT_CARD}\n````")
+    assert [(r["oauth_model"], r["timeout_seconds"]) for r in runs] == [("gemini-4-argon-high", 150.0)]
+    assert gateway_calls == []
+    record = metadata[html_visual_prompt.HTML_VISUAL_AGY_HTML_METADATA_KEY]
+    assert record["status"] == "success" and record["backend"] == "offiagy:gemini-4-argon-high"
+    assert "fallback_reason" not in record
+
+
+@pytest.mark.parametrize(
+    "failure", [(b"", 1), asyncio.TimeoutError(), html_visual_prompt._AgyAuthenticationRequiredError()]
+)
+def test_agy_answer_design_falls_back_when_the_preferred_model_fails(monkeypatch, failure):
+    gateway_calls = []
+
+    async def _offiagy(*args, **kwargs):
+        if isinstance(failure, BaseException):
+            raise failure
+        return failure
+
+    _preferred_setup(monkeypatch, _offiagy, gateway_calls)
+    metadata = _metadata()
+
+    designed = asyncio.run(
+        html_visual_prompt.design_html_visual_artifact_with_agy(STRUCTURED_REPORT, metadata)
+    )
+
+    assert designed.endswith(f"````html\n{_KIT_CARD}\n````")
+    assert len(gateway_calls) == 1 and 140.0 < gateway_calls[0] <= 300.0
+    record = metadata[html_visual_prompt.HTML_VISUAL_AGY_HTML_METADATA_KEY]
+    assert record["status"] == "success" and record["backend"] == "agy"
+    assert record["fallback_reason"].split(":")[0] in {"failed", "timeout"}
+
+
+@pytest.mark.parametrize("value", ["", "--dangerously-skip-permissions", "a b"])
+def test_agy_preferred_model_can_be_switched_off_and_must_be_a_model_id(monkeypatch, value):
+    gateway_calls = []
+
+    async def _no_cli(*args, **kwargs):
+        raise AssertionError("no preferred run expected")
+
+    _preferred_setup(monkeypatch, _no_cli, gateway_calls)
+    monkeypatch.setenv("HALOWEBUI_AGY_PREFERRED_MODEL", value)
+    metadata = _metadata()
+
+    asyncio.run(html_visual_prompt.design_html_visual_artifact_with_agy(STRUCTURED_REPORT, metadata))
+
+    assert gateway_calls == [300.0]
+    assert "fallback_reason" not in metadata[html_visual_prompt.HTML_VISUAL_AGY_HTML_METADATA_KEY]
+
+
+def test_agy_preferred_model_needs_the_account_sign_in(monkeypatch):
+    gateway_calls = []
+
+    async def _no_cli(*args, **kwargs):
+        raise AssertionError("no preferred run without an OAuth token file")
+
+    _preferred_setup(monkeypatch, _no_cli, gateway_calls)
+    monkeypatch.delenv("HALOWEBUI_AGY_OAUTH_TOKEN_FILE")
+
+    asyncio.run(html_visual_prompt.design_html_visual_artifact_with_agy(STRUCTURED_REPORT, _metadata()))
+
+    assert gateway_calls == [300.0]

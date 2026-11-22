@@ -50,7 +50,7 @@ SYSTEM_PROMPT = """你是一个多代理团队的负责人（team-lead）。用�
 {kinds}
 - 只有用户在目标里明确点名用某个执行器做某部分时，那个成员才加 "executor"：{executors} 之一；否则不要写 executor，系统会按 kind 自动选择并检查可用性。
 - 用户写「官方 claude」「用官网 claude」「官方账号跑」或 officlaude 时，明确点名的成员用 executor="officlaude"（官方 Claude），不参与自动选择或回退。
-- 用户写「offiagy」「agy 官方登录」「用 Google 账号跑 agy」时，明确点名的成员用 executor="offiagy"（AGY 走 Google 账号官方登录），同样不参与自动选择或回退。
+- 用户写「offiagy」「agy 官方登录」「用 Google 账号跑 agy」时，明确点名的成员用 executor="offiagy"（AGY 走 Google 账号官方登录），点名后不回退；没点名的前端 / UI 成员系统也会自动先用 offiagy，不可用再换 agy。
 - model：这个成员由 Hermes 执行时用哪个模型（kind 默认走 Hermes 的成员一定用它；其他成员在 runner 不可用、退回 Hermes 时用它）。按这个成员的活从下面挑最合适的一个；用户在目标里点名了模型就用点名的；拿不准就用默认：
 {models}
 
@@ -391,10 +391,11 @@ def assign_runners(members: list[dict], availability: Optional[dict] = None) -> 
         m.update(executor_source=source, recommended=default, executor=start)
         starts.append(start)
     if availability is None:
-        needed = sorted({name for start in starts for name in runners.chain_from(start)})
+        needed = sorted({name for m, start in zip(members, starts)
+                         for name in runners.chain_from(start, auto=m["executor_source"] == "auto")})
         availability = runners.check(needed)
     for m in members:
-        picked = runners.select(m["executor"], availability)
+        picked = runners.select(m["executor"], availability, auto=m["executor_source"] == "auto")
         m["runner"] = picked["executor"]
         m["runner_note"] = runners.fallback_reason(picked) if picked["executor"] != m["executor"] else ""
         if picked["executor"] is None:

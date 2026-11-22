@@ -66,7 +66,7 @@ def reroute(slug: str, conn: Any, task_id: str, current: str, reason: str, *, ph
     chosen = entry.get("chosen") or current
     if fail_kind and phase == "runtime":
         runners.mark_down(current, "recent_failure", reason)
-    picked = runners.select_after(chosen, current)
+    picked = runners.select_after(chosen, current, auto=entry.get("chosen_by") == "auto")
     target = picked["executor"]
     stamp = now()
     reason = redact(reason, 300)
@@ -112,7 +112,7 @@ def reselect_for_retry(slug: str, conn: Any, task_id: str) -> Optional[str]:
     task = kb().get_task(conn, task_id)
     current = task_executor(team, task_id, task.assignee if task else None)
     chosen = entry.get("chosen") or current
-    picked = runners.select(chosen)
+    picked = runners.select(chosen, auto=entry.get("chosen_by") == "auto")
     target = picked["executor"]
     if target is None or target == current:
         return current

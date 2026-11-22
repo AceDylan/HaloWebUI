@@ -83,6 +83,6 @@ def test_decision_options_and_bad_input(pkg, monkeypatch, plan_dict, availabilit
     options = pkg.plan.decision_options()
     assert [m["model"] for m in options["models"]] == ["gpt-chat", "deepseek-chat", "claude-chat"]
     by = {e["name"]: e for e in options["executors"]}
-    assert by["agy"]["available"] is False and by["hermes"]["available"] is True and options["kinds"]["ui"] == "agy"
+    assert by["agy"]["available"] is False and by["hermes"]["available"] is True and options["kinds"]["ui"] == "offiagy"
     assert pkg.plan.apply_decision("x", {})[0] is None
     assert pkg.plan.apply_decision(plan_dict, None)[0] is None

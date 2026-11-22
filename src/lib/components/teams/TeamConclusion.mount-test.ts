@@ -569,7 +569,7 @@ describe('RunnerBadge and RunnerStatus', () => {
 		const chips = Array.from(target.querySelectorAll('[data-runner-chip]')) as any[];
 		expect(chips.map((c) => c.getAttribute('data-runner-chip'))).toEqual([...names, 'officlaude']);
 		expect(chips[6].textContent).toContain('官方 Claude');
-		expect(target.textContent).toContain('仅点名');
+		expect(target.textContent).toContain('官方账号 · 不进兜底链');
 	});
 });
 

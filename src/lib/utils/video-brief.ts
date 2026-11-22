@@ -19,6 +19,8 @@ export type VideoRecipeKey = 'explainer' | 'story' | 'split-jizura' | 'data' | '
 export type VideoFrameKey = '16:9' | '9:16' | '1:1';
 /** Opening 3-second visual hook pattern for Douyin optimization. */
 export type VideoHookKey = 'auto' | 'reversal' | 'pain' | 'result' | 'list';
+/** Pacing & content density preset (defaults to 'fast' for viral high-density short videos). */
+export type VideoPaceKey = 'fast' | 'balanced' | 'cinematic';
 /** Directorial animation choreography & storytelling strategy (for both enhancement and maker). */
 export type VideoCreativeKey = 'auto' | 'metaphor' | 'contrast' | 'montage' | 'oneshot';
 /** Split-screen direction for cartoon + JIZURA hybrid videos. */
@@ -128,32 +130,62 @@ export const VIDEO_HOOKS: { key: VideoHookKey; label: string; sub: string; guide
 	{
 		key: 'auto',
 		label: '自动匹配',
-		sub: '按主题选最强高概念开场',
-		guide: '前 3 秒直接切入最有视觉奇观或情绪张力的动画意象（夸张尺度反差、超现实隐喻或高能冲突），第 0.5 秒画面立刻动起来'
+		sub: '0.5 秒画面+台词双钩子',
+		guide: '0.5 秒内画面与第一句钩子台词同步砸出（好奇缺口、反常识反转或高能冲突），绝不做 3–10 秒纯音乐空前奏'
 	},
 	{
 		key: 'reversal',
 		label: '反差反转',
-		sub: '一秒制造强烈视觉反差',
-		guide: '前 3 秒用极强的正反动画画面对比（如巨大脑内暗影瞬间坍缩成巴掌大纸团）破冰，用视觉反差留住观众而非靠大字喊口号'
+		sub: '一秒颠覆认知强反差',
+		guide: '前 2 秒直接抛出反常识认知冲突+正反动画同框对撞（如巨大脑内暗影瞬间坍缩成巴掌大纸团），开声即钩人，拒绝大字喊口号'
 	},
 	{
 		key: 'pain',
 		label: '情景代入',
-		sub: '动画意象直击共鸣瞬间',
-		guide: '前 3 秒用高共鸣生活瞬间叠加超现实心理可视化直接击中痛点，紧接用创意变形转场展开转折与解法'
+		sub: '直击痛点+损失厌恶',
+		guide: '前 2 秒用高共鸣扎心瞬间叠加超现实心理可视化直接锁住目标人群，零寒暄切入，紧接用变形转场高速推进'
 	},
 	{
 		key: 'result',
 		label: '高能前置',
-		sub: '先抛全片最炸动画名场面',
-		guide: '第 1 秒直接抛最有视觉冲击力的动画高潮帧或奇观隐喻，再以变速节奏层层揭晓前因与反转'
+		sub: '先抛全片最炸名场面',
+		guide: '第 0.5 秒直接前置全片最震撼的动画高潮画面与核心悬念，再以密集快切倒叙拆解前因与反转'
 	},
 	{
 		key: 'list',
 		label: '视觉清单',
-		sub: '用同一母题串起 3 幕演进',
-		guide: '前 3 秒先抛出贯穿全片的视觉母题与核心悬念，再用递进式动画场景与道具变形依次演完每个要点，越往后越惊艳'
+		sub: '高密递进 3–5 个爽点',
+		guide: '前 2 秒抛出贯穿全片的视觉母题与高价值承诺，再用高密度递进案例与道具变形逐个击破，越往后越炸'
+	}
+];
+
+export const VIDEO_PACES: {
+	key: VideoPaceKey;
+	label: string;
+	sub: string;
+	short: string;
+	guide: string;
+}[] = [
+	{
+		key: 'fast',
+		label: '快节奏 · 爆款高密',
+		sub: '1.5–3秒切镜 · 内容塞满无冷场',
+		short: '0.5s开声、1.5–3s换景、约4字/秒塞满无>1.5s空白',
+		guide: '【快节奏·爆款高密（硬约束）】① 零前奏空等：0.3–0.8 秒内第一句钩子台词与动态画面同步爆发，严禁 3–10 秒无台词空开场；② 内容塞满不注水：配音密度约 3.8–4.8 字/秒（30秒约120–145字、60秒约230–280字、2分40秒约580–720字），edge-tts 语速提至 "+10%"～"+15%"，film.py 启用 "tight": true 压缩句间死寂，句间停顿 ≤ 0.4 秒、全片严禁 >1.5 秒无声空白段；③ 高频视觉微刺激：每 1.5–3 秒切换景别（特写↔中景↔全景↔分格）或推进角色动作与视觉锚点，每 10–15 秒给一个小案例/小反转，中段（35–45%）埋防划走微悬念，绝不慢吞吞拖节奏'
+	},
+	{
+		key: 'balanced',
+		label: '标准节奏',
+		sub: '2–4秒换拍 · 张弛有度',
+		short: '2–4s换景、约3.2–4字/秒、大反转≤1.5s呼吸',
+		guide: '【标准节奏】开头 1 秒内迅速入戏，每 2–4 秒换一次景别或动作，配音清晰紧凑（edge-tts "+5%"～"+8%"，约 3.2–4 字/秒），仅在核心反转前留 ≤ 1.5 秒短暂呼吸停顿，全片饱满无拖沓'
+	},
+	{
+		key: 'cinematic',
+		label: '舒缓氛围',
+		sub: '3–5秒运镜 · 治愈留白',
+		short: '3–5s运镜、允许1.5–2.5s音乐留白',
+		guide: '【舒缓氛围】适合抒情、晚安与治愈长镜头：3–5 秒平滑运镜推进，语速自然（"+0%"），关键情绪画面允许 1.5–2.5 秒音乐留白与环境光影呼吸，但画面元素仍须持续流动不静止'
 	}
 ];
 
@@ -410,15 +442,15 @@ export const MV_LYRICS_MAX = 4000;
 export const publishLines = (place: VideoPlace) => [
 	'',
 	'## 发布标准（默认要求，每个视频都要做到）',
-	'- 拒绝纯文字动效与简陋画面：无论普通视频还是 MV，都要做贴近字幕或歌词意境的丰富动画（具象角色、视觉隐喻、场景、道具、光影与镜头运动），绝不做纯黑底飞大字或单图干放大',
+	'- 拒绝纯文字动效与简陋画面：无论普通视频还是 MV，都要做贴近字幕或歌词意境的高密度多图层动画（流动背景层+具象角色/视觉隐喻+视觉锚点道具与镜头运动），绝不做纯黑底飞大字或单图干放大',
 	'- 动画导演级创意与转场：用只有动画才演得出的视觉隐喻、夸张尺度反差与冷暖光影外化主题，严禁平淡写实流水账；幕间优先使用匹配剪辑（Match Cut）、图形变形（Morph）、前景遮挡擦除或穿门/穿镜转场，少用生硬硬切',
-	'- 第 0.5 秒内就要进入有吸引力的动态画面，不要黑场、静止片名卡或静态干等',
-	'- 变速节奏与呼吸感：片头片尾即使只有音乐没有人声，动画画面也要持续流动（任何画面静止不超过 2 秒，同一构图停留不超过 4 秒）；紧张或堆叠处可 1.5–3 秒快切，反转或高潮前留短暂顿挫，严禁整片机械均分等长镜头',
-	'- 动画要贴内容：动作直接演绎画面在讲的事和情绪（讲故事有角色大姿态与意象变形、讲对比有双世界反差、讲流程有物件运转，抒情缓高潮快），不做无意义的整屏乱晃或生硬碎微动作',
-	'- 全程连续、节奏跟着音乐或旁白走，约 60–75% 处放最有冲击力的动画高潮镜头；结尾 1–2 秒内回扣开场意象并收在一个仍有微动的完整构图上',
+	'- 零前奏 0.5 秒钩人：第 0.5 秒内画面同步进入高能动态（绝不做黑场、静止片名卡或 3–10 秒纯空等）',
+	'- 快节奏饱满推进（拒绝慢拖与注水）：除非明确选「舒缓氛围」，否则必须按时长把画面与内容塞满，任何画面静止不超过 1.5 秒、同一构图停留不超过 3 秒（舒缓模式不超过 4 秒），严禁 >1.5 秒冷场空白或机械均分等长镜头',
+	'- 动画要贴内容与景别跳跃：每 1.5–3 秒通过特写/中景/全景切换、角色大姿态、双世界反差或物件运转推进叙事，每 10–15 秒给一个小反转或新场景，中段（35–45%）埋防划走微悬念，不做无意义的整屏乱晃',
+	'- 高潮与利落收尾：节奏紧咬音乐鼓点或旁白，约 60–75% 处放最有冲击力的动画反转高潮；结尾 2–3 秒内回扣开场意象并收在一个仍有微动的完整构图上（带一句自然评论/收藏引导，戛然而止不拖泥带水）',
 	place === 'server'
 		? '- 封面：交付前按技能 video-studio「封面」一节运行 scripts/cover.py all，用 gpt-image 依据首帧画好动画风封面并放进视频第 0 帧'
-		: '- 封面：交付前按技能 video-studio「封面」一节，用 gpt-image 依据首帧画好动画风封面并放进视频第 0 帧（pc-video deliver 会自动做；家里电脑不在线、改在服务器做时运行 scripts/cover.py all）'
+		: '- 封面：交付前按技能 video-studio「封面」一节，用 gpt-image 依据首帧画好动画风封面并放进视频第 0 帧（pc-video deliver 会自动做；家里电脑不在线或 WSL 无响应改在服务器做时运行 scripts/cover.py all，Windows SSH 在线时可再跑 pc-video sync-to-pc 同步到 D:\\HermesWork\\视频\\）'
 ];
 
 /** Describe the PC JIZURA configuration cleanly (shared between normal split-mix / accent and MV). */
@@ -450,6 +482,15 @@ export const creativeLines = (
 	];
 };
 
+/** Pacing & content density lines for both 提示词增强 and the final maker brief. */
+export const paceLines = (opts: Pick<VideoBriefOptions, 'pace'>, forMaker = false): string[] => {
+	const mode = VIDEO_PACES.find((p) => p.key === opts.pace) ?? VIDEO_PACES[0];
+	if (!forMaker) {
+		return [`- 节奏密度：${mode.label}（${mode.short}）`];
+	}
+	return [`- 节奏密度（${mode.label}）：${mode.guide}`];
+};
+
 /** 抖音爆款规格: animation-first short-video rules (never pushing pure-text kinetic walls;
  * respects burned-in subtitles by keeping on-screen text minimal when subtitles are on). */
 export const douyinLines = (
@@ -461,17 +502,17 @@ export const douyinLines = (
 	const vertical = opts.frame === '9:16';
 	if (!forMaker) {
 		return [
-			`- 抖音爆款优化：开启（前 3 秒「${hook.label}」动画钩子禁寒暄；2–4 秒换动画景别/动作；${vertical ? '严守 9:16 安全区；' : ''}${opts.subtitles ? '已有字幕不堆文字动效，专注动画演活台词；' : '动画为主、短标题克制融入；'}结尾动画收束+拟 6–10 字动画风封面标题）`
+			`- 抖音爆款优化：开启（0–3秒「${hook.label}」双钩子；1.5–3秒快切塞满内容；中段防流失悬念；${vertical ? '9:16 安全区；' : ''}${opts.subtitles ? '已有字幕不堆文字动效；' : '动画为主短标题克制；'}拟 6–10 字动画封面标题）`
 		];
 	}
 	return [
 		'',
-		'## 抖音爆款规格（动画叙事优先，按高完播与高互动标准执行）',
-		`- 前 3 秒动画视觉钩子（${hook.label}）：${hook.guide}；严禁“大家好/今天聊聊”式慢热开场或纯黑底大字卡`,
-		'- 高密动画节拍：旁白短句口语化（每句 ≤ 14 字），每 2–4 秒必有一次画面演进（角色动作切换、景别推拉、场景转换或道具互动），每一幕画面紧扣当前字幕内容，约 60–75% 处给最高能动画反转或视觉高潮',
+		'## 抖音爆款规格（快节奏高密动画叙事，按高完播、高收藏与高复播标准执行）',
+		`- 黄金 3 秒双钩子（${hook.label}）：${hook.guide}；严禁“大家好/今天聊聊”式慢热开场、纯黑底大字卡或 3–10 秒纯音乐空前奏`,
+		'- 高密快切与信息塞满：旁白短句口语化（每句 ≤ 14 字，语速轻快不拖音），每 1.5–3 秒必有一次画面演进与景别跳跃（特写↔中景↔全景、动作切换或道具互动），每 10–15 秒给一个小案例/小反转；中段（35–45%）埋一句防划走微悬念（如“但最扎心的还不是这个…”），约 60–75% 处引爆最强视觉反转高潮',
 		...(opts.subtitles
 			? [
-					'- 有字幕不凸显文字动效：视频已开启底部烧录字幕，画面不必再堆叠满屏弹跳大字、花字或繁复文字动效；把视觉焦点全部留给贴合字幕内容的动画剧情与细节表演，仅在章节转场或关键数据时点缀极简标签'
+					'- 有字幕不凸显文字动效：视频已开启底部烧录字幕，画面不必再堆叠满屏弹跳大字、花字或繁复文字动效；把视觉焦点全部留给贴合字幕的高密度动画剧情、微动背景层与视觉锚点道具，仅在章节转场或关键数据时点缀极简标签'
 				]
 			: [
 					'- 无字幕轻排版：未开烧录字幕时，仅把极少量关键短句克制融入动画构图，画面主体仍必须是生动动画场景，绝不退化成纯文字视频'
@@ -481,7 +522,7 @@ export const douyinLines = (
 					'- 抖音 9:16 安全区（硬规范）：顶部留 12%（状态/搜索栏）、右侧留 14%（点赞/评论/收藏/转发按钮列）、底部留 22%（作者名/标题/进度条）；动画主角焦点与字幕严格放在安全区内（X: 6%–84%，Y: 14%–76%），字幕清晰易读不挡角色表情'
 				]
 			: ['- 构图可读性：动画主体居中聚焦，字幕与画面对比清晰，手机小屏一眼看清']),
-		'- 动画收尾与高点击封面：结尾 3–4 秒用一组完整呼应主题的动画定格画面自然收束（配一句轻互动提问或收藏提示，不做丑陋文字墙）；第 0 帧封面延用本片动画画风，构图集中、配 6–10 字干净短标题'
+		'- 闭环收尾与高点击封面：结尾 2–3 秒用一组回扣开场意象的动画画面利落收束（鼓励首尾呼应提升复播，配一句自然评论/收藏提问，不做丑陋文字墙）；第 0 帧封面延用本片动画画风，构图集中、配 6–10 字高反差短标题'
 	];
 };
 
@@ -530,6 +571,7 @@ export type VideoBriefOptions = {
 	subtitles: boolean;
 	douyin: boolean;
 	hook: VideoHookKey;
+	pace?: VideoPaceKey;
 	creative?: VideoCreativeKey;
 	splitLayout: SplitLayoutKey;
 	jizuraStyle: JizuraStyleKey;
@@ -572,6 +614,7 @@ export const DEFAULT_VIDEO_SETTINGS: VideoSettings = {
 	subtitles: true,
 	douyin: true,
 	hook: 'auto',
+	pace: 'fast',
 	creative: 'auto',
 	splitLayout: 'auto',
 	jizuraStyle: 'auto',
@@ -622,6 +665,11 @@ export const normalizeVideoSettings = (value: unknown): VideoSettings => {
 			raw.hook,
 			VIDEO_HOOKS.map((h) => h.key),
 			DEFAULT_VIDEO_SETTINGS.hook
+		),
+		pace: pick(
+			raw.pace,
+			VIDEO_PACES.map((p) => p.key),
+			DEFAULT_VIDEO_SETTINGS.pace ?? 'fast'
 		),
 		creative: pick(
 			raw.creative,
@@ -785,6 +833,7 @@ const requirementLines = (opts: Omit<VideoBriefOptions, 'idea'>, forMaker = fals
 			: `- 时长：约 ${lengthLabel(opts.seconds)}`,
 		`- 配音：${voice && voice.key ? `中文配音，${voice.label}（edge-tts ${voice.key}）` : '不要配音'}`,
 		`- 字幕：${opts.subtitles ? '烧录中文字幕（已有字幕，画面不必凸显文字动效）' : '不要字幕'}`,
+		...paceLines(opts, forMaker),
 		...creativeLines(opts, forMaker),
 		...normalJizuraLines(opts, forMaker)
 	];
@@ -1016,7 +1065,7 @@ export const buildVideoBrief = (opts: VideoBriefOptions): string => {
 			'## 背景音乐（用户指定：先定音乐，再按音乐做视频）',
 			`- 音乐文件：${plainName(music.name)}${musicClock ? `（${musicClock}）` : ''}，随消息附上，原文件路径见消息末尾的附件原文件；这是成片唯一的背景音乐，不要换、不要另加配乐或合成音`,
 			fullLength
-				? '- 长度：视频和这首音乐一样长（film.py 用 "music_fit": "full"），旁白要放得进音乐的长度'
+				? '- 长度与内容饱满度：视频和这首音乐一样长（film.py 用 "music_fit": "full"），旁白必须放得进且把整段音乐塞满（严禁用十几句稀疏台词拉长注水或留大段无声空白，快节奏按约 4 字/秒写足多组案例/反转与递进内容）'
 				: `- 长度：视频约 ${lengthLabel(opts.seconds)}，音乐从开头截取、结尾淡出（film.py 用 "music_fit": "trim", "seconds": ${opts.seconds}）${loops ? '；音乐比视频短，会循环播放' : ''}`,
 			`- 先听音乐再分镜：python3 ${VIDEO_FILM_SCRIPT} --music-info <音乐路径>，得到时长、节拍（beats）、每秒能量和高潮位置；转场卡在节拍上，最有冲击力的动画画面放在高潮，结尾落在音乐结尾`,
 			'- 用 film.py 出片（"music" 写这首音乐的路径；Remotion 画面用 --picture 交给它混音）：音乐从 0 秒开始，有配音时自动压低',

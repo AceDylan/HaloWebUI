@@ -92,7 +92,7 @@ export const redrawVideoCover = async (token: string, id: string): Promise<Libra
 };
 
 /** 家里电脑 (生成位置): whether the home PC is on, as the host last saw it (every 30 s). */
-export type PcState = 'ready' | 'off' | 'on-no-ssh' | 'on-untrusted' | 'unknown';
+export type PcState = 'ready' | 'off' | 'on-no-ssh' | 'on-untrusted' | 'on-wsl-hung' | 'unknown';
 export type PcStatus = { state: PcState; checkedAt: number | null };
 
 export const getPcStatus = async (token: string): Promise<PcStatus> => {

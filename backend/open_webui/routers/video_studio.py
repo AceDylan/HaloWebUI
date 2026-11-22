@@ -101,12 +101,12 @@ async def get_video_page(
 # and writes it into the data volume): this container cannot reach the PC itself.
 PC_STATUS_FILE = "pc-status.json"
 PC_STATUS_STALE_SECONDS = 180
-PC_STATES = ("ready", "off", "on-no-ssh", "on-untrusted")
+PC_STATES = ("ready", "off", "on-no-ssh", "on-untrusted", "on-wsl-hung")
 
 
 @router.get("/pc")
 async def get_pc_status(user=Depends(get_verified_user)):
-    """家里电脑在不在线 (生成位置): ``state`` ready | off | on-no-ssh | on-untrusted | unknown
+    """家里电脑在不在线 (生成位置): ``state`` ready | off | on-no-ssh | on-untrusted | on-wsl-hung | unknown
     (no report, or none for PC_STATUS_STALE_SECONDS), ``checkedAt`` (ms) of the last check."""
     import json
     import os

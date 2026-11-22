@@ -8,6 +8,7 @@ import {
 	VIDEO_CREATIVES,
 	VIDEO_HOOKS,
 	VIDEO_LENGTHS,
+	VIDEO_PACES,
 	attachmentKind,
 	buildVideoBrief,
 	clockLabel,
@@ -206,6 +207,7 @@ describe('normalizeVideoSettings', () => {
 				subtitles: false,
 				douyin: false,
 				hook: 'reversal',
+				pace: 'balanced',
 				creative: 'metaphor',
 				splitLayout: 'lr',
 				jizuraStyle: 'hud',
@@ -223,6 +225,7 @@ describe('normalizeVideoSettings', () => {
 			subtitles: false,
 			douyin: false,
 			hook: 'reversal',
+			pace: 'balanced',
 			creative: 'metaphor',
 			splitLayout: 'lr',
 			jizuraStyle: 'hud',
@@ -541,7 +544,7 @@ describe('publishing standard, split-jizura and MP3 做 MV', () => {
 			expect(brief).toContain('## 发布标准');
 			expect(brief).toContain('拒绝纯文字动效与简陋画面');
 			expect(brief).toContain('第 0.5 秒内');
-			expect(brief).toContain('同一构图停留不超过 4 秒');
+			expect(brief).toContain('同一构图停留不超过 3 秒');
 			expect(brief).toContain('动画要贴内容');
 			expect(brief).toContain('放进视频第 0 帧');
 			expect(brief).toContain('scripts/cover.py all');
@@ -649,24 +652,27 @@ describe('publishing standard, split-jizura and MP3 做 MV', () => {
 		expect(VIDEO_HOOKS.map((h) => h.key)).toEqual(['auto', 'reversal', 'pain', 'result', 'list']);
 		const onSub = buildVideoBrief({ ...base, douyin: true, hook: 'reversal', frame: '9:16', subtitles: true });
 		expect(onSub).toContain('## 抖音爆款规格');
-		expect(onSub).toContain('前 3 秒动画视觉钩子（反差反转）');
+		expect(onSub).toContain('黄金 3 秒双钩子（反差反转）');
 		expect(onSub).toContain('有字幕不凸显文字动效');
 		expect(onSub).toContain('抖音 9:16 安全区');
 		const noSub = buildVideoBrief({ ...base, douyin: true, hook: 'reversal', frame: '9:16', subtitles: false });
 		expect(noSub).toContain('无字幕轻排版');
 		expect(noSub).not.toContain('有字幕不凸显文字动效');
 		const settingsOn = videoSettingsText({ ...base, douyin: true, hook: 'reversal', frame: '9:16', subtitles: true });
-		expect(settingsOn).toContain('抖音爆款优化：开启（前 3 秒「反差反转」动画钩子');
+		expect(settingsOn).toContain('抖音爆款优化：开启（0–3秒「反差反转」双钩子');
 		expect(settingsOn).toContain('已有字幕不堆文字动效');
 		const off = buildVideoBrief({ ...base, douyin: false });
 		expect(off).not.toContain('## 抖音爆款规格');
 		expect(videoSettingsText({ ...base, douyin: false })).not.toContain('抖音爆款优化');
 	});
 
-	it('directorial creative modes reach both enhancement and maker brief, and 3200-char enhanced briefs fit cleanly under 8000 chars', () => {
+	it('fast-paced high-density defaults and directorial creative modes reach enhancement and maker brief, fitting 3600-char drafts under 8000 chars', () => {
+		expect(VIDEO_PACES.map((p) => p.key)).toEqual(['fast', 'balanced', 'cinematic']);
+		expect(DEFAULT_VIDEO_SETTINGS.pace).toBe('fast');
 		expect(VIDEO_CREATIVES.map((c) => c.key)).toEqual(['auto', 'metaphor', 'contrast', 'montage', 'oneshot']);
 		const opts = {
 			...base,
+			pace: 'fast' as const,
 			creative: 'metaphor' as const,
 			recipe: 'explainer' as const,
 			style: 'storybook' as const,
@@ -675,16 +681,21 @@ describe('publishing standard, split-jizura and MP3 做 MV', () => {
 		};
 		const settings = videoSettingsText(opts);
 		const brief = buildVideoBrief(opts);
+		expect(settings).toContain('- 节奏密度：快节奏 · 爆款高密');
+		expect(brief).toContain('- 节奏密度（快节奏 · 爆款高密）');
+		expect(brief).toContain('3.8–4.8 字/秒');
+		expect(brief).toContain('"tight": true');
+		expect(brief).toContain('严禁用十几句稀疏台词拉长注水');
 		expect(settings).toContain('- 动画编排：视觉隐喻');
 		expect(brief).toContain('- 动画编排（视觉隐喻）');
 		expect(brief).toContain('动画导演级创意与转场');
 		expect(brief).toContain('匹配剪辑（Match Cut）');
-		expect(brief).toContain('严禁整片机械均分等长镜头');
+		expect(brief).toContain('机械均分等长镜头');
 		// Footage keeps original footage without animation choreography override
 		expect(videoSettingsText({ ...opts, recipe: 'footage' })).not.toContain('动画编排');
 		expect(buildVideoBrief({ ...opts, recipe: 'footage' })).not.toContain('动画编排（');
-		// A full 3200-char enhanced brief still fits inside HANDOFF_TEXT_MAX (8000)
-		const longEnhanced = fitVideoBrief({ ...opts, idea: '幕'.repeat(3200) }, 8000);
+		// A full 3600-char enhanced brief still fits inside HANDOFF_TEXT_MAX (8000)
+		const longEnhanced = fitVideoBrief({ ...opts, idea: '幕'.repeat(3600) }, 8000);
 		expect(longEnhanced.length).toBeLessThanOrEqual(8000);
 		expect(longEnhanced).toContain('## 发布标准');
 		expect(longEnhanced).toContain('## 怎么做');

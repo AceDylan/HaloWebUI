@@ -241,6 +241,8 @@ def test_the_home_pc_state_comes_from_the_hosts_report(monkeypatch):
     assert client.get("/api/v1/video-studio/pc").json() == {"state": "ready", "checkedAt": (now - 10) * 1000}
     report.write_text(_json.dumps({"state": "off", "checked": now}))
     assert client.get("/api/v1/video-studio/pc").json()["state"] == "off"
+    report.write_text(_json.dumps({"state": "on-wsl-hung", "checked": now}))
+    assert client.get("/api/v1/video-studio/pc").json()["state"] == "on-wsl-hung"
     # an old report (the host stopped publishing) or a state it does not know: unknown
     report.write_text(_json.dumps({"state": "ready", "checked": now - video_studio.PC_STATUS_STALE_SECONDS - 5}))
     assert client.get("/api/v1/video-studio/pc").json()["state"] == "unknown"

@@ -37,7 +37,7 @@ IDEA_MAX_CHARS = 6000
 SETTINGS_MAX_CHARS = 1500
 # what the enhanced request and its notes may take (the video brief travels to the chat whole,
 # at most 8000 characters with its fixed parts)
-ENHANCED_MAX_CHARS = {"video": 3200, "image": 1200}
+ENHANCED_MAX_CHARS = {"video": 3600, "image": 1200}
 NOTES_MAX_CHARS = 1200
 SOURCES_MAX = 6
 SOURCE_EXCERPT_CHARS = 1400
@@ -202,36 +202,43 @@ def enhance_messages(kind: str, idea: str, settings: str, *, sources: list[dict]
     limit = ENHANCED_MAX_CHARS[kind]
     if kind == "video":
         task = (
-            "Act as an award-winning animation director and visual screenwriter (Pixar SparkShorts / Kurzgesagt / "
-            "Spider-Verse / Ghibli craft level). Rewrite the user's video request into a vivid, inventive, "
-            "production-ready director's treatment for the agent that will make the video. "
+            "Act as an award-winning short-video animation director and viral visual screenwriter (Kurzgesagt / "
+            "Spider-Verse / Pixar SparkShorts craft combined with top Douyin & Xiaohongshu high-completion viral pacing). "
+            "Rewrite the user's video request into a high-density, fast-paced, vivid, production-ready director's treatment "
+            "for the agent that will make the video. "
             "Keep everything the user asked for (topic, audience, tone, style, must-have details, wording they insist on). "
-            "The settings listed are decided and stated separately in the brief (做法, 画幅, 时长, 配音, 字幕, 背景音乐, 附件, 视觉风格, 动画编排): "
-            "never contradict them and do not repeat them as bare setting items, but tailor narrative structure and pacing strictly to the length.\n"
-            "1) ANTI-CLICHÉ & ANIMATION-NATIVE VISUAL METAPHOR (mandatory): "
-            "Never settle for bland, literal, mundane everyday plots (e.g. stretching one trivial errand like 'sent a message, got no reply, walked down a hallway, opened a door' across a whole film) or preachy cliché monologues. "
-            "For abstract, emotional, psychological, reflective, or conceptual topics (such as overthinking/worry, self-discipline, anxiety, principles), invent a bold CORE VISUAL METAPHOR and a RECURRING VISUAL MOTIF that ONLY animation can pull off — e.g., exaggerated scale contrast (a tiny pebble casting a 100-meter shadow monster under an overthinking spotlight, collapsing into a palm-sized paper creature the moment real sunlight hits), surreal mental-space morphing, anthropomorphic contraptions, or 2–3 sharply relatable modern-life micro-vignettes fused seamlessly by one visual motif. "
-            "Make narration lines sharp, insightful, human, and memorable (zero diary filler); deliberately include 1–2 s silent/music breathing beats at key visual reveals so animation and music carry emotion.\n"
-            "2) DRAMATIC ARC & VARIABLE PACING (never monotonous equal-length rows): "
-            "Shape a real cinematic tension curve: 0–3 s high-concept visual hook -> metaphor/world setup -> escalating tension or contrast (accelerate into 1.5–2.5 s quick-cut montage beats as pressure builds) -> apex pressure + brief stillness/beat drop -> unforgettable 60–75% hero visual reversal/climax -> resonant closing frame that echoes and transforms the opening motif (held ~1 s with gentle ambient motion). "
+            "The settings listed are decided and stated separately in the brief (做法, 画幅, 时长, 节奏密度, 配音, 字幕, 背景音乐, 附件, 视觉风格, 动画编排): "
+            "never contradict them and do not repeat them as bare setting items, but tailor narrative density and pacing strictly to the length and 节奏密度.\n"
+            "1) ANTI-CLICHÉ, VISUAL METAPHOR & HIGH INFORMATION DENSITY (mandatory — pack content FULL, never slow or watered-down): "
+            "Never settle for bland, literal, mundane everyday plots (e.g. stretching one trivial errand like 'sent a message, got no reply, walked down a hallway, opened a door' across a whole film) or slow sparse monologues. "
+            "For abstract, emotional, psychological, reflective, or conceptual topics (such as overthinking/worry, self-discipline, anxiety, principles), invent a bold CORE VISUAL METAPHOR and a RECURRING VISUAL MOTIF that ONLY animation can pull off — e.g., exaggerated scale contrast (a tiny pebble casting a 100-meter shadow monster under an overthinking spotlight, collapsing into a palm-sized paper creature the moment real sunlight hits), surreal mental-space morphing, anthropomorphic contraptions, or 3–5 sharply relatable modern-life micro-vignettes fused seamlessly by one visual motif. "
+            "PACK CONTENT FULL TO MATCH RUNTIME (zero dead air): unless 节奏密度 explicitly specifies 舒缓氛围, target dense spoken storytelling (~3.8–4.8 Chinese chars/s: ~115–145 chars for 30 s, ~170–215 chars for 45 s, ~230–280 chars for 60 s, ~560–720 chars for 150–180 s / full-song length) with crisp colloquial punchy sentences (<= 14 chars per line), concrete relatable examples, sharp contrasts, and zero wasted filler. "
+            "NEVER leave 3–10 s silent music intros or long empty stretches, and NEVER stretch 10–15 short sparse lines across a 2–3 minute song! When 节奏密度 is 舒缓氛围, allow 1.5–2.5 s poetic music breathing beats; in 快节奏 (default), keep spoken lines tightly chained with <= 0.4 s pauses.\n"
+            "2) VIRAL SHORT-VIDEO RETENTION ARC & FAST VARIABLE PACING (never slow or monotonous equal-length rows): "
+            "Engineer maximum completion rate: "
+            "(a) GOLDEN 0–3 s ZERO-WAIT DUAL HOOK: within 0.3–0.8 s hit simultaneously with an eye-popping animated action/contrast AND the first spoken hook (curiosity gap, counter-intuitive reversal, loss aversion, or sharp pain point — NEVER open with silent waiting, black screens, or '大家好'); "
+            "(b) FAST MICRO-STIMULATION & TWIST CADENCE: change shot framing, character action, or visual anchor every 1.5–3 s (never hold one framing > 3 s in 快节奏), and land a mini-twist, new relatable scenario, or emotional escalation every 10–15 s; "
+            "(c) MID-VIDEO RETENTION HOOK (~35–45%): drop a sharp anti-scroll twist or question ('但最扎心的还不是这个…') right where viewer attention dips; "
+            "(d) 60–75% HERO CLIMAX REVERSAL: unleash the peak visual metaphor transformation on the musical climax; "
+            "(e) SNAPPY LOOPABLE PAYOFF & INTERACTION CTA (final 2–3 s): resolve cleanly by echoing and transforming the opening motif (inviting replay) with one natural comment/save cue, held ~1 s with ongoing ambient motion (zero slow dragging outro). "
             "NEVER cut a medium/long video into 20+ identical 6-second metronome rows: "
-            "for short videos (<= 45 s), design 5–8 dynamically timed shots (varying 1.5–5 s); "
-            "for medium/long videos (60–180 s or full-song length), structure into 6–10 dramatic Acts/Chapters (幕), each stating its time span, internal 2–4 s beat progression, hero visual transformation, camera & transition, and crisp narration/breathing beats.\n"
-            "3) DIRECTOR-GRADE CHOREOGRAPHY, CAMERA & TRANSITIONS (built for Remotion/SVG/layered animation): "
-            "In every shot/act specify: (a) foreground/midground/background composition, dramatic color-temperature/lighting contrast (e.g., oppressive cold shadow vs warm open light), and expressive animation physics (scale exaggeration, squash-and-stretch, shape morphing, silhouette shatter/dissolution, parallax); "
-            "(b) cinematic camera framing & movement (extreme close-up <-> sudden wide pullback, low-angle loom <-> open horizon, dolly push-through) and explicit creative transitions between beats (match cut, graphic morph, doorway/pupil pass-through, foreground wipe, light wash — never vague '镜头切换'); "
+            "for short videos (<= 45 s), design 8–14 tightly paced shots (varying 1.5–3.5 s); "
+            "for medium/long videos (60–180 s or full-song length), structure into 7–10 dense dramatic Acts/Chapters (幕), each stating its time span, rapid 1.5–3 s internal beat/shot-size cuts, full high-density narration lines (not sparse placeholders), hero visual transformation, and creative transition.\n"
+            "3) MULTI-LAYER HIGH VISUAL DENSITY, SHOT-SIZE JUMPS & CREATIVE TRANSITIONS (built for Remotion/SVG/layered animation): "
+            "In every shot/act specify: (a) dense 3-layer staging — flowing animated background layer (moving grid/particles/light beams/weather, never flat empty color), dynamic foreground character/metaphor performance (scale exaggeration, squash-and-stretch, shape morphing, silhouette shatter/dissolution, parallax), and visual anchor props (arrows, counters, pop badges, highlight rings, comic SFX icons) so every frame feels rich and alive; "
+            "(b) dramatic shot-size alternation (extreme close-up <-> medium <-> sudden wide pullback <-> split comparison) and explicit creative transitions between beats (match cut, graphic morph, doorway/pupil zoom-through, foreground wipe, light wash — never vague '镜头切换'); "
             "(c) bold, iconic, renderable visual staging instead of fragile microscopic realistic hand gestures that look stiff in vector/layered animation.\n"
             "4) SETTINGS, STYLE & JIZURA DISCIPLINE: "
             "Follow visual-style and reference priority rules: explicit user visual requirements > preset > invented details. "
-            "Honor 风格特征, 配色, 关键技法, 验收 and 动画编排 when supplied; never design pure kinetic text on plain dark backgrounds or static title cards. "
-            "When 烧录中文字幕 is enabled in settings, DO NOT ask for flashy on-screen text animations or giant floating highlight words — keep on-screen text minimal and devote the screen to animated storytelling. "
+            "Honor 风格特征, 配色, 关键技法, 验收, 节奏密度 and 动画编排 when supplied; never design pure kinetic text on plain dark backgrounds or static title cards. "
+            "When 烧录中文字幕 is enabled in settings, DO NOT ask for flashy on-screen text animations or giant floating highlight words — keep on-screen text minimal and devote the screen to dense animated storytelling and visual props. "
             "When 分屏混搭 or PC JIZURA is enabled, specify concrete moments/acts where the animated story half and the synchronized JIZURA kinetic motion half physically respond to each other (e.g., pressure-montage pulses, climax shadow-shatter burst on the beat) rather than a generic footnote. "
             "配色与外观偏好 changes appearance only, not techniques. Respect the selected recipe: footage keeps its original subject; storybook animations use layered motion over unified illustrations. If a required rendering capability is unavailable, state the limitation instead of silently promising it. "
             "When updating a previously enhanced draft, retain content and user edits but reconcile obsolete generated visual details and timing with current settings. Reference attachments are not automatically footage to insert; if only names are provided, leave visual extraction to the maker. Style never changes recipe, frame, duration, voice, subtitle switch, or music. "
-            "When 抖音爆款优化 is enabled in the settings: optimize for high completion with animation-first storytelling — hook visually within 0–3 s using the chosen animated hook pattern (never open with '大家好' or a bare text card), tighten pacing to one animated visual beat every 2-4 seconds (with faster 1.5–2.5 s escalations where tension rises), write crisp colloquial spoken lines (<= 14 Chinese chars per sentence), respect the 9:16 Douyin UI safe zone (keep focal characters and subtitles clear of right-side buttons and bottom bar), restrain on-screen text effects whenever subtitles are enabled, close with a cohesive animated payoff scene plus a light natural engagement cue, and include a clean 6–10 character animated cover title and high-contrast cover framing.\n"
+            "When 抖音爆款优化 is enabled in the settings: optimize relentlessly for high completion, saves, and replays — hook visually + verbally within 0–3 s using the chosen animated hook pattern (never open with '大家好', silent intro, or a bare text card), tighten pacing to 1.5–3 s animated visual cuts (2-4 seconds max on calm beats) with dense crisp colloquial lines (<= 14 Chinese chars per sentence, brisk TTS pace), plant a mid-video retention hook, respect the 9:16 Douyin UI safe zone (keep focal characters and subtitles clear of right-side buttons and bottom bar), restrain on-screen text effects whenever subtitles are enabled, close with a snappy loopable animated payoff + natural comment/save cue, and include a clean 6–10 character high-CTR animated cover title and high-contrast cover framing.\n"
             "5) OUTPUT FORMAT & LENGTH BUDGET: "
-            "Organize cleanly with concise plain-text headings: 【核心创意与视觉母题】, 【美术与光影反差】, 【动态分镜与转场编排】, 【高潮名场面与收尾回扣】, 【动画封面建议】. "
-            f"Keep the total response comfortably under {limit - 200} characters so EVERY section (including the ending and cover title) finishes cleanly without ever being cut off."
+            "Organize cleanly with concise plain-text headings: 【核心创意与视觉母题】, 【美术与光影反差】, 【高密快切分镜与转场编排】, 【高潮名场面与互动收尾】, 【动画封面建议】. "
+            f"Keep the total response comfortably under {limit - 200} characters so EVERY section (including dense narration script, climax, ending and cover title) finishes cleanly without ever being cut off."
         )
     else:
         task = (

@@ -71,6 +71,7 @@
 		VIDEO_HOOKS,
 		VIDEO_LENGTHS,
 		VIDEO_MAKERS,
+		VIDEO_PACES,
 		VIDEO_KINDS,
 		MV_THEMES,
 		MV_VISUALS,
@@ -243,6 +244,7 @@
 	$: maker = VIDEO_MAKERS.find((m) => m.key === settings.maker) ?? VIDEO_MAKERS[0];
 	$: place = VIDEO_PLACES.find((p) => p.key === settings.place) ?? VIDEO_PLACES[0];
 	$: activeHook = VIDEO_HOOKS.find((h) => h.key === settings.hook) ?? VIDEO_HOOKS[0];
+	$: activePace = VIDEO_PACES.find((p) => p.key === settings.pace) ?? VIDEO_PACES[0];
 	$: activeCreative = VIDEO_CREATIVES.find((c) => c.key === settings.creative) ?? VIDEO_CREATIVES[0];
 	$: activeMvVisual = MV_VISUALS.find((v) => v.key === settings.mvVisual) ?? MV_VISUALS[0];
 	$: activeMvTheme = MV_THEMES.find((t) => t.key === settings.mvTheme) ?? MV_THEMES[0];
@@ -270,6 +272,7 @@
 		off: '已关机',
 		'on-no-ssh': '开机了但连不上',
 		'on-untrusted': '开机了但未信任',
+		'on-wsl-hung': 'WSL 无响应',
 		unknown: '状态未知'
 	};
 	const pcAgo = (ms: number | null) => {
@@ -1375,6 +1378,7 @@
 						{#if settings.douyin}
 							<span class="rounded-full bg-rose-500/12 px-2 py-0.5 font-medium text-rose-700 dark:text-rose-300">抖音动画 · {activeHook.label}</span>
 						{/if}
+						<span class="rounded-full bg-emerald-500/12 px-2 py-0.5 font-medium text-emerald-700 dark:text-emerald-300">{activePace.label}</span>
 						<span class="rounded-full bg-gray-100 px-2 py-0.5 text-gray-600 dark:bg-gray-800 dark:text-gray-300">{activeVoiceLabel}</span>
 					{:else}
 						<span class="rounded-full bg-indigo-500/12 px-2 py-0.5 font-medium text-indigo-700 dark:text-indigo-300">{activeMvVisual.label}</span>
@@ -1490,8 +1494,8 @@
 								</div>
 								<p class="text-[11px] text-gray-500 dark:text-gray-400">
 									{settings.douyin
-										? '前 3 秒动画视觉钩子 · 2–4 秒动画换拍 · 9:16 安全区 · 有字幕时不堆文字动效'
-										: '已关闭：按常规节奏制作多风格动画'}
+										? '0.5 秒双钩子 · 1.5–3 秒快切 · 内容塞满无冷场 · 9:16 安全区 · 有字幕不堆文字动效'
+										: '已关闭：按所选节奏制作多风格动画'}
 								</p>
 							</div>
 							<button
@@ -1524,6 +1528,25 @@
 								<p class="text-[11px] leading-relaxed text-gray-500 dark:text-gray-400">{activeHook.sub} · {activeHook.guide}</p>
 							</div>
 						{/if}
+					</div>
+
+					<div class="space-y-1.5" data-video-paces>
+						<div class="flex flex-wrap items-center justify-between gap-2">
+							<span class="text-xs font-medium text-gray-500 dark:text-gray-400">节奏与内容密度</span>
+							<span class="text-[11px] text-gray-500 dark:text-gray-400">{activePace.sub}</span>
+						</div>
+						<div class="flex flex-wrap gap-1.5">
+							{#each VIDEO_PACES as p (p.key)}
+								<button
+									type="button"
+									class={(settings.pace ?? 'fast') === p.key ? chipOn : chip}
+									aria-pressed={(settings.pace ?? 'fast') === p.key}
+									title={p.sub}
+									on:click={() => (settings = { ...settings, pace: p.key })}
+									data-video-pace={p.key}
+								>{p.label}</button>
+							{/each}
+						</div>
 					</div>
 				{/if}
 
@@ -1919,9 +1942,11 @@
 					</div>
 					<p class="text-[11px] leading-relaxed text-gray-500 dark:text-gray-400">
 						{settings.place === 'pc'
-							? pc && pc.state !== 'ready' && pc.state !== 'unknown'
-								? '家里电脑现在不在线：会自动改在服务器渲染，成片回到这里（歌词 MV 要等电脑开机）。'
-								: '画面渲染和合成放到家里电脑（快约 4 倍），成片存在电脑的 D:\\HermesWork\\视频\\；电脑关机时自动改在服务器做。'
+							? pc?.state === 'on-wsl-hung'
+								? '家里电脑已开机但 WSL 无响应：将自动改在服务器渲染（渲染后可用 pc-video sync-to-pc 传到电脑 D 盘；需在电脑上运行 wsl --shutdown 或重启恢复 WSL）。'
+								: pc && pc.state !== 'ready' && pc.state !== 'unknown'
+									? '家里电脑现在不在线：会自动改在服务器渲染，成片回到这里（歌词 MV 要等电脑开机）。'
+									: '画面渲染和合成放到家里电脑（快约 4 倍），成片存在电脑的 D:\\HermesWork\\视频\\；电脑关机或 WSL 无响应时自动改在服务器做。'
 							: '全部在服务器上渲染，不用家里电脑。'}
 					</p>
 				</div>

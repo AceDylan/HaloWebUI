@@ -904,6 +904,16 @@ describe('Videos 制作任务', () => {
 		badge = target.querySelector('[data-pc-status]');
 		expect(badge.textContent).toContain('家里电脑已关机');
 		expect(target.textContent).toContain('家里电脑现在不在线：会自动改在服务器渲染');
+		apps.splice(0).forEach((app) => app.$destroy());
+		document.body.innerHTML = '';
+		// Windows SSH reachable, but WSL hung: surfaces clear status & server fallback note
+		api.getPcStatus.mockResolvedValueOnce({ state: 'on-wsl-hung', checkedAt: Date.now() - 3_000 });
+		target = await mount();
+		await sleep(20);
+		badge = target.querySelector('[data-pc-status]');
+		expect(badge.getAttribute('data-pc-status')).toBe('on-wsl-hung');
+		expect(badge.textContent).toContain('家里电脑WSL 无响应');
+		expect(target.textContent).toContain('家里电脑已开机但 WSL 无响应');
 	});
 
 	it('a video left on the home PC is shown by its Windows path, ready to copy', async () => {
@@ -939,7 +949,8 @@ describe('Videos 制作任务', () => {
 		expect(brief()).toContain('视觉风格：日漫卡通');
 		expect(brief()).toContain('上下分屏');
 		expect(brief()).toContain('pc-video jizura');
-		expect(brief()).toContain('前 3 秒动画视觉钩子（反差反转）');
+		expect(brief()).toContain('黄金 3 秒双钩子（反差反转）');
+		expect(brief()).toContain('节奏密度（快节奏 · 爆款高密）');
 		expect(brief()).toContain('有字幕不凸显文字动效');
 		// Switch split direction & JIZURA skin
 		target.querySelector('[data-video-split-layout="lr"]').click();
@@ -947,10 +958,12 @@ describe('Videos 制作任务', () => {
 		await sleep(10);
 		expect(brief()).toContain('左右分屏');
 		expect(brief()).toContain('--style caution');
-		// Switch hook and toggle Douyin off
+		// Switch hook, pace and toggle Douyin off
 		target.querySelector('[data-video-hook="pain"]').click();
+		target.querySelector('[data-video-pace="balanced"]').click();
 		await sleep(10);
-		expect(brief()).toContain('前 3 秒动画视觉钩子（情景代入）');
+		expect(brief()).toContain('黄金 3 秒双钩子（情景代入）');
+		expect(brief()).toContain('节奏密度（标准节奏）');
 		// Switch directorial creative mode and verify it reaches the brief and persists
 		target.querySelector('[data-video-creative="metaphor"]').click();
 		await sleep(10);

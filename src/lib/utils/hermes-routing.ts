@@ -1,7 +1,7 @@
 // Labels and pure helpers for the 「Hermes 模型」 settings page (HermesRouting.svelte).
 // Hermes validates and writes the routing itself (hermes_cli/routing_admin.py); this only
 // shapes what the page shows and what it sends.
-import type { HermesRouting, HermesRoutingChange } from '$lib/apis/hermes';
+import type { HermesAgyPrefs, HermesRouting, HermesRoutingChange } from '$lib/apis/hermes';
 
 export const ROUTING_MAX_FALLBACKS = 3;
 export const ROUTING_MAX_AUX_FALLBACKS = 2;
@@ -130,3 +130,51 @@ export const describeChange = (change: HermesRoutingChange) =>
 
 export const historySourceLabel = (source: string) =>
 	source === 'halowebui' ? '网页' : source.startsWith('rollback:') ? '回滚' : source || '未知';
+
+// ---- AGY 优先 ----
+
+export type AgyDraft = { card_model: string; ui_runner: string; offiagy_model: string };
+
+export const RUNNER_LABELS: Record<string, string> = {
+	offiagy: 'offiagy（Google 账号）',
+	agy: 'agy（网关 gemini-chat）',
+	hermes: 'Hermes',
+	reclaude: 'reclaude',
+	cchclaude: 'cchclaude',
+	anyclaude: 'anyclaude',
+	codex: 'Codex'
+};
+
+export const runnerLabel = (name: string) => RUNNER_LABELS[name] ?? name;
+
+export const agyDraftFrom = (prefs: HermesAgyPrefs): AgyDraft => ({
+	card_model: prefs.card.model,
+	ui_runner: prefs.teams.ui_runner ?? '',
+	offiagy_model: prefs.teams.offiagy_model ?? ''
+});
+
+/** The fields that changed (what the save sends) and one plain line for each. */
+export const agyChanges = (before: AgyDraft, rawAfter: AgyDraft) => {
+	const after: AgyDraft = {
+		card_model: rawAfter.card_model ?? '',
+		ui_runner: rawAfter.ui_runner ?? '',
+		offiagy_model: rawAfter.offiagy_model ?? ''
+	};
+	const update: Partial<AgyDraft> = {};
+	const lines: string[] = [];
+	if (before.card_model !== after.card_model) {
+		update.card_model = after.card_model;
+		const label = (v: string) => v || '关闭（直接走网关 agy）';
+		lines.push(`回答卡片：${label(before.card_model)} → ${label(after.card_model)}`);
+	}
+	if (before.ui_runner !== after.ui_runner) {
+		update.ui_runner = after.ui_runner;
+		lines.push(`界面任务起点：${runnerLabel(before.ui_runner)} → ${runnerLabel(after.ui_runner)}`);
+	}
+	if (before.offiagy_model !== after.offiagy_model) {
+		update.offiagy_model = after.offiagy_model;
+		const label = (v: string) => v || 'AGY 默认';
+		lines.push(`offiagy 模型：${label(before.offiagy_model)} → ${label(after.offiagy_model)}`);
+	}
+	return { update, lines };
+};

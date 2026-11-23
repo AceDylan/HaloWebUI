@@ -668,3 +668,43 @@ export const rollbackHermesRouting = (token: string, id: string, revision: strin
 
 export const probeHermesRoutingModel = (token: string, model: string) =>
 	routingCall<HermesRoutingProbe>(token, 'POST', '/probe', { model });
+
+// 「AGY 优先」 on the same page: the HTML card's first try on the Google account sign-in
+// (offiagy), where team UI tasks start, and offiagy's model.
+export type HermesAgyRunnerChoice = { name: string; label: string; note: string; chain: string[] };
+
+export type HermesAgyPrefs = {
+	card: { model: string; default: string; signed_in: boolean };
+	teams: {
+		ui_runner?: string;
+		ui_runner_default?: string;
+		ui_chain?: string[];
+		ui_choices?: HermesAgyRunnerChoice[];
+		offiagy_model?: string;
+		offiagy_models?: { id: string; name: string }[];
+		error?: string;
+	};
+};
+
+export type HermesAgyPrefsUpdate = {
+	card_model?: string;
+	ui_runner?: string;
+	offiagy_model?: string;
+};
+
+const agyPrefsCall = async (token: string, method: string, body?: HermesAgyPrefsUpdate) => {
+	const res = await fetch(`${WEBUI_API_BASE_URL}/hermes/agy-prefs`, {
+		method,
+		headers: jsonHeaders(token),
+		...(body === undefined ? {} : { body: JSON.stringify(body) })
+	});
+	if (!res.ok) {
+		throw new Error(String(await detailOf(res)));
+	}
+	return (await res.json()) as HermesAgyPrefs;
+};
+
+export const getHermesAgyPrefs = (token: string) => agyPrefsCall(token, 'GET');
+
+export const saveHermesAgyPrefs = (token: string, update: HermesAgyPrefsUpdate) =>
+	agyPrefsCall(token, 'PUT', update);

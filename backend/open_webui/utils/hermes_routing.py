@@ -1,12 +1,18 @@
 """Hermes 模型路由 (main model, fallback chain, sub-agents, auxiliary tasks, media) for the
 「Hermes 模型」 settings page: a thin pass-through to hermes ``/api/admin/routing``.
 
+Plus its 「AGY 优先」 part: the HTML card's first try on the Google account sign-in (offiagy) is a
+HaloWebUI setting (the card is designed here); where team UI tasks start and offiagy's model live
+in hermes' ``halo-teams-runners.json`` (teams plugin ``/v1/halo-teams/agy-prefs``).
+
 Hermes owns the validation, the history and the write (``hermes_cli/routing_admin.py``):
 config.yaml stays its single source of truth, so Telegram and the CLI see the same routing.
 Admin only — this changes which model answers everyone.
 """
 
 import logging
+import os
+import re
 from typing import Optional
 
 import aiohttp
@@ -28,9 +34,13 @@ ROUTING_TIMEOUT_SECONDS = 30
 PROBE_TIMEOUT_SECONDS = 75
 
 
+AGY_MODEL_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}")
+TEAMS_AGY_PREFS_PATH = "/v1/halo-teams/agy-prefs"
+
+
 async def _routing_call(
     request, user, method: str, path: str = "", *, json: Optional[dict] = None,
-    timeout: float = ROUTING_TIMEOUT_SECONDS,
+    timeout: float = ROUTING_TIMEOUT_SECONDS, base: str = "/api/admin/routing",
 ) -> dict:
     model = await resolve_hermes_model(request, user, None)
     root, headers = _connection(request, user, model)
@@ -40,7 +50,7 @@ async def _routing_call(
         ) as session:
             async with session.request(
                 method,
-                f"{root}/api/admin/routing{path}",
+                f"{root}{base}{path}",
                 json=json,
                 headers=headers,
                 ssl=AIOHTTP_CLIENT_SESSION_SSL,
@@ -95,3 +105,46 @@ async def probe_model(request, user, model: str) -> dict:
     return await _routing_call(
         request, user, "POST", "/probe", json={"model": model}, timeout=PROBE_TIMEOUT_SECONDS
     )
+
+
+# ---- AGY 优先 ----
+
+
+def _card_prefs() -> dict:
+    from open_webui.config import HTML_VISUAL_AGY_CARD_MODEL
+    from open_webui.utils.html_visual_prompt import (
+        HTML_VISUAL_AGY_OAUTH_TOKEN_FILE_ENV,
+        HTML_VISUAL_AGY_PREFERRED_DEFAULT_MODEL,
+    )
+
+    return {
+        "model": str(HTML_VISUAL_AGY_CARD_MODEL.value or "").strip(),
+        "default": HTML_VISUAL_AGY_PREFERRED_DEFAULT_MODEL,
+        # Without the token file the card never tries offiagy, whatever is saved.
+        "signed_in": bool(os.environ.get(HTML_VISUAL_AGY_OAUTH_TOKEN_FILE_ENV, "").strip()),
+    }
+
+
+async def get_agy_prefs(request, user) -> dict:
+    try:
+        teams = await _routing_call(request, user, "GET", base=TEAMS_AGY_PREFS_PATH, timeout=60)
+    except HermesSessionsError as e:
+        teams = {"error": e.detail}
+    return {"card": _card_prefs(), "teams": teams}
+
+
+async def save_agy_prefs(request, user, fields: dict) -> dict:
+    if "card_model" in fields:
+        model = str(fields["card_model"] or "").strip()
+        if model and not AGY_MODEL_RE.fullmatch(model):
+            raise HermesSessionsError(400, "回答卡片：不是合法的模型 ID")
+        from open_webui.config import HTML_VISUAL_AGY_CARD_MODEL
+
+        HTML_VISUAL_AGY_CARD_MODEL.value = model
+        HTML_VISUAL_AGY_CARD_MODEL.save()
+    teams_fields = {k: fields[k] for k in ("ui_runner", "offiagy_model") if k in fields}
+    if teams_fields:
+        await _routing_call(
+            request, user, "PUT", base=TEAMS_AGY_PREFS_PATH, json=teams_fields, timeout=60
+        )
+    return await get_agy_prefs(request, user)

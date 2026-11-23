@@ -2054,13 +2054,29 @@ async def design_html_visual_artifact_with_agy(
     )
 
 
+def _saved_card_model() -> str | None:
+    """The model saved on the 「Hermes 模型」 page ("" = off), or None when nothing was saved
+    there (then the env switch / built-in default applies)."""
+    try:
+        from open_webui.config import HTML_VISUAL_AGY_CARD_MODEL
+    except Exception:  # config not importable (bare unit tests): keep the env behaviour
+        return None
+    saved = HTML_VISUAL_AGY_CARD_MODEL.config_value
+    return str(saved) if saved is not None else None
+
+
 def _agy_preferred_model() -> str | None:
     """The account sign-in model tried first, or None (no OAuth token configured,
     preference disabled, or a value that is not a plain model id)."""
     if not os.environ.get(HTML_VISUAL_AGY_OAUTH_TOKEN_FILE_ENV, "").strip():
         return None
-    model = os.environ.get(
-        HTML_VISUAL_AGY_PREFERRED_MODEL_ENV, HTML_VISUAL_AGY_PREFERRED_DEFAULT_MODEL
+    saved = _saved_card_model()
+    model = (
+        saved
+        if saved is not None
+        else os.environ.get(
+            HTML_VISUAL_AGY_PREFERRED_MODEL_ENV, HTML_VISUAL_AGY_PREFERRED_DEFAULT_MODEL
+        )
     ).strip()
     if not model:
         return None

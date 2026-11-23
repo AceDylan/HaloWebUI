@@ -490,7 +490,10 @@ def test_offiagy_is_explicit_only_and_probes_the_google_sign_in(pkg, availabilit
         assert "offiagy" not in r.chain_from(name)
     override({"order": ["agy", "offiagy", "codex"], "kinds": {"code": "offiagy"}})
     assert r.fallback_order() == ("agy", "codex", "hermes")
-    assert r.kind_default("code") == "cchclaude" and r.kind_default("ui") == "offiagy"
+    # a kind may start on offiagy by override too; it then falls back to agy like the UI default
+    assert r.kind_default("code") == "offiagy" and r.kind_default("ui") == "offiagy"
+    override({"kinds": {"code": "officlaude"}})
+    assert r.kind_default("code") == "cchclaude"  # no fallback after officlaude: not a default
     token = tmp_path / "token"
     monkeypatch.setenv("HALO_TEAMS_AGY_TOKEN", str(token))
     state, detail, _ = r._probe_account(spec)
@@ -541,3 +544,73 @@ def test_relay_probe_reads_the_settings_file_the_wrapper_passes(pkg, monkeypatch
     # A wrapper without --settings (or pointing at a missing file) falls back to the registry default.
     wrapper.write_text("#!/usr/bin/env bash\nexec claude --settings /nonexistent/s.json \"$@\"\n")
     assert r._settings_file(r.BY_NAME["cchclaude"]) == r.BY_NAME["cchclaude"].settings
+
+
+# --- AGY preferences (HaloWebUI 「Hermes 模型」 page) ------------------------------------------
+
+def test_agy_prefs_roundtrip_keeps_other_override_keys(pkg, override, monkeypatch):
+    r = pkg.runners
+    monkeypatch.setattr(r, "offiagy_models", lambda **_k: [{"id": "gemini-4-neon-high", "name": "Gemini 4 Neon (High)"}])
+    override({"order": ["codex", "agy"], "disabled": ["anyclaude"]})
+    prefs = r.agy_prefs()
+    assert prefs["ui_runner"] == "offiagy" and prefs["ui_chain"] == ["offiagy", "agy", "hermes"]
+    assert prefs["offiagy_model"] == "" and prefs["offiagy_models"][0]["id"] == "gemini-4-neon-high"
+    names = [c["name"] for c in prefs["ui_choices"]]
+    assert "offiagy" in names and "agy" in names and "hermes" in names and "officlaude" not in names
+    chains = {c["name"]: c["chain"] for c in prefs["ui_choices"]}
+    assert chains["offiagy"] == ["offiagy", "agy", "hermes"] and chains["codex"] == ["codex", "agy", "hermes"]
+
+    prefs = r.save_agy_prefs("agy", "gemini-4-argon-high")
+    assert prefs["ui_runner"] == "agy" and prefs["ui_chain"] == ["agy", "hermes"]
+    assert prefs["offiagy_model"] == "gemini-4-argon-high"
+    data = json.loads(r.OVERRIDE_FILE.read_text(encoding="utf-8"))
+    assert data == {"order": ["codex", "agy"], "disabled": ["anyclaude"], "kinds": {"ui": "agy"},
+                    "offiagy_model": "gemini-4-argon-high"}
+
+    # back to the built-in default and the AGY default model: the keys go away
+    prefs = r.save_agy_prefs("offiagy", "")
+    assert prefs["ui_runner"] == "offiagy" and prefs["offiagy_model"] == ""
+    assert json.loads(r.OVERRIDE_FILE.read_text(encoding="utf-8")) == {"order": ["codex", "agy"], "disabled": ["anyclaude"]}
+
+
+def test_agy_prefs_back_to_defaults_leaves_no_empty_file(pkg, override, monkeypatch):
+    r = pkg.runners
+    monkeypatch.setattr(r, "offiagy_models", lambda **_k: [])
+    if r.OVERRIDE_FILE.exists():
+        r.OVERRIDE_FILE.unlink()
+    r.save_agy_prefs("hermes", "gemini-4-neon-low")
+    assert json.loads(r.OVERRIDE_FILE.read_text(encoding="utf-8")) == {
+        "kinds": {"ui": "hermes"}, "offiagy_model": "gemini-4-neon-low"}
+    assert r.kind_default("ui") == "hermes"
+    r.save_agy_prefs("offiagy", "")
+    assert not r.OVERRIDE_FILE.exists() and r.kind_default("ui") == "offiagy"
+
+
+@pytest.mark.parametrize("ui_runner, model, message", [
+    ("officlaude", None, "不能从"), ("nope", None, "不能从"), (None, "bad model; rm -rf", "模型 ID"),
+])
+def test_agy_prefs_refuses_bad_values(pkg, override, ui_runner, model, message):
+    override({"order": ["agy"]})
+    with pytest.raises(ValueError, match=message):
+        pkg.runners.save_agy_prefs(ui_runner, model)
+    assert json.loads(pkg.runners.OVERRIDE_FILE.read_text(encoding="utf-8")) == {"order": ["agy"]}
+
+
+def test_offiagy_models_parses_and_caches(pkg, monkeypatch):
+    r = pkg.runners
+    r._offiagy_models_cache.update(at=0.0, models=[])
+    calls = []
+
+    class Done:
+        stdout = "Fetching available models...\ngemini-4-neon-high\tGemini 4 Neon (High)\nclaude-opus-5-5-high\tClaude Opus 5.5 (High)\n"
+
+    def run(argv, **kwargs):
+        calls.append(argv)
+        return Done()
+
+    monkeypatch.setattr(r, "_which", lambda name: "/stub/" + name)
+    monkeypatch.setattr(r.subprocess, "run", run)
+    assert [m["id"] for m in r.offiagy_models()] == ["gemini-4-neon-high", "claude-opus-5-5-high"]
+    r.offiagy_models()
+    assert calls == [["/stub/offiagy", "models"]]  # second call served from the cache
+    r._offiagy_models_cache.update(at=0.0, models=[])

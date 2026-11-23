@@ -3939,3 +3939,20 @@ LDAP_GROUP_SEARCH_FILTER = PersistentConfig(
     "ldap.group_sync.search_filter",
     os.environ.get("LDAP_GROUP_SEARCH_FILTER", "(objectClass=groupOfNames)"),
 )
+
+####################################
+# Hermes 模型 page: the HTML card's AGY preference
+####################################
+
+from open_webui.utils.html_visual_prompt import (  # noqa: E402  (no open_webui imports there)
+    HTML_VISUAL_AGY_PREFERRED_DEFAULT_MODEL,
+    HTML_VISUAL_AGY_PREFERRED_MODEL_ENV,
+)
+
+# The model the HTML card asks the Google account sign-in (offiagy) first; "" = straight to the
+# usual AGY path (Hermes gateway). Seeded from the old env switch, edited on 「Hermes 模型」.
+HTML_VISUAL_AGY_CARD_MODEL = PersistentConfig(
+    HTML_VISUAL_AGY_PREFERRED_MODEL_ENV,
+    "hermes.agy.card_model",
+    os.environ.get(HTML_VISUAL_AGY_PREFERRED_MODEL_ENV, HTML_VISUAL_AGY_PREFERRED_DEFAULT_MODEL),
+)

@@ -102,3 +102,76 @@ def test_errors_keep_hermes_message(monkeypatch, status, body, expect_status, ex
         asyncio.run(hermes_routing.get_routing(None, USER))
     assert e.value.status_code == expect_status
     assert expect_text in e.value.detail
+
+
+# ---- AGY 优先 ----
+
+
+class _Card:
+    def __init__(self, value):
+        self.value, self.config_value, self.saved = value, None, 0
+
+    def save(self):
+        self.saved += 1
+        self.config_value = self.value
+
+
+def _card(monkeypatch, value="gemini-4-argon-high"):
+    import open_webui.config as config
+
+    card = _Card(value)
+    monkeypatch.setattr(config, "HTML_VISUAL_AGY_CARD_MODEL", card, raising=False)
+    monkeypatch.setenv("HALOWEBUI_AGY_OAUTH_TOKEN_FILE", "/x/token")
+    return card
+
+
+def test_agy_prefs_combines_card_and_teams(monkeypatch):
+    calls = _world(monkeypatch, (200, {"ui_runner": "offiagy", "offiagy_models": []}))
+    _card(monkeypatch)
+    out = asyncio.run(hermes_routing.get_agy_prefs(None, USER))
+    assert out["card"] == {"model": "gemini-4-argon-high", "default": "gemini-4-argon-high", "signed_in": True}
+    assert out["teams"]["ui_runner"] == "offiagy"
+    assert calls == [("GET", "http://hermes.test/v1/halo-teams/agy-prefs", None)]
+
+
+def test_agy_prefs_card_still_shows_when_hermes_is_down(monkeypatch):
+    _world(monkeypatch, (500, {"error": {"message": "boom"}}))
+    _card(monkeypatch, "")
+    out = asyncio.run(hermes_routing.get_agy_prefs(None, USER))
+    assert out["card"]["model"] == "" and "boom" in out["teams"]["error"]
+
+
+def test_agy_prefs_save_card_locally_and_teams_on_hermes(monkeypatch):
+    calls = _world(monkeypatch, (200, {"ui_runner": "agy"}))
+    card = _card(monkeypatch)
+    asyncio.run(
+        hermes_routing.save_agy_prefs(
+            None, USER, {"card_model": "", "ui_runner": "agy", "offiagy_model": "gemini-4-neon-high"}
+        )
+    )
+    assert card.value == "" and card.saved == 1
+    assert calls[0] == (
+        "PUT", "http://hermes.test/v1/halo-teams/agy-prefs",
+        {"ui_runner": "agy", "offiagy_model": "gemini-4-neon-high"},
+    )
+    # only the card: nothing goes to hermes but the re-read
+    calls.clear()
+    asyncio.run(hermes_routing.save_agy_prefs(None, USER, {"card_model": "gemini-4-neon-low"}))
+    assert card.value == "gemini-4-neon-low" and [c[0] for c in calls] == ["GET"]
+    with pytest.raises(HermesSessionsError) as e:
+        asyncio.run(hermes_routing.save_agy_prefs(None, USER, {"card_model": "--evil flag"}))
+    assert e.value.status_code == 400 and card.value == "gemini-4-neon-low"
+
+
+def test_html_card_prefers_the_model_saved_on_the_page(monkeypatch):
+    from open_webui.utils import html_visual_prompt
+
+    card = _card(monkeypatch)
+    monkeypatch.setenv("HALOWEBUI_AGY_PREFERRED_MODEL", "from-env")
+    assert html_visual_prompt._agy_preferred_model() == "from-env"  # nothing saved yet
+    card.value = "gemini-4-neon-high"
+    card.save()
+    assert html_visual_prompt._agy_preferred_model() == "gemini-4-neon-high"
+    card.value = ""
+    card.save()
+    assert html_visual_prompt._agy_preferred_model() is None  # switched off on the page

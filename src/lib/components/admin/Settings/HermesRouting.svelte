@@ -3,13 +3,18 @@
 	// models for sub-agents, auxiliary tasks and media. Hermes owns the write and the history
 	// (hermes_cli/routing_admin.py); config.yaml stays the one source, so Telegram and the CLI
 	// follow the same routing. A save applies from the next message, no restart.
+	// 「AGY 优先」 rides along: the HTML card's offiagy model (a HaloWebUI setting), where team UI
+	// tasks start and offiagy's model (hermes' halo-teams-runners.json); one save bar for all.
 	import { onMount } from 'svelte';
 	import { toast } from 'svelte-sonner';
 	import {
+		getHermesAgyPrefs,
 		getHermesRouting,
 		probeHermesRoutingModel,
 		rollbackHermesRouting,
+		saveHermesAgyPrefs,
 		saveHermesRouting,
+		type HermesAgyPrefs,
 		type HermesRouting,
 		type HermesRoutingModel,
 		type HermesRoutingSnapshot
@@ -25,6 +30,8 @@
 		MEDIA_TIMEOUT_MIN,
 		ROUTING_MAX_AUX_FALLBACKS,
 		ROUTING_MAX_FALLBACKS,
+		agyChanges,
+		agyDraftFrom,
 		auxTaskLabel,
 		describeChange,
 		diffRouting,
@@ -33,7 +40,9 @@
 		modelFamily,
 		modelLabel,
 		orderedAuxTasks,
-		withPrimary
+		runnerLabel,
+		withPrimary,
+		type AgyDraft
 	} from '$lib/utils/hermes-routing';
 
 	const EFFORT_LABELS: Record<string, string> = {
@@ -56,6 +65,9 @@
 	let confirmTimer: ReturnType<typeof setTimeout> | undefined;
 	type ProbeState = { state: 'run' | 'ok' | 'fail'; ms?: number; error?: string };
 	let probes: Record<string, ProbeState> = {};
+	let agyPrefs: HermesAgyPrefs | null = null;
+	let agyDraft: AgyDraft | null = null;
+	let agyError = '';
 
 	const clone = <T,>(v: T): T => JSON.parse(JSON.stringify(v));
 
@@ -63,6 +75,20 @@
 		snap = next;
 		draft = clone(next.routing);
 		conflict = false;
+	};
+
+	const adoptAgy = (next: HermesAgyPrefs) => {
+		agyPrefs = next;
+		agyDraft = agyDraftFrom(next);
+	};
+
+	const loadAgy = async () => {
+		agyError = '';
+		try {
+			adoptAgy(await getHermesAgyPrefs(localStorage.token));
+		} catch (e) {
+			agyError = `${(e as Error)?.message ?? e}`;
+		}
 	};
 
 	const load = async () => {
@@ -78,6 +104,7 @@
 
 	onMount(() => {
 		load();
+		loadAgy();
 		getHaloClawConfig(localStorage.token)
 			.then((cfg: any) => (haloEffort = String(cfg?.default_reasoning_effort ?? '')))
 			.catch(() => {});
@@ -91,7 +118,24 @@
 		HermesRoutingModel
 	>;
 	$: changes = snap && draft ? diffRouting(snap.routing, draft) : [];
-	$: dirty = changes.length > 0;
+	$: routingDirty = changes.length > 0;
+	$: agy =
+		agyPrefs && agyDraft
+			? agyChanges(agyDraftFrom(agyPrefs), agyDraft)
+			: { update: {}, lines: [] as string[] };
+	$: agyDirty = agy.lines.length > 0;
+	$: dirty = routingDirty || agyDirty;
+	$: changeLines = [...changes.map(describeChange), ...agy.lines];
+	$: agyModels = agyPrefs?.teams.offiagy_models ?? [];
+	$: agyChoices = agyPrefs?.teams.ui_choices ?? [];
+	$: uiChain =
+		agyChoices.find((c) => c.name === agyDraft?.ui_runner)?.chain ??
+		(agyDraft?.ui_runner ? [agyDraft.ui_runner] : []);
+	// a saved model the list does not have (listing failed, or set by hand) stays selectable
+	const modelOptions = (list: { id: string; name: string }[], current: string) =>
+		current && !list.some((m) => m.id === current)
+			? [{ id: current, name: current }, ...list]
+			: list;
 	$: auxTasks = draft ? orderedAuxTasks(Object.keys(draft.auxiliary)) : [];
 	$: mainModel = draft ? modelById[draft.main] : undefined;
 	$: delegationPrimary = draft ? draft.delegation.model || draft.main : '';
@@ -121,6 +165,7 @@
 
 	const discard = () => {
 		if (snap) draft = clone(snap.routing);
+		if (agyPrefs) agyDraft = agyDraftFrom(agyPrefs);
 	};
 
 	const errorStatus = (e: any) => Number(e?.status) || 0;
@@ -128,11 +173,19 @@
 	const save = async () => {
 		if (!snap || !draft || !dirty) return;
 		saving = true;
+		let saved = 0;
 		try {
-			const next = await saveHermesRouting(localStorage.token, draft, snap.revision);
-			const n = next.changes?.length ?? 0;
-			adopt(next);
-			toast.success(n ? `已保存 ${n} 处改动，下一条消息起生效` : '没有需要保存的改动');
+			if (routingDirty) {
+				const next = await saveHermesRouting(localStorage.token, draft, snap.revision);
+				saved += next.changes?.length ?? 0;
+				adopt(next);
+			}
+			if (agyDirty) {
+				const n = agy.lines.length;
+				adoptAgy(await saveHermesAgyPrefs(localStorage.token, agy.update));
+				saved += n;
+			}
+			toast.success(saved ? `已保存 ${saved} 处改动，下一次任务起生效` : '没有需要保存的改动');
 		} catch (e) {
 			if (errorStatus(e) === 409) conflict = true;
 			toast.error(`${(e as Error)?.message ?? e}`);
@@ -194,7 +247,15 @@
 		return `${d.getMonth() + 1}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 	};
 
-	const lanes = (r: HermesRouting) => [
+	type Lane = {
+		key: string;
+		title: string;
+		primary: string;
+		chain: string[];
+		empty: string;
+		label?: (id: string) => string;
+	};
+	const lanes = (r: HermesRouting, a: AgyDraft | null, ui: string[]): Lane[] => [
 		{ key: 'chat', title: '对话', primary: r.main, chain: r.fallback, empty: '' },
 		{
 			key: 'delegation',
@@ -203,7 +264,27 @@
 			chain: r.delegation.fallback,
 			empty: '跟随主模型'
 		},
-		{ key: 'media', title: '媒体识别', primary: r.media.model, chain: [], empty: '不走首选' }
+		{ key: 'media', title: '媒体识别', primary: r.media.model, chain: [], empty: '不走首选' },
+		...(a
+			? [
+					{
+						key: 'card',
+						title: '回答卡片',
+						primary: a.card_model,
+						chain: a.card_model ? ['agy'] : [],
+						empty: runnerLabel('agy'),
+						label: (id: string) => (id === 'agy' ? runnerLabel('agy') : id)
+					},
+					{
+						key: 'ui',
+						title: '界面任务',
+						primary: ui[0] ?? '',
+						chain: ui.slice(1),
+						empty: '—',
+						label: runnerLabel
+					}
+				]
+			: [])
 	];
 </script>
 
@@ -250,7 +331,7 @@
 
 				<!-- the star-core: every lane at a glance, reflecting unsaved edits -->
 				<div class="hr-lanes mt-4">
-					{#each lanes(draft) as lane (lane.key)}
+					{#each lanes(draft, agyDraft, uiChain) as lane (lane.key)}
 						<div class="hr-lane" data-lane={lane.key}>
 							<span class="hr-lane-title">{lane.title}</span>
 							<span class="hr-node hr-core" class:hr-follow={!lane.primary}>
@@ -261,13 +342,15 @@
 									data-family={modelFamily(lane.primary)}
 									aria-hidden="true"
 								></span>
-								{modelLabel(lane.primary, lane.empty)}
+								{lane.label && lane.primary
+									? lane.label(lane.primary)
+									: modelLabel(lane.primary, lane.empty)}
 							</span>
 							{#each lane.chain as id (id)}
 								<span class="hr-beam" aria-hidden="true"></span>
 								<span class="hr-node" data-model={id}>
 									<span class="hr-dot" data-family={modelFamily(id)} aria-hidden="true"
-									></span>{modelLabel(id)}
+									></span>{lane.label ? lane.label(id) : modelLabel(id)}
 								</span>
 							{/each}
 							{#if lane.key === 'chat' && !lane.chain.length}
@@ -283,7 +366,7 @@
 
 				{#if dirty}
 					<div class="hr-unsaved mt-3" role="status">
-						未保存：{changes.length} 处改动，上面是改完后的样子
+						未保存：{changeLines.length} 处改动，上面是改完后的样子
 					</div>
 				{/if}
 			</section>
@@ -477,11 +560,103 @@
 					</div>
 				</section>
 
+				<!-- AGY first -->
+				<section class="glass-item hr-card px-4 py-3" data-section="agy">
+					<div class="hr-card-title">AGY 优先</div>
+					<div class="hr-card-hint">
+						回答卡片和协作台的前端 / 界面任务，先用 Google 账号登录的
+						AGY（offiagy），不行再换网关上的 agy（Hermes 的 gemini-chat）。
+					</div>
+					{#if !agyPrefs || !agyDraft}
+						{#if agyError}
+							<div class="hr-probe-error mt-2">读取失败：{agyError}</div>
+							<button type="button" class="hr-mini-btn mt-2" on:click={loadAgy}>重试</button>
+						{:else}
+							<div class="hr-card-hint mt-2">读取中…（要列出 offiagy 的模型，第一次稍慢）</div>
+						{/if}
+					{:else}
+						<div class="hr-aux mt-2">
+							<div class="hr-aux-row" data-agy="card">
+								<div class="hr-aux-name">
+									<span>回答卡片</span>
+									<span class="hr-card-hint">HTML 卡片先用它，失败或用掉一半时间就走网关 agy</span>
+								</div>
+								<div class="hr-aux-ctl">
+									<select
+										class="glass-input hr-select"
+										aria-label="回答卡片的 offiagy 模型"
+										bind:value={agyDraft.card_model}
+									>
+										<option value="">关闭：直接走网关 agy</option>
+										{#each modelOptions(agyModels, agyDraft.card_model) as m (m.id)}
+											<option value={m.id}>{m.name === m.id ? m.id : `${m.name} · ${m.id}`}</option>
+										{/each}
+									</select>
+									{#if !agyPrefs.card.signed_in}
+										<div class="hr-note">
+											没有 Google 登录凭据，卡片不会尝试 offiagy，只走网关 agy。
+										</div>
+									{/if}
+								</div>
+							</div>
+							{#if agyPrefs.teams.error}
+								<div class="hr-probe-error">协作台部分读取失败：{agyPrefs.teams.error}</div>
+							{:else}
+								<div class="hr-aux-row" data-agy="ui">
+									<div class="hr-aux-name">
+										<span>协作台界面任务</span>
+										<span class="hr-card-hint">没点名执行器的前端 / UI 成员从这里开始</span>
+									</div>
+									<div class="hr-aux-ctl">
+										<div class="hr-picker" role="radiogroup" aria-label="界面任务起点">
+											{#each agyChoices as c (c.name)}
+												<button
+													type="button"
+													class="halo-wb-opt hr-runner"
+													role="radio"
+													data-runner={c.name}
+													title={c.note}
+													aria-checked={agyDraft.ui_runner === c.name}
+													on:click={() => {
+														if (agyDraft) agyDraft.ui_runner = c.name;
+													}}>{runnerLabel(c.name)}</button
+												>
+											{/each}
+										</div>
+										<div class="hr-note">依次尝试：{uiChain.map(runnerLabel).join(' › ')}</div>
+									</div>
+								</div>
+								<div class="hr-aux-row" data-agy="offiagy-model">
+									<div class="hr-aux-name">
+										<span>offiagy 模型</span>
+										<span class="hr-card-hint">协作台和 /offiagy 派发用 Google 账号跑 AGY 时</span>
+									</div>
+									<div class="hr-aux-ctl">
+										<select
+											class="glass-input hr-select"
+											aria-label="offiagy 模型"
+											bind:value={agyDraft.offiagy_model}
+										>
+											<option value="">AGY 默认（agy 自己的设置）</option>
+											{#each modelOptions(agyModels, agyDraft.offiagy_model) as m (m.id)}
+												<option value={m.id}
+													>{m.name === m.id ? m.id : `${m.name} · ${m.id}`}</option
+												>
+											{/each}
+										</select>
+									</div>
+								</div>
+							{/if}
+						</div>
+					{/if}
+				</section>
+
 				<!-- history -->
 				<section class="glass-item hr-card px-4 py-3" data-section="history">
 					<div class="hr-card-title">改动记录</div>
 					<div class="hr-card-hint">
-						每次保存前都备份了整份配置。回滚只恢复模型这几项，其他配置不动。
+						每次保存前都备份了整份配置。回滚只恢复模型这几项，其他配置不动（「AGY
+						优先」的改动不记在这里）。
 					</div>
 					{#if snap.history.length === 0}
 						<div class="hr-card-hint mt-2">还没有网页上的改动。</div>
@@ -526,8 +701,8 @@
 					<span class="text-rose-500">配置刚被别处改过</span>
 					<button type="button" class="hr-link-text" on:click={load}>重新读取</button>
 				{:else if dirty}
-					<span class="hr-bar-count">{changes.length} 处改动</span>
-					<span class="hr-bar-list">{changes.map(describeChange).join('；')}</span>
+					<span class="hr-bar-count">{changeLines.length} 处改动</span>
+					<span class="hr-bar-list">{changeLines.join('；')}</span>
 				{:else}
 					<span class="hr-card-hint">没有未保存的改动</span>
 				{/if}
@@ -804,6 +979,14 @@
 		font-size: 0.7rem;
 		color: rgb(100 116 139);
 		flex: none;
+	}
+	.hr-select {
+		width: min(100%, 22rem);
+		padding: 0.3rem 0.5rem;
+		font-size: 0.78rem;
+	}
+	.hr-runner {
+		font-size: 0.72rem;
 	}
 	.hr-num {
 		width: 5.5rem;

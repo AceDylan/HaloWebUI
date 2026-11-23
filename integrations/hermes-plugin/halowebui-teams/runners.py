@@ -25,7 +25,10 @@ Results are cached for ``CACHE_SECONDS``; ``check(force=True)`` re-runs them.
   {"order": [...], "kinds": {"code": "codex"}, "disabled": ["anyclaude"],
    "unavailable": {"cchclaude": "中转维护中"}}
 "unavailable" marks a runner down by hand (maintenance) — it then falls back like any other
-unavailable runner, with that reason.
+unavailable runner, with that reason. "kinds" may also start a kind on offiagy (it then falls back
+to agy, see ``AUTO_THEN``); "offiagy_model" is the model offiagy runs with (agy_runner.py reads it;
+empty = AGY's own default). HaloWebUI's 「Hermes 模型」 page edits "kinds.ui" and "offiagy_model"
+(``agy_prefs`` / ``save_agy_prefs``).
 """
 
 from __future__ import annotations
@@ -196,11 +199,95 @@ def fallback_order() -> tuple[str, ...]:
     return DEFAULT_ORDER
 
 
+def _startable(name: Any) -> bool:
+    """A runner a kind may start on: any but an official account that has no fallback."""
+    return name in BY_NAME and (name not in NAMED_ONLY or name in AUTO_THEN)
+
+
 def kind_default(kind: str) -> str:
     custom = overrides().get("kinds")
-    if isinstance(custom, dict) and custom.get(kind) in BY_NAME and custom.get(kind) not in NAMED_ONLY:
+    if isinstance(custom, dict) and _startable(custom.get(kind)):
         return custom[kind]
     return KINDS.get(kind, KINDS[DEFAULT_KIND])["default"]
+
+
+# --- AGY preferences (HaloWebUI 「Hermes 模型」 page) --------------------------------------------
+
+AGY_MODEL_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}")
+OFFIAGY_MODELS_TTL = 3600
+_offiagy_models_cache: dict[str, Any] = {"at": 0.0, "models": []}
+
+
+def offiagy_models(*, force: bool = False) -> list[dict]:
+    """``offiagy models`` as [{id, name}] (cached for an hour; [] when it cannot be listed)."""
+    if not force and _offiagy_models_cache["models"] and time.time() - _offiagy_models_cache["at"] < OFFIAGY_MODELS_TTL:
+        return _offiagy_models_cache["models"]
+    command = _which("offiagy") or "offiagy"
+    try:
+        out = subprocess.run([command, "models"], capture_output=True, text=True, timeout=40).stdout
+    except (OSError, subprocess.SubprocessError) as exc:
+        logger.warning("halowebui-teams: offiagy models failed: %s", exc)
+        return _offiagy_models_cache["models"]
+    models = []
+    for line in out.splitlines():
+        model_id, _, name = line.partition("\t")
+        if name and AGY_MODEL_RE.fullmatch(model_id.strip()):
+            models.append({"id": model_id.strip(), "name": name.strip()})
+    if models:
+        _offiagy_models_cache.update(at=time.time(), models=models)
+    return models or _offiagy_models_cache["models"]
+
+
+def agy_prefs() -> dict:
+    data = overrides()
+    model = data.get("offiagy_model")
+    return {
+        "ui_runner": kind_default("ui"),
+        "ui_runner_default": KINDS["ui"]["default"],
+        "ui_chain": chain_from(kind_default("ui"), auto=True),
+        "ui_choices": [{"name": n, "label": BY_NAME[n].label, "note": BY_NAME[n].note,
+                        "chain": chain_from(n, auto=True)} for n in NAMES if _startable(n)],
+        "offiagy_model": model if isinstance(model, str) and AGY_MODEL_RE.fullmatch(model) else "",
+        "offiagy_models": offiagy_models(),
+    }
+
+
+def save_agy_prefs(ui_runner: Any = None, offiagy_model: Any = None) -> dict:
+    """Write ``kinds.ui`` / ``offiagy_model`` into the override file (other keys untouched).
+    ``ui_runner`` equal to the built-in default drops the override; ``offiagy_model`` "" too."""
+    try:
+        data = json.loads(OVERRIDE_FILE.read_text(encoding="utf-8")) if OVERRIDE_FILE.exists() else {}
+    except (OSError, ValueError):
+        raise ValueError(f"{OVERRIDE_FILE} 不是合法 JSON，先手动修好再改")
+    data = data if isinstance(data, dict) else {}
+    if ui_runner is not None:
+        if not _startable(ui_runner):
+            raise ValueError(f"界面任务不能从 {ui_runner} 开始")
+        kinds = data.get("kinds") if isinstance(data.get("kinds"), dict) else {}
+        if ui_runner == KINDS["ui"]["default"]:
+            kinds.pop("ui", None)
+        else:
+            kinds["ui"] = ui_runner
+        if kinds:
+            data["kinds"] = kinds
+        else:
+            data.pop("kinds", None)
+    if offiagy_model is not None:
+        model = str(offiagy_model).strip()
+        if model and not AGY_MODEL_RE.fullmatch(model):
+            raise ValueError("offiagy 模型不是合法的模型 ID")
+        if model:
+            data["offiagy_model"] = model
+        else:
+            data.pop("offiagy_model", None)
+    if data:
+        tmp = OVERRIDE_FILE.with_name(OVERRIDE_FILE.name + ".tmp")
+        tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        os.replace(tmp, OVERRIDE_FILE)
+    else:  # everything back to the built-in defaults: no override file at all
+        OVERRIDE_FILE.unlink(missing_ok=True)
+    _override_cache.update(mtime=None, data={})
+    return agy_prefs()
 
 
 def normalize_kind(kind: Any) -> str:

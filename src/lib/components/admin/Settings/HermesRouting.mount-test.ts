@@ -41,7 +41,29 @@ const snapshot = (over: any = {}) => ({
 	...over
 });
 
+const agyPrefs = (over: any = {}) => ({
+	card: { model: 'gemini-4-argon-high', default: 'gemini-4-argon-high', signed_in: true },
+	teams: {
+		ui_runner: 'offiagy',
+		ui_runner_default: 'offiagy',
+		ui_chain: ['offiagy', 'agy', 'hermes'],
+		ui_choices: [
+			{ name: 'offiagy', label: 'offiagy', note: '', chain: ['offiagy', 'agy', 'hermes'] },
+			{ name: 'agy', label: 'agy', note: '', chain: ['agy', 'hermes'] },
+			{ name: 'hermes', label: 'Hermes', note: '', chain: ['hermes'] }
+		],
+		offiagy_model: '',
+		offiagy_models: [
+			{ id: 'gemini-4-argon-high', name: 'Gemini 4 Argon (High)' },
+			{ id: 'gemini-4-neon-high', name: 'Gemini 4 Neon (High)' }
+		]
+	},
+	...over
+});
+
 const api = vi.hoisted(() => ({
+	getHermesAgyPrefs: vi.fn(),
+	saveHermesAgyPrefs: vi.fn(),
 	getHermesRouting: vi.fn(),
 	saveHermesRouting: vi.fn(),
 	rollbackHermesRouting: vi.fn(),
@@ -82,6 +104,7 @@ const pill = (root: any, section: string, id: string) =>
 
 beforeEach(() => {
 	api.getHermesRouting.mockResolvedValue(snapshot());
+	api.getHermesAgyPrefs.mockResolvedValue(agyPrefs());
 });
 
 afterEach(() => {
@@ -206,5 +229,62 @@ describe('Hermes 模型 settings', () => {
 		await sleep(20);
 		expect(text(root.querySelector('.hr-model[data-model="gpt-chat"] .hr-probe'))).toBe('1.2s');
 		expect(text(root.querySelector('.hr-probe-error'))).toBe('claude-chat：HTTP 503');
+	});
+
+	it('edits the AGY preferences with the same save bar', async () => {
+		const root = await mount();
+		await waitFor(() => root.querySelector('[data-lane="ui"]'), 'agy lanes');
+		expect(text(root.querySelector('[data-lane="card"]'))).toBe(
+			'回答卡片 gemini-4-argon-high agy（网关 gemini-chat）'
+		);
+		expect(text(root.querySelector('[data-lane="ui"]'))).toBe(
+			'界面任务 offiagy（Google 账号） agy（网关 gemini-chat） Hermes'
+		);
+
+		root.querySelector('[data-agy="ui"] [data-runner="agy"]').click();
+		const select = root.querySelector('[aria-label="回答卡片的 offiagy 模型"]');
+		for (const option of Array.from(select.querySelectorAll('option')) as any[]) {
+			option.selected = option.value === '';
+			if (option.selected) option.setAttribute('selected', '');
+			else option.removeAttribute('selected');
+		}
+		select.dispatchEvent(new Event('change'));
+		await sleep(20);
+		expect(text(root.querySelector('[data-lane="ui"]'))).toBe(
+			'界面任务 agy（网关 gemini-chat） Hermes'
+		);
+		expect(text(root.querySelector('[data-lane="card"]'))).toBe('回答卡片 agy（网关 gemini-chat）');
+		expect(text(root.querySelector('.hr-bar'))).toContain('2 处改动');
+		expect(text(root.querySelector('.hr-bar'))).toContain(
+			'界面任务起点：offiagy（Google 账号） → agy（网关 gemini-chat）'
+		);
+
+		api.saveHermesAgyPrefs.mockResolvedValue(
+			agyPrefs({
+				card: { model: '', default: 'gemini-4-argon-high', signed_in: true },
+				teams: { ...agyPrefs().teams, ui_runner: 'agy', ui_chain: ['agy', 'hermes'] }
+			})
+		);
+		root.querySelector('.hr-save').click();
+		await waitFor(() => api.saveHermesAgyPrefs.mock.calls.length, 'agy save');
+		expect(api.saveHermesAgyPrefs.mock.calls[0][1]).toEqual({ card_model: '', ui_runner: 'agy' });
+		expect(api.saveHermesRouting).not.toHaveBeenCalled();
+		await waitFor(
+			() => text(root.querySelector('.hr-bar')).includes('没有未保存的改动'),
+			'clean bar'
+		);
+	});
+
+	it('still edits the routing when the AGY part cannot be read', async () => {
+		api.getHermesAgyPrefs.mockRejectedValue(new Error('连不上 Hermes'));
+		const root = await mount();
+		await waitFor(
+			() => text(root.querySelector('[data-section="agy"]')).includes('读取失败'),
+			'agy error'
+		);
+		expect(root.querySelector('[data-lane="ui"]')).toBeFalsy();
+		pill(root, 'main', 'gpt-chat').click();
+		await sleep(20);
+		expect(text(root.querySelector('.hr-bar'))).toContain('2 处改动');
 	});
 });

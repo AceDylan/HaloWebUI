@@ -309,6 +309,22 @@ async def _runners_check(request):
     return _json_response(await asyncio.to_thread(runners.public_registry, {**runners.check(), **result}))
 
 
+async def _agy_prefs_get(request):
+    from . import runners
+
+    return _json_response(await asyncio.to_thread(runners.agy_prefs))
+
+
+async def _agy_prefs_put(request):
+    """HaloWebUI 「Hermes 模型」 page (admin only there): where UI tasks start, offiagy's model."""
+    from . import runners
+
+    data = await _body(request)
+    result = await asyncio.to_thread(
+        runners.save_agy_prefs, data.get("ui_runner"), data.get("offiagy_model"))
+    return _json_response(result)
+
+
 async def _plan_resolve(request):
     from .plan import validate_plan
 
@@ -517,6 +533,8 @@ def install(app: Any, adapter: Any) -> None:
     base = "/v1/halo-teams"
     router.add_get(base + "/meta", _wrap(adapter, _meta))
     router.add_post(base + "/runners/check", _wrap(adapter, _runners_check))
+    router.add_get(base + "/agy-prefs", _wrap(adapter, _agy_prefs_get))
+    router.add_put(base + "/agy-prefs", _wrap(adapter, _agy_prefs_put))
     router.add_post(base + "/plan/resolve", _wrap(adapter, _plan_resolve))
     router.add_post(base + "/plan/decide", _wrap(adapter, _plan_decide))
     router.add_get(base + "/plan/progress", _wrap(adapter, _plan_progress))

@@ -65,3 +65,26 @@ describe('hermes routing helpers', () => {
 		]);
 	});
 });
+
+describe('agy preferences', () => {
+	it('sends only what changed, with plain lines', async () => {
+		const { agyChanges } = await import('./hermes-routing');
+		const before = { card_model: 'gemini-4-argon-high', ui_runner: 'offiagy', offiagy_model: '' };
+		expect(agyChanges(before, { ...before })).toEqual({ update: {}, lines: [] });
+		const out = agyChanges(before, {
+			card_model: undefined as any,
+			ui_runner: 'agy',
+			offiagy_model: 'gemini-4-neon-high'
+		});
+		expect(out.update).toEqual({
+			card_model: '',
+			ui_runner: 'agy',
+			offiagy_model: 'gemini-4-neon-high'
+		});
+		expect(out.lines).toEqual([
+			'回答卡片：gemini-4-argon-high → 关闭（直接走网关 agy）',
+			'界面任务起点：offiagy（Google 账号） → agy（网关 gemini-chat）',
+			'offiagy 模型：AGY 默认 → gemini-4-neon-high'
+		]);
+	});
+});

@@ -16,6 +16,8 @@ GET/POST/PATCH/DELETE /api/v1/hermes/jobs[/{id}[/pause|resume|run|outputs]] — 
 GET/PUT /api/v1/hermes/routing, POST /api/v1/hermes/routing/rollback|probe — hermes 模型路由
 (main model, fallback chain, sub-agents, auxiliary tasks, media) for the 「Hermes 模型」 page,
 admin only: hermes validates, keeps the history and writes its config.yaml.
+GET/PUT /api/v1/hermes/agy-prefs — the page's 「AGY 优先」: the HTML card's offiagy model, where
+team UI tasks start and offiagy's model (admin only).
 
 GET /api/v1/hermes/runner-stats?days= — background runner runs with cost / time / turns
 (admin only), for the usage page's 后台任务 tab.
@@ -556,5 +558,28 @@ async def probe_hermes_routing_model(
 ):
     try:
         return await hermes_routing.probe_model(request, user, form_data.model)
+    except HermesSessionsError as e:
+        raise _job_error(e)
+
+
+class HermesAgyPrefsForm(BaseModel):
+    card_model: Optional[str] = Field(default=None, max_length=128)
+    ui_runner: Optional[str] = Field(default=None, max_length=32)
+    offiagy_model: Optional[str] = Field(default=None, max_length=128)
+
+
+@router.get("/agy-prefs")
+async def get_hermes_agy_prefs(request: Request, user=Depends(get_admin_user)):
+    return await hermes_routing.get_agy_prefs(request, user)
+
+
+@router.put("/agy-prefs")
+async def save_hermes_agy_prefs(
+    request: Request, form_data: HermesAgyPrefsForm, user=Depends(get_admin_user)
+):
+    try:
+        return await hermes_routing.save_agy_prefs(
+            request, user, form_data.model_dump(exclude_unset=True)
+        )
     except HermesSessionsError as e:
         raise _job_error(e)

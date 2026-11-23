@@ -298,7 +298,8 @@
 								Hermes 配置里的模型，下面每一处都只能从这里选。点「测试」发一条真实小请求。
 							</div>
 						</div>
-						<button type="button" class="halo-wb-opt" on:click={probeAll}>全部测试</button>
+						<button type="button" class="halo-wb-opt hr-nowrap" on:click={probeAll}>全部测试</button
+						>
 					</div>
 					<div class="hr-models mt-2">
 						{#each models as m (m.id)}
@@ -812,7 +813,7 @@
 
 	.hr-models {
 		display: grid;
-		grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr));
+		grid-template-columns: repeat(auto-fill, minmax(min(100%, 19rem), 1fr));
 		gap: 0.4rem;
 	}
 	.hr-model {
@@ -826,12 +827,18 @@
 	:global(.dark) .hr-model {
 		border-color: rgb(255 255 255 / 0.07);
 	}
+	.hr-nowrap {
+		flex: none;
+		white-space: nowrap;
+	}
 	.hr-model-name {
+		white-space: nowrap;
 		font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 		font-size: 0.78rem;
 		font-weight: 600;
 	}
 	.hr-tag {
+		white-space: nowrap;
 		border-radius: 0.4rem;
 		padding: 0.05rem 0.35rem;
 		font-size: 0.62rem;
@@ -847,6 +854,7 @@
 		color: #67e8f9;
 	}
 	.hr-probe {
+		white-space: nowrap;
 		font-size: 0.68rem;
 		font-variant-numeric: tabular-nums;
 		color: rgb(148 163 184);

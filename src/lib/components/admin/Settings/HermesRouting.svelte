@@ -37,6 +37,7 @@
 		diffRouting,
 		historySourceLabel,
 		isForeignModel,
+		isValidMediaTimeout,
 		modelFamily,
 		modelLabel,
 		orderedAuxTasks,
@@ -55,6 +56,7 @@
 	};
 
 	let loading = true;
+	let refreshing = false;
 	let loadError = '';
 	let saving = false;
 	let snap: HermesRoutingSnapshot | null = null;
@@ -63,11 +65,13 @@
 	let conflict = false;
 	let confirmRollback = '';
 	let confirmTimer: ReturnType<typeof setTimeout> | undefined;
-	type ProbeState = { state: 'run' | 'ok' | 'fail'; ms?: number; error?: string };
+	type ProbeState = { state: 'run' | 'ok' | 'fail'; ms?: number; reply?: string; error?: string };
 	let probes: Record<string, ProbeState> = {};
 	let agyPrefs: HermesAgyPrefs | null = null;
 	let agyDraft: AgyDraft | null = null;
 	let agyError = '';
+	let agyRefreshing = false;
+	let auxCollapsed = false;
 
 	const clone = <T,>(v: T): T => JSON.parse(JSON.stringify(v));
 
@@ -82,13 +86,39 @@
 		agyDraft = agyDraftFrom(next);
 	};
 
-	const loadAgy = async () => {
+	const loadAgy = async (opts?: { refresh?: boolean }) => {
 		agyError = '';
 		try {
-			adoptAgy(await getHermesAgyPrefs(localStorage.token));
+			adoptAgy(await getHermesAgyPrefs(localStorage.token, opts));
 		} catch (e) {
 			agyError = `${(e as Error)?.message ?? e}`;
 		}
+	};
+
+	const refreshAgyModels = async () => {
+		if (agyRefreshing) return;
+		agyRefreshing = true;
+		agyError = '';
+		try {
+			const next = await getHermesAgyPrefs(localStorage.token, { refresh: true });
+			if (agyDirty && agyDraft) {
+				agyPrefs = next;
+			} else {
+				adoptAgy(next);
+			}
+			const count = next.teams.offiagy_models?.length ?? 0;
+			if (next.teams.offiagy_models_error) {
+				toast.error(next.teams.offiagy_models_error);
+			} else if (next.teams.error) {
+				toast.error(next.teams.error);
+			} else {
+				toast.success(`已刷新 AGY 模型列表（${count} 个）`);
+			}
+		} catch (e) {
+			agyError = `${(e as Error)?.message ?? e}`;
+			toast.error(`刷新失败：${agyError}`);
+		}
+		agyRefreshing = false;
 	};
 
 	const load = async () => {
@@ -100,6 +130,13 @@
 			loadError = `${e}`;
 		}
 		loading = false;
+	};
+
+	const reloadAll = async () => {
+		if (refreshing) return;
+		refreshing = true;
+		await Promise.all([load(), loadAgy()]);
+		refreshing = false;
 	};
 
 	onMount(() => {
@@ -127,6 +164,8 @@
 	$: dirty = routingDirty || agyDirty;
 	$: changeLines = [...changes.map(describeChange), ...agy.lines];
 	$: agyModels = agyPrefs?.teams.offiagy_models ?? [];
+	$: agyModelsAt = agyPrefs?.teams.offiagy_models_at ?? 0;
+	$: agyModelsError = agyPrefs?.teams.offiagy_models_error ?? '';
 	$: agyChoices = agyPrefs?.teams.ui_choices ?? [];
 	$: uiChain =
 		agyChoices.find((c) => c.name === agyDraft?.ui_runner)?.chain ??
@@ -137,8 +176,12 @@
 			? [{ id: current, name: current }, ...list]
 			: list;
 	$: auxTasks = draft ? orderedAuxTasks(Object.keys(draft.auxiliary)) : [];
+	$: auxCustomCount = draft ? auxTasks.filter((t) => Boolean(draft!.auxiliary[t]?.model)).length : 0;
+	$: auxChangedCount = changes.filter((c) => c.path.startsWith('auxiliary.')).length;
 	$: mainModel = draft ? modelById[draft.main] : undefined;
 	$: delegationPrimary = draft ? draft.delegation.model || draft.main : '';
+	$: mediaTimeoutInvalid = Boolean(draft && !isValidMediaTimeout(draft.media.timeout));
+	$: anyProbing = Object.values(probes).some((p) => p.state === 'run');
 
 	const touch = () => (draft = draft);
 
@@ -146,6 +189,10 @@
 		if (!draft) return;
 		draft.main = id;
 		draft.fallback = withPrimary(draft.fallback, id);
+		// When delegation follows main, its chain cannot contain the new main model either.
+		if (!draft.delegation.model) {
+			draft.delegation.fallback = withPrimary(draft.delegation.fallback, id);
+		}
 		touch();
 	};
 	const setDelegation = (id: string) => {
@@ -171,14 +218,16 @@
 	const errorStatus = (e: any) => Number(e?.status) || 0;
 
 	const save = async () => {
-		if (!snap || !draft || !dirty) return;
+		if (!snap || !draft || !dirty || mediaTimeoutInvalid) return;
 		saving = true;
 		let saved = 0;
+		let routingSaved = false;
 		try {
 			if (routingDirty) {
 				const next = await saveHermesRouting(localStorage.token, draft, snap.revision);
 				saved += next.changes?.length ?? 0;
 				adopt(next);
+				routingSaved = true;
 			}
 			if (agyDirty) {
 				const n = agy.lines.length;
@@ -188,7 +237,8 @@
 			toast.success(saved ? `已保存 ${saved} 处改动，下一次任务起生效` : '没有需要保存的改动');
 		} catch (e) {
 			if (errorStatus(e) === 409) conflict = true;
-			toast.error(`${(e as Error)?.message ?? e}`);
+			const msg = `${(e as Error)?.message ?? e}`;
+			toast.error(routingSaved ? `Hermes 路由已保存，但 AGY 优先保存失败：${msg}` : msg);
 		}
 		saving = false;
 	};
@@ -223,14 +273,17 @@
 			probes = {
 				...probes,
 				[id]: r.ok
-					? { state: 'ok', ms: r.latency_ms }
+					? { state: 'ok', ms: r.latency_ms, reply: r.reply }
 					: { state: 'fail', ms: r.latency_ms, error: r.error || '无回复' }
 			};
 		} catch (e) {
 			probes = { ...probes, [id]: { state: 'fail', error: `${(e as Error)?.message ?? e}` } };
 		}
 	};
-	const probeAll = () => modelIds.forEach((id) => probe(id));
+	const probeAll = () => {
+		if (anyProbing) return;
+		modelIds.forEach((id) => probe(id));
+	};
 
 	const probeText = (p?: ProbeState) =>
 		!p
@@ -241,10 +294,25 @@
 					? `${((p.ms ?? 0) / 1000).toFixed(1)}s`
 					: '不通';
 
+	const probeTitle = (p?: ProbeState) =>
+		!p ? '' : p.state === 'ok' ? (p.reply ? `回复：${p.reply}` : '连通正常') : (p.error ?? '');
+
 	const timeText = (at: number) => {
 		const d = new Date(at * 1000);
 		const pad = (n: number) => String(n).padStart(2, '0');
 		return `${d.getMonth() + 1}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+	};
+
+	const clockText = (at: number) => {
+		const d = new Date(at * 1000);
+		const pad = (n: number) => String(n).padStart(2, '0');
+		return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+	};
+
+	const onBeforeUnload = (e: BeforeUnloadEvent) => {
+		if (!dirty) return;
+		e.preventDefault();
+		e.returnValue = '';
 	};
 
 	type Lane = {
@@ -281,12 +349,17 @@
 						primary: ui[0] ?? '',
 						chain: ui.slice(1),
 						empty: '—',
-						label: runnerLabel
+						label: (id: string) =>
+							id === 'offiagy' && a.offiagy_model
+								? `${runnerLabel(id)} · ${a.offiagy_model}`
+								: runnerLabel(id)
 					}
 				]
 			: [])
 	];
 </script>
+
+<svelte:window on:beforeunload={onBeforeUnload} />
 
 <div class="hr-page flex flex-col h-full text-sm" data-halo-mode="hermes" data-hermes-routing>
 	<div class="overflow-y-scroll scrollbar-hidden h-full min-h-0">
@@ -327,6 +400,15 @@
 							Telegram、命令行是同一份配置，保存后下一条消息起生效，不用重启。对话里单独选过模型的不受影响。
 						</p>
 					</div>
+					<button
+						type="button"
+						class="halo-wb-opt hr-nowrap"
+						disabled={refreshing || saving || dirty}
+						title={dirty ? '请先保存或放弃当前改动' : '重新读取最新配置'}
+						on:click={reloadAll}
+					>
+						{refreshing ? '刷新中…' : '刷新配置'}
+					</button>
 				</div>
 
 				<!-- the star-core: every lane at a glance, reflecting unsaved edits -->
@@ -358,7 +440,10 @@
 								<span class="hr-lane-warn">没有兜底，主模型挂了就没人回答</span>
 							{/if}
 							{#if lane.key === 'media'}
-								<span class="hr-lane-meta">超时 {draft.media.timeout} 秒</span>
+								<span class="hr-lane-meta">超时 {draft.media.timeout ?? '—'} 秒</span>
+							{/if}
+							{#if lane.key === 'card' && lane.primary && agyPrefs && !agyPrefs.card.signed_in}
+								<span class="hr-lane-warn">未登录，实际走网关</span>
 							{/if}
 						</div>
 					{/each}
@@ -378,10 +463,14 @@
 						<div>
 							<div class="hr-card-title">可用模型</div>
 							<div class="hr-card-hint">
-								Hermes 配置里的模型，下面每一处都只能从这里选。点「测试」发一条真实小请求。
+								实时读取 Hermes `config.yaml` 中已配置的模型，下面每一处都只能从这里选。点「测试」发一条真实小请求。
 							</div>
 						</div>
-						<button type="button" class="halo-wb-opt hr-nowrap" on:click={probeAll}>全部测试</button
+						<button
+							type="button"
+							class="halo-wb-opt hr-nowrap"
+							disabled={anyProbing || !modelIds.length}
+							on:click={probeAll}>{anyProbing ? '测试中…' : '全部测试'}</button
 						>
 					</div>
 					<div class="hr-models mt-2">
@@ -395,7 +484,7 @@
 								<span
 									class="hr-probe"
 									data-state={probes[m.id]?.state ?? 'idle'}
-									title={probes[m.id]?.error ?? ''}>{probeText(probes[m.id])}</span
+									title={probeTitle(probes[m.id])}>{probeText(probes[m.id])}</span
 								>
 								<button
 									type="button"
@@ -451,130 +540,50 @@
 					</div>
 				</section>
 
-				<!-- delegation -->
-				<section class="glass-item hr-card px-4 py-3" data-section="delegation">
-					<div class="hr-card-title">子代理</div>
-					<div class="hr-card-hint">
-						Hermes 把子任务分给子代理时用的模型。它有自己的兜底链，不会沿用上面那条。
-					</div>
-					<div class="mt-2">
-						<ModelPicker
-							label="子代理模型"
-							value={draft.delegation.model}
-							models={modelIds}
-							emptyLabel="跟随主模型"
-							on:change={(e) => setDelegation(e.detail)}
-						/>
-					</div>
-					<div class="hr-sub mt-3">
-						<span class="hr-sub-label">失败时依次换</span>
-						<ChainEditor
-							label="子代理兜底链"
-							chain={draft.delegation.fallback}
-							models={modelIds}
-							primary={delegationPrimary}
-							limit={ROUTING_MAX_FALLBACKS}
-							on:change={(e) => {
-								if (draft) draft.delegation.fallback = e.detail;
-								touch();
-							}}
-						/>
-					</div>
-				</section>
-
-				<!-- media -->
-				<section class="glass-item hr-card px-4 py-3" data-section="media">
-					<div class="hr-card-title">媒体识别</div>
-					<div class="hr-card-hint">
-						语音转文字、看图、看视频先交给它，失败再走各入口原来的路径。
-					</div>
-					<div class="mt-2">
-						<ModelPicker
-							label="媒体识别模型"
-							value={draft.media.model}
-							models={modelIds}
-							emptyLabel="不走首选"
-							on:change={(e) => {
-								if (draft) draft.media.model = e.detail;
-								touch();
-							}}
-						/>
-					</div>
-					<label class="hr-sub mt-3">
-						<span class="hr-sub-label">超时</span>
-						<input
-							class="glass-input hr-num"
-							type="number"
-							min={MEDIA_TIMEOUT_MIN}
-							max={MEDIA_TIMEOUT_MAX}
-							step="10"
-							bind:value={draft.media.timeout}
-						/>
-						<span class="hr-card-hint">秒（{MEDIA_TIMEOUT_MIN}–{MEDIA_TIMEOUT_MAX}）</span>
-					</label>
-				</section>
-
-				<!-- auxiliary -->
-				<section class="glass-item hr-card px-4 py-3" data-section="auxiliary">
-					<div class="hr-card-title">后台小任务</div>
-					<div class="hr-card-hint">
-						压缩上下文、起标题、提取网页这类辅助活儿。「跟随主模型」就用上面的主模型和兜底链。
-					</div>
-					<div class="hr-aux mt-2">
-						{#each auxTasks as task (task)}
-							<div class="hr-aux-row" data-task={task}>
-								<div class="hr-aux-name">
-									<span>{auxTaskLabel(task)}</span>
-									{#if AUX_TASKS[task]?.hint}<span class="hr-card-hint">{AUX_TASKS[task].hint}</span
-										>{/if}
-								</div>
-								<div class="hr-aux-ctl">
-									<ModelPicker
-										compact
-										label={auxTaskLabel(task)}
-										value={draft.auxiliary[task].model}
-										models={modelIds}
-										emptyLabel="跟随主模型"
-										on:change={(e) => setAux(task, e.detail)}
-									/>
-									{#if draft.auxiliary[task].model && !isForeignModel(draft.auxiliary[task].model)}
-										<div class="hr-aux-chain">
-											<span class="hr-sub-label">兜底</span>
-											<ChainEditor
-												compact
-												label="{auxTaskLabel(task)}兜底"
-												chain={draft.auxiliary[task].fallback}
-												models={modelIds}
-												primary={draft.auxiliary[task].model}
-												limit={ROUTING_MAX_AUX_FALLBACKS}
-												on:change={(e) => {
-													if (draft) draft.auxiliary[task].fallback = e.detail;
-													touch();
-												}}
-											/>
-										</div>
-									{/if}
-								</div>
-							</div>
-						{/each}
-					</div>
-				</section>
-
 				<!-- AGY first -->
 				<section class="glass-item hr-card px-4 py-3" data-section="agy">
-					<div class="hr-card-title">AGY 优先</div>
-					<div class="hr-card-hint">
-						回答卡片和协作台的前端 / 界面任务，先用 Google 账号登录的
-						AGY（offiagy），不行再换网关上的 agy（Hermes 的 gemini-chat）。
+					<div class="hr-card-head">
+						<div>
+							<div class="hr-card-title">AGY 优先</div>
+							<div class="hr-card-hint">
+								回答卡片和协作台的前端 / 界面任务，先用 Google 账号登录的
+								AGY（offiagy），不行再换网关上的 agy（Hermes 的 gemini-chat）。
+							</div>
+						</div>
+						{#if agyPrefs}
+							<button
+								type="button"
+								class="halo-wb-opt hr-nowrap"
+								disabled={agyRefreshing}
+								title="立即从 offiagy models 重新拉取最新模型列表"
+								on:click={refreshAgyModels}
+							>
+								{agyRefreshing ? '刷新中…' : '刷新模型'}
+							</button>
+						{/if}
 					</div>
 					{#if !agyPrefs || !agyDraft}
 						{#if agyError}
 							<div class="hr-probe-error mt-2">读取失败：{agyError}</div>
-							<button type="button" class="hr-mini-btn mt-2" on:click={loadAgy}>重试</button>
+							<button type="button" class="hr-mini-btn mt-2" on:click={() => loadAgy()}>重试</button>
 						{:else}
 							<div class="hr-card-hint mt-2">读取中…（要列出 offiagy 的模型，第一次稍慢）</div>
 						{/if}
 					{:else}
+						{#if !agyPrefs.teams.error}
+							<div class="hr-note mt-1.5">
+								{#if agyModels.length}
+									动态拉取：共 {agyModels.length} 个 offiagy 模型{agyModelsAt
+										? `（${clockText(agyModelsAt)} 更新，1 小时自动刷新）`
+										: '（1 小时自动刷新）'}
+								{:else if !agyModelsError}
+									暂未拉取到 offiagy 模型列表，可点右上角「刷新模型」重试。
+								{/if}
+							</div>
+							{#if agyModelsError}
+								<div class="hr-probe-error mt-1">{agyModelsError}</div>
+							{/if}
+						{/if}
 						<div class="hr-aux mt-2">
 							<div class="hr-aux-row" data-agy="card">
 								<div class="hr-aux-name">
@@ -651,6 +660,142 @@
 					{/if}
 				</section>
 
+				<!-- delegation -->
+				<section class="glass-item hr-card px-4 py-3" data-section="delegation">
+					<div class="hr-card-title">子代理</div>
+					<div class="hr-card-hint">
+						Hermes 把子任务分给子代理时用的模型。它有自己的兜底链，不会沿用上面那条。
+					</div>
+					<div class="mt-2">
+						<ModelPicker
+							label="子代理模型"
+							value={draft.delegation.model}
+							models={modelIds}
+							emptyLabel="跟随主模型"
+							on:change={(e) => setDelegation(e.detail)}
+						/>
+					</div>
+					<div class="hr-sub mt-3">
+						<span class="hr-sub-label">失败时依次换</span>
+						<ChainEditor
+							label="子代理兜底链"
+							chain={draft.delegation.fallback}
+							models={modelIds}
+							primary={delegationPrimary}
+							limit={ROUTING_MAX_FALLBACKS}
+							on:change={(e) => {
+								if (draft) draft.delegation.fallback = e.detail;
+								touch();
+							}}
+						/>
+					</div>
+				</section>
+
+				<!-- media -->
+				<section class="glass-item hr-card px-4 py-3" data-section="media">
+					<div class="hr-card-title">媒体识别</div>
+					<div class="hr-card-hint">
+						语音转文字、看图、看视频先交给它，失败再走各入口原来的路径。
+					</div>
+					<div class="mt-2">
+						<ModelPicker
+							label="媒体识别模型"
+							value={draft.media.model}
+							models={modelIds}
+							emptyLabel="不走首选"
+							on:change={(e) => {
+								if (draft) draft.media.model = e.detail;
+								touch();
+							}}
+						/>
+					</div>
+					<label class="hr-sub mt-3">
+						<span class="hr-sub-label">超时</span>
+						<input
+							class="glass-input hr-num"
+							type="number"
+							min={MEDIA_TIMEOUT_MIN}
+							max={MEDIA_TIMEOUT_MAX}
+							step="10"
+							aria-invalid={mediaTimeoutInvalid}
+							bind:value={draft.media.timeout}
+						/>
+						<span class="hr-card-hint">秒（{MEDIA_TIMEOUT_MIN}–{MEDIA_TIMEOUT_MAX}）</span>
+						{#if mediaTimeoutInvalid}
+							<span class="hr-lane-warn">请输入 {MEDIA_TIMEOUT_MIN}–{MEDIA_TIMEOUT_MAX} 之间的整数</span>
+						{/if}
+					</label>
+				</section>
+
+				<!-- auxiliary -->
+				<section class="glass-item hr-card px-4 py-3" data-section="auxiliary">
+					<div class="hr-card-head">
+						<div>
+							<div class="hr-card-title">
+								后台小任务
+								<span class="hr-tag ml-1"
+									>{auxCustomCount} 项单独指定 · {auxTasks.length - auxCustomCount} 项跟随</span
+								>
+								{#if auxChangedCount > 0}
+									<span class="hr-tag hr-tag-warn ml-1">未保存 {auxChangedCount}</span>
+								{/if}
+							</div>
+							<div class="hr-card-hint">
+								压缩上下文、起标题、提取网页这类辅助活儿。「跟随主模型」就用上面的主模型和兜底链。
+							</div>
+						</div>
+						<button
+							type="button"
+							class="hr-mini-btn hr-nowrap"
+							aria-expanded={!auxCollapsed}
+							on:click={() => (auxCollapsed = !auxCollapsed)}
+						>
+							{auxCollapsed ? `展开（${auxTasks.length}）` : '收起'}
+						</button>
+					</div>
+					{#if !auxCollapsed}
+						<div class="hr-aux mt-2">
+							{#each auxTasks as task (task)}
+								<div class="hr-aux-row" data-task={task}>
+									<div class="hr-aux-name">
+										<span>{auxTaskLabel(task)}</span>
+										{#if AUX_TASKS[task]?.hint}<span class="hr-card-hint"
+												>{AUX_TASKS[task].hint}</span
+											>{/if}
+									</div>
+									<div class="hr-aux-ctl">
+										<ModelPicker
+											compact
+											label={auxTaskLabel(task)}
+											value={draft.auxiliary[task].model}
+											models={modelIds}
+											emptyLabel="跟随主模型"
+											on:change={(e) => setAux(task, e.detail)}
+										/>
+										{#if draft.auxiliary[task].model && !isForeignModel(draft.auxiliary[task].model)}
+											<div class="hr-aux-chain">
+												<span class="hr-sub-label">兜底</span>
+												<ChainEditor
+													compact
+													label="{auxTaskLabel(task)}兜底"
+													chain={draft.auxiliary[task].fallback}
+													models={modelIds}
+													primary={draft.auxiliary[task].model}
+													limit={ROUTING_MAX_AUX_FALLBACKS}
+													on:change={(e) => {
+														if (draft) draft.auxiliary[task].fallback = e.detail;
+														touch();
+													}}
+												/>
+											</div>
+										{/if}
+									</div>
+								</div>
+							{/each}
+						</div>
+					{/if}
+				</section>
+
 				<!-- history -->
 				<section class="glass-item hr-card px-4 py-3" data-section="history">
 					<div class="hr-card-title">改动记录</div>
@@ -699,7 +844,11 @@
 			<div class="hr-bar-text">
 				{#if conflict}
 					<span class="text-rose-500">配置刚被别处改过</span>
-					<button type="button" class="hr-link-text" on:click={load}>重新读取</button>
+					<button type="button" class="hr-link-text" on:click={reloadAll}>重新读取</button>
+				{:else if mediaTimeoutInvalid}
+					<span class="text-rose-500">
+						媒体识别超时需为 {MEDIA_TIMEOUT_MIN}–{MEDIA_TIMEOUT_MAX} 秒的整数
+					</span>
 				{:else if dirty}
 					<span class="hr-bar-count">{changeLines.length} 处改动</span>
 					<span class="hr-bar-list">{changeLines.join('；')}</span>
@@ -713,7 +862,7 @@
 			<button
 				type="button"
 				class="workspace-primary-button hr-save"
-				disabled={!dirty || saving || conflict}
+				disabled={!dirty || saving || conflict || mediaTimeoutInvalid}
 				on:click={save}
 			>
 				{saving ? '保存中…' : '保存并生效'}
@@ -984,6 +1133,17 @@
 		width: min(100%, 22rem);
 		padding: 0.3rem 0.5rem;
 		font-size: 0.78rem;
+	}
+	:global(.dark) .hr-select {
+		color-scheme: dark;
+	}
+	:global(.dark) .hr-select option {
+		background-color: #0f172a;
+		color: #e2e8f0;
+	}
+	.hr-tag-warn {
+		color: rgb(217 119 6);
+		background: rgb(217 119 6 / 0.14);
 	}
 	.hr-runner {
 		font-size: 0.72rem;

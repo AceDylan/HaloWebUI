@@ -312,7 +312,8 @@ async def _runners_check(request):
 async def _agy_prefs_get(request):
     from . import runners
 
-    return _json_response(await asyncio.to_thread(runners.agy_prefs))
+    refresh = request.query.get("refresh") in ("1", "true", "yes")
+    return _json_response(await asyncio.to_thread(runners.agy_prefs, refresh=refresh))
 
 
 async def _agy_prefs_put(request):

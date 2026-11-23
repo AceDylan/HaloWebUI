@@ -287,4 +287,54 @@ describe('Hermes 模型 settings', () => {
 		await sleep(20);
 		expect(text(root.querySelector('.hr-bar'))).toContain('2 处改动');
 	});
+
+	it('strips the new main model from delegation fallback when delegation follows main', async () => {
+		api.getHermesRouting.mockResolvedValue(
+			snapshot({
+				routing: {
+					...routing(),
+					delegation: { model: '', fallback: ['gpt-chat', 'gemini-chat'] }
+				}
+			})
+		);
+		const root = await mount();
+		pill(root, 'main', 'gpt-chat').click();
+		await sleep(20);
+		expect(text(root.querySelector('[data-lane="delegation"]'))).toBe('子代理 跟随主模型 gemini-chat');
+	});
+
+	it('refreshes offiagy models on demand while keeping unsaved AGY edits', async () => {
+		const root = await mount();
+		await waitFor(() => root.querySelector('[data-lane="ui"]'), 'agy lanes');
+		// Make an unsaved edit first
+		root.querySelector('[data-agy="ui"] [data-runner="agy"]').click();
+		await sleep(20);
+		api.getHermesAgyPrefs.mockResolvedValueOnce(
+			agyPrefs({
+				teams: {
+					...agyPrefs().teams,
+					offiagy_models: [
+						{ id: 'gemini-4-argon-high', name: 'Gemini 4 Argon (High)' },
+						{ id: 'gemini-4-neon-high', name: 'Gemini 4 Neon (High)' },
+						{ id: 'gemini-5-new', name: 'Gemini 5 New' }
+					],
+					offiagy_models_at: 1763877600
+				}
+			})
+		);
+		const refreshBtn = Array.from(
+			root.querySelectorAll('[data-section="agy"] button')
+		).find((b: any) => text(b) === '刷新模型') as any;
+		refreshBtn.click();
+		await waitFor(
+			() => api.getHermesAgyPrefs.mock.calls.some((c: any[]) => c[1]?.refresh === true),
+			'refresh call'
+		);
+		await sleep(20);
+		// New model appears in dropdown and unsaved ui_runner edit is preserved
+		expect(text(root.querySelector('[aria-label="offiagy 模型"]'))).toContain('Gemini 5 New');
+		expect(text(root.querySelector('[data-lane="ui"]'))).toBe(
+			'界面任务 agy（网关 gemini-chat） Hermes'
+		);
+	});
 });

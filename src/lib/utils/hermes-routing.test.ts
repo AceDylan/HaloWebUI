@@ -55,6 +55,9 @@ describe('hermes routing helpers', () => {
 		expect(modelLabel('?openrouter/x')).toBe('其他：openrouter/x');
 		expect(modelFamily('claude-chat')).toBe('claude');
 		expect(modelFamily('gpt-chat')).toBe('gpt');
+		expect(modelFamily('codex')).toBe('gpt');
+		expect(modelFamily('offiagy')).toBe('gemini');
+		expect(modelFamily('agy')).toBe('gemini');
 		expect(modelFamily('mystery')).toBe('other');
 		expect(historySourceLabel('halowebui')).toBe('网页');
 		expect(historySourceLabel('rollback:1')).toBe('回滚');

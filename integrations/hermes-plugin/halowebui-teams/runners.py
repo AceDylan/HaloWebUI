@@ -215,32 +215,69 @@ def kind_default(kind: str) -> str:
 
 AGY_MODEL_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}")
 OFFIAGY_MODELS_TTL = 3600
-_offiagy_models_cache: dict[str, Any] = {"at": 0.0, "models": []}
+_offiagy_models_cache: dict[str, Any] = {"at": 0.0, "models": [], "error": ""}
+_offiagy_models_lock = threading.Lock()
+
+
+def _parse_offiagy_models(out: str) -> list[dict]:
+    models: list[dict] = []
+    seen: set[str] = set()
+    for raw_line in out.splitlines():
+        line = raw_line.rsplit("\r", 1)[-1].strip()
+        if not line:
+            continue
+        if "\t" in line:
+            model_id, _, name = line.partition("\t")
+        else:
+            parts = re.split(r"\s{2,}", line, maxsplit=1)
+            if len(parts) != 2:
+                continue
+            model_id, name = parts
+        model_id, name = model_id.strip(), name.strip()
+        if name and model_id not in seen and AGY_MODEL_RE.fullmatch(model_id):
+            seen.add(model_id)
+            models.append({"id": model_id, "name": name})
+    return models
 
 
 def offiagy_models(*, force: bool = False) -> list[dict]:
     """``offiagy models`` as [{id, name}] (cached for an hour; [] when it cannot be listed)."""
-    if not force and _offiagy_models_cache["models"] and time.time() - _offiagy_models_cache["at"] < OFFIAGY_MODELS_TTL:
+    now = time.time()
+    if not force and _offiagy_models_cache["models"] and now - _offiagy_models_cache["at"] < OFFIAGY_MODELS_TTL:
         return _offiagy_models_cache["models"]
-    command = _which("offiagy") or "offiagy"
-    try:
-        out = subprocess.run([command, "models"], capture_output=True, text=True, timeout=40).stdout
-    except (OSError, subprocess.SubprocessError) as exc:
-        logger.warning("halowebui-teams: offiagy models failed: %s", exc)
+    with _offiagy_models_lock:
+        now = time.time()
+        if not force and _offiagy_models_cache["models"] and now - _offiagy_models_cache["at"] < OFFIAGY_MODELS_TTL:
+            return _offiagy_models_cache["models"]
+        command = _which("offiagy") or "offiagy"
+        try:
+            proc = subprocess.run(
+                [command, "models"],
+                capture_output=True,
+                text=True,
+                timeout=40,
+                env={**os.environ, "PATH": _gateway_path() + ":/root/.local/bin"},
+            )
+            out = proc.stdout or ""
+            rc = getattr(proc, "returncode", 0)
+            stderr = getattr(proc, "stderr", "") or ""
+        except (OSError, subprocess.SubprocessError) as exc:
+            logger.warning("halowebui-teams: offiagy models failed: %s", exc)
+            _offiagy_models_cache["error"] = f"无法运行 offiagy models：{redact(str(exc), 120)}"
+            return _offiagy_models_cache["models"]
+        models = _parse_offiagy_models(out)
+        if models:
+            _offiagy_models_cache.update(at=time.time(), models=models, error="")
+            return models
+        detail = failure_line(stderr) or (f"退出码 {rc}" if rc else "返回列表为空")
+        _offiagy_models_cache["error"] = f"未获取到 offiagy 模型列表（{detail}）"
         return _offiagy_models_cache["models"]
-    models = []
-    for line in out.splitlines():
-        model_id, _, name = line.partition("\t")
-        if name and AGY_MODEL_RE.fullmatch(model_id.strip()):
-            models.append({"id": model_id.strip(), "name": name.strip()})
-    if models:
-        _offiagy_models_cache.update(at=time.time(), models=models)
-    return models or _offiagy_models_cache["models"]
 
 
-def agy_prefs() -> dict:
+def agy_prefs(*, refresh: bool = False) -> dict:
     data = overrides()
     model = data.get("offiagy_model")
+    models = offiagy_models(force=refresh)
     return {
         "ui_runner": kind_default("ui"),
         "ui_runner_default": KINDS["ui"]["default"],
@@ -248,7 +285,9 @@ def agy_prefs() -> dict:
         "ui_choices": [{"name": n, "label": BY_NAME[n].label, "note": BY_NAME[n].note,
                         "chain": chain_from(n, auto=True)} for n in NAMES if _startable(n)],
         "offiagy_model": model if isinstance(model, str) and AGY_MODEL_RE.fullmatch(model) else "",
-        "offiagy_models": offiagy_models(),
+        "offiagy_models": models,
+        "offiagy_models_at": int(_offiagy_models_cache["at"]) if _offiagy_models_cache["at"] else 0,
+        "offiagy_models_error": str(_offiagy_models_cache.get("error") or ""),
     }
 
 

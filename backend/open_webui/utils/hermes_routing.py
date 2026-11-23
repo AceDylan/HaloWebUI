@@ -125,9 +125,10 @@ def _card_prefs() -> dict:
     }
 
 
-async def get_agy_prefs(request, user) -> dict:
+async def get_agy_prefs(request, user, *, refresh: bool = False) -> dict:
+    path = "?refresh=1" if refresh else ""
     try:
-        teams = await _routing_call(request, user, "GET", base=TEAMS_AGY_PREFS_PATH, timeout=60)
+        teams = await _routing_call(request, user, "GET", path, base=TEAMS_AGY_PREFS_PATH, timeout=60)
     except HermesSessionsError as e:
         teams = {"error": e.detail}
     return {"card": _card_prefs(), "teams": teams}

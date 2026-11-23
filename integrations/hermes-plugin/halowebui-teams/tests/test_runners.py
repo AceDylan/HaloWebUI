@@ -598,11 +598,17 @@ def test_agy_prefs_refuses_bad_values(pkg, override, ui_runner, model, message):
 
 def test_offiagy_models_parses_and_caches(pkg, monkeypatch):
     r = pkg.runners
-    r._offiagy_models_cache.update(at=0.0, models=[])
+    r._offiagy_models_cache.update(at=0.0, models=[], error="")
     calls = []
 
     class Done:
-        stdout = "Fetching available models...\ngemini-4-neon-high\tGemini 4 Neon (High)\nclaude-opus-5-5-high\tClaude Opus 5.5 (High)\n"
+        returncode = 0
+        stderr = ""
+        stdout = (
+            "\rFetching available models...\n"
+            "gemini-4-neon-high\tGemini 4 Neon (High)\n"
+            "claude-opus-5-5-high    Claude Opus 5.5 (High)\n"
+        )
 
     def run(argv, **kwargs):
         calls.append(argv)
@@ -613,4 +619,18 @@ def test_offiagy_models_parses_and_caches(pkg, monkeypatch):
     assert [m["id"] for m in r.offiagy_models()] == ["gemini-4-neon-high", "claude-opus-5-5-high"]
     r.offiagy_models()
     assert calls == [["/stub/offiagy", "models"]]  # second call served from the cache
-    r._offiagy_models_cache.update(at=0.0, models=[])
+    # force=True bypasses the 1h cache
+    r.offiagy_models(force=True)
+    assert len(calls) == 2
+    assert r._offiagy_models_cache["error"] == ""
+
+    # when refresh fails, stale models stay usable while the error is surfaced
+    def fail(argv, **kwargs):
+        raise OSError("cli missing")
+
+    monkeypatch.setattr(r.subprocess, "run", fail)
+    kept = r.offiagy_models(force=True)
+    assert [m["id"] for m in kept] == ["gemini-4-neon-high", "claude-opus-5-5-high"]
+    prefs = r.agy_prefs()
+    assert "cli missing" in prefs["offiagy_models_error"] and prefs["offiagy_models_at"] > 0
+    r._offiagy_models_cache.update(at=0.0, models=[], error="")

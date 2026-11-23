@@ -132,6 +132,9 @@ def test_agy_prefs_combines_card_and_teams(monkeypatch):
     assert out["card"] == {"model": "gemini-4-argon-high", "default": "gemini-4-argon-high", "signed_in": True}
     assert out["teams"]["ui_runner"] == "offiagy"
     assert calls == [("GET", "http://hermes.test/v1/halo-teams/agy-prefs", None)]
+    calls.clear()
+    asyncio.run(hermes_routing.get_agy_prefs(None, USER, refresh=True))
+    assert calls == [("GET", "http://hermes.test/v1/halo-teams/agy-prefs?refresh=1", None)]
 
 
 def test_agy_prefs_card_still_shows_when_hermes_is_down(monkeypatch):

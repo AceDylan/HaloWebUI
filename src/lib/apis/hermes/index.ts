@@ -682,6 +682,8 @@ export type HermesAgyPrefs = {
 		ui_choices?: HermesAgyRunnerChoice[];
 		offiagy_model?: string;
 		offiagy_models?: { id: string; name: string }[];
+		offiagy_models_at?: number;
+		offiagy_models_error?: string;
 		error?: string;
 	};
 };
@@ -692,8 +694,13 @@ export type HermesAgyPrefsUpdate = {
 	offiagy_model?: string;
 };
 
-const agyPrefsCall = async (token: string, method: string, body?: HermesAgyPrefsUpdate) => {
-	const res = await fetch(`${WEBUI_API_BASE_URL}/hermes/agy-prefs`, {
+const agyPrefsCall = async (
+	token: string,
+	method: string,
+	body?: HermesAgyPrefsUpdate,
+	query = ''
+) => {
+	const res = await fetch(`${WEBUI_API_BASE_URL}/hermes/agy-prefs${query}`, {
 		method,
 		headers: jsonHeaders(token),
 		...(body === undefined ? {} : { body: JSON.stringify(body) })
@@ -704,7 +711,8 @@ const agyPrefsCall = async (token: string, method: string, body?: HermesAgyPrefs
 	return (await res.json()) as HermesAgyPrefs;
 };
 
-export const getHermesAgyPrefs = (token: string) => agyPrefsCall(token, 'GET');
+export const getHermesAgyPrefs = (token: string, opts?: { refresh?: boolean }) =>
+	agyPrefsCall(token, 'GET', undefined, opts?.refresh ? '?refresh=1' : '');
 
 export const saveHermesAgyPrefs = (token: string, update: HermesAgyPrefsUpdate) =>
 	agyPrefsCall(token, 'PUT', update);

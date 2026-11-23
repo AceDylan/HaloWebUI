@@ -569,8 +569,10 @@ class HermesAgyPrefsForm(BaseModel):
 
 
 @router.get("/agy-prefs")
-async def get_hermes_agy_prefs(request: Request, user=Depends(get_admin_user)):
-    return await hermes_routing.get_agy_prefs(request, user)
+async def get_hermes_agy_prefs(
+    request: Request, refresh: bool = False, user=Depends(get_admin_user)
+):
+    return await hermes_routing.get_agy_prefs(request, user, refresh=refresh)
 
 
 @router.put("/agy-prefs")

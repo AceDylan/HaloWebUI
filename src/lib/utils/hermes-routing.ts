@@ -8,6 +8,12 @@ export const ROUTING_MAX_AUX_FALLBACKS = 2;
 export const MEDIA_TIMEOUT_MIN = 30;
 export const MEDIA_TIMEOUT_MAX = 600;
 
+export const isValidMediaTimeout = (value: unknown): boolean =>
+	typeof value === 'number' &&
+	Number.isInteger(value) &&
+	value >= MEDIA_TIMEOUT_MIN &&
+	value <= MEDIA_TIMEOUT_MAX;
+
 /** Auxiliary tasks hermes runs on a side model: what each one is for, in plain words. */
 export const AUX_TASKS: Record<string, { label: string; hint: string }> = {
 	compression: { label: '上下文压缩', hint: '对话太长时把旧消息总结掉' },
@@ -49,9 +55,9 @@ export type ModelFamily = 'gpt' | 'deepseek' | 'gemini' | 'claude' | 'other';
 
 export const modelFamily = (id: string): ModelFamily => {
 	const s = (id || '').toLowerCase();
-	if (s.includes('gpt') || s.includes('openai')) return 'gpt';
+	if (s.includes('gpt') || s.includes('openai') || s.includes('codex')) return 'gpt';
 	if (s.includes('deepseek')) return 'deepseek';
-	if (s.includes('gemini')) return 'gemini';
+	if (s.includes('gemini') || s.includes('agy')) return 'gemini';
 	if (s.includes('claude')) return 'claude';
 	return 'other';
 };
@@ -119,7 +125,8 @@ const pathLabel = (path: string) => {
 const valueLabel = (path: string, value: unknown) => {
 	if (Array.isArray(value))
 		return value.length ? value.map((v) => modelLabel(String(v))).join(' › ') : '无';
-	if (path === 'media.timeout') return `${value} 秒`;
+	if (path === 'media.timeout')
+		return typeof value === 'number' && !Number.isNaN(value) ? `${value} 秒` : '未填';
 	if (path === 'media.model') return modelLabel(String(value ?? ''), '不走首选');
 	return modelLabel(String(value ?? ''));
 };

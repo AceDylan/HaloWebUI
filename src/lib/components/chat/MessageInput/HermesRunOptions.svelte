@@ -415,7 +415,16 @@
 			<div
 				class="mt-3 flex items-start justify-between gap-2 text-2xs text-gray-400 dark:text-gray-500"
 			>
-				<span class="min-w-0">模型对这个对话一直生效</span>
+				<span class="min-w-0"
+					>模型对这个对话一直生效{#if $user?.role === 'admin'}{' · '}<a
+							class="text-primary-600 hover:underline dark:text-primary-400"
+							href="/settings/hermes"
+							data-halo-hermes-routing-link
+							on:click={() => {
+								open = false;
+							}}>默认模型和兜底</a
+						>{/if}</span
+				>
 				{#if summary}
 					<button
 						type="button"

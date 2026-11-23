@@ -590,3 +590,81 @@ export const getRunnerStats = async (token: string, days = 30) =>
 		if (!res.ok) throw await detailOf(res);
 		return res.json();
 	})) as { days: number; runs: RunnerRun[]; quota?: RunnerQuota; quotas?: RunnerQuota[] };
+
+// ---- Hermes 模型路由 (main model, fallback chain, sub-agents, auxiliary, media; admin only) ----
+
+export type HermesRoutingModel = {
+	id: string;
+	model: string;
+	provider: string;
+	base_url: string;
+	api_mode: string;
+	vision: boolean;
+	context_length?: number | null;
+};
+
+export type HermesRoutingSlot = { model: string; fallback: string[] };
+
+export type HermesRouting = {
+	main: string;
+	fallback: string[];
+	delegation: HermesRoutingSlot;
+	auxiliary: Record<string, HermesRoutingSlot>;
+	media: { model: string; timeout: number };
+};
+
+export type HermesRoutingChange = { path: string; before: unknown; after: unknown };
+
+export type HermesRoutingHistoryEntry = {
+	id: string;
+	at: number;
+	source: string;
+	changes: HermesRoutingChange[];
+};
+
+export type HermesRoutingSnapshot = {
+	models: HermesRoutingModel[];
+	routing: HermesRouting;
+	revision: string;
+	reasoning_effort: string;
+	history: HermesRoutingHistoryEntry[];
+	changes?: HermesRoutingChange[];
+};
+
+export type HermesRoutingProbe = {
+	model: string;
+	ok: boolean;
+	latency_ms: number;
+	reply: string;
+	error: string;
+};
+
+const routingCall = async <T>(
+	token: string,
+	method: string,
+	path = '',
+	body?: unknown
+): Promise<T> => {
+	const res = await fetch(`${WEBUI_API_BASE_URL}/hermes/routing${path}`, {
+		method,
+		headers: jsonHeaders(token),
+		...(body === undefined ? {} : { body: JSON.stringify(body) })
+	});
+	if (!res.ok) {
+		const error: any = await detailOf(res);
+		throw Object.assign(new Error(String(error)), { status: res.status });
+	}
+	return res.json();
+};
+
+export const getHermesRouting = (token: string) =>
+	routingCall<HermesRoutingSnapshot>(token, 'GET');
+
+export const saveHermesRouting = (token: string, routing: HermesRouting, revision: string) =>
+	routingCall<HermesRoutingSnapshot>(token, 'PUT', '', { routing, revision });
+
+export const rollbackHermesRouting = (token: string, id: string, revision: string) =>
+	routingCall<HermesRoutingSnapshot>(token, 'POST', '/rollback', { id, revision });
+
+export const probeHermesRoutingModel = (token: string, model: string) =>
+	routingCall<HermesRoutingProbe>(token, 'POST', '/probe', { model });

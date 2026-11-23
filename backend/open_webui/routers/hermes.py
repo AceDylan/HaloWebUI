@@ -13,6 +13,10 @@ codex / agy) that one of the user's chats launched (hermes
 GET/POST/PATCH/DELETE /api/v1/hermes/jobs[/{id}[/pause|resume|run|outputs]] — hermes 定时任务
 (cron jobs), admin only: a job runs on the hermes host with its tools.
 
+GET/PUT /api/v1/hermes/routing, POST /api/v1/hermes/routing/rollback|probe — hermes 模型路由
+(main model, fallback chain, sub-agents, auxiliary tasks, media) for the 「Hermes 模型」 page,
+admin only: hermes validates, keeps the history and writes its config.yaml.
+
 GET /api/v1/hermes/runner-stats?days= — background runner runs with cost / time / turns
 (admin only), for the usage page's 后台任务 tab.
 
@@ -64,7 +68,7 @@ from open_webui.utils.hermes_sessions import (
     stop_background_runner,
     validate_session_id,
 )
-from open_webui.utils import hermes_jobs
+from open_webui.utils import hermes_jobs, hermes_routing
 from open_webui.utils.task_inbox import (
     DEFAULT_DAYS as INBOX_DEFAULT_DAYS,
     MAX_DAYS as INBOX_MAX_DAYS,
@@ -496,5 +500,61 @@ async def hermes_runner_stats(
     """Background runner runs of the last ``days`` days: cost, time, turns, project."""
     try:
         return await hermes_jobs.runner_stats(request, user, days)
+    except HermesSessionsError as e:
+        raise _job_error(e)
+
+
+class HermesRoutingForm(BaseModel):
+    routing: dict
+    revision: Optional[str] = Field(default=None, max_length=128)
+
+
+class HermesRoutingRollbackForm(BaseModel):
+    id: str = Field(min_length=1, max_length=64, pattern=r"^[0-9A-Za-z_-]+$")
+    revision: Optional[str] = Field(default=None, max_length=128)
+
+
+class HermesRoutingProbeForm(BaseModel):
+    model: str = Field(min_length=1, max_length=128)
+
+
+@router.get("/routing")
+async def get_hermes_routing(request: Request, user=Depends(get_admin_user)):
+    try:
+        return await hermes_routing.get_routing(request, user)
+    except HermesSessionsError as e:
+        raise _job_error(e)
+
+
+@router.put("/routing")
+async def save_hermes_routing(
+    request: Request, form_data: HermesRoutingForm, user=Depends(get_admin_user)
+):
+    try:
+        return await hermes_routing.save_routing(
+            request, user, form_data.routing, form_data.revision
+        )
+    except HermesSessionsError as e:
+        raise _job_error(e)
+
+
+@router.post("/routing/rollback")
+async def rollback_hermes_routing(
+    request: Request, form_data: HermesRoutingRollbackForm, user=Depends(get_admin_user)
+):
+    try:
+        return await hermes_routing.rollback_routing(
+            request, user, form_data.id, form_data.revision
+        )
+    except HermesSessionsError as e:
+        raise _job_error(e)
+
+
+@router.post("/routing/probe")
+async def probe_hermes_routing_model(
+    request: Request, form_data: HermesRoutingProbeForm, user=Depends(get_admin_user)
+):
+    try:
+        return await hermes_routing.probe_model(request, user, form_data.model)
     except HermesSessionsError as e:
         raise _job_error(e)

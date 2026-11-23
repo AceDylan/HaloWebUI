@@ -133,6 +133,9 @@ describe('HermesRunOptions', () => {
 		expect(note.textContent).toContain('思考强度高');
 		expect(note.textContent).toContain('调低回复更快 · 去修改');
 		expect(note.querySelector('a')?.getAttribute('href')).toBe('/settings/haloclaw');
+		expect(
+			panel.querySelector('[data-halo-hermes-routing-link]')?.getAttribute('href')
+		).toBe('/settings/hermes');
 		app.$destroy();
 		target.remove();
 
@@ -141,6 +144,7 @@ describe('HermesRunOptions', () => {
 		note = panel.querySelector('[data-halo-hermes-effort-note]');
 		expect(note.textContent).toContain('思考强度高');
 		expect(note.querySelectorAll('a').length).toBe(0);
+		expect(panel.querySelector('[data-halo-hermes-routing-link]')).toBeFalsy();
 		user.set(undefined as any);
 	});
 

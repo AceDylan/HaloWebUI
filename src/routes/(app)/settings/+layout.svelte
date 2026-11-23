@@ -80,6 +80,7 @@
 		images: false,
 		analytics: false,
 		haloclaw: false,
+		hermes: false,
 		userAgent: false
 	};
 	$: currentPath = $page.url.pathname;
@@ -107,6 +108,7 @@
 			images: path.startsWith('/settings/images'),
 			analytics: path.startsWith('/settings/analytics'),
 			haloclaw: path.startsWith('/settings/haloclaw'),
+			hermes: path.startsWith('/settings/hermes'),
 			userAgent: path.startsWith('/settings/user-agent')
 		};
 	}
@@ -146,6 +148,7 @@
 		['images', 'Images'],
 		['analytics', 'Analytics'],
 		['haloclaw', 'HaloClaw'],
+		['hermes', 'Hermes 模型'],
 		['functions', 'Functions']
 	];
 	$: activeSectionTitleKey = sectionTitleKeys.find(([key]) => activeLinks[key])?.[1] ?? '';
@@ -260,6 +263,7 @@
 						<a class={navLinkClass(activeLinks.haloclaw)} href="/settings/haloclaw"
 							>{$i18n.t('HaloClaw')}</a
 						>
+						<a class={navLinkClass(activeLinks.hermes)} href="/settings/hermes">Hermes 模型</a>
 					{/if}
 				</div>
 

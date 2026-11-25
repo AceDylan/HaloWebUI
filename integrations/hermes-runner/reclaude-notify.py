@@ -55,7 +55,7 @@ import time
 import urllib.error
 import urllib.request
 
-SCRIPT_VERSION = "2026-10-17.1"
+SCRIPT_VERSION = "2026-11-25.1"
 CONFIG_FILE = "/root/.hermes/reclaude-runner.env"
 REQUIRED_CONFIG_KEYS = ("HALOWEBUI_NOTIFY_URL", "HALOWEBUI_NOTIFY_TOKEN")
 STATE_DB = "/root/.hermes/state.db"
@@ -734,7 +734,7 @@ def media_lines(body, shown, run_dir):
 
 
 def build_digest(run_id, status, run_dir, session_id, agent="reclaude", chat=False,
-                 max_chars=DIGEST_MAX_CHARS):
+                 max_chars=DIGEST_MAX_CHARS, followups=""):
     """The report as the user reads it: a status line, result.md, and what to do next.
 
     *chat* (a Telegram report): the next step is spelled as the command that goes straight
@@ -835,6 +835,8 @@ def build_digest(run_id, status, run_dir, session_id, agent="reclaude", chat=Fal
         progress = _tail_lines(os.path.join(run_dir, "progress.log"), 8)
         if progress:
             lines += ["", "最后几步：", "```", *progress, "```"]
+    if followups:
+        lines += ["", followups]
     if footer:
         lines += ["", footer]
     return "\n".join(lines)
@@ -1054,7 +1056,8 @@ def file_run_videos(args, record, save, platform):
 
 def deliver_direct(args, record, save, platform, chat_id, session_id, agent_session):
     """Report a detached run to its gateway chat, retrying like the HaloWebUI path."""
-    digest = build_digest(args.run_id, args.status, args.run_dir, agent_session, agent=args.agent, chat=True)
+    digest = build_digest(args.run_id, args.status, args.run_dir, agent_session, agent=args.agent, chat=True,
+                          followups=getattr(args, "followups", ""))
     notice = build_session_notice(
         args.run_id, args.status, args.run_dir, agent_session, digest, agent=args.agent,
         answer_command=args.answer_command,
@@ -1206,7 +1209,70 @@ def main():
             log("notification already delivered; duplicate skipped")
             return 0
         args.receipt_dir = receipt_dir
+        try:
+            args.followups = send_followups(args)
+        except Exception as exc:  # never cost the report
+            log(f"followups: {exc}")
         return notify(args)
+
+
+# What the user added while the run worked ("/officlaude 补充 …", gateway/runner_followups.py).
+FOLLOWUPS_PY = os.path.join(os.environ.get("HERMES_AGENT_DIR", "/usr/local/lib/hermes-agent"),
+                            "gateway", "runner_followups.py")
+FOLLOWUP_LAUNCH_TIMEOUT_SECONDS = 120
+
+
+def send_followups(args):
+    """After a success: the next round of the same session with what was added meanwhile.
+    Returns the report's line about it ("" when nothing was added)."""
+    if not os.path.exists(FOLLOWUPS_PY):
+        return ""
+    spec = importlib.util.spec_from_file_location("runner_followups", FOLLOWUPS_PY)
+    followups = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(followups)
+    waiting = followups.pending(args.run_dir)
+    if not waiting:
+        return ""
+    later = f"📌 你中途补充的 {len(waiting)} 条要求还没做，下次接着做时会一起带上。"
+    if args.status != "success":
+        return later
+    texts = followups.take(args.run_dir)
+    if not texts:
+        return ""  # a 继续 sent just now has them
+    task_file = os.path.join(args.run_dir, "followups.task.md")
+    started = ""
+    try:
+        with open(task_file, "w", encoding="utf-8") as handle:
+            handle.write(followups.task_text(texts, agent=args.agent, run_id=args.run_id))
+        os.chmod(task_file, 0o600)
+        started = launch_answer(args, task_file)
+    finally:
+        if not started:
+            followups.restore(args.run_dir, texts)
+    if not started:
+        return later
+    return f"📌 你中途补充的 {len(texts)} 条要求已在同一个会话里接着做，运行编号 `{started}`。"
+
+
+def launch_answer(args, task_file):
+    """Start ``<agent>-run.sh answer`` in the background; the new run's id, "" when none started."""
+    meta = read_meta(args.run_dir)
+    script = os.path.join(os.path.dirname(os.path.abspath(__file__)), f"{args.agent}-run.sh")
+    # Not this run's scope, log, vault receipts or notice switch: the new run has its own.
+    env = {key: value for key, value in os.environ.items()
+           if not key.endswith("_SCOPE_UNIT") and not key.startswith("VAULT_ARCHIVE_")
+           and key not in ("RUNNER_DETACHED_LOG", "RUNNER_SUPPRESS_NOTIFY")}
+    for key, value in (("HERMES_SESSION_ID", meta.get("origin_session_id")),
+                       ("HERMES_SESSION_PLATFORM", meta.get("origin_platform") or meta.get("origin_source")),
+                       ("HERMES_SESSION_CHAT_ID", meta.get("origin_chat_id"))):
+        if value:
+            env[key] = str(value)
+    proc = subprocess.run([script, "answer", args.run_id, "--detach", "--task-file", task_file], env=env,
+                          stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                          timeout=FOLLOWUP_LAUNCH_TIMEOUT_SECONDS)
+    match = re.search(rf"==== {re.escape(args.agent)} run (\S+) started", proc.stdout or "")
+    log(f"followups: answer exited {proc.returncode}, new run {match.group(1) if match else '-'}")
+    return match.group(1) if proc.returncode == 0 and match else ""
 
 
 def _continue_run(run_dir):
@@ -1337,7 +1403,7 @@ def notify(args):
         # A HaloWebUI that knows mode=display shows the report as the reply, with no model
         # turn; an older one ignores these keys and runs the prompt above.
         digest = build_digest(args.run_id, args.status, args.run_dir, agent_session, agent=args.agent,
-                              max_chars=HALOWEBUI_DIGEST_MAX_CHARS)
+                              max_chars=HALOWEBUI_DIGEST_MAX_CHARS, followups=getattr(args, "followups", ""))
         payload["mode"] = "display"
         payload["content"] = digest
         # The user turn HaloWebUI shows above the report: the notice's first line.

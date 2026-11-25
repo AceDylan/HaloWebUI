@@ -78,6 +78,17 @@ describe('BackgroundRunnerBanner', () => {
 		expect(toast.success.mock.calls[0][0]).toContain('已停止 官方 Claude');
 	});
 
+	it('puts the command that adds a requirement in the composer', async () => {
+		await mount();
+		const sent: any[] = [];
+		const listen = (event: any) => sent.push(event.detail);
+		window.addEventListener('chat:set-input', listen);
+		(target.querySelector('[data-halo-background-runner-add]') as any).click();
+		window.removeEventListener('chat:set-input', listen);
+		expect(sent).toEqual([{ prompt: '/reclaude 补充 ', before: true }]);
+		expect(api.stopHermesBackgroundRunner).not.toHaveBeenCalled();
+	});
+
 	it('stops the runner on the second press and drops the banner', async () => {
 		const stores = await mount();
 		api.stopHermesBackgroundRunner.mockResolvedValue({ stopped: true, report_shown: true });

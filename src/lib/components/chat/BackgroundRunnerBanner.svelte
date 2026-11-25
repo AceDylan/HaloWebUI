@@ -17,6 +17,13 @@
 	const stopper = createRunStopper((state) => ({ armed, stopping } = state));
 	const stop = stopper.press;
 
+	// A requirement for a run that is still working: hermes keeps it for the run's next round
+	// (gateway/runner_followups.py), so the run need not be stopped to say it.
+	const add = (agent: string) =>
+		window.dispatchEvent(
+			new CustomEvent('chat:set-input', { detail: { prompt: `/${agent} 补充 `, before: true } })
+		);
+
 	onMount(() => {
 		clock = setInterval(() => {
 			now = Date.now() / 1000;
@@ -82,6 +89,16 @@
 				</div>
 			{/if}
 		</div>
+		<button
+			type="button"
+			class="halo-runner__stop shrink-0 rounded-full px-3 py-1 text-xs font-medium transition max-sm:px-3.5 max-sm:py-2"
+			data-halo-background-runner-add={run.run_id}
+			title="补充要求，这一轮跑完自动接着做，不用停"
+			aria-label={`给 ${runnerLabel(run.agent)} 补充要求`}
+			on:click={() => add(run.agent)}
+		>
+			补充
+		</button>
 		<button
 			type="button"
 			class="halo-runner__stop shrink-0 rounded-full px-3 py-1 text-xs font-medium transition max-sm:px-3.5 max-sm:py-2 disabled:opacity-60"

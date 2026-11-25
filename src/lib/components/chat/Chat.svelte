@@ -3454,13 +3454,14 @@
 		}
 	};
 
-	const onSetInputHandler = async (event: CustomEvent<{ prompt: string }>) => {
+	// `before`: the text goes in front of what is typed already (a runner command), not over it.
+	const onSetInputHandler = async (event: CustomEvent<{ prompt: string; before?: boolean }>) => {
 		const text = event?.detail?.prompt ?? '';
 		if (!text) {
 			return;
 		}
 
-		prompt = text;
+		prompt = event.detail.before ? `${text}${prompt.replace(text, '').trimStart()}` : text;
 		await tick();
 
 		const chatInput = document.getElementById('chat-input');

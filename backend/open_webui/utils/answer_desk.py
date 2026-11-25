@@ -87,7 +87,14 @@ UNIT_KEY = "q"
 WEB_RULE = (
     'Also give a top-level "web_search": true only when a good answer needs current or real-world facts that may '
     "have changed (news, prices, releases, versions, schedules, recent events, specific products or people); false "
-    "for reasoning, writing, coding, maths, explanations of stable knowledge, or anything personal."
+    "for reasoning, writing, coding, maths, explanations of stable knowledge, or anything personal. Also true when the "
+    "question hangs on a title or name that could be several works or things (a film, series, song, book, product, person) "
+    "and nothing says which: the search settles it."
+)
+# 「谷雨 讲的什么故事」 (a TV series on air) went to a music assistant, unsearched, to ask which song was meant.
+AMBIGUOUS_RULE = (
+    "A title or name that could be several works or things belongs to no single field: do not guess one and do not pick an "
+    "assistant just to ask back. Pick one that can cover the likeliest meanings; it answers the likeliest and names the others."
 )
 
 
@@ -104,6 +111,8 @@ def plan_messages(
     chosen: str = "",
 ) -> list[dict]:
     rules = [WEB_RULE if web_allowed else 'Web search is off for this question: "web_search" must be false.']
+    if not chosen:
+        rules.append(AMBIGUOUS_RULE)
     if chosen:
         rules.append(
             f'The user chose "{chosen}" for this question: it answers. Keep it as it is ("use") unless the question is squarely in '
@@ -237,7 +246,8 @@ def decision_request(
         questions["web_search"] = dm.noul(
             "Does a good answer to `question` need current or real-world facts that may have changed (news, prices, releases, "
             "versions, schedules, recent events, specific products or people)? No for reasoning, writing, coding, maths, "
-            "explanations of stable knowledge or anything personal."
+            "explanations of stable knowledge or anything personal. Yes when it hangs on a title or name that could be several "
+            "works or things (a film, series, song, book, product, person) and nothing says which."
         )
     state = {"question": question, "background": clean_text(background, 1500)}
     if options:

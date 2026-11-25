@@ -8,6 +8,7 @@ import type {
 	DiscussRetry,
 	DiscussUsage,
 	DispatchOrigin,
+	LocalInspect,
 	ModeCard,
 	ModeIllustration,
 	VaultNote,
@@ -16,7 +17,7 @@ import type {
 
 /** 精答工作台 (answer desk) API — see backend/open_webui/routers/answers.py. */
 
-export type AnswerStatus = 'routing' | 'researching' | 'answering' | 'done' | 'stopped' | 'error' | 'interrupted';
+export type AnswerStatus = 'routing' | 'inspecting' | 'researching' | 'answering' | 'done' | 'stopped' | 'error' | 'interrupted';
 
 /** How the dispatcher got an assistant: kept one, upgraded one, made one; `template` = a built-in
  * template as it is; `temporary` = made one for this question only (the user may not keep
@@ -78,12 +79,14 @@ export type AnswerRun = {
 	status: AnswerStatus;
 	planner: { model: string; name: string };
 	webAllowed: boolean;
+	localInspectAllowed?: boolean;
 	/** The conversation it was asked from, given to the dispatcher and the assistant as background. */
 	context?: DiscussContext | null;
 	/** Sent from a chat (派发方式「精答」): the answer goes back to that chat when it is done. */
 	origin?: DispatchOrigin | null;
 	plan: AnswerPlan;
 	assistant: AnswerAssistant | null;
+	localInspect?: LocalInspect | null;
 	research: DiscussResearch | null;
 	/** related notes of the user's knowledge base (Obsidian), read with the question */
 	notes?: VaultNote[];
@@ -127,6 +130,7 @@ export type AnswerSummary = {
 	preview: string;
 	assistant: { id: string; name: string; emoji?: string; action: AssistantAction } | null;
 	research?: boolean;
+	localInspect?: boolean;
 	/** 结论配图 of the answer: whether it is still being drawn. */
 	picture?: Pick<ModeIllustration, 'status' | 'startedAt'> | null;
 };
@@ -203,6 +207,7 @@ export const createAnswer = (
 		files?: string[];
 		planner?: string | null;
 		research?: boolean;
+		local_inspect?: boolean;
 		context?: { text: string; title: string; chat_id: string | null } | null;
 		client_key?: string;
 		/** 「用于精答」: this assistant answers (model:<id> / builtin:<id>). */

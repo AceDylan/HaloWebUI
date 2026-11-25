@@ -11,7 +11,7 @@
 	import { uploadErrorText, uploadFileReliably } from '$lib/utils/reliable-upload';
 	import { isVideoFile, videoContactSheet } from '$lib/utils/video-contact-sheet';
 	import UploadProgress from '$lib/components/common/UploadProgress.svelte';
-	import { config, mobile, models, showSidebar } from '$lib/stores';
+	import { config, mobile, models, showSidebar, user } from '$lib/stores';
 	import {
 		AnswerApiError,
 		createAnswer,
@@ -46,6 +46,7 @@
 	let question = '';
 	let planner = '';
 	let research = true;
+	let localInspect = false;
 	let creating = false;
 	let origin: HandoffOrigin | null = null;
 	// Handed over from a chat: the conversation as background, and the way back.
@@ -139,6 +140,7 @@
 	// the dispatcher: any text model the discussion room would seat (not Hermes, not image models)
 	$: choices = discussionSeatModels(($models ?? []) as any[], $config?.hermes_agent_model_ids).filter((m: any) => !m?.info?.base_model_id);
 	$: webSearchEnabled = $config?.features?.enable_web_search !== false;
+	$: canLocalInspect = $user?.role === 'admin';
 	$: shownAssistants = showAllAssistants ? library : library.slice(0, 10);
 	$: shown = items;
 	$: liveCount = Math.max(liveTotal, items.filter((d) => isLive(d.status) || d.running).length);
@@ -237,6 +239,7 @@
 			files: attachments.filter((a) => a.id).map((a) => a.id!),
 			planner,
 			research: webSearchEnabled && research,
+			...(canLocalInspect && localInspect ? { local_inspect: true } : {}),
 			assistant: chosen?.ref ?? null,
 			context: background ? { text: background, title: origin?.title ?? '', chat_id: origin?.kind === 'chat' ? origin.id : null } : null
 		};
@@ -560,6 +563,27 @@
 								/></svg
 							>
 							按需联网
+						</button>
+					{/if}
+					{#if canLocalInspect}
+						<button
+							type="button"
+							class="dc-chip"
+							aria-pressed={localInspect}
+							title="仅管理员：开始前由 Hermes 只读查看本机相关文件/配置，脱敏后提供给作答助手（不写记忆、不改文件）"
+							on:click={() => (localInspect = !localInspect)}
+							data-answer-local-inspect-toggle
+						>
+							<svg class="size-3.5" viewBox="0 0 16 16" fill="none" aria-hidden="true"
+								><rect x="2.2" y="2.8" width="11.6" height="10.4" rx="2" stroke="currentColor" stroke-width="1.3" /><path
+									d="m5 6.3 2 1.7-2 1.7M8.5 9.7h2.5"
+									stroke="currentColor"
+									stroke-width="1.2"
+									stroke-linecap="round"
+									stroke-linejoin="round"
+								/></svg
+							>
+							本机取证
 						</button>
 					{/if}
 					{#if question.trim() && !creating}

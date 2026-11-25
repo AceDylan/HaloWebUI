@@ -14,6 +14,7 @@ from open_webui.models.auto_routes import AutoRoutes
 from open_webui.models.chats import Chats
 from open_webui.models.files import Files
 from open_webui.utils.vault_notes import with_goal_notes
+from open_webui.utils.local_inspect import may_inspect
 from open_webui.utils.auth import get_verified_user
 from open_webui.utils.auto_routing import (
     LABELS,
@@ -99,6 +100,7 @@ class CreateForm(BaseModel):
     files: list[str] = Field(default_factory=list, max_length=4)
     context: str = Field(default="", max_length=12000)
     research: bool = True
+    local_inspect: Optional[bool] = None
     preference: Literal["standard", "economy"] = "standard"
     mode: Literal["auto", "hermes", "answer", "discuss", "team"] = "auto"
     auto_start: bool = False
@@ -130,7 +132,8 @@ def public(row, user, targets=None):
         "auto_start": bool(data.get("auto_start")), "target_status": None,
         "title": data["input"]["question"][:80], "routing_model": data.get("routing_model"),
         "origin_chat_id": (data.get("origin") or {}).get("chatId"), "decision": data.get("decision"),
-        "read_only": bool(data.get("read_only")), "degraded": data.get("degraded"), "blocked": bool(data.get("blocked"))}
+        "read_only": bool(data.get("read_only")), "local_inspect": bool(data.get("local_inspect")),
+        "degraded": data.get("degraded"), "blocked": bool(data.get("blocked"))}
     if targets is not None:
         info = targets.get((mode, target)) if target else None
         if target:
@@ -175,16 +178,17 @@ def _hermes_status(chat, message_id):
 _PENDING_REPLY = "已交给自动分流工作台：正在选择处理方式，结果会发回这个对话。"
 
 
-def _chosen_reply(mode, reason, *, read_only=False, degraded=None):
+def _chosen_reply(mode, reason, *, read_only=False, degraded=None, local_inspect=False):
     """The chat reply once a mode is chosen: who handles it and why (what Hermes reads next turn).
     A stand-in for an unavailable mode says so, rather than reading as the right choice."""
     reason = str(reason or "").strip().rstrip("。.")
-    label = LABELS.get(mode, mode) + ("（只读）" if read_only else "")
+    suffix = "（只读）" if read_only else ("（含本机只读取证）" if local_inspect else "")
+    label = LABELS.get(mode, mode) + suffix
     head = f"🔀 自动分流临时改用{label}" if degraded else f"🔀 自动分流交给了{label}"
     return head + (f"：{reason}" if reason else "") + "。进度在下面的卡片里，结果会发回这个对话。"
 
 
-def _settle_reply(origin, mode, reason, *, only_if=None, read_only=False, degraded=None):
+def _settle_reply(origin, mode, reason, *, only_if=None, read_only=False, degraded=None, local_inspect=False):
     if not (origin or {}).get("chatId") or not origin.get("messageId") or mode not in LABELS:
         return
     if only_if is not None:
@@ -193,7 +197,8 @@ def _settle_reply(origin, mode, reason, *, only_if=None, read_only=False, degrad
         if not message or message.get("content") != only_if:
             return
     Chats.upsert_message_to_chat_by_id_and_message_id(origin["chatId"], origin["messageId"],
-        {"content": _chosen_reply(mode, reason, read_only=read_only, degraded=degraded)}, set_current=False)
+        {"content": _chosen_reply(mode, reason, read_only=read_only, degraded=degraded, local_inspect=local_inspect)},
+        set_current=False)
 
 
 def _files(ids, user):
@@ -225,14 +230,20 @@ async def select(request, user, form, file_info, *, remote=False):
     # Hermes takes it in a chat it answers (its own, or one made for it). Not from Telegram / QQ:
     # there a plain message already is Hermes, /auto asks for one of the workbenches.
     from open_webui.utils.hermes_agent import is_hermes_agent_model
-    hermes_available = not remote and any(is_hermes_agent_model(m) for m in models.values() if isinstance(m, dict))
+    has_hermes_model = any(is_hermes_agent_model(m) for m in models.values() if isinstance(m, dict))
+    hermes_available = not remote and has_hermes_model
+    local_inspect_available = (
+        may_inspect(user)
+        and has_hermes_model
+        and form.local_inspect is not False
+    )
     trace = None
     failed_models = set()
     used_classifier_model = None
     if form.mode != "auto":
         # choosing 协作 is permission to use tools; 「只分析」 in the question still keeps it read-only
         raw = {"mode": form.mode, "reason": "你指定了处理方式", "execution_requested": form.mode == "team",
-               "needs_tools": form.mode == "team"}
+               "needs_tools": form.mode == "team" or (form.local_inspect is True and form.mode in ("answer", "discuss"))}
     else:
         # 辅助决策模型 first (when the user set one); its failure leaves the classifier below
         from open_webui.utils import decision_model as dm
@@ -252,7 +263,7 @@ async def select(request, user, form, file_info, *, remote=False):
             async def assisted(decider):
                 state, questions = decision_request(form.question, form.context, file_info,
                     teams_available=teams_available, discussion_available=discussion_available,
-                    hermes_available=hermes_available)
+                    hermes_available=hermes_available, local_inspect_available=local_inspect_available)
                 answers_map, reason = await decider.judge(state, questions)
                 picked = selection_from_answers(answers_map, reason, decider.name)
                 return picked, {"mode": picked["mode"], "execution_requested": picked["execution_requested"],
@@ -276,6 +287,7 @@ async def select(request, user, form, file_info, *, remote=False):
         messages = selection_messages(
             form.question, form.context, file_info,
             teams_available=teams_available, hermes_available=hermes_available,
+            local_inspect_available=local_inspect_available,
         )
         for idx, candidate in enumerate(candidates):
             async def classify(model_id=candidate):
@@ -304,22 +316,29 @@ async def select(request, user, form, file_info, *, remote=False):
                 teams_available=teams_available,
                 discussion_available=discussion_available,
                 hermes_available=hermes_available,
+                local_inspect_available=local_inspect_available,
             )
-    # Only probe Hermes team availability when the selection could actually land on 协作台.
-    needs_team_check = isinstance(raw, dict) and teams_available and (
-        raw.get("mode") == "team"
-        or (raw.get("mode") in ("answer", "discuss") and raw.get("needs_tools") is True and not hermes_available)
-        or (raw.get("mode") == "hermes" and not hermes_available
-            and (raw.get("needs_tools") is True or raw.get("execution_requested") is True))
+    # Only probe Hermes availability when the selection could actually land on 协作台 or local_inspect.
+    needs_hermes_probe = isinstance(raw, dict) and (
+        (teams_available and (
+            raw.get("mode") == "team"
+            or (raw.get("mode") in ("answer", "discuss") and raw.get("needs_tools") is True and not hermes_available)
+            or (raw.get("mode") == "hermes" and not hermes_available
+                and (raw.get("needs_tools") is True or raw.get("execution_requested") is True))
+        ))
+        or (local_inspect_available and raw.get("mode") in ("answer", "discuss")
+            and (raw.get("needs_tools") is True or form.local_inspect is True))
     )
-    if needs_team_check:
+    if needs_hermes_probe:
         try:
             await hermes_target(request, user)
         except TeamsError:
             teams_available = False
+            local_inspect_available = False
     try:
         decision = normalize_selection(raw, question=form.question, context=form.context,
-            teams_available=teams_available, discussion_available=discussion_available, hermes_available=hermes_available)
+            teams_available=teams_available, discussion_available=discussion_available,
+            hermes_available=hermes_available, local_inspect_available=local_inspect_available)
         if raw.get("degraded") == "auto":
             decision["degraded"] = "auto"
     except ValueError:
@@ -328,10 +347,16 @@ async def select(request, user, form, file_info, *, remote=False):
             teams_available=teams_available,
             discussion_available=discussion_available,
             hermes_available=hermes_available,
+            local_inspect_available=local_inspect_available,
         )
         decision = normalize_selection(fallback_raw, question=form.question, context=form.context,
-            teams_available=teams_available, discussion_available=discussion_available, hermes_available=hermes_available)
+            teams_available=teams_available, discussion_available=discussion_available,
+            hermes_available=hermes_available, local_inspect_available=local_inspect_available)
         decision["degraded"] = "auto"
+    if form.local_inspect is True and local_inspect_available and decision.get("mode") in ("answer", "discuss"):
+        decision["local_inspect"] = True
+    elif form.local_inspect is False:
+        decision.pop("local_inspect", None)
     if decision.get("blocked"):
         raise RouteBlocked(decision["reason"])
     # An explicit manual choice should explain an unavailable capability rather than change mode.
@@ -410,16 +435,17 @@ async def dispatch(request, user, row, form, decision, models, ambiguous, bases,
     else:
         loaded = await asyncio.to_thread(discussions._load_files, form.files, user)
         web = form.research and bool(getattr(request.app.state.config, "ENABLE_WEB_SEARCH", True))
+        use_local_inspect = bool(decision.get("local_inspect")) and may_inspect(user)
         if mode == "answer":
             answers._check_capacity(user)
             answers._open(request, user, question=form.question, planner=planner, web_allowed=web,
-                context=context, origin=origin, files=loaded, on_created=bind)
+                local_inspect=use_local_inspect, context=context, origin=origin, files=loaded, on_created=bind)
         else:
             discussions._check_capacity(user)
             chosen = discussions._diverse(bases, 2 if form.preference == "economy" else 3)
             setup = room.normalize_setup({"mode": "compare", "rounds": 1,
                 "seats": [{"model": b["id"]} for b in chosen], "moderator": planner["model"],
-                "research": web, "autoMatch": True}, models, ambiguous, user)
+                "research": web, "localInspect": use_local_inspect, "autoMatch": True}, models, ambiguous, user)
             discussions._open(request, user, question=form.question, setup=setup, files=loaded,
                 context=context, origin=origin, on_created=bind)
         if origin:
@@ -430,7 +456,9 @@ async def dispatch(request, user, row, form, decision, models, ambiguous, bases,
         Chats.set_chat_meta_value_by_id(origin["chatId"], "auto_route", {"id": row["id"], "mode": mode})
         try:  # Hermes' reply is its own answer, not a note about where it went
             if mode != "hermes":
-                _settle_reply(origin, mode, decision.get("reason"), read_only=read_only, degraded=decision.get("degraded"))
+                _settle_reply(origin, mode, decision.get("reason"), read_only=read_only,
+                              degraded=decision.get("degraded"),
+                              local_inspect=bool(decision.get("local_inspect")))
         except Exception:  # the card shows the choice either way
             log.debug("auto: could not update the chat reply", exc_info=True)
         from open_webui.utils.team_chats import emit_chat_event

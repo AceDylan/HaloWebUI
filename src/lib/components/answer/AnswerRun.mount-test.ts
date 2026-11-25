@@ -344,4 +344,28 @@ describe('AnswerRun', () => {
 		await until(() => !!target.querySelector('[data-conclusion-card] [data-halo-inline-html-preview]'));
 		expect(chip()).toBeFalsy();
 	}, 90000);
+
+	it('renders read-only local inspect evidence panel and toggles detail view', async () => {
+		const withInspect = created({
+			status: 'done',
+			localInspectAllowed: true,
+			localInspect: {
+				status: 'done',
+				summary: 'nginx 监听 3001，反代 127.0.0.1:3000，凭据已脱敏。',
+				sources: [
+					{ kind: 'file', path: '/etc/nginx/sites-enabled/halowebui.conf' },
+					{ kind: 'command', path: 'docker ps' }
+				]
+			},
+			answer: { status: 'done', content: '根据本机取证，反代配置正常。', startedAt: 1000, endedAt: 5000 }
+		});
+		api.getAnswer.mockResolvedValue(detail(withInspect, { running: false }));
+		const target = await mount();
+		await until(() => !!target.querySelector('[data-local-inspect="done"]'));
+		expect(text(target, '[data-local-inspect-toggle]')).toContain('本机取证 · 2 项（只读已脱敏）');
+		expect(target.querySelector('[data-local-inspect-detail]')).toBeFalsy();
+		(target.querySelector('[data-local-inspect-toggle]') as any).click();
+		await until(() => !!target.querySelector('[data-local-inspect-detail]'));
+		expect(text(target, '[data-local-inspect-detail]')).toContain('nginx 监听 3001');
+	}, 90000);
 });

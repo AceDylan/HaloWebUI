@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field
 from open_webui.models.chats import DISPATCHED_FROM_META_KEY, ChatForm, Chats
 from open_webui.socket.main import get_event_emitter
 from open_webui.utils.vault_notes import notes_for
+from open_webui.utils.local_inspect import inspect_host, may_inspect
 from open_webui.utils.access_control import has_permission
 from open_webui.utils.auth import get_verified_user
 from open_webui.utils import discussion_room as room
@@ -54,6 +55,7 @@ class CreateForm(BaseModel):
     rounds: Optional[int] = None
     moderator: Optional[str] = None
     research: bool = False
+    local_inspect: bool = False
     files: list[str] = []
     # the conversation a discussion was started from (text, title, chat_id): background for every seat
     context: Optional[dict] = None
@@ -145,6 +147,7 @@ def _setup_of(chat) -> dict:
     data = (chat.chat or {}).get(CHAT_KEY) or {}
     setup = {key: data.get(key) for key in ("mode", "rounds", "seats", "moderator")}
     setup["research"] = bool(data.get("research"))
+    setup["localInspect"] = bool(data.get("localInspect"))
     setup["autoMatch"] = bool(data.get("autoMatch"))
     setup["smart"] = bool(data.get("smart"))
     return setup
@@ -180,6 +183,8 @@ def _settle_interrupted(chat) -> None:
                     turn["status"] = "stopped"
             if (ask.get("conclusion") or {}).get("status") in {"waiting", "streaming"}:
                 ask["conclusion"]["status"] = "stopped" if ask["conclusion"].get("content") else "waiting"
+            if isinstance(ask.get("localInspect"), dict) and ask["localInspect"].get("status") == "running":
+                ask["localInspect"]["status"] = "stopped"
             _persist_ask(chat.id, ask, _setup_of(chat))
 
 
@@ -904,6 +909,17 @@ def _start(
     async def search(question: str, past: list[dict]):
         return await _search(request, user, ask["moderator"]["model"], question, past)
 
+    async def inspect(question: str, past: list[dict]):
+        parts = []
+        bg = (ask.get("context") or {}).get("text") or ""
+        if bg:
+            parts.append(bg[:1200])
+        for item in past[-2:]:
+            q_prev = item.get("question") or ""
+            if q_prev:
+                parts.append(f"Earlier question: {q_prev[:300]}")
+        return await inspect_host(request, user, question, context="\n\n".join(parts), mode="discuss")
+
     async def match(current: dict) -> dict:
         return await _match(request, user, chat_id, current, call_model)
 
@@ -931,6 +947,7 @@ def _start(
         conclude_only=conclude_only,
         from_round=from_round,
         search=search,
+        inspect=inspect,
         retry_turn=retry_turn,
         resume=resume,
         adapt_rounds=adapt_rounds,
@@ -1183,7 +1200,14 @@ def dispatch_setup(user, models_map: dict, ambiguous: set) -> dict:
 
 
 async def open_for_chat(
-    request: Request, user, *, question: str, context: Optional[dict], origin: dict, files: Optional[list[str]] = None
+    request: Request,
+    user,
+    *,
+    question: str,
+    context: Optional[dict],
+    origin: dict,
+    files: Optional[list[str]] = None,
+    local_inspect: Optional[bool] = None,
 ) -> str:
     """派发方式「讨论」 (utils/mode_dispatch.py): a chat's message as a new discussion at the
     user's usual table (dispatch_setup), the conversation before it as background, the message's
@@ -1196,6 +1220,8 @@ async def open_for_chat(
     _check_capacity(user)
     models_map, ambiguous = await _models(request, user)
     setup = dispatch_setup(user, models_map, ambiguous)
+    if local_inspect is not None:
+        setup = {**setup, "localInspect": bool(local_inspect) and may_inspect(user)}
     loaded = []
     for file_id in (files or [])[: room.MAX_FILES]:
         try:
@@ -1227,6 +1253,7 @@ async def create_discussion(request: Request, form: CreateForm, user=Depends(get
                 "rounds": form.rounds,
                 "moderator": form.moderator,
                 "research": form.research,
+                "localInspect": form.local_inspect,
                 "autoMatch": form.auto_match,
                 "smart": form.smart,
             },

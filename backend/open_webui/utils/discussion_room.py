@@ -34,6 +34,7 @@ from typing import Any, Awaitable, Callable, Optional
 
 from open_webui.env import BYPASS_MODEL_ACCESS_CONTROL, GLOBAL_LOG_LEVEL, SRC_LOG_LEVELS
 from open_webui.utils.vault_notes import notes_block, notes_tail
+from open_webui.utils.local_inspect import inspect_block, inspect_tail, may_inspect
 from open_webui.utils.mode_chats import native_search_failed, sources_from_docs
 from open_webui.utils.mode_illustrate import picture_summary
 from open_webui.utils.model_identity import resolve_model_from_lookup
@@ -64,6 +65,7 @@ MAX_RUNNING_PER_USER = 2
 HISTORY_CONCLUSION_CHARS = 2400
 TRANSCRIPT_TURN_CHARS = 6000
 DELTA_FLUSH_SECONDS = 0.15
+INSPECT_TIMEOUT_SECONDS = 100
 RESEARCH_TIMEOUT_SECONDS = 150
 RESEARCH_MAX_SOURCES = 8
 RESEARCH_EXCERPT_CHARS = 2800
@@ -316,6 +318,7 @@ def normalize_setup(
         "seats": seats,
         "moderator": moderator,
         "research": bool(raw.get("research")),
+        "localInspect": bool(raw.get("localInspect") or raw.get("local_inspect")) and may_inspect(user),
         "autoMatch": auto_match,
         "smart": smart,
     }
@@ -733,6 +736,7 @@ def build_turn_messages(
         f"User question:\n{question}",
         _files_block(ask, sees_images=sees, gets_images=gets_images),
         notes_block(ask.get("notes") or []),
+        inspect_block(ask.get("localInspect")),
         _research_block(ask),
     ]
     if transcript:
@@ -805,6 +809,7 @@ def build_conclusion_messages(
         f"User question:\n{ask.get('question') or ''}",
         _files_block(ask, sees_images=moderator_sees, gets_images=gets_images),
         notes_block(ask.get("notes") or []),
+        inspect_block(ask.get("localInspect")),
         _research_block(ask),
         f"Transcript:\n\n{transcript or '(no participant produced an answer)'}",
     ]
@@ -1123,7 +1128,7 @@ def stored_content(ask: dict, *, tail: str = "") -> str:
 
     content = with_picture(((ask.get("conclusion") or {}).get("content") or "").strip(), ask.get("illustration"))
     if content:
-        content += tail + notes_tail(ask.get("notes") or [])
+        content += tail + notes_tail(ask.get("notes") or []) + inspect_tail(ask.get("localInspect"))
     return with_card(content, ask.get("card"))
 
 
@@ -1292,6 +1297,9 @@ def new_ask(
         "interjections": [],
         "conclusion": {"status": "waiting", "content": "", "model": setup["moderator"]["model"], "name": setup["moderator"]["name"]},
         "previousConclusions": [],
+        "localInspect": {"status": "waiting", "summary": "", "sources": [], "error": None, "startedAt": None, "endedAt": None}
+        if setup.get("localInspect")
+        else None,
         "research": {"status": "waiting", "queries": [], "sources": []} if setup.get("research") else None,
         "notes": deepcopy(notes or []),
         "files": files or [],
@@ -1340,6 +1348,7 @@ def summary_meta(setup: dict, asks: list[dict]) -> dict:
         ],
         "moderator": deepcopy(setup["moderator"]),
         "research": bool(setup.get("research")),
+        "localInspect": bool(setup.get("localInspect")),
         "status": last.get("status") or "running",
         "asks": len(asks),
         "question": _clean_text(last.get("question"), 200),
@@ -1385,6 +1394,8 @@ class LiveDiscussion:
     from_round: int = 1
     # (question, history) -> {"queries": [...], "docs": [{"title", "url", "content"}]}
     search: Optional[Callable[[str, list[dict]], Awaitable[dict]]] = None
+    # (question, history) -> {"summary": str, "sources": [...], "model": str}
+    inspect: Optional[Callable[[str, list[dict]], Awaitable[dict]]] = None
     # re-run just this turn (a seat that failed), then conclude again
     retry_turn: Optional[str] = None
     # data URLs of the question's images (round 1 and the moderator get them)
@@ -1817,6 +1828,36 @@ class LiveDiscussion:
             self.save()
             await self.send_state()
 
+    async def _run_inspect(self):
+        local = self.ask.get("localInspect")
+        if not isinstance(local, dict):
+            return
+        local.update({"status": "running", "startedAt": now_ms(), "endedAt": None, "error": None})
+        await self.send_state()
+        try:
+            if self.inspect is None:
+                raise ValueError("本机只读取证不可用")
+            found = await asyncio.wait_for(self.inspect(self.ask["question"], self.history), INSPECT_TIMEOUT_SECONDS)
+            summary = str((found or {}).get("summary") or "").strip()
+            local["summary"] = summary
+            local["sources"] = list((found or {}).get("sources") or [])
+            if (found or {}).get("model"):
+                local["model"] = str(found["model"])
+            local["status"] = "skipped" if (found or {}).get("skipped") else ("done" if summary else "empty")
+        except asyncio.CancelledError:
+            local["status"] = "stopped"
+            raise
+        except asyncio.TimeoutError:
+            local["status"] = "error"
+            local["error"] = f"超过 {INSPECT_TIMEOUT_SECONDS} 秒没取证完，讨论照常进行"
+        except Exception as exc:
+            local["status"] = "error"
+            local["error"] = _short_error(exc)[:200]
+        finally:
+            local["endedAt"] = now_ms()
+            self.save()
+            await self.send_state()
+
     async def _run_research(self):
         research = self.ask["research"]
         research.update({"status": "running", "startedAt": now_ms(), "error": None})
@@ -1941,22 +1982,34 @@ class LiveDiscussion:
                 self.save()
             elif not self.conclude_only:
                 research = self.ask.get("research")
+                local_ins = self.ask.get("localInspect")
                 fresh_research = bool(
                     research and research.get("status") in {"waiting", "stopped", "running"} and not self.ask["turns"] and self.from_round == 1
                 )
+                fresh_inspect = bool(
+                    isinstance(local_ins, dict)
+                    and local_ins.get("status") in {"waiting", "stopped", "running"}
+                    and not self.ask["turns"]
+                    and self.from_round == 1
+                )
                 planning = self.ask.get("planning")
                 if planning and (planning.get("status") in {"waiting", "running", "stopped"} or not self.setup["seats"]) and not self.ask["turns"]:
-                    # the notes do not depend on who sits at the table: looked up meanwhile
-                    researching = asyncio.ensure_future(self._run_research()) if fresh_research else None
+                    # the notes and local evidence do not depend on who sits at the table: gathered meanwhile
+                    pre_tasks = []
+                    if fresh_research:
+                        pre_tasks.append(asyncio.ensure_future(self._run_research()))
+                    if fresh_inspect:
+                        pre_tasks.append(asyncio.ensure_future(self._run_inspect()))
                     try:
                         await self._run_plan()
                     except BaseException:
-                        if researching is not None:
-                            researching.cancel()
-                            await asyncio.gather(researching, return_exceptions=True)
+                        for t in pre_tasks:
+                            t.cancel()
+                        if pre_tasks:
+                            await asyncio.gather(*pre_tasks, return_exceptions=True)
                         raise
-                    if researching is not None:
-                        await researching
+                    if pre_tasks:
+                        await asyncio.gather(*pre_tasks)
                 matching = self.ask.get("matching")
                 if (
                     self.match is not None
@@ -1965,7 +2018,20 @@ class LiveDiscussion:
                     and not self.ask["turns"]
                 ):
                     await self._run_match()
-                if research and research.get("status") in {"waiting", "stopped", "running"} and not self.ask["turns"] and self.from_round == 1:
+                need_res = bool(
+                    research and research.get("status") in {"waiting", "stopped", "running"} and not self.ask["turns"] and self.from_round == 1
+                )
+                need_ins = bool(
+                    isinstance(local_ins, dict)
+                    and local_ins.get("status") in {"waiting", "stopped", "running"}
+                    and not self.ask["turns"]
+                    and self.from_round == 1
+                )
+                if need_res and need_ins:
+                    await asyncio.gather(self._run_inspect(), self._run_research())
+                elif need_ins:
+                    await self._run_inspect()
+                elif need_res:
                     await self._run_research()
                 await self._find_browsers()
                 if self.resume:

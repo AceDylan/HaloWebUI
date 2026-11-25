@@ -19,6 +19,7 @@
 	import { now, timeAgo } from '$lib/components/teams/clock';
 	import ResearchPanel from '$lib/components/discuss/ResearchPanel.svelte';
 	import VaultNotesPanel from '$lib/components/discuss/VaultNotesPanel.svelte';
+	import LocalInspectPanel from '$lib/components/discuss/LocalInspectPanel.svelte';
 	import ConclusionPicture from '$lib/components/discuss/ConclusionPicture.svelte';
 	import ConclusionBody from '$lib/components/discuss/ConclusionBody.svelte';
 	import FinishChips from '$lib/components/discuss/FinishChips.svelte';
@@ -416,6 +417,7 @@
 				{/if}
 
 				<VaultNotesPanel notes={run.notes ?? []} />
+				<LocalInspectPanel inspect={run.localInspect} />
 				{#if run.research}
 					<ResearchPanel research={run.research} />
 				{/if}
@@ -440,7 +442,7 @@
 									{:else if answerState === 'streaming'}
 										· 正在回答…
 									{:else if answerState === 'waiting' && liveNow}
-										· {run.status === 'researching' ? '等资料查完' : '准备中'}
+										· {run.status === 'inspecting' ? '等本机只读取证完成' : run.status === 'researching' ? '等资料查完' : '准备中'}
 									{:else if answerState === 'done'}
 										{[
 											took !== null ? `用时 ${took}s` : '',

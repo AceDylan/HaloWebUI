@@ -16,6 +16,7 @@ from pydantic import BaseModel
 from open_webui.models.chats import DISPATCHED_FROM_META_KEY, ChatForm, Chats
 from open_webui.socket.main import get_event_emitter
 from open_webui.utils.vault_notes import notes_for
+from open_webui.utils.local_inspect import inspect_host, may_inspect
 from open_webui.utils.auth import get_verified_user
 from open_webui.utils import answer_desk as desk
 from open_webui.utils import assistant_library as lib
@@ -37,6 +38,8 @@ class CreateForm(BaseModel):
     planner: Optional[str] = None
     # may the dispatcher look things up on the web (it decides whether the question needs it)
     research: bool = True
+    # admin-only: read-only local host evidence collection via Hermes before answering
+    local_inspect: bool = False
     # the conversation it was asked from (text, title, chat_id): background for the dispatcher
     # and the assistant
     context: Optional[dict] = None
@@ -120,7 +123,7 @@ def _settle_interrupted(chat) -> None:
     if run and run.get("status") in desk.RUNNING_STATUSES:
         run["status"] = "interrupted"
         run["endedAt"] = run.get("endedAt") or desk.now_ms()
-        for key in ("plan", "answer"):
+        for key in ("plan", "localInspect", "answer"):
             part = run.get(key) or {}
             if part.get("status") in {"running", "streaming", "waiting"} and part.get("startedAt"):
                 part["status"] = "stopped"
@@ -459,6 +462,9 @@ def _start(request: Request, user, chat, run: dict) -> desk.LiveAnswer:
 
         return await discussions._search(request, user, run["planner"]["model"], text, [])
 
+    async def inspect(text: str, background: str):
+        return await inspect_host(request, user, text, context=background, mode="answer")
+
     async def can_browse(model_id: str) -> bool:
         from open_webui.utils.mode_chats import native_search_models
 
@@ -477,6 +483,7 @@ def _start(request: Request, user, chat, run: dict) -> desk.LiveAnswer:
         persist=lambda current: _persist(chat_id, current),
         after_done=after_done,
         search=search,
+        inspect=inspect,
         can_browse=can_browse,
     )
     desk.start_live(live)
@@ -600,6 +607,7 @@ def _open(
     question: str,
     planner: dict,
     web_allowed: bool,
+    local_inspect: bool = False,
     context: Optional[dict] = None,
     chosen: str = "",
     origin: Optional[dict] = None,
@@ -614,6 +622,7 @@ def _open(
         user_message_id=user_message_id,
         message_id=message_id,
         web_allowed=web_allowed,
+        local_inspect=bool(local_inspect) and may_inspect(user),
         context=context,
         origin=origin,
         files=files,
@@ -669,7 +678,16 @@ def _open(
     return chat
 
 
-async def open_for_chat(request: Request, user, *, question: str, context: Optional[dict], origin: dict, files: Optional[list[str]] = None) -> str:
+async def open_for_chat(
+    request: Request,
+    user,
+    *,
+    question: str,
+    context: Optional[dict],
+    origin: dict,
+    files: Optional[list[str]] = None,
+    local_inspect: bool = False,
+) -> str:
     """派发方式「精答」 (utils/mode_dispatch.py): a chat's message as a new run, the conversation
     before it as background; the answer goes back to ``origin`` when it is done (``origin`` None: a
     run of its own, read back by routers/remote.py). Returns the run's chat id; raises HTTPException
@@ -680,7 +698,15 @@ async def open_for_chat(request: Request, user, *, question: str, context: Optio
     loaded = await asyncio.to_thread(_load_files, files or [], user)
     planner, web_allowed = await _prepare(request, user, None, True)
     return _open(
-        request, user, question=question, planner=planner, web_allowed=web_allowed, context=clean_context(context), origin=origin, files=loaded
+        request,
+        user,
+        question=question,
+        planner=planner,
+        web_allowed=web_allowed,
+        local_inspect=local_inspect,
+        context=clean_context(context),
+        origin=origin,
+        files=loaded,
     ).id
 
 
@@ -708,6 +734,7 @@ async def create_answer(request: Request, form: CreateForm, user=Depends(get_ver
         question=question,
         planner=planner,
         web_allowed=web_allowed,
+        local_inspect=bool(form.local_inspect),
         context=clean_context(form.context),
         chosen=str(form.assistant or "").strip()[:200],
         files=files,

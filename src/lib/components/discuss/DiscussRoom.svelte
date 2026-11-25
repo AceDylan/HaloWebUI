@@ -34,6 +34,7 @@
 	import ConclusionCard from './ConclusionCard.svelte';
 	import ResearchPanel from './ResearchPanel.svelte';
 	import VaultNotesPanel from './VaultNotesPanel.svelte';
+	import LocalInspectPanel from './LocalInspectPanel.svelte';
 	import SeatAssistants from './SeatAssistants.svelte';
 	import SeatAvatar from './SeatAvatar.svelte';
 	import TurnCard from './TurnCard.svelte';
@@ -504,6 +505,7 @@
 						</header>
 
 						<VaultNotesPanel notes={ask.notes ?? []} />
+						<LocalInspectPanel inspect={ask.localInspect} />
 						{#if ask.research}
 							<ResearchPanel research={ask.research} />
 						{/if}

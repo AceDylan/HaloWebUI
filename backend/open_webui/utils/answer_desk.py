@@ -41,6 +41,7 @@ from open_webui.utils.discussion_room import (
 from open_webui.utils import assistant_library as lib
 from open_webui.utils.mode_chats import native_search_failed, sources_from_docs
 from open_webui.utils.vault_notes import notes_block, notes_tail
+from open_webui.utils.local_inspect import inspect_block, inspect_tail
 from open_webui.utils.mode_illustrate import picture_summary
 
 log = logging.getLogger(__name__)
@@ -54,13 +55,14 @@ QUESTION_MAX_CHARS = 8000
 MAX_RUNNING_PER_USER = 3
 PLAN_TIMEOUT_SECONDS = 135  # 辅助决策模型 (up to 60s) and then the dispatcher
 ANSWER_TIMEOUT_SECONDS = 300
+INSPECT_TIMEOUT_SECONDS = 100
 RESEARCH_TIMEOUT_SECONDS = 150
 RESEARCH_MAX_SOURCES = 8
 RESEARCH_EXCERPT_CHARS = 2800
 DELTA_FLUSH_SECONDS = 0.12
 RETRY_DELAYS = (8, 20, 45)
 
-RUNNING_STATUSES = {"routing", "researching", "answering"}
+RUNNING_STATUSES = {"routing", "inspecting", "researching", "answering"}
 TERMINAL_STATUSES = {"done", "stopped", "error", "interrupted"}
 
 
@@ -295,6 +297,7 @@ def new_run(
     user_message_id: str,
     message_id: str,
     web_allowed: bool,
+    local_inspect: bool = False,
     context: Optional[dict] = None,
     origin: Optional[dict] = None,
     files: Optional[list[dict]] = None,
@@ -312,10 +315,14 @@ def new_run(
         "status": "routing",
         "planner": deepcopy(planner),
         "webAllowed": web_allowed,
+        "localInspectAllowed": bool(local_inspect),
         "context": context,
         "files": deepcopy(files or []),
         "plan": {"status": "running", "startedAt": now_ms(), "endedAt": None},
         "assistant": None,
+        "localInspect": {"status": "waiting", "summary": "", "sources": [], "error": None, "startedAt": None, "endedAt": None}
+        if local_inspect
+        else None,
         "research": None,
         "notes": deepcopy(notes or []),
         "answer": {"status": "waiting", "content": "", "thinking": False, "usage": {}, "startedAt": None, "endedAt": None, "error": None, "retry": None},
@@ -355,6 +362,7 @@ def summary_meta(run: dict) -> dict:
         "preview": clean_text(_plain((run.get("answer") or {}).get("content") or ""), 180),
         "assistant": {k: assistant.get(k) for k in ("id", "name", "emoji", "action")} if assistant else None,
         "research": bool((run.get("research") or {}).get("sources")),
+        "localInspect": bool((run.get("localInspect") or {}).get("summary")),
         "picture": picture_summary(run.get("illustration")),
         "updatedAt": now_ms(),
     }
@@ -411,6 +419,9 @@ def answer_messages(run: dict, browse: bool = False) -> list[dict]:
     notes = notes_block(run.get("notes") or [])
     if notes:
         content = f"{content}\n\n---\n{notes}"
+    local = inspect_block(run.get("localInspect"))
+    if local:
+        content = f"{content}\n\n---\n{local}"
     sources = (run.get("research") or {}).get("sources") or []
     if sources:
         content = f"{content}\n\n---\n{research_block(sources)}"
@@ -433,7 +444,7 @@ def stored_content(run: dict) -> str:
     content = with_picture(((run.get("answer") or {}).get("content") or "").strip(), run.get("illustration"))
     sources = (run.get("research") or {}).get("sources") or []
     if content:
-        content += sources_tail(sources) + notes_tail(run.get("notes") or [])
+        content += sources_tail(sources) + notes_tail(run.get("notes") or []) + inspect_tail(run.get("localInspect"))
     return with_card(content, run.get("card"))
 
 
@@ -463,6 +474,8 @@ class LiveAnswer:
     after_done: Optional[Callable[[dict], Awaitable[None]]] = None
     # (question) -> {"queries": [...], "docs": [...]}
     search: Optional[Callable[[str], Awaitable[dict]]] = None
+    # (question, background) -> {"summary": str, "sources": [...], "model": str}
+    inspect: Optional[Callable[[str, str], Awaitable[dict]]] = None
     # (model id) -> whether it searches the web itself (native web search) when the plan looks things up
     can_browse: Optional[Callable[[str], Awaitable[bool]]] = None
     browse: bool = False
@@ -533,6 +546,38 @@ class LiveAnswer:
         run["assistant"] = assistant
         self.save()
         await self.send_state()
+
+    async def _inspect(self):
+        run = self.run
+        local = run["localInspect"]
+        if not isinstance(local, dict):
+            return
+        local.update({"status": "running", "error": None, "startedAt": now_ms(), "endedAt": None})
+        if run.get("status") not in {"researching"}:
+            run["status"] = "inspecting"
+        await self.send_state()
+        try:
+            if self.inspect is None:
+                raise ValueError("本机只读取证不可用")
+            background = (run.get("context") or {}).get("text") or ""
+            found = await asyncio.wait_for(self.inspect(run["question"], background), INSPECT_TIMEOUT_SECONDS)
+            summary = str((found or {}).get("summary") or "").strip()
+            local["summary"] = summary
+            local["sources"] = list((found or {}).get("sources") or [])
+            if (found or {}).get("model"):
+                local["model"] = str(found["model"])
+            local["status"] = "skipped" if (found or {}).get("skipped") else ("done" if summary else "empty")
+        except asyncio.CancelledError:
+            local["status"] = "stopped"
+            raise
+        except asyncio.TimeoutError:
+            local.update({"status": "error", "error": f"超过 {INSPECT_TIMEOUT_SECONDS} 秒没取证完，直接回答"})
+        except Exception as exc:
+            local.update({"status": "error", "error": _short_error(exc)[:200]})
+        finally:
+            local["endedAt"] = now_ms()
+            self.save()
+            await self.send_state()
 
     async def _research(self):
         run = self.run
@@ -640,7 +685,19 @@ class LiveAnswer:
         try:
             if not run.get("assistant"):
                 await self._route()
-            if (run.get("plan") or {}).get("webSearch") and (run.get("research") or {}).get("status") not in {"done", "skipped"}:
+            needs_inspect = bool(
+                isinstance(run.get("localInspect"), dict)
+                and run["localInspect"].get("status") in {"waiting", "stopped", "running"}
+            )
+            needs_research = bool(
+                (run.get("plan") or {}).get("webSearch")
+                and (run.get("research") or {}).get("status") not in {"done", "skipped"}
+            )
+            if needs_inspect and needs_research:
+                await asyncio.gather(self._inspect(), self._research())
+            elif needs_inspect:
+                await self._inspect()
+            elif needs_research:
                 await self._research()
             await self._answer()
             run["status"] = "done"
@@ -648,6 +705,8 @@ class LiveAnswer:
             run["status"] = "stopped"
             if run.get("plan", {}).get("status") == "running":
                 run["plan"].update({"status": "stopped", "endedAt": now_ms()})
+            if isinstance(run.get("localInspect"), dict) and run["localInspect"].get("status") == "running":
+                run["localInspect"].update({"status": "stopped", "endedAt": now_ms()})
             self._settle_answer("stopped")
         except Exception as exc:
             log.warning("answer %s failed: %s", self.chat_id, exc)
@@ -655,6 +714,8 @@ class LiveAnswer:
             run["error"] = _short_error(exc)[:300]
             if run.get("plan", {}).get("status") == "running":
                 run["plan"].update({"status": "error", "error": run["error"], "endedAt": now_ms()})
+            if isinstance(run.get("localInspect"), dict) and run["localInspect"].get("status") == "running":
+                run["localInspect"].update({"status": "error", "error": run["error"], "endedAt": now_ms()})
             self._settle_answer("error", run["error"])
         finally:
             flusher.cancel()

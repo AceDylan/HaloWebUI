@@ -6,10 +6,11 @@ from typing import Any
 
 
 def register(ctx: Any) -> None:
-    from . import api, hooks, remote, tg, gallery
+    from . import api, hooks, local_inspect, remote, tg, gallery
 
     ctx.register_hook("image_generated", gallery.on_image_generated)
 
+    ctx.register_hook("pre_tool_call", local_inspect.on_pre_tool_call)
     ctx.register_hook("post_tool_call", hooks.on_post_tool_call)
     ctx.register_hook("subagent_start", hooks.on_subagent_start)
     ctx.register_hook("subagent_stop", hooks.on_subagent_stop)

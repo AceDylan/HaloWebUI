@@ -23,6 +23,8 @@ export type AutoRoute = {
 	auto_start: boolean;
 	/** 协作 that may only look (查仓库、核对配置), never change anything. */
 	read_only?: boolean;
+	/** 精答 / 讨论 automatically gathers read-only host evidence via Hermes first. */
+	local_inspect?: boolean;
 	/** The mode that was wanted but unavailable ('auto' = the choice itself failed): this one stands in. */
 	degraded?: AutoMode | 'auto' | null;
 	/** Real files had to be checked and nothing available could: reported, not answered from memory. */
@@ -111,9 +113,11 @@ export const MODE_GUIDE: Record<AutoMode, { when: string; how: string }> = {
 	}
 };
 export const MODE_ORDER: AutoMode[] = ['hermes', 'answer', 'discuss', 'team'];
-/** Who handles it, e.g. 「协作台（只读）」. */
-export const routeTarget = (row: Pick<AutoRoute, 'mode' | 'read_only'>) =>
-	row.mode ? MODE_LABEL[row.mode] + (row.read_only ? '（只读）' : '') : '';
+/** Who handles it, e.g. 「协作台（只读）」 or 「讨论（本机取证）」. */
+export const routeTarget = (row: Pick<AutoRoute, 'mode' | 'read_only' | 'local_inspect'>) =>
+	row.mode
+		? MODE_LABEL[row.mode] + (row.read_only ? '（只读）' : row.local_inspect ? '（本机取证）' : '')
+		: '';
 export const routePending = (row: AutoRoute) =>
 	row.status === 'routing' || row.status === 'dispatching';
 export const routeStatus = (row: AutoRoute) => {
@@ -139,6 +143,7 @@ export const routeStatus = (row: AutoRoute) => {
 		running: '进行中',
 		concluding: '正在写结论',
 		answering: '正在作答',
+		inspecting: '正在本机取证',
 		researching: '正在查资料',
 		routing: '正在匹配助手',
 		error: '任务出错',

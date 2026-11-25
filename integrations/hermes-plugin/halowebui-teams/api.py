@@ -146,6 +146,20 @@ async def _plan_progress(request):
     return _json_response(progress.planning(team_id if valid_team_id(team_id) else ""))
 
 
+async def _inspect(request):
+    """Read-only local evidence collector for HaloWebUI 精答 / 讨论台."""
+    from . import local_inspect
+
+    data = await _body(request)
+    question = str(data.get("question") or "").strip()
+    if not question:
+        return _error(400, "question is required")
+    context = str(data.get("context") or "").strip()
+    mode = "discuss" if str(data.get("mode") or "") == "discuss" else "answer"
+    result = await asyncio.to_thread(local_inspect.collect, question, context=context, mode=mode)
+    return _json_response(result)
+
+
 async def _create(request):
     from .teams import create_team
 
@@ -547,6 +561,7 @@ def install(app: Any, adapter: Any) -> None:
     router.add_post(base + "/plan/decide", _wrap(adapter, _plan_decide))
     router.add_get(base + "/plan/progress", _wrap(adapter, _plan_progress))
     router.add_post(base + "/plan", _wrap(adapter, _plan))
+    router.add_post(base + "/inspect", _wrap(adapter, _inspect))
     router.add_post(base + "/notify", _wrap(adapter, _notify))
     router.add_post(base, _wrap(adapter, _create))
     router.add_get(base + "/{team_id}", _wrap(adapter, _snapshot))

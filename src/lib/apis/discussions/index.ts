@@ -38,6 +38,8 @@ export type DiscussSetup = {
 	moderator: DiscussModerator;
 	/** Look things up on the web before round 1 (one shared set of notes). */
 	research?: boolean;
+	/** Admin-only: read-only local host evidence inspection via Hermes before round 1. */
+	localInspect?: boolean;
 	/** 自动匹配助手 */
 	autoMatch?: boolean;
 	/** 主持人安排: the moderator set the table (format, rounds, seats) for the first question. */
@@ -112,6 +114,18 @@ export type ModeCard = {
 };
 
 export type VaultNote = { n: number; path: string; title: string; excerpt?: string };
+
+export type LocalInspectSource = { kind: 'file' | 'search' | 'command'; path: string };
+
+export type LocalInspect = {
+	status: 'waiting' | 'running' | 'done' | 'empty' | 'error' | 'stopped' | 'skipped';
+	summary?: string;
+	sources?: LocalInspectSource[];
+	model?: string;
+	error?: string | null;
+	startedAt?: number | null;
+	endedAt?: number | null;
+};
 
 export type DiscussResearch = {
 	/** skipped: the query writer found nothing a search could help with */
@@ -205,6 +219,8 @@ export type DiscussAsk = {
 	interjections: { text: string; afterRound: number; at: number }[];
 	conclusion: DiscussConclusion;
 	previousConclusions: { content: string; endedAt?: number | null }[];
+	/** Admin-only read-only local evidence collected via Hermes before round 1. */
+	localInspect?: LocalInspect | null;
 	research?: DiscussResearch | null;
 	/** related notes of the user's knowledge base (Obsidian), read with the question */
 	notes?: VaultNote[];
@@ -252,6 +268,7 @@ export type DiscussionSummary = {
 	seats: { model: string; name: string; label: string; role: string; assistant?: string }[];
 	moderator: DiscussModerator;
 	research?: boolean;
+	localInspect?: boolean;
 	status: AskStatus;
 	asks: number;
 	question: string;
@@ -315,6 +332,7 @@ export const createDiscussion = (
 		rounds: number;
 		moderator: string;
 		research?: boolean;
+		local_inspect?: boolean;
 		files?: string[];
 		context?: { text: string; title?: string; chat_id?: string | null } | null;
 		/** One per question: a retry with the same key gets the same discussion back. */

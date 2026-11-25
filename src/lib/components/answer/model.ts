@@ -4,6 +4,7 @@ import { pictureElapsed, pictureState, pictureStep } from '$lib/components/discu
 
 export const STATUS_LABEL: Record<AnswerStatus, string> = {
 	routing: '挑选助手',
+	inspecting: '本机取证',
 	researching: '查资料',
 	answering: '回答中',
 	done: '已答完',
@@ -13,7 +14,7 @@ export const STATUS_LABEL: Record<AnswerStatus, string> = {
 };
 
 export const isLive = (status: AnswerStatus | string | null | undefined) =>
-	status === 'routing' || status === 'researching' || status === 'answering';
+	status === 'routing' || status === 'inspecting' || status === 'researching' || status === 'answering';
 
 export const ACTION_LABEL: Record<AssistantAction, string> = {
 	use: '选用',
@@ -39,7 +40,7 @@ export const actionSentence = (action: AssistantAction | undefined, name: string
 					: `选用了「${name}」`;
 
 export type StageState = 'waiting' | 'active' | 'done' | 'error' | 'stopped' | 'skipped';
-export type Stage = { key: 'route' | 'assistant' | 'research' | 'answer' | 'picture'; label: string; state: StageState; note: string };
+export type Stage = { key: 'route' | 'assistant' | 'inspect' | 'research' | 'answer' | 'picture'; label: string; state: StageState; note: string };
 
 const partState = (status: string | undefined, started: boolean): StageState =>
 	status === 'done'
@@ -74,6 +75,36 @@ export const stagesOf = (run: AnswerRun, nowSeconds: number = Date.now() / 1000)
 		note: assistant ? assistant.name : ''
 	};
 	const stages: Stage[] = [route, pick];
+	if (run.localInspect) {
+		const ins = run.localInspect;
+		const state: StageState =
+			ins.status === 'done' || ins.status === 'empty'
+				? 'done'
+				: ins.status === 'skipped'
+					? 'skipped'
+					: ins.status === 'error'
+						? 'error'
+						: ins.status === 'stopped'
+							? 'stopped'
+							: ins.status === 'running'
+								? 'active'
+								: ended
+									? 'skipped'
+									: 'waiting';
+		stages.push({
+			key: 'inspect',
+			label: '本机取证',
+			state,
+			note:
+				ins.status === 'done'
+					? `${ins.sources?.length || 0} 项`
+					: ins.status === 'empty'
+						? '无补充'
+						: ins.status === 'error'
+							? '未取成'
+							: ''
+		});
+	}
 	if (plan.webSearch || run.research) {
 		const research = run.research;
 		const state: StageState = research

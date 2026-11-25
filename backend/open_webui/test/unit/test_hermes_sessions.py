@@ -313,6 +313,45 @@ def test_model_options_keep_a_current_provider_hermes_did_not_mark_as_configured
     assert condense_model_options(None) == {"model": "", "provider": "", "providers": []}
 
 
+def test_model_options_include_logged_in_oauth_provider_models():
+    from open_webui.utils.hermes_sessions import condense_model_options
+
+    options = condense_model_options(
+        {
+            "model": "gpt-chat",
+            "provider": "custom:gpt-chat",
+            "providers": [
+                {
+                    "slug": "custom:gpt-chat",
+                    "name": "gpt-chat",
+                    "authenticated": True,
+                    "is_user_defined": True,
+                    "is_current": True,
+                    "models": ["gpt-chat"],
+                },
+                {
+                    "slug": "openai-codex",
+                    "name": "ChatGPT or Codex Subscription",
+                    "authenticated": True,
+                    "is_user_defined": False,
+                    "models": ["gpt-6.2-sol", "gpt-5.6-sol", "gpt-6.2-sol"],
+                },
+                {
+                    "slug": "anthropic",
+                    "name": "Anthropic",
+                    "authenticated": True,
+                    "is_user_defined": False,
+                    "models": ["claude-opus-5"],
+                },
+            ],
+        }
+    )
+    assert [(p["slug"], p["models"], p["current"]) for p in options["providers"]] == [
+        ("custom:gpt-chat", ["gpt-chat"], True),
+        ("openai-codex", ["gpt-6.2-sol", "gpt-5.6-sol"], False),
+    ]
+
+
 
 def test_model_options_serve_the_last_list_while_one_refresh_runs(monkeypatch):
     from open_webui.utils import hermes_sessions

@@ -175,17 +175,50 @@
 				: '消息直接交给 Hermes'
 			: `${DISPATCHES.find((item) => item.value === current.dispatch)?.hint ?? ''}。只对下一条消息生效，发送后回到「直接」；消息自己以 /命令 开头时以消息为准，交给 Hermes`;
 	$: modelValue = current.model ? `${current.provider}\u0000${current.model}` : '';
-	// The configured models (one per hermes provider entry), without the
-	// default, which "默认" already stands for.
-	$: modelChoices = (modelOptions?.providers ?? []).flatMap((provider) =>
-		provider.models
-			.filter((model) => !(provider.current && model === modelOptions?.model))
-			.map((model) => ({
-				value: `${provider.slug}\u0000${model}`,
-				label: model,
-				provider: provider.name
-			}))
-	);
+	const OAUTH_PROVIDER_LABELS: Record<string, string> = {
+		'openai-codex': 'ChatGPT / Codex（已登录）',
+		nous: 'Nous Portal（已登录）',
+		'qwen-oauth': 'Qwen（已登录）',
+		'minimax-oauth': 'MiniMax（已登录）',
+		'xai-oauth': 'xAI Grok（已登录）'
+	};
+	const isGroupedProvider = (provider: { slug: string; models: string[] }) =>
+		provider.slug in OAUTH_PROVIDER_LABELS || provider.models.length > 1;
+	const providerGroupLabel = (provider: { slug: string; name: string }) =>
+		OAUTH_PROVIDER_LABELS[provider.slug] ?? provider.name;
+
+	// Flat choices (one per gateway custom_provider entry) and grouped choices (logged-in
+	// OAuth accounts with multiple models such as openai-codex), excluding the default model
+	// which the top "默认" option already stands for.
+	$: flatModelChoices = (modelOptions?.providers ?? [])
+		.filter((provider) => !isGroupedProvider(provider))
+		.flatMap((provider) =>
+			provider.models
+				.filter((model) => !(provider.current && model === modelOptions?.model))
+				.map((model) => ({
+					value: `${provider.slug}\u0000${model}`,
+					label: model,
+					provider: provider.name
+				}))
+		);
+	$: groupedModelChoices = (modelOptions?.providers ?? [])
+		.filter((provider) => isGroupedProvider(provider))
+		.map((provider) => ({
+			slug: provider.slug,
+			label: providerGroupLabel(provider),
+			items: provider.models
+				.filter((model) => !(provider.current && model === modelOptions?.model))
+				.map((model) => ({
+					value: `${provider.slug}\u0000${model}`,
+					label: model,
+					provider: provider.name
+				}))
+		}))
+		.filter((group) => group.items.length > 0);
+	$: allModelChoices = [
+		...flatModelChoices,
+		...groupedModelChoices.flatMap((group) => group.items)
+	];
 	// The thinking level is not per chat: hermes' reasoning-sync plugin sets the
 	// Message Gateway default on every request (Telegram too). Saying which
 	// level, and where it is changed, is the one speed lever the panel can point at.
@@ -200,7 +233,7 @@
 	$: effortLabel = EFFORT_LABELS[modelOptions?.reasoning_effort ?? ''] ?? '';
 	// A model chosen earlier that the list no longer offers stays visible.
 	$: pinnedMissing =
-		Boolean(current.model) && !modelChoices.some((item) => item.value === modelValue);
+		Boolean(current.model) && !allModelChoices.some((item) => item.value === modelValue);
 
 	const update = (patch: Partial<HermesRunOptions>) => {
 		options = normalizeHermesRunOptions({ ...current, ...patch });
@@ -394,8 +427,15 @@
 					{#if pinnedMissing}
 						<option value={modelValue}>{current.model}</option>
 					{/if}
-					{#each modelChoices as item (item.value)}
+					{#each flatModelChoices as item (item.value)}
 						<option value={item.value} title={item.provider}>{item.label}</option>
+					{/each}
+					{#each groupedModelChoices as group (group.slug)}
+						<optgroup label={group.label}>
+							{#each group.items as item (item.value)}
+								<option value={item.value} title={item.provider}>{item.label}</option>
+							{/each}
+						</optgroup>
 					{/each}
 				</select>
 			</label>
@@ -441,13 +481,13 @@
 				{#if effortLabel}
 					思考强度{effortLabel}，Hermes 各入口共用，调低回复更快{#if $user?.role === 'admin'}{' · '}<a
 							class="text-primary-600 hover:underline dark:text-primary-400"
-							href="/settings/haloclaw"
+							href="/settings/hermes"
 							on:click={() => {
 								open = false;
 							}}>去修改</a
 						>{/if}
 				{:else}
-					思考强度跟随 HaloWebUI 设置（消息网关）
+					思考强度跟随 HaloWebUI 设置（Hermes 模型）
 				{/if}
 			</div>
 		</div>

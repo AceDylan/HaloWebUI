@@ -26,6 +26,7 @@
 	import {
 		API_MODE_LABELS,
 		AUX_TASKS,
+		EFFORT_OPTIONS,
 		MEDIA_TIMEOUT_MAX,
 		MEDIA_TIMEOUT_MIN,
 		ROUTING_MAX_AUX_FALLBACKS,
@@ -35,8 +36,10 @@
 		auxTaskLabel,
 		describeChange,
 		diffRouting,
+		effortLabel,
 		historySourceLabel,
 		isForeignModel,
+		isOAuthModelId,
 		isValidMediaTimeout,
 		modelFamily,
 		modelLabel,
@@ -46,20 +49,13 @@
 		type AgyDraft
 	} from '$lib/utils/hermes-routing';
 
-	const EFFORT_LABELS: Record<string, string> = {
-		none: '关闭',
-		low: '低',
-		medium: '中',
-		high: '高',
-		xhigh: '超高',
-		max: '最大'
-	};
-
 	let loading = true;
 	let refreshing = false;
+	let routingRefreshing = false;
 	let loadError = '';
 	let saving = false;
 	let snap: HermesRoutingSnapshot | null = null;
+	let baseline: HermesRouting | null = null;
 	let draft: HermesRouting | null = null;
 	let haloEffort = '';
 	let conflict = false;
@@ -72,13 +68,36 @@
 	let agyError = '';
 	let agyRefreshing = false;
 	let auxCollapsed = false;
+	let overridesCollapsed = true;
+	let selectedOAuthModel = '';
 
 	const clone = <T,>(v: T): T => JSON.parse(JSON.stringify(v));
 
+	const normalizeRouting = (next: HermesRoutingSnapshot, fallbackEffort: string): HermesRouting => {
+		const r = clone(next.routing);
+		const effectiveEffort =
+			next.halo_reasoning_effort || r.reasoning_effort || fallbackEffort || '';
+		if (effectiveEffort) r.reasoning_effort = effectiveEffort;
+		r.reasoning_overrides = { ...(r.reasoning_overrides ?? {}) };
+		return r;
+	};
+
 	const adopt = (next: HermesRoutingSnapshot) => {
 		snap = next;
-		draft = clone(next.routing);
+		if (next.halo_reasoning_effort) haloEffort = next.halo_reasoning_effort;
+		baseline = normalizeRouting(next, haloEffort);
+		draft = clone(baseline);
 		conflict = false;
+		const oauth = (next.models ?? []).filter((m) => m.auth_kind === 'oauth');
+		if (oauth.length) {
+			if (isOAuthModelId(draft.main) && oauth.some((m) => m.id === draft!.main)) {
+				selectedOAuthModel = draft.main;
+			} else if (!oauth.some((m) => m.id === selectedOAuthModel)) {
+				selectedOAuthModel = oauth[0].id;
+			}
+		} else {
+			selectedOAuthModel = '';
+		}
 	};
 
 	const adoptAgy = (next: HermesAgyPrefs) => {
@@ -121,21 +140,39 @@
 		agyRefreshing = false;
 	};
 
-	const load = async () => {
+	const load = async (opts?: { refresh?: boolean }) => {
 		loading = !snap;
 		loadError = '';
 		try {
-			adopt(await getHermesRouting(localStorage.token));
+			adopt(await getHermesRouting(localStorage.token, opts));
 		} catch (e) {
 			loadError = `${e}`;
 		}
 		loading = false;
 	};
 
+	const refreshRoutingModels = async () => {
+		if (routingRefreshing) return;
+		routingRefreshing = true;
+		try {
+			const next = await getHermesRouting(localStorage.token, { refresh: true });
+			if (routingDirty && draft) {
+				snap = next;
+			} else {
+				adopt(next);
+			}
+			const oauthCount = (next.models ?? []).filter((m) => m.auth_kind === 'oauth').length;
+			toast.success(`已刷新模型列表（已登录账号模型 ${oauthCount} 个）`);
+		} catch (e) {
+			toast.error(`刷新失败：${(e as Error)?.message ?? e}`);
+		}
+		routingRefreshing = false;
+	};
+
 	const reloadAll = async () => {
 		if (refreshing) return;
 		refreshing = true;
-		await Promise.all([load(), loadAgy()]);
+		await Promise.all([load({ refresh: true }), loadAgy()]);
 		refreshing = false;
 	};
 
@@ -143,19 +180,43 @@
 		load();
 		loadAgy();
 		getHaloClawConfig(localStorage.token)
-			.then((cfg: any) => (haloEffort = String(cfg?.default_reasoning_effort ?? '')))
+			.then((cfg: any) => {
+				const eff = String(cfg?.default_reasoning_effort ?? '').trim();
+				if (!eff) return;
+				haloEffort = eff;
+				if (snap && !snap.halo_reasoning_effort && baseline && draft && !routingDirty) {
+					baseline.reasoning_effort = eff;
+					draft.reasoning_effort = eff;
+					baseline = baseline;
+					draft = draft;
+				}
+			})
 			.catch(() => {});
 		return () => clearTimeout(confirmTimer);
 	});
 
 	$: models = snap?.models ?? [];
+	$: customModels = models.filter((m) => m.auth_kind !== 'oauth');
+	$: oauthModels = models.filter((m) => m.auth_kind === 'oauth');
+	$: authProviders = snap?.auth_providers ?? [];
 	$: modelIds = models.map((m) => m.id);
+	$: mediaModelIds = models.filter((m) => m.media_capable !== false).map((m) => m.id);
 	$: modelById = Object.fromEntries(models.map((m) => [m.id, m])) as Record<
 		string,
 		HermesRoutingModel
 	>;
-	$: changes = snap && draft ? diffRouting(snap.routing, draft) : [];
+	$: changes = baseline && draft ? diffRouting(baseline, draft) : [];
 	$: routingDirty = changes.length > 0;
+	$: effortOutOfSync = Boolean(
+		snap &&
+			haloEffort &&
+			snap.routing.reasoning_effort &&
+			haloEffort !== snap.routing.reasoning_effort
+	);
+	$: overrideEntries = Object.entries(draft?.reasoning_overrides ?? {});
+	$: overrideCandidates = modelIds.filter(
+		(id) => !((draft?.reasoning_overrides ?? {})[id])
+	);
 	$: agy =
 		agyPrefs && agyDraft
 			? agyChanges(agyDraftFrom(agyPrefs), agyDraft)
@@ -193,6 +254,23 @@
 		if (!draft.delegation.model) {
 			draft.delegation.fallback = withPrimary(draft.delegation.fallback, id);
 		}
+		if (isOAuthModelId(id)) selectedOAuthModel = id;
+		touch();
+	};
+	const setEffort = (effort: string) => {
+		if (!draft) return;
+		draft.reasoning_effort = effort;
+		touch();
+	};
+	const setOverride = (key: string, effort: string) => {
+		if (!draft) return;
+		const next = { ...(draft.reasoning_overrides ?? {}) };
+		if (!effort) {
+			delete next[key];
+		} else {
+			next[key] = effort;
+		}
+		draft.reasoning_overrides = next;
 		touch();
 	};
 	const setDelegation = (id: string) => {
@@ -211,7 +289,7 @@
 	};
 
 	const discard = () => {
-		if (snap) draft = clone(snap.routing);
+		if (baseline) draft = clone(baseline);
 		if (agyPrefs) agyDraft = agyDraftFrom(agyPrefs);
 	};
 
@@ -224,7 +302,9 @@
 		let routingSaved = false;
 		try {
 			if (routingDirty) {
-				const next = await saveHermesRouting(localStorage.token, draft, snap.revision);
+				const payload = clone(draft);
+				if (!payload.reasoning_effort) delete payload.reasoning_effort;
+				const next = await saveHermesRouting(localStorage.token, payload, snap.revision);
 				saved += next.changes?.length ?? 0;
 				adopt(next);
 				routingSaved = true;
@@ -239,6 +319,24 @@
 			if (errorStatus(e) === 409) conflict = true;
 			const msg = `${(e as Error)?.message ?? e}`;
 			toast.error(routingSaved ? `Hermes 路由已保存，但 AGY 优先保存失败：${msg}` : msg);
+		}
+		saving = false;
+	};
+
+	const syncEffortNow = async () => {
+		if (!snap || !draft || saving || !haloEffort) return;
+		saving = true;
+		try {
+			const next = await saveHermesRouting(
+				localStorage.token,
+				{ ...clone(draft), reasoning_effort: haloEffort },
+				snap.revision
+			);
+			adopt(next);
+			toast.success(`已同步思考强度为「${effortLabel(haloEffort)}」`);
+		} catch (e) {
+			if (errorStatus(e) === 409) conflict = true;
+			toast.error(`${(e as Error)?.message ?? e}`);
 		}
 		saving = false;
 	};
@@ -267,6 +365,7 @@
 	};
 
 	const probe = async (id: string) => {
+		if (!id) return;
 		probes = { ...probes, [id]: { state: 'run' } };
 		try {
 			const r = await probeHermesRoutingModel(localStorage.token, id);
@@ -282,7 +381,11 @@
 	};
 	const probeAll = () => {
 		if (anyProbing) return;
-		modelIds.forEach((id) => probe(id));
+		const targets = customModels.map((m) => m.id);
+		if (draft?.main && isOAuthModelId(draft.main) && !targets.includes(draft.main)) {
+			targets.push(draft.main);
+		}
+		targets.forEach((id) => probe(id));
 	};
 
 	const probeText = (p?: ProbeState) =>
@@ -439,6 +542,9 @@
 								<span class="hr-beam hr-beam-off" aria-hidden="true"></span>
 								<span class="hr-lane-warn">没有兜底，主模型挂了就没人回答</span>
 							{/if}
+							{#if lane.key === 'chat' && draft.reasoning_effort}
+								<span class="hr-lane-meta">思考 {effortLabel(draft.reasoning_effort)}</span>
+							{/if}
 							{#if lane.key === 'media'}
 								<span class="hr-lane-meta">超时 {draft.media.timeout ?? '—'} 秒</span>
 							{/if}
@@ -458,23 +564,36 @@
 
 			<div class="space-y-3 pb-4">
 				<!-- the model array -->
-				<section class="glass-item hr-card px-4 py-3">
+				<section class="glass-item hr-card px-4 py-3" data-section="models">
 					<div class="hr-card-head">
 						<div>
 							<div class="hr-card-title">可用模型</div>
 							<div class="hr-card-hint">
-								实时读取 Hermes `config.yaml` 中已配置的模型，下面每一处都只能从这里选。点「测试」发一条真实小请求。
+								实时读取 Hermes 网关模型与已登录账号模型，下面每一处都可直接切换。点「测试」发一条真实小请求。
 							</div>
 						</div>
-						<button
-							type="button"
-							class="halo-wb-opt hr-nowrap"
-							disabled={anyProbing || !modelIds.length}
-							on:click={probeAll}>{anyProbing ? '测试中…' : '全部测试'}</button
-						>
+						<div class="flex items-center gap-1.5">
+							{#if oauthModels.length > 0}
+								<button
+									type="button"
+									class="hr-mini-btn hr-nowrap"
+									disabled={routingRefreshing}
+									title="重新拉取已登录账号的可用模型"
+									on:click={refreshRoutingModels}
+								>
+									{routingRefreshing ? '刷新中…' : '刷新模型'}
+								</button>
+							{/if}
+							<button
+								type="button"
+								class="halo-wb-opt hr-nowrap"
+								disabled={anyProbing || !customModels.length}
+								on:click={probeAll}>{anyProbing ? '测试中…' : '全部测试'}</button
+							>
+						</div>
 					</div>
 					<div class="hr-models mt-2">
-						{#each models as m (m.id)}
+						{#each customModels as m (m.id)}
 							<div class="hr-model" data-model={m.id}>
 								<span class="hr-dot" data-family={modelFamily(m.id)} aria-hidden="true"></span>
 								<span class="hr-model-name">{m.id}</span>
@@ -495,26 +614,72 @@
 							</div>
 						{/each}
 					</div>
+					{#if oauthModels.length > 0}
+						<div class="hr-oauth-box mt-3" data-oauth-models>
+							<div class="hr-oauth-head">
+								<span class="hr-dot" data-family="gpt" aria-hidden="true"></span>
+								<span class="hr-model-name">
+									{authProviders.map((p) => p.label).join(' / ') || '已登录账号'}
+								</span>
+								<span class="hr-tag hr-tag-on">已登录</span>
+								<span class="hr-tag">{oauthModels.length} 个模型</span>
+							</div>
+							<div class="hr-oauth-controls mt-2">
+								<select
+									class="glass-input hr-select"
+									aria-label="已登录账号模型"
+									bind:value={selectedOAuthModel}
+								>
+									{#each oauthModels as m (m.id)}
+										<option value={m.id}>{modelLabel(m.id)}</option>
+									{/each}
+								</select>
+								<span
+									class="hr-probe"
+									data-state={probes[selectedOAuthModel]?.state ?? 'idle'}
+									title={probeTitle(probes[selectedOAuthModel])}
+									>{probeText(probes[selectedOAuthModel])}</span
+								>
+								<button
+									type="button"
+									class="hr-mini-btn hr-nowrap"
+									disabled={!selectedOAuthModel || probes[selectedOAuthModel]?.state === 'run'}
+									on:click={() => probe(selectedOAuthModel)}>测试</button
+								>
+								<button
+									type="button"
+									class="hr-mini-btn hr-nowrap"
+									disabled={!selectedOAuthModel || draft.main === selectedOAuthModel}
+									on:click={() => selectedOAuthModel && setMain(selectedOAuthModel)}
+								>
+									{draft.main === selectedOAuthModel ? '已是主模型' : '设为默认主模型'}
+								</button>
+							</div>
+						</div>
+					{/if}
 					{#each models.filter((m) => probes[m.id]?.state === 'fail') as m (m.id)}
-						<div class="hr-probe-error mt-1">{m.id}：{probes[m.id]?.error}</div>
+						<div class="hr-probe-error mt-1">{modelLabel(m.id)}：{probes[m.id]?.error}</div>
 					{/each}
 				</section>
 
-				<!-- main + fallback -->
+				<!-- main + fallback + reasoning effort -->
 				<section class="glass-item hr-card px-4 py-3" data-section="main">
-					<div class="hr-card-title">对话主模型</div>
-					<div class="hr-card-hint">所有对话默认由它回答（网页、Telegram、QQ、定时任务）。</div>
+					<div class="hr-card-title">对话主模型与思考强度</div>
+					<div class="hr-card-hint">
+						所有对话默认由它回答（网页、Telegram、QQ、定时任务），可在网关模型和已登录的 Codex 账号模型间一键切换。
+					</div>
 					<div class="mt-2">
 						<ModelPicker
 							label="主模型"
 							value={draft.main}
 							models={modelIds}
+							oauthLabel="已登录 Codex"
 							on:change={(e) => setMain(e.detail)}
 						/>
 					</div>
 					{#if mainModel && !mainModel.vision}
 						<div class="hr-note mt-2">
-							{mainModel.id} 不能直接看图：附图会先交给「媒体识别」描述成文字。
+							{modelLabel(mainModel.id)} 不能直接看图：附图会先交给「媒体识别」描述成文字。
 						</div>
 					{/if}
 					<div class="hr-sub mt-3">
@@ -532,11 +697,92 @@
 							}}
 						/>
 					</div>
-					<div class="hr-note mt-2">
-						思考强度由「消息网关」统一设置{haloEffort
-							? `：${EFFORT_LABELS[haloEffort] ?? haloEffort}`
-							: ''}，
-						<a class="hr-link-text" href="/settings/haloclaw">去修改</a>
+					<div class="hr-sub mt-3" data-effort-picker>
+						<span class="hr-sub-label">思考强度：{effortLabel(draft.reasoning_effort)}</span>
+						<div class="hr-picker" role="radiogroup" aria-label="思考强度">
+							{#each EFFORT_OPTIONS as opt (opt.value)}
+								<button
+									type="button"
+									class="halo-wb-opt hr-effort-pill"
+									role="radio"
+									data-effort={opt.value}
+									title={opt.hint}
+									aria-checked={draft.reasoning_effort === opt.value}
+									on:click={() => setEffort(opt.value)}
+								>
+									{opt.label}
+								</button>
+							{/each}
+						</div>
+					</div>
+					<div class="hr-note mt-1.5">
+						保存后同步更新 Hermes 配置与「消息网关」默认思考强度，网页、Telegram、QQ、命令行及已登录 Codex 统一生效（不支持的档位会自动降档）。
+						<a class="hr-link-text" href="/settings/haloclaw">消息网关设置</a>
+						{#if effortOutOfSync && !dirty}
+							<span class="ml-1 text-amber-600 dark:text-amber-400">
+								（网关为{effortLabel(haloEffort)}，Hermes 配置为{effortLabel(snap.routing.reasoning_effort)}）
+							</span>
+							<button
+								type="button"
+								class="hr-mini-btn ml-1"
+								disabled={saving}
+								on:click={syncEffortNow}>立即同步</button
+							>
+						{/if}
+					</div>
+					<div class="hr-overrides mt-2.5" data-effort-overrides>
+						<button
+							type="button"
+							class="hr-mini-btn"
+							aria-expanded={!overridesCollapsed}
+							on:click={() => (overridesCollapsed = !overridesCollapsed)}
+						>
+							按模型单独设置思考强度（{overrideEntries.length} 项）{overridesCollapsed ? ' ▾' : ' ▴'}
+						</button>
+						{#if !overridesCollapsed}
+							<div class="hr-overrides-list mt-2">
+								<div class="hr-card-hint">
+									仅对未走消息网关全局同步的模型（如 Claude、原生 Gemini）生效；设为「跟随全局」即移除覆盖。
+								</div>
+								{#each overrideEntries as [key, eff] (key)}
+									<div class="hr-override-row" data-override={key}>
+										<span class="hr-model-name">{modelLabel(key)}</span>
+										<select
+											class="glass-input hr-override-select"
+											aria-label="{modelLabel(key)} 思考强度"
+											value={eff}
+											on:change={(e) => setOverride(key, e.currentTarget.value)}
+										>
+											<option value="">跟随全局</option>
+											{#each EFFORT_OPTIONS as opt (opt.value)}
+												<option value={opt.value}>{opt.label}</option>
+											{/each}
+										</select>
+									</div>
+								{/each}
+								{#if overrideCandidates.length > 0}
+									<div class="hr-override-row">
+										<select
+											class="glass-input hr-override-select"
+											aria-label="添加按模型思考强度覆盖"
+											value=""
+											on:change={(e) => {
+												const picked = e.currentTarget.value;
+												if (picked) {
+													setOverride(picked, draft?.reasoning_effort || 'high');
+													e.currentTarget.value = '';
+												}
+											}}
+										>
+											<option value="">+ 为模型添加单独思考强度…</option>
+											{#each overrideCandidates as id (id)}
+												<option value={id}>{modelLabel(id)}</option>
+											{/each}
+										</select>
+									</div>
+								{/if}
+							</div>
+						{/if}
 					</div>
 				</section>
 
@@ -695,13 +941,13 @@
 				<section class="glass-item hr-card px-4 py-3" data-section="media">
 					<div class="hr-card-title">媒体识别</div>
 					<div class="hr-card-hint">
-						语音转文字、看图、看视频先交给它，失败再走各入口原来的路径。
+						语音转文字、看图、看视频先交给它（仅支持网关里的原生多模态模型），失败再走各入口原来的路径。
 					</div>
 					<div class="mt-2">
 						<ModelPicker
 							label="媒体识别模型"
 							value={draft.media.model}
-							models={modelIds}
+							models={mediaModelIds}
 							emptyLabel="不走首选"
 							on:change={(e) => {
 								if (draft) draft.media.model = e.detail;
@@ -1147,6 +1393,56 @@
 	}
 	.hr-runner {
 		font-size: 0.72rem;
+	}
+	.hr-effort-pill {
+		font-size: 0.74rem;
+		padding: 0.24rem 0.6rem;
+	}
+	.hr-oauth-box {
+		border-radius: 0.7rem;
+		border: 1px dashed rgb(15 23 42 / 0.14);
+		padding: 0.55rem 0.7rem;
+		background: rgb(255 255 255 / 0.35);
+	}
+	:global(.dark) .hr-oauth-box {
+		border-color: rgb(94 231 255 / 0.18);
+		background: rgb(9 13 28 / 0.35);
+	}
+	.hr-oauth-head {
+		display: flex;
+		align-items: center;
+		flex-wrap: wrap;
+		gap: 0.4rem;
+	}
+	.hr-oauth-controls {
+		display: flex;
+		align-items: center;
+		flex-wrap: wrap;
+		gap: 0.45rem;
+	}
+	.hr-overrides-list {
+		display: grid;
+		gap: 0.35rem;
+		padding-left: 0.5rem;
+		border-left: 2px solid rgb(100 116 139 / 0.2);
+	}
+	.hr-override-row {
+		display: flex;
+		align-items: center;
+		flex-wrap: wrap;
+		gap: 0.5rem;
+	}
+	.hr-override-select {
+		width: min(100%, 14rem);
+		padding: 0.2rem 0.45rem;
+		font-size: 0.74rem;
+	}
+	:global(.dark) .hr-override-select {
+		color-scheme: dark;
+	}
+	:global(.dark) .hr-override-select option {
+		background-color: #0f172a;
+		color: #e2e8f0;
 	}
 	.hr-num {
 		width: 5.5rem;

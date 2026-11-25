@@ -48,11 +48,29 @@ describe('hermes routing helpers', () => {
 			'媒体超时：300 秒 → 120 秒'
 		]);
 		expect(diffRouting(routing(), routing())).toEqual([]);
+
+		const withEffortBefore = {
+			...routing(),
+			reasoning_effort: 'medium',
+			reasoning_overrides: { 'claude-chat': 'xhigh' }
+		};
+		const withEffortAfter = {
+			...routing(),
+			main: 'openai-codex:gpt-6.2-sol',
+			reasoning_effort: 'high',
+			reasoning_overrides: {}
+		};
+		expect(diffRouting(withEffortBefore, withEffortAfter).map(describeChange)).toEqual([
+			'主模型：deepseek-chat → Codex · gpt-6.2-sol',
+			'思考强度：中 → 高',
+			'claude-chat 思考强度：超高 → 跟随全局'
+		]);
 	});
 
 	it('labels models, families, sources and orders tasks', () => {
 		expect(modelLabel('')).toBe('跟随主模型');
 		expect(modelLabel('?openrouter/x')).toBe('其他：openrouter/x');
+		expect(modelLabel('openai-codex:gpt-6.2-sol')).toBe('Codex · gpt-6.2-sol');
 		expect(modelFamily('claude-chat')).toBe('claude');
 		expect(modelFamily('gpt-chat')).toBe('gpt');
 		expect(modelFamily('codex')).toBe('gpt');

@@ -178,3 +178,49 @@ def test_html_card_prefers_the_model_saved_on_the_page(monkeypatch):
     card.value = ""
     card.save()
     assert html_visual_prompt._agy_preferred_model() is None  # switched off on the page
+
+
+def test_get_routing_supports_refresh_and_attaches_halo_reasoning_effort(monkeypatch):
+    import open_webui.haloclaw.config as hc
+
+    effort_cfg = _Card("high")
+    monkeypatch.setattr(hc, "HALOCLAW_DEFAULT_REASONING_EFFORT", effort_cfg, raising=False)
+    calls = _world(monkeypatch, (200, {"models": [], "routing": {"main": "gpt-chat"}}))
+    _MODEL_OPTIONS_CACHE["u1"] = (0, {})
+    out = asyncio.run(hermes_routing.get_routing(None, USER, refresh=True))
+    assert calls == [("GET", "http://hermes.test/api/admin/routing?refresh=1", None)]
+    assert out["halo_reasoning_effort"] == "high"
+    assert _MODEL_OPTIONS_CACHE == {}
+
+
+def test_save_and_rollback_routing_sync_halo_reasoning_effort(monkeypatch):
+    import open_webui.haloclaw.config as hc
+
+    effort_cfg = _Card("medium")
+    monkeypatch.setattr(hc, "HALOCLAW_DEFAULT_REASONING_EFFORT", effort_cfg, raising=False)
+    _world(
+        monkeypatch,
+        (200, {"routing": {"main": "gpt-chat", "reasoning_effort": "high"}, "changes": []}),
+    )
+    out = asyncio.run(
+        hermes_routing.save_routing(
+            None, USER, {"main": "gpt-chat", "reasoning_effort": "high"}, "rev"
+        )
+    )
+    assert effort_cfg.value == "high" and effort_cfg.saved == 1
+    assert out["halo_reasoning_effort"] == "high"
+    assert out["changes"] == [{"path": "reasoning_effort", "before": "medium", "after": "high"}]
+
+    _world(
+        monkeypatch,
+        (
+            200,
+            {
+                "routing": {"main": "gpt-chat", "reasoning_effort": "low"},
+                "changes": [{"path": "reasoning_effort", "before": "high", "after": "low"}],
+            },
+        ),
+    )
+    rolled = asyncio.run(hermes_routing.rollback_routing(None, USER, "20261125-1", "rev"))
+    assert effort_cfg.value == "low" and effort_cfg.saved == 2
+    assert rolled["halo_reasoning_effort"] == "low"

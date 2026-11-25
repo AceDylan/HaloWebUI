@@ -132,7 +132,7 @@ describe('HermesRunOptions', () => {
 		let note = panel.querySelector('[data-halo-hermes-effort-note]');
 		expect(note.textContent).toContain('思考强度高');
 		expect(note.textContent).toContain('调低回复更快 · 去修改');
-		expect(note.querySelector('a')?.getAttribute('href')).toBe('/settings/haloclaw');
+		expect(note.querySelector('a')?.getAttribute('href')).toBe('/settings/hermes');
 		expect(
 			panel.querySelector('[data-halo-hermes-routing-link]')?.getAttribute('href')
 		).toBe('/settings/hermes');
@@ -366,5 +366,32 @@ describe('HermesRunOptions', () => {
 			'claude-chat',
 			'deepseek-chat'
 		]);
+	});
+
+	it('groups logged-in OpenAI Codex OAuth models cleanly under their own optgroup', async () => {
+		api.getHermesModelOptions.mockResolvedValue({
+			model: 'gpt-chat',
+			provider: 'custom:gpt-chat',
+			providers: [
+				{ slug: 'custom:gpt-chat', name: 'gpt-chat', current: true, models: ['gpt-chat'] },
+				{
+					slug: 'custom:deepseek-chat',
+					name: 'deepseek-chat',
+					current: false,
+					models: ['deepseek-chat']
+				},
+				{
+					slug: 'openai-codex',
+					name: 'ChatGPT or Codex Subscription',
+					current: false,
+					models: ['gpt-6.2-sol', 'gpt-5.6-sol']
+				}
+			]
+		});
+		const panel: any = await mount();
+		const groups = Array.from(panel.querySelectorAll('optgroup')) as any[];
+		expect(groups).toHaveLength(1);
+		expect(groups[0].getAttribute('label')).toBe('ChatGPT / Codex（已登录）');
+		expect(optionTexts()).toEqual(['默认（gpt-chat）', 'deepseek-chat', 'gpt-6.2-sol', 'gpt-5.6-sol']);
 	});
 });

@@ -597,10 +597,20 @@ export type HermesRoutingModel = {
 	id: string;
 	model: string;
 	provider: string;
+	provider_label?: string;
+	auth_kind?: 'custom' | 'oauth' | string;
 	base_url: string;
 	api_mode: string;
 	vision: boolean;
 	context_length?: number | null;
+	media_capable?: boolean;
+};
+
+export type HermesAuthProvider = {
+	slug: string;
+	label: string;
+	logged_in: boolean;
+	model_count: number;
 };
 
 export type HermesRoutingSlot = { model: string; fallback: string[] };
@@ -611,6 +621,8 @@ export type HermesRouting = {
 	delegation: HermesRoutingSlot;
 	auxiliary: Record<string, HermesRoutingSlot>;
 	media: { model: string; timeout: number };
+	reasoning_effort?: string;
+	reasoning_overrides?: Record<string, string>;
 };
 
 export type HermesRoutingChange = { path: string; before: unknown; after: unknown };
@@ -624,9 +636,11 @@ export type HermesRoutingHistoryEntry = {
 
 export type HermesRoutingSnapshot = {
 	models: HermesRoutingModel[];
+	auth_providers?: HermesAuthProvider[];
 	routing: HermesRouting;
 	revision: string;
 	reasoning_effort: string;
+	halo_reasoning_effort?: string;
 	history: HermesRoutingHistoryEntry[];
 	changes?: HermesRoutingChange[];
 };
@@ -657,8 +671,8 @@ const routingCall = async <T>(
 	return res.json();
 };
 
-export const getHermesRouting = (token: string) =>
-	routingCall<HermesRoutingSnapshot>(token, 'GET');
+export const getHermesRouting = (token: string, opts?: { refresh?: boolean }) =>
+	routingCall<HermesRoutingSnapshot>(token, 'GET', opts?.refresh ? '?refresh=1' : '');
 
 export const saveHermesRouting = (token: string, routing: HermesRouting, revision: string) =>
 	routingCall<HermesRoutingSnapshot>(token, 'PUT', '', { routing, revision });

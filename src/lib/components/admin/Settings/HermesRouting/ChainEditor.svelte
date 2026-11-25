@@ -7,6 +7,7 @@
 		chainCandidates,
 		chainMove,
 		chainRemove,
+		isOAuthModelId,
 		modelFamily,
 		modelLabel
 	} from '$lib/utils/hermes-routing';
@@ -25,6 +26,8 @@
 	};
 
 	$: candidates = chainCandidates(models, chain, primary);
+	$: customCandidates = candidates.filter((id) => !isOAuthModelId(id));
+	$: oauthCandidates = candidates.filter((id) => isOAuthModelId(id));
 </script>
 
 <div class="hr-chain" class:compact aria-label={label} role="list">
@@ -66,7 +69,7 @@
 	{/each}
 	{#if chain.length < limit && candidates.length}
 		<span class="hr-add">
-			{#each candidates as id (id)}
+			{#each customCandidates as id (id)}
 				<button
 					type="button"
 					class="hr-add-btn"
@@ -77,6 +80,27 @@
 					+ {id}
 				</button>
 			{/each}
+			{#if oauthCandidates.length > 0}
+				<select
+					class="hr-add-btn hr-add-select"
+					aria-label="添加已登录模型到{label}"
+					data-add-oauth
+					value=""
+					on:change={(e) => {
+						const el = e.currentTarget;
+						const picked = el.value || el.options?.[el.selectedIndex]?.value || '';
+						if (picked) {
+							emit(chainAdd(chain, picked, limit));
+							el.value = '';
+						}
+					}}
+				>
+					<option value="">+ 已登录模型</option>
+					{#each oauthCandidates as id (id)}
+						<option value={id}>{modelLabel(id)}</option>
+					{/each}
+				</select>
+			{/if}
 		</span>
 	{/if}
 </div>
@@ -173,6 +197,17 @@
 	.hr-add-btn:hover {
 		border-color: var(--scifi-cyan, rgb(8 145 178));
 		color: var(--scifi-cyan, rgb(8 145 178));
+	}
+	.hr-add-select {
+		background: transparent;
+		cursor: pointer;
+	}
+	:global(.dark) .hr-add-select {
+		color-scheme: dark;
+	}
+	:global(.dark) .hr-add-select option {
+		background-color: #0f172a;
+		color: #e2e8f0;
 	}
 	:global(html.halo-scifi.dark) .hr-link {
 		background: linear-gradient(90deg, rgb(94 231 255 / 0.15), rgb(94 231 255 / 0.7));

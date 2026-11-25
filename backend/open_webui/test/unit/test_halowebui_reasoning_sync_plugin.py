@@ -226,3 +226,33 @@ def test_an_unreachable_halowebui_is_logged_once_per_window(monkeypatch, caplog)
     warnings = [r for r in caplog.records if r.levelname == "WARNING"]
     assert len(warnings) == 1
     assert "OSError" in warnings[0].getMessage()
+
+
+def test_official_codex_clamps_unsupported_efforts(monkeypatch):
+    monkeypatch.setattr(
+        plugin, "urlopen", lambda url, timeout: _Response({"reasoning_effort": "none"})
+    )
+    astra = plugin.sync_reasoning_effort(
+        request={"model": "gpt-6-astra", "reasoning": {"effort": "high"}},
+        api_mode="codex_responses",
+        base_url="https://chatgpt.com/backend-api/codex",
+    )
+    assert astra["request"]["reasoning"]["effort"] == "low"
+
+    monkeypatch.setattr(
+        plugin, "urlopen", lambda url, timeout: _Response({"reasoning_effort": "max"})
+    )
+    legacy = plugin.sync_reasoning_effort(
+        request={"model": "gpt-6.2-sol", "reasoning": {"effort": "medium"}},
+        api_mode="codex_responses",
+        base_url="https://chatgpt.com/backend-api/codex",
+    )
+    assert legacy["request"]["reasoning"]["effort"] == "xhigh"
+
+    # Relay / custom codex_responses endpoints keep the requested effort verbatim.
+    relay = plugin.sync_reasoning_effort(
+        request={"model": "gpt-chat", "reasoning": {"effort": "medium"}},
+        api_mode="codex_responses",
+        base_url="http://172.17.0.1:8081/v1",
+    )
+    assert relay["request"]["reasoning"]["effort"] == "max"

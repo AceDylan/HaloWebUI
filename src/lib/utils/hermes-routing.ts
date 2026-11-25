@@ -45,11 +45,56 @@ export const orderedAuxTasks = (tasks: string[]) => {
 	});
 };
 
+export const EFFORT_OPTIONS: { value: string; label: string; hint: string }[] = [
+	{ value: 'none', label: '关闭', hint: '关闭额外思考，回复最快' },
+	{ value: 'low', label: '低', hint: '轻量思考，适合简单问答' },
+	{ value: 'medium', label: '中', hint: '速度与质量均衡' },
+	{ value: 'high', label: '高', hint: '深度推理，适合复杂任务' },
+	{ value: 'xhigh', label: '超高', hint: '更充分的推理预算' },
+	{ value: 'max', label: '最大', hint: '最高强度（不支持的模型会自动降档）' }
+];
+
+export const EFFORT_LABELS: Record<string, string> = Object.fromEntries(
+	EFFORT_OPTIONS.map((item) => [item.value, item.label])
+);
+
+export const effortLabel = (value: unknown, empty = '未设') => {
+	const key = String(value ?? '')
+		.trim()
+		.toLowerCase();
+	return !key ? empty : (EFFORT_LABELS[key] ?? key);
+};
+
+export const PROVIDER_SHORT_LABELS: Record<string, string> = {
+	'openai-codex': 'Codex',
+	nous: 'Nous',
+	'qwen-oauth': 'Qwen',
+	'minimax-oauth': 'MiniMax',
+	'xai-oauth': 'xAI'
+};
+
+export const isOAuthModelId = (id: string) => {
+	const idx = (id || '').indexOf(':');
+	return idx > 0 && id.slice(0, idx) in PROVIDER_SHORT_LABELS;
+};
+
+export const shortModelName = (id: string) => {
+	const idx = (id || '').indexOf(':');
+	return idx > 0 && id.slice(0, idx) in PROVIDER_SHORT_LABELS ? id.slice(idx + 1) : id;
+};
+
 /** A value hermes could not map to a configured model (set from the command line). */
 export const isForeignModel = (id: string) => id.startsWith('?');
 
-export const modelLabel = (id: string, empty = '跟随主模型') =>
-	!id ? empty : isForeignModel(id) ? `其他：${id.slice(1)}` : id;
+export const modelLabel = (id: string, empty = '跟随主模型') => {
+	if (!id) return empty;
+	if (isForeignModel(id)) return `其他：${id.slice(1)}`;
+	const idx = id.indexOf(':');
+	if (idx > 0 && id.slice(0, idx) in PROVIDER_SHORT_LABELS) {
+		return `${PROVIDER_SHORT_LABELS[id.slice(0, idx)]} · ${id.slice(idx + 1)}`;
+	}
+	return id;
+};
 
 export type ModelFamily = 'gpt' | 'deepseek' | 'gemini' | 'claude' | 'other';
 
@@ -117,6 +162,10 @@ const pathLabel = (path: string) => {
 	if (path === 'delegation.fallback') return '子代理兜底';
 	if (path === 'media.model') return '媒体识别';
 	if (path === 'media.timeout') return '媒体超时';
+	if (path === 'reasoning_effort') return '思考强度';
+	if (path.startsWith('reasoning_overrides.')) {
+		return `${modelLabel(path.slice('reasoning_overrides.'.length))} 思考强度`;
+	}
 	const m = path.match(/^auxiliary\.([^.]+)\.(model|fallback)$/);
 	if (m) return `${auxTaskLabel(m[1])}${m[2] === 'fallback' ? '兜底' : ''}`;
 	return path;
@@ -128,6 +177,8 @@ const valueLabel = (path: string, value: unknown) => {
 	if (path === 'media.timeout')
 		return typeof value === 'number' && !Number.isNaN(value) ? `${value} 秒` : '未填';
 	if (path === 'media.model') return modelLabel(String(value ?? ''), '不走首选');
+	if (path === 'reasoning_effort') return effortLabel(value, '未设');
+	if (path.startsWith('reasoning_overrides.')) return effortLabel(value, '跟随全局');
 	return modelLabel(String(value ?? ''));
 };
 

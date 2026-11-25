@@ -624,15 +624,21 @@ def _model_option_id(model: Any) -> str:
     return str(model or "").strip()
 
 
+OAUTH_MODEL_PROVIDERS = frozenset(
+    {"openai-codex", "nous", "qwen-oauth", "minimax-oauth", "xai-oauth"}
+)
+
+
 def condense_model_options(body: Any) -> dict:
     """hermes' GET /api/model/options, reduced to the models its config
-    chooses: hermes' default, and for every provider the user set up
-    (custom_providers / providers) the model that entry selects.
+    chooses: hermes' default, every user-defined provider's selected model
+    (custom_providers / providers), and every authenticated OAuth provider's
+    model list (e.g. openai-codex).
 
     The inventory is hermes' whole picker: providers it found through ambient
     credentials (anthropic, openai-api, moa) and every id an endpoint's
     /v1/models advertises — thousands on a relay — none of which the config
-    picked. Hermes lists an entry's selected model first; the current
+    picked. Hermes lists a custom entry's selected model first; the current
     provider's list is re-probed and sorted, so its choice is the top-level
     `model`."""
     body = body if isinstance(body, dict) else {}
@@ -644,17 +650,41 @@ def condense_model_options(body: Any) -> dict:
         return bool(row.get("is_current")) or bool(slug and slug == default_provider)
 
     providers = []
-    seen = set()
+    seen_custom = set()
+    seen_slugs = set()
     rows = [row for row in body.get("providers") or [] if isinstance(row, dict)]
     # The current provider first: the model it runs is the one to keep when
     # another row repeats it.
     rows.sort(key=lambda row: not is_current(row))
     for provider in rows:
         slug = str(provider.get("slug") or "").strip()
-        if not slug or not provider.get("authenticated"):
+        if not slug or slug in seen_slugs or not provider.get("authenticated"):
             continue
         current = is_current(provider)
-        if not current and not provider.get("is_user_defined"):
+        is_oauth = slug in OAUTH_MODEL_PROVIDERS
+        if not current and not provider.get("is_user_defined") and not is_oauth:
+            continue
+        if is_oauth:
+            models: list[str] = []
+            seen_in_provider: set[str] = set()
+            if current and default_model:
+                models.append(default_model)
+                seen_in_provider.add(default_model)
+            for model_id in map(_model_option_id, provider.get("models") or []):
+                if model_id and model_id not in seen_in_provider:
+                    seen_in_provider.add(model_id)
+                    models.append(model_id)
+            if not models:
+                continue
+            seen_slugs.add(slug)
+            providers.append(
+                {
+                    "slug": slug,
+                    "name": str(provider.get("name") or slug),
+                    "current": current,
+                    "models": models,
+                }
+            )
             continue
         if current and default_model:
             model = default_model
@@ -669,9 +699,10 @@ def condense_model_options(body: Any) -> dict:
             )
         # `providers: custom: models:` (per-model settings, no endpoint of its
         # own) repeats the default model under a bare "custom" row.
-        if not model or model in seen:
+        if not model or model in seen_custom:
             continue
-        seen.add(model)
+        seen_custom.add(model)
+        seen_slugs.add(slug)
         providers.append(
             {
                 "slug": slug,
@@ -680,7 +711,13 @@ def condense_model_options(body: Any) -> dict:
                 "models": [model],
             }
         )
-    providers.sort(key=lambda item: (not item["current"], item["name"].lower()))
+    providers.sort(
+        key=lambda item: (
+            not item["current"],
+            item["slug"] in OAUTH_MODEL_PROVIDERS,
+            item["name"].lower(),
+        )
+    )
     return {
         "model": default_model,
         "provider": default_provider,

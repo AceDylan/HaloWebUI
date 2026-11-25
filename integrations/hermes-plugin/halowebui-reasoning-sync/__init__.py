@@ -87,6 +87,33 @@ def _is_native_gemini_base_url(base_url: Any) -> bool:
     return path.endswith("/v1beta") or path.endswith("/v1beta/models")
 
 
+def _is_official_codex_base_url(base_url: Any) -> bool:
+    normalized = str(base_url or "").strip().lower()
+    if not normalized:
+        return False
+    try:
+        host = (urlsplit(normalized).hostname or "").lower()
+    except ValueError:
+        return False
+    return host == "chatgpt.com" or host.endswith(".chatgpt.com") or host == "api.openai.com"
+
+
+def _clamp_official_codex_effort(effort: str, model: Any) -> str:
+    """Keep official OpenAI/ChatGPT Codex requests within each model's wire vocabulary."""
+    try:
+        from agent.reasoning_effort import clamp_effort, codex_supported_efforts
+
+        clamped = clamp_effort(effort, codex_supported_efforts(str(model or "")))
+        return str(clamped) if clamped else effort
+    except Exception:
+        name = str(model or "").strip().lower().rsplit("/", 1)[-1]
+        if name in {"gpt-6-astra", "gpt-6-astra-900k"}:
+            return "low" if effort == "none" else effort
+        if "gpt-5.6" not in name and effort == "max":
+            return "xhigh"
+        return effort
+
+
 def sync_reasoning_effort(**kwargs: Any) -> dict[str, Any] | None:
     """Replace only the outbound request's reasoning-effort field."""
     api_mode = kwargs.get("api_mode")
@@ -109,6 +136,8 @@ def sync_reasoning_effort(**kwargs: Any) -> dict[str, Any] | None:
 
     updated_request = dict(request)
     if api_mode == "codex_responses":
+        if _is_official_codex_base_url(kwargs.get("base_url")):
+            effort = _clamp_official_codex_effort(effort, request.get("model"))
         existing_reasoning = request.get("reasoning")
         reasoning = (
             dict(existing_reasoning) if isinstance(existing_reasoning, dict) else {}

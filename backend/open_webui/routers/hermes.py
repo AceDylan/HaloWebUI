@@ -521,9 +521,11 @@ class HermesRoutingProbeForm(BaseModel):
 
 
 @router.get("/routing")
-async def get_hermes_routing(request: Request, user=Depends(get_admin_user)):
+async def get_hermes_routing(
+    request: Request, refresh: bool = False, user=Depends(get_admin_user)
+):
     try:
-        return await hermes_routing.get_routing(request, user)
+        return await hermes_routing.get_routing(request, user, refresh=refresh)
     except HermesSessionsError as e:
         raise _job_error(e)
 

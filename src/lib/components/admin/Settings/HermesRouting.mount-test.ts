@@ -117,7 +117,7 @@ afterEach(() => {
 describe('Hermes 模型 settings', () => {
 	it('shows every lane at a glance', async () => {
 		const root = await mount();
-		expect(text(root.querySelector('[data-lane="chat"]'))).toBe(
+		expect(text(root.querySelector('[data-lane="chat"]'))).toContain(
 			'对话 deepseek-chat gpt-chat gemini-chat'
 		);
 		expect(text(root.querySelector('[data-lane="media"]'))).toContain('gemini-chat 超时 300 秒');
@@ -129,6 +129,9 @@ describe('Hermes 模型 settings', () => {
 			() => text(root.querySelector('[data-section="main"]')).includes('：高'),
 			'effort'
 		);
+		expect(text(root.querySelector('[data-lane="chat"]'))).toBe(
+			'对话 deepseek-chat gpt-chat gemini-chat 思考 高'
+		);
 		expect(root.querySelector('.hr-save').disabled).toBe(true);
 	});
 
@@ -137,7 +140,7 @@ describe('Hermes 模型 settings', () => {
 		pill(root, 'main', 'gpt-chat').click();
 		await sleep(20);
 		// the new primary leaves its own fallback chain; the lane follows the draft
-		expect(text(root.querySelector('[data-lane="chat"]'))).toBe('对话 gpt-chat gemini-chat');
+		expect(text(root.querySelector('[data-lane="chat"]'))).toBe('对话 gpt-chat gemini-chat 思考 高');
 		expect(text(root.querySelector('[data-section="main"]'))).not.toContain('不能直接看图');
 		expect(text(root.querySelector('.hr-bar'))).toContain('2 处改动');
 
@@ -176,12 +179,12 @@ describe('Hermes 模型 settings', () => {
 		root.querySelector('[data-section="main"] [data-add="claude-chat"]').click();
 		await sleep(20);
 		expect(text(root.querySelector('[data-lane="chat"]'))).toBe(
-			'对话 deepseek-chat gemini-chat claude-chat'
+			'对话 deepseek-chat gemini-chat claude-chat 思考 高'
 		);
 		root.querySelector('[data-section="main"] [aria-label="把 claude-chat 往前挪"]').click();
 		await sleep(20);
 		expect(text(root.querySelector('[data-lane="chat"]'))).toBe(
-			'对话 deepseek-chat claude-chat gemini-chat'
+			'对话 deepseek-chat claude-chat gemini-chat 思考 高'
 		);
 		const discard = Array.from(root.querySelectorAll('.hr-bar button')).find(
 			(b: any) => text(b) === '放弃'
@@ -189,7 +192,7 @@ describe('Hermes 模型 settings', () => {
 		discard.click();
 		await sleep(20);
 		expect(text(root.querySelector('[data-lane="chat"]'))).toBe(
-			'对话 deepseek-chat gpt-chat gemini-chat'
+			'对话 deepseek-chat gpt-chat gemini-chat 思考 高'
 		);
 	});
 
@@ -336,5 +339,86 @@ describe('Hermes 模型 settings', () => {
 		expect(text(root.querySelector('[data-lane="ui"]'))).toBe(
 			'界面任务 agy（网关 gemini-chat） Hermes'
 		);
+	});
+
+	it('switches default model to a logged-in Codex OAuth model and edits reasoning effort', async () => {
+		const oauthModels = [
+			...models,
+			{
+				id: 'openai-codex:gpt-6.2-sol',
+				model: 'gpt-6.2-sol',
+				provider: 'openai-codex',
+				provider_label: 'ChatGPT / Codex',
+				auth_kind: 'oauth',
+				base_url: 'https://chatgpt.com/backend-api/codex',
+				api_mode: 'codex_responses',
+				vision: true,
+				media_capable: false
+			}
+		];
+		api.getHermesRouting.mockResolvedValue(
+			snapshot({
+				models: oauthModels,
+				auth_providers: [
+					{ slug: 'openai-codex', label: 'ChatGPT / Codex', logged_in: true, model_count: 1 }
+				],
+				halo_reasoning_effort: 'high',
+				routing: {
+					...routing(),
+					reasoning_effort: 'high',
+					reasoning_overrides: { 'claude-chat': 'xhigh' }
+				}
+			})
+		);
+
+		const root = await mount();
+		// Logged-in Codex section appears in 可用模型
+		expect(text(root.querySelector('[data-oauth-models]'))).toContain('ChatGPT / Codex');
+		expect(text(root.querySelector('[data-oauth-models]'))).toContain('已登录');
+		// Media section excludes non-media-capable OAuth models
+		expect(root.querySelector('[data-section="media"] [data-oauth-picker]')).toBeFalsy();
+
+		// Switch default model via the inline logged-in Codex selector
+		const oauthSelect = root.querySelector('[data-section="main"] [data-oauth-picker]') as any;
+		for (const option of Array.from(oauthSelect.querySelectorAll('option')) as any[]) {
+			option.selected = option.value === 'openai-codex:gpt-6.2-sol';
+			if (option.selected) option.setAttribute('selected', '');
+			else option.removeAttribute('selected');
+		}
+		oauthSelect.value = 'openai-codex:gpt-6.2-sol';
+		oauthSelect.dispatchEvent(new Event('change'));
+		await sleep(20);
+		expect(text(root.querySelector('[data-lane="chat"]'))).toContain('Codex · gpt-6.2-sol');
+
+		// Change thinking effort directly on the page
+		const xhighBtn = root.querySelector('[data-effort-picker] [data-effort="xhigh"]') as any;
+		xhighBtn.click();
+		await sleep(20);
+		expect(xhighBtn.getAttribute('aria-checked')).toBe('true');
+		expect(text(root.querySelector('[data-lane="chat"]'))).toContain('思考 超高');
+		expect(text(root.querySelector('.hr-bar'))).toContain('思考强度：高 → 超高');
+
+		api.saveHermesRouting.mockResolvedValue(
+			snapshot({
+				models: oauthModels,
+				halo_reasoning_effort: 'xhigh',
+				routing: {
+					...routing(),
+					main: 'openai-codex:gpt-6.2-sol',
+					reasoning_effort: 'xhigh',
+					reasoning_overrides: { 'claude-chat': 'xhigh' }
+				},
+				revision: 'rev-2',
+				changes: [
+					{ path: 'main', before: 'deepseek-chat', after: 'openai-codex:gpt-6.2-sol' },
+					{ path: 'reasoning_effort', before: 'high', after: 'xhigh' }
+				]
+			})
+		);
+		root.querySelector('.hr-save').click();
+		await waitFor(() => api.saveHermesRouting.mock.calls.length, 'save codex + effort');
+		const [, sent] = api.saveHermesRouting.mock.calls[0];
+		expect(sent.main).toBe('openai-codex:gpt-6.2-sol');
+		expect(sent.reasoning_effort).toBe('xhigh');
 	});
 });

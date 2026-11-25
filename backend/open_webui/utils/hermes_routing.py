@@ -75,22 +75,79 @@ async def _routing_call(
         raise HermesSessionsError(502, f"连不上 Hermes：{e}")
 
 
+def _halo_reasoning_effort() -> str:
+    try:
+        from open_webui.haloclaw.config import (
+            HALOCLAW_DEFAULT_REASONING_EFFORT,
+            normalize_default_reasoning_effort,
+        )
+
+        return normalize_default_reasoning_effort(HALOCLAW_DEFAULT_REASONING_EFFORT.value)
+    except Exception:
+        return ""
+
+
+def _sync_halo_reasoning_effort(effort: Optional[str]) -> Optional[dict]:
+    """Keep HaloWebUI's Message Gateway reasoning effort in lockstep with Hermes' routing save.
+
+    Hermes' ``halowebui-reasoning-sync`` plugin reads ``HALOCLAW_DEFAULT_REASONING_EFFORT`` on
+    every ``codex_responses`` / ``chat_completions`` call, so updating both together means one
+    change on 「Hermes 模型」 takes effect everywhere (Codex OAuth, gateway models, Claude, Gemini).
+    """
+    value = str(effort or "").strip().lower()
+    if not value:
+        return None
+    from open_webui.haloclaw.config import (
+        HALOCLAW_DEFAULT_REASONING_EFFORT,
+        HALOCLAW_REASONING_EFFORT_VALUES,
+        normalize_default_reasoning_effort,
+    )
+
+    if value not in HALOCLAW_REASONING_EFFORT_VALUES:
+        raise HermesSessionsError(400, f"思考强度不支持：{value}")
+    before = normalize_default_reasoning_effort(HALOCLAW_DEFAULT_REASONING_EFFORT.value)
+    if before == value:
+        return None
+    HALOCLAW_DEFAULT_REASONING_EFFORT.value = value
+    HALOCLAW_DEFAULT_REASONING_EFFORT.save()
+    return {"path": "reasoning_effort", "before": before, "after": value}
+
+
+def _with_halo_effort(body: dict) -> dict:
+    effort = _halo_reasoning_effort()
+    if effort:
+        body = {**body, "halo_reasoning_effort": effort}
+    return body
+
+
 def _changed(body: dict) -> dict:
     # The composer's per-chat picker caches hermes' default model; drop it so it
     # shows the new one right away.
     if body.get("changes"):
         _MODEL_OPTIONS_CACHE.clear()
-    return body
+    return _with_halo_effort(body)
 
 
-async def get_routing(request, user) -> dict:
-    return await _routing_call(request, user, "GET")
+async def get_routing(request, user, *, refresh: bool = False) -> dict:
+    path = "?refresh=1" if refresh else ""
+    body = await _routing_call(request, user, "GET", path)
+    if refresh:
+        _MODEL_OPTIONS_CACHE.clear()
+    return _with_halo_effort(body)
 
 
 async def save_routing(request, user, routing: dict, revision: Optional[str]) -> dict:
     body = await _routing_call(
         request, user, "PUT", json={"routing": routing, "revision": revision, "source": "halowebui"}
     )
+    requested_effort = routing.get("reasoning_effort") if isinstance(routing, dict) else None
+    if requested_effort:
+        halo_change = _sync_halo_reasoning_effort(requested_effort)
+        if halo_change and not any(
+            isinstance(c, dict) and c.get("path") == "reasoning_effort"
+            for c in (body.get("changes") or [])
+        ):
+            body = {**body, "changes": [*(body.get("changes") or []), halo_change]}
     return _changed(body)
 
 
@@ -98,6 +155,15 @@ async def rollback_routing(request, user, entry_id: str, revision: Optional[str]
     body = await _routing_call(
         request, user, "POST", "/rollback", json={"id": entry_id, "revision": revision}
     )
+    if any(
+        isinstance(c, dict) and c.get("path") == "reasoning_effort"
+        for c in (body.get("changes") or [])
+    ):
+        rolled_effort = (body.get("routing") or {}).get("reasoning_effort") or body.get(
+            "reasoning_effort"
+        )
+        if rolled_effort:
+            _sync_halo_reasoning_effort(rolled_effort)
     return _changed(body)
 
 

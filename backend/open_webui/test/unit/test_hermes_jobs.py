@@ -173,12 +173,14 @@ def test_runner_stats_preserves_quota_and_rejects_malformed_data(monkeypatch):
     )
     assert asyncio.run(hermes_jobs.runner_stats(None, USER, 7))["quota"] == quota
     offiagy = {"runner": "offiagy", "label": "offiagy", "available": True, "windows": []}
+    codex = {"runner": "openai-codex", "label": "Hermes Codex", "plan": "Plus", "banked_resets": 2,
+             "available": True, "windows": [{"key": "weekly", "label": "每周", "utilization": 83, "resets_at": None}]}
     monkeypatch.setattr(
         hermes_jobs.aiohttp, "ClientSession",
         lambda **_kw: _GetSession((200, {"days": 7, "runs": [], "quota": quota,
-                                          "quotas": [quota, offiagy, "junk"]}), calls),
+                                          "quotas": [quota, offiagy, codex, "junk"]}), calls),
     )
-    assert asyncio.run(hermes_jobs.runner_stats(None, USER, 7))["quotas"] == [quota, offiagy]
+    assert asyncio.run(hermes_jobs.runner_stats(None, USER, 7))["quotas"] == [quota, offiagy, codex]
     monkeypatch.setattr(
         hermes_jobs.aiohttp, "ClientSession", lambda **_kw: _GetSession((200, []), calls)
     )

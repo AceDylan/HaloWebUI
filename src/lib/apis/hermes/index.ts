@@ -574,9 +574,11 @@ export type RunnerRun = {
 };
 
 export type RunnerQuota = {
-	/** Which official account: officlaude (官方 Claude) or offiagy; absent from a Hermes before offiagy. */
+	/** Which official account: officlaude (官方 Claude), offiagy, or openai-codex (Hermes Codex); absent from older Hermes. */
 	runner?: string;
 	label?: string;
+	plan?: string;
+	banked_resets?: number;
 	available: boolean;
 	checked_at: number;
 	notice?: string;

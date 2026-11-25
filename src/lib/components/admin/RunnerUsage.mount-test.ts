@@ -146,6 +146,46 @@ describe('runner usage page', () => {
 		expect(target.textContent).toContain('暂时无法获取官方 Claude的实时额度');
 		api.getRunnerStats.mockReset();
 	});
+	it('shows Hermes logged-in Codex OAuth quota card with plan and banked resets', async () => {
+		const now = Date.now() / 1000;
+		api.getRunnerStats.mockResolvedValue({
+			days: 7,
+			runs: [run('codex')],
+			quota: {
+				runner: 'officlaude',
+				available: true,
+				checked_at: now,
+				windows: [{ key: 'five_hour', label: '5 小时', utilization: 20, resets_at: null }]
+			},
+			quotas: [
+				{
+					runner: 'officlaude',
+					available: true,
+					checked_at: now,
+					windows: [{ key: 'five_hour', label: '5 小时', utilization: 20, resets_at: null }]
+				},
+				{
+					runner: 'openai-codex',
+					label: 'Hermes Codex',
+					plan: 'Plus',
+					banked_resets: 2,
+					available: true,
+					checked_at: now,
+					windows: [{ key: 'weekly', label: '每周', utilization: 83, resets_at: '2026-11-26T03:04:25+00:00' }]
+				}
+			]
+		});
+		await mount();
+		const codexCard = target.querySelector('[data-halo-runner-quota="openai-codex"]');
+		expect(codexCard).toBeTruthy();
+		expect(codexCard.textContent).toContain('Codex（Hermes 已登录 · Plus）额度');
+		expect(codexCard.textContent).toContain('备用重置 2 次');
+		expect(codexCard.textContent).toContain('每周');
+		expect(codexCard.textContent).toContain('剩余 17%');
+		expect(codexCard.textContent).toContain('已用 83%');
+		expect(codexCard.querySelector('[data-halo-quota-window="weekly"]')).toBeTruthy();
+		expect(target.querySelector('[data-halo-runner-quota="officlaude"]')).toBeTruthy();
+	});
 	it('keeps the latest range when an older request finishes later and shows retryable errors', async () => {
 		let finishOld: (value: any) => void = () => {};
 		api.getRunnerStats.mockImplementationOnce(() => new Promise((r) => (finishOld = r)));

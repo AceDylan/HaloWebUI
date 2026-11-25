@@ -184,7 +184,7 @@ async def runner_stats(request, user, days: int = 30) -> dict:
     out = {"days": body.get("days") or days, "runs": runs}
     if isinstance(body.get("quota"), dict):
         out["quota"] = body["quota"]
-    # Every official account (官方 Claude, offiagy); a Hermes before offiagy sends only "quota".
+    # Every official account (官方 Claude, offiagy, Hermes Codex); older Hermes sends only "quota".
     if isinstance(body.get("quotas"), list):
         out["quotas"] = [q for q in body["quotas"] if isinstance(q, dict)]
     return out

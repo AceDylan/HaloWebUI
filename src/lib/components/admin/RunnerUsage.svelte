@@ -26,7 +26,7 @@
 	export let days = 30;
 	let loadedDays = 0;
 	let runs: RunnerRun[] = [];
-	/** One card per official account (官方 Claude, offiagy); a Hermes before offiagy sends only `quota`. */
+	/** One card per official account (官方 Claude, offiagy, Hermes Codex); older Hermes sends only `quota`. */
 	let quotas: RunnerQuota[] = [];
 	let loading = true;
 	let error = '';
@@ -58,8 +58,13 @@
 	};
 	const runTime = (ts: number) => shortTime(new Date(ts * 1000));
 	const resetTime = (value: string | null) => (value ? shortTime(new Date(value)) : '时间未知');
-	const quotaTitle = (q: RunnerQuota) =>
-		q.runner === 'offiagy' ? 'offiagy（AGY · Google 账号）Gemini 额度' : '官方 Claude 订阅额度';
+	const quotaTitle = (q: RunnerQuota) => {
+		if (q.runner === 'offiagy') return 'offiagy（AGY · Google 账号）Gemini 额度';
+		if (q.runner === 'openai-codex') {
+			return q.plan ? `Codex（Hermes 已登录 · ${q.plan}）额度` : 'Codex（Hermes 已登录）额度';
+		}
+		return '官方 Claude 订阅额度';
+	};
 	const quotaWindows = (q: RunnerQuota) => {
 		if (q.runner !== 'offiagy') return q.windows;
 		// offiagy only tracks Gemini windows (Weekly Limit Remaining first); never show Claude/GPT.
@@ -181,13 +186,20 @@
 		{@const windows = quotaWindows(quota)}
 		{@const isOffiagy = quota.runner === 'offiagy'}
 		<section class="{card} p-4" data-halo-runner-quota={quota.runner ?? 'officlaude'}>
-			<div class="flex items-baseline justify-between gap-3">
+			<div class="flex flex-wrap items-baseline justify-between gap-2">
 				<h3 class="text-[13px] font-medium text-gray-500 dark:text-gray-400">
 					{quotaTitle(quota)}
 				</h3>
-				<span class="text-2xs tabular-nums text-gray-400 dark:text-gray-500"
-					>查询于 {runTime(quota.checked_at)}</span
-				>
+				<div class="flex items-center gap-2 text-2xs tabular-nums text-gray-400 dark:text-gray-500">
+					{#if quota.banked_resets && quota.banked_resets > 0}
+						<span
+							class="rounded-full bg-cyan-500/10 px-2 py-0.5 font-medium text-cyan-700 dark:bg-cyan-400/15 dark:text-cyan-300"
+							data-halo-quota-banked-resets
+							>备用重置 {quota.banked_resets} 次</span
+						>
+					{/if}
+					<span>查询于 {runTime(quota.checked_at)}</span>
+				</div>
 			</div>
 			<div class="mt-3 grid gap-4 {windows.length > 2 ? 'sm:grid-cols-3' : windows.length === 1 ? 'sm:grid-cols-1' : 'sm:grid-cols-2'}">
 				{#each windows as window}

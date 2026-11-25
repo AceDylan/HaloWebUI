@@ -164,10 +164,10 @@ describe('ChangesView', () => {
 		expect(target.textContent).toContain('不是在项目里做的');
 	});
 
-	it('triggers one-click deploy after confirm, shows progress steps, CI link and auto-deploy toggle', async () => {
+	it('triggers one-click deploy after confirm, shows progress steps, CI link and auto-deploy note', async () => {
 		api.getTeamChanges.mockResolvedValue({
 			...CHANGES,
-			auto_deploy: false,
+			auto_deploy: true,
 			deploy_profile: {
 				configured: true,
 				label: 'HaloWebUI（GitHub CI 构建镜像 → 拉取部署）',
@@ -179,11 +179,9 @@ describe('ChangesView', () => {
 		await mount({ teamId: 'team-1', phase: 'completed' });
 		expect(target.querySelector('[data-changes-deploy-panel]').textContent).toContain('HaloWebUI');
 
-		// Toggle auto-deploy
-		api.setTeamAutoDeploy.mockResolvedValue({ auto_deploy: true });
-		target.querySelector('[data-changes-auto-deploy]').click();
-		await sleep(10);
-		expect(api.setTeamAutoDeploy).toHaveBeenCalledWith('tok', 'team-1', true);
+		// Auto-deploy is always on for repo changes: quiet badge instead of toggle button
+		expect(target.querySelector('[data-changes-auto-deploy]')).toBeFalsy();
+		expect(target.querySelector('[data-changes-auto-deploy-badge]').textContent).toContain('自动推送部署');
 
 		// One-click deploy confirms first
 		target.querySelector('[data-changes-deploy]').click();

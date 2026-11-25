@@ -73,3 +73,81 @@ def test_dev_pipeline_auto_mode_walks_family_order_when_top_down(pkg, availabili
     assert by["claude-lead"]["executor"] == "officlaude" and by["claude-lead"]["runner"] == "cchclaude"
     assert by["agy-advisor"]["executor"] == "offiagy" and by["agy-advisor"]["runner"] == "agy"
     assert by["codex-dev"]["runner"] == "codex"
+
+
+def test_auto_promotes_to_dev_lite_for_repo_code_changes(pkg, availability):
+    project = {"name": "HaloWebUI", "path": "/root/HaloWebUI", "branch": "main"}
+    res = pkg.plan.propose_plan(
+        "给 HaloWebUI 协作台修复接口并发 bug 并补单元测试",
+        "/tmp/ws",
+        project=project,
+        workflow="auto",
+    )
+    assert res["ok"] is True
+    plan = res["plan"]
+    assert plan["workflow"] == "dev_lite"
+    assert plan["promoted_from"] == "auto"
+    assert plan["auto_deploy"] is True
+    assert len(plan["tasks"]) == 3
+
+
+def test_auto_stays_freeform_for_readonly_repo_goal_or_explicit_feedback(pkg, availability, monkeypatch):
+    import halowebui_teams.workflow as workflow_mod
+
+    project = {"name": "HaloWebUI", "path": "/root/HaloWebUI", "branch": "main"}
+    assert workflow_mod.should_promote_to_dev_lite("审查 HaloWebUI 最近的提交并出报告", project) is False
+    assert workflow_mod.should_promote_to_dev_lite("给 HaloWebUI 写新接口", None) is False
+    assert workflow_mod.should_promote_to_dev_lite("给 HaloWebUI 写新接口", project) is True
+
+    # Feedback asking for 自由协作 keeps workflow free-form instead of re-promoting
+    import json
+
+    fake_free = json.dumps({
+        "title": "自由协作任务",
+        "summary": "自定义",
+        "members": [{"name": "m1", "role": "开发", "executor": "codex"}],
+        "tasks": [{"key": "T1", "title": "执行", "description": "做", "member": "m1", "depends_on": []}],
+    })
+    monkeypatch.setattr(pkg.plan, "call_model", lambda messages, **kw: (fake_free, "", {"model": "gpt-chat"}))
+    res = pkg.plan.propose_plan(
+        "给 HaloWebUI 加一个按钮",
+        "/tmp/ws",
+        project=project,
+        workflow="auto",
+        feedback="不要用流水线，保持自由协作",
+    )
+    assert res["ok"] is True
+    assert res["plan"].get("workflow", "auto") == "auto"
+    assert res["plan"].get("promoted_from") is None
+
+
+def test_create_team_defaults_auto_deploy_for_project_and_exposes_promoted_from(pkg, availability, tmp_path):
+    import subprocess
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-b", "main"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.email", "t@example.com"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.name", "Test"], cwd=repo, check=True, capture_output=True)
+    (repo / "README.md").write_text("hi\n")
+    subprocess.run(["git", "add", "README.md"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "init"], cwd=repo, check=True, capture_output=True)
+
+    proj = {"name": "repo", "path": str(repo), "branch": "main"}
+    plan = pkg.plan.propose_plan(
+        "修改 repo 页面样式",
+        str(tmp_path / "ws"),
+        project=proj,
+        workflow="auto",
+    )["plan"]
+    out = pkg.teams.create_team(
+        "team-promo-1",
+        plan,
+        owner="u1",
+        goal="修改 repo 页面样式",
+        title="修改样式",
+    )
+    snap = pkg.teams.snapshot("team-promo-1")
+    assert snap["team"]["auto_deploy"] is True
+    assert snap["team"]["workflow"] == "dev_lite"
+    assert snap["team"]["promoted_from"] == "auto"

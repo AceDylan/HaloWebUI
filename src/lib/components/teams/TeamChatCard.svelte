@@ -6,6 +6,7 @@
 	import './teams.css';
 	import { chatId as currentChatId, pendingMessageReveal } from '$lib/stores';
 	import {
+		deployTeamChanges,
 		followUpTeamConclusion,
 		getTeam,
 		getTeamEvents,
@@ -46,6 +47,7 @@
 	let error = '';
 	let gone = false;
 	let bringing = false;
+	let redeploying = false;
 	let timer: ReturnType<typeof setTimeout> | null = null;
 	let destroyed = false;
 	let lastSeen = '';
@@ -100,8 +102,33 @@
 	};
 
 	$: key = stage?.key ?? '';
-	$: settled = gone || SETTLED.has(key) || (team?.status === 'running' && team.phase === 'stopped');
-	$: shellMoving = !settled && key !== 'approval' && key !== 'paused';
+	$: deploy = live?.team?.deploy ?? null;
+	$: workflow = team?.workflow ?? live?.team?.workflow ?? team?.plan?.workflow ?? 'auto';
+	$: promotedFrom = team?.promoted_from ?? live?.team?.promoted_from ?? team?.plan?.promoted_from ?? null;
+	$: workflowLabel =
+		workflow === 'dev_pipeline'
+			? '多模型研发'
+			: workflow === 'dev_lite'
+				? promotedFrom === 'auto'
+					? '快速研发 · 自动晋升'
+					: '快速研发'
+				: '';
+	$: deployRunning = deploy?.status === 'running';
+	$: acceptance = live?.team?.conclusion?.acceptance;
+	$: autoDeployPending =
+		key === 'done' &&
+		!!team?.project &&
+		!live?.team?.project_cleaned &&
+		!deploy &&
+		acceptance?.status === 'ready' &&
+		acceptance?.verdict !== 'unmet' &&
+		Date.now() / 1000 - Number(acceptance?.at ?? 0) < 45;
+	$: settled =
+		gone ||
+		(!deployRunning &&
+			!autoDeployPending &&
+			(SETTLED.has(key) || (team?.status === 'running' && team.phase === 'stopped')));
+	$: shellMoving = (!settled || deployRunning) && key !== 'approval' && key !== 'paused';
 	$: hasActions =
 		!!team &&
 		key !== 'done' &&
@@ -172,6 +199,24 @@
 		}
 	};
 
+	const redeploy = async () => {
+		if (redeploying) return;
+		redeploying = true;
+		try {
+			await deployTeamChanges(localStorage.token, teamId, true);
+			toast.success('已启动推送与部署流水线');
+			unchanged = 0;
+			void load();
+		} catch (e) {
+			toast.error(`${(e as Error)?.message ?? e}`);
+		} finally {
+			redeploying = false;
+		}
+	};
+
+	const stepIcon = (status: string) =>
+		({ done: '✓', running: '…', failed: '✕', skipped: '–', pending: '·' })[status] ?? '·';
+
 	const load = async () => {
 		try {
 			const data = await getTeam(localStorage.token, teamId);
@@ -187,12 +232,16 @@
 				team?.status,
 				team?.phase,
 				team?.task_count,
+				team?.workflow,
+				team?.promoted_from,
 				stage?.key,
 				stage?.now,
 				stage?.steps,
 				stage?.done,
 				stage?.task,
-				leadChange?.status
+				leadChange?.status,
+				data.live?.team?.deploy?.status,
+				data.live?.team?.deploy?.step
 			]);
 			unchanged = seen === lastSeen ? unchanged + 1 : 0;
 			lastSeen = seen;
@@ -268,10 +317,19 @@
 					size={30}
 				/>
 				<div class="min-w-0 flex-1">
-					<div class="flex min-w-0 items-center gap-2">
+					<div class="flex min-w-0 flex-wrap items-center gap-1.5">
 						<span class="truncate text-sm font-semibold text-gray-900 dark:text-gray-100"
 							>{team?.title ?? '协作任务'}</span
 						>
+						{#if workflowLabel}
+							<span
+								class="shrink-0 rounded-full px-2 py-[2px] text-[10.5px] font-medium leading-none {workflow ===
+								'dev_pipeline'
+									? 'bg-violet-500/12 text-violet-700 ring-1 ring-inset ring-violet-500/25 dark:text-violet-300'
+									: 'bg-cyan-500/12 text-cyan-700 ring-1 ring-inset ring-cyan-500/25 dark:text-cyan-300'}"
+								data-team-chat-workflow={workflow}>{workflowLabel}</span
+							>
+						{/if}
 						{#if team}<span class="shrink-0"
 								><StatusChip status={chip} label={chipLabel} size="sm" /></span
 							>{/if}
@@ -333,6 +391,68 @@
 			{:else}
 				<div class="wb-shell-body">
 					<div class="h-14 animate-pulse rounded-xl bg-gray-100 dark:bg-white/[0.04]" aria-busy="true" />
+				</div>
+			{/if}
+
+			{#if deploy}
+				<div
+					class="wb-shell-section flex flex-col gap-1.5 text-xs"
+					data-team-chat-deploy={deploy.status}
+				>
+					<div class="flex flex-wrap items-center gap-x-2 gap-y-1">
+						<span class="font-medium text-gray-800 dark:text-gray-100">
+							{#if deploy.status === 'running'}
+								<span class="tm-shimmer text-sky-700 dark:text-sky-300">交付与部署中</span>
+							{:else if deploy.status === 'succeeded'}
+								<span class="text-emerald-700 dark:text-emerald-300">已自动合并推送并上线</span>
+							{:else if deploy.status === 'skipped'}
+								<span class="text-amber-700 dark:text-amber-300">已暂停自动部署</span>
+							{:else}
+								<span class="text-red-700 dark:text-red-300">推送部署失败</span>
+							{/if}
+						</span>
+						{#if deploy.sha}
+							<span class="font-mono text-[11px] text-gray-400">{deploy.sha.slice(0, 8)}</span>
+						{/if}
+						{#if deploy.ci_url}
+							<a
+								href={deploy.ci_url}
+								target="_blank"
+								rel="noopener noreferrer"
+								class="ml-auto text-[11px] text-sky-700 hover:underline dark:text-sky-300"
+								data-team-chat-ci>CI ↗</a
+							>
+						{/if}
+						{#if deploy.status === 'failed' || deploy.status === 'skipped'}
+							<button
+								type="button"
+								class="tm-btn-ghost {deploy.ci_url ? '' : 'ml-auto'} !px-2 !py-0.5 !text-[11px]"
+								disabled={redeploying}
+								on:click={redeploy}
+								data-team-chat-redeploy>{redeploying ? '启动中…' : '重试推送部署'}</button
+							>
+						{/if}
+					</div>
+					{#if deploy.steps?.length}
+						<div class="flex flex-wrap gap-1.5 text-[11px]">
+							{#each deploy.steps as s (s.key)}
+								<span
+									class="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 {s.status === 'done'
+										? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
+										: s.status === 'running'
+											? 'bg-sky-500/12 font-medium text-sky-700 dark:text-sky-300'
+											: s.status === 'failed'
+												? 'bg-red-500/10 text-red-700 dark:text-red-300'
+												: 'bg-gray-500/[0.06] text-gray-400'}"
+									title={s.detail || s.label}
+									><span class="font-mono">{stepIcon(s.status)}</span><span>{s.label}</span></span
+								>
+							{/each}
+						</div>
+					{/if}
+					{#if deploy.error}
+						<p class="text-[11px] leading-relaxed text-red-700 dark:text-red-300">{deploy.error}</p>
+					{/if}
 				</div>
 			{/if}
 

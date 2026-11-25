@@ -8,6 +8,7 @@ installDominoDom('http://localhost/');
 
 const api = vi.hoisted(() => ({
 	getTeam: vi.fn(),
+	deployTeamChanges: vi.fn(),
 	followUpTeamConclusion: vi.fn(),
 	adjustTeam: vi.fn(),
 	decideTeamChange: vi.fn(),
@@ -626,5 +627,99 @@ describe('TeamChatCard (派发方式「协作台」 in a chat)', () => {
 		expect(text('[data-team-chat-gone]')).toContain('已经在协作台删除');
 		expect(target.querySelector('[data-team-chat-open]')).toBeFalsy();
 		expect(api.getTeam).toHaveBeenCalledTimes(1);
+	});
+
+	it('shows workflow badge, current_run.question for approval gate, switch-runner retry, and deploy progress with retry', async () => {
+		const task = (over: Record<string, unknown>) => ({
+			id: 't4',
+			key: 'T4',
+			seq: 4,
+			title: '汇总对比并拍板',
+			member: 'claude-lead',
+			executor: 'officlaude',
+			status: 'running',
+			sub_status: 'waiting_user',
+			parents: [],
+			children: [],
+			created_at: 1,
+			started_at: 1,
+			completed_at: null,
+			attempts: 1,
+			current_run: { question: '请从方案 A（星核三卡片）和方案 B 中拍板选择' },
+			result: '',
+			block_reason: '等待确认',
+			consecutive_failures: 0,
+			...over
+		});
+		api.getTeam.mockResolvedValue({
+			team: {
+				id: 'team-wf',
+				title: '多模型研发测试',
+				status: 'running',
+				phase: 'attention',
+				workflow: 'dev_lite',
+				promoted_from: 'auto',
+				member_count: 2,
+				task_count: 4
+			},
+			live: {
+				team: {
+					phase: 'attention',
+					state: 'running',
+					workflow: 'dev_lite',
+					promoted_from: 'auto',
+					change: null,
+					deploy: {
+						status: 'failed',
+						error: 'docker pull timeout',
+						ci_url: 'https://github.com/AceDylan/HaloWebUI/actions/runs/999',
+						steps: [
+							{ key: 'merge', label: '合并', status: 'done' },
+							{ key: 'deploy', label: '部署', status: 'failed' }
+						]
+					}
+				},
+				tasks: [
+					task({}),
+					task({
+						id: 't8',
+						key: 'T8',
+						title: '实现后端接口',
+						member: 'codex-dev',
+						executor: 'codex',
+						sub_status: 'failed',
+						current_run: null,
+						block_reason: '额度耗尽'
+					})
+				]
+			},
+			stage: { key: 'attention', label: '需要你处理', now: 'T4 等待拍板', at: nowTs(), steps: steps(2) }
+		});
+		api.retryTeamTask.mockResolvedValue({ retried: true });
+		api.deployTeamChanges.mockResolvedValue({ deploy: { status: 'running' } });
+
+		await card({ teamId: 'team-wf' });
+		expect(text('[data-team-chat-workflow]')).toBe('快速研发 · 自动晋升');
+		expect(target.querySelector('[data-team-chat-need="waiting_user"]').textContent).toContain(
+			'请从方案 A（星核三卡片）和方案 B 中拍板选择'
+		);
+
+		// Switch runner and retry failed task directly in chat card
+		const sw = target.querySelector('[data-team-chat-switch-select="t8"]') as any;
+		sw.value = 'anyclaude';
+		sw.dispatchEvent(new (window as any).Event('change'));
+		await sleep(10);
+		(target.querySelector('[data-team-chat-switch-apply="t8"]') as any).click();
+		await sleep(20);
+		expect(api.retryTeamTask).toHaveBeenCalledWith('tok', 'team-wf', 't8', 'anyclaude');
+
+		// Deploy progress strip + CI link + retry deploy button
+		const dep = target.querySelector('[data-team-chat-deploy]');
+		expect(dep.getAttribute('data-team-chat-deploy')).toBe('failed');
+		expect(dep.textContent).toContain('docker pull timeout');
+		expect(target.querySelector('[data-team-chat-ci]').getAttribute('href')).toContain('/runs/999');
+		(target.querySelector('[data-team-chat-redeploy]') as any).click();
+		await sleep(20);
+		expect(api.deployTeamChanges).toHaveBeenCalledWith('tok', 'team-wf', true);
 	});
 });

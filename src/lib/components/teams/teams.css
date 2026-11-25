@@ -251,6 +251,65 @@
 	}
 }
 
+/* --- Starcore workflow selector cards (自由协作 / 快速研发 / 多模型研发) -------------------- */
+.tm-wf-card {
+	--wf-tone: var(--tm-accent);
+	position: relative;
+	overflow: hidden;
+	border: 1px solid hsl(var(--tm-line));
+	background:
+		radial-gradient(120% 100% at 100% 0%, hsl(var(--wf-tone) / 0.06), transparent 60%),
+		hsl(var(--tm-surface));
+	border-radius: 1rem;
+	transition:
+		transform 0.28s var(--tm-ease),
+		border-color 0.22s ease,
+		box-shadow 0.28s var(--tm-ease),
+		background 0.28s ease;
+}
+.tm-wf-card[data-wf-tone='cyan'] {
+	--wf-tone: var(--tm-accent-2);
+}
+.tm-wf-card[data-wf-tone='violet'] {
+	--wf-tone: var(--tm-violet);
+}
+.tm-wf-card:hover {
+	border-color: hsl(var(--wf-tone) / 0.36);
+	box-shadow: 0 6px 24px -14px hsl(var(--wf-tone) / 0.35);
+}
+.tm-wf-card.is-active {
+	border-color: hsl(var(--wf-tone) / 0.55);
+	background:
+		radial-gradient(130% 110% at 0% 0%, hsl(var(--wf-tone) / 0.14), transparent 58%),
+		radial-gradient(90% 90% at 100% 100%, hsl(var(--tm-accent-2) / 0.07), transparent 65%),
+		hsl(var(--tm-surface));
+	box-shadow:
+		0 0 0 1px hsl(var(--wf-tone) / 0.22),
+		0 10px 30px -14px hsl(var(--wf-tone) / 0.42);
+}
+.tm-wf-card.is-active::before {
+	content: '';
+	position: absolute;
+	inset: 0 0 auto 0;
+	height: 2px;
+	background: linear-gradient(90deg, transparent, hsl(var(--wf-tone)), hsl(var(--tm-accent-2)), transparent);
+	opacity: 0.9;
+}
+.tm-wf-badge {
+	color: hsl(var(--wf-tone));
+	background: hsl(var(--wf-tone) / 0.1);
+	border: 1px solid hsl(var(--wf-tone) / 0.22);
+}
+.tm-wf-icon {
+	color: hsl(var(--wf-tone));
+	background: hsl(var(--wf-tone) / 0.1);
+	box-shadow: inset 0 0 0 1px hsl(var(--wf-tone) / 0.22);
+}
+.tm-wf-dot {
+	background: hsl(var(--wf-tone));
+	color: hsl(var(--wf-tone));
+}
+
 .tm-rise {
 	animation: tm-rise 0.55s var(--tm-ease) both;
 	animation-delay: calc(var(--i, 0) * 45ms);

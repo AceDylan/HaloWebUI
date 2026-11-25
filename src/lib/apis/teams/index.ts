@@ -139,6 +139,11 @@ export type TeamPlan = {
 	max_parallel?: number;
 	widest_layer?: number;
 	executors?: TeamExecutor[];
+	/** Optional workflow template & promotion metadata. */
+	workflow?: TeamWorkflow;
+	promoted_from?: string | null;
+	runner_prefs?: Record<string, string>;
+	auto_deploy?: boolean;
 	/** Where the team will work: a git repository (``auto``: the goal named it). */
 	project?: {
 		path: string;
@@ -292,6 +297,9 @@ export type Team = {
 	phase: string | null;
 	plan?: TeamPlan | null;
 	auto_deploy?: boolean;
+	workflow?: TeamWorkflow;
+	promoted_from?: string | null;
+	runner_prefs?: Record<string, string>;
 	error: string | null;
 	board: string | null;
 	created_at: number;
@@ -621,6 +629,9 @@ export type LiveSnapshot = {
 		project_cleaned?: boolean;
 		/** Whether this project team auto-merges, pushes, deploys and cleans up on completion. */
 		auto_deploy?: boolean;
+		workflow?: TeamWorkflow;
+		promoted_from?: string | null;
+		runner_prefs?: Record<string, string>;
 		/** Live / latest push-and-deploy pipeline status for a project team. */
 		deploy?: TeamDeployState | null;
 		/** The open 对负责人说 request / proposal, and the latest decided ones. */

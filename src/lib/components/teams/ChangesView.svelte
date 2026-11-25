@@ -12,7 +12,6 @@
 		getTeamChanges,
 		mergeTeamChanges,
 		pushTeamChanges,
-		setTeamAutoDeploy,
 		type TeamChanges
 	} from '$lib/apis/teams';
 	import { elapsed, now, timeAgo } from './clock';
@@ -45,7 +44,6 @@
 	$: deploy = data?.deploy ?? null;
 	$: deployProfile = data?.deploy_profile ?? null;
 	$: deployRunning = deploy?.status === 'running';
-	$: autoDeploy = !!data?.auto_deploy;
 	$: hasChanges = commits.length > 0 || (data?.pending?.length ?? 0) > 0;
 	$: canShip =
 		finished &&
@@ -129,12 +127,6 @@
 			'deploy',
 			() => deployTeamChanges(localStorage.token, teamId, deployCleanup, deployReview),
 			'已启动推送部署流水线'
-		);
-	const toggleAutoDeploy = () =>
-		act(
-			'auto-deploy',
-			() => setTeamAutoDeploy(localStorage.token, teamId, !autoDeploy),
-			!autoDeploy ? '已开启完成后自动推送部署' : '已关闭自动推送部署'
 		);
 
 	const stepIcon = (status: string) =>
@@ -236,16 +228,9 @@
 							>
 						{/if}
 						{#if !project.discarded_at}
-							<button
-								type="button"
-								class="rounded-full border px-2 py-0.5 text-[11px] transition tm-hairline {autoDeploy
-									? 'border-sky-500/40 bg-sky-500/10 text-sky-700 dark:text-sky-300'
-									: 'text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200'}"
-								disabled={!!busy || deployRunning}
-								aria-pressed={autoDeploy}
-								on:click={toggleAutoDeploy}
-								title="开启后，任务完成且验收通过时自动合并、推送、部署并清理分支"
-								data-changes-auto-deploy>{autoDeploy ? '自动部署：开' : '自动部署：关'}</button
+							<span
+								class="rounded-full border border-sky-500/30 bg-sky-500/10 px-2 py-0.5 text-[11px] text-sky-700 dark:text-sky-300"
+								data-changes-auto-deploy-badge>代码改动完成后自动推送部署</span
 							>
 						{/if}
 					</div>

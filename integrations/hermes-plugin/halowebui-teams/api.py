@@ -166,7 +166,7 @@ async def _create(request):
         inputs=data.get("inputs") if isinstance(data.get("inputs"), list) else None,
         conclusion_template=data.get("conclusion_template") if isinstance(data.get("conclusion_template"), dict) else None,
         member_assistants=data.get("member_assistants") if isinstance(data.get("member_assistants"), dict) else None,
-        auto_deploy=bool(data.get("auto_deploy")),
+        auto_deploy=None if data.get("auto_deploy") is None else bool(data.get("auto_deploy")),
     )
     return _json_response(result, status=201 if result.get("created") else 200)
 

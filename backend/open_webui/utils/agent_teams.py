@@ -329,9 +329,11 @@ async def start_team(team: AgentTeamModel, target: HermesTarget,
                     log.warning("teams: the assistants applied for %s could not be recorded", team.id)
             snapshots = member_snapshots(applied)
         sent = {k: v for k, v in plan.items() if k != "assistants_applied"}
+        has_project = isinstance(plan.get("project"), dict) and bool(plan["project"].get("path"))
         body = {"team_id": team.id, "plan": sent, "goal": team.goal, "title": team.title,
                 "chat_id": team.chat_id or "", "origin": team_origin(team),
-                "auto_deploy": bool((team.meta or {}).get("auto_deploy"))}
+                # Every project team auto-deploys when it has actual repo changes (zero changes auto-clean).
+                "auto_deploy": True if has_project else bool((team.meta or {}).get("auto_deploy"))}
         if snapshots:
             body["member_assistants"] = snapshots
         templates = image_templates(team.user_id, limit=200)
@@ -660,7 +662,7 @@ async def reconcile(team: AgentTeamModel, target: Optional[HermesTarget]) -> tup
 
 def result_settled(live: Optional[dict]) -> bool:
     """The lead is done with a finished team: the result is written (or failed), not being checked,
-    and no push/deploy pipeline is still running."""
+    and no push/deploy pipeline is still running or about to launch."""
     conclusion = (live or {}).get("conclusion") if isinstance(live, dict) else None
     if not isinstance(conclusion, dict):
         return False
@@ -668,8 +670,17 @@ def result_settled(live: Optional[dict]) -> bool:
     illustration = conclusion.get("illustration") if isinstance(conclusion.get("illustration"), dict) else {}
     deploy = (live or {}).get("deploy") if isinstance(live, dict) else None
     deploying = isinstance(deploy, dict) and deploy.get("status") == "running"
+    # Give bridge.tick_board a short grace window to kick off auto-deploy right after acceptance finishes.
+    auto_pending = (
+        bool((live or {}).get("auto_deploy"))
+        and not bool((live or {}).get("project_cleaned"))
+        and deploy is None
+        and acceptance.get("status") == "ready"
+        and acceptance.get("verdict") != "unmet"
+        and int(time.time()) - int(acceptance.get("at") or conclusion.get("generated_at") or 0) < 45
+    )
     return (conclusion.get("status") in ("ready", "failed") and acceptance.get("status") != "checking"
-            and illustration.get("status") != "generating" and not deploying)
+            and illustration.get("status") != "generating" and not deploying and not auto_pending)
 
 
 def snapshot_progress(snap: Any) -> Optional[dict]:
@@ -784,20 +795,21 @@ def public_team(team: AgentTeamModel, *, with_plan: bool = True) -> dict:
         data["plan"] = {**data["plan"], "assistants_applied": public_assistants_applied(data["plan"]["assistants_applied"])}
     data["preferred_assistants"] = preferred_refs(meta.get("assistants"))
     data["lead_model"] = meta.get("lead_model")
+    plan = data.get("plan") or {}
+    project = plan.get("project") if isinstance(plan.get("project"), dict) else None
     data["auto_start"] = bool(meta.get("auto_start"))
-    data["auto_deploy"] = bool(meta.get("auto_deploy"))
-    data["workflow"] = meta.get("workflow") or (data.get("plan") or {}).get("workflow") or "auto"
-    data["runner_prefs"] = meta.get("runner_prefs") or (data.get("plan") or {}).get("runner_prefs") or {}
+    data["auto_deploy"] = bool(project) or bool(meta.get("auto_deploy"))
+    data["workflow"] = plan.get("workflow") or meta.get("workflow") or "auto"
+    data["promoted_from"] = plan.get("promoted_from") or None
+    data["runner_prefs"] = plan.get("runner_prefs") or meta.get("runner_prefs") or {}
     # 再来一次 / 定时: the team this one repeats, and whether a schedule started it
     data["repeat_of"] = meta.get("repeat_of")
     data["scheduled"] = bool(meta.get("schedule_id"))
-    plan = data.get("plan") or {}
     data["member_count"] = len(plan.get("members") or [])
     data["task_count"] = len(plan.get("tasks") or [])
     data["executors"] = plan.get("executors") or []
     data["progress"] = meta.get("progress")
     data["origin"] = (meta.get("origin") or {}).get("platform") if isinstance(meta.get("origin"), dict) else None
-    project = plan.get("project") if isinstance(plan.get("project"), dict) else None
     data["project"] = {"name": project.get("name"), "path": project.get("path")} if project else None
     data["deletable"] = deletable(team)
     data["inputs"] = [str(i.get("name") or "")[:120] for i in team_inputs(team)]

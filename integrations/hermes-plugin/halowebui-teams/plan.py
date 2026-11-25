@@ -581,6 +581,10 @@ def validate_plan(raw: Any, *, parallel_cap: int = DEFAULT_PARALLEL_CAP,
         wf = wf_mod.normalize_workflow(raw.get("workflow"))
         if wf != "auto":
             plan["workflow"] = wf
+    if raw.get("promoted_from") in ("auto",):
+        plan["promoted_from"] = str(raw["promoted_from"])
+    if raw.get("auto_deploy"):
+        plan["auto_deploy"] = True
     if isinstance(raw.get("runner_prefs"), dict):
         from . import workflow as wf_mod
 
@@ -687,14 +691,24 @@ def propose_plan(goal: str, workspace: str, *, feedback: str = "", previous: Opt
     is ``dev_pipeline`` / ``dev_lite``), then validate it."""
     from . import progress, workflow as wf_mod
 
-    wf = wf_mod.normalize_workflow(workflow or (previous.get("workflow") if isinstance(previous, dict) else "auto"))
+    prev_wf = (previous.get("workflow") if isinstance(previous, dict) else "auto") or "auto"
+    prev_promoted = bool(isinstance(previous, dict) and previous.get("promoted_from") == "auto")
+    stay_free = bool(feedback and re.search(r"自由协作|不要晋升|不用快速研发", feedback))
+    wf = wf_mod.normalize_workflow(workflow if workflow and workflow != "auto" else prev_wf)
+    if stay_free or (prev_promoted and not project and wf == "dev_lite"):
+        wf = "auto"
     prefs = wf_mod.normalize_runner_prefs(
         runner_prefs if runner_prefs is not None else (previous.get("runner_prefs") if isinstance(previous, dict) else None)
     )
+    promoted_from = ""
+    if wf == "auto" and not stay_free and wf_mod.should_promote_to_dev_lite(goal, project):
+        wf = "dev_lite"
+        promoted_from = "auto"
     if wf in ("dev_pipeline", "dev_lite"):
-        progress.planning_step(team_id, "check", f"正在按「{wf_mod.WORKFLOW_LABELS[wf]}」生成多模型协作计划并检查执行器")
+        note = "检测到需改仓库代码，自动晋升为「快速研发」并开启自动部署" if promoted_from else f"正在按「{wf_mod.WORKFLOW_LABELS[wf]}」生成多模型协作计划并检查执行器"
+        progress.planning_step(team_id, "check", note)
         raw = wf_mod.build_pipeline_plan(goal, workflow=wf, project=project, feedback=feedback,
-                                         runner_prefs=prefs, inputs=inputs)
+                                         runner_prefs=prefs, inputs=inputs, promoted_from=promoted_from)
         plan, errors = validate_plan(raw, parallel_cap=parallel_cap)
         if plan is None:
             return {"ok": False, "error": "研发流水线计划校验失败：" + "；".join(errors)}

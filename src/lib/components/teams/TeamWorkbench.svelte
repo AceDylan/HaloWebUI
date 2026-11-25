@@ -17,7 +17,6 @@
 		getTeamEvents,
 		getTeamsMeta,
 		replanTeam,
-		setTeamAutoDeploy,
 		type LiveSnapshot,
 		type Team,
 		type TeamEvent,
@@ -287,10 +286,19 @@
 		const conclusionPending =
 			phase === 'completed' && !['ready', 'failed'].includes(live?.team.conclusion?.status ?? '');
 		// … and the lead answering 对负责人说, or checking the result against the goal, or deploying.
+		const acc = live?.team.conclusion?.acceptance;
+		const autoDeployPending =
+			phase === 'completed' &&
+			projectTeam &&
+			!live?.team.deploy &&
+			acc?.status === 'ready' &&
+			acc?.verdict !== 'unmet' &&
+			Date.now() / 1000 - Number(acc?.at ?? 0) < 45;
 		const leadPending =
 			live?.team.change?.status === 'thinking' ||
-			live?.team.conclusion?.acceptance?.status === 'checking' ||
-			live?.team.deploy?.status === 'running';
+			acc?.status === 'checking' ||
+			live?.team.deploy?.status === 'running' ||
+			autoDeployPending;
 		if (settled || (finished && finishedFetches > 2 && !conclusionPending && !leadPending)) return;
 		schedule();
 	};
@@ -353,11 +361,6 @@
 				source === 'auto' ? { name, model_source: 'auto' } : { name, model, model_source: 'user' }
 			]);
 		});
-	const setPlanAutoDeploy = (enabled: boolean) =>
-		act(async () => {
-			await setTeamAutoDeploy(localStorage.token, teamId, enabled);
-			if (team) team = { ...team, auto_deploy: enabled };
-		}, enabled ? '已开启完成后自动推送部署' : '已关闭自动推送部署');
 
 	// Runner availability for the plan review: loaded once, re-checked on request (which also lets
 	// Hermes work out every member's runner again).
@@ -717,7 +720,6 @@
 						on:executor={(e) => setExecutor(e.detail.name, e.detail.executor, e.detail.source)}
 						on:model={(e) => setModel(e.detail.name, e.detail.model, e.detail.source)}
 						on:recheck={recheck}
-						on:auto-deploy={(e) => setPlanAutoDeploy(e.detail)}
 					/>
 				{/if}
 			</div>

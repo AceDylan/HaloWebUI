@@ -31,6 +31,29 @@ _SKIP_DESIGN_RE = re.compile(
     r"纯后端|仅后端|不改前端|没有前端|无前端|跳过设计|不需要设计稿|不用设计稿|backend[- ]only|no[- ]ui",
     re.I,
 )
+_READONLY_GOAL_RE = re.compile(
+    r"不要改代码|不改代码|只读|只看|仅分析|仅调研|只分析|代码审查报告|只做审查|只查|帮我看下|解释一下|"
+    r"分析一下.*架构|审查.*(?:提交|代码|改动).*(?:报告|建议|清单)|(?:仅|只)做.*(?:审查|调研|分析|总结)",
+    re.I,
+)
+_REPO_EDIT_RE = re.compile(
+    r"改|修改|修复|修一下|修个|新增|增加|添加|加上|实现|开发|重构|优化|删除|去掉|移除|替换|升级|适配|接入|"
+    r"支持|部署|提交代码|推送部署|推送上线|写(?:一个|个|新|代码|接口|页面|组件|测试|单测|脚本|函数|功能)|"
+    r"做个|做一个|调整|完善|打通|落地|补齐|迁移|改造|"
+    r"fix|add|implement|refactor|update|remove|feat|upgrade|deploy|build|create",
+    re.I,
+)
+
+
+def should_promote_to_dev_lite(goal: str, project: Optional[dict]) -> bool:
+    """When workflow is default ``auto`` (自由协作) but targets a git project and intends to change
+    repository code, promote directly to ``dev_lite`` (and auto-deploy on completion)."""
+    if not (isinstance(project, dict) and project.get("path")):
+        return False
+    text = str(goal or "").strip()
+    if not text or _READONLY_GOAL_RE.search(text):
+        return False
+    return bool(_REPO_EDIT_RE.search(text))
 
 
 def normalize_workflow(value: Any) -> str:
@@ -104,6 +127,7 @@ def build_pipeline_plan(
     feedback: str = "",
     runner_prefs: Optional[dict[str, str]] = None,
     inputs: Optional[list[str]] = None,
+    promoted_from: str = "",
 ) -> dict:
     """Build a deterministic raw plan dict matching the reference diagram, ready for ``validate_plan``."""
     wf = normalize_workflow(workflow)
@@ -121,9 +145,9 @@ def build_pipeline_plan(
     if wf == "dev_lite":
         members = [
             _member_spec("claude-lead", "Claude 主控", "code",
-                         "理解需求、查代码定接口与派活单；读 Codex 改动、写前端并跑完整测试", prefs),
+                         "理解需求、查代码定接口与派活单；读 Codex 改动、写前端并跑完整测试（按默认配置）", prefs),
             _member_spec("codex-dev", "Codex 后端", "codex",
-                         "按派活单写成块后端代码与单元测试，提交回执（按 Codex 默认配置运行）", prefs),
+                         "按派活单写成块后端代码与单元测试，提交回执（按默认配置）", prefs),
         ]
         tasks = [
             {
@@ -161,15 +185,18 @@ def build_pipeline_plan(
                 ),
             },
         ]
-        summary = "快速研发模式：Claude 主控摸底定接口 → Codex 写后端交回执 → Claude 读改动、写前端并跑测试；完成后可走 Codex 审查（最多 2 轮）直接合主分支推送更新。"
+        summary = (
+            ("检测到需改动仓库代码，已自动晋升为快速研发并开启完成后自动部署：" if promoted_from == "auto" else "快速研发模式：")
+            + "Claude 主控摸底定接口 → Codex 写后端交回执 → Claude 读改动、写前端并跑测试；完成后自动走 Codex 审查（最多 2 轮）→ 直合主分支推送、自动拉取部署、清理分支与核实线上。"
+        )
     else:
         members = [
             _member_spec("claude-lead", "Claude 主控", "code",
-                         "理解需求查代码/线上、对比合成方案等你拍板、出设计稿、定接口、写前端、读改动跑测试", prefs),
+                         "理解需求查代码/线上、对比合成方案等你拍板、出设计稿、定接口、写前端、读改动跑测试（按默认配置）", prefs),
             _member_spec("agy-advisor", "AGY 方案与交互顾问", "ui",
-                         "独立出对比方案（与 Claude 并行），以及审查设计稿的交互与文案", prefs),
+                         "独立出对比方案（与 Claude 并行），以及审查设计稿的交互与文案（按默认配置）", prefs),
             _member_spec("codex-dev", "Codex 后端", "codex",
-                         "按派活单写成块后端代码与单元测试并提交回执（按 Codex 默认配置运行）", prefs),
+                         "按派活单写成块后端代码与单元测试并提交回执（按默认配置）", prefs),
         ]
         tasks = [
             {
@@ -328,6 +355,9 @@ def build_pipeline_plan(
         "lead": {"name": "team-lead", "role": "负责人"},
         "lead_model": {"model": "pipeline-template", "source": "workflow", "label": WORKFLOW_LABELS[wf]},
     }
+    if promoted_from:
+        plan["promoted_from"] = promoted_from
     if project:
         plan["project"] = project
+        plan["auto_deploy"] = True
     return plan

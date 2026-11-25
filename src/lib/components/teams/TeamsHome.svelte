@@ -80,12 +80,48 @@
 	// Optional explicit runner overrides per engine family (empty = auto family order).
 	let claudePref = '';
 	let agyPref = '';
+	let showEnginePrefs = false;
 	$: runnerPrefs = {
 		...(claudePref ? { claude: claudePref } : {}),
 		...(agyPref ? { agy: agyPref } : {})
 	};
 	$: claudeFamily = meta?.registry?.families?.claude ?? ['officlaude', 'cchclaude', 'anyclaude', 'reclaude'];
 	$: agyFamily = meta?.registry?.families?.agy ?? ['offiagy', 'agy'];
+
+	const WORKFLOW_MODES: {
+		id: TeamWorkflow;
+		title: string;
+		badge: string;
+		tone: 'blue' | 'cyan' | 'violet';
+		flow: string;
+		hint: string;
+	}[] = [
+		{
+			id: 'auto',
+			title: '自由协作',
+			badge: '默认',
+			tone: 'blue',
+			flow: '负责人智能拆解 · 多代理协作',
+			hint: '通用任务；若改仓库代码自动晋升快速研发并部署'
+		},
+		{
+			id: 'dev_lite',
+			title: '快速研发',
+			badge: '3 步闭环',
+			tone: 'cyan',
+			flow: '主控定接口 → Codex 后端 → 测试',
+			hint: '跳过双方案与设计稿 · 审查直合自动部署'
+		},
+		{
+			id: 'dev_pipeline',
+			title: '多模型研发',
+			badge: '全流程',
+			tone: 'violet',
+			flow: '摸底 → Claude⇄AGY 拍板 → 开发',
+			hint: '双方案拍板 · 交互审稿 · 2 轮审查核实上线'
+		}
+	];
+
 	// 「直接开始」: the plan starts as soon as it is ready (remembered on this device).
 	const AUTO_START_KEY = 'halo.teams.autoStart';
 	let autoStart = false;
@@ -93,17 +129,6 @@
 		autoStart = !autoStart;
 		try {
 			localStorage.setItem(AUTO_START_KEY, autoStart ? '1' : '0');
-		} catch {
-			// storage unavailable: the choice holds for this page only
-		}
-	};
-	// 「自动部署」: for code/project teams, automatically merge → push → deploy → clean up after completion.
-	const AUTO_DEPLOY_KEY = 'halo.teams.autoDeploy';
-	let autoDeploy = false;
-	const toggleAutoDeploy = () => {
-		autoDeploy = !autoDeploy;
-		try {
-			localStorage.setItem(AUTO_DEPLOY_KEY, autoDeploy ? '1' : '0');
 		} catch {
 			// storage unavailable: the choice holds for this page only
 		}
@@ -396,7 +421,7 @@
 				autoStart,
 				attached.filter((f) => f.id).map((f) => f.id as string),
 				preferred ? [preferred.ref] : [],
-				autoDeploy,
+				false,
 				workflow,
 				runnerPrefs
 			);
@@ -455,11 +480,6 @@
 			autoStart = localStorage.getItem(AUTO_START_KEY) === '1';
 		} catch {
 			autoStart = false;
-		}
-		try {
-			autoDeploy = localStorage.getItem(AUTO_DEPLOY_KEY) === '1';
-		} catch {
-			autoDeploy = false;
 		}
 		// "发起协作任务" from a chat links here with ?chat=<id> (and an optional ?goal=).
 		const params = new URLSearchParams(window.location.search);
@@ -542,6 +562,83 @@
 					负责人拆解依赖、调度多代理并行执行；默认先出计划等你批准，交付完整报告、代码与文件。
 				</p>
 			</header>
+
+			<!-- starcore workflow mode selector -->
+			<section class="tm-rise mb-3" style="--i:0.6" aria-label="协作流程模式" data-team-workflow={workflow}>
+				<div class="grid grid-cols-1 gap-2 sm:grid-cols-3">
+					{#each WORKFLOW_MODES as mode (mode.id)}
+						{@const active = workflow === mode.id}
+						<button
+							type="button"
+							class="tm-wf-card flex flex-col items-start gap-1.5 px-3.5 py-2.5 text-left {active
+								? 'is-active'
+								: ''}"
+							data-wf-mode={mode.id}
+							data-wf-tone={mode.tone}
+							aria-pressed={active}
+							on:click={() => (workflow = mode.id)}
+						>
+							<div class="flex w-full items-center gap-2">
+								<span class="tm-wf-icon grid size-7 shrink-0 place-items-center rounded-lg" aria-hidden="true">
+									{#if mode.id === 'auto'}
+										<svg class="size-4" viewBox="0 0 20 20" fill="none">
+											<circle cx="10" cy="10" r="2.6" fill="currentColor" />
+											<circle cx="4.5" cy="5.5" r="1.5" stroke="currentColor" stroke-width="1.3" />
+											<circle cx="15.5" cy="5.5" r="1.5" stroke="currentColor" stroke-width="1.3" />
+											<circle cx="10" cy="16.2" r="1.5" stroke="currentColor" stroke-width="1.3" />
+											<path
+												d="M8 8.3 5.7 6.5M12 8.3l2.3-1.8M10 12.6v2.1"
+												stroke="currentColor"
+												stroke-width="1.2"
+												stroke-linecap="round"
+											/>
+										</svg>
+									{:else if mode.id === 'dev_lite'}
+										<svg class="size-4" viewBox="0 0 20 20" fill="none">
+											<circle cx="3.8" cy="10" r="2" fill="currentColor" />
+											<circle cx="10" cy="10" r="2.2" stroke="currentColor" stroke-width="1.4" />
+											<circle cx="16.2" cy="10" r="2" fill="currentColor" />
+											<path
+												d="M5.8 10h2M12.2 10h2"
+												stroke="currentColor"
+												stroke-width="1.4"
+												stroke-linecap="round"
+											/>
+										</svg>
+									{:else}
+										<svg class="size-4" viewBox="0 0 20 20" fill="none">
+											<circle cx="3.2" cy="10" r="1.8" fill="currentColor" />
+											<circle cx="9.6" cy="5.2" r="1.8" stroke="currentColor" stroke-width="1.3" />
+											<circle cx="9.6" cy="14.8" r="1.8" stroke="currentColor" stroke-width="1.3" />
+											<circle cx="16.6" cy="10" r="2" fill="currentColor" />
+											<path
+												d="M4.8 9 7.9 6.3M4.8 11l3.1 2.7M11.3 6.3 14.8 9M11.3 13.7 14.8 11"
+												stroke="currentColor"
+												stroke-width="1.2"
+												stroke-linecap="round"
+											/>
+										</svg>
+									{/if}
+								</span>
+								<span class="tm-display text-[13.5px] font-semibold text-gray-900 dark:text-gray-50"
+									>{mode.title}</span
+								>
+								<span class="tm-wf-badge rounded-full px-1.5 py-[1px] text-[10px] font-medium"
+									>{mode.badge}</span
+								>
+								{#if active}
+									<span
+										class="tm-wf-dot tm-pulse-dot ml-auto size-1.5 shrink-0 rounded-full"
+										aria-hidden="true"
+									/>
+								{/if}
+							</div>
+							<div class="text-[11.5px] font-medium text-gray-700 dark:text-gray-200">{mode.flow}</div>
+							<div class="text-[10.5px] leading-snug text-gray-500 dark:text-gray-400">{mode.hint}</div>
+						</button>
+					{/each}
+				</div>
+			</section>
 
 			<!-- composer -->
 			<form
@@ -671,23 +768,6 @@
 						>附件{attached.length ? ` ${attached.length}` : ''}</button
 					>
 					<label
-						class="pill flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full py-1 pr-1 pl-2.5 text-xs {workflow !== 'auto'
-							? 'pill-on'
-							: ''}"
-						data-team-workflow
-						title="自由协作 = 负责人动态拆解；多模型研发 = 主控摸底→Claude/AGY并行出方案→对比拍板→设计审稿→Codex写后端→主控测试→Codex审查上线；快速研发 = 跳过方案与设计稿直接开发"
-					>
-						<span class="shrink-0 text-gray-500 dark:text-gray-400">流程</span>
-						<select
-							bind:value={workflow}
-							class="compact-select min-w-0 max-w-[9rem] truncate sm:max-w-[11rem]"
-						>
-							<option value="auto">自由协作</option>
-							<option value="dev_pipeline">多模型研发（完整）</option>
-							<option value="dev_lite">快速研发（精简）</option>
-						</select>
-					</label>
-					<label
 						class="pill flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full py-1 pr-1 pl-2.5 text-xs"
 						data-lead-model
 						title="负责人做计划、写结论用的模型；默认跟随 Hermes 当前的默认模型"
@@ -799,24 +879,17 @@
 					</button>
 					<button
 						type="button"
-						class="pill inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-1 text-xs {autoDeploy
+						class="pill inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-1 text-xs {showEnginePrefs ||
+						claudePref ||
+						agyPref
 							? 'pill-on'
 							: 'text-gray-600 dark:text-gray-300'}"
-						aria-pressed={autoDeploy}
-						on:click={toggleAutoDeploy}
-						title="打开后，涉及代码的协作任务完成且验收通过后，自动合并到主分支、推送、按项目配置部署并清理团队分支（普通非代码任务不受影响）"
-						data-auto-deploy
+						aria-pressed={showEnginePrefs || !!claudePref || !!agyPref}
+						on:click={() => (showEnginePrefs = !showEnginePrefs)}
+						title="按引擎家族手动指定执行器（留空按默认顺序；手动指定后不可用不自动顺延，会停下让你选择）"
+						data-engine-prefs-toggle
 					>
-						<svg class="size-3.5 shrink-0" viewBox="0 0 16 16" fill="none" aria-hidden="true"
-							><path
-								d="M8 2.25v7.5M5.25 5 8 2.25 10.75 5M3 10.5v1.75A1.5 1.5 0 0 0 4.5 13.75h7a1.5 1.5 0 0 0 1.5-1.5V10.5"
-								stroke="currentColor"
-								stroke-width="1.3"
-								stroke-linecap="round"
-								stroke-linejoin="round"
-							/></svg
-						>
-						自动部署
+						指定引擎{claudePref || agyPref ? ' · 已选' : ''}
 					</button>
 					{#if goal.trim() && !creating}
 						<button
@@ -864,7 +937,7 @@
 					</div>
 				</div>
 			</form>
-			{#if workflow !== 'auto' || claudePref || agyPref}
+			{#if workflow !== 'auto' || showEnginePrefs || claudePref || agyPref}
 				<div
 					class="tm-card-quiet mt-2 flex flex-wrap items-center gap-x-3 gap-y-2 px-3.5 py-2.5 text-xs"
 					transition:slide={{ duration: 160 }}
@@ -874,7 +947,8 @@
 					<label class="inline-flex items-center gap-1.5 text-gray-600 dark:text-gray-300">
 						<span class="text-gray-400">Claude</span>
 						<select
-							bind:value={claudePref}
+							value={claudePref}
+							on:change={(e) => (claudePref = e.currentTarget.value)}
 							class="compact-select rounded-lg border bg-white py-0.5 pl-2 pr-6 text-xs tm-hairline dark:bg-gray-900"
 							data-pref-claude
 						>
@@ -887,7 +961,8 @@
 					<label class="inline-flex items-center gap-1.5 text-gray-600 dark:text-gray-300">
 						<span class="text-gray-400">AGY</span>
 						<select
-							bind:value={agyPref}
+							value={agyPref}
+							on:change={(e) => (agyPref = e.currentTarget.value)}
 							class="compact-select rounded-lg border bg-white py-0.5 pl-2 pr-6 text-xs tm-hairline dark:bg-gray-900"
 							data-pref-agy
 						>
@@ -897,12 +972,12 @@
 							{/each}
 						</select>
 					</label>
-					<span class="text-[11px] text-gray-400">Codex：固定 codex（用默认配置） · 手动指定不可用不自动顺延</span>
+					<span class="text-[11px] text-gray-400">所有 runner 使用默认模型配置 · 手动指定不可用不自动顺延</span>
 				</div>
 			{/if}
 
 			<p class="mt-2 px-1 text-[11px] text-gray-400 dark:text-gray-500">
-				做计划只调用一次模型，不会启动任何成员；计划要你批准才会执行。
+				涉及仓库代码变更时完成后自动审查、合并推送部署并清理分支；纯调研或零改动自动清理空分支。
 			</p>
 
 			{#if showRunners}

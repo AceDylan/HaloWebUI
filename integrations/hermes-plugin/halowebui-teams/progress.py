@@ -148,7 +148,7 @@ def history(force: bool = False) -> dict:
     return data
 
 
-KIND_LABELS = {"code": "代码", "ui": "前端/UI", "complex": "复杂", "research": "调研", "writing": "写作"}
+KIND_LABELS = {"code": "代码", "codex": "Codex 后端", "ui": "前端/UI", "complex": "复杂", "research": "调研", "writing": "写作"}
 
 
 def typical(kind: str, executor: Optional[str] = None, stats: Optional[dict] = None,

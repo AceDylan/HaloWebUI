@@ -50,6 +50,7 @@
 	let feedback = '';
 	let showFeedback = false;
 	let replies: Record<string, string> = {};
+	let switchRunners: Record<string, TeamExecutor | ''> = {};
 	let stopArmed = false;
 	let stopTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -168,12 +169,23 @@
 			toast.success(`已回复 ${task.member}`);
 		}
 	};
-	const retry = (task: LiveTask) =>
+	const setSwitchRunner = (taskId: string, val: string) => {
+		const picked = EXECUTOR_OPTIONS.find((o) => o.value === val)?.value ?? '';
+		switchRunners = { ...switchRunners, [taskId]: picked };
+	};
+	const retry = (task: LiveTask, executor?: TeamExecutor) =>
 		act(
 			`retry:${task.id}`,
-			() => retryTeamTask(localStorage.token, teamId, task.id),
-			'已重新排队，会作为新的执行尝试开始'
-		);
+			() =>
+				executor
+					? retryTeamTask(localStorage.token, teamId, task.id, executor)
+					: retryTeamTask(localStorage.token, teamId, task.id),
+			executor
+				? `已切换为 ${runnerLabel(executor)} 并重新排队`
+				: '已重新排队，会作为新的执行尝试开始'
+		).then((ok) => {
+			if (ok && executor) switchRunners = { ...switchRunners, [task.id]: '' };
+		});
 	const applyDiagnosis = (task: LiveTask) =>
 		act(
 			`diagnosis:${task.id}`,
@@ -203,7 +215,7 @@
 
 	const reason = (t: LiveTask) =>
 		t.sub_status === 'waiting_user'
-			? t.block_reason || `${t.member} 在等你回答`
+			? String(t.current_run?.question || t.block_reason || `${t.member} 在等你回答`)
 			: t.block_reason || (t.sub_status === 'failed' ? '这一步没有做成' : '这一步卡住了');
 </script>
 
@@ -387,7 +399,7 @@
 					</ul>
 				{/key}
 				<p class="text-[11px] text-gray-400">
-					改完立即生效，批准时按这里的选择开始；执行者不可用时会沿兜底链往后换。
+					改完立即生效，批准时按这里的选择开始；手动指定后不可用不会自动顺延，会停下让你选择。
 				</p>
 			</div>
 		{/if}
@@ -503,6 +515,31 @@
 								data-team-chat-retry={task.id}
 								>{busy === `retry:${task.id}` ? '排队中…' : '重试这一步'}</button
 							>
+							<div class="flex items-center gap-1">
+								<select
+									value={switchRunners[task.id] ?? ''}
+									on:change={(e) => setSwitchRunner(task.id, e.currentTarget.value)}
+									disabled={!!busy}
+									aria-label="更换执行来源"
+									class="chat-select rounded-lg border border-gray-200 bg-white text-xs text-gray-800 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+									data-team-chat-switch-select={task.id}
+								>
+									<option value="">换执行来源…</option>
+									{#each EXECUTOR_OPTIONS as opt (opt.value)}
+										<option value={opt.value}>{opt.label}</option>
+									{/each}
+								</select>
+								{#if switchRunners[task.id]}
+									<button
+										type="button"
+										class="tm-btn-primary !px-2 !py-1 !text-[11px]"
+										disabled={!!busy}
+										on:click={() => switchRunners[task.id] && retry(task, switchRunners[task.id])}
+										data-team-chat-switch-apply={task.id}
+										>用 {runnerLabel(switchRunners[task.id])} 重试</button
+									>
+								{/if}
+							</div>
 						</div>
 					{/if}
 				</li>

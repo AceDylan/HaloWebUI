@@ -128,6 +128,18 @@
 								? '已取消'
 								: '启动失败，可以重新批准'}
 					/>
+					{#if plan.workflow === 'dev_pipeline'}
+						<span
+							class="whitespace-nowrap rounded-full bg-violet-500/10 px-2 py-[3px] text-[11px] font-medium leading-none text-violet-700 ring-1 ring-inset ring-violet-500/25 dark:text-violet-300"
+							data-plan-workflow="dev_pipeline">多模型研发</span
+						>
+					{:else if plan.workflow === 'dev_lite'}
+						<span
+							class="whitespace-nowrap rounded-full bg-cyan-500/10 px-2 py-[3px] text-[11px] font-medium leading-none text-cyan-700 ring-1 ring-inset ring-cyan-500/25 dark:text-cyan-300"
+							data-plan-workflow="dev_lite"
+							>{plan.promoted_from === 'auto' ? '快速研发 · 自动晋升' : '快速研发'}</span
+						>
+					{/if}
 					{#if plan.effort === 'quick'}
 						<span
 							class="whitespace-nowrap rounded-full px-2 py-[3px] text-[11px] font-medium leading-none text-gray-600 ring-1 ring-inset ring-gray-200 dark:text-gray-300 dark:ring-gray-700"
@@ -241,26 +253,10 @@
 							>{plan.project.deploy_profile?.label || '合并到主分支、推送 origin 并清理团队分支'}</span
 						>
 					</span>
-					{#if editable}
-						<label
-							class="ml-auto inline-flex cursor-pointer select-none items-center gap-1.5 text-gray-700 dark:text-gray-200"
-						>
-							<input
-								type="checkbox"
-								class="size-3.5 rounded accent-sky-600"
-								checked={!!team.auto_deploy}
-								disabled={busy}
-								on:change={(e) => dispatch('auto-deploy', e.currentTarget.checked)}
-								data-plan-auto-deploy
-							/>
-							<span>完成后自动推送部署并清理</span>
-						</label>
-					{:else if team.auto_deploy}
-						<span
-							class="ml-auto rounded-full bg-sky-50 px-2 py-0.5 text-[11px] text-sky-700 dark:bg-sky-950 dark:text-sky-300"
-							>已开启自动推送部署</span
-						>
-					{/if}
+					<span
+						class="ml-auto rounded-full bg-sky-500/10 px-2 py-0.5 text-[11px] text-sky-700 ring-1 ring-inset ring-sky-500/20 dark:text-sky-300"
+						data-plan-auto-deploy-note>有代码改动时完成后自动审查并部署，无改动自动清理</span
+					>
 				</div>
 			{/if}
 		</section>

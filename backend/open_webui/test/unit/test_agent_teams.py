@@ -1526,4 +1526,49 @@ def test_dev_pipeline_workflow_runner_prefs_retry_switch_and_codex_review(hermes
     assert dep_call == {"cleanup": True, "codex_review": True}
 
 
+def test_promoted_from_and_result_settled_auto_deploy_grace_window(hermes):
+    import time as _time
+
+    client = _client("u1")
+    created = client.post("/api/v1/teams/", json={"goal": "给 HaloWebUI 修复页面样式"}).json()
+    team = AgentTeams.get(created["id"], "u1")
+    target = teams_utils.HermesTarget("http://hermes", {}, "u1")
+    hermes.responses[("POST", "/plan")] = {
+        "ok": True,
+        "plan": {
+            **PLAN,
+            "workflow": "dev_lite",
+            "promoted_from": "auto",
+            "auto_deploy": True,
+            "project": {"name": "HaloWebUI", "path": "/root/HaloWebUI"},
+        },
+    }
+    asyncio.run(teams_utils._plan_job(team, target, "", None))
+    refreshed = AgentTeams.get(created["id"], "u1")
+    pub = teams_utils.public_team(refreshed)
+    assert pub["workflow"] == "dev_lite"
+    assert pub["promoted_from"] == "auto"
+    assert pub["auto_deploy"] is True
+
+    # result_settled stays False during the 45s grace window after acceptance ready when auto_deploy is on
+    now = _time.time()
+    live_grace = {
+        "phase": "completed",
+        "auto_deploy": True,
+        "project_cleaned": False,
+        "deploy": None,
+        "conclusion": {
+            "status": "ready",
+            "acceptance": {"status": "ready", "verdict": "met", "at": now - 5},
+        },
+    }
+    assert teams_utils.result_settled(live_grace) is False
+    # Once past the 45s window (or project_cleaned), it settles
+    live_grace["conclusion"]["acceptance"]["at"] = now - 60
+    assert teams_utils.result_settled(live_grace) is True
+    live_grace["conclusion"]["acceptance"]["at"] = now - 5
+    live_grace["project_cleaned"] = True
+    assert teams_utils.result_settled(live_grace) is True
+
+
 

@@ -285,7 +285,7 @@ def _workspace_text(team: dict) -> str:
 def create_team(team_id: str, plan: dict, *, owner: str, chat_id: str = "", goal: str = "",
                 title: str = "", origin: Optional[dict] = None, image_templates: Optional[list] = None,
                 inputs: Optional[list] = None, conclusion_template: Optional[dict] = None,
-                member_assistants: Optional[dict] = None, auto_deploy: bool = False) -> dict:
+                member_assistants: Optional[dict] = None, auto_deploy: Optional[bool] = None) -> dict:
     """Create (or return) the board for *team_id* from a validated *plan*; idempotent.
     ``image_templates``: the owner's HaloWebUI image templates, offered to image members.
     ``conclusion_template``: the one the result's picture is drawn in once it is written.
@@ -333,8 +333,9 @@ def create_team(team_id: str, plan: dict, *, owner: str, chat_id: str = "", goal
                        if k in ("platform", "chat_id", "user_id", "thread_id") and v},
             "workspace": workspace,
             "project": project,
-            "auto_deploy": bool(auto_deploy),
+            "auto_deploy": bool(project) if auto_deploy is None else bool(auto_deploy),
             "workflow": str(checked.get("workflow") or "auto"),
+            **({"promoted_from": checked["promoted_from"]} if checked.get("promoted_from") else {}),
             "runner_prefs": checked.get("runner_prefs") or {},
             "lead": checked["lead"],
             "members": checked["members"],
@@ -619,6 +620,7 @@ def snapshot(team_id: str, owner: Optional[str] = None) -> dict:
             "project_cleaned": bool((team.get("project") or {}).get("auto_cleaned")),
             "auto_deploy": bool(team.get("auto_deploy")),
             "workflow": team.get("workflow") or "auto",
+            **({"promoted_from": team["promoted_from"]} if team.get("promoted_from") else {}),
             "runner_prefs": team.get("runner_prefs") or {},
             "deploy": _deploy_brief(team),
             **_lead_state(team),

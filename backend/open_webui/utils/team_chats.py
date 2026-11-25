@@ -62,7 +62,8 @@ def card_text(team: AgentTeamModel, *, backfill: bool = False) -> str:
         return (f"🤝 协作台「{title}」{how}：用上次的目标和成员，{start}{files}。"
                 "进度在下面的卡片里实时更新，做完后完整结果会发回这个对话。")
     start = "计划好就直接开始" if meta.get("auto_start") else "计划好后等你批准再开始"
-    return (f"🤝 已交给协作台「{title}」：负责人在制定计划，{start}{files}。"
+    wf_tag = {"dev_pipeline": "（多模型研发）", "dev_lite": "（快速研发）"}.get(meta.get("workflow") or "", "")
+    return (f"🤝 已交给协作台「{title}」{wf_tag}：负责人在制定计划，{start}{files}。"
             "进度在下面的卡片里实时更新，做完后完整结果会发回这个对话。")
 
 

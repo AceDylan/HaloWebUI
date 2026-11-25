@@ -246,3 +246,14 @@ def test_the_team_list_comes_a_page_at_a_time_with_server_filters_and_counts(env
         db.commit()
     current = client.get("/api/v1/teams/?scope=current").json()
     assert {t["id"] for t in current["teams"]} == {made[0], made[1], made[6], made[2], made[4]}
+
+
+def test_card_text_includes_workflow_badge_when_not_auto(env):
+    client = _client("tc-wf")
+    t_pipe = client.post("/api/v1/teams/", json={"goal": "多模型开发协作台", "workflow": "dev_pipeline"}).json()
+    _, chain = _messages(t_pipe["chat_id"], "tc-wf")
+    assert "多模型研发" in chain[1]["content"]
+
+    t_lite = client.post("/api/v1/teams/", json={"goal": "快速修个 bug", "workflow": "dev_lite"}).json()
+    _, chain_lite = _messages(t_lite["chat_id"], "tc-wf")
+    assert "快速研发" in chain_lite[1]["content"]

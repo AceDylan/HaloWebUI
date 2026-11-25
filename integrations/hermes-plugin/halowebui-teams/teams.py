@@ -277,9 +277,11 @@ def _workspace_text(team: dict) -> str:
         return (f"工作目录：{team['workspace']}——项目 {project['name']}（{project['path']}）的一个 git worktree，"
                 f"在团队分支 {project['branch']} 上（基于 {project.get('base_branch') or '当前提交'}）。全队共用这个目录；"
                 "只改你的任务说明里涉及的文件，不要改别人的产出。可以 git commit（留在这个分支上），"
-                "**不要 git push、不要切换分支、不要合并到主分支、不要部署**——合并和推送由用户在协作台决定。"
+                "**不要 git push、不要切换分支、不要合并到主分支、不要部署，也不要自行调用外部 Codex / AGY / CCG 等审阅或协作 CLI**"
+                "——多模型分工、最终 Codex 审阅与合并推送部署由协作台统一调度。"
                 "按任务说明里的方法验证（测试 / 检查），把验证结果写进 result。")
-    return f"工作目录：{team['workspace']}（全队共用；只写你的任务说明里指定的文件，不要改别人的产出）。"
+    return (f"工作目录：{team['workspace']}（全队共用；只写你的任务说明里指定的文件，不要改别人的产出；"
+            "不要自行调用外部 Codex / AGY / CCG 等审阅或协作 CLI）。")
 
 
 def create_team(team_id: str, plan: dict, *, owner: str, chat_id: str = "", goal: str = "",

@@ -151,3 +151,8 @@ def test_create_team_defaults_auto_deploy_for_project_and_exposes_promoted_from(
     assert snap["team"]["auto_deploy"] is True
     assert snap["team"]["workflow"] == "dev_lite"
     assert snap["team"]["promoted_from"] == "auto"
+    raw_team = pkg.teams.read_team(out["board"])
+    ws_text = pkg.teams._workspace_text(raw_team)
+    assert "不要自行调用外部 Codex / AGY / CCG" in ws_text
+    assert "不要 git push" in ws_text
+    assert "不要自行调用外部 Codex / AGY / CCG" in pkg.teams._workspace_text({"workspace": "/tmp/ws"})

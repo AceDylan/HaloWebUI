@@ -171,16 +171,19 @@ def _keep(task: "asyncio.Task") -> None:
 async def _plan_job(team: AgentTeamModel, target: HermesTarget, feedback: str, previous: Optional[dict],
                     access: Optional["AssistantAccess"] = None) -> None:
     try:
+        meta = team.meta or {}
         request_body = {
             "goal": team.goal, "team_id": team.id, "feedback": feedback, "previous": previous,
-            "lead_model": (team.meta or {}).get("lead_model") or "",
-            "project": (team.meta or {}).get("project") or "",
+            "lead_model": meta.get("lead_model") or "",
+            "project": meta.get("project") or "",
             "inputs": [i["name"] for i in team_inputs(team)],
+            "workflow": meta.get("workflow") or "auto",
+            "runner_prefs": meta.get("runner_prefs") or {},
         }
         library = await plan_library(team, access) if access is not None else None
         if library is not None:
             request_body["library"] = library
-        assisted = _decision_model_set(access)
+        assisted = _decision_model_set(access) and (meta.get("workflow") or "auto") == "auto"
         if assisted:
             request_body["decision_options"] = True  # what the 辅助决策模型 may pick from
         body = await hermes_call(target, "POST", "/plan", json_body=request_body, timeout=PLAN_TIMEOUT_SECONDS)
@@ -783,6 +786,8 @@ def public_team(team: AgentTeamModel, *, with_plan: bool = True) -> dict:
     data["lead_model"] = meta.get("lead_model")
     data["auto_start"] = bool(meta.get("auto_start"))
     data["auto_deploy"] = bool(meta.get("auto_deploy"))
+    data["workflow"] = meta.get("workflow") or (data.get("plan") or {}).get("workflow") or "auto"
+    data["runner_prefs"] = meta.get("runner_prefs") or (data.get("plan") or {}).get("runner_prefs") or {}
     # 再来一次 / 定时: the team this one repeats, and whether a schedule started it
     data["repeat_of"] = meta.get("repeat_of")
     data["scheduled"] = bool(meta.get("schedule_id"))

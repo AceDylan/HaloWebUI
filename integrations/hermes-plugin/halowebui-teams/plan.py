@@ -48,9 +48,9 @@ SYSTEM_PROMPT = """你是一个多代理团队的负责人（team-lead）。用�
 {assistant_rules}
 - kind：这个成员的任务类型，决定由哪种执行器（runner）来做：
 {kinds}
-- 只有用户在目标里明确点名用某个执行器做某部分时，那个成员才加 "executor"：{executors} 之一；否则不要写 executor，系统会按 kind 自动选择并检查可用性。
-- 用户写「官方 claude」「用官网 claude」「官方账号跑」或 officlaude 时，明确点名的成员用 executor="officlaude"（官方 Claude），不参与自动选择或回退。
-- 用户写「offiagy」「agy 官方登录」「用 Google 账号跑 agy」时，明确点名的成员用 executor="offiagy"（AGY 走 Google 账号官方登录），点名后不回退；没点名的前端 / UI 成员系统也会自动先用 offiagy，不可用再换 agy。
+- 只有用户在目标里明确点名用某个执行器做某部分时，那个成员才加 "executor"：{executors} 之一；否则不要写 executor，系统会按 kind 所属引擎家族自动选择并检查可用性（Claude：officlaude→cchclaude→anyclaude→reclaude；Codex：codex；AGY：offiagy→agy）。
+- 用户明确点名了某个执行器时，该执行器不可用时**不会自动顺延**，会停下让用户自己选择。
+- 用户写「官方 claude」「用官网 claude」「官方账号跑」或 officlaude 时，明确点名的成员用 executor="officlaude"；写「offiagy」「agy 官方登录」时用 executor="offiagy"；写「codex」时用 executor="codex"。
 - model：这个成员由 Hermes 执行时用哪个模型（kind 默认走 Hermes 的成员一定用它；其他成员在 runner 不可用、退回 Hermes 时用它）。按这个成员的活从下面挑最合适的一个；用户在目标里点名了模型就用点名的；拿不准就用默认：
 {models}
 
@@ -575,6 +575,18 @@ def validate_plan(raw: Any, *, parallel_cap: int = DEFAULT_PARALLEL_CAP,
         plan["lead_model"] = raw["lead_model"]
     if isinstance(raw.get("decider"), dict):
         plan["decider"] = raw["decider"]
+    if raw.get("workflow"):
+        from . import workflow as wf_mod
+
+        wf = wf_mod.normalize_workflow(raw.get("workflow"))
+        if wf != "auto":
+            plan["workflow"] = wf
+    if isinstance(raw.get("runner_prefs"), dict):
+        from . import workflow as wf_mod
+
+        prefs = wf_mod.normalize_runner_prefs(raw.get("runner_prefs"))
+        if prefs:
+            plan["runner_prefs"] = prefs
     if isinstance(raw.get("project"), dict) and raw["project"].get("path"):
         plan["project"] = {k: raw["project"].get(k) for k in ("path", "name", "branch", "head", "dirty", "auto", "deploy_profile")
                            if raw["project"].get(k) not in (None, "")}
@@ -669,12 +681,29 @@ def resolve_project(goal: str, choice: str) -> Optional[dict]:
 def propose_plan(goal: str, workspace: str, *, feedback: str = "", previous: Optional[dict] = None,
                  parallel_cap: int = DEFAULT_PARALLEL_CAP, timeout: int = 150, lead_model: str = "",
                  project: Optional[dict] = None, team_id: str = "", inputs: Optional[list] = None,
-                 library: Optional[dict] = None) -> dict:
-    """Ask the lead model for a plan, then validate it. One retry when the reply is not usable.
-    Each step is visible to HaloWebUI while it runs (``progress.planning``). ``library``: the
-    user's assistants as HaloWebUI sent them (see library.py)."""
+                 library: Optional[dict] = None, workflow: str = "auto",
+                 runner_prefs: Optional[dict[str, str]] = None) -> dict:
+    """Ask the lead model for a plan (or build a deterministic dev pipeline plan when ``workflow``
+    is ``dev_pipeline`` / ``dev_lite``), then validate it."""
+    from . import progress, workflow as wf_mod
+
+    wf = wf_mod.normalize_workflow(workflow or (previous.get("workflow") if isinstance(previous, dict) else "auto"))
+    prefs = wf_mod.normalize_runner_prefs(
+        runner_prefs if runner_prefs is not None else (previous.get("runner_prefs") if isinstance(previous, dict) else None)
+    )
+    if wf in ("dev_pipeline", "dev_lite"):
+        progress.planning_step(team_id, "check", f"正在按「{wf_mod.WORKFLOW_LABELS[wf]}」生成多模型协作计划并检查执行器")
+        raw = wf_mod.build_pipeline_plan(goal, workflow=wf, project=project, feedback=feedback,
+                                         runner_prefs=prefs, inputs=inputs)
+        plan, errors = validate_plan(raw, parallel_cap=parallel_cap)
+        if plan is None:
+            return {"ok": False, "error": "研发流水线计划校验失败：" + "；".join(errors)}
+        estimate = progress.estimate_plan(plan)
+        if estimate:
+            plan["estimate"] = estimate
+        return {"ok": True, "plan": plan, "attempts": 1}
+
     library = library_mod.usable(library)
-    from . import progress
 
     if project and project.get("path"):
         workspace = project["path"] + "（团队分支的 worktree，批准时创建）"
@@ -703,9 +732,13 @@ def propose_plan(goal: str, workspace: str, *, feedback: str = "", previous: Opt
             parsed["lead_model"] = used
             if project:
                 parsed["project"] = project
+            if prefs:
+                parsed["runner_prefs"] = prefs
             parsed.setdefault("lead", {})
             if isinstance(parsed["lead"], dict):
                 parsed["lead"]["model"] = used.get("model")
+            if prefs and isinstance(parsed.get("members"), list):
+                wf_mod.apply_runner_prefs(parsed["members"], prefs)
             plan, last_errors = validate_plan(parsed, parallel_cap=parallel_cap, library=library)
             if plan is not None:
                 estimate = progress.estimate_plan(plan)

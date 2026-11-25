@@ -218,7 +218,7 @@ describe('ChangesView', () => {
 		) as any;
 		confirm.click();
 		await sleep(20);
-		expect(api.deployTeamChanges).toHaveBeenCalledWith('tok', 'team-1', true);
+		expect(api.deployTeamChanges).toHaveBeenCalledWith('tok', 'team-1', true, false);
 		expect(target.querySelector('[data-deploy-status="succeeded"]')).toBeTruthy();
 		expect(target.querySelector('[data-changes-ci-link]').getAttribute('href')).toContain('/runs/123');
 		expect(target.querySelector('[data-changes-discarded]').textContent).toContain('已发布并清理分支');

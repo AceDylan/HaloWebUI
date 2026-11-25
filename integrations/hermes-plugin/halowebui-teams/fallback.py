@@ -33,6 +33,7 @@ from .common import (
 )
 
 ALL_DOWN = "所有执行来源都不可用"
+CHOSEN_DOWN = "指定的执行来源不可用"
 
 
 def _record(slug: str, task_id: str, step: dict, executor: Optional[str]) -> None:
@@ -60,19 +61,26 @@ def _assign(conn: Any, task_id: str, executor: str) -> None:
 def reroute(slug: str, conn: Any, task_id: str, current: str, reason: str, *, phase: str,
             fail_kind: str = "", run_row: Optional[int] = None) -> Optional[str]:
     """Give *task_id* (ready or blocked, not claimed) to the next available runner after
-    *current*. Returns the new executor, or None when the chain is exhausted (task blocked)."""
+    *current*. When the user explicitly chose *chosen* (``chosen_by != 'auto'``), never
+    auto-fallback: block the task and let the user pick another runner."""
     team = read_team(slug) or {}
     entry = (team.get("tasks") or {}).get(task_id) or {}
     chosen = entry.get("chosen") or current
+    is_auto = entry.get("chosen_by", "auto") == "auto"
     if fail_kind and phase == "runtime":
         runners.mark_down(current, "recent_failure", reason)
-    picked = runners.select_after(chosen, current, auto=entry.get("chosen_by") == "auto")
+    picked = runners.select_after(chosen, current, auto=is_auto)
     target = picked["executor"]
     stamp = now()
     reason = redact(reason, 300)
     if target is None:
         others = "；".join(s["reason"] for s in picked["skipped"])
-        text = f"{ALL_DOWN}：{reason}" + (f"；{others}" if others else "")
+        if not is_auto:
+            text = f"{CHOSEN_DOWN}（{current}，不自动顺延，请手动选择其他执行来源重试）：{reason}"
+        else:
+            fam = runners.FAMILY_LABELS.get(runners.family_of(chosen), "")
+            prefix = f"{ALL_DOWN}（{fam} 家族均不可用，请手动选择执行来源）" if fam else ALL_DOWN
+            text = f"{prefix}：{reason}" + (f"；{others}" if others else "")
         _record(slug, task_id, {"from": current, "to": None, "reason": text, "at": stamp, "phase": phase,
                                 "fail_kind": fail_kind}, None)
         task = kb().get_task(conn, task_id)
@@ -104,15 +112,33 @@ def reroute(slug: str, conn: Any, task_id: str, current: str, reason: str, *, ph
     return target
 
 
-def reselect_for_retry(slug: str, conn: Any, task_id: str) -> Optional[str]:
-    """A retried task starts again from its chosen runner (if that is back) — the user's or the
-    automatic choice is preferred over whatever it fell back to last time."""
+def reselect_for_retry(slug: str, conn: Any, task_id: str, *, executor: Optional[str] = None) -> Optional[str]:
+    """Re-select runner on retry. When *executor* is provided by the user, switch to it explicitly
+    (``chosen_by='user'``, no auto-fallback). Otherwise, an automatic task starts again from its
+    chosen runner if it is back."""
     team = read_team(slug) or {}
     entry = (team.get("tasks") or {}).get(task_id) or {}
     task = kb().get_task(conn, task_id)
     current = task_executor(team, task_id, task.assignee if task else None)
+    if executor and executor in EXECUTOR_ASSIGNEE:
+        def choose(rec: dict) -> None:
+            t_entry = rec.setdefault("tasks", {}).setdefault(task_id, {})
+            t_entry["chosen"] = executor
+            t_entry["chosen_by"] = "user"
+            t_entry["executor"] = executor
+
+        update_team(slug, choose)
+        if executor != current:
+            reason = f"用户手动切换为 {executor}"
+            _record(slug, task_id, {"from": current, "to": executor, "reason": reason, "at": now(), "phase": "user"},
+                    executor)
+            _assign(conn, task_id, executor)
+            append_event(conn, task_id, "halo_runner", {
+                "phase": "fallback", "runner": current, "to": executor, "reason": reason,
+                "text": f"用户手动换执行来源：{current} → {executor}"})
+        return executor
     chosen = entry.get("chosen") or current
-    picked = runners.select(chosen, auto=entry.get("chosen_by") == "auto")
+    picked = runners.select(chosen, auto=entry.get("chosen_by", "auto") == "auto")
     target = picked["executor"]
     if target is None or target == current:
         return current

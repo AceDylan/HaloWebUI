@@ -17,7 +17,10 @@ export type TeamExecutor =
 	| 'offiagy';
 
 /** What a member's work is, which decides the runner it starts on (see the plugin's runners.py). */
-export type TaskKind = 'code' | 'ui' | 'complex' | 'research' | 'writing' | 'image';
+export type TaskKind = 'code' | 'codex' | 'ui' | 'complex' | 'research' | 'writing' | 'image';
+
+/** Collaboration workflow preset: free-form lead planning vs multi-model dev pipeline. */
+export type TeamWorkflow = 'auto' | 'dev_pipeline' | 'dev_lite';
 
 /** The assistant the lead staffed a member with: one of the user's (助手库, `model:<id>`), a
  * built-in template (`builtin:<id>`, src/lib/data/agents-zh.json), or one it proposes to create.
@@ -247,11 +250,13 @@ export type DeployProfile = {
 	label: string;
 	has_ci: boolean;
 	has_command: boolean;
+	has_verify?: boolean;
+	codex_review?: boolean;
 	cleanup: boolean;
 };
 
 export type DeployStep = {
-	key: 'merge' | 'push' | 'ci' | 'deploy' | 'cleanup' | string;
+	key: 'review' | 'merge' | 'push' | 'ci' | 'deploy' | 'cleanup' | 'verify' | string;
 	label: string;
 	status: 'pending' | 'running' | 'done' | 'failed' | 'skipped';
 	detail?: string;
@@ -271,6 +276,7 @@ export type TeamDeployState = {
 	ci_url?: string;
 	ci_run_id?: number | null;
 	cleanup?: boolean;
+	codex_review?: boolean;
 	error?: string;
 	note?: string;
 	log?: string;
@@ -474,7 +480,7 @@ export type RunnerStep = {
 	to: TeamExecutor | null;
 	reason: string;
 	at: number;
-	phase: 'plan' | 'launch' | 'runtime' | 'retry' | 'lead';
+	phase: 'plan' | 'launch' | 'runtime' | 'retry' | 'user' | 'lead';
 	fail_kind?: string;
 };
 
@@ -535,6 +541,7 @@ export type RunnerInfo = {
 	name: TeamExecutor;
 	label: string;
 	engine: string;
+	family?: string;
 	note: string;
 	native: boolean;
 	quota_wait: boolean;
@@ -554,6 +561,8 @@ export type TeamsMeta = {
 		runners: RunnerInfo[];
 		kinds: { value: TaskKind; label: string; hint: string; default: TeamExecutor }[];
 		order: TeamExecutor[];
+		families?: Record<string, TeamExecutor[]>;
+		family_labels?: Record<string, string>;
 		cache_seconds: number;
 	};
 	assistants: AssistantRef[];
@@ -786,7 +795,9 @@ export const createTeam = (
 	autoStart = false,
 	files: string[] = [],
 	assistants: string[] = [],
-	autoDeploy = false
+	autoDeploy = false,
+	workflow: TeamWorkflow = 'auto',
+	runnerPrefs: Record<string, string> = {}
 ) =>
 	request<Team>(token, 'POST', '/', {
 		goal,
@@ -795,6 +806,8 @@ export const createTeam = (
 		project: project || null,
 		auto_start: autoStart,
 		...(autoDeploy ? { auto_deploy: true } : {}),
+		...(workflow && workflow !== 'auto' ? { workflow } : {}),
+		...(Object.keys(runnerPrefs).length ? { runner_prefs: runnerPrefs } : {}),
 		...(files.length ? { files } : {}),
 		...(assistants.length ? { assistants } : {})
 	});
@@ -877,8 +890,16 @@ export const pushTeamChanges = (token: string, teamId: string, what: 'branch' | 
 export const discardTeamChanges = (token: string, teamId: string) =>
 	request<{ discarded: boolean }>(token, 'POST', `/${id(teamId)}/changes/discard`);
 
-export const deployTeamChanges = (token: string, teamId: string, cleanup = true) =>
-	request<{ deploy: TeamDeployState }>(token, 'POST', `/${id(teamId)}/changes/deploy`, { cleanup });
+export const deployTeamChanges = (
+	token: string,
+	teamId: string,
+	cleanup = true,
+	codexReview?: boolean
+) =>
+	request<{ deploy: TeamDeployState }>(token, 'POST', `/${id(teamId)}/changes/deploy`, {
+		cleanup,
+		...(codexReview === undefined ? {} : { codex_review: codexReview })
+	});
 
 export const setTeamAutoDeploy = (token: string, teamId: string, enabled: boolean) =>
 	request<{ auto_deploy: boolean }>(token, 'POST', `/${id(teamId)}/changes/auto-deploy`, {
@@ -1019,8 +1040,18 @@ export const sendTeamMessage = (token: string, teamId: string, taskId: string, b
 		{ body }
 	);
 
-export const retryTeamTask = (token: string, teamId: string, taskId: string) =>
-	request<{ retried: boolean }>(token, 'POST', `/${id(teamId)}/tasks/${id(taskId)}/retry`);
+export const retryTeamTask = (
+	token: string,
+	teamId: string,
+	taskId: string,
+	executor?: TeamExecutor
+) =>
+	request<{ retried: boolean; executor?: TeamExecutor }>(
+		token,
+		'POST',
+		`/${id(teamId)}/tasks/${id(taskId)}/retry`,
+		executor ? { executor } : {}
+	);
 
 export const adjustTeam = (token: string, teamId: string, text: string) =>
 	request<TeamChangeRequest>(token, 'POST', `/${id(teamId)}/adjust`, { text });

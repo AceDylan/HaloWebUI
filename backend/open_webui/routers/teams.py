@@ -92,6 +92,10 @@ class CreateTeamForm(BaseModel):
     auto_start: bool = False
     # 「自动推送部署」: once a project team finishes and passes acceptance, merge → push → deploy → clean up.
     auto_deploy: bool = False
+    # Workflow template: "auto" (free-form) | "dev_pipeline" (reference multi-model) | "dev_lite".
+    workflow: Literal["auto", "dev_pipeline", "dev_lite"] = "auto"
+    # Optional per-family explicit runner choices: {"claude": "cchclaude", "agy": "agy"}.
+    runner_prefs: dict[str, str] = Field(default_factory=dict)
     # Files uploaded for the team (their ids, /api/v1/files): copied into its workspace's inputs/.
     files: list[str] = Field(default_factory=list, max_length=INPUT_FILES_MAX)
     # 「用于协作」 from the assistant library: assistants (model:<id> / builtin:<id>) at least one
@@ -312,13 +316,15 @@ async def create_team(request: Request, form: CreateTeamForm, user=Depends(get_v
     goal = with_goal_notes(goal, user, goal, GOAL_MAX_CHARS)
     return public_team(await _start(request, user, goal, target, chat_id=chat_id, lead_model=form.lead_model,
                                     title=title, project=form.project, auto_start=form.auto_start,
-                                    auto_deploy=form.auto_deploy, inputs=inputs,
+                                    auto_deploy=form.auto_deploy, workflow=form.workflow,
+                                    runner_prefs=form.runner_prefs, inputs=inputs,
                                     assistants=preferred_refs(form.assistants), access=AssistantAccess(request, user)))
 
 
 async def _start(request: Request, user, goal: str, target, *, chat_id: Optional[str] = None,
                  lead_model: Optional[str] = None, origin: Optional[dict] = None, project: Optional[str] = None,
-                 auto_start: bool = False, auto_deploy: bool = False, inputs: Optional[list] = None,
+                 auto_start: bool = False, auto_deploy: bool = False, workflow: str = "auto",
+                 runner_prefs: Optional[dict] = None, inputs: Optional[list] = None,
                  assistants: Optional[list] = None, access=None, on_created=None, title: Optional[str] = None):
     meta: dict = {}
     if inputs:
@@ -329,6 +335,14 @@ async def _start(request: Request, user, goal: str, target, *, chat_id: Optional
         meta["auto_start"] = True
     if auto_deploy:
         meta["auto_deploy"] = True
+    if workflow in ("dev_pipeline", "dev_lite"):
+        meta["workflow"] = workflow
+    if isinstance(runner_prefs, dict):
+        cleaned = {str(k).strip().lower(): str(v).strip().lower()
+                   for k, v in runner_prefs.items()
+                   if str(k).strip().lower() in ("claude", "agy", "codex") and str(v or "").strip()}
+        if cleaned:
+            meta["runner_prefs"] = cleaned
     if (lead_model or "").strip():
         meta["lead_model"] = lead_model.strip()
     if (project or "").strip():
@@ -605,12 +619,20 @@ async def send_message(request: Request, team_id: str, task_id: str, form: Messa
         _raise(exc)
 
 
+class RetryForm(BaseModel):
+    executor: Optional[Literal["hermes", "reclaude", "cchclaude", "anyclaude", "officlaude", "codex", "agy", "offiagy"]] = None
+
+
 @router.post("/{team_id}/tasks/{task_id}/retry", dependencies=[Depends(_enabled)])
-async def retry_task(request: Request, team_id: str, task_id: str, user=Depends(get_verified_user)):
+async def retry_task(request: Request, team_id: str, task_id: str, form: Optional[RetryForm] = None,
+                     user=Depends(get_verified_user)):
     team, target = await _running_target(request, team_id, user)
+    body = {"actor": user.name or ""}
+    if form and form.executor:
+        body["executor"] = form.executor
     try:
         return await hermes_call(target, "POST", f"/{team.id}/tasks/{_task_id(task_id)}/retry",
-                                 json_body={"actor": user.name or ""})
+                                 json_body=body)
     except TeamsError as exc:
         _raise(exc)
 
@@ -777,6 +799,7 @@ class PushForm(BaseModel):
 
 class DeployForm(BaseModel):
     cleanup: Optional[bool] = True
+    codex_review: Optional[bool] = None
 
 
 class AutoDeployForm(BaseModel):
@@ -833,11 +856,14 @@ async def discard_changes(request: Request, team_id: str, user=Depends(get_verif
 
 @router.post("/{team_id}/changes/deploy", dependencies=[Depends(_enabled)])
 async def deploy_changes(request: Request, team_id: str, form: DeployForm, user=Depends(get_verified_user)):
-    """One-click merge → push → CI → deploy → cleanup for a finished project team (async, 202)."""
+    """One-click [Codex review] → merge → push → CI → deploy → cleanup → [verify] (async, 202)."""
     team, target = await _running_target(request, team_id, user)
+    payload: dict = {"cleanup": form.cleanup}
+    if form.codex_review is not None:
+        payload["codex_review"] = form.codex_review
     try:
         return await hermes_call(target, "POST", f"/{team.id}/changes/deploy",
-                                 json_body={"cleanup": form.cleanup}, timeout=60)
+                                 json_body=payload, timeout=60)
     except TeamsError as exc:
         _raise(exc)
 

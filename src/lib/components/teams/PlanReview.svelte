@@ -564,8 +564,7 @@
 				{/each}
 			</ul>
 			<p class="mt-2 text-[11px] leading-relaxed text-gray-400">
-				执行来源不可用时会沿 {order.map(runnerLabel).join(' → ')} 往后兜底，你手动选的也一样；每次改派都会在任务上记下原因。由
-				Hermes 执行的成员用上面选的模型（负责人按分工推荐，可以改）。
+				自动模式按引擎家族顺序选择（Claude：官方 Claude → cchclaude → anyclaude → reclaude；Codex：codex；AGY：offiagy → agy），不跨家族乱滑；你手动指定的执行来源不可用时不会自动顺延，会停下来等你选择。
 			</p>
 		</section>
 

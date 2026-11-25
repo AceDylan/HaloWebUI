@@ -1488,3 +1488,42 @@ def test_the_results_card_goes_into_its_posted_reply_and_onto_the_result_page(he
     assert out["status"] == "designing" and len(designed) == 2
 
 
+def test_dev_pipeline_workflow_runner_prefs_retry_switch_and_codex_review(hermes):
+    client = _client("u1")
+    resp = client.post("/api/v1/teams/", json={
+        "goal": "开发多模型协作页面",
+        "workflow": "dev_pipeline",
+        "runner_prefs": {"claude": "cchclaude", "agy": "agy"},
+        "auto_deploy": True,
+    })
+    assert resp.status_code == 200, resp.text
+    created = resp.json()
+    assert created["workflow"] == "dev_pipeline"
+    assert created["runner_prefs"] == {"claude": "cchclaude", "agy": "agy"}
+    assert created["auto_deploy"] is True
+
+    team = AgentTeams.get(created["id"], "u1")
+    target = teams_utils.HermesTarget("http://hermes", {}, "u1")
+    hermes.responses[("POST", "/plan")] = {"ok": True, "plan": {**PLAN, "workflow": "dev_pipeline"}}
+    asyncio.run(teams_utils._plan_job(team, target, "", None))
+    plan_call = next(c for c in hermes.calls if c[2] == "/plan")[3]
+    assert plan_call["workflow"] == "dev_pipeline"
+    assert plan_call["runner_prefs"] == {"claude": "cchclaude", "agy": "agy"}
+
+    # Retry with explicit executor switch + deploy with codex_review toggle
+    AgentTeams.update(created["id"], "u1", status="running", board="halo-dev1")
+    hermes.responses[("POST", "/retry")] = {"retried": True, "executor": "anyclaude"}
+    r_resp = client.post(f"/api/v1/teams/{created['id']}/tasks/t_1234abcd/retry", json={"executor": "anyclaude"})
+    assert r_resp.status_code == 200 and r_resp.json()["executor"] == "anyclaude"
+    retry_call = next(c for c in hermes.calls if c[2].endswith("/retry"))[3]
+    assert retry_call["executor"] == "anyclaude"
+
+    hermes.responses[("POST", "/changes/deploy")] = {"deploy": {"status": "running", "codex_review": True}}
+    d_resp = client.post(f"/api/v1/teams/{created['id']}/changes/deploy",
+                         json={"cleanup": True, "codex_review": True})
+    assert d_resp.status_code == 200
+    dep_call = next(c for c in hermes.calls if c[2].endswith("/changes/deploy"))[3]
+    assert dep_call == {"cleanup": True, "codex_review": True}
+
+
+

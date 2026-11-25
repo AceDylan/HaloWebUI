@@ -43,7 +43,7 @@ TIMELINE_HARD_CAP = 50000
 USER_AUTHOR_PREFIX = "user:"
 STOP_REASON = "用户停止了协作任务"
 # str.startswith takes the tuple; a task whose whole runner chain is down is failed too.
-RUNNER_FAIL_PREFIX = RUNNER_FAIL_PREFIXES + ("所有执行来源都不可用",)
+RUNNER_FAIL_PREFIX = RUNNER_FAIL_PREFIXES + ("所有执行来源都不可用", "指定的执行来源不可用")
 VALID_STATUSES = {"triage", "todo", "scheduled", "ready", "running", "blocked", "review", "done", "archived"}
 # Kanban event kind -> task status after it (when the payload does not say).
 STATUS_BY_KIND = {
@@ -334,6 +334,8 @@ def create_team(team_id: str, plan: dict, *, owner: str, chat_id: str = "", goal
             "workspace": workspace,
             "project": project,
             "auto_deploy": bool(auto_deploy),
+            "workflow": str(checked.get("workflow") or "auto"),
+            "runner_prefs": checked.get("runner_prefs") or {},
             "lead": checked["lead"],
             "members": checked["members"],
             "max_parallel": checked["max_parallel"],
@@ -616,6 +618,8 @@ def snapshot(team_id: str, owner: Optional[str] = None) -> dict:
             # a project team that changed nothing: its branch is gone, there are no changes to show
             "project_cleaned": bool((team.get("project") or {}).get("auto_cleaned")),
             "auto_deploy": bool(team.get("auto_deploy")),
+            "workflow": team.get("workflow") or "auto",
+            "runner_prefs": team.get("runner_prefs") or {},
             "deploy": _deploy_brief(team),
             **_lead_state(team),
         },
@@ -1223,12 +1227,16 @@ def control(team_id: str, action: str, *, owner: Optional[str] = None, actor: st
     return {"state": "stopped", "changed": True, "stopped_tasks": stopped_tasks}
 
 
-def retry(team_id: str, task_id: str, *, owner: Optional[str] = None, actor: str = "") -> dict:
+def retry(team_id: str, task_id: str, *, owner: Optional[str] = None, actor: str = "",
+          executor: Optional[str] = None) -> dict:
     slug, team = _require_team(team_id, owner)
     if task_id not in (team.get("tasks") or {}):
         raise TeamError(404, "task not found")
     if team.get("state") == "stopped":
         raise TeamError(409, "协作任务已停止，不能重试")
+    picked_exec = str(executor or "").strip().lower() or None
+    if picked_exec is not None and picked_exec not in EXECUTOR_ASSIGNEE:
+        raise TeamError(400, f"不支持的执行来源：{picked_exec}")
     with board_conn(slug) as conn:
         task = kb().get_task(conn, task_id)
         if task is None:
@@ -1241,11 +1249,13 @@ def retry(team_id: str, task_id: str, *, owner: Optional[str] = None, actor: str
         from .fallback import reselect_for_retry
 
         try:
-            reselect_for_retry(slug, conn, task_id)
+            reselect_for_retry(slug, conn, task_id, executor=picked_exec)
         except Exception:
             logger.warning("halowebui-teams: runner reselect on retry failed for %s", task_id, exc_info=True)
         if not kb().unblock_task(conn, task_id):
             raise TeamError(409, "任务状态已变化，请刷新后再试")
-        append_event(conn, TEAM_EVENT_TASK, "halo_team", {"action": "retry", "task_id": task_id, "by": actor})
+        append_event(conn, TEAM_EVENT_TASK, "halo_team",
+                     {"action": "retry", "task_id": task_id, "by": actor,
+                      **({"executor": picked_exec} if picked_exec else {})})
     nudge_dispatch(slug)
-    return {"retried": True}
+    return {"retried": True, **({"executor": picked_exec} if picked_exec else {})}

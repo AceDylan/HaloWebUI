@@ -535,14 +535,14 @@ export const formatDuration = (seconds: number) => {
 
 /** Who can run a member, as offered when reviewing a plan (the runners are the ones `/reclaude`, `/codex` … start). */
 export const EXECUTOR_OPTIONS: { value: TeamExecutor; label: string }[] = [
-	{ value: 'hermes', label: 'Hermes 代理' },
-	{ value: 'reclaude', label: 'reclaude · Claude' },
+	{ value: 'officlaude', label: '官方 Claude' },
 	{ value: 'cchclaude', label: 'cchclaude · Claude' },
 	{ value: 'anyclaude', label: 'anyclaude · 慢' },
-	{ value: 'officlaude', label: '官方 Claude' },
+	{ value: 'reclaude', label: 'reclaude · 拼车' },
 	{ value: 'codex', label: 'codex' },
-	{ value: 'agy', label: 'agy' },
-	{ value: 'offiagy', label: 'offiagy · 官方登录' }
+	{ value: 'offiagy', label: 'offiagy · 官方登录' },
+	{ value: 'agy', label: 'agy · 网关' },
+	{ value: 'hermes', label: 'Hermes 代理' }
 ];
 
 export const EXECUTOR_LABEL: Record<string, string> = Object.fromEntries(
@@ -560,8 +560,9 @@ export const isRunnerExecutor = (executor: string | null | undefined): boolean =
 
 /** Labels when the live registry (GET /teams/meta) is not loaded yet. */
 export const KIND_LABEL: Record<string, string> = {
-	code: '后端 / 通用代码',
-	ui: '前端 / UI / UX',
+	code: 'Claude 主控 / 通用代码',
+	codex: 'Codex 后端 / 审查',
+	ui: 'AGY 方案 / UI / UX',
 	complex: '复杂任务',
 	research: '调研 / 分析',
 	writing: '写作 / 文档',
@@ -628,6 +629,7 @@ export const RUNNER_PHASE_LABEL: Record<string, string> = {
 	launch: '启动前',
 	runtime: '运行中',
 	retry: '重试时',
+	user: '你手动切换',
 	lead: '负责人建议'
 };
 

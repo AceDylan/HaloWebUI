@@ -30,9 +30,13 @@ STALE_RUNNING = 3600
 CI_POLL_INTERVAL = 15
 DEFAULT_CI_TIMEOUT = 1800
 DEFAULT_CMD_TIMEOUT = 600
+DEFAULT_REVIEW_ROUNDS = 2
+DEFAULT_REVIEW_TIMEOUT = 900
+DEFAULT_VERIFY_TIMEOUT = 120
 LOG_MAX_CHARS = 6000
 _SHA_RE = re.compile(r"^[0-9a-f]{7,40}$", re.I)
 _GH_REPO_RE = re.compile(r"github\.com[:/]([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+?)(?:\.git)?$")
+_VERDICT_RE = re.compile(r"(?mi)^\s*(?:(?:REVIEW\s+)?VERDICT\s*:?\s*)?(PASS|FAIL|BLOCKED)\b")
 
 _inflight: set[str] = set()
 _lock = threading.Lock()
@@ -69,6 +73,7 @@ def _builtin_profiles() -> list[tuple[Callable[[str], bool], dict]]:
                 "ci_workflow": "Docker Image CI",
                 "ci_timeout": 1800,
                 "command": "sh /root/work/halo-hermes-autopilot/deploy.sh {short_sha}",
+                "verify_command": "test \"$(docker inspect -f '{{.State.Health.Status}}' halowebui 2>/dev/null)\" = healthy && curl -sf http://127.0.0.1:3000/health >/dev/null && echo 'HaloWebUI 线上健康检查通过'",
                 "timeout": 600,
                 "cleanup": True,
                 "restart_gateway_paths": ["integrations/hermes-plugin/halowebui-teams/"],
@@ -86,6 +91,7 @@ def _builtin_profiles() -> list[tuple[Callable[[str], bool], dict]]:
                     "'cd /root/AICheckIn && git pull --ff-only && docker compose up -d --build "
                     "&& docker image prune -f'"
                 ),
+                "verify_command": "python3 /root/vps/vpsctl.py run hk-vps 'cd /root/AICheckIn && docker compose ps --status running'",
                 "timeout": 600,
                 "cleanup": True,
             },
@@ -100,6 +106,7 @@ def _builtin_profiles() -> list[tuple[Callable[[str], bool], dict]]:
                 "ci_workflow": "Docker Image CI",
                 "ci_timeout": 1800,
                 "command": "cd /opt/webobsidian && docker compose pull -q && docker compose up -d && docker image prune -f",
+                "verify_command": "cd /opt/webobsidian && docker compose ps --status running | grep -qi webobsidian && echo 'WebObsidian 线上运行正常'",
                 "timeout": 600,
                 "cleanup": True,
             },
@@ -123,6 +130,7 @@ def _builtin_profiles() -> list[tuple[Callable[[str], bool], dict]]:
 def _normalize_profile(raw: dict, default_label: str) -> dict:
     wait_ci = bool(raw.get("wait_ci") or raw.get("gh_workflow"))
     command = str(raw.get("command") or "").strip()
+    verify_command = str(raw.get("verify_command") or "").strip()
     gh_workflow = str(raw.get("gh_workflow") or "").strip()
     configured = bool(raw.get("configured", bool(command or wait_ci or gh_workflow)))
     return {
@@ -133,6 +141,10 @@ def _normalize_profile(raw: dict, default_label: str) -> dict:
         "ci_workflow": str(raw.get("ci_workflow") or "").strip()[:120],
         "ci_timeout": max(60, min(int(raw.get("ci_timeout") or DEFAULT_CI_TIMEOUT), 7200)),
         "command": command,
+        "verify_command": verify_command,
+        "verify_timeout": max(15, min(int(raw.get("verify_timeout") or DEFAULT_VERIFY_TIMEOUT), 600)),
+        "codex_review": bool(raw.get("codex_review", False)),
+        "codex_review_rounds": max(1, min(int(raw.get("codex_review_rounds") or DEFAULT_REVIEW_ROUNDS), 3)),
         "timeout": max(30, min(int(raw.get("timeout") or DEFAULT_CMD_TIMEOUT), 3600)),
         "cleanup": bool(raw.get("cleanup", True)),
         "restart_gateway_paths": [
@@ -172,6 +184,8 @@ def public_profile(repo_path: Optional[str]) -> dict:
         "label": p["label"],
         "has_ci": bool(p["wait_ci"] or p["gh_workflow"]),
         "has_command": bool(p["command"]),
+        "has_verify": bool(p["verify_command"]),
+        "codex_review": bool(p["codex_review"]),
         "cleanup": bool(p["cleanup"]),
     }
 
@@ -182,7 +196,7 @@ def public_state(team: dict) -> Optional[dict]:
     if not isinstance(entry, dict) or not entry.get("status"):
         return None
     keep = ("status", "by", "step", "steps", "started_at", "finished_at", "seconds",
-            "sha", "base_branch", "ci_url", "ci_run_id", "cleanup", "error", "note", "profile_label")
+            "sha", "base_branch", "ci_url", "ci_run_id", "cleanup", "codex_review", "error", "note", "profile_label")
     return {k: entry[k] for k in keep if entry.get(k) not in (None, "")}
 
 
@@ -192,8 +206,12 @@ def _clean_output(text: Any, limit: int = LOG_MAX_CHARS) -> str:
     return cleaned[-limit:] if len(cleaned) > limit else cleaned
 
 
-def _initial_steps(profile: dict, cleanup: bool) -> list[dict]:
-    steps = [
+def _initial_steps(profile: dict, cleanup: bool, *, codex_review: bool = False) -> list[dict]:
+    steps: list[dict] = []
+    if codex_review:
+        rounds = int(profile.get("codex_review_rounds") or DEFAULT_REVIEW_ROUNDS)
+        steps.append({"key": "review", "label": f"Codex 审查（最多 {rounds} 轮）", "status": "pending"})
+    steps += [
         {"key": "merge", "label": "合并到主分支", "status": "pending"},
         {"key": "push", "label": "推送 origin", "status": "pending"},
     ]
@@ -204,6 +222,8 @@ def _initial_steps(profile: dict, cleanup: bool) -> list[dict]:
         steps.append({"key": "deploy", "label": "拉取并部署", "status": "pending"})
     if cleanup:
         steps.append({"key": "cleanup", "label": "清理分支", "status": "pending"})
+    if profile.get("verify_command"):
+        steps.append({"key": "verify", "label": "核实线上", "status": "pending"})
     return steps
 
 
@@ -308,8 +328,21 @@ def _wait_for_ci(slug: str, repo_path: str, sha: str, base_branch: str, profile:
     raise projects.ProjectError(504, f"等待 GitHub CI 超时（超过 {int(profile['ci_timeout'] // 60)} 分钟）")
 
 
-def _run_deploy_command(slug: str, repo_path: str, sha: str, base_branch: str, branch: str, profile: dict) -> str:
-    """Execute the host-configured deploy command safely and capture redacted output."""
+def _append_log(slug: str, section: str) -> None:
+    if not section:
+        return
+
+    def apply(d: dict) -> None:
+        prev = str(d.get("log") or "")
+        combined = (prev + "\n\n" + section).strip() if prev else section.strip()
+        d["log"] = _clean_output(combined)
+
+    _update_deploy(slug, apply)
+
+
+def _run_shell_step(slug: str, repo_path: str, cmd_template: str, sha: str, base_branch: str, branch: str,
+                    timeout: int, label: str) -> str:
+    """Execute a configured shell command (deploy or online verify) and append redacted output."""
     if sha and not _SHA_RE.match(sha):
         raise projects.ProjectError(400, "提交 SHA 格式异常")
     short_sha = sha[:8] if sha else ""
@@ -320,7 +353,7 @@ def _run_deploy_command(slug: str, repo_path: str, sha: str, base_branch: str, b
         "branch": shlex.quote(branch),
         "repo": shlex.quote(repo_path),
     }
-    cmd = profile["command"]
+    cmd = cmd_template
     for key, val in subs.items():
         cmd = cmd.replace("{" + key + "}", val)
     env = {
@@ -337,19 +370,157 @@ def _run_deploy_command(slug: str, repo_path: str, sha: str, base_branch: str, b
             cwd=repo_path,
             capture_output=True,
             text=True,
-            timeout=int(profile["timeout"]),
+            timeout=int(timeout),
             env=env,
         )
     except subprocess.TimeoutExpired as exc:
         out = _clean_output((exc.stdout or "") + "\n" + (exc.stderr or ""))
-        _update_deploy(slug, lambda d: d.update({"log": out}))
-        raise projects.ProjectError(504, f"部署命令超时（超过 {profile['timeout']} 秒）") from None
+        _append_log(slug, f"=== {label}（超时）===\n{out}")
+        raise projects.ProjectError(504, f"{label}超时（超过 {timeout} 秒）") from None
     output = _clean_output((proc.stdout or "") + ("\n" + proc.stderr if proc.stderr else ""))
-    _update_deploy(slug, lambda d: d.update({"log": output}))
+    _append_log(slug, f"=== {label} ===\n{output}" if output else "")
     if proc.returncode != 0:
         tail = output.strip().splitlines()[-1] if output.strip() else f"exit {proc.returncode}"
-        raise projects.ProjectError(502, f"部署命令失败（exit {proc.returncode}）：{tail[:240]}")
+        raise projects.ProjectError(502, f"{label}失败（exit {proc.returncode}）：{tail[:240]}")
     return output
+
+
+def _run_deploy_command(slug: str, repo_path: str, sha: str, base_branch: str, branch: str, profile: dict) -> str:
+    return _run_shell_step(slug, repo_path, profile["command"], sha, base_branch, branch,
+                           int(profile["timeout"]), "部署命令")
+
+
+def _run_verify_command(slug: str, repo_path: str, sha: str, base_branch: str, branch: str, profile: dict) -> str:
+    return _run_shell_step(slug, repo_path, profile["verify_command"], sha, base_branch, branch,
+                           int(profile.get("verify_timeout") or DEFAULT_VERIFY_TIMEOUT), "线上核实")
+
+
+def _parse_review_verdict(result_json: dict, text: str) -> str:
+    raw = str(result_json.get("review_verdict") or "").strip().upper()
+    if raw in ("PASS", "FAIL", "BLOCKED"):
+        return raw
+    m = _VERDICT_RE.search(text or "")
+    if m:
+        return m.group(1).upper()
+    return "BLOCKED"
+
+
+def _run_codex_once(workspace: str, base_branch: str, round_num: int, max_rounds: int) -> tuple[str, str]:
+    """Run ``codex-run.sh review`` inheriting Codex's own config (never forces --model).
+    Returns ``(verdict, summary_text)`` where verdict ∈ PASS | FAIL | BLOCKED."""
+    from . import reclaude, runners
+
+    spec = runners.BY_NAME["codex"]
+    run_id = reclaude.new_run_id()
+    reclaude.TASK_DIR.mkdir(parents=True, exist_ok=True)
+    task_file = reclaude.TASK_DIR / f"deploy-review-r{round_num}-{run_id}.md"
+    task_file.write_text(
+        f"你是独立代码审查员（第 {round_num}/{max_rounds} 轮）。请以只读方式审查当前分支相对 `{base_branch}` 的全部代码改动：\n"
+        f"- 运行 `git diff {base_branch}...HEAD` 与 `git status` 检查改动文件，重点排查正确性缺陷、安全/权限隐患、边界条件、回归风险及缺失验证。\n"
+        f"- 不要修改任何文件，不要提交，不要推送。\n"
+        f"- 在回复开头明确写 `VERDICT: PASS`（无阻断问题，可合并上线）或 `VERDICT: FAIL`（列出每条必须修复的具体文件与问题）。\n",
+        encoding="utf-8",
+    )
+    argv = [spec.script_path, "review", "--cwd", workspace, "--task-file", str(task_file),
+            "--run-id", run_id, "--timeout", str(DEFAULT_REVIEW_TIMEOUT), "--no-vault-archive"]
+    proc = subprocess.run(argv, cwd=workspace, capture_output=True, text=True, timeout=DEFAULT_REVIEW_TIMEOUT + 60)
+    run_dir = spec.runs_root / run_id
+    result_json: dict = {}
+    try:
+        loaded = json.loads((run_dir / "result.json").read_text(encoding="utf-8"))
+        if isinstance(loaded, dict):
+            result_json = loaded
+    except (OSError, ValueError):
+        pass
+    text = str(result_json.get("result") or result_json.get("response") or "")
+    if not text:
+        try:
+            text = (run_dir / "result.md").read_text(encoding="utf-8")
+        except OSError:
+            text = (proc.stdout or "") + "\n" + (proc.stderr or "")
+    verdict = _parse_review_verdict(result_json, text)
+    return verdict, _clean_output(text, 2400)
+
+
+def _pick_claude_fixer(team: dict) -> tuple[Optional[str], str]:
+    """Select the Claude runner to fix Codex review findings: respects explicit user pref
+    (no auto-fallback) or walks the Claude family order."""
+    from . import runners
+
+    prefs = team.get("runner_prefs") if isinstance(team.get("runner_prefs"), dict) else {}
+    explicit = str(prefs.get("claude") or "").strip().lower()
+    if explicit and explicit in runners.BY_NAME:
+        picked = runners.select(explicit, auto=False)
+        if picked["executor"]:
+            return picked["executor"], ""
+        return None, f"你指定的 {explicit} 不可用（不自动顺延）：{runners.fallback_reason(picked)}"
+    picked = runners.select(runners.kind_default("code"), auto=True)
+    if picked["executor"]:
+        return picked["executor"], ""
+    return None, f"Claude 家族均不可用：{runners.fallback_reason(picked)}"
+
+
+def _run_claude_fix(runner_name: str, workspace: str, review_text: str, round_num: int) -> str:
+    from . import reclaude, runners
+
+    spec = runners.BY_NAME[runner_name]
+    run_id = reclaude.new_run_id()
+    reclaude.TASK_DIR.mkdir(parents=True, exist_ok=True)
+    task_file = reclaude.TASK_DIR / f"deploy-fix-r{round_num}-{run_id}.md"
+    task_file.write_text(
+        f"Codex 第 {round_num} 轮合并前审查未通过，请按下面审查意见修复当前分支代码并重新运行相关测试：\n\n"
+        f"{review_text}\n\n"
+        "要求：只修复审查指出的问题，不要 git push 或合并主分支，修完后验证通过即可。\n",
+        encoding="utf-8",
+    )
+    argv = [spec.script_path, "run", "--cwd", workspace, "--task-file", str(task_file),
+            "--run-id", run_id, "--max-turns", "80", "--no-vault-archive"]
+    proc = subprocess.run(argv, cwd=workspace, capture_output=True, text=True, timeout=DEFAULT_REVIEW_TIMEOUT + 60)
+    run_dir = spec.runs_root / run_id
+    try:
+        out = (run_dir / "result.md").read_text(encoding="utf-8")
+    except OSError:
+        out = (proc.stdout or "") + "\n" + (proc.stderr or "")
+    if proc.returncode != 0:
+        raise projects.ProjectError(502, f"{runner_name} 修复审查问题失败（exit {proc.returncode}）")
+    # Commit fixes on the team branch so the next review round sees a clean committed diff.
+    status = projects.git(workspace, "status", "--porcelain", timeout=20).stdout.strip()
+    if status:
+        projects.git(workspace, "add", "-A", "--", *projects.JUNK, timeout=30)
+        if projects.git(workspace, "diff", "--cached", "--quiet", timeout=20).returncode != 0:
+            projects.git(workspace, "-c", f"user.name={projects.AUTHOR[0]}", "-c", f"user.email={projects.AUTHOR[1]}",
+                         "commit", "-m", f"[Codex审查修复 · 第{round_num}轮] {runner_name}", timeout=30, check=True)
+    return _clean_output(out, 1600)
+
+
+def _run_codex_review(slug: str, team: dict, workspace: str, base_branch: str, profile: dict) -> str:
+    """Up to ``codex_review_rounds`` (default 2) rounds of Codex review + Claude fix."""
+    from . import runners
+
+    max_rounds = int(profile.get("codex_review_rounds") or DEFAULT_REVIEW_ROUNDS)
+    codex_avail = (runners.check(["codex"]).get("codex") or {})
+    if not codex_avail.get("available"):
+        raise projects.ProjectError(409, f"Codex 不可用，已暂停合并等待你处理：{codex_avail.get('reason') or '未知原因'}")
+
+    for round_num in range(1, max_rounds + 1):
+        _set_step(slug, "review", "running", f"第 {round_num}/{max_rounds} 轮 Codex 审查中")
+        verdict, text = _run_codex_once(workspace, base_branch, round_num, max_rounds)
+        _append_log(slug, f"=== Codex 审查第 {round_num} 轮（{verdict}）===\n{text}")
+        if verdict == "PASS":
+            return f"第 {round_num} 轮审查通过"
+        if verdict == "FAIL" and round_num < max_rounds:
+            fixer, err = _pick_claude_fixer(team)
+            if not fixer:
+                raise projects.ProjectError(409, f"Codex 第 {round_num} 轮审查未通过，但无法自动修复（{err}）；已暂停合并")
+            _set_step(slug, "review", "running", f"第 {round_num} 轮发现问题，正由 {fixer} 修复")
+            fix_out = _run_claude_fix(fixer, workspace, text, round_num)
+            _append_log(slug, f"=== {fixer} 自动修复（第 {round_num} 轮）===\n{fix_out}")
+            continue
+        raise projects.ProjectError(
+            409,
+            f"Codex 第 {round_num}/{max_rounds} 轮审查未通过（{verdict}），已暂停自动合并；请查看部署日志后处理",
+        )
+    raise projects.ProjectError(409, "Codex 审查未通过，已暂停自动合并")
 
 
 def _schedule_gateway_restart() -> None:
@@ -369,7 +540,7 @@ def _schedule_gateway_restart() -> None:
         logger.warning("halowebui-teams: failed to schedule gateway restart", exc_info=True)
 
 
-def _run_ship(slug: str, profile: dict, by: str, cleanup: bool) -> None:
+def _run_ship(slug: str, profile: dict, by: str, cleanup: bool, codex_review: bool = False) -> None:
     started = now()
     need_gateway_restart = False
     try:
@@ -380,6 +551,17 @@ def _run_ship(slug: str, profile: dict, by: str, cleanup: bool) -> None:
         repo = project.get("path") or ""
         branch = project.get("branch") or ""
         base_branch = project.get("base_branch") or ""
+        workspace = team.get("workspace") or ""
+
+        # 0. Codex review loop (up to 2 rounds + Claude fix, optional)
+        if codex_review:
+            info_pre = projects.changes(team)
+            if info_pre.get("merged"):
+                _set_step(slug, "review", "done", "分支已合并，跳过审查")
+            else:
+                review_detail = _run_codex_review(slug, team, workspace, base_branch, profile)
+                _set_step(slug, "review", "done", review_detail)
+                team = read_team(slug) or team
 
         # Record touched paths before merge/cleanup so we know if plugin files changed.
         touched = projects.changed_paths(team) or []
@@ -429,6 +611,12 @@ def _run_ship(slug: str, profile: dict, by: str, cleanup: bool) -> None:
             else:
                 projects.discard(slug, team, auto=False, shipped=True)
                 _set_step(slug, "cleanup", "done", "已清理工作区与分支")
+
+        # 6. Online verification (optional)
+        if profile.get("verify_command"):
+            _set_step(slug, "verify", "running", "正在核实线上状态")
+            _run_verify_command(slug, repo, sha, base_branch, branch, profile)
+            _set_step(slug, "verify", "done", "线上核实通过")
 
         restart_prefixes = profile.get("restart_gateway_paths") or []
         if restart_prefixes and any(any(p.startswith(pref) for pref in restart_prefixes) for p in touched):
@@ -490,8 +678,9 @@ def _fail_ship(slug: str, started: int, message: str, by: str) -> None:
     logger.warning("halowebui-teams: ship of %s failed at %s: %s", slug, current_step, message)
 
 
-def start(slug: str, *, by: str = "user", cleanup: Optional[bool] = None, auto_key: str = "") -> dict:
-    """Start the merge → push → CI → deploy → cleanup pipeline in the background."""
+def start(slug: str, *, by: str = "user", cleanup: Optional[bool] = None, auto_key: str = "",
+          codex_review: Optional[bool] = None) -> dict:
+    """Start the [Codex review] → merge → push → CI → deploy → cleanup → [verify] pipeline."""
     team = read_team(slug)
     if not team:
         raise projects.ProjectError(404, "team not found")
@@ -505,6 +694,11 @@ def start(slug: str, *, by: str = "user", cleanup: Optional[bool] = None, auto_k
         raise projects.ProjectError(409, "团队分支已删除，无法推送部署")
     profile = profile_for(repo)
     do_cleanup = profile["cleanup"] if cleanup is None else bool(cleanup)
+    do_review = (
+        bool(codex_review)
+        if codex_review is not None
+        else bool(profile.get("codex_review") or team.get("workflow") in ("dev_pipeline", "dev_lite"))
+    )
     if do_cleanup and (team.get("conclusion") or {}).get("status") == "generating":
         raise projects.ProjectError(409, "负责人正在写结论（要读工作区文件），写完后再推送部署并清理")
 
@@ -517,16 +711,17 @@ def start(slug: str, *, by: str = "user", cleanup: Optional[bool] = None, auto_k
     entry = {
         "status": "running",
         "by": by,
-        "step": "merge",
-        "steps": _initial_steps(profile, do_cleanup),
+        "step": "review" if do_review else "merge",
+        "steps": _initial_steps(profile, do_cleanup, codex_review=do_review),
         "started_at": now(),
         "finished_at": None,
         "seconds": None,
         "sha": project.get("merged_sha") or "",
         "base_branch": base_branch,
+        "cleanup": do_cleanup,
+        "codex_review": do_review,
         "ci_url": "",
         "ci_run_id": None,
-        "cleanup": do_cleanup,
         "error": "",
         "note": "",
         "log": "",
@@ -537,7 +732,7 @@ def start(slug: str, *, by: str = "user", cleanup: Optional[bool] = None, auto_k
     _append_team_event(slug, "deploy_started", by=by, profile=profile["label"])
     thread = threading.Thread(
         target=_run_ship,
-        args=(slug, profile, by, do_cleanup),
+        args=(slug, profile, by, do_cleanup, do_review),
         name=f"halo-deploy-{slug[-8:]}",
         daemon=True,
     )

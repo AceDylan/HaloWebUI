@@ -14,7 +14,8 @@
 		listTeams,
 		type Team,
 		type TeamPage,
-		type TeamsMeta
+		type TeamsMeta,
+		type TeamWorkflow
 	} from '$lib/apis/teams';
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import MenuLines from '$lib/components/icons/MenuLines.svelte';
@@ -74,6 +75,17 @@
 	// Where the team works: "" = the project the goal names (if any), "none" = a fresh directory,
 	// a path = that git repository (the team gets its own branch there).
 	let project = '';
+	// Collaboration workflow preset: free-form lead planning vs multi-model dev pipeline.
+	let workflow: TeamWorkflow = 'auto';
+	// Optional explicit runner overrides per engine family (empty = auto family order).
+	let claudePref = '';
+	let agyPref = '';
+	$: runnerPrefs = {
+		...(claudePref ? { claude: claudePref } : {}),
+		...(agyPref ? { agy: agyPref } : {})
+	};
+	$: claudeFamily = meta?.registry?.families?.claude ?? ['officlaude', 'cchclaude', 'anyclaude', 'reclaude'];
+	$: agyFamily = meta?.registry?.families?.agy ?? ['offiagy', 'agy'];
 	// 「直接开始」: the plan starts as soon as it is ready (remembered on this device).
 	const AUTO_START_KEY = 'halo.teams.autoStart';
 	let autoStart = false;
@@ -384,7 +396,9 @@
 				autoStart,
 				attached.filter((f) => f.id).map((f) => f.id as string),
 				preferred ? [preferred.ref] : [],
-				autoDeploy
+				autoDeploy,
+				workflow,
+				runnerPrefs
 			);
 			// its chat is in the history from now on (the socket says so too; this covers a lost event)
 			chatListRefreshRevision.update((n) => n + 1);
@@ -657,6 +671,23 @@
 						>附件{attached.length ? ` ${attached.length}` : ''}</button
 					>
 					<label
+						class="pill flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full py-1 pr-1 pl-2.5 text-xs {workflow !== 'auto'
+							? 'pill-on'
+							: ''}"
+						data-team-workflow
+						title="自由协作 = 负责人动态拆解；多模型研发 = 主控摸底→Claude/AGY并行出方案→对比拍板→设计审稿→Codex写后端→主控测试→Codex审查上线；快速研发 = 跳过方案与设计稿直接开发"
+					>
+						<span class="shrink-0 text-gray-500 dark:text-gray-400">流程</span>
+						<select
+							bind:value={workflow}
+							class="compact-select min-w-0 max-w-[9rem] truncate sm:max-w-[11rem]"
+						>
+							<option value="auto">自由协作</option>
+							<option value="dev_pipeline">多模型研发（完整）</option>
+							<option value="dev_lite">快速研发（精简）</option>
+						</select>
+					</label>
+					<label
 						class="pill flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full py-1 pr-1 pl-2.5 text-xs"
 						data-lead-model
 						title="负责人做计划、写结论用的模型；默认跟随 Hermes 当前的默认模型"
@@ -833,6 +864,43 @@
 					</div>
 				</div>
 			</form>
+			{#if workflow !== 'auto' || claudePref || agyPref}
+				<div
+					class="tm-card-quiet mt-2 flex flex-wrap items-center gap-x-3 gap-y-2 px-3.5 py-2.5 text-xs"
+					transition:slide={{ duration: 160 }}
+					data-team-runner-prefs
+				>
+					<span class="font-medium text-gray-700 dark:text-gray-200">引擎指定</span>
+					<label class="inline-flex items-center gap-1.5 text-gray-600 dark:text-gray-300">
+						<span class="text-gray-400">Claude</span>
+						<select
+							bind:value={claudePref}
+							class="compact-select rounded-lg border bg-white py-0.5 pl-2 pr-6 text-xs tm-hairline dark:bg-gray-900"
+							data-pref-claude
+						>
+							<option value="">自动（{claudeFamily.map(runnerLabel).join(' → ')}）</option>
+							{#each claudeFamily as name}
+								<option value={name}>指定 {runnerLabel(name)}</option>
+							{/each}
+						</select>
+					</label>
+					<label class="inline-flex items-center gap-1.5 text-gray-600 dark:text-gray-300">
+						<span class="text-gray-400">AGY</span>
+						<select
+							bind:value={agyPref}
+							class="compact-select rounded-lg border bg-white py-0.5 pl-2 pr-6 text-xs tm-hairline dark:bg-gray-900"
+							data-pref-agy
+						>
+							<option value="">自动（{agyFamily.map(runnerLabel).join(' → ')}）</option>
+							{#each agyFamily as name}
+								<option value={name}>指定 {runnerLabel(name)}</option>
+							{/each}
+						</select>
+					</label>
+					<span class="text-[11px] text-gray-400">Codex：固定 codex（用默认配置） · 手动指定不可用不自动顺延</span>
+				</div>
+			{/if}
+
 			<p class="mt-2 px-1 text-[11px] text-gray-400 dark:text-gray-500">
 				做计划只调用一次模型，不会启动任何成员；计划要你批准才会执行。
 			</p>

@@ -26,53 +26,61 @@ def override(pkg):
 
 # --- chain / kinds / selection ------------------------------------------------------------------
 
-def test_chain_starts_where_the_default_is_and_always_ends_with_hermes(pkg):
+def test_family_chains_and_explicit_choice_no_auto_fallback(pkg):
     r = pkg.runners
-    assert r.chain_from("reclaude") == ["reclaude", "cchclaude", "anyclaude", "codex", "agy", "hermes"]
-    assert r.chain_from("cchclaude") == ["cchclaude", "anyclaude", "codex", "agy", "hermes"]
-    assert r.chain_from("codex") == ["codex", "agy", "hermes"]
-    assert r.chain_from("agy") == ["agy", "hermes"]
-    assert r.chain_from("hermes") == ["hermes"]
+    # Auto mode walks strictly within the engine family.
+    assert r.chain_from("officlaude", auto=True) == ["officlaude", "cchclaude", "anyclaude", "reclaude"]
+    assert r.chain_from("cchclaude", auto=True) == ["cchclaude", "anyclaude", "reclaude"]
+    assert r.chain_from("reclaude", auto=True) == ["reclaude"]
+    assert r.chain_from("codex", auto=True) == ["codex"]
+    assert r.chain_from("offiagy", auto=True) == ["offiagy", "agy"]
+    assert r.chain_from("agy", auto=True) == ["agy"]
+    assert r.chain_from("hermes", auto=True) == ["hermes"]
+    # Explicit choice (auto=False) NEVER auto-falls back: user picks another runner when down.
+    for name in r.NAMES:
+        assert r.chain_from(name, auto=False) == [name]
 
 
 def test_kind_defaults(pkg):
     r = pkg.runners
-    assert {k: r.recommend(k)["default"] for k in ("code", "ui", "complex", "research", "writing")} == {
-        "code": "cchclaude", "ui": "offiagy", "complex": "reclaude", "research": "hermes", "writing": "hermes"}
+    assert {k: r.recommend(k)["default"] for k in ("code", "codex", "ui", "complex", "research", "writing")} == {
+        "code": "officlaude", "codex": "codex", "ui": "offiagy", "complex": "officlaude",
+        "research": "hermes", "writing": "hermes"}
     assert r.normalize_kind("frontend") == "ui" and r.normalize_kind("backend") == "code"
+    assert r.normalize_kind("review") == "codex" and r.normalize_kind("codex") == "codex"
     assert r.normalize_kind("nonsense") == ""
 
 
 @pytest.mark.parametrize("down,expected", [
-    ([], "cchclaude"),
-    (["cchclaude"], "anyclaude"),
-    (["cchclaude", "anyclaude"], "codex"),
-    (["cchclaude", "anyclaude", "codex"], "agy"),
-    (["cchclaude", "anyclaude", "codex", "agy"], "hermes"),
-    (["cchclaude", "anyclaude", "codex", "agy", "hermes"], None),
+    ([], "officlaude"),
+    (["officlaude"], "cchclaude"),
+    (["officlaude", "cchclaude"], "anyclaude"),
+    (["officlaude", "cchclaude", "anyclaude"], "reclaude"),
+    (["officlaude", "cchclaude", "anyclaude", "reclaude"], None),
 ])
-def test_backend_task_walks_the_chain(pkg, availability, down, expected):
+def test_claude_code_task_walks_claude_family_only(pkg, availability, down, expected):
     for name in down:
         availability.down[name] = f"{name} 演练不可用"
     picked = pkg.runners.recommend("code")
-    assert picked["default"] == "cchclaude" and picked["executor"] == expected
+    assert picked["default"] == "officlaude" and picked["executor"] == expected
     assert [s["name"] for s in picked["skipped"]] == down
     if down:
         assert "演练不可用" in pkg.runners.fallback_reason(picked)
 
 
-def test_ui_task_goes_offiagy_then_agy_then_hermes(pkg, availability):
+def test_ui_task_goes_offiagy_then_agy_without_drifting_across_families(pkg, availability):
     r = pkg.runners
     assert r.recommend("ui")["executor"] == "offiagy"
-    assert r.recommend("ui")["chain"] == ["offiagy", "agy", "hermes"]
+    assert r.recommend("ui")["chain"] == ["offiagy", "agy"]
     availability.down["offiagy"] = "offiagy 没有登录"
     picked = r.recommend("ui")
     assert picked["executor"] == "agy" and "offiagy 没有登录" in r.fallback_reason(picked)
-    availability.down["agy"] = "agy 没登录"
-    assert r.recommend("ui")["executor"] == "hermes"
-    # automatic choice only: a member the user named offiagy for still has no fallback
+    availability.down["agy"] = "agy 网关不可用"
+    assert r.recommend("ui")["executor"] is None
+    # Explicit choice never falls back even when agy is up.
+    availability.down.pop("agy", None)
     assert r.chain_from("offiagy") == ["offiagy"] and r.select("offiagy")["executor"] is None
-    assert r.select_after("offiagy", "offiagy", auto=True)["executor"] == "hermes"
+    assert r.select_after("offiagy", "offiagy", auto=True)["executor"] == "agy"
     assert r.select_after("offiagy", "offiagy")["executor"] is None
 
 
@@ -90,13 +98,14 @@ def test_auto_offiagy_login_failure_at_runtime_moves_to_agy(pkg, availability, b
     assert snap["chosen"] == "offiagy" and snap["trail"][-1]["fail_kind"] == "auth"
 
 
-def test_select_after_only_moves_forward(pkg, availability):
+def test_select_after_only_moves_forward_within_family(pkg, availability):
     r = pkg.runners
-    # chosen cchclaude (down at plan time), now on codex; codex fails → agy, never back to cchclaude
-    assert r.select_after("cchclaude", "codex")["executor"] == "agy"
-    availability.down["agy"] = "x"
-    assert r.select_after("cchclaude", "codex")["executor"] == "hermes"
-    assert r.select_after("hermes", "hermes")["executor"] is None
+    assert r.select_after("officlaude", "cchclaude", auto=True)["executor"] == "anyclaude"
+    availability.down["anyclaude"] = "x"
+    assert r.select_after("officlaude", "cchclaude", auto=True)["executor"] == "reclaude"
+    assert r.select_after("officlaude", "reclaude", auto=True)["executor"] is None
+    # Explicit choice never moves forward.
+    assert r.select_after("cchclaude", "cchclaude", auto=False)["executor"] is None
 
 
 def test_override_file_changes_defaults_order_and_marks_runners(pkg, override):
@@ -104,12 +113,14 @@ def test_override_file_changes_defaults_order_and_marks_runners(pkg, override):
     override({"kinds": {"code": "codex"}, "order": ["codex", "reclaude"], "unavailable": {"agy": "维护中"},
               "disabled": ["anyclaude"]})
     assert r.kind_default("code") == "codex"
-    assert r.fallback_order() == ("codex", "reclaude", "hermes")
+    assert r.fallback_order() == ("codex", "reclaude")
     now = time.time()
     agy = r._check_one(r.BY_NAME["agy"], now)
     assert not agy["available"] and agy["state"] == "manual" and "维护中" in agy["reason"]
     anyc = r._check_one(r.BY_NAME["anyclaude"], now)
     assert not anyc["available"] and anyc["state"] == "not_configured"
+    override({"families": {"claude": ["cchclaude", "officlaude"]}})
+    assert r.chain_from("cchclaude", auto=True) == ["cchclaude", "officlaude"]
     override({})
     assert r.fallback_order() == r.DEFAULT_ORDER
 
@@ -178,36 +189,36 @@ def test_plan_members_get_assistant_kind_and_runner(pkg, availability):
         {"name": "backend-dev", "role": "后端开发", "assistant": "17"},
         {"name": "ui-dev", "role": "界面", "assistant": "前端工程师"},
         {"name": "analyst", "role": "竞品调研", "assistant": None, "kind": "research"},
-        {"name": "refactor", "role": "重构", "kind": "complex", "assistant": "999999"},
+        {"name": "codex-dev", "role": "后端模块", "kind": "codex", "assistant": None},
     ]))
     assert not errors
     by = {m["name"]: m for m in plan["members"]}
     assert by["backend-dev"]["assistant"]["name"] == "开发工程师" and by["backend-dev"]["kind"] == "code"
-    assert by["backend-dev"]["executor"] == "cchclaude" == by["backend-dev"]["runner"]
+    assert by["backend-dev"]["executor"] == "officlaude" == by["backend-dev"]["runner"]
     assert by["backend-dev"]["executor_source"] == "auto" and by["backend-dev"]["runner_note"] == ""
     assert by["ui-dev"]["assistant"]["id"] == "15" and by["ui-dev"]["kind"] == "ui" and by["ui-dev"]["runner"] == "offiagy"
     assert by["analyst"]["assistant"] is None and by["analyst"]["runner"] == "hermes"
-    assert by["refactor"]["assistant"] is None and by["refactor"]["runner"] == "reclaude"
+    assert by["codex-dev"]["assistant"] is None and by["codex-dev"]["runner"] == "codex"
 
 
-def test_plan_runner_falls_back_and_says_why(pkg, availability):
-    availability.down["cchclaude"] = "cchclaude 连不上：best.acedylan.us 超时"
+def test_plan_runner_falls_back_within_family_and_says_why(pkg, availability):
+    availability.down["officlaude"] = "官方 Claude 额度不足"
     plan, _ = pkg.plan.validate_plan(_members_plan([{"name": "backend-dev", "role": "后端开发", "kind": "code"}]))
     m = plan["members"][0]
-    assert m["recommended"] == "cchclaude" and m["executor"] == "cchclaude" and m["runner"] == "anyclaude"
-    assert "超时" in m["runner_note"]
-    assert plan["executors"] == ["anyclaude"]
+    assert m["recommended"] == "officlaude" and m["executor"] == "officlaude" and m["runner"] == "cchclaude"
+    assert "额度不足" in m["runner_note"]
+    assert plan["executors"] == ["cchclaude"]
 
 
-def test_user_choice_is_kept_but_still_falls_back(pkg, availability):
-    member = {"name": "backend-dev", "role": "后端开发", "kind": "code", "executor": "codex", "executor_source": "user"}
+def test_user_choice_is_locked_and_never_auto_falls_back(pkg, availability):
+    member = {"name": "backend-dev", "role": "后端开发", "kind": "code", "executor": "cchclaude", "executor_source": "user"}
     plan, _ = pkg.plan.validate_plan(_members_plan([member]))
-    assert plan["members"][0]["executor"] == "codex" and plan["members"][0]["runner"] == "codex"
-    availability.down["codex"] = "codex 没登录"
+    assert plan["members"][0]["executor"] == "cchclaude" and plan["members"][0]["runner"] == "cchclaude"
+    availability.down["cchclaude"] = "cchclaude 中转 502"
     plan, _ = pkg.plan.validate_plan(_members_plan([dict(member)]))
     m = plan["members"][0]
-    assert m["executor"] == "codex" and m["executor_source"] == "user" and m["runner"] == "agy"
-    assert "没登录" in m["runner_note"]
+    assert m["executor"] == "cchclaude" and m["executor_source"] == "user" and m["runner"] is None
+    assert "502" in m["runner_note"]
 
 
 def test_every_runner_down_is_reported(pkg, availability):
@@ -315,59 +326,56 @@ def bridge(pkg, monkeypatch):
 
 
 def test_plan_time_fallback_is_recorded_on_the_task(pkg, availability, bridge):
-    availability.down["cchclaude"] = "cchclaude 连不上"
+    availability.down["officlaude"] = "官方 Claude 额度不足"
     t = bridge.team([{"name": "backend-dev", "role": "后端开发", "kind": "code"}])
-    assert t.task().assignee == "anyclaude"
+    assert t.task().assignee == "cchclaude"
     snap = t.snap()
-    assert snap["executor"] == "anyclaude" and snap["chosen"] == "cchclaude"
-    assert snap["trail"][0]["phase"] == "plan" and "连不上" in snap["trail"][0]["reason"]
+    assert snap["executor"] == "cchclaude" and snap["chosen"] == "officlaude"
+    assert snap["trail"][0]["phase"] == "plan" and "额度不足" in snap["trail"][0]["reason"]
     ev = t.events("fallback")
-    assert len(ev) == 1 and ev[0]["data"]["to"] == "anyclaude"
+    assert len(ev) == 1 and ev[0]["data"]["to"] == "cchclaude"
 
 
 def test_launch_time_fallback_moves_the_task_before_it_starts(pkg, availability, bridge):
     t = bridge.team([{"name": "backend-dev", "role": "后端开发", "kind": "code"}])
-    assert t.task().assignee == "cchclaude"
-    availability.down["cchclaude"] = "cchclaude 中转 502"
-    t.tick()  # cchclaude down → anyclaude (ready again)
-    assert t.task().assignee == "anyclaude" and t.task().status == "ready"
-    t.tick()  # anyclaude starts it
+    assert t.task().assignee == "officlaude"
+    availability.down["officlaude"] = "官方 Claude 限流"
+    t.tick()  # officlaude down → cchclaude (ready again)
+    assert t.task().assignee == "cchclaude" and t.task().status == "ready"
+    t.tick()  # cchclaude starts it
     assert t.task().status == "running"
     argv = bridge.fake.calls[-1]
-    assert argv[0] == pkg.reclaude.RUNNERS["anyclaude"].script and argv[1] == "run"
+    assert argv[0] == pkg.reclaude.RUNNERS["cchclaude"].script and argv[1] == "run"
     snap = t.snap()
-    assert snap["executor"] == "anyclaude" and snap["chosen"] == "cchclaude" and snap["attempts"] == 1
+    assert snap["executor"] == "cchclaude" and snap["chosen"] == "officlaude" and snap["attempts"] == 1
     assert [s["phase"] for s in snap["trail"]] == ["launch"]
     assert "启动前检查" in t.events("fallback")[0]["text"]
 
 
-def test_runtime_login_failure_falls_forward_but_ordinary_failure_does_not(pkg, availability, bridge):
+def test_runtime_failure_on_user_chosen_runner_blocks_and_lets_user_switch(pkg, availability, bridge):
     codex = pkg.reclaude.RUNNERS["codex"]
     t = bridge.team([{"name": "coder", "role": "后端", "kind": "code", "executor": "codex", "executor_source": "user"}])
     t.tick()
     run_id = t.run_meta()["runner_run_id"]
     bridge.fake.write(run_id, status="error", _root=str(codex.runs_root))
     json.dump({"error": "401 Unauthorized: token expired"}, open(codex.runs_root / run_id / "result.json", "w"))
-    t.tick()  # failed for login → attempt closed, moved to agy, which the same tick starts
+    t.tick()  # user-chosen runner down -> does NOT auto-fallback; blocks for user to choose
     task = t.task()
-    assert task.assignee == "agy" and task.status == "running"
-    assert bridge.fake.calls[-1][0] == pkg.reclaude.RUNNERS["agy"].script
+    assert task.status == "blocked" and task.assignee == "codex"
     snap = t.snap()
-    assert snap["chosen"] == "codex" and snap["trail"][-1]["phase"] == "runtime" and snap["trail"][-1]["fail_kind"] == "auth"
-    assert snap["attempts"] == 2
-    # An ordinary failure of the work itself stays failed on its runner.
-    agy = pkg.reclaude.RUNNERS["agy"]
-    run2 = t.run_meta()["runner_run_id"]
-    bridge.fake.write(run2, status="error", _root=str(agy.runs_root))
-    json.dump({"error": "单元测试没有通过：test_login 断言失败"}, open(agy.runs_root / run2 / "result.json", "w"))
-    t.tick()
-    assert t.task().status == "blocked" and t.task().assignee == "agy"
-    assert t.snap()["sub_status"] == "failed"
+    assert snap["sub_status"] == "failed" and "不自动顺延" in snap["trail"][-1]["reason"]
+    # User explicitly switches to cchclaude on retry!
+    res = pkg.teams.retry(t.team_id, t.tasks["T1"], owner="u1", executor="cchclaude")
+    assert res["retried"] is True and res["executor"] == "cchclaude"
+    assert t.task().assignee == "cchclaude" and t.task().status == "ready"
+    assert t.snap()["trail"][-1]["phase"] == "user" and t.snap()["trail"][-1]["to"] == "cchclaude"
 
 
 def test_long_quota_wait_moves_on_short_one_waits(pkg, availability, bridge):
+    availability.down["officlaude"] = "官方 Claude 额度不足"
     cch = pkg.reclaude.RUNNERS["cchclaude"]
     t = bridge.team([{"name": "backend-dev", "role": "后端开发", "kind": "code"}])
+    assert t.task().assignee == "cchclaude"
     t.tick()
     run_id = t.run_meta()["runner_run_id"]
     bridge.fake.write(run_id, status="error", auto_resume="scheduled", auto_resume_pid=os.getpid(),
@@ -382,11 +390,11 @@ def test_long_quota_wait_moves_on_short_one_waits(pkg, availability, bridge):
 
 
 def test_quota_blocked_start_moves_on(pkg, availability, bridge):
-    rec = pkg.reclaude.RUNNERS["reclaude"]
+    offi = pkg.reclaude.RUNNERS["officlaude"]
     t = bridge.team([{"name": "architect", "role": "架构", "kind": "complex"}])
     t.tick()
     run_id = t.run_meta()["runner_run_id"]
-    bridge.fake.write(run_id, status="quota_blocked", _root=str(rec.runs_root))
+    bridge.fake.write(run_id, status="quota_blocked", _root=str(offi.runs_root))
     t.tick()
     assert t.task().assignee == "cchclaude"
     assert any("额度" in e["text"] for e in t.events("fallback"))
@@ -395,7 +403,7 @@ def test_quota_blocked_start_moves_on(pkg, availability, bridge):
 def test_whole_chain_down_blocks_with_every_reason(pkg, availability, bridge):
     t = bridge.team([{"name": "ui-dev", "role": "前端", "kind": "ui"}])
     assert t.task().assignee == "offiagy"
-    availability.down.update(offiagy="offiagy 没有登录", agy="agy 没登录", hermes="Hermes 停用")
+    availability.down.update(offiagy="offiagy 没有登录", agy="agy 网关不可用")
     t.tick()
     task = t.task()
     assert task.status == "blocked"
@@ -406,19 +414,19 @@ def test_whole_chain_down_blocks_with_every_reason(pkg, availability, bridge):
 
 
 def test_retry_goes_back_to_the_chosen_runner_when_it_is_back(pkg, availability, bridge):
-    availability.down["cchclaude"] = "cchclaude 连不上"
+    availability.down["officlaude"] = "官方 Claude 额度不足"
     t = bridge.team([{"name": "backend-dev", "role": "后端开发", "kind": "code"}])
-    assert t.task().assignee == "anyclaude"
+    assert t.task().assignee == "cchclaude"
     t.tick()
     run_id = t.run_meta()["runner_run_id"]
-    anyc = pkg.reclaude.RUNNERS["anyclaude"]
-    bridge.fake.write(run_id, status="error", _root=str(anyc.runs_root))
-    json.dump({"error": "构建失败：缺少依赖"}, open(anyc.runs_root / run_id / "result.json", "w"))
+    cch = pkg.reclaude.RUNNERS["cchclaude"]
+    bridge.fake.write(run_id, status="error", _root=str(cch.runs_root))
+    json.dump({"error": "构建失败：缺少依赖"}, open(cch.runs_root / run_id / "result.json", "w"))
     t.tick()
     assert t.task().status == "blocked"
     availability.down.clear()
     pkg.teams.retry(t.team_id, t.tasks["T1"], owner="u1")
-    assert t.task().assignee == "cchclaude" and t.task().status == "ready"
+    assert t.task().assignee == "officlaude" and t.task().status == "ready"
     assert t.snap()["trail"][-1]["phase"] == "retry"
 
 
@@ -462,38 +470,31 @@ def test_failure_line_is_the_readable_part(pkg):
     assert pkg.runners.failure_line('{"x": 1}\n\n') == ""
 
 
-def test_official_claude_is_explicit_only_even_with_order_overrides(pkg, availability, override):
+def test_official_claude_leads_claude_family_and_locks_when_explicit(pkg, availability, override):
     r = pkg.runners
     spec = r.BY_NAME["officlaude"]
-    assert spec.label == "官方 Claude" and spec.max_turns and not spec.quota_wait
-    assert r.chain_from("officlaude") == ["officlaude"]
+    assert spec.label == "官方 Claude" and spec.max_turns and not spec.quota_wait and spec.family == "claude"
+    assert r.chain_from("officlaude", auto=True) == ["officlaude", "cchclaude", "anyclaude", "reclaude"]
+    assert r.chain_from("officlaude", auto=False) == ["officlaude"]
     assert r.select("officlaude")["executor"] == "officlaude"
     availability.down["officlaude"] = "未登录"
-    assert r.select("officlaude")["executor"] is None
-    assert r.select_after("officlaude", "officlaude")["executor"] is None
-    for name in r.DEFAULT_ORDER:
-        assert "officlaude" not in r.chain_from(name)
-    override({"order": ["reclaude", "officlaude", "codex"], "kinds": {"code": "officlaude"}})
-    assert r.fallback_order() == ("reclaude", "codex", "hermes")
-    assert r.kind_default("code") == "cchclaude"
+    assert r.select("officlaude", auto=False)["executor"] is None
+    assert r.select("officlaude", auto=True)["executor"] == "cchclaude"
+    assert r.select_after("officlaude", "officlaude", auto=False)["executor"] is None
+    assert r.select_after("officlaude", "officlaude", auto=True)["executor"] == "cchclaude"
     assert r.classify_failure("", "auth_required") == "auth"
     assert r.classify_failure("", "official_limit") == "quota"
 
 
-def test_offiagy_is_explicit_only_and_probes_the_google_sign_in(pkg, availability, override, monkeypatch, tmp_path):
+def test_offiagy_leads_agy_family_and_probes_the_google_sign_in(pkg, availability, override, monkeypatch, tmp_path):
     r = pkg.runners
     spec = r.BY_NAME["offiagy"]
     assert spec.engine == "Antigravity" and spec.script == "offiagy-run.sh" and spec.answer_sets_id
-    assert r.chain_from("offiagy") == ["offiagy"]
+    assert r.chain_from("offiagy", auto=True) == ["offiagy", "agy"]
+    assert r.chain_from("offiagy", auto=False) == ["offiagy"]
     assert r.select("offiagy")["executor"] == "offiagy"
-    for name in r.DEFAULT_ORDER:
-        assert "offiagy" not in r.chain_from(name)
-    override({"order": ["agy", "offiagy", "codex"], "kinds": {"code": "offiagy"}})
-    assert r.fallback_order() == ("agy", "codex", "hermes")
-    # a kind may start on offiagy by override too; it then falls back to agy like the UI default
+    override({"kinds": {"code": "offiagy"}})
     assert r.kind_default("code") == "offiagy" and r.kind_default("ui") == "offiagy"
-    override({"kinds": {"code": "officlaude"}})
-    assert r.kind_default("code") == "cchclaude"  # no fallback after officlaude: not a default
     token = tmp_path / "token"
     monkeypatch.setenv("HALO_TEAMS_AGY_TOKEN", str(token))
     state, detail, _ = r._probe_account(spec)
@@ -502,21 +503,26 @@ def test_offiagy_is_explicit_only_and_probes_the_google_sign_in(pkg, availabilit
     assert r._probe_account(spec)[0] == "ok"
 
 
-@pytest.mark.parametrize("response,rc,expected", [
-    ({"loggedIn": True, "authMethod": "claude.ai"}, 0, "ok"),
-    ({"loggedIn": False, "authMethod": "none"}, 1, "account"),
-    ({"loggedIn": True, "authMethod": "api_key"}, 0, "account"),
+@pytest.mark.parametrize("response,rc,quota_out,expected", [
+    ({"loggedIn": True, "authMethod": "claude.ai"}, 0, "**官方 Claude 额度**：5 小时 剩余 **80%** · 每周 剩余 **60%**", "ok"),
+    ({"loggedIn": True, "authMethod": "claude.ai"}, 0, "**官方 Claude 额度**：5 小时 剩余 **0%**（17:00 重置） · 每周 剩余 **60%**", "quota"),
+    ({"loggedIn": False, "authMethod": "none"}, 1, "", "account"),
+    ({"loggedIn": True, "authMethod": "api_key"}, 0, "", "account"),
 ])
-def test_official_account_probe_is_read_only_oauth_status(pkg, monkeypatch, response, rc, expected):
+def test_official_account_probe_checks_oauth_and_quota(pkg, monkeypatch, response, rc, quota_out, expected):
     calls = []
     monkeypatch.setattr(pkg.runners, "_which", lambda name: "/stub/" + name)
+
     def run(argv, **kwargs):
         calls.append(argv)
+        if argv[0] == "python3":
+            return 0, quota_out
         return rc, json.dumps(response)
+
     monkeypatch.setattr(pkg.runners, "_run", run)
-    state, detail, reset = pkg.runners._probe_account(pkg.runners.BY_NAME["officlaude"])
-    assert state == expected and reset is None
-    assert calls == [["/stub/officlaude", "auth", "status", "--json"]]
+    state, detail, _reset = pkg.runners._probe_account(pkg.runners.BY_NAME["officlaude"])
+    assert state == expected
+    assert calls[0] == ["/stub/officlaude", "auth", "status", "--json"]
     assert "官方 Claude" in detail
 
 
@@ -551,26 +557,25 @@ def test_relay_probe_reads_the_settings_file_the_wrapper_passes(pkg, monkeypatch
 def test_agy_prefs_roundtrip_keeps_other_override_keys(pkg, override, monkeypatch):
     r = pkg.runners
     monkeypatch.setattr(r, "offiagy_models", lambda **_k: [{"id": "gemini-4-neon-high", "name": "Gemini 4 Neon (High)"}])
-    override({"order": ["codex", "agy"], "disabled": ["anyclaude"]})
+    override({"disabled": ["anyclaude"]})
     prefs = r.agy_prefs()
-    assert prefs["ui_runner"] == "offiagy" and prefs["ui_chain"] == ["offiagy", "agy", "hermes"]
+    assert prefs["ui_runner"] == "offiagy" and prefs["ui_chain"] == ["offiagy", "agy"]
     assert prefs["offiagy_model"] == "" and prefs["offiagy_models"][0]["id"] == "gemini-4-neon-high"
     names = [c["name"] for c in prefs["ui_choices"]]
-    assert "offiagy" in names and "agy" in names and "hermes" in names and "officlaude" not in names
+    assert "offiagy" in names and "agy" in names and "hermes" in names and "officlaude" in names
     chains = {c["name"]: c["chain"] for c in prefs["ui_choices"]}
-    assert chains["offiagy"] == ["offiagy", "agy", "hermes"] and chains["codex"] == ["codex", "agy", "hermes"]
+    assert chains["offiagy"] == ["offiagy", "agy"] and chains["codex"] == ["codex"]
 
     prefs = r.save_agy_prefs("agy", "gemini-4-argon-high")
-    assert prefs["ui_runner"] == "agy" and prefs["ui_chain"] == ["agy", "hermes"]
+    assert prefs["ui_runner"] == "agy" and prefs["ui_chain"] == ["agy"]
     assert prefs["offiagy_model"] == "gemini-4-argon-high"
     data = json.loads(r.OVERRIDE_FILE.read_text(encoding="utf-8"))
-    assert data == {"order": ["codex", "agy"], "disabled": ["anyclaude"], "kinds": {"ui": "agy"},
-                    "offiagy_model": "gemini-4-argon-high"}
+    assert data == {"disabled": ["anyclaude"], "kinds": {"ui": "agy"}, "offiagy_model": "gemini-4-argon-high"}
 
     # back to the built-in default and the AGY default model: the keys go away
     prefs = r.save_agy_prefs("offiagy", "")
     assert prefs["ui_runner"] == "offiagy" and prefs["offiagy_model"] == ""
-    assert json.loads(r.OVERRIDE_FILE.read_text(encoding="utf-8")) == {"order": ["codex", "agy"], "disabled": ["anyclaude"]}
+    assert json.loads(r.OVERRIDE_FILE.read_text(encoding="utf-8")) == {"disabled": ["anyclaude"]}
 
 
 def test_agy_prefs_back_to_defaults_leaves_no_empty_file(pkg, override, monkeypatch):
@@ -587,7 +592,7 @@ def test_agy_prefs_back_to_defaults_leaves_no_empty_file(pkg, override, monkeypa
 
 
 @pytest.mark.parametrize("ui_runner, model, message", [
-    ("officlaude", None, "不能从"), ("nope", None, "不能从"), (None, "bad model; rm -rf", "模型 ID"),
+    ("nope", None, "不能从"), (None, "bad model; rm -rf", "模型 ID"),
 ])
 def test_agy_prefs_refuses_bad_values(pkg, override, ui_runner, model, message):
     override({"order": ["agy"]})

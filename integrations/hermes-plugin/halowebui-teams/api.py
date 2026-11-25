@@ -126,6 +126,8 @@ async def _plan(request):
             lead_model=lead_model, project=project, team_id=plan_key,
             inputs=[str(n)[:120] for n in data.get("inputs") or [] if n][:20] if isinstance(data.get("inputs"), list) else None,
             library=data.get("library") if isinstance(data.get("library"), dict) else None,
+            workflow=str(data.get("workflow") or "auto"),
+            runner_prefs=data.get("runner_prefs") if isinstance(data.get("runner_prefs"), dict) else None,
         )
     finally:
         progress.planning_done(plan_key)
@@ -227,9 +229,10 @@ async def _retry(request):
     from .teams import retry
 
     data = await _body(request)
+    executor = str(data.get("executor") or "").strip().lower() or None
     return _json_response(await asyncio.to_thread(
         retry, request.match_info["team_id"], request.match_info["task_id"], owner=_owner(request),
-        actor=str(data.get("actor") or ""),
+        actor=str(data.get("actor") or ""), executor=executor,
     ))
 
 
@@ -473,8 +476,12 @@ async def _changes_post(request):
             from . import deploy
 
             cleanup = data.get("cleanup")
-            return _project_call(lambda: {"deploy": deploy.start(slug, by="user",
-                                                                 cleanup=None if cleanup is None else bool(cleanup))})
+            codex_review = data.get("codex_review")
+            return _project_call(lambda: {"deploy": deploy.start(
+                slug, by="user",
+                cleanup=None if cleanup is None else bool(cleanup),
+                codex_review=None if codex_review is None else bool(codex_review),
+            )})
         return {"error": "unknown action"}
 
     status = 202 if action == "deploy" else 200

@@ -32,6 +32,15 @@
 	$: order = registry?.order ?? [];
 	$: chain = order.length ? order : runners.map((r) => r.name);
 	$: offChain = offChainRunners(order, runners);
+	$: familyGroups = registry?.families
+		? Object.entries(registry.families)
+				.map(([key, names]) => ({
+					key,
+					label: registry?.family_labels?.[key] ?? key,
+					items: names.map((n) => runners.find((x) => x.name === n)).filter(Boolean) as RunnerInfo[]
+				}))
+				.filter((g) => g.items.length > 0)
+		: [];
 	$: checkedAt = Math.max(0, ...runners.map((r) => r.checked_at || 0));
 	$: down = runners.filter((r) => !r.available).length;
 
@@ -77,45 +86,87 @@
 	{#if error}
 		<p class="px-4 pt-1 text-xs text-red-600 dark:text-red-400" role="alert">{error}</p>
 	{/if}
-	<ol class="flex flex-wrap items-center gap-y-2 px-4 pb-3.5 pt-3" aria-label="兜底顺序">
-		{#each [...chain, ...offChain.map((r) => r.name)] as name, index}
-			{@const r = runners.find((x) => x.name === name)}
-			{#if r}
-				{#if index === chain.length}
-					<li class="ml-3 mr-1.5 text-[11px] text-gray-400" aria-hidden="true">官方账号 · 不进兜底链</li>
-				{/if}
-				<li class="flex items-center">
-					<button
-						type="button"
-						class="chip group inline-flex max-w-[16rem] items-center gap-1.5 rounded-xl px-2.5 py-1.5 text-xs transition focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 {open ===
-						r.name
-							? 'is-open'
-							: ''} {r.available ? '' : 'is-down'}"
-						aria-expanded={open === r.name}
-						title={r.available ? `${runnerLabel(r.name)}：${r.reason}` : r.reason}
-						on:click={() => (open = open === r.name ? null : r.name)}
-						data-runner-chip={r.name}
-						data-available={r.available ? 'true' : 'false'}
-					>
-						<span
-							class="size-1.5 shrink-0 rounded-full {dot(r)} {r.available
-								? 'tm-pulse-dot text-emerald-500'
-								: ''}"
-							aria-hidden="true"
-						/>
-						<span class="font-mono font-medium text-gray-800 dark:text-gray-100"
-							>{runnerLabel(r.name)}</span
-						>
-						<span class="hidden truncate text-gray-400 sm:inline">{r.engine}</span>
-						<span class="sr-only">{r.available ? '可用' : `不可用：${r.reason}`}</span>
-					</button>
-					{#if index < chain.length - 1}
-						<span class="link mx-1 h-px w-3 sm:w-4" aria-hidden="true" />
+	{#if familyGroups.length}
+		<div class="flex flex-col gap-2 px-4 pb-3.5 pt-3" aria-label="引擎家族顺序">
+			{#each familyGroups as group (group.key)}
+				<div class="flex flex-wrap items-center gap-y-1.5">
+					<span class="mr-2 w-14 shrink-0 text-[11px] font-medium text-gray-400">{group.label}</span>
+					<ol class="flex flex-wrap items-center gap-y-1.5">
+						{#each group.items as r, index (r.name)}
+							<li class="flex items-center">
+								<button
+									type="button"
+									class="chip group inline-flex max-w-[16rem] items-center gap-1.5 rounded-xl px-2.5 py-1 text-xs transition focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 {open ===
+									r.name
+										? 'is-open'
+										: ''} {r.available ? '' : 'is-down'}"
+									aria-expanded={open === r.name}
+									title={r.available ? `${runnerLabel(r.name)}：${r.reason}` : r.reason}
+									on:click={() => (open = open === r.name ? null : r.name)}
+									data-runner-chip={r.name}
+									data-available={r.available ? 'true' : 'false'}
+								>
+									<span
+										class="size-1.5 shrink-0 rounded-full {dot(r)} {r.available
+											? 'tm-pulse-dot text-emerald-500'
+											: ''}"
+										aria-hidden="true"
+									/>
+									<span class="font-mono font-medium text-gray-800 dark:text-gray-100"
+										>{runnerLabel(r.name)}</span
+									>
+									<span class="sr-only">{r.available ? '可用' : `不可用：${r.reason}`}</span>
+								</button>
+								{#if index < group.items.length - 1}
+									<span class="link mx-1 h-px w-3 sm:w-4" aria-hidden="true" />
+								{/if}
+							</li>
+						{/each}
+					</ol>
+				</div>
+			{/each}
+		</div>
+	{:else}
+		<ol class="flex flex-wrap items-center gap-y-2 px-4 pb-3.5 pt-3" aria-label="兜底顺序">
+			{#each [...chain, ...offChain.map((r) => r.name)] as name, index}
+				{@const r = runners.find((x) => x.name === name)}
+				{#if r}
+					{#if index === chain.length}
+						<li class="ml-3 mr-1.5 text-[11px] text-gray-400" aria-hidden="true">官方账号 · 不进兜底链</li>
 					{/if}
-				</li>
-			{/if}
-		{/each}
-	</ol>
+					<li class="flex items-center">
+						<button
+							type="button"
+							class="chip group inline-flex max-w-[16rem] items-center gap-1.5 rounded-xl px-2.5 py-1.5 text-xs transition focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 {open ===
+							r.name
+								? 'is-open'
+								: ''} {r.available ? '' : 'is-down'}"
+							aria-expanded={open === r.name}
+							title={r.available ? `${runnerLabel(r.name)}：${r.reason}` : r.reason}
+							on:click={() => (open = open === r.name ? null : r.name)}
+							data-runner-chip={r.name}
+							data-available={r.available ? 'true' : 'false'}
+						>
+							<span
+								class="size-1.5 shrink-0 rounded-full {dot(r)} {r.available
+									? 'tm-pulse-dot text-emerald-500'
+									: ''}"
+								aria-hidden="true"
+							/>
+							<span class="font-mono font-medium text-gray-800 dark:text-gray-100"
+								>{runnerLabel(r.name)}</span
+							>
+							<span class="hidden truncate text-gray-400 sm:inline">{r.engine}</span>
+							<span class="sr-only">{r.available ? '可用' : `不可用：${r.reason}`}</span>
+						</button>
+						{#if index < chain.length - 1}
+							<span class="link mx-1 h-px w-3 sm:w-4" aria-hidden="true" />
+						{/if}
+					</li>
+				{/if}
+			{/each}
+		</ol>
+	{/if}
 	{#if open}
 		{@const r = runners.find((x) => x.name === open)}
 		{#if r}

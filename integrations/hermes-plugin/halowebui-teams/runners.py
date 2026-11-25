@@ -64,6 +64,7 @@ class RunnerSpec:
     label: str              # short, for pickers and chips
     engine: str             # what actually runs: Claude Code / Codex / Antigravity / Hermes
     note: str               # one line: what it is good at / how it behaves
+    family: str = "hermes"  # engine family: claude / codex / agy / hermes
     native: bool = False    # Hermes: the gateway's Kanban dispatcher runs it
     script: str = ""        # <name>-run.sh in ~/.hermes/scripts
     command: str = ""       # the CLI it drives
@@ -85,45 +86,59 @@ class RunnerSpec:
 
 
 SPECS: tuple[RunnerSpec, ...] = (
-    RunnerSpec("reclaude", "reclaude", "Claude Code", "Claude Code（拼车账号）：自主性最强，额度用完会自己等重置续跑",
-               script="reclaude-run.sh", command="reclaude", probe="reclaude_quota", max_turns=True, quota_wait=True),
-    RunnerSpec("cchclaude", "cchclaude", "Claude Code", "Claude Code（自己的 cch 中转）：后端 / 通用代码的首选",
-               script="cchclaude-run.sh", command="cchclaude", probe="claude_settings",
+    RunnerSpec("officlaude", "官方 Claude", "Claude Code", "Claude 家族首选（官网 claude.ai 订阅 OAuth）；自动模式不可用时按 Claude 家族顺延，手动指定后不自动顺延",
+               family="claude", script="officlaude-run.sh", command="officlaude", probe="claude_official", max_turns=True),
+    RunnerSpec("cchclaude", "cchclaude", "Claude Code", "Claude 家族第二顺位（自建 cch 中转）",
+               family="claude", script="cchclaude-run.sh", command="cchclaude", probe="claude_settings",
                settings="/root/.claude-thirdparty/settings-cch.json", max_turns=True, quota_wait=True),
-    RunnerSpec("anyclaude", "anyclaude", "Claude Code", "Claude Code（anyrouter 免费服务）：慢，适合不急的代码任务",
-               script="anyclaude-run.sh", command="anyclaude", probe="claude_settings",
+    RunnerSpec("anyclaude", "anyclaude", "Claude Code", "Claude 家族第三顺位（anyrouter 免费服务，较慢）",
+               family="claude", script="anyclaude-run.sh", command="anyclaude", probe="claude_settings",
                settings="/root/.claude-thirdparty/settings-any.json", max_turns=True, quota_wait=True),
-    RunnerSpec("officlaude", "官方 Claude", "Claude Code", "官网 claude.ai 订阅 OAuth 账号；仅点名使用，认证/额度失败后手动续跑",
-               script="officlaude-run.sh", command="officlaude", probe="claude_official", max_turns=True),
-    RunnerSpec("codex", "codex", "Codex", "OpenAI Codex CLI：代码任务的另一条线，额度用完即失败",
-               script="codex-run.sh", command="codex", probe="codex_login"),
-    RunnerSpec("agy", "agy", "Antigravity", "Antigravity CLI（Hermes 网关）：offiagy 不可用时前端 / UI / UX / 视觉设计的兜底；没有工具记录",
-               script="agy-run.sh", command="agy", probe="agy_token", answer_sets_id=True),
-    RunnerSpec("offiagy", "offiagy", "Antigravity", "Antigravity CLI（Google 账号官方登录，不走网关）：前端 / UI / UX / 视觉设计的首选，不可用时回退 agy；点名使用时不回退",
-               script="offiagy-run.sh", command="offiagy", probe="agy_official", answer_sets_id=True),
-    RunnerSpec("hermes", "Hermes", "Hermes", "Hermes 代理：联网搜索、调研、写作、汇总；永远是最后的兜底",
-               native=True, probe="hermes"),
+    RunnerSpec("reclaude", "reclaude", "Claude Code", "Claude 家族第四顺位（拼车账号，额度用完会等重置续跑）",
+               family="claude", script="reclaude-run.sh", command="reclaude", probe="reclaude_quota", max_turns=True, quota_wait=True),
+    RunnerSpec("codex", "codex", "Codex", "OpenAI Codex CLI（按 codex 自身设置运行）：成块后端开发与独立代码审查，不跨家族顺延",
+               family="codex", script="codex-run.sh", command="codex", probe="codex_login"),
+    RunnerSpec("offiagy", "offiagy", "Antigravity", "AGY 家族首选（Google 账号官方登录）：独立方案 / 交互文案审稿 / 前端视觉，自动模式不可用时顺延 agy，手动指定后不自动顺延",
+               family="agy", script="offiagy-run.sh", command="offiagy", probe="agy_official", answer_sets_id=True),
+    RunnerSpec("agy", "agy", "Antigravity", "AGY 家族第二顺位（Hermes gemini-chat 网关）：offiagy 不可用时的同家族备选",
+               family="agy", script="agy-run.sh", command="agy", probe="agy_token", answer_sets_id=True),
+    RunnerSpec("hermes", "Hermes", "Hermes", "Hermes 代理：联网搜索、调研、写作、生图、汇总",
+               family="hermes", native=True, probe="hermes"),
 )
 BY_NAME = {spec.name: spec for spec in SPECS}
 NAMES = tuple(BY_NAME)
 EXTERNAL = tuple(spec.name for spec in SPECS if not spec.native)
-assert EXTERNAL == RUNNER_EXECUTORS, "common.RUNNER_EXECUTORS and runners.SPECS must list the same runners"
-DEFAULT_ORDER = ("reclaude", "cchclaude", "anyclaude", "codex", "agy", "hermes")
-# Runners on the user's own official account: they never join the fallback chain as a step after
-# another runner, and a member the user named one for has no fallback.
-NAMED_ONLY = ("officlaude", "offiagy")
-# ...except a kind default on one: an automatic choice there falls back onto the ordinary chain
-# from here (the user wants offiagy first for UI work, agy when it cannot run; 2026-11-22).
-AUTO_THEN = {"offiagy": "agy"}
+assert set(EXTERNAL) == set(RUNNER_EXECUTORS), "common.RUNNER_EXECUTORS and runners.SPECS must list the same runners"
+
+# Engine families and their default auto-selection order. Auto mode only walks within the same
+# family (never silently drifting across Claude / Codex / AGY). Explicit user / goal choices never
+# auto-fallback: when unavailable, the task pauses for the user to pick another runner.
+DEFAULT_FAMILIES: dict[str, tuple[str, ...]] = {
+    "claude": ("officlaude", "cchclaude", "anyclaude", "reclaude"),
+    "codex": ("codex",),
+    "agy": ("offiagy", "agy"),
+    "hermes": ("hermes",),
+}
+FAMILY_LABELS: dict[str, str] = {
+    "claude": "Claude",
+    "codex": "Codex",
+    "agy": "AGY",
+    "hermes": "Hermes",
+}
+DEFAULT_ORDER = tuple(name for chain in DEFAULT_FAMILIES.values() for name in chain)
+NAMED_ONLY: tuple[str, ...] = ()
+AUTO_THEN: dict[str, str] = {}
 
 # Task kinds the lead labels every member with, and the runner each starts from.
 KINDS: dict[str, dict] = {
-    "code": {"label": "后端 / 通用代码", "default": "cchclaude",
-             "hint": "后端、服务端、脚本、接口、数据库、测试、代码评审、修 bug 等通用代码任务"},
-    "ui": {"label": "前端 / UI / UX / 视觉", "default": "offiagy",
-           "hint": "前端页面、组件、交互、样式、视觉设计、UX 走查"},
-    "complex": {"label": "复杂任务", "default": "reclaude",
-                "hint": "深度重构、跨多个项目修改、大规模架构调整、需要很强自主执行能力的长任务"},
+    "code": {"label": "Claude 主控 / 通用代码", "default": "officlaude",
+             "hint": "主控调研、方案合成、前端实现、测试联调、通用代码、修 bug 等（按 Claude 家族顺序）"},
+    "codex": {"label": "Codex 后端 / 审查", "default": "codex",
+              "hint": "成块后端代码开发、独立代码审查（固定走 Codex，使用 Codex 自身配置）"},
+    "ui": {"label": "AGY 方案 / UI / UX", "default": "offiagy",
+           "hint": "独立方案评审、交互与文案走查、前端视觉与 UX（按 AGY 家族顺序）"},
+    "complex": {"label": "复杂任务", "default": "officlaude",
+                "hint": "深度重构、跨多个项目修改、大规模架构调整、需要强自主执行能力的长任务（按 Claude 家族顺序）"},
     "research": {"label": "调研 / 分析", "default": "hermes",
                  "hint": "联网调研、资料搜集、数据分析、对比评估（不改代码）"},
     "writing": {"label": "写作 / 文档", "default": "hermes",
@@ -189,19 +204,39 @@ def overrides() -> dict:
     return _override_cache["data"]
 
 
+def family_of(name: Any) -> str:
+    spec = BY_NAME.get(str(name or ""))
+    return spec.family if spec else "hermes"
+
+
+def family_orders() -> dict[str, tuple[str, ...]]:
+    """Per-family auto order, overridable via ``halo-teams-runners.json`` ``families``."""
+    raw = overrides().get("families")
+    out: dict[str, tuple[str, ...]] = {}
+    for fam, default_chain in DEFAULT_FAMILIES.items():
+        custom = raw.get(fam) if isinstance(raw, dict) else None
+        if isinstance(custom, list):
+            names = [n for n in custom if n in BY_NAME and BY_NAME[n].family == fam]
+            if names:
+                out[fam] = tuple(dict.fromkeys(names))
+                continue
+        out[fam] = default_chain
+    return out
+
+
 def fallback_order() -> tuple[str, ...]:
     order = overrides().get("order")
     if isinstance(order, list):
-        names = [n for n in order if n in BY_NAME and n not in NAMED_ONLY]
+        names = [n for n in order if n in BY_NAME]
         if names:
-            # Hermes always ends the chain: it is the executor that never needs another account.
-            return tuple(n for n in names if n != "hermes") + ("hermes",)
-    return DEFAULT_ORDER
+            return tuple(dict.fromkeys(names))
+    fams = family_orders()
+    return tuple(n for fam in DEFAULT_FAMILIES for n in fams[fam])
 
 
 def _startable(name: Any) -> bool:
-    """A runner a kind may start on: any but an official account that has no fallback."""
-    return name in BY_NAME and (name not in NAMED_ONLY or name in AUTO_THEN)
+    """Any configured runner can be a kind's starting runner."""
+    return name in BY_NAME
 
 
 def kind_default(kind: str) -> str:
@@ -331,7 +366,8 @@ def save_agy_prefs(ui_runner: Any = None, offiagy_model: Any = None) -> dict:
 
 def normalize_kind(kind: Any) -> str:
     value = str(kind or "").strip().lower()
-    aliases = {"backend": "code", "server": "code", "general": "code", "coding": "code", "review": "code",
+    aliases = {"backend": "code", "server": "code", "general": "code", "coding": "code", "review": "codex",
+               "codex": "codex", "gpt": "codex",
                "test": "code", "qa": "code", "frontend": "ui", "design": "ui", "ux": "ui", "visual": "ui",
                "docs": "writing", "doc": "writing", "report": "writing", "analysis": "research",
                "data": "research", "illustration": "image", "picture": "image", "img": "image", "art": "image",
@@ -341,15 +377,27 @@ def normalize_kind(kind: Any) -> str:
 
 
 def chain_from(start: str, *, auto: bool = False) -> list[str]:
-    """``start`` and every runner after it in the fallback order (Hermes last). ``auto``: nobody
-    named ``start`` (the kind's default), so an official-account start falls back too."""
-    if start in NAMED_ONLY:
-        then = AUTO_THEN.get(start) if auto else None
-        return [start, *chain_from(then)] if then else [start]
-    order = list(fallback_order())
-    if start not in order:
-        return ["hermes"] if start != "hermes" else ["hermes"]
-    return order[order.index(start):]
+    """Runners to try starting at *start*.
+
+    * ``auto=False`` (explicitly specified by the user or goal): **never auto-fallback**. Returns
+      ``[start]`` only, so when it is unavailable the task pauses and lets the user choose.
+    * ``auto=True`` (automatic kind/family selection): walks only within *start*'s engine family
+      (Claude: officlaude→cchclaude→anyclaude→reclaude; AGY: offiagy→agy; Codex: codex; Hermes:
+      hermes) — or an explicit ``order`` override when configured without ``families``.
+    """
+    if start not in BY_NAME:
+        return ["hermes"]
+    if not auto:
+        return [start]
+    over = overrides()
+    if isinstance(over.get("order"), list) and not isinstance(over.get("families"), dict):
+        order = [n for n in over["order"] if n in BY_NAME]
+        if start in order:
+            return order[order.index(start):]
+    fam_chain = list(family_orders().get(BY_NAME[start].family, (start,)))
+    if start in fam_chain:
+        return fam_chain[fam_chain.index(start):]
+    return [start]
 
 
 # --- probes -------------------------------------------------------------------------------------
@@ -460,22 +508,60 @@ def _probe_account(spec: RunnerSpec) -> tuple[str, str, Optional[str]]:
             auth = json.loads(out)
         except (ValueError, TypeError):
             return "account", "官方 Claude 登录状态无法确认；请在服务器终端运行 officlaude 并输入 /login", None
-        if rc == 0 and isinstance(auth, dict) and auth.get("loggedIn") and auth.get("authMethod") == "claude.ai":
-            return "ok", "官方 Claude 已登录（claude.ai 订阅 OAuth）；实际请求以 runner 结果为准", None
-        return "account", "官方 Claude 未登录或登录已失效：在服务器终端运行 officlaude，输入 /login 完成浏览器授权", None
+        if not (rc == 0 and isinstance(auth, dict) and auth.get("loggedIn") and auth.get("authMethod") == "claude.ai"):
+            return "account", "官方 Claude 未登录或登录已失效：在服务器终端运行 officlaude，输入 /login 完成浏览器授权", None
+        quota_script = os.path.join(_SCRIPTS, "officlaude-quota.py")
+        if os.path.isfile(quota_script):
+            qrc, qout = _run(["python3", quota_script, "--timeout", "8"], timeout=PROBE_TIMEOUT)
+            qline = (qout or "").strip().splitlines()[-1] if (qout or "").strip() else ""
+            if qrc == 0 and qline and "⚠️" not in qline:
+                clean = qline.replace("**", "").strip()
+                # Flag quota exhausted when either 5h or weekly window shows 0% remaining.
+                if re.search(r"剩余\s*0%", clean):
+                    reset = re.search(r"（([^）]+重置)）", clean)
+                    return "quota", redact(clean, 200), (reset.group(1) if reset else None)
+                return "ok", redact(clean, 180), None
+        return "ok", "官方 Claude 已登录（claude.ai 订阅 OAuth）；实际请求以 runner 结果为准", None
     if spec.probe == "codex_login":
         rc, out = _run([_which("codex") or "codex", "login", "status"])
         if rc == 0:
             return "ok", "已登录", None
         return "account", "codex 没有登录（codex login status 失败）", None
     if spec.probe == "agy_token":
-        token = Path(os.environ.get("HALO_TEAMS_AGY_TOKEN", "/root/.gemini/antigravity-cli/antigravity-oauth-token"))
+        explicit_token = os.environ.get("HALO_TEAMS_AGY_TOKEN")
+        if explicit_token:
+            token = Path(explicit_token)
+            try:
+                if token.stat().st_size > 0:
+                    return "ok", "已登录（有 OAuth 令牌）", None
+            except OSError:
+                pass
+            return "account", "agy 没有登录（找不到 OAuth 令牌）", None
+        # agy uses Hermes gemini-chat gateway when ~/.gemini/antigravity-cli/settings.json enables
+        # modelProvider=gemini, independent of offiagy's Google OAuth login.
+        gateway_script = os.path.join(_SCRIPTS, "agy_gateway.py")
+        if os.path.isfile(gateway_script):
+            try:
+                import importlib.util
+
+                g_spec = importlib.util.spec_from_file_location("_halo_agy_gateway", gateway_script)
+                if g_spec and g_spec.loader:
+                    g_mod = importlib.util.module_from_spec(g_spec)
+                    g_spec.loader.exec_module(g_mod)
+                    env = {**os.environ, "HERMES_HOME": _HOME}
+                    if g_mod.api_key_mode(env):
+                        details = g_mod.provider_details(env, need_key=True)
+                        host = re.sub(r"^https?://", "", str(details.get("base_url") or "")).split("/")[0]
+                        return "ok", f"Hermes 网关模式（{details.get('provider') or 'gemini-chat'} · {host or 'local'}）", None
+            except Exception as exc:
+                return "account", f"agy 网关配置不可用：{redact(str(exc), 160)}", None
+        token = Path("/root/.gemini/antigravity-cli/antigravity-oauth-token")
         try:
             if token.stat().st_size > 0:
                 return "ok", "已登录（有 OAuth 令牌）", None
         except OSError:
             pass
-        return "account", "agy 没有登录（找不到 OAuth 令牌）", None
+        return "account", "agy 没有登录（未启用网关模式且找不到 OAuth 令牌）", None
     if spec.probe == "agy_official":
         # offiagy signs in with the Google account; its OAuth token file is the sign-in.
         token = Path(os.environ.get("HALO_TEAMS_AGY_TOKEN", "/root/.gemini/antigravity-cli/antigravity-oauth-token"))
@@ -719,9 +805,10 @@ def select(start: str, availability: Optional[dict] = None, *, skip: tuple = (),
 
 def select_after(start: str, current: str, availability: Optional[dict] = None, *, auto: bool = False) -> dict:
     """The next available runner *after* ``current`` on the chain that starts at ``start`` (a
-    fallback only moves forward). Same shape as ``select``."""
+    fallback only moves forward). When ``auto=False`` (explicitly chosen by user/goal), never
+    auto-fallback: returns ``executor=None`` so the user can pick another runner."""
     chain = chain_from(start if start in BY_NAME else current, auto=auto)
-    rest = chain[chain.index(current) + 1:] if current in chain else chain_from(current)[1:]
+    rest = chain[chain.index(current) + 1:] if current in chain else chain_from(current, auto=auto)[1:]
     if not rest:
         return {"executor": None, "start": start, "chain": chain, "skipped": []}
     avail = availability if availability is not None else check(rest)
@@ -757,14 +844,18 @@ def fallback_reason(picked: dict) -> str:
 
 
 def public_registry(availability: Optional[dict] = None) -> dict:
-    """What HaloWebUI shows: runners (with availability), kinds with their default, the order."""
+    """What HaloWebUI shows: runners (with availability), kinds with their default, families and order."""
     avail = availability if availability is not None else check()
+    fams = family_orders()
     return {
         "runners": [{**{k: v for k, v in (avail.get(s.name) or {}).items() if k != "layers"},
-                     "name": s.name, "label": s.label, "engine": s.engine, "note": s.note, "native": s.native,
+                     "name": s.name, "label": s.label, "engine": s.engine, "family": s.family,
+                     "note": s.note, "native": s.native,
                      "quota_wait": s.quota_wait, "layers": (avail.get(s.name) or {}).get("layers") or []}
                     for s in SPECS],
         "kinds": [{"value": k, "label": v["label"], "hint": v["hint"], "default": kind_default(k)} for k, v in KINDS.items()],
         "order": list(fallback_order()),
+        "families": {k: list(v) for k, v in fams.items()},
+        "family_labels": dict(FAMILY_LABELS),
         "cache_seconds": CACHE_SECONDS,
     }

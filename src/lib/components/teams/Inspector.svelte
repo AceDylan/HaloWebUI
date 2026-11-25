@@ -11,7 +11,8 @@
 		type AssistantsApplied,
 		type LiveTask,
 		type TaskDetail,
-		type TeamEvent
+		type TeamEvent,
+		type TeamExecutor
 	} from '$lib/apis/teams';
 	import { teamFilePath } from '$lib/apis/teams';
 	import { undoAssistantRun } from '$lib/apis/assistant-library';
@@ -22,6 +23,7 @@
 	import TeamAvatar from './TeamAvatar.svelte';
 	import {
 		avatarKind,
+		EXECUTOR_OPTIONS,
 		formatClock,
 		isRunnerExecutor,
 		KIND_LABEL,
@@ -122,6 +124,7 @@
 	let sending = false;
 	let lastExpect = '';
 	let retrying = false;
+	let switchExecutor: TeamExecutor | '' = '';
 	let diagnosing: '' | 'apply' | 'again' = '';
 	let loadedFor = '';
 	// The log of a running task follows along (re-read every few seconds, kept scrolled to the end).
@@ -313,12 +316,17 @@
 		}
 	};
 
-	const retry = async () => {
+	const retry = async (executor?: TeamExecutor) => {
 		if (!taskId || retrying) return;
 		retrying = true;
 		try {
-			await retryTeamTask(localStorage.token, teamId, taskId);
-			toast.success('已重新排队，会作为新的执行尝试开始；已完成的任务不会重做');
+			await retryTeamTask(localStorage.token, teamId, taskId, executor);
+			toast.success(
+				executor
+					? `已切换为 ${runnerLabel(executor)} 并重新排队执行`
+					: '已重新排队，会作为新的执行尝试开始；已完成的任务不会重做'
+			);
+			switchExecutor = '';
 			dispatch('changed');
 		} catch (error) {
 			toast.error(`${error?.message ?? error}`);
@@ -555,12 +563,37 @@
 		{/if}
 
 		{#if canRetry}
-			<button
-				type="button"
-				class="tm-btn-primary self-start !py-1.5 !text-xs"
-				disabled={retrying}
-				on:click={retry}>{retrying ? '正在重试…' : '重试这个任务（新的执行尝试）'}</button
-			>
+			<div class="flex flex-wrap items-center gap-2" data-task-retry-bar>
+				<button
+					type="button"
+					class="tm-btn-primary !py-1.5 !text-xs"
+					disabled={retrying}
+					on:click={() => retry()}>{retrying ? '正在重试…' : '重试这个任务'}</button
+				>
+				<div class="flex items-center gap-1.5">
+					<select
+						bind:value={switchExecutor}
+						disabled={retrying}
+						aria-label="更换执行来源"
+						class="rounded-lg border border-gray-200 bg-white px-2 py-1 text-xs text-gray-800 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+						data-retry-switch-select
+					>
+						<option value="">换执行来源…</option>
+						{#each EXECUTOR_OPTIONS as opt (opt.value)}
+							<option value={opt.value}>{opt.label}</option>
+						{/each}
+					</select>
+					{#if switchExecutor}
+						<button
+							type="button"
+							class="tm-btn-ghost !py-1 !text-xs"
+							disabled={retrying}
+							on:click={() => switchExecutor && retry(switchExecutor)}
+							data-retry-switch-apply>改用 {runnerLabel(switchExecutor)} 重试</button
+						>
+					{/if}
+				</div>
+			</div>
 		{/if}
 
 		{#if !replay}

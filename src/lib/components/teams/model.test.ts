@@ -259,14 +259,14 @@ describe('avatars', () => {
 describe('executors', () => {
 	it('offers Hermes and every runner, and only runners count as runners', () => {
 		expect(EXECUTOR_OPTIONS.map((o) => o.value)).toEqual([
-			'hermes',
-			'reclaude',
+			'officlaude',
 			'cchclaude',
 			'anyclaude',
-			'officlaude',
+			'reclaude',
 			'codex',
+			'offiagy',
 			'agy',
-			'offiagy'
+			'hermes'
 		]);
 		expect(EXECUTOR_LABEL.hermes).toBe('Hermes 代理');
 		expect(EXECUTOR_LABEL.codex).toBe('codex');

@@ -31,6 +31,7 @@
 	let confirmDiscard = false;
 	let confirmDeploy = false;
 	let deployCleanup = true;
+	let deployReview = false;
 	let showDeployLog = false;
 	let timer: ReturnType<typeof setTimeout> | null = null;
 
@@ -126,7 +127,7 @@
 	const startDeploy = () =>
 		act(
 			'deploy',
-			() => deployTeamChanges(localStorage.token, teamId, deployCleanup),
+			() => deployTeamChanges(localStorage.token, teamId, deployCleanup, deployReview),
 			'已启动推送部署流水线'
 		);
 	const toggleAutoDeploy = () =>
@@ -340,6 +341,7 @@
 								disabled={!!busy}
 								on:click={() => {
 									deployCleanup = deployProfile?.cleanup ?? true;
+									deployReview = !!(deploy?.codex_review ?? deployProfile?.codex_review);
 									confirmDeploy = true;
 								}}
 								data-changes-deploy
@@ -350,9 +352,9 @@
 										: '一键推送部署'}</button
 							>
 							<span class="text-[11px] text-gray-400">
-								合并到 {project.base_branch} → 推送{deployProfile?.has_ci ? ' → 等待 CI' : ''}{deployProfile?.has_command
-									? ' → 部署'
-									: ''} → 清理分支
+								{deployProfile?.codex_review ? 'Codex 审查 → ' : ''}合并到 {project.base_branch} → 推送{deployProfile?.has_ci ? ' → 等待 CI' : ''}{deployProfile?.has_command
+									? ' → 自动拉取部署'
+									: ''} → 清理分支{deployProfile?.has_verify ? ' → 核实线上' : ''}
 							</span>
 						</div>
 					{/if}
@@ -519,14 +521,26 @@
 >
 	<div class="flex flex-col gap-3 text-sm text-gray-500 dark:text-gray-400">
 		<p>
-			将按顺序执行：合并 <span class="font-mono text-gray-700 dark:text-gray-200"
-				>{project?.branch}</span
-			>
+			将按顺序执行：{deployReview ? 'Codex 审查（最多 2 轮，不通过自动派 Claude 修） → ' : ''}合并
+			<span class="font-mono text-gray-700 dark:text-gray-200">{project?.branch}</span>
 			到 <span class="font-mono text-gray-700 dark:text-gray-200">{project?.base_branch}</span> →
 			推送 origin{deployProfile?.has_ci ? ' → 等待 GitHub CI 通过' : ''}{deployProfile?.has_command
-				? ' → 运行项目部署脚本'
-				: ''}{deployCleanup ? ' → 清理团队分支与 worktree（结论保留）' : ''}。
+				? ' → 自动拉取并更新部署'
+				: ''}{deployCleanup ? ' → 清理团队分支与 worktree（结论保留）' : ''}{deployProfile?.has_verify
+				? ' → 核实线上状态'
+				: ''}。
 		</p>
+		<label
+			class="inline-flex cursor-pointer select-none items-center gap-2 text-xs text-gray-700 dark:text-gray-200"
+		>
+			<input
+				type="checkbox"
+				class="size-3.5 rounded accent-sky-600"
+				bind:checked={deployReview}
+				data-deploy-review-checkbox
+			/>
+			<span>合并前先做 Codex 审查（最多 2 轮，用 Codex 默认配置）</span>
+		</label>
 		<label
 			class="inline-flex cursor-pointer select-none items-center gap-2 text-xs text-gray-700 dark:text-gray-200"
 		>

@@ -233,14 +233,14 @@ describe('PlanReview', () => {
 		app.$on('executor', (e: any) => picked.push(e.detail));
 		const select = target.querySelector('select') as any;
 		expect(Array.from(select.querySelectorAll('option')).map((o: any) => o.value)).toEqual([
-			'hermes',
-			'reclaude',
+			'officlaude',
 			'cchclaude',
 			'anyclaude',
-			'officlaude',
+			'reclaude',
 			'codex',
+			'offiagy',
 			'agy',
-			'offiagy'
+			'hermes'
 		]);
 		select.value = 'codex';
 		select.dispatchEvent(new (globalThis as any).Event('change', { bubbles: true }));

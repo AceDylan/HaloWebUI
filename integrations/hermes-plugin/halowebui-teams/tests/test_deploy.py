@@ -224,3 +224,100 @@ def test_progress_stage_and_telegram_done_button(pkg, team_id, plan_dict, repo, 
     }))
     st = progress.stage(slug, pkg.common.read_team(slug), snap["tasks"], "completed")
     assert st["key"] == "deploying" and "CI 运行中" in st["now"]
+
+
+def test_codex_review_fail_then_claude_fix_then_pass_and_verify(pkg, team_id, plan_dict, repo, tmp_path, monkeypatch, availability):
+    import halowebui_teams.bridge as bridge
+    import halowebui_teams.deploy as deploy
+
+    verify_marker = tmp_path / "verified.txt"
+    cfg = tmp_path / "deploy.json"
+    cfg.write_text(json.dumps({
+        "projects": {
+            str(repo): {
+                "label": "MyApp 审查+核实",
+                "command": "echo deployed",
+                "verify_command": f"echo online-ok:$HALO_DEPLOY_SHORT_SHA > {verify_marker}",
+                "codex_review": True,
+                "cleanup": True,
+            }
+        }
+    }), encoding="utf-8")
+    monkeypatch.setenv("HALO_TEAMS_DEPLOY_CONFIG", str(cfg))
+    monkeypatch.setenv("HALO_TEAMS_NO_GATEWAY_RESTART", "1")
+
+    first = _create(pkg, team_id, plan_dict, repo)
+    slug = pkg.common.board_slug(team_id)
+    ws = pkg.common.read_team(slug)["workspace"]
+    _finish(pkg, slug, first["tasks"]["T1"], lambda: open(os.path.join(ws, "app.py"), "w").write("print('v2')\n"))
+    bridge._commit_finished(slug, pkg.common.read_team(slug))
+
+    review_calls = []
+    fix_calls = []
+
+    def fake_codex(workspace, base_branch, round_num, max_rounds):
+        review_calls.append((round_num, max_rounds))
+        if round_num == 1:
+            return "FAIL", "VERDICT: FAIL\napp.py 缺少异常处理"
+        return "PASS", "VERDICT: PASS\n问题已修复"
+
+    def fake_fix(runner_name, workspace, review_text, round_num):
+        fix_calls.append((runner_name, round_num))
+        open(os.path.join(workspace, "app.py"), "w").write("print('v2-fixed')\n")
+        _git(workspace, "add", "app.py")
+        _git(workspace, "commit", "-q", "-m", "fix review")
+        return "已修复 app.py"
+
+    monkeypatch.setattr(deploy, "_run_codex_once", fake_codex)
+    monkeypatch.setattr(deploy, "_run_claude_fix", fake_fix)
+
+    deploy.start(slug, by="user", cleanup=True)
+    team, dep = _wait_done(pkg, slug)
+    assert dep["status"] == "succeeded"
+    assert review_calls == [(1, 2), (2, 2)]
+    assert fix_calls == [("officlaude", 1)]
+    assert [s["key"] for s in dep["steps"]] == ["review", "merge", "push", "deploy", "cleanup", "verify"]
+    assert all(s["status"] == "done" for s in dep["steps"])
+    assert (repo / "app.py").read_text() == "print('v2-fixed')\n"
+    assert verify_marker.read_text().strip().startswith("online-ok:")
+
+
+def test_codex_review_exhausted_stops_before_merge(pkg, team_id, plan_dict, repo, tmp_path, monkeypatch, availability):
+    import halowebui_teams.bridge as bridge
+    import halowebui_teams.deploy as deploy
+
+    cfg = tmp_path / "deploy.json"
+    cfg.write_text(json.dumps({"projects": {str(repo): {"label": "MyApp", "codex_review": True}}}), encoding="utf-8")
+    monkeypatch.setenv("HALO_TEAMS_DEPLOY_CONFIG", str(cfg))
+
+    first = _create(pkg, team_id, plan_dict, repo)
+    slug = pkg.common.board_slug(team_id)
+    ws = pkg.common.read_team(slug)["workspace"]
+    _finish(pkg, slug, first["tasks"]["T1"], lambda: open(os.path.join(ws, "app.py"), "w").write("print('bad')\n"))
+    bridge._commit_finished(slug, pkg.common.read_team(slug))
+
+    monkeypatch.setattr(deploy, "_run_codex_once", lambda *_a: ("FAIL", "VERDICT: FAIL\n仍有严重缺陷"))
+    monkeypatch.setattr(deploy, "_run_claude_fix", lambda *_a: "尝试修复")
+
+    deploy.start(slug, by="user", cleanup=True, codex_review=True)
+    team, dep = _wait_done(pkg, slug)
+    assert dep["status"] == "failed"
+    assert "第 2/2 轮审查未通过" in dep["error"]
+    # Main branch untouched and team branch preserved
+    assert (repo / "app.py").read_text() == "print('v1')\n"
+    assert _git(repo, "branch", "--list", f"halo/{slug}")
+
+
+def test_codex_review_never_passes_model_flag(pkg, tmp_path, monkeypatch):
+    import halowebui_teams.deploy as deploy
+
+    seen = []
+
+    def fake_run(argv, **kwargs):
+        seen.append(argv)
+        return subprocess.CompletedProcess(argv, 0, "VERDICT: PASS\nall good", "")
+
+    monkeypatch.setattr(deploy.subprocess, "run", fake_run)
+    verdict, text = deploy._run_codex_once(str(tmp_path), "main", 1, 2)
+    assert verdict == "PASS" and "all good" in text
+    assert seen and seen[0][1] == "review" and "--model" not in seen[0] and "--reasoning-effort" not in seen[0]

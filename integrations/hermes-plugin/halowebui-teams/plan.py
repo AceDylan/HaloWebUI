@@ -35,6 +35,7 @@ SYSTEM_PROMPT = """你是一个多代理团队的负责人（team-lead）。用�
   "title": "不超过 20 个字的团队任务名",
   "summary": "一两句话说明你打算怎么分工",
   "effort": "quick（只有快答才写这个键，见下）",
+  "repo_change": true（只有给了「项目」才写这个键，见下）,
   "members": [
     {"name": "backend-dev", "role": "后端开发", {member_assistant}, "kind": "code", "model": "模型名", "focus": "负责什么"}
   ],
@@ -68,7 +69,9 @@ SYSTEM_PROMPT = """你是一个多代理团队的负责人（team-lead）。用�
 - 每个任务的 description 要自成一体：写清楚要做什么、产出物写到工作目录下的哪个文件、完成标准。并行任务不能写同一个文件。
 - 目标要图片（生成一张图、配图、插画、海报、封面、信息图、示意图）时，安排一个 kind 为 "image" 的成员：只有它能调用 gpt-image 生图。它的任务依赖提供内容的任务；description 写清要几张图（一般 1 到 3 张）、每张画什么、给谁看、用在哪、横版 / 竖版 / 方形、图里要出现的文字（逐字写出）。不要让别的成员用 SVG、代码或网上找图来代替生图——除非目标要的就是可编辑的矢量图或代码生成的数据图表。
 - 不要安排需要用户手动操作、需要密钥或会改动生产服务的任务。
-- 如果给了「项目」：团队在这个 git 仓库的独立分支（一个 worktree）上工作，工作目录就是仓库根。任务要指向真实的文件和模块，description 写清改哪些文件、怎么验证（跑哪些测试 / 检查）；并行任务改不同的文件；不要安排 push、合并到主分支、部署、构建镜像的任务——合并和推送由用户在协作台里决定。"""
+- 如果给了「项目」：团队在这个 git 仓库的独立分支（一个 worktree）上工作，工作目录就是仓库根。任务要指向真实的文件和模块，description 写清改哪些文件、怎么验证（跑哪些测试 / 检查）；并行任务改不同的文件；不要安排 push、合并到主分支、部署、构建镜像的任务——审查、合并、推送和部署由协作台在完成后统一处理。
+- 给了「项目」就要写 repo_change，按用户**这次要的结果**判断（笔记、对话背景只是参考）：要把仓库里的东西改好（修复、新增、优化、重构、改文档 / 样式 / 配置 / 测试，「看下并处理掉」「不对就改」也算）写 true；只要看法、原因、评估、对比、建议、策略、清单、总结、审查报告（「看下有没有问题」「还有优化空间吗」「值得重构吗」）写 false。拿不准写 false。
+- repo_change 为 false 时：任务都是只读的，不改仓库里的文件；产出完整写进任务结果，确实要落文件的写到 .halo/ 下。"""
 
 USER_TEMPLATE = """协作目标：
 {goal}
@@ -141,7 +144,8 @@ def _plan_for_lead(plan: dict) -> dict:
             entry["model"] = m["model"]  # the user's pick stays
         members.append(entry)
     return {"title": plan.get("title"), "summary": plan.get("summary"),
-            **({"effort": plan["effort"]} if plan.get("effort") else {}), "members": members,
+            **({"effort": plan["effort"]} if plan.get("effort") else {}),
+            **({"repo_change": plan["repo_change"]} if "repo_change" in plan else {}), "members": members,
             "tasks": [{k: t.get(k) for k in ("key", "title", "description", "member", "depends_on")}
                       for t in plan.get("tasks") or []],
             **library_mod.for_lead(plan)}
@@ -392,10 +396,10 @@ def assign_runners(members: list[dict], availability: Optional[dict] = None) -> 
         starts.append(start)
     if availability is None:
         needed = sorted({name for m, start in zip(members, starts)
-                         for name in runners.chain_from(start, auto=m["executor_source"] == "auto")})
+                         for name in runners.chain_from(start, auto=runners.is_auto(m["executor_source"]))})
         availability = runners.check(needed)
     for m in members:
-        picked = runners.select(m["executor"], availability, auto=m["executor_source"] == "auto")
+        picked = runners.select(m["executor"], availability, auto=runners.is_auto(m["executor_source"]))
         m["runner"] = picked["executor"]
         m["runner_note"] = runners.fallback_reason(picked) if picked["executor"] != m["executor"] else ""
         if picked["executor"] is None:
@@ -583,8 +587,8 @@ def validate_plan(raw: Any, *, parallel_cap: int = DEFAULT_PARALLEL_CAP,
             plan["workflow"] = wf
     if raw.get("promoted_from") in ("auto",):
         plan["promoted_from"] = str(raw["promoted_from"])
-    if raw.get("auto_deploy"):
-        plan["auto_deploy"] = True
+    if isinstance(raw.get("repo_change"), bool) and isinstance(raw.get("project"), dict):
+        plan["repo_change"] = raw["repo_change"]
     if isinstance(raw.get("runner_prefs"), dict):
         from . import workflow as wf_mod
 
@@ -668,6 +672,7 @@ def resolve_project(goal: str, choice: str) -> Optional[dict]:
     """The project a plan works in: "none" → none; a path → that repository; "" → the project the
     goal names, if any (``auto``). Raises ValueError for a path that is not a usable repository."""
     from . import deploy, projects
+    from .workflow import user_goal
 
     choice = (choice or "").strip()
     if choice == "none":
@@ -677,7 +682,7 @@ def resolve_project(goal: str, choice: str) -> Optional[dict]:
         if described is None:
             raise ValueError(f"{choice} 不是可以协作的 git 仓库（要是本机某个仓库的根目录，不能是主目录）")
         return {**described, "deploy_profile": deploy.public_profile(described["path"])}
-    suggested = projects.suggest(goal)
+    suggested = projects.suggest(user_goal(goal))  # a note's title or path must not pick the repository
     described = projects.describe(suggested["path"]) if suggested else None
     return {**described, "auto": True, "deploy_profile": deploy.public_profile(described["path"])} if described else None
 
@@ -687,35 +692,36 @@ def propose_plan(goal: str, workspace: str, *, feedback: str = "", previous: Opt
                  project: Optional[dict] = None, team_id: str = "", inputs: Optional[list] = None,
                  library: Optional[dict] = None, workflow: str = "auto",
                  runner_prefs: Optional[dict[str, str]] = None) -> dict:
-    """Ask the lead model for a plan (or build a deterministic dev pipeline plan when ``workflow``
-    is ``dev_pipeline`` / ``dev_lite``), then validate it."""
+    """Ask the lead model for a plan, then validate it. An explicitly chosen ``dev_pipeline`` /
+    ``dev_lite`` is built from its template instead. A free-form (``auto``) goal on a git project the
+    lead judges to change the repository is promoted to the ``dev_lite`` template."""
     from . import progress, workflow as wf_mod
 
-    prev_wf = (previous.get("workflow") if isinstance(previous, dict) else "auto") or "auto"
-    prev_promoted = bool(isinstance(previous, dict) and previous.get("promoted_from") == "auto")
+    previous = previous if isinstance(previous, dict) else None
+    prev_promoted = bool(previous and previous.get("promoted_from") == "auto")
     stay_free = bool(feedback and re.search(r"自由协作|不要晋升|不用快速研发", feedback))
-    wf = wf_mod.normalize_workflow(workflow if workflow and workflow != "auto" else prev_wf)
-    if stay_free or (prev_promoted and not project and wf == "dev_lite"):
+    wf = wf_mod.normalize_workflow(workflow)
+    if wf == "auto" and previous and not prev_promoted:
+        wf = wf_mod.normalize_workflow(previous.get("workflow"))
+    if stay_free:
         wf = "auto"
-    prefs = wf_mod.normalize_runner_prefs(
-        runner_prefs if runner_prefs is not None else (previous.get("runner_prefs") if isinstance(previous, dict) else None)
-    )
-    promoted_from = ""
-    if wf == "auto" and not stay_free and wf_mod.should_promote_to_dev_lite(goal, project):
-        wf = "dev_lite"
-        promoted_from = "auto"
-    if wf in ("dev_pipeline", "dev_lite"):
-        note = "检测到需改仓库代码，自动晋升为「快速研发」并开启自动部署" if promoted_from else f"正在按「{wf_mod.WORKFLOW_LABELS[wf]}」生成多模型协作计划并检查执行器"
-        progress.planning_step(team_id, "check", note)
-        raw = wf_mod.build_pipeline_plan(goal, workflow=wf, project=project, feedback=feedback,
-                                         runner_prefs=prefs, inputs=inputs, promoted_from=promoted_from)
-        plan, errors = validate_plan(raw, parallel_cap=parallel_cap)
-        if plan is None:
-            return {"ok": False, "error": "研发流水线计划校验失败：" + "；".join(errors)}
+    prefs = wf_mod.normalize_runner_prefs(runner_prefs or (previous or {}).get("runner_prefs"))
+
+    def finished(plan: dict, attempts: int) -> dict:
         estimate = progress.estimate_plan(plan)
         if estimate:
             plan["estimate"] = estimate
-        return {"ok": True, "plan": plan, "attempts": 1}
+        return {"ok": True, "plan": plan, "attempts": attempts}
+
+    if wf != "auto":
+        progress.planning_step(team_id, "check", f"正在按「{wf_mod.WORKFLOW_LABELS[wf]}」生成多模型协作计划并检查执行器")
+        raw = wf_mod.build_pipeline_plan(
+            goal, workflow=wf, project=project, feedback=feedback, runner_prefs=prefs, inputs=inputs,
+            lead_model={"model": lead_model, "requested": lead_model} if lead_model else None)
+        plan, errors = validate_plan(raw, parallel_cap=parallel_cap)
+        if plan is None:
+            return {"ok": False, "error": "研发流水线计划校验失败：" + "；".join(errors)}
+        return finished(plan, 1)
 
     library = library_mod.usable(library)
 
@@ -744,21 +750,34 @@ def propose_plan(goal: str, workspace: str, *, feedback: str = "", previous: Opt
             last_errors = ["负责人返回的不是 JSON"]
         else:
             parsed["lead_model"] = used
+            for key in ("workflow", "promoted_from", "project", "runner_prefs"):
+                parsed.pop(key, None)  # decided here, never by the lead's text
             if project:
                 parsed["project"] = project
+                parsed["repo_change"] = wf_mod.wants_repo_change(parsed, goal)
+            from_template = False
+            if project and parsed["repo_change"] and not stay_free:
+                chosen = wf_mod.promotion_prefs(parsed, prefs, library)
+                if feedback and prev_promoted:
+                    # The user is adjusting a promoted plan: the lead's adjusted one, not the template again.
+                    parsed.update(workflow="dev_lite", promoted_from="auto")
+                elif chosen is not None:
+                    progress.planning_step(team_id, "check", "要改仓库代码，自动晋升为「快速研发」，完成后自动审查并部署")
+                    parsed = wf_mod.build_pipeline_plan(
+                        goal, workflow="dev_lite", project=project, feedback=feedback, runner_prefs=chosen,
+                        inputs=inputs, promoted_from="auto", lead_model=used)
+                    from_template = True
             if prefs:
-                parsed["runner_prefs"] = prefs
+                parsed["runner_prefs"] = {**prefs, **(parsed.get("runner_prefs") or {})}
             parsed.setdefault("lead", {})
             if isinstance(parsed["lead"], dict):
                 parsed["lead"]["model"] = used.get("model")
             if prefs and isinstance(parsed.get("members"), list):
                 wf_mod.apply_runner_prefs(parsed["members"], prefs)
-            plan, last_errors = validate_plan(parsed, parallel_cap=parallel_cap, library=library)
+            plan, last_errors = validate_plan(parsed, parallel_cap=parallel_cap,
+                                              library=None if from_template else library)
             if plan is not None:
-                estimate = progress.estimate_plan(plan)
-                if estimate:
-                    plan["estimate"] = estimate
-                return {"ok": True, "plan": plan, "attempts": attempt + 1}
+                return finished(plan, attempt + 1)
         messages = messages + [
             {"role": "assistant", "content": text[:6000]},
             {"role": "user", "content": "这个计划不能用：" + "；".join(last_errors) + "。请改正后只输出 JSON。"},
@@ -772,16 +791,18 @@ def propose_plan(goal: str, workspace: str, *, feedback: str = "", previous: Opt
 # picks come back through apply_decision and the plan is validated again like any other.
 
 def decision_options() -> dict:
-    """What a member may be given: Hermes' models and the executors with their availability now."""
+    """What a member may be given: Hermes' models and the engine families. Inside a family the
+    user's order decides the runner, so each family is offered as the runner it starts on."""
     availability = runners.check()
-    return {
-        "models": hermes_models(),
-        "executors": [{"name": name, "label": runners.BY_NAME[name].label, "note": runners.BY_NAME[name].note,
-                       "available": bool((availability.get(name) or {}).get("available")) or runners.BY_NAME[name].native,
-                       "reason": (availability.get(name) or {}).get("reason") or ""}
-                      for name in EXECUTORS if name in runners.BY_NAME],
-        "kinds": {k: runners.kind_default(k) for k in runners.KINDS},
-    }
+    executors = []
+    for family, chain in runners.family_orders().items():
+        start = runners.family_start(family)
+        executors.append({
+            "name": start, "label": runners.FAMILY_LABELS[family], "note": runners.BY_NAME[start].note,
+            "available": any((availability.get(n) or {}).get("available") or runners.BY_NAME[n].native for n in chain),
+            "reason": (availability.get(start) or {}).get("reason") or ""})
+    return {"models": hermes_models(), "executors": executors,
+            "kinds": {k: runners.kind_default(k) for k in runners.KINDS}}
 
 
 def apply_decision(plan: dict, picks: Any, library: Optional[dict] = None,
@@ -799,9 +820,12 @@ def apply_decision(plan: dict, picks: Any, library: Optional[dict] = None,
         if not isinstance(pick, dict):
             continue
         executor = str(pick.get("executor") or "")
-        if (executor in EXECUTORS and member.get("kind") != "image"
-                and member.get("executor_source") not in ("goal", "user")):
-            member.update(executor=executor, executor_source="decision")
+        # It picks the engine; the runner inside a family stays the user's order. A template plan's
+        # division of work is fixed.
+        if (executor in EXECUTORS and member.get("kind") != "image" and not plan.get("workflow")
+                and member.get("executor_source") not in ("goal", "user")
+                and runners.family_of(executor) != runners.family_of(member.get("executor"))):
+            member.update(executor=runners.family_start(runners.family_of(executor)), executor_source="decision")
         model = str(pick.get("model") or "")
         if model in names and member.get("model_source") != "user":
             member.update(model=model, model_source="decision")

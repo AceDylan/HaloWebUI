@@ -75,53 +75,128 @@ def test_dev_pipeline_auto_mode_walks_family_order_when_top_down(pkg, availabili
     assert by["codex-dev"]["runner"] == "codex"
 
 
-def test_auto_promotes_to_dev_lite_for_repo_code_changes(pkg, availability):
-    project = {"name": "HaloWebUI", "path": "/root/HaloWebUI", "branch": "main"}
-    res = pkg.plan.propose_plan(
-        "给 HaloWebUI 协作台修复接口并发 bug 并补单元测试",
-        "/tmp/ws",
-        project=project,
-        workflow="auto",
-    )
-    assert res["ok"] is True
-    plan = res["plan"]
-    assert plan["workflow"] == "dev_lite"
-    assert plan["promoted_from"] == "auto"
-    assert plan["auto_deploy"] is True
-    assert len(plan["tasks"]) == 3
+PROJECT = {"name": "HaloWebUI", "path": "/root/HaloWebUI", "branch": "main"}
+NOTES = ("\n\n笔记库里可能相关的笔记（用户自己的知识库，宿主机只读路径，按需阅读；可能过时，以实际系统为准）：\n"
+         "- AICheckIn 修改记录：/root/Documents/Obsidian Vault/项目/AICheckIn.md")
 
 
-def test_auto_stays_freeform_for_readonly_repo_goal_or_explicit_feedback(pkg, availability, monkeypatch):
-    import halowebui_teams.workflow as workflow_mod
-
-    project = {"name": "HaloWebUI", "path": "/root/HaloWebUI", "branch": "main"}
-    assert workflow_mod.should_promote_to_dev_lite("审查 HaloWebUI 最近的提交并出报告", project) is False
-    assert workflow_mod.should_promote_to_dev_lite("给 HaloWebUI 写新接口", None) is False
-    assert workflow_mod.should_promote_to_dev_lite("给 HaloWebUI 写新接口", project) is True
-
-    # Feedback asking for 自由协作 keeps workflow free-form instead of re-promoting
+@pytest.fixture
+def lead(pkg, monkeypatch):
+    """The lead's answer to a free-form goal (``lead.answer``) and what it was asked."""
     import json
 
-    fake_free = json.dumps({
-        "title": "自由协作任务",
-        "summary": "自定义",
-        "members": [{"name": "m1", "role": "开发", "executor": "codex"}],
-        "tasks": [{"key": "T1", "title": "执行", "description": "做", "member": "m1", "depends_on": []}],
-    })
-    monkeypatch.setattr(pkg.plan, "call_model", lambda messages, **kw: (fake_free, "", {"model": "gpt-chat"}))
-    res = pkg.plan.propose_plan(
-        "给 HaloWebUI 加一个按钮",
-        "/tmp/ws",
-        project=project,
-        workflow="auto",
-        feedback="不要用流水线，保持自由协作",
-    )
-    assert res["ok"] is True
-    assert res["plan"].get("workflow", "auto") == "auto"
-    assert res["plan"].get("promoted_from") is None
+    class Lead:
+        answer: dict = {}
+        prompts: list = []
+
+        def says(self, repo_change=None, **member):
+            self.answer = {
+                "title": "任务", "summary": "分工",
+                "members": [{"name": "dev", "role": "开发", "kind": "code", **member}],
+                "tasks": [{"key": "T1", "title": "做", "description": "做", "member": "dev", "depends_on": []}],
+                **({} if repo_change is None else {"repo_change": repo_change})}
+
+    fake = Lead()
+    fake.prompts = []
+
+    def call(messages, **kw):
+        fake.prompts.append(messages)
+        return json.dumps(fake.answer), "", {"model": "gpt-chat", "requested": kw.get("preferred") or ""}
+
+    monkeypatch.setattr(pkg.plan, "call_model", call)
+    return fake
 
 
-def test_create_team_defaults_auto_deploy_for_project_and_exposes_promoted_from(pkg, availability, tmp_path):
+def _plan(pkg, goal, **kw):
+    res = pkg.plan.propose_plan(goal, "/tmp/ws", project=kw.pop("project", PROJECT), **kw)
+    assert res["ok"] is True, res
+    return res["plan"]
+
+
+def test_repo_change_is_promoted_whatever_the_notes_say(pkg, availability, lead):
+    lead.says(repo_change=True)
+    plan = _plan(pkg, "修一下 HaloWebUI 下拉框错位" + NOTES)
+    assert (plan["workflow"], plan["promoted_from"], plan["repo_change"]) == ("dev_lite", "auto", True)
+    assert [m["name"] for m in plan["members"]] == ["claude-lead", "codex-dev"] and len(plan["tasks"]) == 3
+    assert plan["lead_model"]["model"] == "gpt-chat"  # the model that judged it, not a placeholder
+
+
+def test_analysis_of_a_project_is_not_promoted_and_ships_nothing(pkg, availability, lead):
+    lead.says(repo_change=False)
+    plan = _plan(pkg, "hub书签服务的UI还有优化空间吗 给个策略")
+    assert "workflow" not in plan and "promoted_from" not in plan and plan["repo_change"] is False
+    # an explicit read-only goal wins over the lead
+    lead.says(repo_change=True)
+    plan = _plan(pkg, "看下 HaloWebUI 自动分流\n\n用户约束：只读任务。只查看和分析")
+    assert "workflow" not in plan and plan["repo_change"] is False
+    text = pkg.teams._workspace_text({"workspace": "/w", "repo_change": False,
+                                      "project": {"name": "a", "path": "/a", "branch": "halo/x"}})
+    assert "不要改动仓库里的任何文件" in text
+
+
+def test_lead_that_does_not_say_is_read_from_its_members(pkg, availability, lead):
+    lead.says()
+    assert _plan(pkg, "给 HaloWebUI 加按钮")["workflow"] == "dev_lite"
+    lead.says(kind="research")
+    assert _plan(pkg, "评估 HaloWebUI")["repo_change"] is False
+    # without a project there is nothing to change
+    lead.says(repo_change=True)
+    plan = _plan(pkg, "写个脚本", project=None)
+    assert "workflow" not in plan and "repo_change" not in plan
+
+
+def test_runners_named_in_the_goal_survive_promotion(pkg, availability, lead):
+    lead.says(repo_change=True, executor="reclaude")
+    plan = _plan(pkg, "用 reclaude 修复 HaloWebUI 登录 bug")
+    by = {m["name"]: m["executor"] for m in plan["members"]}
+    assert plan["workflow"] == "dev_lite" and by == {"claude-lead": "reclaude", "codex-dev": "codex"}
+    # a division of work the template does not have: the lead's own plan stays
+    lead.says(repo_change=True, executor="offiagy")
+    plan = _plan(pkg, "用 offiagy 改 HaloWebUI 首页")
+    assert "workflow" not in plan and plan["members"][0]["executor"] == "offiagy" and plan["repo_change"] is True
+    lead.says(repo_change=True)
+    lead.answer["members"].append({"name": "dev2", "role": "后端", "kind": "code", "executor": "cchclaude"})
+    lead.answer["members"][0]["executor"] = "reclaude"
+    lead.answer["tasks"].append({"key": "T2", "title": "后端", "description": "做", "member": "dev2", "depends_on": []})
+    plan = _plan(pkg, "用 reclaude 改前端，cchclaude 写后端")
+    assert "workflow" not in plan and [m["executor"] for m in plan["members"]] == ["reclaude", "cchclaude"]
+
+
+def test_replanning_a_promoted_plan_follows_the_feedback(pkg, availability, lead):
+    lead.says(repo_change=True)
+    first = _plan(pkg, "修复 HaloWebUI 下拉框")
+    lead.says(repo_change=True)
+    lead.answer["members"].append({"name": "qa", "role": "测试", "kind": "code"})
+    lead.answer["tasks"].append({"key": "T2", "title": "测试", "description": "测", "member": "qa", "depends_on": ["T1"]})
+    again = _plan(pkg, "修复 HaloWebUI 下拉框", feedback="加一个测试成员", previous=first)
+    assert [m["name"] for m in again["members"]] == ["dev", "qa"]
+    assert (again["workflow"], again["promoted_from"]) == ("dev_lite", "auto")
+    assert "claude-lead" in lead.prompts[-1][-1]["content"]  # the lead saw the plan it adjusts
+    free = _plan(pkg, "修复 HaloWebUI 下拉框", feedback="不要用流水线，保持自由协作", previous=again)
+    assert "workflow" not in free and "promoted_from" not in free
+    # and the per-family choice made when the team was started is kept
+    first = _plan(pkg, "修复 HaloWebUI 下拉框", runner_prefs={"claude": "cchclaude"})
+    again = _plan(pkg, "修复 HaloWebUI 下拉框", feedback="加测试", previous=first, runner_prefs={})
+    assert again["runner_prefs"] == {"claude": "cchclaude"} and again["members"][0]["executor"] == "cchclaude"
+
+
+def test_chosen_template_keeps_the_chosen_lead_model(pkg, availability):
+    plan = pkg.plan.propose_plan("改接口", "/tmp/ws", workflow="dev_lite", lead_model="claude-chat")["plan"]
+    assert plan["lead_model"]["requested"] == "claude-chat"
+    plan = pkg.plan.propose_plan("改接口", "/tmp/ws", workflow="dev_lite")["plan"]
+    assert not plan["lead_model"].get("model")
+
+
+def test_a_note_does_not_pick_the_project(pkg, monkeypatch):
+    import halowebui_teams.projects as projects
+
+    monkeypatch.setattr(projects, "candidates", lambda: [{"path": "/root/AICheckIn", "name": "AICheckIn", "aliases": []}])
+    monkeypatch.setattr(projects, "describe", lambda path: {"path": path, "name": "AICheckIn"})
+    assert pkg.plan.resolve_project("写一份周报" + NOTES, "") is None
+    assert pkg.plan.resolve_project("改 AICheckIn 侧栏" + NOTES, "")["path"] == "/root/AICheckIn"
+
+
+def test_create_team_defaults_auto_deploy_for_project_and_exposes_promoted_from(pkg, availability, tmp_path, lead):
     import subprocess
 
     repo = tmp_path / "repo"
@@ -134,6 +209,7 @@ def test_create_team_defaults_auto_deploy_for_project_and_exposes_promoted_from(
     subprocess.run(["git", "commit", "-m", "init"], cwd=repo, check=True, capture_output=True)
 
     proj = {"name": "repo", "path": str(repo), "branch": "main"}
+    lead.says(repo_change=True)
     plan = pkg.plan.propose_plan(
         "修改 repo 页面样式",
         str(tmp_path / "ws"),
@@ -156,3 +232,8 @@ def test_create_team_defaults_auto_deploy_for_project_and_exposes_promoted_from(
     assert "不要自行调用外部 Codex / AGY / CCG" in ws_text
     assert "不要 git push" in ws_text
     assert "不要自行调用外部 Codex / AGY / CCG" in pkg.teams._workspace_text({"workspace": "/tmp/ws"})
+
+    lead.says(repo_change=False)
+    plan = _plan(pkg, "分析 repo", project=proj)
+    pkg.teams.create_team("team-analysis-1", plan, owner="u1", goal="分析 repo")
+    assert pkg.teams.snapshot("team-analysis-1")["team"]["auto_deploy"] is False

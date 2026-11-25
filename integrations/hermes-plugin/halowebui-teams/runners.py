@@ -209,6 +209,23 @@ def family_of(name: Any) -> str:
     return spec.family if spec else "hermes"
 
 
+def is_auto(source: Any) -> bool:
+    """Whether a member's runner was picked automatically (by its kind or by the decision model), so
+    it falls back within its family. A runner the user, the goal or an applied lead suggestion named
+    never does."""
+    return (source or "auto") in ("auto", "decision")
+
+
+def family_start(family: str) -> str:
+    """The runner automatic work of *family* starts on: a kind's configured default in it, else
+    the head of the family's order."""
+    for kind in KINDS:
+        name = kind_default(kind)
+        if BY_NAME[name].family == family:
+            return name
+    return family_orders()[family][0]
+
+
 def family_orders() -> dict[str, tuple[str, ...]]:
     """Per-family auto order, overridable via ``halo-teams-runners.json`` ``families``."""
     raw = overrides().get("families")
@@ -517,9 +534,10 @@ def _probe_account(spec: RunnerSpec) -> tuple[str, str, Optional[str]]:
             if qrc == 0 and qline and "⚠️" not in qline:
                 clean = qline.replace("**", "").strip()
                 # Flag quota exhausted when either 5h or weekly window shows 0% remaining.
-                if re.search(r"剩余\s*0%", clean):
-                    reset = re.search(r"（([^）]+重置)）", clean)
-                    return "quota", redact(clean, 200), (reset.group(1) if reset else None)
+                # Several windows used up: the last one listed (weekly) resets last.
+                used_up = re.findall(r"剩余\s*0%(?:（([^）]+?)\s*重置）)?", clean)
+                if used_up:
+                    return "quota", redact(clean, 200), used_up[-1] or None
                 return "ok", redact(clean, 180), None
         return "ok", "官方 Claude 已登录（claude.ai 订阅 OAuth）；实际请求以 runner 结果为准", None
     if spec.probe == "codex_login":

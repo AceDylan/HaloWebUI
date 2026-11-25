@@ -69,6 +69,34 @@ def availability(monkeypatch):
     return fake
 
 
+REAL = {}
+
+
+@pytest.fixture
+def real_review(no_real_runners):
+    return REAL["review"]
+
+
+@pytest.fixture
+def real_fix(no_real_runners):
+    return REAL["fix"]
+
+
+@pytest.fixture(autouse=True)
+def no_real_runners(monkeypatch):
+    """The ship pipeline reviews by default: no test starts a real Codex or Claude run."""
+    import halowebui_teams.deploy as deploy
+
+    REAL.setdefault("review", deploy._run_codex_once)
+    REAL.setdefault("fix", deploy._run_claude_fix)
+    monkeypatch.setattr(deploy, "_run_codex_once", lambda *_a, **_k: ("PASS", "ok"))
+
+    def refuse(*_a):
+        raise AssertionError("a test must not start a real Claude fix run")
+
+    monkeypatch.setattr(deploy, "_run_claude_fix", refuse)
+
+
 @pytest.fixture
 def pkg():
     import halowebui_teams.common as common

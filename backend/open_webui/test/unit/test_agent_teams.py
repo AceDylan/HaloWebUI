@@ -1539,7 +1539,7 @@ def test_promoted_from_and_result_settled_auto_deploy_grace_window(hermes):
             **PLAN,
             "workflow": "dev_lite",
             "promoted_from": "auto",
-            "auto_deploy": True,
+            "repo_change": True,
             "project": {"name": "HaloWebUI", "path": "/root/HaloWebUI"},
         },
     }
@@ -1549,6 +1549,10 @@ def test_promoted_from_and_result_settled_auto_deploy_grace_window(hermes):
     assert pub["workflow"] == "dev_lite"
     assert pub["promoted_from"] == "auto"
     assert pub["auto_deploy"] is True
+    # a template's division of work is not the decision model's to change; an analysis ships nothing
+    assert teams_utils.ships_itself({**refreshed.plan, "repo_change": False}) is False
+    assert teams_utils.ships_itself({**refreshed.plan, "repo_change": True}) is True
+    assert teams_utils.ships_itself({"members": []}) is False
 
     # result_settled stays False during the 45s grace window after acceptance ready when auto_deploy is on
     now = _time.time()

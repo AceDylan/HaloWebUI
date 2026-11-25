@@ -117,7 +117,7 @@
 	$: acceptance = live?.team?.conclusion?.acceptance;
 	$: autoDeployPending =
 		key === 'done' &&
-		!!team?.project &&
+		!!team?.auto_deploy &&
 		!live?.team?.project_cleaned &&
 		!deploy &&
 		acceptance?.status === 'ready' &&

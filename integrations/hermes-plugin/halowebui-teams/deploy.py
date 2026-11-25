@@ -32,11 +32,13 @@ DEFAULT_CI_TIMEOUT = 1800
 DEFAULT_CMD_TIMEOUT = 600
 DEFAULT_REVIEW_ROUNDS = 2
 DEFAULT_REVIEW_TIMEOUT = 900
+FIX_TIMEOUT = 1800
+FIX_MAX_TURNS = 120
+REVIEW_MAX_CHARS = 8000
 DEFAULT_VERIFY_TIMEOUT = 120
 LOG_MAX_CHARS = 6000
 _SHA_RE = re.compile(r"^[0-9a-f]{7,40}$", re.I)
 _GH_REPO_RE = re.compile(r"github\.com[:/]([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+?)(?:\.git)?$")
-_VERDICT_RE = re.compile(r"(?mi)^\s*(?:(?:REVIEW\s+)?VERDICT\s*:?\s*)?(PASS|FAIL|BLOCKED)\b")
 
 _inflight: set[str] = set()
 _lock = threading.Lock()
@@ -91,7 +93,7 @@ def _builtin_profiles() -> list[tuple[Callable[[str], bool], dict]]:
                     "'cd /root/AICheckIn && git pull --ff-only && docker compose up -d --build "
                     "&& docker image prune -f'"
                 ),
-                "verify_command": "python3 /root/vps/vpsctl.py run hk-vps 'cd /root/AICheckIn && docker compose ps --status running'",
+                "verify_command": "python3 /root/vps/vpsctl.py run hk-vps 'cd /root/AICheckIn && docker compose ps --status running -q | grep -q . && echo AICheckIn 线上运行正常'",
                 "timeout": 600,
                 "cleanup": True,
             },
@@ -143,7 +145,7 @@ def _normalize_profile(raw: dict, default_label: str) -> dict:
         "command": command,
         "verify_command": verify_command,
         "verify_timeout": max(15, min(int(raw.get("verify_timeout") or DEFAULT_VERIFY_TIMEOUT), 600)),
-        "codex_review": bool(raw.get("codex_review", False)),
+        "codex_review": bool(raw.get("codex_review", True)),
         "codex_review_rounds": max(1, min(int(raw.get("codex_review_rounds") or DEFAULT_REVIEW_ROUNDS), 3)),
         "timeout": max(30, min(int(raw.get("timeout") or DEFAULT_CMD_TIMEOUT), 3600)),
         "cleanup": bool(raw.get("cleanup", True)),
@@ -201,6 +203,8 @@ def public_state(team: dict) -> Optional[dict]:
 
 
 def _clean_output(text: Any, limit: int = LOG_MAX_CHARS) -> str:
+    if isinstance(text, bytes):
+        text = text.decode("utf-8", "replace")
     cleaned = projects._URL_CREDENTIALS.sub(r"\1***@", str(text or ""))
     cleaned = redact(cleaned, limit + 500, one_line=False)
     return cleaned[-limit:] if len(cleaned) > limit else cleaned
@@ -366,7 +370,8 @@ def _run_shell_step(slug: str, repo_path: str, cmd_template: str, sha: str, base
     }
     try:
         proc = subprocess.run(
-            ["bash", "-lc", cmd],
+            # Not a login shell: its greeting would fill the log and pass for the failure's last line.
+            ["bash", "-c", cmd],
             cwd=repo_path,
             capture_output=True,
             text=True,
@@ -374,7 +379,8 @@ def _run_shell_step(slug: str, repo_path: str, cmd_template: str, sha: str, base
             env=env,
         )
     except subprocess.TimeoutExpired as exc:
-        out = _clean_output((exc.stdout or "") + "\n" + (exc.stderr or ""))
+        # TimeoutExpired carries bytes even in text mode.
+        out = "\n".join(part for part in (_clean_output(exc.stdout or ""), _clean_output(exc.stderr or "")) if part)
         _append_log(slug, f"=== {label}（超时）===\n{out}")
         raise projects.ProjectError(504, f"{label}超时（超过 {timeout} 秒）") from None
     output = _clean_output((proc.stdout or "") + ("\n" + proc.stderr if proc.stderr else ""))
@@ -395,51 +401,74 @@ def _run_verify_command(slug: str, repo_path: str, sha: str, base_branch: str, b
                            int(profile.get("verify_timeout") or DEFAULT_VERIFY_TIMEOUT), "线上核实")
 
 
-def _parse_review_verdict(result_json: dict, text: str) -> str:
-    raw = str(result_json.get("review_verdict") or "").strip().upper()
-    if raw in ("PASS", "FAIL", "BLOCKED"):
-        return raw
-    m = _VERDICT_RE.search(text or "")
-    if m:
-        return m.group(1).upper()
-    return "BLOCKED"
+def _run_runner(spec: Any, argv: list[str], workspace: str, timeout: int) -> subprocess.CompletedProcess:
+    """One foreground runner run inside the pipeline: bounded by its own ``--timeout`` (so it never
+    goes on editing after we gave up), no automatic continuation, no notice of its own."""
+    env = {**os.environ, "RUNNER_SUPPRESS_NOTIFY": "1", "RECLAUDE_AUTO_CONTINUE": "0"}
+    try:
+        return subprocess.run([*argv, "--timeout", str(timeout), "--no-vault-archive"], cwd=workspace,
+                              capture_output=True, text=True, timeout=timeout + 120, env=env)
+    except subprocess.TimeoutExpired:
+        raise projects.ProjectError(504, f"{spec.label} 超时（超过 {timeout // 60} 分钟）") from None
 
 
-def _run_codex_once(workspace: str, base_branch: str, round_num: int, max_rounds: int) -> tuple[str, str]:
-    """Run ``codex-run.sh review`` inheriting Codex's own config (never forces --model).
-    Returns ``(verdict, summary_text)`` where verdict ∈ PASS | FAIL | BLOCKED."""
+def _runner_files(spec: Any, run_id: str) -> tuple[dict, str]:
+    run_dir = spec.runs_root / run_id
+    data: dict = {}
+    text = ""
+    try:
+        loaded = json.loads((run_dir / "result.json").read_text(encoding="utf-8"))
+        data = loaded if isinstance(loaded, dict) else {}
+    except (OSError, ValueError):
+        pass
+    try:
+        text = (run_dir / "result.md").read_text(encoding="utf-8")
+    except OSError:
+        pass
+    return data, text
+
+
+def _task_file(name: str, text: str) -> Path:
+    from . import reclaude
+
+    reclaude.TASK_DIR.mkdir(parents=True, exist_ok=True)
+    path = reclaude.TASK_DIR / name
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
+def _run_codex_once(workspace: str, base_branch: str, round_num: int, max_rounds: int, *,
+                    goal: str = "", previous: str = "") -> tuple[str, str]:
+    """One read-only ``codex-run.sh run --audit`` (Codex's own configured model). Returns
+    ``(verdict, report)``; the verdict is the one the runner parsed (PASS | FAIL | BLOCKED), never
+    guessed from the text. ``previous``: the report of the round before, whose findings were fixed."""
     from . import reclaude, runners
 
     spec = runners.BY_NAME["codex"]
     run_id = reclaude.new_run_id()
-    reclaude.TASK_DIR.mkdir(parents=True, exist_ok=True)
-    task_file = reclaude.TASK_DIR / f"deploy-review-r{round_num}-{run_id}.md"
-    task_file.write_text(
-        f"你是独立代码审查员（第 {round_num}/{max_rounds} 轮）。请以只读方式审查当前分支相对 `{base_branch}` 的全部代码改动：\n"
-        f"- 运行 `git diff {base_branch}...HEAD` 与 `git status` 检查改动文件，重点排查正确性缺陷、安全/权限隐患、边界条件、回归风险及缺失验证。\n"
-        f"- 不要修改任何文件，不要提交，不要推送。\n"
-        f"- 在回复开头明确写 `VERDICT: PASS`（无阻断问题，可合并上线）或 `VERDICT: FAIL`（列出每条必须修复的具体文件与问题）。\n",
-        encoding="utf-8",
+    task_file = _task_file(
+        f"deploy-review-r{round_num}-{run_id}.md",
+        f"合并前代码审查（第 {round_num}/{max_rounds} 轮）：只读审查当前目录（git worktree）里团队分支相对 `{base_branch}` 的全部改动。\n"
+        f"- 用 `git log {base_branch}..HEAD` 和 `git diff {base_branch}...HEAD` 看改动，需要时读相关代码。\n"
+        "- 只有合并后会真实出问题的才判 FAIL：没做到目标要求的行为、正常使用会出错或崩溃、安全 / 权限隐患、丢数据、"
+        "破坏已有功能。目标没有要求的假设输入、可选的加固、补测试、文档措辞、风格偏好、改动之前就有的问题都不判 FAIL，"
+        "写成「建议」即可。\n"
+        "- 一次把所有必须修的问题都列出来，不要留到下一轮。\n"
+        "- 这是代码审查：只读环境里跑不了测试、连不上线上服务都不算缺少证据，按代码判断；"
+        "团队的实测结果可以看 `.halo/` 下的回执（不一定有，没有不影响结论）。\n"
+        "- 有必须修的问题就判 FAIL，逐条写出文件、行号、问题和改法；没有就判 PASS。\n"
+        + (f"\n这次要达成的目标：\n{goal[:3000]}\n" if goal else "")
+        + (f"\n上一轮的审查意见（之后已经修过）。这一轮先核对它们是否真的修好，再看修复有没有引入新问题；"
+           f"上一轮看过而没提的代码，只有确实漏掉了会真实出问题的缺陷才判 FAIL：\n{previous}\n" if previous else ""),
     )
-    argv = [spec.script_path, "review", "--cwd", workspace, "--task-file", str(task_file),
-            "--run-id", run_id, "--timeout", str(DEFAULT_REVIEW_TIMEOUT), "--no-vault-archive"]
-    proc = subprocess.run(argv, cwd=workspace, capture_output=True, text=True, timeout=DEFAULT_REVIEW_TIMEOUT + 60)
-    run_dir = spec.runs_root / run_id
-    result_json: dict = {}
-    try:
-        loaded = json.loads((run_dir / "result.json").read_text(encoding="utf-8"))
-        if isinstance(loaded, dict):
-            result_json = loaded
-    except (OSError, ValueError):
-        pass
-    text = str(result_json.get("result") or result_json.get("response") or "")
-    if not text:
-        try:
-            text = (run_dir / "result.md").read_text(encoding="utf-8")
-        except OSError:
-            text = (proc.stdout or "") + "\n" + (proc.stderr or "")
-    verdict = _parse_review_verdict(result_json, text)
-    return verdict, _clean_output(text, 2400)
+    proc = _run_runner(spec, [spec.script_path, "run", "--audit", "--cwd", workspace, "--task-file", str(task_file),
+                              "--run-id", run_id], workspace, DEFAULT_REVIEW_TIMEOUT)
+    data, text = _runner_files(spec, run_id)
+    verdict = str(data.get("review_verdict") or "").upper()
+    if verdict not in ("PASS", "FAIL"):
+        verdict = "BLOCKED"
+    text = text or str(data.get("result") or "") or f"{proc.stdout or ''}\n{proc.stderr or ''}"
+    return verdict, _clean_output(text, REVIEW_MAX_CHARS).strip()
 
 
 def _pick_claude_fixer(team: dict) -> tuple[Optional[str], str]:
@@ -465,46 +494,39 @@ def _run_claude_fix(runner_name: str, workspace: str, review_text: str, round_nu
 
     spec = runners.BY_NAME[runner_name]
     run_id = reclaude.new_run_id()
-    reclaude.TASK_DIR.mkdir(parents=True, exist_ok=True)
-    task_file = reclaude.TASK_DIR / f"deploy-fix-r{round_num}-{run_id}.md"
-    task_file.write_text(
-        f"Codex 第 {round_num} 轮合并前审查未通过，请按下面审查意见修复当前分支代码并重新运行相关测试：\n\n"
+    task_file = _task_file(
+        f"deploy-fix-r{round_num}-{run_id}.md",
+        f"Codex 第 {round_num} 轮合并前审查未通过，请按下面的审查意见修复当前分支的代码并重新运行相关测试：\n\n"
         f"{review_text}\n\n"
-        "要求：只修复审查指出的问题，不要 git push 或合并主分支，修完后验证通过即可。\n",
-        encoding="utf-8",
+        "要求：只修复审查指出的问题；不要 git push、不要合并主分支、不要部署，也不要再调用其他代理或审查工具。\n",
     )
-    argv = [spec.script_path, "run", "--cwd", workspace, "--task-file", str(task_file),
-            "--run-id", run_id, "--max-turns", "80", "--no-vault-archive"]
-    proc = subprocess.run(argv, cwd=workspace, capture_output=True, text=True, timeout=DEFAULT_REVIEW_TIMEOUT + 60)
-    run_dir = spec.runs_root / run_id
-    try:
-        out = (run_dir / "result.md").read_text(encoding="utf-8")
-    except OSError:
-        out = (proc.stdout or "") + "\n" + (proc.stderr or "")
+    proc = _run_runner(spec, [spec.script_path, "run", "--cwd", workspace, "--task-file", str(task_file),
+                              "--run-id", run_id, "--max-turns", str(FIX_MAX_TURNS)], workspace, FIX_TIMEOUT)
+    _data, text = _runner_files(spec, run_id)
     if proc.returncode != 0:
-        raise projects.ProjectError(502, f"{runner_name} 修复审查问题失败（exit {proc.returncode}）")
-    # Commit fixes on the team branch so the next review round sees a clean committed diff.
-    status = projects.git(workspace, "status", "--porcelain", timeout=20).stdout.strip()
-    if status:
-        projects.git(workspace, "add", "-A", "--", *projects.JUNK, timeout=30)
-        if projects.git(workspace, "diff", "--cached", "--quiet", timeout=20).returncode != 0:
-            projects.git(workspace, "-c", f"user.name={projects.AUTHOR[0]}", "-c", f"user.email={projects.AUTHOR[1]}",
-                         "commit", "-m", f"[Codex审查修复 · 第{round_num}轮] {runner_name}", timeout=30, check=True)
-    return _clean_output(out, 1600)
+        why = "它有问题要你回答" if proc.returncode == 2 else f"exit {proc.returncode}"
+        raise projects.ProjectError(502, f"{runner_name} 没能修完审查问题（{why}），已暂停合并")
+    # On the team branch, so the next round reviews it.
+    projects.commit_all(workspace, f"[Codex 审查修复 · 第 {round_num} 轮] {runner_name}")
+    return _clean_output(text or proc.stdout or "", 1600)
 
 
 def _run_codex_review(slug: str, team: dict, workspace: str, base_branch: str, profile: dict) -> str:
     """Up to ``codex_review_rounds`` (default 2) rounds of Codex review + Claude fix."""
     from . import runners
+    from .workflow import user_goal
 
     max_rounds = int(profile.get("codex_review_rounds") or DEFAULT_REVIEW_ROUNDS)
     codex_avail = (runners.check(["codex"]).get("codex") or {})
     if not codex_avail.get("available"):
         raise projects.ProjectError(409, f"Codex 不可用，已暂停合并等待你处理：{codex_avail.get('reason') or '未知原因'}")
+    projects.commit_all(workspace, f"[收尾] {team.get('title') or ''}")  # the review reads the committed diff
 
+    goal = user_goal(team.get("goal") or "")
+    text = ""
     for round_num in range(1, max_rounds + 1):
         _set_step(slug, "review", "running", f"第 {round_num}/{max_rounds} 轮 Codex 审查中")
-        verdict, text = _run_codex_once(workspace, base_branch, round_num, max_rounds)
+        verdict, text = _run_codex_once(workspace, base_branch, round_num, max_rounds, goal=goal, previous=text)
         _append_log(slug, f"=== Codex 审查第 {round_num} 轮（{verdict}）===\n{text}")
         if verdict == "PASS":
             return f"第 {round_num} 轮审查通过"
@@ -516,10 +538,12 @@ def _run_codex_review(slug: str, team: dict, workspace: str, base_branch: str, p
             fix_out = _run_claude_fix(fixer, workspace, text, round_num)
             _append_log(slug, f"=== {fixer} 自动修复（第 {round_num} 轮）===\n{fix_out}")
             continue
+        if verdict == "BLOCKED":
+            tail = text.splitlines()[-1][:160] if text else "没有输出"
+            raise projects.ProjectError(
+                409, f"Codex 第 {round_num}/{max_rounds} 轮审查没有给出结论，已暂停自动合并（{tail}）；请查看部署日志后处理")
         raise projects.ProjectError(
-            409,
-            f"Codex 第 {round_num}/{max_rounds} 轮审查未通过（{verdict}），已暂停自动合并；请查看部署日志后处理",
-        )
+            409, f"Codex 第 {round_num}/{max_rounds} 轮审查未通过，已暂停自动合并；请查看部署日志后处理")
     raise projects.ProjectError(409, "Codex 审查未通过，已暂停自动合并")
 
 
@@ -602,6 +626,9 @@ def _run_ship(slug: str, profile: dict, by: str, cleanup: bool, codex_review: bo
             _run_deploy_command(slug, repo, sha, base_branch, branch, profile)
             _set_step(slug, "deploy", "done", "部署完成")
 
+        # The new plugin is live on disk from here, whatever the remaining steps say.
+        need_gateway_restart = any(p.startswith(pref) for pref in profile.get("restart_gateway_paths") or [] for p in touched)
+
         # 5. Cleanup worktree & branch (optional)
         if cleanup:
             team = read_team(slug) or team
@@ -617,10 +644,6 @@ def _run_ship(slug: str, profile: dict, by: str, cleanup: bool, codex_review: bo
             _set_step(slug, "verify", "running", "正在核实线上状态")
             _run_verify_command(slug, repo, sha, base_branch, branch, profile)
             _set_step(slug, "verify", "done", "线上核实通过")
-
-        restart_prefixes = profile.get("restart_gateway_paths") or []
-        if restart_prefixes and any(any(p.startswith(pref) for pref in restart_prefixes) for p in touched):
-            need_gateway_restart = True
 
         finished = now()
         note = "检测到协作台插件改动，将在数秒后平滑重启 Hermes 网关加载新版插件" if need_gateway_restart else ""
@@ -640,6 +663,7 @@ def _run_ship(slug: str, profile: dict, by: str, cleanup: bool, codex_review: bo
         logger.warning("halowebui-teams: ship failed for %s", slug, exc_info=True)
         _fail_ship(slug, started, f"发布异常：{type(exc).__name__}: {redact(exc, 240)}", by)
     finally:
+        _mark_attempt(slug)
         with _lock:
             _inflight.discard(slug)
         try:
@@ -652,6 +676,25 @@ def _run_ship(slug: str, profile: dict, by: str, cleanup: bool, codex_review: bo
             logger.warning("halowebui-teams: deploy Telegram notice failed for %s", slug, exc_info=True)
         if need_gateway_restart:
             _schedule_gateway_restart()
+
+
+def _attempt_key(team: dict) -> str:
+    """What an automatic ship would ship: the round and the branch's head."""
+    head = projects.git(team["workspace"], "rev-parse", "HEAD", timeout=10).stdout.strip()
+    return f"{int(team.get('round') or 0)}:{head[:12]}"
+
+
+def _mark_attempt(slug: str) -> None:
+    """This head has been through the pipeline (its own commits — review fixes, leftovers — included):
+    auto-deploy waits for new work instead of shipping the same thing again."""
+    team = read_team(slug) or {}
+    if (team.get("project") or {}).get("discarded_at") or not os.path.isdir(team.get("workspace") or ""):
+        return
+    try:
+        key = _attempt_key(team)
+    except (OSError, subprocess.SubprocessError):
+        return
+    _update_deploy(slug, lambda d: d.update({"auto_key": key}))
 
 
 def _fail_ship(slug: str, started: int, message: str, by: str) -> None:
@@ -694,11 +737,7 @@ def start(slug: str, *, by: str = "user", cleanup: Optional[bool] = None, auto_k
         raise projects.ProjectError(409, "团队分支已删除，无法推送部署")
     profile = profile_for(repo)
     do_cleanup = profile["cleanup"] if cleanup is None else bool(cleanup)
-    do_review = (
-        bool(codex_review)
-        if codex_review is not None
-        else bool(profile.get("codex_review") or team.get("workflow") in ("dev_pipeline", "dev_lite"))
-    )
+    do_review = profile["codex_review"] if codex_review is None else bool(codex_review)
     if do_cleanup and (team.get("conclusion") or {}).get("status") == "generating":
         raise projects.ProjectError(409, "负责人正在写结论（要读工作区文件），写完后再推送部署并清理")
 
@@ -757,8 +796,7 @@ def tick_board(slug: str, team: dict) -> bool:
     if (entry.get("illustration") or {}).get("status") == "generating":
         return False
 
-    head = projects.git(workspace, "rev-parse", "HEAD", timeout=10).stdout.strip()
-    auto_key = f"{int(team.get('round') or 0)}:{head[:12]}"
+    auto_key = _attempt_key(team)
     existing = project.get("deploy") if isinstance(project.get("deploy"), dict) else {}
     if existing.get("status") == "running" or existing.get("auto_key") == auto_key:
         return False

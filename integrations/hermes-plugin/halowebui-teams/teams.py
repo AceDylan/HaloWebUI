@@ -279,7 +279,10 @@ def _workspace_text(team: dict) -> str:
                 "只改你的任务说明里涉及的文件，不要改别人的产出。可以 git commit（留在这个分支上），"
                 "**不要 git push、不要切换分支、不要合并到主分支、不要部署，也不要自行调用外部 Codex / AGY / CCG 等审阅或协作 CLI**"
                 "——多模型分工、最终 Codex 审阅与合并推送部署由协作台统一调度。"
-                "按任务说明里的方法验证（测试 / 检查），把验证结果写进 result。")
+                + ("这次目标只要分析结论：任务说明没有明确要求改文件时，不要改动仓库里的任何文件，"
+                   "产出完整写进 result，确实要落文件的写到 .halo/ 下。"
+                   if team.get("repo_change") is False else
+                   "按任务说明里的方法验证（测试 / 检查），把验证结果写进 result。"))
     return (f"工作目录：{team['workspace']}（全队共用；只写你的任务说明里指定的文件，不要改别人的产出；"
             "不要自行调用外部 Codex / AGY / CCG 等审阅或协作 CLI）。")
 
@@ -335,7 +338,10 @@ def create_team(team_id: str, plan: dict, *, owner: str, chat_id: str = "", goal
                        if k in ("platform", "chat_id", "user_id", "thread_id") and v},
             "workspace": workspace,
             "project": project,
-            "auto_deploy": bool(project) if auto_deploy is None else bool(auto_deploy),
+            # An analysis (repo_change False) leaves nothing to ship; everything else in a project does.
+            "auto_deploy": (bool(project) and checked.get("repo_change") is not False
+                            if auto_deploy is None else bool(auto_deploy)),
+            **({"repo_change": checked["repo_change"]} if "repo_change" in checked else {}),
             "workflow": str(checked.get("workflow") or "auto"),
             **({"promoted_from": checked["promoted_from"]} if checked.get("promoted_from") else {}),
             "runner_prefs": checked.get("runner_prefs") or {},

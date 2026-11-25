@@ -143,7 +143,8 @@ export type TeamPlan = {
 	workflow?: TeamWorkflow;
 	promoted_from?: string | null;
 	runner_prefs?: Record<string, string>;
-	auto_deploy?: boolean;
+	/** Project teams: false = an analysis only, nothing to ship. */
+	repo_change?: boolean;
 	/** Where the team will work: a git repository (``auto``: the goal named it). */
 	project?: {
 		path: string;

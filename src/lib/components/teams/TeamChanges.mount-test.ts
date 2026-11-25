@@ -164,6 +164,24 @@ describe('ChangesView', () => {
 		expect(target.textContent).toContain('不是在项目里做的');
 	});
 
+	it('says an analysis team does not deploy itself', async () => {
+		api.getTeamChanges.mockResolvedValue({
+			...CHANGES,
+			auto_deploy: false,
+			deploy_profile: {
+				configured: false,
+				label: '合并、推送并清理',
+				has_ci: false,
+				has_command: false,
+				cleanup: true
+			}
+		});
+		await mount({ teamId: 'team-1', phase: 'completed' });
+		expect(target.querySelector('[data-changes-auto-deploy-badge]').textContent).toContain(
+			'不自动部署'
+		);
+	});
+
 	it('triggers one-click deploy after confirm, shows progress steps, CI link and auto-deploy note', async () => {
 		api.getTeamChanges.mockResolvedValue({
 			...CHANGES,
@@ -181,7 +199,9 @@ describe('ChangesView', () => {
 
 		// Auto-deploy is always on for repo changes: quiet badge instead of toggle button
 		expect(target.querySelector('[data-changes-auto-deploy]')).toBeFalsy();
-		expect(target.querySelector('[data-changes-auto-deploy-badge]').textContent).toContain('自动推送部署');
+		expect(target.querySelector('[data-changes-auto-deploy-badge]').textContent).toContain(
+			'完成后自动审查并部署'
+		);
 
 		// One-click deploy confirms first
 		target.querySelector('[data-changes-deploy]').click();
@@ -216,7 +236,7 @@ describe('ChangesView', () => {
 		) as any;
 		confirm.click();
 		await sleep(20);
-		expect(api.deployTeamChanges).toHaveBeenCalledWith('tok', 'team-1', true, false);
+		expect(api.deployTeamChanges).toHaveBeenCalledWith('tok', 'team-1', true, true);
 		expect(target.querySelector('[data-deploy-status="succeeded"]')).toBeTruthy();
 		expect(target.querySelector('[data-changes-ci-link]').getAttribute('href')).toContain('/runs/123');
 		expect(target.querySelector('[data-changes-discarded]').textContent).toContain('已发布并清理分支');

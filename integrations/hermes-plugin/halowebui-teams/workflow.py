@@ -31,29 +31,50 @@ _SKIP_DESIGN_RE = re.compile(
     r"纯后端|仅后端|不改前端|没有前端|无前端|跳过设计|不需要设计稿|不用设计稿|backend[- ]only|no[- ]ui",
     re.I,
 )
-_READONLY_GOAL_RE = re.compile(
-    r"不要改代码|不改代码|只读|只看|仅分析|仅调研|只分析|代码审查报告|只做审查|只查|帮我看下|解释一下|"
-    r"分析一下.*架构|审查.*(?:提交|代码|改动).*(?:报告|建议|清单)|(?:仅|只)做.*(?:审查|调研|分析|总结)",
-    re.I,
-)
-_REPO_EDIT_RE = re.compile(
-    r"改|修改|修复|修一下|修个|新增|增加|添加|加上|实现|开发|重构|优化|删除|去掉|移除|替换|升级|适配|接入|"
-    r"支持|部署|提交代码|推送部署|推送上线|写(?:一个|个|新|代码|接口|页面|组件|测试|单测|脚本|函数|功能)|"
-    r"做个|做一个|调整|完善|打通|落地|补齐|迁移|改造|"
-    r"fix|add|implement|refactor|update|remove|feat|upgrade|deploy|build|create",
-    re.I,
-)
+# HaloWebUI appends these to the goal (utils/vault_notes.py goal_notes, routers/auto.py): the notes
+# are context, not what the user asked for; the constraint is an explicit "change nothing".
+NOTES_MARK = "\n\n笔记库里可能相关的笔记（"
+READONLY_MARK = "用户约束：只读任务"
 
 
-def should_promote_to_dev_lite(goal: str, project: Optional[dict]) -> bool:
-    """When workflow is default ``auto`` (自由协作) but targets a git project and intends to change
-    repository code, promote directly to ``dev_lite`` (and auto-deploy on completion)."""
-    if not (isinstance(project, dict) and project.get("path")):
+def user_goal(goal: str) -> str:
+    """The goal without the related notes HaloWebUI appended to it."""
+    return str(goal or "").split(NOTES_MARK, 1)[0]
+
+
+def wants_repo_change(parsed: dict, goal: str) -> bool:
+    """Whether the team is to change the repository: the lead's own judgement of the goal
+    (``repo_change``), except that an explicit read-only goal never does. A lead that did not say
+    is read from the kinds of work it planned."""
+    if READONLY_MARK in goal:
         return False
-    text = str(goal or "").strip()
-    if not text or _READONLY_GOAL_RE.search(text):
-        return False
-    return bool(_REPO_EDIT_RE.search(text))
+    said = parsed.get("repo_change")
+    if isinstance(said, bool):
+        return said
+    kinds = {runners.normalize_kind(m.get("kind")) for m in parsed.get("members") or [] if isinstance(m, dict)}
+    return bool(kinds & {"code", "codex", "ui", "complex"})
+
+
+def promotion_prefs(parsed: dict, prefs: dict[str, str], library: Optional[dict] = None) -> Optional[dict[str, str]]:
+    """The runners the dev_lite template should use for the lead's plan, or None when the template
+    cannot express what the user asked for (a runner named for a role it does not have, two runners
+    of one family, an image member, a preferred assistant): the lead's own plan is kept then."""
+    if (library or {}).get("preferred"):
+        return None
+    named: dict[str, str] = {}
+    for member in parsed.get("members") or []:
+        if not isinstance(member, dict):
+            continue
+        if runners.normalize_kind(member.get("kind")) == "image":
+            return None
+        executor = str(member.get("executor") or "").strip().lower()
+        if not executor:
+            continue
+        family = runners.family_of(executor)
+        if family not in ("claude", "codex") or named.get(family, executor) != executor:
+            return None
+        named[family] = executor
+    return {**prefs, **named}
 
 
 def normalize_workflow(value: Any) -> str:
@@ -128,6 +149,7 @@ def build_pipeline_plan(
     runner_prefs: Optional[dict[str, str]] = None,
     inputs: Optional[list[str]] = None,
     promoted_from: str = "",
+    lead_model: Optional[dict] = None,
 ) -> dict:
     """Build a deterministic raw plan dict matching the reference diagram, ready for ``validate_plan``."""
     wf = normalize_workflow(workflow)
@@ -140,6 +162,7 @@ def build_pipeline_plan(
         else ""
     )
     ctx_tail = extra_feedback + input_note
+    goal = user_goal(goal)
     skip_design = bool(_SKIP_DESIGN_RE.search(goal + "\n" + (feedback or "")))
 
     if wf == "dev_lite":
@@ -353,11 +376,11 @@ def build_pipeline_plan(
         "members": members,
         "tasks": tasks,
         "lead": {"name": "team-lead", "role": "负责人"},
-        "lead_model": {"model": "pipeline-template", "source": "workflow", "label": WORKFLOW_LABELS[wf]},
+        "lead_model": lead_model or {},
     }
     if promoted_from:
         plan["promoted_from"] = promoted_from
     if project:
         plan["project"] = project
-        plan["auto_deploy"] = True
+        plan["repo_change"] = True
     return plan

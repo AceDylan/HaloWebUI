@@ -387,7 +387,7 @@ async def dispatch(request, user, row, form, decision, models, ambiguous, bases,
         goal = form.question
         if form.context:
             goal += "\n\n对话背景（供参考，遵守用户当前要求）：\n" + form.context
-        if read_only:
+        if read_only:  # "用户约束：只读任务" is also what the Hermes plugin looks for (workflow.py READONLY_MARK)
             goal += ("\n\n用户约束：只读任务。只查看和分析（读文件、查 git 记录、核对配置），不要创建、修改或删除"
                      "任何文件，不要提交、推送、部署，也不要运行会改变状态的命令；需要改动时写进结论里的建议。")
         if not form.research:

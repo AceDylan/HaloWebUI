@@ -30,7 +30,7 @@
 	let confirmDiscard = false;
 	let confirmDeploy = false;
 	let deployCleanup = true;
-	let deployReview = false;
+	let deployReview = true;
 	let showDeployLog = false;
 	let timer: ReturnType<typeof setTimeout> | null = null;
 
@@ -230,7 +230,8 @@
 						{#if !project.discarded_at}
 							<span
 								class="rounded-full border border-sky-500/30 bg-sky-500/10 px-2 py-0.5 text-[11px] text-sky-700 dark:text-sky-300"
-								data-changes-auto-deploy-badge>代码改动完成后自动推送部署</span
+								data-changes-auto-deploy-badge={data?.auto_deploy ? 'on' : 'off'}
+								>{data?.auto_deploy ? '代码改动完成后自动审查并部署' : '不自动部署，可手动推送'}</span
 							>
 						{/if}
 					</div>
@@ -326,7 +327,7 @@
 								disabled={!!busy}
 								on:click={() => {
 									deployCleanup = deployProfile?.cleanup ?? true;
-									deployReview = !!(deploy?.codex_review ?? deployProfile?.codex_review);
+									deployReview = deployProfile?.codex_review ?? true;
 									confirmDeploy = true;
 								}}
 								data-changes-deploy

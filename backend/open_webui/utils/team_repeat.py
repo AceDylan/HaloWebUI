@@ -42,7 +42,7 @@ DEFAULT_TZ = "Asia/Shanghai"
 SWEEP_SECONDS = 60
 TIME_RE = re.compile(r"^([01]\d|2[0-3]):([0-5]\d)$")
 # The settings of the source team a new run keeps (see utils/agent_teams.py _start).
-_KEPT_META = ("lead_model", "project", "assistants", "inputs", "auto_deploy")
+_KEPT_META = ("lead_model", "project", "assistants", "inputs", "auto_deploy", "workflow", "runner_prefs")
 
 
 # --- 再来一次 -------------------------------------------------------------------------------------

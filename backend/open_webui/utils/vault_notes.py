@@ -337,6 +337,7 @@ def goal_notes(notes: list[dict]) -> str:
     rows = [n for n in notes if n.get("hostPath")]
     if not rows:
         return ""
+    # The Hermes plugin (halowebui-teams workflow.py NOTES_MARK) tells the goal from its notes by this opening.
     return ("\n\n笔记库里可能相关的笔记（用户自己的知识库，宿主机只读路径，按需阅读；可能过时，以实际系统为准）：\n"
             + "\n".join(f"- {n['title']}：{n['hostPath']}" for n in rows))
 

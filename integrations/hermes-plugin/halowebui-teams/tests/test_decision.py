@@ -71,18 +71,51 @@ def test_decision_keeps_image_members_goal_executors_and_preferred_assistants(pk
 def test_decision_falls_back_along_the_chain_when_its_pick_is_down(pkg, monkeypatch, plan_dict, availability):
     _cfg(pkg, monkeypatch)
     plan = _auto_plan(pkg, plan_dict)
-    availability.down["codex"] = "额度用完"
-    decided, _ = pkg.plan.apply_decision(plan, {"backend-dev": {"executor": "codex"}})
+    availability.down["offiagy"] = "额度用完"
+    decided, _ = pkg.plan.apply_decision(plan, {"backend-dev": {"executor": "offiagy"}})
     member = decided["members"][0]
-    assert member["executor"] == "codex" and member["runner"] != "codex" and member["runner_note"]
+    # the model's pick is automatic, not the user's: it still falls back in its family
+    assert member["executor"] == "offiagy" and member["executor_source"] == "decision"
+    assert member["runner"] == "agy" and member["runner_note"]
+
+
+def test_decision_picks_the_engine_not_the_order_inside_it(pkg, monkeypatch, plan_dict, availability):
+    _cfg(pkg, monkeypatch)
+    plan = _auto_plan(pkg, plan_dict)
+    decided, _ = pkg.plan.apply_decision(plan, {"backend-dev": {"executor": "anyclaude"},  # same family: no change
+                                                "reviewer": {"executor": "reclaude"}})     # another: its first runner
+    out = {m["name"]: (m["executor"], m["executor_source"]) for m in decided["members"]}
+    assert out["backend-dev"] == ("officlaude", "auto") and out["reviewer"] == ("officlaude", "decision")
+
+
+def test_decision_leaves_a_template_plan_alone(pkg, monkeypatch, availability):
+    _cfg(pkg, monkeypatch)
+    plan = pkg.plan.propose_plan("修接口", "/tmp/ws", workflow="dev_lite")["plan"]
+    decided, errors = pkg.plan.apply_decision(plan, {"codex-dev": {"executor": "hermes"}})
+    assert not errors and {m["name"]: m["executor"] for m in decided["members"]}["codex-dev"] == "codex"
+
+
+def test_decision_chosen_task_falls_back_at_runtime(pkg, monkeypatch, team_id, plan_dict, availability):
+    import halowebui_teams.fallback as fallback
+
+    _cfg(pkg, monkeypatch)
+    plan, _ = pkg.plan.apply_decision(_auto_plan(pkg, plan_dict), {"backend-dev": {"executor": "offiagy"}})
+    first = pkg.teams.create_team(team_id, plan, owner="u1", goal="g")
+    slug, t1 = first["board"], first["tasks"]["T1"]
+    with pkg.common.board_conn(slug) as conn:
+        assert fallback.reroute(slug, conn, t1, "offiagy", "额度用完", phase="launch") == "agy"
 
 
 def test_decision_options_and_bad_input(pkg, monkeypatch, plan_dict, availability):
     _cfg(pkg, monkeypatch)
-    availability.down["agy"] = "地区限制"
+    availability.down["offiagy"] = "地区限制"
+    availability.down["codex"] = "未登录"
     options = pkg.plan.decision_options()
     assert [m["model"] for m in options["models"]] == ["gpt-chat", "deepseek-chat", "claude-chat"]
     by = {e["name"]: e for e in options["executors"]}
-    assert by["agy"]["available"] is False and by["hermes"]["available"] is True and options["kinds"]["ui"] == "offiagy"
+    assert set(by) == {"officlaude", "codex", "offiagy", "hermes"}  # one per engine family
+    assert by["offiagy"]["available"] is True  # agy of its family can run
+    assert by["codex"]["available"] is False and by["hermes"]["available"] is True
+    assert options["kinds"]["ui"] == "offiagy"
     assert pkg.plan.apply_decision("x", {})[0] is None
     assert pkg.plan.apply_decision(plan_dict, None)[0] is None

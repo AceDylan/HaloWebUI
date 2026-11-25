@@ -506,6 +506,7 @@ def test_offiagy_leads_agy_family_and_probes_the_google_sign_in(pkg, availabilit
 @pytest.mark.parametrize("response,rc,quota_out,expected", [
     ({"loggedIn": True, "authMethod": "claude.ai"}, 0, "**官方 Claude 额度**：5 小时 剩余 **80%** · 每周 剩余 **60%**", "ok"),
     ({"loggedIn": True, "authMethod": "claude.ai"}, 0, "**官方 Claude 额度**：5 小时 剩余 **0%**（17:00 重置） · 每周 剩余 **60%**", "quota"),
+    ({"loggedIn": True, "authMethod": "claude.ai"}, 0, "**官方 Claude 额度**：5 小时 剩余 **10%**（17:00 重置） · 每周 剩余 **0%**（11-30 22:00 重置）", "quota"),
     ({"loggedIn": False, "authMethod": "none"}, 1, "", "account"),
     ({"loggedIn": True, "authMethod": "api_key"}, 0, "", "account"),
 ])
@@ -520,8 +521,10 @@ def test_official_account_probe_checks_oauth_and_quota(pkg, monkeypatch, respons
         return rc, json.dumps(response)
 
     monkeypatch.setattr(pkg.runners, "_run", run)
-    state, detail, _reset = pkg.runners._probe_account(pkg.runners.BY_NAME["officlaude"])
+    state, detail, reset = pkg.runners._probe_account(pkg.runners.BY_NAME["officlaude"])
     assert state == expected
+    # the window that is used up, not the first one listed
+    assert reset == {True: "11-30 22:00", False: "17:00" if expected == "quota" else None}["11-30" in quota_out]
     assert calls[0] == ["/stub/officlaude", "auth", "status", "--json"]
     assert "官方 Claude" in detail
 

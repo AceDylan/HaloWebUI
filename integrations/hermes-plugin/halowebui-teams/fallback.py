@@ -61,12 +61,12 @@ def _assign(conn: Any, task_id: str, executor: str) -> None:
 def reroute(slug: str, conn: Any, task_id: str, current: str, reason: str, *, phase: str,
             fail_kind: str = "", run_row: Optional[int] = None) -> Optional[str]:
     """Give *task_id* (ready or blocked, not claimed) to the next available runner after
-    *current*. When the user explicitly chose *chosen* (``chosen_by != 'auto'``), never
-    auto-fallback: block the task and let the user pick another runner."""
+    *current*. When *chosen* was named explicitly (see ``runners.is_auto``), never auto-fallback:
+    block the task and let the user pick another runner."""
     team = read_team(slug) or {}
     entry = (team.get("tasks") or {}).get(task_id) or {}
     chosen = entry.get("chosen") or current
-    is_auto = entry.get("chosen_by", "auto") == "auto"
+    is_auto = runners.is_auto(entry.get("chosen_by"))
     if fail_kind and phase == "runtime":
         runners.mark_down(current, "recent_failure", reason)
     picked = runners.select_after(chosen, current, auto=is_auto)
@@ -138,7 +138,7 @@ def reselect_for_retry(slug: str, conn: Any, task_id: str, *, executor: Optional
                 "text": f"用户手动换执行来源：{current} → {executor}"})
         return executor
     chosen = entry.get("chosen") or current
-    picked = runners.select(chosen, auto=entry.get("chosen_by", "auto") == "auto")
+    picked = runners.select(chosen, auto=runners.is_auto(entry.get("chosen_by")))
     target = picked["executor"]
     if target is None or target == current:
         return current

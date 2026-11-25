@@ -190,7 +190,7 @@ async def _plan_job(team: AgentTeamModel, target: HermesTarget, feedback: str, p
         ok = isinstance(body, dict) and body.get("ok") and isinstance(body.get("plan"), dict)
         if ok:
             plan = body["plan"]
-            if assisted:
+            if assisted and not plan.get("workflow"):  # a template's division of work is fixed
                 from open_webui.utils.team_decision import assist
 
                 # executors, models and assistants still automatic: the user's decision model
@@ -303,6 +303,13 @@ def plan_draws(plan: Optional[dict]) -> bool:
     return any(isinstance(m, dict) and m.get("kind") == "image" for m in (plan or {}).get("members") or [])
 
 
+def ships_itself(plan: dict) -> bool:
+    """A project team pushes and deploys what it changed once it is done; one the lead judged an
+    analysis only (``repo_change`` false) has nothing to ship."""
+    project = plan.get("project")
+    return isinstance(project, dict) and bool(project.get("path")) and plan.get("repo_change") is not False
+
+
 async def start_team(team: AgentTeamModel, target: HermesTarget,
                      access: Optional["AssistantAccess"] = None) -> AgentTeamModel:
     """Hand the plan to Hermes: the board and its tasks are created and the members start.
@@ -329,11 +336,9 @@ async def start_team(team: AgentTeamModel, target: HermesTarget,
                     log.warning("teams: the assistants applied for %s could not be recorded", team.id)
             snapshots = member_snapshots(applied)
         sent = {k: v for k, v in plan.items() if k != "assistants_applied"}
-        has_project = isinstance(plan.get("project"), dict) and bool(plan["project"].get("path"))
         body = {"team_id": team.id, "plan": sent, "goal": team.goal, "title": team.title,
                 "chat_id": team.chat_id or "", "origin": team_origin(team),
-                # Every project team auto-deploys when it has actual repo changes (zero changes auto-clean).
-                "auto_deploy": True if has_project else bool((team.meta or {}).get("auto_deploy"))}
+                "auto_deploy": ships_itself(plan) or bool((team.meta or {}).get("auto_deploy"))}
         if snapshots:
             body["member_assistants"] = snapshots
         templates = image_templates(team.user_id, limit=200)
@@ -798,7 +803,7 @@ def public_team(team: AgentTeamModel, *, with_plan: bool = True) -> dict:
     plan = data.get("plan") or {}
     project = plan.get("project") if isinstance(plan.get("project"), dict) else None
     data["auto_start"] = bool(meta.get("auto_start"))
-    data["auto_deploy"] = bool(project) or bool(meta.get("auto_deploy"))
+    data["auto_deploy"] = ships_itself(plan) or bool(meta.get("auto_deploy"))
     data["workflow"] = plan.get("workflow") or meta.get("workflow") or "auto"
     data["promoted_from"] = plan.get("promoted_from") or None
     data["runner_prefs"] = plan.get("runner_prefs") or meta.get("runner_prefs") or {}

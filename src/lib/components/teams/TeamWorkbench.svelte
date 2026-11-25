@@ -290,6 +290,7 @@
 		const autoDeployPending =
 			phase === 'completed' &&
 			projectTeam &&
+			!!live?.team.auto_deploy &&
 			!live?.team.deploy &&
 			acc?.status === 'ready' &&
 			acc?.verdict !== 'unmet' &&

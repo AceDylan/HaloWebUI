@@ -207,7 +207,7 @@ def prepare(repo: str, slug: str, workspace: str) -> dict:
             "base_sha": base_sha, "branch": branch, "created_at": now()}
 
 
-def _commit(workspace: str, message: str) -> Optional[str]:
+def commit_all(workspace: str, message: str) -> Optional[str]:
     git(workspace, "add", "-A", "--", ".", *JUNK, check=True)
     if git(workspace, "diff", "--cached", "--quiet").returncode == 0:
         return None
@@ -229,7 +229,7 @@ def commit_finished(slug: str, team: dict, done: list[dict]) -> list[str]:
         member = task.get("member") or ""
         message = f"[{task.get('key') or ''} · {member}] {task.get('title') or ''}".strip()
         try:
-            sha = _commit(workspace, message[:200])
+            sha = commit_all(workspace, message[:200])
         except (ProjectError, OSError, subprocess.SubprocessError) as exc:
             logger.warning("halowebui-teams: commit for %s %s failed: %s", slug, task.get("id"),
                            getattr(exc, "message", type(exc).__name__))
@@ -366,7 +366,7 @@ def merge(slug: str, team: dict) -> dict:
         raise ProjectError(409, "开始时项目处于分离 HEAD，没有可合并的目标分支；请推送团队分支后自己合并")
     workspace = team.get("workspace") or ""
     if os.path.isdir(workspace):
-        _commit(workspace, f"[收尾] {team.get('title') or ''}")
+        commit_all(workspace, f"[收尾] {team.get('title') or ''}")
     current = git(repo, "rev-parse", "--abbrev-ref", "HEAD", timeout=10).stdout.strip()
     if current == base_branch:
         if git(repo, "status", "--porcelain", "--untracked-files=no", timeout=20).stdout.strip():
@@ -435,7 +435,7 @@ def push(slug: str, team: dict, what: str) -> dict:
         raise ProjectError(409, "这个仓库没有 origin 远程")
     workspace = team.get("workspace") or ""
     if what == "branch" and os.path.isdir(workspace):
-        _commit(workspace, f"[收尾] {team.get('title') or ''}")
+        commit_all(workspace, f"[收尾] {team.get('title') or ''}")
     result = git(repo, "push", "origin", f"refs/heads/{ref}:refs/heads/{ref}", timeout=PUSH_TIMEOUT)
     if result.returncode != 0:
         raise ProjectError(502, "推送失败：" + (result.stderr or result.stdout).strip()[-300:])

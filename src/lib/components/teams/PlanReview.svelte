@@ -255,7 +255,10 @@
 					</span>
 					<span
 						class="ml-auto rounded-full bg-sky-500/10 px-2 py-0.5 text-[11px] text-sky-700 ring-1 ring-inset ring-sky-500/20 dark:text-sky-300"
-						data-plan-auto-deploy-note>有代码改动时完成后自动审查并部署，无改动自动清理</span
+						data-plan-auto-deploy-note
+						>{plan.repo_change === false
+							? '只做分析，不改仓库、不部署'
+							: '有代码改动时完成后自动审查并部署，无改动自动清理'}</span
 					>
 				</div>
 			{/if}

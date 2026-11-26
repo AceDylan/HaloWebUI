@@ -933,6 +933,8 @@ class HermesCreateForm(BaseModel):
     origin: dict = Field(default_factory=dict)
     auto_start: bool = False
     auto_deploy: bool = False
+    # ``/team 多模型 …`` / ``/team 快速 …`` from Telegram / QQ: the same templates as the browser's.
+    workflow: Literal["auto", "dev_pipeline", "dev_lite"] = "auto"
 
 
 async def _hermes_caller(request: Request):
@@ -1028,7 +1030,7 @@ async def hermes_create(request: Request, form: HermesCreateForm, caller=Depends
         raise HTTPException(status_code=400, detail="请写下要协作完成的目标")
     return public_team(await _start(request, user, goal, target, origin=_clean_origin(form.origin),
                                     auto_start=form.auto_start, auto_deploy=form.auto_deploy,
-                                    access=AssistantAccess(request, user)))
+                                    workflow=form.workflow, access=AssistantAccess(request, user)))
 
 
 @router.get("/hermes/teams/{team_id}")

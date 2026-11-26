@@ -404,6 +404,20 @@ def test_hermes_routes_need_the_users_own_hermes_key(hermes, monkeypatch):
     assert _client("u1").get(base).status_code == 401
 
 
+def test_telegram_team_can_pick_a_workflow(hermes, monkeypatch):
+    client = _hermes_client(monkeypatch)
+    h = {"X-Hermes-Key": "k", "X-Halo-Owner": "u1"}
+    origin = {"platform": "qqbot", "chat_id": "c1", "user_id": "c1"}
+    picked = client.post("/api/v1/teams/hermes/teams", headers=h,
+                         json={"goal": "给 HaloWebUI 加个按钮", "origin": origin, "workflow": "dev_pipeline"})
+    assert picked.status_code == 200
+    assert AgentTeams.get(picked.json()["id"], "u1").meta["workflow"] == "dev_pipeline"
+    plain = client.post("/api/v1/teams/hermes/teams", headers=h, json={"goal": "分析一下", "origin": origin})
+    assert "workflow" not in (AgentTeams.get(plain.json()["id"], "u1").meta or {})
+    assert client.post("/api/v1/teams/hermes/teams", headers=h,
+                       json={"goal": "x", "origin": origin, "workflow": "bogus"}).status_code == 422
+
+
 def test_telegram_team_runs_the_same_plan_and_approve_flow(hermes, monkeypatch):
     client = _hermes_client(monkeypatch)
     h = {"X-Hermes-Key": "k", "X-Halo-Owner": "u1"}

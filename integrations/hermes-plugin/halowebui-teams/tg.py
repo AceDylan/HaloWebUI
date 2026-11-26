@@ -373,8 +373,11 @@ async def _say(source: Any, text: str, buttons: Optional[list] = None, event: An
 
 
 USAGE = ("<b>协作台</b>\n"
-         "/team 目标 —— 交给一个团队：负责人先做计划发给你，批准后成员分工执行，完成后把结论发回来。\n"
+         "/team 目标 —— 交给一个团队：负责人先做计划发给你，批准后成员分工执行，完成后把结论发回来。"
+         "默认自由协作，要改仓库时自动转快速研发。\n"
          "/team 直接 目标 —— 计划好就直接开始，不用批准。\n"
+         "/team 多模型 目标 —— 多模型研发：Claude 和 AGY 各出方案，合成后问你拍板（回复那条问题消息），再设计、写后端和前端。\n"
+         "/team 快速研发 目标 —— 快速研发：摸底 → Codex 写后端 → Claude 写前端并测试。可以和「直接」叠着写。\n"
          "/team —— 最近的协作任务。\n"
          "回复完成通知 —— 对负责人说还要补什么、改什么。")
 
@@ -386,36 +389,64 @@ async def _team_command(source: Any, owner: str, args: str, event: Any) -> None:
     if args in ("help", "帮助", "?", "？"):
         await _say(source, USAGE, None, event)
         return
-    goal, auto_start = split_auto_start(args)
+    goal, auto_start, workflow = split_team_args(args)
     if not goal:
         await _say(source, USAGE, None, event)
         return
     try:
-        team = await asyncio.to_thread(link.create, owner, goal, _origin(source), auto_start)
+        team = await asyncio.to_thread(link.create, owner, goal, _origin(source), auto_start, workflow)
     except link.HaloError as exc:
         await _say(source, f"⚠️ 没能发起协作：{esc(exc.message)}", None, event)
         return
     url = link.team_url(team["id"])
     after = ("计划好就直接开始（不用批准），计划发到这里给你过目。" if auto_start
              else "计划好了发到这里（一般 1 分钟内），你批准后才会开始。")
-    await _say(source, f"🧭 已交给负责人做计划：<b>{esc(clip(team.get('title'), 60))}</b>\n{after}",
+    await _say(source, f"🧭 已交给负责人做计划{workflow_note(workflow)}：<b>{esc(clip(team.get('title'), 60))}</b>\n{after}",
                [[("🌐 在网页看", "url:" + url)]] if url else None, event)
 
 
 AUTO_START_WORDS = ("直接开始", "直接", "自动开始", "自动")
+# 「快速」 alone is not one: 「/team 快速 看下日志」 is a goal, not a request for the dev template.
+WORKFLOW_WORDS = (("多模型研发", "dev_pipeline"), ("多模型", "dev_pipeline"), ("快速研发", "dev_lite"),
+                  ("自由协作", "auto"))
+WORKFLOW_LABEL = {"dev_pipeline": "多模型研发", "dev_lite": "快速研发"}
 AUTO_START_SEPARATORS = " ：:，,\u3000"
 
 
-def split_auto_start(args: str) -> tuple[str, bool]:
-    """``/team 直接 <目标>`` (also ``自动 …`` or ``! …``): start as soon as the plan is ready. A word
-    counts only with a separator after it, so a goal that merely begins with 「直接」 is a goal."""
-    text = (args or "").strip()
-    if text[:1] in ("!", "！"):
-        return text[1:].strip(), True
-    for word in AUTO_START_WORDS:
+def workflow_note(workflow: str) -> str:
+    label = WORKFLOW_LABEL.get(workflow)
+    return f"（{label}）" if label else ""
+
+
+def _leading_word(text: str, words) -> Optional[tuple[str, str]]:
+    """The word *text* starts with, followed by a separator: (word, rest)."""
+    for word in words:
         if text.startswith(word) and text[len(word):len(word) + 1] in tuple(AUTO_START_SEPARATORS):
-            return text[len(word):].strip(AUTO_START_SEPARATORS), True
-    return text, False
+            return word, text[len(word):].strip(AUTO_START_SEPARATORS)
+    return None
+
+
+def split_team_args(args: str) -> tuple[str, bool, str]:
+    """``/team [直接] [多模型|快速研发|自由协作] <目标>`` in either order → (goal, auto_start, workflow).
+    「直接」 (also ``自动 …`` or ``! …``): start as soon as the plan is ready. A word counts only with a
+    separator after it, so a goal that merely begins with 「直接」 is a goal."""
+    text = (args or "").strip()
+    auto_start, workflow, picked = False, "auto", False
+    modes = dict(WORKFLOW_WORDS)
+    for _ in range(2):
+        if not auto_start and text[:1] in ("!", "！"):
+            text, auto_start = text[1:].strip(), True
+            continue
+        found = None if auto_start else _leading_word(text, AUTO_START_WORDS)
+        if found:
+            text, auto_start = found[1], True
+            continue
+        found = None if picked else _leading_word(text, modes)
+        if found:
+            text, workflow, picked = found[1], modes[found[0]], True
+            continue
+        break
+    return text, auto_start, workflow
 
 
 STATUS_LINE = {

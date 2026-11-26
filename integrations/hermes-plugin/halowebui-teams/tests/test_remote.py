@@ -233,7 +233,7 @@ PLAN_TEAM = {"id": "5f3c2a10-team-q", "title": "做个小工具", "status": "pla
 
 def test_qq_team_plan_approve_and_result(remote, monkeypatch, tmp_path):
     created = []
-    monkeypatch.setattr(remote.link, "create", lambda owner, goal, origin, auto: created.append((goal, origin, auto))
+    monkeypatch.setattr(remote.link, "create", lambda owner, goal, origin, auto, workflow="auto": created.append((goal, origin, auto))
                         or {"id": "5f3c2a10-team-q", "title": goal})
     _dispatch(remote.remote, _event("qqbot", QQ_USER, "/team 做个小工具"))
     assert created == [("做个小工具", {"platform": "qqbot", "chat_id": QQ_USER, "user_id": QQ_USER}, False)]
@@ -326,3 +326,125 @@ def test_install_captures_the_adapters(remote):
 
     asyncio.run(go())
     assert list(remote.remote._state["adapters"]) == ["qqbot"]
+
+
+def test_qq_team_command_picks_a_workflow(remote, monkeypatch):
+    created = []
+    monkeypatch.setattr(remote.link, "create", lambda owner, goal, origin, auto, workflow="auto":
+                        created.append((goal, auto, workflow)) or {"id": "5f3c2a10-team-m", "title": goal})
+    _dispatch(remote.remote, _event("qqbot", QQ_USER, "/team 直接 多模型 给 HaloWebUI 加按钮"))
+    assert created == [("给 HaloWebUI 加按钮", True, "dev_pipeline")]
+    assert "（多模型研发）" in remote.sent[-1]["text"]
+
+
+def test_qq_prompt_replies_parse():
+    import halowebui_teams.remote as remote
+
+    assert remote.prompt_reply("答 用方案 B") == ("answer", None, "用方案 B")
+    assert remote.prompt_reply("答#2：用 A") == ("answer", 2, "用 A")
+    assert remote.prompt_reply("回答：好") == ("answer", None, "好")
+    assert remote.prompt_reply("重试") == ("retry", None, "")
+    assert remote.prompt_reply("重试＃3 换个端口") == ("retry", 3, "换个端口")
+    assert remote.prompt_reply("按建议。") == ("advice", None, "")
+    for text in ("答案是 42", "答", "重试一下行不行吗", "你好"):
+        assert remote.prompt_reply(text) is None, text
+
+
+def _qq_team_board(monkeypatch, tasks, diagnoses=None):
+    """A running QQ team whose board says *tasks* (the snapshot) need the user."""
+    import halowebui_teams.notify as notify
+
+    board = {"team_id": "9a8b7c6d-team-a", "title": "加按钮", "members": [{"name": "claude-lead", "role": "主控"}],
+             "diagnoses": diagnoses or {}}
+    monkeypatch.setattr("halowebui_teams.common.read_team", lambda slug: board)
+    snap = {"team": {"phase": "attention"}, "tasks": tasks}
+    monkeypatch.setattr("halowebui_teams.teams.snapshot", lambda team_id, owner=None: snap)
+    monkeypatch.setattr(notify, "now", lambda: int(time.time()))
+    return snap
+
+
+def test_qq_team_question_comes_in_full_and_an_answer_goes_to_the_member(remote, monkeypatch):
+    remote.remote.put_job({"kind": "team", "id": "9a8b7c6d-team-a", "owner": OWNER, "platform": "qqbot",
+                           "chat_id": QQ_USER, "question": "g", "at": time.time(), "approved": True})
+    team = {"id": "9a8b7c6d-team-a", "title": "加按钮", "status": "running", "phase": "attention"}
+    monkeypatch.setattr(remote.link, "get", lambda *a: team)
+    ask = {"id": "t_aaaa", "title": "合成方案", "member": "claude-lead", "sub_status": "waiting_user", "attempts": 1,
+           "current_run": {"question": "方案 A 还是方案 B？A 快，B 稳。"}}
+    snap = _qq_team_board(monkeypatch, [ask])
+    remote.remote.tick()
+    remote.remote.tick()  # once only
+    asks = [m for m in remote.sent if "在任务「合成方案」里问你" in m["text"]]
+    assert len(asks) == 1
+    text = asks[0]["text"]
+    assert text.startswith("【#1】❓") and "方案 A 还是方案 B" in text and "回「答 你的回答」" in text
+    assert "<b>" not in text and "回复这条消息" not in text and "请到网页看" not in text
+
+    posted = []
+    import halowebui_teams.teams as teams
+
+    monkeypatch.setattr(teams, "post_message", lambda team_id, task_id, body, author_name, owner=None:
+                        posted.append((team_id, task_id, body, owner)) or {})
+    assert _dispatch(remote.remote, _event("qqbot", QQ_USER, "答 用 B", "80")) == {
+        "action": "skip", "reason": "answer a team notice (QQ)"}
+    assert posted == [("9a8b7c6d-team-a", "t_aaaa", "用 B", OWNER)]
+    assert "已转给 claude-lead" in remote.sent[-1]["text"]
+    # answered: the next 「答」 is an ordinary message; the same wait is not sent again
+    assert _dispatch(remote.remote, _event("qqbot", QQ_USER, "答 再说一次", "81")) is None
+    remote.remote.tick()
+    assert len([m for m in remote.sent if "在任务「合成方案」里问你" in m["text"]]) == 1
+    # the member works again: the notice is closed
+    snap["tasks"] = []
+    team["phase"] = "running"
+    remote.remote.tick()
+    assert remote.remote.jobs()["team:9a8b7c6d-team-a"]["prompts"] == {}
+
+
+def test_qq_team_failure_retries_with_a_note_or_the_leads_advice(remote, monkeypatch):
+    remote.remote.put_job({"kind": "team", "id": "9a8b7c6d-team-a", "owner": OWNER, "platform": "qqbot",
+                           "chat_id": QQ_USER, "question": "g", "at": time.time(), "approved": True})
+    monkeypatch.setattr(remote.link, "get", lambda *a: {"id": "9a8b7c6d-team-a", "title": "加按钮",
+                                                        "status": "running", "phase": "attention"})
+    diagnosis = {"status": "ready", "cause": "端口被占", "action": "retry_with_note", "note": "换 8081"}
+    fail = {"id": "t_bbbb", "title": "写后端", "member": "codex-dev", "sub_status": "failed", "attempts": 2,
+            "block_reason": "address already in use", "diagnosis": diagnosis}
+    other = {"id": "t_cccc", "title": "写前端", "member": "claude-lead", "sub_status": "failed", "attempts": 1,
+             "block_reason": "tests failed"}
+    _qq_team_board(monkeypatch, [fail, other])
+    remote.remote.tick()
+    fails = [m["text"] for m in remote.sent if "失败" in m["text"]]
+    assert [t[:4] for t in fails] == ["【#1】", "【#2】"]
+    assert "「按建议」" in fails[0] and "「按建议」" not in fails[1] and "address already in use" in fails[0]
+
+    import halowebui_teams.teams as teams
+    import halowebui_teams.lead as lead
+
+    calls = []
+    monkeypatch.setattr(teams, "post_message", lambda team_id, task_id, body, author_name, owner=None:
+                        calls.append(("note", task_id, body)) or {})
+    monkeypatch.setattr(teams, "retry", lambda team_id, task_id, owner=None, actor="": calls.append(("retry", task_id)) or {})
+    monkeypatch.setattr(lead, "apply_diagnosis", lambda team_id, task_id, owner=None, actor="":
+                        calls.append(("advice", task_id)) or {})
+    _dispatch(remote.remote, _event("qqbot", QQ_USER, "重试#1 换个端口", "82"))
+    assert calls == [("note", "t_bbbb", "换个端口"), ("retry", "t_bbbb")] and "带着你的说明重试" in remote.sent[-1]["text"]
+    # 按建议: only the failure with advice; #1 is settled, #2 has none → an ordinary message
+    assert _dispatch(remote.remote, _event("qqbot", QQ_USER, "按建议", "83")) is None
+    _dispatch(remote.remote, _event("qqbot", QQ_USER, "重试", "84"))
+    assert calls[-1] == ("retry", "t_cccc") and remote.sent[-1]["text"] == "🔁 已重试。"
+
+
+def test_qq_failure_waits_for_the_leads_diagnosis_without_a_generic_notice(remote, monkeypatch):
+    remote.remote.put_job({"kind": "team", "id": "9a8b7c6d-team-a", "owner": OWNER, "platform": "qqbot",
+                           "chat_id": QQ_USER, "question": "g", "at": time.time(), "approved": True})
+    monkeypatch.setattr(remote.link, "get", lambda *a: {"id": "9a8b7c6d-team-a", "title": "加按钮",
+                                                        "status": "running", "phase": "attention"})
+    fail = {"id": "t_bbbb", "title": "写后端", "member": "codex-dev", "sub_status": "failed", "attempts": 1,
+            "block_reason": "boom"}
+    thinking = {"t_bbbb": {"status": "thinking", "attempt": 1, "started_at": int(time.time())}}
+    _qq_team_board(monkeypatch, [fail], diagnoses=thinking)
+    remote.remote.tick()
+    assert remote.sent == []
+    # a task in triage: nothing to answer here, the page once
+    _qq_team_board(monkeypatch, [{"id": "t_dddd", "title": "x", "member": "m", "sub_status": "", "status": "triage"}])
+    remote.remote.tick()
+    remote.remote.tick()
+    assert [m["text"][:12] for m in remote.sent] == ["🟣 协作「加按钮」需要你"]

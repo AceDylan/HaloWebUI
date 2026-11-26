@@ -357,7 +357,7 @@ def _run(coro_fn):
 
 def test_team_command_starts_a_team_with_its_origin(linked, monkeypatch):
     calls = []
-    monkeypatch.setattr(linked.link, "create", lambda owner, goal, origin, auto_start=False:
+    monkeypatch.setattr(linked.link, "create", lambda owner, goal, origin, auto_start=False, workflow="auto":
                         calls.append((owner, goal, origin)) or {"id": "11111111-2222-3333-4444-555555555555", "title": goal})
     result = _run(lambda: linked.telegram.on_pre_gateway_dispatch(event=_event("/team 研究下雨天山上的云")))
     assert result == {"action": "skip", "reason": "halo team command"}
@@ -495,20 +495,42 @@ def test_halowebui_client_sends_key_and_owner_and_reads_errors(linked, monkeypat
         with pytest.raises(linked.link.HaloError) as err:
             linked.link.approve(OWNER, "abc")
         assert err.value.status == 409 and "已经批准过" in err.value.message
+        linked.link.create(OWNER, "目标", {"platform": "qqbot"}, True, "dev_lite")
     finally:
         server.shutdown()
     assert seen[0][:3] == ("/api/v1/teams/hermes/teams", "k-test", OWNER)
     assert seen[0][3] == {"goal": "目标", "origin": {"platform": "telegram"}}
+    assert seen[2][3] == {"goal": "目标", "origin": {"platform": "qqbot"}, "auto_start": True, "workflow": "dev_lite"}
 
 
 def test_team_command_can_start_without_approval(linked, monkeypatch):
     calls = []
-    monkeypatch.setattr(linked.link, "create", lambda owner, goal, origin, auto_start=False:
+    monkeypatch.setattr(linked.link, "create", lambda owner, goal, origin, auto_start=False, workflow="auto":
                         calls.append((goal, auto_start)) or {"id": "11111111-2222-3333-4444-555555555555", "title": goal})
     for text in ("/team 直接 写一首诗", "/team ！写一首诗", "/team 自动：写一首诗", "/team 直接对比两个方案"):
         _run(lambda: linked.telegram.on_pre_gateway_dispatch(event=_event(text)))
     assert calls == [("写一首诗", True), ("写一首诗", True), ("写一首诗", True), ("直接对比两个方案", False)]
     assert "直接开始" in linked.sent[0]["text"] and "批准后才会开始" in linked.sent[-1]["text"]
+
+
+def test_team_command_picks_a_workflow(linked, monkeypatch):
+    split = linked.telegram.split_team_args
+    assert split("多模型 给 HaloWebUI 加按钮") == ("给 HaloWebUI 加按钮", False, "dev_pipeline")
+    assert split("多模型研发：加按钮") == ("加按钮", False, "dev_pipeline")
+    assert split("直接 快速研发 修 bug") == ("修 bug", True, "dev_lite")
+    assert split("快速研发 直接 修 bug") == ("修 bug", True, "dev_lite")
+    assert split("！多模型 加按钮") == ("加按钮", True, "dev_pipeline")
+    assert split("自由协作 分析一下") == ("分析一下", False, "auto")
+    # 「快速」 alone, or a word without a separator after it, is part of the goal
+    assert split("快速 看下日志") == ("快速 看下日志", False, "auto")
+    assert split("多模型对比一下") == ("多模型对比一下", False, "auto")
+    assert split("多模型 多模型研发 x") == ("多模型研发 x", False, "dev_pipeline")
+    calls = []
+    monkeypatch.setattr(linked.link, "create", lambda owner, goal, origin, auto_start=False, workflow="auto":
+                        calls.append((goal, auto_start, workflow)) or {"id": "11111111-2222-3333-4444-555555555555", "title": goal})
+    _run(lambda: linked.telegram.on_pre_gateway_dispatch(event=_event("/team 多模型 给 HaloWebUI 加按钮")))
+    assert calls == [("给 HaloWebUI 加按钮", False, "dev_pipeline")]
+    assert "（多模型研发）" in linked.sent[-1]["text"]
 
 
 def test_auto_started_plan_is_a_notice_and_a_failed_start_is_a_plan_card(linked):

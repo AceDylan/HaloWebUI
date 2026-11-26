@@ -172,8 +172,9 @@ def _request(method: str, path: str, owner: str, body: Any, *, timeout: float, a
     return raw
 
 
-def create(owner: str, goal: str, origin: dict, auto_start: bool = False) -> dict:
-    body = {"goal": goal, "origin": origin, **({"auto_start": True} if auto_start else {})}
+def create(owner: str, goal: str, origin: dict, auto_start: bool = False, workflow: str = "auto") -> dict:
+    body = {"goal": goal, "origin": origin, **({"auto_start": True} if auto_start else {}),
+            **({"workflow": workflow} if workflow and workflow != "auto" else {})}
     return call("POST", "/teams", owner, body, timeout=60)
 
 

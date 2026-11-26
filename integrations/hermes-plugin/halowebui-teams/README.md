@@ -106,7 +106,9 @@ is the Hermes side. It adds no service, port or second task store:
   the base branch's tip. The conclusion's picture goes to `.halo/images/` in a worktree.
 * **Telegram** (`tg.py`, `notify.py`, `link.py`): `/team <目标>` starts a team from Telegram
   (HaloWebUI creates and plans it through its `/api/v1/teams/hermes/*` routes; the plan card comes
-  back with 批准 / 取消 buttons, a reply re-plans), `/team` lists recent teams; the bridge loop sends
+  back with 批准 / 取消 buttons, a reply re-plans; `/team 多模型 …` / `/team 快速研发 …` pick the
+  dev_pipeline / dev_lite workflow, `直接` starts without approval — both in either order, see
+  `tg.split_team_args`), `/team` lists recent teams; the bridge loop sends
   a notice when a member asks something, a task fails, or the team finishes (with the start of
   the conclusion) — to the chat the team came from, else the owner's linked chat — and holds it
   back while the team's page is open (`events?visible=1`). Replies to notices answer the member /
@@ -119,7 +121,9 @@ is the Hermes side. It adds no service, port or second task store:
   holds what is still awaited). 自动分流 says where it went and then follows that run; a team it
   picks is followed by the Telegram notices above. QQ also has `/team` without buttons: the plan
   comes back as text, 「批准」/「取消」 answer it, `/team 重做 <意见>` re-plans, the result comes back
-  when the lead has written it; a team started from QQ does not notify Telegram. QQ users are linked
+  when the lead has written it; a member's question (a 多模型研发's 拍板 too) and a failed task come
+  in full and numbered (`【#n】`): 「答 …」 / 「答#n …」 answers it, 「重试 [说明]」 / 「按建议」 settle a
+  failure; a team started from QQ does not notify Telegram. QQ users are linked
   in `qqbot.owners` of `halo-teams.json`.
 * **Where the conclusion goes** (`bridge.report_conclusion`, `link.concluded`): once the lead has
   written a conclusion when the team finished (after its acceptance check, bounded wait), the

@@ -5,8 +5,10 @@
   page there (``/api/v1/remote``); its result — text, picture, link — comes back to the chat when it
   is done (``tick``, from the bridge loop). The command alone: what it does and what is still going.
 * QQ also gets ``/team`` (Telegram's is tg.py, with buttons): the plan comes back as text,
-  「批准」/「取消」 are plain words, the result comes back when the lead has written it. A team
-  started from QQ tells QQ only (notify.target_for).
+  「批准」/「取消」 are plain words, the result comes back when the lead has written it. A member's
+  question (a 多模型研发's 拍板 too) and a failed task come in full, numbered; 「答 …」 answers the
+  question, 「重试 [说明]」 / 「按建议」 settle the failure (``_tick_prompts`` / ``_answer_prompt``). A
+  team started from QQ tells QQ only (notify.target_for).
 
 Only users linked in ``halo-teams.json`` (``telegram.owners`` / ``qqbot.owners``) are handled; every
 other message goes on to Hermes untouched. Messages go out through the gateway's own adapters
@@ -231,6 +233,11 @@ def _dispatch(event: Any) -> Optional[dict]:
     if command in ("team", "teams"):
         _spawn(_team_command(source, owner, event.get_command_args().strip(), event))
         return {"action": "skip", "reason": "halo team command (QQ)"}
+    if not command:
+        said = prompt_reply(getattr(event, "text", "") or "")
+        if said and pick_prompt(platform, source.chat_id, said[0], said[1]):
+            _spawn(_answer_prompt(source, owner, *said, event))
+            return {"action": "skip", "reason": "answer a team notice (QQ)"}
     word = (getattr(event, "text", "") or "").strip().rstrip("。.!！ ").lower()
     if not command and (word in APPROVE_WORDS or word in CANCEL_WORDS) and open_plan(platform, source.chat_id):
         _spawn(_team_command(source, owner, "批准" if word in APPROVE_WORDS else "取消", event))
@@ -282,7 +289,9 @@ USAGE = {
 def usage_text(platform: str, chat_id: Any) -> str:
     lines = ["**HaloWebUI 命令**", *USAGE.values()]
     if platform == "qqbot":
-        lines.append("协作台：/team 目标 —— 负责人做计划发到这里，回「批准」开始、「取消」作罢；/team 直接 目标 —— 计划好就开始。")
+        lines.append("协作台：/team 目标 —— 负责人做计划发到这里，回「批准」开始、「取消」作罢；/team 直接 目标 —— 计划好就开始；"
+                     "/team 多模型 目标、/team 快速研发 目标 —— 选研发流程（可以和「直接」叠着写）。"
+                     "成员提问回「答 内容」，任务失败回「重试」或「重试 说明」。")
     going = chat_jobs(platform, chat_id)
     if going:
         lines.append("")
@@ -317,7 +326,7 @@ async def _start(source: Any, owner: str, kind: str, question: str, event: Any) 
 # --- QQ: the 协作台 -----------------------------------------------------------------------------------
 
 async def _team_command(source: Any, owner: str, args: str, event: Any) -> None:
-    from .tg import list_message, split_auto_start
+    from .tg import list_message, split_team_args, workflow_note
 
     platform = _platform(source)
     if args in ("", "列表", "list", "ls", "状态"):
@@ -355,12 +364,12 @@ async def _team_command(source: Any, owner: str, args: str, event: Any) -> None:
         except link.HaloError as exc:
             await _say(source, f"⚠️ {exc.message}", event)
         return
-    goal, auto_start = split_auto_start(args)
+    goal, auto_start, workflow = split_team_args(args)
     if not goal:
         await _say(source, usage_text(platform, source.chat_id), event)
         return
     try:
-        team = await asyncio.to_thread(link.create, owner, goal, _origin(source), auto_start)
+        team = await asyncio.to_thread(link.create, owner, goal, _origin(source), auto_start, workflow)
     except link.HaloError as exc:
         await _say(source, f"⚠️ 没能发起协作：{exc.message}", event)
         return
@@ -369,7 +378,7 @@ async def _team_command(source: Any, owner: str, args: str, event: Any) -> None:
     url = link.team_url(team["id"])
     after = ("计划好就直接开始，完成后把结论发到这里。" if auto_start
              else "计划好了发到这里（一般 1 分钟内），回「批准」才开始。")
-    await _say(source, f"🧭 已交给负责人做计划：{clip(team.get('title'), 60)}\n{after}" + (f"\n🌐 {url}" if url else ""), event)
+    await _say(source, f"🧭 已交给负责人做计划{workflow_note(workflow)}：{clip(team.get('title'), 60)}\n{after}" + (f"\n🌐 {url}" if url else ""), event)
 
 
 _TAG_RE = re.compile(r"<[^>]+>")
@@ -540,13 +549,16 @@ def _tick_team(key: str, job: dict) -> None:
         return
     phase = team.get("phase")
     url = link.team_url(job["id"])
-    if phase == "attention" and not job.get("attention_sent"):
-        if send(job, f"🟣 协作「{clip(team.get('title'), 40)}」需要你处理（成员在问问题或任务失败了），请到网页看。"
-                     + (f"\n🌐 {url}" if url else "")):
+    if phase == "attention":
+        if _tick_prompts(key, job) or job.get("attention_sent"):
+            return
+        # nothing we can put to the user here (a task in triage): the page
+        if send(job, f"🟣 协作「{clip(team.get('title'), 40)}」需要你处理，请到网页看。" + (f"\n🌐 {url}" if url else "")):
             update_job(key, attention_sent=True)
         return
-    if phase == "running" and job.get("attention_sent"):
-        update_job(key, attention_sent=False)
+    if job.get("attention_sent") or job.get("prompts"):
+        update_job(key, attention_sent=False, prompts={})
+    if phase == "running":
         return
     if phase == "stopped":
         if send(job, f"⏹ 协作「{clip(team.get('title'), 40)}」已停止。" + (f"\n🌐 {url}" if url else "")):
@@ -583,3 +595,129 @@ def _team_done(key: str, job: dict, team: dict) -> None:
     picture = picture_of(board) if board else None
     if picture is not None:
         send_picture(job, picture, f"🖼 结果配图 · {clip(team.get('title'), 60)}")
+
+
+# --- QQ: a member's question, a failed task ----------------------------------------------------------
+
+ANSWER_WORDS = ("回答", "答")
+RETRY_WORDS = ("重试",)
+ADVICE_WORDS = {"按建议", "按建议处理", "照建议"}
+_PROMPT_RE = re.compile(r"^(回答|答|重试)\s*(?:[#＃](\d{1,3}))?(?:$|[\s：:，,]+)(.*)$", re.S)
+
+
+def prompt_reply(text: str) -> Optional[tuple[str, Optional[int], str]]:
+    """「答 …」 / 「答#2 …」 / 「重试 [说明]」 / 「按建议」 → (verb, number, text); None: not one of ours.
+    A word counts only with a separator (or a number) after it: 「答案是…」 is a message."""
+    text = (text or "").strip()
+    if text.rstrip("。.!！ ") in ADVICE_WORDS:
+        return "advice", None, ""
+    m = _PROMPT_RE.match(text)
+    if not m:
+        return None
+    verb = "answer" if m.group(1) in ANSWER_WORDS else "retry"
+    body = m.group(3).strip()
+    if verb == "answer" and not body:
+        return None
+    return verb, int(m.group(2)) if m.group(2) else None, body
+
+
+VERB_KIND = {"answer": "ask", "retry": "fail", "advice": "fail"}
+
+
+def pick_prompt(platform: str, chat_id: Any, verb: str, number: Optional[int]) -> Optional[tuple[str, str, dict]]:
+    """The open notice a reply is for: (job key, prompt key, prompt) — the numbered one, else the newest
+    of its kind (a question for 「答」, a failure for 「重试」 / 「按建议」)."""
+    kind = VERB_KIND[verb]
+    found = []
+    for job in chat_jobs(platform, chat_id):
+        if job.get("kind") != "team":
+            continue
+        for pkey, prompt in (job.get("prompts") or {}).items():
+            if prompt.get("acted") or prompt.get("kind") != kind:
+                continue
+            if verb == "advice" and not prompt.get("advice"):
+                continue
+            if number is None or prompt.get("n") == number:
+                found.append((f"team:{job['id']}", pkey, prompt))
+    return max(found, key=lambda f: f[2].get("at") or 0) if found else None
+
+
+def _chat_numbers(platform: str, chat_id: Any) -> list[int]:
+    return [int(p.get("n") or 0) for j in chat_jobs(platform, chat_id) for p in (j.get("prompts") or {}).values()]
+
+
+def _tick_prompts(key: str, job: dict) -> bool:
+    """A QQ team's members asking or failing: each notice once, in full, numbered. True when some
+    notice is open (sent now or before) or will be (the lead is still diagnosing)."""
+    from .common import board_slug, read_team
+    from .notify import ask_message, fail_message, pending
+    from .teams import snapshot
+
+    slug = board_slug(job["id"])
+    board = read_team(slug)
+    if not board:
+        return False
+    snap = snapshot(job["id"])
+    board = read_team(slug) or board
+    found = [(k, kind, task) for k, kind, task in pending(board, snap) if kind in ("ask", "fail")]
+    prompts = {k: p for k, p in (job.get("prompts") or {}).items() if k in {f[0] for f in found}}
+    changed = prompts != (job.get("prompts") or {})
+    for pkey, kind, task in found:
+        if pkey in prompts:
+            continue
+        number = max(_chat_numbers(job["platform"], job["chat_id"]) + [int(p.get("n") or 0) for p in prompts.values()],
+                     default=0) + 1
+        diagnosis = task.get("diagnosis") or {}
+        advice = diagnosis.get("status") == "ready" and diagnosis.get("action") not in (None, "", "ask_user")
+        if kind == "ask":
+            text, _buttons = ask_message(board, task)
+            hint = f"回「答 你的回答」转给它；同时有几个问题在等时写「答#{number} 内容」。"
+        else:
+            text, _buttons = fail_message(board, task)
+            hint = (f"回「重试」原样重试，「重试 说明」带着说明重试{'，「按建议」按负责人的建议处理' if advice else ''}；"
+                    f"同时有几个在等时写「重试#{number}」。")
+        if not send(job, f"【#{number}】" + html_text(text) + f"\n\n{hint}"):
+            break
+        prompts[pkey] = {"kind": kind, "task": task["id"], "member": task.get("member") or "", "n": number,
+                         "at": time.time(), **({"advice": True} if advice else {})}
+        changed = True
+    if changed:
+        update_job(key, prompts=prompts)
+    # a failure the lead is still looking at comes once it has: no 「请到网页看」 meanwhile
+    held = any(t.get("sub_status") in ("waiting_user", "failed", "blocked") for t in snap.get("tasks") or [])
+    return bool(prompts) or held
+
+
+async def _answer_prompt(source: Any, owner: str, verb: str, number: Optional[int], text: str, event: Any) -> None:
+    from .teams import TeamError, post_message, retry
+
+    picked = pick_prompt(_platform(source), source.chat_id, verb, number)
+    if picked is None:
+        return
+    job_key, pkey, prompt = picked
+    team_id = job_key.split(":", 1)[1]
+    author = str(getattr(source, "user_name", None) or "你")[:40]
+    try:
+        if verb == "answer":
+            await asyncio.to_thread(post_message, team_id, prompt["task"], text, author_name=author, owner=owner)
+            reply = f"✅ 已转给 {prompt.get('member') or '成员'}，它会接着做。"
+        elif verb == "advice":
+            from .lead import apply_diagnosis
+
+            await asyncio.to_thread(apply_diagnosis, team_id, prompt["task"], owner=owner, actor=author)
+            reply = "✅ 已按负责人的建议处理。"
+        else:
+            if text:
+                await asyncio.to_thread(post_message, team_id, prompt["task"], text, author_name=author, owner=owner)
+            await asyncio.to_thread(retry, team_id, prompt["task"], owner=owner, actor=author)
+            reply = "🔁 已带着你的说明重试。" if text else "🔁 已重试。"
+    except (link.HaloError, TeamError) as exc:
+        await _say(source, f"⚠️ {exc.message}", event)
+        return
+    with _store_lock:
+        data = _load()
+        entry = ((data.get(job_key) or {}).get("prompts") or {}).get(pkey)
+        if entry is not None:
+            entry["acted"] = verb
+            _save(data)
+    await _say(source, reply, event)

@@ -882,6 +882,24 @@ def test_heuristic_selection_routes_accurately_when_all_models_fail(question, he
     assert raw["degraded"] == "auto"
 
 
+@pytest.mark.parametrize("question, executes", [
+    ("按发布流程做", True),
+    ("修复视频选择卡顿，按发布流程做", True),
+    ("“按发布流程做”是什么意思？", False),
+    ("不要按发布流程做", False),
+    ("只分析，按发布流程做是什么意思？", False),
+])
+def test_release_shortcut_after_read_only_turn(question, executes):
+    from open_webui.utils.auto_routing import heuristic_selection
+
+    context = "用户：先只分析"
+    raw = heuristic_selection(question, context, teams_available=True, hermes_available=True)
+    result = normalize_selection(raw, question=question, context=context, teams_available=True, hermes_available=True)
+    assert result["execution_requested"] is executes
+    if executes:
+        assert result["mode"] == "team"
+
+
 def test_select_uses_backup_classifier_when_primary_fails_and_skips_dead_decision_model(env, monkeypatch):
     from open_webui.routers import answers
     from open_webui.utils import assistant_library, chat, decision_model as dm

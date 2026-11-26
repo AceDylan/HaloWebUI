@@ -1,4 +1,5 @@
 <script lang="ts">
+	import AnswerAttribution from '$lib/components/discuss/AnswerAttribution.svelte';
 	import AutoRouteNotice from '$lib/components/auto/AutoRouteNotice.svelte';
 	import { WEBUI_API_BASE_URL } from '$lib/constants';
 	import { onDestroy, onMount } from 'svelte';
@@ -486,6 +487,7 @@
 								<button type="button" class="dc-chip" on:click={copyAnswer} data-answer-copy>复制</button>
 							{/if}
 						</header>
+						<div class="px-5 pb-2"><AnswerAttribution {run} /></div>
 						<div class="px-5 pb-5" data-answer-body>
 							{#if answer?.content}
 								{#if answerState === 'done'}

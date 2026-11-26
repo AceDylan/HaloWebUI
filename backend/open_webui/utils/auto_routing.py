@@ -40,6 +40,14 @@ NEW_EXECUTION = re.compile(
     r"(?:now|please)\s+(?:implement|execute|fix|deploy)", re.I)
 
 
+# Only a direct instruction overrides an earlier read-only turn. The model can
+# interpret freer wording; the fallback must not act on quoted examples or questions.
+_RELEASE_INSTRUCTION = re.compile(
+    r"(?:(?:请|帮我)?(?:修复|修改|优化|实现|新增|按你推荐)[^，。？！?\n]{1,80}[，,\s]+)?"
+    r"(?:请)?按发布流程做[。！!]*"
+)
+
+
 def _forbids_work(text):
     return bool(READ_ONLY.search(text) or (PLAN_FIRST.search(text) and not THEN_DO.search(text)))
 
@@ -58,11 +66,13 @@ def analysis_only(question, context=""):
         return True
     # A later explicit implementation request can supersede an earlier analysis-only turn.
     # Vague follow-ups ("继续") do not grant execution permission.
-    return _forbids_work(_user_words(context)) and not NEW_EXECUTION.search(question)
+    return _forbids_work(_user_words(context)) and not (NEW_EXECUTION.search(question) or _RELEASE_INSTRUCTION.fullmatch(question.strip()))
 
 
 # Boundary examples shared by both deciders: route by which mode clearly improves the result.
 EXAMPLES = (
+    "「修复导出按钮，按发布流程做」→ team（修改、验证、提交、推送、部署、清理）；"
+    "「按发布流程做是什么意思」→ answer（解释口令）；"
     "「PostgreSQL 和 MySQL 各适合什么场景」→ answer；"
     "「结合我们订单量大、要求强一致的业务，PostgreSQL 和 MySQL 到底选哪个」→ discuss；"
     "「公司 GitLab/Jenkins 管理页面该有哪些功能」→ answer；"
@@ -365,7 +375,7 @@ def heuristic_selection(question, context="", files=None, *, teams_available=Fal
                 "execution_requested": wants_exec, "degraded": "auto"}
 
     # 2. Multi-step repository delivery or full-repo systematic audit -> team.
-    if _TEAM_DELIVERY_RE.search(q):
+    if _TEAM_DELIVERY_RE.search(q) or _RELEASE_INSTRUCTION.fullmatch(q):
         return {"mode": "team", "reason": f"{prefix}多步仓库开发/交付任务，交由协作台处理",
                 "needs_tools": True, "execution_requested": not ro, "degraded": "auto"}
     if _TEAM_AUDIT_RE.search(q):

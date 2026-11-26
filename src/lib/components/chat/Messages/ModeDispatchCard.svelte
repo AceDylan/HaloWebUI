@@ -1,4 +1,5 @@
 <script lang="ts">
+	import AnswerAttribution from '$lib/components/discuss/AnswerAttribution.svelte';
 	import { goto } from '$app/navigation';
 	import { onDestroy, onMount } from 'svelte';
 	import { toast } from 'svelte-sonner';
@@ -75,7 +76,7 @@
 	$: label = kind === 'answer' ? '精答' : '讨论台';
 	$: href = `/${kind}/${chatId}`;
 	$: status = (kind === 'answer' ? run?.status : ask?.status) ?? '';
-	$: live = ['routing', 'researching', 'answering', 'running', 'concluding'].includes(status);
+	$: live = ['routing', 'inspecting', 'researching', 'answering', 'running', 'concluding'].includes(status);
 	$: done = status === 'done';
 	// 结论配图: once the text is written its picture is drawn, and the result comes back with it
 	$: picture = done ? (kind === 'answer' ? run?.illustration : ask?.illustration) : null;
@@ -513,6 +514,7 @@
 						{/if}
 						<span class="truncate">{facts.join(' · ')}</span>
 					</div>
+					<AnswerAttribution {run} {ask} />
 				</div>
 				<a {href} class="tm-btn-ghost shrink-0 !text-xs" data-mode-dispatch-open
 					>{live ? `在${label}看` : `打开${label}`} ↗</a

@@ -263,6 +263,14 @@ def report_of(kind: str, chat_id: str, run: dict) -> tuple[str, str, str]:
         moderator = ((run.get("conclusion") or {}).get("name") or (run.get("moderator") or {}).get("name") or "主持人")
         notice = (f"{MODES[kind]['notice']} 「{question}」：{len(seats)} 个模型{mode}（{'、'.join(seats)}），"
                   f"下面是 {moderator} 整理的结论。讨论台：/discuss/{chat_id}")
+    if kind == "answer":
+        base = assistant.get("baseName") or assistant.get("base")
+        if base:
+            notice += f" · 作答模型 {base}"
+    elif (run.get("conclusion") or {}).get("standIn"):
+        notice += f" · {moderator} 代写"
+    if (run.get("localInspect") or {}).get("status") == "done":
+        notice += " · 已使用本机取证"
     content = result_content(kind, run)
     if len(content) > REPORT_CONTENT_MAX_CHARS:
         content = content[:REPORT_CONTENT_MAX_CHARS].rstrip() + f"\n\n…（太长了，后面的部分请到{MODES[kind]['label']}页看）"

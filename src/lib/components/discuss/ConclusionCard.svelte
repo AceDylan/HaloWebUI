@@ -1,4 +1,5 @@
 <script lang="ts">
+	import AnswerAttribution from '$lib/components/discuss/AnswerAttribution.svelte';
 	import { toast } from 'svelte-sonner';
 
 	import type { DiscussAsk } from '$lib/apis/discussions';
@@ -140,6 +141,7 @@
 				>
 			{/if}
 		</header>
+		<div class="px-5 pb-2"><AnswerAttribution {ask} /></div>
 
 		<div class="px-5 pb-5">
 			{#if conclusion.standIn}

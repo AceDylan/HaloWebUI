@@ -262,11 +262,13 @@ describe('ModeDispatchCard', () => {
 					round: 1,
 					status: 'running',
 					seats,
+					moderator: { model: 'c', name: 'c' },
 					turns: [
 						{ id: 'r1-s1', round: 1, seat: 's1', status: 'done', content: 'x' },
 						{ id: 'r1-s2', round: 1, seat: 's2', status: 'streaming', content: 'y' }
 					],
 					conclusion: { status: 'waiting', content: '', model: 'c', name: 'c' },
+					localInspect: null,
 					origin: { chatId: 'chat-1', messageId: 'r1' }
 				}
 			]
@@ -274,6 +276,9 @@ describe('ModeDispatchCard', () => {
 		await mount({ kind: 'discuss', chatId: 'room-1', history: { messages: {} } });
 		await until(() => state() === 'running', 'the discussion');
 		expect(text('[data-mode-dispatch-facts]')).toBe('讨论台 · 圆桌讨论 · 2 个模型 · 2 轮');
+		expect(text('[data-answer-attribution]')).toContain('主持 · c');
+		expect(text('[data-answer-attribution]')).not.toContain('结论 · c');
+		expect(text('[data-answer-attribution]')).toContain('未使用本机取证');
 		expect(text('[data-mode-dispatch-line]')).toBe('b 在发言');
 		expect(
 			[...target.querySelectorAll('[data-step]')].map(

@@ -376,7 +376,7 @@ describe('AnswerRun', () => {
 		await until(() => !!target.querySelector('[data-local-inspect="done"]'));
 		expect(text(target, '[data-answer-attribution]')).toContain('作答 · deepseek-chat');
 		expect(text(target, '[data-answer-attribution]')).toContain('已使用本机取证');
-	expect(text(target, '[data-local-inspect-toggle]')).toContain('本机取证 · 2 项（只读已脱敏）');
+		expect(text(target, '[data-local-inspect-toggle]')).toContain('本机取证 · 2 项（只读已脱敏）');
 		expect(target.querySelector('[data-local-inspect-detail]')).toBeFalsy();
 		(target.querySelector('[data-local-inspect-toggle]') as any).click();
 		await until(() => !!target.querySelector('[data-local-inspect-detail]'));

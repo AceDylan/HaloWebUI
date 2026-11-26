@@ -199,7 +199,6 @@
 					ask ? modeSpec(ask.mode).label : '',
 					seats.length ? `${seats.length} 个模型` : '',
 					ask?.rounds ? `${ask.rounds} 轮` : '',
-					ask?.moderator?.name ? `${ask.moderator.name} 主持` : '',
 					ask?.files?.length ? `${ask.files.length} 个文件` : ''
 				]
 	).filter(Boolean);

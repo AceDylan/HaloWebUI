@@ -267,8 +267,11 @@ def report_of(kind: str, chat_id: str, run: dict) -> tuple[str, str, str]:
         base = assistant.get("baseName") or assistant.get("base")
         if base:
             notice += f" · 作答模型 {base}"
-    elif (run.get("conclusion") or {}).get("standIn"):
-        notice += f" · {moderator} 代写"
+    else:
+        stand_in = (run.get("conclusion") or {}).get("standIn")
+        if stand_in:
+            orig = (stand_in.get("for") if isinstance(stand_in, dict) else None) or (run.get("moderator") or {}).get("name")
+            notice += f" · 替 {orig} 代写" if orig and orig != moderator else " · 代写结论"
     if (run.get("localInspect") or {}).get("status") == "done":
         notice += " · 已使用本机取证"
     content = result_content(kind, run)

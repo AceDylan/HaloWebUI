@@ -473,7 +473,7 @@ describe('DiscussRoom', () => {
 		const second = await mount();
 		await until(() => !!second.querySelector('[data-discuss-stand-in]'));
 		expect(second.querySelector('[data-answer-attribution]')!.textContent).toContain('代写结论 · gpt-chat');
-	expect(second.querySelector('[data-discuss-stand-in]')!.textContent).toContain('主持人 claude-chat 暂时写不了（限流），由 gpt-chat 代写');
+		expect(second.querySelector('[data-discuss-stand-in]')!.textContent).toContain('主持人 claude-chat 暂时写不了（限流），由 gpt-chat 代写');
 		expect(second.querySelector('[data-discuss-resume]')).toBeFalsy();
 		app.$destroy();
 		document.body.innerHTML = '';

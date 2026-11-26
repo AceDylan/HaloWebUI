@@ -41,11 +41,46 @@ NEW_EXECUTION = re.compile(
 
 
 # Only a direct instruction overrides an earlier read-only turn. The model can
-# interpret freer wording; the fallback must not act on quoted examples or questions.
-_RELEASE_INSTRUCTION = re.compile(
-    r"(?:(?:请|帮我)?(?:修复|修改|优化|实现|新增|按你推荐)[^，。？！?\n]{1,80}[，,\s]+)?"
-    r"(?:请)?按发布流程做[。！!]*"
+# interpret freer wording; the fallback must not act on quoted examples, questions,
+# hypotheticals, or negations.
+_RELEASE_PHRASE = "按发布流程做"
+_RELEASE_CLAUSE_SPLIT = re.compile(r"[，。；！？?!\n]+")
+_RELEASE_NEG_PREFIX = re.compile(
+    r"(?:不(?:要|用|必|想|会|能|是|算|需要)?|别|无需|先别|先不|暂(?:时)?不|没(?:有)?(?:让|叫|要|说)你?)"
+    r"\s*(?:直接|马上|立刻|真的|去|给|帮我|再)?\s*$"
 )
+_RELEASE_META_PREFIX = re.compile(
+    r"(?:如果|要是|假如|假设|万一|是否|能否|能不能|要不要|为什么|为啥|怎么|什么叫|什么是|"
+    r"解释(?:一下|下)?|问(?:一下|下)?|提到|引用)"
+)
+_RELEASE_META_SUFFIX = re.compile(
+    r"^的|是什么意思|是什么|什么意思|的意思|怎么用|含义|算什么|会怎样|会怎么|会做什么|"
+    r"干嘛|干什么|做什么|包含|包括|步骤|吗|嘛|呢|行不行|可以吗|好不好|的话"
+)
+_RELEASE_OPEN_QUOTES = "「『“\"'`《【"
+_RELEASE_CLOSE_QUOTES = "」』”\"'`》】"
+
+
+def _is_release_instruction(text):
+    t = (text or "").strip()
+    if _RELEASE_PHRASE not in t or _forbids_work(t) or re.search(r"[？?]\s*$", t):
+        return False
+    for clause in _RELEASE_CLAUSE_SPLIT.split(t):
+        if _RELEASE_PHRASE not in clause:
+            continue
+        for match in re.finditer(re.escape(_RELEASE_PHRASE), clause):
+            prefix = clause[: match.start()]
+            suffix = clause[match.end() :]
+            if (prefix and prefix[-1] in _RELEASE_OPEN_QUOTES) or (suffix and suffix[0] in _RELEASE_CLOSE_QUOTES):
+                continue
+            if any(q in prefix for q in _RELEASE_OPEN_QUOTES) and any(q in suffix for q in _RELEASE_CLOSE_QUOTES):
+                continue
+            if _RELEASE_NEG_PREFIX.search(prefix) or _RELEASE_META_PREFIX.search(prefix):
+                continue
+            if _RELEASE_META_SUFFIX.search(suffix):
+                continue
+            return True
+    return False
 
 
 def _forbids_work(text):
@@ -66,7 +101,7 @@ def analysis_only(question, context=""):
         return True
     # A later explicit implementation request can supersede an earlier analysis-only turn.
     # Vague follow-ups ("继续") do not grant execution permission.
-    return _forbids_work(_user_words(context)) and not (NEW_EXECUTION.search(question) or _RELEASE_INSTRUCTION.fullmatch(question.strip()))
+    return _forbids_work(_user_words(context)) and not (NEW_EXECUTION.search(question) or _is_release_instruction(question))
 
 
 # Boundary examples shared by both deciders: route by which mode clearly improves the result.
@@ -375,7 +410,7 @@ def heuristic_selection(question, context="", files=None, *, teams_available=Fal
                 "execution_requested": wants_exec, "degraded": "auto"}
 
     # 2. Multi-step repository delivery or full-repo systematic audit -> team.
-    if _TEAM_DELIVERY_RE.search(q) or _RELEASE_INSTRUCTION.fullmatch(q):
+    if _TEAM_DELIVERY_RE.search(q) or _is_release_instruction(q):
         return {"mode": "team", "reason": f"{prefix}多步仓库开发/交付任务，交由协作台处理",
                 "needs_tools": True, "execution_requested": not ro, "degraded": "auto"}
     if _TEAM_AUDIT_RE.search(q):

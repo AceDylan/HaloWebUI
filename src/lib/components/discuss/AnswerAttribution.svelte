@@ -17,13 +17,14 @@
 		(run && 'localInspect' in run) || (ask && 'localInspect' in ask) ? '未使用本机取证' : '无本机取证记录';
 	$: model = author?.baseName || author?.base || (author?.action === 'direct' ? author.name : '') ||
 		(writer?.name || writer?.model);
+	$: showModel = Boolean(model && (run || writer?.standIn || model !== ask?.moderator?.name));
 </script>
 
 {#if run || ask}
 	<p class="flex flex-wrap gap-x-2 gap-y-0.5 break-all text-xs text-gray-500 dark:text-gray-400" data-answer-attribution>
 		{#if run?.planner?.name}<span>调度 · {run.planner.name}</span>{/if}
-		{#if ask?.moderator?.name}<span>主持 · {ask.moderator.name}</span>{/if}
-		{#if model}<span title={author?.base || writer?.model}>{run ? '作答' : writer?.standIn ? '代写结论' : '结论'} · {model}</span>{/if}
+		{#if ask?.moderator?.name}<span title={ask.moderator.model}>主持 · {ask.moderator.name}</span>{/if}
+		{#if showModel}<span title={author?.base || writer?.model}>{run ? '作答' : writer?.standIn ? '代写结论' : '结论'} · {model}</span>{/if}
 		<span>{inspected}</span>
 	</p>
 {/if}

@@ -774,6 +774,23 @@ def test_the_conclusion_goes_back_into_the_chat_once(env, monkeypatch):
     assert f"/discuss/{run_chat_id}" in notice
     assert content.startswith("## 结论\n用 Postgres") and run_id == f"discuss:{run_chat_id}:{ask['id']}"
 
+    stand_in_ask = {
+        **ask,
+        "moderator": {"model": "claude-chat", "name": "claude-chat"},
+        "conclusion": {
+            **(ask.get("conclusion") or {}),
+            "model": "gpt-chat",
+            "name": "gpt-chat",
+            "standIn": {"for": "claude-chat", "reason": "限流"},
+        },
+        "localInspect": {"status": "done"},
+    }
+    stand_in_notice, _, _ = mode_dispatch.report_of("discuss", run_chat_id, stand_in_ask)
+    assert "下面是 gpt-chat 整理的结论" in stand_in_notice
+    assert "· 替 claude-chat 代写" in stand_in_notice
+    assert "· gpt-chat 代写" not in stand_in_notice
+    assert "· 已使用本机取证" in stand_in_notice
+
     posted = []
     busy = {"left": 1}
 

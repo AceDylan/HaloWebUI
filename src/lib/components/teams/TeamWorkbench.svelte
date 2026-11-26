@@ -33,15 +33,26 @@
 	import Inspector from './Inspector.svelte';
 	import LeadDesk from './LeadDesk.svelte';
 	import MemberStrip from './MemberStrip.svelte';
+	import NarrativeFeed from './NarrativeFeed.svelte';
 	import PlanReview from './PlanReview.svelte';
 	import ReplayBar from './ReplayBar.svelte';
 	import StatusChip from './StatusChip.svelte';
+	import SwimlaneTree from './SwimlaneTree.svelte';
 	import TeamBoard from './TeamBoard.svelte';
 	import TeamProgress from './TeamProgress.svelte';
 	import StageRail from './StageRail.svelte';
 	import TeamAvatar from './TeamAvatar.svelte';
 	import TeamRepeat from './TeamRepeat.svelte';
+	import WorkbenchFilterBar from './WorkbenchFilterBar.svelte';
 	import { elapsed, now } from './clock';
+	import {
+		buildStages,
+		groupNarrative,
+		layoutSwimlanes,
+		lanePalette,
+		LEAD_LANE_ID,
+		type LanePalette
+	} from './narrative';
 	import {
 		countStates,
 		foldStates,
@@ -81,11 +92,25 @@
 	let selectedTask: string | null = null;
 	let selectedMember: string | null = null;
 	let mobileTab: 'tasks' | 'members' | 'feed' | 'conclusion' | 'changes' = 'tasks';
+	let mobileTaskView: 'list' | 'swimlane' = 'list';
+	let mobileFeedMode: 'narrative' | 'raw' = 'narrative';
 	let asideTab: 'feed' | 'conclusion' | 'changes' = 'feed';
+	let viewMode: 'stream' | 'board' | 'conclusion' | 'changes' = 'stream';
+	let memberFilter: string | null = null;
+	let stageFilter: string | null = null;
+	let focusId: string | null = null;
+	let focusSource: 'feed' | 'swimlane' | null = null;
+	let focusPin = false;
+	let autoFollow = true;
+	let connectorEnabled = true;
+	let splitEl: HTMLDivElement | null = null;
+	let connector: { x1: number; y1: number; x2: number; y2: number; color: string } | null = null;
+	let connectorRaf: number | null = null;
 	// A team working on a git project has a 变更 tab (its branch, commits, diff, merge / push) —
 	// unless it changed nothing and its branch was cleaned up.
 	$: projectTeam = !!team?.plan?.project && !live?.team.project_cleaned;
 	$: if (!projectTeam && asideTab === 'changes') asideTab = 'feed';
+	$: if (!projectTeam && viewMode === 'changes') viewMode = 'stream';
 	$: if (!projectTeam && mobileTab === 'changes') mobileTab = 'tasks';
 	let asideTouched = false;
 	let busy = false;
@@ -213,6 +238,84 @@
 		}
 		return out;
 	})();
+	$: stages = buildStages(tasks, states, replay ? null : deployBrief);
+	$: narrativeItems = groupNarrative(shownEvents, tasks, {
+		cursorSeq,
+		deploy: deployBrief,
+		includeDeploy: !replay
+	});
+	$: swimlaneLayout = layoutSwimlanes(narrativeItems, planMembers, { leadName: lead.name });
+	$: lanePalettes = new Map<string, LanePalette>(
+		swimlaneLayout.lanes.map((l) => [l.id, l.palette])
+	);
+
+	const escapeAttr = (value: string) =>
+		typeof CSS !== 'undefined' && typeof CSS.escape === 'function'
+			? CSS.escape(value)
+			: value.replace(/["\\]/g, '\\$&');
+
+	const clamp = (val: number, min: number, max: number) => Math.max(min, Math.min(max, val));
+
+	const scheduleConnector = () => {
+		if (typeof window === 'undefined') return;
+		if (connectorRaf !== null) cancelAnimationFrame(connectorRaf);
+		connectorRaf = requestAnimationFrame(() => {
+			connectorRaf = null;
+			if (!connectorEnabled || !focusId || !splitEl || viewMode !== 'stream' || $mobile) {
+				connector = null;
+				return;
+			}
+			const esc = escapeAttr(focusId);
+			const leftEl = splitEl.querySelector(`[data-narrative-id="${esc}"]`) as HTMLElement | null;
+			const rightEl = splitEl.querySelector(`[data-swimlane-node="${esc}"]`) as Element | null;
+			const leftBox = splitEl.querySelector('[data-narrative-feed] ol') as HTMLElement | null;
+			const rightBox = splitEl.querySelector('[data-swimlane-scroll]') as HTMLElement | null;
+			if (!leftEl || !rightEl || !leftBox || !rightBox) {
+				connector = null;
+				return;
+			}
+			const host = splitEl.getBoundingClientRect();
+			const lr = leftEl.getBoundingClientRect();
+			const rr = rightEl.getBoundingClientRect();
+			const lb = leftBox.getBoundingClientRect();
+			const rb = rightBox.getBoundingClientRect();
+			// Account for the 34px sticky lane header inside rightBox.
+			const rightTopVisible = rb.top + 34;
+			if (
+				!host.width ||
+				lr.bottom < lb.top ||
+				lr.top > lb.bottom ||
+				rr.bottom < rightTopVisible ||
+				rr.top > rb.bottom
+			) {
+				connector = null;
+				return;
+			}
+			const item = narrativeItems.find((it) => it.id === focusId);
+			const color = item
+				? (lanePalettes.get(item.lane)?.stroke ?? lanePalette(item.lane, 1).stroke)
+				: 'hsl(var(--tm-accent))';
+			const rawY1 = lr.top + lr.height / 2;
+			const rawY2 = rr.top + rr.height / 2;
+			connector = {
+				x1: lr.right - host.left - 2,
+				y1: clamp(rawY1, lb.top + 6, lb.bottom - 6) - host.top,
+				x2: rr.left + rr.width / 2 - host.left,
+				y2: clamp(rawY2, rightTopVisible + 6, rb.bottom - 6) - host.top,
+				color
+			};
+		});
+	};
+
+	$: focusId, connectorEnabled, viewMode, $mobile, narrativeItems, scheduleConnector();
+	const onFocus = (
+		e: CustomEvent<{ id: string | null; source: 'feed' | 'swimlane'; pin?: boolean }>
+	) => {
+		focusId = e.detail.id;
+		focusSource = e.detail.id ? e.detail.source : null;
+		focusPin = !!e.detail.pin;
+		scheduleConnector();
+	};
 
 	// --- loading / polling -------------------------------------------------------------------
 	const schedule = (ms?: number) => {
@@ -328,6 +431,8 @@
 	onDestroy(() => {
 		destroyed = true;
 		if (timer) clearTimeout(timer);
+		if (connectorRaf !== null && typeof cancelAnimationFrame === 'function')
+			cancelAnimationFrame(connectorRaf);
 		if (typeof document !== 'undefined')
 			document.removeEventListener('visibilitychange', onVisibility);
 		if (litChat && $currentChatId === litChat) currentChatId.set('');
@@ -419,6 +524,7 @@
 		}
 		selectedTask = null;
 		selectedMember = null;
+		viewMode = 'conclusion';
 		asideTab = 'conclusion';
 		asideTouched = true;
 	};
@@ -431,6 +537,7 @@
 		}
 		selectedTask = null;
 		selectedMember = null;
+		viewMode = 'changes';
 		asideTab = 'changes';
 		asideTouched = true;
 	};
@@ -473,7 +580,7 @@
 <svelte:head>
 	<title>{pageTitle} · 协作台 | {$WEBUI_NAME}</title>
 </svelte:head>
-<svelte:window on:keydown={onKey} />
+<svelte:window on:keydown={onKey} on:resize={scheduleConnector} />
 
 <div
 	class="relative flex h-screen max-h-[100dvh] w-full max-w-full flex-col"
@@ -725,18 +832,46 @@
 				{/if}
 			</div>
 		{:else}
-			<div class="flex flex-col gap-4 pt-1">
+			<div class="flex flex-col gap-3 pt-1">
 				{#if showStage}
 					<StageRail {stage} />
 				{/if}
-				<TeamProgress
-					{counts}
-					{fallbacks}
-					{leadModel}
-					workspace={live?.team.workspace ?? ''}
-					startedAt={replay || (showStage && !finished) ? null : team.approved_at}
-					finishedAt={finished ? (team.finished_at ?? null) : null}
-				/>
+				{#if $mobile}
+					<TeamProgress
+						{counts}
+						{fallbacks}
+						{leadModel}
+						workspace={live?.team.workspace ?? ''}
+						startedAt={replay || (showStage && !finished) ? null : team.approved_at}
+						finishedAt={finished ? (team.finished_at ?? null) : null}
+					/>
+				{:else}
+					<WorkbenchFilterBar
+						{lead}
+						members={memberViews}
+						{lanePalettes}
+						{stages}
+						{memberFilter}
+						{stageFilter}
+						{viewMode}
+						{projectTeam}
+						conclusionReady={conclusionBrief?.status === 'ready'}
+						deployStatus={deployBrief?.status ?? null}
+						{counts}
+						{fallbacks}
+						startedAt={replay || (showStage && !finished) ? null : team.approved_at}
+						finishedAt={finished ? (team.finished_at ?? null) : null}
+						on:member={(e) => (memberFilter = e.detail)}
+						on:inspectMember={(e) => selectMember(e.detail)}
+						on:stage={(e) => (stageFilter = e.detail)}
+						on:view={(e) => {
+							viewMode = e.detail;
+							asideTouched = true;
+							if (e.detail === 'conclusion') asideTab = 'conclusion';
+							if (e.detail === 'changes') asideTab = 'changes';
+						}}
+					/>
+				{/if}
 
 				{#if liveError}
 					<div
@@ -882,11 +1017,11 @@
 					</div>
 				{/if}
 
-				{#if running && !replay && !stopped && team.status === 'running'}
+				{#if $mobile && running && !replay && !stopped && team.status === 'running'}
 					<LeadDesk {teamId} change={leadChange} {phase} on:changed={restart} />
 				{/if}
 
-				{#if !($mobile && mobileTab === 'members')}
+				{#if $mobile && mobileTab !== 'members'}
 					<MemberStrip
 						{lead}
 						members={memberViews}
@@ -943,88 +1078,172 @@
 							on:select={(e) => selectMember(e.detail)}
 						/>
 					{:else if mobileTab === 'tasks'}
-						<ol class="flex flex-col gap-4">
-							{#each layers as layer, depth}
-								<li>
-									<div class="mb-1.5 flex items-center gap-2 text-xs text-gray-500">
-										<span
-											class="tm-num grid size-5 place-items-center rounded-full border text-[10px] font-semibold tm-hairline"
-											>{depth + 1}</span
-										>
-										第 {depth + 1} 步{layer.length > 1 ? ` · ${layer.length} 个并行` : ''}
-									</div>
-									<ul class="flex flex-col gap-2">
-										{#each layer as t (t.id)}
-											{@const s = states.get(t.id)}
-											<li>
-												<button
-													type="button"
-													class="tm-card w-full px-3 py-2.5 text-left {toneOf(s?.sub_status) ===
-													'run'
-														? 'tm-live'
-														: ''} {selectedTask === t.id ? '!border-sky-400/60' : ''}"
-													on:click={() => selectTask(t.id)}
-												>
-													<div class="flex items-center gap-2 text-xs">
-														<span class="font-mono font-semibold text-gray-400">#{t.key}</span>
-														<span class="min-w-0 truncate text-gray-500">{t.member}</span>
-														<RunnerBadge
-															chosen={taskRunner(t).chosen}
-															actual={t.executor}
-															reason={taskRunner(t).reason}
-															model={t.model}
-														/>
-														<span class="ml-auto shrink-0"
-															><StatusChip status={s?.sub_status} /></span
-														>
-													</div>
-													<div class="mt-1 text-sm font-medium">{t.title}</div>
-													{#if s?.sub_status === 'waiting_deps'}
-														<div class="text-xs text-amber-600 dark:text-amber-400">
-															等 {openParents(t, states)
-																.map((p) => `#${keyOf.get(p) ?? p}`)
-																.join('、')} 完成
-														</div>
-													{:else if toneOf(s?.sub_status) === 'run'}
-														{@const act = activity.get(t.member)}
-														<div
-															class="mt-1 flex min-w-0 items-center gap-1.5 font-mono text-[11px]"
-															data-task-activity
-														>
-															<span class="shrink-0 text-sky-500" aria-hidden="true">›</span>
-															<span
-																class="tm-caret min-w-0 truncate text-gray-600 dark:text-gray-300"
-																>{act?.text ?? '开始执行…'}</span
+						<div class="flex items-center justify-end">
+							<div class="tm-segment !p-[2px]" role="radiogroup" aria-label="移动端任务视图">
+								<button
+									type="button"
+									role="radio"
+									aria-checked={mobileTaskView === 'list'}
+									class="!px-2.5 !py-1 !text-xs"
+									on:click={() => (mobileTaskView = 'list')}>任务列表</button
+								>
+								<button
+									type="button"
+									role="radio"
+									aria-checked={mobileTaskView === 'swimlane'}
+									class="!px-2.5 !py-1 !text-xs"
+									on:click={() => (mobileTaskView = 'swimlane')}>泳道树</button
+								>
+							</div>
+						</div>
+						{#if mobileTaskView === 'swimlane'}
+							<div class="tm-card h-[60vh] overflow-hidden">
+								<SwimlaneTree
+									items={narrativeItems}
+									members={planMembers}
+									leadName={lead.name}
+									precomputedLayout={swimlaneLayout}
+									{memberFilter}
+									{stageFilter}
+									{focusId}
+									{focusSource}
+									{focusPin}
+									{autoFollow}
+									showConnectorToggle={false}
+									on:focus={onFocus}
+									on:selectTask={(e) => selectTask(e.detail)}
+									on:toggleMember={(e) => (memberFilter = e.detail)}
+									on:toggleFollow={(e) => (autoFollow = e.detail)}
+								/>
+							</div>
+						{:else}
+							<ol class="flex flex-col gap-4">
+								{#each layers as layer, depth}
+									<li>
+										<div class="mb-1.5 flex items-center gap-2 text-xs text-gray-500">
+											<span
+												class="tm-num grid size-5 place-items-center rounded-full border text-[10px] font-semibold tm-hairline"
+												>{depth + 1}</span
+											>
+											第 {depth + 1} 步{layer.length > 1 ? ` · ${layer.length} 个并行` : ''}
+										</div>
+										<ul class="flex flex-col gap-2">
+											{#each layer as t (t.id)}
+												{@const s = states.get(t.id)}
+												<li>
+													<button
+														type="button"
+														class="tm-card w-full px-3 py-2.5 text-left {toneOf(s?.sub_status) ===
+														'run'
+															? 'tm-live'
+															: ''} {selectedTask === t.id ? '!border-sky-400/60' : ''}"
+														on:click={() => selectTask(t.id)}
+													>
+														<div class="flex items-center gap-2 text-xs">
+															<span class="font-mono font-semibold text-gray-400">#{t.key}</span>
+															<span class="min-w-0 truncate text-gray-500">{t.member}</span>
+															<RunnerBadge
+																chosen={taskRunner(t).chosen}
+																actual={t.executor}
+																reason={taskRunner(t).reason}
+																model={t.model}
+															/>
+															<span class="ml-auto shrink-0"
+																><StatusChip status={s?.sub_status} /></span
 															>
-															{#if !replay && t.started_at}
-																<span class="tm-num ml-auto shrink-0 text-sky-600 dark:text-sky-300"
-																	>{elapsed($now - t.started_at)}</span
+														</div>
+														<div class="mt-1 text-sm font-medium">{t.title}</div>
+														{#if s?.sub_status === 'waiting_deps'}
+															<div class="text-xs text-amber-600 dark:text-amber-400">
+																等 {openParents(t, states)
+																	.map((p) => `#${keyOf.get(p) ?? p}`)
+																	.join('、')} 完成
+															</div>
+														{:else if toneOf(s?.sub_status) === 'run'}
+															{@const act = activity.get(t.member)}
+															<div
+																class="mt-1 flex min-w-0 items-center gap-1.5 font-mono text-[11px]"
+																data-task-activity
+															>
+																<span class="shrink-0 text-sky-500" aria-hidden="true">›</span>
+																<span
+																	class="tm-caret min-w-0 truncate text-gray-600 dark:text-gray-300"
+																	>{act?.text ?? '开始执行…'}</span
 																>
-															{/if}
-														</div>
-													{:else if s?.status === 'done' && !replay && t.started_at && t.completed_at}
-														<div class="tm-num mt-0.5 text-[11px] text-gray-400">
-															用时 {elapsed(t.completed_at - t.started_at)}
-														</div>
-													{/if}
-												</button>
-											</li>
-										{/each}
-									</ul>
-								</li>
-							{/each}
-						</ol>
+																{#if !replay && t.started_at}
+																	<span
+																		class="tm-num ml-auto shrink-0 text-sky-600 dark:text-sky-300"
+																		>{elapsed($now - t.started_at)}</span
+																	>
+																{/if}
+															</div>
+														{:else if s?.status === 'done' && !replay && t.started_at && t.completed_at}
+															<div class="tm-num mt-0.5 text-[11px] text-gray-400">
+																用时 {elapsed(t.completed_at - t.started_at)}
+															</div>
+														{/if}
+													</button>
+												</li>
+											{/each}
+										</ul>
+									</li>
+								{/each}
+							</ol>
+						{/if}
 					{:else if mobileTab === 'feed'}
-						<div class="tm-card h-[60vh] p-3">
-							<CommFeed
-								events={shownEvents}
-								{cursorSeq}
-								memberFilter={selectedMember}
-								{titles}
-								members={planMembers}
-								on:task={(e) => selectTask(e.detail)}
-								on:clearfilter={() => selectMember(null)}
-							/>
+						<div class="flex items-center justify-end">
+							<div class="tm-segment !p-[2px]" role="radiogroup" aria-label="移动端通讯模式">
+								<button
+									type="button"
+									role="radio"
+									aria-checked={mobileFeedMode === 'narrative'}
+									class="!px-2.5 !py-1 !text-xs"
+									on:click={() => (mobileFeedMode = 'narrative')}>叙事流</button
+								>
+								<button
+									type="button"
+									role="radio"
+									aria-checked={mobileFeedMode === 'raw'}
+									class="!px-2.5 !py-1 !text-xs"
+									on:click={() => (mobileFeedMode = 'raw')}>原始日志</button
+								>
+							</div>
+						</div>
+						<div class="tm-card h-[60vh] overflow-hidden {mobileFeedMode === 'raw' ? 'p-3' : ''}">
+							{#if mobileFeedMode === 'narrative'}
+								<NarrativeFeed
+									{teamId}
+									items={narrativeItems}
+									members={planMembers}
+									{states}
+									{lanePalettes}
+									{memberFilter}
+									{stageFilter}
+									{focusId}
+									{focusSource}
+									{focusPin}
+									{replay}
+									teamStopped={stopped}
+									{autoFollow}
+									on:focus={onFocus}
+									on:selectTask={(e) => selectTask(e.detail)}
+									on:clearFilters={() => {
+										memberFilter = null;
+										stageFilter = null;
+									}}
+									on:changed={restart}
+								/>
+							{:else}
+								<CommFeed
+									events={shownEvents}
+									{cursorSeq}
+									memberFilter={selectedMember}
+									{titles}
+									members={planMembers}
+									on:task={(e) => selectTask(e.detail)}
+									on:clearfilter={() => selectMember(null)}
+								/>
+							{/if}
 						</div>
 					{:else if mobileTab === 'conclusion'}
 						<ConclusionView
@@ -1040,9 +1259,127 @@
 					{:else if mobileTab === 'changes'}
 						<ChangesView {teamId} {phase} />
 					{/if}
-				{:else}
+				{:else if viewMode === 'stream'}
+					<!-- Desktop signature dual-pane: Left structured NarrativeFeed + Right SwimlaneTree + cross-pane connector -->
 					<div
-						class="grid gap-4 {asideTab !== 'feed' && !selectedTask && !selectedMember
+						bind:this={splitEl}
+						class="relative grid gap-3 lg:h-[calc(100dvh-16rem)] lg:min-h-[480px] lg:grid-cols-[minmax(0,1fr)_390px] xl:grid-cols-[minmax(0,1fr)_440px]"
+						data-workbench-stream
+					>
+						<div class="tm-card flex max-h-[70vh] min-h-[420px] min-w-0 flex-col overflow-hidden lg:max-h-none">
+							<div class="min-h-0 flex-1">
+								<NarrativeFeed
+									{teamId}
+									items={narrativeItems}
+									members={planMembers}
+									{states}
+									{lanePalettes}
+									{memberFilter}
+									{stageFilter}
+									{focusId}
+									{focusSource}
+									{focusPin}
+									{replay}
+									teamStopped={stopped}
+									{autoFollow}
+									on:focus={onFocus}
+									on:selectTask={(e) => selectTask(e.detail)}
+									on:clearFilters={() => {
+										memberFilter = null;
+										stageFilter = null;
+									}}
+									on:changed={restart}
+									on:scroll={scheduleConnector}
+								/>
+							</div>
+							{#if running && !replay && !stopped && team.status === 'running'}
+								<div class="border-t p-2.5 tm-hairline">
+									<LeadDesk {teamId} change={leadChange} {phase} on:changed={restart} />
+								</div>
+							{/if}
+						</div>
+
+						<div class="tm-card flex max-h-[70vh] min-h-[420px] min-w-0 flex-col overflow-hidden lg:max-h-none">
+							<SwimlaneTree
+								items={narrativeItems}
+								members={planMembers}
+								leadName={lead.name}
+								precomputedLayout={swimlaneLayout}
+								{memberFilter}
+								{stageFilter}
+								{focusId}
+								{focusSource}
+								{focusPin}
+								{autoFollow}
+								{connectorEnabled}
+								on:focus={onFocus}
+								on:selectTask={(e) => selectTask(e.detail)}
+								on:toggleMember={(e) => (memberFilter = e.detail)}
+								on:toggleFollow={(e) => (autoFollow = e.detail)}
+								on:toggleConnector={(e) => (connectorEnabled = e.detail)}
+								on:scroll={scheduleConnector}
+							/>
+						</div>
+
+						{#if connector}
+							{@const midX = (connector.x1 + connector.x2) / 2}
+							<svg
+								class="connector-overlay pointer-events-none absolute inset-0 z-20 hidden h-full w-full overflow-visible lg:block"
+								aria-hidden="true"
+								data-focus-connector
+							>
+								<path
+									d="M {connector.x1} {connector.y1} C {midX} {connector.y1}, {midX} {connector.y2}, {connector.x2} {connector.y2}"
+									fill="none"
+									stroke={connector.color}
+									stroke-width="2"
+									stroke-opacity="0.72"
+									stroke-dasharray="5 4"
+									class="connector-path"
+								/>
+								<circle cx={connector.x1} cy={connector.y1} r="3.5" fill={connector.color} />
+								<circle
+									cx={connector.x2}
+									cy={connector.y2}
+									r="4.5"
+									fill="none"
+									stroke={connector.color}
+									stroke-width="2"
+								/>
+							</svg>
+						{/if}
+					</div>
+				{:else if viewMode === 'conclusion'}
+					<div class="mx-auto flex w-full max-w-4xl flex-col gap-3">
+						<div class="tm-card p-5">
+							<ConclusionView
+								{teamId}
+								title={team.title}
+								{phase}
+								brief={conclusionBrief}
+								progress={{ done: counts.done, total: counts.total }}
+								chatId={team.chat_id}
+								outputs={team.outputs}
+								{stage}
+							/>
+						</div>
+						{#if running && !replay && !stopped && team.status === 'running'}
+							<LeadDesk {teamId} change={leadChange} {phase} on:changed={restart} />
+						{/if}
+					</div>
+				{:else if viewMode === 'changes'}
+					<div class="mx-auto w-full max-w-4xl">
+						<div class="tm-card p-5">
+							<ChangesView {teamId} {phase} />
+						</div>
+					</div>
+				{:else}
+					<!-- Classic DAG Board view (preserved 100%) -->
+					{#if running && !replay && !stopped && team.status === 'running'}
+						<LeadDesk {teamId} change={leadChange} {phase} on:changed={restart} />
+					{/if}
+					<div
+						class="grid gap-4 {asideTab !== 'feed'
 							? 'lg:grid-cols-[minmax(0,1fr)_420px] xl:grid-cols-[minmax(0,1fr)_520px]'
 							: 'lg:grid-cols-[minmax(0,1fr)_380px]'}"
 					>
@@ -1080,91 +1417,106 @@
 						<aside
 							class="tm-card flex min-h-[420px] flex-col p-3 lg:sticky lg:top-0 lg:max-h-[calc(100dvh-9rem)]"
 						>
-							{#if selectedTask || selectedMember}
-								<div class="tm-scroll min-h-0 overflow-y-auto">
-									<Inspector
+							<div class="mb-3 flex items-center">
+								<div class="tm-segment" role="tablist" aria-label="通讯与结论">
+									{#each [['feed', '通讯与日志'], ['conclusion', '结论'], ...(projectTeam ? [['changes', '变更']] : [])] as [value, label]}
+										<button
+											type="button"
+											role="tab"
+											aria-selected={asideTab === value}
+											class="relative focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-400"
+											on:click={() => {
+												asideTab = value;
+												asideTouched = true;
+											}}
+											data-aside-tab={value}
+											>{label}{#if value === 'conclusion' && conclusionBrief?.status === 'ready' && asideTab !== 'conclusion'}<span
+													class="absolute right-1 top-1 size-1.5 rounded-full bg-[hsl(var(--tm-accent))]"
+													aria-label="结论已生成"
+												/>{:else if value === 'changes' && asideTab !== 'changes' && (deployBrief?.status === 'running' || deployBrief?.status === 'failed')}<span
+													class="absolute right-1 top-1 size-1.5 rounded-full {deployBrief.status ===
+													'failed'
+														? 'bg-red-500'
+														: 'bg-sky-500'}"
+													aria-label={deployBrief.status === 'failed'
+														? '推送部署失败'
+														: '推送部署中'}
+												/>{/if}</button
+										>
+									{/each}
+								</div>
+							</div>
+							{#if asideTab === 'conclusion'}
+								<div class="tm-scroll min-h-0 flex-1 overflow-y-auto pr-1">
+									<ConclusionView
 										{teamId}
-										taskId={selectedTask}
-										memberName={selectedMember}
-										{tasks}
-										{states}
-										members={memberViews}
-										events={shownEvents}
-										{replay}
-										teamStopped={stopped}
-										workspace={live?.team.workspace ?? null}
-										{refreshKey}
-										assistantsApplied={team?.plan?.assistants_applied ?? null}
-										on:team={(e) => (team = e.detail)}
-										on:close={() => {
-											selectedTask = null;
-											selectedMember = null;
-										}}
-										on:task={(e) => selectTask(e.detail)}
-										on:changed={restart}
+										title={team.title}
+										{phase}
+										brief={conclusionBrief}
+										progress={{ done: counts.done, total: counts.total }}
+										chatId={team.chat_id}
+										outputs={team.outputs}
+										{stage}
 									/>
 								</div>
-							{:else}
-								<div class="mb-3 flex items-center">
-									<div class="tm-segment" role="tablist" aria-label="通讯与结论">
-										{#each [['feed', '通讯与日志'], ['conclusion', '结论'], ...(projectTeam ? [['changes', '变更']] : [])] as [value, label]}
-											<button
-												type="button"
-												role="tab"
-												aria-selected={asideTab === value}
-												class="relative focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-400"
-												on:click={() => {
-													asideTab = value;
-													asideTouched = true;
-												}}
-												data-aside-tab={value}
-												>{label}{#if value === 'conclusion' && conclusionBrief?.status === 'ready' && asideTab !== 'conclusion'}<span
-														class="absolute right-1 top-1 size-1.5 rounded-full bg-[hsl(var(--tm-accent))]"
-														aria-label="结论已生成"
-													/>{:else if value === 'changes' && asideTab !== 'changes' && (deployBrief?.status === 'running' || deployBrief?.status === 'failed')}<span
-														class="absolute right-1 top-1 size-1.5 rounded-full {deployBrief.status ===
-														'failed'
-															? 'bg-red-500'
-															: 'bg-sky-500'}"
-														aria-label={deployBrief.status === 'failed'
-															? '推送部署失败'
-															: '推送部署中'}
-													/>{/if}</button
-											>
-										{/each}
-									</div>
+							{:else if asideTab === 'changes'}
+								<div class="tm-scroll min-h-0 flex-1 overflow-y-auto pr-1">
+									<ChangesView {teamId} {phase} />
 								</div>
-								{#if asideTab === 'conclusion'}
-									<div class="tm-scroll min-h-0 flex-1 overflow-y-auto pr-1">
-										<ConclusionView
-											{teamId}
-											title={team.title}
-											{phase}
-											brief={conclusionBrief}
-											progress={{ done: counts.done, total: counts.total }}
-											chatId={team.chat_id}
-											outputs={team.outputs}
-											{stage}
-										/>
-									</div>
-								{:else if asideTab === 'changes'}
-									<div class="tm-scroll min-h-0 flex-1 overflow-y-auto pr-1">
-										<ChangesView {teamId} {phase} />
-									</div>
-								{:else}
-									<div class="min-h-0 flex-1">
-										<CommFeed
-											events={shownEvents}
-											{cursorSeq}
-											{titles}
-											members={planMembers}
-											on:task={(e) => selectTask(e.detail)}
-											on:clearfilter={() => selectMember(null)}
-										/>
-									</div>
-								{/if}
+							{:else}
+								<div class="min-h-0 flex-1">
+									<CommFeed
+										events={shownEvents}
+										{cursorSeq}
+										{titles}
+										members={planMembers}
+										on:task={(e) => selectTask(e.detail)}
+										on:clearfilter={() => selectMember(null)}
+									/>
+								</div>
 							{/if}
 						</aside>
+					</div>
+				{/if}
+
+				<!-- Desktop non-destructive Inspector slide-over drawer -->
+				{#if !$mobile && (selectedTask || selectedMember)}
+					<div
+						class="inspector-backdrop fixed inset-0 z-40 flex justify-end bg-black/20 backdrop-blur-[1px] dark:bg-black/45"
+						role="presentation"
+						on:click|self={() => {
+							selectedTask = null;
+							selectedMember = null;
+						}}
+						data-inspector-drawer
+					>
+						<div
+							class="inspector-panel tm-card tm-scroll h-full w-full max-w-[440px] overflow-y-auto rounded-none rounded-l-2xl p-4 shadow-2xl"
+							role="dialog"
+							aria-label="任务与成员详情"
+						>
+							<Inspector
+								{teamId}
+								taskId={selectedTask}
+								memberName={selectedMember}
+								{tasks}
+								{states}
+								members={memberViews}
+								events={shownEvents}
+								{replay}
+								teamStopped={stopped}
+								workspace={live?.team.workspace ?? null}
+								{refreshKey}
+								assistantsApplied={team?.plan?.assistants_applied ?? null}
+								on:team={(e) => (team = e.detail)}
+								on:close={() => {
+									selectedTask = null;
+									selectedMember = null;
+								}}
+								on:task={(e) => selectTask(e.detail)}
+								on:changed={restart}
+							/>
+						</div>
 					</div>
 				{/if}
 			</div>
@@ -1254,8 +1606,31 @@
 	.legend-wait {
 		background: repeating-linear-gradient(90deg, #94a3b8 0 3px, transparent 3px 6px);
 	}
+	.connector-path {
+		animation: tm-connector-dash 1.2s linear infinite;
+	}
+	@keyframes tm-connector-dash {
+		to {
+			stroke-dashoffset: -18;
+		}
+	}
+	.inspector-panel {
+		animation: tm-drawer-in 0.24s var(--tm-ease) both;
+	}
+	@keyframes tm-drawer-in {
+		from {
+			opacity: 0;
+			transform: translateX(24px);
+		}
+		to {
+			opacity: 1;
+			transform: none;
+		}
+	}
 	@media (prefers-reduced-motion: reduce) {
-		.ghost {
+		.ghost,
+		.connector-path,
+		.inspector-panel {
 			animation: none;
 		}
 		.check path {

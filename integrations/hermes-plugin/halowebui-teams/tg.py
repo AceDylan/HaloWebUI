@@ -3,6 +3,8 @@
 
 * ``/team <目标>`` starts a team (HaloWebUI plans it; the plan card comes back here, see
   ``notify.plan_notice``); ``/team`` alone lists your recent teams.
+* ``/work [runner …] <需求>`` starts the ``work`` workflow (AGY plans → Codex builds → Claude
+  reviews and fixes → release), started at once; a runner named first is used for its family.
 * Buttons on our messages (callback data ``ht:<action>:<team>[:<task>]``): approve / cancel /
   re-plan a plan, retry a failed task.
 * A reply to one of our notices: to a plan → re-plan with it as feedback; to a question → the
@@ -336,6 +338,9 @@ def _dispatch(event: Any) -> Optional[dict]:
     if command in ("team", "teams"):
         _spawn(_team_command(source, owner, event.get_command_args().strip(), event))
         return {"action": "skip", "reason": "halo team command"}
+    if command == "work":
+        _spawn(_work_command(source, owner, event.get_command_args().strip(), event))
+        return {"action": "skip", "reason": "halo work command"}
     if not text or command:
         return None
     reply_to = getattr(event, "reply_to_message_id", None)
@@ -379,6 +384,7 @@ USAGE = ("<b>协作台</b>\n"
          "/team 多模型 目标 —— 多模型研发：Claude 和 AGY 各出方案，合成后问你拍板（回复那条问题消息），再设计、写后端和前端。\n"
          "/team 快速研发 目标 —— 快速研发：摸底 → Codex 写后端 → Claude 写前端并测试。可以和「直接」叠着写。\n"
          "/team —— 最近的协作任务。\n"
+         "/work 需求 —— 工作流：AGY 规划 → Codex 开发 → Claude 审阅修复 → 自动发布（/work help 看详情）。\n"
          "回复完成通知 —— 对负责人说还要补什么、改什么。")
 
 
@@ -405,11 +411,64 @@ async def _team_command(source: Any, owner: str, args: str, event: Any) -> None:
                [[("🌐 在网页看", "url:" + url)]] if url else None, event)
 
 
+WORK_USAGE = ("<b>工作流 /work</b>\n"
+              "/work 需求 —— AGY 出规划 → Codex 开发 → Claude 审阅并修复问题 → 提交、推送、部署、清理，全程自动。"
+              "需求里写上项目名或路径（例如「/work HaloWebUI 给设置页加个开关」）。\n"
+              "默认 offiagy 规划（不行换 agy），officlaude 审阅（不行依次换 cchclaude、anyclaude、reclaude）。\n"
+              "/work cchclaude 需求 —— 指定审阅的 Claude（cchclaude / anyclaude / reclaude / officlaude），"
+              "指定了就只用它，不可用时暂停等你换；agy / offiagy 同理指定规划的。")
+_WORK_RUNNER_RE = re.compile(r"([A-Za-z]+)(?=$|[\s：:，,])")
+
+
+def split_work_args(args: str) -> tuple[str, dict[str, str]]:
+    """``/work [runner …] <需求>`` → (goal, runner_prefs). Runners named first pick their family's
+    runner (``{"claude": "cchclaude"}``); one per family, Hermes is not one."""
+    from . import runners
+
+    text, prefs = (args or "").strip(), {}
+    while True:
+        found = _WORK_RUNNER_RE.match(text)
+        spec = runners.BY_NAME.get(found.group(1).lower()) if found else None
+        if spec is None or spec.native or spec.family in prefs:
+            return text, prefs
+        prefs[spec.family] = spec.name
+        text = text[found.end():].strip(AUTO_START_SEPARATORS)
+
+
+def work_flow(prefs: Optional[dict] = None) -> str:
+    """The /work steps with the runners that will do them."""
+    prefs = prefs or {}
+    planner = prefs.get("agy") or "offiagy（不行换 agy）"
+    developer = prefs.get("codex") or "Codex"
+    reviewer = prefs.get("claude") or "officlaude（不行依次换 cchclaude、anyclaude、reclaude）"
+    return f"{planner} 出规划 → {developer} 开发 → {reviewer} 审阅修复 → 提交推送部署清理"
+
+
+def work_started(team: dict, prefs: dict) -> str:
+    """The reply to /work (Telegram HTML; QQ strips the tags)."""
+    return (f"🛠️ 已交给工作流：<b>{esc(clip(team.get('title'), 60))}</b>\n{esc(work_flow(prefs))}。\n"
+            "规划好就直接开始，全程自动；需要你处理或做完发布了会发到这里。")
+
+
+async def _work_command(source: Any, owner: str, args: str, event: Any) -> None:
+    goal, prefs = split_work_args(args)
+    if not goal or goal in ("help", "帮助", "?", "？"):
+        await _say(source, WORK_USAGE, None, event)
+        return
+    try:
+        team = await asyncio.to_thread(link.create, owner, goal, _origin(source), True, "work", prefs)
+    except link.HaloError as exc:
+        await _say(source, f"⚠️ 没能发起工作流：{esc(exc.message)}", None, event)
+        return
+    url = link.team_url(team["id"])
+    await _say(source, work_started(team, prefs), [[("🌐 在网页看", "url:" + url)]] if url else None, event)
+
+
 AUTO_START_WORDS = ("直接开始", "直接", "自动开始", "自动")
 # 「快速」 alone is not one: 「/team 快速 看下日志」 is a goal, not a request for the dev template.
 WORKFLOW_WORDS = (("多模型研发", "dev_pipeline"), ("多模型", "dev_pipeline"), ("快速研发", "dev_lite"),
                   ("自由协作", "auto"))
-WORKFLOW_LABEL = {"dev_pipeline": "多模型研发", "dev_lite": "快速研发"}
+WORKFLOW_LABEL = {"dev_pipeline": "多模型研发", "dev_lite": "快速研发", "work": "工作流"}
 AUTO_START_SEPARATORS = " ：:，,\u3000"
 
 

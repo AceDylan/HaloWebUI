@@ -416,6 +416,12 @@ def test_telegram_team_can_pick_a_workflow(hermes, monkeypatch):
     assert "workflow" not in (AgentTeams.get(plain.json()["id"], "u1").meta or {})
     assert client.post("/api/v1/teams/hermes/teams", headers=h,
                        json={"goal": "x", "origin": origin, "workflow": "bogus"}).status_code == 422
+    work = client.post("/api/v1/teams/hermes/teams", headers=h,
+                       json={"goal": "给 HaloWebUI 加个按钮", "origin": origin, "workflow": "work", "auto_start": True,
+                             "runner_prefs": {"claude": "cchclaude", "hermes": "x"}})
+    assert work.status_code == 200 and work.json()["workflow"] == "work" and work.json()["auto_start"] is True
+    meta = AgentTeams.get(work.json()["id"], "u1").meta
+    assert meta["workflow"] == "work" and meta["runner_prefs"] == {"claude": "cchclaude"}
 
 
 def test_telegram_team_runs_the_same_plan_and_approve_flow(hermes, monkeypatch):

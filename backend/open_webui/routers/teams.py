@@ -92,8 +92,9 @@ class CreateTeamForm(BaseModel):
     auto_start: bool = False
     # 「自动推送部署」: once a project team finishes and passes acceptance, merge → push → deploy → clean up.
     auto_deploy: bool = False
-    # Workflow template: "auto" (free-form) | "dev_pipeline" (reference multi-model) | "dev_lite".
-    workflow: Literal["auto", "dev_pipeline", "dev_lite"] = "auto"
+    # Workflow template: "auto" (free-form) | "dev_pipeline" (reference multi-model) | "dev_lite" |
+    # "work" (``/work``: AGY plans → Codex builds → Claude reviews and fixes → release).
+    workflow: Literal["auto", "dev_pipeline", "dev_lite", "work"] = "auto"
     # Optional per-family explicit runner choices: {"claude": "cchclaude", "agy": "agy"}.
     runner_prefs: dict[str, str] = Field(default_factory=dict)
     # Files uploaded for the team (their ids, /api/v1/files): copied into its workspace's inputs/.
@@ -335,7 +336,7 @@ async def _start(request: Request, user, goal: str, target, *, chat_id: Optional
         meta["auto_start"] = True
     if auto_deploy:
         meta["auto_deploy"] = True
-    if workflow in ("dev_pipeline", "dev_lite"):
+    if workflow in ("dev_pipeline", "dev_lite", "work"):
         meta["workflow"] = workflow
     if isinstance(runner_prefs, dict):
         cleaned = {str(k).strip().lower(): str(v).strip().lower()
@@ -933,8 +934,10 @@ class HermesCreateForm(BaseModel):
     origin: dict = Field(default_factory=dict)
     auto_start: bool = False
     auto_deploy: bool = False
-    # ``/team 多模型 …`` / ``/team 快速 …`` from Telegram / QQ: the same templates as the browser's.
-    workflow: Literal["auto", "dev_pipeline", "dev_lite"] = "auto"
+    # ``/team 多模型 …`` / ``/team 快速 …`` / ``/work …`` from Telegram / QQ: the same templates as the browser's.
+    workflow: Literal["auto", "dev_pipeline", "dev_lite", "work"] = "auto"
+    # ``/work cchclaude …``: the runner the user named for its family (no fallback inside it).
+    runner_prefs: dict[str, str] = Field(default_factory=dict)
 
 
 async def _hermes_caller(request: Request):
@@ -1030,7 +1033,8 @@ async def hermes_create(request: Request, form: HermesCreateForm, caller=Depends
         raise HTTPException(status_code=400, detail="请写下要协作完成的目标")
     return public_team(await _start(request, user, goal, target, origin=_clean_origin(form.origin),
                                     auto_start=form.auto_start, auto_deploy=form.auto_deploy,
-                                    workflow=form.workflow, access=AssistantAccess(request, user)))
+                                    workflow=form.workflow, runner_prefs=form.runner_prefs,
+                                    access=AssistantAccess(request, user)))
 
 
 @router.get("/hermes/teams/{team_id}")

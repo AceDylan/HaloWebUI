@@ -448,3 +448,16 @@ def test_qq_failure_waits_for_the_leads_diagnosis_without_a_generic_notice(remot
     remote.remote.tick()
     remote.remote.tick()
     assert [m["text"][:12] for m in remote.sent] == ["🟣 协作「加按钮」需要你"]
+
+
+def test_qq_work_command_starts_the_work_workflow(remote, monkeypatch):
+    created = []
+    monkeypatch.setattr(remote.link, "create", lambda owner, goal, origin, auto, workflow="auto", runner_prefs=None:
+                        created.append((goal, auto, workflow, runner_prefs)) or {"id": "5f3c2a10-team-w", "title": goal})
+    _dispatch(remote.remote, _event("qqbot", QQ_USER, "/work anyclaude 给 HaloWebUI 加按钮"))
+    assert created == [("给 HaloWebUI 加按钮", True, "work", {"claude": "anyclaude"})]
+    text = remote.sent[-1]["text"]
+    assert "已交给工作流" in text and "anyclaude 审阅修复" in text and "<b>" not in text
+    assert any(j["kind"] == "team" and j["id"] == "5f3c2a10-team-w" for j in remote.remote.chat_jobs("qqbot", QQ_USER))
+    _dispatch(remote.remote, _event("qqbot", QQ_USER, "/work"))
+    assert "/work 需求" in remote.sent[-1]["text"] and len(created) == 1

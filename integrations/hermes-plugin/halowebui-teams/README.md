@@ -114,6 +114,13 @@ is the Hermes side. It adds no service, port or second task store:
   back while the team's page is open (`events?visible=1`). Replies to notices answer the member /
   add a note and retry. Settings and the user link: `~/.hermes/halo-teams.json` (see `link.py`).
   The hook runs before the gateway's auth: only Telegram users listed there are handled.
+* **`/work [runner …] <需求>`** (Telegram `tg.py`, QQ `remote.py`, HaloWebUI's chat composer
+  `src/lib/utils/work-command.ts`): the fixed `work` workflow, started at once — AGY plans
+  (`.halo/plan.md`, offiagy → agy) → Codex builds it all (`.halo/dev-receipt.md`) → Claude reviews and
+  fixes (`.halo/review.md`, officlaude → cchclaude → anyclaude → reclaude) → the delivery pipeline
+  commits, merges, pushes, waits for CI, deploys, cleans up and verifies, without a Codex review
+  (`workflow.skips_codex_review`). It needs a git project (named in the goal); a runner named first
+  (`/work cchclaude …`) is used for its family and never falls back (`tg.split_work_args`).
 * **精答 / 讨论 / 自动分流 from Telegram and QQ** (`remote.py`): `/answer <问题>`, `/discuss <问题>`,
   `/auto <问题>` start the user's own HaloWebUI run (`/api/v1/remote/*`, same key and owner header
   as the 协作台 routes; one run per chat message); the bridge loop reads it back and sends the

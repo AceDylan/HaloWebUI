@@ -713,6 +713,8 @@ def propose_plan(goal: str, workspace: str, *, feedback: str = "", previous: Opt
             plan["estimate"] = estimate
         return {"ok": True, "plan": plan, "attempts": attempts}
 
+    if wf in wf_mod.PROJECT_ONLY and not (project and project.get("path")):
+        return {"ok": False, "error": wf_mod.WORK_NEEDS_PROJECT}
     if wf != "auto":
         progress.planning_step(team_id, "check", f"正在按「{wf_mod.WORKFLOW_LABELS[wf]}」生成多模型协作计划并检查执行器")
         raw = wf_mod.build_pipeline_plan(

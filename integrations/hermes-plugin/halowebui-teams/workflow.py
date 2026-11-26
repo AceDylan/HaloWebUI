@@ -9,6 +9,8 @@ infrastructure:
     → CI → 自动拉取更新部署 → 清理分支 → 核实线上。
   - ``dev_lite``: 跳过双方案与设计稿的轻量研发模式（主控摸底定接口 → Codex 写后端 → Claude
     读改动写前端跑测试 → 审查与上线）。
+  - ``work``: ``/work`` 命令的固定工作流（AGY 出规划 → Codex 开发 → Claude 审阅并修复问题 →
+    提交推送部署清理）。Claude 已经审过，交付流水线不再跑 Codex 审查（``skips_codex_review``）。
   - ``auto``: 现有自由协作（负责人动态拆解，适合非代码任务或定制分工）。
 """
 
@@ -20,12 +22,22 @@ from typing import Any, Optional
 from . import runners
 from .common import redact
 
-WORKFLOWS = ("auto", "dev_pipeline", "dev_lite")
+WORKFLOWS = ("auto", "dev_pipeline", "dev_lite", "work")
 WORKFLOW_LABELS = {
     "auto": "自由协作",
     "dev_pipeline": "多模型研发（完整）",
     "dev_lite": "快速研发（精简）",
+    "work": "工作流（规划 → 开发 → 审阅 → 发布）",
 }
+# Workflows that must work inside a git project: their last step is the release.
+PROJECT_ONLY = ("work",)
+WORK_NEEDS_PROJECT = ("/work 要在一个 git 项目里做（做完会提交、推送、部署和清理）：在需求里写上项目名或路径，"
+                      "例如「/work HaloWebUI 给设置页加个开关」。")
+
+
+def skips_codex_review(workflow: Any) -> bool:
+    """The ``work`` workflow ends with a Claude review that fixes what it finds: no Codex review after it."""
+    return normalize_workflow(workflow) == "work"
 
 _SKIP_DESIGN_RE = re.compile(
     r"纯后端|仅后端|不改前端|没有前端|无前端|跳过设计|不需要设计稿|不用设计稿|backend[- ]only|no[- ]ui",
@@ -115,7 +127,7 @@ def apply_runner_prefs(members: list[dict], runner_prefs: Optional[dict[str, str
 
 def _title_from_goal(goal: str, workflow: str) -> str:
     first = " ".join(str(goal or "").split())
-    prefix = "研发：" if workflow == "dev_pipeline" else "快研："
+    prefix = {"dev_pipeline": "研发：", "work": "工作："}.get(workflow, "快研：")
     if not first:
         return prefix + "协作开发"
     max_body = 24 - len(prefix)
@@ -165,7 +177,60 @@ def build_pipeline_plan(
     goal = user_goal(goal)
     skip_design = bool(_SKIP_DESIGN_RE.search(goal + "\n" + (feedback or "")))
 
-    if wf == "dev_lite":
+    if wf == "work":
+        members = [
+            _member_spec("agy-planner", "AGY 规划", "ui",
+                         "读代码与现状，出实现规划、文件边界、验收标准与测试命令（按 AGY 家族顺序：offiagy → agy）", prefs),
+            _member_spec("codex-dev", "Codex 开发", "codex",
+                         "按规划完成全部代码（前端 + 后端）与测试，交开发回执（按默认配置）", prefs),
+            _member_spec("claude-review", "Claude 审阅修复", "code",
+                         "审阅 Codex 的改动、直接修掉发现的问题并跑测试（按 Claude 家族顺序：officlaude → cchclaude → anyclaude → reclaude）",
+                         prefs),
+        ]
+        tasks = [
+            {
+                "key": "T1",
+                "title": "AGY 出规划",
+                "member": "agy-planner",
+                "depends_on": [],
+                "description": (
+                    "先真实阅读项目代码、配置与现状（项目根目录的 AGENTS.md / CLAUDE.md 里的约定必须遵守），"
+                    "为用户的需求写一份可以直接照着开发的规划，写入 `.halo/plan.md`：① 需求理解与不做的范围；"
+                    "② 实现方案与关键取舍；③ 逐个列出要改 / 新增的文件和改法；④ 接口与数据契约；"
+                    "⑤ 验收标准；⑥ 要跑的测试命令（只用轻量定向测试，不要整站构建）。"
+                    "本步骤只读分析并写规划，不改任何业务代码。" + ctx_tail
+                ),
+            },
+            {
+                "key": "T2",
+                "title": "Codex 按规划开发",
+                "member": "codex-dev",
+                "depends_on": ["T1"],
+                "description": (
+                    "严格按照 `.halo/plan.md` 完成全部代码改动（前端和后端都由你写）与对应测试，并运行规划里的测试命令。"
+                    "规划有明显错误时按代码事实修正，并在回执里说明。完成后把改动文件清单、与规划的差异、"
+                    "测试命令与实际结果写入 `.halo/dev-receipt.md`。不要 push、不要合并主分支、不要部署。"
+                ),
+            },
+            {
+                "key": "T3",
+                "title": "Claude 审阅并修复问题",
+                "member": "claude-review",
+                "depends_on": ["T2"],
+                "description": (
+                    "通读 `.halo/plan.md`、`.halo/dev-receipt.md` 和当前分支相对主分支的完整 git diff，逐条对照验收标准审阅："
+                    "正确性、遗漏的需求、回归风险、安全问题、与项目约定是否一致。发现的问题由你直接修改代码修掉"
+                    "（不要只提意见），再运行受影响的测试确认通过。把审阅结论、修了什么、测试命令与实际结果写入 "
+                    "`.halo/review.md` 和最终回答。不要 push、不要合并主分支、不要部署——提交、推送、部署和清理"
+                    "由后面的发布流水线自动完成。"
+                ),
+            },
+        ]
+        summary = (
+            "工作流（/work）：AGY 出规划 → Codex 按规划开发 → Claude 审阅并修复问题；"
+            "完成后自动提交合并主分支、推送、等 CI、部署更新、清理分支并核实线上。"
+        )
+    elif wf == "dev_lite":
         members = [
             _member_spec("claude-lead", "Claude 主控", "code",
                          "理解需求、查代码定接口与派活单；读 Codex 改动、写前端并跑完整测试（按默认配置）", prefs),

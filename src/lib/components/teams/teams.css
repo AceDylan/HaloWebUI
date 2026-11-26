@@ -273,6 +273,9 @@
 .tm-wf-card[data-wf-tone='violet'] {
 	--wf-tone: var(--tm-violet);
 }
+.tm-wf-card[data-wf-tone='amber'] {
+	--wf-tone: 38 92% 50%;
+}
 .tm-wf-card:hover {
 	border-color: hsl(var(--wf-tone) / 0.36);
 	box-shadow: 0 6px 24px -14px hsl(var(--wf-tone) / 0.35);

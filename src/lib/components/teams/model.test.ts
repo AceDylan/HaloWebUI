@@ -303,3 +303,14 @@ describe('stage estimates', () => {
 		expect(etaSentence(null, 1000, 2000)).toBe('');
 	});
 });
+
+describe('workflowLabel', () => {
+	it('names every template, free-form has none', async () => {
+		const { workflowLabel, workflowBadgeClass } = await import('./model');
+		expect(workflowLabel('auto')).toBe('');
+		expect(workflowLabel('dev_lite', 'auto')).toBe('快速研发 · 自动晋升');
+		expect(workflowLabel('dev_pipeline')).toBe('多模型研发');
+		expect(workflowLabel('work')).toBe('工作流 · 规划→开发→审阅→发布');
+		expect(workflowBadgeClass('work')).toContain('amber');
+	});
+});

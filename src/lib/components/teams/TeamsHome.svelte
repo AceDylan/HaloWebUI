@@ -92,7 +92,7 @@
 		id: TeamWorkflow;
 		title: string;
 		badge: string;
-		tone: 'blue' | 'cyan' | 'violet';
+		tone: 'blue' | 'cyan' | 'violet' | 'amber';
 		flow: string;
 		hint: string;
 	}[] = [
@@ -119,6 +119,14 @@
 			tone: 'violet',
 			flow: '摸底 → Claude⇄AGY 拍板 → 开发',
 			hint: '双方案拍板 · 交互审稿 · 2 轮审查核实上线'
+		},
+		{
+			id: 'work',
+			title: '工作流',
+			badge: '/work',
+			tone: 'amber',
+			flow: 'AGY 规划 → Codex 开发 → Claude 审阅',
+			hint: '直接开始 · 修完问题自动提交推送部署清理'
 		}
 	];
 
@@ -418,7 +426,7 @@
 				chatId,
 				leadModel || null,
 				project,
-				autoStart,
+				autoStart || workflow === 'work',
 				attached.filter((f) => f.id).map((f) => f.id as string),
 				preferred ? [preferred.ref] : [],
 				false,
@@ -565,7 +573,7 @@
 
 			<!-- starcore workflow mode selector -->
 			<section class="tm-rise mb-3" style="--i:0.6" aria-label="协作流程模式" data-team-workflow={workflow}>
-				<div class="grid grid-cols-1 gap-2 sm:grid-cols-3">
+				<div class="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
 					{#each WORKFLOW_MODES as mode (mode.id)}
 						{@const active = workflow === mode.id}
 						<button
@@ -603,6 +611,22 @@
 												stroke="currentColor"
 												stroke-width="1.4"
 												stroke-linecap="round"
+											/>
+										</svg>
+									{:else if mode.id === 'work'}
+										<svg class="size-4" viewBox="0 0 20 20" fill="none">
+											<path
+												d="M3.5 5.5h6M3.5 10h9M3.5 14.5h5"
+												stroke="currentColor"
+												stroke-width="1.4"
+												stroke-linecap="round"
+											/>
+											<path
+												d="m12.5 13.6 1.7 1.7 3.3-3.6"
+												stroke="currentColor"
+												stroke-width="1.5"
+												stroke-linecap="round"
+												stroke-linejoin="round"
 											/>
 										</svg>
 									{:else}

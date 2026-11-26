@@ -737,7 +737,12 @@ def start(slug: str, *, by: str = "user", cleanup: Optional[bool] = None, auto_k
         raise projects.ProjectError(409, "团队分支已删除，无法推送部署")
     profile = profile_for(repo)
     do_cleanup = profile["cleanup"] if cleanup is None else bool(cleanup)
-    do_review = profile["codex_review"] if codex_review is None else bool(codex_review)
+    if codex_review is None:
+        from .workflow import skips_codex_review
+
+        do_review = profile["codex_review"] and not skips_codex_review(team.get("workflow"))
+    else:
+        do_review = bool(codex_review)
     if do_cleanup and (team.get("conclusion") or {}).get("status") == "generating":
         raise projects.ProjectError(409, "负责人正在写结论（要读工作区文件），写完后再推送部署并清理")
 

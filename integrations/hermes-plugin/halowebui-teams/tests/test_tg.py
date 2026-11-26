@@ -610,3 +610,28 @@ def test_done_notice_carries_the_whole_conclusion(linked):
     body = "\n\n".join("第%d段：" % i + "内容" * 800 for i in range(6))
     text, _buttons = notify.done_message(team, {"tasks": []}, body)
     assert "第5段" in text and text.count("内容") == 4800
+
+
+def test_work_command_starts_the_work_workflow(linked, monkeypatch):
+    split = linked.telegram.split_work_args
+    assert split("给 HaloWebUI 加按钮") == ("给 HaloWebUI 加按钮", {})
+    assert split("cchclaude 给 HaloWebUI 加按钮") == ("给 HaloWebUI 加按钮", {"claude": "cchclaude"})
+    assert split("AnyClaude：修 bug") == ("修 bug", {"claude": "anyclaude"})
+    assert split("agy reclaude 修 bug") == ("修 bug", {"agy": "agy", "claude": "reclaude"})
+    # one per family, Hermes is not a runner here, a name glued to the text is the text
+    assert split("cchclaude anyclaude 修") == ("anyclaude 修", {"claude": "cchclaude"})
+    assert split("hermes 修") == ("hermes 修", {})
+    assert split("codexify 修") == ("codexify 修", {})
+    calls = []
+    monkeypatch.setattr(linked.link, "create", lambda owner, goal, origin, auto_start=False, workflow="auto",
+                        runner_prefs=None: calls.append((goal, auto_start, workflow, runner_prefs))
+                        or {"id": "11111111-2222-3333-4444-555555555555", "title": "工作：" + goal})
+    _run(lambda: linked.telegram.on_pre_gateway_dispatch(event=_event("/work cchclaude 给 HaloWebUI 加按钮")))
+    assert calls == [("给 HaloWebUI 加按钮", True, "work", {"claude": "cchclaude"})]
+    text = linked.sent[-1]["text"]
+    assert "已交给工作流" in text and "cchclaude 审阅修复" in text and "提交推送部署清理" in text
+    _run(lambda: linked.telegram.on_pre_gateway_dispatch(event=_event("/work 修 bug")))
+    assert "officlaude（不行依次换 cchclaude、anyclaude、reclaude）" in linked.sent[-1]["text"]
+    assert "offiagy（不行换 agy） 出规划" in linked.sent[-1]["text"]
+    _run(lambda: linked.telegram.on_pre_gateway_dispatch(event=_event("/work")))
+    assert "工作流 /work" in linked.sent[-1]["text"] and len(calls) == 2

@@ -21,7 +21,7 @@
 	import TeamChatActions from './TeamChatActions.svelte';
 	import TeamAvatar from './TeamAvatar.svelte';
 	import TeamResultBar from './TeamResultBar.svelte';
-	import { avatarKind, PHASE_LABEL } from './model';
+	import { avatarKind, PHASE_LABEL, workflowBadgeClass, workflowLabel } from './model';
 
 	/**
 	 * A 协作台 team in its chat: who is on it and where it is, live — the same stage rail as the
@@ -105,14 +105,7 @@
 	$: deploy = live?.team?.deploy ?? null;
 	$: workflow = team?.workflow ?? live?.team?.workflow ?? team?.plan?.workflow ?? 'auto';
 	$: promotedFrom = team?.promoted_from ?? live?.team?.promoted_from ?? team?.plan?.promoted_from ?? null;
-	$: workflowLabel =
-		workflow === 'dev_pipeline'
-			? '多模型研发'
-			: workflow === 'dev_lite'
-				? promotedFrom === 'auto'
-					? '快速研发 · 自动晋升'
-					: '快速研发'
-				: '';
+	$: workflowText = workflowLabel(workflow, promotedFrom);
 	$: deployRunning = deploy?.status === 'running';
 	$: acceptance = live?.team?.conclusion?.acceptance;
 	$: autoDeployPending =
@@ -321,13 +314,12 @@
 						<span class="truncate text-sm font-semibold text-gray-900 dark:text-gray-100"
 							>{team?.title ?? '协作任务'}</span
 						>
-						{#if workflowLabel}
+						{#if workflowText}
 							<span
-								class="shrink-0 rounded-full px-2 py-[2px] text-[10.5px] font-medium leading-none {workflow ===
-								'dev_pipeline'
-									? 'bg-violet-500/12 text-violet-700 ring-1 ring-inset ring-violet-500/25 dark:text-violet-300'
-									: 'bg-cyan-500/12 text-cyan-700 ring-1 ring-inset ring-cyan-500/25 dark:text-cyan-300'}"
-								data-team-chat-workflow={workflow}>{workflowLabel}</span
+								class="shrink-0 rounded-full px-2 py-[2px] text-[10.5px] font-medium leading-none {workflowBadgeClass(
+									workflow
+								)}"
+								data-team-chat-workflow={workflow}>{workflowText}</span
 							>
 						{/if}
 						{#if team}<span class="shrink-0"

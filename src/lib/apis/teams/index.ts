@@ -19,8 +19,9 @@ export type TeamExecutor =
 /** What a member's work is, which decides the runner it starts on (see the plugin's runners.py). */
 export type TaskKind = 'code' | 'codex' | 'ui' | 'complex' | 'research' | 'writing' | 'image';
 
-/** Collaboration workflow preset: free-form lead planning vs multi-model dev pipeline. */
-export type TeamWorkflow = 'auto' | 'dev_pipeline' | 'dev_lite';
+/** Collaboration workflow preset: free-form lead planning vs multi-model dev pipeline; `work` is
+ * the `/work` command's fixed flow (AGY plans → Codex builds → Claude reviews and fixes → release). */
+export type TeamWorkflow = 'auto' | 'dev_pipeline' | 'dev_lite' | 'work';
 
 /** The assistant the lead staffed a member with: one of the user's (助手库, `model:<id>`), a
  * built-in template (`builtin:<id>`, src/lib/data/agents-zh.json), or one it proposes to create.

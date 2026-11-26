@@ -233,6 +233,9 @@ def _dispatch(event: Any) -> Optional[dict]:
     if command in ("team", "teams"):
         _spawn(_team_command(source, owner, event.get_command_args().strip(), event))
         return {"action": "skip", "reason": "halo team command (QQ)"}
+    if command == "work":
+        _spawn(_work_command(source, owner, event.get_command_args().strip(), event))
+        return {"action": "skip", "reason": "halo work command (QQ)"}
     if not command:
         said = prompt_reply(getattr(event, "text", "") or "")
         if said and pick_prompt(platform, source.chat_id, said[0], said[1]):
@@ -292,6 +295,8 @@ def usage_text(platform: str, chat_id: Any) -> str:
         lines.append("协作台：/team 目标 —— 负责人做计划发到这里，回「批准」开始、「取消」作罢；/team 直接 目标 —— 计划好就开始；"
                      "/team 多模型 目标、/team 快速研发 目标 —— 选研发流程（可以和「直接」叠着写）。"
                      "成员提问回「答 内容」，任务失败回「重试」或「重试 说明」。")
+        lines.append("工作流：/work 需求 —— AGY 出规划 → Codex 开发 → Claude 审阅修复 → 提交推送部署清理，全程自动；"
+                     "/work cchclaude 需求 —— 指定审阅用的 Claude。")
     going = chat_jobs(platform, chat_id)
     if going:
         lines.append("")
@@ -379,6 +384,25 @@ async def _team_command(source: Any, owner: str, args: str, event: Any) -> None:
     after = ("计划好就直接开始，完成后把结论发到这里。" if auto_start
              else "计划好了发到这里（一般 1 分钟内），回「批准」才开始。")
     await _say(source, f"🧭 已交给负责人做计划{workflow_note(workflow)}：{clip(team.get('title'), 60)}\n{after}" + (f"\n🌐 {url}" if url else ""), event)
+
+
+async def _work_command(source: Any, owner: str, args: str, event: Any) -> None:
+    """QQ's ``/work``: the same workflow as Telegram's (tg.py), its notices and questions come here."""
+    from .tg import WORK_USAGE, split_work_args, work_started
+
+    goal, prefs = split_work_args(args)
+    if not goal or goal in ("help", "帮助", "?", "？"):
+        await _say(source, html_text(WORK_USAGE), event)
+        return
+    try:
+        team = await asyncio.to_thread(link.create, owner, goal, _origin(source), True, "work", prefs)
+    except link.HaloError as exc:
+        await _say(source, f"⚠️ 没能发起工作流：{exc.message}", event)
+        return
+    put_job({**_job_base(source, event), "kind": "team", "id": team["id"], "owner": owner, "question": goal[:200],
+             "auto_start": True})
+    url = link.team_url(team["id"])
+    await _say(source, html_text(work_started(team, prefs)) + (f"\n🌐 {url}" if url else ""), event)
 
 
 _TAG_RE = re.compile(r"<[^>]+>")

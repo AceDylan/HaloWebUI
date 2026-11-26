@@ -237,3 +237,46 @@ def test_create_team_defaults_auto_deploy_for_project_and_exposes_promoted_from(
     plan = _plan(pkg, "分析 repo", project=proj)
     pkg.teams.create_team("team-analysis-1", plan, owner="u1", goal="分析 repo")
     assert pkg.teams.snapshot("team-analysis-1")["team"]["auto_deploy"] is False
+
+
+def test_work_workflow_plans_with_agy_builds_with_codex_reviews_with_claude(pkg, availability):
+    proj = {"name": "repo", "path": "/tmp/repo", "branch": "main"}
+    res = pkg.plan.propose_plan("给设置页加个开关", "/tmp/ws", workflow="work", project=proj)
+    assert res["ok"] is True
+    plan = res["plan"]
+    assert plan["workflow"] == "work" and plan["repo_change"] is True
+    assert plan["title"].startswith("工作：")
+    by = {m["name"]: m for m in plan["members"]}
+    assert by["agy-planner"]["executor"] == "offiagy" and by["agy-planner"]["executor_source"] == "auto"
+    assert by["codex-dev"]["executor"] == "codex"
+    assert by["claude-review"]["executor"] == "officlaude" and by["claude-review"]["executor_source"] == "auto"
+    tasks = {t["key"]: t for t in plan["tasks"]}
+    assert [tasks[k]["member"] for k in ("T1", "T2", "T3")] == ["agy-planner", "codex-dev", "claude-review"]
+    assert tasks["T2"]["depends_on"] == ["T1"] and tasks["T3"]["depends_on"] == ["T2"]
+    assert ".halo/plan.md" in tasks["T2"]["description"] and "直接修改代码" in tasks["T3"]["description"]
+    import halowebui_teams.workflow as wf
+
+    assert wf.skips_codex_review("work") and not wf.skips_codex_review("dev_lite")
+
+
+def test_work_workflow_falls_back_in_family_unless_a_runner_is_named(pkg, availability):
+    proj = {"name": "repo", "path": "/tmp/repo", "branch": "main"}
+    availability.down["officlaude"] = "额度用完"
+    availability.down["offiagy"] = "没登录"
+    plan = pkg.plan.propose_plan("修个 bug", "/tmp/ws", workflow="work", project=proj)["plan"]
+    by = {m["name"]: m for m in plan["members"]}
+    assert by["claude-review"]["executor"] == "officlaude" and by["claude-review"]["runner"] == "cchclaude"
+    assert by["agy-planner"]["executor"] == "offiagy" and by["agy-planner"]["runner"] == "agy"
+
+    availability.down["cchclaude"] = "维护中"
+    plan = pkg.plan.propose_plan("修个 bug", "/tmp/ws", workflow="work", project=proj,
+                                 runner_prefs={"claude": "cchclaude"})["plan"]
+    by = {m["name"]: m for m in plan["members"]}
+    assert plan["runner_prefs"] == {"claude": "cchclaude"}
+    assert by["claude-review"]["executor"] == "cchclaude" and by["claude-review"]["executor_source"] == "user"
+    assert by["claude-review"].get("runner") != "anyclaude"  # named: never walks on to the next Claude
+
+
+def test_work_workflow_needs_a_project(pkg, availability):
+    res = pkg.plan.propose_plan("写个周报", "/tmp/ws", workflow="work")
+    assert res["ok"] is False and "git 项目" in res["error"]

@@ -139,6 +139,11 @@
 							data-plan-workflow="dev_lite"
 							>{plan.promoted_from === 'auto' ? '快速研发 · 自动晋升' : '快速研发'}</span
 						>
+					{:else if plan.workflow === 'work'}
+						<span
+							class="whitespace-nowrap rounded-full bg-amber-500/10 px-2 py-[3px] text-[11px] font-medium leading-none text-amber-700 ring-1 ring-inset ring-amber-500/25 dark:text-amber-300"
+							data-plan-workflow="work">工作流 · 规划→开发→审阅→发布</span
+						>
 					{/if}
 					{#if plan.effort === 'quick'}
 						<span

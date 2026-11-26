@@ -506,3 +506,19 @@ def test_shell_step_timeout_reports_itself(pkg, team_id, plan_dict, repo, tmp_pa
     slug, _ws = _completed(pkg, team_id, plan_dict, repo, tmp_path, monkeypatch)
     with pytest.raises(projects.ProjectError, match="部署命令超时"):
         deploy._run_shell_step(slug, str(repo), "echo half; sleep 5", "", "main", "b", 1, "部署命令")
+
+
+def test_work_workflow_ships_without_a_codex_review(pkg, team_id, plan_dict, repo, tmp_path, monkeypatch, availability):
+    """/work ends with Claude reviewing and fixing: the release does not run Codex review after it."""
+    import halowebui_teams.deploy as deploy
+
+    slug, _ws = _completed(pkg, team_id, plan_dict, repo, tmp_path, monkeypatch, command="true", cleanup=True)
+    pkg.common.update_team(slug, lambda rec: rec.update({"workflow": "work"}))
+    reviews = []
+    monkeypatch.setattr(deploy, "_run_codex_once", lambda *a, **k: reviews.append(1) or ("PASS", "ok"))
+    entry = deploy.start(slug, by="auto")
+    assert entry["codex_review"] is False and [s["key"] for s in entry["steps"]][0] == "merge"
+    team, dep = _settle(pkg, slug)
+    assert dep["status"] == "succeeded" and reviews == []
+    assert team["project"].get("merged_at") and team["project"].get("discarded_at")
+    assert _git(repo, "show", "main:app.py") == "print('v2')"

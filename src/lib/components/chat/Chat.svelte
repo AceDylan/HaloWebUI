@@ -175,6 +175,8 @@
 	import { getSkills } from '$lib/apis/skills';
 	import DiscussionFollowup from './DiscussionFollowup.svelte';
 	import { HermesSteerError, steerHermesRun } from '$lib/apis/hermes';
+	import { createTeam } from '$lib/apis/teams';
+	import { parseWorkCommand, workFileIds, WORK_USAGE } from '$lib/utils/work-command';
 	import {
 		EMPTY_HERMES_RUN_OPTIONS,
 		NEW_CHAT_HERMES_RUN_OPTIONS,
@@ -5680,6 +5682,44 @@
 	// Chat functions
 	//////////////////////////
 
+	let workStarting = false;
+	const startWorkCommand = async (
+		work: NonNullable<ReturnType<typeof parseWorkCommand>>,
+		sendFiles: any[],
+		failedFiles: any[]
+	) => {
+		if (!work.goal) {
+			toast.info(WORK_USAGE);
+			return;
+		}
+		if (workStarting) return;
+		workStarting = true;
+		try {
+			const team = await createTeam(
+				localStorage.token,
+				work.goal,
+				$chatId || null,
+				null,
+				null,
+				true,
+				workFileIds(sendFiles),
+				[],
+				false,
+				'work',
+				work.runnerPrefs
+			);
+			prompt = '';
+			files = structuredClone(failedFiles);
+			chatListRefreshRevision.update((value) => value + 1);
+			toast.success(`已交给工作流「${team.title}」，进度在对话里的卡片上`);
+			if (!$chatId && team.chat_id) await goto(`/c/${team.chat_id}`);
+		} catch (error) {
+			toast.error(`没能发起工作流：${(error as any)?.message ?? error}`);
+		} finally {
+			workStarting = false;
+		}
+	};
+
 	const submitPrompt = async (
 		userPrompt,
 		{
@@ -5776,6 +5816,13 @@
 					maxCount: $config?.file?.max_count
 				})
 			);
+			return;
+		}
+
+		// `/work 需求`: the 协作台's work workflow, its card in this chat (a new chat when none is open).
+		const work = fromQueue ? null : parseWorkCommand(userPrompt);
+		if (work) {
+			await startWorkCommand(work, validFiles, failedFiles);
 			return;
 		}
 

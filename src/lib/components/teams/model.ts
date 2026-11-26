@@ -847,3 +847,26 @@ export const etaSentence = (
 		return `比平时久一些，可能还要 ${formatEta(0, left.high).replace('约 ', '')}`;
 	return `预计还要${formatEta(left.low, left.high)}`;
 };
+
+/** The badge a team's workflow shows (none for free-form 自由协作). */
+export const workflowLabel = (
+	workflow: string | null | undefined,
+	promotedFrom?: string | null
+): string =>
+	workflow === 'dev_pipeline'
+		? '多模型研发'
+		: workflow === 'dev_lite'
+			? promotedFrom === 'auto'
+				? '快速研发 · 自动晋升'
+				: '快速研发'
+			: workflow === 'work'
+				? '工作流 · 规划→开发→审阅→发布'
+				: '';
+
+/** The badge's colors, matching the 协作台 mode cards (多模型 violet, 快速 cyan, 工作流 amber). */
+export const workflowBadgeClass = (workflow: string | null | undefined): string =>
+	workflow === 'dev_pipeline'
+		? 'bg-violet-500/12 text-violet-700 ring-1 ring-inset ring-violet-500/25 dark:text-violet-300'
+		: workflow === 'work'
+			? 'bg-amber-500/12 text-amber-700 ring-1 ring-inset ring-amber-500/25 dark:text-amber-300'
+			: 'bg-cyan-500/12 text-cyan-700 ring-1 ring-inset ring-cyan-500/25 dark:text-cyan-300';

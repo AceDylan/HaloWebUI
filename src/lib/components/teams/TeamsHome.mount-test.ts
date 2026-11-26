@@ -175,11 +175,11 @@ describe('TeamsHome attachments', () => {
 });
 
 describe('TeamsHome workflows', () => {
-	it('defaults to free-form auto mode, renders 3 starcore workflow cards, drops auto-deploy toggle, and sends workflow + runnerPrefs', async () => {
+	it('defaults to free-form auto mode, renders 4 starcore workflow cards, drops auto-deploy toggle, and sends workflow + runnerPrefs', async () => {
 		const target = await mount();
 		await until(() => !!target.querySelector('[data-team-workflow]'));
 		expect(target.querySelector('[data-team-workflow]')!.getAttribute('data-team-workflow')).toBe('auto');
-		expect(target.querySelectorAll('[data-wf-mode]').length).toBe(3);
+		expect(target.querySelectorAll('[data-wf-mode]').length).toBe(4);
 		expect(target.querySelector('[data-auto-deploy]')).toBeFalsy();
 
 		// Switch to dev_pipeline: opens engine preferences
@@ -206,5 +206,25 @@ describe('TeamsHome workflows', () => {
 		expect(call[1]).toBe('开发多模型研发流水线');
 		expect(call[9]).toBe('dev_pipeline');
 		expect(call[10]).toEqual({ claude: 'cchclaude' });
+	});
+
+	it('starts the /work workflow at once', async () => {
+		const target = await mount();
+		await until(() => !!target.querySelector('[data-wf-mode="work"]'));
+		(target.querySelector('[data-wf-mode="work"]') as any).click();
+		await until(
+			() => target.querySelector('[data-team-workflow]')!.getAttribute('data-team-workflow') === 'work'
+		);
+		const box = target.querySelector('#team-goal') as any;
+		box.value = 'HaloWebUI 加个开关';
+		box.dispatchEvent(new (window as any).Event('input'));
+		await sleep(10);
+		target
+			.querySelector('form')!
+			.dispatchEvent(new (globalThis as any).Event('submit', { cancelable: true }));
+		await until(() => api.createTeam.mock.calls.length > 0);
+		const call = api.createTeam.mock.calls[0];
+		expect(call[5]).toBe(true);
+		expect(call[9]).toBe('work');
 	});
 });

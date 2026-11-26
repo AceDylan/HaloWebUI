@@ -58,6 +58,7 @@ COPY vite.config.ts ./
 ENV APP_BUILD_HASH=${BUILD_HASH} \
     ENABLE_PYODIDE=${ENABLE_PYODIDE} \
     VITE_SOURCEMAP=${VITE_SOURCEMAP} \
+    ALLOW_LOCAL_BUILD=1 \
     NODE_OPTIONS="--max-old-space-size=${NODE_BUILD_MEMORY_MB}"
 
 RUN npm run build

@@ -4,6 +4,16 @@ import { resolve } from 'node:path';
 import { defineConfig } from 'vite';
 
 import { viteStaticCopy } from 'vite-plugin-static-copy';
+import { assertBuildAllowed } from './scripts/check-build-env.mjs';
+
+const guardLocalBuild = () => ({
+	name: 'guard-local-build',
+	config(_config: unknown, env: { command: string }) {
+		if (env.command === 'build' && !process.env.VITEST) {
+			assertBuildAllowed();
+		}
+	}
+});
 
 const enablePyodide = process.env.ENABLE_PYODIDE === 'true';
 const enableSourceMap = process.env.VITE_SOURCEMAP === 'true';
@@ -38,6 +48,7 @@ const stripPyodideAssets = () => ({
 
 export default defineConfig({
 	plugins: [
+		guardLocalBuild(),
 		sveltekit(),
 		viteStaticCopy({
 			targets: [

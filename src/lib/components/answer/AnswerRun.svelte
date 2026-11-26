@@ -42,6 +42,10 @@
 	let boundSocket: any = null;
 	let modelsRefreshedFor = '';
 
+	$: delivered = Boolean(run?.origin?.chatId && run.status === 'done' && detail?.report?.run_id === run.id && detail.report?.message_id);
+	$: awaitingDelivery = Boolean(run?.origin?.chatId && run.status === 'done' && !delivered);
+	$: deliveryLabel = delivered ? '已完成 · 已送达' : awaitingDelivery ? '已完成 · 待送达' : '';
+
 	$: title = detail?.title ?? '精答';
 	$: liveNow = !!run && isLive(run.status);
 	$: stages = run ? stagesOf(run, $now) : [];
@@ -97,6 +101,10 @@
 
 	const onChatEvent = (event: any) => {
 		if (event?.chat_id !== chatId || event?.data?.type !== 'answer') return;
+		if (event.data.data?.kind === 'delivery') {
+			scheduleReload(0);
+			return;
+		}
 		const data = event.data.data as AnswerEvent;
 		if (data.kind === 'meta') {
 			if (detail) detail = { ...detail, title: data.title ?? detail.title, folder_id: data.folderId ?? detail.folder_id };
@@ -110,15 +118,17 @@
 
 	const bindSocket = (s: any) => {
 		if (boundSocket === s) return;
+		boundSocket?.off?.('connect', onVisible);
 		boundSocket?.off?.('chat-events', onChatEvent);
 		boundSocket = s;
+		boundSocket?.on?.('connect', onVisible);
 		boundSocket?.on?.('chat-events', onChatEvent);
 	};
 	$: bindSocket($socket);
 
-	const onVisible = () => {
+	function onVisible() {
 		if (!document.hidden) load();
-	};
+	}
 
 	// ---- actions ------------------------------------------------------------------------------
 
@@ -183,10 +193,11 @@
 		document.addEventListener('visibilitychange', onVisible);
 		// the socket carries every token; this only catches up when it is down or a tab slept
 		pollTimer = setInterval(() => {
-			if (!document.hidden && liveNow && !$socket?.connected) load();
+			if (!document.hidden && (liveNow || awaitingDelivery) && !$socket?.connected) load();
 		}, 3000);
 	});
 	onDestroy(() => {
+		boundSocket?.off?.('connect', onVisible);
 		boundSocket?.off?.('chat-events', onChatEvent);
 		if (reloadTimer) clearTimeout(reloadTimer);
 		if (pollTimer) clearInterval(pollTimer);
@@ -211,10 +222,12 @@
 			<span
 				class="ml-1 shrink-0 rounded-full px-2 py-0.5 text-[11px] {liveNow || drawing
 					? 'bg-blue-500/10 text-blue-600 dark:text-blue-300'
-					: run.status === 'error'
-						? 'bg-red-500/10 text-red-600 dark:text-red-300'
-						: 'bg-gray-500/10 text-gray-500 dark:text-gray-400'}"
-				data-answer-status={drawing ? 'drawing' : run.status}>{drawing ? '已答完 · 配图中' : (STATUS_LABEL[run.status] ?? run.status)}</span
+					: awaitingDelivery
+						? 'bg-amber-500/10 text-amber-700 dark:text-amber-300'
+						: run.status === 'error'
+							? 'bg-red-500/10 text-red-600 dark:text-red-300'
+							: 'bg-gray-500/10 text-gray-500 dark:text-gray-400'}"
+				data-answer-status={drawing ? 'drawing' : run.status}>{drawing ? '已答完 · 配图中' : (deliveryLabel || STATUS_LABEL[run.status] || run.status)}</span
 			>
 		{/if}
 		<div class="relative ml-auto shrink-0">

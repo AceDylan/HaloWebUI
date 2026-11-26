@@ -306,7 +306,12 @@ def test_completion_recovers_original_metadata_using_its_generated_child_title(
 
     async def finish():
         api = answers if kind == "answer" else discussions
-        await api._report_done(request, user, child.id, run, "子任务生成的主题")
+        async def name(*args):
+            assert len(forwarded) == 1  # a slow title must not hold back delivery
+            return "子任务生成的主题"
+
+        monkeypatch.setattr(api, "_name", name)
+        await api._after_done(request, child_user, child.id, run)
         await asyncio.gather(*list(mode_chats._metadata_tasks))
 
     asyncio.run(finish())

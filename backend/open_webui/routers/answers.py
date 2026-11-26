@@ -186,8 +186,25 @@ async def _after_done(request: Request, user, chat_id: str, run: dict) -> None:
     chat = Chats.get_chat_by_id_and_user_id(chat_id, user.id)
     if chat is None:
         return
+    if run.get("origin"):
+        from open_webui.utils import mode_dispatch
+        from open_webui.utils.mode_chats import schedule_origin_metadata
+
+        # Delivery can start as soon as the text is ready. The origin's title
+        # and folder still use the metadata generated for the child.
+        mode_dispatch.report_back_later(request, "answer", chat_id, run)
+        await _name(request, user, chat_id, chat, run)
+        schedule_origin_metadata(request, user, chat_id, run)
+        return
+
     title = await _name(request, user, chat_id, chat, run)
-    await _report_done(request, user, chat_id, run, title)
+    answer = (run.get("answer") or {}).get("content") or ""
+    try:
+        await _emitter(user, chat_id, run["id"])(
+            {"type": "chat:completion", "data": {"done": True, "title": title, "content": answer[:400], "answer_desk": True}}
+        )
+    except Exception:
+        pass
 
 
 async def _name(request: Request, user, chat_id: str, chat, run: dict) -> str:
@@ -214,27 +231,6 @@ async def _name(request: Request, user, chat_id: str, chat, run: dict) -> str:
     except Exception:
         pass
     return title
-
-
-async def _report_done(request: Request, user, chat_id: str, run: dict, title: str) -> None:
-    # The answer is done with its text: its picture and card are made only when asked for
-    # (start_picture / start_card).
-    if run.get("origin"):
-        # 派发方式「精答」: the answer goes back into the chat it was asked in
-        from open_webui.utils import mode_dispatch
-        from open_webui.utils.mode_chats import schedule_origin_metadata
-
-        schedule_origin_metadata(request, user, chat_id, run)
-        mode_dispatch.report_back_later(request, "answer", chat_id, run)
-        return
-    answer = (run.get("answer") or {}).get("content") or ""
-    try:
-        await _emitter(user, chat_id, run["id"])(
-            {"type": "chat:completion", "data": {"done": True, "title": title, "content": answer[:400], "answer_desk": True}}
-        )
-    except Exception:
-        pass
-
 
 async def _keep(user, chat_id: str, run: dict, key: str, entry: dict) -> None:
     """Where a finishing step (``illustration``, ``card``) stands: kept on the run and in the

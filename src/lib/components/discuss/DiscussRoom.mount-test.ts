@@ -129,6 +129,25 @@ const mount = async () => {
 };
 
 describe('DiscussRoom', () => {
+	it('updates a finished dispatched discussion when its delivery receipt arrives', async () => {
+		const done = {
+			...runningAsk(),
+			status: 'done',
+			origin: { chatId: 'source' },
+			conclusion: { model: 'b.claude-chat', name: 'claude-chat', status: 'done', content: '结论：选 Postgres' }
+		};
+		api.getDiscussion.mockResolvedValue({ ...discussion(done), running: false });
+		const target = await mount();
+		await until(() => (target.querySelector('[data-discuss-status]')?.textContent ?? '').includes('待送达'));
+		api.getDiscussion.mockResolvedValue({
+			...discussion(done),
+			running: false,
+			report: { run_id: done.id, message_id: 'delivered', chat_id: 'source' }
+		});
+		emit({ kind: 'delivery' });
+		await until(() => (target.querySelector('[data-discuss-status]')?.textContent ?? '').includes('已送达'));
+	}, 90000);
+
 	it('shows the question and the seats, then streams parallel turns from the socket', async () => {
 		api.getDiscussion.mockResolvedValue(discussion(runningAsk()));
 		const target = await mount();

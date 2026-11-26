@@ -244,6 +244,16 @@ type ChatHistoryLike =
 	| null
 	| undefined;
 
+/** The delivered discussion at the tip of the branch the composer will continue. */
+export const discussionRoomForReply = (history: ChatHistoryLike): string | null => {
+	const reply = history?.currentId ? history.messages?.[history.currentId] : null;
+	if (reply?.role !== 'assistant' || !reply.done) return null;
+	const parent = history?.messages?.[reply.parentId];
+	const notice = parent?.hermes_notice;
+	if (parent?.role !== 'user' || notice?.source !== 'discuss') return null;
+	return /^discuss:([\w-]+):[\w-]+$/.exec(notice.run_id)?.[1] ?? null;
+};
+
 export const findHermesContinuation = (history: ChatHistoryLike): HermesContinuation | null => {
 	const last = history?.currentId ? history.messages?.[history.currentId] : null;
 	if (!last || last.role !== 'assistant' || last.done !== true || !last.parentId) return null;

@@ -520,12 +520,16 @@ async def show_notification_report(
         }
     mark_unread(chat_id, user.id)
     if push:
+        text = report_push_text(content)
+        if source in ("answer", "discuss"):
+            label = "精答回答" if source == "answer" else "讨论结论"
+            text = f"{label}已送达原对话\n\n{text}"
         _schedule_completion_webhook(
             request,
             user,
             metadata,
             Chats.get_chat_title_by_id(chat_id),
-            report_push_text(content),
+            text,
         )
 
     log.info(

@@ -32,7 +32,7 @@
 	$: headline = team
 		? team.headline
 		: mode
-			? mode.headline
+			? `${mode.headline} · 已送达`
 			: [describeHermesRunNotice(notice, report), duration].filter(Boolean).join(' · ');
 </script>
 

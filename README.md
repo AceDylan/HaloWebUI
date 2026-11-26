@@ -72,6 +72,10 @@ docker compose up -d
 
 启动完成后访问 **http://localhost:3000** ，首次注册的用户自动成为管理员。
 
+### Hermes 联动升级
+
+使用 Hermes 后台任务通知时，在 Hermes 宿主机切到目标发布提交，运行 `bash integrations/hermes-runner/install.sh --check-release`。它只读核对运行中镜像的提交和两个宿主通知脚本，全部一致返回 0。容器名默认是 `halowebui`，可通过 `HALOWEBUI_CONTAINER` 指定。镜像由原部署流程更新，通知脚本有差异时可先用 `--dry-run` 查看，再运行安装脚本同步。[宿主通知脚本说明](integrations/hermes-runner/README.md#安装)
+
 ### AGY OAuth（可选）
 
 AGY 前置设计链需要 OAuth 时，只挂载 token 文件，不要挂载整个主机 `.gemini` 目录。通过可选 Compose override 启用：

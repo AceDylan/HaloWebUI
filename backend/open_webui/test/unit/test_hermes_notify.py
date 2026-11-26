@@ -243,6 +243,16 @@ def test_show_notification_report_saves_announces_and_starts_no_turn(monkeypatch
     assert calls["designed"] == []
 
 
+def test_discussion_push_confirms_delivery_after_the_reply_is_saved(monkeypatch):
+    calls, asyncio = _patch_report_stack(monkeypatch)
+    result = asyncio.run(hermes_notify.show_notification_report(
+        object(), chat_id="chat-1", content="选择方案 B", source="discuss", run_id="discuss:room:ask"
+    ))
+    reply = calls["saved"][-1]["history"]["messages"][result["assistant_message_id"]]
+    assert reply["content"] == "选择方案 B"
+    assert calls["webhook"] == [("标题", "讨论结论已送达原对话\n\n选择方案 B")]
+
+
 def test_show_notification_report_shows_a_run_once(monkeypatch):
     from types import SimpleNamespace
 

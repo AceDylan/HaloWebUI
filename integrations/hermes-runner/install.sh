@@ -11,7 +11,7 @@
 # given.  A copy with no SCRIPT_VERSION counts as older than any versioned one.
 #
 # Usage:
-#   ./install.sh [--target-dir DIR] [--force] [--dry-run]
+#   ./install.sh [--target-dir DIR] [--force] [--dry-run] [--check-release]
 # Defaults to /root/.hermes/scripts.  Existing files are backed up next to the target as
 # <name>.bak-<timestamp> before being replaced.  Nothing else on the host is touched: no
 # service is restarted, no config or token is read or written, no notification is sent.
@@ -21,12 +21,14 @@ SOURCE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TARGET_DIR=/root/.hermes/scripts
 FORCE=0
 DRY_RUN=0
+CHECK_RELEASE=0
 SCRIPTS=(reclaude-notify.py reclaude-notify-backfill.py)
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --target-dir) TARGET_DIR="$2"; shift 2;;
     --force) FORCE=1; shift;;
+    --check-release) CHECK_RELEASE=1; shift;;
     --dry-run|-n) DRY_RUN=1; shift;;
     -h|--help) sed -n '2,20p' "${BASH_SOURCE[0]}"; exit 0;;
     *) echo "install.sh: unknown option: $1" >&2; exit 2;;
@@ -52,7 +54,34 @@ dst_version="$(version "$TARGET_DIR/reclaude-notify.py")"
 echo "source:    $SOURCE_DIR/reclaude-notify.py (version $src_version)"
 echo "installed: $TARGET_DIR/reclaude-notify.py (version $dst_version)"
 
-if [ -f "$TARGET_DIR/reclaude-notify.py" ] && cmp -s "$SOURCE_DIR/reclaude-notify.py" "$TARGET_DIR/reclaude-notify.py"; then
+changed=()
+for name in "${SCRIPTS[@]}"; do
+  if ! cmp -s "$SOURCE_DIR/$name" "$TARGET_DIR/$name"; then
+    changed+=("$name")
+  fi
+done
+
+if [ "$CHECK_RELEASE" = 1 ]; then
+  expected=$(git -C "$SOURCE_DIR" rev-parse HEAD)
+  container=${HALOWEBUI_CONTAINER:-halowebui}
+  actual=$(docker exec "$container" printenv WEBUI_BUILD_VERSION 2>/dev/null) || actual=""
+  status=0
+  if [[ "$actual" =~ ^[0-9a-f]{7,40}$ && "$expected" == "$actual"* ]]; then
+    echo "image: $container matches $expected"
+  else
+    echo "image: $container does not match $expected (got ${actual:-unavailable})" >&2
+    status=1
+  fi
+  if (( ${#changed[@]} )); then
+    printf 'host script missing or different: %s\n' "${changed[@]}" >&2
+    status=1
+  else
+    echo "host notification scripts match the checkout"
+  fi
+  exit "$status"
+fi
+
+if (( ${#changed[@]} == 0 )); then
   echo "already identical; nothing to do"
   exit 0
 fi
@@ -72,7 +101,7 @@ MSG
 fi
 
 stamp="$(date +%Y%m%d-%H%M%S)"
-for name in "${SCRIPTS[@]}"; do
+for name in "${changed[@]}"; do
   src="$SOURCE_DIR/$name"
   dst="$TARGET_DIR/$name"
   [ -f "$src" ] || { echo "install.sh: missing $src" >&2; exit 1; }

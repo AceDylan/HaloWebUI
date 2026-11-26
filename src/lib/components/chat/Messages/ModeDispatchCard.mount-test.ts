@@ -118,6 +118,7 @@ describe('ModeDispatchCard', () => {
 		await until(() => state() === 'done', 'the answer written');
 		// just finished: on its way into the chat
 		expect(text('[data-mode-dispatch-done]')).toContain('结果已生成，正在同步到对话');
+		expect(text('[data-status="waiting_deps"]')).toBe('已完成 · 待送达');
 		app.$set({
 			history: {
 				messages: {
@@ -131,6 +132,7 @@ describe('ModeDispatchCard', () => {
 			}
 		});
 		await until(() => !!target.querySelector('[data-mode-dispatch-jump]'), 'the way to the answer');
+		expect(text('[data-status="done"]')).toBe('已完成 · 已送达');
 		expect(text('[data-mode-dispatch-done]')).toContain('已发回这个对话');
 		expect(text('[data-mode-dispatch-line]')).toContain('新建了「合同审查」');
 		expect(steps()).toEqual(['pick:done', 'answer:done', 'report:done']);

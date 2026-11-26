@@ -388,10 +388,13 @@ export const discussionMarkdown = (title: string, asks: DiscussAsk[]): string =>
 
 /** What "交给 Hermes 核查" sends (the user edits it first): the question, the conclusion and,
  * when the seats looked things up, the sources its [n] marks point at. */
-export const hermesHandoffPrompt = (ask: DiscussAsk): string => {
-	const lines = [
+export const hermesHandoffPrompt = (ask: DiscussAsk, purpose: 'verify' | 'execute' = 'verify'): string => {
+	const instructions = purpose === 'execute' ? ['请按下面的讨论结论执行。'] : [
 		'下面是一次多模型讨论的结论。请用你的工具（联网搜索、读文件等）核查其中需要事实支撑的说法：哪些成立、哪些不成立或要修正，并给出依据。',
-		'如果结论里有可以直接做的下一步，先说你打算怎么做，等我确认再动手。',
+		'如果结论里有可以直接做的下一步，先说你打算怎么做，等我确认再动手。'
+	];
+	const lines = [
+		...instructions,
 		'',
 		`问题：${ask.question}`,
 		'',

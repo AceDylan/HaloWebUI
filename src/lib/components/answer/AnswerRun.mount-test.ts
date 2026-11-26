@@ -128,6 +128,18 @@ const mount = async () => {
 };
 
 describe('AnswerRun', () => {
+	it('updates a finished dispatched answer when its delivery receipt arrives', async () => {
+		const done = created({ status: 'done', origin: { chatId: 'source' } });
+		api.getAnswer.mockResolvedValue(detail(done, { running: false }));
+		const target = await mount();
+		await until(() => text(target, '[data-answer-status]').includes('待送达'));
+		api.getAnswer.mockResolvedValue(detail(done, {
+			running: false, report: { run_id: done.id, message_id: 'delivered', chat_id: 'source' }
+		}));
+		emit({ kind: 'delivery' });
+		await until(() => text(target, '[data-answer-status]').includes('已送达'));
+	});
+
 	it('shows the attachments kept with the question', async () => {
 		api.getAnswer.mockResolvedValue(
 			detail(

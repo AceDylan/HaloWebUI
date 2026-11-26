@@ -303,8 +303,11 @@ async def report_back(request, kind: str, chat_id: str, run: dict, *, quiet: boo
             raise ReportError(409, "这个对话正在回答别的问题，等它答完再试") from exc
         raise ReportError(exc.status_code if exc.status_code in (404, 422) else 502,
                           f"没能放进对话：{exc.detail}") from exc
+    from open_webui.utils.team_chats import emit_chat_event
+
     Chats.set_chat_meta_value_by_id(chat_id, "dispatch_report", {
         "run_id": run.get("id"), "message_id": result.get("assistant_message_id"), "chat_id": origin_id})
+    await emit_chat_event(source.user_id, chat_id, kind, {"kind": "delivery"})
     _sessions.pop(chat_id, None)
     return {**({"message_id": result["assistant_message_id"]} if result.get("assistant_message_id") else {}), "chat_id": origin_id, "posted": not result.get("duplicate"), "duplicate": bool(result.get("duplicate"))}
 

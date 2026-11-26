@@ -348,8 +348,26 @@ async def _after_done(request: Request, user, chat_id: str, ask: dict) -> None:
     chat = Chats.get_chat_by_id_and_user_id(chat_id, user.id)
     if chat is None:
         return
+    if ask.get("origin"):
+        from open_webui.utils import mode_dispatch
+        from open_webui.utils.mode_chats import schedule_origin_metadata
+
+        # Delivery can start as soon as the text is ready. The origin's title
+        # and folder still use the metadata generated for the child.
+        mode_dispatch.report_back_later(request, "discuss", chat_id, ask)
+        await _name(request, user, chat_id, chat, ask)
+        schedule_origin_metadata(request, user, chat_id, ask)
+        return
+
     title = await _name(request, user, chat_id, chat, ask)
-    await _report_done(request, user, chat_id, ask, title)
+    # the app's "reply ready" toast, for when the room is not on screen
+    answer = room.conclusion_answer((ask.get("conclusion") or {}).get("content") or "")
+    try:
+        await _emitter(user, chat_id, ask["id"])(
+            {"type": "chat:completion", "data": {"done": True, "title": title, "content": answer[:400], "discussion_room": True}}
+        )
+    except Exception:
+        pass
 
 
 async def _name(request: Request, user, chat_id: str, chat, ask: dict) -> str:
@@ -381,28 +399,6 @@ async def _name(request: Request, user, chat_id: str, chat, ask: dict) -> str:
     except Exception:
         pass
     return title
-
-
-async def _report_done(request: Request, user, chat_id: str, ask: dict, title: str) -> None:
-    # The conclusion is done with its text: its picture and card are made only when asked for
-    # (start_picture / start_card).
-    if ask.get("origin"):
-        # 派发方式「讨论」: the conclusion goes back into the chat the question was asked in
-        from open_webui.utils import mode_dispatch
-        from open_webui.utils.mode_chats import schedule_origin_metadata
-
-        schedule_origin_metadata(request, user, chat_id, ask)
-        mode_dispatch.report_back_later(request, "discuss", chat_id, ask)
-        return
-    # the app's "reply ready" toast, for when the room is not on screen
-    answer = room.conclusion_answer((ask.get("conclusion") or {}).get("content") or "")
-    try:
-        await _emitter(user, chat_id, ask["id"])(
-            {"type": "chat:completion", "data": {"done": True, "title": title, "content": answer[:400], "discussion_room": True}}
-        )
-    except Exception:
-        pass
-
 
 async def _keep(user, chat_id: str, ask: dict, key: str, entry: dict) -> None:
     """Where a finishing step (``illustration``, ``card``) stands: kept on the ask and in the

@@ -173,6 +173,7 @@
 	import { getTools } from '$lib/apis/tools';
 	import { getChatBookmarkIds } from '$lib/apis/bookmarks';
 	import { getSkills } from '$lib/apis/skills';
+	import DiscussionFollowup from './DiscussionFollowup.svelte';
 	import { HermesSteerError, steerHermesRun } from '$lib/apis/hermes';
 	import {
 		EMPTY_HERMES_RUN_OPTIONS,
@@ -183,6 +184,8 @@
 		hermesOptionsForReply,
 		hermesOptionsToKeep,
 		hermesRunOptionsForRequest,
+		discussionRoomForReply,
+		isHermesAgentModel,
 		isHermesAgentModelId,
 		isHermesRunSteerable,
 		type HermesApprovalRequest,
@@ -1343,6 +1346,24 @@
 	// "接着上次": the chat ends on a runner's report, so a message left on
 	// "直接" goes back to that run's session instead of to hermes' model.
 	$: hermesContinuation = showHermesOptions ? findHermesContinuation(history) : null;
+
+	$: discussionRoomId = discussionRoomForReply(history);
+	$: followupHermes = discussionRoomId
+		? ($models ?? []).find((model) => getModelSelectionId(model) === selectedModels[0] && isHermesAgentModel(model, $config?.hermes_agent_model_ids))
+			?? ($models ?? []).find((model) => isHermesAgentModel(model, $config?.hermes_agent_model_ids))
+		: null;
+
+	const prepareDiscussionExecution = async (text: string) => {
+		if (!followupHermes) return;
+		if (activeAssistant) deactivateAssistant();
+		selectedModels = [getModelSelectionId(followupHermes)];
+		atSelectedModel = undefined;
+		multiModelDiscussionEnabled = false;
+		hermesOptions = { ...hermesOptions, dispatch: 'hermes' };
+		if (!prompt.startsWith(text)) prompt = prompt.trim() ? `${text}\n\n${prompt}` : text;
+		await tick();
+		document.getElementById('chat-input')?.focus();
+	};
 
 	// What a message about to be sent carries (null when no hermes model is
 	// selected). A dispatch covers this one message: "进度怎么样？" in a chat
@@ -7548,6 +7569,13 @@
 									);
 								}}
 							/>
+
+							{#if discussionRoomId && $chatId}
+								{#key history.currentId}
+									<DiscussionFollowup roomId={discussionRoomId} originId={$chatId}
+										canUseHermes={!!followupHermes} prepare={prepareDiscussionExecution} />
+								{/key}
+							{/if}
 
 							<MessageInput
 								{history}

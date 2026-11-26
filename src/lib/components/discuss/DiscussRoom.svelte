@@ -76,6 +76,10 @@
 
 	$: title = discussion?.title ?? '讨论';
 	$: last = asks[asks.length - 1] ?? null;
+	$: delivered = Boolean(last?.origin?.chatId && last.status === 'done' && discussion?.report?.run_id === last.id && discussion.report?.message_id);
+	$: awaitingDelivery = Boolean(last?.origin?.chatId && last.status === 'done' && !delivered);
+	$: deliveryLabel = delivered ? '已完成 · 已送达' : awaitingDelivery ? '已完成 · 待送达' : '';
+
 	$: liveNow = !!last && isLive(last.status);
 	$: concluding = last?.status === 'concluding';
 	// concluded, the picture still being drawn (结论配图): not quite finished yet
@@ -115,6 +119,10 @@
 
 	const onChatEvent = (event: any) => {
 		if (event?.chat_id !== chatId || event?.data?.type !== 'discuss') return;
+		if (event.data.data?.kind === 'delivery') {
+			scheduleReload(0);
+			return;
+		}
 		const data = event.data.data as DiscussEvent;
 		if (data.kind === 'meta') {
 			if (discussion) discussion = { ...discussion, title: data.title ?? discussion.title, folder_id: data.folderId ?? discussion.folder_id };
@@ -128,15 +136,17 @@
 
 	const bindSocket = (s: any) => {
 		if (boundSocket === s) return;
+		boundSocket?.off?.('connect', onVisible);
 		boundSocket?.off?.('chat-events', onChatEvent);
 		boundSocket = s;
+		boundSocket?.on?.('connect', onVisible);
 		boundSocket?.on?.('chat-events', onChatEvent);
 	};
 	$: bindSocket($socket);
 
-	const onVisible = () => {
+	function onVisible() {
 		if (!document.hidden) load();
-	};
+	}
 
 	// ---- actions ------------------------------------------------------------------------------
 
@@ -330,14 +340,18 @@
 		currentChatId.set(chatId);
 		await load();
 		await tick();
-		if (liveNow) scrollToBottom();
+		if (window.location.hash === '#follow-up') {
+			scrollToBottom();
+			inputEl?.focus();
+		} else if (liveNow) scrollToBottom();
 		document.addEventListener('visibilitychange', onVisible);
 		// the socket carries every token; this only catches up when it is down or a tab slept
 		pollTimer = setInterval(() => {
-			if (!document.hidden && liveNow && !$socket?.connected) load();
+			if (!document.hidden && (liveNow || awaitingDelivery) && !$socket?.connected) load();
 		}, 3000);
 	});
 	onDestroy(() => {
+		boundSocket?.off?.('connect', onVisible);
 		boundSocket?.off?.('chat-events', onChatEvent);
 		if (reloadTimer) clearTimeout(reloadTimer);
 		if (pollTimer) clearInterval(pollTimer);
@@ -363,10 +377,12 @@
 			<span
 				class="ml-1 shrink-0 rounded-full px-2 py-0.5 text-[11px] {liveNow || drawing
 					? 'bg-blue-500/10 text-blue-600 dark:text-blue-300'
-					: last.status === 'error'
-						? 'bg-red-500/10 text-red-600 dark:text-red-300'
-						: 'bg-gray-500/10 text-gray-500 dark:text-gray-400'}"
-				data-discuss-status={drawing ? 'drawing' : last.status}>{drawing ? '已有结论 · 配图中' : (STATUS_LABEL[last.status] ?? last.status)}</span
+					: awaitingDelivery
+						? 'bg-amber-500/10 text-amber-700 dark:text-amber-300'
+						: last.status === 'error'
+							? 'bg-red-500/10 text-red-600 dark:text-red-300'
+							: 'bg-gray-500/10 text-gray-500 dark:text-gray-400'}"
+				data-discuss-status={drawing ? 'drawing' : last.status}>{drawing ? '已有结论 · 配图中' : (deliveryLabel || STATUS_LABEL[last.status] || last.status)}</span
 			>
 		{/if}
 		<div class="relative ml-auto shrink-0">
@@ -637,6 +653,7 @@
 				{/if}
 				<form class="dc-dock relative flex items-end gap-2 p-2 pl-4" on:submit|preventDefault={submit} data-scifi-conduit>
 					<textarea
+						id="follow-up"
 						bind:this={inputEl}
 						bind:value={input}
 						rows="1"

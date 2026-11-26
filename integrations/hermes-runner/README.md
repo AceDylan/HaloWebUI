@@ -128,6 +128,7 @@ HaloWebUI 的 HTTP 409 只表示**那个会话正在回合中**，而回合总�
 
 ```bash
 ./install.sh                 # 装到 /root/.hermes/scripts，自动备份被替换的文件
+./install.sh --check-release # 核对运行中镜像的提交和两个宿主脚本；不一致或不可读取返回 1
 ./install.sh --dry-run       # 只看会做什么
 ./install.sh --target-dir DIR
 ```

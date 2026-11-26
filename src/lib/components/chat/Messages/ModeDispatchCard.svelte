@@ -55,7 +55,7 @@
 
 	const POLL_MS = { answer: 2500, discuss: 4000 };
 	const POLL_HIDDEN_MS = 30000;
-	// right after the run ends the result is on its way into this chat (title first, then the post)
+	// right after the run ends the result is on its way into this chat
 	const ARRIVING_MS = 45000;
 
 	let run: AnswerRun | null = null;
@@ -204,21 +204,24 @@
 	).filter(Boolean);
 
 	// The result posted into this chat: the reply under its notice (run id "<kind>:<chat id>:…").
-	const findResult = (h: typeof history, prefix: string): string | null => {
+	const findResult = (h: typeof history, expected: string): string | null => {
 		for (const m of Object.values(h?.messages ?? {})) {
 			const runId = m?.hermes_notice?.run_id;
 			if (
 				m?.role === 'user' &&
 				typeof runId === 'string' &&
-				runId.startsWith(prefix) &&
+				runId === expected &&
 				m?.childrenIds?.[0]
 			)
 				return m.childrenIds[0];
 		}
 		return null;
 	};
-	$: resultId = findResult(history, `${kind}:${chatId}:${(kind === 'answer' ? run?.id : ask?.id) ?? ''}`)
-		|| (report?.run_id === (kind === 'answer' ? run?.id : ask?.id) ? report?.message_id : null);
+	$: currentRunId = (kind === 'answer' ? run?.id : ask?.id) ?? '';
+	$: resultId = currentRunId
+		? findResult(history, `${kind}:${chatId}:${currentRunId}`) ||
+			(report?.run_id === currentRunId ? (report?.message_id ?? null) : null)
+		: null;
 	// the report back follows the picture (or follows the text when none is drawn)
 	$: reportFrom = picture?.endedAt || endedAt;
 	$: arriving = done && !drawing && !resultId && reportFrom > 0 && clock - reportFrom < ARRIVING_MS;
@@ -488,7 +491,7 @@
 							title={question}>{question || label}</span
 						>
 						{#if status}<span class="shrink-0"
-								><StatusChip status={chip} label={chipLabel} size="sm" /></span
+								><StatusChip status={done && !drawing && !resultId ? 'waiting_deps' : chip} label={done && !drawing ? (resultId ? '已完成 · 已送达' : '已完成 · 待送达') : chipLabel} size="sm" /></span
 							>{/if}
 					</div>
 					<div

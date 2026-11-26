@@ -28,7 +28,8 @@ from .common import logger, now
 GIT_TIMEOUT = 60
 PUSH_TIMEOUT = 180
 DIFF_MAX = 200_000
-EXCLUDE = ":(exclude).halo"
+# Glob form avoids git 2.34 rejecting ``:(exclude).halo`` when ``.halo/`` is also in ``.gitignore``.
+EXCLUDE = ":(exclude,glob)**/.halo/**"
 # Never committed or shown even in a repository that does not ignore them: what running tests or
 # installing packages leaves behind (members run tests in the worktree).
 JUNK = (EXCLUDE, ":(exclude,glob)**/__pycache__/**", ":(exclude,glob)**/*.py[co]", ":(exclude,glob)**/.pytest_cache/**",

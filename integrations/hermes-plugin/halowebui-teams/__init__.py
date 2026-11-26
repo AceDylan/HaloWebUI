@@ -19,7 +19,7 @@ def register(ctx: Any) -> None:
     # Also a plain command, so it is in Telegram's menu; the hook answers linked users first.
     ctx.register_command("team", tg.command_fallback, description="协作台：/team 目标 交给团队，/team 看最近的")
     ctx.register_command("work", tg.command_fallback,
-                         description="工作流：/work 需求，AGY 规划→Codex 开发→Claude 审阅→自动发布")
+                         description="工作流：/work 需求，AGY规划→Codex开发→Claude审阅→发布")
     ctx.register_platform_handler("telegram", tg.install)
     # Telegram and QQ: /answer, /discuss, /auto (and QQ's /team) — HaloWebUI runs, results back (remote.py).
     ctx.register_hook("pre_gateway_dispatch", remote.on_pre_gateway_dispatch)

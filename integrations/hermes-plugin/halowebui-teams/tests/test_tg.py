@@ -635,3 +635,21 @@ def test_work_command_starts_the_work_workflow(linked, monkeypatch):
     assert "offiagy（不行换 agy） 出规划" in linked.sent[-1]["text"]
     _run(lambda: linked.telegram.on_pre_gateway_dispatch(event=_event("/work")))
     assert "工作流 /work" in linked.sent[-1]["text"] and len(calls) == 2
+
+
+def test_command_descriptions_fit_the_telegram_menu():
+    """Hermes clamps menu descriptions to 40 characters (commands_platforms desc_limit)."""
+    import halowebui_teams
+
+    seen = {}
+
+    class Ctx:
+        def register_command(self, name, handler, description=""):
+            seen[name] = description
+
+        def __getattr__(self, _name):
+            return lambda *a, **k: None
+
+    halowebui_teams.register(Ctx())
+    assert {"team", "work", "answer", "discuss", "auto"} <= set(seen)
+    assert {n: d for n, d in seen.items() if len(d) > 40} == {}

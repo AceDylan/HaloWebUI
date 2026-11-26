@@ -461,3 +461,34 @@ def test_qq_work_command_starts_the_work_workflow(remote, monkeypatch):
     assert any(j["kind"] == "team" and j["id"] == "5f3c2a10-team-w" for j in remote.remote.chat_jobs("qqbot", QQ_USER))
     _dispatch(remote.remote, _event("qqbot", QQ_USER, "/work"))
     assert "/work 需求" in remote.sent[-1]["text"] and len(created) == 1
+
+
+def test_qq_team_receives_deploy_notice_without_notifying_telegram(remote, monkeypatch):
+    import halowebui_teams.notify as notify
+
+    remembered = []
+    monkeypatch.setattr(notify, "_remember", lambda slug, keys: remembered.extend(keys))
+    team = {
+        "team_id": "5f3c2a10-team-w",
+        "title": "工作：加减法",
+        "owner": OWNER,
+        "origin": {"platform": "qqbot", "chat_id": QQ_USER, "user_id": QQ_USER},
+        "project": {
+            "name": "calc",
+            "deploy": {
+                "status": "succeeded",
+                "base_branch": "main",
+                "sha": "abcdef123456",
+                "seconds": 12,
+                "cleanup": True,
+                "finished_at": 1700000000,
+                "ci_url": "https://github.com/AceDylan/calc/actions/runs/1",
+            },
+        },
+        "notified": [],
+    }
+    assert notify.deploy_notice("halo-5f3c2a10", team) == 1
+    assert len(remote.sent) == 1 and remote.sent[0]["platform"] == "qqbot"
+    text = remote.sent[0]["text"]
+    assert "推送部署完成" in text and "<b>" not in text and "https://github.com/AceDylan/calc/actions/runs/1" in text
+    assert remembered == ["deploy:succeeded:1700000000"]

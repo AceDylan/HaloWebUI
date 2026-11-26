@@ -358,3 +358,22 @@ def test_a_question_about_a_project_ends_without_a_branch_and_more_work_brings_i
     assert team["state"] == "running" and team["project"]["auto_cleaned"] is False
     assert _git(ws, "rev-parse", "--abbrev-ref", "HEAD") == f"halo/{slug}"
     assert pkg.teams.snapshot(team_id, "u1")["team"]["project_cleaned"] is False
+
+
+def test_commit_all_and_merge_succeed_when_gitignore_ignores_halo(pkg, team_id, plan_dict, repo):
+    """Git 2.34 rejects ``:(exclude).halo`` when ``.halo/`` is also in ``.gitignore``; glob exclude avoids it."""
+    import halowebui_teams.projects as projects
+
+    _create(pkg, team_id, plan_dict, repo)
+    slug = pkg.common.board_slug(team_id)
+    ws = pkg.common.read_team(slug)["workspace"]
+    os.makedirs(os.path.join(ws, ".halo"), exist_ok=True)
+    open(os.path.join(ws, ".halo", "plan.md"), "w").write("plan\n")
+    open(os.path.join(ws, ".gitignore"), "w").write(".halo/\n__pycache__/\n")
+    open(os.path.join(ws, "app.py"), "w").write("print('v2')\n")
+
+    sha = projects.commit_all(ws, "[T3 · claude-review] add gitignore")
+    assert sha
+    assert ".halo/plan.md" not in _git(ws, "ls-files")
+    merged = projects.merge(slug, pkg.common.read_team(slug))
+    assert merged["merged"] is True and (repo / "app.py").read_text() == "print('v2')\n"

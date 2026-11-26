@@ -56,6 +56,12 @@ def _own_telegram_origin(origin: Any, owner: Any) -> bool:
             and bool(owner) and link.owner_for_telegram(origin.get("user_id")) == str(owner))
 
 
+def _own_qq_origin(origin: Any, owner: Any) -> bool:
+    """A QQ chat started by the QQ user linked to this owner (nobody else's chat)."""
+    return (isinstance(origin, dict) and origin.get("platform") == "qqbot" and bool(origin.get("chat_id"))
+            and bool(owner) and link.owner_for("qqbot", origin.get("user_id")) == str(owner))
+
+
 def target_for(team: dict) -> Optional[dict]:
     """Where this team's notices go: {"chat_id", "thread_id"?} or None."""
     origin = team.get("origin") if isinstance(team.get("origin"), dict) else {}
@@ -354,19 +360,38 @@ def deploy_message(team: dict) -> tuple[str, list]:
 
 
 def deploy_notice(slug: str, team: dict) -> Optional[int]:
-    """Send a Telegram notice once the deploy pipeline reaches a terminal state."""
+    """Send a Telegram (or QQ, when started from QQ) notice once the deploy pipeline reaches a terminal state."""
     from . import tg as telegram
 
-    if not telegram.ready():
-        return None
     dep = (team.get("project") or {}).get("deploy")
     if not isinstance(dep, dict) or dep.get("status") not in ("succeeded", "failed", "skipped"):
         return None
-    target = target_for(team)
-    if target is None:
-        return None
     key = f"deploy:{dep.get('status')}:{dep.get('finished_at') or dep.get('started_at') or 0}"
     if key in set(team.get("notified") or []):
+        return None
+    origin = team.get("origin") if isinstance(team.get("origin"), dict) else {}
+    if _own_qq_origin(origin, team.get("owner")):
+        from . import remote
+
+        if not remote.ready("qqbot"):
+            return None
+        text, _buttons = deploy_message(team)
+        lines = [remote.html_text(text)]
+        if dep.get("ci_url"):
+            lines.append(f"🔗 CI：{dep['ci_url']}")
+        url = link.team_url(team["team_id"])
+        if url:
+            lines.append(f"🌐 协作台：{url}")
+        job = {"platform": "qqbot", "chat_id": str(origin["chat_id"]),
+               **({"thread_id": str(origin["thread_id"])} if origin.get("thread_id") else {})}
+        if remote.send(job, "\n".join(lines)):
+            _remember(slug, [key])
+            return 1
+        return None
+    if not telegram.ready():
+        return None
+    target = target_for(team)
+    if target is None:
         return None
     text, buttons = deploy_message(team)
     message_id = telegram.send(target["chat_id"], text, buttons, thread_id=target.get("thread_id"))

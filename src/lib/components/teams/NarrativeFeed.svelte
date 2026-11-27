@@ -9,6 +9,7 @@
 	import {
 		LEAD_LANE_ID,
 		lanePalette,
+		sectionStageIds,
 		type LanePalette,
 		type NarrativeItem,
 		type NarrativeKind,
@@ -85,6 +86,8 @@
 		...members.map((m, i): [string, number] => [m.name, i + 1])
 	]);
 	$: stageById = new Map(stages.map((stage) => [stage.id, stage]));
+	$: sectionIds = sectionStageIds(items);
+	$: sectionById = new Map(items.map((item, i) => [item.id, sectionIds[i]]));
 	$: headId = items.at(-1)?.id;
 	const kindOf = (name: string | null | undefined, isLead = false) =>
 		avatarKind(roles.get(name ?? '') ?? { name: name ?? '' }, isLead);
@@ -381,7 +384,8 @@
 			aria-live="polite"
 		>
 			{#each visible as item, i (item.id)}
-				{@const stage = stageById.get(item.stageId)}
+				{@const section = sectionById.get(item.id) ?? item.stageId}
+				{@const stage = stageById.get(section)}
 				{@const pal =
 					lanePalettes?.get(item.lane) ?? lanePalette(item.lane, laneIndexMap.get(item.lane) ?? 1)}
 				{@const focused = focusId === item.id}
@@ -395,7 +399,7 @@
 					replay,
 					teamStopped
 				)}
-				{#if stage && visible[i - 1]?.stageId !== item.stageId}
+				{#if stage && (i === 0 || sectionById.get(visible[i - 1].id) !== section)}
 					<li
 						class="timeline-stage"
 						data-narrative-stage={stage.id}
@@ -430,7 +434,9 @@
 								aria-expanded={isToolOpen}
 								on:click|stopPropagation={() => {
 									toggleTool(item.id);
-									dispatch('focus', { id: item.id, source: 'feed', pin: true });
+									// Expanding must not toggle off a card that is already pinned.
+									if (!(focused && focusPin))
+										dispatch('focus', { id: item.id, source: 'feed', pin: true });
 								}}
 								data-tool-group-toggle={item.id}
 							>

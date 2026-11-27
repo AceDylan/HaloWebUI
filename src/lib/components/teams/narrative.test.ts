@@ -8,7 +8,8 @@ import {
 	extractArtifacts,
 	groupNarrative,
 	lanePalette,
-	layoutSwimlanes
+	layoutSwimlanes,
+	sectionStageIds
 } from './narrative';
 
 const ev = (seq: number, partial: Partial<TeamEvent> = {}): TeamEvent => ({
@@ -279,6 +280,36 @@ describe('narrative pure engine', () => {
 		expect(custom.lanes[1].x - custom.lanes[0].x).toBe(80);
 		expect(custom.nodes[1].y - custom.nodes[0].y).toBe(48);
 		expect(custom.width - custom.lanes.at(-1)!.x).toBe(custom.lanes[0].x);
+	});
+
+	it('keeps task-less lead items inside the stage that is already open', () => {
+		const items = groupNarrative(
+			[
+				ev(1, { type: 'message', task_id: null, key: null, member: null, who: 'lead', text: '开工' }),
+				ev(2, { text: '开始设计' }),
+				ev(3, { task_id: 't_2', key: 'T2', member: 'dev-b', text: '开始实现' }),
+				ev(4, { type: 'message', task_id: null, key: null, member: null, who: 'lead', text: '跟进' }),
+				ev(5, { task_id: 't_2', key: 'T2', member: 'dev-b', text: '实现完成' })
+			],
+			TASKS
+		);
+		expect(items.map((item) => item.stageId)).toEqual([
+			'layer-0',
+			'layer-0',
+			'layer-1',
+			'layer-0',
+			'layer-1'
+		]);
+		expect(sectionStageIds(items)).toEqual(['layer-0', 'layer-0', 'layer-1', 'layer-1', 'layer-1']);
+		const layout = layoutSwimlanes(items, [{ name: 'dev-a' }, { name: 'dev-b' }], {
+			stages: buildStages(TASKS, new Map())
+		});
+		expect(layout.stageBands.map(({ stageId, startRow, endRow }) => [stageId, startRow, endRow])).toEqual([
+			['layer-0', 0, 1],
+			['layer-1', 2, 4]
+		]);
+		// The stage filter still uses the item's own stage.
+		expect(layout.nodes[3].stageId).toBe('layer-0');
 	});
 
 	it('returns only incident edges and direct neighbors, including a handoff without a target node', () => {

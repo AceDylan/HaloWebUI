@@ -872,6 +872,18 @@ export const fitSwimlaneLabel = (
 	return { text: `${chars.slice(0, count).join('')}…`, width: width + ellipsisWidth };
 };
 
+/** Section (stage band / chapter) of each item, in chronological order. Items without a task —
+ *  lead coordination, team status — default to layer-0; keep them in the stage that is already
+ *  open so a lead message during step 3 doesn't split the timeline back into 第1步. */
+export const sectionStageIds = (items: Pick<NarrativeItem, 'taskId' | 'stageId'>[]): string[] => {
+	let current: string | null = null;
+	return items.map((item) => {
+		if (!item.taskId && item.stageId === 'layer-0' && current) return current;
+		current = item.stageId;
+		return current;
+	});
+};
+
 export const layoutSwimlanes = (
 	items: NarrativeItem[],
 	members: { name: string; role?: string }[],
@@ -1086,30 +1098,27 @@ export const layoutSwimlanes = (
 	}
 
 	const stageById = new Map(options.stages?.map((stage) => [stage.id, stage]));
+	const sectionIds = sectionStageIds(items);
 	const stageBands: SwimlaneStageBand[] = [];
 	for (const node of nodes) {
 		const prev = stageBands[stageBands.length - 1];
 		const bottomY = node.y + rowHeight / 2;
-		if (prev?.stageId === node.stageId) {
+		const stageId = sectionIds[node.row];
+		if (prev?.stageId === stageId) {
 			prev.endRow = node.row;
 			prev.bottomY = bottomY;
 			continue;
 		}
-		const stage = stageById.get(node.stageId);
-		const layer = /^layer-(\d+)$/.exec(node.stageId);
+		const stage = stageById.get(stageId);
+		const layer = /^layer-(\d+)$/.exec(stageId);
 		const hue = STAGE_HUES[layer ? Number(layer[1]) % STAGE_HUES.length : 0];
 		stageBands.push({
-			id: `${node.stageId}-${node.id}`,
-			stageId: node.stageId,
+			id: `${stageId}-${node.id}`,
+			stageId,
 			label:
 				stage?.shortLabel ??
-				(layer
-					? `第${Number(layer[1]) + 1}步`
-					: node.stageId === 'deploy'
-						? '审查与部署'
-						: node.stageId),
-			color:
-				stage?.color ?? (node.stageId === 'deploy' ? 'hsl(var(--tm-ok))' : `hsl(${hue} 78% 52%)`),
+				(layer ? `第${Number(layer[1]) + 1}步` : stageId === 'deploy' ? '审查与部署' : stageId),
+			color: stage?.color ?? (stageId === 'deploy' ? 'hsl(var(--tm-ok))' : `hsl(${hue} 78% 52%)`),
 			startRow: node.row,
 			endRow: node.row,
 			topY: Math.max(0, node.y - rowHeight / 2),

@@ -226,6 +226,44 @@ describe('NarrativeFeed', () => {
 	});
 });
 
+describe('NarrativeFeed sections & pin', () => {
+	it('keeps lead chatter in the open stage and expanding a pinned tool group keeps the pin', async () => {
+		const { buildStages, groupNarrative } = await import('./narrative');
+		const { default: NarrativeFeed } = await import('./NarrativeFeed.svelte');
+		const events = [
+			...SAMPLE_EVENTS.slice(0, 5),
+			ev(7, { type: 'message', task_id: null, key: null, member: null, who: 'lead', text: '我在跟进' }),
+			SAMPLE_EVENTS[5]
+		];
+		const items = groupNarrative(events as any, SAMPLE_TASKS as any);
+		const toolItem = items.find((item) => item.kind === 'tool_group')!;
+		await mount(NarrativeFeed, {
+			teamId: 'team-1',
+			items,
+			stages: buildStages(SAMPLE_TASKS, new Map()),
+			members: [
+				{ name: 'dev-a', role: '后端' },
+				{ name: 'dev-b', role: '测试' }
+			],
+			focusId: toolItem.id,
+			focusSource: 'feed',
+			focusPin: true
+		});
+		expect(
+			Array.from(target.querySelectorAll('[data-narrative-stage]'), (el: any) =>
+				el.getAttribute('data-narrative-stage')
+			)
+		).toEqual(['layer-0', 'layer-1']);
+
+		const focused: any[] = [];
+		app.$on('focus', (e: CustomEvent) => focused.push(e.detail));
+		(target.querySelector(`[data-tool-group-toggle="${toolItem.id}"]`) as any).click();
+		await sleep(5);
+		expect(target.querySelector(`[data-tool-group-steps="${toolItem.id}"]`)).toBeTruthy();
+		expect(focused).toEqual([]);
+	});
+});
+
 describe('SwimlaneTree', () => {
 	it('renders lanes/nodes, grows live with replay items, and dispatches focus & member toggle', async () => {
 		const { buildStages, groupNarrative } = await import('./narrative');

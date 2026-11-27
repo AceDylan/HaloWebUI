@@ -61,6 +61,13 @@ def test_extract_json_preserves_fences_inside_json_strings(pkg):
     assert pkg.plan.extract_json(raw) == value
 
 
+def test_extract_json_never_returns_an_inner_object_of_a_cut_off_reply(pkg):
+    # max_tokens cut the reply: callers must see None (and ask again), not the first task.
+    raw = '```json\n{"title": "x", "tasks": [{"key": "a", "title": "t"}, {"key": "b", "ti'
+    assert pkg.plan.extract_json(raw) is None
+    assert pkg.plan.extract_json('先看 {示例} 再说：{"action": "skip"}') == {"action": "skip"}
+
+
 def test_propose_plan_retries_once_with_the_validation_errors(pkg, monkeypatch, plan_dict):
     replies = iter([json.dumps({"members": [], "tasks": []}), json.dumps(plan_dict)])
     seen = []

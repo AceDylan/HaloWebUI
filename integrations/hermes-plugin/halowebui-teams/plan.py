@@ -157,10 +157,16 @@ def extract_json(raw: str) -> Optional[dict]:
     if not raw:
         return None
     decoder = json.JSONDecoder()
+    # A brace before `reached` sits inside an object that failed to parse (a reply cut off by
+    # max_tokens, say): never return one of its inner objects as the whole answer.
+    reached = -1
     for match in re.finditer(r"\{", raw):
+        if match.start() < reached:
+            continue
         try:
             value, _ = decoder.raw_decode(raw, match.start())
-        except ValueError:
+        except json.JSONDecodeError as exc:
+            reached = exc.pos
             continue
         if isinstance(value, dict):
             return value

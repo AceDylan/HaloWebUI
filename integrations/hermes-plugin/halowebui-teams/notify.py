@@ -35,6 +35,9 @@ NOTIFIED_KEEP = 200
 TEXT_MAX = 30000
 DIAGNOSIS_WAIT = 120        # a failure notice waits this long for the lead's diagnosis
 ACCEPTANCE_WAIT = 180       # the done notice waits this long for the lead's acceptance check
+PROGRESS_FIRST_DELAY = 20
+PROGRESS_MILESTONE_GAP = 10
+PROGRESS_ACTIVITY_GAP = 30
 
 _seen: dict[str, float] = {}
 _seen_lock = threading.Lock()
@@ -384,6 +387,10 @@ def deploy_notice(slug: str, team: dict) -> Optional[int]:
             lines.append(f"🌐 协作台：{url}")
         job = {"platform": "qqbot", "chat_id": str(origin["chat_id"]),
                **({"thread_id": str(origin["thread_id"])} if origin.get("thread_id") else {})}
+        active = remote.jobs().get(f"team:{team['team_id']}") or {}
+        if all(active.get(key) == job.get(key) for key in ("platform", "chat_id", "thread_id")) \
+                and active.get("owner") == team.get("owner"):
+            job["reply_to"] = active.get("reply_to")
         if remote.send(job, "\n".join(lines)):
             _remember(slug, [key])
             return 1
@@ -520,6 +527,66 @@ def _remember(slug: str, keys: list[str]) -> None:
     update_team(slug, apply)
 
 
+def anchor_tg_progress(slug: str, chat_id: Any, thread_id: Any, message_id: Optional[int],
+                       milestone_sig: str, full_sig: str, *, finalized: bool = False,
+                       expected: Optional[dict] = None) -> None:
+    """Persist the live card; an in-flight automatic edit must not replace a newer manual card."""
+    def apply(rec: dict) -> None:
+        if expected is not None and (rec.get("tg_progress") or {}) != expected:
+            return
+        rec["tg_progress"] = {"chat_id": str(chat_id), "thread_id": str(thread_id) if thread_id else None,
+                              "message_id": message_id, "milestone_sig": milestone_sig, "full_sig": full_sig,
+                              "last_edit_at": now(), "finalized": finalized}
+
+    update_team(slug, apply)
+
+
+def _tick_progress(slug: str, team: dict, snap: dict, target: dict) -> None:
+    from . import chat_progress, tg as telegram
+
+    if not link.telegram_progress_enabled() or watching(team["team_id"]):
+        return
+    view = chat_progress.view_from_snapshot(snap, team)
+    stage = view["stage_key"]
+    milestone, full = chat_progress.fingerprints(view)
+    pg = team.get("tg_progress") or {}
+    chat_id, thread_id = target["chat_id"], target.get("thread_id")
+    message_id = pg.get("message_id") if (pg.get("chat_id"), pg.get("thread_id")) == (chat_id, thread_id) else None
+    round_no = int(team.get("round") or 0)
+    done_key = f"done:{round_no}" if round_no else "done"
+    deployment_finished = (view["deploy"] or {}).get("status") in chat_progress.DEPLOY_TERMINAL
+    finalized = stage == "stopped" or (stage == "done" and not chat_progress.is_active(view)
+                                       and (done_key in (team.get("notified") or []) or deployment_finished))
+    if message_id is not None:
+        if stage == "done" and not chat_progress.is_active(view) and not finalized:
+            return
+        if finalized and pg.get("finalized") and milestone == pg.get("milestone_sig"):
+            return
+        gap = now() - (pg.get("last_edit_at") or 0)
+        milestone_changed = milestone != pg.get("milestone_sig") and gap >= PROGRESS_MILESTONE_GAP
+        activity_changed = full != pg.get("full_sig") and gap >= PROGRESS_ACTIVITY_GAP
+        if not (finalized or milestone_changed or activity_changed):
+            return
+        text, buttons = chat_progress.render_telegram(view, finalized=finalized)
+        result = telegram.edit(chat_id, message_id, text, buttons)
+        if result in ("ok", "not_modified", "gone"):
+            anchor_tg_progress(slug, chat_id, thread_id, None if result == "gone" else message_id,
+                               milestone, full, finalized=finalized, expected=pg)
+        return
+
+    started = view["started_at"]
+    if stage not in chat_progress.LIVE_MOVING_STAGES or not (
+        (started and now() - started >= PROGRESS_FIRST_DELAY) or view["done"] or stage in chat_progress.POST_RUN_STAGES
+    ):
+        return
+    text, buttons = chat_progress.render_telegram(view)
+    message_id = telegram.send(chat_id, text, buttons, thread_id=thread_id, silent=True)
+    if message_id is not None:
+        anchor_tg_progress(slug, chat_id, thread_id, message_id, milestone, full, expected=pg)
+        telegram.remember_message(chat_id, message_id, {"team": team["team_id"], "kind": "progress",
+                                                       "owner": team.get("owner")})
+
+
 def tick_board(slug: str, team: dict) -> None:
     """One look at one team board (from the bridge loop in the gateway)."""
     from . import tg as telegram
@@ -527,9 +594,15 @@ def tick_board(slug: str, team: dict) -> None:
     if not telegram.ready():
         return
     state = team.get("state")
-    if state not in ("running", "paused", "completed"):
+    if state not in ("running", "paused", "completed", "stopped"):
         return
-    if state == "completed" and now() - int(team.get("completed_at") or 0) > RECENT:
+    pg = team.get("tg_progress") or {}
+    deploy = (team.get("project") or {}).get("deploy") or {}
+    if state == "stopped" and (not pg.get("message_id") or pg.get("finalized")):
+        return
+    if state == "completed" and now() - int(team.get("completed_at") or 0) > RECENT and not (
+        deploy.get("status") == "running" or (pg.get("message_id") and not pg.get("finalized"))
+    ):
         return
     target = target_for(team)
     if target is None:
@@ -538,16 +611,15 @@ def tick_board(slug: str, team: dict) -> None:
 
     snap = snapshot(team["team_id"])
     team = read_team(slug) or team  # the snapshot may just have marked it completed
-    found = pending(team, snap)
+    found = pending(team, snap) if state != "stopped" else []
     if "notified" not in team:
         _remember(slug, [key for key, _kind, _task in found])
         return
     known = set(team.get("notified") or [])
     new = [(key, kind, task) for key, kind, task in found if key not in known]
-    if not new:
-        return
     if watching(team["team_id"]):
-        _remember(slug, [key for key, _kind, _task in new])
+        if new:
+            _remember(slug, [key for key, _kind, _task in new])
         return
     sent = []
     for key, kind, task in new:
@@ -571,6 +643,7 @@ def tick_board(slug: str, team: dict) -> None:
                                 thread_id=target.get("thread_id"), reply_to=message_id)
     if sent:
         _remember(slug, sent)
+    _tick_progress(slug, read_team(slug) or team, snap, target)
 
 
 def plan_notice(owner: str, event: str, team: dict, origin: dict) -> dict:

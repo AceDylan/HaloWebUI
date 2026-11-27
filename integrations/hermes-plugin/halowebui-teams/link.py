@@ -97,6 +97,14 @@ def notify_web_teams() -> bool:
     return _section("telegram").get("notify_web_teams", True) is not False
 
 
+def telegram_progress_enabled() -> bool:
+    return _section("telegram").get("progress_updates", True) is not False
+
+
+def qq_progress_enabled() -> bool:
+    return _section("qqbot").get("progress_updates", True) is not False
+
+
 def public_url(path: str = "") -> str:
     base = str(_section("halowebui").get("public_url") or "").rstrip("/")
     return base + path if base else ""

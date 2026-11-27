@@ -357,7 +357,7 @@ def _qq_team_board(monkeypatch, tasks, diagnoses=None):
     board = {"team_id": "9a8b7c6d-team-a", "title": "加按钮", "members": [{"name": "claude-lead", "role": "主控"}],
              "diagnoses": diagnoses or {}}
     monkeypatch.setattr("halowebui_teams.common.read_team", lambda slug: board)
-    snap = {"team": {"phase": "attention"}, "tasks": tasks}
+    snap = {"team": {"title": board["title"], "phase": "attention"}, "tasks": tasks}
     monkeypatch.setattr("halowebui_teams.teams.snapshot", lambda team_id, owner=None: snap)
     monkeypatch.setattr(notify, "now", lambda: int(time.time()))
     return snap
@@ -366,7 +366,7 @@ def _qq_team_board(monkeypatch, tasks, diagnoses=None):
 def test_qq_team_question_comes_in_full_and_an_answer_goes_to_the_member(remote, monkeypatch):
     remote.remote.put_job({"kind": "team", "id": "9a8b7c6d-team-a", "owner": OWNER, "platform": "qqbot",
                            "chat_id": QQ_USER, "question": "g", "at": time.time(), "approved": True})
-    team = {"id": "9a8b7c6d-team-a", "title": "加按钮", "status": "running", "phase": "attention"}
+    team = {"id": "9a8b7c6d-team-a", "title": "加按钮", "status": "running", "phase": "running"}
     monkeypatch.setattr(remote.link, "get", lambda *a: team)
     ask = {"id": "t_aaaa", "title": "合成方案", "member": "claude-lead", "sub_status": "waiting_user", "attempts": 1,
            "current_run": {"question": "方案 A 还是方案 B？A 快，B 稳。"}}
@@ -394,7 +394,7 @@ def test_qq_team_question_comes_in_full_and_an_answer_goes_to_the_member(remote,
     assert len([m for m in remote.sent if "在任务「合成方案」里问你" in m["text"]]) == 1
     # the member works again: the notice is closed
     snap["tasks"] = []
-    team["phase"] = "running"
+    snap["team"]["phase"] = "running"
     remote.remote.tick()
     assert remote.remote.jobs()["team:9a8b7c6d-team-a"]["prompts"] == {}
 

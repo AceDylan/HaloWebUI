@@ -36,8 +36,8 @@ def linked(tmp_path, monkeypatch):
     link._cache.update(mtime=None, data={})
     sent = []
 
-    def fake_send(chat_id, text, buttons=None, *, thread_id=None):
-        sent.append({"chat": str(chat_id), "text": text, "buttons": buttons or []})
+    def fake_send(chat_id, text, buttons=None, *, thread_id=None, silent=False):
+        sent.append({"chat": str(chat_id), "text": text, "buttons": buttons or [], "silent": silent})
         return 1000 + len(sent)
 
     async def fake_asend(chat_id, text, buttons=None, *, thread_id=None, reply_to=None):
@@ -50,6 +50,7 @@ def linked(tmp_path, monkeypatch):
 
     monkeypatch.setattr(telegram, "ready", lambda: True)
     monkeypatch.setattr(telegram, "send", fake_send)
+    monkeypatch.setattr(telegram, "edit", lambda *_: "ok")
     monkeypatch.setattr(telegram, "send_photo", fake_send_photo)
     monkeypatch.setattr(telegram, "asend", fake_asend)
     notify._seen.clear()

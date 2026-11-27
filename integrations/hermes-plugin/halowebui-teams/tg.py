@@ -33,8 +33,8 @@ import time
 from pathlib import Path
 from typing import Any, Optional
 
-from . import link
-from .common import logger
+from . import chat_progress, link, notify
+from .common import logger, read_team
 from .notify import clip, esc
 
 _state: dict = {"app": None, "loop": None}
@@ -128,7 +128,7 @@ _parts: dict[tuple[str, int], list[int]] = {}
 
 
 async def asend(chat_id: Any, text: str, buttons: Optional[list] = None, *, thread_id: Any = None,
-                reply_to: Any = None) -> Optional[int]:
+                reply_to: Any = None, silent: bool = False) -> Optional[int]:
     """Send on the gateway loop, in several messages when it is long (the buttons under the last);
     the last message's id, or None when it failed."""
     app = _state.get("app")
@@ -140,6 +140,8 @@ async def asend(chat_id: Any, text: str, buttons: Optional[list] = None, *, thre
         last = i == len(chunks) - 1
         kwargs: dict = {"chat_id": _chat(chat_id), "text": chunk, "parse_mode": "HTML",
                         "disable_web_page_preview": True, "reply_markup": markup(buttons) if last else None}
+        if silent:
+            kwargs["disable_notification"] = True
         if thread_id:
             kwargs["message_thread_id"] = int(thread_id)
         if reply_to and not sent:
@@ -157,6 +159,26 @@ async def asend(chat_id: Any, text: str, buttons: Optional[list] = None, *, thre
         while len(_parts) > STORE_KEEP:
             _parts.pop(next(iter(_parts)))
     return sent[-1]
+
+
+async def aedit(chat_id: Any, message_id: Any, text: str, buttons: Optional[list] = None) -> str:
+    """Edit a progress card, distinguishing a deleted message from a transient failure."""
+    app = _state.get("app")
+    if app is None:
+        return "failed"
+    try:
+        await app.bot.edit_message_text(chat_id=_chat(chat_id), message_id=int(message_id), text=text,
+                                        parse_mode="HTML", disable_web_page_preview=True,
+                                        reply_markup=markup(buttons))
+    except Exception as exc:  # noqa: BLE001 — a notice must never break the caller
+        message = str(exc).lower()
+        if "message is not modified" in message:
+            return "not_modified"
+        if "message to edit not found" in message:
+            return "gone"
+        logger.warning("halowebui-teams: Telegram edit failed: %s", type(exc).__name__)
+        return "failed"
+    return "ok"
 
 
 async def asend_photo(chat_id: Any, path: Path, caption: str = "", *, thread_id: Any = None,
@@ -181,9 +203,9 @@ async def asend_photo(chat_id: Any, path: Path, caption: str = "", *, thread_id:
     return int(message.message_id)
 
 
-def _from_thread(make) -> Optional[int]:
+def _from_thread(make):
     """Run the coroutine ``make()`` returns on the gateway loop from a worker thread (bridge
-    loop, API handlers run in threads) and wait for its message id."""
+    loop, API handlers run in threads) and wait for its result."""
     loop = _state.get("loop")
     if not ready():
         return None
@@ -201,9 +223,14 @@ def _from_thread(make) -> Optional[int]:
         return None
 
 
-def send(chat_id: Any, text: str, buttons: Optional[list] = None, *, thread_id: Any = None) -> Optional[int]:
+def send(chat_id: Any, text: str, buttons: Optional[list] = None, *, thread_id: Any = None,
+         silent: bool = False) -> Optional[int]:
     """``asend`` from a worker thread."""
-    return _from_thread(lambda: asend(chat_id, text, buttons, thread_id=thread_id))
+    return _from_thread(lambda: asend(chat_id, text, buttons, thread_id=thread_id, silent=silent))
+
+
+def edit(chat_id: Any, message_id: Any, text: str, buttons: Optional[list] = None) -> str:
+    return _from_thread(lambda: aedit(chat_id, message_id, text, buttons)) or "failed"
 
 
 def send_photo(chat_id: Any, path: Path, caption: str = "", *, thread_id: Any = None,
@@ -384,13 +411,18 @@ USAGE = ("<b>协作台</b>\n"
          "/team 多模型 目标 —— 多模型研发：Claude 和 AGY 各出方案，合成后问你拍板（回复那条问题消息），再设计、写后端和前端。\n"
          "/team 快速研发 目标 —— 快速研发：摸底 → Codex 写后端 → Claude 写前端并测试。可以和「直接」叠着写。\n"
          "/team —— 最近的协作任务。\n"
+         "/team 进度 [编号或 ID] —— 查看任务、验收与发布进度。\n"
          "/work 需求 —— 工作流：AGY 规划 → Codex 开发 → Claude 审阅修复 → 自动发布（/work help 看详情）。\n"
          "回复完成通知 —— 对负责人说还要补什么、改什么。")
 
 
 async def _team_command(source: Any, owner: str, args: str, event: Any) -> None:
-    if args in ("", "列表", "list", "ls", "状态"):
+    if args in ("", "列表", "list", "ls"):
         await _list(source, owner, event)
+        return
+    selector = chat_progress.parse_progress_query(args)
+    if selector is not None:
+        await _progress_command(source, owner, selector, event)
         return
     if args in ("help", "帮助", "?", "？"):
         await _say(source, USAGE, None, event)
@@ -404,11 +436,10 @@ async def _team_command(source: Any, owner: str, args: str, event: Any) -> None:
     except link.HaloError as exc:
         await _say(source, f"⚠️ 没能发起协作：{esc(exc.message)}", None, event)
         return
-    url = link.team_url(team["id"])
     after = ("计划好就直接开始（不用批准），计划发到这里给你过目。" if auto_start
              else "计划好了发到这里（一般 1 分钟内），你批准后才会开始。")
     await _say(source, f"🧭 已交给负责人做计划{workflow_note(workflow)}：<b>{esc(clip(team.get('title'), 60))}</b>\n{after}",
-               [[("🌐 在网页看", "url:" + url)]] if url else None, event)
+               _started_buttons(team["id"]), event)
 
 
 WORK_USAGE = ("<b>工作流 /work</b>\n"
@@ -416,7 +447,8 @@ WORK_USAGE = ("<b>工作流 /work</b>\n"
               "需求里写上项目名或路径（例如「/work HaloWebUI 给设置页加个开关」）。\n"
               "默认 offiagy 规划（不行换 agy），officlaude 审阅（不行依次换 cchclaude、anyclaude、reclaude）。\n"
               "/work cchclaude 需求 —— 指定审阅的 Claude（cchclaude / anyclaude / reclaude / officlaude），"
-              "指定了就只用它，不可用时暂停等你换；agy / offiagy 同理指定规划的。")
+              "指定了就只用它，不可用时暂停等你换；agy / offiagy 同理指定规划的。\n"
+              "/work 进度 —— 查看工作流进度。")
 _WORK_RUNNER_RE = re.compile(r"([A-Za-z]+)(?=$|[\s：:，,])")
 
 
@@ -451,6 +483,13 @@ def work_started(team: dict, prefs: dict) -> str:
 
 
 async def _work_command(source: Any, owner: str, args: str, event: Any) -> None:
+    if chat_progress.is_work_progress_query(args):
+        selector = chat_progress.parse_progress_query(args)
+        if selector is None:
+            await _say(source, "发 <code>/work 进度 [编号或 ID]</code> 查看工作流进度。", None, event)
+        else:
+            await _progress_command(source, owner, selector, event, workflow_first="work")
+        return
     goal, prefs = split_work_args(args)
     if not goal or goal in ("help", "帮助", "?", "？"):
         await _say(source, WORK_USAGE, None, event)
@@ -460,8 +499,15 @@ async def _work_command(source: Any, owner: str, args: str, event: Any) -> None:
     except link.HaloError as exc:
         await _say(source, f"⚠️ 没能发起工作流：{esc(exc.message)}", None, event)
         return
-    url = link.team_url(team["id"])
-    await _say(source, work_started(team, prefs), [[("🌐 在网页看", "url:" + url)]] if url else None, event)
+    await _say(source, work_started(team, prefs), _started_buttons(team["id"]), event)
+
+
+def _started_buttons(team_id: str) -> list:
+    url = link.team_url(team_id)
+    row = [("📊 看进度", f"cb:pg:{team_id}")]
+    if url:
+        row.append(("🌐 在网页看", "url:" + url))
+    return [row]
 
 
 AUTO_START_WORDS = ("直接开始", "直接", "自动开始", "自动")
@@ -521,7 +567,8 @@ def list_message(teams: list) -> tuple[str, list]:
         return "还没有协作任务。发 <code>/team 目标</code> 开一个。", []
     lines = ["<b>协作任务</b>（最近的）"]
     buttons = []
-    for team in teams[:8]:
+    progress_buttons = []
+    for number, team in enumerate(teams[:8], 1):
         if team.get("status") == "running":
             icon, word = PHASE_LINE.get(team.get("phase") or "running", PHASE_LINE["running"])
             progress = team.get("progress") or {}
@@ -533,9 +580,9 @@ def list_message(teams: list) -> tuple[str, list]:
         title = esc(clip(team.get("title"), 40))
         if url:
             title = f'<a href="{html.escape(url)}">{title}</a>'
-        lines.append(f"{icon} {title} · {word}")
+        lines.append(f"{icon} {number}. {title} · {word}")
         stage = team.get("stage") if isinstance(team.get("stage"), dict) else {}
-        if stage.get("key") in ("planning", "running", "attention", "concluding", "illustrating", "checking", "approval"):
+        if stage.get("key") in chat_progress.ACTIVE_STAGES:
             from .progress import eta_text
 
             when = ""
@@ -552,6 +599,12 @@ def list_message(teams: list) -> tuple[str, list]:
                 lines.append(f"   └ {detail}")
         if team.get("status") == "plan_ready" and len(buttons) < 3:
             buttons.append([(f"✅ 批准「{clip(team.get('title'), 16)}」", f"cb:ap:{team['id']}")])
+        active = stage.get("key") in chat_progress.ACTIVE_STAGES or (
+            not stage and (team.get("status") in ("planning", "plan_ready", "starting") or
+                           (team.get("status") == "running" and team.get("phase") not in ("completed", "stopped"))))
+        if active and len(progress_buttons) < 3:
+            progress_buttons.append([(f"📊 进度「{clip(team.get('title'), 16)}」", f"cb:pg:{team['id']}")])
+    buttons.extend(progress_buttons)
     home = link.public_url("/teams")
     if home:
         buttons.append([("🌐 打开协作台", "url:" + home)])
@@ -566,6 +619,66 @@ async def _list(source: Any, owner: str, event: Any) -> None:
         return
     text, buttons = list_message(teams)
     await _say(source, text, buttons, event)
+
+
+def _anchor_progress_card(view: dict, chat_id: Any, thread_id: Any, message_id: Any, *, refresh: bool = False) -> None:
+    slug = view.get("board")
+    board = read_team(slug) if slug else None
+    target = notify.target_for(board) if board else None
+    if not target or (str(chat_id), str(thread_id or "")) != (target["chat_id"], str(target.get("thread_id") or "")):
+        return
+    current = board.get("tg_progress") or {}
+    if refresh and str(current.get("message_id")) != str(message_id):
+        return
+    notify.anchor_tg_progress(slug, chat_id, thread_id, message_id, *chat_progress.fingerprints(view),
+                              finalized=not chat_progress.is_active(view), expected=current if refresh else None)
+
+
+async def _progress_command(source: Any, owner: str, selector: str, event: Any, *,
+                            workflow_first: Optional[str] = None) -> None:
+    from .teams import TeamError
+
+    try:
+        views, recent = await asyncio.to_thread(chat_progress.resolve_query_views, owner, selector,
+                                                workflow_first=workflow_first)
+    except (link.HaloError, TeamError) as exc:
+        await _say(source, f"⚠️ 读不到协作进度：{esc(exc.message)}", None, event)
+        return
+    if not views:
+        text, buttons = list_message(recent)
+        hint = "没有找到唯一匹配的协作任务。" if selector else "当前没有进行中的协作。"
+        await _say(source, hint + "\n\n" + text, buttons, event)
+        return
+    for view in views:
+        text, buttons = chat_progress.render_telegram(view)
+        message_id = await _say(source, text, buttons, event)
+        if message_id is not None and len(views) == 1:
+            _anchor_progress_card(view, source.chat_id, getattr(source, "thread_id", None), message_id)
+
+
+async def _progress_callback(query: Any, owner: str, team_id: str, *, refresh: bool) -> None:
+    view = await asyncio.to_thread(chat_progress.resolve_team_view, owner, team_id)
+    message = query.message
+    if not view or message is None:
+        await query.answer("找不到这个协作任务", show_alert=True)
+        return
+    chat_id = message.chat_id
+    thread_id = getattr(message, "message_thread_id", None)
+    text, buttons = chat_progress.render_telegram(view)
+    if refresh:
+        result = await aedit(chat_id, message.message_id, text, buttons)
+        if result in ("ok", "not_modified"):
+            _anchor_progress_card(view, chat_id, thread_id, message.message_id, refresh=True)
+            await query.answer("已是最新进度" if result == "not_modified" else "已刷新进度")
+        else:
+            await query.answer("暂时无法刷新，发 /team 进度 查看", show_alert=True)
+        return
+    message_id = await asend(chat_id, text, buttons, thread_id=thread_id)
+    if message_id is None:
+        await query.answer("暂时无法发送进度", show_alert=True)
+        return
+    _anchor_progress_card(view, chat_id, thread_id, message_id)
+    await query.answer("已打开进度")
 
 
 def _author(event: Any, source: Any) -> str:
@@ -622,9 +735,8 @@ async def _approve_by_text(source: Any, owner: str, message_id: str, entry: dict
         await _say(source, f"⚠️ 没能批准：{esc(exc.message)}", None, event)
         return
     mark_acted(source.chat_id, message_id, "approve")
-    url = link.team_url(team["id"])
     await _say(source, f"✅ 已批准「{esc(clip(team.get('title'), 40))}」，成员开始干活了。完成或需要你时我会告诉你。",
-               [[("🌐 看工作台", "url:" + url)]] if url else None, event)
+               _started_buttons(team["id"]), event)
 
 
 async def _on_callback(update: Any, context: Any) -> None:
@@ -657,6 +769,9 @@ async def _handle_callback(query: Any) -> None:
     action, team_id = parts[1], parts[2]
     task_id = parts[3] if len(parts) > 3 else ""
     try:
+        if action in ("pg", "pr"):
+            await _progress_callback(query, owner, team_id, refresh=action == "pr")
+            return
         if action == "ap":
             await asyncio.to_thread(link.approve, owner, team_id)
         elif action == "cx":

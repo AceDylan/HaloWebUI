@@ -28,8 +28,8 @@ import time
 from pathlib import Path
 from typing import Any, Optional
 
-from . import link
-from .common import logger
+from . import chat_progress, link
+from .common import logger, valid_team_id
 from .notify import clip, plain
 
 PLATFORMS = ("telegram", "qqbot")
@@ -46,6 +46,9 @@ APPROVE_WINDOW = 30 * 60
 APPROVE_WORDS = {"批准", "批准并开始", "开始吧", "批准开始", "同意", "approve"}
 CANCEL_WORDS = {"取消", "不做了", "cancel"}
 SEND_TIMEOUT = 60
+QQ_MILESTONE_COOLDOWN = 20
+QQ_PROGRESS_MAX = 10
+AUTO_DEPLOY_GRACE = chat_progress.AUTO_DEPLOY_GRACE
 
 _state: dict = {"adapters": {}, "loop": None}
 _tasks: set = set()
@@ -185,6 +188,21 @@ def chat_jobs(platform: str, chat_id: Any) -> list[dict]:
                   key=lambda j: j.get("at") or 0)
 
 
+def _refresh_chat_reply_to(platform: str, chat_id: Any, message_id: Any) -> None:
+    if platform != "qqbot" or not message_id:
+        return
+    with _store_lock:
+        data = _load()
+        changed = False
+        for job in data.values():
+            if (isinstance(job, dict) and job.get("kind") == "team" and job.get("platform") == platform
+                    and job.get("chat_id") == str(chat_id) and job.get("reply_to") != str(message_id)):
+                job["reply_to"] = str(message_id)
+                changed = True
+        if changed:
+            _save(data)
+
+
 def open_plan(platform: str, chat_id: Any) -> Optional[dict]:
     """The newest QQ team plan in this chat sent and not answered yet, if recent."""
     plans = [j for j in chat_jobs(platform, chat_id) if j["kind"] == "team" and j.get("plan_at")
@@ -242,6 +260,11 @@ def _dispatch(event: Any) -> Optional[dict]:
             _spawn(_answer_prompt(source, owner, *said, event))
             return {"action": "skip", "reason": "answer a team notice (QQ)"}
     word = (getattr(event, "text", "") or "").strip().rstrip("。.!！ ").lower()
+    if not command and word in chat_progress.QQ_SHORTCUT_WORDS:
+        _refresh_chat_reply_to(platform, source.chat_id, getattr(event, "message_id", None))
+        _spawn(_progress_command(source, owner, "", event,
+                                 workflow_first="work" if word == "工作流进度" else None))
+        return {"action": "skip", "reason": "halo team progress (QQ)"}
     if not command and (word in APPROVE_WORDS or word in CANCEL_WORDS) and open_plan(platform, source.chat_id):
         _spawn(_team_command(source, owner, "批准" if word in APPROVE_WORDS else "取消", event))
         return {"action": "skip", "reason": "answer the team plan (QQ)"}
@@ -294,9 +317,9 @@ def usage_text(platform: str, chat_id: Any) -> str:
     if platform == "qqbot":
         lines.append("协作台：/team 目标 —— 负责人做计划发到这里，回「批准」开始、「取消」作罢；/team 直接 目标 —— 计划好就开始；"
                      "/team 多模型 目标、/team 快速研发 目标 —— 选研发流程（可以和「直接」叠着写）。"
-                     "成员提问回「答 内容」，任务失败回「重试」或「重试 说明」。")
+                     "成员提问回「答 内容」，任务失败回「重试」或「重试 说明」。发 /team 进度 或「协作进度」查详情。")
         lines.append("工作流：/work 需求 —— AGY 出规划 → Codex 开发 → Claude 审阅修复 → 提交推送部署清理，全程自动；"
-                     "/work cchclaude 需求 —— 指定审阅用的 Claude。")
+                     "/work cchclaude 需求 —— 指定审阅用的 Claude。发 /work 进度 查进度。")
     going = chat_jobs(platform, chat_id)
     if going:
         lines.append("")
@@ -334,14 +357,19 @@ async def _team_command(source: Any, owner: str, args: str, event: Any) -> None:
     from .tg import list_message, split_team_args, workflow_note
 
     platform = _platform(source)
-    if args in ("", "列表", "list", "ls", "状态"):
+    _refresh_chat_reply_to(platform, source.chat_id, getattr(event, "message_id", None))
+    if args in ("", "列表", "list", "ls"):
         try:
             teams = await asyncio.to_thread(link.recent, owner)
         except link.HaloError as exc:
             await _say(source, f"⚠️ 读不到协作任务：{exc.message}", event)
             return
         text, _buttons = list_message(teams)
-        await _say(source, html_text(text) + "\n\n回「批准」开始最近一个等批准的计划。", event)
+        await _say(source, html_text(text) + "\n\n发 /team 进度 查详情。回「批准」开始最近一个等批准的计划。", event)
+        return
+    selector = chat_progress.parse_progress_query(args)
+    if selector is not None:
+        await _progress_command(source, owner, selector, event)
         return
     if args in ("help", "帮助", "?", "？"):
         await _say(source, usage_text(platform, source.chat_id), event)
@@ -390,6 +418,14 @@ async def _work_command(source: Any, owner: str, args: str, event: Any) -> None:
     """QQ's ``/work``: the same workflow as Telegram's (tg.py), its notices and questions come here."""
     from .tg import WORK_USAGE, split_work_args, work_started
 
+    _refresh_chat_reply_to(_platform(source), source.chat_id, getattr(event, "message_id", None))
+    if chat_progress.is_work_progress_query(args):
+        selector = chat_progress.parse_progress_query(args)
+        if selector is None:
+            await _say(source, "发 /work 进度 [编号或 ID] 查看工作流进度。", event)
+        else:
+            await _progress_command(source, owner, selector, event, workflow_first="work")
+        return
     goal, prefs = split_work_args(args)
     if not goal or goal in ("help", "帮助", "?", "？"):
         await _say(source, html_text(WORK_USAGE), event)
@@ -403,6 +439,26 @@ async def _work_command(source: Any, owner: str, args: str, event: Any) -> None:
              "auto_start": True})
     url = link.team_url(team["id"])
     await _say(source, html_text(work_started(team, prefs)) + (f"\n🌐 {url}" if url else ""), event)
+
+
+async def _progress_command(source: Any, owner: str, selector: str, event: Any, *,
+                            workflow_first: Optional[str] = None) -> None:
+    from .teams import TeamError
+    from .tg import list_message
+
+    try:
+        views, recent = await asyncio.to_thread(chat_progress.resolve_query_views, owner, selector,
+                                                workflow_first=workflow_first)
+    except (link.HaloError, TeamError) as exc:
+        await _say(source, f"⚠️ 读不到协作进度：{exc.message}", event)
+        return
+    if not views:
+        text, _buttons = list_message(recent)
+        hint = "没有找到唯一匹配的协作任务。" if selector else "当前没有进行中的协作。"
+        await _say(source, hint + "\n\n" + html_text(text), event)
+        return
+    for view in views:
+        await _say(source, chat_progress.render_qq(view), event)
 
 
 _TAG_RE = re.compile(r"<[^>]+>")
@@ -542,11 +598,49 @@ def _after_routing(key: str, job: dict, state: dict) -> None:
     put_job({**job, "kind": mode, "id": target, "at": time.time()})
 
 
+def _live_snapshot(job: dict) -> Optional[dict]:
+    from .teams import TeamError, snapshot
+
+    if valid_team_id(job["id"]):
+        try:
+            return snapshot(job["id"], job["owner"])
+        except TeamError as exc:
+            if exc.status != 404:
+                raise
+    return None
+
+
+def _tick_qq_progress(key: str, job: dict, snap: dict) -> None:
+    if job["platform"] != "qqbot" or not link.qq_progress_enabled():
+        return
+    count = int(job.get("progress_count") or 0)
+    if count >= QQ_PROGRESS_MAX:
+        return
+    view = chat_progress.view_from_snapshot(snap)
+    prev = job.get("progress_state")
+    current = chat_progress.qq_milestone_state(view)
+    message = chat_progress.qq_milestone_message(prev, view)
+    if not message:
+        if prev != current:
+            update_job(key, progress_state=current)
+        return
+    stamp = time.time()
+    last = max(job.get("progress_at") or 0, job.get("progress_attempt_at") or 0)
+    if stamp - last < QQ_MILESTONE_COOLDOWN:
+        return
+    if send(job, message):
+        update_job(key, progress_state=current, progress_at=stamp, progress_count=count + 1)
+    else:
+        update_job(key, progress_attempt_at=stamp)
+
+
 def _tick_team(key: str, job: dict) -> None:
     """A team started from QQ: its plan, its finish (QQ has no buttons and no plan hand-over)."""
     from .notify import plan_failed_message, plan_message
 
-    team = link.get(job["owner"], job["id"])
+    snap = _live_snapshot(job) if job.get("approved") else None
+    team = ({**(snap.get("team") or {}), "status": "running"} if snap
+            else link.get(job["owner"], job["id"]))
     status = team.get("status")
     if status in ("planning", "starting"):
         return
@@ -572,9 +666,11 @@ def _tick_team(key: str, job: dict) -> None:
         update_job(key, approved=True)
         return
     phase = team.get("phase")
+    if snap and phase in ("running", "paused", "completed"):
+        _tick_qq_progress(key, job, snap)
     url = link.team_url(job["id"])
     if phase == "attention":
-        if _tick_prompts(key, job) or job.get("attention_sent"):
+        if _tick_prompts(key, job, snap) or job.get("attention_sent"):
             return
         # nothing we can put to the user here (a task in triage): the page
         if send(job, f"🟣 协作「{clip(team.get('title'), 40)}」需要你处理，请到网页看。" + (f"\n🌐 {url}" if url else "")):
@@ -597,6 +693,14 @@ def _team_done(key: str, job: dict, team: dict) -> None:
     from .notify import _conclusion_markdown, picture_of
 
     board = read_team(board_slug(job["id"])) or {}
+    deploy = ((board.get("project") or {}).get("deploy") or team.get("deploy") or {})
+    deploy_status = deploy.get("status")
+    if job.get("done_sent"):
+        if deploy_status in chat_progress.DEPLOY_TERMINAL or (
+            deploy_status != "running" and time.time() - float(job.get("done_at") or 0) >= AUTO_DEPLOY_GRACE
+        ):
+            drop_job(key)
+        return
     conclusion = board.get("conclusion") or {}
     waited = time.time() - float(job.get("completed_seen") or time.time())
     if not job.get("completed_seen"):
@@ -615,7 +719,11 @@ def _team_done(key: str, job: dict, team: dict) -> None:
     body = whole(body)
     if not send(job, f"{head}\n\n{body}{tail}"):
         return
-    drop_job(key)
+    if deploy_status == "running" or (deploy_status not in chat_progress.DEPLOY_TERMINAL
+                                      and chat_progress.expects_auto_deploy(board)):
+        update_job(key, done_sent=True, done_at=time.time())
+    else:
+        drop_job(key)
     picture = picture_of(board) if board else None
     if picture is not None:
         send_picture(job, picture, f"🖼 结果配图 · {clip(team.get('title'), 60)}")
@@ -670,19 +778,18 @@ def _chat_numbers(platform: str, chat_id: Any) -> list[int]:
     return [int(p.get("n") or 0) for j in chat_jobs(platform, chat_id) for p in (j.get("prompts") or {}).values()]
 
 
-def _tick_prompts(key: str, job: dict) -> bool:
+def _tick_prompts(key: str, job: dict, snap: Optional[dict] = None) -> bool:
     """A QQ team's members asking or failing: each notice once, in full, numbered. True when some
     notice is open (sent now or before) or will be (the lead is still diagnosing)."""
     from .common import board_slug, read_team
     from .notify import ask_message, fail_message, pending
-    from .teams import snapshot
 
-    slug = board_slug(job["id"])
-    board = read_team(slug)
+    snap = snap or _live_snapshot(job)
+    if not snap:
+        return False
+    board = read_team(board_slug(job["id"]))
     if not board:
         return False
-    snap = snapshot(job["id"])
-    board = read_team(slug) or board
     found = [(k, kind, task) for k, kind, task in pending(board, snap) if kind in ("ask", "fail")]
     prompts = {k: p for k, p in (job.get("prompts") or {}).items() if k in {f[0] for f in found}}
     changed = prompts != (job.get("prompts") or {})
@@ -718,6 +825,7 @@ async def _answer_prompt(source: Any, owner: str, verb: str, number: Optional[in
     picked = pick_prompt(_platform(source), source.chat_id, verb, number)
     if picked is None:
         return
+    _refresh_chat_reply_to(_platform(source), source.chat_id, getattr(event, "message_id", None))
     job_key, pkey, prompt = picked
     team_id = job_key.split(":", 1)[1]
     author = str(getattr(source, "user_name", None) or "你")[:40]

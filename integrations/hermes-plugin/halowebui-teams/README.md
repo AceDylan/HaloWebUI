@@ -112,7 +112,10 @@ is the Hermes side. It adds no service, port or second task store:
   a notice when a member asks something, a task fails, or the team finishes (with the start of
   the conclusion) — to the chat the team came from, else the owner's linked chat — and holds it
   back while the team's page is open (`events?visible=1`). Replies to notices answer the member /
-  add a note and retry. Settings and the user link: `~/.hermes/halo-teams.json` (see `link.py`).
+  add a note and retry. A quiet progress card updates in place with tasks, activity, estimates,
+  and release steps. Use 「看进度」, `/team 进度 [编号或 ID]`, or `/work 进度` to open it on demand.
+  Set `telegram.progress_updates` to `false` in `~/.hermes/halo-teams.json` to disable automatic
+  progress updates. The same file holds the user link (see `link.py`).
   The hook runs before the gateway's auth: only Telegram users listed there are handled.
 * **`/work [runner …] <需求>`** (Telegram `tg.py`, QQ `remote.py`, HaloWebUI's chat composer
   `src/lib/utils/work-command.ts`): the fixed `work` workflow, started at once — AGY plans
@@ -131,7 +134,11 @@ is the Hermes side. It adds no service, port or second task store:
   when the lead has written it; a member's question (a 多模型研发's 拍板 too) and a failed task come
   in full and numbered (`【#n】`): 「答 …」 / 「答#n …」 answers it, 「重试 [说明]」 / 「按建议」 settle a
   failure; a team started from QQ does not notify Telegram. QQ users are linked
-  in `qqbot.owners` of `halo-teams.json`.
+  in `qqbot.owners` of `halo-teams.json`. QQ groups task and release milestones into short messages,
+  at most one per 20 seconds and ten per team. Use `/team 进度 [编号或 ID]`, `/work 进度`, or the exact
+  phrases 「协作进度」「团队进度」「工作流进度」「看协作进度」 for a detailed reply. Set
+  `qqbot.progress_updates` to `false` to disable milestone messages. Manual queries still work
+  with either platform's automatic updates disabled.
 * **Where the conclusion goes** (`bridge.report_conclusion`, `link.concluded`): once the lead has
   written a conclusion when the team finished (after its acceptance check, bounded wait), the
   bridge tells HaloWebUI (`POST /api/v1/teams/hermes/teams/{id}/concluded`), which posts it as a

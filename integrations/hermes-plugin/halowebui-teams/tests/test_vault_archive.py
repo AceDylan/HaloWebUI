@@ -379,3 +379,55 @@ def test_release_defers_archive_and_notifies_with_terminal_evidence(
         assert calls == ["refresh", "notice"]
     assert archive.run(slug)["status"] == "skipped"
     assert not (run_dir / "obsidian-archive.jsonl").exists()
+
+
+def test_archive_receipts_and_backups_stay_out_of_a_members_git_add(pkg, team_id, plan_dict, vault, monkeypatch):
+    slug, run_dir = completed(pkg, team_id, plan_dict)
+    workspace = run_dir.parent
+    subprocess.run(["git", "init", "-q", str(workspace)], check=True)
+    (run_dir / ".gitignore").write_text("scratch/", encoding="utf-8")  # a member's own entry survives
+    model(pkg, monkeypatch, [DECISION, {"action": "create", "path": NOTE, "reason": "验证通过",
+                                        "content": body(slug, "`pytest -q t.py` → 1 passed")}])
+    assert archive.run(slug)["status"] == "saved"
+    pkg.common.update_team(slug, lambda rec: rec["conclusion"].update(
+        generated_at=rec["conclusion"]["generated_at"] + 1))
+
+    def update(details):
+        note, = details["notes"]
+        return {"action": "update", "path": NOTE, "expect_sha": note["sha256"],
+                "content": body(slug, "`pytest -q t2.py` → 2 passed", updated=True)}
+
+    model(pkg, monkeypatch, [DECISION, update])
+    assert archive.run(slug)["status"] == "saved"
+    assert any(p.is_file() for p in (run_dir / "obsidian-backups").rglob("*"))
+    lines = (run_dir / ".gitignore").read_text().splitlines()
+    assert lines == ["scratch/", "/obsidian-archive.jsonl", "/obsidian-backups/"]
+    subprocess.run(["git", "-C", str(workspace), "add", "-A"], check=True)
+    staged = subprocess.run(["git", "-C", str(workspace), "diff", "--cached", "--name-only"],
+                            check=True, capture_output=True, text=True).stdout.split()
+    assert ".halo/.gitignore" in staged
+    assert not [p for p in staged if "obsidian" in p]
+
+
+@pytest.mark.parametrize("goal, skipped", [
+    ("协作台完成后不自动存入知识库，修一下", False),
+    ("排查 Obsidian 不更新的原因", False),
+    ("验证流程，请不要动 Obsidian", True),
+    ("这次不用写笔记", True),
+    ("跳过知识库归档", True),
+])
+def test_opt_out_matches_imperatives_not_bug_reports(goal, skipped):
+    assert bool(archive._SKIP.search(goal)) is skipped
+
+
+def test_draft_gets_a_longer_per_call_budget_than_the_decision(pkg, team_id, plan_dict, vault, monkeypatch):
+    slug, run_dir = completed(pkg, team_id, plan_dict)
+    timeouts = []
+
+    def respond(messages, **kwargs):
+        timeouts.append(kwargs["timeout"])
+        return json.dumps(DECISION if len(timeouts) == 1 else {"action": "skip", "reason": "已有"}), "", {"model": "m"}
+
+    monkeypatch.setattr(pkg.plan, "call_model", respond)
+    assert archive.run(slug)["status"] == "skipped"
+    assert timeouts[0] == 30 and 30 < timeouts[1] <= 60

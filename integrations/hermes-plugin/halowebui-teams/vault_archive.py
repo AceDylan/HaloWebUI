@@ -26,10 +26,13 @@ _ACTIVE = ("pending", "running")
 _ACTION_LABELS = {"create": "新建", "update": "更新", "append": "追加"}
 _RECEIPTS = "obsidian-archive.jsonl"
 _BACKUPS = "obsidian-backups"
+_GIT_IGNORED = (f"/{_RECEIPTS}", f"/{_BACKUPS}/")
 _SKIP = re.compile(
-    r"(?:不要|不用|无需|无须|不需要|禁止|别|不必|请勿|不|跳过)\s*(?:自动)?\s*"
+    # Imperatives only: a bare 不 also reads 「协作台不自动存入知识库」 (a bug report about archiving).
+    # Anything subtler is left to the lead, which skips on the policy's 「用户禁止」 rule.
+    r"(?:不要|不用|无需|无须|不需要|禁止|别|不必|请勿|跳过)\s*(?:自动)?\s*"
     r"(?:归档|(?:存入|写入|录入|保存到|更新|修改|改动|动|碰|使用|写)?\s*(?:任何)?\s*(?:Obsidian|知识库|笔记|Vault))"
-    r"|(?:Obsidian|知识库|笔记|Vault)\s*(?:不要|不用|无需|禁止|别|不必|请勿|不)\s*(?:自动)?\s*(?:写|归档|更新|存)",
+    r"|(?:Obsidian|知识库|笔记|Vault)\s*(?:不要|不用|无需|禁止|别|不必|请勿)\s*(?:自动)?\s*(?:写|归档|更新|存)",
     re.I,
 )
 _MANUAL = re.compile(
@@ -64,6 +67,19 @@ def workspace_lock(slug: str) -> threading.Lock:
 
 def private_artifact(path: PurePosixPath) -> bool:
     return path.parts[:2] in ((".halo", _RECEIPTS), (".halo", _BACKUPS))
+
+
+def keep_out_of_git(run_dir: Path) -> None:
+    """Backups hold whole private notes. The pipeline never commits .halo/, but a member reopened
+    with 「对负责人说」 may run ``git add -A`` in the worktree: ignore them there too."""
+    ignore = run_dir / ".gitignore"
+    if not run_dir.is_dir() or ignore.is_symlink() or (ignore.exists() and not ignore.is_file()):
+        raise ArchiveError("无法确认归档备份不会进入 git")
+    text = ignore.read_text(encoding="utf-8", errors="replace") if ignore.exists() else ""
+    missing = [line for line in _GIT_IGNORED if line not in text.splitlines()]
+    if missing:
+        with ignore.open("a", encoding="utf-8") as handle:
+            handle.write(("\n" if text and not text.endswith("\n") else "") + "\n".join(missing) + "\n")
 
 
 def enabled() -> bool:
@@ -281,7 +297,7 @@ class Archive:
     def cli(self, command: str, *args: str, body: str | None = None) -> subprocess.CompletedProcess:
         return _cli(self.script, self.slug, self.run_dir, self.deadline, command, *args, body=body)
 
-    def ask(self, instructions: str, payload: dict, *, retry_json: bool = False) -> dict:
+    def ask(self, instructions: str, payload: dict, *, retry_json: bool = False, per_call: int = 30) -> dict:
         from . import plan
 
         messages = [
@@ -291,7 +307,7 @@ class Archive:
         ]
         for _ in range(2 if retry_json else 1):
             raw, error, used = plan.call_model(
-                messages, timeout=max(1, min(30, int(_remaining(self.deadline)))),
+                messages, timeout=max(1, min(per_call, int(_remaining(self.deadline)))),
                 preferred=(self.team.get("lead_model") or {}).get("requested"),
                 max_tokens=8000, temperature=0.1, deadline=self.deadline,
             )
@@ -360,6 +376,8 @@ class Archive:
              "notes": list(self.notes.values())[:8], "top_directories": directories,
              "date": datetime.now(timezone(timedelta(hours=8))).date().isoformat(),
              "source": f"hermes run {self.slug}", "feedback": feedback, "previous": previous},
+            # A whole note: the lead model writes ~75 chars/s (gpt-6.2-sol, 2026-11-27), 30 s cut ~2,000.
+            per_call=60,
         )
 
     def write(self, draft: dict, manual: str) -> subprocess.CompletedProcess:
@@ -566,6 +584,8 @@ def _run_job(slug: str, timeout: float, force: bool) -> None:
         else:
             if linked or (receipt.exists() and not receipt.is_file()):
                 raise ArchiveError("归档回执目录或文件不是常规路径")
+            with lock:
+                keep_out_of_git(run_dir)
             archive = Archive(slug, team, run_dir, deadline)
             outcome = archive.evaluate()
     except Exception as exc:

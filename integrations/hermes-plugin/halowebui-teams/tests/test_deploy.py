@@ -459,7 +459,7 @@ def test_failed_verify_still_reloads_the_changed_plugin(pkg, team_id, plan_dict,
     slug, _ws = _completed(pkg, team_id, plan_dict, repo, tmp_path, monkeypatch, command="true",
                            verify_command="echo connection refused; false", restart_gateway_paths=["app.py"])
     reloads = []
-    monkeypatch.setattr(deploy, "_schedule_gateway_restart", lambda: reloads.append(1))
+    monkeypatch.setattr(deploy, "_schedule_gateway_restart", lambda: reloads.append(1) or True)
     deploy.start(slug, by="user")
     dep = _settle(pkg, slug)[1]
     assert dep["status"] == "failed" and dep["error"] == "线上核实失败（exit 1）：connection refused"
@@ -467,6 +467,20 @@ def test_failed_verify_still_reloads_the_changed_plugin(pkg, team_id, plan_dict,
     while not reloads and time.time() < deadline:  # scheduled last, after the notice
         time.sleep(0.02)
     assert reloads == [1]
+
+
+def test_schedule_gateway_restart_reports_disabled_and_spawn_failure(monkeypatch):
+    import halowebui_teams.deploy as deploy
+
+    def fail(*args, **kwargs):
+        raise OSError("cannot spawn")
+
+    monkeypatch.setenv("HALO_TEAMS_NO_GATEWAY_RESTART", "1")
+    monkeypatch.setattr(deploy.subprocess, "Popen", lambda *a, **kw: pytest.fail("restart is disabled"))
+    assert deploy._schedule_gateway_restart() is False
+    monkeypatch.delenv("HALO_TEAMS_NO_GATEWAY_RESTART")
+    monkeypatch.setattr(deploy.subprocess, "Popen", fail)
+    assert deploy._schedule_gateway_restart() is False
 
 
 def test_fix_run_is_bounded_and_committed(pkg, repo, tmp_path, monkeypatch, real_fix):

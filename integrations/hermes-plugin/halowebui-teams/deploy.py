@@ -231,14 +231,15 @@ def _initial_steps(profile: dict, cleanup: bool, *, codex_review: bool = False) 
     return steps
 
 
-def _update_deploy(slug: str, fn: Callable[[dict], None]) -> Optional[dict]:
+def _update_deploy(slug: str, fn: Callable[[dict], None], *, defer_archive: bool = False) -> Optional[dict]:
     def apply(rec: dict) -> None:
         entry = rec.setdefault("project", {}).setdefault("deploy", {})
         previous = (entry.get("status"), entry.get("finished_at"))
         fn(entry)
         if (entry.get("status") in vault_archive.DEPLOY_TERMINAL
                 and (entry.get("status"), entry.get("finished_at")) != previous):
-            marker = vault_archive.pre_mark(rec, waiting=False)
+            # A bridge tick can see this terminal state before _notify_finished runs.
+            marker = vault_archive.pre_mark(rec, waiting=False, defer_archive=defer_archive)
             if marker:
                 rec["conclusion"]["vault_archive"] = marker
 
@@ -553,11 +554,11 @@ def _run_codex_review(slug: str, team: dict, workspace: str, base_branch: str, p
     raise projects.ProjectError(409, "Codex 审查未通过，已暂停自动合并")
 
 
-def _schedule_gateway_restart() -> None:
+def _schedule_gateway_restart() -> bool:
     """Detached graceful reload of hermes-gateway (SIGUSR1 drain -> systemd restart) so the
     current response and Telegram notice finish first."""
     if os.environ.get("HALO_TEAMS_NO_GATEWAY_RESTART") == "1":
-        return
+        return False
     try:
         subprocess.Popen(
             ["bash", "-lc", "sleep 3 && systemctl --user reload hermes-gateway"],
@@ -568,13 +569,16 @@ def _schedule_gateway_restart() -> None:
         )
     except OSError:
         logger.warning("halowebui-teams: failed to schedule gateway restart", exc_info=True)
+        return False
+    return True
 
 
-def _notify_finished(slug: str) -> None:
+def _notify_finished(slug: str, *, defer_archive: bool = False) -> None:
     from . import notify
 
     try:
-        vault_archive.run_bounded(slug)
+        if not (defer_archive and vault_archive.defer_to_reload(slug)):
+            vault_archive.run_bounded(slug)
     except Exception as exc:
         logger.warning("halowebui-teams: archive before deploy notice failed for %s (%s)", slug, type(exc).__name__)
     try:
@@ -588,6 +592,7 @@ def _notify_finished(slug: str) -> None:
 def _run_ship(slug: str, profile: dict, by: str, cleanup: bool, codex_review: bool = False) -> None:
     started = now()
     need_gateway_restart = False
+    defer_archive = False
     try:
         team = read_team(slug)
         if not team:
@@ -652,6 +657,7 @@ def _run_ship(slug: str, profile: dict, by: str, cleanup: bool, codex_review: bo
 
         # The new plugin is live on disk from here, whatever the remaining steps say.
         need_gateway_restart = any(p.startswith(pref) for pref in profile.get("restart_gateway_paths") or [] for p in touched)
+        defer_archive = need_gateway_restart and os.environ.get("HALO_TEAMS_NO_GATEWAY_RESTART") != "1"
 
         # 5. Cleanup worktree & branch (optional)
         if cleanup:
@@ -670,7 +676,7 @@ def _run_ship(slug: str, profile: dict, by: str, cleanup: bool, codex_review: bo
             _set_step(slug, "verify", "done", "线上核实通过")
 
         finished = now()
-        note = "检测到协作台插件改动，将在数秒后平滑重启 Hermes 网关加载新版插件" if need_gateway_restart else ""
+        note = "检测到协作台插件改动，将在数秒后平滑重启 Hermes 网关加载新版插件" if defer_archive else ""
         _update_deploy(slug, lambda d: d.update({
             "status": "succeeded",
             "step": "done",
@@ -678,20 +684,21 @@ def _run_ship(slug: str, profile: dict, by: str, cleanup: bool, codex_review: bo
             "seconds": max(1, finished - started),
             "error": "",
             **({"note": note} if note else {}),
-        }))
+        }), defer_archive=defer_archive)
         _append_team_event(slug, "deploy_succeeded", sha=sha[:10], by=by, cleanup=cleanup)
         logger.info("halowebui-teams: %s shipped %s (%s)", slug, sha[:10], profile["label"])
     except projects.ProjectError as exc:
-        _fail_ship(slug, started, exc.message, by)
+        _fail_ship(slug, started, exc.message, by, defer_archive=defer_archive)
     except Exception as exc:  # noqa: BLE001
         logger.warning("halowebui-teams: ship failed for %s", slug, exc_info=True)
-        _fail_ship(slug, started, f"发布异常：{type(exc).__name__}: {redact(exc, 240)}", by)
+        _fail_ship(slug, started, f"发布异常：{type(exc).__name__}: {redact(exc, 240)}", by, defer_archive=defer_archive)
     finally:
         try:
             _mark_attempt(slug)
-            _notify_finished(slug)
-            if need_gateway_restart:
-                _schedule_gateway_restart()
+            _notify_finished(slug, defer_archive=defer_archive)
+            if (need_gateway_restart and not _schedule_gateway_restart() and defer_archive
+                    and vault_archive.release_deferred(slug)):
+                vault_archive.run_bounded(slug)
         finally:
             with _lock:
                 _inflight.discard(slug)
@@ -716,7 +723,7 @@ def _mark_attempt(slug: str) -> None:
     _update_deploy(slug, lambda d: d.update({"auto_key": key}))
 
 
-def _fail_ship(slug: str, started: int, message: str, by: str) -> None:
+def _fail_ship(slug: str, started: int, message: str, by: str, *, defer_archive: bool = False) -> None:
     finished = now()
     current_step = ""
 
@@ -735,7 +742,7 @@ def _fail_ship(slug: str, started: int, message: str, by: str) -> None:
             "error": redact(message, 600),
         })
 
-    _update_deploy(slug, apply)
+    _update_deploy(slug, apply, defer_archive=defer_archive)
     _append_team_event(slug, "deploy_failed", step=current_step, error=redact(message, 200), by=by)
     logger.warning("halowebui-teams: ship of %s failed at %s: %s", slug, current_step, message)
 

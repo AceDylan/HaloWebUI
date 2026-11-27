@@ -55,6 +55,12 @@ def test_extract_json_tolerates_fences_and_chatter(pkg):
     assert pkg.plan.extract_json("not json") is None
 
 
+def test_extract_json_preserves_fences_inside_json_strings(pkg):
+    value = {"content": "```bash\nprintf '{ready}'\n```", "action": "update"}
+    raw = "草稿\n```json\n" + json.dumps(value) + "\n```\n末尾还有一个 } 符号"
+    assert pkg.plan.extract_json(raw) == value
+
+
 def test_propose_plan_retries_once_with_the_validation_errors(pkg, monkeypatch, plan_dict):
     replies = iter([json.dumps({"members": [], "tasks": []}), json.dumps(plan_dict)])
     seen = []

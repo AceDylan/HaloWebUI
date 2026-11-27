@@ -244,6 +244,10 @@ The result appears in the workbench, conclusion and completion or deployment
 notices. Run receipts and backups live in the worktree's `.halo/` and survive
 branch cleanup.
 
+Long evergreen notes are updated with exact `edits`. Notes with masked credentials cannot be rewritten automatically.
+Changes to the plugin defer archiving until the gateway reloads, followed by an archive notice on Telegram or QQ.
+Bump `ARCHIVE_LOGIC` when changing archive decisions so recent skips and failures are reconsidered once.
+
 Set `HALO_TEAMS_AUTO_VAULT_ARCHIVE=0` in the Hermes gateway environment to turn it
 off. The conclusion page's manual 「存入知识库」 action saves to HaloWebUI's
 「协作结论」 knowledge base.

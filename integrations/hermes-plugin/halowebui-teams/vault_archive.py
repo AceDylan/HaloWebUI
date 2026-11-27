@@ -10,6 +10,7 @@ import subprocess
 import threading
 import time
 import unicodedata
+import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path, PurePosixPath
 from weakref import WeakValueDictionary
@@ -17,11 +18,21 @@ from weakref import WeakValueDictionary
 from .common import TEAM_EVENT_TASK, append_event, board_conn, logger, now, read_team, redact, update_team
 from .workflow import NOTES_MARK, READONLY_MARK, user_goal
 
-ARCHIVE_WAIT = 90
+ARCHIVE_WAIT = 150
 ARCHIVE_STALE = 300
 ARCHIVE_WINDOW = 6 * 3600
 ARCHIVE_BASELINE_AGE = 600
+ARCHIVE_LOGIC = 2
+NOTE_FULL_LIMIT = 40000
+NOTES_FULL_BUDGET = 60000
+FULL_REWRITE_LIMIT = 12000
+TIMELINE_TAIL_CHARS = 8000
+MAX_SHOW_NOTES = 4
+MAX_SHOW_CANDIDATES = 8
+MAX_DRAFT_ATTEMPTS = 3
+MAX_EDITS = 20
 DEPLOY_TERMINAL = ("succeeded", "failed", "skipped")
+_PROCESS_TOKEN = uuid.uuid4().hex
 _ACTIVE = ("pending", "running")
 _ACTION_LABELS = {"create": "新建", "update": "更新", "append": "追加"}
 _RECEIPTS = "obsidian-archive.jsonl"
@@ -45,6 +56,14 @@ _MANUAL = re.compile(
 _HIT = re.compile(r"^\d+\. (.+?\.md)  \[sha256 [0-9a-f]{12}\s.*?\](.*)$", re.M)
 _SHOW = re.compile(r"^vault-archive: path=(.+) sha256=([0-9a-f]{64}) bytes=\d+$")
 _DATE = re.compile(r"20\d\d[-./年]\d{1,2}[-./月]\d{1,2}日?")
+_FRONTMATTER = re.compile(r"\A---\n(.*?\n)(?:---|\.\.\.)[ \t]*(?:\n|$)", re.S)
+_REASON_PREFIX = re.compile(
+    r"^(?:(?:📚|⚠️)\s*)?Obsidian[:：]\s*"
+    r"(?:未写入(?:知识库)?|已(?:新建|更新|追加|归档)|自动归档失败)[。，,：:\s]*"
+)
+_REASON_RULE = "reason 是不超过 60 字的中文短语，不带「Obsidian：」「未写入」等前缀。"
+_DEPLOY_EVIDENCE = ("deployment.status 为 succeeded 时，以上线后的提交、CI 和核实结果为准，"
+                    "覆盖结论里部署前的「尚未上线」。")
 _jobs: dict[str, threading.Thread] = {}
 _jobs_lock = threading.Lock()
 _workspace_locks = WeakValueDictionary()
@@ -131,10 +150,51 @@ def is_eligible(team: dict) -> bool:
             and script_path().is_file() and os.access(script_path(), os.X_OK))
 
 
-def pre_mark(team: dict, *, waiting: bool | None = None) -> dict | None:
+def pre_mark(team: dict, *, waiting: bool | None = None, defer_archive: bool = False) -> dict | None:
     if not is_eligible(team) or (waits_for_deploy(team) if waiting is None else waiting):
         return None
-    return {"status": "pending", "started_at": now(), "version_key": version_key(team)}
+    marker = {"status": "pending", "started_at": now(), "version_key": version_key(team)}
+    if defer_archive:
+        marker.update(after_reload=_PROCESS_TOKEN, deferred_at=marker["started_at"])
+    return marker
+
+
+def _pending_entry(team: dict) -> dict | None:
+    entry = (team.get("conclusion") or {}).get("vault_archive") or {}
+    if entry.get("status") == "pending" and entry.get("version_key") == version_key(team):
+        return entry
+    return None
+
+
+def defer_to_reload(slug: str) -> bool:
+    deferred = False
+
+    def apply(team: dict) -> None:
+        nonlocal deferred
+        entry = _pending_entry(team)
+        if entry and is_eligible(team):
+            if entry.get("after_reload") != _PROCESS_TOKEN:
+                entry.update(after_reload=_PROCESS_TOKEN, deferred_at=now())
+            deferred = True
+
+    update_team(slug, apply)
+    return deferred
+
+
+def release_deferred(slug: str) -> bool:
+    released = False
+
+    def apply(team: dict) -> None:
+        nonlocal released
+        entry = _pending_entry(team)
+        if entry and entry.get("after_reload") == _PROCESS_TOKEN:
+            entry.pop("after_reload")
+            entry.pop("deferred_at", None)
+            entry["announce"] = True  # the deployment notice already promised a follow-up
+            released = True
+
+    update_team(slug, apply)
+    return released
 
 
 def is_active(entry: dict | None) -> bool:
@@ -142,13 +202,21 @@ def is_active(entry: dict | None) -> bool:
                 and now() - int(entry.get("started_at") or 0) < ARCHIVE_WAIT)
 
 
+def _clean_reason(reason: str) -> str:
+    reason = reason.strip()
+    while match := _REASON_PREFIX.match(reason):
+        reason = reason[match.end():]
+    return reason.strip()
+
+
 def public_state(entry: dict | None) -> dict | None:
     if not isinstance(entry, dict) or entry.get("status") not in (*_ACTIVE, "saved", "skipped", "failed"):
         return None
     out = {"status": entry["status"]}
     for key, limit in (("action", 12), ("path", 300), ("reason", 300), ("error", 300), ("model", 100)):
-        if isinstance(entry.get(key), str) and entry[key]:
-            out[key] = redact(entry[key], limit)
+        value = entry.get(key)
+        if isinstance(value, str) and value:
+            out[key] = redact(_clean_reason(value) if key == "reason" else value, limit)
     for key in ("started_at", "at"):
         if isinstance(entry.get(key), int):
             out[key] = entry[key]
@@ -203,7 +271,7 @@ def _materials(slug: str, team: dict, run_dir: Path) -> dict:
                    "result": redact(row["result"], 900, one_line=False)} for row in rows[:30]],
         "receipts": {name: _read_evidence(run_dir / name, 4000) for name in ("dev-receipt.md", "review.md")},
         "deployment": {
-            **{k: dep.get(k) for k in ("status", "sha", "base_branch", "ci_url", "profile_label",
+            **{k: dep.get(k) for k in ("status", "sha", "base_branch", "ci_url", "ci_run_id", "profile_label", "note",
                                       "touched_files", "steps", "error")},
             "log_tail": redact(dep.get("log"), 0, one_line=False)[-2500:],
         } if dep else None,
@@ -231,6 +299,52 @@ def _topic(raw: str) -> str:
 
 def _strings(value: object, limit: int) -> list[str]:
     return [i.strip() for i in value[:limit] if isinstance(i, str) and i.strip()] if isinstance(value, list) else []
+
+
+def _note_outline(body: str) -> str:
+    return "\n".join(re.findall(r"^#{1,6}[ \t]+[^\n]+", body, re.M))[:3000]
+
+
+def _apply_edits(body: str, edits: list) -> str:
+    if len(edits) > MAX_EDITS:
+        raise ArchiveError(f"edits 最多允许 {MAX_EDITS} 条")
+    original_chars = len(body)
+    for index, edit in enumerate(edits, 1):
+        if not isinstance(edit, dict) or not isinstance(edit.get("old"), str) or not isinstance(edit.get("new"), str):
+            raise ArchiveError(f"第 {index} 条 edit 的 old 和 new 必须是字符串")
+        old, new = edit["old"], edit["new"]
+        label = f"第 {index} 条 edit（old: {old[:60]!r}）"
+        if not old:
+            raise ArchiveError(f"{label}：old 不能为空")
+        if old == new:
+            raise ArchiveError(f"{label}：无变化")
+        start = body.find(old)
+        if start < 0:
+            raise ArchiveError(f"{label}：匹配 0 处，请逐字复制原文")
+        if body.find(old, start + 1) >= 0:
+            raise ArchiveError(f"{label}：匹配多处，请带上唯一的上下文")
+        body = body[:start] + new + body[start + len(old):]
+    if original_chars > 2000 and len(body) * 2 < original_chars:
+        raise ArchiveError("edits 使笔记缩减超过 50%")
+    return body
+
+
+def _today() -> str:
+    return datetime.now(timezone(timedelta(hours=8))).date().isoformat()
+
+
+def _set_updated(body: str) -> str:
+    frontmatter = _FRONTMATTER.match(body)
+    if not frontmatter:
+        raise ArchiveError("edits 更新需要保留笔记的 frontmatter")
+    fields = frontmatter[1]
+    updated = f"updated: {_today()}\n"
+    fields, count = re.subn(r"^updated[ \t]*:[^\n]*\n", updated, fields, flags=re.M | re.I)
+    if not count:
+        created = re.search(r"^created[ \t]*:[^\n]*\n", fields, re.M | re.I)
+        pos = created.end() if created else len(fields)
+        fields = fields[:pos] + updated + fields[pos:]
+    return body[:frontmatter.start(1)] + fields + body[frontmatter.end(1):]
 
 
 def _remaining(deadline: float) -> float:
@@ -355,12 +469,21 @@ class Archive:
         heading, sep, body = rest.partition(f"--- 以下为全文；update / append 时用 --expect-sha {match[2] if match else ''} ---\n")
         if not match or match[1] != path or not sep:
             raise ArchiveError("无法解析笔记版本")
-        frontmatter = re.match(r"\A---\r?\n(.*?)\r?\n---(?:\r?\n|$)", body, re.S)
-        timeline = bool(frontmatter and re.search(r"^maintenance:\s*timeline[ \t]*$", frontmatter[1], re.M))
-        truncated = len(body) > 12000
+        frontmatter = _FRONTMATTER.match(body)
+        timeline = bool(frontmatter and re.search(r"^maintenance:[ \t]*timeline[ \t]*$", frontmatter[1], re.M))
+        full_chars = sum(note["chars"] for key, note in self.notes.items() if key != path and not note["truncated"])
+        truncated = timeline or len(body) > NOTE_FULL_LIMIT or full_chars + len(body) > NOTES_FULL_BUDGET
+        view = body
         if truncated:
-            body = body[:8000] + "\n\n［正文截断，不可直接覆盖全文］\n\n" + body[-3900:]
-        self.notes[path] = {"path": path, "sha256": match[2], "notice": heading.strip(), "body": body,
+            prefix = frontmatter[0] if frontmatter else ""
+            text = body[len(prefix):]
+            if timeline:
+                view = prefix + text[-TIMELINE_TAIL_CHARS:]
+            else:
+                view = (f"{prefix}\n［标题大纲］\n{_note_outline(text)}\n\n［正文开头］\n{text[:6000]}"
+                        f"\n\n［正文末尾］\n{text[-3000:]}")
+        self.notes[path] = {"path": path, "sha256": match[2], "notice": heading.strip(), "body": view,
+                            "full_body": body, "chars": len(body), "masked": "疑似凭据" in heading,
                             "timeline": timeline, "truncated": truncated}
 
     def draft(self, decision: dict, *, feedback: str = "", previous: dict | None = None) -> dict:
@@ -369,26 +492,30 @@ class Archive:
                              and path.name not in {"模板", "附件"}) if self.root and self.root.is_dir() else []
         return self.ask(
             "从证据起草归档，缺少新的可复用知识就 skip。按规则优先整合旧笔记，"
-            "不能把有截断的正文作为完整 update；只有已有 maintenance: timeline 可以 append。"
-            "返回 {action: skip|create|update|append, reason, path, expect_sha, distinct_from, content}。"
-            "修改旧笔记时只用已 show 的路径和精确 sha256。distinct_from 仅用于确实不同的已读主题。",
+            "只有已有 maintenance: timeline 可以 append。masked 的笔记不能 update，请说明需要人工整合。"
+            "返回 {action: skip|create|update|append, reason, path, expect_sha, distinct_from, edits, content}。"
+            "修改旧笔记只用已 show 的路径和 sha256（全量或至少 12 位前缀）。"
+            "update 优先用 edits: [{old, new}]（最多 20 条，按顺序执行）。old 从笔记逐字复制，"
+            "在该步原文中必须只出现一次；必须改到「验证」段，加入本次证据；代码会设置 updated。"
+            "只有未截断且不超过 12000 字的笔记可以用 content 整篇 update；create、append 用 content。"
+            "distinct_from 仅用于确实不同的已读主题。" + _REASON_RULE + _DEPLOY_EVIDENCE,
             {"materials": self.materials, "decision": decision, "search_hits": self.hits,
-             "notes": list(self.notes.values())[:8], "top_directories": directories,
-             "date": datetime.now(timezone(timedelta(hours=8))).date().isoformat(),
+             "notes": [{k: v for k, v in note.items() if k != "full_body"} for note in self.notes.values()],
+             "top_directories": directories, "date": _today(),
              "source": f"hermes run {self.slug}", "feedback": feedback, "previous": previous},
-            # A whole note: the lead model writes ~75 chars/s (gpt-6.2-sol, 2026-11-27), 30 s cut ~2,000.
-            per_call=60,
+            per_call=75,
         )
 
     def write(self, draft: dict, manual: str) -> subprocess.CompletedProcess:
         action = draft.get("action")
         self.path = self.path_for(draft.get("path"))
         body = draft.get("content")
-        if not isinstance(action, str) or action not in _ACTION_LABELS or not self.path or not isinstance(body, str) or not body.strip():
-            raise ArchiveError("主控模型未提供有效的归档路径或正文")
-        if len(body.encode("utf-8")) > 512 * 1024:
-            raise ArchiveError("归档草稿过大")
+        edits = draft.get("edits") if action == "update" else None
+        if not isinstance(action, str) or action not in _ACTION_LABELS or not self.path:
+            raise ArchiveError("主控模型未提供有效的归档操作或路径")
         args = [self.path, "--from", "-"]
+        if not edits and (not isinstance(body, str) or not body.strip()):
+            return subprocess.CompletedProcess(args, 4, "", "主控模型未提供归档正文或有效的 edits")
         if action == "create":
             stem = _DATE.sub("", PurePosixPath(self.path).stem).strip(" （）()-_")
             topic = _topic(stem)
@@ -401,17 +528,31 @@ class Archive:
                         self.show(path)
                     return subprocess.CompletedProcess(args, 3, "", "补充检索发现相关笔记，请核对后决定整合或新建")
             for raw in _strings(draft.get("distinct_from"), 3):
-                if raw in self.notes:
-                    args.extend(("--distinct-from", raw))
+                path = self.path_for(raw)
+                if path in self.notes:
+                    args.extend(("--distinct-from", path))
         else:
             note = self.notes.get(self.path) or {}
-            if not note or note["sha256"] != draft.get("expect_sha"):
+            sha = draft.get("expect_sha")
+            if not note or not isinstance(sha, str) or len(sha) < 12 or not note["sha256"].startswith(sha):
                 return subprocess.CompletedProcess(args, 3, "", "待更新笔记需要先 show 并使用准确的 sha256")
             if action == "append" and not note["timeline"]:
                 return subprocess.CompletedProcess(args, 4, "", "仅已有 maintenance: timeline 的笔记允许追加")
-            if action == "update" and note["truncated"]:
-                return subprocess.CompletedProcess(args, 4, "", "笔记正文已截断，无法安全整合更新")
+            if action == "update":
+                if note["masked"]:
+                    return subprocess.CompletedProcess(args, 4, "", "该笔记含已遮蔽的凭据，自动归档不能改写；请 skip 并说明需人工整合")
+                if edits:
+                    if not isinstance(edits, list):
+                        return subprocess.CompletedProcess(args, 4, "", "edits 必须是包含 old、new 的数组")
+                    try:
+                        body = _set_updated(_apply_edits(note["full_body"], edits))
+                    except ArchiveError as exc:
+                        return subprocess.CompletedProcess(args, 4, "", str(exc))
+                elif note["truncated"] or note["chars"] > FULL_REWRITE_LIMIT:
+                    return subprocess.CompletedProcess(args, 4, "", "笔记较长或正文已截断，请改用 edits，old 从原文逐字复制")
             args.extend(("--expect-sha", note["sha256"]))
+        if len(body.encode("utf-8")) > 512 * 1024:
+            raise ArchiveError("归档草稿过大")
         if manual:
             args.extend(("--manual", manual))
         for attempt in range(2):
@@ -430,8 +571,9 @@ class Archive:
             "判断该任务是否留下值得记入 Obsidian 的新且可复用的证据。"
             "以实际验收和发布结果为准，简单问答、例行检查、只读审查、未验证猜测、重复知识或用户禁止时跳过。"
             "返回 {should_archive: true|false, reason, kind, search_queries: [最多三组主题关键词], "
-            "candidate_paths: [已知笔记路径], manual_request: 原目标里的明确写笔记要求或空字符串}。",
-            self.materials, retry_json=True,
+            "candidate_paths: [已知笔记路径], manual_request: 原目标里的明确写笔记要求或空字符串}。"
+            + _REASON_RULE + _DEPLOY_EVIDENCE,
+            self.materials, retry_json=True, per_call=40,
         )
         if decision.get("should_archive") is False:
             return {"status": "skipped", "reason": decision.get("reason") or "主控模型判断无需归档"}
@@ -440,8 +582,10 @@ class Archive:
         for query in dict.fromkeys(_strings(decision.get("search_queries"), 3)):
             self.search(query)
         paths = [self.path_for(path) for path in _strings(decision.get("candidate_paths"), 12)]
-        for path in list(dict.fromkeys([*(p for p in paths if p), *self.hits]))[:3]:
+        for path in list(dict.fromkeys([*(p for p in paths if p), *self.hits]))[:MAX_SHOW_CANDIDATES]:
             self.show(path)
+            if len(self.notes) >= MAX_SHOW_NOTES:
+                break
         original_goal = self.materials["goal"]
         requested = decision.get("manual_request")
         manual = (redact(requested, 180) if isinstance(requested, str) and requested in original_goal
@@ -449,18 +593,18 @@ class Archive:
         if len(manual) < 4:
             manual = ""
         draft = self.draft(decision)
-        for attempt in range(2):
+        for attempt in range(MAX_DRAFT_ATTEMPTS):
             if draft.get("action") == "skip":
                 return {"status": "skipped", "reason": draft.get("reason") or "没有需要补充的知识"}
             result = self.write(draft, manual)
             if result.returncode == 0:
                 return _saved_output(result.stdout, draft["action"], self.path, draft.get("reason"))
             error = redact(result.stderr or f"归档工具退出码 {result.returncode}", 500)
-            if attempt or result.returncode not in (3, 4):
+            if attempt == MAX_DRAFT_ATTEMPTS - 1 or result.returncode not in (3, 4):
                 raise ArchiveError(error)
             if result.returncode == 3:
-                matches = re.search(r"同主题笔记已存在：(.+?)；", error)
-                paths = [self.path] + (re.findall(r"(.+?\.md)(?:、|$)", matches[1]) if matches else [])
+                matches = re.search(r"同主题笔记已存在：(.+?)；", result.stderr or "")
+                paths = [self.path] + (matches[1].split("、") if matches else [])
                 for path in list(dict.fromkeys(filter(None, map(self.path_for, paths))))[:3]:
                     self.show(path)
             previous = draft if result.returncode == 3 else {k: v for k, v in draft.items() if k != "content"}
@@ -511,7 +655,7 @@ def refresh_reply(team: dict) -> None:
 
 def _finish(slug: str, marker: dict, outcome: dict) -> None:
     changed = False
-    final = {**marker, **(public_state({**outcome, "at": now()}) or {}),
+    final = {**marker, **(public_state({**outcome, "at": now()}) or {}), "logic": ARCHIVE_LOGIC,
              **{k: outcome[k] for k in ("sha_after", "backup") if isinstance(outcome.get(k), str)}}
 
     def apply(team: dict) -> None:
@@ -534,6 +678,13 @@ def _finish(slug: str, marker: dict, outcome: dict) -> None:
     finally:
         if team.get("reported") == str((team.get("conclusion") or {}).get("generated_at")):
             refresh_reply(team)
+        if marker.get("announce"):
+            from . import notify
+
+            try:
+                notify.archive_notice(slug, team)
+            except Exception as exc:
+                logger.info("halowebui-teams: archive notice failed for %s (%s)", slug, type(exc).__name__)
 
 
 def _run_job(slug: str, timeout: float, force: bool) -> None:
@@ -560,9 +711,14 @@ def _run_job(slug: str, timeout: float, force: bool) -> None:
         def claim(rec: dict) -> None:
             if version_key(rec) != version or not _should_start(rec, force=force):
                 return
+            current = rec["conclusion"].get("vault_archive") or {}
             marker.update(status="running", version_key=version, started_at=(
                 previous.get("started_at") if same and is_active(previous) else now()),
                 attempt_at=now(), receipt_offset=offset)
+            if current.get("version_key") == version and (
+                current.get("announce") or current.get("after_reload") or _needs_rejudge(rec, current)
+            ):
+                marker["announce"] = True
             rec["conclusion"]["vault_archive"] = marker
 
         update_team(slug, claim)
@@ -591,9 +747,9 @@ def _run_job(slug: str, timeout: float, force: bool) -> None:
     except Exception as exc:
         error = str(exc) if isinstance(exc, ArchiveError) else (
             "归档工具超时" if isinstance(exc, subprocess.TimeoutExpired) else f"归档出错：{type(exc).__name__}")
-        outcome = (_recover(receipt, marker.get("receipt_offset"), slug) if receipt else None) or {
-            "status": "failed", "error": redact(error, 300),
-        }
+        with workspace_lock(slug):
+            recovered = _recover(receipt, marker.get("receipt_offset"), slug) if receipt else None
+        outcome = recovered or {"status": "failed", "error": redact(error, 300)}
         if archive and archive.path and outcome["status"] == "failed":
             outcome["path"] = archive.path
         logger.info("halowebui-teams: archive attempt for %s ended with %s", slug, type(exc).__name__)
@@ -610,6 +766,11 @@ def _run_job(slug: str, timeout: float, force: bool) -> None:
                 _jobs.pop(slug, None)
 
 
+def _needs_rejudge(team: dict, current: dict) -> bool:
+    return (current.get("status") in ("skipped", "failed")
+            and current.get("logic") != ARCHIVE_LOGIC and recent_completion(team))
+
+
 def _should_start(team: dict, *, force: bool = False) -> bool:
     entry = team.get("conclusion") or {}
     if (not is_eligible(team) or _deployment(team).get("status") == "running"
@@ -619,6 +780,9 @@ def _should_start(team: dict, *, force: bool = False) -> bool:
     if current.get("version_key") != version_key(team):
         return True
     if current.get("status") == "pending":
+        return (current.get("after_reload") != _PROCESS_TOKEN
+                or now() - int(current.get("deferred_at") or 0) >= ARCHIVE_STALE)
+    if _needs_rejudge(team, current):
         return True
     return (current.get("status") == "running"
             and (force or now() - int(current.get("attempt_at") or current.get("started_at") or 0) >= ARCHIVE_STALE))

@@ -156,6 +156,14 @@ def extract_json(raw: str) -> Optional[dict]:
     """The first JSON object in a model reply (code fences and chatter tolerated)."""
     if not raw:
         return None
+    decoder = json.JSONDecoder()
+    for match in re.finditer(r"\{", raw):
+        try:
+            value, _ = decoder.raw_decode(raw, match.start())
+        except ValueError:
+            continue
+        if isinstance(value, dict):
+            return value
     candidates = [m.group(1) for m in _FENCE_RE.finditer(raw)] + [raw]
     for text in candidates:
         start, end = text.find("{"), text.rfind("}")

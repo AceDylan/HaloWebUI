@@ -361,9 +361,12 @@ def deploy_message(team: dict) -> tuple[str, list]:
                  + (f" · 用时 {took}" if took else ""),
                  esc(clip(dep.get("error") or "原因未知，请到协作台「变更」查看日志", 800))]
         buttons.append([("🔁 重试推送部署", f"cb:dp:{team['team_id']}")])
-    archive = vault_archive.summary_line((team.get("conclusion") or {}).get("vault_archive"), html_mode=True)
-    if archive:
-        lines.append(archive)
+    archive = (team.get("conclusion") or {}).get("vault_archive") or {}
+    summary = vault_archive.summary_line(archive, html_mode=True)
+    if summary:
+        lines.append(summary)
+    elif archive.get("status") == "pending" and archive.get("after_reload"):
+        lines.append("📚 Obsidian：网关重启加载新插件后自动归档，结果另行通知")
     row = []
     if dep.get("ci_url"):
         row.append(("🔗 查看 CI", "url:" + str(dep["ci_url"])))
@@ -375,24 +378,42 @@ def deploy_message(team: dict) -> tuple[str, list]:
 
 def deploy_notice(slug: str, team: dict) -> Optional[int]:
     """Send a Telegram (or QQ, when started from QQ) notice once the deploy pipeline reaches a terminal state."""
-    from . import tg as telegram
-
     dep = (team.get("project") or {}).get("deploy")
     if not isinstance(dep, dict) or dep.get("status") not in ("succeeded", "failed", "skipped"):
         return None
     key = f"deploy:{dep.get('status')}:{dep.get('finished_at') or dep.get('started_at') or 0}"
-    if key in set(team.get("notified") or []):
+    return _send_team_notice(slug, team, key, deploy_message(team), ci_url=dep.get("ci_url"))
+
+
+def archive_notice(slug: str, team: dict) -> Optional[int]:
+    from . import vault_archive
+
+    entry = (team.get("conclusion") or {}).get("vault_archive") or {}
+    summary = vault_archive.summary_line(entry, html_mode=True)
+    version = entry.get("version_key")
+    if not summary or not version:
         return None
+    title = esc(clip(team.get("title"), 60))
+    text = f"📚 <b>{title}</b> · {summary.removeprefix('📚 ')}"
+    return _send_team_notice(slug, team, f"archive:{version}", (text, []))
+
+
+def _send_team_notice(slug: str, team: dict, key: str, message: tuple[str, list], *,
+                      ci_url: str | None = None) -> Optional[int]:
+    from . import tg as telegram
+
+    if key in ((read_team(slug) or team).get("notified") or []):
+        return None
+    text, buttons = message
     origin = team.get("origin") if isinstance(team.get("origin"), dict) else {}
     if _own_qq_origin(origin, team.get("owner")):
         from . import remote
 
         if not remote.ready("qqbot"):
             return None
-        text, _buttons = deploy_message(team)
         lines = [remote.html_text(text)]
-        if dep.get("ci_url"):
-            lines.append(f"🔗 CI：{dep['ci_url']}")
+        if ci_url:
+            lines.append(f"🔗 CI：{ci_url}")
         url = link.team_url(team["team_id"])
         if url:
             lines.append(f"🌐 协作台：{url}")
@@ -411,7 +432,6 @@ def deploy_notice(slug: str, team: dict) -> Optional[int]:
     target = target_for(team)
     if target is None:
         return None
-    text, buttons = deploy_message(team)
     message_id = telegram.send(target["chat_id"], text, buttons, thread_id=target.get("thread_id"))
     if message_id is not None:
         _remember(slug, [key])

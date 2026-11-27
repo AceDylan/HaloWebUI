@@ -260,5 +260,5 @@ def test_card_text_includes_workflow_badge_when_not_auto(env):
 
     t_work = client.post("/api/v1/teams/", json={"goal": "HaloWebUI 加个开关", "workflow": "work"}).json()
     _, chain_work = _messages(t_work["chat_id"], "tc-wf")
-    assert "已交给工作流" in chain_work[1]["content"] and "Claude 审阅并修复问题" in chain_work[1]["content"]
+    assert "已交给工作流" in chain_work[1]["content"] and "审阅并修复问题" in chain_work[1]["content"]
     assert "负责人在制定计划" not in chain_work[1]["content"]

@@ -384,3 +384,23 @@ def test_a_runner_question_on_an_open_run_is_not_diagnosed(pkg, lead):
     assert lead.mod.diagnosable({"sub_status": "waiting_user", "status": "blocked"}) is True
     assert lead.mod.diagnosable({"sub_status": "failed", "status": "blocked"}) is True
     assert lead.mod.diagnosable({"sub_status": "stopped", "status": "blocked"}) is False
+
+
+def test_a_task_the_lead_adds_for_a_work_member_keeps_its_configured_chain(pkg, team_id, lead, monkeypatch):
+    from halowebui_teams import workflow
+
+    cfg = pkg.runners.work_config()
+    cfg["steps"]["dev"] = {"runner": "codex", "fallback": ["officlaude"]}
+    monkeypatch.setattr(pkg.runners, "work_config", lambda: cfg)
+    created = pkg.teams.create_team(team_id, workflow.build_pipeline_plan("修个 bug", workflow="work"), owner=OWNER)
+    slug = created["board"]
+    lead.fake.change.append({
+        "reply": "补一个开发任务。",
+        "add_tasks": [{"key": "N1", "title": "补测试", "description": "补单测", "member": "codex-dev",
+                       "depends_on": ["T2"]}],
+    })
+    entry = lead.mod.request_change(team_id, "再补个单测", owner=OWNER, actor="Ace")
+    lead.mod.apply_change(team_id, entry["id"], owner=OWNER, actor="Ace")
+    team = pkg.common.read_team(slug)
+    added = next(e for e in team["tasks"].values() if e.get("change"))
+    assert added["member"] == "codex-dev" and added["chain"] == ["codex", "officlaude"]

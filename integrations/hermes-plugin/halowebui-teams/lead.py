@@ -596,7 +596,7 @@ def discard_change(team_id: str, change_id: str, *, owner: Optional[str] = None,
 def apply_change(team_id: str, change_id: str, *, owner: Optional[str] = None, actor: str = "") -> dict:
     """Put a proposal on the board: members, tasks, cancels, edits — checked again against the
     current state first (a task that started since is not touched; the user is told)."""
-    from . import teams
+    from . import runners, teams
     from .plan import assign_runners, task_model
     from .teams import TeamError, _require_team, _task_body, snapshot
 
@@ -686,6 +686,9 @@ def apply_change(team_id: str, change_id: str, *, owner: Optional[str] = None, a
                                   "chosen": member.get("executor") or executor,
                                   "chosen_by": member.get("executor_source") or "auto", "trail": [],
                                   "depends_on": t["depends_on"], "change": change_id}
+                chain = member.get("fallback_chain")
+                if chain and runners.is_auto(member.get("executor_source")):
+                    added[task_id]["chain"] = list(chain)  # the member's /work chain, like create_task's
             update_team(slug, lambda rec: rec.update({"tasks": {**(rec.get("tasks") or {}), **added}, "keys": keys}))
             summary = {"added": [t["key"] for t in proposal.get("add_tasks") or []],
                        "members": [m["name"] for m in new_members],

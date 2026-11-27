@@ -126,8 +126,8 @@
 			title: '工作流',
 			badge: '/work',
 			tone: 'amber',
-			flow: 'AGY 规划 → Codex 开发 → Claude 审阅',
-			hint: '直接开始 · 修完问题自动提交推送部署清理'
+			flow: '规划 → 开发 → 审阅修复',
+			hint: '直接开始 · 设置里可调执行器与规划审阅 · 自动发布'
 		}
 	];
 

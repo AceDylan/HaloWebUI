@@ -310,7 +310,9 @@ describe('workflowLabel', () => {
 		expect(workflowLabel('auto')).toBe('');
 		expect(workflowLabel('dev_lite', 'auto')).toBe('快速研发 · 自动晋升');
 		expect(workflowLabel('dev_pipeline')).toBe('多模型研发');
-		expect(workflowLabel('work')).toBe('工作流 · 规划→开发→审阅→发布');
+		expect(workflowLabel('work')).toBe('工作流 · /work');
+		expect(workflowLabel('work', null, 'deep')).toBe('工作流 · 深度多模型');
+		expect(workflowLabel('work', null, 'fast')).toBe('工作流 · 快速精简');
 		expect(workflowBadgeClass('work')).toContain('amber');
 	});
 });

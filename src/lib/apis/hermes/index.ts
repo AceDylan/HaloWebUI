@@ -735,7 +735,14 @@ export const saveHermesAgyPrefs = (token: string, update: HermesAgyPrefsUpdate) 
 
 export type WorkStepKey = 'plan' | 'plan_review' | 'dev' | 'review';
 export type WorkStepConfig = { runner: string; fallback: string[] };
-export type WorkWorkflowConfig = { plan_review: boolean; steps: Record<WorkStepKey, WorkStepConfig> };
+export type WorkWorkflowConfig = {
+	plan_review: boolean;
+	dual_plan: boolean;
+	plan_approval: boolean;
+	ui_review: boolean;
+	split_dev: boolean;
+	steps: Record<WorkStepKey, WorkStepConfig>;
+};
 export type WorkRunnerOption = {
 	name: string;
 	label: string;

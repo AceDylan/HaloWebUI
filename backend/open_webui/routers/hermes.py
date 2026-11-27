@@ -596,6 +596,10 @@ class HermesWorkStepForm(BaseModel):
 
 class HermesWorkConfigForm(BaseModel):
     plan_review: StrictBool = False
+    dual_plan: StrictBool = False
+    plan_approval: StrictBool = False
+    ui_review: StrictBool = False
+    split_dev: StrictBool = False
     steps: dict[Literal["plan", "plan_review", "dev", "review"], HermesWorkStepForm]
 
 

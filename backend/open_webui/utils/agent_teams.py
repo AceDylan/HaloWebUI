@@ -180,6 +180,7 @@ async def _plan_job(team: AgentTeamModel, target: HermesTarget, feedback: str, p
             "inputs": [i["name"] for i in team_inputs(team)],
             "workflow": meta.get("workflow") or "auto",
             "runner_prefs": meta.get("runner_prefs") or {},
+            **({"work_preset": meta["work_preset"]} if meta.get("work_preset") else {}),
         }
         library = await plan_library(team, access) if access is not None else None
         if library is not None:
@@ -811,6 +812,7 @@ def public_team(team: AgentTeamModel, *, with_plan: bool = True) -> dict:
     data["auto_deploy"] = ships_itself(plan) or bool(meta.get("auto_deploy"))
     data["workflow"] = plan.get("workflow") or meta.get("workflow") or "auto"
     data["promoted_from"] = plan.get("promoted_from") or None
+    data["work_preset"] = plan.get("work_preset") or meta.get("work_preset") or None
     data["runner_prefs"] = plan.get("runner_prefs") or meta.get("runner_prefs") or {}
     # 再来一次 / 定时: the team this one repeats, and whether a schedule started it
     data["repeat_of"] = meta.get("repeat_of")

@@ -15,7 +15,8 @@
 		type Team,
 		type TeamPage,
 		type TeamsMeta,
-		type TeamWorkflow
+		type TeamWorkflow,
+		type WorkPreset
 	} from '$lib/apis/teams';
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import MenuLines from '$lib/components/icons/MenuLines.svelte';
@@ -76,8 +77,9 @@
 	// Where the team works: "" = the project the goal names (if any), "none" = a fresh directory,
 	// a path = that git repository (the team gets its own branch there).
 	let project = '';
-	// Collaboration workflow preset: free-form lead planning vs multi-model dev pipeline.
+	// Collaboration workflow preset: free-form lead planning vs fast dev vs unified /work.
 	let workflow: TeamWorkflow = 'auto';
+	let workPreset: WorkPreset = '';
 	// Optional explicit runner overrides per engine family (empty = auto family order).
 	let claudePref = '';
 	let agyPref = '';
@@ -114,21 +116,23 @@
 			hint: '跳过双方案与设计稿 · 审查直合自动部署'
 		},
 		{
-			id: 'dev_pipeline',
-			title: '多模型研发',
-			badge: '全流程',
-			tone: 'violet',
-			flow: '摸底 → Claude⇄AGY 拍板 → 开发',
-			hint: '双方案拍板 · 交互审稿 · 2 轮审查核实上线'
-		},
-		{
 			id: 'work',
 			title: '工作流',
-			badge: '/work',
+			badge: '/work · 含多模型',
 			tone: 'amber',
-			flow: '规划 → 开发 → 审阅修复',
-			hint: '直接开始 · 设置里可调执行器与规划审阅 · 自动发布'
+			flow: '规划 → 开发 → 审阅 · 可切深度多模型',
+			hint: '直接开始 · 复用设置执行器链 · 支持默认 / 深度多模型 / 快速三档'
 		}
+	];
+
+	const WORK_PRESET_OPTIONS: { id: WorkPreset; label: string; hint: string }[] = [
+		{ id: '', label: '默认设置', hint: '沿用「设置 → Hermes 模型」中配置的 /work 模块与执行器链' },
+		{
+			id: 'deep',
+			label: '深度多模型',
+			hint: '双方案对比拍板 · UI 交互审稿 · 前后端分拆 · Codex 2 轮独立审查'
+		},
+		{ id: 'fast', label: '快速精简', hint: '规划 → 全栈开发 → 审阅修复 → 自动发布（3 步直达）' }
 	];
 
 	// 「直接开始」: the plan starts as soon as it is ready (remembered on this device).
@@ -434,7 +438,8 @@
 				preferred ? [preferred.ref] : [],
 				false,
 				workflow,
-				runnerPrefs
+				runnerPrefs,
+				workflow === 'work' ? workPreset : ''
 			);
 			// its chat is in the history from now on (the socket says so too; this covers a lost event)
 			chatListRefreshRevision.update((n) => n + 1);
@@ -576,7 +581,7 @@
 
 			<!-- starcore workflow mode selector -->
 			<section class="tm-rise mb-3" style="--i:0.6" aria-label="协作流程模式" data-team-workflow={workflow}>
-				<div class="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
+				<div class="grid grid-cols-1 gap-2 sm:grid-cols-3">
 					{#each WORKFLOW_MODES as mode (mode.id)}
 						{@const active = workflow === mode.id}
 						<button
@@ -964,6 +969,35 @@
 					</div>
 				</div>
 			</form>
+			{#if workflow === 'work'}
+				<div
+					class="tm-card-quiet mt-2 flex flex-wrap items-center gap-x-2.5 gap-y-2 px-3.5 py-2.5 text-xs"
+					transition:slide={{ duration: 160 }}
+					data-work-preset-bar
+					data-selected-work-preset={workPreset}
+				>
+					<span class="font-medium text-gray-700 dark:text-gray-200">工作流档位</span>
+					<div class="flex flex-wrap items-center gap-1.5" role="radiogroup" aria-label="工作流档位">
+						{#each WORK_PRESET_OPTIONS as option (option.id)}
+							{@const picked = workPreset === option.id}
+							<button
+								type="button"
+								role="radio"
+								aria-checked={picked}
+								class="pill rounded-full px-2.5 py-0.5 text-xs {picked
+									? 'pill-on'
+									: 'text-gray-600 dark:text-gray-300'}"
+								title={option.hint}
+								data-work-preset={option.id || 'default'}
+								on:click={() => (workPreset = option.id)}>{option.label}</button
+							>
+						{/each}
+					</div>
+					<span class="text-[11px] text-gray-500 dark:text-gray-400">
+						{WORK_PRESET_OPTIONS.find((item) => item.id === workPreset)?.hint}
+					</span>
+				</div>
+			{/if}
 			{#if workflow !== 'auto' || showEnginePrefs || claudePref || agyPref}
 				<div
 					class="tm-card-quiet mt-2 flex flex-wrap items-center gap-x-3 gap-y-2 px-3.5 py-2.5 text-xs"

@@ -93,8 +93,10 @@ class CreateTeamForm(BaseModel):
     # 「自动推送部署」: once a project team finishes and passes acceptance, merge → push → deploy → clean up.
     auto_deploy: bool = False
     # Workflow template: "auto" (free-form) | "dev_pipeline" (reference multi-model) | "dev_lite" |
-    # "work" (``/work``: AGY plans → Codex builds → Claude reviews and fixes → release).
+    # "work" (``/work``: configurable modular pipeline with optional multi-model stages).
     workflow: Literal["auto", "dev_pipeline", "dev_lite", "work"] = "auto"
+    # Optional one-shot /work preset: "" (use settings) | "deep" (multi-model full) | "fast" (3-step).
+    work_preset: Literal["", "deep", "fast"] = ""
     # Optional per-family explicit runner choices: {"claude": "cchclaude", "agy": "agy"}.
     runner_prefs: dict[str, str] = Field(default_factory=dict)
     # Files uploaded for the team (their ids, /api/v1/files): copied into its workspace's inputs/.
@@ -318,6 +320,7 @@ async def create_team(request: Request, form: CreateTeamForm, user=Depends(get_v
     return public_team(await _start(request, user, goal, target, chat_id=chat_id, lead_model=form.lead_model,
                                     title=title, project=form.project, auto_start=form.auto_start,
                                     auto_deploy=form.auto_deploy, workflow=form.workflow,
+                                    work_preset=form.work_preset,
                                     runner_prefs=form.runner_prefs, inputs=inputs,
                                     assistants=preferred_refs(form.assistants), access=AssistantAccess(request, user)))
 
@@ -325,6 +328,7 @@ async def create_team(request: Request, form: CreateTeamForm, user=Depends(get_v
 async def _start(request: Request, user, goal: str, target, *, chat_id: Optional[str] = None,
                  lead_model: Optional[str] = None, origin: Optional[dict] = None, project: Optional[str] = None,
                  auto_start: bool = False, auto_deploy: bool = False, workflow: str = "auto",
+                 work_preset: str = "",
                  runner_prefs: Optional[dict] = None, inputs: Optional[list] = None,
                  assistants: Optional[list] = None, access=None, on_created=None, title: Optional[str] = None):
     meta: dict = {}
@@ -338,6 +342,8 @@ async def _start(request: Request, user, goal: str, target, *, chat_id: Optional
         meta["auto_deploy"] = True
     if workflow in ("dev_pipeline", "dev_lite", "work"):
         meta["workflow"] = workflow
+    if workflow == "work" and work_preset in ("deep", "fast"):
+        meta["work_preset"] = work_preset
     if isinstance(runner_prefs, dict):
         cleaned = {str(k).strip().lower(): str(v).strip().lower()
                    for k, v in runner_prefs.items()
@@ -936,6 +942,7 @@ class HermesCreateForm(BaseModel):
     auto_deploy: bool = False
     # ``/team 多模型 …`` / ``/team 快速 …`` / ``/work …`` from Telegram / QQ: the same templates as the browser's.
     workflow: Literal["auto", "dev_pipeline", "dev_lite", "work"] = "auto"
+    work_preset: Literal["", "deep", "fast"] = ""
     # ``/work cchclaude …``: the runner the user named for its family (no fallback inside it).
     runner_prefs: dict[str, str] = Field(default_factory=dict)
 
@@ -1033,7 +1040,8 @@ async def hermes_create(request: Request, form: HermesCreateForm, caller=Depends
         raise HTTPException(status_code=400, detail="请写下要协作完成的目标")
     return public_team(await _start(request, user, goal, target, origin=_clean_origin(form.origin),
                                     auto_start=form.auto_start, auto_deploy=form.auto_deploy,
-                                    workflow=form.workflow, runner_prefs=form.runner_prefs,
+                                    workflow=form.workflow, work_preset=form.work_preset,
+                                    runner_prefs=form.runner_prefs,
                                     access=AssistantAccess(request, user)))
 
 

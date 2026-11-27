@@ -23,13 +23,60 @@
 		if (!draft) return;
 		draft = { ...draft, steps: { ...draft.steps, [key]: { ...draft.steps[key], fallback } } };
 	};
+
+	const setFlag = (key: keyof Omit<WorkWorkflowConfig, 'steps'>, value: boolean) => {
+		if (!draft) return;
+		draft = { ...draft, [key]: value };
+	};
+
+	const stepActive = (key: WorkStepKey, config: WorkWorkflowConfig) =>
+		key !== 'plan_review' || config.plan_review || config.dual_plan || config.ui_review;
+
+	const stepRoleNote = (key: WorkStepKey, config: WorkWorkflowConfig): string => {
+		if (key === 'plan') {
+			return config.dual_plan
+				? '当前职责：与主控并行独立出对比方案' + (config.ui_review ? '，并审阅交互与文案' : '')
+				: config.ui_review
+					? '当前职责：读代码出 .halo/plan.md，并审阅交互与文案'
+					: '当前职责：读代码与现状，写出 .halo/plan.md 实现规划';
+		}
+		if (key === 'plan_review') {
+			if (config.dual_plan) {
+				return (
+					'当前职责：主控摸底、独立出方案、对比合成' +
+					(config.plan_approval ? '并请你拍板' : '') +
+					(config.ui_review ? '、出设计稿并定稿' : '')
+				);
+			}
+			if (config.ui_review) {
+				return (
+					'当前职责：' +
+					(config.plan_review ? '审阅定稿规划、' : '') +
+					'出交互设计稿并取舍定稿'
+				);
+			}
+			return config.plan_review
+				? '当前职责：核查并定稿 .halo/plan.md，确认无误后放行开发'
+				: '未启用（开启规划审阅、双方案并行或 UI 交互审稿后生效）';
+		}
+		if (key === 'dev') {
+			return config.split_dev
+				? '当前职责：按派活单完成成块后端代码与单元测试'
+				: '当前职责：按 .halo/plan.md 完成全部前后端改动与测试';
+		}
+		return config.split_dev
+			? '当前职责：读后端改动、写前端联调并跑全套测试（交付前再由 Codex 独立审查 2 轮）'
+			: '当前职责：审阅代码 diff、直接修掉发现的问题并跑测试确认';
+	};
 </script>
 
 <section class="glass-item work-card px-4 py-3" data-section="work" aria-label="/work 工作流">
 	<div class="flex flex-wrap items-start justify-between gap-2">
 		<div>
 			<h2 class="font-semibold">/work 工作流</h2>
-			<p class="work-hint">为网页、Telegram 和 QQ 的 /work 设置首选执行器与兜底顺序。</p>
+			<p class="work-hint">
+				统一配置网页、Telegram、QQ 与协作台的 /work：自由组合多模型模块、首选执行器与兜底顺序。
+			</p>
 		</div>
 		{#if response && draft}
 			<button
@@ -63,34 +110,89 @@
 					</span>
 					<span aria-hidden="true">→</span>
 				{/each}
+				{#if draft.split_dev}
+					<span class="work-chip"><strong>Codex 2 轮审查</strong></span>
+					<span aria-hidden="true">→</span>
+				{/if}
 				<span class="work-chip">自动发布</span>
 			</div>
 
-			<label class="flex cursor-pointer flex-wrap items-center gap-x-2 gap-y-1 py-1">
-				<input
-					type="checkbox"
-					role="switch"
-					data-work-toggle="plan_review"
-					bind:checked={draft.plan_review}
-				/>
-				<span class="font-medium">规划后先审阅再开发</span>
-				<span class="work-hint">审阅员确认或修订规划，完成审阅后才开始开发。</span>
-			</label>
+			<div class="grid gap-1.5 py-1" data-work-modules>
+				<label class="flex cursor-pointer flex-wrap items-center gap-x-2 gap-y-0.5">
+					<input
+						type="checkbox"
+						role="switch"
+						data-work-toggle="plan_review"
+						checked={draft.plan_review}
+						on:change={(e) => setFlag('plan_review', Boolean((e.currentTarget ?? e.target)?.checked))}
+					/>
+					<span class="font-medium">规划后先审阅再开发</span>
+					<span class="work-hint">
+						{draft.dual_plan
+							? '双方案并行已开启，当前由双方案对比合成替代单规划审阅。'
+							: '审阅员核查或修订规划，完成审阅后才开始开发。'}
+					</span>
+				</label>
+
+				<label class="flex cursor-pointer flex-wrap items-center gap-x-2 gap-y-0.5">
+					<input
+						type="checkbox"
+						role="switch"
+						data-work-toggle="dual_plan"
+						checked={draft.dual_plan}
+						on:change={(e) => setFlag('dual_plan', Boolean((e.currentTarget ?? e.target)?.checked))}
+					/>
+					<span class="font-medium">双方案并行对照</span>
+					<span class="work-hint">主控摸底后，两位规划成员并行盲写方案再逐条对比合成。</span>
+				</label>
+
+				<label class="flex cursor-pointer flex-wrap items-center gap-x-2 gap-y-0.5">
+					<input
+						type="checkbox"
+						role="switch"
+						data-work-toggle="plan_approval"
+						checked={draft.plan_approval}
+						on:change={(e) => setFlag('plan_approval', Boolean((e.currentTarget ?? e.target)?.checked))}
+					/>
+					<span class="font-medium">方案定稿后强制等你拍板</span>
+					<span class="work-hint">暂停发出方案要点，等你拍板后再进开发；关闭则仅遇重大歧义再问。</span>
+				</label>
+
+				<label class="flex cursor-pointer flex-wrap items-center gap-x-2 gap-y-0.5">
+					<input
+						type="checkbox"
+						role="switch"
+						data-work-toggle="ui_review"
+						checked={draft.ui_review}
+						on:change={(e) => setFlag('ui_review', Boolean((e.currentTarget ?? e.target)?.checked))}
+					/>
+					<span class="font-medium">UI 交互与文案互审</span>
+					<span class="work-hint">开发前先出设计稿并由规划顾问审交互和文案（纯后端需求自动跳过）。</span>
+				</label>
+
+				<label class="flex cursor-pointer flex-wrap items-center gap-x-2 gap-y-0.5">
+					<input
+						type="checkbox"
+						role="switch"
+						data-work-toggle="split_dev"
+						checked={draft.split_dev}
+						on:change={(e) => setFlag('split_dev', Boolean((e.currentTarget ?? e.target)?.checked))}
+					/>
+					<span class="font-medium">前后端分拆 + 交付前 Codex 2 轮审查</span>
+					<span class="work-hint">
+						开发写后端、验收写前端联调，合并前自动走 Codex 独立审查；关闭则全栈开发并直接审阅修复。
+					</span>
+				</label>
+			</div>
 
 			{#each response.steps_meta as step (step.key)}
 				{@const config = draft.steps[step.key]}
 				{@const candidates = chainCandidates(runnerNames, config.fallback, config.runner)}
-				<div
-					class="work-row"
-					class:inactive={step.optional && !draft.plan_review}
-					data-work-step={step.key}
-				>
+				{@const active = stepActive(step.key, draft)}
+				<div class="work-row" class:inactive={!active} data-work-step={step.key}>
 					<div class="grid gap-1">
 						<div class="font-medium">{step.label}</div>
-						<span class="work-hint">{step.hint}</span>
-						{#if step.optional && !draft.plan_review}
-							<span class="work-hint">未启用（开启上方开关后生效）</span>
-						{/if}
+						<span class="work-hint">{stepRoleNote(step.key, draft)}</span>
 					</div>
 					<div class="grid min-w-0 gap-2">
 						<label class="flex flex-wrap items-center gap-2">
@@ -164,7 +266,7 @@
 			{/each}
 		</fieldset>
 		<p class="work-hint mt-3">
-			<code>/work cchclaude 需求</code> 可单次覆盖首选属于 Claude 家族的环节。命令点名的环节不自动兜底。
+			命令用法：<code>/work 需求</code> 按此处默认配置执行；<code>/work 深度 需求</code> 单次拉满多模型全流程；<code>/work 快速 需求</code> 单次走 3 步精简闭环；<code>/work cchclaude 需求</code> 单次锁定 Claude 家族执行器（不自动兜底）。
 		</p>
 	{/if}
 </section>

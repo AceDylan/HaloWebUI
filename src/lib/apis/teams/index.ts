@@ -22,6 +22,7 @@ export type TaskKind = 'code' | 'codex' | 'ui' | 'complex' | 'research' | 'writi
 /** Collaboration workflow preset: free-form lead planning vs multi-model dev pipeline; `work` is
  * the `/work` command's fixed flow (AGY plans → Codex builds → Claude reviews and fixes → release). */
 export type TeamWorkflow = 'auto' | 'dev_pipeline' | 'dev_lite' | 'work';
+export type WorkPreset = '' | 'deep' | 'fast';
 
 /** The assistant the lead staffed a member with: one of the user's (助手库, `model:<id>`), a
  * built-in template (`builtin:<id>`, src/lib/data/agents-zh.json), or one it proposes to create.
@@ -143,6 +144,7 @@ export type TeamPlan = {
 	/** Optional workflow template & promotion metadata. */
 	workflow?: TeamWorkflow;
 	promoted_from?: string | null;
+	work_preset?: 'deep' | 'fast' | null;
 	runner_prefs?: Record<string, string>;
 	/** Project teams: false = an analysis only, nothing to ship. */
 	repo_change?: boolean;
@@ -302,6 +304,7 @@ export type Team = {
 	auto_deploy?: boolean;
 	workflow?: TeamWorkflow;
 	promoted_from?: string | null;
+	work_preset?: 'deep' | 'fast' | null;
 	runner_prefs?: Record<string, string>;
 	error: string | null;
 	board: string | null;
@@ -647,6 +650,7 @@ export type LiveSnapshot = {
 		auto_deploy?: boolean;
 		workflow?: TeamWorkflow;
 		promoted_from?: string | null;
+		work_preset?: 'deep' | 'fast' | null;
 		runner_prefs?: Record<string, string>;
 		/** Live / latest push-and-deploy pipeline status for a project team. */
 		deploy?: TeamDeployState | null;
@@ -824,7 +828,8 @@ export const createTeam = (
 	assistants: string[] = [],
 	autoDeploy = false,
 	workflow: TeamWorkflow = 'auto',
-	runnerPrefs: Record<string, string> = {}
+	runnerPrefs: Record<string, string> = {},
+	workPreset: WorkPreset = ''
 ) =>
 	request<Team>(token, 'POST', '/', {
 		goal,
@@ -834,6 +839,7 @@ export const createTeam = (
 		auto_start: autoStart,
 		...(autoDeploy ? { auto_deploy: true } : {}),
 		...(workflow && workflow !== 'auto' ? { workflow } : {}),
+		...(workflow === 'work' && workPreset ? { work_preset: workPreset } : {}),
 		...(Object.keys(runnerPrefs).length ? { runner_prefs: runnerPrefs } : {}),
 		...(files.length ? { files } : {}),
 		...(assistants.length ? { assistants } : {})

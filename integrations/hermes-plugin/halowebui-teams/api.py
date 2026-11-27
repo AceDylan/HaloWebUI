@@ -128,6 +128,7 @@ async def _plan(request):
             library=data.get("library") if isinstance(data.get("library"), dict) else None,
             workflow=str(data.get("workflow") or "auto"),
             runner_prefs=data.get("runner_prefs") if isinstance(data.get("runner_prefs"), dict) else None,
+            work_preset=str(data.get("work_preset") or ""),
         )
     finally:
         progress.planning_done(plan_key)

@@ -476,6 +476,20 @@ def test_qq_work_help_uses_the_same_config_as_the_start_receipt(remote, pkg, mon
         assert "Codex（不行换 agy） 审阅规划" in remote.sent[-1]["text"]
 
 
+def test_qq_work_deep_preset_passes_work_preset(remote, monkeypatch):
+    created = []
+    monkeypatch.setattr(
+        remote.link,
+        "create",
+        lambda owner, goal, origin, auto, workflow="auto", runner_prefs=None, work_preset="":
+            created.append((goal, auto, workflow, runner_prefs, work_preset))
+            or {"id": "5f3c2a10-team-d", "title": goal},
+    )
+    _dispatch(remote.remote, _event("qqbot", QQ_USER, "/work 深度 anyclaude 给 HaloWebUI 加多模型开关"))
+    assert created == [("给 HaloWebUI 加多模型开关", True, "work", {"claude": "anyclaude"}, "deep")]
+    assert "深度多模型" in remote.sent[-1]["text"] and "Codex 2 轮审查" in remote.sent[-1]["text"]
+
+
 def test_qq_team_receives_deploy_notice_without_notifying_telegram(remote, monkeypatch):
     import halowebui_teams.notify as notify
 

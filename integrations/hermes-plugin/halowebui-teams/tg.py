@@ -443,30 +443,57 @@ async def _team_command(source: Any, owner: str, args: str, event: Any) -> None:
 
 
 _WORK_RUNNER_RE = re.compile(r"([A-Za-z]+)(?=$|[\s：:，,])")
+_WORK_PRESET_WORDS = (
+    ("深度多模型", "deep"), ("多模型研发", "deep"), ("多模型", "deep"), ("深度", "deep"), ("完整", "deep"), ("deep", "deep"),
+    ("快速精简", "fast"), ("快速", "fast"), ("精简", "fast"), ("fast", "fast"),
+)
 
 
-def split_work_args(args: str) -> tuple[str, dict[str, str]]:
-    """``/work [runner …] <需求>`` → (goal, runner_prefs). Runners named first pick their family's
-    runner (``{"claude": "cchclaude"}``); one per family, Hermes is not one."""
-    text, prefs = (args or "").strip(), {}
-    while True:
+def parse_work_args(args: str) -> tuple[str, dict[str, str], str]:
+    """``/work [深度|快速] [runner …] <需求>`` → (goal, runner_prefs, preset).
+    Preset words and runner names may appear in any order before the goal; each requires a
+    separator so a goal like ``深度优化接口`` is never mistaken for a preset."""
+    text, prefs, preset = (args or "").strip(), {}, ""
+    while text:
+        matched = False
+        if not preset:
+            low = text.lower()
+            for word, key in _WORK_PRESET_WORDS:
+                if low.startswith(word):
+                    after = text[len(word):len(word) + 1]
+                    if not after or after in AUTO_START_SEPARATORS:
+                        preset = key
+                        text = text[len(word):].strip(AUTO_START_SEPARATORS)
+                        matched = True
+                        break
+        if matched:
+            continue
         found = _WORK_RUNNER_RE.match(text)
         spec = runners.BY_NAME.get(found.group(1).lower()) if found else None
         if spec is None or spec.native or spec.family in prefs:
-            return text, prefs
+            break
         prefs[spec.family] = spec.name
         text = text[found.end():].strip(AUTO_START_SEPARATORS)
+    return text, prefs, preset
 
 
-def work_flow(prefs: Optional[dict] = None) -> str:
+def split_work_args(args: str) -> tuple[str, dict[str, str]]:
+    """``/work [runner …] <需求>`` → (goal, runner_prefs). Kept for callers expecting a 2-tuple."""
+    goal, prefs, _preset = parse_work_args(args)
+    return goal, prefs
+
+
+def work_flow(prefs: Optional[dict] = None, preset: str = "") -> str:
     """The current /work steps with the runners that will do them."""
-    return workflow.work_flow(runners.work_config(), workflow.normalize_runner_prefs(prefs))
+    return workflow.work_flow(runners.work_config(), workflow.normalize_runner_prefs(prefs), preset=preset)
 
 
 def _format_work_usage(flow: str) -> str:
-    return (f"<b>工作流 /work</b>\n/work 需求 —— 当前流程：{esc(flow)}。\n"
+    return (f"<b>工作流 /work</b>\n/work 需求 —— 当前默认流程：{esc(flow)}。\n"
+            "/work 深度 需求 —— 单次启用多模型全流程（双方案拍板、UI 互审、前后端分拆、Codex 2 轮审查）。\n"
+            "/work 快速 需求 —— 单次走精简 3 步闭环（规划 → 开发 → 审阅修复）。\n"
             "需求里写上项目名或路径（例如「/work HaloWebUI 给设置页加个开关」）。\n"
-            "在 HaloWebUI 设置 → Hermes 模型 中可调整执行器、兜底顺序和规划审阅。\n"
+            "在 HaloWebUI 设置 → Hermes 模型 中可调整流程模块、执行器与兜底顺序。\n"
             "/work cchclaude 需求 —— 单次指定首选属于 Claude 家族的环节；指定后不可用时暂停等你换。\n"
             "/work 进度 —— 查看工作流进度。")
 
@@ -478,9 +505,11 @@ def work_usage() -> str:
     return _format_work_usage(work_flow())
 
 
-def work_started(team: dict, prefs: dict) -> str:
+def work_started(team: dict, prefs: dict, preset: str = "") -> str:
     """The reply to /work (Telegram HTML; QQ strips the tags)."""
-    return (f"🛠️ 已交给工作流：<b>{esc(clip(team.get('title'), 60))}</b>\n{esc(work_flow(prefs))}。\n"
+    p = workflow.normalize_work_preset(preset)
+    tag = f"（{workflow.WORK_PRESET_LABELS[p]}）" if p else ""
+    return (f"🛠️ 已交给工作流{tag}：<b>{esc(clip(team.get('title'), 60))}</b>\n{esc(work_flow(prefs, p))}。\n"
             "各环节依次自动开始；需要你处理或做完发布了会发到这里。")
 
 
@@ -493,16 +522,20 @@ async def _work_command(source: Any, owner: str, args: str, event: Any) -> None:
         else:
             await _progress_command(source, owner, selector, event, workflow_first="work")
         return
-    goal, prefs = split_work_args(args)
+    goal, prefs, preset = parse_work_args(args)
     if not goal or goal in ("help", "帮助", "?", "？"):
         await _say(source, work_usage(), None, event)
         return
     try:
-        team = await asyncio.to_thread(link.create, owner, goal, _origin(source), True, "work", prefs)
+        if preset:
+            team = await asyncio.to_thread(link.create, owner, goal, _origin(source), True, "work", prefs,
+                                           work_preset=preset)
+        else:
+            team = await asyncio.to_thread(link.create, owner, goal, _origin(source), True, "work", prefs)
     except link.HaloError as exc:
         await _say(source, f"⚠️ 没能发起工作流：{esc(exc.message)}", None, event)
         return
-    await _say(source, work_started(team, prefs), _started_buttons(team["id"]), event)
+    await _say(source, work_started(team, prefs, preset), _started_buttons(team["id"]), event)
 
 
 def _started_buttons(team_id: str) -> list:

@@ -406,3 +406,72 @@ def test_work_native_outage_routes_to_fallback_and_generic_questions_still_block
         assert kb.get_task(conn, tid).assignee == "codex"
         assert kb.get_task(conn, dev).status == "todo"
     assert pkg.common.read_team(slug)["tasks"][tid]["trail"][-1]["fail_kind"] == "auth"
+
+
+def test_work_deep_preset_combines_multi_model_stages_with_work_chains(pkg, availability, monkeypatch):
+    from halowebui_teams import workflow
+
+    cfg = pkg.runners.work_config()
+    cfg["steps"]["plan"] = {"runner": "offiagy", "fallback": ["agy"]}
+    cfg["steps"]["plan_review"] = {"runner": "officlaude", "fallback": ["anyclaude", "reclaude"]}
+    cfg["steps"]["dev"] = {"runner": "codex", "fallback": []}
+    cfg["steps"]["review"] = {"runner": "officlaude", "fallback": ["anyclaude", "reclaude"]}
+    monkeypatch.setattr(pkg.runners, "work_config", lambda: cfg)
+
+    proj = {"name": "HaloWebUI", "path": "/tmp/repo", "branch": "main"}
+    res = pkg.plan.propose_plan("给协作台加多模型工作流界面", "/tmp/ws", workflow="work", project=proj, work_preset="deep")
+    assert res["ok"] is True
+    plan = res["plan"]
+    assert plan["workflow"] == "work"
+    assert plan["work_preset"] == "deep"
+    assert plan["codex_review"] is True
+    assert workflow.skips_codex_review("work", plan) is False
+
+    tasks = {t["key"]: t for t in plan["tasks"]}
+    assert len(tasks) == 9
+    assert tasks["T2"]["depends_on"] == ["T1"] and tasks["T3"]["depends_on"] == ["T1"]
+    assert tasks["T2"]["member"] == "plan-reviewer" and tasks["T3"]["member"] == "agy-planner"
+    assert tasks["T4"]["depends_on"] == ["T2", "T3"] and "拍板闸门" in tasks["T4"]["description"]
+    assert tasks["T5"]["member"] == "plan-reviewer" and tasks["T6"]["member"] == "agy-planner"
+    assert tasks["T8"]["member"] == "codex-dev" and tasks["T9"]["member"] == "claude-review"
+    by = {m["name"]: m for m in plan["members"]}
+    assert by["plan-reviewer"]["fallback_chain"] == ["officlaude", "anyclaude", "reclaude"]
+    assert by["claude-review"]["fallback_chain"] == ["officlaude", "anyclaude", "reclaude"]
+
+    # Backend-only goal skips UI design review (7 tasks instead of 9).
+    backend = pkg.plan.propose_plan("纯后端接口优化", "/tmp/ws", workflow="work", project=proj, work_preset="deep")["plan"]
+    assert len(backend["tasks"]) == 7
+    assert backend["codex_review"] is True
+
+
+def test_work_fast_preset_overrides_enabled_modules_and_skips_codex_review(pkg, availability, monkeypatch):
+    from halowebui_teams import workflow
+
+    cfg = pkg.runners.work_config()
+    cfg.update(plan_review=True, dual_plan=True, plan_approval=True, ui_review=True, split_dev=True)
+    monkeypatch.setattr(pkg.runners, "work_config", lambda: cfg)
+
+    proj = {"name": "HaloWebUI", "path": "/tmp/repo", "branch": "main"}
+    plan = pkg.plan.propose_plan("改个按钮文案", "/tmp/ws", workflow="work", project=proj, work_preset="fast")["plan"]
+    assert plan["work_preset"] == "fast"
+    assert plan["codex_review"] is False
+    assert workflow.skips_codex_review("work", plan) is True
+    assert [t["member"] for t in plan["tasks"]] == ["agy-planner", "codex-dev", "claude-review"]
+
+
+def test_work_modular_flags_persisted_onto_team_board_for_deploy_review(pkg, team_id, availability, monkeypatch):
+    from halowebui_teams import workflow
+
+    cfg = pkg.runners.work_config()
+    cfg.update(plan_review=True, plan_approval=True, split_dev=True)
+    monkeypatch.setattr(pkg.runners, "work_config", lambda: cfg)
+
+    raw = workflow.build_pipeline_plan("新增后端接口", workflow="work")
+    plan, errors = pkg.plan.validate_plan(raw)
+    assert not errors
+    assert plan["codex_review"] is True
+    assert "拍板闸门" in plan["tasks"][1]["description"]
+    created = pkg.teams.create_team(team_id, plan, owner="u1")
+    team_rec = pkg.common.read_team(created["board"])
+    assert team_rec["codex_review"] is True
+    assert workflow.skips_codex_review(team_rec["workflow"], team_rec) is False

@@ -105,7 +105,8 @@
 	$: deploy = live?.team?.deploy ?? null;
 	$: workflow = team?.workflow ?? live?.team?.workflow ?? team?.plan?.workflow ?? 'auto';
 	$: promotedFrom = team?.promoted_from ?? live?.team?.promoted_from ?? team?.plan?.promoted_from ?? null;
-	$: workflowText = workflowLabel(workflow, promotedFrom);
+	$: workPreset = team?.work_preset ?? live?.team?.work_preset ?? team?.plan?.work_preset ?? null;
+	$: workflowText = workflowLabel(workflow, promotedFrom, workPreset);
 	$: deployRunning = deploy?.status === 'running';
 	$: acceptance = live?.team?.conclusion?.acceptance;
 	$: autoDeployPending =
@@ -227,6 +228,7 @@
 				team?.task_count,
 				team?.workflow,
 				team?.promoted_from,
+				team?.work_preset,
 				stage?.key,
 				stage?.now,
 				stage?.steps,

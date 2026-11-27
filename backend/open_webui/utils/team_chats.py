@@ -62,6 +62,14 @@ def card_text(team: AgentTeamModel, *, backfill: bool = False) -> str:
         return (f"🤝 协作台「{title}」{how}：用上次的目标和成员，{start}{files}。"
                 "进度在下面的卡片里实时更新，做完后完整结果会发回这个对话。")
     if meta.get("workflow") == "work":
+        preset = meta.get("work_preset") or ""
+        if preset == "deep":
+            return (f"🛠️ 已交给工作流「{title}」（深度多模型）：按 /work 执行器配置依次双方案对比拍板 → "
+                    f"设计互审 → 前后端分拆开发 → Codex 2 轮审查并自动发布{files}。"
+                    "进度在下面的卡片里实时更新，做完后完整结果会发回这个对话。")
+        if preset == "fast":
+            return (f"🛠️ 已交给工作流「{title}」（快速精简）：按 /work 执行器配置依次规划 → 开发 → 审阅修复 → "
+                    f"提交推送部署清理，全程自动{files}。进度在下面的卡片里实时更新，做完后完整结果会发回这个对话。")
         return (f"🛠️ 已交给工作流「{title}」：按设置里的 /work 工作流依次规划 → 开发 → 审阅并修复问题 → "
                 f"提交推送部署清理，全程自动{files}。进度在下面的卡片里实时更新，做完后完整结果会发回这个对话。")
     start = "计划好就直接开始" if meta.get("auto_start") else "计划好后等你批准再开始"

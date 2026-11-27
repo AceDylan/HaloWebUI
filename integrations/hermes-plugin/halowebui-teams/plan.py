@@ -618,6 +618,14 @@ def validate_plan(raw: Any, *, parallel_cap: int = DEFAULT_PARALLEL_CAP,
             plan["workflow"] = wf
     if raw.get("promoted_from") in ("auto",):
         plan["promoted_from"] = str(raw["promoted_from"])
+    if raw.get("work_preset"):
+        from . import workflow as wf_mod
+
+        preset = wf_mod.normalize_work_preset(raw.get("work_preset"))
+        if preset:
+            plan["work_preset"] = preset
+    if isinstance(raw.get("codex_review"), bool):
+        plan["codex_review"] = raw["codex_review"]
     if isinstance(raw.get("repo_change"), bool) and isinstance(raw.get("project"), dict):
         plan["repo_change"] = raw["repo_change"]
     if isinstance(raw.get("runner_prefs"), dict):
@@ -722,7 +730,7 @@ def propose_plan(goal: str, workspace: str, *, feedback: str = "", previous: Opt
                  parallel_cap: int = DEFAULT_PARALLEL_CAP, timeout: int = 150, lead_model: str = "",
                  project: Optional[dict] = None, team_id: str = "", inputs: Optional[list] = None,
                  library: Optional[dict] = None, workflow: str = "auto",
-                 runner_prefs: Optional[dict[str, str]] = None) -> dict:
+                 runner_prefs: Optional[dict[str, str]] = None, work_preset: str = "") -> dict:
     """Ask the lead model for a plan, then validate it. An explicitly chosen ``dev_pipeline`` /
     ``dev_lite`` is built from its template instead. A free-form (``auto``) goal on a git project the
     lead judges to change the repository is promoted to the ``dev_lite`` template."""
@@ -737,6 +745,7 @@ def propose_plan(goal: str, workspace: str, *, feedback: str = "", previous: Opt
     if stay_free:
         wf = "auto"
     prefs = wf_mod.normalize_runner_prefs(runner_prefs or (previous or {}).get("runner_prefs"))
+    preset = wf_mod.normalize_work_preset(work_preset or (previous or {}).get("work_preset"))
 
     def finished(plan: dict, attempts: int) -> dict:
         estimate = progress.estimate_plan(plan)
@@ -750,7 +759,8 @@ def propose_plan(goal: str, workspace: str, *, feedback: str = "", previous: Opt
         progress.planning_step(team_id, "check", f"正在按「{wf_mod.WORKFLOW_LABELS[wf]}」生成多模型协作计划并检查执行器")
         raw = wf_mod.build_pipeline_plan(
             goal, workflow=wf, project=project, feedback=feedback, runner_prefs=prefs, inputs=inputs,
-            lead_model={"model": lead_model, "requested": lead_model} if lead_model else None)
+            lead_model={"model": lead_model, "requested": lead_model} if lead_model else None,
+            work_preset=preset)
         plan, errors = validate_plan(raw, parallel_cap=parallel_cap)
         if plan is None:
             return {"ok": False, "error": "研发流水线计划校验失败：" + "；".join(errors)}

@@ -417,7 +417,7 @@ async def _team_command(source: Any, owner: str, args: str, event: Any) -> None:
 
 async def _work_command(source: Any, owner: str, args: str, event: Any) -> None:
     """QQ's ``/work``: the same workflow as Telegram's (tg.py), its notices and questions come here."""
-    from .tg import split_work_args, work_started, work_usage
+    from .tg import parse_work_args, work_started, work_usage
 
     _refresh_chat_reply_to(_platform(source), source.chat_id, getattr(event, "message_id", None))
     if chat_progress.is_work_progress_query(args):
@@ -428,19 +428,23 @@ async def _work_command(source: Any, owner: str, args: str, event: Any) -> None:
         else:
             await _progress_command(source, owner, selector, event, workflow_first="work")
         return
-    goal, prefs = split_work_args(args)
+    goal, prefs, preset = parse_work_args(args)
     if not goal or goal in ("help", "帮助", "?", "？"):
         await _say(source, html_text(work_usage()), event)
         return
     try:
-        team = await asyncio.to_thread(link.create, owner, goal, _origin(source), True, "work", prefs)
+        if preset:
+            team = await asyncio.to_thread(link.create, owner, goal, _origin(source), True, "work", prefs,
+                                           work_preset=preset)
+        else:
+            team = await asyncio.to_thread(link.create, owner, goal, _origin(source), True, "work", prefs)
     except link.HaloError as exc:
         await _say(source, f"⚠️ 没能发起工作流：{exc.message}", event)
         return
     put_job({**_job_base(source, event), "kind": "team", "id": team["id"], "owner": owner, "question": goal[:200],
              "auto_start": True})
     url = link.team_url(team["id"])
-    await _say(source, html_text(work_started(team, prefs)) + (f"\n🌐 {url}" if url else ""), event)
+    await _say(source, html_text(work_started(team, prefs, preset)) + (f"\n🌐 {url}" if url else ""), event)
 
 
 async def _progress_command(source: Any, owner: str, selector: str, event: Any, *,

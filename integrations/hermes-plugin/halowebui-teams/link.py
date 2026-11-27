@@ -181,10 +181,11 @@ def _request(method: str, path: str, owner: str, body: Any, *, timeout: float, a
 
 
 def create(owner: str, goal: str, origin: dict, auto_start: bool = False, workflow: str = "auto",
-           runner_prefs: Optional[dict] = None) -> dict:
+           runner_prefs: Optional[dict] = None, work_preset: str = "") -> dict:
     body = {"goal": goal, "origin": origin, **({"auto_start": True} if auto_start else {}),
             **({"workflow": workflow} if workflow and workflow != "auto" else {}),
-            **({"runner_prefs": runner_prefs} if runner_prefs else {})}
+            **({"runner_prefs": runner_prefs} if runner_prefs else {}),
+            **({"work_preset": work_preset} if work_preset else {})}
     return call("POST", "/teams", owner, body, timeout=60)
 
 

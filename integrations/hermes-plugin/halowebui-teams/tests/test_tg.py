@@ -655,6 +655,28 @@ def test_work_receipt_and_help_read_the_current_configuration(linked, pkg, monke
     _run(lambda: linked.telegram.on_pre_gateway_dispatch(event=_event("/work help")))
     assert linked.telegram.work_flow() in linked.sent[-1]["text"]
     assert "设置 → Hermes 模型" in linked.sent[-1]["text"]
+    assert "/work 深度" in linked.sent[-1]["text"]
+
+
+def test_work_command_parses_deep_and_fast_presets_with_runners(linked, monkeypatch):
+    parse = linked.telegram.parse_work_args
+    assert parse("深度 给 HaloWebUI 加按钮") == ("给 HaloWebUI 加按钮", {}, "deep")
+    assert parse("深度 cchclaude 给 HaloWebUI 加按钮") == ("给 HaloWebUI 加按钮", {"claude": "cchclaude"}, "deep")
+    assert parse("cchclaude 快速：修个文案") == ("修个文案", {"claude": "cchclaude"}, "fast")
+    assert parse("深度优化接口") == ("深度优化接口", {}, "")
+
+    calls = []
+    monkeypatch.setattr(
+        linked.link,
+        "create",
+        lambda owner, goal, origin, auto_start=False, workflow="auto", runner_prefs=None, work_preset="":
+            calls.append((goal, auto_start, workflow, runner_prefs, work_preset))
+            or {"id": "11111111-2222-3333-4444-555555555555", "title": "工作：" + goal},
+    )
+    _run(lambda: linked.telegram.on_pre_gateway_dispatch(event=_event("/work 深度 cchclaude 改协作台")))
+    assert calls == [("改协作台", True, "work", {"claude": "cchclaude"}, "deep")]
+    text = linked.sent[-1]["text"]
+    assert "深度多模型" in text and "双方案" in text and "Codex 2 轮审查" in text
 
 
 def test_command_descriptions_fit_the_telegram_menu():

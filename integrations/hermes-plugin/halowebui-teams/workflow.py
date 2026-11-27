@@ -29,14 +29,46 @@ WORKFLOW_LABELS = {
     "dev_lite": "快速研发（精简）",
     "work": "工作流（/work）",
 }
+WORK_PRESETS = ("", "deep", "fast")
+WORK_PRESET_LABELS = {
+    "": "默认设置",
+    "deep": "深度多模型",
+    "fast": "快速精简",
+}
 # Workflows that must work inside a git project: their last step is the release.
 PROJECT_ONLY = ("work",)
 WORK_NEEDS_PROJECT = ("/work 要在一个 git 项目里做（做完会提交、推送、部署和清理）：在需求里写上项目名或路径，"
                       "例如「/work HaloWebUI 给设置页加个开关」。")
 
 
-def skips_codex_review(workflow: Any) -> bool:
-    """The ``work`` workflow ends with a review that fixes what it finds."""
+def normalize_work_preset(value: Any) -> str:
+    raw = str(value or "").strip().lower()
+    return raw if raw in ("deep", "fast") else ""
+
+
+def effective_work_config(cfg: dict, preset: Any = "") -> dict:
+    """Resolve the active /work options after applying an optional one-shot preset."""
+    p = normalize_work_preset(preset)
+    out = {
+        "plan_review": bool(cfg.get("plan_review")),
+        "dual_plan": bool(cfg.get("dual_plan")),
+        "plan_approval": bool(cfg.get("plan_approval")),
+        "ui_review": bool(cfg.get("ui_review")),
+        "split_dev": bool(cfg.get("split_dev")),
+        "steps": cfg["steps"],
+    }
+    if p == "deep":
+        out.update(dual_plan=True, plan_approval=True, ui_review=True, split_dev=True)
+    elif p == "fast":
+        out.update(plan_review=False, dual_plan=False, plan_approval=False, ui_review=False, split_dev=False)
+    return out
+
+
+def skips_codex_review(workflow: Any, team: Optional[dict] = None) -> bool:
+    """The default ``work`` workflow ends with a review that fixes what it finds; when ``split_dev``
+    is enabled (``codex_review=True`` on the team/plan), delivery runs Codex review instead."""
+    if isinstance(team, dict) and isinstance(team.get("codex_review"), bool):
+        return not team["codex_review"]
     return normalize_workflow(workflow) == "work"
 
 _SKIP_DESIGN_RE = re.compile(
@@ -177,11 +209,44 @@ def work_flow_label(step_cfg: dict, prefs: dict) -> str:
     return label
 
 
-def work_flow(cfg: dict, prefs: dict) -> str:
-    labels = {"plan": "出规划", "plan_review": "审阅规划", "dev": "开发", "review": "审阅修复"}
-    steps = [f"{work_flow_label(cfg['steps'][key], prefs)} {labels[key]}"
-             for key in runners.WORK_STEPS if key != "plan_review" or cfg["plan_review"]]
-    return " → ".join([*steps, "提交推送部署清理"])
+def work_flow(cfg: dict, prefs: dict, *, preset: Any = "", skip_design: bool = False) -> str:
+    eff = effective_work_config(cfg, preset)
+    steps_cfg = eff["steps"]
+    p_lbl = work_flow_label(steps_cfg["plan"], prefs)
+    pr_lbl = work_flow_label(steps_cfg["plan_review"], prefs)
+    d_lbl = work_flow_label(steps_cfg["dev"], prefs)
+    r_lbl = work_flow_label(steps_cfg["review"], prefs)
+    parts: list[str] = []
+    approve_tail = "并拍板" if eff["plan_approval"] else ""
+    if eff["dual_plan"]:
+        parts.extend([
+            f"{pr_lbl} 摸底",
+            f"{pr_lbl} & {p_lbl} 双方案",
+            f"{pr_lbl} 对比合成{approve_tail}",
+        ])
+    elif eff["plan_review"]:
+        parts.extend([
+            f"{p_lbl} 出规划",
+            f"{pr_lbl} 审阅规划{approve_tail}",
+        ])
+    else:
+        parts.append(f"{p_lbl} 出规划{approve_tail}")
+    if eff["ui_review"] and not skip_design:
+        parts.append(f"{pr_lbl} 出设计稿 → {p_lbl} 审交互 → {pr_lbl} 定稿")
+    if eff["split_dev"]:
+        parts.extend([
+            f"{d_lbl} 写后端",
+            f"{r_lbl} 写前端并测试",
+            "Codex 2 轮审查",
+            "提交推送部署清理",
+        ])
+    else:
+        parts.extend([
+            f"{d_lbl} 开发",
+            f"{r_lbl} 审阅修复",
+            "提交推送部署清理",
+        ])
+    return " → ".join(parts)
 
 
 def build_pipeline_plan(
@@ -194,10 +259,12 @@ def build_pipeline_plan(
     inputs: Optional[list[str]] = None,
     promoted_from: str = "",
     lead_model: Optional[dict] = None,
+    work_preset: str = "",
 ) -> dict:
     """Build a deterministic raw plan dict matching the reference diagram, ready for ``validate_plan``."""
     wf = normalize_workflow(workflow)
     prefs = normalize_runner_prefs(runner_prefs)
+    preset = normalize_work_preset(work_preset) if wf == "work" else ""
     extra_feedback = f"\n\n用户补充意见：\n{feedback.strip()}" if feedback and feedback.strip() else ""
     input_note = (
         f"\n用户随目标附带了参考文件（在工作目录 {'.halo/inputs/' if project else 'inputs/'} 下）："
@@ -208,86 +275,278 @@ def build_pipeline_plan(
     ctx_tail = extra_feedback + input_note
     goal = user_goal(goal)
     skip_design = bool(_SKIP_DESIGN_RE.search(goal + "\n" + (feedback or "")))
+    work_codex_review: Optional[bool] = None
 
     if wf == "work":
         cfg = runners.work_config()
-        steps = cfg["steps"]
-        plan_review_on = cfg["plan_review"]
+        eff = effective_work_config(cfg, preset)
+        steps = eff["steps"]
+        dual_plan = eff["dual_plan"]
+        plan_review_on = eff["plan_review"]
+        plan_approval = eff["plan_approval"]
+        ui_review_on = eff["ui_review"] and not skip_design
+        split_dev = eff["split_dev"]
+        work_codex_review = bool(split_dev)
+        need_reviewer = dual_plan or plan_review_on or ui_review_on
         role_labels = {"offiagy": "AGY", "officlaude": "Claude", "codex": "Codex", "hermes": "Hermes"}
         members = [
-            _work_member_spec("agy-planner", "规划", "ui", "读代码与现状，出实现规划、文件边界、验收标准与测试命令",
-                              steps["plan"], prefs),
-            _work_member_spec("codex-dev", "开发", "codex", "按规划完成前后端代码与测试，交开发回执",
-                              steps["dev"], prefs),
-            _work_member_spec("claude-review", "审阅修复", "code", "审阅开发改动、直接修掉发现的问题并跑测试",
-                              steps["review"], prefs),
+            _work_member_spec(
+                "agy-planner",
+                "方案顾问" if dual_plan else "规划",
+                "ui",
+                "独立出对比方案并审阅交互与文案" if dual_plan else "读代码与现状，出实现规划、文件边界、验收标准与测试命令",
+                steps["plan"],
+                prefs,
+            ),
+            _work_member_spec(
+                "codex-dev",
+                "后端开发" if split_dev else "开发",
+                "codex",
+                "按派活单完成成块后端代码与单元测试并交回执" if split_dev else "按规划完成前后端代码与测试，交开发回执",
+                steps["dev"],
+                prefs,
+            ),
+            _work_member_spec(
+                "claude-review",
+                "前端与联调" if split_dev else "审阅修复",
+                "code",
+                "读后端改动与 diff，完成前端实现、联调并跑全套测试" if split_dev else "审阅开发改动、直接修掉发现的问题并跑测试",
+                steps["review"],
+                prefs,
+            ),
         ]
-        if plan_review_on:
-            members.insert(1, _work_member_spec("plan-reviewer", "规划审阅", "code", "核查并定稿实施规划",
-                                                steps["plan_review"], prefs))
+        if need_reviewer:
+            members.insert(
+                1,
+                _work_member_spec(
+                    "plan-reviewer",
+                    "主控规划" if dual_plan else "规划审阅",
+                    "code",
+                    "摸底、独立出方案、逐条对比合成与设计定稿" if dual_plan else "核查并定稿实施规划",
+                    steps["plan_review"],
+                    prefs,
+                ),
+            )
         labels = {}
         for member in members:
             executor = member["executor"]
             label = role_labels.get(executor, executor)
             labels[member["name"]] = label
             member["role"] = f"{label} {member['role']}"
-        dev_key = "T3" if plan_review_on else "T2"
-        tasks = [
-            {
-                "key": "T1",
-                "title": f"{labels['agy-planner']} 出规划",
-                "member": "agy-planner",
-                "depends_on": [],
-                "description": (
+
+        tasks: list[dict[str, Any]] = []
+
+        def add_task(title: str, member: str, depends_on: list[str], description: str) -> str:
+            key = f"T{len(tasks) + 1}"
+            tasks.append({
+                "key": key,
+                "title": title,
+                "member": member,
+                "depends_on": list(depends_on),
+                "description": description,
+            })
+            return key
+
+        approval_gate = (
+            "\n**拍板闸门（必须遵守）**：写完 `.halo/plan.md` 后，先不要结束任务，请以 `QUESTION:` 开头"
+            "把最终方案要点和取舍发给用户，请用户「拍板确认进入开发」或「提出修改意见」；"
+            "Hermes 成员用 `kanban_block`（`kind=needs_input`）写明问题。"
+            "如果用户提出修改意见，先修订 `.halo/plan.md` 并再次用 `QUESTION:` 确认；"
+            "收到用户明确拍板同意后，再输出最终确认结果完成本任务。"
+        )
+        soft_question_gate = (
+            "遇到需要用户拍板的重大需求歧义或方案分歧，按 `QUESTION:` 协议暂停；"
+            "Hermes 成员用 `kanban_block`（`kind=needs_input`）写明问题。收到答复后更新定稿和审阅记录，"
+            "再完成本任务以放行开发。"
+        )
+        backend_spec_hint = (
+            "同时明确前后端文件边界、接口契约与单元测试要求，便于后端成员按边界实现。"
+            if split_dev and not ui_review_on
+            else ""
+        )
+
+        if dual_plan:
+            t_ctx = add_task(
+                f"{labels['plan-reviewer']} 摸底（查代码 / 查现状）",
+                "plan-reviewer",
+                [],
+                (
+                    "先完整理解需求并做事实摸底：真实阅读相关代码、配置、现有测试与项目根目录的 "
+                    "`AGENTS.md` / `CLAUDE.md`（只读核查，不改业务代码）。\n"
+                    "把关键事实、涉及模块路径、约束与待决策问题写入 `.halo/context.md`，供下一步双模型各自独立出方案使用。"
+                    + ctx_tail
+                ),
+            )
+            t_p1 = add_task(
+                f"{labels['plan-reviewer']} 独立出方案",
+                "plan-reviewer",
+                [t_ctx],
+                (
+                    "阅读 `.halo/context.md`，**独立**产出一份完整技术与实现方案，写入 `.halo/proposal-lead.md`。\n"
+                    "要求：不要读取或等待另一份方案；写清架构取舍、涉及文件、前后端边界、风险与轻量定向测试策略。"
+                    "本步骤只写方案文档，不改业务代码。"
+                ),
+            )
+            t_p2 = add_task(
+                f"{labels['agy-planner']} 独立出方案",
+                "agy-planner",
+                [t_ctx],
+                (
+                    "阅读 `.halo/context.md`，**独立**产出一份完整技术与交互方案，写入 `.halo/proposal-agy.md`。\n"
+                    "要求：不要读取或参考 `.halo/proposal-lead.md`；重点从全局架构、交互体验、边界条件、"
+                    "可维护性和替代方案角度给出独立判断。本步骤只写方案文档，不改业务代码。"
+                ),
+            )
+            plan_end = add_task(
+                f"{labels['plan-reviewer']} 逐条对比合成方案" + ("并请你拍板" if plan_approval else ""),
+                "plan-reviewer",
+                [t_p1, t_p2],
+                (
+                    "同时阅读 `.halo/proposal-lead.md` 与 `.halo/proposal-agy.md`，逐条对比并合成为一份最终实施规划，"
+                    "写入 `.halo/plan.md`（并把对比记录写入 `.halo/plan-review.md`）。\n"
+                    "必须在方案里**逐条标清**：① 采纳了谁的方案；② 没采纳的原因；③ 最终改动文件、接口契约、验收标准与轻量测试命令。"
+                    + (approval_gate if plan_approval else "\n" + soft_question_gate)
+                    + "本步只修改 `.halo/` 中的规划与审阅文件。"
+                ),
+            )
+        else:
+            t_p1 = add_task(
+                f"{labels['agy-planner']} 出规划" + ("并请你拍板" if (plan_approval and not plan_review_on) else ""),
+                "agy-planner",
+                [],
+                (
                     "先真实阅读项目代码、配置与现状（项目根目录的 AGENTS.md / CLAUDE.md 里的约定必须遵守），"
                     "为用户的需求写一份可以直接照着开发的规划，写入 `.halo/plan.md`：① 需求理解与不做的范围；"
                     "② 实现方案与关键取舍；③ 逐个列出要改 / 新增的文件和改法；④ 接口与数据契约；"
                     "⑤ 验收标准；⑥ 要跑的测试命令（只用轻量定向测试，不要整站构建）。"
-                    "本步骤只读分析并写规划，不改任何业务代码。" + ctx_tail
+                    + backend_spec_hint
+                    + "本步骤只读分析并写规划，不改任何业务代码。"
+                    + (approval_gate if (plan_approval and not plan_review_on) else "")
+                    + ctx_tail
                 ),
-            },
-            {
-                "key": dev_key,
-                "title": f"{labels['codex-dev']} 按规划开发",
-                "member": "codex-dev",
-                "depends_on": ["T2" if plan_review_on else "T1"],
-                "description": (
+            )
+            if plan_review_on:
+                plan_end = add_task(
+                    "审阅规划并定稿" + ("（请你拍板）" if plan_approval else ""),
+                    "plan-reviewer",
+                    [t_p1],
+                    (
+                        "通读 `.halo/plan.md`、真实代码以及项目的 `AGENTS.md` / `CLAUDE.md`，核查需求覆盖、文件路径、"
+                        "接口契约、边界风险与测试命令。发现明确的问题就直接修订 `.halo/plan.md` 定稿；把审阅结论与改动"
+                        "记录在 `.halo/plan-review.md`。"
+                        + backend_spec_hint
+                        + (approval_gate if plan_approval else soft_question_gate)
+                        + "本步只修改 `.halo/` 中的规划与审阅文件。"
+                    ),
+                )
+            else:
+                plan_end = t_p1
+
+        if ui_review_on:
+            t_d1 = add_task(
+                f"{labels['plan-reviewer']} 出设计稿（交互与文案）",
+                "plan-reviewer",
+                [plan_end],
+                (
+                    "基于已定稿的 `.halo/plan.md`，产出交互流程、界面布局、状态反馈与关键文案设计稿，"
+                    "写入 `.halo/design.md`（若某项改动确实不涉及界面，请在文件里简要说明后供审稿确认）。"
+                ),
+            )
+            t_d2 = add_task(
+                f"{labels['agy-planner']} 审交互和文案",
+                "agy-planner",
+                [t_d1],
+                (
+                    "对照 `.halo/plan.md` 审查 `.halo/design.md`：重点挑出交互断点、多余步骤、"
+                    "边界状态遗漏、文案晦涩或与现有产品风格不一致之处，给出具体修改建议，写入 `.halo/design-review.md`。"
+                ),
+            )
+            pre_dev = add_task(
+                f"{labels['plan-reviewer']} 取舍改稿" + ("并定接口与派活单" if split_dev else "并定稿设计"),
+                "plan-reviewer",
+                [t_d2],
+                (
+                    "1) 阅读 `.halo/design-review.md`，对建议做取舍并定版 `.halo/design-final.md`（注明采纳与舍弃理由）；\n"
+                    + (
+                        "2) 制定完整接口契约、数据模型、验收标准与文件边界，写出清晰可执行的后端派活单到 `.halo/backend-spec.md`，"
+                        "明确告诉后端成员负责实现哪些后端模块与单元测试，以及前端和总验证留给后续成员处理。"
+                        if split_dev
+                        else "2) 如设计定稿影响了实施细节，同步修订 `.halo/plan.md` 以供开发严格遵循。"
+                    )
+                ),
+            )
+        elif split_dev and dual_plan:
+            pre_dev = add_task(
+                f"{labels['plan-reviewer']} 定接口与验收标准（派活单）",
+                "plan-reviewer",
+                [plan_end],
+                (
+                    "按已定稿的 `.halo/plan.md`，制定接口契约、文件边界与验收标准，"
+                    "写出清晰可执行的后端派活单到 `.halo/backend-spec.md`。"
+                ),
+            )
+        else:
+            pre_dev = plan_end
+
+        if split_dev:
+            t_dev = add_task(
+                f"{labels['codex-dev']} 写成块后端并交回执",
+                "codex-dev",
+                [pre_dev],
+                (
+                    "严格按照 `.halo/backend-spec.md`（若未单独生成则按 `.halo/plan.md` 中的后端范围与接口契约）"
+                    "实现成块后端代码与单元测试并跑通验证。\n"
+                    "完成后将改动文件、关键设计、测试命令及实测结果写入回执 `.halo/backend-receipt.md`。"
+                    "只改后端范围内的代码，不要 push、不要合并主分支、不要部署。"
+                ),
+            )
+            add_task(
+                f"{labels['claude-review']} 读改动、写前端并跑全套测试",
+                "claude-review",
+                [t_dev],
+                (
+                    "1) 通读 `.halo/backend-receipt.md` 和分支 git diff，核查后端代码质量与接口契约；\n"
+                    + (
+                        "2) 按 `.halo/design-final.md` 与 `.halo/plan.md` 完成前端代码实现与前后端联调；\n"
+                        if ui_review_on
+                        else "2) 按 `.halo/plan.md` 完成前端实现（如有）与前后端联调、补充修复；\n"
+                    )
+                    + "3) 自己运行全套相关定向单元测试、挂载测试或类型检查，修掉发现的问题，把实测命令与结果写入最终回答。"
+                    "不要 git push、不要合并主分支、不要部署（后续由交付流水线自动执行 Codex 独立审查并上线）。"
+                ),
+            )
+        else:
+            dev_refs = []
+            if plan_review_on or dual_plan:
+                dev_refs.append("以定稿后的 `.halo/plan.md` 为准，并参考 `.halo/plan-review.md`。")
+            if ui_review_on:
+                dev_refs.append("界面交互与文案严格遵循 `.halo/design-final.md`。")
+            t_dev = add_task(
+                f"{labels['codex-dev']} 按规划开发",
+                "codex-dev",
+                [pre_dev],
+                (
                     "严格按照 `.halo/plan.md` 完成全部代码改动（前端和后端都由你写）与对应测试，并运行规划里的测试命令。"
                     "规划有明显错误时按代码事实修正，并在回执里说明。完成后把改动文件清单、与规划的差异、"
                     "测试命令与实际结果写入 `.halo/dev-receipt.md`。不要 push、不要合并主分支、不要部署。"
-                    + ("以审阅定稿后的 `.halo/plan.md` 为准，并参考 `.halo/plan-review.md`。" if plan_review_on else "")
+                    + "".join(dev_refs)
                 ),
-            },
-            {
-                "key": "T4" if plan_review_on else "T3",
-                "title": f"{labels['claude-review']} 审阅并修复问题",
-                "member": "claude-review",
-                "depends_on": [dev_key],
-                "description": (
+            )
+            add_task(
+                f"{labels['claude-review']} 审阅并修复问题",
+                "claude-review",
+                [t_dev],
+                (
                     "通读 `.halo/plan.md`、`.halo/dev-receipt.md` 和当前分支相对主分支的完整 git diff，逐条对照验收标准审阅："
                     "正确性、遗漏的需求、回归风险、安全问题、与项目约定是否一致。发现的问题由你直接修改代码修掉"
                     "（不要只提意见），再运行受影响的测试确认通过。把审阅结论、修了什么、测试命令与实际结果写入 "
                     "`.halo/review.md` 和最终回答。不要 push、不要合并主分支、不要部署——提交、推送、部署和清理"
                     "由后面的发布流水线自动完成。"
                 ),
-            },
-        ]
-        if plan_review_on:
-            tasks.insert(1, {
-                "key": "T2",
-                "title": "审阅规划并定稿",
-                "member": "plan-reviewer",
-                "depends_on": ["T1"],
-                "description": (
-                    "通读 `.halo/plan.md`、真实代码以及项目的 `AGENTS.md` / `CLAUDE.md`，核查需求覆盖、文件路径、"
-                    "接口契约、边界风险与测试命令。发现明确的问题就直接修订 `.halo/plan.md` 定稿；把审阅结论与改动"
-                    "记录在 `.halo/plan-review.md`。遇到需要用户拍板的重大需求歧义或方案分歧，按 `QUESTION:` 协议"
-                    "暂停；Hermes 成员用 `kanban_block`（`kind=needs_input`）写明问题。收到答复后更新定稿和审阅记录，"
-                    "再完成本任务以放行开发。"
-                    "本步只修改 `.halo/` 中的规划与审阅文件。"
-                ),
-            })
-        summary = f"工作流（/work）：{work_flow(cfg, prefs)}。"
+            )
+
+        preset_tag = f" · {WORK_PRESET_LABELS[preset]}" if preset else ""
+        summary = f"工作流（/work{preset_tag}）：{work_flow(cfg, prefs, preset=preset, skip_design=skip_design)}。"
     elif wf == "dev_lite":
         members = [
             _member_spec("claude-lead", "Claude 主控", "code",
@@ -503,6 +762,10 @@ def build_pipeline_plan(
     }
     if promoted_from:
         plan["promoted_from"] = promoted_from
+    if preset:
+        plan["work_preset"] = preset
+    if work_codex_review is not None:
+        plan["codex_review"] = work_codex_review
     if project:
         plan["project"] = project
         plan["repo_change"] = True

@@ -5706,12 +5706,15 @@
 				[],
 				false,
 				'work',
-				work.runnerPrefs
+				work.runnerPrefs,
+				work.preset ?? ''
 			);
 			prompt = '';
 			files = structuredClone(failedFiles);
 			chatListRefreshRevision.update((value) => value + 1);
-			toast.success(`已交给工作流「${team.title}」，进度在对话里的卡片上`);
+			const presetNote =
+				work.preset === 'deep' ? '（深度多模型）' : work.preset === 'fast' ? '（快速精简）' : '';
+			toast.success(`已交给工作流${presetNote}「${team.title}」，进度在对话里的卡片上`);
 			if (!$chatId && team.chat_id) await goto(`/c/${team.chat_id}`);
 		} catch (error) {
 			toast.error(`没能发起工作流：${(error as any)?.message ?? error}`);

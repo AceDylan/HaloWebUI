@@ -143,10 +143,17 @@ def test_work_config_routes_require_an_admin(monkeypatch):
     app = FastAPI()
     app.include_router(router)
     client = TestClient(app)
-    payload = {"plan_review": True, "steps": {
-        step: {"runner": "codex", "fallback": []}
-        for step in ("plan", "plan_review", "dev", "review")
-    }}
+    payload = {
+        "plan_review": True,
+        "dual_plan": False,
+        "plan_approval": False,
+        "ui_review": False,
+        "split_dev": False,
+        "steps": {
+            step: {"runner": "codex", "fallback": []}
+            for step in ("plan", "plan_review", "dev", "review")
+        },
+    }
     calls = []
 
     async def get_config(_request, user):
@@ -167,6 +174,7 @@ def test_work_config_routes_require_an_admin(monkeypatch):
     assert client.get("/work-config").json() == {"config": payload}
     assert client.put("/work-config", json=payload).json() == {"config": payload}
     assert client.put("/work-config", json={**payload, "plan_review": "true"}).status_code == 422
+    assert client.put("/work-config", json={**payload, "dual_plan": "yes"}).status_code == 422
     assert calls == [("GET", "admin"), ("PUT", "admin", payload)]
 
 

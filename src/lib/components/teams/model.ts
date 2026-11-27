@@ -868,7 +868,8 @@ export const etaSentence = (
 /** The badge a team's workflow shows (none for free-form 自由协作). */
 export const workflowLabel = (
 	workflow: string | null | undefined,
-	promotedFrom?: string | null
+	promotedFrom?: string | null,
+	workPreset?: string | null
 ): string =>
 	workflow === 'dev_pipeline'
 		? '多模型研发'
@@ -877,7 +878,11 @@ export const workflowLabel = (
 				? '快速研发 · 自动晋升'
 				: '快速研发'
 			: workflow === 'work'
-				? '工作流 · 规划→开发→审阅→发布'
+				? workPreset === 'deep'
+					? '工作流 · 深度多模型'
+					: workPreset === 'fast'
+						? '工作流 · 快速精简'
+						: '工作流 · /work'
 				: '';
 
 /** The badge's colors, matching the 协作台 mode cards (多模型 violet, 快速 cyan, 工作流 amber). */

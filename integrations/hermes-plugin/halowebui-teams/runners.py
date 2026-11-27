@@ -130,13 +130,23 @@ AUTO_THEN: dict[str, str] = {}
 
 WORK_STEPS = ("plan", "plan_review", "dev", "review")
 WORK_STEP_META = (
-    {"key": "plan", "label": "规划", "hint": "读代码与现状，写出 .halo/plan.md 实现规划", "optional": False},
-    {"key": "plan_review", "label": "规划审阅", "hint": "核查并定稿 .halo/plan.md，确认无误再进入开发", "optional": True},
-    {"key": "dev", "label": "开发", "hint": "按 .halo/plan.md 完成前后端改动与测试", "optional": False},
-    {"key": "review", "label": "验收修复", "hint": "审阅代码 diff、直接修掉问题并跑测试确认", "optional": False},
+    {"key": "plan", "label": "规划 / 方案顾问", "hint": "单规划时读代码写 .halo/plan.md；开启双方案/UI 互审时兼任独立对比方案与交互文案审稿", "optional": False},
+    {"key": "plan_review", "label": "规划审阅 / 主控", "hint": "单规划开启审阅时核查定稿；开启双方案或 UI 互审时负责摸底、双方案合成与设计定稿", "optional": True},
+    {"key": "dev", "label": "开发", "hint": "默认完成全部前后端改动与测试；开启前后端分拆时负责成块后端与单元测试", "optional": False},
+    {"key": "review", "label": "验收修复 / 前端联调", "hint": "默认审阅 diff 并直接修掉问题；开启前后端分拆时读后端改动、写前端联调并跑全套测试", "optional": False},
+)
+WORK_EXTRA_FLAGS = (
+    ("dual_plan", "双方案并行"),
+    ("plan_approval", "方案拍板闸门"),
+    ("ui_review", "UI 交互审稿"),
+    ("split_dev", "前后端分拆与 Codex 审查"),
 )
 DEFAULT_WORK_CONFIG = {
     "plan_review": False,
+    "dual_plan": False,
+    "plan_approval": False,
+    "ui_review": False,
+    "split_dev": False,
     "steps": {
         "plan": {"runner": "offiagy", "fallback": ["agy"]},
         "plan_review": {"runner": "officlaude", "fallback": ["cchclaude", "anyclaude", "reclaude"]},
@@ -251,6 +261,12 @@ def _normalize_work_config(raw: Any, *, strict: bool = False) -> dict:
     plan_review = raw.get("plan_review")
     if strict and not isinstance(plan_review, bool):
         raise ValueError("规划后审阅开关必须为布尔值")
+    flags: dict[str, bool] = {"plan_review": plan_review is True}
+    for key, label in WORK_EXTRA_FLAGS:
+        val = raw.get(key)
+        if strict and key in raw and not isinstance(val, bool):
+            raise ValueError(f"{label}开关必须为布尔值")
+        flags[key] = val is True
     steps = raw.get("steps")
     if strict and (not isinstance(steps, dict) or set(steps) != set(WORK_STEPS)):
         raise ValueError("请提供规划、规划审阅、开发、验收修复四个环节的配置")
@@ -275,7 +291,7 @@ def _normalize_work_config(raw: Any, *, strict: bool = False) -> dict:
         if strict and len(chain) != len(fallback):
             raise ValueError(f"{label}的兜底只能包含有效且互不重复的执行器，不能包含首选执行器")
         result[key] = {"runner": runner, "fallback": chain}
-    return {"plan_review": plan_review is True, "steps": result}
+    return {**flags, "steps": result}
 
 
 def work_config() -> dict:

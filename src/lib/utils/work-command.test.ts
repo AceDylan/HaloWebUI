@@ -28,6 +28,28 @@ describe('parseWorkCommand', () => {
 		expect(parseWorkCommand('/work')).toEqual({ goal: '', runnerPrefs: {} });
 	});
 
+	it('parses one-shot deep and fast presets in any order with runners without false positives', () => {
+		expect(parseWorkCommand('/work 深度 给 HaloWebUI 加按钮')).toEqual({
+			goal: '给 HaloWebUI 加按钮',
+			runnerPrefs: {},
+			preset: 'deep'
+		});
+		expect(parseWorkCommand('/work 深度 cchclaude 给 HaloWebUI 加按钮')).toEqual({
+			goal: '给 HaloWebUI 加按钮',
+			runnerPrefs: { claude: 'cchclaude' },
+			preset: 'deep'
+		});
+		expect(parseWorkCommand('/work cchclaude 快速：修个文案')).toEqual({
+			goal: '修个文案',
+			runnerPrefs: { claude: 'cchclaude' },
+			preset: 'fast'
+		});
+		expect(parseWorkCommand('/work 深度优化一下接口')).toEqual({
+			goal: '深度优化一下接口',
+			runnerPrefs: {}
+		});
+	});
+
 	it('is not a command otherwise', () => {
 		expect(parseWorkCommand('/workspace 打开')).toBeNull();
 		expect(parseWorkCommand('帮我 /work 一下')).toBeNull();

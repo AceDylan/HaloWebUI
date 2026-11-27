@@ -262,7 +262,14 @@ export const workDraftFrom = ({ config, defaults }: HermesWorkConfigResponse): W
 		const step = config.steps[key] ?? defaults.steps[key];
 		steps[key] = { runner: step.runner, fallback: [...step.fallback] };
 	}
-	return { plan_review: config.plan_review, steps };
+	return {
+		plan_review: Boolean(config.plan_review ?? defaults.plan_review),
+		dual_plan: Boolean(config.dual_plan ?? defaults.dual_plan),
+		plan_approval: Boolean(config.plan_approval ?? defaults.plan_approval),
+		ui_review: Boolean(config.ui_review ?? defaults.ui_review),
+		split_dev: Boolean(config.split_dev ?? defaults.split_dev),
+		steps
+	};
 };
 
 export const setWorkStepRunner = (
@@ -277,11 +284,21 @@ export const setWorkStepRunner = (
 	}
 });
 
+const WORK_FLAG_CHANGES: readonly [keyof Omit<WorkWorkflowConfig, 'steps'>, string][] = [
+	['plan_review', '规划后审阅'],
+	['dual_plan', '双方案并行对照'],
+	['plan_approval', '方案定稿后强制拍板'],
+	['ui_review', 'UI 交互与文案互审'],
+	['split_dev', '前后端分拆与 Codex 审查']
+];
+
 export const workChanges = (before: WorkWorkflowConfig, after: WorkWorkflowConfig) => {
 	const lines: string[] = [];
 	const toggle = (value: boolean) => (value ? '开启' : '关闭');
-	if (before.plan_review !== after.plan_review) {
-		lines.push(`规划后审阅：${toggle(before.plan_review)} → ${toggle(after.plan_review)}`);
+	for (const [key, label] of WORK_FLAG_CHANGES) {
+		const prev = Boolean(before[key]);
+		const next = Boolean(after[key]);
+		if (prev !== next) lines.push(`${label}：${toggle(prev)} → ${toggle(next)}`);
 	}
 	for (const key of WORK_STEP_KEYS) {
 		const label = workStepLabel(key);
@@ -300,9 +317,44 @@ export const workChanges = (before: WorkWorkflowConfig, after: WorkWorkflowConfi
 export const workConfigEquals = (a: WorkWorkflowConfig, b: WorkWorkflowConfig) =>
 	!workChanges(a, b).changed;
 
-export const workFlowSummary = (config: WorkWorkflowConfig) =>
-	WORK_STEP_KEYS.filter((key) => key !== 'plan_review' || config.plan_review).map((key) => ({
-		key,
-		title: workStepLabel(key),
-		...config.steps[key]
-	}));
+export const workFlowSummary = (config: WorkWorkflowConfig) => {
+	const items: { key: string; title: string; runner: string; fallback: string[] }[] = [];
+	const approve = config.plan_approval ? '·拍板' : '';
+	if (config.dual_plan) {
+		items.push({
+			key: 'dual_plan',
+			title: `双方案合成${approve}`,
+			runner: `${config.steps.plan_review.runner} + ${config.steps.plan.runner}`,
+			fallback: config.steps.plan_review.fallback
+		});
+	} else {
+		items.push({
+			key: 'plan',
+			title: config.plan_review ? '规划' : `规划${approve}`,
+			...config.steps.plan
+		});
+		if (config.plan_review) {
+			items.push({
+				key: 'plan_review',
+				title: `规划审阅${approve}`,
+				...config.steps.plan_review
+			});
+		}
+	}
+	if (config.ui_review) {
+		items.push({
+			key: 'ui_review',
+			title: '交互审稿',
+			runner: `${config.steps.plan_review.runner} ⇄ ${config.steps.plan.runner}`,
+			fallback: config.steps.plan.fallback
+		});
+	}
+	if (config.split_dev) {
+		items.push({ key: 'dev', title: '后端开发', ...config.steps.dev });
+		items.push({ key: 'review', title: '前端联调', ...config.steps.review });
+	} else {
+		items.push({ key: 'dev', title: '开发', ...config.steps.dev });
+		items.push({ key: 'review', title: '验收修复', ...config.steps.review });
+	}
+	return items;
+};

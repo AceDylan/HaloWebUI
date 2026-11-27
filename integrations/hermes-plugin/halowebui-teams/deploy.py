@@ -766,7 +766,7 @@ def start(slug: str, *, by: str = "user", cleanup: Optional[bool] = None, auto_k
     if codex_review is None:
         from .workflow import skips_codex_review
 
-        do_review = profile["codex_review"] and not skips_codex_review(team.get("workflow"))
+        do_review = profile["codex_review"] and not skips_codex_review(team.get("workflow"), team)
     else:
         do_review = bool(codex_review)
     if do_cleanup and (team.get("conclusion") or {}).get("status") == "generating":

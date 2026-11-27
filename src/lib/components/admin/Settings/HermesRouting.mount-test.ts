@@ -65,6 +65,10 @@ const agyPrefs = (over: any = {}) => ({
 
 const workDefaults = (): WorkWorkflowConfig => ({
 	plan_review: false,
+	dual_plan: false,
+	plan_approval: false,
+	ui_review: false,
+	split_dev: false,
 	steps: {
 		plan: { runner: 'offiagy', fallback: ['agy'] },
 		plan_review: { runner: 'officlaude', fallback: ['cchclaude', 'anyclaude', 'reclaude'] },
@@ -203,7 +207,28 @@ describe('Hermes 模型 settings', () => {
 		await waitFor(() => !root.querySelector('.hr-save').disabled, 'save defaults enabled');
 		root.querySelector('.hr-save').click();
 		await waitFor(() => api.saveHermesWorkConfig.mock.calls.length === 2, 'save defaults');
+		await waitFor(
+			() => root.querySelector('.hr-save').disabled && text(root.querySelector('.hr-save')) === '保存并生效',
+			'saved defaults'
+		);
 		expect(api.saveHermesWorkConfig).toHaveBeenLastCalledWith('tok', workDefaults());
+
+		const dual = root.querySelector('[data-work-toggle="dual_plan"]') as HTMLInputElement;
+		const split = root.querySelector('[data-work-toggle="split_dev"]') as HTMLInputElement;
+		dual.checked = true;
+		dual.dispatchEvent(new Event('change'));
+		split.checked = true;
+		split.dispatchEvent(new Event('change'));
+		await waitFor(() => lane().includes('双方案合成') && lane().includes('后端开发'), 'modular toggles');
+		expect(text(root.querySelector('[data-section="work"]'))).toContain('Codex 2 轮审查');
+		await waitFor(() => !root.querySelector('.hr-save').disabled, 'save modular enabled');
+		root.querySelector('.hr-save').click();
+		await waitFor(() => api.saveHermesWorkConfig.mock.calls.length === 3, 'save modular flags');
+		expect(api.saveHermesWorkConfig).toHaveBeenLastCalledWith('tok', {
+			...workDefaults(),
+			dual_plan: true,
+			split_dev: true
+		});
 	});
 
 	it('keeps routing and AGY editable when /work is unavailable and retries separately', async () => {

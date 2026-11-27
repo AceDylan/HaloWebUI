@@ -143,6 +143,56 @@ afterEach(() => {
 });
 
 describe('ConclusionView', () => {
+	it('polls while Obsidian archiving is active and shows the saved note', async () => {
+		const archive = { status: 'running', started_at: 1790900000 };
+		api.getTeamConclusion
+			.mockResolvedValueOnce({
+				...CONCLUSION,
+				markdown: '# 验证结果',
+				entry: { ...CONCLUSION.entry, vault_archive: archive }
+			})
+			.mockResolvedValue({
+				...CONCLUSION,
+				markdown: '# 验证结果',
+				entry: {
+					...CONCLUSION.entry,
+					vault_archive: {
+						status: 'saved',
+						action: 'update',
+						path: '项目/验证.md',
+						reason: '已核验'
+					}
+				}
+			});
+		await mount(ConclusionView, { teamId: 'team-1', phase: 'completed' });
+		const marker = () => target.querySelector('[data-vault-archive]');
+		expect(marker().getAttribute('data-vault-archive')).toBe('running');
+		expect(marker().textContent).toContain('正在判断是否更新 Obsidian 知识库');
+		await until(() => marker()?.getAttribute('data-vault-archive') === 'saved', 6000);
+		expect(api.getTeamConclusion).toHaveBeenCalledTimes(2);
+		expect(marker().textContent).toContain('已更新 项目/验证.md（已核验）');
+	});
+
+	it.each([
+		{ archive: { status: 'skipped', reason: '已有记录' }, label: '未写入 Obsidian 知识库（已有记录）' },
+		{ archive: { status: 'failed', error: '校验拒绝' }, label: 'Obsidian 自动归档失败（校验拒绝）' }
+	])('shows a terminal archive state after the workbench snapshot changes', async ({ archive, label }) => {
+		api.getTeamConclusion
+			.mockResolvedValueOnce({ ...CONCLUSION, markdown: '# 验证结果' })
+			.mockResolvedValue({
+				...CONCLUSION,
+				markdown: '# 验证结果',
+				entry: { ...CONCLUSION.entry, vault_archive: archive }
+			});
+		await mount(ConclusionView, { teamId: 'team-1', phase: 'completed', brief: CONCLUSION.entry });
+		const marker = () => target.querySelector('[data-vault-archive]');
+		expect(marker()).toBeFalsy();
+		app.$set({ brief: { ...CONCLUSION.entry, vault_archive: archive } });
+		await until(() => !!marker(), 3000);
+		expect(marker().getAttribute('data-vault-archive')).toBe(archive.status);
+		expect(marker().textContent).toContain(label);
+	});
+
 	it('renders a mixed report with workspace images, a table, code, files and task results', async () => {
 		api.getTeamConclusion.mockResolvedValue(CONCLUSION);
 		await mount(ConclusionView, {

@@ -6,7 +6,7 @@
  * stream up to that point (each event carries the task status after it, computed by Hermes).
  * The live view additionally trusts Hermes' authoritative snapshot for the current state.
  */
-import type { HermesModel, LiveTask, TeamEvent, TeamExecutor } from '$lib/apis/teams';
+import type { HermesModel, LiveTask, TeamEvent, TeamExecutor, VaultArchive } from '$lib/apis/teams';
 
 export type TaskState = { status: string; sub_status: string };
 
@@ -799,8 +799,25 @@ export const STAGE_MOVING = new Set([
 	'concluding',
 	'illustrating',
 	'checking',
+	'archiving',
 	'deploying'
 ]);
+
+export const vaultArchivePending = (archive?: VaultArchive | null) =>
+	archive?.status === 'pending' || archive?.status === 'running';
+
+export const vaultArchiveText = (archive: VaultArchive): string => {
+	if (vaultArchivePending(archive)) return '正在判断是否更新 Obsidian 知识库';
+	const detail = archive.status === 'failed' ? archive.error : archive.reason;
+	const suffix = detail ? `（${detail}）` : '';
+	if (archive.status === 'saved') {
+		const verbs = { create: '新建', update: '更新', append: '追加' };
+		const verb = archive.action ? verbs[archive.action] : '归档';
+		return `Obsidian：已${verb}${archive.path ? ' ' + archive.path : ''}${suffix}`;
+	}
+	if (archive.status === 'failed') return `Obsidian 自动归档失败${suffix}`;
+	return `未写入 Obsidian 知识库${suffix}`;
+};
 
 /**
  * What is left of an estimate made at `at`, now: {low, high, overtime}. A stage past its usual

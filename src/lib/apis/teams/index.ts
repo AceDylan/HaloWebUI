@@ -189,6 +189,7 @@ export type StageKey =
 	| 'concluding'
 	| 'illustrating'
 	| 'checking'
+	| 'archiving'
 	| 'deploying'
 	| 'done'
 	| 'stopped'
@@ -482,6 +483,7 @@ export type Acceptance = {
 	gaps?: { title: string; detail: string }[];
 	model?: string;
 	error?: string;
+	at?: number;
 };
 
 /** One move of a task to another runner. */
@@ -492,6 +494,17 @@ export type RunnerStep = {
 	at: number;
 	phase: 'plan' | 'launch' | 'runtime' | 'retry' | 'user' | 'lead';
 	fail_kind?: string;
+};
+
+export type VaultArchive = {
+	status: 'pending' | 'running' | 'saved' | 'skipped' | 'failed';
+	action?: 'create' | 'update' | 'append';
+	path?: string;
+	reason?: string;
+	error?: string;
+	model?: string;
+	started_at?: number;
+	at?: number;
 };
 
 export type ConclusionEntry = {
@@ -510,6 +523,7 @@ export type ConclusionEntry = {
 	by?: string;
 	error?: string;
 	acceptance?: Acceptance;
+	vault_archive?: VaultArchive | null;
 	/** 2: the conclusion is the task's complete result (older ones were a report about the work) */
 	format?: number;
 	/** workspace files the lead placed in the result in full */

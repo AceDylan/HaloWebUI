@@ -1089,6 +1089,20 @@ async def hermes_illustrated(request: Request, team_id: str, caller=Depends(_her
     return result
 
 
+@router.post("/hermes/teams/{team_id}/vault-archived")
+async def hermes_vault_archived(team_id: str, caller=Depends(_hermes_caller)):
+    """Keep the chat reply in sync when Obsidian finishes after the conclusion was sent."""
+    user, target = caller
+    team, _snap, _err = await reconcile(_own(team_id, user), target)
+    if team.status != "running":
+        return {"refreshed": False, "reason": "not running"}
+    try:
+        return {"refreshed": await refresh_reply(team, await read_conclusion(target, team))}
+    except Exception:
+        log.warning("teams: vault archive status did not refresh the reply of %s", team.id, exc_info=True)
+        return {"refreshed": False}
+
+
 @router.post("/hermes/teams/{team_id}/knowledge")
 async def hermes_knowledge(request: Request, team_id: str, caller=Depends(_hermes_caller)):
     """「存入知识库」 from Telegram."""

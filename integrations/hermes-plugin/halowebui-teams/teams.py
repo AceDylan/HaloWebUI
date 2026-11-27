@@ -155,10 +155,8 @@ def _task_body(team: dict, task: dict, member: dict) -> str:
         "需要和别的成员沟通时用 kanban_comment 写在你的任务上。"
         "确实无法继续（缺信息、需要用户决定）时调用 kanban_block 并写明原因，不要编造结果。"
         # A Hermes member follows SOUL.md's Obsidian rule like any session: on 2026-10-02 the
-        # 戒烟 member spent its last 100 s checking the vault (and wrote nothing). The team's
-        # result reaches the knowledge base through the conclusion page instead.
         "这是团队里的一项任务：不要写 Obsidian / 知识库笔记，也不要做归档检查——"
-        "团队结论由负责人汇总，用户可以在结论页一键存入知识库。"
+        "团队结论由负责人汇总，完成后由主控模型统一判断是否更新 Obsidian 知识库。"
     )
 
 
@@ -290,7 +288,8 @@ def _workspace_text(team: dict) -> str:
 def create_team(team_id: str, plan: dict, *, owner: str, chat_id: str = "", goal: str = "",
                 title: str = "", origin: Optional[dict] = None, image_templates: Optional[list] = None,
                 inputs: Optional[list] = None, conclusion_template: Optional[dict] = None,
-                member_assistants: Optional[dict] = None, auto_deploy: Optional[bool] = None) -> dict:
+                member_assistants: Optional[dict] = None, auto_deploy: Optional[bool] = None,
+                vault_archive: bool = False) -> dict:
     """Create (or return) the board for *team_id* from a validated *plan*; idempotent.
     ``image_templates``: the owner's HaloWebUI image templates, offered to image members.
     ``conclusion_template``: the one the result's picture is drawn in once it is written.
@@ -332,6 +331,7 @@ def create_team(team_id: str, plan: dict, *, owner: str, chat_id: str = "", goal
             "goal": redact(goal, 4000, one_line=False),
             "summary": checked.get("summary") or "",
             "owner": str(owner),
+            "vault_archive_allowed": vault_archive is True,
             "chat_id": str(chat_id or ""),
             # Where the team was started from when not the browser (Telegram): its notices go there.
             "origin": {k: str(v)[:64] for k, v in (origin or {}).items()
@@ -659,6 +659,7 @@ def _mark_completed(slug: str, team: dict) -> None:
 
 
 def _conclusion_brief(team: dict) -> dict:
+    from . import vault_archive
     from .illustrate import public
 
     entry = team.get("conclusion") or {}
@@ -668,6 +669,9 @@ def _conclusion_brief(team: dict) -> dict:
     illustration = public(entry.get("illustration"))
     if illustration:
         out["illustration"] = illustration
+    archive = vault_archive.public_state(entry.get("vault_archive"))
+    if archive:
+        out["vault_archive"] = archive
     return out
 
 
@@ -1033,6 +1037,9 @@ def _team_text(payload: dict) -> str:
         "deploy_succeeded": f"推送与部署完成（{payload.get('sha') or '已发布'}）"
                             + ("，已清理团队分支" if payload.get("cleanup") else ""),
         "deploy_failed": f"推送/部署失败（{payload.get('step') or 'deploy'}）：{payload.get('error') or '见变更页日志'}",
+        "vault_archived": f"已归档到 Obsidian：{payload.get('path') or ''}",
+        "vault_archive_skipped": f"未写入 Obsidian：{payload.get('reason') or ''}",
+        "vault_archive_failed": f"Obsidian 自动归档失败：{payload.get('error') or ''}",
     }.get(action, str(action or "团队事件"))
 
 

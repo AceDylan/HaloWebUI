@@ -48,6 +48,7 @@
 		'concluding',
 		'illustrating',
 		'checking',
+		'archiving',
 		'deploying'
 	]);
 
@@ -193,7 +194,9 @@
 	$: activeCount = counts.active ?? 0;
 	// A team that just finished is still moving while the lead writes and checks its result.
 	$: settling = teams.some(
-		(t) => t.stage && ['concluding', 'illustrating', 'checking', 'deploying'].includes(t.stage.key)
+		(t) =>
+			t.stage &&
+			['concluding', 'illustrating', 'checking', 'archiving', 'deploying'].includes(t.stage.key)
 	);
 
 	const QUICK_STARTS = [

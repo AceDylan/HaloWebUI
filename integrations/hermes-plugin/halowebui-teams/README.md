@@ -232,3 +232,18 @@ Drop the name from `plugins.enabled` and restart the gateway. Team boards stay o
 archives one.
 
 显式成员来源新增官方 Claude（officlaude）：官网订阅 OAuth、只读 auth status 探测、不自动等待额度；不进入默认或覆盖配置中的自动回退顺序。
+
+### Automatic Obsidian archiving
+
+When a HaloWebUI admin's team finishes, the team lead can use the host
+`vault-archive.py policy` and CLI to decide whether the result belongs in Obsidian.
+This also covers linked Telegram and QQ teams and `/work`. Ordinary teams are
+evaluated after acceptance. When the team ships automatically, the lead waits
+for the deploy result and can cite its commit, CI and verification evidence.
+The result appears in the workbench, conclusion and completion or deployment
+notices. Run receipts and backups live in the worktree's `.halo/` and survive
+branch cleanup.
+
+Set `HALO_TEAMS_AUTO_VAULT_ARCHIVE=0` in the Hermes gateway environment to turn it
+off. The conclusion page's manual 「存入知识库」 action saves to HaloWebUI's
+「协作结论」 knowledge base.

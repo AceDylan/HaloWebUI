@@ -68,7 +68,9 @@
 		phaseAt,
 		statusLabel,
 		taskRunner,
-		toneOf
+		toneOf,
+		vaultArchivePending,
+		vaultArchiveText
 	} from './model';
 
 	export let teamId: string;
@@ -199,6 +201,7 @@
 	$: titles = new Map(tasks.map((t) => [t.id, t.key]));
 	$: conclusionBrief = live?.team.conclusion;
 	$: acceptance = conclusionBrief?.acceptance;
+	$: archive = conclusionBrief?.vault_archive;
 	$: deployBrief = live?.team.deploy ?? null;
 	$: leadChange = live?.team.change ?? null;
 	$: leadModel =
@@ -432,6 +435,7 @@
 		const leadPending =
 			live?.team.change?.status === 'thinking' ||
 			acc?.status === 'checking' ||
+			vaultArchivePending(live?.team.conclusion?.vault_archive) ||
 			live?.team.deploy?.status === 'running' ||
 			autoDeployPending;
 		if (settled || (finished && finishedFetches > 2 && !conclusionPending && !leadPending)) return;
@@ -1061,6 +1065,15 @@
 										{/if}
 									</div>
 								{/if}
+							</div>
+						{/if}
+						{#if archive}
+							<div
+								class="mt-2 break-words text-xs text-gray-600 dark:text-gray-300"
+								data-vault-archive={archive.status}
+								role="status"
+							>
+								{vaultArchiveText(archive)}
 							</div>
 						{/if}
 					</div>

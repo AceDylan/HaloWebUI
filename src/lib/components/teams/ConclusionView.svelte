@@ -22,7 +22,15 @@
 	import ReportMarkdown from './ReportMarkdown.svelte';
 	import RunnerBadge from './RunnerBadge.svelte';
 	import StatusChip from './StatusChip.svelte';
-	import { etaSentence, formatBytes, formatStamp, prepareReport, statusLabel } from './model';
+	import {
+		etaSentence,
+		formatBytes,
+		formatStamp,
+		prepareReport,
+		statusLabel,
+		vaultArchivePending,
+		vaultArchiveText
+	} from './model';
 	import { now } from './clock';
 
 	/**
@@ -69,6 +77,7 @@
 
 	$: status = data?.status ?? 'none';
 	$: entry = data?.entry ?? {};
+	$: archive = entry.vault_archive;
 	$: generating = status === 'generating' || writing;
 	$: finished = phase === 'completed' || phase === 'stopped';
 	$: doneTasks = data?.tasks.filter((t) => t.status === 'done').length ?? progress?.done ?? 0;
@@ -106,6 +115,7 @@
 				data?.status === 'generating' ||
 				writing ||
 				data?.entry?.illustration?.status === 'generating' ||
+				vaultArchivePending(data?.entry?.vault_archive) ||
 				cardDesigning(data?.card)
 			)
 		)
@@ -115,7 +125,14 @@
 
 	// The workbench's snapshot says when the report changed (written / regenerated): reload then.
 	$: {
-		const key = `${brief?.status ?? ''}:${brief?.generated_at ?? ''}:${brief?.illustration?.status ?? ''}:${brief?.illustration?.at ?? ''}`;
+		const key = [
+			brief?.status,
+			brief?.generated_at,
+			brief?.illustration?.status,
+			brief?.illustration?.at,
+			brief?.vault_archive?.status,
+			brief?.vault_archive?.at
+		].join(':');
 		if (key !== lastBrief) {
 			const first = lastBrief === '';
 			lastBrief = key;
@@ -412,6 +429,16 @@
 				</div>
 			{/if}
 		</header>
+
+		{#if archive}
+			<div
+				class="tm-card-quiet mb-3 break-words px-3 py-2 text-xs text-gray-600 dark:text-gray-300"
+				data-vault-archive={archive.status}
+				role="status"
+			>
+				{vaultArchiveText(archive)}
+			</div>
+		{/if}
 
 		{#if generating}
 			<div

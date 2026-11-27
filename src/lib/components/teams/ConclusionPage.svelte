@@ -19,6 +19,8 @@
 	let live: LiveSnapshot | null = null;
 	let error = '';
 	let view: ConclusionView;
+	let refresh: ReturnType<typeof setTimeout> | undefined;
+	let destroyed = false;
 	// the parts of the page the chat links to (…/conclusion#files, #process)
 	const PARTS = [
 		{ key: 'files', label: '产出文件' },
@@ -34,18 +36,40 @@
 	$: leadModel =
 		live?.team.lead_model?.model ?? team?.plan?.lead_model?.model ?? team?.plan?.lead?.model ?? '';
 
-	onMount(async () => {
+	const load = async () => {
 		try {
 			const data = await getTeam(localStorage.token, teamId);
+			if (destroyed) return;
 			team = data.team;
 			live = data.live;
 			// the team's chat is the one lit in the history while its result is read
 			if (team?.chat_id) currentChatId.set(team.chat_id);
+			const state = live?.team;
+			const acceptance = state?.conclusion?.acceptance;
+			const deployPending =
+				state?.auto_deploy &&
+				!state.project_cleaned &&
+				!state.deploy &&
+				acceptance?.status === 'ready' &&
+				Date.now() / 1000 - Number(acceptance.at ?? 0) < 45;
+			if (
+				deployPending ||
+				['concluding', 'checking', 'illustrating', 'deploying', 'archiving'].includes(
+					data.stage?.key ?? ''
+				)
+			) {
+				refresh = setTimeout(load, 5000);
+			}
 		} catch (e) {
-			error = `${(e as Error)?.message ?? e}`;
+			if (!team && !destroyed) error = `${(e as Error)?.message ?? e}`;
 		}
+	};
+	onMount(() => {
+		void load();
 	});
 	onDestroy(() => {
+		destroyed = true;
+		if (refresh) clearTimeout(refresh);
 		if (team?.chat_id && $currentChatId === team.chat_id) currentChatId.set('');
 	});
 </script>

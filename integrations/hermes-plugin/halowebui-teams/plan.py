@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from typing import Any, Callable, Optional
 
 from . import assistants, library as library_mod, runners
@@ -313,7 +314,8 @@ _MAX_TOKENS_ERROR = re.compile(r"max_tokens|max_completion_tokens|max_output_tok
 
 def call_model(messages: list, timeout: int = 150, *, max_tokens: int = 4000,
                temperature: float = 0.3, preferred: Optional[str] = None,
-               on_route: Optional[Callable[[dict, list], None]] = None) -> tuple[Optional[str], str, dict]:
+               on_route: Optional[Callable[[dict, list], None]] = None,
+               deadline: Optional[float] = None) -> tuple[Optional[str], str, dict]:
     """One lead call along ``lead_routes``: ``(text, "", used)`` or ``(None, reason, used)``. Never raises.
     ``on_route(route, failures so far)`` before each model is tried (progress)."""
     try:
@@ -330,17 +332,23 @@ def call_model(messages: list, timeout: int = 150, *, max_tokens: int = 4000,
                 on_route(route, list(failures))
             except Exception:  # noqa: BLE001 — progress must never break the call
                 pass
+        budget = timeout if deadline is None else min(timeout, int(deadline - time.monotonic()))
+        if budget <= 0:
+            break
         try:
             try:
                 resp = call_llm(task=None, provider=route["provider"], model=route["model"], messages=messages,
-                                temperature=temperature, max_tokens=max_tokens, timeout=timeout)
+                                temperature=temperature, max_tokens=max_tokens, timeout=budget)
             except Exception as exc:
                 # A long answer asks for more output than some providers allow (deepseek-chat: 8192):
                 # the same route once more within the common cap.
                 if max_tokens <= SAFE_MAX_TOKENS or not _MAX_TOKENS_ERROR.search(str(exc)):
                     raise
+                budget = timeout if deadline is None else min(timeout, int(deadline - time.monotonic()))
+                if budget <= 0:
+                    break
                 resp = call_llm(task=None, provider=route["provider"], model=route["model"], messages=messages,
-                                temperature=temperature, max_tokens=SAFE_MAX_TOKENS, timeout=timeout)
+                                temperature=temperature, max_tokens=SAFE_MAX_TOKENS, timeout=budget)
             text = resp.choices[0].message.content or ""
         except Exception as exc:
             failures.append(f"{route['model']}：{type(exc).__name__}: {redact(exc, 160)}")
@@ -353,6 +361,8 @@ def call_model(messages: list, timeout: int = 150, *, max_tokens: int = 4000,
                 "fallback_from": [f.split("：", 1)[0] for f in failures], "fallback_reason": "；".join(failures),
                 **({"requested": preferred} if preferred else {})}
         return text, "", used
+    if deadline is not None and int(deadline - time.monotonic()) <= 0:
+        failures.append("负责人模型调用等待超时")
     return None, "负责人模型都调用失败：" + "；".join(failures), {"model": "", "fallback_reason": "；".join(failures)}
 
 

@@ -23,6 +23,7 @@ import time
 from pathlib import Path
 from typing import Any, Optional
 
+from . import vault_archive
 from .common import RUNNER_EXECUTORS, board_conn, logger, now, read_team, redact, team_boards
 
 STATS_TTL = 600
@@ -50,7 +51,7 @@ TOOL_LABELS = {
 STAGE_LABELS = {
     "planning": "负责人制定计划", "approval": "等你批准", "starting": "启动成员", "running": "成员执行中",
     "attention": "需要你处理", "paused": "已暂停派发", "concluding": "整理完整结果", "checking": "对照目标验收",
-    "illustrating": "为结果配图", "deploying": "推送与部署中",
+    "illustrating": "为结果配图", "deploying": "推送与部署中", "archiving": "判断知识库归档",
     "done": "已完成", "stopped": "已停止",
 }
 
@@ -379,7 +380,8 @@ def _latest_activity(slug: str, task_ids: list[str]) -> dict[str, dict]:
 def _step_states(key: str) -> list[dict]:
     order = ["plan", "approve", "run", "conclude", "check"]
     position = {"planning": 0, "approval": 1, "starting": 2, "running": 2, "attention": 2, "paused": 2,
-                "concluding": 3, "illustrating": 3, "checking": 4, "deploying": 5, "done": 5, "stopped": 5}.get(key, 2)
+                "concluding": 3, "illustrating": 3, "checking": 4, "archiving": 4,
+                "deploying": 5, "done": 5, "stopped": 5}.get(key, 2)
     out = []
     for i, name in enumerate(order):
         state = "done" if i < position else ("active" if i == position else "pending")
@@ -436,6 +438,9 @@ def stage(slug: str, team: dict, tasks: list[dict], phase: str, stats: Optional[
             active = next((s for s in steps if s.get("status") == "running"), None)
             step_now = (active.get("detail") or active.get("label")) if isinstance(active, dict) else "正在合并、推送并部署"
             out.update(key="deploying", started_at=int(dep.get("started_at") or at), now=step_now)
+        elif vault_archive.is_active(entry.get("vault_archive")):
+            out.update(key="archiving", started_at=entry["vault_archive"]["started_at"],
+                       now="主控模型正在判断是否更新 Obsidian 知识库")
         else:
             failed = entry.get("status") == "failed"
             out.update(key="done", started_at=team.get("completed_at"),

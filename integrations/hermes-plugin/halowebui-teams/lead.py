@@ -638,7 +638,7 @@ def apply_change(team_id: str, change_id: str, *, owner: Optional[str] = None, a
                 rec.update({"state": "running", "completed_at": None, "round": int(rec.get("round") or 0) + 1})
                 if rec.get("conclusion"):
                     rec["conclusion"] = {**rec["conclusion"], "status": "outdated", "outdated_at": stamp,
-                                         "acceptance": None}
+                                         "acceptance": None, "vault_archive": None}
 
         update_team(slug, mutate_members)
         team = read_team(slug) or team

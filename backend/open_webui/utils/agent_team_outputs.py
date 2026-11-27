@@ -13,6 +13,7 @@
 """
 
 import asyncio
+import html
 import io
 import logging
 import re
@@ -119,6 +120,28 @@ def _acceptance_lines(entry: dict) -> list[str]:
     return lines
 
 
+def _vault_archive_lines(entry: dict) -> list[str]:
+    archive = entry.get("vault_archive")
+    if not isinstance(archive, dict):
+        return []
+    status = archive.get("status")
+    if status == "saved":
+        verb = {"create": "新建", "update": "更新", "append": "追加"}.get(str(archive.get("action")), "归档")
+        line = f"📚 Obsidian：已{verb} {archive.get('path') or ''}"
+    elif status == "skipped":
+        line = "📚 Obsidian：未写入知识库"
+    elif status == "failed":
+        line = "⚠️ Obsidian：自动归档失败"
+    else:
+        return []
+    detail = archive.get("error") if status == "failed" else archive.get("reason")
+    if detail:
+        line = f"{line.rstrip()}（{detail}）"
+    # State can include text from the model. Keep it inside the quoted Markdown line.
+    escaped = re.sub(r"([\\`*_{}\[\]()~!])", r"\\\1", html.escape(" ".join(line.split()), quote=False))
+    return [f"> {escaped}"]
+
+
 def _report_markdown(team: AgentTeamModel, conclusion: dict) -> str:
     markdown = chat_links(team.id, conclusion.get("markdown") or "", conclusion.get("workspace") or "",
                           [f.get("path") for f in conclusion.get("files") or [] if isinstance(f, dict)]).strip()
@@ -131,7 +154,8 @@ def chat_content(team: AgentTeamModel, conclusion: dict, card: Optional[dict] = 
     """The conclusion as a chat reply: the report, its card (结论卡片) when it fits, the lead's
     acceptance, where the rest is (last: the page shows that line as buttons)."""
     markdown = _report_markdown(team, conclusion)
-    tail = ["---", *_acceptance_lines(conclusion.get("entry") or {})]
+    entry = conclusion.get("entry") or {}
+    tail = ["---", *_acceptance_lines(entry), *_vault_archive_lines(entry)]
     if len(tail) > 1:
         tail.append("")
     # The page shows this line as buttons that open each part in place (TeamResultBar).

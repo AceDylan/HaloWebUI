@@ -138,19 +138,21 @@ def list_files(team: dict) -> list[dict]:
 
 def resolve_file(team: dict, rel: str) -> Optional[Path]:
     """*rel* inside the team's workspace, or None (absolute paths, .., symlinks out refused)."""
+    from .vault_archive import private_artifact
+
     root = _workspace(team)
     if root is None or not rel:
         return None
     rel = rel.replace("\\", "/").lstrip("/")
-    if ".." in rel.split("/"):
+    if ".." in rel.split("/") or private_artifact(Path(rel)):
         return None
     root_real = root.resolve()
     candidate = (root_real / rel).resolve()
     try:
-        candidate.relative_to(root_real)
+        relative = candidate.relative_to(root_real)
     except ValueError:
         return None
-    return candidate if candidate.is_file() else None
+    return candidate if not private_artifact(relative) and candidate.is_file() else None
 
 
 def read_file(team: dict, rel: str) -> tuple[bytes, str, str]:
@@ -392,11 +394,25 @@ def _strip_wrapping_fence(text: str) -> str:
     return m.group(1) if m and "\n```" not in m.group(1) else text
 
 
-def _set(slug: str, **fields: Any) -> dict:
+def _set(slug: str, *, mark_archive: bool = False, **fields: Any) -> dict:
+    from . import vault_archive
+
+    waiting = False
+    if mark_archive:
+        try:
+            team = read_team(slug) or {}
+            candidate = {**team, "conclusion": fields}
+            waiting = vault_archive.is_eligible(candidate) and vault_archive.waits_for_deploy(candidate)
+        except Exception as exc:
+            logger.info("halowebui-teams: archive scheduling deferred (%s)", type(exc).__name__)
+            waiting = True
+
     def mutate(rec: dict) -> None:
         current = dict(rec.get("conclusion") or {})
         current.update(fields)
         rec["conclusion"] = current
+        if mark_archive:
+            current["vault_archive"] = vault_archive.pre_mark(rec, waiting=waiting)
 
     return (update_team(slug, mutate).get("conclusion") or {})
 
@@ -434,7 +450,8 @@ def generate(slug: str, *, by: str = "auto") -> dict:
     tmp = path.with_suffix(".tmp")
     tmp.write_text(text, encoding="utf-8")
     os.replace(tmp, path)
-    entry = _set(slug, status="ready", source=source, model=used.get("model") or "",
+    entry = _set(slug, mark_archive=by == "auto" and source == "lead",
+                 status="ready", source=source, model=used.get("model") or "",
                  model_label=used.get("label") or "", fallback_reason=used.get("fallback_reason") or (reason if source == "assembled" else ""),
                  generated_at=now(), seconds=round(time.time() - started, 1), chars=len(text),
                  tasks_done=sum(1 for r in rows if r["status"] == "done"), tasks_total=len(rows), by=by, error="",
@@ -461,19 +478,52 @@ def _run(slug: str, by: str) -> None:
             except Exception:  # noqa: BLE001
                 logger.warning("halowebui-teams: automatic illustration for %s did not start", slug, exc_info=True)
         if entry.get("status") == "ready" and entry.get("source") == "lead":
-            from .lead import check_acceptance
-
-            try:  # the lead checks the result against the goal (gaps → 「让团队补上」)
-                check_acceptance(slug)
-            except Exception:  # noqa: BLE001
-                logger.warning("halowebui-teams: acceptance check for %s failed", slug, exc_info=True)
-                _set(slug, acceptance={"status": "failed", "error": "验收出错", "at": now()})
+            _check_and_archive(slug)
     except Exception as exc:
         logger.warning("halowebui-teams: conclusion for %s failed", slug, exc_info=True)
         _set(slug, status="failed", error=f"生成结论出错：{type(exc).__name__}", finished_at=now())
     finally:
         with _jobs_lock:
             _jobs.pop(slug, None)
+
+
+def _check_and_archive(slug: str) -> None:
+    from . import vault_archive
+    from .lead import check_acceptance
+
+    try:
+        check_acceptance(slug)
+    except Exception:
+        logger.warning("halowebui-teams: acceptance check for %s failed", slug, exc_info=True)
+        _set(slug, acceptance={"status": "failed", "error": "验收出错", "at": now()})
+    try:
+        vault_archive.maybe_after_conclusion(slug)
+    except Exception as exc:
+        logger.warning("halowebui-teams: archive scheduling failed for %s (%s)", slug, type(exc).__name__)
+
+
+def resume_acceptance(slug: str, team: dict) -> None:
+    """Resume the acceptance that gates archiving if the gateway stopped mid-check."""
+    from . import vault_archive
+
+    entry = team.get("conclusion") or {}
+    acceptance = entry.get("acceptance") or {}
+    if (acceptance.get("status") != "checking" or not vault_archive.is_eligible(team)
+            or (not entry.get("vault_archive") and not vault_archive.recent_completion(team))):
+        return
+
+    def resume() -> None:
+        try:
+            _check_and_archive(slug)
+        finally:
+            with _jobs_lock:
+                _jobs.pop(slug, None)
+
+    with _jobs_lock:
+        if slug in _jobs:
+            return
+        _jobs[slug] = threading.Thread(target=resume, name=f"halo-acceptance-{slug[-8:]}", daemon=True)
+        _jobs[slug].start()
 
 
 def start(slug: str, *, by: str = "auto", force: bool = False) -> dict:
@@ -488,7 +538,9 @@ def start(slug: str, *, by: str = "auto", force: bool = False) -> dict:
         if (not force and current.get("status") == "generating"
                 and now() - int(current.get("started_at") or 0) < STALE_GENERATING):
             return current
-        entry = _set(slug, status="generating", started_at=now(), by=by, error="")
+        archive = current.get("vault_archive") or {}
+        clear_archive = {"vault_archive": None} if archive.get("status") in ("pending", "running") else {}
+        entry = _set(slug, status="generating", started_at=now(), by=by, error="", **clear_archive)
         if os.environ.get("HALO_TEAMS_CONCLUSION_SYNC") == "1":  # tests
             _jobs[slug] = threading.current_thread()
         else:
@@ -518,10 +570,12 @@ def read(slug: str, team: dict) -> dict:
             markdown = ""
     rows = _task_rows(slug, team)
     files = list_files(team)
-    from . import illustrate
+    from . import illustrate, vault_archive
 
     if entry.get("illustration"):
         entry["illustration"] = illustrate.public(entry["illustration"])
+    if "vault_archive" in entry:
+        entry["vault_archive"] = vault_archive.public_state(entry["vault_archive"])
     return {
         # A failed regeneration keeps showing the previous report, with the error beside it.
         "status": entry.get("status") or ("ready" if markdown else "none"),

@@ -351,8 +351,9 @@ def diff(team: dict, path: str) -> str:
         raise ProjectError(404, "没有可看的改动")
     if not path or path.startswith("/") or ".." in Path(path).parts or "\x00" in path:
         raise ProjectError(400, "路径不对")
-    text = git(workspace, "diff", "-M", project["base_sha"], "--", path).stdout
-    if not text and path in git(workspace, "ls-files", "--others", "--exclude-standard", "--", path).stdout.split("\n"):
+    text = git(workspace, "diff", "-M", project["base_sha"], "--", path, EXCLUDE).stdout
+    if not text and path in git(workspace, "ls-files", "--others", "--exclude-standard", "--", path,
+                                EXCLUDE).stdout.split("\n"):
         text = git(workspace, "diff", "--no-index", "/dev/null", path).stdout  # new, not added yet
     return text[:DIFF_MAX] + ("\n… （太长，截断）" if len(text) > DIFF_MAX else "")
 
@@ -459,22 +460,25 @@ def discard(slug: str, team: dict, *, auto: bool = False, shipped: bool = False)
         raise ProjectError(404, "这个团队不是在项目里做的")
     if (team.get("conclusion") or {}).get("status") == "generating":
         raise ProjectError(409, "负责人正在写结论（要读这些文件），写完再放弃分支")
-    workspace = team.get("workspace") or ""
-    if os.path.isdir(workspace):
-        # The conclusion lives in <workspace>/.halo: keep it through the removal.
-        import shutil
-        import tempfile
+    from .vault_archive import workspace_lock
 
-        keep = Path(workspace) / ".halo"
-        saved = None
-        if keep.is_dir():
-            saved = Path(tempfile.mkdtemp(prefix="halo-keep-")) / ".halo"
-            shutil.copytree(keep, saved)
-        git(repo, "worktree", "remove", "--force", workspace, check=True)
-        Path(workspace).mkdir(parents=True, exist_ok=True)  # the team's record still points here
-        if saved is not None:
-            shutil.copytree(saved, keep)
-            shutil.rmtree(saved.parent, ignore_errors=True)
+    workspace = team.get("workspace") or ""
+    with workspace_lock(slug):
+        if os.path.isdir(workspace):
+            # The conclusion and archive receipts live in <workspace>/.halo.
+            import shutil
+            import tempfile
+
+            keep = Path(workspace) / ".halo"
+            saved = None
+            if keep.is_dir():
+                saved = Path(tempfile.mkdtemp(prefix="halo-keep-")) / ".halo"
+                shutil.copytree(keep, saved)
+            git(repo, "worktree", "remove", "--force", workspace, check=True)
+            Path(workspace).mkdir(parents=True, exist_ok=True)  # the team's record still points here
+            if saved is not None:
+                shutil.copytree(saved, keep)
+                shutil.rmtree(saved.parent, ignore_errors=True)
     git(repo, "worktree", "prune", timeout=20)
     git(repo, "branch", "-D", branch, timeout=20)
     from .common import update_team
@@ -533,19 +537,22 @@ def revive(slug: str, team: dict) -> None:
     entries = os.listdir(workspace) if os.path.isdir(workspace) else []
     if set(entries) - {".halo"}:
         raise ProjectError(409, f"{workspace} 里有别的文件，不能重建团队分支")
-    saved = None
-    if ".halo" in entries:
-        saved = Path(tempfile.mkdtemp(prefix="halo-keep-")) / ".halo"
-        shutil.move(str(Path(workspace) / ".halo"), saved)
-    try:
-        if os.path.isdir(workspace):
-            os.rmdir(workspace)
-        git(top, "worktree", "add", "-b", branch, workspace, base_sha, check=True)
-    finally:
-        if saved is not None:
-            Path(workspace).mkdir(parents=True, exist_ok=True)
-            shutil.move(str(saved), Path(workspace) / ".halo")
-            shutil.rmtree(saved.parent, ignore_errors=True)
+    from .vault_archive import workspace_lock
+
+    with workspace_lock(slug):
+        saved = None
+        if (Path(workspace) / ".halo").exists():
+            saved = Path(tempfile.mkdtemp(prefix="halo-keep-")) / ".halo"
+            shutil.move(str(Path(workspace) / ".halo"), saved)
+        try:
+            if os.path.isdir(workspace):
+                os.rmdir(workspace)
+            git(top, "worktree", "add", "-b", branch, workspace, base_sha, check=True)
+        finally:
+            if saved is not None:
+                Path(workspace).mkdir(parents=True, exist_ok=True)
+                shutil.move(str(saved), Path(workspace) / ".halo")
+                shutil.rmtree(saved.parent, ignore_errors=True)
     from .common import update_team
 
     update_team(slug, lambda rec: rec.setdefault("project", {}).update({

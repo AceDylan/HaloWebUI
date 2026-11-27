@@ -263,6 +263,8 @@ def fail_message(team: dict, task: dict) -> tuple[str, list]:
 
 
 def done_message(team: dict, snap: dict, markdown: str) -> tuple[str, list]:
+    from . import vault_archive
+
     tasks = snap.get("tasks") or []
     done = sum(1 for t in tasks if t.get("status") in ("done", "archived"))
     started = team.get("approved_at") or team.get("created_at") or 0
@@ -309,6 +311,9 @@ def done_message(team: dict, snap: dict, markdown: str) -> tuple[str, list]:
             check = (f"\n🎯 负责人验收：{esc(clip(acceptance.get('summary'), 200)) or '没有完全达成'}\n"
                      + "\n".join(f"  · {esc(clip(g.get('title'), 40))}：{esc(clip(g.get('detail'), 160))}" for g in gaps[:5]))
     head += check
+    archive = vault_archive.summary_line(conclusion.get("vault_archive"), html_mode=True)
+    if archive:
+        head += "\n" + archive
     body = plain(markdown) if markdown else ""
     if not body:
         body = "\n".join(f"• {t.get('title')}：{plain(t.get('result') or '')[:200]}" for t in tasks[:8])
@@ -328,6 +333,8 @@ def done_message(team: dict, snap: dict, markdown: str) -> tuple[str, list]:
 
 def deploy_message(team: dict) -> tuple[str, list]:
     """Telegram notice for a finished / failed / skipped push-and-deploy run."""
+    from . import vault_archive
+
     project = team.get("project") or {}
     dep = project.get("deploy") if isinstance(project.get("deploy"), dict) else {}
     status = dep.get("status") or ""
@@ -354,6 +361,9 @@ def deploy_message(team: dict) -> tuple[str, list]:
                  + (f" · 用时 {took}" if took else ""),
                  esc(clip(dep.get("error") or "原因未知，请到协作台「变更」查看日志", 800))]
         buttons.append([("🔁 重试推送部署", f"cb:dp:{team['team_id']}")])
+    archive = vault_archive.summary_line((team.get("conclusion") or {}).get("vault_archive"), html_mode=True)
+    if archive:
+        lines.append(archive)
     row = []
     if dep.get("ci_url"):
         row.append(("🔗 查看 CI", "url:" + str(dep["ci_url"])))
@@ -481,14 +491,15 @@ def pending(team: dict, snap: dict) -> list[tuple[str, str, Optional[dict]]]:
         else:
             out.append((f"fail:{task['id']}:{attempt}", "fail", task))
     if (snap.get("team") or {}).get("phase") == "completed":
-        from . import illustrate
+        from . import illustrate, vault_archive
 
         entry = team.get("conclusion") or {}
         waited = now() - int(team.get("completed_at") or now())
         checking = ((entry.get("acceptance") or {}).get("status") == "checking"
                     and now() - int((entry.get("acceptance") or {}).get("started_at") or 0) < ACCEPTANCE_WAIT)
         # a picture being drawn (on request, or HALO_TEAMS_AUTO_ILLUSTRATE=1) goes out with the notice (bounded by illustrate.WAIT)
-        if (entry.get("status") in ("ready", "failed") and not checking and not illustrate.drawing(entry)) \
+        if (entry.get("status") in ("ready", "failed") and not checking and not illustrate.drawing(entry)
+                and not vault_archive.is_active(entry.get("vault_archive"))) \
                 or waited >= DONE_WAIT:
             rounds = int(team.get("round") or 0)
             out.append(("done" if not rounds else f"done:{rounds}", "done", None))

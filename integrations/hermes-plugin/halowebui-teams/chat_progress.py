@@ -9,15 +9,15 @@ import re
 import time
 from typing import Optional
 
-from . import link, progress, teams
+from . import link, progress, teams, vault_archive
 from .common import board_slug, now, read_team, redact, team_boards, valid_team_id
 from .notify import duration, plain
 
-LIVE_MOVING_STAGES = ("running", "paused", "concluding", "checking", "illustrating", "deploying")
+LIVE_MOVING_STAGES = ("running", "paused", "concluding", "checking", "illustrating", "deploying", "archiving")
 ACTIVE_STAGES = ("planning", "approval", "starting", "attention", *LIVE_MOVING_STAGES)
 TERMINAL_STAGES = ("done", "stopped", "plan_failed", "start_failed", "cancelled")
-DEPLOY_TERMINAL = ("succeeded", "failed", "skipped")
-POST_RUN_STAGES = ("concluding", "checking", "illustrating", "deploying")
+DEPLOY_TERMINAL = vault_archive.DEPLOY_TERMINAL
+POST_RUN_STAGES = ("concluding", "checking", "illustrating", "deploying", "archiving")
 PROGRESS_WORDS = {"进度", "状态", "详情", "progress", "status", "detail"}
 QQ_SHORTCUT_WORDS = {"协作进度", "团队进度", "工作流进度", "看协作进度"}
 CARD_MAX_CHARS = 3200
@@ -77,12 +77,14 @@ def _make_view(team: dict, stage: dict, tasks: list[dict], *, status: str, board
     completed_at = team.get("completed_at") or team.get("finished_at")
     settled_at = max(completed_at or 0, conclusion.get("generated_at") or (board.get("conclusion") or {}).get("finished_at") or 0,
                      (conclusion.get("acceptance") or {}).get("at") or 0,
+                     (conclusion.get("vault_archive") or {}).get("at") or 0,
                      (conclusion.get("illustration") or {}).get("at") or 0)
     deploy_pending = (key == "done" and not deploy_status and expects_auto_deploy(board)
                       and now() - settled_at < AUTO_DEPLOY_GRACE)
     finished_at = None
     if key in TERMINAL_STAGES and not deploy_pending:
-        finished_at = (team.get("stopped_at") if key == "stopped" else (deploy or {}).get("finished_at") or settled_at)
+        finished_at = (team.get("stopped_at") if key == "stopped"
+                       else max((deploy or {}).get("finished_at") or 0, settled_at))
         finished_at = finished_at or team.get("updated_at") or now()
     eta = stage.get("eta")
     if isinstance(eta, dict):
@@ -226,6 +228,7 @@ def resolve_query_views(owner: str, selector: str = "", *, workflow_first: Optio
             if (conclusion.get("status") in ("ready", "failed")
                     and (conclusion.get("acceptance") or {}).get("status") != "checking"
                     and (conclusion.get("illustration") or {}).get("status") != "generating"
+                    and not vault_archive.is_active(conclusion.get("vault_archive"))
                     and deploy.get("status") != "running" and not expects_auto_deploy(board)):
                 settled_local.add(team_id)
 
@@ -425,14 +428,15 @@ def qq_milestone_state(view: dict) -> dict:
 def qq_milestone_message(prev: Optional[dict], view: dict) -> Optional[str]:
     stage = view["stage_key"]
     state = qq_milestone_state(view)
-    if stage in ("attention", *TERMINAL_STAGES) or state["deploy_status"] in DEPLOY_TERMINAL:
+    if stage in ("attention", *TERMINAL_STAGES) or (
+            state["deploy_status"] in DEPLOY_TERMINAL and stage != "archiving"):
         return None
     if prev is None and not view["done"] and stage not in POST_RUN_STAGES:
         return None
     prev = prev or {}
     before = prev.get("tasks") or {}
     updates = []
-    if stage != prev.get("stage_key") and stage in ("concluding", "checking", "deploying"):
+    if stage != prev.get("stage_key") and stage in ("concluding", "checking", "deploying", "archiving"):
         updates.append("📍 " + view["stage_label"])
     if state["deploy_step"] == "ci" and (prev.get("deploy_step") != "ci" or
                                          (state["ci_url"] and prev.get("ci_url") != state["ci_url"])):

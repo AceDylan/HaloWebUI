@@ -44,7 +44,7 @@ def _has_ready_native(slug: str) -> bool:
 
 def tick() -> None:
     from .teams import nudge_dispatch
-    from . import gallery
+    from . import gallery, vault_archive
 
     try:
         gallery.flush()
@@ -95,6 +95,7 @@ def tick() -> None:
                     deploy.tick_board(slug, read_team(slug) or team)  # auto-ship when auto_deploy is on
                 except Exception:
                     logger.warning("halowebui-teams: auto-deploy tick failed for %s", slug, exc_info=True)
+            vault_archive.tick_board(slug, read_team(slug) or team)
         except Exception:
             logger.warning("halowebui-teams: bridge tick failed for %s", slug, exc_info=True)
 
@@ -155,6 +156,8 @@ def _catch_up_conclusion(slug: str, team: dict) -> None:
         conclusion.start(slug, by="auto")
     elif not entry and now() - int(team.get("completed_at") or 0) < CONCLUSION_CATCH_UP:
         conclusion.start(slug, by="auto")
+    elif entry.get("status") == "ready":
+        conclusion.resume_acceptance(slug, team)
 
 
 REPORT_RETRY = 60            # a hand-over HaloWebUI could not take (chat busy, HaloWebUI down) is tried again
@@ -167,7 +170,7 @@ def report_conclusion(slug: str, team: dict) -> None:
     to HaloWebUI, which puts it in the chat the team was started from. Once per written version,
     after the lead's acceptance check and the result's picture (bounded waits); a rewrite the user
     asked for is not re-sent."""
-    from . import link, notify
+    from . import link, notify, vault_archive
 
     if team.get("state") != "completed" or not team.get("owner"):
         return
@@ -191,6 +194,8 @@ def report_conclusion(slug: str, team: dict) -> None:
 
     if illustrate.drawing(entry):  # the chat gets the result with its picture (bounded wait)
         return
+    if vault_archive.is_active(entry.get("vault_archive")):
+        return
     if not link.configured() or now() - int(team.get("report_tried_at") or 0) < REPORT_RETRY:
         return
     update_team(slug, lambda rec: rec.update({"report_tried_at": now()}))
@@ -205,9 +210,12 @@ def report_conclusion(slug: str, team: dict) -> None:
         else:
             logger.info("halowebui-teams: HaloWebUI did not take the conclusion of %s yet (%s)", slug, exc.message)
         return
-    update_team(slug, lambda rec: rec.update({"reported": key}))
+    fresh = update_team(slug, lambda rec: rec.update({"reported": key}))
     if isinstance(result, dict) and result.get("posted"):
         logger.info("halowebui-teams: conclusion of %s posted to its chat", slug)
+        archive = (fresh.get("conclusion") or {}).get("vault_archive") or {}
+        if archive.get("at") and archive != entry.get("vault_archive"):
+            vault_archive.refresh_reply(fresh)
 
 
 def _loop() -> None:

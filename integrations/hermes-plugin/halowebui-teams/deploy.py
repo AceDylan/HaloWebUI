@@ -23,7 +23,7 @@ import time
 from pathlib import Path
 from typing import Any, Callable, Optional
 
-from . import projects
+from . import projects, vault_archive
 from .common import TEAM_EVENT_TASK, append_event, board_conn, logger, now, read_team, redact, update_team
 
 STALE_RUNNING = 3600
@@ -234,7 +234,13 @@ def _initial_steps(profile: dict, cleanup: bool, *, codex_review: bool = False) 
 def _update_deploy(slug: str, fn: Callable[[dict], None]) -> Optional[dict]:
     def apply(rec: dict) -> None:
         entry = rec.setdefault("project", {}).setdefault("deploy", {})
+        previous = (entry.get("status"), entry.get("finished_at"))
         fn(entry)
+        if (entry.get("status") in vault_archive.DEPLOY_TERMINAL
+                and (entry.get("status"), entry.get("finished_at")) != previous):
+            marker = vault_archive.pre_mark(rec, waiting=False)
+            if marker:
+                rec["conclusion"]["vault_archive"] = marker
 
     updated = update_team(slug, apply)
     return ((updated or {}).get("project") or {}).get("deploy")
@@ -564,6 +570,21 @@ def _schedule_gateway_restart() -> None:
         logger.warning("halowebui-teams: failed to schedule gateway restart", exc_info=True)
 
 
+def _notify_finished(slug: str) -> None:
+    from . import notify
+
+    try:
+        vault_archive.run_bounded(slug)
+    except Exception as exc:
+        logger.warning("halowebui-teams: archive before deploy notice failed for %s (%s)", slug, type(exc).__name__)
+    try:
+        fresh = read_team(slug)
+        if fresh:
+            notify.deploy_notice(slug, fresh)
+    except Exception:
+        logger.warning("halowebui-teams: deploy notice failed for %s", slug, exc_info=True)
+
+
 def _run_ship(slug: str, profile: dict, by: str, cleanup: bool, codex_review: bool = False) -> None:
     started = now()
     need_gateway_restart = False
@@ -579,6 +600,8 @@ def _run_ship(slug: str, profile: dict, by: str, cleanup: bool, codex_review: bo
 
         # 0. Codex review loop (up to 2 rounds + Claude fix, optional)
         if codex_review:
+            before_review = projects.changed_paths(team) or []
+            _update_deploy(slug, lambda d: d.update({"touched_files": before_review[:80]}))
             info_pre = projects.changes(team)
             if info_pre.get("merged"):
                 _set_step(slug, "review", "done", "分支已合并，跳过审查")
@@ -589,6 +612,7 @@ def _run_ship(slug: str, profile: dict, by: str, cleanup: bool, codex_review: bo
 
         # Record touched paths before merge/cleanup so we know if plugin files changed.
         touched = projects.changed_paths(team) or []
+        _update_deploy(slug, lambda d: d.update({"touched_files": touched[:80]}))
 
         # 1. Merge
         _set_step(slug, "merge", "running", f"合并 {branch} 到 {base_branch}")
@@ -663,19 +687,14 @@ def _run_ship(slug: str, profile: dict, by: str, cleanup: bool, codex_review: bo
         logger.warning("halowebui-teams: ship failed for %s", slug, exc_info=True)
         _fail_ship(slug, started, f"发布异常：{type(exc).__name__}: {redact(exc, 240)}", by)
     finally:
-        _mark_attempt(slug)
-        with _lock:
-            _inflight.discard(slug)
         try:
-            from . import notify
-
-            fresh = read_team(slug)
-            if fresh:
-                notify.deploy_notice(slug, fresh)
-        except Exception:  # noqa: BLE001
-            logger.warning("halowebui-teams: deploy Telegram notice failed for %s", slug, exc_info=True)
-        if need_gateway_restart:
-            _schedule_gateway_restart()
+            _mark_attempt(slug)
+            _notify_finished(slug)
+            if need_gateway_restart:
+                _schedule_gateway_restart()
+        finally:
+            with _lock:
+                _inflight.discard(slug)
 
 
 def _attempt_key(team: dict) -> str:
@@ -815,6 +834,7 @@ def tick_board(slug: str, team: dict) -> bool:
     if acceptance.get("status") == "ready" and acceptance.get("verdict") == "unmet":
         profile = profile_for(project.get("path"))
         reason = "负责人验收未通过（目标未达成），已跳过自动推送部署；检查后可在「变更」里手动一键推送部署"
+        touched = projects.changed_paths(team) or []
         _update_deploy(slug, lambda d: (d.clear(), d.update({
             "status": "skipped",
             "by": "auto",
@@ -827,15 +847,13 @@ def tick_board(slug: str, team: dict) -> bool:
             "error": reason,
             "profile_label": profile["label"],
             "auto_key": auto_key,
+            "touched_files": touched[:80],
         })))
-        try:
-            from . import notify
-
-            fresh = read_team(slug)
-            if fresh:
-                notify.deploy_notice(slug, fresh)
-        except Exception:  # noqa: BLE001
-            pass
+        if vault_archive.is_eligible(team) and os.environ.get("HALO_TEAMS_VAULT_ARCHIVE_SYNC") != "1":
+            threading.Thread(target=_notify_finished, args=(slug,), name=f"halo-deploy-notice-{slug[-8:]}",
+                             daemon=True).start()
+        else:
+            _notify_finished(slug)
         return False
 
     try:

@@ -26,6 +26,8 @@ os.environ["HALO_TEAMS_RUNNERS_FILE"] = os.path.join(_TMP, "halo-teams-runners.j
 os.environ["HALO_TEAMS_CONCLUSION_SYNC"] = "1"
 os.environ["HALO_TEAMS_LEAD_SYNC"] = "1"
 os.environ["HALO_TEAMS_AUTO_ILLUSTRATE"] = "0"  # tests that want it turn it on (no real gpt-image)
+os.environ["HALO_TEAMS_AUTO_VAULT_ARCHIVE"] = "0"
+os.environ["HALO_TEAMS_VAULT_ARCHIVE_SYNC"] = "1"
 for key in [k for k in os.environ if k.startswith("HERMES_KANBAN_") and k != "HERMES_KANBAN_HOME"]:
     del os.environ[key]
 os.makedirs(os.environ["HERMES_HOME"], exist_ok=True)

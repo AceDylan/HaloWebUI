@@ -225,6 +225,10 @@ def illustrated(owner: str, team_id: str) -> dict:
     return call("POST", f"/teams/{team_id}/illustrated", owner, {}, timeout=60)
 
 
+def vault_archived(owner: str, team_id: str) -> dict:
+    return call("POST", f"/teams/{team_id}/vault-archived", owner, {}, timeout=8)
+
+
 def save_knowledge(owner: str, team_id: str) -> dict:
     """「存入知识库」: the conclusion into the owner's 「协作结论」 knowledge base in HaloWebUI."""
     return call("POST", f"/teams/{team_id}/knowledge", owner, {}, timeout=180)

@@ -690,6 +690,7 @@ def _tick_team(key: str, job: dict) -> None:
 
 
 def _team_done(key: str, job: dict, team: dict) -> None:
+    from . import vault_archive
     from .common import board_slug, read_team
     from .notify import _conclusion_markdown, picture_of
 
@@ -709,13 +710,17 @@ def _team_done(key: str, job: dict, team: dict) -> None:
     from . import illustrate
 
     writing = conclusion.get("status") not in ("ready", "failed") or illustrate.drawing(conclusion) \
-        or (conclusion.get("acceptance") or {}).get("status") == "checking"
+        or (conclusion.get("acceptance") or {}).get("status") == "checking" \
+        or vault_archive.is_active(conclusion.get("vault_archive"))
     if writing and waited < CONCLUSION_WAIT:
         return
     markdown = _conclusion_markdown(board) if board else ""
     url = link.team_url(job["id"], "/conclusion" if markdown else "")
     head = f"✅ 协作好了：**{clip(team.get('title'), 60)}**"
     tail = f"\n\n🌐 {'阅读结论' if markdown else '工作台'}：{url}" if url else ""
+    archive = vault_archive.summary_line(conclusion.get("vault_archive"))
+    if archive:
+        tail = f"\n\n{archive}{tail}"
     body = markdown.strip() or "结论没有写出来，各任务的结果请到工作台看。"
     body = whole(body)
     if not send(job, f"{head}\n\n{body}{tail}"):

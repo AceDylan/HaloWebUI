@@ -26,6 +26,7 @@ import aiohttp
 
 from open_webui.env import AIOHTTP_CLIENT_SESSION_SSL
 from open_webui.models.agent_teams import AgentTeamModel, AgentTeams
+from open_webui.models.users import Users
 
 log = logging.getLogger(__name__)
 
@@ -336,9 +337,11 @@ async def start_team(team: AgentTeamModel, target: HermesTarget,
                     log.warning("teams: the assistants applied for %s could not be recorded", team.id)
             snapshots = member_snapshots(applied)
         sent = {k: v for k, v in plan.items() if k != "assistants_applied"}
+        owner = getattr(access, "user", None) or Users.get_user_by_id(team.user_id)
         body = {"team_id": team.id, "plan": sent, "goal": team.goal, "title": team.title,
                 "chat_id": team.chat_id or "", "origin": team_origin(team),
-                "auto_deploy": ships_itself(plan) or bool((team.meta or {}).get("auto_deploy"))}
+                "auto_deploy": ships_itself(plan) or bool((team.meta or {}).get("auto_deploy")),
+                "vault_archive": getattr(owner, "role", None) == "admin"}
         if snapshots:
             body["member_assistants"] = snapshots
         templates = image_templates(team.user_id, limit=200)
@@ -673,6 +676,7 @@ def result_settled(live: Optional[dict]) -> bool:
         return False
     acceptance = conclusion.get("acceptance") if isinstance(conclusion.get("acceptance"), dict) else {}
     illustration = conclusion.get("illustration") if isinstance(conclusion.get("illustration"), dict) else {}
+    archive = conclusion.get("vault_archive") if isinstance(conclusion.get("vault_archive"), dict) else {}
     deploy = (live or {}).get("deploy") if isinstance(live, dict) else None
     deploying = isinstance(deploy, dict) and deploy.get("status") == "running"
     # Give bridge.tick_board a short grace window to kick off auto-deploy right after acceptance finishes.
@@ -685,7 +689,8 @@ def result_settled(live: Optional[dict]) -> bool:
         and int(time.time()) - int(acceptance.get("at") or conclusion.get("generated_at") or 0) < 45
     )
     return (conclusion.get("status") in ("ready", "failed") and acceptance.get("status") != "checking"
-            and illustration.get("status") != "generating" and not deploying and not auto_pending)
+            and illustration.get("status") != "generating" and archive.get("status") not in ("pending", "running")
+            and not deploying and not auto_pending)
 
 
 def snapshot_progress(snap: Any) -> Optional[dict]:

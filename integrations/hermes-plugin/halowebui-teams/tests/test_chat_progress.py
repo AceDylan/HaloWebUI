@@ -157,7 +157,8 @@ def test_telegram_transport_sends_quietly_and_reports_edit_outcomes(monkeypatch)
     assert asyncio.run(tg.asend(TG_USER, "<b>进度</b>", silent=True)) == 123
     assert calls[-1]["disable_notification"] is True
     for failure, outcome in ((None, "ok"), ("Message is not modified", "not_modified"),
-                             ("Message to edit not found", "gone"), ("Timed out", "failed")):
+                             ("Message to edit not found", "gone"), ("Message can't be edited", "gone"),
+                             ("Timed out", "failed")):
         assert asyncio.run(tg.aedit(TG_USER, 123, "进度")) == outcome
         assert calls[-1]["message_id"] == 123 and calls[-1]["parse_mode"] == "HTML"
 
@@ -277,6 +278,37 @@ def test_telegram_deleted_card_is_recreated_then_stopped(pkg, plan_dict, team_id
     assert pkg.common.read_team(slug)["tg_progress"]["finalized"]
     tick()
     assert len(edits) == 1
+
+
+def test_telegram_failing_card_edits_back_off_then_let_the_card_go(pkg, plan_dict, team_id, linked, monkeypatch):
+    slug, clock, snap, tick = _tg_board(pkg, plan_dict, team_id, monkeypatch)
+    edits = []
+    monkeypatch.setattr(tg, "edit", lambda *args: edits.append(args) or "failed")
+    tick()
+    clock[0] += 20
+    tick()
+    assert len(linked.sent) == 1
+    first = pkg.common.read_team(slug)["tg_progress"]["milestone_sig"]
+    snap["tasks"][:] = [_task(1, "done"), _task(2, "running")]
+    clock[0] += 10
+    tick()
+    pg = pkg.common.read_team(slug)["tg_progress"]
+    assert len(edits) == 1 and pg["failures"] == 1 and pg["milestone_sig"] == first and pg["message_id"] == 1001
+    tick()  # the next bridge tick does not hammer Telegram
+    clock[0] += 9
+    tick()
+    assert len(edits) == 1
+    for tries in range(2, notify.PROGRESS_EDIT_TRIES + 1):
+        clock[0] += 10
+        tick()
+        assert len(edits) == tries
+    pg = pkg.common.read_team(slug)["tg_progress"]
+    assert pg["message_id"] is None and "failures" not in pg
+    monkeypatch.setattr(tg, "edit", lambda *args: edits.append(args) or "ok")
+    tick()  # a fresh card while the team still works
+    assert [m["silent"] for m in linked.sent] == [True, True]
+    pg = pkg.common.read_team(slug)["tg_progress"]
+    assert pg["message_id"] == 1002 and pg["milestone_sig"] != first
 
 
 def test_telegram_buttons_open_new_card_refresh_in_place_and_respect_target(pkg, plan_dict, team_id, linked, monkeypatch):

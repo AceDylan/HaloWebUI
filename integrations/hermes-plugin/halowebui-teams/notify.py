@@ -38,6 +38,7 @@ ACCEPTANCE_WAIT = 180       # the done notice waits this long for the lead's acc
 PROGRESS_FIRST_DELAY = 20
 PROGRESS_MILESTONE_GAP = 10
 PROGRESS_ACTIVITY_GAP = 30
+PROGRESS_EDIT_TRIES = 5     # a card whose edits keep failing is let go (a new one comes while the team works)
 
 _seen: dict[str, float] = {}
 _seen_lock = threading.Lock()
@@ -388,7 +389,7 @@ def deploy_notice(slug: str, team: dict) -> Optional[int]:
         job = {"platform": "qqbot", "chat_id": str(origin["chat_id"]),
                **({"thread_id": str(origin["thread_id"])} if origin.get("thread_id") else {})}
         active = remote.jobs().get(f"team:{team['team_id']}") or {}
-        if all(active.get(key) == job.get(key) for key in ("platform", "chat_id", "thread_id")) \
+        if all(active.get(field) == job.get(field) for field in ("platform", "chat_id", "thread_id")) \
                 and active.get("owner") == team.get("owner"):
             job["reply_to"] = active.get("reply_to")
         if remote.send(job, "\n".join(lines)):
@@ -529,14 +530,15 @@ def _remember(slug: str, keys: list[str]) -> None:
 
 def anchor_tg_progress(slug: str, chat_id: Any, thread_id: Any, message_id: Optional[int],
                        milestone_sig: str, full_sig: str, *, finalized: bool = False,
-                       expected: Optional[dict] = None) -> None:
+                       expected: Optional[dict] = None, failures: int = 0) -> None:
     """Persist the live card; an in-flight automatic edit must not replace a newer manual card."""
     def apply(rec: dict) -> None:
         if expected is not None and (rec.get("tg_progress") or {}) != expected:
             return
         rec["tg_progress"] = {"chat_id": str(chat_id), "thread_id": str(thread_id) if thread_id else None,
                               "message_id": message_id, "milestone_sig": milestone_sig, "full_sig": full_sig,
-                              "last_edit_at": now(), "finalized": finalized}
+                              "last_edit_at": now(), "finalized": finalized,
+                              **({"failures": failures} if failures else {})}
 
     update_team(slug, apply)
 
@@ -563,15 +565,24 @@ def _tick_progress(slug: str, team: dict, snap: dict, target: dict) -> None:
         if finalized and pg.get("finalized") and milestone == pg.get("milestone_sig"):
             return
         gap = now() - (pg.get("last_edit_at") or 0)
+        if pg.get("failures") and gap < PROGRESS_MILESTONE_GAP:
+            return  # the last edit failed: retry at the milestone pace, not on every bridge tick
         milestone_changed = milestone != pg.get("milestone_sig") and gap >= PROGRESS_MILESTONE_GAP
         activity_changed = full != pg.get("full_sig") and gap >= PROGRESS_ACTIVITY_GAP
         if not (finalized or milestone_changed or activity_changed):
             return
         text, buttons = chat_progress.render_telegram(view, finalized=finalized)
         result = telegram.edit(chat_id, message_id, text, buttons)
-        if result in ("ok", "not_modified", "gone"):
-            anchor_tg_progress(slug, chat_id, thread_id, None if result == "gone" else message_id,
-                               milestone, full, finalized=finalized, expected=pg)
+        if result == "failed":  # keep the old signatures so the change is retried; give up after a few tries
+            failures = int(pg.get("failures") or 0) + 1
+            give_up = failures >= PROGRESS_EDIT_TRIES
+            anchor_tg_progress(slug, chat_id, thread_id, None if give_up else message_id,
+                               pg.get("milestone_sig") or "", pg.get("full_sig") or "",
+                               finalized=finalized if give_up else bool(pg.get("finalized")),
+                               failures=0 if give_up else failures, expected=pg)
+            return
+        anchor_tg_progress(slug, chat_id, thread_id, None if result == "gone" else message_id,
+                           milestone, full, finalized=finalized, expected=pg)
         return
 
     started = view["started_at"]

@@ -422,7 +422,8 @@ async def _work_command(source: Any, owner: str, args: str, event: Any) -> None:
     if chat_progress.is_work_progress_query(args):
         selector = chat_progress.parse_progress_query(args)
         if selector is None:
-            await _say(source, "发 /work 进度 [编号或 ID] 查看工作流进度。", event)
+            await _say(source, "发 /work 进度 [编号或 ID] 查看工作流进度。要发起新需求，换个说法别用「进度 / 状态 / 详情」开头。",
+                       event)
         else:
             await _progress_command(source, owner, selector, event, workflow_first="work")
         return

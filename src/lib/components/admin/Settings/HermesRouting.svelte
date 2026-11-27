@@ -10,19 +10,24 @@
 	import {
 		getHermesAgyPrefs,
 		getHermesRouting,
+		getHermesWorkConfig,
 		probeHermesRoutingModel,
 		rollbackHermesRouting,
 		saveHermesAgyPrefs,
 		saveHermesRouting,
+		saveHermesWorkConfig,
 		type HermesAgyPrefs,
 		type HermesRouting,
 		type HermesRoutingModel,
-		type HermesRoutingSnapshot
+		type HermesRoutingSnapshot,
+		type HermesWorkConfigResponse,
+		type WorkWorkflowConfig
 	} from '$lib/apis/hermes';
 	import { getHaloClawConfig } from '$lib/apis/haloclaw';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import ModelPicker from './HermesRouting/ModelPicker.svelte';
 	import ChainEditor from './HermesRouting/ChainEditor.svelte';
+	import WorkWorkflowCard from './HermesRouting/WorkWorkflowCard.svelte';
 	import {
 		API_MODE_LABELS,
 		AUX_TASKS,
@@ -46,6 +51,9 @@
 		orderedAuxTasks,
 		runnerLabel,
 		withPrimary,
+		workChanges,
+		workDraftFrom,
+		workFlowSummary,
 		type AgyDraft
 	} from '$lib/utils/hermes-routing';
 
@@ -67,6 +75,10 @@
 	let agyDraft: AgyDraft | null = null;
 	let agyError = '';
 	let agyRefreshing = false;
+	let workRes: HermesWorkConfigResponse | null = null;
+	let workDraft: WorkWorkflowConfig | null = null;
+	let workError = '';
+	let workLoading = false;
 	let auxCollapsed = false;
 	let overridesCollapsed = true;
 	let selectedOAuthModel = '';
@@ -111,6 +123,24 @@
 			adoptAgy(await getHermesAgyPrefs(localStorage.token, opts));
 		} catch (e) {
 			agyError = `${(e as Error)?.message ?? e}`;
+		}
+	};
+
+	const adoptWork = (next: HermesWorkConfigResponse) => {
+		workDraft = workDraftFrom(next);
+		workRes = next;
+	};
+
+	const loadWork = async () => {
+		if (workLoading) return;
+		workLoading = true;
+		workError = '';
+		try {
+			adoptWork(await getHermesWorkConfig(localStorage.token));
+		} catch (e) {
+			workError = `${(e as Error)?.message ?? e}`;
+		} finally {
+			workLoading = false;
 		}
 	};
 
@@ -172,13 +202,14 @@
 	const reloadAll = async () => {
 		if (refreshing) return;
 		refreshing = true;
-		await Promise.all([load({ refresh: true }), loadAgy()]);
+		await Promise.all([load({ refresh: true }), loadAgy(), loadWork()]);
 		refreshing = false;
 	};
 
 	onMount(() => {
 		load();
 		loadAgy();
+		loadWork();
 		getHaloClawConfig(localStorage.token)
 			.then((cfg: any) => {
 				const eff = String(cfg?.default_reasoning_effort ?? '').trim();
@@ -222,8 +253,13 @@
 			? agyChanges(agyDraftFrom(agyPrefs), agyDraft)
 			: { update: {}, lines: [] as string[] };
 	$: agyDirty = agy.lines.length > 0;
-	$: dirty = routingDirty || agyDirty;
-	$: changeLines = [...changes.map(describeChange), ...agy.lines];
+	$: workDiff =
+		workRes && workDraft
+			? workChanges(workDraftFrom(workRes), workDraft)
+			: { changed: false, lines: [] };
+	$: workDirty = workDiff.changed;
+	$: dirty = routingDirty || agyDirty || workDirty;
+	$: changeLines = [...changes.map(describeChange), ...agy.lines, ...workDiff.lines];
 	$: agyModels = agyPrefs?.teams.offiagy_models ?? [];
 	$: agyModelsAt = agyPrefs?.teams.offiagy_models_at ?? 0;
 	$: agyModelsError = agyPrefs?.teams.offiagy_models_error ?? '';
@@ -291,6 +327,7 @@
 	const discard = () => {
 		if (baseline) draft = clone(baseline);
 		if (agyPrefs) agyDraft = agyDraftFrom(agyPrefs);
+		if (workRes) workDraft = workDraftFrom(workRes);
 	};
 
 	const errorStatus = (e: any) => Number(e?.status) || 0;
@@ -299,7 +336,8 @@
 		if (!snap || !draft || !dirty || mediaTimeoutInvalid) return;
 		saving = true;
 		let saved = 0;
-		let routingSaved = false;
+		const savedSections: string[] = [];
+		let savingSection = 'Hermes 路由';
 		try {
 			if (routingDirty) {
 				const payload = clone(draft);
@@ -307,18 +345,30 @@
 				const next = await saveHermesRouting(localStorage.token, payload, snap.revision);
 				saved += next.changes?.length ?? 0;
 				adopt(next);
-				routingSaved = true;
+				savedSections.push(savingSection);
 			}
 			if (agyDirty) {
+				savingSection = 'AGY 优先';
 				const n = agy.lines.length;
 				adoptAgy(await saveHermesAgyPrefs(localStorage.token, agy.update));
+				saved += n;
+				savedSections.push(savingSection);
+			}
+			if (workDirty && workDraft) {
+				savingSection = '/work 工作流';
+				const n = workDiff.lines.length;
+				adoptWork(await saveHermesWorkConfig(localStorage.token, workDraft));
 				saved += n;
 			}
 			toast.success(saved ? `已保存 ${saved} 处改动，下一次任务起生效` : '没有需要保存的改动');
 		} catch (e) {
-			if (errorStatus(e) === 409) conflict = true;
+			if (savingSection === 'Hermes 路由' && errorStatus(e) === 409) conflict = true;
 			const msg = `${(e as Error)?.message ?? e}`;
-			toast.error(routingSaved ? `Hermes 路由已保存，但 AGY 优先保存失败：${msg}` : msg);
+			toast.error(
+				savedSections.length
+					? `${savedSections.join('、')}已保存，${savingSection}保存失败：${msg}`
+					: msg
+			);
 		}
 		saving = false;
 	};
@@ -426,7 +476,13 @@
 		empty: string;
 		label?: (id: string) => string;
 	};
-	const lanes = (r: HermesRouting, a: AgyDraft | null, ui: string[]): Lane[] => [
+	type WorkLane = { key: 'work'; title: string; steps: ReturnType<typeof workFlowSummary> };
+	const lanes = (
+		r: HermesRouting,
+		a: AgyDraft | null,
+		ui: string[],
+		work: WorkWorkflowConfig | null
+	): (Lane | WorkLane)[] => [
 		{ key: 'chat', title: '对话', primary: r.main, chain: r.fallback, empty: '' },
 		{
 			key: 'delegation',
@@ -458,7 +514,8 @@
 								: runnerLabel(id)
 					}
 				]
-			: [])
+			: []),
+		...(work ? [{ key: 'work' as const, title: '/work', steps: workFlowSummary(work) }] : [])
 	];
 </script>
 
@@ -516,40 +573,49 @@
 
 				<!-- the star-core: every lane at a glance, reflecting unsaved edits -->
 				<div class="hr-lanes mt-4">
-					{#each lanes(draft, agyDraft, uiChain) as lane (lane.key)}
+					{#each lanes(draft, agyDraft, uiChain, workDraft) as lane (lane.key)}
 						<div class="hr-lane" data-lane={lane.key}>
 							<span class="hr-lane-title">{lane.title}</span>
-							<span class="hr-node hr-core" class:hr-follow={!lane.primary}>
-								<span class="hr-orbit" aria-hidden="true"></span>
-								<span
-									class="hr-dot"
-									class:hr-dot-follow={!lane.primary}
-									data-family={modelFamily(lane.primary)}
-									aria-hidden="true"
-								></span>
-								{lane.label && lane.primary
-									? lane.label(lane.primary)
-									: modelLabel(lane.primary, lane.empty)}
-							</span>
-							{#each lane.chain as id (id)}
-								<span class="hr-beam" aria-hidden="true"></span>
-								<span class="hr-node" data-model={id}>
-									<span class="hr-dot" data-family={modelFamily(id)} aria-hidden="true"
-									></span>{lane.label ? lane.label(id) : modelLabel(id)}
+							{#if 'steps' in lane}
+								{#each lane.steps as step, index (step.key)}
+									{#if index > 0}<span class="hr-beam" aria-hidden="true"></span>{/if}
+									<span class="hr-node" data-model={step.runner}>
+										{step.title} · {step.runner}
+									</span>
+								{/each}
+							{:else}
+								<span class="hr-node hr-core" class:hr-follow={!lane.primary}>
+									<span class="hr-orbit" aria-hidden="true"></span>
+									<span
+										class="hr-dot"
+										class:hr-dot-follow={!lane.primary}
+										data-family={modelFamily(lane.primary)}
+										aria-hidden="true"
+									></span>
+									{lane.label && lane.primary
+										? lane.label(lane.primary)
+										: modelLabel(lane.primary, lane.empty)}
 								</span>
-							{/each}
-							{#if lane.key === 'chat' && !lane.chain.length}
-								<span class="hr-beam hr-beam-off" aria-hidden="true"></span>
-								<span class="hr-lane-warn">没有兜底，主模型挂了就没人回答</span>
-							{/if}
-							{#if lane.key === 'chat' && draft.reasoning_effort}
-								<span class="hr-lane-meta">思考 {effortLabel(draft.reasoning_effort)}</span>
-							{/if}
-							{#if lane.key === 'media'}
-								<span class="hr-lane-meta">超时 {draft.media.timeout ?? '—'} 秒</span>
-							{/if}
-							{#if lane.key === 'card' && lane.primary && agyPrefs && !agyPrefs.card.signed_in}
-								<span class="hr-lane-warn">未登录，实际走网关</span>
+								{#each lane.chain as id (id)}
+									<span class="hr-beam" aria-hidden="true"></span>
+									<span class="hr-node" data-model={id}>
+										<span class="hr-dot" data-family={modelFamily(id)} aria-hidden="true"
+										></span>{lane.label ? lane.label(id) : modelLabel(id)}
+									</span>
+								{/each}
+								{#if lane.key === 'chat' && !lane.chain.length}
+									<span class="hr-beam hr-beam-off" aria-hidden="true"></span>
+									<span class="hr-lane-warn">没有兜底，主模型挂了就没人回答</span>
+								{/if}
+								{#if lane.key === 'chat' && draft.reasoning_effort}
+									<span class="hr-lane-meta">思考 {effortLabel(draft.reasoning_effort)}</span>
+								{/if}
+								{#if lane.key === 'media'}
+									<span class="hr-lane-meta">超时 {draft.media.timeout ?? '—'} 秒</span>
+								{/if}
+								{#if lane.key === 'card' && lane.primary && agyPrefs && !agyPrefs.card.signed_in}
+									<span class="hr-lane-warn">未登录，实际走网关</span>
+								{/if}
 							{/if}
 						</div>
 					{/each}
@@ -905,6 +971,14 @@
 						</div>
 					{/if}
 				</section>
+
+				<WorkWorkflowCard
+					response={workRes}
+					bind:draft={workDraft}
+					error={workError}
+					disabled={saving || workLoading}
+					retry={loadWork}
+				/>
 
 				<!-- delegation -->
 				<section class="glass-item hr-card px-4 py-3" data-section="delegation">

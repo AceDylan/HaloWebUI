@@ -393,23 +393,24 @@ def infer_kind(*texts: Any) -> str:
 
 def assign_runners(members: list[dict], availability: Optional[dict] = None) -> None:
     """Work out each member's runner in place: ``executor`` = where its chain starts (the user's
-    or the goal's explicit choice, else the kind's default), ``runner`` = what will actually run
+    or the goal's explicit choice, else the configured chain or kind default), ``runner`` = what will actually run
     it now, ``runner_note`` = why that differs. ``availability=None`` checks live."""
-    starts = []
     for m in members:
         source = m.get("executor_source") if m.get("executor_source") in EXECUTOR_SOURCES else "auto"
-        default = runners.kind_default(m["kind"])
+        chain = m.get("fallback_chain") if runners.is_auto(source) and m["kind"] != "image" else None
+        default = chain[0] if chain else runners.kind_default(m["kind"])
         start = m.get("executor") if source in ("goal", "user", "decision") and m.get("executor") in EXECUTORS else default
         if m["kind"] == "image":  # gpt-image is a Hermes tool: no runner can draw for this member
             start, source = "hermes", "auto"
         m.update(executor_source=source, recommended=default, executor=start)
-        starts.append(start)
     if availability is None:
-        needed = sorted({name for m, start in zip(members, starts)
-                         for name in runners.chain_from(start, auto=runners.is_auto(m["executor_source"]))})
+        needed = sorted({name for m in members for name in (
+            m.get("fallback_chain") or runners.chain_from(m["executor"], auto=runners.is_auto(m["executor_source"]))
+        )})
         availability = runners.check(needed)
     for m in members:
-        picked = runners.select(m["executor"], availability, auto=runners.is_auto(m["executor_source"]))
+        picked = runners.select(m["executor"], availability, auto=runners.is_auto(m["executor_source"]),
+                                chain=m.get("fallback_chain"))
         m["runner"] = picked["executor"]
         m["runner_note"] = runners.fallback_reason(picked) if picked["executor"] != m["executor"] else ""
         if picked["executor"] is None:
@@ -490,6 +491,11 @@ def validate_plan(raw: Any, *, parallel_cap: int = DEFAULT_PARALLEL_CAP,
         })
         if entry.get("assistant_preferred") and chosen:
             members[-1]["assistant_preferred"] = True
+        chain = entry.get("fallback_chain")
+        if source == "auto" and kind != "image" and isinstance(chain, list):
+            chain = list(dict.fromkeys(n for n in chain if isinstance(n, str) and n in EXECUTORS))
+            if chain:
+                members[-1].update(fallback_chain=chain, executor=chain[0])
 
     tasks: list[dict] = []
     keys: set[str] = set()
@@ -558,7 +564,8 @@ def validate_plan(raw: Any, *, parallel_cap: int = DEFAULT_PARALLEL_CAP,
         assign_runners(members, availability)
     else:
         for m in members:
-            m.setdefault("recommended", runners.kind_default(m["kind"]))
+            chain = m.get("fallback_chain")
+            m.setdefault("recommended", chain[0] if chain else runners.kind_default(m["kind"]))
             if not m["executor"]:
                 m["executor"] = m["recommended"]
             m.setdefault("runner", m["executor"])

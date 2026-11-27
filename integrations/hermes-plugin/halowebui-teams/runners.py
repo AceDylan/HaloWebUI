@@ -110,9 +110,8 @@ NAMES = tuple(BY_NAME)
 EXTERNAL = tuple(spec.name for spec in SPECS if not spec.native)
 assert set(EXTERNAL) == set(RUNNER_EXECUTORS), "common.RUNNER_EXECUTORS and runners.SPECS must list the same runners"
 
-# Engine families and their default auto-selection order. Auto mode only walks within the same
-# family (never silently drifting across Claude / Codex / AGY). Explicit user / goal choices never
-# auto-fallback: when unavailable, the task pauses for the user to pick another runner.
+# Default auto-selection order for tasks without their own chain. Explicit user / goal choices
+# never auto-fallback: when unavailable, the task pauses for the user to pick another runner.
 DEFAULT_FAMILIES: dict[str, tuple[str, ...]] = {
     "claude": ("officlaude", "cchclaude", "anyclaude", "reclaude"),
     "codex": ("codex",),
@@ -128,6 +127,23 @@ FAMILY_LABELS: dict[str, str] = {
 DEFAULT_ORDER = tuple(name for chain in DEFAULT_FAMILIES.values() for name in chain)
 NAMED_ONLY: tuple[str, ...] = ()
 AUTO_THEN: dict[str, str] = {}
+
+WORK_STEPS = ("plan", "plan_review", "dev", "review")
+WORK_STEP_META = (
+    {"key": "plan", "label": "规划", "hint": "读代码与现状，写出 .halo/plan.md 实现规划", "optional": False},
+    {"key": "plan_review", "label": "规划审阅", "hint": "核查并定稿 .halo/plan.md，确认无误再进入开发", "optional": True},
+    {"key": "dev", "label": "开发", "hint": "按 .halo/plan.md 完成前后端改动与测试", "optional": False},
+    {"key": "review", "label": "验收修复", "hint": "审阅代码 diff、直接修掉问题并跑测试确认", "optional": False},
+)
+DEFAULT_WORK_CONFIG = {
+    "plan_review": False,
+    "steps": {
+        "plan": {"runner": "offiagy", "fallback": ["agy"]},
+        "plan_review": {"runner": "officlaude", "fallback": ["cchclaude", "anyclaude", "reclaude"]},
+        "dev": {"runner": "codex", "fallback": []},
+        "review": {"runner": "officlaude", "fallback": ["cchclaude", "anyclaude", "reclaude"]},
+    },
+}
 
 # Task kinds the lead labels every member with, and the runner each starts from.
 KINDS: dict[str, dict] = {
@@ -186,22 +202,106 @@ _RECLAUDE_FAIL_KIND = {
 # --- override file / order ------------------------------------------------------------------
 
 _override_cache: dict[str, Any] = {"mtime": None, "data": {}}
+_override_lock = threading.RLock()
 
 
 def overrides() -> dict:
-    try:
-        mtime = OVERRIDE_FILE.stat().st_mtime
-    except OSError:
-        _override_cache.update(mtime=None, data={})
-        return {}
-    if _override_cache["mtime"] != mtime:
+    with _override_lock:
         try:
-            data = json.loads(OVERRIDE_FILE.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            logger.warning("halowebui-teams: %s is not valid JSON, ignored", OVERRIDE_FILE)
-            data = {}
-        _override_cache.update(mtime=mtime, data=data if isinstance(data, dict) else {})
-    return _override_cache["data"]
+            mtime = OVERRIDE_FILE.stat().st_mtime_ns
+        except OSError:
+            _override_cache.update(mtime=None, data={})
+            return {}
+        if _override_cache["mtime"] != mtime:
+            try:
+                data = json.loads(OVERRIDE_FILE.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                logger.warning("halowebui-teams: %s is not valid JSON, ignored", OVERRIDE_FILE)
+                data = {}
+            _override_cache.update(mtime=mtime, data=data if isinstance(data, dict) else {})
+        return _override_cache["data"]
+
+
+def _read_override_for_write() -> dict:
+    try:
+        data = json.loads(OVERRIDE_FILE.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return {}
+    except (OSError, ValueError):
+        raise ValueError(f"{OVERRIDE_FILE} 不是合法 JSON，先手动修好再改") from None
+    return data if isinstance(data, dict) else {}
+
+
+def _write_override(data: dict) -> None:
+    if data:
+        tmp = OVERRIDE_FILE.with_name(OVERRIDE_FILE.name + ".tmp")
+        tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        os.replace(tmp, OVERRIDE_FILE)
+    else:
+        OVERRIDE_FILE.unlink(missing_ok=True)
+    _override_cache.update(mtime=None, data={})
+
+
+def _known_runners(raw: list) -> list[str]:
+    return list(dict.fromkeys(n for n in raw if isinstance(n, str) and n in BY_NAME))
+
+
+def _normalize_work_config(raw: Any, *, strict: bool = False) -> dict:
+    raw = raw if isinstance(raw, dict) else {}
+    plan_review = raw.get("plan_review")
+    if strict and not isinstance(plan_review, bool):
+        raise ValueError("规划后审阅开关必须为布尔值")
+    steps = raw.get("steps")
+    if strict and (not isinstance(steps, dict) or set(steps) != set(WORK_STEPS)):
+        raise ValueError("请提供规划、规划审阅、开发、验收修复四个环节的配置")
+    steps = steps if isinstance(steps, dict) else {}
+    result = {}
+    for meta in WORK_STEP_META:
+        key, label = meta["key"], meta["label"]
+        default = DEFAULT_WORK_CONFIG["steps"][key]
+        step = steps.get(key)
+        step = step if isinstance(step, dict) else {}
+        runner = step.get("runner")
+        if not isinstance(runner, str) or runner not in BY_NAME:
+            if strict:
+                raise ValueError(f"{label}的首选执行器不受支持")
+            runner = default["runner"]
+        fallback = step.get("fallback")
+        if not isinstance(fallback, list):
+            if strict:
+                raise ValueError(f"{label}的兜底必须是列表")
+            fallback = default["fallback"]
+        chain = [n for n in _known_runners(fallback) if n != runner]
+        if strict and len(chain) != len(fallback):
+            raise ValueError(f"{label}的兜底只能包含有效且互不重复的执行器，不能包含首选执行器")
+        result[key] = {"runner": runner, "fallback": chain}
+    return {"plan_review": plan_review is True, "steps": result}
+
+
+def work_config() -> dict:
+    return _normalize_work_config(overrides().get("work"))
+
+
+def work_config_public() -> dict:
+    return {
+        "config": work_config(),
+        "defaults": _normalize_work_config(DEFAULT_WORK_CONFIG),
+        "runners": [{"name": s.name, "label": s.label, "engine": s.engine, "family": s.family,
+                     "note": s.note, "native": s.native} for s in SPECS],
+        "steps_meta": [dict(meta) for meta in WORK_STEP_META],
+    }
+
+
+def save_work_config(payload: dict) -> dict:
+    config = _normalize_work_config(payload, strict=True)
+    with _override_lock:
+        data = _read_override_for_write()
+        if config == DEFAULT_WORK_CONFIG:
+            data.pop("work", None)
+        else:
+            data["work"] = config
+        _write_override(data)
+        return work_config_public()
 
 
 def family_of(name: Any) -> str:
@@ -346,38 +446,29 @@ def agy_prefs(*, refresh: bool = False) -> dict:
 def save_agy_prefs(ui_runner: Any = None, offiagy_model: Any = None) -> dict:
     """Write ``kinds.ui`` / ``offiagy_model`` into the override file (other keys untouched).
     ``ui_runner`` equal to the built-in default drops the override; ``offiagy_model`` "" too."""
-    try:
-        data = json.loads(OVERRIDE_FILE.read_text(encoding="utf-8")) if OVERRIDE_FILE.exists() else {}
-    except (OSError, ValueError):
-        raise ValueError(f"{OVERRIDE_FILE} 不是合法 JSON，先手动修好再改")
-    data = data if isinstance(data, dict) else {}
-    if ui_runner is not None:
-        if not _startable(ui_runner):
-            raise ValueError(f"界面任务不能从 {ui_runner} 开始")
-        kinds = data.get("kinds") if isinstance(data.get("kinds"), dict) else {}
-        if ui_runner == KINDS["ui"]["default"]:
-            kinds.pop("ui", None)
-        else:
-            kinds["ui"] = ui_runner
-        if kinds:
-            data["kinds"] = kinds
-        else:
-            data.pop("kinds", None)
-    if offiagy_model is not None:
-        model = str(offiagy_model).strip()
-        if model and not AGY_MODEL_RE.fullmatch(model):
-            raise ValueError("offiagy 模型不是合法的模型 ID")
-        if model:
-            data["offiagy_model"] = model
-        else:
-            data.pop("offiagy_model", None)
-    if data:
-        tmp = OVERRIDE_FILE.with_name(OVERRIDE_FILE.name + ".tmp")
-        tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-        os.replace(tmp, OVERRIDE_FILE)
-    else:  # everything back to the built-in defaults: no override file at all
-        OVERRIDE_FILE.unlink(missing_ok=True)
-    _override_cache.update(mtime=None, data={})
+    with _override_lock:
+        data = _read_override_for_write()
+        if ui_runner is not None:
+            if not _startable(ui_runner):
+                raise ValueError(f"界面任务不能从 {ui_runner} 开始")
+            kinds = data.get("kinds") if isinstance(data.get("kinds"), dict) else {}
+            if ui_runner == KINDS["ui"]["default"]:
+                kinds.pop("ui", None)
+            else:
+                kinds["ui"] = ui_runner
+            if kinds:
+                data["kinds"] = kinds
+            else:
+                data.pop("kinds", None)
+        if offiagy_model is not None:
+            model = str(offiagy_model).strip()
+            if model and not AGY_MODEL_RE.fullmatch(model):
+                raise ValueError("offiagy 模型不是合法的模型 ID")
+            if model:
+                data["offiagy_model"] = model
+            else:
+                data.pop("offiagy_model", None)
+        _write_override(data)
     return agy_prefs()
 
 
@@ -742,9 +833,9 @@ _cache_overrides: dict[str, Any] = {}  # override-file mtime each cached result 
 _cache_lock = threading.Lock()
 
 
-def _override_mtime() -> Optional[float]:
+def _override_mtime() -> Optional[int]:
     try:
-        return OVERRIDE_FILE.stat().st_mtime
+        return OVERRIDE_FILE.stat().st_mtime_ns
     except OSError:
         return None
 
@@ -802,11 +893,20 @@ def forget(name: Optional[str] = None) -> None:
 
 # --- selection ----------------------------------------------------------------------------------
 
-def select(start: str, availability: Optional[dict] = None, *, skip: tuple = (), auto: bool = False) -> dict:
+def _effective_chain(start: str, *, auto: bool, chain: Optional[list[str]]) -> list[str]:
+    start = start if start in BY_NAME else "hermes"
+    if not auto:
+        return [start]
+    custom = _known_runners(chain) if chain is not None else []
+    return custom or chain_from(start, auto=True)
+
+
+def select(start: str, availability: Optional[dict] = None, *, skip: tuple = (), auto: bool = False,
+           chain: Optional[list[str]] = None) -> dict:
     """Walk the fallback chain from *start* (``auto``: see ``chain_from``):
     {executor, start, chain, skipped:[{name, reason}]}. ``executor`` is None when nothing in the
     chain can run."""
-    chain = chain_from(start if start in BY_NAME else "hermes", auto=auto)
+    chain = _effective_chain(start, auto=auto, chain=chain)
     avail = availability if availability is not None else check(chain)
     skipped = []
     for name in chain:
@@ -821,12 +921,19 @@ def select(start: str, availability: Optional[dict] = None, *, skip: tuple = (),
     return {"executor": None, "start": start, "chain": chain, "skipped": skipped}
 
 
-def select_after(start: str, current: str, availability: Optional[dict] = None, *, auto: bool = False) -> dict:
+def select_after(start: str, current: str, availability: Optional[dict] = None, *, auto: bool = False,
+                 chain: Optional[list[str]] = None) -> dict:
     """The next available runner *after* ``current`` on the chain that starts at ``start`` (a
     fallback only moves forward). When ``auto=False`` (explicitly chosen by user/goal), never
     auto-fallback: returns ``executor=None`` so the user can pick another runner."""
-    chain = chain_from(start if start in BY_NAME else current, auto=auto)
-    rest = chain[chain.index(current) + 1:] if current in chain else chain_from(current, auto=auto)[1:]
+    effective = _effective_chain(start if start in BY_NAME else current, auto=auto, chain=chain)
+    if current in effective:
+        rest = effective[effective.index(current) + 1:]
+    elif auto and chain is None:
+        rest = chain_from(current, auto=True)[1:]
+    else:
+        rest = []
+    chain = effective
     if not rest:
         return {"executor": None, "start": start, "chain": chain, "skipped": []}
     avail = availability if availability is not None else check(rest)

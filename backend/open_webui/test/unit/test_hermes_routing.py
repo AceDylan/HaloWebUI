@@ -104,6 +104,72 @@ def test_errors_keep_hermes_message(monkeypatch, status, body, expect_status, ex
     assert expect_text in e.value.detail
 
 
+def test_work_config_forwards_get_and_put(monkeypatch):
+    config = {"plan_review": True, "steps": {
+        "plan": {"runner": "offiagy", "fallback": ["agy"]},
+        "plan_review": {"runner": "officlaude", "fallback": ["codex"]},
+        "dev": {"runner": "codex", "fallback": []},
+        "review": {"runner": "officlaude", "fallback": ["cchclaude"]},
+    }}
+    response = {"config": config, "defaults": {}, "runners": [], "steps_meta": []}
+    calls = _world(monkeypatch, (200, response))
+    assert asyncio.run(hermes_routing.get_work_config(None, USER)) == response
+    assert asyncio.run(hermes_routing.save_work_config(None, USER, config)) == response
+    path = "http://hermes.test/v1/halo-teams/work-config"
+    assert calls == [("GET", path, None), ("PUT", path, config)]
+
+
+@pytest.mark.parametrize("status, body, expected, message", [
+    (400, {"error": {"message": "开发的兜底不能包含首选执行器"}}, 400, "不能包含首选执行器"),
+    (403, {}, 403, "HTTP 403"),
+    (409, {}, 409, "HTTP 409"),
+    (404, {}, 501, "网页配置 /work"),
+    (500, {"error": {"message": "upstream error"}}, 502, "upstream error"),
+])
+def test_work_config_keeps_gateway_error_semantics(monkeypatch, status, body, expected, message):
+    _world(monkeypatch, (status, body))
+    with pytest.raises(HermesSessionsError) as error:
+        asyncio.run(hermes_routing.save_work_config(None, USER, {}))
+    assert error.value.status_code == expected
+    assert message in error.value.detail
+
+
+def test_work_config_routes_require_an_admin(monkeypatch):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from open_webui.routers.hermes import router
+    from open_webui.utils.auth import get_current_user
+
+    app = FastAPI()
+    app.include_router(router)
+    client = TestClient(app)
+    payload = {"plan_review": True, "steps": {
+        step: {"runner": "codex", "fallback": []}
+        for step in ("plan", "plan_review", "dev", "review")
+    }}
+    calls = []
+
+    async def get_config(_request, user):
+        calls.append(("GET", user.role))
+        return {"config": payload}
+
+    async def save_config(_request, user, config):
+        calls.append(("PUT", user.role, config))
+        return {"config": config}
+
+    monkeypatch.setattr(hermes_routing, "get_work_config", get_config)
+    monkeypatch.setattr(hermes_routing, "save_work_config", save_config)
+    app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(role="user")
+    assert client.get("/work-config").status_code in (401, 403)
+    assert client.put("/work-config", json=payload).status_code in (401, 403)
+    assert not calls
+    app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(role="admin")
+    assert client.get("/work-config").json() == {"config": payload}
+    assert client.put("/work-config", json=payload).json() == {"config": payload}
+    assert client.put("/work-config", json={**payload, "plan_review": "true"}).status_code == 422
+    assert calls == [("GET", "admin"), ("PUT", "admin", payload)]
+
+
 # ---- AGY 优先 ----
 
 

@@ -3,6 +3,8 @@
 // and roll back from the history after a confirm.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { installDominoDom } from '$lib/test-support/domino-dom';
+import { toast } from 'svelte-sonner';
+import type { HermesWorkConfigResponse, WorkWorkflowConfig } from '$lib/apis/hermes';
 
 installDominoDom('http://localhost/');
 
@@ -61,11 +63,37 @@ const agyPrefs = (over: any = {}) => ({
 	...over
 });
 
+const workDefaults = (): WorkWorkflowConfig => ({
+	plan_review: false,
+	steps: {
+		plan: { runner: 'offiagy', fallback: ['agy'] },
+		plan_review: { runner: 'officlaude', fallback: ['cchclaude', 'anyclaude', 'reclaude'] },
+		dev: { runner: 'codex', fallback: [] },
+		review: { runner: 'officlaude', fallback: ['cchclaude', 'anyclaude', 'reclaude'] }
+	}
+});
+
+const workResponse = (config = workDefaults()): HermesWorkConfigResponse => ({
+	config,
+	defaults: workDefaults(),
+	runners: ['offiagy', 'agy', 'officlaude', 'cchclaude', 'anyclaude', 'reclaude', 'codex', 'hermes'].map(
+		(name) => ({ name, label: name, engine: name, family: name, note: '' })
+	),
+	steps_meta: [
+		{ key: 'plan', label: '规划', hint: '' },
+		{ key: 'plan_review', label: '规划审阅', hint: '', optional: true },
+		{ key: 'dev', label: '开发', hint: '' },
+		{ key: 'review', label: '验收修复', hint: '' }
+	]
+});
+
 const api = vi.hoisted(() => ({
 	getHermesAgyPrefs: vi.fn(),
 	saveHermesAgyPrefs: vi.fn(),
 	getHermesRouting: vi.fn(),
 	saveHermesRouting: vi.fn(),
+	getHermesWorkConfig: vi.fn(),
+	saveHermesWorkConfig: vi.fn(),
 	rollbackHermesRouting: vi.fn(),
 	probeHermesRoutingModel: vi.fn()
 }));
@@ -102,9 +130,23 @@ const text = (el: any) => (el?.textContent ?? '').replace(/\s+/g, ' ').trim();
 const pill = (root: any, section: string, id: string) =>
 	root.querySelector(`[data-section="${section}"] [role="radio"][data-model="${id}"]`);
 
+const choose = (select: HTMLSelectElement, value: string) => {
+	// Domino does not reflect selected options through HTMLSelectElement.value.
+	select.value = value;
+	select.dispatchEvent(new Event('change'));
+};
+
+const toggleWorkReview = (root: HTMLElement, checked: boolean) => {
+	const input = root.querySelector<HTMLInputElement>('[data-work-toggle="plan_review"]')!;
+	input.checked = checked;
+	input.dispatchEvent(new Event('change'));
+};
+
 beforeEach(() => {
 	api.getHermesRouting.mockResolvedValue(snapshot());
 	api.getHermesAgyPrefs.mockResolvedValue(agyPrefs());
+	api.getHermesWorkConfig.mockResolvedValue(workResponse());
+	api.saveHermesWorkConfig.mockImplementation(async (_token, config) => workResponse(config));
 });
 
 afterEach(() => {
@@ -115,6 +157,87 @@ afterEach(() => {
 });
 
 describe('Hermes 模型 settings', () => {
+	it('edits and saves /work, previews the changes, and restores or discards defaults', async () => {
+		const root = await mount();
+		const lane = () => text(root.querySelector('[data-lane="work"]'));
+		const card = root.querySelector('[data-section="work"]');
+		const dev = card.querySelector('[data-work-step="dev"]');
+		const reset = () => Array.from<HTMLButtonElement>(card.querySelectorAll('button')).find((b) => text(b) === '恢复默认')!;
+		const fallback = () => Array.from<HTMLElement>(dev.querySelectorAll('[data-work-fallback]')).map((chip) => chip.getAttribute('data-work-fallback'));
+		expect(card.querySelectorAll('[data-work-step]')).toHaveLength(4);
+		expect(lane()).toContain('规划 · offiagy 开发 · codex 验收修复 · officlaude');
+		expect(text(card.querySelector('[data-work-step="plan_review"]'))).toContain('未启用');
+		expect(reset().disabled).toBe(true);
+
+		toggleWorkReview(root, true);
+		choose(dev.querySelector('[aria-label="添加开发兜底"]'), 'officlaude');
+		await waitFor(() => fallback().length === 1 && lane().includes('规划审阅'), 'workflow preview');
+		choose(dev.querySelector('[aria-label="添加开发兜底"]'), 'agy');
+		await waitFor(() => fallback().length === 2, 'second fallback');
+		dev.querySelector('[aria-label="把 agy 往前挪"]').click();
+		await waitFor(() => fallback()[0] === 'agy', 'move earlier');
+		dev.querySelector('[aria-label="把 agy 往后挪"]').click();
+		await waitFor(() => fallback()[0] === 'officlaude', 'move later');
+		choose(dev.querySelector('[aria-label="开发首选执行器"]'), 'officlaude');
+		await waitFor(() => fallback().length === 1, 'new primary removed from fallback');
+		dev.querySelector('[aria-label="移除 agy"]').click();
+		await waitFor(() => fallback().length === 0, 'empty fallback');
+		expect(lane()).toContain('开发 · officlaude');
+		expect(text(root.querySelector('.hr-bar'))).toContain('/work 开发首选：codex → officlaude');
+		root.querySelector('.hr-save').click();
+		await waitFor(() => root.querySelector('.hr-save').disabled, 'saved workflow');
+		const config = workDefaults();
+		config.plan_review = true;
+		config.steps.dev.runner = 'officlaude';
+		expect(api.saveHermesWorkConfig).toHaveBeenCalledWith('tok', config);
+		expect(api.saveHermesRouting).not.toHaveBeenCalled();
+
+		reset().click();
+		await waitFor(() => lane().includes('开发 · codex'), 'reset draft');
+		expect(lane()).not.toContain('规划审阅');
+		expect(api.saveHermesWorkConfig).toHaveBeenCalledTimes(1);
+		const discard = Array.from<HTMLButtonElement>(root.querySelectorAll('.hr-bar button')).find((b) => text(b) === '放弃')!;
+		discard.click();
+		await waitFor(() => lane().includes('规划审阅'), 'discard reset');
+		reset().click();
+		await waitFor(() => !root.querySelector('.hr-save').disabled, 'save defaults enabled');
+		root.querySelector('.hr-save').click();
+		await waitFor(() => api.saveHermesWorkConfig.mock.calls.length === 2, 'save defaults');
+		expect(api.saveHermesWorkConfig).toHaveBeenLastCalledWith('tok', workDefaults());
+	});
+
+	it('keeps routing and AGY editable when /work is unavailable and retries separately', async () => {
+		api.getHermesWorkConfig.mockRejectedValueOnce(new Error('请更新 Hermes'));
+		const root = await mount();
+		const card = root.querySelector('[data-section="work"]');
+		await waitFor(() => text(card).includes('读取失败：请更新 Hermes'), 'work read error');
+		expect(root.querySelector('[data-lane="work"]')).toBeFalsy();
+		pill(root, 'main', 'gpt-chat').click();
+		root.querySelector('[data-agy="ui"] [data-runner="agy"]').click();
+		await waitFor(() => text(root.querySelector('.hr-bar')).includes('界面任务起点'), 'AGY changes');
+		expect(text(root.querySelector('.hr-bar'))).toContain('gpt-chat');
+		card.querySelector('button').click();
+		await waitFor(() => root.querySelector('[data-lane="work"]'), 'retried work settings');
+		expect(text(root.querySelector('.hr-bar'))).toContain('界面任务起点');
+	});
+
+	it('keeps the failed /work draft after the routing has saved', async () => {
+		api.saveHermesWorkConfig.mockRejectedValueOnce(new Error('连接失败'));
+		api.saveHermesRouting.mockResolvedValue(snapshot({
+			routing: { ...routing(), main: 'gpt-chat', fallback: ['gemini-chat'] },
+			changes: [{ path: 'main' }]
+		}));
+		const root = await mount();
+		pill(root, 'main', 'gpt-chat').click();
+		toggleWorkReview(root, true);
+		await waitFor(() => text(root.querySelector('.hr-bar')).includes('规划后审阅'), 'work draft');
+		root.querySelector('.hr-save').click();
+		await waitFor(() => vi.mocked(toast.error).mock.calls.length, 'partial save notice');
+		expect(toast.error).toHaveBeenCalledWith('Hermes 路由已保存，/work 工作流保存失败：连接失败');
+		expect(text(root.querySelector('.hr-bar'))).toContain('1 处改动');
+		expect(text(root.querySelector('[data-lane="work"]'))).toContain('规划审阅');
+	});
+
 	it('shows every lane at a glance', async () => {
 		const root = await mount();
 		expect(text(root.querySelector('[data-lane="chat"]'))).toContain(

@@ -280,3 +280,129 @@ def test_work_workflow_falls_back_in_family_unless_a_runner_is_named(pkg, availa
 def test_work_workflow_needs_a_project(pkg, availability):
     res = pkg.plan.propose_plan("写个周报", "/tmp/ws", workflow="work")
     assert res["ok"] is False and "git 项目" in res["error"]
+
+
+def test_work_plan_review_is_a_dependency_and_cli_prefs_lock_by_primary_family(pkg, availability, monkeypatch):
+    from halowebui_teams import workflow
+
+    cfg = pkg.runners.work_config()
+    cfg["plan_review"] = True
+    cfg["steps"]["plan"] = {"runner": "agy", "fallback": ["officlaude"]}
+    cfg["steps"]["dev"] = {"runner": "codex", "fallback": ["officlaude"]}
+    cfg["steps"]["review"] = {"runner": "cchclaude", "fallback": []}
+    monkeypatch.setattr(pkg.runners, "work_config", lambda: cfg)
+    availability.down.update(agy="网关不可用", codex="维护中", cchclaude="额度不足", reclaude="账号不可用")
+    raw = workflow.build_pipeline_plan("修个 bug", workflow="work")
+    plan, errors = pkg.plan.validate_plan(raw)
+    assert not errors
+    assert plan["layers"] == [["T1"], ["T2"], ["T3"], ["T4"]]
+    assert [task["member"] for task in plan["tasks"]] == ["agy-planner", "plan-reviewer", "codex-dev", "claude-review"]
+    assert all(word in plan["tasks"][1]["description"] for word in (".halo/plan.md", ".halo/plan-review.md", "QUESTION:"))
+    assert ".halo/plan-review.md" in plan["tasks"][2]["description"]
+    assert "officlaude" in plan["summary"] and "审阅规划" in plan["summary"]
+    by = {m["name"]: m for m in plan["members"]}
+    assert by["agy-planner"]["executor"] == by["agy-planner"]["recommended"] == "agy"
+    assert by["agy-planner"]["runner"] == by["codex-dev"]["runner"] == "officlaude"
+    assert by["claude-review"]["runner"] is None
+    assert by["claude-review"]["fallback_chain"] == ["cchclaude"]
+
+    preview, _ = pkg.plan.validate_plan(raw, check_runners=False)
+    assert preview["members"][0]["executor"] == preview["members"][0]["recommended"] == "agy"
+    locked = workflow.build_pipeline_plan("修个 bug", workflow="work", runner_prefs={"claude": "reclaude"})
+    plan, errors = pkg.plan.validate_plan(locked)
+    assert not errors
+    for m in plan["members"]:
+        if m["name"] in ("plan-reviewer", "claude-review"):
+            assert m["executor"] == "reclaude" and m["executor_source"] == "user"
+            assert m["runner"] is None and "fallback_chain" not in m
+        else:
+            assert m["runner"] == "officlaude" and m["executor_source"] == "auto"
+
+
+def test_work_board_uses_the_saved_chain_for_launch_runtime_and_retry(pkg, team_id, availability, monkeypatch):
+    from halowebui_teams import workflow
+
+    cfg = pkg.runners.work_config()
+    chain = ["codex", "officlaude", "agy"]
+    cfg["steps"]["plan"] = {"runner": chain[0], "fallback": chain[1:]}
+    monkeypatch.setattr(pkg.runners, "work_config", lambda: cfg)
+    raw = workflow.build_pipeline_plan("修个 bug", workflow="work")
+    created = pkg.teams.create_team(team_id, raw, owner="u1")
+    slug, tid = created["board"], created["tasks"]["T1"]
+    assert pkg.common.read_team(slug)["tasks"][tid]["chain"] == chain
+    assert pkg.common.read_team(slug)["tasks"][created["tasks"]["T2"]]["depends_on"] == ["T1"]
+    # A configuration change cannot change a team that's already running.
+    cfg["steps"]["plan"]["fallback"] = []
+    availability.down["codex"] = "维护中"
+    pkg.reclaude.tick_board(slug, pkg.common.read_team(slug))
+    with pkg.common.board_conn(slug) as conn:
+        assert pkg.common.kb().get_task(conn, tid).assignee == "officlaude"
+        assert pkg.fallback.reroute(slug, conn, tid, "officlaude", "网络错误", phase="runtime") == "agy"
+        assert pkg.common.kb().get_task(conn, tid).assignee == "agy"
+        availability.down.clear()
+        assert pkg.fallback.reselect_for_retry(slug, conn, tid) == "codex"
+        assert pkg.fallback.reselect_for_retry(slug, conn, tid, executor="cchclaude") == "cchclaude"
+        entry = pkg.common.read_team(slug)["tasks"][tid]
+        assert entry["chosen_by"] == "user" and "chain" not in entry
+        assert pkg.fallback.reroute(slug, conn, tid, "cchclaude", "不可用", phase="launch") is None
+        assert pkg.common.kb().get_task(conn, tid).status == "blocked"
+
+
+def test_work_empty_fallback_pauses_without_choosing_the_next_family_runner(pkg, team_id, availability, monkeypatch):
+    from halowebui_teams import workflow
+
+    cfg = pkg.runners.work_config()
+    cfg["steps"]["plan"]["fallback"] = []
+    monkeypatch.setattr(pkg.runners, "work_config", lambda: cfg)
+    availability.down["offiagy"] = "未登录"
+    created = pkg.teams.create_team(team_id, workflow.build_pipeline_plan("修个 bug", workflow="work"), owner="u1")
+    slug, tid = created["board"], created["tasks"]["T1"]
+    pkg.reclaude.tick_board(slug, pkg.common.read_team(slug))
+    with pkg.common.board_conn(slug) as conn:
+        task = pkg.common.kb().get_task(conn, tid)
+        assert task.status == "blocked" and task.assignee == "offiagy"
+    entry = pkg.common.read_team(slug)["tasks"][tid]
+    assert entry["chain"] == ["offiagy"]
+    assert "执行链 offiagy" in entry["trail"][-1]["reason"]
+
+
+def test_work_unavailable_native_runner_with_no_fallback_is_never_ready(pkg, team_id, availability, monkeypatch):
+    from halowebui_teams import workflow
+
+    cfg = pkg.runners.work_config()
+    cfg["steps"]["plan"] = {"runner": "hermes", "fallback": []}
+    monkeypatch.setattr(pkg.runners, "work_config", lambda: cfg)
+    availability.down["hermes"] = "已停用"
+    created = pkg.teams.create_team(team_id, workflow.build_pipeline_plan("修个 bug", workflow="work"), owner="u1")
+    slug, tid = created["board"], created["tasks"]["T1"]
+    with pkg.common.board_conn(slug) as conn:
+        assert pkg.common.kb().get_task(conn, tid).status == "blocked"
+        assert pkg.common.kb().claim_task(conn, tid) is None
+    assert "已停用" in pkg.common.read_team(slug)["tasks"][tid]["trail"][-1]["reason"]
+
+
+def test_work_native_outage_routes_to_fallback_and_generic_questions_still_block(pkg, team_id, monkeypatch):
+    from halowebui_teams import workflow
+
+    cfg = pkg.runners.work_config()
+    cfg["steps"]["plan"] = {"runner": "hermes", "fallback": ["codex"]}
+    monkeypatch.setattr(pkg.runners, "work_config", lambda: cfg)
+    created = pkg.teams.create_team(team_id, workflow.build_pipeline_plan("修个 bug", workflow="work"), owner="u1")
+    slug, tid, dev = created["board"], created["tasks"]["T1"], created["tasks"]["T2"]
+    kb = pkg.common.kb()
+    with pkg.common.board_conn(slug) as conn:
+        assert kb.claim_task(conn, tid)
+        assert kb.block_task(conn, tid, reason="需要确认 API 的范围", kind="needs_input")
+    pkg.fallback.reroute_native_work(slug, pkg.common.read_team(slug))
+    with pkg.common.board_conn(slug) as conn:
+        assert kb.get_task(conn, tid).status == "blocked"
+        assert kb.get_task(conn, dev).status == "todo"
+        assert kb.unblock_task(conn, tid)
+        conn.execute("UPDATE tasks SET last_failure_error = ? WHERE id = ?",
+                     ("401 Unauthorized", tid))
+        conn.commit()
+    pkg.fallback.reroute_native_work(slug, pkg.common.read_team(slug))
+    with pkg.common.board_conn(slug) as conn:
+        assert kb.get_task(conn, tid).assignee == "codex"
+        assert kb.get_task(conn, dev).status == "todo"
+    assert pkg.common.read_team(slug)["tasks"][tid]["trail"][-1]["fail_kind"] == "auth"

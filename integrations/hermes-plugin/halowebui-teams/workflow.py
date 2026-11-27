@@ -9,8 +9,8 @@ infrastructure:
     → CI → 自动拉取更新部署 → 清理分支 → 核实线上。
   - ``dev_lite``: 跳过双方案与设计稿的轻量研发模式（主控摸底定接口 → Codex 写后端 → Claude
     读改动写前端跑测试 → 审查与上线）。
-  - ``work``: ``/work`` 命令的固定工作流（AGY 出规划 → Codex 开发 → Claude 审阅并修复问题 →
-    提交推送部署清理）。Claude 已经审过，交付流水线不再跑 Codex 审查（``skips_codex_review``）。
+  - ``work``: ``/work`` 配置的执行器依次规划 → 可选规划审阅 → 开发 → 审阅修复 → 发布。
+    交付流水线不再跑 Codex 审查（``skips_codex_review``）。
   - ``auto``: 现有自由协作（负责人动态拆解，适合非代码任务或定制分工）。
 """
 
@@ -27,7 +27,7 @@ WORKFLOW_LABELS = {
     "auto": "自由协作",
     "dev_pipeline": "多模型研发（完整）",
     "dev_lite": "快速研发（精简）",
-    "work": "工作流（规划 → 开发 → 审阅 → 发布）",
+    "work": "工作流（/work）",
 }
 # Workflows that must work inside a git project: their last step is the release.
 PROJECT_ONLY = ("work",)
@@ -36,7 +36,7 @@ WORK_NEEDS_PROJECT = ("/work 要在一个 git 项目里做（做完会提交、�
 
 
 def skips_codex_review(workflow: Any) -> bool:
-    """The ``work`` workflow ends with a Claude review that fixes what it finds: no Codex review after it."""
+    """The ``work`` workflow ends with a review that fixes what it finds."""
     return normalize_workflow(workflow) == "work"
 
 _SKIP_DESIGN_RE = re.compile(
@@ -123,6 +123,7 @@ def apply_runner_prefs(members: list[dict], runner_prefs: Optional[dict[str, str
         if chosen:
             m["executor"] = chosen
             m["executor_source"] = "user"
+            m.pop("fallback_chain", None)
 
 
 def _title_from_goal(goal: str, workflow: str) -> str:
@@ -152,6 +153,37 @@ def _member_spec(name: str, role: str, kind: str, focus: str, prefs: dict[str, s
     return entry
 
 
+def _work_member_spec(name: str, role: str, kind: str, focus: str, step_cfg: dict, prefs: dict) -> dict:
+    runner = step_cfg["runner"]
+    chosen = prefs.get(runners.family_of(runner))
+    entry = {"name": name, "role": role, "kind": kind, "focus": focus, "assistant": None,
+             "executor": chosen or runner, "executor_source": "user" if chosen else "auto"}
+    if not chosen:
+        entry["fallback_chain"] = [runner, *step_cfg["fallback"]]
+    return entry
+
+
+def work_flow_label(step_cfg: dict, prefs: dict) -> str:
+    runner = step_cfg["runner"]
+    chosen = prefs.get(runners.family_of(runner))
+    if chosen:
+        return chosen
+    label = {"codex": "Codex", "hermes": "Hermes"}.get(runner, runner)
+    fallback = step_cfg["fallback"]
+    if len(fallback) == 1:
+        return f"{label}（不行换 {fallback[0]}）"
+    if fallback:
+        return f"{label}（不行依次换 {'、'.join(fallback)}）"
+    return label
+
+
+def work_flow(cfg: dict, prefs: dict) -> str:
+    labels = {"plan": "出规划", "plan_review": "审阅规划", "dev": "开发", "review": "审阅修复"}
+    steps = [f"{work_flow_label(cfg['steps'][key], prefs)} {labels[key]}"
+             for key in runners.WORK_STEPS if key != "plan_review" or cfg["plan_review"]]
+    return " → ".join([*steps, "提交推送部署清理"])
+
+
 def build_pipeline_plan(
     goal: str,
     *,
@@ -178,19 +210,32 @@ def build_pipeline_plan(
     skip_design = bool(_SKIP_DESIGN_RE.search(goal + "\n" + (feedback or "")))
 
     if wf == "work":
+        cfg = runners.work_config()
+        steps = cfg["steps"]
+        plan_review_on = cfg["plan_review"]
+        role_labels = {"offiagy": "AGY", "officlaude": "Claude", "codex": "Codex", "hermes": "Hermes"}
         members = [
-            _member_spec("agy-planner", "AGY 规划", "ui",
-                         "读代码与现状，出实现规划、文件边界、验收标准与测试命令（按 AGY 家族顺序：offiagy → agy）", prefs),
-            _member_spec("codex-dev", "Codex 开发", "codex",
-                         "按规划完成全部代码（前端 + 后端）与测试，交开发回执（按默认配置）", prefs),
-            _member_spec("claude-review", "Claude 审阅修复", "code",
-                         "审阅 Codex 的改动、直接修掉发现的问题并跑测试（按 Claude 家族顺序：officlaude → cchclaude → anyclaude → reclaude）",
-                         prefs),
+            _work_member_spec("agy-planner", "规划", "ui", "读代码与现状，出实现规划、文件边界、验收标准与测试命令",
+                              steps["plan"], prefs),
+            _work_member_spec("codex-dev", "开发", "codex", "按规划完成前后端代码与测试，交开发回执",
+                              steps["dev"], prefs),
+            _work_member_spec("claude-review", "审阅修复", "code", "审阅开发改动、直接修掉发现的问题并跑测试",
+                              steps["review"], prefs),
         ]
+        if plan_review_on:
+            members.insert(1, _work_member_spec("plan-reviewer", "规划审阅", "code", "核查并定稿实施规划",
+                                                steps["plan_review"], prefs))
+        labels = {}
+        for member in members:
+            executor = member["executor"]
+            label = role_labels.get(executor, executor)
+            labels[member["name"]] = label
+            member["role"] = f"{label} {member['role']}"
+        dev_key = "T3" if plan_review_on else "T2"
         tasks = [
             {
                 "key": "T1",
-                "title": "AGY 出规划",
+                "title": f"{labels['agy-planner']} 出规划",
                 "member": "agy-planner",
                 "depends_on": [],
                 "description": (
@@ -202,21 +247,22 @@ def build_pipeline_plan(
                 ),
             },
             {
-                "key": "T2",
-                "title": "Codex 按规划开发",
+                "key": dev_key,
+                "title": f"{labels['codex-dev']} 按规划开发",
                 "member": "codex-dev",
-                "depends_on": ["T1"],
+                "depends_on": ["T2" if plan_review_on else "T1"],
                 "description": (
                     "严格按照 `.halo/plan.md` 完成全部代码改动（前端和后端都由你写）与对应测试，并运行规划里的测试命令。"
                     "规划有明显错误时按代码事实修正，并在回执里说明。完成后把改动文件清单、与规划的差异、"
                     "测试命令与实际结果写入 `.halo/dev-receipt.md`。不要 push、不要合并主分支、不要部署。"
+                    + ("以审阅定稿后的 `.halo/plan.md` 为准，并参考 `.halo/plan-review.md`。" if plan_review_on else "")
                 ),
             },
             {
-                "key": "T3",
-                "title": "Claude 审阅并修复问题",
+                "key": "T4" if plan_review_on else "T3",
+                "title": f"{labels['claude-review']} 审阅并修复问题",
                 "member": "claude-review",
-                "depends_on": ["T2"],
+                "depends_on": [dev_key],
                 "description": (
                     "通读 `.halo/plan.md`、`.halo/dev-receipt.md` 和当前分支相对主分支的完整 git diff，逐条对照验收标准审阅："
                     "正确性、遗漏的需求、回归风险、安全问题、与项目约定是否一致。发现的问题由你直接修改代码修掉"
@@ -226,10 +272,22 @@ def build_pipeline_plan(
                 ),
             },
         ]
-        summary = (
-            "工作流（/work）：AGY 出规划 → Codex 按规划开发 → Claude 审阅并修复问题；"
-            "完成后自动提交合并主分支、推送、等 CI、部署更新、清理分支并核实线上。"
-        )
+        if plan_review_on:
+            tasks.insert(1, {
+                "key": "T2",
+                "title": "审阅规划并定稿",
+                "member": "plan-reviewer",
+                "depends_on": ["T1"],
+                "description": (
+                    "通读 `.halo/plan.md`、真实代码以及项目的 `AGENTS.md` / `CLAUDE.md`，核查需求覆盖、文件路径、"
+                    "接口契约、边界风险与测试命令。发现明确的问题就直接修订 `.halo/plan.md` 定稿；把审阅结论与改动"
+                    "记录在 `.halo/plan-review.md`。遇到需要用户拍板的重大需求歧义或方案分歧，按 `QUESTION:` 协议"
+                    "暂停；Hermes 成员用 `kanban_block`（`kind=needs_input`）写明问题。收到答复后更新定稿和审阅记录，"
+                    "再完成本任务以放行开发。"
+                    "本步只修改 `.halo/` 中的规划与审阅文件。"
+                ),
+            })
+        summary = f"工作流（/work）：{work_flow(cfg, prefs)}。"
     elif wf == "dev_lite":
         members = [
             _member_spec("claude-lead", "Claude 主控", "code",

@@ -315,11 +315,12 @@ USAGE = {
 def usage_text(platform: str, chat_id: Any) -> str:
     lines = ["**HaloWebUI 命令**", *USAGE.values()]
     if platform == "qqbot":
+        from .tg import work_usage
+
         lines.append("协作台：/team 目标 —— 负责人做计划发到这里，回「批准」开始、「取消」作罢；/team 直接 目标 —— 计划好就开始；"
                      "/team 多模型 目标、/team 快速研发 目标 —— 选研发流程（可以和「直接」叠着写）。"
                      "成员提问回「答 内容」，任务失败回「重试」或「重试 说明」。发 /team 进度 或「协作进度」查详情。")
-        lines.append("工作流：/work 需求 —— AGY 出规划 → Codex 开发 → Claude 审阅修复 → 提交推送部署清理，全程自动；"
-                     "/work cchclaude 需求 —— 指定审阅用的 Claude。发 /work 进度 查进度。")
+        lines.append(html_text(work_usage()))
     going = chat_jobs(platform, chat_id)
     if going:
         lines.append("")
@@ -416,7 +417,7 @@ async def _team_command(source: Any, owner: str, args: str, event: Any) -> None:
 
 async def _work_command(source: Any, owner: str, args: str, event: Any) -> None:
     """QQ's ``/work``: the same workflow as Telegram's (tg.py), its notices and questions come here."""
-    from .tg import WORK_USAGE, split_work_args, work_started
+    from .tg import split_work_args, work_started, work_usage
 
     _refresh_chat_reply_to(_platform(source), source.chat_id, getattr(event, "message_id", None))
     if chat_progress.is_work_progress_query(args):
@@ -429,7 +430,7 @@ async def _work_command(source: Any, owner: str, args: str, event: Any) -> None:
         return
     goal, prefs = split_work_args(args)
     if not goal or goal in ("help", "帮助", "?", "？"):
-        await _say(source, html_text(WORK_USAGE), event)
+        await _say(source, html_text(work_usage()), event)
         return
     try:
         team = await asyncio.to_thread(link.create, owner, goal, _origin(source), True, "work", prefs)

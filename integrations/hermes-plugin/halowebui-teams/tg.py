@@ -33,7 +33,7 @@ import time
 from pathlib import Path
 from typing import Any, Optional
 
-from . import chat_progress, link, notify
+from . import chat_progress, link, notify, runners, workflow
 from .common import logger, read_team
 from .notify import clip, esc
 
@@ -442,21 +442,12 @@ async def _team_command(source: Any, owner: str, args: str, event: Any) -> None:
                _started_buttons(team["id"]), event)
 
 
-WORK_USAGE = ("<b>工作流 /work</b>\n"
-              "/work 需求 —— AGY 出规划 → Codex 开发 → Claude 审阅并修复问题 → 提交、推送、部署、清理，全程自动。"
-              "需求里写上项目名或路径（例如「/work HaloWebUI 给设置页加个开关」）。\n"
-              "默认 offiagy 规划（不行换 agy），officlaude 审阅（不行依次换 cchclaude、anyclaude、reclaude）。\n"
-              "/work cchclaude 需求 —— 指定审阅的 Claude（cchclaude / anyclaude / reclaude / officlaude），"
-              "指定了就只用它，不可用时暂停等你换；agy / offiagy 同理指定规划的。\n"
-              "/work 进度 —— 查看工作流进度。")
 _WORK_RUNNER_RE = re.compile(r"([A-Za-z]+)(?=$|[\s：:，,])")
 
 
 def split_work_args(args: str) -> tuple[str, dict[str, str]]:
     """``/work [runner …] <需求>`` → (goal, runner_prefs). Runners named first pick their family's
     runner (``{"claude": "cchclaude"}``); one per family, Hermes is not one."""
-    from . import runners
-
     text, prefs = (args or "").strip(), {}
     while True:
         found = _WORK_RUNNER_RE.match(text)
@@ -468,18 +459,29 @@ def split_work_args(args: str) -> tuple[str, dict[str, str]]:
 
 
 def work_flow(prefs: Optional[dict] = None) -> str:
-    """The /work steps with the runners that will do them."""
-    prefs = prefs or {}
-    planner = prefs.get("agy") or "offiagy（不行换 agy）"
-    developer = prefs.get("codex") or "Codex"
-    reviewer = prefs.get("claude") or "officlaude（不行依次换 cchclaude、anyclaude、reclaude）"
-    return f"{planner} 出规划 → {developer} 开发 → {reviewer} 审阅修复 → 提交推送部署清理"
+    """The current /work steps with the runners that will do them."""
+    return workflow.work_flow(runners.work_config(), workflow.normalize_runner_prefs(prefs))
+
+
+def _format_work_usage(flow: str) -> str:
+    return (f"<b>工作流 /work</b>\n/work 需求 —— 当前流程：{esc(flow)}。\n"
+            "需求里写上项目名或路径（例如「/work HaloWebUI 给设置页加个开关」）。\n"
+            "在 HaloWebUI 设置 → Hermes 模型 中可调整执行器、兜底顺序和规划审阅。\n"
+            "/work cchclaude 需求 —— 单次指定首选属于 Claude 家族的环节；指定后不可用时暂停等你换。\n"
+            "/work 进度 —— 查看工作流进度。")
+
+
+WORK_USAGE = _format_work_usage(workflow.work_flow(runners.DEFAULT_WORK_CONFIG, {}))
+
+
+def work_usage() -> str:
+    return _format_work_usage(work_flow())
 
 
 def work_started(team: dict, prefs: dict) -> str:
     """The reply to /work (Telegram HTML; QQ strips the tags)."""
     return (f"🛠️ 已交给工作流：<b>{esc(clip(team.get('title'), 60))}</b>\n{esc(work_flow(prefs))}。\n"
-            "规划好就直接开始，全程自动；需要你处理或做完发布了会发到这里。")
+            "各环节依次自动开始；需要你处理或做完发布了会发到这里。")
 
 
 async def _work_command(source: Any, owner: str, args: str, event: Any) -> None:
@@ -493,7 +495,7 @@ async def _work_command(source: Any, owner: str, args: str, event: Any) -> None:
         return
     goal, prefs = split_work_args(args)
     if not goal or goal in ("help", "帮助", "?", "？"):
-        await _say(source, WORK_USAGE, None, event)
+        await _say(source, work_usage(), None, event)
         return
     try:
         team = await asyncio.to_thread(link.create, owner, goal, _origin(source), True, "work", prefs)

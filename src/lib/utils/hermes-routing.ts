@@ -1,7 +1,14 @@
 // Labels and pure helpers for the 「Hermes 模型」 settings page (HermesRouting.svelte).
 // Hermes validates and writes the routing itself (hermes_cli/routing_admin.py); this only
 // shapes what the page shows and what it sends.
-import type { HermesAgyPrefs, HermesRouting, HermesRoutingChange } from '$lib/apis/hermes';
+import type {
+	HermesAgyPrefs,
+	HermesRouting,
+	HermesRoutingChange,
+	HermesWorkConfigResponse,
+	WorkStepKey,
+	WorkWorkflowConfig
+} from '$lib/apis/hermes';
 
 export const ROUTING_MAX_FALLBACKS = 3;
 export const ROUTING_MAX_AUX_FALLBACKS = 2;
@@ -194,6 +201,7 @@ export const historySourceLabel = (source: string) =>
 export type AgyDraft = { card_model: string; ui_runner: string; offiagy_model: string };
 
 export const RUNNER_LABELS: Record<string, string> = {
+	officlaude: 'officlaude（官方 Claude）',
 	offiagy: 'offiagy（Google 账号）',
 	agy: 'agy（网关 gemini-chat）',
 	hermes: 'Hermes',
@@ -236,3 +244,65 @@ export const agyChanges = (before: AgyDraft, rawAfter: AgyDraft) => {
 	}
 	return { update, lines };
 };
+
+export const WORK_STEP_KEYS: readonly WorkStepKey[] = ['plan', 'plan_review', 'dev', 'review'];
+
+const WORK_STEP_LABELS: Record<WorkStepKey, string> = {
+	plan: '规划',
+	plan_review: '规划审阅',
+	dev: '开发',
+	review: '验收修复'
+};
+
+export const workStepLabel = (key: WorkStepKey) => WORK_STEP_LABELS[key];
+
+export const workDraftFrom = ({ config, defaults }: HermesWorkConfigResponse): WorkWorkflowConfig => {
+	const steps = { ...defaults.steps };
+	for (const key of WORK_STEP_KEYS) {
+		const step = config.steps[key] ?? defaults.steps[key];
+		steps[key] = { runner: step.runner, fallback: [...step.fallback] };
+	}
+	return { plan_review: config.plan_review, steps };
+};
+
+export const setWorkStepRunner = (
+	draft: WorkWorkflowConfig,
+	key: WorkStepKey,
+	runner: string
+): WorkWorkflowConfig => ({
+	...draft,
+	steps: {
+		...draft.steps,
+		[key]: { runner, fallback: draft.steps[key].fallback.filter((id) => id !== runner) }
+	}
+});
+
+export const workChanges = (before: WorkWorkflowConfig, after: WorkWorkflowConfig) => {
+	const lines: string[] = [];
+	const toggle = (value: boolean) => (value ? '开启' : '关闭');
+	if (before.plan_review !== after.plan_review) {
+		lines.push(`规划后审阅：${toggle(before.plan_review)} → ${toggle(after.plan_review)}`);
+	}
+	for (const key of WORK_STEP_KEYS) {
+		const label = workStepLabel(key);
+		const prev = before.steps[key];
+		const next = after.steps[key];
+		if (prev.runner !== next.runner) {
+			lines.push(`/work ${label}首选：${prev.runner} → ${next.runner}`);
+		}
+		const prevChain = prev.fallback.join(' › ') || '无';
+		const nextChain = next.fallback.join(' › ') || '无';
+		if (prevChain !== nextChain) lines.push(`/work ${label}兜底：${prevChain} → ${nextChain}`);
+	}
+	return { changed: lines.length > 0, lines };
+};
+
+export const workConfigEquals = (a: WorkWorkflowConfig, b: WorkWorkflowConfig) =>
+	!workChanges(a, b).changed;
+
+export const workFlowSummary = (config: WorkWorkflowConfig) =>
+	WORK_STEP_KEYS.filter((key) => key !== 'plan_review' || config.plan_review).map((key) => ({
+		key,
+		title: workStepLabel(key),
+		...config.steps[key]
+	}));

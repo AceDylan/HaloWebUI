@@ -1,5 +1,5 @@
 /**
- * `/work [runner …] <需求>` typed in a chat: the 协作台's `work` workflow (AGY plans → Codex builds →
+ * `/work [runner …] <需求>` typed in a chat: the 协作台's `work` workflow (planning → development →
  * Claude reviews and fixes → commit, push, deploy, clean up), started at once and shown as the team's
  * card in this chat. The same command as Telegram / QQ (the Hermes plugin's tg.split_work_args): a
  * runner named first is used for its family and never falls back to another one.
@@ -19,7 +19,7 @@ export const WORK_RUNNERS: Record<string, WorkFamily> = {
 };
 
 export const WORK_USAGE =
-	'/work 需求：AGY 出规划 → Codex 开发 → Claude 审阅修复 → 自动提交推送部署清理。需求里写上项目名或路径；/work cchclaude 需求 可以指定审阅用的 Claude。';
+	'/work 需求：规划 → 开发 → 审阅修复 → 自动提交推送部署清理。需求里写上项目名或路径。可在 HaloWebUI 设置 → Hermes 模型 自定义各环节执行器、兜底顺序与是否开启规划审阅。/work cchclaude 需求 可单次指定首选属于 Claude 家族的环节。';
 
 const COMMAND_RE = /^\s*\/work(?=$|[\s：:])[\s：:]*([\s\S]*)$/i;
 const RUNNER_RE = /^([A-Za-z]+)(?=$|[\s：:，,])/;

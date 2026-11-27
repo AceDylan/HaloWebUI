@@ -541,6 +541,7 @@ def _stop_runner_run(rn: Runner, run_id: str, meta: dict) -> None:
 # --- board tick / stop --------------------------------------------------------------------------
 
 def tick_board(slug: str, team: dict) -> None:
+    fallback.reroute_native_work(slug, team)
     with board_conn(slug) as conn:
         running = conn.execute(
             "SELECT id, assignee FROM tasks WHERE status = 'running' AND assignee IN " + _ASSIGNEES_SQL

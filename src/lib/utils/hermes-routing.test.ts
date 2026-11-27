@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import type { HermesWorkConfigResponse, WorkWorkflowConfig } from '$lib/apis/hermes';
 import {
 	chainAdd,
 	chainCandidates,
@@ -10,7 +11,12 @@ import {
 	modelFamily,
 	modelLabel,
 	orderedAuxTasks,
-	withPrimary
+	setWorkStepRunner,
+	withPrimary,
+	workChanges,
+	workConfigEquals,
+	workDraftFrom,
+	workFlowSummary
 } from './hermes-routing';
 
 const routing = () => ({
@@ -19,6 +25,52 @@ const routing = () => ({
 	delegation: { model: '', fallback: [] as string[] },
 	auxiliary: { compression: { model: 'gemini-chat', fallback: ['deepseek-chat'] } },
 	media: { model: 'gemini-chat', timeout: 300 }
+});
+
+const workConfig = (): WorkWorkflowConfig => ({
+	plan_review: false,
+	steps: {
+		plan: { runner: 'offiagy', fallback: ['agy'] },
+		plan_review: { runner: 'officlaude', fallback: ['cchclaude'] },
+		dev: { runner: 'codex', fallback: [] },
+		review: { runner: 'officlaude', fallback: ['cchclaude', 'anyclaude'] }
+	}
+});
+
+describe('/work workflow helpers', () => {
+	it('copies the configuration and fills missing steps from the defaults', () => {
+		const defaults = workConfig();
+		const config = { plan_review: true, steps: { plan: { runner: 'hermes', fallback: [] } } };
+		const res = { defaults, config, runners: [], steps_meta: [] } as unknown as HermesWorkConfigResponse;
+		const draft = workDraftFrom(res);
+		expect(draft.steps).toEqual({ ...defaults.steps, ...config.steps });
+		draft.steps.plan.fallback.push('codex');
+		draft.steps.review.fallback.pop();
+		expect(config.steps.plan.fallback).toEqual([]);
+		expect(defaults.steps.review.fallback).toEqual(['cchclaude', 'anyclaude']);
+	});
+
+	it('removes the selected primary from fallback and reports the exact changes', () => {
+		const before = workConfig();
+		const after = setWorkStepRunner(before, 'review', 'cchclaude');
+		after.plan_review = true;
+		expect(before.steps.review.fallback).toEqual(['cchclaude', 'anyclaude']);
+		expect(after.steps.review.fallback).toEqual(['anyclaude']);
+		expect(workChanges(before, after)).toEqual({
+			changed: true,
+			lines: [
+				'规划后审阅：关闭 → 开启',
+				'/work 验收修复首选：officlaude → cchclaude',
+				'/work 验收修复兜底：cchclaude › anyclaude → anyclaude'
+			]
+		});
+		expect(workConfigEquals(before, workConfig())).toBe(true);
+		expect(workConfigEquals(before, after)).toBe(false);
+		expect(workFlowSummary(before).map((step) => step.key)).toEqual(['plan', 'dev', 'review']);
+		expect(workFlowSummary(after).map((step) => step.key)).toEqual([
+			'plan', 'plan_review', 'dev', 'review'
+		]);
+	});
 });
 
 describe('hermes routing helpers', () => {

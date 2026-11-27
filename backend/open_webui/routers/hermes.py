@@ -44,7 +44,7 @@ import logging
 from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StrictBool
 
 from open_webui.env import SRC_LOG_LEVELS
 from open_webui.models.users import Users
@@ -585,5 +585,33 @@ async def save_hermes_agy_prefs(
         return await hermes_routing.save_agy_prefs(
             request, user, form_data.model_dump(exclude_unset=True)
         )
+    except HermesSessionsError as e:
+        raise _job_error(e)
+
+
+class HermesWorkStepForm(BaseModel):
+    runner: str = Field(min_length=1, max_length=32)
+    fallback: list[str] = Field(default_factory=list, max_length=8)
+
+
+class HermesWorkConfigForm(BaseModel):
+    plan_review: StrictBool = False
+    steps: dict[Literal["plan", "plan_review", "dev", "review"], HermesWorkStepForm]
+
+
+@router.get("/work-config")
+async def get_hermes_work_config(request: Request, user=Depends(get_admin_user)):
+    try:
+        return await hermes_routing.get_work_config(request, user)
+    except HermesSessionsError as e:
+        raise _job_error(e)
+
+
+@router.put("/work-config")
+async def save_hermes_work_config(
+    request: Request, form_data: HermesWorkConfigForm, user=Depends(get_admin_user)
+):
+    try:
+        return await hermes_routing.save_work_config(request, user, form_data.model_dump())
     except HermesSessionsError as e:
         raise _job_error(e)

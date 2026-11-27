@@ -22,6 +22,7 @@ from . import runners
 from .common import (
     EXECUTOR_ASSIGNEE,
     append_event,
+    board_conn,
     kb,
     kbc,
     logger,
@@ -34,6 +35,13 @@ from .common import (
 
 ALL_DOWN = "所有执行来源都不可用"
 CHOSEN_DOWN = "指定的执行来源不可用"
+
+
+def unavailable_prefix(chosen: str, chain: Optional[list[str]]) -> str:
+    family = runners.family_of(chosen)
+    if chain and set(chain) != set(runners.DEFAULT_FAMILIES[family]):
+        return f"{ALL_DOWN}（执行链 {' → '.join(chain)} 均不可用，请手动选择执行来源）"
+    return f"{ALL_DOWN}（{runners.FAMILY_LABELS[family]} 家族均不可用，请手动选择执行来源）"
 
 
 def _record(slug: str, task_id: str, step: dict, executor: Optional[str]) -> None:
@@ -67,9 +75,11 @@ def reroute(slug: str, conn: Any, task_id: str, current: str, reason: str, *, ph
     entry = (team.get("tasks") or {}).get(task_id) or {}
     chosen = entry.get("chosen") or current
     is_auto = runners.is_auto(entry.get("chosen_by"))
+    chain = entry.get("chain")
+    chain = chain if isinstance(chain, list) and chain else None
     if fail_kind and phase == "runtime":
         runners.mark_down(current, "recent_failure", reason)
-    picked = runners.select_after(chosen, current, auto=is_auto)
+    picked = runners.select_after(chosen, current, auto=is_auto, chain=chain)
     target = picked["executor"]
     stamp = now()
     reason = redact(reason, 300)
@@ -78,8 +88,7 @@ def reroute(slug: str, conn: Any, task_id: str, current: str, reason: str, *, ph
         if not is_auto:
             text = f"{CHOSEN_DOWN}（{current}，不自动顺延，请手动选择其他执行来源重试）：{reason}"
         else:
-            fam = runners.FAMILY_LABELS.get(runners.family_of(chosen), "")
-            prefix = f"{ALL_DOWN}（{fam} 家族均不可用，请手动选择执行来源）" if fam else ALL_DOWN
+            prefix = unavailable_prefix(chosen, picked["chain"] if chain else None)
             text = f"{prefix}：{reason}" + (f"；{others}" if others else "")
         _record(slug, task_id, {"from": current, "to": None, "reason": text, "at": stamp, "phase": phase,
                                 "fail_kind": fail_kind}, None)
@@ -112,6 +121,42 @@ def reroute(slug: str, conn: Any, task_id: str, current: str, reason: str, *, ph
     return target
 
 
+def reroute_native_work(slug: str, team: dict) -> None:
+    """Apply a /work chain when the current runner is a native Hermes worker."""
+    if team.get("workflow") != "work" or team.get("archived") or team.get("state") != "running":
+        return
+    tasks = {tid: entry for tid, entry in (team.get("tasks") or {}).items()
+             if entry.get("chain") and entry.get("executor") == "hermes"}
+    if not tasks:
+        return
+    # The native dispatcher also uses this lock. Don't take a task it is about to claim.
+    with kbc()._dispatch_tick_lock(kb().kanban_db_path(board=slug)) as held:
+        if not held:
+            return
+        with board_conn(slug) as conn:
+            info = runners.check(["hermes"]).get("hermes") or {}
+            for tid, entry in tasks.items():
+                task = kb().get_task(conn, tid)
+                if (task is None or task.assignee != EXECUTOR_ASSIGNEE["hermes"] or task.claim_lock
+                        or task.status not in ("ready", "blocked")):
+                    continue
+                trail = entry.get("trail") or []
+                if task.status == "blocked" and (
+                    task.block_kind == "needs_input" or (trail and trail[-1].get("to") is None)
+                ):
+                    continue  # waiting for the user to answer or to pick another runner
+                error = task.last_failure_error
+                if error:
+                    run = kb().latest_run(conn, tid)
+                    kind = "quota" if run and run.outcome == "rate_limited" else runners.classify_failure(error)
+                    if kind:
+                        reroute(slug, conn, tid, "hermes", error, phase="runtime", fail_kind=kind,
+                                run_row=run.id if run else None)
+                        continue
+                if task.status == "ready" and info and not info.get("available"):
+                    reroute(slug, conn, tid, "hermes", info.get("reason") or "Hermes 不可用", phase="launch")
+
+
 def reselect_for_retry(slug: str, conn: Any, task_id: str, *, executor: Optional[str] = None) -> Optional[str]:
     """Re-select runner on retry. When *executor* is provided by the user, switch to it explicitly
     (``chosen_by='user'``, no auto-fallback). Otherwise, an automatic task starts again from its
@@ -126,6 +171,7 @@ def reselect_for_retry(slug: str, conn: Any, task_id: str, *, executor: Optional
             t_entry["chosen"] = executor
             t_entry["chosen_by"] = "user"
             t_entry["executor"] = executor
+            t_entry.pop("chain", None)
 
         update_team(slug, choose)
         if executor != current:
@@ -138,7 +184,9 @@ def reselect_for_retry(slug: str, conn: Any, task_id: str, *, executor: Optional
                 "text": f"用户手动换执行来源：{current} → {executor}"})
         return executor
     chosen = entry.get("chosen") or current
-    picked = runners.select(chosen, auto=runners.is_auto(entry.get("chosen_by")))
+    chain = entry.get("chain")
+    picked = runners.select(chosen, auto=runners.is_auto(entry.get("chosen_by")),
+                            chain=chain if isinstance(chain, list) and chain else None)
     target = picked["executor"]
     if target is None or target == current:
         return current

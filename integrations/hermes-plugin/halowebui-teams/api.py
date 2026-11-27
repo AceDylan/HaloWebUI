@@ -344,6 +344,18 @@ async def _agy_prefs_put(request):
     return _json_response(result)
 
 
+async def _work_config_get(request):
+    from . import runners
+
+    return _json_response(await asyncio.to_thread(runners.work_config_public))
+
+
+async def _work_config_put(request):
+    from . import runners
+
+    return _json_response(await asyncio.to_thread(runners.save_work_config, await _body(request)))
+
+
 async def _plan_resolve(request):
     from .plan import validate_plan
 
@@ -558,6 +570,8 @@ def install(app: Any, adapter: Any) -> None:
     router.add_post(base + "/runners/check", _wrap(adapter, _runners_check))
     router.add_get(base + "/agy-prefs", _wrap(adapter, _agy_prefs_get))
     router.add_put(base + "/agy-prefs", _wrap(adapter, _agy_prefs_put))
+    router.add_get(base + "/work-config", _wrap(adapter, _work_config_get))
+    router.add_put(base + "/work-config", _wrap(adapter, _work_config_put))
     router.add_post(base + "/plan/resolve", _wrap(adapter, _plan_resolve))
     router.add_post(base + "/plan/decide", _wrap(adapter, _plan_decide))
     router.add_get(base + "/plan/progress", _wrap(adapter, _plan_progress))

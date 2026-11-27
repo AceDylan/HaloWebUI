@@ -463,6 +463,19 @@ def test_qq_work_command_starts_the_work_workflow(remote, monkeypatch):
     assert "/work 需求" in remote.sent[-1]["text"] and len(created) == 1
 
 
+def test_qq_work_help_uses_the_same_config_as_the_start_receipt(remote, pkg, monkeypatch, tmp_path):
+    monkeypatch.setattr(pkg.runners, "OVERRIDE_FILE", tmp_path / "runners.json")
+    cfg = pkg.runners.work_config()
+    cfg["plan_review"] = True
+    cfg["steps"]["plan_review"] = {"runner": "codex", "fallback": ["agy"]}
+    pkg.runners.save_work_config(cfg)
+    monkeypatch.setattr(remote.link, "create", lambda *_a: {"id": "5f3c2a10-team-w", "title": "工作"})
+
+    for command in ("/work help", "/work 修 bug"):
+        _dispatch(remote.remote, _event("qqbot", QQ_USER, command))
+        assert "Codex（不行换 agy） 审阅规划" in remote.sent[-1]["text"]
+
+
 def test_qq_team_receives_deploy_notice_without_notifying_telegram(remote, monkeypatch):
     import halowebui_teams.notify as notify
 

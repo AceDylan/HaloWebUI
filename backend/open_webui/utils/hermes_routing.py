@@ -36,6 +36,7 @@ PROBE_TIMEOUT_SECONDS = 75
 
 AGY_MODEL_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}")
 TEAMS_AGY_PREFS_PATH = "/v1/halo-teams/agy-prefs"
+TEAMS_WORK_CONFIG_PATH = "/v1/halo-teams/work-config"
 
 
 async def _routing_call(
@@ -63,8 +64,9 @@ async def _routing_call(
                     return body if isinstance(body, dict) else {}
                 message = _hermes_error_message(body)
                 if resp.status == 404 and not message:
+                    feature = "网页配置 /work" if base == TEAMS_WORK_CONFIG_PATH else "网页改模型"
                     raise HermesSessionsError(
-                        501, "这个 Hermes 还不支持网页改模型，更新 Hermes 并重载网关后再试"
+                        501, f"这个 Hermes 还不支持{feature}，更新 Hermes 并重载网关后再试"
                     )
                 if resp.status in (400, 403, 409):
                     raise HermesSessionsError(resp.status, message or f"HTTP {resp.status}")
@@ -215,3 +217,11 @@ async def save_agy_prefs(request, user, fields: dict) -> dict:
             request, user, "PUT", base=TEAMS_AGY_PREFS_PATH, json=teams_fields, timeout=60
         )
     return await get_agy_prefs(request, user)
+
+
+async def get_work_config(request, user) -> dict:
+    return await _routing_call(request, user, "GET", base=TEAMS_WORK_CONFIG_PATH)
+
+
+async def save_work_config(request, user, payload: dict) -> dict:
+    return await _routing_call(request, user, "PUT", base=TEAMS_WORK_CONFIG_PATH, json=payload)

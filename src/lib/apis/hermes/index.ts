@@ -732,3 +732,43 @@ export const getHermesAgyPrefs = (token: string, opts?: { refresh?: boolean }) =
 
 export const saveHermesAgyPrefs = (token: string, update: HermesAgyPrefsUpdate) =>
 	agyPrefsCall(token, 'PUT', update);
+
+export type WorkStepKey = 'plan' | 'plan_review' | 'dev' | 'review';
+export type WorkStepConfig = { runner: string; fallback: string[] };
+export type WorkWorkflowConfig = { plan_review: boolean; steps: Record<WorkStepKey, WorkStepConfig> };
+export type WorkRunnerOption = {
+	name: string;
+	label: string;
+	engine: string;
+	family: string;
+	note: string;
+	native?: boolean;
+};
+export type WorkStepMeta = { key: WorkStepKey; label: string; hint: string; optional?: boolean };
+export type HermesWorkConfigResponse = {
+	config: WorkWorkflowConfig;
+	defaults: WorkWorkflowConfig;
+	runners: WorkRunnerOption[];
+	steps_meta: WorkStepMeta[];
+};
+
+const workConfigCall = async (
+	token: string,
+	method: 'GET' | 'PUT',
+	config?: WorkWorkflowConfig
+): Promise<HermesWorkConfigResponse> => {
+	const res = await fetch(`${WEBUI_API_BASE_URL}/hermes/work-config`, {
+		method,
+		headers: jsonHeaders(token),
+		...(config === undefined ? {} : { body: JSON.stringify(config) })
+	});
+	if (!res.ok) {
+		throw Object.assign(new Error(String(await detailOf(res))), { status: res.status });
+	}
+	return res.json();
+};
+
+export const getHermesWorkConfig = (token: string) => workConfigCall(token, 'GET');
+
+export const saveHermesWorkConfig = (token: string, config: WorkWorkflowConfig) =>
+	workConfigCall(token, 'PUT', config);

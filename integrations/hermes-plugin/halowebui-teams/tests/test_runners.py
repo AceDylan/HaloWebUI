@@ -108,6 +108,80 @@ def test_select_after_only_moves_forward_within_family(pkg, availability):
     assert r.select_after("cchclaude", "cchclaude", auto=False)["executor"] is None
 
 
+def test_work_config_round_trip_and_reset(pkg, tmp_path, monkeypatch):
+    r = pkg.runners
+    path = tmp_path / "runners.json"
+    monkeypatch.setattr(r, "OVERRIDE_FILE", path)
+    custom = r.work_config()
+    assert custom == r.DEFAULT_WORK_CONFIG
+    custom["plan_review"] = True
+    custom["steps"]["dev"] = {"runner": "hermes", "fallback": ["codex", "officlaude"]}
+    other = {"kinds": {"ui": "agy"}, "offiagy_model": "model-id", "disabled": ["anyclaude"]}
+    path.write_text(json.dumps(other), encoding="utf-8")
+
+    saved = r.save_work_config(custom)
+    assert saved["config"] == r.work_config() == custom
+    assert saved["defaults"]["steps"]["dev"] == {"runner": "codex", "fallback": []}
+    assert {runner["name"] for runner in saved["runners"]} == set(r.NAMES)
+    assert [step["key"] for step in saved["steps_meta"]] == list(r.WORK_STEPS)
+    assert json.loads(path.read_text()) == {**other, "work": custom}
+    assert r.save_work_config(saved["defaults"])["config"] == r.DEFAULT_WORK_CONFIG
+    assert json.loads(path.read_text()) == other
+
+    path.write_text(json.dumps({"work": custom}), encoding="utf-8")
+    r.save_work_config(saved["defaults"])
+    assert not path.exists()
+
+
+def test_work_config_tolerates_partial_and_stale_values_on_disk(pkg, override):
+    override({"work": {"plan_review": "true", "steps": {
+        "plan": {"runner": {}, "fallback": [{}, "unknown", "offiagy", "codex", "codex"]},
+        "review": {"runner": "cchclaude"},
+    }}})
+    cfg = pkg.runners.work_config()
+    assert cfg["plan_review"] is False
+    assert cfg["steps"]["plan"] == {"runner": "offiagy", "fallback": ["codex"]}
+    assert cfg["steps"]["review"] == {"runner": "cchclaude", "fallback": ["anyclaude", "reclaude"]}
+    assert cfg["steps"]["dev"] == {"runner": "codex", "fallback": []}
+
+
+@pytest.mark.parametrize("step, message", [
+    ({"runner": "unknown", "fallback": []}, "首选执行器"),
+    ({"runner": "codex", "fallback": "officlaude"}, "兜底必须是列表"),
+    ({"runner": "codex", "fallback": [{}]}, "有效且互不重复"),
+    ({"runner": "codex", "fallback": ["codex"]}, "不能包含首选"),
+    ({"runner": "codex", "fallback": ["agy", "agy"]}, "互不重复"),
+    (None, "四个环节"),
+])
+def test_work_config_rejects_invalid_saves(pkg, step, message):
+    r = pkg.runners
+    cfg = r.work_config()
+    if step is None:
+        del cfg["steps"]["dev"]
+    else:
+        cfg["steps"]["dev"] = step
+    with pytest.raises(ValueError, match=message):
+        r.save_work_config(cfg)
+    with pytest.raises(ValueError, match="布尔值"):
+        r.save_work_config({**cfg, "plan_review": "true"})
+
+
+def test_select_uses_only_the_custom_chain_unless_manually_pinned(pkg, availability):
+    r = pkg.runners
+    availability.down["offiagy"] = "未登录"
+    availability.down["codex"] = "维护中"
+    chain = ["offiagy", "unknown", "codex", "codex", "cchclaude"]
+    picked = r.select("offiagy", auto=True, chain=chain)
+    assert picked["executor"] == "cchclaude"
+    assert picked["chain"] == ["offiagy", "codex", "cchclaude"]
+    assert r.select_after("offiagy", "codex", auto=True, chain=chain)["executor"] == "cchclaude"
+    assert r.select_after("offiagy", "officlaude", auto=True, chain=chain)["executor"] is None
+    assert r.select("offiagy", auto=True, chain=["offiagy"])["executor"] is None
+    assert r.select_after("offiagy", "offiagy", auto=True, chain=["offiagy"])["executor"] is None
+    assert r.select("offiagy", chain=chain)["executor"] is None
+    assert r.select_after("offiagy", "offiagy", chain=chain)["executor"] is None
+
+
 def test_override_file_changes_defaults_order_and_marks_runners(pkg, override):
     r = pkg.runners
     override({"kinds": {"code": "codex"}, "order": ["codex", "reclaude"], "unavailable": {"agy": "维护中"},

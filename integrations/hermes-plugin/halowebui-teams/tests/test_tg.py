@@ -638,6 +638,25 @@ def test_work_command_starts_the_work_workflow(linked, monkeypatch):
     assert "工作流 /work" in linked.sent[-1]["text"] and len(calls) == 2
 
 
+def test_work_receipt_and_help_read_the_current_configuration(linked, pkg, monkeypatch, tmp_path):
+    runners = pkg.runners
+    monkeypatch.setattr(runners, "OVERRIDE_FILE", tmp_path / "runners.json")
+    assert linked.telegram.work_flow() == (
+        "offiagy（不行换 agy） 出规划 → Codex 开发 → "
+        "officlaude（不行依次换 cchclaude、anyclaude、reclaude） 审阅修复 → 提交推送部署清理"
+    )
+    cfg = runners.work_config()
+    cfg["plan_review"] = True
+    cfg["steps"]["dev"] = {"runner": "agy", "fallback": ["codex", "hermes"]}
+    runners.save_work_config(cfg)
+    monkeypatch.setattr(linked.link, "create", lambda *_a: {"id": "11111111-2222-3333-4444-555555555555", "title": "工作"})
+    _run(lambda: linked.telegram.on_pre_gateway_dispatch(event=_event("/work anyclaude 修 bug")))
+    assert "anyclaude 审阅规划 → agy（不行依次换 codex、hermes） 开发 → anyclaude 审阅修复" in linked.sent[-1]["text"]
+    _run(lambda: linked.telegram.on_pre_gateway_dispatch(event=_event("/work help")))
+    assert linked.telegram.work_flow() in linked.sent[-1]["text"]
+    assert "设置 → Hermes 模型" in linked.sent[-1]["text"]
+
+
 def test_command_descriptions_fit_the_telegram_menu():
     """Hermes clamps menu descriptions to 40 characters (commands_platforms desc_limit)."""
     import halowebui_teams

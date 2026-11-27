@@ -11,7 +11,7 @@ import threading
 from pathlib import Path
 from typing import Any, Optional
 
-from . import assistants
+from . import assistants, runners
 from .common import (
     ASSIGNEE_EXECUTOR,
     EXECUTOR_ASSIGNEE,
@@ -297,6 +297,7 @@ def create_team(team_id: str, plan: dict, *, owner: str, chat_id: str = "", goal
     ``conclusion_template``: the one the result's picture is drawn in once it is written.
     ``member_assistants``: each member's assistant as HaloWebUI froze it at approval (see
     apply_member_assistants); the task bodies use these prompts."""
+    from .fallback import unavailable_prefix
     from .illustrate import clean_template
     from .plan import task_model, validate_plan
 
@@ -380,6 +381,10 @@ def create_team(team_id: str, plan: dict, *, owner: str, chat_id: str = "", goal
                 # Where the member's chain stands now; with nothing available it stays on the chosen
                 # runner and the bridge blocks it with the reasons when it would start.
                 executor = member.get("runner") or chosen
+                chain = member.get("fallback_chain") if runners.is_auto(member.get("executor_source")) else None
+                # A native worker is claimable by Hermes as soon as the task exists.
+                native_down = (checked.get("workflow") == "work" and chain and executor == "hermes"
+                               and member["runner"] is None)
                 task_id = kb().create_task(
                     conn,
                     title=f"{key} {task['title']}",
@@ -393,6 +398,7 @@ def create_team(team_id: str, plan: dict, *, owner: str, chat_id: str = "", goal
                     idempotency_key=f"{team_id}:{key}",
                     max_runtime_seconds=NATIVE_MAX_RUNTIME if executor == "hermes" else None,
                     board=slug,
+                    **({"initial_status": "blocked"} if native_down else {}),
                     # the member's model, used whenever this task runs on Hermes (also after a fallback)
                     **task_model(member),
                 )
@@ -404,10 +410,17 @@ def create_team(team_id: str, plan: dict, *, owner: str, chat_id: str = "", goal
                 task_map[task_id] = {"key": key, "member": member["name"], "seq": seq, "executor": executor,
                                      "chosen": chosen, "chosen_by": member.get("executor_source") or "auto",
                                      "trail": trail, "depends_on": task["depends_on"]}
+                if chain:
+                    task_map[task_id]["chain"] = list(chain)
                 if trail:
                     append_event(conn, task_id, "halo_runner", {
                         "phase": "fallback", "runner": chosen, "to": executor, "reason": trail[0]["reason"],
                         "text": f"{chosen} 现在不可用，改由 {executor} 执行（{trail[0]['reason'] or '原因未知'}）"})
+                elif native_down:
+                    reason = f"{unavailable_prefix(chosen, chain)}：{member['runner_note']}"
+                    trail.append({"from": chosen, "to": None, "reason": reason, "at": stamp, "phase": "plan"})
+                    append_event(conn, task_id, "halo_runner", {"phase": "unavailable", "runner": chosen,
+                                                               "reason": reason, "text": reason})
         update_team(slug, lambda rec: rec.update({"tasks": task_map, "keys": keys}))
     nudge_dispatch(slug)
     try:  # a plan card in Telegram for this team is answered now, wherever it was approved
@@ -455,7 +468,9 @@ def nudge_dispatch(slug: str) -> None:
         return
     try:
         from hermes_cli import kanban_db_dispatch as kbd
+        from .fallback import reroute_native_work
 
+        reroute_native_work(slug, team)
         with board_conn(slug) as conn:
             kbd.dispatch_once(conn, board=slug, **_dispatch_kwargs())
     except Exception:

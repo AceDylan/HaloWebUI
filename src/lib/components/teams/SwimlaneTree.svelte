@@ -1,10 +1,16 @@
 <script lang="ts">
 	import { createEventDispatcher, onDestroy, tick } from 'svelte';
+	import { formatDuration } from './model';
 
 	import {
+		SWIMLANE_HEADER_HEIGHT,
 		SWIMLANE_LEGEND,
+		connectedSwimlaneIds,
+		fitSwimlaneLabel,
 		layoutSwimlanes,
 		type NarrativeItem,
+		type NarrativeKind,
+		type StageSegment,
 		type SwimlaneEdge,
 		type SwimlaneLayout,
 		type SwimlaneNode
@@ -30,6 +36,11 @@
 	export let autoFollow = true;
 	export let connectorEnabled = true;
 	export let showConnectorToggle = true;
+	export let activeLanes: Set<string> | string[] = [];
+	export let stages: StageSegment[] = [];
+	export let wide = false;
+	export let showWideToggle = true;
+	export let motion = true;
 
 	const dispatch = createEventDispatcher<{
 		focus: { id: string | null; source: 'swimlane'; pin?: boolean };
@@ -37,6 +48,7 @@
 		toggleMember: string | null;
 		toggleFollow: boolean;
 		toggleConnector: boolean;
+		toggleWide: boolean;
 		scroll: void;
 	}>();
 
@@ -46,9 +58,20 @@
 	let canScroll = false;
 	let manualScrollUntil = 0;
 	let rafHover: number | null = null;
+	let legendKind: NarrativeKind | null = null;
 	const uid = Math.random().toString(36).slice(2, 7);
 
-	$: layout = precomputedLayout ?? layoutSwimlanes(items, members, { leadName });
+	$: layout = precomputedLayout ?? layoutSwimlanes(items, members, { leadName, stages });
+	$: active = new Set(activeLanes);
+	$: connected = connectedSwimlaneIds(layout, focusId);
+	$: spotlight = connected.nodeIds.size > 0;
+	$: hudNode = layout.nodes.find((node) => node.id === focusId) ?? layout.nodes.at(-1);
+	$: recentEdges = new Set(
+		layout.edges
+			.filter((edge) => edge.kind !== 'steer')
+			.slice(-4)
+			.map((edge) => edge.id)
+	);
 
 	// Deduplicated colored arrow markers (avoids context-stroke issues on older browsers & dark mode).
 	$: edgeColors = [...new Set(layout.edges.map((e) => e.color))];
@@ -75,6 +98,9 @@
 					Math.max(e.fromY, e.toY) >= minVisibleY && Math.min(e.fromY, e.toY) <= maxVisibleY
 			)
 		: layout.edges;
+	$: visibleBands = windowing
+		? layout.stageBands.filter((band) => band.endRow >= startRow && band.startRow <= endRow)
+		: layout.stageBands;
 
 	const syncMetrics = () => {
 		if (!scroller) return;
@@ -94,21 +120,6 @@
 				scroller.scrollTop = scroller.scrollHeight;
 			}
 		});
-	}
-
-	// Scroll focused node into view ONLY on explicit click from NarrativeFeed (no hover scroll war).
-	$: if (focusId && focusSource === 'feed' && focusPin && scroller) {
-		const targetNode = layout.nodes.find((n) => n.id === focusId);
-		if (targetNode) {
-			const top = scroller.scrollTop;
-			const bottom = top + scroller.clientHeight;
-			if (targetNode.y < top + 56 || targetNode.y > bottom - 40) {
-				scroller.scrollTo({
-					top: Math.max(0, targetNode.y - scroller.clientHeight * 0.45),
-					behavior: 'smooth'
-				});
-			}
-		}
 	}
 
 	const onScroll = () => {
@@ -136,11 +147,36 @@
 			cancelAnimationFrame(rafHover);
 	});
 
-	const isNodeMuted = (n: SwimlaneNode): boolean => {
-		if (stageFilter && n.stageId !== stageFilter) return true;
-		if (memberFilter && n.laneId !== memberFilter) return true;
-		return false;
+	const pinNode = (id: string) => dispatch('focus', { id, source: 'swimlane', pin: true });
+	const outsideLaneViewport = (el: HTMLElement, x: number) =>
+		x < el.scrollLeft + 14 || x > el.scrollLeft + el.clientWidth - 14;
+	const scrollToNode = (node: SwimlaneNode) => {
+		if (!scroller) return;
+		const reduced = window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches;
+		const viewport = scroller.clientWidth;
+		scroller.scrollTo({
+			top: Math.max(0, node.y - (scroller.clientHeight - SWIMLANE_HEADER_HEIGHT) * 0.45),
+			left: outsideLaneViewport(scroller, node.x)
+				? Math.max(0, node.x - viewport / 2)
+				: scroller.scrollLeft,
+			behavior: reduced ? 'auto' : 'smooth'
+		});
 	};
+
+	const locateFocusedNode = (id: string, el: HTMLElement) => {
+		const node = layout.nodes.find((entry) => entry.id === id);
+		if (!node) return;
+		const top = el.scrollTop + SWIMLANE_HEADER_HEIGHT;
+		const bottom = el.scrollTop + el.clientHeight;
+		const y = node.y + SWIMLANE_HEADER_HEIGHT;
+		if (y < top + 16 || y > bottom - 24 || outsideLaneViewport(el, node.x)) {
+			scrollToNode(node);
+		}
+	};
+	// Depend on the explicit selection, so polling and playback don't pull the scroll position back.
+	$: if (focusId && focusSource === 'feed' && focusPin && scroller) {
+		locateFocusedNode(focusId, scroller);
+	}
 
 	const edgePath = (e: SwimlaneEdge): string => {
 		if (e.kind === 'retry' && Math.abs(e.fromX - e.toX) < 2) {
@@ -154,83 +190,87 @@
 </script>
 
 <div class="flex h-full min-h-0 flex-col" data-swimlane-tree>
-	<!-- Header -->
-	<div class="flex flex-wrap items-center gap-2 border-b px-3 py-2 tm-hairline">
+	<div class="workbench-pane-head flex flex-wrap items-center gap-2 border-b px-3 py-2 tm-hairline">
 		<div class="flex items-center gap-1.5">
-			<span class="text-xs font-semibold text-gray-900 dark:text-gray-100">工作树 · 泳道</span>
-			<span class="tm-num rounded-full bg-gray-500/10 px-1.5 py-px text-[10px] text-gray-500">
-				{layout.nodes.length}
-			</span>
+			<svg class="tree-icon size-4" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+				<path d="M3 4v8m0-6c0 4 10 0 10 4v2" stroke="currentColor" stroke-width="1.3" />
+				<circle cx="3" cy="3" r="1.8" fill="currentColor" />
+				<circle cx="3" cy="13" r="1.8" fill="currentColor" />
+				<circle cx="13" cy="13" r="1.8" fill="currentColor" />
+			</svg>
+			<span class="text-xs font-semibold">工作树 · 泳道</span>
+			<span class="count-chip tm-num" title="执行节点数">{layout.nodes.length}</span>
+			{#if active.size}
+				<span class="count-chip tm-num">{active.size} 运行中</span>
+			{/if}
 		</div>
-		<div class="ml-auto flex items-center gap-1">
+		<div class="ml-auto flex flex-wrap items-center gap-1">
+			{#if showWideToggle}
+				<button
+					type="button"
+					class="mini-toggle hidden lg:inline-block"
+					aria-pressed={wide}
+					on:click={() => dispatch('toggleWide', !wide)}
+					data-wide-toggle>{wide ? '标准' : '宽画布'}</button
+				>
+			{/if}
 			{#if showConnectorToggle}
 				<button
 					type="button"
-					class="mini-toggle {connectorEnabled ? 'is-on' : ''}"
+					class="mini-toggle"
 					aria-pressed={connectorEnabled}
-					title="悬停时绘制中右联动引导线"
+					title="绘制叙事流与泳道之间的定位连线"
 					on:click={() => dispatch('toggleConnector', !connectorEnabled)}
-					data-connector-toggle
+					data-connector-toggle>连线</button
 				>
-					连线
-				</button>
 			{/if}
 			<button
 				type="button"
-				class="mini-toggle {autoFollow ? 'is-on' : ''}"
+				class="mini-toggle"
 				aria-pressed={autoFollow}
 				title="有新节点时自动滚到最新位置"
 				on:click={() => dispatch('toggleFollow', !autoFollow)}
-				data-follow-toggle
+				data-follow-toggle>自动跟随</button
 			>
-				自动跟随
-			</button>
 		</div>
 	</div>
 
-	<!-- Sticky lane headers + scrollable SVG canvas -->
 	<div
 		bind:this={scroller}
 		on:scroll|passive={onScroll}
 		on:wheel|passive={onManualMove}
 		on:touchstart|passive={onManualMove}
-		class="tm-scroll relative min-h-0 flex-1 overflow-auto"
+		class="canvas tm-scroll relative min-h-0 flex-1 overflow-auto"
 		data-swimlane-scroll
 	>
-		<!-- Sticky column headers aligned 1:1 with lane x positions -->
 		<div
-			class="lane-headers sticky top-0 z-10 flex items-center border-b backdrop-blur-md tm-hairline"
-			style="width:{layout.width}px"
+			class="lane-headers sticky top-0 z-10 border-b tm-hairline"
+			style="width:{layout.width}px;height:{SWIMLANE_HEADER_HEIGHT}px"
 		>
 			{#each layout.lanes as lane (lane.id)}
 				{@const selected = memberFilter === lane.id}
 				<button
 					type="button"
-					class="lane-head absolute top-0 flex h-full -translate-x-1/2 flex-col items-center justify-center px-1 transition-opacity {memberFilter &&
-					!selected
-						? 'opacity-45 hover:opacity-85'
-						: 'opacity-100'}"
-					style="left:{lane.x}px;width:{layout.laneWidth - 6}px"
-					title="{lane.name}（{lane.role}）· 点击筛选"
+					class="lane-head absolute top-0 flex h-full -translate-x-1/2 flex-col items-center justify-center px-1"
+					class:is-muted={memberFilter && !selected}
+					aria-pressed={selected}
+					style="left:{lane.x}px;width:{layout.laneWidth - 6}px;--lane-color:{lane.palette.stroke}"
+					title="{lane.name}（{lane.role}）· {lane.nodeCount} 个节点 · 点击筛选"
 					on:click={() => dispatch('toggleMember', selected ? null : lane.id)}
 					data-swimlane-lane={lane.id}
+					data-lane-active={active.has(lane.id) ? 'true' : undefined}
 				>
-					<span class="flex max-w-full items-center gap-1">
-						<span
-							class="size-2 shrink-0 rounded-full"
-							style="background:{lane.palette.stroke}"
-							aria-hidden="true"
-						/>
-						<span class="truncate text-[11px] font-semibold text-gray-800 dark:text-gray-100">
-							{lane.name}
-						</span>
+					<span class="flex max-w-full items-center gap-1.5">
+						<span class="lane-status" aria-hidden="true" />
+						<span class="truncate text-[11px] font-semibold">{lane.name}</span>
 					</span>
+					<span class="lane-count tm-num">{lane.nodeCount}</span>
 				</button>
 			{/each}
 		</div>
 
-		{#if layout.nodes.length === 0}
-			<div class="flex h-48 items-center justify-center text-xs text-gray-400">
+		{#if !layout.nodes.length}
+			<div class="flex h-48 items-center justify-center text-xs text-gray-500 dark:text-gray-400">
 				等待执行节点…
 			</div>
 		{:else}
@@ -239,7 +279,7 @@
 				width={layout.width}
 				height={layout.height}
 				viewBox="0 0 {layout.width} {layout.height}"
-				role="img"
+				role="group"
 				aria-label="多角色泳道执行树"
 				data-swimlane-svg
 			>
@@ -252,176 +292,245 @@
 							refY="5"
 							markerWidth="5.5"
 							markerHeight="5.5"
-							orient="auto-start-reverse"
+							orient="auto"
 						>
-							<path d="M 1 1.5 L 8.5 5 L 1 8.5 z" fill={color} />
+							<path d="M1 1.5 8.5 5 1 8.5Z" fill={color} />
 						</marker>
 					{/each}
+					{#each layout.lanes as lane (lane.id)}
+						<linearGradient id={`tm-lane-${uid}-${lane.index}`} x2="0" y2="1">
+							<stop stop-color={lane.palette.stroke} stop-opacity="0.14" />
+							<stop offset="1" stop-color={lane.palette.stroke} stop-opacity="0.035" />
+						</linearGradient>
+					{/each}
+					<radialGradient id="tm-node-glow-{uid}">
+						<stop stop-color="hsl(var(--tm-accent))" stop-opacity="0.38" />
+						<stop offset="1" stop-color="hsl(var(--tm-accent))" stop-opacity="0" />
+					</radialGradient>
+					<linearGradient id="tm-stage-line-{uid}">
+						<stop stop-color="white" stop-opacity="0.9" />
+						<stop offset="1" stop-color="white" stop-opacity="0.2" />
+					</linearGradient>
+					<mask
+						id="tm-stage-mask-{uid}"
+						maskUnits="userSpaceOnUse"
+						x="0"
+						y="0"
+						width={layout.width}
+						height={layout.height}
+					>
+						<rect width={layout.width} height={layout.height} fill="url(#tm-stage-line-{uid})" />
+					</mask>
 				</defs>
 
-				<!-- Lane background tracks & active spans -->
-				{#each layout.lanes as lane (lane.id)}
-					{@const laneMuted = !!memberFilter && memberFilter !== lane.id}
-					<line
-						x1={lane.x}
-						y1={8}
-						x2={lane.x}
-						y2={layout.height - 12}
-						stroke={lane.palette.stroke}
-						stroke-opacity={laneMuted ? 0.08 : 0.16}
-						stroke-width="1.5"
-						stroke-dasharray="3 5"
-					/>
-					{#if lane.firstRow !== null && lane.lastRow !== null && lane.lastRow > lane.firstRow}
-						<line
-							x1={lane.x}
-							y1={layout.topPad + lane.firstRow * layout.rowHeight}
-							x2={lane.x}
-							y2={layout.topPad + lane.lastRow * layout.rowHeight}
-							stroke={lane.palette.stroke}
-							stroke-opacity={laneMuted ? 0.2 : 0.58}
-							stroke-width="2"
-							stroke-linecap="round"
+				{#each visibleBands as band (band.id)}
+					{@const label = fitSwimlaneLabel(band.label, layout.width - 28)}
+					<g data-swimlane-stage-band={band.stageId} aria-hidden="true">
+						<title>{band.label}</title>
+						<rect
+							y={band.topY}
+							width={layout.width}
+							height={band.bottomY - band.topY}
+							fill={band.color}
+							fill-opacity={band.startRow % 2 ? 0.065 : 0.038}
 						/>
-					{/if}
-				{/each}
-
-				<!-- Cross-lane curves: handoffs, steers, fail→retry loops, merge convergence -->
-				{#each visibleEdges as edge (edge.id)}
-					{@const focusedEdge = focusId === edge.fromNodeId || focusId === edge.toNodeId}
-					<g class="edge" style="color:{edge.color}" opacity={focusedEdge ? 1 : 0.72}>
 						<path
-							d={edgePath(edge)}
-							fill="none"
-							stroke={edge.color}
-							stroke-width={focusedEdge ? 2.4 : 1.6}
-							stroke-dasharray={edge.dashed ? '4 4' : undefined}
-							stroke-linecap="round"
-							marker-end="url(#{markerIdByColor.get(edge.color)})"
-							class={focusedEdge ? 'edge-focused' : ''}
+							d="M0 {band.topY}H{layout.width}"
+							stroke={band.color}
+							stroke-opacity="0.52"
+							stroke-dasharray="3 4"
+							mask="url(#tm-stage-mask-{uid})"
 						/>
-						{#if edge.compact && edge.label}
-							<text
-								x={(edge.fromX + edge.toX) / 2}
-								y={edge.toY - 4}
-								text-anchor="middle"
-								class="edge-label"
-								fill={edge.color}>{edge.label}</text
-							>
+						{#if layout.rowHeight >= 44}
+							<rect
+								x="10"
+								y={band.topY + 2}
+								width={label.width + 10}
+								height="14"
+								rx="5"
+								class="node-pill-bg"
+								stroke={band.color}
+								stroke-opacity="0.38"
+							/>
+							<text x="15" y={band.topY + 12} class="stage-label">{label.text}</text>
 						{/if}
 					</g>
 				{/each}
 
-				<!-- Nodes -->
+				{#each layout.lanes as lane (lane.id)}
+					{@const live = active.has(lane.id)}
+					{@const muted = !!memberFilter && memberFilter !== lane.id}
+					{#if live && !muted}
+						<rect
+							class="lane-glow"
+							x={lane.x - layout.laneWidth * 0.26}
+							width={layout.laneWidth * 0.52}
+							height={layout.height}
+							fill="url(#tm-lane-{uid}-{lane.index})"
+						/>
+					{/if}
+					<path
+						d="M{lane.x} 0V{layout.height - 12}"
+						stroke={lane.palette.stroke}
+						stroke-opacity={muted ? 0.08 : 0.26}
+						stroke-dasharray="2 5"
+					/>
+					{#if lane.firstRow !== null && lane.lastRow !== null && lane.lastRow > lane.firstRow}
+						{@const rail = `M${lane.x} ${layout.topPad + lane.firstRow * layout.rowHeight}V${layout.topPad + lane.lastRow * layout.rowHeight}`}
+						<g stroke={lane.palette.stroke} stroke-linecap="round">
+							<path d={rail} stroke-width="6" stroke-opacity={muted ? 0.04 : live ? 0.26 : 0.12} />
+							<path d={rail} stroke-width="2.2" stroke-opacity={muted ? 0.2 : live ? 0.9 : 0.58} />
+							{#if live && !muted && motion}
+								<path
+									d={rail}
+									pathLength="100"
+									stroke-width="3"
+									stroke-dasharray="12 88"
+									class="rail-scan workbench-motion"
+								/>
+							{/if}
+						</g>
+					{/if}
+				{/each}
+
+				{#each visibleEdges as edge (edge.id)}
+					{@const focusedEdge = connected.edgeIds.has(edge.id)}
+					{@const path = edgePath(edge)}
+					{@const label =
+						edge.compact && edge.label ? fitSwimlaneLabel(edge.label, layout.laneWidth - 24) : null}
+					<g
+						class="edge"
+						class:edge-focused={focusedEdge}
+						style="color:{edge.color}"
+						opacity={focusedEdge ? 1 : spotlight ? 0.18 : 0.78}
+					>
+						<path
+							d={path}
+							fill="none"
+							stroke="currentColor"
+							stroke-width="5.5"
+							stroke-opacity="0.2"
+						/>
+						<path
+							d={path}
+							fill="none"
+							stroke="currentColor"
+							stroke-width={focusedEdge ? 2.4 : 1.6}
+							stroke-dasharray={edge.dashed ? '4 4' : undefined}
+							stroke-linecap="round"
+							marker-end="url(#{markerIdByColor.get(edge.color)})"
+						/>
+						{#if motion && (focusedEdge || recentEdges.has(edge.id))}
+							<g class="workbench-motion-particle" aria-hidden="true">
+								<circle r="5" fill="currentColor" opacity="0.32" />
+								<circle r="2.3" fill="var(--tm-workbench-spark)" />
+								<animateMotion {path} dur="1.8s" repeatCount="indefinite" />
+							</g>
+						{/if}
+						{#if label?.text}
+							<g transform="translate({(edge.fromX + edge.toX) / 2}, {edge.toY - 9})">
+								<rect
+									x={-label.width / 2 - 4}
+									y="-7"
+									width={label.width + 8}
+									height="14"
+									rx="5"
+									class="node-pill-bg"
+									stroke="currentColor"
+									stroke-opacity="0.4"
+								/>
+								<text y="3" text-anchor="middle" class="stage-label">{label.text}</text>
+							</g>
+						{/if}
+					</g>
+				{/each}
+
 				{#each visibleNodes as node (node.id)}
 					{@const focused = focusId === node.id}
-					{@const muted = isNodeMuted(node)}
-					{@const labelOnLeft = node.laneIndex === layout.lanes.length - 1 && layout.lanes.length > 1}
+					{@const related = connected.nodeIds.has(node.id)}
+					{@const muted =
+						(stageFilter && node.stageId !== stageFilter) ||
+						(memberFilter && node.laneId !== memberFilter)}
+					{@const glyph = node.kind === 'runner' ? 'status' : node.kind}
+					{@const labelOnLeft =
+						node.laneIndex === layout.lanes.length - 1 && layout.lanes.length > 1}
+					{@const name = fitSwimlaneLabel(node.label, layout.laneWidth - 34)}
+					{@const sub = fitSwimlaneLabel(node.sublabel, layout.laneWidth - 34)}
+					{@const labelWidth = Math.max(name.width, sub.width) + 10}
 					<g
 						class="node-group"
 						class:is-focused={focused}
-						opacity={muted && !focused ? 0.28 : 1}
+						opacity={related
+							? 1
+							: spotlight
+								? 0.26
+								: muted
+									? 0.28
+									: legendKind && legendKind !== glyph
+										? 0.56
+										: 1}
+						style="color:{node.color}"
 						transform="translate({node.x}, {node.y})"
 						data-swimlane-node={node.id}
 						data-focus={focused ? 'true' : undefined}
 						role="button"
 						tabindex="0"
-						aria-label="{node.label} {node.sublabel}"
+						aria-label="{node.fullTitle} {node.sublabel}"
+						aria-pressed={focused && focusPin}
 						on:mouseenter={() => hoverNode(node.id)}
 						on:mouseleave={() => hoverNode(null)}
-						on:click={() => dispatch('focus', { id: node.id, source: 'swimlane', pin: true })}
+						on:focus={() => hoverNode(node.id)}
+						on:blur={() => hoverNode(null)}
+						on:click={() => pinNode(node.id)}
 						on:dblclick={() => node.taskId && dispatch('selectTask', node.taskId)}
 						on:keydown={(e) => {
 							if (e.key === 'Enter' || e.key === ' ') {
 								e.preventDefault();
-								dispatch('focus', { id: node.id, source: 'swimlane', pin: true });
+								pinNode(node.id);
 							}
 						}}
 					>
-						{#if node.isHead || focused}
-							<circle
-								r={focused ? 12 : 11}
-								fill={node.color}
-								fill-opacity={focused ? 0.18 : 0.12}
-								class={node.isHead ? 'head-ring' : ''}
-							/>
+						{#if node.isHead || related}
+							<circle r="18" fill="url(#tm-node-glow-{uid})" class="node-halo" />
 						{/if}
-
-						<!-- Node circle / semantic glyph -->
-						{#if node.kind === 'tool_group'}
-							<rect
-								x="-6.5"
-								y="-6.5"
-								width="13"
-								height="13"
-								rx="3.5"
-								class="node-bg"
-								stroke={node.color}
-								stroke-width={focused ? 2.4 : 1.7}
-							/>
-							<text
-								y="3"
-								text-anchor="middle"
-								class="step-num"
-								fill={node.color}>{Math.min(99, node.stepCount)}</text
-							>
-						{:else if node.kind === 'fail'}
-							<circle r="7" fill={node.color} />
-							<path
-								d="M -2.6 -2.6 L 2.6 2.6 M 2.6 -2.6 L -2.6 2.6"
-								stroke="white"
-								stroke-width="1.6"
-								stroke-linecap="round"
-							/>
-						{:else if node.kind === 'handoff'}
-							<circle r="7" class="node-bg" stroke={node.color} stroke-width={focused ? 2.5 : 2} />
-							<path
-								d="M -2.5 0 H 2.5 M 0.5 -2.3 L 2.8 0 L 0.5 2.3"
-								fill="none"
-								stroke={node.color}
-								stroke-width="1.5"
-								stroke-linecap="round"
-								stroke-linejoin="round"
-							/>
-						{:else if node.kind === 'approval'}
-							<circle r="7.5" fill={node.color} />
-							<text y="3.2" text-anchor="middle" class="glyph-txt" fill="white">?</text>
-						{:else if node.kind === 'deploy'}
-							<polygon
-								points="0,-7.5 7.5,0 0,7.5 -7.5,0"
-								fill={node.color}
-							/>
-						{:else if node.kind === 'retry'}
-							<circle r="6.5" class="node-bg" stroke={node.color} stroke-width="2" />
-							<circle r="2.2" fill={node.color} />
-						{:else}
-							<circle
-								r={focused ? 6.5 : 5.5}
-								fill={node.kind === 'milestone' ? node.color : undefined}
-								class={node.kind === 'milestone' ? '' : 'node-bg'}
-								stroke={node.color}
-								stroke-width={focused ? 2.4 : 2}
-							/>
+						{#if node.isHead}
+							<circle r="12" class="head-radar head-radar-1 workbench-motion" />
+							<circle r="15" class="head-radar head-radar-2 workbench-motion" />
 						{/if}
+						<circle data-swimlane-anchor r="9" fill="transparent" />
+						<g class="node-glyph">
+							<use href="#tm-glyph-{uid}-{glyph}" />
+							{#if node.isHead && node.kind !== 'tool_group'}
+								<circle cx="0" cy="-5.5" r="1.35" fill="var(--tm-workbench-spark)" />
+							{/if}
+							{#if node.kind === 'tool_group'}
+								<text y="3.1" text-anchor="middle" class="glyph-text count-text"
+									>{Math.min(99, node.stepCount)}</text
+								>
+							{/if}
+						</g>
 
-						<!-- Compact inline node label -->
-						<text
-							x={labelOnLeft ? -12 : 12}
-							y={node.sublabel ? -1 : 3.5}
-							text-anchor={labelOnLeft ? 'end' : 'start'}
-							class="node-label {focused ? 'is-bold' : ''}"
-						>
-							{node.label}
-						</text>
-						{#if node.sublabel}
-							<text
-								x={labelOnLeft ? -12 : 12}
-								y="9.5"
-								text-anchor={labelOnLeft ? 'end' : 'start'}
-								class="node-sub"
+						{#if name.text || sub.text}
+							<svg
+								x={labelOnLeft ? -14 - labelWidth : 14}
+								y={sub.text ? -10 : -8}
+								width={labelWidth}
+								height={sub.text ? 24 : 16}
+								aria-hidden="true"
 							>
-								{node.sublabel}
-							</text>
+								<rect
+									x="0.5"
+									y="0.5"
+									width={labelWidth - 1}
+									height={sub.text ? 23 : 15}
+									rx="5"
+									class="node-pill-bg"
+									stroke="currentColor"
+									stroke-opacity={focused ? 0.72 : 0.24}
+								/>
+								<text x="5" y={sub.text ? 10 : 11.5} class="node-label">{name.text}</text>
+								{#if sub.text}<text x="5" y="20" class="node-sub">{sub.text}</text>{/if}
+							</svg>
 						{/if}
 					</g>
 				{/each}
@@ -429,105 +538,318 @@
 		{/if}
 	</div>
 
-	<!-- Static compact legend -->
+	{#if hudNode}
+		{@const node = hudNode}
+		<div
+			class="hud border-t px-3 py-2 tm-hairline"
+			data-swimlane-hud
+			style="--hud-color:{node.color}"
+		>
+			<div class="hud-info">
+				<div class="flex min-w-0 items-center gap-1.5 text-xs">
+					<span class="hud-badge shrink-0">{node.badge}</span>
+					<strong class="min-w-0 break-words">{node.fullTitle}</strong>
+				</div>
+				<div class="hud-meta tm-num">
+					{node.memberName}{node.taskKey ? ` · #${node.taskKey}` : ''}
+					{node.kind === 'tool_group' ? ` · ${node.stepCount} 步` : ''}
+					{node.durationSec > 0 ? ` · ${formatDuration(node.durationSec)}` : ''}
+					{#each node.files as file (file)}
+						<span class="hud-file">{file}</span>
+					{/each}
+				</div>
+			</div>
+			<div class="flex shrink-0 gap-1">
+				<button
+					type="button"
+					class="mini-toggle"
+					on:click={() => {
+						scrollToNode(node);
+						pinNode(node.id);
+					}}
+				>
+					定位
+				</button>
+				{#if node.taskId}
+					<button
+						type="button"
+						class="mini-toggle"
+						title="双击节点也可打开详情"
+						on:click={() => node.taskId && dispatch('selectTask', node.taskId)}>详情</button
+					>
+				{/if}
+			</div>
+		</div>
+	{/if}
+
 	<div
-		class="legend grid grid-cols-4 gap-x-2 gap-y-1 border-t px-3 py-2 text-[10.5px] text-gray-500 tm-hairline dark:text-gray-400"
+		class="legend flex flex-wrap gap-x-3 gap-y-1 border-t px-3 py-2 tm-hairline"
 		aria-label="泳道图例"
 	>
 		{#each SWIMLANE_LEGEND as item (item.kind)}
-			<span class="flex min-w-0 items-center gap-1.5">
-				<span
-					class="size-2 shrink-0 rounded-full"
-					style="background:{item.color}"
+			<span
+				class="flex min-w-0 items-center gap-1"
+				on:mouseenter={() => (legendKind = item.kind)}
+				on:mouseleave={() => (legendKind = null)}
+			>
+				<svg
+					class="shrink-0"
+					width="14"
+					height="14"
+					viewBox="-10 -10 20 20"
+					style="color:{item.color}"
 					aria-hidden="true"
-				/>
-				<span class="truncate">{item.label}</span>
+				>
+					<use href="#tm-glyph-{uid}-{item.kind}" />
+				</svg>
+				{item.label}
 			</span>
 		{/each}
 	</div>
+
+	<svg class="absolute size-0 overflow-hidden" aria-hidden="true">
+		<defs>
+			{#each SWIMLANE_LEGEND as item (item.kind)}
+				<g id="tm-glyph-{uid}-{item.kind}" stroke="currentColor" stroke-width="1.6">
+					{#if item.kind === 'tool_group'}
+						<rect x="-7.5" y="-7.5" width="15" height="15" rx="3.7" class="node-pill-bg" />
+					{:else if item.kind === 'handoff' || item.kind === 'message'}
+						<circle r="8" class="node-pill-bg" />
+						{#if item.kind === 'handoff'}
+							<path
+								d="M-4 0H4M1-3l3 3-3 3"
+								fill="none"
+								stroke-linecap="round"
+								stroke-linejoin="round"
+							/>
+						{:else}
+							<path d="M-3.5-2h7v4H0L-2 3.5V2h-1.5Z" fill="none" stroke-linejoin="round" />
+						{/if}
+					{:else if item.kind === 'approval' || item.kind === 'fail'}
+						<circle r="8" fill="currentColor" />
+						{#if item.kind === 'approval'}
+							<text y="3.5" text-anchor="middle" class="glyph-text" fill="white" stroke="none"
+								>?</text
+							>
+						{:else}
+							<path d="M-3-3 3 3M3-3-3 3" stroke="white" stroke-linecap="round" />
+						{/if}
+					{:else if item.kind === 'milestone' || item.kind === 'deploy'}
+						<path
+							d="M0-8 8 0 0 8-8 0Z"
+							class:node-pill-bg={item.kind === 'milestone'}
+							fill={item.kind === 'deploy' ? 'currentColor' : undefined}
+						/>
+						{#if item.kind === 'deploy'}<path d="m-3 0 2 2 4-4" stroke="white" fill="none" />{/if}
+					{:else}
+						<circle r="7" class="node-pill-bg" />
+						<circle r={item.kind === 'retry' ? 2.4 : 1.6} fill="currentColor" stroke="none" />
+					{/if}
+				</g>
+			{/each}
+		</defs>
+	</svg>
 </div>
 
 <style>
-	.lane-headers {
-		height: 34px;
-		background: hsl(var(--tm-surface) / 0.88);
+	.canvas {
+		background:
+			radial-gradient(circle at center, var(--tm-workbench-grid) 0.75px, transparent 1px) 0 0 / 16px
+				16px,
+			radial-gradient(ellipse at top, var(--tm-workbench-glow), transparent 58%),
+			var(--tm-workbench-canvas);
+	}
+	.tree-icon {
+		color: hsl(var(--tm-accent));
+	}
+	.count-chip,
+	.hud-badge {
+		border-radius: 5px;
+		padding: 1px 5px;
+		font-size: 10px;
+		font-weight: 650;
+		background: hsl(var(--tm-accent) / 0.09);
+		color: hsl(var(--tm-accent));
 	}
 	.mini-toggle {
 		border-radius: 0.45rem;
 		padding: 0.14rem 0.45rem;
 		font-size: 0.68rem;
-		font-weight: 500;
 		color: hsl(var(--tm-muted));
-		border: 1px solid hsl(var(--tm-line));
-		background: transparent;
+		border: 1px solid hsl(var(--tm-line-strong));
 		transition:
-			background 0.15s ease,
-			color 0.15s ease,
-			border-color 0.15s ease;
+			background 160ms ease,
+			color 160ms ease;
 	}
-	.mini-toggle:hover {
+	.mini-toggle:hover,
+	.mini-toggle:focus-visible {
+		color: hsl(var(--tm-ink));
+		background: hsl(var(--tm-accent) / 0.1);
+	}
+	.mini-toggle[aria-pressed='true'] {
+		color: hsl(var(--tm-accent));
+		border-color: hsl(var(--tm-accent) / 0.36);
+		background: hsl(var(--tm-accent) / 0.08);
+	}
+	.lane-headers {
+		background: var(--tm-workbench-pill);
+	}
+	.lane-head {
+		border-bottom: 2px solid transparent;
 		color: hsl(var(--tm-ink));
 	}
-	.mini-toggle.is-on {
-		color: hsl(var(--tm-accent));
-		border-color: hsl(var(--tm-accent) / 0.35);
-		background: hsl(var(--tm-accent) / 0.08);
+	.lane-head.is-muted {
+		opacity: 0.58;
+	}
+	.lane-head:hover,
+	.lane-head:focus-visible {
+		opacity: 1;
+	}
+	.lane-head[aria-pressed='true'],
+	.lane-head[data-lane-active] {
+		border-bottom-color: var(--lane-color);
+		background: linear-gradient(
+			0deg,
+			color-mix(in srgb, var(--lane-color) 14%, transparent),
+			transparent 72%
+		);
+	}
+	.lane-count {
+		font-size: 10px;
+		line-height: 1;
+		color: hsl(var(--tm-muted));
+	}
+	.lane-status {
+		position: relative;
+		width: 7px;
+		height: 7px;
+		flex: none;
+		border-radius: 50%;
+		background: var(--lane-color);
+	}
+	.lane-head[data-lane-active] .lane-status::after {
+		content: '';
+		position: absolute;
+		inset: -3px;
+		border-radius: 50%;
+		border: 1px solid var(--lane-color);
+		animation: tm-radar 2.4s ease-out infinite;
+		animation-play-state: var(--tm-workbench-play-state, running);
+	}
+	.rail-scan {
+		animation: tm-rail-scan 3.8s linear infinite;
+	}
+	@keyframes tm-rail-scan {
+		to {
+			stroke-dashoffset: -100;
+		}
 	}
 	.node-group {
 		cursor: pointer;
 		outline: none;
 	}
-	.node-bg {
-		fill: hsl(var(--tm-surface));
+	.node-group,
+	.edge {
+		transition: opacity var(--dur-micro, 160ms) ease;
+	}
+	.node-group:focus-visible [data-swimlane-anchor] {
+		stroke: currentColor;
+		stroke-width: 2px;
+	}
+	.node-group.is-focused .node-label {
+		font-weight: 650;
+	}
+	.edge-focused {
+		filter: drop-shadow(0 0 2px currentColor);
+	}
+	.head-radar {
+		fill: none;
+		stroke: currentColor;
+		stroke-width: 1.1px;
+		opacity: 0.55;
+		transform-box: fill-box;
+		transform-origin: center;
+		animation: tm-radar 2.4s ease-out infinite;
+	}
+	.head-radar-2 {
+		animation-delay: -1.2s;
+	}
+	@keyframes tm-radar {
+		from {
+			opacity: 0.85;
+			transform: scale(0.8);
+		}
+		to {
+			opacity: 0;
+			transform: scale(1.45);
+		}
+	}
+	.node-pill-bg {
+		fill: var(--tm-workbench-pill);
+	}
+	.node-label,
+	.node-sub,
+	.stage-label {
+		font-family: var(--font-mono);
+		fill: hsl(var(--tm-ink));
 	}
 	.node-label {
 		font-size: 10.5px;
-		fill: hsl(var(--tm-ink) / 0.84);
-		font-family: var(--font-sans);
 	}
-	.node-label.is-bold {
-		font-weight: 600;
-		fill: hsl(var(--tm-ink));
+	.stage-label {
+		font-size: 9.5px;
+		font-weight: 650;
 	}
 	.node-sub {
-		font-size: 9px;
-		fill: hsl(var(--tm-muted));
-		font-family: var(--font-mono);
-	}
-	.step-num {
 		font-size: 8.5px;
-		font-weight: 700;
+		fill: hsl(var(--tm-muted));
+	}
+	.glyph-text {
+		font: 700 10px var(--font-mono);
+	}
+	.count-text {
+		fill: hsl(var(--tm-ink));
+		font-size: 8.5px;
+	}
+	.hud {
+		display: flex;
+		min-height: 3.65rem;
+		align-items: center;
+		gap: 0.5rem;
+		background: linear-gradient(
+			90deg,
+			color-mix(in srgb, var(--hud-color) 9%, transparent),
+			transparent 82%
+		);
+	}
+	.hud-info {
+		flex: 1;
+		min-width: 0;
+		max-height: 2.65rem;
+		overflow: auto;
+		scrollbar-width: thin;
+	}
+	.hud-badge {
+		color: hsl(var(--tm-ink));
+		background: color-mix(in srgb, var(--hud-color) 20%, var(--tm-workbench-pill));
+	}
+	.hud-meta,
+	.legend {
+		font-size: 10px;
+		color: hsl(var(--tm-muted));
+	}
+	.hud-file {
+		display: inline-block;
+		margin-inline-start: 0.25rem;
+		overflow-wrap: anywhere;
 		font-family: var(--font-mono);
 	}
-	.glyph-txt {
-		font-size: 9.5px;
-		font-weight: 700;
-	}
-	.edge-label {
-		font-size: 9px;
-		font-family: var(--font-mono);
-		font-weight: 600;
-	}
-	.head-ring {
-		animation: tm-swim-pulse 2s ease-out infinite;
-	}
-	.edge-focused {
-		filter: drop-shadow(0 0 3px currentColor);
-	}
-	@keyframes tm-swim-pulse {
-		0% {
-			opacity: 0.9;
-		}
-		70% {
-			opacity: 0.25;
-		}
-		100% {
-			opacity: 0.9;
-		}
-	}
-	@media (prefers-reduced-motion: reduce) {
-		.head-ring {
+	@media (prefers-reduced-motion: reduce), (max-width: 767px) {
+		.lane-head[data-lane-active] .lane-status::after {
 			animation: none;
+		}
+		.edge-focused {
+			filter: none;
 		}
 	}
 </style>

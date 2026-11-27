@@ -35,6 +35,12 @@
 	--tm-ease: cubic-bezier(0.22, 1, 0.36, 1);
 	/* the app's page background behind 协作台 content (light: body gray-50; dark: surface-base) */
 	--tm-page: var(--surface-base, #ffffff);
+	--tm-workbench-canvas: hsl(var(--tm-surface-2));
+	--tm-workbench-card: hsl(var(--tm-surface));
+	--tm-workbench-pill: hsl(var(--tm-surface));
+	--tm-workbench-grid: hsl(var(--tm-accent) / 0.16);
+	--tm-workbench-glow: hsl(var(--tm-accent-2) / 0.08);
+	--tm-workbench-spark: #fff;
 }
 :is(.dark [data-teams-ui]),
 :is(.dark[data-teams-ui]) {
@@ -141,6 +147,30 @@
 	backdrop-filter: blur(16px) saturate(1.4);
 	-webkit-backdrop-filter: blur(16px) saturate(1.4);
 	border: 1px solid hsl(var(--tm-line));
+}
+
+.workbench-pane-head {
+	position: relative;
+	color: hsl(var(--tm-ink));
+	background: linear-gradient(90deg, hsl(var(--tm-accent) / 0.05), transparent 60%);
+}
+
+[data-workbench-paused] {
+	--tm-workbench-play-state: paused;
+}
+.workbench-motion {
+	animation-play-state: var(--tm-workbench-play-state, running) !important;
+}
+@media (prefers-reduced-motion: reduce), (max-width: 767px) {
+	.workbench-motion {
+		animation: none !important;
+		transition: none !important;
+	}
+	.workbench-motion-particle,
+	[data-swimlane-tree] .lane-glow,
+	[data-swimlane-tree] .node-halo {
+		display: none;
+	}
 }
 
 /* --- the halo: a sweeping arc on the border of whatever is working ---------------------------- */

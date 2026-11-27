@@ -4,6 +4,7 @@ import type { LiveTask, TeamDeployState, TeamEvent } from '$lib/apis/teams';
 import {
 	LEAD_LANE_ID,
 	buildStages,
+	connectedSwimlaneIds,
 	extractArtifacts,
 	groupNarrative,
 	lanePalette,
@@ -83,8 +84,10 @@ describe('narrative pure engine', () => {
 		expect(items[1].stepCount).toBe(3);
 		expect(items[1].durationSec).toBe(26);
 		expect(items[1].files).toContain('src/api.ts');
+		expect(items[1].toolIcon).toBe('search');
 		expect(items[2].member).toBe('dev-b');
 		expect(items[2].stepCount).toBe(1);
+		expect(items[2].toolIcon).toBe('terminal');
 	});
 
 	it('detects approval, failure, retry, runner fallback, handoff, and hides redundant delivery', () => {
@@ -203,5 +206,127 @@ describe('narrative pure engine', () => {
 		const mergeEdges = layout.edges.filter((e) => e.kind === 'merge');
 		expect(mergeEdges.length).toBeGreaterThanOrEqual(2);
 		expect(lanePalette('extra-member', 9).stroke).toMatch(/^hsl\(/);
+	});
+
+	it('groups consecutive stage rows, preserves their spacing, and adapts lane widths', () => {
+		const deploy: TeamDeployState = {
+			status: 'running',
+			steps: [{ key: 'review', label: '审查', status: 'running' }]
+		};
+		const items = groupNarrative(
+			[
+				ev(1, { text: '开始设计' }),
+				ev(2, {
+					type: 'tool',
+					ts: 100,
+					text: 'read src/really-long-router-file.ts',
+					data: { name: 'read_file' }
+				}),
+				ev(3, { type: 'tool', ts: 113, text: 'read docs/设计.md', data: { name: 'read_file' } }),
+				ev(4, { task_id: 't_2', key: 'T2', member: 'dev-b', text: '开始实现' }),
+				ev(5, { text: '设计回访' })
+			],
+			TASKS,
+			{ deploy, includeDeploy: true }
+		);
+		const members = TASKS.slice(0, 3).map((task) => ({ name: task.member }));
+		const stages = buildStages(TASKS, new Map(), deploy);
+		const layout = layoutSwimlanes(items, members, { stages, leadName: '统筹' });
+		expect(layout.laneWidth).toBe(112);
+		expect(layout.rowHeight).toBe(52);
+		expect(layout.topPad).toBe(30);
+		expect(layout.nodes.map((node) => node.y)).toEqual([30, 82, 134, 186, 238]);
+		expect(
+			layout.stageBands.map(({ stageId, startRow, endRow, topY, bottomY }) => [
+				stageId,
+				startRow,
+				endRow,
+				topY,
+				bottomY
+			])
+		).toEqual([
+			['layer-0', 0, 1, 4, 108],
+			['layer-1', 2, 2, 108, 160],
+			['layer-0', 3, 3, 160, 212],
+			['deploy', 4, 4, 212, 264]
+		]);
+		expect(layout.stageBands[1]).toMatchObject({
+			label: stages[1].shortLabel,
+			color: stages[1].color
+		});
+		expect(new Set(layout.stageBands.map((band) => band.id)).size).toBe(4);
+		expect(layout.nodes[1]).toMatchObject({
+			fullTitle: items[1].title,
+			memberName: 'dev-a',
+			files: ['src/really-long-router-file.ts'],
+			badge: '检索与阅读',
+			durationSec: 13,
+			stepCount: 2
+		});
+		expect(layout.nodes[1].label).toBe('really-lo…');
+		expect(layout.nodes.at(-1)).toMatchObject({ memberName: '统筹', isHead: true });
+		const moreMembers = [...members, { name: 'qa' }];
+		const dense = layoutSwimlanes(items, moreMembers);
+		expect(dense.laneWidth).toBe(96);
+		expect(dense.stageBands.map((band) => band.label)).toEqual([
+			'第1步',
+			'第2步',
+			'第1步',
+			'审查与部署'
+		]);
+		const custom = layoutSwimlanes(items, moreMembers, { laneWidth: 80, rowHeight: 48 });
+		expect(custom.laneWidth).toBe(80);
+		expect(custom.lanes[1].x - custom.lanes[0].x).toBe(80);
+		expect(custom.nodes[1].y - custom.nodes[0].y).toBe(48);
+		expect(custom.width - custom.lanes.at(-1)!.x).toBe(custom.lanes[0].x);
+	});
+
+	it('returns only incident edges and direct neighbors, including a handoff without a target node', () => {
+		const items = groupNarrative(
+			[
+				ev(1, { type: 'message', who: 'lead', text: '开始检查' }),
+				ev(2, {
+					type: 'handoff',
+					data: {
+						to: [
+							{ member: 'dev-b', key: 'T2' },
+							{ member: 'dev-c', key: 'T3' }
+						]
+					}
+				}),
+				ev(3, {
+					task_id: 't_2',
+					key: 'T2',
+					member: 'dev-b',
+					status: 'failed',
+					sub_status: 'failed'
+				}),
+				ev(4, {
+					type: 'attempt',
+					task_id: 't_2',
+					key: 'T2',
+					member: 'dev-b',
+					text: '开始第 2 次执行'
+				}),
+				ev(5, { type: 'message', who: 'lead', text: '等下一次更新' })
+			],
+			TASKS
+		);
+		const layout = layoutSwimlanes(items, []);
+		const { nodeIds, edgeIds } = connectedSwimlaneIds(layout, items[1].id);
+		expect(nodeIds).toEqual(new Set([items[0].id, items[1].id, items[2].id]));
+		expect(layout.edges.filter((edge) => edgeIds.has(edge.id)).map((edge) => edge.kind)).toEqual([
+			'steer',
+			'handoff',
+			'handoff'
+		]);
+		expect(connectedSwimlaneIds(layout, 'missing')).toEqual({
+			nodeIds: new Set(),
+			edgeIds: new Set()
+		});
+		expect(connectedSwimlaneIds(layout, null)).toEqual({ nodeIds: new Set(), edgeIds: new Set() });
+		const pendingSteer = layout.edges.at(-1)!;
+		expect(pendingSteer).toMatchObject({ fromNodeId: items.at(-1)?.id, toNodeId: null });
+		expect(pendingSteer.toY).toBeLessThan(layout.height);
 	});
 });

@@ -23,6 +23,7 @@ import {
 } from './model';
 
 export const LEAD_LANE_ID = '__lead__';
+export const SWIMLANE_HEADER_HEIGHT = 44;
 
 export type NarrativeKind =
 	| 'message'
@@ -215,14 +216,22 @@ export const extractArtifacts = (text: string, limit = 4): string[] => {
 	return found;
 };
 
-const TOOL_GROUP_TITLES: [RegExp, string][] = [
-	[/^(read_file|view_file|cat|grep|search|glob|find|rg|halo-search|web_search)/i, '检索与阅读'],
-	[/^(write_file|edit_file|replace|patch|create_file|apply_patch)/i, '编写与修改'],
-	[/^(terminal|bash|shell|exec|run_command|execute_code)/i, '命令与验证'],
-	[/^(image|draw|generate_image|illustrate)/i, '生成视觉产物']
+export type ToolIcon = 'search' | 'edit' | 'terminal' | 'image' | 'subagent' | 'generic';
+
+const TOOL_GROUP_TITLES: [RegExp, string, ToolIcon][] = [
+	[
+		/^(read_file|view_file|cat|grep|search|glob|find|rg|halo-search|web_search)/i,
+		'检索与阅读',
+		'search'
+	],
+	[/^(write_file|edit_file|replace|patch|create_file|apply_patch)/i, '编写与修改', 'edit'],
+	[/^(terminal|bash|shell|exec|run_command|execute_code)/i, '命令与验证', 'terminal'],
+	[/^(image|draw|generate_image|illustrate)/i, '生成视觉产物', 'image']
 ];
 
-const summarizeToolGroup = (steps: TeamEvent[]): { badge: string; title: string; files: string[] } => {
+const summarizeToolGroup = (
+	steps: TeamEvent[]
+): { badge: string; title: string; files: string[]; toolIcon: ToolIcon } => {
 	const counts = new Map<string, number>();
 	const files: string[] = [];
 	const seenFiles = new Set<string>();
@@ -244,19 +253,20 @@ const summarizeToolGroup = (steps: TeamEvent[]): { badge: string; title: string;
 	if (subagents > 0 && counts.size === 0) {
 		return {
 			badge: '子代理',
-			title: subagents === 1 ? (steps[0].data?.phase === 'start' ? '派出子代理' : '子代理完成') : `子代理协作 · ${subagents} 步`,
+			toolIcon: 'subagent',
+			title:
+				subagents === 1
+					? steps[0].data?.phase === 'start'
+						? '派出子代理'
+						: '子代理完成'
+					: `子代理协作 · ${subagents} 步`,
 			files
 		};
 	}
 	const topTools = [...counts.entries()].sort((a, b) => b[1] - a[1]);
 	const primary = topTools[0]?.[0] ?? '工具';
-	let category = '执行步骤';
-	for (const [re, label] of TOOL_GROUP_TITLES) {
-		if (re.test(primary)) {
-			category = label;
-			break;
-		}
-	}
+	const [, category = '执行步骤', toolIcon = 'generic'] =
+		TOOL_GROUP_TITLES.find(([pattern]) => pattern.test(primary)) ?? [];
 	const firstText = (steps[0]?.text ?? '').replace(/\s+/g, ' ').trim();
 	const title =
 		steps.length === 1
@@ -267,7 +277,7 @@ const summarizeToolGroup = (steps: TeamEvent[]): { badge: string; title: string;
 						.slice(0, 2)
 						.map(([k, n]) => (n > 1 ? `${k}×${n}` : k))
 						.join('、')}`;
-	return { badge: category, title, files };
+	return { badge: category, title, files, toolIcon };
 };
 
 // --- narrative grouping ------------------------------------------------------------------------
@@ -302,6 +312,7 @@ export type NarrativeItem = {
 	runnerMeta: string;
 	delivery: Delivery | null;
 	steps: TeamEvent[];
+	toolIcon?: ToolIcon;
 	sourceEvent: TeamEvent | null;
 	/** True when this item is actionable in live view (e.g. waiting_user question or failed task). */
 	actionable?: 'reply' | 'retry' | null;
@@ -372,6 +383,7 @@ export const groupNarrative = (
 			stageId: stageOfTask(first.task_id),
 			kind: 'tool_group',
 			badge: summary.badge,
+			toolIcon: summary.toolIcon,
 			title: summary.title,
 			body: '',
 			files: summary.files,
@@ -748,6 +760,11 @@ export type SwimlaneNode = {
 	stageId: string;
 	isHead: boolean;
 	stepCount: number;
+	fullTitle: string;
+	memberName: string;
+	durationSec: number;
+	files: string[];
+	badge: string;
 };
 
 export type SwimlaneEdgeKind = 'handoff' | 'steer' | 'retry' | 'merge';
@@ -771,11 +788,23 @@ export type SwimlaneLayout = {
 	lanes: SwimlaneLane[];
 	nodes: SwimlaneNode[];
 	edges: SwimlaneEdge[];
+	stageBands: SwimlaneStageBand[];
 	width: number;
 	height: number;
 	rowHeight: number;
 	topPad: number;
 	laneWidth: number;
+};
+
+export type SwimlaneStageBand = {
+	id: string;
+	stageId: string;
+	label: string;
+	color: string;
+	startRow: number;
+	endRow: number;
+	topY: number;
+	bottomY: number;
 };
 
 const MAX_EDGE_SPAN_ROWS = 10;
@@ -800,8 +829,7 @@ const nodeColorForKind = (kind: NarrativeKind, laneStroke: string): string => {
 const shortNodeLabel = (item: NarrativeItem): string => {
 	if (item.kind === 'tool_group') {
 		if (item.files.length) {
-			const base = item.files[0].split('/').pop() ?? item.files[0];
-			return base.length > 14 ? `${base.slice(0, 12)}…` : base;
+			return item.files[0].split('/').pop() ?? item.files[0];
 		}
 		return `${item.badge} ×${item.stepCount}`;
 	}
@@ -818,20 +846,45 @@ const shortNodeLabel = (item: NarrativeItem): string => {
 		if (item.who === 'lead') return '协调';
 		return item.taskKey ? `#${item.taskKey} 发言` : '发言';
 	}
-	const clean = item.title.replace(/^#\S+\s*/, '');
-	return clean.length > 12 ? `${clean.slice(0, 11)}…` : clean;
+	return item.title.replace(/^#\S+\s*/, '');
+};
+
+// Budget both the text and its SVG background in the same units. Leave room for an ellipsis.
+export const fitSwimlaneLabel = (
+	text: string,
+	maxWidth: number
+): { text: string; width: number } => {
+	const chars = Array.from(text);
+	const widths = chars.map((char) => (/^[\x00-\x7f]$/.test(char) ? 7 : 11));
+	const maxChars = chars.some((char, i) => widths[i] === 11 && char !== '…') ? 6 : 10;
+	if (chars.length <= maxChars) {
+		const width = widths.reduce((total, next) => total + next, 0);
+		if (width <= maxWidth) return { text, width };
+	}
+	const ellipsisWidth = 11;
+	if (maxWidth < ellipsisWidth) return { text: '', width: 0 };
+	let width = 0;
+	let count = 0;
+	while (count < Math.min(chars.length, maxChars - 1)) {
+		if (width + widths[count] + ellipsisWidth > maxWidth) break;
+		width += widths[count++];
+	}
+	return { text: `${chars.slice(0, count).join('')}…`, width: width + ellipsisWidth };
 };
 
 export const layoutSwimlanes = (
 	items: NarrativeItem[],
 	members: { name: string; role?: string }[],
-	options: { leadName?: string; laneWidth?: number; rowHeight?: number } = {}
+	options: {
+		leadName?: string;
+		laneWidth?: number;
+		rowHeight?: number;
+		stages?: StageSegment[];
+	} = {}
 ): SwimlaneLayout => {
-	const laneWidth = options.laneWidth ?? 84;
-	const rowHeight = options.rowHeight ?? 44;
-	const topPad = 24;
-	const bottomPad = 32;
-	const leftPad = Math.round(laneWidth / 2) + 8;
+	const rowHeight = options.rowHeight ?? 52;
+	const topPad = 30;
+	const bottomPad = 36;
 
 	// Build ordered lane list: Lane 0 = lead/team, then planned members, then any unplanned members.
 	const laneOrder: { id: string; name: string; role: string }[] = [
@@ -860,6 +913,10 @@ export const layoutSwimlanes = (
 		}
 	}
 
+	const laneWidth = options.laneWidth ?? (laneOrder.length <= 4 ? 112 : 96);
+	const laneSpan = (laneOrder.length - 1) * laneWidth;
+	const width = Math.max(240, laneSpan + laneWidth + 16);
+	const leftPad = (width - laneSpan) / 2;
 	const lanes: SwimlaneLane[] = laneOrder.map((entry, index) => ({
 		...entry,
 		index,
@@ -887,14 +944,19 @@ export const layoutSwimlanes = (
 			x: lane.x,
 			y: topPad + row * rowHeight,
 			kind: item.kind,
-			label: shortNodeLabel(item),
+			label: fitSwimlaneLabel(shortNodeLabel(item), Math.max(0, laneWidth - 34)).text,
 			sublabel: item.taskKey ? `#${item.taskKey}` : item.runnerMeta || '',
 			color,
 			taskId: item.taskId,
 			taskKey: item.taskKey,
 			stageId: item.stageId,
 			isHead: row === items.length - 1,
-			stepCount: item.stepCount
+			stepCount: item.stepCount,
+			fullTitle: item.title,
+			memberName: item.member ?? lane.name,
+			durationSec: item.durationSec,
+			files: item.files,
+			badge: item.badge
 		};
 	});
 
@@ -1023,9 +1085,57 @@ export const layoutSwimlanes = (
 		lastNodeByLane.set(node.laneId, node);
 	}
 
-	const width = Math.max(240, leftPad * 2 + Math.max(0, lanes.length - 1) * laneWidth + 32);
+	const stageById = new Map(options.stages?.map((stage) => [stage.id, stage]));
+	const stageBands: SwimlaneStageBand[] = [];
+	for (const node of nodes) {
+		const prev = stageBands[stageBands.length - 1];
+		const bottomY = node.y + rowHeight / 2;
+		if (prev?.stageId === node.stageId) {
+			prev.endRow = node.row;
+			prev.bottomY = bottomY;
+			continue;
+		}
+		const stage = stageById.get(node.stageId);
+		const layer = /^layer-(\d+)$/.exec(node.stageId);
+		const hue = STAGE_HUES[layer ? Number(layer[1]) % STAGE_HUES.length : 0];
+		stageBands.push({
+			id: `${node.stageId}-${node.id}`,
+			stageId: node.stageId,
+			label:
+				stage?.shortLabel ??
+				(layer
+					? `第${Number(layer[1]) + 1}步`
+					: node.stageId === 'deploy'
+						? '审查与部署'
+						: node.stageId),
+			color:
+				stage?.color ?? (node.stageId === 'deploy' ? 'hsl(var(--tm-ok))' : `hsl(${hue} 78% 52%)`),
+			startRow: node.row,
+			endRow: node.row,
+			topY: Math.max(0, node.y - rowHeight / 2),
+			bottomY
+		});
+	}
 	const height = Math.max(180, topPad + Math.max(1, nodes.length) * rowHeight + bottomPad);
-	return { lanes, nodes, edges, width, height, rowHeight, topPad, laneWidth };
+	return { lanes, nodes, edges, stageBands, width, height, rowHeight, topPad, laneWidth };
+};
+
+export const connectedSwimlaneIds = (
+	layout: SwimlaneLayout,
+	focusId: string | null
+): { nodeIds: Set<string>; edgeIds: Set<string> } => {
+	const nodeIds = new Set<string>();
+	const edgeIds = new Set<string>();
+	if (focusId && layout.nodes.some((node) => node.id === focusId)) {
+		nodeIds.add(focusId);
+		for (const edge of layout.edges) {
+			if (edge.fromNodeId !== focusId && edge.toNodeId !== focusId) continue;
+			edgeIds.add(edge.id);
+			nodeIds.add(edge.fromNodeId);
+			if (edge.toNodeId) nodeIds.add(edge.toNodeId);
+		}
+	}
+	return { nodeIds, edgeIds };
 };
 
 export const SWIMLANE_LEGEND: { kind: NarrativeKind; label: string; color: string }[] = [
@@ -1036,5 +1146,6 @@ export const SWIMLANE_LEGEND: { kind: NarrativeKind; label: string; color: strin
 	{ kind: 'approval', label: '等你回复', color: 'hsl(var(--tm-violet))' },
 	{ kind: 'retry', label: '重跑/改派', color: 'hsl(var(--tm-warn))' },
 	{ kind: 'fail', label: '失败/受阻', color: 'hsl(var(--tm-bad))' },
-	{ kind: 'deploy', label: '合并/部署', color: 'hsl(var(--tm-ok))' }
+	{ kind: 'deploy', label: '合并/部署', color: 'hsl(var(--tm-ok))' },
+	{ kind: 'milestone', label: '里程碑', color: 'hsl(var(--tm-accent))' }
 ];

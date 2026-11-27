@@ -11,7 +11,9 @@
 		lanePalette,
 		type LanePalette,
 		type NarrativeItem,
-		type NarrativeKind
+		type NarrativeKind,
+		type StageSegment,
+		type ToolIcon
 	} from './narrative';
 
 	/**
@@ -35,6 +37,7 @@
 	export let replay = false;
 	export let teamStopped = false;
 	export let autoFollow = true;
+	export let stages: StageSegment[] = [];
 
 	const dispatch = createEventDispatcher<{
 		focus: { id: string | null; source: 'feed'; pin?: boolean };
@@ -44,8 +47,9 @@
 		scroll: void;
 	}>();
 
+	type Category = 'all' | 'key' | 'message' | 'tool';
 	let order: 'asc' | 'desc' = 'asc';
-	let category: 'all' | 'key' | 'message' | 'tool' = 'all';
+	let category: Category = 'all';
 	let expandedTools = new Set<string>();
 	let expandedBodies = new Set<string>();
 	let listEl: HTMLOListElement | null = null;
@@ -80,8 +84,8 @@
 		[LEAD_LANE_ID, 0],
 		...members.map((m, i): [string, number] => [m.name, i + 1])
 	]);
-	const paletteOf = (lane: string) =>
-		lanePalettes?.get(lane) ?? lanePalette(lane, laneIndexMap.get(lane) ?? 1);
+	$: stageById = new Map(stages.map((stage) => [stage.id, stage]));
+	$: headId = items.at(-1)?.id;
 	const kindOf = (name: string | null | undefined, isLead = false) =>
 		avatarKind(roles.get(name ?? '') ?? { name: name ?? '' }, isLead);
 
@@ -179,7 +183,11 @@
 			const box = listEl.getBoundingClientRect();
 			const rect = el.getBoundingClientRect();
 			const delta = rect.top - box.top - box.height * 0.35;
-			listEl.scrollTo({ top: Math.max(0, listEl.scrollTop + delta), behavior: 'smooth' });
+			const reduced = window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches;
+			listEl.scrollTo({
+				top: Math.max(0, listEl.scrollTop + delta),
+				behavior: reduced ? 'auto' : 'smooth'
+			});
 		});
 	}
 
@@ -189,6 +197,7 @@
 	const onListScroll = () => {
 		dispatch('scroll');
 	};
+	$: visible, expandedTools, expandedBodies, tick().then(onListScroll);
 
 	const hoverItem = (id: string | null) => {
 		if (typeof window === 'undefined') {
@@ -264,30 +273,52 @@
 		}
 	};
 
-	const CATS: { value: typeof category; label: string }[] = [
-		{ value: 'all', label: '全部' },
-		{ value: 'key', label: '关键节点' },
-		{ value: 'message', label: '对话/交接' },
-		{ value: 'tool', label: '步骤组' }
+	const CATS: { value: Category; label: string; icon: string }[] = [
+		{ value: 'all', label: '全部', icon: 'M3 4h10M3 8h10M3 12h10' },
+		{ value: 'key', label: '关键节点', icon: 'm8 2 6 6-6 6-6-6Z' },
+		{ value: 'message', label: '对话/交接', icon: 'M3 3.5h10v7H7l-3 2v-2H3Z' },
+		{ value: 'tool', label: '步骤组', icon: 'm3 5 3 3-3 3m5 0h5' }
 	];
+	const TOOL_ICONS: Record<ToolIcon, string> = {
+		search: 'M11 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0Zm-1 3 3.5 3.5',
+		edit: 'm3 10 7.8-7.8 3 3L6 13H3Zm6.2-6.2 3 3',
+		terminal: 'm3 5 3 3-3 3m5 0h5',
+		image: 'M2.5 3.5h11v9h-11Zm0 7 3-3 2.5 2.5 2-2 3.5 3.5M10 6h.1',
+		subagent: 'M6 2.5h4v4H6ZM3 10h3v3H3Zm7 0h3v3h-3ZM8 6.5V8m-3.5 2V8h7v2',
+		generic: 'm8 2.5 5 2.75v5.5L8 13.5l-5-2.75v-5.5Zm-5 2.75L8 8l5-2.75M8 8v5.5'
+	};
 </script>
 
 <div class="flex h-full min-h-0 flex-col" data-narrative-feed>
 	<!-- Toolbar -->
-	<div class="flex flex-wrap items-center gap-2 border-b px-3 py-2 tm-hairline">
+	<div class="workbench-pane-head flex flex-wrap items-center gap-2 border-b px-3 py-2 tm-hairline">
 		<div class="tm-segment !p-[2px]" role="radiogroup" aria-label="筛选叙事流">
 			{#each CATS as opt}
 				<button
 					type="button"
 					role="radio"
 					aria-checked={category === opt.value}
-					class="!px-2 !py-0.5 !text-[11px]"
-					on:click={() => (category = opt.value)}>{opt.label}</button
+					class="!inline-flex items-center gap-1 !px-2 !py-0.5 !text-[11px]"
+					on:click={() => (category = opt.value)}
 				>
+					<svg width="11" height="11" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+						<path
+							d={opt.icon}
+							stroke="currentColor"
+							stroke-width="1.4"
+							stroke-linejoin="round"
+							stroke-linecap="round"
+						/>
+					</svg>
+					{opt.label}
+				</button>
 			{/each}
 		</div>
 
 		<div class="ml-auto flex items-center gap-1.5">
+			<span class="feed-count tm-num" title="显示条数 / 总条数"
+				>{visible.length} / {items.length}</span
+			>
 			{#if memberFilter || stageFilter || category !== 'all'}
 				<button
 					type="button"
@@ -345,18 +376,41 @@
 			on:wheel|passive={onWheelOrTouch}
 			on:touchstart|passive={onWheelOrTouch}
 			on:scroll|passive={onListScroll}
-			class="tm-scroll min-h-0 flex-1 space-y-2 overflow-y-auto px-3 py-3"
+			class="timeline tm-scroll min-h-0 flex-1 overflow-y-auto"
 			aria-label="结构化协作流"
 			aria-live="polite"
 		>
-			{#each visible as item (item.id)}
-				{@const pal = paletteOf(item.lane)}
+			{#each visible as item, i (item.id)}
+				{@const stage = stageById.get(item.stageId)}
+				{@const pal =
+					lanePalettes?.get(item.lane) ?? lanePalette(item.lane, laneIndexMap.get(item.lane) ?? 1)}
 				{@const focused = focusId === item.id}
 				{@const isToolOpen = expandedTools.has(item.id)}
 				{@const isBodyOpen = expandedBodies.has(item.id)}
 				{@const taskBusy = !!item.taskId && busyTasks.has(item.taskId)}
+				{@const actionable = canInlineReply(
+					item,
+					states,
+					latestApprovalByTask,
+					replay,
+					teamStopped
+				)}
+				{#if stage && visible[i - 1]?.stageId !== item.stageId}
+					<li
+						class="timeline-stage"
+						data-narrative-stage={stage.id}
+						style="--stage-color:{stage.color}"
+					>
+						<span class="stage-dot" aria-hidden="true" />
+						<span>{stage.shortLabel}</span>
+						<span class="feed-count tm-num">{stage.done}/{stage.total}</span>
+						<span class="stage-rule" aria-hidden="true" />
+					</li>
+				{/if}
+				<!-- svelte-ignore a11y-click-events-have-key-events a11y-no-noninteractive-element-interactions -->
 				<li
 					class="row-card {focused ? 'is-focused' : ''} kind-{item.kind}"
+					class:is-actionable={actionable}
 					style="--lane-color:{pal.stroke};--lane-soft:{pal.soft}"
 					data-narrative-id={item.id}
 					data-narrative-kind={item.kind}
@@ -365,12 +419,14 @@
 					on:mouseleave={() => hoverItem(null)}
 					on:click={() => dispatch('focus', { id: item.id, source: 'feed', pin: true })}
 				>
+					<span class="timeline-anchor" class:is-head={item.id === headId} aria-hidden="true" />
+					{#if focused}<span class="connector-anchor" aria-hidden="true" />{/if}
 					{#if item.kind === 'tool_group'}
 						<!-- Collapsible structured tool batch -->
-						<div class="flex items-start gap-2.5">
+						<div class="flex items-start gap-1.5">
 							<button
 								type="button"
-								class="group flex min-w-0 flex-1 items-center gap-2 text-left"
+								class="tool-toggle min-w-0 flex-1 text-left"
 								aria-expanded={isToolOpen}
 								on:click|stopPropagation={() => {
 									toggleTool(item.id);
@@ -391,29 +447,44 @@
 										/></svg
 									></span
 								>
-								<span class="lane-bar shrink-0" aria-hidden="true" />
-								<span class="badge {badgeClass(item.kind)}">{item.badge}</span>
-								<span class="shrink-0 text-xs font-medium text-gray-700 dark:text-gray-200"
-									>{item.member ?? '系统'}</span
-								>
-								<span class="min-w-0 flex-1 truncate text-xs text-gray-600 dark:text-gray-300"
-									>{item.title}</span
-								>
-								{#if item.taskKey}
-									<span
-										role="button"
-										tabindex="0"
-										class="task-chip shrink-0"
-										on:click|stopPropagation={() => item.taskId && dispatch('selectTask', item.taskId)}
-										on:keydown|stopPropagation={(e) =>
-											e.key === 'Enter' && item.taskId && dispatch('selectTask', item.taskId)}
-										>#{item.taskKey}</span
+								<span class="tool-icon" title={item.badge}>
+									<svg
+										width="15"
+										height="15"
+										viewBox="0 0 16 16"
+										fill="none"
+										role="img"
+										aria-label={item.badge}
 									>
-								{/if}
-								<span class="tm-num shrink-0 text-[11px] text-gray-400 dark:text-gray-500">
+										<path
+											d={TOOL_ICONS[item.toolIcon ?? 'generic']}
+											stroke="currentColor"
+											stroke-width="1.4"
+											stroke-linejoin="round"
+											stroke-linecap="round"
+										/>
+									</svg>
+								</span>
+								<span class="min-w-0">
+									<span class="block break-words text-xs font-semibold" title={item.title}
+										>{item.title}</span
+									>
+									<span class="block truncate text-[11px] text-gray-500 dark:text-gray-400"
+										>{item.member ?? '系统'}</span
+									>
+								</span>
+								<span class="tool-stats tm-num">
 									{item.stepCount} 步{item.durationSec > 0 ? ` · ${item.durationSec}s` : ''}
 								</span>
 							</button>
+							{#if item.taskKey && item.taskId}
+								<button
+									type="button"
+									class="task-chip shrink-0 self-center"
+									on:click|stopPropagation={() =>
+										item.taskId && dispatch('selectTask', item.taskId)}>#{item.taskKey}</button
+								>
+							{/if}
 						</div>
 
 						{#if item.files.length && !isToolOpen}
@@ -425,16 +496,17 @@
 						{/if}
 
 						{#if isToolOpen}
-							<div class="mt-2 border-t pt-2 pl-5 tm-hairline" data-tool-group-steps={item.id}>
-								<div class="mb-1.5 text-[11px] text-gray-400">
+							<div class="terminal mt-2" data-tool-group-steps={item.id}>
+								<div class="terminal-head">
 									已执行 {item.stepCount} 个步骤{item.durationSec > 0
 										? ` · 用时 ${formatDuration(item.durationSec)}`
 										: ''} · {formatClock(item.ts)}
 								</div>
-								<ul class="space-y-1">
-									{#each item.steps as step (step.id)}
-										<li class="flex min-w-0 items-baseline gap-2 font-mono text-[11px]">
-											<span class="shrink-0 font-semibold text-gray-700 dark:text-gray-200">
+								<ol class="terminal-steps">
+									{#each item.steps as step, index (step.id)}
+										<li class="terminal-row">
+											<span class="terminal-number">{String(index + 1).padStart(2, '0')}</span>
+											<span class="terminal-tool">
 												{step.type === 'subagent'
 													? step.data?.phase === 'start'
 														? 'subagent:start'
@@ -442,24 +514,37 @@
 													: step.data?.name ?? 'tool'}
 											</span>
 											{#if step.text}
-												<span
-													class="min-w-0 flex-1 whitespace-pre-wrap break-all text-gray-500 dark:text-gray-400"
-													>{step.text}</span
-												>
+												<code class="terminal-command">{step.text}</code>
 											{/if}
-											<time class="tm-num shrink-0 text-[10px] text-gray-400"
-												>{formatClock(step.ts)}</time
-											>
+											<time class="terminal-time">{formatClock(step.ts)}</time>
 										</li>
 									{/each}
-								</ul>
+								</ol>
 							</div>
 						{/if}
 					{:else}
 						<!-- Semantic card: message / handoff / approval / fail / retry / runner / milestone / deploy -->
 						<div class="flex items-start gap-2.5">
 							<div class="shrink-0 pt-0.5">
-								{#if item.lane === LEAD_LANE_ID}
+								{#if item.kind === 'milestone' || item.kind === 'deploy'}
+									<svg
+										class="banner-icon"
+										width="24"
+										height="24"
+										viewBox="0 0 24 24"
+										fill="none"
+										aria-hidden="true"
+									>
+										<path
+											d={item.kind === 'deploy'
+												? 'M9 15c0-5 4-9 10-10-1 6-5 10-10 10Zm0 0-3 3m3-7H6l-2 3h5m6 1v3l-3 2v-5m2-5h.1'
+												: 'm12 4 8 8-8 8-8-8Zm0 4 4 4-4 4-4-4Z'}
+											stroke="currentColor"
+											stroke-width="1.4"
+											stroke-linejoin="round"
+										/>
+									</svg>
+								{:else if item.lane === LEAD_LANE_ID}
 									<TeamAvatar kind="lead" size={24} />
 								{:else}
 									<TeamAvatar kind={kindOf(item.member)} size={24} />
@@ -468,7 +553,11 @@
 							<div class="min-w-0 flex-1">
 								<div class="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs">
 									<span class="badge {badgeClass(item.kind)}">{item.badge}</span>
-									<span class="font-semibold text-gray-900 dark:text-gray-100">{item.title}</span>
+									{#if item.kind !== 'handoff'}
+										<span class="break-words font-semibold text-gray-900 dark:text-gray-100"
+											>{item.title}</span
+										>
+									{/if}
 									{#if item.taskKey}
 										<button
 											type="button"
@@ -478,12 +567,41 @@
 										>
 									{/if}
 									{#if item.runnerMeta && item.kind !== 'runner'}
-										<span class="font-mono text-[10px] text-gray-400">{item.runnerMeta}</span>
+										<span
+											class="font-mono text-[10px] text-gray-500 dark:text-gray-400"
+											class:sha-chip={item.stageId === 'deploy'}>{item.runnerMeta}</span
+										>
 									{/if}
 									<time class="tm-num ml-auto shrink-0 text-[11px] text-gray-400">
 										{formatClock(item.ts)}
 									</time>
 								</div>
+								{#if item.kind === 'handoff'}
+									<div class="handoff-route">
+										<span class="handoff-chip">{item.member ?? item.author ?? '负责人'}</span>
+										<svg
+											class="handoff-arrow"
+											width="29"
+											height="12"
+											viewBox="0 0 29 12"
+											fill="none"
+											role="img"
+											aria-label="交接至"
+										>
+											<path
+												d="M1 6h26m-5-4 5 4-5 4"
+												stroke="currentColor"
+												stroke-width="1.4"
+												stroke-linejoin="round"
+											/>
+										</svg>
+										{#each item.handoffTo as to}
+											<span class="handoff-chip">{to.member}{to.key ? ` #${to.key}` : ''}</span>
+										{:else}
+											<span class="handoff-chip">下一阶段</span>
+										{/each}
+									</div>
+								{/if}
 
 								{#if item.body}
 									{@const longBody = item.body.length > 220 || item.body.split('\n').length > 4}
@@ -528,7 +646,7 @@
 								{/if}
 
 								<!-- Inline approval reply right in the stream (only when task is currently waiting_user) -->
-								{#if canInlineReply(item, states, latestApprovalByTask, replay, teamStopped)}
+								{#if actionable}
 									<form
 										class="mt-2 flex items-center gap-1.5"
 										on:click|stopPropagation
@@ -537,8 +655,9 @@
 									>
 										<input
 											type="text"
-											class="min-w-0 flex-1 rounded-lg border px-2.5 py-1 text-xs text-gray-900 placeholder:text-gray-400 focus:border-violet-400 focus:outline-none dark:bg-gray-900/60 dark:text-gray-100 tm-hairline"
+											class="reply-field min-w-0 flex-1 rounded-lg border px-2.5 py-1 text-xs"
 											placeholder="直接在这里回复并继续…"
+											aria-label="回复待确认事项"
 											bind:value={replyDrafts[item.id]}
 											disabled={taskBusy}
 										/>
@@ -586,11 +705,90 @@
 </div>
 
 <style>
+	.timeline {
+		padding: 0.65rem 0.85rem 0.75rem 1.9rem;
+	}
+	.timeline > li + li {
+		margin-top: 0.55rem;
+	}
+	.timeline-anchor {
+		position: absolute;
+		z-index: 1;
+		left: -1.3rem;
+		top: calc(50% - 4px);
+		width: 8px;
+		height: 8px;
+		border: 1.5px solid var(--lane-color);
+		border-radius: 50%;
+		background: var(--tm-workbench-pill);
+	}
+	.timeline-anchor.is-head {
+		background: var(--lane-color);
+	}
+	.timeline-anchor.is-head::after {
+		content: '';
+		position: absolute;
+		inset: -4px;
+		border: 1px solid var(--lane-color);
+		border-radius: inherit;
+		animation: tm-feed-pulse 2.4s ease-out infinite;
+		animation-play-state: var(--tm-workbench-play-state, running);
+	}
+	.timeline-stage {
+		position: relative;
+		display: flex;
+		align-items: center;
+		gap: 0.45rem;
+		padding: 0.2rem 0;
+		color: hsl(var(--tm-ink));
+		font-size: 0.7rem;
+		font-weight: 650;
+	}
+	.timeline-stage::before,
+	.row-card::after {
+		content: '';
+		position: absolute;
+		width: 1px;
+		left: -1.05rem;
+		inset-block: -0.55rem 0;
+		background: hsl(var(--tm-line-strong));
+		pointer-events: none;
+	}
+	.timeline > li:first-child::before,
+	.timeline > .row-card:first-child::after {
+		inset-block-start: 50%;
+	}
+	.timeline > .row-card:last-child::after {
+		inset-block-end: 50%;
+	}
+	.stage-dot {
+		width: 7px;
+		height: 7px;
+		border-radius: 50%;
+		flex: none;
+		background: var(--stage-color);
+	}
+	.stage-rule {
+		position: relative;
+		height: 1px;
+		min-width: 0.65rem;
+		flex: 1;
+		overflow: hidden;
+		background: linear-gradient(90deg, var(--stage-color), transparent);
+	}
+	.feed-count {
+		flex: none;
+		padding: 0.1rem 0.35rem;
+		border-radius: 4px;
+		border: 1px solid hsl(var(--tm-line));
+		color: hsl(var(--tm-muted));
+		font-size: 0.65rem;
+	}
 	.row-card {
 		position: relative;
 		border-radius: 0.85rem;
 		border: 1px solid hsl(var(--tm-line));
-		background: hsl(var(--tm-surface));
+		background: var(--tm-workbench-card);
 		padding: 0.55rem 0.75rem;
 		transition:
 			border-color 0.16s ease,
@@ -619,35 +817,207 @@
 			0 0 0 2px color-mix(in srgb, var(--lane-color) 16%, transparent),
 			var(--tm-shadow);
 	}
+	.connector-anchor {
+		position: absolute;
+		right: 0;
+		top: 50%;
+		width: 6px;
+		height: 6px;
+		border-radius: 50%;
+		background: var(--lane-color);
+		box-shadow: 0 0 6px var(--lane-color);
+		transform: translate(50%, -50%);
+		pointer-events: none;
+	}
+	.row-card.is-focused::before {
+		box-shadow: 0 0 6px var(--lane-color);
+	}
 	.row-card.kind-tool_group {
 		background: hsl(var(--tm-surface-2) / 0.85);
 		padding: 0.45rem 0.7rem;
 	}
 	.row-card.kind-handoff {
-		background: linear-gradient(90deg, hsl(158 64% 42% / 0.06), hsl(var(--tm-surface)) 55%);
+		background: linear-gradient(90deg, hsl(158 64% 42% / 0.06), var(--tm-workbench-card) 55%);
 		border-color: hsl(158 64% 42% / 0.22);
 	}
 	.row-card.kind-approval {
-		background: linear-gradient(90deg, hsl(var(--tm-violet) / 0.09), hsl(var(--tm-surface)) 65%);
+		background: linear-gradient(90deg, hsl(var(--tm-violet) / 0.09), var(--tm-workbench-card) 65%);
 		border-color: hsl(var(--tm-violet) / 0.32);
 	}
+	.row-card.kind-approval.is-actionable {
+		border-color: hsl(var(--tm-violet) / 0.68);
+	}
+	.row-card.kind-approval.is-actionable::before {
+		background: hsl(var(--tm-violet));
+		animation: tm-approval-pulse 2.6s ease-in-out infinite alternate;
+		animation-play-state: var(--tm-workbench-play-state, running);
+	}
+	.reply-field {
+		border-color: hsl(var(--tm-violet) / 0.36);
+		background: var(--tm-workbench-pill);
+		color: hsl(var(--tm-ink));
+	}
+	.reply-field:focus {
+		border-color: hsl(var(--tm-violet));
+		outline: 2px solid hsl(var(--tm-violet) / 0.22);
+	}
+	@keyframes tm-feed-pulse {
+		from {
+			opacity: 0.8;
+			transform: scale(0.8);
+		}
+		to {
+			opacity: 0;
+			transform: scale(1.55);
+		}
+	}
+	@keyframes tm-approval-pulse {
+		from {
+			opacity: 0.55;
+		}
+		to {
+			opacity: 1;
+			box-shadow: 0 0 8px hsl(var(--tm-violet) / 0.75);
+		}
+	}
 	.row-card.kind-fail {
-		background: linear-gradient(90deg, hsl(var(--tm-bad) / 0.08), hsl(var(--tm-surface)) 65%);
+		background: linear-gradient(90deg, hsl(var(--tm-bad) / 0.08), var(--tm-workbench-card) 65%);
 		border-color: hsl(var(--tm-bad) / 0.32);
 	}
 	.row-card.kind-retry {
-		background: linear-gradient(90deg, hsl(var(--tm-warn) / 0.08), hsl(var(--tm-surface)) 60%);
+		background: linear-gradient(90deg, hsl(var(--tm-warn) / 0.08), var(--tm-workbench-card) 60%);
 		border-color: hsl(var(--tm-warn) / 0.28);
 	}
+	.kind-fail::before,
+	.kind-retry::before {
+		width: 3px;
+		opacity: 1;
+	}
+	.kind-fail::before {
+		background: hsl(var(--tm-bad));
+	}
+	.kind-retry::before {
+		background: hsl(var(--tm-warn));
+	}
 	.row-card.kind-deploy {
-		background: linear-gradient(90deg, hsl(var(--tm-ok) / 0.08), hsl(var(--tm-surface)) 60%);
+		background: linear-gradient(90deg, hsl(var(--tm-ok) / 0.08), var(--tm-workbench-card) 60%);
 		border-color: hsl(var(--tm-ok) / 0.26);
 	}
-	.lane-bar {
-		width: 6px;
-		height: 6px;
-		border-radius: 9999px;
-		background: var(--lane-color);
+	.row-card.kind-milestone {
+		background: linear-gradient(90deg, hsl(var(--tm-accent) / 0.08), var(--tm-workbench-card) 68%);
+		border-color: hsl(var(--tm-accent) / 0.24);
+	}
+	.kind-milestone,
+	.kind-deploy {
+		box-shadow: inset 0 1px hsl(var(--tm-accent) / 0.12);
+	}
+	.banner-icon {
+		color: hsl(var(--tm-accent));
+	}
+	.kind-deploy .banner-icon {
+		color: hsl(var(--tm-ok));
+	}
+	.handoff-route {
+		display: flex;
+		align-items: center;
+		flex-wrap: wrap;
+		gap: 0.25rem;
+		margin-top: 0.25rem;
+	}
+	.handoff-chip,
+	.sha-chip {
+		max-width: 100%;
+		border-radius: 5px;
+		padding: 0.08rem 0.38rem;
+		overflow-wrap: anywhere;
+		border: 1px solid hsl(var(--tm-ok) / 0.28);
+		background: hsl(var(--tm-ok) / 0.08);
+	}
+	.handoff-chip {
+		font-size: 0.72rem;
+		color: hsl(var(--tm-ink));
+	}
+	.handoff-arrow {
+		color: hsl(var(--tm-ok));
+	}
+	.tool-toggle {
+		display: grid;
+		grid-template-columns: auto auto minmax(0, 1fr) auto;
+		align-items: center;
+		gap: 0.35rem;
+	}
+	.tool-icon {
+		display: grid;
+		place-items: center;
+		width: 1.6rem;
+		height: 1.6rem;
+		border-radius: 6px;
+		background: var(--lane-soft);
+		color: hsl(var(--tm-ink));
+		border: 1px solid color-mix(in srgb, var(--lane-color) 35%, transparent);
+	}
+	.tool-stats {
+		border-radius: 5px;
+		padding: 0.1rem 0.35rem;
+		font-size: 0.65rem;
+		background: var(--lane-soft);
+		color: hsl(var(--tm-muted));
+	}
+	.terminal {
+		border-radius: 0.6rem;
+		overflow: hidden;
+		background: #101522;
+		border: 1px solid #25314a;
+		color: #dce6f7;
+	}
+	.terminal-head {
+		padding: 0.35rem 0.55rem;
+		border-bottom: 1px solid #25314a;
+		background: #182237;
+		color: #b6c7e7;
+		font-size: 0.68rem;
+	}
+	.terminal-steps {
+		padding: 0.25rem 0.5rem;
+	}
+	.terminal-row {
+		display: grid;
+		grid-template-columns: auto minmax(0, 1fr) auto;
+		gap: 0.2rem 0.45rem;
+		align-items: baseline;
+		padding: 0.28rem 0;
+		font: 0.68rem var(--font-mono);
+	}
+	.terminal-row + .terminal-row {
+		border-top: 1px solid #222c40;
+	}
+	.terminal-number,
+	.terminal-time {
+		color: #9eabc2;
+	}
+	.terminal-tool {
+		justify-self: start;
+		padding: 0.07rem 0.25rem;
+		border-radius: 4px;
+		background: #23334f;
+		color: #a5dfff;
+		overflow-wrap: anywhere;
+	}
+	.terminal-command {
+		grid-column: 2 / -1;
+		grid-row: 2;
+		white-space: pre-wrap;
+		overflow-wrap: anywhere;
+	}
+	.terminal-time {
+		grid-column: 3;
+		grid-row: 1;
+	}
+	@media (prefers-reduced-motion: reduce), (max-width: 767px) {
+		.timeline-anchor.is-head::after,
+		.row-card.kind-approval.is-actionable::before {
+			animation: none;
+		}
 	}
 	.badge {
 		display: inline-flex;

@@ -523,6 +523,7 @@ html.halo-scifi
 		[data-answer-row],
 		[data-team-row],
 		[data-teams-ui] .tm-card-quiet.tm-hover,
+		[data-workbench-filter],
 		.dc-turn,
 		#team-inspector,
 		[data-halo-mode] .glass-item:not(.group)
@@ -564,7 +565,13 @@ html.halo-scifi
 		background-color 0.15s ease;
 }
 /* the working panels wear their corners all the time … */
-html.halo-scifi :is(.dc-turn, #team-inspector, [data-halo-mode] .glass-item:not(.group)) {
+html.halo-scifi
+	:is(
+		.dc-turn,
+		#team-inspector,
+		[data-workbench-filter],
+		[data-halo-mode] .glass-item:not(.group)
+	) {
 	--sf-k: 9px;
 }
 /* … list rows and quick starts lock on when the pointer reaches them */
@@ -575,6 +582,7 @@ html.halo-scifi
 		[data-answer-row],
 		[data-team-row],
 		[data-teams-ui] .tm-card-quiet.tm-hover,
+		[data-workbench-filter],
 		.dc-turn,
 		#team-inspector,
 		[data-halo-mode] .glass-item:not(.group)
@@ -959,6 +967,91 @@ html.halo-scifi.dark [data-halo-mode] [data-scifi-conduit] textarea {
 	}
 }
 
+/* ------------------------------------------------------------------ team workbench */
+
+html.halo-scifi [data-teams-ui] {
+	--tm-workbench-canvas: #eff8fc;
+	--tm-workbench-card: rgb(251 254 255 / 0.94);
+	--tm-workbench-pill: #f9fdff;
+	--tm-workbench-grid: rgb(8 145 178 / 0.26);
+	--tm-workbench-glow: rgb(65 184 212 / 0.15);
+	--tm-workbench-glass: rgb(244 251 255 / 0.82);
+}
+html.halo-scifi.dark [data-teams-ui] {
+	--tm-workbench-canvas: #090e1d;
+	--tm-workbench-card: rgb(13 22 41 / 0.92);
+	--tm-workbench-pill: #101a2e;
+	--tm-workbench-grid: rgb(111 214 255 / 0.25);
+	--tm-workbench-glow: rgb(41 166 233 / 0.16);
+	--tm-workbench-glass: rgb(9 13 28 / 0.74);
+}
+
+html.halo-scifi :is([data-workbench-filter], [data-workbench-stream] > .tm-card) {
+	border-color: hsl(var(--tm-accent) / 0.24);
+	background-color: var(--tm-workbench-glass);
+	box-shadow:
+		var(--tm-shadow),
+		inset 0 1px hsl(var(--tm-accent) / 0.08);
+}
+html.halo-scifi [data-workbench-stream] > .tm-card {
+	background-image: linear-gradient(
+		90deg,
+		transparent,
+		var(--scifi-cyan),
+		var(--scifi-violet),
+		transparent
+	);
+	background-repeat: no-repeat;
+	background-size: 83% 1px;
+	background-position: top center;
+}
+html.halo-scifi .workbench-pane-head {
+	background: linear-gradient(
+		105deg,
+		hsl(var(--tm-accent) / 0.09),
+		transparent 55%,
+		hsl(var(--tm-violet) / 0.06)
+	);
+}
+
+@media (min-width: 768px) {
+	html.halo-scifi :is([data-workbench-filter], [data-workbench-stream] > .tm-card) {
+		backdrop-filter: blur(14px);
+	}
+	html.halo-scifi [data-swimlane-tree] .head-radar {
+		filter: drop-shadow(0 0 3px currentColor);
+	}
+	html.halo-scifi [data-narrative-feed] .row-card:hover:not(.is-actionable) {
+		border-color: color-mix(in srgb, var(--lane-color) 45%, transparent);
+	}
+	html.halo-scifi [data-narrative-feed] .row-card.is-focused {
+		border-color: color-mix(in srgb, var(--lane-color) 68%, transparent);
+		box-shadow: 0 0 14px -3px color-mix(in srgb, var(--lane-color) 34%, transparent);
+	}
+	html.halo-scifi [data-narrative-feed] .reply-field:focus {
+		box-shadow: 0 0 12px hsl(var(--tm-violet) / 0.25);
+	}
+	html.halo-scifi [data-narrative-feed] .stage-rule::after {
+		content: '';
+		position: absolute;
+		width: 40%;
+		inset-block: 0;
+		background: linear-gradient(90deg, transparent, var(--scifi-cyan), transparent);
+		animation: tm-stage-section-in 800ms var(--sf-ease) both;
+		animation-play-state: var(--tm-workbench-play-state, running);
+	}
+}
+@keyframes tm-stage-section-in {
+	from {
+		transform: translateX(-100%);
+		opacity: 0.78;
+	}
+	to {
+		transform: translateX(250%);
+		opacity: 0;
+	}
+}
+
 /* ------------------------------------------------------------------ calm when asked */
 
 @media (prefers-reduced-motion: reduce) {
@@ -976,6 +1069,12 @@ html.halo-scifi.dark [data-halo-mode] [data-scifi-conduit] textarea {
 	html.halo-scifi [data-image-studio-results] .result-card > div::after,
 	html.halo-scifi [data-image-studio-results] .workspace-empty-state > div:first-child::after {
 		animation: none !important;
+	}
+	html.halo-scifi [data-narrative-feed] .stage-rule::after {
+		display: none;
+	}
+	html.halo-scifi [data-swimlane-tree] .head-radar {
+		filter: none;
 	}
 	html.halo-scifi .halo-mode-hero::after,
 	html.halo-scifi [data-image-studio-results] .result-card > div::after {

@@ -56,7 +56,7 @@ export const markBooted = (now = Date.now()) => {
  *  ones keep their own gradient. One delegated listener for the whole app; mouse only, one
  *  write a frame. */
 export const SPOT_SELECTOR =
-	'[data-auto-row], [data-discuss-row], [data-answer-row], [data-team-row], [data-teams-ui] .tm-card-quiet.tm-hover, .dc-turn, #team-inspector, [data-halo-mode] .glass-item:not(.group)';
+	'[data-auto-row], [data-discuss-row], [data-answer-row], [data-team-row], [data-teams-ui] .tm-card-quiet.tm-hover, [data-workbench-filter], .dc-turn, #team-inspector, [data-halo-mode] .glass-item:not(.group)';
 
 export const trackSpotlight = (root: Pick<Document, 'addEventListener' | 'removeEventListener'> = document) => {
 	let frame = 0;

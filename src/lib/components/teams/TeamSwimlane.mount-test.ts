@@ -161,12 +161,13 @@ describe('NarrativeFeed', () => {
 	it('collapses tool steps, toggles expansion, and supports inline reply & retry', async () => {
 		api.sendTeamMessage.mockResolvedValue({ comment_id: 9, delivery: 'queued' });
 		api.retryTeamTask.mockResolvedValue({ ok: true });
-		const { groupNarrative } = await import('./narrative');
+		const { buildStages, groupNarrative } = await import('./narrative');
 		const { default: NarrativeFeed } = await import('./NarrativeFeed.svelte');
 		const items = groupNarrative(SAMPLE_EVENTS as any, SAMPLE_TASKS as any);
 		await mount(NarrativeFeed, {
 			teamId: 'team-1',
 			items,
+			stages: buildStages(SAMPLE_TASKS, new Map()),
 			members: [
 				{ name: 'dev-a', role: '后端' },
 				{ name: 'dev-b', role: '测试' }
@@ -181,6 +182,13 @@ describe('NarrativeFeed', () => {
 			'approval',
 			'fail'
 		]);
+		expect(
+			Array.from(target.querySelectorAll('[data-narrative-stage]'), (el: any) =>
+				el.getAttribute('data-narrative-stage')
+			)
+		).toEqual(['layer-0', 'layer-1']);
+		expect(rows[2].textContent).toContain('dev-b #T2');
+		expect(rows[3].classList.contains('is-actionable')).toBe(true);
 
 		// Tool group collapsed by default, expands on click
 		const tgId = rows[1].getAttribute('data-narrative-id');
@@ -191,6 +199,7 @@ describe('NarrativeFeed', () => {
 		expect(expandedSteps).toBeTruthy();
 		expect(expandedSteps.textContent).toContain('cat api.md');
 		expect(expandedSteps.textContent).toContain('edit src/routes.ts');
+		expect(expandedSteps.textContent).toContain('02');
 
 		// Inline approval reply
 		const replyForm = target.querySelector('[data-inline-reply]') as any;
@@ -213,16 +222,19 @@ describe('NarrativeFeed', () => {
 		await sleep(10);
 		expect(target.querySelector('[data-inline-reply]')).toBeFalsy();
 		expect(target.querySelector('[data-inline-retry]')).toBeFalsy();
+		expect(rows[3].classList.contains('is-actionable')).toBe(false);
 	});
 });
 
 describe('SwimlaneTree', () => {
 	it('renders lanes/nodes, grows live with replay items, and dispatches focus & member toggle', async () => {
-		const { groupNarrative } = await import('./narrative');
+		const { buildStages, groupNarrative } = await import('./narrative');
 		const { default: SwimlaneTree } = await import('./SwimlaneTree.svelte');
 		const initialItems = groupNarrative(SAMPLE_EVENTS.slice(0, 2) as any, SAMPLE_TASKS as any);
 		await mount(SwimlaneTree, {
 			items: initialItems,
+			stages: buildStages(SAMPLE_TASKS, new Map()),
+			activeLanes: new Set(['dev-a']),
 			members: [
 				{ name: 'dev-a', role: '后端' },
 				{ name: 'dev-b', role: '测试' }
@@ -236,6 +248,10 @@ describe('SwimlaneTree', () => {
 
 		expect(target.querySelectorAll('[data-swimlane-lane]').length).toBe(3);
 		expect(target.querySelectorAll('[data-swimlane-node]').length).toBe(2);
+		expect(
+			target.querySelector('[data-swimlane-lane="dev-a"][data-lane-active="true"]')
+		).toBeTruthy();
+		expect(target.querySelector('[data-swimlane-hud]').textContent).toContain('api.md');
 
 		// Simulate replay cursor moving forward -> swimlane grows live
 		const fullItems = groupNarrative(SAMPLE_EVENTS as any, SAMPLE_TASKS as any);
@@ -243,6 +259,9 @@ describe('SwimlaneTree', () => {
 		await sleep(10);
 		const nodes = target.querySelectorAll('[data-swimlane-node]');
 		expect(nodes.length).toBe(fullItems.length);
+		expect(target.querySelectorAll('[data-swimlane-stage-band]').length).toBe(2);
+		expect(target.querySelector('[data-swimlane-hud]').textContent).toContain('dev-b');
+		expect(target.querySelector('[data-swimlane-hud]').textContent).toContain('#T2');
 
 		// Clicking a node dispatches focus with source='swimlane' and pin=true
 		(nodes[2] as any).dispatchEvent(new (globalThis as any).Event('click', { bubbles: true }));
@@ -252,11 +271,45 @@ describe('SwimlaneTree', () => {
 			source: 'swimlane',
 			pin: true
 		});
+		app.$set({ focusId: fullItems[2].id });
+		await sleep(5);
+		expect(target.querySelector('[data-swimlane-hud]').textContent).toContain('交接 → dev-b(#T2)');
+		expect(nodes[0].getAttribute('opacity')).toBe('0.26');
+		expect(nodes[3].getAttribute('opacity')).toBe('1');
+		expect(target.querySelectorAll('.workbench-motion-particle').length).toBe(1);
+		app.$set({ motion: false });
+		await sleep(5);
+		expect(target.querySelectorAll('.workbench-motion-particle').length).toBe(0);
 
 		// Clicking a lane header toggles member filter
 		(target.querySelector('[data-swimlane-lane="dev-a"]') as any).click();
 		await sleep(5);
 		expect(toggled[toggled.length - 1]).toBe('dev-a');
+	});
+
+	it('windows nodes on a long scrolling canvas and shows a focused node outside the window in the HUD', async () => {
+		const { groupNarrative } = await import('./narrative');
+		const { default: SwimlaneTree } = await import('./SwimlaneTree.svelte');
+		const items = groupNarrative(
+			Array.from({ length: 125 }, (_, i) => ev(i + 1, { text: `执行记录 ${i + 1}` })) as any,
+			SAMPLE_TASKS
+		);
+		await mount(SwimlaneTree, { items, autoFollow: false, focusId: items.at(-1)?.id });
+		const scroller = target.querySelector('[data-swimlane-scroll]');
+		Object.defineProperties(scroller, {
+			clientHeight: { value: 420 },
+			scrollHeight: { value: 6600 },
+			scrollTop: { value: 0, writable: true }
+		});
+		scroller.dispatchEvent(new Event('scroll'));
+		await sleep(5);
+		expect(target.querySelectorAll('[data-swimlane-node]').length).toBeLessThan(40);
+		expect(target.querySelector('[data-swimlane-node="ev-125"]')).toBeFalsy();
+		expect(target.querySelector('[data-swimlane-hud]').textContent).toContain('执行记录 125');
+		scroller.scrollTop = 6100;
+		scroller.dispatchEvent(new Event('scroll'));
+		await sleep(5);
+		expect(target.querySelector('[data-swimlane-node="ev-125"]')).toBeTruthy();
 	});
 });
 
@@ -335,6 +388,58 @@ describe('TeamWorkbench integration (dual-pane + non-destructive drawer)', () =>
 		expect(target.querySelector('[data-workbench-stream]')).toBeTruthy();
 		expect(target.querySelector('[data-narrative-feed]')).toBeTruthy();
 		expect(target.querySelector('[data-swimlane-tree]')).toBeTruthy();
+		const wideToggle = target.querySelector('[data-wide-toggle]');
+		const stream = target.querySelector('[data-workbench-stream]');
+		expect(wideToggle.getAttribute('aria-pressed')).toBe('false');
+		wideToggle.click();
+		await sleep(10);
+		expect(stream.getAttribute('data-wide')).toBe('true');
+		expect(wideToggle.getAttribute('aria-pressed')).toBe('true');
+		wideToggle.click();
+		await sleep(10);
+		expect(stream.hasAttribute('data-wide')).toBe(false);
+
+		// Domino has no layout. Give the two scrollboxes and focus targets physical coordinates.
+		const rect = (left: number, top: number, width: number, height: number) => ({
+			left,
+			top,
+			width,
+			height,
+			right: left + width,
+			bottom: top + height,
+			x: left,
+			y: top
+		});
+		const graphScroll = target.querySelector('[data-swimlane-scroll]');
+		const feedList = target.querySelector('[data-narrative-feed] ol');
+		const row = target.querySelector('[data-narrative-id="ev-4"]');
+		const node = target.querySelector('[data-swimlane-node="ev-4"]');
+		const anchor = node.querySelector('[data-swimlane-anchor]');
+		stream.getBoundingClientRect = () => rect(0, 40, 1000, 600);
+		feedList.getBoundingClientRect = () => rect(0, 85, 490, 500);
+		graphScroll.getBoundingClientRect = () => rect(510, 85, 490, 500);
+		row.getBoundingClientRect = () => rect(28, 140, 450, 60);
+		anchor.getBoundingClientRect = () => rect(629, 192, 18, 18);
+		Object.defineProperty(graphScroll, 'clientWidth', { value: 490 });
+		Object.defineProperty(graphScroll, 'clientHeight', { value: 500 });
+		row.dispatchEvent(new Event('mouseenter'));
+		await sleep(10);
+		const overlay = target.querySelector('[data-focus-connector]');
+		expect(overlay).toBeTruthy();
+		expect(overlay.querySelectorAll('path').length).toBe(2);
+		anchor.getBoundingClientRect = () => rect(490, 192, 18, 18);
+		graphScroll.dispatchEvent(new Event('scroll'));
+		await sleep(10);
+		expect(target.querySelector('[data-focus-connector]')).toBeFalsy();
+		row.dispatchEvent(new Event('mouseleave'));
+		await sleep(5);
+
+		(target.querySelector('[data-filter-stage="layer-1"]') as any).click();
+		await sleep(10);
+		expect(target.querySelector('[data-narrative-stage="layer-0"]')).toBeFalsy();
+		(target.querySelector('[data-clear-filters]') as any).click();
+		await sleep(10);
+		expect(target.querySelector('[data-narrative-stage="layer-0"]')).toBeTruthy();
 
 		// Open member inspector via compact filter bar -> slide-over drawer opens while stream stays visible
 		(target.querySelector('[data-inspect-member="dev-a"]') as any).click();

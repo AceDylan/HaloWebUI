@@ -51,6 +51,7 @@
 		layoutSwimlanes,
 		lanePalette,
 		LEAD_LANE_ID,
+		SWIMLANE_HEADER_HEIGHT,
 		type LanePalette
 	} from './narrative';
 	import {
@@ -103,6 +104,9 @@
 	let focusPin = false;
 	let autoFollow = true;
 	let connectorEnabled = true;
+	let swimlaneWide = false;
+	let pageVisible = true;
+	let reducedMotion = false;
 	let splitEl: HTMLDivElement | null = null;
 	let connector: { x1: number; y1: number; x2: number; y2: number; color: string } | null = null;
 	let connectorRaf: number | null = null;
@@ -244,7 +248,12 @@
 		deploy: deployBrief,
 		includeDeploy: !replay
 	});
-	$: swimlaneLayout = layoutSwimlanes(narrativeItems, planMembers, { leadName: lead.name });
+	$: swimlaneLayout = layoutSwimlanes(narrativeItems, planMembers, { leadName: lead.name, stages });
+	$: activeLanes = new Set([
+		...(toneOf(lead.status) === 'run' ? [LEAD_LANE_ID] : []),
+		...memberViews.filter((member) => toneOf(member.status) === 'run').map((member) => member.name)
+	]);
+	$: swimlaneMotion = pageVisible && !reducedMotion && !$mobile;
 	$: lanePalettes = new Map<string, LanePalette>(
 		swimlaneLayout.lanes.map((l) => [l.id, l.palette])
 	);
@@ -257,7 +266,7 @@
 	const clamp = (val: number, min: number, max: number) => Math.max(min, Math.min(max, val));
 
 	const scheduleConnector = () => {
-		if (typeof window === 'undefined') return;
+		if (typeof window === 'undefined' || !pageVisible) return;
 		if (connectorRaf !== null) cancelAnimationFrame(connectorRaf);
 		connectorRaf = requestAnimationFrame(() => {
 			connectorRaf = null;
@@ -267,7 +276,7 @@
 			}
 			const esc = escapeAttr(focusId);
 			const leftEl = splitEl.querySelector(`[data-narrative-id="${esc}"]`) as HTMLElement | null;
-			const rightEl = splitEl.querySelector(`[data-swimlane-node="${esc}"]`) as Element | null;
+			const rightEl = splitEl.querySelector(`[data-swimlane-node="${esc}"] [data-swimlane-anchor]`);
 			const leftBox = splitEl.querySelector('[data-narrative-feed] ol') as HTMLElement | null;
 			const rightBox = splitEl.querySelector('[data-swimlane-scroll]') as HTMLElement | null;
 			if (!leftEl || !rightEl || !leftBox || !rightBox) {
@@ -279,14 +288,17 @@
 			const rr = rightEl.getBoundingClientRect();
 			const lb = leftBox.getBoundingClientRect();
 			const rb = rightBox.getBoundingClientRect();
-			// Account for the 34px sticky lane header inside rightBox.
-			const rightTopVisible = rb.top + 34;
+			const rightTopVisible = rb.top + SWIMLANE_HEADER_HEIGHT;
+			const x2 = rr.left + rr.width / 2;
+			const y2 = rr.top + rr.height / 2;
 			if (
 				!host.width ||
 				lr.bottom < lb.top ||
 				lr.top > lb.bottom ||
-				rr.bottom < rightTopVisible ||
-				rr.top > rb.bottom
+				x2 <= rb.left ||
+				x2 >= rb.right ||
+				y2 <= rightTopVisible ||
+				y2 >= rb.bottom
 			) {
 				connector = null;
 				return;
@@ -296,21 +308,40 @@
 				? (lanePalettes.get(item.lane)?.stroke ?? lanePalette(item.lane, 1).stroke)
 				: 'hsl(var(--tm-accent))';
 			const rawY1 = lr.top + lr.height / 2;
-			const rawY2 = rr.top + rr.height / 2;
 			connector = {
-				x1: lr.right - host.left - 2,
+				x1: lr.right - host.left,
 				y1: clamp(rawY1, lb.top + 6, lb.bottom - 6) - host.top,
-				x2: rr.left + rr.width / 2 - host.left,
-				y2: clamp(rawY2, rightTopVisible + 6, rb.bottom - 6) - host.top,
+				x2: x2 - host.left,
+				y2: y2 - host.top,
 				color
 			};
 		});
 	};
 
-	$: focusId, connectorEnabled, viewMode, $mobile, narrativeItems, scheduleConnector();
+	$: focusId,
+		connectorEnabled,
+		viewMode,
+		$mobile,
+		narrativeItems,
+		swimlaneWide,
+		memberFilter,
+		stageFilter,
+		splitEl,
+		scheduleConnector();
+	const clearFocus = () => {
+		focusId = null;
+		focusSource = null;
+		focusPin = false;
+	};
+	$: if (focusId && !narrativeItems.some((item) => item.id === focusId)) clearFocus();
 	const onFocus = (
 		e: CustomEvent<{ id: string | null; source: 'feed' | 'swimlane'; pin?: boolean }>
 	) => {
+		if (focusPin && !e.detail.pin) return;
+		if (focusPin && focusId === e.detail.id && focusSource === e.detail.source) {
+			clearFocus();
+			return;
+		}
 		focusId = e.detail.id;
 		focusSource = e.detail.id ? e.detail.source : null;
 		focusPin = !!e.detail.pin;
@@ -414,7 +445,14 @@
 	};
 
 	const onVisibility = () => {
-		if (document.visibilityState === 'visible') schedule(0);
+		pageVisible = document.visibilityState !== 'hidden';
+		if (pageVisible) {
+			schedule(0);
+			scheduleConnector();
+		} else if (connectorRaf !== null) {
+			cancelAnimationFrame(connectorRaf);
+			connectorRaf = null;
+		}
 	};
 
 	// The team's chat is the one lit in the history while the team is on screen.
@@ -425,8 +463,14 @@
 	}
 
 	onMount(() => {
+		pageVisible = document.visibilityState !== 'hidden';
+		const media = window.matchMedia?.('(prefers-reduced-motion: reduce)');
+		const syncMotion = () => (reducedMotion = media?.matches ?? false);
+		syncMotion();
+		media?.addEventListener?.('change', syncMotion);
 		poll();
 		document.addEventListener('visibilitychange', onVisibility);
+		return () => media?.removeEventListener?.('change', syncMotion);
 	});
 	onDestroy(() => {
 		destroyed = true;
@@ -566,11 +610,15 @@
 	};
 	// Esc closes the task / member details (not while typing a note).
 	const onKey = (e: KeyboardEvent) => {
-		if (e.key !== 'Escape' || !(selectedTask || selectedMember)) return;
+		if (e.key !== 'Escape') return;
 		const el = e.target as HTMLElement | null;
 		if (el && (el.tagName === 'TEXTAREA' || el.tagName === 'INPUT' || el.isContentEditable)) return;
-		selectedTask = null;
-		selectedMember = null;
+		if (selectedTask || selectedMember) {
+			selectedTask = null;
+			selectedMember = null;
+		} else if (focusPin) {
+			clearFocus();
+		}
 	};
 	const seek = (index: number | null) => {
 		replayIndex = index === null ? null : Math.max(0, Math.min(index, events.length - 1));
@@ -585,6 +633,7 @@
 <div
 	class="relative flex h-screen max-h-[100dvh] w-full max-w-full flex-col"
 	data-team-workbench
+	data-workbench-paused={pageVisible ? undefined : ''}
 	data-teams-ui
 >
 	<nav class="flex items-center gap-2 px-3 pt-2.5 pb-2 sm:px-4">
@@ -1103,6 +1152,9 @@
 									members={planMembers}
 									leadName={lead.name}
 									precomputedLayout={swimlaneLayout}
+									{activeLanes}
+									{stages}
+									motion={false}
 									{memberFilter}
 									{stageFilter}
 									{focusId}
@@ -1110,6 +1162,7 @@
 									{focusPin}
 									{autoFollow}
 									showConnectorToggle={false}
+									showWideToggle={false}
 									on:focus={onFocus}
 									on:selectTask={(e) => selectTask(e.detail)}
 									on:toggleMember={(e) => (memberFilter = e.detail)}
@@ -1215,6 +1268,7 @@
 									{teamId}
 									items={narrativeItems}
 									members={planMembers}
+									{stages}
 									{states}
 									{lanePalettes}
 									{memberFilter}
@@ -1263,8 +1317,9 @@
 					<!-- Desktop signature dual-pane: Left structured NarrativeFeed + Right SwimlaneTree + cross-pane connector -->
 					<div
 						bind:this={splitEl}
-						class="relative grid gap-3 lg:h-[calc(100dvh-16rem)] lg:min-h-[480px] lg:grid-cols-[minmax(0,1fr)_390px] xl:grid-cols-[minmax(0,1fr)_440px]"
+						class="stream-panes relative grid gap-3 lg:h-[calc(100dvh-16rem)] lg:min-h-[480px]"
 						data-workbench-stream
+						data-wide={swimlaneWide ? 'true' : undefined}
 					>
 						<div class="tm-card flex max-h-[70vh] min-h-[420px] min-w-0 flex-col overflow-hidden lg:max-h-none">
 							<div class="min-h-0 flex-1">
@@ -1272,6 +1327,7 @@
 									{teamId}
 									items={narrativeItems}
 									members={planMembers}
+									{stages}
 									{states}
 									{lanePalettes}
 									{memberFilter}
@@ -1305,6 +1361,10 @@
 								members={planMembers}
 								leadName={lead.name}
 								precomputedLayout={swimlaneLayout}
+								{activeLanes}
+								{stages}
+								wide={swimlaneWide}
+								motion={swimlaneMotion}
 								{memberFilter}
 								{stageFilter}
 								{focusId}
@@ -1317,35 +1377,46 @@
 								on:toggleMember={(e) => (memberFilter = e.detail)}
 								on:toggleFollow={(e) => (autoFollow = e.detail)}
 								on:toggleConnector={(e) => (connectorEnabled = e.detail)}
+								on:toggleWide={(e) => (swimlaneWide = e.detail)}
 								on:scroll={scheduleConnector}
 							/>
 						</div>
 
 						{#if connector}
 							{@const midX = (connector.x1 + connector.x2) / 2}
+							{@const path = `M ${connector.x1} ${connector.y1} C ${midX} ${connector.y1}, ${midX} ${connector.y2}, ${connector.x2} ${connector.y2}`}
 							<svg
 								class="connector-overlay pointer-events-none absolute inset-0 z-20 hidden h-full w-full overflow-visible lg:block"
 								aria-hidden="true"
 								data-focus-connector
 							>
 								<path
-									d="M {connector.x1} {connector.y1} C {midX} {connector.y1}, {midX} {connector.y2}, {connector.x2} {connector.y2}"
+									d={path}
+									fill="none"
+									stroke={connector.color}
+									stroke-width="6.5"
+									stroke-opacity="0.16"
+								/>
+								<path
+									d={path}
 									fill="none"
 									stroke={connector.color}
 									stroke-width="2"
-									stroke-opacity="0.72"
-									stroke-dasharray="5 4"
-									class="connector-path"
+									stroke-opacity="0.9"
+									class="connector-path workbench-motion"
 								/>
-								<circle cx={connector.x1} cy={connector.y1} r="3.5" fill={connector.color} />
-								<circle
-									cx={connector.x2}
-									cy={connector.y2}
-									r="4.5"
-									fill="none"
-									stroke={connector.color}
-									stroke-width="2"
-								/>
+								{#if swimlaneMotion}
+									<g class="workbench-motion-particle">
+										<circle r="6" fill={connector.color} opacity="0.42" />
+										<circle r="2.8" fill="var(--tm-workbench-spark)" />
+										<animateMotion {path} dur="1.4s" repeatCount="indefinite" />
+									</g>
+								{/if}
+								<g stroke={connector.color} fill="none">
+									<circle cx={connector.x1} cy={connector.y1} r="4.5" stroke-width="1.5" />
+									<circle cx={connector.x2} cy={connector.y2} r="11" stroke-opacity="0.48" />
+									<circle cx={connector.x2} cy={connector.y2} r="8" stroke-width="1.2" />
+								</g>
 							</svg>
 						{/if}
 					</div>
@@ -1610,8 +1681,30 @@
 		animation: tm-connector-dash 1.2s linear infinite;
 	}
 	@keyframes tm-connector-dash {
+		from {
+			stroke-dasharray: 8 3;
+		}
 		to {
-			stroke-dashoffset: -18;
+			stroke-dasharray: 8 3;
+			stroke-dashoffset: -22;
+		}
+	}
+	@media (min-width: 1024px) {
+		.stream-panes {
+			grid-template-columns: minmax(0, 1fr) 430px;
+		}
+		.stream-panes[data-wide] {
+			grid-template-columns: minmax(0, 0.9fr) minmax(460px, 1.1fr);
+		}
+	}
+	@media (min-width: 1280px) {
+		.stream-panes:not([data-wide]) {
+			grid-template-columns: minmax(0, 1fr) 500px;
+		}
+	}
+	@media (min-width: 1536px) {
+		.stream-panes:not([data-wide]) {
+			grid-template-columns: minmax(0, 1fr) 550px;
 		}
 	}
 	.inspector-panel {

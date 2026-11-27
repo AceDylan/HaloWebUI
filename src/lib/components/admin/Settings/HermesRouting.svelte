@@ -476,7 +476,11 @@
 		empty: string;
 		label?: (id: string) => string;
 	};
-	type WorkLane = { key: 'work'; title: string; steps: ReturnType<typeof workFlowSummary> };
+	type WorkLane = {
+		key: 'work' | 'work-deep' | 'work-fast';
+		title: string;
+		steps: ReturnType<typeof workFlowSummary>;
+	};
 	const lanes = (
 		r: HermesRouting,
 		a: AgyDraft | null,
@@ -515,7 +519,13 @@
 					}
 				]
 			: []),
-		...(work ? [{ key: 'work' as const, title: '/work', steps: workFlowSummary(work) }] : [])
+		...(work
+			? [
+					{ key: 'work' as const, title: '默认 /work', steps: workFlowSummary(work, 'default') },
+					{ key: 'work-deep' as const, title: '深度 /work', steps: workFlowSummary(work, 'deep') },
+					{ key: 'work-fast' as const, title: '快速 /work', steps: workFlowSummary(work, 'fast') }
+				]
+			: [])
 	];
 </script>
 
@@ -580,7 +590,7 @@
 								{#each lane.steps as step, index (step.key)}
 									{#if index > 0}<span class="hr-beam" aria-hidden="true"></span>{/if}
 									<span class="hr-node" data-model={step.runner}>
-										{step.title} · {step.runner}
+										{step.fixed ? step.title : `${step.title} · ${step.runner}`}
 									</span>
 								{/each}
 							{:else}

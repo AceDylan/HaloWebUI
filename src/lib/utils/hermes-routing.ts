@@ -6,6 +6,10 @@ import type {
 	HermesRouting,
 	HermesRoutingChange,
 	HermesWorkConfigResponse,
+	WorkPresetKey,
+	WorkProfileConfig,
+	WorkRunnerOption,
+	WorkStepConfig,
 	WorkStepKey,
 	WorkWorkflowConfig
 } from '$lib/apis/hermes';
@@ -245,71 +249,221 @@ export const agyChanges = (before: AgyDraft, rawAfter: AgyDraft) => {
 	return { update, lines };
 };
 
-export const WORK_STEP_KEYS: readonly WorkStepKey[] = ['plan', 'plan_review', 'dev', 'review'];
+export const WORK_STEP_KEYS: readonly WorkStepKey[] = [
+	'plan',
+	'plan_review',
+	'dev',
+	'frontend',
+	'review'
+];
+export const WORK_PRESET_KEYS: readonly WorkPresetKey[] = ['default', 'deep', 'fast'];
+
+export const WORK_PRESET_INFO: Record<
+	WorkPresetKey,
+	{ key: WorkPresetKey; command: string; label: string; laneTitle: string; hint: string }
+> = {
+	default: {
+		key: 'default',
+		command: '/work',
+		label: '默认工作流',
+		laneTitle: '默认 /work',
+		hint: '直接发 /work 需求 时使用，可自由组合模块与全部环节执行器'
+	},
+	deep: {
+		key: 'deep',
+		command: '/work 深度',
+		label: '深度多模型',
+		laneTitle: '深度 /work',
+		hint: '发 /work 深度 需求 时使用，适合复杂或高风险需求，支持独立配置'
+	},
+	fast: {
+		key: 'fast',
+		command: '/work 快速',
+		label: '快速精简',
+		laneTitle: '快速 /work',
+		hint: '发 /work 快速 需求 时使用，适合轻量改动与小修小补，支持独立配置'
+	}
+};
 
 const WORK_STEP_LABELS: Record<WorkStepKey, string> = {
 	plan: '规划',
 	plan_review: '规划审阅',
-	dev: '开发',
-	review: '验收修复'
+	dev: '后端 / 全栈开发',
+	frontend: '前端开发',
+	review: '审阅修复'
 };
 
 export const workStepLabel = (key: WorkStepKey) => WORK_STEP_LABELS[key];
 
-export const workDraftFrom = ({ config, defaults }: HermesWorkConfigResponse): WorkWorkflowConfig => {
-	const steps = { ...defaults.steps };
+const FALLBACK_STEP_DEFAULTS: Record<WorkStepKey, WorkStepConfig> = {
+	plan: { runner: 'offiagy', fallback: ['agy'] },
+	plan_review: { runner: 'officlaude', fallback: ['cchclaude', 'anyclaude', 'reclaude'] },
+	dev: { runner: 'codex', fallback: [] },
+	frontend: { runner: 'offiagy', fallback: ['agy'] },
+	review: { runner: 'officlaude', fallback: ['cchclaude', 'anyclaude', 'reclaude'] }
+};
+
+const FALLBACK_PRESET_FLAGS: Record<'deep' | 'fast', Omit<WorkProfileConfig, 'steps'>> = {
+	deep: {
+		plan_review: true,
+		dual_plan: true,
+		plan_approval: true,
+		ui_review: true,
+		split_dev: true,
+		codex_review: true
+	},
+	fast: {
+		plan_review: false,
+		dual_plan: false,
+		plan_approval: false,
+		ui_review: false,
+		split_dev: false,
+		codex_review: false
+	}
+};
+
+const cloneWorkProfile = (
+	raw: Partial<WorkProfileConfig> | undefined,
+	fallback: Partial<WorkProfileConfig> | undefined,
+	stepFallback?: Partial<Record<WorkStepKey, WorkStepConfig>>
+): WorkProfileConfig => {
+	const steps = {} as Record<WorkStepKey, WorkStepConfig>;
 	for (const key of WORK_STEP_KEYS) {
-		const step = config.steps[key] ?? defaults.steps[key];
-		steps[key] = { runner: step.runner, fallback: [...step.fallback] };
+		const step =
+			raw?.steps?.[key] ??
+			fallback?.steps?.[key] ??
+			stepFallback?.[key] ??
+			FALLBACK_STEP_DEFAULTS[key];
+		steps[key] = { runner: step.runner, fallback: [...(step.fallback ?? [])] };
 	}
 	return {
-		plan_review: Boolean(config.plan_review ?? defaults.plan_review),
-		dual_plan: Boolean(config.dual_plan ?? defaults.dual_plan),
-		plan_approval: Boolean(config.plan_approval ?? defaults.plan_approval),
-		ui_review: Boolean(config.ui_review ?? defaults.ui_review),
-		split_dev: Boolean(config.split_dev ?? defaults.split_dev),
+		plan_review: Boolean(raw?.plan_review ?? fallback?.plan_review ?? false),
+		dual_plan: Boolean(raw?.dual_plan ?? fallback?.dual_plan ?? false),
+		plan_approval: Boolean(raw?.plan_approval ?? fallback?.plan_approval ?? false),
+		ui_review: Boolean(raw?.ui_review ?? fallback?.ui_review ?? false),
+		split_dev: Boolean(raw?.split_dev ?? fallback?.split_dev ?? false),
+		codex_review: Boolean(raw?.codex_review ?? fallback?.codex_review ?? false),
 		steps
+	};
+};
+
+export const workProfileOf = (
+	config: WorkWorkflowConfig,
+	preset: WorkPresetKey = 'default'
+): WorkProfileConfig => {
+	if (preset === 'deep' || preset === 'fast') {
+		return config.presets?.[preset] ?? cloneWorkProfile(undefined, FALLBACK_PRESET_FLAGS[preset], config.steps);
+	}
+	return {
+		plan_review: config.plan_review,
+		dual_plan: config.dual_plan,
+		plan_approval: config.plan_approval,
+		ui_review: config.ui_review,
+		split_dev: config.split_dev,
+		codex_review: config.codex_review,
+		steps: config.steps
+	};
+};
+
+export const withWorkProfile = (
+	config: WorkWorkflowConfig,
+	preset: WorkPresetKey,
+	profile: WorkProfileConfig
+): WorkWorkflowConfig => {
+	if (preset === 'deep' || preset === 'fast') {
+		return {
+			...config,
+			presets: {
+				...config.presets,
+				[preset]: profile
+			}
+		};
+	}
+	return {
+		...config,
+		...profile,
+		presets: config.presets
+	};
+};
+
+export const workDraftFrom = ({ config, defaults }: HermesWorkConfigResponse): WorkWorkflowConfig => {
+	const base = cloneWorkProfile(config, defaults);
+	const deep = cloneWorkProfile(
+		config.presets?.deep,
+		defaults.presets?.deep ?? FALLBACK_PRESET_FLAGS.deep,
+		base.steps
+	);
+	const fast = cloneWorkProfile(
+		config.presets?.fast,
+		defaults.presets?.fast ?? FALLBACK_PRESET_FLAGS.fast,
+		base.steps
+	);
+	return {
+		...base,
+		presets: { deep, fast }
 	};
 };
 
 export const setWorkStepRunner = (
 	draft: WorkWorkflowConfig,
 	key: WorkStepKey,
-	runner: string
-): WorkWorkflowConfig => ({
-	...draft,
-	steps: {
-		...draft.steps,
-		[key]: { runner, fallback: draft.steps[key].fallback.filter((id) => id !== runner) }
-	}
-});
+	runner: string,
+	preset: WorkPresetKey = 'default'
+): WorkWorkflowConfig => {
+	const profile = workProfileOf(draft, preset);
+	const nextProfile: WorkProfileConfig = {
+		...profile,
+		steps: {
+			...profile.steps,
+			[key]: { runner, fallback: profile.steps[key].fallback.filter((id) => id !== runner) }
+		}
+	};
+	return withWorkProfile(draft, preset, nextProfile);
+};
 
-const WORK_FLAG_CHANGES: readonly [keyof Omit<WorkWorkflowConfig, 'steps'>, string][] = [
+const WORK_FLAG_CHANGES: readonly [keyof Omit<WorkProfileConfig, 'steps'>, string][] = [
 	['plan_review', '规划后审阅'],
 	['dual_plan', '双方案并行对照'],
 	['plan_approval', '方案定稿后强制拍板'],
 	['ui_review', 'UI 交互与文案互审'],
-	['split_dev', '前后端分拆与 Codex 审查']
+	['split_dev', '前后端分拆开发'],
+	['codex_review', '交付前 Codex 2 轮审查']
 ];
 
-export const workChanges = (before: WorkWorkflowConfig, after: WorkWorkflowConfig) => {
+const workProfileChanges = (
+	before: WorkProfileConfig,
+	after: WorkProfileConfig,
+	prefix: string
+): string[] => {
 	const lines: string[] = [];
 	const toggle = (value: boolean) => (value ? '开启' : '关闭');
 	for (const [key, label] of WORK_FLAG_CHANGES) {
 		const prev = Boolean(before[key]);
 		const next = Boolean(after[key]);
-		if (prev !== next) lines.push(`${label}：${toggle(prev)} → ${toggle(next)}`);
+		if (prev !== next) lines.push(`${prefix}${label}：${toggle(prev)} → ${toggle(next)}`);
 	}
 	for (const key of WORK_STEP_KEYS) {
 		const label = workStepLabel(key);
 		const prev = before.steps[key];
 		const next = after.steps[key];
 		if (prev.runner !== next.runner) {
-			lines.push(`/work ${label}首选：${prev.runner} → ${next.runner}`);
+			lines.push(`${prefix}${label}首选：${prev.runner} → ${next.runner}`);
 		}
 		const prevChain = prev.fallback.join(' › ') || '无';
 		const nextChain = next.fallback.join(' › ') || '无';
-		if (prevChain !== nextChain) lines.push(`/work ${label}兜底：${prevChain} → ${nextChain}`);
+		if (prevChain !== nextChain) lines.push(`${prefix}${label}兜底：${prevChain} → ${nextChain}`);
+	}
+	return lines;
+};
+
+export const workProfileEquals = (a: WorkProfileConfig, b: WorkProfileConfig) =>
+	workProfileChanges(a, b, '').length === 0;
+
+export const workChanges = (before: WorkWorkflowConfig, after: WorkWorkflowConfig) => {
+	const lines: string[] = [];
+	for (const preset of WORK_PRESET_KEYS) {
+		const prefix = `${WORK_PRESET_INFO[preset].laneTitle} · `;
+		lines.push(...workProfileChanges(workProfileOf(before, preset), workProfileOf(after, preset), prefix));
 	}
 	return { changed: lines.length > 0, lines };
 };
@@ -317,44 +471,83 @@ export const workChanges = (before: WorkWorkflowConfig, after: WorkWorkflowConfi
 export const workConfigEquals = (a: WorkWorkflowConfig, b: WorkWorkflowConfig) =>
 	!workChanges(a, b).changed;
 
-export const workFlowSummary = (config: WorkWorkflowConfig) => {
-	const items: { key: string; title: string; runner: string; fallback: string[] }[] = [];
-	const approve = config.plan_approval ? '·拍板' : '';
-	if (config.dual_plan) {
+export type WorkFlowSummaryItem = {
+	key: string;
+	title: string;
+	runner: string;
+	fallback: string[];
+	fixed?: boolean;
+};
+
+export const workFlowSummary = (
+	config: WorkWorkflowConfig | WorkProfileConfig,
+	preset: WorkPresetKey = 'default'
+): WorkFlowSummaryItem[] => {
+	const profile =
+		'presets' in config ? workProfileOf(config as WorkWorkflowConfig, preset) : (config as WorkProfileConfig);
+	const items: WorkFlowSummaryItem[] = [];
+	const approve = profile.plan_approval ? '·拍板' : '';
+	if (profile.dual_plan) {
 		items.push({
 			key: 'dual_plan',
 			title: `双方案合成${approve}`,
-			runner: `${config.steps.plan_review.runner} + ${config.steps.plan.runner}`,
-			fallback: config.steps.plan_review.fallback
+			runner: `${profile.steps.plan_review.runner} + ${profile.steps.plan.runner}`,
+			fallback: profile.steps.plan_review.fallback
 		});
 	} else {
 		items.push({
 			key: 'plan',
-			title: config.plan_review ? '规划' : `规划${approve}`,
-			...config.steps.plan
+			title: profile.plan_review ? '规划' : `规划${approve}`,
+			...profile.steps.plan
 		});
-		if (config.plan_review) {
+		if (profile.plan_review) {
 			items.push({
 				key: 'plan_review',
 				title: `规划审阅${approve}`,
-				...config.steps.plan_review
+				...profile.steps.plan_review
 			});
 		}
 	}
-	if (config.ui_review) {
+	if (profile.ui_review) {
 		items.push({
 			key: 'ui_review',
 			title: '交互审稿',
-			runner: `${config.steps.plan_review.runner} ⇄ ${config.steps.plan.runner}`,
-			fallback: config.steps.plan.fallback
+			runner: `${profile.steps.plan_review.runner} ⇄ ${profile.steps.plan.runner}`,
+			fallback: profile.steps.plan.fallback
 		});
 	}
-	if (config.split_dev) {
-		items.push({ key: 'dev', title: '后端开发', ...config.steps.dev });
-		items.push({ key: 'review', title: '前端联调', ...config.steps.review });
+	if (profile.split_dev) {
+		items.push({ key: 'dev', title: '后端开发', ...profile.steps.dev });
+		items.push({ key: 'frontend', title: '前端开发', ...profile.steps.frontend });
+		items.push({ key: 'review', title: '审阅修复', ...profile.steps.review });
 	} else {
-		items.push({ key: 'dev', title: '开发', ...config.steps.dev });
-		items.push({ key: 'review', title: '验收修复', ...config.steps.review });
+		items.push({ key: 'dev', title: '全栈开发', ...profile.steps.dev });
+		items.push({ key: 'review', title: '审阅修复', ...profile.steps.review });
+	}
+	if (profile.codex_review) {
+		items.push({ key: 'codex_review', title: 'Codex 2 轮审查', runner: 'codex', fallback: [], fixed: true });
 	}
 	return items;
+};
+
+export const workSelfReviewWarning = (
+	profile: WorkProfileConfig,
+	runners: WorkRunnerOption[]
+): string => {
+	if (profile.codex_review) return '';
+	const familyOf = (name: string) =>
+		runners.find((item) => item.name === name)?.family ?? modelFamily(name);
+	const reviewFam = familyOf(profile.steps.review.runner);
+	if (profile.split_dev) {
+		const feFam = familyOf(profile.steps.frontend.runner);
+		if (feFam && feFam === reviewFam) {
+			return '提示：当前前端开发与审阅修复同属一个模型家族；建议给前端与审阅选不同家族执行器，或开启「交付前 Codex 2 轮独立审查」以保证交叉复核。';
+		}
+		return '';
+	}
+	const devFam = familyOf(profile.steps.dev.runner);
+	if (devFam && devFam === reviewFam) {
+		return '提示：当前全栈开发与审阅修复同属一个模型家族；建议选不同家族执行器或开启「交付前 Codex 2 轮独立审查」。';
+	}
+	return '';
 };

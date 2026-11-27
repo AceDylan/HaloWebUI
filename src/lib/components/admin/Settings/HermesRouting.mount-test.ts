@@ -63,31 +63,69 @@ const agyPrefs = (over: any = {}) => ({
 	...over
 });
 
-const workDefaults = (): WorkWorkflowConfig => ({
-	plan_review: false,
+const workProfileDefaults = (over: Partial<WorkWorkflowConfig> = {}) => ({
+	plan_review: true,
 	dual_plan: false,
 	plan_approval: false,
 	ui_review: false,
-	split_dev: false,
+	split_dev: true,
+	codex_review: false,
 	steps: {
 		plan: { runner: 'offiagy', fallback: ['agy'] },
 		plan_review: { runner: 'officlaude', fallback: ['cchclaude', 'anyclaude', 'reclaude'] },
 		dev: { runner: 'codex', fallback: [] },
+		frontend: { runner: 'offiagy', fallback: ['agy'] },
 		review: { runner: 'officlaude', fallback: ['cchclaude', 'anyclaude', 'reclaude'] }
+	},
+	...over
+});
+
+const workDefaults = (): WorkWorkflowConfig => ({
+	...workProfileDefaults(),
+	presets: {
+		deep: workProfileDefaults({
+			plan_review: true,
+			dual_plan: true,
+			plan_approval: true,
+			ui_review: true,
+			split_dev: true,
+			codex_review: true
+		}),
+		fast: workProfileDefaults({
+			plan_review: false,
+			dual_plan: false,
+			plan_approval: false,
+			ui_review: false,
+			split_dev: false,
+			codex_review: false
+		})
 	}
 });
 
 const workResponse = (config = workDefaults()): HermesWorkConfigResponse => ({
 	config,
 	defaults: workDefaults(),
-	runners: ['offiagy', 'agy', 'officlaude', 'cchclaude', 'anyclaude', 'reclaude', 'codex', 'hermes'].map(
-		(name) => ({ name, label: name, engine: name, family: name, note: '' })
-	),
+	runners: [
+		{ name: 'offiagy', label: 'offiagy', engine: 'AGY', family: 'agy', note: '' },
+		{ name: 'agy', label: 'agy', engine: 'AGY', family: 'agy', note: '' },
+		{ name: 'officlaude', label: 'officlaude', engine: 'Claude', family: 'claude', note: '' },
+		{ name: 'cchclaude', label: 'cchclaude', engine: 'Claude', family: 'claude', note: '' },
+		{ name: 'anyclaude', label: 'anyclaude', engine: 'Claude', family: 'claude', note: '' },
+		{ name: 'reclaude', label: 'reclaude', engine: 'Claude', family: 'claude', note: '' },
+		{ name: 'codex', label: 'codex', engine: 'Codex', family: 'codex', note: '' },
+		{ name: 'hermes', label: 'hermes', engine: 'Hermes', family: 'hermes', note: '' }
+	],
 	steps_meta: [
-		{ key: 'plan', label: '规划', hint: '' },
-		{ key: 'plan_review', label: '规划审阅', hint: '', optional: true },
-		{ key: 'dev', label: '开发', hint: '' },
-		{ key: 'review', label: '验收修复', hint: '' }
+		{ key: 'plan', label: '规划 / 方案顾问', hint: '' },
+		{ key: 'plan_review', label: '规划审阅 / 主控', hint: '', optional: true },
+		{ key: 'dev', label: '后端 / 全栈开发', hint: '' },
+		{ key: 'frontend', label: '前端开发', hint: '', optional: true },
+		{ key: 'review', label: '审阅修复', hint: '' }
+	],
+	presets_meta: [
+		{ key: 'default', preset: '', command: '/work', label: '默认工作流', hint: '默认档' },
+		{ key: 'deep', preset: 'deep', command: '/work 深度', label: '深度多模型', hint: '深度档' },
+		{ key: 'fast', preset: 'fast', command: '/work 快速', label: '快速精简', hint: '快速档' }
 	]
 });
 
@@ -161,49 +199,90 @@ afterEach(() => {
 });
 
 describe('Hermes 模型 settings', () => {
-	it('edits and saves /work, previews the changes, and restores or discards defaults', async () => {
+	it('edits and saves all three /work presets independently, previews all three lanes, and restores or discards defaults', async () => {
 		const root = await mount();
 		const lane = () => text(root.querySelector('[data-lane="work"]'));
+		const deepLane = () => text(root.querySelector('[data-lane="work-deep"]'));
+		const fastLane = () => text(root.querySelector('[data-lane="work-fast"]'));
 		const card = root.querySelector('[data-section="work"]');
-		const dev = card.querySelector('[data-work-step="dev"]');
-		const reset = () => Array.from<HTMLButtonElement>(card.querySelectorAll('button')).find((b) => text(b) === '恢复默认')!;
-		const fallback = () => Array.from<HTMLElement>(dev.querySelectorAll('[data-work-fallback]')).map((chip) => chip.getAttribute('data-work-fallback'));
-		expect(card.querySelectorAll('[data-work-step]')).toHaveLength(4);
-		expect(lane()).toContain('规划 · offiagy 开发 · codex 验收修复 · officlaude');
-		expect(text(card.querySelector('[data-work-step="plan_review"]'))).toContain('未启用');
-		expect(reset().disabled).toBe(true);
+		const dev = () => card.querySelector('[data-work-step="dev"]');
+		const frontend = () => card.querySelector('[data-work-step="frontend"]');
+		const resetAll = () =>
+			Array.from<HTMLButtonElement>(card.querySelectorAll('button')).find((b) => text(b) === '恢复默认')!;
+		const fallback = () =>
+			Array.from<HTMLElement>(dev().querySelectorAll('[data-work-fallback]')).map((chip) =>
+				chip.getAttribute('data-work-fallback')
+			);
 
-		toggleWorkReview(root, true);
-		choose(dev.querySelector('[aria-label="添加开发兜底"]'), 'officlaude');
-		await waitFor(() => fallback().length === 1 && lane().includes('规划审阅'), 'workflow preview');
-		choose(dev.querySelector('[aria-label="添加开发兜底"]'), 'agy');
+		// All 3 workflows are visible both in the top lanes and in the card overview.
+		expect(card.querySelectorAll('[data-work-preset]')).toHaveLength(3);
+		expect(card.querySelectorAll('[data-work-step]')).toHaveLength(5);
+		expect(lane()).toContain('规划 · offiagy 规划审阅 · officlaude 后端开发 · codex 前端开发 · offiagy 审阅修复 · officlaude');
+		expect(deepLane()).toContain('双方案合成·拍板');
+		expect(deepLane()).toContain('Codex 2 轮审查');
+		expect(fastLane()).toContain('规划 · offiagy 全栈开发 · codex 审阅修复 · officlaude');
+		expect(resetAll().disabled).toBe(true);
+
+		// Edit default preset: turn off plan_review, edit dev fallback + primary, switch frontend to officlaude (triggers self-review hint).
+		toggleWorkReview(root, false);
+		choose(dev().querySelector('[aria-label="添加后端开发兜底"]'), 'officlaude');
+		await waitFor(() => fallback().length === 1 && !lane().includes('规划审阅'), 'workflow preview');
+		choose(dev().querySelector('[aria-label="添加后端开发兜底"]'), 'agy');
 		await waitFor(() => fallback().length === 2, 'second fallback');
-		dev.querySelector('[aria-label="把 agy 往前挪"]').click();
+		dev().querySelector('[aria-label="把 agy 往前挪"]').click();
 		await waitFor(() => fallback()[0] === 'agy', 'move earlier');
-		dev.querySelector('[aria-label="把 agy 往后挪"]').click();
+		dev().querySelector('[aria-label="把 agy 往后挪"]').click();
 		await waitFor(() => fallback()[0] === 'officlaude', 'move later');
-		choose(dev.querySelector('[aria-label="开发首选执行器"]'), 'officlaude');
+		choose(dev().querySelector('[aria-label="后端开发首选执行器"]'), 'officlaude');
 		await waitFor(() => fallback().length === 1, 'new primary removed from fallback');
-		dev.querySelector('[aria-label="移除 agy"]').click();
+		dev().querySelector('[aria-label="移除 agy"]').click();
 		await waitFor(() => fallback().length === 0, 'empty fallback');
-		expect(lane()).toContain('开发 · officlaude');
-		expect(text(root.querySelector('.hr-bar'))).toContain('/work 开发首选：codex → officlaude');
+		choose(frontend().querySelector('[aria-label="前端开发首选执行器"]'), 'officlaude');
+		await waitFor(() => Boolean(card.querySelector('[data-work-self-review-warn]')), 'self-review warning');
+		expect(lane()).toContain('后端开发 · officlaude 前端开发 · officlaude');
+		expect(text(root.querySelector('.hr-bar'))).toContain('默认 /work · 后端 / 全栈开发首选：codex → officlaude');
+
+		// Switch to deep preset and edit its planner & codex_review independently.
+		card.querySelector('[data-work-preset="deep"]').click();
+		await waitFor(() => card.querySelector('[data-work-editor="deep"]'), 'deep editor');
+		choose(card.querySelector('[data-work-step="plan"] [aria-label="规划 / 方案顾问首选执行器"]'), 'codex');
+		const codexRev = card.querySelector('[data-work-toggle="codex_review"]') as HTMLInputElement;
+		codexRev.checked = false;
+		codexRev.dispatchEvent(new Event('change'));
+		await waitFor(() => deepLane().includes('officlaude + codex') && !deepLane().includes('Codex 2 轮审查'), 'deep updated');
+
+		// Switch to fast preset and change its dev runner without affecting default or deep.
+		card.querySelector('[data-work-preset="fast"]').click();
+		await waitFor(() => card.querySelector('[data-work-editor="fast"]'), 'fast editor');
+		expect(text(frontend())).toContain('未启用');
+		choose(card.querySelector('[data-work-step="dev"] [aria-label="全栈开发首选执行器"]'), 'offiagy');
+		await waitFor(() => fastLane().includes('全栈开发 · offiagy'), 'fast updated');
+
 		root.querySelector('.hr-save').click();
 		await waitFor(() => root.querySelector('.hr-save').disabled, 'saved workflow');
-		const config = workDefaults();
-		config.plan_review = true;
-		config.steps.dev.runner = 'officlaude';
-		expect(api.saveHermesWorkConfig).toHaveBeenCalledWith('tok', config);
+		const expected = workDefaults();
+		expected.plan_review = false;
+		expected.steps.dev = { runner: 'officlaude', fallback: [] };
+		expected.steps.frontend = { runner: 'officlaude', fallback: ['agy'] };
+		expected.presets.deep.codex_review = false;
+		expected.presets.deep.steps.plan = { runner: 'codex', fallback: ['agy'] };
+		expected.presets.fast.steps.dev = { runner: 'offiagy', fallback: [] };
+		expect(api.saveHermesWorkConfig).toHaveBeenCalledWith('tok', expected);
 		expect(api.saveHermesRouting).not.toHaveBeenCalled();
 
-		reset().click();
-		await waitFor(() => lane().includes('开发 · codex'), 'reset draft');
-		expect(lane()).not.toContain('规划审阅');
+		// Reset only fast preset via "恢复本档默认"
+		card.querySelector('[data-work-reset-preset="fast"]').click();
+		await waitFor(() => fastLane().includes('全栈开发 · codex'), 'reset fast preset');
+		expect(deepLane()).toContain('officlaude + codex');
+
+		// Reset all presets, discard, then reset all and save.
+		resetAll().click();
+		await waitFor(() => lane().includes('后端开发 · codex') && lane().includes('规划审阅'), 'reset draft');
 		expect(api.saveHermesWorkConfig).toHaveBeenCalledTimes(1);
 		const discard = Array.from<HTMLButtonElement>(root.querySelectorAll('.hr-bar button')).find((b) => text(b) === '放弃')!;
 		discard.click();
-		await waitFor(() => lane().includes('规划审阅'), 'discard reset');
-		reset().click();
+		await waitFor(() => fastLane().includes('全栈开发 · offiagy'), 'discard reset');
+		resetAll().click();
 		await waitFor(() => !root.querySelector('.hr-save').disabled, 'save defaults enabled');
 		root.querySelector('.hr-save').click();
 		await waitFor(() => api.saveHermesWorkConfig.mock.calls.length === 2, 'save defaults');
@@ -212,23 +291,6 @@ describe('Hermes 模型 settings', () => {
 			'saved defaults'
 		);
 		expect(api.saveHermesWorkConfig).toHaveBeenLastCalledWith('tok', workDefaults());
-
-		const dual = root.querySelector('[data-work-toggle="dual_plan"]') as HTMLInputElement;
-		const split = root.querySelector('[data-work-toggle="split_dev"]') as HTMLInputElement;
-		dual.checked = true;
-		dual.dispatchEvent(new Event('change'));
-		split.checked = true;
-		split.dispatchEvent(new Event('change'));
-		await waitFor(() => lane().includes('双方案合成') && lane().includes('后端开发'), 'modular toggles');
-		expect(text(root.querySelector('[data-section="work"]'))).toContain('Codex 2 轮审查');
-		await waitFor(() => !root.querySelector('.hr-save').disabled, 'save modular enabled');
-		root.querySelector('.hr-save').click();
-		await waitFor(() => api.saveHermesWorkConfig.mock.calls.length === 3, 'save modular flags');
-		expect(api.saveHermesWorkConfig).toHaveBeenLastCalledWith('tok', {
-			...workDefaults(),
-			dual_plan: true,
-			split_dev: true
-		});
 	});
 
 	it('keeps routing and AGY editable when /work is unavailable and retries separately', async () => {
@@ -254,13 +316,13 @@ describe('Hermes 模型 settings', () => {
 		}));
 		const root = await mount();
 		pill(root, 'main', 'gpt-chat').click();
-		toggleWorkReview(root, true);
+		toggleWorkReview(root, false);
 		await waitFor(() => text(root.querySelector('.hr-bar')).includes('规划后审阅'), 'work draft');
 		root.querySelector('.hr-save').click();
 		await waitFor(() => vi.mocked(toast.error).mock.calls.length, 'partial save notice');
 		expect(toast.error).toHaveBeenCalledWith('Hermes 路由已保存，/work 工作流保存失败：连接失败');
 		expect(text(root.querySelector('.hr-bar'))).toContain('1 处改动');
-		expect(text(root.querySelector('[data-lane="work"]'))).toContain('规划审阅');
+		expect(text(root.querySelector('[data-lane="work"]'))).not.toContain('规划审阅');
 	});
 
 	it('shows every lane at a glance', async () => {

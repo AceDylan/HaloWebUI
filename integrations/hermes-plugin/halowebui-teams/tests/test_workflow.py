@@ -246,17 +246,31 @@ def test_work_workflow_plans_with_agy_builds_with_codex_reviews_with_claude(pkg,
     plan = res["plan"]
     assert plan["workflow"] == "work" and plan["repo_change"] is True
     assert plan["title"].startswith("工作：")
+    assert plan["codex_review"] is False
     by = {m["name"]: m for m in plan["members"]}
     assert by["agy-planner"]["executor"] == "offiagy" and by["agy-planner"]["executor_source"] == "auto"
+    assert by["plan-reviewer"]["executor"] == "officlaude" and by["plan-reviewer"]["executor_source"] == "auto"
     assert by["codex-dev"]["executor"] == "codex"
+    assert by["frontend-dev"]["executor"] == "offiagy" and by["frontend-dev"]["executor_source"] == "auto"
     assert by["claude-review"]["executor"] == "officlaude" and by["claude-review"]["executor_source"] == "auto"
     tasks = {t["key"]: t for t in plan["tasks"]}
-    assert [tasks[k]["member"] for k in ("T1", "T2", "T3")] == ["agy-planner", "codex-dev", "claude-review"]
+    assert [tasks[k]["member"] for k in ("T1", "T2", "T3", "T4", "T5")] == [
+        "agy-planner", "plan-reviewer", "codex-dev", "frontend-dev", "claude-review"
+    ]
     assert tasks["T2"]["depends_on"] == ["T1"] and tasks["T3"]["depends_on"] == ["T2"]
-    assert ".halo/plan.md" in tasks["T2"]["description"] and "直接修改代码" in tasks["T3"]["description"]
+    assert tasks["T4"]["depends_on"] == ["T3"] and tasks["T5"]["depends_on"] == ["T4"]
+    assert ".halo/plan.md" in tasks["T3"]["description"]
+    assert ".halo/frontend-receipt.md" in tasks["T4"]["description"]
+    assert "直接修改代码" in tasks["T5"]["description"]
     import halowebui_teams.workflow as wf
 
-    assert wf.skips_codex_review("work") and not wf.skips_codex_review("dev_lite")
+    assert wf.skips_codex_review("work") and wf.skips_codex_review("work", plan)
+    assert not wf.skips_codex_review("dev_lite")
+
+    # Backend-only goal skips frontend-dev while keeping split backend + review.
+    backend = pkg.plan.propose_plan("纯后端接口优化", "/tmp/ws", workflow="work", project=proj)["plan"]
+    assert [t["member"] for t in backend["tasks"]] == ["agy-planner", "plan-reviewer", "codex-dev", "claude-review"]
+    assert all(m["name"] != "frontend-dev" for m in backend["members"])
 
 
 def test_work_workflow_falls_back_in_family_unless_a_runner_is_named(pkg, availability):
@@ -287,6 +301,7 @@ def test_work_plan_review_is_a_dependency_and_cli_prefs_lock_by_primary_family(p
 
     cfg = pkg.runners.work_config()
     cfg["plan_review"] = True
+    cfg["split_dev"] = False
     cfg["steps"]["plan"] = {"runner": "agy", "fallback": ["officlaude"]}
     cfg["steps"]["dev"] = {"runner": "codex", "fallback": ["officlaude"]}
     cfg["steps"]["review"] = {"runner": "cchclaude", "fallback": []}
@@ -412,10 +427,12 @@ def test_work_deep_preset_combines_multi_model_stages_with_work_chains(pkg, avai
     from halowebui_teams import workflow
 
     cfg = pkg.runners.work_config()
-    cfg["steps"]["plan"] = {"runner": "offiagy", "fallback": ["agy"]}
-    cfg["steps"]["plan_review"] = {"runner": "officlaude", "fallback": ["anyclaude", "reclaude"]}
-    cfg["steps"]["dev"] = {"runner": "codex", "fallback": []}
-    cfg["steps"]["review"] = {"runner": "officlaude", "fallback": ["anyclaude", "reclaude"]}
+    deep = cfg["presets"]["deep"]
+    deep["steps"]["plan"] = {"runner": "offiagy", "fallback": ["agy"]}
+    deep["steps"]["plan_review"] = {"runner": "officlaude", "fallback": ["anyclaude", "reclaude"]}
+    deep["steps"]["dev"] = {"runner": "codex", "fallback": []}
+    deep["steps"]["frontend"] = {"runner": "offiagy", "fallback": ["agy"]}
+    deep["steps"]["review"] = {"runner": "officlaude", "fallback": ["anyclaude", "reclaude"]}
     monkeypatch.setattr(pkg.runners, "work_config", lambda: cfg)
 
     proj = {"name": "HaloWebUI", "path": "/tmp/repo", "branch": "main"}
@@ -428,27 +445,58 @@ def test_work_deep_preset_combines_multi_model_stages_with_work_chains(pkg, avai
     assert workflow.skips_codex_review("work", plan) is False
 
     tasks = {t["key"]: t for t in plan["tasks"]}
-    assert len(tasks) == 9
+    assert len(tasks) == 10
     assert tasks["T2"]["depends_on"] == ["T1"] and tasks["T3"]["depends_on"] == ["T1"]
     assert tasks["T2"]["member"] == "plan-reviewer" and tasks["T3"]["member"] == "agy-planner"
     assert tasks["T4"]["depends_on"] == ["T2", "T3"] and "拍板闸门" in tasks["T4"]["description"]
     assert tasks["T5"]["member"] == "plan-reviewer" and tasks["T6"]["member"] == "agy-planner"
-    assert tasks["T8"]["member"] == "codex-dev" and tasks["T9"]["member"] == "claude-review"
+    assert tasks["T8"]["member"] == "codex-dev" and tasks["T9"]["member"] == "frontend-dev"
+    assert tasks["T10"]["member"] == "claude-review" and tasks["T10"]["depends_on"] == ["T9"]
     by = {m["name"]: m for m in plan["members"]}
     assert by["plan-reviewer"]["fallback_chain"] == ["officlaude", "anyclaude", "reclaude"]
+    assert by["frontend-dev"]["fallback_chain"] == ["offiagy", "agy"]
     assert by["claude-review"]["fallback_chain"] == ["officlaude", "anyclaude", "reclaude"]
 
-    # Backend-only goal skips UI design review (7 tasks instead of 9).
+    # Backend-only goal skips UI design review AND frontend-dev (7 tasks instead of 10).
     backend = pkg.plan.propose_plan("纯后端接口优化", "/tmp/ws", workflow="work", project=proj, work_preset="deep")["plan"]
     assert len(backend["tasks"]) == 7
     assert backend["codex_review"] is True
+    assert all(m["name"] != "frontend-dev" for m in backend["members"])
+
+
+def test_work_presets_are_independently_configurable_without_hardcoding(pkg, availability, monkeypatch):
+    from halowebui_teams import workflow
+
+    cfg = pkg.runners.work_config()
+    cfg["steps"]["frontend"] = {"runner": "officlaude", "fallback": ["cchclaude"]}
+    cfg["presets"]["deep"]["codex_review"] = False
+    cfg["presets"]["deep"]["ui_review"] = False
+    cfg["presets"]["deep"]["steps"]["plan"] = {"runner": "codex", "fallback": []}
+    cfg["presets"]["deep"]["steps"]["frontend"] = {"runner": "agy", "fallback": []}
+    cfg["presets"]["fast"]["plan_review"] = True
+    cfg["presets"]["fast"]["steps"]["plan"] = {"runner": "hermes", "fallback": []}
+    cfg["presets"]["fast"]["steps"]["dev"] = {"runner": "offiagy", "fallback": ["agy"]}
+    monkeypatch.setattr(pkg.runners, "work_config", lambda: cfg)
+
+    proj = {"name": "HaloWebUI", "path": "/tmp/repo", "branch": "main"}
+    default_plan = pkg.plan.propose_plan("改设置页", "/tmp/ws", workflow="work", project=proj)["plan"]
+    deep_plan = pkg.plan.propose_plan("改设置页", "/tmp/ws", workflow="work", project=proj, work_preset="deep")["plan"]
+    fast_plan = pkg.plan.propose_plan("改文案", "/tmp/ws", workflow="work", project=proj, work_preset="fast")["plan"]
+
+    assert {m["name"]: m["executor"] for m in default_plan["members"]}["frontend-dev"] == "officlaude"
+    assert deep_plan["codex_review"] is False
+    deep_by = {m["name"]: m["executor"] for m in deep_plan["members"]}
+    assert deep_by["agy-planner"] == "codex" and deep_by["frontend-dev"] == "agy"
+    assert [t["member"] for t in fast_plan["tasks"]] == ["agy-planner", "plan-reviewer", "codex-dev", "claude-review"]
+    fast_by = {m["name"]: m["executor"] for m in fast_plan["members"]}
+    assert fast_by["agy-planner"] == "hermes" and fast_by["codex-dev"] == "offiagy"
 
 
 def test_work_fast_preset_overrides_enabled_modules_and_skips_codex_review(pkg, availability, monkeypatch):
     from halowebui_teams import workflow
 
     cfg = pkg.runners.work_config()
-    cfg.update(plan_review=True, dual_plan=True, plan_approval=True, ui_review=True, split_dev=True)
+    cfg.update(plan_review=True, dual_plan=True, plan_approval=True, ui_review=True, split_dev=True, codex_review=True)
     monkeypatch.setattr(pkg.runners, "work_config", lambda: cfg)
 
     proj = {"name": "HaloWebUI", "path": "/tmp/repo", "branch": "main"}
@@ -463,7 +511,7 @@ def test_work_modular_flags_persisted_onto_team_board_for_deploy_review(pkg, tea
     from halowebui_teams import workflow
 
     cfg = pkg.runners.work_config()
-    cfg.update(plan_review=True, plan_approval=True, split_dev=True)
+    cfg.update(plan_review=True, plan_approval=True, split_dev=True, codex_review=True)
     monkeypatch.setattr(pkg.runners, "work_config", lambda: cfg)
 
     raw = workflow.build_pipeline_plan("新增后端接口", workflow="work")

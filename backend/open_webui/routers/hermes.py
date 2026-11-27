@@ -594,13 +594,18 @@ class HermesWorkStepForm(BaseModel):
     fallback: list[str] = Field(default_factory=list, max_length=8)
 
 
-class HermesWorkConfigForm(BaseModel):
+class HermesWorkProfileForm(BaseModel):
     plan_review: StrictBool = False
     dual_plan: StrictBool = False
     plan_approval: StrictBool = False
     ui_review: StrictBool = False
     split_dev: StrictBool = False
-    steps: dict[Literal["plan", "plan_review", "dev", "review"], HermesWorkStepForm]
+    codex_review: StrictBool = False
+    steps: dict[Literal["plan", "plan_review", "dev", "frontend", "review"], HermesWorkStepForm]
+
+
+class HermesWorkConfigForm(HermesWorkProfileForm):
+    presets: Optional[dict[Literal["deep", "fast"], HermesWorkProfileForm]] = None
 
 
 @router.get("/work-config")
@@ -616,6 +621,8 @@ async def save_hermes_work_config(
     request: Request, form_data: HermesWorkConfigForm, user=Depends(get_admin_user)
 ):
     try:
-        return await hermes_routing.save_work_config(request, user, form_data.model_dump())
+        return await hermes_routing.save_work_config(
+            request, user, form_data.model_dump(exclude_none=True)
+        )
     except HermesSessionsError as e:
         raise _job_error(e)

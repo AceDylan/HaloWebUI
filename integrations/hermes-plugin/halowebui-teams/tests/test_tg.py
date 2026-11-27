@@ -642,20 +642,28 @@ def test_work_receipt_and_help_read_the_current_configuration(linked, pkg, monke
     runners = pkg.runners
     monkeypatch.setattr(runners, "OVERRIDE_FILE", tmp_path / "runners.json")
     assert linked.telegram.work_flow() == (
-        "offiagy（不行换 agy） 出规划 → Codex 开发 → "
+        "offiagy（不行换 agy） 出规划 → "
+        "officlaude（不行依次换 cchclaude、anyclaude、reclaude） 审阅规划 → "
+        "Codex 写后端 → offiagy（不行换 agy） 写前端 → "
         "officlaude（不行依次换 cchclaude、anyclaude、reclaude） 审阅修复 → 提交推送部署清理"
     )
     cfg = runners.work_config()
     cfg["plan_review"] = True
+    cfg["split_dev"] = False
     cfg["steps"]["dev"] = {"runner": "agy", "fallback": ["codex", "hermes"]}
+    cfg["presets"]["fast"]["steps"]["plan"] = {"runner": "hermes", "fallback": []}
     runners.save_work_config(cfg)
     monkeypatch.setattr(linked.link, "create", lambda *_a: {"id": "11111111-2222-3333-4444-555555555555", "title": "工作"})
     _run(lambda: linked.telegram.on_pre_gateway_dispatch(event=_event("/work anyclaude 修 bug")))
     assert "anyclaude 审阅规划 → agy（不行依次换 codex、hermes） 开发 → anyclaude 审阅修复" in linked.sent[-1]["text"]
     _run(lambda: linked.telegram.on_pre_gateway_dispatch(event=_event("/work help")))
-    assert linked.telegram.work_flow() in linked.sent[-1]["text"]
-    assert "设置 → Hermes 模型" in linked.sent[-1]["text"]
-    assert "/work 深度" in linked.sent[-1]["text"]
+    help_text = linked.sent[-1]["text"]
+    assert linked.telegram.esc(linked.telegram.work_flow()) in help_text
+    assert linked.telegram.esc(linked.telegram.work_flow(preset="deep")) in help_text
+    assert linked.telegram.esc(linked.telegram.work_flow(preset="fast")) in help_text
+    assert "Hermes 出规划" in help_text
+    assert "设置 → Hermes 模型" in help_text
+    assert "/work 深度" in help_text
 
 
 def test_work_command_parses_deep_and_fast_presets_with_runners(linked, monkeypatch):

@@ -114,8 +114,17 @@ def test_work_config_round_trip_and_reset(pkg, tmp_path, monkeypatch):
     monkeypatch.setattr(r, "OVERRIDE_FILE", path)
     custom = r.work_config()
     assert custom == r.DEFAULT_WORK_CONFIG
-    custom["plan_review"] = True
+    assert custom["plan_review"] is True and custom["split_dev"] is True and custom["codex_review"] is False
+    assert custom["steps"]["frontend"] == {"runner": "offiagy", "fallback": ["agy"]}
+    assert custom["presets"]["deep"]["codex_review"] is True
+    assert custom["presets"]["fast"]["split_dev"] is False
+
+    custom["plan_review"] = False
     custom["steps"]["dev"] = {"runner": "hermes", "fallback": ["codex", "officlaude"]}
+    custom["steps"]["frontend"] = {"runner": "officlaude", "fallback": ["cchclaude"]}
+    custom["presets"]["deep"]["steps"]["plan"] = {"runner": "codex", "fallback": []}
+    custom["presets"]["fast"]["plan_review"] = True
+    custom["presets"]["fast"]["steps"]["dev"] = {"runner": "offiagy", "fallback": ["agy"]}
     other = {"kinds": {"ui": "agy"}, "offiagy_model": "model-id", "disabled": ["anyclaude"]}
     path.write_text(json.dumps(other), encoding="utf-8")
 
@@ -124,6 +133,7 @@ def test_work_config_round_trip_and_reset(pkg, tmp_path, monkeypatch):
     assert saved["defaults"]["steps"]["dev"] == {"runner": "codex", "fallback": []}
     assert {runner["name"] for runner in saved["runners"]} == set(r.NAMES)
     assert [step["key"] for step in saved["steps_meta"]] == list(r.WORK_STEPS)
+    assert [preset["key"] for preset in saved["presets_meta"]] == ["default", "deep", "fast"]
     assert json.loads(path.read_text()) == {**other, "work": custom}
     assert r.save_work_config(saved["defaults"])["config"] == r.DEFAULT_WORK_CONFIG
     assert json.loads(path.read_text()) == other
@@ -140,9 +150,17 @@ def test_work_config_tolerates_partial_and_stale_values_on_disk(pkg, override):
     }}})
     cfg = pkg.runners.work_config()
     assert cfg["plan_review"] is False
+    assert cfg["split_dev"] is True
+    assert cfg["codex_review"] is False
     assert cfg["steps"]["plan"] == {"runner": "offiagy", "fallback": ["codex"]}
+    assert cfg["steps"]["frontend"] == {"runner": "offiagy", "fallback": ["agy"]}
     assert cfg["steps"]["review"] == {"runner": "cchclaude", "fallback": ["anyclaude", "reclaude"]}
     assert cfg["steps"]["dev"] == {"runner": "codex", "fallback": []}
+    # Legacy files without presets inherit top-level steps with preset default flags.
+    assert cfg["presets"]["deep"]["dual_plan"] is True
+    assert cfg["presets"]["deep"]["steps"]["plan"] == {"runner": "offiagy", "fallback": ["codex"]}
+    assert cfg["presets"]["fast"]["split_dev"] is False
+    assert cfg["presets"]["fast"]["steps"]["review"] == {"runner": "cchclaude", "fallback": ["anyclaude", "reclaude"]}
 
 
 @pytest.mark.parametrize("step, message", [
@@ -151,7 +169,7 @@ def test_work_config_tolerates_partial_and_stale_values_on_disk(pkg, override):
     ({"runner": "codex", "fallback": [{}]}, "有效且互不重复"),
     ({"runner": "codex", "fallback": ["codex"]}, "不能包含首选"),
     ({"runner": "codex", "fallback": ["agy", "agy"]}, "互不重复"),
-    (None, "四个环节"),
+    (None, "五个环节"),
 ])
 def test_work_config_rejects_invalid_saves(pkg, step, message):
     r = pkg.runners
@@ -163,7 +181,11 @@ def test_work_config_rejects_invalid_saves(pkg, step, message):
     with pytest.raises(ValueError, match=message):
         r.save_work_config(cfg)
     with pytest.raises(ValueError, match="布尔值"):
-        r.save_work_config({**cfg, "plan_review": "true"})
+        r.save_work_config({**r.work_config(), "plan_review": "true"})
+    bad_presets = r.work_config()
+    bad_presets["presets"] = {"deep": bad_presets["presets"]["deep"]}
+    with pytest.raises(ValueError, match="presets"):
+        r.save_work_config(bad_presets)
 
 
 def test_select_uses_only_the_custom_chain_unless_manually_pinned(pkg, availability):

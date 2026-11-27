@@ -126,13 +126,17 @@
 	];
 
 	const WORK_PRESET_OPTIONS: { id: WorkPreset; label: string; hint: string }[] = [
-		{ id: '', label: '默认设置', hint: '沿用「设置 → Hermes 模型」中配置的 /work 模块与执行器链' },
+		{ id: '', label: '默认设置', hint: '按「设置 → Hermes 模型」中「默认工作流」配置执行' },
 		{
 			id: 'deep',
 			label: '深度多模型',
-			hint: '双方案对比拍板 · UI 交互审稿 · 前后端分拆 · Codex 2 轮独立审查'
+			hint: '按「设置 → Hermes 模型」中「深度多模型」配置执行（默认含双方案拍板、UI 互审、前后端分拆与 Codex 审查）'
 		},
-		{ id: 'fast', label: '快速精简', hint: '规划 → 全栈开发 → 审阅修复 → 自动发布（3 步直达）' }
+		{
+			id: 'fast',
+			label: '快速精简',
+			hint: '按「设置 → Hermes 模型」中「快速精简」配置执行（默认 3 步直达）'
+		}
 	];
 
 	// 「直接开始」: the plan starts as soon as it is ready (remembered on this device).

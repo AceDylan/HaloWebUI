@@ -488,21 +488,27 @@ def work_flow(prefs: Optional[dict] = None, preset: str = "") -> str:
     return workflow.work_flow(runners.work_config(), workflow.normalize_runner_prefs(prefs), preset=preset)
 
 
-def _format_work_usage(flow: str) -> str:
+def _format_work_usage(flow: str, deep_flow: str = "", fast_flow: str = "") -> str:
+    deep_line = f"/work 深度 需求 —— 当前深度流程：{esc(deep_flow)}。\n" if deep_flow else "/work 深度 需求 —— 单次启用深度多模型工作流。\n"
+    fast_line = f"/work 快速 需求 —— 当前快速流程：{esc(fast_flow)}。\n" if fast_flow else "/work 快速 需求 —— 单次启用快速精简工作流。\n"
     return (f"<b>工作流 /work</b>\n/work 需求 —— 当前默认流程：{esc(flow)}。\n"
-            "/work 深度 需求 —— 单次启用多模型全流程（双方案拍板、UI 互审、前后端分拆、Codex 2 轮审查）。\n"
-            "/work 快速 需求 —— 单次走精简 3 步闭环（规划 → 开发 → 审阅修复）。\n"
+            f"{deep_line}"
+            f"{fast_line}"
             "需求里写上项目名或路径（例如「/work HaloWebUI 给设置页加个开关」）。\n"
-            "在 HaloWebUI 设置 → Hermes 模型 中可调整流程模块、执行器与兜底顺序。\n"
+            "在 HaloWebUI 设置 → Hermes 模型 中可分别自定义默认 / 深度 / 快速三档的模块开关、前后端执行器与兜底顺序。\n"
             "/work cchclaude 需求 —— 单次指定首选属于 Claude 家族的环节；指定后不可用时暂停等你换。\n"
             "/work 进度 —— 查看工作流进度。")
 
 
-WORK_USAGE = _format_work_usage(workflow.work_flow(runners.DEFAULT_WORK_CONFIG, {}))
+WORK_USAGE = _format_work_usage(
+    workflow.work_flow(runners.DEFAULT_WORK_CONFIG, {}),
+    workflow.work_flow(runners.DEFAULT_WORK_CONFIG, {}, preset="deep"),
+    workflow.work_flow(runners.DEFAULT_WORK_CONFIG, {}, preset="fast"),
+)
 
 
 def work_usage() -> str:
-    return _format_work_usage(work_flow())
+    return _format_work_usage(work_flow(), work_flow(preset="deep"), work_flow(preset="fast"))
 
 
 def work_started(team: dict, prefs: dict, preset: str = "") -> str:

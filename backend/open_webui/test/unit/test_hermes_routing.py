@@ -105,13 +105,14 @@ def test_errors_keep_hermes_message(monkeypatch, status, body, expect_status, ex
 
 
 def test_work_config_forwards_get_and_put(monkeypatch):
-    config = {"plan_review": True, "steps": {
+    config = {"plan_review": True, "split_dev": True, "codex_review": False, "steps": {
         "plan": {"runner": "offiagy", "fallback": ["agy"]},
         "plan_review": {"runner": "officlaude", "fallback": ["codex"]},
         "dev": {"runner": "codex", "fallback": []},
+        "frontend": {"runner": "offiagy", "fallback": ["agy"]},
         "review": {"runner": "officlaude", "fallback": ["cchclaude"]},
     }}
-    response = {"config": config, "defaults": {}, "runners": [], "steps_meta": []}
+    response = {"config": config, "defaults": {}, "runners": [], "steps_meta": [], "presets_meta": []}
     calls = _world(monkeypatch, (200, response))
     assert asyncio.run(hermes_routing.get_work_config(None, USER)) == response
     assert asyncio.run(hermes_routing.save_work_config(None, USER, config)) == response
@@ -143,15 +144,23 @@ def test_work_config_routes_require_an_admin(monkeypatch):
     app = FastAPI()
     app.include_router(router)
     client = TestClient(app)
-    payload = {
+    profile = {
         "plan_review": True,
         "dual_plan": False,
         "plan_approval": False,
         "ui_review": False,
-        "split_dev": False,
+        "split_dev": True,
+        "codex_review": False,
         "steps": {
             step: {"runner": "codex", "fallback": []}
-            for step in ("plan", "plan_review", "dev", "review")
+            for step in ("plan", "plan_review", "dev", "frontend", "review")
+        },
+    }
+    payload = {
+        **profile,
+        "presets": {
+            "deep": {**profile, "dual_plan": True, "codex_review": True},
+            "fast": {**profile, "plan_review": False, "split_dev": False},
         },
     }
     calls = []
@@ -174,7 +183,8 @@ def test_work_config_routes_require_an_admin(monkeypatch):
     assert client.get("/work-config").json() == {"config": payload}
     assert client.put("/work-config", json=payload).json() == {"config": payload}
     assert client.put("/work-config", json={**payload, "plan_review": "true"}).status_code == 422
-    assert client.put("/work-config", json={**payload, "dual_plan": "yes"}).status_code == 422
+    assert client.put("/work-config", json={**payload, "codex_review": "yes"}).status_code == 422
+    assert client.put("/work-config", json={**payload, "presets": {"deep": {**profile, "split_dev": "no"}}}).status_code == 422
     assert calls == [("GET", "admin"), ("PUT", "admin", payload)]
 
 

@@ -47,30 +47,66 @@ def normalize_work_preset(value: Any) -> str:
 
 
 def effective_work_config(cfg: dict, preset: Any = "") -> dict:
-    """Resolve the active /work options after applying an optional one-shot preset."""
+    """Resolve the active /work profile (default / deep / fast) without hard-coded overrides."""
     p = normalize_work_preset(preset)
-    out = {
-        "plan_review": bool(cfg.get("plan_review")),
-        "dual_plan": bool(cfg.get("dual_plan")),
-        "plan_approval": bool(cfg.get("plan_approval")),
-        "ui_review": bool(cfg.get("ui_review")),
-        "split_dev": bool(cfg.get("split_dev")),
-        "steps": cfg["steps"],
-    }
-    if p == "deep":
-        out.update(dual_plan=True, plan_approval=True, ui_review=True, split_dev=True)
-    elif p == "fast":
-        out.update(plan_review=False, dual_plan=False, plan_approval=False, ui_review=False, split_dev=False)
+    presets = cfg.get("presets") if isinstance(cfg.get("presets"), dict) else {}
+    source = presets.get(p) if (p and isinstance(presets.get(p), dict)) else None
+    if source is not None:
+        steps = source.get("steps") if isinstance(source.get("steps"), dict) else cfg["steps"]
+        out = {
+            "plan_review": bool(source.get("plan_review")),
+            "dual_plan": bool(source.get("dual_plan")),
+            "plan_approval": bool(source.get("plan_approval")),
+            "ui_review": bool(source.get("ui_review")),
+            "split_dev": bool(source.get("split_dev")),
+            "codex_review": bool(source.get("codex_review")),
+            "steps": steps,
+        }
+    else:
+        steps = cfg["steps"]
+        out = {
+            "plan_review": bool(cfg.get("plan_review")),
+            "dual_plan": bool(cfg.get("dual_plan")),
+            "plan_approval": bool(cfg.get("plan_approval")),
+            "ui_review": bool(cfg.get("ui_review")),
+            "split_dev": bool(cfg.get("split_dev")),
+            "codex_review": bool(cfg.get("codex_review")),
+            "steps": steps,
+        }
+        if p == "deep":
+            out.update(
+                plan_review=True,
+                dual_plan=True,
+                plan_approval=True,
+                ui_review=True,
+                split_dev=True,
+                codex_review=True,
+            )
+        elif p == "fast":
+            out.update(
+                plan_review=False,
+                dual_plan=False,
+                plan_approval=False,
+                ui_review=False,
+                split_dev=False,
+                codex_review=False,
+            )
+    if "frontend" not in out["steps"]:
+        out["steps"] = {**out["steps"], "frontend": runners.DEFAULT_WORK_CONFIG["steps"]["frontend"]}
     return out
 
 
 def skips_codex_review(workflow: Any, team: Optional[dict] = None) -> bool:
-    """The default ``work`` workflow ends with a review that fixes what it finds; when ``split_dev``
-    is enabled (``codex_review=True`` on the team/plan), delivery runs Codex review instead."""
+    """The default ``work`` workflow ends with a review that fixes what it finds; when ``codex_review``
+    is enabled on the team/plan, delivery runs Codex 2-round review before merge."""
     if isinstance(team, dict) and isinstance(team.get("codex_review"), bool):
         return not team["codex_review"]
     return normalize_workflow(workflow) == "work"
 
+_BACKEND_ONLY_RE = re.compile(
+    r"纯后端|仅后端|不改前端|没有前端|无前端|backend[- ]only|no[- ]ui",
+    re.I,
+)
 _SKIP_DESIGN_RE = re.compile(
     r"纯后端|仅后端|不改前端|没有前端|无前端|跳过设计|不需要设计稿|不用设计稿|backend[- ]only|no[- ]ui",
     re.I,
@@ -209,12 +245,20 @@ def work_flow_label(step_cfg: dict, prefs: dict) -> str:
     return label
 
 
-def work_flow(cfg: dict, prefs: dict, *, preset: Any = "", skip_design: bool = False) -> str:
+def work_flow(
+    cfg: dict,
+    prefs: dict,
+    *,
+    preset: Any = "",
+    skip_design: bool = False,
+    backend_only: bool = False,
+) -> str:
     eff = effective_work_config(cfg, preset)
     steps_cfg = eff["steps"]
     p_lbl = work_flow_label(steps_cfg["plan"], prefs)
     pr_lbl = work_flow_label(steps_cfg["plan_review"], prefs)
     d_lbl = work_flow_label(steps_cfg["dev"], prefs)
+    f_lbl = work_flow_label(steps_cfg["frontend"], prefs)
     r_lbl = work_flow_label(steps_cfg["review"], prefs)
     parts: list[str] = []
     approve_tail = "并拍板" if eff["plan_approval"] else ""
@@ -234,18 +278,18 @@ def work_flow(cfg: dict, prefs: dict, *, preset: Any = "", skip_design: bool = F
     if eff["ui_review"] and not skip_design:
         parts.append(f"{pr_lbl} 出设计稿 → {p_lbl} 审交互 → {pr_lbl} 定稿")
     if eff["split_dev"]:
-        parts.extend([
-            f"{d_lbl} 写后端",
-            f"{r_lbl} 写前端并测试",
-            "Codex 2 轮审查",
-            "提交推送部署清理",
-        ])
+        parts.append(f"{d_lbl} 写后端")
+        if not backend_only:
+            parts.append(f"{f_lbl} 写前端")
+        parts.append(f"{r_lbl} 审阅修复")
     else:
         parts.extend([
             f"{d_lbl} 开发",
             f"{r_lbl} 审阅修复",
-            "提交推送部署清理",
         ])
+    if eff["codex_review"]:
+        parts.append("Codex 2 轮审查")
+    parts.append("提交推送部署清理")
     return " → ".join(parts)
 
 
@@ -274,7 +318,9 @@ def build_pipeline_plan(
     )
     ctx_tail = extra_feedback + input_note
     goal = user_goal(goal)
-    skip_design = bool(_SKIP_DESIGN_RE.search(goal + "\n" + (feedback or "")))
+    goal_and_fb = goal + "\n" + (feedback or "")
+    backend_only = bool(_BACKEND_ONLY_RE.search(goal_and_fb))
+    skip_design = backend_only or bool(_SKIP_DESIGN_RE.search(goal_and_fb))
     work_codex_review: Optional[bool] = None
 
     if wf == "work":
@@ -286,7 +332,8 @@ def build_pipeline_plan(
         plan_approval = eff["plan_approval"]
         ui_review_on = eff["ui_review"] and not skip_design
         split_dev = eff["split_dev"]
-        work_codex_review = bool(split_dev)
+        need_frontend = split_dev and not backend_only
+        work_codex_review = bool(eff["codex_review"])
         need_reviewer = dual_plan or plan_review_on or ui_review_on
         role_labels = {"offiagy": "AGY", "officlaude": "Claude", "codex": "Codex", "hermes": "Hermes"}
         members = [
@@ -308,13 +355,25 @@ def build_pipeline_plan(
             ),
             _work_member_spec(
                 "claude-review",
-                "前端与联调" if split_dev else "审阅修复",
+                "审阅修复",
                 "code",
-                "读后端改动与 diff，完成前端实现、联调并跑全套测试" if split_dev else "审阅开发改动、直接修掉发现的问题并跑测试",
+                "审阅前后端全部改动、直接修掉发现的问题并跑受影响测试" if split_dev else "审阅开发改动、直接修掉发现的问题并跑测试",
                 steps["review"],
                 prefs,
             ),
         ]
+        if need_frontend:
+            members.insert(
+                2,
+                _work_member_spec(
+                    "frontend-dev",
+                    "前端开发",
+                    "ui",
+                    "读后端改动与回执，按规划与设计稿完成前端实现、联调与前端测试并交回执",
+                    steps["frontend"],
+                    prefs,
+                ),
+            )
         if need_reviewer:
             members.insert(
                 1,
@@ -488,6 +547,11 @@ def build_pipeline_plan(
         else:
             pre_dev = plan_end
 
+        ship_tail = (
+            "不要 git push、不要合并主分支、不要部署（后续由交付流水线自动执行 Codex 独立审查并上线）。"
+            if work_codex_review
+            else "不要 push、不要合并主分支、不要部署——提交、推送、部署和清理由后面的发布流水线自动完成。"
+        )
         if split_dev:
             t_dev = add_task(
                 f"{labels['codex-dev']} 写成块后端并交回执",
@@ -500,19 +564,38 @@ def build_pipeline_plan(
                     "只改后端范围内的代码，不要 push、不要合并主分支、不要部署。"
                 ),
             )
+            review_dep = t_dev
+            if need_frontend:
+                t_fe = add_task(
+                    f"{labels['frontend-dev']} 读改动并写前端",
+                    "frontend-dev",
+                    [t_dev],
+                    (
+                        "1) 通读 `.halo/backend-receipt.md` 和分支 git diff，核对后端接口契约与返回结构；\n"
+                        + (
+                            "2) 按 `.halo/design-final.md` 与 `.halo/plan.md` 完成前端代码实现、前后端联调与前端定向测试；\n"
+                            if ui_review_on
+                            else "2) 按 `.halo/plan.md` 完成前端实现、前后端联调与前端定向测试（若规划确认本次无前端改动，核对接口后直接写回执说明跳过）；\n"
+                        )
+                        + "3) 将前端改动文件、测试命令及实测结果写入回执 `.halo/frontend-receipt.md`。"
+                        "不要 git push、不要合并主分支、不要部署。"
+                    ),
+                )
+                review_dep = t_fe
+            receipt_hint = (
+                "`.halo/backend-receipt.md`、`.halo/frontend-receipt.md`"
+                if need_frontend
+                else "`.halo/backend-receipt.md`"
+            )
             add_task(
-                f"{labels['claude-review']} 读改动、写前端并跑全套测试",
+                f"{labels['claude-review']} 审阅并修复问题",
                 "claude-review",
-                [t_dev],
+                [review_dep],
                 (
-                    "1) 通读 `.halo/backend-receipt.md` 和分支 git diff，核查后端代码质量与接口契约；\n"
-                    + (
-                        "2) 按 `.halo/design-final.md` 与 `.halo/plan.md` 完成前端代码实现与前后端联调；\n"
-                        if ui_review_on
-                        else "2) 按 `.halo/plan.md` 完成前端实现（如有）与前后端联调、补充修复；\n"
-                    )
-                    + "3) 自己运行全套相关定向单元测试、挂载测试或类型检查，修掉发现的问题，把实测命令与结果写入最终回答。"
-                    "不要 git push、不要合并主分支、不要部署（后续由交付流水线自动执行 Codex 独立审查并上线）。"
+                    f"通读 `.halo/plan.md`、{receipt_hint} 和当前分支相对主分支的完整 git diff，逐条对照验收标准审阅："
+                    "前后端契约一致性、正确性、遗漏的需求、回归风险、安全问题与项目约定。发现的问题由你直接修改代码修掉"
+                    "（不要只提意见），再运行受影响的定向测试确认通过。把审阅结论、修了什么、测试命令与实际结果写入 "
+                    f"`.halo/review.md` 和最终回答。{ship_tail}"
                 ),
             )
         else:
@@ -540,13 +623,15 @@ def build_pipeline_plan(
                     "通读 `.halo/plan.md`、`.halo/dev-receipt.md` 和当前分支相对主分支的完整 git diff，逐条对照验收标准审阅："
                     "正确性、遗漏的需求、回归风险、安全问题、与项目约定是否一致。发现的问题由你直接修改代码修掉"
                     "（不要只提意见），再运行受影响的测试确认通过。把审阅结论、修了什么、测试命令与实际结果写入 "
-                    "`.halo/review.md` 和最终回答。不要 push、不要合并主分支、不要部署——提交、推送、部署和清理"
-                    "由后面的发布流水线自动完成。"
+                    f"`.halo/review.md` 和最终回答。{ship_tail}"
                 ),
             )
 
         preset_tag = f" · {WORK_PRESET_LABELS[preset]}" if preset else ""
-        summary = f"工作流（/work{preset_tag}）：{work_flow(cfg, prefs, preset=preset, skip_design=skip_design)}。"
+        summary = (
+            f"工作流（/work{preset_tag}）："
+            f"{work_flow(cfg, prefs, preset=preset, skip_design=skip_design, backend_only=backend_only)}。"
+        )
     elif wf == "dev_lite":
         members = [
             _member_spec("claude-lead", "Claude 主控", "code",

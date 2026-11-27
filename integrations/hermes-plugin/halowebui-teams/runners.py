@@ -128,30 +128,74 @@ DEFAULT_ORDER = tuple(name for chain in DEFAULT_FAMILIES.values() for name in ch
 NAMED_ONLY: tuple[str, ...] = ()
 AUTO_THEN: dict[str, str] = {}
 
-WORK_STEPS = ("plan", "plan_review", "dev", "review")
+WORK_STEPS = ("plan", "plan_review", "dev", "frontend", "review")
 WORK_STEP_META = (
     {"key": "plan", "label": "规划 / 方案顾问", "hint": "单规划时读代码写 .halo/plan.md；开启双方案/UI 互审时兼任独立对比方案与交互文案审稿", "optional": False},
     {"key": "plan_review", "label": "规划审阅 / 主控", "hint": "单规划开启审阅时核查定稿；开启双方案或 UI 互审时负责摸底、双方案合成与设计定稿", "optional": True},
-    {"key": "dev", "label": "开发", "hint": "默认完成全部前后端改动与测试；开启前后端分拆时负责成块后端与单元测试", "optional": False},
-    {"key": "review", "label": "验收修复 / 前端联调", "hint": "默认审阅 diff 并直接修掉问题；开启前后端分拆时读后端改动、写前端联调并跑全套测试", "optional": False},
+    {"key": "dev", "label": "后端 / 全栈开发", "hint": "开启前后端分拆时负责成块后端与单元测试；关闭分拆时完成全部前后端改动与测试", "optional": False},
+    {"key": "frontend", "label": "前端开发", "hint": "开启前后端分拆时读后端改动与 diff，完成前端实现、联调与前端测试（纯后端需求自动跳过）", "optional": True},
+    {"key": "review", "label": "审阅修复", "hint": "通读完整前后端 diff 与开发回执，审阅并直接修掉问题、运行受影响测试确认通过", "optional": False},
 )
 WORK_EXTRA_FLAGS = (
     ("dual_plan", "双方案并行"),
     ("plan_approval", "方案拍板闸门"),
     ("ui_review", "UI 交互审稿"),
-    ("split_dev", "前后端分拆与 Codex 审查"),
+    ("split_dev", "前后端分拆开发"),
+    ("codex_review", "交付前 Codex 2 轮审查"),
 )
-DEFAULT_WORK_CONFIG = {
-    "plan_review": False,
-    "dual_plan": False,
-    "plan_approval": False,
-    "ui_review": False,
-    "split_dev": False,
-    "steps": {
+WORK_PRESET_KEYS = ("deep", "fast")
+WORK_PRESET_LABELS = {"default": "默认工作流", "deep": "深度多模型", "fast": "快速精简"}
+WORK_PRESETS_META = (
+    {"key": "default", "preset": "", "command": "/work", "label": "默认工作流",
+     "hint": "直接发 /work 需求 时使用，可自由组合模块与全部环节执行器"},
+    {"key": "deep", "preset": "deep", "command": "/work 深度", "label": "深度多模型",
+     "hint": "发 /work 深度 需求 时使用，适合复杂或高风险需求，支持独立配置"},
+    {"key": "fast", "preset": "fast", "command": "/work 快速", "label": "快速精简",
+     "hint": "发 /work 快速 需求 时使用，适合轻量改动与小修小补，支持独立配置"},
+)
+
+
+def _default_work_steps() -> dict[str, dict[str, Any]]:
+    return {
         "plan": {"runner": "offiagy", "fallback": ["agy"]},
         "plan_review": {"runner": "officlaude", "fallback": ["cchclaude", "anyclaude", "reclaude"]},
         "dev": {"runner": "codex", "fallback": []},
+        "frontend": {"runner": "offiagy", "fallback": ["agy"]},
         "review": {"runner": "officlaude", "fallback": ["cchclaude", "anyclaude", "reclaude"]},
+    }
+
+
+DEFAULT_WORK_PRESETS = {
+    "deep": {
+        "plan_review": True,
+        "dual_plan": True,
+        "plan_approval": True,
+        "ui_review": True,
+        "split_dev": True,
+        "codex_review": True,
+        "steps": _default_work_steps(),
+    },
+    "fast": {
+        "plan_review": False,
+        "dual_plan": False,
+        "plan_approval": False,
+        "ui_review": False,
+        "split_dev": False,
+        "codex_review": False,
+        "steps": _default_work_steps(),
+    },
+}
+DEFAULT_WORK_CONFIG = {
+    "plan_review": True,
+    "dual_plan": False,
+    "plan_approval": False,
+    "ui_review": False,
+    "split_dev": True,
+    "codex_review": False,
+    "steps": _default_work_steps(),
+    "presets": {
+        "deep": {**DEFAULT_WORK_PRESETS["deep"], "steps": _default_work_steps()},
+        "fast": {**DEFAULT_WORK_PRESETS["fast"], "steps": _default_work_steps()},
     },
 }
 
@@ -256,42 +300,84 @@ def _known_runners(raw: list) -> list[str]:
     return list(dict.fromkeys(n for n in raw if isinstance(n, str) and n in BY_NAME))
 
 
-def _normalize_work_config(raw: Any, *, strict: bool = False) -> dict:
+def _normalize_work_profile(
+    raw: Any,
+    default_profile: dict,
+    *,
+    strict: bool = False,
+    scope_label: str = "",
+    fallback_steps: Optional[dict] = None,
+) -> dict:
+    prefix = f"{scope_label}：" if scope_label else ""
+    if strict and not isinstance(raw, dict):
+        raise ValueError(f"{prefix}配置必须是对象")
     raw = raw if isinstance(raw, dict) else {}
     plan_review = raw.get("plan_review")
     if strict and not isinstance(plan_review, bool):
-        raise ValueError("规划后审阅开关必须为布尔值")
-    flags: dict[str, bool] = {"plan_review": plan_review is True}
+        raise ValueError(f"{prefix}规划后审阅开关必须为布尔值")
+    flags: dict[str, bool] = {
+        "plan_review": (plan_review is True) if "plan_review" in raw else bool(default_profile["plan_review"])
+    }
     for key, label in WORK_EXTRA_FLAGS:
         val = raw.get(key)
         if strict and key in raw and not isinstance(val, bool):
-            raise ValueError(f"{label}开关必须为布尔值")
-        flags[key] = val is True
+            raise ValueError(f"{prefix}{label}开关必须为布尔值")
+        flags[key] = (val is True) if key in raw else bool(default_profile[key])
     steps = raw.get("steps")
     if strict and (not isinstance(steps, dict) or set(steps) != set(WORK_STEPS)):
-        raise ValueError("请提供规划、规划审阅、开发、验收修复四个环节的配置")
+        raise ValueError(f"{prefix}请提供规划、规划审阅、后端/全栈开发、前端开发、审阅修复五个环节的配置")
     steps = steps if isinstance(steps, dict) else {}
+    step_defaults = fallback_steps if isinstance(fallback_steps, dict) else default_profile["steps"]
     result = {}
     for meta in WORK_STEP_META:
         key, label = meta["key"], meta["label"]
-        default = DEFAULT_WORK_CONFIG["steps"][key]
+        default = step_defaults.get(key) or default_profile["steps"][key]
         step = steps.get(key)
         step = step if isinstance(step, dict) else {}
         runner = step.get("runner")
         if not isinstance(runner, str) or runner not in BY_NAME:
             if strict:
-                raise ValueError(f"{label}的首选执行器不受支持")
+                raise ValueError(f"{prefix}{label}的首选执行器不受支持")
             runner = default["runner"]
         fallback = step.get("fallback")
         if not isinstance(fallback, list):
             if strict:
-                raise ValueError(f"{label}的兜底必须是列表")
-            fallback = default["fallback"]
+                raise ValueError(f"{prefix}{label}的兜底必须是列表")
+            fallback = list(default["fallback"])
         chain = [n for n in _known_runners(fallback) if n != runner]
         if strict and len(chain) != len(fallback):
-            raise ValueError(f"{label}的兜底只能包含有效且互不重复的执行器，不能包含首选执行器")
+            raise ValueError(f"{prefix}{label}的兜底只能包含有效且互不重复的执行器，不能包含首选执行器")
         result[key] = {"runner": runner, "fallback": chain}
     return {**flags, "steps": result}
+
+
+def _normalize_work_config(raw: Any, *, strict: bool = False) -> dict:
+    raw_dict = raw if isinstance(raw, dict) else {}
+    base = _normalize_work_profile(raw_dict, DEFAULT_WORK_CONFIG, strict=strict)
+    raw_presets = raw_dict.get("presets")
+    if strict and "presets" in raw_dict:
+        if not isinstance(raw_presets, dict) or set(raw_presets) != set(WORK_PRESET_KEYS):
+            raise ValueError("presets 必须包含深度（deep）和快速（fast）两档配置")
+    presets: dict[str, dict] = {}
+    for key in WORK_PRESET_KEYS:
+        default_p = DEFAULT_WORK_PRESETS[key]
+        if isinstance(raw_presets, dict) and key in raw_presets:
+            presets[key] = _normalize_work_profile(
+                raw_presets.get(key),
+                default_p,
+                strict=strict,
+                scope_label=WORK_PRESET_LABELS[key],
+                fallback_steps=base["steps"],
+            )
+        else:
+            # Inherit top-level steps when an older config has no explicit preset overrides.
+            presets[key] = _normalize_work_profile(
+                {},
+                default_p,
+                strict=False,
+                fallback_steps=base["steps"],
+            )
+    return {**base, "presets": presets}
 
 
 def work_config() -> dict:
@@ -305,6 +391,7 @@ def work_config_public() -> dict:
         "runners": [{"name": s.name, "label": s.label, "engine": s.engine, "family": s.family,
                      "note": s.note, "native": s.native} for s in SPECS],
         "steps_meta": [dict(meta) for meta in WORK_STEP_META],
+        "presets_meta": [dict(meta) for meta in WORK_PRESETS_META],
     }
 
 

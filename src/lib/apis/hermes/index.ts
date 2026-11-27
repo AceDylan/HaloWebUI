@@ -733,15 +733,20 @@ export const getHermesAgyPrefs = (token: string, opts?: { refresh?: boolean }) =
 export const saveHermesAgyPrefs = (token: string, update: HermesAgyPrefsUpdate) =>
 	agyPrefsCall(token, 'PUT', update);
 
-export type WorkStepKey = 'plan' | 'plan_review' | 'dev' | 'review';
+export type WorkStepKey = 'plan' | 'plan_review' | 'dev' | 'frontend' | 'review';
+export type WorkPresetKey = 'default' | 'deep' | 'fast';
 export type WorkStepConfig = { runner: string; fallback: string[] };
-export type WorkWorkflowConfig = {
+export type WorkProfileConfig = {
 	plan_review: boolean;
 	dual_plan: boolean;
 	plan_approval: boolean;
 	ui_review: boolean;
 	split_dev: boolean;
+	codex_review: boolean;
 	steps: Record<WorkStepKey, WorkStepConfig>;
+};
+export type WorkWorkflowConfig = WorkProfileConfig & {
+	presets: Record<'deep' | 'fast', WorkProfileConfig>;
 };
 export type WorkRunnerOption = {
 	name: string;
@@ -752,11 +757,19 @@ export type WorkRunnerOption = {
 	native?: boolean;
 };
 export type WorkStepMeta = { key: WorkStepKey; label: string; hint: string; optional?: boolean };
+export type WorkPresetMeta = {
+	key: WorkPresetKey;
+	preset: '' | 'deep' | 'fast';
+	command: string;
+	label: string;
+	hint: string;
+};
 export type HermesWorkConfigResponse = {
 	config: WorkWorkflowConfig;
 	defaults: WorkWorkflowConfig;
 	runners: WorkRunnerOption[];
 	steps_meta: WorkStepMeta[];
+	presets_meta?: WorkPresetMeta[];
 };
 
 const workConfigCall = async (

@@ -37,7 +37,7 @@ const WORK_PRESET_WORDS: readonly [string, WorkPreset][] = [
 ];
 
 export const WORK_USAGE =
-	'/work 需求：按设置执行规划 → 开发 → 审阅修复 → 自动发布；/work 深度 需求 启用多模型全流程（双方案拍板、UI 互审、前后端分拆、Codex 2 轮审查）；/work 快速 需求 走精简 3 步；/work cchclaude 需求 单次指定执行器。';
+	'/work 需求：按「默认工作流」执行；/work 深度 需求 按「深度多模型」执行；/work 快速 需求 按「快速精简」执行（均可在「设置 → Hermes 模型」中独立自定义模块与前后端执行器）；/work cchclaude 需求 单次指定执行器。';
 
 const COMMAND_RE = /^\s*\/work(?=$|[\s：:])[\s：:]*([\s\S]*)$/i;
 const RUNNER_RE = /^([A-Za-z]+)(?=$|[\s：:，,])/;

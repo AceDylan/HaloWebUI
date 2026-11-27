@@ -717,13 +717,16 @@ describe('接着上次: a follow-up goes back to the run whose report ends the c
 	});
 });
 
-describe('a new chat starts on 自动分流', () => {
-	it('sends its first message to 自动分流, then the chat keeps only the model', () => {
-		expect(NEW_CHAT_HERMES_RUN_OPTIONS).toEqual({ dispatch: 'auto', model: '', provider: '' });
-		expect(hermesOptionsForMessage(NEW_CHAT_HERMES_RUN_OPTIONS, null, '看下日志').dispatch).toBe('auto');
-		// a command typed by hand still goes to Hermes as typed
-		expect(hermesOptionsForMessage(NEW_CHAT_HERMES_RUN_OPTIONS, null, '/reclaude 修 bug').dispatch).toBe('');
-		expect(hermesOptionsToKeep(NEW_CHAT_HERMES_RUN_OPTIONS).dispatch).toBe('');
-		expect(hermesRunOptionsForRequest(NEW_CHAT_HERMES_RUN_OPTIONS)).toEqual({ dispatch: 'auto' });
+describe('a new chat defaults to direct Hermes', () => {
+	it('sends its first message directly to Hermes, while manual 自动分流 remains single-message', () => {
+		expect(NEW_CHAT_HERMES_RUN_OPTIONS).toEqual({ dispatch: '', model: '', provider: '' });
+		expect(hermesOptionsForMessage(NEW_CHAT_HERMES_RUN_OPTIONS, null, '看下日志').dispatch).toBe('');
+		expect(hermesRunOptionsForRequest(NEW_CHAT_HERMES_RUN_OPTIONS)).toBeNull();
+		// Manual 自动分流 still dispatches that message, respects /commands, and resets afterward.
+		const autoOptions = { ...NEW_CHAT_HERMES_RUN_OPTIONS, dispatch: 'auto' as const };
+		expect(hermesOptionsForMessage(autoOptions, null, '看下日志').dispatch).toBe('auto');
+		expect(hermesOptionsForMessage(autoOptions, null, '/reclaude 修 bug').dispatch).toBe('');
+		expect(hermesOptionsToKeep(autoOptions).dispatch).toBe('');
+		expect(hermesRunOptionsForRequest(autoOptions)).toEqual({ dispatch: 'auto' });
 	});
 });

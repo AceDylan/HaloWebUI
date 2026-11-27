@@ -4115,7 +4115,7 @@
 			webSearchMode = getPreferredDefaultWebSearchMode();
 			webSearchModeSource = 'default';
 			restoreChatSessionState('');
-			// restoreChatSessionState clears per-message dispatch via applyComposerState; keep new-chat 自动分流.
+			// restoreChatSessionState clears per-message dispatch via applyComposerState; apply new-chat default dispatch.
 			hermesOptions = { ...hermesOptions, dispatch: NEW_CHAT_HERMES_RUN_OPTIONS.dispatch };
 			if (reasoningEffort) {
 				params.reasoning_effort = reasoningEffort;

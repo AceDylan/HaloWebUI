@@ -161,13 +161,11 @@ export const EMPTY_HERMES_RUN_OPTIONS: HermesRunOptions = {
 };
 
 /**
- * A new chat starts on 自动分流: its first message goes to Hermes, 精答, 讨论 or 协作台, whichever
- * fits (Hermes for everyday questions and small jobs on this machine). Like any 派发方式 it is for
- * that one message; later ones go to Hermes directly unless another choice is picked.
+ * A new chat defaults to direct Hermes (empty dispatch). Users can still pick 自动分流 or any
+ * other 派发方式 for a message when needed.
  */
 export const NEW_CHAT_HERMES_RUN_OPTIONS: HermesRunOptions = {
-	...EMPTY_HERMES_RUN_OPTIONS,
-	dispatch: 'auto'
+	...EMPTY_HERMES_RUN_OPTIONS
 };
 
 // cchclaude: the reclaude runner driving Claude Code through the user's own cch hub;

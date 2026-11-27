@@ -2,7 +2,7 @@
 
 Hermes 对话里输入框旁的「Hermes」按钮打开「派发给谁」。上面几排是**谁来做**：直接（Hermes 自己）、reclaude、cchclaude、anyclaude、官方 Claude（officlaude）、codex、agy；下面一排是**换一种方式问**：精答、讨论、协作台——这条消息不走 Hermes，交给对应的模式，结果发回这个对话。
 
-「换一种方式问」最上面是**自动分流**：按问题在 Hermes、精答、讨论、协作台里选一个（什么时候交给谁见 [auto-routing-workbench.md](auto-routing-workbench.md#什么时候交给谁)），选中 Hermes 时同一条回复直接变成 Hermes 的回答。**新对话默认选中自动分流**（只管第一条消息）。
+「换一种方式问」最上面是**自动分流**：按问题在 Hermes、精答、讨论、协作台里选一个（什么时候交给谁见 [auto-routing-workbench.md](auto-routing-workbench.md#什么时候交给谁)），选中 Hermes 时同一条回复直接变成 Hermes 的回答。新对话默认「直接」交给 Hermes，需要时可手动选择自动分流。
 
 都只对下一条消息生效，发出后回到「直接」；消息自己以 `/命令` 开头时以消息为准，交给 Hermes（对 runner 一直如此，现在对精答、讨论、协作台也一样）。选了这三种时，「Hermes 用的模型」那一行会写明这条消息不经过 Hermes 的模型。
 

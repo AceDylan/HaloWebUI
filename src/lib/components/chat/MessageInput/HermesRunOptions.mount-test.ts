@@ -301,6 +301,9 @@ describe('HermesRunOptions', () => {
 			)
 		).toBe('true');
 		expect(Boolean(target.querySelector('[data-halo-hermes-options-summary]'))).toBe(false);
+		const autoChoice = panel.querySelector('[data-halo-hermes-dispatch="auto"]') as any;
+		expect(autoChoice.getAttribute('aria-checked')).toBe('false');
+		expect(autoChoice.getAttribute('title')).not.toContain('新对话默认用它');
 	});
 
 	describe('placement', () => {

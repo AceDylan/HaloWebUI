@@ -672,6 +672,9 @@ def test_work_command_parses_deep_and_fast_presets_with_runners(linked, monkeypa
     assert parse("深度 cchclaude 给 HaloWebUI 加按钮") == ("给 HaloWebUI 加按钮", {"claude": "cchclaude"}, "deep")
     assert parse("cchclaude 快速：修个文案") == ("修个文案", {"claude": "cchclaude"}, "fast")
     assert parse("深度优化接口") == ("深度优化接口", {}, "")
+    # 「精简」「完整」常作动词，不能被当成档位吞掉
+    assert parse("精简 设置页代码") == ("精简 设置页代码", {}, "")
+    assert parse("完整 重写 README") == ("完整 重写 README", {}, "")
 
     calls = []
     monkeypatch.setattr(

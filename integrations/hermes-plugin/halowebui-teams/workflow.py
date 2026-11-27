@@ -47,52 +47,24 @@ def normalize_work_preset(value: Any) -> str:
 
 
 def effective_work_config(cfg: dict, preset: Any = "") -> dict:
-    """Resolve the active /work profile (default / deep / fast) without hard-coded overrides."""
+    """Resolve the active /work profile (default / deep / fast) from the saved config. A deep / fast
+    profile missing from *cfg* takes its switches from ``runners.DEFAULT_WORK_PRESETS`` and the top-level
+    runners, as ``runners._normalize_work_config`` does (``runners.work_config()`` always fills both in,
+    so this only guards hand-built configs)."""
     p = normalize_work_preset(preset)
-    presets = cfg.get("presets") if isinstance(cfg.get("presets"), dict) else {}
-    source = presets.get(p) if (p and isinstance(presets.get(p), dict)) else None
-    if source is not None:
+    source, steps = cfg, None
+    if p:
+        presets = cfg.get("presets") if isinstance(cfg.get("presets"), dict) else {}
+        if isinstance(presets.get(p), dict):
+            source = presets[p]
+        else:
+            source, steps = runners.DEFAULT_WORK_PRESETS[p], cfg["steps"]
+    if steps is None:
         steps = source.get("steps") if isinstance(source.get("steps"), dict) else cfg["steps"]
-        out = {
-            "plan_review": bool(source.get("plan_review")),
-            "dual_plan": bool(source.get("dual_plan")),
-            "plan_approval": bool(source.get("plan_approval")),
-            "ui_review": bool(source.get("ui_review")),
-            "split_dev": bool(source.get("split_dev")),
-            "codex_review": bool(source.get("codex_review")),
-            "steps": steps,
-        }
-    else:
-        steps = cfg["steps"]
-        out = {
-            "plan_review": bool(cfg.get("plan_review")),
-            "dual_plan": bool(cfg.get("dual_plan")),
-            "plan_approval": bool(cfg.get("plan_approval")),
-            "ui_review": bool(cfg.get("ui_review")),
-            "split_dev": bool(cfg.get("split_dev")),
-            "codex_review": bool(cfg.get("codex_review")),
-            "steps": steps,
-        }
-        if p == "deep":
-            out.update(
-                plan_review=True,
-                dual_plan=True,
-                plan_approval=True,
-                ui_review=True,
-                split_dev=True,
-                codex_review=True,
-            )
-        elif p == "fast":
-            out.update(
-                plan_review=False,
-                dual_plan=False,
-                plan_approval=False,
-                ui_review=False,
-                split_dev=False,
-                codex_review=False,
-            )
-    if "frontend" not in out["steps"]:
-        out["steps"] = {**out["steps"], "frontend": runners.DEFAULT_WORK_CONFIG["steps"]["frontend"]}
+    out = {key: bool(source.get(key)) for key in ("plan_review", *(k for k, _ in runners.WORK_EXTRA_FLAGS))}
+    out["steps"] = steps
+    if "frontend" not in steps:
+        out["steps"] = {**steps, "frontend": runners.DEFAULT_WORK_CONFIG["steps"]["frontend"]}
     return out
 
 

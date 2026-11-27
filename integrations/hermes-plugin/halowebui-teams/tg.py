@@ -444,8 +444,8 @@ async def _team_command(source: Any, owner: str, args: str, event: Any) -> None:
 
 _WORK_RUNNER_RE = re.compile(r"([A-Za-z]+)(?=$|[\s：:，,])")
 _WORK_PRESET_WORDS = (
-    ("深度多模型", "deep"), ("多模型研发", "deep"), ("多模型", "deep"), ("深度", "deep"), ("完整", "deep"), ("deep", "deep"),
-    ("快速精简", "fast"), ("快速", "fast"), ("精简", "fast"), ("fast", "fast"),
+    ("深度多模型", "deep"), ("多模型研发", "deep"), ("多模型", "deep"), ("深度", "deep"), ("deep", "deep"),
+    ("快速精简", "fast"), ("快速", "fast"), ("fast", "fast"),
 )
 
 

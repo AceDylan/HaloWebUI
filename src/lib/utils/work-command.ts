@@ -28,11 +28,9 @@ const WORK_PRESET_WORDS: readonly [string, WorkPreset][] = [
 	['多模型研发', 'deep'],
 	['多模型', 'deep'],
 	['深度', 'deep'],
-	['完整', 'deep'],
 	['deep', 'deep'],
 	['快速精简', 'fast'],
 	['快速', 'fast'],
-	['精简', 'fast'],
 	['fast', 'fast']
 ];
 

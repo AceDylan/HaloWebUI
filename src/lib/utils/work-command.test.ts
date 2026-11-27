@@ -48,6 +48,15 @@ describe('parseWorkCommand', () => {
 			goal: '深度优化一下接口',
 			runnerPrefs: {}
 		});
+		// 「精简」「完整」常作动词，不能被当成档位吞掉
+		expect(parseWorkCommand('/work 精简 设置页代码')).toEqual({
+			goal: '精简 设置页代码',
+			runnerPrefs: {}
+		});
+		expect(parseWorkCommand('/work 完整 重写 README')).toEqual({
+			goal: '完整 重写 README',
+			runnerPrefs: {}
+		});
 	});
 
 	it('is not a command otherwise', () => {

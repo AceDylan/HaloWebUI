@@ -523,3 +523,16 @@ def test_work_modular_flags_persisted_onto_team_board_for_deploy_review(pkg, tea
     team_rec = pkg.common.read_team(created["board"])
     assert team_rec["codex_review"] is True
     assert workflow.skips_codex_review(team_rec["workflow"], team_rec) is False
+
+
+def test_effective_work_config_missing_preset_uses_default_switches_and_top_level_runners(pkg):
+    import halowebui_teams.workflow as wf
+    steps = {k: {"runner": "officlaude", "fallback": []} for k in pkg.runners.WORK_STEPS}
+    cfg = {"plan_review": False, "dual_plan": False, "plan_approval": False, "ui_review": False,
+           "split_dev": False, "codex_review": False, "steps": steps}
+    for preset in ("deep", "fast"):
+        eff = wf.effective_work_config(cfg, preset)
+        expected = pkg.runners.DEFAULT_WORK_PRESETS[preset]
+        assert {k: v for k, v in eff.items() if k != "steps"} == {k: v for k, v in expected.items() if k != "steps"}
+        assert eff["steps"] is steps
+    assert wf.effective_work_config(cfg, "")["split_dev"] is False

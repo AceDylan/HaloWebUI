@@ -220,6 +220,12 @@ describe('Sidebar responsive layout (Fold6 / tablet / desktop)', () => {
 		expect(backdrop).toBeTruthy();
 		expect(sidebar.contains(backdrop!)).toBe(false);
 
+		// mousedown alone must not dismiss: closing on mousedown removes the
+		// backdrop before the click lands, so the tap would hit the page under it.
+		backdrop!.dispatchEvent(new (window as any).Event('mousedown', { bubbles: true }));
+		await sleep(30);
+		expect(sidebar.getAttribute('data-state')).toBe('overlay');
+
 		// Click backdrop -> collapses back to rail
 		backdrop!.click();
 		await sleep(30);
@@ -243,6 +249,31 @@ describe('Sidebar responsive layout (Fold6 / tablet / desktop)', () => {
 		await sleep(30);
 		expect(sidebar.getAttribute('data-sidebar-mode')).toBe('foldable-rail');
 		expect(sidebar.getAttribute('data-rail-density')).toBe('compact');
+	});
+
+	it('ignores visualViewport shrink (on-screen keyboard) so the sidebar search box stays mounted', async () => {
+		const root = await mountSidebar({ width: 1194, height: 834 });
+		const sidebar = root.querySelector('#sidebar') as HTMLElement;
+		expect(sidebar.getAttribute('data-sidebar-mode')).toBe('desktop');
+		expect(sidebar.getAttribute('data-compact-expanded')).toBe('false');
+		expect(root.querySelector('#chat-search')).toBeTruthy();
+
+		const previous = (window as any).visualViewport;
+		(window as any).visualViewport = {
+			width: 1194,
+			height: 420,
+			addEventListener: () => {},
+			removeEventListener: () => {}
+		};
+		try {
+			window.dispatchEvent(new Event('resize'));
+			await sleep(30);
+			expect(sidebar.getAttribute('data-compact-expanded')).toBe('false');
+			expect(sidebar.getAttribute('data-rail-density')).toBe('compact');
+			expect(root.querySelector('#chat-search')).toBeTruthy();
+		} finally {
+			(window as any).visualViewport = previous;
+		}
 	});
 
 	it('uses tight rail density on ultra-short foldable viewports (835x580)', async () => {

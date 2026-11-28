@@ -168,6 +168,22 @@ describe('SidebarLibrary', () => {
 		await sleep(20);
 		expect(document.body.querySelector('[data-sidebar-library-popover]')).toBeFalsy();
 		expect(trigger!.getAttribute('aria-expanded')).toBe('false');
+
+		// Arrow keys move within the menu without closing it; Tab closes it (the
+		// menu sits at the end of <body>, so Tab must not walk out of the page).
+		trigger!.click();
+		await sleep(20);
+		const down = new (window as any).Event('keydown', { bubbles: true }) as any;
+		down.key = 'ArrowDown';
+		window.dispatchEvent(down);
+		await sleep(20);
+		expect(document.body.querySelector('[data-sidebar-library-popover]')).toBeTruthy();
+		const tab = new (window as any).Event('keydown', { bubbles: true, cancelable: true }) as any;
+		tab.key = 'Tab';
+		window.dispatchEvent(tab);
+		await sleep(20);
+		expect(document.body.querySelector('[data-sidebar-library-popover]')).toBeFalsy();
+		expect(trigger!.getAttribute('aria-expanded')).toBe('false');
 	});
 
 	it('renders a direct icon link for 1 library permission and nothing for 0 in compact mode', async () => {

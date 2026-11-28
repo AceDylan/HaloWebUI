@@ -125,16 +125,15 @@
 		sidebarStyle = fromQuery ?? 'flat';
 	}
 
+	// Layout viewport only. visualViewport shrinks when the on-screen keyboard
+	// opens (and on pinch-zoom); following it would flip density / compact mode
+	// while typing and unmount the sidebar search box under the user's finger.
 	const readViewport = () => {
 		if (!browser) return { width: 1280, height: 900 };
-		const width = Math.round(window.innerWidth || 0);
-		const visualHeight = window.visualViewport?.height;
-		const height = Math.round(
-			typeof visualHeight === 'number' && visualHeight > 0
-				? Math.min(window.innerHeight || visualHeight, visualHeight)
-				: window.innerHeight || 0
-		);
-		return { width, height };
+		return {
+			width: Math.round(window.innerWidth || 0),
+			height: Math.round(window.innerHeight || 0)
+		};
 	};
 
 	const initialViewport = readViewport();
@@ -852,7 +851,6 @@
 		});
 
 		window.addEventListener('resize', onViewportResize);
-		window.visualViewport?.addEventListener('resize', onViewportResize);
 
 		window.addEventListener('keydown', onKeyDown);
 		window.addEventListener('keyup', onKeyUp);
@@ -878,7 +876,6 @@
 		unsubscribeShowSidebar = null;
 
 		window.removeEventListener('resize', onViewportResize);
-		window.visualViewport?.removeEventListener('resize', onViewportResize);
 
 		window.removeEventListener('keydown', onKeyDown);
 		window.removeEventListener('keyup', onKeyUp);
@@ -949,9 +946,6 @@
 			: ''}fixed inset-0 z-40 w-full h-full flex justify-center overflow-hidden overscroll-contain {$mobile
 			? 'md:hidden bg-black/60'
 			: 'bg-black/20'}"
-		on:mousedown={() => {
-			showSidebar.set(false);
-		}}
 		on:click={() => {
 			showSidebar.set(false);
 		}}

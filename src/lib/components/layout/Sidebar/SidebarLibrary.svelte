@@ -68,12 +68,33 @@
 		closePopover();
 	};
 
+	const menuItems = (): HTMLElement[] =>
+		Array.from(popoverEl?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? []);
+
 	const handleKeyDown = (event: KeyboardEvent) => {
-		if (event.key === 'Escape') {
+		if (event.key === 'Escape' || event.key === 'Tab') {
+			// The menu lives at the end of <body>; Tab would walk out of the page
+			// instead of back to the rail, so close and return focus to the trigger.
+			event.preventDefault();
 			event.stopPropagation();
 			closePopover();
 			triggerEl?.focus();
+			return;
 		}
+		if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
+		const items = menuItems();
+		if (!items.length) return;
+		event.preventDefault();
+		const current = items.indexOf(document.activeElement as HTMLElement);
+		const next =
+			event.key === 'Home'
+				? 0
+				: event.key === 'End'
+					? items.length - 1
+					: event.key === 'ArrowDown'
+						? (current + 1) % items.length
+						: (current - 1 + items.length) % items.length;
+		items[next]?.focus();
 	};
 
 	const handleResize = () => {
@@ -109,6 +130,8 @@
 		await tick();
 		if (popoverOpen) {
 			updatePopoverPosition();
+			const items = menuItems();
+			(items.find((item) => item.getAttribute('aria-current') === 'page') ?? items[0])?.focus();
 		}
 	};
 

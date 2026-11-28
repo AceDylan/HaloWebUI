@@ -389,9 +389,9 @@
 						<!-- Windows or unavailable fallback -->
 						{#if isAvailable}
 							<div class="mt-3 space-y-2.5">
-								{#each windows as window, wIdx (`${window.key}-${wIdx}`)}
-									{@const metrics = computeWindowMetrics(window.utilization)}
-									{@const countdown = formatResetCountdown(window.resets_at)}
+								{#each windows as quotaWindow, wIdx (`${quotaWindow.key}-${wIdx}`)}
+									{@const metrics = computeWindowMetrics(quotaWindow.utilization)}
+									{@const countdown = formatResetCountdown(quotaWindow.resets_at)}
 									{@const isAlert = metrics.level === 'low' || metrics.level === 'empty'}
 									<div
 										role={isAlert ? 'alert' : undefined}
@@ -400,12 +400,12 @@
 											: metrics.level === 'low'
 												? 'bg-orange-500/[0.06] ring-1 ring-inset ring-orange-500/20 dark:bg-orange-400/[0.08] dark:ring-orange-400/25'
 												: 'bg-gray-50/75 dark:bg-white/[0.025]'}"
-										data-halo-quota-window={window.key}
+										data-halo-quota-window={quotaWindow.key}
 									>
 										<div class="flex items-baseline justify-between gap-2">
 											<div class="flex min-w-0 items-center gap-1.5">
 												<span class="truncate text-[13px] font-medium text-gray-700 dark:text-gray-200">
-													{window.label}
+													{quotaWindow.label}
 												</span>
 												{#if metrics.level === 'empty'}
 													<span
@@ -433,7 +433,7 @@
 
 										<div class="halo-quota-bar-track mt-1.5 h-2 w-full overflow-hidden rounded-full">
 											<div
-												class="h-full rounded-full transition-[width] duration-300 ease-out {barFillClass(
+												class="h-full rounded-full transition-[width] duration-300 ease-out motion-reduce:transition-none {barFillClass(
 													metrics.level,
 													meta.theme
 												)}"
@@ -448,8 +448,8 @@
 											class="mt-1.5 flex items-center justify-between gap-2 text-[11px] tabular-nums text-gray-400 dark:text-gray-500"
 										>
 											<span class="truncate">
-												{#if window.resets_at}
-													重置：{formatQuotaShortTime(window.resets_at)}{#if countdown}（{countdown}）{/if}
+												{#if quotaWindow.resets_at}
+													重置：{formatQuotaShortTime(quotaWindow.resets_at)}{#if countdown}（{countdown}）{/if}
 												{:else}
 													重置时间未知
 												{/if}

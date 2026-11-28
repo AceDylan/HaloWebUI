@@ -15,7 +15,11 @@ def _git(cwd, *args):
 
 @pytest.fixture
 def repo(tmp_path):
-    path = tmp_path / "myapp"
+    return _make_repo(tmp_path, "myapp")
+
+
+def _make_repo(tmp_path, name):
+    path = tmp_path / name
     path.mkdir()
     _git(path, "init", "-q", "-b", "main")
     _git(path, "config", "user.email", "me@example.com")
@@ -24,7 +28,7 @@ def repo(tmp_path):
     (path / "app.py").write_text("print('v1')\n")
     _git(path, "add", "-A")
     _git(path, "commit", "-q", "-m", "init")
-    origin = tmp_path / "origin.git"
+    origin = tmp_path / ("origin.git" if name == "myapp" else f"{name}-origin.git")
     subprocess.run(["git", "init", "-q", "--bare", str(origin)], check=True)
     _git(path, "remote", "add", "origin", str(origin))
     return path
@@ -109,6 +113,63 @@ def test_custom_config_ship_merges_pushes_runs_command_and_cleans_up(pkg, team_i
     assert open(os.path.join(ws, ".halo", "conclusion.md")).read() == "完整结论"
     ch = projects.changes(team)
     assert ch["available"] is False and ch["deploy"]["status"] == "succeeded"
+
+
+def test_builtin_profile_with_missing_entry_point_is_blocked_not_push_only(pkg, tmp_path, monkeypatch):
+    import halowebui_teams.deploy as deploy
+
+    monkeypatch.setenv("HALO_TEAMS_DEPLOY_CONFIG", str(tmp_path / "absent.json"))
+    halo = _make_repo(tmp_path, "HaloWebUI")
+    script = tmp_path / "deploy.sh"
+    monkeypatch.setattr(deploy, "HALOWEBUI_DEPLOY_SCRIPT", str(script))
+
+    missing = deploy.profile_for(str(halo))
+    assert missing["wait_ci"] and missing["configured"]
+    assert str(script) in missing["blocked"] and "不会只合并推送" in missing["blocked"]
+    assert deploy.public_profile(str(halo))["blocked"] == missing["blocked"]
+
+    script.write_text("#!/bin/sh\n")
+    ready = deploy.profile_for(str(halo))
+    assert not ready["blocked"] and "blocked" not in deploy.public_profile(str(halo))
+    assert ready["command"] == f"sh {script} {{short_sha}}"
+
+    # Projects without a built-in recipe keep the plain push-only pipeline.
+    plain = deploy.profile_for(str(_make_repo(tmp_path, "otherapp")))
+    assert not plain["configured"] and not plain["blocked"]
+
+
+def test_missing_entry_point_refuses_manual_and_skips_auto_ship(pkg, team_id, plan_dict, tmp_path, monkeypatch):
+    import halowebui_teams.bridge as bridge
+    import halowebui_teams.deploy as deploy
+    import halowebui_teams.projects as projects
+
+    monkeypatch.setenv("HALO_TEAMS_DEPLOY_CONFIG", str(tmp_path / "absent.json"))
+    monkeypatch.setattr(deploy, "HALOWEBUI_DEPLOY_SCRIPT", str(tmp_path / "gone" / "deploy.sh"))
+    halo = _make_repo(tmp_path, "HaloWebUI")
+    first = _create(pkg, team_id, plan_dict, halo, auto_deploy=True)
+    slug = pkg.common.board_slug(team_id)
+    ws = pkg.common.read_team(slug)["workspace"]
+    _finish(pkg, slug, first["tasks"]["T1"], lambda: open(os.path.join(ws, "app.py"), "w").write("print('v2')\n"))
+    bridge._commit_finished(slug, pkg.common.read_team(slug))
+    pkg.common.update_team(slug, lambda rec: rec.update({
+        "state": "completed",
+        "conclusion": {"status": "ready", "generated_at": 100, "acceptance": {"status": "ready", "verdict": "met"}},
+    }))
+    base_head = _git(halo, "rev-parse", "main")
+
+    with pytest.raises(projects.ProjectError) as err:
+        deploy.start(slug, by="user")
+    assert err.value.status == 409 and "部署入口" in err.value.message
+
+    assert deploy.tick_board(slug, pkg.common.read_team(slug)) is False
+    dep = pkg.common.read_team(slug)["project"]["deploy"]
+    assert dep["status"] == "skipped" and "部署入口" in dep["error"]
+    # Nothing merged or pushed, team branch kept, and the same attempt is not re-skipped every tick.
+    assert _git(halo, "rev-parse", "main") == base_head
+    assert _git(halo, "ls-remote", "origin") == ""
+    assert _git(halo, "branch", "--list", f"halo/{slug}")
+    assert deploy.tick_board(slug, pkg.common.read_team(slug)) is False
+    assert pkg.common.read_team(slug)["project"]["deploy"]["finished_at"] == dep["finished_at"]
 
 
 def test_ci_failure_stops_before_deploy_and_keeps_branch_for_retry(pkg, team_id, plan_dict, repo, tmp_path, monkeypatch):

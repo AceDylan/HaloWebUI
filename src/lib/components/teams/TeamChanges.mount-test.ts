@@ -182,6 +182,30 @@ describe('ChangesView', () => {
 		);
 	});
 
+	it('disables one-click deploy and says why when the deploy entry point is missing', async () => {
+		api.getTeamChanges.mockResolvedValue({
+			...CHANGES,
+			auto_deploy: true,
+			deploy_profile: {
+				configured: true,
+				label: 'HaloWebUI（GitHub CI 构建镜像 → 拉取部署）',
+				has_ci: true,
+				has_command: true,
+				cleanup: true,
+				blocked: '部署入口 /root/halowebui/deploy.sh 不存在，已停止推送部署（不会只合并推送）'
+			}
+		});
+		await mount({ teamId: 'team-1', phase: 'completed' });
+		const button = target.querySelector('[data-changes-deploy]') as HTMLButtonElement;
+		expect(button.disabled).toBe(true);
+		expect(target.querySelector('[data-changes-deploy-blocked]').textContent).toContain(
+			'/root/halowebui/deploy.sh 不存在'
+		);
+		button.click();
+		await sleep(10);
+		expect(api.deployTeamChanges).not.toHaveBeenCalled();
+	});
+
 	it('triggers one-click deploy after confirm, shows progress steps, CI link and auto-deploy note', async () => {
 		api.getTeamChanges.mockResolvedValue({
 			...CHANGES,

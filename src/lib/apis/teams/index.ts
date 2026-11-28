@@ -263,6 +263,8 @@ export type DeployProfile = {
 	has_verify?: boolean;
 	codex_review?: boolean;
 	cleanup: boolean;
+	/** Set when the project's deploy entry point is missing: shipping is refused instead of push-only. */
+	blocked?: string;
 };
 
 export type DeployStep = {

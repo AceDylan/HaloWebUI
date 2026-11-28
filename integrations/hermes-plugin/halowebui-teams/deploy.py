@@ -6,8 +6,9 @@ enabled and the team changed files without failing acceptance) or on demand (the
 button in the 变更 tab, or Telegram's 「🚀 推送部署」 button).
 
 Project-specific deploy recipes come from ``~/.hermes/halo-teams-deploy.json`` (overrideable via
-``HALO_TEAMS_DEPLOY_CONFIG``), falling back to built-in host recipes when the corresponding local
-scripts/files exist, and finally to a safe merge → push → cleanup pipeline for any git repository.
+``HALO_TEAMS_DEPLOY_CONFIG``), then built-in host recipes matched by project name (when a matched
+recipe's local entry point is missing, shipping is refused rather than silently downgraded to
+push-only), and finally a safe merge → push → cleanup pipeline for any other git repository.
 Credentials in git/command output are always redacted.
 """
 
@@ -61,20 +62,23 @@ def _load_config() -> dict:
     return data if isinstance(data, dict) else {}
 
 
-def _builtin_profiles() -> list[tuple[Callable[[str], bool], dict]]:
-    """Built-in deploy profiles for repositories on this host (active only when their local
-    deployment entry points exist; always overridable in ~/.hermes/halo-teams-deploy.json)."""
+HALOWEBUI_DEPLOY_SCRIPT = "/root/halowebui/deploy.sh"
+
+
+def _builtin_profiles() -> list[tuple[Callable[[str], bool], Callable[[str], list[str]], dict]]:
+    """Built-in deploy profiles for repositories on this host: (project matcher, required entry
+    points, recipe). Always overridable in ~/.hermes/halo-teams-deploy.json."""
     return [
         (
-            lambda top: os.path.basename(top) == "HaloWebUI"
-            and os.path.isfile("/root/work/halo-hermes-autopilot/deploy.sh"),
+            lambda top: os.path.basename(top) == "HaloWebUI",
+            lambda top: [HALOWEBUI_DEPLOY_SCRIPT],
             {
                 "configured": True,
                 "label": "HaloWebUI（GitHub CI 构建镜像 → 拉取部署）",
                 "wait_ci": True,
                 "ci_workflow": "Docker Image CI",
                 "ci_timeout": 1800,
-                "command": "sh /root/work/halo-hermes-autopilot/deploy.sh {short_sha}",
+                "command": f"sh {HALOWEBUI_DEPLOY_SCRIPT} {{short_sha}}",
                 "verify_command": "test \"$(docker inspect -f '{{.State.Health.Status}}' halowebui 2>/dev/null)\" = healthy && curl -sf http://127.0.0.1:3000/health >/dev/null && echo 'HaloWebUI 线上健康检查通过'",
                 "timeout": 600,
                 "cleanup": True,
@@ -82,8 +86,8 @@ def _builtin_profiles() -> list[tuple[Callable[[str], bool], dict]]:
             },
         ),
         (
-            lambda top: os.path.basename(top) == "AICheckIn"
-            and os.path.isfile("/root/vps/vpsctl.py"),
+            lambda top: os.path.basename(top) == "AICheckIn",
+            lambda top: ["/root/vps/vpsctl.py"],
             {
                 "configured": True,
                 "label": "AICheckIn / Hub（hk-vps 拉取并重建容器）",
@@ -99,8 +103,8 @@ def _builtin_profiles() -> list[tuple[Callable[[str], bool], dict]]:
             },
         ),
         (
-            lambda top: os.path.basename(top).lower() == "webobsidian"
-            and os.path.isfile("/opt/webobsidian/docker-compose.yml"),
+            lambda top: os.path.basename(top).lower() == "webobsidian",
+            lambda top: ["/opt/webobsidian/docker-compose.yml"],
             {
                 "configured": True,
                 "label": "WebObsidian（GitHub CI 构建镜像 → 拉取部署）",
@@ -114,8 +118,8 @@ def _builtin_profiles() -> list[tuple[Callable[[str], bool], dict]]:
             },
         ),
         (
-            lambda top: os.path.basename(top) == "cf-server-monitor"
-            and os.path.isfile(os.path.join(top, ".github", "workflows", "deploy.yml")),
+            lambda top: os.path.basename(top) == "cf-server-monitor",
+            lambda top: [os.path.join(top, ".github", "workflows", "deploy.yml")],
             {
                 "configured": True,
                 "label": "CF-Server-Monitor（触发 GitHub Actions 部署）",
@@ -152,6 +156,7 @@ def _normalize_profile(raw: dict, default_label: str) -> dict:
         "restart_gateway_paths": [
             str(p).strip() for p in (raw.get("restart_gateway_paths") or []) if str(p or "").strip()
         ],
+        "blocked": str(raw.get("blocked") or "").strip()[:300],
     }
 
 
@@ -166,12 +171,22 @@ def profile_for(repo_path: Optional[str]) -> dict:
         if key and isinstance(by_proj.get(key), dict):
             return _normalize_profile(by_proj[key], f"{name or '项目'} 自定义部署")
     if real:
-        for matcher, spec in _builtin_profiles():
+        for matcher, requires, spec in _builtin_profiles():
             try:
-                if matcher(real):
-                    return _normalize_profile(spec, spec.get("label") or name)
+                if not matcher(real):
+                    continue
+                missing = [p for p in requires(real) if not os.path.isfile(p)]
             except OSError:
                 continue
+            profile = _normalize_profile(spec, spec.get("label") or name)
+            if missing:
+                # Never degrade silently to push-only: merging and pushing without the real deploy
+                # step leaves production on the old build while the team reports success.
+                profile["blocked"] = (
+                    f"部署入口 {', '.join(missing)} 不存在，已停止推送部署（不会只合并推送）；"
+                    f"恢复该文件，或在 {_config_path()} 里为这个项目写明部署方式"
+                )[:300]
+            return profile
     return _normalize_profile(
         {"configured": False, "label": "合并到主分支、推送 origin 并清理团队分支", "cleanup": True},
         "合并到主分支、推送 origin 并清理团队分支",
@@ -189,6 +204,7 @@ def public_profile(repo_path: Optional[str]) -> dict:
         "has_verify": bool(p["verify_command"]),
         "codex_review": bool(p["codex_review"]),
         "cleanup": bool(p["cleanup"]),
+        **({"blocked": p["blocked"]} if p.get("blocked") else {}),
     }
 
 
@@ -762,6 +778,8 @@ def start(slug: str, *, by: str = "user", cleanup: Optional[bool] = None, auto_k
     if project.get("discarded_at") and not project.get("merged_at"):
         raise projects.ProjectError(409, "团队分支已删除，无法推送部署")
     profile = profile_for(repo)
+    if profile.get("blocked"):
+        raise projects.ProjectError(409, profile["blocked"])
     do_cleanup = profile["cleanup"] if cleanup is None else bool(cleanup)
     if codex_review is None:
         from .workflow import skips_codex_review
@@ -810,6 +828,31 @@ def start(slug: str, *, by: str = "user", cleanup: Optional[bool] = None, auto_k
     return entry
 
 
+def _skip_auto(slug: str, team: dict, profile: dict, auto_key: str, reason: str) -> None:
+    """Record a skipped auto-deploy (once per attempt key) and tell the user why."""
+    project = team.get("project") or {}
+    touched = projects.changed_paths(team) or []
+    _update_deploy(slug, lambda d: (d.clear(), d.update({
+        "status": "skipped",
+        "by": "auto",
+        "step": "skipped",
+        "steps": _initial_steps(profile, profile["cleanup"]),
+        "started_at": now(),
+        "finished_at": now(),
+        "base_branch": project.get("base_branch") or "",
+        "cleanup": profile["cleanup"],
+        "error": reason,
+        "profile_label": profile["label"],
+        "auto_key": auto_key,
+        "touched_files": touched[:80],
+    })))
+    if vault_archive.is_eligible(team) and os.environ.get("HALO_TEAMS_VAULT_ARCHIVE_SYNC") != "1":
+        threading.Thread(target=_notify_finished, args=(slug,), name=f"halo-deploy-notice-{slug[-8:]}",
+                         daemon=True).start()
+    else:
+        _notify_finished(slug)
+
+
 def tick_board(slug: str, team: dict) -> bool:
     """Bridge loop hook: automatically ship a completed project team when ``auto_deploy`` is on."""
     if team.get("state") != "completed" or not team.get("auto_deploy"):
@@ -838,29 +881,14 @@ def tick_board(slug: str, team: dict) -> bool:
         return False
 
     # Acceptance gate: if the lead explicitly judged the goal unmet, pause auto-deploy safely.
+    profile = profile_for(project.get("path"))
     if acceptance.get("status") == "ready" and acceptance.get("verdict") == "unmet":
-        profile = profile_for(project.get("path"))
-        reason = "负责人验收未通过（目标未达成），已跳过自动推送部署；检查后可在「变更」里手动一键推送部署"
-        touched = projects.changed_paths(team) or []
-        _update_deploy(slug, lambda d: (d.clear(), d.update({
-            "status": "skipped",
-            "by": "auto",
-            "step": "skipped",
-            "steps": _initial_steps(profile, profile["cleanup"]),
-            "started_at": now(),
-            "finished_at": now(),
-            "base_branch": project.get("base_branch") or "",
-            "cleanup": profile["cleanup"],
-            "error": reason,
-            "profile_label": profile["label"],
-            "auto_key": auto_key,
-            "touched_files": touched[:80],
-        })))
-        if vault_archive.is_eligible(team) and os.environ.get("HALO_TEAMS_VAULT_ARCHIVE_SYNC") != "1":
-            threading.Thread(target=_notify_finished, args=(slug,), name=f"halo-deploy-notice-{slug[-8:]}",
-                             daemon=True).start()
-        else:
-            _notify_finished(slug)
+        _skip_auto(slug, team, profile, auto_key,
+                   "负责人验收未通过（目标未达成），已跳过自动推送部署；检查后可在「变更」里手动一键推送部署")
+        return False
+    # Deploy entry point missing: stop instead of merging/pushing without the real deploy step.
+    if profile.get("blocked"):
+        _skip_auto(slug, team, profile, auto_key, profile["blocked"])
         return False
 
     try:

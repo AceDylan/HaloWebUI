@@ -17,7 +17,7 @@
 2. **构建镜像**：推送到 `origin/main`，由 GitHub Actions `Docker Image CI`（`.github/workflows/docker-image.yml`）自动执行测试并构建推送 `dylanha009/halowebui:custom`。
 3. **部署上线**（仅在用户明确要求「按发布流程做」或明确授权部署时）：
    - `gh run watch -R AceDylan/HaloWebUI <RUN_ID> --exit-status --interval 15` 等待 CI 全绿；
-   - `sh /root/work/halo-hermes-autopilot/deploy.sh <short_sha>` 拉取镜像并核验 `health=healthy` 与 `WEBUI_BUILD_VERSION`；
+   - `sh /root/halowebui/deploy.sh <short_sha>` 拉取镜像并核验 `health=healthy` 与 `WEBUI_BUILD_VERSION`（该脚本在 cold-archive 保护名单里；不要把部署入口放进 `/root/work/*`，那里超过 14 天未改会被冷归档删除）；
    - 核验 `/health` 与目标路由返回 HTTP 200 及容器内构建产物，清理本次临时产物并确保 `git status` 干净。
 
 ## 折叠屏 / 小平板（vivo X Fold6 内屏）适配

@@ -324,7 +324,7 @@
 							<button
 								type="button"
 								class="tm-btn-primary !py-1.5 !text-xs"
-								disabled={!!busy}
+								disabled={!!busy || !!deployProfile?.blocked}
 								on:click={() => {
 									deployCleanup = deployProfile?.cleanup ?? true;
 									deployReview = deployProfile?.codex_review ?? true;
@@ -342,6 +342,14 @@
 									? ' → 自动拉取部署'
 									: ''} → 清理分支{deployProfile?.has_verify ? ' → 核实线上' : ''}
 							</span>
+							{#if deployProfile?.blocked}
+								<p
+									class="w-full text-[11px] text-amber-700 dark:text-amber-300"
+									data-changes-deploy-blocked
+								>
+									{deployProfile.blocked}
+								</p>
+							{/if}
 						</div>
 					{/if}
 				</div>

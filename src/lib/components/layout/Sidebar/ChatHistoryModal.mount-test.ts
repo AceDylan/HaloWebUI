@@ -61,4 +61,29 @@ describe('ChatHistoryModal', () => {
 		await sleep(20);
 		expect(nav.goto).toHaveBeenCalledWith('/discuss/d1');
 	}, 90_000);
+
+	it('switches directly to Archived Chats from the header shortcut', async () => {
+		const { get, writable } = await import('svelte/store');
+		const stores = await import('$lib/stores');
+		stores.showArchivedChats.set(false);
+		const i18n = writable({ t: (s: string) => s, language: 'zh-CN', resolvedLanguage: 'zh-CN' });
+		const { default: Modal } = await import('./ChatHistoryModal.svelte');
+		target = document.createElement('div');
+		document.body.appendChild(target);
+		app = new Modal({
+			target,
+			props: { show: true },
+			context: new Map<string, any>([['i18n', i18n]])
+		});
+
+		const archivedBtn = await waitFor(
+			() => document.body.querySelector('[data-halo-open-archived-from-history]') as HTMLButtonElement | null
+		);
+		expect(archivedBtn).toBeTruthy();
+		archivedBtn.click();
+		await sleep(30);
+
+		expect(get(stores.showArchivedChats)).toBe(true);
+		expect(document.body.querySelector('[data-halo-open-archived-from-history]')).toBeFalsy();
+	}, 90_000);
 });

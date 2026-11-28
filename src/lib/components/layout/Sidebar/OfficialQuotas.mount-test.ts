@@ -137,6 +137,7 @@ let unsubShow: (() => void) | null = null;
 const mountPair = async ({
 	role = 'admin',
 	compact = false,
+	inline = false,
 	sidebarStyle = 'flat' as 'flat' | 'card',
 	isMobile = false,
 	onOpen = vi.fn()
@@ -167,7 +168,7 @@ const mountPair = async ({
 
 	buttonApp = new OfficialQuotasButton({
 		target: btnHost,
-		props: { compact, sidebarStyle, buttonClass: 'test-btn', onOpen }
+		props: { compact, inline, sidebarStyle, buttonClass: 'test-btn', onOpen }
 	});
 	modalApp = new OfficialQuotasModal({
 		target: modalHost,
@@ -305,6 +306,26 @@ describe('OfficialQuotasButton & OfficialQuotasModal', () => {
 		await sleep(30);
 
 		expect(onOpen).toHaveBeenCalledTimes(1);
+		expect(api.getOfficialQuotas).toHaveBeenCalledTimes(1);
+		expect(getModal()).toBeTruthy();
+	});
+
+	it('opens from inline expanded footer pill', async () => {
+		api.getOfficialQuotas.mockResolvedValueOnce(SAMPLE_RESPONSE);
+		const onOpen = vi.fn();
+		const { stores, btnHost } = await mountPair({ inline: true, onOpen });
+
+		const trigger = btnHost.querySelector(
+			'[data-halo-official-quotas-trigger="expanded"]'
+		) as HTMLButtonElement;
+		expect(trigger).toBeTruthy();
+		expect(trigger.classList.contains('halo-quota-trigger--inline')).toBe(true);
+		expect(trigger.textContent).toContain('额度');
+		trigger.click();
+		await sleep(30);
+
+		expect(onOpen).toHaveBeenCalledTimes(1);
+		expect(get(stores.showOfficialQuotas)).toBe(true);
 		expect(api.getOfficialQuotas).toHaveBeenCalledTimes(1);
 		expect(getModal()).toBeTruthy();
 	});

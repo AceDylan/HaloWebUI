@@ -12,6 +12,10 @@
 	export let value = '';
 	export let showClearButton = false;
 	export let uiStyle: 'flat' | 'card' = 'flat';
+	export let autoFocus = false;
+	export let dense = false;
+
+	let inputElement: HTMLInputElement | null = null;
 
 	$: shellClass =
 		uiStyle === 'card'
@@ -86,9 +90,18 @@
 	const documentClickHandler = (e) => {
 		const searchContainer = document.getElementById('search-container');
 		const chatSearch = document.getElementById('chat-search');
+		if (!searchContainer || !chatSearch) {
+			return;
+		}
 
-		if (!searchContainer.contains(e.target) && !chatSearch.contains(e.target)) {
-			if (e.target.id.startsWith('search-tag-') || e.target.id.startsWith('search-option-')) {
+		const target = e.target as HTMLElement | null;
+		if (!target) {
+			return;
+		}
+
+		if (!searchContainer.contains(target) && !chatSearch.contains(target)) {
+			const targetId = target.id ?? '';
+			if (targetId.startsWith('search-tag-') || targetId.startsWith('search-option-')) {
 				return;
 			}
 			focused = false;
@@ -97,6 +110,12 @@
 
 	onMount(() => {
 		document.addEventListener('click', documentClickHandler);
+		if (autoFocus) {
+			inputElement?.focus();
+			void tick().then(() => {
+				inputElement?.focus();
+			});
+		}
 	});
 
 	onDestroy(() => {
@@ -104,7 +123,10 @@
 	});
 </script>
 
-<div class="px-2 mb-1.5 mt-2 flex justify-center space-x-2 relative z-10" id="search-container">
+<div
+	class="px-2 {dense ? 'my-1' : 'mb-1.5 mt-2'} flex justify-center space-x-2 relative z-10"
+	id="search-container"
+>
 	<div class={shellClass} id="chat-search">
 		<div class="self-center pl-2.5 py-2 text-gray-400 dark:text-gray-500">
 			<svg
@@ -122,6 +144,7 @@
 		</div>
 
 		<input
+			bind:this={inputElement}
 			class={inputClass}
 			placeholder={placeholder ? placeholder : $i18n.t('Search')}
 			bind:value
@@ -133,6 +156,15 @@
 				initTags();
 			}}
 			on:keydown={(e) => {
+				if (e.key === 'Escape') {
+					e.stopPropagation();
+					focused = false;
+					if (!value) {
+						dispatch('escape');
+					}
+					return;
+				}
+
 				if (e.key === 'Enter') {
 					if (filteredTags.length > 0) {
 						const tagElement = document.getElementById(`search-tag-${selectedIdx}`);

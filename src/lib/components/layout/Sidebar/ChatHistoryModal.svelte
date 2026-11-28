@@ -9,12 +9,13 @@
 	import { CHAT_KIND_LABEL, CHAT_KIND_TITLE, chatHref } from '$lib/utils/chat-kind';
 
 	import { getChatList, getChatListBySearchText } from '$lib/apis/chats';
-	import { folders as folderStore, pendingMessageReveal } from '$lib/stores';
+	import { folders as folderStore, pendingMessageReveal, showArchivedChats } from '$lib/stores';
 	import { snippetParts } from '$lib/utils/search-snippet';
 
 	import Modal from '$lib/components/common/Modal.svelte';
 	import Loader from '$lib/components/common/Loader.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
+	import ArchiveBox from '$lib/components/icons/ArchiveBox.svelte';
 
 	const i18n = getContext('i18n');
 
@@ -97,25 +98,40 @@
 	<div>
 		<div class=" flex justify-between dark:text-gray-300 px-5 pt-4 pb-1">
 			<div class=" text-lg font-medium self-center">{$i18n.t('Chat History')}</div>
-			<button
-				class="self-center"
-				on:click={() => {
-					show = false;
-				}}
-			>
-				<svg
-					xmlns="http://www.w3.org/2000/svg"
-					viewBox="0 0 20 20"
-					fill="currentColor"
-					class="w-5 h-5"
+			<div class="flex items-center gap-2">
+				<button
+					type="button"
+					class="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-medium text-gray-600 transition hover:bg-gray-100 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-850 dark:hover:text-gray-100"
+					data-halo-open-archived-from-history
+					on:click={() => {
+						show = false;
+						showArchivedChats.set(true);
+					}}
 				>
-					<path
-						fill-rule="evenodd"
-						d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z"
-						clip-rule="evenodd"
-					/>
-				</svg>
-			</button>
+					<ArchiveBox className="size-3.5" strokeWidth="2" />
+					<span>{$i18n.t('Archived Chats')}</span>
+				</button>
+				<button
+					class="self-center"
+					aria-label={$i18n.t('Close')}
+					on:click={() => {
+						show = false;
+					}}
+				>
+					<svg
+						xmlns="http://www.w3.org/2000/svg"
+						viewBox="0 0 20 20"
+						fill="currentColor"
+						class="w-5 h-5"
+					>
+						<path
+							fill-rule="evenodd"
+							d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z"
+							clip-rule="evenodd"
+						/>
+					</svg>
+				</button>
+			</div>
 		</div>
 
 		<div class="flex flex-col w-full px-5 pb-4 dark:text-gray-200">

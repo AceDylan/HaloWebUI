@@ -2,7 +2,7 @@
 	import type { Writable } from 'svelte/store';
 	import { browser } from '$app/environment';
 	import { toast } from 'svelte-sonner';
-	import { goto } from '$app/navigation';
+	import { afterNavigate, goto } from '$app/navigation';
 	import { page } from '$app/stores';
 	import {
 		user,
@@ -51,6 +51,11 @@
 	import { MODELS_ERROR_TOAST_ID, describeModelsError, ensureModels } from '$lib/services/models';
 	import { getTimeRange } from '$lib/utils';
 	import { getModelChatDisplayName, getModelDisplayParts } from '$lib/utils/model-display';
+	import {
+		resolveInitialAssistantSectionOpen,
+		resolveInitialSidebarOpen,
+		resolveSidebarLayout
+	} from '$lib/utils/sidebar-layout';
 
 	import ArchivedChatsModal from './Sidebar/ArchivedChatsModal.svelte';
 	import HermesSessionsModal from './Sidebar/HermesSessionsModal.svelte';
@@ -75,7 +80,6 @@
 	import ChatBubblePlus from '../icons/ChatBubblePlus.svelte';
 	import ChatBubbles from '../icons/ChatBubbles.svelte';
 	import Search from '../icons/Search.svelte';
-	import ArchiveBox from '../icons/ArchiveBox.svelte';
 	import FolderIcon from '../icons/Folder.svelte';
 	import FolderOpen from '../icons/FolderOpen.svelte';
 	import SidebarModes from './Sidebar/SidebarModes.svelte';
@@ -121,41 +125,72 @@
 		sidebarStyle = fromQuery ?? 'flat';
 	}
 
+	const readViewport = () => {
+		if (!browser) return { width: 1280, height: 900 };
+		const width = Math.round(window.innerWidth || 0);
+		const visualHeight = window.visualViewport?.height;
+		const height = Math.round(
+			typeof visualHeight === 'number' && visualHeight > 0
+				? Math.min(window.innerHeight || visualHeight, visualHeight)
+				: window.innerHeight || 0
+		);
+		return { width, height };
+	};
+
+	const initialViewport = readViewport();
+	let viewportWidth = initialViewport.width;
+	let viewportHeight = initialViewport.height;
+	const initialLayout = resolveSidebarLayout(initialViewport);
+
+	$: layout = resolveSidebarLayout({ width: viewportWidth, height: viewportHeight });
+	$: foldableOverlay = !$mobile && layout.mode === 'foldable-rail';
+
 	$: iconButtonClass =
 		sidebarStyle === 'card'
-			? 'group flex items-center justify-center w-11 h-11 rounded-2xl bg-white/85 dark:bg-gray-900/55 border border-gray-200/70 dark:border-gray-800/70 shadow-sm hover:bg-white dark:hover:bg-gray-900/75 hover:shadow-md transition active:scale-[0.98]'
-			: 'group flex items-center justify-center w-10 h-10 rounded-xl bg-transparent text-gray-600 dark:text-gray-300 hover:bg-[var(--sb-row-hover)] hover:text-gray-900 dark:hover:text-white transition active:scale-[0.96]';
+			? 'halo-rail-btn group flex items-center justify-center rounded-2xl bg-white/85 dark:bg-gray-900/55 border border-gray-200/70 dark:border-gray-800/70 shadow-sm hover:bg-white dark:hover:bg-gray-900/75 hover:shadow-md transition active:scale-[0.98]'
+			: 'halo-rail-btn group flex items-center justify-center rounded-xl bg-transparent text-gray-600 dark:text-gray-300 hover:bg-[var(--sb-row-hover)] hover:text-gray-900 dark:hover:text-white transition active:scale-[0.96]';
+
+	$: headerIconButtonClass =
+		sidebarStyle === 'card'
+			? 'group flex items-center justify-center w-9 h-9 rounded-2xl bg-white/85 dark:bg-gray-900/55 border border-gray-200/70 dark:border-gray-800/70 shadow-sm hover:bg-white dark:hover:bg-gray-900/75 hover:shadow-md transition active:scale-[0.98]'
+			: 'group flex items-center justify-center w-8 h-8 rounded-xl bg-transparent text-gray-600 dark:text-gray-300 hover:bg-[var(--sb-row-hover)] hover:text-gray-900 dark:hover:text-white transition active:scale-[0.96]';
 
 	$: actionItemClass =
 		sidebarStyle === 'card'
-			? 'flex items-center gap-2.5 rounded-2xl bg-white/70 dark:bg-gray-900/45 border border-gray-200/60 dark:border-gray-800/60 shadow-sm hover:bg-white/85 dark:hover:bg-gray-900/60 hover:shadow-md transition w-full px-3 py-2'
+			? 'flex items-center gap-2 rounded-2xl bg-white/70 dark:bg-gray-900/45 border border-gray-200/60 dark:border-gray-800/60 shadow-sm hover:bg-white/85 dark:hover:bg-gray-900/60 hover:shadow-md transition w-full px-3 py-1.5'
 			: 'halo-nav-row';
 
 	$: userItemClass =
 		sidebarStyle === 'card'
-			? 'flex items-center rounded-2xl bg-white/70 dark:bg-gray-900/45 border border-gray-200/60 dark:border-gray-800/60 hover:bg-white/85 dark:hover:bg-gray-900/60 transition w-full px-2 py-2'
-			: 'halo-user-row';
+			? 'flex items-center rounded-2xl bg-white/70 dark:bg-gray-900/45 border border-gray-200/60 dark:border-gray-800/60 hover:bg-white/85 dark:hover:bg-gray-900/60 transition w-full px-2 py-1.5'
+			: 'halo-user-row halo-user-row--compact';
 
 	$: avatarContainerClass =
 		sidebarStyle === 'card'
-			? 'shrink-0 w-9 h-9 rounded-full overflow-hidden ring-2 ring-gray-200 dark:ring-gray-700 group-hover:ring-blue-300 dark:group-hover:ring-blue-600 transition'
-			: 'shrink-0 w-8 h-8 rounded-full overflow-hidden ring-1 ring-gray-200 dark:ring-gray-700 group-hover:ring-blue-300 dark:group-hover:ring-blue-600 transition';
+			? 'halo-rail-avatar shrink-0 w-8 h-8 rounded-full overflow-hidden ring-2 ring-gray-200 dark:ring-gray-700 group-hover:ring-blue-300 dark:group-hover:ring-blue-600 transition'
+			: 'halo-rail-avatar shrink-0 w-8 h-8 rounded-full overflow-hidden ring-1 ring-gray-200 dark:ring-gray-700 group-hover:ring-blue-300 dark:group-hover:ring-blue-600 transition';
 
 	$: brandLinkClass =
 		sidebarStyle === 'card'
-			? 'flex items-center gap-2 px-2 py-1.5 rounded-2xl bg-white/60 dark:bg-gray-900/40 border border-gray-200/60 dark:border-gray-800/60 hover:bg-white/80 dark:hover:bg-gray-900/55 transition'
+			? 'flex items-center gap-2 px-2 py-1 rounded-2xl bg-white/60 dark:bg-gray-900/40 border border-gray-200/60 dark:border-gray-800/60 hover:bg-white/80 dark:hover:bg-gray-900/55 transition'
 			: 'halo-brand';
 
 	let navElement;
 	let sidebarScrollContainerElement: HTMLDivElement | null = null;
 	let search = '';
+	let searchExpanded = false;
 
 	let shiftKey = false;
 
 	let selectedChatId = null;
 	let showDropdown = false;
 	let showPinnedChat = browser ? localStorage?.showPinnedChat !== 'false' : true;
-	let showAssistantSection = browser ? localStorage?.showAssistantSection !== 'false' : true;
+	let showAssistantSection = browser
+		? resolveInitialAssistantSectionOpen(
+				localStorage?.getItem?.('showAssistantSection') ?? localStorage?.showAssistantSection,
+				initialLayout.compactExpanded
+			)
+		: true;
 	// Folders start collapsed so the chat list is on the first screen; opening
 	// the section is remembered.
 	let showFolderSection = browser ? localStorage?.showFolderSection === 'true' : false;
@@ -170,17 +205,37 @@
 
 	// Collapsed rail (desktop): the pointer resting on it opens the full
 	// sidebar as an overlay — no layout shift, nothing persisted — until it
-	// leaves. Off on touch, on mobile, and when turned off in Settings.
+	// leaves. Off on touch, on mobile, on foldable-rail, and when turned off in Settings.
 	let peek = false;
 	let peekTimer: ReturnType<typeof setTimeout> | null = null;
 	const PEEK_OPEN_DELAY_MS = 220;
 	const PEEK_CLOSE_DELAY_MS = 160;
-	$: peekEnabled = !$mobile && !$showSidebar && ($settings?.sidebarPeekOnHover ?? true);
+	$: peekEnabled =
+		!$mobile && !foldableOverlay && !$showSidebar && ($settings?.sidebarPeekOnHover ?? true);
 	$: if (!peekEnabled && peek) {
 		peek = false;
 	}
+	$: isFloatingPanel = peek || (foldableOverlay && $showSidebar);
 	// What the template renders: the full sidebar or the 60px rail.
 	$: expanded = $showSidebar || $mobile || peek;
+	$: showSearchInput = !layout.compactExpanded || searchExpanded || search.trim().length > 0;
+	$: if (!expanded && searchExpanded && search.trim() === '') {
+		searchExpanded = false;
+	}
+	$: if (
+		foldableOverlay &&
+		$showSidebar &&
+		($showOfficialQuotas ||
+			$showArchivedChats ||
+			$showTaskInbox ||
+			$showBookmarks ||
+			$showHermesSessions ||
+			$showCommandPalette ||
+			showChatHistoryModal ||
+			showCreateChannel)
+	) {
+		showSidebar.set(false);
+	}
 
 	const clearPeekTimer = () => {
 		if (peekTimer) {
@@ -211,6 +266,27 @@
 		clearPeekTimer();
 		peek = false;
 		showSidebar.set(!$showSidebar);
+	};
+
+	const closeIfFloating = () => {
+		if ($mobile || foldableOverlay) {
+			clearPeekTimer();
+			peek = false;
+			if ($showSidebar) {
+				showSidebar.set(false);
+			}
+		}
+	};
+
+	const toggleSearchInput = async () => {
+		if (showSearchInput && search.trim() === '') {
+			searchExpanded = false;
+			return;
+		}
+		searchExpanded = true;
+		await tick();
+		const input = document.querySelector('#chat-search input') as HTMLInputElement | null;
+		input?.focus();
 	};
 
 	const toggleShowAllChats = async () => {
@@ -289,9 +365,7 @@
 		await chatId.set('');
 		await goto('/');
 
-		if ($mobile) {
-			showSidebar.set(false);
-		}
+		closeIfFloating();
 	};
 
 	// Going to one of the chat's modes (讨论台 / 协作台 / 生图工作台) or to 助手 / 提示词 leaves the open chat.
@@ -299,9 +373,7 @@
 		selectedChatId = null;
 		chatId.set('');
 		selectedAssistantScene.set(null);
-		if ($mobile) {
-			showSidebar.set(false);
-		}
+		closeIfFloating();
 	};
 
 	const startSidebarNewChat = async () => {
@@ -313,9 +385,7 @@
 			await goto('/');
 		}
 
-		if ($mobile) {
-			showSidebar.set(false);
-		}
+		closeIfFloating();
 	};
 
 	const initChannels = async () => {
@@ -644,9 +714,13 @@
 		if (e.key === 'Shift') {
 			shiftKey = true;
 		}
-		if (e.key === 'Escape' && peek) {
-			clearPeekTimer();
-			peek = false;
+		if (e.key === 'Escape') {
+			if (peek) {
+				clearPeekTimer();
+				peek = false;
+			} else if (foldableOverlay && $showSidebar) {
+				showSidebar.set(false);
+			}
 		}
 	};
 
@@ -671,21 +745,72 @@
 		}
 	};
 
+	const getStoredAssistantSection = () =>
+		localStorage?.getItem?.('showAssistantSection') ?? localStorage?.showAssistantSection;
+
+	let lastPersistDesktop: boolean | null = null;
+	let unsubscribeMobile: (() => void) | null = null;
+	let unsubscribeShowSidebar: (() => void) | null = null;
+
+	const applyViewport = (forceSync = false) => {
+		const next = readViewport();
+		viewportWidth = next.width;
+		viewportHeight = next.height;
+		const nextLayout = resolveSidebarLayout(next);
+		const crossedDesktopBoundary =
+			lastPersistDesktop !== null &&
+			lastPersistDesktop !== nextLayout.persistDesktopPreference;
+		lastPersistDesktop = nextLayout.persistDesktopPreference;
+
+		const storedAssistant = getStoredAssistantSection();
+		if (storedAssistant !== 'true' && storedAssistant !== 'false') {
+			showAssistantSection = resolveInitialAssistantSectionOpen(
+				storedAssistant,
+				nextLayout.compactExpanded
+			);
+		}
+
+		if (forceSync || crossedDesktopBoundary) {
+			const targetOpen = resolveInitialSidebarOpen(nextLayout, localStorage.sidebar);
+			if ($showSidebar !== targetOpen) {
+				showSidebar.set(targetOpen);
+			}
+		}
+	};
+
+	const onViewportResize = () => {
+		applyViewport(false);
+	};
+
+	if (typeof afterNavigate === 'function') {
+		afterNavigate(() => {
+			clearPeekTimer();
+			peek = false;
+			if (foldableOverlay && $showSidebar) {
+				showSidebar.set(false);
+			}
+		});
+	}
+
 	onMount(async () => {
 		showPinnedChat = localStorage?.showPinnedChat ? localStorage.showPinnedChat === 'true' : true;
-		showAssistantSection = localStorage?.showAssistantSection
-			? localStorage.showAssistantSection === 'true'
-			: true;
 		showFolderSection = localStorage?.showFolderSection === 'true';
+		showAssistantSection = resolveInitialAssistantSectionOpen(
+			getStoredAssistantSection(),
+			resolveSidebarLayout(readViewport()).compactExpanded
+		);
 
-		// Desktop preference: expanded unless the person collapsed it. A
-		// phone-sized viewport starts hidden and never writes the preference,
-		// so going back to a desktop-sized window restores the desktop choice
-		// instead of forcing the sidebar open.
-		const isNarrowViewport = () => window.innerWidth < 768;
-		const desktopSidebarPreference = () => localStorage.sidebar !== 'false';
+		// Desktop (>= 900px) restores and persists localStorage.sidebar.
+		// Mobile (< 768px) and foldable-rail (768-899px) start collapsed and never
+		// overwrite the desktop preference, so switching back to desktop restores it.
+		applyViewport(true);
 
-		mobile.subscribe((value) => {
+		unsubscribeMobile = mobile.subscribe((value) => {
+			const current = readViewport();
+			viewportWidth = current.width;
+			viewportHeight = current.height;
+			const currentLayout = resolveSidebarLayout(current);
+
 			if (value) {
 				if ($showSidebar) {
 					showSidebar.set(false);
@@ -693,42 +818,41 @@
 				return;
 			}
 
-			const navElement = document.getElementsByTagName('nav')[0];
-			if (navElement) {
-				navElement.style['-webkit-app-region'] = 'drag';
+			const navEl = document.getElementsByTagName('nav')[0];
+			if (navEl) {
+				navEl.style['-webkit-app-region'] = 'drag';
 			}
 
-			if ($showSidebar !== desktopSidebarPreference()) {
-				showSidebar.set(desktopSidebarPreference());
+			const targetOpen = resolveInitialSidebarOpen(currentLayout, localStorage.sidebar);
+			if ($showSidebar !== targetOpen) {
+				showSidebar.set(targetOpen);
 			}
 		});
 
-		showSidebar.set(isNarrowViewport() ? false : desktopSidebarPreference());
-		showSidebar.subscribe((value) => {
-			if (!isNarrowViewport()) {
+		unsubscribeShowSidebar = showSidebar.subscribe((value) => {
+			const currentLayout = resolveSidebarLayout(readViewport());
+			if (currentLayout.persistDesktopPreference) {
 				localStorage.sidebar = value;
 			}
 
 			// nav element is not available on the first render
-			const navElement = document.getElementsByTagName('nav')[0];
+			const navEl = document.getElementsByTagName('nav')[0];
 
-			if (navElement) {
+			if (navEl) {
 				if ($mobile) {
 					if (!value) {
-						navElement.style['-webkit-app-region'] = 'drag';
+						navEl.style['-webkit-app-region'] = 'drag';
 					} else {
-						navElement.style['-webkit-app-region'] = 'no-drag';
+						navEl.style['-webkit-app-region'] = 'no-drag';
 					}
 				} else {
-					navElement.style['-webkit-app-region'] = 'drag';
+					navEl.style['-webkit-app-region'] = 'drag';
 				}
 			}
 		});
 
-		await initChannels();
-		// The chat list itself is loaded by the `$selectedAssistantScene` block
-		// above, which runs on init.
-		await loadAssistantScenes();
+		window.addEventListener('resize', onViewportResize);
+		window.visualViewport?.addEventListener('resize', onViewportResize);
 
 		window.addEventListener('keydown', onKeyDown);
 		window.addEventListener('keyup', onKeyUp);
@@ -740,10 +864,22 @@
 		window.addEventListener('blur', onBlur);
 		document.addEventListener('visibilitychange', onVisibilityChange);
 
+		await initChannels();
+		// The chat list itself is loaded by the `$selectedAssistantScene` block
+		// above, which runs on init.
+		await loadAssistantScenes();
 	});
 
 	onDestroy(() => {
 		clearPeekTimer();
+		unsubscribeMobile?.();
+		unsubscribeMobile = null;
+		unsubscribeShowSidebar?.();
+		unsubscribeShowSidebar = null;
+
+		window.removeEventListener('resize', onViewportResize);
+		window.visualViewport?.removeEventListener('resize', onViewportResize);
+
 		window.removeEventListener('keydown', onKeyDown);
 		window.removeEventListener('keyup', onKeyUp);
 
@@ -753,7 +889,6 @@
 		window.removeEventListener('focus', onFocus);
 		window.removeEventListener('blur', onBlur);
 		document.removeEventListener('visibilitychange', onVisibilityChange);
-
 	});
 </script>
 
@@ -805,13 +940,19 @@
 
 <!-- svelte-ignore a11y-no-static-element-interactions -->
 
-<!-- 移动端遮罩层 -->
-{#if $showSidebar && $mobile}
+<!-- 移动端 / 折叠屏浮层遮罩 -->
+{#if $showSidebar && ($mobile || foldableOverlay)}
 	<div
-		class=" {$isApp
-			? ' ml-[4.5rem] md:ml-0'
-			: ''} fixed md:hidden z-40 top-0 right-0 left-0 bottom-0 bg-black/60 w-full min-h-screen h-screen flex justify-center overflow-hidden overscroll-contain"
+		data-halo-sidebar-backdrop
+		class="{$isApp
+			? 'ml-[4.5rem] md:ml-0 '
+			: ''}fixed inset-0 z-40 w-full h-full flex justify-center overflow-hidden overscroll-contain {$mobile
+			? 'md:hidden bg-black/60'
+			: 'bg-black/20'}"
 		on:mousedown={() => {
+			showSidebar.set(false);
+		}}
+		on:click={() => {
 			showSidebar.set(false);
 		}}
 	/>
@@ -822,42 +963,55 @@
 	id="sidebar"
 	role="navigation"
 	aria-label={$i18n.t('Chat sidebar')}
-	class="h-screen max-h-[100dvh] min-h-screen select-none
+	class="h-screen max-h-[100dvh] select-none
 		{$isApp ? `ml-[4.5rem] md:ml-0 ` : ''}
 		shrink-0 {$mobile ? 'bg-gray-50' : 'bg-gray-50/80 backdrop-blur-xl'} border-r border-gray-200/50 dark:border-white/[0.08] text-gray-900 dark:text-gray-200
-		text-sm fixed md:relative z-50 top-0 left-0 {peek
+		text-sm fixed md:relative z-50 top-0 left-0 {isFloatingPanel
 		? 'overflow-visible'
 		: 'overflow-hidden'} transform-gpu transition-[width,max-width,transform,visibility] duration-300 ease-in-out
 		will-change-transform {!$mobile
-		? $showSidebar
+		? $showSidebar && !foldableOverlay
 			? 'w-[260px] max-w-[260px] translate-x-0'
 			: 'w-[60px] max-w-[60px] translate-x-0'
 		: $showSidebar
 			? 'w-[260px] max-w-[260px] translate-x-0'
 			: 'w-[260px] max-w-[260px] -translate-x-full invisible'}"
 	style="will-change: {$mobile ? 'transform' : 'width, transform'};"
-	data-state={$showSidebar ? 'expanded' : peek ? 'peek' : $mobile ? 'hidden' : 'collapsed'}
+	data-state={foldableOverlay && $showSidebar
+		? 'overlay'
+		: $showSidebar
+			? 'expanded'
+			: peek
+				? 'peek'
+				: $mobile
+					? 'hidden'
+					: 'collapsed'}
+	data-sidebar-mode={layout.mode}
+	data-rail-density={layout.railDensity}
+	data-compact-expanded={layout.compactExpanded ? 'true' : 'false'}
 	data-halo-drawer={$mobile ? 'true' : undefined}
 	data-style={sidebarStyle}
 	on:pointerenter={onSidebarPointerEnter}
 	on:pointerleave={onSidebarPointerLeave}
 >
-	<!-- While peeking, the panel floats over the page at full width; the rail
-	     keeps its 60px in the layout underneath. -->
+	<!-- While peeking or in foldable overlay, the panel floats over the page at full width;
+	     the rail keeps its 60px in the layout underneath. -->
 	<div
-		class="py-2 flex flex-col h-screen max-h-[100dvh] overflow-x-hidden z-50 transition-all duration-300 ease-in-out
-			{expanded ? 'w-[260px]' : 'w-[60px]'} {peek
+		class="{!expanded && layout.railDensity === 'tight'
+			? 'py-1'
+			: 'py-1.5'} flex flex-col h-full max-h-[100dvh] min-h-0 overflow-x-hidden z-50 transition-all duration-300 ease-in-out
+			{expanded ? 'w-[260px]' : 'w-[60px]'} {isFloatingPanel
 			? 'absolute top-0 left-0 border-r border-gray-200/70 bg-gray-50 shadow-2xl dark:border-white/[0.08] dark:bg-[var(--surface-raised)]'
 			: ''}"
 	>
-		<!-- 顶栏：Logo + 折叠按钮 -->
+		<!-- 顶栏：Logo + 搜索切换(紧凑态) + 折叠按钮 -->
 		<div
 			class="shrink-0 flex items-center justify-between px-2 {expanded
 				? ''
-				: 'flex-col gap-2'}"
+				: 'flex-col'}"
 		>
 			{#if expanded}
-				<!-- 展开状态：Logo左边，折叠按钮右边 -->
+				<!-- 展开状态：Logo左边，操作按钮右边 -->
 				<a
 					href="/?fresh-chat=true"
 					class={brandLinkClass}
@@ -865,9 +1019,7 @@
 						selectedChatId = null;
 						selectedAssistantScene.set(null);
 						await goto('/?fresh-chat=true');
-						if ($mobile) {
-							showSidebar.set(false);
-						}
+						closeIfFloating();
 					}}
 					draggable="false"
 				>
@@ -890,37 +1042,56 @@
 					</svg>
 					<span class="halo-wordmark">Halo<span>WebUI</span></span>
 				</a>
-				<Tooltip
-					content="{$i18n.t($showSidebar ? 'Collapse sidebar' : 'Expand sidebar')} · {$i18n.t(
-						'Toggle with Ctrl+Shift+S'
-					)}"
-				>
-					<button
-						id="sidebar-collapse-button"
-						class={iconButtonClass}
-						on:click={toggleSidebar}
-						aria-label={$i18n.t($showSidebar ? 'Collapse sidebar' : 'Expand sidebar')}
+				<div class="flex items-center gap-1">
+					{#if layout.compactExpanded}
+						<Tooltip content={$i18n.t('Search')}>
+							<button
+								type="button"
+								class="{headerIconButtonClass} {showSearchInput
+									? 'bg-[var(--sb-row-hover)] text-gray-900 dark:text-white'
+									: ''}"
+								on:click={toggleSearchInput}
+								aria-label={$i18n.t('Search')}
+								aria-expanded={showSearchInput}
+								aria-pressed={showSearchInput}
+								data-sidebar-search-toggle
+							>
+								<Search className="size-[18px]" strokeWidth="2" />
+							</button>
+						</Tooltip>
+					{/if}
+					<Tooltip
+						content="{$i18n.t($showSidebar ? 'Collapse sidebar' : 'Expand sidebar')} · {$i18n.t(
+							'Toggle with Ctrl+Shift+S'
+						)}"
 					>
-						<svg
-							xmlns="http://www.w3.org/2000/svg"
-							fill="none"
-							viewBox="0 0 24 24"
-							stroke-width="1.75"
-							stroke="currentColor"
-							class="size-5"
+						<button
+							id="sidebar-collapse-button"
+							class={headerIconButtonClass}
+							on:click={toggleSidebar}
+							aria-label={$i18n.t($showSidebar ? 'Collapse sidebar' : 'Expand sidebar')}
 						>
-							<rect x="3" y="4" width="18" height="16" rx="2" />
-							<path stroke-linecap="round" stroke-linejoin="round" d="M9 4v16" />
-							{#if $showSidebar}
-								<path stroke-linecap="round" stroke-linejoin="round" d="M16 8l-3 4 3 4" />
-							{:else}
-								<path stroke-linecap="round" stroke-linejoin="round" d="M12 8l3 4-3 4" />
-							{/if}
-						</svg>
-					</button>
-				</Tooltip>
+							<svg
+								xmlns="http://www.w3.org/2000/svg"
+								fill="none"
+								viewBox="0 0 24 24"
+								stroke-width="1.75"
+								stroke="currentColor"
+								class="size-[18px]"
+							>
+								<rect x="3" y="4" width="18" height="16" rx="2" />
+								<path stroke-linecap="round" stroke-linejoin="round" d="M9 4v16" />
+								{#if $showSidebar}
+									<path stroke-linecap="round" stroke-linejoin="round" d="M16 8l-3 4 3 4" />
+								{:else}
+									<path stroke-linecap="round" stroke-linejoin="round" d="M12 8l3 4-3 4" />
+								{/if}
+							</svg>
+						</button>
+					</Tooltip>
+				</div>
 			{:else}
-				<!-- 折叠状态：垂直图标。顶上是品牌标，指针移上去变成展开按钮的图标。 -->
+				<!-- 折叠状态：顶锚品牌标，悬停或触屏下显示展开图标。 -->
 				<Tooltip
 					content="{$i18n.t($showSidebar ? 'Collapse sidebar' : 'Expand sidebar')} · {$i18n.t(
 						'Toggle with Ctrl+Shift+S'
@@ -963,67 +1134,75 @@
 		</div>
 
 		{#if expanded}
-			<!-- 新对话：独立一行 -->
-			<div class="flex text-gray-700 dark:text-gray-200 px-2 mt-2 mb-1.5">
+			<!-- 主动作双联行：新对话 + 自动分流并排 -->
+			<div
+				class="shrink-0 flex items-center gap-1.5 text-gray-700 dark:text-gray-200 px-2 {layout.compactExpanded
+					? 'mt-1 mb-1'
+					: 'mt-1.5 mb-1.5'}"
+				data-sidebar-primary-actions
+			>
 				<a
 					id="sidebar-new-chat-button"
 					class={actionItemClass +
-						' no-drag-region' +
+						' flex-1 min-w-0 no-drag-region' +
 						(sidebarStyle === 'flat' ? ' halo-new-chat' : '')}
 					href="/"
 					draggable="false"
 					aria-label={$i18n.t('New Chat')}
 					on:click|preventDefault={startSidebarNewChat}
 				>
-					<ChatBubblePlus className="size-5" strokeWidth="2" />
-					<span class="text-sm font-medium whitespace-nowrap">{$i18n.t('New Chat')}</span>
-					<span class="halo-kbd" aria-hidden="true">{shortcutModifier}⇧O</span>
+					<ChatBubblePlus className="size-[18px] shrink-0" strokeWidth="2" />
+					<span class="text-sm font-medium whitespace-nowrap truncate">{$i18n.t('New Chat')}</span>
+					{#if !layout.compactExpanded}
+						<span class="halo-kbd" aria-hidden="true">{shortcutModifier}⇧O</span>
+					{/if}
 				</a>
+				<AutoWorkbenchLink
+					inline
+					buttonClass={sidebarStyle === 'card' ? 'rounded-2xl' : ''}
+					onNavigate={leaveChatForMode}
+				/>
 			</div>
-			<!-- 对话的几种模式：讨论 / 协作 / 生图，和新对话放在一起 -->
-			<AutoWorkbenchLink buttonClass={actionItemClass} onNavigate={leaveChatForMode} />
-			<SidebarModes onNavigate={leaveChatForMode} />
+			<!-- 对话的几种模式：精答 / 讨论 / 协作 / 生图 / 视频 -->
+			<SidebarModes dense={layout.compactExpanded} onNavigate={leaveChatForMode} />
 		{/if}
 
 		{#if expanded}
-			<!-- 助手 / 提示词: what is left of the workspace once the image studio became a mode -->
-			<SidebarLibrary {actionItemClass} onNavigate={leaveChatForMode} />
+			<!-- 助手 / 提示词 / 定时 -->
+			<SidebarLibrary
+				{actionItemClass}
+				dense={layout.compactExpanded}
+				onNavigate={leaveChatForMode}
+			/>
 		{/if}
 
 		{#if !expanded}
-			<div class="mt-3 px-2 flex flex-col items-center gap-2 text-gray-700 dark:text-gray-200">
+			<div
+				class="flex-1 min-h-0 overflow-y-auto scrollbar-hidden px-2 flex flex-col items-center halo-rail-stack text-gray-700 dark:text-gray-200 {layout.railDensity ===
+				'tight'
+					? 'mt-0.5'
+					: layout.railDensity === 'compact'
+						? 'mt-1'
+						: 'mt-1.5'}"
+			>
 				<Tooltip content={$i18n.t('New Chat')}>
 					<a
 						id="sidebar-new-chat-button"
-						class={iconButtonClass + ' no-drag-region'}
+						class={iconButtonClass +
+							' no-drag-region' +
+							(sidebarStyle === 'flat' ? ' halo-rail-new-chat' : '')}
 						href="/"
 						draggable="false"
+						aria-label={$i18n.t('New Chat')}
 						on:click|preventDefault={startSidebarNewChat}
 					>
 						<ChatBubblePlus className="size-5" strokeWidth="2" />
 					</a>
 				</Tooltip>
 
-				<AutoWorkbenchLink compact buttonClass={iconButtonClass} onNavigate={leaveChatForMode} />
-				<SidebarModes compact {iconButtonClass} onNavigate={leaveChatForMode} />
-				<SidebarLibrary compact {iconButtonClass} onNavigate={leaveChatForMode} />
-
-				<div class="w-full h-px bg-gray-200/70 dark:bg-gray-800/70 my-1" />
-
-				<Tooltip content={$i18n.t('Chat History')}>
-					<button
-						class={iconButtonClass}
-						on:click={() => {
-							showChatHistoryModal = true;
-						}}
-						aria-label={$i18n.t('Chat History')}
-					>
-						<ChatBubbles className="size-5" strokeWidth="2" />
-					</button>
-				</Tooltip>
-
 				<Tooltip content="搜索（Ctrl/⌘ K）">
 					<button
+						type="button"
 						class={iconButtonClass}
 						on:click={() => {
 							clearPeekTimer();
@@ -1037,15 +1216,33 @@
 					</button>
 				</Tooltip>
 
-				<Tooltip content={$i18n.t('Archived Chats')}>
+				<div class="halo-rail-divider" aria-hidden="true" />
+
+				<AutoWorkbenchLink compact buttonClass={iconButtonClass} onNavigate={leaveChatForMode} />
+				<SidebarModes compact {iconButtonClass} onNavigate={leaveChatForMode} />
+
+				<div class="halo-rail-divider" aria-hidden="true" />
+
+				<SidebarLibrary
+					compact
+					{iconButtonClass}
+					onNavigate={leaveChatForMode}
+					onOpen={() => {
+						clearPeekTimer();
+						peek = false;
+					}}
+				/>
+
+				<Tooltip content={$i18n.t('Chat History')}>
 					<button
+						type="button"
 						class={iconButtonClass}
 						on:click={() => {
-							showArchivedChats.set(true);
+							showChatHistoryModal = true;
 						}}
-						aria-label={$i18n.t('Archived Chats')}
+						aria-label={$i18n.t('Chat History')}
 					>
-						<ArchiveBox className="size-5" strokeWidth="2" />
+						<ChatBubbles className="size-5" strokeWidth="2" />
 					</button>
 				</Tooltip>
 
@@ -1060,7 +1257,7 @@
 			</div>
 		{/if}
 
-		{#if expanded}
+		{#if expanded && showSearchInput}
 			<div class="shrink-0 relative {$temporaryChatEnabled ? 'opacity-20' : ''}">
 				{#if $temporaryChatEnabled}
 					<div class="absolute z-40 w-full h-full flex justify-center"></div>
@@ -1069,7 +1266,14 @@
 				<SearchInput
 					bind:value={search}
 					uiStyle={sidebarStyle}
+					dense={layout.compactExpanded}
+					autoFocus={searchExpanded && layout.compactExpanded}
 					on:input={searchDebounceHandler}
+					on:escape={() => {
+						if (layout.compactExpanded && search.trim() === '') {
+							searchExpanded = false;
+						}
+					}}
 					placeholder={$i18n.t('Search')}
 					showClearButton={true}
 				/>
@@ -1079,7 +1283,7 @@
 		{#if expanded}
 			<div
 				bind:this={sidebarScrollContainerElement}
-				class="sidebar-scroll relative flex flex-col flex-1 overflow-y-auto overflow-x-hidden {$temporaryChatEnabled
+				class="sidebar-scroll relative flex flex-col flex-1 min-h-0 overflow-y-auto overflow-x-hidden {$temporaryChatEnabled
 					? 'opacity-20'
 					: ''}"
 			>
@@ -1117,10 +1321,11 @@
 					<Folder
 						className="px-2 mt-0.5"
 						name={$i18n.t('Assistants')}
+						count={assistantScenes.length}
 						dragAndDrop={false}
 						bind:open={showAssistantSection}
 						on:change={(e) => {
-							localStorage.setItem('showAssistantSection', e.detail);
+							localStorage.setItem('showAssistantSection', `${e.detail}`);
 						}}
 					>
 						<div class="mt-1 flex flex-col gap-0.5">
@@ -1161,6 +1366,7 @@
 					<Folder
 						className="px-2 mt-0.5"
 						name={$i18n.t('Chat Folders')}
+						count={folderOptions.length}
 						dragAndDrop={false}
 						addButtonVisibility="always"
 						bind:open={showFolderSection}
@@ -1390,75 +1596,126 @@
 		{/if}
 
 		<!-- 底部用户区 -->
-		<div class="shrink-0 mt-auto px-2 pt-1.5 pb-1">
-			<div class="flex flex-col font-primary">
-				{#if $user?.role === 'admin'}
-					<OfficialQuotasButton
-						compact={!expanded}
-						{sidebarStyle}
-						buttonClass={expanded ? actionItemClass : iconButtonClass}
-						onOpen={() => {
-							clearPeekTimer();
-							peek = false;
-						}}
-					/>
-				{/if}
-				{#if $user !== undefined && $user !== null}
-					<UserMenu
-						role={$user?.role}
-						on:show={(e) => {
-							if (e.detail === 'archived-chat') {
-								showArchivedChats.set(true);
-							}
-						}}
-						let:builder
-					>
-						<button
-							{...builder}
-							use:builder.action
-							class="group transition active:scale-[0.99] {expanded
-								? userItemClass
-								: iconButtonClass + ' mx-auto'}"
-							on:click={() => {
-								showDropdown = !showDropdown;
-							}}
-						>
-							<div class="{avatarContainerClass} {expanded ? 'mr-3' : ''}">
-								<img
-									src={$user?.profile_image_url || '/user.png'}
-									class="w-full h-full object-cover rounded-full"
-									alt={$i18n.t('User profile')}
-									draggable="false"
-								/>
-							</div>
-							{#if expanded}
-								<div class="flex-1 text-left min-w-0">
-									<div class="text-sm font-medium text-gray-800 dark:text-gray-100 truncate">
-										{$user?.name}
-									</div>
-									<div class="text-xs text-gray-600 dark:text-gray-400 whitespace-nowrap">
-										{$user?.role === 'admin' ? $i18n.t('admin') : $i18n.t('user')}
-									</div>
-								</div>
-								<svg
-									xmlns="http://www.w3.org/2000/svg"
-									fill="none"
-									viewBox="0 0 24 24"
-									stroke-width="2"
-									stroke="currentColor"
-									class="size-4 text-gray-400"
+		{#if expanded}
+			<div class="shrink-0 mt-auto px-2 pt-1.5 pb-1">
+				<div class="flex items-center gap-1.5 font-primary">
+					{#if $user !== undefined && $user !== null}
+						<div class="min-w-0 flex-1">
+							<UserMenu
+								role={$user?.role}
+								on:show={(e) => {
+									if (e.detail === 'archived-chat') {
+										showArchivedChats.set(true);
+									}
+								}}
+								let:builder
+							>
+								<button
+									{...builder}
+									use:builder.action
+									title={`${$user?.name ?? ''} (${$user?.role === 'admin' ? $i18n.t('admin') : $i18n.t('user')})`}
+									class="group transition active:scale-[0.99] {userItemClass}"
+									on:click={() => {
+										showDropdown = !showDropdown;
+									}}
 								>
-									<path
-										stroke-linecap="round"
-										stroke-linejoin="round"
-										d="M8.25 15L12 18.75 15.75 15m-7.5-6L12 5.25 15.75 9"
-									/>
-								</svg>
-							{/if}
-						</button>
-					</UserMenu>
-				{/if}
+									<div
+										class="shrink-0 size-7 rounded-full overflow-hidden ring-1 ring-gray-200 dark:ring-gray-700 group-hover:ring-blue-300 dark:group-hover:ring-blue-600 transition mr-2"
+									>
+										<img
+											src={$user?.profile_image_url || '/user.png'}
+											class="w-full h-full object-cover rounded-full"
+											alt={$i18n.t('User profile')}
+											draggable="false"
+										/>
+									</div>
+									<div class="flex-1 text-left min-w-0">
+										<div
+											class="text-[13px] font-medium text-gray-800 dark:text-gray-100 truncate leading-tight"
+										>
+											{$user?.name}
+										</div>
+									</div>
+									<svg
+										xmlns="http://www.w3.org/2000/svg"
+										fill="none"
+										viewBox="0 0 24 24"
+										stroke-width="2"
+										stroke="currentColor"
+										class="size-3.5 shrink-0 text-gray-400"
+									>
+										<path
+											stroke-linecap="round"
+											stroke-linejoin="round"
+											d="M8.25 15L12 18.75 15.75 15m-7.5-6L12 5.25 15.75 9"
+										/>
+									</svg>
+								</button>
+							</UserMenu>
+						</div>
+					{/if}
+					{#if $user?.role === 'admin'}
+						<OfficialQuotasButton
+							inline
+							{sidebarStyle}
+							onOpen={() => {
+								clearPeekTimer();
+								peek = false;
+							}}
+						/>
+					{/if}
+				</div>
 			</div>
-		</div>
+		{:else}
+			<div
+				class="shrink-0 mt-auto px-2 {layout.railDensity === 'tight'
+					? 'pt-0.5 pb-0.5'
+					: 'pt-1 pb-0.5'}"
+			>
+				<div class="flex flex-col items-center font-primary halo-rail-stack">
+					{#if $user?.role === 'admin'}
+						<OfficialQuotasButton
+							compact
+							{sidebarStyle}
+							buttonClass={iconButtonClass}
+							onOpen={() => {
+								clearPeekTimer();
+								peek = false;
+							}}
+						/>
+					{/if}
+					{#if $user !== undefined && $user !== null}
+						<UserMenu
+							role={$user?.role}
+							on:show={(e) => {
+								if (e.detail === 'archived-chat') {
+									showArchivedChats.set(true);
+								}
+							}}
+							let:builder
+						>
+							<button
+								{...builder}
+								use:builder.action
+								class="group transition active:scale-[0.99] {iconButtonClass} mx-auto"
+								aria-label={$i18n.t('User profile')}
+								on:click={() => {
+									showDropdown = !showDropdown;
+								}}
+							>
+								<div class={avatarContainerClass}>
+									<img
+										src={$user?.profile_image_url || '/user.png'}
+										class="w-full h-full object-cover rounded-full"
+										alt={$i18n.t('User profile')}
+										draggable="false"
+									/>
+								</div>
+							</button>
+						</UserMenu>
+					{/if}
+				</div>
+			</div>
+		{/if}
 	</div>
 </div>

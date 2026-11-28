@@ -13,6 +13,7 @@
 	 * equal tiles in the open sidebar, a column of icons in the collapsed one.
 	 */
 	export let compact = false;
+	export let dense = false;
 	export let iconButtonClass = '';
 	export let onNavigate: () => void = () => {};
 
@@ -39,13 +40,16 @@
 	{/each}
 {:else if modes.length}
 	<div
-		class="mb-1.5 grid gap-1 px-2 text-gray-700 dark:text-gray-200"
+		class="{dense ? 'mb-1' : 'mb-1.5'} grid gap-1 px-2 text-gray-700 dark:text-gray-200"
 		style="grid-template-columns: repeat({modes.length}, minmax(0, 1fr))"
 		data-sidebar-modes
+		data-dense={dense ? 'true' : undefined}
 	>
 		{#each modes as mode (mode.key)}
 			<a
-				class="halo-mode-tile relative flex min-w-0 flex-col items-center gap-1 rounded-xl border border-transparent px-1 pt-2 pb-1.5 text-[11.5px] font-medium transition hover:bg-gray-100/90 dark:hover:bg-gray-850"
+				class="halo-mode-tile relative flex min-w-0 flex-col items-center rounded-xl border border-transparent px-1 font-medium transition hover:bg-gray-100/90 dark:hover:bg-gray-850 {dense
+					? 'gap-0.5 pt-1.5 pb-1 text-[11px] leading-tight'
+					: 'gap-1 pt-2 pb-1.5 text-[11.5px]'}"
 				class:is-active={mode.active}
 				data-accent={mode.key}
 				href={mode.href}
@@ -59,7 +63,10 @@
 				data-sidebar-teams={mode.key === 'teams' ? '' : undefined}
 				data-sidebar-studio={mode.key === 'studio' ? '' : undefined}
 			>
-				<SidebarModeIcon mode={mode.key} className="halo-mode-tile__icon size-[17px]" />
+				<SidebarModeIcon
+					mode={mode.key}
+					className="halo-mode-tile__icon {dense ? 'size-4' : 'size-[17px]'}"
+				/>
 				<span class="truncate">{mode.label}</span>
 				{#if mode.key === 'teams'}<TeamsBadge compact />{:else if mode.key === 'discuss'}<DiscussBadge compact />{:else if mode.key === 'answer'}<AnswerBadge compact />{/if}
 			</a>

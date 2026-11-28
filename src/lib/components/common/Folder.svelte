@@ -14,6 +14,7 @@
 
 	export let id = '';
 	export let name = '';
+	export let count: number | null = null;
 	export let collapsible = true;
 
 	export let onAddLabel: string = '';
@@ -150,6 +151,14 @@
 					<div class="translate-y-[0.5px]">
 						{name}
 					</div>
+					{#if !open && typeof count === 'number' && count > 0}
+						<span
+							class="translate-y-[0.5px] text-[10px] font-normal text-gray-400 dark:text-gray-500 tabular-nums"
+							data-folder-count
+						>
+							{count}
+						</span>
+					{/if}
 				</button>
 
 				{#if $$slots.actions}

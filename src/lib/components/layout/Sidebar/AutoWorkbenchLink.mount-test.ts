@@ -29,3 +29,19 @@ it('renders the workbench as a separate full row, with an accessible compact ent
 	app = new Link({ target, props: { compact: true } });
 	expect(target.querySelector('[aria-label="自动分流工作台"]')).toBeTruthy();
 });
+
+it('renders a compact inline pill when inline is enabled', () => {
+	target = document.createElement('div');
+	document.body.appendChild(target);
+	const navigate = vi.fn();
+	app = new Link({ target, props: { inline: true, onNavigate: navigate } });
+	expect(target.querySelector('[data-sidebar-auto-row]')).toBeFalsy();
+	const pill = target.querySelector('[data-sidebar-auto-inline]') as HTMLAnchorElement | null;
+	expect(pill).toBeTruthy();
+	expect(pill!.getAttribute('href')).toBe('/auto');
+	expect(pill!.getAttribute('aria-label')).toBe('自动分流工作台');
+	expect(pill!.hasAttribute('data-sidebar-auto')).toBe(true);
+	expect(pill!.textContent).toContain('自动分流');
+	pill!.click();
+	expect(navigate).toHaveBeenCalledOnce();
+});

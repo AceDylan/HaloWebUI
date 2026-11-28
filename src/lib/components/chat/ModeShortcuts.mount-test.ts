@@ -6,7 +6,7 @@ import { installDominoDom } from '$lib/test-support/domino-dom';
 
 installDominoDom('http://localhost/');
 
-const nav = vi.hoisted(() => ({ goto: vi.fn() }));
+const nav = vi.hoisted(() => ({ goto: vi.fn(), afterNavigate: vi.fn() }));
 vi.mock('$app/navigation', () => nav);
 vi.mock('$app/stores', async () => {
 	const { writable } = await import('svelte/store');
@@ -127,5 +127,64 @@ describe('SidebarLibrary', () => {
 		]);
 		stores.user.set({ id: 'u3', role: 'user', permissions: { workspace: {} } } as any);
 		expect(await links()).toEqual([]);
+	});
+
+	it('collapses multiple libraries into one portaled popover trigger in compact rail mode', async () => {
+		const { default: SidebarLibrary } = await import('$lib/components/layout/Sidebar/SidebarLibrary.svelte');
+		const onOpen = vi.fn();
+		const target = await mount(SidebarLibrary, { compact: true, onOpen });
+
+		const trigger = target.querySelector('[data-sidebar-library-trigger]') as HTMLButtonElement | null;
+		expect(trigger).toBeTruthy();
+		expect(trigger!.getAttribute('aria-haspopup')).toBe('menu');
+		expect(trigger!.getAttribute('aria-expanded')).toBe('false');
+		expect(target.querySelectorAll('[data-sidebar-library]').length).toBe(0);
+		expect(document.body.querySelector('[data-sidebar-library-popover]')).toBeFalsy();
+
+		// Open popover — portaled to document.body, outside target
+		trigger!.click();
+		await sleep(20);
+
+		expect(onOpen).toHaveBeenCalledTimes(1);
+		expect(trigger!.getAttribute('aria-expanded')).toBe('true');
+		const popover = document.body.querySelector('[data-sidebar-library-popover]') as HTMLElement | null;
+		expect(popover).toBeTruthy();
+		expect(target.contains(popover!)).toBe(false);
+
+		const items = [...popover!.querySelectorAll('[data-sidebar-library]')].map((el: any) => [
+			el.querySelector('[data-sidebar-library-label]')?.textContent?.trim(),
+			el.getAttribute('href')
+		]);
+		expect(items).toEqual([
+			['助手', '/workspace/models'],
+			['提示词', '/workspace/prompts'],
+			['定时', '/workspace/schedules']
+		]);
+
+		// Escape closes the popover
+		const esc = new (window as any).Event('keydown', { bubbles: true }) as any;
+		esc.key = 'Escape';
+		window.dispatchEvent(esc);
+		await sleep(20);
+		expect(document.body.querySelector('[data-sidebar-library-popover]')).toBeFalsy();
+		expect(trigger!.getAttribute('aria-expanded')).toBe('false');
+	});
+
+	it('renders a direct icon link for 1 library permission and nothing for 0 in compact mode', async () => {
+		const { default: SidebarLibrary } = await import('$lib/components/layout/Sidebar/SidebarLibrary.svelte');
+
+		// 1 permission (knowledge grants only 助手 -> /workspace/assistants)
+		stores.user.set({ id: 'u4', role: 'user', permissions: { workspace: { knowledge: true } } } as any);
+		const oneTarget = await mount(SidebarLibrary, { compact: true });
+		expect(oneTarget.querySelector('[data-sidebar-library-trigger]')).toBeFalsy();
+		const single = oneTarget.querySelector('[data-sidebar-library="assistants"]') as HTMLAnchorElement | null;
+		expect(single).toBeTruthy();
+		expect(single!.getAttribute('href')).toBe('/workspace/assistants');
+
+		// 0 permissions
+		stores.user.set({ id: 'u5', role: 'user', permissions: { workspace: {} } } as any);
+		const emptyTarget = await mount(SidebarLibrary, { compact: true });
+		expect(emptyTarget.querySelector('[data-sidebar-library-trigger]')).toBeFalsy();
+		expect(emptyTarget.querySelector('[data-sidebar-library]')).toBeFalsy();
 	});
 });

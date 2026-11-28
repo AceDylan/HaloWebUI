@@ -3,6 +3,7 @@
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 
 	export let compact = false;
+	export let inline = false;
 	export let sidebarStyle: 'flat' | 'card' = 'flat';
 	export let buttonClass = '';
 	export let onOpen: () => void = () => {};
@@ -18,7 +19,7 @@
 
 {#if $user?.role === 'admin'}
 	{#if compact}
-		<div class="mb-1.5 flex justify-center">
+		<div class="halo-rail-quota-wrap flex justify-center">
 			<Tooltip content="官方额度">
 				<button
 					type="button"
@@ -56,6 +57,46 @@
 				</button>
 			</Tooltip>
 		</div>
+	{:else if inline}
+		<Tooltip content="官方额度">
+			<button
+				type="button"
+				class={sidebarStyle === 'card'
+					? 'halo-quota-trigger halo-quota-trigger--inline halo-quota-trigger--card shrink-0'
+					: 'halo-quota-trigger halo-quota-trigger--inline shrink-0'}
+				aria-haspopup="dialog"
+				aria-label="查看官方订阅额度"
+				title="官方额度"
+				data-halo-official-quotas-trigger="expanded"
+				on:click={openQuotas}
+			>
+				<svg
+					xmlns="http://www.w3.org/2000/svg"
+					viewBox="0 0 24 24"
+					fill="none"
+					stroke="currentColor"
+					stroke-width="1.85"
+					class="size-4 shrink-0 text-gray-600 dark:text-gray-300"
+					aria-hidden="true"
+				>
+					<path
+						stroke-linecap="round"
+						stroke-linejoin="round"
+						d="M4.75 16.25a8.25 8.25 0 1 1 14.5 0"
+					/>
+					<path stroke-linecap="round" stroke-linejoin="round" d="M12 13.5 15.75 9.25" />
+					<circle cx="12" cy="13.5" r="1.25" fill="currentColor" stroke="none" />
+				</svg>
+				<span class="text-xs font-medium whitespace-nowrap text-gray-800 dark:text-gray-100">
+					额度
+				</span>
+				<span class="flex shrink-0 items-center gap-[3px]" aria-hidden="true">
+					<span class="size-[5px] rounded-full bg-amber-500"></span>
+					<span class="size-[5px] rounded-full bg-cyan-500"></span>
+					<span class="size-[5px] rounded-full bg-emerald-500"></span>
+				</span>
+			</button>
+		</Tooltip>
 	{:else}
 		<div class="mb-1.5">
 			<button

@@ -3,6 +3,7 @@
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import SidebarModeIcon from './SidebarModeIcon.svelte';
 	export let compact = false;
+	export let inline = false;
 	export let buttonClass = '';
 	export let onNavigate: () => void = () => {};
 	$: active = $page?.url?.pathname?.startsWith('/auto');
@@ -19,6 +20,24 @@
 			data-sidebar-auto><SidebarModeIcon mode="auto" /></a
 		></Tooltip
 	>
+{:else if inline}
+	<a
+		href="/auto"
+		class="halo-auto-inline inline-flex shrink-0 items-center justify-center gap-1 rounded-[0.625rem] border border-cyan-500/20 bg-cyan-500/[0.06] px-2.5 py-[7px] text-xs font-medium whitespace-nowrap text-cyan-700 transition hover:border-cyan-500/35 hover:bg-cyan-500/[0.11] dark:border-cyan-400/20 dark:bg-cyan-400/[0.08] dark:text-cyan-300 dark:hover:border-cyan-400/35 dark:hover:bg-cyan-400/[0.14] {buttonClass}"
+		class:halo-auto-active={active}
+		aria-label="自动分流工作台"
+		title="自动分流工作台：按问题选择 Hermes、精答、讨论或协作"
+		aria-current={active ? 'page' : undefined}
+		draggable="false"
+		on:click={onNavigate}
+		data-sidebar-auto
+		data-sidebar-auto-inline
+	>
+		<span class="shrink-0 text-cyan-600 dark:text-cyan-400">
+			<SidebarModeIcon mode="auto" className="size-4" />
+		</span>
+		<span>自动分流</span>
+	</a>
 {:else}
 	<div class="mb-1.5 px-2 text-gray-700 dark:text-gray-200" data-sidebar-auto-row>
 		<a

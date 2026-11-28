@@ -19,7 +19,9 @@ import {
 	phaseAt,
 	plainPreview,
 	replayDelay,
+	replayDensity,
 	replayMarks,
+	runnerFamily,
 	taskDepths
 } from './model';
 
@@ -182,6 +184,44 @@ describe('events', () => {
 		expect(replayDelay(list, 0, 4).ms).toBe(250);
 		expect(replayDelay(list, 1, 1)).toEqual({ ms: 2500, compressed: true });
 		expect(replayDelay(list, 2, 1).ms).toBe(120);
+	});
+});
+
+describe('replay density', () => {
+	it('peaks where events came fast and dips over long waits, aligned with the index track', () => {
+		// 10 events within 10s, then 1 event per 10 minutes.
+		const ts = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 600, 1200, 1800, 2400, 3000, 3600, 4200, 4800, 5400, 6000];
+		const wave = replayDensity(
+			ts.map((t, i) => ev(i + 1, { ts: t })),
+			4
+		);
+		expect(wave).toHaveLength(4);
+		expect(Math.max(...wave)).toBe(1);
+		expect(wave[0]).toBe(1);
+		expect(wave[3]).toBeLessThan(0.05);
+		expect(wave.every((v) => v >= 0 && v <= 1)).toBe(true);
+	});
+
+	it('handles tiny and same-second logs', () => {
+		expect(replayDensity([ev(1, {})])).toEqual([]);
+		expect(replayDensity([ev(1, { ts: 5 }), ev(2, { ts: 5 }), ev(3, { ts: 5 })], 48)).toEqual([1, 1]);
+	});
+});
+
+describe('runner family', () => {
+	it('groups runners by engine', () => {
+		expect(['officlaude', 'cchclaude', 'anyclaude', 'reclaude'].map(runnerFamily)).toEqual([
+			'claude',
+			'claude',
+			'claude',
+			'claude'
+		]);
+		expect(runnerFamily('codex')).toBe('codex');
+		expect(runnerFamily('offiagy')).toBe('gemini');
+		expect(runnerFamily('agy')).toBe('gemini');
+		expect(runnerFamily('hermes')).toBe('hermes');
+		expect(runnerFamily(null)).toBe('other');
+		expect(runnerFamily('mystery')).toBe('other');
 	});
 });
 

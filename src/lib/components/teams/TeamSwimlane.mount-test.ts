@@ -261,6 +261,36 @@ describe('NarrativeFeed sections & pin', () => {
 		await sleep(5);
 		expect(target.querySelector(`[data-tool-group-steps="${toolItem.id}"]`)).toBeTruthy();
 		expect(focused).toEqual([]);
+
+		// Folding a stage hides its rows behind a one-line summary.
+		(target.querySelector('[data-stage-toggle="layer-0"]') as any).click();
+		await sleep(5);
+		expect(target.querySelector(`[data-narrative-id="${toolItem.id}"]`)).toBeFalsy();
+		const summary = target.querySelector('[data-narrative-stage="layer-0"] [data-stage-summary]');
+		expect(summary.textContent).toContain('交接 1');
+		expect(summary.textContent).toContain('2 步');
+		// A pin from the swimlane opens the stage it lands in; folding it again sticks.
+		const list = target.querySelector('[data-narrative-feed] ol');
+		const scrolled: unknown[] = [];
+		list.scrollTo = (options: unknown) => scrolled.push(options);
+		app.$set({ focusSource: 'swimlane' });
+		await sleep(10);
+		expect(target.querySelector(`[data-narrative-id="${toolItem.id}"]`)).toBeTruthy();
+		expect(scrolled).toHaveLength(1);
+		(target.querySelector('[data-stage-toggle="layer-0"]') as any).click();
+		await sleep(10);
+		expect(target.querySelector(`[data-narrative-id="${toolItem.id}"]`)).toBeFalsy();
+		(target.querySelector('[data-stage-toggle="layer-0"]') as any).click();
+		await sleep(5);
+		// 折叠阶段 folds everything but the newest record's stage.
+		(target.querySelector('[data-stages-toggle]') as any).click();
+		await sleep(5);
+		const folded = (id: string) =>
+			target.querySelector(`[data-narrative-stage="${id}"]`).classList.contains('is-folded');
+		expect([folded('layer-0'), folded('layer-1')]).toEqual([true, false]);
+		(target.querySelector('[data-stages-toggle]') as any).click();
+		await sleep(5);
+		expect([folded('layer-0'), folded('layer-1')]).toEqual([false, false]);
 	});
 });
 
@@ -325,6 +355,48 @@ describe('SwimlaneTree', () => {
 		expect(toggled[toggled.length - 1]).toBe('dev-a');
 	});
 
+	it('shows who runs each lane and plays the closing sequence once the team is done', async () => {
+		const { groupNarrative } = await import('./narrative');
+		const { default: SwimlaneTree } = await import('./SwimlaneTree.svelte');
+		const items = groupNarrative(SAMPLE_EVENTS as any, SAMPLE_TASKS as any, {
+			deploy: {
+				status: 'succeeded',
+				steps: [{ key: 'merge', label: '合并到 main', status: 'done', at: 1790900100 }]
+			} as any,
+			includeDeploy: true
+		});
+		await mount(SwimlaneTree, {
+			items,
+			members: [
+				{ name: 'dev-a', role: '后端' },
+				{ name: 'dev-b', role: '测试' }
+			],
+			leadName: '统筹',
+			laneMeta: new Map([
+				['dev-a', { runner: 'officlaude', status: 'done' }],
+				['dev-b', { runner: 'codex', status: 'running' }]
+			])
+		});
+		expect(target.querySelector('[data-lane-runner="officlaude"]').textContent.trim()).toBe('CL');
+		expect(target.querySelector('[data-lane-runner="codex"]').textContent.trim()).toBe('CX');
+		expect(target.querySelector('[data-swimlane-lane="dev-b"]').getAttribute('data-lane-tone')).toBe(
+			'run'
+		);
+		expect(target.querySelector('[data-swimlane-lane="dev-a"]').title).toContain('官方 Claude');
+		expect(target.querySelectorAll('.head-radar').length).toBe(2);
+		expect(target.querySelector('[data-swimlane-finale]')).toBeFalsy();
+
+		app.$set({ finished: true });
+		await sleep(5);
+		expect(target.querySelectorAll('.head-radar').length).toBe(0);
+		expect(target.querySelector('[data-swimlane-finale="burst"]')).toBeTruthy();
+		expect(target.querySelectorAll('[data-swimlane-finale="merge"]').length).toBe(2);
+		expect(target.querySelectorAll('[data-swimlane-finale="rail"]').length).toBeGreaterThan(0);
+		app.$set({ motion: false });
+		await sleep(5);
+		expect(target.querySelector('[data-swimlane-finale]')).toBeFalsy();
+	});
+
 	it('windows nodes on a long scrolling canvas and shows a focused node outside the window in the HUD', async () => {
 		const { groupNarrative } = await import('./narrative');
 		const { default: SwimlaneTree } = await import('./SwimlaneTree.svelte');
@@ -351,65 +423,67 @@ describe('SwimlaneTree', () => {
 	});
 });
 
+const teamFixture = () => ({
+	team: {
+		id: 'team-1',
+		chat_id: null,
+		title: '协作台升级',
+		goal: '升级协作台',
+		status: 'running',
+		phase: 'running',
+		plan: {
+			title: '协作台升级',
+			members: [
+				{ name: 'dev-a', role: '后端', executor: 'officlaude' },
+				{ name: 'dev-b', role: '测试', executor: 'codex' }
+			],
+			tasks: []
+		},
+		error: null,
+		board: 'b1',
+		created_at: 1790900000,
+		updated_at: 1790900000,
+		approved_at: 1790900001,
+		finished_at: null,
+		member_count: 2,
+		task_count: 2,
+		executors: ['officlaude', 'codex']
+	},
+	live: {
+		team: {
+			team_id: 'team-1',
+			board: 'b1',
+			title: '协作台升级',
+			goal: '升级协作台',
+			summary: '',
+			chat_id: '',
+			workspace: '/tmp/ws',
+			state: 'running',
+			archived: false,
+			phase: 'running',
+			created_at: 1790900000,
+			approved_at: 1790900001,
+			completed_at: null,
+			stopped_at: null,
+			max_parallel: 2,
+			lead: { name: 'team-lead', role: '负责人', status: 'coordinating' }
+		},
+		members: [
+			{ name: 'dev-a', role: '后端', executor: 'officlaude', status: 'done', task_ids: ['t_1'], current_task: null },
+			{ name: 'dev-b', role: '测试', executor: 'codex', status: 'waiting_user', task_ids: ['t_2'], current_task: 't_2' }
+		],
+		tasks: SAMPLE_TASKS,
+		counts: { done: 1, running: 1, total: 2 },
+		latest_seq: 6,
+		generated_at: 1790900030
+	},
+	live_error: null,
+	stage: null
+});
+
 describe('TeamWorkbench integration (dual-pane + non-destructive drawer)', () => {
 	it('defaults to stream+swimlane mode and keeps stream visible when inspector drawer opens', async () => {
-		api.getTeam.mockResolvedValue({
-			team: {
-				id: 'team-1',
-				chat_id: null,
-				title: '协作台升级',
-				goal: '升级协作台',
-				status: 'running',
-				phase: 'running',
-				plan: {
-					title: '协作台升级',
-					members: [
-						{ name: 'dev-a', role: '后端', executor: 'officlaude' },
-						{ name: 'dev-b', role: '测试', executor: 'codex' }
-					],
-					tasks: []
-				},
-				error: null,
-				board: 'b1',
-				created_at: 1790900000,
-				updated_at: 1790900000,
-				approved_at: 1790900001,
-				finished_at: null,
-				member_count: 2,
-				task_count: 2,
-				executors: ['officlaude', 'codex']
-			},
-			live: {
-				team: {
-					team_id: 'team-1',
-					board: 'b1',
-					title: '协作台升级',
-					goal: '升级协作台',
-					summary: '',
-					chat_id: '',
-					workspace: '/tmp/ws',
-					state: 'running',
-					archived: false,
-					phase: 'running',
-					created_at: 1790900000,
-					approved_at: 1790900001,
-					completed_at: null,
-					stopped_at: null,
-					max_parallel: 2,
-					lead: { name: 'team-lead', role: '负责人', status: 'coordinating' }
-				},
-				members: [
-					{ name: 'dev-a', role: '后端', executor: 'officlaude', status: 'done', task_ids: ['t_1'], current_task: null },
-					{ name: 'dev-b', role: '测试', executor: 'codex', status: 'waiting_user', task_ids: ['t_2'], current_task: 't_2' }
-				],
-				tasks: SAMPLE_TASKS,
-				counts: { done: 1, running: 1, total: 2 },
-				latest_seq: 6,
-				generated_at: 1790900030
-			},
-			live_error: null,
-			stage: null
-		});
+		api.getTeam.mockResolvedValue(teamFixture());
 		api.getTeamEvents.mockResolvedValue({
 			events: SAMPLE_EVENTS,
 			next_after: 6,
@@ -426,6 +500,11 @@ describe('TeamWorkbench integration (dual-pane + non-destructive drawer)', () =>
 		expect(target.querySelector('[data-workbench-stream]')).toBeTruthy();
 		expect(target.querySelector('[data-narrative-feed]')).toBeTruthy();
 		expect(target.querySelector('[data-swimlane-tree]')).toBeTruthy();
+		expect(target.querySelector('[data-replay-wave] .wave-played').getAttribute('d')).toMatch(/^M0 10L0 /);
+		expect(target.querySelector('[data-lane-runner="codex"]')).toBeTruthy();
+		expect(target.querySelector(`[data-swimlane-lane="dev-b"]`).getAttribute('data-lane-tone')).toBe(
+			'user'
+		);
 		const wideToggle = target.querySelector('[data-wide-toggle]');
 		const stream = target.querySelector('[data-workbench-stream]');
 		expect(wideToggle.getAttribute('aria-pressed')).toBe('false');
@@ -490,5 +569,46 @@ describe('TeamWorkbench integration (dual-pane + non-destructive drawer)', () =>
 		(target.querySelector('[data-view-tab="board"]') as any).click();
 		await sleep(20);
 		expect(target.querySelector('[data-team-board]')).toBeTruthy();
+	});
+
+	it('a finished team shows how it ended at a glance', async () => {
+		const fixture = teamFixture() as any;
+		fixture.team.finished_at = 1790900601;
+		fixture.live.team.phase = 'completed';
+		fixture.live.tasks = SAMPLE_TASKS.map((task) => ({ ...task, status: 'done', sub_status: 'done' }));
+		fixture.live.team.conclusion = {
+			status: 'ready',
+			acceptance: {
+				status: 'ready',
+				verdict: 'partial',
+				summary: '还差上线',
+				gaps: [{ title: '未上线', detail: '需要部署后核实' }]
+			},
+			vault_archive: { status: 'saved', action: 'update', path: '项目/协作台.md' }
+		};
+		api.getTeam.mockResolvedValue(fixture);
+		api.getTeamEvents.mockResolvedValue({
+			events: SAMPLE_EVENTS,
+			next_after: 6,
+			has_more: false,
+			latest_seq: 6,
+			reconcile: []
+		});
+		const { default: TeamWorkbench } = await import('./TeamWorkbench.svelte');
+		await mount(TeamWorkbench, { teamId: 'team-1' });
+		await sleep(40);
+
+		const hud = target.querySelector('[data-completed-banner] [data-done-hud]');
+		expect(hud.querySelector('[data-hud="tasks"]').textContent).toContain('2/2');
+		expect(hud.querySelector('[data-hud="time"]').textContent).toContain('用时');
+		const verdict = hud.querySelector('[data-hud="acceptance"]');
+		expect(verdict.getAttribute('data-tone')).toBe('warn');
+		expect(verdict.textContent).toContain('部分达成');
+		expect(verdict.textContent).toContain('1 处缺口');
+		expect(hud.querySelector('[data-hud="archive"]').textContent).toContain('已写入');
+		expect(target.querySelector('[data-acceptance="partial"]').textContent).toContain('未上线');
+		expect(target.querySelector('[data-vault-archive="saved"]').textContent).toContain('项目/协作台.md');
+		// Done: the head stops pulsing as if it were still working.
+		expect(target.querySelectorAll('[data-swimlane-tree] .head-radar').length).toBe(0);
 	});
 });

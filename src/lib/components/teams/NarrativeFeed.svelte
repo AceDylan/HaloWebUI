@@ -53,6 +53,8 @@
 	let category: Category = 'all';
 	let expandedTools = new Set<string>();
 	let expandedBodies = new Set<string>();
+	/** Stage sections folded into a one-line summary (user-driven; nothing is folded by default). */
+	let collapsedStages = new Set<string>();
 	let listEl: HTMLOListElement | null = null;
 	let manualScrollUntil = 0;
 	let rafHover: number | null = null;
@@ -78,6 +80,19 @@
 			return;
 		}
 		expandedTools = new Set(visible.filter((it) => it.kind === 'tool_group').map((it) => it.id));
+	};
+
+	const toggleStage = (id: string) => {
+		if (collapsedStages.has(id)) collapsedStages.delete(id);
+		else collapsedStages.add(id);
+		collapsedStages = collapsedStages;
+	};
+	// Fold every section but the one the newest record is in; or unfold all.
+	const setStagesCollapsed = (fold: boolean) => {
+		const current = headId ? sectionById.get(headId) : null;
+		collapsedStages = fold
+			? new Set(visible.map((it) => sectionById.get(it.id) ?? it.stageId).filter((id) => id !== current))
+			: new Set();
 	};
 
 	$: roles = new Map(members.map((m) => [m.name, m]));
@@ -159,6 +174,19 @@
 
 	$: visible = order === 'asc' ? filtered : filtered.slice().reverse();
 	$: hasExpandedTools = visible.some((it) => it.kind === 'tool_group' && expandedTools.has(it.id));
+	$: sectionSummary = (() => {
+		const out = new Map<string, { total: number; handoff: number; fail: number; steps: number }>();
+		for (const it of visible) {
+			const id = sectionById.get(it.id) ?? it.stageId;
+			const entry = out.get(id) ?? { total: 0, handoff: 0, fail: 0, steps: 0 };
+			entry.total++;
+			if (it.kind === 'handoff') entry.handoff++;
+			if (it.kind === 'fail') entry.fail++;
+			if (it.kind === 'tool_group') entry.steps += it.stepCount;
+			out.set(id, entry);
+		}
+		return out;
+	})();
 
 	// Auto-scroll to bottom when new items arrive in chronological live mode.
 	let prevCount = 0;
@@ -173,8 +201,13 @@
 	}
 
 	// Scroll focused row within listEl only on explicit click from SwimlaneTree (never outer page).
-	$: if (focusId && focusSource === 'swimlane' && focusPin && listEl) {
-		const id = focusId;
+	// A function, so this runs on focus changes only: folding a stage later must not re-open it.
+	const revealPinned = (id: string) => {
+		const folded = sectionById.get(id);
+		if (folded && collapsedStages.has(folded)) {
+			collapsedStages.delete(folded);
+			collapsedStages = collapsedStages;
+		}
 		tick().then(() => {
 			if (!listEl) return;
 			const escaped =
@@ -192,7 +225,8 @@
 				behavior: reduced ? 'auto' : 'smooth'
 			});
 		});
-	}
+	};
+	$: if (focusId && focusSource === 'swimlane' && focusPin && listEl) revealPinned(focusId);
 
 	const onWheelOrTouch = () => {
 		manualScrollUntil = Date.now() + 2000;
@@ -335,6 +369,17 @@
 					已筛选 · 清除
 				</button>
 			{/if}
+			{#if stages.length > 1}
+				<button
+					type="button"
+					class="tm-btn-ghost !px-2 !py-0.5 !text-[11px]"
+					on:click={() => setStagesCollapsed(collapsedStages.size === 0)}
+					title="把之前的阶段折叠成一行摘要，只展开最新阶段"
+					data-stages-toggle
+				>
+					{collapsedStages.size ? '展开阶段' : '折叠阶段'}
+				</button>
+			{/if}
 			<button
 				type="button"
 				class="tm-btn-ghost !px-2 !py-0.5 !text-[11px]"
@@ -399,18 +444,54 @@
 					replay,
 					teamStopped
 				)}
+				{@const folded = collapsedStages.has(section)}
 				{#if stage && (i === 0 || sectionById.get(visible[i - 1].id) !== section)}
+					{@const summary = sectionSummary.get(section)}
 					<li
 						class="timeline-stage"
+						class:is-folded={folded}
 						data-narrative-stage={stage.id}
+						data-stage-status={stage.status}
 						style="--stage-color:{stage.color}"
 					>
-						<span class="stage-dot" aria-hidden="true" />
-						<span>{stage.shortLabel}</span>
+						<button
+							type="button"
+							class="stage-toggle"
+							aria-expanded={!folded}
+							title={folded ? '展开这个阶段' : '折叠这个阶段'}
+							on:click={() => toggleStage(section)}
+							data-stage-toggle={stage.id}
+						>
+							<svg
+								class="stage-chevron size-3"
+								class:rotate-90={!folded}
+								viewBox="0 0 16 16"
+								fill="none"
+								aria-hidden="true"
+								><path
+									d="m6 4 4 4-4 4"
+									stroke="currentColor"
+									stroke-width="1.8"
+									stroke-linecap="round"
+									stroke-linejoin="round"
+								/></svg
+							>
+							<span class="stage-dot" aria-hidden="true" />
+							<span>{stage.shortLabel}</span>
+						</button>
 						<span class="feed-count tm-num">{stage.done}/{stage.total}</span>
+						{#if folded && summary}
+							<span class="stage-summary tm-num" data-stage-summary
+								>{summary.total} 条{summary.handoff ? ` · 交接 ${summary.handoff}` : ''}{summary.steps
+									? ` · ${summary.steps} 步`
+									: ''}{#if summary.fail}<span class="stage-fail"> · 失败 {summary.fail}</span
+									>{/if}</span
+							>
+						{/if}
 						<span class="stage-rule" aria-hidden="true" />
 					</li>
 				{/if}
+				{#if !folded}
 				<!-- svelte-ignore a11y-click-events-have-key-events a11y-no-noninteractive-element-interactions -->
 				<li
 					class="row-card {focused ? 'is-focused' : ''} kind-{item.kind}"
@@ -610,11 +691,16 @@
 								{/if}
 
 								{#if item.body}
-									{@const longBody = item.body.length > 220 || item.body.split('\n').length > 4}
+									{@const brief = item.kind === 'milestone'}
+									{@const longBody = brief
+										? item.body.length > 120 || item.body.split('\n').length > 2
+										: item.body.length > 220 || item.body.split('\n').length > 4}
 									<div
 										class="mt-1.5 whitespace-pre-wrap break-words text-[12.5px] leading-relaxed text-gray-700 dark:text-gray-200 {longBody &&
 										!isBodyOpen
-											? 'line-clamp-4'
+											? brief
+												? 'line-clamp-2'
+												: 'line-clamp-4'
 											: ''}"
 									>
 										{item.body}
@@ -705,6 +791,7 @@
 						</div>
 					{/if}
 				</li>
+				{/if}
 			{/each}
 		</ol>
 	{/if}
@@ -767,6 +854,48 @@
 	.timeline > .row-card:last-child::after {
 		inset-block-end: 50%;
 	}
+	.stage-toggle {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.35rem;
+		border-radius: 0.4rem;
+		padding: 0.05rem 0.3rem 0.05rem 0.1rem;
+		margin-left: -0.1rem;
+		font: inherit;
+		color: inherit;
+		transition: background 0.16s ease;
+	}
+	.stage-toggle:hover,
+	.stage-toggle:focus-visible {
+		background: color-mix(in srgb, var(--stage-color) 14%, transparent);
+	}
+	.stage-chevron {
+		color: hsl(var(--tm-muted));
+		transition: transform 0.18s var(--tm-ease, ease);
+	}
+	.timeline-stage[data-stage-status='running'] .stage-dot {
+		box-shadow: 0 0 0 3px color-mix(in srgb, var(--stage-color) 22%, transparent),
+			0 0 8px var(--stage-color);
+	}
+	.timeline-stage.is-folded {
+		border-radius: 0.6rem;
+		padding: 0.3rem 0.45rem 0.3rem 0.15rem;
+		margin-inline-start: -0.15rem;
+		background: linear-gradient(
+			90deg,
+			color-mix(in srgb, var(--stage-color) 11%, transparent),
+			transparent 85%
+		);
+	}
+	.stage-summary {
+		flex: none;
+		font-size: 0.66rem;
+		font-weight: 500;
+		color: hsl(var(--tm-muted));
+	}
+	.stage-fail {
+		color: hsl(var(--tm-bad));
+	}
 	.stage-dot {
 		width: 7px;
 		height: 7px;
@@ -801,17 +930,33 @@
 			box-shadow 0.16s ease,
 			background 0.16s ease;
 	}
+	.row-card {
+		background:
+			linear-gradient(
+				90deg,
+				color-mix(in srgb, var(--lane-color) 7%, transparent),
+				transparent 38%
+			),
+			var(--tm-workbench-card);
+	}
+	/* Lane color edge: the same color as the member's rail on the right. */
 	.row-card::before {
 		content: '';
 		position: absolute;
 		left: 0;
-		top: 0.5rem;
-		bottom: 0.5rem;
-		width: 2.5px;
+		top: 0.45rem;
+		bottom: 0.45rem;
+		width: 3px;
 		border-radius: 9999px;
-		background: var(--lane-color, hsl(var(--tm-accent)));
-		opacity: 0.45;
-		transition: opacity 0.16s ease;
+		background: linear-gradient(
+			180deg,
+			var(--lane-color, hsl(var(--tm-accent))),
+			color-mix(in srgb, var(--lane-color, hsl(var(--tm-accent))) 35%, transparent)
+		);
+		opacity: 0.8;
+		transition:
+			opacity 0.16s ease,
+			box-shadow 0.16s ease;
 	}
 	.row-card:hover::before,
 	.row-card.is-focused::before {
@@ -912,6 +1057,11 @@
 	.row-card.kind-milestone {
 		background: linear-gradient(90deg, hsl(var(--tm-accent) / 0.08), var(--tm-workbench-card) 68%);
 		border-color: hsl(var(--tm-accent) / 0.24);
+		padding: 0.4rem 0.7rem;
+	}
+	.kind-milestone .banner-icon {
+		width: 18px;
+		height: 18px;
 	}
 	.kind-milestone,
 	.kind-deploy {

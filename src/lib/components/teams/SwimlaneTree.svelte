@@ -1,6 +1,12 @@
 <script lang="ts">
 	import { createEventDispatcher, onDestroy, tick } from 'svelte';
-	import { formatDuration } from './model';
+	import {
+		formatDuration,
+		runnerFamily,
+		runnerLabel,
+		toneOf,
+		type RunnerFamily
+	} from './model';
 
 	import {
 		SWIMLANE_HEADER_HEIGHT,
@@ -42,6 +48,11 @@
 	export let wide = false;
 	export let showWideToggle = true;
 	export let motion = true;
+	/** The team is done: play the closing sequence once (rails sweep, merges light up, head bursts). */
+	export let finished = false;
+	/** Per lane: who runs it (runner name) and its status, for the lane header. */
+	export let laneMeta: Map<string, { runner?: string | null; status?: string | null }> | null =
+		null;
 
 	const dispatch = createEventDispatcher<{
 		focus: { id: string | null; source: 'swimlane'; pin?: boolean };
@@ -179,6 +190,20 @@
 		locateFocusedNode(focusId, scroller);
 	}
 
+	const FAMILY_MARK: Record<RunnerFamily, string> = {
+		claude: 'CL',
+		codex: 'CX',
+		gemini: 'AG',
+		hermes: 'H',
+		other: ''
+	};
+	$: finale = finished && motion;
+	$: mergeOrder = new Map(
+		layout.edges.filter((edge) => edge.kind === 'merge').map((edge, i) => [edge.id, i])
+	);
+	// The head bursts once the merges have lit up (or right after the rails sweep without merges).
+	$: burstDelay = 0.55 + Math.max(mergeOrder.size, 1) * 0.18 + 0.5;
+
 	// Gradient ids must be valid in url(#…); node ids may contain any character.
 	const edgeGradientId = (index: number) => `tm-edge-${uid}-${index}`;
 	// Skip the entrance pop while windowing, otherwise every scroll re-pops the rows coming into view.
@@ -245,22 +270,35 @@
 		>
 			{#each layout.lanes as lane (lane.id)}
 				{@const selected = memberFilter === lane.id}
+				{@const meta = laneMeta?.get(lane.id)}
+				{@const tone = meta?.status ? toneOf(meta.status) : 'idle'}
+				{@const family = runnerFamily(meta?.runner)}
 				<button
 					type="button"
 					class="lane-head absolute top-0 flex h-full -translate-x-1/2 flex-col items-center justify-center px-1"
 					class:is-muted={memberFilter && !selected}
 					aria-pressed={selected}
 					style="left:{lane.x}px;width:{layout.laneWidth - 6}px;--lane-color:{lane.palette.stroke}"
-					title="{lane.name}（{lane.role}）· {lane.nodeCount} 个节点 · 点击筛选"
+					title="{lane.name}（{lane.role}）{meta?.runner
+						? ` · 由 ${runnerLabel(meta.runner)} 执行`
+						: ''} · {lane.nodeCount} 个节点 · 点击筛选"
 					on:click={() => dispatch('toggleMember', selected ? null : lane.id)}
 					data-swimlane-lane={lane.id}
 					data-lane-active={active.has(lane.id) ? 'true' : undefined}
+					data-lane-tone={tone}
 				>
 					<span class="flex max-w-full items-center gap-1.5">
-						<span class="lane-status" aria-hidden="true" />
+						<span class="lane-status" data-tone={tone} aria-hidden="true" />
 						<span class="truncate text-[11px] font-semibold">{lane.name}</span>
 					</span>
-					<span class="lane-count tm-num">{lane.nodeCount}</span>
+					<span class="lane-count tm-num">
+						{#if meta?.runner}
+							<span class="runner-mark" data-family={family} data-lane-runner={meta.runner}
+								>{FAMILY_MARK[family] || meta.runner.slice(0, 2).toUpperCase()}</span
+							>
+						{/if}
+						{lane.nodeCount}
+					</span>
 				</button>
 			{/each}
 		</div>
@@ -374,6 +412,8 @@
 					{#if live && !muted}
 						<rect
 							class="lane-glow"
+							class:workbench-motion={motion}
+							class:lane-breathe={motion}
 							x={lane.x - layout.laneWidth * 0.26}
 							width={layout.laneWidth * 0.52}
 							height={layout.height}
@@ -398,6 +438,16 @@
 									stroke-width="3"
 									stroke-dasharray="12 88"
 									class="rail-scan workbench-motion"
+								/>
+							{/if}
+							{#if finale}
+								<path
+									d={rail}
+									pathLength="100"
+									stroke-width="3.2"
+									class="rail-finale workbench-motion"
+									style="color:{lane.palette.stroke};animation-delay:{lane.index * 0.12}s"
+									data-swimlane-finale="rail"
 								/>
 							{/if}
 						</g>
@@ -435,6 +485,18 @@
 								class="edge-flow workbench-motion"
 								stroke-dasharray="6 94"
 								aria-hidden="true"
+							/>
+						{/if}
+						{#if finale && mergeOrder.has(edge.id)}
+							<path
+								d={path}
+								pathLength="100"
+								fill="none"
+								stroke="currentColor"
+								class="edge-ignite workbench-motion"
+								style="animation-delay:{0.55 + (mergeOrder.get(edge.id) ?? 0) * 0.18}s"
+								aria-hidden="true"
+								data-swimlane-finale="merge"
 							/>
 						{/if}
 						{#if motion && (focusedEdge || recentEdges.has(edge.id))}
@@ -513,9 +575,18 @@
 						{#if node.isHead || related}
 							<circle r="18" fill="url(#tm-node-glow-{uid})" class="node-halo" />
 						{/if}
-						{#if node.isHead}
+						{#if node.isHead && !finished}
 							<circle r="12" class="head-radar head-radar-1 workbench-motion" />
 							<circle r="15" class="head-radar head-radar-2 workbench-motion" />
+						{:else if node.isHead && finale}
+							{#each [0, 1, 2] as ring}
+								<circle
+									r="10"
+									class="finale-burst workbench-motion"
+									style="animation-delay:{burstDelay + ring * 0.22}s"
+									data-swimlane-finale={ring === 0 ? 'burst' : undefined}
+								/>
+							{/each}
 						{/if}
 						<circle data-swimlane-anchor r="9" fill="transparent" />
 						<g class="node-glyph" class:node-enter={nodeEnter}>
@@ -747,14 +818,134 @@
 		border-radius: 50%;
 		background: var(--lane-color);
 	}
-	.lane-head[data-lane-active] .lane-status::after {
+	.lane-head[data-lane-active] {
+		box-shadow: inset 0 -12px 18px -14px var(--lane-color);
+	}
+	/* Status ring around the lane dot: spinning while it works, violet when it needs you, red when
+	   it failed, amber dashes while it waits, a quiet green ring when done. */
+	.lane-status::after {
 		content: '';
 		position: absolute;
-		inset: -3px;
+		inset: -3.5px;
 		border-radius: 50%;
-		border: 1px solid var(--lane-color);
-		animation: tm-radar 2.4s ease-out infinite;
+		border: 1.5px solid transparent;
 		animation-play-state: var(--tm-workbench-play-state, running);
+	}
+	.lane-status[data-tone='run']::after {
+		border-color: var(--lane-color) transparent var(--lane-color) transparent;
+		animation: tm-lane-spin 1.1s linear infinite;
+	}
+	.lane-status[data-tone='user']::after {
+		border-color: hsl(var(--tm-violet));
+		animation: tm-radar 2s ease-out infinite;
+	}
+	.lane-status[data-tone='fail']::after {
+		border-color: hsl(var(--tm-bad));
+	}
+	.lane-status[data-tone='done']::after {
+		border-color: hsl(var(--tm-ok) / 0.75);
+	}
+	.lane-status:is([data-tone='wait'], [data-tone='deps'], [data-tone='quota'])::after {
+		border: 1.5px dashed hsl(var(--tm-warn) / 0.8);
+	}
+	@keyframes tm-lane-spin {
+		to {
+			transform: rotate(360deg);
+		}
+	}
+	.lane-count {
+		display: inline-flex;
+		align-items: center;
+		gap: 4px;
+	}
+	.runner-mark {
+		--mark: hsl(var(--tm-muted));
+		border-radius: 4px;
+		padding: 0 3px;
+		font: 700 8.5px/12px var(--font-mono);
+		letter-spacing: 0.02em;
+		color: var(--mark);
+		background: color-mix(in srgb, var(--mark) 16%, transparent);
+		box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--mark) 38%, transparent);
+	}
+	.runner-mark[data-family='claude'] {
+		--mark: #e8875b;
+	}
+	.runner-mark[data-family='codex'] {
+		--mark: #34d399;
+	}
+	.runner-mark[data-family='gemini'] {
+		--mark: #6ea8ff;
+	}
+	.runner-mark[data-family='hermes'] {
+		--mark: hsl(var(--tm-violet));
+	}
+	.lane-breathe {
+		animation: tm-lane-breathe 3.2s ease-in-out infinite alternate;
+	}
+	@keyframes tm-lane-breathe {
+		from {
+			opacity: 0.55;
+		}
+		to {
+			opacity: 1;
+		}
+	}
+	/* Closing sequence, played once when the team finishes. */
+	.rail-finale {
+		fill: none;
+		stroke-dasharray: 0 100;
+		filter: drop-shadow(0 0 3px currentColor);
+		animation: tm-rail-finale 1.5s cubic-bezier(0.3, 0.7, 0.2, 1) both;
+	}
+	@keyframes tm-rail-finale {
+		0% {
+			stroke-dasharray: 0 100;
+			opacity: 0.95;
+		}
+		70% {
+			stroke-dasharray: 100 0;
+			opacity: 0.95;
+		}
+		100% {
+			stroke-dasharray: 100 0;
+			opacity: 0;
+		}
+	}
+	.edge-ignite {
+		stroke-width: 2.8px;
+		stroke-linecap: round;
+		stroke-dasharray: 100;
+		filter: drop-shadow(0 0 4px currentColor);
+		animation: tm-edge-ignite 0.9s cubic-bezier(0.3, 0.7, 0.2, 1) both;
+	}
+	@keyframes tm-edge-ignite {
+		from {
+			stroke-dashoffset: 100;
+			opacity: 1;
+		}
+		to {
+			stroke-dashoffset: 0;
+			opacity: 0.6;
+		}
+	}
+	.finale-burst {
+		fill: none;
+		stroke: currentColor;
+		stroke-width: 1.6px;
+		transform-box: fill-box;
+		transform-origin: center;
+		animation: tm-finale-burst 1.3s cubic-bezier(0.2, 0.8, 0.3, 1) both;
+	}
+	@keyframes tm-finale-burst {
+		from {
+			opacity: 0.95;
+			transform: scale(0.6);
+		}
+		to {
+			opacity: 0;
+			transform: scale(3.2);
+		}
 	}
 	.rail-scan {
 		animation: tm-rail-scan 3.8s linear infinite;
@@ -896,14 +1087,17 @@
 		font-family: var(--font-mono);
 	}
 	@media (prefers-reduced-motion: reduce), (max-width: 767px) {
-		.lane-head[data-lane-active] .lane-status::after {
-			animation: none;
-		}
 		.edge-focused {
 			filter: none;
 		}
-		.edge-flow {
+		.edge-flow,
+		.rail-finale,
+		.edge-ignite,
+		.finale-burst {
 			display: none;
+		}
+		.lane-status::after {
+			animation: none;
 		}
 		.node-enter {
 			animation: none;

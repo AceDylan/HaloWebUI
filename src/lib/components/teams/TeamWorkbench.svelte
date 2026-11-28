@@ -257,6 +257,14 @@
 		...memberViews.filter((member) => toneOf(member.status) === 'run').map((member) => member.name)
 	]);
 	$: swimlaneMotion = pageVisible && !reducedMotion && !$mobile;
+	$: laneMeta = new Map<string, { runner?: string | null; status?: string | null }>([
+		[LEAD_LANE_ID, { runner: 'hermes', status: lead.status }],
+		...memberViews.map((member): [string, { runner?: string | null; status?: string | null }] => [
+			member.name,
+			{ runner: member.actualRunner, status: member.status }
+		])
+	]);
+	$: swimlaneFinished = phase === 'completed' && !replay;
 	$: lanePalettes = new Map<string, LanePalette>(
 		swimlaneLayout.lanes.map((l) => [l.id, l.palette])
 	);
@@ -978,10 +986,7 @@
 						>
 						<div class="min-w-0 flex-1">
 							<div class="text-sm font-semibold text-gray-900 dark:text-gray-50">
-								全部 {counts.total} 个任务已完成{#if team.approved_at && team.finished_at}<span
-										class="tm-num block whitespace-nowrap text-xs font-normal text-gray-500 sm:ml-2 sm:inline-block"
-										>用时 {elapsed(team.finished_at - team.approved_at)}</span
-									>{/if}
+								全部 {counts.total} 个任务已完成
 							</div>
 							<div class="text-xs text-gray-500 dark:text-gray-400">
 								{#if conclusionBrief?.status === 'ready'}
@@ -1017,6 +1022,81 @@
 								>阅读结论</button
 							>
 						</div>
+						<!-- At a glance: how it ended (tasks, time, acceptance, deploy, knowledge base). -->
+						<div class="hud-chips flex basis-full flex-wrap items-center gap-1.5" data-done-hud>
+							<span class="hud-chip" data-tone="ok" data-hud="tasks"
+								><span class="hud-key">任务</span><span class="tm-num"
+									>{counts.done}/{counts.total}</span
+								></span
+							>
+							{#if team.approved_at && team.finished_at}
+								<span class="hud-chip" data-hud="time"
+									><span class="hud-key">用时</span><span class="tm-num"
+										>{elapsed(team.finished_at - team.approved_at)}</span
+									></span
+								>
+							{/if}
+							{#if conclusionBrief?.status === 'ready' && acceptance}
+								<span
+									class="hud-chip"
+									data-hud="acceptance"
+									data-tone={acceptance.status !== 'ready'
+										? 'busy'
+										: acceptance.verdict === 'met'
+											? 'ok'
+											: acceptance.verdict === 'unmet'
+												? 'bad'
+												: 'warn'}
+									><span class="hud-key">验收</span>{acceptance.status !== 'ready'
+										? '对照目标中…'
+										: acceptance.verdict === 'met'
+											? '目标已达成'
+											: acceptance.verdict === 'unmet'
+												? '没有达成'
+												: '部分达成'}{#if acceptance.status === 'ready' && acceptance.gaps?.length}<span
+											class="hud-count tm-num">{acceptance.gaps.length} 处缺口</span
+										>{/if}</span
+								>
+							{/if}
+							{#if projectTeam && deployBrief}
+								<span
+									class="hud-chip"
+									data-hud="deploy"
+									data-tone={deployBrief.status === 'succeeded'
+										? 'ok'
+										: deployBrief.status === 'failed'
+											? 'bad'
+											: 'busy'}
+									><span class="hud-key">部署</span>{deployBrief.status === 'succeeded'
+										? '已推送部署'
+										: deployBrief.status === 'failed'
+											? '失败'
+											: deployBrief.status === 'running'
+												? '进行中…'
+												: '未开始'}</span
+								>
+							{/if}
+							{#if archive}
+								<span
+									class="hud-chip"
+									data-hud="archive"
+									data-tone={archive.status === 'saved'
+										? 'ok'
+										: archive.status === 'failed'
+											? 'bad'
+											: vaultArchivePending(archive)
+												? 'busy'
+												: 'idle'}
+									><span class="hud-key">知识库</span>{archive.status === 'saved'
+										? '已写入'
+										: archive.status === 'failed'
+											? '写入失败'
+											: vaultArchivePending(archive)
+												? '判断中…'
+												: '未写入'}</span
+								>
+							{/if}
+						</div>
 						{#if conclusionBrief?.status === 'ready' && acceptance}
 							<div
 								class="accept basis-full border-t pt-2.5 text-xs"
@@ -1044,9 +1124,9 @@
 														· {acceptance.summary}</span
 													>{/if}
 											</div>
-											<ul class="mt-1 flex flex-col gap-0.5 text-gray-600 dark:text-gray-300">
+											<ul class="gap-list mt-1.5 flex flex-col gap-1 text-gray-600 dark:text-gray-300">
 												{#each acceptance.gaps ?? [] as gap}
-													<li class="break-words">
+													<li class="gap-item break-words">
 														<span class="font-medium text-gray-800 dark:text-gray-100"
 															>{gap.title}</span
 														>{gap.detail ? `：${gap.detail}` : ''}
@@ -1069,7 +1149,7 @@
 						{/if}
 						{#if archive}
 							<div
-								class="mt-2 break-words text-xs text-gray-600 dark:text-gray-300"
+								class="archive-line basis-full break-words text-xs text-gray-600 dark:text-gray-300"
 								data-vault-archive={archive.status}
 								role="status"
 							>
@@ -1166,6 +1246,8 @@
 									leadName={lead.name}
 									precomputedLayout={swimlaneLayout}
 									{activeLanes}
+									{laneMeta}
+									finished={swimlaneFinished}
 									{stages}
 									motion={false}
 									{memberFilter}
@@ -1375,6 +1457,8 @@
 								leadName={lead.name}
 								precomputedLayout={swimlaneLayout}
 								{activeLanes}
+								{laneMeta}
+								finished={swimlaneFinished}
 								{stages}
 								wide={swimlaneWide}
 								motion={swimlaneMotion}
@@ -1632,11 +1716,125 @@
 	.accept {
 		border-color: hsl(var(--tm-line));
 	}
+	.accept:is([data-acceptance='partial'], [data-acceptance='unmet']) {
+		position: relative;
+		padding: 0.6rem 0.75rem;
+		border: 1px solid hsl(var(--tm-warn) / 0.28);
+		border-radius: 0.75rem;
+		background: linear-gradient(90deg, hsl(var(--tm-warn) / 0.09), transparent 70%);
+	}
+	.accept[data-acceptance='unmet'] {
+		border-color: hsl(var(--tm-bad) / 0.3);
+		background: linear-gradient(90deg, hsl(var(--tm-bad) / 0.08), transparent 70%);
+	}
+	.gap-item {
+		position: relative;
+		padding-left: 0.9rem;
+	}
+	.gap-item::before {
+		content: '';
+		position: absolute;
+		left: 0.1rem;
+		top: 0.45em;
+		width: 6px;
+		height: 6px;
+		transform: rotate(45deg);
+		border-radius: 1px;
+		background: hsl(var(--tm-warn));
+		box-shadow: 0 0 6px hsl(var(--tm-warn) / 0.6);
+	}
+	.archive-line {
+		display: flex;
+		align-items: baseline;
+		gap: 0.4rem;
+	}
+	.archive-line::before {
+		content: '';
+		flex: none;
+		width: 6px;
+		height: 6px;
+		border-radius: 50%;
+		background: hsl(var(--tm-violet));
+		box-shadow: 0 0 6px hsl(var(--tm-violet) / 0.7);
+		transform: translateY(-1px);
+	}
+	.hud-chip {
+		--chip: hsl(var(--tm-muted));
+		display: inline-flex;
+		align-items: center;
+		gap: 0.35rem;
+		border-radius: 9999px;
+		padding: 0.14rem 0.6rem 0.14rem 0.5rem;
+		font-size: 0.72rem;
+		font-weight: 600;
+		color: hsl(var(--tm-ink));
+		border: 1px solid color-mix(in srgb, var(--chip) 38%, transparent);
+		background: color-mix(in srgb, var(--chip) 10%, transparent);
+	}
+	.hud-chip::before {
+		content: '';
+		width: 6px;
+		height: 6px;
+		border-radius: 50%;
+		background: var(--chip);
+		box-shadow: 0 0 6px var(--chip);
+	}
+	.hud-chip[data-tone='ok'] {
+		--chip: hsl(var(--tm-ok));
+	}
+	.hud-chip[data-tone='warn'] {
+		--chip: hsl(var(--tm-warn));
+	}
+	.hud-chip[data-tone='bad'] {
+		--chip: hsl(var(--tm-bad));
+	}
+	.hud-chip[data-tone='busy'] {
+		--chip: hsl(var(--tm-accent));
+	}
+	.hud-chip[data-tone='busy']::before {
+		animation: hud-blink 1.2s ease-in-out infinite alternate;
+	}
+	@keyframes hud-blink {
+		to {
+			opacity: 0.3;
+		}
+	}
+	.hud-key {
+		font-weight: 500;
+		color: hsl(var(--tm-muted));
+	}
+	.hud-count {
+		border-radius: 9999px;
+		padding: 0 0.35rem;
+		font-size: 0.66rem;
+		background: color-mix(in srgb, var(--chip) 18%, transparent);
+	}
 	/* the one celebratory moment: the halo closes around an ink check (it used to be a green disc) */
 	.done-banner {
-		background: radial-gradient(120% 160% at 0% 0%, hsl(var(--tm-accent) / 0.08), transparent 55%),
+		position: relative;
+		overflow: hidden;
+		background:
+			radial-gradient(120% 160% at 0% 0%, hsl(var(--tm-accent) / 0.1), transparent 55%),
+			radial-gradient(80% 140% at 100% 100%, hsl(var(--tm-violet) / 0.07), transparent 60%),
 			hsl(var(--tm-surface));
 		border-color: hsl(var(--tm-line-strong));
+	}
+	/* a thin halo light along the top edge */
+	.done-banner::before {
+		content: '';
+		position: absolute;
+		inset: 0 0 auto;
+		height: 1px;
+		background: linear-gradient(
+			90deg,
+			transparent,
+			var(--halo-ion, hsl(var(--tm-accent))),
+			var(--halo-violet, hsl(var(--tm-violet))),
+			var(--halo-solar, hsl(var(--tm-warn))),
+			transparent
+		);
+		opacity: 0.8;
+		pointer-events: none;
 	}
 	.check {
 		color: hsl(var(--tm-ink));
@@ -1736,7 +1934,8 @@
 	@media (prefers-reduced-motion: reduce) {
 		.ghost,
 		.connector-path,
-		.inspector-panel {
+		.inspector-panel,
+		.hud-chip[data-tone='busy']::before {
 			animation: none;
 		}
 		.check path {

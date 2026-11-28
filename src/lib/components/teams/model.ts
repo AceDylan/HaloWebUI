@@ -482,6 +482,39 @@ export const replayMarks = (events: TeamEvent[], max = 80): ReplayMark[] => {
 	return Array.from({ length: max }, (_, i) => kept[Math.floor(i * step)]);
 };
 
+/**
+ * Activity waveform for the replay track. The track is index-based (every event is one step), so
+ * plain counts would be flat: each bucket instead holds an equal share of the events and its
+ * height is how fast they came (events per second, log-scaled to 0..1). A burst of tool calls
+ * reads as a peak, a long wait as a trough, both lined up with the slider position.
+ */
+export const replayDensity = (events: Pick<TeamEvent, 'ts'>[], buckets = 48): number[] => {
+	if (events.length < 2) return [];
+	const count = Math.min(buckets, events.length - 1);
+	const rates: number[] = [];
+	for (let b = 0; b < count; b++) {
+		const from = Math.floor((b * (events.length - 1)) / count);
+		const to = Math.floor(((b + 1) * (events.length - 1)) / count);
+		const span = Math.max(1, (events[to]?.ts ?? 0) - (events[from]?.ts ?? 0));
+		rates.push(Math.log1p((to - from) / span));
+	}
+	const peak = Math.max(...rates);
+	return rates.map((rate) => (peak > 0 ? Math.round((rate / peak) * 1000) / 1000 : 0));
+};
+
+export type RunnerFamily = 'claude' | 'codex' | 'gemini' | 'hermes' | 'other';
+
+/** Which engine family a runner belongs to (officlaude / cchclaude / anyclaude are all Claude). */
+export const runnerFamily = (name: string | null | undefined): RunnerFamily => {
+	const value = (name ?? '').toLowerCase();
+	if (!value) return 'other';
+	if (value.includes('claude')) return 'claude';
+	if (value.includes('codex') || value.includes('gpt')) return 'codex';
+	if (value.includes('agy') || value.includes('gemini')) return 'gemini';
+	if (value.includes('hermes')) return 'hermes';
+	return 'other';
+};
+
 // --- avatars / formatting -------------------------------------------------------------------
 
 export type AvatarKind =

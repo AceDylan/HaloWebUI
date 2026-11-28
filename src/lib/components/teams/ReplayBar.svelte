@@ -2,7 +2,14 @@
 	import { createEventDispatcher, onDestroy } from 'svelte';
 
 	import type { TeamEvent } from '$lib/apis/teams';
-	import { formatClock, formatDuration, REPLAY_SPEEDS, replayDelay, replayMarks } from './model';
+	import {
+		formatClock,
+		formatDuration,
+		REPLAY_SPEEDS,
+		replayDelay,
+		replayDensity,
+		replayMarks
+	} from './model';
 
 	/**
 	 * Replay = moving a cursor over the recorded events. It only changes what is shown: it never
@@ -24,6 +31,25 @@
 	$: end = events[last]?.ts ?? start;
 	$: at = events[cursor]?.ts ?? start;
 	$: marks = events.length > 1 ? replayMarks(events) : [];
+	$: wave = events.length > 3 ? replayDensity(events) : [];
+	$: playedUpTo = last ? cursor / last : 1;
+	// Smooth area through the bucket centers (x 0..100, y 0..10 with 10 at the bottom).
+	$: wavePath = (() => {
+		if (!wave.length) return '';
+		const pts = wave.map((v, i): [number, number] => [
+			((i + 0.5) / wave.length) * 100,
+			10 - Math.max(0.6, v * 9.4)
+		]);
+		let d = `M0 10L0 ${pts[0][1]}L${pts[0][0]} ${pts[0][1]}`;
+		for (let i = 1; i < pts.length; i++) {
+			const [x0, y0] = pts[i - 1];
+			const [x1, y1] = pts[i];
+			const mx = (x0 + x1) / 2;
+			d += `C${mx} ${y0} ${mx} ${y1} ${x1} ${y1}`;
+		}
+		return `${d}L100 ${pts[pts.length - 1][1]}L100 10Z`;
+	})();
+	const waveId = `tm-wave-${Math.random().toString(36).slice(2, 7)}`;
 
 	const MARK: Record<string, string> = {
 		fail: 'bg-red-500',
@@ -149,7 +175,29 @@
 	{/if}
 	<label class="flex min-w-[160px] flex-1 items-center gap-3">
 		<span class="sr-only">回放时间轴</span>
-		<span class="relative flex flex-1 items-center">
+		<span class="relative flex flex-1 items-center {wave.length ? 'pt-[15px]' : ''}">
+			{#if wave.length}
+				<!-- Activity: taller = events came faster here. The played part glows, the rest is ghosted. -->
+				<svg
+					class="wave pointer-events-none absolute inset-x-[7px] top-0 h-[13px]"
+					viewBox="0 0 100 10"
+					preserveAspectRatio="none"
+					aria-hidden="true"
+					data-replay-wave
+				>
+					<defs>
+						<linearGradient id="{waveId}-fill" x2="0" y2="1">
+							<stop class="wave-stop-top" />
+							<stop offset="1" class="wave-stop-bottom" />
+						</linearGradient>
+						<clipPath id="{waveId}-played">
+							<rect width={playedUpTo * 100} height="10" />
+						</clipPath>
+					</defs>
+					<path d={wavePath} class="wave-ghost" />
+					<path d={wavePath} fill="url(#{waveId}-fill)" clip-path="url(#{waveId}-played)" class="wave-played" />
+				</svg>
+			{/if}
 			<input
 				type="range"
 				min="0"
@@ -231,5 +279,26 @@
 	}
 	.scrub:disabled {
 		opacity: 0.5;
+	}
+	.wave {
+		width: calc(100% - 14px);
+		overflow: visible;
+	}
+	.wave-ghost {
+		fill: hsl(var(--tm-line-strong));
+	}
+	.wave-played {
+		filter: drop-shadow(0 0 3px hsl(var(--tm-accent-2) / 0.55));
+	}
+	.wave-stop-top {
+		stop-color: hsl(var(--tm-accent-2));
+		stop-opacity: 0.95;
+	}
+	.wave-stop-bottom {
+		stop-color: hsl(var(--tm-accent));
+		stop-opacity: 0.25;
+	}
+	[data-live='true'] .wave-stop-top {
+		stop-color: hsl(var(--tm-violet));
 	}
 </style>

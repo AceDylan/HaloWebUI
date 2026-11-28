@@ -9,7 +9,9 @@ import {
 	groupNarrative,
 	lanePalette,
 	layoutSwimlanes,
-	sectionStageIds
+	sectionStageIds,
+	swimlaneEdgeCurveEndY,
+	swimlaneEdgePath
 } from './narrative';
 
 const ev = (seq: number, partial: Partial<TeamEvent> = {}): TeamEvent => ({
@@ -207,6 +209,73 @@ describe('narrative pure engine', () => {
 		const mergeEdges = layout.edges.filter((e) => e.kind === 'merge');
 		expect(mergeEdges.length).toBeGreaterThanOrEqual(2);
 		expect(lanePalette('extra-member', 9).stroke).toMatch(/^hsl\(/);
+	});
+
+	it('routes long edges along lane rails instead of leaving them floating mid-canvas', () => {
+		// Member lanes go quiet long before the lead merges and deploys (the 2026-11-28 screenshot).
+		const events: TeamEvent[] = [
+			ev(1, { member: 'dev-a', task_id: 't_1', key: 'T1', text: '开始设计' }),
+			ev(2, {
+				type: 'handoff',
+				member: 'dev-a',
+				text: '交给 dev-b',
+				data: { to: [{ task_id: 't_2', key: 'T2', member: 'dev-b' }] }
+			}),
+			...Array.from({ length: 14 }, (_, idx) =>
+				ev(3 + idx, {
+					type: 'message',
+					who: 'lead',
+					member: null,
+					task_id: null,
+					key: null,
+					text: `负责人进度 ${idx}`
+				})
+			),
+			ev(30, { member: 'dev-b', task_id: 't_2', key: 'T2', text: '开始实现' })
+		];
+		const deploy: TeamDeployState = {
+			status: 'succeeded',
+			steps: [{ key: 'merge', label: '合并到 main', status: 'done', at: 1790900400 }]
+		};
+		const items = groupNarrative(events, TASKS, { deploy, includeDeploy: true });
+		const layout = layoutSwimlanes(items, [{ name: 'dev-a' }, { name: 'dev-b' }], {
+			leadName: '统筹'
+		});
+		const byId = new Map(layout.nodes.map((node) => [node.id, node]));
+
+		const merges = layout.edges.filter((e) => e.kind === 'merge');
+		const fromA = merges.find((e) => byId.get(e.fromNodeId)?.laneId === 'dev-a');
+		expect(fromA).toBeTruthy();
+		const last = byId.get(fromA!.fromNodeId)!;
+		const merge = byId.get(fromA!.toNodeId!)!;
+		// Starts on the member's last node, not 1.5 rows above the merge in an empty lane.
+		expect([fromA!.fromX, fromA!.fromY]).toEqual([last.x, last.y]);
+		expect(fromA!.compact).toBe(true);
+		expect(fromA!.elbow).toEqual({ at: 'from', y: merge.y - layout.rowHeight * 1.5 });
+		expect(swimlaneEdgePath(fromA!)).toMatch(
+			new RegExp(`^M ${last.x} ${last.y} V ${fromA!.elbow!.y} C `)
+		);
+		expect(fromA!.fromColor).toBe(layout.lanes[last.laneIndex].palette.stroke);
+		expect(fromA!.color).not.toBe(fromA!.fromColor);
+
+		// A long handoff lands on the receiving node via the target lane rail.
+		const handoff = layout.edges.find((e) => e.kind === 'handoff')!;
+		const target = byId.get(handoff.toNodeId!)!;
+		expect(handoff.compact).toBe(true);
+		expect(handoff.toY).toBe(target.y);
+		expect(handoff.elbow?.at).toBe('to');
+		expect(swimlaneEdgePath(handoff)).toMatch(new RegExp(`V ${target.y}$`));
+		expect(swimlaneEdgeCurveEndY(handoff)).toBe(handoff.elbow!.y);
+
+		// Every merge but a short hop fans in along its lane; short non-merge edges keep a single curve.
+		for (const edge of merges) {
+			const span = byId.get(edge.toNodeId!)!.row - byId.get(edge.fromNodeId)!.row;
+			expect(edge.elbow?.at).toBe(span > 2 ? 'from' : undefined);
+		}
+		for (const edge of layout.edges.filter((e) => !e.compact && e.kind !== 'merge')) {
+			expect(edge.elbow).toBeUndefined();
+			expect(swimlaneEdgePath(edge)).not.toContain(' V ');
+		}
 	});
 
 	it('groups consecutive stage rows, preserves their spacing, and adapts lane widths', () => {

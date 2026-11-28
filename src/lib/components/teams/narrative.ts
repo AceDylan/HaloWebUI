@@ -779,9 +779,14 @@ export type SwimlaneEdge = {
 	toX: number;
 	toY: number;
 	color: string;
+	/** Source lane color; the stroke blends from it into `color`. */
+	fromColor: string;
 	dashed: boolean;
 	compact: boolean;
 	label?: string;
+	/** Long edges run along a lane rail instead of slicing across every row: `from` = drop down the
+	 *  source lane to `y` and then curve over; `to` = curve over at `y` and then run down the target lane. */
+	elbow?: { at: 'from' | 'to'; y: number };
 };
 
 export type SwimlaneLayout = {
@@ -808,6 +813,31 @@ export type SwimlaneStageBand = {
 };
 
 const MAX_EDGE_SPAN_ROWS = 10;
+const MERGE_ELBOW_MIN_ROWS = 2;
+
+/** Where the drawn curve of an edge ends (the rest is a straight run along the target lane). */
+export const swimlaneEdgeCurveEndY = (e: SwimlaneEdge): number =>
+	e.elbow?.at === 'to' ? e.elbow.y : e.toY;
+
+const bezier = (fx: number, fy: number, tx: number, ty: number): string => {
+	const dy = Math.max(18, Math.abs(ty - fy) * 0.48);
+	return `C ${fx} ${fy + dy}, ${tx} ${ty - dy}, ${tx} ${ty}`;
+};
+
+export const swimlaneEdgePath = (e: SwimlaneEdge): string => {
+	if (e.kind === 'retry' && Math.abs(e.fromX - e.toX) < 2) {
+		// Same-lane loopback arc on the left side of the rail.
+		const bulge = Math.min(34, Math.max(20, (e.toY - e.fromY) * 0.25));
+		return `M ${e.fromX} ${e.fromY} C ${e.fromX - bulge} ${e.fromY + 12}, ${e.toX - bulge} ${e.toY - 12}, ${e.toX} ${e.toY}`;
+	}
+	if (e.elbow?.at === 'from') {
+		return `M ${e.fromX} ${e.fromY} V ${e.elbow.y} ${bezier(e.fromX, e.elbow.y, e.toX, e.toY)}`;
+	}
+	if (e.elbow?.at === 'to') {
+		return `M ${e.fromX} ${e.fromY} ${bezier(e.fromX, e.fromY, e.toX, e.elbow.y)} V ${e.toY}`;
+	}
+	return `M ${e.fromX} ${e.fromY} ${bezier(e.fromX, e.fromY, e.toX, e.toY)}`;
+};
 
 const nodeColorForKind = (kind: NarrativeKind, laneStroke: string): string => {
 	switch (kind) {
@@ -976,6 +1006,7 @@ export const layoutSwimlanes = (
 	const edges: SwimlaneEdge[] = [];
 	const lastFailByTask = new Map<string, SwimlaneNode>();
 	const lastNodeByLane = new Map<string, SwimlaneNode>();
+	const laneColor = (node: SwimlaneNode) => lanes[node.laneIndex].palette.stroke;
 
 	for (let i = 0; i < items.length; i++) {
 		const item = items[i];
@@ -999,6 +1030,7 @@ export const layoutSwimlanes = (
 				toX: node.x,
 				toY: node.y,
 				color: 'hsl(var(--tm-warn))',
+				fromColor: 'hsl(var(--tm-warn))',
 				dashed: true,
 				compact: span > MAX_EDGE_SPAN_ROWS,
 				label: item.badge
@@ -1023,6 +1055,7 @@ export const layoutSwimlanes = (
 				const toRow = nextNode ? nextNode.row : Math.min(items.length - 0.35, i + 0.85);
 				const span = toRow - i;
 				const compact = span > MAX_EDGE_SPAN_ROWS;
+				const bendY = node.y + rowHeight * 1.4;
 				edges.push({
 					id: `ho-${node.id}-${targetLane.id}-${target.key ?? ''}`,
 					kind: 'handoff',
@@ -1031,11 +1064,13 @@ export const layoutSwimlanes = (
 					fromX: node.x,
 					fromY: node.y,
 					toX: targetLane.x,
-					toY: compact ? node.y + rowHeight * 1.4 : nextNode ? nextNode.y : topPad + toRow * rowHeight,
+					toY: nextNode ? nextNode.y : compact ? bendY : topPad + toRow * rowHeight,
 					color: targetLane.palette.stroke,
+					fromColor: laneColor(node),
 					dashed: !nextNode,
 					compact,
-					label: target.key ? `#${target.key}` : undefined
+					label: target.key ? `#${target.key}` : undefined,
+					...(compact && nextNode ? { elbow: { at: 'to' as const, y: bendY } } : {})
 				});
 			}
 		}
@@ -1053,6 +1088,7 @@ export const layoutSwimlanes = (
 				}
 				const span = nextNode ? nextNode.row - i : 1;
 				const compact = span > MAX_EDGE_SPAN_ROWS;
+				const color = item.who === 'user' ? 'hsl(var(--tm-violet))' : 'hsl(var(--tm-accent))';
 				edges.push({
 					id: `steer-${node.id}-${targetLane.id}`,
 					kind: 'steer',
@@ -1061,14 +1097,14 @@ export const layoutSwimlanes = (
 					fromX: node.x,
 					fromY: node.y,
 					toX: targetLane.x,
-					toY: compact
-						? node.y + rowHeight * 1.15
-						: nextNode
-							? nextNode.y
-							: node.y + rowHeight * 0.75,
-					color: item.who === 'user' ? 'hsl(var(--tm-violet))' : 'hsl(var(--tm-accent))',
+					toY: nextNode ? nextNode.y : node.y + rowHeight * 0.75,
+					color,
+					fromColor: color,
 					dashed: true,
-					compact
+					compact,
+					...(compact && nextNode
+						? { elbow: { at: 'to' as const, y: node.y + rowHeight * 1.15 } }
+						: {})
 				});
 			}
 		}
@@ -1084,12 +1120,18 @@ export const layoutSwimlanes = (
 					fromNodeId: prev.id,
 					toNodeId: node.id,
 					fromX: prev.x,
-					fromY: span > MAX_EDGE_SPAN_ROWS ? node.y - rowHeight * 1.5 : prev.y,
+					// Always start at the member's last node. Anything longer than a short hop drops down
+					// its own (empty) rail first, so merges fan in together instead of slicing across labels.
+					fromY: prev.y,
 					toX: node.x,
 					toY: node.y,
 					color: 'hsl(var(--tm-ok))',
+					fromColor: laneColor(prev),
 					dashed: false,
-					compact: span > MAX_EDGE_SPAN_ROWS
+					compact: span > MAX_EDGE_SPAN_ROWS,
+					...(span > MERGE_ELBOW_MIN_ROWS
+						? { elbow: { at: 'from' as const, y: node.y - rowHeight * 1.5 } }
+						: {})
 				});
 			}
 		}

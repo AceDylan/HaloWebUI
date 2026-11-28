@@ -8,10 +8,11 @@
 		connectedSwimlaneIds,
 		fitSwimlaneLabel,
 		layoutSwimlanes,
+		swimlaneEdgeCurveEndY,
+		swimlaneEdgePath,
 		type NarrativeItem,
 		type NarrativeKind,
 		type StageSegment,
-		type SwimlaneEdge,
 		type SwimlaneLayout,
 		type SwimlaneNode
 	} from './narrative';
@@ -178,15 +179,10 @@
 		locateFocusedNode(focusId, scroller);
 	}
 
-	const edgePath = (e: SwimlaneEdge): string => {
-		if (e.kind === 'retry' && Math.abs(e.fromX - e.toX) < 2) {
-			// Same-lane loopback arc on the left side of the rail.
-			const bulge = Math.min(34, Math.max(20, (e.toY - e.fromY) * 0.25));
-			return `M ${e.fromX} ${e.fromY} C ${e.fromX - bulge} ${e.fromY + 12}, ${e.toX - bulge} ${e.toY - 12}, ${e.toX} ${e.toY}`;
-		}
-		const dy = Math.max(18, Math.abs(e.toY - e.fromY) * 0.48);
-		return `M ${e.fromX} ${e.fromY} C ${e.fromX} ${e.fromY + dy}, ${e.toX} ${e.toY - dy}, ${e.toX} ${e.toY}`;
-	};
+	// Gradient ids must be valid in url(#…); node ids may contain any character.
+	const edgeGradientId = (index: number) => `tm-edge-${uid}-${index}`;
+	// Skip the entrance pop while windowing, otherwise every scroll re-pops the rows coming into view.
+	$: nodeEnter = motion && !windowing;
 </script>
 
 <div class="flex h-full min-h-0 flex-col" data-swimlane-tree>
@@ -297,6 +293,21 @@
 							<path d="M1 1.5 8.5 5 1 8.5Z" fill={color} />
 						</marker>
 					{/each}
+					{#each visibleEdges as edge, index (edge.id)}
+						{#if edge.fromColor !== edge.color}
+							<linearGradient
+								id={edgeGradientId(index)}
+								gradientUnits="userSpaceOnUse"
+								x1={edge.fromX}
+								y1={edge.fromY}
+								x2={edge.toX}
+								y2={edge.toY}
+							>
+								<stop offset="0.08" stop-color={edge.fromColor} />
+								<stop offset="0.92" stop-color={edge.color} />
+							</linearGradient>
+						{/if}
+					{/each}
 					{#each layout.lanes as lane (lane.id)}
 						<linearGradient id={`tm-lane-${uid}-${lane.index}`} x2="0" y2="1">
 							<stop stop-color={lane.palette.stroke} stop-opacity="0.14" />
@@ -393,9 +404,11 @@
 					{/if}
 				{/each}
 
-				{#each visibleEdges as edge (edge.id)}
+				{#each visibleEdges as edge, index (edge.id)}
 					{@const focusedEdge = connected.edgeIds.has(edge.id)}
-					{@const path = edgePath(edge)}
+					{@const path = swimlaneEdgePath(edge)}
+					{@const stroke =
+						edge.fromColor !== edge.color ? `url(#${edgeGradientId(index)})` : 'currentColor'}
 					{@const label =
 						edge.compact && edge.label ? fitSwimlaneLabel(edge.label, layout.laneWidth - 24) : null}
 					<g
@@ -404,22 +417,26 @@
 						style="color:{edge.color}"
 						opacity={focusedEdge ? 1 : spotlight ? 0.18 : 0.78}
 					>
+						<path d={path} fill="none" {stroke} stroke-width="5.5" stroke-opacity="0.2" />
 						<path
 							d={path}
 							fill="none"
-							stroke="currentColor"
-							stroke-width="5.5"
-							stroke-opacity="0.2"
-						/>
-						<path
-							d={path}
-							fill="none"
-							stroke="currentColor"
+							{stroke}
 							stroke-width={focusedEdge ? 2.4 : 1.6}
 							stroke-dasharray={edge.dashed ? '4 4' : undefined}
 							stroke-linecap="round"
 							marker-end="url(#{markerIdByColor.get(edge.color)})"
 						/>
+						{#if motion && !edge.dashed}
+							<path
+								d={path}
+								pathLength="100"
+								fill="none"
+								class="edge-flow workbench-motion"
+								stroke-dasharray="6 94"
+								aria-hidden="true"
+							/>
+						{/if}
 						{#if motion && (focusedEdge || recentEdges.has(edge.id))}
 							<g class="workbench-motion-particle" aria-hidden="true">
 								<circle r="5" fill="currentColor" opacity="0.32" />
@@ -428,7 +445,10 @@
 							</g>
 						{/if}
 						{#if label?.text}
-							<g transform="translate({(edge.fromX + edge.toX) / 2}, {edge.toY - 9})">
+							<g
+								transform="translate({(edge.fromX + edge.toX) / 2}, {swimlaneEdgeCurveEndY(edge) -
+									9})"
+							>
 								<rect
 									x={-label.width / 2 - 4}
 									y="-7"
@@ -498,7 +518,7 @@
 							<circle r="15" class="head-radar head-radar-2 workbench-motion" />
 						{/if}
 						<circle data-swimlane-anchor r="9" fill="transparent" />
-						<g class="node-glyph">
+						<g class="node-glyph" class:node-enter={nodeEnter}>
 							<use href="#tm-glyph-{uid}-{glyph}" />
 							{#if node.isHead && node.kind !== 'tool_group'}
 								<circle cx="0" cy="-5.5" r="1.35" fill="var(--tm-workbench-spark)" />
@@ -762,6 +782,37 @@
 	.edge-focused {
 		filter: drop-shadow(0 0 2px currentColor);
 	}
+	/* A short bright comet travelling each solid edge: idle edges look alive without extra DOM nodes. */
+	.edge-flow {
+		stroke: var(--tm-workbench-spark);
+		stroke-width: 1.6px;
+		stroke-linecap: round;
+		opacity: 0.55;
+		animation: tm-edge-flow 3.6s linear infinite;
+	}
+	.edge-focused .edge-flow {
+		opacity: 0.95;
+		animation-duration: 2.2s;
+	}
+	@keyframes tm-edge-flow {
+		from {
+			stroke-dashoffset: 100;
+		}
+		to {
+			stroke-dashoffset: 0;
+		}
+	}
+	.node-enter {
+		transform-box: fill-box;
+		transform-origin: center;
+		animation: tm-node-in 460ms cubic-bezier(0.2, 1.5, 0.4, 1) both;
+	}
+	@keyframes tm-node-in {
+		from {
+			opacity: 0;
+			transform: scale(0.2);
+		}
+	}
 	.head-radar {
 		fill: none;
 		stroke: currentColor;
@@ -850,6 +901,12 @@
 		}
 		.edge-focused {
 			filter: none;
+		}
+		.edge-flow {
+			display: none;
+		}
+		.node-enter {
+			animation: none;
 		}
 	}
 </style>

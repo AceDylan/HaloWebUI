@@ -385,6 +385,11 @@ describe('SwimlaneTree', () => {
 		expect(target.querySelector('[data-swimlane-lane="dev-a"]').title).toContain('官方 Claude');
 		expect(target.querySelectorAll('.head-radar').length).toBe(2);
 		expect(target.querySelector('[data-swimlane-finale]')).toBeFalsy();
+		app.$set({ motion: false });
+		await sleep(5);
+		expect(target.querySelectorAll('.head-radar').length).toBe(0);
+		app.$set({ motion: true });
+		await sleep(5);
 
 		app.$set({ finished: true });
 		await sleep(5);
@@ -569,6 +574,41 @@ describe('TeamWorkbench integration (dual-pane + non-destructive drawer)', () =>
 		(target.querySelector('[data-view-tab="board"]') as any).click();
 		await sleep(20);
 		expect(target.querySelector('[data-team-board]')).toBeTruthy();
+	});
+
+	it('keeps the swimlane still on touch-only screens such as a foldable inner screen', async () => {
+		api.getTeam.mockResolvedValue(teamFixture());
+		api.getTeamEvents.mockResolvedValue({
+			events: SAMPLE_EVENTS,
+			next_after: 6,
+			has_more: false,
+			latest_seq: 6,
+			reconcile: []
+		});
+		const win = globalThis.window as any;
+		const original = win.matchMedia;
+		const queries: string[] = [];
+		win.matchMedia = (query: string) => {
+			queries.push(query);
+			return {
+				matches: query.includes('pointer: coarse'),
+				addEventListener: () => {},
+				removeEventListener: () => {}
+			};
+		};
+		try {
+			const { default: TeamWorkbench } = await import('./TeamWorkbench.svelte');
+			await mount(TeamWorkbench, { teamId: 'team-1' });
+			await sleep(40);
+			expect(queries.some((q) => q.includes('(hover: none) and (pointer: coarse)'))).toBe(true);
+			expect(target.querySelector('[data-swimlane-tree]')).toBeTruthy();
+			expect(target.querySelectorAll('[data-swimlane-node]').length).toBeGreaterThan(0);
+			expect(target.querySelectorAll('.edge-flow').length).toBe(0);
+			expect(target.querySelectorAll('.head-radar').length).toBe(0);
+			expect(target.querySelectorAll('.lane-breathe').length).toBe(0);
+		} finally {
+			win.matchMedia = original;
+		}
 	});
 
 	it('a finished team shows how it ended at a glance', async () => {

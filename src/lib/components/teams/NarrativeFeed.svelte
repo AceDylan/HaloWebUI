@@ -1169,7 +1169,7 @@
 		grid-column: 3;
 		grid-row: 1;
 	}
-	@media (prefers-reduced-motion: reduce), (max-width: 767px) {
+	@media (prefers-reduced-motion: reduce), (max-width: 767px), (hover: none) and (pointer: coarse) {
 		.timeline-anchor.is-head::after,
 		.row-card.kind-approval.is-actionable::before {
 			animation: none;

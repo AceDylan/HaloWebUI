@@ -19,3 +19,12 @@
    - `gh run watch -R AceDylan/HaloWebUI <RUN_ID> --exit-status --interval 15` 等待 CI 全绿；
    - `sh /root/work/halo-hermes-autopilot/deploy.sh <short_sha>` 拉取镜像并核验 `health=healthy` 与 `WEBUI_BUILD_VERSION`；
    - 核验 `/health` 与目标路由返回 HTTP 200 及容器内构建产物，清理本次临时产物并确保 `git status` 干净。
+
+## 折叠屏 / 小平板（vivo X Fold6 内屏）适配
+
+- 内屏接近正方形（物理 2312×2504），按 **小平板** 设计：不要当放大的手机，也不要直接套 PC 横屏布局。以 CSS px 布局，按**可用宽度**判断，不按横竖屏判断（Hub 内嵌、分屏和小窗时可用宽度可能只有手机那么宽）。
+- 断点参考：`<600` 手机单栏；`600–899` 折叠屏 / 小平板（双列）；`900–1199` 平板 / 紧凑桌面；`≥1200` 完整桌面（侧栏 + 多列）。600–900 是最容易被忽略、最值得专门优化的区间；折叠屏上不要同时摆宽侧栏、多列表格和详情面板。
+- 用 Grid / Flex / 百分比 / `minmax()`，避免固定宽高；移动端高度优先 `100dvh`；关键操作不能只靠 hover。
+- **动效按指针判断，不只按宽度**：内屏 ≥768px 会进桌面布局，但它是触屏。无限循环的 SVG 描边 / 渐变 / `stroke-dashoffset` / `background-position` / `drop-shadow` 动画每帧都要重绘，在 Fold6 上会拖垮外层 Hub（侧栏闪烁，见协作台泳道 2026-11-28 修复）。这类动效在 `(prefers-reduced-motion: reduce), (max-width: 767px), (hover: none) and (pointer: coarse)` 下一律关闭。
+- 测试视口：手机 390×844、Fold6 外屏 373×843、内屏 771×835、内屏横屏 835×771、平板 1024×768、PC 1440×900（Fold6 的 DPR 3 是假设，真机用 `innerWidth/innerHeight/devicePixelRatio` 校正）。Playwright 里折叠屏要开 `has_touch` / `is_mobile`。
+- 详细规范：Obsidian `知识库/折叠屏与小平板 Web 适配规范（2026-11-28）.md`。

@@ -575,7 +575,7 @@
 						{#if node.isHead || related}
 							<circle r="18" fill="url(#tm-node-glow-{uid})" class="node-halo" />
 						{/if}
-						{#if node.isHead && !finished}
+						{#if node.isHead && !finished && motion}
 							<circle r="12" class="head-radar head-radar-1 workbench-motion" />
 							<circle r="15" class="head-radar head-radar-2 workbench-motion" />
 						{:else if node.isHead && finale}
@@ -1086,7 +1086,7 @@
 		overflow-wrap: anywhere;
 		font-family: var(--font-mono);
 	}
-	@media (prefers-reduced-motion: reduce), (max-width: 767px) {
+	@media (prefers-reduced-motion: reduce), (max-width: 767px), (hover: none) and (pointer: coarse) {
 		.edge-focused {
 			filter: none;
 		}
@@ -1096,7 +1096,8 @@
 		.finale-burst {
 			display: none;
 		}
-		.lane-status::after {
+		.lane-status::after,
+		.head-radar {
 			animation: none;
 		}
 		.node-enter {

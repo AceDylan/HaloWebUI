@@ -460,8 +460,9 @@
 			background-position: -100% 0;
 		}
 	}
-	@media (prefers-reduced-motion: reduce), (max-width: 767px) {
-		.role-status[data-tone='run']::after {
+	@media (prefers-reduced-motion: reduce), (max-width: 767px), (hover: none) and (pointer: coarse) {
+		.role-status[data-tone='run']::after,
+		[data-stage-status='running'] .stage-fill {
 			animation: none;
 		}
 	}

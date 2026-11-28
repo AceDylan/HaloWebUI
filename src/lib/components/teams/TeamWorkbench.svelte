@@ -108,7 +108,8 @@
 	let connectorEnabled = true;
 	let swimlaneWide = false;
 	let pageVisible = true;
-	let reducedMotion = false;
+	const LITE_MOTION_QUERY = '(prefers-reduced-motion: reduce), (hover: none) and (pointer: coarse)';
+	let liteMotion = false;
 	let splitEl: HTMLDivElement | null = null;
 	let connector: { x1: number; y1: number; x2: number; y2: number; color: string } | null = null;
 	let connectorRaf: number | null = null;
@@ -256,7 +257,9 @@
 		...(toneOf(lead.status) === 'run' ? [LEAD_LANE_ID] : []),
 		...memberViews.filter((member) => toneOf(member.status) === 'run').map((member) => member.name)
 	]);
-	$: swimlaneMotion = pageVisible && !reducedMotion && !$mobile;
+	// Touch-only screens (foldable inner screens, tablets) are often ≥768px wide but must not run the
+	// endless SVG paint animations: they repaint every frame and starve the embedding Hub's layers.
+	$: swimlaneMotion = pageVisible && !liteMotion && !$mobile;
 	$: laneMeta = new Map<string, { runner?: string | null; status?: string | null }>([
 		[LEAD_LANE_ID, { runner: 'hermes', status: lead.status }],
 		...memberViews.map((member): [string, { runner?: string | null; status?: string | null }] => [
@@ -476,8 +479,8 @@
 
 	onMount(() => {
 		pageVisible = document.visibilityState !== 'hidden';
-		const media = window.matchMedia?.('(prefers-reduced-motion: reduce)');
-		const syncMotion = () => (reducedMotion = media?.matches ?? false);
+		const media = window.matchMedia?.(LITE_MOTION_QUERY);
+		const syncMotion = () => (liteMotion = media?.matches ?? false);
 		syncMotion();
 		media?.addEventListener?.('change', syncMotion);
 		poll();
@@ -1929,6 +1932,12 @@
 		to {
 			opacity: 1;
 			transform: none;
+		}
+	}
+	@media (hover: none) and (pointer: coarse) {
+		.connector-path,
+		.hud-chip[data-tone='busy']::before {
+			animation: none;
 		}
 	}
 	@media (prefers-reduced-motion: reduce) {

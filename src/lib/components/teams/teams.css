@@ -161,7 +161,7 @@
 .workbench-motion {
 	animation-play-state: var(--tm-workbench-play-state, running) !important;
 }
-@media (prefers-reduced-motion: reduce), (max-width: 767px) {
+@media (prefers-reduced-motion: reduce), (max-width: 767px), (hover: none) and (pointer: coarse) {
 	.workbench-motion {
 		animation: none !important;
 		transition: none !important;

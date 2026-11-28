@@ -22,6 +22,7 @@ def test_hermes_router_exposes_every_endpoint():
     assert ("POST", "/sessions/{session_id}/import") in routes
     assert ("POST", "/webhook-test") in routes
     assert ("POST", "/chats/{chat_id}/read") in routes
+    assert ("GET", "/quotas") in routes
 
 
 def test_runner_stats_requires_admin_and_validates_the_window(monkeypatch):
@@ -50,6 +51,49 @@ def test_runner_stats_requires_admin_and_validates_the_window(monkeypatch):
         assert client.get("/runner-stats?days=0").status_code == 422
         assert client.get("/runner-stats?days=91").status_code == 422
         assert calls == [7]
+
+
+def test_official_quotas_requires_admin_and_maps_errors(monkeypatch):
+    from types import SimpleNamespace
+
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from open_webui.utils.auth import get_current_user
+    from open_webui.utils.hermes_sessions import HermesSessionsError
+
+    app = FastAPI()
+    app.include_router(hermes_router.router, prefix="/api/v1/hermes")
+    path = "/api/v1/hermes/quotas"
+    headers = {"Authorization": "Bearer test-only"}
+    account = SimpleNamespace(id="u1", role="user")
+    calls = []
+    payload = {"quotas": [], "fetched_at": 101.0, "cache_ttl_seconds": 60}
+    error = None
+
+    async def quotas(request, user):
+        calls.append(user.role)
+        if error is not None:
+            raise error
+        return payload
+
+    monkeypatch.setattr(hermes_router.hermes_jobs, "official_quotas", quotas)
+    with TestClient(app) as client:
+        assert client.get(path).status_code == 401
+        app.dependency_overrides[get_current_user] = lambda: account
+        assert client.get(path, headers=headers).status_code == 401
+        assert calls == []
+
+        account.role = "admin"
+        response = client.get(path, headers=headers)
+        assert response.status_code == 200
+        assert response.json() == payload
+        assert calls == ["admin"]
+
+        for status, detail in [(501, "额度查询暂不支持"), (502, "连不上 Hermes：请求超时")]:
+            error = HermesSessionsError(status, detail)
+            response = client.get(path, headers=headers)
+            assert response.status_code == status
+            assert response.json() == {"detail": detail}
 
 
 def test_notification_display_mode_shows_the_report_and_prompt_mode_starts_a_turn(monkeypatch):

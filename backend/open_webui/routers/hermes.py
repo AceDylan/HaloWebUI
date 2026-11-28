@@ -22,6 +22,8 @@ team UI tasks start and offiagy's model (admin only).
 GET /api/v1/hermes/runner-stats?days= — background runner runs with cost / time / turns
 (admin only), for the usage page's 后台任务 tab.
 
+GET /api/v1/hermes/quotas — official subscription quotas for the sidebar (admin only).
+
 GET /api/v1/hermes/sessions — hermes sessions from another surface (Telegram,
 QQ, CLI); POST /api/v1/hermes/sessions/{id}/import turns one into a chat whose
 id is the hermes session id, so the chat continues that session.
@@ -44,11 +46,12 @@ import logging
 from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.security import HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field, StrictBool
 
 from open_webui.env import SRC_LOG_LEVELS
 from open_webui.models.users import Users
-from open_webui.utils.auth import get_admin_user, get_verified_user
+from open_webui.utils.auth import bearer_security, get_admin_user, get_verified_user
 from open_webui.utils.hermes_agent import (
     STEER_TEXT_MAX_CHARS,
     HermesSteerError,
@@ -502,6 +505,22 @@ async def hermes_runner_stats(
     """Background runner runs of the last ``days`` days: cost, time, turns, project."""
     try:
         return await hermes_jobs.runner_stats(request, user, days)
+    except HermesSessionsError as e:
+        raise _job_error(e)
+
+
+def _require_quota_credentials(
+    request: Request, auth_token: Optional[HTTPAuthorizationCredentials] = Depends(bearer_security)
+):
+    # The quotas API returns 401 for missing credentials; the shared auth dependency returns 403.
+    if auth_token is None and request.cookies.get("token") is None:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+
+@router.get("/quotas", dependencies=[Depends(_require_quota_credentials)])
+async def hermes_official_quotas(request: Request, user=Depends(get_admin_user)):
+    try:
+        return await hermes_jobs.official_quotas(request, user)
     except HermesSessionsError as e:
         raise _job_error(e)
 

@@ -6,7 +6,9 @@ admin reaches these. A job is trimmed to what the page shows: hermes keeps sched
 """
 
 import logging
+import math
 import re
+import time
 from typing import Any, Optional
 
 import aiohttp
@@ -26,6 +28,17 @@ JOB_ID_RE = re.compile(r"^[a-f0-9]{12}$")
 JOB_ACTIONS = ("pause", "resume", "run")
 JOBS_TIMEOUT_SECONDS = 30
 OUTPUTS_LIMIT_MAX = 10
+QUOTA_CACHE_TTL_SECONDS = 60
+
+_QUOTA_DEFAULT_LABELS = {
+    "officlaude": "官方 Claude",
+    "offiagy": "offiagy",
+    "openai-codex": "Hermes Codex",
+}
+_QUOTA_PUBLIC_ERRORS = {
+    "days must be an integer",
+    "Invalid gateway API key (API_SERVER_KEY)",
+}
 
 _JOB_FIELDS = (
     "id",
@@ -188,3 +201,121 @@ async def runner_stats(request, user, days: int = 30) -> dict:
     if isinstance(body.get("quotas"), list):
         out["quotas"] = [q for q in body["quotas"] if isinstance(q, dict)]
     return out
+
+
+def _finite_quota_number(value: Any) -> Optional[float]:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    try:
+        number = float(value)
+    except OverflowError:
+        return None
+    return number if math.isfinite(number) else None
+
+
+def _normalize_quota_window(window: Any) -> Optional[dict]:
+    if not isinstance(window, dict):
+        return None
+    key, label = window.get("key"), window.get("label")
+    if not isinstance(key, str) or not isinstance(label, str):
+        return None
+    utilization = _finite_quota_number(window.get("utilization"))
+    if utilization is None or utilization < 0:
+        return None
+    resets_at = window.get("resets_at")
+    return {
+        "key": key,
+        "label": label,
+        "utilization": min(utilization, 100.0),
+        "resets_at": resets_at if isinstance(resets_at, str) else None,
+    }
+
+
+def _normalize_quota(quota: Any, fetched_at: float) -> Optional[dict]:
+    if not isinstance(quota, dict):
+        return None
+    runner = quota.get("runner")
+    runner = (runner.strip() if isinstance(runner, str) else "") or "officlaude"
+    if runner not in _QUOTA_DEFAULT_LABELS:
+        return None
+    label = quota.get("label")
+    label = (label.strip() if isinstance(label, str) else "") or _QUOTA_DEFAULT_LABELS[runner]
+    checked_at = _finite_quota_number(quota.get("checked_at"))
+    raw_windows = quota.get("windows")
+    windows = []
+    if isinstance(raw_windows, list):
+        for raw_window in raw_windows:
+            window = _normalize_quota_window(raw_window)
+            if window is not None:
+                windows.append(window)
+    result = {
+        "runner": runner,
+        "label": label,
+        "available": quota.get("available") is True and bool(windows),
+        "checked_at": checked_at if checked_at is not None and checked_at > 0 else fetched_at,
+        "windows": windows,
+    }
+    for field in ("plan", "notice"):
+        value = quota.get(field)
+        if isinstance(value, str) and value.strip():
+            result[field] = value.strip()
+    banked = quota.get("banked_resets")
+    if isinstance(banked, int) and not isinstance(banked, bool) and banked > 0:
+        result["banked_resets"] = banked
+    return result
+
+
+def _extract_quotas(body: dict, fetched_at: float) -> list[dict]:
+    quotas = body.get("quotas")
+    if not isinstance(quotas, list):
+        legacy = body.get("quota")
+        quotas = [legacy] if isinstance(legacy, dict) else []
+    result = []
+    for item in quotas:
+        quota = _normalize_quota(item, fetched_at)
+        if quota is not None:
+            result.append(quota)
+    return result
+
+
+async def official_quotas(request, user) -> dict:
+    """Read the three official accounts from the Hermes gateway's quota cache."""
+    try:
+        model = await resolve_hermes_model(request, user, None)
+        root, headers = _connection(request, user, model)
+    except HermesSessionsError:
+        raise HermesSessionsError(502, "连不上 Hermes：未配置可用的 Hermes 网关") from None
+
+    timeout = aiohttp.ClientTimeout(total=JOBS_TIMEOUT_SECONDS)
+    try:
+        async with aiohttp.ClientSession(trust_env=True, timeout=timeout) as session:
+            async with session.get(
+                f"{root}/v1/runners/stats",
+                params={"days": "1"},
+                headers=headers,
+                ssl=AIOHTTP_CLIENT_SESSION_SSL,
+            ) as resp:
+                if resp.status == 404:
+                    raise HermesSessionsError(501, "这个 Hermes 还不支持额度查询，更新 Hermes 并重启网关后再试")
+                try:
+                    body = await resp.json(content_type=None)
+                except ValueError:
+                    body = None
+                if resp.status >= 400:
+                    message = _hermes_error_message(body)
+                    # Only fixed gateway messages are safe to return to the browser.
+                    if message not in _QUOTA_PUBLIC_ERRORS:
+                        message = f"HTTP {resp.status}"
+                    raise HermesSessionsError(502, f"Hermes 返回 {resp.status}：{message}")
+    except TimeoutError:
+        raise HermesSessionsError(502, "连不上 Hermes：请求超时") from None
+    except aiohttp.ClientError:
+        raise HermesSessionsError(502, "连不上 Hermes：连接失败") from None
+    if not isinstance(body, dict):
+        raise HermesSessionsError(502, "Hermes 额度查询返回格式异常")
+    fetched_at = time.time()
+    return {
+        "quotas": _extract_quotas(body, fetched_at),
+        "fetched_at": fetched_at,
+        "cache_ttl_seconds": QUOTA_CACHE_TTL_SECONDS,
+    }

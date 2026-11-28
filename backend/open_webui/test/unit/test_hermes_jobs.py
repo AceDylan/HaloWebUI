@@ -3,6 +3,7 @@
 import asyncio
 from types import SimpleNamespace
 
+import aiohttp
 import pytest
 
 from open_webui.utils import hermes_jobs
@@ -36,6 +37,8 @@ class _Response:
         return False
 
     async def json(self, content_type=None):
+        if isinstance(self.body, Exception):
+            raise self.body
         return self.body
 
 
@@ -54,7 +57,7 @@ class _Session:
         return _Response(*self.answer)
 
 
-def _world(monkeypatch, answer):
+def _world(monkeypatch, answer, *, session_class=_Session):
     calls = []
 
     async def resolve(request, user, model_id=None):
@@ -62,7 +65,7 @@ def _world(monkeypatch, answer):
 
     monkeypatch.setattr(hermes_jobs, "resolve_hermes_model", resolve)
     monkeypatch.setattr(hermes_jobs, "_connection", lambda *_a: ("http://hermes.test", {}))
-    monkeypatch.setattr(hermes_jobs.aiohttp, "ClientSession", lambda **_kw: _Session(answer, calls))
+    monkeypatch.setattr(hermes_jobs.aiohttp, "ClientSession", lambda **_kw: session_class(answer, calls))
     return calls
 
 
@@ -187,3 +190,178 @@ def test_runner_stats_preserves_quota_and_rejects_malformed_data(monkeypatch):
     with pytest.raises(HermesSessionsError) as e:
         asyncio.run(hermes_jobs.runner_stats(None, USER, 7))
     assert e.value.status_code == 502
+
+
+def test_official_quotas_returns_only_the_three_accounts_and_public_fields(monkeypatch):
+    claude = {
+        "runner": "officlaude",
+        "label": "官方 Claude",
+        "available": True,
+        "checked_at": 100.1,
+        "windows": [
+            {"key": "five_hour", "label": "5 小时", "utilization": 18.0, "resets_at": None},
+            {"key": "seven_day", "label": "每周", "utilization": 42.0, "resets_at": None},
+        ],
+    }
+    agy = {
+        "runner": "offiagy",
+        "label": "offiagy",
+        "available": True,
+        "checked_at": 100.2,
+        "windows": [
+            {"key": "gemini_five_hour", "label": "Gemini 5 小时", "utilization": 5.0, "resets_at": None},
+            {"key": "gemini_weekly", "label": "Gemini 每周", "utilization": 12.0, "resets_at": None},
+            {"key": "argon_weekly", "label": "Argon 每周", "utilization": 8.0, "resets_at": None},
+        ],
+    }
+    codex = {
+        "runner": "openai-codex",
+        "label": "Hermes Codex",
+        "available": True,
+        "checked_at": 100.3,
+        "windows": [
+            {"key": "five_hour", "label": "5 小时", "utilization": 10.0,
+             "resets_at": "2026-11-28T11:45:00+00:00"},
+            {"key": "weekly", "label": "每周", "utilization": 65.0, "resets_at": None},
+        ],
+        "plan": "Plus",
+        "banked_resets": 2,
+    }
+    body = {
+        "days": 1,
+        "runs": [{"run_id": "r1", "cwd": "/private"}],
+        "quota": claude,
+        "quotas": [
+            {
+                **claude,
+                "api_key": "test-only",
+                "windows": [
+                    {**claude["windows"][0], "access_token": "test-only"},
+                    claude["windows"][1],
+                ],
+            },
+            agy,
+            codex,
+            {"runner": "other"},
+            "junk",
+        ],
+    }
+    calls = _world(monkeypatch, (200, body), session_class=_GetSession)
+    monkeypatch.setattr(hermes_jobs, "time", SimpleNamespace(time=lambda: 101.0))
+
+    assert asyncio.run(hermes_jobs.official_quotas(None, USER)) == {
+        "quotas": [claude, agy, codex],
+        "fetched_at": 101.0,
+        "cache_ttl_seconds": 60,
+    }
+    assert calls == [("GET", "http://hermes.test/v1/runners/stats", None, {"days": "1"})]
+
+
+@pytest.mark.parametrize("legacy_envelope", [{}, {"quotas": "bad"}])
+def test_official_quotas_supports_legacy_quota(monkeypatch, legacy_envelope):
+    body = {
+        **legacy_envelope,
+        "quota": {
+            "available": True,
+            "windows": [{"key": "five_hour", "label": "5 小时", "utilization": 0}],
+        },
+    }
+    _world(monkeypatch, (200, body), session_class=_GetSession)
+    out = asyncio.run(hermes_jobs.official_quotas(None, USER))
+
+    assert out["quotas"] == [
+        {
+            "runner": "officlaude",
+            "label": "官方 Claude",
+            "available": True,
+            "checked_at": out["fetched_at"],
+            "windows": [{"key": "five_hour", "label": "5 小时", "utilization": 0.0, "resets_at": None}],
+        }
+    ]
+
+
+def test_official_quotas_filters_malformed_windows_and_preserves_partial_results(monkeypatch):
+    valid = {"key": "weekly", "label": "每周", "utilization": 120, "resets_at": 100}
+    invalid = [
+        "junk",
+        {**valid, "key": 2},
+        {**valid, "label": None},
+        {**valid, "utilization": float("nan")},
+        {**valid, "utilization": float("inf")},
+        {**valid, "utilization": -1},
+        {**valid, "utilization": True},
+        {**valid, "utilization": "junk"},
+    ]
+    body = {
+        "quotas": [
+            {"runner": "officlaude", "available": True, "windows": [*invalid, valid]},
+            {"runner": "offiagy", "available": False, "checked_at": 90,
+             "notice": "暂时无法获取 offiagy 的实时额度"},
+            {"runner": "openai-codex", "label": " ", "available": True, "checked_at": float("inf"),
+             "windows": invalid, "plan": " ", "banked_resets": True, "notice": {"error": "test-only"}},
+        ]
+    }
+    _world(monkeypatch, (200, body), session_class=_GetSession)
+    out = asyncio.run(hermes_jobs.official_quotas(None, USER))
+
+    assert out["quotas"] == [
+        {
+            "runner": "officlaude", "label": "官方 Claude", "available": True, "checked_at": out["fetched_at"],
+            "windows": [{"key": "weekly", "label": "每周", "utilization": 100.0, "resets_at": None}],
+        },
+        {
+            "runner": "offiagy", "label": "offiagy", "available": False, "checked_at": 90.0, "windows": [],
+            "notice": "暂时无法获取 offiagy 的实时额度",
+        },
+        {
+            "runner": "openai-codex", "label": "Hermes Codex", "available": False,
+            "checked_at": out["fetched_at"], "windows": [],
+        },
+    ]
+
+
+@pytest.mark.parametrize(
+    "body",
+    [{"runs": [{"run_id": "r1"}]}, {"quotas": {}, "quota": []}, {"quotas": [], "quota": {"available": True}}],
+)
+def test_official_quotas_returns_empty_list_when_no_quotas_are_reported(monkeypatch, body):
+    _world(monkeypatch, (200, body), session_class=_GetSession)
+    assert asyncio.run(hermes_jobs.official_quotas(None, USER))["quotas"] == []
+
+
+@pytest.mark.parametrize(
+    "answer,status,detail",
+    [
+        ((404, {"error": "test-only"}), 501, "这个 Hermes 还不支持额度查询，更新 Hermes 并重启网关后再试"),
+        ((401, {"error": {"message": "Invalid gateway API key (API_SERVER_KEY)"}}), 502,
+         "Hermes 返回 401：Invalid gateway API key (API_SERVER_KEY)"),
+        ((500, {"error": {"message": "Bearer test-only"}}), 502, "Hermes 返回 500：HTTP 500"),
+        ((500, ValueError("upstream raw body")), 502, "Hermes 返回 500：HTTP 500"),
+        ((200, TimeoutError("test-only")), 502, "连不上 Hermes：请求超时"),
+        ((200, aiohttp.ClientConnectionError("test-only")), 502, "连不上 Hermes：连接失败"),
+        ((200, ValueError("upstream raw body")), 502, "Hermes 额度查询返回格式异常"),
+        ((200, []), 502, "Hermes 额度查询返回格式异常"),
+    ],
+)
+def test_official_quotas_maps_gateway_errors_without_exposing_private_details(monkeypatch, answer, status, detail):
+    _world(monkeypatch, answer, session_class=_GetSession)
+    with pytest.raises(HermesSessionsError) as error:
+        asyncio.run(hermes_jobs.official_quotas(None, USER))
+
+    assert error.value.status_code == status
+    assert error.value.detail == detail
+
+
+def test_official_quotas_reports_missing_gateway_configuration(monkeypatch):
+    calls = _world(monkeypatch, (200, {}), session_class=_GetSession)
+
+    def missing_connection(*_args):
+        raise HermesSessionsError(503, "test-only")
+
+    monkeypatch.setattr(hermes_jobs, "_connection", missing_connection)
+    with pytest.raises(HermesSessionsError) as error:
+        asyncio.run(hermes_jobs.official_quotas(None, USER))
+
+    assert error.value.status_code == 502
+    assert error.value.detail == "连不上 Hermes：未配置可用的 Hermes 网关"
+    assert calls == []

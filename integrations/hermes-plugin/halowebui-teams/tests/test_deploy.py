@@ -288,6 +288,68 @@ def test_progress_stage_and_telegram_done_button(pkg, team_id, plan_dict, repo, 
     assert st["key"] == "deploying" and "CI 运行中" in st["now"]
 
 
+def test_done_notice_waits_for_the_deployment_and_says_both(pkg, team_id, plan_dict, repo, tmp_path, monkeypatch):
+    import halowebui_teams.bridge as bridge
+    import halowebui_teams.notify as notify
+    import halowebui_teams.tg as tg
+
+    cfg = tmp_path / "deploy.json"
+    cfg.write_text(json.dumps({"projects": {}}), encoding="utf-8")
+    monkeypatch.setenv("HALO_TEAMS_DEPLOY_CONFIG", str(cfg))
+    first = _create(pkg, team_id, plan_dict, repo, auto_deploy=True)
+    slug = pkg.common.board_slug(team_id)
+    ws = pkg.common.read_team(slug)["workspace"]
+    _finish(pkg, slug, first["tasks"]["T1"], lambda: open(os.path.join(ws, "app.py"), "w").write("print('one')\n"))
+    bridge._commit_finished(slug, pkg.common.read_team(slug))
+    clock = [pkg.common.now()]
+    monkeypatch.setattr(notify, "now", lambda: clock[0])
+    pkg.common.update_team(slug, lambda rec: rec.update({
+        "state": "completed", "completed_at": clock[0], "notified": [],
+        "conclusion": {"status": "ready", "generated_at": clock[0], "acceptance": {"status": "ready", "verdict": "met"}},
+    }))
+    snap = {"team": {"phase": "completed"}, "tasks": []}
+    sent = []
+    monkeypatch.setattr(tg, "ready", lambda: True)
+    monkeypatch.setattr(tg, "send", lambda chat, text, buttons, **kw: sent.append((text, buttons)) or 7)
+    monkeypatch.setattr(notify, "target_for", lambda _team: {"chat_id": "tg-chat"})
+    monkeypatch.setattr(notify, "watching", lambda _id: False)
+
+    def set_deploy(**dep):
+        pkg.common.update_team(slug, lambda rec: rec["project"].update(deploy=dep))
+        return pkg.common.read_team(slug)
+
+    # finished, the deployment not started yet (the bridge starts it right after): the done notice waits
+    board = pkg.common.read_team(slug)
+    assert notify.waits_for_deploy(board) and not notify.pending(board, snap)
+    board = set_deploy(status="running", started_at=clock[0] + 5, steps=[])
+    clock[0] += 20 * 60
+    assert notify.waits_for_deploy(board) and not notify.pending(board, snap)
+
+    # it ends: its notice is handed over, the done notice says both, with the CI link
+    board = set_deploy(status="succeeded", started_at=board["project"]["deploy"]["started_at"], finished_at=clock[0],
+                       sha="4f1e7e00" + "0" * 32, base_branch="main", seconds=600, cleanup=True,
+                       profile_label="HaloWebUI（GitHub CI 构建镜像 → 拉取部署）", ci_url="https://ci.test/1")
+    assert notify.deploy_notice(slug, board) is None and not sent
+    board = pkg.common.read_team(slug)
+    assert not notify.waits_for_deploy(board) and notify.pending(board, snap) == [("done", "done", None)]
+    text, buttons = notify.done_message(board, snap, "结论正文")
+    assert text.index("· 完成") < text.index("🚀 推送部署完成") < text.index("结论正文")
+    assert "(4f1e7e00) · 用时 10 分钟" in text and "已清理团队分支" in text and "已开启自动部署" not in text
+    assert ("🔗 查看 CI", "url:https://ci.test/1") in [b for row in buttons for b in row]
+
+    # a deployment after the done notice went out (pushed by hand later) still gets its own notice
+    board = set_deploy(status="failed", started_at=clock[0] + 60, finished_at=clock[0] + 90, error="CI 失败")
+    pkg.common.update_team(slug, lambda rec: rec.update(notified=[*rec.get("notified", []), "done"]))
+    assert notify.deploy_notice(slug, pkg.common.read_team(slug)) == 7
+    assert "推送部署失败" in sent[-1][0] and ("🔁 重试推送部署", f"cb:dp:{team_id}") in sent[-1][1][0]
+
+    # a deployment that hangs does not hold the result back forever
+    board = set_deploy(status="running", started_at=clock[0])
+    pkg.common.update_team(slug, lambda rec: rec.update(notified=[]))
+    clock[0] += notify.DEPLOY_WAIT
+    assert not notify.waits_for_deploy(pkg.common.read_team(slug))
+
+
 def test_codex_review_fail_then_claude_fix_then_pass_and_verify(pkg, team_id, plan_dict, repo, tmp_path, monkeypatch, availability):
     import halowebui_teams.bridge as bridge
     import halowebui_teams.deploy as deploy

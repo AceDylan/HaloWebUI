@@ -10,11 +10,13 @@
 	export let size: 'xs' | 'sm' = 'xs';
 	/** Tight spots (board cards): the actual runner with a fallback mark; details in the title. */
 	export let compact = false;
-	/** The model, shown when Hermes does the work (runners bring their own). */
+	/** The model, shown when Hermes does the work (a member's model is the Hermes one it would use). */
 	export let model: string | null | undefined = '';
+	/** The model is what a task's run really used (a runner's own model and effort): shown for any runner. */
+	export let ran = false;
 
 	$: moved = !!chosen && chosen !== actual;
-	$: withModel = actual === 'hermes' && !!model;
+	$: withModel = !!model && (ran || actual === 'hermes');
 	$: title =
 		(moved
 			? `默认 ${runnerLabel(chosen)}，实际 ${actual ? runnerLabel(actual) : '没有可用的执行来源'}${reason ? `：${reason}` : ''}`

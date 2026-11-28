@@ -276,6 +276,7 @@ def launch(rn: Runner, slug: str, conn: Any, team: dict, task_id: str, *, previo
             *rn.extra_args, "--no-vault-archive"]
     _set_run_meta(conn, run_row, {
         "runner": rn.name, "runner_run_id": run_id, "runner_runs": [{"run_id": run_id, "kind": "launch"}],
+        "runner_model": runner_registry.model_label(rn.name)[0],
         "runner_phase": "starting", "launched_at": now(), "progress_seen": 0, "tool_events": 0,
         "interrupt_resumes": 0, **({"parent_runner_run_id": previous_run} if previous_run else {}),
     })
@@ -426,6 +427,10 @@ def follow(rn: Runner, slug: str, conn: Any, team: dict, task: Any) -> None:
             kb().heartbeat_claim(conn, task.id, ttl_seconds=CLAIM_TTL, claimer=CLAIMER)
         return
     updates = _copy_progress(rn, conn, task.id, run_row, rmeta, runner_run)
+    if not rmeta.get("runner_model_final"):  # the model the run reports (Claude: its first event)
+        label, final = runner_registry.model_label(rn.name, rn.runs_root / runner_run)
+        if label and (final or label != rmeta.get("runner_model")):
+            updates = {**(updates or {}), "runner_model": label, "runner_model_final": final}
     if updates:
         rmeta = _set_run_meta(conn, run_row, updates)
     status = str(meta.get("status") or "")

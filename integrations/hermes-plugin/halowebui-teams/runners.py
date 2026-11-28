@@ -678,6 +678,90 @@ def _settings_file(spec: RunnerSpec) -> str:
     return spec.settings
 
 
+# --- which model a runner runs with ---------------------------------------------------------------
+
+_EFFORT_KEY = re.compile(r'"effortLevel"\s*:\s*"([A-Za-z]+)"')
+CODEX_CONFIG = Path(os.environ.get("HALO_TEAMS_CODEX_CONFIG") or
+                    os.path.join(os.environ.get("CODEX_HOME") or "/root/.codex", "config.toml"))
+AGY_SETTINGS = Path(os.environ.get("HALO_TEAMS_AGY_SETTINGS", "/root/.gemini/antigravity-cli/settings.json"))
+
+
+def _json_file(path: Path) -> dict:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def with_effort(model: str, effort: str) -> str:
+    """「gpt-6.2-sol (xhigh)」; a label that already says its effort (AGY's 「… (XHigh)」) stays."""
+    model, effort = str(model or "").strip(), str(effort or "").strip()
+    if not model or not effort or effort.lower() in model.lower():
+        return model
+    return f"{model} ({effort})"
+
+
+def _claude_effort(spec: RunnerSpec) -> str:
+    """The effort a Claude runner starts with: the inline ``--settings`` JSON of its wrapper
+    (officlaude), else the settings file the wrapper passes (cchclaude / anyclaude)."""
+    command = _which(spec.command)
+    try:
+        text = Path(command).read_text(encoding="utf-8", errors="replace")[:20000] if command else ""
+    except OSError:
+        text = ""
+    if match := _EFFORT_KEY.search(text):
+        return match.group(1)
+    settings = _settings_file(spec)
+    return str(_json_file(Path(settings)).get("effortLevel") or "") if settings else ""
+
+
+def _codex_config() -> tuple[str, str]:
+    import tomllib
+
+    try:
+        data = tomllib.loads(CODEX_CONFIG.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return "", ""
+    return str(data.get("model") or ""), str(data.get("model_reasoning_effort") or "")
+
+
+def _run_model(run_dir: Optional[Path]) -> str:
+    """The model a run reported: result.json (Claude, AGY), meta.json (AGY started with --model),
+    the stream's init event (Claude while it is still running)."""
+    if run_dir is None:
+        return ""
+    for name in ("result.json", "meta.json"):
+        if model := str(_json_file(run_dir / name).get("model") or ""):
+            return model
+    try:
+        with (run_dir / "events.jsonl").open(encoding="utf-8") as events:
+            first = json.loads(events.readline() or "{}")
+    except (OSError, ValueError):
+        return ""
+    return str(first.get("model") or "") if isinstance(first, dict) and first.get("type") == "system" else ""
+
+
+def model_label(name: str, run_dir: Optional[Path] = None) -> tuple[str, bool]:
+    """(label, final): the model an external runner works with and its thinking effort, e.g.
+    「claude-opus-5-5 (high)」「gpt-6.2-sol (xhigh)」「Gemini 4 Neon (XHigh)」. ``final``: the run
+    itself said which model (or the runner has no other source), so a later look adds nothing.
+    ("", False) while it is not known yet."""
+    spec = BY_NAME.get(name)
+    if spec is None or spec.native:
+        return "", False
+    if spec.family == "codex":
+        model, effort = _codex_config()
+        return with_effort(model, effort), True
+    reported = _run_model(run_dir)
+    if spec.family == "claude":
+        return with_effort(reported, _claude_effort(spec)), bool(reported)
+    # AGY: the model it was started with, else the one AGY itself has selected (its label carries the effort)
+    configured = str(_json_file(OVERRIDE_FILE).get("offiagy_model") or "") if name == "offiagy" else ""
+    model = reported or configured or str(_json_file(AGY_SETTINGS).get("model") or "")
+    return model, bool(run_dir is not None and (run_dir / "meta.json").exists())
+
+
 def _probe_account(spec: RunnerSpec) -> tuple[str, str, Optional[str]]:
     """(state, detail, resume_at): state ∈ ok | account | quota | unreachable."""
     if spec.probe == "hermes":

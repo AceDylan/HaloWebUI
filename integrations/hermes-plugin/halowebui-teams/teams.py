@@ -8,6 +8,7 @@ import json
 import os
 import re
 import threading
+import time
 from pathlib import Path
 from typing import Any, Optional
 
@@ -503,9 +504,32 @@ def _require_team(team_id: str, owner: Optional[str]) -> tuple[str, dict]:
     return slug, team
 
 
+_hermes_efforts: dict[str, tuple[float, str]] = {}
+
+
+def hermes_model(model: str) -> str:
+    """A Hermes worker's model with the thinking effort Hermes gives it (config.yaml: the
+    per-model override, else agent.reasoning_effort), read at most once a minute per model."""
+    if not model:
+        return ""
+    at, effort = _hermes_efforts.get(model, (0.0, ""))
+    if time.monotonic() - at > 60:
+        try:
+            from hermes_constants import resolve_reasoning_config
+
+            from .plan import _config
+
+            reasoning = resolve_reasoning_config(_config(), model) or {}
+            effort = str(reasoning.get("effort") or "") if reasoning.get("enabled", True) else "off"
+        except Exception:  # noqa: BLE001 — the model alone then
+            effort = ""
+        _hermes_efforts[model] = (time.monotonic(), effort)
+    return runners.with_effort(model, effort)
+
+
 def _runner_meta(run_meta: dict) -> dict:
     keep = ("runner", "runner_run_id", "runner_status", "runner_phase", "resume_at", "parent_runner_run_id",
-            "question")
+            "question", "runner_model")
     return {k: run_meta[k] for k in keep if run_meta.get(k) not in (None, "")}
 
 
@@ -571,6 +595,7 @@ def snapshot(team_id: str, owner: Optional[str] = None) -> dict:
                     **_runner_meta(run_meta),
                 }
             sub = _sub_status(task, team, last_events.get(task.id), run_meta)
+            executor = ASSIGNEE_EXECUTOR.get(task.assignee or "", "") or entry.get("executor") or "hermes"
             counts[sub] = counts.get(sub, 0) + 1
             tasks_out.append({
                 "id": task.id,
@@ -578,9 +603,11 @@ def snapshot(team_id: str, owner: Optional[str] = None) -> dict:
                 "seq": entry.get("seq"),
                 "title": re.sub(r"^\S+\s+", "", task.title, count=1) if entry.get("key") and task.title.startswith(entry["key"] + " ") else task.title,
                 "member": entry.get("member"),
-                "executor": ASSIGNEE_EXECUTOR.get(task.assignee or "", "") or entry.get("executor") or "hermes",
-                # the model a Hermes worker runs this task on (pinned at creation from the member's)
-                "model": getattr(task, "model_override", None) or "",
+                "executor": executor,
+                # what the task runs on: a runner's own model and effort (recorded by its run), or the
+                # model a Hermes worker was pinned to at creation from the member's
+                "model": (run_meta.get("runner_model") or "") if executor != "hermes"
+                else hermes_model(getattr(task, "model_override", None) or ""),
                 "chosen": entry.get("chosen") or entry.get("executor"),
                 "chosen_by": entry.get("chosen_by") or "auto",
                 "trail": entry.get("trail") or [],

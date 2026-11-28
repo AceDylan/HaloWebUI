@@ -1298,6 +1298,7 @@
 																actual={t.executor}
 																reason={taskRunner(t).reason}
 																model={t.model}
+																ran
 															/>
 															<span class="ml-auto shrink-0"
 																><StatusChip status={s?.sub_status} /></span

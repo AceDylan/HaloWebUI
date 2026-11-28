@@ -408,3 +408,15 @@ def test_systemd_launch_hands_down_our_path(pkg, monkeypatch):
     cmd = seen[0]
     assert "--setenv=PATH=/root/.local/bin:/usr/bin:/bin" in cmd
     assert cmd[cmd.index("--") + 1:] == ["/root/.hermes/scripts/agy-run.sh", "run"]
+
+
+def test_a_runner_tasks_model_is_its_own_not_hermes(pkg, setup, monkeypatch):
+    monkeypatch.setattr(pkg.runners, "_claude_effort", lambda spec: "high")
+    s = setup
+    s.tick()
+    run_id = s.run_meta("T1")["runner_run_id"]
+    assert s.snap("T1")["model"] == ""  # not the Hermes model the plan would pin
+    root = pkg.reclaude.RUNNERS["reclaude"].runs_root / run_id
+    (root / "events.jsonl").write_text(json.dumps({"type": "system", "model": "claude-opus-5-5"}) + "\n")
+    s.tick()
+    assert s.snap("T1")["model"] == "claude-opus-5-5 (high)" and s.run_meta("T1")["runner_model_final"]

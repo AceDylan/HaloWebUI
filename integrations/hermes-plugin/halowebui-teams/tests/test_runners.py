@@ -738,3 +738,39 @@ def test_offiagy_models_parses_and_caches(pkg, monkeypatch):
     prefs = r.agy_prefs()
     assert "cli missing" in prefs["offiagy_models_error"] and prefs["offiagy_models_at"] > 0
     r._offiagy_models_cache.update(at=0.0, models=[], error="")
+
+
+# --- the model a runner runs with -----------------------------------------------------------------
+
+def test_model_label_reads_each_runners_own_model_and_effort(pkg, tmp_path, monkeypatch, override):
+    runners = pkg.runners
+    codex = tmp_path / "config.toml"
+    codex.write_text('model_provider = "custom"\nmodel = "gpt-6.2-sol"\nmodel_reasoning_effort = "xhigh"\n')
+    agy = tmp_path / "agy-settings.json"
+    agy.write_text(json.dumps({"model": "Gemini 4 Neon (XHigh)", "modelProvider": "gemini"}))
+    wrapper = tmp_path / "officlaude"
+    wrapper.write_text("""#!/bin/sh\nFLAG_SETTINGS='{"effortLevel":"high","env":{}}'\nexec claude --settings "$FLAG_SETTINGS" "$@"\n""")
+    relay = tmp_path / "settings-any.json"
+    relay.write_text(json.dumps({"effortLevel": "xhigh", "env": {}}))
+    anyclaude = tmp_path / "anyclaude"
+    anyclaude.write_text(f"#!/bin/sh\nexec claude --settings {relay} \"$@\"\n")
+    monkeypatch.setattr(runners, "CODEX_CONFIG", codex)
+    monkeypatch.setattr(runners, "AGY_SETTINGS", agy)
+    monkeypatch.setattr(runners, "_which", lambda command: {"officlaude": str(wrapper), "anyclaude": str(anyclaude)}.get(command))
+
+    assert runners.model_label("codex") == ("gpt-6.2-sol (xhigh)", True)
+    assert runners.model_label("hermes") == ("", False)
+    # Claude: the model is known once the run's stream starts; the effort is the wrapper's
+    run = tmp_path / "run"
+    run.mkdir()
+    assert runners.model_label("officlaude", run) == ("", False)
+    (run / "events.jsonl").write_text(json.dumps({"type": "system", "subtype": "init", "model": "claude-opus-5-5"}) + "\n")
+    assert runners.model_label("officlaude", run) == ("claude-opus-5-5 (high)", True)
+    assert runners.model_label("anyclaude", run) == ("claude-opus-5-5 (xhigh)", True)
+    # AGY: what it was started with, else its own selection (whose label carries the effort)
+    assert runners.model_label("offiagy") == ("Gemini 4 Neon (XHigh)", False)
+    override({"offiagy_model": "gemini-4-pro"})
+    assert runners.model_label("offiagy")[0] == "gemini-4-pro"
+    (run / "meta.json").write_text(json.dumps({"model": "gemini-chat"}))
+    assert runners.model_label("agy", run) == ("gemini-chat", True)
+    assert runners.with_effort("gpt-6.2-sol", "") == "gpt-6.2-sol"

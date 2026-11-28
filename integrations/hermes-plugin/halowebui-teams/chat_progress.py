@@ -166,9 +166,11 @@ def view_from_summary(team: dict, planning_info: Optional[dict] = None) -> dict:
     for t in plan.get("tasks") or []:
         key = t.get("key") or str(len(tasks) + 1)
         member = members.get(t.get("member")) or {}
-        tasks.append(_task_view({**t, "id": key, "key": key, "sub_status": "waiting_deps",
-                                 "executor": t.get("runner") or member.get("runner") or member.get("executor"),
-                                 "model": member.get("model"), "parents": t.get("depends_on")},
+        executor = t.get("runner") or member.get("runner") or member.get("executor")
+        # a member's model is the Hermes one it would run on; a runner brings its own (known once it runs)
+        tasks.append(_task_view({**t, "id": key, "key": key, "sub_status": "waiting_deps", "executor": executor,
+                                 "model": member.get("model") if (executor or "hermes") == "hermes" else "",
+                                 "parents": t.get("depends_on")},
                                 {dep: dep for dep in t.get("depends_on") or []}, {}))
     return _make_view(team, stage, tasks, status=status)
 

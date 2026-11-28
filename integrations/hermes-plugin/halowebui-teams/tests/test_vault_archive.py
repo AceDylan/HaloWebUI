@@ -517,8 +517,10 @@ def test_release_defers_archive_and_notifies_with_terminal_evidence(
     slug, run_dir = completed(pkg, team_id, plan_dict, auto_deploy=True)
     stamp = pkg.common.now()
     verdict = "unmet" if terminal == "skipped" else "met"
+    # the done notice already went out (the page was open, say): the deployment gets a notice of its own
     pkg.common.update_team(slug, lambda rec: rec.update(
-        reported=str(stamp), project={"path": "/test/repo", "branch": "halo/branch", "base_branch": "main"}))
+        reported=str(stamp), project={"path": "/test/repo", "branch": "halo/branch", "base_branch": "main"},
+        notified=["done"]))
     pkg.common.update_team(slug, lambda rec: rec["conclusion"].update(
         generated_at=stamp, acceptance={"status": "ready", "verdict": verdict}))
     monkeypatch.setattr(projects, "changes", lambda _team: {"commits": [1]})
@@ -526,7 +528,7 @@ def test_release_defers_archive_and_notifies_with_terminal_evidence(
     fresh = pkg.common.read_team(slug)
     assert archive.waits_for_deploy(fresh) and archive.pre_mark(fresh) is None
     assert archive.run(slug) is None
-    assert notify.pending(fresh, {"team": {"phase": "completed"}})[0][1] == "done"
+    assert notify.waits_for_deploy(fresh) and not notify.pending(fresh, {"team": {"phase": "completed"}})
     calls = []
     deferred = reload in ("new_process", "schedule_failed", "stalled")
     if reload == "disabled":

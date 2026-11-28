@@ -376,6 +376,9 @@ async def concluded(request, team: AgentTeamModel, target: HermesTarget, *, tele
     if conclusion.get("status") != "ready" or not (conclusion.get("markdown") or "").strip():
         return {"posted": False, "reason": "no conclusion"}
     result = await post_to_chat(request, team, conclusion, push=not telegram)
+    from open_webui.utils.team_chats import retry_failed_metadata
+
+    retry_failed_metadata(request, team)
     return {"posted": True, "chat_id": team.chat_id, "duplicate": bool(result.get("duplicate"))}
 
 

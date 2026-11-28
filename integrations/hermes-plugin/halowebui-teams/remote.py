@@ -697,7 +697,7 @@ def _tick_team(key: str, job: dict) -> None:
 def _team_done(key: str, job: dict, team: dict) -> None:
     from . import vault_archive
     from .common import board_slug, read_team
-    from .notify import _conclusion_markdown, picture_of
+    from .notify import _conclusion_markdown, deploy_lines, picture_of, waits_for_deploy
 
     board = read_team(board_slug(job["id"])) or {}
     deploy = ((board.get("project") or {}).get("deploy") or team.get("deploy") or {})
@@ -719,10 +719,17 @@ def _team_done(key: str, job: dict, team: dict) -> None:
         or vault_archive.is_active(conclusion.get("vault_archive"))
     if writing and waited < CONCLUSION_WAIT:
         return
+    if board and waits_for_deploy(board):  # the result and its deployment go out as one message
+        return
     markdown = _conclusion_markdown(board) if board else ""
     url = link.team_url(job["id"], "/conclusion" if markdown else "")
     head = f"✅ 协作好了：**{clip(team.get('title'), 60)}**"
     tail = f"\n\n🌐 {'阅读结论' if markdown else '工作台'}：{url}" if url else ""
+    shipped = deploy_lines(board) if board else []
+    if shipped:
+        head += "\n" + "\n".join(html_text(line) for line in shipped)
+        if ci := deploy.get("ci_url"):
+            tail += f"\n🔗 CI：{ci}"
     archive = vault_archive.summary_line(conclusion.get("vault_archive"))
     if archive:
         tail = f"\n\n{archive}{tail}"

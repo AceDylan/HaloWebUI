@@ -533,6 +533,19 @@ describe('RunnerBadge and RunnerStatus', () => {
 		expect(badge.getAttribute('title')).toContain('由 官方 Claude 执行');
 	});
 
+	it("badge shows a task's own runner model, but a member's model only on Hermes", async () => {
+		const { default: RunnerBadge } = await import('./RunnerBadge.svelte');
+		await mount(RunnerBadge, { actual: 'codex', model: 'gpt-6.2-sol (xhigh)', ran: true });
+		expect(target.querySelector('[data-runner-model]')?.textContent).toContain('gpt-6.2-sol (xhigh)');
+		expect(target.querySelector('[data-runner]').getAttribute('title')).toContain('模型 gpt-6.2-sol (xhigh)');
+
+		await mount(RunnerBadge, { actual: 'officlaude', model: 'gpt-6.2-sol' });
+		expect(target.querySelector('[data-runner-model]')).toBeFalsy();
+
+		await mount(RunnerBadge, { actual: 'hermes', model: 'gpt-6.2-sol (high)' });
+		expect(target.querySelector('[data-runner-model]')?.textContent).toContain('gpt-6.2-sol (high)');
+	});
+
 	it('badge shows a fallback as chosen → actual', async () => {
 		const { default: RunnerBadge } = await import('./RunnerBadge.svelte');
 		await mount(RunnerBadge, { chosen: 'cchclaude', actual: 'anyclaude', reason: '中转 502' });

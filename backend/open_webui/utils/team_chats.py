@@ -349,3 +349,35 @@ async def follow_title(team_before: AgentTeamModel, team_after: Optional[AgentTe
             await emit_chat_event(team_after.user_id, team_after.chat_id, "chat:title", team_after.title)
     except Exception:  # noqa: BLE001
         log.debug("teams: chat title of %s not followed", team_after.id, exc_info=True)
+
+
+def retry_failed_metadata(request, team: AgentTeamModel) -> bool:
+    """The team is done: its chat's title or folder that failed when it was made (the task model
+    timed out, the title fell back to the question) gets one more try, on the same turn. Returns
+    whether a try was scheduled; the usual guards (manual title, manual move, settings) still hold."""
+    from open_webui.models.users import Users
+    from open_webui.utils.folder_assignment import RETRYABLE_STATUSES
+
+    try:
+        chat = Chats.get_chat_by_id_and_user_id(team.chat_id, team.user_id) if team.chat_id else None
+        if chat is None:
+            return False
+        meta = chat.meta or {}
+        title = meta.get("title_generation") or {}
+        folder = meta.get("folder_assignment") or {}
+        title_failed = title.get("auto_generated") is True and title.get("last_status") == "fallback"
+        folder_failed = not chat.folder_id and folder.get("last_status") in RETRYABLE_STATUSES
+        message_id = title.get("last_message_id") or folder.get("last_message_id")
+        user = Users.get_user_by_id(team.user_id)
+        if not (title_failed or folder_failed) or not message_id or user is None:
+            return False
+        from open_webui.utils.mode_chats import schedule_chat_metadata
+
+        schedule_chat_metadata(request, user, chat.id, model_id=((chat.chat or {}).get("models") or ["hermes-agent"])[0],
+            messages=[{"role": "user", "content": ask_of(team.goal)}], message_id=message_id,
+            user_message_count=int(title.get("last_user_message_count") or folder.get("last_user_message_count") or 1),
+            team_id=team.id, retry_failed_folder=folder_failed)
+        return True
+    except Exception:  # noqa: BLE001 — the conclusion is in the chat either way
+        log.warning("teams: chat metadata of team %s not retried", team.id, exc_info=True)
+        return False

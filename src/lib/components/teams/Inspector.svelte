@@ -432,6 +432,7 @@
 						actual={decision.actual}
 						reason={decision.reason}
 						model={task?.model}
+						ran
 						size="sm"
 					/>
 					<span class="text-gray-400">{SOURCE_LABEL[decision.source] ?? ''}</span>

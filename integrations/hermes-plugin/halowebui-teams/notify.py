@@ -4,7 +4,8 @@
   ``POST /v1/halo-teams/notify``), with buttons to approve or cancel; a reply re-plans with it.
 * a member asks something (runner QUESTION, a Hermes member blocked for input) — a reply answers.
 * a task failed or is blocked — retry button; a reply is a note for the member, then a retry.
-* the team finished — with the start of the lead's conclusion (waits for it a few minutes).
+* the team finished — with the start of the lead's conclusion (waits for it a few minutes). A team
+  that ships on its own waits for its push-and-deploy run too and says both in one message.
 
 Where: the chat a team was started from, else (``notify_web_teams``) the owner's linked private
 chat. Nothing is sent while the team's page is open in front of the user (HaloWebUI polls its
@@ -39,6 +40,8 @@ PROGRESS_FIRST_DELAY = 20
 PROGRESS_MILESTONE_GAP = 10
 PROGRESS_ACTIVITY_GAP = 30
 PROGRESS_EDIT_TRIES = 5     # a card whose edits keep failing is let go (a new one comes while the team works)
+DEPLOY_WAIT = 45 * 60       # the done notice waits this long for an automatic push-and-deploy run
+DEPLOY_NOTICE_WAIT = 4 * 60  # ... and this long after it for its hand-over (deploy_notice, after the archive)
 
 _seen: dict[str, float] = {}
 _seen_lock = threading.Lock()
@@ -277,7 +280,11 @@ def done_message(team: dict, snap: dict, markdown: str) -> tuple[str, list]:
             f"{done}/{len(tasks)} 个任务{' · 用时 ' + took if took else ''}")
     project = team.get("project") or {}
     can_deploy_btn = False
-    if project.get("branch"):
+    shipped = deploy_lines(team)  # one message for the result and its deployment (see waits_for_deploy)
+    deploy_action = _deploy_section(team)[2] if shipped else []
+    if shipped:
+        head += "\n" + "\n".join(shipped)
+    elif project.get("branch"):
         from . import projects
 
         try:
@@ -311,15 +318,16 @@ def done_message(team: dict, snap: dict, markdown: str) -> tuple[str, list]:
             check = (f"\n🎯 负责人验收：{esc(clip(acceptance.get('summary'), 200)) or '没有完全达成'}\n"
                      + "\n".join(f"  · {esc(clip(g.get('title'), 40))}：{esc(clip(g.get('detail'), 160))}" for g in gaps[:5]))
     head += check
-    archive = vault_archive.summary_line(conclusion.get("vault_archive"), html_mode=True)
+    archive = (_archive_lines(team) if shipped
+               else [line for line in [vault_archive.summary_line(conclusion.get("vault_archive"), html_mode=True)] if line])
     if archive:
-        head += "\n" + archive
+        head += "\n" + "\n".join(archive)
     body = plain(markdown) if markdown else ""
     if not body:
         body = "\n".join(f"• {t.get('title')}：{plain(t.get('result') or '')[:200]}" for t in tasks[:8])
     tail = "\n\n<i>回复这条消息对负责人说要追加或修改什么。</i>"
     text = head + "\n\n" + esc(clip(body, TEXT_MAX)) + tail
-    actions = []
+    actions = [*deploy_action]
     if can_deploy_btn:
         actions.append(("🚀 推送部署", f"cb:dp:{team['team_id']}"))
     if acceptance.get("status") == "ready" and acceptance.get("gaps"):
@@ -328,23 +336,34 @@ def done_message(team: dict, snap: dict, markdown: str) -> tuple[str, list]:
         actions.append(("📚 存入知识库", f"cb:kb:{team['team_id']}"))
     buttons = [actions] if actions else []
     buttons.append([*_open_row(team["team_id"], "📄 阅读结论", "/conclusion"), *_open_row(team["team_id"], "🌐 工作台")])
+    if shipped:
+        buttons.append(_ci_button(team))
     return text, [b for b in buttons if b]
 
 
-def deploy_message(team: dict) -> tuple[str, list]:
-    """Telegram notice for a finished / failed / skipped push-and-deploy run."""
-    from . import vault_archive
+def _deployment(team: dict) -> dict:
+    dep = (team.get("project") or {}).get("deploy")
+    return dep if isinstance(dep, dict) else {}
 
+
+def _round_deployment(team: dict) -> dict:
+    """The push-and-deploy run of this round: one started after the team last finished (a
+    later round's done notice does not carry the last round's deployment)."""
+    dep = _deployment(team)
+    return dep if int(dep.get("started_at") or 0) >= int(team.get("completed_at") or 0) else {}
+
+
+def _deploy_section(team: dict) -> tuple[str, list[str], list]:
+    """(headline, lines, action) of the team's finished push-and-deploy run (HTML), for its own
+    notice and for the done notice that carries it."""
     project = team.get("project") or {}
-    dep = project.get("deploy") if isinstance(project.get("deploy"), dict) else {}
+    dep = _deployment(team)
     status = dep.get("status") or ""
-    title = esc(clip(team.get("title"), 60))
     proj = esc(project.get("name") or "项目")
     sha = esc((dep.get("sha") or "")[:8])
     took = duration(dep.get("seconds")) if dep.get("seconds") else ""
-    buttons = []
     if status == "succeeded":
-        lines = [f"🚀 <b>{title}</b> · 推送部署完成", f"📁 {proj} · <code>{esc(dep.get('base_branch') or 'main')}</code>"
+        lines = [f"📁 {proj} · <code>{esc(dep.get('base_branch') or 'main')}</code>"
                  + (f" ({sha})" if sha else "") + (f" · 用时 {took}" if took else "")]
         if dep.get("profile_label"):
             lines.append(f"流程：{esc(dep['profile_label'])}")
@@ -352,36 +371,107 @@ def deploy_message(team: dict) -> tuple[str, list]:
             lines.append("🧹 已清理团队分支与 worktree")
         if dep.get("note"):
             lines.append(f"ℹ️ {esc(dep['note'])}")
-    elif status == "skipped":
-        lines = [f"⏸ <b>{title}</b> · 已跳过自动推送部署", f"📁 {proj}",
-                 esc(clip(dep.get("error") or "未满足自动部署条件", 500))]
-        buttons.append([("🚀 仍要推送部署", f"cb:dp:{team['team_id']}")])
-    else:
-        lines = [f"⚠️ <b>{title}</b> · 推送部署失败", f"📁 {proj}" + (f" ({sha})" if sha else "")
-                 + (f" · 用时 {took}" if took else ""),
-                 esc(clip(dep.get("error") or "原因未知，请到协作台「变更」查看日志", 800))]
-        buttons.append([("🔁 重试推送部署", f"cb:dp:{team['team_id']}")])
+        return "🚀 推送部署完成", lines, []
+    if status == "skipped":
+        return ("⏸ 已跳过自动推送部署", [f"📁 {proj}", esc(clip(dep.get("error") or "未满足自动部署条件", 500))],
+                [("🚀 仍要推送部署", f"cb:dp:{team['team_id']}")])
+    return ("⚠️ 推送部署失败",
+            [f"📁 {proj}" + (f" ({sha})" if sha else "") + (f" · 用时 {took}" if took else ""),
+             esc(clip(dep.get("error") or "原因未知，请到协作台「变更」查看日志", 800))],
+            [("🔁 重试推送部署", f"cb:dp:{team['team_id']}")])
+
+
+def deploy_lines(team: dict) -> list[str]:
+    """This round's finished push-and-deploy run as lines of the done notice (HTML); [] when none."""
+    if _round_deployment(team).get("status") not in ("succeeded", "failed", "skipped"):
+        return []
+    headline, lines, _action = _deploy_section(team)
+    return [headline, *lines]
+
+
+def _archive_lines(team: dict) -> list[str]:
+    from . import vault_archive
+
     archive = (team.get("conclusion") or {}).get("vault_archive") or {}
     summary = vault_archive.summary_line(archive, html_mode=True)
     if summary:
-        lines.append(summary)
-    elif archive.get("status") == "pending" and archive.get("after_reload"):
-        lines.append("📚 Obsidian：网关重启加载新插件后自动归档，结果另行通知")
-    row = []
-    if dep.get("ci_url"):
-        row.append(("🔗 查看 CI", "url:" + str(dep["ci_url"])))
-    row += _open_row(team["team_id"], "🌐 打开协作台")
+        return [summary]
+    if archive.get("status") == "pending" and archive.get("after_reload"):
+        return ["📚 Obsidian：网关重启加载新插件后自动归档，结果另行通知"]
+    return []
+
+
+def _ci_button(team: dict) -> list:
+    url = _deployment(team).get("ci_url")
+    return [("🔗 查看 CI", "url:" + str(url))] if url else []
+
+
+def deploy_message(team: dict) -> tuple[str, list]:
+    """Telegram notice for a finished / failed / skipped push-and-deploy run."""
+    headline, lines, action = _deploy_section(team)
+    icon, _, label = headline.partition(" ")
+    lines = [f"{icon} <b>{esc(clip(team.get('title'), 60))}</b> · {label}", *lines, *_archive_lines(team)]
+    buttons = [action] if action else []
+    row = [*_ci_button(team), *_open_row(team["team_id"], "🌐 打开协作台")]
     if row:
         buttons.append(row)
     return "\n".join(lines), buttons
 
 
+def done_key(team: dict) -> str:
+    rounds = int(team.get("round") or 0)
+    return "done" if not rounds else f"done:{rounds}"
+
+
+def _deploy_key(dep: dict) -> str:
+    return f"deploy:{dep.get('status')}:{dep.get('finished_at') or dep.get('started_at') or 0}"
+
+
+def waits_for_deploy(team: dict) -> bool:
+    """Whether the done notice of a team that ships on its own still waits for its deployment, so
+    that the result and how it shipped go out as one message (bounded: a run that hangs, or a
+    hand-over that never comes, lets the done notice go on its own)."""
+    from . import chat_progress
+
+    dep = _round_deployment(team)
+    status = dep.get("status")
+    if status == "running":
+        return now() - int(dep.get("started_at") or now()) < DEPLOY_WAIT
+    if status in chat_progress.DEPLOY_TERMINAL:
+        return (_deploy_key(dep) not in (team.get("notified") or [])
+                and now() - int(dep.get("finished_at") or now()) < DEPLOY_NOTICE_WAIT)
+    project = team.get("project") or {}
+    if not (team.get("auto_deploy") and project.get("branch") and not project.get("discarded_at")):
+        return False  # (a goal judged unmet still waits: its skipped deployment is said with it)
+    conclusion = team.get("conclusion") or {}
+    settled = max(int(team.get("completed_at") or 0), int(conclusion.get("generated_at") or 0),
+                  int((conclusion.get("acceptance") or {}).get("at") or 0))
+    return bool(settled) and now() - settled < chat_progress.AUTO_DEPLOY_GRACE  # yet to start (never: no diff)
+
+
+def _done_notice_to_come(team: dict) -> bool:
+    """The done notice of this round has not gone out yet and will (it then carries the deployment)."""
+    if done_key(team) in (team.get("notified") or []) or watching(team["team_id"]):
+        return False
+    origin = team.get("origin") if isinstance(team.get("origin"), dict) else {}
+    if _own_qq_origin(origin, team.get("owner")):
+        from . import remote
+
+        job = remote.jobs().get(f"team:{team['team_id']}") or {}
+        return bool(job) and not job.get("done_sent")
+    return target_for(team) is not None
+
+
 def deploy_notice(slug: str, team: dict) -> Optional[int]:
-    """Send a Telegram (or QQ, when started from QQ) notice once the deploy pipeline reaches a terminal state."""
-    dep = (team.get("project") or {}).get("deploy")
-    if not isinstance(dep, dict) or dep.get("status") not in ("succeeded", "failed", "skipped"):
+    """Send a Telegram (or QQ, when started from QQ) notice once the deploy pipeline reaches a
+    terminal state — unless the team's done notice is still to go: that one says it."""
+    dep = _deployment(team)
+    if dep.get("status") not in ("succeeded", "failed", "skipped"):
         return None
-    key = f"deploy:{dep.get('status')}:{dep.get('finished_at') or dep.get('started_at') or 0}"
+    key = _deploy_key(dep)
+    if team.get("state") == "completed" and _done_notice_to_come(team):
+        _remember(slug, [key])  # handed over: the done notice goes out now (waits_for_deploy)
+        return None
     return _send_team_notice(slug, team, key, deploy_message(team), ci_url=dep.get("ci_url"))
 
 
@@ -518,11 +608,10 @@ def pending(team: dict, snap: dict) -> list[tuple[str, str, Optional[dict]]]:
         checking = ((entry.get("acceptance") or {}).get("status") == "checking"
                     and now() - int((entry.get("acceptance") or {}).get("started_at") or 0) < ACCEPTANCE_WAIT)
         # a picture being drawn (on request, or HALO_TEAMS_AUTO_ILLUSTRATE=1) goes out with the notice (bounded by illustrate.WAIT)
-        if (entry.get("status") in ("ready", "failed") and not checking and not illustrate.drawing(entry)
-                and not vault_archive.is_active(entry.get("vault_archive"))) \
-                or waited >= DONE_WAIT:
-            rounds = int(team.get("round") or 0)
-            out.append(("done" if not rounds else f"done:{rounds}", "done", None))
+        ready = (entry.get("status") in ("ready", "failed") and not checking and not illustrate.drawing(entry)
+                 and not vault_archive.is_active(entry.get("vault_archive"))) or waited >= DONE_WAIT
+        if ready and not waits_for_deploy(team):
+            out.append((done_key(team), "done", None))
     return out
 
 

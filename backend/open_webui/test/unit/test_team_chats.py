@@ -262,3 +262,45 @@ def test_card_text_includes_workflow_badge_when_not_auto(env):
     _, chain_work = _messages(t_work["chat_id"], "tc-wf")
     assert "已交给工作流" in chain_work[1]["content"] and "审阅并修复问题" in chain_work[1]["content"]
     assert "负责人在制定计划" not in chain_work[1]["content"]
+
+
+def test_a_failed_title_or_folder_is_tried_again_when_the_team_is_done(env, monkeypatch):
+    from open_webui.models.users import Users
+    from open_webui.utils import mode_chats
+
+    scheduled = []
+    monkeypatch.setattr(mode_chats, "schedule_chat_metadata",
+                        lambda request, user, chat_id, **kwargs: scheduled.append((chat_id, kwargs)))
+    monkeypatch.setattr(Users, "get_user_by_id", lambda user_id: _User(user_id))
+    client = _client("tc-retry")
+
+    def new_team(goal: str):
+        team = client.post("/api/v1/teams/", json={"goal": goal}).json()
+        chat, chain = _messages(team["chat_id"], "tc-retry")
+        scheduled.clear()  # the chat's first naming, when it was made
+        return AgentTeams.get(team["id"], "tc-retry"), chat, chain[0]["id"]
+
+    # named fine and not sorted yet: nothing to try again
+    team, chat, ask_id = new_team("调研看板工具")
+    Chats.update_chat_title_by_id(chat.id, "📋 看板工具调研", auto_generated=True, last_user_message_count=1,
+                                  source_message_id=ask_id)
+    assert team_chats.retry_failed_metadata(None, team) is False and not scheduled
+
+    # the task model timed out on both when the chat was made: one more try, on the same turn
+    team, chat, ask_id = new_team("xfold6 内屏侧边栏优化")
+    Chats.update_chat_title_by_id(chat.id, "xfold6 内屏侧边", auto_generated=True, last_user_message_count=1,
+                                  source_message_id=ask_id, generation_status="fallback")
+    Chats.update_chat_folder_assignment_by_id_and_user_id(chat.id, "tc-retry", None, apply_folder=False, evaluations=1,
+                                                          last_user_message_count=1, last_message_id=ask_id,
+                                                          last_status="timeout")
+    assert team_chats.retry_failed_metadata(None, team) is True
+    chat_id, kwargs = scheduled[-1]
+    assert chat_id == chat.id and kwargs["message_id"] == ask_id and kwargs["user_message_count"] == 1
+    assert kwargs["retry_failed_folder"] is True and kwargs["team_id"] == team.id
+    assert kwargs["messages"] == [{"role": "user", "content": "xfold6 内屏侧边栏优化"}]
+
+    # a title the user typed is theirs, and a chat already in a folder stays: nothing left to try
+    Chats.update_chat_title_by_id(chat.id, "我的名字", auto_generated=False)
+    Chats.update_chat_folder_id_by_id_and_user_id(chat.id, "tc-retry", "f-1")
+    scheduled.clear()
+    assert team_chats.retry_failed_metadata(None, team) is False and not scheduled

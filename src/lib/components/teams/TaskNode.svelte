@@ -48,6 +48,7 @@
 				actual={data?.executor}
 				reason={data?.runner?.reason}
 				model={data?.model}
+				ran
 				compact
 			/></span
 		>

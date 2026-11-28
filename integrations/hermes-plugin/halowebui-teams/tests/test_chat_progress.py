@@ -234,18 +234,29 @@ def test_telegram_auto_card_delay_activity_milestones_and_finalization(pkg, plan
     clock[0] += 10
     tick()
     assert "等待自动发布" in edits[-1][2] and not pkg.common.read_team(slug)["tg_progress"]["finalized"]
-    assert len([m for m in linked.sent if m["text"] == "✅ 结论"]) == 1
+    # the result waits for its deployment: one message says both
+    assert not [m for m in linked.sent if m["text"] == "✅ 结论"]
+
+    def deploy(step, status="running"):
+        snap["team"]["deploy"] = _deploy(step, status)
+        started = (pkg.common.read_team(slug)["project"].get("deploy") or {}).get("started_at") or clock[0]
+        pkg.common.update_team(slug, lambda rec: rec["project"].update(deploy={
+            **_deploy(step, status), "started_at": started,
+            **({"finished_at": clock[0]} if status != "running" else {})}))
 
     stage["key"] = "deploying"
     for step in ("push", "ci"):
-        snap["team"]["deploy"] = _deploy(step)
+        deploy(step)
         clock[0] += 10
         tick()
         assert edits[-1][1] == 1001 and "推送与部署中" in edits[-1][2]
     assert any(spec == "url:" + CI_URL for row in edits[-1][3] for _, spec in row)
+    assert not [m for m in linked.sent if m["text"] == "✅ 结论"]
     stage["key"] = "done"
-    snap["team"]["deploy"] = _deploy("done", "succeeded")
+    deploy("done", "succeeded")
+    assert notify.deploy_notice(slug, pkg.common.read_team(slug)) is None  # handed over to the done notice
     tick()
+    assert len([m for m in linked.sent if m["text"] == "✅ 结论"]) == 1
     assert "发布完成" in edits[-1][2] and all("cb:pr:" not in spec for row in edits[-1][3] for _, spec in row)
     assert pkg.common.read_team(slug)["tg_progress"]["finalized"]
     count = len(edits)
@@ -479,6 +490,32 @@ def test_qq_live_completion_and_auto_deploy_outlive_the_conclusion(remote, pkg, 
     assert remote.sent[-1]["reply_to"] == "old"
     remote.remote.tick()
     assert remote.remote.jobs() == {} and len(remote.sent) == 6
+
+
+def test_qq_done_notice_waits_for_the_deployment_and_says_both(remote, pkg, monkeypatch):
+    key = _qq_job(remote)
+    stamp = notify.now()
+    board = {"team_id": TEAM_ID, "title": "任务", "auto_deploy": True, "owner": OWNER, "state": "completed",
+             "completed_at": stamp, "project": {"branch": "team", "name": "HaloWebUI"}, "notified": [],
+             "conclusion": {"status": "ready", "generated_at": stamp, "acceptance": {"status": "ready", "verdict": "met"}},
+             "origin": {"platform": "qqbot", "user_id": QQ_USER, "chat_id": QQ_USER}}
+    monkeypatch.setattr(pkg.common, "read_team", lambda *_: board)
+    monkeypatch.setattr(pkg.teams, "snapshot", lambda *_: _snapshot(stage="done", phase="completed"))
+    monkeypatch.setattr(link, "get", lambda *_: {"phase": "completed", "status": "running"})
+    monkeypatch.setattr(link, "qq_progress_enabled", lambda: False)
+    monkeypatch.setattr(notify, "_remember", lambda _slug, keys: board["notified"].extend(keys))
+    remote.remote.tick()
+    board["project"]["deploy"] = {**_deploy("ci"), "started_at": stamp}
+    remote.remote.tick()
+    assert not [m for m in remote.sent if "协作好了" in m["text"]]  # waiting for the deployment
+
+    board["project"]["deploy"] = {**_deploy("done", "succeeded"), "started_at": stamp, "finished_at": notify.now(),
+                                  "sha": "4f1e7e00aa", "base_branch": "main"}
+    assert notify.deploy_notice("halo-demo", board) is None  # handed over, no message of its own
+    remote.remote.tick()
+    done = [m["text"] for m in remote.sent if "协作好了" in m["text"]]
+    assert len(done) == 1 and "推送部署完成" in done[0] and "HaloWebUI · main (4f1e7e00)" in done[0]
+    assert f"CI：{CI_URL}" in done[0] and remote.remote.jobs() == {}
 
 
 def test_qq_drops_completed_job_if_auto_deploy_never_starts(remote, pkg, monkeypatch):

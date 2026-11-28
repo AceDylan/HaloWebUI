@@ -2924,3 +2924,195 @@ body:has(#chat-input:focus) .halo-orb__arc {
 [data-halo-layer] { animation: halo-panel-enter 168ms var(--spring-smooth) both; }
 [data-halo-layer='2'] { animation-delay: 72ms; }
 @media (prefers-reduced-motion: reduce) { [data-halo-layer] { animation: halo-panel-fade 120ms ease-out both; } @keyframes halo-panel-fade { from { opacity: 0; } to { opacity: 1; } } }
+
+/* ---------------------------------------------------------------- official quotas */
+
+.halo-quota-trigger {
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+	padding: 0.4375rem 0.625rem;
+	border-radius: 0.75rem;
+	border: 1px solid var(--surface-border);
+	background: color-mix(in oklab, var(--surface-overlay) 72%, transparent);
+	color: var(--sb-ink);
+	box-shadow: var(--shadow-sm);
+	transition:
+		background-color var(--dur-fast) ease,
+		border-color var(--dur-fast) ease,
+		box-shadow var(--dur-base) ease,
+		transform var(--dur-fast) var(--ease-out-quart);
+}
+.dark .halo-quota-trigger {
+	background: oklch(1 0 0 / 0.04);
+	box-shadow: inset 0 1px 0 oklch(1 0 0 / 0.04);
+}
+.halo-quota-trigger:hover {
+	background: var(--surface-overlay);
+	border-color: var(--surface-border-strong);
+	box-shadow: var(--shadow-md);
+}
+.dark .halo-quota-trigger:hover {
+	background: oklch(1 0 0 / 0.075);
+	border-color: oklch(1 0 0 / 0.14);
+}
+.halo-quota-trigger:active {
+	transform: scale(0.985);
+}
+.halo-quota-trigger--card {
+	border-radius: 1rem;
+	padding: 0.5rem 0.75rem;
+}
+.halo-quota-trigger__icon {
+	background: oklch(0.3 0.03 268 / 0.055);
+	color: var(--color-gray-700);
+}
+.dark .halo-quota-trigger__icon {
+	background: oklch(1 0 0 / 0.07);
+	color: var(--color-gray-200);
+}
+
+.halo-quota-header {
+	background: linear-gradient(
+		180deg,
+		color-mix(in oklab, var(--color-primary-500) 4%, var(--surface-overlay)) 0%,
+		var(--surface-overlay) 100%
+	);
+}
+.dark .halo-quota-header {
+	background: linear-gradient(
+		180deg,
+		oklch(1 0 0 / 0.035) 0%,
+		transparent 100%
+	);
+}
+.halo-quota-badge {
+	background: linear-gradient(
+		135deg,
+		color-mix(in oklab, var(--halo-ion) 14%, var(--surface-overlay)),
+		color-mix(in oklab, var(--halo-violet) 10%, var(--surface-overlay))
+	);
+	color: var(--color-primary-600);
+	box-shadow: inset 0 0 0 1px var(--surface-border);
+}
+.dark .halo-quota-badge {
+	background: linear-gradient(
+		135deg,
+		color-mix(in oklab, var(--halo-ion) 20%, transparent),
+		color-mix(in oklab, var(--halo-violet) 16%, transparent)
+	);
+	color: var(--color-primary-300);
+	box-shadow: inset 0 0 0 1px oklch(1 0 0 / 0.1);
+}
+
+.halo-quota-card {
+	position: relative;
+	overflow: hidden;
+	border-radius: 0.875rem;
+	border: 1px solid var(--surface-border);
+	background: color-mix(in oklab, var(--surface-raised) 55%, var(--surface-overlay));
+	box-shadow: var(--shadow-sm);
+}
+.dark .halo-quota-card {
+	background: oklch(1 0 0 / 0.03);
+	box-shadow: inset 0 1px 0 oklch(1 0 0 / 0.04);
+}
+.halo-quota-card::before {
+	content: '';
+	position: absolute;
+	left: 0;
+	top: 0.625rem;
+	bottom: 0.625rem;
+	width: 3px;
+	border-radius: 0 9999px 9999px 0;
+	background: var(--quota-accent, var(--color-primary-500));
+	opacity: 0.88;
+}
+.halo-quota-card--amber {
+	--quota-accent: linear-gradient(180deg, #f59e0b, #fb923c);
+}
+.halo-quota-card--cyan {
+	--quota-accent: linear-gradient(180deg, #06b6d4, #38bdf8);
+}
+.halo-quota-card--emerald {
+	--quota-accent: linear-gradient(180deg, #10b981, #2dd4bf);
+}
+.halo-quota-card--slate {
+	--quota-accent: linear-gradient(180deg, #64748b, #94a3b8);
+}
+
+.halo-quota-bar-track {
+	background: oklch(0.3 0.02 268 / 0.085);
+}
+.dark .halo-quota-bar-track {
+	background: oklch(1 0 0 / 0.085);
+}
+
+.halo-quota-skeleton-bar {
+	background: oklch(0.3 0.02 268 / 0.1);
+	animation: halo-quota-pulse 1.5s ease-in-out infinite;
+}
+.dark .halo-quota-skeleton-bar {
+	background: oklch(1 0 0 / 0.1);
+}
+@keyframes halo-quota-pulse {
+	0%,
+	100% {
+		opacity: 0.45;
+	}
+	50% {
+		opacity: 0.9;
+	}
+}
+
+/* Sci-Fi theme adaptations */
+html.halo-scifi .halo-quota-trigger {
+	border-color: var(--scifi-line);
+	background: rgb(255 255 255 / 0.62);
+}
+html.halo-scifi .halo-quota-trigger:hover {
+	border-color: color-mix(in oklab, var(--scifi-cyan) 48%, transparent);
+	box-shadow: 0 0 18px -6px var(--scifi-glow);
+}
+html.halo-scifi.dark .halo-quota-trigger {
+	border-color: var(--scifi-line);
+	background: rgb(94 231 255 / 0.045);
+	box-shadow: inset 0 1px 0 rgb(94 231 255 / 0.08);
+}
+html.halo-scifi.dark .halo-quota-trigger:hover {
+	background: rgb(94 231 255 / 0.09);
+	border-color: rgb(94 231 255 / 0.36);
+	box-shadow: 0 0 22px -6px var(--scifi-glow);
+}
+html.halo-scifi.dark .halo-quota-trigger-compact:hover {
+	box-shadow:
+		0 0 0 1px var(--scifi-line),
+		0 0 18px -4px var(--scifi-glow);
+}
+html.halo-scifi.dark .halo-quota-badge {
+	background: rgb(94 231 255 / 0.1);
+	color: var(--scifi-cyan);
+	box-shadow:
+		inset 0 0 0 1px var(--scifi-line),
+		0 0 18px -6px var(--scifi-glow);
+}
+html.halo-scifi.dark .halo-quota-card {
+	border-color: var(--scifi-line);
+	background: rgb(8 14 28 / 0.65);
+	box-shadow:
+		inset 0 1px 0 rgb(94 231 255 / 0.06),
+		0 10px 24px -18px var(--scifi-glow);
+}
+html.halo-scifi.dark .halo-quota-bar-track {
+	background: rgb(94 231 255 / 0.09);
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.halo-quota-trigger,
+	.halo-quota-trigger svg {
+		transition: none !important;
+	}
+	.halo-quota-skeleton-bar {
+		animation: none !important;
+	}
+}

@@ -18,6 +18,7 @@
 		showArchivedChats,
 		showHermesSessions,
 		showTaskInbox,
+		showOfficialQuotas,
 		showBookmarks,
 		showCommandPalette,
 		selectedAssistantScene,
@@ -54,6 +55,8 @@
 	import ArchivedChatsModal from './Sidebar/ArchivedChatsModal.svelte';
 	import HermesSessionsModal from './Sidebar/HermesSessionsModal.svelte';
 	import TaskInboxModal from './Sidebar/TaskInboxModal.svelte';
+	import OfficialQuotasButton from './Sidebar/OfficialQuotasButton.svelte';
+	import OfficialQuotasModal from './Sidebar/OfficialQuotasModal.svelte';
 	import ChatHistoryModal from './Sidebar/ChatHistoryModal.svelte';
 	import BookmarksModal from './Sidebar/BookmarksModal.svelte';
 	import UserMenu from './Sidebar/UserMenu.svelte';
@@ -768,6 +771,8 @@
 	}}
 />
 
+<OfficialQuotasModal bind:show={$showOfficialQuotas} />
+
 <ArchivedChatsModal
 	bind:show={$showArchivedChats}
 	on:change={async () => {
@@ -1387,6 +1392,17 @@
 		<!-- 底部用户区 -->
 		<div class="shrink-0 mt-auto px-2 pt-1.5 pb-1">
 			<div class="flex flex-col font-primary">
+				{#if $user?.role === 'admin'}
+					<OfficialQuotasButton
+						compact={!expanded}
+						{sidebarStyle}
+						buttonClass={expanded ? actionItemClass : iconButtonClass}
+						onOpen={() => {
+							clearPeekTimer();
+							peek = false;
+						}}
+					/>
+				{/if}
 				{#if $user !== undefined && $user !== null}
 					<UserMenu
 						role={$user?.role}

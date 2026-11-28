@@ -585,6 +585,46 @@ export type RunnerQuota = {
 	windows: { key: string; label: string; utilization: number; resets_at: string | null }[];
 };
 
+export type OfficialQuotasResponse = {
+	quotas: RunnerQuota[];
+	fetched_at: number;
+	cache_ttl_seconds?: number;
+};
+
+/** Read the admin's three official subscription quotas via the lightweight dedicated endpoint. */
+export const getOfficialQuotas = async (token: string): Promise<OfficialQuotasResponse> => {
+	const res = await fetch(`${WEBUI_API_BASE_URL}/hermes/quotas`, {
+		method: 'GET',
+		headers: jsonHeaders(token)
+	});
+	if (res.status === 401) {
+		throw new HermesSessionExpiredError();
+	}
+	if (!res.ok) {
+		throw await detailOf(res);
+	}
+	const data = await res.json().catch(() => ({}));
+	const rawQuotas = Array.isArray(data?.quotas)
+		? data.quotas
+		: data?.quota && typeof data.quota === 'object'
+			? [data.quota]
+			: [];
+	const fetchedAt =
+		typeof data?.fetched_at === 'number' && Number.isFinite(data.fetched_at)
+			? data.fetched_at
+			: Date.now() / 1000;
+	const result: OfficialQuotasResponse = {
+		quotas: rawQuotas.filter((item: unknown): item is RunnerQuota =>
+			Boolean(item && typeof item === 'object')
+		),
+		fetched_at: fetchedAt
+	};
+	if (typeof data?.cache_ttl_seconds === 'number' && Number.isFinite(data.cache_ttl_seconds)) {
+		result.cache_ttl_seconds = data.cache_ttl_seconds;
+	}
+	return result;
+};
+
 export const getRunnerStats = async (token: string, days = 30) =>
 	(await fetch(`${WEBUI_API_BASE_URL}/hermes/runner-stats?days=${days}`, {
 		headers: jsonHeaders(token)
